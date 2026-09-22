@@ -164,8 +164,10 @@ run_generator() {
   ) >"$output" 2>&1
 }
 
-# Canonical 43 = heredoc KEY= lines + public-edge keys. --claim swaps
-# MOMO_INITIAL_OWNER_PASSWORD ↔ MOMO_BOOTSTRAP_CLAIM (count stays 43).
+# Canonical 45 = heredoc KEY= lines + public-edge keys. --claim swaps
+# MOMO_INITIAL_OWNER_PASSWORD ↔ MOMO_BOOTSTRAP_CLAIM (count stays 45).
+# 43 → 45 at #2066: WEBHOOK_INGRESS_MASTER_KEY + OUTBOUND_WEBHOOK_MASTER_KEY
+# became managed keys (ADR-0004 증보 4 D1).
 canonical_keys_from_generator() {
   {
     awk '
@@ -1091,14 +1093,17 @@ canonical_keys_from_generator >"$TMP_ROOT/canonical.keys"
 claim_swapped_canonical_keys >"$TMP_ROOT/claim.canonical.keys"
 canon_count="$(grep -c . "$TMP_ROOT/canonical.keys" | tr -d ' ')"
 claim_canon_count="$(grep -c . "$TMP_ROOT/claim.canonical.keys" | tr -d ' ')"
-[ "$canon_count" = "43" ] || {
-  echo "canonical key set must stay 43, got $canon_count" >&2
+[ "$canon_count" = "45" ] || {
+  echo "canonical key set must stay 45, got $canon_count" >&2
   exit 1
 }
-[ "$claim_canon_count" = "43" ] || {
-  echo "claim-swapped canonical key set must stay 43, got $claim_canon_count" >&2
+[ "$claim_canon_count" = "45" ] || {
+  echo "claim-swapped canonical key set must stay 45, got $claim_canon_count" >&2
   exit 1
 }
+# #2066 — the two webhook master keys are part of the contract, not incidental.
+grep -Fxq 'WEBHOOK_INGRESS_MASTER_KEY' "$TMP_ROOT/canonical.keys"
+grep -Fxq 'OUTBOUND_WEBHOOK_MASTER_KEY' "$TMP_ROOT/canonical.keys"
 grep -Fxq 'MOMO_INITIAL_OWNER_PASSWORD' "$TMP_ROOT/canonical.keys"
 grep -Fxq 'MOMO_BOOTSTRAP_CLAIM' "$TMP_ROOT/claim.canonical.keys"
 if grep -Fxq 'MOMO_BOOTSTRAP_CLAIM' "$TMP_ROOT/canonical.keys"; then
@@ -1157,6 +1162,122 @@ if grep -E 'MOMO_CLAIM_PATH=/claim/' "$claim_fixture/compose-up-output"; then
   echo "compose up hint leaked a claim token" >&2
   exit 1
 fi
+
+# ---------------------------------------------------------------------------
+# #2066 / ADR-0004 증보 4 D2(a) — 웹훅 마스터키 이행 복사 백필.
+#
+# 이 티켓 전체가 이 함수의 출력에 걸려 있다. 백필이 JWT_HMAC 의 **원문 그대로**를
+# 넣지 않으면 폴백이 사라지는 순간 발급된 webhook secret 이 전부 무효가 된다.
+# 그래서 여기서 재는 것은 "키가 생겼다"가 아니라 "바이트가 같다"이다.
+# ---------------------------------------------------------------------------
+whk="$(make_fixture webhook-master-key-backfill)"
+whk_env="$whk/infra/rust/local.secrets.env"
+run_generator "$whk" "$whk/create-output" 49770 --local-build
+grep -q '^WEBHOOK_INGRESS_MASTER_KEY=.' "$whk_env" || {
+  echo "fresh install is missing WEBHOOK_INGRESS_MASTER_KEY" >&2
+  exit 1
+}
+grep -q '^OUTBOUND_WEBHOOK_MASTER_KEY=.' "$whk_env" || {
+  echo "fresh install is missing OUTBOUND_WEBHOOK_MASTER_KEY" >&2
+  exit 1
+}
+# 새 설치가 처음부터 독립 난수인지는 이 픽스처가 잴 수 없다 — fake openssl 이
+# 모든 호출에 같은 문자열을 돌려주기 때문이다. 대신 생성기가 두 키를 **서로 다른
+# 변수에서, 각각 따로 뽑은 난수로** 쓴다는 정적 계약을 잰다. 한 변수를 두 줄에
+# 재사용하는 회귀(= 두 키가 항상 같아져 api 기동 거부)가 여기서 빨개진다.
+for whk_contract in \
+  'WEBHOOK_INGRESS_MASTER_KEY=$WEBHOOK_INGRESS_SECRET' \
+  'OUTBOUND_WEBHOOK_MASTER_KEY=$OUTBOUND_WEBHOOK_SECRET' \
+  'WEBHOOK_INGRESS_SECRET="$(gen)"' \
+  'OUTBOUND_WEBHOOK_SECRET="$(gen)"'
+do
+  grep -Fq "$whk_contract" "$ROOT/scripts/self_host_env.sh" || {
+    echo "generator no longer carries: $whk_contract (두 키가 같은 난수를 공유하면 api 기동 거부)" >&2
+    exit 1
+  }
+done
+
+# 업그레이드 전 형상: 두 키가 아예 없고, JWT 는 다른 시크릿과 구분되는 값이다
+# (fake openssl 은 모든 시크릿을 같은 문자열로 만들어 두므로, 여기서 JWT 만
+# 갈아끼워야 "JWT 원문을 복사했다"가 실제로 측정된다).
+whk_jwt='pre-2066-jwt-hmac-value-0a1b2c3d'
+grep -v -e '^WEBHOOK_INGRESS_MASTER_KEY=' -e '^OUTBOUND_WEBHOOK_MASTER_KEY=' \
+  "$whk_env" | sed -e "s/^JWT_HMAC=.*/JWT_HMAC=$whk_jwt/" >"$whk/pre2066.env"
+cp "$whk/pre2066.env" "$whk_env"
+grep -Fxq "JWT_HMAC=$whk_jwt" "$whk_env" || {
+  echo "pre-2066 fixture did not take the distinct JWT_HMAC" >&2
+  exit 1
+}
+run_generator "$whk" "$whk/backfill-output" 49770 --ensure-managed-keys || {
+  echo "--ensure-managed-keys failed:
+$(cat "$whk/backfill-output")" >&2
+  exit 1
+}
+for whk_key in WEBHOOK_INGRESS_MASTER_KEY OUTBOUND_WEBHOOK_MASTER_KEY; do
+  whk_n="$(grep -c "^${whk_key}=" "$whk_env" | tr -d ' ')"
+  [ "$whk_n" = "1" ] || {
+    echo "backfill wrote $whk_key $whk_n times (want exactly 1)" >&2
+    exit 1
+  }
+  whk_got="$(sed -n "s/^${whk_key}=//p" "$whk_env")"
+  [ "$whk_got" = "$whk_jwt" ] || {
+    echo "backfill did not copy the value in use into $whk_key — 발급된 secret 이 무효가 된다" >&2
+    exit 1
+  }
+done
+# 백필은 JWT 도 다른 시크릿도 건드리지 않는다.
+test "$(sed -n 's/^JWT_HMAC=//p' "$whk_env")" = "$whk_jwt" || {
+  echo "backfill changed JWT_HMAC" >&2
+  exit 1
+}
+# 로그는 키 이름과 개수만 말한다 — 값은 절대 아니다.
+grep -Fq '웹훅 마스터키 백필: 2키 추가' "$whk/backfill-output" || {
+  echo "backfill did not report exactly 2 added keys:
+$(cat "$whk/backfill-output")" >&2
+  exit 1
+}
+if grep -Fq "$whk_jwt" "$whk/backfill-output"; then
+  echo "backfill log leaked the master key value" >&2
+  exit 1
+fi
+
+# 멱등: 두 번째 실행은 파일을 한 바이트도 바꾸지 않는다.
+whk_hash_before="$(hash_file "$whk_env")"
+run_generator "$whk" "$whk/backfill-again-output" 49770 --ensure-managed-keys || {
+  echo "second --ensure-managed-keys failed:
+$(cat "$whk/backfill-again-output")" >&2
+  exit 1
+}
+test "$whk_hash_before" = "$(hash_file "$whk_env")" || {
+  echo "second --ensure-managed-keys rewrote the env" >&2
+  exit 1
+}
+
+# add-only: 운영자가 이미 회전해 둔 키는 되돌리지 않는다. 한 키로 줄였다면
+# 바로 이 형상에서 인바운드 secret 이 전량 무효가 됐을 것이다(PR 근거 2줄째).
+whk_hand='hand-rotated-outbound-key-2066'
+grep -v -e '^WEBHOOK_INGRESS_MASTER_KEY=' -e '^OUTBOUND_WEBHOOK_MASTER_KEY=' \
+  "$whk/pre2066.env" >"$whk_env"
+printf 'OUTBOUND_WEBHOOK_MASTER_KEY=%s\n' "$whk_hand" >>"$whk_env"
+run_generator "$whk" "$whk/backfill-partial-output" 49770 --ensure-managed-keys || {
+  echo "--ensure-managed-keys failed on a half-configured env:
+$(cat "$whk/backfill-partial-output")" >&2
+  exit 1
+}
+test "$(sed -n 's/^OUTBOUND_WEBHOOK_MASTER_KEY=//p' "$whk_env")" = "$whk_hand" || {
+  echo "backfill overwrote an operator's rotated key" >&2
+  exit 1
+}
+test "$(sed -n 's/^WEBHOOK_INGRESS_MASTER_KEY=//p' "$whk_env")" = "$whk_jwt" || {
+  echo "backfill did not fill the missing key with the value in use" >&2
+  exit 1
+}
+grep -Fq '웹훅 마스터키 백필: 1키 추가' "$whk/backfill-partial-output" || {
+  echo "half-configured backfill did not report exactly 1 added key:
+$(cat "$whk/backfill-partial-output")" >&2
+  exit 1
+}
+echo "webhook master key backfill: 이행 복사 == JWT_HMAC 원문, add-only, 멱등, 값 비유입"
 
 # Existing password env + --claim must refuse (never silently convert).
 password_to_claim="$(make_fixture password-to-claim)"
@@ -1293,8 +1414,8 @@ cmp "$alias_fixture/railway.out" "$alias_fixture/platform.out" || {
   exit 1
 }
 grep -Fxq 'OORT_SITE_ADDRESS=platform.example.test' "$alias_fixture/platform.out"
-grep -Fq -e '--platform railway 키 44개를 stdout에 썼다' "$alias_fixture/platform.err"
-# #2438 — --railway --claim ≡ --platform railway --claim; 1:1 key swap; count 44.
+grep -Fq -e '--platform railway 키 46개를 stdout에 썼다' "$alias_fixture/platform.err"
+# #2438 — --railway --claim ≡ --platform railway --claim; 1:1 key swap; count 46.
 run_platform_stdout "$alias_fixture" "$alias_fixture/railway-claim.out" \
   "$alias_fixture/railway-claim.err" --railway --claim || {
   cat "$alias_fixture/railway-claim.err" >&2
@@ -1328,16 +1449,16 @@ if ! diff -u "$alias_fixture/claim.expected.keys" "$alias_fixture/claim.keys" \
   exit 1
 fi
 claim_t2_count="$(grep -c . "$alias_fixture/claim.keys" | tr -d ' ')"
-[ "$claim_t2_count" = "44" ] || {
-  echo "--railway --claim key-set count expected 44 got $claim_t2_count" >&2
+[ "$claim_t2_count" = "46" ] || {
+  echo "--railway --claim key-set count expected 46 got $claim_t2_count" >&2
   exit 1
 }
-grep -Fq -e '--platform railway 키 44개를 stdout에 썼다' "$alias_fixture/platform-claim.err"
-echo "T2 --claim stdout count=$claim_t2_count (password variant 44; 1:1 swap)"
+grep -Fq -e '--platform railway 키 46개를 stdout에 썼다' "$alias_fixture/platform-claim.err"
+echo "T2 --claim stdout count=$claim_t2_count (password variant 46; 1:1 swap)"
 # The hand-set keys and the internal hostname suffix come from the same row.
 grep -Fq 'CENT_API_URL,WORKER_DATABASE_URL,CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS' "$alias_fixture/platform.err"
 grep -Fq '.railway.internal' "$alias_fixture/platform.err"
-# T2 stdout is the canonical 43 plus the stamp outside the heredoc. No
+# T2 stdout is the canonical 45 plus the stamp outside the heredoc. No
 # hosted-delivery key, no file. --railway is byte-identical by construction.
 grep -Fxq 'MOMO_SELF_HOST_PLATFORM=railway' "$alias_fixture/platform.out"
 test "$(grep -c '^MOMO_SELF_HOST_PLATFORM=' "$alias_fixture/platform.out")" = "1"
@@ -1446,7 +1567,7 @@ if awk '
   grab && index($0, "MOMO_SELF_HOST_PLATFORM=") == 1 { found = 1 }
   END { exit !found }
 ' "$ROOT/scripts/self_host_env.sh"; then
-  echo "MOMO_SELF_HOST_PLATFORM moved into the heredoc — the canonical 43-key set would grow" >&2
+  echo "MOMO_SELF_HOST_PLATFORM moved into the heredoc — the canonical 45-key set would grow" >&2
   exit 1
 fi
 

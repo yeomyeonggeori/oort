@@ -37,6 +37,17 @@ pub enum ConfigError {
     /// for. Names the environment **key**, never the value.
     #[error("invalid security config: {0}")]
     InvalidSecurity(&'static str),
+    /// ADR-0004 증보 4 D2(a): the webhook master keys have no fallback any more,
+    /// so an absent one is fatal. The sentence carries the **next action**
+    /// because fail-closed is only humane when the operator is told how to
+    /// close it — the generator's add-only backfill copies the value already in
+    /// use, which is why nothing gets invalidated by following it.
+    #[error(
+        "set {0} — webhook master keys no longer fall back to JWT_HMAC (ADR-0004 증보 4). \
+Run `scripts/oort upgrade` (or `scripts/self_host_env.sh --ensure-managed-keys`) to backfill \
+the key already in use; it re-issues nothing."
+    )]
+    MissingWebhookMasterKey(&'static str),
 }
 
 /// Everything the server needs to boot.
@@ -80,10 +91,12 @@ pub struct Config {
     /// process the Centrifugo publish credential**, which no deployment did
     /// before this batch.
     pub ephemeral: EphemeralSettings,
-    /// #1222 웹훅 — the outbound signing master key and the local-only plain-HTTP
-    /// escape hatch. Never fatal and never closing: an operator who set neither
-    /// gets `OUTBOUND_WEBHOOK_MASTER_KEY = JWT_HMAC` (Swift's own fallback) and
-    /// an HTTPS-only destination policy.
+    /// #1222 웹훅 — the two webhook master keys and the local-only plain-HTTP
+    /// escape hatch. **Fatal when either key is absent** (ADR-0004 증보 4 D2(a),
+    /// #2066): the Swift-era `env("OUTBOUND_WEBHOOK_MASTER_KEY", jwtHMAC)`
+    /// fallback is gone, because a defaulted key is a JWT secret quietly doing
+    /// a second job — rotate the JWT and every issued webhook secret dies with
+    /// no row recording it. The destination policy stays HTTPS-only.
     pub webhook: WebhookSettings,
     /// MOMO-605 CORS origin allowlist — **empty unless the operator names an
     /// origin**, and an empty one mounts no middleware at all.
@@ -1347,13 +1360,22 @@ impl SettingsConfig {
     /// mint App JWTs. **Absence** is not an error — it closes the surface with a
     /// 503 instead, because an instance that never configured a DB provider link
     /// is a perfectly good instance.
-    pub fn boot_error(&self, jwt_secret: &str) -> Option<&'static str> {
+    ///
+    /// #2066: the webhook keys arrive as an argument instead of being re-read
+    /// from the process environment. One reader is what makes this decidable in
+    /// a unit test, and it removes the hole the old `env(...)` call had — it
+    /// compared against the *raw* variable while [`WebhookSettings`] compared
+    /// against the resolved one.
+    pub fn boot_error(&self, jwt_secret: &str, webhook: &WebhookSettings) -> Option<&'static str> {
         let key = self.provider_link_master_key.as_deref()?;
         if key == jwt_secret {
             return Some("PROVIDER_LINK_MASTER_KEY must not reuse JWT_HMAC");
         }
-        if env("OUTBOUND_WEBHOOK_MASTER_KEY").as_deref() == Some(key) {
+        if webhook.outbound_master_key == key {
             return Some("PROVIDER_LINK_MASTER_KEY must not reuse OUTBOUND_WEBHOOK_MASTER_KEY");
+        }
+        if webhook.ingress_master_key == key {
+            return Some("PROVIDER_LINK_MASTER_KEY must not reuse WEBHOOK_INGRESS_MASTER_KEY");
         }
         None
     }
@@ -1459,30 +1481,39 @@ impl T3Settings {
     }
 }
 
-/// The two webhook families' knobs (#1222).
+/// The two webhook families' knobs (#1222, ADR-0004 증보 4 / #2066).
 ///
-/// ## Why there are two master keys and not one
+/// ## Why there are two master keys and neither is the JWT secret
 ///
-/// The **inbound** native ingress secret is derived from `JWT_HMAC`
-/// (Swift `App.swift:265` hands `WebhookRoutes` `config.jwtHMAC`), while the
-/// **outbound** event-subscription secret is derived from
-/// `OUTBOUND_WEBHOOK_MASTER_KEY` (`App.swift:207`). This struct carries only the
-/// second, because the first is already on [`crate::AppState::jwt_secret`] and a
-/// duplicate would be a second value that could drift from it.
+/// Until #2066 the **inbound** native ingress secret was derived from `JWT_HMAC`
+/// (Swift `App.swift:265` hands `WebhookRoutes` `config.jwtHMAC`) and the
+/// **outbound** event-subscription secret from `OUTBOUND_WEBHOOK_MASTER_KEY`
+/// *or*, unset, that same JWT secret (`App.swift:207`). Both derivations are
+/// domain-separated (`momo-webhook/src/crypto.rs`), so the reuse was never a
+/// cryptographic break — it was an **operational** one: rotating `JWT_HMAC`
+/// invalidated every already-issued webhook secret at once, with no row
+/// anywhere recording that it had happened.
 ///
-/// `outbound_master_key` is `None` when the operator set nothing, and the
-/// resolver ([`WebhookSettings::outbound_master_key_or`]) then falls back to the
-/// JWT secret — byte-for-byte Swift's `env("OUTBOUND_WEBHOOK_MASTER_KEY", jwtHMAC)`.
-/// That fallback is what lets an un-updated deployment keep verifying the
-/// credentials it has already issued: a subscription's secret is *derived*, so
-/// changing the key silently invalidates every live subscriber. Swift's strict
-/// environments still refuse to boot when the two are equal, and that check is
-/// unchanged — it lives in `SettingsConfig::boot_error`'s family, not here.
+/// So both keys are now required and independent, and the fallback is deleted.
+/// The migration that makes that safe is not in this file: the generator's
+/// add-only backfill writes each new key as an explicit **copy of the value
+/// already in use** (ADR-0004 증보 4 D2(a)), so the day the fallback disappears
+/// every derivation is byte-identical to the day before. From then on the keys
+/// are independent variables and a JWT rotation touches nothing here.
+///
+/// `ingress_master_key == outbound_master_key == JWT_HMAC` is therefore the
+/// expected state of a freshly upgraded install: [`WebhookSettings::boot_error`]
+/// permits exactly that window and `oort doctor` carries the rotation nudge.
 #[derive(Clone, PartialEq, Eq)]
 pub struct WebhookSettings {
-    /// `OUTBOUND_WEBHOOK_MASTER_KEY`. Held in memory only; never logged, never
-    /// echoed, used for nothing but HMAC derivation.
-    pub outbound_master_key: Option<String>,
+    /// `WEBHOOK_INGRESS_MASTER_KEY` — the derivation root for inbound native
+    /// ingress secrets (`momo_whsec_v1.*`). Held in memory only; never logged,
+    /// never echoed, used for nothing but HMAC derivation.
+    pub ingress_master_key: String,
+    /// `OUTBOUND_WEBHOOK_MASTER_KEY` — the derivation root for outbound event
+    /// subscription and doorbell secrets (`momo_evtsec_v1.*`). Same handling
+    /// rules as the field above.
+    pub outbound_master_key: String,
     /// `MOMO_ENV=local` **and** `MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP=1`.
     ///
     /// Both halves are required, which is the same pair the Swift relay reads
@@ -1500,11 +1531,18 @@ pub struct WebhookSettings {
 }
 
 impl Default for WebhookSettings {
-    /// Fail-closed: no dedicated key (fall back to the JWT secret, as Swift
-    /// does) and HTTPS required.
+    /// HTTPS required, doorbell shut, and **empty master keys**.
+    ///
+    /// Empty is the honest default for a value that has no defensible one, and
+    /// it is unreachable in a booted server: [`Config::from_env`] returns
+    /// [`ConfigError::MissingWebhookMasterKey`] before a `Config` exists, and
+    /// `main` is the only producer of the `AppState` the routes read. What is
+    /// left is the test `AppState`, which either names its own keys or never
+    /// touches a webhook route.
     fn default() -> Self {
         WebhookSettings {
-            outbound_master_key: None,
+            ingress_master_key: String::new(),
+            outbound_master_key: String::new(),
             allow_development_http: false,
             doorbell_enabled: false,
             per_installation_limit: 60,
@@ -1519,8 +1557,12 @@ impl std::fmt::Debug for WebhookSettings {
         formatter
             .debug_struct("WebhookSettings")
             .field(
+                "ingress_master_key_configured",
+                &!self.ingress_master_key.is_empty(),
+            )
+            .field(
                 "outbound_master_key_configured",
-                &self.outbound_master_key.is_some(),
+                &!self.outbound_master_key.is_empty(),
             )
             .field("allow_development_http", &self.allow_development_http)
             .field("doorbell_enabled", &self.doorbell_enabled)
@@ -1530,9 +1572,20 @@ impl std::fmt::Debug for WebhookSettings {
 }
 
 impl WebhookSettings {
-    pub fn from_env() -> WebhookSettings {
-        WebhookSettings {
-            outbound_master_key: env("OUTBOUND_WEBHOOK_MASTER_KEY"),
+    /// ADR-0004 증보 4 D1: both keys are required. `env` already treats an empty
+    /// or whitespace-only value as absent, which matters because compose passes
+    /// these with the optional `${VAR:-}` form — an operator who emptied the key
+    /// gets the same fail-closed sentence as one who deleted it.
+    pub fn from_env() -> Result<WebhookSettings, ConfigError> {
+        let ingress_master_key = env("WEBHOOK_INGRESS_MASTER_KEY").ok_or(
+            ConfigError::MissingWebhookMasterKey("WEBHOOK_INGRESS_MASTER_KEY"),
+        )?;
+        let outbound_master_key = env("OUTBOUND_WEBHOOK_MASTER_KEY").ok_or(
+            ConfigError::MissingWebhookMasterKey("OUTBOUND_WEBHOOK_MASTER_KEY"),
+        )?;
+        Ok(WebhookSettings {
+            ingress_master_key,
+            outbound_master_key,
             allow_development_http: env_or("MOMO_ENV", "local")
                 .trim()
                 .eq_ignore_ascii_case("local")
@@ -1541,13 +1594,38 @@ impl WebhookSettings {
             per_installation_limit: env("RATE_LIMIT_WEBHOOK_PER_INSTALLATION")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(60),
-        }
+        })
     }
 
-    /// The key outbound secrets are derived from, falling back to the app JWT
-    /// secret exactly as Swift does.
-    pub fn outbound_master_key_or<'a>(&'a self, jwt_secret: &'a str) -> &'a str {
-        self.outbound_master_key.as_deref().unwrap_or(jwt_secret)
+    /// The reuse guard [`SettingsConfig::boot_error`] applies to the provider
+    /// master key, extended to these two (ADR-0004 증보 4 D1) — with the one
+    /// exception D2(a) buys.
+    ///
+    /// | state | verdict | why |
+    /// |---|---|---|
+    /// | either key == the other, both == `JWT_HMAC` | **boot** | the D2(a) migration window: this is what the backfill just wrote, and refusing it would take down every upgrading install |
+    /// | either key == `JWT_HMAC` (only one of them) | **boot** | half-migrated is still a copy of a value in use, not a new blast radius; doctor asks for the rotation |
+    /// | the two keys equal each other, neither == `JWT_HMAC` | **refuse** | two rotated keys that landed on one value merge the inbound and outbound blast radii for no reason a rotation could have intended |
+    ///
+    /// Returning `Some` is fatal; the transition window instead surfaces through
+    /// [`WebhookSettings::reuses_jwt_secret`], which boot logs once and
+    /// `oort doctor` records as a warning.
+    pub fn boot_error(&self, jwt_secret: &str) -> Option<&'static str> {
+        if self.ingress_master_key == self.outbound_master_key
+            && self.ingress_master_key != jwt_secret
+        {
+            return Some(
+                "WEBHOOK_INGRESS_MASTER_KEY and OUTBOUND_WEBHOOK_MASTER_KEY must not be the same value",
+            );
+        }
+        None
+    }
+
+    /// True while either key is still the D2(a) copy of the app JWT secret.
+    /// Not an error — a nudge, and the only thing that reads it is a log line
+    /// and a doctor record. **Never** returns or logs the value itself.
+    pub fn reuses_jwt_secret(&self, jwt_secret: &str) -> bool {
+        self.ingress_master_key == jwt_secret || self.outbound_master_key == jwt_secret
     }
 }
 
@@ -1652,12 +1730,27 @@ impl Config {
             return Err(ConfigError::InvalidSecurity(message));
         }
 
+        // ADR-0004 증보 4 (#2066). Absent keys are fatal (the error names the
+        // backfill command), an inter-key collision is fatal, and the D2(a)
+        // migration window — either key still a copy of JWT_HMAC — boots with a
+        // single warning that names no value.
+        let webhook = WebhookSettings::from_env()?;
+        if let Some(message) = webhook.boot_error(&jwt_secret) {
+            return Err(ConfigError::InvalidSecurity(message));
+        }
+        if webhook.reuses_jwt_secret(&jwt_secret) {
+            tracing::warn!(
+                "webhook 마스터키가 JWT 시크릿과 같다 (ADR-0004 증보 4 D2(a) 이행 창) — \
+회전을 권고한다: docs/SELF_HOST.md §시크릿 회전. 회전하면 발급된 webhook secret 은 재발급이 필요하다."
+            );
+        }
+
         // B4.2: the only settings misconfiguration worth refusing a boot over.
         // A *missing* provider master key closes the surface (503); a *reused*
         // one silently merges two blast radii, so it is fatal here rather than
         // discovered after a leak.
         let settings = SettingsConfig::from_env();
-        if let Some(message) = settings.boot_error(&jwt_secret) {
+        if let Some(message) = settings.boot_error(&jwt_secret, &webhook) {
             return Err(ConfigError::InvalidSecurity(message));
         }
 
@@ -1690,12 +1783,11 @@ impl Config {
             // here, and byte-for-byte today's behaviour for a deployment that
             // does not update its env block.
             ephemeral: EphemeralSettings::from_env(),
-            // #1222: never fatal. `OUTBOUND_WEBHOOK_MASTER_KEY` is optional
-            // precisely because it has a defined fallback — changing the key an
-            // outbound secret is derived from invalidates every already-issued
-            // subscriber credential, so a missing value must mean "keep the one
-            // in use", not "pick a new one".
-            webhook: WebhookSettings::from_env(),
+            // #1222 / ADR-0004 증보 4: validated above, because unlike every
+            // other subsystem here an absent value cannot mean "closed" — a
+            // webhook secret is *derived*, so a defaulted key silently changes
+            // credentials that are already in the field.
+            webhook,
             // MOMO-605: never fatal. A malformed entry narrows the allowlist and
             // the boot warns; refusing to start over a browser knob would take
             // the whole instance down for a desktop-only concern.
@@ -2603,5 +2695,163 @@ mod tests {
             parse_database_url("mysql://u:p@localhost/momo"),
             Err(ConfigError::InvalidDatabaseUrl(_))
         ));
+    }
+
+    // -- ADR-0004 증보 4 / #2066 ------------------------------------------
+
+    /// `WebhookSettings::from_env` and the `Config::from_env` that wraps it are
+    /// the only readers of these two variables in the whole binary, so a lock
+    /// held across the set/read/restore is enough to make them deterministic.
+    static WEBHOOK_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn webhook(ingress: &str, outbound: &str) -> WebhookSettings {
+        WebhookSettings {
+            ingress_master_key: ingress.to_string(),
+            outbound_master_key: outbound.to_string(),
+            ..WebhookSettings::default()
+        }
+    }
+
+    #[test]
+    fn a_webhook_master_key_has_no_fallback_and_an_absent_one_refuses_the_boot() {
+        let guard = WEBHOOK_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let restore: Vec<(&str, Option<String>)> =
+            ["WEBHOOK_INGRESS_MASTER_KEY", "OUTBOUND_WEBHOOK_MASTER_KEY"]
+                .iter()
+                .map(|key| (*key, std::env::var(key).ok()))
+                .collect();
+
+        // Absent.
+        std::env::remove_var("WEBHOOK_INGRESS_MASTER_KEY");
+        std::env::remove_var("OUTBOUND_WEBHOOK_MASTER_KEY");
+        assert!(
+            matches!(
+                WebhookSettings::from_env(),
+                Err(ConfigError::MissingWebhookMasterKey(
+                    "WEBHOOK_INGRESS_MASTER_KEY"
+                ))
+            ),
+            "an absent ingress master key must refuse the boot, not fall back to JWT_HMAC"
+        );
+
+        // Present but empty — compose passes these with the optional `${VAR:-}`
+        // form, so "" is how an un-backfilled install actually arrives.
+        std::env::set_var("WEBHOOK_INGRESS_MASTER_KEY", "   ");
+        assert!(
+            matches!(
+                WebhookSettings::from_env(),
+                Err(ConfigError::MissingWebhookMasterKey(
+                    "WEBHOOK_INGRESS_MASTER_KEY"
+                ))
+            ),
+            "an empty ingress master key is absence, not a key"
+        );
+
+        std::env::set_var("WEBHOOK_INGRESS_MASTER_KEY", "ingress-key");
+        assert!(
+            matches!(
+                WebhookSettings::from_env(),
+                Err(ConfigError::MissingWebhookMasterKey(
+                    "OUTBOUND_WEBHOOK_MASTER_KEY"
+                ))
+            ),
+            "the outbound key is required on its own terms"
+        );
+
+        std::env::set_var("OUTBOUND_WEBHOOK_MASTER_KEY", "outbound-key");
+        let settings = WebhookSettings::from_env().expect("both keys present");
+        assert_eq!(settings.ingress_master_key, "ingress-key");
+        assert_eq!(settings.outbound_master_key, "outbound-key");
+
+        for (key, value) in restore {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+        drop(guard);
+    }
+
+    #[test]
+    fn the_missing_key_sentence_names_the_backfill_and_no_value() {
+        let rendered =
+            ConfigError::MissingWebhookMasterKey("OUTBOUND_WEBHOOK_MASTER_KEY").to_string();
+        assert!(rendered.contains("OUTBOUND_WEBHOOK_MASTER_KEY"));
+        assert!(
+            rendered.contains("scripts/oort upgrade") && rendered.contains("--ensure-managed-keys"),
+            "fail-closed is only humane when the sentence carries the next action: {rendered}"
+        );
+    }
+
+    #[test]
+    fn the_d2a_migration_window_boots_and_says_so_without_naming_a_value() {
+        // What the backfill writes: both keys are an explicit copy of JWT_HMAC.
+        let migrating = webhook("jwt-secret", "jwt-secret");
+        assert_eq!(
+            migrating.boot_error("jwt-secret"),
+            None,
+            "refusing the copy the backfill just wrote would take down every upgrading install"
+        );
+        assert!(migrating.reuses_jwt_secret("jwt-secret"));
+
+        // Half-rotated is still a copy of a value in use, not a new blast radius.
+        let half = webhook("jwt-secret", "rotated-outbound");
+        assert_eq!(half.boot_error("jwt-secret"), None);
+        assert!(half.reuses_jwt_secret("jwt-secret"));
+
+        // Fully rotated: nothing to nudge about.
+        let rotated = webhook("rotated-ingress", "rotated-outbound");
+        assert_eq!(rotated.boot_error("jwt-secret"), None);
+        assert!(!rotated.reuses_jwt_secret("jwt-secret"));
+    }
+
+    #[test]
+    fn two_rotated_webhook_keys_that_landed_on_one_value_refuse_the_boot() {
+        let merged = webhook("same-rotated-key", "same-rotated-key");
+        assert_eq!(
+            merged.boot_error("jwt-secret"),
+            Some(
+                "WEBHOOK_INGRESS_MASTER_KEY and OUTBOUND_WEBHOOK_MASTER_KEY must not be the same value"
+            )
+        );
+    }
+
+    #[test]
+    fn the_provider_master_key_may_reuse_neither_webhook_key() {
+        let settings = |key: &str| SettingsConfig {
+            provider_link_master_key: Some(key.to_string()),
+            ..SettingsConfig::default()
+        };
+        let keys = webhook("ingress-key", "outbound-key");
+
+        assert_eq!(
+            settings("ingress-key").boot_error("jwt-secret", &keys),
+            Some("PROVIDER_LINK_MASTER_KEY must not reuse WEBHOOK_INGRESS_MASTER_KEY")
+        );
+        assert_eq!(
+            settings("outbound-key").boot_error("jwt-secret", &keys),
+            Some("PROVIDER_LINK_MASTER_KEY must not reuse OUTBOUND_WEBHOOK_MASTER_KEY")
+        );
+        assert_eq!(
+            settings("jwt-secret").boot_error("jwt-secret", &keys),
+            Some("PROVIDER_LINK_MASTER_KEY must not reuse JWT_HMAC")
+        );
+        assert_eq!(
+            settings("its-own-key").boot_error("jwt-secret", &keys),
+            None
+        );
+    }
+
+    #[test]
+    fn the_debug_rendering_reports_presence_and_never_a_key() {
+        let rendered = format!("{:?}", webhook("ingress-key", "outbound-key"));
+        assert!(rendered.contains("ingress_master_key_configured: true"));
+        assert!(rendered.contains("outbound_master_key_configured: true"));
+        assert!(
+            !rendered.contains("ingress-key") && !rendered.contains("outbound-key"),
+            "a master key reached a Debug rendering: {rendered}"
+        );
     }
 }

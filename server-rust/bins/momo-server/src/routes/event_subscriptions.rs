@@ -237,10 +237,7 @@ pub async fn create(
     };
 
     let row = settle_db("event_subscriptions.create", outcome)?;
-    let secret = momo_webhook::outbound_secret(
-        state.webhook.outbound_master_key_or(&state.jwt_secret),
-        &secret_ref,
-    );
+    let secret = momo_webhook::outbound_secret(&state.webhook.outbound_master_key, &secret_ref);
     Ok((
         StatusCode::CREATED,
         Json(CreatedEventSubscriptionResponse {
