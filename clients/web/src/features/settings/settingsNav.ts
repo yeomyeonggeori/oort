@@ -6,7 +6,8 @@
 // 그룹은 권한이 아니라 범위다. 각 운영 패널의 403은 섹션이 서버에 물어 답한다.
 // =============================================================================
 
-import type { SurfaceId } from "@momo/core/features/capabilities/serverSurfaces";
+import { isSurfaceProvided, type SurfaceId } from "@momo/core/features/capabilities/serverSurfaces";
+import { isDesktop } from "@/lib/tauri";
 
 export type SettingsSectionId =
   | "profile"
@@ -71,3 +72,34 @@ export const SETTINGS_GROUPS: SettingsGroupId[] = [
 ];
 
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionId = "profile";
+
+/**
+ * **이 빌드에서 실제로 도착할 수 있는** 섹션 (design-review #2540 R2 M-R2-1).
+ *
+ * `SETTINGS_SECTIONS` 는 원표이고, 화면에 서는 목록은 그보다 짧다: `updates` 는
+ * 데스크톱 셸에만 있고(`desktopOnly`), `code` 는 서버가 그 표면을 실었을 때만
+ * 있다(`surface`). `SettingsRoute` 는 그 **걸러진 목록**으로 `?section=` 을
+ * 판정하고, 목록 밖 이름은 조용히 기본 섹션(프로필)으로 접는다.
+ *
+ * 그래서 원표를 읽고 「이 섹션은 있다」고 답하는 쪽은 전부 틀린다. R1 H1 이
+ * 닫은 결함(`?section=invites`)과 **같은 결함**이 `updates`·`code` 로 한 겹 더
+ * 남아 있었다: 결과 카드가 문을 세우고, 누르면 아무 말 없이 프로필에 도착한다.
+ *
+ * 판정을 여기 한 곳에 둔다. `SettingsRoute` 가 자기 목록을 만들 때, 결과 카드가
+ * 문을 세울지 정할 때, 팔레트가 행동 줄을 열지 정할 때 — 셋이 같은 함수를
+ * 부른다. 세 곳이 각자 필터를 적으면 그중 하나가 먼저 낡는다.
+ *
+ * 런타임 사실을 읽으므로(셸 종류·서버 표면) 상수가 아니라 함수다.
+ */
+export function reachableSettingsSections(): SettingsSectionMeta[] {
+  return SETTINGS_SECTIONS.filter(
+    (item) =>
+      (!item.desktopOnly || isDesktop()) &&
+      (item.surface === undefined || isSurfaceProvided(item.surface))
+  );
+}
+
+/** 이 빌드가 이 섹션 이름으로 도착할 수 있는가. */
+export function isReachableSettingsSection(section: string): boolean {
+  return reachableSettingsSections().some((item) => item.id === section);
+}

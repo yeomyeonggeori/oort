@@ -9,6 +9,7 @@ import {
   formatMicroUsd,
   frameSentence,
   payloadDetail,
+  parseApprovalAction,
   parseApprovalStatus,
   resolveApprovalStatus,
   turnStatusFor,
@@ -617,5 +618,103 @@ describe("decision receipt semantics", () => {
     expect(interpretReceipt(404, receipt("not_found")).errorCopy).toContain(
       "찾을 수 없습니다"
     );
+  });
+});
+
+// ---- ADR-0186 부록 A: 승인 카드의 행동 블록 --------------------------------
+
+/** 부록 A 샘플 그대로. 서버(AX-3a/3b)가 아직 없으므로 이것이 계약이다. */
+const APPENDIX_A_ACTION = {
+  id: "invite.create",
+  rows: [
+    { label: "역할", value: "member" },
+    { label: "사용 횟수", value: "1회" },
+    { label: "만료", value: "7일" },
+  ],
+  rationale: "새 팀원 온보딩 요청",
+  required_role: "admin",
+};
+
+describe("승인 카드의 행동 블록 (ADR-0186 부록 A)", () => {
+  it("부록 A 샘플을 행·사유·필요 역할로 읽는다", () => {
+    const card = agentCardModel(
+      msg({
+        type: "approval_request",
+        props: approvalProps({
+          action_type: "workspace_action",
+          title: "팀원 초대 링크 만들기",
+          action: APPENDIX_A_ACTION,
+        }),
+      })
+    );
+    if (card?.kind !== "approval") throw new Error("not an approval card");
+    expect(card.action).toEqual({
+      id: "invite.create",
+      rows: [
+        { label: "역할", value: "member" },
+        { label: "사용 횟수", value: "1회" },
+        { label: "만료", value: "7일" },
+      ],
+      omittedRows: 0,
+      rationale: "새 팀원 온보딩 요청",
+      requiredRole: "admin",
+    });
+  });
+
+  it("블록을 그리는 카드는 그것을 숨김으로 세지 않는다", () => {
+    const card = agentCardModel(
+      msg({
+        type: "approval_request",
+        props: {
+          approval_id: "0199aa11-2222-7000-8000-0000000000a1",
+          action_type: "workspace_action",
+          title: "팀원 초대 링크 만들기",
+          summary: "hermes가 제안했습니다.",
+          status: "pending",
+          action: APPENDIX_A_ACTION,
+        },
+      })
+    );
+    if (card?.kind !== "approval") throw new Error("not an approval card");
+    expect(card.detail.withheld).toBe(0);
+  });
+
+  it("블록이 없으면 도구 호출 승인 그대로다 (회귀 0)", () => {
+    const card = agentCardModel(
+      msg({ type: "approval_request", props: approvalProps() })
+    );
+    if (card?.kind !== "approval") throw new Error("not an approval card");
+    expect(card.action).toBeNull();
+    expect(card.title).toBe("빌드 캐시 정리");
+  });
+
+  it("id 없는 블록은 블록이 아니다 — 이름 없는 행동을 허가시키지 않는다", () => {
+    expect(parseApprovalAction({ rows: APPENDIX_A_ACTION.rows })).toBeNull();
+    expect(parseApprovalAction("invite.create")).toBeNull();
+    expect(parseApprovalAction(null)).toBeNull();
+  });
+
+  it("모양이 어긋난 행은 버리고 개수로 남긴다", () => {
+    const action = parseApprovalAction({
+      id: "invite.create",
+      rows: [{ label: "역할", value: "member" }, { label: "만료" }, 7],
+    });
+    expect(action?.rows).toEqual([{ label: "역할", value: "member" }]);
+    expect(action?.omittedRows).toBe(2);
+    expect(action?.rationale).toBeNull();
+    expect(action?.requiredRole).toBeNull();
+  });
+
+  it("`workspace_action` 은 접힘에서 enum 이 아니라 낱말로 읽힌다", () => {
+    const detail = payloadDetail({ action_type: "workspace_action" });
+    expect(detail.rows).toContainEqual({
+      label: "동작",
+      value: "워크스페이스 행동",
+    });
+    // 모르는 값은 원문 그대로 지나간다(감추지 않는다).
+    expect(payloadDetail({ action_type: "shell" }).rows).toContainEqual({
+      label: "동작",
+      value: "shell",
+    });
   });
 });
