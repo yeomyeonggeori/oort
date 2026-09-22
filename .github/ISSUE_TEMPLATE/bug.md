@@ -6,7 +6,7 @@ labels: ["type:bug", "status:ready"]
 ---
 
 > 재현 절차와 기대/실제가 명확하면 Codex가 `fix/<issue#>-<slug>` 브랜치로 자율 수정→PR을 연다.
-> Acceptance에 검증 등급(`[rust]/[web]/[mobile]/[runtime]/...`, AGENTS.md §3)을 명시한다. 라벨에 `area:*`를 추가한다.
+> Acceptance에 검증 등급(`[rust]/[web]/[mobile]/[runtime]/...`, docs/runbooks/development-validation.md)을 명시한다. 라벨에 `area:*`를 추가한다.
 
 ## 증상
 <!-- 무엇이 잘못됐나 (1~2줄) -->

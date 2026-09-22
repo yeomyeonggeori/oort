@@ -14,7 +14,9 @@ Public-repository `pr-ci` is active for PRs into `main`, `track/engine`, and `tr
 
 ## 1. Rule
 
-Every PR needs local evidence in the PR body: date and machine/toolchain, commands executed, pass/fail, runtime scope actually exercised, and anything intentionally not covered. Do not mark runtime work complete if the runtime script was not run.
+필수 검증 등급은 AGENTS.md, 실행 명령은 [개발 검증](runbooks/development-validation.md)에 있다. 같은 HEAD·환경의 유효한 증거는 재사용한다. 리뷰 수정·base/병합 결과·환경 차이가 있으면 관련 검증을 다시 실행한다.
+
+A local-only prose diff requested for inspection is not a PR and follows the narrow AGENTS exception. Every PR needs local evidence in the PR body: date and machine/toolchain, commands executed, pass/fail, runtime scope actually exercised, and anything intentionally not covered. Do not mark runtime work complete if the runtime script was not run.
 
 ```bash
 scripts/local_gate.sh --profile docs
@@ -68,6 +70,6 @@ Paste the `## Local Gate` block the script prints (result, profile, run id, comm
 1. Worker runs the matching profile, opens 1 PR = 1 issue, pastes evidence.
 2. `scripts/goal_release.sh <issue> --review --pr <url>` → `status:needs-review`.
 3. Worker does **not** merge, close, or retarget ROADMAP.
-4. `momo-main` reviews, re-runs the local gate, checks PR CI + Policy integrity, then merges to the track branch.
+4. `momo-main` reviews current-head local evidence, re-runs affected gates after changes or integration differences, checks PR CI + Policy integrity and the exact-base verifier, then merges to the track branch.
 
 Cross-client landings also need `scripts/verify_merge_tree.sh` green (merged tree, not branch-alone).

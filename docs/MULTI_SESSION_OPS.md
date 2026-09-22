@@ -1,284 +1,57 @@
-# Multi-session Worktree Operations
+# 공유 워크트리 운영
 
-> Purpose: run five or more 워커 레인 sessions without issue, branch, worktree, runtime, or review collisions.
-> Canonical rule: one GitHub Issue = one goal = one branch = one worktree = one PR.
+한 이슈 = 한 브랜치·워크트리·PR. 모델·병렬 상한은 [PIPELINE](planning/PIPELINE.md), 트랙/승격 권한은 [TRACKS](TRACKS.md)에만 정의한다.
 
-## 0. Operating Model
+## 0. 역할과 소유권
+서로 다른 기획 범위는 병렬로 진행할 수 있다. 같은 파일군의 구현은 분리하거나 순서를 정한다. 공용 통합은 `integration` 범위를 맡은 세션 하나가 수행한다. 다른 하네스에서도 같은 scope/session 기록을 읽는다.
 
-`momo-main` is the orchestration thread. It should stay light and avoid heavy implementation except for urgent fixes.
+로컬 기록 위치는 `scripts/planning_session.py path`로 찾는다. Git common directory 아래이므로 같은 저장소의 모든 워크트리에서 같다. 별도 clone/머신은 GitHub Issue·브랜치·PR과 커밋된 CURRENT_STATE로 조율한다. 공용 폴더가 프로세스 감독기나 원격 잠금을 대신하지는 않는다.
 
-Worker threads are implementation threads. Each worker claims exactly one GitHub Issue and works only in the worktree created for that issue. **Concurrent implementation goals are capped at 5** (planning contract `docs/planning/README.md` §3); excess work waits in `status:ready`.
+## 1. 상태판
+`scripts/planning_context.sh`는 오프라인 현재 상태, `scripts/goal_status.sh --repo yeomyeonggeori/oort`는 실시간 이슈/PR/worktree 보드다. gate 표시는 라벨 기반 힌트이며 최종 검증은 실제 diff와 [LOCAL_PR_GATE](LOCAL_PR_GATE.md)로 정한다.
 
-Planning-layer inputs (who issues tickets, handoff packets, deviation feedback) are defined in `docs/planning/README.md`. Workers read the handoff packet linked in the issue Context before starting.
+워크트리 정리는 read-only 감사 후 수행한다. **main 및 track/*는 정리 대상이 아니다.** closed 이슈라는 이유만으로 dirty·미push·현재 사용 중인 작업을 삭제하지 않는다. 다른 owner의 파일은 무접촉으로 둔다.
 
-Workers stop at PR handoff: claim issue -> worktree work -> local gate -> PR -> `status:needs-review` -> handoff to `momo-main`. Workers must not merge PRs, close issues, run the post-merge `main` gate, or reorder roadmap/backlog state. Those actions are `momo-main` only.
+## 2. 구현 claim
+트랙을 명시해 `scripts/goal_claim.sh --base track/engine <issue-number>` 또는 UXUI 트랙으로 claim한다. 스크립트는 원격 브랜치와 이슈 assignee/status를 기록한다. 이미 맡은 이슈·브랜치·PR이 있으면 새로 claim하지 않는다.
 
-Recommended five-session split:
+공용 로컬 scope는 오케스트레이션 충돌을 방지하고, Issue+remote branch는 원격 작업 소유권을 표시한다. 단순한 읽기·개인 검토는 새 claim을 만들 필요가 없다. helper 사용은 `scripts/planning_session.py --help`를 따른다.
 
-| Session | Default lane | Responsibility |
-|---|---|---|
-| `momo-main` | orchestration | Issue picker, branch collision checks, review/merge, issue close, main gate, roadmap/status updates, next-goal recommendation |
-| worker 1 | runtime/backend | Small server, DB, relay, worker, runtime verification tickets |
-| worker 2 | macOS UX | MomoMac SwiftUI, app launch, desktop interaction tickets |
-| worker 3 | docs/spec/protocol | Context, memory, agent protocol, research-to-roadmap tickets |
-| worker 4 | infra/devtooling | Local gate, worktree tooling, scripts, GitHub ops, deployment runbooks |
+## 3. 환경
+runtime은 전용 env/포트/Compose project와 폐기 가능한 DB를 사용한다. `.conductor/setup.sh`가 만드는 로컬 env는 비밀정보를 포함할 수 있으므로 커밋하지 않는다. root .env와 다른 작업의 DB·볼륨·포트를 공유하지 않는다.
 
-More workers are allowed, but do not open two large edits in the same file family without an explicit merge order.
+검토용 사본은 실제 worktree의 gitdir을 재사용하지 않게 만든다. 사용 중인 트리의 복사본에서 Git mutation을 하지 않는다. runtime 자원은 자신이 만든 것만 정리한다.
 
-## 1. Status Board
+## 4. 충돌과 체크포인트
+겹침을 우선 확인할 대상은 server-rust/DDL, 공유 momo-core, 클라이언트 공통 계약, infra, 게이트·goal 도구, 공용 계획 문서다. 변경 규모보다 실제 파일/자원 겹침을 기준으로 분리한다.
 
-`momo-main` starts every orchestration cycle with:
+로컬 note에는 한 일 / 현재 / 다음 / 마지막 검증 / 실제 막힘 / 이슈·PR / run·종료 기록을 적는다. 진입은 read-only, claim은 명시적이며 같은 scope를 다른 세션이 보유하면 거절된다. session 식별자는 모델 이름과 별개다. 마지막 기록의 시각만으로 owner를 자동 탈취하지 않는다.
 
-```bash
-scripts/goal_status.sh --repo yeomyeonggeori/oort
-```
+### 4.1 루트·공용 파일
+- root main은 clean 유지. 변경은 전용 워크트리에서 작성하고 기획 문서도 track/engine에 PR로 랜딩한다.
+- 다른 세션의 dirty 파일을 stash/reset/삭제하거나 함께 stage하지 않는다. 파일 목록을 지정해 커밋한다.
+- canonical 브랜치 갱신은 clean 상태에서 ff-only 또는 검토된 sync merge로 한다. main 직접 push, canonical force-push·history rewrite 금지.
 
-The board shows:
+## 5. worker 전달
+이슈 번호, 필요하면 패킷/기준 커밋, worktree, 허용 파일, 관련 검증과 전달 지점으로 충분하다. 제품 버그의 재현과 함정은 관련된 것만 준다. 과거 사고 체크리스트 전체를 반복하지 않는다.
 
-- `ready`, `in-progress`, `needs-review`, and `blocked` issues,
-- issue number, assignee, title, and status labels,
-- matched branch, open PR, and local worktree path,
-- the local gate profile or evidence state expected next.
-- a read-only stale/done local worktree audit for closed issues or merged/closed PRs.
+## 6. worker 결과
+한 일 / 변경 파일·커밋 / 검증 원문 경로 / PR / 남은 것·계획 이탈을 보고한다.
+`scripts/goal_release.sh <issue-number> --review --pr <PR URL>` 뒤에는 orchestrator가 검수·후속 수정을 이어간다.
+막힘은 해당 이슈의 구체적 원인으로 기록한다. 설계 승인 대기와 실행 도구 오류를 구분한다.
 
-Column meanings:
+## 7. PR 검수·통합
+1. 이슈와 실제 HEAD/파일·독립 검수·local evidence를 대조한다.
+2. 관련 실패는 같은 이슈에서 수정하고 영향을 받는 검증을 다시 실행한다. UI는 B0·H0 및 해당 표면 증거가 필요하다.
+3. **현재 PR HEAD**의 PR CI gate·Policy integrity gate와 exact canonical base 출처를 [GITHUB_OPS](GITHUB_OPS.md)대로 검증한다. 정책 파일의 지정 owner exact-head audit/라벨 조건을 유지한다.
+4. 단일 integrator가 자기 track으로 순차 머지한다. 테스트한 HEAD·base/병합 결과와 실제 결과가 다르면 해당 차이를 검증한다.
+5. track→main은 TRACKS의 승인 범위에서 승격+양 트랙 sync로 수행한다. 다른 owner의 진행 중 PR을 임의로 인수하지 않는다.
+6. 검증·상태·다음 행동을 기록한다. 모든 로그를 여러 Markdown 파일에 복사하지 않는다.
 
-| Column | Meaning |
-|---|---|
-| `status` | Issue status label group. |
-| `issue` | GitHub Issue number. This is the goal id. |
-| `assignee` | Current worker owner. Empty means claimable only if `status:ready`. |
-| `gate` | Local gate profile expected for this surface. |
-| `evidence` | Next evidence step: claim, run a gate, attach PR Local Gate, or explain blocker. |
-| `branch` | Canonical branch matched by `<type>/<issue>-<slug>`. |
-| `pr` | Open PR for the branch, if one exists. |
-| `worktree` | Local worktree path for the branch, if present on this machine. |
+## 8. 검증
+검증 등급·명령은 [개발 검증](runbooks/development-validation.md), local profile 이름은 [LOCAL_PR_GATE](LOCAL_PR_GATE.md)와 `scripts/local_gate.sh --help`가 정본이다. 폐기된 Swift/macOS profile로 현행 제품을 검증하지 않는다.
 
-If a branch/PR/worktree column is `-`, check for a non-canonical branch before starting work. The remote branch is the practical lock.
+## 9. 호스트 자원
+무거운 게이트는 PIPELINE의 호스트 전체 단일 슬롯으로 실행한다. runtime-*의 load > 12 가드는 유지한다. 새로운 작업·머지 결과 검증을 시작할 때 기존 실행과 겹치지 않는지 확인한다.
 
-### 1.1 Stale Worktree Audit And Cleanup
-
-The same command also audits local worktrees whose branch name follows the canonical `<type>/<issue>-<slug>` pattern. It matches each local branch to GitHub issue and PR state and prints a separate `Stale/done local worktree audit (read-only)` section.
-
-Cleanup is never automatic. Rows are intentionally conservative:
-
-| Audit row | Meaning |
-|---|---|
-| `done-candidate` | The issue is closed or the PR is merged/closed, the local worktree is not the current checkout, the worktree is clean, and no unpushed/divergent commits were detected. |
-| `stale-warning` | The worktree appears tied to completed GitHub state, but cleanup needs human review first. The row explains blockers such as `dirty:<n>`, `unpushed:<n>`, `upstream-unknown`, or `current-worktree`. |
-
-For `done-candidate` rows, copy the printed command only after confirming the issue/PR references are the intended completed work:
-
-```bash
-git worktree remove '<printed-path>'
-```
-
-Do not run cleanup commands for `stale-warning` rows until the warning is resolved. Inspect dirty files with `git -C '<path>' status --short`; inspect local-only commits with `git -C '<path>' log --oneline --decorate --max-count 20`. If the current worktree is listed, switch to another checkout before removing it.
-
-### 1.2 Worktree Docker Compose Janitor
-
-Parallel runtime gates can leave Docker Compose containers or networks after a worktree has been removed. Audit those resources with:
-
-```bash
-scripts/compose_janitor.sh
-```
-
-The janitor is dry-run by default. It only lists Compose-labeled worktree projects whose name starts with `momo_` or `momo240_` (live local-alpha runners are PID-protected) and no longer matches an active git worktree. It explicitly protects the root `momo` project, `momo_default`, `supabase`, active worktree projects, and non-momo Docker resources.
-
-Cleanup requires an explicit flag:
-
-```bash
-scripts/compose_janitor.sh --cleanup
-```
-
-The cleanup path removes only the listed stale containers and networks. Volumes are intentionally left untouched; remove them manually only after checking that no useful local database state is needed.
-
-## 2. Claiming Work
-
-Preferred:
-
-```bash
-scripts/goal_claim.sh <issue-number>
-```
-
-This script:
-
-1. verifies the issue is open and `status:ready`,
-2. rejects already-assigned or in-review issues unless `--force` is used deliberately,
-3. creates a canonical branch and worktree under `../momo-worktrees/<issue>-<slug>`,
-4. pushes the remote branch as the lock,
-5. assigns the issue to the current GitHub user and moves it to `status:in-progress`,
-6. runs `.conductor/setup.sh` when available.
-
-If the script is unavailable in an older checkout, use the manual fallback:
-
-```bash
-git fetch origin main
-git worktree add -b <type>/<issue-number>-<slug> ../momo-worktrees/<issue-number>-<slug> origin/main
-git -C ../momo-worktrees/<issue-number>-<slug> push -u origin <type>/<issue-number>-<slug>
-gh issue edit <issue-number> --repo yeomyeonggeori/oort --add-assignee @me --add-label status:in-progress --remove-label status:ready
-```
-
-Do not claim an issue that already has an assignee, an active branch, an open PR, or `status:in-progress`/`status:needs-review`, unless `momo-main` explicitly resolves the conflict.
-
-## 3. Worktree Environment Separation
-
-`.conductor/setup.sh` creates per-worktree runtime overrides:
-
-- `.conductor/local.env`: ignored local file with generated ports, compose name, and the base runtime env keys needed by Docker Compose.
-- `.env.worktree`: ignored symlink to `.conductor/local.env`.
-- `COMPOSE_PROJECT_NAME`: branch/worktree-specific namespace.
-- `PORT`, `CENT_PORT`, `POSTGRES_PORT`, `HERMES_PORT`: deterministic branch-specific ports.
-- `DATABASE_URL`, `CENT_API_URL`, `HERMES_BASE_URL`: local runtime URLs derived from those ports.
-
-Root `.env` is treated as a secret source and must never be copied into commits. `.conductor/local.env` may mirror those values locally so `make up` can use a single `--env-file`; it is ignored and must stay uncommitted.
-
-Runtime tickets should pass `ENV_FILE=.env.worktree` when needed and must not reuse another worktree's compose project, volume, or port set.
-
-## 4. Collision Rules
-
-Safe concurrent lanes:
-
-- one runtime/backend worker and one docs/spec worker,
-- one macOS UI worker and one infra/devtooling worker,
-- multiple docs workers if they do not edit the same roadmap/status sections.
-
-Coordinate before opening parallel work in:
-
-- `server/`, `server/Migrations/`, or any RLS/runtime verification path,
-- `schema_v0.sql` references or shared DB model changes,
-- `clients/Core/` shared models/protocols,
-- `infra/docker-compose.yml` or `.conductor/setup.sh`,
-- `scripts/local_gate.sh` and goal orchestration scripts,
-- `ROADMAP.md`, `BUILD_TICKETS.md`, `STATUS.md` sections for the same milestone.
-
-Large shared changes should be merged by `momo-main` in dependency order. Workers should rebase/refresh from `main` after upstream PRs merge, rerun the relevant local gate, and update their PR evidence.
-
-### 4.1 메인 worktree 소유권 (2026-07-17 사고 후 정본)
-
-메인 체크아웃(`/Users/kwakseongjae/projects/momo`)은 **통합(momo-main) 문서·머지 전용**이다. 어떤 세션도 여기서 구현 파일(clients/server/workers 소스)을 작업하지 않는다 — 구현은 반드시 `scripts/goal_claim.sh`가 만드는 격리 worktree에서.
-
-1. **통합 세션(들)**: 메인 worktree에서는 planning/docs 파일만 수정하고, 커밋은 **명시적 파일 지정 add만**(`git add -A`/`git add .` 금지 — 타 세션 미커밋 작업분을 삼킨 사고 2회: 오커밋→main 빌드 파손, stash 시도).
-2. **타 세션의 미커밋 파일 발견 시**: 절대 stash/checkout/reset --hard/정리하지 않는다. 잔재로 보여도 해당 트랙 세션에 확인을 요청하고 무접촉으로 둔다.
-3. **push 충돌 시**: 메인 worktree에서 rebase가 타 세션 파일에 막히면, 임시 worktree(`git worktree add <tmp> origin/main`) + cherry-pick + `push origin HEAD:main`으로 우회한다 — working tree 무접촉.
-4. 구현 세션(GPT momo-main 포함)이 메인 worktree에서 초안을 잡았다면, worktree로 옮긴 뒤 **메인 worktree의 사본을 스스로 정리**한다(잔재를 남기면 타 세션의 rebase/게이트가 막힌다).
-5. **루트 clean 유지 + 동기화 규약 (2026-07-17 mixed-reset 착시 사고 후)**: 메인 체크아웃은 항상 clean(`git status` 0건) + `origin/main` 일치가 기본 상태다. 동기화는 clean 확인 후 `git pull --ff-only`만 사용한다. dirty 트리 위 `git reset origin/main`(mixed)은 HEAD/index만 이동하고 파일은 낡은 버전으로 남아, 이후 세션에 "수천 줄 미커밋 역삭제"라는 착시를 만든다(2026-07-17: 낡은 스냅샷 2,973줄이 webhook/게이트 하드닝을 되돌리는 변경처럼 보임 — 전 파일이 과거 커밋 blob과 일치함을 확인 후 stash 보존으로 해소). 부득이 dirty 상태에서 mixed reset을 쓴 세션은 그 사실을 JOURNAL에 남긴다.
-
-## 5. Worker Prompt Template
-
-Paste this into a worker chat:
-
-```md
-Use repo /Users/kwakseongjae/projects/momo.
-Read docs/planning/handoffs/<packet>.md first, then claim GitHub issue #<number> and work in a separate worktree.
-Do not touch root dirty changes.
-
-Operational:
-- Use issue #<number> as the only goal. The handoff packet + issue body are the full contract; the packet carries file map, contracts, pitfalls, and merge order.
-- Prefer scripts/goal_claim.sh <number>; if unavailable, create a canonical branch/worktree manually.
-- Branch/worktree lock required before editing.
-- Use .env.worktree for runtime work and avoid shared ports/compose projects.
-- Run scripts/local_gate.sh --profile <docs|swift|runtime-db|runtime-relay|runtime-agent|macos-ui>.
-- Open one PR, paste Local Gate evidence, fill the "## 계획 이탈" (deviation) section honestly, run scripts/goal_release.sh <number> --review --pr <PR URL>, and hand off the PR URL back to momo-main.
-- Stop after the handoff. Do not merge, close the issue, run the post-merge main gate, or adjust roadmap/backlog state from the worker thread.
-```
-
-If no handoff packet exists for the issue, ask `momo-main` for one instead of reconstructing intent from chat history — packets are mandatory for planned batches (`docs/planning/README.md` §2).
-
-## 6. Worker Handoff Report
-
-Each worker ends with:
-
-```md
-Issue:
-Branch:
-Worktree:
-PR:
-Local Gate:
-Files changed:
-Runtime coverage:
-Remaining risks:
-Handoff target: momo-main
-Next recommended issue:
-```
-
-If blocked:
-
-```bash
-scripts/goal_release.sh <issue-number> --blocked "<short blocker>"
-```
-
-If ready for review:
-
-```bash
-scripts/goal_release.sh <issue-number> --review --pr <PR URL>
-```
-
-`--review` requires a valid open PR that either closes the issue or uses the canonical issue branch. It is the worker stop line: after this command, `momo-main` owns review, merge, issue close, main gate, and roadmap/backlog adjustments. `--ready` returns an issue to the ready pool and removes the current assignee so another worker can claim it normally.
-
-## 7. PR Review And Merge Cycle
-
-`momo-main` owns the merge lane:
-
-1. Run `scripts/goal_status.sh` and confirm the issue has exactly one branch/worktree/PR.
-2. Read the PR diff and Local Gate evidence.
-3. Run code review or a review agent focused on security, correctness, scope, and test honesty.
-4. Ask the worker to fix issues, or fix narrowly in the same issue worktree when delegated.
-5. Run the final relevant local gate on the PR branch.
-6. Merge only when local gate passes, review blockers are cleared, and unrelated dirty files are absent.
-7. Update `main`, rerun the same local gate on `main`, and verify GitHub Actions remain `disabled_manually` during the manual-only period.
-8. Close or relabel the issue, update `STATUS.md`/roadmap/backlog if the work changed direction, then recommend the next batch of goals.
-
-## 8. Local Gate Profiles
-
-Use the narrowest profile that honestly covers the changed surface:
-
-| Profile | Use when |
-|---|---|
-| `docs` | Documentation, specs, static GitHub ops, shell/Python syntax only |
-| `swift` | Any Swift package/model/view change |
-| `runtime-db` | DB, server, migration, RLS, or tenant isolation work |
-| `runtime-relay` | OutboxRelay/Centrifugo publish or realtime transport work |
-| `runtime-agent` | AgentWorker, hermes/OpenAI-compatible SSE, cost accounting |
-| `macos-ui` | MomoMac desktop UI or launch behavior |
-| `all` | Rare merge-critical changes spanning all major surfaces |
-
-PR evidence must come from a clean worktree. Exploratory pre-commit runs may use `LOCAL_GATE_ALLOW_DIRTY=1`, but that evidence is not enough to merge.
-
-## 9. Resource Governance (호스트 부하 규칙 — 2026-07-17 발열 사고 후 정본)
-
-> 적용 대상: **oort에서 게이트/빌드/soak를 돌리는 모든 세션**(기획 엔진 트랙, momo-main/UX 트랙, 워커 레인). 이 머신에서는 tf-hwp 등 다른 프로젝트도 병행되므로 oort 세션 합산이 아니라 **호스트 전체 기준**으로 판단한다.
-
-### 9.1 부하 체크 게이트 (heavy 작업 전 의무)
-
-docker-heavy 작업(runtime-* 게이트, e2e compose verifier, 컨테이너 내 Swift 빌드, soak) 시작 전에 확인한다:
-
-```sh
-uptime            # load 1min 기준
-docker ps --format '{{.Names}}' | grep -c momo   # 활성 momo 스택 수
-```
-
-- **load(1min) > 12** (18코어의 ~65%): heavy 작업 시작 금지 — 문서/리뷰/기획 작업으로 전환하거나 부하 하강 대기.
-- **load 8~12**: heavy 작업 1개만, 동시 실행 금지.
-- **load < 8**: 정상 진행. 그래도 docker-heavy 게이트는 **세션당 동시 1개**(9.2).
-
-`scripts/local_gate.sh`의 `runtime-db`/`runtime-relay`/`runtime-live`/`runtime-agent`는
-이 정본과 같은 **load(1min) > 12** 임계값을 시작 전에 자동 검사한다. 부하를 확인하고
-위험을 명시적으로 수용한 경우에만 `LOCAL_GATE_FORCE=1`로 우회한다. 사용법과 evidence
-계약은 [`LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md#2-standard-script)를 참조한다.
-
-### 9.2 잔재 방지 (사고 원인의 성문화)
-
-1. **게이트 런 종료 즉시 해당 worktree의 compose project를 down한다** — `local_gate.sh`의 위 runtime-* 프로파일은 `make up` 시작 후 성공/실패/중단 EXIT trap에서 기본 `make down`한다. 디버깅을 위해 의도적으로 보존할 때만 `--keep-stack`을 사용하며, 이후 수동 `make down`은 실행 세션의 의무다.
-2. docker-heavy 게이트는 **호스트 전체에서 동시 1개** — 다른 트랙이 게이트 중이면(`docker ps`에서 분 단위 신생 oort 스택 관찰) 대기.
-3. goal 종결(머지·close) 시 해당 goal의 worktree 제거 + compose 스택 down + network rm까지가 종결이다.
-4. 배치 종결마다 `scripts/compose_janitor.sh --cleanup`(`momo_`와 `momo240_` stale project 대상, 볼륨 불변; [`LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md#2-standard-script)) + `docker builder prune -f --filter until=72h`. 주 1회 `~/.local/bin/momo-docker-reclaim.sh --aggressive`.
-5. 무거운 타 프로젝트 병행 시 워커 동시 spawn 1~2로 제한(평시 상한 5와 별개의 부하 상한).
-
-### 9.3 판별 팁
-
-`docker ps`에서 **Up 수 시간짜리 `momo_feat-*`/`momo240_*` postgres+centrifugo 쌍 = 잔재**(활성 게이트는 분 단위). `momo_main`과 분 단위 신생 스택만 보존 대상. 유휴 판정이 애매하면 해당 트랙 세션에 확인 후 down.
-
-## 10. Thread Tool Note
-
-If worker-lane tools are available, `momo-main` can create or hand off worker threads. If tools are unavailable or awkward, use the prompt template above. The durable lock remains GitHub Issue + remote branch + PR, not the chat itself.
+게이트가 만든 자원은 해당 게이트의 cleanup 계약을 따른다. 조사용 보존은 명시적으로 기록한다. 배치가 끝났다는 이유로 호스트 전체 Docker cache/volume이나 다른 프로젝트 자원을 자동 prune하지 않는다. janitor는 기본 read-only이며, 명확한 자기 자원만 정리한다.

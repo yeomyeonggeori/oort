@@ -3,7 +3,7 @@
   "description": "oort self-host on Railway: one GHCR image (api · relay · webhook-sender · agent-worker), Caddy public edge, Centrifugo, Postgres plugin. LiveKit/huddle excluded.",
   "appImage": {
     "ref": "ghcr.io/yeomyeonggeori/oort",
-    "digest": "sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f",
+    "digest": "sha256:5481c14eccab99d3cbce51fd8b8710fe6fd671e673652cb3e30422b0e66f7a85",
     "source": "releases/latest.json images.app"
   },
   "plugins": ["postgresql"],
@@ -25,7 +25,7 @@
     },
     "api": {
       "public": false,
-      "image": "ghcr.io/yeomyeonggeori/oort@sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f",
+      "image": "ghcr.io/yeomyeonggeori/oort@sha256:5481c14eccab99d3cbce51fd8b8710fe6fd671e673652cb3e30422b0e66f7a85",
       "startCommand": "api",
       "preDeployCommand": [
         "DATABASE_URL=\"$MIGRATE_DATABASE_URL\" MOMO_RUNTIME_ROLE_PROVISION=1 /usr/local/bin/momo-migrate && DATABASE_URL=\"$MIGRATE_DATABASE_URL\" MOMO_BOOTSTRAP_RUNTIME_ROLES=0 MOMO_ENV=\"${MOMO_MIGRATE_ENV:-development}\" /usr/local/bin/momo-migrate"
@@ -36,7 +36,7 @@
     },
     "relay": {
       "public": false,
-      "image": "ghcr.io/yeomyeonggeori/oort@sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f",
+      "image": "ghcr.io/yeomyeonggeori/oort@sha256:5481c14eccab99d3cbce51fd8b8710fe6fd671e673652cb3e30422b0e66f7a85",
       "startCommand": "relay",
       "variablesHardcoded": {
         "CENT_API_URL": "http://centrifugo.railway.internal:8000/api"
@@ -44,12 +44,12 @@
     },
     "webhook-sender": {
       "public": false,
-      "image": "ghcr.io/yeomyeonggeori/oort@sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f",
+      "image": "ghcr.io/yeomyeonggeori/oort@sha256:5481c14eccab99d3cbce51fd8b8710fe6fd671e673652cb3e30422b0e66f7a85",
       "startCommand": "webhook-sender"
     },
     "agent-worker": {
       "public": false,
-      "image": "ghcr.io/yeomyeonggeori/oort@sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f",
+      "image": "ghcr.io/yeomyeonggeori/oort@sha256:5481c14eccab99d3cbce51fd8b8710fe6fd671e673652cb3e30422b0e66f7a85",
       "startCommand": "agent-worker",
       "variablesDerived": {
         "WORKER_DATABASE_URL": "postgres://momo_worker:${WORKER_POSTGRES_PASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE} — compose interpolates this; --railway does not emit it (key-set equality with the generator heredoc). Set on this service from the generator passwords + Postgres plugin host."
