@@ -28,7 +28,6 @@ export const ContextMenuContent = React.forwardRef<
     <ContextMenuPrimitive.Content
       ref={ref}
       collisionPadding={8}
-      data-overlay-layer="surface"
       className={cn(
         "layer-overlay-surface min-w-pane-sm rounded-md border border-line bg-surface-raised p-1 text-ink shadow-lg",
         POPOVER_MOTION,
@@ -38,6 +37,7 @@ export const ContextMenuContent = React.forwardRef<
       {...({ onOpenAutoFocus } as React.ComponentPropsWithoutRef<
         typeof ContextMenuPrimitive.Content
       >)}
+      data-overlay-layer="surface"
     />
   </ContextMenuPrimitive.Portal>
 ));

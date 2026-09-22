@@ -244,7 +244,7 @@ export function UnfurlCards({
           // all, so this placeholder can only represent a real pending record.
           <div
             key={state.unfurl.id}
-            className="relative h-rail-tile rounded-md border border-line bg-muted-soft"
+            className="relative isolate h-rail-tile rounded-md border border-line bg-muted-soft"
             role="status"
             aria-label="링크 미리보기를 불러오는 중"
             data-testid="unfurl-pending"
@@ -252,9 +252,17 @@ export function UnfurlCards({
             {removeControl(index)}
           </div>
         ) : (
+          // `isolate` (#2485 R1 M-3): the X below floats over THIS card, and
+          // nothing else. Without a stacking context here it floated at the
+          // document root next to the hover toolbar, which sits on the same
+          // layer — so which one won came down to DOM order, and DOM order is
+          // the reverse of the order the two used to have (toolbar z-20 over
+          // unfurl X z-10). Where `hover-toolbar-straddle-below` drops a
+          // toolbar into this row's band, the toolbar is the transient thing
+          // under the cursor and it wins; the X is furniture on a card.
           <div
             key={state.unfurl.id}
-            className="relative flex overflow-hidden rounded-md border border-line bg-surface-raised"
+            className="relative isolate flex overflow-hidden rounded-md border border-line bg-surface-raised"
           >
             <UnfurlCard unfurl={state.unfurl} preference={preference} />
             {removeControl(index)}

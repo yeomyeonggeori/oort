@@ -441,8 +441,8 @@ export function AdeDrawer() {
       tabIndex={-1}
       aria-label="작업 목록"
       data-testid="ade-drawer"
-      data-overlay-layer="surface"
       className="ade-drawer flex flex-col border-e border-line bg-surface"
+      data-overlay-layer="surface"
     >
       <header className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-4 py-2">
         <h2 className="min-w-0 flex-1 truncate text-body font-semibold">
@@ -499,8 +499,8 @@ export function AdeDrawer() {
       onClick={close}
       aria-label="작업 목록 닫기"
       data-testid="ade-scrim"
-      data-overlay-layer="scrim"
       className="ade-scrim scrim-press"
+      data-overlay-layer="scrim"
     />
     </>
   );

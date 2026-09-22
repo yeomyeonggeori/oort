@@ -398,7 +398,6 @@ function PaletteLayer({
         <DialogPrimitive.Content
           aria-label="검색과 이동"
           data-testid="quick-switcher"
-          data-overlay-layer="surface"
           className={cn(
             "layer-overlay-surface fixed left-1/2 top-8 w-full max-w-pane-md -translate-x-1/2 rounded-lg border border-line bg-surface-raised text-ink shadow-lg",
             MODAL_CONTENT_MOTION
@@ -409,6 +408,7 @@ function PaletteLayer({
             // here: a second path made the red proof green.
             event.preventDefault();
           }}
+          data-overlay-layer="surface"
         >
           {children}
         </DialogPrimitive.Content>

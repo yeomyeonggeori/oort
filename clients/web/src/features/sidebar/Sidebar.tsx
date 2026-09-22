@@ -535,8 +535,8 @@ export function Sidebar({
         id="sidebar-drawer"
         className={cn("sidebar-drawer flex h-full", asDrawer && "shadow-lg")}
         data-open={asDrawer && drawerOpen ? "" : undefined}
-        data-overlay-layer={asDrawer ? "surface" : undefined}
         data-testid="sidebar"
+        data-overlay-layer={asDrawer ? "surface" : undefined}
       >
         <WorkspaceRail
           workspace={{
@@ -1202,10 +1202,10 @@ export function SidebarDrawerScrim({ onClose }: { onClose: () => void }) {
       type="button"
       className={cn("sidebar-scrim scrim-blur scrim-press", DRAWER_SCRIM_MOTION)}
       data-state={isPresent ? "open" : "closed"}
-      data-overlay-layer="scrim"
       onClick={onClose}
       aria-label="채널 목록 닫기"
       data-testid="sidebar-scrim"
+      data-overlay-layer="scrim"
     />
   );
 }

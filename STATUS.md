@@ -1,10 +1,10 @@
 # oort 진행 현황
 
-## 오버레이 층 이름표 (#2044 #2075 #1919, 2026-09-11)
+## 오버레이 층 이름표 (#2044 #2075 #1919, R2 2026-09-22)
 
-- Track UXUI. `fix/2044-overlay-layers` onto `origin/track/uxui`. `--layer-content-float` < `--layer-overlay-scrim` < `--layer-overlay-surface` < `--layer-confirm-ephemeral` 를 `tokens.css` 한 곳에 두고 정본 §2.6 D6 / §3.4에 적음. UnreadPill·언펄 X·호버 툴바는 content-float, 다이얼로그/시트/팝오버/⌘K/드로어 스크림·표면은 overlay 층.
-- 검증: Playwright `clients/web/scripts/capture-overlay-layers.mjs` — 다이얼로그·시트·팔레트·드로어에서 `elementFromPoint` 가 오버레이를 돌려줌. UnreadPill 을 `z-10` 으로 되돌리면 필 좌표가 `jump-unread`. 스크림 `z-index: auto` 면 하단 필이 스크림을 뚫음.
-- runtime-unverified: 실서버 타임라인에서 사람 클릭 왕복(캡처 목).
+- Track UXUI. `fix/2044-overlay-layers` onto `origin/track/uxui`. `--layer-content-float`(100) < `--layer-overlay-scrim`(200) < `--layer-overlay-surface`(300) 세 이름을 `tokens.css` 한 곳에 두고 정본 §2.6 D6 / §3.4에 적음. 값은 남은 Tailwind `z-*` 잔량(상한 `z-50`) 위 100 단위 — R1 B-1·B-2가 잡은 1/2/3 밴드는 잔량 아래였다. 잔량 셋(`ArtifactCard`·`WorkspaceRail`·`WorkSessionDetail`)은 소유 상자의 `isolate` 로 루트에서 경쟁하지 않는다. body로 포털되는 컴포저 서식 트레이는 떠 있는 **표면**이라 `--layer-overlay-surface`. 소비자 없는 `--layer-confirm-ephemeral` 은 삭제(ADR-0182 세 형은 전부 표면 안/in-flow).
+- 검증: `clients/web/scripts/capture-overlay-layers.mjs` — 다섯 오버레이 종류 히트 테스트 + **루트 스윕**(문서 스태킹 루트에서 이름 밖 수치 z = 0) + R1이 붉게 본 장면 3(880 스레드 트레이·1280 ⌘K 위 아티팩트·390 서랍 위 아티팩트)과 신규 2(두 서랍 M-1·언펄 X↔호버 툴바 M-3)를 두 스킴에서 캡처. 사보타주 4개가 각각 빨강: `artifact-root-z`(isolate 제거 → 루트 스윕 2건)·`tray-content-float`(트레이 hitIsTray=false)·`unread-pill`(z-10 → 루트 스윕 1건)·`scrim`. `overlayLayers.test.ts` 10 시험(순서·바닥·단일 철자·CSS 수치 0·여섯 파일 `data-overlay-layer` 위치·잔량↔isolate 짝). lint 0 오류 / typecheck / `npm test` 269 파일 3066 / `design_preflight_web.sh` PASS.
+- runtime-unverified: 실서버 타임라인에서 사람 클릭 왕복(캡처 목). Tauri WKWebView의 스태킹 해석은 헤드리스 Chromium에서만 측정. 두 서랍이 함께 서는 장면은 앱이 `inert` 로 막아 존재하지 않음 — 하네스가 그 사실을 잰다.
 
 ## 설정 › 기기 목록·해제 UI (#2476 R2, 2026-09-12)
 

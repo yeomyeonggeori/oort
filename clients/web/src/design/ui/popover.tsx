@@ -38,7 +38,6 @@ export const PopoverContent = React.forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       collisionPadding={8}
-      data-overlay-layer="surface"
       className={cn(
         "layer-overlay-surface w-pane-picker rounded-lg border border-line bg-surface-raised p-3 text-ink shadow-lg",
         POPOVER_MOTION,
@@ -52,6 +51,7 @@ export const PopoverContent = React.forwardRef<
         }
       }}
       {...props}
+      data-overlay-layer="surface"
     />
   </PopoverPrimitive.Portal>
 ));
