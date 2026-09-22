@@ -20,10 +20,11 @@
 //! ## What is deliberately not here
 //!
 //! * **No executor.** ADR-0186 D2 runs the action inside the *decision*
-//!   transaction, with the **approver's** authority, and that half is AX-3b
-//!   (#2509). An agent is never admin at any point (D2), so a registry that
-//!   carried an executor callable from the agent's own transaction would be the
-//!   exact shape this ADR rejected.
+//!   transaction, with the **approver's** authority, and that half lives in
+//!   `bins/momo-server/src/routes/approvals.rs`
+//!   (`execute_workspace_action`, AX-3b #2509). An agent is never admin at any
+//!   point (D2), so a registry that carried an executor callable from the
+//!   agent's own transaction would be the exact shape this ADR rejected.
 //! * **No argument normalisation.** The invite spec already has validators
 //!   (`momo_settings::{normalized_invite_role, validated_max_uses,
 //!   validated_expires_at_ms}`) and this crate does not depend on
@@ -33,8 +34,10 @@
 //!   invite", and the two would drift.
 //!
 //! What this module *does* own is the declaration (id, title, summary, risk,
-//! required role, argument schema) and the **card contract** that goes with it
-//! (부록 A's `action` block), because those two must not be able to disagree.
+//! required role, argument schema) and the **card contract** on both sides of a
+//! decision — 부록 A's `action` block on the request card, 부록 B's
+//! `momo.action_result` on the outcome card — because those must not be able to
+//! disagree about what was asked for and what was done.
 
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -422,6 +425,180 @@ pub fn workspace_action_request_props(
     })
 }
 
+// ---------------------------------------------------------------------------
+// the outcome contract (부록 B, 부록 C) — what a decision leaves behind
+// ---------------------------------------------------------------------------
+
+/// The props key of the persistent result card (ADR-0186 부록 B).
+pub const ACTION_RESULT_PROPS_KEY: &str = "momo.action_result";
+
+/// `momo.action_result.v1`.
+pub const ACTION_RESULT_VERSION: i64 = 1;
+
+/// 부록 B `status` — the one this executor writes.
+///
+/// The vocabulary is `executed | rejected | expired | role_required`; the other
+/// three belong to arms that already have their own outcome line (the
+/// rejection's and the sweep's `tool_result`, and the card patch a refused
+/// decision leaves), so widening those here would put **two** lines under one
+/// card.
+pub const ACTION_RESULT_EXECUTED: &str = "executed";
+
+/// The card patch a decision refused for want of authority leaves behind
+/// (ADR-0186 D2: 「승인은 소모되지 않음」).
+///
+/// It is written onto the *request* card's props rather than posted as a
+/// message, because nothing happened: the approval is still `pending`, the run
+/// is still parked, and the same person — or an admin beside them — can still
+/// decide it. A message would say the proposal ended.
+pub const LAST_ATTEMPT_PROPS_KEY: &str = "last_attempt";
+
+/// The one value [`LAST_ATTEMPT_PROPS_KEY`] takes today, and the `status` a
+/// refused decision answers with.
+///
+/// The same string on the wire and in the props on purpose: the client picks
+/// 「관리자가 승인해야 합니다」 from one word, wherever it read it.
+pub const ROLE_REQUIRED: &str = "role_required";
+
+/// `audit_log.action` for the approval half of an executed workspace action.
+pub const AUDIT_ACTION_APPROVED: &str = "action.approved";
+
+/// `detail.schema` of that row (ADR-0186 D2).
+pub const ACTION_APPROVED_AUDIT_SCHEMA: &str = "momo.action.approved.v1";
+
+/// `result.secretOnce.kind` for an invite link (부록 C).
+pub const SECRET_ONCE_INVITE_LINK: &str = "invite_link";
+
+/// 부록 B `next` — where the durable half of this action can be found later.
+///
+/// **정오표 (AX-4 #2510, this PR):** the appendix's sample says
+/// `/settings?section=invites`, and there is no such section. The web client's
+/// canonical nav (`clients/web/src/features/settings/settingsNav.ts:53`) has
+/// `members`, labelled 「멤버와 초대」. A card whose only next step is a dead link
+/// is worse than a card with no next step, so both the href and the label follow
+/// the nav rather than the sample.
+pub const ACTION_RESULT_NEXT_HREF: &str = "/settings?section=members";
+
+/// The label beside [`ACTION_RESULT_NEXT_HREF`], spelled as the nav spells it.
+pub const ACTION_RESULT_NEXT_LABEL: &str = "설정 › 멤버와 초대에서 보기";
+
+/// The `client_msg_id` of the `action_result` line an executed action posts.
+///
+/// **Not the approval id, and not the card's id either.** Three messages can now
+/// share `(channel_id, author_member_id)` for one approval — the proposal card
+/// ([`card_client_msg_id`]), the rejection/expiry `tool_result`
+/// (`approval.id`, `routes::approvals::reject_run` and
+/// `momo_notifier::approval_sweep`), and this one. The spine's idempotency guard
+/// is `(channel, author, client_msg_id)` with `ON CONFLICT … DO NOTHING`
+/// (`message_client_idem_uniq`, `001_init.sql:185`), so any two of the three
+/// sharing a key would silently drop one row.
+///
+/// Reusing `approval.id` here would be the quietest of the three failures: an
+/// approval is either approved or rejected, never both, so the collision would
+/// never fire in a test that decides once — and would fire the day an expiry
+/// sweep and a late approval raced, dropping the line that says a link was
+/// minted while the invite itself stayed very real.
+///
+/// Deterministic for the same reason the card's is: a retried decision
+/// transaction must post one line, not two.
+pub fn result_client_msg_id(approval_id: Uuid) -> Uuid {
+    Uuid::new_v5(
+        &CARD_CLIENT_MSG_NAMESPACE,
+        format!("result:{approval_id}").as_bytes(),
+    )
+}
+
+/// What an executed action leaves on the timeline (부록 B).
+///
+/// A struct rather than eight positional arguments because six of them are
+/// strings: `action_result_props(a, b, c, d, …)` is a call nobody can read, and
+/// two of the strings are ids whose order a reader could not recover.
+#[derive(Debug, Clone)]
+pub struct ActionResult<'a> {
+    pub action_id: &'a str,
+    /// One of the 부록 B statuses — [`ACTION_RESULT_EXECUTED`] here.
+    pub status: &'a str,
+    pub approval_id: Uuid,
+    pub decided_by: Uuid,
+    /// The durable thing this produced: `("invite", <invite_id>)`.
+    pub ref_type: &'a str,
+    pub ref_id: Uuid,
+    /// The same `label`/`value` shape the request card uses.
+    pub rows: Vec<Value>,
+    /// 부록 B / D4: **true** says a one-time value existed and was shown to the
+    /// decider once. It is a flag, never the value — the card is durable and the
+    /// value is not.
+    pub secret_shown_once: bool,
+}
+
+/// `message.props` for the `tool_result` row of an executed workspace action.
+///
+/// The key set is **closed and small**, and that is the security property rather
+/// than a style: a props object is durable, is broadcast to every member of the
+/// channel, survives a reload, and is read by clients this server has never
+/// seen. ADR-0186 D4 says the one-time value lives in the decision *response*
+/// body alone, so this object has no field a code or a URL could be put in —
+/// `secret_shown_once` is a boolean and `next.href` is a fixed in-app path
+/// ([`ACTION_RESULT_NEXT_HREF`]).
+pub fn action_result_props(result: &ActionResult<'_>) -> Value {
+    json!({
+        ACTION_RESULT_PROPS_KEY: {
+            "v": ACTION_RESULT_VERSION,
+            "action_id": result.action_id,
+            "status": result.status,
+            "approval_id": result.approval_id.to_string(),
+            "decided_by": result.decided_by.to_string(),
+            "ref": {"type": result.ref_type, "id": result.ref_id.to_string()},
+            "rows": result.rows,
+            "secret_shown_once": result.secret_shown_once,
+            "next": {"label": ACTION_RESULT_NEXT_LABEL, "href": ACTION_RESULT_NEXT_HREF},
+        }
+    })
+}
+
+/// The `ref` object of 부록 B and 부록 C — one shape, two carriers.
+///
+/// The result card's props and the decision response both name what was made,
+/// and they must name it identically: a client that read the id from the
+/// response and then matched it against the card would otherwise have to know
+/// two spellings of the same fact.
+pub fn action_ref(ref_type: &str, ref_id: Uuid) -> Value {
+    json!({"type": ref_type, "id": ref_id.to_string()})
+}
+
+/// `ref.type` for a minted invite.
+pub const REF_TYPE_INVITE: &str = "invite";
+
+/// The `invite.create` result rows (부록 B): role and the **date** it dies.
+///
+/// The request card says 「7일」 because a relative span is what a person is
+/// consenting to; the result card says a date because the span has now started
+/// and 「7일」 would mean something different every day the card is re-read.
+pub fn invite_result_rows(role: &str, expires_on: &str) -> Vec<Value> {
+    vec![action_row("역할", role), action_row("만료", expires_on)]
+}
+
+/// The one-line body of the result message.
+///
+/// Says what was made and its three bounds, and **not** the link: this body is
+/// as durable as the props beside it (ADR-0186 D4).
+pub fn invite_result_body(role: &str, max_uses: i32, expires_in_days: i64) -> String {
+    format!("초대 링크를 만들었습니다({role} · {max_uses}회 · {expires_in_days}일)")
+}
+
+/// The props patch a refused decision leaves on the request card.
+///
+/// There is deliberately **no** "clear" form of this patch. A shallow jsonb
+/// merge cannot delete a key — `{"last_attempt": null}` leaves it present
+/// holding a null, and a client asking `"last_attempt" in props` would still
+/// see it. So the decision that settles the card **prunes** the key instead
+/// (`momo_messaging::patch_and_prune_message_props_in_tx`), and both the
+/// approve and the reject arm do it: a decided card must not still say the last
+/// attempt needed an admin.
+pub fn last_attempt_patch(last_attempt: &str) -> Value {
+    json!({ LAST_ATTEMPT_PROPS_KEY: last_attempt })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -624,5 +801,195 @@ mod tests {
             workspace_action_request_body(action),
             "승인 요청: 팀원 초대 링크 만들기"
         );
+    }
+
+    // -- 부록 B / D4 -------------------------------------------------------
+
+    fn executed_result() -> Value {
+        action_result_props(&ActionResult {
+            action_id: ACTION_INVITE_CREATE,
+            status: ACTION_RESULT_EXECUTED,
+            approval_id: Uuid::from_u128(11),
+            decided_by: Uuid::from_u128(12),
+            ref_type: REF_TYPE_INVITE,
+            ref_id: Uuid::from_u128(13),
+            rows: invite_result_rows("member", "2026-09-29"),
+            secret_shown_once: true,
+        })
+    }
+
+    /// 부록 B, key by key — and **closed**. The point of spelling the whole key
+    /// set is the negative half: adding `code`, `url`, `link` or `invite_code`
+    /// to the builder fails here, which is the mutation ADR-0186 D4 is about.
+    #[test]
+    fn the_result_props_are_appendix_b_and_the_key_set_is_closed() {
+        let props = executed_result();
+        let card = &props[ACTION_RESULT_PROPS_KEY];
+        let mut keys: Vec<&str> = card
+            .as_object()
+            .expect("the result card is an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            vec![
+                "action_id",
+                "approval_id",
+                "decided_by",
+                "next",
+                "ref",
+                "rows",
+                "secret_shown_once",
+                "status",
+                "v",
+            ],
+            "부록 B is a closed object; a new key is a new durable field"
+        );
+        assert_eq!(card["v"], json!(1));
+        assert_eq!(card["action_id"], json!("invite.create"));
+        assert_eq!(card["status"], json!("executed"));
+        assert_eq!(card["approval_id"], json!(Uuid::from_u128(11).to_string()));
+        assert_eq!(card["decided_by"], json!(Uuid::from_u128(12).to_string()));
+        assert_eq!(
+            card["ref"],
+            json!({"type": "invite", "id": Uuid::from_u128(13).to_string()})
+        );
+        assert_eq!(
+            card["rows"],
+            json!([
+                {"label": "역할", "value": "member"},
+                {"label": "만료", "value": "2026-09-29"}
+            ])
+        );
+        // A flag, not a value.
+        assert_eq!(card["secret_shown_once"], json!(true));
+        assert!(card["secret_shown_once"].is_boolean());
+        // The `ref` the response carries and the one the card carries are one
+        // builder, so a client can match them without knowing two spellings.
+        assert_eq!(
+            card["ref"],
+            action_ref(REF_TYPE_INVITE, Uuid::from_u128(13))
+        );
+    }
+
+    /// The one-time value has nowhere to live in this object — measured as
+    /// absence of the fields **and** absence of the shapes.
+    #[test]
+    fn no_field_of_the_result_card_can_carry_a_code_or_a_url() {
+        let props = executed_result();
+        let card = &props[ACTION_RESULT_PROPS_KEY];
+        for forbidden in [
+            "code",
+            "invite_code",
+            "url",
+            "link",
+            "join_url",
+            "secret",
+            "secret_once",
+            "value",
+            "href",
+        ] {
+            assert!(
+                card.get(forbidden).is_none(),
+                "{forbidden} must not be a result-card field"
+            );
+        }
+        // …and the only `href` anywhere under it is the fixed in-app path.
+        assert_eq!(card["next"]["href"], json!("/settings?section=members"));
+        assert_eq!(card["next"]["label"], json!("설정 › 멤버와 초대에서 보기"));
+        let rendered = props.to_string();
+        assert!(!rendered.contains("http"), "{rendered}");
+        assert!(!rendered.contains("code="), "{rendered}");
+        assert!(
+            !rendered.contains("?code"),
+            "the href must not be able to carry a query the way a join link does: {rendered}"
+        );
+    }
+
+    /// The three messages one approval can author must hold three distinct
+    /// idempotency keys, or the spine drops one of them.
+    #[test]
+    fn the_three_message_keys_of_one_approval_are_distinct_and_stable() {
+        let approval = Uuid::from_u128(0x5eed);
+        let card = card_client_msg_id(approval);
+        let result = result_client_msg_id(approval);
+        assert_ne!(card, result);
+        assert_ne!(card, approval, "the card is not keyed on the approval");
+        assert_ne!(
+            result, approval,
+            "neither is the result — the rejection/expiry line already holds \
+             that key (routes::approvals::reject_run, approval_sweep)"
+        );
+        // Deterministic: a retried transaction posts one line, not two.
+        assert_eq!(result, result_client_msg_id(approval));
+        // …and a different approval gets a different key.
+        assert_ne!(result, result_client_msg_id(Uuid::from_u128(0x5eee)));
+    }
+
+    #[test]
+    fn the_result_body_names_the_bounds_and_never_the_link() {
+        let body = invite_result_body("member", 1, 7);
+        assert_eq!(body, "초대 링크를 만들었습니다(member · 1회 · 7일)");
+        assert!(!body.contains("http"));
+        assert!(!body.contains("code"));
+        assert_eq!(
+            invite_result_body("admin", 5, 30),
+            "초대 링크를 만들었습니다(admin · 5회 · 30일)"
+        );
+    }
+
+    /// The refusal patch sets one word and nothing else; clearing it is a
+    /// **removal**, which this builder deliberately cannot express.
+    #[test]
+    fn the_last_attempt_patch_sets_one_key_and_cannot_null_it() {
+        assert_eq!(
+            last_attempt_patch(ROLE_REQUIRED),
+            json!({"last_attempt": "role_required"})
+        );
+        assert_eq!(
+            last_attempt_patch(ROLE_REQUIRED)
+                .as_object()
+                .expect("object")
+                .len(),
+            1
+        );
+    }
+
+    /// **The gate reads what the card published** (ADR-0186 부록 A).
+    ///
+    /// The approval card advertises `action.required_role` and the decision
+    /// route judges the approver against the registry's `RequiredRole`. If
+    /// those two ever came from different places, a card could say 「관리자가
+    /// 승인해야 합니다」 while the server let somebody else through — or the
+    /// reverse. They are one field, and this is the test that says so for every
+    /// action the registry carries.
+    #[test]
+    fn the_card_publishes_exactly_the_role_the_gate_will_require() {
+        let expires_at =
+            chrono::DateTime::from_timestamp_millis(1_700_000_000_000).expect("an instant");
+        for action in ACTIONS {
+            let props = workspace_action_request_props(
+                Uuid::from_u128(1),
+                Uuid::from_u128(2),
+                Uuid::from_u128(3),
+                action,
+                action_block(action, vec![], None),
+                expires_at,
+            );
+            assert_eq!(
+                props["action"]["required_role"],
+                json!(action.required_role.as_wire()),
+                "{} publishes a role the gate does not read",
+                action.id
+            );
+            // v1's whole vocabulary is one word. A second variant must reach
+            // the decision route's `match` (routes::approvals) before it
+            // reaches this registry — the match is exhaustive so that adding
+            // one here fails to compile there.
+            assert_eq!(action.required_role, RequiredRole::Admin, "{}", action.id);
+            assert_eq!(action.required_role.as_wire(), "admin");
+        }
     }
 }

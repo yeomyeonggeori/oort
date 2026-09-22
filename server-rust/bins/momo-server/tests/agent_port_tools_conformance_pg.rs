@@ -15,7 +15,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx;
@@ -2465,16 +2465,13 @@ async fn a_proposal_parks_the_run_and_opens_no_other_path() {
     .unwrap();
     assert_eq!(cards, 1, "one proposal, one card");
 
-    // ---- APPROVE is closed until AX-3b, and closes safely ------------------
+    // ---- the proposal is still pending, and nothing has resumed ------------
     //
-    // The card is live in a real channel the moment this lands, so the generic
-    // resume path must not take it: that path would requeue the run and enqueue
-    // a `resume_approval` job whose payload has no tool call.
-    let approve_status = decide(&client, &base, &fixture, approval_id, true).await;
-    assert_eq!(
-        approve_status, 409,
-        "approving a workspace action is refused while the executor is unlanded"
-    );
+    // The approve arm is AX-3b's (#2509) and is measured end to end by
+    // `an_approved_workspace_action_mints_the_invite_and_shows_the_link_once`,
+    // which needs its own parked run because approving closes this one. What
+    // this test keeps measuring is the proposal axis: the card is live in a real
+    // channel and *nothing* has taken the generic resume path.
     let still_pending: String =
         sqlx::query_scalar("SELECT status::text FROM approval WHERE workspace_id=$1 AND id=$2")
             .bind(fixture.workspace)
@@ -2484,15 +2481,15 @@ async fn a_proposal_parks_the_run_and_opens_no_other_path() {
             .unwrap();
     assert_eq!(
         still_pending, "pending",
-        "the refusal must not consume the approval"
+        "a proposal waits for a person; nothing else settles it"
     );
     assert_eq!(
         agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await,
         agent_jobs_before,
-        "and it must not enqueue a resume job"
+        "and no resume job exists for it"
     );
 
-    // ---- REJECT is open, and is the only way to close a proposal -----------
+    // ---- REJECT is open, and is the only way a person says no --------------
     //
     // **ADR-0186 D2: 「거부·만료: 기존 arm 그대로」.** The temporary approve-side
     // refusal must not take the reject side with it. If it did, a person looking
@@ -2881,4 +2878,1038 @@ async fn agent_job_count(pool: &PgPool, workspace: Uuid, agent: Uuid) -> i64 {
     .fetch_one(pool)
     .await
     .expect("count agent jobs")
+}
+
+// ---------------------------------------------------------------------------
+// (9) ADR-0186 D2/D4 — approving a workspace action executes it, once
+// ---------------------------------------------------------------------------
+
+/// A global `tracing` capture, installed once per test binary.
+///
+/// Global rather than thread-local because the thing under measurement runs on
+/// the server's own tokio worker threads: `tracing::subscriber::with_default`
+/// binds a *thread* and would have captured nothing an axum handler emitted —
+/// a capture that can only pass.
+///
+/// The level is TRACE and the layer is the `fmt` one, so everything the process
+/// emits lands here in its rendered form, including `sqlx`'s per-statement
+/// events. That is deliberate: the statement log is the likeliest place a
+/// credential leaks into logs by accident, and a capture that filtered it out
+/// would prove nothing about the risk it exists for.
+fn log_capture() -> Arc<Mutex<Vec<u8>>> {
+    static CAPTURE: OnceLock<Arc<Mutex<Vec<u8>>>> = OnceLock::new();
+    CAPTURE
+        .get_or_init(|| {
+            let buffer = Arc::new(Mutex::new(Vec::new()));
+            // `try_init` rather than `init`: another test in this binary may
+            // have installed it first, and losing that race is fine — the
+            // buffer it installed is this same `OnceLock` value.
+            let _ = tracing_subscriber::fmt()
+                .with_writer(CaptureWriter(buffer.clone()))
+                .with_max_level(tracing::Level::TRACE)
+                .with_ansi(false)
+                .try_init();
+            buffer
+        })
+        .clone()
+}
+
+#[derive(Clone)]
+struct CaptureWriter(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for CaptureWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if let Ok(mut sink) = self.0.lock() {
+            // A TRACE-level capture of a whole conformance binary is unbounded
+            // by nature; this ceiling keeps a long run from eating the box
+            // without changing what the assertions below measure (they read a
+            // slice recorded around one HTTP call).
+            if sink.len() < 64 * 1024 * 1024 {
+                sink.extend_from_slice(buf);
+            }
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CaptureWriter {
+    type Writer = CaptureWriter;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+fn captured_since(buffer: &Arc<Mutex<Vec<u8>>>, offset: usize) -> String {
+    let sink = buffer.lock().expect("the capture buffer is healthy");
+    String::from_utf8_lossy(&sink[offset.min(sink.len())..]).into_owned()
+}
+
+fn capture_offset(buffer: &Arc<Mutex<Vec<u8>>>) -> usize {
+    buffer.lock().expect("the capture buffer is healthy").len()
+}
+
+/// A decision, with the two things the receipt-only helper throws away: the
+/// response headers (ADR-0186 D4's `no-store`) and the body.
+async fn decide_as(
+    client: &reqwest::Client,
+    base: &str,
+    workspace: Uuid,
+    bearer: &str,
+    approval_id: Uuid,
+    approve: bool,
+    client_decision_id: Uuid,
+) -> (u16, reqwest::header::HeaderMap, Value) {
+    let response = client
+        .post(format!(
+            "{base}/v1/workspaces/{workspace}/approvals/{approval_id}/decision"
+        ))
+        .bearer_auth(bearer)
+        .json(&json!({
+            "approvalId": approval_id,
+            "approve": approve,
+            "clientDecisionId": client_decision_id
+        }))
+        .send()
+        .await
+        .expect("decision responds");
+    let status = response.status().as_u16();
+    let headers = response.headers().clone();
+    let body: Value = response.json().await.expect("a decision body");
+    (status, headers, body)
+}
+
+/// A second human in the same workspace and the same channel who is **not** an
+/// admin — the decider ADR-0186 D2's role gate is about.
+async fn seed_plain_member(pool: &PgPool, fixture: &Fixture) -> String {
+    let member = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member(id, workspace_id, kind, display_name, handle) \
+         VALUES($1,$2,'human','Plain Member',$3)",
+    )
+    .bind(member)
+    .bind(fixture.workspace)
+    .bind(format!("plain-{}", member.simple()))
+    .execute(pool)
+    .await
+    .expect("seed plain member");
+    sqlx::query(
+        "INSERT INTO human(member_id, workspace_id, email, email_verified) VALUES($1,$2,$3,true)",
+    )
+    .bind(member)
+    .bind(fixture.workspace)
+    .bind(format!("{member}@tools.test"))
+    .execute(pool)
+    .await
+    .expect("seed plain identity");
+    sqlx::query(
+        "INSERT INTO workspace_membership(workspace_id, member_id, role) VALUES($1,$2,'member')",
+    )
+    .bind(fixture.workspace)
+    .bind(member)
+    .execute(pool)
+    .await
+    .expect("seed plain membership");
+    sqlx::query("INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)")
+        .bind(fixture.workspace)
+        .bind(fixture.channel)
+        .bind(member)
+        .execute(pool)
+        .await
+        .expect("seed plain channel membership");
+
+    let jwt = momo_auth::sign_access(member, fixture.workspace, &[], TEST_JWT_SECRET)
+        .expect("sign a plain member App JWT")
+        .token;
+    sqlx::query(
+        "INSERT INTO token(workspace_id, kind, actor_member_id, token_hash, scopes, label) \
+         VALUES($1,'session',$2,digest($3::text,'sha256'),ARRAY[]::text[],'tools-conformance')",
+    )
+    .bind(fixture.workspace)
+    .bind(member)
+    .bind(&jwt)
+    .execute(pool)
+    .await
+    .expect("record the plain member session token");
+    jwt
+}
+
+/// Mention, claim, propose — and hand back both ids the decision test needs.
+async fn propose_invite(
+    client: &reqwest::Client,
+    base: &str,
+    su: &PgPool,
+    fixture: &Fixture,
+    args: Value,
+) -> (Uuid, Uuid) {
+    let handle_name = hosted_handle(su, fixture.hosted_agent).await;
+    let trigger: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{handle_name} 초대 링크 하나 만들어줘")
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+
+    let (status, claimed) = call(
+        client,
+        base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("a lease handle")
+        .to_string();
+
+    let (status, proposed) = call(
+        client,
+        base,
+        &fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({
+            "handle": handle,
+            "actionId": "invite.create",
+            "args": args,
+            "rationale": "새 팀원 온보딩 요청"
+        }),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let result = structured(&proposed);
+    (
+        Uuid::parse_str(result["approvalId"].as_str().expect("approvalId")).expect("uuid"),
+        Uuid::parse_str(result["cardMessageId"].as_str().expect("cardMessageId")).expect("uuid"),
+    )
+}
+
+/// Every durable store this decision writes, as text, in one place.
+///
+/// The grep for the minted code runs over **all six** rather than the three a
+/// reader first thinks of: ADR-0186 D4 names `approval.payload`, message props,
+/// the audit row, the log **and the outbox**, and `agent_run.output` is the one
+/// the executor itself writes.
+async fn durable_text(pool: &PgPool, workspace: Uuid) -> String {
+    let mut rendered = String::new();
+    for statement in [
+        "SELECT coalesce(string_agg(payload::text, ' '), '') FROM approval WHERE workspace_id=$1",
+        "SELECT coalesce(string_agg(coalesce(props::text,'') || ' ' || coalesce(body,''), ' '), '') \
+           FROM message WHERE workspace_id=$1",
+        "SELECT coalesce(string_agg(detail::text, ' '), '') FROM audit_log WHERE workspace_id=$1",
+        "SELECT coalesce(string_agg(receipt::text, ' '), '') FROM approval_decision \
+           WHERE workspace_id=$1",
+        "SELECT coalesce(string_agg(coalesce(output::text,'') || ' ' || coalesce(error::text,''), ' '), '') \
+           FROM agent_run WHERE workspace_id=$1",
+        "SELECT coalesce(string_agg(payload::text, ' '), '') FROM outbox WHERE workspace_id=$1",
+    ] {
+        let chunk: String = sqlx::query_scalar(statement)
+            .bind(workspace)
+            .fetch_one(pool)
+            .await
+            .expect("read a durable store");
+        rendered.push_str(&chunk);
+        rendered.push(' ');
+    }
+    rendered
+}
+
+/// **The AX-3b red proof, end to end** (issue #2509).
+///
+/// Six things are measured against a real database and the real router, in the
+/// order a person meets them:
+///
+/// 1. a non-admin decider is refused `role_required` and the approval survives;
+/// 2. an admin's approval mints the invite in the decision transaction;
+/// 3. the code appears in the response body and in **no** durable store and in
+///    no log line;
+/// 4. the persistent card carries 부록 B and nothing that could hold a code;
+/// 5. the run ends `succeeded` with zero resume jobs;
+/// 6. a replayed `client_decision_id` answers the same receipt with the link
+///    gone.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_approved_workspace_action_mints_the_invite_and_shows_the_link_once() {
+    ensure_schema_and_roles();
+    let capture = log_capture();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+
+    let (approval_id, card_message_id) = propose_invite(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        json!({"role": "member", "maxUses": 1, "expiresInDays": 7}),
+    )
+    .await;
+    let jobs_before = agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await;
+    let invites_before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM invite_code WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+
+    // ---- red proof 2: the role gate ----------------------------------------
+    //
+    // A member of the channel, a human, active — and not an admin. Everything
+    // else about this request is identical to the one that succeeds below, so
+    // the role is the only variable.
+    let (status, _headers, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &plain_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(
+        refused["status"], "role_required",
+        "the refusal is receipt-shaped, as every expected failure on this route \
+         is (openapi decideApproval): {refused}"
+    );
+    assert!(
+        refused.get("result").is_none(),
+        "a refusal executed nothing: {refused}"
+    );
+    let (still_pending, decided_by): (String, Option<Uuid>) = sqlx::query_as(
+        "SELECT status::text, decided_by FROM approval WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(approval_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(still_pending, "pending", "the approval is NOT consumed");
+    assert_eq!(decided_by, None);
+    let ledger_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM approval_decision WHERE workspace_id=$1 AND approval_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(approval_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(ledger_rows, 0, "a refused decision writes no ledger row");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM invite_code WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap(),
+        invites_before,
+        "and mints nothing"
+    );
+    // …but the card says somebody tried, which is what AX-4 draws.
+    let card_props: Value =
+        sqlx::query_scalar("SELECT props FROM message WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(card_message_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(card_props["last_attempt"], json!("role_required"));
+    assert_eq!(
+        card_props["status"],
+        json!("pending"),
+        "the card is still awaiting a decision"
+    );
+
+    // ---- the admin decides, and the action runs ----------------------------
+    let decision_id = Uuid::new_v4();
+    let log_offset = capture_offset(&capture);
+    tracing::info!(canary = "ax3b-log-capture-canary", "log capture is live");
+    let (status, headers, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval_id,
+        true,
+        decision_id,
+    )
+    .await;
+    let captured = captured_since(&capture, log_offset);
+    assert_eq!(status, 200, "{approved}");
+
+    // ---- red proof 7: the headers ------------------------------------------
+    assert_eq!(
+        headers
+            .get("cache-control")
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store"),
+        "a response carrying a one-time value must not be cacheable (ADR-0186 D4)"
+    );
+    assert_eq!(
+        headers.get("pragma").and_then(|value| value.to_str().ok()),
+        Some("no-cache")
+    );
+
+    // ---- 부록 C: the body --------------------------------------------------
+    assert_eq!(approved["status"], json!("approved"));
+    assert_eq!(approved["decidedBy"], json!(fixture.human.to_string()));
+    assert_eq!(approved["result"]["actionId"], json!("invite.create"));
+    assert_eq!(approved["result"]["ref"]["type"], json!("invite"));
+    let invite_id = Uuid::parse_str(
+        approved["result"]["ref"]["id"]
+            .as_str()
+            .expect("the ref names the invite"),
+    )
+    .expect("invite id is a uuid");
+    assert_eq!(
+        approved["result"]["secretOnce"]["kind"],
+        json!("invite_link")
+    );
+    let link = approved["result"]["secretOnce"]["value"]
+        .as_str()
+        .expect("the one-time link")
+        .to_string();
+    let code = link
+        .split("code=")
+        .nth(1)
+        .expect("the link carries the code")
+        .to_string();
+    assert!(!code.is_empty());
+    assert_eq!(
+        link,
+        format!("{base}/join?code={code}"),
+        "with no MOMO_PUBLIC_BASE_URL configured the link is built from this \
+         request's own origin (ADR-0167 derivation)"
+    );
+
+    // ---- the invite is real, and it is the approver's ----------------------
+    let (invite_role, invite_max_uses, invite_created_by, invite_expires_ms): (
+        String,
+        i32,
+        Uuid,
+        i64,
+    ) = sqlx::query_as(
+        "SELECT role::text, max_uses, created_by, \
+                (extract(epoch FROM expires_at) * 1000)::bigint \
+           FROM invite_code WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(invite_id)
+    .fetch_one(&su)
+    .await
+    .expect("the invite row exists");
+    assert_eq!(invite_role, "member");
+    assert_eq!(invite_max_uses, 1);
+    assert_eq!(
+        invite_created_by, fixture.human,
+        "executed with the APPROVER's authority — the agent is never admin"
+    );
+    assert_eq!(
+        approved["result"]["secretOnce"]["expiresAtMs"]
+            .as_i64()
+            .expect("expiresAtMs"),
+        invite_expires_ms
+    );
+    // The code the body handed out is the one this row hashes, and the row
+    // keeps only the hash.
+    let code_matches: bool = sqlx::query_scalar(
+        "SELECT code_hash = momo_invite_code_hash($2) FROM invite_code \
+          WHERE workspace_id=$1 AND id=$3",
+    )
+    .bind(fixture.workspace)
+    .bind(&code)
+    .bind(invite_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(code_matches, "the answered code opens this invite");
+
+    // ---- red proof 1: the code lives in the response body and nowhere else --
+    let stored = durable_text(&su, fixture.workspace).await;
+    assert!(
+        !stored.contains(&code),
+        "the minted code must not appear in approval.payload, message props or \
+         body, audit detail, the decision receipt, agent_run output or the \
+         outbox"
+    );
+    assert!(
+        !stored.contains("/join?code="),
+        "nor may the assembled link: {stored}"
+    );
+    assert!(
+        captured.contains("ax3b-log-capture-canary"),
+        "the capture must be live, or 'the code never appears in the log' is a \
+         sentence about nothing"
+    );
+    assert!(
+        captured.contains("sqlx::query"),
+        "…and it must reach the layer where a credential would most plausibly \
+         leak by accident — the statement log — rather than only the events \
+         this test emits itself: {} bytes captured",
+        captured.len()
+    );
+    assert!(
+        !captured.contains(&code),
+        "the minted code must not appear in any log line emitted while the \
+         decision was processed"
+    );
+
+    // ---- red proof 5: 부록 B on the persistent card -------------------------
+    let (result_author, result_props, result_body, result_key): (
+        Uuid,
+        Value,
+        Option<String>,
+        Option<Uuid>,
+    ) = sqlx::query_as(
+        "SELECT author_member_id, props, body, client_msg_id FROM message \
+              WHERE workspace_id=$1 AND channel_id=$2 AND type='tool_result' \
+              ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .expect("the action_result line is in the channel");
+    assert_eq!(
+        result_author, fixture.hosted_agent,
+        "the outcome is authored by the agent whose proposal it was"
+    );
+    assert_ne!(
+        result_key,
+        Some(approval_id),
+        "the result line must not take the key the rejection and expiry lines use"
+    );
+    let card = &result_props["momo.action_result"];
+    assert_eq!(card["v"], json!(1));
+    assert_eq!(card["action_id"], json!("invite.create"));
+    assert_eq!(card["status"], json!("executed"));
+    assert_eq!(card["approval_id"], json!(approval_id.to_string()));
+    assert_eq!(card["decided_by"], json!(fixture.human.to_string()));
+    assert_eq!(
+        card["ref"],
+        json!({"type": "invite", "id": invite_id.to_string()})
+    );
+    assert_eq!(card["secret_shown_once"], json!(true));
+    assert_eq!(card["next"]["href"], json!("/settings?section=members"));
+    assert_eq!(card["rows"][0], json!({"label": "역할", "value": "member"}));
+    let rendered_props = result_props.to_string();
+    assert!(!rendered_props.contains("http"), "{rendered_props}");
+    assert!(!rendered_props.contains("code="), "{rendered_props}");
+    assert!(
+        result_body
+            .as_deref()
+            .expect("a body a client that knows no card kind can still read")
+            .starts_with("초대 링크를 만들었습니다"),
+        "{result_body:?}"
+    );
+
+    // ---- the request card is decided, and no longer says it was refused ----
+    let card_props: Value =
+        sqlx::query_scalar("SELECT props FROM message WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(card_message_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(card_props["status"], json!("approved"));
+    assert_eq!(card_props["approval_status"], json!("approved"));
+    assert!(
+        card_props.get("last_attempt").is_none(),
+        "an approved card must not still say the last attempt needed an admin — \
+         and the key must be GONE, not null: a client that reads it by presence \
+         (`\"last_attempt\" in props`) cannot tell a null from a refusal. \
+         {card_props}"
+    );
+
+    // ---- the audit: two rows, and the generic one is not among them --------
+    let audit: Vec<(String, Option<Uuid>, Option<Uuid>, Value)> = sqlx::query_as(
+        "SELECT action, actor_member_id, subject_member_id, detail FROM audit_log \
+          WHERE workspace_id=$1 AND (detail->>'approval_id') = $2 ORDER BY action",
+    )
+    .bind(fixture.workspace)
+    .bind(approval_id.to_string())
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    let actions: Vec<&str> = audit.iter().map(|row| row.0.as_str()).collect();
+    assert_eq!(
+        actions,
+        vec!["action.approved", "invite.created"],
+        "ADR-0186 §5 names exactly these two — and NOT the generic \
+         approval.approved the tool-call path writes"
+    );
+    let approved_row = &audit[0];
+    assert_eq!(approved_row.1, Some(fixture.human), "a person decided");
+    assert_eq!(
+        approved_row.2,
+        Some(fixture.hosted_agent),
+        "…about an agent's proposal"
+    );
+    assert_eq!(approved_row.3["schema"], json!("momo.action.approved.v1"));
+    assert_eq!(approved_row.3["action_id"], json!("invite.create"));
+    assert_eq!(
+        approved_row.3["proposed_by"],
+        json!(fixture.hosted_agent.to_string())
+    );
+    assert_eq!(
+        approved_row.3["decided_by"],
+        json!(fixture.human.to_string())
+    );
+    assert_eq!(
+        approved_row.3["ref"],
+        json!({"type": "invite", "id": invite_id.to_string()})
+    );
+    let created_row = &audit[1];
+    assert_eq!(created_row.3["schema"], json!("momo.invite.created.v1"));
+    assert_eq!(created_row.3["role"], json!("member"));
+    assert_eq!(created_row.3["max_uses"], json!(1));
+    assert_eq!(
+        created_row.3["via_agent"],
+        json!(fixture.hosted_agent.to_string()),
+        "the invite row records which agent asked for it"
+    );
+    for forbidden in ["code", "code_hash", "code_preview", "preview", "link"] {
+        assert!(
+            created_row.3.get(forbidden).is_none(),
+            "{forbidden} must not be in an audit detail"
+        );
+    }
+
+    // ---- red proof 3: the run ended, with no job behind it -----------------
+    let (run_status, run_output): (String, Option<Value>) = sqlx::query_as(
+        "SELECT r.status::text, r.output FROM agent_run r JOIN approval a ON a.run_id = r.id \
+          WHERE a.workspace_id=$1 AND a.id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(approval_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(run_status, "succeeded");
+    let run_output = run_output.expect("the run records what it did");
+    assert_eq!(run_output["actionId"], json!("invite.create"));
+    assert_eq!(
+        run_output["ref"],
+        json!({"type": "invite", "id": invite_id.to_string()})
+    );
+    assert_eq!(
+        agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await,
+        jobs_before,
+        "an executed action enqueues NO resume job — the decision was the \
+         execution (ADR-0186 §5)"
+    );
+
+    // ---- red proof 4: the replay -------------------------------------------
+    //
+    // The same `client_decision_id`, the same decider, the same verdict. The
+    // server answers the stored receipt — which names the invite and does not
+    // carry the link, because the link was never stored.
+    let (status, headers, replayed) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval_id,
+        true,
+        decision_id,
+    )
+    .await;
+    assert_eq!(status, 200, "{replayed}");
+    assert_eq!(
+        headers
+            .get("cache-control")
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store"),
+        "no-store is on every outcome, not only the minting one"
+    );
+    assert_eq!(replayed["result"]["actionId"], json!("invite.create"));
+    assert_eq!(replayed["result"]["ref"], approved["result"]["ref"]);
+    assert!(
+        replayed["result"].get("secretOnce").is_none(),
+        "a replay must not re-show the one-time value: {replayed}"
+    );
+    assert!(!replayed.to_string().contains(&code));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM invite_code WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap(),
+        invites_before + 1,
+        "and it mints nothing the second time"
+    );
+
+    // ---- bodies for the spec's own validator -------------------------------
+    //
+    // `scripts/verify_openapi_contract_rust.sh` samples this operation with a
+    // **tool-call** approval, so its green says nothing about 부록 C: the
+    // sampled body has no `result` at all. Setting this variable writes the
+    // three bodies this test actually observed, so the spec's validator can be
+    // pointed at them:
+    //
+    //   OPENAPI_DECISION_SAMPLE_DIR=/tmp/ax3b cargo test … --ignored
+    //   python3 scripts/openapi_shape_check.py --spec <spec.json> \
+    //     --manifest /tmp/ax3b/manifest.json
+    //
+    // Writing them only on request keeps the test itself hermetic.
+    if let Ok(dir) = std::env::var("OPENAPI_DECISION_SAMPLE_DIR") {
+        std::fs::create_dir_all(&dir).expect("create the sample directory");
+        for (name, body) in [
+            ("decision-executed", &approved),
+            ("decision-role-required", &refused),
+            ("decision-replayed", &replayed),
+        ] {
+            std::fs::write(format!("{dir}/{name}.json"), body.to_string())
+                .expect("write a decision sample");
+        }
+        let manifest = json!({
+            "samples": [
+                {
+                    "name": "decision-executed",
+                    "method": "post",
+                    "path": "/v1/workspaces/{workspaceId}/approvals/{approvalId}/decision",
+                    "status": "200",
+                    "body_file": format!("{dir}/decision-executed.json")
+                },
+                {
+                    "name": "decision-role-required",
+                    "method": "post",
+                    "path": "/v1/workspaces/{workspaceId}/approvals/{approvalId}/decision",
+                    "status": "403",
+                    "body_file": format!("{dir}/decision-role-required.json")
+                },
+                {
+                    "name": "decision-replayed",
+                    "method": "post",
+                    "path": "/v1/workspaces/{workspaceId}/approvals/{approvalId}/decision",
+                    "status": "200",
+                    "body_file": format!("{dir}/decision-replayed.json")
+                }
+            ]
+        });
+        std::fs::write(format!("{dir}/manifest.json"), manifest.to_string())
+            .expect("write the sample manifest");
+    }
+}
+
+/// **The expiry arm, tapped late** (ADR-0186 D2 「거부·만료: 기존 arm 그대로」).
+///
+/// AX-3a already proved the notifier's sweep settles a `workspace_action`. What
+/// is unproved until here is the *other* expiry path: a person who taps 승인 on
+/// a card whose deadline has passed. That request reaches `settle_expired`
+/// **before** the executor branch, so it must settle the approval as `expired`,
+/// time the run out, mint nothing — and, the point of the test, enqueue no
+/// resume job for a payload that has no tool call to resume.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_late_tap_on_a_workspace_action_expires_it_and_mints_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+
+    let (approval_id, _card) =
+        propose_invite(&client, &base, &su, &fixture, json!({"role": "member"})).await;
+    let jobs_before = agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await;
+    sqlx::query(
+        "UPDATE approval SET expires_at = now() - interval '1 minute' \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(approval_id)
+    .execute(&su)
+    .await
+    .unwrap();
+
+    let (status, headers, settled) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{settled}");
+    assert_eq!(settled["status"], json!("expired"));
+    assert!(
+        settled.get("result").is_none(),
+        "an expiry executed nothing: {settled}"
+    );
+    assert_eq!(
+        headers
+            .get("cache-control")
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
+
+    let expired: String =
+        sqlx::query_scalar("SELECT status::text FROM approval WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(approval_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(expired, "expired");
+    let run_status: String = sqlx::query_scalar(
+        "SELECT r.status::text FROM agent_run r JOIN approval a ON a.run_id = r.id \
+          WHERE a.workspace_id=$1 AND a.id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(approval_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        run_status, "timed_out",
+        "the late tap releases the concurrency gate rather than merely failing"
+    );
+    assert_eq!(
+        agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await,
+        jobs_before,
+        "the expiry arm must not assume a resume job a workspace action never had"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM invite_code WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap(),
+        0,
+        "an overdue card mints nothing"
+    );
+}
+
+/// **M1 — the run left its hold between the execution and the transition.**
+///
+/// ADR-0186 D2 mints the invite and only then moves the run out of
+/// `awaiting_approval`. A human stop or the expiry sweep can win that race, and
+/// when it does the invite must not survive: `succeed_parked_run_in_tx`
+/// answering `false` is the only guard between "a person approved this" and "an
+/// invite exists for a run somebody else already ended".
+///
+/// This drives the race by cancelling the run under a still-pending approval —
+/// exactly the state `routes::agent_runs`' human stop produces if its own
+/// approval sweep ever misses one — and measures both halves: the transaction
+/// rolled back (no invite, no ledger row, the approval still pending) and the
+/// answer is the receipt clients already decode, not a 500 envelope.
+///
+/// Sabotage: change the guard to `let _ = succeed_parked_run_in_tx(…)` and this
+/// goes red on the very first assertion, because the decision then commits.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_approval_whose_run_left_the_hold_rolls_back_and_answers_a_receipt() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+
+    let (approval_id, card_message_id) =
+        propose_invite(&client, &base, &su, &fixture, json!({"role": "member"})).await;
+    let messages_before = channel_message_count(&su, fixture.workspace, fixture.channel).await;
+
+    // The run ends while the card is still pending — the approval row is
+    // untouched, so the decision route walks straight into the executor.
+    sqlx::query(
+        "UPDATE agent_run SET status='cancelled', finished_at=now() \
+          WHERE id = (SELECT run_id FROM approval WHERE workspace_id=$1 AND id=$2)",
+    )
+    .bind(fixture.workspace)
+    .bind(approval_id)
+    .execute(&su)
+    .await
+    .unwrap();
+
+    let (status, headers, answered) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(
+        status, 409,
+        "a lost race is an expected failure on this route, not a 500: {answered}"
+    );
+    assert_eq!(
+        answered["status"], "run_not_parked",
+        "…and it is receipt-shaped, like every other expected failure here: {answered}"
+    );
+    assert!(answered.get("result").is_none(), "{answered}");
+    assert!(
+        answered.get("error").is_none(),
+        "the generic envelope would make this the one 500 on a receipt route: {answered}"
+    );
+    assert_eq!(
+        headers
+            .get("cache-control")
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
+
+    // ---- everything the executor wrote is gone -----------------------------
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM invite_code WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap(),
+        0,
+        "the minted invite MUST be rolled back — an invite for a run nobody is \
+         waiting on is the exact state this guard exists to prevent"
+    );
+    let (approval_status, decided_by): (String, Option<Uuid>) = sqlx::query_as(
+        "SELECT status::text, decided_by FROM approval WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(approval_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(approval_status, "pending", "the approval is not consumed");
+    assert_eq!(decided_by, None);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM approval_decision WHERE workspace_id=$1 AND approval_id=$2"
+        )
+        .bind(fixture.workspace)
+        .bind(approval_id)
+        .fetch_one(&su)
+        .await
+        .unwrap(),
+        0,
+        "no ledger row survived the rollback"
+    );
+    assert_eq!(
+        channel_message_count(&su, fixture.workspace, fixture.channel).await,
+        messages_before,
+        "and no result line reached the channel"
+    );
+    let audit_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND (detail->>'approval_id') = $2",
+    )
+    .bind(fixture.workspace)
+    .bind(approval_id.to_string())
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(audit_rows, 0, "nor any audit row");
+    let card_props: Value =
+        sqlx::query_scalar("SELECT props FROM message WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(card_message_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(card_props["status"], json!("pending"), "{card_props}");
+}
+
+/// **L1 — a rejected card must not still say an admin was needed.**
+///
+/// The refusal patch (`last_attempt`) is written outside any decision, so the
+/// arm that finally settles the card has to clear it — and both arms do. The
+/// approve arm is measured by the executor test above; this is the reject one,
+/// which is the likelier sequence in practice: a member taps 승인, is told an
+/// admin must do it, and closes their own proposal instead.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn rejecting_after_a_refused_tap_clears_the_admin_notice() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+
+    let (approval_id, card_message_id) =
+        propose_invite(&client, &base, &su, &fixture, json!({"role": "member"})).await;
+
+    // A member taps 승인 and is told who may.
+    let (status, _headers, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &plain_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    let card_props: Value =
+        sqlx::query_scalar("SELECT props FROM message WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(card_message_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(card_props["last_attempt"], json!("role_required"));
+
+    // **The same member may still reject** — ADR-0186 D2 keeps the reject arm
+    // as it was, and that asymmetry is deliberate: a person must be able to
+    // close their own agent's proposal, or the parked run holds the agent's
+    // only concurrency slot until the TTL.
+    let (status, _headers, rejected) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &plain_jwt,
+        approval_id,
+        false,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{rejected}");
+    assert_eq!(rejected["status"], json!("rejected"));
+
+    let card_props: Value =
+        sqlx::query_scalar("SELECT props FROM message WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(card_message_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(card_props["status"], json!("rejected"));
+    assert!(
+        card_props.get("last_attempt").is_none(),
+        "a rejected card saying `last_attempt: role_required` gives two answers \
+         to one question — and the key must be GONE, not null: {card_props}"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM invite_code WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap(),
+        0,
+        "a rejection mints nothing"
+    );
 }

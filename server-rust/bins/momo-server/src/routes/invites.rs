@@ -29,6 +29,7 @@ use momo_settings::{
     normalized_invite_code, normalized_invite_role, normalized_revoke_reason, read_invite,
     redeem_invite_for_member, regenerate_invite, revoke_invite, validated_expires_at_ms,
     validated_max_uses, InviteCode, InviteMutationInvalid, InviteRedeemInvalid, InviteRedemption,
+    INVITE_CREATED_AUDIT_ACTION, INVITE_CREATED_AUDIT_SCHEMA,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -144,12 +145,12 @@ pub async fn create(
                         .await?;
                 write_audit(
                     conn,
-                    &AuditEntry::new(workspace_id, "invite.created")
+                    &AuditEntry::new(workspace_id, INVITE_CREATED_AUDIT_ACTION)
                         .by(member_id)
                         .target("invite_code", created.invite.id)
                         .via_token(via_token)
                         .with_schema(
-                            "momo.invite.created.v1",
+                            INVITE_CREATED_AUDIT_SCHEMA,
                             // Role and reach only. Never the code, never its
                             // hash, never the preview — an audit row is read by
                             // more people than the response is.
@@ -404,7 +405,12 @@ fn decode_revoke_reason(body: &Bytes) -> Result<Option<String>, ApiError> {
 
 /// Invite management is workspace authority, not channel authority (ADR-0128) —
 /// `active_workspace_role` is the single place that decides it.
-async fn require_admin(
+///
+/// `pub(crate)` for ADR-0186 D2: the decision route judges an `invite.create`
+/// approver with 「기존 `require_admin`과 같은 판정」, and the only way two gates
+/// cannot drift is for them to be one function. Widening an owner/admin rule in
+/// one place and not the other is exactly the failure this avoids.
+pub(crate) async fn require_admin(
     conn: &mut momo_db::PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
