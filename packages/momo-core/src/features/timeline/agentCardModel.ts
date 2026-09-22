@@ -8,6 +8,10 @@ import {
   completionReportCard,
   type CompletionReportCard,
 } from "./completionReportCard";
+import {
+  actionResultCard,
+  type AgentActionResultCard,
+} from "./actionResultCard";
 
 // =============================================================================
 // Agent card model (R-1 §4). Pure: no DOM, no fetch, no React, so the status
@@ -238,6 +242,24 @@ const PARSED_KEYS: ReadonlySet<string> = new Set([
   "actions",
   "gates",
   "elapsed_ms",
+  // ADR-0186 부록 A. 승인 카드가 행·사유·필요 역할을 **그리는** 블록이라
+  // 여기 없으면 정직 카운트가 자기가 그린 것을 숨김으로 센다(위 `execution`
+  // 과 같은 이유).
+  "action",
+  // ADR-0186 부록 B. `tool_result` 가 결과 카드로 서는 갈래. 카드가 서면
+  // 그 카드가 이 키의 내용을 전부 그리므로 숨김이 아니다.
+  //
+  // 카드가 **서지 못한 경우**(모르는 판·모르는 상태)에도 숨김으로 세지
+  // 않는다. 그때 행은 평범한 도구 결과이고 본문이 그대로 보이는데, 그 화면에
+  // 「숨김 1개」를 더하면 클라이언트가 감춘 공개 필드가 있다는 뜻이 된다 —
+  // 사실은 이 빌드가 읽을 줄 모르는 **미래 판**이다. 그 사실은 개수가 아니라
+  // 본문 폴백 그 자체가 말한다.
+  //
+  // 글자를 그대로 적는다. `ACTION_RESULT_PROP_KEY` 를 import 해 오면 이 Set 은
+  // **모듈 초기화 시점**에 그 값을 읽는데, 두 모듈은 서로를 참조하므로
+  // (`actionResultCard` 가 `payloadDetail` 을 쓴다) 진입 순서에 따라 TDZ 에
+  // 걸린다. 같은 글자인지는 시험이 잰다(`agentCardModel.test.ts`).
+  "momo.action_result",
 ]);
 
 export interface PayloadRow {
@@ -262,12 +284,32 @@ const TIER_LABEL: Readonly<Record<string, string>> = {
   network_write: "네트워크 쓰기",
 };
 
+/**
+ * `approval.action_type` 중 **이 빌드가 이름을 아는 것**만 옮긴다.
+ *
+ * `TIER_LABEL` 과 같은 규율이고, 같은 이유로 모르는 값은 원문 그대로 지나간다:
+ * 서버가 내일 새 갈래를 더해도 화면은 그것을 감추지 않는다. 옮기는 것부터
+ * 시작하는 이유는 ADR-0186 이 들여온 `workspace_action` 때문이다 — 접힘을 연
+ * 사람이 읽는 것이 「동작: workspace_action」이면 그것은 문장이 아니라 enum 이다.
+ */
+const ACTION_TYPE_LABEL: Readonly<Record<string, string>> = {
+  workspace_action: "워크스페이스 행동",
+};
+
 const DETAIL_FIELDS: ReadonlyArray<{
   key: string;
   label: string;
   format?: (props: Props, key: string) => string | undefined;
 }> = [
-  { key: "action_type", label: "동작" },
+  {
+    key: "action_type",
+    label: "동작",
+    format: (props, key) => {
+      const raw = readString(props, key);
+      if (raw === undefined) return undefined;
+      return ACTION_TYPE_LABEL[raw] ?? raw;
+    },
+  },
   { key: "tool_name", label: "도구" },
   { key: "tool", label: "도구" },
   { key: "label", label: "대상" },
@@ -397,6 +439,85 @@ export function frameSentence(frame: ActionFrame): string {
 
 // ---- card models ------------------------------------------------------------
 
+/**
+ * 워크스페이스 행동 제안이 승인 카드에 얹는 블록 (ADR-0186 부록 A).
+ *
+ * 승인 카드가 두 얼굴을 갖게 된 자리다(ADR-0186 §6): 도구 호출 승인과 행동
+ * 승인. 렌더러를 둘로 가르지 않고 **이 블록의 유무**로 가른다 — 두 컴포넌트가
+ * 되는 순간 확인 규칙도 멱등 정책도 두 벌이 되고, 보지 않는 쪽이 낡는다
+ * (`ApprovalActions` 머리말이 같은 말을 한다).
+ *
+ * 블록이 `null` 인 것이 압도적 다수다. 없으면 카드는 지금까지 그리던 것을
+ * 한 글자도 다르지 않게 그린다.
+ */
+export interface AgentApprovalAction {
+  /** 레지스트리의 행동 id(`invite.create`). 화면에는 그리지 않는다. */
+  id: string;
+  /** 사람이 판단할 사실. 서버가 이름 붙여 보낸 것만, 보낸 순서대로. */
+  rows: PayloadRow[];
+  /** 상한에 걸리거나 모양이 어긋나 그리지 못한 행. 조용히 자르지 않는다. */
+  omittedRows: number;
+  /** 에이전트가 적은 사유. 없으면 그리지 않는다. */
+  rationale: string | null;
+  /** 이 행동을 승인할 수 있는 역할. 없으면 `null`. */
+  requiredRole: string | null;
+}
+
+/** 승인 카드가 그리는 행동 행의 상한. 결과 카드와 같은 자(`MAX_ACTION_RESULT_ROWS`). */
+export const MAX_APPROVAL_ACTION_ROWS = 12;
+
+function parseApprovalActionRow(value: unknown): PayloadRow | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const row = value as Record<string, unknown>;
+  const label = typeof row.label === "string" ? row.label : "";
+  if (label === "") return null;
+  if (typeof row.value !== "string") return null;
+  return { label, value: row.value };
+}
+
+/**
+ * `props.action` 을 행동 블록으로 읽는다. 총 파싱: 던지지 않고, 모르면 `null`
+ * 이며 그때 카드는 도구 호출 승인 그대로다.
+ *
+ * `id` 가 없으면 블록이 아니다 — 어느 행동인지 모르는 행동 제안은 승인 카드에
+ * 얹을 것이 없고, 그 상태로 행만 그리면 사람은 이름 없는 무언가를 허가하게 된다.
+ */
+export function parseApprovalAction(value: unknown): AgentApprovalAction | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const raw = value as Record<string, unknown>;
+  const id = typeof raw.id === "string" && raw.id !== "" ? raw.id : null;
+  if (id === null) return null;
+
+  const rows: PayloadRow[] = [];
+  let omittedRows = 0;
+  for (const candidate of Array.isArray(raw.rows) ? raw.rows : []) {
+    const row = parseApprovalActionRow(candidate);
+    if (row === null || rows.length >= MAX_APPROVAL_ACTION_ROWS) {
+      omittedRows += 1;
+      continue;
+    }
+    rows.push(row);
+  }
+
+  return {
+    id,
+    rows,
+    omittedRows,
+    rationale:
+      typeof raw.rationale === "string" && raw.rationale !== ""
+        ? raw.rationale
+        : null,
+    requiredRole:
+      typeof raw.required_role === "string" && raw.required_role !== ""
+        ? raw.required_role
+        : null,
+  };
+}
+
 export interface AgentApprovalCard {
   kind: "approval";
   approvalId: string | null;
@@ -424,6 +545,11 @@ export interface AgentApprovalCard {
    * 거절을 「결정됨」이 아니라 오류로 그려야 하는 이유다.
    */
   execution: SpawnExecutionPlan | null;
+  /**
+   * 이 승인이 **워크스페이스 행동**인가 (ADR-0186 부록 A). `null`이면 지금까지의
+   * 도구 호출 승인이고 카드는 한 글자도 달라지지 않는다.
+   */
+  action: AgentApprovalAction | null;
   detail: PayloadDetail;
 }
 
@@ -527,7 +653,8 @@ export type AgentCardModel =
   | AgentToolCard
   | AgentTurnCard
   | LoginHandoffCard
-  | CompletionReportCard;
+  | CompletionReportCard
+  | AgentActionResultCard;
 
 function approvalCard(
   message: Message,
@@ -560,6 +687,7 @@ function approvalCard(
     status,
     isResumeOffer,
     execution: parseExecutionPlan(props),
+    action: parseApprovalAction(props["action"]),
     detail: payloadDetail(props),
   };
   const summary = readString(props, "summary");
@@ -645,6 +773,14 @@ export function agentCardModel(message: Message): AgentCardModel | null {
     return approvalCard(message, props);
   }
   if (message.type === "tool_call" || message.type === "tool_result") {
+    // 워크스페이스 행동의 결과는 도구 결과 메시지 안에서 `props` 로 갈라진다
+    // (ADR-0186 부록 B) — 로그인 핸드오프가 승인 메시지 안에서 갈라지는 것과
+    // 같은 재사용이고, 새 `message_type` 도 마이그레이션도 없다. `tool_call`
+    // 에서는 물어보지 않는다: 결과는 호출이 끝난 뒤에만 있다.
+    if (message.type === "tool_result") {
+      const result = actionResultCard(props, message.body);
+      if (result !== null) return result;
+    }
     return toolCard(message, props);
   }
   // 작업 완료 리포트(UXC-A)는 평범한 턴 메시지 안에서 `props.kind` 로 갈라진다 —
@@ -674,6 +810,10 @@ export function agentCardModel(message: Message): AgentCardModel | null {
  * the body there makes the agent's one line ("환경 셋업을 마쳤습니다") vanish from
  * web and phone alike (M2). So a summary-less report keeps its body: the body is
  * the missing summary.
+ *
+ * 행동 결과 카드(ADR-0186 부록 B)는 첫 번째 무리다. 그 카드의 **제목이 곧 본문**
+ * 이라(`actionResultCard` 의 `title`), 본문을 위에 한 번 더 두면 같은 문장이 두
+ * 줄로 선다 — 승인 카드가 서버 카피를 제목으로 들고 본문을 접는 것과 같은 일이다.
  */
 export function cardKeepsBody(card: AgentCardModel): boolean {
   if (card.kind === "turn") return true;

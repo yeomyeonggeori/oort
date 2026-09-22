@@ -16,6 +16,8 @@ import {
   spawnHostGate,
 } from "@momo/core/features/timeline/spawnHostChoice";
 import { SpawnHostChoice } from "./SpawnHostChoice";
+import { CopyButton } from "@/features/settings/SettingsFields";
+import type { SecretOnce } from "@momo/core/features/approvals/secretOnce";
 
 // =============================================================================
 // 승인 결정 컨트롤 (R-1 §4, goal B5.3b D-5).
@@ -161,7 +163,13 @@ export interface DecisionVerbs {
   rejectConfirm: string;
 }
 
-const APPROVAL_VERBS: DecisionVerbs = {
+/**
+ * 승인/거부의 기본 낱말. 행동 승인 카드가 `approveConfirm` 한 칸만 갈아 끼우려고
+ * 이것을 펴서 쓴다(R1 M2), 그래서 내보낸다 — 여섯 낱말을 그쪽에서 다시 적으면
+ * 「거부 확정」이 두 파일에 살게 된다.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- 이 파일의 다른 상수 내보내기와 같은 자리의 어휘표다.
+export const APPROVAL_VERBS: DecisionVerbs = {
   approve: "승인",
   reject: "거부",
   approveCommit: "승인 확정",
@@ -169,6 +177,108 @@ const APPROVAL_VERBS: DecisionVerbs = {
   approveConfirm: null,
   rejectConfirm: REJECT_CONFIRM,
 };
+
+/**
+ * 1회 값이 사는 **유일한 화면 자리** (ADR-0186 D4 · ADR-0182 ①).
+ *
+ * ## 왜 이 컴포넌트에는 상태가 없는가
+ *
+ * 값은 호출자(`AgentCard` 의 `ApprovalBody`)의 React state 에 있고 이 함수는
+ * 받아서 그린다. 그래야 하는 이유가 이 카드의 생애에 있다: 결정이 확정되면
+ * 승인 카드의 footer 가 컨트롤에서 **영수증 줄**로 바뀌고 `ApprovalActions` 는
+ * 언마운트된다. 값을 여기 두면 그려야 할 바로 그 순간에 사라진다.
+ *
+ * 그리고 그것이 전부다 — props 도 store 도 localStorage 도 URL 도 아니다.
+ * 새로고침하면 호출자의 state 와 함께 사라지고, 그 뒤에 남는 것은 영속 카드의
+ * 「1회 표시됐습니다 · 다시 만드세요」뿐이다(부록 B). 값을 살아남게 만드는
+ * 구현이 D4 가 이름으로 금지한 위반이다.
+ *
+ * 복사 컨트롤은 설정의 것을 그대로 든다(`CopyButton` → `useClipboardCopy` →
+ * `useInlineConfirm`). 두 번째 복사 버튼을 지으면 「복사됨」이 언제 풀리는지가
+ * 두 벌이 되고, ADR-0182 D5 의 1.6s 는 그중 한 벌에만 남는다.
+ */
+export const LINK_ONCE_LEAD =
+  "이 링크는 이 화면에서만 볼 수 있습니다. 지금 전달하세요.";
+
+export function LinkOnce({
+  secret,
+  testIdPrefix = "approval",
+  className,
+}: {
+  secret: SecretOnce;
+  testIdPrefix?: string;
+  className?: string;
+}) {
+  const leadId = useId();
+  const regionRef = useRef<HTMLDivElement | null>(null);
+
+  // ## 확정이 초점을 버리던 자리 (design-review R1 H2)
+  //
+  // 확정에 성공하면 승인 카드의 footer 가 컨트롤에서 영수증+링크로 바뀌면서
+  // `ApprovalActions` 가 통째로 언마운트된다. 그 순간 초점은 `document.body` 로
+  // 떨어졌고(두 폭 실측), 키보드 사용자는 **링크가 나타난 바로 그 순간** 셸
+  // 처음부터 Tab 으로 되돌아와야 했다. 앞 판에도 같은 유실이 있었지만 그때 그
+  // 자리에는 누를 것이 없었다 — 이 배치가 거기에 복사 버튼을 세웠다.
+  //
+  // 그래서 이 영역이 마운트되면 **자기 자신**으로 초점을 가져온다. 복사 버튼이
+  // 아니라 컨테이너인 이유: 초점이 그룹에 앉으면 접근성 이름(`aria-labelledby`
+  // → lead 문장)이 먼저 읽히고, 그다음 Tab 한 번이 복사 버튼이다. 버튼에 바로
+  // 앉히면 「이 화면에서만 볼 수 있습니다」를 듣기 전에 「복사」부터 듣는다.
+  useEffect(() => {
+    regionRef.current?.focus();
+  }, []);
+
+  return (
+    <div
+      ref={regionRef}
+      tabIndex={-1}
+      role="group"
+      aria-labelledby={leadId}
+      className={cn("px-3 py-2 focus-visible:focus-ring", className)}
+      data-testid={`${testIdPrefix}-link-once`}
+    >
+      {/* `role=status` 가 아니다 (R1 N1). 승인 직후 이 카드에는 영수증 줄이 이미
+          라이브 리전으로 서 있고, 둘이 함께 낭독되면 두 문장이 겹쳐 들린다.
+          이 문장은 **초점이 이 그룹에 앉을 때** 접근성 이름으로 읽힌다 — 같은
+          한 번, 같은 내용, 겹침 없음. */}
+      <p id={leadId} className="break-keep text-body text-ink">
+        {LINK_ONCE_LEAD}
+      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {/* ## 잘린 1회 값은 잘린 것이다 (R1 B1)
+            
+            앞 판은 `truncate` 였고 390 에서 실측 scrollWidth 296 / clientWidth
+            237 로 코드 꼬리가 말줄임에 먹혔다. 「지금 전달하세요」라고 말하면서
+            전달할 값을 보여 주지 않는 화면이다.
+            
+            `break-all` 이 맞는 이유: 이 값은 **라틴 URL** 이다. 스킬 §5.3 이
+            `break-all` 을 경고하는 대상은 한글 본문이고(음절 중간에서 끊긴다),
+            여기서는 끊을 자리가 없는 한 덩어리 ASCII 라 그 경고가 겨냥하는 결함이
+            생기지 않는다. `select-all` 은 복사 버튼을 못 쓰는 경우(클립보드 권한
+            거부)에 한 번의 클릭으로 전체를 고르게 한다.
+            
+            `flex-1` 에서 `w-full` 로 바꾸지 않은 이유: 1280 에서는 값과 버튼이
+            한 줄에 서는 것이 맞고(실측 559/559, 잘리지 않는다), 좁아지면
+            `flex-wrap` 이 버튼을 아랫줄로 내린다. */}
+        <span
+          data-numeric
+          data-testid={`${testIdPrefix}-link-once-value`}
+          className="min-w-0 flex-1 select-all break-all font-mono text-meta text-ink"
+        >
+          {secret.value}
+        </span>
+        {/* 600px 미만에서 44px 로 자란다 (R1 M6). 이 버튼은 이 순간 사람이
+            반드시 눌러야 하는 하나이고, `sm` 은 28px 에서 멈춘다. */}
+        <CopyButton
+          value={secret.value}
+          subject="초대 링크"
+          testId={`${testIdPrefix}-link-once-copy`}
+          className="tap-target"
+        />
+      </div>
+    </div>
+  );
+}
 
 export function ApprovalActions({
   approvalId,
@@ -181,6 +291,8 @@ export function ApprovalActions({
   reversible = true,
   execution = null,
   verbs = APPROVAL_VERBS,
+  forbiddenCopy = null,
+  onLandOnCard,
 }: {
   approvalId: string;
   armed: Armed;
@@ -218,6 +330,25 @@ export function ApprovalActions({
    * 재개/중단으로 바꿔 든다 — 낱말만이고 계약은 그대로다(`DecisionVerbs`).
    */
   verbs?: DecisionVerbs;
+  /**
+   * 403 일 때 이 카드가 대신 할 말 (ADR-0186 §5).
+   *
+   * 기본 문장("채널 멤버인지 확인하세요")은 도구 호출 승인의 것이고 지금도
+   * 옳다. 워크스페이스 행동 승인만 다른 사실을 안다 — 부록 A 가 `required_role`
+   * 을 실어 보냈으므로, 이 403 에서 모자란 것은 멤버십이 아니라 **역할**이다.
+   * 그 판정을 이 파일이 지지 않고 호출자가 문장으로 건네는 이유는 낱말만
+   * 갈라지고 계약은 하나로 남기는 이 컴포넌트의 규칙 그대로다(`verbs`).
+   */
+  forbiddenCopy?: string | null;
+  /**
+   * 403 뒤 초점을 어디에 내려놓을지 **호출자가 안다** (R2 H-R2-1 · N-R2-2).
+   *
+   * 이 컨트롤의 컨테이너는 이름 없는 `div` 다. 카드는 이름(`aria-label`)과
+   * house 링을 이미 가진 `section` 을 갖고 있고, 그것이 옳은 착지점이다 —
+   * 그런데 그 노드는 이 컴포넌트가 만들지 않는다. 그래서 목적지를 아는 쪽이
+   * 함수로 건넨다. 없으면 `root` 로 떨어지고, 그 `root` 도 이제 링을 든다.
+   */
+  onLandOnCard?: () => void;
 }) {
   // workspaceId comes from session context rather than a prop chain: both
   // callers sit several components below the shell.
@@ -282,6 +413,56 @@ export function ApprovalActions({
         setErrorTone(
           outcome.errorCode === "surface_absent" ? "unavailable" : "error"
         );
+        // 역할이 모자란 403 은 사고가 아니다. 승인은 여전히 대기이고(§5), 사람이
+        // 할 수 있는 다음 행동이 있다 — 그래서 붉은 alert 이 아니라 조용한
+        // 안내로 서고, 문장은 호출자가 아는 사실에서 온다.
+        //
+        // 두 갈래가 같은 자리에 선다 (AX-3b #2549). `role_required` 는 서버가
+        // 이름을 댄 것이고, `forbidden` 은 이름 없는 403 이다. 행동 승인 카드는
+        // 어느 쪽에서도 자기 문장을 안다 — 부록 A 가 `required_role` 을 실어
+        // 보냈으니까. 이름 없는 403 에도 이 문장을 쓰는 것은 R1 부터의 판정
+        // 그대로다: 이 카드에서 403 이 뜻할 수 있는 것은 그것 하나다.
+        if (
+          (outcome.errorCode === "role_required" ||
+            outcome.errorCode === "forbidden") &&
+          forbiddenCopy !== null
+        ) {
+          setErrorTone("unavailable");
+          setErrorCopy(forbiddenCopy);
+          // ## 성공할 수 없는 버튼을 세워 두지 않는다 (design-review R1 M1)
+          //
+          // 앞 판은 무장을 유지했다. 그 결과 화면에서 **가장 큰 컨트롤**(채움
+          // 「승인 확정」)이 「관리자가 승인해야 합니다」 바로 위에 서서, 다시
+          // 눌러도 같은 403 을 받는 행동을 위계의 꼭대기에 두었다(§3).
+          //
+          // 무장만 푼다. 카드는 여전히 대기이므로 승인·거부 버튼은 그대로 있고
+          // (다른 사람이 이 화면을 이어받을 수 있다), 이 사람에게 참인 사실은
+          // 바로 아래 안내 문장이 진다.
+          //
+          // 초점도 함께 돌려놓는다 (R1 H2). `disabled={busy}` 가 눌린 버튼을
+          // 비활성화한 순간 초점은 이미 body 로 떨어졌고, 여기서 확정 버튼까지
+          // 언마운트된다 — 목적지를 적어 두지 않으면 키보드 사용자는 방금 읽을
+          // 문장이 생긴 자리를 잃는다.
+          //
+          // ## 목적지가 `root` 에서 **카드**로 옮겨 갔다 (R2 H-R2-1 · N-R2-2)
+          //
+          // R2 는 `root` 착지에서 두 가지를 실측했다. 이 `div` 에는 house 링이
+          // 없어 크로미움 UA 기본 링(이 팔레트 밖의 파랑)이 footer 를 둘렀고
+          // (같은 카드의 성공 착지는 2px accent 였다 — 한 카드에 두 링), 이름도
+          // role 도 없어 스크린리더가 footer 의 textContent 를 통째로 읽었다.
+          //
+          // 카드 `section` 은 그 둘을 이미 갖고 있다: `focus-visible:focus-ring`
+          // 과 `aria-label={title}`. R1 H2 가 적어 둔 방향이기도 하다. 그래서
+          // 착지는 카드이고, 착지한 사람이 듣는 것은 카드 제목이다 — 그 아래에
+          // 방금 생긴 안내 문장이 있다.
+          //
+          // 카드가 없는 표면(인박스 목록)에서는 이 갈래 자체에 들어오지 않지만
+          // (`forbiddenCopy === null`), 들어오더라도 `onLandOnCard` 가 없으면
+          // `root` 로 떨어진다. 그 `root` 도 이제 house 링을 든다(아래).
+          focusAfterArmChange.current = "card";
+          setArmed(null);
+          return;
+        }
         setErrorCopy(outcome.errorCopy ?? "결정을 처리하지 못했습니다.");
         return;
       }
@@ -307,7 +488,7 @@ export function ApprovalActions({
   const approveRef = useRef<HTMLButtonElement | null>(null);
   const rejectRef = useRef<HTMLButtonElement | null>(null);
   const focusAfterArmChange = useRef<
-    "commit" | "approve" | "reject" | "root" | null
+    "commit" | "approve" | "reject" | "root" | "card" | null
   >(null);
 
   useEffect(() => {
@@ -317,8 +498,9 @@ export function ApprovalActions({
     if (target === "commit") commitRef.current?.focus();
     else if (target === "approve") approveRef.current?.focus();
     else if (target === "reject") rejectRef.current?.focus();
+    else if (target === "card" && onLandOnCard !== undefined) onLandOnCard();
     else rootRef.current?.focus();
-  }, [armed]);
+  }, [armed, onLandOnCard]);
 
   function arm(next: Exclude<Armed, null>) {
     // 실행할 호스트가 하나도 없으면 승인은 무장조차 하지 않는다. 서버가 409로
@@ -343,7 +525,12 @@ export function ApprovalActions({
 
   return (
     <div
-      className={cn("px-3 py-2", className)}
+      // `tabIndex={-1}` 로 초점을 받는 자리라 링이 있어야 한다 (R2 H-R2-1).
+      // 없으면 크로미움이 자기 기본 링을 그리고, 그것은 이 팔레트 밖 색이다
+      // (§2.2 한 액센트). 프리플라이트의 `naked_focus` 는 링을 **끈** 자리만
+      // 보므로 이렇게 링이 아예 없던 자리는 기계가 잡지 못한다 — 세 줄 아래
+      // `LinkOnce` 와 카드 `section` 이 이미 드는 그 클래스다.
+      className={cn("px-3 py-2 focus-visible:focus-ring", className)}
       ref={rootRef}
       // 확정 뒤 캐럿이 착지할 자리. 목록에서는 이 행이 곧 사라지므로 호출자가
       // 다시 옮기지만(InboxRoute), 카드에서는 여기가 종착지다.

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Check,
   ClipboardCheck,
@@ -68,7 +68,19 @@ import {
   StreamCaret,
   TurnChip,
 } from "./StatusChip";
-import { ApprovalActions, type Armed } from "./ApprovalActions";
+import {
+  APPROVAL_VERBS,
+  ApprovalActions,
+  LinkOnce,
+  type Armed,
+} from "./ApprovalActions";
+import { ActionResultBody } from "./ActionResultCard";
+import {
+  actionApproveConfirmCopy,
+  approvalRoleCopy,
+  roleRequiredCopy,
+} from "@momo/core/features/approvals/actionRole";
+import type { SecretOnce } from "@momo/core/features/approvals/secretOnce";
 import { APPROVAL_NOTE_TONE_CLASS } from "./approvalNoteTone";
 import { FoldedValue } from "./FoldToggle";
 import {
@@ -96,8 +108,14 @@ import {
 //     to the evidence the human is judging instead of covering it with a modal.
 // =============================================================================
 
-/** One typed key/value row. Never a raw JSON blob (design-taste-web §8). */
-function LabeledRow({
+/**
+ * One typed key/value row. Never a raw JSON blob (design-taste-web §8).
+ *
+ * 내보내는 이유는 `ActionResultCard.tsx` 가 같은 행을 그리기 때문이다. 그 파일이
+ * 자기 행을 다시 지으면 한 타임라인 안에서 승인 카드의 행과 결과 카드의 행이
+ * 다른 여백·다른 정렬로 서고, 그 차이는 아무 뜻도 나르지 않는다.
+ */
+export function LabeledRow({
   label,
   children,
   testId,
@@ -292,8 +310,24 @@ function ApprovalBody({
     decidedAtMs?: number;
     decidedByMemberId?: string;
     note?: string;
+    /**
+     * 결정 응답이 한 번 실어 준 1회 값 (ADR-0186 D4 · 부록 C).
+     *
+     * **이 state 가 그 값이 사는 유일한 자리다.** `card` 에도 store 에도
+     * localStorage 에도 URL 에도 쓰지 않는다. 이 컴포넌트가 언마운트되면
+     * — 탭을 닫든 새로고침하든 채널을 옮기든 — 값은 그대로 사라지고,
+     * 남는 것은 영속 카드의 「1회 표시됐습니다」뿐이다(부록 B).
+     *
+     * 자리가 `ApprovalActions` 안이 아니라 **여기**인 이유: 결정이 확정되면
+     * 아래 footer 가 컨트롤에서 영수증 줄로 바뀌면서 그 컴포넌트가 언마운트된다.
+     * 값을 거기 두면 그려야 할 바로 그 순간에 잃는다.
+     */
+    secretOnce?: SecretOnce;
   } | null>(null);
   const [armed, setArmed] = useState<Armed>(null);
+  // 403 뒤 초점이 내려앉을 자리 (R2 H-R2-1). 카드 자신이다 — 이름과 링을
+  // 이미 가진 유일한 조상이고, 방금 생긴 안내 문장이 그 안에 있다.
+  const cardRef = useRef<HTMLElement | null>(null);
   const approvalsProvided = isSurfaceProvided("approvals");
   // 결정은 REST POST로 나간다. 「레일이 붙어 있는가」와 「이 요청이 나갈 수 있는가」는
   // 다른 질문이고, 승인에는 기한이 있으므로 후자를 물어야 한다 — 웹소켓이 잠깐
@@ -329,6 +363,7 @@ function ApprovalBody({
 
   return (
     <CardFrame
+      sectionRef={cardRef}
       icon={<ShieldQuestion className="size-4" aria-hidden="true" />}
       title={card.title}
       chip={<ApprovalChip status={status} />}
@@ -347,7 +382,18 @@ function ApprovalBody({
       detail={card.detail}
       footer={
         note !== null ? (
-          <ApprovalNoteLine note={note} />
+          <>
+            <ApprovalNoteLine note={note} />
+            {/* 버튼이 있던 자리에 링크가 선다 (ADR-0182 ① · ADR-0186 D4).
+                영수증 **아래**인 것은 읽는 순서 때문이다: 방금 무엇이
+                기록됐는지가 먼저이고, 그 결과로 받은 값이 그다음이다. */}
+            {local?.secretOnce !== undefined && (
+              <LinkOnce
+                secret={local.secretOnce}
+                className="border-t border-line"
+              />
+            )}
+          </>
         ) : card.approvalId !== null ? (
           <ApprovalActions
             approvalId={card.approvalId}
@@ -355,18 +401,51 @@ function ApprovalBody({
             armed={armed}
             setArmed={setArmed}
             execution={card.execution}
+            forbiddenCopy={
+              card.action?.requiredRole
+                ? roleRequiredCopy(card.action.requiredRole)
+                : null
+            }
+            onLandOnCard={() => cardRef.current?.focus()}
+            {...(card.action !== null
+              ? {
+                  // 확정 문장만 갈아 끼운다 (design-review R1 M2). 기본 문장
+                  // 「승인하면 에이전트가 이어서 진행합니다」는 도구 호출 승인의
+                  // 것이고 행동 승인에서는 거짓이다 — 제안한 turn 은 이미
+                  // 끝났고(ADR-0186 D2 run park) 승인하면 **서버가** 실행한다.
+                  // 낱말만 갈라지고 계약은 하나로 남는다(`DecisionVerbs`).
+                  verbs: {
+                    ...APPROVAL_VERBS,
+                    approveConfirm: actionApproveConfirmCopy(
+                      card.action.requiredRole
+                    ),
+                  },
+                }
+              : {})}
             onSettled={(outcome) => {
               const next: {
                 status: ApprovalStatus;
                 decidedAtMs?: number;
                 decidedByMemberId?: string;
                 note?: string;
+                secretOnce?: SecretOnce;
               } = { status: outcome.status ?? "pending" };
               if (outcome.decidedAtMs !== undefined) {
                 next.decidedAtMs = outcome.decidedAtMs;
               }
               if (outcome.decidedByMemberId !== undefined) {
                 next.decidedByMemberId = outcome.decidedByMemberId;
+              }
+              // 승인으로 **확정된** 결정에만 링크가 붙는다. 방향은 우리가 보낸
+              // 것이 아니라 원장이 답한 것으로 판정한다(부록 C: 「`secretOnce`
+              // 는 승인 성공에만 있다」). 영수증에 상태가 없으면 그리지 않는다 —
+              // 거부한 카드 자리에 링크가 서는 것보다 아무것도 없는 편이 낫다.
+              if (
+                outcome.kind === "committed" &&
+                outcome.status === "approved" &&
+                outcome.result?.secretOnce
+              ) {
+                next.secretOnce = outcome.result.secretOnce;
               }
               next.note = decisionNote(outcome).text;
               setLocal(next);
@@ -376,6 +455,40 @@ function ApprovalBody({
       }
     >
       {card.summary && <LabeledRow label="요청">{card.summary}</LabeledRow>}
+      {/* 워크스페이스 행동의 행 (ADR-0186 부록 A).
+          서버가 이름 붙여 보낸 것만, 보낸 순서대로. 이 카드가 두 얼굴을 갖되
+          컴포넌트는 하나라는 것이 §6 의 결론이고, 그 하나됨이 여기 이 몇 줄이다 —
+          블록이 없으면 아래는 전부 지금까지의 도구 호출 승인 그대로다. */}
+      {card.action?.rows.map((row) => (
+        <LabeledRow
+          key={`action-${row.label}`}
+          label={row.label}
+          testId="approval-action-row"
+        >
+          {row.value}
+        </LabeledRow>
+      ))}
+      {card.action !== null && card.action.omittedRows > 0 && (
+        <LabeledRow label="그 밖에" testId="approval-action-omitted">
+          <span data-numeric>
+            {formatCount(card.action.omittedRows)}개를 표시하지 못했습니다.
+          </span>
+        </LabeledRow>
+      )}
+      {card.action?.rationale && (
+        <LabeledRow label="사유" testId="approval-action-rationale">
+          {card.action.rationale}
+        </LabeledRow>
+      )}
+      {card.action?.requiredRole !== undefined &&
+        card.action?.requiredRole !== null && (
+          // 누가 결정할 수 있는지를 **결정하기 전에** 말한다. 이 줄이 없으면
+          // 권한 없는 사람은 누르고 나서야 403 을 만나고, 그 실패는 화면이 미리
+          // 알 수 있었던 것이다.
+          <LabeledRow label="결정 권한" testId="approval-action-role">
+            {approvalRoleCopy(card.action.requiredRole)}
+          </LabeledRow>
+        )}
       {card.isReversible !== undefined && (
         <LabeledRow label="영향" testId="approval-impact">
           {card.isReversible
@@ -976,8 +1089,12 @@ function TurnBody({ card }: { card: AgentTurnCard }) {
  * Shared shell. Focusable so the card carries its own keyboard path: Y arms an
  * approval, N arms a rejection, and both still route through the confirm step
  * (R-1 §4 "확인 경유"). Space toggles the disclosure natively on <summary>.
+ *
+ * `ActionResultCard.tsx` 가 이것을 든다(위 `LabeledRow` 와 같은 이유). 두 모듈이
+ * 서로를 참조하지만 둘 다 **함수 선언**이라 호이스팅되고, 실제 호출은 렌더 시점
+ * 이므로 순환이 초기화 순서를 타지 않는다.
  */
-function CardFrame({
+export function CardFrame({
   icon,
   title,
   chip,
@@ -990,6 +1107,7 @@ function CardFrame({
   keyboard = false,
   onApprove,
   onReject,
+  sectionRef,
 }: {
   icon: React.ReactNode;
   title: string;
@@ -1005,9 +1123,17 @@ function CardFrame({
   keyboard?: boolean;
   onApprove?: () => void;
   onReject?: () => void;
+  /**
+   * 카드의 `section` 노드. 지금 유일한 소비자는 403 뒤 초점 착지다
+   * (design-review #2540 R2 H-R2-1): 이 요소는 이름(`aria-label={title}`)과
+   * house 링을 이미 갖고 있어서 키보드가 내려앉을 자리로 맞고, 결정 컨트롤은
+   * 그 노드를 스스로 만들지 않으므로 참조가 밖에서 들어와야 한다.
+   */
+  sectionRef?: React.Ref<HTMLElement>;
 }) {
   return (
     <section
+      ref={sectionRef}
       data-testid="agent-card"
       data-card-kind={kind}
       data-status={status}
@@ -1075,6 +1201,9 @@ export function AgentCard({
   }
   if (card.kind === "completion_report") {
     return <CompletionReportBody card={card} />;
+  }
+  if (card.kind === "action_result") {
+    return <ActionResultBody card={card} directory={directory} />;
   }
   if (card.kind === "tool") return <ToolBody card={card} />;
   return <TurnBody card={card} />;
