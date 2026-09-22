@@ -592,8 +592,12 @@ describe("팔레트 상태줄", () => {
     });
   }
 
+  // 시간은 **오직 여기서만** 흐른다. `shouldAdvanceTime: true`는 가짜 시계를
+  // 진짜 시간과 함께 굴려서, 부하가 걸린 머신에서는 단정 전에 3s가 지나 버린다
+  // (병합 트리 전체 스위트에서 실측). 타이머를 재는 시험은 시간을 손으로만
+  // 밀어야 「3s 뒤에 사라진다」와 「언젠가 사라진다」를 구별한다.
   it("문장을 쥐었다가 3s 뒤에 놓는다", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers();
     await mountProbe(true);
     await act(async () => {
       announceRef?.("액센트를 새벽으로 바꿨습니다");
@@ -612,6 +616,7 @@ describe("팔레트 상태줄", () => {
   });
 
   it("다시 열면 지난 회차의 문장이 없다", async () => {
+    vi.useFakeTimers();
     await mountProbe(true);
     await act(async () => {
       announceRef?.("설정으로 이동");
