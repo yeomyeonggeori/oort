@@ -42,7 +42,7 @@
 ### 운영 파이프라인
 
 - **트랙**: track/uxui · track/engine에서 랜딩(트랙 내 머지 자율), **main 승격은 성재 명시 승인**(`docs/TRACKS.md`).
-- **워커 레인**: grok 4.6(grok build CLI, 2026-09-02 성재 지시 — 병렬 상한 2·조기 종료 시 1), 리뷰는 design-review 에이전트 폐곡선(Blocker 0·High 0) 후 머지. 레인·모델 정본은 (예정) `docs/planning/PIPELINE.md`.
+- **실행 레인**: 모델·하네스·병렬 상한은 `docs/planning/PIPELINE.md`의 현재 값을 따른다. UI는 독립 design-review(Blocker 0·High 0) 후 머지한다.
 - **푸시**: APNs 종단 증명 완료 · PushRelay 배포 · id-only payload(ADR-0120). 셀프호스트는 Dawn PushRelay 경유(D1-A). Apple 서명 자산 확보 완료, CI 레인만 미구축.
 
 ---
@@ -60,6 +60,7 @@
 | 모바일 | **M0 QR 기기 연결** | ADR-0180 1회용 링크 토큰: 서버 라우트 2 + 웹 QR 카드 + 폰 스캔 화면. **G1 창 안에서 선행**(셀프호스팅 blocker 무관, Railway E2E 마지막 칸) | 편성 완료 |
 | 모바일 | **M1 폰 패리티 · M2 TestFlight internal** | 관전·승인 축 완주 + 웹 전용 축 이관(#1908 #1892 #1876 #1748 #1752 #1604 #1600 #1396) + 폰 온보딩. **G1 이후 ITO와 병렬**. TestFlight internal은 M0 직후(성재 손) | 편성 완료(순서 확정) |
 | 파이프 | **P1~P8** | PIPELINE.md 단일 설정(레인 추상화) · AGENTS.md→AGENTS.md 병합 · `.claude/commands` · worker-lane 스킬 · handoffs archive · planning_context 갱신 | 편성 완료 |
+| 공통 | **AX 에이전트 행동**(2026-09-22 편성, `docs/planning/2026-09-22-plan-revision.md`) | ADR-0186(Proposed): 에이전트 제안→사람 승인→서버 실행 + 선언형 카드 카탈로그. AX-2 레지스트리·팔레트(UX-R3a 축소 해제) → AX-3a/3b 초대 1종 → AX-4 카드 → AX-6 E2E(ITO 전) → AX-5·7·8(ITO 뒤) | 편성 완료·ADR Accept 대기 |
 | 공통 | **런칭 보조축 — Bring your hosted agent** | ADR-0162 축 — 계약·순서는 `BUILD_TICKETS.md` §런칭 보조축(유지). UX-R2c(첫 에이전트 연결 퍼널)·SH-6이 이 축의 UI/서버 잔여를 흡수 | 부분 랜딩 |
 
 ### 게이트
