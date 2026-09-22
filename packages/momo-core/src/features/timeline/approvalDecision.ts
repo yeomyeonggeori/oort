@@ -5,6 +5,10 @@ import {
   serverSurface,
 } from "../capabilities/serverSurfaces";
 import { parseApprovalStatus, type ApprovalStatus } from "./agentCardModel";
+import {
+  parseDecisionResult,
+  type DecisionActionResult,
+} from "../approvals/secretOnce";
 
 // =============================================================================
 // Approval decision transport (R-1 §4). Existing landed REST, nothing new:
@@ -58,6 +62,14 @@ export interface ApprovalDecisionReceipt {
   decidedAtMs?: number | null;
   decision_reason?: string | null;
   decisionReason?: string | null;
+  /**
+   * 워크스페이스 행동이 실제로 한 일 (ADR-0186 부록 C). 승인 성공에만 실린다.
+   *
+   * 읽기만 하고 해석은 `features/approvals/secretOnce.ts` 가 진다 — 1회 값의
+   * 규율(D4: 여기 말고는 어디에도 두지 않는다)이 이 전송 파일이 아니라 그
+   * 모듈 하나에 적혀 있어야, 두 번째 소비자(폰 AX-7)가 규율까지 같이 받는다.
+   */
+  result?: unknown;
 }
 
 /**
@@ -97,6 +109,15 @@ export interface DecisionOutcome {
   decidedByMemberId?: string;
   /** Quiet note for `superseded` (decided elsewhere, or expired first). */
   note?: string;
+  /**
+   * 승인 성공에만 있는 행동 결과 (ADR-0186 부록 C).
+   *
+   * **호출자는 이것을 저장하지 않는다.** 안에 든 `secretOnce.value` 는 이
+   * 응답에만 존재하는 1회 값이고(D4), 화면은 그것을 React 상태에 두었다가
+   * 언마운트와 함께 잃는다. props·store·localStorage·URL 에 쓰는 구현은
+   * ADR 이 이름으로 금지한 위반이다.
+   */
+  result?: DecisionActionResult;
   /** User copy for `error`. States what happened and what to do next. */
   errorCopy?: string;
   /**
@@ -105,6 +126,23 @@ export interface DecisionOutcome {
    *
    *   idempotency_conflict  캐시된 멱등 키를 버리고 새 키로 다시 시도해야 한다.
    *   surface_absent        이 서버에 승인 라우트가 없다. **장애가 아니다.**
+   *   role_required         결정자의 역할이 모자라다(ADR-0186 §5).
+   *   forbidden             그 밖의 403. 무엇이 모자란지 서버가 말하지 않았다.
+   *
+   * ## 코드가 어디로 오는가 (AX-3b #2549 계약 확정)
+   *
+   * `ErrorResponse.code` 가 아니다 — 그 봉투에는 코드 칸이 없다(`{error:{message}}`).
+   * 이 라우트는 **403 도 영수증**으로 답하도록 정의돼 있고(이 파일 머리말의
+   * `receiptStatuses`), 그래서 역할 부족은 영수증의 `status: "role_required"` 로
+   * 온다. 그 값은 `approval_status` PG enum 밖이라 `parseApprovalStatus` 가
+   * `null` 을 답하고, 그것이 옳다: 승인의 **상태**는 여전히 `pending` 이고
+   * (§5: 「approval 은 여전히 pending 이다」) `role_required` 는 이 **결정 시도**에
+   * 일어난 일이다. 두 축을 섞지 않으려고 상태가 아니라 `errorCode` 로 읽는다.
+   *
+   * R1 에서 이 파일은 「없는 필드를 짐작하지 않는다」며 403 을 `forbidden` 하나로
+   * 뭉쳤고, 문장은 카드가 아는 `action.required_role` 로 골랐다. 계약이 확정된
+   * 지금 그 한 줄이 늘었을 뿐 **문장을 고르는 쪽은 그대로다** — 서버는 「역할이
+   * 모자라다」까지 말하고, 「어느 역할인가」는 카드가 부록 A 에서 읽는다.
    *
    * `surface_absent`가 별도의 `kind`가 아니라 여기 있는 이유: 이 결과는
    * `kind: "error"`로 남아야 한다. 결정은 실제로 기록되지 않았고, 그것을
@@ -118,7 +156,11 @@ export interface DecisionOutcome {
    * (features/capabilities/serverSurfaces.ts), 한 화면에서 같은 사실이 두 가지
    * 색을 갖는 일이 없어야 한다.
    */
-  errorCode?: "idempotency_conflict" | "surface_absent";
+  errorCode?:
+    | "idempotency_conflict"
+    | "surface_absent"
+    | "role_required"
+    | "forbidden";
 }
 
 const SETTLED = new Set<ApprovalStatus>([
@@ -296,6 +338,11 @@ export function interpretReceipt(
 
   if (httpStatus === 200) {
     const outcome: DecisionOutcome = { kind: "committed" };
+    // 부록 C 는 이 블록을 **200 에만** 못박았다("`secretOnce` 는 승인 성공에만
+    // 있다"). 409/403 에서도 읽으면, 재생된 영수증이나 거절 응답에 우연히 실린
+    // 것을 화면이 방금 만들어진 링크로 그리게 된다.
+    const result = parseDecisionResult(receipt.result);
+    if (result !== null) outcome.result = result;
     if (status !== null) outcome.status = status;
     if (decidedAtMs !== undefined) outcome.decidedAtMs = decidedAtMs;
     if (decidedBy !== undefined) outcome.decidedByMemberId = decidedBy;
@@ -327,8 +374,21 @@ export function interpretReceipt(
       errorCopy: "이 승인 요청을 찾을 수 없습니다. 이미 정리되었을 수 있습니다.",
     };
   }
+  // AX-3b #2549: 역할 부족만 영수증이 이름을 댄다. 그 밖의 403 은 지금까지처럼
+  // 「무엇이 모자란지 모르는 거절」이고 문장도 그대로다(도구 호출 승인 회귀 0).
+  if (receipt.status === "role_required") {
+    return {
+      kind: "error",
+      errorCode: "role_required",
+      // 역할 이름 없이도 참인 문장. 어느 역할인지 아는 카드는 이것을 자기
+      // 문장으로 덮는다(`ApprovalActions.forbiddenCopy`).
+      errorCopy:
+        "이 결정을 내릴 수 있는 역할이 아닙니다. 이 요청은 아직 대기 중입니다.",
+    };
+  }
   return {
     kind: "error",
+    errorCode: "forbidden",
     errorCopy: "이 승인을 결정할 권한이 없습니다. 채널 멤버인지 확인하세요.",
   };
 }

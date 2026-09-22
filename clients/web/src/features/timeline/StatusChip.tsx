@@ -17,6 +17,10 @@ import {
   COMPLETION_OUTCOME_TONE,
   type CompletionOutcome,
 } from "@momo/core/features/timeline/completionReportCard";
+import {
+  ACTION_RESULT_STATUS_LABEL,
+  type ActionResultStatus,
+} from "@momo/core/features/timeline/actionResultCard";
 import { COMPLETION_TONE_CLASS } from "./completionTone";
 
 // =============================================================================
@@ -146,6 +150,43 @@ export function CompletionReportChip({ outcome }: { outcome: CompletionOutcome }
       )}
     >
       {COMPLETION_OUTCOME_LABEL[outcome]}
+    </span>
+  );
+}
+
+/**
+ * 워크스페이스 행동 결과 칩 (ADR-0186 부록 B).
+ *
+ * 잉크는 승인 칩과 같다 — 「거부됨」은 여기서도 `danger` 이고 「만료됨」은 여기서도
+ * 중성이다. 한 사람이 승인 카드에서 읽은 낱말을 결과 카드에서 다른 색으로 다시
+ * 읽으면, 두 가지 일이 일어났다고 읽는다.
+ *
+ * **그릇은 위 세 표와 다르다.** 이 표만 `*-soft` 톤 그릇을 쓴다(#1515 의 규칙).
+ * 위 세 표는 그 규칙보다 먼저 있었고 `chipVessel.test.ts` 의 잔량 표에 좌표와 수로
+ * 적혀 있다 — 새로 적는 표까지 잔량에 얹으면 그 표는 「줄어들기만 한다」를 잃는다.
+ *
+ * `role_required` 가 `warn` 인 이유는 `ApprovalNoteLine` 의 `blocked` 와 같다:
+ * 위험이 아니라 **때**의 문제라 `danger` 가 아니고, 조용한 안내에 묻히면 사람이
+ * 아무것도 하지 않으므로 중성도 아니다. 실패가 아니기 때문이다 — 아무것도
+ * 고장나지 않았고, 권한을 가진 사람이 결정하면 그대로 이어진다.
+ */
+const ACTION_RESULT_CHIP_CLASS: Readonly<
+  Record<ActionResultStatus, string>
+> = {
+  executed: "bg-ok-soft text-ok",
+  rejected: "bg-danger-soft text-danger",
+  expired: "bg-muted-soft text-ink-muted",
+  role_required: "bg-warn-soft text-warn",
+};
+
+export function ActionResultChip({ status }: { status: ActionResultStatus }) {
+  return (
+    <span
+      data-testid="agent-status-chip"
+      data-status={status}
+      className={cn(CHIP_CLASS, ACTION_RESULT_CHIP_CLASS[status])}
+    >
+      {ACTION_RESULT_STATUS_LABEL[status]}
     </span>
   );
 }

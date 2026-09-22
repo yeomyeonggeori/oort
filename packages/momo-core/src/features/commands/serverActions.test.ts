@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { parseActionsCatalog } from "./serverActions";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  ACTION_DESTINATION_META,
+  actionDestination,
+  fetchActionsCatalog,
+  parseActionsCatalog,
+} from "./serverActions";
+import { installCoreHost, resetCoreHost } from "../../runtime/host";
 
 // ADR-0186 부록 E의 본문 그대로.
 const INVITE = {
@@ -77,5 +83,97 @@ describe("행동 카탈로그 파싱 (부록 E)", () => {
   it("계약에 없는 필드는 버린다", () => {
     const parsed = parseActionsCatalog({ actions: [INVITE] });
     expect(parsed?.[0]).not.toHaveProperty("argsSchema");
+  });
+});
+
+// ---- AX-4: 요청과 목적지 ----------------------------------------------------
+
+function installHost(): void {
+  installCoreHost({
+    apiBase: () => "https://oort.test",
+    absoluteApiBase: () => "https://oort.test",
+    buildMode: () => "test",
+    session: {
+      getAccessToken: () => "access",
+      getRefreshToken: () => null,
+      getPersistedSession: () => null,
+      applyLogin: () => {},
+      applyRotation: () => {},
+      markAuthExpired: () => {},
+      clearSession: () => {},
+    },
+  });
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  resetCoreHost();
+});
+
+function respond(body: unknown, status = 200): typeof fetch {
+  return vi.fn(
+    async () =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { "content-type": "application/json" },
+      })
+  ) as unknown as typeof fetch;
+}
+
+describe("카탈로그 요청 (부록 E)", () => {
+  it("계약대로 온 본문을 읽고, 워크스페이스 경로로 묻는다", async () => {
+    installHost();
+    const fetchMock = respond({ actions: [INVITE] });
+    vi.stubGlobal("fetch", fetchMock);
+    const parsed = await fetchActionsCatalog("ws-1");
+    expect(parsed?.[0]?.id).toBe("invite.create");
+    expect(String((fetchMock as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0])).toBe(
+      "https://oort.test/v1/workspaces/ws-1/actions"
+    );
+  });
+
+  it("라우트가 없으면 null 이다 — 그리고 null 이면 그룹이 없다", async () => {
+    installHost();
+    vi.stubGlobal("fetch", respond({ error: { message: "not found" } }, 404));
+    expect(await fetchActionsCatalog("ws-1")).toBeNull();
+  });
+
+  it("네트워크가 끊겨도 던지지 않는다", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("network down");
+      })
+    );
+    expect(await fetchActionsCatalog("ws-1")).toBeNull();
+  });
+
+  it("본문이 계약과 다르면 null 이다 (반쯤 아는 목록을 그리지 않는다)", async () => {
+    installHost();
+    vi.stubGlobal("fetch", respond({ actions: [{ id: "x" }] }));
+    expect(await fetchActionsCatalog("ws-1")).toBeNull();
+  });
+});
+
+describe("행동 줄의 목적지 (v1)", () => {
+  it("실물 화면이 있는 것만 답한다", () => {
+    expect(actionDestination("invite.create")).toBe("/settings?section=members");
+    expect(actionDestination("webhook.create")).toBe("/settings?section=webhooks");
+  });
+
+  it("모르는 id 는 null 이고, null 이면 그 줄은 눌리지 않는다", () => {
+    expect(actionDestination("channel.create")).toBeNull();
+    expect(actionDestination("")).toBeNull();
+  });
+
+  it("프로토타입 오염으로 목적지가 생기지 않는다", () => {
+    expect(actionDestination("constructor")).toBeNull();
+    expect(actionDestination("__proto__")).toBeNull();
+    expect(actionDestination("toString")).toBeNull();
+  });
+
+  it("작은 글씨는 누르면 일어나는 일을 말한다", () => {
+    expect(ACTION_DESTINATION_META).toBe("설정에서 직접 하기");
   });
 });
