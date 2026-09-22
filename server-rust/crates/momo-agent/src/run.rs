@@ -1346,6 +1346,48 @@ pub async fn end_parked_run_in_tx(
     Ok(updated.rows_affected() > 0)
 }
 
+/// End a parked run **with** a completion — ADR-0186 D2's approve arm.
+///
+/// The third member of the family, and it exists for the reason the other two
+/// do: the guard is the contract. A workspace action is executed by the decision
+/// transaction itself, so the run it was proposed from ends `succeeded` right
+/// there, carrying `{actionId, ref}` as its output — and it must only be able to
+/// end a run that is genuinely still parked.
+///
+/// [`finish_run_in_tx`] cannot serve this: it carries **no status guard at all**
+/// (`WHERE id = $1`), so a run a human had already stopped, or one the expiry
+/// sweep had already timed out, would be dragged back to `succeeded` by a
+/// decision that arrived a moment later.
+///
+/// `false` is not "nothing to do" here, and callers must not treat it as such:
+/// unlike [`crate::requeue_run_from_approval_in_tx`] — where a lost race merely
+/// means no job is enqueued — this statement runs **after** the action has
+/// already been executed in the same transaction. A `false` therefore means a
+/// real invite was minted for a run that is no longer waiting for it, and the
+/// only honest answer is to roll the whole decision back.
+pub async fn succeed_parked_run_in_tx(
+    conn: &mut PgConnection,
+    run_id: Uuid,
+    output: &Value,
+) -> Result<bool, DbError> {
+    let updated = sqlx::query(
+        "UPDATE agent_run \
+            SET status = 'succeeded'::run_status, \
+                output = $2, \
+                error = NULL, \
+                deadline_at = NULL, \
+                updated_at = now(), \
+                finished_at = now() \
+          WHERE id = $1 \
+            AND status = 'awaiting_approval'",
+    )
+    .bind(run_id)
+    .bind(output)
+    .execute(&mut *conn)
+    .await?;
+    Ok(updated.rows_affected() > 0)
+}
+
 // ---------------------------------------------------------------------------
 // the human stop (goal SRV-C2 — ADR-0132 휴먼 정지권)
 //

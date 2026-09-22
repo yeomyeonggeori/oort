@@ -1129,6 +1129,43 @@ pub async fn patch_message_props_in_tx(
     Ok(updated.rows_affected() > 0)
 }
 
+/// [`patch_message_props_in_tx`] plus a list of keys to **remove**.
+///
+/// The shallow `||` merge cannot delete: writing `{"k": null}` leaves the key
+/// present holding a JSON null, and a reader that asks `"k" in props` still
+/// sees it. That difference is load-bearing wherever a props key means "this
+/// happened" by its **presence** — ADR-0186's `last_attempt` is the first such
+/// key (a decision refused for want of authority sets it; the decision that
+/// follows must make it gone, not null).
+///
+/// `- text[]` is the jsonb delete operator, applied after the merge so one
+/// statement can set some keys and drop others without reading the object
+/// first — a read-modify-write here would race the other writers of this row.
+/// Removing a key that was never there is a no-op, which is why the decision
+/// route can prune unconditionally instead of branching on card kind.
+///
+/// Emits no broadcast, for the same reason [`patch_message_props_in_tx`] does
+/// not.
+pub async fn patch_and_prune_message_props_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    message_id: Uuid,
+    patch: &Value,
+    prune: &[&str],
+) -> Result<bool, DbError> {
+    let prune: Vec<String> = prune.iter().map(|key| (*key).to_string()).collect();
+    let updated = sqlx::query(
+        "UPDATE message             SET props = (COALESCE(props, '{}'::jsonb) || $3) - $4::text[]           WHERE id = $2 AND workspace_id = $1",
+    )
+    .bind(workspace_id)
+    .bind(message_id)
+    .bind(patch)
+    .bind(&prune)
+    .execute(&mut *conn)
+    .await?;
+    Ok(updated.rows_affected() > 0)
+}
+
 /// List a channel's live messages in ascending `seq` order (the authoritative
 /// per-channel order), capped at `limit`.
 pub async fn list_messages(

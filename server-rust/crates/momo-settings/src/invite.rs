@@ -36,6 +36,23 @@ pub struct InviteCode {
     pub updated_at_ms: i64,
 }
 
+/// `audit_log.action` for a minted invite.
+///
+/// A constant rather than a literal because there are now **two** writers: the
+/// operator's own `POST …/invites` (`routes::invites::create`) and the decision
+/// route's `invite.create` executor (ADR-0186 D2), which mints through the very
+/// same [`create_invite`] with the approver's authority. One audit vocabulary
+/// for one act, whichever door it came through.
+pub const INVITE_CREATED_AUDIT_ACTION: &str = "invite.created";
+
+/// `detail.schema` of that row.
+///
+/// The executor adds `via_agent` and `approval_id` to the detail object and
+/// keeps the version: the schema describes the same event with more provenance,
+/// not a different event. Role and reach only — never the code, never its hash,
+/// never the preview.
+pub const INVITE_CREATED_AUDIT_SCHEMA: &str = "momo.invite.created.v1";
+
 /// The one response that ever carries the raw code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreatedInvite {
