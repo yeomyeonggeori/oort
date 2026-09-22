@@ -588,10 +588,14 @@ pub fn invite_result_body(role: &str, max_uses: i32, expires_in_days: i64) -> St
 
 /// The props patch a refused decision leaves on the request card.
 ///
-/// `Value::Null` clears it: the next decision — the admin's — patches the card
-/// with `decided_props_patch` *and* this, so a card that says 「승인됨」 cannot
-/// also still say the last attempt was refused.
-pub fn last_attempt_patch(last_attempt: Option<&str>) -> Value {
+/// There is deliberately **no** "clear" form of this patch. A shallow jsonb
+/// merge cannot delete a key — `{"last_attempt": null}` leaves it present
+/// holding a null, and a client asking `"last_attempt" in props` would still
+/// see it. So the decision that settles the card **prunes** the key instead
+/// (`momo_messaging::patch_and_prune_message_props_in_tx`), and both the
+/// approve and the reject arm do it: a decided card must not still say the last
+/// attempt needed an admin.
+pub fn last_attempt_patch(last_attempt: &str) -> Value {
     json!({ LAST_ATTEMPT_PROPS_KEY: last_attempt })
 }
 
@@ -936,13 +940,56 @@ mod tests {
         );
     }
 
-    /// The refusal patch sets one word, and the decision that follows clears it.
+    /// The refusal patch sets one word and nothing else; clearing it is a
+    /// **removal**, which this builder deliberately cannot express.
     #[test]
-    fn the_last_attempt_patch_is_one_key_that_can_be_cleared() {
+    fn the_last_attempt_patch_sets_one_key_and_cannot_null_it() {
         assert_eq!(
-            last_attempt_patch(Some(ROLE_REQUIRED)),
+            last_attempt_patch(ROLE_REQUIRED),
             json!({"last_attempt": "role_required"})
         );
-        assert_eq!(last_attempt_patch(None), json!({"last_attempt": null}));
+        assert_eq!(
+            last_attempt_patch(ROLE_REQUIRED)
+                .as_object()
+                .expect("object")
+                .len(),
+            1
+        );
+    }
+
+    /// **The gate reads what the card published** (ADR-0186 부록 A).
+    ///
+    /// The approval card advertises `action.required_role` and the decision
+    /// route judges the approver against the registry's `RequiredRole`. If
+    /// those two ever came from different places, a card could say 「관리자가
+    /// 승인해야 합니다」 while the server let somebody else through — or the
+    /// reverse. They are one field, and this is the test that says so for every
+    /// action the registry carries.
+    #[test]
+    fn the_card_publishes_exactly_the_role_the_gate_will_require() {
+        let expires_at =
+            chrono::DateTime::from_timestamp_millis(1_700_000_000_000).expect("an instant");
+        for action in ACTIONS {
+            let props = workspace_action_request_props(
+                Uuid::from_u128(1),
+                Uuid::from_u128(2),
+                Uuid::from_u128(3),
+                action,
+                action_block(action, vec![], None),
+                expires_at,
+            );
+            assert_eq!(
+                props["action"]["required_role"],
+                json!(action.required_role.as_wire()),
+                "{} publishes a role the gate does not read",
+                action.id
+            );
+            // v1's whole vocabulary is one word. A second variant must reach
+            // the decision route's `match` (routes::approvals) before it
+            // reaches this registry — the match is exhaustive so that adding
+            // one here fails to compile there.
+            assert_eq!(action.required_role, RequiredRole::Admin, "{}", action.id);
+            assert_eq!(action.required_role.as_wire(), "admin");
+        }
     }
 }

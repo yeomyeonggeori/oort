@@ -789,6 +789,15 @@ The same call also updates the Centrifugo allowlist and the drive base URL
 is refused (#1792). Run without `--public-origin` and the two keys are not
 written — the local loopback path stays as-is.
 
+Behind a reverse proxy, also set **`MOMO_PUBLIC_BASE_URL` to the absolute
+https origin people actually open** (`https://<host>`, no trailing path).
+The API reads it when it has to name this deployment to a person — today
+that is the one-time invite link an approval decision answers with
+(ADR-0186). Unset, the link is built from that request's `Host` header,
+which is correct when one site serves both the SPA and `/v1` and wrong when
+it does not. A value that is not absolute https is **ignored** and the
+server says so in one line at startup, rather than silently falling back.
+
 The public overlay passes that env into the container. Empty env makes
 compose/`caddy validate` fail. That is the actual ACME misfire block. Start
 this overlay **only on a machine that holds DNS for that host**. Do not

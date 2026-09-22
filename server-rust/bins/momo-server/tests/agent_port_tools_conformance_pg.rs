@@ -3432,10 +3432,12 @@ async fn an_approved_workspace_action_mints_the_invite_and_shows_the_link_once()
             .unwrap();
     assert_eq!(card_props["status"], json!("approved"));
     assert_eq!(card_props["approval_status"], json!("approved"));
-    assert_eq!(
-        card_props["last_attempt"],
-        Value::Null,
-        "an approved card must not still say the last attempt needed an admin"
+    assert!(
+        card_props.get("last_attempt").is_none(),
+        "an approved card must not still say the last attempt needed an admin — \
+         and the key must be GONE, not null: a client that reads it by presence \
+         (`\"last_attempt\" in props`) cannot tell a null from a refusal. \
+         {card_props}"
     );
 
     // ---- the audit: two rows, and the generic one is not among them --------
@@ -3697,5 +3699,217 @@ async fn a_late_tap_on_a_workspace_action_expires_it_and_mints_nothing() {
             .unwrap(),
         0,
         "an overdue card mints nothing"
+    );
+}
+
+/// **M1 — the run left its hold between the execution and the transition.**
+///
+/// ADR-0186 D2 mints the invite and only then moves the run out of
+/// `awaiting_approval`. A human stop or the expiry sweep can win that race, and
+/// when it does the invite must not survive: `succeed_parked_run_in_tx`
+/// answering `false` is the only guard between "a person approved this" and "an
+/// invite exists for a run somebody else already ended".
+///
+/// This drives the race by cancelling the run under a still-pending approval —
+/// exactly the state `routes::agent_runs`' human stop produces if its own
+/// approval sweep ever misses one — and measures both halves: the transaction
+/// rolled back (no invite, no ledger row, the approval still pending) and the
+/// answer is the receipt clients already decode, not a 500 envelope.
+///
+/// Sabotage: change the guard to `let _ = succeed_parked_run_in_tx(…)` and this
+/// goes red on the very first assertion, because the decision then commits.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_approval_whose_run_left_the_hold_rolls_back_and_answers_a_receipt() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+
+    let (approval_id, card_message_id) =
+        propose_invite(&client, &base, &su, &fixture, json!({"role": "member"})).await;
+    let messages_before = channel_message_count(&su, fixture.workspace, fixture.channel).await;
+
+    // The run ends while the card is still pending — the approval row is
+    // untouched, so the decision route walks straight into the executor.
+    sqlx::query(
+        "UPDATE agent_run SET status='cancelled', finished_at=now() \
+          WHERE id = (SELECT run_id FROM approval WHERE workspace_id=$1 AND id=$2)",
+    )
+    .bind(fixture.workspace)
+    .bind(approval_id)
+    .execute(&su)
+    .await
+    .unwrap();
+
+    let (status, headers, answered) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(
+        status, 409,
+        "a lost race is an expected failure on this route, not a 500: {answered}"
+    );
+    assert_eq!(
+        answered["status"], "run_not_parked",
+        "…and it is receipt-shaped, like every other expected failure here: {answered}"
+    );
+    assert!(answered.get("result").is_none(), "{answered}");
+    assert!(
+        answered.get("error").is_none(),
+        "the generic envelope would make this the one 500 on a receipt route: {answered}"
+    );
+    assert_eq!(
+        headers
+            .get("cache-control")
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
+
+    // ---- everything the executor wrote is gone -----------------------------
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM invite_code WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap(),
+        0,
+        "the minted invite MUST be rolled back — an invite for a run nobody is \
+         waiting on is the exact state this guard exists to prevent"
+    );
+    let (approval_status, decided_by): (String, Option<Uuid>) = sqlx::query_as(
+        "SELECT status::text, decided_by FROM approval WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(approval_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(approval_status, "pending", "the approval is not consumed");
+    assert_eq!(decided_by, None);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM approval_decision WHERE workspace_id=$1 AND approval_id=$2"
+        )
+        .bind(fixture.workspace)
+        .bind(approval_id)
+        .fetch_one(&su)
+        .await
+        .unwrap(),
+        0,
+        "no ledger row survived the rollback"
+    );
+    assert_eq!(
+        channel_message_count(&su, fixture.workspace, fixture.channel).await,
+        messages_before,
+        "and no result line reached the channel"
+    );
+    let audit_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND (detail->>'approval_id') = $2",
+    )
+    .bind(fixture.workspace)
+    .bind(approval_id.to_string())
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(audit_rows, 0, "nor any audit row");
+    let card_props: Value =
+        sqlx::query_scalar("SELECT props FROM message WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(card_message_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(card_props["status"], json!("pending"), "{card_props}");
+}
+
+/// **L1 — a rejected card must not still say an admin was needed.**
+///
+/// The refusal patch (`last_attempt`) is written outside any decision, so the
+/// arm that finally settles the card has to clear it — and both arms do. The
+/// approve arm is measured by the executor test above; this is the reject one,
+/// which is the likelier sequence in practice: a member taps 승인, is told an
+/// admin must do it, and closes their own proposal instead.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn rejecting_after_a_refused_tap_clears_the_admin_notice() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+
+    let (approval_id, card_message_id) =
+        propose_invite(&client, &base, &su, &fixture, json!({"role": "member"})).await;
+
+    // A member taps 승인 and is told who may.
+    let (status, _headers, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &plain_jwt,
+        approval_id,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    let card_props: Value =
+        sqlx::query_scalar("SELECT props FROM message WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(card_message_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(card_props["last_attempt"], json!("role_required"));
+
+    // **The same member may still reject** — ADR-0186 D2 keeps the reject arm
+    // as it was, and that asymmetry is deliberate: a person must be able to
+    // close their own agent's proposal, or the parked run holds the agent's
+    // only concurrency slot until the TTL.
+    let (status, _headers, rejected) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &plain_jwt,
+        approval_id,
+        false,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{rejected}");
+    assert_eq!(rejected["status"], json!("rejected"));
+
+    let card_props: Value =
+        sqlx::query_scalar("SELECT props FROM message WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(card_message_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(card_props["status"], json!("rejected"));
+    assert!(
+        card_props.get("last_attempt").is_none(),
+        "a rejected card saying `last_attempt: role_required` gives two answers \
+         to one question — and the key must be GONE, not null: {card_props}"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM invite_code WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap(),
+        0,
+        "a rejection mints nothing"
     );
 }

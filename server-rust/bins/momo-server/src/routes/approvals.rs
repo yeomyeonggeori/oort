@@ -86,7 +86,8 @@ use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
 use momo_messaging::{
-    cent_channel, patch_message_props_in_tx, send_message_in_tx, MessageType, NewMessage,
+    cent_channel, patch_and_prune_message_props_in_tx, patch_message_props_in_tx,
+    send_message_in_tx, MessageType, NewMessage,
 };
 use momo_outbox::{emit_outbox, OutboxKind, RESUME_APPROVAL_JOB_METHOD};
 use momo_settings::{create_invite, INVITE_CREATED_AUDIT_ACTION, INVITE_CREATED_AUDIT_SCHEMA};
@@ -112,6 +113,37 @@ use crate::AppState;
 
 /// The body of the `tool_result` a rejection appends (Swift :847).
 const REJECTED_TOOL_RESULT_BODY: &str = "Tool call rejected by human approval.";
+
+/// The one expected failure this route discovers **after** its first write, and
+/// the receipt `status` it answers with.
+///
+/// ADR-0186 D2 executes the action and only then moves the run out of its hold.
+/// If the run left the hold in between — a human stop, or the expiry sweep
+/// winning the race — the invite has already been minted in this transaction
+/// and the only honest answer is to roll the whole decision back. But a
+/// rollback is `Err(DbError)`, and `settle_db` folds every `Err` into an opaque
+/// 500, which would make this the one outcome on a route whose every other
+/// expected failure is a receipt (403/404/409). A card stuck in that state
+/// would then answer 500 to every tap forever, with the approval still pending.
+///
+/// So the executor returns a **sentinel** protocol error: the transaction rolls
+/// back exactly as it must, and [`decide`] recognises the sentinel and answers
+/// the receipt-shaped 409 the clients already decode.
+const RUN_NOT_PARKED: &str = "run_not_parked";
+
+/// The sentinel itself. Namespaced and versioned so it cannot collide with a
+/// genuine `sqlx::Error::Protocol` message from the driver.
+const RUN_NOT_PARKED_SENTINEL: &str = "momo.approvals.run_not_parked.v1";
+
+/// Is this the rollback [`RUN_NOT_PARKED`] asked for, rather than a real
+/// database failure?
+fn is_run_not_parked(error: &momo_db::DbError) -> bool {
+    matches!(
+        error,
+        momo_db::DbError::Sqlx(momo_db::sqlx::Error::Protocol(message))
+            if message == RUN_NOT_PARKED_SENTINEL
+    )
+}
 
 // ---------------------------------------------------------------------------
 // list
@@ -306,7 +338,22 @@ async fn decide(
     })
     .await;
 
-    let decision = settle_db("approvals.decide", outcome)?;
+    let decision = match outcome {
+        // The action was executed and then un-executed: the transaction rolled
+        // back, so nothing was minted, nothing was decided, and the approval is
+        // still pending. Answering the receipt rather than a 500 is what lets a
+        // client say 「이 승인의 실행 대상이 이미 끝났습니다」 and stop offering
+        // the button.
+        Err(ref error) if is_run_not_parked(error) => refusal(
+            approval_id,
+            member_id,
+            RUN_NOT_PARKED,
+            "this approval's run is no longer waiting for a decision",
+            StatusCode::CONFLICT,
+            Utc::now(),
+        ),
+        outcome => settle_db("approvals.decide", outcome)?,
+    };
     let status = decision.status;
     let secret_once = decision.secret_once;
     let mut receipt: ApprovalDecisionReceipt = serde_json::from_value(decision.receipt)
@@ -535,11 +582,18 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
     .await?;
 
     if let Some(message_id) = approval.request_message_id {
-        patch_message_props_in_tx(
+        // The same prune the executor does, on the arm a person reaches by
+        // saying **no**. A proposal refused for want of authority and then
+        // rejected would otherwise render `status: rejected` beside
+        // `last_attempt: "role_required"` — two answers to "what happened
+        // here". Pruning a key this card never had is a no-op, so the tool-call
+        // face of this route is untouched.
+        patch_and_prune_message_props_in_tx(
             conn,
             input.workspace_id,
             message_id,
             &decided_props_patch(desired_status, Some(input.member_id), now, input.reason),
+            &[LAST_ATTEMPT_PROPS_KEY],
         )
         .await?;
     }
@@ -717,7 +771,7 @@ async fn execute_workspace_action(
                 conn,
                 input.workspace_id,
                 message_id,
-                &last_attempt_patch(Some(ROLE_REQUIRED)),
+                &last_attempt_patch(ROLE_REQUIRED),
             )
             .await?;
         }
@@ -911,13 +965,18 @@ async fn execute_workspace_action(
     .await?;
 
     if let Some(message_id) = approval.request_message_id {
-        let mut patch = decided_props_patch("approved", Some(input.member_id), now, input.reason);
-        if let Some(object) = patch.as_object_mut() {
-            // Clear any earlier refusal: a card that says 승인됨 must not also
-            // still say the last attempt needed an admin.
-            object.insert(LAST_ATTEMPT_PROPS_KEY.into(), Value::Null);
-        }
-        patch_message_props_in_tx(conn, input.workspace_id, message_id, &patch).await?;
+        // The prune is what clears an earlier refusal: a card that says 승인됨
+        // must not also still say the last attempt needed an admin — and a
+        // shallow merge cannot delete, so writing a null would have left the
+        // key present for any client reading it by presence.
+        patch_and_prune_message_props_in_tx(
+            conn,
+            input.workspace_id,
+            message_id,
+            &decided_props_patch("approved", Some(input.member_id), now, input.reason),
+            &[LAST_ATTEMPT_PROPS_KEY],
+        )
+        .await?;
     }
 
     record_decision_in_tx(
@@ -991,9 +1050,7 @@ async fn execute_workspace_action(
         // expiry that raced us). Unlike `approve_run`'s identical-looking check
         // this cannot be swallowed — an invite has already been minted in this
         // transaction, and `Err` is the only channel that rolls it back.
-        return Err(protocol_error(
-            "the approved run left its hold before the action could be recorded",
-        ));
+        return Err(protocol_error(RUN_NOT_PARKED_SENTINEL));
     }
     emit_terminal_agent_status(
         conn,
@@ -1648,6 +1705,38 @@ mod tests {
             .is_err(),
             "a null is refused; `{{}}` would have been accepted as all-defaults"
         );
+    }
+
+    /// The rollback channel carries exactly one meaning, and nothing else in
+    /// it is mistaken for that meaning.
+    #[test]
+    fn only_the_sentinel_is_read_as_a_run_that_left_its_hold() {
+        assert!(is_run_not_parked(&protocol_error(RUN_NOT_PARKED_SENTINEL)));
+        // A real driver protocol failure must still roll back as a 500 — it is
+        // not an expected outcome and a client can do nothing with it.
+        assert!(!is_run_not_parked(&protocol_error(
+            "unexpected response from the server"
+        )));
+        assert!(!is_run_not_parked(&protocol_error(RUN_NOT_PARKED)));
+        assert!(!is_run_not_parked(&momo_db::DbError::Sqlx(
+            momo_db::sqlx::Error::RowNotFound
+        )));
+        // The wire word and the sentinel are different strings on purpose: one
+        // is a contract with clients, the other is internal plumbing.
+        assert_ne!(RUN_NOT_PARKED, RUN_NOT_PARKED_SENTINEL);
+        let decision = refusal(
+            Uuid::from_u128(1),
+            Uuid::from_u128(2),
+            RUN_NOT_PARKED,
+            "this approval's run is no longer waiting for a decision",
+            StatusCode::CONFLICT,
+            Utc::now(),
+        );
+        assert_eq!(decision.status, StatusCode::CONFLICT);
+        let receipt: ApprovalDecisionReceipt =
+            serde_json::from_value(decision.receipt).expect("receipt decodes");
+        assert_eq!(receipt.status, "run_not_parked");
+        assert!(receipt.result.is_none(), "nothing survived the rollback");
     }
 
     /// The link is built by concatenation, so the code's alphabet is checked
