@@ -146,7 +146,7 @@ $(cat "$legacy/compose")"
 fi
 pass "existing env without MOMO_BUILD_SHA is left alone (compose treats unknown)"
 
-# Railway canonical set is the generator heredoc + public-edge keys (43).
+# Railway canonical set is the generator heredoc + public-edge keys (45; #2066 +2).
 # T2 stdout adds MOMO_SELF_HOST_PLATFORM outside the heredoc (not compared
 # here). MOMO_BUILD_SHA is appended after the heredoc and must not appear.
 canonical_keys() {
@@ -198,10 +198,10 @@ if ! diff -u "$TMP/canonical.keys" "$TMP/railway.canonical.keys" >"$TMP/keys.dif
   fail "Railway key-set diff not empty"
 fi
 key_count="$(grep -c . "$TMP/canonical.keys" | tr -d ' ')"
-[ "$key_count" = "43" ] || fail "Railway canonical key set must stay 43, got $key_count"
-pass "Railway canonical key set unchanged (43, no MOMO_BUILD_SHA; stamp outside)"
+[ "$key_count" = "45" ] || fail "Railway canonical key set must stay 45, got $key_count"
+pass "Railway canonical key set unchanged (45, no MOMO_BUILD_SHA; stamp outside)"
 
-# #2438 — --railway --claim is the same 43 with one key swapped, plus stamp.
+# #2438 — --railway --claim is the same 45 with one key swapped, plus stamp.
 claim_out="$TMP/railway-claim.env"
 set +e
 env \
@@ -237,8 +237,8 @@ if grep -Fxq 'MOMO_BUILD_SHA' "$TMP/railway-claim.keys"; then
   fail "MOMO_BUILD_SHA leaked into Railway --claim output"
 fi
 claim_count="$(grep -c . "$TMP/claim.canonical.keys" | tr -d ' ')"
-[ "$claim_count" = "43" ] || fail "Railway --claim canonical key set must stay 43, got $claim_count"
-pass "Railway --claim canonical key set 43 (password variant $key_count; 1:1 swap; no MOMO_BUILD_SHA)"
+[ "$claim_count" = "45" ] || fail "Railway --claim canonical key set must stay 45, got $claim_count"
+pass "Railway --claim canonical key set 45 (password variant $key_count; 1:1 swap; no MOMO_BUILD_SHA)"
 
 # Compose interpolation: build.args only, never service environment.
 local_fix="$(make_fixture compose-local)"

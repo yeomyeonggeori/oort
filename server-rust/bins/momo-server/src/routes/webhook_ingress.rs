@@ -10,6 +10,18 @@
 //! of a known `delivery_id` with a body that would 400 if parsed must still 200
 //! because parse never runs. Direct `INSERT INTO message` is forbidden — the
 //! send goes through [`momo_messaging::send_message_in_tx`].
+//!
+//! ## The per-installation budget (ADR-0004 증보 4 D3, #2066)
+//!
+//! The budget already existed as a sliding window (ADR-0115 D3,
+//! `RATE_LIMIT_WEBHOOK_PER_INSTALLATION`); what it lacked was a durable record,
+//! so a leaked URL token could be throttled all night and leave nothing behind
+//! but a 429 the attacker saw. Each burst now also writes ONE
+//! `webhook.rate_limited` audit row — one, not one per request, because the
+//! limiter hands out a first-denial reservation and the rest of the burst
+//! carries `should_log: false`. The row names the installation, the dialect and
+//! the budget. It never names the credential: no URL token, no token hash, no
+//! `secret_ref`, no body, not even a fingerprint of them.
 
 use std::time::Duration;
 
@@ -18,6 +30,7 @@ use axum::extract::{Path, State};
 use axum::http::{header, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use momo_db::audit::{write_audit, AuditEntry};
 use momo_messaging::{MessageType, NewMessage};
 use momo_webhook::{
     attach_receipt_message, canonical_signature_base, deterministic_client_message_id,
@@ -41,6 +54,10 @@ pub(crate) const UNKNOWN_INSTALLATION: &str = "webhook installation not found";
 const INVALID_AUTH: &str = "invalid webhook authentication";
 const TIMESTAMP_WINDOW: &str = "webhook timestamp is outside the replay window";
 const BODY_TOO_LARGE: &str = "webhook body exceeds 262144 bytes";
+
+/// `audit_log.action` for a per-installation budget denial (ADR-0004 증보 4 D3).
+/// One row per burst; the conformance suite counts them.
+pub const WEBHOOK_RATE_LIMITED_ACTION: &str = "webhook.rate_limited";
 
 const SIGNATURE_VERSION_HEADER: &str = "x-momo-signature-version";
 const KEY_ID_HEADER: &str = "x-momo-key-id";
@@ -160,23 +177,125 @@ fn webhook_props(
     Value::Object(props)
 }
 
+/// The limiter key one installation's budget lives under. Shared by the check
+/// and by the reservation release, so the two can never drift onto different
+/// buckets.
+fn install_rate_key(installation_id: Uuid) -> String {
+    format!("webhook:{installation_id}")
+}
+
+/// A denial, with everything the caller needs to both answer and record it.
+struct RateDenial {
+    retry_after_seconds: u64,
+    /// `Some` for the first denial of a burst — the reservation that owns the
+    /// single audit row. Released again if the transaction that would have
+    /// carried that row never commits.
+    log_reservation: Option<u64>,
+}
+
 fn check_install_rate(
     limiter: &crate::rate_limit::SlidingWindowRateLimiter,
     installation_id: Uuid,
     limit: u32,
     window_secs: u64,
-) -> Option<IngressOutcome> {
+) -> Option<RateDenial> {
     let verdict = limiter.check(
-        &format!("webhook:{installation_id}"),
+        &install_rate_key(installation_id),
         limit,
         Duration::from_secs(window_secs),
     );
     if verdict.allowed {
-        None
-    } else {
-        Some(IngressOutcome::RateLimited {
-            retry_after_seconds: verdict.retry_after_seconds,
-        })
+        return None;
+    }
+    Some(RateDenial {
+        retry_after_seconds: verdict.retry_after_seconds,
+        log_reservation: verdict
+            .should_log
+            .then_some(verdict.log_reservation)
+            .flatten(),
+    })
+}
+
+/// Turn a denial into the 429 outcome, writing the burst's one audit row when
+/// this request is the one holding the reservation.
+///
+/// The write rides the request's own tenant transaction, which is what makes
+/// the row attributable (RLS GUC already set) and honest (it rolls back with
+/// the request instead of recording a refusal that never happened).
+async fn deny_with_audit(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    installation_id: Uuid,
+    mode: WebhookMode,
+    limit: u32,
+    window_secs: u64,
+    denial: RateDenial,
+) -> Result<IngressOutcome, momo_db::DbError> {
+    if denial.log_reservation.is_some() {
+        tracing::warn!(
+            mode = mode.as_db_label(),
+            limit,
+            window_seconds = window_secs,
+            "webhook ingress rate limit exceeded"
+        );
+        // No credential material: the installation id is a public path segment
+        // on the native route and a row id on the Slack-compatible one.
+        let entry = AuditEntry::new(workspace_id, WEBHOOK_RATE_LIMITED_ACTION)
+            .target("webhook_installation", installation_id)
+            .with_schema(
+                "oort.webhook.rate_limited.v1",
+                json!({
+                    "mode": mode.as_db_label(),
+                    "limit": limit,
+                    "window_seconds": window_secs,
+                }),
+            );
+        write_audit(conn, &entry).await?;
+    }
+    Ok(IngressOutcome::RateLimited {
+        retry_after_seconds: denial.retry_after_seconds,
+    })
+}
+
+type RateReservation = std::sync::Arc<std::sync::Mutex<Option<(String, u64)>>>;
+
+/// Park the first-denial reservation where the post-transaction path can find
+/// it. Recorded BEFORE the audit INSERT so a failure anywhere after this point
+/// — the INSERT itself or the COMMIT — is still releasable.
+fn remember_rate_reservation(slot: &RateReservation, installation_id: Uuid, denial: &RateDenial) {
+    let Some(reservation) = denial.log_reservation else {
+        return;
+    };
+    let entry = Some((install_rate_key(installation_id), reservation));
+    match slot.lock() {
+        Ok(mut held) => *held = entry,
+        Err(poisoned) => *poisoned.into_inner() = entry,
+    }
+}
+
+/// The first-denial marker is only earned by a transaction that committed.
+///
+/// If this one rolled back, the audit row it was going to carry does not exist,
+/// so releasing the marker lets the NEXT denial write it instead of suppressing
+/// the burst's only record forever. The release matches on the exact
+/// reservation, so a late failure cannot clear a newer burst's marker.
+fn release_rate_reservation_on_failure<T>(
+    state: &AppState,
+    slot: &RateReservation,
+    outcome: &DbRejectable<T>,
+) {
+    if outcome.is_ok() {
+        return;
+    }
+    let held = match slot.lock() {
+        Ok(mut held) => held.take(),
+        Err(poisoned) => poisoned.into_inner().take(),
+    };
+    if let Some((key, reservation)) = held {
+        state
+            .rate_limit
+            .limiter
+            .release_log_reservation(&key, reservation);
     }
 }
 
@@ -330,10 +449,14 @@ pub async fn receive_native(
         &delivery_id,
         &body_sha256,
     );
-    let master = (*state.jwt_secret).clone();
+    // ADR-0004 증보 4 D1: the inbound derivation root is its own key now, not
+    // the app JWT secret. `POST /v1/webhooks/…` (the mint) reads the same field.
+    let master = state.webhook.ingress_master_key.clone();
     let limiter = state.rate_limit.clone();
     let per_install = state.webhook.per_installation_limit;
     let window_secs = state.rate_limit.config.window_seconds.max(1);
+    let reserved_rate_log = std::sync::Arc::new(std::sync::Mutex::new(None::<(String, u64)>));
+    let reserved_rate_log_in_tx = std::sync::Arc::clone(&reserved_rate_log);
 
     let outcome: DbRejectable<IngressOutcome> =
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
@@ -350,13 +473,27 @@ pub async fn receive_native(
                 if !signatures_equal(&expected, &signature) {
                     return Ok(Err(ApiError::unauthorized(INVALID_AUTH)));
                 }
-                if let Some(limited) = check_install_rate(
+                if let Some(denial) = check_install_rate(
                     &limiter.limiter,
                     target.installation_id,
                     per_install,
                     window_secs,
                 ) {
-                    return Ok(Ok(limited));
+                    remember_rate_reservation(
+                        &reserved_rate_log_in_tx,
+                        target.installation_id,
+                        &denial,
+                    );
+                    return Ok(Ok(deny_with_audit(
+                        conn,
+                        workspace_id,
+                        target.installation_id,
+                        WebhookMode::Native,
+                        per_install,
+                        window_secs,
+                        denial,
+                    )
+                    .await?));
                 }
                 // #1265-order: replay short-circuit (must stay above parse)
                 if let Some(existing) =
@@ -390,6 +527,7 @@ pub async fn receive_native(
         })
         .await;
 
+    release_rate_reservation_on_failure(&state, &reserved_rate_log, &outcome);
     Ok(settle_db("webhooks.receive_native", outcome)?.into_response())
 }
 
@@ -409,6 +547,8 @@ pub async fn receive_slack(
     let limiter = state.rate_limit.clone();
     let per_install = state.webhook.per_installation_limit;
     let window_secs = state.rate_limit.config.window_seconds.max(1);
+    let reserved_rate_log = std::sync::Arc::new(std::sync::Mutex::new(None::<(String, u64)>));
+    let reserved_rate_log_in_tx = std::sync::Arc::clone(&reserved_rate_log);
 
     let outcome: DbRejectable<IngressOutcome> =
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
@@ -417,13 +557,27 @@ pub async fn receive_slack(
                     Some(target) => target,
                     None => return Ok(Err(ApiError::not_found(UNKNOWN_INSTALLATION))),
                 };
-                if let Some(limited) = check_install_rate(
+                if let Some(denial) = check_install_rate(
                     &limiter.limiter,
                     target.installation_id,
                     per_install,
                     window_secs,
                 ) {
-                    return Ok(Ok(limited));
+                    remember_rate_reservation(
+                        &reserved_rate_log_in_tx,
+                        target.installation_id,
+                        &denial,
+                    );
+                    return Ok(Ok(deny_with_audit(
+                        conn,
+                        workspace_id,
+                        target.installation_id,
+                        WebhookMode::SlackCompatible,
+                        per_install,
+                        window_secs,
+                        denial,
+                    )
+                    .await?));
                 }
                 if let Some(existing) = load_slack_receipt(
                     conn,
@@ -462,5 +616,6 @@ pub async fn receive_slack(
         })
         .await;
 
+    release_rate_reservation_on_failure(&state, &reserved_rate_log, &outcome);
     Ok(settle_db("webhooks.receive_slack", outcome)?.into_response())
 }

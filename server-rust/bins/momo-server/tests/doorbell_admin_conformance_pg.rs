@@ -21,6 +21,9 @@ use uuid::Uuid;
 
 const TEST_JWT_SECRET: &str = "doorbell-admin-conformance-jwt";
 const TEST_OUTBOUND_MASTER_KEY: &str = "doorbell-admin-conformance-outbound-key";
+/// #2066: distinct from the outbound key AND from `TEST_JWT_SECRET`, so a
+/// derivation that silently fell back to either one fails these tests.
+const TEST_INGRESS_MASTER_KEY: &str = "doorbell-admin-conformance-ingress-key";
 const DOORBELL_SECRET: &str = "crsr_live_doorbell_admin_secret_value";
 
 const HOSTED_SCOPES: [&str; 6] = [
@@ -290,7 +293,8 @@ async fn start_server(pool: PgPool, doorbell_enabled: bool) -> String {
         "ws://127.0.0.1:8000/connection/websocket".to_string(),
     )
     .with_webhook(WebhookSettings {
-        outbound_master_key: Some(TEST_OUTBOUND_MASTER_KEY.to_string()),
+        ingress_master_key: TEST_INGRESS_MASTER_KEY.to_string(),
+        outbound_master_key: TEST_OUTBOUND_MASTER_KEY.to_string(),
         allow_development_http: false,
         doorbell_enabled,
         per_installation_limit: 60,

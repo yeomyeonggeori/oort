@@ -633,10 +633,18 @@ validate_published_image() {
 # assignment. POSIX argv/environment entries cannot contain NUL (execve rejects
 # it and Bash cannot represent it); reject both representable record separators
 # before the file exists. Diagnostics name only the key, never a secret value.
+# A CR in a value read back out of an existing env file almost never means
+# somebody typed one: it means the file itself is CRLF, and `env_value_once`'s
+# `substr` carries the line's trailing `\r` into the value (#2066 R2 / 검수 C).
+# Same refusal, same exit — the sentence just names the cause, because "값에는
+# 줄바꿈을 넣을 수 없다" on a value with no visible newline is a dead end.
 validate_env_scalar() {
   local key="$1" value="$2"
   case "$value" in
-    *$'\n'*|*$'\r'*) fail "$key 값에는 LF/CR 줄바꿈을 넣을 수 없다." ;;
+    *$'\r'*)
+      fail "$key 값에 CR 이 있다 — env 파일이 CRLF 줄바꿈으로 저장돼 있다. LF 로 바꾼 뒤 다시 실행하라: tr -d '\\r' < ${ENV_FILE} > ${ENV_FILE}.lf && mv ${ENV_FILE}.lf ${ENV_FILE} (0600 유지). 값 자체에는 LF/CR 을 넣을 수 없다."
+      ;;
+    *$'\n'*) fail "$key 값에는 LF/CR 줄바꿈을 넣을 수 없다." ;;
   esac
 }
 
@@ -966,6 +974,65 @@ print(urllib.parse.unquote(u.password or ""))
   added="$(printf '%s' "$added" | awk '{$1=$1; print}')"
   count="$(printf '%s' "$added" | awk '{ print NF }')"
   printf '[self-host] env 보강: %s키 추가(%s)\n' "$count" "$added" >&2
+}
+
+# ADR-0004 증보 4 D2(a) / #2066 — 웹훅 마스터키 2종을 기존 env 에 백필한다.
+#
+# **이행 복사**: 지금 실제로 파생에 쓰이고 있는 값(= `JWT_HMAC`)을 명시 복사로
+# 넣는다. 서버가 폴백을 잃는 순간에도 파생 입력이 바이트 동일하므로 이미 발급된
+# webhook secret 은 하나도 무효화되지 않는다(재발급 0). 이 줄이 들어간 순간부터
+# 세 키는 서로 독립 변수이고, 다음 `JWT_HMAC` 회전은 webhook secret 을 건드리지
+# 않는다 — 그게 이 티켓 전체의 목적이다.
+#
+# 값은 원문 그대로 복사한다. 따옴표까지 포함해 같은 바이트여야 compose 가 두 키를
+# 같은 값으로 해석한다. add-only: 이미 있는 키는 절대 덮어쓰지 않는다(운영자가
+# 이미 회전해 둔 키를 되돌리는 것이야말로 조용한 무효화다).
+ensure_webhook_master_keys() {
+  local added="" jwt_raw count tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/oort-webhook-keys.XXXXXX")"
+  : >"$tmp"
+
+  count="$(env_key_count JWT_HMAC)"
+  [ "$count" -le 1 ] || fail "${ENV_FILE}의 JWT_HMAC 항목은 최대 한 번만 있어야 한다."
+  jwt_raw=""
+  if [ "$count" -eq 1 ]; then
+    jwt_raw="$(env_value_once JWT_HMAC)"
+    validate_env_scalar JWT_HMAC "$jwt_raw"
+  fi
+
+  add_one_webhook_master_key() {
+    local key="$1" present
+    present="$(env_key_count "$key")"
+    [ "$present" -le 1 ] || fail "${ENV_FILE}의 $key 항목은 최대 한 번만 있어야 한다."
+    [ "$present" -eq 0 ] || return 0
+    [ -n "$jwt_raw" ] ||
+      fail "${ENV_FILE}에 JWT_HMAC 이 없어 $key 를 현재 유효값으로 백필할 수 없다. env 를 먼저 고쳐라."
+    printf '%s=%s\n' "$key" "$jwt_raw" >>"$tmp"
+    added="${added}${key} "
+  }
+
+  add_one_webhook_master_key WEBHOOK_INGRESS_MASTER_KEY
+  add_one_webhook_master_key OUTBOUND_WEBHOOK_MASTER_KEY
+
+  if [ -z "$added" ]; then
+    rm -f "$tmp"
+    return 0
+  fi
+  {
+    printf '\n# --- 웹훅 마스터키 (#2066 / ADR-0004 증보 4, 기존 env에 추가) --------------\n'
+    printf '# 이행 복사: 지금 쓰이는 값(JWT_HMAC)과 같은 값이다. 발급된 webhook secret 은\n'
+    printf '# 하나도 무효화되지 않고, 이후 JWT 회전은 webhook secret 과 무관해진다.\n'
+    printf '# 두 값이 같은 동안 scripts/oort doctor 가 회전을 권고한다(경고, 실패 아님).\n'
+    printf '# 반영에는 api 재시작이 필요하다(프로세스 env).\n'
+    cat "$tmp"
+  } >>"$ENV_FILE"
+  rm -f "$tmp"
+  added="$(printf '%s' "$added" | awk '{$1=$1; print}')"
+  count="$(printf '%s' "$added" | awk '{ print NF }')"
+  printf '[self-host] 웹훅 마스터키 백필: %s키 추가(%s). 값은 현재 JWT_HMAC 의 복사이므로 재발급은 0건이다.\n' \
+    "$count" "$added" >&2
+  printf '[self-host] 이미 떠 있는 스택이라면 api를 재시작해야 반영된다: %s\n' \
+    "$(stack_restart_hint)" >&2
 }
 
 # #1696 / ADR-0169 — local file archive, for env files written before it existed.
@@ -1336,6 +1403,49 @@ platform_secret() {
   fi
 }
 
+# ADR-0004 증보 4 D2(a) on T2 (#2066 R2 / 독립 검수 C M-1).
+#
+# A platform install has **no env file**, so `--ensure-managed-keys` — the
+# backfill that copies the value already in use — never runs there
+# (`oort_upgrade_t2` prints digest instructions and returns; it does not touch
+# keys). The only way a T2 operator gets the two new variables is by
+# re-rendering `--platform <name>`, and plain `platform_secret` would mint fresh
+# randoms for them: every issued native ingress secret, event subscription and
+# doorbell secret would go invalid at once — the exact outcome D2(a) exists to
+# prevent, arriving through the fail-closed boot error that tells the operator
+# to re-run the generator.
+#
+# So: a webhook master key already in the surrounding env is reused verbatim
+# (operator rotated, or a previous render). Otherwise, if `JWT_HMAC` is in the
+# surrounding env, that is a pre-#2066 install whose secrets are *derived from
+# it right now* — emit the same explicit copy the file backfill writes, and
+# nothing is re-issued. With no `JWT_HMAC` either, this is a fresh install: the
+# JWT is itself new, so an independent random is correct.
+#
+# The predicate is its own function because the emitter runs in a command
+# substitution: a flag it set would die with that subshell, and the notice has
+# to be decided from the same condition, not a second copy of it.
+platform_webhook_is_transition_copy() {
+  local key="$1"
+  [ -z "$(eval "printf '%s' \"\${$key:-}\"")" ] && [ -n "${JWT_HMAC:-}" ]
+}
+
+platform_webhook_master_secret() {
+  local key="$1" current
+  current="$(eval "printf '%s' \"\${$key:-}\"")"
+  if [ -n "$current" ]; then
+    printf '%s' "$current"
+    return 0
+  fi
+  if platform_webhook_is_transition_copy "$key"; then
+    # Byte-identical to the surrounding JWT_HMAC: in this branch
+    # `platform_secret JWT_HMAC` returned that same value.
+    printf '%s' "$JWT_SECRET"
+    return 0
+  fi
+  gen
+}
+
 platform_value_for() {
   case "$1" in
     COMPOSE_PROJECT_NAME) printf '%s' "$PROJECT" ;;
@@ -1363,6 +1473,8 @@ platform_value_for() {
     CENT_API_KEY) printf '%s' "$CENT_API_SECRET" ;;
     CENT_PROXY_SECRET) printf '%s' "$CENT_PROXY_SECRET_VALUE" ;;
     PROVIDER_LINK_MASTER_KEY) printf '%s' "$PROVIDER_LINK_SECRET" ;;
+    WEBHOOK_INGRESS_MASTER_KEY) printf '%s' "$WEBHOOK_INGRESS_SECRET" ;;
+    OUTBOUND_WEBHOOK_MASTER_KEY) printf '%s' "$OUTBOUND_WEBHOOK_SECRET" ;;
     MOMO_WEB_PORT) printf '%s' "8080" ;;
     MOMO_CENTRIFUGO_WS_URL) printf '%s' "same-origin" ;;
     CENTRIFUGO_ALLOWED_ORIGINS) printf '%s' "$CENTRIFUGO_ORIGINS" ;;
@@ -1391,7 +1503,7 @@ platform_value_for() {
 # appended outside the heredoc (#2328). No hosted-delivery key, no file.
 emit_managed_platform_env() {
   local name="$REQUESTED_PLATFORM" label origin_var db_var internal hand_keys hosted
-  local origin raw key value quoted
+  local origin raw key value quoted transition_keys
   label="$(platform_profile_field "$name" 2)"
   origin_var="$(platform_profile_field "$name" 4)"
   origin_var="${origin_var#env:}"
@@ -1441,6 +1553,19 @@ emit_managed_platform_env() {
   CENT_API_SECRET="$(platform_secret CENT_API_KEY)"
   CENT_PROXY_SECRET_VALUE="$(platform_secret CENT_PROXY_SECRET)"
   PROVIDER_LINK_SECRET="$(platform_secret PROVIDER_LINK_MASTER_KEY)"
+  # ADR-0004 증보 4 D1 (#2066). Independent from JWT_HMAC and from each other on
+  # a **new** install: a webhook secret is derived from these, so sharing one
+  # with the token signing key makes a JWT rotation invalidate every issued
+  # webhook secret. An **existing** T2 install crossing #2066 gets the D2(a)
+  # transition copy instead — see `platform_webhook_master_secret`.
+  WEBHOOK_INGRESS_SECRET="$(platform_webhook_master_secret WEBHOOK_INGRESS_MASTER_KEY)"
+  OUTBOUND_WEBHOOK_SECRET="$(platform_webhook_master_secret OUTBOUND_WEBHOOK_MASTER_KEY)"
+  transition_keys=""
+  for key in WEBHOOK_INGRESS_MASTER_KEY OUTBOUND_WEBHOOK_MASTER_KEY; do
+    if platform_webhook_is_transition_copy "$key"; then
+      transition_keys="${transition_keys}${key} "
+    fi
+  done
 
   APP_DATABASE_URL="$(managed_role_url momo_app "$APP_PASSWORD")"
   RELAY_DB_URL="$(managed_role_url momo_relay "$RELAY_PASSWORD")"
@@ -1450,7 +1575,8 @@ emit_managed_platform_env() {
 
   for key in PROJECT IMAGE APP_PASSWORD RELAY_PASSWORD WORKER_PASSWORD \
              NOTIFIER_PASSWORD JWT_SECRET CENT_TOKEN_SECRET CENT_API_SECRET \
-             CENT_PROXY_SECRET_VALUE PROVIDER_LINK_SECRET OWNER_EMAIL SITE_HOST \
+             CENT_PROXY_SECRET_VALUE PROVIDER_LINK_SECRET \
+             WEBHOOK_INGRESS_SECRET OUTBOUND_WEBHOOK_SECRET OWNER_EMAIL SITE_HOST \
              CSP CENTRIFUGO_ORIGINS APP_DATABASE_URL RELAY_DB_URL NOTIFIER_DB_URL; do
     validate_env_scalar "$key" "$(eval "printf '%s' \"\${$key}\"")"
   done
@@ -1470,6 +1596,13 @@ EOF
     "$name" "$(($(oort_emit_canonical_keys | grep -c .) + 1))" >&2
   printf '[self-host] 손으로 넣는 키(생성기가 내지 않는다): %s · 내부 호스트 접미사: %s\n' \
     "$hand_keys" "$internal" >&2
+  # D2(a) 이행 복사를 했으면 말한다. 값은 절대 출력하지 않는다.
+  if [ -n "$transition_keys" ]; then
+    printf '[self-host] 웹훅 마스터키 이행 복사(#2066 / ADR-0004 증보 4 D2(a)): %s는 지금 쓰이는 JWT_HMAC 값의 복사다. 발급된 webhook secret 재발급 0. 두 값이 같은 동안 scripts/oort doctor 가 회전을 권고한다.\n' \
+      "$(printf '%s' "$transition_keys" | awk '{$1=$1; print}')" >&2
+  elif [ -z "${WEBHOOK_INGRESS_MASTER_KEY:-}${OUTBOUND_WEBHOOK_MASTER_KEY:-}" ]; then
+    printf '[self-host] 새 설치로 보고 웹훅 마스터키 2종을 독립 난수로 만들었다(#2066). 이미 돌던 설치를 옮기는 중이라면 이 출력을 쓰지 말고, 현재 JWT_HMAC 을 export 한 뒤 다시 실행하라 — 그러지 않으면 발급된 native ingress·이벤트구독·doorbell secret 이 전부 무효가 된다.\n' >&2
+  fi
 }
 
 normalize_requested_public_origins() {
@@ -1919,6 +2052,9 @@ if [ -e "$ENV_FILE" ]; then
   ensure_desktop_cors_allowlist
   ensure_local_drive_archive
   ensure_managed_role_keys
+  # #2066: before the early exit, so `oort upgrade` (which calls
+  # `--ensure-managed-keys`) is the backfill ADR-0004 증보 4 D2(a) promises.
+  ensure_webhook_master_keys
   if [ "$REQUESTED_ACTION" = "ensure-managed-keys" ]; then
     exit 0
   fi
@@ -2035,6 +2171,9 @@ CENT_TOKEN_SECRET="$(gen)"
 CENT_API_SECRET="$(gen)"
 CENT_PROXY_SECRET_VALUE="$(gen)"
 PROVIDER_LINK_SECRET="$(gen)"
+# ADR-0004 증보 4 D1 (#2066) — 새 설치는 처음부터 독립 난수 2개.
+WEBHOOK_INGRESS_SECRET="$(gen)"
+OUTBOUND_WEBHOOK_SECRET="$(gen)"
 
 CENTRIFUGO_ORIGINS="http://localhost:$WEB_PORT http://127.0.0.1:$WEB_PORT $SELF_HOST_DESKTOP_CENTRIFUGO_ORIGINS"
 CENTRIFUGO_ORIGINS="$(centrifugo_origins_with_public "$CENTRIFUGO_ORIGINS")"
@@ -2103,6 +2242,13 @@ CENT_TOKEN_HMAC=$CENT_TOKEN_SECRET
 CENT_API_KEY=$CENT_API_SECRET
 CENT_PROXY_SECRET=$CENT_PROXY_SECRET_VALUE
 PROVIDER_LINK_MASTER_KEY=$PROVIDER_LINK_SECRET
+# ADR-0004 증보 4 (#2066) — 웹훅 마스터키 2종. 인바운드(native ingress)와
+# 아웃바운드(이벤트구독·doorbell) secret 이 각각 이 키에서 파생된다. JWT_HMAC 과
+# 분리돼 있으므로 JWT 를 회전해도 이미 발급한 webhook secret 은 살아 있다.
+# 반대로 이 키를 회전하면 그 방향의 발급 secret 은 전부 재발급해야 한다
+# (docs/SELF_HOST.md §시크릿 회전).
+WEBHOOK_INGRESS_MASTER_KEY=$WEBHOOK_INGRESS_SECRET
+OUTBOUND_WEBHOOK_MASTER_KEY=$OUTBOUND_WEBHOOK_SECRET
 
 # --- 주소 -------------------------------------------------------------------
 # 브라우저가 여는 곳. SPA · /v1 · /connection 이 전부 이 오리진에서 나오므로
