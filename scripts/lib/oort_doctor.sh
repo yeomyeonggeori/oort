@@ -405,6 +405,9 @@ EOF
   #   정상 경로이므로 판정은 PASS 로 두고 회전만 권고한다.
   # blocker: 두 키가 서로 같고 JWT 와도 다르면 회전이 두 방향을 한 값으로
   #   합친 것이다. 서버도 이 조합은 기동을 거부한다.
+  # blocker: PROVIDER_LINK_MASTER_KEY 가 JWT_HMAC 이나 웹훅 키 둘 중 하나를
+  #   재사용하면 api 는 기동하지 않는다(SettingsConfig::boot_error 3분기).
+  #   doctor 가 이 조합을 보지 않으면 verdict PASS 인데 부팅이 실패한다.
   oort_doctor_check_webhook_master_keys
 
   if ! oort_doctor_has MOMO_DRIVE_ARCHIVE_BACKEND; then
@@ -493,8 +496,11 @@ EOF
 #
 # Values are compared, never printed: a detail string that carried a master key
 # would put it in every doctor transcript and every gate artifact.
+#
+# Exactly one `env.webhook_master_keys` record leaves this function, whichever
+# branch fires — `oort doctor --json` check ids are counted by the harness.
 oort_doctor_check_webhook_master_keys() {
-  local key value jwt ingress outbound missing=""
+  local key value jwt ingress outbound plink missing=""
 
   for key in WEBHOOK_INGRESS_MASTER_KEY OUTBOUND_WEBHOOK_MASTER_KEY; do
     if ! oort_doctor_has "$key"; then
@@ -524,6 +530,34 @@ oort_doctor_check_webhook_master_keys() {
       "웹훅 마스터키 2종이 같은 값이다 — api 기동 거부" \
       "인바운드와 아웃바운드의 폭발 반경을 하나로 합치지 마라. 한쪽을 openssl rand -hex 24 로 새로 회전하고 그 방향의 발급 secret 을 재발급하라."
     return 0
+  fi
+
+  # The provider master key may not reuse another master key — `SettingsConfig`
+  # `::boot_error` (server-rust/bins/momo-server/src/config.rs) refuses the boot
+  # on all three arms, and #2066 added two of them. Checked here because this is
+  # where both webhook values are already in hand; `env.provider_link_master_key`
+  # keeps its single presence record so the check-id count does not move.
+  #
+  # Fatal outranks the D2(a) transition window below: when the provider key
+  # equals a webhook key that is still the JWT copy, the api refuses the boot
+  # (`must not reuse JWT_HMAC`) — "rotate when you get a chance" would be a lie.
+  plink=""
+  if oort_doctor_has PROVIDER_LINK_MASTER_KEY; then
+    plink="$(oort_doctor_get PROVIDER_LINK_MASTER_KEY)"
+  fi
+  if [ -n "$plink" ]; then
+    if [ -n "$jwt" ] && [ "$plink" = "$jwt" ]; then
+      oort_doctor_record env.webhook_master_keys blocker fail \
+        "PROVIDER_LINK_MASTER_KEY 가 JWT_HMAC 을 재사용한다 — api 기동 거부" \
+        "provider 마스터키는 다른 마스터키와 같을 수 없다(provider bearer 유출이 곧 토큰 서명 유출이 된다). PROVIDER_LINK_MASTER_KEY 만 openssl rand -hex 24 로 새로 만들고 api·agent-worker 를 재시작하라. 저장된 provider 자격증명은 재입력이 필요하다."
+      return 0
+    fi
+    if [ "$plink" = "$ingress" ] || [ "$plink" = "$outbound" ]; then
+      oort_doctor_record env.webhook_master_keys blocker fail \
+        "PROVIDER_LINK_MASTER_KEY 가 웹훅 마스터키를 재사용한다 — api 기동 거부" \
+        "provider 마스터키는 다른 마스터키와 같을 수 없다. PROVIDER_LINK_MASTER_KEY 만 openssl rand -hex 24 로 새로 만들고 api·agent-worker 를 재시작하라(웹훅 키를 바꾸면 발급된 webhook secret 이 무효가 된다). 저장된 provider 자격증명은 재입력이 필요하다."
+      return 0
+    fi
   fi
 
   if [ -n "$jwt" ] && { [ "$ingress" = "$jwt" ] || [ "$outbound" = "$jwt" ]; }; then

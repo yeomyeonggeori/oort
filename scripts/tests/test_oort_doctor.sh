@@ -317,6 +317,95 @@ assert_no_secret_leak "noadmin json" "$OUT"
 pass "PLATFORM_ADMIN_EMAILS removed → fail(blocker), exit 2"
 
 # -----------------------------------------------------------------------------
+# 3b. #2066 / ADR-0004 증보 4 — env.webhook_master_keys 의 네 분기.
+#     ① 두 키 미설정        → blocker fail, exit 2 (api 가 기동하지 않는 상태)
+#     ② 두 키 동일·JWT 아님 → blocker fail, exit 2 (회전이 두 방향을 합쳤다)
+#     ③ 두 키 == JWT        → minor info + verdict PASS + exit 0 (D2(a) 이행 창)
+#     ④ PROVIDER_LINK == 웹훅 키 → blocker fail, exit 2 (boot_error 와 동형)
+#     SELF_HOST.md §시크릿 회전이 ③의 출력·판정·종료코드를 문장으로 단정하고,
+#     모든 업그레이드 설치가 반드시 ③을 지나간다 — 그래서 여기서 잰다.
+# -----------------------------------------------------------------------------
+webhook_env() {
+  # usage: webhook_env <dest> <ingress-value|-> <outbound-value|-> [plink-value]
+  local dest="$1" ingress="$2" outbound="$3" plink="${4:-}"
+  awk -v ing="$ingress" -v out="$outbound" -v pl="$plink" '
+    index($0, "WEBHOOK_INGRESS_MASTER_KEY=") == 1 {
+      if (ing != "-") { print "WEBHOOK_INGRESS_MASTER_KEY=" ing }
+      next
+    }
+    index($0, "OUTBOUND_WEBHOOK_MASTER_KEY=") == 1 {
+      if (out != "-") { print "OUTBOUND_WEBHOOK_MASTER_KEY=" out }
+      next
+    }
+    index($0, "PROVIDER_LINK_MASTER_KEY=") == 1 && pl != "" {
+      print "PROVIDER_LINK_MASTER_KEY=" pl
+      next
+    }
+    { print }
+  ' "$VALID" >"$dest"
+  chmod 600 "$dest"
+}
+
+assert_webhook_case() {
+  # usage: assert_webhook_case <label> <env> <want-exit> <want-status> <want-severity> <needle>
+  local label="$1" env="$2" want_exit="$3" want_status="$4" want_sev="$5" needle="$6"
+  local out="$SANDBOX/${label}.json" err="$SANDBOX/${label}.err" code status sev detail fix
+  code="$(run_doctor "$env" "$out" "$err" --json)"
+  validate_schema "$out" || fail "$label JSON schema"
+  [ "$code" = "$want_exit" ] || \
+    fail "$label exit $code (want $want_exit); stderr=$(cat "$err")"
+  status="$(check_field "$out" env.webhook_master_keys status)"
+  sev="$(check_field "$out" env.webhook_master_keys severity)"
+  detail="$(check_field "$out" env.webhook_master_keys detail)"
+  fix="$(check_field "$out" env.webhook_master_keys fix)"
+  [ "$status" = "$want_status" ] || fail "$label status $status (want $want_status); detail=$detail"
+  [ "$sev" = "$want_sev" ] || fail "$label severity $sev (want $want_sev)"
+  printf '%s %s' "$detail" "$fix" | grep -Fq "$needle" || \
+    fail "$label detail/fix lacks '$needle': $detail / $fix"
+  # exactly one record for this id, whichever branch fired
+  local n
+  n="$(jq -r '[.checks[] | select(.id == "env.webhook_master_keys")] | length' "$out")"
+  [ "$n" = "1" ] || fail "$label emitted $n env.webhook_master_keys records (want 1)"
+  assert_no_secret_leak "$label json" "$out"
+  assert_no_secret_leak "$label stderr" "$err"
+}
+
+# ① 두 키 미설정 → blocker fail, exit 2. (env.required_keys 도 함께 붉어지지만,
+#    여기서 재는 것은 「api 가 기동을 거부하는 상태를 doctor 가 같은 계급으로
+#    드러내고, 문장이 백필 명령을 들고 있는가」다.)
+webhook_env "$SANDBOX/whk-missing.env" - -
+assert_webhook_case whk-missing "$SANDBOX/whk-missing.env" 2 fail blocker 'ensure-managed-keys'
+grep -q '^WEBHOOK_INGRESS_MASTER_KEY=' "$SANDBOX/whk-missing.env" && fail "① fixture still has the key"
+pass "① 웹훅 마스터키 2종 미설정 → env.webhook_master_keys fail(blocker), exit 2, 백필 명령 포함"
+
+# ② 두 키가 서로 같고 JWT 와 다름 → blocker fail, exit 2 (api boot_error 와 동형)
+TOKEN_WHSAME="$(openssl rand -hex 12)"
+webhook_env "$SANDBOX/whk-same.env" "$TOKEN_WHSAME" "$TOKEN_WHSAME"
+assert_webhook_case whk-same "$SANDBOX/whk-same.env" 2 fail blocker '같은 값'
+if grep -F -- "$TOKEN_WHSAME" "$SANDBOX/whk-same.json" "$SANDBOX/whk-same.err" >/dev/null 2>&1; then
+  fail "② leaked the shared master key value"
+fi
+pass "② 웹훅 마스터키 2종이 서로 같고 JWT 와 다름 → fail(blocker), exit 2, 값 비출력"
+
+# ③ 두 키 == JWT (백필 직후 = 모든 업그레이드 설치가 지나는 상태) → minor info,
+#    verdict PASS, exit 0. SELF_HOST.md 가 문장으로 단정하는 그 출력.
+webhook_env "$SANDBOX/whk-jwt.env" "$TOKEN_JWT" "$TOKEN_JWT"
+assert_webhook_case whk-jwt "$SANDBOX/whk-jwt.env" 0 info minor '회전 권고'
+[ "$(jq -r '.summary.verdict' "$SANDBOX/whk-jwt.json")" = "PASS" ] || \
+  fail "③ 이행 창 verdict $(jq -r '.summary.verdict' "$SANDBOX/whk-jwt.json") (want PASS)"
+[ "$(jq -r '[.checks[] | select(.status == "fail")] | length' "$SANDBOX/whk-jwt.json")" = "0" ] || \
+  fail "③ 이행 창에서 다른 검사가 붉어졌다: $(jq -r '[.checks[] | select(.status == "fail") | .id] | join(",")' "$SANDBOX/whk-jwt.json")"
+pass "③ 두 키 == JWT_HMAC (D2(a) 이행 창) → minor info, verdict PASS, exit 0"
+
+# ④ PROVIDER_LINK_MASTER_KEY 가 웹훅 키를 재사용 → blocker fail, exit 2.
+#    api SettingsConfig::boot_error 가 거부하는 조합이므로 doctor 도 blocker 다.
+webhook_env "$SANDBOX/whk-plink.env" "$TOKEN_WHIN" "$TOKEN_WHOUT" "$TOKEN_WHIN"
+grep -Fxq "PROVIDER_LINK_MASTER_KEY=${TOKEN_WHIN}" "$SANDBOX/whk-plink.env" || \
+  fail "④ fixture did not alias PROVIDER_LINK_MASTER_KEY to the ingress key"
+assert_webhook_case whk-plink "$SANDBOX/whk-plink.env" 2 fail blocker 'PROVIDER_LINK_MASTER_KEY'
+pass "④ PROVIDER_LINK_MASTER_KEY == 웹훅 마스터키 → fail(blocker), exit 2 (boot_error 동형)"
+
+# -----------------------------------------------------------------------------
 # 4. role password ≠ DATABASE_URL → fail blocker
 # -----------------------------------------------------------------------------
 MISMATCH="$SANDBOX/mismatch.env"

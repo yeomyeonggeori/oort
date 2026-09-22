@@ -520,7 +520,7 @@ that list is empty, hosted delivery is closed: set
 are closed) and restart **api** and **webhook-sender**. New env from
 `scripts/self_host_env.sh` already writes that line; existing env is not
 backfilled. `--platform railway` (alias `--railway`) does not emit this
-key (the 43-key canonical set is unchanged by this gate — putting it in the heredoc would make doctor require it on
+key (the 45-key canonical set is unchanged by this gate — putting it in the heredoc would make doctor require it on
 every existing install). To add the two gate lines, run the awk block in
 [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.17.2 — do not paste it
 here.
@@ -937,6 +937,41 @@ info   minor    env.webhook_master_keys   webhook 마스터키가 JWT 시크릿�
 ```bash
 scripts/oort upgrade            # 또는 scripts/self_host_env.sh --ensure-managed-keys
 ```
+
+### #2066 이전에 `OUTBOUND_WEBHOOK_MASTER_KEY`를 손으로 넣어 둔 설치
+
+이 코호트는 **이미 어긋나 있었다**. #2066 이전 compose는 그 키를 api에 전달하지
+않았으므로, api는 `JWT_HMAC`으로 아웃바운드 secret을 파생해 구독자에게 보여주고
+`webhook-sender`는 운영자가 넣은 키로 서명했다 — 검증은 처음부터 실패하고 있었다.
+#2066 이후 api가 같은 키를 읽으므로 **신규 발급은 sender와 일치한다**. 이 PR이 새로
+무효화하는 secret은 없지만, 어긋난 채로 발급됐던 **기존 이벤트구독·doorbell secret은
+재발급해야 한다**(아래 회전 절차 5단계의 아웃바운드 항목과 같은 조작). 인바운드
+native secret은 양쪽 다 `JWT_HMAC` 파생이었으므로 영향이 없다.
+
+### 플랫폼(T2: Railway 등)에는 env 파일이 없다
+
+백필은 env 파일 위의 조작이므로 T2에는 그대로 적용되지 않는다. `scripts/oort upgrade`도
+T2에서는 digest 교체 안내만 하고 키를 건드리지 않는다. 그래서 T2의 이행 창은
+**생성기를 다시 돌릴 때 현재 값을 손에 쥐고 있는가**로 갈린다.
+
+```bash
+# 플랫폼 변수 화면에서 현재 JWT_HMAC 값을 복사해 온다(출력하지 않는다).
+export JWT_HMAC='<지금 쓰이는 값>'
+scripts/self_host_env.sh --platform railway > railway.env   # alias --railway
+```
+
+`JWT_HMAC`이 이렇게 주어지고 두 웹훅 키가 없으면 생성기는 두 키를 **그 값의 명시
+복사**로 내고(재발급 0), stderr에 이행 복사를 했다고 한 줄 알린다(값은 출력하지 않는다).
+`JWT_HMAC` 없이 돌리면 새 설치로 보고 두 키를 **새 난수**로 만든다 — 그 출력을 기존
+설치에 붙이면 발급된 native ingress·이벤트구독·doorbell secret이 **전부 무효**가 된다.
+이미 회전해 둔 키를 export해 두면 그 값이 그대로 유지된다.
+
+플랫폼 변수를 직접 편집한다면 같은 결과를 손으로 만들 수 있다: `WEBHOOK_INGRESS_MASTER_KEY`와
+`OUTBOUND_WEBHOOK_MASTER_KEY`를 **현재 `JWT_HMAC`과 같은 값**으로 추가하면 된다.
+`OUTBOUND_WEBHOOK_MASTER_KEY`는 `api`와 `webhook-sender` **두 서비스 모두**에 같은 값으로
+들어가야 한다(Railway는 compose 렌더링이 아니라 서비스별 변수 주입이고, sender의
+`JWT_HMAC` 폴백은 #2066에서 삭제됐다 — `infra/railway/railway.json`의
+`services.webhook-sender.variablesFromGenerator`).
 
 ### 회전 절차 (방향 하나씩)
 

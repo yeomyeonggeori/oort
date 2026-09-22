@@ -633,10 +633,18 @@ validate_published_image() {
 # assignment. POSIX argv/environment entries cannot contain NUL (execve rejects
 # it and Bash cannot represent it); reject both representable record separators
 # before the file exists. Diagnostics name only the key, never a secret value.
+# A CR in a value read back out of an existing env file almost never means
+# somebody typed one: it means the file itself is CRLF, and `env_value_once`'s
+# `substr` carries the line's trailing `\r` into the value (#2066 R2 / 검수 C).
+# Same refusal, same exit — the sentence just names the cause, because "값에는
+# 줄바꿈을 넣을 수 없다" on a value with no visible newline is a dead end.
 validate_env_scalar() {
   local key="$1" value="$2"
   case "$value" in
-    *$'\n'*|*$'\r'*) fail "$key 값에는 LF/CR 줄바꿈을 넣을 수 없다." ;;
+    *$'\r'*)
+      fail "$key 값에 CR 이 있다 — env 파일이 CRLF 줄바꿈으로 저장돼 있다. LF 로 바꾼 뒤 다시 실행하라: tr -d '\\r' < ${ENV_FILE} > ${ENV_FILE}.lf && mv ${ENV_FILE}.lf ${ENV_FILE} (0600 유지). 값 자체에는 LF/CR 을 넣을 수 없다."
+      ;;
+    *$'\n'*) fail "$key 값에는 LF/CR 줄바꿈을 넣을 수 없다." ;;
   esac
 }
 
@@ -1395,6 +1403,49 @@ platform_secret() {
   fi
 }
 
+# ADR-0004 증보 4 D2(a) on T2 (#2066 R2 / 독립 검수 C M-1).
+#
+# A platform install has **no env file**, so `--ensure-managed-keys` — the
+# backfill that copies the value already in use — never runs there
+# (`oort_upgrade_t2` prints digest instructions and returns; it does not touch
+# keys). The only way a T2 operator gets the two new variables is by
+# re-rendering `--platform <name>`, and plain `platform_secret` would mint fresh
+# randoms for them: every issued native ingress secret, event subscription and
+# doorbell secret would go invalid at once — the exact outcome D2(a) exists to
+# prevent, arriving through the fail-closed boot error that tells the operator
+# to re-run the generator.
+#
+# So: a webhook master key already in the surrounding env is reused verbatim
+# (operator rotated, or a previous render). Otherwise, if `JWT_HMAC` is in the
+# surrounding env, that is a pre-#2066 install whose secrets are *derived from
+# it right now* — emit the same explicit copy the file backfill writes, and
+# nothing is re-issued. With no `JWT_HMAC` either, this is a fresh install: the
+# JWT is itself new, so an independent random is correct.
+#
+# The predicate is its own function because the emitter runs in a command
+# substitution: a flag it set would die with that subshell, and the notice has
+# to be decided from the same condition, not a second copy of it.
+platform_webhook_is_transition_copy() {
+  local key="$1"
+  [ -z "$(eval "printf '%s' \"\${$key:-}\"")" ] && [ -n "${JWT_HMAC:-}" ]
+}
+
+platform_webhook_master_secret() {
+  local key="$1" current
+  current="$(eval "printf '%s' \"\${$key:-}\"")"
+  if [ -n "$current" ]; then
+    printf '%s' "$current"
+    return 0
+  fi
+  if platform_webhook_is_transition_copy "$key"; then
+    # Byte-identical to the surrounding JWT_HMAC: in this branch
+    # `platform_secret JWT_HMAC` returned that same value.
+    printf '%s' "$JWT_SECRET"
+    return 0
+  fi
+  gen
+}
+
 platform_value_for() {
   case "$1" in
     COMPOSE_PROJECT_NAME) printf '%s' "$PROJECT" ;;
@@ -1452,7 +1503,7 @@ platform_value_for() {
 # appended outside the heredoc (#2328). No hosted-delivery key, no file.
 emit_managed_platform_env() {
   local name="$REQUESTED_PLATFORM" label origin_var db_var internal hand_keys hosted
-  local origin raw key value quoted
+  local origin raw key value quoted transition_keys
   label="$(platform_profile_field "$name" 2)"
   origin_var="$(platform_profile_field "$name" 4)"
   origin_var="${origin_var#env:}"
@@ -1502,11 +1553,19 @@ emit_managed_platform_env() {
   CENT_API_SECRET="$(platform_secret CENT_API_KEY)"
   CENT_PROXY_SECRET_VALUE="$(platform_secret CENT_PROXY_SECRET)"
   PROVIDER_LINK_SECRET="$(platform_secret PROVIDER_LINK_MASTER_KEY)"
-  # ADR-0004 증보 4 D1 (#2066). Independent from JWT_HMAC and from each other:
-  # a webhook secret is derived from these, so sharing one with the token
-  # signing key makes a JWT rotation invalidate every issued webhook secret.
-  WEBHOOK_INGRESS_SECRET="$(platform_secret WEBHOOK_INGRESS_MASTER_KEY)"
-  OUTBOUND_WEBHOOK_SECRET="$(platform_secret OUTBOUND_WEBHOOK_MASTER_KEY)"
+  # ADR-0004 증보 4 D1 (#2066). Independent from JWT_HMAC and from each other on
+  # a **new** install: a webhook secret is derived from these, so sharing one
+  # with the token signing key makes a JWT rotation invalidate every issued
+  # webhook secret. An **existing** T2 install crossing #2066 gets the D2(a)
+  # transition copy instead — see `platform_webhook_master_secret`.
+  WEBHOOK_INGRESS_SECRET="$(platform_webhook_master_secret WEBHOOK_INGRESS_MASTER_KEY)"
+  OUTBOUND_WEBHOOK_SECRET="$(platform_webhook_master_secret OUTBOUND_WEBHOOK_MASTER_KEY)"
+  transition_keys=""
+  for key in WEBHOOK_INGRESS_MASTER_KEY OUTBOUND_WEBHOOK_MASTER_KEY; do
+    if platform_webhook_is_transition_copy "$key"; then
+      transition_keys="${transition_keys}${key} "
+    fi
+  done
 
   APP_DATABASE_URL="$(managed_role_url momo_app "$APP_PASSWORD")"
   RELAY_DB_URL="$(managed_role_url momo_relay "$RELAY_PASSWORD")"
@@ -1537,6 +1596,13 @@ EOF
     "$name" "$(($(oort_emit_canonical_keys | grep -c .) + 1))" >&2
   printf '[self-host] 손으로 넣는 키(생성기가 내지 않는다): %s · 내부 호스트 접미사: %s\n' \
     "$hand_keys" "$internal" >&2
+  # D2(a) 이행 복사를 했으면 말한다. 값은 절대 출력하지 않는다.
+  if [ -n "$transition_keys" ]; then
+    printf '[self-host] 웹훅 마스터키 이행 복사(#2066 / ADR-0004 증보 4 D2(a)): %s는 지금 쓰이는 JWT_HMAC 값의 복사다. 발급된 webhook secret 재발급 0. 두 값이 같은 동안 scripts/oort doctor 가 회전을 권고한다.\n' \
+      "$(printf '%s' "$transition_keys" | awk '{$1=$1; print}')" >&2
+  elif [ -z "${WEBHOOK_INGRESS_MASTER_KEY:-}${OUTBOUND_WEBHOOK_MASTER_KEY:-}" ]; then
+    printf '[self-host] 새 설치로 보고 웹훅 마스터키 2종을 독립 난수로 만들었다(#2066). 이미 돌던 설치를 옮기는 중이라면 이 출력을 쓰지 말고, 현재 JWT_HMAC 을 export 한 뒤 다시 실행하라 — 그러지 않으면 발급된 native ingress·이벤트구독·doorbell secret 이 전부 무효가 된다.\n' >&2
+  fi
 }
 
 normalize_requested_public_origins() {
