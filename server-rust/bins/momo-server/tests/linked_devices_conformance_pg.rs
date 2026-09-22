@@ -1035,6 +1035,14 @@ async fn concurrent_duplicate_refresh_mints_exactly_one_pair() {
 /// is gone by the time it holds the lock. The whole rotation must be refused
 /// with nothing half-written — no minted tokens, and the presented refresh not
 /// consumed.
+///
+/// Scope, stated so the assertion is not read as more than it is: the refusal
+/// trips at the post-lock binding re-check, which runs *before* `revoke_token`,
+/// so "the presented refresh was not consumed" holds because nothing was
+/// written at all. The deeper `rebind → false → Err → tx rollback` branch is
+/// defensive: while this transaction holds `FOR UPDATE` on the row, no other
+/// writer can move the binding out from under the re-check, so that branch is
+/// unreachable by external injection and is NOT what this test measures.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn rotation_on_a_changed_binding_writes_nothing() {
