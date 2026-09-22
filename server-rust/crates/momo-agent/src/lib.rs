@@ -161,10 +161,15 @@ pub mod welcome;
 // worker tools exist", the other is "which workspace actions may be proposed".
 // Callers say `momo_agent::actions::…` so the reader always knows which.
 pub use actions::{
-    action_block, action_by_id, action_ids, card_client_msg_id, invite_create_rows,
-    proposal_summary, workspace_action_payload, workspace_action_request_body,
-    workspace_action_request_props, DeclaredAction, RequiredRole, Risk, WorkspaceAction,
-    ACTION_INVITE_CREATE, ACTION_TYPE_WORKSPACE_ACTION, DEFAULT_INVITE_EXPIRES_IN_DAYS,
+    action_block, action_by_id, action_ids, action_ref, action_result_props, card_client_msg_id,
+    invite_create_rows, invite_result_body, invite_result_rows, last_attempt_patch,
+    proposal_summary, result_client_msg_id, workspace_action_payload,
+    workspace_action_request_body, workspace_action_request_props, ActionResult, DeclaredAction,
+    RequiredRole, Risk, WorkspaceAction, ACTION_APPROVED_AUDIT_SCHEMA, ACTION_INVITE_CREATE,
+    ACTION_RESULT_EXECUTED, ACTION_RESULT_NEXT_HREF, ACTION_RESULT_NEXT_LABEL,
+    ACTION_RESULT_PROPS_KEY, ACTION_RESULT_VERSION, ACTION_TYPE_WORKSPACE_ACTION,
+    AUDIT_ACTION_APPROVED, DEFAULT_INVITE_EXPIRES_IN_DAYS, LAST_ATTEMPT_PROPS_KEY, REF_TYPE_INVITE,
+    ROLE_REQUIRED, SECRET_ONCE_INVITE_LINK,
 };
 pub use approval::{
     approval_payload, approval_request_body, approval_request_props, attach_request_message_in_tx,
@@ -231,11 +236,11 @@ pub use run::{
     load_agent_run_in_tx, load_agent_run_with_visibility_in_tx, load_eligible_agent_in_tx,
     lock_gateway_run_in_tx, lock_run_for_cancel_in_tx, mark_run_started_in_tx,
     park_run_for_approval_in_tx, park_runs_for_control_window_in_tx,
-    requeue_run_from_approval_in_tx, resume_runs_from_control_window_in_tx, terminal_run_ids_in_tx,
-    trigger_summary, validated_run_limit, AgentRunRow, AgentRunSummaryPage, AgentRunSummaryRow,
-    CancellableRun, CompletionStatusError, CreatedRun, EligibleAgent, GatewayRunSnapshot,
-    NewAgentRun, ParkedRun, RunBindingRejected, RunStatus, RunTrigger, WelcomeKind,
-    TRIGGER_SUMMARY_LIMIT,
+    requeue_run_from_approval_in_tx, resume_runs_from_control_window_in_tx,
+    succeed_parked_run_in_tx, terminal_run_ids_in_tx, trigger_summary, validated_run_limit,
+    AgentRunRow, AgentRunSummaryPage, AgentRunSummaryRow, CancellableRun, CompletionStatusError,
+    CreatedRun, EligibleAgent, GatewayRunSnapshot, NewAgentRun, ParkedRun, RunBindingRejected,
+    RunStatus, RunTrigger, WelcomeKind, TRIGGER_SUMMARY_LIMIT,
 };
 pub use status::{
     agent_partial_payload, agent_partial_tool_call_payload, agent_status_channel,

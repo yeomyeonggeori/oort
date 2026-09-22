@@ -149,11 +149,15 @@ v1의 모든 워크스페이스 행동은 `approval`이다. 「관리자 위임�
     "ref": {"type": "invite", "id": "<invite_id>"},
     "rows": [{"label": "역할", "value": "member"}, {"label": "만료", "value": "2026-09-29"}],
     "secret_shown_once": true,
-    "next": {"label": "설정 › 초대에서 보기", "href": "/settings?section=invites"}
+    "next": {"label": "설정 › 멤버와 초대에서 보기", "href": "/settings?section=members"}
   }
 }
 ```
 `status` ∈ `executed | rejected | expired | role_required`. 코드·URL 필드는 없다.
+
+**정오표 2026-09-22 (AX-4 #2510 지적, AX-3b #2509에서 반영)**: 원문 샘플의 `next`는 `/settings?section=invites`·「설정 › 초대에서 보기」였는데 그런 섹션이 없다. 클라 정본은 `members`(「멤버와 초대」, `clients/web/src/features/settings/settingsNav.ts:53`)다. 서버가 보내는 값은 위 샘플대로 `href=/settings?section=members`·`label=「설정 › 멤버와 초대에서 보기」`이며, 정본 상수는 `momo_agent::actions::{ACTION_RESULT_NEXT_HREF, ACTION_RESULT_NEXT_LABEL}`이다.
+
+**정오표 2026-09-22 (D2 403 봉투)**: AX-4는 403 `role_required`를 `ErrorResponse` 봉투의 `code` 필드로 요청했으나, 이 라우트의 403은 봉투가 아니라 **영수증**이다 — 스펙이 「Expected failures (403/404/409) return the SAME receipt schema (not the generic error envelope)」라고 못박고 있고(`docs/api/openapi.yaml` `decideApproval`), 두 클라이언트 모두 403을 영수증으로 파싱한다(`packages/momo-core/src/features/timeline/approvalDecision.ts:233`의 `receiptStatuses`에 403 포함 후 `receipt.status` 판독). 그래서 코드는 `ErrorResponse.code`가 아니라 **영수증 `status: "role_required"`**로 실린다. 부록 B가 이미 `role_required`를 *status* 어휘로 쓰고 있으므로 한 낱말이 두 표면에서 같다. `ErrorResponse`는 무변경.
 
 ### C. 결정 응답(`decision` 200) — 기존 receipt + `result`
 ```json
@@ -183,3 +187,4 @@ v1의 모든 워크스페이스 행동은 `approval`이다. 「관리자 위임�
 - 2026-09-22 성재(방향, ADR 기안 전): ①AX 첫 실물 = **ITO 전에 초대 1종까지** ②승인 정책 = **위험 등급별** ③ADR-0004 증보 4 = **Accept, D2(a) 이행 복사** ④UX-R3a 팔레트 = **축소 범위 연기 해제**. 「나머지는 설계 구체화, 준비가 온전하면 착수」.
 - 정오표 D7(087) — planner 수용, 성재 통보.
 - 2026-09-22 성재 Accept: 확정점 ①run park+`run_complete` 409 ②1회 시크릿=결정 응답에만 ③테마 「적용」 버튼 ④AX-2 지금·AX-3a Accept 뒤 — 전부 승인. 같은 결재에서 W-A 발사 go(#2066 ∥ AX-2 #2507). 워커 레인은 이 배치에 한해 **Opus 5 서브에이전트**(성재 지시, PIPELINE 기본값 Grok 4.6의 예외).
+- 2026-09-22 AX-3b(#2509) 랜딩분 기록: D2 결정 분기·D4 `secretOnce`·부록 B/C 구현. 부록 B `next` 정오표(§8 B)와 403 봉투 정오표(같은 절) 반영. 부록 C `secretOnce.value`의 공개 오리진은 `MOMO_PUBLIC_BASE_URL`(설정 시) → 요청 `Host`+`X-Forwarded-Proto`(ADR-0167 파생) 순서로 결정한다 — 브리프가 가리킨 「초대 redeem 라우트의 공개 사이트 주소 정본」은 실재하지 않았다(#1926 `OORT_SITE_ADDRESS`는 Caddy 템플릿 env이고 Rust는 읽지 않는다).
