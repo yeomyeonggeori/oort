@@ -3,6 +3,12 @@
 > 세션 종료 시 공용 계약에 따라 짧은 항목을 맨 위에 추가한다.
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 갱신할 때 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-22 (저녁) · Fable(+Opus 5 워커·리뷰어 C·design-review) · ★AX 축 초대 1종 폐곡선 main 정본화 — AX-2·3a·3b·4 + #2066·#2498·#2476·#2044 8건 랜딩
+
+- 성재 결재: ADR-0186 Accept · W-A go · 워커=Opus 5 서브에이전트. 하루 랜딩(track→main 승격+sync 각 1회): #2519(ADR Accept) · #2497(정책3, 감사) · #2490(#2476 설정›기기, design R2 PASS) · #2523(#2066 마스터키, 리뷰 C FAIL→R2, 감사) · #2524(AX-2 레지스트리, design R1 FAIL H1→R2 PASS) · #2537(#2498 직렬화, 리뷰 C FAIL→R3, H1→M 재판정 uuidv7) · #2538(AX-3a propose, 리뷰 C FAIL→R2, 087 CHECK 재작성·D7 정오표, 감사) · #2485(#2044 오버레이, design R1 FAIL B2→R2 PASS) · #2549(AX-3b 실행기·secretOnce, 리뷰 C PASS-WITH-NITS→R2) · #2540(AX-4 카드, design R1 FAIL B1→R2 FAIL H1→R3 PASS). main `07567a14`.
+- 교훈: ①리뷰어 C·design-review가 회전마다 실결함을 잡았다(sender 폴백 잔존·T2 백필 부재·거부 차단·멱등키 충돌·UA 포커스 링·390 절단) — fresh context 검수 상설 ②리뷰어 전제도 재판정 대상(uuid 무작위 → uuidv7 반증) ③DDL 무접촉 단정은 CHECK 열거를 봐야 한다(087) ④ADR 부록 샘플의 낡은 값(section=invites)이 두 PR을 오갔다 — 부록은 실좌표 검증 후 확정 ⑤워커 3기+리뷰 병렬은 호스트 부하 20 근처 — 상한 2 규율 재확인.
+- 다음: AX-6 #2512 E2E(초대 1종) → E2E-A 발행 이미지 → SH-11a → ITO. 후속 이슈 9건 적립.
+
 ## 2026-09-22 (오후) · Fable · ★AX-0 main 정본화 + ADR-0186 Accepted + W-A 발사(Opus 5 서브에이전트 2기)
 
 - AX-0 #2506: PR #2515 → track/engine → 승격 #2516(main 95199a69) → sync #2517/#2518. docs 게이트·CI PASS, 보호 경로 0.
