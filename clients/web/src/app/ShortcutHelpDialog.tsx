@@ -13,6 +13,49 @@ import {
   shouldOpenShortcutHelp,
 } from "@/app/keyboardShortcuts";
 
+/**
+ * 키캡 상자. 글꼴·모서리·그릇·색이 한 벌로 여기 한 번만 적힌다.
+ *
+ * ⌘K 팔레트도 같은 키를 그린다(ADR-0186 D1 키캡 힌트). 두 자리가 각자 `<kbd>`를
+ * 적으면 도움말과 팔레트의 키가 서로 다른 모양으로 늙는다 — 이 파일이 애초에
+ * 세워진 이유(키 문자열을 다시 적으면 갈라진다)와 같은 규율이라, 상자도 한 번만
+ * 적는다. 문자열 자체는 여전히 `keyboardShortcuts.ts`의 `keycaps`에서 온다.
+ */
+const KEYCAP_BOX =
+  "whitespace-nowrap rounded-sm bg-muted-soft px-2 font-mono text-meta text-ink";
+
+/**
+ * 갈리는 것은 **세로 여백 하나**뿐이고, 그 갈림은 상자가 선 자리에서 나온다.
+ *
+ * `block` 은 이 파일의 정의 목록이다: 키캡이 그 줄에서 가장 큰 것이라 상자가 행
+ * 높이를 정해도 된다.
+ *
+ * `inline` 은 텍스트 줄에 **얹히는** 자리다(⌘K 팔레트 명령 줄, #2524 R1 H-1).
+ * 거기서 `py-1` 상자는 18+8=26px 이 되어 `text-body` 줄상자(22px)보다 크고,
+ * 그러면 키캡이 달린 줄만 4px 높아진다 — 한 목록의 행 리듬이 **내용**으로
+ * 흔들린다. `py-px` 면 상자가 20px 이라 줄상자 안에 들어가고, 행 높이는 다시
+ * 글자가 정한다. 키 문자열도 상자의 정체성도 갈리지 않는다.
+ */
+const KEYCAP_PAD = { block: "py-1", inline: "py-px" } as const;
+
+export function Keycaps({
+  keycaps,
+  variant = "block",
+}: {
+  keycaps: readonly string[];
+  variant?: keyof typeof KEYCAP_PAD;
+}) {
+  return (
+    <>
+      {keycaps.map((keycap) => (
+        <kbd key={keycap} className={`${KEYCAP_BOX} ${KEYCAP_PAD[variant]}`}>
+          {keycap}
+        </kbd>
+      ))}
+    </>
+  );
+}
+
 function anotherDialogIsOpen(): boolean {
   if (typeof document === "undefined") return false;
   // "Is another dialog *open*", not "who owns this Escape". Presence-exit
@@ -105,14 +148,7 @@ export function ShortcutHelpDialog() {
                       {shortcut.description}
                     </dt>
                     <dd className="flex shrink-0 items-center gap-1">
-                      {shortcut.keycaps.map((keycap) => (
-                        <kbd
-                          key={keycap}
-                          className="whitespace-nowrap rounded-sm bg-muted-soft px-2 py-1 font-mono text-meta text-ink"
-                        >
-                          {keycap}
-                        </kbd>
-                      ))}
+                      <Keycaps keycaps={shortcut.keycaps} />
                     </dd>
                   </div>
                 ))}

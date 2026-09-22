@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Command } from "cmdk";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
@@ -19,6 +26,7 @@ import {
   SquareTerminal,
   User,
   Users,
+  type LucideIcon,
 } from "lucide-react";
 import { useSession } from "@/app/session";
 import {
@@ -56,7 +64,27 @@ import {
   OPEN_NEW_DM_SHORTCUT,
   OPEN_QUICK_SWITCHER_SHORTCUT,
   OPEN_SETTINGS_SHORTCUT,
+  REGISTERED_SHORTCUTS,
+  type KeyboardShortcut,
 } from "@/app/keyboardShortcuts";
+import { Keycaps } from "@/app/ShortcutHelpDialog";
+import {
+  commandSearchValue,
+  visibleCommands,
+  type Command as PaletteCommand,
+  type CommandContext,
+  type CommandIcon,
+} from "@momo/core/features/commands/registry";
+import {
+  COMMAND_USAGE_STORAGE_KEY,
+  EMPTY_COMMAND_USAGE,
+  parseCommandUsage,
+  rankCommands,
+  recordCommandUse,
+  serializeCommandUsage,
+  type CommandUsage,
+} from "@momo/core/features/commands/usage";
+import { parseActionsCatalog } from "@momo/core/features/commands/serverActions";
 import { rememberSettingsOpener } from "@/features/settings/settingsFocus";
 import { Dialog, DialogOverlay, DialogPortal } from "@/design/ui/dialog";
 import { MODAL_CONTENT_MOTION } from "@/design/motion";
@@ -104,6 +132,203 @@ const groupHeadingClass =
  * 라우트의 제목이 각자 적으면 셋이 갈라지고, 실제로 사이드바가 갈라져 있었다.
  */
 const SEARCH_SURFACE_NAME = serverSurface("messageSearch").label;
+
+// =============================================================================
+// 「명령」 그룹 (ADR-0186 D1).
+//
+// 「이동」·「만들기」·「에이전트 설정」 세 머리글이 하나로 합쳐졌다. 세 갈래는
+// 레지스트리의 `group`으로 남아 있고(에이전트 카탈로그가 읽는다), **화면에서는**
+// 한 목록이다: 사람이 ⌘K에서 찾는 것은 「이 낱말이 어느 갈래인가」가 아니라
+// 「그 일을 하는 줄」이고, 갈래가 셋이면 가장 자주 쓰는 줄이 언제나 두 번째
+// 머리글 아래 세 번째 자리에 있다. 합친 목록은 **랭킹**을 가질 수 있다 —
+// 최근 쓴 것이 위로 온다(`rankCommands`).
+//
+// 항목은 하나도 여기서 지어지지 않는다. 경로·이름·별칭·아이콘 이름·testId가
+// 전부 레지스트리에 있고 이 파일은 그것을 그린다. 「팔레트에 줄을 하나 더
+// 붙이는 일」은 이제 이 파일을 열지 않는다.
+// =============================================================================
+
+const COMMAND_ICONS: Record<CommandIcon, LucideIcon> = {
+  inbox: Inbox,
+  drafts: FileText,
+  activity: Activity,
+  members: Users,
+  settings: Settings,
+  credentials: KeyRound,
+  "work-console": SquareTerminal,
+  workstreams: Milestone,
+  "create-channel": Plus,
+  agent: Bot,
+};
+
+/** 명령 id → 그 명령과 같은 일을 하는 단축키. 없으면 키캡을 그리지 않는다. */
+const SHORTCUT_BY_COMMAND_ID = new Map<string, KeyboardShortcut>(
+  REGISTERED_SHORTCUTS.filter(
+    (shortcut) => shortcut.paletteCommandId !== undefined
+  ).map((shortcut) => [shortcut.paletteCommandId as string, shortcut])
+);
+
+/**
+ * 이 기기의 명령 사용 기록. 규칙은 코어에 있고 여기는 **저장소**만 안다.
+ *
+ * 저장이 막힌 브라우저(프라이빗 모드·임베디드 웹뷰 정책)에서 읽기도 쓰기도
+ * 던질 수 있다. 둘 다 삼킨다: 랭킹이 없어지면 팔레트는 레지스트리의 바닥
+ * 순서로 그려지고, 그 외에는 아무것도 나빠지지 않는다. 사람에게 알릴 실패가
+ * 아니다 (`design/theme.ts`가 외양 저장에서 세운 규율과 같다).
+ */
+function readCommandUsage(): CommandUsage {
+  try {
+    if (typeof localStorage === "undefined") return EMPTY_COMMAND_USAGE;
+    return parseCommandUsage(localStorage.getItem(COMMAND_USAGE_STORAGE_KEY));
+  } catch {
+    return EMPTY_COMMAND_USAGE;
+  }
+}
+
+function writeCommandUsage(usage: CommandUsage): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(COMMAND_USAGE_STORAGE_KEY, serializeCommandUsage(usage));
+  } catch {
+    // 위 주석과 같은 이유로 조용하다.
+  }
+}
+
+/**
+ * 상태줄이 문장을 쥐고 있는 시간 (ADR-0182 D5 ② = 3s).
+ *
+ * 숫자를 여기 한 번만 적는다. `3000ms` 같은 손기입 duration은 사다리 밖이라
+ * 프리플라이트가 막고(ADR-0179 D10), 이 값은 CSS duration이 아니라 **문장이
+ * 남아 있는 시간**이라 모션 사다리와 다른 축이다.
+ */
+export const PALETTE_STATUS_HOLD_MS = 3_000;
+
+/**
+ * 팔레트 하단 상태줄 (ADR-0182 ②).
+ *
+ * 토스트가 금지된 자리의 대안 문법이다. 명령 표면에서 실행된 결과는 **그 표면
+ * 하단 고정 자리**에 `role=status`로 서고 3s 뒤 사라진다 — 위치가 고정이라
+ * 낭독과 시선이 갈라지지 않는다.
+ *
+ * ## 닫을 때 지우지 않는 것은 의도다
+ *
+ * 열 때 지운다. 닫을 때는 지우지 않는다. 지금 레지스트리의 명령은 전부 실행과
+ * 동시에 표면을 닫으므로(`closesSurface`), 닫히는 순간 문장을 지우면 낭독될
+ * 기회 자체가 사라진다. 문장은 팔레트가 물러나는 동안 살아 있다가 그 노드와
+ * 함께 사라진다 — 같은 ADR의 「표면이 닫히면 함께 소거」가 바로 이것이다.
+ *
+ * **3s 동안 눈에 보이는** 줄은 표면을 열어 둔 채 끝나는 명령(`kind: "client"`,
+ * 외양 변경)의 것이고, 그런 명령은 AX-5(#2511)가 처음 들여온다. 그래서 이
+ * 티켓의 캡처 장면에는 상태줄이 없다 — 없는 장면을 찍으려면 팔레트를 억지로
+ * 열어 두어야 하고, 그것은 하네스에만 있는 화면이다.
+ */
+export function usePaletteStatus(open: boolean): {
+  status: string | null;
+  announce: (text: string | null) => void;
+} {
+  const [status, setStatus] = useState<string | null>(null);
+  const timerRef = useRef<number | null>(null);
+
+  const stopTimer = useCallback(() => {
+    if (timerRef.current === null) return;
+    window.clearTimeout(timerRef.current);
+    timerRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    stopTimer();
+    setStatus(null);
+  }, [open, stopTimer]);
+
+  useEffect(() => stopTimer, [stopTimer]);
+
+  const announce = useCallback(
+    (text: string | null) => {
+      stopTimer();
+      setStatus(text);
+      if (text === null) return;
+      timerRef.current = window.setTimeout(() => {
+        timerRef.current = null;
+        setStatus(null);
+      }, PALETTE_STATUS_HOLD_MS);
+    },
+    [stopTimer]
+  );
+
+  return { status, announce };
+}
+
+/**
+ * 상태줄의 자리.
+ *
+ * 문장이 없어도 **노드는 남는다**: 라이브 리전은 내용이 바뀌기 전부터 문서에
+ * 있어야 낭독된다. 비었을 때는 테두리도 여백도 없어 높이가 0이라, 빈 띠가
+ * 팔레트 바닥에 늘 그려지는 일은 없다.
+ */
+function PaletteStatus({ status }: { status: string | null }) {
+  return (
+    <div
+      role="status"
+      data-testid="quick-switcher-status"
+      className={cn(
+        "text-meta text-ink-muted",
+        status !== null && "motion-fast-enter border-t border-line px-4 py-2"
+      )}
+    >
+      {status}
+    </div>
+  );
+}
+
+function CommandRow({
+  command,
+  onRun,
+}: {
+  command: PaletteCommand;
+  onRun: (command: PaletteCommand) => void;
+}) {
+  const Icon = COMMAND_ICONS[command.icon];
+  const shortcut = SHORTCUT_BY_COMMAND_ID.get(command.id);
+  return (
+    <Command.Item
+      role="option"
+      className={itemClass}
+      value={commandSearchValue(command)}
+      data-testid={command.testId}
+      data-command-id={command.id}
+      data-member-id={command.memberId}
+      onSelect={() => onRun(command)}
+    >
+      {/* Agent identity is the --agent token on the glyph and nothing else:
+       * same row, same type as every other command (design-taste-web §9). */}
+      <Icon
+        className={cn(
+          "size-4",
+          command.icon === "agent" ? "text-agent" : "opacity-70"
+        )}
+        aria-hidden="true"
+      />
+      {command.title}
+      {command.meta !== undefined && (
+        <span className="text-meta text-ink-muted">{command.meta}</span>
+      )}
+      {/* 키캡은 단축키 정본의 `keycaps` 그대로다. 도움말과 같은 상자를 쓴다
+          (`Keycaps`): 두 자리가 각자 적으면 같은 키가 두 모양으로 늙는다.
+
+          `inline` 이 바꾸는 것은 그 상자의 세로 여백 하나뿐이다(#2524 R1 H-1).
+          도움말의 여백 그대로면 상자가 `text-body` 줄상자보다 커져 **키캡이 달린
+          줄만** 4px 높았다(34 vs 30) — 랭킹으로 그 줄이 위로 오면 목록이 위에서부터
+          들쭉날쭉해진다. 행 높이는 글자가 정하고 키캡은 거기 얹힌다. 캡처 장면
+          3c-2 가 모든 명령 줄의 높이가 하나임을 잰다. */}
+      {shortcut && (
+        <span className="ml-auto flex shrink-0 items-center gap-1">
+          <Keycaps keycaps={shortcut.keycaps} variant="inline" />
+        </span>
+      )}
+    </Command.Item>
+  );
+}
 
 function PaletteLayer({
   onOpenChange,
@@ -194,9 +419,20 @@ function PaletteLayer({
 export function QuickSwitcher({
   open,
   onOpenChange,
+  actionsResponse,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * `GET /v1/workspaces/{ws}/actions`의 응답 본문이 들어올 자리 (ADR-0186 부록 E).
+   *
+   * **이 티켓은 요청을 보내지 않는다.** AX-4(#2510)가 fetch를 붙여 이 값을
+   * 넘긴다. 그때까지 App은 아무것도 넘기지 않으므로 총 파서가 `undefined`를
+   * `null`로 답하고, `null`이면 「워크스페이스 행동」 그룹은 통째로 없다 —
+   * 확신 없는 행동 줄은 세우지 않는다(fail-closed). 그래서 오늘 제품의
+   * 팔레트에는 `[data-action-id]` 줄이 0개다.
+   */
+  actionsResponse?: unknown;
 }) {
   const { session, workspaceId } = useSession();
   const navigate = useNavigate();
@@ -347,6 +583,20 @@ export function QuickSwitcher({
   // 팔레트에 친 말. 메시지 검색으로 넘길 때 그대로 들고 간다.
   const [typed, setTyped] = useState("");
 
+  /**
+   * 설정으로 갈 때의 규율 — 닫는 일은 하지 않는다.
+   *
+   * ⌘, 와 같은 규칙이다. 이미 /settings 위라면 히스토리를 하나 더 쌓지 않고
+   * (「앱으로 돌아가기」가 navigate(-1)이라 쌓인 항목이 첫 클릭을 먹는다,
+   * #1867 H-1), 갈 때는 돌아올 자리를 기억해 둔다.
+   */
+  function navigateFromPalette(path: string) {
+    const toSettings = path === "/settings" || path.startsWith("/settings?");
+    if (toSettings && location.pathname === "/settings") return;
+    if (toSettings) rememberSettingsOpener(restoreRef.current);
+    navigate(path);
+  }
+
   function go(path: string) {
     const toSettings = path === "/settings" || path.startsWith("/settings?");
     if (toSettings && location.pathname === "/settings") {
@@ -357,6 +607,72 @@ export function QuickSwitcher({
     onOpenChange(false);
     navigate(path);
   }
+
+  // ---- 명령 (ADR-0186 D1) ---------------------------------------------------
+
+  const { status, announce } = usePaletteStatus(open);
+
+  // 랭킹 기록은 **팔레트를 열 때** 읽는다. 다른 탭에서 쓴 명령도 다음에 열 때
+  // 반영되고, 열려 있는 동안에는 목록이 발밑에서 재정렬되지 않는다.
+  const [usage, setUsage] = useState<CommandUsage>(readCommandUsage);
+  useEffect(() => {
+    if (open) setUsage(readCommandUsage());
+  }, [open]);
+
+  const commandAgents = useMemo(
+    () =>
+      agents.map((agent) => ({
+        id: agent.id,
+        displayName: agent.displayName,
+        handle: agent.handle,
+      })),
+    [agents]
+  );
+
+  const commands = useMemo(
+    () =>
+      rankCommands(
+        visibleCommands({
+          showDrafts,
+          canCreateChannel: canCreate,
+          isSurfaceProvided,
+          agents: commandAgents,
+        }),
+        usage
+      ),
+    [showDrafts, canCreate, commandAgents, usage]
+  );
+
+  const commandContext: CommandContext = {
+    navigate: navigateFromPalette,
+    // 폼은 한 프레임 뒤에 연다. 같은 커밋에서 팔레트가 닫히고 폼이 열리면 두
+    // 포커스 스코프가 겹쳐, 폼이 "무엇이 나를 열었나"로 사라지는 중인 팔레트
+    // 입력을 잡는다. 팔레트가 먼저 캐럿을 제자리에 돌려놓은 다음 열려야 닫을
+    // 때도 그 자리로 돌아간다.
+    openCreateChannel: () => requestAnimationFrame(() => openCreateChannel()),
+    openAgentProfile: (memberId) =>
+      requestAnimationFrame(() => openAgentProfile(memberId)),
+    session: { memberId: session.member.id },
+    workspaceId,
+  };
+
+  function runCommand(command: PaletteCommand) {
+    const result = command.run(commandContext);
+    setUsage((previous) => {
+      const next = recordCommandUse(previous, command.id);
+      writeCommandUsage(next);
+      return next;
+    });
+    announce(result.status);
+    if (result.closesSurface) onOpenChange(false);
+  }
+
+  // 서버 행동 카탈로그 (ADR-0186 부록 E). 이 티켓은 fetch를 붙이지 않으므로
+  // 제품에서는 언제나 `null`이고, `null`이면 그룹 자체가 없다.
+  const workspaceActions = useMemo(
+    () => parseActionsCatalog(actionsResponse),
+    [actionsResponse]
+  );
 
   // 채널 만들기 다이얼로그와 같은 앵커(left-1/2 top-8 max-w-pane-md)에 번갈아
   // 뜨는 오버레이라, 스크림도 라운드도 폭도 하나여야 한다. rounded-lg = 다이얼로그가
@@ -427,7 +743,7 @@ export function QuickSwitcher({
 
             그리고 그 생존이 여기서는 예외가 아니라 규칙이다: 이 두 줄은 정확히
             **이름으로 못 찾았을 때 쓰라고 있는** 줄들이라, 걸러져 사라지면
-            필요한 바로 그 순간에 없다. 「이동」의 나머지 항목은 반대로 이름이
+            필요한 바로 그 순간에 없다. 아래 「명령」의 줄들은 반대로 이름이
             안 맞으면 사라지는 것이 맞으므로 그 그룹에 남는다.
 
             그룹 머리글이 표면 이름을 **한 번** 말하고(#1146 N4), 두 줄은 각자
@@ -484,119 +800,61 @@ export function QuickSwitcher({
           </Command.Group>
         )}
 
-        <Command.Group heading="이동">
-          <Command.Item role="option" className={itemClass} onSelect={() => go("/inbox")}>
-            <Inbox className="size-4 opacity-70" />
-            인박스
-          </Command.Item>
-          {showDrafts && (
-            <Command.Item role="option"
-              className={itemClass}
-              value="초안 drafts"
-              data-testid="switcher-drafts"
-              onSelect={() => go("/drafts")}
-            >
-              <FileText className="size-4 opacity-70" />
-              초안
-            </Command.Item>
-          )}
-          <Command.Item role="option" className={itemClass} onSelect={() => go("/activity")}>
-            <Activity className="size-4 opacity-70" />
-            활동
-          </Command.Item>
-          {/* 멤버, the same word the sidebar row and the route's own h1 use.
-              One destination cannot have three names, and the surface people
-              arrive at says 멤버, so that is the name (R-1 어휘 계승). The
-              older wording stays in `value` as a search alias, so typing
-              디렉터리 or 명부 still finds it. */}
-          <Command.Item role="option"
-            className={itemClass}
-            value="멤버 디렉터리 명부"
-            onSelect={() => go("/directory")}
-          >
-            <Users className="size-4 opacity-70" />
-            멤버
-          </Command.Item>
-          <Command.Item role="option" className={itemClass} onSelect={() => go("/settings")}>
-            <Settings className="size-4 opacity-70" />
-            설정
-          </Command.Item>
-          <Command.Item
-            role="option"
-            className={itemClass}
-            value="에이전트 자격 설정 연결 hosted pairing"
-            data-testid="switcher-settings-agents"
-            onSelect={() => go("/settings?section=agents")}
-          >
-            <KeyRound className="size-4 opacity-70" aria-hidden="true" />
-            에이전트 자격
-          </Command.Item>
-          {isSurfaceProvided("workConsole") && (
-            <Command.Item
-              role="option"
-              className={itemClass}
-              value={`${serverSurface("workConsole").label} work console`}
-              data-testid="switcher-work-console"
-              onSelect={() => go("/work")}
-            >
-              <SquareTerminal className="size-4 opacity-70" />
-              {serverSurface("workConsole").label}
-            </Command.Item>
-          )}
-          {isSurfaceProvided("workstreams") && (
-            <Command.Item
-              role="option"
-              className={itemClass}
-              value={`${serverSurface("workstreams").label} workstreams`}
-              data-testid="switcher-workstreams"
-              onSelect={() => go("/workstreams")}
-            >
-              <Milestone className="size-4 opacity-70" />
-              {serverSurface("workstreams").label}
-            </Command.Item>
-          )}
-        </Command.Group>
+        {/* 「명령」 — 레지스트리가 그리는 한 그룹 (ADR-0186 D1).
 
-        {canCreate && (
-          <Command.Group heading="만들기">
-            <Command.Item role="option"
-              className={itemClass}
-              value="채널 만들기 새 채널 create channel"
-              data-testid="switcher-create-channel"
-              onSelect={() => {
-                onOpenChange(false);
-                // 한 프레임 뒤에 연다. 같은 커밋에서 팔레트가 닫히고 폼이
-                // 열리면 두 포커스 스코프가 겹쳐, 폼이 "무엇이 나를 열었나"로
-                // 사라지는 중인 팔레트 입력을 잡는다. 팔레트가 먼저 캐럿을
-                // 제자리에 돌려놓은 다음 열려야 닫을 때도 그 자리로 돌아간다.
-                requestAnimationFrame(() => openCreateChannel());
-              }}
-            >
-              <Plus className="size-4 opacity-70" />
-              채널 만들기
-            </Command.Item>
+            머리글 셋(이동·만들기·에이전트 설정)이 하나로 합쳐졌다. 갈래는
+            레지스트리의 `group`으로 남아 에이전트 카탈로그가 읽고, 화면에서는
+            **랭킹이 있는 한 목록**이 된다: 최근 쓴 명령이 위로 온다. 머리글이
+            셋이면 가장 자주 쓰는 줄은 언제나 둘째 머리글 아래 셋째 자리다.
+
+            forceMount는 여기 없다. 위의 검색 두 줄과 달리 이 줄들은 **이름으로
+            찾는** 줄이라, 이름이 안 맞으면 사라지는 것이 맞다. */}
+        {commands.length > 0 && (
+          <Command.Group heading="명령">
+            {commands.map((command) => (
+              <CommandRow
+                key={command.id}
+                command={command}
+                onRun={runCommand}
+              />
+            ))}
           </Command.Group>
         )}
 
-        {agents.length > 0 && (
-          <Command.Group heading="에이전트 설정">
-            {agents.map((agent) => (
-              <Command.Item role="option"
-                key={agent.id}
-                value={`${agent.displayName} ${agent.handle} 라우팅 모델 추론 강도 routing model effort`}
+        {/* 워크스페이스 행동 (ADR-0186 부록 E · D3 risk=approval).
+
+            서버 `actions` 카탈로그가 그리는 자리다. 위의 명령과 달리 이 줄들은
+            **워크스페이스를 바꾼다**(초대·웹훅·채널·역할) — 그래서 같은 그룹에
+            섞지 않는다: 누르면 승인 카드가 뜨는 줄과 그냥 이동하는 줄은 사람이
+            구분할 수 있어야 한다.
+
+            **이 티켓이 세우는 것은 경계뿐이다.** 카탈로그가 `null`(= 아직
+            모른다)이면 그룹 자체가 없다 — 반쯤 아는 목록을 그리면 팔레트가
+            없는 능력을 약속한다(fail-closed). 그리고 지금은 요청을 보내지
+            않으므로 제품에서 이 그룹은 언제나 없다.
+
+            줄이 그려질 때에도 **여기서는 실행되지 않는다**: 워크스페이스 행동은
+            제안 → 승인 → 실행이고(D2), 그 세 단계는 전부 AX-4(#2510)가 붙이는
+            카드 위에서 일어난다. 그때까지 줄은 사람 섹션의 선택 불가 이름과
+            같은 규율로 산다 — 이름은 찾히고, Enter는 답하지 않으며, 왜인지가
+            같은 줄에 적혀 있다. */}
+        {workspaceActions !== null && workspaceActions.length > 0 && (
+          <Command.Group heading="워크스페이스 행동">
+            {workspaceActions.map((action) => (
+              <Command.Item
+                role="option"
+                key={action.id}
                 className={itemClass}
-                data-testid="switcher-agent-routing"
-                data-member-id={agent.id}
-                onSelect={() => {
-                  onOpenChange(false);
-                  // 채널 만들기와 같은 이유로 한 프레임 뒤에 연다: 같은 커밋에서
-                  // 팔레트가 닫히고 폼이 열리면 두 포커스 스코프가 겹친다.
-                  requestAnimationFrame(() => openAgentProfile(agent.id));
-                }}
+                value={`${action.title} ${action.summary} ${action.id}`}
+                data-testid="switcher-workspace-action"
+                data-action-id={action.id}
+                disabled
               >
-                <Bot className="size-4 text-agent" />
-                {agent.displayName} 라우팅
-                <span className="text-meta text-ink-muted">@{agent.handle}</span>
+                <Bot className="size-4 text-agent" aria-hidden="true" />
+                {action.title}
+                <span className="text-meta text-warn">
+                  {action.unavailableReason ?? "승인 필요"}
+                </span>
               </Command.Item>
             ))}
           </Command.Group>
@@ -698,6 +956,11 @@ export function QuickSwitcher({
           </Command.Group>
         )}
       </Command.List>
+
+      {/* 상태줄은 목록 **밖**, 팔레트 바닥에 고정이다 (ADR-0182 ②). 목록 안이면
+          스크롤과 함께 움직이고 필터에 걸려 사라진다 — 고정 자리라는 것이 이
+          문법의 전부다. */}
+      <PaletteStatus status={status} />
     </Command>
     </PaletteLayer>
       ) : null}
