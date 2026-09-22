@@ -37,6 +37,9 @@
 //!   6. **`revoke` is the atomic single-use gate** (:177-181): the loser of a
 //!      concurrent replay gets 401 `refresh token already used or revoked`;
 //!   7. mint + record a new pair, answer `{accessToken, refreshToken}`.
+//!      Linked-device refresh locks the stable `device_link_token` row first,
+//!      re-reads the current pair, then consumes / records / rebinds in that
+//!      same tenant transaction so a racing DELETE cannot leave a live pair.
 //!
 //! ## `POST /v1/auth/logout` (B1.6)
 //!
@@ -70,7 +73,9 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::Json;
 use momo_auth::{
-    carries_privileged_scope, rebind_device_link_session_in_tx, record_session_token,
+    carries_privileged_scope, find_linked_device_id_by_refresh_in_tx, lock_linked_device_in_tx,
+    lock_member_session_tokens_by_ids, rebind_device_link_session_in_tx,
+    rebind_locked_device_link_session_in_tx, record_session_token,
     record_session_token_with_device, revoke_privileged_session_tokens, revoke_token,
     session_device_label, sign_access, sign_refresh, token_state, verify_app_access,
     verify_app_refresh, without_privileged_scopes, AuthError, DeviceSessionRecord, IssuedToken,
@@ -353,13 +358,30 @@ enum RefreshGate {
     /// The atomic single-use gate was lost: this token was already spent.
     AlreadyUsed,
     /// Gate passed — the presented refresh token is now revoked.
+    /// Non-linked sessions still mint the replacement pair after this
+    /// transaction (ordinary login refresh).
     Rotated {
         old_refresh_id: Uuid,
         device_label: Option<String>,
     },
+    /// Linked-device rotation finished in this transaction: consume, mint,
+    /// record and rebind either all committed or all rolled back.
+    Issued {
+        access: IssuedToken,
+        refresh: IssuedToken,
+    },
 }
 
 /// Map a verification failure on the refresh path to Swift's wording.
+fn refresh_tx_error(error: DbError) -> ApiError {
+    if let DbError::Sqlx(momo_db::sqlx::Error::Protocol(message)) = &error {
+        if message == "linked-device binding changed" {
+            return ApiError::unauthorized("refresh token already used or revoked");
+        }
+    }
+    db_error("auth.refresh", error)
+}
+
 fn refresh_auth_error(error: AuthError) -> ApiError {
     match error {
         AuthError::InvalidToken(_) => ApiError::unauthorized("invalid or expired refresh token"),
@@ -390,17 +412,20 @@ pub async fn refresh(
     };
 
     let presented = request.refresh_token.clone();
+    let jwt_secret = state.jwt_secret.clone();
+    let linked_scopes = scopes.clone();
     let gate = with_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
             // (1) Advisory pre-check — precise 401s for a logged-out/rotated
             // token. The *atomic* gate is the revoke below, not this read.
-            if let Err(rejection) = token_state(conn, &presented)
+            let old_refresh_id = match token_state(conn, &presented)
                 .await
                 .map_err(DbError::from)?
                 .require_active()
             {
-                return Ok(RefreshGate::Rejected(rejection));
-            }
+                Ok(id) => id,
+                Err(rejection) => return Ok(RefreshGate::Rejected(rejection)),
+            };
 
             // (2) The credential is alive, but the human behind it may not be.
             // RLS scopes this lookup to the token's workspace, so "active in
@@ -410,8 +435,106 @@ pub async fn refresh(
                 return Ok(RefreshGate::MemberInactive);
             }
 
-            // (3) THE single-use gate: exactly one concurrent replay flips the
-            // row and may mint a replacement pair (Swift :169-181).
+            if let Some(device_id) = find_linked_device_id_by_refresh_in_tx(
+                conn,
+                workspace_id,
+                member_id,
+                old_refresh_id,
+            )
+            .await
+            .map_err(DbError::from)?
+            {
+                // Linked path: stable device row first, then the current pair
+                // in id order. Consume / mint / rebind stay in this tx.
+                let Some(locked) =
+                    lock_linked_device_in_tx(conn, workspace_id, member_id, device_id)
+                        .await
+                        .map_err(DbError::from)?
+                else {
+                    return Ok(RefreshGate::AlreadyUsed);
+                };
+                if locked.refresh_id != old_refresh_id {
+                    return Ok(RefreshGate::AlreadyUsed);
+                }
+
+                let revoke = revoke_token(conn, &presented)
+                    .await
+                    .map_err(DbError::from)?;
+                if !revoke.revoked_now {
+                    return Ok(RefreshGate::AlreadyUsed);
+                }
+                if downgrade {
+                    revoke_privileged_session_tokens(conn, workspace_id, member_id)
+                        .await
+                        .map_err(DbError::from)?;
+                }
+
+                let access =
+                    sign_access(member_id, workspace_id, &linked_scopes, jwt_secret.as_str())
+                        .map_err(|error| {
+                            DbError::Sqlx(momo_db::sqlx::Error::Protocol(error.to_string()))
+                        })?;
+                let refresh =
+                    sign_refresh(member_id, workspace_id, &linked_scopes, jwt_secret.as_str())
+                        .map_err(|error| {
+                            DbError::Sqlx(momo_db::sqlx::Error::Protocol(error.to_string()))
+                        })?;
+                let device_label = locked.device_label.clone();
+                let access_id = record_session_token_with_device(
+                    conn,
+                    workspace_id,
+                    member_id,
+                    DeviceSessionRecord {
+                        raw_token: &access.token,
+                        label: SESSION_LABEL_ACCESS,
+                        scopes: &linked_scopes,
+                        expires_at_unix: access.expires_at,
+                        device_label: device_label.as_deref(),
+                        pending_sas: false,
+                    },
+                )
+                .await
+                .map_err(DbError::from)?;
+                let refresh_id = record_session_token_with_device(
+                    conn,
+                    workspace_id,
+                    member_id,
+                    DeviceSessionRecord {
+                        raw_token: &refresh.token,
+                        label: SESSION_LABEL_REFRESH,
+                        scopes: &linked_scopes,
+                        expires_at_unix: refresh.expires_at,
+                        device_label: device_label.as_deref(),
+                        pending_sas: false,
+                    },
+                )
+                .await
+                .map_err(DbError::from)?;
+                let rebound = rebind_locked_device_link_session_in_tx(
+                    conn,
+                    workspace_id,
+                    member_id,
+                    locked.id,
+                    locked.access_id,
+                    locked.refresh_id,
+                    access_id,
+                    refresh_id,
+                )
+                .await
+                .map_err(DbError::from)?;
+                if !rebound {
+                    // Consume + insert already happened in this tx. Returning
+                    // Ok would commit a live pair on a device that just refused
+                    // the rebind. Roll back so no orphan tokens survive.
+                    return Err(DbError::Sqlx(momo_db::sqlx::Error::Protocol(
+                        "linked-device binding changed".to_string(),
+                    )));
+                }
+                return Ok(RefreshGate::Issued { access, refresh });
+            }
+
+            // (3) Non-linked single-use gate: exactly one concurrent replay
+            // flips the row and may mint a replacement pair (Swift :169-181).
             let revoke = revoke_token(conn, &presented)
                 .await
                 .map_err(DbError::from)?;
@@ -442,7 +565,7 @@ pub async fn refresh(
         })
     })
     .await
-    .map_err(|error| db_error("auth.refresh", error))?;
+    .map_err(refresh_tx_error)?;
 
     match gate {
         RefreshGate::Rejected(rejection) => Err(ApiError::unauthorized(rejection.message())),
@@ -452,6 +575,10 @@ pub async fn refresh(
         RefreshGate::AlreadyUsed => Err(ApiError::unauthorized(
             "refresh token already used or revoked",
         )),
+        RefreshGate::Issued { access, refresh } => Ok(Json(RefreshResponse {
+            access_token: access.token,
+            refresh_token: refresh.token,
+        })),
         RefreshGate::Rotated {
             old_refresh_id,
             device_label,
@@ -538,15 +665,51 @@ pub async fn logout(
     // Both revokes in one transaction (Swift uses two connections): a logout
     // that killed the access half but not the refresh half would leave the
     // session rotatable, which is precisely what logout must prevent.
+    let member_id = principal.member_id;
     let (revoked_access, revoked_refresh) =
         with_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
+                // #2498 R3 / H1 — take the SAME id-ordered `token` row locks the
+                // linked-device refresh takes (`lock_linked_device_in_tx` →
+                // `lock_member_session_tokens_by_ids`) BEFORE either `revoke_token`
+                // UPDATE below. Without this, logout's lock order is the semantic
+                // access→refresh, while refresh's is `ORDER BY id`; the two only
+                // agree because `token.id` is `uuidv7()` and the access half is
+                // always INSERTed first. This makes the agreement an invariant of
+                // the code instead of a property of the id generator.
+                //
+                // The two lookups are advisory reads, not the idempotency gate:
+                // an unknown token contributes no id (nothing to lock) and an
+                // already-revoked one still locks its row. Which halves this call
+                // actually flipped is decided by the `revoke_token` UPDATEs, so a
+                // second logout stays a 200 exactly as before.
+                let mut lock_ids: Vec<Uuid> = Vec::with_capacity(2);
+                if let Some(id) = token_state(conn, &raw_access)
+                    .await
+                    .map_err(DbError::from)?
+                    .token_id()
+                {
+                    lock_ids.push(id);
+                }
+                if let Some(raw) = raw_refresh.as_deref() {
+                    if let Some(id) = token_state(conn, raw)
+                        .await
+                        .map_err(DbError::from)?
+                        .token_id()
+                    {
+                        lock_ids.push(id);
+                    }
+                }
+                lock_member_session_tokens_by_ids(conn, workspace_id, member_id, &lock_ids)
+                    .await
+                    .map_err(DbError::from)?;
+
                 let access = revoke_token(conn, &raw_access)
                     .await
                     .map_err(DbError::from)?;
-                let refresh = match raw_refresh {
+                let refresh = match raw_refresh.as_deref() {
                     Some(raw) => {
-                        revoke_token(conn, &raw)
+                        revoke_token(conn, raw)
                             .await
                             .map_err(DbError::from)?
                             .revoked_now
@@ -586,6 +749,16 @@ mod tests {
     #[test]
     fn v0_scopes_match_swift() {
         assert_eq!(base_scopes(), vec!["messages:write", "messages:read"]);
+    }
+
+    #[test]
+    fn linked_rebind_failure_rolls_back_as_already_used() {
+        let error = DbError::Sqlx(momo_db::sqlx::Error::Protocol(
+            "linked-device binding changed".to_string(),
+        ));
+        let mapped = refresh_tx_error(error);
+        assert_eq!(mapped.status.as_u16(), 401);
+        assert_eq!(mapped.message, "refresh token already used or revoked");
     }
 
     #[test]

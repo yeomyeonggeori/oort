@@ -379,6 +379,34 @@ pub async fn revoke_member_session_tokens_by_ids(
     Ok(rows.len() as u64)
 }
 
+/// Lock the named session rows in **id order** so refresh and revoke cannot
+/// invert `device_link_token` vs `token` locks. Callers must already hold the
+/// stable device-link row. Missing/foreign ids are skipped (same owner filter
+/// as the revoke sweep).
+const LOCK_MEMBER_SESSION_BY_IDS_SQL: &str = "SELECT id       FROM token      WHERE workspace_id = $1        AND actor_member_id = $2        AND kind = 'session'        AND id = ANY($3::uuid[])      ORDER BY id        FOR UPDATE";
+
+/// Take `FOR UPDATE` on `ids` in a stable order. Empty input is a no-op.
+pub async fn lock_member_session_tokens_by_ids(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    ids: &[Uuid],
+) -> Result<(), sqlx::Error> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let mut ordered = ids.to_vec();
+    ordered.sort_unstable();
+    ordered.dedup();
+    sqlx::query(LOCK_MEMBER_SESSION_BY_IDS_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(&ordered)
+        .fetch_all(&mut *conn)
+        .await?;
+    Ok(())
+}
+
 /// `token.device_label` on a session row, when present. Used by refresh to
 /// copy ADR-0180 device metadata onto the rotated pair.
 pub async fn session_device_label(
@@ -568,6 +596,26 @@ mod tests {
         assert!(
             REVOKE_MEMBER_SESSION_BY_IDS_SQL.contains("id = ANY($3::uuid[])"),
             "per-device revoke must name the id set"
+        );
+    }
+
+    #[test]
+    fn linked_session_lock_orders_ids_and_keeps_the_owner_filter() {
+        for needle in [
+            "actor_member_id = $2",
+            "kind = 'session'",
+            "id = ANY($3::uuid[])",
+            "ORDER BY id",
+            "FOR UPDATE",
+        ] {
+            assert!(
+                LOCK_MEMBER_SESSION_BY_IDS_SQL.contains(needle),
+                "lock_member_session_tokens_by_ids lost `{needle}`"
+            );
+        }
+        assert!(
+            !LOCK_MEMBER_SESSION_BY_IDS_SQL.contains("revoked_at IS NULL"),
+            "the lock must still serialize an already-revoked sibling so refresh and revoke share one order"
         );
     }
 
