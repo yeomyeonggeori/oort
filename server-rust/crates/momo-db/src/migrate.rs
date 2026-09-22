@@ -414,19 +414,25 @@ mod tests {
     /// 086 is ADR-0180's `device_link_token` (#1959 M0s): hash-only QR link
     /// tokens, SAS hold, and nullable `token.device_label`/`pending_sas`.
     /// schema_v0.sql is not modified.
+    ///
+    /// 087 is ADR-0186 D2's `workspace:propose` (#2508 AX-3a): the hosted scope
+    /// vocabulary gains a seventh value, so the three CHECK constraints that
+    /// enumerate it are rewritten (`hosted_agent_connection_scopes_ck`,
+    /// `token_hosted_binding_ck`, `hosted_oauth_request_scope_ck`). No table,
+    /// column or index is added; schema_v0.sql is not modified.
     #[test]
-    fn discovers_contiguous_migrations_001_to_086() {
+    fn discovers_contiguous_migrations_001_to_087() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            86,
-            "expected 86 migrations under {}",
+            87,
+            "expected 87 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 86);
+        assert_eq!(migrations.last().unwrap().version, 87);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

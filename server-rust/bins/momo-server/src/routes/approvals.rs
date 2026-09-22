@@ -415,6 +415,43 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
         .await?));
     }
 
+    // **ADR-0186 D2 / AX-3a — only the *approve* half is unlanded.**
+    //
+    // The moment `oort_action_propose` lands, `approval_request` cards with
+    // `action_type = 'workspace_action'` are real rows in real channels and the
+    // web card renders approve/reject on any approval. Approving one must not
+    // take the generic path: `approve_run` would requeue the run and enqueue a
+    // `resume_approval` job whose payload has no `tool_call` at all — a job the
+    // worker cannot run, for a run that AX-3b (#2509) will **execute** rather
+    // than resume (ADR-0186 §5: 세 경로 모두 resume job 0건).
+    //
+    // **Rejection is deliberately NOT blocked**, because ADR-0186 D2 says the
+    // reject arm is the existing one and the existing one is already correct for
+    // this payload: `reject_run` reads `payload.tool_call.call_id` with
+    // `unwrap_or_default()`, `end_parked_run_in_tx` is guarded on
+    // `awaiting_approval`, and the resume job is emitted only by `approve_run`.
+    // Blocking it would be worse than doing nothing: a person looking at the
+    // card would have no way to close their own proposal, and the parked run
+    // holds `agent.max_concurrent_runs` (**default 1**) until the one-hour TTL
+    // sweep, so the agent would go silent with nothing anywhere saying why.
+    //
+    // Placed **after** the expiry settlement above and **before** the first
+    // write: an already-overdue card still settles as `expired` on a tap
+    // (otherwise the deadline would be invisible on the one surface a person
+    // uses), and a live one leaves the approval `pending` with the run still
+    // parked — nothing consumed, so the same tap succeeds once the executor
+    // lands.
+    if approval.action_type == momo_agent::ACTION_TYPE_WORKSPACE_ACTION && input.approve {
+        return Ok(Ok(refusal(
+            approval.id,
+            input.member_id,
+            "action_not_executable_yet",
+            "workspace action execution is not open on this server yet",
+            StatusCode::CONFLICT,
+            now,
+        )));
+    }
+
     // ---- writes ------------------------------------------------------------
     let event = decision_event_payload(
         &approval,

@@ -1,6 +1,6 @@
 //! The Agent Port tool catalog (ADR-0162 D3/D6, HAP-E5) — protocol only.
 //!
-//! Eight thin-binding tools, each one name plus one required scope plus one
+//! Nine thin-binding tools, each one name plus one required scope plus one
 //! bounded input schema. **No product logic and no database lives here**: the
 //! server adapter injects a typed domain port and this module decides only what
 //! a given credential may see and call, and what a result or a failure looks
@@ -79,6 +79,8 @@ pub const TOOL_JOB_RENEW: &str = "oort_job_renew";
 pub const TOOL_JOB_RELEASE: &str = "oort_job_release";
 pub const TOOL_RUN_EVENT: &str = "oort_run_event";
 pub const TOOL_RUN_COMPLETE: &str = "oort_run_complete";
+/// ADR-0186 D2 — propose a workspace change; never perform one.
+pub const TOOL_ACTION_PROPOSE: &str = "oort_action_propose";
 
 pub const SCOPE_PORT_CONNECT: &str = "agent:port:connect";
 pub const SCOPE_INBOX_READ: &str = "agent:inbox:read";
@@ -86,6 +88,14 @@ pub const SCOPE_MESSAGES_READ: &str = "messages:read";
 pub const SCOPE_MESSAGES_WRITE: &str = "messages:write";
 pub const SCOPE_JOBS_READ: &str = "agent:jobs:read";
 pub const SCOPE_RUNS_CALLBACK: &str = "agent:runs:callback";
+/// ADR-0186 D2 — the **propose** class, and nothing else.
+///
+/// It opens exactly one tool and **no REST route at all**
+/// (`momo_auth::agent_scope` leaves it out of `required_agent_scope` on
+/// purpose). That asymmetry is the decision: a credential carrying it can ask a
+/// human to change the workspace and can do nothing to the workspace itself, so
+/// a leaked hosted bearer buys an attacker a card somebody has to tap.
+pub const SCOPE_WORKSPACE_PROPOSE: &str = "workspace:propose";
 
 /// The note every length-bounded string carries.
 ///
@@ -255,9 +265,67 @@ fn run_complete_schema() -> Value {
     })
 }
 
+/// The `actionId` enum of [`action_propose_schema`] — ADR-0186 D1.
+///
+/// **A deliberate second copy** of `momo_agent::actions::ACTIONS`' ids. This
+/// crate is protocol-only and may not depend on the domain crate (see the module
+/// docs and this crate's `Cargo.toml`), so the enum is written here and a single
+/// drift test in `momo-server` measures this list, the registry, and
+/// `docs/api/openapi.yaml`'s `WorkspaceActionId` against each other. Adding an
+/// action means editing three lines; forgetting one of them is a red test, not a
+/// production surprise.
+const WORKSPACE_ACTION_IDS: [&str; 1] = ["invite.create"];
+
+// The argument vocabulary the registry publishes, restated here for the same
+// reason the ids are: `momo-mcp` may not depend on `momo-agent`, and
+// `the_protocol_crate_cannot_reach_transport_database_or_product_crates`
+// enforces that rather than merely recommending it. So these are named
+// constants that a drift test measures against
+// `momo_agent::actions`' own (`INVITE_PROPOSABLE_ROLES` /
+// `INVITE_MAX_USES_CEILING` / `INVITE_EXPIRES_IN_DAYS_CEILING`), instead of
+// literals buried inside a schema builder where a reader cannot see that they
+// are a copy at all. The test compares the whole published `args` object, not
+// the three values, so a property added on one side only is caught too.
+const WORKSPACE_ACTION_ROLES: [&str; 2] = ["member", "admin"];
+const WORKSPACE_ACTION_MAX_USES_CEILING: i64 = 100;
+const WORKSPACE_ACTION_EXPIRES_IN_DAYS_CEILING: i64 = 30;
+
+/// `oort_action_propose` — ADR-0186 D2.
+///
+/// `handle` rather than `leaseHandle`: ADR-0186 D2 names the field, and the E2E
+/// (#2512) and the hosted runtime instructions are written from the ADR. The
+/// value is the very same sealed `oort_jobs_claim` handle the lease verbs take,
+/// and the adapter proves it with the same `bound_handle` check.
+///
+/// `args` is required and **closed**: every action's own schema lives in the
+/// registry, and this one is the union those schemas are narrowed from. A v1
+/// with one action makes them identical; the closed shape is what keeps a typo
+/// (`maxUse`) from reaching the domain as an ignored key.
+fn action_propose_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["handle", "actionId", "args"],
+        "properties": {
+            "handle": required_text(512),
+            "actionId": {"type": "string", "enum": WORKSPACE_ACTION_IDS},
+            "args": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "role": nullable(json!({"type": "string", "enum": WORKSPACE_ACTION_ROLES})),
+                    "maxUses": nullable(integer(1, WORKSPACE_ACTION_MAX_USES_CEILING)),
+                    "expiresInDays": nullable(integer(1, WORKSPACE_ACTION_EXPIRES_IN_DAYS_CEILING))
+                }
+            },
+            "rationale": nullable(text(280))
+        }
+    })
+}
+
 /// The complete catalog. Order is the `tools/list` order and is stable so a
 /// client diffing two listings sees only real capability changes.
-pub const TOOL_CATALOG: [ToolDescriptor; 8] = [
+pub const TOOL_CATALOG: [ToolDescriptor; 9] = [
     ToolDescriptor {
         name: TOOL_INBOX_READ,
         title: "Read the hosted inbox",
@@ -315,6 +383,15 @@ pub const TOOL_CATALOG: [ToolDescriptor; 8] = [
         required_scope: SCOPE_RUNS_CALLBACK,
         schema: run_complete_schema,
     },
+    ToolDescriptor {
+        name: TOOL_ACTION_PROPOSE,
+        title: "Propose a workspace action",
+        description: "Ask a person to approve one workspace change. \
+                      The proposal parks this run until someone decides; it never performs \
+                      the change.",
+        required_scope: SCOPE_WORKSPACE_PROPOSE,
+        schema: action_propose_schema,
+    },
 ];
 
 /// What this server build is able to serve, independent of any credential.
@@ -339,6 +416,7 @@ impl ToolCapability {
             TOOL_JOB_RELEASE,
             TOOL_RUN_EVENT,
             TOOL_RUN_COMPLETE,
+            TOOL_ACTION_PROPOSE,
         ],
     };
 
@@ -615,7 +693,7 @@ mod tests {
     }
 
     #[test]
-    fn the_catalog_is_exactly_the_eight_named_tools() {
+    fn the_catalog_is_exactly_the_nine_named_tools() {
         assert_eq!(
             TOOL_CATALOG.iter().map(|t| t.name).collect::<Vec<_>>(),
             vec![
@@ -627,6 +705,7 @@ mod tests {
                 "oort_job_release",
                 "oort_run_event",
                 "oort_run_complete",
+                "oort_action_propose",
             ]
         );
     }
@@ -653,9 +732,10 @@ mod tests {
             SCOPE_MESSAGES_WRITE,
             SCOPE_JOBS_READ,
             SCOPE_RUNS_CALLBACK,
+            SCOPE_WORKSPACE_PROPOSE,
         ]);
         let view = ToolView::intersect(&all, &all, ToolCapability::FULL);
-        assert_eq!(view.names().len(), 8);
+        assert_eq!(view.names().len(), 9);
         for (name, scope) in [
             (TOOL_INBOX_READ, SCOPE_INBOX_READ),
             (TOOL_CONVERSATION_READ, SCOPE_MESSAGES_READ),
@@ -665,9 +745,109 @@ mod tests {
             (TOOL_JOB_RELEASE, SCOPE_JOBS_READ),
             (TOOL_RUN_EVENT, SCOPE_RUNS_CALLBACK),
             (TOOL_RUN_COMPLETE, SCOPE_RUNS_CALLBACK),
+            (TOOL_ACTION_PROPOSE, SCOPE_WORKSPACE_PROPOSE),
         ] {
             assert_eq!(view.callable(name).expect(name).required_scope, scope);
         }
+    }
+
+    /// **ADR-0186 §5, first red proof.** The propose tool is invisible *and*
+    /// uncallable unless `workspace:propose` is on both halves of the
+    /// intersection, and every other scope a full hosted credential carries
+    /// opens nothing of it.
+    ///
+    /// The asymmetry matters: this is the one tool whose absence is a security
+    /// property rather than a missing feature, and the two halves fail
+    /// independently so a human's narrowing and a token's narrowing each close
+    /// it alone.
+    #[test]
+    fn the_propose_tool_needs_its_own_scope_on_both_halves() {
+        let without = scopes(&[
+            SCOPE_PORT_CONNECT,
+            SCOPE_INBOX_READ,
+            SCOPE_MESSAGES_READ,
+            SCOPE_MESSAGES_WRITE,
+            SCOPE_JOBS_READ,
+            SCOPE_RUNS_CALLBACK,
+        ]);
+        let view = ToolView::intersect(&without, &without, ToolCapability::FULL);
+        assert!(
+            !view.names().contains(&TOOL_ACTION_PROPOSE),
+            "no other scope may open the propose tool"
+        );
+        assert_eq!(
+            view.callable(TOOL_ACTION_PROPOSE),
+            view.callable("oort_nope"),
+            "invisible and unknown must be the same answer"
+        );
+
+        let mut with = without.clone();
+        with.push(SCOPE_WORKSPACE_PROPOSE.to_string());
+        // Approved but not carried, and carried but not approved: both closed.
+        assert!(ToolView::intersect(&with, &without, ToolCapability::FULL)
+            .callable(TOOL_ACTION_PROPOSE)
+            .is_none());
+        assert!(ToolView::intersect(&without, &with, ToolCapability::FULL)
+            .callable(TOOL_ACTION_PROPOSE)
+            .is_none());
+        assert!(ToolView::intersect(&with, &with, ToolCapability::FULL)
+            .callable(TOOL_ACTION_PROPOSE)
+            .is_some());
+    }
+
+    /// The propose schema refuses everything the registry's ceilings refuse, at
+    /// the protocol layer, before any transaction opens.
+    #[test]
+    fn the_propose_schema_bounds_every_argument() {
+        let propose = TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == TOOL_ACTION_PROPOSE)
+            .expect("catalog");
+        let call = |arguments: Value| validate_arguments(propose, &arguments);
+        assert!(call(
+            json!({"handle": "momo_lease_v1.AAAA", "actionId": "invite.create",
+                            "args": {}})
+        )
+        .is_ok());
+        assert!(call(
+            json!({"handle": "momo_lease_v1.AAAA", "actionId": "invite.create",
+                            "args": {"role": "admin", "maxUses": 100, "expiresInDays": 30},
+                            "rationale": "새 팀원 온보딩"})
+        )
+        .is_ok());
+        for refused in [
+            // an id outside the registry
+            json!({"handle": "h", "actionId": "webhook.create", "args": {}}),
+            // the REST surface's wider values, refused at the proposal boundary
+            json!({"handle": "h", "actionId": "invite.create", "args": {"role": "guest"}}),
+            json!({"handle": "h", "actionId": "invite.create", "args": {"maxUses": 101}}),
+            json!({"handle": "h", "actionId": "invite.create", "args": {"maxUses": 0}}),
+            json!({"handle": "h", "actionId": "invite.create", "args": {"expiresInDays": 31}}),
+            // a typo must not be an ignored key
+            json!({"handle": "h", "actionId": "invite.create", "args": {"maxUse": 1}}),
+            // the required trio
+            json!({"handle": "h", "args": {}}),
+            json!({"actionId": "invite.create", "args": {}}),
+            json!({"handle": "h", "actionId": "invite.create"}),
+            // the lease handle is not optional-as-null
+            json!({"handle": Value::Null, "actionId": "invite.create", "args": {}}),
+        ] {
+            assert_eq!(
+                call(refused.clone()),
+                Err(ToolFailure::InvalidArguments),
+                "{refused}"
+            );
+        }
+        // 280 **bytes**, like every other bound in this catalog.
+        let hangul = "가".repeat(94);
+        assert_eq!(hangul.len(), 282);
+        assert_eq!(
+            call(
+                json!({"handle": "h", "actionId": "invite.create", "args": {},
+                        "rationale": hangul})
+            ),
+            Err(ToolFailure::InvalidArguments)
+        );
     }
 
     /// Both scope lists are required, and the failure is symmetric: a stale

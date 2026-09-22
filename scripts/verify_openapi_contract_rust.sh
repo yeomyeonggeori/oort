@@ -3826,6 +3826,24 @@ guard_jq --arg id "$INVITE_ADMIN_ID" '
   and (has("codeHash") | not)' \
   "invite create returns metadata plus a one-time code"
 
+# ADR-0186 D1 / #2508 — the action catalog three consumers derive from. Sampled
+# on the real Rust handler because the shape it publishes (`executable` + a
+# non-null `unavailableReason` on every unavailable row) is what a client uses to
+# decide whether a row can be proposed at all, and an `additionalProperties:
+# false` spec cannot catch a key the handler simply stopped sending.
+sample workspace-actions get "/v1/workspaces/{workspaceId}/actions" \
+  "/v1/workspaces/$WS/actions" 200 "" "$ACCESS"
+guard_jq '
+  (.actions | type == "array")
+  and (any(.actions[]; .id == "invite.create" and .executable == true
+        and .risk == "approval" and .requiredRole == "admin"
+        and (.argsSchema.properties.role.enum == ["member","admin"])
+        and .unavailableReason == null))
+  and (all(.actions[] | select(.executable == false);
+        (.unavailableReason | type == "string") and (.unavailableReason | length > 0)))
+  and (tostring | test("code|secret|credential") | not)' \
+  "action catalog publishes executable rows with schemas and unavailable rows with reasons"
+
 sample invite-list get "/v1/workspaces/{workspaceId}/invites" \
   "/v1/workspaces/$WS/invites?limit=20" 200 "" "$ACCESS"
 guard_jq --arg id "$INVITE_ADMIN_ID" '
