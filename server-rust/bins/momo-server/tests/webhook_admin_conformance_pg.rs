@@ -58,6 +58,9 @@ const TEST_JWT_SECRET: &str = "webhook-conformance-app-signing-secret";
 /// Deliberately different from the app secret, for the same reason B4 split the
 /// Centrifugo key and MOMO-572 split the provider key: one leak must not be two.
 const TEST_OUTBOUND_MASTER_KEY: &str = "webhook-conformance-outbound-master-key";
+/// #2066: distinct from the outbound key AND from `TEST_JWT_SECRET`, so a
+/// derivation that silently fell back to either one fails these tests.
+const TEST_INGRESS_MASTER_KEY: &str = "webhook-conformance-ingress-master-key";
 const TEST_PASSWORD: &str = "webhook-conformance-password";
 
 fn database_url() -> String {
@@ -148,7 +151,8 @@ async fn start_server(pool: PgPool) -> String {
         "ws://127.0.0.1:8000/connection/websocket".to_string(),
     )
     .with_webhook(WebhookSettings {
-        outbound_master_key: Some(TEST_OUTBOUND_MASTER_KEY.to_string()),
+        ingress_master_key: TEST_INGRESS_MASTER_KEY.to_string(),
+        outbound_master_key: TEST_OUTBOUND_MASTER_KEY.to_string(),
         allow_development_http: false,
         doorbell_enabled: false,
         per_installation_limit: 60,

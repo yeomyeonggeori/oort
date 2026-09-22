@@ -19,7 +19,7 @@
 | 기동/배포 | [`docs/SELF_HOST.md`](SELF_HOST.md) · [`infra/rust/`](../infra/rust/)(셀프호스트 compose·Caddy·pgBackRest) · [`scripts/oort`](../scripts/oort) |
 | 에이전트 접속 | Rust Agent Port/MCP(ADR-0162) · [`adapters/prime`](../adapters/prime/) · [`adapters/hermes`](../adapters/hermes/) |
 
-현행 스택 빌드·검증 명령의 정본은 [`AGENTS.md`](../AGENTS.md) §3.
+공용 운영 계약은 [`AGENTS.md`](../AGENTS.md), 현행 빌드·검증 명령은 [개발 검증](runbooks/development-validation.md).
 
 ---
 
@@ -28,8 +28,8 @@
 | 파일 | 역할 |
 |---|---|
 | [`README.md`](../README.md) | 제품 1줄 + 불변식 + 셀프호스트 진입 |
-| [`AGENTS.md`](../AGENTS.md) | 워커 레인 운영 계약(빌드·검증·DoD·PR). 충돌 시 최우선 |
-| [`CLAUDE.md`](../CLAUDE.md) | 기획/오케스트레이션 세션 진입점 |
+| [`AGENTS.md`](../AGENTS.md) | 두 하네스의 공용 운영 계약·필수 검증·권한 경계 |
+| [`CLAUDE.md`](../CLAUDE.md) | Claude Code의 공용 AGENTS import 진입점 |
 | [`CONTRIBUTING.md`](../CONTRIBUTING.md) · [`CONTRIBUTING.ko.md`](../CONTRIBUTING.ko.md) | 기여 정본(DCO·라이선스 게이트) |
 | [`SECURITY.md`](../SECURITY.md) | 취약점 신고. 한국어 [`docs/security/README.ko.md`](security/README.ko.md) |
 | [`LICENSE`](../LICENSE) · [`NOTICE`](../NOTICE) | Apache-2.0 · 귀속 |

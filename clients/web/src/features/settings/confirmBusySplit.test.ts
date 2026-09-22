@@ -49,6 +49,7 @@ const FILES = {
     "../hostedAgents/HostedConnectionSection.tsx"
   ),
   "DoorbellSection.tsx": source("../hostedAgents/DoorbellSection.tsx"),
+  "LinkedDevicesList.tsx": source("./LinkedDevicesList.tsx"),
 } as const;
 
 type FileName = keyof typeof FILES;
@@ -148,6 +149,14 @@ const SITES = [
     label: "나가는 중",
     lock: "offline",
     lockVia: null,
+  },
+  {
+    file: "LinkedDevicesList.tsx",
+    testId: "linked-device-disconnect",
+    busy: "revoking",
+    label: "해제 중",
+    lock: "locked",
+    lockVia: "const locked = device.current || offline || (busy && !revoking);",
   },
 ] as const satisfies readonly {
   file: FileName;

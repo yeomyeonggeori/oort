@@ -6,6 +6,27 @@
 - 검증: Playwright `clients/web/scripts/capture-overlay-layers.mjs` — 다이얼로그·시트·팔레트·드로어에서 `elementFromPoint` 가 오버레이를 돌려줌. UnreadPill 을 `z-10` 으로 되돌리면 필 좌표가 `jump-unread`. 스크림 `z-index: auto` 면 하단 필이 스크림을 뚫음.
 - runtime-unverified: 실서버 타임라인에서 사람 클릭 왕복(캡처 목).
 
+## 설정 › 기기 목록·해제 UI (#2476 R2, 2026-09-12)
+
+- Track uxui. `feat/2476-devices-settings` onto `origin/track/uxui`. R2: 목록은 `authedRequest`(401 1회 회전, 만료는 `markAuthExpired`). 해제 후 다음 행/QR 만들기 착지 + `role=status` 낭독. 플랫폼은 iOS/iPadOS/Android/macOS/Windows. 빈 상태 한 줄. 「현재 기기」는 메타 문장. 마지막 사용 시각은 아직 기록하지 않습니다.
+- runtime-unverified: 실폰 redeem 후 이 화면 e2e. `current` 행은 폰 세션에서만 실측(웹 비밀번호 세션은 목록에 없음).
+## OpenAPI rust 샘플러에 GET/DELETE /v1/auth/devices 샘플 (#2491, 2026-09-12)
+
+- Track engine. `policy/2491-openapi-sampler-devices` onto `origin/track/engine`. `scripts/openapi_sampled_on_rust.txt`에 `GET /v1/auth/devices`·`DELETE /v1/auth/devices/{id}` 등재. 샘플러가 기기 링크 2회 redeem 픽스처 뒤 200(두 행, 하나 `current: true`, `lastSeenAt` 생략)·400 `cannot_revoke_current`·404·204를 왕복. compose 필수 `NOTIFIER_POSTGRES_PASSWORD`를 게이트 env에 추가(기존 검사 삭제 0).
+- 검증: `scripts/verify_openapi_contract_rust.sh` PASS 91/91 samples · 86 ops(이전 87/84). red: OpenAPI에서 `current` 제거 → shape FAIL undeclared `current`; 400 가드 문자열 `cannot_revoke_session` → guard FAIL, 원복. `bash -n` PASS. `cargo test -p momo-server` 334 lib + 24 unignored green(샘플러는 Rust 시험을 구동하지 않음).
+- runtime-unverified: 없음(호스트 스크립트+로컬 compose 부분집합). 실폰 설정 UI는 uxui A-46.
+## 두 하네스 공용 파이프라인 (#2501, 2026-09-12)
+
+- Track engine. Astra/Codex 또는 Fable/Claude Code가 같은 AGENTS·planning skill·현재 스냅샷과 Git common-dir의 owner/checkpoint를 사용하고, 구현은 Grok 4.6에 배정한다. 긴 필수 독서·모델별 중복 규칙을 줄이고 기존 기록은 archive에 보존했다.
+- 검증: 문서·스크립트 독립 검수와 격리 복원/소유권/상태표 시험. 실제 SessionStart 명령의 다른 cwd·Git 환경변수 격리, 동시 claim, 손상 기록 거절, checkpoint 원본 HEAD 보존을 확인했다. 최종 docs·CI·정책 게이트의 HEAD/결과는 이슈 PR 증거 참조; 게이트 실행체·DDL 불변.
+- runtime-unverified: 새로운 Fable 네이티브 세션 전체 자동 기동은 별도 미실행(훅 명령 실주행과 문서 진입점 검수 범위). #2498·기존 Fable PR·실제 배포는 대기. 기존 세션은 복원 재실행, 오래된 워크트리는 새 계약이 포함된 기준으로 동기화 후 재개.
+
+## Railway app/Caddy 릴리스 pin 정합 (#2499, 2026-09-12)
+
+- Track engine. `fix/2499-synchronize-railway-release-image-pins` onto `origin/track/engine`. `railway.json` `appImage`와 api/relay/webhook-sender/agent-worker image, `Dockerfile.caddy` `ARG OORT_IMAGE`를 `releases/latest.json` v0.1.5 list digest `sha256:5481c14e…`에 동기화. Centrifugo 등 외부 이미지 불변.
+- 검증: `scripts/tests/test_railway_template.sh`가 JSON 필드·Caddy ARG·`AS web` FROM·`COPY --from=web /opt/momo/web /srv/web` 소스를 각각 대조. 스크래치에서 서비스/Caddy ARG/unused-current+stale-web/COPY-redirect를 이전 digest로 하나씩 변조하면 RED. 원본 트리 청결. `local_gate --profile docs`는 Astra 슬롯 대기.
+- runtime-unverified: 실제 Railway 계정 재배포(#2205 미주장).
+
 ## 연결된 기기 목록·해제 (#2029, 2026-09-11)
 
 - Track engine. `feat/2029-linked-devices` onto `origin/track/engine`. ADR-0180 D5: `GET /v1/auth/devices` · `DELETE /v1/auth/devices/{id}`. 사람 bearer만. `id`=`device_link_token.id`. 현재 세션 해제는 400 `cannot_revoke_current`(로그아웃 경로). 남의 id는 404(존재 비누설). 스키마 변경 없음 — `token.device_label`+`device_link_token` join. refresh는 라벨을 복사하고 `redeemed_*`를 재결속한다. 푸시 `/v1/workspaces/{ws}/devices`와 별개.

@@ -172,13 +172,24 @@ has_label() {
 
 gate_for_labels() {
   local labels="$1"
+  # Map issue labels onto live local_gate.sh profiles only.
+  # Grade [rust] is a verification grade, not a profile; server/rust work
+  # uses runtime-db. There is no local_gate profile named rust or swift.
   case ",$labels," in
     *",area:relay,"*) echo "runtime-relay" ;;
     *",area:worker,"*) echo "runtime-agent" ;;
     *",area:server,"*|*",area:schema,"*|*",area:tenancy,"*) echo "runtime-db" ;;
-    *",area:macos,"*) echo "macos-ui" ;;
-    *",type:docs,"*|*",type:spec,"*|*",area:ci,"*) echo "docs+swift-before-merge" ;;
-    *) echo "swift" ;;
+    *",type:docs,"*|*",type:spec,"*|*",area:ci,"*) echo "docs" ;;
+    *",area:web,"*) echo "web" ;;
+    *) echo "verify-scope" ;;
+  esac
+}
+
+is_canonical_branch() {
+  local branch="$1"
+  case "$branch" in
+    main|track|track/*) return 0 ;;
+    *) return 1 ;;
   esac
 }
 
@@ -251,7 +262,11 @@ evidence_for_status() {
       echo "claim-first"
       ;;
     in-progress)
-      echo "run:$gate"
+      if [ "$gate" = "verify-scope" ]; then
+        echo "inspect-scope"
+      else
+        echo "run:$gate"
+      fi
       ;;
     needs-review)
       if [ -n "$pr" ] && [ "$pr" != "-" ]; then
@@ -374,7 +389,16 @@ print_stale_worktree_audit() {
     printf 'audit\tissue\tpr\tbranch\tworktree\tremote\tlocal_state\tcleanup_command\n'
 
     while IFS=$'\t' read -r branch path; do
+      # Never treat canonical or generic non-issue branches as cleanup
+      # candidates. track→main PRs have headRefName track/engine|track/uxui
+      # and would otherwise become done-candidates after merge.
+      if is_canonical_branch "$branch"; then
+        continue
+      fi
       issue="$(issue_for_branch "$branch")"
+      if [ "$issue" = "-" ]; then
+        continue
+      fi
       issue_title="-"
       issue_state="-"
       issue_url="-"
@@ -498,9 +522,10 @@ print_stale_worktree_audit
 
 echo
 echo "Legend:"
-echo "- gate: local gate profile expected before PR handoff or momo-main merge; docs+swift-before-merge means docs profile is enough for worker PR evidence, but swift profile is rerun by momo-main before merge."
-echo "- evidence: triage-feedback=alpha feedback needs severity/evidence/labels/milestone and a buildable goal before claim, claim-first=not started, run:<profile>=worker should run that local gate then open PR, momo-main-review=needs-review PR is in momo-main's review/merge queue, PR-missing=handoff label without an open PR, blocker-comment=issue comment must explain the blocker."
+echo "- gate: live local_gate.sh profile expected before PR handoff or momo-main merge. runtime-db covers server/rust ([rust] is a grade, not a profile). web covers clients/web. docs covers docs/spec/ci. verify-scope means labels do not map to one profile — inspect the issue, do not treat it as rust or swift."
+echo "- evidence: triage-feedback=alpha feedback needs severity/evidence/labels/milestone and a buildable goal before claim, claim-first=not started, run:<profile>=worker should run that live local gate then open PR, inspect-scope=in-progress labels do not map to an executable profile (verify-scope is a hint, not a gate), momo-main-review=needs-review PR is in momo-main's review/merge queue, PR-missing=handoff label without an open PR, blocker-comment=issue comment must explain the blocker."
 echo "- branch/PR/worktree are matched by the canonical '<type>/<issue>-<slug>' convention. If a field is '-', check for non-canonical names before starting duplicate work."
-echo "- stale/done audit is read-only. A cleanup command appears only for a closed issue or merged/closed PR whose local worktree is not current, has no dirty files, and has no unpushed/divergent commits."
+echo "- stale/done audit is read-only. A cleanup command appears only for a closed issue or merged/closed PR on a non-canonical issue branch whose local worktree is not current, has no dirty files, and has no unpushed/divergent commits."
+echo "- canonical branches (main, track, track/*) and generic non-issue branches are never cleanup candidates."
 echo "- stale-warning rows need human review first; dirty, current-worktree, upstream-unknown, or unpushed warnings intentionally suppress cleanup commands."
 echo "- worker stop line: after PR + scripts/goal_release.sh --review, workers do not merge, close issues, run the post-merge main gate, or adjust roadmap/backlog state."

@@ -78,7 +78,10 @@ vi.mock("@/features/sidebar/WorkspaceRail", () => ({
   WorkspaceRail: () => null,
 }));
 
-vi.mock("@/app/ShortcutHelpDialog", () => ({
+// 다이얼로그만 재운다. 같은 모듈의 `Keycaps`는 ⌘K 팔레트가 키캡 힌트를 그릴 때
+// 쓰는 순수 컴포넌트라 진짜가 필요하다 (ADR-0186 D1).
+vi.mock("@/app/ShortcutHelpDialog", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/app/ShortcutHelpDialog")>()),
   ShortcutHelpDialog: () => null,
 }));
 

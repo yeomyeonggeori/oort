@@ -36,6 +36,10 @@ command -v docker >/dev/null 2>&1 || fail "docker 없음"
 command -v openssl >/dev/null 2>&1 || fail "openssl 없음"
 [ -f "$RAILWAY_JSON" ] || fail "infra/railway/railway.json missing"
 [ -f "$CADDYFILE_RAILWAY" ] || fail "infra/railway/Caddyfile.railway missing"
+CADDY_DOCKERFILE="$ROOT/infra/railway/Dockerfile.caddy"
+PIN_CHECKER="$ROOT/scripts/tests/check_railway_release_pins.py"
+[ -f "$CADDY_DOCKERFILE" ] || fail "infra/railway/Dockerfile.caddy missing"
+[ -f "$PIN_CHECKER" ] || fail "scripts/tests/check_railway_release_pins.py missing"
 [ -f "$GENERATOR" ] || fail "scripts/self_host_env.sh missing"
 [ -f "$CONTRACT" ] || fail "scripts/verify_public_edge_centrifugo_contract.sh missing"
 
@@ -69,7 +73,7 @@ output_keys() {
   awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/ { print $1 }' "$1" | LC_ALL=C sort -u
 }
 
-# T2 stdout = canonical 43 + stamp outside the heredoc (#2193).
+# T2 stdout = canonical 45 + stamp outside the heredoc (#2193, #2066).
 expected_keys() {
   {
     canonical_keys
@@ -97,9 +101,9 @@ run_railway() {
 # ---------------------------------------------------------------------------
 # ① railway.json: required services, startCommand, preDeploy
 # ---------------------------------------------------------------------------
-python3 - "$RAILWAY_JSON" "$LATEST" <<'PY'
+python3 - "$RAILWAY_JSON" <<'PY'
 import json, sys
-path, latest_path = sys.argv[1], sys.argv[2]
+path = sys.argv[1]
 data = json.load(open(path))
 services = data.get("services") or {}
 required = ("api", "relay", "webhook-sender", "agent-worker", "centrifugo", "caddy")
@@ -128,15 +132,77 @@ if services["api"].get("public") is not False:
     raise SystemExit("api must be internal (Caddy is the public edge)")
 if services["caddy"].get("public") is not True:
     raise SystemExit("caddy must be the public service")
-digest = data["appImage"]["digest"]
-latest = json.load(open(latest_path))
-want = latest["images"]["app"]["digest_list"]
-if digest != want:
-    raise SystemExit("railway.json app digest %s != latest.json %s" % (digest, want))
+# #2066 — Railway is not a compose rendering (notes.composeTable), so the
+# `${VAR:?}` that stops a keyless api/sender in compose does not exist here.
+# The binary's JWT_HMAC fallback is deleted, so a webhook-sender service that
+# is never given OUTBOUND_WEBHOOK_MASTER_KEY refuses to boot — and one given a
+# *different* value than api signs deliveries nobody can verify. The catalog
+# must therefore name that variable on this service, not only on api.
+sender_vars = services["webhook-sender"].get("variablesFromGenerator") or []
+if "OUTBOUND_WEBHOOK_MASTER_KEY" not in sender_vars:
+    raise SystemExit(
+        "webhook-sender.variablesFromGenerator must contain OUTBOUND_WEBHOOK_MASTER_KEY "
+        "(#2066: no JWT_HMAC fallback, and no compose `:?` on Railway): %s" % sender_vars
+    )
 print("services", ",".join(required))
+print("webhook-sender vars", ",".join(sender_vars))
 print("preDeploy", blob[:120])
 PY
-pass "railway.json services + startCommand + preDeploy + digest pin"
+pass "railway.json services + startCommand + preDeploy + webhook-sender OUTBOUND_WEBHOOK_MASTER_KEY (#2066)"
+
+# Sabotage: the same assertion, run against a copy with the key dropped, must
+# exit non-zero. Committed file untouched.
+assert_sender_key() {
+  python3 - "$1" <<'PY'
+import json, sys
+services = json.load(open(sys.argv[1]))["services"]
+sender_vars = services["webhook-sender"].get("variablesFromGenerator") or []
+if "OUTBOUND_WEBHOOK_MASTER_KEY" not in sender_vars:
+    raise SystemExit("webhook-sender is missing OUTBOUND_WEBHOOK_MASTER_KEY: %s" % sender_vars)
+PY
+}
+python3 - "$RAILWAY_JSON" "$TMP_ROOT/railway.nosenderkey.json" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+service = data["services"]["webhook-sender"]
+service["variablesFromGenerator"] = [
+    v for v in (service.get("variablesFromGenerator") or [])
+    if v != "OUTBOUND_WEBHOOK_MASTER_KEY"
+]
+json.dump(data, open(sys.argv[2], "w"))
+PY
+assert_sender_key "$RAILWAY_JSON" || fail "committed railway.json failed its own sender-key check"
+if assert_sender_key "$TMP_ROOT/railway.nosenderkey.json" 2>/dev/null; then
+  fail "sabotage (drop OUTBOUND_WEBHOOK_MASTER_KEY from webhook-sender) still passed"
+fi
+pass "sabotage drop OUTBOUND_WEBHOOK_MASTER_KEY from webhook-sender → RED"
+
+# ---------------------------------------------------------------------------
+# ①b release pins: appImage, each app service image, Caddy ARG, web stage,
+# and the COPY that ships /srv/web. Compares those sources — not a file-wide
+# digest grep, and not an unused FROM ${OORT_IMAGE}. Scratch copies mutate one
+# source at a time; committed files stay clean.
+# ---------------------------------------------------------------------------
+python3 "$PIN_CHECKER" "$RAILWAY_JSON" "$CADDY_DOCKERFILE" "$LATEST" \
+  --prove-mutations \
+  >"$TMP_ROOT/pins.out" 2>"$TMP_ROOT/pins.err" || {
+  cat "$TMP_ROOT/pins.out" >&2
+  cat "$TMP_ROOT/pins.err" >&2
+  fail "Railway app/Caddy pins drifted from latest.json or mutation proof failed"
+}
+grep -Fq 'want_image' "$TMP_ROOT/pins.out" || fail "pin checker missing want_image"
+grep -Fq 'mutation appImage RED' "$TMP_ROOT/pins.out" || fail "pin checker missing appImage mutation proof"
+grep -Fq 'mutation api RED' "$TMP_ROOT/pins.out" || fail "pin checker missing api mutation proof"
+grep -Fq 'mutation relay RED' "$TMP_ROOT/pins.out" || fail "pin checker missing relay mutation proof"
+grep -Fq 'mutation webhook-sender RED' "$TMP_ROOT/pins.out" || fail "pin checker missing webhook-sender mutation proof"
+grep -Fq 'mutation agent-worker RED' "$TMP_ROOT/pins.out" || fail "pin checker missing agent-worker mutation proof"
+grep -Fq 'mutation caddy RED' "$TMP_ROOT/pins.out" || fail "pin checker missing Caddy ARG mutation proof"
+grep -Fq 'mutation missing-api RED' "$TMP_ROOT/pins.out" || fail "pin checker missing missing-api proof"
+grep -Fq 'mutation missing-caddy-arg RED' "$TMP_ROOT/pins.out" || fail "pin checker missing missing-caddy-arg proof"
+grep -Fq 'mutation caddy-stale-web-stage RED' "$TMP_ROOT/pins.out" || fail "pin checker missing stale web-stage mutation proof"
+grep -Fq 'mutation caddy-copy-from-stale RED' "$TMP_ROOT/pins.out" || fail "pin checker missing COPY --from stale mutation proof"
+grep -Fq 'committed tree still pinned' "$TMP_ROOT/pins.out" || fail "pin checker missing restore proof"
+pass "appImage + four app service images + Caddy web source match latest.json; independent mutations RED"
 
 # ---------------------------------------------------------------------------
 # ② generator --railway key set == canonical; sabotage one key → RED
@@ -166,12 +232,24 @@ if ! diff -u "$canon" "$got" >"$TMP_ROOT/keys.diff"; then
   fail "key-set diff not empty"
 fi
 key_count="$(wc -l <"$canon" | tr -d ' ')"
-[ "$key_count" = "44" ] || fail "key-set count expected 44 got $key_count"
+[ "$key_count" = "46" ] || fail "key-set count expected 46 got $key_count"
 grep -Fxq 'MOMO_SELF_HOST_PLATFORM=railway' "$happy_env" || \
   fail "T2 stdout missing MOMO_SELF_HOST_PLATFORM=railway stamp"
 pass "key-set equality (diff empty) count=$key_count"
 
-# #2438 — --railway --claim swaps password ↔ claim; count stays 44.
+# #2066 — every key the catalog promises webhook-sender must be one the
+# generator actually emits. A service list naming a key nothing writes is a
+# note, not an injection, and the operator would find out at boot.
+while IFS= read -r key; do
+  [ -n "$key" ] || continue
+  grep -Fxq "$key" "$canon" || \
+    fail "railway.json webhook-sender names ${key}, which --railway does not emit"
+done <<EOF
+$(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["services"]["webhook-sender"].get("variablesFromGenerator") or []))' "$RAILWAY_JSON")
+EOF
+pass "webhook-sender.variablesFromGenerator ⊆ 생성기 키 집합 (약속한 키를 실제로 낸다)"
+
+# #2438 — --railway --claim swaps password ↔ claim; count stays 46 (#2066: +2).
 claim_env="$TMP_ROOT/railway-claim.env"
 claim_ec="$(
   run_railway "$claim_env" env \
@@ -202,8 +280,73 @@ if ! diff -u "$TMP_ROOT/claim.expected.keys" "$TMP_ROOT/claim.got.keys" \
   fail "--railway --claim key-set diff not empty"
 fi
 claim_count="$(wc -l <"$TMP_ROOT/claim.got.keys" | tr -d ' ')"
-[ "$claim_count" = "44" ] || fail "--railway --claim key-set count expected 44 got $claim_count"
+[ "$claim_count" = "46" ] || fail "--railway --claim key-set count expected 46 got $claim_count"
 pass "key-set --claim equality (diff empty) count=$claim_count (password variant $key_count; 1:1 swap)"
+
+# ---------------------------------------------------------------------------
+# ②b #2066 R2 — T2 has no env file, so the `--ensure-managed-keys` backfill
+# never runs here (`oort_upgrade_t2` prints digest instructions and returns).
+# The only D2(a) path a platform install has is this render: when the operator
+# hands us the JWT secret already in use and no webhook keys, the two new keys
+# must be an explicit **copy** of it. Fresh randoms would invalidate every
+# issued native ingress secret, event subscription and doorbell secret at once.
+# ---------------------------------------------------------------------------
+FIXTURE_JWT="jwt-in-use-$(openssl rand -hex 8)"
+transition_env="$TMP_ROOT/railway-transition.env"
+transition_ec="$(
+  run_railway "$transition_env" env \
+    RAILWAY_PUBLIC_DOMAIN="$FIXTURE_HOST" \
+    DATABASE_URL="$FIXTURE_DB_URL" \
+    MOMO_RUST_IMAGE="$FIXTURE_IMAGE" \
+    JWT_HMAC="$FIXTURE_JWT" \
+    "$GENERATOR" --railway
+)"
+[ "$transition_ec" = "0" ] || {
+  cat "$transition_env.err" >&2
+  fail "--railway with an in-use JWT_HMAC failed exit=$transition_ec"
+}
+grep -Fxq "JWT_HMAC=${FIXTURE_JWT}" "$transition_env" || \
+  fail "--railway did not reuse the surrounding JWT_HMAC"
+grep -Fxq "WEBHOOK_INGRESS_MASTER_KEY=${FIXTURE_JWT}" "$transition_env" || \
+  fail "T2 D2(a): WEBHOOK_INGRESS_MASTER_KEY is not the transition copy of JWT_HMAC — every issued native secret would die: $(grep '^WEBHOOK_INGRESS_MASTER_KEY=' "$transition_env" | sed 's/=.*/=<redacted>/')"
+grep -Fxq "OUTBOUND_WEBHOOK_MASTER_KEY=${FIXTURE_JWT}" "$transition_env" || \
+  fail "T2 D2(a): OUTBOUND_WEBHOOK_MASTER_KEY is not the transition copy of JWT_HMAC"
+grep -Fq '이행 복사' "$transition_env.err" || {
+  cat "$transition_env.err" >&2
+  fail "the transition copy must be announced on stderr"
+}
+if grep -Fq "$FIXTURE_JWT" "$transition_env.err"; then
+  fail "the transition notice leaked the key value"
+fi
+pass "T2 D2(a): JWT_HMAC in env + no webhook keys → both keys are its copy, announced without the value"
+
+# Already-set keys win: a platform operator who rotated must not be reset by a
+# re-render (add-only, the same rule the file backfill keeps).
+PRESET_IN="rotated-in-$(openssl rand -hex 8)"
+PRESET_OUT="rotated-out-$(openssl rand -hex 8)"
+preset_env="$TMP_ROOT/railway-preset.env"
+preset_ec="$(
+  run_railway "$preset_env" env \
+    RAILWAY_PUBLIC_DOMAIN="$FIXTURE_HOST" \
+    DATABASE_URL="$FIXTURE_DB_URL" \
+    MOMO_RUST_IMAGE="$FIXTURE_IMAGE" \
+    JWT_HMAC="$FIXTURE_JWT" \
+    WEBHOOK_INGRESS_MASTER_KEY="$PRESET_IN" \
+    OUTBOUND_WEBHOOK_MASTER_KEY="$PRESET_OUT" \
+    "$GENERATOR" --railway
+)"
+[ "$preset_ec" = "0" ] || {
+  cat "$preset_env.err" >&2
+  fail "--railway with preset webhook keys failed exit=$preset_ec"
+}
+grep -Fxq "WEBHOOK_INGRESS_MASTER_KEY=${PRESET_IN}" "$preset_env" || \
+  fail "a rotated WEBHOOK_INGRESS_MASTER_KEY must survive a re-render"
+grep -Fxq "OUTBOUND_WEBHOOK_MASTER_KEY=${PRESET_OUT}" "$preset_env" || \
+  fail "a rotated OUTBOUND_WEBHOOK_MASTER_KEY must survive a re-render"
+if grep -Fq '이행 복사' "$preset_env.err"; then
+  fail "preset keys are not a transition copy; the notice must not fire"
+fi
+pass "T2: preset webhook keys survive a re-render and raise no transition notice"
 
 sabotaged="$TMP_ROOT/sabotaged.env"
 grep -v '^JWT_HMAC=' "$happy_env" >"$sabotaged" || true
