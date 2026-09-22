@@ -139,6 +139,7 @@
 //! breaks when reverted.
 
 pub mod a2a;
+pub mod actions;
 pub mod approval;
 pub mod dm;
 pub mod effort;
@@ -153,6 +154,18 @@ pub mod tools;
 pub mod usage;
 pub mod welcome;
 
+// NOTE the two names this block deliberately does **not** flatten:
+// `actions::DECLARED_NOT_EXECUTABLE` and `actions::ACTIONS` live one module down
+// because `tools::DECLARED_NOT_EXECUTABLE` already owns that name at the crate
+// root and the two lists answer different questions — one is "which internal
+// worker tools exist", the other is "which workspace actions may be proposed".
+// Callers say `momo_agent::actions::…` so the reader always knows which.
+pub use actions::{
+    action_block, action_by_id, action_ids, invite_create_rows, proposal_summary,
+    workspace_action_payload, workspace_action_request_body, workspace_action_request_props,
+    DeclaredAction, RequiredRole, Risk, WorkspaceAction, ACTION_INVITE_CREATE,
+    ACTION_TYPE_WORKSPACE_ACTION, DEFAULT_INVITE_EXPIRES_IN_DAYS,
+};
 pub use approval::{
     approval_payload, approval_request_body, approval_request_props, attach_request_message_in_tx,
     cancel_pending_approvals_for_run_in_tx, create_pending_approval_in_tx, decided_props_patch,

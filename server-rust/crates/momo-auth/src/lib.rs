@@ -100,6 +100,7 @@ pub use agent_credential::{
 pub use agent_scope::{
     is_gateway_callback_route, required_agent_scope, SCOPE_AGENT_INBOX_READ, SCOPE_AGENT_JOBS_READ,
     SCOPE_AGENT_PORT_CONNECT, SCOPE_AGENT_RUNS_CALLBACK, SCOPE_MESSAGES_READ, SCOPE_MESSAGES_WRITE,
+    SCOPE_WORKSPACE_PROPOSE,
 };
 pub use device_link::{
     confirm_device_link_sas_in_tx, consume_device_link_in_tx, device_link_status_in_tx,

@@ -1,0 +1,579 @@
+//! The **workspace action registry** — ADR-0186 D1, the Rust side of "정의는 한
+//! 곳, 소비자는 셋".
+//!
+//! A *workspace action* is something that changes the workspace and that an
+//! agent may **propose** but never execute: an invite link, a webhook, a
+//! channel, a role change. [`ACTIONS`] is the one definition, and three
+//! consumers are derived from it rather than written beside it:
+//!
+//! 1. `GET /v1/workspaces/{ws}/actions` — the human-facing catalog (부록 E);
+//! 2. the `actionId` enum of the Agent Port tool `oort_action_propose`;
+//! 3. `docs/api/openapi.yaml`'s `WorkspaceActionId`.
+//!
+//! The second copy is unavoidable: `momo-mcp` is protocol-only and may not
+//! depend on this crate (its Cargo.toml says so, and that boundary is what
+//! keeps SQL out of the protocol layer). So the enum is written twice and a
+//! single drift test measures all three lists at once — see
+//! `bins/momo-server/src/routes/actions.rs`'s
+//! `the_action_ids_are_one_list_in_three_places`.
+//!
+//! ## What is deliberately not here
+//!
+//! * **No executor.** ADR-0186 D2 runs the action inside the *decision*
+//!   transaction, with the **approver's** authority, and that half is AX-3b
+//!   (#2509). An agent is never admin at any point (D2), so a registry that
+//!   carried an executor callable from the agent's own transaction would be the
+//!   exact shape this ADR rejected.
+//! * **No argument normalisation.** The invite spec already has validators
+//!   (`momo_settings::{normalized_invite_role, validated_max_uses,
+//!   validated_expires_at_ms}`) and this crate does not depend on
+//!   `momo-settings`. The server layer reuses them
+//!   (`routes::actions::validated_action_args`) rather than growing a second
+//!   set here — a second validator is a second answer to "is this a legal
+//!   invite", and the two would drift.
+//!
+//! What this module *does* own is the declaration (id, title, summary, risk,
+//! required role, argument schema) and the **card contract** that goes with it
+//! (부록 A's `action` block), because those two must not be able to disagree.
+
+use serde_json::{json, Value};
+use uuid::Uuid;
+
+/// `approval.action_type` for every workspace-action proposal.
+///
+/// A sibling of [`crate::tools::ACTION_TYPE_TOOL_CALL`] on the same column
+/// (ADR-0186 D7: DDL untouched). The decision route branches on this string, and
+/// the expiry sweep must **not** — an expiring workspace action settles through
+/// exactly the same arm a tool call does, minus the resume job it never had.
+pub const ACTION_TYPE_WORKSPACE_ACTION: &str = "workspace_action";
+
+/// `invite.create` — mint a workspace invite link.
+///
+/// v1's only executable action, and the one the product sentence is about:
+/// 「@hermes 초대 링크 하나 만들어줘」 has no path today (ADR-0186 §1.1).
+pub const ACTION_INVITE_CREATE: &str = "invite.create";
+
+/// What a person is consenting to when they approve (ADR-0186 D3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Risk {
+    /// Changes nothing on the server — navigation, theme, density. These are
+    /// **client** commands (TS registry) and never reach this catalog; the
+    /// variant exists because `GET …/actions` publishes a `risk` field whose
+    /// vocabulary is the ADR's table, not "whatever v1 happened to need".
+    None,
+    /// Changes the workspace. Always an approval card, always executed by the
+    /// approver's authority.
+    Approval,
+}
+
+impl Risk {
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            Risk::None => "none",
+            Risk::Approval => "approval",
+        }
+    }
+}
+
+/// The workspace role a **decider** must hold for an action to execute.
+///
+/// Not the agent's role: the agent holds none of these at any point. This is
+/// read by the decision route (AX-3b) to judge the approver, and published so a
+/// card can say 「관리자가 승인해야 합니다」 before anyone taps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequiredRole {
+    Admin,
+}
+
+impl RequiredRole {
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            RequiredRole::Admin => "admin",
+        }
+    }
+
+    /// The word the summary sentence uses. Kept beside [`Self::as_wire`] so the
+    /// wire value and the Korean noun cannot drift into different roles.
+    pub fn korean(self) -> &'static str {
+        match self {
+            RequiredRole::Admin => "관리자",
+        }
+    }
+}
+
+/// One action this server can be asked to take.
+#[derive(Debug, Clone, Copy)]
+pub struct WorkspaceAction {
+    pub id: &'static str,
+    /// The card's heading and the catalog row's name.
+    pub title: &'static str,
+    /// One line, for the catalog row. The approval card's own summary is
+    /// [`proposal_summary`], which adds what approving *does*.
+    pub summary: &'static str,
+    pub risk: Risk,
+    pub required_role: RequiredRole,
+    /// What approving this executes, as a verb phrase. Only used to build
+    /// [`proposal_summary`]; it lives here so a new action cannot be added
+    /// without writing the sentence a person reads before consenting.
+    effect: &'static str,
+    args_schema: fn() -> Value,
+}
+
+/// Identity is the **id**, like `momo_mcp::ToolDescriptor`: the struct holds a
+/// function pointer whose address is not a meaningful value to compare.
+impl PartialEq for WorkspaceAction {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for WorkspaceAction {}
+
+impl WorkspaceAction {
+    /// The published JSON Schema for this action's `args` object — the same
+    /// object `GET …/actions` advertises, `oort_action_propose` embeds, and the
+    /// domain validators then re-prove.
+    pub fn args_schema(&self) -> Value {
+        (self.args_schema)()
+    }
+}
+
+/// The roles a **proposal** may ask for.
+///
+/// `momo_settings::normalized_invite_role` also accepts `guest`; a proposal may
+/// not. Narrowing here rather than there is deliberate — the REST surface serves
+/// a human admin who can see the whole workspace, and this one serves a card
+/// somebody reads in a channel.
+pub const INVITE_PROPOSABLE_ROLES: [&str; 2] = ["member", "admin"];
+/// The proposal ceiling on `maxUses`. The REST validator allows 10,000.
+pub const INVITE_MAX_USES_CEILING: i64 = 100;
+/// The proposal ceiling on `expiresInDays`.
+pub const INVITE_EXPIRES_IN_DAYS_CEILING: i64 = 30;
+
+/// `invite.create` arguments (ADR-0186 부록 E).
+///
+/// **Narrower than the REST surface on purpose** — see the three constants
+/// above. The published numbers are those constants rather than literals,
+/// because the server re-proves them with `momo_settings`' validators and a
+/// schema that advertised a different ceiling than the one enforced would be the
+/// exact divergence this registry exists to remove.
+fn invite_create_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "role": {"type": "string", "enum": INVITE_PROPOSABLE_ROLES},
+            "maxUses": {"type": "integer", "minimum": 1, "maximum": INVITE_MAX_USES_CEILING},
+            "expiresInDays": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": INVITE_EXPIRES_IN_DAYS_CEILING
+            }
+        }
+    })
+}
+
+/// The complete registry. Order is the catalog's order.
+pub const ACTIONS: &[WorkspaceAction] = &[WorkspaceAction {
+    id: ACTION_INVITE_CREATE,
+    title: "팀원 초대 링크 만들기",
+    summary: "역할과 사용 횟수, 만료를 정해 초대 링크를 하나 만듭니다.",
+    risk: Risk::Approval,
+    required_role: RequiredRole::Admin,
+    effect: "초대 링크를 만듭니다",
+    args_schema: invite_create_args_schema,
+}];
+
+/// An action the product already performs over REST that is **not** proposable
+/// yet, and the sentence that says why.
+///
+/// The same discipline `crate::tools::DECLARED_NOT_EXECUTABLE` follows: the next
+/// batch starts from a written list instead of a guess, and `GET …/actions`
+/// publishes these rows with `executable: false` so a client never has to invent
+/// its own explanation for an absence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeclaredAction {
+    pub id: &'static str,
+    pub title: &'static str,
+    pub summary: &'static str,
+    /// Required whenever `executable` is false — the #2016 catalog contract.
+    ///
+    /// A row without one would make a client invent its own explanation for an
+    /// absence, and every client would invent a different one.
+    pub unavailable_reason: &'static str,
+}
+
+pub const DECLARED_NOT_EXECUTABLE: &[DeclaredAction] = &[
+    DeclaredAction {
+        id: "webhook.create",
+        title: "채널 웹훅 발급",
+        summary: "채널로 들어오는 웹훅 자격을 하나 발급합니다.",
+        unavailable_reason: "웹훅 마스터키 분리(ADR-0004 증보 4)가 랜딩한 뒤에 열립니다.",
+    },
+    DeclaredAction {
+        id: "channel.create",
+        title: "채널 만들기",
+        summary: "이름과 공개 범위를 정해 채널을 하나 만듭니다.",
+        unavailable_reason: "다음 배치에서 열립니다.",
+    },
+    DeclaredAction {
+        id: "member.role.set",
+        title: "멤버 역할 변경",
+        summary: "한 멤버의 워크스페이스 역할을 바꿉니다.",
+        unavailable_reason: "다음 배치에서 열립니다.",
+    },
+];
+
+/// The registry's ids, in catalog order. The propose schema's enum and the
+/// OpenAPI enum are measured against exactly this.
+pub fn action_ids() -> Vec<&'static str> {
+    ACTIONS.iter().map(|action| action.id).collect()
+}
+
+/// The action `id` names, or `None`.
+///
+/// An unknown id and a declared-but-not-executable id answer the same way, so a
+/// proposal cannot be used to enumerate what a future batch will open.
+pub fn action_by_id(id: &str) -> Option<&'static WorkspaceAction> {
+    ACTIONS.iter().find(|action| action.id == id)
+}
+
+// ---------------------------------------------------------------------------
+// the approval contract (부록 A) — payload and props
+// ---------------------------------------------------------------------------
+
+/// `approval.payload` for a workspace action.
+///
+/// Deliberately **not** [`crate::approval::approval_payload`]: that builder
+/// exists to preserve a model's tool call byte for byte (`arguments` as the raw
+/// string the provider sent) and every one of its keys is about that utterance.
+/// A workspace action is not a tool call — there is no `call_id`, no provider
+/// string, and nothing to replay into a model.
+///
+/// `resume_model` is present and **null**, which is the load-bearing part: the
+/// tool-call payload's `resume_model` names the contract "the same run is
+/// resumed by a new `agent_job`", and a workspace action has no resume job at
+/// all (ADR-0186 D2). Writing the key as null says that explicitly rather than
+/// leaving a reader to infer it from an absence.
+///
+/// `args` is the **normalised** object, not what the agent typed: the card and
+/// the executor must agree about what "approve" means, and the only way to
+/// guarantee that is for both to read the same normalised values.
+pub fn workspace_action_payload(
+    action_id: &str,
+    args: &Value,
+    rationale: Option<&str>,
+    proposed_by: Uuid,
+) -> Value {
+    json!({
+        "action": {
+            "id": action_id,
+            "args": args.clone(),
+            "rationale": rationale,
+        },
+        "proposed_by": proposed_by.to_string(),
+        "resume_model": Value::Null,
+    })
+}
+
+/// One `label`/`value` row of the card's argument table.
+pub fn action_row(label: &str, value: impl Into<String>) -> Value {
+    json!({"label": label, "value": value.into()})
+}
+
+/// The `invite.create` card rows, built from the **normalised** arguments.
+///
+/// `expires_in_days` is `None` when the proposal named no expiry; the row still
+/// says 7일 because that is what the statement's own default
+/// (`invite_code.expires_at DEFAULT now() + interval '7 days'`) will write. A
+/// card that omitted the row would ask a person to approve an expiry they were
+/// never shown.
+pub fn invite_create_rows(role: &str, max_uses: i32, expires_in_days: Option<i64>) -> Vec<Value> {
+    vec![
+        action_row("역할", role),
+        action_row("사용 횟수", format!("{max_uses}회")),
+        action_row(
+            "만료",
+            format!(
+                "{}일",
+                expires_in_days.unwrap_or(DEFAULT_INVITE_EXPIRES_IN_DAYS)
+            ),
+        ),
+    ]
+}
+
+/// The invite expiry the SQL default applies when a proposal names none
+/// (`server/Migrations/…` `invite_code.expires_at`).
+pub const DEFAULT_INVITE_EXPIRES_IN_DAYS: i64 = 7;
+
+/// The `action` block of 부록 A.
+pub fn action_block(action: &WorkspaceAction, rows: Vec<Value>, rationale: Option<&str>) -> Value {
+    json!({
+        "id": action.id,
+        "rows": rows,
+        "rationale": rationale,
+        "required_role": action.required_role.as_wire(),
+    })
+}
+
+/// The sentence under the card's title: what approving this **does**, and with
+/// whose authority.
+///
+/// The proposer is not named in the sentence because the message is authored by
+/// the agent — the card already carries its avatar and name, and repeating it
+/// here would be the only place in the product where a speaker introduces
+/// themselves in their own message body.
+pub fn proposal_summary(action: &WorkspaceAction) -> String {
+    format!(
+        "에이전트가 제안했습니다. 승인하면 {} 권한으로 {}.",
+        action.required_role.korean(),
+        action.effect
+    )
+}
+
+/// The one-line body of the `approval_request` message.
+///
+/// A body rather than props alone, because props are a *rendering* affordance:
+/// a client that does not know this card kind still shows the person a sentence
+/// (ADR-0186 D5's fallback rule).
+pub fn workspace_action_request_body(action: &WorkspaceAction) -> String {
+    format!("승인 요청: {}", action.title)
+}
+
+/// `message.props` for the `approval_request` row of a workspace action —
+/// ADR-0186 부록 A.
+///
+/// The shared keys are the same ones
+/// [`crate::approval::approval_request_props`] writes (`approval_id`, `run_id`,
+/// `channel_id`, `action_type`, `status`, `expires_at_ms`, `title`, `summary`),
+/// so one renderer draws both faces of the card and the decision route's
+/// `decided_props_patch` patches this one unchanged. What separates them is the
+/// `action` block: its **presence** is the discriminator (ADR-0186 §6), which is
+/// why the tool-call builder is not widened to take an optional one — a
+/// workspace action has no `call_id`, no `tool_name` and no `arguments` string,
+/// and passing three empty ones would make the discriminator a lie.
+pub fn workspace_action_request_props(
+    approval_id: Uuid,
+    run_id: Uuid,
+    channel_id: Uuid,
+    action: &WorkspaceAction,
+    action_block: Value,
+    expires_at: chrono::DateTime<chrono::Utc>,
+) -> Value {
+    json!({
+        "approval_id": approval_id.to_string(),
+        "run_id": run_id.to_string(),
+        "channel_id": channel_id.to_string(),
+        "action_type": ACTION_TYPE_WORKSPACE_ACTION,
+        "status": "pending",
+        "expires_at_ms": expires_at.timestamp_millis(),
+        "title": action.title,
+        "summary": proposal_summary(action),
+        "action": action_block,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn v1_is_exactly_one_executable_action_and_three_declared_ones() {
+        assert_eq!(action_ids(), vec!["invite.create"]);
+        assert_eq!(
+            DECLARED_NOT_EXECUTABLE
+                .iter()
+                .map(|declared| declared.id)
+                .collect::<Vec<_>>(),
+            vec!["webhook.create", "channel.create", "member.role.set"]
+        );
+    }
+
+    /// The #2016 catalog contract: an unavailable row always says why. A blank
+    /// reason would make the client invent one.
+    #[test]
+    fn every_declared_action_carries_a_reason_and_no_id_is_in_both_lists() {
+        for declared in DECLARED_NOT_EXECUTABLE {
+            assert!(
+                !declared.unavailable_reason.trim().is_empty(),
+                "{}",
+                declared.id
+            );
+            assert!(!declared.title.trim().is_empty(), "{}", declared.id);
+            assert!(!declared.summary.trim().is_empty(), "{}", declared.id);
+            assert!(
+                action_by_id(declared.id).is_none(),
+                "{} cannot be both executable and declared-not-executable",
+                declared.id
+            );
+        }
+    }
+
+    #[test]
+    fn every_action_id_is_unique_and_resolvable() {
+        let mut ids = action_ids();
+        let total = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), total, "action identity is the id");
+        for action in ACTIONS {
+            assert_eq!(
+                action_by_id(action.id).map(|found| found.id),
+                Some(action.id)
+            );
+        }
+        assert!(action_by_id("invite.create.evil").is_none());
+        assert!(action_by_id("webhook.create").is_none());
+    }
+
+    /// Every v1 action changes the workspace, so every one of them is an
+    /// approval card. `Risk::None` exists for the client-command vocabulary
+    /// (ADR-0186 D3/D6) and must never appear in **this** catalog — an action
+    /// that reached the server without a card would be the gate's one hole.
+    #[test]
+    fn every_registry_action_is_an_approval_risk() {
+        for action in ACTIONS {
+            assert_eq!(action.risk, Risk::Approval, "{}", action.id);
+            assert_eq!(action.risk.as_wire(), "approval");
+        }
+        assert_eq!(Risk::None.as_wire(), "none");
+    }
+
+    #[test]
+    fn every_args_schema_is_a_closed_object() {
+        for action in ACTIONS {
+            let schema = action.args_schema();
+            assert_eq!(schema["type"], "object", "{}", action.id);
+            assert_eq!(schema["additionalProperties"], false, "{}", action.id);
+            assert!(schema["properties"].is_object(), "{}", action.id);
+        }
+    }
+
+    /// 부록 E's bounds, checked as numbers rather than as prose: the proposal
+    /// surface is narrower than the REST one it will execute through.
+    #[test]
+    fn the_invite_schema_is_narrower_than_the_rest_surface() {
+        let schema = action_by_id(ACTION_INVITE_CREATE)
+            .expect("v1")
+            .args_schema();
+        assert_eq!(
+            schema["properties"]["role"]["enum"],
+            json!(["member", "admin"])
+        );
+        assert_eq!(schema["properties"]["maxUses"]["minimum"], json!(1));
+        assert_eq!(schema["properties"]["maxUses"]["maximum"], json!(100));
+        assert_eq!(schema["properties"]["expiresInDays"]["minimum"], json!(1));
+        assert_eq!(schema["properties"]["expiresInDays"]["maximum"], json!(30));
+        // The published numbers ARE the constants the server enforces.
+        assert_eq!(
+            schema["properties"]["maxUses"]["maximum"],
+            json!(INVITE_MAX_USES_CEILING)
+        );
+        assert_eq!(
+            schema["properties"]["expiresInDays"]["maximum"],
+            json!(INVITE_EXPIRES_IN_DAYS_CEILING)
+        );
+        assert_eq!(
+            schema["properties"]["role"]["enum"],
+            json!(INVITE_PROPOSABLE_ROLES)
+        );
+        // `guest` is a role `momo_settings::normalized_invite_role` accepts and a
+        // proposal may not ask for; `owner` is refused by both. That the *REST*
+        // validator is genuinely wider is measured where both are in scope
+        // (`routes::actions::the_registry_ceilings_are_enforced_by_the_domain_as_well`)
+        // — this crate cannot depend on `momo-settings`.
+        assert!(!INVITE_PROPOSABLE_ROLES.contains(&"guest"));
+        assert!(!INVITE_PROPOSABLE_ROLES.contains(&"owner"));
+    }
+
+    #[test]
+    fn the_payload_names_the_proposer_and_declares_no_resume() {
+        let proposer = Uuid::from_u128(7);
+        let payload = workspace_action_payload(
+            ACTION_INVITE_CREATE,
+            &json!({"role": "member", "maxUses": 1}),
+            Some("새 팀원 온보딩 요청"),
+            proposer,
+        );
+        assert_eq!(payload["action"]["id"], json!("invite.create"));
+        assert_eq!(payload["action"]["args"]["role"], json!("member"));
+        assert_eq!(payload["action"]["rationale"], json!("새 팀원 온보딩 요청"));
+        assert_eq!(payload["proposed_by"], json!(proposer.to_string()));
+        assert!(
+            payload.get("resume_model").is_some_and(Value::is_null),
+            "a workspace action has no resume job, and the payload says so"
+        );
+        // The tool-call payload's keys are absent, which is what keeps the
+        // decision route from reading this as a tool call.
+        assert!(payload.get("tool_call").is_none());
+        // An omitted rationale is a null, never a missing key: the card renders
+        // the same shape either way.
+        let anonymous = workspace_action_payload(ACTION_INVITE_CREATE, &json!({}), None, proposer);
+        assert_eq!(anonymous["action"]["rationale"], Value::Null);
+    }
+
+    #[test]
+    fn the_card_rows_show_the_default_expiry_that_sql_will_apply() {
+        assert_eq!(
+            invite_create_rows("member", 1, None),
+            vec![
+                json!({"label": "역할", "value": "member"}),
+                json!({"label": "사용 횟수", "value": "1회"}),
+                json!({"label": "만료", "value": "7일"}),
+            ]
+        );
+        assert_eq!(
+            invite_create_rows("admin", 5, Some(30))[2],
+            json!({"label": "만료", "value": "30일"})
+        );
+    }
+
+    /// 부록 A, key by key. The shared half is what one renderer draws for both
+    /// approval faces; `action` is the discriminator.
+    #[test]
+    fn the_request_props_are_appendix_a() {
+        let action = action_by_id(ACTION_INVITE_CREATE).expect("v1");
+        let expires_at = chrono::DateTime::from_timestamp_millis(1_700_000_000_000)
+            .expect("a representable instant");
+        let props = workspace_action_request_props(
+            Uuid::from_u128(1),
+            Uuid::from_u128(2),
+            Uuid::from_u128(3),
+            action,
+            action_block(
+                action,
+                invite_create_rows("member", 1, Some(7)),
+                Some("새 팀원 온보딩 요청"),
+            ),
+            expires_at,
+        );
+        assert_eq!(props["approval_id"], json!(Uuid::from_u128(1).to_string()));
+        assert_eq!(props["run_id"], json!(Uuid::from_u128(2).to_string()));
+        assert_eq!(props["channel_id"], json!(Uuid::from_u128(3).to_string()));
+        assert_eq!(props["action_type"], json!("workspace_action"));
+        assert_eq!(props["status"], json!("pending"));
+        assert_eq!(props["expires_at_ms"], json!(1_700_000_000_000i64));
+        assert_eq!(props["title"], json!("팀원 초대 링크 만들기"));
+        assert_eq!(props["action"]["id"], json!("invite.create"));
+        assert_eq!(props["action"]["required_role"], json!("admin"));
+        assert_eq!(props["action"]["rows"][0]["label"], json!("역할"));
+        assert!(props["summary"]
+            .as_str()
+            .expect("summary")
+            .contains("관리자 권한으로"));
+        // The tool-call card's keys never appear here — their absence is what
+        // tells a renderer which face it is drawing.
+        for absent in ["call_id", "tool_name", "arguments"] {
+            assert!(props.get(absent).is_none(), "{absent}");
+        }
+    }
+
+    #[test]
+    fn the_request_body_is_readable_without_props() {
+        let action = action_by_id(ACTION_INVITE_CREATE).expect("v1");
+        assert_eq!(
+            workspace_action_request_body(action),
+            "승인 요청: 팀원 초대 링크 만들기"
+        );
+    }
+}

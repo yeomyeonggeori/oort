@@ -378,6 +378,31 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
         )));
     }
 
+    // **ADR-0186 D2 / AX-3a — a workspace action has no decision branch yet.**
+    //
+    // The moment `oort_action_propose` lands, `approval_request` cards with
+    // `action_type = 'workspace_action'` are real rows in real channels, and the
+    // web card renders any approval with approve/reject. Without this arm the
+    // generic path below would take one: `approve_run` would requeue the run and
+    // enqueue a `resume_approval` job whose payload has no `tool_call` at all —
+    // a job the worker cannot run, for a run that should have been executed
+    // rather than resumed (ADR-0186 §5: resume job 0건).
+    //
+    // So it is refused **before the first write**, which leaves the approval
+    // `pending` and the run parked: nothing is consumed, and the same tap
+    // succeeds once AX-3b (#2509) lands the executor. A person sees 「아직 열리지
+    // 않았습니다」 rather than a silently swallowed decision.
+    if approval.action_type == momo_agent::ACTION_TYPE_WORKSPACE_ACTION {
+        return Ok(Ok(refusal(
+            approval.id,
+            input.member_id,
+            "action_not_executable_yet",
+            "workspace action decisions are not open on this server yet",
+            StatusCode::CONFLICT,
+            now,
+        )));
+    }
+
     // The `work_control` this approval owns, if any (Swift :196). A malformed
     // binding is answered here rather than followed, because following it would
     // send a spawn down the generic resume path where nothing dispatches it.

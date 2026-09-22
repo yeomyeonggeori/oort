@@ -795,6 +795,13 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/reminders/{id}",
             patch(routes::reminders::update).delete(routes::reminders::delete),
         )
+        // ADR-0186 D1 — the action catalog an agent proposes from and a
+        // person's palette merges in. Read-only: proposing is the Agent Port's
+        // `oort_action_propose` and executing is the decision route.
+        .route(
+            "/v1/workspaces/{ws}/actions",
+            get(routes::actions::list),
+        )
         .route(
             "/v1/workspaces/{ws}/invites",
             get(routes::invites::list).post(routes::invites::create),

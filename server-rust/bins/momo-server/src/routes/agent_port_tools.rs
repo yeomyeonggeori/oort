@@ -1,4 +1,4 @@
-//! The Agent Port's eight product tools (ADR-0162 D3/D6, HAP-E5).
+//! The Agent Port's nine product tools (ADR-0162 D3/D6, HAP-E5; ADR-0186 D2).
 //!
 //! `momo-mcp` decides what a credential may see and call; **this module is the
 //! typed domain port it is handed**, and it is the whole reason the protocol
@@ -13,10 +13,26 @@
 //! | `oort_job_renew` / `oort_job_release` | `momo_outbox`'s existing lease verbs, unchanged |
 //! | `oort_run_event` | `routes::agent_gateway::record_gateway_event_in_tx` |
 //! | `oort_run_complete` | `routes::agent_gateway::complete_gateway_run_in_tx` |
+//! | `oort_action_propose` | `momo_agent::approval`'s producer — the *same* park #979 already wrote for tool calls |
 //!
 //! There is **no SQL in this file** beyond what those functions own, no second
 //! message or job ledger, and no Centrifugo publish: a hosted answer reaches a
 //! channel through the same outbox row a human's message does.
+//!
+//! ## Proposing is not doing (ADR-0186 D2)
+//!
+//! `oort_action_propose` is the one tool whose subject is the workspace rather
+//! than the conversation, and it is deliberately the *weakest* of the nine: it
+//! writes an `approval` row, an `approval_request` card and a run transition,
+//! and then the run stops. No invite, no webhook, no membership changes here;
+//! that happens in the decision transaction, with the **approver's** authority
+//! (AX-3b). The agent holds no admin scope at any point, which is why the
+//! propose scope opens zero REST routes.
+//!
+//! The run guard is the other half of that sentence. Once a run is parked,
+//! `oort_run_complete` and `oort_job_release` refuse it: an agent that could
+//! settle its own parked run would turn "waiting for a person" into "the person
+//! never gets asked".
 //!
 //! ## Authority is re-proved inside every transaction
 //!
@@ -44,8 +60,8 @@ use momo_mcp::{
 };
 use momo_messaging::{
     clamp_history_limit, is_channel_member, list_channel_page, list_hosted_inbox_in_tx,
-    validate_quote_target_in_tx, validate_thread_root_in_tx, HistoryCursor, MessageType,
-    NewMessage, SendExtras, HOSTED_INBOX_LIMIT_DEFAULT,
+    send_message_in_tx, validate_quote_target_in_tx, validate_thread_root_in_tx, HistoryCursor,
+    MessageType, NewMessage, SendExtras, HOSTED_INBOX_LIMIT_DEFAULT,
 };
 use momo_outbox::GatewayLeaseBinding;
 use serde_json::{json, Map, Value};
@@ -158,6 +174,7 @@ pub(crate) async fn execute(
         }
         momo_mcp::TOOL_RUN_EVENT => run_event(state, caller, &call.arguments).await,
         momo_mcp::TOOL_RUN_COMPLETE => run_complete(state, caller, &call.arguments).await,
+        momo_mcp::TOOL_ACTION_PROPOSE => action_propose(state, caller, &call.arguments).await,
         _ => Err(ToolFailure::InvalidArguments),
     };
     match result {
@@ -726,6 +743,30 @@ async fn job_lease(
                     })
                 }
                 LeaseVerb::Release => {
+                    // **ADR-0186 D2 — a parked run may not be handed back.**
+                    //
+                    // Releasing the lease is how an agent says "I am not doing
+                    // this job"; on a run that is waiting for a human decision
+                    // that would strand the approval: the card stays pending,
+                    // the job returns to the pool, and the next claim finds a
+                    // run it cannot park again. `oort_run_complete` already
+                    // refuses an approval hold inside
+                    // `complete_gateway_run_in_tx` (agent_gateway.rs), and this
+                    // is the same refusal on the lease verb that has no run
+                    // check of its own — `momo-outbox` knows about leases, not
+                    // runs, so the check belongs here.
+                    //
+                    // Renew is deliberately NOT guarded: keeping a lease alive
+                    // while a person decides is exactly what a well-behaved
+                    // adapter should be able to do.
+                    if let Some(run) =
+                        momo_agent::lock_gateway_run_in_tx(conn, caller.workspace_id, handle.run_id)
+                            .await?
+                    {
+                        if run.status.is_approval_held() {
+                            return Ok(Err(ToolFailure::Conflict));
+                        }
+                    }
                     let released = momo_outbox::release_gateway_lease_in_tx(
                         conn,
                         caller.workspace_id,
@@ -869,6 +910,189 @@ async fn run_complete(
 
     let (message_id, seq, status) = outcome?;
     Ok(json!({"status": status, "messageId": message_id, "seq": seq}))
+}
+
+// ---------------------------------------------------------------------------
+// oort_action_propose
+// ---------------------------------------------------------------------------
+
+/// Ask a person to make one workspace change (ADR-0186 D2).
+///
+/// The whole tool is the approval producer #979 already wrote, called with a
+/// different `action_type`:
+///
+/// 1. the arguments are normalised by the registry's own validators
+///    (`routes::actions::validated_action_args`), **outside** the transaction,
+///    so a bad proposal never opens one;
+/// 2. inside one tenant transaction: the scope is re-proved, the lease handle is
+///    re-bound, the run is locked, an `approval` row is inserted, the
+///    `approval_request` card goes out through `send_message_in_tx` (the same
+///    `channel_seq` bump and the same outbox row a human's message takes), the
+///    approval is joined to its card, and the run is parked.
+///
+/// Everything commits together or not at all, because the two shapes a partial
+/// write produces — a parked run with no card, a card with no park — both strand
+/// a person waiting on a decision nobody can make.
+///
+/// **No new outbox producer.** The card's broadcast is `send_message_in_tx`'s
+/// own, and no resume job is enqueued: a workspace action's decision executes it
+/// directly (AX-3b) rather than handing the run back to a model, which is what
+/// `payload.resume_model = null` says out loud.
+async fn action_propose(
+    state: &AppState,
+    caller: HostedCaller,
+    arguments_value: &Value,
+) -> Result<Value, ToolFailure> {
+    let args = arguments(arguments_value)?;
+    // `handle`, not `leaseHandle`: ADR-0186 D2 names the field, and the value is
+    // the same sealed `oort_jobs_claim` handle the lease verbs take.
+    let raw_handle = required_str(args, "handle", 512)?.to_string();
+    let action_id = required_str(args, "actionId", 128)?;
+    let action =
+        momo_agent::actions::action_by_id(action_id).ok_or(ToolFailure::InvalidArguments)?;
+    let rationale = optional_str(args, "rationale", 280)?.map(str::to_string);
+    let raw_args = args.get("args").cloned().unwrap_or_else(|| json!({}));
+    let validated = crate::routes::actions::validated_action_args(
+        action,
+        &raw_args,
+        chrono::Utc::now().timestamp_millis(),
+    )
+    .map_err(|error| failure_of(&error))?;
+
+    let secret = state.agent_port.envelope_secret().to_string();
+    let now = chrono::Utc::now();
+    let expires_at = momo_agent::default_expires_at(now, momo_agent::DEFAULT_TTL_SECONDS);
+
+    let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+        Box::pin(async move {
+            let identity =
+                match authorize_in_tx(conn, caller, momo_auth::SCOPE_WORKSPACE_PROPOSE).await? {
+                    Ok(identity) => identity,
+                    Err(failure) => return Ok(Err(failure)),
+                };
+            let handle = match bound_handle(&identity, caller, &raw_handle, &secret) {
+                Ok(handle) => handle,
+                Err(failure) => return Ok(Err(failure)),
+            };
+            // The same lock the gateway callbacks take: it re-proves that the
+            // agent is still an active agent member AND still a member of the
+            // run's channel, so an agent removed from the room mid-run cannot
+            // raise a card in it.
+            let Some(run) =
+                momo_agent::lock_gateway_run_in_tx(conn, caller.workspace_id, handle.run_id)
+                    .await?
+            else {
+                return Ok(Err(ToolFailure::Unavailable));
+            };
+            if run.agent_member_id != caller.agent_member_id
+                // The channel sealed into the handle is the one the human
+                // approved for this connection; the run's own channel is where
+                // the card must land. They are the same channel by construction
+                // — a disagreement means the handle and the run are not about
+                // the same work, and guessing which to believe is not an option.
+                || run.channel_id != handle.channel_id
+            {
+                return Ok(Err(ToolFailure::NotAuthorized));
+            }
+            // A run already parked, already settled, or paused cannot raise a
+            // second card. `park_run_for_approval_in_tx` would refuse anyway;
+            // answering here means the refusal is `Conflict` rather than an
+            // indistinguishable late failure after three writes.
+            if run.status.is_approval_held() || run.status.is_terminal() {
+                return Ok(Err(ToolFailure::Conflict));
+            }
+            // `queued → running`, idempotent and non-regressive. A hosted run is
+            // still `queued` until its first progress event, and an adapter that
+            // claims a job and proposes without reporting progress first is
+            // normal — the park below requires `running`.
+            momo_agent::mark_run_started_in_tx(conn, handle.run_id).await?;
+            // **The park happens before the approval, not after.**
+            //
+            // Its `status = 'running'` guard is the one thing in this
+            // transaction that can legitimately answer "no", and a refusal after
+            // the approval row and the card were written would have to roll them
+            // back through an error path that cannot carry `Conflict`. Doing it
+            // first means the refusal costs nothing and the three writes below
+            // are unconditional. The run row is already locked `FOR UPDATE` by
+            // the snapshot above, so nothing can move it in between.
+            if !momo_agent::park_run_for_approval_in_tx(conn, handle.run_id, expires_at).await? {
+                return Ok(Err(ToolFailure::Conflict));
+            }
+
+            let payload = momo_agent::workspace_action_payload(
+                action.id,
+                &validated.normalized,
+                rationale.as_deref(),
+                caller.agent_member_id,
+            );
+            let approval_id = momo_agent::create_pending_approval_in_tx(
+                conn,
+                caller.workspace_id,
+                momo_agent::NewApproval {
+                    run_id: handle.run_id,
+                    channel_id: run.channel_id,
+                    // The **agent** asked. `approval.requested_by` is a member
+                    // id like any other, and it is also what makes self-approval
+                    // structurally impossible: a decision requires
+                    // `member.kind = 'human'`.
+                    requested_by: caller.agent_member_id,
+                    action_type: momo_agent::ACTION_TYPE_WORKSPACE_ACTION.to_string(),
+                    payload,
+                    expires_at,
+                },
+            )
+            .await?;
+            let card = send_message_in_tx(
+                conn,
+                caller.workspace_id,
+                NewMessage {
+                    channel_id: run.channel_id,
+                    author_member_id: caller.agent_member_id,
+                    message_type: MessageType::ApprovalRequest,
+                    body: Some(momo_agent::workspace_action_request_body(action)),
+                    props: momo_agent::workspace_action_request_props(
+                        approval_id,
+                        handle.run_id,
+                        run.channel_id,
+                        action,
+                        momo_agent::action_block(
+                            action,
+                            validated.rows.clone(),
+                            rationale.as_deref(),
+                        ),
+                        expires_at,
+                    ),
+                    root_id: None,
+                    reply_to_id: None,
+                    // The approval id is the idempotency key, exactly as the
+                    // worker's own producer does it: a retried transaction
+                    // cannot produce two cards for one approval.
+                    client_msg_id: Some(approval_id),
+                    run_id: Some(handle.run_id),
+                    hlc_ts: None,
+                    hlc_count: None,
+                },
+            )
+            .await?;
+            momo_agent::attach_request_message_in_tx(
+                conn,
+                caller.workspace_id,
+                approval_id,
+                card.message.id,
+            )
+            .await?;
+            Ok(Ok(json!({
+                "approvalId": approval_id,
+                "status": "pending",
+                "expiresAtMs": expires_at.timestamp_millis(),
+                "cardMessageId": card.message.id,
+            })))
+        })
+    })
+    .await
+    .map_err(|error| internal("agent_port.action_propose", error))?;
+
+    outcome
 }
 
 /// One reported token count.
@@ -1095,6 +1319,81 @@ mod tests {
             bound_handle(&identity, caller, &handle, "another-secret"),
             Err(ToolFailure::NotAuthorized)
         );
+    }
+
+    /// **ADR-0186 D2 — the propose tool's scope is its own.**
+    ///
+    /// `authorize_in_tx` asks for exactly one scope per tool, and this is the
+    /// pairing for the one tool that can change what a workspace looks like. A
+    /// credential holding every conversational scope opens nothing of it, on
+    /// either half of the intersection.
+    #[test]
+    fn the_propose_scope_is_not_implied_by_any_other() {
+        let full = |scopes: &[&str]| HostedToolIdentity {
+            connection_id: Uuid::from_u128(1),
+            agent_member_id: Uuid::from_u128(2),
+            token_id: Uuid::from_u128(3),
+            token_scopes: scopes.iter().map(|scope| (*scope).to_string()).collect(),
+            approved_scopes: scopes.iter().map(|scope| (*scope).to_string()).collect(),
+            approved_channel_ids: Vec::new(),
+        };
+        let conversational = full(&[
+            "agent:port:connect",
+            "agent:inbox:read",
+            "messages:read",
+            "messages:write",
+            "agent:jobs:read",
+            "agent:runs:callback",
+        ]);
+        assert!(!has_scope(
+            &conversational,
+            momo_auth::SCOPE_WORKSPACE_PROPOSE
+        ));
+        let mut proposer = full(&["workspace:propose"]);
+        assert!(has_scope(&proposer, momo_auth::SCOPE_WORKSPACE_PROPOSE));
+        proposer.token_scopes.clear();
+        assert!(!has_scope(&proposer, momo_auth::SCOPE_WORKSPACE_PROPOSE));
+        proposer.token_scopes = vec!["workspace:propose".into()];
+        proposer.approved_scopes.clear();
+        assert!(!has_scope(&proposer, momo_auth::SCOPE_WORKSPACE_PROPOSE));
+        // The scope the adapter asks for and the scope the catalog publishes are
+        // the same string; a typo on either side would be a silently dead tool.
+        assert_eq!(
+            momo_auth::SCOPE_WORKSPACE_PROPOSE,
+            momo_mcp::TOOL_CATALOG
+                .iter()
+                .find(|tool| tool.name == momo_mcp::TOOL_ACTION_PROPOSE)
+                .expect("the propose tool is served")
+                .required_scope
+        );
+    }
+
+    /// The park is the run guard, stated as the predicate both refusals read.
+    ///
+    /// `complete_gateway_run_in_tx` answers an approval hold with 409 before it
+    /// even judges the lease (agent_gateway.rs), and `failure_of` maps that onto
+    /// `Conflict`; `job_release` asks `is_approval_held` directly. This pins the
+    /// two ends of that chain so a future status can neither widen the hold nor
+    /// leak out of it as some other wire answer.
+    #[test]
+    fn an_approval_hold_is_a_conflict_on_both_guarded_verbs() {
+        assert!(momo_agent::RunStatus::AwaitingApproval.is_approval_held());
+        assert_eq!(
+            failure_of(&ApiError::new(
+                StatusCode::CONFLICT,
+                "agent run requires a human approval decision (awaiting_approval)"
+            )),
+            ToolFailure::Conflict,
+            "the parked run's 409 must reach the adapter as Conflict, not Internal"
+        );
+        // Renew is not guarded, and the statuses that are not a hold are not
+        // affected by any of this.
+        for open in [
+            momo_agent::RunStatus::Queued,
+            momo_agent::RunStatus::Running,
+        ] {
+            assert!(!open.is_approval_held(), "{open:?}");
+        }
     }
 
     /// Both halves of the intersection are required at call time too, not only
