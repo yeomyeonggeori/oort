@@ -8057,6 +8057,9 @@ async function captureScheme(browser, scheme) {
   //       두 화면을 나란히 놓고 같은 키가 같은 모양인지 볼 수 있다.
   await sceneClick(directory, directory.getByTestId("open-quick-switcher"));
   await directory.getByTestId("quick-switcher").waitFor({ state: "visible" });
+  // 질의는 팔레트가 닫혀도 남는다(입력 상태는 팔레트 바깥에 산다). 앞 장면이
+  // 「김」을 쳐 두었으므로 비우지 않으면 이 장면은 사람 두 줄만 찍는다.
+  await directory.getByTestId("quick-switcher-input").fill("");
   await directory.getByTestId("switcher-inbox").waitFor({ state: "visible" });
   const commandRows = await directory.locator("[data-command-id]").count();
   if (commandRows < 5) {
