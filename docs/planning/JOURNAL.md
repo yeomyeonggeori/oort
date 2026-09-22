@@ -3,6 +3,13 @@
 > 세션 종료 시 공용 계약에 따라 짧은 항목을 맨 위에 추가한다.
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 갱신할 때 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-22 (오후) · Fable · ★AX-0 main 정본화 + ADR-0186 Accepted + W-A 발사(Opus 5 서브에이전트 2기)
+
+- AX-0 #2506: PR #2515 → track/engine → 승격 #2516(main 95199a69) → sync #2517/#2518. docs 게이트·CI PASS, 보호 경로 0.
+- 성재 결재: 「승인할게 진행해줘. 워커는 그냥 opus 5 서브에이전트로」 → ADR-0186 **Accepted**(§7 확정점 4 전부) · W-A go. 워커 레인 예외 기록(PIPELINE 기본 Grok 4.6 → 이 배치 Opus 5 서브에이전트).
+- 발사: `goal_claim` #2066(engine)·#2507(uxui) → Agent(opus) 2기, 미션 `claudedocs/resume-2026-09-22/mission-*.md`.
+- 다음: 워커 보고 → 독립 검수 → 랜딩(#2066은 정책 감사, AX-2는 design-review) → W-B. planner 병행 #2498·PR 3건.
+
 ## 2026-09-22 · Fable · ★진행 브리핑 + 시장 동향(Muse·ZCode·Slack Code·NanoClaw·OpenUI) + AX 에이전트 행동 축 편성 — ADR-0186 Proposed·ADR-0004 증보 4 Accept·이슈 9·브리프 5
 
 - 복원: 09-12 #2501 정합 뒤 랜딩 0(main=engine=uxui 동일 트리). 미랜딩: #2498(로컬)·PR #2485/#2490/#2497·#2066(Proposed)·#2205.
