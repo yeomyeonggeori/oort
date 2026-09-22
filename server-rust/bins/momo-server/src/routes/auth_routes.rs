@@ -564,7 +564,7 @@ pub async fn refresh(
         })
     })
     .await
-    .map_err(|error| refresh_tx_error(error))?;
+    .map_err(refresh_tx_error)?;
 
     match gate {
         RefreshGate::Rejected(rejection) => Err(ApiError::unauthorized(rejection.message())),

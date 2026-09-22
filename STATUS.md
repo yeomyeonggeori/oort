@@ -3,8 +3,9 @@
 ## 연결 기기 refresh/revoke 원자성 (#2498, 2026-09-12)
 
 - Track engine. `fix/2498-serialize-linked-device-refresh-and-revoke`. linked refresh는 `device_link_token` 안정 행을 먼저 잠그고, 현재 pair를 재확인한 뒤 consume·발급·rebind를 같은 tenant tx에서 끝내거나 전부 rollback한다. revoke도 같은 잠금 순서를 쓴다. 일반 로그인 refresh는 기존 경로.
-- 검증(이번 라운드): `cargo fmt --all --check` · `cargo test -p momo-auth --lib` 88 · `cargo test -p momo-server --lib routes::auth_routes` 9. HTTP+PG 경합/rollback 시험과 workspace clippy/test는 다음 라운드.
-- runtime-unverified: refresh 선행·revoke 선행 barrier, 중복 refresh, 중간 실패 rollback.
+- 검증(이번 라운드): 격리 PG18(로컬 19432)에서 `linked_devices_conformance_pg` 6 green — 실제 행 잠금 barrier(`pg_stat_activity.wait_event_type='Lock'`로 대기 확인, sleep 순서 추측 없음)로 refresh 선행·revoke 선행·동시 중복 refresh·binding 변경 중 rollback을 재현. `device_link_conformance_pg` 8 green. 게이트: `cargo fmt --all --check` · `cargo clippy --workspace --all-targets -D warnings` · `cargo test --workspace` 1346 pass/0 fail.
+- red proof: `LOCK_LINKED_DEVICE_SQL`의 `FOR UPDATE` 제거 → refresh 선행 시험이 대기 0으로 RED; 잠금 후 binding 재확인 제거 → binding 변경 시험이 200으로 RED. 둘 다 원복.
+- runtime-unverified: 실폰 redeem 후 설정 UI e2e와 다중 노드 배포 경합은 미측정(단일 서버 + 격리 PG 범위).
 
 ## 설정 › 기기 목록·해제 UI (#2476 R2, 2026-09-12)
 

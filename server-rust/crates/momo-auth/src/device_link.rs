@@ -715,6 +715,7 @@ pub async fn revoke_linked_device_in_tx(
 /// Point a locked consumed link at the rotated session pair and kill the
 /// previous access row. Returns `false` when the binding changed under the lock
 /// so the caller can roll the whole rotation back instead of no-op succeeding.
+#[allow(clippy::too_many_arguments)]
 pub async fn rebind_locked_device_link_session_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
