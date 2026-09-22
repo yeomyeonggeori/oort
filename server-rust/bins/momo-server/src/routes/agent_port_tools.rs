@@ -759,13 +759,36 @@ async fn job_lease(
                     // Renew is deliberately NOT guarded: keeping a lease alive
                     // while a person decides is exactly what a well-behaved
                     // adapter should be able to do.
-                    if let Some(run) =
-                        momo_agent::lock_gateway_run_in_tx(conn, caller.workspace_id, handle.run_id)
-                            .await?
+                    // **`AwaitingApproval` only, and fail-closed when the run
+                    // cannot be read.**
+                    //
+                    // Not `is_approval_held()`: that predicate also covers
+                    // `Paused`, and refusing to release a paused run's lease
+                    // would be a behaviour change outside ADR-0186's scope —
+                    // pausing is a person stopping work, and handing the job
+                    // back is a reasonable thing to do with it.
+                    //
+                    // A `None` run is refused rather than allowed through. The
+                    // loader returns `None` for a run whose agent left the
+                    // channel or is no longer active, which is exactly the state
+                    // in which a stranded card is most likely and least
+                    // recoverable — and releasing a lease we cannot prove is
+                    // unparked would do it silently. `Unavailable` (not
+                    // `Conflict`) because the run is unreachable rather than in
+                    // a refusing state, which is the same distinction every
+                    // other tool here draws.
+                    match momo_agent::lock_gateway_run_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        handle.run_id,
+                    )
+                    .await?
                     {
-                        if run.status.is_approval_held() {
+                        Some(run) if run.status == momo_agent::RunStatus::AwaitingApproval => {
                             return Ok(Err(ToolFailure::Conflict));
                         }
+                        Some(_) => {}
+                        None => return Ok(Err(ToolFailure::Unavailable)),
                     }
                     let released = momo_outbox::release_gateway_lease_in_tx(
                         conn,
@@ -924,8 +947,11 @@ async fn run_complete(
 /// 1. the arguments are normalised by the registry's own validators
 ///    (`routes::actions::validated_action_args`), **outside** the transaction,
 ///    so a bad proposal never opens one;
-/// 2. inside one tenant transaction: the scope is re-proved, the lease handle is
-///    re-bound, the run is locked, an `approval` row is inserted, the
+/// 2. inside one tenant transaction: the scope is re-proved, the handle's
+///    **identity** binding is re-checked (`bound_handle` — workspace, agent,
+///    connection and the human's still-current channel approval) and its
+///    **lease** is separately proved live and still ours, the run is locked, an
+///    `approval` row is inserted, the
 ///    `approval_request` card goes out through `send_message_in_tx` (the same
 ///    `channel_seq` bump and the same outbox row a human's message takes), the
 ///    approval is joined to its card, and the run is parked.
@@ -984,6 +1010,38 @@ async fn action_propose(
             else {
                 return Ok(Err(ToolFailure::Unavailable));
             };
+            // **The lease must still be live and still ours** — the same
+            // judgment `oort_run_complete` makes through
+            // `complete_gateway_run_in_tx`, applied here because parking a run
+            // is no less consequential than settling one.
+            //
+            // `bound_handle` above proves *identity* (workspace, agent,
+            // connection, approved channel) and nothing about the lease: a
+            // handle whose lease expired and whose job was re-claimed by a
+            // newer worker still decodes and still binds. Without this check
+            // that stale handle could park the run, and the worker that
+            // actually holds the job would then get 409 on every
+            // `oort_run_complete` until the one-hour TTL — a turn nobody can
+            // finish, caused by a proposal nobody asked for. ADR-0186 D2 gives
+            // the park to the lease holder; this is what makes that true.
+            //
+            // `allow_settled: false` — a done job may be replayed into
+            // `run_complete` (the retry window), but never into a new proposal.
+            let lease_snapshot = momo_outbox::lock_gateway_lease_in_tx(
+                conn,
+                caller.workspace_id,
+                handle.run_id,
+                run.agent_member_id,
+                GatewayLeaseBinding {
+                    job_id: handle.job_id,
+                    lease_id: handle.lease_id,
+                },
+            )
+            .await
+            .map_err(DbError::from)?;
+            if !momo_outbox::gateway_lease_authorized(lease_snapshot, handle.lease_id, false) {
+                return Ok(Err(ToolFailure::Conflict));
+            }
             if run.agent_member_id != caller.agent_member_id
                 // The channel sealed into the handle is the one the human
                 // approved for this connection; the run's own channel is where
@@ -1064,10 +1122,14 @@ async fn action_propose(
                     ),
                     root_id: None,
                     reply_to_id: None,
-                    // The approval id is the idempotency key, exactly as the
-                    // worker's own producer does it: a retried transaction
-                    // cannot produce two cards for one approval.
-                    client_msg_id: Some(approval_id),
+                    // A key **derived from** the approval id, not the approval
+                    // id itself — see `momo_agent::card_client_msg_id`. The
+                    // rejection and expiry `tool_result` lines for this same
+                    // approval are authored by this same agent in this same
+                    // channel and keyed on `approval.id`, so reusing it here
+                    // would make the card and its own outcome line collide on
+                    // `message_client_idem_uniq` and silently drop one of them.
+                    client_msg_id: Some(momo_agent::card_client_msg_id(approval_id)),
                     run_id: Some(handle.run_id),
                     hlc_ts: None,
                     hlc_count: None,

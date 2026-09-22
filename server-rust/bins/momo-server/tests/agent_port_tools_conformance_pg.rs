@@ -54,6 +54,34 @@ async fn superuser_pool() -> PgPool {
         .expect("connect to the tools conformance DB as superuser")
 }
 
+/// The **`momo_notifier`** pool — the posture `momo-notifier` actually runs its
+/// sweep in.
+///
+/// Not a convenience: step 1 of `sweep_expired_approvals` is a deliberately
+/// cross-tenant read (`workspaces_with_overdue_approvals`) issued with no
+/// `app.workspace_id` bound, because a sweep cannot know which tenants need
+/// visiting until it looks. On a NOBYPASSRLS role that statement does not merely
+/// return nothing — the RLS policy's `current_setting('app.workspace_id',
+/// true)::uuid` casts an empty string and raises `22P02`. `momo_notifier` is one
+/// of the two roles AGENTS.md keeps as a standing BYPASSRLS exception for
+/// exactly this scan, so running the sweep on `momo_app` would be testing a
+/// posture production never uses.
+async fn momo_notifier_pool() -> PgPool {
+    let options: PgConnectOptions = database_url()
+        .parse()
+        .expect("DATABASE_URL parses as a postgres connect string");
+    PgPoolOptions::new()
+        .max_connections(4)
+        .connect_with(
+            options.username("momo_notifier").password(
+                &std::env::var("MOMO_NOTIFIER_PASSWORD")
+                    .unwrap_or_else(|_| "momo_notifier_dev_pw".to_string()),
+            ),
+        )
+        .await
+        .expect("connect as momo_notifier after bootstrap_roles.sql")
+}
+
 async fn momo_app_pool() -> PgPool {
     let options: PgConnectOptions = database_url()
         .parse()
@@ -2437,29 +2465,15 @@ async fn a_proposal_parks_the_run_and_opens_no_other_path() {
     .unwrap();
     assert_eq!(cards, 1, "one proposal, one card");
 
-    // ---- the decision branch is closed until AX-3b, and closes safely ------
+    // ---- APPROVE is closed until AX-3b, and closes safely ------------------
     //
     // The card is live in a real channel the moment this lands, so the generic
     // resume path must not take it: that path would requeue the run and enqueue
     // a `resume_approval` job whose payload has no tool call.
-    let decision: reqwest::Response = client
-        .post(format!(
-            "{base}/v1/workspaces/{}/approvals/{approval_id}/decision",
-            fixture.workspace
-        ))
-        .bearer_auth(&fixture.human_jwt)
-        .json(&json!({
-            "approvalId": approval_id,
-            "approve": true,
-            "clientDecisionId": Uuid::new_v4()
-        }))
-        .send()
-        .await
-        .expect("decision responds");
+    let approve_status = decide(&client, &base, &fixture, approval_id, true).await;
     assert_eq!(
-        decision.status().as_u16(),
-        409,
-        "a workspace action decision is refused while the executor is unlanded"
+        approve_status, 409,
+        "approving a workspace action is refused while the executor is unlanded"
     );
     let still_pending: String =
         sqlx::query_scalar("SELECT status::text FROM approval WHERE workspace_id=$1 AND id=$2")
@@ -2478,58 +2492,32 @@ async fn a_proposal_parks_the_run_and_opens_no_other_path() {
         "and it must not enqueue a resume job"
     );
 
-    // ---- the expiry sweep settles it rather than tripping over it ----------
+    // ---- REJECT is open, and is the only way to close a proposal -----------
     //
-    // Run through the same domain calls `momo-notifier`'s sweep makes
-    // (`approval_sweep.rs`), because the risk this guards is not a crash but a
-    // *skip*: a payload with no `tool_call` must still release the gate.
-    sqlx::query(
-        "UPDATE approval SET expires_at = now() - interval '1 minute' \
-                  WHERE workspace_id=$1 AND id=$2",
-    )
-    .bind(fixture.workspace)
-    .bind(approval_id)
-    .execute(&su)
-    .await
-    .unwrap();
-    let workspace = fixture.workspace;
-    let swept = momo_db::with_tenant_tx(&app, workspace, move |conn| {
-        Box::pin(async move {
-            let candidates =
-                momo_agent::approval::overdue_approvals_in_tx(conn, workspace, 50).await?;
-            let mut settled = 0usize;
-            for candidate in candidates {
-                let approval = momo_agent::lock_approval_in_tx(conn, workspace, candidate.id)
-                    .await?
-                    .expect("the sweep re-reads the row it found");
-                if momo_agent::mark_approval_expired_in_tx(
-                    conn,
-                    approval.id,
-                    chrono::Utc::now(),
-                    "expired",
-                )
-                .await?
-                {
-                    momo_agent::end_parked_run_in_tx(
-                        conn,
-                        approval.run_id,
-                        momo_agent::RunStatus::TimedOut,
-                        &json!({"code": "approval_expired"}),
-                    )
-                    .await?;
-                    settled += 1;
-                }
-            }
-            Ok(settled)
-        })
-    })
-    .await
-    .expect("the sweep must not fail on a workspace_action payload");
+    // **ADR-0186 D2: 「거부·만료: 기존 arm 그대로」.** The temporary approve-side
+    // refusal must not take the reject side with it. If it did, a person looking
+    // at their own agent's proposal would have no way to say no: the card stays
+    // pending and the run stays parked, and because `agent.max_concurrent_runs`
+    // defaults to **1** and `awaiting_approval` counts as live, that agent
+    // answers nothing at all until the one-hour TTL expires — with nothing
+    // anywhere saying why.
+    let messages_before = channel_message_count(&su, fixture.workspace, fixture.channel).await;
+    let reject_status = decide(&client, &base, &fixture, approval_id, false).await;
     assert_eq!(
-        swept, 1,
-        "the overdue workspace action is found and settled"
+        reject_status, 200,
+        "rejecting a workspace action must work — the executor is what is unlanded, not the refusal"
     );
-    let after_sweep: String = sqlx::query_scalar(
+
+    let rejected: String =
+        sqlx::query_scalar("SELECT status::text FROM approval WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(approval_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(rejected, "rejected");
+
+    let run_after_reject: String = sqlx::query_scalar(
         "SELECT r.status::text FROM agent_run r JOIN approval a ON a.run_id = r.id \
           WHERE a.workspace_id=$1 AND a.id=$2",
     )
@@ -2539,14 +2527,347 @@ async fn a_proposal_parks_the_run_and_opens_no_other_path() {
     .await
     .unwrap();
     assert_eq!(
-        after_sweep, "timed_out",
-        "an expired proposal MUST release the concurrency gate"
+        run_after_reject, "cancelled",
+        "a rejection releases the concurrency gate"
     );
+
+    // **The `tool_result` line actually reaches the channel.** This is what the
+    // card's idempotency key was changed for: the rejection line is authored by
+    // the same agent in the same channel and is keyed on `approval.id`, so a
+    // card that had kept `approval.id` too would have collided with it on
+    // `message_client_idem_uniq` and one of the two would have been silently
+    // dropped. Counting rows is what makes that visible — a props assertion
+    // alone would pass on the surviving row.
+    let messages_after = channel_message_count(&su, fixture.workspace, fixture.channel).await;
+    assert_eq!(
+        messages_after - messages_before,
+        1,
+        "the rejection must add exactly one message (the tool_result) beside the card"
+    );
+    let (result_author, result_props): (Uuid, Value) = sqlx::query_as(
+        "SELECT author_member_id, props FROM message \
+          WHERE workspace_id=$1 AND channel_id=$2 AND type='tool_result' \
+          ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .expect("the rejection tool_result is in the channel");
+    assert_eq!(
+        result_author, fixture.hosted_agent,
+        "the outcome is authored by the agent whose proposal it was"
+    );
+    assert_eq!(result_props["approval_id"], json!(approval_id.to_string()));
+    assert_eq!(result_props["status"], json!("rejected"));
+    // The card and its outcome are two distinct rows with two distinct keys.
+    let card_key: Option<Uuid> =
+        sqlx::query_scalar("SELECT client_msg_id FROM message WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(card_message_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_ne!(
+        card_key,
+        Some(approval_id),
+        "the card must not share the approval id with its own outcome line"
+    );
+
     assert_eq!(
         agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await,
         agent_jobs_before,
+        "a rejection enqueues no resume job — the resume job is approve_run's alone"
+    );
+
+    // ---- the REAL expiry sweep settles a second proposal -------------------
+    //
+    // `momo_notifier::approval_sweep::sweep_expired_approvals` is the production
+    // loop, called here **as itself** rather than re-assembled from the domain
+    // calls it happens to make. Re-assembling it would prove only that the
+    // re-assembly does not panic; the risk this guards is that the real sweep
+    // *skips* a payload with no `tool_call` and leaves the run parked forever.
+    let second = propose_on_a_fresh_run(&client, &base, &su, &fixture).await;
+    let jobs_before_sweep = agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await;
+    sqlx::query(
+        "UPDATE approval SET expires_at = now() - interval '1 minute' \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(second)
+    .execute(&su)
+    .await
+    .unwrap();
+
+    // The sweep runs on its own role, exactly as `momo-notifier` does.
+    let notifier = momo_notifier_pool().await;
+    let stats = momo_notifier::approval_sweep::sweep_expired_approvals(&notifier, 50)
+        .await
+        .expect("the production sweep must not fail on a workspace_action payload");
+    assert!(
+        stats.expired >= 1,
+        "the production sweep must settle the overdue workspace action, got {stats:?}"
+    );
+
+    let expired: String =
+        sqlx::query_scalar("SELECT status::text FROM approval WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(second)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(expired, "expired");
+    let run_after_sweep: String = sqlx::query_scalar(
+        "SELECT r.status::text FROM agent_run r JOIN approval a ON a.run_id = r.id \
+          WHERE a.workspace_id=$1 AND a.id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(second)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        run_after_sweep, "timed_out",
+        "an expired proposal MUST release the concurrency gate — otherwise one \
+         unanswered card silences the agent permanently"
+    );
+    assert_eq!(
+        agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await,
+        jobs_before_sweep,
         "expiry enqueues no resume job either — all three arms are job-free"
     );
+    // The sweep's own expiry line reached the channel too, beside its card.
+    let expiry_line: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message \
+          WHERE workspace_id=$1 AND type='tool_result' AND props->>'approval_id' = $2",
+    )
+    .bind(fixture.workspace)
+    .bind(second.to_string())
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        expiry_line, 1,
+        "the expiry tool_result must not collide with its own proposal card"
+    );
+}
+
+/// **ADR-0186 D2 — the park belongs to the lease holder.**
+///
+/// `bound_handle` proves identity (workspace, agent, connection, approved
+/// channel) and says nothing about the lease, so a handle whose lease expired
+/// and whose job was re-claimed still decodes and still binds. If proposing
+/// accepted it, a stale worker could park a run out from under the worker that
+/// actually holds the job — and that second worker would then get 409 on every
+/// `oort_run_complete` until the one-hour TTL, unable to finish a turn it owns.
+///
+/// This is the asymmetry the reviewer found: `oort_run_complete` judges the
+/// lease through `complete_gateway_run_in_tx` and proposing did not.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_stale_lease_handle_cannot_park_a_run_someone_else_owns() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    let handle_name = hosted_handle(&su, fixture.hosted_agent).await;
+    let trigger: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{handle_name} 초대 링크 만들어줘")
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+
+    // The first worker claims the job and holds a handle.
+    let (status, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let stale_handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("handle")
+        .to_string();
+
+    // Its lease lapses and a second worker takes the job over. The first
+    // worker's handle is now stale — but still perfectly well-formed, still
+    // sealed with the live secret, and still bound to this very agent,
+    // connection and approved channel.
+    // Both timestamps move, because `outbox_gateway_lease_shape_ck` requires
+    // `lease_expires_at > lease_acquired_at` — a lapsed lease is one whose whole
+    // window is in the past, not one with an impossible shape.
+    sqlx::query(
+        "UPDATE outbox \
+            SET lease_acquired_at = now() - interval '10 minutes', \
+                lease_expires_at = now() - interval '1 minute' \
+          WHERE workspace_id=$1 AND kind='agent_job' AND partition_key=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, reclaimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{reclaimed}");
+    let fresh_handle = structured(&reclaimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("the takeover mints a new handle")
+        .to_string();
+    assert_ne!(
+        fresh_handle, stale_handle,
+        "a takeover must mint a new lease, or this test proves nothing"
+    );
+
+    // The stale handle may not park the run.
+    let (status, refused) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({"handle": stale_handle, "actionId": "invite.create", "args": {}}),
+    )
+    .await;
+    assert_eq!(status, 409, "a stale lease must not park a run: {refused}");
+    assert_eq!(error_code(&refused), -32005);
+    let approvals: i64 = sqlx::query_scalar("SELECT count(*) FROM approval WHERE workspace_id=$1")
+        .bind(fixture.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(approvals, 0, "a refused proposal writes nothing");
+
+    // …and the worker that actually holds the lease still can.
+    let (status, proposed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({"handle": fresh_handle, "actionId": "invite.create", "args": {}}),
+    )
+    .await;
+    assert_eq!(status, 200, "the live lease holder may park: {proposed}");
+    assert_eq!(structured(&proposed)["status"], json!("pending"));
+}
+
+/// Send one decision as the fixture's human and return the HTTP status.
+async fn decide(
+    client: &reqwest::Client,
+    base: &str,
+    fixture: &Fixture,
+    approval_id: Uuid,
+    approve: bool,
+) -> u16 {
+    client
+        .post(format!(
+            "{base}/v1/workspaces/{}/approvals/{approval_id}/decision",
+            fixture.workspace
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "approvalId": approval_id,
+            "approve": approve,
+            "clientDecisionId": Uuid::new_v4()
+        }))
+        .send()
+        .await
+        .expect("decision responds")
+        .status()
+        .as_u16()
+}
+
+async fn channel_message_count(pool: &PgPool, workspace: Uuid, channel: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM message WHERE workspace_id=$1 AND channel_id=$2")
+        .bind(workspace)
+        .bind(channel)
+        .fetch_one(pool)
+        .await
+        .expect("count channel messages")
+}
+
+/// Raise a second mention, claim it, and propose on it. Returns the approval id.
+///
+/// The expiry arm needs its own parked run because the first one was closed by
+/// the rejection above — and settling two different approvals through two
+/// different paths is exactly what ADR-0186 §5 asks to be measured separately.
+async fn propose_on_a_fresh_run(
+    client: &reqwest::Client,
+    base: &str,
+    su: &PgPool,
+    fixture: &Fixture,
+) -> Uuid {
+    let handle_name = hosted_handle(su, fixture.hosted_agent).await;
+    let trigger: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{handle_name} 하나 더 만들어줘")
+        }))
+        .send()
+        .await
+        .expect("second mention send")
+        .json()
+        .await
+        .expect("second mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+
+    let (status, claimed) = call(
+        client,
+        base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("a second lease handle")
+        .to_string();
+
+    let (status, proposed) = call(
+        client,
+        base,
+        &fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({"handle": handle, "actionId": "invite.create", "args": {"role": "member"}}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    Uuid::parse_str(
+        structured(&proposed)["approvalId"]
+            .as_str()
+            .expect("approvalId"),
+    )
+    .expect("approvalId is a uuid")
 }
 
 /// Every `agent_job` row on this agent's partition key, settled or not.

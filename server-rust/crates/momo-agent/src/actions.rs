@@ -276,6 +276,42 @@ pub fn workspace_action_payload(
     })
 }
 
+/// The namespace the proposal card's idempotency key is derived in.
+///
+/// A fixed v5 namespace rather than a random v4, because the key has to be the
+/// **same** on a retried transaction and different from every other message an
+/// approval produces.
+const CARD_CLIENT_MSG_NAMESPACE: Uuid = Uuid::from_bytes([
+    0x0a, 0xd7, 0x01, 0x86, 0x00, 0x00, 0x50, 0x00, 0x8a, 0xc7, 0x10, 0x9e, 0x00, 0x00, 0x00, 0x01,
+]);
+
+/// The `client_msg_id` of a proposal's `approval_request` card.
+///
+/// **Not the approval id.** The message spine's idempotency key is
+/// `(channel_id, author_member_id, client_msg_id)` with `ON CONFLICT … DO
+/// NOTHING` (`message_client_idem_uniq`, `001_init.sql:185`), and every other
+/// message an approval produces already shares the first two components: the
+/// rejection `tool_result` (`routes::approvals::reject_run`) and the expiry one
+/// (`momo_notifier::approval_sweep`) are both authored by the same agent, in the
+/// same channel, keyed on `approval.id`. Keying the card on `approval.id` too
+/// would make the card and the outcome line **one** row: whichever arrived
+/// second would be silently dropped, and a person would watch a proposal they
+/// rejected sit on the card forever with no result line under it.
+///
+/// So the card derives a distinct, deterministic id instead. Deterministic
+/// because a retried proposal transaction must not produce a second card;
+/// distinct because the outcome line must be able to exist beside it.
+///
+/// Those two outcome writers keep `approval.id` and are untouched here — an
+/// approval ends exactly once, so the rejection and the expiry genuinely do
+/// share one key space, and that sharing is correct where it is.
+pub fn card_client_msg_id(approval_id: Uuid) -> Uuid {
+    Uuid::new_v5(
+        &CARD_CLIENT_MSG_NAMESPACE,
+        format!("card:{approval_id}").as_bytes(),
+    )
+}
+
 /// One `label`/`value` row of the card's argument table.
 pub fn action_row(label: &str, value: impl Into<String>) -> Value {
     json!({"label": label, "value": value.into()})
@@ -319,10 +355,23 @@ pub fn action_block(action: &WorkspaceAction, rows: Vec<Value>, rationale: Optio
 /// The sentence under the card's title: what approving this **does**, and with
 /// whose authority.
 ///
-/// The proposer is not named in the sentence because the message is authored by
-/// the agent — the card already carries its avatar and name, and repeating it
-/// here would be the only place in the product where a speaker introduces
-/// themselves in their own message body.
+/// ## 「에이전트가」 rather than 부록 A's 「hermes가」 — a deliberate departure
+///
+/// ADR-0186 부록 A shows `"hermes가 제안했습니다. …"`, i.e. the proposer's name
+/// inlined. This builds `"에이전트가 제안했습니다. …"` instead, for two reasons
+/// the appendix's one example could not show:
+///
+/// * the message is **authored by that agent**, so the card already carries its
+///   avatar and display name one line above. Inlining the name again would make
+///   this the only place in the product where a speaker introduces themselves in
+///   their own message body; and
+/// * a name baked into `props.summary` is a **stale copy** — `member.display_name`
+///   is mutable (`PATCH …/members/me`, #1873), and the card would keep saying
+///   「hermes가」 after a rename.
+///
+/// The appendix's contract is the *shape* (`title` + `summary` + the `action`
+/// block), which is kept exactly; AX-4 renders `summary` as an opaque string, so
+/// nothing downstream reads the name out of it.
 pub fn proposal_summary(action: &WorkspaceAction) -> String {
     format!(
         "에이전트가 제안했습니다. 승인하면 {} 권한으로 {}.",

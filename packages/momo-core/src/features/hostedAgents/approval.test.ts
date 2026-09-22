@@ -180,15 +180,30 @@ describe("RED PROOF ④ 접속 권한은 꺼지지 않는다", () => {
   // ---- ADR-0186 D2 ---------------------------------------------------------
 
   it("동의 화면은 서버의 일곱 스코프를 같은 순서로 그린다", () => {
-    // 이 배열이 서버 `HOSTED_AGENT_SCOPES`·openapi `HostedAgentScope` 와 같은
-    // 일곱이라는 사실은 Rust 쪽 드리프트 시험이 잰다. 여기서 잠그는 것은 **화면**
-    // 이다: 권한 목록에 있는데 선택지가 없으면 사람은 승인할 방법이 없고,
-    // 선택지에 있는데 목록에 없으면 `normalizeScopes` 가 조용히 버린다.
+    // **이 시험이 재는 것과 못 재는 것.**
+    //
+    // 재는 것: 목록(`HOSTED_AGENT_SCOPES`)과 선택지(`HOSTED_SCOPE_CHOICES`)가
+    // 같은 값·같은 순서라는 것. 권한 목록에 있는데 선택지가 없으면 사람은 승인할
+    // 방법이 없고, 선택지에 있는데 목록에 없으면 `normalizeScopes` 가 조용히
+    // 버린다 — 둘 다 화면에서만 드러나는 결함이다.
+    //
+    // **못 재는 것**: 이 배열이 서버·openapi 와 같다는 것. 이 패키지는
+    // `node:fs`·`import.meta` 가 금지(`purity.mjs`)라 vitest 가 openapi.yaml 을
+    // 읽을 수 없어서, 아래는 리터럴 단정이다 — 개수 변화와 마지막 항목 개명은
+    // 잡지만 중간 항목의 개명·재정렬은 통과한다. 서버 쪽 정본 대조는
+    // `routes::actions::the_hosted_scope_vocabulary_is_one_list_everywhere`.
     expect([...HOSTED_AGENT_SCOPES]).toEqual(
       HOSTED_SCOPE_CHOICES.map((choice) => choice.id)
     );
-    expect(HOSTED_AGENT_SCOPES).toHaveLength(7);
-    expect(HOSTED_AGENT_SCOPES[6]).toBe("workspace:propose");
+    expect([...HOSTED_AGENT_SCOPES]).toEqual([
+      "agent:port:connect",
+      "agent:inbox:read",
+      "messages:read",
+      "messages:write",
+      "agent:jobs:read",
+      "agent:runs:callback",
+      "workspace:propose",
+    ]);
   });
 
   it("제안 권한은 기본으로 요청하지 않고, 껐다 켤 수 있다", () => {

@@ -276,6 +276,20 @@ fn run_complete_schema() -> Value {
 /// production surprise.
 const WORKSPACE_ACTION_IDS: [&str; 1] = ["invite.create"];
 
+// The argument vocabulary the registry publishes, restated here for the same
+// reason the ids are: `momo-mcp` may not depend on `momo-agent`, and
+// `the_protocol_crate_cannot_reach_transport_database_or_product_crates`
+// enforces that rather than merely recommending it. So these are named
+// constants that a drift test measures against
+// `momo_agent::actions`' own (`INVITE_PROPOSABLE_ROLES` /
+// `INVITE_MAX_USES_CEILING` / `INVITE_EXPIRES_IN_DAYS_CEILING`), instead of
+// literals buried inside a schema builder where a reader cannot see that they
+// are a copy at all. The test compares the whole published `args` object, not
+// the three values, so a property added on one side only is caught too.
+const WORKSPACE_ACTION_ROLES: [&str; 2] = ["member", "admin"];
+const WORKSPACE_ACTION_MAX_USES_CEILING: i64 = 100;
+const WORKSPACE_ACTION_EXPIRES_IN_DAYS_CEILING: i64 = 30;
+
 /// `oort_action_propose` — ADR-0186 D2.
 ///
 /// `handle` rather than `leaseHandle`: ADR-0186 D2 names the field, and the E2E
@@ -299,9 +313,9 @@ fn action_propose_schema() -> Value {
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                    "role": nullable(json!({"type": "string", "enum": ["member", "admin"]})),
-                    "maxUses": nullable(integer(1, 100)),
-                    "expiresInDays": nullable(integer(1, 30))
+                    "role": nullable(json!({"type": "string", "enum": WORKSPACE_ACTION_ROLES})),
+                    "maxUses": nullable(integer(1, WORKSPACE_ACTION_MAX_USES_CEILING)),
+                    "expiresInDays": nullable(integer(1, WORKSPACE_ACTION_EXPIRES_IN_DAYS_CEILING))
                 }
             },
             "rationale": nullable(text(280))

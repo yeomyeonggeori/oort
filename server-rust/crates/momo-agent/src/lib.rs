@@ -161,10 +161,10 @@ pub mod welcome;
 // worker tools exist", the other is "which workspace actions may be proposed".
 // Callers say `momo_agent::actions::…` so the reader always knows which.
 pub use actions::{
-    action_block, action_by_id, action_ids, invite_create_rows, proposal_summary,
-    workspace_action_payload, workspace_action_request_body, workspace_action_request_props,
-    DeclaredAction, RequiredRole, Risk, WorkspaceAction, ACTION_INVITE_CREATE,
-    ACTION_TYPE_WORKSPACE_ACTION, DEFAULT_INVITE_EXPIRES_IN_DAYS,
+    action_block, action_by_id, action_ids, card_client_msg_id, invite_create_rows,
+    proposal_summary, workspace_action_payload, workspace_action_request_body,
+    workspace_action_request_props, DeclaredAction, RequiredRole, Risk, WorkspaceAction,
+    ACTION_INVITE_CREATE, ACTION_TYPE_WORKSPACE_ACTION, DEFAULT_INVITE_EXPIRES_IN_DAYS,
 };
 pub use approval::{
     approval_payload, approval_request_body, approval_request_props, attach_request_message_in_tx,

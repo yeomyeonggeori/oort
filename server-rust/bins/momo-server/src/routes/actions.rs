@@ -293,16 +293,84 @@ mod tests {
         assert_eq!(spec_enum, registry, "openapi WorkspaceActionId vs ACTIONS");
     }
 
+    /// **The propose tool must accept exactly what the catalog advertises.**
+    ///
+    /// `momo-mcp` cannot depend on `momo-agent`
+    /// (`the_protocol_crate_cannot_reach_transport_database_or_product_crates`
+    /// enforces it), so the tool's `args` bounds are a fourth copy of the
+    /// registry's. Comparing the whole published object rather than the three
+    /// ceilings means a property added, removed or renamed on one side only is
+    /// caught as well — which a constant-by-constant check would miss.
+    ///
+    /// Drift here is fail-closed (the narrower of the two wins) but it is still
+    /// a lie: `GET …/actions` would advertise a value the tool then refuses,
+    /// and the client has no way to discover which.
+    #[test]
+    fn the_propose_tool_accepts_exactly_what_the_catalog_advertises() {
+        let propose = momo_mcp::TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == momo_mcp::TOOL_ACTION_PROPOSE)
+            .expect("the propose tool is in the catalog");
+        let published = propose.input_schema();
+        let tool_args = &published["properties"]["args"];
+        assert_eq!(tool_args["type"], json!("object"));
+        assert_eq!(tool_args["additionalProperties"], json!(false));
+
+        // v1 has one action, so the tool's `args` is that action's schema. With
+        // a second action it becomes their union, and this is the assertion that
+        // will say so rather than drifting quietly.
+        assert_eq!(
+            actions::ACTIONS.len(),
+            1,
+            "v1 is one action; widen this test with the second"
+        );
+        let registry_args = actions::ACTIONS[0].args_schema();
+
+        let tool_properties = tool_args["properties"]
+            .as_object()
+            .expect("tool args properties");
+        let registry_properties = registry_args["properties"]
+            .as_object()
+            .expect("registry args properties");
+        assert_eq!(
+            tool_properties.keys().collect::<Vec<_>>(),
+            registry_properties.keys().collect::<Vec<_>>(),
+            "the tool and the catalog must bound the same argument names"
+        );
+        for (name, registry_property) in registry_properties {
+            let tool_property = &tool_properties[name];
+            // The tool wraps every optional property in the nullability
+            // contract (`["integer","null"]`); the catalog publishes the bare
+            // type. Everything else must match key for key.
+            for key in ["enum", "minimum", "maximum", "minLength", "maxLength"] {
+                assert_eq!(
+                    tool_property.get(key),
+                    registry_property.get(key),
+                    "args.{name}.{key} disagrees between oort_action_propose and GET /actions"
+                );
+            }
+            let declared = registry_property["type"].as_str().expect("a declared type");
+            assert_eq!(
+                tool_property["type"],
+                json!([declared, "null"]),
+                "args.{name} must keep the catalog's type under the nullability contract"
+            );
+        }
+    }
+
     /// **ADR-0186 D2 — the hosted scope vocabulary, in all four places.**
     ///
     /// A scope is only real when the human can approve it, the credential can
-    /// carry it, the spec publishes it and the tool requires it. `momo-core`'s
-    /// `HOSTED_AGENT_SCOPES` is the fifth copy and cannot be read from Rust, so
-    /// it is pinned against this same published enum from its own suite
-    /// (`hostedAgents/approval.test.ts`) — the spec is the shared fixed point.
+    /// carry it, the DB admits it, the spec publishes it and the tool requires
+    /// it. Four of those five copies are measured here: `momo_auth`, the spec,
+    /// migration 087's three CHECK constraints, and the tool catalog.
     ///
-    /// The DB is the sixth: three CHECK constraints enumerate this vocabulary
-    /// (migration 087), which is why AX-3a needed a migration at all.
+    /// The fifth is `momo-core`'s `HOSTED_AGENT_SCOPES`, which this test cannot
+    /// reach. Its own suite (`hostedAgents/approval.test.ts`) pins the list
+    /// against **literals**, not against the spec — `node:fs` and `import.meta`
+    /// are banned in that package, so a vitest cannot read `openapi.yaml`. That
+    /// catches a count change and a renamed last entry; a rename or a reorder in
+    /// the middle would pass on the TS side and is caught only by review.
     #[test]
     fn the_hosted_scope_vocabulary_is_one_list_everywhere() {
         assert_eq!(
@@ -324,6 +392,94 @@ mod tests {
                 tool.required_scope
             );
         }
+
+        // **The DB copies.** Migration 087 rewrote three CHECK constraints that
+        // each enumerate this vocabulary, and nothing else in the build reads
+        // them. Without this, an eighth scope added to Rust, the spec and TS but
+        // not to the SQL leaves every gate green and produces the one failure
+        // 087's own header calls 「진단 불가능한 증상」: the human approves it, and
+        // the credential cannot carry it.
+        //
+        // Read as a **set** because the three constraints do not agree on order
+        // or line-wrapping, and order is not what they enforce.
+        let expected: std::collections::BTreeSet<&str> =
+            momo_auth::HOSTED_AGENT_SCOPES.iter().copied().collect();
+        let constraints = migration_087_scope_arrays();
+        assert_eq!(
+            constraints.len(),
+            3,
+            "087 must rewrite exactly three scope CHECK constraints, found {}",
+            constraints.len()
+        );
+        for (constraint, values) in &constraints {
+            let found: std::collections::BTreeSet<&str> =
+                values.iter().map(String::as_str).collect();
+            assert_eq!(
+                found, expected,
+                "{constraint} in 087 does not enumerate the same scope set as \
+                 momo_auth::HOSTED_AGENT_SCOPES"
+            );
+        }
+    }
+
+    /// The scope arrays of migration 087, as `(constraint name, values)`.
+    ///
+    /// A text scan for the same reason `openapi_enum` is one: the workspace
+    /// carries no SQL parser and would not gain one for three literals. What it
+    /// depends on is pinned by the caller — exactly three constraints, each
+    /// naming a scope-shaped set — so a rewrite that moved these somewhere this
+    /// scan cannot see fails loudly instead of quietly measuring nothing.
+    fn migration_087_scope_arrays() -> Vec<(String, Vec<String>)> {
+        let sql = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../server/Migrations/087_hosted_scope_workspace_propose.sql"
+        ))
+        .expect("migration 087 is readable from the server crate");
+        let mut found = Vec::new();
+        let mut current: Option<String> = None;
+        let mut buffer = String::new();
+        let mut collecting = false;
+        for line in sql.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("--") {
+                continue;
+            }
+            if let Some(rest) = trimmed.strip_prefix("ADD CONSTRAINT ") {
+                current = rest.split_whitespace().next().map(str::to_string);
+            }
+            if trimmed.contains("ARRAY[") {
+                collecting = true;
+                buffer.clear();
+            }
+            if collecting {
+                buffer.push_str(trimmed);
+                if buffer.contains("]::text[]") {
+                    collecting = false;
+                    let inner = buffer
+                        .split_once("ARRAY[")
+                        .expect("the buffer began at ARRAY[")
+                        .1
+                        .split_once("]::text[]")
+                        .expect("the buffer ended at ]::text[]")
+                        .0;
+                    let values: Vec<String> = inner
+                        .split(',')
+                        .map(|item| item.trim().trim_matches('\'').to_string())
+                        .filter(|item| !item.is_empty())
+                        .collect();
+                    // Only the scope arrays: 087 touches no other ARRAY literal
+                    // today, and a future one that is not a scope set would show
+                    // up as a set mismatch rather than be silently folded in.
+                    if values.iter().any(|value| value.contains(':')) {
+                        found.push((
+                            current.clone().unwrap_or_else(|| "<unnamed>".to_string()),
+                            values,
+                        ));
+                    }
+                }
+            }
+        }
+        found
     }
 
     /// One published enum, read out of the spec file itself.
@@ -369,16 +525,30 @@ mod tests {
 
     /// Fail-closed by construction: a registry entry whose arguments nothing
     /// normalises would otherwise reach the domain unvalidated.
+    ///
+    /// The verdict is **"not the unknown-action arm"**, not "empty args are
+    /// accepted". An action with a required argument is a perfectly good action
+    /// and must be able to refuse `{}` — measuring acceptance would turn the
+    /// first such action into a red test for no reason, which is how a guard
+    /// stops being trusted.
     #[test]
     fn every_action_has_a_normaliser() {
         for action in actions::ACTIONS {
-            let refused = validated_action_args(action, &json!({}), NOW_MS);
-            assert!(
-                refused.is_ok(),
-                "{} has no argument normaliser in validated_action_args",
-                action.id
-            );
+            if let Err(error) = validated_action_args(action, &json!({}), NOW_MS) {
+                assert_ne!(
+                    error.message, "unknown workspace action",
+                    "{} has no argument normaliser in validated_action_args",
+                    action.id
+                );
+            }
         }
+        // The fallback arm cannot be reached from here on purpose:
+        // `WorkspaceAction`'s fields are private to `momo-agent`, so the only
+        // values that exist are the registry's own. That is a stronger property
+        // than the arm being tested — it means an unnormalised action cannot be
+        // constructed at all — and the arm stays as the answer for the day a
+        // registry entry is added without a match arm, which is exactly what the
+        // loop above measures.
     }
 
     #[test]
