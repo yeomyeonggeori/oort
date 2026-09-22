@@ -118,6 +118,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
              credential at once."
         );
     }
+    // ADR-0186 D4 / 부록 C: the one-time invite link a workspace-action approval
+    // answers with is built from this value when it is set, and from the
+    // request's own `Host` + `X-Forwarded-Proto` when it is not. A value that is
+    // NOT an absolute https origin is silently not configuration — it fails
+    // `ready_public_base_url()` and the request origin is used instead — and an
+    // operator who typed one deserves to be told rather than to discover it in a
+    // link somebody could not open.
+    if config.t3.public_base_url.is_some() && config.t3.ready_public_base_url().is_none() {
+        tracing::warn!(
+            "MOMO_PUBLIC_BASE_URL is set but is not an absolute https origin, so it \
+             is IGNORED. Invite links minted by an approval decision (ADR-0186) then \
+             fall back to this request's Host header, which behind a reverse proxy \
+             may not be the address people can open. Set it to https://<your host> \
+             (no trailing path), or unset it if same-origin is what you want."
+        );
+    }
     if config.agent_gateway.legacy_secret_enabled() {
         tracing::warn!(
             "MOMO_ALLOW_LEGACY_GATEWAY_SECRET is on; rotate gateway callers to \
