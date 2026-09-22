@@ -82,7 +82,13 @@ async fn authorize(
 
 /// The two headers a one-time credential response must carry. The server keeps
 /// no copy of the value; a cached response would be the copy it refused to keep.
-fn no_store(mut response: Response) -> Response {
+///
+/// `pub(crate)` since ADR-0186 D4: the approval decision route answers with a
+/// one-time invite link (부록 C `result.secretOnce`) and inherits this
+/// discipline rather than writing a second pair of header inserts — 「기존
+/// `routes/webhooks.rs` 규율 승계」. One writer means a rotation of the policy
+/// (a third header, a different directive) cannot land on one surface only.
+pub(crate) fn no_store(mut response: Response) -> Response {
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
