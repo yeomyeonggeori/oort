@@ -8050,6 +8050,42 @@ async function captureScheme(browser, scheme) {
   shots.push(switcherShot);
   await directory.keyboard.press("Escape");
 
+  // 3c-2. ⌘K 「명령」 그룹 (AX-2 #2507, ADR-0186 D1). 질의 없이 막 열린 팔레트가
+  //       이 티켓이 바꾼 화면이다: 「이동」·「만들기」·「에이전트 설정」 세
+  //       머리글이 하나의 「명령」으로 합쳐졌고, 단축키가 있는 줄은 오른쪽에
+  //       키캡(⌘⇧A · ⌘,)을 단다. 키캡은 도움말 다이얼로그와 같은 상자라,
+  //       두 화면을 나란히 놓고 같은 키가 같은 모양인지 볼 수 있다.
+  await sceneClick(directory, directory.getByTestId("open-quick-switcher"));
+  await directory.getByTestId("quick-switcher").waitFor({ state: "visible" });
+  await directory.getByTestId("switcher-inbox").waitFor({ state: "visible" });
+  const commandRows = await directory.locator("[data-command-id]").count();
+  if (commandRows < 5) {
+    throw new Error(
+      `[⌘K 명령 그룹 ${scheme}] 명령 줄이 ${commandRows}개다 — 레지스트리가 비었거나 그룹이 접혔다`
+    );
+  }
+  const commandKeycaps = await directory
+    .locator('[data-command-id="nav.inbox"] kbd')
+    .count();
+  if (commandKeycaps < 1) {
+    throw new Error(
+      `[⌘K 명령 그룹 ${scheme}] 인박스 줄에 키캡이 없다 — 단축키 정본과 팔레트가 갈라졌다`
+    );
+  }
+  const commandShot = beginSceneFromShotPath(`${OUT_DIR}/quick-switcher-commands-${scheme}.png`);
+  await directory.screenshot({ path: commandShot });
+  shots.push(commandShot);
+
+  // 3c-3. 같은 팔레트에 「설정」을 쳐 넣는다. 명령은 **이름으로 찾는** 줄이라
+  //       걸러져야 하고, 검색 두 줄은 forceMount라 남아야 한다 — 한 프레임에서
+  //       두 규칙이 같이 보인다.
+  await directory.getByTestId("quick-switcher-input").fill("설정");
+  await directory.getByTestId("switcher-settings-agents").waitFor({ state: "visible" });
+  const filteredShot = beginSceneFromShotPath(`${OUT_DIR}/quick-switcher-commands-filtered-${scheme}.png`);
+  await directory.screenshot({ path: filteredShot });
+  shots.push(filteredShot);
+  await directory.keyboard.press("Escape");
+
   // 3d. the DM that a directory profile opens: same timeline anatomy as a channel.
   await sceneClick(directory, directory
     .locator('[data-testid="directory-row"][data-member-kind="agent"]')

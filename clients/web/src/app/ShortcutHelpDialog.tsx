@@ -13,6 +13,29 @@ import {
   shouldOpenShortcutHelp,
 } from "@/app/keyboardShortcuts";
 
+/**
+ * 키캡 한 벌.
+ *
+ * ⌘K 팔레트도 같은 키를 그린다(ADR-0186 D1 키캡 힌트). 두 자리가 각자 `<kbd>`를
+ * 적으면 도움말과 팔레트의 키가 서로 다른 모양으로 늙는다 — 이 파일이 애초에
+ * 세워진 이유(키 문자열을 다시 적으면 갈라진다)와 같은 규율이라, 상자도 한 번만
+ * 적는다. 문자열 자체는 여전히 `keyboardShortcuts.ts`의 `keycaps`에서 온다.
+ */
+export function Keycaps({ keycaps }: { keycaps: readonly string[] }) {
+  return (
+    <>
+      {keycaps.map((keycap) => (
+        <kbd
+          key={keycap}
+          className="whitespace-nowrap rounded-sm bg-muted-soft px-2 py-1 font-mono text-meta text-ink"
+        >
+          {keycap}
+        </kbd>
+      ))}
+    </>
+  );
+}
+
 function anotherDialogIsOpen(): boolean {
   if (typeof document === "undefined") return false;
   // "Is another dialog *open*", not "who owns this Escape". Presence-exit
@@ -105,14 +128,7 @@ export function ShortcutHelpDialog() {
                       {shortcut.description}
                     </dt>
                     <dd className="flex shrink-0 items-center gap-1">
-                      {shortcut.keycaps.map((keycap) => (
-                        <kbd
-                          key={keycap}
-                          className="whitespace-nowrap rounded-sm bg-muted-soft px-2 py-1 font-mono text-meta text-ink"
-                        >
-                          {keycap}
-                        </kbd>
-                      ))}
+                      <Keycaps keycaps={shortcut.keycaps} />
                     </dd>
                   </div>
                 ))}

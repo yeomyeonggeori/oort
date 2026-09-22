@@ -20,6 +20,21 @@ export interface KeyboardShortcut {
   description: string;
   keycaps: readonly string[];
   matches: (event: ShortcutEvent) => boolean;
+  /**
+   * 이 단축키와 **같은 일을 하는** ⌘K 명령의 id (ADR-0186 D1).
+   *
+   * 키 정의가 아니라 표시다. 이것이 붙은 단축키는 팔레트에도 줄이 있어야 하고,
+   * 그 줄은 여기 keycaps를 힌트로 그린다. 드리프트 가드
+   * (`commandRegistry.test.ts`)가 양방향으로 잰다: 여기가 가리키는 명령은
+   * 레지스트리에 실존해야 하고, 레지스트리의 `shortcutId`는 아래 등록표에
+   * 실존해야 한다.
+   *
+   * **같은 일**이 기준이다. ⌘⇧K(새 다이렉트 메시지)는 멤버 목록으로 데려가지만
+   * 그 줄의 이름은 「멤버」이고 이 키의 이름은 「새 다이렉트 메시지 시작」이라,
+   * 둘을 같다고 적으면 팔레트가 「멤버」 옆에 ⌘⇧K를 그리고 키캡이 거짓말을
+   * 한다. 그래서 비워 둔다.
+   */
+  paletteCommandId?: string;
 }
 
 export interface ShortcutHelpGroup {
@@ -56,6 +71,7 @@ export const OPEN_SETTINGS_SHORTCUT: KeyboardShortcut = {
   id: "open-settings",
   description: "설정 열기",
   keycaps: ["⌘,"],
+  paletteCommandId: "nav.settings",
   matches: (event) => commandOrControl(event) && event.key === ",",
 };
 
@@ -63,6 +79,7 @@ export const OPEN_INBOX_SHORTCUT: KeyboardShortcut = {
   id: "open-inbox",
   description: "인박스 열기",
   keycaps: ["⌘⇧A"],
+  paletteCommandId: "nav.inbox",
   matches: (event) =>
     event.metaKey === true &&
     event.shiftKey === true &&
