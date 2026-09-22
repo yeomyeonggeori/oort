@@ -115,6 +115,10 @@ TOKEN_CENT_TOKEN="$(openssl rand -hex 12)"
 TOKEN_CENT_API="$(openssl rand -hex 12)"
 TOKEN_CENT_PROXY="$(openssl rand -hex 12)"
 TOKEN_PLINK="$(openssl rand -hex 12)"
+# #2066 — 웹훅 마스터키 2종. 서로 다르고 JWT 와도 다르다: 같은 값이면
+# doctor 가 이행 창 경고를 내므로 정상 경로 픽스처로 쓸 수 없다.
+TOKEN_WHIN="$(openssl rand -hex 12)"
+TOKEN_WHOUT="$(openssl rand -hex 12)"
 TOKEN_OWNER="$(openssl rand -hex 12)"
 
 materialize() {
@@ -134,6 +138,8 @@ repl = {
     "__TOKEN_CENT_API__": "${TOKEN_CENT_API}",
     "__TOKEN_CENT_PROXY__": "${TOKEN_CENT_PROXY}",
     "__TOKEN_PLINK__": "${TOKEN_PLINK}",
+    "__TOKEN_WHIN__": "${TOKEN_WHIN}",
+    "__TOKEN_WHOUT__": "${TOKEN_WHOUT}",
     "__TOKEN_OWNER__": "${TOKEN_OWNER}",
     "__TOKEN_WEB_PORT__": "18088",
     "__TOKEN_API_PORT__": "18080",
@@ -304,7 +310,8 @@ fi
 pass "digest --to CLI pulls (no build) and prints --to previous"
 
 # -----------------------------------------------------------------------------
-# 4. #2193 N-1: pre-#2193 41-key env backfills to 43; compose config needs it
+# 4. #2193 N-1: pre-#2193 43-key env backfills to 45; compose config needs it
+#    (43/45, not 41/43, since #2066 made the two webhook master keys managed)
 # -----------------------------------------------------------------------------
 GENERATOR="$REPO_ROOT/scripts/self_host_env.sh"
 canonical_keys() {
@@ -340,7 +347,7 @@ file_key_count() {
 
 canonical_keys >"$SANDBOX/canonical.keys"
 CANON_N="$(grep -c . "$SANDBOX/canonical.keys" | tr -d ' ')"
-[ "$CANON_N" = "43" ] || fail "canonical key set must stay 43, got $CANON_N"
+[ "$CANON_N" = "45" ] || fail "canonical key set must stay 45, got $CANON_N"
 
 FRESH="$SANDBOX/fresh.env"
 set +e
@@ -364,8 +371,8 @@ awk '
 chmod 600 "$PRE"
 PRE_N="$(file_key_count "$PRE")"
 FRESH_N="$(file_key_count "$FRESH")"
-[ "$FRESH_N" = "43" ] || fail "fresh local-build env key count ${FRESH_N} != 43"
-[ "$PRE_N" = "41" ] || fail "pre-#2193 env key count ${PRE_N} != 41"
+[ "$FRESH_N" = "45" ] || fail "fresh local-build env key count ${FRESH_N} != 45"
+[ "$PRE_N" = "43" ] || fail "pre-#2193 env key count ${PRE_N} != 43"
 
 compose_config() {
   local envfile="$1" out="$2" err="$3"
@@ -407,7 +414,7 @@ grep -Fq '[self-host] env 보강: 2키 추가(NOTIFIER_POSTGRES_PASSWORD NOTIFIE
   "$BACKFILL_ERR" || \
   fail "backfill stderr missing exact 보강 line: $(cat "$BACKFILL_ERR")"
 POST_N="$(file_key_count "$PRE")"
-[ "$POST_N" = "43" ] || fail "after backfill key count ${POST_N} != 43"
+[ "$POST_N" = "45" ] || fail "after backfill key count ${POST_N} != 45"
 grep -E '^NOTIFIER_POSTGRES_PASSWORD=' "$PRE" >/dev/null || fail "missing NOTIFIER_POSTGRES_PASSWORD"
 grep -E '^NOTIFIER_DATABASE_URL=postgres://momo_notifier:' "$PRE" >/dev/null || \
   fail "missing NOTIFIER_DATABASE_URL"
@@ -419,7 +426,7 @@ SELF_HOST_ENV_FILE="$PRE" "$GENERATOR" --ensure-managed-keys \
 if grep -Fq 'env 보강:' "$SANDBOX/backfill2.err"; then
   fail "second backfill still printed 보강 (should be a no-op)"
 fi
-pass "41-key env → 43 keys; existing values not rewritten"
+pass "43-key env → 45 keys; existing values not rewritten"
 
 if command -v docker >/dev/null 2>&1; then
   POST_CFG_OUT="$SANDBOX/post.config.out"
@@ -427,9 +434,9 @@ if command -v docker >/dev/null 2>&1; then
   post_cfg_rc="$(compose_config "$PRE" "$POST_CFG_OUT" "$POST_CFG_ERR")"
   [ "$post_cfg_rc" = "0" ] || {
     cat "$POST_CFG_ERR" >&2
-    fail "43-key env compose config failed"
+    fail "45-key env compose config failed"
   }
-  pass "43-key env compose config OK"
+  pass "45-key env compose config OK"
 fi
 
 # Sabotage: remove the upgrade backfill call → this grep RED.

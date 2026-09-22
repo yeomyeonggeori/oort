@@ -128,10 +128,7 @@ pub async fn register(
     }
     let url = validate_url(&state, &request.url).await?;
     let secret = request.secret.clone();
-    let master_key = state
-        .webhook
-        .outbound_master_key_or(&state.jwt_secret)
-        .to_string();
+    let master_key = state.webhook.outbound_master_key.clone();
     let absolute = url.absolute.clone();
 
     let outcome = agent_tenant_tx(&state.pool, workspace_id, move |conn| {

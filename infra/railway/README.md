@@ -40,8 +40,8 @@ The plugin provides `DATABASE_URL` / `PGHOST` / `PGPORT` / `PGUSER` /
 `scripts/self_host_env.sh --platform railway` (alias `--railway`; the two
 are byte-identical) reads `RAILWAY_PUBLIC_DOMAIN` and `DATABASE_URL` and
 prints the **canonical generator key set** (heredoc keys +
-`oort_public_edge_env_keys`, 41) plus `MOMO_SELF_HOST_PLATFORM=railway`
-outside the heredoc (42). Do not type `OORT_SITE_ADDRESS` /
+`oort_public_edge_env_keys`, 45) plus `MOMO_SELF_HOST_PLATFORM=railway`
+outside the heredoc (46). Do not type `OORT_SITE_ADDRESS` /
 `OORT_CSP_CONNECT_SRC` by hand.
 
 ```sh
@@ -54,16 +54,16 @@ scripts/self_host_env.sh --platform railway > railway.env
 Missing `RAILWAY_PUBLIC_DOMAIN` or `DATABASE_URL` is a hard fail (the
 compose `:?` equivalent). `MOMO_CENTRIFUGO_WS_URL=same-origin`.
 
-Generator stdout (44 keys): canonical 43 + stamp.
+Generator stdout (46 keys): canonical 45 + stamp.
 
 | Key | Source |
 |---|---|
-| heredoc + `OORT_SITE_ADDRESS` + `OORT_CSP_CONNECT_SRC` | generator (43) |
+| heredoc + `OORT_SITE_ADDRESS` + `OORT_CSP_CONNECT_SRC` | generator (45) |
 | `MOMO_SELF_HOST_PLATFORM=railway` | stamp outside the heredoc (#2328). `railway.json` `notes.platformStamp`. |
 | `NOTIFIER_POSTGRES_PASSWORD` / `NOTIFIER_DATABASE_URL` | generator (#2193). Role `momo_notifier`, BYPASSRLS, table-scoped GRANTs. |
 
 Keys compose interpolates that are **not** in the generator file (so
-`--platform railway` does not print them — key-set equality of the 43):
+`--platform railway` does not print them — key-set equality of the 45):
 
 - `CENT_API_URL=http://centrifugo.railway.internal:8000/api` (relay + api)
 - `WORKER_DATABASE_URL=postgres://momo_worker:<WORKER_POSTGRES_PASSWORD>@<PGHOST>:<PGPORT>/<PGDATABASE>` (agent-worker)
@@ -111,6 +111,8 @@ Caddyfile (`/v1/centrifugo/*` 403 before `/v1/*`). Contract proof:
 1. Create a Railway project; add the Postgres plugin.
 2. Create the six services from `railway.json` (image/startCommand/preDeploy as tabled). Give **caddy** the public domain.
 3. Run `--platform railway` (alias `--railway`) with the plugin `DATABASE_URL` and caddy `RAILWAY_PUBLIC_DOMAIN`; load the output as variables; add the three extra keys above.
+   - **Upgrading an install that already ran** (#2066): `export JWT_HMAC='<the value in use>'` first. The generator then emits `WEBHOOK_INGRESS_MASTER_KEY` / `OUTBOUND_WEBHOOK_MASTER_KEY` as an explicit copy of it (ADR-0004 증보 4 D2(a) — re-issues nothing) and says so on stderr. Without it they are fresh randoms and every issued native ingress / event-subscription / doorbell secret dies. Already-rotated keys survive if they are exported too.
+   - `OUTBOUND_WEBHOOK_MASTER_KEY` must reach **webhook-sender as well as api**, with the same value (`services.webhook-sender.variablesFromGenerator`). This file is not a compose rendering, so nothing here is the `${VAR:?}` that would catch the omission, and #2066 deleted the binary's `JWT_HMAC` fallback: a sender without it refuses to boot, and a sender with a *different* value signs deliveries no subscriber can verify.
 4. Deploy. Wait until api preDeploy has finished and caddy `/healthz` is 200.
 5. `scripts/oort doctor --json` against an env that contains the public origin — `public.healthz` and `public.websocket` must PASS.
 6. `railway down` (or delete the project) when the measurement is recorded.
