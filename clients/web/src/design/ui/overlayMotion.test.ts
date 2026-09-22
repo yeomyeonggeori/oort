@@ -264,6 +264,8 @@ describe("UX-R1a primitive wiring (comment-stripped)", () => {
     const code = codeOnly(FILES.dialog);
     expect(code).toMatch(/\bMODAL_OVERLAY_MOTION\b/);
     expect(code).toMatch(/\bMODAL_CONTENT_MOTION\b/);
+    expect(code).toContain("layer-overlay-scrim");
+    expect(code).toContain("layer-overlay-surface");
     // #1997 H-1: closed pe=none is the `!` class, not an inline assignment.
     expect(code).not.toMatch(/\bpointerEvents\b/);
     expect(code).not.toMatch(/DialogOpenContext/);
@@ -341,6 +343,9 @@ describe.skipIf(!chromiumAvailable)(
         ...quotedClassTokens(FILES.sectionDialogs),
         "scrim-blur",
         "bg-scrim",
+        "layer-overlay-scrim",
+        "layer-overlay-surface",
+        "layer-content-float",
         "focus-visible:focus-ring",
       ];
       const css = await buildCss(candidates);

@@ -60,7 +60,7 @@ export function UnreadPillDock({
   return (
     <div
       className={cn(
-        "pointer-events-none absolute inset-x-0 z-10 flex justify-center",
+        "pointer-events-none absolute inset-x-0 layer-content-float flex justify-center",
         side === "top" ? "top-2" : "bottom-2"
       )}
     >
