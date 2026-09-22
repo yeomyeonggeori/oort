@@ -4018,6 +4018,53 @@ pub struct ApprovalDecisionReceipt {
     pub decided_at_ms: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub decision_reason: Option<String>,
+    /// ADR-0186 부록 C — present only when this decision **executed** a
+    /// workspace action.
+    ///
+    /// Absent on every other outcome, including a tool-call approval, every
+    /// refusal, and an idempotent replay of an execution: the ledger stores the
+    /// receipt with `result.ref` and **without** `result.secretOnce`
+    /// ([`ApprovalDecisionResult::secret_once` is `skip_serializing_if`]), so a
+    /// retry answers "this made invite X" and never re-shows the link. That
+    /// asymmetry is the whole of D4's server half, and it is enforced by this
+    /// struct's shape rather than by a caller remembering to strip a field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<ApprovalDecisionResult>,
+}
+
+/// The `result` object of ADR-0186 부록 C.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalDecisionResult {
+    pub action_id: String,
+    /// What was made. The same object the persistent card carries
+    /// (`momo_agent::action_ref`), so one id matches across both.
+    pub r#ref: ActionRefDto,
+    /// The one-time value, **response body only**.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_once: Option<SecretOnceDto>,
+}
+
+/// `{type, id}` — the durable thing an executed action produced.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ActionRefDto {
+    pub r#type: String,
+    pub id: String,
+}
+
+/// ADR-0186 부록 C `secretOnce`, answered under `Cache-Control: no-store`.
+///
+/// There is no route that can read this value back: the durable record of an
+/// invite is a sha256 written inside the minting statement
+/// (`momo_settings::create_invite`), and the decider's own response is the only
+/// place the plaintext ever exists.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretOnceDto {
+    /// `invite_link` today (`momo_agent::SECRET_ONCE_INVITE_LINK`).
+    pub kind: String,
+    pub value: String,
+    pub expires_at_ms: i64,
 }
 
 /// `GET …/approvals?status=&limit=`.
@@ -4314,6 +4361,7 @@ mod tests {
             decided_by: Some("h".into()),
             decided_at_ms: 9,
             decision_reason: None,
+            result: None,
         })
         .expect("serialize");
         let mut receipt_keys: Vec<&str> = receipt
@@ -4333,6 +4381,62 @@ mod tests {
         // `decidedAtMs` is NOT optional on this struct, so the spec listing it as
         // optional was a second, quieter lie.
         assert!(receipt_keys.contains(&"decidedAtMs"));
+    }
+
+    /// **ADR-0186 D4, as a shape rather than a rule.**
+    ///
+    /// The ledger stores the receipt verbatim and replays it on a retry, so the
+    /// stored copy is what a second tap answers with. This test drives that
+    /// round trip: what is persisted carries `result.ref` and no `secretOnce`,
+    /// decodes back into the same struct, and re-serializes identically — so
+    /// the link cannot reappear on a replay even if a future caller forgot the
+    /// rule, because there is nothing in the stored bytes to reappear from.
+    #[test]
+    fn the_stored_receipt_carries_the_ref_and_never_the_one_time_value() {
+        let executed = ApprovalDecisionReceipt {
+            approval_id: "ap".into(),
+            status: "approved".into(),
+            decided_by: Some("h".into()),
+            decided_at_ms: 9,
+            decision_reason: None,
+            result: Some(ApprovalDecisionResult {
+                action_id: "invite.create".into(),
+                r#ref: ActionRefDto {
+                    r#type: "invite".into(),
+                    id: "iv".into(),
+                },
+                secret_once: None,
+            }),
+        };
+        let stored = serde_json::to_value(&executed).expect("serialize");
+        assert_eq!(stored["result"]["actionId"], "invite.create");
+        assert_eq!(stored["result"]["ref"]["type"], "invite");
+        assert_eq!(stored["result"]["ref"]["id"], "iv");
+        assert!(
+            stored["result"].get("secretOnce").is_none(),
+            "the persisted receipt has no one-time value: {stored}"
+        );
+        assert!(!stored.to_string().contains("secretOnce"), "{stored}");
+
+        let replayed: ApprovalDecisionReceipt =
+            serde_json::from_value(stored.clone()).expect("the stored receipt decodes back");
+        assert_eq!(
+            serde_json::to_value(&replayed).expect("re-serialize"),
+            stored,
+            "a replay answers byte-identically to the first call"
+        );
+
+        // …and when the link IS answered, it is answered beside the same ref.
+        let mut live = executed;
+        live.result.as_mut().expect("result").secret_once = Some(SecretOnceDto {
+            kind: "invite_link".into(),
+            value: "https://oort.example/join?code=Ab3-_x".into(),
+            expires_at_ms: 11,
+        });
+        let answered = serde_json::to_value(&live).expect("serialize");
+        assert_eq!(answered["result"]["secretOnce"]["kind"], "invite_link");
+        assert_eq!(answered["result"]["secretOnce"]["expiresAtMs"], 11);
+        assert_eq!(answered["result"]["ref"], stored["result"]["ref"]);
     }
 
     #[test]

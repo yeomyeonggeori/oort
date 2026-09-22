@@ -6187,6 +6187,18 @@ paths:
         return the SAME receipt schema (not the generic error envelope) with
         a diagnostic `status`; the generic error envelope is used only for
         400 body/path mismatches and 401 auth failures.
+
+
+        ADR-0186 D2/D4 — approving an approval whose `action_type` is
+        `workspace_action` **executes** the action in the decision transaction
+        with the approver's authority, and the 200 receipt then carries
+        `result` (부록 C): `actionId`, the `ref` of what was made, and a
+        `secretOnce` the server keeps no copy of. A replay of the same
+        `client_decision_id` answers the stored receipt, which carries `result`
+        **without** `secretOnce` — the one-time value is answered exactly once.
+        Every response on this operation is sent `Cache-Control: no-store` and
+        `Pragma: no-cache`, on all outcomes rather than only the one that mints
+        something.
       security:
         - bearerAuth: []
       parameters:
@@ -6207,6 +6219,15 @@ paths:
       responses:
         "200":
           description: Decision committed (or identical idempotent retry).
+          headers:
+            Cache-Control:
+              description: Always `no-store` (ADR-0186 D4).
+              schema:
+                type: string
+            Pragma:
+              description: Always `no-cache` (ADR-0186 D4).
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -6220,7 +6241,13 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: Receipt-shaped expected failure (not human / not a channel member).
+          description: >
+            Receipt-shaped expected failure — `forbidden` (not human / not a
+            channel member), or `role_required` when the decider does not hold
+            the `required_role` the workspace action published (ADR-0186 D2).
+            `role_required` does **not** consume the approval: it stays
+            `pending`, no ledger row is written, and the request card is patched
+            with `last_attempt: "role_required"`.
           content:
             application/json:
               schema:
@@ -6234,7 +6261,10 @@ paths:
         "409":
           description: >
             Receipt-shaped expected failure — already decided, expired before
-            decision, or idempotency conflict.
+            decision, idempotency conflict, or (ADR-0186) a workspace action
+            this server can no longer execute: `action_unavailable`,
+            `action_args_invalid`, `public_origin_unavailable`. None of the
+            three consumes the approval.
           content:
             application/json:
               schema:
@@ -13428,8 +13458,10 @@ components:
       description: >
         Decision acknowledgement. Committed decisions carry status
         approved/rejected; expected failures reuse this shape with a
-        diagnostic status (e.g. idempotency_conflict, forbidden, not_found,
-        bad_request, expired, or the approval's current status on a 409).
+        diagnostic status (e.g. idempotency_conflict, forbidden, role_required,
+        not_found, bad_request, expired, action_unavailable,
+        action_args_invalid, public_origin_unavailable, or the approval's
+        current status on a 409).
 
 
         NOTATION (SRV-B5c): camelCase, matching the deployed Rust server. See
@@ -13456,3 +13488,67 @@ components:
             `ApprovalDecisionReceipt`), including on the refusal shapes.
         decisionReason:
           type: string
+        result:
+          allOf:
+            - $ref: "#/components/schemas/WorkspaceActionResult"
+          description: >
+            ADR-0186 부록 C. Present only when this decision executed a
+            workspace action; absent on tool-call approvals and on every
+            refusal.
+
+    WorkspaceActionResult:
+      type: object
+      description: >
+        What an approved workspace action produced (ADR-0186 부록 C). `ref`
+        names the durable object and is repeated in the persistent result card's
+        props (`momo.action_result.ref`), so one id matches across both.
+      required: [actionId, ref]
+      properties:
+        actionId:
+          $ref: "#/components/schemas/WorkspaceActionId"
+        ref:
+          $ref: "#/components/schemas/WorkspaceActionRef"
+        secretOnce:
+          allOf:
+            - $ref: "#/components/schemas/ActionSecretOnce"
+          description: >
+            ADR-0186 D4 — the one-time value, answered in this response body
+            and nowhere else. It is NOT stored in `approval_decision.receipt`,
+            so an idempotent replay of the same `client_decision_id` answers
+            the same `actionId` and `ref` with this key **absent**. It is not
+            in `approval.payload`, the card props, the audit row, the outbox or
+            the server log either; the durable record of an invite is a sha256
+            written inside the minting statement.
+
+    WorkspaceActionRef:
+      type: object
+      description: The durable object an executed action produced.
+      required: [type, id]
+      properties:
+        type:
+          type: string
+          enum: [invite]
+        id:
+          type: string
+          format: uuid
+
+    ActionSecretOnce:
+      type: object
+      description: >
+        A credential-bearing value shown to the approver exactly once. Answered
+        under `Cache-Control: no-store` + `Pragma: no-cache`; clients render it
+        from memory only and must not persist it (ADR-0186 D4, ADR-0182 ①).
+      required: [kind, value, expiresAtMs]
+      properties:
+        kind:
+          type: string
+          enum: [invite_link]
+        value:
+          type: string
+          description: >
+            The join link, built from this deployment's public origin
+            (`MOMO_PUBLIC_BASE_URL` when configured, otherwise the request's own
+            `Host` + `X-Forwarded-Proto`, the ADR-0167 derivation).
+        expiresAtMs:
+          type: integer
+          format: int64

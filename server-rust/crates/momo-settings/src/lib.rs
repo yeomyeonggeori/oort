@@ -84,7 +84,7 @@ pub use invite::{
     normalized_invite_role, normalized_revoke_reason, read_invite, redeem_invite_for_member,
     regenerate_invite, revoke_invite, validated_expires_at_ms, validated_max_uses, CreatedInvite,
     InviteCode, InviteMutationInvalid, InviteRedeemInvalid, InviteRedemption, InviteSpecInvalid,
-    RedeemedInvite, RevokedInvite,
+    RedeemedInvite, RevokedInvite, INVITE_CREATED_AUDIT_ACTION, INVITE_CREATED_AUDIT_SCHEMA,
 };
 pub use join::{
     fallback_handle, is_handle_banned_in_tx, is_handle_unique_violation, is_identity_banned_in_tx,

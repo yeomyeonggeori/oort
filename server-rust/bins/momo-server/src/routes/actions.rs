@@ -144,6 +144,34 @@ pub async fn list(
 pub struct ValidatedActionArgs {
     pub normalized: Value,
     pub rows: Vec<Value>,
+    /// The same values, typed, for the **executor** (ADR-0186 D2, AX-3b).
+    ///
+    /// The decision route re-runs this whole function over the stored
+    /// `payload.action.args` rather than trusting what was written months — or
+    /// one compromised propose call — ago. Handing it a typed variant instead of
+    /// making it dig `normalized["maxUses"].as_i64()` back out is what keeps the
+    /// executor from re-deriving, and re-deciding, anything: the parse happened
+    /// here, once, and its result is the only thing the executor can act on.
+    pub args: ActionArgs,
+}
+
+/// One action's arguments, after the domain has agreed to them.
+///
+/// An enum rather than three fields on [`ValidatedActionArgs`] because the next
+/// action's arguments are not an invite's; a struct with `role`/`max_uses` would
+/// make every future executor read fields that mean nothing to it, and the
+/// compiler would not notice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActionArgs {
+    InviteCreate {
+        /// `momo_settings::normalized_invite_role`'s canonical spelling.
+        role: &'static str,
+        max_uses: i32,
+        /// `None` means "the statement's own 7-day default"
+        /// (`momo_agent::DEFAULT_INVITE_EXPIRES_IN_DAYS`), which is what the
+        /// card's 만료 row already showed.
+        expires_in_days: Option<i64>,
+    },
 }
 
 /// Normalise `args` for `action`, refusing anything the registry's published
@@ -221,6 +249,11 @@ fn invite_create_args(args: &Value, now_ms: i64) -> Result<ValidatedActionArgs, 
             "expiresInDays": expires_in_days,
         }),
         rows: actions::invite_create_rows(role, max_uses, expires_in_days),
+        args: ActionArgs::InviteCreate {
+            role,
+            max_uses,
+            expires_in_days,
+        },
     })
 }
 

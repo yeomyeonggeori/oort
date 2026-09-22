@@ -59,10 +59,17 @@
 //! `momo_messaging::patch_message_props_in_tx`.
 
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::http::{header, HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use chrono::Utc;
+use momo_agent::actions::{
+    action_by_id, action_ref, action_result_props, invite_result_body, invite_result_rows,
+    last_attempt_patch, result_client_msg_id, ActionResult, ACTION_APPROVED_AUDIT_SCHEMA,
+    ACTION_RESULT_EXECUTED, ACTION_TYPE_WORKSPACE_ACTION, AUDIT_ACTION_APPROVED,
+    DEFAULT_INVITE_EXPIRES_IN_DAYS, LAST_ATTEMPT_PROPS_KEY, REF_TYPE_INVITE, ROLE_REQUIRED,
+    SECRET_ONCE_INVITE_LINK,
+};
 use momo_agent::approval::{
     decided_props_patch, decision_broadcast_payload, decision_event_payload, decision_receipt,
     default_execution_host, existing_decision_in_tx, is_active_channel_member_in_tx,
@@ -72,7 +79,9 @@ use momo_agent::approval::{
     validated_limit, validated_status, ApprovalListRow, LockedApproval,
 };
 use momo_agent::tools::{ToolResult, TOOL_AUDIT_SCHEMA};
-use momo_agent::{end_parked_run_in_tx, requeue_run_from_approval_in_tx, RunStatus};
+use momo_agent::{
+    end_parked_run_in_tx, requeue_run_from_approval_in_tx, succeed_parked_run_in_tx, RunStatus,
+};
 use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
@@ -80,19 +89,25 @@ use momo_messaging::{
     cent_channel, patch_message_props_in_tx, send_message_in_tx, MessageType, NewMessage,
 };
 use momo_outbox::{emit_outbox, OutboxKind, RESUME_APPROVAL_JOB_METHOD};
+use momo_settings::{create_invite, INVITE_CREATED_AUDIT_ACTION, INVITE_CREATED_AUDIT_SCHEMA};
 use momo_t3::work_control::{spawn_host_ineligible_reason_in_tx, work_control_id};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+use crate::config::T3Settings;
 use crate::dto::{
     ApprovalDecisionReceipt, ApprovalDecisionRequest, ApprovalDto, ApprovalListQuery,
-    ApprovalListResponse,
+    ApprovalListResponse, SecretOnceDto,
 };
 use crate::error::ApiError;
+use crate::realtime_advert::derive_same_origin_http_base;
+use crate::routes::actions::{validated_action_args, ActionArgs};
+use crate::routes::invites::require_admin;
 use crate::routes::shared::{
     agent_tenant_tx, audit_via_token_id, emit_terminal_agent_status, epoch_ms, path_uuid,
     settle_db, workspace_scope, DbRejectable,
 };
+use crate::routes::webhooks::no_store;
 use crate::AppState;
 
 /// The body of the `tool_result` a rejection appends (Swift :847).
@@ -171,8 +186,9 @@ pub async fn decide_by_approval(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path((workspace, approval)): Path<(String, String)>,
+    headers: HeaderMap,
     Json(request): Json<ApprovalDecisionRequest>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Result<Response, ApiError> {
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let approval_id = path_uuid(&approval, "invalid approval id")?;
     // Swift `validateBodyApprovalID` (:1026-1030): the body must agree with the
@@ -181,7 +197,16 @@ pub async fn decide_by_approval(
     if request.approval_id != approval_id {
         return Err(ApiError::bad_request("approval_id does not match path"));
     }
-    decide(state, principal, workspace_id, approval_id, None, request).await
+    decide(
+        state,
+        principal,
+        workspace_id,
+        approval_id,
+        None,
+        &headers,
+        request,
+    )
+    .await
 }
 
 /// `POST /v1/agent-runs/{run}/approval-decisions` (Swift `decideByRun`,
@@ -194,8 +219,9 @@ pub async fn decide_by_run(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path(run): Path<String>,
+    headers: HeaderMap,
     Json(request): Json<ApprovalDecisionRequest>,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Result<Response, ApiError> {
     let run_id = path_uuid(&run, "invalid run id")?;
     let workspace_id = principal.workspace_id;
     let approval_id = request.approval_id;
@@ -205,6 +231,7 @@ pub async fn decide_by_run(
         workspace_id,
         approval_id,
         Some(run_id),
+        &headers,
         request,
     )
     .await
@@ -212,8 +239,18 @@ pub async fn decide_by_run(
 
 /// A settled decision: the receipt plus the status it answers with.
 struct Decision {
+    /// What is stored in `approval_decision.receipt` **and** answered — the two
+    /// are the same bytes, which is what makes an idempotent retry honest.
     receipt: Value,
     status: StatusCode,
+    /// ADR-0186 부록 C / D4 — the one-time value this decision minted.
+    ///
+    /// Deliberately **outside** [`Self::receipt`]: the receipt is persisted and
+    /// replayed, and this is neither. It is carried out of the transaction as a
+    /// separate field and grafted onto the response body by [`decide`], so
+    /// "stored" and "answered" differ by exactly this one key and a reader can
+    /// see where the difference is made.
+    secret_once: Option<SecretOnceDto>,
 }
 
 impl Decision {
@@ -221,6 +258,7 @@ impl Decision {
         Decision {
             receipt,
             status: StatusCode::OK,
+            secret_once: None,
         }
     }
 }
@@ -231,14 +269,20 @@ async fn decide(
     workspace_id: Uuid,
     approval_id: Uuid,
     route_run_id: Option<Uuid>,
+    headers: &HeaderMap,
     request: ApprovalDecisionRequest,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Result<Response, ApiError> {
     let reason = normalized_reason(request.reason.as_deref());
     let approve = request.approve;
     let client_decision_id = request.client_decision_id;
     let member_id = principal.member_id;
     let via_token_id = audit_via_token_id(&principal);
     let selected_host_id = request.host_id;
+    // Resolved here rather than inside the transaction because it is a property
+    // of *this request* (its Host header) and of the process (its configured
+    // public base), not of any row. The executor judges its absence before the
+    // first write — see `execute_workspace_action`.
+    let public_origin = invite_link_origin(&state.t3, headers);
 
     let outcome: DbRejectable<Decision> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
@@ -254,6 +298,7 @@ async fn decide(
                     reason: reason.as_deref(),
                     client_decision_id,
                     selected_host_id,
+                    public_origin: public_origin.as_deref(),
                 },
             )
             .await
@@ -262,9 +307,31 @@ async fn decide(
     .await;
 
     let decision = settle_db("approvals.decide", outcome)?;
-    let receipt: ApprovalDecisionReceipt = serde_json::from_value(decision.receipt)
+    let status = decision.status;
+    let secret_once = decision.secret_once;
+    let mut receipt: ApprovalDecisionReceipt = serde_json::from_value(decision.receipt)
         .map_err(|error| ApiError::internal("approvals.decide.receipt", error))?;
-    Ok((decision.status, Json(receipt)))
+    if let Some(secret) = secret_once {
+        // An executed action always built its `result` first, so a missing one
+        // here would mean the two halves of 부록 C had come apart. Answering the
+        // link with no `ref` beside it would hand a person a credential with
+        // nothing naming what it opens.
+        let result = receipt.result.as_mut().ok_or_else(|| {
+            ApiError::internal(
+                "approvals.decide.result",
+                "a one-time value with no result object",
+            )
+        })?;
+        result.secret_once = Some(secret);
+    }
+
+    // **ADR-0186 D4 — on every outcome, not only the one that carries a link.**
+    //
+    // A conditional `no-store` would be a signal in itself: an intermediary (or
+    // a person reading a HAR) could tell "this decision minted something" from
+    // the headers alone, before reading the body. It is also the fragile shape —
+    // one more arm that can answer with a secret is one more place to remember.
+    Ok(no_store((status, Json(receipt)).into_response()))
 }
 
 struct DecisionInput<'a> {
@@ -278,6 +345,9 @@ struct DecisionInput<'a> {
     client_decision_id: Uuid,
     /// ADR-0125 D6-A (#1114) — the host the approver picked on the card.
     selected_host_id: Option<Uuid>,
+    /// The absolute origin an invite link should point at, or `None` when this
+    /// instance cannot name itself (ADR-0186 부록 C).
+    public_origin: Option<&'a str>,
 }
 
 async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRejectable<Decision> {
@@ -312,6 +382,7 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
                 Some("approval_decision_idempotency_conflict"),
             ),
             status: StatusCode::CONFLICT,
+            secret_once: None,
         }));
     }
 
@@ -415,41 +486,26 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
         .await?));
     }
 
-    // **ADR-0186 D2 / AX-3a — only the *approve* half is unlanded.**
+    // **ADR-0186 D2 — the approve half of a workspace action is executed, not
+    // resumed.**
     //
-    // The moment `oort_action_propose` lands, `approval_request` cards with
-    // `action_type = 'workspace_action'` are real rows in real channels and the
-    // web card renders approve/reject on any approval. Approving one must not
-    // take the generic path: `approve_run` would requeue the run and enqueue a
+    // The generic path below would requeue the run and enqueue a
     // `resume_approval` job whose payload has no `tool_call` at all — a job the
-    // worker cannot run, for a run that AX-3b (#2509) will **execute** rather
-    // than resume (ADR-0186 §5: 세 경로 모두 resume job 0건).
+    // worker cannot run. A workspace action has no model turn waiting on it:
+    // the decision transaction *is* the execution (ADR-0186 §5: 세 경로 모두
+    // resume job 0건).
     //
-    // **Rejection is deliberately NOT blocked**, because ADR-0186 D2 says the
-    // reject arm is the existing one and the existing one is already correct for
-    // this payload: `reject_run` reads `payload.tool_call.call_id` with
-    // `unwrap_or_default()`, `end_parked_run_in_tx` is guarded on
-    // `awaiting_approval`, and the resume job is emitted only by `approve_run`.
-    // Blocking it would be worse than doing nothing: a person looking at the
-    // card would have no way to close their own proposal, and the parked run
-    // holds `agent.max_concurrent_runs` (**default 1**) until the one-hour TTL
-    // sweep, so the agent would go silent with nothing anywhere saying why.
+    // **Only the approve half branches.** Rejection and expiry keep the arms
+    // they already had, and the existing ones are correct for this payload:
+    // `reject_run` reads `payload.tool_call.call_id` with `unwrap_or_default()`,
+    // `end_parked_run_in_tx` is guarded on `awaiting_approval`, and the resume
+    // job is emitted only by `approve_run`.
     //
-    // Placed **after** the expiry settlement above and **before** the first
-    // write: an already-overdue card still settles as `expired` on a tap
-    // (otherwise the deadline would be invisible on the one surface a person
-    // uses), and a live one leaves the approval `pending` with the run still
-    // parked — nothing consumed, so the same tap succeeds once the executor
-    // lands.
-    if approval.action_type == momo_agent::ACTION_TYPE_WORKSPACE_ACTION && input.approve {
-        return Ok(Ok(refusal(
-            approval.id,
-            input.member_id,
-            "action_not_executable_yet",
-            "workspace action execution is not open on this server yet",
-            StatusCode::CONFLICT,
-            now,
-        )));
+    // Placed **after** the expiry settlement above: an already-overdue card
+    // still settles as `expired` on a tap rather than minting an invite past its
+    // own deadline.
+    if approval.action_type == ACTION_TYPE_WORKSPACE_ACTION && input.approve {
+        return execute_workspace_action(conn, &approval, &input, now).await;
     }
 
     // ---- writes ------------------------------------------------------------
@@ -603,6 +659,426 @@ async fn approve_run(
     )
     .await?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0186 D2/D4 — the workspace-action executor (#2509)
+//
+// Everything below happens inside the decision transaction that locked the
+// approval `FOR UPDATE`, with the **approver's** authority. The agent that
+// proposed it is not an admin at any point; it is not even consulted here. What
+// it gets is its own name on the outcome line, because the proposal was its
+// utterance.
+//
+// The order is the ADR's, and each step's placement is load-bearing:
+//
+//   1. the role gate            — before the first write except the card patch
+//   2. the arguments, re-proved — from the stored payload, never trusted as-is
+//   3. the link's origin        — before the first write, so a link this server
+//                                 cannot address refuses instead of minting a
+//                                 code nobody will ever see
+//   4. execute · audit · settle · post · finish · broadcast
+// ---------------------------------------------------------------------------
+
+/// Approve a `workspace_action`: run it here, now, as the person who said yes.
+async fn execute_workspace_action(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+) -> DbRejectable<Decision> {
+    // ---- 1. the gate is the invite surface's own ---------------------------
+    //
+    // `require_admin` is `routes::invites`'s function, called rather than
+    // copied: ADR-0186 D2 says the judgement is 「기존 `require_admin`과 같은
+    // 판정」, and two implementations of one rule drift the day either is
+    // widened. It is also the same authority the REST route would have applied
+    // had this person minted the invite by hand — which is exactly what they
+    // are doing, one card removed.
+    if require_admin(conn, input.workspace_id, input.member_id)
+        .await?
+        .is_err()
+    {
+        // The approval is **not consumed** (ADR-0186 D2): no ledger row, no
+        // status change, the run stays parked. What does change is the card — a
+        // person who tapped and was refused must be able to see why on the
+        // surface they tapped, and an admin scrolling past must see that
+        // somebody already tried.
+        if let Some(message_id) = approval.request_message_id {
+            patch_message_props_in_tx(
+                conn,
+                input.workspace_id,
+                message_id,
+                &last_attempt_patch(Some(ROLE_REQUIRED)),
+            )
+            .await?;
+        }
+        return Ok(Ok(refusal(
+            approval.id,
+            input.member_id,
+            ROLE_REQUIRED,
+            "this workspace action must be approved by a workspace admin",
+            StatusCode::FORBIDDEN,
+            now,
+        )));
+    }
+
+    // ---- 2. what was proposed, re-proved -----------------------------------
+    let Some(action_id) = approval
+        .payload
+        .get("action")
+        .and_then(|action| action.get("id"))
+        .and_then(Value::as_str)
+    else {
+        // A `workspace_action` row with no action id cannot have come from
+        // `oort_action_propose`. Rolling back is the only safe answer: the
+        // alternative is guessing which action a person consented to.
+        return Err(protocol_error("workspace action approval names no action"));
+    };
+    let Some(action) = action_by_id(action_id) else {
+        // The registry no longer publishes this id — a card outlived the action
+        // it proposed. The approval stays pending rather than executing
+        // something whose contract this build does not carry.
+        return Ok(Ok(refusal(
+            approval.id,
+            input.member_id,
+            "action_unavailable",
+            "this workspace action is no longer offered by this server",
+            StatusCode::CONFLICT,
+            now,
+        )));
+    };
+
+    // The stored `args` are re-run through the **same** normaliser the proposal
+    // passed (`routes::actions::validated_action_args`), for the reason ADR-0186
+    // D2 gives: 「저장값을 신뢰하지 않는다」. The card may be an hour old, the
+    // ceilings may have narrowed since, and the row is writable by anything that
+    // can write `approval.payload`. Re-proving costs one function call and is
+    // the difference between "a person approved these numbers" and "a person
+    // approved a row".
+    let now_ms = now.timestamp_millis();
+    let Ok(validated) = validated_action_args(action, proposed_args(&approval.payload), now_ms)
+    else {
+        return Ok(Ok(refusal(
+            approval.id,
+            input.member_id,
+            "action_args_invalid",
+            "this proposal's arguments are no longer valid",
+            StatusCode::CONFLICT,
+            now,
+        )));
+    };
+
+    // ---- 3. can this server address its own link? --------------------------
+    //
+    // Judged before the mint, not after. A code exists exactly once, in the
+    // response that carries it (D4), so minting one we cannot put in a link
+    // would burn an invite nobody could ever use and leave a row in
+    // `invite_code` that no person asked for.
+    let Some(origin) = input.public_origin else {
+        return Ok(Ok(refusal(
+            approval.id,
+            input.member_id,
+            "public_origin_unavailable",
+            "this instance cannot address its own invite links",
+            StatusCode::CONFLICT,
+            now,
+        )));
+    };
+
+    // ---- 4. execute --------------------------------------------------------
+    let ActionArgs::InviteCreate {
+        role,
+        max_uses,
+        expires_in_days,
+    } = validated.args;
+    let expires_at_ms = expires_in_days.map(|days| now_ms + days * 86_400_000);
+    let created = create_invite(
+        conn,
+        input.workspace_id,
+        role,
+        max_uses,
+        expires_at_ms,
+        // **The approver's name on the row**, not the agent's. `invite_code.
+        // created_by` is who is accountable for this link existing.
+        input.member_id,
+    )
+    .await?;
+
+    // base64url by construction (`momo_generate_invite_code`, 003). Checked
+    // rather than escaped: an unsafe code means the generator changed, and
+    // quietly percent-encoding it would hide that while producing a link whose
+    // text no longer matches the code a person may type by hand.
+    if !created.code.bytes().all(is_url_safe_code_byte) {
+        return Err(protocol_error("minted invite code is not url-safe"));
+    }
+    let join_url = format!("{origin}/join?code={}", created.code);
+    let action_ref_value = action_ref(REF_TYPE_INVITE, created.invite.id);
+
+    // ---- audit: two rows, and the generic `approval.approved` is not one ----
+    //
+    // ADR-0186 §5 names exactly two: `action.approved` and `invite.created`.
+    // This arm returns before the generic write block, so the tool-call path's
+    // `approval.{status}` row is not written — an executed action is recorded as
+    // what it did, once, rather than as a decision plus a coincidence.
+    write_audit(
+        conn,
+        &AuditEntry::new(input.workspace_id, INVITE_CREATED_AUDIT_ACTION)
+            .by(input.member_id)
+            .target("invite_code", created.invite.id)
+            .via_token(input.via_token_id)
+            .run(approval.run_id)
+            .with_schema(
+                INVITE_CREATED_AUDIT_SCHEMA,
+                // The REST route's two fields plus this path's provenance.
+                // Role and reach only — never the code, never its hash, never
+                // the preview (`routes::invites::create`'s discipline, and an
+                // audit row is read by more people than a response is).
+                json!({
+                    "role": role,
+                    "max_uses": max_uses,
+                    "via_agent": approval.requested_by.to_string(),
+                    "approval_id": approval.id.to_string(),
+                }),
+            ),
+    )
+    .await?;
+    write_audit(
+        conn,
+        &AuditEntry::new(input.workspace_id, AUDIT_ACTION_APPROVED)
+            .by(input.member_id)
+            // Actor and subject differ here and the difference is the point:
+            // a person decided, an agent's proposal was decided about.
+            .about(approval.requested_by)
+            .target("approval", approval.id)
+            .via_token(input.via_token_id)
+            .run(approval.run_id)
+            .with_schema(
+                ACTION_APPROVED_AUDIT_SCHEMA,
+                json!({
+                    "action_id": action.id,
+                    "approval_id": approval.id.to_string(),
+                    "proposed_by": approval.requested_by.to_string(),
+                    "decided_by": input.member_id.to_string(),
+                    "ref": action_ref_value,
+                }),
+            ),
+    )
+    .await?;
+
+    // ---- settle the approval ----------------------------------------------
+    let event = decision_event_payload(
+        approval,
+        "approved",
+        Some(input.member_id),
+        now,
+        input.reason,
+    );
+    let mut receipt = decision_receipt(
+        approval.id,
+        "approved",
+        Some(input.member_id),
+        now,
+        input.reason,
+    );
+    // The **ref only** (ADR-0186 D2). This object is stored verbatim in
+    // `approval_decision.receipt` and replayed to a retry, so anything put here
+    // is a durable copy — and `secretOnce` is grafted on afterwards, outside the
+    // transaction, by `decide`.
+    if let Some(object) = receipt.as_object_mut() {
+        object.insert(
+            "result".into(),
+            json!({"actionId": action.id, "ref": action_ref_value}),
+        );
+    }
+
+    mark_approval_decided_in_tx(
+        conn,
+        approval.id,
+        "approved",
+        input.member_id,
+        now,
+        input.reason,
+    )
+    .await?;
+
+    if let Some(message_id) = approval.request_message_id {
+        let mut patch = decided_props_patch("approved", Some(input.member_id), now, input.reason);
+        if let Some(object) = patch.as_object_mut() {
+            // Clear any earlier refusal: a card that says 승인됨 must not also
+            // still say the last attempt needed an admin.
+            object.insert(LAST_ATTEMPT_PROPS_KEY.into(), Value::Null);
+        }
+        patch_message_props_in_tx(conn, input.workspace_id, message_id, &patch).await?;
+    }
+
+    record_decision_in_tx(
+        conn,
+        input.workspace_id,
+        approval.id,
+        input.client_decision_id,
+        input.member_id,
+        input.approve,
+        "approved",
+        input.reason,
+        &receipt,
+    )
+    .await?;
+
+    // ---- the outcome line, authored by the agent ---------------------------
+    //
+    // Same authorship rule as the rejection's (`reject_run`): the proposal was
+    // the agent's utterance, so its outcome belongs to the same speaker. Who
+    // decided is in the props, not in the authorship.
+    // UTC, like every other date this server renders. A client that wants the
+    // reader's own calendar day formats it from the invite row; the card's row
+    // is the server's statement about the instant it wrote.
+    let expires_on = chrono::DateTime::from_timestamp_millis(created.invite.expires_at_ms)
+        .ok_or_else(|| protocol_error("minted invite has an unrepresentable expiry"))?
+        .format("%Y-%m-%d")
+        .to_string();
+    send_message_in_tx(
+        conn,
+        input.workspace_id,
+        NewMessage {
+            channel_id: approval.channel_id,
+            author_member_id: approval.requested_by,
+            message_type: MessageType::ToolResult,
+            body: Some(invite_result_body(
+                role,
+                max_uses,
+                expires_in_days.unwrap_or(DEFAULT_INVITE_EXPIRES_IN_DAYS),
+            )),
+            props: action_result_props(&ActionResult {
+                action_id: action.id,
+                status: ACTION_RESULT_EXECUTED,
+                approval_id: approval.id,
+                decided_by: input.member_id,
+                ref_type: REF_TYPE_INVITE,
+                ref_id: created.invite.id,
+                rows: invite_result_rows(role, &expires_on),
+                secret_shown_once: true,
+            }),
+            root_id: None,
+            reply_to_id: None,
+            // NOT `approval.id` — that key belongs to the rejection and expiry
+            // lines (`momo_agent::actions::result_client_msg_id`).
+            client_msg_id: Some(result_client_msg_id(approval.id)),
+            run_id: Some(approval.run_id),
+            hlc_ts: None,
+            hlc_count: None,
+        },
+    )
+    .await?;
+
+    // ---- the run ends here, succeeded, with no job behind it ---------------
+    if !succeed_parked_run_in_tx(
+        conn,
+        approval.run_id,
+        &json!({"actionId": action.id, "ref": action_ref_value}),
+    )
+    .await?
+    {
+        // The guard lost: this run is no longer parked (a human stop, or an
+        // expiry that raced us). Unlike `approve_run`'s identical-looking check
+        // this cannot be swallowed — an invite has already been minted in this
+        // transaction, and `Err` is the only channel that rolls it back.
+        return Err(protocol_error(
+            "the approved run left its hold before the action could be recorded",
+        ));
+    }
+    emit_terminal_agent_status(
+        conn,
+        input.workspace_id,
+        approval.channel_id,
+        approval.requested_by,
+        approval.run_id,
+        RunStatus::Succeeded,
+    )
+    .await?;
+
+    emit_outbox(
+        &mut *conn,
+        input.workspace_id,
+        OutboxKind::Broadcast,
+        "publish",
+        &decision_broadcast_payload(
+            &cent_channel(input.workspace_id, approval.channel_id),
+            approval,
+            "approved",
+            &event,
+            now,
+        ),
+        Some(approval.channel_id),
+    )
+    .await
+    .map_err(momo_db::DbError::from)?;
+
+    Ok(Ok(Decision {
+        receipt,
+        status: StatusCode::OK,
+        secret_once: Some(SecretOnceDto {
+            kind: SECRET_ONCE_INVITE_LINK.to_string(),
+            value: join_url,
+            expires_at_ms: created.invite.expires_at_ms,
+        }),
+    }))
+}
+
+/// `payload.action.args`, or a value the normaliser will refuse.
+///
+/// Returning `&Value::Null` rather than defaulting to `{}` keeps a payload with
+/// no args from being read as "all defaults": a proposal always writes the
+/// normalised object, so its absence is corruption, not brevity.
+fn proposed_args(payload: &Value) -> &Value {
+    payload
+        .get("action")
+        .and_then(|action| action.get("args"))
+        .unwrap_or(&Value::Null)
+}
+
+/// base64url, the alphabet `momo_generate_invite_code` produces.
+fn is_url_safe_code_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'
+}
+
+/// The absolute origin an invite link points at (ADR-0186 부록 C).
+///
+/// ## Why this is not simply `MOMO_PUBLIC_BASE_URL`
+///
+/// The brief pointed at 「초대 redeem 라우트가 쓰는 공개 사이트 주소 정본」, and
+/// there is no such thing: the redeem route builds no URL (the web client
+/// assembles its own from `resolveServerBaseUrl`, `IssuedInviteCard.tsx:39`),
+/// and #1926's `OORT_SITE_ADDRESS` is a Caddy template env this process never
+/// reads. So this resolves the two sources that **do** exist, in the order that
+/// makes a self-hosted instance work out of the box:
+///
+/// 1. `MOMO_PUBLIC_BASE_URL`, when the operator set it to an absolute https
+///    origin. It is stored on [`T3Settings`] because T3 needed it first, and is
+///    read here **without** consulting `T3Settings::enabled` — the operator's
+///    answer to "what is this deployment's public address" does not become
+///    untrue when oort Cloud is off, which is the default.
+/// 2. otherwise the request's own origin, by the ADR-0167 trust boundary
+///    ([`derive_same_origin_http_base`]) — the same `Host` + `X-Forwarded-Proto`
+///    derivation the realtime advertisement and the Drive capability URL use,
+///    including its Host validation. That is correct for the canonical
+///    deployment, where one Caddy site serves the SPA at `/` and the API at
+///    `/v1` (`infra/rust/Caddyfile`), so the link a decider is handed is the
+///    address they are already looking at.
+///
+/// `None` only when both fail, which needs an HTTP/1.1 request with no usable
+/// `Host` at all. The executor answers that with a refusal rather than a link.
+fn invite_link_origin(settings: &T3Settings, headers: &HeaderMap) -> Option<String> {
+    if let Some(configured) = settings.ready_public_base_url() {
+        return Some(configured);
+    }
+    let forwarded_proto = headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok());
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok());
+    derive_same_origin_http_base(forwarded_proto, host, None).ok()
 }
 
 /// Rejected: end the run and tell the channel, in that order (Swift
@@ -771,6 +1247,7 @@ async fn settle_expired(
     Ok(Decision {
         receipt,
         status: StatusCode::CONFLICT,
+        secret_once: None,
     })
 }
 
@@ -970,6 +1447,8 @@ fn refusal(
     Decision {
         receipt: decision_receipt(approval_id, status, Some(member_id), now, Some(reason)),
         status: http_status,
+        // A refusal mints nothing, so there is nothing to show once.
+        secret_once: None,
     }
 }
 
@@ -1000,6 +1479,165 @@ mod tests {
                 serde_json::from_value(decision.receipt).expect("receipt decodes");
             assert_eq!(receipt.status, status);
             assert_eq!(decision.status, http);
+            assert!(
+                receipt.result.is_none(),
+                "a refusal executed nothing, so it names nothing"
+            );
+        }
+    }
+
+    /// `role_required` joins that family rather than becoming the one 403 on
+    /// this route that answers a different schema.
+    ///
+    /// The spec is explicit — 「Expected failures (403/404/409) return the SAME
+    /// receipt schema (not the generic error envelope)」
+    /// (`docs/api/openapi.yaml`, `decideApproval`) — and both clients decode it
+    /// that way (`packages/momo-core/.../approvalDecision.ts:233` lists 403 in
+    /// `receiptStatuses` and then reads `receipt.status`).
+    #[test]
+    fn role_required_is_a_receipt_like_every_other_expected_failure() {
+        let decision = refusal(
+            Uuid::from_u128(1),
+            Uuid::from_u128(2),
+            ROLE_REQUIRED,
+            "this workspace action must be approved by a workspace admin",
+            StatusCode::FORBIDDEN,
+            Utc::now(),
+        );
+        assert_eq!(decision.status, StatusCode::FORBIDDEN);
+        assert!(decision.secret_once.is_none());
+        let receipt: ApprovalDecisionReceipt =
+            serde_json::from_value(decision.receipt).expect("receipt decodes");
+        assert_eq!(receipt.status, "role_required");
+        assert_eq!(
+            receipt.status,
+            momo_agent::actions::ROLE_REQUIRED,
+            "the word on the wire and the word in the card props are one constant"
+        );
+    }
+
+    fn headers_of(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        for (name, value) in pairs {
+            headers.insert(
+                axum::http::HeaderName::from_bytes(name.as_bytes()).expect("header name"),
+                axum::http::HeaderValue::from_str(value).expect("header value"),
+            );
+        }
+        headers
+    }
+
+    fn settings_with(public_base_url: Option<&str>) -> T3Settings {
+        T3Settings {
+            public_base_url: public_base_url.map(str::to_string),
+            ..T3Settings::default()
+        }
+    }
+
+    /// The configured origin wins, and — the load-bearing half — it is read
+    /// **without** consulting `T3Settings::enabled`.
+    ///
+    /// `MOMO_PUBLIC_BASE_URL` lives on the T3 struct because oort Cloud needed
+    /// it first, but it answers "what is this deployment's public address",
+    /// which does not stop being true when T3 is off. T3 is off by **default**,
+    /// so gating on it would have meant every ordinary deployment silently fell
+    /// through to the header derivation.
+    #[test]
+    fn the_configured_public_base_wins_even_with_t3_disabled() {
+        let settings = settings_with(Some("https://oort.example.com/"));
+        assert!(!settings.enabled, "the default, and the interesting case");
+        assert_eq!(
+            invite_link_origin(&settings, &headers_of(&[("host", "internal:8080")])).as_deref(),
+            Some("https://oort.example.com"),
+            "trailing slash trimmed, and the Host header does not override it"
+        );
+    }
+
+    /// Unset (or unusable) configuration falls through to this request's own
+    /// origin, by the ADR-0167 derivation the realtime advert already uses.
+    #[test]
+    fn an_unconfigured_instance_addresses_itself_from_the_request() {
+        assert_eq!(
+            invite_link_origin(
+                &settings_with(None),
+                &headers_of(&[("host", "team.example"), ("x-forwarded-proto", "https")])
+            )
+            .as_deref(),
+            Some("https://team.example")
+        );
+        // A loopback self-host with no proxy in front of it: http, port kept.
+        assert_eq!(
+            invite_link_origin(
+                &settings_with(None),
+                &headers_of(&[("host", "127.0.0.1:8080")])
+            )
+            .as_deref(),
+            Some("http://127.0.0.1:8080")
+        );
+        // `http://…` is not an https public base, so it is not accepted as
+        // configuration (`T3Settings::ready_public_base_url`) — but the request
+        // still answers for itself rather than leaving the link unbuildable.
+        assert_eq!(
+            invite_link_origin(
+                &settings_with(Some("http://insecure.example")),
+                &headers_of(&[("host", "team.example")])
+            )
+            .as_deref(),
+            Some("http://team.example")
+        );
+    }
+
+    /// No configuration and no usable `Host` ⇒ no origin, and the executor
+    /// refuses rather than minting a code it cannot put in a link.
+    #[test]
+    fn a_request_that_names_no_host_yields_no_origin() {
+        assert_eq!(
+            invite_link_origin(&settings_with(None), &HeaderMap::new()),
+            None
+        );
+        // Host is a trust boundary: control bytes are refused upstream by
+        // `derive_same_origin_http_base`, and an invalid header value cannot
+        // even be constructed here — so the reachable failure is absence.
+        assert_eq!(
+            invite_link_origin(&settings_with(None), &headers_of(&[("host", " ")])),
+            None
+        );
+    }
+
+    /// The executor reads the proposal's arguments from one place, and a
+    /// payload that carries none hands the normaliser something it refuses
+    /// rather than an empty object it would happily fill with defaults.
+    #[test]
+    fn missing_proposal_args_are_null_rather_than_defaults() {
+        assert_eq!(
+            proposed_args(&json!({"action": {"id": "invite.create", "args": {"role": "admin"}}})),
+            &json!({"role": "admin"})
+        );
+        assert_eq!(proposed_args(&json!({})), &Value::Null);
+        assert_eq!(proposed_args(&json!({"action": {"id": "x"}})), &Value::Null);
+        assert!(
+            validated_action_args(
+                action_by_id(momo_agent::actions::ACTION_INVITE_CREATE).expect("v1"),
+                proposed_args(&json!({})),
+                0,
+            )
+            .is_err(),
+            "a null is refused; `{{}}` would have been accepted as all-defaults"
+        );
+    }
+
+    /// The link is built by concatenation, so the code's alphabet is checked
+    /// rather than assumed: `momo_generate_invite_code` (003) is base64url.
+    #[test]
+    fn only_a_base64url_code_may_be_pasted_into_a_link() {
+        for safe in ["Ab3-_x", "aaaaBBBB9999", "-_-_"] {
+            assert!(safe.bytes().all(is_url_safe_code_byte), "{safe}");
+        }
+        for unsafe_code in ["a&b", "a#b", "a b", "a/b", "a=b", "a?b", "a+b"] {
+            assert!(
+                !unsafe_code.bytes().all(is_url_safe_code_byte),
+                "{unsafe_code} would truncate or re-target the link"
+            );
         }
     }
 }
