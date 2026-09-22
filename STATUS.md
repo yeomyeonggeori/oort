@@ -6,6 +6,15 @@
 - 검증(이번 라운드): `cargo fmt --all --check` · `cargo test -p momo-auth --lib` 88 · `cargo test -p momo-server --lib routes::auth_routes` 9. HTTP+PG 경합/rollback 시험과 workspace clippy/test는 다음 라운드.
 - runtime-unverified: refresh 선행·revoke 선행 barrier, 중복 refresh, 중간 실패 rollback.
 
+## 설정 › 기기 목록·해제 UI (#2476 R2, 2026-09-12)
+
+- Track uxui. `feat/2476-devices-settings` onto `origin/track/uxui`. R2: 목록은 `authedRequest`(401 1회 회전, 만료는 `markAuthExpired`). 해제 후 다음 행/QR 만들기 착지 + `role=status` 낭독. 플랫폼은 iOS/iPadOS/Android/macOS/Windows. 빈 상태 한 줄. 「현재 기기」는 메타 문장. 마지막 사용 시각은 아직 기록하지 않습니다.
+- runtime-unverified: 실폰 redeem 후 이 화면 e2e. `current` 행은 폰 세션에서만 실측(웹 비밀번호 세션은 목록에 없음).
+## OpenAPI rust 샘플러에 GET/DELETE /v1/auth/devices 샘플 (#2491, 2026-09-12)
+
+- Track engine. `policy/2491-openapi-sampler-devices` onto `origin/track/engine`. `scripts/openapi_sampled_on_rust.txt`에 `GET /v1/auth/devices`·`DELETE /v1/auth/devices/{id}` 등재. 샘플러가 기기 링크 2회 redeem 픽스처 뒤 200(두 행, 하나 `current: true`, `lastSeenAt` 생략)·400 `cannot_revoke_current`·404·204를 왕복. compose 필수 `NOTIFIER_POSTGRES_PASSWORD`를 게이트 env에 추가(기존 검사 삭제 0).
+- 검증: `scripts/verify_openapi_contract_rust.sh` PASS 91/91 samples · 86 ops(이전 87/84). red: OpenAPI에서 `current` 제거 → shape FAIL undeclared `current`; 400 가드 문자열 `cannot_revoke_session` → guard FAIL, 원복. `bash -n` PASS. `cargo test -p momo-server` 334 lib + 24 unignored green(샘플러는 Rust 시험을 구동하지 않음).
+- runtime-unverified: 없음(호스트 스크립트+로컬 compose 부분집합). 실폰 설정 UI는 uxui A-46.
 ## 두 하네스 공용 파이프라인 (#2501, 2026-09-12)
 
 - Track engine. Astra/Codex 또는 Fable/Claude Code가 같은 AGENTS·planning skill·현재 스냅샷과 Git common-dir의 owner/checkpoint를 사용하고, 구현은 Grok 4.6에 배정한다. 긴 필수 독서·모델별 중복 규칙을 줄이고 기존 기록은 archive에 보존했다.

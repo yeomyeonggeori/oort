@@ -77,6 +77,10 @@ TOKEN_CENT_TOKEN="$(openssl rand -hex 12)"
 TOKEN_CENT_API="$(openssl rand -hex 12)"
 TOKEN_CENT_PROXY="$(openssl rand -hex 12)"
 TOKEN_PLINK="$(openssl rand -hex 12)"
+# #2066 — 웹훅 마스터키 2종. 서로 다르고 JWT 와도 다르다: 같은 값이면
+# doctor 가 이행 창 경고를 내므로 정상 경로 픽스처로 쓸 수 없다.
+TOKEN_WHIN="$(openssl rand -hex 12)"
+TOKEN_WHOUT="$(openssl rand -hex 12)"
 TOKEN_OWNER="$(openssl rand -hex 12)"
 WEB_PORT="$(pick_port 18088)"
 API_PORT="$(pick_port 18080)"
@@ -105,6 +109,8 @@ repl = {
     "__TOKEN_CENT_API__": "${TOKEN_CENT_API}",
     "__TOKEN_CENT_PROXY__": "${TOKEN_CENT_PROXY}",
     "__TOKEN_PLINK__": "${TOKEN_PLINK}",
+    "__TOKEN_WHIN__": "${TOKEN_WHIN}",
+    "__TOKEN_WHOUT__": "${TOKEN_WHOUT}",
     "__TOKEN_OWNER__": "${TOKEN_OWNER}",
     "__TOKEN_WEB_PORT__": "${WEB_PORT}",
     "__TOKEN_API_PORT__": "${API_PORT}",
@@ -126,7 +132,7 @@ assert_no_secret_leak() {
     for token in \
       "$TOKEN_PG" "$TOKEN_APP" "$TOKEN_RELAY" "$TOKEN_WORKER" "$TOKEN_NOTIFIER" \
       "$TOKEN_JWT" "$TOKEN_CENT_TOKEN" "$TOKEN_CENT_API" "$TOKEN_CENT_PROXY" \
-      "$TOKEN_PLINK" "$TOKEN_OWNER"
+      "$TOKEN_PLINK" "$TOKEN_WHIN" "$TOKEN_WHOUT" "$TOKEN_OWNER"
     do
       if grep -F -- "$token" "$file" >/dev/null 2>&1; then
         fail "$label leaked secret token in $file"

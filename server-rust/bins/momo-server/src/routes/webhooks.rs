@@ -182,7 +182,7 @@ pub async fn create(
     };
 
     let body = secret_response(
-        &state.jwt_secret,
+        &state.webhook.ingress_master_key,
         workspace_id,
         installation_dto(created.installation),
         created.key_id,
@@ -264,7 +264,7 @@ pub async fn rotate(
 
     let (row, key_id, mode) = settle_db("webhooks.rotate", outcome)?;
     let body = secret_response(
-        &state.jwt_secret,
+        &state.webhook.ingress_master_key,
         workspace_id,
         installation_dto(row),
         key_id,
@@ -325,14 +325,19 @@ pub async fn revoke(
 
 /// Build the one-time reveal for whichever dialect this installation speaks.
 ///
-/// Native mode derives the secret from `JWT_HMAC` + the stored reference — the
-/// same pair Swift's `WebhookRoutes` uses (`App.swift:265`), so a credential
-/// issued by either server verifies on the other. Slack-compatible mode has no
+/// Native mode derives the secret from `WEBHOOK_INGRESS_MASTER_KEY` + the
+/// stored reference. Swift's `WebhookRoutes` was handed `config.jwtHMAC` for
+/// this (`App.swift:265`) and so was this server until #2066; ADR-0004 증보 4
+/// split the derivation root off so a JWT rotation stops invalidating issued
+/// webhook secrets. Credentials issued before the split keep verifying because
+/// the generator backfills the new key as a copy of the value in use, so
+/// **this must read the same key `receive_native` verifies with** — a divergence
+/// here mints secrets no delivery can ever satisfy. Slack-compatible mode has no
 /// separate secret: the credential IS the URL, which is why `secret` is omitted
 /// and `signatureVersion`/`algorithm` are too.
 #[allow(clippy::too_many_arguments)]
 fn secret_response(
-    jwt_secret: &str,
+    ingress_master_key: &str,
     workspace_id: Uuid,
     installation: WebhookInstallationDto,
     key_id: Uuid,
@@ -349,7 +354,8 @@ fn secret_response(
         WebhookMode::Native => WebhookSecretResponse {
             installation,
             key_id: key_id.to_string(),
-            secret: secret_ref.map(|reference| momo_webhook::native_secret(jwt_secret, reference)),
+            secret: secret_ref
+                .map(|reference| momo_webhook::native_secret(ingress_master_key, reference)),
             url: receive_url(workspace_id, installation_id, None),
             signature_version: Some(SIGNATURE_VERSION.to_string()),
             algorithm: Some(ALGORITHM.to_string()),

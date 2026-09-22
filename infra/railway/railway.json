@@ -9,7 +9,8 @@
   "plugins": ["postgresql"],
   "notes": {
     "composeTable": "Not a docker-compose rendering. scripts/check_compose_env_templates.sh tables infra/rust/*.yml only. This file is a Railway service catalog; env keys come from scripts/self_host_env.sh --platform railway (alias --railway).",
-    "platformStamp": "MOMO_SELF_HOST_PLATFORM=railway — appended outside the generator heredoc so oort_tier() can read T2 from env alone (#2328). Not a heredoc key. Generator stdout is canonical 43 + this stamp (44). Includes NOTIFIER_POSTGRES_PASSWORD and NOTIFIER_DATABASE_URL (#2193).",
+    "platformStamp": "MOMO_SELF_HOST_PLATFORM=railway — appended outside the generator heredoc so oort_tier() can read T2 from env alone (#2328). Not a heredoc key. Generator stdout is canonical 45 + this stamp (46). Includes NOTIFIER_POSTGRES_PASSWORD and NOTIFIER_DATABASE_URL (#2193), and WEBHOOK_INGRESS_MASTER_KEY + OUTBOUND_WEBHOOK_MASTER_KEY (#2066, 43→45 / 44→46).",
+    "webhookSenderKeys": "webhook-sender must be given OUTBOUND_WEBHOOK_MASTER_KEY explicitly, with the same value as api. #2066 deleted the binary's JWT_HMAC fallback, and this file is not a compose rendering — there is no `${VAR:?}` to catch a variable that reached api but not this service. Its DSN resolves WEBHOOK_SENDER_DATABASE_URL → RELAY_DATABASE_URL → DATABASE_URL, so the generator's RELAY_DATABASE_URL is enough when no dedicated credential is set.",
     "livekit": "Excluded (huddle deferred). Do not add a LiveKit service.",
     "tls": "Railway terminates HTTPS on the caddy service. Caddyfile.railway is the public Caddyfile with an internal-HTTP listener only — not auto_https off plus a bare :8080 site.",
     "migrate": "Image command migrate does not provision runtime roles and apply 001..NNN in one process. MOMO_RUNTIME_ROLE_PROVISION=1 applies bootstrap_runtime_roles.sql and exits. A second invocation with MOMO_BOOTSTRAP_RUNTIME_ROLES=0 migrates. api.preDeployCommand sequences both against MIGRATE_DATABASE_URL so the running api keeps DATABASE_URL=momo_app (RLS)."
@@ -45,7 +46,8 @@
     "webhook-sender": {
       "public": false,
       "image": "ghcr.io/yeomyeonggeori/oort@sha256:5481c14eccab99d3cbce51fd8b8710fe6fd671e673652cb3e30422b0e66f7a85",
-      "startCommand": "webhook-sender"
+      "startCommand": "webhook-sender",
+      "variablesFromGenerator": ["OUTBOUND_WEBHOOK_MASTER_KEY", "RELAY_DATABASE_URL"]
     },
     "agent-worker": {
       "public": false,
