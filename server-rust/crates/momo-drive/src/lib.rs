@@ -45,6 +45,7 @@ pub mod local;
 pub mod stub;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -59,6 +60,33 @@ pub use stub::StubDriveArchive;
 /// and the `attachment_size_ck` constraint in migration 017. Three places agree
 /// on the number; this constant is the one the Rust side reads.
 pub const MAX_ATTACHMENT_BYTES: i64 = 100 * 1024 * 1024;
+
+/// How long an in-process upload capability — the stub's and the local
+/// archive's `…/__momo_stub/drive/uploads/{token}` — stays usable after
+/// [`DriveArchive::create_resumable_upload`] minted it (#2615).
+///
+/// The clock runs until the archive sees the PUT's **whole body**: the route
+/// buffers the body before it calls [`DriveArchive::accept_stub_upload`], so
+/// this must cover one complete transfer, not only its first byte.
+///
+/// * Every client creates the session immediately before its PUT (web and
+///   desktop `draftStore.uploadOne`, phone `draftStore.uploadOne`, workspace
+///   avatar), so creation → first byte is one round trip.
+/// * No client cuts a transfer shorter: web XHR sets no timeout, the phone's
+///   upload task runs on `URLSessionConfiguration.default` (60 s idle, 7-day
+///   resource) or OkHttp (60 s idle).
+/// * The edges do: Railway ends a request body that has not finished within
+///   5 minutes (15-minute request ceiling); T1's Caddy leaves `read_body` at
+///   its default, no timeout. One hour is 12× Railway's body window and
+///   carries the 100 MB ceiling at ~233 kbit/s sustained where no edge limit
+///   applies.
+///
+/// Google's resumable sessions live a week, and they can be *resumed*
+/// (`308 Resume Incomplete`). This route has no resume protocol — one PUT
+/// carries the whole body, and every client restarts a failed transfer with a
+/// new session — so a longer lifetime would only widen the window in which an
+/// unused URL that leaked is still worth something.
+pub const UPLOAD_SESSION_TTL: Duration = Duration::from_secs(60 * 60);
 
 /// A create-time declaration of `0` means the client does not know the length
 /// (`sizeKnown=false`). It is a hint, not a promise: complete records the
@@ -207,6 +235,16 @@ pub trait DriveArchive: Send + Sync + std::fmt::Debug {
 
     /// Accept bytes for a stub session. Non-stub backends refuse: an upload that
     /// reached the server at all means the client used the wrong URL.
+    ///
+    /// **A session accepts one upload (#2615).** The first PUT that passes the
+    /// size and mime checks spends it, before a byte is stored — Google's
+    /// resumable session is likewise done once its upload completes. A spent,
+    /// expired ([`UPLOAD_SESSION_TTL`]) or never-issued token is the same
+    /// [`DriveError::FileNotFound`], so the route answers no question about
+    /// which capabilities once existed. A refusal before storage (wrong length,
+    /// wrong mime, over the ceiling) leaves the session usable until it
+    /// expires, like a Google session that has not received its bytes yet. An
+    /// object that has landed is never overwritten through a capability.
     async fn accept_stub_upload(
         &self,
         _token: &str,
