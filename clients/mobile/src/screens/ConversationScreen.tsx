@@ -58,9 +58,13 @@ import {
   turnPlaceholderKey,
 } from '@momo/core/features/agents/workingSignal';
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
+import {LINK_ONCE_LEAD} from '@momo/core/features/approvals/secretOnce';
 import {decisionReceiptCopy} from '../features/inbox/ApprovalDecision';
 import {useInvalidateApprovals} from '../features/inbox/useInbox';
-import type {ApprovalReceipt} from '../features/conversation/approvalGate';
+import {
+  linkOnceFrom,
+  type ApprovalReceipt,
+} from '../features/conversation/approvalGate';
 import {useOnline} from '../features/inbox/useOnline';
 import {usePendingApprovals} from '../features/conversation/usePendingApprovals';
 import {
@@ -101,6 +105,9 @@ import {
 import {useNow} from '../lib/useNow';
 import {useRealtime} from '../realtime/RealtimeProvider';
 import {useSession} from '../session/useSession';
+
+/** 비어 있는 영수증 표. 첫 값이자 채널이 바뀔 때 돌아가는 자리다. */
+const NO_RECEIPTS: ReadonlyMap<string, ApprovalReceipt> = new Map();
 
 // =============================================================================
 // The conversation: read it, receive it, write into it.
@@ -847,20 +854,43 @@ export default function ConversationScreen({
   // 결함(M3)에서 이미 배운 것이다.
   const networkOnline = useOnline();
   const invalidateApprovals = useInvalidateApprovals();
-  const [approvalReceipts, setApprovalReceipts] = useState<
-    ReadonlyMap<string, ApprovalReceipt>
-  >(() => new Map());
+  const [approvalReceipts, setApprovalReceipts] =
+    useState<ReadonlyMap<string, ApprovalReceipt>>(NO_RECEIPTS);
+  // ## 채널이 바뀌면 영수증 표를 비운다 (ADR-0186 D4 · #2513)
+  //
+  // 이 표는 1회 값(`secretOnce`)이 사는 유일한 자리다. 대화를 닫으면 이 화면이
+  // 언마운트되며 함께 사라지지만, 셸은 대화를 **닫지 않고 바꾸기도 한다**
+  // (`onOpenConversation` — 프로필 시트의 DM 열기, ADE 카드의 채널 확대). 그 길에서
+  // 표가 살아남으면 A 에서 받은 링크가 B 를 거쳐 A 로 돌아왔을 때 다시 선다 —
+  // 「재진입하면 사라진다」가 경로에 따라 참이기도 거짓이기도 한 것이다. 멈춤
+  // 영수증(`stopOutcome`)이 같은 이유로 같은 자리에서 비워진다. 처음 마운트에서는
+  // 같은 빈 표라 다시 그리지 않는다.
+  useEffect(() => setApprovalReceipts(NO_RECEIPTS), [channelId]);
   const onApprovalSettled = useCallback(
     (approvalId: string, outcome: DecisionOutcome) => {
       const note = decisionReceiptCopy(outcome);
+      // 1회 값은 **결정 응답에서만** 온다(부록 C). 판정은 `linkOnceFrom` 한
+      // 곳이고, 값은 이 표 — React 상태 — 에만 든다. 어디에도 적지 않는다.
+      const secretOnce = linkOnceFrom(outcome);
       // 문장과 **상태**를 함께 든다. 상태가 없으면 칩은 스냅샷을 그대로 둔다 —
       // 원장이 알아볼 수 없는 상태를 답했을 때 우리가 지어내지 않는다.
       setApprovalReceipts(previous =>
-        new Map(previous).set(approvalId, {note, status: outcome.status}),
+        new Map(previous).set(
+          approvalId,
+          secretOnce === undefined
+            ? {note, status: outcome.status}
+            : {note, status: outcome.status, secretOnce},
+        ),
       );
       // 결과도 말해 준다. 무장은 알리고 결과는 알리지 않으면, 화면을 보지 않는
       // 사람에게 되돌릴 수 없는 행동이 소리 없이 끝난 것이 된다(인박스 2R H3).
-      AccessibilityInfo.announceForAccessibility(note);
+      //
+      // 링크가 섰으면 그 사실을 **같은 한 번**에 말한다. 두 번 나눠 알리면 iOS 는
+      // 앞의 것을 끊고 뒤의 것만 읽는다. 값 자체는 읽지 않는다 — 긴 URL 을 소리로
+      // 흘리는 것은 전달이 아니고, 전달하는 길은 바로 아래 복사 버튼이다.
+      AccessibilityInfo.announceForAccessibility(
+        secretOnce === undefined ? note : `${note} ${LINK_ONCE_LEAD}`,
+      );
       invalidateApprovals();
     },
     [invalidateApprovals],
