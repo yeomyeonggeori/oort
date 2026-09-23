@@ -142,6 +142,8 @@ export default function SidebarScreen({
   openChannelId,
   onOpenConversation,
   onOpenSearch,
+  notificationNotice = null,
+  onDismissNotificationNotice,
 }: {
   openChannelId: string | null;
   onOpenConversation: (channelId: string, title: string) => void;
@@ -156,6 +158,14 @@ export default function SidebarScreen({
    * carrying `?q=`).
    */
   onOpenSearch: (initialQuery?: string) => void;
+  /**
+   * 알림을 눌렀는데 그 대화로 갈 수 없었던 이유, 한 문장 (#2569).
+   *
+   * 이 목록에 서는 이유는 이곳이 그 대화가 **있었어야 할 자리**이기 때문이다.
+   * 셸이 탭을 판정하고 이 화면은 그 문장을 그릴 뿐이다.
+   */
+  notificationNotice?: string | null;
+  onDismissNotificationNotice?: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
@@ -276,6 +286,16 @@ export default function SidebarScreen({
           testID="sidebar-search"
         />
       </View>
+
+      {/* 알림 탭의 영수증 (#2569). 방금 한 행동에 대한 답이라 닫을 수 있고,
+          다른 고지보다 위에 선다 — 사람이 이 화면에 온 이유가 이것이다. */}
+      {notificationNotice ? (
+        <NoticeBlock
+          headline={notificationNotice}
+          onDismiss={onDismissNotificationNotice}
+          testID="notification-tap-notice"
+        />
+      ) : null}
 
       {/* Unread is server truth, so when the projection fails the badges simply
           are not there. Saying so is cheaper than letting someone conclude they

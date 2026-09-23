@@ -112,6 +112,11 @@ jest.mock('expo-notifications', () => ({
   addNotificationResponseReceivedListener: jest.fn(() => ({
     remove: jest.fn(),
   })),
+  // #2569 — the cold-launch half of a notification tap. `null` is what the
+  // native module answers when the app was NOT launched by a tap, which is every
+  // existing suite; `__tests__/pushTap.test.tsx` overrides it per test.
+  getLastNotificationResponse: jest.fn(() => null),
+  clearLastNotificationResponse: jest.fn(),
   // Present so that importing it is an error a test can see, rather than
   // `undefined is not a function` at the call site. Nothing in this client may
   // call it: it mints an Expo-service token and routes our notifications through

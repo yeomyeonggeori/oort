@@ -130,6 +130,17 @@ export interface ResumeInfo {
 export interface UseTimelineResult {
   state: TimelineState;
   status: 'loading' | 'ready' | 'error';
+  /**
+   * The channel whose head page `state` holds, or null while one is being read
+   * (#2569).
+   *
+   * `status` cannot say this on its own. This hook keeps its state across a
+   * channel switch until its effect runs, so on the render where `channelId`
+   * changes `status` is still the PREVIOUS channel's 'ready' and `state` still
+   * holds that channel's rows. A caller that acts once "the timeline is ready" —
+   * a notification landing on one message — would act on the wrong room.
+   */
+  loadedChannelId: string | null;
   resume: ResumeInfo;
   recoveryMarkers: RecoveryMarker[];
   /** Channel-level echoes awaiting their server seq. Never inside `state`. */
@@ -199,6 +210,7 @@ export function useTimeline(
 ): UseTimelineResult {
   const [state, setState] = useState<TimelineState>(emptyTimeline);
   const [status, setStatus] = useState<UseTimelineResult['status']>('loading');
+  const [loadedChannelId, setLoadedChannelId] = useState<string | null>(null);
   const [resume, setResume] = useState<ResumeInfo>({
     lastRecovered: null,
     lastBackfillCount: 0,
@@ -614,6 +626,7 @@ export function useTimeline(
     updatePending(() => []);
     setState(emptyTimeline());
     setStatus('loading');
+    setLoadedChannelId(null);
     setReachedStart(false);
     setRecoveryMarkers([]);
     setResume({lastRecovered: null, lastBackfillCount: 0, resubscribeCount: 0});
@@ -628,6 +641,7 @@ export function useTimeline(
         applyBatch(page.messages);
         setReachedStart(page.nextBefore === undefined);
         setStatus('ready');
+        setLoadedChannelId(channelId);
       })
       .catch(() => {
         if (!cancelled) setStatus('error');
@@ -793,6 +807,7 @@ export function useTimeline(
   return {
     state,
     status,
+    loadedChannelId,
     resume,
     recoveryMarkers,
     pending: channelPending,

@@ -49,6 +49,7 @@ export function ThreadPanel({
   root,
   workspaceId,
   channelId,
+  landOn,
   timeline,
   directory,
   myMemberId,
@@ -61,6 +62,11 @@ export function ThreadPanel({
   /** Production supplies both; isolated legacy render fixtures may omit them. */
   workspaceId?: string;
   channelId?: string;
+  /**
+   * 알림이 이 스레드를 열었을 때 착지할 답글 (#2569). 답글이 **다 온 뒤에** 건다 —
+   * `loadReplies` 가 끝나기 전의 목록에는 루트 하나뿐이라, 그때 쏘면 빗나간다.
+   */
+  landOn?: {messageId: string; token: number};
   timeline: UseTimelineResult;
   directory: Directory;
   myMemberId: string;
@@ -114,6 +120,20 @@ export function ThreadPanel({
   );
 
   const messages = useMemo(() => [liveRoot, ...replies], [liveRoot, replies]);
+
+  // 채널의 점프와 같은 기계다(`Timeline.jumpTarget`). 토큰이 바뀌는 순간 한 번
+  // 돌므로, 답글이 도착해 `ready` 가 되는 그 렌더에서 처음 모습을 드러낸다.
+  const landingMessageId = landOn?.messageId;
+  const landingToken = landOn?.token;
+  const jumpTarget = useMemo(
+    () =>
+      landingMessageId !== undefined &&
+      landingToken !== undefined &&
+      status === 'ready'
+        ? {messageId: landingMessageId, seq: null, token: landingToken}
+        : undefined,
+    [landingMessageId, landingToken, status],
+  );
 
   const {toggleReaction, editBody, removeMessage, togglePin} = timeline;
   const actions = useMemo<MessageRowActions>(
@@ -248,6 +268,7 @@ export function ThreadPanel({
               // 아니라 **그 줄이 여기서 할 말이 없다**는 것이었다.
               showRollup={false}
               onResendPending={clientMsgId => void timeline.resend(clientMsgId)}
+              jumpTarget={jumpTarget}
             />
           }
           composer={

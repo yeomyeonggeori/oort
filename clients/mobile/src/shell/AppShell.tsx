@@ -18,6 +18,7 @@ import {
   type Tab,
 } from '../nav/state';
 import PushProvider from '../push/PushProvider';
+import {useNotificationTapRouting} from '../push/useNotificationTapRouting';
 import {RealtimeProvider} from '../realtime/RealtimeProvider';
 import AgentDetailScreen from '../screens/AgentDetailScreen';
 import AgentsScreen from '../screens/AgentsScreen';
@@ -87,6 +88,8 @@ export default function AppShell({member}: {member: Member}): React.JSX.Element 
 function Shell(): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const [nav, dispatch] = useReducer(navReducer, INITIAL_NAV);
+  // 알림 본문 탭 → 대화 하나 (#2569). 못 가면 그 이유 한 문장을 대화 목록에 둔다.
+  const tapRouting = useNotificationTapRouting(dispatch);
 
   const onOpenConversation = useCallback(
     (
@@ -150,6 +153,8 @@ function Shell(): React.JSX.Element {
             openChannelId={nav.conversation?.channelId ?? null}
             onOpenConversation={onOpenConversation}
             onOpenSearch={onOpenSearch}
+            notificationNotice={tapRouting.notice}
+            onDismissNotificationNotice={tapRouting.dismissNotice}
           />
         </View>
         <View style={nav.tab === 'inbox' ? styles.visible : styles.hidden}>
@@ -274,6 +279,7 @@ function Shell(): React.JSX.Element {
             channelId={nav.conversation.channelId}
             title={nav.conversation.title}
             anchor={nav.conversation.anchor}
+            notification={nav.conversation.notification}
             onBack={onBack}
             // ADE 관제 목록의 카드가 자기 채널로 확대되는 길 (이슈 1137). 셸의
             // 같은 액션이라 뒤로가기는 여전히 한 겹씩 벗겨진다.
