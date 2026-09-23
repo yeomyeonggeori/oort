@@ -342,6 +342,19 @@ pub struct RateLimitConfig {
     pub password_change_per_member_limit: u32,
     /// `RATE_LIMIT_PASSWORD_CHANGE_PER_IP` (default 30). 0 disables.
     pub password_change_per_ip_limit: u32,
+    /// `RATE_LIMIT_DRIVE_UPLOAD_PER_IP` (default 120). 0 disables. The public
+    /// upload PUT (`/__momo_stub/drive/uploads/{token}`, #2628), which answers
+    /// anyone who knows the path shape. Its own key, so upload traffic and the
+    /// join/claim surfaces cannot starve each other.
+    ///
+    /// Why 120 a minute: a message carries at most 20 attachments and every
+    /// client uploads them one PUT at a time, so one person's heaviest burst is
+    /// 20 PUTs plus retries (each retry is a new session and a new PUT). 120
+    /// leaves room for six such bursts from one address — an office NAT — in
+    /// the same minute, while a flood from one address is held to two requests
+    /// a second. Every legitimate PUT also needs a session an authenticated
+    /// member created first.
+    pub drive_upload_per_ip_limit: u32,
 }
 
 impl Default for RateLimitConfig {
@@ -352,6 +365,7 @@ impl Default for RateLimitConfig {
             claim_per_ip_limit: 30,
             password_change_per_member_limit: 10,
             password_change_per_ip_limit: 30,
+            drive_upload_per_ip_limit: 120,
         }
     }
 }
@@ -376,6 +390,9 @@ impl RateLimitConfig {
             password_change_per_ip_limit: env("RATE_LIMIT_PASSWORD_CHANGE_PER_IP")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.password_change_per_ip_limit),
+            drive_upload_per_ip_limit: env("RATE_LIMIT_DRIVE_UPLOAD_PER_IP")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.drive_upload_per_ip_limit),
         }
     }
 }

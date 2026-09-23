@@ -96,6 +96,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
              that route accepts a claim token in the body"
         );
     }
+    if config.rate_limit.drive_upload_per_ip_limit == 0 {
+        tracing::warn!(
+            "RATE_LIMIT_DRIVE_UPLOAD_PER_IP=0 disables the per-IP limiter on the public \
+             upload PUT (/__momo_stub/drive/uploads/…); that route answers anyone"
+        );
+    }
     if config.realtime.cent_token_hmac.is_none() || config.realtime.cent_proxy_secret.is_none() {
         tracing::warn!(
             "CENT_TOKEN_HMAC / CENT_PROXY_SECRET not both set; the realtime rail is \

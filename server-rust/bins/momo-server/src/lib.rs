@@ -46,7 +46,6 @@ pub use realtime_advert::{
 
 use std::sync::Arc;
 
-use axum::extract::DefaultBodyLimit;
 use axum::http::HeaderMap;
 use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
@@ -1356,12 +1355,23 @@ pub fn build_app(state: AppState) -> Router {
     // The stand-in for Google's resumable session URL. Public for the same
     // reason that URL is: the client uploading has no bearer to present to it,
     // and its authorization is the unguessable token in the path.
+    //
+    // #2628: no `DefaultBodyLimit` here, on purpose. The handler takes the raw
+    // body and hands it to the archive unread, and a raw body is not what that
+    // limit applies to; the 100 MB ceiling is enforced by the archive as the
+    // bytes arrive (`momo_drive::ReceivedLength`), after the capability and the
+    // announced length were checked. What does stand in front is the per-IP
+    // gate, the same `route_layer` shape as `/v1/join`: it runs before the
+    // handler, so a 429 costs no body either.
     let app = if accepts_stub_uploads {
         app.route(
             "/__momo_stub/drive/uploads/{token}",
-            put(routes::attachments::stub_upload).layer(DefaultBodyLimit::max(
-                momo_drive::MAX_ATTACHMENT_BYTES as usize,
-            )),
+            put(routes::attachments::stub_upload).route_layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    rate_limit::per_ip_drive_upload,
+                ),
+            ),
         )
     } else {
         app

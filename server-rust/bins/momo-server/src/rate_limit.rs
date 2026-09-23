@@ -332,6 +332,27 @@ pub async fn per_ip_device_link(
     .await
 }
 
+/// Per-IP gate for the public upload PUT (#2628). Mounted with `route_layer`
+/// on `/__momo_stub/drive/uploads/{token}`, so it runs — and a 429 is answered —
+/// before the handler, and so before a byte of the body is read. The surface
+/// logged is the route's shape: the token in the path is a capability and never
+/// reaches a log line.
+pub async fn per_ip_drive_upload(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    gate_per_ip(
+        state,
+        request,
+        next,
+        "ip:drive-upload",
+        |config| config.drive_upload_per_ip_limit,
+        "PUT /__momo_stub/drive/uploads/{token}",
+    )
+    .await
+}
+
 async fn gate_per_ip(
     state: AppState,
     request: Request,
