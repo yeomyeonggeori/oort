@@ -906,6 +906,21 @@ describe('갈 수 없으면 한 문장 — 조용히 무시하지 않는다 (#25
     expect(announce).toHaveBeenCalledWith(jumpNoticeSpeech(expected));
   });
 
+  it('같은 방이 이미 열려 있어도, 첫 페이지에 없는 메시지면 고지를 세우고 말한다', async () => {
+    installFetch();
+    renderShell();
+    await waitForSidebar();
+    await tapWhileRunning(apnsPayload({messageId: PLAIN}));
+    await expectLanded('general', PLAIN, false);
+
+    // 같은 방(#general)을 가리키는 두 번째 알림 — 이번에는 첫 페이지 밖의 메시지다.
+    await tapWhileRunning(apnsPayload({messageId: UNLOADED}));
+
+    const expected = jumpMissedNotice('unknown', 'notification');
+    await expectSentence('jump-missed', expected.headline);
+    expect(announce).toHaveBeenCalledWith(jumpNoticeSpeech(expected));
+  });
+
   it('문장은 닫을 수 있는 영수증이다', async () => {
     installFetch();
     renderShell();
