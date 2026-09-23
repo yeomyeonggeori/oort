@@ -414,6 +414,22 @@ function distanceToEnd(geometry: TimelineGeometry): number | null {
   return geometry.contentHeight - (geometry.offsetY + geometry.viewportHeight);
 }
 
+/** The offset at which the window's last pixel is the content's last pixel. */
+function contentEnd(geometry: TimelineGeometry): number {
+  return Math.max(0, geometry.contentHeight - geometry.viewportHeight);
+}
+
+/**
+ * How long 「최신으로」 keeps the list on the end after arriving, in ms (#1892).
+ * Long enough to outlast the adjustment measured in `holdLanding` (it came one
+ * round after release); short enough that nobody could have meant to scroll in
+ * it — and a finger ends it at once anyway (`onScrollBeginDrag`).
+ */
+const LANDING_HOLD_MS = 600;
+
+/** UIKit's animated `setContentOffset` is ~300ms; wait for it to be down. */
+const GLIDE_SETTLE_MS = 350;
+
 // =============================================================================
 // ## 이 목록이 다시 그려지는 값 (goal RN-P2a / #997)
 //
@@ -753,7 +769,16 @@ function TimelineInner({
   reduceMotionRef.current = reduceMotion;
   const [atBottom, setAtBottom] = useState(true);
   const [baselineSeq, setBaselineSeq] = useState<number | null>(null);
-  const [viewableKeys, setViewableKeys] = useState<readonly string[]>(NO_KEYS);
+  /**
+   * 구분선이 창의 어디에 있는가 — **바뀔 때만** 상태가 된다.
+   *
+   * 보이는 행의 목록 자체를 상태로 두면 스크롤 중 행 하나가 창을 드나들 때마다 이
+   * 목록이 다시 그려진다. 필에 필요한 것은 네 값(위·안·아래·없음) 중 하나뿐이고,
+   * 같은 값이면 React 가 렌더를 건너뛴다. 끝으로 가는 수렴처럼 행이 수십 개씩 창을
+   * 지나가는 순간에 JS 스레드를 비워 두는 것이 이 모양의 이유다.
+   */
+  const [relationState, setRelationState] =
+    useState<DividerViewportRelation | null>(null);
   const [unreadLatched, setUnreadLatched] = useState(false);
   /** 지금 가장 새 확정 메시지. 바닥을 떠나는 순간 기준선이 된다. */
   const newestSeqRef = useRef<number | null>(null);
@@ -819,31 +844,41 @@ function TimelineInner({
    */
   const onViewableItemsChanged = useRef(
     ({viewableItems}: {viewableItems: ViewToken<FoldedTimelineItem>[]}) => {
-      const keys = viewableItems.map(token => token.key);
-      viewableKeysRef.current = keys;
-      setViewableKeys(keys);
+      viewableKeysRef.current = viewableItems.map(token => token.key);
+      setRelationState(relationFromKeys(itemsRef.current, viewableKeysRef.current));
       armLatchIfDividerSeen();
     },
   ).current;
 
+  // 목록이 바뀌어도 자리는 다시 판정한다 — 방을 연 뒤에야 읽음 스냅샷이 도착해
+  // 구분선이 새로 서는 경우, 보이는 행 보고는 새로 오지 않는다.
+  useEffect(() => {
+    if (!jumpPills) return;
+    setRelationState(relationFromKeys(items, viewableKeysRef.current));
+  }, [jumpPills, items]);
+
   // 방이 바뀌면 목록이 먼저 빈다(`useTimeline` 이 새 방에서 처음부터 읽는다). 빈
   // 목록에는 경계도, 쌓인 것도, 본 것도 없다 — 웹이 `epoch` 로 버리는 것을 여기서는
-  // 그 빈 순간이 버린다. 출발점도 다시 잡아야 한다: 새 목록은 오프셋 0 에서 선다.
+  // 그 빈 순간이 버린다. 출발점도 다시 잡아야 한다: 새 목록은 오프셋 0 에서 서므로
+  // **진입 앵커(#1025)를 다시 태운다.** 이 화면은 방을 바꿀 때 언마운트되지 않아서,
+  // 그러지 않으면 두 번째 방부터는 진입 수렴 없이 `scrollToEnd` 한 번만 받았고 —
+  // 앞 방에서 위로 올라가 읽던 사람이면 그 한 번도 없이 새 방의 맨 위에서 열렸다.
   const listEmpty = items.length === 0;
   useEffect(() => {
     if (!listEmpty) return;
     entrySettledRef.current = false;
+    didInitialScrollRef.current = false;
+    noteFollowing(true);
     viewableKeysRef.current = NO_KEYS;
-    setViewableKeys(NO_KEYS);
+    setRelationState(null);
     setUnreadLatched(false);
     setBaselineSeq(null);
-  }, [listEmpty]);
+  }, [listEmpty, noteFollowing]);
 
   const unreadJumpCount = countUnreadJump(unreadCount);
-  const relation = useMemo(
-    () => (jumpPills ? relationFromKeys(items, viewableKeys) : 'absent'),
-    [jumpPills, items, viewableKeys],
-  );
+  const relation: DividerViewportRelation | null = jumpPills
+    ? relationState
+    : 'absent';
   const showJumpUnread =
     jumpPills && shouldShowJumpUnread(relation, unreadJumpCount, unreadLatched);
   const newCount = useMemo(
@@ -905,13 +940,15 @@ function TimelineInner({
         contentSize.height -
         (contentOffset.y + layoutMeasurement.height) -
         shrankBy;
-      const following = distanceFromEnd <= FOLLOW_THRESHOLD_PX;
-      noteFollowing(following);
-      // 끝 근처에서 쉬는 것이 관측됐다 = 출발점에 앉았다 (#1892). 방을 옮긴 뒤의
-      // 새 목록은 진입 수렴 없이 끝으로 미끄러지므로, 그 도착을 여기서 본다.
-      if (following) settleEntry();
+      // 출발점에 앉았는지는 여기서 판정하지 않는다 (#1892). 마운트 직후의 목록은
+      // 첫 배치만 든 짧은 콘텐츠라 오프셋 0 에서도 「끝 근처」로 읽히고, 그 순간
+      // 보이는 맨 위 행들 사이에 구분선이 있으면 사람이 본 적 없는 경계로 래치가
+      // 걸린다(시뮬레이터에서 실제로 그렇게 위 필이 끝내 안 섰다). 앉았다는 것은
+      // 진입 수렴이 끝났거나(`release`) 손가락이 목록을 잡았을 때(`onScrollBeginDrag`)
+      // 뿐이다.
+      noteFollowing(distanceFromEnd <= FOLLOW_THRESHOLD_PX);
     },
-    [noteGeometry, noteFollowing, settleEntry],
+    [noteGeometry, noteFollowing],
   );
 
   // ===========================================================================
@@ -1007,7 +1044,67 @@ function TimelineInner({
       // Off for the correction, back on the moment it ends.
       if (!near) setChasingTail(true);
 
-      const release = () => {
+      /**
+       * One hop toward the end.
+       *
+       * `latest` aims at the content the scroll view actually holds, not at the
+       * list's estimate of where the data ends (#1892, measured below). The
+       * other two keep `scrollToEnd`, for the reason in the round's comment —
+       * this change is scoped to the travel that had to be made to land.
+       */
+      const hop = (animated: boolean) => {
+        const geometry = geometryRef.current;
+        if (
+          mode === 'latest' &&
+          geometry.contentHeight > 0 &&
+          geometry.viewportHeight > 0
+        ) {
+          listRef.current?.scrollToOffset({offset: contentEnd(geometry), animated});
+          return;
+        }
+        listRef.current?.scrollToEnd({animated});
+      };
+
+      /**
+       * 「최신으로」 lands and STAYS landed (#1892).
+       *
+       * Measured on the simulator (iOS 26.5, `measure/` JUMP-PILLS, the offset
+       * trace printed on the capture): the hop landed exactly on the end
+       * (2463 over content 3062 in a 599 window) and 50ms later — after this
+       * loop had already released — the offset moved to 2878, 415pt past the
+       * end, and stayed there: a blank list. From the unread line the same
+       * travel came to rest 1412pt past the end. Nothing in this file scrolled
+       * it; the only thing that changes the offset without being asked is
+       * `maintainVisibleContentPosition` coming back on at release and applying
+       * an anchor recorded before the jump. The pill is a thing a person
+       * presses and then looks at, so for a short while after arriving any
+       * movement off the end that no finger made is put back.
+       */
+      const holdLanding = (firstTickAt: number) => {
+        const until = firstTickAt + LANDING_HOLD_MS;
+        scrollPinUntilRef.current = until;
+        const tick = () => {
+          const geometry = geometryRef.current;
+          const left = distanceToEnd(geometry);
+          if (left !== null && Math.abs(left) > ARRIVED_PX) {
+            listRef.current?.scrollToOffset({
+              offset: contentEnd(geometry),
+              animated: false,
+            });
+          }
+          if (Date.now() >= until) {
+            scrollPinUntilRef.current = 0;
+            return;
+          }
+          convergeTimerRef.current = setTimeout(tick, CONVERGE_ROUND_MS);
+        };
+        convergeTimerRef.current = setTimeout(
+          tick,
+          Math.max(0, firstTickAt - Date.now()),
+        );
+      };
+
+      const release = (arrived: boolean) => {
         convergingRef.current = false;
         setChasingTail(false);
         // Hand the scroll back at once rather than at the deadline: the list is
@@ -1017,36 +1114,51 @@ function TimelineInner({
         // And the list is where it was going to rest, so what is on screen now is
         // what the reader sees (#1892 — the latch waits for exactly this).
         settleEntry();
+        if (arrived && mode === 'latest') holdLanding(Date.now() + CONVERGE_ROUND_MS);
       };
 
       const converge = () => {
         const now = Date.now();
+        const geometry = geometryRef.current;
+        const left = distanceToEnd(geometry);
+        // **Past the end is never a resting place** (#1892). The round below
+        // used to read any `left <= 1` as arrival, including a negative one,
+        // because the scroll view was assumed to clamp. It does not clamp a
+        // programmatic offset here — see `holdLanding` for the measurement —
+        // and "arrived" at 415pt past the content is a blank list. So an
+        // overshoot is brought back to the content the scroll view holds, and
+        // the loop goes on to judge from there.
+        const overshot = left !== null && left < -ARRIVED_PX;
+        if (overshot) {
+          listRef.current?.scrollToOffset({
+            offset: contentEnd(geometry),
+            animated: false,
+          });
+        }
         if (now >= idleStop || now >= hardStop) {
           // Out of road. `following` is NOT forced here — whatever the next
           // scroll event says about where the reader ended up is now the truth,
           // including "still far from the end", which is the honest reading of a
           // correction that could not finish.
-          release();
+          release(false);
           return;
         }
-        const geometry = geometryRef.current;
         if (geometry.offsetY > furthest + PROGRESS_PX) {
           furthest = geometry.offsetY;
           idleStop = Math.min(now + CONVERGE_IDLE_MS, hardStop);
           scrollPinUntilRef.current = idleStop;
         }
-        const left = distanceToEnd(geometry);
-        if (left !== null && left <= ARRIVED_PX) {
-          release();
+        if (!overshot && left !== null && left <= ARRIVED_PX) {
+          release(true);
           return;
         }
         // `scrollToEnd` rather than an offset computed from `geometryRef`: the
         // list's own metrics are live, ours are one scroll event behind, and a
         // stale content height would ask the list to scroll BACKWARDS. Its
         // estimate overshoots the clamped content end (it estimates the DATA
-        // end) and the scroll view clamps — so every round lands exactly as far
-        // as the list will currently go, which is the most a round can do.
-        listRef.current?.scrollToEnd({animated: false});
+        // end) — and when the scroll view does not clamp it, the branch above
+        // brings it back. (`latest` aims at the held content instead; `hop`.)
+        if (!overshot) hop(false);
         convergeTimerRef.current = setTimeout(converge, CONVERGE_ROUND_MS);
       };
 
@@ -1057,9 +1169,13 @@ function TimelineInner({
       // travelling to its own bottom — and this is the round after that one.
       convergeFrameRef.current = requestAnimationFrame(() => {
         convergeFrameRef.current = undefined;
-        listRef.current?.scrollToEnd({animated: glide});
+        hop(glide);
         if (near) {
           settleEntry();
+          // A glide takes UIKit's ~300ms; the hold starts once it is down.
+          if (mode === 'latest') {
+            holdLanding(Date.now() + (glide ? GLIDE_SETTLE_MS : CONVERGE_ROUND_MS));
+          }
           return;
         }
         converge();
@@ -1411,6 +1527,13 @@ function TimelineInner({
     }
     // 이동은 **따라가기를 끈다**. 안 끄면 다음 메시지 한 통에 맨 아래로 되돌아가고,
     // 사람은 자기가 방금 연 자리를 잃는다.
+    //
+    // 걸려 있던 끝 쫓기도 거둔다 (#1892). 방금 보낸 전송의 수렴이나 「최신으로」의
+    // 착지 유지가 아직 돌고 있으면, 사람이 방금 가리킨 줄에서 목록을 도로 바닥으로
+    // 끌어내린다 — 새 요청이 앞선 요청을 이긴다.
+    cancelConvergence();
+    scrollPinUntilRef.current = 0;
+    setChasingTail(false);
     noteFollowing(false);
     // 도착했으므로 「못 찾았습니다」 고지는 물러난다 (design-review H-5).
     onJumpLanded?.();

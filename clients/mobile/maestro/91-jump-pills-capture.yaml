@@ -46,6 +46,13 @@ name: 91-jump-pills-capture
     notVisible:
       id: "jump-latest"
     timeout: 10000
+# 착지의 증거는 좌표가 아니라 **도착한 줄**이다. 떠난 뒤 붙은 두 통 중 마지막
+# 줄이 화면에 서야 이 사진을 찍는다 — 빈 목록 위의 「애니메이션 끝」은 끝이 아니다.
+# 부분 일치(정규식)다. 행은 작성자·시각·본문을 한 접근성 요소로 읽히므로, 본문
+# 한 줄과 **완전 일치**하는 요소는 없다(첫 판이 화면에 그 줄이 있는데도 실패했다).
+- extendedWaitUntil:
+    visible: ".*배포 창 10시 확정으로 공지 올렸습니다.*"
+    timeout: 10000
 - waitForAnimationToEnd:
     timeout: 3000
 - takeScreenshot: jump-pills-after-latest

@@ -185,6 +185,35 @@ function scrollUpIntoHistory() {
   });
 }
 
+/** 목록이 콘텐츠 끝보다 `by`pt 아래에 섰다고 보고한다(창 800 · 콘텐츠 4000). */
+function overshoot(by: number) {
+  fireEvent.scroll(list(), {
+    nativeEvent: {
+      contentOffset: {y: 3200 + by},
+      contentSize: {height: 4000, width: 390},
+      layoutMeasurement: {height: 800, width: 390},
+    },
+  });
+}
+
+/** 목록이 정확히 끝에 섰다. */
+function atTheEnd() {
+  fireEvent.scroll(list(), {
+    nativeEvent: {
+      contentOffset: {y: 3200},
+      contentSize: {height: 4000, width: 390},
+      layoutMeasurement: {height: 800, width: 390},
+    },
+  });
+}
+
+/** 수렴 한 라운드(50ms)를 실제로 흘려보낸다. */
+async function waitRound() {
+  await act(async () => {
+    await new Promise(resolve => setTimeout(resolve, 60));
+  });
+}
+
 function topPill() {
   return screen.queryByTestId('jump-unread');
 }
@@ -360,6 +389,32 @@ describe('위 필 「안읽음으로」', () => {
     expect(topPill()).not.toBeNull();
   });
 
+  it('마운트 직후 짧은 콘텐츠의 스크롤 보고로는 앉지 않는다 — 시뮬레이터에서 위 필이 끝내 안 섰던 길', async () => {
+    // 첫 배치만 든 목록은 오프셋 0 에서도 「끝 근처」로 읽힌다(콘텐츠 700 · 창 800).
+    // 그 스크롤 보고가 출발점을 선언하면, 바로 뒤의 보이는 행 보고(맨 위 행들 사이의
+    // 구분선)가 사람이 본 적 없는 경계로 래치를 건다.
+    mount();
+    fireEvent.scroll(list(), {
+      nativeEvent: {
+        contentOffset: {y: 0},
+        contentSize: {height: 700, width: 390},
+        layoutMeasurement: {height: 800, width: 390},
+      },
+    });
+    reportDividerIn();
+    fireEvent(list(), 'contentSizeChange', 390, 4000);
+    fireEvent.scroll(list(), {
+      nativeEvent: {
+        contentOffset: {y: 3200},
+        contentSize: {height: 4000, width: 390},
+        layoutMeasurement: {height: 800, width: 390},
+      },
+    });
+    reportDividerAbove();
+    await flushFrame();
+    expect(topPill()).not.toBeNull();
+  });
+
   it('짧은 대화에서 앉은 자리에 구분선이 보이면 — 봤다. 위 필은 서지 않는다', async () => {
     mount();
     // 스크롤할 것이 없는 짧은 방: 바닥에 앉은 자리에서 구분선이 창 안이다.
@@ -456,16 +511,73 @@ describe('아래 필 「최신으로」', () => {
     expect(bottomPill()?.props.accessibilityLabel).toBe('새 메시지 2개 보기');
   });
 
-  it('누르면 끝으로 가고, 필은 그 순간 물러난다', async () => {
+  it('누르면 스크롤뷰가 든 콘텐츠의 끝으로 가고, 필은 그 순간 물러난다', async () => {
     const {listRef} = mount();
     await settleAtBottom();
-    scrollUpIntoHistory();
-    const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
+    scrollUpIntoHistory(); // 오프셋 1200 · 콘텐츠 4000 · 창 800
+    const spy = jest.spyOn(listRef.current!, 'scrollToOffset');
 
     fireEvent.press(screen.getByTestId('jump-latest'));
     expect(bottomPill()).toBeNull();
     await flushFrame();
-    expect(spy).toHaveBeenCalled();
+    // 목록의 추정(`scrollToEnd`)이 아니라 콘텐츠의 실제 끝: 4000 − 800.
+    expect(spy).toHaveBeenCalledWith({offset: 3200, animated: false});
+  });
+
+  it('끝을 넘어 선 자리는 쉬는 자리가 아니다 — 스크롤뷰가 든 끝으로 되돌린다', async () => {
+    // 시뮬레이터 실측(iOS 26.5): 착지한 목록이 콘텐츠 끝보다 415pt 아래에 서서
+    // 화면이 비었다. 옛 도착 판정(`left <= 1`)은 음수도 도착으로 읽었다.
+    const {listRef} = mount();
+    await settleAtBottom();
+    scrollUpIntoHistory();
+    const spy = jest.spyOn(listRef.current!, 'scrollToOffset');
+    fireEvent.press(screen.getByTestId('jump-latest'));
+    await flushFrame();
+    spy.mockClear();
+
+    overshoot(415);
+    await waitRound();
+
+    expect(spy).toHaveBeenCalledWith({offset: 3200, animated: false});
+  });
+
+  it('도착한 뒤 손가락 없이 밀려나면 되돌린다 — 착지 유지', async () => {
+    const {listRef} = mount();
+    await settleAtBottom();
+    scrollUpIntoHistory();
+    const spy = jest.spyOn(listRef.current!, 'scrollToOffset');
+    fireEvent.press(screen.getByTestId('jump-latest'));
+    await flushFrame();
+    atTheEnd();
+    await waitRound(); // 도착 — 수렴이 풀리고 착지 유지가 시작된다
+    spy.mockClear();
+
+    overshoot(415); // 풀린 뒤에 온 어긋남. 이 파일의 누구도 스크롤하지 않았다.
+    await waitRound();
+    await waitRound();
+
+    expect(spy).toHaveBeenCalledWith({offset: 3200, animated: false});
+    // 그동안 아래 필은 다시 서지 않는다 — 떨림 없이 제자리다.
+    expect(bottomPill()).toBeNull();
+  });
+
+  it('착지 유지는 손가락에게 진다', async () => {
+    const {listRef} = mount();
+    await settleAtBottom();
+    scrollUpIntoHistory();
+    const spy = jest.spyOn(listRef.current!, 'scrollToOffset');
+    fireEvent.press(screen.getByTestId('jump-latest'));
+    await flushFrame();
+    atTheEnd();
+    await waitRound();
+    spy.mockClear();
+
+    scrollUpIntoHistory(); // 사람이 잡고 올라간다
+    await waitRound();
+    await waitRound();
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(bottomPill()).not.toBeNull();
   });
 
   it('바닥으로 돌아오면 쌓인 수는 0 으로 돌아간다', async () => {

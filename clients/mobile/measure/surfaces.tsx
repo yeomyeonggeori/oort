@@ -1065,7 +1065,15 @@ const JUMP_PILL_LINES = [
   '모바일 빌드는 오늘 저녁에 올라갑니다.',
 ] as const;
 
+/** 고정된 동일성 — 판독 줄이 다시 그려질 때 컴포저까지 다시 그리지 않게. */
+const NOOP = () => {};
+
 const JUMP_PILL_COUNT = 40;
+/** 떠난 뒤 도착하는 두 줄. 다른 줄과 겹치지 않는 본문 — 착지를 글자로 확인한다. */
+const JUMP_PILL_ARRIVALS = [
+  '롤백 리허설 끝났습니다. 이상 없어요.',
+  '배포 창 10시 확정으로 공지 올렸습니다.',
+] as const;
 /** 커서. 구분선은 이 다음 줄 위에 선다. */
 const JUMP_PILL_CURSOR = 12;
 
@@ -1093,6 +1101,8 @@ function JumpPillsStage(): React.JSX.Element {
   const listRef = React.useRef<unknown>(null);
   const metricsRef = React.useRef<TimelineGeometry | null>(null);
   const [messages, setMessages] = React.useState<Message[]>(JUMP_PILL_HISTORY);
+  const [geometryLine, setGeometryLine] = React.useState('기하 측정 중…');
+  const [traceLine, setTraceLine] = React.useState('');
   React.useEffect(() => {
     const move = setTimeout(() => {
       const geometry = metricsRef.current;
@@ -1110,16 +1120,63 @@ function JumpPillsStage(): React.JSX.Element {
       });
     }, 3000);
     // 남의 말 두 통. 내 말이었다면 아래 필은 세지 않는다(웹 M-3 과 같은 판정).
+    // 본문이 다른 줄과 겹치지 않는 것은 일부러다: Maestro 가 「아래 필을 누른 뒤
+    // 이 두 줄이 화면에 있는가」를 **글자로** 기다린다 — 착지의 증거가 좌표가
+    // 아니라 도착한 줄 자체다.
     const arrive = setTimeout(() => {
       setMessages(current => [
         ...current,
-        {...jumpPillMessage(JUMP_PILL_COUNT + 1), authorMemberId: OTHER},
-        {...jumpPillMessage(JUMP_PILL_COUNT + 2), authorMemberId: AGENT},
+        {
+          ...jumpPillMessage(JUMP_PILL_COUNT + 1),
+          authorMemberId: OTHER,
+          body: JUMP_PILL_ARRIVALS[0],
+        },
+        {
+          ...jumpPillMessage(JUMP_PILL_COUNT + 2),
+          authorMemberId: AGENT,
+          body: JUMP_PILL_ARRIVALS[1],
+        },
       ]);
     }, 3800);
+    // 목록이 스스로 보고한 기하를 사진 위에 적는다. 「착지했다」는 그림만으로는
+    // 반쯤만 증명된다 — 끝까지 남은 거리가 숫자로 함께 찍혀야 한다. 둘째 줄은
+    // 오프셋이 바뀐 순간들의 기록이다(이전 변화로부터의 ms → 오프셋/콘텐츠). 한
+    // 장의 사진이 「어디에 섰나」뿐 아니라 「어떻게 거기 갔나」도 말한다.
+    //
+    // 표본은 40ms 마다 **ref 에만** 쌓고, 화면에 옮기는 것은 250ms 마다다. 표본마다
+    // 상태를 바꾸면 이 장이 초당 스물다섯 번 다시 그려지고, 그 JS 부하가 재려는
+    // 스크롤 자체를 늦춘다(첫 판이 그랬다 — 진입 수렴이 끝을 162pt 앞두고 멈췄다).
+    let last: number | null = null;
+    let lastAt = 0;
+    const changes: string[] = [];
+    let line = '';
+    const sample = setInterval(() => {
+      const geometry = metricsRef.current;
+      if (geometry === null) return;
+      const offset = Math.round(geometry.offsetY);
+      const content = Math.round(geometry.contentHeight);
+      const left = content - (offset + Math.round(geometry.viewportHeight));
+      line = `오프셋 ${offset} · 콘텐츠 ${content} · 창 ${Math.round(
+        geometry.viewportHeight,
+      )} · 끝까지 ${left}`;
+      if (offset !== last) {
+        const now = Date.now();
+        changes.push(`+${last === null ? 0 : now - lastAt}→${offset}/${content}`);
+        if (changes.length > 7) changes.shift();
+        last = offset;
+        lastAt = now;
+      }
+    }, 40);
+    const readout = setInterval(() => {
+      setGeometryLine(current => (current === line || line === '' ? current : line));
+      const trace = changes.join(' ');
+      setTraceLine(current => (current === trace ? current : trace));
+    }, 250);
     return () => {
       clearTimeout(move);
       clearTimeout(arrive);
+      clearInterval(sample);
+      clearInterval(readout);
     };
   }, []);
   return (
@@ -1127,7 +1184,13 @@ function JumpPillsStage(): React.JSX.Element {
       <Text style={styles.label}>
         위 = 연 순간의 안읽음(동결 28) · 아래 = 떠난 뒤 붙은 남의 말 (#1892)
       </Text>
-      <ScreenHeader title="배포" onBack={() => {}} titleTestID="measure-title" />
+      <Text style={styles.label} testID="jump-pills-geometry">
+        {geometryLine}
+      </Text>
+      <Text style={styles.label} numberOfLines={2}>
+        {traceLine}
+      </Text>
+      <ScreenHeader title="배포" onBack={NOOP} titleTestID="measure-title" />
       <ConversationLayout
         list={
           <Timeline
@@ -1150,7 +1213,7 @@ function JumpPillsStage(): React.JSX.Element {
             channelLabel="배포"
             directory={DIRECTORY}
             draftKey="measure:jump-pills"
-            onSend={() => {}}
+            onSend={NOOP}
           />
         }
       />
