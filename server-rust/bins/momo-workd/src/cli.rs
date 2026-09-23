@@ -262,6 +262,7 @@ pub async fn run(config_path: PathBuf, dev_key_file: Option<PathBuf>) -> Result<
             working_directory: config.working_directory.clone(),
             acp_start_timeout: Duration::from_millis(config.acp_start_timeout_ms),
             parent_env: std::env::vars().collect(),
+            max_sessions: config.max_sessions,
         },
     );
     let mut controls = ControlLoop::new(api.clone(), sessions, state.owner_member_id);

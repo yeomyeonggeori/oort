@@ -16,6 +16,10 @@
 //!   session, so the ledger is not left with a `running` session nothing runs.
 //! * `input` — the host owner's instruction, queued as the next turn.
 //!
+//! A spawn label or an input that starts with `/` is refused
+//! (`slash_command_refused`, #2602 L-7): it would run an adapter command, not a
+//! prompt.
+//!
 //! **Owner only (ADR-0188 D3, #2602 M-4).** `momo-workd` serves member-scoped
 //! hosts only (`cli::run` checks the registration), and on a member host a
 //! spawn or an input comes from its owner or not at all. The server withholds
@@ -217,6 +221,7 @@ impl ControlLoop {
             .payload_str("text")
             .filter(|text| !text.is_empty())
             .ok_or(Refusal::InvalidControl)?;
+        crate::policy::check_prompt(text)?;
         self.sessions.input(session_id, text.to_string()).await
     }
 }

@@ -14,6 +14,9 @@
 //! | `inv_9_a_refused_resume_ends_its_preallocated_session` | `ControlLoop::end_preallocated_session` (#2602 M-4) |
 //! | `inv_10_run_serves_member_hosts_only` | the scope gate in `cli::run` (#2602 M-4) |
 //! | `inv_11_credentials_never_leave_the_host_even_split_across_flushes` | `projection::redact_credentials` and the relay's hold (`session::ready_len`) (#2602 M-1) |
+//! | `inv_12_a_slash_command_never_reaches_the_agent` | `policy::check_prompt` on the spawn label and on input (#2602 L-7) |
+//! | `inv_13_rows_for_another_host_or_not_dispatched_are_ignored` | the host/status filter in `ControlLoop::poll_once` (#2602 L-6) |
+//! | `inv_14_sessions_and_queued_inputs_are_bounded` | `max_sessions` in `SessionManager::spawn`, `MAX_QUEUED_PROMPTS` in the session task (#2602 L-2) |
 //! | `inv_7_a_lost_spawn_ack_response_still_starts_the_session` | the settled-verdict sweep in `ControlLoop::poll_once` |
 
 use std::collections::{BTreeMap, VecDeque};
@@ -229,6 +232,7 @@ fn harness_with(tools: &[(&str, AdapterKind, &[&str])]) -> Harness {
         working_directory: dir.join("repo"),
         acp_start_timeout: Duration::from_secs(10),
         parent_env,
+        max_sessions: 2,
     };
     let owner = Uuid::new_v4();
     let sessions = SessionManager::new(server.clone(), settings);
@@ -796,6 +800,9 @@ fn inv_10_run_serves_member_hosts_only() {
         .unwrap(),
     )
     .unwrap();
+    // The owner's own file whatever the umask (`config::read_owned_file`).
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o600)).unwrap();
     momo_workd::config::HostState {
         server_url: server.to_string(),
         workspace_id: workspace,
@@ -900,5 +907,123 @@ async fn inv_11_credentials_never_leave_the_host_even_split_across_flushes() {
     assert!(relayed.ends_with("end — done."), "{relayed}");
     for partial in &partials {
         assert!(partial.chars().count() <= momo_workd::projection::MAX_FIELD_CHARS);
+    }
+}
+
+#[tokio::test]
+async fn inv_12_a_slash_command_never_reaches_the_agent() {
+    let mut h = harness(&[("claude", &[])]);
+    // A label that is an adapter command: refused before anything launches.
+    let logout = spawn(&h, "claude", "/logout");
+    h.server.push(logout.clone());
+    h.controls.poll_once().await.unwrap();
+    assert_eq!(
+        ack_for(&h, logout.id),
+        ControlAck::refused("slash_command_refused")
+    );
+    assert!(
+        h.server.creates().is_empty(),
+        "no session for a refused label"
+    );
+    assert!(stub_log(&h).is_empty(), "the agent was never launched");
+
+    // An input that is an adapter command: refused, the session carries on.
+    let request = spawn(&h, "claude", "hello");
+    h.server.push(request.clone());
+    h.controls.poll_once().await.unwrap();
+    let session = ack_for(&h, request.id).session_id.expect("ok spawn ack");
+    wait_for("the first turn to end", || {
+        h.server
+            .statuses(session)
+            .contains(&SessionStatus::Idle { exit_code: 0 })
+    })
+    .await;
+    let compact = control(
+        &h,
+        "input",
+        h.owner,
+        Some(session),
+        json!({"text": "  /compact"}),
+    );
+    h.server.push(compact.clone());
+    h.controls.poll_once().await.unwrap();
+    assert_eq!(
+        ack_for(&h, compact.id),
+        ControlAck::refused("slash_command_refused")
+    );
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let prompts: Vec<String> = stub_log(&h)
+        .iter()
+        .filter(|entry| entry["received"]["method"] == "session/prompt")
+        .filter_map(|entry| {
+            entry["received"]["params"]["prompt"][0]["text"]
+                .as_str()
+                .map(str::to_string)
+        })
+        .collect();
+    assert_eq!(
+        prompts,
+        ["hello"],
+        "only the plain prompt reached the agent"
+    );
+}
+
+#[tokio::test]
+async fn inv_13_rows_for_another_host_or_not_dispatched_are_ignored() {
+    let mut h = harness(&[("claude", &[])]);
+    let mut elsewhere = spawn(&h, "claude", "for another host");
+    elsewhere.target_host_id = Uuid::new_v4();
+    let mut pending = spawn(&h, "claude", "not approved yet");
+    pending.status = "pending_approval".to_string();
+    h.server.push(elsewhere);
+    h.server.push(pending);
+    let handled = h.controls.poll_once().await.unwrap();
+    assert_eq!(handled, 0, "neither row is this host's to act on");
+    assert!(h.server.acks().is_empty(), "nothing was acknowledged");
+    assert!(h.server.creates().is_empty(), "no session was opened");
+    assert!(stub_log(&h).is_empty(), "no agent was launched");
+}
+
+#[tokio::test]
+async fn inv_14_sessions_and_queued_inputs_are_bounded() {
+    // The harness allows two sessions; the agent never finishes a turn, so
+    // every later input waits in the session's queue.
+    let mut h = harness(&[("claude", &["--hang"])]);
+    let mut sessions = Vec::new();
+    for label in ["one", "two"] {
+        let request = spawn(&h, "claude", label);
+        h.server.push(request.clone());
+        h.controls.poll_once().await.unwrap();
+        sessions.push(ack_for(&h, request.id).session_id.expect("ok spawn ack"));
+    }
+    let third = spawn(&h, "claude", "three");
+    h.server.push(third.clone());
+    h.controls.poll_once().await.unwrap();
+    assert_eq!(ack_for(&h, third.id), ControlAck::refused("host_busy"));
+    assert_eq!(h.server.creates().len(), 2, "no third session was opened");
+
+    let session = sessions[0];
+    for index in 0..=momo_workd::session::MAX_QUEUED_PROMPTS {
+        let input = control(
+            &h,
+            "input",
+            h.owner,
+            Some(session),
+            json!({"text": format!("next {index}")}),
+        );
+        h.server.push(input.clone());
+        h.controls.poll_once().await.unwrap();
+        let expected = if index < momo_workd::session::MAX_QUEUED_PROMPTS {
+            ControlAck::ok(Some(session))
+        } else {
+            ControlAck::refused("input_queue_full")
+        };
+        assert_eq!(ack_for(&h, input.id), expected, "input {index}");
+    }
+    for session in sessions {
+        let kill = control(&h, "kill", h.owner, Some(session), json!({}));
+        h.server.push(kill.clone());
+        h.controls.poll_once().await.unwrap();
+        assert_eq!(ack_for(&h, kill.id), ControlAck::ok(Some(session)));
     }
 }

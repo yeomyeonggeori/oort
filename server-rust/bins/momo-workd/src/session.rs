@@ -88,7 +88,13 @@ pub struct SessionSettings {
     pub acp_start_timeout: Duration,
     /// The host's environment at startup; filtered per launch by the policy.
     pub parent_env: Vec<(String, String)>,
+    /// Most sessions (agent processes) this host runs at once (#2602 L-2).
+    pub max_sessions: usize,
 }
+
+/// Most instructions one session keeps queued behind its running turn
+/// (#2602 L-2).
+pub const MAX_QUEUED_PROMPTS: usize = 16;
 
 enum Command {
     Prompt {
@@ -143,6 +149,12 @@ impl SessionManager {
         else {
             return Err(Refusal::InvalidControl);
         };
+        // The label becomes the first prompt: never an adapter command.
+        policy::check_prompt(label)?;
+        self.reap();
+        if self.sessions.len() >= self.settings.max_sessions {
+            return Err(Refusal::HostBusy);
+        }
         // (1) ADR-0188 D6: never a remote shell — checked before the allowlist.
         policy::check_remote_tool(tool)?;
         // (2) The allowlist decides the binary and its arguments.
@@ -424,9 +436,14 @@ impl SessionTask {
                 }
                 Event::Command(Some(Command::Kill { reply })) => Some(End::Killed(reply)),
                 Event::Command(Some(Command::Prompt { text, reply })) => {
-                    self.queue.push_back(text);
-                    let _ = reply.send(Ok(()));
-                    self.start_next_turn().await
+                    if self.queue.len() >= MAX_QUEUED_PROMPTS {
+                        let _ = reply.send(Err(Refusal::InputQueueFull));
+                        None
+                    } else {
+                        self.queue.push_back(text);
+                        let _ = reply.send(Ok(()));
+                        self.start_next_turn().await
+                    }
                 }
                 Event::TurnEnded(result) => {
                     self.in_flight = None;

@@ -9,6 +9,7 @@
 //! | the permission mode is fixed; bypass/auto at session start → no session | [`check_session_modes`] |
 //! | leaving the fixed mode mid-session closes the remote path | [`check_mode_update`] |
 //! | no remote `shell` | [`check_remote_tool`] |
+//! | remote text never runs an adapter slash command | [`check_prompt`] |
 //! | only ACP adapters with a permission bridge | [`AdapterKind`], [`check_adapter_admitted`] |
 //! | every ACP permission request is denied until the R1 bridge lands | [`decide_permission`] |
 //! | project hooks / MCP servers / allow rules are not applied | [`AdapterKind::isolation_env`], [`session_new_params`], [`check_project_config`] |
@@ -109,6 +110,14 @@ pub enum Refusal {
     UnsupportedControl,
     /// The control's payload is not the shape its kind requires.
     InvalidControl,
+    /// Remote text that starts with `/` would run an adapter command, not a
+    /// prompt (#2602 L-7).
+    SlashCommandRefused,
+    /// The host already runs as many sessions as its config allows (#2602 L-2).
+    HostBusy,
+    /// The session already has as many queued instructions as it keeps
+    /// (#2602 L-2).
+    InputQueueFull,
 }
 
 impl Refusal {
@@ -127,6 +136,9 @@ impl Refusal {
             Self::SessionClosed => "session_closed",
             Self::UnsupportedControl => "unsupported_control",
             Self::InvalidControl => "invalid_control",
+            Self::SlashCommandRefused => "slash_command_refused",
+            Self::HostBusy => "host_busy",
+            Self::InputQueueFull => "input_queue_full",
         }
     }
 }
@@ -353,13 +365,20 @@ pub fn session_new_params(adapter: AdapterKind, cwd: &Path) -> Value {
     params
 }
 
-/// Arguments that would relax the fixed permission mode or re-open a
-/// configuration source. Matched case-insensitively as substrings, so
+/// Arguments that would relax the fixed permission mode, re-open a
+/// configuration source, or hand the command line to the raw CLI. Needles are
+/// matched case-insensitively as substrings, so
 /// `--permission-mode=bypassPermissions` and `-c approval_policy="never"` are
-/// both caught.
+/// both caught; the flags below are matched as whole arguments (`--cli`,
+/// `--cli=…`) or, for single-letter ones, with their value glued on (`-snever`).
+///
+/// Still a deny list (#2602 L-5 is only partly closed): an owner-written
+/// argument that relaxes the agent in a way not named here is not caught, and
+/// the session mode check stays the backstop.
 pub fn is_forbidden_launch_argument(argument: &str) -> bool {
     const NEEDLES: &[&str] = &[
         "dangerously",
+        "danger",
         "bypass",
         "yolo",
         "full-auto",
@@ -369,9 +388,8 @@ pub fn is_forbidden_launch_argument(argument: &str) -> bool {
         "approval_policy",
         "approval-policy",
         "ask-for-approval",
-        "sandbox_mode",
-        "sandbox-mode",
-        "--sandbox",
+        "sandbox",
+        "network_access",
         "acceptedits",
         "dontask",
         "allowedtools",
@@ -381,8 +399,19 @@ pub fn is_forbidden_launch_argument(argument: &str) -> bool {
         "settings",
         "hooks",
     ];
+    // The raw CLI behind each adapter (`codex-acp cli …`,
+    // `claude-agent-acp --cli`) and Codex's config/approval/sandbox flags.
+    const FLAGS: &[&str] = &["cli", "--cli", "--config", "--profile"];
+    const SHORT_FLAGS: &[&str] = &["-a", "-c", "-s", "-p"];
     let lowered = argument.to_ascii_lowercase();
     NEEDLES.iter().any(|needle| lowered.contains(needle))
+        || FLAGS.iter().any(|flag| {
+            lowered == *flag
+                || lowered
+                    .strip_prefix(flag)
+                    .is_some_and(|rest| rest.starts_with('='))
+        })
+        || SHORT_FLAGS.iter().any(|flag| lowered.starts_with(flag))
 }
 
 /// `^[a-z0-9][a-z0-9._-]{1,63}$` — the server's work tool key.
@@ -412,6 +441,18 @@ pub fn check_adapter_admitted(adapter: AdapterKind) -> Result<(), Refusal> {
         AdapterKind::Claude => Ok(()),
         AdapterKind::Codex => Err(Refusal::AdapterRefused),
     }
+}
+
+/// Remote text is a prompt, never an adapter command (#2602 L-7). Both
+/// adapters run a first line that starts with `/` as their own verb — Codex's
+/// `/logout` signs the owner out without a permission request, and `/compact`
+/// or `/rename` act on the session — so a spawn label or an input that starts
+/// with `/` is refused rather than escaped: the owner rephrases.
+pub fn check_prompt(text: &str) -> Result<(), Refusal> {
+    if text.trim_start().starts_with('/') {
+        return Err(Refusal::SlashCommandRefused);
+    }
+    Ok(())
 }
 
 /// ADR-0188 D6: a remote spawn of `shell` is refused, before the allowlist is
@@ -795,11 +836,46 @@ mod tests {
             "--sandbox=danger-full-access",
             "--mcp-config=/tmp/x.json",
             "--settings",
+            // #2602 L-5: Codex's short flags and the raw CLI passthroughs.
+            "-s",
+            "danger-full-access",
+            "-a",
+            "-anever",
+            "-c",
+            "sandbox_workspace_write.network_access=true",
+            "--config=profile.toml",
+            "cli",
+            "--cli",
+            "--CLI=/bin/sh",
         ] {
             assert!(is_forbidden_launch_argument(argument), "{argument}");
         }
-        for argument in ["--model", "opus", "--verbose"] {
+        for argument in [
+            "--model",
+            "opus",
+            "--verbose",
+            "--record",
+            "--permission",
+            "--mode",
+            "auto",
+            "clinic",
+            "--client-name",
+        ] {
             assert!(!is_forbidden_launch_argument(argument), "{argument}");
+        }
+    }
+
+    #[test]
+    fn remote_text_never_starts_an_adapter_command() {
+        for text in ["/logout", "  /compact", "\n/rename x", "/"] {
+            assert_eq!(
+                check_prompt(text),
+                Err(Refusal::SlashCommandRefused),
+                "{text:?}"
+            );
+        }
+        for text in ["fix /etc/hosts parsing", "read src/lib.rs", "a/b"] {
+            assert_eq!(check_prompt(text), Ok(()), "{text:?}");
         }
     }
 
