@@ -32,8 +32,8 @@ SELF_HOST 문면 확인.**
 
 발행 workflow는 `refs/heads/main` 만 받는다
 (`.github/workflows/publish-images.yml`). 이미지가 가리킬 커밋이 아직
-`track/engine` 에만 있으면, 성재의 명시 승인 뒤에 `track/engine` → `main`
-승격부터 한다([`docs/TRACKS.md`](TRACKS.md) §3). 워커가 main에 직접 push하지
+`track/engine` 에만 있으면, 성재 승인 범위의 묶음 승격([`docs/TRACKS.md`](TRACKS.md) §3)으로
+`track/engine` → `main` 승격부터 한다. 워커가 main에 직접 push하지
 않는다.
 
 첫 공개 발행의 빌드 커밋은 `main=45a154d2` 다 (패킷 §G1).

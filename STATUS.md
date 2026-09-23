@@ -1,5 +1,7 @@
 # oort 진행 현황
 
+> **2026-09-23 동결.** 이슈마다 STATUS를 고치는 규칙을 폐지했다(ADR-0187 D8, 성재). 검증 증거의 정본은 **PR 본문**, 릴리스 요약은 `CHANGELOG.md`와 GitHub Release, 현재 위치는 `docs/planning/CURRENT_STATE.md`다. 아래는 역사 기록이며 더 고치지 않는다.
+
 ## 오버레이 층 이름표 (#2044 #2075 #1919, R2 2026-09-22)
 
 - Track UXUI. `fix/2044-overlay-layers` onto `origin/track/uxui`. `--layer-content-float`(100) < `--layer-overlay-scrim`(200) < `--layer-overlay-surface`(300) 세 이름을 `tokens.css` 한 곳에 두고 정본 §2.6 D6 / §3.4에 적음. 값은 남은 Tailwind `z-*` 잔량(상한 `z-50`) 위 100 단위 — R1 B-1·B-2가 잡은 1/2/3 밴드는 잔량 아래였다. 잔량 셋(`ArtifactCard`·`WorkspaceRail`·`WorkSessionDetail`)은 소유 상자의 `isolate` 로 루트에서 경쟁하지 않는다. body로 포털되는 컴포저 서식 트레이는 떠 있는 **표면**이라 `--layer-overlay-surface`. 소비자 없는 `--layer-confirm-ephemeral` 은 삭제(ADR-0182 세 형은 전부 표면 안/in-flow).

@@ -26,7 +26,7 @@
 - 이미 승인된 범위의 가역적 로컬 수정·격리 테스트·실패 수리는 재확인 없이 진행한다. 로컬 테스트는 전용 fixture/포트/DB를 사용한다. 기존 사용자 데이터나 다른 작업의 자원을 재사용·정리하지 않는다.
 - 완료는 **수용기준 충족 + 관련 검증 + 독립 검수 + 요청된 전달 단계**다. 첫 구현만 끝났다고 멈추지 않는다. 범위/계약을 바꾸는 판단만 이탈로 기록하고 필요한 결정을 구한다.
 - 해당 HEAD·환경에서 통과한 검증은 증거를 재사용한다. 변경·실패·환경 차이·미검증 위험이 생긴 범위와 병합 결과를 다시 검증한다. 줄어든 문서 때문에 게이트를 생략하지 않는다.
-- 의미 있는 체크포인트에 공용 로컬 기록을 남긴다. 이슈 완료/통합 시 STATUS에 검증·미검증 1–3줄, CURRENT_STATE에 다음 행동, JOURNAL에 짧은 이력을 남긴다. 매 도구 호출마다 모든 문서를 갱신하지 않는다.
+- 의미 있는 체크포인트에 공용 로컬 기록을 남긴다. **검증 증거의 정본은 PR 본문이다.** 묶음 승격 때 CURRENT_STATE에 다음 행동, JOURNAL에 짧은 이력을 남긴다. `STATUS.md`는 2026-09-23에 동결된 역사 기록이라 고치지 않는다(ADR-0187 D8). 매 도구 호출마다 모든 문서를 갱신하지 않는다.
 
 ## 반드시 보존할 계약
 - Rust/Axum `server-rust/`, React/Vite `clients/web/`, Tauri `clients/desktop/`, React Native `clients/mobile/`, 공유 TS `packages/momo-core/`가 현행이다. 삭제된 Swift 서버·클라 트리를 새 작업 대상으로 삼지 않는다. `server/Migrations/`는 계속 사용하는 정본 DDL이다.
@@ -50,4 +50,4 @@
 - PR은 자기 **track/** 대상으로, 통합자만 순차 머지한다. current HEAD의 **PR CI gate·Policy integrity gate**와 local evidence를 확인하고, 머지 직전 **현재 exact canonical base에서 추출한 verifier**로 `scripts/verify_policy_integrity_from_base.sh`를 실행한다. 후보 verifier나 같은 이름의 status만 믿지 않는다.
 - 정책 파일 변경은 지정 owner의 exact-head audit와 승인 라벨 규칙을 유지한다([GITHUB_OPS](docs/GITHUB_OPS.md)). 문서로 게이트를 옮겨도 이 표의 검증 의무는 바뀌지 않는다.
 - **track→main은 성재의 명시 승인 범위에서만**. 이미 기록된 상시 위임은 [TRACKS](docs/TRACKS.md)대로 적용하고 승격+양 트랙 sync를 한 단위로 수행한다. canonical force-push·main 직접 push 금지.
-- M7 PASS 기록 없는 스토어/공증/external TestFlight 배포 금지. release·유료 macOS workflow는 owner 승인 경계를 유지한다. 구현 권한이 배포 권한으로 확대되지 않는다.
+- 배포는 [M7 게이트](docs/cicd/03-store-readiness-gate.md) 등급을 따른다. **내부 등급(M7-I)** PASS 기록과 owner 승인 없이 팀 대상 공증 DMG·업데이터 매니페스트·TestFlight internal을 배포하지 않는다. **스토어 등급(M7-S)** PASS 기록 없이 App Store 제출·external TestFlight·공개 공증 배포를 하지 않는다. release·유료 macOS workflow는 owner 승인 경계를 유지한다. 구현 권한이 배포 권한으로 확대되지 않는다.

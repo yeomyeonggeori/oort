@@ -34,7 +34,7 @@ Codex와 Claude Code는 같은 [AGENTS](../../AGENTS.md), [CURRENT_STATE](CURREN
 |---|---|
 | CURRENT_STATE.md | 최신 위치와 다음 행동만. 통합·범위 변경·세션 종료에 갱신 |
 | JOURNAL.md | 짧은 이력. 기존 항목 불변, 세션 종료에 한 일/열린 것/다음 |
-| STATUS.md | 코드/실행 증거. 이슈 완료·통합 시 |
+| STATUS.md | 2026-09-23 동결된 역사 기록. 새 증거는 PR 본문 |
 | ROADMAP·ADR·Issue/패킷 | 각각 계획·결정·수용기준의 정본 |
 | `<git-common-dir>/oort-coordination/` | 같은 로컬 저장소의 워크트리/하네스가 공유하는 owner·중간 체크포인트. 유의미한 작업 경계에 저장 |
 

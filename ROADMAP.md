@@ -3,9 +3,9 @@
 > **v0의 단위는 마일스톤 번호가 아니라 축이다**(2026-08-03 성재 승인).
 > ADR-0137 D5가 자른 셋 — **관전 · 승인 · 대화** — 이 **폰에서 한 번씩 도는 것**이 v0다. 스토어는 그 뒤.
 >
-> **실행 주체:** 계획=기획 레이어(`docs/planning/README.md`) · 구현=워커(핸드오프 패킷, `AGENTS.md`) · 결정 거버넌스=ADR-0100. 증거는 `STATUS.md`, 세션 스냅샷은 `docs/planning/CURRENT_STATE.md`, 트랙 운영은 `docs/TRACKS.md`.
+> **실행 주체:** 계획=기획 레이어(`docs/planning/README.md`) · 구현=워커(핸드오프 패킷, `AGENTS.md`) · 결정 거버넌스=ADR-0100. 증거는 PR 본문(`STATUS.md`는 2026-09-23 동결), 세션 스냅샷은 `docs/planning/CURRENT_STATE.md`, 트랙 운영은 `docs/TRACKS.md`.
 >
-> **불변식(스토어 게이트):** 🔒 스토어/공증 배포(external TestFlight 포함)는 사용성 검수 게이트 PASS 후에만 진행한다(체크리스트는 아카이브 §4~§5).
+> **불변식(배포 게이트):** 🔒 팀 배포(공증 DMG·업데이터·TestFlight internal)는 **M7-I**, 스토어·external TestFlight·공개 공증 배포는 **M7-S** PASS 기록 뒤에만 진행한다([M7](docs/cicd/03-store-readiness-gate.md), ADR-0187 D5).
 >
 > **아카이브(2026-09-01 경량화 재편, 성재 지시):** 직전 판 전문(2026-08-03 §0 + M0~M8 §1~§7)은 git 히스토리. M0~M8의 **스토어 제출·공증·법무·CI/CD 체크리스트는 폐기가 아니라 보류** — 축 셋이 폰에서 돈 뒤 그 부분만 다시 태운다.
 
@@ -41,8 +41,8 @@
 
 ### 운영 파이프라인
 
-- **트랙**: track/uxui · track/engine에서 랜딩(트랙 내 머지 자율), **main 승격은 성재 명시 승인**(`docs/TRACKS.md`).
-- **실행 레인**: 모델·하네스·병렬 상한은 `docs/planning/PIPELINE.md`의 현재 값을 따른다. UI는 독립 design-review(Blocker 0·High 0) 후 머지한다.
+- **트랙**: track/uxui · track/engine에서 랜딩(트랙 내 머지 자율), **main 승격은 성재 승인 범위의 묶음 단위**(상시 위임, `docs/TRACKS.md` §3).
+- **실행 레인**: 모델·하네스·병렬 판단은 `docs/planning/PIPELINE.md`의 현재 값을 따른다. UI는 독립 design-review(Blocker 0·High 0) 후 머지한다.
 - **푸시**: APNs 종단 증명 완료 · PushRelay 배포 · id-only payload(ADR-0120). 셀프호스트는 Dawn PushRelay 경유(D1-A). Apple 서명 자산 확보 완료, CI 레인만 미구축.
 
 ---
@@ -84,7 +84,7 @@
 | 무엇 | 어디 |
 |---|---|
 | 결정(왜) | `docs/adr/` (ADR-0100 거버넌스) |
-| 증거(됐나) | `STATUS.md` (당월+직전월 · 과거=`docs/planning/archive/STATUS-YYYY-MM.md`) |
+| 증거(됐나) | PR 본문 · `CHANGELOG.md` (`STATUS.md`는 2026-09-23 동결된 역사) |
 | 현재 상태(어디까지) | `docs/planning/CURRENT_STATE.md` (스냅샷 최근 6) |
 | 계획(다음) | 이 문서 + GitHub Issues |
 | 티켓 수용기준 | `BUILD_TICKETS.md` (등급·활성 축·백로그만) |

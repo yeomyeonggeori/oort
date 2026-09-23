@@ -1,53 +1,39 @@
-# oort — 스토어 검수 게이트 (마일스톤, 스토어 제출 선행)
+# oort — 배포 게이트 M7 (내부 등급 M7-I · 스토어 등급 M7-S)
 
-> **이 게이트는 스토어·공증·external TestFlight 공개 배포에 적용한다. PASS 기록 없이 실행하지 않는다.** 서버/셀프호스트 이미지 발행은 [RELEASING](../RELEASING.md)의 별도 owner 승인 절차를 따른다. 이 구분은 이미지 발행 권한을 새로 부여하지 않는다.
-> 아래 Swift/Xcode 체크리스트에는 은퇴한 표면이 남아 있다. 현행 Tauri/RN 검수 기준으로 갱신되기 전까지 이 문서를 PASS로 간주하지 않는다.
-> 목적: "빌드 파일이 실제로 사용 가능"함을 빡세게 판명한 뒤에만 스토어/공증 배포로 진행.
-> 현재 상태(STATUS.md): M1 runtime MOMO-001~004는 Docker Desktop으로 검증됨. WebSocket live subscribe/presence/recovery, APNs, packaged app/IPA, QA 실측은 후속. → 이 게이트는 아직 OPEN(미통과).
->
-> 📐 **객관 통과기준(measurable DoD)** 문서는 LS-3에서 삭제됐다(G3 진입 때 RN 기준으로 재작성). 이 파일(03)은 체크리스트 + PASS 블록 기록처다.
-> 관련: `07-crash-analytics-spec.md`(크래시-free 계측) · `08-e2e-accessibility-performance.md`(e2e/접근성/성능).
+> **2026-09-23 개정(ADR-0187 D5, 성재 결재).** 한 등급이던 게이트를 두 등급으로 나눴다. 은퇴한 Swift/Xcode 체크리스트는 git 히스토리에 있다. 현행 표면은 Tauri 데스크탑(macOS), React Native iOS, Rust 서버(Railway 팀 인스턴스)다.
+> 서버/셀프호스트 이미지 발행은 [RELEASING](../RELEASING.md)의 별도 owner 승인 절차를 따른다. 이 게이트는 이미지 발행 권한을 새로 부여하지 않는다.
+> PASS는 하단 표에 날짜·커밋·빌드 번호·증거 링크·승인자를 적어 기록한다. owner 승인은 성재다.
 
-## G-0. 런타임 e2e (STATUS.md §5 선결)
-- [ ] docker(PG18+Centrifugo v6) 기동 → `make migrate`(001→002) 멱등 적용.
-- [ ] 서버 기동 → `GET /health` green.
-- [ ] 메시지 송신 → `channel_seq` 갭리스 발급 + outbox→relay→Centrifugo publish 왕복.
-- [ ] RLS 테넌트 격리 확인(워크스페이스 간 행 미노출).
-- [ ] AgentWorker↔hermes SSE 실연결: 김인턴 멘션→스트리밍 응답 1회 + reserve/reconcile 비용 기록.
+## M7-I 내부 등급 — 팀 배포
 
-## G-1. macOS .app 사용성
-- [ ] `clients/macOS`에 Xcode App 프로젝트 추가 → `.app` 번들 산출(C1 티켓).
-- [ ] 실기기(개발자 머신) 기동: 로그인 → 채널 입장 → 메시지 송수신 → 에이전트 응답 렌더(D Live Tool-Call) 1회.
-- [ ] 비용 호흡 링(B) / 승인 인박스(C) 실데이터 바인딩 표시.
-- [ ] 크래시 0, 콘솔 에러 0(치명), 권한 prompt(네트워크/알림) 정상.
+**적용 대상:** 팀 인스턴스 사용자에게 주는 서명·공증 DMG와 데스크탑 업데이터 매니페스트, TestFlight internal 빌드.
 
-## G-2. iOS 앱 사용성
-- [ ] `clients/iOS` 디렉터리 + Xcode App 프로젝트 생성(C2 티켓).
-- [ ] 시뮬레이터 + 실기기에서 G-1과 동일 시나리오 통과.
-- [ ] 멀티팀: 고유 초대코드 자가가입 → 워크스페이스 격리 확인(10인=1팀, 3+팀).
+- [ ] **I-1 재현성.** 빌드가 main 커밋이나 태그에서 재현되고, 버전·빌드 번호가 기록된다.
+- [ ] **I-2 팀 인스턴스 왕복.** Railway 팀 인스턴스에 로그인하고, 채널 메시지 송수신과 에이전트 멘션 답장이 한 번씩 돈다.
+- [ ] **I-3 데스크탑.** `spctl -a -vv`가 공증된 앱으로 받아들이고, 업데이터가 직전 빌드에서 이 빌드로 한 번 갱신되며, OS 알림을 한 번 받는다.
+- [ ] **I-4 iOS.** 실기기에 설치되고, 로그인 또는 QR 기기 연결이 되며, 앱이 종료된 상태에서도 실기기 푸시를 한 번 받고, 승인 카드 결정을 한 번 한다.
+- [ ] **I-5 안정성.** 30분 스모크에서 치명 크래시 0, 데이터 손실 0.
+- [ ] **I-6 되돌리기.** 이전 빌드와 이전 업데이터 매니페스트로 돌아가는 절차를 한 번 확인한다.
 
-## G-3. 스토어 메타/정책 사전점검
-- [ ] App Store Connect App 레코드 + Bundle ID 등록.
-- [ ] 개인정보 처리방침 URL, App Privacy(데이터 수집) 라벨 작성.
-- [ ] 스크린샷(필수 기기 사이즈), 아이콘, 설명 초안.
-- [ ] `deliver`/`precheck`로 메타데이터 사전검증 1회(submit_for_review:false).
-- [ ] (법무) 라이선스/약관/수출규제(암호화 사용 신고 ITSAppUsesNonExemptEncryption) 검토 — **법률 자문 아님**.
+PASS와 owner 승인이 기록되면 팀 배포를 진행한다.
 
-## G-4. CI 그린
-- [ ] `ci-build.yml` 통과(swift build/test + Xcode app 빌드).
-- [ ] `fastlane ios beta`(TestFlight) 비대화형 성공 1회(내부 테스터).
+**기록 단위:** M7-I PASS와 owner 승인은 **마이너 계열**(예: 데스크탑 `0.2.x`, iOS `1.0.x`)의 첫 빌드에 한 번 기록한다. 같은 계열의 다음 빌드는 PR 본문에 I-1과 I-5 증거를 적고 배포한다. 계열이 바뀌거나 서버 API·DB 계약이 바뀌면 전 항목을 다시 잰다.
 
-## G-5. 객관 통과기준 (수치 — G3 진입 때 RN 기준으로 재작성)
-> 아래는 요약. 정의/측정법/임계 정본은 LS-3에서 삭제됐다.
-- [ ] **G-A 크래시-free**: 세션 ≥ 99.5% AND 유저 ≥ 99.0% (분모=세션/유저 수 + 윈도우 일수 명기), 신규 P0/P1 crash 0. (Sentry/MetricKit, 05 §2)
-- [ ] **G-B 핵심플로우 e2e**: 8/8 PASS, 치명 결함 0. (XCUITest + 수동 스모크, 05 §3 / 08 §1)
-- [ ] **G-C 접근성**: `performAccessibilityAudit` 치명 위반 0 + VoiceOver 핵심플로우 조작 가능. (05 §4 / 08 §2)
-- [ ] **G-D 성능**: 콜드 런치 p90 < 2s, hang ≈ 0, 메모리/스크롤 안정(실기기·Release). (05 §5 / 08 §3)
-- [ ] **G-F 베타 피드백**: 전수 트리아지, P0/P1 잔여 0. (TestFlight + ASC API, 06 §3)
-- [ ] **G-G 릴리스 준비 체크리스트**: 05 §9 (메타/프라이버시/암호화 신고/버전·빌드번호) 100%.
-- [ ] **G-H Enterprise Trust**: threat model + SBOM/license scan + secret scanning + VDP/pentest plan + security whitepaper draft. (05 §8a, MOMO-140)
+## M7-S 스토어 등급 — App Store · external TestFlight · 공개 DMG
 
-## PASS 판정
-위 **G-0~G-5 및 G-A~G-H 전부 체크 + 증거 첨부** → 게이트 **PASS**. 이 파일 상단에 05 §10 PASS 블록(날짜+커밋해시+빌드#+증거 링크) 기록.
-→ 이후에만 승인된 스토어·공증·external TestFlight 배포를 진행한다. **PASS 기록 없는 해당 배포는 규칙 위반이다.** 서버 이미지 태그/발행 절차는 위 별도 계약을 따른다.
-</content>
+**전제:** 같은 계열 빌드의 M7-I PASS.
+
+- [ ] **S-1 크래시-free.** 내부 사용 기간의 세션 크래시-free 99.5% 이상, 신규 P0/P1 크래시 0. 분모·기간을 적는다([07](07-crash-analytics-spec.md)).
+- [ ] **S-2 핵심 플로우 e2e.** `clients/mobile/maestro` 흐름 전부 PASS, 데스크탑 핵심 플로우 스모크 PASS([08](08-e2e-accessibility-performance.md)).
+- [ ] **S-3 접근성.** VoiceOver로 로그인·대화·승인·알림 흐름을 조작할 수 있고 치명 위반 0.
+- [ ] **S-4 성능.** 실기기 Release 빌드 콜드 런치 p90 2초 미만, 스크롤·메모리 안정.
+- [ ] **S-5 스토어 요건.** 앱 안 계정 삭제(#20), PrivacyInfo.xcprivacy와 암호화 신고(#21), UGC 모더레이션과 EULA(#22), 메타데이터·스크린샷·연령 등급(#30), 빌드 업로드와 심사(#31).
+- [ ] **S-6 베타 피드백.** TestFlight 피드백 전수 트리아지, P0/P1 잔여 0.
+- [ ] **S-7 법무.** 개인정보처리방침·약관·NOTICE 귀속(#35)은 외부 변호사 1회 검토를 거친다. 이 문서는 법률 자문이 아니다.
+
+PASS와 owner 승인이 기록되면 App Store 제출·external TestFlight·공개 공증 배포를 진행한다. **PASS 기록 없는 해당 배포는 규칙 위반이다.**
+
+## PASS 기록
+
+| 등급 | 날짜 | 커밋 | 빌드 | 증거 | 승인 |
+|---|---|---|---|---|---|

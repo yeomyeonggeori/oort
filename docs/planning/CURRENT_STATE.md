@@ -6,7 +6,7 @@
 ## 전체 위치
 | 단계 | 완료 / 현재 | 다음 조건 |
 |---|---|---|
-| 실행 체계 | planner=Fable · worker=Opus 5 서브에이전트(이 배치 한정 예외, PIPELINE 기본 Grok 4.6) · 리뷰어 C=Opus fresh(diff 사본) · design-review fresh | 예외 유지 여부는 성재 |
+| 실행 체계 | planner=Opus 5.5 · worker=Opus 5.5 서브에이전트 · 리뷰어 C=fresh 서브에이전트(diff 사본) · design-review fresh. Grok 은퇴(ADR-0187 D7) | 병렬은 PIPELINE §2 기준으로 판단 |
 | **AX 에이전트 행동 축** | **AX-2·3a·3b·4 main 정본화**(09-22). 초대 1종 propose→승인→실행→secretOnce 서버·카드 전부 랜딩. 서버 실샘플로 카드 픽스처 교체·병합 검증은 미실행 | AX-6 #2512 E2E(초대 1종, `claudedocs/resume-2026-09-22/mission-ax6.md`) → ITO 시나리오 행 |
 | 출시 후보 | v0.1.5 발행, 로컬 B′ PASS. #2066 webhook 마스터키 분리·#2498 기기 refresh/revoke 직렬화·#2476 설정›기기·#2044 오버레이 층 main | E2E-A 발행 이미지 재실측 · Update/Reset · SH-11a Railway(최종) |
 | 검수·베타 | 척추 유지: E2E-A → SH-11a → ITO(초대 1종 포함) → G2 | 각 단계 실제 증거 |
