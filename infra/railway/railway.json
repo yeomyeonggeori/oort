@@ -3,7 +3,7 @@
   "description": "oort team instance on Railway: one GHCR image (api · relay · webhook-sender · agent-worker · notifier · push-relay), Caddy public edge, Centrifugo, Postgres 18 + pgvector as an image service with a volume. LiveKit/huddle excluded.",
   "appImage": {
     "ref": "ghcr.io/yeomyeonggeori/oort",
-    "digest": "sha256:5481c14eccab99d3cbce51fd8b8710fe6fd671e673652cb3e30422b0e66f7a85",
+    "digest": "sha256:e56c43319990319fcfb75b4299ee2bf6d839ab16c7d7b1248648e6f286f4aef2",
     "source": "releases/latest.json images.app"
   },
   "notes": {
@@ -59,7 +59,7 @@
     },
     "api": {
       "public": false,
-      "image": "ghcr.io/yeomyeonggeori/oort@sha256:5481c14eccab99d3cbce51fd8b8710fe6fd671e673652cb3e30422b0e66f7a85",
+      "image": "ghcr.io/yeomyeonggeori/oort@sha256:e56c43319990319fcfb75b4299ee2bf6d839ab16c7d7b1248648e6f286f4aef2",
       "startCommand": "/bin/sh -c 'set -eu; [ \"$(id -u)\" = 0 ] || { echo \"api: RAILWAY_RUN_UID=0 이 필요하다 (드라이브 볼륨은 root 소유로 붙는다)\" >&2; exit 78; }; d=\"${MOMO_DRIVE_LOCAL_DIR:?MOMO_DRIVE_LOCAL_DIR is required}\"; mkdir -p \"$d\"; chown -R momo:momo \"$d\"; exec setpriv --reuid=momo --regid=momo --init-groups env -u MIGRATE_DATABASE_URL -u POSTGRES_PASSWORD -u MOMO_APP_POSTGRES_PASSWORD -u RELAY_POSTGRES_PASSWORD -u WORKER_POSTGRES_PASSWORD -u NOTIFIER_POSTGRES_PASSWORD -u MOMO_INITIAL_OWNER_PASSWORD HOME=/home/momo momo-rust-entrypoint api'",
       "preDeployCommand": [
         "/bin/sh -c 'set -eu; run() { if [ \"$(id -u)\" = 0 ]; then setpriv --reuid=momo --regid=momo --init-groups env HOME=/home/momo \"$@\"; else \"$@\"; fi; }; run env DATABASE_URL=\"$MIGRATE_DATABASE_URL\" MOMO_RUNTIME_ROLE_PROVISION=1 /usr/local/bin/momo-migrate && run env DATABASE_URL=\"$MIGRATE_DATABASE_URL\" MOMO_BOOTSTRAP_RUNTIME_ROLES=0 MOMO_ENV=\"${MOMO_MIGRATE_ENV:-development}\" /usr/local/bin/momo-migrate'"
@@ -107,7 +107,7 @@
     },
     "relay": {
       "public": false,
-      "image": "ghcr.io/yeomyeonggeori/oort@sha256:5481c14eccab99d3cbce51fd8b8710fe6fd671e673652cb3e30422b0e66f7a85",
+      "image": "ghcr.io/yeomyeonggeori/oort@sha256:e56c43319990319fcfb75b4299ee2bf6d839ab16c7d7b1248648e6f286f4aef2",
       "startCommand": "momo-rust-entrypoint relay",
       "variables": {
         "MOMO_ENV": "${{shared.MOMO_ENV}}",
@@ -119,7 +119,7 @@
     },
     "webhook-sender": {
       "public": false,
-      "image": "ghcr.io/yeomyeonggeori/oort@sha256:5481c14eccab99d3cbce51fd8b8710fe6fd671e673652cb3e30422b0e66f7a85",
+      "image": "ghcr.io/yeomyeonggeori/oort@sha256:e56c43319990319fcfb75b4299ee2bf6d839ab16c7d7b1248648e6f286f4aef2",
       "startCommand": "momo-rust-entrypoint webhook-sender",
       "variables": {
         "MOMO_ENV": "${{shared.MOMO_ENV}}",
@@ -131,7 +131,7 @@
     },
     "agent-worker": {
       "public": false,
-      "image": "ghcr.io/yeomyeonggeori/oort@sha256:5481c14eccab99d3cbce51fd8b8710fe6fd671e673652cb3e30422b0e66f7a85",
+      "image": "ghcr.io/yeomyeonggeori/oort@sha256:e56c43319990319fcfb75b4299ee2bf6d839ab16c7d7b1248648e6f286f4aef2",
       "startCommand": "momo-rust-entrypoint agent-worker",
       "variables": {
         "MOMO_ENV": "${{shared.MOMO_ENV}}",
@@ -142,7 +142,7 @@
     },
     "notifier": {
       "public": false,
-      "image": "ghcr.io/yeomyeonggeori/oort@sha256:5481c14eccab99d3cbce51fd8b8710fe6fd671e673652cb3e30422b0e66f7a85",
+      "image": "ghcr.io/yeomyeonggeori/oort@sha256:e56c43319990319fcfb75b4299ee2bf6d839ab16c7d7b1248648e6f286f4aef2",
       "startCommand": "/bin/sh -c 'set -eu; umask 077; [ -d /dev/shm ] && [ -w /dev/shm ] && [ \"$(stat -f -c %T /dev/shm)\" = tmpfs ] || { echo \"notifier: /dev/shm 가 쓰기 가능한 tmpfs 가 아니다 — 서명키를 디스크에 쓰지 않는다\" >&2; exit 78; }; : \"${RELAY_SIGNING_KEY_B64:?RELAY_SIGNING_KEY_B64 is required}\"; k=/dev/shm/relay-signing-key.pem; printf %s \"$RELAY_SIGNING_KEY_B64\" | base64 -d >\"$k\"; [ -s \"$k\" ]; unset RELAY_SIGNING_KEY_B64; export MOMO_PUSH_RELAY_PRIVATE_KEY_PATH=\"$k\"; exec momo-rust-entrypoint notifier'",
       "variables": {
         "MOMO_ENV": "${{shared.MOMO_ENV}}",
@@ -156,7 +156,7 @@
     },
     "push-relay": {
       "public": false,
-      "image": "ghcr.io/yeomyeonggeori/oort@sha256:5481c14eccab99d3cbce51fd8b8710fe6fd671e673652cb3e30422b0e66f7a85",
+      "image": "ghcr.io/yeomyeonggeori/oort@sha256:e56c43319990319fcfb75b4299ee2bf6d839ab16c7d7b1248648e6f286f4aef2",
       "startCommand": "/bin/sh -c 'set -eu; umask 077; [ -d /dev/shm ] && [ -w /dev/shm ] && [ \"$(stat -f -c %T /dev/shm)\" = tmpfs ] || { echo \"push-relay: /dev/shm 가 쓰기 가능한 tmpfs 가 아니다 — APNs 키를 디스크에 쓰지 않는다\" >&2; exit 78; }; : \"${APNS_KEY_P8_B64:?APNS_KEY_P8_B64 is required}\"; k=/dev/shm/apns-key.p8; printf %s \"$APNS_KEY_P8_B64\" | base64 -d >\"$k\"; [ -s \"$k\" ]; unset APNS_KEY_P8_B64; export MOMO_APNS_KEY_PATH=\"$k\"; exec momo-rust-entrypoint push-relay'",
       "port": 28195,
       "privateHostname": "push-relay.railway.internal",

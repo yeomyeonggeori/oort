@@ -11,6 +11,32 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-09-23
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.6>. Tag target: `main=ab58a111`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images.
+
+### Added
+- Agent workspace actions (ADR-0186): the agent proposes, a human approves, the server executes. Agent Port tool `oort_action_propose`, `GET /v1/workspaces/{ws}/actions`, v1 action `invite.create` (admin approval); the one-time invite link travels only in the decision response, with `Cache-Control: no-store`. (#2508, #2509)
+- Web: command registry and ⌘K command groups (#2524); action card catalog v1 — action row, `action_result`, one-time link (#2540).
+- Linked devices list and revoke: `GET/DELETE /v1/auth/devices` (ADR-0180 D5) and web settings › 기기. (#2468, #2490)
+
+### Changed
+- Webhook master keys are split from `JWT_HMAC`: `WEBHOOK_INGRESS_MASTER_KEY` and `OUTBOUND_WEBHOOK_MASTER_KEY`, with an audit on the ingress budget (ADR-0004 amendment 4). **Upgrading:** both keys must be in the env or webhook-sender refuses to boot; run the generator with the current `JWT_HMAC` exported and it copies that value into both keys, so issued webhook and doorbell secrets survive. (#2523)
+- Overlay layer order (scrim, surface, transient confirmation). (#2485)
+
+### Security
+- Refresh and revoke of a linked device are serialized. (#2537)
+- PostgreSQL image: libssh2 `1.11.1-1+deb13u2` (CVE-2026-66032, CVE-2026-66033, CVE-2026-66034, CVE-2026-66035, CVE-2026-58050, CVE-2026-58051); package URLs moved to the permanent archives (snapshot.debian.org, apt-archive.postgresql.org). (#2573)
+
+### Docs
+- Goal A (ADR-0187): deploy gate grades M7-I/M7-S, bundle promotion, `STATUS.md` frozen. (#2566)
+- Phone remote work design ADR-0188 Accepted. (#2575)
+
+### Not in this release
+- ADR-0188 R0 (remote-host defence, #2576) is on `track/engine`, not in this image.
+- runtime-unverified: published-image E2E re-measure, the Railway team instance deploy and real-device APNs (#2205).
+- The phone's empty list on long conversations (#2586) is a client defect outside this release.
+
 ## [0.1.5] - 2026-09-11
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.5>. Tag target: `main=803ae7d5`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`.
