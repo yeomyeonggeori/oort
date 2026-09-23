@@ -106,7 +106,7 @@
 - Railway 실배포 #2205는 팀 인스턴스(D2)가 된다.
 - AX-6 #2512 초대 E2E는 팀 인스턴스 위에서 돌려 인스턴스 검증을 겸한다.
 - AX-7 #2513 폰 승인·결과 카드는 폰 승인 버튼 #1084와 한 파도로 처리한다.
-- App Store 제출 항목(#20–#22·#30·#31)은 목표에 남는다(D5). 순서만 M7-I 팀 배포가 안정된 뒤다.
+- App Store 제출 항목(#20–#22·#30·#31)은 목표에 남는다(D5). 순서는 M7-I 팀 배포가 안정된 뒤다. 이 순서는 A안 원문이고, 스토어 직행 여부는 §4에 열려 있다.
 - #1281 next 채널 재발행은 M7-I PASS 뒤 첫 팀 게시로 한다(next = 팀 채널, §5 2차 결재).
 
 ### D7. 실행 체계 — Grok 은퇴, Opus 5.5 서브에이전트, 병렬 상한 없음
@@ -174,3 +174,5 @@
   - `docs/GITHUB_OPS.md`, `docs/RELEASING.md`, `docs/INDEX.md`, `docs/NEXT_CHANNEL.md`(동결 배너)
   - `ROADMAP.md`(정정 상자)
   - `docs/legal/00`·`01`, `docs/cicd/00`(등급·증거 문구)
+  - `docs/planning/README.md`, `docs/MULTI_SESSION_OPS.md`, `docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`, `docs/runbooks/development-validation.md`, `docs/planning/CURRENT_STATE.md`
+  - 대체 표시: `docs/planning/2026-09-02-launch-program-plan.md`, `2026-09-07-first-goal-two-cases.md`, `2026-09-08-remaining-work-map.md`
