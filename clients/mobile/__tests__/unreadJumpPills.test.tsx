@@ -222,6 +222,17 @@ function overshoot(by: number) {
   });
 }
 
+/** 목록이 오프셋 `y` 에 섰다고 보고한다(창 800 · 콘텐츠 4000). 드래그는 없다. */
+function scrollBy(y: number) {
+  fireEvent.scroll(list(), {
+    nativeEvent: {
+      contentOffset: {y},
+      contentSize: {height: 4000, width: 390},
+      layoutMeasurement: {height: 800, width: 390},
+    },
+  });
+}
+
 /** 목록이 정확히 끝에 섰다. */
 function atTheEnd() {
   fireEvent.scroll(list(), {
@@ -714,6 +725,12 @@ describe('점프가 진입을 가져간다 (R1 M-1)', () => {
 
     // 쫓기가 남아 있으면 방금 데려간 줄에서 목록을 도로 바닥으로 끌어내린다.
     expect(toEnd).not.toHaveBeenCalled();
+
+    // 점프가 목표 줄에 앉는다(끝에서 멀다). 이동이 멈추면 그 자리에서 판정하고 —
+    // 필은 그때까지 그대로다(R2 H-A) — 「최신으로」가 선다.
+    scrollBy(400);
+    await sleep(350);
+    expect(toEnd).not.toHaveBeenCalled();
     expect(bottomPill()).not.toBeNull();
   });
 
@@ -744,7 +761,11 @@ describe('점프가 진입을 가져간다 (R1 M-1)', () => {
     await waitRound();
 
     expect(toEnd).not.toHaveBeenCalled();
-    // 따라가기는 점프가 끈 그대로다 — 「최신으로」가 선다.
+    // 점프가 목표 줄(msg-102)에 앉는다 — 끝에서 멀다. 이동이 멈추면 그 자리에서
+    // 판정하고 「최신으로」가 선다(R2 H-A: 필은 판정이 날 때까지 그대로다).
+    scrollBy(400);
+    await sleep(350);
+    expect(toEnd).not.toHaveBeenCalled();
     expect(bottomPill()).not.toBeNull();
   });
 
@@ -799,7 +820,248 @@ describe('점프가 진입을 가져간다 (R1 M-1)', () => {
     fireEvent(list(), 'contentSizeChange', 390, 2099);
 
     expect(toEnd).not.toHaveBeenCalled();
+    // 필은 판정이 날 때까지 그대로다(R2 H-A). 멈춘 뒤의 판정은 아래 「회복 경로의
+    // clamp 자리는 착지가 아니다」가 회복의 한 바퀴를 끝까지 돌려 단정한다.
+  });
+});
+
+// ---- 이동이 멈추면 다시 판정한다 (design-review 2594 R2 H-A) -----------------------
+//
+// R2 의 점프 핀(800ms)은 「가는 동안의 자리는 사람의 것이 아니다」를 지켰지만, 핀이
+// **놓을 때** 아무도 바닥을 다시 판정하지 않았다. 착지한 목록이 멈추며 보내는 마지막
+// 스크롤 보고(RN `_handleFinishedScrolling`)는 핀 안에 와서 버려지고, 목표가 지금
+// 자리와 같으면(끝 근처 착지·짧은 대화) 보고는 아예 오지 않는다. 그러면 가장 새 메시지
+// 위에 서 있는데 「최신 메시지로 이동」이 서고, 다음 메시지는 따라가지 않는다.
+//
+// 리뷰의 탐침(`probe-2594r2/__tests__/pinExpiry.test.tsx`) 판을 그대로 옮겼다: 메시지
+// 8개, 끝에 앉힘(3200/4000/800), 가장 새 `msg-8` 로 점프.
+
+async function sleep(ms: number) {
+  await act(async () => {
+    await new Promise(resolve => setTimeout(resolve, ms));
+  });
+}
+
+/** 안읽음 없이 끝에 앉은 목록 — 탐침의 판. */
+async function mountAtTheEnd(over: MountProps = {}) {
+  const mounted = mount({channelId: 'ch', lastReadSeq: 8, unreadCount: 0, ...over});
+  await settleAtBottom();
+  expect(bottomPill()).toBeNull();
+  return mounted;
+}
+
+const TO_NEWEST = {messageId: 'msg-8', seq: 8, token: 1};
+
+/** 남의 메시지가 붙는다. 따라가면 목록이 끝으로 간다. */
+function someoneElseTalks() {
+  const toEnd = jest
+    .spyOn(FlatList.prototype, 'scrollToEnd')
+    .mockImplementation(() => {});
+  fireEvent(list(), 'contentSizeChange', 390, 4100);
+  return toEnd;
+}
+
+describe('끝 근처 착지 — 이동이 멈추면 바닥을 다시 판정한다 (R2 H-A)', () => {
+  beforeEach(() => {
+    jest.spyOn(FlatList.prototype, 'scrollToIndex').mockImplementation(() => {});
+  });
+
+  it('탐침 A: 착지 보고가 이동 중에 와도, 이동이 멈추면 따라가기로 돌아온다', async () => {
+    const {rerender} = await mountAtTheEnd();
+    rerender({jumpTarget: TO_NEWEST});
+    await sleep(300);
+    atTheEnd(); // 끝난 프로그램 스크롤이 강제로 한 번 보내는 보고
+    await sleep(700);
+    const toEnd = someoneElseTalks();
+
+    expect(bottomPill()).toBeNull();
+    expect(toEnd).toHaveBeenCalled();
+  });
+
+  it('움직이는 동안 매 프레임 보고가 오고 마지막 보고가 끝 근처면, 멈춘 뒤 따라가기로 돌아온다', async () => {
+    // 실제 활강은 보고를 한 번이 아니라 프레임마다 보낸다 — 이동은 그동안 살아 있고,
+    // 판정은 멈춘 자리(마지막 보고)에서 난다. 탐침 A 의 보고 한 번은 이동이 이미 멈춘
+    // 뒤에 도착해 보통의 판정을 받는다.
+    const {rerender} = await mountAtTheEnd();
+    rerender({jumpTarget: TO_NEWEST});
+    for (const y of [3120, 3140, 3160, 3180, 3195, 3200]) {
+      await sleep(50);
+      scrollBy(y);
+    }
+    await sleep(400);
+    const toEnd = someoneElseTalks();
+
+    expect(bottomPill()).toBeNull();
+    expect(toEnd).toHaveBeenCalled();
+  });
+
+  it('탐침 B(대조): 같은 보고가 늦게 와도 같은 결과다', async () => {
+    const {rerender} = await mountAtTheEnd();
+    rerender({jumpTarget: TO_NEWEST});
+    await sleep(850);
+    atTheEnd();
+    const toEnd = someoneElseTalks();
+
+    expect(bottomPill()).toBeNull();
+    expect(toEnd).toHaveBeenCalled();
+  });
+
+  it('보고가 아예 오지 않는 착지(목표가 지금 자리)도 곧 따라가기로 돌아온다', async () => {
+    // 목표를 clamp 한 자리가 지금 오프셋과 같으면 스크롤뷰는 아무 보고도 하지 않는다
+    // (`RCTScrollViewComponentView.mm` `scrollToOffset:animated:` 의 같은 점 반환).
+    const {rerender} = await mountAtTheEnd();
+    rerender({jumpTarget: TO_NEWEST});
+    await sleep(400);
+    const toEnd = someoneElseTalks();
+
+    expect(bottomPill()).toBeNull();
+    expect(toEnd).toHaveBeenCalled();
+  });
+
+  it('끝 근처에 착지하는 동안 「최신으로」는 한 번도 서지 않는다', async () => {
+    const {rerender} = await mountAtTheEnd();
+    rerender({jumpTarget: TO_NEWEST});
+    expect(bottomPill()).toBeNull();
+    await sleep(100);
+    expect(bottomPill()).toBeNull();
+    atTheEnd();
+    await sleep(500);
+    expect(bottomPill()).toBeNull();
+  });
+
+  it('「안읽음으로」도 끝 근처에 착지하면 따라가기로 돌아온다', async () => {
+    // 안읽음 묶음이 한 화면보다 조금 긴 방: 구분선(seq 7 위)은 창 위쪽 밖이고,
+    // 누르면 끝에서 50pt 앞에 앉는다.
+    mount({channelId: 'ch', lastReadSeq: 6, unreadCount: 2});
+    await settleAtBottom();
+    reportDividerAbove();
+    fireEvent.press(screen.getByTestId('jump-unread'));
+    // 구분선을 창 맨 위로 데려가는 활강 — 프레임마다 보고가 오고, 끝에서 50pt 앞에 앉는다.
+    for (const y of [3190, 3175, 3160, 3150]) {
+      await sleep(60);
+      scrollBy(y);
+    }
+    await sleep(450);
+    const toEnd = someoneElseTalks();
+
+    expect(bottomPill()).toBeNull();
+    expect(toEnd).toHaveBeenCalled();
+  });
+
+  it('VoiceOver 세 손가락 스크롤처럼 드래그 없는 이동으로 끝에 돌아와도 판정이 막히지 않는다', async () => {
+    const {rerender} = await mountAtTheEnd();
+    rerender({jumpTarget: {messageId: 'msg-2', seq: 2, token: 1}});
+    await sleep(100);
+    scrollBy(1200); // 점프가 위로 데려간다
+    await sleep(200);
+    atTheEnd(); // 사람이 세 손가락으로 끝까지 내린다 — `scrollBeginDrag` 는 없다
+    await sleep(400);
+    const toEnd = someoneElseTalks();
+
+    expect(bottomPill()).toBeNull();
+    expect(toEnd).toHaveBeenCalled();
+  });
+
+  it('멀리 착지하면 이동이 멈춘 뒤 「최신으로」가 서고, 따라가지 않는다', async () => {
+    const {rerender} = await mountAtTheEnd();
+    rerender({jumpTarget: {messageId: 'msg-2', seq: 2, token: 1}});
+    await sleep(100);
+    scrollBy(1200);
+    await sleep(500);
+    const toEnd = someoneElseTalks();
+
     expect(bottomPill()).not.toBeNull();
+    expect(toEnd).not.toHaveBeenCalled();
+  });
+
+  it('손가락이 거둔 점프를 회복 경로가 다시 쥐지 않는다 (R2 N-A)', async () => {
+    // 아직 안 잰 행으로 가는 점프는 `onScrollToIndexFailed` 를 탄다. 가상 목록처럼
+    // 실패를 그 자리에서(동기로) 알린다.
+    const toIndex = jest
+      .spyOn(FlatList.prototype, 'scrollToIndex')
+      .mockImplementation(function (this: FlatList<TimelineStreamItem>, params) {
+        this.props.onScrollToIndexFailed?.({
+          index: params.index,
+          averageItemLength: 70,
+          highestMeasuredFrameIndex: 1,
+        });
+      });
+    const toOffset = jest
+      .spyOn(FlatList.prototype, 'scrollToOffset')
+      .mockImplementation(() => {});
+    const {rerender} = await mountAtTheEnd();
+    rerender({jumpTarget: {messageId: 'msg-2', seq: 2, token: 1}});
+    expect(toIndex).toHaveBeenCalledTimes(1);
+    toOffset.mockClear();
+
+    fireEvent(list(), 'scrollBeginDrag'); // 사람이 목록을 잡는다
+    await flushFrame();
+    await sleep(50);
+
+    // 회복의 다음 라운드가 손가락 밑에서 목록을 옮기거나 핀을 다시 걸면 안 된다.
+    expect(toIndex).toHaveBeenCalledTimes(1);
+    expect(toOffset).not.toHaveBeenCalled();
+    // 손가락이 끝으로 데려오면 그 자리는 곧바로 바닥이다.
+    atTheEnd();
+    expect(bottomPill()).toBeNull();
+  });
+
+  it('회복 경로의 clamp 자리는 착지가 아니다 — 멈춘 뒤 목표 자리로 판정한다', async () => {
+    // R1 M-1 실측: 새 목록에서 아직 안 잰 줄로 가는 점프는 목록을 잰 데까지의 끝에
+    // 세우고(788/1399), 그 보고가 따라가기를 켜 착지가 꼬리로 끌려갔다.
+    let calls = 0;
+    jest
+      .spyOn(FlatList.prototype, 'scrollToIndex')
+      .mockImplementation(function (this: FlatList<TimelineStreamItem>, params) {
+        calls += 1;
+        if (calls > 1) return;
+        this.props.onScrollToIndexFailed?.({
+          index: params.index,
+          averageItemLength: 70,
+          highestMeasuredFrameIndex: 3,
+        });
+      });
+    jest.spyOn(FlatList.prototype, 'scrollToOffset').mockImplementation(() => {});
+    const toEnd = jest
+      .spyOn(FlatList.prototype, 'scrollToEnd')
+      .mockImplementation(() => {});
+    mount({channelId: 'ch', jumpTarget: {messageId: 'msg-2', seq: 2, token: 1}});
+
+    fireEvent.scroll(list(), {
+      nativeEvent: {
+        contentOffset: {y: 788},
+        contentSize: {height: 1399, width: 390},
+        layoutMeasurement: {height: 599, width: 390},
+      },
+    });
+    fireEvent(list(), 'contentSizeChange', 390, 2099);
+    await flushFrame(); // 회복의 다음 라운드 — 이번에는 목표에 앉는다
+    expect(calls).toBe(2);
+    fireEvent.scroll(list(), {
+      nativeEvent: {
+        contentOffset: {y: 100},
+        contentSize: {height: 2099, width: 390},
+        layoutMeasurement: {height: 599, width: 390},
+      },
+    });
+    fireEvent(list(), 'contentSizeChange', 390, 3008);
+    await sleep(400);
+    fireEvent(list(), 'contentSizeChange', 390, 3100);
+
+    expect(toEnd).not.toHaveBeenCalled();
+    expect(bottomPill()).not.toBeNull();
+  });
+
+  it('점프로 방에 들어온 방문은 착지에서 앉는다 — 드래그 없이도 구분선을 보면 래치가 걸린다 (R2 N-B)', async () => {
+    // 착지 점프가 진입을 가져간 방문은 진입 수렴이 없으므로 「앉음」이 오지 않았다.
+    // VoiceOver 사용자는 드래그를 하지 않으니, 구분선을 보고도 래치가 안 걸려 위 필이
+    // 다시 섰다.
+    mount({channelId: 'ch', jumpTarget: {messageId: 'msg-5', seq: 5, token: 1}});
+    reportDividerIn(); // 착지한 자리에서 구분선이 보인다
+    await sleep(400);
+    reportDividerAbove(); // 새 메시지가 그것을 위로 밀어낸다
+
+    expect(topPill()).toBeNull();
   });
 });
 
@@ -893,6 +1155,21 @@ describe('아래 필 「최신으로」', () => {
     atTheEnd();
     await waitRound(); // 도착 — 수렴이 풀린다
 
+    await waitFor(() => expect(focus).toHaveBeenCalledTimes(1), {timeout: 2000});
+    expect(focus).toHaveBeenCalledWith(expect.stringContaining('8번째 메시지'));
+  });
+
+  it('끝에 닿지 못한 「최신으로」도 초점을 가장 아래 메시지로 옮긴다 (R2 N-C)', async () => {
+    // 수렴이 끝에 못 닿고 풀려도(`release(false)`) 누른 필은 이미 사라졌다 —
+    // VoiceOver 초점이 갈 곳이 있어야 한다.
+    const focus = jest
+      .spyOn(AccessibilityInfo, 'setAccessibilityFocus')
+      .mockImplementation(() => {});
+    mount();
+    await settleAtBottom();
+    scrollUpIntoHistory();
+    fireEvent.press(screen.getByTestId('jump-latest'));
+    // 도착 보고가 없다 — 수렴은 진전 없이 400ms 뒤 손을 놓는다.
     await waitFor(() => expect(focus).toHaveBeenCalledTimes(1), {timeout: 2000});
     expect(focus).toHaveBeenCalledWith(expect.stringContaining('8번째 메시지'));
   });

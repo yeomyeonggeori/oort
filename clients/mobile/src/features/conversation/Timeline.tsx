@@ -487,21 +487,38 @@ const LANDING_HOLD_MS = 600;
 const GLIDE_SETTLE_MS = 350;
 
 /**
- * How long a jump owns the scroll position, in ms, from the request and again
- * from every failed `scrollToIndex` (#1892 R1 M-1, measured).
+ * A jump's travel is over once the list has not moved for this long, in ms
+ * (#1892 R2 H-A). The travel itself — why a jump owns the scroll while it moves,
+ * and why it must look again when it stops — is the note above
+ * `beginJumpTravel`.
  *
- * A jump into rows the list has not measured yet — every landing in a room that
- * has just opened — goes through `onScrollToIndexFailed`, which parks the list at
- * `averageItemLength × index` and asks again a frame later. Measured on the
- * simulator (`JUMP-PILLS-LAND`): that parking offset lies past the few rows the
- * fresh list has laid out, the scroll view clamps it to their end, and `onScroll`
- * read the clamped end as "the reader is at the bottom". `following` came on, the
- * next content growth glided the list to the tail, and the landing never showed.
- * The travel is this component's, not the reader's — the same reason a send pins
- * the scroll (`scrollPinUntilRef`). Long enough to cover the failed rounds and the
- * ~300ms glide onto the row; a finger ends it at once (`onScrollBeginDrag`).
+ * Every scroll event of a moving list is one frame apart (`scrollEventThrottle`
+ * 16), and the first one follows the request by a frame or two. 250ms is several
+ * of those gaps wide, so a list that is still moving is never taken for one
+ * that stopped; a list that never moved at all — the landing whose target is
+ * where it already stands, which sends no event — is judged 250ms after the
+ * request.
  */
-const JUMP_PIN_MS = 800;
+const JUMP_SETTLE_MS = 250;
+
+/**
+ * The backstop, in ms: a travel that never goes still (a recovery that keeps
+ * failing) ends here and is judged where it stands. Nothing should reach it.
+ */
+const JUMP_TRAVEL_MAX_MS = 1500;
+
+/** A jump on its way to its row (#1892 R1 M-1 · R2 H-A). See `beginJumpTravel`. */
+interface JumpTravel {
+  startedAt: number;
+  /** When the list last moved — the request itself, until it first does. */
+  lastMotionAt: number;
+  /** A failed `scrollToIndex` is being asked again a frame from now. */
+  recovering: boolean;
+  /** The newest seq when the jump left — where the 「최신으로」 count starts. */
+  leftAtSeq: number | null;
+  /** What the landing is for, once it is over (the unread pill's focus move). */
+  onLanded?: () => void;
+}
 
 // =============================================================================
 // ## 이 목록이 다시 그려지는 값 (goal RN-P2a / #997)
@@ -766,6 +783,12 @@ function TimelineInner({
    * the reader choosing to read history — see the header note.
    */
   const scrollPinUntilRef = useRef(0);
+  /**
+   * A jump travelling to its row, or `null` (#1892 R1 M-1 · R2 H-A). While one
+   * is, a scroll event is its motion rather than the reader's choice — see
+   * `beginJumpTravel`.
+   */
+  const jumpTravelRef = useRef<JumpTravel | null>(null);
   /** Is that pin being served by instant corrections rather than one glide? */
   const convergingRef = useRef(false);
   /**
@@ -859,6 +882,12 @@ function TimelineInner({
   // — 값이 바뀌어도 그릴 것이 없고, 비동기 첫 답이 렌더를 부르지 않는다(R1 N-1).
   const reduceMotionRef = useReduceMotionRef();
   const [atBottom, setAtBottom] = useState(true);
+  /**
+   * The pill's half of the following verdict, read without a render — see
+   * `noteFollowing`, and `beginJumpTravel` for the one moment the two halves may
+   * differ.
+   */
+  const atBottomRef = useRef(true);
   const [baselineSeq, setBaselineSeq] = useState<number | null>(null);
   /**
    * 구분선이 창의 어디에 있는가 — **바뀔 때만** 상태가 된다.
@@ -922,6 +951,7 @@ function TimelineInner({
     setUnreadLatched(false);
     setLandedId(null);
     followingRef.current = true;
+    atBottomRef.current = true;
     // 진입 앵커(#1025)를 다시 태운다. 새 목록은 앞 방의 오프셋에 서 있거나(자리
     // 표시가 목록을 붙잡은 경우) 오프셋 0 에서 다시 선다. 어느 쪽이든 새 방의 바닥이
     // 아니다.
@@ -992,19 +1022,30 @@ function TimelineInner({
   }, [armLatchIfDividerSeen]);
 
   /**
-   * `followingRef` 에 쓰는 유일한 문.
+   * 따라가기 판정을 내리는 문 — `followingRef` 와 필(`atBottom`)을 한 번에 맞춘다.
    *
-   * 판정이 바뀔 때만 상태를 건드린다 — 스크롤 이벤트는 초당 60번 오고, 그때마다
+   * 필이 바뀔 때만 상태를 건드린다 — 스크롤 이벤트는 초당 60번 오고, 그때마다
    * 렌더를 부르면 목록 옆에서 도는 렌더가 곧 goal RN-P2a 의 버벅임이다.
+   *
+   * 판정을 내리지 않고 따라가기만 **붙드는** 자리가 하나 있다 — 점프가 가는 동안
+   * (`beginJumpTravel`). 그때 필은 판정이 날 때까지 그대로 두고, 판정은 이 문으로
+   * 온다. 비교를 `followingRef` 가 아니라 필 쪽(`atBottomRef`)과 하는 이유가 그것이다:
+   * 붙들린 `false` 와 같은 값이라고 필을 건너뛰면 착지 판정이 필에 닿지 못한다.
    */
-  const noteFollowing = useCallback((next: boolean) => {
-    const was = followingRef.current;
-    followingRef.current = next;
-    if (was === next) return;
-    setAtBottom(next);
-    // 떠나는 순간의 가장 새 seq 가 기준선이다. 바닥에 닿으면 아래에 쌓인 것은 0이다.
-    setBaselineSeq(next ? null : newestSeqRef.current);
-  }, []);
+  const noteFollowing = useCallback(
+    (next: boolean, leftAtSeq?: number | null) => {
+      followingRef.current = next;
+      if (atBottomRef.current === next) return;
+      atBottomRef.current = next;
+      setAtBottom(next);
+      // 떠나는 순간의 가장 새 seq 가 기준선이다. 바닥에 닿으면 아래에 쌓인 것은 0이다.
+      // 점프는 떠난 순간을 들고 온다 — 판정이 착지 뒤로 미뤄지기 때문이다.
+      setBaselineSeq(
+        next ? null : leftAtSeq !== undefined ? leftAtSeq : newestSeqRef.current,
+      );
+    },
+    [],
+  );
 
   /**
    * `onViewableItemsChanged` 는 **처음 받은 함수 하나**여야 한다 — `FlatList` 는
@@ -1067,6 +1108,14 @@ function TimelineInner({
         contentHeight: contentSize.height,
         viewportHeight: layoutMeasurement.height,
       });
+      // A jump is still on its way (#1892 R2 H-A): this event is its motion, and
+      // the verdict waits for the list to stop (`beginJumpTravel`). The geometry
+      // above is kept either way — it is exactly what that verdict reads.
+      const travel = jumpTravelRef.current;
+      if (travel !== null) {
+        travel.lastMotionAt = Date.now();
+        return;
+      }
       // A scroll this component STARTED is not the reader going anywhere. Every
       // intermediate position of a travel to the end is far from the end, so
       // answering them would revoke `following` mid-flight and cancel the very
@@ -1172,6 +1221,116 @@ function TimelineInner({
     [cancelFocus],
   );
 
+  /** 지금 창에 보이는 가장 아래 메시지 행 — 보고가 없으면 `null`. */
+  const lastVisibleMessageId = useCallback((): string | null => {
+    const visible = new Set(viewableKeysRef.current);
+    const all = itemsRef.current;
+    for (let index = all.length - 1; index >= 0; index -= 1) {
+      const item = all[index];
+      if (item.kind === 'message' && visible.has(item.key)) return item.message.id;
+    }
+    return null;
+  }, []);
+
+  // ---- 점프의 이동 — 멈추면 끝나고, 끝나면 다시 판정한다 (#1892 R1 M-1 · R2 H-A) ----
+  //
+  // 인용·고정·검색·세션 앵커·알림 착지, 그리고 「안읽음으로」는 전부 `scrollToIndex`
+  // 로 한 줄에 간다. 가는 동안의 스크롤 보고는 **이 목록이 움직인 것**이지 사람이 고른
+  // 자리가 아니다. R1 이 시뮬레이터에서 잰 대로, 아직 안 잰 줄로 가는 점프는
+  // `onScrollToIndexFailed` 가 목록을 대략의 자리에 세우는데 새 목록에서는 그 자리가
+  // 잰 데까지의 끝(788/1399)으로 clamp 되고, 그 보고를 「바닥에 있다」로 읽으면
+  // 따라가기가 켜져 착지 대신 꼬리로 끌려갔다. 그래서 점프는 가는 동안 판정을 쥔다.
+  //
+  // R2 는 그것을 시계(800ms)로 쥐었고, **놓을 때 다시 보지 않았다**(design-review 2594
+  // R2 H-A). 끝난 프로그램 스크롤이 보내는 마지막 보고(RN `_handleFinishedScrolling`)는
+  // 그 800ms 안에 와서 버려졌고, 목표가 지금 자리로 clamp 되면(끝 근처 착지·짧은
+  // 대화) 보고는 아예 오지 않는다(`scrollToOffset:animated:` 의 같은 점 반환). 가장 새
+  // 메시지 위에 서서 「최신 메시지로 이동」을 보았고, 다음 메시지는 따라가지 않았다.
+  // base 는 마지막 보고로 다시 판정했으므로, 오프셋이 움직인 절반은 R2 가 만든 회귀다.
+  //
+  // 이제 쥐는 것은 **이동과 함께 끝난다**:
+  //
+  //   - 가는 동안의 보고는 움직임으로만 센다(`onScroll`). 기하는 그대로 적는다.
+  //   - `JUMP_SETTLE_MS` 동안 움직임이 없으면 이동이 끝난 것이다. 움직이지 않은
+  //     착지도 요청 시각부터 같은 규칙으로 끝난다 — 보고가 오지 않는 절반이 그것이다.
+  //   - 끝나면 **멈춘 자리에서**(`geometryRef`) 바닥을 다시 판정한다. 회복이 걸려 있는
+  //     동안(다음 프레임에 다시 묻는 중)에는 끝나지 않는다 — 대략의 자리는 착지가 아니다.
+  //   - 손가락·전송·「최신으로」·다른 점프·방 전환은 걸린 이동을 판정 없이 거둔다.
+  //     그 뒤의 보고나 그 요청이 스스로 판정한다.
+  //
+  // **필은 판정이 날 때까지 그대로 둔다.** 점프는 따라가기만 붙든다 — 가는 동안 도착한
+  // 메시지가 목록을 끌어내리면 안 되기 때문이다. 떠나자마자 「최신으로」를 세우면, 제자리
+  // 착지는 그 필을 한 번 번쩍이고 거둔다. 멀리 가는 점프의 필은 착지하며 선다.
+  const jumpTravelTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(
+    undefined,
+  );
+  const recoveryFrameRef = useRef<number | undefined>(undefined);
+
+  /** 걸린 이동을 판정 없이 거둔다. 다음 보고나 새 요청이 판정한다. */
+  const cancelJumpTravel = useCallback(() => {
+    if (jumpTravelTimerRef.current !== undefined) {
+      clearInterval(jumpTravelTimerRef.current);
+      jumpTravelTimerRef.current = undefined;
+    }
+    if (recoveryFrameRef.current !== undefined) {
+      cancelAnimationFrame(recoveryFrameRef.current);
+      recoveryFrameRef.current = undefined;
+    }
+    jumpTravelRef.current = null;
+  }, []);
+
+  /**
+   * 이동이 끝났다 — 멈춘 자리에서 판정한다.
+   *
+   * 기하를 모르면(목록이 아직 한 번도 보고하지 않았다) 판정하지 않는다: 붙든 따라가기는
+   * 그대로 두고, 핀이 풀렸으니 다음 보고가 판정한다. 모르는 것을 「바닥이 아니다」로
+   * 말하면 필이 거짓을 말한다.
+   *
+   * **착지는 출발점이다**(R2 N-B). 점프가 진입의 몫을 가져간 방문은 진입 수렴이 없어
+   * 드래그·필·전송 없이는 「앉음」이 오지 않았고, 드래그하지 않는 VoiceOver 사용자는
+   * 구분선을 보고도 래치가 안 걸려 위 필이 다시 섰다. R1 이 점프 순간에 앉히지 않은
+   * 이유 — 애니메이션 중 지나가는 구분선 보고가 래치를 건다 — 는 이동이 끝난 지금은
+   * 없다. 창에 남은 행이 사람이 보는 것이다(`release` 와 같은 판단).
+   */
+  const endJumpTravel = useCallback(() => {
+    const travel = jumpTravelRef.current;
+    if (travel === null) return;
+    cancelJumpTravel();
+    const left = distanceToEnd(geometryRef.current);
+    if (left !== null) noteFollowing(left <= FOLLOW_THRESHOLD_PX, travel.leftAtSeq);
+    settleEntry();
+    travel.onLanded?.();
+  }, [cancelJumpTravel, noteFollowing, settleEntry]);
+
+  /** 점프 하나가 떠난다. 앞선 이동은 판정 없이 거둔다 — 새 요청이 이긴다. */
+  const beginJumpTravel = useCallback(
+    (onLanded?: () => void) => {
+      cancelJumpTravel();
+      const now = Date.now();
+      jumpTravelRef.current = {
+        startedAt: now,
+        lastMotionAt: now,
+        recovering: false,
+        leftAtSeq: newestSeqRef.current,
+        onLanded,
+      };
+      // 따라가기만 붙든다 — 필은 판정이 날 때까지 그대로다(위 머리말).
+      followingRef.current = false;
+      jumpTravelTimerRef.current = setInterval(() => {
+        const travel = jumpTravelRef.current;
+        if (travel === null) return;
+        const at = Date.now();
+        if (at - travel.startedAt >= JUMP_TRAVEL_MAX_MS) {
+          endJumpTravel();
+          return;
+        }
+        if (travel.recovering) return;
+        if (at - travel.lastMotionAt >= JUMP_SETTLE_MS) endJumpTravel();
+      }, CONVERGE_ROUND_MS);
+    },
+    [cancelJumpTravel, endJumpTravel],
+  );
+
   // ===========================================================================
   // 끝까지 데려가는 일 하나 (goal RN-P3 · RN-B4a/#1025)
   //
@@ -1223,8 +1382,10 @@ function TimelineInner({
   const convergeToEnd = useCallback(
     (mode: 'entry' | 'send' | 'latest') => {
       cancelConvergence();
-      // A new travel supersedes a focus still waiting for an earlier landing.
+      // A new travel supersedes a focus still waiting for an earlier landing, and
+      // a jump still on its way — without a verdict: this travel sets its own.
       cancelFocus();
+      cancelJumpTravel();
       // Following again, because they are now at the bottom on purpose — the next
       // arrival from anyone else should keep them there. Through the one door, so
       // the 「최신으로」 pill steps down in the same moment (#1892).
@@ -1337,12 +1498,20 @@ function TimelineInner({
         // And the list is where it was going to rest, so what is on screen now is
         // what the reader sees (#1892 — the latch waits for exactly this).
         settleEntry();
-        if (arrived && mode === 'latest') {
-          holdLanding(Date.now() + CONVERGE_ROUND_MS);
-          // The pill that had VoiceOver's focus is gone; the row it brought the
-          // reader to takes it (#1892 R1 M-3). The list is on the end already.
-          focusRow(lastMessageId(itemsRef.current), 0);
-        }
+        if (mode !== 'latest') return;
+        if (arrived) holdLanding(Date.now() + CONVERGE_ROUND_MS);
+        // The pill that had VoiceOver's focus is gone; the row it brought the
+        // reader to takes it (#1892 R1 M-3). When the travel could not finish
+        // (R2 N-C) that row is still where the reader asked to go, and focusing
+        // it has VoiceOver scroll the rest of the way — if it is mounted. When it
+        // is not, the lowest row on screen takes the focus rather than nothing.
+        const newest = lastMessageId(itemsRef.current);
+        const mounted =
+          newest !== null && rowNodesRef.current.has(newest.toLowerCase());
+        focusRow(
+          arrived || mounted ? newest : lastVisibleMessageId() ?? newest,
+          0,
+        );
       };
 
       const converge = () => {
@@ -1429,7 +1598,9 @@ function TimelineInner({
     [
       cancelConvergence,
       cancelFocus,
+      cancelJumpTravel,
       focusRow,
+      lastVisibleMessageId,
       listRef,
       noteFollowing,
       reduceMotionRef,
@@ -1443,8 +1614,9 @@ function TimelineInner({
     () => () => {
       cancelConvergence();
       cancelFocus();
+      cancelJumpTravel();
     },
-    [cancelConvergence, cancelFocus],
+    [cancelConvergence, cancelFocus, cancelJumpTravel],
   );
 
   // 방이 바뀌면 앞 방의 이동도 이 방의 일이 아니다 (#1892 R1 H-1). 전송의 끝 쫓기나
@@ -1454,9 +1626,10 @@ function TimelineInner({
   useEffect(() => {
     cancelConvergence();
     cancelFocus();
+    cancelJumpTravel();
     scrollPinUntilRef.current = 0;
     setChasingTail(false);
-  }, [channelId, cancelConvergence, cancelFocus]);
+  }, [channelId, cancelConvergence, cancelFocus, cancelJumpTravel]);
 
   /**
    * A finger on the glass ends the correction's claim immediately.
@@ -1471,6 +1644,10 @@ function TimelineInner({
     // The reader has taken the list; a focus move queued by a jump would pull
     // VoiceOver back to where they are leaving (#1892 R1 M-3).
     cancelFocus();
+    // And a jump still on its way is theirs to end — including the recovery's
+    // next round, which would otherwise move the list under the finger and take
+    // the verdict back for itself (R2 N-A). Their own scroll events judge next.
+    cancelJumpTravel();
     scrollPinUntilRef.current = 0;
     convergingRef.current = false;
     // The reader has the list now. Whatever it shows from here on, they are
@@ -1485,7 +1662,7 @@ function TimelineInner({
     // is the likeliest prelude to them scrolling UP into history, which is the
     // one thing that must never move under them.
     setChasingTail(false);
-  }, [cancelConvergence, cancelFocus, settleEntry]);
+  }, [cancelConvergence, cancelFocus, cancelJumpTravel, settleEntry]);
 
   // Follow the tail only when the reader is already there. Anyone scrolled back
   // is READING, and yanking them to the bottom because someone else typed is
@@ -1598,18 +1775,29 @@ function TimelineInner({
     setUnreadLatched(true);
     entrySettledRef.current = true;
     cancelConvergence();
-    // 가는 동안의 자리는 사람의 것이 아니다 — 아래 인용 점프와 같은 핀(R1 M-1).
-    scrollPinUntilRef.current = Date.now() + JUMP_PIN_MS;
+    cancelFocus();
+    scrollPinUntilRef.current = 0;
     setChasingTail(false);
-    noteFollowing(false);
+    // 가는 동안의 자리는 사람의 것이 아니다 — 인용 점프와 같은 이동이다(R1 M-1).
+    // 멈추면 착지한 자리에서 바닥을 다시 판정하고(R2 H-A — 안읽음 묶음이 한 화면보다
+    // 조금 길면 끝 근처에 앉는다), 그때 초점을 옮긴다: 움직이는 행에 초점을 주면
+    // VoiceOver 가 한 번 더 스크롤한다.
+    const focusTarget = firstMessageIdAfter(itemsRef.current, index);
+    beginJumpTravel(() => focusRow(focusTarget, 0));
     scrollViewPositionRef.current = 0;
-    const animated = !reduceMotionRef.current;
-    listRef.current?.scrollToIndex({index, viewPosition: 0, animated});
-    focusRow(
-      firstMessageIdAfter(itemsRef.current, index),
-      animated ? GLIDE_SETTLE_MS : CONVERGE_ROUND_MS,
-    );
-  }, [cancelConvergence, focusRow, listRef, noteFollowing, reduceMotionRef]);
+    listRef.current?.scrollToIndex({
+      index,
+      viewPosition: 0,
+      animated: !reduceMotionRef.current,
+    });
+  }, [
+    beginJumpTravel,
+    cancelConvergence,
+    cancelFocus,
+    focusRow,
+    listRef,
+    reduceMotionRef,
+  ]);
 
   // 아래 필은 전송과 같은 여정이다 — 먼 과거에서 끝까지 가는 길은 RN-P3 가 이미
   // 닦았고(측정된 클램프를 오르는 즉시 라운드), 두 번째 길을 내면 그 수리를 다시
@@ -1819,12 +2007,12 @@ function TimelineInner({
     // 끌어내린다 — 새 요청이 앞선 요청을 이긴다.
     cancelConvergence();
     cancelFocus();
-    // 그리고 가는 동안은 이 점프가 스크롤을 쥔다(`JUMP_PIN_MS`). 측정 안 된 행으로
-    // 가는 회복 경로는 목록을 잠시 콘텐츠 끝에 세우고, 그 자리를 「바닥에 있다」로
-    // 읽으면 따라가기가 켜져 착지 대신 꼬리로 끌려간다(R1 M-1, 시뮬레이터 실측).
-    scrollPinUntilRef.current = Date.now() + JUMP_PIN_MS;
+    scrollPinUntilRef.current = 0;
     setChasingTail(false);
-    noteFollowing(false);
+    // 그리고 가는 동안은 이 점프가 판정을 쥐고, 멈추면 착지한 자리에서 다시 판정한다
+    // (`beginJumpTravel`). 끝 근처에 앉으면 따라가기로 돌아오고(R2 H-A), 멀리 앉으면
+    // 그때 「최신으로」가 선다.
+    beginJumpTravel();
     // **이 점프가 방의 진입이다** (#1892 R1 M-1). 다른 방으로 가는 착지(ADE
     // 「대화로」·알림 탭)는 새 방의 목록이 도착한 뒤 걸리고, 그 순간이 새 목록의 첫
     // `onContentSizeChange` 보다 앞설 수 있다 — 네이티브 레이아웃 보고와 효과의 순서는
@@ -1874,18 +2062,27 @@ function TimelineInner({
       // 마운트되고, 다음 프레임에 정확히 앉는다. 실패를 삼키지 않는 이유는
       // 삼키면 「눌렀는데 아무 일도 안 일어남」이 되기 때문이다.
       //
-      // 회복 한 번마다 점프의 핀을 늘린다(R1 M-1). 대략의 자리는 새 목록에서 흔히
-      // 재어 둔 행들의 끝을 넘고, 스크롤뷰는 그 끝에 세운다 — 그 자리는 사람이 고른
-      // 「바닥」이 아니다.
-      scrollPinUntilRef.current = Math.max(
-        scrollPinUntilRef.current,
-        Date.now() + JUMP_PIN_MS,
-      );
+      // 회복은 **걸린 이동의 일부**다(`beginJumpTravel`). 대략의 자리는 새 목록에서 흔히
+      // 재어 둔 행들의 끝으로 clamp 되고 — 그 자리는 착지가 아니다 — 그래서 다시 묻는
+      // 동안 이동은 끝나지 않는다. 걸린 이동이 없으면(손가락이나 새 요청이 거뒀다)
+      // 아무것도 하지 않는다: 회복의 다음 라운드가 사람 손 밑에서 목록을 옮기면 안
+      // 된다(R2 N-A).
+      const travel = jumpTravelRef.current;
+      if (travel === null) return;
+      travel.recovering = true;
+      travel.lastMotionAt = Date.now();
       listRef.current?.scrollToOffset({
         offset: info.averageItemLength * info.index,
         animated: false,
       });
-      requestAnimationFrame(() => {
+      if (recoveryFrameRef.current !== undefined) {
+        cancelAnimationFrame(recoveryFrameRef.current);
+      }
+      recoveryFrameRef.current = requestAnimationFrame(() => {
+        recoveryFrameRef.current = undefined;
+        if (jumpTravelRef.current !== travel) return;
+        travel.recovering = false;
+        travel.lastMotionAt = Date.now();
         listRef.current?.scrollToIndex({
           index: info.index,
           // 실패하기 전 그 요청이 원한 자리 — 인용은 가운데, 안읽음 필은 위 (#1892).
