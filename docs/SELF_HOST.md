@@ -802,12 +802,20 @@ The public overlay passes that env into the container. Empty env makes
 compose/`caddy validate` fail. That is the actual ACME misfire block. Start
 this overlay **only on a machine that holds DNS for that host**. Do not
 name it on local. `--compose` cannot change the canonical file set, so on
-the deploy host call compose directly for the public overlay:
+the deploy host call compose directly for the public overlay. Keep
+`local.override.yml` in the set: it carries the attachment archive the
+generator turns on (`drive-init` and the `drive-archive` volume) and the
+loopback `web` service that doctor `stack.compose_ps` requires. Without it
+compose recreates the api with no archive volume and the api refuses to
+boot (`MOMO_DRIVE_LOCAL_DIR could not be created or is not writable`,
+restart loop — measured, #2609). This is the same three-file set
+`infra/fly/entrypoint.sh` runs:
 
 ```sh
 ENV_FILE=infra/rust/local.secrets.env
 docker compose --env-file "$ENV_FILE" \
   -f infra/rust/docker-compose.rust.yml \
+  -f infra/rust/local.override.yml \
   -f infra/rust/caddy.override.yml up -d
 ```
 
@@ -817,7 +825,7 @@ and order ACME.
 
 | | Local (this document's default) | Public origin |
 |---|---|---|
-| Edge | `local.override.yml` + `Caddyfile.local` (`:80`) | `caddy.override.yml` + `Caddyfile` (`{$OORT_SITE_ADDRESS}`) |
+| Edge | `local.override.yml` + `Caddyfile.local` (`:80`) | `caddy.override.yml` + `Caddyfile` (`{$OORT_SITE_ADDRESS}`), on top of `local.override.yml` (archive volume) |
 | Address | `http://localhost:<port>` | Operator-declared `https://<host>` |
 | CSP connect-src | loopback `ws://localhost:*` / `ws://127.0.0.1:*` | `OORT_CSP_CONNECT_SRC` derived by `--public-origin` |
 
