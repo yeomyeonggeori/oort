@@ -107,6 +107,7 @@ const EMPTY_GATES: ReadonlyMap<string, ApprovalGate> = new Map();
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import {ApprovalDecision} from '../inbox/ApprovalDecision';
 import {LinkOnce} from './LinkOnce';
+import {Sentence} from '../../design/atoms';
 import {AttachmentList} from '../attachments/AttachmentList';
 import {
   approvalCardNote,
@@ -1053,7 +1054,9 @@ function FactRow({
   return (
     <View style={styles.factRow} testID={testID}>
       <Text style={styles.factLabel}>{label}</Text>
-      <Text style={styles.factValue}>{value}</Text>
+      {/* 값은 서버·에이전트가 쓴 한국어 문장일 수 있다(사유·결정 권한). 접히면
+          어절에서 접는다 — `Sentence` 머리말의 규칙. */}
+      <Sentence style={styles.factValue}>{value}</Sentence>
     </View>
   );
 }
@@ -1116,22 +1119,22 @@ function ActionResultCardView({
           ) : null}
         </View>
       ) : null}
-      <Text style={styles.cardBody} testID="action-result-note">
+      <Sentence style={styles.cardBody} testID="action-result-note">
         {ACTION_RESULT_STATUS_NOTE[card.status]}
-      </Text>
+      </Sentence>
       {card.secretShownOnce ? (
-        <Text
+        <Sentence
           style={[styles.cardNote, noteStyle.guidance]}
           testID="action-result-secret-once">
           {ACTION_RESULT_SECRET_ONCE_NOTE}
-        </Text>
+        </Sentence>
       ) : null}
       {elsewhere !== null ? (
-        <Text
+        <Sentence
           style={[styles.cardNote, noteStyle.guidance]}
           testID="action-result-elsewhere">
           {elsewhere}
-        </Text>
+        </Sentence>
       ) : null}
     </View>
   );
@@ -1282,7 +1285,11 @@ function AgentCard({
             }
           />
         </View>
-        {card.summary ? <Text style={styles.cardBody}>{card.summary}</Text> : null}
+        {/* 서버가 쓴 한국어 문장이다. 접히면 어절에서 접는다 — 기본 줄바꿈은
+            「초 / 대 링크」처럼 낱말 가운데를 자른다(#2513 캡처 실측). */}
+        {card.summary ? (
+          <Sentence style={styles.cardBody}>{card.summary}</Sentence>
+        ) : null}
         {/* 워크스페이스 행동의 판단 근거 (ADR-0186 부록 A · #2513). 코어가 읽어 준
             `card.action` 만 그린다 — 블록이 없으면 아래는 전부 지금까지의 도구
             호출 승인 그대로다. */}

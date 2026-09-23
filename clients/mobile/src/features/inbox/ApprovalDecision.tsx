@@ -14,6 +14,7 @@ import {
 import React, {useCallback, useRef, useState} from 'react';
 import {AccessibilityInfo, Pressable, StyleSheet, Text, View} from 'react-native';
 import {font, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {Sentence} from '../../design/atoms';
 import {useStyles} from '../../design/theme';
 import {useSession} from '../../session/useSession';
 import {SpawnHostChoice} from './SpawnHostChoice';
@@ -342,14 +343,15 @@ export function ApprovalDecision({
           </Pressable>
         </View>
         {errorCopy !== null ? (
-          <Text
+          <Sentence
             // 403 뒤의 안내는 무장이 풀린 **이 자리**에 선다. 격은 `noticeTone`
             // 이 정한다 — 같은 testID 에 두 격이 서는 것은 웹과 같은 모양이다
-            // (`approval-error` + `data-tone`).
+            // (`approval-error` + `data-tone`). 두 문장짜리 안내라 어절에서
+            // 접는다(「결 / 정할」이 캡처 실측).
             style={noticeTone === 'quiet' ? styles.hint : styles.error}
             testID={`${testIDPrefix}-error`}>
             {errorCopy}
-          </Text>
+          </Sentence>
         ) : null}
       </View>
     );

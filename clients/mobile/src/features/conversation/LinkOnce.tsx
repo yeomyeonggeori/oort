@@ -5,6 +5,7 @@ import {
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {font, line, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {Sentence} from '../../design/atoms';
 import {useStyles} from '../../design/theme';
 import {COPY_RECEIPT_MS, copyText} from './copy';
 
@@ -74,9 +75,10 @@ export function LinkOnce({
 
   return (
     <View style={styles.wrap} testID={`${testIDPrefix}-link-once`}>
-      <Text style={styles.lead} testID={`${testIDPrefix}-link-once-lead`}>
+      {/* 완성된 한국어 문장 — 어절에서 접는다(「지금 전달하 / 세요」가 캡처 실측). */}
+      <Sentence style={styles.lead} testID={`${testIDPrefix}-link-once-lead`}>
         {LINK_ONCE_LEAD}
-      </Text>
+      </Sentence>
       <View style={styles.row}>
         <Text
           selectable
