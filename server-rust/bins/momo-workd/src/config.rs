@@ -576,6 +576,8 @@ mod tests {
         let dir =
             std::env::temp_dir().join(format!("momo-workd-owned-{}", Uuid::new_v4().simple()));
         std::fs::create_dir_all(&dir).unwrap();
+        // The owner's own folder whatever the umask (`check_parent_folder`).
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
         let config = dir.join("workd.json");
         std::fs::write(&config, serde_json::to_vec(&base_json()).unwrap()).unwrap();
         std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o644)).unwrap();

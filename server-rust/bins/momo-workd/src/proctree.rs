@@ -104,7 +104,7 @@ pub fn children(pid: i32) -> Vec<i32> {
     if pid <= 0 {
         return Vec::new();
     }
-    let mut found = Vec::new();
+    let mut found: Vec<i32> = Vec::new();
     let mut listed = false;
     if let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) {
         for task in tasks.flatten() {
@@ -112,7 +112,7 @@ pub fn children(pid: i32) -> Vec<i32> {
                 listed = true;
                 found.extend(
                     list.split_whitespace()
-                        .filter_map(|child| child.parse().ok()),
+                        .filter_map(|child| child.parse::<i32>().ok()),
                 );
             }
         }
@@ -125,7 +125,7 @@ pub fn children(pid: i32) -> Vec<i32> {
                 let Some(candidate) = entry
                     .file_name()
                     .to_str()
-                    .and_then(|name| name.parse().ok())
+                    .and_then(|name| name.parse::<i32>().ok())
                 else {
                     continue;
                 };
