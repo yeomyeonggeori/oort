@@ -626,6 +626,39 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
         }
     }
 
+    // ADR-0188 R0.1 (A′) — 「에이전트 컨트롤은 member-scope host에 kill만」,
+    // enforced where the row would be made. Only a spawn card asks a host
+    // question (`remote_host` is `Some` only then), so the control this approval
+    // releases is a spawn — never the `kill` an agent keeps — and whoever
+    // requested it is its origin (`requested_by`: the agent, on the REST
+    // ledger's card and on the spawn tool's alike). An agent's spawn is never
+    // approved onto somebody's own machine, by its owner included: approving it
+    // would only make a dispatched row the poll withholds. Refused before the
+    // first write, so the card stays pending — the decider can still pick a
+    // workspace host, or reject. The origin is read rather than assumed, although
+    // every spawn card is an agent's today: the rule is about agents, and a card
+    // a person asks for themselves (ADR-0188 R2) must not inherit it by accident.
+    if let (true, Some(_)) = (input.approve, remote_host) {
+        if momo_t3::work_control::member_is_agent_in_tx(
+            conn,
+            input.workspace_id,
+            approval.requested_by,
+        )
+        .await
+        .map_err(control_failure)?
+        {
+            return Ok(Ok(refusal(
+                approval.id,
+                input.member_id,
+                momo_t3::work_control::REFUSAL_MEMBER_HOST_AGENT_CONTROL,
+                "an agent's work cannot be sent to a member-scoped work host; pick a \
+                 workspace host or reject",
+                StatusCode::FORBIDDEN,
+                now,
+            )));
+        }
+    }
+
     // ---- expiry: settle it rather than merely refusing (Swift :198-221) ----
     if approval.expires_at.is_some_and(|expires| expires <= now) {
         return Ok(Ok(settle_expired(

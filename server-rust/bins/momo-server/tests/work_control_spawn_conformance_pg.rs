@@ -1033,7 +1033,7 @@ async fn ade1_3_a_host_the_card_never_offered_is_refused() {
     .await;
     // What the agent aims at. Since ADR-0188 R0 an agent bearer cannot aim a
     // spawn at a member-scoped host (`remote_host_kill_only`), so it asks for
-    // the team box and the picker is where a laptop is chosen — by its owner.
+    // the team box; since R0.1 (A′) no approval sends it to a laptop either.
     let vps = seed_host(
         &su,
         tenant.workspace,
@@ -1110,9 +1110,10 @@ async fn ade1_3_a_host_the_card_never_offered_is_refused() {
         );
     }
 
-    // …and the legitimate host still works, so the refusals above are a rule
-    // rather than a broken route. The laptop is the approver's own, which is
-    // what ADR-0188 D3 asks of a decision that lands on a member-scoped host.
+    // The approver's own laptop *is* a candidate — but since ADR-0188 R0.1
+    // (A′) an agent's spawn is not approved onto a member-scoped host by
+    // anyone, so it is refused by that rule rather than by the picker
+    // (`remote_host_r0_conformance_pg::r01_5`), and the card stays pending.
     let response = decide(
         &http,
         &base,
@@ -1123,10 +1124,30 @@ async fn ade1_3_a_host_the_card_never_offered_is_refused() {
         Some(laptop),
     )
     .await;
+    assert_eq!(response.status(), 403);
+    let receipt: Value = response.json().await.expect("receipt");
+    assert_eq!(
+        receipt["status"],
+        json!("member_host_agent_control_refused")
+    );
+    assert_eq!(control_row(&su, control).await.0, "pending_approval");
+
+    // …and the legitimate host still works, so the refusals above are a rule
+    // rather than a broken route.
+    let response = decide(
+        &http,
+        &base,
+        &token,
+        tenant.workspace,
+        approval,
+        true,
+        Some(vps),
+    )
+    .await;
     assert_eq!(response.status(), 200);
     let (status, target, _, _) = control_row(&su, control).await;
     assert_eq!(status, "dispatched");
-    assert_eq!(target, laptop);
+    assert_eq!(target, vps);
 }
 
 // ---------------------------------------------------------------------------
@@ -1254,8 +1275,10 @@ async fn ade1_4_a_pre_authorised_tool_dispatches_without_a_card() {
 /// Reverting `work.session.spawn` out of `CATALOG` makes the first drain answer
 /// a `tool_result` naming the gap instead of parking; running it without the
 /// approval makes the session exist before the decision; ignoring
-/// `approved_host_id` puts the session on the laptop the model guessed rather
-/// than the box the person chose.
+/// `approved_host_id` puts the session on the box the model guessed rather than
+/// the one the person chose. The guess is a team box: since ADR-0188 R0.1 (A′)
+/// a call that names a member's laptop is refused before any card exists
+/// (`remote_host_r0_conformance_pg::r01_6`).
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
 async fn ade1_5_the_spawn_tool_closes_the_loop_from_model_to_session() {
@@ -1285,6 +1308,16 @@ async fn ade1_5_the_spawn_tool_closes_the_loop_from_model_to_session() {
         "workspace",
         "workd",
         "팀 VPS",
+        Some(5),
+    )
+    .await;
+    let other_vps = seed_host(
+        &su,
+        tenant.workspace,
+        tenant.human,
+        "workspace",
+        "workd",
+        "옆 VPS",
         Some(5),
     )
     .await;
@@ -1319,8 +1352,8 @@ async fn ade1_5_the_spawn_tool_closes_the_loop_from_model_to_session() {
         // `momo_tool_name` at the provider boundary (`responses.rs`), and the
         // mock stands in for the adapter's output, not for the raw wire.
         name: momo_agent::tools::WORK_SESSION_SPAWN.to_string(),
-        // The model proposes the laptop; the person will not agree.
-        arguments: json!({"tool": TOOL, "label": "리팩터링", "host_id": laptop.to_string()})
+        // The model proposes a team box; the person will not agree.
+        arguments: json!({"tool": TOOL, "label": "리팩터링", "host_id": other_vps.to_string()})
             .to_string(),
     };
     let worker = AgentWorker::new(
@@ -1355,8 +1388,14 @@ async fn ade1_5_the_spawn_tool_closes_the_loop_from_model_to_session() {
     let execution = &payload["execution"];
     assert_eq!(
         execution["requested_host_id"],
-        json!(laptop.to_string()),
+        json!(other_vps.to_string()),
         "the model's proposal is recorded as a proposal: {execution}"
+    );
+    assert_eq!(
+        execution["default_host_id"],
+        json!(laptop.to_string()),
+        "and the card still pre-selects the laptop (로컬 온라인 우선) — which, since \
+         R0.1 (A′), the person could not approve an agent's spawn onto: {execution}"
     );
     assert_eq!(candidate(execution, vps)["selectable"], json!(true));
 

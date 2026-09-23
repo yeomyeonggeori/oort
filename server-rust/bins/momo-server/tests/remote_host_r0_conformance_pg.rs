@@ -38,6 +38,10 @@
 //! | `r01_2_an_app_host_is_never_workspace_scoped` | Medium: `type=app` is always remote | `work_hosts::validated_scope_for_type` in `register` |
 //! | `r01_3_a_remote_host_is_not_handed_what_r0_would_refuse` | Low 1: rows dispatched before R0 | the member-host clause in `momo_t3::pending_controls_for_host_in_tx` |
 //! | `r01_4_a_rejection_is_judged_on_the_card_not_the_pick` | Low 2: the rejecting decider's pick | the reject branch of `approvals::decision_reference_host` |
+//! | `r01_5_an_agents_spawn_is_not_approved_onto_a_member_host` | A′: decision time | the `member_is_agent_in_tx` refusal in `approvals::decide_in_tx` |
+//! | `r01_6_a_spawn_call_that_names_a_member_host_is_refused` | A′: request time (tool) | `AgentWorker::refused_spawn_target` in `momo-agent-worker` |
+//!
+//! `r0_8` also pins A′'s executor re-check (`tool_exec::spawn_session_in_tx`).
 //!
 //! Every refusal test also takes the **legitimate** path at the end — the owner
 //! deciding, a team host, a `kill` — so none of them can pass by a route that
@@ -773,9 +777,9 @@ async fn heartbeat_provenance_rows(su: &PgPool, workspace: Uuid, host: Uuid) -> 
 ///
 /// Then the criterion is shown to be **the final host**, not the card: the
 /// colleague *may* approve a second card onto the team box. And the owner
-/// approves the first onto their own laptop, which is the path R0 keeps open —
-/// on the ledger: the row is still an agent's control, so R0.1 does not hand it
-/// to the laptop (`r01_3`).
+/// settles the first — the decision the rule reserves for them. Since R0.1 (A′)
+/// that is a rejection: nobody, the owner included, approves an agent's spawn
+/// *onto* a laptop (`r01_5`).
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
 async fn r0_1_a_teammate_cannot_decide_work_headed_to_the_owners_host() {
@@ -865,25 +869,24 @@ async fn r0_1_a_teammate_cannot_decide_work_headed_to_the_owners_host() {
     );
     assert_eq!(control_row(&su, second).await.0, "dispatched");
 
-    // ---- and the owner decides their own laptop ------------------------------
+    // ---- and the owner settles the card that sits on their laptop ------------
     let (status, receipt) = decide(
         &http,
         &base,
         &owner_token,
         tenant.workspace,
         approval,
-        true,
-        Some(laptop),
+        false,
+        None,
     )
     .await;
     assert_eq!(
         status, 200,
-        "the owner may send work to their own laptop: {receipt}"
+        "the owner may decide a card that points at their own laptop: {receipt}"
     );
-    let (state, target, _) = control_row(&su, control).await;
-    assert_eq!(state, "dispatched");
-    assert_eq!(target, laptop);
-    assert_eq!(dispatched_to(&su, tenant.workspace, laptop).await, 1);
+    assert_eq!(receipt["status"], json!("rejected"));
+    assert_eq!(control_row(&su, control).await.0, "denied");
+    assert_eq!(dispatched_to(&su, tenant.workspace, laptop).await, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -904,8 +907,10 @@ async fn r0_1_a_teammate_cannot_decide_work_headed_to_the_owners_host() {
 /// 2. **the handler** — the same principal presented *past* the middleware, on a
 ///    router that mounts only the decision handler, is still refused with a 403
 ///    receipt `human_principal_required`. This is the layer the red proof
-///    removes: without it the laptop's principal decides as its owner and the
-///    spawn is dispatched to the laptop.
+///    removes: without it the laptop's principal decides as its owner. It asks
+///    for the team box, so that nothing *else* refuses it — since R0.1 (A′) no
+///    approval sends an agent's spawn onto the laptop itself (`r01_5`), and a
+///    host that can approve anything at all as its owner is the hole either way.
 ///
 /// An agent bearer is refused as well. The owner's own decision closes the test.
 #[tokio::test]
@@ -930,7 +935,7 @@ async fn r0_2_a_work_host_principal_cannot_decide() {
         "/v1/workspaces/{}/approvals/{approval}/decision",
         tenant.workspace
     );
-    let body = serde_json::to_vec(&decision_body(approval, true, Some(laptop))).expect("json");
+    let body = serde_json::to_vec(&decision_body(approval, true, Some(vps))).expect("json");
 
     // ---- layer 1: a signed laptop never authenticates on this route ---------
     let signed = SignedRequest::new(
@@ -992,8 +997,12 @@ async fn r0_2_a_work_host_principal_cannot_decide() {
     assert_eq!(control_row(&su, control).await.0, "pending_approval");
     assert_eq!(approval_status(&su, approval).await, "pending");
     assert_eq!(dispatched_to(&su, tenant.workspace, laptop).await, 0);
+    assert_eq!(dispatched_to(&su, tenant.workspace, vps).await, 0);
 
     // ---- the person does ------------------------------------------------------
+    // Onto the team box: since R0.1 (A′) an agent's spawn is not approved onto
+    // the laptop by anyone (`r01_5`), and what is under test here is only that a
+    // person's decision goes through where a host's does not.
     let (status, receipt) = decide(
         &http,
         &base,
@@ -1001,11 +1010,12 @@ async fn r0_2_a_work_host_principal_cannot_decide() {
         tenant.workspace,
         approval,
         true,
-        Some(laptop),
+        Some(vps),
     )
     .await;
     assert_eq!(status, 200, "{receipt}");
     assert_eq!(control_row(&su, control).await.0, "dispatched");
+    assert_eq!(dispatched_to(&su, tenant.workspace, laptop).await, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1016,11 +1026,16 @@ async fn r0_2_a_work_host_principal_cannot_decide() {
 /// owner's laptop, the agent that asked for it may stop it and do nothing else.
 ///
 /// The lineage below is the strongest one an agent can hold: its own spawn,
-/// approved by the owner onto the laptop, acked with the session bound — exactly
-/// what ADR-0114 D4 let `input`/`read` ride on without asking again. On a remote
-/// host that is over: `input`, `read` and a fresh `spawn` are 403
-/// `remote_host_kill_only` before any write (no row, no dispatch), and `kill` —
-/// the off switch — is still accepted.
+/// acked on the owner's laptop with the session bound — exactly what ADR-0114
+/// D4 let `input`/`read` ride on without asking again. On a remote host that is
+/// over: `input`, `read` and a fresh `spawn` are 403 `remote_host_kill_only`
+/// before any write (no row, no dispatch), and `kill` — the off switch — is
+/// still accepted.
+///
+/// Since R0.1 (A′) no route can build that lineage any more — the decision route
+/// will not approve an agent's spawn onto a laptop (`r01_5`) — so it is seeded
+/// as the superuser: the shape a laptop may still carry from before, and the
+/// one its off switch must still reach.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
 async fn r0_3_an_agent_reaches_a_remote_host_with_kill_only() {
@@ -1029,7 +1044,6 @@ async fn r0_3_an_agent_reaches_a_remote_host_with_kill_only() {
     let app_pool = role_pool("momo_app", &momo_app_password()).await;
     let tenant = seed_tenant(&su, &app_pool).await;
     let (laptop, _) = seed_laptop(&su, &tenant).await;
-    let vps = seed_team_box(&su, &tenant, "팀 VPS").await;
     let run = seed_run(&su, &tenant).await;
 
     let base = start_server(app_pool).await;
@@ -1038,49 +1052,27 @@ async fn r0_3_an_agent_reaches_a_remote_host_with_kill_only() {
     let bearer = agent_bearer(&su, &tenant).await;
 
     // ---- the lineage: the agent's spawn, the owner's laptop, acked ----------
-    let spawn = request_spawn(&http, &base, &bearer, &tenant, run, vps, TOOL, "리팩터링").await;
-    let approval = approval_for(&su, spawn).await;
-    let (status, receipt) = decide(
-        &http,
-        &base,
-        &owner_token,
-        tenant.workspace,
-        approval,
-        true,
-        Some(laptop),
+    let session = open_session(&http, &base, &owner_token, &tenant, laptop, "리팩터링").await;
+    let spawn = insert_dispatched(
+        &su,
+        &tenant,
+        laptop,
+        tenant.agent,
+        Some(session),
+        "spawn",
+        json!({"tool": TOOL, "label": "리팩터링"}),
     )
     .await;
-    assert_eq!(status, 200, "{receipt}");
-    let created = http
-        .post(format!(
-            "{base}/v1/workspaces/{}/work-sessions",
-            tenant.workspace
-        ))
-        .bearer_auth(&owner_token)
-        .json(&json!({
-            "channelId": tenant.channel,
-            "hostId": laptop,
-            "tool": TOOL,
-            "label": "리팩터링",
-        }))
-        .send()
+    sqlx::query("UPDATE work_control SET status = 'acked' WHERE id = $1")
+        .bind(spawn)
+        .execute(&su)
         .await
-        .expect("create work session");
-    assert_eq!(created.status(), 201);
-    let created: Value = created.json().await.expect("session body");
-    let session = Uuid::parse_str(created["workSession"]["id"].as_str().expect("id")).unwrap();
-    let acked = http
-        .post(format!(
-            "{base}/v1/workspaces/{}/work-controls/{spawn}/ack",
-            tenant.workspace
-        ))
-        .bearer_auth(&owner_token)
-        .json(&json!({"ok": true, "sessionId": session}))
-        .send()
-        .await
-        .expect("ack the spawn");
-    assert_eq!(acked.status(), 200, "the laptop's owner acks its spawn");
-    assert_eq!(control_row(&su, spawn).await.2, Some(session));
+        .expect("the spawn was acked on the laptop, before R0.1 (A′)");
+    let (state, target, bound) = control_row(&su, spawn).await;
+    assert_eq!(
+        (state.as_str(), target, bound),
+        ("acked", laptop, Some(session))
+    );
 
     // ---- what the agent may no longer do ------------------------------------
     let before = control_count(&su, tenant.workspace).await;
@@ -1560,9 +1552,14 @@ async fn r0_7_a_signed_request_carries_no_query_string() {
 
 /// **The executor half of D3 and D6.** `tool_exec::spawn_session` also runs
 /// for callers that never passed a card — a G6 exemption runs it with the
-/// *agent's* own authority. So the executor asks again: a session lands on the
-/// owner's laptop only with the owner's authority, and never as a shell. The
-/// owner's own `codex` then runs, so the refusals are rules.
+/// *agent's* own authority. So the executor asks again, and each refusal keeps
+/// its own word: the agent's own authority does not reach the owner's laptop
+/// (`remote_host_owner_required`), a shell never does (`remote_host_shell_refused`),
+/// and since R0.1 (A′) the owner's authority does not carry an agent's spawn
+/// there either (`member_host_agent_control_refused`) — what reaches this line
+/// is an approval granted before the decision route refused it. Nothing is
+/// written for any of them. The owner's `codex` then runs on the team box, so
+/// the refusals are rules.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
 async fn r0_8_the_spawn_tool_refuses_a_remote_host_it_was_not_given() {
@@ -1572,44 +1569,71 @@ async fn r0_8_the_spawn_tool_refuses_a_remote_host_it_was_not_given() {
     let worker_pool = role_pool("momo_worker", &momo_worker_password()).await;
     let tenant = seed_tenant(&su, &app_pool).await;
     let (laptop, _) = seed_laptop(&su, &tenant).await;
+    let vps = seed_team_box(&su, &tenant, "팀 VPS").await;
     let run = seed_run(&su, &tenant).await;
 
-    let spawn = |call_id: &str, tool: &str| momo_agent::tools::ToolCall {
+    let spawn = |call_id: &str, tool: &str, host: Uuid| momo_agent::tools::ToolCall {
         call_id: call_id.to_string(),
         name: momo_agent::tools::WORK_SESSION_SPAWN.to_string(),
-        arguments: json!({"tool": tool, "label": "실행기", "host_id": laptop.to_string()}),
+        arguments: json!({"tool": tool, "label": "실행기", "host_id": host.to_string()}),
     };
-    let context = |approved_by: Uuid| ToolContext {
+    let context = |approved_by: Uuid, host: Uuid| ToolContext {
         workspace_id: tenant.workspace,
         run_id: run,
         channel_id: tenant.channel,
         agent_member_id: tenant.agent,
         approved_by,
-        approved_host_id: Some(laptop),
+        approved_host_id: Some(host),
     };
 
-    let unapproved = tool_exec::execute(&worker_pool, &context(tenant.agent), &spawn("c1", TOOL))
+    for (approved_by, tool, code, why) in [
+        (
+            tenant.agent,
+            TOOL,
+            "remote_host_owner_required",
+            "the agent's own authority does not reach the laptop",
+        ),
+        (
+            tenant.owner,
+            "shell",
+            "remote_host_shell_refused",
+            "not even the owner starts a shell there",
+        ),
+        (
+            tenant.owner,
+            TOOL,
+            "member_host_agent_control_refused",
+            "nor carries an agent's spawn there, since R0.1 (A′)",
+        ),
+    ] {
+        let refused = tool_exec::execute(
+            &worker_pool,
+            &context(approved_by, laptop),
+            &spawn(&format!("laptop-{tool}-{approved_by}"), tool, laptop),
+        )
         .await
         .expect("execute");
-    assert!(
-        unapproved.is_error && unapproved.output.contains("remote_host_owner_required"),
-        "the agent's own authority does not reach the laptop: {unapproved:?}"
-    );
-    let shell = tool_exec::execute(&worker_pool, &context(tenant.owner), &spawn("c2", "shell"))
-        .await
-        .expect("execute");
-    assert!(
-        shell.is_error && shell.output.contains("remote_host_shell_refused"),
-        "not even the owner starts a shell there: {shell:?}"
-    );
+        assert!(
+            refused.is_error && refused.output.contains(code),
+            "{why}: {refused:?}"
+        );
+    }
     assert_eq!(sessions_on(&su, tenant.workspace, laptop).await, 0);
     assert_eq!(control_count(&su, tenant.workspace).await, 0);
 
-    let owned = tool_exec::execute(&worker_pool, &context(tenant.owner), &spawn("c3", TOOL))
-        .await
-        .expect("execute");
-    assert!(!owned.is_error, "the owner's own codex runs: {owned:?}");
-    assert_eq!(sessions_on(&su, tenant.workspace, laptop).await, 1);
+    let owned = tool_exec::execute(
+        &worker_pool,
+        &context(tenant.owner, vps),
+        &spawn("team-box", TOOL, vps),
+    )
+    .await
+    .expect("execute");
+    assert!(
+        !owned.is_error,
+        "the owner's codex runs on the team box: {owned:?}"
+    );
+    assert_eq!(sessions_on(&su, tenant.workspace, vps).await, 1);
+    assert_eq!(sessions_on(&su, tenant.workspace, laptop).await, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1981,12 +2005,12 @@ async fn r01_2_an_app_host_is_never_workspace_scoped() {
 ///   before #1139 asked whose host a target was).
 ///
 /// One more row is not pre-R0 at all and is withheld on purpose: an agent's
-/// spawn its **owner** approved onto the laptop through R0's own card. R0 lets
-/// that decision through (the owner decides, `r0_1`), but the row is still an
-/// agent's control, and ADR-0188 §3 gives an agent `kill` only on a remote host
-/// — so it is `dispatched` on the ledger and never handed to the laptop. This
-/// pins the literal reading of #2582; delivering owner-approved agent spawns
-/// would be a deliberate change to this assertion.
+/// spawn its **owner** approved onto the laptop through a card, as R0 allowed
+/// until R0.1 (A′). The decision route now refuses to make that row
+/// (`r01_5`); one made in between is still an agent's control, and ADR-0188 §3
+/// gives an agent `kill` only on a remote host — so it stays `dispatched` and
+/// is never handed to the laptop. It is written as the superuser, like the
+/// colleague's approval, because no route writes it any more.
 ///
 /// None of them is delivered, and none is failed either — they are withheld,
 /// still `dispatched`, because the poll writes nothing. What the laptop **is**
@@ -2036,27 +2060,29 @@ async fn r01_3_a_remote_host_is_not_handed_what_r0_would_refuse() {
     .await
     .expect("…dispatched onto the owner's laptop");
 
-    // ---- R0's own card path: the owner approves an agent's spawn onto the
-    // laptop. The decision stands (`r0_1`); the delivery does not (§3).
+    // ---- the owner's own approval onto the laptop, as R0 allowed until A′ ----
     let owner_approved =
         request_spawn(&http, &base, &bearer, &tenant, run, vps, TOOL, "주인 승인").await;
     let owner_card = approval_for(&su, owner_approved).await;
-    let (status, receipt) = decide(
-        &http,
-        &base,
-        &owner_token,
-        tenant.workspace,
-        owner_card,
-        true,
-        Some(laptop),
+    sqlx::query(
+        "UPDATE approval SET status = 'approved', decided_by = $2, decided_at = clock_timestamp() \
+          WHERE id = $1",
     )
-    .await;
-    assert_eq!(
-        status, 200,
-        "R0 lets the owner approve onto the laptop: {receipt}"
-    );
-    let (state, target, _) = control_row(&su, owner_approved).await;
-    assert_eq!((state.as_str(), target), ("dispatched", laptop));
+    .bind(owner_card)
+    .bind(tenant.owner)
+    .execute(&su)
+    .await
+    .expect("the owner's approval, before R0.1 (A′)");
+    sqlx::query(
+        "UPDATE work_control SET status = 'dispatched', target_host_id = $2, \
+                updated_at = clock_timestamp() \
+          WHERE id = $1",
+    )
+    .bind(owner_approved)
+    .bind(laptop)
+    .execute(&su)
+    .await
+    .expect("…dispatched onto the owner's laptop");
 
     // ---- the other pre-R0 shapes, on the owner's laptop ----------------------
     let spawn = |tool: &str, label: &str| json!({"tool": tool, "label": label});
@@ -2067,7 +2093,7 @@ async fn r01_3_a_remote_host_is_not_handed_what_r0_would_refuse() {
         ),
         (
             owner_approved,
-            "an agent's spawn its owner approved onto the laptop (§3: an agent's control)",
+            "an agent's spawn its owner approved onto the laptop before A′ (§3: an agent's control)",
         ),
     ];
     for (requester, session, kind, payload, why) in [
@@ -2342,4 +2368,361 @@ async fn r01_4_a_rejection_is_judged_on_the_card_not_the_pick() {
         "picking the laptop does not make a team-box card the owner's: {receipt}"
     );
     assert_eq!(control_row(&su, team).await.0, "denied");
+}
+
+// ---------------------------------------------------------------------------
+// R0.1 (A′) — an agent's spawn is refused where the row would be made
+// ---------------------------------------------------------------------------
+
+/// The newest run in `workspace` — the one the last mention started.
+async fn latest_run(su: &PgPool, workspace: Uuid) -> Uuid {
+    sqlx::query_scalar(
+        "SELECT id FROM agent_run WHERE workspace_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1",
+    )
+    .bind(workspace)
+    .fetch_one(su)
+    .await
+    .expect("the mention started a run")
+}
+
+async fn run_status(su: &PgPool, run: Uuid) -> String {
+    sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id = $1")
+        .bind(run)
+        .fetch_one(su)
+        .await
+        .expect("read run status")
+}
+
+async fn approvals_in(su: &PgPool, workspace: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM approval WHERE workspace_id = $1")
+        .bind(workspace)
+        .fetch_one(su)
+        .await
+        .expect("count approvals")
+}
+
+/// The owner mentions the agent, which starts a real run.
+async fn mention_agent(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    tenant: &Tenant,
+    body: &str,
+) {
+    let sent = http
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            tenant.workspace, tenant.channel
+        ))
+        .bearer_auth(token)
+        .json(&json!({"clientMsgId": Uuid::new_v4(), "body": body}))
+        .send()
+        .await
+        .expect("send mention");
+    assert_eq!(sent.status(), 201, "the mention is sent");
+}
+
+/// A real worker whose mock model asks for `work.session.spawn` once.
+fn spawn_worker(worker_pool: &PgPool, call_id: &str, arguments: Value) -> AgentWorker {
+    let call = ProviderToolCall {
+        id: call_id.to_string(),
+        name: momo_agent::tools::WORK_SESSION_SPAWN.to_string(),
+        arguments: arguments.to_string(),
+    };
+    AgentWorker::new(
+        worker_pool.clone(),
+        Arc::new(MockChatProvider::echo().with_tool_calls([vec![call], vec![]])),
+        WorkerConfig::for_target(database_url()),
+    )
+}
+
+/// **RED PROOF — 결정 시점 거부 (A′).** An agent's spawn is not approved onto
+/// a member-scoped host by anyone — its owner included — on either producer of
+/// a spawn card, and the refusal writes nothing: the card stays pending so the
+/// decider can still send the work to a team box, which then works.
+///
+/// * **The REST ledger's card.** The agent asks for the team box; the card
+///   defaults to the owner's laptop. The owner approving onto the laptop, by
+///   name or by the default, is 403 `member_host_agent_control_refused`: the
+///   control stays `pending_approval`, no row is added, the laptop is told
+///   nothing. Onto the team box it dispatches.
+/// * **The spawn tool's card**, driven through the real worker: the model names
+///   no host, the card defaults to the laptop, the same refusal holds — the run
+///   stays parked, no control and no session exist — and approving onto the
+///   team box resumes the run and starts the session there.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn r01_5_an_agents_spawn_is_not_approved_onto_a_member_host() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let worker_pool = role_pool("momo_worker", &momo_worker_password()).await;
+    let base = start_server(app_pool.clone()).await;
+    let http = reqwest::Client::new();
+
+    // ---- the REST ledger's card ---------------------------------------------
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let (laptop, _) = seed_laptop(&su, &tenant).await;
+    let vps = seed_team_box(&su, &tenant, "팀 VPS").await;
+    let run = seed_run(&su, &tenant).await;
+    let owner_token = login(&http, &base, tenant.workspace, &tenant.owner_email).await;
+    let bearer = agent_bearer(&su, &tenant).await;
+
+    let control = request_spawn(&http, &base, &bearer, &tenant, run, vps, TOOL, "리팩터링").await;
+    let approval = approval_for(&su, control).await;
+    assert_eq!(
+        approval_payload(&su, approval).await["execution"]["default_host_id"],
+        json!(laptop.to_string()),
+        "the card defaults to the owner's laptop"
+    );
+    let rows = control_count(&su, tenant.workspace).await;
+    for (pick, why) in [
+        (
+            Some(laptop),
+            "the owner approving onto their laptop by name",
+        ),
+        (None, "the owner approving the card's default, the laptop"),
+    ] {
+        let (status, receipt) = decide(
+            &http,
+            &base,
+            &owner_token,
+            tenant.workspace,
+            approval,
+            true,
+            pick,
+        )
+        .await;
+        assert_eq!(status, 403, "{why}: {receipt}");
+        assert_eq!(
+            receipt["status"],
+            json!("member_host_agent_control_refused"),
+            "{why}: {receipt}"
+        );
+        let (state, target, _) = control_row(&su, control).await;
+        assert_eq!(
+            (state.as_str(), target),
+            ("pending_approval", vps),
+            "{why}: the control did not move"
+        );
+        assert_eq!(approval_status(&su, approval).await, "pending", "{why}");
+        assert_eq!(
+            control_count(&su, tenant.workspace).await,
+            rows,
+            "{why}: no row"
+        );
+        assert_eq!(
+            dispatched_to(&su, tenant.workspace, laptop).await,
+            0,
+            "{why}"
+        );
+    }
+    let (status, receipt) = decide(
+        &http,
+        &base,
+        &owner_token,
+        tenant.workspace,
+        approval,
+        true,
+        Some(vps),
+    )
+    .await;
+    assert_eq!(status, 200, "the same card, onto the team box: {receipt}");
+    let (state, target, _) = control_row(&su, control).await;
+    assert_eq!((state.as_str(), target), ("dispatched", vps));
+
+    // ---- the spawn tool's card -------------------------------------------------
+    let tool_tenant = seed_tenant(&su, &app_pool).await;
+    let (tool_laptop, _) = seed_laptop(&su, &tool_tenant).await;
+    let tool_vps = seed_team_box(&su, &tool_tenant, "팀 VPS").await;
+    let tool_owner = login(
+        &http,
+        &base,
+        tool_tenant.workspace,
+        &tool_tenant.owner_email,
+    )
+    .await;
+    mention_agent(
+        &http,
+        &base,
+        &tool_owner,
+        &tool_tenant,
+        "@hermes 코덱스 세션 하나 띄워줘",
+    )
+    .await;
+    let tool_run = latest_run(&su, tool_tenant.workspace).await;
+    let worker = spawn_worker(
+        &worker_pool,
+        "call_spawn_a_prime",
+        json!({"tool": TOOL, "label": "도구 카드"}),
+    );
+    worker.drain_once().await.expect("first drain");
+    assert_eq!(run_status(&su, tool_run).await, "awaiting_approval");
+    let tool_approval: Uuid = sqlx::query_scalar(
+        "SELECT id FROM approval WHERE workspace_id = $1 AND status = 'pending'",
+    )
+    .bind(tool_tenant.workspace)
+    .fetch_one(&su)
+    .await
+    .expect("the spawn raised a card");
+    assert_eq!(
+        approval_payload(&su, tool_approval).await["execution"]["default_host_id"],
+        json!(tool_laptop.to_string()),
+        "a call that names no host gets a card, defaulting to the laptop"
+    );
+
+    let (status, receipt) = decide(
+        &http,
+        &base,
+        &tool_owner,
+        tool_tenant.workspace,
+        tool_approval,
+        true,
+        None,
+    )
+    .await;
+    assert_eq!(status, 403, "the tool's card onto the laptop: {receipt}");
+    assert_eq!(
+        receipt["status"],
+        json!("member_host_agent_control_refused")
+    );
+    assert_eq!(approval_status(&su, tool_approval).await, "pending");
+    assert_eq!(run_status(&su, tool_run).await, "awaiting_approval");
+    assert_eq!(control_count(&su, tool_tenant.workspace).await, 0, "no row");
+    assert_eq!(
+        sessions_on(&su, tool_tenant.workspace, tool_laptop).await,
+        0
+    );
+
+    let (status, receipt) = decide(
+        &http,
+        &base,
+        &tool_owner,
+        tool_tenant.workspace,
+        tool_approval,
+        true,
+        Some(tool_vps),
+    )
+    .await;
+    assert_eq!(status, 200, "onto the team box: {receipt}");
+    worker.drain_once().await.expect("resume drain");
+    assert_eq!(
+        sessions_on(&su, tool_tenant.workspace, tool_vps).await,
+        1,
+        "the approved spawn started on the team box"
+    );
+    assert_eq!(
+        sessions_on(&su, tool_tenant.workspace, tool_laptop).await,
+        0
+    );
+    assert_eq!(
+        dispatched_to(&su, tool_tenant.workspace, tool_laptop).await,
+        0
+    );
+}
+
+/// **RED PROOF — 요청 시점 거부 (A′).** A `work.session.spawn` whose `host_id`
+/// names the owner's laptop is refused as the call arrives, through the real
+/// worker: no approval, no card, no control, no session — the run is not
+/// parked on anybody. The model is answered with a `tool_result` that carries
+/// `remote_host_kill_only`, the word the REST ledger gives the same request.
+///
+/// The same call naming the team box still raises its card, so the refusal is
+/// about the host the call named, not about the tool.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn r01_6_a_spawn_call_that_names_a_member_host_is_refused() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let worker_pool = role_pool("momo_worker", &momo_worker_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let (laptop, _) = seed_laptop(&su, &tenant).await;
+    let vps = seed_team_box(&su, &tenant, "팀 VPS").await;
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let owner_token = login(&http, &base, tenant.workspace, &tenant.owner_email).await;
+
+    // ---- the call names the laptop -------------------------------------------
+    mention_agent(
+        &http,
+        &base,
+        &owner_token,
+        &tenant,
+        "@hermes 내 맥에서 코덱스 띄워줘",
+    )
+    .await;
+    let refused_run = latest_run(&su, tenant.workspace).await;
+    spawn_worker(
+        &worker_pool,
+        "call_spawn_laptop",
+        json!({"tool": TOOL, "label": "노트북에서", "host_id": laptop.to_string()}),
+    )
+    .drain_once()
+    .await
+    .expect("drain");
+
+    assert_eq!(
+        approvals_in(&su, tenant.workspace).await,
+        0,
+        "no card was raised for a call that names the laptop"
+    );
+    assert_ne!(
+        run_status(&su, refused_run).await,
+        "awaiting_approval",
+        "and the run is not parked on anybody"
+    );
+    assert_eq!(control_count(&su, tenant.workspace).await, 0);
+    assert_eq!(sessions_on(&su, tenant.workspace, laptop).await, 0);
+    let answer: Value = sqlx::query_scalar(
+        "SELECT props FROM message \
+          WHERE workspace_id = $1 AND run_id = $2 AND type = 'tool_result'",
+    )
+    .bind(tenant.workspace)
+    .bind(refused_run)
+    .fetch_one(&su)
+    .await
+    .expect("the refusal stands beside the call as its tool_result");
+    assert_eq!(answer["is_error"], json!(true), "{answer}");
+    assert!(
+        answer["output"]
+            .as_str()
+            .is_some_and(|output| output.contains("remote_host_kill_only")),
+        "the model is told why, in the REST ledger's word: {answer}"
+    );
+
+    // ---- the same call, naming the team box ----------------------------------
+    mention_agent(
+        &http,
+        &base,
+        &owner_token,
+        &tenant,
+        "@hermes 팀 VPS에서 코덱스 띄워줘",
+    )
+    .await;
+    let carded_run = latest_run(&su, tenant.workspace).await;
+    assert_ne!(carded_run, refused_run);
+    spawn_worker(
+        &worker_pool,
+        "call_spawn_team_box",
+        json!({"tool": TOOL, "label": "팀 VPS에서", "host_id": vps.to_string()}),
+    )
+    .drain_once()
+    .await
+    .expect("drain");
+    assert_eq!(run_status(&su, carded_run).await, "awaiting_approval");
+    let payload: Value = sqlx::query_scalar(
+        "SELECT payload FROM approval WHERE workspace_id = $1 AND status = 'pending'",
+    )
+    .bind(tenant.workspace)
+    .fetch_one(&su)
+    .await
+    .expect("a call that names the team box raises its card");
+    assert_eq!(
+        payload["execution"]["requested_host_id"],
+        json!(vps.to_string())
+    );
 }

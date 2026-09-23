@@ -458,6 +458,12 @@ pub async fn fetch_work_control_in_tx(
 ///   [`remote_host_refuses_tool_in_tx`] applies before a decision (one SQL
 ///   text for both, `shell_tool_sql`).
 ///
+/// Since R0.1 (A′) no entry point *makes* such a row any more — the decision
+/// route will not approve an agent's spawn onto a remote host, and the spawn
+/// tool refuses a call that names one — so this clause is the defence in depth
+/// for the rows made before that: pre-R0 dispatches, and approvals granted in
+/// between.
+///
 /// A withheld row is **left `dispatched`**, not failed, for the reasons the
 /// control-window clause above gives and one more: this is a `GET`, and a poll
 /// that settled ledger rows would make their outcome depend on when a host
@@ -950,6 +956,13 @@ pub fn target_host_scope_allows(host: &TargetWorkHost, session_owner_member_id: 
 // ([`REFUSAL_WORKSPACE_HOST_ADMIN_REQUIRED`],
 // [`REFUSAL_APP_HOST_MEMBER_SCOPE_REQUIRED`], enforced by the register route).
 //
+// R0.1 (A′) then enforces 「에이전트 컨트롤은 kill만」 where such a row would be
+// **made**, so the ledger never holds a dispatched agent spawn the poll would
+// only withhold: the decision route refuses to approve an agent's spawn onto a
+// remote host ([`REFUSAL_MEMBER_HOST_AGENT_CONTROL`]), the spawn tool refuses a
+// call that names one ([`REFUSAL_REMOTE_HOST_KILL_ONLY`]), and the executor
+// re-checks both. The poll's clause stays, as the defence for rows made before.
+//
 // Workspace-scoped hosts are outside goal A (ADR-0188 D3) and keep every rule
 // they had.
 
@@ -1005,6 +1018,15 @@ pub const REFUSAL_WORKSPACE_HOST_ADMIN_REQUIRED: &str = "workspace_host_admin_re
 /// machine, tier `local`) asked to be registered workspace-scoped. It is a
 /// remote host whatever scope it names, so it registers `member` or not at all.
 pub const REFUSAL_APP_HOST_MEMBER_SCOPE_REQUIRED: &str = "app_host_member_scope_required";
+/// ADR-0188 R0.1 (A′, #2582) — an **approval** would send an agent's non-`kill`
+/// control to a remote host: a person approving an agent's spawn card onto a
+/// member-scoped host, or the executor about to run such an approved spawn.
+///
+/// The request-side twin is [`REFUSAL_REMOTE_HOST_KILL_ONLY`] — the agent
+/// *asked* for it (the REST ledger, or `work.session.spawn` naming the host).
+/// Two words because two different acts are refused, and the reader of each is
+/// different: this one is answered to whoever decided, that one to the agent.
+pub const REFUSAL_MEMBER_HOST_AGENT_CONTROL: &str = "member_host_agent_control_refused";
 
 /// ADR-0188 D3 — 「에이전트 컨트롤은 kill만(불변식)」: may an **agent bearer**
 /// address a control of this kind to a host of this scope?
@@ -1018,6 +1040,31 @@ pub const REFUSAL_APP_HOST_MEMBER_SCOPE_REQUIRED: &str = "app_host_member_scope_
 /// an agent's own request.
 pub fn agent_control_allowed(host_scope: &str, kind: &str) -> bool {
     host_scope != HOST_SCOPE_MEMBER || kind == KIND_KILL
+}
+
+/// Is this member an agent (`member.kind = 'agent'`)?
+///
+/// ADR-0188 R0.1 (A′) asks it of whoever **originated** a control before an
+/// approval may send it to a remote host — an approval's `requested_by`, which
+/// is the requesting agent on both spawn producers (the REST ledger's card and
+/// the `work.session.spawn` tool's). Soft-deleted members keep their kind, so a
+/// departed agent's request is still an agent's.
+pub async fn member_is_agent_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<bool, T3Error> {
+    let agent: bool = sqlx::query_scalar(
+        "SELECT EXISTS ( \
+                  SELECT 1 FROM member \
+                   WHERE id = $2 AND workspace_id = $1 AND kind = 'agent' \
+                )",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(agent)
 }
 
 /// The owner a decision about work headed to this host must come from — or
@@ -2179,6 +2226,7 @@ mod tests {
             REFUSAL_REMOTE_HOST_OWNER_REQUIRED,
             REFUSAL_WORKSPACE_HOST_ADMIN_REQUIRED,
             REFUSAL_APP_HOST_MEMBER_SCOPE_REQUIRED,
+            REFUSAL_MEMBER_HOST_AGENT_CONTROL,
         ];
         for (index, code) in codes.iter().enumerate() {
             assert!(code.chars().all(|c| c.is_ascii_lowercase() || c == '_'));
