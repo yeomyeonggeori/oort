@@ -4,22 +4,26 @@
 # multi-platform manifest digest immutable; tags are only human-readable hints.
 FROM pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e AS packages-amd64
 
-# apt.postgresql.org package bytes are pinned independently of repository
-# metadata so a republish or moving package index fails at the Docker layer.
+# Package bytes are pinned independently of repository metadata so a republish
+# or moving package index fails at the Docker layer. The URLs are permanent
+# archives (#2572): the live deb.debian.org and apt.postgresql.org pools delete
+# superseded versions (libssh2 1.11.1-1+deb13u1 went 404 at Debian 13.7 and
+# failed the v0.1.6 publish), while snapshot.debian.org and
+# apt-archive.postgresql.org keep every published file at a fixed path.
 ADD --checksum=sha256:2ff822645a132ce71f215ae4355d050c6c542143ea6a267cb433acf6413b1a3e \
-    https://apt.postgresql.org/pub/repos/apt/pool/main/p/pgbackrest/pgbackrest_2.59.0-1.pgdg13%2B1_amd64.deb \
+    https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/pgbackrest/pgbackrest_2.59.0-1.pgdg13%2B1_amd64.deb \
     /packages/pgbackrest.deb
-ADD --checksum=sha256:915c4ec450a369d430e0151f9e10e25044ea2f0d6e41901e00a9317e232e5683 \
-    https://deb.debian.org/debian/pool/main/libs/libssh2/libssh2-1t64_1.11.1-1%2Bdeb13u1_amd64.deb \
+ADD --checksum=sha256:dbb1024c192d4d292b7cfa902b96076cfe81b56a5eed4fb28da36e8bf543e49a \
+    https://snapshot.debian.org/archive/debian/20260905T205002Z/pool/main/libs/libssh2/libssh2-1t64_1.11.1-1%2Bdeb13u2_amd64.deb \
     /packages/libssh2.deb
 
 FROM pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e AS packages-arm64
 
 ADD --checksum=sha256:bb42e82a8c02a556b98e2002f4ea2aa14675d34627ba4025351e56c9c520fc20 \
-    https://apt.postgresql.org/pub/repos/apt/pool/main/p/pgbackrest/pgbackrest_2.59.0-1.pgdg13%2B1_arm64.deb \
+    https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/pgbackrest/pgbackrest_2.59.0-1.pgdg13%2B1_arm64.deb \
     /packages/pgbackrest.deb
-ADD --checksum=sha256:600c2a845d6d14d292c765382bc7e644898762e1634a4aecf5b85329622dbbfe \
-    https://deb.debian.org/debian/pool/main/libs/libssh2/libssh2-1t64_1.11.1-1%2Bdeb13u1_arm64.deb \
+ADD --checksum=sha256:245565f4ce5493d67a3c54e26bc3d9cf28b1b70eeb912de7cda61af52268017d \
+    https://snapshot.debian.org/archive/debian/20260905T205002Z/pool/main/libs/libssh2/libssh2-1t64_1.11.1-1%2Bdeb13u2_arm64.deb \
     /packages/libssh2.deb
 
 FROM pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e AS runtime
@@ -32,7 +36,7 @@ LABEL org.opencontainers.image.title="oort PostgreSQL 18 + pgBackRest" \
       org.opencontainers.image.revision="${MOMO_BUILD_SHA}" \
       com.oor7.oort.postgres-base.digest="sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e" \
       com.oor7.oort.pgbackrest.version="2.59.0-1.pgdg13+1" \
-      com.oor7.oort.libssh2.version="1.11.1-1+deb13u1" \
+      com.oor7.oort.libssh2.version="1.11.1-1+deb13u2" \
       com.oor7.oort.additive-licenses="MIT AND BSD-3-Clause AND ISC"
 
 COPY --from=packages-amd64 /packages/ /tmp/packages/amd64/
@@ -53,11 +57,11 @@ RUN set -eux; \
     test "$(dpkg-deb -f "$package_dir/pgbackrest.deb" Version)" = "2.59.0-1.pgdg13+1"; \
     test "$(dpkg-deb -f "$package_dir/pgbackrest.deb" Architecture)" = "$TARGETARCH"; \
     test "$(dpkg-deb -f "$package_dir/libssh2.deb" Package)" = "libssh2-1t64"; \
-    test "$(dpkg-deb -f "$package_dir/libssh2.deb" Version)" = "1.11.1-1+deb13u1"; \
+    test "$(dpkg-deb -f "$package_dir/libssh2.deb" Version)" = "1.11.1-1+deb13u2"; \
     test "$(dpkg-deb -f "$package_dir/libssh2.deb" Architecture)" = "$TARGETARCH"; \
     dpkg -i "$package_dir/libssh2.deb" "$package_dir/pgbackrest.deb"; \
     test "$(dpkg-query -W -f='${Version}' pgbackrest)" = "2.59.0-1.pgdg13+1"; \
-    test "$(dpkg-query -W -f='${Version}' libssh2-1t64)" = "1.11.1-1+deb13u1"; \
+    test "$(dpkg-query -W -f='${Version}' libssh2-1t64)" = "1.11.1-1+deb13u2"; \
     test "$(pgbackrest version)" = "pgBackRest 2.59.0"; \
     grep -Fxq 'License: MIT' /usr/share/doc/pgbackrest/copyright; \
     grep -Fxq 'License: BSD3' /usr/share/doc/libssh2-1t64/copyright; \
