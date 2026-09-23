@@ -37,11 +37,22 @@
 //!   settings tier, which applies with `settingSources: []`: the SDK documents
 //!   `permissions.blockReadsOutsideWorkingDirectories` as "Refuse file-tool
 //!   reads (Read, Grep, Glob, LSP) outside the working directories in every
-//!   permission mode", and [`CLAUDE_READ_DENY`] denies the usual credential
+//!   permission mode", and [`claude_read_deny`] denies the usual credential
 //!   files inside the folder. Measured with the real adapter and Claude Code
 //!   2.1.280: with the fence, a `Read` of `/etc/hosts` failed without even a
 //!   permission request, and `cat /etc/hosts` reached the permission bridge
 //!   (and was denied).
+//!
+//!   Read-only commands that name no file — `grep -r pattern .` — run without
+//!   a permission request in every mode and are not held to the Read rules:
+//!   measured, such a grep read the folder's `.env` (#2607 N-1). So Bash runs
+//!   in Claude Code's OS sandbox, set through the same settings tier:
+//!   `sandbox.enabled` with `failIfUnavailable` (no sandbox → no session, not
+//!   an unsandboxed one), `autoAllowBashIfSandboxed: false` (the default,
+//!   `true`, would let every sandboxed command run without asking),
+//!   `allowUnsandboxedCommands: false` (no way out of it), the credential
+//!   patterns as `filesystem.denyRead` and the owner's credential folders as
+//!   `credentials.files` denies.
 //! * **Codex — admitted inside its sandbox (ADR-0188 §8, 2026-09-24).**
 //!   `@agentclientprotocol/codex-acp` 1.13.0 has three presets and sends the
 //!   chosen preset's approval policy and sandbox on every turn. The strictest,
@@ -247,8 +258,23 @@ impl AdapterKind {
                             "permissions": {
                                 "blockReadsOutsideWorkingDirectories": true,
                                 "disableBypassPermissionsMode": "disable",
-                                "deny": CLAUDE_READ_DENY,
-                            }
+                                "deny": claude_read_deny(),
+                            },
+                            // #2607 N-1: read-only commands that name no file
+                            // (`grep -r pattern .`) run without a permission
+                            // request in every mode and are not held to the
+                            // Read rules; the OS sandbox holds them. Every Bash
+                            // command runs in it, none may leave it, a missing
+                            // sandbox stops the session instead of running
+                            // unsandboxed, and a sandboxed command still asks.
+                            "sandbox": {
+                                "enabled": true,
+                                "failIfUnavailable": true,
+                                "autoAllowBashIfSandboxed": false,
+                                "allowUnsandboxedCommands": false,
+                                "filesystem": {"denyRead": CLAUDE_SANDBOX_DENY_READ},
+                                "credentials": {"files": claude_credential_files()},
+                            },
                         },
                     }
                 }
@@ -259,31 +285,68 @@ impl AdapterKind {
 }
 
 /// Credential files a remote Claude session may not read even inside the
-/// allowed folder (the fence already covers everything outside it), plus the
-/// owner's own credential directories for a folder that happens to contain
-/// them. Claude Code permission-rule syntax: `~/` is the home directory, `**`
-/// any depth.
-pub const CLAUDE_READ_DENY: &[&str] = &[
-    "Read(**/.env)",
-    "Read(**/.env.*)",
-    "Read(**/*.pem)",
-    "Read(**/*.key)",
-    "Read(**/id_rsa*)",
-    "Read(**/id_ecdsa*)",
-    "Read(**/id_ed25519*)",
-    "Read(**/.npmrc)",
-    "Read(**/.pypirc)",
-    "Read(**/.netrc)",
-    "Read(**/.git-credentials)",
-    "Read(~/.ssh/**)",
-    "Read(~/.aws/**)",
-    "Read(~/.gnupg/**)",
-    "Read(~/.config/gh/**)",
-    "Read(~/.docker/config.json)",
-    "Read(~/.kube/**)",
-    "Read(~/.codex/**)",
-    "Read(~/.claude/**)",
+/// allowed folder, as glob patterns (`**` any depth): the Read rules name
+/// them for Claude's file tools, and the same patterns go to the OS sandbox
+/// for Bash (#2607 N-1 widened the list).
+pub const CLAUDE_SANDBOX_DENY_READ: &[&str] = &[
+    "**/.env",
+    "**/.env.*",
+    "**/.envrc",
+    "**/*.pem",
+    "**/*.key",
+    "**/*.p12",
+    "**/*.pfx",
+    "**/*.ppk",
+    "**/id_rsa*",
+    "**/id_dsa*",
+    "**/id_ecdsa*",
+    "**/id_ed25519*",
+    "**/.npmrc",
+    "**/.pypirc",
+    "**/.netrc",
+    "**/.pgpass",
+    "**/.git-credentials",
+    "**/credentials*.json",
+    "**/*.tfvars",
+    "**/*.tfstate",
 ];
+
+/// The owner's own credential directories and files, for a folder that
+/// happens to reach them: denied to the file tools and, as sandbox credential
+/// entries, to every Bash command.
+pub const CLAUDE_HOME_CREDENTIALS: &[&str] = &[
+    "~/.ssh",
+    "~/.aws",
+    "~/.gnupg",
+    "~/.config/gh",
+    "~/.docker/config.json",
+    "~/.kube",
+    "~/.codex",
+    "~/.claude",
+];
+
+/// The permission deny rules: every sandbox pattern as a `Read(…)` rule, and
+/// every home credential path (with `/**` for a directory).
+pub fn claude_read_deny() -> Vec<String> {
+    CLAUDE_SANDBOX_DENY_READ
+        .iter()
+        .map(|pattern| format!("Read({pattern})"))
+        .chain(CLAUDE_HOME_CREDENTIALS.iter().map(|path| {
+            if path.ends_with(".json") {
+                format!("Read({path})")
+            } else {
+                format!("Read({path}/**)")
+            }
+        }))
+        .collect()
+}
+
+fn claude_credential_files() -> Vec<Value> {
+    CLAUDE_HOME_CREDENTIALS
+        .iter()
+        .map(|path| json!({"path": path, "mode": "deny"}))
+        .collect()
+}
 
 // ---------------------------------------------------------------------------
 // launch
@@ -930,6 +993,17 @@ mod tests {
         assert_eq!(params["cwd"], "/work/repo");
     }
 
+    /// Not a check: prints the exact `session/new` `_meta` the host sends a
+    /// Claude session, for measuring it against the real adapter
+    /// (`cargo test -p momo-workd --lib claude_meta_for_measurement --
+    /// --ignored --nocapture`).
+    #[test]
+    #[ignore = "prints the Claude `_meta` for a measurement"]
+    fn claude_meta_for_measurement() {
+        let params = session_new_params(AdapterKind::Claude, Path::new("/"));
+        println!("{}", params["_meta"]);
+    }
+
     #[test]
     fn claude_is_isolated_through_session_meta() {
         let params = session_new_params(AdapterKind::Claude, Path::new("/work/repo"));
@@ -957,9 +1031,32 @@ mod tests {
             .iter()
             .map(|rule| rule.as_str().unwrap())
             .collect();
-        for rule in ["Read(~/.ssh/**)", "Read(~/.codex/**)", "Read(**/.env)"] {
+        for rule in [
+            "Read(~/.ssh/**)",
+            "Read(~/.codex/**)",
+            "Read(**/.env)",
+            "Read(**/.envrc)",
+            "Read(**/credentials*.json)",
+            "Read(**/*.tfstate)",
+            "Read(~/.docker/config.json)",
+        ] {
             assert!(deny.contains(&rule), "{rule} is denied");
         }
+        // #2607 N-1: Bash runs in the OS sandbox, cannot leave it, still asks,
+        // and is refused outright where no sandbox can start.
+        let sandbox = &options["settings"]["sandbox"];
+        assert_eq!(sandbox["enabled"], true);
+        assert_eq!(sandbox["failIfUnavailable"], true);
+        assert_eq!(sandbox["autoAllowBashIfSandboxed"], false);
+        assert_eq!(sandbox["allowUnsandboxedCommands"], false);
+        assert_eq!(
+            sandbox["filesystem"]["denyRead"],
+            json!(CLAUDE_SANDBOX_DENY_READ)
+        );
+        assert!(sandbox["credentials"]["files"]
+            .as_array()
+            .unwrap()
+            .contains(&json!({"path": "~/.ssh", "mode": "deny"})));
         assert!(AdapterKind::Claude
             .isolation_env(&codex_fixture())
             .is_empty());

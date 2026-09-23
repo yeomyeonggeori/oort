@@ -560,11 +560,25 @@ async fn inv_4_round_trip_events_idle_input_kill() {
             "settingSources": [],
             "strictMcpConfig": true,
             "allowDangerouslySkipPermissions": false,
-            "settings": {"permissions": {
-                "blockReadsOutsideWorkingDirectories": true,
-                "disableBypassPermissionsMode": "disable",
-                "deny": momo_workd::policy::CLAUDE_READ_DENY,
-            }},
+            "settings": {
+                "permissions": {
+                    "blockReadsOutsideWorkingDirectories": true,
+                    "disableBypassPermissionsMode": "disable",
+                    "deny": momo_workd::policy::claude_read_deny(),
+                },
+                // #2607 N-1: every Bash command in the OS sandbox.
+                "sandbox": {
+                    "enabled": true,
+                    "failIfUnavailable": true,
+                    "autoAllowBashIfSandboxed": false,
+                    "allowUnsandboxedCommands": false,
+                    "filesystem": {"denyRead": momo_workd::policy::CLAUDE_SANDBOX_DENY_READ},
+                    "credentials": {"files": momo_workd::policy::CLAUDE_HOME_CREDENTIALS
+                        .iter()
+                        .map(|path| json!({"path": path, "mode": "deny"}))
+                        .collect::<Vec<_>>()},
+                },
+            },
         })
     );
     let initialize = log

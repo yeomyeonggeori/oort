@@ -120,6 +120,23 @@ pub fn check_parent_folder(path: &Path) -> Result<(), ConfigError> {
     }
 }
 
+/// The allowed folder is a project folder: not `/`, not the home folder, and
+/// not a folder above it (#2607 N-1). Those would put the owner's credential
+/// folders inside the read fence and under every command's reach.
+pub fn check_working_directory(folder: &Path, home: Option<&Path>) -> Result<(), String> {
+    let resolve = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let folder = resolve(folder);
+    let too_wide =
+        folder.parent().is_none() || home.is_some_and(|home| resolve(home).starts_with(&folder));
+    if too_wide {
+        return Err(format!(
+            "working_directory {} is `/`, the home folder or above it; allow a project folder",
+            folder.display()
+        ));
+    }
+    Ok(())
+}
+
 fn default_poll_interval_ms() -> u64 {
     2_000
 }
@@ -206,6 +223,9 @@ impl WorkdConfig {
         if !self.working_directory.is_absolute() {
             return invalid("working_directory must be an absolute path".to_string());
         }
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        check_working_directory(&self.working_directory, home.as_deref())
+            .map_err(ConfigError::Invalid)?;
         if !self.state_path.is_absolute() {
             return invalid("state_path must be an absolute path".to_string());
         }
@@ -487,6 +507,29 @@ mod tests {
         .unwrap();
         assert_eq!(HostState::load(&path).unwrap().scope, "");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_allowed_folder_is_a_project_folder() {
+        let home = Path::new("/Users/me");
+        for wide in ["/", "/Users", "/Users/me", "/Users/me/"] {
+            assert!(
+                check_working_directory(Path::new(wide), Some(home)).is_err(),
+                "{wide}"
+            );
+        }
+        for project in ["/Users/me/src/app", "/opt/work"] {
+            assert!(
+                check_working_directory(Path::new(project), Some(home)).is_ok(),
+                "{project}"
+            );
+        }
+        // A config naming the home folder is refused at load.
+        let mut value = base_json();
+        value["working_directory"] = std::env::var("HOME").unwrap().into();
+        assert!(
+            matches!(parse(value), Err(ConfigError::Invalid(message)) if message.contains("home folder"))
+        );
     }
 
     #[test]
