@@ -1,0 +1,58 @@
+appId: app.momo.ios
+name: 91-jump-pills-capture
+---
+# 91-jump-pills-capture — 두 점프 필과, 각각을 **정말로 누른 뒤**의 착지 (#1892).
+#
+# `-momoMeasure JUMP-PILLS` 표면은 저 혼자 두 필이 함께 서는 자리까지 간다
+# (`measure/surfaces.tsx` 의 `JumpPillsStage`: 목록 가운데로 옮기고 남의 말 두 통을
+# 받는다). 누르는 것은 이 흐름이 한다. 표면이 스스로 스크롤해 「착지」를 흉내 내면
+# 사진은 필이 아니라 흉내를 찍는다.
+#
+# 90-mention-sheet-capture 와 같은 까닭으로 `launchApp` 이 없다 — 앱을 다시 띄우면
+# 계측 인자가 아니라 보통의 앱이 뜬다. 로그인도 서버도 필요 없다.
+#
+#   xcrun simctl launch booted app.momo.ios --args \
+#     -momoMeasure JUMP-PILLS -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro test clients/mobile/maestro/91-jump-pills-capture.yaml
+#
+# 라이트는 `LIGHT-JUMP-PILLS`(스킴 접두사 — `measure/root.ts`).
+#
+# 세 장:
+#   jump-pills-both          위 「새 메시지 28개 보기」(동결) + 아래 「새 메시지 2개 보기」
+#   jump-pills-after-unread  위 필을 누른 뒤 — 구분선이 창 맨 위, 위 필은 래치로 사라짐
+#   jump-pills-after-latest  아래 필을 누른 뒤 — 가장 새 메시지, 두 필 다 없음
+- extendedWaitUntil:
+    visible:
+      id: "jump-unread"
+    timeout: 60000
+- extendedWaitUntil:
+    visible: "새 메시지 2개 보기"
+    timeout: 20000
+- takeScreenshot: jump-pills-both
+
+- tapOn:
+    id: "jump-unread"
+- extendedWaitUntil:
+    notVisible:
+      id: "jump-unread"
+    timeout: 10000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: jump-pills-after-unread
+
+- tapOn:
+    id: "jump-latest"
+- extendedWaitUntil:
+    notVisible:
+      id: "jump-latest"
+    timeout: 10000
+# 착지의 증거는 좌표가 아니라 **도착한 줄**이다. 떠난 뒤 붙은 두 통 중 마지막
+# 줄이 화면에 서야 이 사진을 찍는다 — 빈 목록 위의 「애니메이션 끝」은 끝이 아니다.
+# 부분 일치(정규식)다. 행은 작성자·시각·본문을 한 접근성 요소로 읽히므로, 본문
+# 한 줄과 **완전 일치**하는 요소는 없다(첫 판이 화면에 그 줄이 있는데도 실패했다).
+- extendedWaitUntil:
+    visible: ".*배포 창 10시 확정으로 공지 올렸습니다.*"
+    timeout: 10000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: jump-pills-after-latest

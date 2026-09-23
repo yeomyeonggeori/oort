@@ -7,9 +7,11 @@ import {
   line,
   radius,
   SAFE_GUTTER,
+  slopTo,
   space,
   TOUCH_TARGET,
 } from '../src/design/tokens';
+import {PILL_HEIGHT} from '../src/features/conversation/JumpPill';
 
 // =============================================================================
 // 오르트 구름 — 비색(非色) 축의 웹 정본 대조 (#1211 D2·D3)
@@ -141,6 +143,13 @@ describe('간격 축이 웹 정본과 같은 표 위에 있다', () => {
     // (웹 `--tap-target`, 폰 `TOUCH_TARGET`), 24(`--touch-target`)는 폰에 짝이 없다.
     // 앞의 절반은 여기서 대조되고, 뒤의 절반은 아래 목록에 열거된다.
     expect(TOUCH_TARGET).toBe(webPx('tap-target'));
+  });
+
+  it('점프 필의 보이는 높이가 웹 --spacing-control-sm 과 같다 (#1892 R1 M-5)', () => {
+    // 폰에 손으로 옮겨 적은 28 이었고 짝 표에 없었다 — 웹이 값을 바꿔도 아무것도
+    // 빨개지지 않았다. 같은 필의 **보이는 상자**라 값이 같아야 한다. 터치 44 를
+    // 채우는 길은 두 클라가 다르다(아래 터치 타깃 절, `JumpPill.tsx` 머리말).
+    expect(PILL_HEIGHT).toBe(webPx('spacing-control-sm'));
   });
 
   it('첨부 트레이 상한이 웹 --spacing-tray-max 와 같다', () => {
@@ -602,6 +611,21 @@ describe('터치 타깃 — 44 는 손으로 적는 값이 아니라 도출되�
 
   it('손으로 적은 hitSlop 이 잔량 안에 있다', () => {
     expectWithinRemaining(sweep(/hitSlop=\{[^}]*\d[^}]*\}/, () => true), REMAINING);
+  });
+
+  it('점프 필은 보이는 상자에 여유 영역을 더해 정확히 44 를 받는다 (#1892 R1 M-5)', () => {
+    // 폰의 결정: 떠 있는 필이 줄을 덜 덮도록 상자는 웹 컨트롤 높이로 두고, 손가락이
+    // 받는 44 는 `slopTo` 가 채운다. 이 합이 44 에서 벗어나면 결정의 절반이 무너진다.
+    expect(PILL_HEIGHT + 2 * slopTo(PILL_HEIGHT)).toBe(TOUCH_TARGET);
+  });
+
+  it('웹은 터치 기기에서 필 상자를 44 로 키운다 — 폰이 다른 길을 고른 근거가 아직 사실이다', () => {
+    // `JumpPill.tsx` 는 「같은 폰에서 웹은 44, 앱은 28 을 그린다」를 전제로 결정을
+    // 적었다(design-review 2594 R1 M-5 가 옛 주석의 거짓 인용을 잡은 자리). 웹이
+    // 그 규칙을 거두면 이 전제가 거짓이 되고, 그때 두 클라를 다시 맞춰 봐야 한다.
+    expect(WEB_TOKENS_CSS).toMatch(
+      /@media \(hover: none\)\s*\{\s*\[data-unread-pill\]\s*\{\s*min-block-size:\s*var\(--tap-target\);/,
+    );
   });
 
   it('도출식을 쓰는 자리는 이 스윕에 걸리지 않는다', () => {
