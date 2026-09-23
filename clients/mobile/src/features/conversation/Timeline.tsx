@@ -507,6 +507,18 @@ const JUMP_SETTLE_MS = 250;
  */
 const JUMP_TRAVEL_MAX_MS = 1500;
 
+/**
+ * A `scrollToIndex` that bypassed the travel door (#2608 N-E). Loud in a dev
+ * build — a jump that silently does nothing is exactly what the door exists to
+ * prevent, and `console.error` would not turn a test red — and a dropped request
+ * in a release build. See `scrollToIndexInTravel`.
+ */
+function failWithoutTravel(what: string): void {
+  if (__DEV__) {
+    throw new Error(`[Timeline] ${what}: go through travelToIndex (#2608 N-E)`);
+  }
+}
+
 /** A jump on its way to its row (#1892 R1 M-1 · R2 H-A). See `beginJumpTravel`. */
 interface JumpTravel {
   startedAt: number;
@@ -789,6 +801,12 @@ function TimelineInner({
    * `beginJumpTravel`.
    */
   const jumpTravelRef = useRef<JumpTravel | null>(null);
+  /**
+   * A travel ended before the list had ever reported its geometry, so its
+   * verdict waits for the first report that makes one possible (#2608 M-C).
+   * Holds the seq the jump left at, for the 「최신으로」 count. See `endJumpTravel`.
+   */
+  const pendingVerdictRef = useRef<{leftAtSeq: number | null} | null>(null);
   /** Is that pin being served by instant corrections rather than one glide? */
   const convergingRef = useRef(false);
   /**
@@ -952,6 +970,7 @@ function TimelineInner({
     setLandedId(null);
     followingRef.current = true;
     atBottomRef.current = true;
+    pendingVerdictRef.current = null;
     // 진입 앵커(#1025)를 다시 태운다. 새 목록은 앞 방의 오프셋에 서 있거나(자리
     // 표시가 목록을 붙잡은 경우) 오프셋 0 에서 다시 선다. 어느 쪽이든 새 방의 바닥이
     // 아니다.
@@ -1051,6 +1070,20 @@ function TimelineInner({
   );
 
   /**
+   * 미뤄 둔 착지 판정을 첫 기하 보고에서 내린다 (#2608 M-C). 기하를 적는 세 자리
+   * (`onScroll`·`onContentSizeChange`·`onLayout`)가 적은 **직후** 부른다 — 그 뒤의
+   * 보통 동작(따라가면 끝으로)이 방금 내린 판정을 그대로 탄다.
+   */
+  const resolvePendingVerdict = useCallback(() => {
+    const waiting = pendingVerdictRef.current;
+    if (waiting === null) return;
+    const left = distanceToEnd(geometryRef.current);
+    if (left === null) return;
+    pendingVerdictRef.current = null;
+    noteFollowing(left <= FOLLOW_THRESHOLD_PX, waiting.leftAtSeq);
+  }, [noteFollowing]);
+
+  /**
    * `onViewableItemsChanged` 는 **처음 받은 함수 하나**여야 한다 — `FlatList` 는
    * 그것이 도중에 바뀌는 것을 허락하지 않는다. 그래서 ref 에 한 번 만들고, 읽는
    * 것은 전부 ref 다.
@@ -1111,6 +1144,9 @@ function TimelineInner({
         contentHeight: contentSize.height,
         viewportHeight: layoutMeasurement.height,
       });
+      // A travel that ended before any geometry was reported is judged by the
+      // first report that has it (#2608 M-C) — this may be that report.
+      resolvePendingVerdict();
       // A jump is still on its way (#1892 R2 H-A): this event is its motion, and
       // the verdict waits for the list to stop (`beginJumpTravel`). The geometry
       // above is kept either way — it is exactly what that verdict reads.
@@ -1160,7 +1196,7 @@ function TimelineInner({
       // 뿐이다.
       noteFollowing(distanceFromEnd <= FOLLOW_THRESHOLD_PX);
     },
-    [noteGeometry, noteFollowing],
+    [noteGeometry, noteFollowing, resolvePendingVerdict],
   );
 
   // ---- 점프가 데려간 행에 초점을 둔다 (#1892 R1 M-3) --------------------------
@@ -1285,9 +1321,20 @@ function TimelineInner({
   /**
    * 이동이 끝났다 — 멈춘 자리에서 판정한다.
    *
-   * 기하를 모르면(목록이 아직 한 번도 보고하지 않았다) 판정하지 않는다: 붙든 따라가기는
-   * 그대로 두고, 핀이 풀렸으니 다음 보고가 판정한다. 모르는 것을 「바닥이 아니다」로
-   * 말하면 필이 거짓을 말한다.
+   * **판정이 「따라가기」면 이동 동안 벌어진 틈을 메운다** (#2608 M-B). 가는 동안에는
+   * 따라가기를 붙들었으므로 그사이 붙은 말은 따라가지 않았다(`onContentSizeChange`).
+   * 판정만 내리고 끝내면 그 말이 접힌 아래에 숨고, 목록은 스스로 따라가는 중이라고
+   * 믿으니 필도 서지 않는다 — 가장 흔한 알림 탭 길 위의 약 0.45초 창이었다. 이동 밖에서
+   * 붙었다면 따라갔을 말이므로 미뤄 둔 따라가기를 지금 한다(도착이 부르는 것과 같은
+   * `scrollToEnd` 활강). 다른 길 — 떠난 뒤 새 말이 있으면 필을 세운다 — 을 고르지
+   * 않은 이유: 그러면 같은 착지가 0.45초 창 안에 말이 붙었느냐는 **우연**으로 필을
+   * 세우거나 말거나 한다. 판정은 목록이 선 자리의 사실이어야 한다.
+   *
+   * **기하를 모르면**(목록이 아직 한 번도 보고하지 않았다) 판정을 **첫 기하 보고로
+   * 미룬다** (#2608 M-C). 첫 판은 판정하지 않고 붙든 채로 놓았는데, 목표가 지금 자리인
+   * 착지는 스크롤 보고를 보내지 않고 `onLayout`·`onContentSizeChange` 는 따라가는 중일
+   * 때만 움직이니, 아무도 판정하지 않았다. 필 쪽 판정으로 되돌리는 길도 있었지만, 새
+   * 목록은 맨 위에서 서므로 「바닥이다」가 거짓일 수 있다 — 첫 보고가 사실을 말한다.
    *
    * **착지는 출발점이다**(R2 N-B). 점프가 진입의 몫을 가져간 방문은 진입 수렴이 없어
    * 드래그·필·전송 없이는 「앉음」이 오지 않았고, 드래그하지 않는 VoiceOver 사용자는
@@ -1300,15 +1347,24 @@ function TimelineInner({
     if (travel === null) return;
     cancelJumpTravel();
     const left = distanceToEnd(geometryRef.current);
-    if (left !== null) noteFollowing(left <= FOLLOW_THRESHOLD_PX, travel.leftAtSeq);
+    if (left === null) {
+      pendingVerdictRef.current = {leftAtSeq: travel.leftAtSeq};
+    } else {
+      const following = left <= FOLLOW_THRESHOLD_PX;
+      noteFollowing(following, travel.leftAtSeq);
+      if (following && left > ARRIVED_PX) {
+        listRef.current?.scrollToEnd({animated: true});
+      }
+    }
     settleEntry();
     travel.onLanded?.();
-  }, [cancelJumpTravel, noteFollowing, settleEntry]);
+  }, [cancelJumpTravel, listRef, noteFollowing, settleEntry]);
 
   /** 점프 하나가 떠난다. 앞선 이동은 판정 없이 거둔다 — 새 요청이 이긴다. */
   const beginJumpTravel = useCallback(
     (onLanded?: () => void) => {
       cancelJumpTravel();
+      pendingVerdictRef.current = null;
       const now = Date.now();
       jumpTravelRef.current = {
         startedAt: now,
@@ -1332,6 +1388,47 @@ function TimelineInner({
       }, CONVERGE_ROUND_MS);
     },
     [cancelJumpTravel, endJumpTravel],
+  );
+
+  // ---- `scrollToIndex` 의 문 (#2608 N-E) ---------------------------------------
+  //
+  // 이 파일에서 `scrollToIndex` 를 부르는 자리는 아래 하나뿐이다
+  // (`__tests__/conversationHygiene.test.tsx` 가 `src/` 전체에서 개수로 센다).
+  //
+  // 이유는 `VirtualizedList` 가 아직 안 잰 목표를 `onScrollToIndexFailed` 로 **그 자리에서
+  // (동기로)** 알리고, 그 회복이 걸린 점프 이동의 일부라는 데 있다 — 회복은 이동이 없으면
+  // 아무것도 하지 않는다(손가락이 거둔 이동을 다시 쥐지 않게, R2 N-A). 그러니 이동을
+  // 걸지 않고 부른 `scrollToIndex` 는 실패를 조용히 삼킨다: 「눌렀는데 아무 일도 안
+  // 일어남」. 날짜로 가기·스레드 루트로 가기 같은 새 이동은 `travelToIndex` 를 탄다.
+  //
+  // 어기면 개발 빌드에서 크게 실패한다. 배포 빌드에서는 그 요청 하나를 버린다.
+
+  /** 걸린 이동 안에서만 `scrollToIndex` 를 부른다. 이 파일의 유일한 호출이다. */
+  const scrollToIndexInTravel = useCallback(
+    (index: number, viewPosition: number, animated: boolean) => {
+      if (jumpTravelRef.current === null) {
+        failWithoutTravel('scrollToIndex was asked for outside a jump travel');
+        return;
+      }
+      // `onScrollToIndexFailed` 의 회복이 같은 자리에 다시 놓으려면 이 값을 안다.
+      scrollViewPositionRef.current = viewPosition;
+      listRef.current?.scrollToIndex({index, viewPosition, animated});
+    },
+    [listRef],
+  );
+
+  /** 점프 하나 — 이동을 걸고, 그 줄로 간다. `onLanded` 는 이동이 끝나며 부른다. */
+  const travelToIndex = useCallback(
+    (
+      index: number,
+      viewPosition: number,
+      animated: boolean,
+      onLanded?: () => void,
+    ) => {
+      beginJumpTravel(onLanded);
+      scrollToIndexInTravel(index, viewPosition, animated);
+    },
+    [beginJumpTravel, scrollToIndexInTravel],
   );
 
   // ===========================================================================
@@ -1389,6 +1486,7 @@ function TimelineInner({
       // a jump still on its way — without a verdict: this travel sets its own.
       cancelFocus();
       cancelJumpTravel();
+      pendingVerdictRef.current = null;
       // Following again, because they are now at the bottom on purpose — the next
       // arrival from anyone else should keep them there. Through the one door, so
       // the 「최신으로」 pill steps down in the same moment (#1892).
@@ -1649,8 +1747,10 @@ function TimelineInner({
     cancelFocus();
     // And a jump still on its way is theirs to end — including the recovery's
     // next round, which would otherwise move the list under the finger and take
-    // the verdict back for itself (R2 N-A). Their own scroll events judge next.
+    // the verdict back for itself (R2 N-A). Their own scroll events judge next —
+    // including a verdict still waiting for geometry (#2608 M-C).
     cancelJumpTravel();
+    pendingVerdictRef.current = null;
     scrollPinUntilRef.current = 0;
     convergingRef.current = false;
     // The reader has the list now. Whatever it shows from here on, they are
@@ -1677,6 +1777,7 @@ function TimelineInner({
       // signal that the tail spacer has grown past the clamp described in the
       // header. A send in flight is waiting for exactly this.
       noteGeometry({contentHeight: height});
+      resolvePendingVerdict();
       if (!didInitialScrollRef.current) {
         // Not the length of `items`: a working placeholder or a pending echo is a
         // row with no message behind it, and on the render where the room
@@ -1704,7 +1805,7 @@ function TimelineInner({
       // guaranteed stable. Ref objects are compared by identity and the harness
       // passes one fixed object, so this costs nothing at runtime.
     },
-    [convergeToEnd, listRef, noteGeometry],
+    [convergeToEnd, listRef, noteGeometry, resolvePendingVerdict],
   );
 
   // My own send: always, and from wherever they were. Skipped on the first
@@ -1752,9 +1853,10 @@ function TimelineInner({
   const onLayout = useCallback(
     (event: LayoutChangeEvent) => {
       noteGeometry({viewportHeight: event.nativeEvent.layout.height});
+      resolvePendingVerdict();
       if (followingRef.current) listRef.current?.scrollToEnd({animated: false});
     },
-    [listRef, noteGeometry],
+    [listRef, noteGeometry, resolvePendingVerdict],
   );
 
   // ---- 두 필이 데려가는 곳 (#1892) ------------------------------------------
@@ -1786,21 +1888,10 @@ function TimelineInner({
     // 조금 길면 끝 근처에 앉는다), 그때 초점을 옮긴다: 움직이는 행에 초점을 주면
     // VoiceOver 가 한 번 더 스크롤한다.
     const focusTarget = firstMessageIdAfter(itemsRef.current, index);
-    beginJumpTravel(() => focusRow(focusTarget, 0));
-    scrollViewPositionRef.current = 0;
-    listRef.current?.scrollToIndex({
-      index,
-      viewPosition: 0,
-      animated: !reduceMotionRef.current,
-    });
-  }, [
-    beginJumpTravel,
-    cancelConvergence,
-    cancelFocus,
-    focusRow,
-    listRef,
-    reduceMotionRef,
-  ]);
+    travelToIndex(index, 0, !reduceMotionRef.current, () =>
+      focusRow(focusTarget, 0),
+    );
+  }, [cancelConvergence, cancelFocus, focusRow, reduceMotionRef, travelToIndex]);
 
   // 아래 필은 전송과 같은 여정이다 — 먼 과거에서 끝까지 가는 길은 RN-P3 가 이미
   // 닦았고(측정된 클램프를 오르는 즉시 라운드), 두 번째 길을 내면 그 수리를 다시
@@ -2012,10 +2103,10 @@ function TimelineInner({
     cancelFocus();
     scrollPinUntilRef.current = 0;
     setChasingTail(false);
-    // 그리고 가는 동안은 이 점프가 판정을 쥐고, 멈추면 착지한 자리에서 다시 판정한다
-    // (`beginJumpTravel`). 끝 근처에 앉으면 따라가기로 돌아오고(R2 H-A), 멀리 앉으면
-    // 그때 「최신으로」가 선다.
-    beginJumpTravel();
+    // 가는 동안은 이 점프가 판정을 쥐고, 멈추면 착지한 자리에서 다시 판정한다 — 아래
+    // `travelToIndex` 가 이동을 걸고 간다. 끝 근처에 앉으면 따라가기로 돌아오고(R2 H-A),
+    // 멀리 앉으면 그때 「최신으로」가 선다.
+    //
     // **이 점프가 방의 진입이다** (#1892 R1 M-1). 다른 방으로 가는 착지(ADE
     // 「대화로」·알림 탭)는 새 방의 목록이 도착한 뒤 걸리고, 그 순간이 새 목록의 첫
     // `onContentSizeChange` 보다 앞설 수 있다 — 네이티브 레이아웃 보고와 효과의 순서는
@@ -2050,12 +2141,7 @@ function TimelineInner({
     // 화면 가운데에 놓는다: 인용의 원본은 그 앞뒤가 함께 읽혀야 뜻이 산다.
     // 「동작 줄이기」면 즉시다 — 두 필과 같은 규율이다(R1 N-4). 이 클라에서 점프가
     // 움직임을 거르는 자리가 둘이면 같은 설정이 버튼마다 다르게 듣는다.
-    scrollViewPositionRef.current = 0.5;
-    listRef.current?.scrollToIndex({
-      index,
-      viewPosition: 0.5,
-      animated: !reduceMotionRef.current,
-    });
+    travelToIndex(index, 0.5, !reduceMotionRef.current);
   }, [jumpToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onScrollToIndexFailed = useCallback(
@@ -2071,7 +2157,11 @@ function TimelineInner({
       // 아무것도 하지 않는다: 회복의 다음 라운드가 사람 손 밑에서 목록을 옮기면 안
       // 된다(R2 N-A).
       const travel = jumpTravelRef.current;
-      if (travel === null) return;
+      if (travel === null) {
+        // 문(`travelToIndex`)을 거치지 않은 `scrollToIndex` 다 (#2608 N-E).
+        failWithoutTravel('scrollToIndex failed with no jump travel to recover it');
+        return;
+      }
       travel.recovering = true;
       travel.lastMotionAt = Date.now();
       listRef.current?.scrollToOffset({
@@ -2086,15 +2176,11 @@ function TimelineInner({
         if (jumpTravelRef.current !== travel) return;
         travel.recovering = false;
         travel.lastMotionAt = Date.now();
-        listRef.current?.scrollToIndex({
-          index: info.index,
-          // 실패하기 전 그 요청이 원한 자리 — 인용은 가운데, 안읽음 필은 위 (#1892).
-          viewPosition: scrollViewPositionRef.current,
-          animated: false,
-        });
+        // 실패하기 전 그 요청이 원한 자리 — 인용은 가운데, 안읽음 필은 위 (#1892).
+        scrollToIndexInTravel(info.index, scrollViewPositionRef.current, false);
       });
     },
-    [listRef],
+    [listRef, scrollToIndexInTravel],
   );
 
   const keyExtractor = useCallback((item: FoldedTimelineItem) => item.key, []);
