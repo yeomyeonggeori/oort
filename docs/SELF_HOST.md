@@ -888,17 +888,23 @@ public hostname exists, the same generator prints Railway variables (no
 file, no compose stack):
 
 ```sh
-scripts/self_host_env.sh --platform railway
+scripts/self_host_env.sh --platform railway --claim
 ```
 
-`RAILWAY_PUBLIC_DOMAIN` and `DATABASE_URL` are required. The output key set
+`RAILWAY_PUBLIC_DOMAIN` and `DATABASE_URL` are required. `--claim` matches
+`railway.json`, whose api variables carry `MOMO_BOOTSTRAP_CLAIM` rather than an
+owner password; without it pre-deploy has the owner email and no password and
+refuses to start (exit 2). For the password variant, generate without
+`--claim` and on api replace `MOMO_BOOTSTRAP_CLAIM` with
+`MOMO_INITIAL_OWNER_PASSWORD` = `${{shared.MOMO_INITIAL_OWNER_PASSWORD}}`. The output key set
 is the generator heredoc plus `oort_public_edge_env_keys` — do not type
 `OORT_SITE_ADDRESS` / `OORT_CSP_CONNECT_SRC` by hand. Local provider opt-in
 (`--allow-local-provider`) is for local installs only; this template does
 not carry those keys. Gate:
 `scripts/oort doctor --json` (`public.healthz` · `public.websocket`), plus the
 README's by-hand checks: the sign-in `realtimeWebSocketUrl` is `wss://` and a
-QR device link carries `https://`.
+QR device link carries `https://`. The README's client-IP gate must PASS before
+the claim link is shared or anyone is invited.
 
 ### Fly.io
 

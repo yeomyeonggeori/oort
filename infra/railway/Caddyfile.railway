@@ -70,9 +70,11 @@ http://{$OORT_SITE_ADDRESS} {
 	# 클라이언트가 에지 IP 하나로 모여, /v1/claim·/v1/join·비밀번호 변경의 IP별
 	# 한도가 익명 누구나 소진할 수 있는 전역 버킷이 된다. Railway 에지가 붙이는
 	# X-Real-IP 를 XFF 로 넘긴다. X-Real-IP 가 없으면 빈 값이 가고 client_ip 는
-	# 소켓 peer 로 떨어진다. 에지가 클라이언트가 보낸 X-Real-IP 를 덮어쓰는지는
-	# 단계 2 실측 항목이다 — 덮어쓰지 않으면 이 줄은 한도 우회가 되므로
-	# trusted_proxies + Railway 에지 대역으로 바꾼다(README 「Public edge」).
+	# 소켓 peer, 곧 이 caddy 컨테이너 주소로 떨어진다(모두 한 버킷). X-Real-IP 가
+	# 진짜 클라이언트인지는 Railway 거동이다 — CDN 경로에서는 CDN 에지 주소라는
+	# 보고가 있다. README 「Client-IP gate」가 PASS 하기 전에는 claim 링크를
+	# 공유하지 않고 팀을 초대하지 않는다. FAIL 이면 같은 절의 trusted_proxies
+	# 설정으로 바꾼다.
 	handle /v1/centrifugo/* {
 		respond 403
 	}

@@ -810,17 +810,23 @@ LiveKit 없음.
 같은 생성기가 Railway 변수를 출력한다(파일 없음, compose 스택 발명 없음):
 
 ```sh
-scripts/self_host_env.sh --platform railway
+scripts/self_host_env.sh --platform railway --claim
 ```
 
-`RAILWAY_PUBLIC_DOMAIN`과 `DATABASE_URL`은 필수다. 출력 키 집합은 생성기
+`RAILWAY_PUBLIC_DOMAIN`과 `DATABASE_URL`은 필수다. `--claim`은
+`railway.json`과 짝이다. 그 api 변수에는 owner 비밀번호가 아니라
+`MOMO_BOOTSTRAP_CLAIM`이 있고, `--claim` 없이 만들면 pre-deploy에 owner
+이메일만 있어 기동을 거부한다(exit 2). 비밀번호 방식을 쓰려면 `--claim`
+없이 만들고 api에서 `MOMO_BOOTSTRAP_CLAIM`을 `MOMO_INITIAL_OWNER_PASSWORD` =
+`${{shared.MOMO_INITIAL_OWNER_PASSWORD}}`로 바꾼다. 출력 키 집합은 생성기
 heredoc + `oort_public_edge_env_keys` — `OORT_SITE_ADDRESS` /
 `OORT_CSP_CONNECT_SRC`를 손으로 적지 마라. 로컬 provider opt-in
 (`--allow-local-provider`)은 로컬 설치 전용이며 이 템플릿은 그 키를 싣지
 않는다. 게이트:
 `scripts/oort doctor --json` (`public.healthz` · `public.websocket`)과 README의
 손 점검 — 로그인 응답 `realtimeWebSocketUrl`이 `wss://`, QR 기기 연결이
-`https://`.
+`https://`. README의 클라이언트 IP 관문이 PASS하기 전에는 claim 링크를
+공유하거나 누구도 초대하지 않는다.
 
 ### Fly.io
 

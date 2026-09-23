@@ -107,7 +107,7 @@ when §3.3.0 (b)/(c) fail.
 | **Fly.io** (single VM + volume) | T1 | §3.5 · [`infra/fly/README.md`](../infra/fly/README.md) | `flyctl` in the user's login → Fly REST with a user token → browser. | `fly auth login`; Fly billing (volume + dedicated IPv4); optional custom-domain DNS; `fly apps destroy` (volume wipe). | Fly account; one VM with a volume; the T1 tool set on it. | T1 compose procedure §3.2 on the VM (`caddy.override.yml` + `Caddyfile`, TLS passthrough). Env `scripts/self_host_env.sh --platform fly --public-origin https://<host>` onto the volume. Fly hostname or custom domain. | Same as VPS. |
 | **AWS Lightsail / EC2** | T1 | §3.6 · [`infra/aws/README.md`](../infra/aws/README.md) (SH-11c) | `aws` CLI / AWS MCP in the user's session → REST → browser. | AWS SSO/login; `terraform apply` (plan resource count); Budgets email; DNS A; `terraform destroy` (data disk). | Cloud account; IAM user/SSO role (not root); VM + extra disk + domain. | T1 compose procedure §3.2 on the VM; env `--platform aws-lightsail --public-origin https://<host>`. Operator domain. | Same as VPS. |
 | **GCP VM** | T1 | §3.7 · provisioning recipe SH-11c pattern | `gcloud` in the user's session → REST → browser. | GCP sign-up/billing; OAuth consent; the DNS record. | Same as AWS. | T1 compose procedure §3.2 on the VM; env `--platform gcp-vm --public-origin https://<host>`. Operator domain. | Same as VPS. |
-| **Railway** | T2 | §3.4 · agent path measured in SH-11a | `railway` CLI (`railway setup agent`) / remote MCP `mcp.railway.com` in the user's OAuth session → REST → browser. | Railway sign-up/billing; the OAuth login for CLI/MCP; assigning the public domain to caddy. | Railway account (a plan with volumes); PG18 + pgvector image service; no Docker on this machine (published images). | Caddy service is the public edge (`Caddyfile.railway`), api internal. Env `scripts/self_host_env.sh --platform railway` (alias `--railway`) from `RAILWAY_PUBLIC_DOMAIN` + `DATABASE_URL`; hand-mapped keys (≥9, `infra/railway/README.md`). Platform hostname. | Doctor PASS on the deployed origin (`public.healthz`, `public.websocket`). Day-2: image one-off `scripts/oort backup --tier t2 --env <env>`, `scripts/oort restore <dump> --tier t2 --yes --env <env>`, `scripts/oort upgrade --tier t2 --yes --env <env>`, `scripts/oort doctor --tier t2 --json`. `--tier t2` must match `MOMO_SELF_HOST_PLATFORM` (railway). Dump uses `MIGRATE_DATABASE_URL` only. Platform CLI/MCP for the one-off is SH-11a. |
+| **Railway** | T2 | §3.4 · agent path measured in SH-11a | `railway` CLI (`railway setup agent`) / remote MCP `mcp.railway.com` in the user's OAuth session → REST → browser. | Railway sign-up/billing; the OAuth login for CLI/MCP; assigning the public domain to caddy. | Railway account (a plan with volumes); PG18 + pgvector image service; no Docker on this machine (published images). | Caddy service is the public edge (`Caddyfile.railway`), api internal. Env `scripts/self_host_env.sh --platform railway --claim` (alias `--railway`) from `RAILWAY_PUBLIC_DOMAIN` + `DATABASE_URL`; hand-mapped keys (≥9, `infra/railway/README.md`). Platform hostname. | Doctor PASS on the deployed origin (`public.healthz`, `public.websocket`). Day-2: image one-off `scripts/oort backup --tier t2 --env <env>`, `scripts/oort restore <dump> --tier t2 --yes --env <env>`, `scripts/oort upgrade --tier t2 --yes --env <env>`, `scripts/oort doctor --tier t2 --json`. `--tier t2` must match `MOMO_SELF_HOST_PLATFORM` (railway). Dump uses `MIGRATE_DATABASE_URL` only. Platform CLI/MCP for the one-off is SH-11a. |
 | **Cloudflare** (edge only) | T3 | §3.8 · recipe SH-11d (`infra/cloudflare/`) — DNS · Tunnel · TLS in front of a T1/T2 row | MCP `mcp.cloudflare.com` (OAuth = approval) or REST with a user API token (`Zone:DNS:Edit` + Tunnel) → `cloudflared` on the host. `wrangler` is unused (Workers/Pages CLI, not DNS/Tunnel). | Cloudflare sign-up / MCP OAuth or API token; nameserver delegation at the registrar; tunnel token on the host; cleanup confirm. | A T1/T2 row already up (doctor PASS). Not compute: Containers/Workers are not adopted (ADR-0184 D1). If the user says "on Cloudflare", pick T1/T2 first. | Fronts the row it protects; the origin keeps that row's edge and `/v1/centrifugo/*` 403 order. Public hostname on Cloudflare DNS (mode A) or named tunnel to loopback Caddy (mode B). | Same as the fronted row, with `public.*` PASS through the Cloudflare hostname. A `public.*` skip is a user error (§3.8), not PASS. |
 | **Grok Bot VM** (Tailscale Funnel) | T1 | §3.3 | Shell in the VM (compose) + `tailscale` CLI. | Tailscale login and Funnel enable (4–5 clicks); opening the one-time claim URL. Zero-account + stable URL is **not** something this playbook delivers (RA-7). | curl, tar, Docker Engine + Compose v2, openssl, jq. git is not required. Durable dir `/workspace`. Tailscale account (one). | Loopback Caddy + Tailscale Funnel to the web port. **Do not** start `caddy.override.yml` here (ACME). `--public-origin` still registers the Funnel URL in Centrifugo. `https://<machine>.<tailnet>.ts.net` while Funnel state under `/workspace` lives. | Doctor PASS including public checks against the Funnel origin, one-time claim URL sent to the user, first-day dump on `/workspace`. |
 
@@ -1562,12 +1562,18 @@ does not ship. Do not paste platform secrets into chat.
    caddy hostname exists:
 
 ```sh
-scripts/self_host_env.sh --platform railway
+scripts/self_host_env.sh --platform railway --claim
 ```
 
    (`--railway` is the alias.) Requires `RAILWAY_PUBLIC_DOMAIN` and
    `DATABASE_URL` in the environment (explicit fail if either is missing —
-   not a doctor `public.*` skip). The row in `platform_profiles` says which
+   not a doctor `public.*` skip). `--claim` matches `railway.json`: its api
+   variables carry `MOMO_BOOTSTRAP_CLAIM`, not an owner password. Without
+   `--claim`, pre-deploy has the owner email and no password and refuses to
+   start (exit 2). For the password variant, generate without `--claim` and on
+   api replace `MOMO_BOOTSTRAP_CLAIM` with `MOMO_INITIAL_OWNER_PASSWORD` =
+   `${{shared.MOMO_INITIAL_OWNER_PASSWORD}}` (the api start command already
+   drops it before the server starts). The row in `platform_profiles` says which
    variables are read and which keys stay by hand.
    Apply the KEY=value stdout as Railway shared variables, then give each
    service its `variables` from `railway.json`. The values compose renames or
@@ -1582,7 +1588,9 @@ scripts/oort doctor --json
 ```
 
    `public.healthz` and `public.websocket` must PASS, and the README's
-   by-hand checks (`wss://` realtime URL, `https://` QR origin). Stop/delete
+   by-hand checks (`wss://` realtime URL, `https://` QR origin). The README's
+   client-IP gate must PASS before the claim link is shared or anyone is
+   invited. Stop/delete
    the project unless this instance is meant to stay up — the team instance
    (#2205) stays.
 

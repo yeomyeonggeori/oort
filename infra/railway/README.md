@@ -9,7 +9,9 @@ run: there is no `railway down` step, and upgrades and backups keep the data.
 `railway.json` is a service catalog, not Railway config-as-code. Every value
 in it is typed into Railway (UI, CLI or MCP) by hand, service by service.
 `scripts/tests/test_railway_template.sh` checks it against what Railway does
-with those values (`scripts/tests/check_railway_catalog.py`).
+with those values (`scripts/tests/check_railway_catalog.py`): every start
+command must parse to its canonical command list, and every variable name must
+be one its compose twin sets.
 
 Image pin: `releases/latest.json` (`images.app.ref` + `images.app.digest_list`).
 `railway.json` (every oort-image service) and `Dockerfile.caddy` (`ARG
@@ -31,7 +33,11 @@ moves, update all of them in the same change
 | **push-relay** | same image | `/bin/sh -c '… exec momo-rust-entrypoint push-relay'` | — | no |
 | **caddy** | `infra/railway/Dockerfile.caddy` (Caddy 2 + SPA from the oort image), build context = repo root | `caddy run --config /etc/caddy/Caddyfile --adapter caddyfile` | — | **yes** (Railway TLS) |
 
-Copy the start commands from `railway.json` verbatim; the table abbreviates.
+Paste each start command decoded, not as the JSON text: the file escapes quotes
+as `\"`, and a pasted `[ \"$(id -u)\" = 0 ]` compares `"0"` with `0`, so api
+exits 78 with a misleading `RAILWAY_RUN_UID` message. Decode with
+`jq -r '.services.api.startCommand' infra/railway/railway.json` (likewise every
+service, and `.services.api.preDeployCommand[0]`). The table abbreviates.
 LiveKit / huddle is not in this template.
 
 - **Start commands.** Railway's start command *replaces* the image
@@ -106,19 +112,22 @@ Missing `RAILWAY_PUBLIC_DOMAIN` or `DATABASE_URL` is a hard fail (the compose
    `${{shared.KEY}}` is Railway's reference to a shared variable. Each service
    gets only what its compose twin gets — do not share every variable with
    every service (webhook-sender, for one, must not hold `CENT_API_KEY`).
+   `check_railway_catalog.py` compares each service's names with its compose
+   twin's `environment` keys plus the Railway-only extras it names.
 
 ### Hand-mapped variables
 
 Compose renames, composes or hard-codes these; Railway does not, and the
 generator does not print them (it names only three on stderr). Apart from this
-table, the push table below, and five Centrifugo literals copied from
-`infra/centrifugo.json` (`CENTRIFUGO_LOG_LEVEL`,
-`CENTRIFUGO_CLIENT_SUBSCRIPTION_TOKEN_ENABLED`,
+table, the push table below and five Centrifugo literals, every value in
+`services.<name>.variables` is an identity reference
+(`JWT_HMAC` = `${{shared.JWT_HMAC}}`). Four of the literals stand in for the
+mounted `infra/centrifugo.json` (`CENTRIFUGO_CLIENT_SUBSCRIPTION_TOKEN_ENABLED`,
 `CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_ENDPOINT`,
 `CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_INCLUDE_CONNECTION_META`,
-`CENTRIFUGO_CHANNEL_NAMESPACES` — paste them from `railway.json` as they are),
-every value in `services.<name>.variables` is an identity reference
-(`JWT_HMAC` = `${{shared.JWT_HMAC}}`).
+`CENTRIFUGO_CHANNEL_NAMESPACES`); the fifth, `CENTRIFUGO_LOG_LEVEL=info`, is
+compose's default (`${CENTRIFUGO_LOG_LEVEL:-info}`). Paste them decoded, e.g.
+`jq -r '.services.centrifugo.variables.CENTRIFUGO_CHANNEL_NAMESPACES' infra/railway/railway.json`.
 
 | Service | Variable | Value |
 |---|---|---|
@@ -153,7 +162,7 @@ the default port is 8000. `scripts/tests/check_railway_catalog.py` holds the
 literals to `infra/centrifugo.json` (namespaces, subscribe endpoint path on the
 api private host, connection meta, subscription tokens, proxy header name).
 
-## Public edge and `X-Forwarded-Proto`
+## Public edge: `X-Forwarded-Proto` and client IP
 
 Railway terminates TLS and hands Caddy plain HTTP (`Caddyfile.railway`:
 `{ http_port {$PORT} }` and `http://{$OORT_SITE_ADDRESS}`). Caddy without
@@ -168,21 +177,124 @@ off the device-link SAS requirement (`is_public_origin_mode()` is true only for
 `same-origin`). Same handle order as the public Caddyfile (`/v1/centrifugo/*`
 403 before `/v1/*`).
 
-The same blocks set `header_up X-Forwarded-For {http.request.header.X-Real-IP}`.
-Caddy also replaces the edge's `X-Forwarded-For` with its own peer — Railway's
-edge — and the api's per-IP rate limits (`rate_limit::client_ip`, first
-`X-Forwarded-For` value) on `/v1/claim`, `/v1/join` and password change would
-then see one client: a single bucket any anonymous caller can exhaust. The api
-gets the client IP Railway's edge puts in `X-Real-IP`; a client-sent
-`X-Forwarded-For` never reaches it. Without `X-Real-IP` the value is empty and
-`client_ip` falls back to its socket peer.
+### Client IP: the per-IP limits and what feeds them
 
-**단계 2 must-measure:** does Railway's edge overwrite an `X-Real-IP` the client
-sent? Send one (`curl -H 'X-Real-IP: 192.0.2.1' https://<domain>/…`) and read
-what the api received (api logs or a request that reports the caller's IP). If
-the forged value arrives, this header is a rate-limit bypass: switch to
-`servers { trusted_proxies static <Railway edge ranges> }` and drop the
-`X-Forwarded-For` line.
+The same three blocks set `header_up X-Forwarded-For {http.request.header.X-Real-IP}`.
+The api keys its per-IP limits on `rate_limit::client_ip`: the first
+`X-Forwarded-For` value, or else the socket peer.
+
+| Surface | Default limit (per 60 s) | Keyed on |
+|---|---|---|
+| `POST /v1/claim` | 30 | client IP |
+| `POST /v1/auth/device-link/redeem` | 30 (claim budget) | client IP |
+| `POST /v1/join` | 1200 | client IP |
+| password change | 10 per member, 30 per IP | member always; IP only when `X-Forwarded-For` has a value — it calls `client_ip(headers, None)`, so an empty value turns the IP axis off |
+
+Caddy has no `trusted_proxies`, so it replaces the edge's `X-Forwarded-For`
+with its own peer, Railway's edge. Without the `header_up` line every request
+would carry that one address: a single bucket that one anonymous caller can
+exhaust, locking everyone out of claim and device linking. With it, the api
+gets whatever Railway's edge puts in `X-Real-IP`, and a client-sent
+`X-Forwarded-For` never reaches it. If `X-Real-IP` is missing the value is
+empty and `client_ip` falls back to its socket peer — the caddy container's
+address, which is again one bucket for everybody.
+
+**Unproven until measured.** Whether `X-Real-IP` is the real client is
+Railway's behaviour, not this repo's, and the only sources are staff answers on
+Railway's forum, not documentation:
+
+- 2026-03: on the CDN path `X-Real-IP` is currently the CDN edge's address, a
+  bug they are tracking; they advised the first `X-Forwarded-For` value.
+- 2026-06: the edge strips `X-Forwarded-For`, and its first value is the
+  connecting IP.
+- Routing paths were reported to change every week or two.
+- Since 2024-08 a client cannot forge `X-Real-IP` through the edge.
+
+A forged-header test alone would pass on the CDN path while every client
+behind one CDN address still shares a bucket, so the gate below measures the
+property itself: distinct clients get distinct buckets.
+
+### Client-IP gate
+
+Run it after the deploy and before anyone but the owner uses the instance.
+**Until it passes, do not share the claim link and do not invite the team.**
+It needs two networks with different public IPs, A and B (for example office
+Wi-Fi and a phone hotspot); bogus claims only ever get 400 or 429.
+
+1. On network A, note the public IP: `curl -s https://checkip.amazonaws.com`.
+2. From A, send 31 bogus claims:
+   ```sh
+   for i in $(seq 31); do
+     curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/json' \
+       --data '{"token":"not-a-claim-token","password":"x"}' "https://$RAILWAY_PUBLIC_DOMAIN/v1/claim"
+   done | sort | uniq -c        # expect 30 × 400 and 1 × 429
+   ```
+3. In the api logs (`railway logs --service api`, or the api service's Deploy
+   Logs in the dashboard) the throttle line `rate limit exceeded (per-ip)`
+   must name A's IP: `ip=<address> … surface="/v1/claim"`. **FAIL** if the address is not A's
+   public IP — a `100.x.y.z` address (Railway's internal range) or a Fastly
+   address means the edge, not the client, is being counted.
+4. Within 60 s, from network B, send one bogus claim: it must get **400**, not
+   429.
+5. Wait 60 s and repeat 2–4 with forged headers on every request
+   (`-H 'X-Real-IP: 192.0.2.1' -H 'X-Forwarded-For: 192.0.2.1'`): the logged
+   `ip=` must still be A's IP and B must still get 400.
+6. Repeat the whole gate about two weeks later; the edge's routing path changes.
+
+PASS is steps 2–5 all as stated. On FAIL, keep the claim link and invites
+closed and switch the edge configuration as below.
+
+### If the gate fails: trust the edge instead
+
+1. Find the edge's peer addresses. Temporarily add to the site block of
+   `Caddyfile.railway`
+   ```
+   	log {
+   		output stdout
+   		format json
+   	}
+   ```
+   redeploy caddy, send a few requests, and read `"remote_ip"` (the
+   `{remote_host}` of each request) in the caddy logs, e.g.
+   `railway logs --service caddy | grep -o '"remote_ip":"[^"]*"' | sort | uniq -c`.
+   Community reports say `100.0.0.0/8` (unofficial). Remove the `log` block
+   afterwards.
+2. If the forged `X-Forwarded-For` in step 5 never won (the edge strips it and
+   its first value is the client — Railway's own advice), trust the edge and
+   drop the three `header_up X-Forwarded-For` lines:
+   ```
+   {
+   	http_port {$PORT}
+   	servers {
+   		trusted_proxies static 100.0.0.0/8
+   	}
+   }
+   ```
+   Caddy then keeps the edge's `X-Forwarded-For` and appends the peer, and the
+   api reads the first value. Verified locally: the api receives
+   `203.0.113.7, <peer>` for an edge-set `203.0.113.7`. Do not use this form if
+   the edge appends: then a forged first value is what the api reads.
+3. If the edge appends to a client-sent `X-Forwarded-For`, parse it right to
+   left and hand the api only the address the edge saw:
+   ```
+   {
+   	http_port {$PORT}
+   	servers {
+   		trusted_proxies static 100.0.0.0/8
+   		trusted_proxies_strict
+   	}
+   }
+   ```
+   and in each of the three api blocks
+   `header_up X-Forwarded-For {client_ip}`. Verified locally: for both
+   `203.0.113.7` and a forged `198.51.100.9, 203.0.113.7` the api receives
+   exactly `203.0.113.7`.
+4. If step 3 of the gate logged a Fastly address (the CDN path), add Fastly's
+   published ranges (`https://api.fastly.com/public-ip-list`) to the same
+   `trusted_proxies static` list and use form 3.
+
+Re-run the gate after any of these; the peer range is only as good as the
+measurement behind it.
 
 ## api: pre-deploy, drive volume, privileges
 
@@ -293,6 +405,8 @@ generator's output, so the domain comes first:
 8. **push-relay**, then **notifier**. Boot logs name the mode and the registry
    size, never a key: push-relay `starting PushRelay … sender_mode="live"`.
 9. **caddy** (re)deploy last; then `https://<domain>/healthz` is the api's JSON.
+10. **Client-IP gate** (Public edge → Client-IP gate). Until it passes, do not
+    share the claim link and do not invite the team.
 
 ## First owner claim
 
@@ -302,36 +416,36 @@ that deployment. The owner opens `https://<domain>/claim/<token>` and sets
 their password. The token is a credential: never paste it into chat, issues or
 this tree. It lives 24 hours. Later deploys print `bootstrap claim skipped — a
 live claim already exists (not reprinted)` while it is live; after it expires,
-the next deploy's pre-deploy issues a fresh one.
+the next deploy's pre-deploy issues a fresh one. The owner may claim before the
+client-IP gate passes; nobody else gets the link until it does.
 
 ## Verify
 
-```sh
-curl -fsS "https://$RAILWAY_PUBLIC_DOMAIN/healthz"
-scripts/oort doctor --tier t2 --env ~/.momo-secrets/railway-oort.env --json
-```
-
-`public.websocket` sends `Origin: https://<domain>` over HTTP/1.1, so an empty
-or wrong Centrifugo `allowed_origins` fails it (403). From a machine outside
-the project, `public.*`, `stack.healthz` and `stack.agent_port` are the
-meaningful rows: `stack.outbox`, `stack.migrate_idempotency` and
-`roles.momo_notifier` read Postgres at `postgres.railway.internal` and fail on
-the connection there. Run the full doctor as the image one-off inside the
-project (`docs/SELF_HOST_AGENT.md` §3.4 Day-2). An image's own `scripts/oort`
-is that image's version: the Origin-sending `public.websocket` is in images
-built after #2205.
-
-Two things the doctor cannot see, because every response that carries them
-needs a signed-in session:
-
-- the sign-in response's `realtimeWebSocketUrl` must be
-  `wss://<domain>/connection/websocket` (not `ws://`), and
-- a new device-link QR (`deepLink` `server=`) must be `https://<domain>`.
-
-Check both by hand after the owner claim, then: a WebSocket upgrade with
-`Origin: https://<domain>` returns 101, a message typed in one browser tab
-arrives in a second tab in real time, and an attachment uploaded before a
-redeploy still opens after it.
+1. Health and doctor:
+   ```sh
+   curl -fsS "https://$RAILWAY_PUBLIC_DOMAIN/healthz"
+   scripts/oort doctor --tier t2 --env ~/.momo-secrets/railway-oort.env --json
+   ```
+   `public.websocket` sends `Origin: https://<domain>` over HTTP/1.1, so an
+   empty or wrong Centrifugo `allowed_origins` fails it (403). From a machine
+   outside the project, `public.*`, `stack.healthz` and `stack.agent_port` are
+   the meaningful rows: `stack.outbox`, `stack.migrate_idempotency` and
+   `roles.momo_notifier` read Postgres at `postgres.railway.internal` and fail
+   on the connection there. Run the full doctor as the image one-off inside the
+   project (`docs/SELF_HOST_AGENT.md` §3.4 Day-2). An image's own
+   `scripts/oort` is that image's version: the Origin-sending
+   `public.websocket` is in images built after #2205.
+2. After the owner claim, by hand — the doctor cannot see these, because every
+   response that carries them needs a signed-in session:
+   - the sign-in response's `realtimeWebSocketUrl` is
+     `wss://<domain>/connection/websocket` (not `ws://`);
+   - a new device-link QR (`deepLink` `server=`) is `https://<domain>`.
+3. A WebSocket upgrade with `Origin: https://<domain>` returns 101, a message
+   typed in one browser tab arrives in a second tab in real time, and an
+   attachment uploaded before a redeploy still opens after it.
+4. **Client-IP gate** (Public edge → Client-IP gate). It must PASS before the
+   claim link is shared or the team is invited; repeat it about two weeks
+   later.
 
 ## Backups and upgrades
 
@@ -352,7 +466,10 @@ redeploy still opens after it.
 - Whether the Raw Editor strips dotenv quotes (see Shared variables).
 - That `/dev/shm` is present and writable on Railway (the start commands refuse
   without it).
-- Railway's edge IP ranges (why `header_up`, not `trusted_proxies`).
+- What Railway's edge puts in `X-Real-IP` (on the CDN path it is reported to
+  be the CDN edge's address) and the edge's peer ranges. The client-IP gate
+  measures the first; the temporary access log under "If the gate fails" shows
+  the second.
 
 Do not paste platform secrets into chat, issues, or the tree. Fixture host in
 tests is `example.test`.
