@@ -66,7 +66,11 @@ FILES = (
     "infra/railway/Caddyfile.railway",
 )
 HANDLE_OPEN = re.compile(r"^(\t)handle(?: (\S+))? \{\s*$")
-PROXY = re.compile(r"^reverse_proxy\s+(\S+)\s*$")
+PROXY = re.compile(r"^reverse_proxy\s+(\S+)(\s+\{)?\s*$")
+# #2205: the Railway edge pins X-Forwarded-Proto for the api upstream (Railway
+# terminates TLS, so Caddy would otherwise forward `http`). That one header_up
+# is the only subdirective a proxy block here may carry.
+PROXY_SUBDIRECTIVES = {"header_up X-Forwarded-Proto https"}
 CSP = "Content-Security-Policy"
 
 
@@ -74,6 +78,7 @@ def exclusive_proxy_body(lines, start_idx):
     """start_idx is the handle-open line. Return (upstream, close_idx)."""
     i = start_idx + 1
     upstream = None
+    in_proxy_block = False
     while i < len(lines):
         stripped = lines[i].strip()
         if stripped == "" or stripped.startswith("#"):
@@ -84,6 +89,14 @@ def exclusive_proxy_body(lines, start_idx):
             if not match:
                 raise ValueError(f"expected reverse_proxy, got {lines[i]!r}")
             upstream = match.group(1)
+            in_proxy_block = match.group(2) is not None
+            i += 1
+            continue
+        if in_proxy_block:
+            if stripped == "}":
+                in_proxy_block = False
+            elif " ".join(stripped.split()) not in PROXY_SUBDIRECTIVES:
+                raise ValueError(f"unexpected reverse_proxy subdirective: {lines[i]!r}")
             i += 1
             continue
         if stripped == "}":

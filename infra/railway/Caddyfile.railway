@@ -50,17 +50,36 @@ http://{$OORT_SITE_ADDRESS} {
 	# neither a missing nor a guessed CENT_PROXY_SECRET can reach the API from
 	# the public edge.  The API's own constant-time secret check remains the
 	# second, private-network boundary.
+	#
+	# ── api 로 가는 세 블록의 X-Forwarded-Proto https (#2205, 감사 §A.4-5) ──
+	# Railway 가 TLS 를 끊고 이 컨테이너에는 평문 HTTP 를 넘긴다. Caddy 는
+	# trusted_proxies 가 없으면 들어온 X-Forwarded-Proto 를 버리고 자기가 받은
+	# 스킴(http)으로 덮어쓴다 — 실측: 에지가 https 를 실어 보내도 api 는 http 를
+	# 본다. api 는 그 값으로 same-origin 주소를 만든다(ADR-0167):
+	# realtimeWebSocketUrl 이 ws:// 가 되고(모든 클라가 이 주소만 쓴다,
+	# ADR-0110) QR 기기 연결 origin 이 http:// 가 된다. Railway 공개 도메인은
+	# 항상 TLS 이므로 https 고정이 결정적이다. trusted_proxies 는 Railway 에지
+	# IP 대역을 모르므로 쓰지 않는다. MOMO_CENTRIFUGO_WS_URL 을 절대 wss:// 로
+	# 박는 우회는 금지 — 실시간만 고치고 기기 연결 SAS 요구를 꺼 버린다
+	# (is_public_origin_mode 는 same-origin 일 때만 참).
+	# /connection/* 는 Centrifugo 로 가고 Centrifugo 는 이 헤더를 읽지 않는다.
 	handle /v1/centrifugo/* {
 		respond 403
 	}
 	handle /v1/* {
-		reverse_proxy api.railway.internal:8080
+		reverse_proxy api.railway.internal:8080 {
+			header_up X-Forwarded-Proto https
+		}
 	}
 	handle /hooks/* {
-		reverse_proxy api.railway.internal:8080
+		reverse_proxy api.railway.internal:8080 {
+			header_up X-Forwarded-Proto https
+		}
 	}
 	handle /healthz {
-		reverse_proxy api.railway.internal:8080
+		reverse_proxy api.railway.internal:8080 {
+			header_up X-Forwarded-Proto https
+		}
 	}
 	handle /connection/* {
 		reverse_proxy centrifugo.railway.internal:8000
