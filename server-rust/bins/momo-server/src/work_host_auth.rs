@@ -14,10 +14,34 @@
 //!   middleware does (`AuthMiddleware.swift:43-62`);
 //! * `routes::terminal_attach::validate` calls it directly, because that route
 //!   is mounted **outside** the bearer middleware (a PTY host asking whether a
-//!   capability is still good holds no bearer at all).
+//!   capability is still good holds no bearer at all). `display_attach::validate`
+//!   and — since ADR-0188 R0 — `work_hosts::heartbeat` do the same, for the same
+//!   reason.
 //!
 //! [`is_allowed_signed_path`] is what both consult, so a path is signable in one
 //! place or neither. Adding the next route stays a one-line, visible decision.
+//!
+//! ## ADR-0188 D7 (R0): no query string, and a v2 heartbeat
+//!
+//! The v2 payload signs the **path**, not the query. A signed request that also
+//! carried `?…` would have bytes the signature does not cover — an unsigned
+//! parameter riding on a signed request, which is the #875 shape (body not
+//! covered) moved one field over. No signed route reads a query, so the rule is
+//! the whole of it: any query string, even an empty `?`, is the same 401 as a
+//! bad signature. [`authenticate_signed_host_request`] takes the whole [`Uri`]
+//! rather than a path for exactly this reason — a caller cannot hand it a path
+//! with the query already stripped off.
+//!
+//! The heartbeat used to sign its own v1 payload
+//! (`momo.work_host.heartbeat.v1`) with no request id, so a captured heartbeat
+//! could be replayed for the whole ±5 minute window and keep a dead host looking
+//! alive. It is now an ordinary v2 request on this allow-list — body digest,
+//! one-time request id — and v1 is not accepted anywhere.
+//!
+//! The approval **decision** route is deliberately *not* on the allow-list
+//! (ADR-0188 D3: 「host 서명 allow-list에 넣지 않는다」): a signed host's
+//! principal carries its owner's `member_id`, so a host that could reach the
+//! decision route could approve work onto itself as its owner.
 //!
 //! The **still-unported two** (each refused by absence): `GET
 //! …/work-hosts/{host}/live-sessions`, `POST …/work-hosts/{host}/reconcile`.
@@ -29,6 +53,7 @@
 //!
 //! ## The check, in Swift's order (`:29-125`)
 //!
+//! 0. the request carries no query string (ADR-0188 D7 — see above);
 //! 1. the path/method is allow-listed — before anything is parsed;
 //! 2. `Authorization: MomoHost <hostId>` parses, and equals the `{host}` in the
 //!    path **when the path names one** ([`scoped_host_id_from_path`], Swift
@@ -71,7 +96,7 @@
 //! before it writes — the chokepoint trusts no caller's word that a signature
 //! was checked.
 
-use axum::http::{HeaderMap, Method};
+use axum::http::{HeaderMap, Method, Uri};
 use momo_auth::{
     consume_work_host_request_id, heartbeat_timestamp_is_fresh, load_work_host_signing_credential,
     verify_work_host_request,
@@ -175,6 +200,16 @@ pub(crate) fn is_allowed_signed_path(method: &Method, path: &str) -> bool {
     {
         return true;
     }
+    // `POST …/work-hosts/{host}/heartbeat` (ADR-0188 D7, R0) — liveness, signed
+    // v2 like every other host act so a captured beat cannot be replayed. The
+    // path names the host, so the `{host}` pin applies.
+    if method == Method::POST
+        && segments.len() == 6
+        && segments[3] == "work-hosts"
+        && segments[5] == "heartbeat"
+    {
+        return true;
+    }
     // `GET …/work-hosts/{host}/pending-controls` — how a daemon learns what a
     // person approved (#1114).
     if method == Method::GET
@@ -258,19 +293,31 @@ pub(crate) fn scoped_host_id_from_path(path: &str) -> Option<Result<Uuid, ()>> {
 
 /// Authenticate a signed host request, returning the verified identity.
 ///
-/// `path` must be the **raw request path** (`Uri::path()`), because it is inside
-/// the signature: reconstructing it from route parameters would re-encode it and
-/// silently invalidate every signature from a host that spelled it differently.
-/// It is also where the scoped-host pin is read from, so the raw path is the one
-/// input this function trusts about the request's shape.
+/// `uri` is the **request's own URI**. Its raw path (`Uri::path()`) is what is
+/// inside the signature: reconstructing it from route parameters would re-encode
+/// it and silently invalidate every signature from a host that spelled it
+/// differently. It is also where the scoped-host pin is read from, so the raw
+/// path is the one input this function trusts about the request's shape.
+///
+/// The whole `Uri`, not just its path, because of what the path leaves out: the
+/// query string is not signed, so a signed request may not carry one at all
+/// (ADR-0188 D7). Taking the path alone would let a caller strip the query
+/// before this function could see it.
 pub(crate) async fn authenticate_signed_host_request(
     state: &AppState,
     method: &Method,
-    path: &str,
+    uri: &Uri,
     headers: &HeaderMap,
     body: &[u8],
     workspace_id: Uuid,
 ) -> Result<SignedHostRequest, ApiError> {
+    // ADR-0188 D7 — nothing unsigned rides on a signed request. `query()` is
+    // `Some("")` for a bare trailing `?`, which is refused too: it is still a
+    // byte the signature does not cover.
+    if uri.query().is_some() {
+        return Err(signed_request_unauthorized());
+    }
+    let path = uri.path();
     if !is_allowed_signed_path(method, path) {
         return Err(signed_request_unauthorized());
     }
@@ -391,6 +438,13 @@ mod tests {
         let create = format!("/v1/workspaces/{ws}/work-sessions");
         let patch = format!("/v1/workspaces/{ws}/work-sessions/{host}");
         let profiles = format!("/v1/workspaces/{ws}/work-tool-profiles");
+        let heartbeat = format!("/v1/workspaces/{ws}/work-hosts/{host}/heartbeat");
+
+        // ADR-0188 D7 (R0): the heartbeat is an ordinary v2 request now, POST
+        // only, and its path names the host so the pin applies to it.
+        assert!(is_allowed_signed_path(&Method::POST, &heartbeat));
+        assert!(!is_allowed_signed_path(&Method::GET, &heartbeat));
+        assert_eq!(scoped_host_id_from_path(&heartbeat), Some(Ok(host)));
 
         assert!(is_allowed_signed_path(&Method::POST, &validate));
         assert!(is_allowed_signed_path(&Method::GET, &pending));
@@ -494,6 +548,91 @@ mod tests {
             Some(Err(()))
         );
         assert_eq!(scoped_host_id_from_path("/healthz"), None);
+    }
+
+    /// ADR-0188 D3: 「host 서명 allow-list에 넣지 않는다」. A signed host's
+    /// principal carries its owner's `member_id`; a decision route on this list
+    /// would let a laptop approve work onto itself as its owner. Every spelling
+    /// and verb of both decision routes — and the inbox beside them — stays off.
+    #[test]
+    fn no_approval_route_is_signable() {
+        let ws = Uuid::from_u128(1);
+        let approval = Uuid::from_u128(4);
+        let run = Uuid::from_u128(5);
+        for path in [
+            format!("/v1/workspaces/{ws}/approvals/{approval}/decision"),
+            format!("/v1/workspaces/{ws}/approvals"),
+            format!("/v1/agent-runs/{run}/approval-decisions"),
+        ] {
+            for method in [Method::GET, Method::POST, Method::PUT, Method::PATCH] {
+                assert!(
+                    !is_allowed_signed_path(&method, &path),
+                    "{method} {path} must never authenticate a work host"
+                );
+            }
+        }
+    }
+
+    /// ADR-0188 D7 — a signed request carries no query string, not even a bare
+    /// `?`. Refused before the allow-list, the headers and the database: the
+    /// pool below never dials, and each request is otherwise shaped to get past
+    /// every cheaper check (allow-listed path, well-formed headers, fresh
+    /// clock), so without the query rule it would reach the database — a 500
+    /// here — rather than the 401 asserted.
+    #[tokio::test]
+    async fn a_query_string_is_refused_before_anything_else() {
+        let pool = momo_db::sqlx::postgres::PgPoolOptions::new()
+            .acquire_timeout(std::time::Duration::from_millis(500))
+            .connect_lazy("postgres://unused:unused@127.0.0.1:1/unused")
+            .expect("a lazy pool never dials");
+        let state = AppState::new(
+            pool,
+            "test-secret".to_string(),
+            "ws://127.0.0.1:8000/connection/websocket".to_string(),
+        );
+        let ws = Uuid::from_u128(1);
+        let host = Uuid::from_u128(2);
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_millis() as i64;
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            format!("MomoHost {host}").parse().expect("header"),
+        );
+        headers.insert(SENT_AT_HEADER, now_ms.to_string().parse().expect("header"));
+        headers.insert(SIGNATURE_HEADER, "c2lnbmF0dXJl".parse().expect("header"));
+        headers.insert(
+            REQUEST_ID_HEADER,
+            Uuid::from_u128(3).to_string().parse().expect("header"),
+        );
+
+        for (method, raw) in [
+            (
+                Method::GET,
+                format!("/v1/workspaces/{ws}/work-hosts/{host}/pending-controls?limit=1"),
+            ),
+            (
+                Method::GET,
+                format!("/v1/workspaces/{ws}/work-hosts/{host}/pending-controls?"),
+            ),
+            (
+                Method::POST,
+                format!("/v1/workspaces/{ws}/work-hosts/{host}/heartbeat?stale=1"),
+            ),
+        ] {
+            let uri: Uri = raw.parse().expect("uri");
+            assert!(uri.query().is_some(), "{raw} carries a query");
+            let error = authenticate_signed_host_request(&state, &method, &uri, &headers, b"", ws)
+                .await
+                .expect_err("a query string is never signed");
+            assert_eq!(error.status, axum::http::StatusCode::UNAUTHORIZED, "{raw}");
+            assert_eq!(
+                error.message, "invalid work host request signature",
+                "{raw}"
+            );
+        }
     }
 
     #[test]

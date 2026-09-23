@@ -856,23 +856,36 @@ async fn a_cloud_policy_acquires_registers_and_runs_a_session() {
     );
 
     // ---- the workd reports in, and the session opens (existing routing) ---
+    // ADR-0188 D7: the heartbeat is an ordinary v2 signed request — method, raw
+    // path, tenant, host, clock, body digest and a one-time request id in the
+    // `MomoHost` headers. There is no v1 body any more.
     let sent_at_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis() as i64;
     let host_uuid = Uuid::parse_str(&host_id).expect("host uuid");
+    let heartbeat_path = format!("/v1/workspaces/{workspace}/work-hosts/{host_id}/heartbeat");
+    let request_id = Uuid::new_v4();
     let signature = momo_wire::signing::sign_base64(
         &signing_seed,
-        &momo_wire::signing::heartbeat_payload(workspace, host_uuid, sent_at_ms),
+        &momo_wire::signing::request_payload(
+            "POST",
+            &heartbeat_path,
+            workspace,
+            host_uuid,
+            sent_at_ms,
+            &momo_wire::signing::sha256_hex(b""),
+            request_id,
+        ),
     )
     .expect("sign heartbeat");
     let response = client
         .http
-        .post(format!(
-            "{}/v1/workspaces/{workspace}/work-hosts/{host_id}/heartbeat",
-            client.base
-        ))
-        .json(&json!({"sentAtMs": sent_at_ms, "signature": signature}))
+        .post(format!("{}{heartbeat_path}", client.base))
+        .header("Authorization", format!("MomoHost {host_uuid}"))
+        .header("X-Momo-Work-Host-Sent-At", sent_at_ms.to_string())
+        .header("X-Momo-Work-Host-Signature", signature)
+        .header("X-Momo-Work-Host-Request-ID", request_id.to_string())
         .send()
         .await
         .expect("heartbeat");
