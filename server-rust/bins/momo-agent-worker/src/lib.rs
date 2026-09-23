@@ -1366,19 +1366,28 @@ impl AgentWorker {
         // ADR-0114 D5: the host owner may have pre-authorised this tool. The
         // permission is theirs and it is per-tool, so it opens the gate for a
         // spawn of `codex` and says nothing about `shell`.
-        let auto_approved = momo_t3::work_control::spawn_is_auto_approved_in_tx(
-            conn,
-            workspace_id,
-            owner_member_id,
-            &arguments.tool,
-        )
-        .await
-        .map_err(t3_as_db)?
+        //
+        // It is judged for the host the gate would open onto — the default the
+        // executor would run on — because ADR-0188 R0 made the host part of the
+        // question: a remote (member-scoped) host is never auto-approved, so a
+        // default that is somebody's own laptop raises the card and its owner
+        // decides.
+        let auto_approved = match default_host_id {
+            Some(host_id) => momo_t3::work_control::spawn_is_auto_approved_in_tx(
+                conn,
+                workspace_id,
+                owner_member_id,
+                &arguments.tool,
+                host_id,
+            )
+            .await
+            .map_err(t3_as_db)?,
             // An auto-approval with nowhere to run is not an approval. Falling
             // through to the card is the honest answer: it shows the person why
             // (every candidate greyed, with its reason) instead of failing in
             // the executor with nobody watching.
-            && default_host_id.is_some();
+            None => false,
+        };
 
         Ok(Some(SpawnExecution {
             execution: momo_t3::work_control::spawn_execution_object(

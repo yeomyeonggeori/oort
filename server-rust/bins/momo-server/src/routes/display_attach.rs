@@ -965,15 +965,9 @@ pub async fn validate(
         return Err(signed_request_unauthorized());
     };
 
-    let signed = authenticate_signed_host_request(
-        &state,
-        &method,
-        uri.path(),
-        &headers,
-        &body,
-        workspace_id,
-    )
-    .await?;
+    let signed =
+        authenticate_signed_host_request(&state, &method, &uri, &headers, &body, workspace_id)
+            .await?;
 
     let request: ValidateDisplayAttachRequest =
         serde_json::from_slice(&body).map_err(|_| invalid_capability())?;
