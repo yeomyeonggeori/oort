@@ -22,6 +22,10 @@ import {
 import {useQueries, useQuery, useQueryClient} from '@tanstack/react-query';
 import {useCallback, useMemo} from 'react';
 import {useNow} from '../../lib/useNow';
+import {
+  readIntentWire,
+  type ReadAdvertisementReason,
+} from '../readState/advertise';
 import {useSession} from '../../session/useSession';
 import {
   useChannels,
@@ -473,14 +477,27 @@ export function useMentionCount(): number {
  * Mark a mention read by advancing the SERVER cursor past it (P7: the client
  * reports a position, the server owns the count). The row leaves the inbox
  * because the projection changed, not because this client hid it.
+ *
+ * The caller states WHY it is advancing (ADR-0178 D6, #1964) and this hook turns
+ * that into the wire discriminator through `readIntentWire` — the one place that
+ * decides it. Required rather than defaulted: a default here would be a silent
+ * choice made on behalf of the next call site, and both wrong answers are bad
+ * ones (a stray `explicit_open` erases a mark set on the desktop; a missing one
+ * leaves every channel the phone opens marked forever).
  */
-export function useMarkRead(): (channelId: string, seq: number) => Promise<void> {
+export function useMarkRead(): (
+  channelId: string,
+  seq: number,
+  reason: ReadAdvertisementReason,
+) => Promise<void> {
   const {workspaceId} = useSession();
   const invalidateReadStates = useInvalidateReadStates(workspaceId);
   const client = useQueryClient();
   return useCallback(
-    async (channelId: string, seq: number) => {
-      await updateReadState(workspaceId, channelId, seq);
+    async (channelId: string, seq: number, reason: ReadAdvertisementReason) => {
+      await updateReadState(workspaceId, channelId, seq, {
+        readIntent: readIntentWire(reason),
+      });
       invalidateReadStates();
       await client.invalidateQueries({
         queryKey: ['inbox-mentions', workspaceId],

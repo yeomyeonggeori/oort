@@ -96,6 +96,11 @@ import {pinListHeaderLabel} from '@momo/core/features/timeline/pins';
 import {Timeline} from '../features/conversation/Timeline';
 import {useTimeline} from '../features/conversation/useTimeline';
 import {useMarkRead} from '../features/inbox/useInbox';
+import {visitFlushReason} from '../features/readState/advertise';
+import {
+  foldVisitBoundary,
+  type VisitBoundary,
+} from '../features/readState/visit';
 import {
   useChannels,
   useDirectory,
@@ -130,6 +135,45 @@ const NO_RECEIPTS: ReadonlyMap<string, ApprovalReceipt> = new Map();
 // after it appeared — the person would see "새 메시지 12개" flash and vanish,
 // which is worse than never drawing it: the one thing they wanted was the line
 // showing where they had stopped.
+//
+// ## …and both are the COMPOSED values (ADR-0178 D3 / D6, #1964)
+//
+// "Where they had stopped" is no longer only the cursor. A person can mark a
+// channel 「여기부터 안 읽음」 on the desktop, and the server keeps that mark
+// beside the cursor instead of folding it into `unreadCount`. So the snapshot is
+// taken through the core's single point — `unreadDividerCursorSeq` for where
+// the line goes, `composedUnreadCount` for the number on it — and this file
+// never does arithmetic on the mark itself.
+//
+// Freezing matters twice over now. The first cursor PUT of a visit carries
+// `read_intent: "explicit_open"`, which is what finally lets the phone clear a
+// mark (D4: opening the channel IS the clearing gesture). The server deletes it
+// in that same transaction, so the next read-state poll comes back unmarked.
+// A live read would take the divider down under the reader at that moment;
+// the snapshot is what keeps it where it was for the rest of the visit.
+//
+// ## …but a mark that arrives after the freeze replaces it, and it is drawn
+// ## before it is cleared (#1964 R1 H-1)
+//
+// The first version froze once and never looked again, and claimed that was the
+// web's rule. It was half of it. The phone caches the read state for 30 seconds
+// and does not refetch on focus, so a person resuming the app, or tapping a push
+// in an open app, opened the room holding a projection older than the mark the
+// desktop had just set. The mount refetch then brought the mark, the snapshot
+// did not take it, and the explicit_open cleared it: a mark erased without ever
+// being drawn, which is the bug ADR-0178 D6 names.
+//
+// Three rules now, stated in `features/readState/visit.ts`:
+//   - freeze from what the phone holds at open (or the first row, if none);
+//   - a live row that carries a mark replaces the boundary, whether this visit
+//     set it or another device did (the web's `foldInVisitMark` direction; the
+//     phone swaps the row's composed pair rather than the mark alone, and that
+//     file says what that changes);
+//   - a live row without one never erases it (the open's own clear).
+// And one on the wire: the visit's first explicit_open waits for a read-state
+// answer received DURING this visit, so the boundary it clears has been drawn
+// from the server's present state (`freshBoundary`, below). The visit asks for
+// that answer the moment it starts instead of waiting out the cache.
 //
 // ## Keyboard
 //
@@ -176,6 +220,16 @@ const READ_CURSOR_COALESCE_MS = 600;
  * 튀어나오는 것은 사람에게 원인 없는 사건이다.
  */
 const PENDING_ANCHOR_TTL_MS = 30_000;
+
+/**
+ * 한 방문 — 이 화면이 한 채널을 연 한 번 (#1964). 객체의 동일성으로 센다.
+ * `cachedAt` 은 방문이 시작될 때 손에 든 읽음 상태가 언제 도착한 것이었는가다
+ * (`dataUpdatedAt`, 없으면 0). 명시 열람의 문턱이 이 값과 견준다.
+ */
+interface Visit {
+  channelId: string;
+  cachedAt: number;
+}
 
 export default function ConversationScreen({
   channelId,
@@ -375,29 +429,71 @@ export default function ConversationScreen({
     if (supersededByNewRun) setStopOutcome(null);
   }, [supersededByNewRun]);
 
-  // ---- the frozen unread snapshot ------------------------------------------
-  // Captured on the first render that has a read state for this channel, and
-  // never updated. `null` until then, which renders no divider rather than a
-  // divider at seq 0 — a line claiming "you stopped here" at the top of the
-  // channel is a lie that costs the reader a scroll.
-  const frozenRef = useRef<{
-    channelId: string;
-    lastReadSeq: number;
-    unreadCount: number;
-  } | null>(null);
-  const readState = unreadFor(readStates.byChannel, channelId);
-  if (
-    readState &&
-    (frozenRef.current === null || frozenRef.current.channelId !== channelId)
-  ) {
-    frozenRef.current = {
-      channelId,
-      lastReadSeq: readState.lastReadSeq,
-      unreadCount: readState.unreadCount,
-    };
+  // ---- the visit's unread boundary -----------------------------------------
+  // Captured on the first render that has a read state for this channel. `null`
+  // until then, which renders no divider rather than a divider at seq 0 — a line
+  // claiming "you stopped here" at the top of the channel is a lie that costs the
+  // reader a scroll.
+  //
+  // Both numbers come out of the core's D3 composition (see the header): the
+  // row's own `lastReadSeq`/`unreadCount` are blind to a mark set elsewhere.
+  // After the freeze, a live row that carries a mark replaces the boundary and a
+  // row without one leaves it alone — the open's own `explicit_open` clears the
+  // server mark, and this is the boundary that outlives that. The rules, and the
+  // one way they differ from the web's, are in `features/readState/visit.ts`.
+  const boundaryRef = useRef<VisitBoundary | null>(null);
+  boundaryRef.current = foldVisitBoundary(
+    boundaryRef.current,
+    channelId,
+    unreadFor(readStates.byChannel, channelId),
+  );
+  const boundary = boundaryRef.current;
+
+  // ---- 방문, 그리고 그 방문의 명시 열람 (ADR-0178 D6, #1964) -----------------
+  //
+  // 방문 = 이 화면이 한 채널을 연 한 번. 채널 id 가 바뀔 때마다 **새 객체**다 —
+  // 같은 방으로 돌아와도(A→B→A) 두 번째 A 는 새로 연 것이고, 그래서 id 가 아니라
+  // 객체의 동일성으로 센다. 셸은 뒤로가기에서 이 화면을 언마운트하므로 사이드바에서
+  // 같은 방을 다시 여는 것도 새 방문이다.
+  //
+  // 방문은 시작할 때 캐시가 언제 받은 것이었는지(`dataUpdatedAt`)를 함께 든다.
+  // 아래 「이 방문 동안 받은 응답」 판정의 기준선이다.
+  const visitRef = useRef<Visit | null>(null);
+  if (visitRef.current === null || visitRef.current.channelId !== channelId) {
+    visitRef.current = {channelId, cachedAt: readStates.dataUpdatedAt};
   }
-  const frozen =
-    frozenRef.current?.channelId === channelId ? frozenRef.current : null;
+  /** 명시 열람 광고가 **성공한** 방문. 실패하면 다음 광고가 다시 싣는다. */
+  const explicitOpenVisitRef = useRef<Visit | null>(null);
+  /**
+   * 이 방문 동안 받은 읽음 상태 응답으로 경계를 그렸는가 (#1964 R1 H-1).
+   *
+   * 명시 열람은 서버에서 마크를 지운다. 그러니 그 광고는 **화면이 서버의 지금 마크를
+   * 그린 뒤에만** 나가야 한다. 첫 판의 문턱은 「응답을 한 번이라도 받았다」
+   * (`data !== undefined`)였고, 그것은 캐시도 「봤다」로 쳤다. 폰의 캐시는 30초까지
+   * 신선하고 포커스로 재조회하지 않으므로, 앱을 되살려 방을 열면 데스크탑이 방금 건
+   * 마크를 모르는 캐시로 명시 열람이 나갔다.
+   *
+   * 그래서 문턱은 **데이터가 이 방문이 시작된 뒤에 도착했는가**다. 이 렌더의 경계는
+   * 같은 렌더의 데이터로 접혔으므로(위 `foldVisitBoundary`), 이 값이 참이 된 커밋에서
+   * 구분선은 이미 화면에 있다. 광고는 그 커밋 뒤의 효과가 예약한다 — 먼저 그리고
+   * 그다음 지운다. 응답이 늦거나 실패하면 background 로 커서만 보낸다. 마크는 산다.
+   */
+  const freshBoundary = readStates.dataUpdatedAt > visitRef.current.cachedAt;
+  const freshBoundaryRef = useRef(freshBoundary);
+  freshBoundaryRef.current = freshBoundary;
+  /**
+   * 그 응답을 **방문이 시작될 때 청한다.** 캐시가 30초보다 젊으면 react-query 는 마운트
+   * 재조회를 하지 않는다. 기다리면 첫 광고는 background 로 나가고, 명시 열람은 그
+   * 광고의 무효화 재조회를 거쳐 한 박자 늦게 나간다. 그 사이 방을 떠나면 마크는 지워지지
+   * 않는다(안전하지만 사람이 다 읽은 방이 안 읽음으로 남는다).
+   *
+   * `cancelRefetch: false` 는 이미 날아가는 조회(오래된 캐시의 마운트 재조회, 콜드
+   * 스타트의 첫 조회)를 **이어받는다.** 기본값 `true` 는 그것을 끊고 새로 보낸다.
+   */
+  const refetchReadStates = readStates.refetch;
+  useEffect(() => {
+    void refetchReadStates({cancelRefetch: false});
+  }, [channelId, refetchReadStates]);
 
   // ---- advance the server cursor -------------------------------------------
   // Fire and forget: the badge is the server's projection, and a failed PUT
@@ -438,7 +534,17 @@ export default function ConversationScreen({
   // 그 구분은 **의존성 배열**로 표현된다: 예약 효과는 `newestSeq` 에도 매이고,
   // 비우는 효과는 `channelId` 에만 매인다. React 는 한 커밋에서 모든 cleanup 을
   // 먼저 돌리므로, 채널이 바뀌는 순간 ref 에는 아직 **떠나는 채널**의 값이 있다.
-  const cursorRef = useRef<{channelId: string; seq: number} | null>(null);
+  //
+  // ## 그리고 방문의 첫 광고는 명시 열람이다 (ADR-0178 D6, #1964)
+  //
+  // 보류된 값은 **어느 방문의 것인지**를 함께 든다. 떠나는 채널의 값이 cleanup 에서
+  // 나갈 때도 그 채널의 방문으로 판정돼야 하기 때문이다 — 600ms 안에 떠난 방도
+  // 사람이 연 방이다. 판정 자체는 `visitFlushReason` 한 곳이 한다.
+  const cursorRef = useRef<{
+    channelId: string;
+    seq: number;
+    visit: Visit;
+  } | null>(null);
   const markReadRef = useRef(markRead);
   useEffect(() => {
     markReadRef.current = markRead;
@@ -450,9 +556,22 @@ export default function ConversationScreen({
     // 먼저 비운다: 이 값은 한 번만 보내면 되고, 떠나기와 타이머가 같은 값을 두 번
     // 보내는 것은 무효화 폭풍을 그만큼 두 번 부르는 일이다.
     cursorRef.current = null;
-    void markReadRef.current(pending.channelId, pending.seq).catch(() => {
-      /* the cursor stays put; the next open tries again */
+    const reason = visitFlushReason({
+      explicitOpenSent: explicitOpenVisitRef.current === pending.visit,
+      freshBoundary: freshBoundaryRef.current,
     });
+    void markReadRef.current(pending.channelId, pending.seq, reason).then(
+      () => {
+        // 성공한 뒤에만 적는다. 실패한 명시 열람을 「보냈다」로 치면 이 방문은
+        // 끝내 마크를 못 지우고, 사람이 다 읽은 방이 계속 안 읽음으로 남는다.
+        if (reason === 'channel_open') {
+          explicitOpenVisitRef.current = pending.visit;
+        }
+      },
+      () => {
+        /* the cursor stays put; the next flush (or the next open) tries again */
+      },
+    );
   }, []);
 
   const newestSeq = timeline.state.newestSeq;
@@ -464,10 +583,16 @@ export default function ConversationScreen({
       cursorRef.current = null;
       return;
     }
-    cursorRef.current = {channelId, seq: newestSeq};
+    const visit = visitRef.current;
+    if (visit === null) return;
+    cursorRef.current = {channelId, seq: newestSeq, visit};
     const timer = setTimeout(flushReadCursor, READ_CURSOR_COALESCE_MS);
     return () => clearTimeout(timer);
-  }, [channelId, newestSeq, flushReadCursor]);
+    // `freshBoundary` 가 여기 있는 이유: 이 방문의 응답보다 먼저 나간 광고는
+    // background 였다(위 `freshBoundary` 주석). 응답이 도착해 경계가 그려진 커밋
+    // 뒤에 이 효과가 한 번 더 돌아 같은 seq 를 다시 예약하고, 그 광고가 이 방문의
+    // 명시 열람이 된다. 서버가 클램프하므로 같은 값을 두 번 보내는 것은 무해하다.
+  }, [channelId, newestSeq, freshBoundary, flushReadCursor]);
 
   useEffect(() => () => flushReadCursor(), [channelId, flushReadCursor]);
 
@@ -1185,8 +1310,8 @@ export default function ConversationScreen({
               status={timeline.status}
               channelKind={channel?.kind}
               peer={peer}
-              lastReadSeq={frozen?.lastReadSeq ?? null}
-              unreadCount={frozen?.unreadCount ?? 0}
+              lastReadSeq={boundary?.lastReadSeq ?? null}
+              unreadCount={boundary?.unreadCount ?? 0}
               recoveryMarkers={timeline.recoveryMarkers}
               pending={timeline.pending}
               working={working}
