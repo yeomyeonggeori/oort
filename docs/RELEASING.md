@@ -281,7 +281,7 @@ scripts/publish_next_build.sh --public --version 0.1.0 --dry-run
 `Unnotarized Developer ID` 가 정상. 이 호출은 `0.1.0` 을 next 채널에 올리지
 않는다.
 
-**실공증 전제:** 공개 DMG(`--public`)는 [M7-S](cicd/03-store-readiness-gate.md) PASS 기록과 owner 승인을 확인한다. 서버 이미지 발행 승인은 공증 권한을 포함하지 않는다. PASS 전에는 위 dry-run/로컬 준비까지만 진행한다.
+**실공증 전제:** `--public`(업로드 없음) 실공증은 [M7-I](cicd/03-store-readiness-gate.md) 증거 빌드(빌드마다 owner 승인, owner 기기 한정)와 M7-I 팀 직접 전달(현재 후보의 PASS 기록 + 배포 건마다 owner 승인)에 쓴다. 공증 DMG를 공개 게시(`gh release upload`)하는 것은 현재 후보의 M7-S PASS 기록과 owner 승인 뒤에만 한다. 서버 이미지 발행 승인은 공증 권한을 포함하지 않는다. 승인 전에는 위 dry-run/로컬 준비까지만 진행한다.
 
 ```sh
 # 실공증·스테이플 (맥 앞에서). 업로드는 하지 않는다.

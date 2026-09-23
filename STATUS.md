@@ -1,6 +1,6 @@
 # oort 진행 현황
 
-> **2026-09-23 동결.** 이슈마다 STATUS를 고치는 규칙을 폐지했다(ADR-0187 D8, 성재). 검증 증거의 정본은 **PR 본문**, 릴리스 요약은 `CHANGELOG.md`와 GitHub Release, 현재 위치는 `docs/planning/CURRENT_STATE.md`다. 아래는 역사 기록이며 더 고치지 않는다.
+> **2026-09-23 동결.** 이슈마다 STATUS를 고치는 규칙을 폐지했다(ADR-0187 D8, 성재 위임·기안자 확인). 검증 증거의 정본은 **PR 본문**, 릴리스 요약은 `CHANGELOG.md`와 GitHub Release, 현재 위치는 `docs/planning/CURRENT_STATE.md`다. 아래는 역사 기록이며 더 고치지 않는다.
 
 ## 오버레이 층 이름표 (#2044 #2075 #1919, R2 2026-09-22)
 
