@@ -294,9 +294,9 @@ impl Stub {
 }
 
 /// `--grandchild-helper PATH`: the helper process behind `--setsid-grandchild`.
-/// Stays in the agent's process group but ignores SIGTERM (a group SIGTERM
-/// alone does not end it), and starts a sleeper in a session of its own (a
-/// group signal cannot reach it at all).
+/// Stays in the agent's process group but ignores SIGTERM and never exits on
+/// its own (only a SIGKILL ends it), and starts a sleeper in a session of its
+/// own (a group signal cannot reach it at all).
 fn grandchild_helper(path: &str) {
     use std::os::unix::process::CommandExt as _;
     // SAFETY: plain syscalls; `setsid` in the forked child before exec is
@@ -312,9 +312,12 @@ fn grandchild_helper(path: &str) {
             Ok(())
         });
     }
-    let mut sleeper = sleeper.spawn().expect("spawn the detached sleeper");
+    let sleeper = sleeper.spawn().expect("spawn the detached sleeper");
     let _ = std::fs::write(path, format!("{} {}\n", sleeper.id(), std::process::id()));
-    let _ = sleeper.wait();
+    // Outlive the sleeper too: only a SIGKILL ends this process.
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(60));
+    }
 }
 
 fn main() {
