@@ -23,14 +23,22 @@ import {
   frameSentence,
   TURN_STATUS_LABEL,
   APPROVAL_STATUS_LABEL,
+  type AgentApprovalAction,
   type AgentCardModel,
 } from '@momo/core/features/timeline/agentCardModel';
 import {
+  ACTION_RESULT_SECRET_ONCE_NOTE,
   ACTION_RESULT_STATUS_LABEL,
   ACTION_RESULT_STATUS_NOTE,
   type ActionResultStatus,
   type AgentActionResultCard,
 } from '@momo/core/features/timeline/actionResultCard';
+import {
+  actionApproveConfirmCopy,
+  approvalRoleCopy,
+  roleRequiredCopy,
+} from '@momo/core/features/approvals/actionRole';
+import {actionDestination} from '@momo/core/features/commands/serverActions';
 import {
   artifactNote,
   isProvisional,
@@ -91,6 +99,7 @@ import {
 const EMPTY_GATES: ReadonlyMap<string, ApprovalGate> = new Map();
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import {ApprovalDecision} from '../inbox/ApprovalDecision';
+import {LinkOnce} from './LinkOnce';
 import {AttachmentList} from '../attachments/AttachmentList';
 import {
   approvalCardNote,
@@ -961,16 +970,33 @@ function CompletionReportCardView({
 }
 
 /**
- * 워크스페이스 행동 결과 카드 (ADR-0186 부록 B) — **폰 최소판**.
+ * 워크스페이스 행동 결과 카드 (ADR-0186 부록 B) — **폰 판** (AX-7 #2513).
  *
- * AX-4(#2510)가 웹에 세운 카드가 코어 모델을 들여오면서 이 파일의 마지막 갈래가
- * 턴 어휘(`AgentTurnStatus`)로 이 카드를 인덱싱하게 됐다. 그대로 두면 병합 트리의
- * 폰 타입검사가 무너지고, `card.title` 을 빌려 쓰던 꼬리가 상태 낱말을 찾지 못한다.
+ * 승인 카드 가족의 **끝난 쪽**이다. 웹 `ActionResultBody` 와 같은 것을 같은 순서로
+ * 그린다: 제목·상태 칩 → 행 → 결정한 사람 → 상태 문장 → 1회 고지 → 다음 길.
+ * 결정 컨트롤은 없다 — 이미 끝난 일에 승인·거부할 것이 없다.
  *
- * 그래서 **여기서 멈춰 세운다**: 제목·상태 칩·행·한 문장. 결정 컨트롤도, 다음 문도,
- * 1회 고지도 없다 — 폰 패리티는 AX-7(#2513)이고, 그 티켓이 오기 전에 반쪽짜리
- * 동선을 세우는 것은 이 배치의 범위 밖이다. 값이 없는 것은 웹과 같다(D4: 1회 값은
- * 결정 응답에만 있고, 폰에서 결정하면 폰 메모리에만 있다).
+ * 모델은 코어가 전부 읽어 준다(`actionResultCard`). 이 함수에는 props 를 읽는
+ * 코드가 한 줄도 없고, 있어서도 안 된다 — 폰이 부록 B 를 스스로 파싱하는 순간
+ * 웹과 폰은 같은 메시지를 두 규칙으로 읽는다(`actionApprovalCard.test.tsx` 의
+ * 단일점 시험이 그것을 잰다).
+ *
+ * ## 링크 값은 이 카드에 없다 (D4)
+ *
+ * 1회 값은 결정 응답에만 있었고, 결정한 사람의 화면에서 한 번 보였다
+ * (`LinkOnce`). 이 카드가 아는 것은 **그 일이 있었다**는 사실뿐이다.
+ *
+ * ## 「설정 › 멤버와 초대에서 보기」는 문이 아니라 문장이다 (이탈 기록)
+ *
+ * 웹은 이 자리에 설정으로 가는 버튼을 세운다. **폰에는 그 설정 화면이 없다**
+ * (`src/screens/` — 멤버·초대 관리 화면 부재). 없는 방으로 가는 문은 버튼이 아니라
+ * 문장이다(`LoginHandoffCardView` 머리말과 같은 규율). 그래서 서버가 붙인 이름을
+ * 그대로 들고 「데스크톱이나 웹에서 이어 갈 수 있습니다」라고 말한다.
+ *
+ * 그 문장도 **목적지를 아는 경우에만** 선다. 웹이 모르는 섹션에 문을 세우지 않는
+ * 것과 같은 fail-closed 다(웹 R1 H1): 부록 B 원문의 `?section=invites` 처럼 실물
+ * 화면이 없는 주소를 「웹에서 볼 수 있다」고 말하면 거짓 안내다. 「아는 목적지」의
+ * 표는 코어의 것을 쓴다(`actionDestination` — 팔레트가 같은 질문에 쓰는 그 표).
  *
  * 색은 웹과 같은 규칙이다. `role_required` 가 `warn` 인 것은 실패가 아니라 **때**의
  * 문제이기 때문이고(웹 `ACTION_RESULT_CHIP_CLASS` 독스트링), 폰에서는 그 역할을
@@ -985,13 +1011,62 @@ const ACTION_RESULT_TONE: Readonly<
   role_required: 'warn',
 };
 
+/**
+ * 결과 카드의 「다음 길」 문장. 목적지를 모르면 `null` — 문장도 서지 않는다.
+ *
+ * 서버의 이름(`next.label`)을 조사 없이 콜론 뒤에 둔다. 조사를 붙이려면 서버
+ * 낱말의 끝소리를 읽어야 하는데, 그 이름은 이 빌드가 짓지 않은 문자열이다.
+ */
+export function actionResultElsewhereCopy(
+  card: AgentActionResultCard,
+): string | null {
+  if (card.next === null) return null;
+  if (actionDestination(card.actionId) !== card.next.href) return null;
+  return `데스크톱이나 웹에서 이어 갈 수 있습니다: ${card.next.label}`;
+}
+
+/**
+ * 사람이 판단할 사실 한 줄 (라벨 · 값).
+ *
+ * 원본 데이터 접힘의 `detailRow` 보다 한 단 앞으로 나온다: 그쪽은 「무엇이 더
+ * 실렸나」이고 이쪽은 **결정의 근거**다. 웹이 두 카드에서 같은 `LabeledRow`
+ * (값 = 본문 잉크)를 쓰는 것과 같은 격이다.
+ */
+function FactRow({
+  label,
+  value,
+  styles,
+  testID,
+}: {
+  label: string;
+  value: string;
+  styles: ReturnType<typeof buildStyles>;
+  testID: string;
+}): React.JSX.Element {
+  return (
+    <View style={styles.factRow} testID={testID}>
+      <Text style={styles.factLabel}>{label}</Text>
+      <Text style={styles.factValue}>{value}</Text>
+    </View>
+  );
+}
+
 function ActionResultCardView({
   card,
+  directory,
   styles,
+  noteStyle,
 }: {
   card: AgentActionResultCard;
+  directory: Directory;
   styles: ReturnType<typeof buildStyles>;
+  noteStyle: ReturnType<typeof buildApprovalNoteStyle>;
 }): React.JSX.Element {
+  const decidedBy =
+    card.decidedByMemberId !== null
+      ? memberFor(directory, card.decidedByMemberId)
+      : null;
+  const elsewhere = actionResultElsewhereCopy(card);
   return (
     <View style={styles.card} testID="agent-card">
       <View style={styles.cardHead}>
@@ -1003,18 +1078,109 @@ function ActionResultCardView({
           tone={ACTION_RESULT_TONE[card.status]}
         />
       </View>
-      <Text style={styles.cardBody}>
+      {card.rows.length > 0 ||
+      card.omittedRows > 0 ||
+      decidedBy !== null ? (
+        <View style={styles.factRows} testID="action-result-rows">
+          {card.rows.map(row => (
+            <FactRow
+              key={`action-result-${row.label}`}
+              label={row.label}
+              value={row.value}
+              styles={styles}
+              testID="action-result-row"
+            />
+          ))}
+          {card.omittedRows > 0 ? (
+            <FactRow
+              label="그 밖에"
+              value={`${formatCount(card.omittedRows)}개를 표시하지 못했습니다.`}
+              styles={styles}
+              testID="action-result-omitted"
+            />
+          ) : null}
+          {decidedBy !== null ? (
+            <FactRow
+              label="결정"
+              value={decidedBy.displayName}
+              styles={styles}
+              testID="action-result-decided-by"
+            />
+          ) : null}
+        </View>
+      ) : null}
+      <Text style={styles.cardBody} testID="action-result-note">
         {ACTION_RESULT_STATUS_NOTE[card.status]}
       </Text>
-      {card.rows.length > 0 ? (
-        <View style={styles.detailRows} testID="action-result-rows">
-          {card.rows.map(row => (
-            <Text
-              key={`action-result-${row.label}`}
-              style={styles.cardMeta}
-            >{`${row.label} ${row.value}`}</Text>
-          ))}
-        </View>
+      {card.secretShownOnce ? (
+        <Text
+          style={[styles.cardNote, noteStyle.guidance]}
+          testID="action-result-secret-once">
+          {ACTION_RESULT_SECRET_ONCE_NOTE}
+        </Text>
+      ) : null}
+      {elsewhere !== null ? (
+        <Text
+          style={[styles.cardNote, noteStyle.guidance]}
+          testID="action-result-elsewhere">
+          {elsewhere}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * 행동 승인의 판단 근거 (ADR-0186 부록 A) — 행 · 사유 · 결정 권한.
+ *
+ * 승인 카드는 두 얼굴을 갖되 컴포넌트는 하나다(ADR-0186 §6). 이 블록이 **있으면**
+ * 행동 승인이고, 없으면 지금까지의 도구 호출 승인이 한 글자도 다르지 않게 선다.
+ *
+ * 결정 권한 줄은 **결정하기 전에** 누가 결정할 수 있는지 말한다. 이 줄이 없으면
+ * 권한 없는 사람은 누르고 나서야 403 을 만나고, 그 실패는 화면이 미리 알 수 있었던
+ * 것이다(웹 `approval-action-role` 과 같은 이유).
+ */
+function ApprovalActionRows({
+  action,
+  styles,
+}: {
+  action: AgentApprovalAction;
+  styles: ReturnType<typeof buildStyles>;
+}): React.JSX.Element {
+  return (
+    <View style={styles.factRows} testID="approval-action-rows">
+      {action.rows.map(row => (
+        <FactRow
+          key={`action-${row.label}`}
+          label={row.label}
+          value={row.value}
+          styles={styles}
+          testID="approval-action-row"
+        />
+      ))}
+      {action.omittedRows > 0 ? (
+        <FactRow
+          label="그 밖에"
+          value={`${formatCount(action.omittedRows)}개를 표시하지 못했습니다.`}
+          styles={styles}
+          testID="approval-action-omitted"
+        />
+      ) : null}
+      {action.rationale !== null ? (
+        <FactRow
+          label="사유"
+          value={action.rationale}
+          styles={styles}
+          testID="approval-action-rationale"
+        />
+      ) : null}
+      {action.requiredRole !== null ? (
+        <FactRow
+          label="결정 권한"
+          value={approvalRoleCopy(action.requiredRole)}
+          styles={styles}
+          testID="approval-action-role"
+        />
       ) : null}
     </View>
   );
@@ -1022,6 +1188,7 @@ function ActionResultCardView({
 
 function AgentCard({
   card,
+  directory,
   approvalGates,
   approvalReceipts,
   approvalOffline,
@@ -1030,6 +1197,8 @@ function AgentCard({
   onApprovalSettled,
 }: {
   card: AgentCardModel;
+  /** 결과 카드의 「결정」 줄이 사람 이름을 푸는 데 쓴다. */
+  directory: Directory;
   approvalGates?: ReadonlyMap<string, ApprovalGate>;
   approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
   approvalOffline?: boolean;
@@ -1107,6 +1276,12 @@ function AgentCard({
           />
         </View>
         {card.summary ? <Text style={styles.cardBody}>{card.summary}</Text> : null}
+        {/* 워크스페이스 행동의 판단 근거 (ADR-0186 부록 A · #2513). 코어가 읽어 준
+            `card.action` 만 그린다 — 블록이 없으면 아래는 전부 지금까지의 도구
+            호출 승인 그대로다. */}
+        {card.action !== null ? (
+          <ApprovalActionRows action={card.action} styles={styles} />
+        ) : null}
         {/* =====================================================================
             여기 있던 문장은 이랬다 (감사 H-1):
 
@@ -1131,16 +1306,37 @@ function AgentCard({
             아래 갈래가 셋이다: 문장 / 컨트롤 / (둘 다 아님 — 재개 제안).
             ===================================================================== */}
         {note !== null ? (
-          <Text
-            style={[styles.cardNote, approvalNoteStyle[note.tone]]}
-            testID={`card-approval-${note.kind}`}>
-            {note.text}
-          </Text>
+          <>
+            <Text
+              style={[styles.cardNote, approvalNoteStyle[note.tone]]}
+              testID={`card-approval-${note.kind}`}>
+              {note.text}
+            </Text>
+            {/* 버튼이 있던 자리에 링크가 선다 (ADR-0182 ① · ADR-0186 D4). 영수증
+                **아래**인 것은 웹과 같은 읽는 순서다: 방금 무엇이 기록됐는지가
+                먼저이고, 그 결과로 받은 값이 그다음이다. 값은 화면의 영수증 표 —
+                메모리 — 에서만 온다(`ApprovalReceipt.secretOnce`). */}
+            {note.kind === 'receipt' && receipt?.secretOnce !== undefined ? (
+              <LinkOnce secret={receipt.secretOnce} />
+            ) : null}
+          </>
         ) : approval !== null ? (
           <ApprovalDecision
             approvalId={approval.approvalId}
             reversible={approval.reversible}
             deadlinePassed={deadlinePassed(approval, nowMs)}
+            // 행동 승인만 두 칸을 갈아 끼운다 (ADR-0186 §5 · 웹 `ApprovalBody`).
+            // 문장만 갈라지고 결정 경로는 인박스·잠금화면과 한 벌 그대로다.
+            approveConfirm={
+              card.action !== null
+                ? actionApproveConfirmCopy(card.action.requiredRole)
+                : null
+            }
+            forbiddenCopy={
+              card.action?.requiredRole
+                ? roleRequiredCopy(card.action.requiredRole)
+                : null
+            }
             /* 호스트 후보는 **카드 스냅샷**에서 온다(이슈 1114). 위 주석의 규율과
                어긋나 보이지만 아니다: 그 규율은 시계가 움직이면 바뀌는 사실
                (만료·이미 결정됨)을 원장에서 읽으라는 것이고, 후보 목록은 승인이
@@ -1180,7 +1376,14 @@ function AgentCard({
   }
 
   if (card.kind === 'action_result') {
-    return <ActionResultCardView card={card} styles={styles} />;
+    return (
+      <ActionResultCardView
+        card={card}
+        directory={directory}
+        styles={styles}
+        noteStyle={approvalNoteStyle}
+      />
+    );
   }
 
   const cost = card.kind === 'turn' ? card.cost : null;
@@ -2120,6 +2323,7 @@ function MessageRowInner({
             ) : presentation.card ? (
               <AgentCard
                 card={presentation.card}
+                directory={directory}
                 approvalGates={approvalGates}
                 approvalReceipts={approvalReceipts}
                 approvalOffline={approvalOffline}
@@ -3245,6 +3449,23 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   detailRow: {flexDirection: 'row', gap: space.sm},
   detailLabel: {fontSize: font.meta, color: color.textFaint, minWidth: 72},
   detailValue: {flex: 1, fontSize: font.meta, color: color.textMuted},
+  // 결정의 근거 행 (ADR-0186 부록 A·B). 두 조각이 **같은 줄 상자**(`line.label`)를
+  // 선언해야 한 줄로 읽힌다 — RN 은 줄 상자 가운데에 글자를 놓고 컨테이너를
+  // 건너뛰는 기준선 정렬이 없다(`tokens.ts` 의 `line` 머리말).
+  factRows: {gap: space.xs, paddingTop: space.xs},
+  factRow: {flexDirection: 'row', gap: space.sm},
+  factLabel: {
+    fontSize: font.meta,
+    lineHeight: line.label,
+    color: color.textMuted,
+    minWidth: 72,
+  },
+  factValue: {
+    flex: 1,
+    fontSize: font.label,
+    lineHeight: line.label,
+    color: color.text,
+  },
   gateGroup: {marginTop: space.xs},
   gateSurface: {fontSize: font.label, fontWeight: '600', color: color.text},
   fileRow: {flexDirection: 'row', alignItems: 'center', gap: space.sm},

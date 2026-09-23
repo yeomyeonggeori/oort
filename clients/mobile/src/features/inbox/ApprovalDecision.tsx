@@ -66,6 +66,16 @@ export type Armed = 'approve' | 'reject' | null;
  */
 export const CONFIRM_GUARD_MS = 400;
 
+/**
+ * 결정 뒤 컨트롤 아래 줄의 격 (ADR-0186 §5 · 웹 `ApprovalActions` 의 `errorTone`).
+ *
+ *   error  무엇인가 실패했다. `color.danger`.
+ *   quiet  실패가 아니다 — 이 사람이 결정할 수 없다는 **사실**이고 요청은 여전히
+ *          대기다. 사람이 할 수 있는 다음 행동(권한 있는 사람에게 알리기)이 있으므로
+ *          사고의 색을 입히지 않는다. 웹의 `unavailable`(ink-muted)과 같은 자리다.
+ */
+type NoticeTone = 'error' | 'quiet';
+
 export function ApprovalDecision({
   approvalId,
   reversible = false,
@@ -74,6 +84,8 @@ export function ApprovalDecision({
   onSettled,
   testIDPrefix = 'inbox-approval',
   initialArmed = null,
+  approveConfirm = null,
+  forbiddenCopy = null,
 }: {
   approvalId: string;
   /**
@@ -123,12 +135,47 @@ export function ApprovalDecision({
    * `__tests__/fillTokens.test.ts` 가 `src/` 전수에서 이 prop 의 사용을 0 으로 단정한다.
    */
   initialArmed?: Armed;
+  /**
+   * 승인 확정 문장을 **이 문장으로** 갈아 끼운다 (ADR-0186 · 웹 R1 M2).
+   *
+   * 기본 문장(「승인하면 에이전트가 이어서 진행합니다」)은 도구 호출 승인의 것이고
+   * 거기서는 참이다. **워크스페이스 행동 승인에서는 거짓이다**: 제안한 turn 은 이미
+   * 끝났고(ADR-0186 D2 run park) 승인하면 서버가 결정자 권한으로 실행한다. 그래서
+   * 행동 승인 카드는 코어의 `actionApproveConfirmCopy` 를 넘긴다 — 웹이 같은 함수로
+   * 같은 칸(`verbs.approveConfirm`)을 갈아 끼운다.
+   *
+   * 갈아 끼우는 것은 **문장 하나**뿐이고 판정은 하나도 갈라지지 않는다: 멱등 키도,
+   * 더블탭 가드도, 409 해석도 그대로다. 기한이 지난 요청이면 여전히 만료 문장이
+   * 이긴다 — 그 요청은 승인도 거부도 아닌 만료로 기록되므로, 행동을 실행한다는
+   * 문장은 그때 거짓이 된다.
+   */
+  approveConfirm?: string | null;
+  /**
+   * 403 일 때 이 컨트롤이 대신 할 말 (ADR-0186 §5 · 웹 `forbiddenCopy`).
+   *
+   * `null`(기본)이면 지금까지와 한 글자도 다르지 않다: 코어의 문장이 붉게 서고
+   * 무장이 유지된다. 인박스는 이것을 넘기지 않는다.
+   *
+   * 넘기면 세 가지가 웹과 같은 뜻으로 바뀐다:
+   *   1. 문장이 호출자의 것이 된다 — 부록 A 의 `required_role` 을 아는 카드만
+   *      「관리자가 승인해야 합니다」라고 말할 수 있다(코어 `roleRequiredCopy`).
+   *   2. **무장이 풀린다.** 다시 눌러도 같은 403 을 받는 「승인 확정」을 위계의
+   *      꼭대기에 세워 두지 않는다(웹 design-review R1 M1). 요청은 여전히 대기라
+   *      승인·거부 버튼은 다시 선다 — 권한 있는 사람이 이 폰을 이어받을 수 있다.
+   *   3. 붉지 않다. 사고가 아니라 이 사람의 역할에 대한 사실이다(`NoticeTone`).
+   *
+   * 서버가 이름을 댄 `role_required` 와 이름 없는 `forbidden` 이 같은 갈래를 탄다.
+   * 웹의 판정 그대로다: 부록 A 가 `required_role` 을 실어 보낸 카드에서 403 이
+   * 뜻할 수 있는 것은 그것 하나다.
+   */
+  forbiddenCopy?: string | null;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {workspaceId} = useSession();
   const [armed, setArmed] = useState<Armed>(initialArmed);
   const [busy, setBusy] = useState(false);
   const [errorCopy, setErrorCopy] = useState<string | null>(null);
+  const [noticeTone, setNoticeTone] = useState<NoticeTone>('error');
   /** 가드 창 안에서 확정 탭이 실제로 있었는가 (2R M1). 죽은 버튼처럼 보이지 않게. */
   const [tooFast, setTooFast] = useState(false);
   // (행, 방향)당 하나. 같은 결정을 다시 누르면 서버가 원래 영수증을 그대로
@@ -206,6 +253,23 @@ export function ApprovalDecision({
         if (outcome.errorCode === 'idempotency_conflict') {
           delete keys.current[slot];
         }
+        if (
+          (outcome.errorCode === 'role_required' ||
+            outcome.errorCode === 'forbidden') &&
+          forbiddenCopy !== null
+        ) {
+          // 성공할 수 없는 확정 버튼을 남기지 않는다 — 무장만 푼다. 카드는 여전히
+          // 대기이므로 승인·거부는 그대로 다시 서고, 이 사람에게 참인 사실은 그
+          // 아래 한 줄이 진다. 웹은 여기서 초점을 카드로 옮기지만(R2 H-R2-1)
+          // RN 에는 옮길 `focus()` 가 없다. 엄지 밑의 버튼이 바뀐 것을 화면을 보지
+          // 않는 사람에게 알리는 길은 소리 하나다 — 무장이 이미 그렇게 한다.
+          setNoticeTone('quiet');
+          setErrorCopy(forbiddenCopy);
+          setArmed(null);
+          AccessibilityInfo.announceForAccessibility(forbiddenCopy);
+          return;
+        }
+        setNoticeTone('error');
         setErrorCopy(outcome.errorCopy ?? '결정을 처리하지 못했습니다.');
         return;
       }
@@ -217,7 +281,16 @@ export function ApprovalDecision({
     } finally {
       setBusy(false);
     }
-  }, [approvalId, armed, busy, chosenHostId, execution, onSettled, workspaceId]);
+  }, [
+    approvalId,
+    armed,
+    busy,
+    chosenHostId,
+    execution,
+    forbiddenCopy,
+    onSettled,
+    workspaceId,
+  ]);
 
   if (armed === null) {
     return (
@@ -269,7 +342,12 @@ export function ApprovalDecision({
           </Pressable>
         </View>
         {errorCopy !== null ? (
-          <Text style={styles.error} testID={`${testIDPrefix}-error`}>
+          <Text
+            // 403 뒤의 안내는 무장이 풀린 **이 자리**에 선다. 격은 `noticeTone`
+            // 이 정한다 — 같은 testID 에 두 격이 서는 것은 웹과 같은 모양이다
+            // (`approval-error` + `data-tone`).
+            style={noticeTone === 'quiet' ? styles.hint : styles.error}
+            testID={`${testIDPrefix}-error`}>
             {errorCopy}
           </Text>
         ) : null}
@@ -277,12 +355,16 @@ export function ApprovalDecision({
     );
   }
 
-  const consequence = confirmCopy(
-    armed,
-    reversible,
-    deadlinePassed,
-    armed === 'approve' ? chosenHostName : null,
-  );
+  const consequence =
+    // 기한이 지난 요청이면 만료 문장이 이긴다 — 그때는 아무것도 실행되지 않는다.
+    armed === 'approve' && approveConfirm !== null && !deadlinePassed
+      ? approveConfirm
+      : confirmCopy(
+          armed,
+          reversible,
+          deadlinePassed,
+          armed === 'approve' ? chosenHostName : null,
+        );
 
   return (
     <View style={styles.bar} testID={`${testIDPrefix}-confirm`}>
