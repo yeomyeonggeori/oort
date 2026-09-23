@@ -79,7 +79,14 @@ import {
 } from '@momo/core/features/timeline/actionCopy';
 import type {ReactionChip} from '@momo/core/features/timeline/reactions';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {Keyboard, Pressable, StyleSheet, Text, View} from 'react-native';
+import {
+  AccessibilityInfo,
+  Keyboard,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {COPY_RECEIPT_MS, copyText} from './copy';
@@ -1792,6 +1799,15 @@ function MessageRowInner({
   const styles = useStyles(buildStyles);
   rowRenders += 1;
   const presentation = useMemo(() => rowPresentation(message), [message]);
+  // 1회 링크 (#2513). 행은 접근성 요소 **하나**라(아래 `accessible`) 카드 안의
+  // 복사 버튼에 VoiceOver 가 닿지 못한다 — 코드 상자의 복사가 로터로 나온 것과
+  // 같은 이유로 여기서 로터에 세운다. 값은 영수증 표(화면의 메모리)에서만 읽고,
+  // 그 표가 링크를 그리는 조건(`LinkOnce`)과 같은 값을 본다.
+  const linkOnce =
+    presentation.card?.kind === 'approval' &&
+    presentation.card.approvalId !== null
+      ? approvalReceipts?.get(presentation.card.approvalId)?.secretOnce
+      : undefined;
   const deleted = message.state === 'deleted';
   const rollup =
     rollupOverride === undefined ? threadRollup(message) : rollupOverride;
@@ -1999,6 +2015,15 @@ function MessageRowInner({
         case 'momoCopyCode':
           if (affordances.firstCode) void copyText(affordances.firstCode);
           return;
+        case 'momoCopyLinkOnce':
+          // 버튼의 라벨 교체(ADR-0182 ①)를 로터에서는 들을 수 없으므로, 같은
+          // 낱말을 소리로 한 번 말한다. 값 자체는 읽지 않는다.
+          if (linkOnce) {
+            void copyText(linkOnce.value).then(ok => {
+              if (ok) AccessibilityInfo.announceForAccessibility('링크 복사됨');
+            });
+          }
+          return;
         case 'momoArtifactLink':
           if (presentation.artifact && 'url' in presentation.artifact) {
             const url = presentation.artifact.url;
@@ -2020,6 +2045,7 @@ function MessageRowInner({
       affordances,
       presentation.artifact,
       togglePin,
+      linkOnce,
     ],
   );
 
@@ -2027,6 +2053,8 @@ function MessageRowInner({
   // full of buttons — the iOS answer to "one tab stop per row" (web R2 H1).
   const accessibilityActions = useMemo(() => {
     const list: {name: string; label: string}[] = [];
+    // 맨 앞이다: 「지금 전달하세요」라고 말한 값이고, 이 화면을 떠나면 다시 없다.
+    if (linkOnce) list.push({name: 'momoCopyLinkOnce', label: '링크 복사하기'});
     if (actionable) list.push({name: 'momoActions', label: '메시지 액션'});
     if (actions?.onOpenProfile && memberFor(directory, message.authorMemberId)) {
       list.push({name: 'momoProfile', label: '작성자 프로필 보기'});
@@ -2076,6 +2104,7 @@ function MessageRowInner({
     pinned,
     directory,
     message.authorMemberId,
+    linkOnce,
   ]);
 
   const authorLabel = memberNameParts(

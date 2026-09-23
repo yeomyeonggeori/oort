@@ -664,6 +664,49 @@ describe('#2513 — 1회 링크는 영수증 자리에만 선다 (ADR-0182 ① �
     ).toBeTruthy();
   });
 
+  it('VoiceOver 는 로터로 복사한다 — 행은 접근성 요소 하나라 카드 안 버튼에 닿지 못한다', async () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+    renderRow({
+      gates: new Map(),
+      receipts: new Map([
+        [
+          APPROVAL_ID,
+          {note: '승인을 기록했습니다.', status: 'approved', secretOnce: SECRET_ONCE},
+        ],
+      ]),
+    });
+    const row = screen.getByTestId('message-row');
+    // 행이 접근성 요소 하나라는 전제부터 잰다. 이것이 거짓이 되면 로터가 아니라
+    // 버튼 자체가 답이고, 이 시험은 무엇을 지키는지 다시 물어야 한다.
+    expect(row.props.accessible).toBe(true);
+    const rotor = (row.props.accessibilityActions ?? []) as {
+      name: string;
+      label: string;
+    }[];
+    expect(rotor[0]).toEqual({name: 'momoCopyLinkOnce', label: '링크 복사하기'});
+    await act(async () => {
+      fireEvent(row, 'accessibilityAction', {
+        nativeEvent: {actionName: 'momoCopyLinkOnce'},
+      });
+    });
+    expect(clipboard.value).toBe(SECRET);
+    expect(announce).toHaveBeenCalledWith('링크 복사됨');
+    // 값 자체를 소리로 흘리지 않는다.
+    expect(
+      announce.mock.calls.some(([text]) => String(text).includes(SECRET)),
+    ).toBe(false);
+  });
+
+  it('링크가 없는 카드에는 그 로터 항목도 없다', () => {
+    renderRow({
+      gates: new Map(),
+      receipts: new Map([[APPROVAL_ID, {note: '거부를 기록했습니다.', status: 'rejected'}]]),
+    });
+    const rotor = (screen.getByTestId('message-row').props.accessibilityActions ??
+      []) as {name: string}[];
+    expect(rotor.map(action => action.name)).not.toContain('momoCopyLinkOnce');
+  });
+
   it('값이 없는 영수증(거부·다른 데서 결정)에는 링크가 서지 않는다', () => {
     renderRow({
       gates: new Map(),
