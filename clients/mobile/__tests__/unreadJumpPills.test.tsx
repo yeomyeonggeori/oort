@@ -1,11 +1,19 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
 import type {TimelineStreamItem} from '@momo/core/features/timeline/model';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import {act, cleanup, fireEvent, render, screen, within} from '@testing-library/react-native';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react-native';
 import {readFileSync} from 'fs';
 import {join} from 'path';
 import React from 'react';
-import {AccessibilityInfo, type FlatList} from 'react-native';
+import {AccessibilityInfo, FlatList, Keyboard} from 'react-native';
 
 import {Timeline} from '../src/features/conversation/Timeline';
 import {
@@ -29,6 +37,18 @@ import {
 //
 // 픽스처는 웹과 같다: 메시지 8개, 커서 3, 안읽음 5 → 구분선은 seq 4 위.
 // =============================================================================
+
+// 제스트 렌더러에는 네이티브 태그가 없어 `findNodeHandle` 이 언제나 null 이다
+// (`workConsole.test.tsx` 와 같은 사정). 여기서는 **어느 행**이 초점을 받았는지를
+// 물어야 하므로, 노드의 접근성 라벨을 그 노드의 손잡이로 돌려준다 — 라벨은 행마다
+// 본문이 달라 착지한 행을 이름으로 가려낸다(R1 M-3).
+jest.mock('react-native/Libraries/ReactNative/RendererProxy', () => ({
+  ...jest.requireActual('react-native/Libraries/ReactNative/RendererProxy'),
+  findNodeHandle: jest.fn(
+    (node: {props?: {accessibilityLabel?: string}} | null) =>
+      node?.props?.accessibilityLabel ?? null,
+  ),
+}));
 
 const SELF = '11111111-1111-4111-8111-111111111111';
 const OTHER = 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb';
@@ -56,10 +76,10 @@ const DIRECTORY = makeDirectory([
 
 const BASE_MS = 1_700_000_000_000;
 
-function message(seq: number, authorMemberId = OTHER): Message {
+function message(seq: number, authorMemberId = OTHER, channelId = 'ch'): Message {
   return {
     id: `msg-${seq}`,
-    channelId: 'ch',
+    channelId,
     seq,
     hlcTs: seq,
     hlcCount: 0,
@@ -81,6 +101,9 @@ interface MountProps {
   unreadCount?: number;
   jumpPills?: boolean;
   status?: 'loading' | 'ready';
+  channelId?: string;
+  working?: readonly {memberId: string}[];
+  jumpTarget?: {messageId: string; seq: number | null; token: number};
 }
 
 function element(listRef: ListRef, over: MountProps = {}) {
@@ -89,10 +112,13 @@ function element(listRef: ListRef, over: MountProps = {}) {
       messages={over.messages ?? HISTORY}
       directory={DIRECTORY}
       status={over.status ?? 'ready'}
+      channelId={over.channelId}
       myMemberId={SELF}
       nowMs={BASE_MS}
       lastReadSeq={over.lastReadSeq === undefined ? 3 : over.lastReadSeq}
       unreadCount={over.unreadCount ?? 5}
+      working={over.working}
+      jumpTarget={over.jumpTarget}
       jumpPills={over.jumpPills ?? true}
       listRef={listRef}
     />
@@ -218,6 +244,19 @@ function topPill() {
   return screen.queryByTestId('jump-unread');
 }
 
+type Emitter = {emit: (event: string, payload: unknown) => void};
+
+/** 키보드 이벤트 — `keyboardTravel.test.tsx` 와 같은 길로 보낸다. */
+function keyboard(event: string, height = 336) {
+  act(() => {
+    (Keyboard as unknown as {_emitter: Emitter})._emitter.emit(event, {
+      endCoordinates: {height, screenX: 0, screenY: 0, width: 390},
+      duration: 250,
+      easing: 'keyboard',
+    });
+  });
+}
+
 function bottomPill() {
   return screen.queryByTestId('jump-latest');
 }
@@ -239,10 +278,18 @@ function pillSentence(testID: string): string {
 beforeEach(() => {
   (AccessibilityInfo.isReduceMotionEnabled as jest.Mock).mockResolvedValue(false);
   (AccessibilityInfo.announceForAccessibility as jest.Mock).mockClear();
+  // 프리셋의 목이다 — `spyOn` 은 같은 함수를 돌려주고 `restoreAllMocks` 는 기록을
+  // 지우지 않는다. 비우지 않으면 앞 시험의 초점 이동이 다음 시험의 기록에 남는다.
+  (AccessibilityInfo.setAccessibilityFocus as jest.Mock).mockClear();
 });
 
 afterEach(() => {
   cleanup();
+  // `Keyboard` 는 모듈 하나가 「지금 올라와 있다」를 들고 있다. 다음 시험이 올라온
+  // 키보드로 시작하지 않게 내려 둔다.
+  (Keyboard as unknown as {_emitter: Emitter})._emitter.emit('keyboardDidHide', {
+    endCoordinates: {height: 0, screenX: 0, screenY: 0, width: 390},
+  });
   jest.restoreAllMocks();
 });
 
@@ -441,13 +488,45 @@ describe('위 필 「안읽음으로」', () => {
       animated: true,
     });
     expect(topPill()).toBeNull();
-    // 화면을 보지 않는 사람에게는 도착한 자리의 이름을 말한다.
-    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith(
-      '새 메시지 5개, 여기까지 읽음',
-    );
     // 목록이 도착해 다시 위쪽 밖을 보고해도(짧은 이동) 다시 서지 않는다.
     reportDividerAbove();
     expect(topPill()).toBeNull();
+  });
+
+  it('누른 뒤 VoiceOver 초점은 구분선 아래 첫 메시지로 간다 — 낭독이 아니라 초점이다 (R1 M-3)', async () => {
+    // 웹 `jumpToUnread` 가 초점을 두는 행과 같다(`firstUnreadMessageSeq`). 첫 판은
+    // 구분선의 문장을 낭독했고, 그 낭독은 초점을 쥔 필이 사라지는 순간에 나갔다.
+    const focus = jest
+      .spyOn(AccessibilityInfo, 'setAccessibilityFocus')
+      .mockImplementation(() => {});
+    const {listRef} = mount();
+    await settleAtBottom();
+    reportDividerAbove();
+    jest.spyOn(listRef.current!, 'scrollToIndex').mockImplementation(() => {});
+
+    fireEvent.press(screen.getByTestId('jump-unread'));
+
+    await waitFor(() => expect(focus).toHaveBeenCalledTimes(1), {timeout: 2000});
+    expect(focus).toHaveBeenCalledWith(expect.stringContaining('4번째 메시지'));
+    expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+  });
+
+  it('손가락이 목록을 잡으면 걸려 있던 초점 이동은 거둔다 (R1 M-3)', async () => {
+    const focus = jest
+      .spyOn(AccessibilityInfo, 'setAccessibilityFocus')
+      .mockImplementation(() => {});
+    const {listRef} = mount();
+    await settleAtBottom();
+    reportDividerAbove();
+    jest.spyOn(listRef.current!, 'scrollToIndex').mockImplementation(() => {});
+
+    fireEvent.press(screen.getByTestId('jump-unread'));
+    fireEvent(list(), 'scrollBeginDrag');
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 600));
+    });
+
+    expect(focus).not.toHaveBeenCalled();
   });
 
   it('동작 줄이기면 점프는 즉시다', async () => {
@@ -472,20 +551,202 @@ describe('위 필 「안읽음으로」', () => {
     expect(bottomPill()).not.toBeNull();
   });
 
-  it('방이 바뀌면(목록이 비면) 래치가 풀린다', async () => {
-    const {rerender} = mount();
+});
+
+// ---- 방을 옮기면 (design-review 2594 R1 H-1) ------------------------------------
+//
+// 대화 화면은 방을 옮길 때 목록을 언마운트하지 않는다. 셸이 `channelId` 만 갈아
+// 끼우고, `useTimeline` 은 **효과에서** 비운다 — 그래서 목록이 보는 순서는 늘 셋이다:
+//
+//   1. 새 방 id + 앞 방의 행        (바뀐 첫 렌더)
+//   2. 새 방 id + 빈 메시지 · 로딩  (효과가 비운 뒤)
+//   3. 새 방 id + 새 방의 첫 페이지
+//
+// 에이전트가 새 방에서 일하고 있으면 2 에서도 「작업 중」 자리가 서 있어 목록이
+// 한 번도 비지 않는다. 첫 판은 「목록이 비었는가」로 방 전환을 판정했고, 이 길에서
+// 앞 방의 래치·기준선·진입 판정이 새 방으로 넘어왔다.
+
+const ROOM_B = [101, 102, 103, 104].map(seq => message(seq, OTHER, 'ch-b'));
+/** 새 방에서 일하는 에이전트의 「작업 중」 자리. 이것이 목록을 붙잡는다. */
+const WORKING = [{memberId: OTHER}] as const;
+
+/** 방 B 로 옮기는 세 렌더. `live` 는 3 에 얹을 값(커서·안읽음·점프). */
+function switchToRoomB(
+  rerender: (next: MountProps) => void,
+  live: MountProps = {},
+  between?: () => void,
+) {
+  rerender({channelId: 'ch-b', working: WORKING});
+  between?.();
+  rerender({channelId: 'ch-b', working: WORKING, messages: [], status: 'loading'});
+  between?.();
+  rerender({
+    channelId: 'ch-b',
+    working: WORKING,
+    messages: ROOM_B,
+    status: 'ready',
+    lastReadSeq: 101,
+    unreadCount: 3,
+    ...live,
+  });
+}
+
+describe('방을 옮기면 필의 판정을 새로 한다 — 방의 정체성 (R1 H-1)', () => {
+  it('「작업 중」 자리가 목록을 붙잡은 채 옮겨도 래치가 풀린다', async () => {
+    const {rerender} = mount({channelId: 'ch'});
     await settleAtBottom();
     reportDividerAbove();
-    reportDividerIn();
+    reportDividerIn(); // 방 A 에서 구분선을 봤다 → 래치
     expect(topPill()).toBeNull();
 
-    // 새 방: `useTimeline` 이 먼저 비우고 다시 읽는다.
-    rerender({messages: [], status: 'loading'});
-    const next = [101, 102, 103, 104].map(seq => message(seq));
-    rerender({messages: next, status: 'ready', lastReadSeq: 101, unreadCount: 3});
+    switchToRoomB(rerender, {}, () => {
+      // 이 판의 요점: 목록은 한 번도 비지 않는다.
+      expect(list()).toBeTruthy();
+    });
     await settleAtBottom();
     reportDividerAbove();
+
+    // 래치가 넘어왔다면 방 B 의 위 필은 이 방문 내내 서지 않는다.
     expect(pillSentence('jump-unread')).toBe('새 메시지 3개 보기');
+  });
+
+  it('앞 방에서 위로 올라가 있었어도 새 방의 아래 필은 앞 방의 기준선으로 세지 않는다', async () => {
+    const {rerender} = mount({channelId: 'ch'});
+    await settleAtBottom();
+    scrollUpIntoHistory(); // 방 A 의 기준선은 seq 8
+    expect(bottomPill()).not.toBeNull();
+
+    switchToRoomB(rerender, {}, () => {
+      // 옮긴 첫 프레임부터 앞 방의 「최신으로」는 없다.
+      expect(bottomPill()).toBeNull();
+    });
+
+    // seq 는 방마다 따로 매긴다. 기준선 8 로 방 B 를 세면 「새 메시지 4개 보기」다.
+    expect(bottomPill()).toBeNull();
+  });
+
+  it('진입 앵커는 새 방의 메시지가 도착한 뒤에 다시 탄다 — 앞 방의 행이나 자리표시에는 타지 않는다', async () => {
+    const {rerender, listRef} = mount({channelId: 'ch'});
+    await settleAtBottom(); // 방 A 의 진입은 끝났다
+    const toEnd = jest
+      .spyOn(listRef.current!, 'scrollToEnd')
+      .mockImplementation(() => {});
+
+    // 1: 새 방 id 인데 행은 앞 방의 것. 그 위의 레이아웃 보고로 진입하면 새 방의
+    //    첫 페이지는 앵커 없이 도착한다.
+    rerender({channelId: 'ch-b', working: WORKING});
+    fireEvent(list(), 'contentSizeChange', 390, 3000);
+    // 2: 자리표시 하나뿐인 목록.
+    rerender({channelId: 'ch-b', working: WORKING, messages: [], status: 'loading'});
+    fireEvent(list(), 'contentSizeChange', 390, 80);
+    expect(toEnd).not.toHaveBeenCalledWith({animated: false});
+
+    // 3: 새 방의 첫 페이지 — 여기서 진입(#1025)이 다시 탄다: 즉시 한 번, 그리고 수렴.
+    rerender({
+      channelId: 'ch-b',
+      working: WORKING,
+      messages: ROOM_B,
+      status: 'ready',
+      lastReadSeq: 101,
+      unreadCount: 3,
+    });
+    fireEvent(list(), 'contentSizeChange', 390, 4000);
+    expect(toEnd).toHaveBeenCalledWith({animated: false});
+    await flushFrame(); // 수렴이 act 안에서 끝나게 둔다
+  });
+});
+
+// ---- 점프가 진입을 가져간다 (design-review 2594 R1 M-1) --------------------------
+//
+// 다른 방으로 가는 착지(ADE 「대화로」, #2584 의 알림 탭)는 새 방의 목록이 준비된
+// 뒤 `jumpTarget` 으로 걸린다. 그 효과와 새 목록의 첫 `onContentSizeChange` 는 순서가
+// 약속되지 않는다. 어느 순서로 와도 착지가 진입 수렴에 지면 안 된다.
+
+describe('점프가 진입을 가져간다 (R1 M-1)', () => {
+  it('점프가 쫓기를 거둔다 — 진입 수렴이 도는 중에 걸린 점프', async () => {
+    const {rerender, listRef} = mount({channelId: 'ch'});
+    const toEnd = jest
+      .spyOn(listRef.current!, 'scrollToEnd')
+      .mockImplementation(() => {});
+    const toIndex = jest
+      .spyOn(listRef.current!, 'scrollToIndex')
+      .mockImplementation(() => {});
+    // 진입 수렴이 시작된다. 창을 아직 못 쟀으므로 끝까지의 거리는 모르고, 수렴은
+    // 라운드마다 끝으로 한 번씩 더 간다.
+    fireEvent(list(), 'contentSizeChange', 390, 4000);
+    await waitRound();
+    expect(toEnd).toHaveBeenCalled();
+
+    rerender({channelId: 'ch', jumpTarget: {messageId: 'msg-2', seq: 2, token: 1}});
+    expect(toIndex).toHaveBeenCalledWith(
+      expect.objectContaining({viewPosition: 0.5}),
+    );
+    toEnd.mockClear();
+    await waitRound();
+    await waitRound();
+
+    // 쫓기가 남아 있으면 방금 데려간 줄에서 목록을 도로 바닥으로 끌어내린다.
+    expect(toEnd).not.toHaveBeenCalled();
+    expect(bottomPill()).not.toBeNull();
+  });
+
+  it('대기 점프가 있으면 진입 수렴이 서지 않는다 — 새 방에서 점프가 첫 레이아웃 보고보다 먼저 온 경우', async () => {
+    const {rerender, listRef} = mount({channelId: 'ch'});
+    await settleAtBottom();
+    const toIndex = jest
+      .spyOn(listRef.current!, 'scrollToIndex')
+      .mockImplementation(() => {});
+
+    // ADE 「대화로」: 방 B 의 첫 페이지가 준비된 뒤 그 줄로 가는 점프가 걸린다.
+    // 목록은 아직 새 콘텐츠를 보고하지 않았다.
+    switchToRoomB(rerender, {
+      jumpTarget: {messageId: 'msg-102', seq: 102, token: 1},
+    });
+    expect(toIndex).toHaveBeenCalledWith(
+      expect.objectContaining({viewPosition: 0.5}),
+    );
+    const toEnd = jest
+      .spyOn(listRef.current!, 'scrollToEnd')
+      .mockImplementation(() => {});
+
+    // 늦게 도착한 첫 레이아웃 보고. 진입 앵커가 여기서 타면 목록은 바닥에 서고,
+    // 착지 틴트는 화면 밖 행에 걸린다.
+    fireEvent(list(), 'contentSizeChange', 390, 4000);
+    await waitRound();
+    await waitRound();
+
+    expect(toEnd).not.toHaveBeenCalled();
+    // 따라가기는 점프가 끈 그대로다 — 「최신으로」가 선다.
+    expect(bottomPill()).not.toBeNull();
+  });
+
+  it('빗나간 점프는 진입을 가져가지 않는다 — 그 방의 바닥에서 열린다', async () => {
+    const onJumpMissed = jest.fn();
+    const listRef = React.createRef<FlatList<TimelineStreamItem>>() as ListRef;
+    render(
+      <Timeline
+        messages={HISTORY}
+        directory={DIRECTORY}
+        status="ready"
+        channelId="ch"
+        myMemberId={SELF}
+        nowMs={BASE_MS}
+        lastReadSeq={3}
+        unreadCount={5}
+        jumpTarget={{messageId: 'msg-older', seq: 1, token: 1}}
+        onJumpMissed={onJumpMissed}
+        jumpPills
+        listRef={listRef}
+      />,
+    );
+    expect(onJumpMissed).toHaveBeenCalled();
+    const toEnd = jest
+      .spyOn(listRef.current!, 'scrollToEnd')
+      .mockImplementation(() => {});
+
+    fireEvent(list(), 'contentSizeChange', 390, 4000);
+
+    expect(toEnd).toHaveBeenCalledWith({animated: false});
   });
 });
 
@@ -561,6 +822,28 @@ describe('아래 필 「최신으로」', () => {
     expect(bottomPill()).toBeNull();
   });
 
+  it('도착하면 VoiceOver 초점이 가장 아래 메시지로 간다 — 누른 필은 사라졌다 (R1 M-3)', async () => {
+    // 웹 `jumpToLatest` 가 초점을 두는 행과 같다. 첫 판은 낭독도 초점 이동도 없어서,
+    // 초점을 쥔 필이 사라지는 순간 VoiceOver 는 갈 곳을 잃었다.
+    const focus = jest
+      .spyOn(AccessibilityInfo, 'setAccessibilityFocus')
+      .mockImplementation(() => {});
+    mount();
+    await settleAtBottom();
+    scrollUpIntoHistory();
+    fireEvent.press(screen.getByTestId('jump-latest'));
+    await flushFrame();
+    // 아직 가는 중에는 옮기지 않는다 — 움직이는 행에 초점을 주면 VoiceOver 가 한 번
+    // 더 스크롤한다.
+    expect(focus).not.toHaveBeenCalled();
+
+    atTheEnd();
+    await waitRound(); // 도착 — 수렴이 풀린다
+
+    await waitFor(() => expect(focus).toHaveBeenCalledTimes(1), {timeout: 2000});
+    expect(focus).toHaveBeenCalledWith(expect.stringContaining('8번째 메시지'));
+  });
+
   it('착지 유지는 손가락에게 진다', async () => {
     const {listRef} = mount();
     await settleAtBottom();
@@ -597,6 +880,72 @@ describe('아래 필 「최신으로」', () => {
     expect(bottomPill()).toBeNull();
     scrollUpIntoHistory();
     expect(pillSentence('jump-latest')).toBe('최신 메시지로 이동');
+  });
+});
+
+describe('키보드가 올라와 있으면 위 필은 잘린 띠에 서지 않는다 (R1 M-4)', () => {
+  // 대화 화면은 키보드 높이만큼 판을 들어 올리고 그 위를 잘라 낸다
+  // (`ConversationLayout`). 목록 맨 위에 붙은 필은 그 띠 안에 서서 보이지도 눌리지도
+  // 않는데, 스크린리더에는 단추로 남는다.
+
+  it('올라오면 위 필은 트리에서 빠지고, 내려가면 다시 선다 — 아래 필은 그대로다', async () => {
+    mount();
+    await settleAtBottom();
+    scrollUpIntoHistory();
+    reportDividerAbove();
+    expect(topPill()).not.toBeNull();
+    expect(bottomPill()).not.toBeNull();
+
+    keyboard('keyboardWillShow');
+    // 그리지 않은 단추는 접근성 트리에도 없다 — 숨김 속성으로 가리는 것과 다르다.
+    expect(topPill()).toBeNull();
+    expect(screen.queryByLabelText('위쪽의 새 메시지 5개 보기')).toBeNull();
+    // 아래 필은 목록과 함께 컴포저 위에 서므로 잘리지 않는다.
+    expect(bottomPill()).not.toBeNull();
+
+    keyboard('keyboardWillHide', 0);
+    expect(pillSentence('jump-unread')).toBe('새 메시지 5개 보기');
+  });
+
+  it('키보드가 이미 올라와 있을 때 새로 서는 위 필도 서지 않는다', async () => {
+    // 입력 중에 새 메시지가 구분선을 위로 밀어내는 순간이 이 길이다.
+    keyboard('keyboardDidShow');
+    expect(Keyboard.isVisible()).toBe(true);
+    mount();
+    await settleAtBottom();
+    reportDividerAbove();
+    expect(topPill()).toBeNull();
+
+    keyboard('keyboardDidHide', 0);
+    expect(topPill()).not.toBeNull();
+  });
+});
+
+describe('인용·고정·검색 점프도 「동작 줄이기」를 따른다 (R1 N-4)', () => {
+  // 한 클라 안에서 점프가 움직임을 거르는 자리가 둘이면, 같은 설정이 단추마다
+  // 다르게 듣는다. 두 필은 첫 판부터 따랐고, 같은 효과 안의 인용 점프만 빠져 있었다.
+  async function quoteJump(): Promise<{animated?: boolean | null} | undefined> {
+    const toIndex = jest
+      .spyOn(FlatList.prototype, 'scrollToIndex')
+      .mockImplementation(() => {});
+    const {rerender} = mount();
+    await flushFrame(); // 설정의 첫 답이 온다
+    await settleAtBottom();
+    rerender({jumpTarget: {messageId: 'msg-2', seq: 2, token: 1}});
+    return toIndex.mock.calls.at(-1)?.[0];
+  }
+
+  it('동작 줄이기면 인용 점프도 즉시다', async () => {
+    (AccessibilityInfo.isReduceMotionEnabled as jest.Mock).mockResolvedValue(true);
+    expect(await quoteJump()).toEqual(
+      expect.objectContaining({viewPosition: 0.5, animated: false}),
+    );
+  });
+
+  it('아니면 인용 점프는 그대로 부드럽다', async () => {
+    expect(await quoteJump()).toEqual(
+      expect.objectContaining({viewPosition: 0.5, animated: true}),
+    );
   });
 });
 

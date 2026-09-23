@@ -18,13 +18,13 @@ import {
   StyleSheet,
   Text,
   View,
+  findNodeHandle,
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   type ViewToken,
 } from 'react-native';
-import {unreadDividerLabel} from '@momo/core/features/timeline/divider';
-import {useReduceMotion} from '../../lib/useReduceMotion';
+import {useReduceMotionRef} from '../../lib/useReduceMotion';
 import {JumpPill, JumpPillDock} from './JumpPill';
 import {
   countNewerThan,
@@ -299,6 +299,11 @@ const NO_PINS: PinMap = {};
 
 /** 측정 seam 이 읽는 필 판정 (#1892). 앱에서는 아무도 읽지 않는다. */
 export interface PillState {
+  /**
+   * 목록이 위 필을 세우기로 했다. 키보드가 판을 들어 올린 동안에는 그 자리가
+   * 스스로 물러나고(`JumpPillDock`, R1 M-4) 이 값은 그것을 모른다 — 하네스의 두
+   * 앵커 판독은 키보드가 내려간 판에서 읽는다.
+   */
   unread: boolean;
   latest: boolean;
   relation: 'above' | 'in' | 'below' | 'absent' | null;
@@ -310,6 +315,46 @@ export interface PillState {
 
 /** 아직 아무 행도 보고되지 않았다. 빈 배열 하나를 모두가 나눠 쓴다. */
 const NO_KEYS: readonly string[] = [];
+
+/**
+ * 같은 방인가 (#1892 R1 H-1). 호출자가 방을 알려 주지 않는 표면(스레드 패널·측정
+ * 하네스)은 방이 하나뿐이므로 `undefined` 끼리는 같다. 와이어가 id 의 대소문자를
+ * 섞어 보내므로 문자열 비교가 아니라 `uuidEq` 다.
+ */
+function sameChannel(a: string | undefined, b: string | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return uuidEq(a, b);
+}
+
+/**
+ * 점프가 데려간 행을 찾지 못하면 얼마 동안 다시 볼지, ms (#1892 R1 M-3).
+ *
+ * 행은 목록이 그 자리에 도착해 셀을 붙여야 생긴다. `scrollToIndex` 가 한 번 실패해
+ * 회복 경로를 타면 두 프레임이 더 든다. 1초면 그 둘을 넉넉히 덮고, 그보다 늦게
+ * 초점이 옮겨 가면 사람이 이미 다른 곳을 만지고 있을 때다.
+ */
+const FOCUS_WAIT_MS = 1000;
+
+/** 목록의 가장 아래 메시지 행 — 「최신으로」가 착지하는 행. */
+function lastMessageId(items: readonly FoldedTimelineItem[]): string | null {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item.kind === 'message') return item.message.id;
+  }
+  return null;
+}
+
+/** 구분선 바로 아래의 첫 메시지 행 — 「안읽음으로」가 초점을 두는 행(웹과 같다). */
+function firstMessageIdAfter(
+  items: readonly FoldedTimelineItem[],
+  from: number,
+): string | null {
+  for (let index = from + 1; index < items.length; index += 1) {
+    const item = items[index];
+    if (item.kind === 'message') return item.message.id;
+  }
+  return null;
+}
 
 /**
  * 「보인다」의 문턱 (#1892). 한 픽셀이라도 창에 걸리면 보인다 — 웹이 구분선에
@@ -476,6 +521,7 @@ function TimelineInner({
   messages,
   directory,
   status,
+  channelId,
   channelKind,
   peer,
   lastReadSeq,
@@ -517,6 +563,23 @@ function TimelineInner({
   messages: Message[];
   directory: Directory;
   status: 'loading' | 'ready' | 'error';
+  /**
+   * 이 목록이 지금 그리는 방 (#1892 R1 H-1).
+   *
+   * 대화 화면은 방을 옮길 때 이 컴포넌트를 언마운트하지 않는다 — 셸이 `channelId`
+   * 만 갈아 끼운다. 그래서 「다른 대화가 됐다」를 이 목록이 스스로 알아야 하고, 그
+   * 판정을 **방의 정체성**에 묶는 것이 이 prop 이다. 첫 판은 「목록이 비었는가」로
+   * 판정했는데, 에이전트가 일하는 방은 메시지를 비우는 동안에도 「작업 중」 자리가
+   * 서 있어 목록이 한 번도 비지 않았다(design-review 2594 R1 H-1). 웹이 `epoch` 로
+   * 버리는 것과 같은 자리다.
+   *
+   * 바뀌면 필의 판정(래치·기준선·바닥·구분선 자리)과 진입 앵커를 전부 새로 한다.
+   * 진입 앵커(#1025)는 **이 방의 메시지가 도착한 뒤에** 탄다 — 방이 바뀐 첫
+   * 렌더에는 아직 앞 방의 행이 들려 있기 때문이다(`useTimeline` 은 효과에서 비운다).
+   *
+   * 방이 하나뿐인 표면(스레드 패널·측정 하네스)은 주지 않는다.
+   */
+  channelId?: string;
   channelKind?: Channel['kind'];
   peer?: RosterMember | null;
   lastReadSeq?: number | null;
@@ -770,14 +833,14 @@ function TimelineInner({
   //   **기준선** (`baselineSeq`) — 바닥을 떠난 순간의 가장 새 seq. 아래 필의 N 은 그
   //     뒤에 붙은 **남의 말**이다(`countNewerThan`).
   //   **래치** (`unreadLatched`) — 이 방문에서 구분선을 봤거나 위 필을 눌렀다. 서면
-  //     위 필은 다시 서지 않는다. 목록이 비면(방을 옮기면) 풀린다.
+  //     위 필은 다시 서지 않는다. 방이 바뀌면(`channelId`) 풀린다.
   //
   // 위 필의 N 은 여기서 세지 않는다. 호출자가 방을 연 순간 얼린 `unreadCount` —
   // 구분선에 적힌 바로 그 수다(동결 N).
   // ===========================================================================
-  const reduceMotion = useReduceMotion();
-  const reduceMotionRef = useRef(reduceMotion);
-  reduceMotionRef.current = reduceMotion;
+  // 「동작 줄이기」는 점프를 **누르는 순간**에만 읽는다. 그래서 상태가 아니라 ref 다
+  // — 값이 바뀌어도 그릴 것이 없고, 비동기 첫 답이 렌더를 부르지 않는다(R1 N-1).
+  const reduceMotionRef = useReduceMotionRef();
   const [atBottom, setAtBottom] = useState(true);
   const [baselineSeq, setBaselineSeq] = useState<number | null>(null);
   /**
@@ -797,8 +860,6 @@ function TimelineInner({
     messages.length === 0 ? null : messages[messages.length - 1].seq;
   const itemsRef = useRef(items);
   itemsRef.current = items;
-  const unreadCountRef = useRef(unreadCount);
-  unreadCountRef.current = unreadCount;
   /** 목록이 마지막으로 「보인다」고 한 행들. 콜백이 렌더보다 먼저 읽는다. */
   const viewableKeysRef = useRef<readonly string[]>(NO_KEYS);
   /**
@@ -819,9 +880,54 @@ function TimelineInner({
     [],
   );
 
-  /** 출발점에 앉은 뒤 구분선이 창 안에 있으면 — 봤다. 래치를 건다. */
   /** 래치가 **왜** 걸렸는가 — 측정 seam 이 사진에 적는다(`pillsRef`). */
   const latchNoteRef = useRef<string | null>(null);
+
+  // ---- 방이 바뀌면 이 목록의 판정을 전부 새로 한다 (#1892 R1 H-1) -------------
+  //
+  // 판정은 **방의 정체성**에 묶는다(`channelId`). 첫 판은 「목록이 비었는가」에
+  // 묶었고, 에이전트가 일하는 방으로 옮기면 「작업 중」 자리 때문에 목록이 한 번도
+  // 비지 않아 앞 방의 래치·기준선·바닥 판정이 새 방으로 넘어왔다. 앞 방에서 구분선을
+  // 봤으면 새 방의 「안읽음으로」가 그 방문 내내 서지 않았고, 앞 방에서 위로 올라가
+  // 있었으면 아래 필의 N 이 앞 방의 seq 를 기준선으로 새 방의 메시지를 셌다 — seq 는
+  // 방마다 따로 매기므로 그 수는 거짓이다.
+  //
+  // 렌더 중에 바로잡는다(React 의 「이전 prop 과 비교해 상태를 고친다」 모양). 효과로
+  // 미루면 새 방의 첫 프레임이 앞 방의 필을 한 번 그린다. 여기서 비우는 ref 들은
+  // 이 렌더 직후 도착하는 네이티브 보고가 곧바로 읽는 것들이다. 타이머를 거두는 일은
+  // 부수 효과라 아래 `convergeToEnd` 옆의 효과가 한다.
+  const [judgedChannel, setJudgedChannel] = useState(channelId);
+  if (!sameChannel(judgedChannel, channelId)) {
+    setJudgedChannel(channelId);
+    setAtBottom(true);
+    setBaselineSeq(null);
+    setRelationState(null);
+    setUnreadLatched(false);
+    setLandedId(null);
+    followingRef.current = true;
+    // 진입 앵커(#1025)를 다시 태운다. 새 목록은 앞 방의 오프셋에 서 있거나(자리
+    // 표시가 목록을 붙잡은 경우) 오프셋 0 에서 다시 선다. 어느 쪽이든 새 방의 바닥이
+    // 아니다.
+    didInitialScrollRef.current = false;
+    entrySettledRef.current = false;
+    viewableKeysRef.current = NO_KEYS;
+    latchNoteRef.current = null;
+  }
+
+  /**
+   * 진입 앵커가 기다리는 것 — **이 방의 메시지**가 목록에 왔다 (#1892 R1 H-1).
+   *
+   * `items` 의 길이로 보면 안 된다. 「작업 중」 자리와 보내는 중인 메아리는 메시지가
+   * 하나도 없어도 행이 되고, 방이 바뀐 첫 렌더에는 `messages` 가 아직 앞 방의 것이다.
+   * 둘 중 어느 것에 진입 앵커를 태워도 새 방의 첫 페이지는 앵커 없이 도착한다.
+   */
+  const holdsChannelContent =
+    messages.length > 0 &&
+    (channelId === undefined || uuidEq(messages[0].channelId, channelId));
+  const holdsChannelContentRef = useRef(holdsChannelContent);
+  holdsChannelContentRef.current = holdsChannelContent;
+
+  /** 출발점에 앉은 뒤 구분선이 창 안에 있으면 — 봤다. 래치를 건다. */
   const armLatchIfDividerSeen = useCallback(() => {
     if (!entrySettledRef.current) return;
     if (relationNow() !== 'in') return;
@@ -871,24 +977,6 @@ function TimelineInner({
     if (!jumpPills) return;
     setRelationState(relationFromKeys(items, viewableKeysRef.current));
   }, [jumpPills, items]);
-
-  // 방이 바뀌면 목록이 먼저 빈다(`useTimeline` 이 새 방에서 처음부터 읽는다). 빈
-  // 목록에는 경계도, 쌓인 것도, 본 것도 없다 — 웹이 `epoch` 로 버리는 것을 여기서는
-  // 그 빈 순간이 버린다. 출발점도 다시 잡아야 한다: 새 목록은 오프셋 0 에서 서므로
-  // **진입 앵커(#1025)를 다시 태운다.** 이 화면은 방을 바꿀 때 언마운트되지 않아서,
-  // 그러지 않으면 두 번째 방부터는 진입 수렴 없이 `scrollToEnd` 한 번만 받았고 —
-  // 앞 방에서 위로 올라가 읽던 사람이면 그 한 번도 없이 새 방의 맨 위에서 열렸다.
-  const listEmpty = items.length === 0;
-  useEffect(() => {
-    if (!listEmpty) return;
-    entrySettledRef.current = false;
-    didInitialScrollRef.current = false;
-    noteFollowing(true);
-    viewableKeysRef.current = NO_KEYS;
-    setRelationState(null);
-    setUnreadLatched(false);
-    setBaselineSeq(null);
-  }, [listEmpty, noteFollowing]);
 
   const unreadJumpCount = countUnreadJump(unreadCount);
   const relation: DividerViewportRelation | null = jumpPills
@@ -975,6 +1063,67 @@ function TimelineInner({
     [noteGeometry, noteFollowing],
   );
 
+  // ---- 점프가 데려간 행에 초점을 둔다 (#1892 R1 M-3) --------------------------
+  //
+  // 필은 누르는 순간 사라진다. VoiceOver 초점이 그 필에 있었으면 초점은 갈 곳을
+  // 잃고, 화면을 보지 않는 사람은 목록이 어디에 섰는지 모른다. 웹은 두 점프 모두
+  // 착지한 행으로 초점을 옮긴다(`scheduleFocusRowStationBySeq`). 폰도 같은 행으로
+  // 옮긴다 — 「최신으로」는 가장 아래 메시지, 「안읽음으로」는 구분선 아래 첫 메시지.
+  //
+  // 행의 노드는 행이 스스로 알린다(`MessageRow` 의 `registerRowNode`). 행을 새 틀로
+  // 감싸 ref 를 달면 감싸고 벗기는 순간마다 행이 다시 마운트되고, 초점을 줄 노드가
+  // 바로 그 순간 바뀐다. 알리는 함수는 하나를 모든 행이 나눠 쓰므로 행의 memo 는
+  // 그대로 맞는다.
+  const rowNodesRef = useRef(new Map<string, View>());
+  const registerRowNode = useCallback((id: string, node: View) => {
+    const key = id.toLowerCase();
+    rowNodesRef.current.set(key, node);
+    // 떼는 쪽이 자기 노드를 이름으로 지목한다 — 같은 행이 다시 붙은 뒤에 앞 노드의
+    // 정리가 도착해도 새 노드를 지우지 않는다(`anchorRef` 래퍼와 같은 이유).
+    return () => {
+      if (rowNodesRef.current.get(key) === node) rowNodesRef.current.delete(key);
+    };
+  }, []);
+  const focusTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  const cancelFocus = useCallback(() => {
+    if (focusTimerRef.current !== undefined) {
+      clearTimeout(focusTimerRef.current);
+      focusTimerRef.current = undefined;
+    }
+  }, []);
+  /**
+   * `delayMs` 뒤에 그 행으로 초점을 옮긴다. 행이 아직 안 붙었으면 라운드마다 다시
+   * 보고, `FOCUS_WAIT_MS` 를 넘기면 조용히 그만둔다. 새 이동·손가락·방 전환이
+   * 걸린 것을 거둔다 — 초점은 사람이 **방금** 한 동작의 결과여야 한다.
+   */
+  const focusRow = useCallback(
+    (id: string | null, delayMs: number) => {
+      cancelFocus();
+      if (id === null) return;
+      const key = id.toLowerCase();
+      const giveUpAt = Date.now() + delayMs + FOCUS_WAIT_MS;
+      const attempt = () => {
+        focusTimerRef.current = undefined;
+        const node = rowNodesRef.current.get(key);
+        if (node === undefined) {
+          if (Date.now() < giveUpAt) {
+            focusTimerRef.current = setTimeout(attempt, CONVERGE_ROUND_MS);
+          }
+          return;
+        }
+        // `WorkConsoleScreen` 과 같은 두 줄이다(노드 → 손잡이 → 초점). 그쪽이 감싼
+        // `InteractionManager` 는 RN 0.86 에서 폐기 경고를 내므로 새로 쓰지 않는다 —
+        // 기다림은 이미 위의 `delayMs` 가 착지 시각으로 한다.
+        const handle = findNodeHandle(node);
+        if (handle !== null) AccessibilityInfo.setAccessibilityFocus(handle);
+      };
+      focusTimerRef.current = setTimeout(attempt, delayMs);
+    },
+    [cancelFocus],
+  );
+
   // ===========================================================================
   // 끝까지 데려가는 일 하나 (goal RN-P3 · RN-B4a/#1025)
   //
@@ -1026,6 +1175,8 @@ function TimelineInner({
   const convergeToEnd = useCallback(
     (mode: 'entry' | 'send' | 'latest') => {
       cancelConvergence();
+      // A new travel supersedes a focus still waiting for an earlier landing.
+      cancelFocus();
       // Following again, because they are now at the bottom on purpose — the next
       // arrival from anyone else should keep them there. Through the one door, so
       // the 「최신으로」 pill steps down in the same moment (#1892).
@@ -1138,7 +1289,12 @@ function TimelineInner({
         // And the list is where it was going to rest, so what is on screen now is
         // what the reader sees (#1892 — the latch waits for exactly this).
         settleEntry();
-        if (arrived && mode === 'latest') holdLanding(Date.now() + CONVERGE_ROUND_MS);
+        if (arrived && mode === 'latest') {
+          holdLanding(Date.now() + CONVERGE_ROUND_MS);
+          // The pill that had VoiceOver's focus is gone; the row it brought the
+          // reader to takes it (#1892 R1 M-3). The list is on the end already.
+          focusRow(lastMessageId(itemsRef.current), 0);
+        }
       };
 
       const converge = () => {
@@ -1147,11 +1303,22 @@ function TimelineInner({
         const left = distanceToEnd(geometry);
         // **Past the end is never a resting place** (#1892). The round below
         // used to read any `left <= 1` as arrival, including a negative one,
-        // because the scroll view was assumed to clamp. It does not clamp a
-        // programmatic offset here — see `holdLanding` for the measurement —
         // and "arrived" at 415pt past the content is a blank list. So an
         // overshoot is brought back to the content the scroll view holds, and
         // the loop goes on to judge from there.
+        //
+        // **This is an after-the-fact correction, not the cause** (design-review
+        // 2594 R1 M-2). A JS `scrollTo` IS clamped natively
+        // (`RCTScrollViewComponentView.mm` `scrollTo:y:animated:`). What writes
+        // an offset past the end without clamping is `maintainVisibleContentPosition`
+        // coming back on: while the prop is off the scroll view records no new
+        // anchor, and the first transaction after it returns applies the anchor
+        // recorded BEFORE the travel straight to `contentOffset`
+        // (`_adjustForMaintainVisibleContentPosition`). That is where the blank
+        // list comes from, it also follows a far entry and a far send when they
+        // release, and fixing it at its source — so that the stale anchor is
+        // never applied — is #2588's to decide, together with #2586. Until then
+        // this branch and `holdLanding` put the list back after it was shoved.
         const overshot = left !== null && left < -ARRIVED_PX;
         if (overshot) {
           listRef.current?.scrollToOffset({
@@ -1196,21 +1363,52 @@ function TimelineInner({
         hop(glide);
         if (near) {
           settleEntry();
-          // A glide takes UIKit's ~300ms; the hold starts once it is down.
+          // A glide takes UIKit's ~300ms; the hold starts once it is down, and
+          // so does the focus move (#1892 R1 M-3) — VoiceOver focusing a row
+          // that is still gliding would scroll it a second time.
           if (mode === 'latest') {
-            holdLanding(Date.now() + (glide ? GLIDE_SETTLE_MS : CONVERGE_ROUND_MS));
+            const landedAfter = glide ? GLIDE_SETTLE_MS : CONVERGE_ROUND_MS;
+            holdLanding(Date.now() + landedAfter);
+            focusRow(lastMessageId(itemsRef.current), landedAfter);
           }
           return;
         }
         converge();
       });
     },
-    [cancelConvergence, listRef, noteFollowing, settleEntry],
+    // `reduceMotionRef` is one ref object for the life of the mount (a hook's
+    // `useRef`); listing it costs nothing and keeps the linter honest.
+    [
+      cancelConvergence,
+      cancelFocus,
+      focusRow,
+      listRef,
+      noteFollowing,
+      reduceMotionRef,
+      settleEntry,
+    ],
   );
 
   // A correction still running when this list goes away is a timer holding a ref
-  // to a scroll view that no longer exists.
-  useEffect(() => cancelConvergence, [cancelConvergence]);
+  // to a scroll view that no longer exists. Same for a focus move still waiting.
+  useEffect(
+    () => () => {
+      cancelConvergence();
+      cancelFocus();
+    },
+    [cancelConvergence, cancelFocus],
+  );
+
+  // 방이 바뀌면 앞 방의 이동도 이 방의 일이 아니다 (#1892 R1 H-1). 전송의 끝 쫓기나
+  // 「최신으로」의 착지 유지가 돌고 있으면 새 방의 목록을 바닥으로 끌고, 걸린 초점은
+  // 앞 방의 행을 찾는다. 판정 자체는 렌더 중에 이미 새로 했다(`judgedChannel`).
+  // 방이 하나뿐인 표면에서는 마운트 때 한 번 돌고 거둘 것이 없다.
+  useEffect(() => {
+    cancelConvergence();
+    cancelFocus();
+    scrollPinUntilRef.current = 0;
+    setChasingTail(false);
+  }, [channelId, cancelConvergence, cancelFocus]);
 
   /**
    * A finger on the glass ends the correction's claim immediately.
@@ -1222,6 +1420,9 @@ function TimelineInner({
    */
   const onScrollBeginDrag = useCallback(() => {
     cancelConvergence();
+    // The reader has taken the list; a focus move queued by a jump would pull
+    // VoiceOver back to where they are leaving (#1892 R1 M-3).
+    cancelFocus();
     scrollPinUntilRef.current = 0;
     convergingRef.current = false;
     // The reader has the list now. Whatever it shows from here on, they are
@@ -1236,7 +1437,7 @@ function TimelineInner({
     // is the likeliest prelude to them scrolling UP into history, which is the
     // one thing that must never move under them.
     setChasingTail(false);
-  }, [cancelConvergence, settleEntry]);
+  }, [cancelConvergence, cancelFocus, settleEntry]);
 
   // Follow the tail only when the reader is already there. Anyone scrolled back
   // is READING, and yanking them to the bottom because someone else typed is
@@ -1249,7 +1450,11 @@ function TimelineInner({
       // header. A send in flight is waiting for exactly this.
       noteGeometry({contentHeight: height});
       if (!didInitialScrollRef.current) {
-        if (items.length === 0) return;
+        // Not the length of `items`: a working placeholder or a pending echo is a
+        // row with no message behind it, and on the render where the room
+        // changes `messages` is still the previous room's (#1892 R1 H-1). The
+        // anchor waits for THIS room's messages.
+        if (!holdsChannelContentRef.current) return;
         didInitialScrollRef.current = true;
         // Instant and now, so the channel is simply AT its newest message rather
         // than seen arriving there…
@@ -1271,7 +1476,7 @@ function TimelineInner({
       // guaranteed stable. Ref objects are compared by identity and the harness
       // passes one fixed object, so this costs nothing at runtime.
     },
-    [convergeToEnd, items.length, listRef, noteGeometry],
+    [convergeToEnd, listRef, noteGeometry],
   );
 
   // My own send: always, and from wherever they were. Skipped on the first
@@ -1333,8 +1538,11 @@ function TimelineInner({
   // 자리에서 래치를 건다(웹과 같다). 걸려 있던 수렴은 거둔다: 진입이나 전송의 끝
   // 쫓기가 남아 있으면 방금 올려 보낸 목록을 다시 바닥으로 끌어내린다.
   //
-  // 화면을 보지 않는 사람에게는 **도착한 자리의 이름**을 말한다. 웹은 첫 안읽음
-  // 행에 포커스를 옮겨 같은 일을 하고, 폰에서 그 행의 이름은 구분선의 문장이다.
+  // 화면을 보지 않는 사람에게는 **도착한 행으로 초점을 옮긴다** — 구분선 아래 첫
+  // 메시지, 웹 `jumpToUnread` 와 같은 행이다(R1 M-3). 첫 판은 구분선의 문장을
+  // 낭독했는데, 그 낭독은 초점을 쥔 필이 사라지는 바로 그 순간에 나가 VoiceOver 가
+  // 초점을 다시 잡으며 끊을 수 있었고, 「최신으로」는 아무것도 하지 않아 두 필이
+  // 스크린리더 사용자를 다르게 대했다. 이제 둘 다 같은 한 가지를 한다.
   const jumpToUnread = useCallback(() => {
     const index = itemsRef.current.findIndex(item => item.kind === 'unread');
     if (index < 0) return;
@@ -1346,15 +1554,13 @@ function TimelineInner({
     setChasingTail(false);
     noteFollowing(false);
     scrollViewPositionRef.current = 0;
-    listRef.current?.scrollToIndex({
-      index,
-      viewPosition: 0,
-      animated: !reduceMotionRef.current,
-    });
-    AccessibilityInfo.announceForAccessibility(
-      unreadDividerLabel(countUnreadJump(unreadCountRef.current)),
+    const animated = !reduceMotionRef.current;
+    listRef.current?.scrollToIndex({index, viewPosition: 0, animated});
+    focusRow(
+      firstMessageIdAfter(itemsRef.current, index),
+      animated ? GLIDE_SETTLE_MS : CONVERGE_ROUND_MS,
     );
-  }, [cancelConvergence, listRef, noteFollowing]);
+  }, [cancelConvergence, focusRow, listRef, noteFollowing, reduceMotionRef]);
 
   // 아래 필은 전송과 같은 여정이다 — 먼 과거에서 끝까지 가는 길은 RN-P3 가 이미
   // 닦았고(측정된 클램프를 오르는 즉시 라운드), 두 번째 길을 내면 그 수리를 다시
@@ -1450,6 +1656,9 @@ function TimelineInner({
           approvalsProvided={approvalsProvided}
           onApprovalSettled={onApprovalSettled}
           runEnded={isStreamRunEnded(item.message, endedRuns)}
+          // 필이 착지한 행에 초점을 줄 때만 읽는다(R1 M-3). 필이 없는 표면에서는
+          // 모을 이유가 없다.
+          registerRowNode={jumpPills ? registerRowNode : undefined}
         />
       );
       if (anchorSeq !== undefined && item.message.seq === anchorSeq) {
@@ -1504,6 +1713,9 @@ function TimelineInner({
       approvalsProvided,
       onApprovalSettled,
       endedRuns,
+      // 둘 다 마운트 동안 바뀌지 않는다(`jumpPills` 는 규약, 등록 함수는 빈 의존성).
+      jumpPills,
+      registerRowNode,
     ],
   );
 
@@ -1557,9 +1769,23 @@ function TimelineInner({
     // 착지 유지가 아직 돌고 있으면, 사람이 방금 가리킨 줄에서 목록을 도로 바닥으로
     // 끌어내린다 — 새 요청이 앞선 요청을 이긴다.
     cancelConvergence();
+    cancelFocus();
     scrollPinUntilRef.current = 0;
     setChasingTail(false);
     noteFollowing(false);
+    // **이 점프가 방의 진입이다** (#1892 R1 M-1). 다른 방으로 가는 착지(ADE
+    // 「대화로」·알림 탭)는 새 방의 목록이 도착한 뒤 걸리고, 그 순간이 새 목록의 첫
+    // `onContentSizeChange` 보다 앞설 수 있다 — 네이티브 레이아웃 보고와 효과의 순서는
+    // 약속되지 않는다. 앞서면, 뒤따라온 그 보고가 진입 앵커를 태워 방금 데려간 줄에서
+    // 목록을 바닥으로 끌어내리고, 착지 틴트는 화면 밖 행에 걸린다. 그래서 착지하는
+    // 점프가 진입의 몫을 가져간다. 늦게 온 보고는 따라가기가 꺼져 있어 아무것도 하지
+    // 않는다. 반대 순서(진입이 먼저 달리는 중)는 바로 위의 `cancelConvergence` 가
+    // 거둔다.
+    //
+    // 출발점에 **앉혔다고** 하지는 않는다(`settleEntry`). 애니메이션 이동 중의 보이는
+    // 행 보고는 지나가는 구분선을 「창 안」이라고 한 번 말할 수 있고, 그 한 번에
+    // 래치가 걸리면 새 방의 위 필이 끝내 서지 않는다 — 진입 스윕과 같은 모양이다.
+    didInitialScrollRef.current = true;
     // 도착했으므로 「못 찾았습니다」 고지는 물러난다 (design-review H-5).
     onJumpLanded?.();
     // 「방금 여기로 왔다」 (#1076). 가운데로 옮겨 놓는 것만으로는 **어느 줄이
@@ -1579,8 +1805,14 @@ function TimelineInner({
       landing?.kind === 'message' ? landing.message.id : jumpTarget.messageId,
     );
     // 화면 가운데에 놓는다: 인용의 원본은 그 앞뒤가 함께 읽혀야 뜻이 산다.
+    // 「동작 줄이기」면 즉시다 — 두 필과 같은 규율이다(R1 N-4). 이 클라에서 점프가
+    // 움직임을 거르는 자리가 둘이면 같은 설정이 버튼마다 다르게 듣는다.
     scrollViewPositionRef.current = 0.5;
-    listRef.current?.scrollToIndex({index, viewPosition: 0.5, animated: true});
+    listRef.current?.scrollToIndex({
+      index,
+      viewPosition: 0.5,
+      animated: !reduceMotionRef.current,
+    });
   }, [jumpToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onScrollToIndexFailed = useCallback(

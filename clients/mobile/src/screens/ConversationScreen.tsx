@@ -1208,6 +1208,9 @@ export default function ConversationScreen({
               // 위 「안읽음으로」·아래 「최신으로」 (#1892). 위 필의 N 은 위의
               // 동결 스냅샷(`unreadCount`) 그대로다 — 구분선과 같은 수.
               jumpPills
+              // 이 화면은 방을 옮길 때 목록을 언마운트하지 않는다. 필의 판정과
+              // 진입 앵커를 방의 정체성에 묶는 값이다(#1892 R1 H-1).
+              channelId={channelId}
             />
           </>
         }

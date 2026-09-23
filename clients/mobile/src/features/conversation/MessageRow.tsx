@@ -1822,6 +1822,16 @@ export interface MessageRowProps {
    * 않는 것이 이 판정의 보수적인 쪽이다.
    */
   runEnded?: boolean;
+  /**
+   * 이 행의 접근성 요소(아래 `accessible` 뿌리)를 목록에 알린다 (#1892 R1 M-3).
+   *
+   * 점프 필은 누르는 순간 사라지고, 목록은 착지한 행으로 VoiceOver 초점을 옮겨야
+   * 한다. 초점을 받을 것은 **이 뿌리**다 — 행을 새 틀로 감싸 ref 를 달면 감싸는
+   * 순간 행이 다시 마운트되고, 틀은 접근성 요소도 아니다. 돌려받는 함수가 떼는
+   * 일이다. 목록이 한 함수를 모든 행에 나눠 주므로 동일성으로 비교해도 memo 가
+   * 맞는다.
+   */
+  registerRowNode?: (id: string, node: View) => () => void;
 }
 
 /**
@@ -1868,9 +1878,19 @@ function MessageRowInner({
   approvalsProvided,
   onApprovalSettled,
   runEnded,
+  registerRowNode,
 }: MessageRowProps): React.JSX.Element {
   const styles = useStyles(buildStyles);
   rowRenders += 1;
+  // 정리(cleanup) 형식의 ref — 떼는 쪽이 자기가 붙인 노드를 지목한다(R1 M-3).
+  const messageId = message.id;
+  const rowNodeRef = useCallback(
+    (node: View | null) =>
+      node !== null && registerRowNode !== undefined
+        ? registerRowNode(messageId, node)
+        : undefined,
+    [registerRowNode, messageId],
+  );
   const presentation = useMemo(() => rowPresentation(message), [message]);
   // 1회 링크 (#2513). 행은 접근성 요소 **하나**라(아래 `accessible`) 카드 안의
   // 복사 버튼에 VoiceOver 가 닿지 못한다 — 코드 상자의 복사가 로터로 나온 것과
@@ -2226,6 +2246,7 @@ function MessageRowInner({
 
   return (
     <View
+      ref={rowNodeRef}
       // ONE accessibility element per row. Grouping is what keeps the chips, the
       // thread anchor and the resend button from each becoming their own stop —
       // the same count the web client cut from 6 to 1. Touch is unaffected:
@@ -2793,6 +2814,7 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
   approvalsProvided: true,
   onApprovalSettled: true,
   runEnded: true,
+  registerRowNode: true,
 };
 
 /**
@@ -2865,7 +2887,11 @@ export function sameMessageRowProps(
     // ADR-0155. 스칼라라 동일성으로 충분하고, 한 행의 run 이 끝날 때만 그 행이
     // 다시 그려진다. 이것이 빠지면 취소 직후 붙어 있는 행은 옛 값을 든 채 서 있고
     // 「응답이 끊김」은 다음에 무언가가 그 행을 흔들 때까지 나타나지 않는다.
-    a.runEnded === b.runEnded
+    a.runEnded === b.runEnded &&
+    // #1892 R1 M-3. 목록이 한 함수를 모든 행에 나눠 주므로 동일성으로 충분하다.
+    // 빠지면 필이 켜진 표면으로 옮겨 온 행이 노드를 알리지 않아 초점이 그 행에
+    // 가지 못한다.
+    a.registerRowNode === b.registerRowNode
   );
 }
 
