@@ -526,10 +526,17 @@ interface JumpTravel {
   lastMotionAt: number;
   /** A failed `scrollToIndex` is being asked again a frame from now. */
   recovering: boolean;
-  /** The newest seq when the jump left — where the 「최신으로」 count starts. */
+  /**
+   * The newest seq when the reader left the bottom — where the 「최신으로」 count
+   * starts. A jump that takes over an unfinished one keeps that one's (#2618 N-1).
+   */
   leftAtSeq: number | null;
-  /** What the landing is for, once it is over (the unread pill's focus move). */
-  onLanded?: () => void;
+  /**
+   * What the landing is for, once it is over (the unread pill's focus move).
+   * `delayMs` is how long the list will still be moving — the glide that closes
+   * the gap (#2618 N-2) — and 0 when it has stopped.
+   */
+  onLanded?: (delayMs: number) => void;
 }
 
 // =============================================================================
@@ -802,9 +809,11 @@ function TimelineInner({
    */
   const jumpTravelRef = useRef<JumpTravel | null>(null);
   /**
-   * A travel ended before the list had ever reported its geometry, so its
-   * verdict waits for the first report that makes one possible (#2608 M-C).
-   * Holds the seq the jump left at, for the 「최신으로」 count. See `endJumpTravel`.
+   * A travel's verdict that waits for the next report that makes one possible:
+   * the travel ended before the list had ever reported its geometry (#2608 M-C),
+   * or a finger took the list while it was still on its way (#2618). Holds the
+   * seq the jump left at, for the 「최신으로」 count. See `endJumpTravel` and
+   * `onScrollBeginDrag`.
    */
   const pendingVerdictRef = useRef<{leftAtSeq: number | null} | null>(null);
   /** Is that pin being served by instant corrections rather than one glide? */
@@ -1294,8 +1303,10 @@ function TimelineInner({
   //     착지도 요청 시각부터 같은 규칙으로 끝난다 — 보고가 오지 않는 절반이 그것이다.
   //   - 끝나면 **멈춘 자리에서**(`geometryRef`) 바닥을 다시 판정한다. 회복이 걸려 있는
   //     동안(다음 프레임에 다시 묻는 중)에는 끝나지 않는다 — 대략의 자리는 착지가 아니다.
-  //   - 손가락·전송·「최신으로」·다른 점프·방 전환은 걸린 이동을 판정 없이 거둔다.
-  //     그 뒤의 보고나 그 요청이 스스로 판정한다.
+  //   - 전송·「최신으로」·방 전환은 걸린 이동을 판정 없이 거둔다. 그 요청이 스스로
+  //     판정한다. 다른 점프는 앞 이동의 판정을 **떠난 순간째로** 물려받고(#2618 N-1),
+  //     손가락은 그 판정을 자기 첫 보고에 넘긴다(#2618). 어느 쪽이든 필 쪽은 앞
+  //     점프가 떠난 뒤로 아직 판정된 적이 없다.
   //
   // **필은 판정이 날 때까지 그대로 둔다.** 점프는 따라가기만 붙든다 — 가는 동안 도착한
   // 메시지가 목록을 끌어내리면 안 되기 때문이다. 떠나자마자 「최신으로」를 세우면, 제자리
@@ -1337,6 +1348,13 @@ function TimelineInner({
    * 때만 움직이니, 아무도 판정하지 않았다. 필 쪽 판정으로 되돌리는 길도 있었지만, 새
    * 목록은 맨 위에서 서므로 「바닥이다」가 거짓일 수 있다 — 첫 보고가 사실을 말한다.
    *
+   * **메우기를 걸었으면 `onLanded` 는 그 활강이 끝난 뒤다** (#2618 N-2). 「안읽음으로」의
+   * 초점 이동이 그것이다. 움직이는 행에 초점을 주면 VoiceOver 가 그 행을 보이게 한 번
+   * 더 스크롤하고, 메우기는 창을 최대 `FOLLOW_THRESHOLD_PX` 올린다 — viewPosition 0 이
+   * 구분선과 첫 안읽음 행을 놓은 바로 그 띠다. 그러면 붙은 말이 다시 접힌 아래로
+   * 가고, VoiceOver 사용자에게만 M-B 가 돌아온다. 「최신으로」가 `GLIDE_SETTLE_MS` 를
+   * 기다리는 것과 같은 모양이다.
+   *
    * **착지는 출발점이다**(R2 N-B). 점프가 진입의 몫을 가져간 방문은 진입 수렴이 없어
    * 드래그·필·전송 없이는 「앉음」이 오지 않았고, 드래그하지 않는 VoiceOver 사용자는
    * 구분선을 보고도 래치가 안 걸려 위 필이 다시 섰다. R1 이 점프 순간에 앉히지 않은
@@ -1347,6 +1365,7 @@ function TimelineInner({
     const travel = jumpTravelRef.current;
     if (travel === null) return;
     cancelJumpTravel();
+    let glide = false;
     const left = distanceToEnd(geometryRef.current);
     if (left === null) {
       pendingVerdictRef.current = {leftAtSeq: travel.leftAtSeq};
@@ -1359,15 +1378,26 @@ function TimelineInner({
       const arrivedDuringTravel = newestSeqRef.current !== travel.leftAtSeq;
       if (following && left > ARRIVED_PX && arrivedDuringTravel) {
         listRef.current?.scrollToEnd({animated: true});
+        glide = true;
       }
     }
     settleEntry();
-    travel.onLanded?.();
+    travel.onLanded?.(glide ? GLIDE_SETTLE_MS : 0);
   }, [cancelJumpTravel, listRef, noteFollowing, settleEntry]);
 
-  /** 점프 하나가 떠난다. 앞선 이동은 판정 없이 거둔다 — 새 요청이 이긴다. */
+  /**
+   * 점프 하나가 떠난다. 앞선 이동은 거둔다 — 새 요청이 이긴다.
+   *
+   * **거두되 떠난 순간은 물려받는다** (#2618 N-1). 끝나지 않은 이동 — 가는 중이거나
+   * 기하를 기다리는 판정(#2608 M-C) — 은 판정 없이 사라지고, 필 쪽은 그 점프가 떠나기
+   * 전 그대로다. 그러니 사람이 바닥을 떠난 것은 **앞 점프가 떠난 순간**이다. 새 점프가
+   * 그 순간을 다시 잡으면 앞 이동 동안 붙은 말이 어디에도 잡히지 않는다: 끝 근처
+   * 착지는 그 말을 메우지 않고(`arrivedDuringTravel`), 먼 착지의 필은 그 말을 세지
+   * 않는다(「최신 메시지로 이동」).
+   */
   const beginJumpTravel = useCallback(
-    (onLanded?: () => void) => {
+    (onLanded?: (delayMs: number) => void) => {
+      const unjudged = jumpTravelRef.current ?? pendingVerdictRef.current;
       cancelJumpTravel();
       pendingVerdictRef.current = null;
       const now = Date.now();
@@ -1375,7 +1405,8 @@ function TimelineInner({
         startedAt: now,
         lastMotionAt: now,
         recovering: false,
-        leftAtSeq: newestSeqRef.current,
+        leftAtSeq:
+          unjudged !== null ? unjudged.leftAtSeq : newestSeqRef.current,
         onLanded,
       };
       // 따라가기만 붙든다 — 필은 판정이 날 때까지 그대로다(위 머리말).
@@ -1422,13 +1453,16 @@ function TimelineInner({
     [listRef],
   );
 
-  /** 점프 하나 — 이동을 걸고, 그 줄로 간다. `onLanded` 는 이동이 끝나며 부른다. */
+  /**
+   * 점프 하나 — 이동을 걸고, 그 줄로 간다. `onLanded` 는 이동이 끝나며 부르고, 착지가
+   * 건 활강이 아직 남았으면 그 시간을 넘긴다(`endJumpTravel`).
+   */
   const travelToIndex = useCallback(
     (
       index: number,
       viewPosition: number,
       animated: boolean,
-      onLanded?: () => void,
+      onLanded?: (delayMs: number) => void,
     ) => {
       beginJumpTravel(onLanded);
       scrollToIndexInTravel(index, viewPosition, animated);
@@ -1729,6 +1763,11 @@ function TimelineInner({
   // 「최신으로」의 착지 유지가 돌고 있으면 새 방의 목록을 바닥으로 끌고, 걸린 초점은
   // 앞 방의 행을 찾는다. 판정 자체는 렌더 중에 이미 새로 했다(`judgedChannel`).
   // 방이 하나뿐인 표면에서는 마운트 때 한 번 돌고 거둘 것이 없다.
+  //
+  // 걸린 이동을 여기서 거두므로 새 방의 점프는 앞 방의 떠난 순간을 물려받지 않는다
+  // (#2618 N-1, `beginJumpTravel`) — seq 는 방마다 따로 매긴다. 방 전환과 새 방의
+  // 점프가 한 커밋에 와도 같다: 이 효과가 아래 `jumpTarget` 효과보다 먼저 선언돼
+  // 먼저 돈다.
   useEffect(() => {
     cancelConvergence();
     cancelFocus();
@@ -1752,10 +1791,18 @@ function TimelineInner({
     cancelFocus();
     // And a jump still on its way is theirs to end — including the recovery's
     // next round, which would otherwise move the list under the finger and take
-    // the verdict back for itself (R2 N-A). Their own scroll events judge next —
-    // including a verdict still waiting for geometry (#2608 M-C).
+    // the verdict back for itself (R2 N-A).
+    //
+    // The verdict itself is theirs too, but not the moment they left (#2618): the
+    // pill still stands where it stood when the jump left, and the list has been
+    // away from the bottom since. So the jump's verdict — or one still waiting
+    // for geometry (#2608 M-C) — waits for their own first report and keeps the
+    // seq the jump left at. Cleared here, that report would count from now, and
+    // whatever arrived while the jump was on its way would never be counted — the
+    // same hole a chained jump had (#2618 N-1).
+    const travel = jumpTravelRef.current;
     cancelJumpTravel();
-    pendingVerdictRef.current = null;
+    if (travel !== null) pendingVerdictRef.current = {leftAtSeq: travel.leftAtSeq};
     scrollPinUntilRef.current = 0;
     convergingRef.current = false;
     // The reader has the list now. Whatever it shows from here on, they are
@@ -1891,10 +1938,11 @@ function TimelineInner({
     // 가는 동안의 자리는 사람의 것이 아니다 — 인용 점프와 같은 이동이다(R1 M-1).
     // 멈추면 착지한 자리에서 바닥을 다시 판정하고(R2 H-A — 안읽음 묶음이 한 화면보다
     // 조금 길면 끝 근처에 앉는다), 그때 초점을 옮긴다: 움직이는 행에 초점을 주면
-    // VoiceOver 가 한 번 더 스크롤한다.
+    // VoiceOver 가 한 번 더 스크롤한다. 착지가 틈을 메우는 활강을 걸었으면 그 활강이
+    // 끝난 뒤다(#2618 N-2).
     const focusTarget = firstMessageIdAfter(itemsRef.current, index);
-    travelToIndex(index, 0, !reduceMotionRef.current, () =>
-      focusRow(focusTarget, 0),
+    travelToIndex(index, 0, !reduceMotionRef.current, delayMs =>
+      focusRow(focusTarget, delayMs),
     );
   }, [cancelConvergence, cancelFocus, focusRow, reduceMotionRef, travelToIndex]);
 

@@ -332,30 +332,24 @@ export function FirstAgentStage({
       : (memberFor(directory, mentionAgent.agentMemberId) ?? null);
 
   const showMentionPath = step === "mention" || pose === "done";
-  const skipRow = (
+  // 건너뛰기는 단계 맨 아래가 아니라 머리 줄에 산다 (#2616). 아래에 두면 카드
+  // 네 장 뒤라 375px 폰에서는 스크롤해야 보였고, 성재는 그 버튼을 찾지 못했다.
+  // 머리 줄은 어느 단계에서도 같은 자리이고 어떤 높이의 화면에서도 첫 줄이다.
+  // 남는 것은 나중에 다시 붙이는 길(설정 링크)이고, 그 줄은 멘션 단계에서
+  // 본문 문장 안으로 들어가므로 여기서는 그리지 않는다.
+  const reentryRow = showMentionPath ? null : (
     <div className="flex flex-wrap items-center gap-2">
-      <Button
-        type="button"
-        variant="ghost"
-        className="self-start"
-        onClick={handleSkip}
-        data-testid="first-agent-skip"
+      <Link
+        to={FIRST_AGENT_REENTRY_HREF}
+        className="tap-target press inline-flex h-control items-center whitespace-nowrap rounded-sm text-body text-ink-muted underline underline-offset-2 hover:text-ink focus-visible:focus-ring"
+        onClick={() => {
+          setFirstAgentResumeHash(`#${FIRST_AGENT_REENTRY_HREF}`);
+          finish("skipped");
+        }}
+        data-testid="first-agent-reentry"
       >
-        {FIRST_AGENT_SKIP_LABEL}
-      </Button>
-      {!showMentionPath && (
-        <Link
-          to={FIRST_AGENT_REENTRY_HREF}
-          className="tap-target press inline-flex h-control items-center whitespace-nowrap rounded-sm text-body text-ink-muted underline underline-offset-2 hover:text-ink focus-visible:focus-ring"
-          onClick={() => {
-            setFirstAgentResumeHash(`#${FIRST_AGENT_REENTRY_HREF}`);
-            finish("skipped");
-          }}
-          data-testid="first-agent-reentry"
-        >
-          {FIRST_AGENT_REENTRY_LABEL}
-        </Link>
-      )}
+        {FIRST_AGENT_REENTRY_LABEL}
+      </Link>
     </div>
   );
 
@@ -387,7 +381,7 @@ export function FirstAgentStage({
             onDone={() => undefined}
             testId="hosted-pairing-card"
           />
-          {skipRow}
+          {reentryRow}
         </div>
       );
     }
@@ -414,7 +408,7 @@ export function FirstAgentStage({
               {firstAgentDetectingDetail(selectedCard)}
             </p>
           </div>
-          {skipRow}
+          {reentryRow}
         </div>
       );
     }
@@ -443,7 +437,7 @@ export function FirstAgentStage({
           >
             {FIRST_AGENT_RECHECK_LABEL}
           </Button>
-          {skipRow}
+          {reentryRow}
         </div>
       );
     }
@@ -518,7 +512,7 @@ export function FirstAgentStage({
               첫 멘션은 채널에서 이어갈 수 있습니다.
             </p>
           )}
-          {skipRow}
+          {reentryRow}
         </div>
       );
     }
@@ -603,18 +597,38 @@ export function FirstAgentStage({
             </Button>
           </>
         )}
-        {skipRow}
+        {reentryRow}
       </div>
     );
   })();
 
   return (
-    <div className="flex min-h-full flex-col bg-surface">
+    // overflow-x-clip (#2616): 단계가 바뀔 때 본문은 오른쪽 48px에서 미끄러져
+    // 들어온다(line-slide). 그 650ms 동안 본문의 오른쪽 끝이 화면 밖으로 나가
+    // 앱 스크롤러(main.tsx)에 24px 가로 넘침이 생겼고, 그 사이 제목에 포커스가
+    // 가면 화면 전체가 머리 줄째 왼쪽으로 24px 끌렸다가 되돌아왔다(WebKit
+    // iPhone 실측, scrollLeft 24). clip은 스크롤 상자를 만들지 않고 넘친 몫만
+    // 자르므로 미끄러짐은 화면 끝에서 들어오는 그대로다.
+    <div className="flex min-h-full flex-col overflow-x-clip bg-surface">
       <header
         className="onboarding-step-chrome"
         data-testid="onboarding-step-chrome"
         {...titlebarDragProps(IS_TAURI)}
-      />
+      >
+        {/* 왼쪽은 비워 둔다: 이 단계는 로그인 뒤라 되돌아갈 단계가 없다.
+            space-between이 건너뛰기를 오른쪽 끝에 세운다. 버튼은 창 끌기
+            영역(Tauri)에 포인터를 넘기지 않는다(ConnectPage의 뒤로와 같다). */}
+        <span />
+        <Button
+          type="button"
+          variant="ghost"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={handleSkip}
+          data-testid="first-agent-skip"
+        >
+          {FIRST_AGENT_SKIP_LABEL}
+        </Button>
+      </header>
       <div className="flex min-h-0 flex-1 items-center justify-center p-6">
         <OnboardingSlideTransition
           transitionKey={step}

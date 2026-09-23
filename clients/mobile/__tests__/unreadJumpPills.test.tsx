@@ -104,6 +104,7 @@ interface MountProps {
   channelId?: string;
   working?: readonly {memberId: string}[];
   jumpTarget?: {messageId: string; seq: number | null; token: number};
+  selfSendToken?: number;
 }
 
 function element(listRef: ListRef, over: MountProps = {}) {
@@ -119,6 +120,7 @@ function element(listRef: ListRef, over: MountProps = {}) {
       unreadCount={over.unreadCount ?? 5}
       working={over.working}
       jumpTarget={over.jumpTarget}
+      selfSendToken={over.selfSendToken}
       jumpPills={over.jumpPills ?? true}
       listRef={listRef}
     />
@@ -1108,7 +1110,8 @@ describe('이동 중에 도착한 말은 판정 뒤에 따라간다 (#2608 M-B)'
     expect(toEnd).not.toHaveBeenCalled(); // 가는 동안에는 끌어내리지 않는다
     await sleep(600);
 
-    expect(toEnd).toHaveBeenCalled();
+    // 도착이 부르는 것과 같은 **활강**이다(#2618 M-1 · 리뷰 S11) — 즉시 이동이 아니다.
+    expect(toEnd).toHaveBeenCalledWith({animated: true});
     expect(bottomPill()).toBeNull();
   });
 
@@ -1180,6 +1183,13 @@ describe('이동 중에 도착한 말은 판정 뒤에 따라간다 (#2608 M-B)'
   });
 });
 
+/** 목록이 자기 창의 높이를 알린다(`onLayout`). */
+function layoutReport(height: number) {
+  fireEvent(list(), 'layout', {
+    nativeEvent: {layout: {x: 0, y: 0, width: 390, height}},
+  });
+}
+
 describe('기하를 모른 채 끝난 이동은 첫 기하 보고에서 판정한다 (#2608 M-C)', () => {
   // 목록이 한 번도 기하를 보고하지 않은 채 이동이 끝나면 판정할 수 없다. 첫 판은 그때
   // 따라가기를 붙든 채로 놓았고, 「다음 보고가 판정한다」는 주석과 달리 보고가 오지
@@ -1187,12 +1197,6 @@ describe('기하를 모른 채 끝난 이동은 첫 기하 보고에서 판정�
   beforeEach(() => {
     jest.spyOn(FlatList.prototype, 'scrollToIndex').mockImplementation(() => {});
   });
-
-  function layoutReport(height: number) {
-    fireEvent(list(), 'layout', {
-      nativeEvent: {layout: {x: 0, y: 0, width: 390, height}},
-    });
-  }
 
   it('O9: 첫 기하가 끝에 앉은 자리면 따라가기로 판정하고, 붙은 말을 따라간다', async () => {
     const {rerender} = mount({channelId: 'ch', lastReadSeq: 8, unreadCount: 0, jumpTarget: TO_NEWEST});
@@ -1284,6 +1288,297 @@ describe('주장했던 성질을 시험이 잡는다 (#2608 N-F)', () => {
     // 판정은 났다: 목록은 끝에 앉은 채였으므로 따라가기로 돌아온다.
     const toEnd = someoneElseTalks();
     expect(toEnd).toHaveBeenCalled();
+  });
+});
+
+// ---- 미룬 판정의 수명주기 · 연쇄 점프 · 메우기 뒤 초점 (#2618) ----------------------
+//
+// design-review 2614(PASS)의 M-1 과 N-1·N-2. 미룬 판정(`pendingVerdictRef`)에는 줄이
+// 여덟 있다 — 세우기 하나, 판정 셋(`onScroll`·`onContentSizeChange`·`onLayout`), 거두기
+// 셋(방 전환·새 점프·전송 등), 그리고 손가락. 첫 판의 시험은 세우기와 콘텐츠 판정만
+// 잡아, 나머지 여섯 줄은 하나씩 지워도 스위트가 초록이었다 — 그중 셋은 R1–R2 의 거짓
+// 필과 「끝으로 끌려감」을 되돌린다. 리뷰 탐침 P4·P5·P7·P8·P9 와 연쇄 점프 N5a·N5b,
+// 초점 N1b 를 옮겼다. 손가락 줄은 이 판에서 거두기가 아니라 **넘기기**가 됐다 — 판정을
+// 손가락의 첫 보고에 넘기되 떠난 순간을 지킨다(`onScrollBeginDrag`).
+
+/** 가장 오래된 것부터 `n` 통. */
+function upTo(n: number, channelId = 'ch'): Message[] {
+  return Array.from({length: n}, (_, i) => message(i + 1, OTHER, channelId));
+}
+
+/** 기하 보고가 오기 전에 점프해서, 기하 없이 이동이 끝난다 — 판정이 미뤄진다. */
+async function pendingVerdict() {
+  const mounted = mount({
+    channelId: 'ch',
+    lastReadSeq: 8,
+    unreadCount: 0,
+    jumpTarget: TO_NEWEST,
+  });
+  await sleep(400);
+  return mounted;
+}
+
+describe('미룬 판정의 수명주기 — 여덟 줄이 저마다 시험에 걸린다 (#2618 M-1)', () => {
+  beforeEach(() => {
+    jest.spyOn(FlatList.prototype, 'scrollToIndex').mockImplementation(() => {});
+    jest.spyOn(FlatList.prototype, 'scrollToOffset').mockImplementation(() => {});
+  });
+
+  it('P4: 첫 보고가 스크롤 보고(끝에서 멂)면 거기서 판정한다 — 기하 전에 붙은 말이 수에 든다', async () => {
+    const {rerender} = await pendingVerdict();
+    rerender({jumpTarget: TO_NEWEST, messages: upTo(9)}); // 기하 보고 전에 붙는다
+    scrollBy(0); // 첫 보고 — 끝까지 3200
+
+    // 떠난 순간(8)이 기준선이다. 보통 판정(지금의 9)으로 가면 「최신 메시지로 이동」.
+    expect(pillSentence('jump-latest')).toBe('새 메시지 1개 보기');
+  });
+
+  it('P5: 콘텐츠 보고가 레이아웃보다 먼저 오면, 레이아웃 보고가 판정한다', async () => {
+    const {rerender} = await pendingVerdict();
+    fireEvent(list(), 'contentSizeChange', 390, 850); // 창을 아직 모른다
+    layoutReport(800); // 이제 안다 — 끝까지 50
+    const toEnd = jest
+      .spyOn(FlatList.prototype, 'scrollToEnd')
+      .mockImplementation(() => {});
+    arriveDuringTravel(rerender, TO_NEWEST, 9, 950);
+
+    expect(toEnd).toHaveBeenCalled();
+    expect(bottomPill()).toBeNull();
+  });
+
+  it('P7: 판정을 기다리는 중에 방을 옮기면 버린다 — 앞 방의 기준선으로 새 방을 세지 않는다', async () => {
+    const {rerender} = await pendingVerdict();
+    rerender({
+      channelId: 'ch2',
+      jumpTarget: undefined,
+      messages: upTo(12, 'ch2'),
+      lastReadSeq: 12,
+    });
+    fireEvent.scroll(list(), {
+      nativeEvent: {
+        contentOffset: {y: 0},
+        contentSize: {height: 3000, width: 390},
+        layoutMeasurement: {height: 800, width: 390},
+      },
+    });
+
+    // 앞 방의 기준선 8 이 새면 seq 9–12 를 세어 「새 메시지 4개 보기」가 된다.
+    expect(pillSentence('jump-latest')).toBe('최신 메시지로 이동');
+  });
+
+  it('P8: 판정을 기다리는 중에 새 점프가 떠나면 버린다 — 이동 중에 끝으로 끌려가지 않는다', async () => {
+    const {rerender} = await pendingVerdict();
+    const second = {messageId: 'msg-2', seq: 2, token: 2};
+    rerender({jumpTarget: second});
+    await sleep(30);
+    scrollBy(3150); // 새 이동이 아직 움직인다 — 이 보고가 옛 판정을 풀면 「따라가기」
+    const toEnd = jest
+      .spyOn(FlatList.prototype, 'scrollToEnd')
+      .mockImplementation(() => {});
+    arriveDuringTravel(rerender, second, 9, 4100);
+
+    expect(toEnd).not.toHaveBeenCalled();
+  });
+
+  it('P9: 판정을 기다리는 중에 내가 보내면 버린다 — 보내는 동안 「최신으로」가 서지 않는다', async () => {
+    const {rerender} = await pendingVerdict();
+    rerender({jumpTarget: TO_NEWEST, selfSendToken: 1});
+    scrollBy(0); // 전송이 끝으로 가는 도중의 보고
+
+    expect(bottomPill()).toBeNull();
+  });
+
+  it('손가락: 기다리던 판정은 손가락의 첫 보고가 내린다 — 떠난 뒤 붙은 말이 수에 든다', async () => {
+    const {rerender} = await pendingVerdict();
+    rerender({jumpTarget: TO_NEWEST, messages: upTo(9)});
+    fireEvent(list(), 'scrollBeginDrag');
+    scrollBy(0); // 손가락이 과거에 머문다
+
+    expect(pillSentence('jump-latest')).toBe('새 메시지 1개 보기');
+  });
+
+  it('손가락: 이동 도중에 잡아도 같다 — 점프가 떠난 순간이 기준선이다', async () => {
+    jest.spyOn(FlatList.prototype, 'scrollToEnd').mockImplementation(() => {});
+    const far = {messageId: 'msg-2', seq: 2, token: 1};
+    const {rerender} = await mountAtTheEnd();
+    rerender({jumpTarget: far});
+    await sleep(80);
+    scrollBy(1200);
+    await sleep(40);
+    arriveDuringTravel(rerender, far, 9, 4100);
+    fireEvent(list(), 'scrollBeginDrag');
+    fireEvent.scroll(list(), {
+      nativeEvent: {
+        contentOffset: {y: 1000},
+        contentSize: {height: 4100, width: 390},
+        layoutMeasurement: {height: 800, width: 390},
+      },
+    });
+
+    expect(pillSentence('jump-latest')).toBe('새 메시지 1개 보기');
+  });
+});
+
+describe('연쇄 점프는 앞 이동이 떠난 순간을 물려받는다 (#2618 N-1)', () => {
+  // 끝나지 않은 이동을 새 점프가 거두면, 앞 이동은 판정 없이 사라지고 필 쪽은 여전히
+  // 「바닥」이다. 새 점프가 떠난 순간을 다시 잡으면 앞 이동 동안 붙은 말을 보지 못한다.
+  beforeEach(() => {
+    jest.spyOn(FlatList.prototype, 'scrollToIndex').mockImplementation(() => {});
+  });
+
+  async function firstJumpWithArrival() {
+    const {rerender} = await mountAtTheEnd();
+    const first = {messageId: 'msg-2', seq: 2, token: 1};
+    rerender({jumpTarget: first});
+    await sleep(80);
+    scrollBy(1200);
+    await sleep(40);
+    arriveDuringTravel(rerender, first, 9, 4100); // 첫 이동 중에 붙는다
+    fireEvent.scroll(list(), {
+      nativeEvent: {
+        contentOffset: {y: 1200},
+        contentSize: {height: 4100, width: 390},
+        layoutMeasurement: {height: 800, width: 390},
+      },
+    });
+    await sleep(60);
+    return rerender;
+  }
+
+  function landAt(y: number) {
+    fireEvent.scroll(list(), {
+      nativeEvent: {
+        contentOffset: {y},
+        contentSize: {height: 4100, width: 390},
+        layoutMeasurement: {height: 800, width: 390},
+      },
+    });
+  }
+
+  it('N5a: 둘째 점프가 끝에서 100pt 앞에 앉으면, 첫 이동 중 붙은 말까지 메운다', async () => {
+    const rerender = await firstJumpWithArrival();
+    const second = {messageId: 'msg-7', seq: 7, token: 2};
+    const toEnd = jest
+      .spyOn(FlatList.prototype, 'scrollToEnd')
+      .mockImplementation(() => {});
+    rerender({jumpTarget: second, messages: upTo(9)});
+    await sleep(60);
+    landAt(3200); // 4100 − 3200 − 800 = 100
+    await sleep(500);
+
+    expect(toEnd).toHaveBeenCalledWith({animated: true});
+    expect(bottomPill()).toBeNull();
+  });
+
+  it('N5b: 둘째 점프가 멀리 앉으면, 첫 이동 중 붙은 말이 수에 든다', async () => {
+    const rerender = await firstJumpWithArrival();
+    const second = {messageId: 'msg-4', seq: 4, token: 2};
+    rerender({jumpTarget: second, messages: upTo(9)});
+    await sleep(60);
+    landAt(2000);
+    await sleep(500);
+
+    expect(pillSentence('jump-latest')).toBe('새 메시지 1개 보기');
+  });
+
+  it('판정을 기다리던 이동도 같다 — 기하 전에 붙은 말은 다음 점프가 멀리 앉으면 수에 든다', async () => {
+    // 기다리는 판정(#2608 M-C)도 끝나지 않은 판정이다. 필 쪽은 첫 점프가 떠난 뒤로 아직
+    // 한 번도 판정되지 않았다.
+    const {rerender} = await pendingVerdict();
+    rerender({messages: upTo(9)}); // 기하 보고 전에 붙는다 — 판정은 계속 기다린다
+    rerender({jumpTarget: {messageId: 'msg-4', seq: 4, token: 2}, messages: upTo(9)});
+    await sleep(60);
+    landAt(2000);
+    await sleep(500);
+
+    expect(pillSentence('jump-latest')).toBe('새 메시지 1개 보기');
+  });
+
+  it('방을 옮기며 떠난 점프는 앞 방의 이동을 물려받지 않는다 — seq 는 방마다 따로 매긴다', async () => {
+    const rerender = await firstJumpWithArrival(); // 방 ch 에서 이동 중(떠난 순간 8)
+    // 가장 나쁜 순서: 방 전환과 새 방의 점프가 한 커밋에 온다.
+    rerender({
+      channelId: 'ch-b',
+      messages: ROOM_B,
+      lastReadSeq: 104,
+      jumpTarget: {messageId: 'msg-102', seq: 102, token: 2},
+    });
+    await sleep(60);
+    landAt(2000);
+    await sleep(500);
+
+    // 앞 방의 8 을 물려받으면 방 B 의 101–104 를 세어 「새 메시지 4개 보기」가 된다.
+    expect(pillSentence('jump-latest')).toBe('최신 메시지로 이동');
+  });
+});
+
+describe('메우기를 걸었으면 초점은 활강이 끝난 뒤에 옮긴다 (#2618 N-2)', () => {
+  it('N1b: 「안읽음으로」가 끝 근처에 앉는 동안 말이 붙으면, 메우기 활강 뒤에 초점이 간다', async () => {
+    // 움직이는 행에 초점을 주면 VoiceOver 가 그 행을 보이게 한 번 더 스크롤하고, 붙은
+    // 말은 다시 접힌 아래로 간다. 「최신으로」가 `GLIDE_SETTLE_MS` 를 기다리는 이유와 같다.
+    const events: Array<[string, number]> = [];
+    jest.spyOn(FlatList.prototype, 'scrollToIndex').mockImplementation(() => {});
+    jest
+      .spyOn(FlatList.prototype, 'scrollToEnd')
+      .mockImplementation(() => {
+        events.push(['toEnd', Date.now()]);
+      });
+    jest
+      .spyOn(AccessibilityInfo, 'setAccessibilityFocus')
+      .mockImplementation(() => {
+        events.push(['focus', Date.now()]);
+      });
+    const {rerender} = mount({channelId: 'ch', lastReadSeq: 6, unreadCount: 2});
+    await settleAtBottom();
+    events.length = 0;
+    reportDividerAbove();
+    fireEvent.press(screen.getByTestId('jump-unread'));
+    for (const y of [3190, 3175]) {
+      await sleep(60);
+      scrollBy(y);
+    }
+    await sleep(40);
+    arriveDuringTravel(rerender, undefined, 9, 4060); // 이동 중에 +60pt
+    for (const y of [3160, 3150]) {
+      fireEvent.scroll(list(), {
+        nativeEvent: {
+          contentOffset: {y},
+          contentSize: {height: 4060, width: 390},
+          layoutMeasurement: {height: 800, width: 390},
+        },
+      });
+      await sleep(30);
+    }
+    await waitFor(
+      () => expect(events.filter(([what]) => what === 'focus')).toHaveLength(1),
+      {timeout: 2000},
+    );
+
+    const glideAt = events.find(([what]) => what === 'toEnd')?.[1];
+    const focusAt = events.find(([what]) => what === 'focus')?.[1];
+    expect(glideAt).toBeDefined();
+    expect(focusAt! - glideAt!).toBeGreaterThanOrEqual(300);
+  });
+
+  it('메우기가 없으면 초점은 이동이 끝나는 대로 간다 — 기다리지 않는다', async () => {
+    const events: Array<[string, number]> = [];
+    jest.spyOn(FlatList.prototype, 'scrollToIndex').mockImplementation(() => {});
+    jest.spyOn(FlatList.prototype, 'scrollToEnd').mockImplementation(() => {});
+    jest
+      .spyOn(AccessibilityInfo, 'setAccessibilityFocus')
+      .mockImplementation(() => {
+        events.push(['focus', Date.now()]);
+      });
+    mount({channelId: 'ch', lastReadSeq: 6, unreadCount: 2});
+    await settleAtBottom();
+    reportDividerAbove();
+    const pressedAt = Date.now();
+    fireEvent.press(screen.getByTestId('jump-unread'));
+    scrollBy(3150); // 한 번에 앉는다
+    await waitFor(() => expect(events).toHaveLength(1), {timeout: 2000});
+
+    // 이동은 마지막 보고 250ms 뒤에 끝난다. 활강을 기다렸다면 600ms 를 넘긴다.
+    expect(events[0][1] - pressedAt).toBeLessThan(550);
   });
 });
 
