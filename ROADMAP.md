@@ -7,7 +7,7 @@
 >
 > **실행 주체:** 계획=기획 레이어(`docs/planning/README.md`) · 구현=워커(핸드오프 패킷, `AGENTS.md`) · 결정 거버넌스=ADR-0100. 증거는 PR 본문(`STATUS.md`는 2026-09-23 동결), 세션 스냅샷은 `docs/planning/CURRENT_STATE.md`, 트랙 운영은 `docs/TRACKS.md`.
 >
-> **불변식(배포 게이트):** 🔒 팀 배포(TestFlight·직접 전달 공증 DMG)는 **M7-I** PASS와 배포 건마다의 owner 승인 뒤에만 한다. 데스크탑 업데이터 매니페스트는 배포 채널 결정(ADR-0187 §4) 전에는 게시하지 않는다. 스토어·external TestFlight·공개 공증 배포는 **M7-S**다([M7](docs/cicd/03-store-readiness-gate.md), ADR-0187 D5).
+> **불변식(배포 게이트):** 🔒 팀 배포(TestFlight·직접 전달 공증 DMG)는 **M7-I** PASS와 배포 건마다의 owner 승인 뒤에만 한다. 데스크탑 next 채널(팀 채널) 게시도 같은 규칙이다. 스토어·external TestFlight·공개 공증 배포는 **M7-S**다([M7](docs/cicd/03-store-readiness-gate.md), ADR-0187 D5).
 >
 > **아카이브(2026-09-01 경량화 재편, 성재 지시):** 직전 판 전문(2026-08-03 §0 + M0~M8 §1~§7)은 git 히스토리. M0~M8의 **스토어 제출·공증·법무·CI/CD 체크리스트는 폐기가 아니라 보류** — 축 셋이 폰에서 돈 뒤 그 부분만 다시 태운다.
 
