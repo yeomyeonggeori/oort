@@ -1459,10 +1459,11 @@ oort_doctor_check_public() {
   #   * --http1.1: HTTP/2 has no Connection: Upgrade, and a TLS edge would
   #     otherwise negotiate h2.
   # After a real 101 curl keeps reading until -m expires (exit 28); the status
-  # line was already recorded in %{http_code}, so the `|| true` keeps it.
+  # line was already recorded in %{http_code}, so the `|| true` keeps it. -m 2
+  # bounds that wait; a handshake to a remote TLS edge fits well inside it.
   ws_url="${origin}/connection/websocket"
   ws_key="$(openssl rand -base64 16 | tr -d '\n')"
-  code="$(curl -sS --http1.1 -m 5 -o /dev/null -w '%{http_code}' \
+  code="$(curl -sS --http1.1 -m 2 -o /dev/null -w '%{http_code}' \
     -H 'Connection: Upgrade' \
     -H 'Upgrade: websocket' \
     -H 'Sec-WebSocket-Version: 13' \

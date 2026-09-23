@@ -66,7 +66,10 @@ export DATABASE_URL="postgres://postgres:${PG_PASSWORD}@postgres.railway.interna
 
 The generator parses it and writes `POSTGRES_USER` / `POSTGRES_PASSWORD` /
 `POSTGRES_DB` (the postgres service's own variables), `MIGRATE_DATABASE_URL`
-(superuser, pre-deploy only) and the four runtime-role URLs.
+(superuser, pre-deploy only) and three runtime-role URLs:
+`MOMO_APP_DATABASE_URL`, `RELAY_DATABASE_URL`, `NOTIFIER_DATABASE_URL`. The
+fourth role's URL, agent-worker's `WORKER_DATABASE_URL`, is assembled by hand
+from `WORKER_POSTGRES_PASSWORD` and `POSTGRES_DB` (hand-mapped table below).
 
 ## Shared variables (generator) and per-service variables
 
@@ -107,8 +110,14 @@ Missing `RAILWAY_PUBLIC_DOMAIN` or `DATABASE_URL` is a hard fail (the compose
 ### Hand-mapped variables
 
 Compose renames, composes or hard-codes these; Railway does not, and the
-generator does not print them (it names only three on stderr). Everything else
-in `services.<name>.variables` is an identity reference
+generator does not print them (it names only three on stderr). Apart from this
+table, the push table below, and five Centrifugo literals copied from
+`infra/centrifugo.json` (`CENTRIFUGO_LOG_LEVEL`,
+`CENTRIFUGO_CLIENT_SUBSCRIPTION_TOKEN_ENABLED`,
+`CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_ENDPOINT`,
+`CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_INCLUDE_CONNECTION_META`,
+`CENTRIFUGO_CHANNEL_NAMESPACES` — paste them from `railway.json` as they are),
+every value in `services.<name>.variables` is an identity reference
 (`JWT_HMAC` = `${{shared.JWT_HMAC}}`).
 
 | Service | Variable | Value |
@@ -140,7 +149,9 @@ reads only its own names, so the four rows above map them. Without the mapping
 Centrifugo boots silently, a relay publish gets 401 ("API key is empty"), and
 every WebSocket upgrade that carries an `Origin` — every browser, the desktop
 app — gets 403 ("empty allowed_origins"). `CENTRIFUGO_PORT` is not a v6 key;
-the default port is 8000.
+the default port is 8000. `scripts/tests/check_railway_catalog.py` holds the
+literals to `infra/centrifugo.json` (namespaces, subscribe endpoint path on the
+api private host, connection meta, subscription tokens, proxy header name).
 
 ## Public edge and `X-Forwarded-Proto`
 
@@ -157,6 +168,22 @@ off the device-link SAS requirement (`is_public_origin_mode()` is true only for
 `same-origin`). Same handle order as the public Caddyfile (`/v1/centrifugo/*`
 403 before `/v1/*`).
 
+The same blocks set `header_up X-Forwarded-For {http.request.header.X-Real-IP}`.
+Caddy also replaces the edge's `X-Forwarded-For` with its own peer — Railway's
+edge — and the api's per-IP rate limits (`rate_limit::client_ip`, first
+`X-Forwarded-For` value) on `/v1/claim`, `/v1/join` and password change would
+then see one client: a single bucket any anonymous caller can exhaust. The api
+gets the client IP Railway's edge puts in `X-Real-IP`; a client-sent
+`X-Forwarded-For` never reaches it. Without `X-Real-IP` the value is empty and
+`client_ip` falls back to its socket peer.
+
+**단계 2 must-measure:** does Railway's edge overwrite an `X-Real-IP` the client
+sent? Send one (`curl -H 'X-Real-IP: 192.0.2.1' https://<domain>/…`) and read
+what the api received (api logs or a request that reports the caller's IP). If
+the forged value arrives, this header is a rate-limit bypass: switch to
+`servers { trusted_proxies static <Railway edge ranges> }` and drop the
+`X-Forwarded-For` line.
+
 ## api: pre-deploy, drive volume, privileges
 
 Pre-deploy (`api.preDeployCommand`) is one `/bin/sh -c '…'` string, because
@@ -167,7 +194,14 @@ in `server-rust/bins/momo-migrate/src/main.rs`: one process is roles **or**
 migrations. Pre-deploy has the private network and the service variables but no
 volumes. That is why api carries `MIGRATE_DATABASE_URL` and the role passwords;
 the api start command removes them with `env -u` before the server starts, so
-the running api holds only `DATABASE_URL` = `momo_app`.
+the running api holds only `DATABASE_URL` = `momo_app` (`POSTGRES_PASSWORD` is
+dropped too, in case every shared variable was shared with api).
+
+`RAILWAY_RUN_UID=0` is a service variable, so pre-deploy runs as root as well.
+`momo-migrate` needs no root (it reads the baked SQL and talks to Postgres), so
+the pre-deploy string defines `run()`: as root it runs each `momo-migrate`
+through `setpriv --reuid=momo --regid=momo --init-groups`, as any other user it
+runs it as is.
 
 Drive (attachments): the generator sets `MOMO_DRIVE_ARCHIVE_BACKEND=local` and
 `MOMO_DRIVE_LOCAL_DIR=/var/lib/oort/drive`. Give api a volume at
@@ -177,7 +211,9 @@ the drive check at boot (`MOMO_DRIVE_LOCAL_DIR could not be created or is not
 writable`). Pre-deploy cannot fix it (no volumes there). So api runs with
 `RAILWAY_RUN_UID=0`, and its start command creates and chowns the directory,
 then `exec setpriv --reuid=momo --regid=momo --init-groups … momo-rust-entrypoint
-api` — the server itself runs as uid 10001. Without `RAILWAY_RUN_UID=0` the start
+api` — the server itself runs as uid 10001. The chown is recursive (`chown -R`),
+so files a root one-off left behind (a restore, say) are handed back to momo;
+it walks the whole volume on every start, which is cheap at team scale. Without `RAILWAY_RUN_UID=0` the start
 command refuses with exit 78 and says so. The long-term fix is the same
 init-and-drop step in the image entrypoint (#2574).
 
@@ -194,10 +230,11 @@ signing key.
 Railway has no file secrets or bind mounts, and both binaries read their key
 from a file. Each start command decodes one **sealed** base64 variable into
 `/dev/shm` (tmpfs) under `umask 077`, unsets the variable, and passes the path
-(`MOMO_APNS_KEY_PATH`, `MOMO_PUSH_RELAY_PRIVATE_KEY_PATH`). If the platform has
-no writable `/dev/shm` the start command refuses (exit 78) rather than write a
-key to disk. Holding the `.p8` as a sealed variable departs from the
-PushRelay runbook ("a file on the host") and needs owner acceptance.
+(`MOMO_APNS_KEY_PATH`, `MOMO_PUSH_RELAY_PRIVATE_KEY_PATH`). Unless `/dev/shm`
+is a writable tmpfs (`stat -f -c %T /dev/shm` = `tmpfs`) the start command
+refuses (exit 78) rather than write a key to disk. Holding the `.p8` as a sealed
+variable departs from the PushRelay runbook ("a file on the host"); the owner
+approved it on 2026-09-23 (ADR-0187 §5, 2차 결재: 「Railway 배포 + APNs 키 변수」).
 
 ```sh
 # APNs key (the .p8 in ~/.momo-secrets) → sealed variable on push-relay only
@@ -227,15 +264,22 @@ includes Production.
 
 ## Deploy order
 
-1. Create the project and the services from `railway.json` (image, start
-   command, pre-deploy, volumes, variables as tabled). Give **caddy** the public
-   domain (custom or `*.up.railway.app`) on port 8080 first: the generator needs
-   it as `RAILWAY_PUBLIC_DOMAIN`, and the shared variables come from that run.
-2. **postgres** → wait until it accepts connections.
-3. **centrifugo**.
-4. **api** — pre-deploy runs roles then migrations; the deploy fails if either
+The generator needs the public host, and every other service needs the
+generator's output, so the domain comes first:
+
+1. Create the project and only the **caddy** service (Dockerfile build). In its
+   settings generate the public domain (custom or `*.up.railway.app`) on port
+   8080. It does not have to deploy yet.
+2. Pick the Postgres password, compose `DATABASE_URL`, run the generator with
+   that host as `RAILWAY_PUBLIC_DOMAIN`, paste the output as shared variables
+   (Shared variables above), then give caddy its `variables`.
+3. Create the other services from `railway.json` (image, start command,
+   pre-deploy, volume, `variables`) and deploy them in this order:
+4. **postgres** → wait until it accepts connections.
+5. **centrifugo**.
+6. **api** — pre-deploy runs roles then migrations; the deploy fails if either
    does. Wait for api `/healthz`.
-5. **relay**, **webhook-sender**, **agent-worker**.
+7. **relay**, **webhook-sender**, **agent-worker**.
    - **Upgrading an install that already ran** (#2066): `export
      JWT_HMAC='<the value in use>'` before generating. The generator then emits
      `WEBHOOK_INGRESS_MASTER_KEY` / `OUTBOUND_WEBHOOK_MASTER_KEY` as an explicit
@@ -246,9 +290,9 @@ includes Production.
      with the same value (the same shared reference). #2066 deleted the
      binary's `JWT_HMAC` fallback: a sender without it refuses to boot, and one
      with a *different* value signs deliveries no subscriber can verify.
-6. **push-relay**, then **notifier**. Boot logs name the mode and the registry
+8. **push-relay**, then **notifier**. Boot logs name the mode and the registry
    size, never a key: push-relay `starting PushRelay … sender_mode="live"`.
-7. **caddy** last; then `https://<domain>/healthz` is the api's JSON.
+9. **caddy** (re)deploy last; then `https://<domain>/healthz` is the api's JSON.
 
 ## First owner claim
 

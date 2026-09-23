@@ -51,11 +51,13 @@ CADDY_DOCKERFILE="$ROOT/infra/railway/Dockerfile.caddy"
 PIN_CHECKER="$ROOT/scripts/tests/check_railway_release_pins.py"
 CATALOG_CHECKER="$ROOT/scripts/tests/check_railway_catalog.py"
 COMPOSE_RUST="$ROOT/infra/rust/docker-compose.rust.yml"
+CENTRIFUGO_JSON="$ROOT/infra/centrifugo.json"
 README_RAILWAY="$ROOT/infra/railway/README.md"
 [ -f "$CADDY_DOCKERFILE" ] || fail "infra/railway/Dockerfile.caddy missing"
 [ -f "$PIN_CHECKER" ] || fail "scripts/tests/check_railway_release_pins.py missing"
 [ -f "$CATALOG_CHECKER" ] || fail "scripts/tests/check_railway_catalog.py missing"
 [ -f "$COMPOSE_RUST" ] || fail "infra/rust/docker-compose.rust.yml missing"
+[ -f "$CENTRIFUGO_JSON" ] || fail "infra/centrifugo.json missing"
 [ -f "$README_RAILWAY" ] || fail "infra/railway/README.md missing"
 [ -f "$GENERATOR" ] || fail "scripts/self_host_env.sh missing"
 [ -f "$CONTRACT" ] || fail "scripts/verify_public_edge_centrifugo_contract.sh missing"
@@ -239,25 +241,30 @@ pass "key-set --claim equality (diff empty) count=$claim_count (password variant
 # scratch mutation that must turn RED naming it.
 # ---------------------------------------------------------------------------
 output_keys "$claim_env" >"$TMP_ROOT/claim.keys"
-python3 "$CATALOG_CHECKER" "$RAILWAY_JSON" "$COMPOSE_RUST" "$TMP_ROOT/claim.keys" \
-  "$README_RAILWAY" --prove-mutations \
+python3 "$CATALOG_CHECKER" "$RAILWAY_JSON" "$COMPOSE_RUST" "$CENTRIFUGO_JSON" \
+  "$TMP_ROOT/claim.keys" "$README_RAILWAY" --prove-mutations \
   >"$TMP_ROOT/catalog.out" 2>"$TMP_ROOT/catalog.err" || {
   cat "$TMP_ROOT/catalog.out" >&2
   cat "$TMP_ROOT/catalog.err" >&2
   fail "railway.json catalog check or its mutation proof failed"
 }
 for mutation in start-bare-api start-bare-relay start-no-exec predeploy-raw \
-  centrifugo-origins-dropped centrifugo-compose-name api-volume-missing \
-  api-run-uid-missing api-keeps-superuser api-dsn-superuser postgres-plugin \
+  predeploy-no-privdrop centrifugo-origins-dropped centrifugo-compose-name \
+  centrifugo-namespaces-drift centrifugo-endpoint-drift \
+  centrifugo-connection-meta-off centrifugo-subscription-token-off \
+  api-volume-missing api-run-uid-missing api-keeps-superuser \
+  api-keeps-postgres-password api-no-setpriv api-exec-not-last api-chown-in-echo \
+  api-chown-not-recursive api-no-root-guard api-dsn-superuser postgres-plugin \
   postgres-image-drift postgres-volume-missing worker-url-drift push-sandbox \
-  push-key-on-disk sealed-shared sender-key-dropped unknown-shared-ref api-public \
+  push-key-on-disk push-umask-after-write push-no-shm-guard push-guard-no-tmpfs \
+  notifier-no-unset sealed-shared sender-key-dropped unknown-shared-ref api-public \
   readme-row-missing; do
   grep -Fq "mutation ${mutation} RED" "$TMP_ROOT/catalog.out" || \
     fail "catalog checker missing mutation proof: ${mutation}"
 done
 grep -Fq 'committed catalog still passes' "$TMP_ROOT/catalog.out" || \
   fail "catalog checker missing restore proof"
-pass "catalog: start commands, pre-deploy sh -c, Centrifugo v6 names, api volume/UID/privilege drop, PG18+pgvector image+volume, push tmpfs keys, shared refs ⊆ --claim keys, README hand-mapped table; 21 mutations RED"
+pass "catalog: start commands (parsed, exec last), pre-deploy sh -c + root→momo drop, Centrifugo v6 names + infra/centrifugo.json parity, api volume/UID/chown -R/setpriv/env -u, PG18+pgvector image+volume, push tmpfs guard/umask order/unset, shared refs ⊆ --claim keys, README hand-mapped table; 36 mutations RED"
 
 # ---------------------------------------------------------------------------
 # ②b #2066 R2 — T2 has no env file, so the `--ensure-managed-keys` backfill
@@ -409,35 +416,37 @@ set -e
 pass "caddy adapt Caddyfile.railway with fixture env"
 
 # ---------------------------------------------------------------------------
-# ③b X-Forwarded-Proto (#2205, audit §A.4-5). Railway terminates TLS, so Caddy
-# receives plain HTTP and — with no trusted_proxies — forwards `http`; the api
-# then advertises ws:// and an http:// QR origin. Every reverse_proxy to the
-# api must set the header; Centrifugo's proxy does not need it.
+# ③b X-Forwarded-Proto and X-Forwarded-For (#2205, audit §A.4-5 + review R2).
+# Railway terminates TLS, so Caddy receives plain HTTP and — with no
+# trusted_proxies — forwards `http` and its own peer (the edge) as the client.
+# The api then advertises ws:// and an http:// QR origin, and its per-IP rate
+# limits (rate_limit::client_ip reads the first XFF value) see one client.
+# Every reverse_proxy to the api must set both; Centrifugo's proxy needs neither.
 # ---------------------------------------------------------------------------
-xfp_api_proxies() {
-  # prints "<with-https> <without>" for reverse_proxy handlers dialing the api
-  python3 - "$1" <<'PY'
+XFF_FROM_EDGE='{http.request.header.X-Real-IP}'
+edge_header_counts() {
+  # prints "<xfp-ok> <xfp-missing> <xff-ok> <xff-missing>" over reverse_proxy
+  # handlers dialing the api
+  python3 - "$1" "$XFF_FROM_EDGE" <<'PY'
 import json, sys
 doc = json.load(open(sys.argv[1]))
-with_https = without = 0
+want_xff = sys.argv[2]
+counts = [0, 0, 0, 0]
 def walk(node):
-    global with_https, without
     if isinstance(node, dict):
         if node.get("handler") == "reverse_proxy":
             dials = [u.get("dial") for u in node.get("upstreams", [])]
             if "api.railway.internal:8080" in dials:
-                xfp = (((node.get("headers") or {}).get("request") or {}).get("set") or {}).get("X-Forwarded-Proto")
-                if xfp == ["https"]:
-                    with_https += 1
-                else:
-                    without += 1
+                header_set = ((node.get("headers") or {}).get("request") or {}).get("set") or {}
+                counts[0 if header_set.get("X-Forwarded-Proto") == ["https"] else 1] += 1
+                counts[2 if header_set.get("X-Forwarded-For") == [want_xff] else 3] += 1
         for value in node.values():
             walk(value)
     elif isinstance(node, list):
         for value in node:
             walk(value)
 walk(doc)
-print("%d %d" % (with_https, without))
+print("%d %d %d %d" % tuple(counts))
 PY
 }
 
@@ -452,30 +461,41 @@ adapt_stdin() {
     <"$1"
 }
 
-xfp_counts="$(xfp_api_proxies "$ADAPT_JSON")"
-[ "$xfp_counts" = "3 0" ] || \
-  fail "Caddyfile.railway: api reverse_proxy blocks with X-Forwarded-Proto https / without = ${xfp_counts} (want 3 0)"
-pass "adapt JSON: all 3 api reverse_proxy blocks set X-Forwarded-Proto https"
-
-XFP_STRIPPED="$TMP_ROOT/Caddyfile.no-xfp"
-python3 - "$CADDYFILE_RAILWAY" "$XFP_STRIPPED" <<'PY'
+strip_header_line() {
+  # usage: strip_header_line <line without tabs> <out>; exactly 3 must go
+  python3 - "$CADDYFILE_RAILWAY" "$2" "$1" <<'PY'
 from pathlib import Path
 import sys
-src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+src, dst, line = Path(sys.argv[1]), Path(sys.argv[2]), "\t\t\t%s\n" % sys.argv[3]
 text = src.read_text()
-block = "\t\treverse_proxy api.railway.internal:8080 {\n\t\t\theader_up X-Forwarded-Proto https\n\t\t}\n"
-if text.count(block) != 3:
-    raise SystemExit("expected 3 header_up blocks to strip, found %d" % text.count(block))
-dst.write_text(text.replace(block, "\t\treverse_proxy api.railway.internal:8080\n"))
+if text.count(line) != 3:
+    raise SystemExit("expected 3 %r lines to strip, found %d" % (line.strip(), text.count(line)))
+dst.write_text(text.replace(line, ""))
 PY
-adapt_stdin "$XFP_STRIPPED" >"$TMP_ROOT/adapt-no-xfp.json" 2>"$TMP_ROOT/adapt-no-xfp.err" || {
-  cat "$TMP_ROOT/adapt-no-xfp.err" >&2
-  fail "caddy adapt of the header_up-stripped copy failed"
 }
-stripped_counts="$(xfp_api_proxies "$TMP_ROOT/adapt-no-xfp.json")"
-[ "$stripped_counts" = "0 3" ] || \
-  fail "sabotage (strip header_up) still counted ${stripped_counts} — XFP check is not load-bearing"
-pass "sabotage strip header_up → adapt JSON has 0/3 api proxies with X-Forwarded-Proto https (RED)"
+
+edge_counts="$(edge_header_counts "$ADAPT_JSON")"
+[ "$edge_counts" = "3 0 3 0" ] || \
+  fail "Caddyfile.railway: api reverse_proxy blocks XFP ok/missing XFF ok/missing = ${edge_counts} (want 3 0 3 0)"
+pass "adapt JSON: all 3 api reverse_proxy blocks set X-Forwarded-Proto https and X-Forwarded-For ${XFF_FROM_EDGE}"
+
+XFP_STRIPPED="$TMP_ROOT/Caddyfile.no-xfp"
+XFF_STRIPPED="$TMP_ROOT/Caddyfile.no-xff"
+strip_header_line 'header_up X-Forwarded-Proto https' "$XFP_STRIPPED"
+strip_header_line "header_up X-Forwarded-For ${XFF_FROM_EDGE}" "$XFF_STRIPPED"
+for variant in no-xfp no-xff; do
+  src="$XFP_STRIPPED"
+  want="0 3 3 0"
+  [ "$variant" = no-xff ] && { src="$XFF_STRIPPED"; want="3 0 0 3"; }
+  adapt_stdin "$src" >"$TMP_ROOT/adapt-${variant}.json" 2>"$TMP_ROOT/adapt-${variant}.err" || {
+    cat "$TMP_ROOT/adapt-${variant}.err" >&2
+    fail "caddy adapt of the ${variant} copy failed"
+  }
+  got="$(edge_header_counts "$TMP_ROOT/adapt-${variant}.json")"
+  [ "$got" = "$want" ] || \
+    fail "sabotage (${variant}) counted ${got} (want ${want}) — the header check is not load-bearing"
+done
+pass "sabotage strip X-Forwarded-Proto line → adapt JSON 0/3 (RED); strip X-Forwarded-For line → 0/3 (RED)"
 
 assert_403_order() {
   local file="$1"
@@ -592,17 +612,24 @@ grep -Eq 'edge_deny_order|edge_deny_count|edge_deny_shape' "$TMP_ROOT/contract-b
 pass "verify_public_edge_centrifugo_contract.sh RED when Caddyfile.railway 403 order is broken"
 
 # ---------------------------------------------------------------------------
-# ⑤ live X-Forwarded-Proto (#2205). What the api actually receives: an echo
-# upstream aliased api.railway.internal answers with the X-Forwarded-Proto it
-# got. Requests carry `X-Forwarded-Proto: https` the way Railway's edge sends
-# them. Committed Caddyfile → https on all three api paths; the stripped copy
-# → http (the defect: ws:// realtime URL, http:// QR origin).
+# ⑤ live X-Forwarded-Proto / X-Forwarded-For (#2205, review R2). What the api
+# actually receives: an echo upstream aliased api.railway.internal answers
+# "<X-Forwarded-Proto> <X-Forwarded-For>". Requests carry what Railway's edge
+# sends — `X-Forwarded-Proto: https` and `X-Real-IP: <client>` — plus a
+# client-forged `X-Forwarded-For` that must not reach the api.
+#   committed          → "https 203.0.113.7" on all three api paths
+#   no X-Forwarded-Proto line → "http …"  (ws:// realtime URL, http:// QR origin)
+#   no X-Forwarded-For line   → the edge's peer IP (one bucket for every client)
+#   committed, no X-Real-IP   → empty XFF: rate_limit::client_ip falls back to
+#                               its socket peer
 # ---------------------------------------------------------------------------
+EDGE_CLIENT_IP="203.0.113.7"
+FORGED_XFF="198.51.100.9"
 docker network create "$PROBE_NET" >/dev/null
 docker run -d --name "${PROBE_PREFIX}-echo" --network "$PROBE_NET" \
   --network-alias api.railway.internal \
   -e 'ECHO_CADDYFILE=:8080 {
-	respond "{http.request.header.X-Forwarded-Proto}"
+	respond "{http.request.header.X-Forwarded-Proto} {http.request.header.X-Forwarded-For}"
 }' \
   "$CADDY_IMAGE" \
   sh -c 'printf "%s\n" "$ECHO_CADDYFILE" >/tmp/Caddyfile && exec caddy run --config /tmp/Caddyfile --adapter caddyfile' \
@@ -624,30 +651,55 @@ published_port() {
   docker port "$1" "$2/tcp" | head -1 | awk -F: '{ print $NF }'
 }
 
-xfp_seen() {
-  curl -sS -m 5 -H "Host: ${FIXTURE_HOST}" -H 'X-Forwarded-Proto: https' \
-    "http://127.0.0.1:$1$2" 2>/dev/null || true
+edge_seen() {
+  # usage: edge_seen <port> <path> [no-real-ip]
+  if [ "${3:-}" = "no-real-ip" ]; then
+    curl -sS -m 5 -H "Host: ${FIXTURE_HOST}" -H 'X-Forwarded-Proto: https' \
+      -H "X-Forwarded-For: ${FORGED_XFF}" "http://127.0.0.1:$1$2" 2>/dev/null || true
+  else
+    curl -sS -m 5 -H "Host: ${FIXTURE_HOST}" -H 'X-Forwarded-Proto: https' \
+      -H "X-Real-IP: ${EDGE_CLIENT_IP}" -H "X-Forwarded-For: ${FORGED_XFF}" \
+      "http://127.0.0.1:$1$2" 2>/dev/null || true
+  fi
 }
 
 start_edge edge-committed "$CADDYFILE_RAILWAY"
 start_edge edge-no-xfp "$XFP_STRIPPED"
+start_edge edge-no-xff "$XFF_STRIPPED"
 EDGE_PORT="$(published_port "${PROBE_PREFIX}-edge-committed" 8080)"
 EDGE_NOXFP_PORT="$(published_port "${PROBE_PREFIX}-edge-no-xfp" 8080)"
+EDGE_NOXFF_PORT="$(published_port "${PROBE_PREFIX}-edge-no-xff" 8080)"
 i=0
-until [ -n "$(xfp_seen "$EDGE_PORT" /healthz)" ] && [ -n "$(xfp_seen "$EDGE_NOXFP_PORT" /healthz)" ]; do
+until [ -n "$(edge_seen "$EDGE_PORT" /healthz)" ] && [ -n "$(edge_seen "$EDGE_NOXFP_PORT" /healthz)" ] \
+  && [ -n "$(edge_seen "$EDGE_NOXFF_PORT" /healthz)" ]; do
   i=$((i + 1))
-  [ "$i" -lt 50 ] || fail "live XFP probe: edge/echo containers did not answer"
+  [ "$i" -lt 50 ] || fail "live edge probe: edge/echo containers did not answer"
   sleep 0.2
 done
-for path in /v1/xfp-probe /hooks/xfp-probe /healthz; do
-  seen="$(xfp_seen "$EDGE_PORT" "$path")"
-  printf '[test-railway-template] XFP committed %s → api sees X-Forwarded-Proto=%s\n' "$path" "$seen"
-  [ "$seen" = "https" ] || fail "committed Caddyfile.railway: api saw X-Forwarded-Proto=${seen:-<empty>} on ${path} (want https)"
-  seen="$(xfp_seen "$EDGE_NOXFP_PORT" "$path")"
-  printf '[test-railway-template] XFP no-header_up %s → api sees X-Forwarded-Proto=%s\n' "$path" "$seen"
-  [ "$seen" = "http" ] || fail "sabotage (strip header_up) on ${path}: api saw ${seen:-<empty>} — probe is not load-bearing (want http)"
+for path in /v1/xff-probe /hooks/xff-probe /healthz; do
+  seen="$(edge_seen "$EDGE_PORT" "$path")"
+  printf '[test-railway-template] edge committed %s → api sees XFP/XFF=%s\n' "$path" "$seen"
+  [ "$seen" = "https ${EDGE_CLIENT_IP}" ] || \
+    fail "committed Caddyfile.railway on ${path}: api saw '${seen}' (want 'https ${EDGE_CLIENT_IP}'; a forged XFF must not pass)"
+  seen="$(edge_seen "$EDGE_NOXFP_PORT" "$path")"
+  printf '[test-railway-template] edge no-XFP-line %s → api sees XFP/XFF=%s\n' "$path" "$seen"
+  case "$seen" in
+    "http ${EDGE_CLIENT_IP}") ;;
+    *) fail "sabotage (no X-Forwarded-Proto line) on ${path}: api saw '${seen}' — probe is not load-bearing (want http)" ;;
+  esac
+  seen="$(edge_seen "$EDGE_NOXFF_PORT" "$path")"
+  printf '[test-railway-template] edge no-XFF-line %s → api sees XFP/XFF=%s\n' "$path" "$seen"
+  case "$seen" in
+    "https ${EDGE_CLIENT_IP}" | "https ${FORGED_XFF}"* | "https ") \
+      fail "sabotage (no X-Forwarded-For line) on ${path}: api saw '${seen}' — probe is not load-bearing (want the edge peer IP)" ;;
+    "https "*) ;;
+    *) fail "sabotage (no X-Forwarded-For line) on ${path}: unexpected '${seen}'" ;;
+  esac
 done
-pass "live: committed edge forwards X-Forwarded-Proto=https to the api on /v1, /hooks, /healthz; without header_up it is http (RED)"
+seen="$(edge_seen "$EDGE_PORT" /v1/xff-probe no-real-ip)"
+printf '[test-railway-template] edge committed without X-Real-IP → api sees XFP/XFF=%s (empty XFF → client_ip uses its socket peer)\n' "$seen"
+[ "$seen" = "https " ] || fail "committed edge without X-Real-IP: api saw '${seen}' (want an empty XFF, never the forged one)"
+pass "live: committed edge gives the api X-Forwarded-Proto=https and X-Forwarded-For=X-Real-IP on /v1, /hooks, /healthz (forged XFF dropped); without either line RED"
 
 # ---------------------------------------------------------------------------
 # ⑥ live Centrifugo from the catalog's own variables (#2205, audit §A.4-4).

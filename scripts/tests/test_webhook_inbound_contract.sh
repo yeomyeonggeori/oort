@@ -68,9 +68,14 @@ FILES = (
 HANDLE_OPEN = re.compile(r"^(\t)handle(?: (\S+))? \{\s*$")
 PROXY = re.compile(r"^reverse_proxy\s+(\S+)(\s+\{)?\s*$")
 # #2205: the Railway edge pins X-Forwarded-Proto for the api upstream (Railway
-# terminates TLS, so Caddy would otherwise forward `http`). That one header_up
-# is the only subdirective a proxy block here may carry.
-PROXY_SUBDIRECTIVES = {"header_up X-Forwarded-Proto https"}
+# terminates TLS, so Caddy would otherwise forward `http`) and hands the api
+# the edge's X-Real-IP as X-Forwarded-For (otherwise every client is the edge
+# IP to the per-IP rate limits). Those two header_up lines are the only
+# subdirectives a proxy block here may carry.
+PROXY_SUBDIRECTIVES = {
+    "header_up X-Forwarded-Proto https",
+    "header_up X-Forwarded-For {http.request.header.X-Real-IP}",
+}
 CSP = "Content-Security-Policy"
 
 
