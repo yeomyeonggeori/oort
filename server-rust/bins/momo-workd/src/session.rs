@@ -252,6 +252,9 @@ impl SessionManager {
                 return Err(refusal);
             }
         };
+        // The first census while the adapter is certainly alive: what it
+        // started at launch is known before any turn can end with its exit.
+        conn.observe_tree();
 
         let session_id = match control.session_id {
             // A resume spawn: the server pre-allocated the session.
@@ -638,6 +641,18 @@ impl SessionTask {
     }
 
     async fn on_incoming(&mut self, message: Incoming) -> Option<End> {
+        // A tool is running or asking to: count the tree now rather than at
+        // the next tick — the adapter may exit before it and orphan the tool.
+        let tool_activity = match &message {
+            Incoming::Notification { params, .. } => params
+                .pointer("/update/sessionUpdate")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| kind.starts_with("tool_call")),
+            Incoming::Request { .. } => true,
+        };
+        if tool_activity {
+            self.conn.observe_tree();
+        }
         match message {
             Incoming::Notification { method, params } if method == "session/update" => {
                 match projection::project(&params) {
@@ -721,6 +736,7 @@ impl SessionTask {
         &mut self,
         result: Result<RpcResult, oneshot::error::RecvError>,
     ) -> Option<End> {
+        self.conn.observe_tree();
         self.relay.flush_text().await;
         let exit_code = match &result {
             Ok(Ok(value))
