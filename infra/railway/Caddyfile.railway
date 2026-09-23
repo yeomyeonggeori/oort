@@ -1,9 +1,12 @@
-# Railway 공개 엣지 (#2205). 정본은 infra/rust/Caddyfile — 이 파일은 TLS 이중
-# 종단만 갈라 낸다. Railway가 HTTPS를 끊고 컨테이너에는 HTTP를 넘기므로
-# 사이트는 http://{$OORT_SITE_ADDRESS} 이고, Railway PORT 에 맞추려고
-# http_port 만 전역으로 연다. auto_https off + :8080 사이트 주소는 쓰지 않는다
-# (그 형태는 금지). 업스트림만 compose DNS(api/centrifugo) 대신
-# *.railway.internal. 키 이름 정본: oort_public_edge_env_keys.
+# Railway 공개 엣지 (#2205). 정본은 infra/rust/Caddyfile 이고 라우트 표는 같다
+# (/__momo_stub/* 포함 — #2609, 패리티 가드 scripts/tests/test_public_edge.sh ⑥).
+# 이 파일은 TLS 이중 종단과 그 결과만 갈라 낸다. Railway가 HTTPS를 끊고
+# 컨테이너에는 HTTP를 넘기므로 사이트는 http://{$OORT_SITE_ADDRESS} 이고,
+# Railway PORT 에 맞추려고 http_port 만 전역으로 연다. auto_https off + :8080
+# 사이트 주소는 쓰지 않는다(그 형태는 금지). 업스트림은 compose DNS
+# (api/centrifugo) 대신 *.railway.internal 이고, api 로 가는 네 블록은
+# header_up 두 줄(X-Forwarded-Proto · X-Forwarded-For)을 단다 — 이유는 아래
+# 주석. 키 이름 정본: oort_public_edge_env_keys.
 # OORT_SITE_ADDRESS / OORT_CSP_CONNECT_SRC / PORT 가 없으면 caddy adapt 가 실패한다.
 {
 	http_port {$PORT}
@@ -38,7 +41,7 @@ http://{$OORT_SITE_ADDRESS} {
 		# Caddy file_server가 확장자로 타입을 붙인다 — 브라우저가 그 선언을
 		# 추측으로 덮어쓸 이유가 없다.
 		X-Content-Type-Options "nosniff"
-		# 첨부 업로드 목적지(www.googleapis.com)로 나가는 요청에 이 사이트의
+		# 첨부 업로드 목적지(google 백엔드의 www.googleapis.com)로 나가는 요청에 이 사이트의
 		# 주소를 싣지 않는다. 이 앱은 리퍼러를 읽는 표면이 없고(OAuth 리디렉트
 		# 플로우 없음 — ADR-0147 링크는 붙여넣기다), 외부로 여는 링크도 리퍼러를
 		# 요구하지 않으므로 가장 좁은 값이 아무것도 깨뜨리지 않는다.
@@ -95,7 +98,8 @@ http://{$OORT_SITE_ADDRESS} {
 	# `$origin/__momo_stub/drive/uploads/{token}` 이다(momo-drive local.rs). 이
 	# matcher 가 없으면 마지막 SPA handle 이 받고, file_server 는 PUT 에 405 를
 	# 준다 — #2205 단계 2 실측(첨부 업로드 405 → complete 404 → 메시지 409).
-	# infra/rust/Caddyfile.local 과 같은 블록이다.
+	# infra/rust/Caddyfile · Caddyfile.local · Caddyfile.host-network 과 같은
+	# 라우트다(패리티 가드: scripts/tests/test_public_edge.sh ⑥).
 	handle /__momo_stub/* {
 		reverse_proxy api.railway.internal:8080 {
 			header_up X-Forwarded-Proto https
@@ -126,14 +130,16 @@ http://{$OORT_SITE_ADDRESS} {
 		#
 		#  connect-src {$OORT_CSP_CONNECT_SRC}
 		#    생성기가 --public-origin 에서 파생한다. 기본 토큰:
-		#    'self' = REST(/v1/*) 와 첨부 다운로드/미리보기 프록시
+		#    'self' = REST(/v1/*), 첨부 다운로드/미리보기 프록시, 그리고 로컬
+		#    보관소 업로드 PUT(/__momo_stub/*, ADR-0169 — 바이트가 이 엣지를 지난다)
 		#    https://<host> / wss://<host> = 같은 호스트 REST·레일
-		#    https://www.googleapis.com = **첨부 바이트가 이 서버를 지나지 않는
-		#    유일한 요청**(ADR-0151 D1). 브라우저가 Drive 재개 가능 세션 주소로
-		#    직접 PUT 한다. 이 한 토큰이 빠지면 첨부 업로드가 즉사한다 — #1206이
-		#    실제로 밟았고 #1207이 닫은 그 사고다. 호스트는 추측이 아니라 서버가
-		#    강제한다: momo-drive/src/google.rs:380 이 Location 헤더가
-		#    "https://www.googleapis.com/" 로 시작하지 않으면 세션을 거절한다.
+		#    https://www.googleapis.com = google 백엔드에서 **첨부 바이트가 이
+		#    서버를 지나지 않는 유일한 요청**(ADR-0151 D1). 브라우저가 Drive 재개
+		#    가능 세션 주소로 직접 PUT 한다. 이 한 토큰이 빠지면 첨부 업로드가
+		#    즉사한다 — #1206이 실제로 밟았고 #1207이 닫은 그 사고다. 호스트는
+		#    추측이 아니라 서버가 강제한다: momo-drive/src/google.rs:380 이
+		#    Location 헤더가 "https://www.googleapis.com/" 로 시작하지 않으면
+		#    세션을 거절한다.
 		#    MOMO_LIVEKIT_* URL 이 env 에 있으면 그 오리진도 붙는다.
 		#    와일드카드는 생성기가 거절한다 (#1792).
 		#
