@@ -1039,7 +1039,9 @@ const ACTION_RESULT_TONE: Readonly<
  * 화면 하나에 예약된 낱말이다(#1584 — `conversationHygiene.test.tsx`).
  */
 const ACTION_RESULT_ELSEWHERE: Readonly<Record<string, string>> = {
-  'invite.create': '링크 관리와 새 링크 만들기는 데스크톱이나 웹에서 할 수 있습니다.',
+  // 「관리」가 아니다(design-review 2R N-A): 웹의 설정 › 멤버와 초대에는 발급된
+  // 목록(읽기 전용)과 만들기 폼뿐이고 취소·재발급이 없다. 할 수 있는 것만 이름 댄다.
+  'invite.create': '링크 목록 확인과 새 링크 만들기는 데스크톱이나 웹에서 할 수 있습니다.',
 };
 
 /**
