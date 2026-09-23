@@ -5,8 +5,11 @@
 #
 # ## 하는 일(순서대로)
 #
-#   1. 작업 트리가 커밋과 같은지 본다. 증거 빌드는 커밋에서 나와야 한다(M7-I I-1).
-#   2. Pods 를 시스템 `pod`(Podfile.lock 의 COCOAPODS 버전)으로 맞춘다.
+#   1. 작업 트리가 커밋과 같은지, 그 커밋이 main 에 있거나 태그인지 본다. 올릴 빌드는
+#      main 커밋이나 태그에서 나와야 한다(M7-I I-1). 아니면 멈춘다. --rehearsal 은 이
+#      검사를 건너뛰는 대신 build-info.txt 에 「업로드 불가(main 밖)」를 찍는다.
+#   2. npm ci 를 매번 돌리고, Pods 를 시스템 `pod`(Podfile.lock 의 COCOAPODS 버전)으로
+#      맞춘다.
 #   3. 빌드 번호를 아래 규칙으로 정해 Release 아카이브를 만든다(개발 서명).
 #   4. IPA 를 로컬에 내보낸다(destination=export). 여기서 배포 서명이 입혀진다.
 #   5. 내보낸 앱에 ios/ci_scripts/ci_post_xcodebuild.sh 를 돌려 NSE 임베드·서명된
@@ -49,10 +52,14 @@
 # Xcode Cloud 는 2000번대를 쓴다(빌드 2035·2039). 로컬 번호는 3000 에서 시작해 그와
 # 겹치지 않고, 날짜와 함께만 커지므로 카운터 파일이 필요 없다. ASC 는 같은
 # MARKETING_VERSION 안에서 이전 업로드보다 큰 번호만 받는다. 3022 < 3022.1 < 3023 이다.
-# 규칙과 다른 번호가 꼭 필요하면 MOMO_IOS_BUILD_NUMBER 로 직접 준다(3000 이상).
+# 규칙과 다른 번호가 꼭 필요하면 MOMO_IOS_BUILD_NUMBER 로 직접 준다(3000 이상,
+# 정수 하나나 점 하나로 이은 정수 둘, 각 정수는 앞자리 0 없이 9자리까지).
 # 명령줄 CURRENT_PROJECT_VERSION 은 앱과 NSE 에 같은 값으로 걸린다. 둘의 번호가
 # 다르면 ASC 가 경고하므로 이것이 원하는 동작이다.
 set -euo pipefail
+
+# 번호의 각 정수 자릿수 상한. 셸 산술이 넘치지 않고(10#…) 사람이 읽을 수 있는 범위다.
+MAX_COMPONENT_DIGITS=9
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # clients/mobile
 SCHEME="MomoMobile"
@@ -73,12 +80,16 @@ KST_OFFSET_SECONDS=32400
 
 usage() {
   cat <<'EOF'
-Usage: clients/mobile/scripts/archive-release.sh [--seq N] [--out DIR]
+Usage: clients/mobile/scripts/archive-release.sh [--seq N] [--out DIR] [--rehearsal]
        clients/mobile/scripts/archive-release.sh --print-build-number [--seq N]
 
   --seq N               같은 날 N번째 재업로드용 번호(BUILD.N). 기본은 그날 첫 번호.
   --out DIR             아카이브·IPA·로그를 둘 디렉터리. 기본은 새 임시 디렉터리.
-                        레포 안은 거부한다.
+                        상대 경로는 이 명령을 실행한 디렉터리 기준이다. 레포 안이면
+                        아무것도 만들지 않고 거부한다.
+  --rehearsal           main 에 없는 커밋(브랜치)에서도 끝까지 돈다. 산출물은
+                        build-info.txt 에 「업로드 불가(main 밖)」로 기록되고, 업로드용
+                        ExportOptions 는 만들지 않는다.
   --print-build-number  빌드 번호만 출력하고 끝낸다.
 
 환경 변수:
@@ -95,6 +106,7 @@ log() { printf '\n==> %s\n' "$*"; }
 SEQ=0
 OUT=""
 PRINT_ONLY=0
+REHEARSAL=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --seq)
@@ -104,28 +116,34 @@ while [ $# -gt 0 ]; do
       ;;
     --out)
       [ $# -ge 2 ] || die "--out 에 값이 없다"
-      OUT="$2"
+      [ -n "$2" ] || die "--out 이 비었다"
+      # 스크립트가 cd 하기 전에, 실행한 디렉터리 기준으로 절대 경로를 만든다.
+      case "$2" in
+        /*) OUT="$2" ;;
+        *) OUT="$PWD/$2" ;;
+      esac
       shift 2
       ;;
+    --rehearsal) REHEARSAL=1; shift ;;
     --print-build-number) PRINT_ONLY=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "알 수 없는 인자: $1" ;;
   esac
 done
 
-case "$SEQ" in
-  ''|*[!0-9]*) die "--seq 는 0 이상의 정수다(받은 값: '$SEQ')" ;;
-esac
+[[ "$SEQ" =~ ^[0-9]{1,$MAX_COMPONENT_DIGITS}$ ]] ||
+  die "--seq 는 ${MAX_COMPONENT_DIGITS}자리 이하의 0 이상 정수다(받은 값: '$SEQ')"
 SEQ=$((10#$SEQ))
 
 build_number() {
   if [ -n "${MOMO_IOS_BUILD_NUMBER:-}" ]; then
     [ "$SEQ" -eq 0 ] || die "MOMO_IOS_BUILD_NUMBER 와 --seq 는 함께 쓸 수 없다"
-    # 점은 하나까지. VERSIONING_SYSTEM=apple-generic 이 이 값을 C double 리터럴로도
-    # 적기 때문에(`*_vers.c`) 3022.1.1 같은 값은 컴파일을 깨뜨린다.
-    case "$MOMO_IOS_BUILD_NUMBER" in
-      *[!0-9.]*|.*|*.|*.*.*) die "MOMO_IOS_BUILD_NUMBER 형식이 틀렸다: '$MOMO_IOS_BUILD_NUMBER'" ;;
-    esac
+    # 정수 하나, 또는 점 하나로 이은 정수 둘. 앞자리 0 은 받지 않는다(03022·3022.01 은
+    # 같은 번호의 다른 표기라 ASC 비교를 흐린다). 점이 둘이면 VERSIONING_SYSTEM=
+    # apple-generic 이 이 값을 C double 리터럴로도 적기 때문에(`*_vers.c`) 컴파일이 깨진다.
+    local d=$((MAX_COMPONENT_DIGITS - 1))
+    [[ "$MOMO_IOS_BUILD_NUMBER" =~ ^(0|[1-9][0-9]{0,$d})(\.(0|[1-9][0-9]{0,$d}))?$ ]] ||
+      die "MOMO_IOS_BUILD_NUMBER 형식이 틀렸다: '$MOMO_IOS_BUILD_NUMBER' (예: 3022, 3022.1; 각 정수는 앞자리 0 없이 ${MAX_COMPONENT_DIGITS}자리까지)"
     local head="${MOMO_IOS_BUILD_NUMBER%%.*}"
     [ "$((10#$head))" -ge "$BUILD_BASE" ] ||
       die "MOMO_IOS_BUILD_NUMBER 는 $BUILD_BASE 이상이어야 한다(Xcode Cloud 2000번대와 겹치지 않게)"
@@ -133,9 +151,7 @@ build_number() {
     return
   fi
   local now="${MOMO_IOS_BUILD_NOW:-$(date -u +%s)}"
-  case "$now" in
-    ''|*[!0-9]*) die "MOMO_IOS_BUILD_NOW 는 epoch 초여야 한다(받은 값: '$now')" ;;
-  esac
+  [[ "$now" =~ ^[0-9]{1,12}$ ]] || die "MOMO_IOS_BUILD_NOW 는 epoch 초여야 한다(받은 값: '$now')"
   local day=$(( (now + KST_OFFSET_SECONDS) / 86400 - BUILD_EPOCH_DAY ))
   [ "$day" -ge 0 ] || die "시계가 규칙 기준일(2026-09-01 KST)보다 이르다"
   local base=$((BUILD_BASE + day))
@@ -157,9 +173,35 @@ fi
 command -v xcodebuild >/dev/null 2>&1 || die "xcodebuild 가 없다"
 command -v node >/dev/null 2>&1 || die "node 가 없다(Podfile 과 번들 단계가 node 를 부른다)"
 REPO_ROOT="$(git -C "$APP_DIR" rev-parse --show-toplevel)"
+REPO_REAL="$(cd "$REPO_ROOT" && pwd -P)"
+
+# ---- 출력 위치: 만들기 전에 판단한다(레포 밖만) --------------------------------
+#
+# 있는 조상까지는 실제 경로(pwd -P, 심볼릭 링크 해소)로 풀고, 아직 없는 꼬리는 그대로
+# 붙인다. 아직 없는 꼬리에 . 이나 .. 가 있으면 어디로 풀릴지 판단할 수 없어 거부한다.
+resolve_out() {
+  local p="$1" tail="" name
+  while [ ! -d "$p" ]; do
+    name="$(basename "$p")"
+    case "$name" in
+      .|..) die "--out 의 아직 없는 부분에 '$name' 이 있다: $1" ;;
+    esac
+    tail="/$name$tail"
+    p="$(dirname "$p")"
+  done
+  printf '%s%s\n' "$(cd "$p" && pwd -P)" "$tail"
+}
+if [ -n "$OUT" ]; then
+  # die 는 명령 치환 안에서 서브셸만 끝내므로 여기서 한 번 더 끝낸다.
+  OUT="$(resolve_out "$OUT")" || exit 1
+  case "$OUT/" in
+    "$REPO_REAL/"*) die "--out 은 레포 밖이어야 한다(받은 값: $OUT). 아무것도 만들지 않았다" ;;
+  esac
+fi
+
 cd "$APP_DIR"
 
-# ---- 1. 커밋과 같은 트리 ------------------------------------------------------
+# ---- 1. 커밋과 같은 트리, 그리고 업로드 자격 -------------------------------------
 #
 # 앱 번들에 들어가는 것은 이 클라이언트와, Metro 가 소스 경로로 묶는 공유 코어다.
 # 둘 중 하나라도 커밋과 다르면 빌드 사실(커밋 해시)이 산출물을 설명하지 못한다.
@@ -170,25 +212,48 @@ dirty="$(tree_state)"
 [ -z "$dirty" ] || die "커밋되지 않은 변경이 있다. 커밋하거나 되돌린 뒤 다시 돌린다:
 $dirty"
 COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD)"
-log "commit $COMMIT, build $BUILD"
 
-# ---- 출력 위치(레포 밖) ------------------------------------------------------
+# 올릴 빌드는 main 에 있는 커밋이나 태그에서 나와야 한다(M7-I I-1). origin/main 은
+# 로컬에 받아 둔 값이라, main 에 막 머지된 커밋이면 먼저 git fetch origin 을 한다.
+# --rehearsal 은 막지 않는 대신 「업로드 불가」로 기록해 산출물이 오인되지 않게 한다.
+if git -C "$REPO_ROOT" rev-parse --verify --quiet origin/main >/dev/null &&
+  git -C "$REPO_ROOT" merge-base --is-ancestor HEAD origin/main; then
+  UPLOAD_ELIGIBLE="yes — origin/main 의 조상"
+elif tags="$(git -C "$REPO_ROOT" tag --points-at HEAD)" && [ -n "$tags" ]; then
+  UPLOAD_ELIGIBLE="yes — 태그 $(printf '%s' "$tags" | tr '\n' ' ' | sed 's/ *$//')"
+elif [ "$REHEARSAL" -eq 1 ]; then
+  UPLOAD_ELIGIBLE="no — 업로드 불가(main 밖, --rehearsal)"
+else
+  main_hint="main 에 막 머지된 커밋이면 git fetch origin 뒤 다시 돌린다."
+  git -C "$REPO_ROOT" rev-parse --verify --quiet origin/main >/dev/null ||
+    main_hint="이 체크아웃에 origin/main 이 없다. git fetch origin 뒤 다시 돌린다."
+  die "HEAD $COMMIT 는 origin/main 의 조상이 아니고 태그도 없다.
+       업로드용 빌드는 main 커밋이나 태그에서 만든다(M7-I I-1). $main_hint
+       리허설이면 --rehearsal 을 붙인다(산출물은 업로드 불가로 기록된다).
+       아무것도 만들지 않았다."
+fi
+log "commit $COMMIT, build $BUILD, upload_eligible: $UPLOAD_ELIGIBLE"
+
+# ---- 출력 위치 만들기 ---------------------------------------------------------
 if [ -z "$OUT" ]; then
   OUT="$(mktemp -d -t oort-ios-release)"
 fi
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd -P)"
 case "$OUT/" in
-  "$(cd "$REPO_ROOT" && pwd -P)/"*) die "--out 은 레포 밖이어야 한다(받은 값: $OUT)" ;;
+  "$REPO_REAL/"*) die "--out 은 레포 밖이어야 한다(받은 값: $OUT)" ;;
 esac
 ARCHIVE="$OUT/MomoMobile-$BUILD.xcarchive"
 [ ! -e "$ARCHIVE" ] || die "$ARCHIVE 가 이미 있다. 다른 --out 을 쓴다"
 
 # ---- 2. JS 의존성과 Pods -----------------------------------------------------
-if [ ! -d node_modules ]; then
-  log "node_modules 가 없어 npm ci 를 돌린다(package-lock.json 고정)"
-  npm ci --no-audit --no-fund
-fi
+#
+# npm ci 는 매번 돌린다(보통 수 초에서 수십 초). 이미 있는 node_modules 가
+# package-lock.json 과 다르면 build-info.txt 의 package_lock_sha256 이 산출물을
+# 설명하지 못한다. 설치된 트리를 lock 과 바이트로 맞춰 볼 방법이 없어
+# (node_modules/.package-lock.json 은 형식이 다르다) 다시 까는 것이 가장 확실하다.
+log "npm ci (package-lock.json 고정)"
+npm ci --no-audit --no-fund
 
 # 번들 단계는 Xcode 의 셸에서 `command -v node` 로 node 를 찾는다. 명령줄 빌드는 PATH 를
 # 물려받지만, 같은 체크아웃을 Xcode 앱에서 열어 아카이브할 때를 위해 ci_post_clone.sh
@@ -325,7 +390,11 @@ EOF
   plutil -lint "$1" >/dev/null
 }
 write_export_options "$OUT/ExportOptions-export.plist" export
-write_export_options "$OUT/ExportOptions-upload.plist" upload
+# 리허설 산출물에는 업로드용 plist 를 두지 않는다. 올릴 수 없는 빌드 옆에 올리는 도구를
+# 놓지 않기 위해서다.
+if [[ "$UPLOAD_ELIGIBLE" == yes* ]]; then
+  write_export_options "$OUT/ExportOptions-upload.plist" upload
+fi
 
 log "export (로컬 IPA, 업로드 없음) → $OUT/export (log: $OUT/export.log)"
 if ! xcodebuild -exportArchive \
@@ -387,6 +456,7 @@ echo "ok: CFBundleVersion=$BUILD (앱·NSE), CFBundleShortVersionString=$MARKETI
 # ---- 빌드 사실(M7-I I-1) -----------------------------------------------------
 {
   echo "commit: $COMMIT"
+  echo "upload_eligible: $UPLOAD_ELIGIBLE"
   echo "marketing_version: $MARKETING_VERSION"
   echo "build: $BUILD"
   echo "signer: $EXPORT_SIGNER"
@@ -408,8 +478,15 @@ echo "ok: CFBundleVersion=$BUILD (앱·NSE), CFBundleShortVersionString=$MARKETI
 
 log "완료 — 업로드는 하지 않았다"
 cat "$OUT/build-info.txt"
-cat <<EOF
+if [[ "$UPLOAD_ELIGIBLE" == yes* ]]; then
+  cat <<EOF
 
-업로드용 ExportOptions: $OUT/ExportOptions-upload.plist
-업로드는 owner 승인 뒤에만 docs/runbooks/ios-testflight.md 의 업로드 절대로 한다.
+올릴 IPA: $IPA (ipa_sha256 는 위 build-info.txt)
+업로드는 owner 승인 뒤에만 docs/runbooks/ios-testflight.md §5 대로 한다.
 EOF
+else
+  cat <<EOF
+
+이 산출물은 업로드 불가다(main 밖, --rehearsal). 올릴 빌드는 main 커밋에서 다시 만든다.
+EOF
+fi
