@@ -1,53 +1,124 @@
-# oort — 스토어 검수 게이트 (마일스톤, 스토어 제출 선행)
+# oort — 배포 게이트 M7 (내부 등급 M7-I · 스토어 등급 M7-S)
 
-> **이 게이트는 스토어·공증·external TestFlight 공개 배포에 적용한다. PASS 기록 없이 실행하지 않는다.** 서버/셀프호스트 이미지 발행은 [RELEASING](../RELEASING.md)의 별도 owner 승인 절차를 따른다. 이 구분은 이미지 발행 권한을 새로 부여하지 않는다.
-> 아래 Swift/Xcode 체크리스트에는 은퇴한 표면이 남아 있다. 현행 Tauri/RN 검수 기준으로 갱신되기 전까지 이 문서를 PASS로 간주하지 않는다.
-> 목적: "빌드 파일이 실제로 사용 가능"함을 빡세게 판명한 뒤에만 스토어/공증 배포로 진행.
-> 현재 상태(STATUS.md): M1 runtime MOMO-001~004는 Docker Desktop으로 검증됨. WebSocket live subscribe/presence/recovery, APNs, packaged app/IPA, QA 실측은 후속. → 이 게이트는 아직 OPEN(미통과).
+> **2026-09-23 개정(ADR-0187 D5).** 한 등급이던 게이트를 두 등급으로 나눴다. 은퇴한 Swift/Xcode 체크리스트는 git 히스토리에 있다. 현행 표면은 Tauri 데스크탑(macOS), React Native iOS, Rust 서버(Railway 팀 인스턴스)다.
+> 서버/셀프호스트 이미지 발행은 [RELEASING](../RELEASING.md)의 별도 owner 승인 절차를 따른다. 이 게이트는 이미지 발행 권한을 새로 부여하지 않는다.
+> **PASS의 유효 범위:**
+> - M7-S PASS는 제출 빌드 커밋에만 유효하다.
+> - M7-I PASS는 「다시 재는 조건」이 바뀌기 전까지 이어지는 빌드에 유효하다. 대신 빌드마다 I-1 사실, 5분 스모크, 승인 인용을 PR 본문에 남긴다.
 >
-> 📐 **객관 통과기준(measurable DoD)** 문서는 LS-3에서 삭제됐다(G3 진입 때 RN 기준으로 재작성). 이 파일(03)은 체크리스트 + PASS 블록 기록처다.
-> 관련: `07-crash-analytics-spec.md`(크래시-free 계측) · `08-e2e-accessibility-performance.md`(e2e/접근성/성능).
+> **승인과 기록:**
+> - PASS 기록은 하단 표에 통합자가 적는다. 날짜·커밋·빌드 번호·증거 링크를 적고, 승인 칸에는 **성재의 발화를 그대로 인용**한다.
+> - 증거 빌드와 모든 배포 건의 승인도 성재 발화를 그대로 인용해 PR 본문이나 이슈에 남긴다.
+> - 인용이 없으면 승인이 아니다.
 
-## G-0. 런타임 e2e (STATUS.md §5 선결)
-- [ ] docker(PG18+Centrifugo v6) 기동 → `make migrate`(001→002) 멱등 적용.
-- [ ] 서버 기동 → `GET /health` green.
-- [ ] 메시지 송신 → `channel_seq` 갭리스 발급 + outbox→relay→Centrifugo publish 왕복.
-- [ ] RLS 테넌트 격리 확인(워크스페이스 간 행 미노출).
-- [ ] AgentWorker↔hermes SSE 실연결: 김인턴 멘션→스트리밍 응답 1회 + reserve/reconcile 비용 기록.
+## M7-I 내부 등급 — 팀 배포
 
-## G-1. macOS .app 사용성
-- [ ] `clients/macOS`에 Xcode App 프로젝트 추가 → `.app` 번들 산출(C1 티켓).
-- [ ] 실기기(개발자 머신) 기동: 로그인 → 채널 입장 → 메시지 송수신 → 에이전트 응답 렌더(D Live Tool-Call) 1회.
-- [ ] 비용 호흡 링(B) / 승인 인박스(C) 실데이터 바인딩 표시.
-- [ ] 크래시 0, 콘솔 에러 0(치명), 권한 prompt(네트워크/알림) 정상.
+**적용 대상:**
+- TestFlight internal 빌드
+- 팀원에게 주는 공증 DMG(직접 전달)
+- 데스크탑 **next 채널** 게시(업데이터 매니페스트·자산)
+- owner 외 사람이 설치할 빌드 전부. 공증 여부와 무관하다.
 
-## G-2. iOS 앱 사용성
-- [ ] `clients/iOS` 디렉터리 + Xcode App 프로젝트 생성(C2 티켓).
-- [ ] 시뮬레이터 + 실기기에서 G-1과 동일 시나리오 통과.
-- [ ] 멀티팀: 고유 초대코드 자가가입 → 워크스페이스 격리 확인(10인=1팀, 3+팀).
+**next 채널은 팀 채널이다**(2026-09-23 성재 결정, ADR-0187 §5).
+- 매니페스트와 자산(`momo-alpha`)은 공개 URL이지만 광고하지 않는다.
+- 게시는 이 등급의 규칙(PASS 기록 + 배포 건마다 owner 승인)을 따른다.
 
-## G-3. 스토어 메타/정책 사전점검
-- [ ] App Store Connect App 레코드 + Bundle ID 등록.
-- [ ] 개인정보 처리방침 URL, App Privacy(데이터 수집) 라벨 작성.
-- [ ] 스크린샷(필수 기기 사이즈), 아이콘, 설명 초안.
-- [ ] `deliver`/`precheck`로 메타데이터 사전검증 1회(submit_for_review:false).
-- [ ] (법무) 라이선스/약관/수출규제(암호화 사용 신고 ITSAppUsesNonExemptEncryption) 검토 — **법률 자문 아님**.
+**자동 배포 경로는 끈다.** ASC에서 내부 테스터 그룹 자동 배포와 Xcode Cloud의 TestFlight 액션이 꺼져 있는지 확인한다. 켜져 있으면 업로드나 승격만으로 팀 배포가 된다.
 
-## G-4. CI 그린
-- [ ] `ci-build.yml` 통과(swift build/test + Xcode app 빌드).
-- [ ] `fastlane ios beta`(TestFlight) 비대화형 성공 1회(내부 테스터).
+- [ ] **I-1 재현성.**
+  - main 커밋이나 태그에서 빌드한다.
+  - PR 본문에 커밋, 버전, 빌드 번호, 서명 주체, 의존 lock 해시를 적는다.
+  - 같은 커밋에서 다시 빌드한 산출물이 설치·실행된다.
+- [ ] **I-2 팀 인스턴스 왕복.** Railway 팀 인스턴스에서 아래 네 가지가 각각 한 번씩 돈다.
+  - 로그인
+  - 채널 메시지 송수신(두 기기 사이 실시간)
+  - 에이전트 멘션 답장
+  - 첨부 1건
+- [ ] **I-3 데스크탑.**
+  - `spctl -a -vv`와 `stapler validate`를 통과한다.
+  - **스테이징 매니페스트**로 업데이터가 한 번 갱신된다.
+    - 두 빌드 모두 `MOMO_CHANNEL_BUILD=1`로 빌드하고, `--config`로 `plugins.updater.endpoints`를 스테이징 HTTPS 주소로 바꾼다.
+    - 스테이징 매니페스트는 `momo-alpha` Pages의 별도 파일 `update-staging.json`이다. 라이브 `update-next.json`과 분리하며, 증거 빌드만 가리킨다.
+    - 이 두 빌드는 `publish_next_build.sh --public`으로 만들 수 없다(업데이터가 컴파일 단계에서 꺼진다).
+    - 수동으로 만든다: `MOMO_CHANNEL_BUILD=1` 빌드 → 공증 → `cargo tauri signer sign -f ~/.momo-secrets/momo-updater.key -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"` → 스테이징 게시.
+    - 스크립트 기본 모드로 대신하지 않는다. 라이브 매니페스트를 건드리기 때문이다.
+  - OS 알림을 한 번 받는다.
+- [ ] **I-4 iOS.**
+  - 실기기에 설치된다.
+  - 로그인 또는 QR 기기 연결이 된다.
+  - **앱이 종료된 상태**에서 실기기 푸시를 한 번 받고, 탭하면 해당 메시지로 간다.
+  - 승인 카드 결정을 한 번 한다.
+- [ ] **I-5 안정성.** 30분 동안 [ITO-3 시나리오 표](../planning/research/2026-08-20-oss-launch-readiness-and-internal-test-plan.md)(§4)의 I1·I2·I3·I6·I7 행을 웹·데스크탑·폰에서 돈다.
+  - 나머지 행의 처리: I4(클라우드 VM 실화면 관전)는 목표 A 밖이라 건너뛴다(데스크탑 세션 원격 관전은 I-8). I5(next 재발행)는 I-3으로, I8(시뮬레이터)은 I-4로 대신한다.
+  - 치명 크래시 0.
+  - 데이터 손실 0. 보낸 메시지·첨부·리액션·읽음 위치가 앱 재시작과 재설치 뒤에도 전부 남아 있어야 한다.
+- [ ] **I-6 되돌리기 실측.**
+  - 데스크탑: 이전 DMG를 수동으로 다시 설치한 뒤, 상위 버전으로 롤포워드를 한 번 한다.
+  - iOS: 이전 TestFlight 빌드를 한 번 다시 설치한다.
+  - 합격 조건: 재설치한 빌드가 기동·로그인하고, I-5에서 만든 데이터가 보인다.
+  - **매니페스트를 되돌리는 것은 롤백이 아니다.** 업데이터는 낮은 버전으로 내려가지 않는다.
+- [ ] **I-7 크래시 수집 경로.** 크래시가 모이는 경로를 확인해 적는다.
+  - iOS: TestFlight 크래시 보고(Xcode Organizer)
+  - 데스크탑: macOS 진단 보고서(`~/Library/Logs/DiagnosticReports`)
+  - 세션 분모 계측은 S-0에서 정한다.
+- [ ] **I-8 원격 관전·승인(ADR-0188 R1).** 성재 결정(원격 작업까지 팀 배포 전)에 따른 항목이다.
+  - 데스크탑에서 시작한 에이전트 세션을 폰 작업 탭에서 실시간으로 본다.
+  - 권한 요청 푸시를 받아 한 번 승인한다.
+  - R0·R1 불변식의 red proof가 해당 PR에 있다.
+  - R0·R1 보안 재검수가 PASS다(ADR-0188 §4).
 
-## G-5. 객관 통과기준 (수치 — G3 진입 때 RN 기준으로 재작성)
-> 아래는 요약. 정의/측정법/임계 정본은 LS-3에서 삭제됐다.
-- [ ] **G-A 크래시-free**: 세션 ≥ 99.5% AND 유저 ≥ 99.0% (분모=세션/유저 수 + 윈도우 일수 명기), 신규 P0/P1 crash 0. (Sentry/MetricKit, 05 §2)
-- [ ] **G-B 핵심플로우 e2e**: 8/8 PASS, 치명 결함 0. (XCUITest + 수동 스모크, 05 §3 / 08 §1)
-- [ ] **G-C 접근성**: `performAccessibilityAudit` 치명 위반 0 + VoiceOver 핵심플로우 조작 가능. (05 §4 / 08 §2)
-- [ ] **G-D 성능**: 콜드 런치 p90 < 2s, hang ≈ 0, 메모리/스크롤 안정(실기기·Release). (05 §5 / 08 §3)
-- [ ] **G-F 베타 피드백**: 전수 트리아지, P0/P1 잔여 0. (TestFlight + ASC API, 06 §3)
-- [ ] **G-G 릴리스 준비 체크리스트**: 05 §9 (메타/프라이버시/암호화 신고/버전·빌드번호) 100%.
-- [ ] **G-H Enterprise Trust**: threat model + SBOM/license scan + secret scanning + VDP/pentest plan + security whitepaper draft. (05 §8a, MOMO-140)
+**증거 빌드:** PASS 전에도 M7-I 증거를 모으는 빌드는 만들 수 있다. 조건은 세 가지다.
+- 빌드마다 owner 승인을 받는다(발화 인용).
+- 첫 업로드 전에 owner가 ASC 자동 배포와 Xcode Cloud의 TestFlight 액션이 꺼져 있는지 확인하고, 확인 날짜를 남긴다.
+- **owner 본인 기기에만** 설치한다.
+  - iOS: TestFlight internal 1인 그룹
+  - 데스크탑: `publish_next_build.sh --public`로 공증하되 업로드는 하지 않고 owner 기기에 직접 전달한다. 업데이터 측정은 스테이징 매니페스트(I-3)로 한다.
 
-## PASS 판정
-위 **G-0~G-5 및 G-A~G-H 전부 체크 + 증거 첨부** → 게이트 **PASS**. 이 파일 상단에 05 §10 PASS 블록(날짜+커밋해시+빌드#+증거 링크) 기록.
-→ 이후에만 승인된 스토어·공증·external TestFlight 배포를 진행한다. **PASS 기록 없는 해당 배포는 규칙 위반이다.** 서버 이미지 태그/발행 절차는 위 별도 계약을 따른다.
-</content>
+**배포 건마다 owner 승인:** PASS가 기록된 뒤에도 팀 대상 TestFlight 업로드, 공증 DMG 전달, next 채널 게시는 **건마다** 성재 승인을 받는다.
+- 승인 한 줄은 발화 인용으로 PR 본문이나 이슈에 남긴다.
+- 같은 PR 본문에 I-1 사실과 5분 스모크(로그인·메시지 1회·푸시 1회) 결과를 적는다.
+
+**다시 재는 조건:** 아래 가운데 하나라도 바뀌면 전 항목을 다시 잰다.
+- 서명 주체
+- 업데이터 키·엔드포인트
+- 엔타이틀먼트
+- 인증 방식
+- 서버 API·DB 계약
+
+## M7-S 스토어 등급 — App Store · external TestFlight · 공개 공증 배포
+
+**전제:** **제출할 빌드 커밋**의 M7-I PASS.
+
+- [ ] **S-0 크래시 계측.** 내부 테스트가 시작되기 전에 세션 분모를 가진 크래시 계측이 켜져 있다. 수단과 분모 정의는 [07](07-crash-analytics-spec.md)을 RN·Tauri 기준으로 고쳐 정한다.
+- [ ] **S-1 크래시-free.** S-0 계측 기준으로 내부 테스트 기간 동안 두 조건을 만족한다. 분모와 기간을 적는다.
+  - 세션 크래시-free 99.5% 이상, 신규 P0/P1 크래시 0.
+  - 기간은 성재가 정하고 14일이 하한이다. 세션은 500 이상이어야 한다.
+- [ ] **S-2 핵심 플로우 e2e.** `clients/mobile/maestro` 흐름이 전부 PASS하고, I-5 행(I1·I2·I3·I6·I7)의 데스크탑 부분이 전부 PASS한다.
+- [ ] **S-3 접근성.** 폰 VoiceOver와 macOS VoiceOver로 로그인·대화·승인·알림 네 흐름을 조작할 수 있다. Xcode Accessibility Inspector 감사에서 치명 위반이 0이다. 치명 위반은 네 흐름 안의 레이블 없음 또는 조작 불가를 말한다.
+- [ ] **S-4 성능.** 실기기 Release 빌드에서 Instruments로 잰다.
+  - 콜드 런치 p90 2초 미만(10회)
+  - 타임라인 스크롤 hitch 비율 5ms/s 미만
+  - 30분 사용 뒤 메모리 증가 100MB 미만
+- [ ] **S-5 스토어 요건.**
+  - 앱 안 계정 삭제(#20)
+  - PrivacyInfo.xcprivacy와 암호화 신고(#21)
+  - UGC 모더레이션과 EULA(#22)
+  - 메타데이터·스크린샷·연령 등급(#30)
+- [ ] **S-6 베타 피드백.** TestFlight **internal** 피드백을 전수 트리아지하고, P0/P1 잔여가 0이다.
+- [ ] **S-7 법무.** 아래 문서를 외부 변호사가 1회 검토한다. 이 문서는 법률 자문이 아니다.
+  - 개인정보처리방침·App Privacy·LLM 고지(#34)
+  - 약관
+  - NOTICE 귀속(#35)
+- [ ] **S-8 Enterprise Trust.** 위협 모델, SBOM·라이선스 스캔, 시크릿 스캔, VDP·펜테스트 계획, 보안 백서 초안(MOMO-140)을 갖춘다. ADR-0187 §3이 외부·엔터프라이즈 출시로 연기를 제안했다. 성재가 확인하기 전까지 이 항목은 유지한다.
+
+PASS가 기록된 빌드와, 배포 건마다의 owner 승인이 모두 있어야 아래를 진행한다.
+- App Store 심사 제출(#31)
+- external TestFlight
+- 공증 DMG의 공개 게시(`gh release upload`)
+
+**PASS 기록 없는 해당 배포는 규칙 위반이다.**
+
+## PASS 기록
+
+| 등급 | 날짜 | 커밋 | 빌드 | 증거 | 승인(성재 발화 인용) |
+|---|---|---|---|---|---|

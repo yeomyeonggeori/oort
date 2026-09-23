@@ -35,7 +35,7 @@
 | [`LICENSE`](../LICENSE) · [`NOTICE`](../NOTICE) | Apache-2.0 · 귀속 |
 | [`CHANGELOG.md`](../CHANGELOG.md) | Keep a Changelog |
 | [`ROADMAP.md`](../ROADMAP.md) | 릴리스 계획 — 상단 **축**이 현행 |
-| [`STATUS.md`](../STATUS.md) | **항상 먼저.** 최상단 항목이 현재 |
+| [`STATUS.md`](../STATUS.md) | 2026-09-23 동결된 증거 원장(역사). 현재 위치는 [`CURRENT_STATE`](planning/CURRENT_STATE.md) |
 | [`BUILD_TICKETS.md`](../BUILD_TICKETS.md) | 수용기준 등급 + 살아 있는 축의 티켓 계약 |
 | [`schema_v0.sql`](../schema_v0.sql) | 정본 스키마 — 이동/수정 금지 |
 | [`DESIGN.md`](../DESIGN.md) | 디자인 시스템 미러 |
@@ -81,7 +81,7 @@
 | 문서 | 역할 |
 |---|---|
 | [`docs/planning/README.md`](planning/README.md) | 기획 레이어 운영 정본 |
-| [`docs/planning/PIPELINE.md`](planning/PIPELINE.md) | 레인·모델·도구·병렬 상한·워크트리 경로의 유일 정본 |
+| [`docs/planning/PIPELINE.md`](planning/PIPELINE.md) | 레인·모델·도구·병렬 판단·워크트리 경로의 유일 정본 |
 | [`docs/TRACKS.md`](TRACKS.md) | UXUI/엔진 트랙 파이프라인 |
 | [`docs/adr/`](adr/) | 결정 정본(전량 보존). 색인은 디렉터리 |
 | [`docs/planning/2026-09-07-first-goal-two-cases.md`](planning/2026-09-07-first-goal-two-cases.md) | 1차 목표 두 케이스 |
@@ -129,6 +129,6 @@
 2. **순서 SoT = `message.seq`**. 에이전트 = 사람과 동일 `member`(kind='agent').
 3. **멀티테넌시:** `workspace→channel→membership`, 모든 행 `workspace_id`, RLS FORCE.
 4. **`schema_v0.sql` 이동·수정 금지.**
-5. **🔒 게이트:** 스토어/공증 배포(M8)·external TestFlight는 검수 게이트(M7) PASS + `docs/cicd/03` PASS 블록 기록 후에만.
+5. **🔒 게이트:** 팀 배포는 M7-I, 스토어·공개 공증 배포(M8)·external TestFlight는 M7-S PASS 기록(`docs/cicd/03`) 뒤에만.
 6. **런타임 미검증 정직 표기.**
 7. **permissive 라이선스 유지.** 법무 텍스트는 **법률 자문 아님**.

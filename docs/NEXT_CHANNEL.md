@@ -1,6 +1,9 @@
 # oort-next 발행 채널 (Tauri 자동 업데이트)
 
 > 범위: `clients/desktop` (Tauri 2 + `clients/web`) 의 **유일한 현행** 내부 배포 채널. ADR-0133 P2 / MOMO-606.
+> **2026-09-23 성재 결정(ADR-0187 §5):** next 채널은 **팀 채널**이다. 매니페스트와 자산은 공개 URL이지만 광고하지 않는다.
+> - §3·§8의 실발행은 [M7-I](cicd/03-store-readiness-gate.md) PASS 기록과 배포 건마다의 owner 승인 뒤에만 한다.
+> - PASS 전 증거는 두 가지로 모은다. 하나는 `--public`(업로드 없음)으로 공증해 owner 기기에 직접 전달하는 빌드이고, 다른 하나는 스테이징 매니페스트 `update-staging.json`이다.
 > macOS SwiftUI 수동 채널 런북 [`NEXT_CHANNEL.md`](NEXT_CHANNEL.md) 는 ITO-0 T-C / #1609 에서 **사문서**다. `clients/macOS` 는 삭제됐다(W-S1 / #1215). 따라 가면 없는 트리를 찾는다. 이 문서가 그것을 대체한다.
 > 은퇴한 Sparkle/DMG PLAYBOOK: [`RELEASING.md`](RELEASING.md) 상단 배너(ITO-0 T-E / #1610) — 실행하지 말 것.
 
@@ -141,13 +144,15 @@ spctl -a -t exec -vv /tmp/check/oort.app
 
 ## 8. 성재 복붙 — next.11 재발행 (ITO-3 I5 직전)
 
+> **전제:** 상단 2026-09-23 배너대로, M7-I PASS 기록과 이번 게시에 대한 owner 승인이 있을 때만 이 절을 실행한다.
+
 이 절만 따라가면 된다. 시크릿 3종(minisign 개인키·Developer ID 개인키·notarytool 프로파일 비밀번호)은 **값으로 출력하거나 채팅/이슈/커밋에 붙이지 말 것.** 존재와 이름만 확인한다. 워커는 이 절을 실행하지 않는다.
 
 자격 위치(2026-08-07 성재 맥 실측, `docs/cicd/13-selfhosted-runner-macos.md` §4):
 
 | 자격 | 이름 / 경로 |
 | --- | --- |
-| minisign 개인키 | `~/.momo-secrets/momo-updater.key` (0600, 레포 밖) |
+| minisign 개인키 | `~/.momo-secrets/momo-updater.key` (0600, 레포 밖). 2026-09-23부터 암호로 보호된다. 암호는 로그인 키체인 항목 `momo-updater-key`에 있고, 꺼낼 때 확인 창이 뜬다 |
 | Developer ID | `Developer ID Application: Kwak Seongjae (YWQQFQM38J)` |
 | 공증 | notarytool 키체인 프로파일 `momo-notary` |
 | 배포 저장소 | `yeomyeonggeori/momo-alpha` (이 레포가 아님 — `MOMO_DIST_REPO` 기본값) |
@@ -158,8 +163,14 @@ spctl -a -t exec -vv /tmp/check/oort.app
 
 로그인 셸에서. 실패하면 여기서 멈춘다.
 
+**업데이터 키 암호:** 2026-09-23부터 필수다. 게시하는 셸에서 로그인 키체인 항목 `momo-updater-key`의 암호를 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 환경변수로 내보낸다.
+- 키체인 확인 창에서 허용한다.
+- 값은 화면·로그·문서에 내지 않는다.
+- 이 문서는 대입 명령을 싣지 않는다(`test_next_channel_hygiene.sh`).
+
 ```sh
 test -f ~/.momo-secrets/momo-updater.key && echo "minisign key: present"
+test -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" || { echo "updater key password not exported (keychain item momo-updater-key)"; exit 1; }
 security find-identity -v -p codesigning | grep -F "Developer ID Application: Kwak Seongjae (YWQQFQM38J)"
 xcrun notarytool history --keychain-profile momo-notary >/dev/null && echo "notary profile: ok"
 command -v cargo >/dev/null && cargo tauri --version

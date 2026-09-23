@@ -1,6 +1,6 @@
 # 공용 기획·오케스트레이션
 
-Codex와 Claude Code는 같은 [AGENTS](../../AGENTS.md), [CURRENT_STATE](CURRENT_STATE.md), 로컬 체크포인트를 사용한다. 역할의 현재 모델·상한은 [PIPELINE](PIPELINE.md)에만 정의한다.
+Codex와 Claude Code는 같은 [AGENTS](../../AGENTS.md), [CURRENT_STATE](CURRENT_STATE.md), 로컬 체크포인트를 사용한다. 역할의 현재 모델·병렬 판단은 [PIPELINE](PIPELINE.md)에만 정의한다.
 
 ## 시작·재개
 `scripts/planning_context.sh`는 현재 checkout과 최신 스냅샷, 공용 로컬 작업 기록을 출력한다. 과거 결정 조사에는 `--details`, 실시간 이슈/PR 조회에는 `--github`를 사용한다. 일반 구현자는 배정된 이슈와 관련 파일부터 읽는다.
@@ -34,7 +34,7 @@ Codex와 Claude Code는 같은 [AGENTS](../../AGENTS.md), [CURRENT_STATE](CURREN
 |---|---|
 | CURRENT_STATE.md | 최신 위치와 다음 행동만. 통합·범위 변경·세션 종료에 갱신 |
 | JOURNAL.md | 짧은 이력. 기존 항목 불변, 세션 종료에 한 일/열린 것/다음 |
-| STATUS.md | 코드/실행 증거. 이슈 완료·통합 시 |
+| STATUS.md | 2026-09-23 동결된 역사 기록. 새 증거는 PR 본문 |
 | ROADMAP·ADR·Issue/패킷 | 각각 계획·결정·수용기준의 정본 |
 | `<git-common-dir>/oort-coordination/` | 같은 로컬 저장소의 워크트리/하네스가 공유하는 owner·중간 체크포인트. 유의미한 작업 경계에 저장 |
 

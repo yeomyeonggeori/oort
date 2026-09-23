@@ -59,5 +59,5 @@ PG18·Centrifugo는 격리 환경에서 실행한다. 구체적 기동 계약은
 - Issue Acceptance, 기존 패킷/ADR, 관련 게이트를 충족한다. 스키마 확장은 신규 migration으로만 하고 원본 schema_v0.sql은 보존한다.
 - clean HEAD에서 실행 시간·commit·명령·결과·실제 환경·미검증 범위를 남긴다. 수정·환경 차이가 없고 관련 증거가 유효하면 같은 테스트를 관성적으로 반복하지 않는다. 병합으로 생긴 차이는 검증한다.
 - 버그 회귀 시험은 실제 동작 경로에서 결함을 감지해야 한다. 무관한 Markdown 수정이나 단순한 가역적 문구 변경마다 새 테스트를 만들 필요는 없다.
-- PR 본문은 해당 이슈, 한 일, 검증과 `runtime-unverified`, STATUS 영향, 남은 것, 계획 이탈(없으면 없음), worker 인계를 포함한다. 템플릿은 [.github/pull_request_template.md](../../.github/pull_request_template.md).
+- PR 본문은 해당 이슈, 한 일, 검증과 `runtime-unverified`, 요약, 남은 것, 계획 이탈(없으면 없음), worker 인계를 포함한다. 템플릿은 [.github/pull_request_template.md](../../.github/pull_request_template.md).
 - worker는 PR과 검증을 넘기고, 통합자가 독립 검수와 current-head/base 정책 확인 후 track으로 순차 통합한다. release/store 권한은 별도다.
