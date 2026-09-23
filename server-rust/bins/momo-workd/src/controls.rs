@@ -17,7 +17,7 @@
 //! * `kill` — stop the agent; the session reports `ended`.
 //! * `read` and anything else — `unsupported_control`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -64,6 +64,7 @@ impl ControlLoop {
         let controls = self.api.pending_controls().await?;
         let host_id = self.api.host_id();
         let mut handled = 0;
+        let mut listed = HashSet::new();
         for control in controls {
             // The server only returns this host's dispatched controls; a row
             // that says otherwise is not one to act on.
@@ -71,6 +72,7 @@ impl ControlLoop {
                 continue;
             }
             handled += 1;
+            listed.insert(control.id);
             let verdict = match self.verdicts.get(&control.id) {
                 Some(verdict) => verdict.clone(),
                 None => {
@@ -100,6 +102,26 @@ impl ControlLoop {
                         let _ = self.sessions.kill(session_id).await;
                     }
                 }
+            }
+        }
+        // A remembered verdict whose control the server no longer lists: the
+        // ack committed and only its response was lost (a failed ack keeps the
+        // control dispatched, so it would still be listed). Nothing is left to
+        // acknowledge, and a spawned session still waiting for its first prompt
+        // gets it now instead of sitting `running` with nothing to do.
+        let settled: Vec<Uuid> = self
+            .verdicts
+            .keys()
+            .filter(|id| !listed.contains(*id))
+            .copied()
+            .collect();
+        for control_id in settled {
+            if let Some(Verdict {
+                activate: Some(session_id),
+                ..
+            }) = self.verdicts.remove(&control_id)
+            {
+                self.sessions.activate(session_id).await;
             }
         }
         self.sessions.reap();

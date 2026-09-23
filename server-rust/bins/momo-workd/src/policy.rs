@@ -146,9 +146,13 @@ impl AdapterKind {
                     "INITIAL_AGENT_MODE".to_string(),
                     CODEX_FIXED_MODE.to_string(),
                 ),
-                // Per-thread config overrides. Leaf keys, because codex
-                // deep-merges tables: `features.*` and `notify` replace the
-                // configured values; an empty table could not have.
+                // Per-thread config overrides. codex 0.146 passes them on as
+                // `-c`-style overrides (`app-server/src/config_manager.rs`
+                // `load_with_cli_overrides`), splits each key on `.`
+                // (`config/src/overrides.rs` `apply_toml_override`) into a
+                // session-flags layer, and deep-merges that over the user and
+                // project layers — so these leaves replace the configured
+                // values, where an empty table would have changed nothing.
                 (
                     "CODEX_CONFIG".to_string(),
                     json!({

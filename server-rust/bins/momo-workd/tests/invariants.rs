@@ -10,6 +10,7 @@
 //! | `inv_4_round_trip_events_idle_input_kill` | the curated projection, idle/running, owner-only input, kill → ended |
 //! | `inv_5_leaving_the_fixed_mode_mid_session_closes_it` | `policy::check_mode_update` |
 //! | `inv_6_codex_opens_only_in_its_fixed_mode_and_never_over_project_config` | `AdapterKind::isolation_env`, `policy::check_project_config` |
+//! | `inv_7_a_lost_spawn_ack_response_still_starts_the_session` | the settled-verdict sweep in `ControlLoop::poll_once` |
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -45,6 +46,8 @@ struct FakeServer {
     host_id: Uuid,
     controls: Mutex<VecDeque<WorkControl>>,
     calls: Mutex<Vec<Call>>,
+    /// Commit the next ack, then answer as if its response was lost.
+    lose_next_ack_response: Mutex<bool>,
 }
 
 impl FakeServer {
@@ -53,6 +56,7 @@ impl FakeServer {
             host_id: Uuid::new_v4(),
             controls: Mutex::new(VecDeque::new()),
             calls: Mutex::new(Vec::new()),
+            lose_next_ack_response: Mutex::new(false),
         })
     }
 
@@ -133,6 +137,9 @@ impl HostApi for FakeServer {
             .lock()
             .unwrap()
             .retain(|control| control.id != control_id);
+        if std::mem::take(&mut *self.lose_next_ack_response.lock().unwrap()) {
+            return Err(ClientError::Transport("response lost".into()));
+        }
         Ok(())
     }
 
@@ -685,4 +692,40 @@ async fn inv_6_codex_opens_only_in_its_fixed_mode_and_never_over_project_config(
         "the adapter is never launched over project config"
     );
     assert!(h.server.creates().is_empty());
+}
+
+#[tokio::test]
+async fn inv_7_a_lost_spawn_ack_response_still_starts_the_session() {
+    let mut h = harness(&[("claude", &[])]);
+    *h.server.lose_next_ack_response.lock().unwrap() = true;
+    let request = spawn(&h, "claude", "summarise the repo");
+    h.server.push(request.clone());
+    h.controls.poll_once().await.unwrap();
+    let session = ack_for(&h, request.id)
+        .session_id
+        .expect("the committed ack carried the session");
+    assert_eq!(
+        received_methods(&h),
+        vec!["initialize".to_string(), "session/new".to_string()],
+        "no prompt before the ack is known to have landed"
+    );
+
+    // The server no longer lists the control: the ack landed. The session gets
+    // its first prompt now, and the ack is not re-sent.
+    h.controls.poll_once().await.unwrap();
+    wait_for("the first turn to go idle", || {
+        h.server
+            .statuses(session)
+            .contains(&SessionStatus::Idle { exit_code: 0 })
+    })
+    .await;
+    assert_eq!(
+        h.server
+            .acks()
+            .iter()
+            .filter(|(id, _)| *id == request.id)
+            .count(),
+        1
+    );
+    assert!(received_methods(&h).contains(&"session/prompt".to_string()));
 }
