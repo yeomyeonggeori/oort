@@ -11,6 +11,23 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+### Added
+- Phone: approve or reject an approval card right in the timeline, and a result card after the decision; a one-time invite link is shown once and never stored. (#2585)
+- Phone: unread badge and divider follow the same computed state as web; opening a conversation clears a desktop "mark unread" only after it has been drawn. (#2593)
+- Phone: "jump to unread" and "jump to latest" pills with web copy, VoiceOver focus on landing, and a scroll machine that settles on movement instead of a clock. (#2594, #2614)
+- Railway team-instance template (T2): nine-service catalog on v0.1.6 digests, start commands that drop root, sealed APNs key handling, Centrifugo literals pinned to `infra/centrifugo.json`, a client-IP measurement gate before any claim link or invite is shared, and the local-storage upload route (`/__momo_stub/*`) on the Railway edge. (#2580, #2606)
+- `momo-workd` skeleton for ADR-0188 remote work: dial-out registration, signed v2 heartbeat, control polling, ACP sessions under D6 isolation (not distributed yet). (#2579)
+- iOS TestFlight preparation: privacy usage strings, export-compliance flag, build-number scheme, a release archive script that refuses non-`main` commits, and the TestFlight runbook. (#2587)
+
+### Security
+- ADR-0188 R0: remote-host defences — the host owner decides, agents may only kill on member hosts, remote auto-approve and remote shell are refused, heartbeat v2. (#2576)
+- ADR-0188 R0.1 + (A′): non-admins cannot register workspace-scoped hosts, app hosts are member-scoped only, member hosts receive only the owner's non-shell controls and everyone's kill, and agent-originated non-kill controls to member hosts are refused at decision, tool-request and executor time. (#2597)
+- ADR-0188 R1.1: `momo-workd` hardening — credential redaction in outgoing events, Claude reads fenced to the working folder, Codex refused remotely until #2607, owner-only spawn on member hosts, request-recorder proof that the host key never leaves the machine. (#2605)
+
+### Not in this release
+- Nothing here is in a published image yet; the next server tag is cut from `main` after the batch promotion.
+- runtime-unverified: real-device APNs and TestFlight install (evidence build pending), the phone push-tap landing (#2584, in review).
+
 ## [0.1.6] - 2026-09-23
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.6>. Tag target: `main=ab58a111`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images.
