@@ -11,7 +11,8 @@ import {
 } from '@testing-library/react-native';
 import * as Notifications from 'expo-notifications';
 import React from 'react';
-import {AccessibilityInfo, AppState} from 'react-native';
+import {AccessibilityInfo, AppState, FlatList} from 'react-native';
+import {centrifugoChannelName} from '@momo/core/lib/realtimeEvents';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -131,9 +132,18 @@ const ROSTER = [
   rosterMember({id: HERMES, kind: 'agent', displayName: '헤르메스', handle: 'hermes'}),
 ];
 
+/**
+ * 평범한 글만 여덟 줄인 방 (#2594 이동 규칙 위의 착지). 스레드·승인 행이 섞이지
+ * 않아야 착지 뒤의 판정이 그 행들의 높이가 아니라 착지 자체를 잰다.
+ */
+const LONG = '77777777-3333-4333-8333-777777777777';
+const longId = (seq: number) =>
+  `77777777-0000-4000-8000-${String(seq).padStart(12, '0')}`;
+
 const CHANNELS = [
   {id: GENERAL, workspaceId: WS, kind: 'public', name: 'general', muted: false},
   {id: RANDOM, workspaceId: WS, kind: 'public', name: 'random', muted: false},
+  {id: LONG, workspaceId: WS, kind: 'public', name: 'long', muted: false},
 ];
 
 const DM_CHANNEL = {
@@ -188,6 +198,14 @@ const GENERAL_HEAD = [
   }),
 ];
 
+const LONG_HEAD = Array.from({length: 8}, (_, i) =>
+  message(i + 1, longId(i + 1), {
+    channelId: LONG,
+    authorMemberId: i % 2 === 0 ? MINSU : HERMES,
+    body: `${i + 1}번째 긴 방 메시지`,
+  }),
+);
+
 const RANDOM_HEAD = [
   message(3, RANDOM_MSG, {channelId: RANDOM, body: '점심 뭐 먹어요'}),
 ];
@@ -224,9 +242,11 @@ interface FetchOptions {
   channelResponder?: (call: number) => Response | Promise<Response>;
 }
 
+type FetchInit = {method?: string; body?: unknown};
+
 function installFetch(options: FetchOptions = {}): jest.Mock {
   let channelCalls = 0;
-  const mock = jest.fn(async (url: string, init?: {method?: string}) => {
+  const mock = jest.fn(async (url: string, init?: FetchInit) => {
     if (url.includes('/reactions')) return jsonResponse(200, {});
     if (url.includes('/pins')) return jsonResponse(200, {pins: []});
     if (url.includes('/replies')) {
@@ -235,6 +255,25 @@ function installFetch(options: FetchOptions = {}): jest.Mock {
           ? GENERAL_HEAD.filter(m => (m as {rootId?: string}).rootId === ROOT)
           : [],
       });
+    }
+    // 읽음 커서(`PUT …/channels/{id}/read-state`, #2593 explicit_open)는 채널 목록이
+    // 아니다. `/channels` 보다 먼저 가른다 — 아니면 목록 호출로 세어져
+    // `channelResponder` 의 차례를 먹고, 목록의 답 대신 그 PUT 이 풀린다.
+    if (url.includes('/read-state')) {
+      if (init?.method === 'PUT') {
+        const channelId = url.split('/channels/')[1]?.split('/')[0] ?? '';
+        const {last_read_seq: lastReadSeq = 0} = JSON.parse(
+          String(init.body ?? '{}'),
+        ) as {last_read_seq?: number};
+        return jsonResponse(200, {
+          channel_id: channelId,
+          last_read_seq: lastReadSeq,
+          latest_seq: lastReadSeq,
+          unread_count: 0,
+          mention_count: 0,
+        });
+      }
+      return jsonResponse(200, {read_states: []});
     }
     if (url.includes('/channels') && !url.includes('/messages')) {
       const call = channelCalls;
@@ -248,11 +287,9 @@ function installFetch(options: FetchOptions = {}): jest.Mock {
       return jsonResponse(200, {channels: list});
     }
     if (url.includes('/roster')) return jsonResponse(200, {members: ROSTER});
-    if (url.includes('/read-state')) {
-      return jsonResponse(200, {read_states: []});
-    }
     if (url.includes('/messages')) {
       if (url.includes(RANDOM)) return jsonResponse(200, {messages: RANDOM_HEAD});
+      if (url.includes(LONG)) return jsonResponse(200, {messages: LONG_HEAD});
       if (url.includes(FRESH_DM)) return jsonResponse(200, {messages: []});
       return jsonResponse(200, {messages: GENERAL_HEAD});
     }
@@ -1030,5 +1067,254 @@ describe('한 번의 탭은 한 번 착지한다', () => {
     expect(screen.getByTestId('tab-channels').props.accessibilityState).toEqual({
       selected: true,
     });
+  });
+});
+
+// =============================================================================
+// #2594(점프 필)의 이동 규칙 위의 알림 착지.
+//
+// #2594 는 점프가 가는 동안 판정을 쥐고(`beginJumpTravel`), 이동이 멈추면 멈춘 자리에서
+// 바닥을 다시 판정하게 했다(design-review 2594 R2 H-A). 그 리뷰가 적었듯 #2584 이후
+// 가장 흔한 푸시 탭 — 가장 새 메시지로 착지 — 이 정확히 그 길이다. 그래서 알림 착지가
+// 그 규칙 위에서 제대로 끝나는지를 앱 전체로 잰다:
+//
+//   가장 새 메시지로 착지   →  「최신 메시지로 이동」은 서지 않고, 다음 말을 따라간다.
+//   중간 메시지로 착지      →  「최신 메시지로 이동」이 서고, 다음 말은 세기만 한다.
+//   스레드 답글로 착지      →  채널은 점프를 받지 않으므로 자기 진입대로 끝에서 연다.
+//
+// 네이티브 목록이 없으므로 `scrollToIndex` 가 하는 일을 흉내 낸다: 부른 뒤 한 박자 뒤에
+// 목록이 착지한 자리를 보고한다(끝난 프로그램 스크롤의 마지막 보고). 보고는 **이동이
+// 살아 있는 동안**(250ms 안에) 오고, 판정은 이동이 멈춘 뒤에 난다.
+// =============================================================================
+
+interface FakeChannelSub {
+  __emit: (event: string, ctx: unknown) => void;
+}
+
+function channelSub(channelId: string): FakeChannelSub | null {
+  const clients = (
+    jest.requireMock('centrifuge') as {
+      __clients: {getSubscription: (name: string) => FakeChannelSub | null}[];
+    }
+  ).__clients;
+  const last = clients[clients.length - 1];
+  return last?.getSubscription(centrifugoChannelName(WS, channelId)) ?? null;
+}
+
+/** 대화의 목록. 스레드 판이 열려 있으면 그 판의 목록은 두 번째다. */
+function channelList() {
+  return screen.getAllByTestId('timeline-list')[0];
+}
+
+const CONTENT = 4000;
+const VIEWPORT = 800;
+const AT_END = CONTENT - VIEWPORT;
+
+/** 목록이 오프셋 `y` 에 섰다고 보고한다(콘텐츠 4000 · 창 800). */
+function reportAt(y: number, content = CONTENT) {
+  fireEvent(channelList(), 'contentSizeChange', 390, content);
+  fireEvent.scroll(channelList(), {
+    nativeEvent: {
+      contentOffset: {y},
+      contentSize: {height: content, width: 390},
+      layoutMeasurement: {height: VIEWPORT, width: 390},
+    },
+  });
+}
+
+/** 점프의 `scrollToIndex` 가 목록을 `y` 에 앉힌다 — 한 박자 뒤에 그 자리를 보고한다. */
+function landingSettlesAt(y: number): jest.SpyInstance {
+  return jest
+    .spyOn(FlatList.prototype, 'scrollToIndex')
+    .mockImplementation(() => {
+      setTimeout(() => reportAt(y), 20);
+    });
+}
+
+async function sleep(ms: number): Promise<void> {
+  await act(async () => {
+    await new Promise(resolve => setTimeout(resolve, ms));
+  });
+}
+
+function latestPill() {
+  return screen.queryByTestId('jump-latest');
+}
+
+/** 필 안의 보이는 문장(화살표 글리프 제외) — `unreadJumpPills.test.tsx` 와 같은 읽기. */
+function latestPillSentence(): string {
+  const pill = screen.getByTestId('jump-latest');
+  const texts = within(pill).queryAllByText(/보기|이동/);
+  const label = texts[texts.length - 1];
+  const flatten = (node: unknown): string => {
+    if (typeof node === 'string' || typeof node === 'number') {
+      return String(node);
+    }
+    if (Array.isArray(node)) return node.map(flatten).join('');
+    const children = (node as {props?: {children?: unknown}})?.props?.children;
+    return children === undefined ? '' : flatten(children);
+  };
+  return flatten(label.props.children);
+}
+
+/** 필이 말하는 문장, 필이 없으면 null — 실패할 때 무엇이 섰는지 원문으로 보인다. */
+function latestPillSaid(): string | null {
+  return latestPill() === null ? null : latestPillSentence();
+}
+
+/**
+ * 남의 말이 하나 붙는다: 레일로 한 줄이 오고, 목록이 그만큼 자란다. 따라가는 목록은
+ * 그 자람에 끝으로 간다 — 그 요청을 돌려준다.
+ */
+async function someoneElseTalks(seq: number): Promise<jest.SpyInstance> {
+  const toEnd = jest
+    .spyOn(FlatList.prototype, 'scrollToEnd')
+    .mockImplementation(() => {});
+  await act(async () => {
+    channelSub(LONG)?.__emit('publication', {
+      data: {
+        type: 'message.new',
+        v: 1,
+        ts: T0 + seq * 1000,
+        seq,
+        payload: {
+          id: longId(seq),
+          channel_id: LONG,
+          seq,
+          type: 'text',
+          body: `${seq}번째 긴 방 메시지`,
+          author_member_id: MINSU,
+          hlc_ts: seq,
+          hlc_count: 0,
+          created_at_ms: T0 + seq * 1000,
+        },
+      },
+    });
+  });
+  await waitFor(() => expect(screen.getByText(`${seq}번째 긴 방 메시지`)).toBeTruthy());
+  fireEvent(channelList(), 'contentSizeChange', 390, CONTENT + 100);
+  return toEnd;
+}
+
+/**
+ * 다른 방(#general)을 읽고 있다 — 끝에 앉아 따라가는 중이다. 백그라운드 착지는 이
+ * 자리에서 떠난다: 알림은 **다른 방**을 가리키고, 목록은 방이 바뀌며 판정을 새로 한다
+ * (#2594 R1 H-1 `judgedChannel`).
+ */
+async function readingGeneralAtItsEnd(): Promise<void> {
+  fireEvent.press(screen.getByTestId(`sidebar-row-channel:${GENERAL}`));
+  await waitFor(() =>
+    expect(screen.getByTestId('conversation-title')).toHaveTextContent('general'),
+  );
+  await waitFor(() => expect(screen.getByText('배포 끝났습니다')).toBeTruthy());
+  reportAt(AT_END);
+  await sleep(50);
+}
+
+const TO_NEWEST: Aim = {channelId: LONG, messageId: longId(8)};
+const TO_MIDDLE: Aim = {channelId: LONG, messageId: longId(3)};
+
+describe('#2594 이동 규칙 위의 알림 착지 — 끝 근처면 따라가고, 멀면 「최신으로」가 선다', () => {
+  it('종료 — 다른 방의 가장 새 메시지로 착지하면 「최신으로」가 서지 않고 다음 말을 따라간다', async () => {
+    installFetch();
+    landingSettlesAt(AT_END);
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(apnsPayload(TO_NEWEST)),
+    );
+    renderShell();
+
+    await expectLanded('long', longId(8), false);
+    await sleep(400); // 이동이 멈춘다(250ms) — 멈춘 자리(끝)에서 판정한다
+    expect(latestPillSaid()).toBeNull();
+
+    const toEnd = await someoneElseTalks(9);
+    expect(toEnd).toHaveBeenCalled();
+    expect(latestPillSaid()).toBeNull();
+  });
+
+  it('백그라운드 — 다른 방을 읽다 뒤로 갔고, 가장 새 메시지 알림으로 돌아와도 같다', async () => {
+    installFetch();
+    const emitAppState = captureAppState();
+    renderShell();
+    await waitForSidebar();
+    await readingGeneralAtItsEnd();
+    landingSettlesAt(AT_END);
+
+    act(() => emitAppState('background'));
+    await tapWhileRunning(apnsPayload(TO_NEWEST));
+    act(() => emitAppState('active'));
+
+    await expectLanded('long', longId(8), false);
+    await sleep(400);
+    expect(latestPillSaid()).toBeNull();
+
+    const toEnd = await someoneElseTalks(9);
+    expect(toEnd).toHaveBeenCalled();
+    expect(latestPillSaid()).toBeNull();
+  });
+
+  it('종료 — 중간 메시지로 착지하면 「최신 메시지로 이동」이 서고, 다음 말은 세기만 한다', async () => {
+    installFetch();
+    landingSettlesAt(1200); // 끝에서 2000pt 위
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(apnsPayload(TO_MIDDLE)),
+    );
+    renderShell();
+
+    await expectLanded('long', longId(3), false);
+    await sleep(400);
+    await waitFor(() => expect(latestPill()).toBeTruthy());
+    expect(latestPillSentence()).toBe('최신 메시지로 이동');
+
+    const toEnd = await someoneElseTalks(9);
+    // 읽던 자리를 뺏지 않는다 — 대신 필이 센다.
+    expect(toEnd).not.toHaveBeenCalled();
+    await waitFor(() => expect(latestPillSentence()).toBe('새 메시지 1개 보기'));
+  });
+
+  it('백그라운드 — 다른 방을 읽다 뒤로 갔고, 중간 메시지 알림으로 돌아와도 같다', async () => {
+    installFetch();
+    const emitAppState = captureAppState();
+    renderShell();
+    await waitForSidebar();
+    await readingGeneralAtItsEnd();
+    landingSettlesAt(1200);
+
+    act(() => emitAppState('background'));
+    await tapWhileRunning(apnsPayload(TO_MIDDLE));
+    act(() => emitAppState('active'));
+
+    await expectLanded('long', longId(3), false);
+    await sleep(400);
+    await waitFor(() => expect(latestPill()).toBeTruthy());
+    expect(latestPillSentence()).toBe('최신 메시지로 이동');
+
+    const toEnd = await someoneElseTalks(9);
+    expect(toEnd).not.toHaveBeenCalled();
+    await waitFor(() => expect(latestPillSentence()).toBe('새 메시지 1개 보기'));
+  });
+
+  it('스레드 답글로 착지하면 채널은 점프를 받지 않고 자기 진입대로 끝에서 연다', async () => {
+    installFetch();
+    const toIndex = jest
+      .spyOn(FlatList.prototype, 'scrollToIndex')
+      .mockImplementation(() => {});
+    const toEnd = jest
+      .spyOn(FlatList.prototype, 'scrollToEnd')
+      .mockImplementation(() => {});
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(apnsPayload(TARGETS['스레드 답글'].aim)),
+    );
+    renderShell();
+
+    await expectLanded('general', REPLY, true);
+    // 채널의 목록이 처음 자기 크기를 알린다 — 점프가 진입을 가져가지 않았으므로 진입
+    // 앵커가 끝으로 데려간다. 점프는 스레드 판의 목록에서만 났다.
+    toEnd.mockClear();
+    fireEvent(channelList(), 'contentSizeChange', 390, CONTENT);
+    expect(toEnd).toHaveBeenCalled();
+    expect(toIndex).toHaveBeenCalledTimes(1);
+    await sleep(100);
+    expect(latestPillSaid()).toBeNull();
   });
 });
