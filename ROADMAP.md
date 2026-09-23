@@ -1,11 +1,13 @@
 # oort — 릴리스 ROADMAP
 
+> **2026-09-23 정정(ADR-0187):** 아래 v0 정의, §1 G1~G3 게이트, §2 「스토어는 보류」는 ADR-0187 D1·D5·D6이 대체한다. 현행 목표는 **목표 A**(팀이 데스크탑·iOS로 oort를 매일 쓰는 것이 먼저, 외부 출시는 그 뒤)이고, App Store는 목표 안에 있다. 파도와 게이트 본문은 목표 A 계획 PR에서 다시 쓴다.
+
 > **v0의 단위는 마일스톤 번호가 아니라 축이다**(2026-08-03 성재 승인).
 > ADR-0137 D5가 자른 셋 — **관전 · 승인 · 대화** — 이 **폰에서 한 번씩 도는 것**이 v0다. 스토어는 그 뒤.
 >
-> **실행 주체:** 계획=기획 레이어(`docs/planning/README.md`) · 구현=워커(핸드오프 패킷, `AGENTS.md`) · 결정 거버넌스=ADR-0100. 증거는 `STATUS.md`, 세션 스냅샷은 `docs/planning/CURRENT_STATE.md`, 트랙 운영은 `docs/TRACKS.md`.
+> **실행 주체:** 계획=기획 레이어(`docs/planning/README.md`) · 구현=워커(핸드오프 패킷, `AGENTS.md`) · 결정 거버넌스=ADR-0100. 증거는 PR 본문(`STATUS.md`는 2026-09-23 동결), 세션 스냅샷은 `docs/planning/CURRENT_STATE.md`, 트랙 운영은 `docs/TRACKS.md`.
 >
-> **불변식(스토어 게이트):** 🔒 스토어/공증 배포(external TestFlight 포함)는 사용성 검수 게이트 PASS 후에만 진행한다(체크리스트는 아카이브 §4~§5).
+> **불변식(배포 게이트):** 🔒 팀 배포(TestFlight·직접 전달 공증 DMG)는 **M7-I** PASS와 배포 건마다의 owner 승인 뒤에만 한다. 데스크탑 next 채널(팀 채널) 게시도 같은 규칙이다. 스토어·external TestFlight·공개 공증 배포는 **M7-S**다([M7](docs/cicd/03-store-readiness-gate.md), ADR-0187 D5).
 >
 > **아카이브(2026-09-01 경량화 재편, 성재 지시):** 직전 판 전문(2026-08-03 §0 + M0~M8 §1~§7)은 git 히스토리. M0~M8의 **스토어 제출·공증·법무·CI/CD 체크리스트는 폐기가 아니라 보류** — 축 셋이 폰에서 돈 뒤 그 부분만 다시 태운다.
 
@@ -29,7 +31,7 @@
 
 - `server-rust/` = 배포 실물. `server/` = Swift 이식 원본(실행 대상 아님) + **`Migrations/` 정본(언어 독립 — 불변식은 DB 트리거·제약·RLS에 있다)**.
 - 핵심 불변식: Postgres=SoT · Centrifugo=전송전용 · 단일 쓰기경로(REST→PG→outbox→relay) · 순서=`message.seq` · 에이전트=`member` · RLS FORCE(ADR-0004 포함).
-- 대표 이식 잔여: 웹훅 인바운드 2경로(#1265) · Centrifugo subscribe proxy 403(#1300) · 라우트별 상세는 `STATUS.md`.
+- 대표 이식 잔여: 웹훅 인바운드 2경로(#1265) · Centrifugo subscribe proxy 403(#1300) · 라우트 계약은 `docs/api/openapi.yaml`.
 
 ### 클라이언트
 
@@ -41,8 +43,8 @@
 
 ### 운영 파이프라인
 
-- **트랙**: track/uxui · track/engine에서 랜딩(트랙 내 머지 자율), **main 승격은 성재 명시 승인**(`docs/TRACKS.md`).
-- **실행 레인**: 모델·하네스·병렬 상한은 `docs/planning/PIPELINE.md`의 현재 값을 따른다. UI는 독립 design-review(Blocker 0·High 0) 후 머지한다.
+- **트랙**: track/uxui · track/engine에서 랜딩(트랙 내 머지 자율), **main 승격은 성재 승인 범위의 묶음 단위**(상시 위임, `docs/TRACKS.md` §3).
+- **실행 레인**: 모델·하네스·병렬 판단은 `docs/planning/PIPELINE.md`의 현재 값을 따른다. UI는 독립 design-review(Blocker 0·High 0) 후 머지한다.
 - **푸시**: APNs 종단 증명 완료 · PushRelay 배포 · id-only payload(ADR-0120). 셀프호스트는 Dawn PushRelay 경유(D1-A). Apple 서명 자산 확보 완료, CI 레인만 미구축.
 
 ---
@@ -70,7 +72,7 @@
 | **G0 파도 마감** | BT-6 랜딩 · 결재 3건 집행(BZ-5a 액센트 기본=새벽 → #1922 머지 · A6 rich 기본 상향 · track→main 승격) · v0.1.4 발행 |
 | **G1 내부 테스트 진입** | UX-R1·R2 + DS-0·1 + SH-1~4 + M0 + P1·P2 랜딩 → ITO(성재+1인, 웹+데스크탑+폰 QR 스모크, `2026-08-20-oss-launch-readiness-and-internal-test-plan.md` 시나리오 표 재사용) |
 | **G2 출시** | 외부 셀프호스터 3(하네스 복붙 1·그록봇 1·Railway 1) + 에이전트 멘션·런 실사용 + LAUNCH_READY 판정 |
-| **G3 v0 스토어** | 축 셋(관전·승인·대화) 폰 완주(M1) + M7 사용성 게이트 → external TestFlight → App Store |
+| **G3 v0 스토어** | 축 셋(관전·승인·대화) 폰 완주(M1) + M7-S 게이트 → external TestFlight → App Store |
 
 ## 2. 보류 (재점화 조건 명시)
 
@@ -84,7 +86,7 @@
 | 무엇 | 어디 |
 |---|---|
 | 결정(왜) | `docs/adr/` (ADR-0100 거버넌스) |
-| 증거(됐나) | `STATUS.md` (당월+직전월 · 과거=`docs/planning/archive/STATUS-YYYY-MM.md`) |
+| 증거(됐나) | PR 본문 · `CHANGELOG.md` (`STATUS.md`는 2026-09-23 동결된 역사) |
 | 현재 상태(어디까지) | `docs/planning/CURRENT_STATE.md` (스냅샷 최근 6) |
 | 계획(다음) | 이 문서 + GitHub Issues |
 | 티켓 수용기준 | `BUILD_TICKETS.md` (등급·활성 축·백로그만) |
