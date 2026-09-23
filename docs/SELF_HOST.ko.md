@@ -730,12 +730,18 @@ scripts/self_host_env.sh --public-origin https://<host>
 validate` 가 실패한다. 그것이 ACME 오발사 차단의 실체다. 이 오버레이는 **그
 호스트의 DNS 를 가진 머신에서만** 기동한다. 로컬에서 이름 부르지 마라.
 `--compose` 는 canonical file 집합을 바꾸지 못하므로, 공개 오버레이는 배포
-호스트에서 compose 를 직접 호출한다:
+호스트에서 compose 를 직접 호출한다. `local.override.yml` 은 집합에 남긴다.
+생성기가 켜는 첨부 보관소(`drive-init` 과 `drive-archive` 볼륨)와 doctor
+`stack.compose_ps` 가 요구하는 루프백 `web` 서비스가 그 파일에 있다. 빠지면
+compose 가 보관소 볼륨 없이 api 를 다시 만들고, api 는 기동을 거부한다
+(`MOMO_DRIVE_LOCAL_DIR could not be created or is not writable`, 재시작 반복 —
+실측, #2609). `infra/fly/entrypoint.sh` 가 쓰는 세 파일 집합과 같다:
 
 ```sh
 ENV_FILE=infra/rust/local.secrets.env
 docker compose --env-file "$ENV_FILE" \
   -f infra/rust/docker-compose.rust.yml \
+  -f infra/rust/local.override.yml \
   -f infra/rust/caddy.override.yml up -d
 ```
 
@@ -744,7 +750,7 @@ docker compose --env-file "$ENV_FILE" \
 
 | | 로컬(이 문서의 기본) | 공개 오리진 |
 |---|---|---|
-| 엣지 | `local.override.yml` + `Caddyfile.local` (`:80`) | `caddy.override.yml` + `Caddyfile` (`{$OORT_SITE_ADDRESS}`) |
+| 엣지 | `local.override.yml` + `Caddyfile.local` (`:80`) | `caddy.override.yml` + `Caddyfile` (`{$OORT_SITE_ADDRESS}`), `local.override.yml`(보관소 볼륨) 위에 |
 | 주소 | `http://localhost:<port>` | 운영자가 선언한 `https://<host>` |
 | CSP connect-src | 루프백 `ws://localhost:*` / `ws://127.0.0.1:*` | `--public-origin` 이 파생한 `OORT_CSP_CONNECT_SRC` |
 
