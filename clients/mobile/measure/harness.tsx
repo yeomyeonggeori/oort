@@ -17,6 +17,7 @@ import {Composer} from '../src/features/conversation/Composer';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
 import {
   Timeline,
+  type PillState,
   type TimelineGeometry,
 } from '../src/features/conversation/Timeline';
 import {color, font, SAFE_GUTTER, space} from '../src/design/tokens';
@@ -574,7 +575,7 @@ function Harness(): React.JSX.Element {
   const anchorRef = useRef<View | null>(null);
   const tailRef = useRef<View | null>(null);
   const metricsRef = useRef<TimelineGeometry | null>(null);
-  const pillsRef = useRef<{unread: boolean; latest: boolean} | null>(null);
+  const pillsRef = useRef<PillState | null>(null);
   const dockRef = useRef<View | null>(null);
   const listRef = useRef<FlatList<never> | null>(null);
   const inputRef = useRef<TextInput | null>(null);
@@ -1711,9 +1712,7 @@ function Harness(): React.JSX.Element {
 }
 
 /** Which pills the list said were standing. `null` = the seam never answered. */
-function pillLabel(
-  pills: {unread: boolean; latest: boolean} | null,
-): string | null {
+function pillLabel(pills: PillState | null): string | null {
   if (pills === null) return null;
   const shown = [
     pills.unread ? '위(안읽음으로)' : null,

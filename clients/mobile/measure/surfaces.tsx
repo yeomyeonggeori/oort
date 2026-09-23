@@ -52,6 +52,7 @@ import {RealtimeContext} from '../src/realtime/RealtimeProvider';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
 import {
   Timeline,
+  type PillState,
   type TimelineGeometry,
 } from '../src/features/conversation/Timeline';
 import {Screen, ScreenHeader} from '../src/design/atoms';
@@ -1100,6 +1101,7 @@ function JumpPillsStage(): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const listRef = React.useRef<unknown>(null);
   const metricsRef = React.useRef<TimelineGeometry | null>(null);
+  const pillsRef = React.useRef<PillState | null>(null);
   const [messages, setMessages] = React.useState<Message[]>(JUMP_PILL_HISTORY);
   const [geometryLine, setGeometryLine] = React.useState('기하 측정 중…');
   const [traceLine, setTraceLine] = React.useState('');
@@ -1168,7 +1170,15 @@ function JumpPillsStage(): React.JSX.Element {
       }
     }, 40);
     const readout = setInterval(() => {
-      setGeometryLine(current => (current === line || line === '' ? current : line));
+      const pills = pillsRef.current;
+      const verdict =
+        pills === null
+          ? ''
+          : ` · 구분선 ${pills.relation ?? '미보고'} · 래치 ${
+              pills.latched ? pills.latchNote ?? '예' : '아니오'
+            } · 앉음 ${pills.settled ? '예' : '아니오'}`;
+      const next = line === '' ? '' : line + verdict;
+      setGeometryLine(current => (current === next || next === '' ? current : next));
       const trace = changes.join(' ');
       setTraceLine(current => (current === trace ? current : trace));
     }, 250);
@@ -1203,6 +1213,7 @@ function JumpPillsStage(): React.JSX.Element {
             lastReadSeq={JUMP_PILL_CURSOR}
             unreadCount={JUMP_PILL_COUNT - JUMP_PILL_CURSOR}
             jumpPills
+            pillsRef={pillsRef}
             metricsRef={metricsRef}
             listRef={listRef as never}
           />

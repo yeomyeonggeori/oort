@@ -297,6 +297,17 @@ const NO_REACTIONS: ReactionMap = {};
 /** 같은 이유의 상수 (이슈 #1112). */
 const NO_PINS: PinMap = {};
 
+/** 측정 seam 이 읽는 필 판정 (#1892). 앱에서는 아무도 읽지 않는다. */
+export interface PillState {
+  unread: boolean;
+  latest: boolean;
+  relation: 'above' | 'in' | 'below' | 'absent' | null;
+  latched: boolean;
+  /** `seen@<offset>` = 창 안에서 봤다 · `pressed` = 위 필을 눌렀다. */
+  latchNote: string | null;
+  settled: boolean;
+}
+
 /** 아직 아무 행도 보고되지 않았다. 빈 배열 하나를 모두가 나눠 쓴다. */
 const NO_KEYS: readonly string[] = [];
 
@@ -635,7 +646,7 @@ function TimelineInner({
    * was actually standing over the list while the anchor was read — otherwise
    * "0px with the pills on" is a claim about a frame nobody looked at.
    */
-  pillsRef?: React.MutableRefObject<{unread: boolean; latest: boolean} | null>;
+  pillsRef?: React.MutableRefObject<PillState | null>;
   /**
    * The seam that had to exist before this batch could measure anything, and the
    * reason the last one reported 「미측정」 instead of a number.
@@ -809,9 +820,13 @@ function TimelineInner({
   );
 
   /** 출발점에 앉은 뒤 구분선이 창 안에 있으면 — 봤다. 래치를 건다. */
+  /** 래치가 **왜** 걸렸는가 — 측정 seam 이 사진에 적는다(`pillsRef`). */
+  const latchNoteRef = useRef<string | null>(null);
   const armLatchIfDividerSeen = useCallback(() => {
     if (!entrySettledRef.current) return;
-    if (relationNow() === 'in') setUnreadLatched(true);
+    if (relationNow() !== 'in') return;
+    latchNoteRef.current = `seen@${Math.round(geometryRef.current.offsetY)}`;
+    setUnreadLatched(true);
   }, [relationNow]);
 
   const settleEntry = useCallback(() => {
@@ -889,7 +904,16 @@ function TimelineInner({
     [messages, baselineSeq, myMemberId],
   );
   const showJumpLatest = jumpPills && !atBottom;
-  if (pillsRef) pillsRef.current = {unread: showJumpUnread, latest: showJumpLatest};
+  if (pillsRef) {
+    pillsRef.current = {
+      unread: showJumpUnread,
+      latest: showJumpLatest,
+      relation,
+      latched: unreadLatched,
+      latchNote: unreadLatched ? latchNoteRef.current : null,
+      settled: entrySettledRef.current,
+    };
+  }
 
   /**
    * 다음 `scrollToIndex` 가 목적지를 창의 어디에 놓는가. 인용은 가운데(앞뒤가
@@ -1314,6 +1338,7 @@ function TimelineInner({
   const jumpToUnread = useCallback(() => {
     const index = itemsRef.current.findIndex(item => item.kind === 'unread');
     if (index < 0) return;
+    latchNoteRef.current = 'pressed';
     setUnreadLatched(true);
     entrySettledRef.current = true;
     cancelConvergence();
