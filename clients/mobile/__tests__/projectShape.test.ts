@@ -1,6 +1,7 @@
 import {execFileSync, execSync} from 'child_process';
 import {existsSync, readFileSync, readdirSync, statSync} from 'fs';
 import {join, resolve} from 'path';
+import * as ts from 'typescript';
 import {NSE_KEYCHAIN_ACCESS_GROUP} from '../src/storage/secureSession';
 
 // =============================================================================
@@ -31,6 +32,74 @@ function sourceFiles(dir: string, acc: string[] = []): string[] {
   }
   return acc;
 }
+
+// Source with its comments removed, for the guards below that search code for a
+// banned name. Comments name those APIs constantly (that is where the reasons
+// live), so a search that kept them would drown.
+//
+// The TypeScript parser does the removing, not a pattern. A pattern cannot tell
+// a comment from code: `/\/\*[\s\S]*?\*\//` applied first let the `/*` inside a
+// `//` comment (`**/v1/**` in the core's chainModel.ts) swallow the 37 lines of
+// real code that followed, and a banned call written there passed every guard
+// (review of #2587). Stripping `//` first has the mirror bug — `//` inside a
+// string, a template literal or a regex. The parser knows where each of those
+// ends, so only real comments go. The printer re-spaces the code, which the
+// patterns below tolerate (`\s*`); identifiers and literals are unchanged.
+const commentFreePrinter = ts.createPrinter({removeComments: true});
+function stripComments(fileName: string, source: string): string {
+  const kind = fileName.endsWith('.tsx')
+    ? ts.ScriptKind.TSX
+    : fileName.endsWith('.jsx')
+      ? ts.ScriptKind.JSX
+      : fileName.endsWith('.js')
+        ? ts.ScriptKind.JS
+        : ts.ScriptKind.TS;
+  // setParentNodes=true: the printer keeps a string literal's original quotes
+  // only when it can walk up to the source file.
+  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, kind);
+  return commentFreePrinter.printFile(sf);
+}
+const codeCache = new Map<string, string>();
+function codeOf(file: string): string {
+  let code = codeCache.get(file);
+  if (code === undefined) {
+    code = stripComments(file, readFileSync(file, 'utf8'));
+    codeCache.set(file, code);
+  }
+  return code;
+}
+
+describe('comment removal used by the code guards (review of #2587)', () => {
+  it('removes comments without swallowing the code around them', () => {
+    const source = [
+      '// catch-all: **/v1/** answers {}',
+      'const a = createMMKV({encryptionKey: k});',
+      "/* block naming window.x */ const s = '/* in a string */';",
+      "const u = 'https://example.com//x';",
+      'const t = `${host}//path/*.ts`; const b = crypto.subtle;',
+      'const r = /^https?:\\/\\//; const c = x.encrypt(y);',
+      '/** jsdoc naming fetch( */',
+      'export const tail = 1; // trailing, names recrypt(',
+    ].join('\n');
+    const code = stripComments('probe.ts', source);
+    // Code after each tricky construct survives …
+    for (const kept of [
+      'encryptionKey',
+      "'/* in a string */'",
+      "'https://example.com//x'",
+      '`${host}//path/*.ts`',
+      'crypto.subtle',
+      'x.encrypt(y)',
+      'export const tail = 1;',
+    ]) {
+      expect(code).toContain(kept);
+    }
+    // … and the comments are gone.
+    for (const dropped of ['catch-all', 'window.x', 'jsdoc naming', 'trailing, names']) {
+      expect(code).not.toContain(dropped);
+    }
+  });
+});
 
 describe('the iOS project survives (ADR-0137 D7 정오 7항)', () => {
   it('still has its Xcode project', () => {
@@ -259,12 +328,10 @@ describe('DOM is in `lib`, so the discipline is enforced by a gate', () => {
     const offenders = sourceFiles(join(APP_ROOT, 'src'))
       .concat([join(APP_ROOT, 'App.tsx'), join(APP_ROOT, 'index.js')])
       .filter(file => {
-        const source = readFileSync(file, 'utf8')
-          // Comments discuss these globals by name constantly; a text search
-          // that did not strip them would drown, then get tuned until it caught
-          // nothing. Same reasoning the core's purity gate gives for parsing.
-          .replace(/\/\*[\s\S]*?\*\//g, '')
-          .replace(/^\s*\/\/.*$/gm, '')
+        // Comments discuss these globals by name constantly; a text search
+        // that did not strip them would drown, then get tuned until it caught
+        // nothing. Same reasoning the core's purity gate gives for parsing.
+        const source = codeOf(file)
           // Module specifiers and UI copy are values, not global reads. Without
           // stripping strings, `expo-document-picker` is mistaken for the DOM
           // `document` global even though the source never evaluates it.
@@ -321,12 +388,7 @@ describe('layering', () => {
     const banned = /(?<![A-Za-z_.])fetch\s*\(/;
     const offenders = sourceFiles(join(APP_ROOT, 'src'))
       .concat([join(APP_ROOT, 'App.tsx')])
-      .filter(file => {
-        const source = readFileSync(file, 'utf8')
-          .replace(/\/\*[\s\S]*?\*\//g, '')
-          .replace(/^\s*\/\/.*$/gm, '');
-        return banned.test(source);
-      });
+      .filter(file => banned.test(codeOf(file)));
     expect(offenders).toEqual([]);
   });
 
@@ -362,8 +424,8 @@ describe('what the upload declares stays true of the code (#2568)', () => {
 
   // Everything that ends up in the JS bundle: this client plus the core, which
   // Metro compiles from source (the core's colocated tests do not ship).
-  // Comments are stripped because the reasoning in them names the very APIs
-  // being banned (kv.ts explains why MMKV's `encryptionKey` is not used).
+  // Comments are stripped (`codeOf`) because the reasoning in them names the very
+  // APIs being banned (kv.ts explains why MMKV's `encryptionKey` is not used).
   const shippedCode = () =>
     sourceFiles(join(APP_ROOT, 'src'))
       .concat([join(APP_ROOT, 'App.tsx'), join(APP_ROOT, 'index.js')])
@@ -372,19 +434,14 @@ describe('what the upload declares stays true of the code (#2568)', () => {
           file => !/\.test\.tsx?$/.test(file),
         ),
       )
-      .map(file => ({
-        file,
-        code: readFileSync(file, 'utf8')
-          .replace(/\/\*[\s\S]*?\*\//g, '')
-          .replace(/^\s*\/\/.*$/gm, ''),
-      }));
+      .map(file => ({file, code: codeOf(file)}));
 
   function nativeFiles(dir: string, acc: string[] = []): string[] {
     for (const entry of readdirSync(dir)) {
       const full = join(dir, entry);
       if (statSync(full).isDirectory()) {
         nativeFiles(full, acc);
-      } else if (/\.(swift|m|mm|h)$/.test(entry)) {
+      } else if (/\.(swift|m|mm|h|c|cc|cpp)$/.test(entry)) {
         acc.push(full);
       }
     }
@@ -432,14 +489,15 @@ describe('what the upload declares stays true of the code (#2568)', () => {
         /crypt|sodium|nacl|cipher|ssl|aes\b|argon/i.test(name),
       ),
     ).toEqual([]);
-    // The app, the notification extension and the two local Expo modules.
+    // The app, the notification extension and the two local Expo modules, in
+    // Swift or Objective-C/C: a module import (`import`/`@import`), a header
+    // import (`#import`/`#include <CommonCrypto/…>`), a CommonCrypto cipher call
+    // (`CCCrypt`, `CCCryptor…`) or a Security-framework key encryption call.
+    const nativeCipher =
+      /\bimport\s+(?:CryptoKit|CommonCrypto)\b|#\s*(?:import|include)\s*<CommonCrypto\b|\bCCCrypt(?:or\w*)?\b|\bSecKeyEncrypt\b|\bSecKeyCreateEncryptedData\b/;
     const native = ['ios/MomoMobile', 'ios/NotificationService', 'ios/MomoPushKit', 'modules']
       .flatMap(dir => nativeFiles(join(APP_ROOT, dir)))
-      .filter(file =>
-        /\bimport\s+(?:CryptoKit|CommonCrypto)\b|\bCCCrypt\b|\bSecKeyCreateEncryptedData\b/.test(
-          readFileSync(file, 'utf8'),
-        ),
-      );
+      .filter(file => nativeCipher.test(readFileSync(file, 'utf8')));
     expect(native).toEqual([]);
   });
 
