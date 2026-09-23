@@ -1065,6 +1065,228 @@ describe('끝 근처 착지 — 이동이 멈추면 바닥을 다시 판정한�
   });
 });
 
+// ---- 이동 중에 도착한 말 · 기하 없이 끝난 이동 · scrollToIndex 의 문 (#2608) --------
+//
+// design-review 2594 R3(PASS)가 남긴 같은 계열의 좁은 틈 둘과 가드. 리뷰 순서 탐침
+// (`probe-2594r3/__tests__/orderings.test.tsx`)의 O1a·O1b·O2·O5·O7·O9 를 옮겼다.
+
+/** 남의 말이 이동 중에 붙는다 — 점프는 그대로 걸려 있다. */
+function arriveDuringTravel(
+  rerender: (next: MountProps) => void,
+  jumpTarget: MountProps['jumpTarget'],
+  seq: number,
+  height: number,
+) {
+  rerender({
+    jumpTarget,
+    messages: [1, 2, 3, 4, 5, 6, 7, 8, ...Array.from({length: seq - 8}, (_, i) => 9 + i)].map(
+      n => message(n),
+    ),
+  });
+  fireEvent(list(), 'contentSizeChange', 390, height);
+}
+
+describe('이동 중에 도착한 말은 판정 뒤에 따라간다 (#2608 M-B)', () => {
+  // 점프는 가는 동안 따라가기를 붙든다 — 가는 도중에 붙은 말이 목록을 끌어내리면
+  // 안 되기 때문이다. 그런데 착지 판정이 「따라가기」로 나와도 그동안 벌어진 틈을
+  // 메우지 않아, 붙은 말이 접힌 아래 100pt 에 숨고 필도 서지 않았다(가장 흔한 알림 탭
+  // 길, 창 약 0.45초).
+  beforeEach(() => {
+    jest.spyOn(FlatList.prototype, 'scrollToIndex').mockImplementation(() => {});
+  });
+
+  it('O1a: 착지 보고 뒤 이동이 끝나기 전에 100pt 가 붙으면, 판정이 나며 그 틈을 메운다', async () => {
+    const {rerender} = await mountAtTheEnd();
+    rerender({jumpTarget: TO_NEWEST});
+    await sleep(200);
+    atTheEnd(); // 착지 보고
+    await sleep(100);
+    const toEnd = jest
+      .spyOn(FlatList.prototype, 'scrollToEnd')
+      .mockImplementation(() => {});
+    arriveDuringTravel(rerender, TO_NEWEST, 9, 4100); // 이동은 아직 걸려 있다
+    expect(toEnd).not.toHaveBeenCalled(); // 가는 동안에는 끌어내리지 않는다
+    await sleep(600);
+
+    expect(toEnd).toHaveBeenCalled();
+    expect(bottomPill()).toBeNull();
+  });
+
+  it('O1b: 붙은 말이 문턱보다 크면(300pt) 따라가지 않고, 필이 떠난 뒤의 수를 말한다', async () => {
+    const {rerender} = await mountAtTheEnd();
+    rerender({jumpTarget: TO_NEWEST});
+    await sleep(200);
+    atTheEnd();
+    await sleep(100);
+    const toEnd = jest
+      .spyOn(FlatList.prototype, 'scrollToEnd')
+      .mockImplementation(() => {});
+    arriveDuringTravel(rerender, TO_NEWEST, 9, 4300);
+    await sleep(600);
+
+    expect(toEnd).not.toHaveBeenCalled();
+    expect(pillSentence('jump-latest')).toBe('새 메시지 1개 보기');
+  });
+
+  it('O2: 보고 없는 착지(같은 자리) 중에 100pt 가 붙어도, 판정이 나며 따라간다', async () => {
+    const {rerender} = await mountAtTheEnd();
+    rerender({jumpTarget: TO_NEWEST});
+    await sleep(100);
+    const toEnd = jest
+      .spyOn(FlatList.prototype, 'scrollToEnd')
+      .mockImplementation(() => {});
+    arriveDuringTravel(rerender, TO_NEWEST, 9, 4100);
+    await sleep(500);
+
+    expect(toEnd).toHaveBeenCalled();
+    expect(bottomPill()).toBeNull();
+  });
+
+  it('「안읽음으로」가 끝 근처에 앉고 붙은 말이 없으면, 판정 뒤에 움직이지 않는다 — 구분선이 창 맨 위에 남는다', async () => {
+    // 끝에서 50pt 앞에 앉은 착지는 판정이 「따라가기」다. 그래도 붙은 말이 없으면 틈을
+    // 메우지 않는다: 메우면 방금 창 맨 위에 놓은 구분선이 창 밖으로 밀려난다.
+    mount({channelId: 'ch', lastReadSeq: 6, unreadCount: 2});
+    await settleAtBottom();
+    reportDividerAbove();
+    const toEnd = jest
+      .spyOn(FlatList.prototype, 'scrollToEnd')
+      .mockImplementation(() => {});
+    fireEvent.press(screen.getByTestId('jump-unread'));
+    for (const y of [3190, 3175, 3160, 3150]) {
+      await sleep(60);
+      scrollBy(y);
+    }
+    await sleep(450);
+    expect(toEnd).not.toHaveBeenCalled();
+    expect(bottomPill()).toBeNull();
+
+    // 판정은 「따라가기」였다 — 그 뒤에 붙는 말은 따라간다.
+    fireEvent(list(), 'contentSizeChange', 390, 4100);
+    expect(toEnd).toHaveBeenCalled();
+  });
+
+  it('붙은 말이 없고 끝에 앉았으면, 판정 뒤에 더 움직이지 않는다', async () => {
+    const {rerender} = await mountAtTheEnd();
+    const toEnd = jest
+      .spyOn(FlatList.prototype, 'scrollToEnd')
+      .mockImplementation(() => {});
+    rerender({jumpTarget: TO_NEWEST});
+    await sleep(200);
+    atTheEnd();
+    await sleep(500);
+
+    expect(toEnd).not.toHaveBeenCalled();
+    expect(bottomPill()).toBeNull();
+  });
+});
+
+describe('기하를 모른 채 끝난 이동은 첫 기하 보고에서 판정한다 (#2608 M-C)', () => {
+  // 목록이 한 번도 기하를 보고하지 않은 채 이동이 끝나면 판정할 수 없다. 첫 판은 그때
+  // 따라가기를 붙든 채로 놓았고, 「다음 보고가 판정한다」는 주석과 달리 보고가 오지
+  // 않는 착지에서는 아무도 판정하지 않았다 — 따라가지도 않고 필도 없었다.
+  beforeEach(() => {
+    jest.spyOn(FlatList.prototype, 'scrollToIndex').mockImplementation(() => {});
+  });
+
+  function layoutReport(height: number) {
+    fireEvent(list(), 'layout', {
+      nativeEvent: {layout: {x: 0, y: 0, width: 390, height}},
+    });
+  }
+
+  it('O9: 첫 기하가 끝에 앉은 자리면 따라가기로 판정하고, 붙은 말을 따라간다', async () => {
+    const {rerender} = mount({channelId: 'ch', lastReadSeq: 8, unreadCount: 0, jumpTarget: TO_NEWEST});
+    await sleep(400); // 기하 없이 이동이 끝난다
+    layoutReport(800);
+    fireEvent(list(), 'contentSizeChange', 390, 800);
+    const toEnd = jest
+      .spyOn(FlatList.prototype, 'scrollToEnd')
+      .mockImplementation(() => {});
+    arriveDuringTravel(rerender, TO_NEWEST, 9, 900);
+
+    expect(toEnd).toHaveBeenCalled();
+    expect(bottomPill()).toBeNull();
+  });
+
+  it('첫 기하가 끝에서 멀면 「최신으로」가 서고, 붙은 말은 따라가지 않는다', async () => {
+    const {rerender} = mount({channelId: 'ch', lastReadSeq: 8, unreadCount: 0, jumpTarget: TO_NEWEST});
+    await sleep(400);
+    layoutReport(800);
+    fireEvent(list(), 'contentSizeChange', 390, 4000); // 오프셋 0, 끝까지 3200
+    expect(pillSentence('jump-latest')).toBe('최신 메시지로 이동');
+    const toEnd = jest
+      .spyOn(FlatList.prototype, 'scrollToEnd')
+      .mockImplementation(() => {});
+    arriveDuringTravel(rerender, TO_NEWEST, 9, 4100);
+
+    expect(toEnd).not.toHaveBeenCalled();
+    expect(pillSentence('jump-latest')).toBe('새 메시지 1개 보기');
+  });
+});
+
+describe('scrollToIndex 는 이동을 거는 문 하나로만 부른다 (#2608 N-E)', () => {
+  it('이동 없이 받은 실패는 개발 빌드에서 크게 실패한다 — 조용히 삼키지 않는다', async () => {
+    // 가상 목록은 안 잰 목표를 **동기로** `onScrollToIndexFailed` 에 알리고, 회복은
+    // 걸린 이동의 일부다. 이동 없이 이 콜백이 불렸다면 누군가 문을 거치지 않고
+    // `scrollToIndex` 를 부른 것이다 — 「눌렀는데 아무 일도 안 일어남」.
+    const {listRef} = await mountAtTheEnd();
+    const failed = listRef.current!.props.onScrollToIndexFailed!;
+    expect(() =>
+      failed({index: 3, averageItemLength: 70, highestMeasuredFrameIndex: 1}),
+    ).toThrow(/scrollToIndex/);
+  });
+});
+
+describe('주장했던 성질을 시험이 잡는다 (#2608 N-F)', () => {
+  it('O5: 먼 점프 중에 붙은 말은 착지 뒤 필의 수에 든다 — 기준선은 떠난 순간이다', async () => {
+    jest.spyOn(FlatList.prototype, 'scrollToIndex').mockImplementation(() => {});
+    const far = {messageId: 'msg-2', seq: 2, token: 1};
+    const {rerender} = await mountAtTheEnd();
+    rerender({jumpTarget: far});
+    await sleep(80);
+    scrollBy(1200);
+    await sleep(70);
+    arriveDuringTravel(rerender, far, 9, 4100);
+    fireEvent.scroll(list(), {
+      nativeEvent: {
+        contentOffset: {y: 1200},
+        contentSize: {height: 4100, width: 390},
+        layoutMeasurement: {height: 800, width: 390},
+      },
+    });
+    await sleep(400);
+
+    // 판정 순간의 가장 새 seq(9)를 기준선으로 삼으면 「최신 메시지로 이동」이 된다.
+    expect(pillSentence('jump-latest')).toBe('새 메시지 1개 보기');
+  });
+
+  it('O7: 끝내 성공하지 않는 회복은 받침(1.5초)에서 끊고, 그 자리에서 판정한다', async () => {
+    const calls: number[] = [];
+    let startedAt = 0;
+    jest
+      .spyOn(FlatList.prototype, 'scrollToIndex')
+      .mockImplementation(function (this: FlatList<TimelineStreamItem>, params) {
+        calls.push(Date.now() - startedAt);
+        this.props.onScrollToIndexFailed?.({
+          index: params.index,
+          averageItemLength: 70,
+          highestMeasuredFrameIndex: 1,
+        });
+      });
+    jest.spyOn(FlatList.prototype, 'scrollToOffset').mockImplementation(() => {});
+    const {rerender} = await mountAtTheEnd();
+    startedAt = Date.now();
+    rerender({jumpTarget: {messageId: 'msg-2', seq: 2, token: 1}});
+    await sleep(2200);
+
+    expect(calls.length).toBeGreaterThan(1); // 회복은 돌았다
+    expect(calls.filter(ms => ms > 1700)).toEqual([]); // 받침 뒤로는 하나도 없다
+    // 판정은 났다: 목록은 끝에 앉은 채였으므로 따라가기로 돌아온다.
+    const toEnd = someoneElseTalks();
+    expect(toEnd).toHaveBeenCalled();
+  });
+});
+
 describe('아래 필 「최신으로」', () => {
   it('바닥에 있으면 없고, 떠나면 「최신 메시지로 이동」이 선다', async () => {
     mount();
