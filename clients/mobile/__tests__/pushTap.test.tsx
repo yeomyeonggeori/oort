@@ -564,8 +564,25 @@ function jumpTargets(): {messageId: string; token: number}[] {
   );
 }
 
+/**
+ * 셸이 **자리를 잡은** 상태를 기다리는 예산 (#1268 과 같은 규율 — `inboxApproval`·
+ * `actionApprovalCard` 의 `SETTLE`).
+ *
+ * RNTL 기본 1초는 linux/amd64 CI 의 **차가운 워커**에서 이 파일의 첫 셸 렌더를
+ * 넘지 못한다: `react-native` 의 게으른 getter(`FlatList`·`ScrollView`…)가 첫 렌더
+ * 안에서 처음 풀리며 그 자리에서 변환된다. 로컬에서도 캐시를 비우면(`--no-cache`)
+ * 첫 셸 시험이 313ms → 1562ms 로 늘었고, CI 에서는 「conversation-title 을 못
+ * 찾았다」로 빨강이었다(`bb2b8085`·`b6b8f382`). 스쳐 가는 상태에는 쓰지 않는다 —
+ * 이 파일의 「없다」 단정은 전부 `queryBy…` 즉시 읽기다.
+ */
+const SETTLE = {timeout: 10_000};
+jest.setTimeout(30_000);
+
 async function waitForSidebar(): Promise<void> {
-  await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+  await waitFor(
+    () => expect(screen.getByTestId('sidebar-list')).toBeTruthy(),
+    SETTLE,
+  );
 }
 
 async function tapWhileRunning(payload: unknown): Promise<void> {
@@ -581,15 +598,20 @@ async function expectLanded(
   landsOn: string,
   inThread: boolean,
 ): Promise<void> {
-  await waitFor(() =>
-    expect(screen.getByTestId('conversation-title')).toHaveTextContent(title),
+  await waitFor(
+    () =>
+      expect(screen.getByTestId('conversation-title')).toHaveTextContent(title),
+    SETTLE,
   );
   if (inThread) {
-    await waitFor(() => expect(screen.getByTestId('thread-title')).toBeTruthy());
+    await waitFor(
+      () => expect(screen.getByTestId('thread-title')).toBeTruthy(),
+      SETTLE,
+    );
   } else {
     expect(screen.queryByTestId('thread-title')).toBeNull();
   }
-  await waitFor(() => expect(landedIds()).toContain(landsOn));
+  await waitFor(() => expect(landedIds()).toContain(landsOn), SETTLE);
 }
 
 /**
@@ -603,8 +625,12 @@ async function expectLanded(
 let announce: jest.SpyInstance;
 
 async function expectSentence(testID: string, sentence: string): Promise<void> {
-  await waitFor(() =>
-    expect(within(screen.getByTestId(testID)).getByText(sentence)).toBeTruthy(),
+  await waitFor(
+    () =>
+      expect(
+        within(screen.getByTestId(testID)).getByText(sentence),
+      ).toBeTruthy(),
+    SETTLE,
   );
 }
 
@@ -1291,10 +1317,17 @@ async function someoneElseTalks(seq: number): Promise<jest.SpyInstance> {
  */
 async function readingGeneralAtItsEnd(): Promise<void> {
   fireEvent.press(screen.getByTestId(`sidebar-row-channel:${GENERAL}`));
-  await waitFor(() =>
-    expect(screen.getByTestId('conversation-title')).toHaveTextContent('general'),
+  await waitFor(
+    () =>
+      expect(screen.getByTestId('conversation-title')).toHaveTextContent(
+        'general',
+      ),
+    SETTLE,
   );
-  await waitFor(() => expect(screen.getByText('배포 끝났습니다')).toBeTruthy());
+  await waitFor(
+    () => expect(screen.getByText('배포 끝났습니다')).toBeTruthy(),
+    SETTLE,
+  );
   reportAt(AT_END);
   await sleep(50);
 }
@@ -1423,10 +1456,17 @@ describe('#2594 이동 규칙 위의 알림 착지 — 끝 근처면 따라가�
 
 async function openGeneral(): Promise<void> {
   fireEvent.press(screen.getByTestId(`sidebar-row-channel:${GENERAL}`));
-  await waitFor(() =>
-    expect(screen.getByTestId('conversation-title')).toHaveTextContent('general'),
+  await waitFor(
+    () =>
+      expect(screen.getByTestId('conversation-title')).toHaveTextContent(
+        'general',
+      ),
+    SETTLE,
   );
-  await waitFor(() => expect(screen.getByText('배포 끝났습니다')).toBeTruthy());
+  await waitFor(
+    () => expect(screen.getByText('배포 끝났습니다')).toBeTruthy(),
+    SETTLE,
+  );
 }
 
 /** 레일이 그 메시지를 들고 온다 — 끊겼던 소켓이 돌아와 복구한 것처럼. */
@@ -1505,7 +1545,7 @@ describe('같은 방 복귀 탭 — 탭 뒤에 읽은 것만으로 없다고 말
 
     expect(missAnnouncements()).toEqual([]);
     expect(screen.queryByTestId('jump-missed')).toBeNull();
-    await waitFor(() => expect(movedToRow(NEW_ID, toIndex)).toBe(true));
+    await waitFor(() => expect(movedToRow(NEW_ID, toIndex)).toBe(true), SETTLE);
     expect(toIndex).toHaveBeenCalledTimes(1);
 
     // 레일이 뒤늦게 같은 메시지를 들고 와도(재연결 복구) 두 번 착지하지 않는다.
@@ -1560,7 +1600,7 @@ describe('같은 방 복귀 탭 — 탭 뒤에 읽은 것만으로 없다고 말
     await railDelivers(17, NEW_ID, NEW_BODY);
     await tapWhileRunning(apnsPayload({messageId: NEW_ID}));
 
-    await waitFor(() => expect(movedToRow(NEW_ID, toIndex)).toBe(true));
+    await waitFor(() => expect(movedToRow(NEW_ID, toIndex)).toBe(true), SETTLE);
     await sleep(100);
     expect(toIndex).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('jump-missed')).toBeNull();
@@ -1605,7 +1645,7 @@ describe('같은 방 복귀 탭 — 탭 뒤에 읽은 것만으로 없다고 말
     await act(async () => {
       channelSub(GENERAL)?.__subscribed({recovered: false});
     });
-    await waitFor(() => expect(movedToRow(NEW_ID, toIndex)).toBe(true));
+    await waitFor(() => expect(movedToRow(NEW_ID, toIndex)).toBe(true), SETTLE);
     expect(toIndex).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('jump-missed')).toBeNull();
     expect(missAnnouncements()).toEqual([]);
@@ -1636,7 +1676,7 @@ describe('같은 방 복귀 탭 — 탭 뒤에 읽은 것만으로 없다고 말
     // 같은 방의 다른 스레드(B)의 답글 알림. 스레드 판은 다시 마운트되지 않고 루트만
     // 바뀐다 — 앞 스레드의 'ready' 로 한 번 일찍 쏘면, 'ready' 에서 한 번 더 쏜다.
     await tapWhileRunning(replyIn(RANDOM_ROOT_B, RANDOM_REPLY_B));
-    await waitFor(() => expect(landedIds()).toContain(RANDOM_REPLY_B));
+    await waitFor(() => expect(landedIds()).toContain(RANDOM_REPLY_B), SETTLE);
     await sleep(400);
     expect(toIndex.mock.calls.length - before).toBe(1);
   });
