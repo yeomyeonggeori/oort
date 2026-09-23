@@ -32,6 +32,11 @@
 //!   --exit-after-turn    exit on its own after answering the first prompt
 //!   --long-answer N      during each prompt, answer N more characters in one
 //!                        chunk (words of `lorem` separated by spaces)
+//!   --split-by-status    during each prompt, write a synthetic token in two
+//!                        chunks with a tool call between them (Probe B)
+//!   --pem-flood N        during each prompt, open a PEM private-key header,
+//!                        write N bytes of lines that never close it, pause,
+//!                        then write a visible tail (Probe D)
 //!
 //! Anything else on the command line (the host's isolation arguments) is
 //! accepted and recorded.
@@ -54,6 +59,8 @@ struct Options {
     setsid_grandchild: Option<String>,
     exit_after_turn: bool,
     long_answer: usize,
+    split_by_status: bool,
+    pem_flood: usize,
     set_mode_error: bool,
     set_mode_silent: bool,
     set_mode_reports: Option<String>,
@@ -74,6 +81,8 @@ fn parse() -> Options {
         setsid_grandchild: None,
         exit_after_turn: false,
         long_answer: 0,
+        split_by_status: false,
+        pem_flood: 0,
         set_mode_error: false,
         set_mode_silent: false,
         set_mode_reports: None,
@@ -97,6 +106,10 @@ fn parse() -> Options {
             "--set-mode-silent" => options.set_mode_silent = true,
             "--set-mode-reports" => options.set_mode_reports = args.next(),
             "--agent-name" => options.agent_name = args.next(),
+            "--split-by-status" => options.split_by_status = true,
+            "--pem-flood" => {
+                options.pem_flood = args.next().and_then(|n| n.parse().ok()).unwrap_or(0)
+            }
             "--long-answer" => {
                 options.long_answer = args.next().and_then(|n| n.parse().ok()).unwrap_or(0)
             }
@@ -212,6 +225,43 @@ impl Stub {
             json!({"sessionUpdate": "agent_message_chunk",
                    "content": {"type": "text", "text": format!("stub heard: {text}")}}),
         );
+        if self.options.split_by_status {
+            // Synthetic — never real — and assembled so this source carries
+            // no scanner-shaped literal.
+            self.update(
+                &session_id,
+                json!({"sessionUpdate": "agent_message_chunk",
+                       "content": {"type": "text", "text": concat!(" key sk-", "ant-api03-AAAA")}}),
+            );
+            self.update(
+                &session_id,
+                json!({"sessionUpdate": "tool_call", "toolCallId": "call-split",
+                       "title": "Read file", "kind": "read", "status": "pending"}),
+            );
+            self.update(
+                &session_id,
+                json!({"sessionUpdate": "agent_message_chunk",
+                       "content": {"type": "text",
+                                   "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA end\n"}}),
+            );
+        }
+        if self.options.pem_flood > 0 {
+            let mut flood = String::from(concat!("\n-----BEGIN RSA ", "PRIVATE KEY-----\n"));
+            while flood.len() < self.options.pem_flood {
+                flood.push_str("lorem ipsum dolor\n");
+            }
+            self.update(
+                &session_id,
+                json!({"sessionUpdate": "agent_message_chunk",
+                       "content": {"type": "text", "text": flood}}),
+            );
+            std::thread::sleep(std::time::Duration::from_millis(700));
+            self.update(
+                &session_id,
+                json!({"sessionUpdate": "agent_message_chunk",
+                       "content": {"type": "text", "text": "visible tail\n"}}),
+            );
+        }
         if self.options.long_answer > 0 {
             let text: String = "lorem "
                 .chars()

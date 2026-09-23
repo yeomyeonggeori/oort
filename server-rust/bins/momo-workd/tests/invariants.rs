@@ -21,6 +21,8 @@
 //! | `inv_15_a_kill_ends_the_whole_tree_even_a_setsid_grandchild` | the process-tree census and member signals in `AcpConnection::terminate` (#2602 L-1, #2607) |
 //! | `inv_16_an_agent_that_exits_on_its_own_takes_its_tree_with_it` | the census on every tick and `AcpConnection::wait_exit` (#2602 L-1, #2607) |
 //! | `inv_17_an_executable_that_is_not_the_named_adapter_is_stopped_at_initialize` | the `agentInfo.name` check in `session::handshake` (#2607 N-9) |
+//! | `inv_18_a_token_split_by_a_tool_event_is_still_masked` | `EventRelay::status` flushing only complete lines (#2607 N-4) |
+//! | `inv_19_an_open_key_header_does_not_hold_the_rest_of_the_answer` | the open-key hold bound in `session::ready_len` (#2607 N-5) |
 //! | `inv_7_a_lost_spawn_ack_response_still_starts_the_session` | the settled-verdict sweep in `ControlLoop::poll_once` |
 
 use std::collections::{BTreeMap, VecDeque};
@@ -1398,4 +1400,77 @@ async fn inv_16_an_agent_that_exits_on_its_own_takes_its_tree_with_it() {
     })
     .await;
     let _ = std::fs::remove_file(&pids);
+}
+
+fn relayed_text(h: &Harness, session: Uuid) -> String {
+    h.server
+        .events()
+        .into_iter()
+        .filter(|event| {
+            event.event_type == "agent.partial"
+                && event.payload["work_session_id"] == json!(session)
+        })
+        .map(|event| event.payload["text_delta"].as_str().unwrap().to_string())
+        .collect()
+}
+
+async fn one_turn(h: &mut Harness, tool: &str) -> Uuid {
+    let request = spawn(h, tool, "go");
+    h.server.push(request.clone());
+    h.controls.poll_once().await.unwrap();
+    let session = ack_for(h, request.id).session_id.expect("ok spawn ack");
+    wait_for("the turn to end", || {
+        h.server
+            .statuses(session)
+            .contains(&SessionStatus::Idle { exit_code: 0 })
+    })
+    .await;
+    session
+}
+
+#[tokio::test]
+async fn inv_18_a_token_split_by_a_tool_event_is_still_masked() {
+    // #2607 N-4, the reviewer's Probe B: a tool event between the two halves
+    // of a token used to flush the first half on its own.
+    let mut h = harness(&[("claude", &["--split-by-status"])]);
+    let session = one_turn(&mut h, "claude").await;
+    let relayed = relayed_text(&h, session);
+    assert!(!relayed.contains("api03-AAAA"), "{relayed}");
+    assert!(!relayed.contains("AAAAAAAAAA"), "{relayed}");
+    assert_eq!(
+        relayed
+            .matches(momo_workd::projection::REDACTED_CREDENTIAL)
+            .count(),
+        1,
+        "{relayed}"
+    );
+    assert!(h
+        .server
+        .events()
+        .iter()
+        .any(|event| event.payload["tool_call_name"] == "read"));
+}
+
+#[tokio::test]
+async fn inv_19_an_open_key_header_does_not_hold_the_rest_of_the_answer() {
+    // #2607 N-5, the reviewer's Probe D: after a PEM header that never
+    // closes, the relay held everything until the turn ended and then masked
+    // it all. Now the hold is bounded: the block is released masked, and the
+    // answer after it is relayed.
+    let mut h = harness(&[("claude", &["--pem-flood", "40000"])]);
+    let session = one_turn(&mut h, "claude").await;
+    let relayed = relayed_text(&h, session);
+    assert!(
+        relayed.contains(momo_workd::projection::REDACTED_PRIVATE_KEY),
+        "{}",
+        &relayed[..relayed.len().min(300)]
+    );
+    assert!(
+        !relayed.contains("lorem ipsum"),
+        "the block itself stays masked"
+    );
+    assert!(
+        relayed.contains("visible tail"),
+        "the answer after the block arrives"
+    );
 }

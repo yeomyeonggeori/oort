@@ -27,4 +27,5 @@ pub mod keystore;
 pub mod policy;
 pub mod proctree;
 pub mod projection;
+pub mod redact;
 pub mod session;

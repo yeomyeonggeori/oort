@@ -55,22 +55,38 @@ const TEXT_FLUSH_BYTES: usize = 3_000;
 /// …or once it has waited this long.
 const TEXT_FLUSH_AGE: Duration = Duration::from_millis(400);
 const RELAY_TICK: Duration = Duration::from_millis(200);
-/// The longest trailing credential-shaped run a size/age flush holds back —
-/// longer than any single token recognised in practice, large JWTs included.
-/// Only a longer unbroken run is sent while it may still be growing.
+/// The longest unfinished line (or, past that, unbroken run) a flush holds
+/// back — longer than any single credential in practice, large JWTs included.
 const MAX_HELD_RUN_BYTES: usize = 16_384;
+/// The longest open private-key block the relay holds (#2607 N-5): a real
+/// PEM key is a few KiB (RSA-8192 is about 6.5 KiB). Past this the block is
+/// sent masked to the end and the text after it flows again.
+const MAX_HELD_KEY_BYTES: usize = 16_384;
 
-/// How much of the buffered text a size or age flush may send: everything
-/// before an unterminated private-key block (or unfinished PEM header), and
-/// before the trailing run of credential characters (bounded) — either of
-/// which the next chunk may complete into a credential.
+/// How much of the buffered text a flush before the end of a message may
+/// send: only **complete lines**, and nothing from an open private-key block
+/// on — the rest may still become one credential with what comes next (a
+/// token, a `secret=` value, a URL with a password, a key's next line).
+///
+/// Bounds (#2607 N-5): an open key block longer than [`MAX_HELD_KEY_BYTES`]
+/// is released (masked to the end by the scan); an unfinished line longer
+/// than [`MAX_HELD_RUN_BYTES`] keeps only its trailing unbroken run, and a
+/// run longer than that is released too.
 fn ready_len(text: &str) -> usize {
-    let cut = projection::open_private_key_block(text).unwrap_or(text.len());
+    let cut = match projection::open_private_key_block(text) {
+        Some(start) if text.len() - start > MAX_HELD_KEY_BYTES => return text.len(),
+        Some(start) => start,
+        None => text.len(),
+    };
     let head = &text[..cut];
+    let line_start = head.rfind('\n').map_or(0, |newline| newline + 1);
+    if head.len() - line_start <= MAX_HELD_RUN_BYTES {
+        return line_start;
+    }
     let run_start = head
         .char_indices()
         .rev()
-        .find(|(_, character)| !projection::is_credential_char(*character))
+        .find(|(_, character)| character.is_whitespace())
         .map(|(index, character)| index + character.len_utf8())
         .unwrap_or(0);
     if head.len() - run_start <= MAX_HELD_RUN_BYTES {
@@ -760,6 +776,7 @@ impl SessionTask {
                 (self.conn.wait_exit(TERMINATE_GRACE).await, None, true)
             }
             End::ModeEscaped => {
+                self.relay.flush_text().await;
                 self.relay
                     .status(projection::status_payload(
                         "thinking",
@@ -874,8 +891,12 @@ impl EventRelay {
         }
     }
 
+    /// Text before the status goes first — but only what can safely go: a
+    /// trailing fragment stays to be joined with the text after the status
+    /// (#2607 N-4). Everything is flushed only when a turn or the session
+    /// ends.
     pub async fn status(&mut self, payload: Map<String, Value>) {
-        self.flush_text().await;
+        self.flush_ready().await;
         self.send("agent.status", payload).await;
     }
 
@@ -885,7 +906,7 @@ impl EventRelay {
     /// (ADR-0188 D5: previews go to the owner's devices only, and that bridge is
     /// R1's next slice).
     pub async fn permission_denied(&mut self) {
-        self.flush_text().await;
+        self.flush_ready().await;
         let mut decided = Map::new();
         decided.insert("action".into(), json!("decided"));
         decided.insert("status".into(), json!("rejected"));
@@ -946,10 +967,13 @@ mod tests {
 
     #[test]
     fn a_flush_holds_what_the_next_chunk_could_complete_into_a_credential() {
-        // The trailing credential-shaped run waits for the next chunk.
-        assert_eq!(ready_len("see sk-ant-api03-"), "see ".len());
-        assert_eq!(ready_len("token=\"eyJhbGciOi.eyJzdWIi"), "token=\"".len());
-        assert_eq!(ready_len("aws AKIA"), "aws ".len());
+        // Only complete lines go before the message ends.
+        assert_eq!(ready_len("see sk-ant-api03-"), 0);
+        assert_eq!(
+            ready_len("line one\nAWS_SECRET_ACCESS_KEY = "),
+            "line one\n".len()
+        );
+        assert_eq!(ready_len("aws AKIA\n"), "aws AKIA\n".len());
         // So does an unfinished PEM header or an open block, spaces and all.
         assert_eq!(ready_len("key:\n-----BEGIN OPENSSH PRIV"), "key:\n".len());
         let open = concat!("key:\n-----BEGIN OPENSSH ", "PRIVATE KEY-----\nb3Blbn\n");
@@ -962,12 +986,25 @@ mod tests {
         );
         assert_eq!(ready_len(closed), closed.len());
         assert_eq!(ready_len("done.\n"), "done.\n".len());
-        // The hold is bounded: an unbroken run past the bound is sent.
+        // The holds are bounded: a line past the bound keeps only its last
+        // run, an unbroken run past the bound is sent…
         let long = "x".repeat(MAX_HELD_RUN_BYTES + 1);
         assert_eq!(ready_len(&long), long.len());
         assert_eq!(
             ready_len(&format!("a {}", "x".repeat(MAX_HELD_RUN_BYTES))),
             2
+        );
+        // …and so is an open key block past its bound (#2607 N-5).
+        let flood = format!(
+            "{}{}",
+            concat!("-----BEGIN RSA ", "PRIVATE KEY-----\n"),
+            "lorem ipsum\n".repeat(MAX_HELD_KEY_BYTES / 12 + 1)
+        );
+        assert_eq!(ready_len(&flood), flood.len());
+        assert_eq!(
+            projection::redact_credentials(&flood),
+            projection::REDACTED_PRIVATE_KEY,
+            "released masked to the end"
         );
     }
 }
