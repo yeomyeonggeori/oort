@@ -26,7 +26,7 @@ labels: ["type:feature", "status:ready", "agent:codex-ok"]
 - [ ] [rust]/[web]/[mobile] 해당 트리 게이트 green: <패키지>
 - [ ] 선행 패키지 빌드 안 깨짐 (의존: BUILD_TICKETS.md STEPS)
 - [ ] [sql] schema_v0.sql 컨벤션 정합(uuidv7 PK, workspace_id, RLS FORCE) — 확장은 신규 마이그레이션 + RLS DO-block ARRAY 등록
-- [ ] runtime 미검증 부분 `runtime-unverified (no docker/psql)` 표기 + STATUS.md 갱신
+- [ ] runtime 미검증 부분 `runtime-unverified (no docker/psql)` 표기를 PR 본문 「검증」 절에 기록
 
 ## Depends on
 <!-- 선행 이슈/티켓. 예: Depends on #12. 의존이 모두 닫혀야 현행 ROADMAP·의존 기반 picker가 이 이슈를 고른다. -->
