@@ -39,12 +39,14 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<!-- 수출 규정 암호화 신고(#2568). false 의 근거는 코드다: 통신은 OS 의 TLS(fetch·WebSocket·
-	     NSE 의 URLSession, ATS 켬)뿐이고, 저장 비밀은 키체인(OS)에만 둔다. 자체 암호 구현을
-	     링크한 유일한 라이브러리 MMKVCore(react-native-mmkv)는 encryptionKey 없이만 쓴다
-	     (src/storage/kv.ts). 이 전제는 __tests__/projectShape.test.ts 가 기계로 지킨다 —
-	     그 시험이 깨지면 이 값을 다시 판단한다. 이 키가 없으면 빌드마다 ASC 가 수출 규정 질문을
-	     띄우고, 답하기 전에는 테스터가 설치하지 못한다. -->
+	<!-- 수출 규정 암호화 신고(#2568). false 는 owner 확인을 기다리는 판단이다
+	     (docs/runbooks/ios-testflight.md §8, M7 S-7 법무 검토). 사실: 통신은 OS 의 TLS
+	     (fetch·WebSocket·NSE 의 URLSession, ATS 켬)뿐이고, 저장 비밀은 키체인(OS)에만 둔다.
+	     MMKVCore(react-native-mmkv)의 AES 코드는 바이너리에 들어 있지만 앱은 encryptionKey
+	     없이만 쓴다(src/storage/kv.ts). 「켜지 않았으니 사용이 아니다」는 해석이다.
+	     코드 쪽 전제는 __tests__/projectShape.test.ts 가 기계로 지킨다. 그 시험이 깨지면 이
+	     값을 다시 판단한다. 이 키가 없으면 빌드마다 ASC 가 수출 규정 질문을 띄우고, 답하기
+	     전에는 테스터가 설치하지 못한다. -->
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
