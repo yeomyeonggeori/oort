@@ -370,6 +370,11 @@ MARKETING_VERSION="$(plist_value "$APP" CFBundleShortVersionString)"
 for key in NSCameraUsageDescription NSMicrophoneUsageDescription NSPhotoLibraryUsageDescription; do
   [ -n "$(plist_value "$APP" "$key")" ] || die "내보낸 앱에 $key 가 없다(ITMS-90683)"
 done
+# testFlightInternalTestingOnly=true 로 내보내면 Xcode 가 앱 Info.plist 에 이 키를 넣는다
+# (아카이브에는 없다, 2026-09-23 실측). 서명된 번들 안에 있으므로 이 IPA 를 어떤 경로로
+# 올려도 external TestFlight·App Store 로 가지 못한다. M7-I 증거 빌드는 내부 전용이다.
+[ "$(plist_value "$APP" TFInternalTestingOnly)" = "true" ] ||
+  die "내보낸 앱에 TFInternalTestingOnly=true 가 없다. 내부 테스트 전용이 아닌 빌드는 만들지 않는다"
 EXPORT_SIGNER="$(signer_of "$APP")"
 case "$EXPORT_SIGNER" in
   "Apple Distribution: "*) ;;
@@ -377,7 +382,7 @@ case "$EXPORT_SIGNER" in
 esac
 [ "$(profile_name_of "$APP")" = "$APP_STORE_PROFILE" ] || die "내보낸 앱의 프로파일이 '$APP_STORE_PROFILE' 이 아니다"
 [ "$(profile_name_of "$APPEX")" = "$NSE_STORE_PROFILE" ] || die "내보낸 NSE 의 프로파일이 '$NSE_STORE_PROFILE' 이 아니다"
-echo "ok: CFBundleVersion=$BUILD (앱·NSE), CFBundleShortVersionString=$MARKETING_VERSION, 수출 신고·권한 문구 3개, 배포 서명·App Store 프로파일"
+echo "ok: CFBundleVersion=$BUILD (앱·NSE), CFBundleShortVersionString=$MARKETING_VERSION, 수출 신고·권한 문구 3개, 내부 테스트 전용, 배포 서명·App Store 프로파일"
 
 # ---- 빌드 사실(M7-I I-1) -----------------------------------------------------
 {
@@ -388,6 +393,7 @@ echo "ok: CFBundleVersion=$BUILD (앱·NSE), CFBundleShortVersionString=$MARKETI
   echo "app_profile: $(profile_name_of "$APP")"
   echo "nse_profile: $(profile_name_of "$APPEX")"
   echo "aps_environment: $(aps_of "$APP")"
+  echo "testflight_internal_only: $(plist_value "$APP" TFInternalTestingOnly)"
   echo "archive_stage_signer: $ARCHIVE_SIGNER"
   echo "archive_stage_aps_environment: $ARCHIVE_APS"
   echo "package_lock_sha256: $(shasum -a 256 package-lock.json | awk '{print $1}')"

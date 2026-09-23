@@ -84,6 +84,7 @@ bash "<작업 디렉터리>/clients/mobile/scripts/archive-release.sh"
   - NSE에는 `aps-environment`가 없다.
   - 앱의 서명된 `aps-environment`와 Info.plist `MomoAPNSEnvironment`가 모두 `production`이다.
   - 이어서 스크립트가 따로 확인하는 것: 앱·NSE의 `CFBundleVersion`이 빌드 번호와 같다. `ITSAppUsesNonExemptEncryption=false`와 권한 문구 3개(카메라·마이크·사진)가 들어 있다. 서명이 `Apple Distribution`이고 프로파일이 두 App Store 프로파일이다.
+  - 앱 Info.plist에 `TFInternalTestingOnly=true`가 있다. `testFlightInternalTestingOnly=true`로 내보내면 Xcode가 넣는 키다(아카이브에는 없다). 서명된 번들 안에 있으므로 이 IPA는 어떤 경로로 올려도 내부 테스트 전용이다.
 - 다시 검사하려면 `CI_ARCHIVE_PATH=<출력 디렉터리>/export-as-archive bash clients/mobile/ios/ci_scripts/ci_post_xcodebuild.sh`를 쓴다. 개발 서명인 `.xcarchive`를 가리키면 마지막 검사(APNs 환경 일치)에서 실패한다. 그 아카이브는 `development`로 서명돼 있기 때문이고, 정상이다.
 - **산출물**(출력 디렉터리):
 
@@ -139,7 +140,10 @@ xcodebuild -exportArchive \
 ```
 
 - 키는 ASC › Users and Access › Integrations에 있는 App Store Connect API 키여야 한다. APNs 키로는 안 된다.
-- 로컬 IPA를 `xcrun altool --upload-package "<ipa>" --api-key "<Key ID>" --api-issuer "<Issuer ID>" --p8-file-path "<.p8 경로>"`로 올릴 수도 있다. 이 경로는 다시 서명하지 않으므로 `-allowProvisioningUpdates`의 부작용이 없다. 다만 `testFlightInternalTestingOnly`가 IPA에 남아 유지되는지는 확인하지 않았다. 확인 전에는 위 xcodebuild 경로를 쓴다.
+- §4에서 검사한 IPA를 그대로 올릴 수도 있다: `xcrun altool --upload-package "<출력 디렉터리>/export/oort.ipa" --api-key "<Key ID>" --api-issuer "<Issuer ID>" --p8-file-path "<.p8 경로>"`.
+  - 다시 서명하지 않으므로 `-allowProvisioningUpdates`의 부작용이 없고, 검사한 바이트(`build-info.txt`의 `ipa_sha256`)가 그대로 올라간다.
+  - 내부 테스트 전용 표지(`TFInternalTestingOnly=true`)는 IPA 안 앱 Info.plist에 들어 있다(§4 검사).
+  - 이 명령도 실행하지 않았다(미검증).
 
 ### 업로드 뒤
 
