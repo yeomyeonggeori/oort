@@ -462,6 +462,9 @@ impl SessionTask {
                     }
                 }
                 Event::Tick => {
+                    // Keep the census current, so a tool that left the
+                    // adapter's group is known before anything can orphan it.
+                    self.conn.observe_tree();
                     self.relay.flush_due().await;
                     if self.start_pending {
                         self.start_next_turn().await

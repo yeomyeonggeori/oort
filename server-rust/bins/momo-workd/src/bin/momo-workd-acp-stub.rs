@@ -13,6 +13,12 @@
 //!   --hang               never answer `session/prompt` until cancelled
 //!   --leak               during each prompt, stream synthetic credentials in
 //!                        slow chunks that split a token and a PEM header
+//!   --setsid-grandchild PATH
+//!                        at start, launch a helper child (same process group,
+//!                        ignores SIGTERM) that launches `sleep 600` after
+//!                        `setsid()` — the shape of a codex shell tool — and
+//!                        writes "<sleeper pid> <helper pid>" to PATH
+//!   --exit-after-turn    exit on its own after answering the first prompt
 //!
 //! Anything else on the command line (the host's isolation arguments) is
 //! accepted and recorded.
@@ -31,6 +37,8 @@ struct Options {
     escape_via_config: bool,
     hang: bool,
     leak: bool,
+    setsid_grandchild: Option<String>,
+    exit_after_turn: bool,
 }
 
 fn parse() -> Options {
@@ -43,6 +51,8 @@ fn parse() -> Options {
         escape_via_config: false,
         hang: false,
         leak: false,
+        setsid_grandchild: None,
+        exit_after_turn: false,
     };
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
@@ -55,6 +65,8 @@ fn parse() -> Options {
             "--escape-via-config" => options.escape_via_config = true,
             "--hang" => options.hang = true,
             "--leak" => options.leak = true,
+            "--setsid-grandchild" => options.setsid_grandchild = args.next(),
+            "--exit-after-turn" => options.exit_after_turn = true,
             _ => {}
         }
     }
@@ -266,6 +278,9 @@ impl Stub {
                 Some("session/prompt") => {
                     let params = message["params"].clone();
                     self.prompt(&id, &params);
+                    if self.options.exit_after_turn {
+                        return;
+                    }
                 }
                 Some(_) if id.is_null() => {}
                 Some(_) => self.send(json!({
@@ -278,8 +293,47 @@ impl Stub {
     }
 }
 
+/// `--grandchild-helper PATH`: the helper process behind `--setsid-grandchild`.
+/// Stays in the agent's process group but ignores SIGTERM (a group SIGTERM
+/// alone does not end it), and starts a sleeper in a session of its own (a
+/// group signal cannot reach it at all).
+fn grandchild_helper(path: &str) {
+    use std::os::unix::process::CommandExt as _;
+    // SAFETY: plain syscalls; `setsid` in the forked child before exec is
+    // async-signal-safe.
+    unsafe {
+        libc::signal(libc::SIGTERM, libc::SIG_IGN);
+    }
+    let mut sleeper = std::process::Command::new("/bin/sleep");
+    sleeper.arg("600");
+    unsafe {
+        sleeper.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+    let mut sleeper = sleeper.spawn().expect("spawn the detached sleeper");
+    let _ = std::fs::write(path, format!("{} {}\n", sleeper.id(), std::process::id()));
+    let _ = sleeper.wait();
+}
+
 fn main() {
+    let mut raw = std::env::args().skip(1);
+    if raw.next().as_deref() == Some("--grandchild-helper") {
+        grandchild_helper(&raw.next().unwrap_or_default());
+        return;
+    }
     let options = parse();
+    // Kept alive (never waited for) so the helper stays this process's child.
+    let _helper = options.setsid_grandchild.as_ref().map(|path| {
+        std::process::Command::new(std::env::current_exe().expect("stub path"))
+            .args(["--grandchild-helper", path])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn the grandchild helper")
+    });
     let stdin: &'static std::io::Stdin = Box::leak(Box::new(std::io::stdin()));
     let mut stub = Stub {
         options,

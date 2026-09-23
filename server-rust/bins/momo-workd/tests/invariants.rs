@@ -17,6 +17,8 @@
 //! | `inv_12_a_slash_command_never_reaches_the_agent` | `policy::check_prompt` on the spawn label and on input (#2602 L-7) |
 //! | `inv_13_rows_for_another_host_or_not_dispatched_are_ignored` | the host/status filter in `ControlLoop::poll_once` (#2602 L-6) |
 //! | `inv_14_sessions_and_queued_inputs_are_bounded` | `max_sessions` in `SessionManager::spawn`, `MAX_QUEUED_PROMPTS` in the session task (#2602 L-2) |
+//! | `inv_15_a_kill_ends_the_whole_tree_even_a_setsid_grandchild` | the process-tree census and member signals in `AcpConnection::terminate` (#2602 L-1, #2607) |
+//! | `inv_16_an_agent_that_exits_on_its_own_takes_its_tree_with_it` | the census on every tick and `AcpConnection::wait_exit` (#2602 L-1, #2607) |
 //! | `inv_7_a_lost_spawn_ack_response_still_starts_the_session` | the settled-verdict sweep in `ControlLoop::poll_once` |
 
 use std::collections::{BTreeMap, VecDeque};
@@ -1026,4 +1028,100 @@ async fn inv_14_sessions_and_queued_inputs_are_bounded() {
         h.controls.poll_once().await.unwrap();
         assert_eq!(ack_for(&h, kill.id), ControlAck::ok(Some(session)));
     }
+}
+
+/// "<sleeper pid> <helper pid>" as the stub's `--setsid-grandchild` wrote it.
+fn read_tree_pids(path: &Path) -> Option<(i32, i32)> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let mut parts = text.split_whitespace();
+    Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
+}
+
+/// Exists and is not a zombie (`kill(pid, 0)` alone counts a zombie).
+fn is_running(pid: i32) -> bool {
+    // SAFETY: signal 0 only checks that the process exists.
+    let exists = unsafe { libc::kill(pid, 0) } == 0;
+    exists && momo_workd::proctree::info(pid).is_some_and(|process| !process.zombie)
+}
+
+/// Test hygiene: whatever the assertions say, these pids do not outlive the
+/// test.
+struct Reap(Vec<i32>);
+
+impl Drop for Reap {
+    fn drop(&mut self) {
+        for pid in &self.0 {
+            // SAFETY: plain syscall on processes this test started.
+            unsafe {
+                libc::kill(*pid, libc::SIGKILL);
+            }
+        }
+    }
+}
+
+async fn detached_tree(pids: &Path) -> (i32, i32, Reap) {
+    wait_for("the helper to start its detached sleeper", || {
+        read_tree_pids(pids).is_some()
+    })
+    .await;
+    let (sleeper, helper) = read_tree_pids(pids).unwrap();
+    let reap = Reap(vec![sleeper, helper]);
+    assert!(is_running(sleeper) && is_running(helper));
+    // The shape #2602 L-1 is about: the sleeper left the agent's process
+    // group (codex's `setsid()`), so a group signal cannot reach it.
+    // SAFETY: plain syscalls.
+    let (sleeper_group, helper_group) = unsafe { (libc::getpgid(sleeper), libc::getpgid(helper)) };
+    assert_ne!(sleeper_group, helper_group);
+    (sleeper, helper, reap)
+}
+
+#[tokio::test]
+async fn inv_15_a_kill_ends_the_whole_tree_even_a_setsid_grandchild() {
+    let pids = std::env::temp_dir().join(format!("momo-workd-tree-{}", Uuid::new_v4().simple()));
+    let path = pids.display().to_string();
+    let mut h = harness(&[("claude", &["--setsid-grandchild", &path, "--hang"])]);
+    let request = spawn(&h, "claude", "start a long build");
+    h.server.push(request.clone());
+    h.controls.poll_once().await.unwrap();
+    let session = ack_for(&h, request.id).session_id.expect("ok spawn ack");
+    let (sleeper, helper, _reap) = detached_tree(&pids).await;
+
+    let kill = control(&h, "kill", h.owner, Some(session), json!({}));
+    h.server.push(kill.clone());
+    h.controls.poll_once().await.unwrap();
+    assert_eq!(ack_for(&h, kill.id), ControlAck::ok(Some(session)));
+    wait_for(
+        "the setsid sleeper and the TERM-ignoring helper to be gone",
+        || !is_running(sleeper) && !is_running(helper),
+    )
+    .await;
+    let _ = std::fs::remove_file(&pids);
+}
+
+#[tokio::test]
+async fn inv_16_an_agent_that_exits_on_its_own_takes_its_tree_with_it() {
+    let pids = std::env::temp_dir().join(format!("momo-workd-tree-{}", Uuid::new_v4().simple()));
+    let path = pids.display().to_string();
+    let mut h = harness(&[(
+        "claude",
+        &["--setsid-grandchild", &path, "--exit-after-turn"],
+    )]);
+    let request = spawn(&h, "claude", "one turn, then exit");
+    h.server.push(request.clone());
+    h.controls.poll_once().await.unwrap();
+    let session = ack_for(&h, request.id).session_id.expect("ok spawn ack");
+    let (sleeper, helper, _reap) = detached_tree(&pids).await;
+
+    wait_for("the session to end on its own", || {
+        matches!(
+            h.server.statuses(session).last(),
+            Some(SessionStatus::Ended { .. })
+        )
+    })
+    .await;
+    wait_for("what the exited agent left running to be gone", || {
+        !is_running(sleeper) && !is_running(helper)
+    })
+    .await;
+    let _ = std::fs::remove_file(&pids);
 }
