@@ -60,6 +60,7 @@
 | [`docs/runbooks/cubesandbox-host-install.md`](runbooks/cubesandbox-host-install.md) | CubeSandbox 호스트 설치 |
 | [`docs/runbooks/t3-unsettled-usage-repair.md`](runbooks/t3-unsettled-usage-repair.md) | T3 unsettled usage 수리 |
 | [`docs/runbooks/internal-alpha-onboarding.md`](runbooks/internal-alpha-onboarding.md) | 내부 알파 온보딩 런북 |
+| [`docs/runbooks/ios-testflight.md`](runbooks/ios-testflight.md) | iOS(RN) TestFlight 내부 배포 — 아카이브·검사·업로드·1인 그룹·APNs production |
 | [`docs/onboarding-deeplink.md`](onboarding-deeplink.md) | `oort://join` 딥링크 |
 
 ---
