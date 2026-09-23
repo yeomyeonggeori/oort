@@ -4,7 +4,7 @@
 >
 > **실행 주체:** 계획=기획 레이어(`docs/planning/README.md`) · 구현=워커(핸드오프 패킷, `AGENTS.md`) · 결정 거버넌스=ADR-0100. 증거는 PR 본문(`STATUS.md`는 2026-09-23 동결), 세션 스냅샷은 `docs/planning/CURRENT_STATE.md`, 트랙 운영은 `docs/TRACKS.md`.
 >
-> **불변식(배포 게이트):** 🔒 팀 배포(공증 DMG·업데이터·TestFlight internal)는 **M7-I**, 스토어·external TestFlight·공개 공증 배포는 **M7-S** PASS 기록 뒤에만 진행한다([M7](docs/cicd/03-store-readiness-gate.md), ADR-0187 D5).
+> **불변식(배포 게이트):** 🔒 팀 배포(TestFlight·직접 전달 공증 DMG)는 **M7-I** PASS와 배포 건마다의 owner 승인 뒤에만 한다. 데스크탑 업데이터 매니페스트는 배포 채널 결정(ADR-0187 §4) 전에는 게시하지 않는다. 스토어·external TestFlight·공개 공증 배포는 **M7-S**다([M7](docs/cicd/03-store-readiness-gate.md), ADR-0187 D5).
 >
 > **아카이브:** 2026-08-03 판(M0~M8)과 2026-09-02 출시 프로그램 판(UX-R·DS·SH·M·P 레인·G0~G3 게이트)의 전문은 git 히스토리와 `docs/planning/2026-09-02-launch-program-plan.md`에 있다. 스토어 제출·공증·법무는 목표 A의 W4(M7-S)에서 다시 태운다.
 
@@ -49,9 +49,9 @@
 
 | 게이트 | 조건 |
 |---|---|
-| **M7-I** | [M7](docs/cicd/03-store-readiness-gate.md) I-1~I-6, 데스크탑·iOS 각각 |
+| **M7-I** | [M7](docs/cicd/03-store-readiness-gate.md) I-1~I-7, 데스크탑·iOS 각각, 배포 건마다 owner 승인 |
 | **내부 테스트** | 팀 전원이 정한 기간 oort를 주 메신저로 쓴다. 기간은 성재 확정 대기 |
-| **M7-S** | M7 S-1~S-7 |
+| **M7-S** | M7 S-0~S-8, 제출 빌드 커밋 기준 |
 | **외부 출시(목표 A 뒤)** | 외부 셀프호스터 3(하네스 복붙·그록봇·Railway) + 에이전트 멘션·런 실사용 + LAUNCH_READY(2026-08-10 정의 유지) |
 
 ## 2. 보류 (재점화 조건 명시)
@@ -61,7 +61,7 @@
 - **VM/그록봇 릴레이 축**: SH-8 — 외부 출시 단계에서 재개.
 - **buzz 제품축 6종 판정**(forum·projects·terminal·mesh-compute·workflows·agent-memory): 외부 출시 뒤 재취사.
 - **웹·데스크탑 UX 잔여 파도**(UX-R·DS 잔여): 목표 A 동안은 내부 테스트 불편으로 올라온 것만 한다.
-- **Enterprise Trust**(위협 모델·SBOM·시크릿 스캔·VDP·보안 백서, MOMO-140): 외부·엔터프라이즈 출시 단계(ADR-0187 §3).
+- **Enterprise Trust**(위협 모델·SBOM·시크릿 스캔·VDP·보안 백서, MOMO-140): ADR-0187 §3이 외부·엔터프라이즈 출시로 연기를 제안했다. 성재 확인 전까지는 M7-S S-8로 남는다.
 
 ## 3. 문서 지도
 

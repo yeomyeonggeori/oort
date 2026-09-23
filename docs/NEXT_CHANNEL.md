@@ -1,6 +1,7 @@
 # oort-next 발행 채널 (Tauri 자동 업데이트)
 
 > 범위: `clients/desktop` (Tauri 2 + `clients/web`) 의 **유일한 현행** 내부 배포 채널. ADR-0133 P2 / MOMO-606.
+> **2026-09-23 동결(ADR-0187 §4):** next 채널의 매니페스트와 자산은 공개 URL이다. 배포 채널이 결정되기 전에는 §8 재발행을 실행하지 않는다. M7-I 증거 빌드는 `--public`(업로드 없음) 공증으로 만들어 owner 기기에 직접 전달한다([M7](cicd/03-store-readiness-gate.md)).
 > macOS SwiftUI 수동 채널 런북 [`NEXT_CHANNEL.md`](NEXT_CHANNEL.md) 는 ITO-0 T-C / #1609 에서 **사문서**다. `clients/macOS` 는 삭제됐다(W-S1 / #1215). 따라 가면 없는 트리를 찾는다. 이 문서가 그것을 대체한다.
 > 은퇴한 Sparkle/DMG PLAYBOOK: [`RELEASING.md`](RELEASING.md) 상단 배너(ITO-0 T-E / #1610) — 실행하지 말 것.
 
@@ -140,6 +141,8 @@ spctl -a -t exec -vv /tmp/check/oort.app
 로컬 `cargo tauri build`(릴리스)는 채널을 따라가지 않는다(#1281). `tauri.conf.json` 의 커밋된 버전은 `0.1.0-next.1` 이고, 발행 스크립트만 `--config` 로 실제 `0.1.0-next.N` 을 주입한다. W-B2-5 가드는 `tauri dev`/`--debug` 만 막았고, 로컬 릴리스는 매니페스트(`next.10`)보다 낮아 기동 즉시 롤백을 제안했다. 지금은 `MOMO_CHANNEL_BUILD=1` 이 있는 산출물만 매니페스트를 본다 — 그 플래그는 이 스크립트만 켠다.
 
 ## 8. 성재 복붙 — next.11 재발행 (ITO-3 I5 직전)
+
+> **동결:** 상단 2026-09-23 배너대로, 배포 채널 결정 전에는 이 절을 실행하지 않는다.
 
 이 절만 따라가면 된다. 시크릿 3종(minisign 개인키·Developer ID 개인키·notarytool 프로파일 비밀번호)은 **값으로 출력하거나 채팅/이슈/커밋에 붙이지 말 것.** 존재와 이름만 확인한다. 워커는 이 절을 실행하지 않는다.
 

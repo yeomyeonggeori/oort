@@ -4,7 +4,7 @@
 
 | 환경 | 실행 경로 |
 |---|---|
-| Claude Code | Agent 도구로 서브에이전트를 발사한다. 모델은 생략해 부모 모델을 상속하고, 구현은 `general-purpose`, 읽기 전용 조사는 `Explore`, UI 검수는 `design-review`를 쓴다. 이름은 붙이지 않는다(이름 붙인 팀메이트는 지시 전달이 끊긴 전례가 있다). 긴 작업은 백그라운드로 두고 완료 알림으로 수거한다 |
+| Claude Code | Agent 도구로 서브에이전트를 발사한다. 모델은 생략해 부모 모델을 상속한다. 부모 모델이 Opus 5.5가 아니면 `model: opus`를 명시하고 체크포인트에 실제 모델을 기록한다. 역할별로 구현은 `general-purpose`, 읽기 전용 조사는 `Explore`, UI 검수는 `design-review`를 쓴다. 이름은 붙이지 않는다(이름 붙인 팀메이트는 지시 전달이 끊긴 전례가 있다). 긴 작업은 백그라운드로 두고 완료 알림으로 수거한다 |
 | Codex | 요청한 모델을 지원하는 native subagent가 있으면 사용. 실제 모델·세션 ID를 확인 |
 | 은퇴 | Grok(grok-fleet 스크립트·Cursor CLI grok) — 2026-09-23 |
 
