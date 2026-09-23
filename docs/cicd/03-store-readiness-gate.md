@@ -109,6 +109,7 @@
   - 개인정보처리방침·App Privacy·LLM 고지(#34)
   - 약관
   - NOTICE 귀속(#35)
+  - 암호화 수출 신고 판단(MMKV AES 포함·미사용 → `ITSAppUsesNonExemptEncryption=false`, [iOS TestFlight 런북](../runbooks/ios-testflight.md) §8)
 - [ ] **S-8 Enterprise Trust.** 위협 모델, SBOM·라이선스 스캔, 시크릿 스캔, VDP·펜테스트 계획, 보안 백서 초안(MOMO-140)을 갖춘다. ADR-0187 §3이 외부·엔터프라이즈 출시로 연기를 제안했다. 성재가 확인하기 전까지 이 항목은 유지한다.
 
 PASS가 기록된 빌드와, 배포 건마다의 owner 승인이 모두 있어야 아래를 진행한다.
