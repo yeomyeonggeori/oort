@@ -1,90 +1,74 @@
 # oort — 릴리스 ROADMAP
 
-> **v0의 단위는 마일스톤 번호가 아니라 축이다**(2026-08-03 성재 승인).
-> ADR-0137 D5가 자른 셋 — **관전 · 승인 · 대화** — 이 **폰에서 한 번씩 도는 것**이 v0다. 스토어는 그 뒤.
+> **현행 목표는 목표 A다**(2026-09-23 성재 확정, [ADR-0187](docs/adr/0187-goal-a-team-daily-desktop-ios.md)). 팀이 데스크탑 앱과 iOS 앱으로 oort를 매일 쓰는 것이 먼저이고, 외부 출시(외부 셀프호스터·그록봇·하네스 복붙)는 그 뒤다. 첫 이정표는 **데스크탑·iOS 둘 다 M7-I PASS로 팀 배포**다. 2026-08-03의 v0 정의(관전·승인·대화가 폰에서 한 번씩)는 목표 A의 iOS 범위에 흡수됐다.
 >
-> **실행 주체:** 계획=기획 레이어(`docs/planning/README.md`) · 구현=워커(핸드오프 패킷, `AGENTS.md`) · 결정 거버넌스=ADR-0100. 증거는 `STATUS.md`, 세션 스냅샷은 `docs/planning/CURRENT_STATE.md`, 트랙 운영은 `docs/TRACKS.md`.
+> **실행 주체:** 계획=기획 레이어(`docs/planning/README.md`) · 구현=워커(핸드오프 패킷, `AGENTS.md`) · 결정 거버넌스=ADR-0100. 증거는 PR 본문(`STATUS.md`는 2026-09-23 동결), 세션 스냅샷은 `docs/planning/CURRENT_STATE.md`, 트랙 운영은 `docs/TRACKS.md`.
 >
-> **불변식(스토어 게이트):** 🔒 스토어/공증 배포(external TestFlight 포함)는 사용성 검수 게이트 PASS 후에만 진행한다(체크리스트는 아카이브 §4~§5).
+> **불변식(배포 게이트):** 🔒 팀 배포(TestFlight·직접 전달 공증 DMG)는 **M7-I** PASS와 배포 건마다의 owner 승인 뒤에만 한다. 데스크탑 next 채널(팀 채널) 게시도 같은 규칙이다. 스토어·external TestFlight·공개 공증 배포는 **M7-S**다([M7](docs/cicd/03-store-readiness-gate.md), ADR-0187 D5).
 >
-> **아카이브(2026-09-01 경량화 재편, 성재 지시):** 직전 판 전문(2026-08-03 §0 + M0~M8 §1~§7)은 git 히스토리. M0~M8의 **스토어 제출·공증·법무·CI/CD 체크리스트는 폐기가 아니라 보류** — 축 셋이 폰에서 돈 뒤 그 부분만 다시 태운다.
+> **아카이브:** 2026-08-03 판(M0~M8)과 2026-09-02 출시 프로그램 판(UX-R·DS·SH·M·P 레인·G0~G3 게이트)의 전문은 git 히스토리와 `docs/planning/2026-09-02-launch-program-plan.md`에 있다. 스토어 제출·공증·법무는 목표 A의 W4(M7-S)에서 다시 태운다.
 
 ---
 
-## 0. 현재 위치 (2026-09-02)
+## 0. 현재 위치 (2026-09-23)
 
-**출시 전 · 내부 도그푸드 · 셀프호스트 중심.** NCP 클라우드는 철수했고(2026-08-26~27 집행), 배포 실물은 **셀프호스트 compose 스택**(최신 발행 v0.1.3, digest pin)이다. 성재 검수는 로컬 스택(oortv013) + track/uxui 검수 앱으로 진행 중.
+**출시 전 · 팀이 쓸 실물을 만드는 단계.** 서버와 웹은 목표 수준에 가깝다. 막힌 곳은 호스팅·데스크탑 배포·iOS다. 계획 정본은 [`docs/planning/2026-09-23-goal-a-plan.md`](docs/planning/2026-09-23-goal-a-plan.md)다.
 
-### v0 = 축 셋이 폰에서 도는 것
-
-| 축 | 서버 | 웹/데스크탑 | 모바일(RN) |
-|---|---|---|---|
-| **대화** | ✅ | ✅ | ✅ |
-| **관전**(작업 세션) | ✅ (#1777·#1778 수리 랜딩) | ✅ TC-1 관전 도크 | 🚧 |
-| **승인**(툴콜) | ✅ 폐곡선(#979) | 부분 | ❌ |
-
-**웹 대비 폰 격차가 여전히 최대 격차다.** 폰이 관전·승인을 표면화하지 않으면 에이전트 네이티브 메신저가 아니라 봇이 있는 채팅이다(ADR-0101이 거부한 자리). 패리티 티켓: #1908(초안)·#1892(점프 항법)·#1876·#1748·#1752·#1604 등.
+| 표면 | 상태 | 목표 A 완료선 |
+|---|---|---|
+| **서버** | 테넌트 격리, 승인 폐곡선, AX 제안·실행(ADR-0186), Rust push relay(SH-10)가 main에 있다. v0.1.5 이미지 발행 | Railway 팀 인스턴스에 notifier·push relay까지 상시 가동 |
+| **웹 + 데스크탑(Tauri, ADR-0133)** | 웹이 가장 성숙하다(buzz 패리티 파도 다수 랜딩). 데스크탑은 배포가 멈췄다(DMG는 v0.1.1 하나, `release-desktop.yml` 실행 기록 없음) | 공증 DMG·자동 업데이트, M7-I |
+| **iOS(RN, ADR-0137)** | 대화 기반(스레드·리액션·첨부·멘션·검색·DM·승인 인박스·QR 연결)이 있지만 배포된 적이 없다. 작업 화면은 읽기 전용이고 기본으로 숨겨져 있다(#2166) | TestFlight → App Store, 실기기 푸시, 원격 작업(ADR-0188) |
+| **호스팅** | 상시 인스턴스가 없다(NCP 철수, Railway 기동 실패 이력) | Railway 기본, Tailscale은 임시 원격 경로 |
+| Android | 미착수 | iOS App Store 뒤(ADR-0137 결정 6) |
 
 ### 서버 — Rust/Axum 단독 배포 (ADR-0145)
 
 - `server-rust/` = 배포 실물. `server/` = Swift 이식 원본(실행 대상 아님) + **`Migrations/` 정본(언어 독립 — 불변식은 DB 트리거·제약·RLS에 있다)**.
 - 핵심 불변식: Postgres=SoT · Centrifugo=전송전용 · 단일 쓰기경로(REST→PG→outbox→relay) · 순서=`message.seq` · 에이전트=`member` · RLS FORCE(ADR-0004 포함).
-- 대표 이식 잔여: 웹훅 인바운드 2경로(#1265) · Centrifugo subscribe proxy 403(#1300) · 라우트별 상세는 `STATUS.md`.
-
-### 클라이언트
-
-| 대상 | 상태 |
-|---|---|
-| **웹 + 데스크탑(Tauri, ADR-0133)** | 주력 검수 표면. 2026-08-29~30 buzz 패리티 파도(BZ 시리즈 + BF A/B군) 대량 랜딩 — track/uxui |
-| **모바일(RN, ADR-0137)** | 서 있음 · 웹과 기능 격차 큼 — 다음 패리티 파도 대상 |
-| 모바일(Android) | 미착수 — iOS v0 TestFlight 직후(FCM 체인 이중 구축 방지, ADR-0137 §6-b) |
+- 대표 이식 잔여: 웹훅 인바운드 2경로(#1265) · Centrifugo subscribe proxy 403(#1300) · 라우트 계약은 `docs/api/openapi.yaml`.
 
 ### 운영 파이프라인
 
-- **트랙**: track/uxui · track/engine에서 랜딩(트랙 내 머지 자율), **main 승격은 성재 명시 승인**(`docs/TRACKS.md`).
-- **실행 레인**: 모델·하네스·병렬 상한은 `docs/planning/PIPELINE.md`의 현재 값을 따른다. UI는 독립 design-review(Blocker 0·High 0) 후 머지한다.
-- **푸시**: APNs 종단 증명 완료 · PushRelay 배포 · id-only payload(ADR-0120). 셀프호스트는 Dawn PushRelay 경유(D1-A). Apple 서명 자산 확보 완료, CI 레인만 미구축.
+- **트랙**: track/uxui · track/engine에서 랜딩(트랙 내 머지 자율), **main 승격은 성재 승인 범위의 묶음 단위**(상시 위임, `docs/TRACKS.md` §3).
+- **실행 레인**: 모델·하네스·병렬 판단은 `docs/planning/PIPELINE.md`의 현재 값을 따른다. UI는 독립 design-review(Blocker 0·High 0) 후 머지한다.
+- **푸시**: id-only payload(ADR-0120). Rust push relay는 main에 있지만 상시 배포된 relay가 없고, 실기기 실수신은 W1에서 잰다(ADR-0187 D4). Apple 서명 자산은 확보돼 있다.
 
 ---
 
-## 1. 출시 프로그램 (2026-09-02 성재 승인 — 편성 정본 `docs/planning/2026-09-02-launch-program-plan.md`)
+## 1. 목표 A 파도 (2026-09-23 — 편성 정본 `docs/planning/2026-09-23-goal-a-plan.md`)
 
-> 진단 정본 `docs/planning/research/2026-09-02-launch-rediagnosis-two-pillars-brief.md`. 두 기둥 = **①Buzz급+Raycast 감각 UXUI ②프롬프트 하나로 설치되는 셀프호스팅**. 4레인이 파일군 분리로 병렬, 게이트 4로 진행을 잰다.
-
-| 레인 | 파도 | 내용 | 상태 |
-|---|---|---|---|
-| UXUI | **UX-R0~R6** | ADR-0179 표현 축(모션·눌림·엘리베이션·밀도) → 모션 토대 → 온보딩 절정(프로필·웰컴 킥오프·첫 에이전트 연결 퍼널) → ⌘K 액션 팔레트 → 에이전트 표면 통합(enabledTools UI·provider 글리프) → 상호작용(DnD·리액션·일시 확인 정책) → 외양(BZ-5a 머지·밀도·폰트) | 편성 완료·착수 대기 |
-| UXUI | **DS-0~6** | 디자인시스템 재발 방지: 표현 축 정본화 · 프리미티브 12종 · `/design` 갤러리 라우트 · 측정 확장(3짝 캡처·waitForAnimations·px-text·1,000줄 ratchet) · 리뷰 루프 · 폰 토큰 파생 · 인테이크 분류 규율 | 편성 완료 |
-| 엔진 | **SH-1~9** | 릴리스 매니페스트 → 공개 엣지 파라미터화(#1926) → `oort doctor`/CLI → 영문 하네스 불가지론 런북+README 프롬프트 블록 → Railway/Fly/AWS·GCP 경로 → 에이전트 합류 GUI → blocker 순서(#1265→#1925→#1792→#1927) → 그록봇 루틴 정본 → OSS 위생 | 편성 완료·착수 대기 |
-| 엔진 | **BT 파도 마감** | BT-1~5 랜딩. **BT-6(#1934) 서버 절반 미커밋(wbt6-server) — 이어받기** | G0 |
-| 모바일 | **M0 QR 기기 연결** | ADR-0180 1회용 링크 토큰: 서버 라우트 2 + 웹 QR 카드 + 폰 스캔 화면. **G1 창 안에서 선행**(셀프호스팅 blocker 무관, Railway E2E 마지막 칸) | 편성 완료 |
-| 모바일 | **M1 폰 패리티 · M2 TestFlight internal** | 관전·승인 축 완주 + 웹 전용 축 이관(#1908 #1892 #1876 #1748 #1752 #1604 #1600 #1396) + 폰 온보딩. **G1 이후 ITO와 병렬**. TestFlight internal은 M0 직후(성재 손) | 편성 완료(순서 확정) |
-| 파이프 | **P1~P8** | PIPELINE.md 단일 설정(레인 추상화) · AGENTS.md→AGENTS.md 병합 · `.claude/commands` · worker-lane 스킬 · handoffs archive · planning_context 갱신 | 편성 완료 |
-| 공통 | **AX 에이전트 행동**(2026-09-22 편성, `docs/planning/2026-09-22-plan-revision.md`) | ADR-0186(Proposed): 에이전트 제안→사람 승인→서버 실행 + 선언형 카드 카탈로그. AX-2 레지스트리·팔레트(UX-R3a 축소 해제) → AX-3a/3b 초대 1종 → AX-4 카드 → AX-6 E2E(ITO 전) → AX-5·7·8(ITO 뒤) | 편성 완료·ADR Accept 대기 |
-| 공통 | **런칭 보조축 — Bring your hosted agent** | ADR-0162 축 — 계약·순서는 `BUILD_TICKETS.md` §런칭 보조축(유지). UX-R2c(첫 에이전트 연결 퍼널)·SH-6이 이 축의 UI/서버 잔여를 흡수 | 부분 랜딩 |
+| 파도 | 레인 | 완료 신호 |
+|---|---|---|
+| **W1** | Railway 설정 PR(#2205: 시작 명령·PG18·Centrifugo·XFP·드라이브·푸시 서비스·doctor 수리) → v0.1.6 → `oort-team` 배포 · 데스크탑 증거 빌드(#1607, `--public` 무업로드) · iOS 배포(#2568: 권한 문구·TestFlight 1인 그룹·APNs production) · iOS 대화 1(#1084+#2513·#1964·#1892·푸시 탭 이동 #2569) | 수리된 doctor PASS·`wss://`·두 탭 실시간, owner 기기에서 공증 DMG 로그인·TestFlight 설치·실기기 푸시 |
+| **W2** | iOS 대화 2(#1048·#1083·#1049·배지) · 원격 R0·R1(W1에 착수한 R0 #2570·workd #2571 → W2 완료, workd는 R0 뒤 머지) · 크래시 계측 S-0 · AX-6 #2512(Railway 위) | 데스크탑 세션을 폰에서 보고 권한 승인 1회, 불변식 red proof, 계측에 세션 수가 잡힘 |
+| **W3** | M7-I PASS(**원격 R1 포함**, 성재 결정 · R0·R1 보안 재검수 PASS · S-0 켜짐) → 팀 배포(#1281 첫 next 게시 포함, 건별 승인) → **내부 테스트**(팀 전원이 정한 기간 주 메신저로 쓰고 불편 전부 티켓) · 원격 R2(R1 재검수·ADR-0146 개정 뒤, 사람 기기 키 서명) | PASS 표 2행, 폰에서 시킨 작업 1건 완주 |
+| **W4** | 스토어(#20–#22·#30·#34·#35) · 원격 R3 · M7-S → #31 제출 | App Store 심사 제출 |
 
 ### 게이트
 
 | 게이트 | 조건 |
 |---|---|
-| **G0 파도 마감** | BT-6 랜딩 · 결재 3건 집행(BZ-5a 액센트 기본=새벽 → #1922 머지 · A6 rich 기본 상향 · track→main 승격) · v0.1.4 발행 |
-| **G1 내부 테스트 진입** | UX-R1·R2 + DS-0·1 + SH-1~4 + M0 + P1·P2 랜딩 → ITO(성재+1인, 웹+데스크탑+폰 QR 스모크, `2026-08-20-oss-launch-readiness-and-internal-test-plan.md` 시나리오 표 재사용) |
-| **G2 출시** | 외부 셀프호스터 3(하네스 복붙 1·그록봇 1·Railway 1) + 에이전트 멘션·런 실사용 + LAUNCH_READY 판정 |
-| **G3 v0 스토어** | 축 셋(관전·승인·대화) 폰 완주(M1) + M7 사용성 게이트 → external TestFlight → App Store |
+| **M7-I** | [M7](docs/cicd/03-store-readiness-gate.md) I-1~I-8(I-8 = ADR-0188 R1), 데스크탑·iOS 각각, 배포 건마다 owner 승인 |
+| **내부 테스트** | 팀 전원이 정한 기간 oort를 주 메신저로 쓴다. 기본 2주(S-1 하한), 성재 확정 대기 |
+| **M7-S** | M7 S-0~S-8, 제출 빌드 커밋 기준 |
+| **외부 출시(목표 A 뒤)** | 외부 셀프호스터 3(하네스 복붙·그록봇·Railway) + 에이전트 멘션·런 실사용 + LAUNCH_READY(2026-08-10 정의 유지) |
 
 ## 2. 보류 (재점화 조건 명시)
 
-- **스토어 제출·공증·CI/CD·법무**: G3 조건 충족 뒤 재점화. 체크리스트 원문은 git 히스토리의 2026-08-03 ROADMAP 판 §4~§7(법무 항목은 법률 자문 아님 — 외부 변호사 1회 검토 필수).
-- **Android**: iOS v0 TestFlight 직후(ADR-0137 결정 6).
-- **VM/그록봇 릴레이 축**: SH-8 — 그록봇 복구 시 재개(S2·S3·허들 결함 B 서버 적용), 그록봇 "템플릿" 앱 표면 확인 전까지 루틴 지시문 정본화.
-- **buzz 제품축 6종 판정**(forum·projects·terminal·mesh-compute·workflows·agent-memory): 차별화 감사가 "싸우지 않을 자리"로 둔 축 — G2 뒤 재취사.
+- **외부 출시 항목**(ADR-0187 D6): 그록봇 VM 발행 이미지 재실측(E2E-A), Railway 밖 플랫폼 경로 확장, 외부 셀프호스터 모집, 하네스 복붙 설치의 외부 재현, AX-5 #2511·AX-8 #2514 → 목표 A 뒤.
+- **Android**: iOS App Store 뒤(ADR-0137 결정 6).
+- **VM/그록봇 릴레이 축**: SH-8 — 외부 출시 단계에서 재개.
+- **buzz 제품축 6종 판정**(forum·projects·terminal·mesh-compute·workflows·agent-memory): 외부 출시 뒤 재취사.
+- **웹·데스크탑 UX 잔여 파도**(UX-R·DS 잔여): 목표 A 동안은 내부 테스트 불편으로 올라온 것만 한다.
+- **Enterprise Trust**(위협 모델·SBOM·시크릿 스캔·VDP·보안 백서, MOMO-140): ADR-0187 §3이 외부·엔터프라이즈 출시로 연기를 제안했다. 성재 확인 전까지는 M7-S S-8로 남는다.
 
 ## 3. 문서 지도
 
 | 무엇 | 어디 |
 |---|---|
 | 결정(왜) | `docs/adr/` (ADR-0100 거버넌스) |
-| 증거(됐나) | `STATUS.md` (당월+직전월 · 과거=`docs/planning/archive/STATUS-YYYY-MM.md`) |
+| 증거(됐나) | PR 본문 · `CHANGELOG.md` (`STATUS.md`는 2026-09-23 동결된 역사) |
 | 현재 상태(어디까지) | `docs/planning/CURRENT_STATE.md` (스냅샷 최근 6) |
 | 계획(다음) | 이 문서 + GitHub Issues |
 | 티켓 수용기준 | `BUILD_TICKETS.md` (등급·활성 축·백로그만) |
