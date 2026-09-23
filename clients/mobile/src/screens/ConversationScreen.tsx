@@ -292,6 +292,17 @@ export default function ConversationScreen({
   const markRead = useMarkRead();
 
   const timeline = useTimeline(rail, workspaceId, channelId, member.id);
+  /**
+   * 타임라인이 **이 방의** 첫 페이지를 들고 있다 (#2569).
+   *
+   * `timeline.status` 로는 모른다: 이 화면은 방을 옮길 때 다시 마운트되지 않고
+   * `channelId` 만 갈아 끼우므로, 바뀐 첫 렌더의 `status` 는 앞 방의 'ready' 이고
+   * `state` 에는 앞 방의 행이 있다. 다른 방으로 가는 두 착지 — 알림 탭(아래)과 ADE
+   * 카드의 「대화로」 — 가 이 문을 함께 쓴다.
+   */
+  const timelineHoldsThisChannel =
+    timeline.loadedChannelId !== null &&
+    uuidEq(timeline.loadedChannelId, channelId);
   const [profileMemberId, setProfileMemberId] = useState<string | null>(null);
   const profileMember = useMemo(
     () => memberFor(directory, profileMemberId ?? undefined),
@@ -963,12 +974,16 @@ export default function ConversationScreen({
     if (pendingAnchor === null) return;
     // 아직 그 방이 아니다. 다른 방에서는 **절대** 쏘지 않는다.
     if (!uuidEq(pendingAnchor.channelId, channelId)) return;
-    if (timeline.status !== 'ready') return;
+    // 그리고 **그 방의** 첫 페이지가 온 뒤에 쏜다(#2584 R2 관찰 1). `status` 가
+    // 'ready' 인지로 물으면, 방이 바뀐 첫 렌더의 'ready' 는 앞 방의 것이라 비어 가는
+    // 목록에서 점프가 빗나가 「찾지 못했습니다」가 한 번 번쩍인다 — 이 앵커가 한 박자
+    // 들고 있는 이유 그 자체다.
+    if (!timelineHoldsThisChannel) return;
     setPendingAnchor(null);
     // 세션 원장은 순서값을 나르지 않는다. 없는 seq 를 지어내지 않고, 그 대가로
     // 못 찾았을 때의 문장은 「더 위에 있다」로 정밀해지지 못한다.
     requestJump('session', pendingAnchor.messageId, null);
-  }, [pendingAnchor, channelId, timeline.status, requestJump]);
+  }, [pendingAnchor, channelId, timelineHoldsThisChannel, requestJump]);
 
   const onOpenAdeAnchor = useCallback(
     (targetChannelId: string, targetTitle: string, messageId: string) => {
@@ -1248,13 +1263,95 @@ export default function ConversationScreen({
   // 선언한다 — 같은 커밋에서 둘 다 돌면 나중 것이 이긴다.
   useEffect(() => setNotificationNotice(null), [channelId]);
   const landedNotificationRef = useRef<number | null>(null);
-  const timelineHoldsThisChannel =
-    timeline.loadedChannelId !== null &&
-    uuidEq(timeline.loadedChannelId, channelId);
   const timelineMessages = timeline.state.messages;
+
+  // ---- 탭 **뒤에** 읽은 행으로만 판정한다 (#2584 design-review R2 H-1) ----------
+  //
+  // 같은 방을 열어 둔 채 앱이 뒤로 갔다. 15초 뒤 소켓이 끊기고(ADR-0137 D4) 상대의
+  // 새 메시지는 알림으로만 왔다. 그 알림을 누르면 이 화면은 다시 마운트되지 않고
+  // `channelId` 도 그대로라, 타임라인은 **탭 앞에 읽은** 이 방의 첫 페이지를 들고
+  // 있다(`timelineHoldsThisChannel` 은 「어느 방인가」만 묻는다). 그 행으로 판정하면
+  // 방금 온 메시지는 없고, 점프는 빗나가 「찾지 못했습니다 / 위로 올려 이전 대화를
+  // 더 불러오세요」를 세우고 낭독했다 — 메시지는 더 새것이고 아래에서 오는데. 문장을
+  // 따라 위로 올린 사람은 레일이 복구하는 순간 대기 점프(`awaitingJump`)에 끌려
+  // 내려왔다.
+  //
+  // 셸이 M-1 에서 지키는 규율을 여기에도 건다: **탭 뒤에 읽은 것만으로 없다고
+  // 말한다**(`useNotificationTapRouting` 의 `dataUpdatedAt ≥ 도착`). 알림은 커밋 뒤에야
+  // 나가므로(relay 가 outbox 를 읽는다) 탭 뒤에 나간 REST 읽기는 그 메시지를 반드시
+  // 본다 — 소켓이 끊겨 있어도.
+  //
+  //   다른 방·첫 마운트   그 방의 첫 페이지는 방이 바뀐 뒤(= 탭 뒤)에 나간다. 그대로
+  //                       기다린다 — 추가 읽기 없음.
+  //   같은 방             탭을 처음 본 순간 이미 이 방을 들고 있다 → 꼬리를 다시
+  //                       읽고(`catchUp`) 그 뒤에 판정한다. 한 번의 왕복이다.
+  //   그 읽기가 실패      모르는 채로는 말하지 않는다. 레일이 다시 붙어 스스로 따라잡은
+  //                       신호(복구 표지 `recoveryMarkers` 가 탭 뒤에 늘었다)를
+  //                       기다린다. 보이지 않는 기다림이므로 시계를 단다 — 세션
+  //                       앵커와 같은 30초(`PENDING_ANCHOR_TTL_MS`). 시간이 다 되면
+  //                       **조용히** 접는다. 시간 끝에 「찾지 못했습니다」를 세우면
+  //                       그것이 바로 없애려던 거짓 문장이다.
+  const catchUpTimeline = timeline.catchUp;
+  const recoveryMarkCount = timeline.recoveryMarkers.length;
+  const [landingRead, setLandingRead] = useState<{
+    token: number;
+    state: 'reading' | 'waiting-rail' | 'fresh';
+  } | null>(null);
+  /** 탭을 처음 본 순간 — 그때 이 방을 들고 있었는가, 복구 표지는 몇 개였는가. */
+  const landingSightRef = useRef<{token: number; markers: number} | null>(null);
+  useEffect(() => {
+    if (!notification) return;
+    if (landingSightRef.current?.token === notification.token) return;
+    const {token} = notification;
+    landingSightRef.current = {token, markers: recoveryMarkCount};
+    if (!timelineHoldsThisChannel) {
+      setLandingRead({token, state: 'fresh'});
+      return;
+    }
+    setLandingRead({token, state: 'reading'});
+    catchUpTimeline().then(
+      () =>
+        setLandingRead(current =>
+          current?.token === token ? {token, state: 'fresh'} : current,
+        ),
+      () =>
+        setLandingRead(current =>
+          current?.token === token && current.state === 'reading'
+            ? {token, state: 'waiting-rail'}
+            : current,
+        ),
+    );
+  }, [
+    notification,
+    timelineHoldsThisChannel,
+    recoveryMarkCount,
+    catchUpTimeline,
+  ]);
+  // 레일이 스스로 따라잡았다 — 탭 뒤에 복구 표지가 늘었다(재구독의 재생 또는 역채움).
+  useEffect(() => {
+    const sight = landingSightRef.current;
+    if (sight === null || landingRead?.token !== sight.token) return;
+    if (landingRead.state === 'fresh') return;
+    if (recoveryMarkCount > sight.markers) {
+      setLandingRead({token: sight.token, state: 'fresh'});
+    }
+  }, [recoveryMarkCount, landingRead]);
+  // 보이지 않는 기다림의 시계.
+  useEffect(() => {
+    if (landingRead?.state !== 'waiting-rail') return undefined;
+    const {token} = landingRead;
+    const timer = setTimeout(() => {
+      landedNotificationRef.current = token;
+      setLandingRead(current => (current?.token === token ? null : current));
+    }, PENDING_ANCHOR_TTL_MS);
+    return () => clearTimeout(timer);
+  }, [landingRead]);
+
   useEffect(() => {
     if (!notification || !timelineHoldsThisChannel) return;
     if (landedNotificationRef.current === notification.token) return;
+    if (landingRead?.token !== notification.token) return;
+    if (landingRead.state !== 'fresh') return;
     landedNotificationRef.current = notification.token;
     const plan = planNotificationLanding(timelineMessages, notification);
     setPinsOpen(false);
@@ -1280,6 +1377,7 @@ export default function ConversationScreen({
   }, [
     notification,
     timelineHoldsThisChannel,
+    landingRead,
     timelineMessages,
     requestJump,
     closeMemberProfile,

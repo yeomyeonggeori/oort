@@ -90,6 +90,19 @@ export function ThreadPanel({
   const styles = useStyles(buildStyles);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [reloadNonce, setReloadNonce] = useState(0);
+  // 루트가 바뀌면 판정도 새로 한다 — **렌더 중에** (#2584 design-review R2 N-A).
+  //
+  // 이 판은 스레드를 옮길 때 다시 마운트되지 않는다(대화 화면이 `root` 만 갈아
+  // 끼운다). 아래 효과가 'loading' 으로 되돌리기 전의 첫 렌더에는 `status` 가 **앞
+  // 스레드의** 'ready' 라, 알림이 같은 방의 다른 스레드를 열면 착지 점프가 답글을
+  // 읽기 전에 한 번 걸리고 'ready' 에서 한 번 더 걸렸다 — 스크롤이 두 번. 채널이
+  // `loadedChannelId`·`judgedChannel` 로 푼 것과 같은 자리다(방의 정체성 대신 루트의
+  // 정체성).
+  const [judgedRootId, setJudgedRootId] = useState(root.id);
+  if (!uuidEq(judgedRootId, root.id)) {
+    setJudgedRootId(root.id);
+    setStatus('loading');
+  }
 
   const {loadReplies} = timeline;
   useEffect(() => {

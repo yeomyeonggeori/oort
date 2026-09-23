@@ -141,6 +141,20 @@ export interface UseTimelineResult {
    * a notification landing on one message — would act on the wrong room.
    */
   loadedChannelId: string | null;
+  /**
+   * Read this channel's tail from Postgres **now** — everything after the newest
+   * row held (#2584 design-review R2 H-1).
+   *
+   * The rail is transport, not truth. A conversation left open in the background
+   * keeps its rows while the socket is dropped (ADR-0137 D4), and nothing re-reads
+   * them when the same room is shown again: a notification tap for that room lands
+   * on rows read before the tap. A caller that must judge "is this message here?"
+   * against the server's present — the notification landing — reads first.
+   *
+   * Rejects when the read fails. Rows that arrive after the person moved to
+   * another channel are dropped, not merged into the one now on screen.
+   */
+  catchUp: () => Promise<void>;
   resume: ResumeInfo;
   recoveryMarkers: RecoveryMarker[];
   /** Channel-level echoes awaiting their server seq. Never inside `state`. */
@@ -580,7 +594,7 @@ export function useTimeline(
   );
 
   const backfillAfter = useCallback(
-    async (channel: string) => {
+    async (channel: string, stillCurrent: () => boolean = () => true) => {
       let after = newestSeqRef.current ?? 0;
       let total = 0;
       for (;;) {
@@ -588,6 +602,7 @@ export function useTimeline(
           after,
           limit: PAGE_LIMIT,
         });
+        if (!stillCurrent()) break;
         if (page.messages.length === 0) break;
         total += page.messages.length;
         applyBatch(page.messages);
@@ -604,6 +619,12 @@ export function useTimeline(
   useEffect(() => {
     channelRef.current = channelId;
   }, [channelId]);
+
+  const catchUp = useCallback(async () => {
+    const channel = channelRef.current;
+    if (!channel) return;
+    await backfillAfter(channel, () => channelRef.current === channel);
+  }, [backfillAfter]);
 
   // Drop echoes whose confirmed twin has landed in the seq stream even though
   // the POST that created them never resolved. That case is real: if the write
@@ -808,6 +829,7 @@ export function useTimeline(
     state,
     status,
     loadedChannelId,
+    catchUp,
     resume,
     recoveryMarkers,
     pending: channelPending,
