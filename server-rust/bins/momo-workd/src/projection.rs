@@ -527,6 +527,31 @@ mod tests {
     }
 
     #[test]
+    fn plan_entries_are_redacted_and_bounded() {
+        // #2607 N-7: a plan entry is text the agent writes, so the same
+        // credential masking and a 500-character bound apply to it.
+        let long = "step ".repeat(400);
+        let projected = project(&update(json!({
+            "sessionUpdate": "plan",
+            "entries": [
+                {"content": format!("export KEY={SK_ANT} then deploy"), "status": "pending"},
+                {"content": long, "status": "pending"}
+            ]
+        })));
+        let Projection::Status(payload) = projected else {
+            panic!()
+        };
+        let first = payload["plan"][0]["content"].as_str().unwrap();
+        assert_eq!(
+            first,
+            format!("export KEY={REDACTED_CREDENTIAL} then deploy")
+        );
+        let second = payload["plan"][1]["content"].as_str().unwrap();
+        assert_eq!(second.chars().count(), MAX_PLAN_ENTRY_CHARS);
+        assert!(second.contains(" … "), "head and tail kept around the mark");
+    }
+
+    #[test]
     fn mode_updates_go_to_the_policy_and_other_updates_are_dropped() {
         assert_eq!(
             project(&update(

@@ -51,6 +51,9 @@ pub fn read_owned_file(path: &Path) -> Result<String, ConfigError> {
         path: path.display().to_string(),
         detail,
     };
+    // #2607 N-10: a folder someone else can write into lets them swap the
+    // file between two reads.
+    check_parent_folder(path)?;
     let mut file = match std::fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
@@ -81,6 +84,40 @@ pub fn read_owned_file(path: &Path) -> Result<String, ConfigError> {
     let mut raw = String::new();
     file.read_to_string(&mut raw).map_err(io)?;
     Ok(raw)
+}
+
+/// The folder holding a file the host takes orders from: owned by this user
+/// (or root) and writable by no one else (#2607 N-10).
+pub fn check_parent_folder(path: &Path) -> Result<(), ConfigError> {
+    let parent = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let metadata = std::fs::metadata(parent).map_err(|source| ConfigError::Io {
+        path: parent.display().to_string(),
+        source,
+    })?;
+    // SAFETY: `geteuid` has no preconditions and cannot fail.
+    let uid = unsafe { libc::geteuid() };
+    let mode = metadata.mode() & 0o7777;
+    let detail = if !metadata.is_dir() {
+        Some("its folder is not a directory".to_string())
+    } else if metadata.uid() != uid && metadata.uid() != 0 {
+        Some(format!("its folder is owned by uid {}", metadata.uid()))
+    } else if mode & 0o022 != 0 {
+        Some(format!(
+            "its folder (mode {mode:04o}) lets others write into it"
+        ))
+    } else {
+        None
+    };
+    match detail {
+        Some(detail) => Err(ConfigError::Unsafe {
+            path: path.display().to_string(),
+            detail,
+        }),
+        None => Ok(()),
+    }
 }
 
 fn default_poll_interval_ms() -> u64 {
@@ -277,13 +314,15 @@ impl HostState {
             source,
         };
         if let Some(parent) = path.parent() {
-            // A new folder is this user's alone (#2602 L-4).
+            // A new folder is this user's alone (#2602 L-4); one that already
+            // exists must be too (#2607 N-10).
             std::fs::DirBuilder::new()
                 .recursive(true)
                 .mode(0o700)
                 .create(parent)
                 .map_err(io)?;
         }
+        check_parent_folder(path)?;
         let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
         let _ = std::fs::remove_file(&temporary);
         let mut file = std::fs::OpenOptions::new()
@@ -447,6 +486,44 @@ mod tests {
         )
         .unwrap();
         assert_eq!(HostState::load(&path).unwrap().scope, "");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_config_or_state_in_a_folder_others_can_write_is_refused() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir =
+            std::env::temp_dir().join(format!("momo-workd-folder-{}", Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let config = dir.join("workd.json");
+        std::fs::write(&config, serde_json::to_vec(&base_json()).unwrap()).unwrap();
+        std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o600)).unwrap();
+        WorkdConfig::load(&config).expect("a private folder is fine");
+
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        match WorkdConfig::load(&config) {
+            Err(ConfigError::Unsafe { detail, .. }) => {
+                assert!(detail.contains("folder"), "{detail}")
+            }
+            other => panic!("a world-writable folder must be refused, got {other:?}"),
+        }
+        let state = HostState {
+            server_url: "https://oort.example.com".to_string(),
+            workspace_id: Uuid::from_u128(1),
+            host_id: Uuid::from_u128(2),
+            owner_member_id: Uuid::from_u128(3),
+            public_key: "AAAA".to_string(),
+            scope: "member".to_string(),
+        };
+        assert!(
+            matches!(
+                state.save(&dir.join("state.json")),
+                Err(ConfigError::Unsafe { .. })
+            ),
+            "no state is written into a folder others can write"
+        );
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
         let _ = std::fs::remove_dir_all(dir);
     }
 

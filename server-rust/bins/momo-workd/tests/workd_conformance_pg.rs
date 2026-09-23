@@ -507,6 +507,8 @@ impl Workd {
     fn new(base: &str, fixture: &Fixture, tools: &[(&str, &[&str])]) -> Self {
         let dir = std::env::temp_dir().join(format!("momo-wdc-{}", Uuid::new_v4().simple()));
         std::fs::create_dir_all(dir.join("repo")).unwrap();
+        // The owner's own folder whatever the umask (`config::check_parent_folder`).
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
         let tools: serde_json::Map<String, Value> = tools
             .iter()
             .map(|(key, extra)| {

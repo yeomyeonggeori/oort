@@ -94,6 +94,9 @@ pub enum Refusal {
     /// ADR-0188 §8: Codex has not been signed in to the host's own
     /// `CODEX_HOME` yet (`CODEX_HOME=<path> codex login`, once).
     CodexLoginRequired,
+    /// The process behind the allowlist entry is not the adapter the entry
+    /// names (its `initialize` `agentInfo.name` says otherwise, #2607 N-9).
+    AdapterMismatch,
     /// ADR-0188 §8: the host's own `CODEX_HOME` is not private to the owner,
     /// sits inside the allowed folder, or carries configuration beyond the
     /// sign-in (instructions, rules, hooks, prompts).
@@ -133,6 +136,7 @@ impl Refusal {
             Self::ShellRefused => "shell_refused",
             Self::ToolNotAllowlisted => "tool_not_allowlisted",
             Self::PermissionModeRefused => "permission_mode_refused",
+            Self::AdapterMismatch => "adapter_mismatch",
             Self::CodexLoginRequired => "codex_login_required",
             Self::CodexHomeRefused => "codex_home_refused",
             Self::ProjectConfigRefused => "project_config_refused",
@@ -173,8 +177,20 @@ pub enum AdapterKind {
 pub const CODEX_FIXED_MODE: &str = "read-only";
 
 impl AdapterKind {
-    /// The one permission mode a remote session may be in. Anything else —
-    /// at start or later — is refused rather than corrected.
+    /// The name the adapter gives in its `initialize` answer
+    /// (`agentInfo.name`, measured). The host checks it before `session/new`,
+    /// so an allowlist entry labelled `claude` that starts codex-acp is
+    /// stopped before codex-acp trusts the folder (#2607 N-9).
+    pub fn agent_name(self) -> &'static str {
+        match self {
+            Self::Claude => "@agentclientprotocol/claude-agent-acp",
+            Self::Codex => "@agentclientprotocol/codex-acp",
+        }
+    }
+
+    /// The one permission mode a remote session may be in: another mode at
+    /// start is corrected before the first prompt (and confirmed) or the
+    /// session is refused; leaving it later closes the session.
     pub fn fixed_mode(self) -> &'static str {
         match self {
             // Claude Code's `default` ("Manual"): edits and commands ask.

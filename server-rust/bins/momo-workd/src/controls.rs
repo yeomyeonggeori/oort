@@ -161,7 +161,11 @@ impl ControlLoop {
                         activate: Some(session_id),
                     },
                     Err(refusal) => {
-                        self.end_preallocated_session(control).await;
+                        // #2607 N-6: only the owner's own resume is closed, and
+                        // never a session this host is running.
+                        if refusal != Refusal::RequesterNotOwner {
+                            self.end_preallocated_session(control).await;
+                        }
                         refused(refusal)
                     }
                 }
@@ -201,10 +205,13 @@ impl ControlLoop {
     /// A resume arrives with its session already allocated and `running` on
     /// the server. If this host refuses to run it, it says so — best effort,
     /// the ack carries the reason either way.
-    async fn end_preallocated_session(&self, control: &WorkControl) {
+    async fn end_preallocated_session(&mut self, control: &WorkControl) {
         let Some(session_id) = control.session_id else {
             return;
         };
+        if self.sessions.runs(session_id) {
+            return;
+        }
         if let Err(error) = self
             .api
             .set_status(session_id, SessionStatus::Ended { exit_code: None })

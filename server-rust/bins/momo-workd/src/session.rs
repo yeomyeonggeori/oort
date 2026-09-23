@@ -1,18 +1,26 @@
 //! Work sessions: one ACP agent process and one task per server session.
 //!
-//! A spawn goes through the D6 checks in a fixed order, and **nothing is
-//! started until each earlier check passed**:
+//! A spawn goes through the D6 checks in this order, and **nothing is
+//! started until each earlier check passed** (the owner check,
+//! `ControlLoop::require_owner`, comes before all of them):
 //!
-//! 1. `shell` refused ([`policy::check_remote_tool`]);
-//! 2. the tool must be in the host allowlist, which alone decides the binary
+//! 1. the label, which becomes the first prompt, is not an adapter command
+//!    ([`policy::check_prompt`]); the host is under its session limit; a
+//!    resume does not name a session this host already runs;
+//! 2. `shell` refused ([`policy::check_remote_tool`]);
+//! 3. the tool must be in the host allowlist, which alone decides the binary
 //!    and its arguments ([`policy::launch_spec`]);
-//! 3. the allowed folder must resolve (`realpath`) to a directory, and carry no
+//! 4. the allowed folder must resolve (`realpath`) to a directory, and carry no
 //!    project agent configuration the adapter would apply regardless
-//!    ([`policy::check_project_config`]);
-//! 4. ACP `initialize` + `session/new` with no MCP servers and the adapter's
-//!    isolation switches;
-//! 5. the agent must report the adapter's fixed permission mode
-//!    ([`policy::check_session_modes`]) — only then is a server session created.
+//!    ([`policy::check_project_config`]); for Codex, the host's own home is
+//!    ready and signed in ([`policy::prepare_codex_home`], ADR-0188 §8);
+//! 5. ACP `initialize` — the process must be the adapter its entry names
+//!    ([`policy::AdapterKind::agent_name`]) — then `session/new` with no MCP
+//!    servers and the adapter's isolation switches;
+//! 6. the agent must be in the adapter's fixed permission mode, or be
+//!    corrected to it and confirm ([`policy::check_session_modes`],
+//!    [`policy::check_mode_confirmed`]) — only then is a server session
+//!    created, and only after that the first prompt sent.
 //!
 //! After that the session task owns the agent. It relays the curated event
 //! stream ([`crate::projection`]), answers every `session/request_permission`
@@ -139,6 +147,12 @@ impl SessionManager {
         self.sessions.keys().copied().collect()
     }
 
+    /// Whether this host is running `session_id`.
+    pub fn runs(&mut self, session_id: Uuid) -> bool {
+        self.reap();
+        self.sessions.contains_key(&session_id)
+    }
+
     /// Forget sessions whose task has finished (the agent exited on its own).
     pub fn reap(&mut self) {
         self.sessions.retain(|_, handle| !handle.task.is_finished());
@@ -156,6 +170,14 @@ impl SessionManager {
         };
         // The label becomes the first prompt: never an adapter command.
         policy::check_prompt(label)?;
+        // A resume names the session the server allocated for it; one this
+        // host already runs is not opened a second time (#2607 N-6).
+        if control
+            .session_id
+            .is_some_and(|session_id| self.runs(session_id))
+        {
+            return Err(Refusal::InvalidControl);
+        }
         self.reap();
         if self.sessions.len() >= self.settings.max_sessions {
             return Err(Refusal::HostBusy);
@@ -358,6 +380,20 @@ async fn handshake(
     if initialized.get("protocolVersion").and_then(Value::as_i64) != Some(ACP_PROTOCOL_VERSION) {
         tracing::warn!("ACP agent negotiated an unsupported protocol version");
         return Err(Refusal::AgentStartFailed);
+    }
+    // #2607 N-9: the adapter the allowlist entry names, before `session/new`
+    // (codex-acp trusts the folder and reads its `.codex` there).
+    let name = initialized
+        .pointer("/agentInfo/name")
+        .and_then(Value::as_str)
+        .unwrap_or("<none>");
+    if name != adapter.agent_name() {
+        tracing::warn!(
+            reported = name,
+            expected = adapter.agent_name(),
+            "the allowlisted executable is not the adapter its entry names; session refused"
+        );
+        return Err(Refusal::AdapterMismatch);
     }
     let created = conn
         .request(

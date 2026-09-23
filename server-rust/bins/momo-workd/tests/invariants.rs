@@ -10,7 +10,7 @@
 //! | `inv_4_round_trip_events_idle_input_kill` | the curated projection, idle/running, owner-only input, kill → ended |
 //! | `inv_5_leaving_the_fixed_mode_mid_session_closes_it` | `policy::check_mode_update` |
 //! | `inv_6_codex_runs_only_from_the_hosts_own_home` | `policy::prepare_codex_home` and `policy::check_project_config` in `SessionManager::spawn`, the Codex launch environment (ADR-0188 §8, #2607) |
-//! | `inv_8_a_spawn_from_anyone_but_the_owner_is_refused` | `ControlLoop::require_owner` on spawn (#2602 M-4) |
+//! | `inv_8_a_spawn_from_anyone_but_the_owner_is_refused` | `ControlLoop::require_owner` on spawn (#2602 M-4); a refused spawn never ends a session the host runs (#2607 N-6) |
 //! | `inv_9_a_refused_resume_ends_its_preallocated_session` | `ControlLoop::end_preallocated_session` (#2602 M-4) |
 //! | `inv_10_run_serves_member_hosts_only` | the scope gate in `cli::run` (#2602 M-4) |
 //! | `inv_11_credentials_never_leave_the_host_even_split_across_flushes` | `projection::redact_credentials` and the relay's hold (`session::ready_len`) (#2602 M-1) |
@@ -20,6 +20,7 @@
 //! | `inv_14_sessions_and_queued_inputs_are_bounded` | `max_sessions` in `SessionManager::spawn`, `MAX_QUEUED_PROMPTS` in the session task (#2602 L-2) |
 //! | `inv_15_a_kill_ends_the_whole_tree_even_a_setsid_grandchild` | the process-tree census and member signals in `AcpConnection::terminate` (#2602 L-1, #2607) |
 //! | `inv_16_an_agent_that_exits_on_its_own_takes_its_tree_with_it` | the census on every tick and `AcpConnection::wait_exit` (#2602 L-1, #2607) |
+//! | `inv_17_an_executable_that_is_not_the_named_adapter_is_stopped_at_initialize` | the `agentInfo.name` check in `session::handshake` (#2607 N-9) |
 //! | `inv_7_a_lost_spawn_ack_response_still_starts_the_session` | the settled-verdict sweep in `ControlLoop::poll_once` |
 
 use std::collections::{BTreeMap, VecDeque};
@@ -872,6 +873,79 @@ async fn inv_8_a_spawn_from_anyone_but_the_owner_is_refused() {
         stub_log(&h)
     );
     assert!(h.server.creates().is_empty());
+
+    // #2607 N-6 (the reviewer's Probe M4): a refused spawn that names a
+    // session the owner is running must not end it — neither from someone
+    // else, nor as a duplicate of the owner's own.
+    let request = spawn(&h, "claude", "keep working");
+    h.server.push(request.clone());
+    h.controls.poll_once().await.unwrap();
+    let live = ack_for(&h, request.id).session_id.expect("ok spawn ack");
+    wait_for("the owner's first turn to end", || {
+        h.server
+            .statuses(live)
+            .contains(&SessionStatus::Idle { exit_code: 0 })
+    })
+    .await;
+    let hijack = control(
+        &h,
+        "spawn",
+        Uuid::new_v4(),
+        Some(live),
+        json!({"tool": "claude", "label": "agent asks"}),
+    );
+    h.server.push(hijack.clone());
+    h.controls.poll_once().await.unwrap();
+    assert_eq!(
+        ack_for(&h, hijack.id),
+        ControlAck::refused("requester_not_owner")
+    );
+    let duplicate = control(
+        &h,
+        "spawn",
+        h.owner,
+        Some(live),
+        json!({"tool": "claude", "label": "again"}),
+    );
+    h.server.push(duplicate.clone());
+    h.controls.poll_once().await.unwrap();
+    assert_eq!(
+        ack_for(&h, duplicate.id),
+        ControlAck::refused("invalid_control")
+    );
+    assert!(
+        !h.server
+            .statuses(live)
+            .iter()
+            .any(|status| matches!(status, SessionStatus::Ended { .. })),
+        "the owner's running session was not ended: {:?}",
+        h.server.statuses(live)
+    );
+    assert_eq!(h.controls.sessions().live_sessions(), vec![live]);
+}
+
+#[tokio::test]
+async fn inv_17_an_executable_that_is_not_the_named_adapter_is_stopped_at_initialize() {
+    // #2607 N-9: an allowlist entry labelled `claude` whose executable is
+    // codex-acp (its `initialize` names itself) never reaches `session/new`,
+    // where codex-acp would trust the folder and read its `.codex`.
+    let mut h = harness(&[(
+        "claude",
+        &["--agent-name", "@agentclientprotocol/codex-acp"],
+    )]);
+    let request = spawn(&h, "claude", "look around");
+    h.server.push(request.clone());
+    h.controls.poll_once().await.unwrap();
+    assert_eq!(
+        ack_for(&h, request.id),
+        ControlAck::refused("adapter_mismatch")
+    );
+    assert_eq!(
+        received_methods(&h),
+        ["initialize"],
+        "stopped before session/new"
+    );
+    assert!(h.server.creates().is_empty());
 }
 
 #[tokio::test]
@@ -910,6 +984,11 @@ async fn inv_9_a_refused_resume_ends_its_preallocated_session() {
 fn inv_10_run_serves_member_hosts_only() {
     let dir = std::env::temp_dir().join(format!("momo-workd-scope-{}", Uuid::new_v4().simple()));
     std::fs::create_dir_all(dir.join("repo")).unwrap();
+    {
+        // The owner's own folder whatever the umask (`config::check_parent_folder`).
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
     let key_path = dir.join("keys").join("host.key");
     let key = momo_workd::keystore::HostKey::generate().unwrap();
     momo_workd::keystore::KeyStore::dev_file(key_path.clone())

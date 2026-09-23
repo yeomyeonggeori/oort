@@ -7,7 +7,9 @@
 //!                        permission outcome, to PATH as JSON lines
 //!   --mode ID            `currentModeId` reported by `session/new` (default `default`)
 //!   --no-modes           omit `modes` from `session/new`
-//!   --codex-modes        report codex-acp's preset catalog instead of Claude's
+//!   --codex-modes        report codex-acp's preset catalog instead of Claude's,
+//!                        and codex-acp's `agentInfo.name`
+//!   --agent-name NAME    `agentInfo.name` in the `initialize` answer
 //!   `session/set_mode`   by default behaves like claude-agent-acp 0.81.0: an
 //!                        offered mode is taken, reported as a `mode`
 //!                        `config_option_update`, then answered `{}`; an
@@ -55,6 +57,7 @@ struct Options {
     set_mode_error: bool,
     set_mode_silent: bool,
     set_mode_reports: Option<String>,
+    agent_name: Option<String>,
 }
 
 fn parse() -> Options {
@@ -74,6 +77,7 @@ fn parse() -> Options {
         set_mode_error: false,
         set_mode_silent: false,
         set_mode_reports: None,
+        agent_name: None,
     };
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
@@ -92,6 +96,7 @@ fn parse() -> Options {
             "--set-mode-error" => options.set_mode_error = true,
             "--set-mode-silent" => options.set_mode_silent = true,
             "--set-mode-reports" => options.set_mode_reports = args.next(),
+            "--agent-name" => options.agent_name = args.next(),
             "--long-answer" => {
                 options.long_answer = args.next().and_then(|n| n.parse().ok()).unwrap_or(0)
             }
@@ -343,11 +348,21 @@ impl Stub {
         while let Some(message) = self.read() {
             let id = message.get("id").cloned().unwrap_or(Value::Null);
             match message["method"].as_str() {
-                Some("initialize") => self.respond(
-                    &id,
-                    json!({"protocolVersion": 1, "agentCapabilities": {"loadSession": false},
-                           "authMethods": []}),
-                ),
+                Some("initialize") => {
+                    let name = self.options.agent_name.clone().unwrap_or_else(|| {
+                        if self.options.codex_modes {
+                            "@agentclientprotocol/codex-acp".to_string()
+                        } else {
+                            "@agentclientprotocol/claude-agent-acp".to_string()
+                        }
+                    });
+                    self.respond(
+                        &id,
+                        json!({"protocolVersion": 1, "agentCapabilities": {"loadSession": false},
+                               "authMethods": [],
+                               "agentInfo": {"name": name, "title": "stub", "version": "0"}}),
+                    );
+                }
                 Some("session/new") => {
                     let mut result = json!({"sessionId": "stub-session-1"});
                     if self.options.modes {
