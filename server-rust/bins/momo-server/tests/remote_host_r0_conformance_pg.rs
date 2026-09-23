@@ -773,7 +773,9 @@ async fn heartbeat_provenance_rows(su: &PgPool, workspace: Uuid, host: Uuid) -> 
 ///
 /// Then the criterion is shown to be **the final host**, not the card: the
 /// colleague *may* approve a second card onto the team box. And the owner
-/// approves the first onto their own laptop, which is the path R0 keeps open.
+/// approves the first onto their own laptop, which is the path R0 keeps open —
+/// on the ledger: the row is still an agent's control, so R0.1 does not hand it
+/// to the laptop (`r01_3`).
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
 async fn r0_1_a_teammate_cannot_decide_work_headed_to_the_owners_host() {
@@ -1978,6 +1980,14 @@ async fn r01_2_an_app_host_is_never_workspace_scoped() {
 /// * a colleague's takeover onto the laptop (the shape resume could write
 ///   before #1139 asked whose host a target was).
 ///
+/// One more row is not pre-R0 at all and is withheld on purpose: an agent's
+/// spawn its **owner** approved onto the laptop through R0's own card. R0 lets
+/// that decision through (the owner decides, `r0_1`), but the row is still an
+/// agent's control, and ADR-0188 §3 gives an agent `kill` only on a remote host
+/// — so it is `dispatched` on the ledger and never handed to the laptop. This
+/// pins the literal reading of #2582; delivering owner-approved agent spawns
+/// would be a deliberate change to this assertion.
+///
 /// None of them is delivered, and none is failed either — they are withheld,
 /// still `dispatched`, because the poll writes nothing. What the laptop **is**
 /// handed is the agent's `kill` and its owner's own takeover, oldest first; and
@@ -2026,12 +2036,40 @@ async fn r01_3_a_remote_host_is_not_handed_what_r0_would_refuse() {
     .await
     .expect("…dispatched onto the owner's laptop");
 
+    // ---- R0's own card path: the owner approves an agent's spawn onto the
+    // laptop. The decision stands (`r0_1`); the delivery does not (§3).
+    let owner_approved =
+        request_spawn(&http, &base, &bearer, &tenant, run, vps, TOOL, "주인 승인").await;
+    let owner_card = approval_for(&su, owner_approved).await;
+    let (status, receipt) = decide(
+        &http,
+        &base,
+        &owner_token,
+        tenant.workspace,
+        owner_card,
+        true,
+        Some(laptop),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "R0 lets the owner approve onto the laptop: {receipt}"
+    );
+    let (state, target, _) = control_row(&su, owner_approved).await;
+    assert_eq!((state.as_str(), target), ("dispatched", laptop));
+
     // ---- the other pre-R0 shapes, on the owner's laptop ----------------------
     let spawn = |tool: &str, label: &str| json!({"tool": tool, "label": label});
-    let mut withheld = vec![(
-        carded,
-        "an agent's spawn a colleague approved onto the laptop",
-    )];
+    let mut withheld = vec![
+        (
+            carded,
+            "an agent's spawn a colleague approved onto the laptop",
+        ),
+        (
+            owner_approved,
+            "an agent's spawn its owner approved onto the laptop (§3: an agent's control)",
+        ),
+    ];
     for (requester, session, kind, payload, why) in [
         (
             tenant.agent,
