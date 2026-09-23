@@ -1,4 +1,5 @@
 import {uuidEq, type Channel, type ReadState, type RosterMember} from '@momo/core/lib/api';
+import {composedUnreadCount} from '@momo/core/features/readState/model';
 import {
   channelLabelParts,
   dmPeer,
@@ -15,7 +16,7 @@ import type {ChannelGroups} from '../workspace/queries';
 // Every naming decision below is a call into
 // `@momo/core/features/workspace/directory` — `channelLabelParts` for the row
 // title, `isAmbiguousName` for whether a handle has to ride along, `unreadFor`
-// for the count, `dmPeer` for who a DM is with. None of it is re-derived here,
+// for the row, `dmPeer` for who a DM is with. None of it is re-derived here,
 // and the reason the core spells out is worth repeating because it is the exact
 // bug a hand-written mobile sidebar would ship with: **this roster really does
 // carry two 김인턴** — a human `@intern-kim` and an agent `@kim-intern` — so a
@@ -31,10 +32,23 @@ import type {ChannelGroups} from '../workspace/queries';
 //      twice would make the same conversation look like two.
 //   2. **open-channel unread suppression.** The row you are currently reading
 //      shows no badge, even before the server's projection catches up. Same rule
-//      as the web sidebar. It is the ONLY place this client overrides a server
-//      count, and it only ever overrides it downward, for one row.
+//      as the web sidebar (`sidebarUnreadCounts`). It is the ONLY place this
+//      client overrides the projection, and it only ever overrides it downward,
+//      for one row.
 //   3. **the search filter.** Substring, case-folded, over the text that is
 //      actually on the row. See the note on `matches` for why it is not fuzzier.
+//
+// ## The count is the COMPOSED one (ADR-0178 D3, #1964)
+//
+// A read-state row carries the server's `unreadCount`, and that number does not
+// know about 「여기부터 안 읽음」: the server keeps the mark in a column of its own
+// and never folds it into the count (PR #1961). A channel marked on the desktop
+// therefore arrives here with `unreadCount: 0`, and a row that printed it showed
+// the one channel the person had asked to come back to as read.
+//
+// So the count goes through `composedUnreadCount`, the core's single point, and
+// this file never names the mark. Composing here instead is exactly what D3
+// forbids — `__tests__/markUnreadConsumption.test.tsx` holds both halves.
 //
 // ## Spike constraint 1 lives at this boundary
 //
@@ -176,7 +190,9 @@ function channelRow(
     isAgent: label.isAgent,
     isPrivate: channel.kind === 'private',
     muted: channel.muted,
-    unreadCount: read?.unreadCount ?? 0,
+    // D3: never `read.unreadCount`. See the header — that field is blind to a
+    // mark set on another device.
+    unreadCount: read ? composedUnreadCount(read) : 0,
     mentionCount: read?.mentionCount ?? 0,
   }, peer ? [`@${peer.handle}`] : []);
 }
