@@ -2771,11 +2771,20 @@ function SearchResults(): React.JSX.Element {
 // 컴포넌트가 요구하는 문맥을 그대로 주는 것**이다.
 // =============================================================================
 
-/** 하네스용 세션. 결정은 전송되지 않는다(사진은 무장 전 상태를 찍는다). */
+/**
+ * 하네스용 세션. 결정은 전송되지 않는다(사진은 무장 전 상태를 찍는다).
+ *
+ * 이름과 핸들은 로스터의 그 멤버에서 온다. 핸들이 빠져 있으면 사이드바 발치의
+ * 계정 줄이 「@」 한 글자로 찍혀, 증거 사진이 빈 핸들 결함처럼 보였다
+ * (design-review 2593 R1 N-1).
+ */
+const HARNESS_SELF = ROSTER.find(member => member.id === SELF);
 const HARNESS_MEMBER = {
   id: SELF,
   workspaceId: 'measure-ws',
-  displayName: '곽성재',
+  kind: 'human',
+  displayName: HARNESS_SELF?.displayName ?? '곽성재',
+  handle: HARNESS_SELF?.handle ?? 'seongjae',
 } as Member;
 
 export default function SurfacesHarness({
