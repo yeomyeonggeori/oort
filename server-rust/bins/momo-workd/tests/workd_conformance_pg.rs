@@ -289,6 +289,10 @@ struct Server {
 }
 
 async fn start_server(pool: PgPool) -> Server {
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::WARN)
+        .with_test_writer()
+        .try_init();
     let state = AppState::new(
         pool,
         TEST_JWT_SECRET.to_string(),
@@ -891,12 +895,12 @@ async fn owner_resume(
         .send()
         .await
         .expect("create the source session");
-    assert_eq!(
-        created.status(),
-        201,
-        "the owner opens a session on the old laptop"
-    );
+    let created_status = created.status();
     let created: Value = created.json().await.expect("source body");
+    assert_eq!(
+        created_status, 201,
+        "the owner opens a session on the old laptop: {created}"
+    );
     let source = Uuid::parse_str(created["workSession"]["id"].as_str().expect("id")).unwrap();
     orphan_session(su, source).await;
     http.post(format!(
@@ -1155,10 +1159,12 @@ async fn wdc_2_mode_correction_codex_and_refusals_on_a_member_host() {
     let http = reqwest::Client::new();
     let token = login(&http, base, &fixture).await;
 
-    // The workspace catalog carries three more tools: a Claude that will not
-    // take the correction, Codex, and a `shell`.
+    // The workspace catalog carries three more tools: Codex, a `shell`, and —
+    // under the one other key the session ledger accepts (`work_session_tool_ck`)
+    // — a Claude that will not take the correction. The host allowlist, not
+    // the key, decides what runs.
     for (tool, command) in [
-        ("claude-stuck", "claude-agent-acp"),
+        ("opencode", "claude-agent-acp"),
         ("codex", "codex-acp"),
         ("shell", "zsh"),
     ] {
@@ -1183,7 +1189,7 @@ async fn wdc_2_mode_correction_codex_and_refusals_on_a_member_host() {
         &fixture,
         &[
             ("claude", &["--mode", "auto"]),
-            ("claude-stuck", &["--mode", "auto", "--set-mode-error"]),
+            ("opencode", &["--mode", "auto", "--set-mode-error"]),
             ("shell", &[]),
         ],
     );
@@ -1241,7 +1247,7 @@ async fn wdc_2_mode_correction_codex_and_refusals_on_a_member_host() {
         &token,
         &fixture,
         host,
-        "claude-stuck",
+        "opencode",
         "fix the bug",
     )
     .await;
@@ -1261,7 +1267,7 @@ async fn wdc_2_mode_correction_codex_and_refusals_on_a_member_host() {
     .await;
     assert!(
         !workd
-            .record("claude-stuck")
+            .record("opencode")
             .iter()
             .any(|entry| entry["received"]["method"] == "session/prompt"),
         "no prompt reached an agent that stayed in auto"
