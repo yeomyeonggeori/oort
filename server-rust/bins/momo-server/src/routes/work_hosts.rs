@@ -21,12 +21,21 @@
 //! Swift mounts it via `addPublic` (:116-118) while every other host route goes
 //! through `addProtected` (:94-110), and the handler resolves no principal: a
 //! daemon holds no bearer token, only its signing key. The route is mounted here
-//! the same way — outside [`crate::auth::require_principal`] — and its whole
-//! authorization is: the row exists, is unrevoked, and the Ed25519 signature
-//! over `momo.work_host.heartbeat.v1` verifies under the *stored* key, all under
-//! one `FOR UPDATE` so a concurrent revoke cannot be raced. Every failure is the
-//! same 401 sentence, so the route tells an attacker nothing about which check
-//! failed.
+//! the same way — outside [`crate::auth::require_principal`] — and authenticates
+//! inside the handler, exactly like `terminal_attach::validate`.
+//!
+//! ## ADR-0188 D7 (R0): the heartbeat is a v2 signed request
+//!
+//! It used to sign its own v1 payload, `momo.work_host.heartbeat.v1\n{ws}\n
+//! {host}\n{sentAtMs}`, with no request id: freshness was the ±5 minute skew
+//! window and nothing else, so one captured heartbeat could be re-sent for five
+//! minutes and keep a dead host looking alive — long enough for a phone to hand
+//! work to a laptop that is gone. It is now an ordinary signed host request
+//! ([`crate::work_host_auth`]): `momo.work_host.request.v2` over method, raw
+//! path, workspace, host, clock, **body digest** and a **request id consumed
+//! exactly once**, with no query string. v1 is not accepted: a request without
+//! the `MomoHost` headers never reaches a verifier. Every failure is still the
+//! same 401 sentence as every other signed request.
 //!
 //! ## The signed poll (#1114)
 //!
@@ -48,36 +57,44 @@
 
 use std::collections::BTreeMap;
 
+use axum::body::Bytes;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::IntoResponse;
 use axum::{Extension, Json};
 use momo_auth::{
-    active_workspace_role, heartbeat_timestamp_is_fresh, insert_work_host, list_work_hosts,
-    load_work_host, lock_work_host_credential, lock_work_host_ownership, mark_work_host_revoked,
-    normalize_public_key_b64, touch_work_host_last_seen, verify_work_host_heartbeat, NewWorkHost,
-    Principal, WorkHostRecord,
+    active_workspace_role, insert_work_host, list_work_hosts, load_work_host,
+    lock_work_host_ownership, mark_work_host_revoked, normalize_public_key_b64,
+    touch_work_host_last_seen, NewWorkHost, Principal, WorkHostRecord,
 };
 use momo_db::{with_tenant_tx, DbError};
 use momo_wire::{
-    record_provenance, EntityRef, ProvenanceError, SignedAction, Signer, ENTITY_WORK_HOST_HEARTBEAT,
+    record_provenance, EntityRef, ProvenanceError, Signer, ENTITY_WORK_HOST_HEARTBEAT,
 };
+use uuid::Uuid;
 
 use crate::dto::{
-    PendingWorkControlsResponse, RegisterWorkHostRequest, WorkHostDto, WorkHostHeartbeatRequest,
-    WorkHostListResponse, WorkHostResponse,
+    PendingWorkControlsResponse, RegisterWorkHostRequest, WorkHostDto, WorkHostListResponse,
+    WorkHostResponse,
 };
 use crate::error::ApiError;
 use crate::routes::shared::{path_uuid, require_human, settle, tenant_tx, workspace_scope};
 use crate::routes::work_controls::control_dto;
+use crate::work_host_auth::{
+    authenticate_signed_host_request, signed_request_unauthorized, MAX_SIGNED_BODY_BYTES,
+};
 use crate::AppState;
 
-/// The 401 every heartbeat failure answers with — unknown host, revoked host,
-/// bad signature and stale clock are indistinguishable on the wire
-/// (Swift `heartbeatUnauthorized`, :630-632).
-fn heartbeat_unauthorized() -> ApiError {
-    ApiError::unauthorized("invalid work host heartbeat signature")
-}
+/// The rollback a heartbeat asks for when the provenance chokepoint refuses a
+/// signature the authenticator accepted.
+///
+/// Unreachable while the two verifications agree (they check the same v2 bytes
+/// under the same stored key), and it must stay unreachable. If it ever fires,
+/// the liveness stamp written a statement earlier has to go too — an `Ok` would
+/// commit it — so the transaction is failed with this sentinel and
+/// [`heartbeat`] answers the ordinary signed-request 401 rather than a 500.
+/// Namespaced and versioned so no genuine driver error can be mistaken for it.
+const HEARTBEAT_PROVENANCE_REFUSED: &str = "momo.work_hosts.heartbeat_provenance_refused.v1";
 
 pub(crate) fn validated_scope(raw: &str) -> Result<String, ApiError> {
     let value = raw.trim().to_lowercase();
@@ -349,106 +366,107 @@ pub async fn revoke(
     }))
 }
 
-/// `POST /v1/workspaces/{ws}/work-hosts/{host}/heartbeat` — PUBLIC, signed
-/// (Swift `heartbeat`, :218-278).
+/// `POST /v1/workspaces/{ws}/work-hosts/{host}/heartbeat` — PUBLIC, signed v2
+/// (Swift `heartbeat`, :218-278; ADR-0188 D7).
 ///
-/// Note the order, which is Swift's: the clock window is checked *before* the
-/// database is touched, so a flood of stale heartbeats costs no row lock; then
-/// the row is locked, the signature verified against the stored key, and only
-/// then is `last_seen_at` stamped. Every rejection is the same 401.
+/// The order is the authenticator's: the query rule, the allow-list, the header
+/// shape and the clock window are all judged **before** the database, so a flood
+/// of stale or malformed heartbeats costs no query; then the stored key verifies
+/// the v2 signature and the request id is consumed, in one transaction. Only
+/// after that is `last_seen_at` stamped — guarded on `revoked_at IS NULL`, so a
+/// revoke that lands between the two transactions still wins. Every rejection is
+/// the same 401 as every other signed host request.
+///
+/// The body carries nothing the server reads: liveness is the fact of a fresh,
+/// signed, never-seen request. Whatever bytes are sent are covered by the
+/// signature's body digest, and an empty body is the normal case.
 ///
 /// ## Provenance (ADR-0146, B2.5)
 ///
-/// This is one of exactly **two** places in this server where an Ed25519
-/// signature from an actor actually arrives (the other is
-/// [`crate::work_host_auth`]'s v2 request signature). Measured, not assumed:
-/// `register`/`revoke` above are bearer-authenticated humans, and the cloud
-/// register path spends a bootstrap token — none of the three carries a
-/// signature, so none of them can be given provenance without a human device key
-/// (fast-follow). So the heartbeat is wired, and the wiring is *additive*: the
-/// signature was already verified for authentication, and `record_provenance`
-/// re-derives the same bytes and stores the proof. The liveness stamp is the
-/// host-signature-induced state transition ADR-0146 §범위 3 names, and it is the
-/// only one this build has.
+/// One of the places in this server where an actor's Ed25519 signature
+/// arrives. The v2 signature was already verified for authentication, and
+/// `record_provenance` re-derives the same bytes and stores the proof under
+/// `work_host.heartbeat` — the same entity the v1 heartbeat recorded, now over
+/// `momo.work_host.request.v2` bytes (a fresh request id per beat, so every beat
+/// is its own row rather than a v1 signature re-presented inside the window).
+/// The liveness stamp is the host-signature-induced state transition ADR-0146
+/// §범위 3 names.
 ///
 /// The record is written **after** `touch_work_host_last_seen`, in the same
 /// transaction: a host revoked mid-flight leaves neither a stamp nor a
 /// provenance row.
 pub async fn heartbeat(
     State(state): State<AppState>,
+    method: Method,
+    uri: Uri,
     Path((workspace, host)): Path<(String, String)>,
-    Json(request): Json<WorkHostHeartbeatRequest>,
+    headers: HeaderMap,
+    body: Bytes,
 ) -> Result<Json<WorkHostResponse>, ApiError> {
-    // No principal: a daemon holds a signing key, never a bearer token, so the
-    // workspace comes from the path and is validated as a UUID only. RLS still
-    // confines every statement below to it.
-    let workspace_id = path_uuid(&workspace, "invalid workspace id")?;
-    let host_id = path_uuid(&host, "invalid work host id")?;
-
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_millis() as i64)
-        .unwrap_or_default();
-    if !heartbeat_timestamp_is_fresh(request.sent_at_ms, now_ms) {
-        return Err(heartbeat_unauthorized());
+    if body.len() > MAX_SIGNED_BODY_BYTES {
+        return Err(signed_request_unauthorized());
     }
+    // No principal: a daemon holds a signing key, never a bearer token, so the
+    // workspace comes from the path. An id that does not parse cannot have been
+    // signed, so it answers the signature 401 rather than a 400 — the caller
+    // learns nothing either way (the `terminal_attach::validate` rule).
+    let (Ok(workspace_id), Ok(host_id)) = (Uuid::parse_str(&workspace), Uuid::parse_str(&host))
+    else {
+        return Err(signed_request_unauthorized());
+    };
 
-    let sent_at_ms = request.sent_at_ms;
-    let signature = request.signature.clone();
+    let signed =
+        authenticate_signed_host_request(&state, &method, &uri, &headers, &body, workspace_id)
+            .await?;
+    // The authenticator pins the signer to the `{host}` segment of this path
+    // (`scoped_host_id_from_path`). Restated because a route that stamps a host
+    // alive must be able to say which host without deferring to a module.
+    if signed.host_id != host_id {
+        return Err(signed_request_unauthorized());
+    }
+    let signature = signed.signature;
+
     let outcome = with_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
-            let Some(credential) = lock_work_host_credential(conn, host_id).await? else {
-                return Ok(None);
-            };
-            if !credential.active
-                || !verify_work_host_heartbeat(
-                    &credential.public_key,
-                    &signature,
-                    workspace_id,
-                    host_id,
-                    sent_at_ms,
-                )
-            {
-                return Ok(None);
-            }
             if !touch_work_host_last_seen(conn, host_id).await? {
                 return Ok(None);
             }
             // ADR-0146: the same verified signature, recorded as provenance.
-            // A re-presented heartbeat inside the skew window hits
-            // `action_signature_signature_uniq` and records once, not twice.
-            let action = SignedAction::WorkHostHeartbeat {
-                workspace_id,
-                host_id,
-                sent_at_ms,
-            };
             match record_provenance(
                 conn,
                 workspace_id,
                 &EntityRef::new(ENTITY_WORK_HOST_HEARTBEAT, host_id),
                 // A host is not a member: the signer is its stored key, and
                 // attributing this to the owning human would be a false record.
-                &Signer::work_host(&credential.public_key),
-                &signature,
-                &action,
+                &Signer::work_host(&signature.signer_pubkey_b64),
+                &signature.signature_b64,
+                &signature.action(workspace_id, host_id),
             )
             .await
             {
                 Ok(_) => {}
-                // Unreachable while the two verifications agree, and it must
-                // stay unreachable: if it ever fires, the heartbeat answers the
-                // same indistinguishable 401 rather than 500ing or — worse —
-                // stamping liveness for a signature the sidecar refused.
-                Err(ProvenanceError::SignatureRejected { .. }) => return Ok(None),
+                Err(ProvenanceError::SignatureRejected { .. }) => {
+                    return Err(DbError::Sqlx(momo_db::sqlx::Error::Protocol(
+                        HEARTBEAT_PROVENANCE_REFUSED.to_string(),
+                    )));
+                }
                 Err(ProvenanceError::Db(error)) => return Err(DbError::from(error)),
             }
             Ok::<_, DbError>(load_work_host(conn, host_id).await?)
         })
     })
-    .await
-    .map_err(|error| ApiError::internal("work_hosts.heartbeat", error))?;
+    .await;
 
-    let record = outcome.ok_or_else(heartbeat_unauthorized)?;
+    let record = match outcome {
+        Err(DbError::Sqlx(momo_db::sqlx::Error::Protocol(ref message)))
+            if message == HEARTBEAT_PROVENANCE_REFUSED =>
+        {
+            return Err(signed_request_unauthorized());
+        }
+        outcome => outcome.map_err(|error| ApiError::internal("work_hosts.heartbeat", error))?,
+    }
+    // `None`: revoked between the authentication and the stamp.
+    .ok_or_else(signed_request_unauthorized)?;
     Ok(Json(WorkHostResponse {
         work_host: work_host_dto(record)?,
     }))
@@ -498,10 +516,15 @@ mod tests {
         assert!(validated_capabilities(Some(&too_many)).is_err());
     }
 
+    /// ADR-0188 D7: a heartbeat fails the way every signed host request fails
+    /// — one 401 sentence, whichever check refused it — and its rollback
+    /// sentinel is namespaced so no driver error reads as it.
     #[test]
-    fn every_heartbeat_failure_is_the_same_401() {
-        let error = heartbeat_unauthorized();
+    fn every_heartbeat_failure_is_the_signed_request_401() {
+        let error = signed_request_unauthorized();
         assert_eq!(error.status, StatusCode::UNAUTHORIZED);
-        assert_eq!(error.message, "invalid work host heartbeat signature");
+        assert_eq!(error.message, "invalid work host request signature");
+        assert!(HEARTBEAT_PROVENANCE_REFUSED.starts_with("momo.work_hosts."));
+        assert!(HEARTBEAT_PROVENANCE_REFUSED.ends_with(".v1"));
     }
 }

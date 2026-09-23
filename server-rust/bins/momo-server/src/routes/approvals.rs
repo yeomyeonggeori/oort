@@ -82,7 +82,7 @@ use momo_agent::tools::{ToolResult, TOOL_AUDIT_SCHEMA};
 use momo_agent::{
     end_parked_run_in_tx, requeue_run_from_approval_in_tx, succeed_parked_run_in_tx, RunStatus,
 };
-use momo_auth::Principal;
+use momo_auth::{Principal, PrincipalKind};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
 use momo_messaging::{
@@ -113,6 +113,10 @@ use crate::AppState;
 
 /// The body of the `tool_result` a rejection appends (Swift :847).
 const REJECTED_TOOL_RESULT_BODY: &str = "Tool call rejected by human approval.";
+
+/// ADR-0188 D3 (R0) — the receipt `status` a principal that is not a person is
+/// refused with: 「결정 라우트는 사람 principal만 받는다」.
+const HUMAN_PRINCIPAL_REQUIRED: &str = "human_principal_required";
 
 /// The one expected failure this route discovers **after** its first write, and
 /// the receipt `status` it answers with.
@@ -304,6 +308,31 @@ async fn decide(
     headers: &HeaderMap,
     request: ApprovalDecisionRequest,
 ) -> Result<Response, ApiError> {
+    // **ADR-0188 D3 (R0) — the decision route takes a person, and only a
+    // person.**
+    //
+    // First, before the idempotency replay and before any row is read: a
+    // principal that is not a person must not be able to read even a stored
+    // receipt through this route. One kind matters above all. A signed work
+    // host's principal carries its **owner's** `member_id`
+    // (`auth::authenticate_signed_host`), so every membership predicate below
+    // would pass it — and a laptop could approve work onto itself as the person
+    // who owns it. The route is not on the host signature allow-list
+    // (`work_host_auth::is_allowed_signed_path` — ADR-0188: 「host 서명
+    // allow-list에 넣지 않는다」), so no such principal reaches here today; this
+    // check is what keeps that true if the allow-list ever moves. An agent
+    // bearer is refused by the middleware's scope table and again here.
+    if principal.kind != PrincipalKind::Human {
+        return respond(refusal(
+            approval_id,
+            principal.member_id,
+            HUMAN_PRINCIPAL_REQUIRED,
+            "approval decisions require a human principal",
+            StatusCode::FORBIDDEN,
+            Utc::now(),
+        ));
+    }
+
     let reason = normalized_reason(request.reason.as_deref());
     let approve = request.approve;
     let client_decision_id = request.client_decision_id;
@@ -354,6 +383,12 @@ async fn decide(
         ),
         outcome => settle_db("approvals.decide", outcome)?,
     };
+    respond(decision)
+}
+
+/// Answer a settled decision: the receipt, the one-time value grafted on when
+/// there is one, and `no-store` on every outcome.
+fn respond(decision: Decision) -> Result<Response, ApiError> {
     let status = decision.status;
     let secret_once = decision.secret_once;
     let mut receipt: ApprovalDecisionReceipt = serde_json::from_value(decision.receipt)
@@ -518,6 +553,78 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
         Ok(choice) => choice,
         Err(rejected) => return Ok(Ok(rejected)),
     };
+
+    // ---- ADR-0188 R0: work headed to a remote (member-scoped) host ----------
+    //
+    // The host this decision is **about** ([`decision_reference_host`]) — when
+    // approving, the host the spawn finally runs on, which is why this follows
+    // the host choice — and its owner when it is a remote host.
+    let remote_host = match decision_reference_host(&approval, &input, &host_choice) {
+        Some(host_id) => {
+            momo_t3::work_control::remote_host_owner_in_tx(conn, input.workspace_id, host_id)
+                .await
+                .map_err(control_failure)?
+                .map(|owner| (host_id, owner))
+        }
+        None => None,
+    };
+
+    // ADR-0188 D3 — 결정자 = host 소유자. Work headed to somebody's own machine
+    // is their call and nobody else's: not a channel member's, not a workspace
+    // admin's. The membership check above stays necessary; for this host it
+    // stops being sufficient.
+    if let Some((_, owner)) = remote_host {
+        if owner != input.member_id {
+            return Ok(Ok(refusal(
+                approval.id,
+                input.member_id,
+                momo_t3::work_control::REFUSAL_REMOTE_HOST_OWNER_REQUIRED,
+                "only the work host's owner can decide work headed to it",
+                StatusCode::FORBIDDEN,
+                now,
+            )));
+        }
+    }
+
+    // ADR-0188 D6 — 원격 shell 금지. Refused even when the owner approves it:
+    // the invariant is about the tool, not the decider (ADR-0188 §3). Only an
+    // approval can put a tool on a host, so only an approval is judged — against
+    // the host it would really land on, which covers the spawn an agent aimed
+    // at a team box and the owner redirected to their laptop.
+    if let (true, Some((host_id, _))) = (input.approve, remote_host) {
+        let Some(tool) = spawn_execution_tool(&approval.payload) else {
+            // `spawn_execution_object` always writes `tool` beside the
+            // candidates, so a card that offers hosts without naming its tool
+            // was written wrong — answered like a malformed binding, never
+            // followed onto somebody's laptop.
+            return Ok(Ok(refusal(
+                approval.id,
+                input.member_id,
+                "internal_error",
+                "spawn approval names no tool",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                now,
+            )));
+        };
+        if momo_t3::work_control::remote_host_refuses_tool_in_tx(
+            conn,
+            input.workspace_id,
+            host_id,
+            tool,
+        )
+        .await
+        .map_err(control_failure)?
+        {
+            return Ok(Ok(refusal(
+                approval.id,
+                input.member_id,
+                momo_t3::work_control::REFUSAL_REMOTE_HOST_SHELL,
+                "a shell cannot be spawned on a member-scoped work host",
+                StatusCode::FORBIDDEN,
+                now,
+            )));
+        }
+    }
 
     // ---- expiry: settle it rather than merely refusing (Swift :198-221) ----
     if approval.expires_at.is_some_and(|expires| expires <= now) {
@@ -1369,6 +1476,49 @@ pub(crate) async fn expire_run(
 // ---------------------------------------------------------------------------
 // ADR-0125 D6-A — the host the approver chose (#1114)
 // ---------------------------------------------------------------------------
+
+/// ADR-0188 D3 — the host a decision is **about**: 「판정 기준은 최종 선택
+/// host다. host 선택이 있으면 선택된 host의 소유자가 기준이다」.
+///
+/// * **Approving** — the host the spawn will finally run on: the approver's
+///   pick, else the card's default. That is exactly what [`resolve_host_choice`]
+///   already settled and judged eligible, so it is read from there rather than
+///   recomputed.
+/// * **Rejecting** — nothing will run, so it is the host the card points at
+///   when the person says no: their pick when it is one the card offers, else
+///   the card's default. A pick the card never offered cannot point it anywhere
+///   (the same rule `resolve_host_choice` applies to an approval's pick), so
+///   naming some other host is not a way to settle a card that sits on
+///   somebody's laptop.
+/// * `None` for an approval that asks no host question — every approval that is
+///   not a spawn. ADR-0188 D3 says nothing about who decides those.
+fn decision_reference_host(
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    host_choice: &HostChoice,
+) -> Option<Uuid> {
+    if input.approve {
+        return host_choice.selected;
+    }
+    if !offers_host_choice(&approval.payload) {
+        return None;
+    }
+    input
+        .selected_host_id
+        .filter(|picked| selectable_host_ids(&approval.payload).contains(picked))
+        .or_else(|| default_execution_host(&approval.payload))
+}
+
+/// `execution.tool` — the tool a spawn card asks to start, as
+/// `momo_t3::work_control::spawn_execution_object` writes it beside the host
+/// candidates on both producers (the REST ledger and the `work.session.spawn`
+/// tool).
+fn spawn_execution_tool(payload: &Value) -> Option<&str> {
+    payload
+        .get("execution")
+        .and_then(|execution| execution.get("tool"))
+        .and_then(Value::as_str)
+}
 
 /// The outcome of judging a decision's host selection.
 struct HostChoice {

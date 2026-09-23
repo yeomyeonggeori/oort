@@ -25,8 +25,10 @@
 //! other crate may own: the **WorkHost credential registry**
 //! ([`work_host_store`] — a `work_host` row is a credential exactly like a
 //! `token` row) and the **workspace-role authority**
-//! ([`workspace_authorization`], the single `workspace_membership` predicate),
-//! plus heartbeat-signature verification in [`workhost`].
+//! ([`workspace_authorization`], the single `workspace_membership` predicate).
+//! Its v1 heartbeat verifier is gone since ADR-0188 D7 (R0): a heartbeat is a
+//! v2 signed request like every other host act, so [`workhost`] verifies one
+//! format.
 
 //! B2.4 adds the third credential path this server authenticates: the **signed
 //! work-host request** ([`work_host_request`] — v2 payload + one-time request
@@ -186,13 +188,13 @@ pub use work_host_request::{
     REQUEST_REPLAY_RETENTION_MINUTES,
 };
 pub use work_host_store::{
-    insert_work_host, list_work_hosts, load_work_host, lock_work_host_credential,
-    lock_work_host_ownership, mark_work_host_revoked, touch_work_host_last_seen, NewWorkHost,
-    WorkHostCredential, WorkHostOwnership, WorkHostRecord, ONLINE_WINDOW_SECONDS,
+    insert_work_host, list_work_hosts, load_work_host, lock_work_host_ownership,
+    mark_work_host_revoked, touch_work_host_last_seen, NewWorkHost, WorkHostOwnership,
+    WorkHostRecord, ONLINE_WINDOW_SECONDS,
 };
 pub use workhost::{
-    heartbeat_timestamp_is_fresh, normalize_public_key_b64, verify_work_host_heartbeat,
-    verify_work_host_request, HEARTBEAT_CLOCK_SKEW_MS,
+    heartbeat_timestamp_is_fresh, normalize_public_key_b64, verify_work_host_request,
+    HEARTBEAT_CLOCK_SKEW_MS,
 };
 pub use workspace_authorization::{
     active_workspace_role, active_workspace_role_for_update, verified_operator_email, WorkspaceRole,

@@ -604,10 +604,16 @@ fn candidate(execution: &Value, host: Uuid) -> &Value {
 /// `acked` with the session bound → the lineage that binding unlocks.
 ///
 /// The host swap in the middle is the ADR-0125 D6-A assertion. The agent asked
-/// for the laptop; the person sent it to the team box. If the decision route
+/// for one team box; the person sent it to another. If the decision route
 /// ignored `hostId`, every other assertion here would still pass and the picker
 /// would be decoration — so the swap is checked on the ledger row, on the
 /// broadcast, and on the session that ends up bound.
+///
+/// Both ends are **workspace-scoped** since ADR-0188 R0: an agent bearer can no
+/// longer aim a spawn at a member-scoped host at all (`remote_host_kill_only`),
+/// and the owner-only decision onto one is `remote_host_r0_conformance_pg`'s
+/// subject. The laptop stays in the room as a candidate — it is still the
+/// card's default (로컬 온라인 우선) — which is what this card is about.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
 async fn ade1_1_a_spawn_waits_for_a_human_then_reaches_the_host_they_chose() {
@@ -638,6 +644,16 @@ async fn ade1_1_a_spawn_waits_for_a_human_then_reaches_the_host_they_chose() {
         Some(5),
     )
     .await;
+    let other_vps = seed_host(
+        &su,
+        tenant.workspace,
+        tenant.human,
+        "workspace",
+        "workd",
+        "옆 VPS",
+        Some(5),
+    )
+    .await;
     let sleeping = seed_host(
         &su,
         tenant.workspace,
@@ -665,7 +681,7 @@ async fn ade1_1_a_spawn_waits_for_a_human_then_reaches_the_host_they_chose() {
     let bearer = agent_bearer(&su, &tenant, agent).await;
 
     // ---- the request --------------------------------------------------------
-    let response = request_spawn(&http, &base, &bearer, &tenant, run, laptop, "리팩터링").await;
+    let response = request_spawn(&http, &base, &bearer, &tenant, run, other_vps, "리팩터링").await;
     assert_eq!(response.status(), 201, "an agent may request a control");
     let body: Value = response.json().await.expect("control body");
     let control: Uuid = body["workControl"]["id"]
@@ -860,13 +876,16 @@ async fn ade1_2_an_undecided_spawn_never_reaches_a_host() {
     let tenant = seed_tenant(&su, &app_pool).await;
     let agent = seed_channel_agent(&su, &tenant, "hermes").await;
     let run = seed_run(&su, &tenant, agent, "running").await;
-    let laptop = seed_host(
+    // A team box: since ADR-0188 R0 an agent bearer cannot aim a spawn at a
+    // member-scoped host at all, so the undecided-spawn rule is proven where
+    // an agent can still ask.
+    let vps = seed_host(
         &su,
         tenant.workspace,
         tenant.human,
-        "member",
-        "app",
-        "내 맥",
+        "workspace",
+        "workd",
+        "팀 VPS",
         Some(5),
     )
     .await;
@@ -876,7 +895,7 @@ async fn ade1_2_an_undecided_spawn_never_reaches_a_host() {
     let token = login(&http, &base, tenant.workspace, &tenant.email).await;
     let bearer = agent_bearer(&su, &tenant, agent).await;
 
-    let body: Value = request_spawn(&http, &base, &bearer, &tenant, run, laptop, "위험한 일")
+    let body: Value = request_spawn(&http, &base, &bearer, &tenant, run, vps, "위험한 일")
         .await
         .json()
         .await
@@ -1012,6 +1031,19 @@ async fn ade1_3_a_host_the_card_never_offered_is_refused() {
         Some(5),
     )
     .await;
+    // What the agent aims at. Since ADR-0188 R0 an agent bearer cannot aim a
+    // spawn at a member-scoped host (`remote_host_kill_only`), so it asks for
+    // the team box and the picker is where a laptop is chosen — by its owner.
+    let vps = seed_host(
+        &su,
+        tenant.workspace,
+        tenant.human,
+        "workspace",
+        "workd",
+        "팀 VPS",
+        Some(5),
+    )
+    .await;
 
     let base = start_server(app_pool).await;
     let http = reqwest::Client::new();
@@ -1036,7 +1068,7 @@ async fn ade1_3_a_host_the_card_never_offered_is_refused() {
         "member-scoped work host belongs to another session owner"
     );
 
-    let body: Value = request_spawn(&http, &base, &bearer, &tenant, run, laptop, "리팩터링")
+    let body: Value = request_spawn(&http, &base, &bearer, &tenant, run, vps, "리팩터링")
         .await
         .json()
         .await
@@ -1079,7 +1111,8 @@ async fn ade1_3_a_host_the_card_never_offered_is_refused() {
     }
 
     // …and the legitimate host still works, so the refusals above are a rule
-    // rather than a broken route.
+    // rather than a broken route. The laptop is the approver's own, which is
+    // what ADR-0188 D3 asks of a decision that lands on a member-scoped host.
     let response = decide(
         &http,
         &base,
@@ -1116,13 +1149,17 @@ async fn ade1_4_a_pre_authorised_tool_dispatches_without_a_card() {
     let tenant = seed_tenant(&su, &app_pool).await;
     let agent = seed_channel_agent(&su, &tenant, "hermes").await;
     let run = seed_run(&su, &tenant, agent, "running").await;
-    let laptop = seed_host(
+    // A team box. ADR-0188 R0 took member-scoped hosts out of ADR-0114 D5
+    // entirely — no standing auto-approval reaches somebody's own machine
+    // (`remote_host_r0_conformance_pg`) — so the standing permission is proven
+    // where it still applies.
+    let vps = seed_host(
         &su,
         tenant.workspace,
         tenant.human,
-        "member",
-        "app",
-        "내 맥",
+        "workspace",
+        "workd",
+        "팀 VPS",
         Some(5),
     )
     .await;
@@ -1156,7 +1193,7 @@ async fn ade1_4_a_pre_authorised_tool_dispatches_without_a_card() {
         .expect("list body");
     assert_eq!(listed["tools"], json!([TOOL]));
 
-    let body: Value = request_spawn(&http, &base, &bearer, &tenant, run, laptop, "자동")
+    let body: Value = request_spawn(&http, &base, &bearer, &tenant, run, vps, "자동")
         .await
         .json()
         .await
@@ -1183,7 +1220,7 @@ async fn ade1_4_a_pre_authorised_tool_dispatches_without_a_card() {
 
     // ---- the workspace turns the tool off ----------------------------------
     seed_tool_profile(&su, tenant.workspace, tenant.human, TOOL, false).await;
-    let refused = request_spawn(&http, &base, &bearer, &tenant, run, laptop, "여전히 자동?").await;
+    let refused = request_spawn(&http, &base, &bearer, &tenant, run, vps, "여전히 자동?").await;
     assert_eq!(
         refused.status(),
         400,
