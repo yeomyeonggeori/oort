@@ -3,7 +3,7 @@ import {THREAD_COMPOSER_PLACEHOLDER} from '@momo/core/features/chat/composerCopy
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
-import {ErrorState, Screen, ScreenHeader} from '../../design/atoms';
+import {ErrorState, NoticeBlock, Screen, ScreenHeader} from '../../design/atoms';
 import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {EdgeSwipeBack} from '../../nav/EdgeSwipeBack';
@@ -50,6 +50,7 @@ export function ThreadPanel({
   workspaceId,
   channelId,
   landOn,
+  notice,
   timeline,
   directory,
   myMemberId,
@@ -67,6 +68,12 @@ export function ThreadPanel({
    * `loadReplies` 가 끝나기 전의 목록에는 루트 하나뿐이라, 그때 쏘면 빗나간다.
    */
   landOn?: {messageId: string; token: number};
+  /**
+   * 그 착지가 무엇에 내려앉았는지의 한 문장 (#2584 리뷰 N-2) — 지금은 「이 알림의
+   * 메시지는 삭제됐습니다」 하나다. 채널과 같은 상자·같은 testID 를 쓴다: 같은 사실을
+   * 두 모양으로 말할 이유가 없고, 두 자리에 동시에 서는 일은 없다(화면이 한쪽만 준다).
+   */
+  notice?: {text: string; onDismiss: () => void};
   timeline: UseTimelineResult;
   directory: Directory;
   myMemberId: string;
@@ -238,38 +245,47 @@ export function ThreadPanel({
         />
         <ConversationLayout
           list={
-            <Timeline
-              messages={messages}
-              directory={directory}
-              // The root is always present, so this list is never empty and the
-              // "no replies yet" invitation belongs beside the composer instead.
-              status="ready"
-              pending={pending}
-              reactions={timeline.reactions}
-              // 이슈 #1146 M1 — 채널과 **같은 지도**다. 행마다의 `pinned` 는
-              // `Timeline` 이 여기서 유도하므로, 이것 없이 `onTogglePin` 만 주면
-              // 이미 고정된 답글이 「고정하기」라고 말한다.
-              pins={timeline.pins}
-              myMemberId={myMemberId}
-              // A thread has no older page to fetch: `loadReplies` walks every
-              // cursor before it resolves.
-              reachedStart
-              nowMs={nowMs}
-              actions={actions}
-              selfSendToken={selfSendToken}
-              // 여기서는 루트 하나를 빼면 전부 답글이다. 행마다 「답글」이라고
-              // 적는 것은 정보의 모양을 한 소음이다 — 채널에서는 그 표식이
-              // 유일한 단서지만, 여기서는 화면 제목이 이미 스레드다.
-              markReplies={false}
-              // 그리고 루트 행의 「답글 N개 · 마지막 …」도 그리지 않는다. 롤업은
-              // **채널에서 "여기 스레드가 있다"를 알리는 장치**이고, 이미 그 스레드를
-              // 열어 둔 사람에게는 자기가 서 있는 곳의 이름을 다시 읽어 주는 것에
-              // 불과하다. 핸들러가 없으니 글로 그려지긴 했지만, 문제는 눌리느냐가
-              // 아니라 **그 줄이 여기서 할 말이 없다**는 것이었다.
-              showRollup={false}
-              onResendPending={clientMsgId => void timeline.resend(clientMsgId)}
-              jumpTarget={jumpTarget}
-            />
+            <>
+              {notice ? (
+                <NoticeBlock
+                  headline={notice.text}
+                  onDismiss={notice.onDismiss}
+                  testID="notification-landing-notice"
+                />
+              ) : null}
+              <Timeline
+                messages={messages}
+                directory={directory}
+                // The root is always present, so this list is never empty and the
+                // "no replies yet" invitation belongs beside the composer instead.
+                status="ready"
+                pending={pending}
+                reactions={timeline.reactions}
+                // 이슈 #1146 M1 — 채널과 **같은 지도**다. 행마다의 `pinned` 는
+                // `Timeline` 이 여기서 유도하므로, 이것 없이 `onTogglePin` 만 주면
+                // 이미 고정된 답글이 「고정하기」라고 말한다.
+                pins={timeline.pins}
+                myMemberId={myMemberId}
+                // A thread has no older page to fetch: `loadReplies` walks every
+                // cursor before it resolves.
+                reachedStart
+                nowMs={nowMs}
+                actions={actions}
+                selfSendToken={selfSendToken}
+                // 여기서는 루트 하나를 빼면 전부 답글이다. 행마다 「답글」이라고
+                // 적는 것은 정보의 모양을 한 소음이다 — 채널에서는 그 표식이
+                // 유일한 단서지만, 여기서는 화면 제목이 이미 스레드다.
+                markReplies={false}
+                // 그리고 루트 행의 「답글 N개 · 마지막 …」도 그리지 않는다. 롤업은
+                // **채널에서 "여기 스레드가 있다"를 알리는 장치**이고, 이미 그 스레드를
+                // 열어 둔 사람에게는 자기가 서 있는 곳의 이름을 다시 읽어 주는 것에
+                // 불과하다. 핸들러가 없으니 글로 그려지긴 했지만, 문제는 눌리느냐가
+                // 아니라 **그 줄이 여기서 할 말이 없다**는 것이었다.
+                showRollup={false}
+                onResendPending={clientMsgId => void timeline.resend(clientMsgId)}
+                jumpTarget={jumpTarget}
+              />
+            </>
           }
           composer={
             <View>

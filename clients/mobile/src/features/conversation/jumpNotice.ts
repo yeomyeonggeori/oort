@@ -24,6 +24,17 @@ export interface JumpNotice {
 }
 
 /**
+ * 고지를 **소리로** 말할 때의 한 덩이 (#2584 리뷰 M-2).
+ *
+ * 상자는 두 줄(무슨 일인지 · 무엇을 하면 되는지)이고, 머리줄은 제목이라 마침표가
+ * 없다. 이어 읽을 때 그 자리에 쉼을 둔다. 화면과 낭독이 **같은 상수**에서 오므로
+ * 둘은 갈라질 수 없다.
+ */
+export function jumpNoticeSpeech(notice: JumpNotice): string {
+  return `${notice.headline}. ${notice.detail}`;
+}
+
+/**
  * **무엇을** 찾다 못 찾았는가 (#1193 · #1196).
  *
  * 같은 기계를 **네 곳**이 탄다. 인용을 누른 사람에게 「인용한 원본」이라고 말하는

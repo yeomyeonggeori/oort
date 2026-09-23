@@ -29,7 +29,12 @@ import {useRefreshControl} from '../design/refresh';
 import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
 import {usePalette, useStyles} from '../design/theme';
 import {ThemeControl} from '../design/ThemeControl';
-import {buildSidebarSections, rowCount, type SidebarRow} from '../features/sidebar/rows';
+import {
+  buildSidebarSections,
+  CHANNEL_LIST_FAILED,
+  rowCount,
+  type SidebarRow,
+} from '../features/sidebar/rows';
 import {useChannels, useDirectory, useReadStates} from '../features/workspace/queries';
 import {useSession} from '../session/useSession';
 
@@ -330,7 +335,7 @@ export default function SidebarScreen({
         <LoadingState label="채널 목록을 불러오는 중입니다." testID="channels-loading" />
       ) : listFailed ? (
         <ErrorState
-          headline="채널을 불러오지 못했습니다."
+          headline={CHANNEL_LIST_FAILED}
           detail={queryFailureDetail(listError)}
           onRetry={() => {
             void channelsQuery.refetch();

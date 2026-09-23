@@ -65,6 +65,7 @@ import {useOnline} from '../features/inbox/useOnline';
 import {usePendingApprovals} from '../features/conversation/usePendingApprovals';
 import {
   jumpMissedNotice,
+  jumpNoticeSpeech,
   type JumpSubject,
 } from '../features/conversation/jumpNotice';
 import {
@@ -575,6 +576,15 @@ export default function ConversationScreen({
     messageId: string;
     token: number;
   } | null>(null);
+  /**
+   * 알림 착지가 무엇에 내려앉았는지의 한 문장 (#2569). `inThread` 면 스레드 판 **안**에
+   * 선다(#2584 리뷰 N-2) — 채널 쪽 자리는 스레드 판이 덮는다. 그래서 스레드를 닫거나
+   * 다른 스레드를 열면 그 문장도 함께 물러난다: 그 스레드에 대한 말이었기 때문이다.
+   */
+  const [notificationNotice, setNotificationNotice] = useState<{
+    text: string;
+    inThread: boolean;
+  } | null>(null);
   const hint = useLongPressHint();
 
   // ---- ADE 관제 (이슈 1137, ADR-0154 D2) ------------------------------------
@@ -896,7 +906,15 @@ export default function ConversationScreen({
   const jumpTargetRef = useRef<typeof jumpTarget>(null);
   jumpTargetRef.current = jumpTarget;
   const onJumpMissed = useCallback((reason: 'older' | 'unknown') => {
-    setJumpMissed(jumpMissedNotice(reason, jumpSubjectRef.current));
+    const notice = jumpMissedNotice(reason, jumpSubjectRef.current);
+    setJumpMissed(notice);
+    // 알림으로 온 점프만 소리를 낸다 (#2584 리뷰 M-2). 다른 넷(인용·고정·검색·세션)은
+    // 사람이 **이 화면에서** 누른 것의 답이라 상자가 누른 자리 곁에 선다. 알림은 잠금
+    // 화면에서 눌렀고 문장은 앱 안에 선다 — 화면을 보지 않는 사람에게는 알림을
+    // 눌렀는데 아무 일도 없었던 것과 같다. 셸의 다른 알림 문장(`fail`)과 같은 규율이다.
+    if (jumpSubjectRef.current === 'notification') {
+      AccessibilityInfo.announceForAccessibility(jumpNoticeSpeech(notice));
+    }
     const target = jumpTargetRef.current;
     if (target === null) return;
     setAwaitingJump({messageId: target.messageId, seq: target.seq});
@@ -947,6 +965,7 @@ export default function ConversationScreen({
   } = timeline;
   const openThread = useCallback((message: Message) => {
     setThreadLanding(null);
+    setNotificationNotice(current => (current?.inThread ? null : current));
     setThread(message);
   }, []);
   const onStartReached = useCallback(() => void loadOlder(), [loadOlder]);
@@ -967,6 +986,7 @@ export default function ConversationScreen({
   const closeThread = useCallback(() => {
     setThread(null);
     setThreadLanding(null);
+    setNotificationNotice(current => (current?.inThread ? null : current));
   }, []);
   // 같은 이유로 고정된다. 이 화면은 턴이 열려 있는 동안 초당 한 번 다시 그려지고,
   // 인라인이면 그때마다 `StopTurnControl`(자체 상태 셋을 든 컴포넌트)이 새 엘리먼트가
@@ -1069,9 +1089,6 @@ export default function ConversationScreen({
   //
   // 착지하는 동안 이 화면을 덮고 있던 층은 걷는다. 같은 방에서 알림을 눌렀을 때
   // 고정 목록이나 관제 목록, 다른 스레드가 떠 있으면 착지가 그 뒤에서 일어난다.
-  const [notificationNotice, setNotificationNotice] = useState<string | null>(
-    null,
-  );
   // 방을 옮기면 그 문장은 이 화면의 사실이 아니다. 착지 효과보다 **먼저**
   // 선언한다 — 같은 커밋에서 둘 다 돌면 나중 것이 이긴다.
   useEffect(() => setNotificationNotice(null), [channelId]);
@@ -1097,7 +1114,11 @@ export default function ConversationScreen({
     if (plan.jumpInChannel) {
       requestJump('notification', notification.messageId, null);
     }
-    setNotificationNotice(plan.notice);
+    setNotificationNotice(
+      plan.notice === null
+        ? null
+        : {text: plan.notice, inThread: plan.thread !== null},
+    );
     if (plan.notice !== null) {
       AccessibilityInfo.announceForAccessibility(plan.notice);
     }
@@ -1229,10 +1250,10 @@ export default function ConversationScreen({
             {/* 알림이 가리킨 것이 사라졌거나 스레드를 못 열었을 때의 한 문장
                 (#2569). 착지는 이미 일어났고 이것은 그 착지가 **무엇에** 내려앉았는지를
                 말하는 영수증이라, 점프 고지와 같은 자리·같은 상자를 쓴다. */}
-            {notificationNotice ? (
+            {notificationNotice && !notificationNotice.inThread ? (
               <View style={styles.notice}>
                 <NoticeBlock
-                  headline={notificationNotice}
+                  headline={notificationNotice.text}
                   onDismiss={dismissNotificationNotice}
                   testID="notification-landing-notice"
                 />
@@ -1349,6 +1370,14 @@ export default function ConversationScreen({
           workspaceId={workspaceId}
           channelId={channelId}
           landOn={threadLanding ?? undefined}
+          notice={
+            notificationNotice?.inThread
+              ? {
+                  text: notificationNotice.text,
+                  onDismiss: dismissNotificationNotice,
+                }
+              : undefined
+          }
           timeline={timeline}
           directory={directory}
           myMemberId={member.id}

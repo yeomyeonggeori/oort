@@ -89,7 +89,11 @@ function Shell(): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const [nav, dispatch] = useReducer(navReducer, INITIAL_NAV);
   // 알림 본문 탭 → 대화 하나 (#2569). 못 가면 그 이유 한 문장을 대화 목록에 둔다.
-  const tapRouting = useNotificationTapRouting(dispatch);
+  // 지금의 자리를 함께 건넨다: 답을 기다리는 탭은 사람이 다른 곳을 고르면 접힌다.
+  const tapRouting = useNotificationTapRouting(dispatch, {
+    tab: nav.tab,
+    conversation: nav.conversation,
+  });
 
   const onOpenConversation = useCallback(
     (

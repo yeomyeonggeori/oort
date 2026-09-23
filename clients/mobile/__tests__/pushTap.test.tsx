@@ -11,12 +11,17 @@ import {
 } from '@testing-library/react-native';
 import * as Notifications from 'expo-notifications';
 import React from 'react';
-import {AppState} from 'react-native';
+import {AccessibilityInfo, AppState} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
-import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
+import {
+  jumpMissedNotice,
+  jumpNoticeSpeech,
+} from '../src/features/conversation/jumpNotice';
+import {ThreadPanel} from '../src/features/conversation/ThreadPanel';
+import {CHANNEL_LIST_FAILED} from '../src/features/sidebar/rows';
 import {PUSH_ACTION} from '../src/push/contract';
 import {
   NOTIFICATION_TAP_COPY,
@@ -85,6 +90,8 @@ const OLD_ROOT = 'aaaaaaaa-0000-4000-8000-000000000007';
 /** 첫 페이지 밖의 메시지. 알림은 순서값을 나르지 않으므로 어디 있는지 모른다. */
 const UNLOADED = 'aaaaaaaa-0000-4000-8000-000000000008';
 const RANDOM_MSG = 'aaaaaaaa-0000-4000-8000-000000000009';
+/** 루트가 로드된 스레드 안의 지워진 답글 (#2584 리뷰 N-2). */
+const DELETED_REPLY = 'aaaaaaaa-0000-4000-8000-000000000010';
 const APPROVAL_ID = 'eeeeeeee-0000-4000-8000-000000000001';
 
 const SELF: Member = {
@@ -172,6 +179,13 @@ const GENERAL_HEAD = [
   }),
   message(14, DELETED, {state: 'deleted', body: undefined, deletedAtMs: T0 + 20_000}),
   message(15, ORPHAN_REPLY, {rootId: OLD_ROOT, body: '오래된 스레드에 단 답글'}),
+  message(16, DELETED_REPLY, {
+    rootId: ROOT,
+    authorMemberId: HERMES,
+    state: 'deleted',
+    body: undefined,
+    deletedAtMs: T0 + 30_000,
+  }),
 ];
 
 const RANDOM_HEAD = [
@@ -203,6 +217,11 @@ interface FetchOptions {
   /** 채널 목록 요청 n 번째(0부터)에 답할 목록. 없으면 늘 `CHANNELS`. */
   channelLists?: unknown[][];
   channelsStatus?: number;
+  /**
+   * 채널 목록 요청 하나하나에 직접 답한다(0부터 센 호출 번호를 받는다). 실패했다가
+   * 살아나는 서버, 답이 늦게 오는 서버를 그리려고 있다 (#2584 리뷰 M-1).
+   */
+  channelResponder?: (call: number) => Response | Promise<Response>;
 }
 
 function installFetch(options: FetchOptions = {}): jest.Mock {
@@ -212,12 +231,15 @@ function installFetch(options: FetchOptions = {}): jest.Mock {
     if (url.includes('/pins')) return jsonResponse(200, {pins: []});
     if (url.includes('/replies')) {
       return jsonResponse(200, {
-        messages: url.includes(ROOT) ? [GENERAL_HEAD[2]] : [],
+        messages: url.includes(ROOT)
+          ? GENERAL_HEAD.filter(m => (m as {rootId?: string}).rootId === ROOT)
+          : [],
       });
     }
     if (url.includes('/channels') && !url.includes('/messages')) {
       const call = channelCalls;
       channelCalls += 1;
+      if (options.channelResponder) return options.channelResponder(call);
       if (options.channelsStatus !== undefined) {
         return jsonResponse(options.channelsStatus, {error: {message: 'boom'}});
       }
@@ -452,6 +474,12 @@ async function expectLanded(
  * 그 상자가 **그 한 문장**을 든다. 상자에는 「닫기」도 있으므로 상자 전체의 글이
  * 아니라 문장 한 줄을 찾는다 — 문장이 조각나 있으면 이 찾기가 실패한다.
  */
+/**
+ * 화면이 소리로 말한 문장들 (#2584 리뷰 M-2). 한 문장 7종은 전부 사람이 누른 곳과
+ * 다른 화면에 서므로, 화면을 보지 않는 사람에게도 닿아야 한다.
+ */
+let announce: jest.SpyInstance;
+
 async function expectSentence(testID: string, sentence: string): Promise<void> {
   await waitFor(() =>
     expect(within(screen.getByTestId(testID)).getByText(sentence)).toBeTruthy(),
@@ -468,6 +496,8 @@ beforeEach(() => {
   captureListener();
   notificationsMock.getLastNotificationResponse.mockReset().mockReturnValue(null);
   notificationsMock.clearLastNotificationResponse.mockReset();
+  announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+  announce.mockClear();
 });
 
 afterEach(() => {
@@ -546,6 +576,16 @@ describe('탭이 가리키는 곳 — 식별자만으로 짓는다 (순수)', ()
       jumpInChannel: true,
       notice: NOTIFICATION_TAP_COPY.threadRootNotLoaded,
     });
+  });
+
+  it('스레드 안의 지워진 답글도 같은 문장이다 — 스레드를 열고 거기서 말한다 (#2584 N-2)', () => {
+    const plan = planNotificationLanding(GENERAL_HEAD as never, {
+      messageId: DELETED_REPLY,
+      threadRootId: ROOT,
+    });
+    expect(plan.thread?.id).toBe(ROOT);
+    expect(plan.jumpInChannel).toBe(false);
+    expect(plan.notice).toBe(NOTIFICATION_TAP_COPY.messageDeleted);
   });
 
   it('지워진 메시지는 묘비에 착지하고 지워졌다고 말한다', () => {
@@ -644,6 +684,7 @@ describe('갈 수 없으면 한 문장 — 조용히 무시하지 않는다 (#25
     await tapWhileRunning(apnsPayload({channelId: GONE, messageId: PLAIN}));
 
     await expectSentence('notification-tap-notice', NOTIFICATION_TAP_COPY.channelGone);
+    expect(announce).toHaveBeenCalledWith(NOTIFICATION_TAP_COPY.channelGone);
     expect(screen.queryByTestId('conversation-title')).toBeNull();
     // 캐시만 보고 말하지 않았다 — 서버에 한 번 더 물었다.
     const channelReads = fetchMock.mock.calls.filter(
@@ -683,6 +724,7 @@ describe('갈 수 없으면 한 문장 — 조용히 무시하지 않는다 (#25
     );
 
     await expectSentence('notification-tap-notice', NOTIFICATION_TAP_COPY.otherWorkspace);
+    expect(announce).toHaveBeenCalledWith(NOTIFICATION_TAP_COPY.otherWorkspace);
     expect(screen.queryByTestId('conversation-title')).toBeNull();
   });
 
@@ -696,16 +738,109 @@ describe('갈 수 없으면 한 문장 — 조용히 무시하지 않는다 (#25
     await tapWhileRunning(payload);
 
     await expectSentence('notification-tap-notice', NOTIFICATION_TAP_COPY.unreadable);
+    expect(announce).toHaveBeenCalledWith(NOTIFICATION_TAP_COPY.unreadable);
   });
 
-  it('목록을 못 불러오면 그 사실을 말한다 — 권한 문제로 바꿔 말하지 않는다', async () => {
-    installFetch({channelsStatus: 500});
+  it('목록 조회 실패 — ErrorState 한 상자만 말하고, 다시 시도가 성공하면 그때 착지한다 (#2584 M-1)', async () => {
+    let listUp = false;
+    installFetch({
+      channelResponder: () =>
+        listUp
+          ? jsonResponse(200, {channels: CHANNELS})
+          : jsonResponse(500, {error: {message: 'boom'}}),
+    });
     notificationsMock.getLastNotificationResponse.mockReturnValue(
       tapResponse(apnsPayload({messageId: PLAIN})),
     );
     renderShell();
 
-    await expectSentence('notification-tap-notice', NOTIFICATION_TAP_COPY.listFailed);
+    await waitFor(() => expect(screen.getByTestId('channels-error')).toBeTruthy());
+    // 한 사실은 한 상자다. 목록의 오류 상자 하나만 서고, 알림의 두 번째 상자는 없다.
+    expect(screen.getAllByTestId('channels-error')).toHaveLength(1);
+    expect(screen.getByText(CHANNEL_LIST_FAILED)).toBeTruthy();
+    expect(screen.queryByTestId('notification-tap-notice')).toBeNull();
+    // 소리로는 그 상자의 문장을 한 번 말한다.
+    await waitFor(() => expect(announce).toHaveBeenCalledWith(CHANNEL_LIST_FAILED));
+    expect(screen.queryByTestId('conversation-title')).toBeNull();
+
+    // 다시 시도가 또 실패해도 탭은 남고, 같은 말을 되풀이하지 않는다.
+    fireEvent.press(screen.getByTestId('channels-error-retry'));
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 20));
+    });
+    expect(screen.getAllByTestId('channels-error')).toHaveLength(1);
+    expect(
+      announce.mock.calls.filter(([said]) => said === CHANNEL_LIST_FAILED),
+    ).toHaveLength(1);
+
+    // 서버가 살아났다 → 다시 시도 → 그때 착지한다. 탭을 먼저 소진했다면 여기서 멈춘다.
+    listUp = true;
+    fireEvent.press(screen.getByTestId('channels-error-retry'));
+    await expectLanded('general', PLAIN, false);
+    expect(screen.queryByTestId('notification-tap-notice')).toBeNull();
+  });
+
+  it('목록 조회 실패 뒤 돌아온 목록에 방이 없으면 「없어졌거나 볼 권한이 없다」로 간다 (#2584 M-1)', async () => {
+    let listUp = false;
+    installFetch({
+      channelResponder: () =>
+        listUp
+          ? jsonResponse(200, {channels: CHANNELS})
+          : jsonResponse(500, {error: {message: 'boom'}}),
+    });
+    notificationsMock.getLastNotificationResponse.mockReturnValue(
+      tapResponse(apnsPayload({channelId: GONE, messageId: PLAIN})),
+    );
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId('channels-error')).toBeTruthy());
+
+    listUp = true;
+    fireEvent.press(screen.getByTestId('channels-error-retry'));
+
+    await expectSentence('notification-tap-notice', NOTIFICATION_TAP_COPY.channelGone);
+    expect(announce).toHaveBeenCalledWith(NOTIFICATION_TAP_COPY.channelGone);
+    expect(screen.queryByTestId('conversation-title')).toBeNull();
+  });
+
+  it('답을 기다리는 동안 사람이 다른 대화를 열면 그 탭은 접힌다 (#2584 M-1)', async () => {
+    let release: ((answer: Response) => void) | null = null;
+    installFetch({
+      channelResponder: call =>
+        call === 0
+          ? jsonResponse(200, {channels: CHANNELS})
+          : new Promise<Response>(resolve => {
+              release = resolve;
+            }),
+    });
+    renderShell();
+    await waitForSidebar();
+
+    // 캐시에 없는 새 DM 이라 셸이 목록을 다시 묻는다 — 그 답이 오기 전이다.
+    await tapWhileRunning(
+      apnsPayload({
+        channelId: FRESH_DM,
+        messageId: PLAIN,
+        category: 'momo.message',
+        reason: 'dm',
+      }),
+    );
+    await waitFor(() => expect(release).not.toBeNull());
+
+    // 사람이 스스로 #random 을 열었다.
+    fireEvent.press(screen.getByTestId(`sidebar-row-channel:${RANDOM}`));
+    await waitFor(() =>
+      expect(screen.getByTestId('conversation-title')).toHaveTextContent('random'),
+    );
+
+    // 이제야 답이 온다 — 그 DM 이 들어 있다. 그래도 끌어가지 않는다.
+    await act(async () => {
+      release?.(jsonResponse(200, {channels: [...CHANNELS, DM_CHANNEL]}));
+      await new Promise(resolve => setTimeout(resolve, 20));
+    });
+    // 그 DM 이 열렸다면 헤더는 상대의 이름(김민수)이다.
+    expect(screen.getByTestId('conversation-title')).toHaveTextContent('random');
+    expect(landedIds()).toHaveLength(0);
+    expect(screen.queryByTestId('notification-tap-notice')).toBeNull();
   });
 
   it('지워진 메시지 — 묘비에 착지하고 지워졌다고 말한다', async () => {
@@ -716,7 +851,30 @@ describe('갈 수 없으면 한 문장 — 조용히 무시하지 않는다 (#25
     await tapWhileRunning(apnsPayload({messageId: DELETED}));
 
     await expectSentence('notification-landing-notice', NOTIFICATION_TAP_COPY.messageDeleted);
+    expect(announce).toHaveBeenCalledWith(NOTIFICATION_TAP_COPY.messageDeleted);
     await waitFor(() => expect(landedIds()).toContain(DELETED));
+  });
+
+  it('스레드 안의 지워진 답글 — 스레드 안에서도 같은 문장으로 말한다 (#2584 N-2)', async () => {
+    installFetch();
+    renderShell();
+    await waitForSidebar();
+
+    await tapWhileRunning(
+      apnsPayload({messageId: DELETED_REPLY, threadId: ROOT}),
+    );
+
+    await waitFor(() => expect(screen.getByTestId('thread-title')).toBeTruthy());
+    // 채널 쪽 자리는 스레드 판이 덮는다. 문장은 **스레드 판 안에** 서야 읽힌다.
+    const panel = screen.UNSAFE_getByType(ThreadPanel);
+    await waitFor(() =>
+      expect(
+        within(panel).getByText(NOTIFICATION_TAP_COPY.messageDeleted),
+      ).toBeTruthy(),
+    );
+    expect(screen.getAllByTestId('notification-landing-notice')).toHaveLength(1);
+    expect(announce).toHaveBeenCalledWith(NOTIFICATION_TAP_COPY.messageDeleted);
+    await waitFor(() => expect(landedIds()).toContain(DELETED_REPLY));
   });
 
   it('루트가 첫 페이지 밖인 답글 — 채널에서 그 답글에 착지하고 이유를 말한다', async () => {
@@ -730,6 +888,7 @@ describe('갈 수 없으면 한 문장 — 조용히 무시하지 않는다 (#25
 
     await expectLanded('general', ORPHAN_REPLY, false);
     await expectSentence('notification-landing-notice', NOTIFICATION_TAP_COPY.threadRootNotLoaded);
+    expect(announce).toHaveBeenCalledWith(NOTIFICATION_TAP_COPY.threadRootNotLoaded);
   });
 
   it('첫 페이지에 없는 메시지 — 알림의 낱말로, 모르는 만큼만 말한다', async () => {
@@ -743,6 +902,8 @@ describe('갈 수 없으면 한 문장 — 조용히 무시하지 않는다 (#25
     await expectSentence('jump-missed', expected.headline);
     // 남의 주어(「찾던 메시지」·「인용한 원본」)로 말하지 않는다.
     expect(screen.getByTestId('jump-missed')).not.toHaveTextContent(/찾던|인용한/);
+    // 그리고 소리로도 말한다 (#2584 M-2) — 상자의 두 줄을 그대로.
+    expect(announce).toHaveBeenCalledWith(jumpNoticeSpeech(expected));
   });
 
   it('문장은 닫을 수 있는 영수증이다', async () => {

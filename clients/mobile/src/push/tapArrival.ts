@@ -117,7 +117,9 @@ export const NOTIFICATION_TAP_COPY = {
   unreadable: '이 알림이 가리키는 곳을 읽지 못해 앱만 열었습니다.',
   otherWorkspace: '이 알림은 다른 워크스페이스의 것이라 여기서 열 수 없습니다.',
   channelGone: '이 알림의 대화가 없어졌거나 볼 권한이 없습니다.',
-  listFailed: '대화 목록을 불러오지 못해 이 알림을 열지 못했습니다.',
+  // 목록 조회 실패는 여기 문장이 없다 (#2584 리뷰 M-1). 그 사실은 목록 자리의
+  // `ErrorState` 한 상자가 말하고(`CHANNEL_LIST_FAILED`), 탭은 그 「다시 시도」가
+  // 성공할 때까지 기다린다(`useNotificationTapRouting`).
   messageDeleted: '이 알림의 메시지는 삭제됐습니다.',
   threadRootNotLoaded:
     '스레드 첫 메시지를 이 화면에서 찾지 못해 채널에서 답글 위치로 이동했습니다.',
@@ -165,7 +167,12 @@ export interface NotificationLandingPlan {
   thread: Message | null;
   /** 채널 타임라인에서 그 메시지로 점프하는가. 스레드를 열면 착지는 스레드 안에서 한다. */
   jumpInChannel: boolean;
-  /** 착지와 함께 말할 한 문장. 없으면 null. */
+  /**
+   * 착지와 함께 말할 한 문장. 없으면 null.
+   *
+   * 스레드를 열면 스레드 **안에** 선다 — 채널 쪽 자리는 스레드 판이 덮으므로, 거기
+   * 세우면 스레드를 닫기 전까지 아무도 못 읽는다.
+   */
   notice: string | null;
 }
 
@@ -183,7 +190,9 @@ export interface NotificationLandingPlan {
  *   기계가 이미 갖고 있다(`jumpMissedNotice(…, 'notification')`) — 두 번째 문장을
  *   세우지 않는다.
  * - 지워진 메시지면 묘비(또는 그 묘비를 대신해 선 접힌 행)에 착지하고, 지워졌다고
- *   한 문장으로 말한다.
+ *   한 문장으로 말한다. **스레드 안에서도 같다** (#2584 리뷰 N-2). 알 수 있는 것은
+ *   첫 페이지에 그 답글이 있을 때다(채널 히스토리는 답글을 거르지 않으므로 대개
+ *   있다). 없으면 스레드가 불러온 묘비가 스스로 말한다.
  */
 export function planNotificationLanding(
   messages: readonly Message[],
@@ -195,9 +204,14 @@ export function planNotificationLanding(
     const rootId = landing.threadRootId;
     const root = messages.find(message => uuidEq(message.id, rootId)) ?? null;
     if (root) {
-      // 문장은 채널 쪽 자리에 서는데 스레드가 그 위를 덮는다. 스레드 안에서는
-      // 착지한 묘비가 스스로 「삭제된 메시지」라고 말하므로 겹쳐 말하지 않는다.
-      return {thread: root, jumpInChannel: false, notice: null};
+      // 채널과 **같은 문장**이다 (#2584 리뷰 N-2). 첫 판은 「묘비가 스스로 말한다」를
+      // 근거로 여기서만 입을 다물었는데, 그 근거는 채널에서도 똑같이 성립한다 —
+      // 한쪽만 말하면 같은 사실에 두 처리가 된다. 문장은 화면이 스레드 안에 세운다.
+      return {
+        thread: root,
+        jumpInChannel: false,
+        notice: deleted ? NOTIFICATION_TAP_COPY.messageDeleted : null,
+      };
     }
     return {
       thread: null,
