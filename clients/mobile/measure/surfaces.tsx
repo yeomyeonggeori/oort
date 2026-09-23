@@ -138,6 +138,17 @@ import type {WorkHost, WorkSession} from '@momo/core/lib/api';
 //                     (「증거가 상수 하나뿐이라 시각 판정은 확인 필요」).
 //   COMPOSER-OFFLINE  보낼 수 있을 때 ↔ 지금은 못 보낼 때 (감사 H-10)
 //
+// ## AX-7 (#2513) · U4-g (#1084) 가 더한 것 — 행동 승인의 한 흐름, 네 순간
+//
+//   ACTION-APPROVAL       결정 전: 부록 A 의 행 셋·사유·결정 권한 + 승인/거부
+//   ACTION-ROLE-REQUIRED  403 role_required 뒤: 무장 해제 + 조용한 안내. 결정을
+//                         실제로 보내야 서는 상태라 Maestro 가 누른다
+//                         (`maestro/92-action-role-required-capture.yaml`)
+//   ACTION-LINK-ONCE      승인 직후: 영수증 + 1회 링크(리드·값·복사) + 결과 카드
+//   ACTION-AFTER-REFRESH  다시 열었을 때: 승인됨 카드 + 결과 카드, 링크 없음(D4)
+//
+// 캡처는 `captures/action2513-*-{dark,light}.png` 다.
+//
 // ## ADE 1단계가 더한 것 (이슈 1114)
 //
 //   SPAWN-LOCKED      잠긴 픽커 ↔ 살아 있는 픽커 (리뷰 B1) — 무장하면 픽커가
@@ -972,6 +983,107 @@ function Frame({label, children}: {label: string; children: React.ReactNode}) {
       {children}
     </View>
   );
+}
+
+// ---- AX-7 (#2513) 픽스처: ADR-0186 부록 A·B 그대로 ----------------------------
+
+/** 부록 A. 제안한 에이전트는 로스터의 에이전트이고, 요약은 서버가 그 이름으로 짓는다. */
+const ACTION_APPROVAL_MESSAGE = {
+  ...MESSAGE,
+  id: '00000000-0000-7000-8000-0000000000b7',
+  type: 'approval_request',
+  body: 'Approve invite.create',
+  authorMemberId: AGENT,
+  // `MESSAGE` 는 답글 3개를 든다. 승인 카드에 스레드 롤업이 서면 사진이 이 배치가
+  // 만든 적 없는 줄을 찍는다.
+  thread: undefined,
+  props: {
+    approval_id: 'ap-1',
+    action_type: 'workspace_action',
+    status: 'pending',
+    title: '팀원 초대 링크 만들기',
+    summary:
+      '김인턴이 제안했습니다. 승인하면 관리자 권한으로 초대 링크를 만듭니다.',
+    action: {
+      id: 'invite.create',
+      rows: [
+        {label: '역할', value: 'member'},
+        {label: '사용 횟수', value: '1회'},
+        {label: '만료', value: '7일'},
+      ],
+      rationale: '새 팀원 온보딩 요청',
+      required_role: 'admin',
+    },
+  },
+} as unknown as Message & {props: Record<string, unknown>};
+
+/** 부록 B. `next` 는 정오표 뒤의 서버 값이다. 코드·URL 필드는 없다. */
+const ACTION_RESULT_MESSAGE = {
+  ...MESSAGE,
+  id: '00000000-0000-7000-8000-0000000000b8',
+  seq: 43,
+  type: 'tool_result',
+  body: '초대 링크를 만들었습니다.',
+  authorMemberId: AGENT,
+  thread: undefined,
+  props: {
+    'momo.action_result': {
+      v: 1,
+      action_id: 'invite.create',
+      status: 'executed',
+      approval_id: 'ap-1',
+      decided_by: SELF,
+      ref: {type: 'invite', id: '00000000-0000-7000-8000-0000000000f1'},
+      rows: [
+        {label: '역할', value: 'member'},
+        {label: '만료', value: '2026-09-29'},
+      ],
+      secret_shown_once: true,
+      next: {
+        label: '설정 › 멤버와 초대에서 보기',
+        href: '/settings?section=members',
+      },
+    },
+  },
+} as unknown as Message;
+
+/** 원장이 「지금도 대기」라고 말하는 승인 — 컨트롤이 서는 조건(`approvalGate.ts`). */
+const ACTION_GATES = new Map([
+  ['ap-1', {approvalId: 'ap-1', reversible: false, expiresAtMs: null}],
+]);
+
+/**
+ * 결정 POST 하나에만 서버처럼 답하는 가짜 (하네스 전용 · #2513).
+ *
+ * 403 뒤의 모습은 결정이 **실제로 나가야** 나온다 — `ApprovalDecision` 의 상태는
+ * prop 으로 세울 수 없고, 세울 수 있게 만드는 것은 배송 컴포넌트에 하네스용 문을
+ * 하나 더 내는 일이다. 대신 네트워크 끝에서 답한다. 결정 말고는 원래 `fetch` 로
+ * 흘려보낸다(하네스의 쿼리는 꺼져 있어 실제로는 아무것도 안 나간다).
+ */
+function DecisionStub({
+  status,
+  body,
+  children,
+}: {
+  status: number;
+  body: unknown;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  React.useState(() => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/decision')) {
+        return {
+          status,
+          ok: status >= 200 && status < 300,
+          text: async () => JSON.stringify(body),
+        } as unknown as Response;
+      }
+      return original(input, init);
+    }) as typeof fetch;
+    return null;
+  });
+  return <>{children}</>;
 }
 
 function Row({
@@ -1887,6 +1999,113 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </Frame>
       );
     }
+    // ---- AX-7 (#2513) + U4-g (#1084): 행동 승인 · 403 · 1회 링크 · 영속 카드 ----
+    //
+    // 네 장이 한 흐름의 네 순간이다: 결정 전 → 결정할 수 없다는 답 → 결정 직후
+    // (링크가 이 화면에 한 번) → 다시 열었을 때(링크 없이 영속 카드만). 픽스처는
+    // ADR-0186 부록 A·B 그대로이고, 값(부록 C `secretOnce`)은 **영수증 표**로만
+    // 건넨다 — 대화 화면이 결정 응답에서 받아 드는 바로 그 자리다.
+    case 'action-approval':
+      return (
+        <Frame label="행동 승인 카드 — 대기 (ADR-0186 부록 A · #2513)">
+          <MessageRow
+            message={ACTION_APPROVAL_MESSAGE}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            approvalGates={ACTION_GATES}
+            approvalsProvided
+          />
+        </Frame>
+      );
+    case 'action-role-required':
+      // 403 뒤의 모습은 결정을 **실제로 보내야** 나온다. 시뮬레이터에서 누르는 것은
+      // Maestro 레인(`maestro/92-action-role-required-capture.yaml`)이 하고, 이 장은
+      // 그 결정 POST 에 서버처럼 403 영수증(`status: role_required`)으로 답한다.
+      // 코어 `decideApproval` · 폰 `ApprovalDecision` 은 전부 진짜다.
+      return (
+        <DecisionStub status={403} body={{approval_id: 'ap-1', status: 'role_required'}}>
+          <Frame label="행동 승인 카드 — 403 role_required 뒤 (무장 해제 · ADR-0186 §5)">
+            <MessageRow
+              message={ACTION_APPROVAL_MESSAGE}
+              startsGroup
+              directory={DIRECTORY}
+              chips={[]}
+              nowMs={NOW}
+              approvalGates={ACTION_GATES}
+              approvalsProvided
+            />
+          </Frame>
+        </DecisionStub>
+      );
+    case 'action-link-once':
+      return (
+        <Frame label="승인 직후 — 링크 1회 표시 + 결과 카드 (D4 · 부록 B)">
+          <MessageRow
+            message={ACTION_APPROVAL_MESSAGE}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW + 60_000}
+            approvalReceipts={
+              new Map([
+                [
+                  'ap-1',
+                  {
+                    note: '승인을 기록했습니다.',
+                    status: 'approved',
+                    secretOnce: {
+                      kind: 'invite_link',
+                      value: 'https://oort.example.com/join?code=Ab3-_xQ7mK2vR9pL',
+                      expiresAtMs: NOW + 7 * 86_400_000,
+                    },
+                  },
+                ],
+              ])
+            }
+            approvalsProvided
+          />
+          <MessageRow
+            message={ACTION_RESULT_MESSAGE}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW + 61_000}
+          />
+        </Frame>
+      );
+    case 'action-after-refresh':
+      // 다시 열면 영수증 표가 없다 — 서버가 패치한 카드(승인됨)와 결과 카드만
+      // 남고, 링크 값은 어디에도 없다. 결과 카드의 「1회 표시됐습니다」가 그
+      // 사실을 사람에게 말하는 유일한 자리다.
+      return (
+        <Frame label="다시 열었을 때 — 영속 카드만, 링크 없음 (D4)">
+          <MessageRow
+            message={{
+              ...ACTION_APPROVAL_MESSAGE,
+              props: {
+                ...ACTION_APPROVAL_MESSAGE.props,
+                approval_status: 'approved',
+                decided_by: SELF,
+                decided_at_ms: NOW + 60_000,
+              },
+            }}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW + 3_600_000}
+            approvalsProvided
+          />
+          <MessageRow
+            message={ACTION_RESULT_MESSAGE}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW + 3_600_000}
+          />
+        </Frame>
+      );
     // ---- 이슈 1114 (ADE 1단계): 승인 카드 호스트 선택기 --------------------
     case 'spawn-picker': {
       // 스폰 승인은 「해도 되나」와 **「어디서 하나」** 를 함께 묻는다. 이 장이

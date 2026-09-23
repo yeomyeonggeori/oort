@@ -19,7 +19,7 @@ Codex는 절차, 체크리스트, 템플릿, 링크, secret inventory 항목을 
 
 ## 1. 현재 권장 흐름
 
-현재 oort는 GitHub Actions가 disabled/manual-only이고, M7 QA 게이트 PASS 전에는 external TestFlight/App Store/공증 배포를 하지 않는다. 따라서 L0/L1의 목적은 "즉시 출시"가 아니라 M4/M5/M6에서 막히지 않도록 행정 선결을 준비하는 것이다.
+현재 oort는 GitHub Actions가 disabled/manual-only이고, M7 등급 게이트(팀 배포 M7-I·스토어 M7-S) PASS와 owner 승인 전에는 해당 배포를 하지 않는다. 따라서 L0/L1의 목적은 "즉시 출시"가 아니라 M4/M5/M6에서 막히지 않도록 행정 선결을 준비하는 것이다.
 
 권장 기본값(추정):
 
@@ -128,7 +128,7 @@ Codex repo 산출물:
 
 ## 5. 등록 후 CI/CD handoff (`L1-handoff`)
 
-Apple Developer Program 등록이 완료되면 다음 단계로 넘긴다. 단, release workflow 실행과 external TestFlight/App Store 제출은 M7 QA 게이트 PASS 전까지 금지다.
+Apple Developer Program 등록이 완료되면 다음 단계로 넘긴다. 단, release workflow 실행과 external TestFlight/App Store 제출은 M7-S PASS와 owner 승인 전까지 금지다(팀 배포는 M7-I).
 
 | 후속 항목 | 담당 | 연결 문서 | 비고 |
 |---|---|---|---|
@@ -137,7 +137,7 @@ Apple Developer Program 등록이 완료되면 다음 단계로 넘긴다. 단, 
 | ASC API Key 발급 | 사람 | `docs/cicd/01-setup-runbook.md`, `docs/cicd/02-secrets-inventory.md` | `.p8`는 1회 다운로드, 리포 금지 |
 | signing repo/match 준비 | 사람 + Codex 문서 | `docs/cicd/01-setup-runbook.md` | GitHub Actions는 현재 disabled/manual-only |
 | local gate evidence | Codex | `docs/LOCAL_PR_GATE.md` | 현재 PR merge 기준 |
-| release workflow 실행 | momo-main/사람 | `docs/cicd/03-store-readiness-gate.md` | M7 PASS 전 실행 금지 |
+| release workflow 실행 | momo-main/사람 | `docs/cicd/03-store-readiness-gate.md` | 해당 M7 등급 PASS·owner 승인 전 실행 금지 |
 
 ## 6. 결정 및 수동 절차 로그
 
@@ -157,4 +157,4 @@ Apple Developer Program 등록이 완료되면 다음 단계로 넘긴다. 단, 
 - [x] 실제 D&B/Apple 제출, 계약 동의, 결제, 인증서/API Key 발급은 사람 `[manual]`로 분리했다.
 - [x] 이 문서는 법률 자문이 아니며 출시 전 외부 전문가 검토가 필요하다고 명시했다.
 
-완료 후 `docs/legal/00-prelaunch-admin-legal-checklist.md`와 `STATUS.md`에는 L0/L1 런북 준비 완료만 기록한다. 실제 외부 등록 완료 여부는 사람이 별도로 갱신한다.
+완료 후 `docs/legal/00-prelaunch-admin-legal-checklist.md`와 PR 본문에는 L0/L1 런북 준비 완료만 기록한다. 실제 외부 등록 완료 여부는 사람이 별도로 갱신한다.

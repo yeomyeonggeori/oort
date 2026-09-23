@@ -22,7 +22,7 @@
 
 ## 1. Milestones = 릴리스/게이트 (로드맵)
 
-순서가 곧 로드맵이다. **QA/사용성 게이트(M7)가 스토어 제출(M8)의 하드 선행.**
+순서가 곧 로드맵이다. **배포 게이트 M7(내부 M7-I·스토어 M7-S)이 스토어 제출(M8)의 하드 선행.**
 
 | # | 마일스톤 | 의미 | 선행 |
 |---|---|---|---|
@@ -33,8 +33,8 @@
 | M4 | 데스크탑 패키징 | Xcode .app + Developer ID + notarytool + DMG + Sparkle | M3 |
 | M5 | iOS 앱 | iOS 26 SDK + Push + 계정삭제 + UGC + PrivacyInfo | M2, M3 |
 | M6 | CI/CD | fastlane/ASC Key/GitHub Actions, release jobs dry-run | M0, M4, M5 |
-| M7 | **QA · 사용성 검수 게이트** | G-0~G-H 전부 PASS + 증거 기록 — **스토어 선행** | M1, M3, M4, M5, M6 |
-| M8 | 스토어 제출 | App Store + macOS 공개 배포. **M7 PASS 후에만** | M7 |
+| M7 | **배포 게이트(M7-I·M7-S)** | `docs/cicd/03` 등급별 항목 PASS + 증거 기록 — **팀 배포·스토어 선행** | M1, M3, M4, M5, M6 |
+| M8 | 스토어 제출 | App Store + macOS 공개 배포. **M7-S PASS 후에만** | M7 |
 
 > ⚠️ **native `gh milestone` 명령은 없다**(2026 현재). 마일스톤은 `gh api repos/{owner}/{repo}/milestones`로 생성한다. 출처: [cli/cli#1200](https://github.com/cli/cli/issues/1200). `scripts/github_bootstrap.sh`가 이 우회를 자동 처리.
 >
@@ -79,14 +79,14 @@
 ```
 - **수동 트리거:** 이슈를 `status:ready`로 두고 워커 레인에 넘긴다.
 - **자동 위임(추정/조직 설정 의존):** triage 규칙에 맞으면 워커에 할당. (추정 — org/플랜 설정 확인)
-- **품질 레버:** 어려운 이슈는 레인 상한 안에서 best-of-N을 쓴다. 정본은 `docs/planning/PIPELINE.md`.
+- **품질 레버:** 어려운 이슈는 PIPELINE §2의 병렬 판단 안에서 best-of-N을 쓴다. 정본은 `docs/planning/PIPELINE.md`.
 - **로컬/데스크탑 실행:** `scripts/goal_status.sh`로 ready/in-progress/needs-review/blocked와 branch/PR/worktree 충돌을 확인한 뒤 `scripts/goal_claim.sh <issue>`로 issue assignee/status/branch/worktree를 한 번에 맞춘다. 아직 스크립트가 없는 checkout에서는 수동으로 별도 branch/worktree를 만들고 같은 규칙을 따른다.
 - **완료 기준:** PR 생성 뒤에도 독립 검수·관련 검증·요청된 통합을 이어간다. 같은 HEAD·환경의 유효 증거는 재사용하고, 변경·병합 결과의 차이는 다시 검증한다. current PR CI와 Policy integrity 및 exact-base 확인은 매 통합 시 필요하다.
-- **대기 시간 사용:** CI를 기다리는 동안 로드맵 위치, 기술스택/중요 결정 변경 여부, 새 리스크나 참고 소스가 생겼는지 점검한다. 변화가 있으면 `STATUS.md`/`ROADMAP.md`/이슈로 반영하거나 후속 이슈를 제안한다.
+- **대기 시간 사용:** CI를 기다리는 동안 로드맵 위치, 기술스택/중요 결정 변경 여부, 새 리스크나 참고 소스가 생겼는지 점검한다. 변화가 있으면 `ROADMAP.md`/이슈로 반영하거나 후속 이슈를 제안한다.
 
 ### 3.2a PR CI + Local PR Gate
 
-공개 레포 전환 뒤 canonical PR은 `main`·`track/engine`·`track/uxui`에서 `PR CI gate`와 base-trusted `Policy integrity gate` 두 required context를 쓴다(ADR-0153 D5). Rust/Node/legacy 생성계약은 `pr-ci`가 변경 경로별로 실행한다. DB·Centrifugo·Docker·외부 provider runtime은 계속 local gate가 정본이다. release/유료 macOS workflow의 owner/M7 제한은 그대로다.
+공개 레포 전환 뒤 canonical PR은 `main`·`track/engine`·`track/uxui`에서 `PR CI gate`와 base-trusted `Policy integrity gate` 두 required context를 쓴다(ADR-0153 D5). Rust/Node/legacy 생성계약은 `pr-ci`가 변경 경로별로 실행한다. DB·Centrifugo·Docker·외부 provider runtime은 계속 local gate가 정본이다. release/유료 macOS workflow의 owner·M7 등급(M7-I·M7-S) 제한은 그대로다.
 
 - 정본: [`docs/LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md), 실행 진입점: `scripts/local_gate.sh`.
 - PR body에는 `scripts/local_gate.sh --profile ...`가 출력하는 `Local Gate: PASS`, 날짜, machine/toolchain, 실행 명령, runtime coverage, 미검증 범위를 붙인다.
@@ -295,5 +295,5 @@ scripts/github_bootstrap.sh --org yeomyeonggeori --repo oort --skip-issues   # �
 - 작업 전 계획 문서를 확인하고, 계획이 미흡하면 추가 리서치부터 한다.
 - PR 이후에는 독립 리뷰, 현재 HEAD/환경의 검증 증거 확인, 요청된 순차 통합과 병합 결과 확인까지 완료한다. 수정·환경·병합 차이가 있으면 해당 검증을 다시 실행한다.
 - local evidence와 reviewer pass는 `docs/LOCAL_PR_GATE.md`를 따른다. current PR CI·Policy integrity·exact-base 검증과 트랙 정렬 확인은 증거 재사용으로 생략하지 않는다.
-- QA/사용성 게이트(M7) PASS 기록 전에는 M8(스토어/공증 공개 배포) 실행 금지. 런북·로컬 검증 등 배포 전 준비와 구분한다.
-- 런타임 미검증은 `status:runtime-unverified` + STATUS.md에 정직 표기. Docker/psql로 가능한 검증은 수행하고, hermes 등 외부 의존은 실제 의존성 또는 mock 준비를 먼저 검토한다.
+- M7-S PASS 기록 전에는 M8(스토어·공개 공증 배포) 실행 금지. 팀 배포는 M7-I. 런북·로컬 검증 등 배포 전 준비와 구분한다.
+- 런타임 미검증은 `status:runtime-unverified` + PR 본문 「검증」 절에 정직 표기. Docker/psql로 가능한 검증은 수행하고, hermes 등 외부 의존은 실제 의존성 또는 mock 준비를 먼저 검토한다.
