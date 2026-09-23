@@ -152,7 +152,7 @@ spctl -a -t exec -vv /tmp/check/oort.app
 
 | 자격 | 이름 / 경로 |
 | --- | --- |
-| minisign 개인키 | `~/.momo-secrets/momo-updater.key` (0600, 레포 밖) |
+| minisign 개인키 | `~/.momo-secrets/momo-updater.key` (0600, 레포 밖). 2026-09-23부터 암호로 보호된다. 암호는 로그인 키체인 항목 `momo-updater-key`에 있고, 꺼낼 때 확인 창이 뜬다 |
 | Developer ID | `Developer ID Application: Kwak Seongjae (YWQQFQM38J)` |
 | 공증 | notarytool 키체인 프로파일 `momo-notary` |
 | 배포 저장소 | `yeomyeonggeori/momo-alpha` (이 레포가 아님 — `MOMO_DIST_REPO` 기본값) |
@@ -163,8 +163,14 @@ spctl -a -t exec -vv /tmp/check/oort.app
 
 로그인 셸에서. 실패하면 여기서 멈춘다.
 
+**업데이터 키 암호:** 2026-09-23부터 필수다. 게시하는 셸에서 로그인 키체인 항목 `momo-updater-key`의 암호를 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 환경변수로 내보낸다.
+- 키체인 확인 창에서 허용한다.
+- 값은 화면·로그·문서에 내지 않는다.
+- 이 문서는 대입 명령을 싣지 않는다(`test_next_channel_hygiene.sh`).
+
 ```sh
 test -f ~/.momo-secrets/momo-updater.key && echo "minisign key: present"
+test -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" || { echo "updater key password not exported (keychain item momo-updater-key)"; exit 1; }
 security find-identity -v -p codesigning | grep -F "Developer ID Application: Kwak Seongjae (YWQQFQM38J)"
 xcrun notarytool history --keychain-profile momo-notary >/dev/null && echo "notary profile: ok"
 command -v cargo >/dev/null && cargo tauri --version
