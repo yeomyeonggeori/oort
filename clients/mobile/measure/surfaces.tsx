@@ -50,7 +50,10 @@ import {AgentActivityBar} from '../src/features/agents/turnSurfaces';
 import {markAgentWorking, resetAgentWorking} from '../src/features/agents/workingSignal';
 import {RealtimeContext} from '../src/realtime/RealtimeProvider';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
-import {Timeline} from '../src/features/conversation/Timeline';
+import {
+  Timeline,
+  type TimelineGeometry,
+} from '../src/features/conversation/Timeline';
 import {Screen, ScreenHeader} from '../src/design/atoms';
 import {ThemeControl} from '../src/design/ThemeControl';
 import {parseExecutionPlan} from '@momo/core/lib/executionPlan';
@@ -1035,6 +1038,126 @@ function StoppedRow({
   );
 }
 
+/**
+ * #1892 — 두 점프 필이 **함께** 선 순간, 그리고 각각을 누른 뒤의 착지.
+ *
+ * 이 장은 저 혼자 한 자리까지 간다: 진입 수렴이 바닥에 앉힌 뒤(최대 4초 — 여유를
+ * 두고 3초) 목록 가운데로 옮기고, 거기서 남의 말 두 통을 더 받는다. 그러면 위
+ * 필은 방을 연 순간의 수(28 — 구분선과 같은 수)를, 아래 필은 떠난 뒤 붙은
+ * 수(2)를 말한다. 같은 낱말이 두 다른 모집단을 세는 것이 한 장에서 읽힌다 —
+ * 그것이 「동결 N」이다.
+ *
+ * 누르는 것은 이 파일이 아니라 Maestro 가 한다(`maestro/91-jump-pills-capture.yaml`).
+ * 누른 뒤의 착지를 찍으려면 정말로 눌러야 한다: 이 장이 스스로 스크롤해서
+ * 「착지」를 흉내 내면, 사진은 필이 아니라 흉내를 찍는다.
+ *
+ * 문장은 한 팀의 배포 스레드다. 줄 길이가 들쭉날쭉한 것은 일부러다 — 한 줄짜리
+ * 행만으로는 `scrollToIndex` 가 측정 안 된 행을 겨누는 회복 경로가 안 불린다.
+ */
+const JUMP_PILL_LINES = [
+  '배포 체크리스트 공유합니다. 각자 담당 항목 확인 부탁드려요.',
+  '인증 서버 설정은 제가 봤습니다.',
+  '스테이징 데이터베이스 마이그레이션 0186 끝났습니다. 롤백 스크립트도 같이 올렸어요.',
+  '좋아요.',
+  'CDN 캐시 무효화는 배포 직후 한 번 더 돌리겠습니다.',
+  '결제 모듈 회귀 테스트 312건 전부 통과했습니다. 느린 테스트 두 건은 따로 표시해 두었어요.',
+  '확인했습니다.',
+  '모바일 빌드는 오늘 저녁에 올라갑니다.',
+] as const;
+
+const JUMP_PILL_COUNT = 40;
+/** 커서. 구분선은 이 다음 줄 위에 선다. */
+const JUMP_PILL_CURSOR = 12;
+
+function jumpPillMessage(seq: number): Message {
+  const line = JUMP_PILL_LINES[seq % JUMP_PILL_LINES.length];
+  return {
+    ...MESSAGE,
+    id: `00000000-0000-7000-8000-${String(1892_000 + seq).padStart(12, '0')}`,
+    seq,
+    hlcTs: seq,
+    authorMemberId: seq % 3 === 0 ? SELF : seq % 3 === 1 ? OTHER : AGENT,
+    body: seq % 5 === 0 ? `${line}\n${JUMP_PILL_LINES[(seq + 3) % JUMP_PILL_LINES.length]}` : line,
+    createdAtMs: NOW + seq * 60_000,
+    thread: undefined,
+  };
+}
+
+const JUMP_PILL_HISTORY: Message[] = Array.from(
+  {length: JUMP_PILL_COUNT},
+  (_, i) => jumpPillMessage(i + 1),
+);
+
+function JumpPillsStage(): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const listRef = React.useRef<unknown>(null);
+  const metricsRef = React.useRef<TimelineGeometry | null>(null);
+  const [messages, setMessages] = React.useState<Message[]>(JUMP_PILL_HISTORY);
+  React.useEffect(() => {
+    const move = setTimeout(() => {
+      const geometry = metricsRef.current;
+      if (geometry === null || geometry.contentHeight <= 0) return;
+      (
+        listRef.current as {
+          scrollToOffset?: (options: {offset: number; animated: boolean}) => void;
+        } | null
+      )?.scrollToOffset?.({
+        offset: Math.max(
+          0,
+          geometry.contentHeight * 0.55 - geometry.viewportHeight / 2,
+        ),
+        animated: false,
+      });
+    }, 3000);
+    // 남의 말 두 통. 내 말이었다면 아래 필은 세지 않는다(웹 M-3 과 같은 판정).
+    const arrive = setTimeout(() => {
+      setMessages(current => [
+        ...current,
+        {...jumpPillMessage(JUMP_PILL_COUNT + 1), authorMemberId: OTHER},
+        {...jumpPillMessage(JUMP_PILL_COUNT + 2), authorMemberId: AGENT},
+      ]);
+    }, 3800);
+    return () => {
+      clearTimeout(move);
+      clearTimeout(arrive);
+    };
+  }, []);
+  return (
+    <Screen>
+      <Text style={styles.label}>
+        위 = 연 순간의 안읽음(동결 28) · 아래 = 떠난 뒤 붙은 남의 말 (#1892)
+      </Text>
+      <ScreenHeader title="배포" onBack={() => {}} titleTestID="measure-title" />
+      <ConversationLayout
+        list={
+          <Timeline
+            messages={messages}
+            directory={DIRECTORY}
+            status="ready"
+            channelKind="public"
+            myMemberId={SELF}
+            nowMs={NOW + 3_000_000}
+            lastReadSeq={JUMP_PILL_CURSOR}
+            unreadCount={JUMP_PILL_COUNT - JUMP_PILL_CURSOR}
+            jumpPills
+            metricsRef={metricsRef}
+            listRef={listRef as never}
+          />
+        }
+        composer={
+          <Composer
+            recipient="place"
+            channelLabel="배포"
+            directory={DIRECTORY}
+            draftKey="measure:jump-pills"
+            onSend={() => {}}
+          />
+        }
+      />
+    </Screen>
+  );
+}
+
 export function Surface({name}: {name: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   // 이슈 #1112 — 고정 여부만 다른 두 시트. 낱말이 상태를 따라 뒤집히는 것을 한
@@ -1478,6 +1601,9 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           <RecoveryDivider seq={4821} source="backfill" />
         </Frame>
       );
+    // #1892 — 안읽음·최신 점프 필. 누르는 것은 `maestro/91-jump-pills-capture.yaml`.
+    case 'jump-pills':
+      return <JumpPillsStage />;
     case 'row':
       return (
         <Frame label="행 — 반응 칩과 스레드 앵커는 항상 보이는 진입점">

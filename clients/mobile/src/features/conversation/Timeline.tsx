@@ -12,6 +12,7 @@ import {isPinned, type PinMap} from '@momo/core/features/timeline/pins';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   FlatList,
   StyleSheet,
@@ -20,7 +21,22 @@ import {
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  type ViewToken,
 } from 'react-native';
+import {unreadDividerLabel} from '@momo/core/features/timeline/divider';
+import {useReduceMotion} from '../../lib/useReduceMotion';
+import {JumpPill, JumpPillDock} from './JumpPill';
+import {
+  countNewerThan,
+  countUnreadJump,
+  dividerRelation,
+  jumpLatestAccessibilityLabel,
+  jumpLatestSegments,
+  jumpUnreadAccessibilityLabel,
+  jumpUnreadSegments,
+  shouldShowJumpUnread,
+  type DividerViewportRelation,
+} from './jumpPills';
 import {EmptyState, ErrorState, LoadingState} from '../../design/atoms';
 import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {usePalette, useStyles} from '../../design/theme';
@@ -281,6 +297,39 @@ const NO_REACTIONS: ReactionMap = {};
 /** 같은 이유의 상수 (이슈 #1112). */
 const NO_PINS: PinMap = {};
 
+/** 아직 아무 행도 보고되지 않았다. 빈 배열 하나를 모두가 나눠 쓴다. */
+const NO_KEYS: readonly string[] = [];
+
+/**
+ * 「보인다」의 문턱 (#1892). 한 픽셀이라도 창에 걸리면 보인다 — 웹이 구분선에
+ * 거는 IntersectionObserver 의 `threshold: 0` 과 같은 판정이다(「한 픽셀이어도
+ * 소멸」). `FlatList` 는 이 객체가 도중에 바뀌는 것도 허락하지 않으므로 상수다.
+ */
+const PILL_VIEWABILITY = {itemVisiblePercentThreshold: 0} as const;
+
+/**
+ * 목록이 보인다고 한 **키**들로 구분선의 자리를 판정한다.
+ *
+ * 첨자가 아니라 키인 이유: 옛 페이지가 위에 붙으면(prepend) 같은 행들의 첨자가
+ * 통째로 밀리는데, 보이는 행 집합은 그대로라 목록은 새 보고를 하지 않는다. 첨자를
+ * 들고 있으면 그 순간부터 판정이 페이지 크기만큼 어긋난다 — 이 파일 머리말이
+ * 「세지 말고 키로」라고 적어 둔 바로 그 함정이다.
+ */
+function relationFromKeys(
+  items: readonly FoldedTimelineItem[],
+  keys: readonly string[],
+): DividerViewportRelation | null {
+  const dividerAt = items.findIndex(item => item.kind === 'unread');
+  if (dividerAt < 0) return 'absent';
+  if (keys.length === 0) return null;
+  const wanted = new Set(keys);
+  const visible: number[] = [];
+  items.forEach((item, index) => {
+    if (wanted.has(item.key)) visible.push(index);
+  });
+  return dividerRelation(dividerAt, visible);
+}
+
 // =============================================================================
 // 셀 계측 seam (goal RN-P2a / #997)
 //
@@ -432,6 +481,8 @@ function TimelineInner({
   jumpTarget,
   onJumpMissed,
   onJumpLanded,
+  jumpPills = false,
+  pillsRef,
   tailRef,
   metricsRef,
   listRef: externalListRef,
@@ -551,6 +602,25 @@ function TimelineInner({
   /** 점프가 실제로 착지했다. 앞선 「못 찾았습니다」 고지를 거두는 신호. */
   onJumpLanded?: () => void;
   /**
+   * 위 「안읽음으로」·아래 「최신으로」 점프 필을 띄우는가 (#1892).
+   *
+   * 채널 대화만 켠다 — 웹도 채널 타임라인에만 둔다. 스레드 패널은 짧고 안읽음
+   * 경계가 없으며, 측정 하네스는 자기가 재는 것에 맞춰 고른다.
+   *
+   * **마운트 동안 바뀌지 않아야 한다.** 이 값이 `onViewableItemsChanged` 를 걸고
+   * 떼는데, `FlatList` 는 그 콜백이 도중에 바뀌는 것을 허락하지 않는다.
+   */
+  jumpPills?: boolean;
+  /**
+   * Measurement seam (`measure/harness.tsx`), inert in the app (#1892).
+   *
+   * Which pills are on screen right now, written on every render. The anchor
+   * claims are only a statement about the pills if the harness can say a pill
+   * was actually standing over the list while the anchor was read — otherwise
+   * "0px with the pills on" is a claim about a frame nobody looked at.
+   */
+  pillsRef?: React.MutableRefObject<{unread: boolean; latest: boolean} | null>;
+  /**
    * The seam that had to exist before this batch could measure anything, and the
    * reason the last one reported 「미측정」 instead of a number.
    *
@@ -661,6 +731,138 @@ function TimelineInner({
     [stream, threads, reactions, myMemberId, showRollup],
   );
 
+  // ===========================================================================
+  // 점프 필의 상태 (#1892 — 웹 `Timeline.tsx` 「항법 상태」의 폰판)
+  //
+  // 셋이다.
+  //
+  //   **아래에 있는가** (`atBottom`) — 이 목록이 이미 들고 있던 「따라가기」 판정의
+  //     거울이다. 따로 재면 아래 필이 떠 있는데 목록은 꼬리를 따라가는, 서로 모순인
+  //     두 말이 동시에 선다. 그래서 `followingRef` 에 쓰는 문을 `noteFollowing` 하나로
+  //     모았다.
+  //   **기준선** (`baselineSeq`) — 바닥을 떠난 순간의 가장 새 seq. 아래 필의 N 은 그
+  //     뒤에 붙은 **남의 말**이다(`countNewerThan`).
+  //   **래치** (`unreadLatched`) — 이 방문에서 구분선을 봤거나 위 필을 눌렀다. 서면
+  //     위 필은 다시 서지 않는다. 목록이 비면(방을 옮기면) 풀린다.
+  //
+  // 위 필의 N 은 여기서 세지 않는다. 호출자가 방을 연 순간 얼린 `unreadCount` —
+  // 구분선에 적힌 바로 그 수다(동결 N).
+  // ===========================================================================
+  const reduceMotion = useReduceMotion();
+  const reduceMotionRef = useRef(reduceMotion);
+  reduceMotionRef.current = reduceMotion;
+  const [atBottom, setAtBottom] = useState(true);
+  const [baselineSeq, setBaselineSeq] = useState<number | null>(null);
+  const [viewableKeys, setViewableKeys] = useState<readonly string[]>(NO_KEYS);
+  const [unreadLatched, setUnreadLatched] = useState(false);
+  /** 지금 가장 새 확정 메시지. 바닥을 떠나는 순간 기준선이 된다. */
+  const newestSeqRef = useRef<number | null>(null);
+  newestSeqRef.current =
+    messages.length === 0 ? null : messages[messages.length - 1].seq;
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const unreadCountRef = useRef(unreadCount);
+  unreadCountRef.current = unreadCount;
+  /** 목록이 마지막으로 「보인다」고 한 행들. 콜백이 렌더보다 먼저 읽는다. */
+  const viewableKeysRef = useRef<readonly string[]>(NO_KEYS);
+  /**
+   * 목록이 **자기 출발점에 앉았는가** — 진입 수렴이 끝났거나, 사람이 목록을
+   * 잡았거나, 끝 근처에서 쉬고 있는 것이 관측됐다.
+   *
+   * 래치를 무장하는 조건이다. 마운트 순간의 목록은 오프셋 0 에 서 있고, 그 첫
+   * 보고에서는 맨 위 행들이 「보인다」 — 구분선이 거기 있으면 사람이 한 번도 못 본
+   * 경계로 래치가 걸려 이 방문 내내 위 필이 서지 않는다. 웹이 겪은 「채널 오픈 스윕」
+   * (design-review H-1 오발)과 같은 모양이고, 폰에서 그 스윕은 진입 수렴이다.
+   */
+  const entrySettledRef = useRef(false);
+
+  /** 구분선이 **지금** 창의 어디에 있는가. 렌더를 기다리지 않고 ref 로 판정한다. */
+  const relationNow = useCallback(
+    (): DividerViewportRelation | null =>
+      relationFromKeys(itemsRef.current, viewableKeysRef.current),
+    [],
+  );
+
+  /** 출발점에 앉은 뒤 구분선이 창 안에 있으면 — 봤다. 래치를 건다. */
+  const armLatchIfDividerSeen = useCallback(() => {
+    if (!entrySettledRef.current) return;
+    if (relationNow() === 'in') setUnreadLatched(true);
+  }, [relationNow]);
+
+  const settleEntry = useCallback(() => {
+    if (entrySettledRef.current) return;
+    entrySettledRef.current = true;
+    // 앉은 자리에서 이미 보이는 구분선은 본 것이다. 뒤에 새 메시지가 그것을 위로
+    // 밀어내도 위 필이 「안 본 경계」처럼 서지 않는다(웹 IO 의 첫 보고와 같은 판정).
+    armLatchIfDividerSeen();
+  }, [armLatchIfDividerSeen]);
+
+  /**
+   * `followingRef` 에 쓰는 유일한 문.
+   *
+   * 판정이 바뀔 때만 상태를 건드린다 — 스크롤 이벤트는 초당 60번 오고, 그때마다
+   * 렌더를 부르면 목록 옆에서 도는 렌더가 곧 goal RN-P2a 의 버벅임이다.
+   */
+  const noteFollowing = useCallback((next: boolean) => {
+    const was = followingRef.current;
+    followingRef.current = next;
+    if (was === next) return;
+    setAtBottom(next);
+    // 떠나는 순간의 가장 새 seq 가 기준선이다. 바닥에 닿으면 아래에 쌓인 것은 0이다.
+    setBaselineSeq(next ? null : newestSeqRef.current);
+  }, []);
+
+  /**
+   * `onViewableItemsChanged` 는 **처음 받은 함수 하나**여야 한다 — `FlatList` 는
+   * 그것이 도중에 바뀌는 것을 허락하지 않는다. 그래서 ref 에 한 번 만들고, 읽는
+   * 것은 전부 ref 다.
+   */
+  const onViewableItemsChanged = useRef(
+    ({viewableItems}: {viewableItems: ViewToken<FoldedTimelineItem>[]}) => {
+      const keys = viewableItems.map(token => token.key);
+      viewableKeysRef.current = keys;
+      setViewableKeys(keys);
+      armLatchIfDividerSeen();
+    },
+  ).current;
+
+  // 방이 바뀌면 목록이 먼저 빈다(`useTimeline` 이 새 방에서 처음부터 읽는다). 빈
+  // 목록에는 경계도, 쌓인 것도, 본 것도 없다 — 웹이 `epoch` 로 버리는 것을 여기서는
+  // 그 빈 순간이 버린다. 출발점도 다시 잡아야 한다: 새 목록은 오프셋 0 에서 선다.
+  const listEmpty = items.length === 0;
+  useEffect(() => {
+    if (!listEmpty) return;
+    entrySettledRef.current = false;
+    viewableKeysRef.current = NO_KEYS;
+    setViewableKeys(NO_KEYS);
+    setUnreadLatched(false);
+    setBaselineSeq(null);
+  }, [listEmpty]);
+
+  const unreadJumpCount = countUnreadJump(unreadCount);
+  const relation = useMemo(
+    () => (jumpPills ? relationFromKeys(items, viewableKeys) : 'absent'),
+    [jumpPills, items, viewableKeys],
+  );
+  const showJumpUnread =
+    jumpPills && shouldShowJumpUnread(relation, unreadJumpCount, unreadLatched);
+  const newCount = useMemo(
+    () =>
+      baselineSeq === null
+        ? 0
+        : countNewerThan(messages, baselineSeq, myMemberId),
+    [messages, baselineSeq, myMemberId],
+  );
+  const showJumpLatest = jumpPills && !atBottom;
+  if (pillsRef) pillsRef.current = {unread: showJumpUnread, latest: showJumpLatest};
+
+  /**
+   * 다음 `scrollToIndex` 가 목적지를 창의 어디에 놓는가. 인용은 가운데(앞뒤가
+   * 함께 읽혀야 뜻이 산다), 안읽음 필은 위(경계 아래부터 읽어 내려간다).
+   * `onScrollToIndexFailed` 의 회복이 같은 자리에 다시 놓으려면 이 값을 알아야 한다.
+   */
+  const scrollViewPositionRef = useRef(0.5);
+
   const onScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       const {contentOffset, contentSize, layoutMeasurement} = event.nativeEvent;
@@ -703,9 +905,13 @@ function TimelineInner({
         contentSize.height -
         (contentOffset.y + layoutMeasurement.height) -
         shrankBy;
-      followingRef.current = distanceFromEnd <= FOLLOW_THRESHOLD_PX;
+      const following = distanceFromEnd <= FOLLOW_THRESHOLD_PX;
+      noteFollowing(following);
+      // 끝 근처에서 쉬는 것이 관측됐다 = 출발점에 앉았다 (#1892). 방을 옮긴 뒤의
+      // 새 목록은 진입 수렴 없이 끝으로 미끄러지므로, 그 도착을 여기서 본다.
+      if (following) settleEntry();
     },
-    [noteGeometry],
+    [noteGeometry, noteFollowing, settleEntry],
   );
 
   // ===========================================================================
@@ -757,11 +963,12 @@ function TimelineInner({
   }, []);
 
   const convergeToEnd = useCallback(
-    (mode: 'entry' | 'send') => {
+    (mode: 'entry' | 'send' | 'latest') => {
       cancelConvergence();
       // Following again, because they are now at the bottom on purpose — the next
-      // arrival from anyone else should keep them there.
-      followingRef.current = true;
+      // arrival from anyone else should keep them there. Through the one door, so
+      // the 「최신으로」 pill steps down in the same moment (#1892).
+      noteFollowing(true);
       const startedAt = Date.now();
       const hardStop = startedAt + CONVERGE_MAX_MS;
       /** Extended on every round that gets somewhere; see `CONVERGE_IDLE_MS`. */
@@ -786,10 +993,16 @@ function TimelineInner({
       // right. `null` — a list that has never scrolled or been laid out — counts
       // as near: it has no history to be lost in. **Entry is never near**, for the
       // reason in the note above.
+      //
+      // `latest` is the 「최신으로」 pill (#1892): the same travel as a send, and
+      // the one of the three a person asked for by pressing something — so it is
+      // the one that honours 「동작 줄이기」, as the web jump does
+      // (`timelineScrollBehavior`). Far away it is instant rounds already.
       const distance = distanceToEnd(geometryRef.current);
       const near =
-        mode === 'send' &&
+        mode !== 'entry' &&
         (distance === null || distance <= geometryRef.current.viewportHeight);
+      const glide = near && !(mode === 'latest' && reduceMotionRef.current);
       convergingRef.current = !near;
       // Off for the correction, back on the moment it ends.
       if (!near) setChasingTail(true);
@@ -801,6 +1014,9 @@ function TimelineInner({
         // where the correction wanted it, so the ordinary rule ("far from the end
         // means the reader is reading") is true again and should apply again.
         scrollPinUntilRef.current = 0;
+        // And the list is where it was going to rest, so what is on screen now is
+        // what the reader sees (#1892 — the latch waits for exactly this).
+        settleEntry();
       };
 
       const converge = () => {
@@ -841,12 +1057,15 @@ function TimelineInner({
       // travelling to its own bottom — and this is the round after that one.
       convergeFrameRef.current = requestAnimationFrame(() => {
         convergeFrameRef.current = undefined;
-        listRef.current?.scrollToEnd({animated: near});
-        if (near) return;
+        listRef.current?.scrollToEnd({animated: glide});
+        if (near) {
+          settleEntry();
+          return;
+        }
         converge();
       });
     },
-    [cancelConvergence, listRef],
+    [cancelConvergence, listRef, noteFollowing, settleEntry],
   );
 
   // A correction still running when this list goes away is a timer holding a ref
@@ -865,6 +1084,9 @@ function TimelineInner({
     cancelConvergence();
     scrollPinUntilRef.current = 0;
     convergingRef.current = false;
+    // The reader has the list now. Whatever it shows from here on, they are
+    // looking at (#1892 latch).
+    settleEntry();
     // 착지 표시도 여기서 물러난다 (#1076). 그것을 세운 것이 사람의 동작(점프)이
     // 었으므로 거두는 것도 사람의 동작이다 — 타이머가 아니라. 이유는
     // `MessageRow` 의 `rowLanded` 주석에 있다: 폰의 점프는 애니메이션이고,
@@ -874,7 +1096,7 @@ function TimelineInner({
     // is the likeliest prelude to them scrolling UP into history, which is the
     // one thing that must never move under them.
     setChasingTail(false);
-  }, [cancelConvergence]);
+  }, [cancelConvergence, settleEntry]);
 
   // Follow the tail only when the reader is already there. Anyone scrolled back
   // is READING, and yanking them to the bottom because someone else typed is
@@ -961,6 +1183,44 @@ function TimelineInner({
     },
     [listRef, noteGeometry],
   );
+
+  // ---- 두 필이 데려가는 곳 (#1892) ------------------------------------------
+  //
+  // 위 필은 **구분선을 창 맨 위에** 놓는다(웹 `align: "start"`). 경계 아래부터 읽어
+  // 내려가는 동작이라, 가운데에 놓으면 이미 읽은 줄이 화면의 절반을 먹는다.
+  //
+  // 누르는 것 자체가 진입이다 — 목록이 도착해 구분선이 보고되기를 기다리지 않고 그
+  // 자리에서 래치를 건다(웹과 같다). 걸려 있던 수렴은 거둔다: 진입이나 전송의 끝
+  // 쫓기가 남아 있으면 방금 올려 보낸 목록을 다시 바닥으로 끌어내린다.
+  //
+  // 화면을 보지 않는 사람에게는 **도착한 자리의 이름**을 말한다. 웹은 첫 안읽음
+  // 행에 포커스를 옮겨 같은 일을 하고, 폰에서 그 행의 이름은 구분선의 문장이다.
+  const jumpToUnread = useCallback(() => {
+    const index = itemsRef.current.findIndex(item => item.kind === 'unread');
+    if (index < 0) return;
+    setUnreadLatched(true);
+    entrySettledRef.current = true;
+    cancelConvergence();
+    scrollPinUntilRef.current = 0;
+    setChasingTail(false);
+    noteFollowing(false);
+    scrollViewPositionRef.current = 0;
+    listRef.current?.scrollToIndex({
+      index,
+      viewPosition: 0,
+      animated: !reduceMotionRef.current,
+    });
+    AccessibilityInfo.announceForAccessibility(
+      unreadDividerLabel(countUnreadJump(unreadCountRef.current)),
+    );
+  }, [cancelConvergence, listRef, noteFollowing]);
+
+  // 아래 필은 전송과 같은 여정이다 — 먼 과거에서 끝까지 가는 길은 RN-P3 가 이미
+  // 닦았고(측정된 클램프를 오르는 즉시 라운드), 두 번째 길을 내면 그 수리를 다시
+  // 벌어야 한다.
+  const jumpToLatest = useCallback(() => {
+    convergeToEnd('latest');
+  }, [convergeToEnd]);
 
   // ---- 라이브로 온 인용을 화면에 있는 행에서 푼다 (ADR-0148) ----------------
   //
@@ -1151,7 +1411,7 @@ function TimelineInner({
     }
     // 이동은 **따라가기를 끈다**. 안 끄면 다음 메시지 한 통에 맨 아래로 되돌아가고,
     // 사람은 자기가 방금 연 자리를 잃는다.
-    followingRef.current = false;
+    noteFollowing(false);
     // 도착했으므로 「못 찾았습니다」 고지는 물러난다 (design-review H-5).
     onJumpLanded?.();
     // 「방금 여기로 왔다」 (#1076). 가운데로 옮겨 놓는 것만으로는 **어느 줄이
@@ -1171,6 +1431,7 @@ function TimelineInner({
       landing?.kind === 'message' ? landing.message.id : jumpTarget.messageId,
     );
     // 화면 가운데에 놓는다: 인용의 원본은 그 앞뒤가 함께 읽혀야 뜻이 산다.
+    scrollViewPositionRef.current = 0.5;
     listRef.current?.scrollToIndex({index, viewPosition: 0.5, animated: true});
   }, [jumpToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1187,7 +1448,8 @@ function TimelineInner({
       requestAnimationFrame(() => {
         listRef.current?.scrollToIndex({
           index: info.index,
-          viewPosition: 0.5,
+          // 실패하기 전 그 요청이 원한 자리 — 인용은 가운데, 안읽음 필은 위 (#1892).
+          viewPosition: scrollViewPositionRef.current,
           animated: false,
         });
       });
@@ -1287,7 +1549,7 @@ function TimelineInner({
     );
   }
 
-  return (
+  const list = (
     <FlatList
       ref={listRef}
       testID="timeline-list"
@@ -1314,6 +1576,11 @@ function TimelineInner({
       scrollEventThrottle={16}
       onContentSizeChange={onContentSizeChange}
       onLayout={onLayout}
+      // #1892: where the unread line is, measured by the list itself. Both are
+      // fixed for the life of the mount — `FlatList` refuses a callback that
+      // changes on the fly, which is why `jumpPills` may not change either.
+      onViewableItemsChanged={jumpPills ? onViewableItemsChanged : undefined}
+      viewabilityConfig={jumpPills ? PILL_VIEWABILITY : undefined}
       onStartReached={reachedStart ? undefined : onStartReached}
       onStartReachedThreshold={0.5}
       ListHeaderComponent={listHeader}
@@ -1350,6 +1617,41 @@ function TimelineInner({
       removeClippedSubviews={false}
     />
   );
+
+  // Surfaces without the pills keep the list as the direct child they always had
+  // — the harness and the thread panel render exactly what they rendered before.
+  if (!jumpPills) return list;
+
+  return (
+    // 필은 목록 **안에** 산다(웹 `relative h-full` 과 같은 자리). 그 줄이 가리키는
+    // 곳도, 눌렀을 때 움직이는 것도 이 스크롤러다. 떠 있으므로 목록의 배치는 한
+    // 픽셀도 바뀌지 않는다 — `measure/` 의 앵커 이동 두 줄이 그것을 잰다.
+    <View style={styles.pillFrame}>
+      {list}
+      {showJumpUnread ? (
+        <JumpPillDock side="top">
+          <JumpPill
+            direction="up"
+            testID="jump-unread"
+            segments={jumpUnreadSegments(unreadJumpCount)}
+            accessibilityLabel={jumpUnreadAccessibilityLabel(unreadJumpCount)}
+            onPress={jumpToUnread}
+          />
+        </JumpPillDock>
+      ) : null}
+      {showJumpLatest ? (
+        <JumpPillDock side="bottom">
+          <JumpPill
+            direction="down"
+            testID="jump-latest"
+            segments={jumpLatestSegments(newCount)}
+            accessibilityLabel={jumpLatestAccessibilityLabel(newCount)}
+            onPress={jumpToLatest}
+          />
+        </JumpPillDock>
+      ) : null}
+    </View>
+  );
 }
 
 /**
@@ -1376,4 +1678,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   headerLabel: {fontSize: font.meta, color: color.textFaint},
   footer: {height: space.sm},
+  /** 필이 떠 있을 틀. 목록과 같은 자리·같은 크기다. */
+  pillFrame: {flex: 1},
 });

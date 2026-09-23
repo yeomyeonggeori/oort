@@ -1175,6 +1175,9 @@ export default function ConversationScreen({
               jumpTarget={jumpTarget ?? undefined}
               onJumpMissed={onJumpMissed}
               onJumpLanded={clearJumpNotice}
+              // 위 「안읽음으로」·아래 「최신으로」 (#1892). 위 필의 N 은 위의
+              // 동결 스냅샷(`unreadCount`) 그대로다 — 구분선과 같은 수.
+              jumpPills
             />
           </>
         }
