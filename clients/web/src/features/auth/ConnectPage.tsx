@@ -898,7 +898,11 @@ export function ConnectPage({
   }
 
   return (
-    <div className="flex min-h-full flex-col bg-surface">
+    // overflow-x-clip (#2616): S1·S2·S3 사이의 line-slide가 카드를 오른쪽
+    // 48px에서 들여오는 650ms 동안 앱 스크롤러(main.tsx)에 24px 가로 넘침이
+    // 생겼다(WebKit iPhone 실측). 폰에서는 그 사이 화면이 옆으로 끌린다. clip은
+    // 스크롤 상자를 만들지 않고 넘친 몫만 자른다. FirstAgentStage와 같은 자리다.
+    <div className="flex min-h-full flex-col overflow-x-clip bg-surface">
       <header
         className="onboarding-step-chrome"
         data-testid="onboarding-step-chrome"

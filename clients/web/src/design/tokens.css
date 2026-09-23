@@ -358,6 +358,21 @@
    * 44pt를 도출식으로 강제하면서 웹만 AA 바닥선 아래였고, hover 없는 기기를
    * 섬기기 시작한 이상 그 축은 두 클라에서 같은 뜻이어야 한다. */
   --touch-target: 24px;
+
+  /* 입력 칸 글자의 바닥 (#2616). iOS 사파리는 포커스 받은 입력 칸의 글자가
+   * 16px보다 작으면 페이지를 확대하고, 확대된 채로 두어 가로로 끌리는 화면을
+   * 남긴다. 막는 길은 `maximum-scale`(확대 자체를 끄는 것, 접근성을 끈다)이
+   * 아니라 글자를 이 값 이상으로 두는 것이다.
+   *
+   * 텍스트 역할이 아니라 플랫폼의 문턱이라 이름을 따로 갖고, `--text-*` 이름표를
+   * 쓰지 않는다. 그 이름표는 닫힌 역할 척도이고(designSystem.test.ts가 그 안의
+   * 값이 서로 달라야 한다고 잰다), 유틸리티를 만들지 않는 값이라 `@theme`에도
+   * 두지 않는다(`--font-onboarding-wordmark`와 같은 자리). 지금 `--text-title`과
+   * 값이 같은 것은 우연이고, 제목 크기가 바뀌는 날 이 바닥이 함께 끌려가면 안
+   * 된다(디자인 시스템 §2.5가 폰 본문 16을 같은 이유로 짝으로 적지 않는다).
+   * 쓰는 자리는 `@layer base`의 입력 칸 규칙 하나다. */
+  --field-text-floor: 1rem;
+  --field-text-floor-leading: 1.5rem;
 }
 
 :root[data-theme="light"] {
@@ -1880,8 +1895,9 @@
  * 이 창은 정확히 #1418이 재는 그 판에서 열린다.
  *
  * 그래서 자르는 자리를 글에게 옮긴다: 플레이스홀더 자신을 한 줄로 묶는다.
- * `1lh`는 임의 픽셀이 아니라 이 요소의 행간(`--text-body--line-height`, 폰에서는
- * `--text-title--line-height`)이라 폰의 16px 규칙을 그대로 따라간다. `max-`인
+ * `1lh`는 임의 픽셀이 아니라 이 요소의 행간(`leading-relaxed` × 글자 크기, 폰과
+ * 손가락 화면에서는 `--field-text-floor` 16px 위의 값)이라 입력 칸 글자 바닥을
+ * 그대로 따라간다(#2616). `max-`인
  * 이유는 짧은 플레이스홀더에게는 아무 일도 일어나지 않아야 하기 때문이다.
  * 사람이 쓴 글은 건드리지 않는다 — 그쪽은 `useAutoGrow`가 재서 상자를 키운다.
  *
@@ -2810,17 +2826,50 @@
     [role="button"] {
       -webkit-tap-highlight-color: transparent;
     }
+  }
 
-    /* iOS 사파리는 16px보다 작은 폼 컨트롤에 포커스가 가면 **페이지를 확대한다**.
-     * 컴포저는 14px(--text-body)이므로 메시지를 쓸 때마다 화면이 튀고, 확대된
-     * 채로 남아 가로 스크롤이 생겼다. 확대를 막는 유일한 방법은 컨트롤 글자를
-     * 16px로 두는 것이다(user-scalable=no는 접근성을 끄는 것이라 쓰지 않는다).
-     * 16px는 임의값이 아니라 이미 있는 역할 --text-title이다. */
+  /* 입력 칸 글자의 바닥 (#2616) ---------------------------------------------
+   *
+   * iOS 사파리는 16px보다 작은 입력 칸에 포커스가 가면 **페이지를 확대하고**,
+   * 확대된 채로 남아 가로 스크롤을 만든다(`--field-text-floor` 주석). 이 규칙은
+   * B6부터 폰 블록 안에 있었지만 **한 번도 이기지 못했다**. 여기는 `@layer
+   * base`이고, 입력 칸이 다는 역할 클래스(`text-body`의 `font-size:
+   * var(--text-body)`)는 `@layer utilities`에 있어서, 뒤 레이어가 특정도와
+   * 무관하게 이긴다. 폰의 로그인 칸·claim 칸·컴포저가 전부 14px였다(WebKit
+   * iPhone 프로필 실측). 성재가 owner claim을 폰으로 하다 만난 확대가 이것이다.
+   *
+   * 그래서 크기를 덮어쓰지 않고 **역할을 다시 묶는다**. 입력 칸 안에서는
+   * 바닥보다 작은 역할(timestamp·meta·body)이 바닥을 답한다. `text-body`는
+   * 그대로 `var(--text-body)`를 읽고도 16px이 된다. 레이어 밖에서 덮어쓰는
+   * 길과 다른 점은 둘이다. 바닥보다 큰 역할(title·display)은 그대로 서고,
+   * 컴포저의 `leading-relaxed` 같은 행간 유틸리티도 그대로 이긴다. 클래스 없는
+   * 칸은 마지막 두 줄이 받는다(Tailwind preflight의 `font: inherit`와 같은
+   * 레이어이고, 그보다 뒤에 선다).
+   *
+   * 문턱은 둘이다. 좁은 창(`width < 600px`)과 손가락(`hover: none`). 폭만 보면
+   * 600px이 넘는 아이패드 세로 화면이 빠지는데, 거기서 입력 칸을 누르는 것도
+   * 손가락이다. 마우스로 쓰는 넓은 창의 14px 밀도는 그대로다.
+   *
+   * `[data-field-adornment]`는 칸 안에 겹쳐 그리는 글자(핸들 칸의 `@`)다. 칸의
+   * 글자만 16px로 오르고 그 앞의 표식이 14px로 남으면 한 칸 안에서 크기가
+   * 갈린다.
+   *
+   * 역할이 새로 생기면 여기도 함께 묶어야 한다. 계산된 글자 크기는
+   * `fieldTextFloor.browser.test.ts`가 WebKit·Chromium에서 재고, 묶는 목록이
+   * 바닥 밑 역할 전부와 같은지는 같은 파일의 정적 시험이 잰다. */
+  @media (width < 600px), (hover: none) {
     input,
     textarea,
-    select {
-      font-size: var(--text-title);
-      line-height: var(--text-title--line-height);
+    select,
+    [data-field-adornment] {
+      --text-timestamp: var(--field-text-floor);
+      --text-timestamp--line-height: var(--field-text-floor-leading);
+      --text-meta: var(--field-text-floor);
+      --text-meta--line-height: var(--field-text-floor-leading);
+      --text-body: var(--field-text-floor);
+      --text-body--line-height: var(--field-text-floor-leading);
+      font-size: var(--field-text-floor);
+      line-height: var(--field-text-floor-leading);
     }
   }
 

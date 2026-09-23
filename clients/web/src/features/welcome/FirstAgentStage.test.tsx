@@ -37,11 +37,15 @@ import {
   FIRST_AGENT_RECHECK_LABEL,
   FIRST_AGENT_RECHECKING,
   FIRST_AGENT_RETRY_LABEL,
+  FIRST_AGENT_CAPTURE_POSES,
+  FIRST_AGENT_REENTRY_HREF,
+  FIRST_AGENT_SKIP_LABEL,
 } from "./firstAgent";
 import {
   applyFirstAgentFocus,
   clearAllFirstAgentMarkers,
   readFirstAgentMarker,
+  takeFirstAgentResumeHash,
 } from "./firstAgentStore";
 import { FirstAgentStage } from "./FirstAgentStage";
 
@@ -542,7 +546,7 @@ describe("카드 4 · 건너뛰기", () => {
     expect(host.querySelector("legend")?.textContent).toBe(FIRST_AGENT_CHOICE_LEGEND);
     expect(host.querySelector('[data-testid="first-agent-provider-choice"]')).toBeNull();
     expect(host.querySelector('[data-testid="first-agent-skip"]')?.textContent).toBe(
-      "나중에"
+      "지금은 건너뛰기"
     );
     expect(host.textContent).toContain("Grok Bot");
     expect(host.textContent).toContain(FIRST_AGENT_LEAD_CARDS);
@@ -607,6 +611,74 @@ describe("카드 4 · 건너뛰기", () => {
     });
     expect(readFirstAgentMarker(WS)).toBe("skipped");
     expect(continued).toBe(2);
+  });
+});
+
+describe("#2616 건너뛰기는 머리 줄에, 다시 붙이는 길은 본문에", () => {
+  // 375px 폰에서 건너뛰기가 카드 네 장 뒤(단계 맨 아래)에 있어서 스크롤해야
+  // 보였다. 머리 줄은 어느 자세에서도 첫 줄이다. 기하(첫 화면 안인가)는
+  // scripts/capture-phone-onboarding.mjs 가 WebKit iPhone 프로필에서 잰다.
+  it.each(FIRST_AGENT_CAPTURE_POSES)(
+    "%s 자세: 건너뛰기 하나가 머리 줄 오른쪽 끝에 있고 단계 본문보다 앞선다",
+    async (pose) => {
+      poseSlot.current = pose;
+      const host = mountStage();
+      await waitFor(
+        () => host.querySelector('[data-testid="first-agent-stage"]') !== null,
+        pose
+      );
+      const skips = host.querySelectorAll('[data-testid="first-agent-skip"]');
+      expect(skips.length).toBe(1);
+      const skip = skips[0] as HTMLElement;
+      expect(skip.tagName).toBe("BUTTON");
+      expect(skip.textContent).toBe(FIRST_AGENT_SKIP_LABEL);
+      const header = host.querySelector('[data-testid="onboarding-step-chrome"]');
+      expect(header?.tagName).toBe("HEADER");
+      expect(header?.contains(skip)).toBe(true);
+      expect(header?.lastElementChild).toBe(skip);
+      const stage = host.querySelector('[data-testid="first-agent-stage"]');
+      expect(stage?.contains(skip)).toBe(false);
+      expect(
+        skip.compareDocumentPosition(stage!) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+      if (pose !== "done") {
+        const reentry = host.querySelectorAll('[data-testid="first-agent-reentry"]');
+        expect(reentry.length).toBe(1);
+        expect(stage?.contains(reentry[0]!)).toBe(true);
+        expect(reentry[0]?.getAttribute("href")).toBe(`#${FIRST_AGENT_REENTRY_HREF}`);
+      }
+    }
+  );
+
+  it("머리 줄 건너뛰기는 finish('skipped') 흐름을 탄다", async () => {
+    takeFirstAgentResumeHash(); // 앞 시험이 남긴 재개 해시를 비운다(마커 정리는 이 칸을 안 지운다).
+    poseSlot.current = "detecting";
+    const host = mountStage();
+    await waitFor(
+      () => host.querySelector('[data-testid="first-agent-skip"]') !== null,
+      "skip"
+    );
+    act(() => {
+      host.querySelector<HTMLButtonElement>('[data-testid="first-agent-skip"]')?.click();
+    });
+    expect(readFirstAgentMarker(WS)).toBe("skipped");
+    expect(continued).toBe(1);
+    expect(takeFirstAgentResumeHash()).toBeNull();
+  });
+
+  it("다시 붙이는 길은 설정 › 에이전트 자격으로 이어지고 skipped 를 남긴다", async () => {
+    takeFirstAgentResumeHash();
+    const host = mountStage();
+    await waitFor(
+      () => host.querySelector('[data-testid="first-agent-reentry"]') !== null,
+      "reentry"
+    );
+    act(() => {
+      host.querySelector<HTMLAnchorElement>('[data-testid="first-agent-reentry"]')?.click();
+    });
+    expect(readFirstAgentMarker(WS)).toBe("skipped");
+    expect(continued).toBe(1);
+    expect(takeFirstAgentResumeHash()).toBe(`#${FIRST_AGENT_REENTRY_HREF}`);
   });
 });
 
