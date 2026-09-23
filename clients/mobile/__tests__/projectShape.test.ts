@@ -1,4 +1,4 @@
-import {execSync} from 'child_process';
+import {execFileSync, execSync} from 'child_process';
 import {existsSync, readFileSync, readdirSync, statSync} from 'fs';
 import {join, resolve} from 'path';
 import {NSE_KEYCHAIN_ACCESS_GROUP} from '../src/storage/secureSession';
@@ -348,5 +348,156 @@ describe('layering', () => {
         stdio: 'pipe',
       }),
     ).not.toThrow();
+  });
+});
+
+describe('what the upload declares stays true of the code (#2568)', () => {
+  // App Store Connect reads these Info.plist keys at upload time and never
+  // looks at the code again. Each assertion below ties one declaration to the
+  // code fact it rests on, so a change that makes the declaration false fails
+  // here instead of shipping a false statement to Apple.
+  const plist = readFileSync(join(APP_ROOT, 'ios/MomoMobile/Info.plist'), 'utf8');
+  const plistString = (key: string) =>
+    plist.match(new RegExp(`<key>${key}</key>\\s*<string>([^<]*)</string>`))?.[1];
+
+  // Everything that ends up in the JS bundle: this client plus the core, which
+  // Metro compiles from source (the core's colocated tests do not ship).
+  // Comments are stripped because the reasoning in them names the very APIs
+  // being banned (kv.ts explains why MMKV's `encryptionKey` is not used).
+  const shippedCode = () =>
+    sourceFiles(join(APP_ROOT, 'src'))
+      .concat([join(APP_ROOT, 'App.tsx'), join(APP_ROOT, 'index.js')])
+      .concat(
+        sourceFiles(join(REPO_ROOT, 'packages/momo-core/src')).filter(
+          file => !/\.test\.tsx?$/.test(file),
+        ),
+      )
+      .map(file => ({
+        file,
+        code: readFileSync(file, 'utf8')
+          .replace(/\/\*[\s\S]*?\*\//g, '')
+          .replace(/^\s*\/\/.*$/gm, ''),
+      }));
+
+  function nativeFiles(dir: string, acc: string[] = []): string[] {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) {
+        nativeFiles(full, acc);
+      } else if (/\.(swift|m|mm|h)$/.test(entry)) {
+        acc.push(full);
+      }
+    }
+    return acc;
+  }
+
+  it('carries the purpose strings the linked APIs require (ITMS-90683)', () => {
+    // Apple checks the binary, not the call sites: expo-image-picker links the
+    // photo-library permission API and expo-camera links the microphone one, so
+    // an upload without these strings is rejected even though PHPicker never
+    // prompts and nothing here records sound.
+    for (const key of [
+      'NSCameraUsageDescription',
+      'NSMicrophoneUsageDescription',
+      'NSPhotoLibraryUsageDescription',
+    ]) {
+      expect(plistString(key)?.trim()).toBeTruthy();
+    }
+  });
+
+  it('declares only exempt encryption', () => {
+    expect(plist).toMatch(/<key>ITSAppUsesNonExemptEncryption<\/key>\s*<false\/>/);
+  });
+
+  it('keeps that declaration true: MMKV is never given a key', () => {
+    // MMKVCore is the one linked library that carries its own cipher (AES),
+    // and it is off unless someone passes `encryptionKey` or calls
+    // `encrypt`/`recrypt`. Everything else is OS-provided: TLS for transport,
+    // the keychain for secrets. Turning MMKV encryption on — or reaching for
+    // WebCrypto's `subtle` — is encryption outside the OS, and the Info.plist
+    // `false` would then be a false export declaration.
+    const banned = /\bencryptionKey\b|\.(?:en|re)crypt\s*\(|\bsubtle\b/;
+    const offenders = shippedCode()
+      .filter(({code}) => banned.test(code))
+      .map(({file}) => file);
+    expect(offenders).toEqual([]);
+  });
+
+  it('keeps that declaration true: no crypto library and no native cipher', () => {
+    // A tripwire, not a proof: a dependency whose name says it implements
+    // cryptography reopens the question before it can ship unnoticed.
+    const pkg = JSON.parse(readFileSync(join(APP_ROOT, 'package.json'), 'utf8'));
+    expect(
+      Object.keys(pkg.dependencies).filter(name =>
+        /crypt|sodium|nacl|cipher|ssl|aes\b|argon/i.test(name),
+      ),
+    ).toEqual([]);
+    // The app, the notification extension and the two local Expo modules.
+    const native = ['ios/MomoMobile', 'ios/NotificationService', 'ios/MomoPushKit', 'modules']
+      .flatMap(dir => nativeFiles(join(APP_ROOT, dir)))
+      .filter(file =>
+        /\bimport\s+(?:CryptoKit|CommonCrypto)\b|\bCCCrypt\b|\bSecKeyCreateEncryptedData\b/.test(
+          readFileSync(file, 'utf8'),
+        ),
+      );
+    expect(native).toEqual([]);
+  });
+
+  it('keeps the microphone sentence true: nothing asks for the microphone', () => {
+    // The purpose string tells the person oort does not record. The first
+    // feature that asks for the microphone makes that sentence false, so it has
+    // to change in the same PR. String literals are kept here on purpose:
+    // `mode="video"` is how CameraView starts recording sound.
+    const banned =
+      /\b(?:requestMicrophonePermissionsAsync|getMicrophonePermissionsAsync|useMicrophonePermissions|recordAsync|requestRecordingPermissionsAsync|useAudioRecorder)\b|\bmode\s*=\s*\{?\s*['"]video['"]/;
+    const offenders = shippedCode()
+      .filter(({code}) => banned.test(code))
+      .map(({file}) => file);
+    expect(offenders).toEqual([]);
+    const pkg = JSON.parse(readFileSync(join(APP_ROOT, 'package.json'), 'utf8'));
+    expect(
+      Object.keys(pkg.dependencies).filter(name =>
+        /audio|voice|webrtc|record|speech|^expo-av$/i.test(name),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe('the local upload build number rule (#2568)', () => {
+  // Xcode Cloud numbers its builds in the 2000s (2035, 2039). Local uploads
+  // take 3000 + the KST day count since 2026-09-01, so the two never collide
+  // and no counter file has to be committed. App Store Connect only accepts a
+  // number higher than the previous upload of the same version.
+  const script = join(APP_ROOT, 'scripts/archive-release.sh');
+  const kst = (local: string) => Math.floor(Date.parse(`${local}+09:00`) / 1000);
+  const buildNumber = (now: number, ...args: string[]) =>
+    execFileSync('bash', [script, '--print-build-number', ...args], {
+      encoding: 'utf8',
+      env: {...process.env, MOMO_IOS_BUILD_NOW: String(now), MOMO_IOS_BUILD_NUMBER: ''},
+      stdio: 'pipe',
+    }).trim();
+
+  it('is 3000 plus the KST day count since 2026-09-01', () => {
+    expect(buildNumber(kst('2026-09-01T00:00:00'))).toBe('3000');
+    expect(buildNumber(kst('2026-09-23T23:59:59'))).toBe('3022');
+    // The day turns at midnight in Seoul, not in UTC.
+    expect(buildNumber(kst('2026-09-24T00:00:00'))).toBe('3023');
+    expect(buildNumber(kst('2027-09-01T00:00:00'))).toBe('3365');
+  });
+
+  it('numbers a same-day re-upload above the first one', () => {
+    expect(buildNumber(kst('2026-09-23T12:00:00'), '--seq', '1')).toBe('3022.1');
+  });
+
+  it('refuses a clock from before the rule', () => {
+    expect(() => buildNumber(kst('2026-08-31T23:59:59'))).toThrow();
+  });
+
+  it('is committed executable', () => {
+    const entry = execSync(
+      'git ls-files -s -- clients/mobile/scripts/archive-release.sh',
+      {cwd: REPO_ROOT, encoding: 'utf8'},
+    ).trim();
+    expect(entry.split(' ')[0]).toBe('100755');
   });
 });
