@@ -1,6 +1,7 @@
-import {execSync} from 'child_process';
+import {execFileSync, execSync} from 'child_process';
 import {existsSync, readFileSync, readdirSync, statSync} from 'fs';
 import {join, resolve} from 'path';
+import * as ts from 'typescript';
 import {NSE_KEYCHAIN_ACCESS_GROUP} from '../src/storage/secureSession';
 
 // =============================================================================
@@ -31,6 +32,74 @@ function sourceFiles(dir: string, acc: string[] = []): string[] {
   }
   return acc;
 }
+
+// Source with its comments removed, for the guards below that search code for a
+// banned name. Comments name those APIs constantly (that is where the reasons
+// live), so a search that kept them would drown.
+//
+// The TypeScript parser does the removing, not a pattern. A pattern cannot tell
+// a comment from code: `/\/\*[\s\S]*?\*\//` applied first let the `/*` inside a
+// `//` comment (`**/v1/**` in the core's chainModel.ts) swallow the 37 lines of
+// real code that followed, and a banned call written there passed every guard
+// (review of #2587). Stripping `//` first has the mirror bug — `//` inside a
+// string, a template literal or a regex. The parser knows where each of those
+// ends, so only real comments go. The printer re-spaces the code, which the
+// patterns below tolerate (`\s*`); identifiers and literals are unchanged.
+const commentFreePrinter = ts.createPrinter({removeComments: true});
+function stripComments(fileName: string, source: string): string {
+  const kind = fileName.endsWith('.tsx')
+    ? ts.ScriptKind.TSX
+    : fileName.endsWith('.jsx')
+      ? ts.ScriptKind.JSX
+      : fileName.endsWith('.js')
+        ? ts.ScriptKind.JS
+        : ts.ScriptKind.TS;
+  // setParentNodes=true: the printer keeps a string literal's original quotes
+  // only when it can walk up to the source file.
+  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, kind);
+  return commentFreePrinter.printFile(sf);
+}
+const codeCache = new Map<string, string>();
+function codeOf(file: string): string {
+  let code = codeCache.get(file);
+  if (code === undefined) {
+    code = stripComments(file, readFileSync(file, 'utf8'));
+    codeCache.set(file, code);
+  }
+  return code;
+}
+
+describe('comment removal used by the code guards (review of #2587)', () => {
+  it('removes comments without swallowing the code around them', () => {
+    const source = [
+      '// catch-all: **/v1/** answers {}',
+      'const a = createMMKV({encryptionKey: k});',
+      "/* block naming window.x */ const s = '/* in a string */';",
+      "const u = 'https://example.com//x';",
+      'const t = `${host}//path/*.ts`; const b = crypto.subtle;',
+      'const r = /^https?:\\/\\//; const c = x.encrypt(y);',
+      '/** jsdoc naming fetch( */',
+      'export const tail = 1; // trailing, names recrypt(',
+    ].join('\n');
+    const code = stripComments('probe.ts', source);
+    // Code after each tricky construct survives …
+    for (const kept of [
+      'encryptionKey',
+      "'/* in a string */'",
+      "'https://example.com//x'",
+      '`${host}//path/*.ts`',
+      'crypto.subtle',
+      'x.encrypt(y)',
+      'export const tail = 1;',
+    ]) {
+      expect(code).toContain(kept);
+    }
+    // … and the comments are gone.
+    for (const dropped of ['catch-all', 'window.x', 'jsdoc naming', 'trailing, names']) {
+      expect(code).not.toContain(dropped);
+    }
+  });
+});
 
 describe('the iOS project survives (ADR-0137 D7 정오 7항)', () => {
   it('still has its Xcode project', () => {
@@ -259,12 +328,10 @@ describe('DOM is in `lib`, so the discipline is enforced by a gate', () => {
     const offenders = sourceFiles(join(APP_ROOT, 'src'))
       .concat([join(APP_ROOT, 'App.tsx'), join(APP_ROOT, 'index.js')])
       .filter(file => {
-        const source = readFileSync(file, 'utf8')
-          // Comments discuss these globals by name constantly; a text search
-          // that did not strip them would drown, then get tuned until it caught
-          // nothing. Same reasoning the core's purity gate gives for parsing.
-          .replace(/\/\*[\s\S]*?\*\//g, '')
-          .replace(/^\s*\/\/.*$/gm, '')
+        // Comments discuss these globals by name constantly; a text search
+        // that did not strip them would drown, then get tuned until it caught
+        // nothing. Same reasoning the core's purity gate gives for parsing.
+        const source = codeOf(file)
           // Module specifiers and UI copy are values, not global reads. Without
           // stripping strings, `expo-document-picker` is mistaken for the DOM
           // `document` global even though the source never evaluates it.
@@ -321,12 +388,7 @@ describe('layering', () => {
     const banned = /(?<![A-Za-z_.])fetch\s*\(/;
     const offenders = sourceFiles(join(APP_ROOT, 'src'))
       .concat([join(APP_ROOT, 'App.tsx')])
-      .filter(file => {
-        const source = readFileSync(file, 'utf8')
-          .replace(/\/\*[\s\S]*?\*\//g, '')
-          .replace(/^\s*\/\/.*$/gm, '');
-        return banned.test(source);
-      });
+      .filter(file => banned.test(codeOf(file)));
     expect(offenders).toEqual([]);
   });
 
@@ -348,5 +410,152 @@ describe('layering', () => {
         stdio: 'pipe',
       }),
     ).not.toThrow();
+  });
+});
+
+describe('what the upload declares stays true of the code (#2568)', () => {
+  // App Store Connect reads these Info.plist keys at upload time and never
+  // looks at the code again. Each assertion below ties one declaration to the
+  // code fact it rests on, so a change that makes the declaration false fails
+  // here instead of shipping a false statement to Apple.
+  const plist = readFileSync(join(APP_ROOT, 'ios/MomoMobile/Info.plist'), 'utf8');
+  const plistString = (key: string) =>
+    plist.match(new RegExp(`<key>${key}</key>\\s*<string>([^<]*)</string>`))?.[1];
+
+  // Everything that ends up in the JS bundle: this client plus the core, which
+  // Metro compiles from source (the core's colocated tests do not ship).
+  // Comments are stripped (`codeOf`) because the reasoning in them names the very
+  // APIs being banned (kv.ts explains why MMKV's `encryptionKey` is not used).
+  const shippedCode = () =>
+    sourceFiles(join(APP_ROOT, 'src'))
+      .concat([join(APP_ROOT, 'App.tsx'), join(APP_ROOT, 'index.js')])
+      .concat(
+        sourceFiles(join(REPO_ROOT, 'packages/momo-core/src')).filter(
+          file => !/\.test\.tsx?$/.test(file),
+        ),
+      )
+      .map(file => ({file, code: codeOf(file)}));
+
+  function nativeFiles(dir: string, acc: string[] = []): string[] {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) {
+        nativeFiles(full, acc);
+      } else if (/\.(swift|m|mm|h|c|cc|cpp)$/.test(entry)) {
+        acc.push(full);
+      }
+    }
+    return acc;
+  }
+
+  it('carries the purpose strings the linked APIs require (ITMS-90683)', () => {
+    // Apple checks the binary, not the call sites: expo-image-picker links the
+    // photo-library permission API and expo-camera links the microphone one, so
+    // an upload without these strings is rejected even though PHPicker never
+    // prompts and nothing here records sound.
+    for (const key of [
+      'NSCameraUsageDescription',
+      'NSMicrophoneUsageDescription',
+      'NSPhotoLibraryUsageDescription',
+    ]) {
+      expect(plistString(key)?.trim()).toBeTruthy();
+    }
+  });
+
+  it('declares only exempt encryption', () => {
+    expect(plist).toMatch(/<key>ITSAppUsesNonExemptEncryption<\/key>\s*<false\/>/);
+  });
+
+  it('keeps that declaration true: MMKV is never given a key', () => {
+    // MMKVCore is the one linked library that carries its own cipher (AES),
+    // and it is off unless someone passes `encryptionKey` or calls
+    // `encrypt`/`recrypt`. Everything else is OS-provided: TLS for transport,
+    // the keychain for secrets. Turning MMKV encryption on — or reaching for
+    // WebCrypto's `subtle` — is encryption outside the OS, and the Info.plist
+    // `false` would then be a false export declaration.
+    const banned = /\bencryptionKey\b|\.(?:en|re)crypt\s*\(|\bsubtle\b/;
+    const offenders = shippedCode()
+      .filter(({code}) => banned.test(code))
+      .map(({file}) => file);
+    expect(offenders).toEqual([]);
+  });
+
+  it('keeps that declaration true: no crypto library and no native cipher', () => {
+    // A tripwire, not a proof: a dependency whose name says it implements
+    // cryptography reopens the question before it can ship unnoticed.
+    const pkg = JSON.parse(readFileSync(join(APP_ROOT, 'package.json'), 'utf8'));
+    expect(
+      Object.keys(pkg.dependencies).filter(name =>
+        /crypt|sodium|nacl|cipher|ssl|aes\b|argon/i.test(name),
+      ),
+    ).toEqual([]);
+    // The app, the notification extension and the two local Expo modules, in
+    // Swift or Objective-C/C: a module import (`import`/`@import`), a header
+    // import (`#import`/`#include <CommonCrypto/…>`), a CommonCrypto cipher call
+    // (`CCCrypt`, `CCCryptor…`) or a Security-framework key encryption call.
+    const nativeCipher =
+      /\bimport\s+(?:CryptoKit|CommonCrypto)\b|#\s*(?:import|include)\s*<CommonCrypto\b|\bCCCrypt(?:or\w*)?\b|\bSecKeyEncrypt\b|\bSecKeyCreateEncryptedData\b/;
+    const native = ['ios/MomoMobile', 'ios/NotificationService', 'ios/MomoPushKit', 'modules']
+      .flatMap(dir => nativeFiles(join(APP_ROOT, dir)))
+      .filter(file => nativeCipher.test(readFileSync(file, 'utf8')));
+    expect(native).toEqual([]);
+  });
+
+  it('keeps the microphone sentence true: nothing asks for the microphone', () => {
+    // The purpose string tells the person oort does not record. The first
+    // feature that asks for the microphone makes that sentence false, so it has
+    // to change in the same PR. String literals are kept here on purpose:
+    // `mode="video"` is how CameraView starts recording sound.
+    const banned =
+      /\b(?:requestMicrophonePermissionsAsync|getMicrophonePermissionsAsync|useMicrophonePermissions|recordAsync|requestRecordingPermissionsAsync|useAudioRecorder)\b|\bmode\s*=\s*\{?\s*['"]video['"]/;
+    const offenders = shippedCode()
+      .filter(({code}) => banned.test(code))
+      .map(({file}) => file);
+    expect(offenders).toEqual([]);
+    const pkg = JSON.parse(readFileSync(join(APP_ROOT, 'package.json'), 'utf8'));
+    expect(
+      Object.keys(pkg.dependencies).filter(name =>
+        /audio|voice|webrtc|record|speech|^expo-av$/i.test(name),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe('the local upload build number rule (#2568)', () => {
+  // Xcode Cloud numbers its builds in the 2000s (2035, 2039). Local uploads
+  // take 3000 + the KST day count since 2026-09-01, so the two never collide
+  // and no counter file has to be committed. App Store Connect only accepts a
+  // number higher than the previous upload of the same version.
+  const script = join(APP_ROOT, 'scripts/archive-release.sh');
+  const kst = (local: string) => Math.floor(Date.parse(`${local}+09:00`) / 1000);
+  const buildNumber = (now: number, ...args: string[]) =>
+    execFileSync('bash', [script, '--print-build-number', ...args], {
+      encoding: 'utf8',
+      env: {...process.env, MOMO_IOS_BUILD_NOW: String(now), MOMO_IOS_BUILD_NUMBER: ''},
+      stdio: 'pipe',
+    }).trim();
+
+  it('is 3000 plus the KST day count since 2026-09-01', () => {
+    expect(buildNumber(kst('2026-09-01T00:00:00'))).toBe('3000');
+    expect(buildNumber(kst('2026-09-23T23:59:59'))).toBe('3022');
+    // The day turns at midnight in Seoul, not in UTC.
+    expect(buildNumber(kst('2026-09-24T00:00:00'))).toBe('3023');
+    expect(buildNumber(kst('2027-09-01T00:00:00'))).toBe('3365');
+  });
+
+  it('numbers a same-day re-upload above the first one', () => {
+    expect(buildNumber(kst('2026-09-23T12:00:00'), '--seq', '1')).toBe('3022.1');
+  });
+
+  it('refuses a clock from before the rule', () => {
+    expect(() => buildNumber(kst('2026-08-31T23:59:59'))).toThrow();
+  });
+
+  it('is committed executable', () => {
+    const entry = execSync(
+      'git ls-files -s -- clients/mobile/scripts/archive-release.sh',
+      {cwd: REPO_ROOT, encoding: 'utf8'},
+    ).trim();
+    expect(entry.split(' ')[0]).toBe('100755');
   });
 });

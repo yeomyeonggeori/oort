@@ -28,10 +28,19 @@ PGBACKREST_PACKAGE_SHA256 = {
     "amd64": "2ff822645a132ce71f215ae4355d050c6c542143ea6a267cb433acf6413b1a3e",
     "arm64": "bb42e82a8c02a556b98e2002f4ea2aa14675d34627ba4025351e56c9c520fc20",
 }
+LIBSSH2_VERSION = "1.11.1-1+deb13u2"
 LIBSSH2_PACKAGE_SHA256 = {
-    "amd64": "915c4ec450a369d430e0151f9e10e25044ea2f0d6e41901e00a9317e232e5683",
-    "arm64": "600c2a845d6d14d292c765382bc7e644898762e1634a4aecf5b85329622dbbfe",
+    "amd64": "dbb1024c192d4d292b7cfa902b96076cfe81b56a5eed4fb28da36e8bf543e49a",
+    "arm64": "245565f4ce5493d67a3c54e26bc3d9cf28b1b70eeb912de7cda61af52268017d",
 }
+# #2572: the live deb.debian.org / apt.postgresql.org pools delete superseded
+# versions (libssh2 deb13u1 went 404 and failed the v0.1.6 publish). Pinned
+# package bytes must come from archives that keep every published file.
+PGBACKREST_PACKAGE_URL_PREFIX = "https://apt-archive.postgresql.org/pub/repos/apt/pool/main/p/pgbackrest/"
+LIBSSH2_PACKAGE_URL_PREFIX = (
+    "https://snapshot.debian.org/archive/debian/20260905T205002Z/pool/main/libs/libssh2/"
+)
+LIVE_POOL_HOSTS = ("://deb.debian.org/", "://apt.postgresql.org/")
 EXPECTED_PERMISSIONS = {
     "contents": "read",
     "packages": "write",
@@ -566,17 +575,28 @@ def validate_postgres_dockerfile(text: str) -> None:
     for architecture, checksum in PGBACKREST_PACKAGE_SHA256.items():
         require(f"ADD --checksum=sha256:{checksum}" in text, f"pgBackRest {architecture} package checksum drifted")
         require(
-            f"pgbackrest_2.59.0-1.pgdg13%2B1_{architecture}.deb" in text,
-            f"pgBackRest {architecture} package URL/version drifted",
+            f"{PGBACKREST_PACKAGE_URL_PREFIX}pgbackrest_2.59.0-1.pgdg13%2B1_{architecture}.deb" in text,
+            f"pgBackRest {architecture} package URL/version drifted from the permanent apt-archive path",
         )
     for architecture, checksum in LIBSSH2_PACKAGE_SHA256.items():
         require(f"ADD --checksum=sha256:{checksum}" in text, f"libssh2 {architecture} package checksum drifted")
         require(
-            f"libssh2-1t64_1.11.1-1%2Bdeb13u1_{architecture}.deb" in text,
-            f"libssh2 {architecture} package URL/version drifted",
+            f"{LIBSSH2_PACKAGE_URL_PREFIX}libssh2-1t64_1.11.1-1%2Bdeb13u2_{architecture}.deb" in text,
+            f"libssh2 {architecture} package URL/version drifted from the permanent snapshot path",
         )
+    for host in LIVE_POOL_HOSTS:
+        require(host not in text, f"package pins must not use a live pool that deletes superseded versions: {host}")
 
     require(f'com.oor7.oort.pgbackrest.version="{PGBACKREST_VERSION}"' in text, "pgBackRest version label drifted")
+    require(f'com.oor7.oort.libssh2.version="{LIBSSH2_VERSION}"' in text, "libssh2 version label drifted")
+    require(
+        f'test "$(dpkg-deb -f "$package_dir/libssh2.deb" Version)" = "{LIBSSH2_VERSION}"' in text,
+        "downloaded libssh2 package version is not verified before install",
+    )
+    require(
+        f"test \"$(dpkg-query -W -f='${{Version}}' libssh2-1t64)\" = \"{LIBSSH2_VERSION}\"" in text,
+        "installed libssh2 package version is not verified",
+    )
     require(
         'com.oor7.oort.additive-licenses="MIT AND BSD-3-Clause AND ISC"' in text,
         "additive pgBackRest/libssh2 license delta label drifted",
@@ -675,6 +695,32 @@ def validate_postgres_mutations(dockerfile: str, wrapper: str) -> None:
         dockerfile.replace(PGBACKREST_PACKAGE_SHA256["amd64"], "0" * 64),
         wrapper,
         "pgBackRest checksum drift",
+    )
+    expect_postgres_contract_rejected(
+        dockerfile.replace(LIBSSH2_PACKAGE_SHA256["arm64"], "0" * 64),
+        wrapper,
+        "libssh2 checksum drift",
+    )
+    expect_postgres_contract_rejected(
+        dockerfile.replace(LIBSSH2_PACKAGE_URL_PREFIX, "https://deb.debian.org/debian/pool/main/libs/libssh2/"),
+        wrapper,
+        "libssh2 pinned to the live Debian pool (#2572 404 shape)",
+    )
+    expect_postgres_contract_rejected(
+        dockerfile.replace(
+            PGBACKREST_PACKAGE_URL_PREFIX,
+            "https://apt.postgresql.org/pub/repos/apt/pool/main/p/pgbackrest/",
+        ),
+        wrapper,
+        "pgBackRest pinned to the live PGDG pool",
+    )
+    expect_postgres_contract_rejected(
+        dockerfile.replace(
+            f"test \"$(dpkg-query -W -f='${{Version}}' libssh2-1t64)\" = \"{LIBSSH2_VERSION}\"; \\\n",
+            "",
+        ),
+        wrapper,
+        "installed libssh2 version check removed",
     )
     expect_postgres_contract_rejected(
         dockerfile.replace("amd64|arm64)", "amd64|arm64|ppc64le)"),

@@ -3,6 +3,8 @@ import type {
   AgentApprovalCard,
   ApprovalStatus,
 } from '@momo/core/features/timeline/agentCardModel';
+import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
+import type {SecretOnce} from '@momo/core/features/approvals/secretOnce';
 
 // =============================================================================
 // 타임라인 승인 카드가 결정 가능한가
@@ -139,6 +141,44 @@ export function deadlinePassed(gate: ApprovalGate, nowMs: number): boolean {
 export interface ApprovalReceipt {
   note: string;
   status?: ApprovalStatus;
+  /**
+   * 결정 응답이 한 번 실어 준 1회 값 (ADR-0186 D4 · D8 · 부록 C).
+   *
+   * **이 필드를 든 영수증 표가 그 값이 사는 유일한 자리다.** 그 표는 대화 화면의
+   * React 상태이고(`useApprovalReceipts`), 그래서 값은 메모리에만 있다: MMKV 에도
+   * 키체인에도 쿼리 캐시에도 로그에도 메시지 props 에도 쓰지 않는다. 대화를 닫거나
+   * 다른 채널로 옮기거나 앱을 다시 띄우면 표와 함께 사라지고, 그 뒤에 남는 것은
+   * 영속 카드의 「1회 표시됐습니다」뿐이다(부록 B). 값을 살아남게 만드는 구현이
+   * D4 가 이름으로 금지한 위반이다.
+   *
+   * 영수증 곁에 두는 이유는 웹이 `ApprovalBody` 의 state 에 두는 이유와 같다 —
+   * 결정이 확정되면 컨트롤(`ApprovalDecision`)이 언마운트되므로, 값을 거기 두면
+   * 그려야 할 바로 그 순간에 잃는다. 행(`MessageRow`)이 아니라 화면에 두는 것은
+   * 폰만의 이유다: 목록이 가상화돼 있어 스크롤로 행이 빠지면 행의 상태도 함께
+   * 사라지는데, 사람은 아직 같은 대화 안에 있다.
+   */
+  secretOnce?: SecretOnce;
+}
+
+/**
+ * 결정 결과에서 화면에 세울 1회 값을 고른다. 없으면 `undefined`.
+ *
+ * 조건은 웹과 **같은 세 겹**이다(`AgentCard.tsx` `onSettled`):
+ *
+ *   - `committed` — 이 기기의 결정이 방금 기록됐다. 다른 데서 이미 결정된 것을
+ *     따라잡은 `superseded` 에는 링크가 없다(그 링크는 결정한 사람의 것이었다).
+ *   - `status === 'approved'` — 방향은 우리가 보낸 것이 아니라 **원장이 답한 것**
+ *     으로 판정한다. 영수증에 상태가 없으면 세우지 않는다 — 거부한 카드 자리에
+ *     링크가 서는 것보다 아무것도 없는 편이 낫다.
+ *   - `result.secretOnce` — 코어가 200 에서만 읽어 준 값이다(`interpretReceipt`).
+ *     이 파일은 응답 본문을 보지 않는다. 폰이 결정 응답을 직접 파싱하는 순간
+ *     그것이 D4 규율의 두 번째 사본이 된다.
+ */
+export function linkOnceFrom(outcome: DecisionOutcome): SecretOnce | undefined {
+  if (outcome.kind !== 'committed' || outcome.status !== 'approved') {
+    return undefined;
+  }
+  return outcome.result?.secretOnce ?? undefined;
 }
 
 /** `memo` 비교용. 필드가 셋이고 전부 스칼라라 행 하나를 다시 그리는 것보다 싸다. */

@@ -10,7 +10,7 @@
 
 ## 0. 전제 · 게이트 (먼저 읽기)
 
-### 0.1 현재 상태(STATUS.md 기준)
+### 0.1 현재 상태(역사 기록 — STATUS.md 동결 전 기준)
 
 - Phase 0: 5개 Swift 패키지 `swift build` green. M1 runtime MOMO-001~004는 Docker Desktop으로 검증됨. 남은 런타임 후속은 WebSocket live subscribe/presence/recovery, APNs, staging이다.
 - `clients/macOS` = SwiftPM **라이브러리 + smoke 실행 타깃**. 아직 **`.app` 번들 아님**(Xcode 프로젝트 없음).
@@ -27,7 +27,7 @@
 3. iOS 앱이 시뮬레이터+실기기에서 동일 시나리오 통과.
 4. 크래시 0, 주요 플로우 수동 스모크 통과, 접근성/권한 prompt 정상.
 
-→ **게이트 PASS 전에는 `release` 워크플로우(notarize/TestFlight)를 트리거하지 않는다.** CI는 PR/푸시마다 `build+test`만 돌린다.
+→ **해당 M7 등급(M7-I·M7-S) PASS와 owner 승인 전에는 `release` 워크플로우(notarize/TestFlight)를 트리거하지 않는다.** CI는 PR/푸시마다 `build+test`만 돌린다.
 
 ### 0.3 권고 결론 (요약)
 
