@@ -478,6 +478,7 @@ impl Workd {
             host_id: host,
             owner_member_id: fixture.owner,
             public_key: key.public_key_b64(),
+            scope: "workspace".to_string(),
         }
         .save(&self.dir.join("state").join("host.json"))
         .expect("host state");

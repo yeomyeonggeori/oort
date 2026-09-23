@@ -8,12 +8,21 @@
 //! `AppliedControlCache`, same reason).
 //!
 //! Kinds:
-//! * `spawn` — [`SessionManager::spawn`] (all D6 checks). The first prompt (the
-//!   spawn label) is sent only after the ack landed: the server accepts a spawn
-//!   ack only while the session is still `running`.
-//! * `input` — the host owner's instruction, queued as the next turn. A
-//!   requester other than the owner is refused (ADR-0188 D3: on a member-scope
-//!   host an agent's controls are `kill` only; the server enforces that too).
+//! * `spawn` — the host owner's only (see below), then
+//!   [`SessionManager::spawn`] (all D6 checks). The first prompt (the spawn
+//!   label) is sent only after the ack landed: the server accepts a spawn ack
+//!   only while the session is still `running`. A refused spawn that arrived
+//!   with a session the server already allocated for it (a resume) ends that
+//!   session, so the ledger is not left with a `running` session nothing runs.
+//! * `input` — the host owner's instruction, queued as the next turn.
+//!
+//! **Owner only (ADR-0188 D3, #2602 M-4).** `momo-workd` serves member-scoped
+//! hosts only (`cli::run` checks the registration), and on a member host a
+//! spawn or an input comes from its owner or not at all. The server withholds
+//! every other requester's non-kill control (#2582 R0.1); the host refuses them
+//! again with `requester_not_owner`, so a server regression or a pre-R0 row
+//! still cannot turn someone else's words into a prompt on the owner's Mac.
+//! `kill` is accepted from anyone the server delivers it for.
 //! * `kill` — stop the agent; the session reports `ended`.
 //! * `read` and anything else — `unsupported_control`.
 
@@ -23,7 +32,7 @@ use std::time::Duration;
 
 use uuid::Uuid;
 
-use crate::client::{ClientError, ControlAck, HostApi, WorkControl};
+use crate::client::{ClientError, ControlAck, HostApi, SessionStatus, WorkControl};
 use crate::policy::Refusal;
 use crate::session::SessionManager;
 
@@ -137,13 +146,22 @@ impl ControlLoop {
             }
         };
         match control.kind.as_str() {
-            "spawn" => match self.sessions.spawn(control).await {
-                Ok(session_id) => Verdict {
-                    ack: ControlAck::ok(Some(session_id)),
-                    activate: Some(session_id),
-                },
-                Err(refusal) => refused(refusal),
-            },
+            "spawn" => {
+                let spawned = match self.require_owner(control) {
+                    Ok(()) => self.sessions.spawn(control).await,
+                    Err(refusal) => Err(refusal),
+                };
+                match spawned {
+                    Ok(session_id) => Verdict {
+                        ack: ControlAck::ok(Some(session_id)),
+                        activate: Some(session_id),
+                    },
+                    Err(refusal) => {
+                        self.end_preallocated_session(control).await;
+                        refused(refusal)
+                    }
+                }
+            }
             "input" => match self.input(control).await {
                 Ok(()) => Verdict {
                     ack: ControlAck::ok(control.session_id),
@@ -167,10 +185,33 @@ impl ControlLoop {
         }
     }
 
-    async fn input(&mut self, control: &WorkControl) -> Result<(), Refusal> {
-        if control.requester_member_id != self.owner_member_id {
-            return Err(Refusal::RequesterNotOwner);
+    /// ADR-0188 D3 on the host: a spawn or an input is its owner's or nothing.
+    fn require_owner(&self, control: &WorkControl) -> Result<(), Refusal> {
+        if control.requester_member_id == self.owner_member_id {
+            Ok(())
+        } else {
+            Err(Refusal::RequesterNotOwner)
         }
+    }
+
+    /// A resume arrives with its session already allocated and `running` on
+    /// the server. If this host refuses to run it, it says so — best effort,
+    /// the ack carries the reason either way.
+    async fn end_preallocated_session(&self, control: &WorkControl) {
+        let Some(session_id) = control.session_id else {
+            return;
+        };
+        if let Err(error) = self
+            .api
+            .set_status(session_id, SessionStatus::Ended { exit_code: None })
+            .await
+        {
+            tracing::warn!(%session_id, error = %error, "could not end a refused resume session");
+        }
+    }
+
+    async fn input(&mut self, control: &WorkControl) -> Result<(), Refusal> {
+        self.require_owner(control)?;
         let session_id = control.session_id.ok_or(Refusal::InvalidControl)?;
         let text = control
             .payload_str("text")

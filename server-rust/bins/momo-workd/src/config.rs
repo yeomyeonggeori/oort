@@ -202,7 +202,16 @@ pub struct HostState {
     pub host_id: Uuid,
     pub owner_member_id: Uuid,
     pub public_key: String,
+    /// The host's scope as the server registered it. `run` serves `member`
+    /// only (ADR-0188 D3, #2602 M-4); a state file without it predates the
+    /// field and is refused until re-registered.
+    #[serde(default)]
+    pub scope: String,
 }
+
+/// The only host scope `momo-workd run` serves (ADR-0188 D3: a desktop host is
+/// its owner's; team hosts are outside goal A).
+pub const SERVED_SCOPE: &str = "member";
 
 impl HostState {
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
@@ -375,10 +384,19 @@ mod tests {
             host_id: Uuid::from_u128(2),
             owner_member_id: Uuid::from_u128(3),
             public_key: "AAAA".to_string(),
+            scope: "member".to_string(),
         };
         state.save(&path).unwrap();
         assert_eq!(std::fs::metadata(&path).unwrap().mode() & 0o777, 0o600);
         assert_eq!(HostState::load(&path).unwrap(), state);
+        // A state file from before the field reads with an empty scope, which
+        // `run` refuses (re-register), rather than defaulting to member.
+        std::fs::write(
+            &path,
+            r#"{"server_url":"https://oort.example.com","workspace_id":"00000000-0000-0000-0000-000000000001","host_id":"00000000-0000-0000-0000-000000000002","owner_member_id":"00000000-0000-0000-0000-000000000003","public_key":"AAAA"}"#,
+        )
+        .unwrap();
+        assert_eq!(HostState::load(&path).unwrap().scope, "");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

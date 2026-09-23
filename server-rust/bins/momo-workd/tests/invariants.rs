@@ -10,6 +10,9 @@
 //! | `inv_4_round_trip_events_idle_input_kill` | the curated projection, idle/running, owner-only input, kill → ended |
 //! | `inv_5_leaving_the_fixed_mode_mid_session_closes_it` | `policy::check_mode_update` |
 //! | `inv_6_codex_is_never_launched_remotely` | `policy::check_adapter_admitted` in `SessionManager::spawn` (#2602 M-2) |
+//! | `inv_8_a_spawn_from_anyone_but_the_owner_is_refused` | `ControlLoop::require_owner` on spawn (#2602 M-4) |
+//! | `inv_9_a_refused_resume_ends_its_preallocated_session` | `ControlLoop::end_preallocated_session` (#2602 M-4) |
+//! | `inv_10_run_serves_member_hosts_only` | the scope gate in `cli::run` (#2602 M-4) |
 //! | `inv_7_a_lost_spawn_ack_response_still_starts_the_session` | the settled-verdict sweep in `ControlLoop::poll_once` |
 
 use std::collections::{BTreeMap, VecDeque};
@@ -258,12 +261,12 @@ fn control(
     }
 }
 
+/// A spawn as a member host receives it: its owner's (#2602 M-4).
 fn spawn(h: &Harness, tool: &str, label: &str) -> WorkControl {
-    // A spawn's requester is the agent that asked for it.
     control(
         h,
         "spawn",
-        Uuid::new_v4(),
+        h.owner,
         None,
         json!({"tool": tool, "label": label}),
     )
@@ -694,4 +697,136 @@ async fn inv_7_a_lost_spawn_ack_response_still_starts_the_session() {
         1
     );
     assert!(received_methods(&h).contains(&"session/prompt".to_string()));
+}
+
+#[tokio::test]
+async fn inv_8_a_spawn_from_anyone_but_the_owner_is_refused() {
+    // A spawn an agent asked for, delivered anyway (a server regression or a
+    // row from before R0): the host refuses it before launching anything.
+    let mut h = harness(&[("claude", &[])]);
+    let foreign = control(
+        &h,
+        "spawn",
+        Uuid::new_v4(),
+        None,
+        json!({"tool": "claude", "label": "agent asks"}),
+    );
+    h.server.push(foreign.clone());
+    h.controls.poll_once().await.unwrap();
+    assert_eq!(
+        ack_for(&h, foreign.id),
+        ControlAck::refused("requester_not_owner"),
+        "a member host runs its owner's spawns only"
+    );
+    assert!(
+        !h.record.exists(),
+        "nothing was launched: {:?}",
+        stub_log(&h)
+    );
+    assert!(h.server.creates().is_empty());
+}
+
+#[tokio::test]
+async fn inv_9_a_refused_resume_ends_its_preallocated_session() {
+    // A resume carries the session the server already opened for it. The
+    // agent reports `auto`, so the host refuses — and must close that session
+    // rather than leave it `running` with nothing behind it.
+    let mut h = harness(&[("claude", &["--mode", "auto"])]);
+    let preallocated = Uuid::new_v4();
+    let resume = control(
+        &h,
+        "spawn",
+        h.owner,
+        Some(preallocated),
+        json!({"tool": "claude", "label": "resume me"}),
+    );
+    h.server.push(resume.clone());
+    h.controls.poll_once().await.unwrap();
+    assert_eq!(
+        ack_for(&h, resume.id),
+        ControlAck::refused("permission_mode_refused")
+    );
+    assert_eq!(
+        h.server.statuses(preallocated),
+        vec![SessionStatus::Ended { exit_code: None }],
+        "the refused resume's session is ended by the host"
+    );
+    assert!(
+        h.server.creates().is_empty(),
+        "a resume never creates a session"
+    );
+}
+
+#[test]
+fn inv_10_run_serves_member_hosts_only() {
+    let dir = std::env::temp_dir().join(format!("momo-workd-scope-{}", Uuid::new_v4().simple()));
+    std::fs::create_dir_all(dir.join("repo")).unwrap();
+    let key_path = dir.join("keys").join("host.key");
+    let key = momo_workd::keystore::HostKey::generate().unwrap();
+    momo_workd::keystore::KeyStore::dev_file(key_path.clone())
+        .store(&key, false)
+        .unwrap();
+    let workspace = Uuid::new_v4();
+    // Port 9 (discard): nothing may be reached before the scope gate refuses.
+    let server = "http://127.0.0.1:9";
+    let config = dir.join("workd.json");
+    std::fs::write(
+        &config,
+        serde_json::to_vec(&json!({
+            "server_url": server,
+            "workspace_id": workspace,
+            "display_name": "scope gate",
+            "state_path": dir.join("state.json"),
+            "working_directory": dir.join("repo"),
+            "tools": {"claude": {"adapter": "claude", "executable": STUB}},
+            "poll_interval_ms": 200,
+            "heartbeat_interval_ms": 500,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    momo_workd::config::HostState {
+        server_url: server.to_string(),
+        workspace_id: workspace,
+        host_id: Uuid::new_v4(),
+        owner_member_id: Uuid::new_v4(),
+        public_key: key.public_key_b64(),
+        scope: "workspace".to_string(),
+    }
+    .save(&dir.join("state.json"))
+    .unwrap();
+
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_momo-workd"))
+        .args(["run", "--config"])
+        .arg(&config)
+        .arg("--dev-key-file")
+        .arg(&key_path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = std::fs::remove_dir_all(&dir);
+            panic!("a workspace-scoped host must not be served: momo-workd kept running");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let mut stderr = String::new();
+    use std::io::Read as _;
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(status.code(), Some(2), "usage exit: {stderr}");
+    assert!(stderr.contains("serves only"), "{stderr}");
 }
