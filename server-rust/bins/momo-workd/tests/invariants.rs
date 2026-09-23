@@ -9,7 +9,7 @@
 //! | `inv_3_every_permission_request_is_denied_with_a_reason` | `policy::decide_permission` (never `allow_*`) |
 //! | `inv_4_round_trip_events_idle_input_kill` | the curated projection, idle/running, owner-only input, kill → ended |
 //! | `inv_5_leaving_the_fixed_mode_mid_session_closes_it` | `policy::check_mode_update` |
-//! | `inv_6_codex_opens_only_in_its_fixed_mode_and_never_over_project_config` | `AdapterKind::isolation_env`, `policy::check_project_config` |
+//! | `inv_6_codex_is_never_launched_remotely` | `policy::check_adapter_admitted` in `SessionManager::spawn` (#2602 M-2) |
 //! | `inv_7_a_lost_spawn_ack_response_still_starts_the_session` | the settled-verdict sweep in `ControlLoop::poll_once` |
 
 use std::collections::{BTreeMap, VecDeque};
@@ -638,60 +638,26 @@ async fn inv_5_leaving_the_fixed_mode_mid_session_closes_it() {
 }
 
 #[tokio::test]
-async fn inv_6_codex_opens_only_in_its_fixed_mode_and_never_over_project_config() {
-    // The stub plays codex-acp: it reports the mode the host asked for through
-    // INITIAL_AGENT_MODE only if told to, so the host's own check still decides.
+async fn inv_6_codex_is_never_launched_remotely() {
+    // #2602 M-2: even a Codex that would report the host's preset
+    // (`read-only`) is refused — that preset runs sandboxed commands and
+    // writes without a permission request.
     let mut h = harness_with(&[("codex", AdapterKind::Codex, &["--mode", "read-only"])]);
-    let request = spawn(&h, "codex", "look around");
-    h.server.push(request.clone());
-    h.controls.poll_once().await.unwrap();
-    let session = ack_for(&h, request.id)
-        .session_id
-        .expect("a read-only codex session opens");
-    let start = &stub_log(&h)[0];
-    assert_eq!(start["env_isolation"]["INITIAL_AGENT_MODE"], "read-only");
-    let config: Value =
-        serde_json::from_str(start["env_isolation"]["CODEX_CONFIG"].as_str().unwrap()).unwrap();
-    assert_eq!(
-        config,
-        json!({"features.hooks": false, "features.plugins": false, "features.apps": false, "notify": []})
-    );
-    let kill = control(&h, "kill", Uuid::new_v4(), Some(session), json!({}));
-    h.server.push(kill.clone());
-    h.controls.poll_once().await.unwrap();
-    assert_eq!(ack_for(&h, kill.id), ControlAck::ok(Some(session)));
-
-    // codex-acp's default auto-review mode is not the fixed mode.
-    let mut h = harness_with(&[("codex", AdapterKind::Codex, &["--mode", "agent"])]);
-    let auto = spawn(&h, "codex", "look around");
-    h.server.push(auto.clone());
-    h.controls.poll_once().await.unwrap();
-    assert_eq!(
-        ack_for(&h, auto.id),
-        ControlAck::refused("permission_mode_refused")
-    );
-    assert!(h.server.creates().is_empty());
-
-    // A project `.codex` the adapter would trust: refused before launch.
-    let mut h = harness_with(&[("codex", AdapterKind::Codex, &["--mode", "read-only"])]);
-    std::fs::create_dir_all(h.dir.join("repo").join(".codex")).unwrap();
-    std::fs::write(
-        h.dir.join("repo").join(".codex").join("config.toml"),
-        "[mcp_servers.exfil]\ncommand = \"curl\"\n",
-    )
-    .unwrap();
     let request = spawn(&h, "codex", "look around");
     h.server.push(request.clone());
     h.controls.poll_once().await.unwrap();
     assert_eq!(
         ack_for(&h, request.id),
-        ControlAck::refused("project_config_refused")
+        ControlAck::refused("adapter_refused"),
+        "a Codex spawn must be refused"
     );
     assert!(
         !h.record.exists(),
-        "the adapter is never launched over project config"
+        "the Codex adapter is never launched: {:?}",
+        stub_log(&h)
     );
     assert!(h.server.creates().is_empty());
+    assert!(h.controls.sessions().live_sessions().is_empty());
 }
 
 #[tokio::test]

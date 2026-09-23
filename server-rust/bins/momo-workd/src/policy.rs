@@ -9,7 +9,7 @@
 //! | the permission mode is fixed; bypass/auto at session start → no session | [`check_session_modes`] |
 //! | leaving the fixed mode mid-session closes the remote path | [`check_mode_update`] |
 //! | no remote `shell` | [`check_remote_tool`] |
-//! | only ACP adapters with a permission bridge | [`AdapterKind`] |
+//! | only ACP adapters with a permission bridge | [`AdapterKind`], [`check_adapter_admitted`] |
 //! | every ACP permission request is denied until the R1 bridge lands | [`decide_permission`] |
 //! | project hooks / MCP servers / allow rules are not applied | [`AdapterKind::isolation_env`], [`session_new_params`], [`check_project_config`] |
 //! | no TCP port | nothing in this crate binds a socket; the conformance test checks the process |
@@ -30,15 +30,30 @@
 //!   `bypassPermissions` leaves the mode catalog and a settings demand for it is
 //!   clamped to `default`. Login is not a setting and is unaffected; CLAUDE.md
 //!   (loaded only with the `project` source) is not read either.
-//! * **Codex** — `@agentclientprotocol/codex-acp` 1.13.0 starts every session in
-//!   `INITIAL_AGENT_MODE` (default `agent`, an auto-review mode) and merges the
-//!   JSON object in `CODEX_CONFIG` into each thread's config overrides; codex
-//!   0.146 turns hooks, plugins and apps off by feature flag. The adapter also
-//!   marks the session folder *trusted*, which loads the project's
-//!   `.codex/config.toml`, and codex deep-merges config layers
+//! * **Codex — not admitted (#2602 M-2).** `@agentclientprotocol/codex-acp`
+//!   1.13.0 has three presets and sends the chosen preset's approval policy on
+//!   every turn (`approvalPolicy: agentMode.approvalPolicy`, its only
+//!   producer). Even the strictest, `read-only` ("Ask for approval"), is
+//!   `on-request` with a `workspaceWrite` sandbox: sandboxed commands and writes
+//!   in the folder run without a permission request. No preset asks before
+//!   every command (`untrusted` occurs nowhere in the adapter). So the
+//!   permission bridge that ADR-0188 D6 calls the real defence does not hold,
+//!   and [`check_adapter_admitted`] refuses Codex — in the config and at spawn —
+//!   until ADR-0188 decides otherwise.
+//!
+//!   The isolation below stays correct for that day. The adapter starts every
+//!   session in `INITIAL_AGENT_MODE` (default `agent`, an auto-review mode) and
+//!   merges the JSON object in `CODEX_CONFIG` into each thread's config
+//!   overrides, next to its own `features` table. Measured with the real
+//!   adapter and codex 0.146.1: dotted keys (`features.hooks`) travel as
+//!   separate overrides beside that table, and whichever codex applies last
+//!   wins — the flag was lost in one order. One nested `features` table is
+//!   merged by the adapter into its own and survives in every order (#2602
+//!   M-3). The adapter also marks the session folder *trusted*, which loads the
+//!   project's `.codex/config.toml`, and codex deep-merges config layers
 //!   (`codex-rs/config/src/merge.rs`), so no override can remove a project MCP
-//!   server or rule. The host therefore refuses a Codex session wherever a
-//!   project `.codex` exists ([`check_project_config`]).
+//!   server or rule: a Codex session is refused wherever a project `.codex`
+//!   exists ([`check_project_config`]).
 
 use std::path::{Path, PathBuf};
 
@@ -61,6 +76,9 @@ pub enum Refusal {
     ToolNotAllowlisted,
     /// ADR-0188 D6: the agent is not in the host's fixed permission mode.
     PermissionModeRefused,
+    /// ADR-0188 D6: the adapter's permission requests do not cover every
+    /// command and write, so it is not launched remotely (#2602 M-2).
+    AdapterRefused,
     /// ADR-0188 D6: the folder carries project agent configuration the adapter
     /// would apply and the host cannot switch off.
     ProjectConfigRefused,
@@ -88,6 +106,7 @@ impl Refusal {
             Self::ShellRefused => "shell_refused",
             Self::ToolNotAllowlisted => "tool_not_allowlisted",
             Self::PermissionModeRefused => "permission_mode_refused",
+            Self::AdapterRefused => "adapter_refused",
             Self::ProjectConfigRefused => "project_config_refused",
             Self::WorkdirUnavailable => "workdir_unavailable",
             Self::AgentStartFailed => "agent_start_failed",
@@ -146,19 +165,17 @@ impl AdapterKind {
                     "INITIAL_AGENT_MODE".to_string(),
                     CODEX_FIXED_MODE.to_string(),
                 ),
-                // Per-thread config overrides. codex 0.146 passes them on as
-                // `-c`-style overrides (`app-server/src/config_manager.rs`
-                // `load_with_cli_overrides`), splits each key on `.`
-                // (`config/src/overrides.rs` `apply_toml_override`) into a
-                // session-flags layer, and deep-merges that over the user and
-                // project layers — so these leaves replace the configured
-                // values, where an empty table would have changed nothing.
+                // Per-thread config overrides, as ONE nested `features` table.
+                // The adapter adds its own `features.cwd_relative_turn_diffs`
+                // by spreading our table (`forceGitRootTurnDiffPaths`), so a
+                // single `features` override reaches codex. Dotted keys would
+                // travel beside that table, and codex applies the override map
+                // in hash order with the last write winning: measured, the
+                // flags were lost whenever the table came last (#2602 M-3).
                 (
                     "CODEX_CONFIG".to_string(),
                     json!({
-                        "features.hooks": false,
-                        "features.plugins": false,
-                        "features.apps": false,
+                        "features": {"hooks": false, "plugins": false, "apps": false},
                         "notify": [],
                     })
                     .to_string(),
@@ -340,6 +357,17 @@ pub fn is_valid_tool_key(raw: &str) -> bool {
 // ---------------------------------------------------------------------------
 // the invariants
 // ---------------------------------------------------------------------------
+
+/// ADR-0188 D6 「원격 spawn은 ACP 권한 다리가 있는 도구만」: only an adapter
+/// whose permission requests cover every command and write is launched. Claude
+/// in `default` asks before every edit and command. Codex has no such mode (see
+/// the module docs, #2602 M-2) and is refused until ADR-0188 is revised.
+pub fn check_adapter_admitted(adapter: AdapterKind) -> Result<(), Refusal> {
+    match adapter {
+        AdapterKind::Claude => Ok(()),
+        AdapterKind::Codex => Err(Refusal::AdapterRefused),
+    }
+}
 
 /// ADR-0188 D6: a remote spawn of `shell` is refused, before the allowlist is
 /// even consulted — an owner who allowlisted something called `shell` still
@@ -599,13 +627,66 @@ mod tests {
         };
         assert_eq!(value("INITIAL_AGENT_MODE"), "read-only");
         let config: Value = serde_json::from_str(&value("CODEX_CONFIG")).unwrap();
-        assert_eq!(config["features.hooks"], false);
-        assert_eq!(config["features.plugins"], false);
-        assert_eq!(config["features.apps"], false);
-        assert_eq!(config["notify"], json!([]));
+        // #2602 M-3: one nested table, no dotted keys beside it.
+        assert_eq!(
+            config,
+            json!({"features": {"hooks": false, "plugins": false, "apps": false}, "notify": []})
+        );
+        assert!(config
+            .as_object()
+            .unwrap()
+            .keys()
+            .all(|key| !key.contains('.')));
         assert!(session_new_params(AdapterKind::Codex, Path::new("/w"))
             .get("_meta")
             .is_none());
+    }
+
+    /// The shape codex-acp 1.13.0 builds before `thread/start`
+    /// (`forceGitRootTurnDiffPaths`: spread our `features`, add its own key).
+    /// With the nested form a single `features` override carries all four
+    /// flags; measured the same with the real adapter's `thread/start` log.
+    #[test]
+    fn the_adapter_merge_keeps_every_codex_flag_in_one_table() {
+        let (_, raw) = AdapterKind::Codex
+            .isolation_env()
+            .into_iter()
+            .find(|(key, _)| key == "CODEX_CONFIG")
+            .unwrap();
+        let mut config: serde_json::Map<String, Value> = serde_json::from_str(&raw).unwrap();
+        let mut features = config
+            .get("features")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        features.insert("cwd_relative_turn_diffs".into(), json!(false));
+        config.insert("features".into(), Value::Object(features));
+        assert_eq!(
+            Value::Object(config.clone()),
+            json!({
+                "features": {"hooks": false, "plugins": false, "apps": false,
+                             "cwd_relative_turn_diffs": false},
+                "notify": []
+            })
+        );
+        assert_eq!(
+            config
+                .keys()
+                .filter(|key| key.starts_with("features"))
+                .count(),
+            1,
+            "one features override, so no application order can drop a flag"
+        );
+    }
+
+    #[test]
+    fn only_claude_is_admitted_remotely() {
+        assert_eq!(check_adapter_admitted(AdapterKind::Claude), Ok(()));
+        assert_eq!(
+            check_adapter_admitted(AdapterKind::Codex),
+            Err(Refusal::AdapterRefused)
+        );
+        assert_eq!(Refusal::AdapterRefused.label(), "adapter_refused");
     }
 
     #[test]

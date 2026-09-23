@@ -129,6 +129,14 @@ impl WorkdConfig {
             if !entry.executable.is_absolute() {
                 return invalid(format!("tools.{key}.executable must be an absolute path"));
             }
+            if policy::check_adapter_admitted(entry.adapter).is_err() {
+                // #2602 M-2: said at startup, not only as a refused control.
+                return invalid(format!(
+                    "tools.{key}: the {:?} adapter is not admitted for remote sessions \
+                     (no mode asks before every command and write; ADR-0188 D6)",
+                    entry.adapter
+                ));
+            }
             if let Some(argument) = entry
                 .args
                 .iter()
@@ -325,6 +333,20 @@ mod tests {
                 }
                 other => panic!("{argument} must be refused, got {other:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn a_codex_tool_entry_is_refused_at_load() {
+        let mut value = base_json();
+        value["tools"]["codex"] = serde_json::json!({
+            "adapter": "codex", "executable": "/usr/local/bin/codex-acp"
+        });
+        match parse(value) {
+            Err(ConfigError::Invalid(message)) => {
+                assert!(message.contains("not admitted"), "{message}")
+            }
+            other => panic!("a codex entry must be refused, got {other:?}"),
         }
     }
 

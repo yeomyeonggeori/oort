@@ -128,6 +128,10 @@ impl SessionManager {
             .get(tool)
             .cloned()
             .ok_or(Refusal::ToolNotAllowlisted)?;
+        // ADR-0188 D6: only an adapter whose permission requests cover every
+        // command and write (#2602 M-2). The config refuses Codex too; this is
+        // the check that holds even for settings built some other way.
+        policy::check_adapter_admitted(entry.adapter)?;
         // (3) The allowed folder, resolved at every spawn.
         let cwd = std::fs::canonicalize(&self.settings.working_directory)
             .ok()
