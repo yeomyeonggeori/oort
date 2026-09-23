@@ -30,6 +30,17 @@
 //!   `bypassPermissions` leaves the mode catalog and a settings demand for it is
 //!   clamped to `default`. Login is not a setting and is unaffected; CLAUDE.md
 //!   (loaded only with the `project` source) is not read either.
+//!
+//!   Reads are fenced too (#2602 M-1). The adapter hands
+//!   `_meta.claudeCode.options.settings` to the CLI as its programmatic
+//!   settings tier, which applies with `settingSources: []`: the SDK documents
+//!   `permissions.blockReadsOutsideWorkingDirectories` as "Refuse file-tool
+//!   reads (Read, Grep, Glob, LSP) outside the working directories in every
+//!   permission mode", and [`CLAUDE_READ_DENY`] denies the usual credential
+//!   files inside the folder. Measured with the real adapter and Claude Code
+//!   2.1.280: with the fence, a `Read` of `/etc/hosts` failed without even a
+//!   permission request, and `cat /etc/hosts` reached the permission bridge
+//!   (and was denied).
 //! * **Codex — not admitted (#2602 M-2).** `@agentclientprotocol/codex-acp`
 //!   1.13.0 has three presets and sends the chosen preset's approval policy on
 //!   every turn (`approvalPolicy: agentMode.approvalPolicy`, its only
@@ -193,6 +204,13 @@ impl AdapterKind {
                         "settingSources": [],
                         "strictMcpConfig": true,
                         "allowDangerouslySkipPermissions": false,
+                        "settings": {
+                            "permissions": {
+                                "blockReadsOutsideWorkingDirectories": true,
+                                "disableBypassPermissionsMode": "disable",
+                                "deny": CLAUDE_READ_DENY,
+                            }
+                        },
                     }
                 }
             })),
@@ -200,6 +218,33 @@ impl AdapterKind {
         }
     }
 }
+
+/// Credential files a remote Claude session may not read even inside the
+/// allowed folder (the fence already covers everything outside it), plus the
+/// owner's own credential directories for a folder that happens to contain
+/// them. Claude Code permission-rule syntax: `~/` is the home directory, `**`
+/// any depth.
+pub const CLAUDE_READ_DENY: &[&str] = &[
+    "Read(**/.env)",
+    "Read(**/.env.*)",
+    "Read(**/*.pem)",
+    "Read(**/*.key)",
+    "Read(**/id_rsa*)",
+    "Read(**/id_ecdsa*)",
+    "Read(**/id_ed25519*)",
+    "Read(**/.npmrc)",
+    "Read(**/.pypirc)",
+    "Read(**/.netrc)",
+    "Read(**/.git-credentials)",
+    "Read(~/.ssh/**)",
+    "Read(~/.aws/**)",
+    "Read(~/.gnupg/**)",
+    "Read(~/.config/gh/**)",
+    "Read(~/.docker/config.json)",
+    "Read(~/.kube/**)",
+    "Read(~/.codex/**)",
+    "Read(~/.claude/**)",
+];
 
 // ---------------------------------------------------------------------------
 // launch
@@ -599,6 +644,19 @@ mod tests {
             options["allowDangerouslySkipPermissions"], false,
             "no bypass mode"
         );
+        // #2602 M-1: reads are fenced to the folder, credential files denied.
+        let permissions = &options["settings"]["permissions"];
+        assert_eq!(permissions["blockReadsOutsideWorkingDirectories"], true);
+        assert_eq!(permissions["disableBypassPermissionsMode"], "disable");
+        let deny: Vec<&str> = permissions["deny"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect();
+        for rule in ["Read(~/.ssh/**)", "Read(~/.codex/**)", "Read(**/.env)"] {
+            assert!(deny.contains(&rule), "{rule} is denied");
+        }
         assert!(AdapterKind::Claude.isolation_env().is_empty());
     }
 

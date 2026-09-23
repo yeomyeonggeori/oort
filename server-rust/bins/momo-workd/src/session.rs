@@ -36,7 +36,7 @@ use crate::client::{
 };
 use crate::config::ToolEntry;
 use crate::policy::{self, AdapterKind, Refusal};
-use crate::projection::{self, chunk_utf8, Projection};
+use crate::projection::{self, chunk_field, Projection, MAX_FIELD_CHARS};
 
 /// ACP protocol version this client speaks.
 pub const ACP_PROTOCOL_VERSION: i64 = 1;
@@ -47,6 +47,30 @@ const TEXT_FLUSH_BYTES: usize = 3_000;
 /// …or once it has waited this long.
 const TEXT_FLUSH_AGE: Duration = Duration::from_millis(400);
 const RELAY_TICK: Duration = Duration::from_millis(200);
+/// The longest trailing credential-shaped run a size/age flush holds back —
+/// longer than any single token recognised in practice, large JWTs included.
+/// Only a longer unbroken run is sent while it may still be growing.
+const MAX_HELD_RUN_BYTES: usize = 16_384;
+
+/// How much of the buffered text a size or age flush may send: everything
+/// before an unterminated private-key block (or unfinished PEM header), and
+/// before the trailing run of credential characters (bounded) — either of
+/// which the next chunk may complete into a credential.
+fn ready_len(text: &str) -> usize {
+    let cut = projection::open_private_key_block(text).unwrap_or(text.len());
+    let head = &text[..cut];
+    let run_start = head
+        .char_indices()
+        .rev()
+        .find(|(_, character)| !projection::is_credential_char(*character))
+        .map(|(index, character)| index + character.len_utf8())
+        .unwrap_or(0);
+    if head.len() - run_start <= MAX_HELD_RUN_BYTES {
+        run_start
+    } else {
+        cut
+    }
+}
 const TERMINATE_GRACE: Duration = Duration::from_secs(3);
 const CANCEL_GRACE: Duration = Duration::from_secs(2);
 
@@ -614,8 +638,16 @@ impl SessionTask {
 // ---------------------------------------------------------------------------
 
 /// Ordered, coalescing sender of one session's events. Answer text is buffered
-/// and sent as `agent.partial` in ≤ 4096-byte slices; any other event flushes
-/// the text first, so the server sees the stream in the order it happened.
+/// and sent as `agent.partial`; any other event flushes the text first, so the
+/// server sees the stream in the order it happened.
+///
+/// Every piece of text is credential-redacted and cut into fields of at most
+/// [`projection::MAX_FIELD_CHARS`] characters (and the server's 4096 bytes)
+/// before it leaves (ADR-0188 D5, #2602 M-1). A size or age flush sends only
+/// the part that cannot be the first half of a credential: an unterminated
+/// private-key block and the trailing whitespace-free run stay buffered until
+/// more text completes them or the message ends. A message boundary — another
+/// event, the end of the turn, the end of the session — flushes everything.
 pub struct EventRelay {
     api: Arc<dyn HostApi>,
     session_id: Uuid,
@@ -644,7 +676,7 @@ impl EventRelay {
         }
         self.text.push_str(text);
         if self.text.len() >= TEXT_FLUSH_BYTES {
-            self.flush_text().await;
+            self.flush_ready().await;
         }
     }
 
@@ -653,14 +685,31 @@ impl EventRelay {
             .text_since
             .is_some_and(|since| since.elapsed() >= TEXT_FLUSH_AGE)
         {
-            self.flush_text().await;
+            self.flush_ready().await;
         }
     }
 
+    /// Send what can safely go now; keep a possible credential fragment.
+    async fn flush_ready(&mut self) {
+        let ready = ready_len(&self.text);
+        if ready == 0 {
+            return;
+        }
+        let text: String = self.text.drain(..ready).collect();
+        self.text_since = (!self.text.is_empty()).then(Instant::now);
+        self.send_text(&text).await;
+    }
+
+    /// A message boundary: send everything buffered.
     pub async fn flush_text(&mut self) {
         self.text_since = None;
         let text = std::mem::take(&mut self.text);
-        for chunk in chunk_utf8(&text, MAX_EVENT_TEXT_BYTES) {
+        self.send_text(&text).await;
+    }
+
+    async fn send_text(&mut self, text: &str) {
+        let clean = projection::redact_credentials(text);
+        for chunk in chunk_field(&clean, MAX_FIELD_CHARS, MAX_EVENT_TEXT_BYTES) {
             let mut payload = Map::new();
             payload.insert("text_delta".into(), json!(chunk));
             self.send("agent.partial", payload).await;
@@ -730,5 +779,37 @@ impl EventRelay {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_flush_holds_what_the_next_chunk_could_complete_into_a_credential() {
+        // The trailing credential-shaped run waits for the next chunk.
+        assert_eq!(ready_len("see sk-ant-api03-"), "see ".len());
+        assert_eq!(ready_len("token=\"eyJhbGciOi.eyJzdWIi"), "token=\"".len());
+        assert_eq!(ready_len("aws AKIA"), "aws ".len());
+        // So does an unfinished PEM header or an open block, spaces and all.
+        assert_eq!(ready_len("key:\n-----BEGIN OPENSSH PRIV"), "key:\n".len());
+        let open = concat!("key:\n-----BEGIN OPENSSH ", "PRIVATE KEY-----\nb3Blbn\n");
+        assert_eq!(ready_len(open), "key:\n".len());
+        // A closed block and a finished word go.
+        let closed = concat!(
+            "-----BEGIN OPENSSH ",
+            "PRIVATE KEY-----\nb3Blbn\n-----END OPENSSH ",
+            "PRIVATE KEY-----\n"
+        );
+        assert_eq!(ready_len(closed), closed.len());
+        assert_eq!(ready_len("done.\n"), "done.\n".len());
+        // The hold is bounded: an unbroken run past the bound is sent.
+        let long = "x".repeat(MAX_HELD_RUN_BYTES + 1);
+        assert_eq!(ready_len(&long), long.len());
+        assert_eq!(
+            ready_len(&format!("a {}", "x".repeat(MAX_HELD_RUN_BYTES))),
+            2
+        );
     }
 }

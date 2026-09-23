@@ -13,6 +13,7 @@
 //! | `inv_8_a_spawn_from_anyone_but_the_owner_is_refused` | `ControlLoop::require_owner` on spawn (#2602 M-4) |
 //! | `inv_9_a_refused_resume_ends_its_preallocated_session` | `ControlLoop::end_preallocated_session` (#2602 M-4) |
 //! | `inv_10_run_serves_member_hosts_only` | the scope gate in `cli::run` (#2602 M-4) |
+//! | `inv_11_credentials_never_leave_the_host_even_split_across_flushes` | `projection::redact_credentials` and the relay's hold (`session::ready_len`) (#2602 M-1) |
 //! | `inv_7_a_lost_spawn_ack_response_still_starts_the_session` | the settled-verdict sweep in `ControlLoop::poll_once` |
 
 use std::collections::{BTreeMap, VecDeque};
@@ -463,10 +464,20 @@ async fn inv_4_round_trip_events_idle_input_kill() {
         .unwrap();
     assert_eq!(new_session["received"]["params"]["mcpServers"], json!([]));
     // ADR-0188 D6: no filesystem settings (hooks, allow rules, plugins), no MCP
-    // configuration but the host's (none), no bypass mode in the catalog.
+    // configuration but the host's (none), no bypass mode in the catalog — and
+    // (#2602 M-1) reads fenced to the folder, credential files denied.
     assert_eq!(
         new_session["received"]["params"]["_meta"]["claudeCode"]["options"],
-        json!({"settingSources": [], "strictMcpConfig": true, "allowDangerouslySkipPermissions": false})
+        json!({
+            "settingSources": [],
+            "strictMcpConfig": true,
+            "allowDangerouslySkipPermissions": false,
+            "settings": {"permissions": {
+                "blockReadsOutsideWorkingDirectories": true,
+                "disableBypassPermissionsMode": "disable",
+                "deny": momo_workd::policy::CLAUDE_READ_DENY,
+            }},
+        })
     );
     let initialize = log
         .iter()
@@ -829,4 +840,65 @@ fn inv_10_run_serves_member_hosts_only() {
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(status.code(), Some(2), "usage exit: {stderr}");
     assert!(stderr.contains("serves only"), "{stderr}");
+}
+
+#[tokio::test]
+async fn inv_11_credentials_never_leave_the_host_even_split_across_flushes() {
+    let mut h = harness(&[("claude", &["--leak"])]);
+    let request = spawn(&h, "claude", "show me the config");
+    h.server.push(request.clone());
+    h.controls.poll_once().await.unwrap();
+    let session = ack_for(&h, request.id).session_id.expect("ok spawn ack");
+    wait_for("the leaking turn to end", || {
+        h.server
+            .statuses(session)
+            .contains(&SessionStatus::Idle { exit_code: 0 })
+    })
+    .await;
+
+    let partials: Vec<String> = h
+        .server
+        .events()
+        .into_iter()
+        .filter(|event| event.event_type == "agent.partial")
+        .map(|event| event.payload["text_delta"].as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        partials.len() >= 3,
+        "the age flushes did land between the pieces: {partials:?}"
+    );
+    let relayed = partials.concat();
+    for fragment in [
+        "sk-ant-api03-AAAA",
+        "api03-",
+        "ghp_abcdef",
+        concat!("AKIA", "ABCDEFGHIJKLMNOP"),
+        "b3BlbnNzaC1rZXkt",
+        "OPENSSH PRIV",
+        "xoxb-1234567890",
+        "eyJhbGciOi",
+    ] {
+        assert!(
+            !relayed.contains(fragment),
+            "{fragment} left the host: {partials:?}"
+        );
+    }
+    assert_eq!(
+        relayed
+            .matches(momo_workd::projection::REDACTED_CREDENTIAL)
+            .count(),
+        5,
+        "{relayed}"
+    );
+    assert_eq!(
+        relayed
+            .matches(momo_workd::projection::REDACTED_PRIVATE_KEY)
+            .count(),
+        1,
+        "{relayed}"
+    );
+    assert!(relayed.ends_with("end — done."), "{relayed}");
+    for partial in &partials {
+        assert!(partial.chars().count() <= momo_workd::projection::MAX_FIELD_CHARS);
+    }
 }

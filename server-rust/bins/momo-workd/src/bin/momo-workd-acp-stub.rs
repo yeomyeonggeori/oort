@@ -11,6 +11,8 @@
 //!   --escape-mode ID     during each prompt, report `current_mode_update` → ID
 //!   --escape-via-config  report that escape as `config_option_update` instead
 //!   --hang               never answer `session/prompt` until cancelled
+//!   --leak               during each prompt, stream synthetic credentials in
+//!                        slow chunks that split a token and a PEM header
 //!
 //! Anything else on the command line (the host's isolation arguments) is
 //! accepted and recorded.
@@ -28,6 +30,7 @@ struct Options {
     escape_mode: Option<String>,
     escape_via_config: bool,
     hang: bool,
+    leak: bool,
 }
 
 fn parse() -> Options {
@@ -39,6 +42,7 @@ fn parse() -> Options {
         escape_mode: None,
         escape_via_config: false,
         hang: false,
+        leak: false,
     };
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
@@ -50,6 +54,7 @@ fn parse() -> Options {
             "--escape-mode" => options.escape_mode = args.next(),
             "--escape-via-config" => options.escape_via_config = true,
             "--hang" => options.hang = true,
+            "--leak" => options.leak = true,
             _ => {}
         }
     }
@@ -114,6 +119,36 @@ impl Stub {
             json!({"sessionUpdate": "agent_message_chunk",
                    "content": {"type": "text", "text": format!("stub heard: {text}")}}),
         );
+        if self.options.leak {
+            // Synthetic, well-formed credentials — never real, and assembled
+            // with `concat!` so this source carries no scanner-shaped literal.
+            // The pauses are longer than the host's age flush, so its flushes
+            // land inside the `sk-ant-` token and inside the PEM header.
+            for piece in [
+                concat!(" leak sk-", "ant-api03-"),
+                concat!(
+                    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA gh ghp",
+                    "_abcdefghijklmnopqrstuvwxyz0123456789 aws AKIA",
+                    "ABCDEFGHIJKLMNOP\n-----BEGIN OPENSSH PRIV"
+                ),
+                "ATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ\n",
+                concat!(
+                    "-----END OPENSSH PRIVATE KEY-----\nslack xoxb",
+                    "-1234567890-abcdefghij jwt eyJhbGciOiJIUzI1NiJ9",
+                    ".",
+                    "eyJzdWIiOiIxMjM0NTY3ODkwIn0",
+                    ".",
+                    "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U end"
+                ),
+            ] {
+                self.update(
+                    &session_id,
+                    json!({"sessionUpdate": "agent_message_chunk",
+                           "content": {"type": "text", "text": piece}}),
+                );
+                std::thread::sleep(std::time::Duration::from_millis(700));
+            }
+        }
         self.update(
             &session_id,
             json!({"sessionUpdate": "agent_thought_chunk",
