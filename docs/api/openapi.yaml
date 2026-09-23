@@ -3447,22 +3447,29 @@ paths:
     post:
       tags: [work-hosts]
       operationId: heartbeatWorkHost
-      summary: Refresh host liveness with an Ed25519 signature.
+      summary: Refresh host liveness with a v2-signed request.
       description: >
-        Public signature-authenticated endpoint. The host signs the exact UTF-8
-        bytes `momo.work_host.heartbeat.v1\\n<lowercase workspace UUID>\\n<lowercase
-        host UUID>\\n<sentAtMs>`. Timestamps outside the five-minute clock-skew
-        window, forged signatures, unknown hosts, and revoked hosts return 401.
-      security: []
+        ADR-0188 D7 (R0). An ordinary signed work-host request, mounted outside
+        the bearer middleware and authenticated in the handler. The host signs
+        the exact UTF-8 bytes `momo.work_host.request.v2\nPOST\n<path>\n<lowercase
+        workspace UUID>\n<lowercase host UUID>\n<sentAtMs>\n<SHA-256(raw body),
+        lowercase hex>\n<lowercase request UUID>` with its registered Ed25519
+        key; the request UUID is consumed atomically once, so a re-sent
+        heartbeat is refused rather than re-stamping liveness. The body is not
+        read — an empty body is the normal case, and any bytes sent are covered
+        by the digest. The retired v1 heartbeat (`momo.work_host.heartbeat.v1`
+        in a `{sentAtMs, signature}` body, no request id) is not accepted. A
+        query string, a timestamp outside the five-minute clock-skew window, a
+        forged or replayed signature, an unknown or revoked host, and a host
+        whose owner is no longer an active member all return the same 401.
+      security:
+        - workHostAuth: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/WorkHostId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/WorkHostHeartbeatRequest"
+        - $ref: "#/components/parameters/WorkHostSentAt"
+        - $ref: "#/components/parameters/WorkHostSignature"
+        - $ref: "#/components/parameters/WorkHostRequestId"
       responses:
         "200":
           description: Host liveness refreshed with server time.
@@ -3470,12 +3477,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorkHostResponse"
-        "400":
-          description: Invalid path identifiers or request body.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "429":
@@ -4609,7 +4610,10 @@ paths:
         read requires the lineage but no approval. The target must be a
         registered, unrevoked host in this workspace. Member-scoped hosts must
         belong to the session owner; workspace-scoped hosts accept all members.
-        Host-local paths,
+        ADR-0188 R0: a member-scoped (remote) host accepts only `kill` from an
+        agent bearer — `input`, `read` and `spawn` are 403 with
+        `error.code: remote_host_kill_only` — and a standing auto-approval
+        never dispatches onto one. Host-local paths,
         environment, process state, and credentials are forbidden payloads.
       security:
         - bearerAuth: []
@@ -4637,7 +4641,10 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: Human bearer, wrong agent/run lineage, or member-host owner mismatch.
+          description: >
+            Human bearer, wrong agent/run lineage, member-host owner mismatch,
+            or (ADR-0188 R0, `error.code: remote_host_kill_only`) an
+            input/read/spawn addressed to a member-scoped host.
           content:
             application/json:
               schema:
@@ -6180,10 +6187,23 @@ paths:
       operationId: decideApproval
       summary: Approve or reject a pending approval (idempotent).
       description: >
-        Human-only. `client_decision_id` provides idempotency — retrying the
+        Human-only: any other principal (agent bearer, signed work host) is a
+        403 receipt `human_principal_required`, checked before the idempotency
+        replay (ADR-0188 D3). `client_decision_id` provides idempotency — retrying the
         same decision returns the original receipt (200); a different
         decision under the same `client_decision_id` returns a 409 receipt
-        with status `idempotency_conflict`. Expected failures (403/404/409)
+        with status `idempotency_conflict`.
+
+
+        ADR-0188 R0 — a spawn headed to a member-scoped (remote) host is decided
+        by that host's owner only; channel membership or a workspace admin role
+        does not substitute (403 receipt `remote_host_owner_required`). The host
+        judged is the one the decision is about: when approving, the host the
+        spawn finally runs on (the `hostId` pick, else the card's default); when
+        rejecting, the host the card points at (a pick the card offers, else its
+        default). Approving a shell onto a member-scoped host is refused even for
+        its owner (403 receipt `remote_host_shell_refused`). Both are judged
+        before the first write. Expected failures (403/404/409)
         return the SAME receipt schema (not the generic error envelope) with
         a diagnostic `status`; the generic error envelope is used only for
         400 body/path mismatches and 401 auth failures.
@@ -6243,7 +6263,11 @@ paths:
         "403":
           description: >
             Receipt-shaped expected failure — `forbidden` (not human / not a
-            channel member), or `role_required` when the decider does not hold
+            channel member), `human_principal_required` (the caller is not a
+            person), `remote_host_owner_required` (work headed to a
+            member-scoped host decided by someone other than its owner),
+            `remote_host_shell_refused` (a shell approved onto a member-scoped
+            host), or `role_required` when the decider does not hold
             the `required_role` the workspace action published (ADR-0186 D2).
             `role_required` does **not** consume the approval: it stays
             `pending`, no ledger row is written, and the request card is patched
@@ -7573,7 +7597,10 @@ components:
         `Authorization: MomoHost <workHostId>` plus X-Momo-Work-Host-Sent-At,
         X-Momo-Work-Host-Request-ID, and X-Momo-Work-Host-Signature. The v2
         Ed25519 payload also binds SHA-256(raw request body); this is not a
-        durable bearer credential.
+        durable bearer credential. The payload signs the path only, so a
+        signed request must carry no query string — any `?…`, even an empty
+        one, is refused with the same 401 as a bad signature (ADR-0188 D7).
+        No approval route accepts this scheme (ADR-0188 D3).
 
   parameters:
     WorkspaceId:
@@ -7927,6 +7954,16 @@ components:
           properties:
             message:
               type: string
+            code:
+              type: string
+              description: >
+                Stable machine code for a refusal a client branches on; the
+                message may be reworded, the code is not. Omitted (never null)
+                when the refusal has none, which is every error older than
+                ADR-0188 R0. Current codes: `remote_host_kill_only` (an agent
+                bearer addressed input/read/spawn to a member-scoped host),
+                `remote_host_shell_refused` (a shell was asked of a
+                member-scoped host).
 
     # ---- Memory Plane (ADR-0129 / MOMO-526) ---------------------------------
     MemoryScope:
@@ -10268,17 +10305,6 @@ components:
         reportedSessionIds:
           type: array
           items: { type: string, format: uuid }
-    WorkHostHeartbeatRequest:
-      type: object
-      required: [sentAtMs, signature]
-      properties:
-        sentAtMs:
-          type: integer
-          format: int64
-        signature:
-          type: string
-          description: Raw 64-byte Ed25519 signature in standard base64.
-
     WorkHost:
       type: object
       required:
@@ -13491,9 +13517,10 @@ components:
         Decision acknowledgement. Committed decisions carry status
         approved/rejected; expected failures reuse this shape with a
         diagnostic status (e.g. idempotency_conflict, forbidden, role_required,
-        not_found, bad_request, expired, action_unavailable,
-        action_args_invalid, public_origin_unavailable, run_not_parked, or the
-        approval's current status on a 409).
+        human_principal_required, remote_host_owner_required,
+        remote_host_shell_refused, not_found, bad_request, expired,
+        action_unavailable, action_args_invalid, public_origin_unavailable,
+        run_not_parked, or the approval's current status on a 409).
 
 
         NOTATION (SRV-B5c): camelCase, matching the deployed Rust server. See

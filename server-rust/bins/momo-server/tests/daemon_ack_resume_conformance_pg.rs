@@ -1298,7 +1298,7 @@ async fn srvchain_4_a_takeover_actually_restarts_the_tool_on_the_new_host() {
 /// **ADR-0125 D6-A's second clause** — 기본 = 로컬 온라인 우선 **→ 마지막 사용**
 /// (#1132's fifth deviation, migration 061).
 ///
-/// The whole rule is visible in one workspace with two hosts: the first card has
+/// The whole rule is visible in one workspace with three hosts: the first card has
 /// no memory and falls back to the tier order; the second remembers where the
 /// person actually sent the work; the third proves the memory is filtered
 /// through the picker, not trusted on its own — a remembered host that went
@@ -1332,6 +1332,20 @@ async fn srvchain_5_the_card_remembers_the_host_you_chose_last() {
         Some(5),
     )
     .await;
+    // What the agent keeps asking for. Since ADR-0188 R0 an agent bearer cannot
+    // aim a spawn at a member-scoped host (`remote_host_kill_only`), so its
+    // proposal is a team box — a third one, so "the proposal", "the memory" and
+    // "the tier rule" stay three distinguishable answers below.
+    let proposed = seed_host(
+        &su,
+        tenant.workspace,
+        tenant.human,
+        "workspace",
+        "workd",
+        "옆 VPS",
+        Some(5),
+    )
+    .await;
 
     let base = start_server(app_pool).await;
     let http = reqwest::Client::new();
@@ -1340,7 +1354,7 @@ async fn srvchain_5_the_card_remembers_the_host_you_chose_last() {
 
     // ---- first card: no memory, so the tier rule answers -------------------
     let run = seed_run(&su, &tenant, agent).await;
-    request_spawn(&http, &base, &bearer, &tenant, run, laptop, "첫 번째").await;
+    request_spawn(&http, &base, &bearer, &tenant, run, proposed, "첫 번째").await;
     let (approval, payload) = sole_approval(&su, tenant.workspace).await;
     assert_eq!(
         payload["execution"]["default_host_id"],
@@ -1369,19 +1383,19 @@ async fn srvchain_5_the_card_remembers_the_host_you_chose_last() {
 
     // ---- second card: it remembers ------------------------------------------
     let run = seed_run(&su, &tenant, agent).await;
-    request_spawn(&http, &base, &bearer, &tenant, run, laptop, "두 번째").await;
+    request_spawn(&http, &base, &bearer, &tenant, run, proposed, "두 번째").await;
     let cards = approvals_payloads(&su, tenant.workspace).await;
     assert_eq!(cards.len(), 2);
     assert_eq!(
         cards[1]["execution"]["default_host_id"],
         json!(vps.to_string()),
-        "마지막 사용 outranks the tier order even though the agent asked for the \
-         laptop again: {}",
+        "마지막 사용 outranks the tier order even though the agent asked for \
+         another box again: {}",
         cards[1]["execution"]
     );
     assert_eq!(
         cards[1]["execution"]["requested_host_id"],
-        json!(laptop.to_string()),
+        json!(proposed.to_string()),
         "the model's proposal is still shown — remembering is not overriding"
     );
 
@@ -1396,7 +1410,7 @@ async fn srvchain_5_the_card_remembers_the_host_you_chose_last() {
     .expect("take the remembered host offline");
 
     let run = seed_run(&su, &tenant, agent).await;
-    request_spawn(&http, &base, &bearer, &tenant, run, laptop, "세 번째").await;
+    request_spawn(&http, &base, &bearer, &tenant, run, proposed, "세 번째").await;
     let cards = approvals_payloads(&su, tenant.workspace).await;
     assert_eq!(cards.len(), 3);
     assert_eq!(

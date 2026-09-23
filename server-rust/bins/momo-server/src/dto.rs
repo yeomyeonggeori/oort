@@ -829,13 +829,9 @@ pub struct RegisterWorkHostRequest {
     pub capabilities: Option<BTreeMap<String, bool>>,
 }
 
-/// `POST …/work-hosts/{host}/heartbeat` request (Swift, :15-18).
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct WorkHostHeartbeatRequest {
-    pub sent_at_ms: i64,
-    pub signature: String,
-}
+// `POST …/work-hosts/{host}/heartbeat` has no request DTO since ADR-0188 D7:
+// the v1 body (`sentAtMs` + a v1 signature) is gone, the v2 proof travels in the
+// `MomoHost` headers, and the server reads nothing from the (signed) body.
 
 /// Swift `WorkHostDTO` (:20-33). `lastSeenAtMs`/`revokedAtMs` are `Int64?` in a
 /// synthesized `Encodable`, so a null is **omitted**, not emitted.

@@ -1,18 +1,22 @@
 //! The **signed work-host request** credential path (MOMO-657 / migration 048),
 //! ported from Swift `Auth/WorkHostAuthenticator.swift:29-125`.
 //!
-//! ## Why this is a second credential surface, not a variation of the heartbeat
+//! ## The one credential surface a host has — the heartbeat included
 //!
-//! A heartbeat signs `momo.work_host.heartbeat.v1\n{ws}\n{host}\n{sentAtMs}` and
-//! carries no request id: the ±5 minute skew window is the whole of its
-//! freshness contract, and a replay inside that window can only re-stamp
-//! `last_seen_at`. A host **request** signs
+//! A host **request** signs
 //! `momo.work_host.request.v2\n{METHOD}\n{path}\n{ws}\n{host}\n{sentAtMs}\n{bodyDigest}\n{requestID}`
 //! — it binds the method, the path and the raw body hash, and it is replay-
 //! protected by one-time consumption of `requestID`, because a request *acts*.
 //! Migration 048 exists for exactly that consumption and says why in its header:
 //! "Accepting v1 in parallel would keep the body-substitution and replay
 //! vulnerability open."
+//!
+//! The heartbeat used to be the exception: `momo.work_host.heartbeat.v1\n{ws}\n
+//! {host}\n{sentAtMs}` with no request id, so a replay inside the ±5 minute
+//! window re-stamped `last_seen_at` and kept a dead host looking alive. ADR-0188
+//! D7 (R0) closed that the same way 048 closed the request: the heartbeat is a
+//! v2 request now, its id is consumed here like any other, and v1 is not
+//! accepted.
 //!
 //! This module owns the two DB halves of that check and nothing else. The
 //! cryptographic verdict is [`crate::workhost::verify_work_host_request`] (which

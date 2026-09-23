@@ -1825,9 +1825,10 @@ guard_jq() {
 # 새 id 를 만든다 — 재사용은 401 이고, 그건 재생 방벽이 살아 있다는 뜻이다.
 now_ms() { "$PYTHON_BIN" -c 'import time; print(time.time_ns() // 1_000_000)'; }
 
-work_host_signed_sample() {
-  local name="$1" method="$2" template="$3" path="$4" expected="$5"
-  local host_id="$6" private_key="$7" body="${8:-}"
+# 서명 요청을 보내고 RESPONSE_STATUS/RESPONSE_BODY 만 채운다. 기록은 호출자 몫이다:
+# 표본은 work_host_signed_sample, 전제(픽스처)는 work_host_signed_expect.
+work_host_signed_request() {
+  local name="$1" method="$2" path="$3" host_id="$4" private_key="$5" body="${6:-}"
   local sent_at request_id body_hash payload signature verb
   local out="$RAW_RESPONSE_FILE" auth_config="$TMP_DIR/work-host-curl.conf"
   sent_at="$(now_ms)"
@@ -1862,7 +1863,23 @@ work_host_signed_sample() {
     echo "[openapi-rust] candidate work-host response secret scan failed; response withheld" >&2
     return 1
   }
+}
+
+work_host_signed_sample() {
+  local name="$1" method="$2" template="$3" path="$4" expected="$5"
+  local host_id="$6" private_key="$7" body="${8:-}"
+  work_host_signed_request "$name" "$method" "$path" "$host_id" "$private_key" "$body" || return 1
   record_sample "$name" "$method" "$template" "$expected"
+}
+
+# 서명 픽스처: 상태만 단정하고 매니페스트에는 넣지 않는다(`expect` 의 서명판).
+work_host_signed_expect() {
+  local label="$1" method="$2" path="$3" expected="$4" host_id="$5" private_key="$6" body="${7:-}"
+  work_host_signed_request "$label" "$method" "$path" "$host_id" "$private_key" "$body" || exit 1
+  [ "$RESPONSE_STATUS" = "$expected" ] && return 0
+  echo "[openapi-rust] FAIL fixture $label: expected HTTP $expected, got $RESPONSE_STATUS" >&2
+  redacted_body >&2
+  exit 1
 }
 
 # `sample` 의 기록 절반만: 요청을 이미 다른 자격증명으로 보낸 호출자가 쓴다.
@@ -1913,20 +1930,9 @@ register_secret_file "$HOST_KEY" || {
 HOST_PUBLIC_KEY="$("$OPENSSL_BIN" pkey -in "$HOST_KEY" -pubout -outform DER 2>/dev/null \
   | tail -c 32 | "$OPENSSL_BIN" base64 -A)"
 
-heartbeat_body() {
-  local host_id="$1" sent_at payload signature
-  sent_at="$(now_ms)"
-  payload="$TMP_DIR/work-host-heartbeat-$host_id.bin"
-  printf 'momo.work_host.heartbeat.v1\n%s\n%s\n%s' \
-    "$(printf '%s' "$WS" | tr '[:upper:]' '[:lower:]')" \
-    "$(printf '%s' "$host_id" | tr '[:upper:]' '[:lower:]')" \
-    "$sent_at" >"$payload"
-  signature="$("$OPENSSL_BIN" pkeyutl -sign -rawin -inkey "$HOST_KEY" \
-    -in "$payload" | "$OPENSSL_BIN" base64 -A)"
-  append_secret_with_derivatives "$signature" || return 1
-  printf '%s' "$signature" | jq -Rsc --argjson sent "$sent_at" \
-    '{sentAtMs:$sent,signature:.}'
-}
+# ADR-0188 D7 (R0): 하트비트는 더 이상 자기 v1 서명(`momo.work_host.heartbeat.v1`,
+# 요청 id 없음)을 싣지 않는다. 다른 호스트 행위와 같은 v2 서명 요청이고 요청 id 는
+# 한 번만 소비되므로 work_host_signed_sample/expect 로 보낸다. v1 본문은 401 이다.
 
 # ---------------------------------------------------------------------------
 # auth — 아래 모든 표본의 자격증명 출처.
@@ -3983,18 +3989,22 @@ guard_jq '.status == "cancelled"' "a person's stop ends the run"
 # ---------------------------------------------------------------------------
 # work host 레지스트리 — 등록 · 서명 하트비트 · 폴링 목록
 # ---------------------------------------------------------------------------
+# 팀 공용(workspace-scoped) 호스트다. ADR-0188 R0 이후 member-scoped 호스트(누군가의
+# 맥)에는 에이전트 bearer 가 kill 만 보낼 수 있고(`remote_host_kill_only`) 자동승인도
+# 닿지 않는다. 아래 폐곡선 — 에이전트가 spawn 을 요청하고 자동승인으로 dispatched
+# 되어 데몬이 서명으로 읽고 ack 한다 — 이 여전히 성립하는 자리가 팀 호스트다.
 sample work-host-register post "/v1/workspaces/{workspaceId}/work-hosts" \
   "/v1/workspaces/$WS/work-hosts" 201 \
   "$(jq -cn --arg key "$HOST_PUBLIC_KEY" \
-      '{scope:"member",type:"app",displayName:"OpenAPI rust gate host",publicKey:$key,
+      '{scope:"workspace",type:"workd",displayName:"OpenAPI rust gate host",publicKey:$key,
         capabilities:{"tool.codex":true}}')" "$ACCESS"
 WORK_HOST_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workHost.id')"
 canonical_uuid "$WORK_HOST_ID" || { echo "[openapi-rust] candidate returned a non-canonical work-host id" >&2; exit 1; }
 
-sample work-host-heartbeat post \
+work_host_signed_sample work-host-heartbeat post \
   "/v1/workspaces/{workspaceId}/work-hosts/{workHostId}/heartbeat" \
   "/v1/workspaces/$WS/work-hosts/$WORK_HOST_ID/heartbeat" 200 \
-  "$(heartbeat_body "$WORK_HOST_ID")"
+  "$WORK_HOST_ID" "$HOST_KEY"
 guard_jq '.workHost.online == true and (.workHost.lastSeenAtMs | type == "number")' \
   "signed heartbeat marks the host online"
 
@@ -4121,9 +4131,9 @@ expect resume-target-host post "/v1/workspaces/$WS/work-hosts" 201 \
         capabilities:{"tool.codex":true}}')" "$ACCESS"
 RESUME_HOST_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workHost.id')"
 canonical_uuid "$RESUME_HOST_ID" || { echo "[openapi-rust] candidate returned a non-canonical resume host id" >&2; exit 1; }
-expect resume-target-heartbeat post \
+work_host_signed_expect resume-target-heartbeat post \
   "/v1/workspaces/$WS/work-hosts/$RESUME_HOST_ID/heartbeat" 200 \
-  "$(heartbeat_body "$RESUME_HOST_ID")"
+  "$RESUME_HOST_ID" "$HOST_KEY"
 
 run_sql <<SQL
 UPDATE work_session SET status = 'orphaned', idle_at = NULL
@@ -4284,7 +4294,6 @@ find "$TMP_DIR" -type f \
   ! -name 'work-host-curl.conf' \
   ! -name 'work-host-curl.conf*' \
   ! -name 'work-host-request-*.bin' \
-  ! -name 'work-host-heartbeat-*.bin' \
   -print >"$LEAK_SCAN_LIST"
 LEAK_FOUND=0
 : >"$TMP_DIR/secret-leaks.txt"

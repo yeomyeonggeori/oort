@@ -18,34 +18,18 @@ use uuid::Uuid;
 /// `WorkHostRoutes.heartbeatClockSkewMs` (:90) — ±5 minutes.
 pub const HEARTBEAT_CLOCK_SKEW_MS: i64 = 5 * 60 * 1_000;
 
-/// Verify a WorkHost **heartbeat v1** signature (B2.2).
-///
-/// A heartbeat is signed over a different payload than a host *request*: the
-/// v1 format `momo.work_host.heartbeat.v1\n{ws}\n{host}\n{sentAtMs}`
-/// (`momo_wire::signing::heartbeat_payload`), which is why
-/// [`verify_work_host_request`] cannot serve this route. Mirrors Swift
-/// `WorkHostRoutes.verifyHeartbeatSignature` (:597-616), including its two
-/// length guards (32-byte key, 64-byte signature) — both are inside
-/// `momo_wire::verify_base64`.
-///
-/// Note the asymmetry with the request path: a heartbeat carries no request id
-/// and is therefore **not** replay-protected by a one-time id — the skew window
-/// ([`heartbeat_timestamp_is_fresh`]) is the whole of its freshness contract,
-/// exactly as in Swift. A replayed heartbeat can only re-stamp `last_seen_at`
-/// inside that window.
-pub fn verify_work_host_heartbeat(
-    public_key_b64: &str,
-    signature_b64: &str,
-    workspace_id: Uuid,
-    host_id: Uuid,
-    sent_at_ms: i64,
-) -> bool {
-    let payload = momo_wire::signing::heartbeat_payload(workspace_id, host_id, sent_at_ms);
-    momo_wire::verify_base64(public_key_b64, signature_b64, &payload)
-}
+// There is no heartbeat verifier here any more (ADR-0188 D7, R0). The v1
+// heartbeat signed `momo.work_host.heartbeat.v1\n{ws}\n{host}\n{sentAtMs}` with
+// no request id, so the ±5 minute window was its whole freshness contract and a
+// captured beat could be replayed for all of it. A heartbeat is now a v2 signed
+// request like every other host act ([`verify_work_host_request`] + one-time
+// request-id consumption), and v1 is not accepted anywhere. The v1 *format*
+// still lives in `momo_wire` because historical `action_signature` rows were
+// recorded over it and must stay re-verifiable.
 
 /// Swift `validateHeartbeatTimestamp` (:618-628): non-negative and within
-/// [`HEARTBEAT_CLOCK_SKEW_MS`] of now, in either direction.
+/// [`HEARTBEAT_CLOCK_SKEW_MS`] of now, in either direction. Every signed host
+/// request's clock window, the heartbeat's included.
 pub fn heartbeat_timestamp_is_fresh(sent_at_ms: i64, now_ms: i64) -> bool {
     sent_at_ms >= 0 && (sent_at_ms - now_ms).abs() <= HEARTBEAT_CLOCK_SKEW_MS
 }
@@ -101,46 +85,54 @@ mod tests {
     use ed25519_dalek::SigningKey;
     use momo_wire::signing::{heartbeat_payload, request_payload, sha256_hex, sign};
 
+    /// ADR-0188 D7: a v1 heartbeat signature authenticates nothing. The same
+    /// key signing the v1 bytes for the very request a v2 heartbeat makes does
+    /// not verify as that request — the schema tag, the missing method/path/
+    /// digest and the missing request id all differ — so a daemon still on v1
+    /// is refused rather than half-accepted.
     #[test]
-    fn accepts_a_valid_heartbeat_signature_and_rejects_a_shifted_clock() {
+    fn a_v1_heartbeat_signature_never_verifies_as_a_v2_request() {
         let seed = [23u8; 32];
         let public_b64 = BASE64.encode(SigningKey::from_bytes(&seed).verifying_key().to_bytes());
         let ws = Uuid::from_u128(11);
         let host = Uuid::from_u128(12);
         let sent_at_ms = 1_730_000_000_000i64;
+        let path = format!("/v1/workspaces/{ws}/work-hosts/{host}/heartbeat");
+        let request_id = Uuid::from_u128(13);
+        let digest = sha256_hex(b"");
 
-        let signature =
-            BASE64.encode(sign(&seed, &heartbeat_payload(ws, host, sent_at_ms)).unwrap());
-        assert!(verify_work_host_heartbeat(
+        let v1 = BASE64.encode(sign(&seed, &heartbeat_payload(ws, host, sent_at_ms)).unwrap());
+        assert!(!verify_work_host_request(
             &public_b64,
-            &signature,
+            &v1,
+            "POST",
+            &path,
             ws,
             host,
-            sent_at_ms
+            sent_at_ms,
+            &digest,
+            request_id,
         ));
-        // The timestamp is inside the signed payload: shifting it invalidates
-        // the signature rather than merely failing the skew check.
-        assert!(!verify_work_host_heartbeat(
-            &public_b64,
-            &signature,
-            ws,
-            host,
-            sent_at_ms + 1
-        ));
-        // A request-format signature must not pass as a heartbeat.
-        let request_signature = BASE64.encode(
+
+        // …while the v2 signature over the same request does — the negative
+        // above is about the format, not a broken key.
+        let v2 = BASE64.encode(
             sign(
                 &seed,
-                &request_payload("POST", "/x", ws, host, sent_at_ms, &sha256_hex(b""), ws),
+                &request_payload("POST", &path, ws, host, sent_at_ms, &digest, request_id),
             )
             .unwrap(),
         );
-        assert!(!verify_work_host_heartbeat(
+        assert!(verify_work_host_request(
             &public_b64,
-            &request_signature,
+            &v2,
+            "POST",
+            &path,
             ws,
             host,
-            sent_at_ms
+            sent_at_ms,
+            &digest,
+            request_id,
         ));
     }
 
