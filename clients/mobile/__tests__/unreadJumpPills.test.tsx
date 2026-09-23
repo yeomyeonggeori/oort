@@ -626,10 +626,12 @@ describe('방을 옮기면 필의 판정을 새로 한다 — 방의 정체성 (
   });
 
   it('진입 앵커는 새 방의 메시지가 도착한 뒤에 다시 탄다 — 앞 방의 행이나 자리표시에는 타지 않는다', async () => {
-    const {rerender, listRef} = mount({channelId: 'ch'});
+    const {rerender} = mount({channelId: 'ch'});
     await settleAtBottom(); // 방 A 의 진입은 끝났다
+    // 원형에 건다 — 새 방의 행은 새 스크롤뷰가 받으므로(아래 시험) 인스턴스 하나에
+    // 걸면 새 방의 진입을 못 본다.
     const toEnd = jest
-      .spyOn(listRef.current!, 'scrollToEnd')
+      .spyOn(FlatList.prototype, 'scrollToEnd')
       .mockImplementation(() => {});
 
     // 1: 새 방 id 인데 행은 앞 방의 것. 그 위의 레이아웃 보고로 진입하면 새 방의
@@ -653,6 +655,31 @@ describe('방을 옮기면 필의 판정을 새로 한다 — 방의 정체성 (
     fireEvent(list(), 'contentSizeChange', 390, 4000);
     expect(toEnd).toHaveBeenCalledWith({animated: false});
     await flushFrame(); // 수렴이 act 안에서 끝나게 둔다
+  });
+
+  it('새 방의 행은 새 스크롤뷰가 받는다 — 앞 방의 행이나 빈 목록일 때는 그대로다', () => {
+    // 시뮬레이터 실측(`JUMP-PILLS-ROOMS`): 앞 방의 스크롤뷰가 새 방을 그대로 받으면,
+    // 진입 수렴이 끝나 `maintainVisibleContentPosition` 이 다시 켜지는 순간 앞 판에서
+    // 기록한 앵커를 clamp 없이 적용했다 — 끝을 오르던 목록(2396/3008)이 357 로 밀려
+    // 구분선이 보이는 자리에 섰고, 거기서 래치가 걸려 새 방의 위 필이 서지 않았다.
+    const {rerender, listRef} = mount({channelId: 'ch'});
+    const roomA = listRef.current;
+
+    rerender({channelId: 'ch-b', working: WORKING});
+    expect(listRef.current).toBe(roomA); // 앞 방의 행 — 새 목록에 그리면 그 행이 번쩍인다
+    rerender({channelId: 'ch-b', working: WORKING, messages: [], status: 'loading'});
+    expect(listRef.current).toBe(roomA); // 자리표시만 — 여기서 새로 세우면 그것을 앵커로 삼는다
+
+    rerender({
+      channelId: 'ch-b',
+      working: WORKING,
+      messages: ROOM_B,
+      status: 'ready',
+      lastReadSeq: 101,
+      unreadCount: 3,
+    });
+    expect(listRef.current).not.toBeNull();
+    expect(listRef.current).not.toBe(roomA);
   });
 });
 
@@ -691,10 +718,11 @@ describe('점프가 진입을 가져간다 (R1 M-1)', () => {
   });
 
   it('대기 점프가 있으면 진입 수렴이 서지 않는다 — 새 방에서 점프가 첫 레이아웃 보고보다 먼저 온 경우', async () => {
-    const {rerender, listRef} = mount({channelId: 'ch'});
+    const {rerender} = mount({channelId: 'ch'});
     await settleAtBottom();
+    // 원형에 건다 — 새 방의 행은 새 스크롤뷰가 받는다.
     const toIndex = jest
-      .spyOn(listRef.current!, 'scrollToIndex')
+      .spyOn(FlatList.prototype, 'scrollToIndex')
       .mockImplementation(() => {});
 
     // ADE 「대화로」: 방 B 의 첫 페이지가 준비된 뒤 그 줄로 가는 점프가 걸린다.
@@ -706,7 +734,7 @@ describe('점프가 진입을 가져간다 (R1 M-1)', () => {
       expect.objectContaining({viewPosition: 0.5}),
     );
     const toEnd = jest
-      .spyOn(listRef.current!, 'scrollToEnd')
+      .spyOn(FlatList.prototype, 'scrollToEnd')
       .mockImplementation(() => {});
 
     // 늦게 도착한 첫 레이아웃 보고. 진입 앵커가 여기서 타면 목록은 바닥에 서고,
@@ -747,6 +775,31 @@ describe('점프가 진입을 가져간다 (R1 M-1)', () => {
     fireEvent(list(), 'contentSizeChange', 390, 4000);
 
     expect(toEnd).toHaveBeenCalledWith({animated: false});
+  });
+
+  it('착지하러 가는 동안 목록이 콘텐츠 끝에 서도 「바닥」으로 읽지 않는다 — 회복 경로의 clamp', () => {
+    // 시뮬레이터 실측(`JUMP-PILLS-LAND`): 새 방의 아직 안 잰 줄로 가는 점프는
+    // `onScrollToIndexFailed` 를 타고, 그 회복은 목록을 `평균 행 높이 × 첨자` 에 세운다.
+    // 새 목록은 몇 행만 재어 두었으므로 스크롤뷰가 그 자리를 **재어 둔 끝**에 세우고
+    // (788/1399), 그 스크롤 보고가 따라가기를 켰다. 다음 콘텐츠 증가가 목록을 꼬리로
+    // 활강시켜 착지는 끝내 보이지 않았다.
+    jest.spyOn(FlatList.prototype, 'scrollToIndex').mockImplementation(() => {});
+    const toEnd = jest
+      .spyOn(FlatList.prototype, 'scrollToEnd')
+      .mockImplementation(() => {});
+    mount({channelId: 'ch', jumpTarget: {messageId: 'msg-2', seq: 2, token: 1}});
+
+    fireEvent.scroll(list(), {
+      nativeEvent: {
+        contentOffset: {y: 800},
+        contentSize: {height: 1399, width: 390},
+        layoutMeasurement: {height: 599, width: 390},
+      },
+    });
+    fireEvent(list(), 'contentSizeChange', 390, 2099);
+
+    expect(toEnd).not.toHaveBeenCalled();
+    expect(bottomPill()).not.toBeNull();
   });
 });
 

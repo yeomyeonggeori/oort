@@ -486,6 +486,23 @@ const LANDING_HOLD_MS = 600;
 /** UIKit's animated `setContentOffset` is ~300ms; wait for it to be down. */
 const GLIDE_SETTLE_MS = 350;
 
+/**
+ * How long a jump owns the scroll position, in ms, from the request and again
+ * from every failed `scrollToIndex` (#1892 R1 M-1, measured).
+ *
+ * A jump into rows the list has not measured yet — every landing in a room that
+ * has just opened — goes through `onScrollToIndexFailed`, which parks the list at
+ * `averageItemLength × index` and asks again a frame later. Measured on the
+ * simulator (`JUMP-PILLS-LAND`): that parking offset lies past the few rows the
+ * fresh list has laid out, the scroll view clamps it to their end, and `onScroll`
+ * read the clamped end as "the reader is at the bottom". `following` came on, the
+ * next content growth glided the list to the tail, and the landing never showed.
+ * The travel is this component's, not the reader's — the same reason a send pins
+ * the scroll (`scrollPinUntilRef`). Long enough to cover the failed rounds and the
+ * ~300ms glide onto the row; a finger ends it at once (`onScrollBeginDrag`).
+ */
+const JUMP_PIN_MS = 800;
+
 // =============================================================================
 // ## 이 목록이 다시 그려지는 값 (goal RN-P2a / #997)
 //
@@ -926,6 +943,37 @@ function TimelineInner({
     (channelId === undefined || uuidEq(messages[0].channelId, channelId));
   const holdsChannelContentRef = useRef(holdsChannelContent);
   holdsChannelContentRef.current = holdsChannelContent;
+
+  /**
+   * 목록(스크롤뷰) **자체의** 정체성 — 지금 든 행들의 방이다 (#1892 R1 H-1, 시뮬레이터 실측).
+   *
+   * 판정만 새로 해서는 모자랐다. 「작업 중」 자리가 목록을 붙잡으면 앞 방의 스크롤뷰가
+   * 그대로 새 방을 받는다. 그 스크롤뷰의 `maintainVisibleContentPosition` 은 앞 판에서
+   * 기록한 앵커를 들고 있고, 새 방의 진입 수렴이 끝나 그 prop 이 다시 켜지는 순간
+   * 그 낡은 앵커를 clamp 없이 적용한다(리뷰 M-2 의 원인). 잰 기록
+   * (`JUMP-PILLS-ROOMS`): 진입이 `2192→2396/3008` 로 끝을 오르다가 101ms 뒤
+   * **`357`** 로 밀려났고, 목록은 구분선이 보이는 그 자리에 서서 래치가 걸렸다 —
+   * 새 방의 「안읽음으로」는 서지 않았다. 자리표시가 없던 길은 로딩 표시가 목록을
+   * 언마운트하므로 늘 새 스크롤뷰였고, 그래서 멀쩡했다.
+   *
+   * 그래서 새 방의 행이 도착하면 **새 스크롤뷰**에서 받는다(`key`). 모든 방 진입이
+   * 첫 마운트와 같은 길을 탄다. 행이 빈 동안은 앞 방의 이름을 그대로 들고 있다 —
+   * 방이 바뀐 첫 렌더(앞 방의 행)나 빈 목록에서 다시 마운트하면, 새 목록은 앞 방의
+   * 행이나 자리표시로 앵커를 기록하고 같은 일이 다시 난다.
+   */
+  const listRoomRef = useRef<string | null>(null);
+  const contentRoom =
+    messages.length > 0
+      ? messages[0].channelId.toLowerCase()
+      : listRoomRef.current;
+  if (contentRoom !== listRoomRef.current) {
+    listRoomRef.current = contentRoom;
+    // 새 스크롤뷰는 맨 위에서, 아무것도 재지 않은 채 선다. 앞 스크롤뷰의 기하를
+    // 들고 있으면 새 방의 수렴이 첫 라운드를 앞 방의 오프셋으로 판정한다.
+    geometryRef.current = {offsetY: 0, contentHeight: 0, viewportHeight: 0};
+    if (metricsRef) metricsRef.current = geometryRef.current;
+  }
+  const listKey = contentRoom ?? 'empty';
 
   /** 출발점에 앉은 뒤 구분선이 창 안에 있으면 — 봤다. 래치를 건다. */
   const armLatchIfDividerSeen = useCallback(() => {
@@ -1550,7 +1598,8 @@ function TimelineInner({
     setUnreadLatched(true);
     entrySettledRef.current = true;
     cancelConvergence();
-    scrollPinUntilRef.current = 0;
+    // 가는 동안의 자리는 사람의 것이 아니다 — 아래 인용 점프와 같은 핀(R1 M-1).
+    scrollPinUntilRef.current = Date.now() + JUMP_PIN_MS;
     setChasingTail(false);
     noteFollowing(false);
     scrollViewPositionRef.current = 0;
@@ -1770,7 +1819,10 @@ function TimelineInner({
     // 끌어내린다 — 새 요청이 앞선 요청을 이긴다.
     cancelConvergence();
     cancelFocus();
-    scrollPinUntilRef.current = 0;
+    // 그리고 가는 동안은 이 점프가 스크롤을 쥔다(`JUMP_PIN_MS`). 측정 안 된 행으로
+    // 가는 회복 경로는 목록을 잠시 콘텐츠 끝에 세우고, 그 자리를 「바닥에 있다」로
+    // 읽으면 따라가기가 켜져 착지 대신 꼬리로 끌려간다(R1 M-1, 시뮬레이터 실측).
+    scrollPinUntilRef.current = Date.now() + JUMP_PIN_MS;
     setChasingTail(false);
     noteFollowing(false);
     // **이 점프가 방의 진입이다** (#1892 R1 M-1). 다른 방으로 가는 착지(ADE
@@ -1821,6 +1873,14 @@ function TimelineInner({
       // 온다. RN 이 권하는 회복 그대로: 대략의 자리로 한 번 밀어 두면 그 행이
       // 마운트되고, 다음 프레임에 정확히 앉는다. 실패를 삼키지 않는 이유는
       // 삼키면 「눌렀는데 아무 일도 안 일어남」이 되기 때문이다.
+      //
+      // 회복 한 번마다 점프의 핀을 늘린다(R1 M-1). 대략의 자리는 새 목록에서 흔히
+      // 재어 둔 행들의 끝을 넘고, 스크롤뷰는 그 끝에 세운다 — 그 자리는 사람이 고른
+      // 「바닥」이 아니다.
+      scrollPinUntilRef.current = Math.max(
+        scrollPinUntilRef.current,
+        Date.now() + JUMP_PIN_MS,
+      );
       listRef.current?.scrollToOffset({
         offset: info.averageItemLength * info.index,
         animated: false,
@@ -1931,6 +1991,8 @@ function TimelineInner({
 
   const list = (
     <FlatList
+      // 새 방의 행은 새 스크롤뷰가 받는다 — `listRoomRef` 주석(R1 H-1 실측).
+      key={listKey}
       ref={listRef}
       testID="timeline-list"
       data={items}
