@@ -6,7 +6,7 @@
 //! |---|---|
 //! | executable and arguments come from the host allowlist, never from the server | [`launch_spec`] (config: `crate::config::ToolEntry`) |
 //! | a configuration that asks for bypass/auto is refused | [`is_forbidden_launch_argument`] |
-//! | the permission mode is fixed; bypass/auto at session start → no session | [`check_session_modes`] |
+//! | the permission mode is fixed: another mode at session start is corrected before the first prompt and confirmed, or there is no session | [`check_session_modes`], [`check_mode_confirmed`] |
 //! | leaving the fixed mode mid-session closes the remote path | [`check_mode_update`] |
 //! | no remote `shell` | [`check_remote_tool`] |
 //! | remote text never runs an adapter slash command | [`check_prompt`] |
@@ -620,15 +620,58 @@ pub fn check_remote_tool(tool: &str) -> Result<(), Refusal> {
     Ok(())
 }
 
-/// ADR-0188 D6: the session must be in the adapter's fixed mode when it opens.
-/// `modes` is the `session/new` result's `modes` object. An adapter that does
-/// not report a mode cannot prove it is not in bypass/auto, so it is refused
-/// too — the host does not guess.
-pub fn check_session_modes(adapter: AdapterKind, modes: Option<&Value>) -> Result<(), Refusal> {
+/// Where a session stands against the adapter's fixed mode when it opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModeAtOpen {
+    /// Already in the fixed mode.
+    Fixed,
+    /// In another mode, with the fixed one on offer: the host corrects it with
+    /// `session/set_mode` before the first prompt and waits for the agent to
+    /// confirm ([`check_mode_confirmed`]).
+    Correct,
+}
+
+/// ADR-0188 D6 as amended on 2026-09-24 (§8, 성재 「시작 직후 교정」): the
+/// session must be in the adapter's fixed mode before its first prompt. A
+/// session that opens in another mode — Claude Code opens in whatever the
+/// owner's own `permissions.defaultMode` says, `auto` on 성재's Mac (measured)
+/// — is corrected, not refused, provided the fixed mode is on offer. `modes`
+/// is the `session/new` result's `modes` object. An adapter that does not
+/// report a mode cannot prove which one it is in, so it is refused — the host
+/// does not guess.
+pub fn check_session_modes(
+    adapter: AdapterKind,
+    modes: Option<&Value>,
+) -> Result<ModeAtOpen, Refusal> {
+    let modes = modes.ok_or(Refusal::PermissionModeRefused)?;
     let current = modes
-        .and_then(|modes| modes.get("currentModeId"))
-        .and_then(Value::as_str);
-    match current {
+        .get("currentModeId")
+        .and_then(Value::as_str)
+        .ok_or(Refusal::PermissionModeRefused)?;
+    if current == adapter.fixed_mode() {
+        return Ok(ModeAtOpen::Fixed);
+    }
+    let offered = modes
+        .get("availableModes")
+        .and_then(Value::as_array)
+        .is_some_and(|available| {
+            available
+                .iter()
+                .any(|mode| mode.get("id").and_then(Value::as_str) == Some(adapter.fixed_mode()))
+        });
+    if offered {
+        Ok(ModeAtOpen::Correct)
+    } else {
+        Err(Refusal::PermissionModeRefused)
+    }
+}
+
+/// A correction counts only when the agent itself reports the fixed mode
+/// after accepting `session/set_mode` (`current_mode_update`, or the `mode`
+/// config option): its answer alone is not a report of the mode it is in.
+/// `reported` is the last mode the agent reported.
+pub fn check_mode_confirmed(adapter: AdapterKind, reported: Option<&str>) -> Result<(), Refusal> {
+    match reported {
         Some(mode) if mode == adapter.fixed_mode() => Ok(()),
         _ => Err(Refusal::PermissionModeRefused),
     }
@@ -745,11 +788,17 @@ mod tests {
     }
 
     #[test]
-    fn only_the_fixed_mode_opens_a_session() {
-        let modes = |current: &str| json!({"currentModeId": current, "availableModes": []});
+    fn a_session_opens_in_the_fixed_mode_or_is_corrected_to_it() {
+        let offering = |current: &str, available: &[&str]| {
+            json!({
+                "currentModeId": current,
+                "availableModes": available.iter().map(|id| json!({"id": id})).collect::<Vec<_>>(),
+            })
+        };
+        let claude = ["default", "acceptEdits", "plan", "auto"];
         assert_eq!(
-            check_session_modes(AdapterKind::Claude, Some(&modes("default"))),
-            Ok(())
+            check_session_modes(AdapterKind::Claude, Some(&offering("default", &claude))),
+            Ok(ModeAtOpen::Fixed)
         );
         for mode in [
             "bypassPermissions",
@@ -759,16 +808,44 @@ mod tests {
             "auto",
         ] {
             assert_eq!(
-                check_session_modes(AdapterKind::Claude, Some(&modes(mode))),
+                check_session_modes(AdapterKind::Claude, Some(&offering(mode, &claude))),
+                Ok(ModeAtOpen::Correct),
+                "{mode} is corrected before the first prompt"
+            );
+            assert_eq!(
+                check_session_modes(AdapterKind::Claude, Some(&offering(mode, &["plan", mode]))),
                 Err(Refusal::PermissionModeRefused),
-                "{mode}"
+                "{mode}: the fixed mode is not on offer, so nothing to correct to"
             );
         }
+        assert_eq!(
+            check_session_modes(
+                AdapterKind::Codex,
+                Some(&offering("agent", &["read-only", "agent"]))
+            ),
+            Ok(ModeAtOpen::Correct)
+        );
         assert_eq!(
             check_session_modes(AdapterKind::Claude, None),
             Err(Refusal::PermissionModeRefused),
             "no reported mode is not proof of a safe mode"
         );
+        assert_eq!(
+            check_session_modes(AdapterKind::Claude, Some(&json!({"availableModes": []}))),
+            Err(Refusal::PermissionModeRefused)
+        );
+        // The correction counts only on the agent's own report.
+        assert_eq!(
+            check_mode_confirmed(AdapterKind::Claude, Some("default")),
+            Ok(())
+        );
+        for reported in [None, Some("auto"), Some("acceptEdits"), Some("")] {
+            assert_eq!(
+                check_mode_confirmed(AdapterKind::Claude, reported),
+                Err(Refusal::PermissionModeRefused),
+                "{reported:?}"
+            );
+        }
         assert_eq!(check_mode_update(AdapterKind::Claude, "default"), Ok(()));
         assert_eq!(
             check_mode_update(AdapterKind::Claude, "bypassPermissions"),

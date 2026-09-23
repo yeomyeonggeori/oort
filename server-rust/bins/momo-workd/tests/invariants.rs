@@ -5,7 +5,7 @@
 //! | test | the guard whose removal turns it red |
 //! |---|---|
 //! | `inv_1_remote_shell_is_refused_even_when_allowlisted` | `policy::check_remote_tool` in `SessionManager::spawn` |
-//! | `inv_2_a_session_outside_the_fixed_mode_is_never_opened` | `policy::check_session_modes` in `session::handshake` |
+//! | `inv_2_a_session_outside_the_fixed_mode_is_corrected_before_its_first_prompt_or_refused` | `policy::check_session_modes`, `session::correct_mode` and `policy::check_mode_confirmed` in `session::handshake` (ADR-0188 §8, #2607) |
 //! | `inv_3_every_permission_request_is_denied_with_a_reason` | `policy::decide_permission` (never `allow_*`) |
 //! | `inv_4_round_trip_events_idle_input_kill` | the curated projection, idle/running, owner-only input, kill → ended |
 //! | `inv_5_leaving_the_fixed_mode_mid_session_closes_it` | `policy::check_mode_update` |
@@ -368,28 +368,88 @@ async fn inv_1_remote_shell_is_refused_even_when_allowlisted() {
 }
 
 #[tokio::test]
-async fn inv_2_a_session_outside_the_fixed_mode_is_never_opened() {
-    // The agent's own settings put it in bypassPermissions (ADR-0188 D6:
-    // 「설정이 bypass·auto를 요구하면 세션을 열지 않는다」).
-    let mut h = harness(&[("claude", &["--mode", "bypassPermissions"])]);
-    let bypass = spawn(&h, "claude", "fix the bug");
-    h.server.push(bypass.clone());
-    h.controls.poll_once().await.unwrap();
-
-    assert_eq!(
-        ack_for(&h, bypass.id),
-        ControlAck::refused("permission_mode_refused"),
-        "a bypass-mode agent must not get a session"
+async fn inv_2_a_session_outside_the_fixed_mode_is_corrected_before_its_first_prompt_or_refused() {
+    // ADR-0188 D6 as amended on 2026-09-24 (§8, 성재 「시작 직후 교정」): an
+    // agent whose own settings open it in another mode is set to the fixed
+    // mode before any prompt, and runs only once it confirms.
+    let mut h = harness(&[
+        ("auto", &["--mode", "auto"]),
+        ("bypass", &["--mode", "bypassPermissions"]),
+    ]);
+    for tool in ["auto", "bypass"] {
+        let request = spawn(&h, tool, "fix the bug");
+        h.server.push(request.clone());
+        h.controls.poll_once().await.unwrap();
+        let session = ack_for(&h, request.id)
+            .session_id
+            .unwrap_or_else(|| panic!("{tool}: corrected, then opened"));
+        wait_for("the corrected turn to end", || {
+            h.server
+                .statuses(session)
+                .contains(&SessionStatus::Idle { exit_code: 0 })
+        })
+        .await;
+    }
+    let log = stub_log(&h);
+    let methods: Vec<&str> = log
+        .iter()
+        .filter_map(|entry| entry["received"]["method"].as_str())
+        .collect();
+    let first_prompt = methods
+        .iter()
+        .position(|method| *method == "session/prompt")
+        .expect("a prompt ran");
+    let set_mode = methods
+        .iter()
+        .position(|method| *method == "session/set_mode")
+        .expect("the host asked for the fixed mode");
+    assert!(
+        set_mode < first_prompt,
+        "corrected before the first prompt: {methods:?}"
     );
+    assert!(log
+        .iter()
+        .filter(|entry| entry["received"]["method"] == "session/set_mode")
+        .all(|entry| entry["received"]["params"]["modeId"] == "default"));
+    let prompt_modes: Vec<&str> = log
+        .iter()
+        .filter_map(|entry| entry["prompt_mode"].as_str())
+        .collect();
+    assert_eq!(
+        prompt_modes,
+        ["default", "default"],
+        "every prompt ran in the fixed mode"
+    );
+
+    // A correction the agent refuses, does not confirm, or confirms as
+    // another mode: no session, no prompt.
+    let mut h = harness(&[
+        ("refuses", &["--mode", "auto", "--set-mode-error"]),
+        ("silent", &["--mode", "auto", "--set-mode-silent"]),
+        (
+            "lies",
+            &["--mode", "auto", "--set-mode-reports", "acceptEdits"],
+        ),
+    ]);
+    for tool in ["refuses", "silent", "lies"] {
+        let request = spawn(&h, tool, "fix the bug");
+        h.server.push(request.clone());
+        h.controls.poll_once().await.unwrap();
+        assert_eq!(
+            ack_for(&h, request.id),
+            ControlAck::refused("permission_mode_refused"),
+            "{tool}: an unconfirmed correction must not open a session"
+        );
+    }
     assert!(
         h.server.creates().is_empty(),
         "no server session was created"
     );
-    let methods = received_methods(&h);
-    assert_eq!(
-        methods,
-        vec!["initialize".to_string(), "session/new".to_string()],
-        "the agent saw the handshake and nothing else — no prompt"
+    assert!(
+        !received_methods(&h)
+            .iter()
+            .any(|method| method == "session/prompt"),
+        "the agent never saw a prompt"
     );
     assert!(h.controls.sessions().live_sessions().is_empty());
 
@@ -817,9 +877,10 @@ async fn inv_8_a_spawn_from_anyone_but_the_owner_is_refused() {
 #[tokio::test]
 async fn inv_9_a_refused_resume_ends_its_preallocated_session() {
     // A resume carries the session the server already opened for it. The
-    // agent reports `auto`, so the host refuses — and must close that session
-    // rather than leave it `running` with nothing behind it.
-    let mut h = harness(&[("claude", &["--mode", "auto"])]);
+    // agent opens in `auto` and refuses the correction, so the host refuses —
+    // and must close that session rather than leave it `running` with nothing
+    // behind it.
+    let mut h = harness(&[("claude", &["--mode", "auto", "--set-mode-error"])]);
     let preallocated = Uuid::new_v4();
     let resume = control(
         &h,

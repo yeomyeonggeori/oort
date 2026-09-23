@@ -8,6 +8,14 @@
 //!   --mode ID            `currentModeId` reported by `session/new` (default `default`)
 //!   --no-modes           omit `modes` from `session/new`
 //!   --codex-modes        report codex-acp's preset catalog instead of Claude's
+//!   `session/set_mode`   by default behaves like claude-agent-acp 0.81.0: an
+//!                        offered mode is taken, reported as a `mode`
+//!                        `config_option_update`, then answered `{}`; an
+//!                        unknown one is an error. Overrides:
+//!   --set-mode-error     answer every `session/set_mode` with an error
+//!   --set-mode-silent    take the mode and answer `{}` without reporting it
+//!                        (codex-acp 1.13.0 does this)
+//!   --set-mode-reports ID  answer `{}` but report ID as the mode
 //!   --permission         during each prompt, ask `session/request_permission`
 //!   --escape-mode ID     during each prompt, report `current_mode_update` → ID
 //!   --escape-via-config  report that escape as `config_option_update` instead
@@ -44,6 +52,9 @@ struct Options {
     setsid_grandchild: Option<String>,
     exit_after_turn: bool,
     long_answer: usize,
+    set_mode_error: bool,
+    set_mode_silent: bool,
+    set_mode_reports: Option<String>,
 }
 
 fn parse() -> Options {
@@ -60,6 +71,9 @@ fn parse() -> Options {
         setsid_grandchild: None,
         exit_after_turn: false,
         long_answer: 0,
+        set_mode_error: false,
+        set_mode_silent: false,
+        set_mode_reports: None,
     };
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
@@ -75,6 +89,9 @@ fn parse() -> Options {
             "--leak" => options.leak = true,
             "--setsid-grandchild" => options.setsid_grandchild = args.next(),
             "--exit-after-turn" => options.exit_after_turn = true,
+            "--set-mode-error" => options.set_mode_error = true,
+            "--set-mode-silent" => options.set_mode_silent = true,
+            "--set-mode-reports" => options.set_mode_reports = args.next(),
             "--long-answer" => {
                 options.long_answer = args.next().and_then(|n| n.parse().ok()).unwrap_or(0)
             }
@@ -86,6 +103,8 @@ fn parse() -> Options {
 
 struct Stub {
     options: Options,
+    /// The mode the stub is in: `--mode`, then whatever `session/set_mode` set.
+    current_mode: String,
     out: std::io::Stdout,
     lines: std::io::Lines<std::io::StdinLock<'static>>,
     next_id: i64,
@@ -131,8 +150,54 @@ impl Stub {
         }
     }
 
+    fn catalog(&self) -> Value {
+        if self.options.codex_modes {
+            json!([
+                {"id": "read-only", "name": "Ask for approval"},
+                {"id": "agent", "name": "Approve for me"},
+                {"id": "agent-full-access", "name": "Full access"}
+            ])
+        } else {
+            json!([
+                {"id": "default", "name": "Default"},
+                {"id": "acceptEdits", "name": "Accept Edits"},
+                {"id": "plan", "name": "Plan"},
+                {"id": "bypassPermissions", "name": "Bypass Permissions"}
+            ])
+        }
+    }
+
+    fn set_mode(&mut self, id: &Value, params: &Value) {
+        let session_id = params["sessionId"].as_str().unwrap_or_default().to_string();
+        let requested = params["modeId"].as_str().unwrap_or_default().to_string();
+        let offered = self
+            .catalog()
+            .as_array()
+            .is_some_and(|modes| modes.iter().any(|mode| mode["id"] == json!(requested)));
+        if self.options.set_mode_error || !offered {
+            self.send(json!({
+                "jsonrpc": "2.0", "id": id,
+                "error": {"code": -32603, "message": "Internal error"}
+            }));
+            return;
+        }
+        self.current_mode = requested.clone();
+        if !self.options.set_mode_silent {
+            let reported = self.options.set_mode_reports.clone().unwrap_or(requested);
+            self.update(
+                &session_id,
+                json!({"sessionUpdate": "config_option_update", "configOptions": [
+                    {"id": "mode", "name": "Mode", "category": "mode", "type": "select",
+                     "currentValue": reported, "options": []}
+                ]}),
+            );
+        }
+        self.respond(id, json!({}));
+    }
+
     fn prompt(&mut self, id: &Value, params: &Value) {
         let session_id = params["sessionId"].as_str().unwrap_or_default().to_string();
+        self.record(json!({"prompt_mode": self.current_mode}));
         let text = params["prompt"][0]["text"]
             .as_str()
             .unwrap_or_default()
@@ -286,26 +351,16 @@ impl Stub {
                 Some("session/new") => {
                     let mut result = json!({"sessionId": "stub-session-1"});
                     if self.options.modes {
-                        let catalog = if self.options.codex_modes {
-                            json!([
-                                {"id": "read-only", "name": "Ask for approval"},
-                                {"id": "agent", "name": "Approve for me"},
-                                {"id": "agent-full-access", "name": "Full access"}
-                            ])
-                        } else {
-                            json!([
-                                {"id": "default", "name": "Default"},
-                                {"id": "acceptEdits", "name": "Accept Edits"},
-                                {"id": "plan", "name": "Plan"},
-                                {"id": "bypassPermissions", "name": "Bypass Permissions"}
-                            ])
-                        };
                         result["modes"] = json!({
                             "currentModeId": self.options.mode,
-                            "availableModes": catalog,
+                            "availableModes": self.catalog(),
                         });
                     }
                     self.respond(&id, result);
+                }
+                Some("session/set_mode") => {
+                    let params = message["params"].clone();
+                    self.set_mode(&id, &params);
                 }
                 Some("session/prompt") => {
                     let params = message["params"].clone();
@@ -374,6 +429,7 @@ fn main() {
     });
     let stdin: &'static std::io::Stdin = Box::leak(Box::new(std::io::stdin()));
     let mut stub = Stub {
+        current_mode: options.mode.clone(),
         options,
         out: std::io::stdout(),
         lines: stdin.lock().lines(),

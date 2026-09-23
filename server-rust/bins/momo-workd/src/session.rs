@@ -35,7 +35,7 @@ use crate::client::{
     now_ms, AcpEvent, ClientError, CreateSession, HostApi, SessionStatus, WorkControl,
 };
 use crate::config::ToolEntry;
-use crate::policy::{self, AdapterKind, Refusal};
+use crate::policy::{self, AdapterKind, ModeAtOpen, Refusal};
 use crate::projection::{self, chunk_field, Projection, MAX_FIELD_CHARS};
 
 /// ACP protocol version this client speaks.
@@ -72,6 +72,9 @@ fn ready_len(text: &str) -> usize {
     }
 }
 const TERMINATE_GRACE: Duration = Duration::from_secs(3);
+/// After the agent accepted `session/set_mode`, how long the host waits for
+/// its report of the new mode when it did not arrive with the answer.
+const MODE_CONFIRM_GRACE: Duration = Duration::from_secs(2);
 const CANCEL_GRACE: Duration = Duration::from_secs(2);
 
 /// Shown on the session stream when a permission request is refused.
@@ -197,14 +200,20 @@ impl SessionManager {
         })?;
 
         // (4) + (5): handshake, then the mode check.
-        let acp_session_id =
-            match handshake(&conn, entry.adapter, &cwd, self.settings.acp_start_timeout).await {
-                Ok(id) => id,
-                Err(refusal) => {
-                    conn.terminate(TERMINATE_GRACE).await;
-                    return Err(refusal);
-                }
-            };
+        let acp_session_id = match handshake(
+            &mut conn,
+            entry.adapter,
+            &cwd,
+            self.settings.acp_start_timeout,
+        )
+        .await
+        {
+            Ok(id) => id,
+            Err(refusal) => {
+                conn.terminate(TERMINATE_GRACE).await;
+                return Err(refusal);
+            }
+        };
 
         let session_id = match control.session_id {
             // A resume spawn: the server pre-allocated the session.
@@ -312,9 +321,11 @@ impl SessionManager {
     }
 }
 
-/// `initialize` → `session/new` → mode check. Returns the ACP session id.
+/// `initialize` → `session/new` → mode check, and the correction to the
+/// fixed mode when the agent opened in another one. Returns the ACP session
+/// id. Nothing is prompted until this returns.
 async fn handshake(
-    conn: &AcpConnection,
+    conn: &mut AcpConnection,
     adapter: AdapterKind,
     cwd: &std::path::Path,
     timeout: Duration,
@@ -365,20 +376,100 @@ async fn handshake(
         .filter(|id| !id.is_empty())
         .ok_or(Refusal::AgentStartFailed)?
         .to_string();
-    // ADR-0188 D6: bypass/auto (or anything but the fixed mode) → no session.
-    if let Err(refusal) = policy::check_session_modes(adapter, created.get("modes")) {
-        let reported = created
-            .pointer("/modes/currentModeId")
-            .and_then(|mode| mode.as_str())
-            .unwrap_or("<none>");
-        tracing::warn!(
-            reported,
-            required = adapter.fixed_mode(),
-            "agent is not in the host's fixed permission mode; session refused"
-        );
-        return Err(refusal);
+    // ADR-0188 D6 as amended (§8): the fixed mode before the first prompt —
+    // corrected and confirmed when the agent opened in another one.
+    let opened = created
+        .pointer("/modes/currentModeId")
+        .and_then(|mode| mode.as_str())
+        .unwrap_or("<none>")
+        .to_string();
+    match policy::check_session_modes(adapter, created.get("modes")) {
+        Ok(ModeAtOpen::Fixed) => {}
+        Ok(ModeAtOpen::Correct) => {
+            if let Err(refusal) = correct_mode(conn, adapter, &acp_session_id, timeout).await {
+                tracing::warn!(
+                    opened = %opened,
+                    required = adapter.fixed_mode(),
+                    "the agent's mode could not be corrected and confirmed; session refused"
+                );
+                return Err(refusal);
+            }
+            tracing::info!(
+                opened = %opened,
+                now = adapter.fixed_mode(),
+                "agent opened outside the fixed mode; corrected before the first prompt"
+            );
+        }
+        Err(refusal) => {
+            tracing::warn!(
+                opened = %opened,
+                required = adapter.fixed_mode(),
+                "agent does not offer the host's fixed permission mode; session refused"
+            );
+            return Err(refusal);
+        }
     }
     Ok(acp_session_id)
+}
+
+/// `session/set_mode` to the fixed mode, then the agent's own confirmation:
+/// the last mode it reports — with its answer, or within
+/// [`MODE_CONFIRM_GRACE`] after it — must be the fixed one
+/// ([`policy::check_mode_confirmed`]). Anything else it sent meanwhile is
+/// handed back to the connection for the session task.
+async fn correct_mode(
+    conn: &mut AcpConnection,
+    adapter: AdapterKind,
+    acp_session_id: &str,
+    timeout: Duration,
+) -> Result<(), Refusal> {
+    let fixed = adapter.fixed_mode();
+    conn.request(
+        "session/set_mode",
+        json!({"sessionId": acp_session_id, "modeId": fixed}),
+        timeout,
+    )
+    .await
+    .map_err(|failure| {
+        tracing::warn!(error = %failure, "the agent refused session/set_mode");
+        Refusal::PermissionModeRefused
+    })?;
+    let mut reported: Option<String> = None;
+    let mut others = Vec::new();
+    // Everything the agent wrote before its answer is queued by now.
+    while let Some(message) = conn.try_next_incoming() {
+        match mode_report(&message) {
+            Some(mode) => reported = Some(mode),
+            None => others.push(message),
+        }
+    }
+    if reported.as_deref() != Some(fixed) {
+        let deadline = tokio::time::Instant::now() + MODE_CONFIRM_GRACE.min(timeout);
+        while reported.as_deref() != Some(fixed) {
+            match tokio::time::timeout_at(deadline, conn.next_incoming()).await {
+                Ok(Some(message)) => match mode_report(&message) {
+                    Some(mode) => reported = Some(mode),
+                    None => others.push(message),
+                },
+                _ => break,
+            }
+        }
+    }
+    conn.unread(others);
+    policy::check_mode_confirmed(adapter, reported.as_deref())
+}
+
+/// The mode an agent message reports, if it is a mode report.
+fn mode_report(message: &Incoming) -> Option<String> {
+    match message {
+        Incoming::Notification { method, params } if method == "session/update" => {
+            match projection::project(params) {
+                Projection::ModeChanged(mode) => Some(mode),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------
