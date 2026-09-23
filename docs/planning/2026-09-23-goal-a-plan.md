@@ -36,10 +36,10 @@
 | W1 | iOS 배포(uxui) | 권한 문구(사진·마이크), `ITSAppUsesNonExemptEncryption`, 빌드 번호 방식, Pods, Release 아카이브, TestFlight owner 1인 그룹 업로드(owner 승인), RN TestFlight 런북, #1115 정리 | 성재 폰에 TestFlight 설치, 앱 종료 상태 푸시 1회 |
 | W1 | iOS 대화 1(uxui) | #1084+#2513, #1964, #1892, 푸시 탭 라우팅 | design-review B0·H0 |
 | **W2** | iOS 대화 2(uxui) | #1048, #1083, #1049, 배지 | design-review B0·H0 |
-| W2 | 원격 R0·R1(engine+uxui) | ADR-0188 Accepted 뒤. R0는 오늘 코드의 위험을 먼저 막는다(결정자=소유자, 원격 auto-approve·shell 금지, heartbeat v2). R1은 `momo-workd`, host 등록 GUI, 권한 다리(migration), 폰 작업 탭 | 데스크탑 세션을 폰에서 보고 권한 승인 1회, 불변식 red proof |
+| W2 | 원격 R0·R1(engine+uxui) | ADR-0188 Accepted 뒤. R0는 오늘 코드의 위험을 먼저 막는다(결정자=소유자, 에이전트 컨트롤은 kill만, 원격 auto-approve·shell 금지, heartbeat v2). R1 진입 조건은 권한 승인 새 RLS 테이블, NSE 토큰 축소, refresh 재사용 계열 폐기다. R1은 `momo-workd`, host 등록 GUI, 권한 다리, 폰 작업 탭 | 데스크탑 세션을 폰에서 보고 권한 승인 1회, 불변식 red proof |
 | W2 | AX-6(engine) | #2512 초대 E2E를 Railway 인스턴스 위에서 | 보고서 PR |
 | **W3** | M7-I | 데스크탑·iOS PASS 기록과 owner 승인, 팀 배포, **내부 테스트 시작** | PASS 표 2행 |
-| W3 | 원격 R2 | 사람 기기 키 서명(ADR-0146), 폰에서 새 작업, 예약·끼어들기, 허용 폴더 id | 폰에서 시킨 작업 1건을 끝까지 따라감 |
+| W3 | 원격 R2 | ADR-0146 개정(서명을 인가 조건으로)이 먼저다. 이어서 사람 기기 키 서명, 폰에서 새 작업, 예약·끼어들기, 허용 폴더 id | 폰에서 시킨 작업 1건을 끝까지 따라감 |
 | **W4** | 스토어 | S-0 크래시 계측, #20–#22·#30·#34·#35, 원격 R3, M7-S, #31 제출 | App Store 심사 제출 |
 
 내부 테스트에서 나온 불편은 전부 이슈로 만들고, W3부터 파도 사이에 끼워 처리한다. 웹·데스크탑의 남은 UX 파도(UX-R·DS 잔여)는 목표 A 동안 **내부 테스트 불편으로 올라온 것만** 한다.
