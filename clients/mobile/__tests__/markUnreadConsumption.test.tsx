@@ -29,6 +29,11 @@ import {
   readIntentWire,
   visitFlushReason,
 } from '../src/features/readState/advertise';
+import {
+  carriesMark,
+  foldVisitBoundary,
+} from '../src/features/readState/visit';
+import {createQueryClient} from '../src/query/queryClient';
 import {buildSidebarSections} from '../src/features/sidebar/rows';
 import InboxScreen from '../src/screens/InboxScreen';
 import AppShell from '../src/shell/AppShell';
@@ -164,6 +169,12 @@ interface ReadStateServer {
   /** Hold the NEXT read-state GET until this is called (cold start). */
   holdNextGet: boolean;
   releaseHeldGet: (() => void) | null;
+  /**
+   * What the phone's list held at the moment each `explicit_open` reached the
+   * server — the 「먼저 그리고 그다음 지운다」 assertion, read at the only instant
+   * it means anything rather than inferred from the order of later states.
+   */
+  dividerAtExplicitOpen: ({count: number; beforeSeq: number | null} | null | 'no-list')[];
 }
 
 let server: ReadStateServer;
@@ -194,7 +205,10 @@ function installFetch(): jest.Mock {
         server.cursor = Math.max(server.cursor, Math.min(requested, server.head));
         // D4/D6: only an explicit open clears the mark, and it does so in the
         // same transaction that advanced the cursor.
-        if (body.read_intent === 'explicit_open') server.mark = null;
+        if (body.read_intent === 'explicit_open') {
+          server.dividerAtExplicitOpen.push(dividerNow());
+          server.mark = null;
+        }
         return jsonResponse(200, wireRow());
       }
       server.gets += 1;
@@ -298,6 +312,22 @@ interface StreamItem {
   message?: {seq: number};
 }
 
+/** The divider right now, or `'no-list'` when no timeline is mounted. */
+function dividerNow(): {count: number; beforeSeq: number | null} | null | 'no-list' {
+  return screen.queryByTestId('timeline-list') === null ? 'no-list' : dividerInList();
+}
+
+/** The phone's own query client — 30s staleTime, no refetch on focus. */
+async function mountShellWith(client: QueryClient) {
+  queryClient = client;
+  render(
+    <QueryClientProvider client={client}>
+      <AppShell member={SELF} />
+    </QueryClientProvider>,
+  );
+  await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+}
+
 /** Where the list put the unread line, read off the data the list is holding. */
 function dividerInList(): {count: number; beforeSeq: number | null} | null {
   const items = screen.getByTestId('timeline-list').props.data as StreamItem[];
@@ -325,6 +355,7 @@ beforeEach(() => {
     gets: 0,
     holdNextGet: false,
     releaseHeldGet: null,
+    dividerAtExplicitOpen: [],
   };
   installFetch();
 });
@@ -381,17 +412,64 @@ describe('read_intent 판별 (D6)', () => {
     expect(readIntentWire('inbox_mention')).toBeUndefined();
   });
 
-  it('방문의 첫 광고만, 그리고 경계를 얼린 뒤에만 명시 열람이다', () => {
-    expect(visitFlushReason({explicitOpenSent: false, boundaryFrozen: true})).toBe(
+  it('방문의 첫 광고만, 그리고 이 방문의 응답으로 경계를 그린 뒤에만 명시 열람이다', () => {
+    expect(visitFlushReason({explicitOpenSent: false, freshBoundary: true})).toBe(
       'channel_open',
     );
-    expect(visitFlushReason({explicitOpenSent: true, boundaryFrozen: true})).toBe(
+    expect(visitFlushReason({explicitOpenSent: true, freshBoundary: true})).toBe(
       'arrival_flush',
     );
-    // 투영을 못 받았으면 마크를 본 적이 없다. 지우지 않는다.
-    expect(visitFlushReason({explicitOpenSent: false, boundaryFrozen: false})).toBe(
+    // 이 방문의 응답을 아직 못 받았으면 지금 마크를 그린 적이 없다. 지우지 않는다.
+    expect(visitFlushReason({explicitOpenSent: false, freshBoundary: false})).toBe(
       'arrival_flush',
     );
+  });
+});
+
+describe('방문 경계 접기 (#1964 R1 H-1 — 웹 foldInVisitMark 방향)', () => {
+  const unmarked = {...markAt3Cursor10(), markedUnreadBeforeSeq: null};
+
+  it('마크는 합성이 쓴 경우에만 「실렸다」 — 커서 뒤의 마크는 D3 의 min 이 버린다', () => {
+    expect(carriesMark(markAt3Cursor10())).toBe(true);
+    expect(carriesMark(unmarked)).toBe(false);
+    expect(carriesMark(markAboveCursor())).toBe(false);
+  });
+
+  it('처음 본 행으로 얼리고, 행이 없으면 경계도 없다', () => {
+    expect(foldVisitBoundary(null, CH, null)).toBeNull();
+    expect(foldVisitBoundary(null, CH, unmarked)).toEqual({
+      channelId: CH,
+      lastReadSeq: 10,
+      unreadCount: 0,
+    });
+  });
+
+  it('얼린 뒤에 마크를 싣고 온 행이 경계를 대신한다 — 캐시로 연 방문 (H-1)', () => {
+    const atOpen = foldVisitBoundary(null, CH, unmarked);
+    expect(foldVisitBoundary(atOpen, CH, markAt3Cursor10())).toEqual({
+      channelId: CH,
+      lastReadSeq: MARK_AT_3_CURSOR_10.dividerCursor,
+      unreadCount: MARK_AT_3_CURSOR_10.count,
+    });
+  });
+
+  it('마크 없는 행은 경계를 지우지 않는다 — 이 방문의 명시 열람이 방금 지운 것', () => {
+    const drawn = foldVisitBoundary(null, CH, markAt3Cursor10());
+    expect(foldVisitBoundary(drawn, CH, unmarked)).toBe(drawn);
+  });
+
+  it('다른 기기의 나중 마크는 구분선을 그리로 옮긴다', () => {
+    const drawn = foldVisitBoundary(null, CH, markAt3Cursor10());
+    const later = foldVisitBoundary(drawn, CH, {
+      ...markAt3Cursor10(),
+      markedUnreadBeforeSeq: 7,
+    });
+    expect(later).toEqual({channelId: CH, lastReadSeq: 6, unreadCount: 4});
+  });
+
+  it('다른 방으로 옮기면 그 방의 행으로 새로 얼린다', () => {
+    const drawn = foldVisitBoundary(null, CH, markAt3Cursor10());
+    expect(foldVisitBoundary(drawn, 'another-room', null)).toBeNull();
   });
 });
 
@@ -503,6 +581,82 @@ describe('데스크탑에서 마크한 채널이 폰에서도 안 읽음으로 �
     const last = server.puts[server.puts.length - 1];
     expect(last).toEqual({last_read_seq: 10, read_intent: 'explicit_open'});
     expect(server.mark).toBeNull();
+    expect(server.dividerAtExplicitOpen).toEqual([{count: 8, beforeSeq: 3}]);
+  });
+});
+
+// ---- 4. the warm start: the phone already holds a projection ---------------
+//
+// design-review 2593 R1 H-1. The cold start above is the easy case — nothing is
+// cached, so nothing can be stale. What a person actually does is resume the app,
+// or tap a push while it is open, and then the phone holds a read state it
+// fetched earlier. The desktop marks the channel in between. The first version
+// took that cache as 「seen」, froze the divider from it, and sent explicit_open
+// — clearing a mark the screen never drew.
+//
+// Both tests run on the phone's OWN query client (`createQueryClient`: 30s
+// staleTime, no refetch on focus). The review's point was precisely that the
+// suite's `staleTime: 0` client never produced this state.
+
+describe('캐시를 들고 연 방에서도 마크는 먼저 그려지고 그다음 지워진다 (#1964 R1 H-1)', () => {
+  it('A. 60초 묵은 캐시(앱 재개·푸시 탭): 이 방문의 응답 전에는 지우지 않고, 응답이 마크를 그린 뒤에 지운다', async () => {
+    server.mark = null; // the phone caches this; the desktop has not marked yet
+    const client = createQueryClient();
+    await mountShellWith(client);
+    await settle();
+    server.mark = 3; // now the desktop marks 「여기부터 안 읽음」 at seq 3
+    client
+      .getQueryCache()
+      .find({queryKey: ['read-state', WS]})
+      ?.setState({dataUpdatedAt: Date.now() - 60_000});
+    // The visit's own answer is slower than the first cursor flush.
+    server.holdNextGet = true;
+
+    await openChannel();
+    await settle(700);
+
+    // First flush went out before this visit had an answer: cursor only.
+    expect(server.puts[0]).toEqual({last_read_seq: 10});
+    expect(server.dividerAtExplicitOpen).toEqual([]);
+
+    await settle(700);
+
+    // The explicit open went out, and at that instant the divider stood at the mark.
+    expect(server.dividerAtExplicitOpen).toEqual([{count: 8, beforeSeq: 3}]);
+    expect(server.puts.at(-1)).toEqual({
+      last_read_seq: 10,
+      read_intent: 'explicit_open',
+    });
+    expect(server.mark).toBeNull();
+
+    await act(async () => {
+      server.releaseHeldGet?.();
+    });
+    await settle(100);
+    // …and the cleared server does not take the line down under the reader.
+    expect(dividerInList()).toEqual({count: 8, beforeSeq: 3});
+  });
+
+  it('B. 30초보다 젊은 캐시: 방문이 응답을 청하고, 첫 광고가 그 응답이 그린 마크를 지운다', async () => {
+    server.mark = null;
+    const client = createQueryClient();
+    await mountShellWith(client);
+    await settle();
+    server.mark = 3;
+    const getsBeforeOpen = server.gets;
+
+    await openChannel();
+    await settle(700);
+
+    // The cache was fresh, so nothing but the visit itself asked again.
+    expect(server.gets).toBeGreaterThan(getsBeforeOpen);
+    // The FIRST advertisement is already the explicit open — and the divider was
+    // on screen when it arrived.
+    expect(server.puts[0]).toEqual({last_read_seq: 10, read_intent: 'explicit_open'});
+    expect(server.dividerAtExplicitOpen).toEqual([{count: 8, beforeSeq: 3}]);
+    expect(server.mark).toBeNull();
+    await settle(100);
+    expect(dividerInList()).toEqual({count: 8, beforeSeq: 3});
   });
 });
 

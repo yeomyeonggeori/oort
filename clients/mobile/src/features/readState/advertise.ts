@@ -56,17 +56,25 @@ export function readIntentWire(
  * 때문이다(채널 id 하나만 기억하면 그 사이 B 가 광고하지 않았을 때 두 번째 A 를
  * 놓친다).
  *
- * `boundaryFrozen` 은 **이 방문의 안읽음 경계를 마크까지 포함해 이미 얼렸는가**다.
- * 명시 열람은 서버에서 마크를 지우므로, 그 전에 화면이 마크를 봤어야 한다. 읽음
- * 상태를 아직 한 번도 못 받았으면(콜드 스타트·조회 실패) 이 광고는 background 로
- * 나가고 — 커서는 전진하고 마크는 산다 — 경계가 얼면 다음 광고가 명시 열람이 된다.
- * 순서가 뒤집히면 마크는 화면에 한 번도 그려지지 않은 채 서버에서 사라진다.
+ * `freshBoundary` 는 **이 방문 동안 받은 읽음 상태 응답으로 경계를 그렸는가**다.
+ * 명시 열람은 서버에서 마크를 지우므로, 그 전에 화면이 서버의 지금 마크를
+ * 그렸어야 한다(「먼저 그리고 그다음 지운다」).
+ *
+ * 문턱이 「응답을 한 번이라도 받았다」가 아니라 **「이 방문 동안 받았다」**인 이유는
+ * 캐시다. 폰은 30초 신선도(`staleTime`)로 읽음 상태를 캐시하고 포커스로 재조회하지
+ * 않는다. 그래서 앱을 되살리거나 켜진 앱에서 푸시로 방을 열면, 손에 든 캐시가
+ * 데스크탑이 방금 건 마크보다 오래됐다. 첫 판은 그 캐시를 「봤다」로 쳤고, 마크를
+ * 한 번도 그리지 않은 채 지웠다(design-review 2593 R1 H-1).
+ *
+ * 아직 이 방문의 응답이 없으면(오는 중·실패·콜드 스타트) 이 광고는 background 로
+ * 나간다. 커서는 전진하고 마크는 산다. 응답이 와서 경계가 그려진 뒤의 광고가 명시
+ * 열람이 된다.
  */
 export function visitFlushReason(input: {
   explicitOpenSent: boolean;
-  boundaryFrozen: boolean;
+  freshBoundary: boolean;
 }): Extract<ReadAdvertisementReason, 'channel_open' | 'arrival_flush'> {
-  return !input.explicitOpenSent && input.boundaryFrozen
+  return !input.explicitOpenSent && input.freshBoundary
     ? 'channel_open'
     : 'arrival_flush';
 }
