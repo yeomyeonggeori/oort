@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::client::{self, ClientError, HostClient};
-use crate::config::{ConfigError, HostState, WorkdConfig};
+use crate::config::{ConfigError, HostState, WorkdConfig, SERVED_SCOPE};
 use crate::controls::{heartbeat_loop, ControlLoop};
 use crate::keystore::{HostKey, KeyStore, KeyStoreError};
 use crate::session::{SessionManager, SessionSettings};
@@ -208,6 +208,7 @@ pub async fn register(
         host_id: registered.id,
         owner_member_id: registered.owner_member_id,
         public_key,
+        scope: registered.scope,
     };
     state.save(&config.state_path)?;
     tracing::info!(host_id = %state.host_id, key_store = %store.describe(), "work host registered");
@@ -220,6 +221,15 @@ pub async fn run(config_path: PathBuf, dev_key_file: Option<PathBuf>) -> Result<
     let config = WorkdConfig::load(&config_path)?;
     let state = HostState::load(&config.state_path)?;
     state.check_matches(&config)?;
+    // ADR-0188 D3 (#2602 M-4): the owner-only rules below are a member host's
+    // rules. A host registered any other way is not one this binary serves.
+    if state.scope != SERVED_SCOPE {
+        return Err(CliError::Usage(format!(
+            "this host is registered with scope {:?}; momo-workd serves only {SERVED_SCOPE:?} \
+             hosts (ADR-0188 D3) — re-register with `momo-workd register`",
+            state.scope
+        )));
+    }
     let store = key_store(&config, dev_key_file)?;
     if store.is_dev_file() {
         tracing::warn!(
@@ -252,6 +262,7 @@ pub async fn run(config_path: PathBuf, dev_key_file: Option<PathBuf>) -> Result<
             working_directory: config.working_directory.clone(),
             acp_start_timeout: Duration::from_millis(config.acp_start_timeout_ms),
             parent_env: std::env::vars().collect(),
+            max_sessions: config.max_sessions,
         },
     );
     let mut controls = ControlLoop::new(api.clone(), sessions, state.owner_member_id);

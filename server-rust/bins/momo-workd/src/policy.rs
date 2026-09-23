@@ -9,7 +9,8 @@
 //! | the permission mode is fixed; bypass/auto at session start → no session | [`check_session_modes`] |
 //! | leaving the fixed mode mid-session closes the remote path | [`check_mode_update`] |
 //! | no remote `shell` | [`check_remote_tool`] |
-//! | only ACP adapters with a permission bridge | [`AdapterKind`] |
+//! | remote text never runs an adapter slash command | [`check_prompt`] |
+//! | only ACP adapters with a permission bridge | [`AdapterKind`], [`check_adapter_admitted`] |
 //! | every ACP permission request is denied until the R1 bridge lands | [`decide_permission`] |
 //! | project hooks / MCP servers / allow rules are not applied | [`AdapterKind::isolation_env`], [`session_new_params`], [`check_project_config`] |
 //! | no TCP port | nothing in this crate binds a socket; the conformance test checks the process |
@@ -30,15 +31,41 @@
 //!   `bypassPermissions` leaves the mode catalog and a settings demand for it is
 //!   clamped to `default`. Login is not a setting and is unaffected; CLAUDE.md
 //!   (loaded only with the `project` source) is not read either.
-//! * **Codex** — `@agentclientprotocol/codex-acp` 1.13.0 starts every session in
-//!   `INITIAL_AGENT_MODE` (default `agent`, an auto-review mode) and merges the
-//!   JSON object in `CODEX_CONFIG` into each thread's config overrides; codex
-//!   0.146 turns hooks, plugins and apps off by feature flag. The adapter also
-//!   marks the session folder *trusted*, which loads the project's
-//!   `.codex/config.toml`, and codex deep-merges config layers
+//!
+//!   Reads are fenced too (#2602 M-1). The adapter hands
+//!   `_meta.claudeCode.options.settings` to the CLI as its programmatic
+//!   settings tier, which applies with `settingSources: []`: the SDK documents
+//!   `permissions.blockReadsOutsideWorkingDirectories` as "Refuse file-tool
+//!   reads (Read, Grep, Glob, LSP) outside the working directories in every
+//!   permission mode", and [`CLAUDE_READ_DENY`] denies the usual credential
+//!   files inside the folder. Measured with the real adapter and Claude Code
+//!   2.1.280: with the fence, a `Read` of `/etc/hosts` failed without even a
+//!   permission request, and `cat /etc/hosts` reached the permission bridge
+//!   (and was denied).
+//! * **Codex — not admitted (#2602 M-2).** `@agentclientprotocol/codex-acp`
+//!   1.13.0 has three presets and sends the chosen preset's approval policy on
+//!   every turn (`approvalPolicy: agentMode.approvalPolicy`, its only
+//!   producer). Even the strictest, `read-only` ("Ask for approval"), is
+//!   `on-request` with a `workspaceWrite` sandbox: sandboxed commands and writes
+//!   in the folder run without a permission request. No preset asks before
+//!   every command (`untrusted` occurs nowhere in the adapter). So the
+//!   permission bridge that ADR-0188 D6 calls the real defence does not hold,
+//!   and [`check_adapter_admitted`] refuses Codex — in the config and at spawn —
+//!   until ADR-0188 decides otherwise.
+//!
+//!   The isolation below stays correct for that day. The adapter starts every
+//!   session in `INITIAL_AGENT_MODE` (default `agent`, an auto-review mode) and
+//!   merges the JSON object in `CODEX_CONFIG` into each thread's config
+//!   overrides, next to its own `features` table. Measured with the real
+//!   adapter and codex-cli 0.156.1: dotted keys (`features.hooks`) travel as
+//!   separate overrides beside that table, and whichever codex applies last
+//!   wins — the flag was lost in one order. One nested `features` table is
+//!   merged by the adapter into its own and survives in every order (#2602
+//!   M-3). The adapter also marks the session folder *trusted*, which loads the
+//!   project's `.codex/config.toml`, and codex deep-merges config layers
 //!   (`codex-rs/config/src/merge.rs`), so no override can remove a project MCP
-//!   server or rule. The host therefore refuses a Codex session wherever a
-//!   project `.codex` exists ([`check_project_config`]).
+//!   server or rule: a Codex session is refused wherever a project `.codex`
+//!   exists ([`check_project_config`]).
 
 use std::path::{Path, PathBuf};
 
@@ -61,6 +88,9 @@ pub enum Refusal {
     ToolNotAllowlisted,
     /// ADR-0188 D6: the agent is not in the host's fixed permission mode.
     PermissionModeRefused,
+    /// ADR-0188 D6: the adapter's permission requests do not cover every
+    /// command and write, so it is not launched remotely (#2602 M-2).
+    AdapterRefused,
     /// ADR-0188 D6: the folder carries project agent configuration the adapter
     /// would apply and the host cannot switch off.
     ProjectConfigRefused,
@@ -80,6 +110,14 @@ pub enum Refusal {
     UnsupportedControl,
     /// The control's payload is not the shape its kind requires.
     InvalidControl,
+    /// Remote text that starts with `/` would run an adapter command, not a
+    /// prompt (#2602 L-7).
+    SlashCommandRefused,
+    /// The host already runs as many sessions as its config allows (#2602 L-2).
+    HostBusy,
+    /// The session already has as many queued instructions as it keeps
+    /// (#2602 L-2).
+    InputQueueFull,
 }
 
 impl Refusal {
@@ -88,6 +126,7 @@ impl Refusal {
             Self::ShellRefused => "shell_refused",
             Self::ToolNotAllowlisted => "tool_not_allowlisted",
             Self::PermissionModeRefused => "permission_mode_refused",
+            Self::AdapterRefused => "adapter_refused",
             Self::ProjectConfigRefused => "project_config_refused",
             Self::WorkdirUnavailable => "workdir_unavailable",
             Self::AgentStartFailed => "agent_start_failed",
@@ -97,6 +136,9 @@ impl Refusal {
             Self::SessionClosed => "session_closed",
             Self::UnsupportedControl => "unsupported_control",
             Self::InvalidControl => "invalid_control",
+            Self::SlashCommandRefused => "slash_command_refused",
+            Self::HostBusy => "host_busy",
+            Self::InputQueueFull => "input_queue_full",
         }
     }
 }
@@ -146,19 +188,17 @@ impl AdapterKind {
                     "INITIAL_AGENT_MODE".to_string(),
                     CODEX_FIXED_MODE.to_string(),
                 ),
-                // Per-thread config overrides. codex 0.146 passes them on as
-                // `-c`-style overrides (`app-server/src/config_manager.rs`
-                // `load_with_cli_overrides`), splits each key on `.`
-                // (`config/src/overrides.rs` `apply_toml_override`) into a
-                // session-flags layer, and deep-merges that over the user and
-                // project layers — so these leaves replace the configured
-                // values, where an empty table would have changed nothing.
+                // Per-thread config overrides, as ONE nested `features` table.
+                // The adapter adds its own `features.cwd_relative_turn_diffs`
+                // by spreading our table (`forceGitRootTurnDiffPaths`), so a
+                // single `features` override reaches codex. Dotted keys would
+                // travel beside that table, and codex applies the override map
+                // in hash order with the last write winning: measured, the
+                // flags were lost whenever the table came last (#2602 M-3).
                 (
                     "CODEX_CONFIG".to_string(),
                     json!({
-                        "features.hooks": false,
-                        "features.plugins": false,
-                        "features.apps": false,
+                        "features": {"hooks": false, "plugins": false, "apps": false},
                         "notify": [],
                     })
                     .to_string(),
@@ -176,6 +216,13 @@ impl AdapterKind {
                         "settingSources": [],
                         "strictMcpConfig": true,
                         "allowDangerouslySkipPermissions": false,
+                        "settings": {
+                            "permissions": {
+                                "blockReadsOutsideWorkingDirectories": true,
+                                "disableBypassPermissionsMode": "disable",
+                                "deny": CLAUDE_READ_DENY,
+                            }
+                        },
                     }
                 }
             })),
@@ -183,6 +230,33 @@ impl AdapterKind {
         }
     }
 }
+
+/// Credential files a remote Claude session may not read even inside the
+/// allowed folder (the fence already covers everything outside it), plus the
+/// owner's own credential directories for a folder that happens to contain
+/// them. Claude Code permission-rule syntax: `~/` is the home directory, `**`
+/// any depth.
+pub const CLAUDE_READ_DENY: &[&str] = &[
+    "Read(**/.env)",
+    "Read(**/.env.*)",
+    "Read(**/*.pem)",
+    "Read(**/*.key)",
+    "Read(**/id_rsa*)",
+    "Read(**/id_ecdsa*)",
+    "Read(**/id_ed25519*)",
+    "Read(**/.npmrc)",
+    "Read(**/.pypirc)",
+    "Read(**/.netrc)",
+    "Read(**/.git-credentials)",
+    "Read(~/.ssh/**)",
+    "Read(~/.aws/**)",
+    "Read(~/.gnupg/**)",
+    "Read(~/.config/gh/**)",
+    "Read(~/.docker/config.json)",
+    "Read(~/.kube/**)",
+    "Read(~/.codex/**)",
+    "Read(~/.claude/**)",
+];
 
 // ---------------------------------------------------------------------------
 // launch
@@ -291,13 +365,20 @@ pub fn session_new_params(adapter: AdapterKind, cwd: &Path) -> Value {
     params
 }
 
-/// Arguments that would relax the fixed permission mode or re-open a
-/// configuration source. Matched case-insensitively as substrings, so
+/// Arguments that would relax the fixed permission mode, re-open a
+/// configuration source, or hand the command line to the raw CLI. Needles are
+/// matched case-insensitively as substrings, so
 /// `--permission-mode=bypassPermissions` and `-c approval_policy="never"` are
-/// both caught.
+/// both caught; the flags below are matched as whole arguments (`--cli`,
+/// `--cli=…`) or, for single-letter ones, with their value glued on (`-snever`).
+///
+/// Still a deny list (#2602 L-5 is only partly closed): an owner-written
+/// argument that relaxes the agent in a way not named here is not caught, and
+/// the session mode check stays the backstop.
 pub fn is_forbidden_launch_argument(argument: &str) -> bool {
     const NEEDLES: &[&str] = &[
         "dangerously",
+        "danger",
         "bypass",
         "yolo",
         "full-auto",
@@ -307,9 +388,8 @@ pub fn is_forbidden_launch_argument(argument: &str) -> bool {
         "approval_policy",
         "approval-policy",
         "ask-for-approval",
-        "sandbox_mode",
-        "sandbox-mode",
-        "--sandbox",
+        "sandbox",
+        "network_access",
         "acceptedits",
         "dontask",
         "allowedtools",
@@ -319,8 +399,19 @@ pub fn is_forbidden_launch_argument(argument: &str) -> bool {
         "settings",
         "hooks",
     ];
+    // The raw CLI behind each adapter (`codex-acp cli …`,
+    // `claude-agent-acp --cli`) and Codex's config/approval/sandbox flags.
+    const FLAGS: &[&str] = &["cli", "--cli", "--config", "--profile"];
+    const SHORT_FLAGS: &[&str] = &["-a", "-c", "-s", "-p"];
     let lowered = argument.to_ascii_lowercase();
     NEEDLES.iter().any(|needle| lowered.contains(needle))
+        || FLAGS.iter().any(|flag| {
+            lowered == *flag
+                || lowered
+                    .strip_prefix(flag)
+                    .is_some_and(|rest| rest.starts_with('='))
+        })
+        || SHORT_FLAGS.iter().any(|flag| lowered.starts_with(flag))
 }
 
 /// `^[a-z0-9][a-z0-9._-]{1,63}$` — the server's work tool key.
@@ -340,6 +431,29 @@ pub fn is_valid_tool_key(raw: &str) -> bool {
 // ---------------------------------------------------------------------------
 // the invariants
 // ---------------------------------------------------------------------------
+
+/// ADR-0188 D6 「원격 spawn은 ACP 권한 다리가 있는 도구만」: only an adapter
+/// whose permission requests cover every command and write is launched. Claude
+/// in `default` asks before every edit and command. Codex has no such mode (see
+/// the module docs, #2602 M-2) and is refused until ADR-0188 is revised.
+pub fn check_adapter_admitted(adapter: AdapterKind) -> Result<(), Refusal> {
+    match adapter {
+        AdapterKind::Claude => Ok(()),
+        AdapterKind::Codex => Err(Refusal::AdapterRefused),
+    }
+}
+
+/// Remote text is a prompt, never an adapter command (#2602 L-7). Both
+/// adapters run a first line that starts with `/` as their own verb — Codex's
+/// `/logout` signs the owner out without a permission request, and `/compact`
+/// or `/rename` act on the session — so a spawn label or an input that starts
+/// with `/` is refused rather than escaped: the owner rephrases.
+pub fn check_prompt(text: &str) -> Result<(), Refusal> {
+    if text.trim_start().starts_with('/') {
+        return Err(Refusal::SlashCommandRefused);
+    }
+    Ok(())
+}
 
 /// ADR-0188 D6: a remote spawn of `shell` is refused, before the allowlist is
 /// even consulted — an owner who allowlisted something called `shell` still
@@ -571,6 +685,19 @@ mod tests {
             options["allowDangerouslySkipPermissions"], false,
             "no bypass mode"
         );
+        // #2602 M-1: reads are fenced to the folder, credential files denied.
+        let permissions = &options["settings"]["permissions"];
+        assert_eq!(permissions["blockReadsOutsideWorkingDirectories"], true);
+        assert_eq!(permissions["disableBypassPermissionsMode"], "disable");
+        let deny: Vec<&str> = permissions["deny"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect();
+        for rule in ["Read(~/.ssh/**)", "Read(~/.codex/**)", "Read(**/.env)"] {
+            assert!(deny.contains(&rule), "{rule} is denied");
+        }
         assert!(AdapterKind::Claude.isolation_env().is_empty());
     }
 
@@ -599,13 +726,66 @@ mod tests {
         };
         assert_eq!(value("INITIAL_AGENT_MODE"), "read-only");
         let config: Value = serde_json::from_str(&value("CODEX_CONFIG")).unwrap();
-        assert_eq!(config["features.hooks"], false);
-        assert_eq!(config["features.plugins"], false);
-        assert_eq!(config["features.apps"], false);
-        assert_eq!(config["notify"], json!([]));
+        // #2602 M-3: one nested table, no dotted keys beside it.
+        assert_eq!(
+            config,
+            json!({"features": {"hooks": false, "plugins": false, "apps": false}, "notify": []})
+        );
+        assert!(config
+            .as_object()
+            .unwrap()
+            .keys()
+            .all(|key| !key.contains('.')));
         assert!(session_new_params(AdapterKind::Codex, Path::new("/w"))
             .get("_meta")
             .is_none());
+    }
+
+    /// The shape codex-acp 1.13.0 builds before `thread/start`
+    /// (`forceGitRootTurnDiffPaths`: spread our `features`, add its own key).
+    /// With the nested form a single `features` override carries all four
+    /// flags; measured the same with the real adapter's `thread/start` log.
+    #[test]
+    fn the_adapter_merge_keeps_every_codex_flag_in_one_table() {
+        let (_, raw) = AdapterKind::Codex
+            .isolation_env()
+            .into_iter()
+            .find(|(key, _)| key == "CODEX_CONFIG")
+            .unwrap();
+        let mut config: serde_json::Map<String, Value> = serde_json::from_str(&raw).unwrap();
+        let mut features = config
+            .get("features")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        features.insert("cwd_relative_turn_diffs".into(), json!(false));
+        config.insert("features".into(), Value::Object(features));
+        assert_eq!(
+            Value::Object(config.clone()),
+            json!({
+                "features": {"hooks": false, "plugins": false, "apps": false,
+                             "cwd_relative_turn_diffs": false},
+                "notify": []
+            })
+        );
+        assert_eq!(
+            config
+                .keys()
+                .filter(|key| key.starts_with("features"))
+                .count(),
+            1,
+            "one features override, so no application order can drop a flag"
+        );
+    }
+
+    #[test]
+    fn only_claude_is_admitted_remotely() {
+        assert_eq!(check_adapter_admitted(AdapterKind::Claude), Ok(()));
+        assert_eq!(
+            check_adapter_admitted(AdapterKind::Codex),
+            Err(Refusal::AdapterRefused)
+        );
+        assert_eq!(Refusal::AdapterRefused.label(), "adapter_refused");
     }
 
     #[test]
@@ -656,11 +836,46 @@ mod tests {
             "--sandbox=danger-full-access",
             "--mcp-config=/tmp/x.json",
             "--settings",
+            // #2602 L-5: Codex's short flags and the raw CLI passthroughs.
+            "-s",
+            "danger-full-access",
+            "-a",
+            "-anever",
+            "-c",
+            "sandbox_workspace_write.network_access=true",
+            "--config=profile.toml",
+            "cli",
+            "--cli",
+            "--CLI=/bin/sh",
         ] {
             assert!(is_forbidden_launch_argument(argument), "{argument}");
         }
-        for argument in ["--model", "opus", "--verbose"] {
+        for argument in [
+            "--model",
+            "opus",
+            "--verbose",
+            "--record",
+            "--permission",
+            "--mode",
+            "auto",
+            "clinic",
+            "--client-name",
+        ] {
             assert!(!is_forbidden_launch_argument(argument), "{argument}");
+        }
+    }
+
+    #[test]
+    fn remote_text_never_starts_an_adapter_command() {
+        for text in ["/logout", "  /compact", "\n/rename x", "/"] {
+            assert_eq!(
+                check_prompt(text),
+                Err(Refusal::SlashCommandRefused),
+                "{text:?}"
+            );
+        }
+        for text in ["fix /etc/hosts parsing", "read src/lib.rs", "a/b"] {
+            assert_eq!(check_prompt(text), Ok(()), "{text:?}");
         }
     }
 

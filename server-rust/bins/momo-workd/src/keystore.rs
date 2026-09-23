@@ -22,7 +22,7 @@
 //! only, and the seed is overwritten when the value drops.
 
 use std::fmt;
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _};
 use std::path::{Path, PathBuf};
 
@@ -210,15 +210,30 @@ impl FileKeyStore {
     }
 
     fn load(&self) -> Result<Option<HostKey>, KeyStoreError> {
-        // `symlink_metadata`: a symlink is refused rather than followed, so the
-        // key cannot be redirected to a file someone else controls.
-        let metadata = match std::fs::symlink_metadata(&self.path) {
-            Ok(metadata) => metadata,
+        // `O_NOFOLLOW`: a symlink is refused rather than followed, so the key
+        // cannot be redirected to a file someone else controls. The checks run
+        // on the open descriptor (`fstat`) and the bytes come from that same
+        // descriptor, so nothing can be swapped in between (#2602 L-4).
+        let mut file = match std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(&self.path)
+        {
+            Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) if error.raw_os_error() == Some(libc::ELOOP) => {
+                return Err(KeyStoreError::UnsafeFile {
+                    path: self.path.display().to_string(),
+                    detail: "a symbolic link".to_string(),
+                })
+            }
             Err(error) => return Err(self.io(error)),
         };
+        let metadata = file.metadata().map_err(|error| self.io(error))?;
         check_private_file(&self.path, &metadata)?;
-        let raw = std::fs::read_to_string(&self.path).map_err(|error| self.io(error))?;
+        let mut raw = String::new();
+        file.read_to_string(&mut raw)
+            .map_err(|error| self.io(error))?;
         let bytes = BASE64
             .decode(raw.trim())
             .map_err(|_| KeyStoreError::Malformed(self.path.display().to_string()))?;
@@ -243,6 +258,10 @@ impl FileKeyStore {
                 .create(parent)
                 .map_err(|error| self.io(error))?;
         }
+        // An existing folder must be this user's and closed to everyone else,
+        // or another account could replace the key between writes (#2602 L-4).
+        let folder = std::fs::metadata(parent).map_err(|error| self.io(error))?;
+        check_private_dir(parent, &folder)?;
         // Write a sibling with O_EXCL + 0600 and rename it into place, so the
         // key is never readable at a wider mode, not even for an instant.
         let temporary = parent.join(format!(
@@ -285,6 +304,31 @@ impl FileKeyStore {
             Err(error) => Err(self.io(error)),
         }
     }
+}
+
+/// The key's folder: a directory owned by this user that no one else may write
+/// into or list (`0700` or stricter).
+fn check_private_dir(path: &Path, metadata: &std::fs::Metadata) -> Result<(), KeyStoreError> {
+    let unsafe_dir = |detail: String| KeyStoreError::UnsafeFile {
+        path: path.display().to_string(),
+        detail,
+    };
+    if !metadata.is_dir() {
+        return Err(unsafe_dir("not a directory".to_string()));
+    }
+    let mode = metadata.mode() & 0o777;
+    if mode & 0o077 != 0 {
+        return Err(unsafe_dir(format!("folder mode {mode:04o}, expected 0700")));
+    }
+    // SAFETY: `geteuid` has no preconditions and cannot fail.
+    let uid = unsafe { libc::geteuid() };
+    if metadata.uid() != uid {
+        return Err(unsafe_dir(format!(
+            "folder owned by uid {}, not {uid}",
+            metadata.uid()
+        )));
+    }
+    Ok(())
 }
 
 /// A key file must be a regular file, owned by this user, with no group or
@@ -492,6 +536,22 @@ mod tests {
             other => panic!("a 0644 key file must be refused, got {other:?}"),
         }
         let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+    }
+
+    #[test]
+    fn a_key_folder_others_can_enter_is_refused() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let path = scratch("folder");
+        let folder = path.parent().unwrap().to_path_buf();
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let store = KeyStore::dev_file(path.clone());
+        match store.store(&HostKey::generate().unwrap(), false) {
+            Err(KeyStoreError::UnsafeFile { detail, .. }) => assert!(detail.contains("0755")),
+            other => panic!("a 0755 key folder must be refused, got {other:?}"),
+        }
+        assert!(!path.exists(), "no key was written");
+        let _ = std::fs::remove_dir_all(folder.parent().unwrap());
     }
 
     #[test]
