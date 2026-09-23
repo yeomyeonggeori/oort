@@ -58,10 +58,15 @@ import {measureMode} from './root';
 import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
 import {NoticeBlock} from '../src/design/atoms';
 import {ResultRow, SearchBody} from '../src/screens/SearchScreen';
-import {
+import SidebarScreen, {
   SearchEntryAction,
   SearchFallthrough,
 } from '../src/screens/SidebarScreen';
+import {
+  composedUnreadCount,
+  unreadDividerCursorSeq,
+} from '@momo/core/features/readState/model';
+import {markAt3Cursor10} from '@momo/core/features/readState/proof';
 import type {MessageSearch} from '../src/features/search/useMessageSearch';
 import {
   font,
@@ -568,6 +573,39 @@ const ADE_TIMELINE: Message[] = [
   },
   MESSAGE,
 ];
+
+// ---- #1964 — 안읽음 마크를 소비하는 두 장의 씨앗 ------------------------------
+//
+// 코어 레드 프루프(`features/readState/proof.ts`)의 한 점 그대로다: 마크 3 · 커서
+// 10 · head 10. 그래서 대화는 열 줄이고, 마크 자리는 셋째 줄 위다. 문장은 한
+// 팀의 금요일 배포 대화 — 「테스트 메시지 1」이 아니다.
+const MARK_UNREAD_LINES: readonly [string, string][] = [
+  [OTHER, '스테이징 배포 끝났습니다. 확인 부탁드려요.'],
+  [SELF, '확인했습니다. 로그인 흐름 정상이에요.'],
+  [AGENT, '릴리스 노트 초안을 올렸습니다. 검토가 필요한 항목은 둘입니다.'],
+  [OTHER, '결제 모듈 변경분은 제가 볼게요.'],
+  [AGENT, '마이그레이션 0187 은 롤백 스크립트와 함께 들어갑니다.'],
+  [OTHER, 'QA 체크리스트 12개 중 10개 끝났어요.'],
+  [AGENT, '남은 두 개는 iOS 푸시 수신 확인입니다.'],
+  [OTHER, '푸시는 오후에 실기기로 보겠습니다.'],
+  [AGENT, '금요일 배포 창은 오전 10시로 잡혀 있습니다.'],
+  [OTHER, '좋아요, 그때 뵙겠습니다.'],
+];
+
+const MARK_UNREAD_TIMELINE: Message[] = MARK_UNREAD_LINES.map(
+  ([author, body], i) => ({
+    id: `00000000-0000-7000-8000-00000019640${i}`,
+    channelId: 'ch-deploy',
+    seq: i + 1,
+    hlcTs: i + 1,
+    hlcCount: 0,
+    authorMemberId: author,
+    type: 'text',
+    body,
+    state: 'sent',
+    createdAtMs: NOW + i * 60_000,
+  }),
+);
 
 /** 하네스에는 소켓이 없다. 「연결됨」은 이 값 하나로 만들어진다. */
 const CONNECTED_RAIL = {
@@ -2401,6 +2439,63 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           </View>
         </Frame>
       );
+    // ---- #1964: 데스크탑의 「여기부터 안 읽음」을 폰이 소비한다 --------------
+    //
+    // 두 장이 한 쌍이다. 사이드바는 **세 행을 나란히** 세운다 — 마크만 있는 방
+    // (서버 `unread_count` 0), 평범하게 안 읽은 방, 다 읽은 방. 「마크한 방도 안 읽음
+    // 으로 보인다」는 주장은 다 읽은 방 옆에서만 사진으로 읽힌다. 구분선 장은 같은
+    // 레드 프루프(마크 3 · 커서 10 · head 10)를 `ConversationScreen` 이 얼리는 그
+    // 두 함수로 풀어 배송되는 `Timeline` 에 건넨다.
+    case 'mark-unread-sidebar':
+      // 캡션은 **아래**에 단다. 이 화면은 자기 `Screen` 이 안전 영역 위쪽을
+      // 이미 먹으므로, 위에 달면 상태 막대 밑으로 들어가거나 인셋이 두 번 쌓인다.
+      return (
+        <View style={styles.fill}>
+          <SidebarScreen
+            openChannelId={null}
+            onOpenConversation={() => {}}
+            onOpenSearch={() => {}}
+          />
+          <Text style={[styles.label, styles.captionBottom]}>
+            #배포 = 데스크탑에서 seq 3 부터 안 읽음 (서버 unread_count 0 → 합성 8) ·
+            #빌드 = 커서 뒤 3개 · #일반 = 다 읽음 (#1964)
+          </Text>
+        </View>
+      );
+    case 'mark-unread-divider': {
+      const read = markAt3Cursor10({channelId: 'ch-deploy'});
+      return (
+        <Screen>
+          <Text style={styles.label}>
+            구분선 = 마크 자리(seq 3 위) · 수 = 합성 8 (서버 unread_count 0) (#1964)
+          </Text>
+          <ScreenHeader title="배포" onBack={() => {}} titleTestID="measure-title" />
+          <ConversationLayout
+            list={
+              <Timeline
+                messages={MARK_UNREAD_TIMELINE}
+                directory={DIRECTORY}
+                status="ready"
+                channelKind="public"
+                myMemberId={SELF}
+                nowMs={NOW + 900_000}
+                lastReadSeq={unreadDividerCursorSeq(read)}
+                unreadCount={composedUnreadCount(read)}
+              />
+            }
+            composer={
+              <Composer
+                recipient="place"
+                channelLabel="배포"
+                directory={DIRECTORY}
+                draftKey="measure:mark-unread-divider"
+                onSend={() => {}}
+              />
+            }
+          />
+        </Screen>
+      );
+    }
     default:
       return (
         <Frame label={`알 수 없는 표면: ${name}`}>
@@ -2411,7 +2506,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             group · dividers · ade-summary · ade-summary-empty · ade-panel ·
             work-console · work-detail · agent-sessions ·
             destructive-confirm · search-entry · search-idle ·
-            search-searching · search-empty · search-error · search-results
+            search-searching · search-empty · search-error · search-results ·
+            mark-unread-sidebar · mark-unread-divider
           </Text>
         </Frame>
       );
@@ -2671,6 +2767,39 @@ const WORK_CONSOLE_SESSIONS = [
 ];
 
 /** Seed the exact query keys the shipping Work Console reads, without a socket. */
+/**
+ * #1964 사이드바 장의 씨앗. 세 방, 세 가지 읽음 상태 — 마크만 있는 방은 서버가 준
+ * 그대로 `unreadCount: 0` 이다. 그 0 이 배지로 새면 이 장은 「다 읽음」 두 줄과
+ * 「안 읽음」 한 줄이 된다.
+ */
+function seedMarkUnread(): void {
+  harnessClient.setQueryData(['roster', ADE_WS], ADE_ROSTER);
+  harnessClient.setQueryData(['channels', ADE_WS], [
+    {id: 'ch-deploy', workspaceId: ADE_WS, kind: 'public', name: '배포', muted: false},
+    {id: 'ch-build', workspaceId: ADE_WS, kind: 'public', name: '빌드', muted: false},
+    {id: 'ch-general', workspaceId: ADE_WS, kind: 'public', name: '일반', muted: false},
+  ]);
+  const marked = markAt3Cursor10({channelId: 'ch-deploy'});
+  harnessClient.setQueryData(['read-state', ADE_WS], [
+    marked,
+    {
+      ...marked,
+      channelId: 'ch-build',
+      lastReadSeq: 7,
+      unreadCount: 3,
+      mentionCount: 1,
+      markedUnreadBeforeSeq: null,
+    },
+    {
+      ...marked,
+      channelId: 'ch-general',
+      lastReadSeq: 20,
+      latestSeq: 20,
+      markedUnreadBeforeSeq: null,
+    },
+  ]);
+}
+
 function seedWorkConsole(): void {
   const shift = Date.now() - NOW;
   harnessClient.setQueryData(['roster', ADE_WS], ADE_ROSTER);
@@ -2744,6 +2873,10 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     // 판에서 어두운 회색 글자가 종이 위에 그대로 서야 캡션이 읽힌다.
     lockedLabel: {fontSize: 12, color: color.textMuted, paddingBottom: 4},
     root: {flex: 1, backgroundColor: color.bg, paddingTop: 56},
+    /** 제 `Screen` 을 든 화면을 통째로 세울 때 (#1964). */
+    fill: {flex: 1, backgroundColor: color.bg},
+    /** 그런 화면 아래의 캡션 — 홈 인디케이터를 비켜 선다. */
+    captionBottom: {paddingTop: 8, paddingBottom: 34},
     label: {
       color: color.textFaint,
       fontSize: 11,
@@ -2834,4 +2967,11 @@ if (
   (LAUNCHED.name === 'work-console' || LAUNCHED.name === 'work-detail')
 ) {
   seedWorkConsole();
+}
+if (
+  LAUNCHED !== null &&
+  LAUNCHED.kind === 'surface' &&
+  LAUNCHED.name === 'mark-unread-sidebar'
+) {
+  seedMarkUnread();
 }
