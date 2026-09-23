@@ -25,4 +25,4 @@
 2. AX-6 E2E → E2E-A 발행 이미지 → SH-11a → ITO 편성. 워커 발사는 명시 go.
 3. 상세: [ROADMAP](../../ROADMAP.md) §1 AX 행 · [계획 개정](2026-09-22-plan-revision.md) · [남은 작업 지도](2026-09-08-remaining-work-map.md) 09-22 갱신.
 
-이 파일은 현재 상태 하나만 유지한다. 결정은 ADR, 검증 원문은 STATUS/PR, 세션 이력은 JOURNAL, 실행 중 note는 공용 로컬 폴더에 둔다.
+이 파일은 현재 상태 하나만 유지한다. 결정은 ADR, 검증 원문은 PR 본문, 세션 이력은 JOURNAL, 실행 중 note는 공용 로컬 폴더에 둔다.

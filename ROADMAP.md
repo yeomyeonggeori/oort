@@ -29,7 +29,7 @@
 
 - `server-rust/` = 배포 실물. `server/` = Swift 이식 원본(실행 대상 아님) + **`Migrations/` 정본(언어 독립 — 불변식은 DB 트리거·제약·RLS에 있다)**.
 - 핵심 불변식: Postgres=SoT · Centrifugo=전송전용 · 단일 쓰기경로(REST→PG→outbox→relay) · 순서=`message.seq` · 에이전트=`member` · RLS FORCE(ADR-0004 포함).
-- 대표 이식 잔여: 웹훅 인바운드 2경로(#1265) · Centrifugo subscribe proxy 403(#1300) · 라우트별 상세는 `STATUS.md`.
+- 대표 이식 잔여: 웹훅 인바운드 2경로(#1265) · Centrifugo subscribe proxy 403(#1300) · 라우트 계약은 `docs/api/openapi.yaml`.
 
 ### 클라이언트
 

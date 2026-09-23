@@ -17,6 +17,8 @@
 
 PASS와 owner 승인이 기록되면 팀 배포를 진행한다.
 
+**증거 빌드:** PASS 전에도 M7-I 증거를 모으는 빌드는 owner 승인을 받아 **owner 본인 기기에만** 설치할 수 있다. TestFlight internal은 owner 1인 그룹을 쓰고, 공증 DMG는 직접 전달한다. 업데이터 매니페스트 발행과 팀 테스터 그룹 배포는 PASS 뒤에만 한다.
+
 **기록 단위:** M7-I PASS와 owner 승인은 **마이너 계열**(예: 데스크탑 `0.2.x`, iOS `1.0.x`)의 첫 빌드에 한 번 기록한다. 같은 계열의 다음 빌드는 PR 본문에 I-1과 I-5 증거를 적고 배포한다. 계열이 바뀌거나 서버 API·DB 계약이 바뀌면 전 항목을 다시 잰다.
 
 ## M7-S 스토어 등급 — App Store · external TestFlight · 공개 DMG
