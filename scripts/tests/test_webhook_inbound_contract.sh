@@ -58,6 +58,7 @@ echo "[test-webhook-inbound-contract] Caddy /hooks/* reverse_proxy on all three 
 python3 - <<'PY'
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 FILES = (
@@ -67,19 +68,23 @@ FILES = (
 )
 HANDLE_OPEN = re.compile(r"^(\t)handle(?: (\S+))? \{\s*$")
 PROXY = re.compile(r"^reverse_proxy\s+(\S+)(\s+\{)?\s*$")
-# #2205: the Railway edge pins X-Forwarded-Proto for the api upstream (Railway
-# terminates TLS, so Caddy would otherwise forward `http`) and hands the api
-# the edge's X-Real-IP as X-Forwarded-For (otherwise every client is the edge
-# IP to the per-IP rate limits). Those two header_up lines are the only
-# subdirectives a proxy block here may carry.
+# #2205: which reverse_proxy subdirectives each edge may carry. Only the
+# Railway edge sits behind another proxy (Railway terminates TLS), so only it
+# pins X-Forwarded-Proto and hands the api the edge's X-Real-IP as
+# X-Forwarded-For. The compose edges face clients directly; there the same
+# X-Real-IP line would let a client choose its own rate-limit key.
 PROXY_SUBDIRECTIVES = {
-    "header_up X-Forwarded-Proto https",
-    "header_up X-Forwarded-For {http.request.header.X-Real-IP}",
+    "infra/rust/Caddyfile": set(),
+    "infra/rust/Caddyfile.local": set(),
+    "infra/railway/Caddyfile.railway": {
+        "header_up X-Forwarded-Proto https",
+        "header_up X-Forwarded-For {http.request.header.X-Real-IP}",
+    },
 }
 CSP = "Content-Security-Policy"
 
 
-def exclusive_proxy_body(lines, start_idx):
+def exclusive_proxy_body(lines, start_idx, allowed):
     """start_idx is the handle-open line. Return (upstream, close_idx)."""
     i = start_idx + 1
     upstream = None
@@ -100,7 +105,7 @@ def exclusive_proxy_body(lines, start_idx):
         if in_proxy_block:
             if stripped == "}":
                 in_proxy_block = False
-            elif " ".join(stripped.split()) not in PROXY_SUBDIRECTIVES:
+            elif " ".join(stripped.split()) not in allowed:
                 raise ValueError(f"unexpected reverse_proxy subdirective: {lines[i]!r}")
             i += 1
             continue
@@ -110,7 +115,8 @@ def exclusive_proxy_body(lines, start_idx):
     raise ValueError("handle never closed")
 
 
-def check(path):
+def check(path, rules_for=None):
+    allowed = PROXY_SUBDIRECTIVES[rules_for or path]
     lines = Path(path).read_text().splitlines()
     opens = []
     for idx, line in enumerate(lines):
@@ -140,8 +146,8 @@ def check(path):
     if deny_idx >= v1_idx:
         raise SystemExit(f"{path}: centrifugo 403 must precede /v1/*")
 
-    v1_up, _ = exclusive_proxy_body(lines, v1_idx)
-    hooks_up, hooks_close = exclusive_proxy_body(lines, hooks_idx)
+    v1_up, _ = exclusive_proxy_body(lines, v1_idx, allowed)
+    hooks_up, hooks_close = exclusive_proxy_body(lines, hooks_idx, allowed)
     if hooks_up != v1_up:
         raise SystemExit(
             f"{path}: /hooks/* reverse_proxy {hooks_up!r} != /v1/* {v1_up!r}"
@@ -160,6 +166,38 @@ def check(path):
 for path in FILES:
     check(path)
 print("caddy /hooks/* present, same upstream as /v1/*, CSP only on catch-all")
+
+# Sabotage (scratch copies; committed files untouched): an X-Forwarded-For line
+# the file's own list does not allow must be RED.
+#   C2: the compose public edge takes X-Real-IP from the client
+#   C1: the Railway edge forwards the client's own X-Forwarded-For
+SABOTAGE = (
+    (
+        "C2",
+        "infra/rust/Caddyfile",
+        "\thandle /v1/* {\n\t\treverse_proxy api:8080\n\t}",
+        "\thandle /v1/* {\n\t\treverse_proxy api:8080 {\n\t\t\theader_up X-Forwarded-For {http.request.header.X-Real-IP}\n\t\t}\n\t}",
+    ),
+    (
+        "C1",
+        "infra/railway/Caddyfile.railway",
+        "\t\t\theader_up X-Forwarded-For {http.request.header.X-Real-IP}\n",
+        "\t\t\theader_up X-Forwarded-For {http.request.header.X-Forwarded-For}\n",
+    ),
+)
+with tempfile.TemporaryDirectory(prefix="oort-webhook-contract.") as tmp:
+    for label, path, old, new in SABOTAGE:
+        text = Path(path).read_text()
+        if old not in text:
+            raise SystemExit(f"{label}: sabotage anchor not found in {path}")
+        broken = Path(tmp) / f"{label}.Caddyfile"
+        broken.write_text(text.replace(old, new, 1))
+        try:
+            check(str(broken), rules_for=path)
+        except (ValueError, SystemExit) as error:
+            print(f"{label} RED ({path}): {error}")
+            continue
+        raise SystemExit(f"{label}: {path} with a disallowed X-Forwarded-For line still passed")
 PY
 
 echo "[test-webhook-inbound-contract] OpenAPI documents 404 on both ingress ops"

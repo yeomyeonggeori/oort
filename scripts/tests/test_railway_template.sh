@@ -258,13 +258,15 @@ for mutation in start-bare-api start-bare-relay start-no-exec predeploy-raw \
   postgres-image-drift postgres-volume-missing worker-url-drift push-sandbox \
   push-key-on-disk push-umask-after-write push-no-shm-guard push-guard-no-tmpfs \
   notifier-no-unset sealed-shared sender-key-dropped unknown-shared-ref api-public \
-  readme-row-missing; do
+  push-set-x push-key-path-escape push-unset-conditional notifier-umask-skipped \
+  api-chown-skipped push-key-reassigned predeploy-run-redefined relay-as-root \
+  relay-superuser-dsn sender-cent-api-key readme-row-missing centrifugo-json-new-key; do
   grep -Fq "mutation ${mutation} RED" "$TMP_ROOT/catalog.out" || \
     fail "catalog checker missing mutation proof: ${mutation}"
 done
 grep -Fq 'committed catalog still passes' "$TMP_ROOT/catalog.out" || \
   fail "catalog checker missing restore proof"
-pass "catalog: start commands (parsed, exec last), pre-deploy sh -c + root→momo drop, Centrifugo v6 names + infra/centrifugo.json parity, api volume/UID/chown -R/setpriv/env -u, PG18+pgvector image+volume, push tmpfs guard/umask order/unset, shared refs ⊆ --claim keys, README hand-mapped table; 36 mutations RED"
+pass "catalog: start commands = canonical command lists (operators, order, values), pre-deploy sh -c + root→momo drop, Centrifugo v6 names + infra/centrifugo.json parity and settings set, api volume/UID/chown -R/setpriv/env -u, PG18+pgvector image+volume, push tmpfs guard/umask order/unset, variables ⊆ compose twin, shared refs ⊆ --claim keys, README hand-mapped table; 47 mutations RED"
 
 # ---------------------------------------------------------------------------
 # ②b #2066 R2 — T2 has no env file, so the `--ensure-managed-keys` backfill

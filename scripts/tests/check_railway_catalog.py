@@ -19,7 +19,14 @@ names something Railway does with a value, not a style preference:
 
 Shell start commands are checked as parsed commands (shlex, `;` `&&` `||` `|`
 kept as separators), not substrings: a `chown` inside an echo string or a
-`umask` after the key is written does not count.
+`umask` after the key is written does not count. Each service's whole command
+list is also compared with a canonical list — operators, order and values
+fixed, only echo text free — so an added `set -x`, a second `k=`, a `||` in
+place of `;` or a redefined `run()` is RED even where no named rule looks.
+
+Each service's variable names must be ones its compose twin sets (plus the
+Railway-only extras named below), and infra/centrifugo.json may only hold the
+settings the catalog's Centrifugo literals stand in for.
 
 `--prove-mutations` copies the catalog (and README) to scratch, breaks one rule
 at a time and requires each copy to fail naming that rule. The committed files
@@ -79,6 +86,196 @@ PUSH_KEYS = (
     ("notifier", "RELAY_SIGNING_KEY_B64", "MOMO_PUSH_RELAY_PRIVATE_KEY_PATH"),
 )
 ANY = object()  # wildcard for one word (echo messages)
+
+
+def refusal_pattern(tests: list[list[object]]) -> list[tuple[object, list[object]]]:
+    """`T1 && T2 … || { echo … >&2; exit 78; }` as commands (first operator ";")."""
+    pattern: list[tuple[object, list[object]]] = [(";", tests[0])]
+    pattern += [("&&", test) for test in tests[1:]]
+    pattern += [
+        ("||", ["{", "echo", ANY, ">", "&", "2"]),
+        (";", ["exit", "78"]),
+        (";", ["}"]),
+    ]
+    return pattern
+
+
+def push_canonical(role: str, key_var: str, key_file: str, path_var: str) -> list[tuple[object, list[object]]]:
+    return (
+        [("", ["set", "-eu"]), (";", ["umask", "077"])]
+        + refusal_pattern(
+            [
+                ["[", "-d", "/dev/shm", "]"],
+                ["[", "-w", "/dev/shm", "]"],
+                ["[", "$(stat -f -c %T /dev/shm)", "=", "tmpfs", "]"],
+            ]
+        )
+        + [
+            (";", [":", "${%s:?%s is required}" % (key_var, key_var)]),
+            (";", ["k=/dev/shm/%s" % key_file]),
+            (";", ["printf", "%s", "$" + key_var]),
+            ("|", ["base64", "-d", ">$k"]),
+            (";", ["[", "-s", "$k", "]"]),
+            (";", ["unset", key_var]),
+            (";", ["export", path_var + "=$k"]),
+            (";", ["exec", "momo-rust-entrypoint", role]),
+        ]
+    )
+
+
+# The whole command list each shell start command must parse to. A change here
+# is a deliberate change of the catalog, reviewed in both places.
+CANONICAL_SHELL: dict[str, list[tuple[object, list[object]]]] = {
+    "api": [("", ["set", "-eu"])]
+    + refusal_pattern([["[", "$(id -u)", "=", "0", "]"]])
+    + [
+        (";", ["d=${MOMO_DRIVE_LOCAL_DIR:?MOMO_DRIVE_LOCAL_DIR is required}"]),
+        (";", ["mkdir", "-p", "$d"]),
+        (";", ["chown", "-R", "momo:momo", "$d"]),
+        (
+            ";",
+            ["exec", "setpriv", "--reuid=momo", "--regid=momo", "--init-groups", "env"]
+            + [w for name in (
+                "MIGRATE_DATABASE_URL",
+                "POSTGRES_PASSWORD",
+                "MOMO_APP_POSTGRES_PASSWORD",
+                "RELAY_POSTGRES_PASSWORD",
+                "WORKER_POSTGRES_PASSWORD",
+                "NOTIFIER_POSTGRES_PASSWORD",
+                "MOMO_INITIAL_OWNER_PASSWORD",
+            ) for w in ("-u", name)]
+            + ["HOME=/home/momo", "momo-rust-entrypoint", "api"],
+        ),
+    ],
+    "push-relay": push_canonical("push-relay", "APNS_KEY_P8_B64", "apns-key.p8", "MOMO_APNS_KEY_PATH"),
+    "notifier": push_canonical(
+        "notifier", "RELAY_SIGNING_KEY_B64", "relay-signing-key.pem", "MOMO_PUSH_RELAY_PRIVATE_KEY_PATH"
+    ),
+}
+CANONICAL_PREDEPLOY: list[tuple[object, list[object]]] = [
+    ("", ["set", "-eu"]),
+    (";", ["run()", "{", "if", "[", "$(id -u)", "=", "0", "]"]),
+    (";", ["then", "setpriv", "--reuid=momo", "--regid=momo", "--init-groups", "env", "HOME=/home/momo", "$@"]),
+    (";", ["else", "$@"]),
+    (";", ["fi"]),
+    (";", ["}"]),
+    (";", ["run", "env", "DATABASE_URL=$MIGRATE_DATABASE_URL", "MOMO_RUNTIME_ROLE_PROVISION=1", "/usr/local/bin/momo-migrate"]),
+    (
+        "&&",
+        [
+            "run",
+            "env",
+            "DATABASE_URL=$MIGRATE_DATABASE_URL",
+            "MOMO_BOOTSTRAP_RUNTIME_ROLES=0",
+            "MOMO_ENV=${MOMO_MIGRATE_ENV:-development}",
+            "/usr/local/bin/momo-migrate",
+        ],
+    ),
+]
+CANONICAL_ARGV: dict[str, list[str] | None] = {
+    "relay": ["momo-rust-entrypoint", "relay"],
+    "webhook-sender": ["momo-rust-entrypoint", "webhook-sender"],
+    "agent-worker": ["momo-rust-entrypoint", "agent-worker"],
+    "centrifugo": ["centrifugo"],
+    "caddy": ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"],
+    "postgres": None,  # the image default
+}
+
+# Railway service -> the compose services whose `environment` keys it may use,
+# and the Railway-only names it adds (each with its reason).
+COMPOSE_TWINS: dict[str, tuple[list[tuple[str, str]], set[str]]] = {
+    # api also hosts pre-deploy = compose runtime-roles + migrate. The renamed
+    # pre-deploy inputs (compose passes them as DATABASE_URL / MOMO_ENV) and
+    # RAILWAY_RUN_UID (root for the drive volume) are Railway-only.
+    "api": (
+        [("docker-compose.rust.yml", "api"), ("docker-compose.rust.yml", "migrate"), ("docker-compose.rust.yml", "runtime-roles")],
+        {"RAILWAY_RUN_UID", "MIGRATE_DATABASE_URL", "MOMO_MIGRATE_ENV"},
+    ),
+    "relay": ([("docker-compose.rust.yml", "relay")], set()),
+    "webhook-sender": ([("docker-compose.rust.yml", "webhook-sender")], set()),
+    "agent-worker": ([("docker-compose.rust.yml", "agent-worker")], set()),
+    "postgres": ([("docker-compose.rust.yml", "postgres")], set()),
+    # compose mounts infra/centrifugo.json; these four env literals replace it.
+    "centrifugo": ([("docker-compose.rust.yml", "centrifugo")], set(CENTRIFUGO_DERIVED)),
+    # compose bind-mounts the key files; Railway passes them as sealed base64.
+    "notifier": ([("docker-compose.push.yml", "notifier")], {"RELAY_SIGNING_KEY_B64"}),
+    "push-relay": ([("docker-compose.push.yml", "push-relay")], {"APNS_KEY_P8_B64"}),
+    # Railway routes the domain to PORT.
+    "caddy": ([("caddy.override.yml", "caddy")], {"PORT"}),
+}
+# Leaf settings of infra/centrifugo.json the catalog's Centrifugo literals carry
+# (lists are one setting). A new key there must be carried here first.
+KNOWN_CENTRIFUGO_SETTINGS = {
+    "channel.namespaces",
+    "channel.proxy.subscribe.endpoint",
+    "channel.proxy.subscribe.include_connection_meta",
+    "channel.proxy.subscribe.http.static_headers.X-Centrifugo-Proxy-Secret",
+    "client.allowed_origins",
+    "client.subscription_token.enabled",
+}
+
+
+def canonical_diff(
+    commands: list[tuple[str, list[str]]], canonical: list[tuple[object, list[object]]]
+) -> str | None:
+    """First difference between parsed commands and the canonical list, or None."""
+    def show(words: list[object]) -> list[str]:
+        return ["<echo text>" if w is ANY else str(w) for w in words]
+
+    for index, (want_op, want_words) in enumerate(canonical):
+        if index >= len(commands):
+            return "command #%d missing, want %s %s" % (index, want_op or "(first)", show(want_words))
+        op, words = commands[index]
+        if op != want_op or not words_match(words, want_words):
+            return "command #%d is %s %s, want %s %s" % (
+                index, op or "(first)", words, want_op or "(first)", show(want_words)
+            )
+    if len(commands) > len(canonical):
+        op, words = commands[len(canonical)]
+        return "extra command #%d %s %s" % (len(canonical), op, words)
+    return None
+
+
+def compose_env_keys(text: str) -> dict[str, set[str]]:
+    """services.<name>.environment keys of a compose file (map form)."""
+    keys: dict[str, set[str]] = {}
+    in_services = in_env = False
+    service = None
+    for line in text.splitlines():
+        if re.match(r"^\S", line):
+            in_services = bool(re.match(r"^services:\s*$", line))
+            service, in_env = None, False
+            continue
+        if not in_services:
+            continue
+        match = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+        if match:
+            service, in_env = match.group(1), False
+            keys.setdefault(service, set())
+            continue
+        if service is None:
+            continue
+        if re.match(r"^    environment:\s*$", line):
+            in_env = True
+            continue
+        if in_env:
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            match = re.match(r"^      ([A-Za-z_][A-Za-z0-9_]*):", line)
+            if match:
+                keys[service].add(match.group(1))
+            elif re.match(r"^ {0,4}\S", line):
+                in_env = False
+    return keys
+
+
+def leaf_settings(node: object, prefix: str = "") -> set[str]:
+    if isinstance(node, dict):
+        out: set[str] = set()
+        for key, value in node.items():
+            out |= leaf_settings(value, "%s.%s" % (prefix, key) if prefix else key)
+        return out
+    return {prefix}
 
 
 def compose_image(compose_text: str, service: str) -> str | None:
@@ -423,6 +620,33 @@ def collect_errors(
         value = services[name].get("variables")
         return value if isinstance(value, dict) else {}
 
+    # -- each service gets only what its compose twin gets -------------------
+    compose_keys = {
+        fname: compose_env_keys((compose_path.parent / fname).read_text())
+        for fname in sorted({f for twins, _ in COMPOSE_TWINS.values() for f, _ in twins})
+    }
+    for name, (twins, extras) in COMPOSE_TWINS.items():
+        allowed = set(extras)
+        for fname, twin in twins:
+            if twin not in compose_keys[fname]:
+                errors.append("compose twin %s:%s not found" % (fname, twin))
+            allowed |= compose_keys[fname].get(twin, set())
+        outside = sorted(set(variables(name)) - allowed)
+        if outside:
+            errors.append(
+                "%s variables outside its compose twin (%s): %s"
+                % (name, ", ".join("%s:%s" % twin for twin in twins), ",".join(outside))
+            )
+
+    # -- infra/centrifugo.json holds only what the literals carry ------------
+    settings = leaf_settings(centrifugo_json)
+    if settings != KNOWN_CENTRIFUGO_SETTINGS:
+        errors.append(
+            "infra/centrifugo.json settings differ from what the Railway Centrifugo "
+            "literals carry: new %s, gone %s"
+            % (sorted(settings - KNOWN_CENTRIFUGO_SETTINGS), sorted(KNOWN_CENTRIFUGO_SETTINGS - settings))
+        )
+
     # -- start commands (exec form replaces ENTRYPOINT) ---------------------
     for role in OORT_ROLES:
         command = services[role].get("startCommand")
@@ -441,6 +665,28 @@ def collect_errors(
 
     # -- pre-deploy ----------------------------------------------------------
     errors.extend(predeploy_errors(services["api"]))
+
+    # -- canonical command lists (whole list: operators, order, values) ------
+    for name, canonical in CANONICAL_SHELL.items():
+        diff = canonical_diff(shell_commands(shell_script(services[name].get("startCommand"))), canonical)
+        if diff:
+            errors.append(
+                "%s start command is not the canonical command list (operators, order "
+                "and values are fixed; only echo text may vary): %s" % (name, diff)
+            )
+    for name, argv in CANONICAL_ARGV.items():
+        command = services[name].get("startCommand")
+        got = split_start(command) if command is not None else None
+        if got != argv:
+            errors.append("%s start command is not the canonical command list: %r != %r" % (name, got, argv))
+    pre = services["api"].get("preDeployCommand")
+    pre_script = shell_script(pre[0]) if isinstance(pre, list) and len(pre) == 1 else None
+    diff = canonical_diff(shell_commands(pre_script), CANONICAL_PREDEPLOY)
+    if diff:
+        errors.append(
+            "api preDeploy is not the canonical command list (operators, order and "
+            "values are fixed): %s" % diff
+        )
 
     # -- api drive volume, UID, privilege drop, DSN --------------------------
     api_vars = variables("api")
@@ -676,6 +922,39 @@ def mutate_catalog(kind: str, data: dict) -> None:
         api["variables"]["JWT_HMAC"] = "${{shared.JWT_HMAC_TYPO}}"
     elif kind == "api-public":
         api["public"] = True
+    elif kind == "push-set-x":  # G1: xtrace prints the base64 key into the logs
+        relay_push["startCommand"] = replace_once(relay_push["startCommand"], "set -eu; ", "set -eu; set -x; ", kind)
+    elif kind == "push-key-path-escape":  # G2: /dev/shm/../../tmp is on disk
+        relay_push["startCommand"] = replace_once(
+            relay_push["startCommand"], "k=/dev/shm/apns-key.p8", "k=/dev/shm/../../tmp/apns-key.p8", kind
+        )
+    elif kind == "push-unset-conditional":  # G3: the key stays in the server env
+        relay_push["startCommand"] = replace_once(
+            relay_push["startCommand"], '[ -s "$k" ]; unset APNS_KEY_P8_B64;', '[ -s "$k" ] || unset APNS_KEY_P8_B64;', kind
+        )
+    elif kind == "notifier-umask-skipped":  # G4: umask never runs
+        notifier["startCommand"] = replace_once(notifier["startCommand"], "umask 077; ", "true || umask 077; ", kind)
+    elif kind == "api-chown-skipped":  # G5: chown never runs
+        api["startCommand"] = replace_once(api["startCommand"], 'mkdir -p "$d"; chown -R', 'mkdir -p "$d" || chown -R', kind)
+    elif kind == "push-key-reassigned":  # G6: a second k= writes the key to disk
+        relay_push["startCommand"] = replace_once(
+            relay_push["startCommand"], "k=/dev/shm/apns-key.p8; ", "k=/dev/shm/apns-key.p8; k=/var/tmp/apns-key.p8; ", kind
+        )
+    elif kind == "predeploy-run-redefined":  # G7: run() redefined without the drop
+        api["preDeployCommand"] = [
+            replace_once(
+                api["preDeployCommand"][0],
+                "run env DATABASE_URL=\"$MIGRATE_DATABASE_URL\" MOMO_RUNTIME_ROLE_PROVISION=1",
+                "run() { \"$@\"; }; run env DATABASE_URL=\"$MIGRATE_DATABASE_URL\" MOMO_RUNTIME_ROLE_PROVISION=1",
+                kind,
+            )
+        ]
+    elif kind == "relay-as-root":  # G8
+        services["relay"]["variables"]["RAILWAY_RUN_UID"] = "0"
+    elif kind == "relay-superuser-dsn":  # G9
+        services["relay"]["variables"]["MIGRATE_DATABASE_URL"] = "${{shared.MIGRATE_DATABASE_URL}}"
+    elif kind == "sender-cent-api-key":  # G10
+        services["webhook-sender"]["variables"]["CENT_API_KEY"] = "${{shared.CENT_API_KEY}}"
     else:
         raise SystemExit("unknown catalog mutation %s" % kind)
 
@@ -716,6 +995,16 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("sender-key-dropped", "webhook-sender OUTBOUND_WEBHOOK_MASTER_KEY"),
     ("unknown-shared-ref", "JWT_HMAC_TYPO"),
     ("api-public", "api must not be public"),
+    ("push-set-x", "push-relay start command is not the canonical command list"),
+    ("push-key-path-escape", "push-relay start command is not the canonical command list"),
+    ("push-unset-conditional", "push-relay start command is not the canonical command list"),
+    ("notifier-umask-skipped", "notifier start command is not the canonical command list"),
+    ("api-chown-skipped", "api start command is not the canonical command list"),
+    ("push-key-reassigned", "push-relay start command is not the canonical command list"),
+    ("predeploy-run-redefined", "api preDeploy is not the canonical command list"),
+    ("relay-as-root", "relay variables outside its compose twin"),
+    ("relay-superuser-dsn", "relay variables outside its compose twin"),
+    ("sender-cent-api-key", "webhook-sender variables outside its compose twin"),
 )
 
 
@@ -760,6 +1049,15 @@ def prove_mutations(
         if not any("agent-worker WORKER_DATABASE_URL" in error for error in errors):
             raise SystemExit("mutation readme-row-missing did not fail on the README table: %s" % errors)
         print("mutation readme-row-missing RED (README hand-mapped table missing rows)")
+        # infra/centrifugo.json gains a setting the Railway literals do not carry.
+        cent = json.loads(centrifugo_path.read_text())
+        cent.setdefault("client", {})["connection_limit"] = 10
+        dest_cent = scratch / "centrifugo.json"
+        dest_cent.write_text(json.dumps(cent))
+        errors = collect_errors(catalog_path, compose_path, dest_cent, keys_path, readme_path)
+        if not any("infra/centrifugo.json settings differ" in error for error in errors):
+            raise SystemExit("mutation centrifugo-json-new-key did not fail: %s" % errors)
+        print("mutation centrifugo-json-new-key RED (infra/centrifugo.json settings differ)")
     if (file_digest(catalog_path), file_digest(readme_path), file_digest(centrifugo_path)) != origin:
         raise SystemExit("committed catalog/README/centrifugo.json changed during scratch mutations")
     leftover = collect_errors(catalog_path, compose_path, centrifugo_path, keys_path, readme_path)
