@@ -96,7 +96,7 @@ gh run watch "$(gh run list --workflow=release-desktop.yml -L1 --json databaseId
 | Variable | `MOMO_UPDATER_KEY` | `~/.momo-secrets/momo-updater.key` |
 | Variable | `MOMO_DIST_REPO` | `yeomyeonggeori/momo-alpha` |
 | Secret | `MOMO_DIST_TOKEN` | 러너 사용자의 `gh`/git 자격을 그대로 쓴다(기본 경로) |
-| Secret | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | 빈 문자열 |
+| Secret | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | **필수**(2026-09-23부터 키에 암호가 있다). 값은 성재 맥의 로그인 키체인 항목 `momo-updater-key`에 있다 |
 
 `momo-alpha` 는 본 레포(`yeomyeonggeori/oort`)의 개명과 **무관하다** — 별개의 공개 배포 저장소로 이름 그대로 존재한다(2026-08-10 실측). 구 org 이름만 현행 소유자로 바꿨다.
 

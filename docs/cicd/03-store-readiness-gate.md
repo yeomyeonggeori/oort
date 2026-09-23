@@ -40,7 +40,7 @@
     - 두 빌드 모두 `MOMO_CHANNEL_BUILD=1`로 빌드하고, `--config`로 `plugins.updater.endpoints`를 스테이징 HTTPS 주소로 바꾼다.
     - 스테이징 매니페스트는 `momo-alpha` Pages의 별도 파일 `update-staging.json`이다. 라이브 `update-next.json`과 분리하며, 증거 빌드만 가리킨다.
     - 이 두 빌드는 `publish_next_build.sh --public`으로 만들 수 없다(업데이터가 컴파일 단계에서 꺼진다).
-    - 수동으로 만든다: `MOMO_CHANNEL_BUILD=1` 빌드 → 공증 → `cargo tauri signer sign` → 스테이징 게시.
+    - 수동으로 만든다: `MOMO_CHANNEL_BUILD=1` 빌드 → 공증 → `cargo tauri signer sign -f ~/.momo-secrets/momo-updater.key -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"` → 스테이징 게시.
     - 스크립트 기본 모드로 대신하지 않는다. 라이브 매니페스트를 건드리기 때문이다.
   - OS 알림을 한 번 받는다.
 - [ ] **I-4 iOS.**
@@ -65,6 +65,7 @@
   - 데스크탑에서 시작한 에이전트 세션을 폰 작업 탭에서 실시간으로 본다.
   - 권한 요청 푸시를 받아 한 번 승인한다.
   - R0·R1 불변식의 red proof가 해당 PR에 있다.
+  - R0·R1 보안 재검수가 PASS다(ADR-0188 §4).
 
 **증거 빌드:** PASS 전에도 M7-I 증거를 모으는 빌드는 만들 수 있다. 조건은 세 가지다.
 - 빌드마다 owner 승인을 받는다(발화 인용).
