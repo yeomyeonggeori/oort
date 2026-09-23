@@ -1,0 +1,65 @@
+appId: app.momo.ios
+name: 93-jump-pills-rooms-capture
+---
+# 93-jump-pills-rooms-capture — 방을 **옮긴 뒤**의 위 필과, 키보드가 올라온 동안의
+# 위 필 (#1892 R1 H-1 · M-4).
+#
+# `-momoMeasure JUMP-PILLS-ROOMS` 표면(`measure/surfaces.tsx` 의
+# `JumpPillsRoomsStage`)이 앱의 순서대로 방을 옮긴다: 짧은 앞 방(구분선을 봐서
+# 래치) → 새 방 id + 앞 방의 행 → 빈 메시지 → 새 방의 첫 페이지. 새 방에서는
+# 에이전트의 「작업 중」 자리가 내내 서 있어 목록이 한 번도 비지 않는다.
+#
+# 91 과 같은 까닭으로 `launchApp` 이 없다.
+#
+#   xcrun simctl launch booted app.momo.ios --args \
+#     -momoMeasure JUMP-PILLS-ROOMS -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro test clients/mobile/maestro/93-jump-pills-rooms-capture.yaml
+#
+# 라이트는 `LIGHT-JUMP-PILLS-ROOMS`.
+#
+# 네 장:
+#   jump-pills-rooms-before         앞 방 — 앉은 자리에서 구분선을 봐서 래치(「래치 seen@…」)
+#   jump-pills-rooms-switch         새 방의 위 「새 메시지 28개 보기」 — 앞 방의 래치가
+#                                   넘어오지 않았다
+#   jump-pills-rooms-keyboard       키보드가 판을 들어 올린 동안 — 위 필은 잘린 띠에
+#                                   서지 않는다(그리지 않는다)
+#   jump-pills-rooms-keyboard-down  키보드를 내리면 위 필이 다시 선다
+- extendedWaitUntil:
+    visible: ".*래치 seen@.*"
+    timeout: 60000
+- takeScreenshot: jump-pills-rooms-before
+
+- extendedWaitUntil:
+    visible: ".*방 B · 단계 b.*"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "jump-unread"
+    timeout: 20000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: jump-pills-rooms-switch
+
+- tapOn:
+    id: "composer-input"
+- extendedWaitUntil:
+    notVisible:
+      id: "jump-unread"
+    timeout: 10000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: jump-pills-rooms-keyboard
+
+# `hideKeyboard` 는 이 입력에서 닫기 동작을 못 찾는다. 목록의 행을 한 번 누른다 —
+# 측정 표면의 행은 동작이 없어 누름을 받지 않고, 목록은 그 누름을 「키보드를
+# 내려라」로 읽는다(`Timeline` 의 `keyboardShouldPersistTaps` 주석). 화면 가운데는
+# 키보드가 올라온 동안 아래 필 자리라 누르면 「최신으로」가 된다 — 위쪽 행을 누른다.
+- tapOn:
+    point: "50%,30%"
+- extendedWaitUntil:
+    visible:
+      id: "jump-unread"
+    timeout: 10000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: jump-pills-rooms-keyboard-down
