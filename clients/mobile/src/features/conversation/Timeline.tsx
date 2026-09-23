@@ -1326,7 +1326,8 @@ function TimelineInner({
    * 판정만 내리고 끝내면 그 말이 접힌 아래에 숨고, 목록은 스스로 따라가는 중이라고
    * 믿으니 필도 서지 않는다 — 가장 흔한 알림 탭 길 위의 약 0.45초 창이었다. 이동 밖에서
    * 붙었다면 따라갔을 말이므로 미뤄 둔 따라가기를 지금 한다(도착이 부르는 것과 같은
-   * `scrollToEnd` 활강). 다른 길 — 떠난 뒤 새 말이 있으면 필을 세운다 — 을 고르지
+   * `scrollToEnd` 활강). **가는 동안 말이 붙었을 때만** 메운다 — 붙은 것 없이 끝 근처에
+   * 앉은 착지는 사람이 간 그 자리에 둔다. 다른 길 — 떠난 뒤 새 말이 있으면 필을 세운다 — 을 고르지
    * 않은 이유: 그러면 같은 착지가 0.45초 창 안에 말이 붙었느냐는 **우연**으로 필을
    * 세우거나 말거나 한다. 판정은 목록이 선 자리의 사실이어야 한다.
    *
@@ -1352,7 +1353,11 @@ function TimelineInner({
     } else {
       const following = left <= FOLLOW_THRESHOLD_PX;
       noteFollowing(following, travel.leftAtSeq);
-      if (following && left > ARRIVED_PX) {
+      // 메우는 것은 **가는 동안 남의 말이 붙었을 때**뿐이다. 붙은 것이 없는데 끝에서
+      // 1–120pt 앞에 앉은 착지 — 「안읽음으로」가 구분선을 창 맨 위에 놓은 자리 — 를
+      // 끝으로 더 밀면, 사람이 방금 간 줄이 창 밖으로 나간다.
+      const arrivedDuringTravel = newestSeqRef.current !== travel.leftAtSeq;
+      if (following && left > ARRIVED_PX && arrivedDuringTravel) {
         listRef.current?.scrollToEnd({animated: true});
       }
     }

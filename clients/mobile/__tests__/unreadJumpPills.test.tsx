@@ -1142,6 +1142,29 @@ describe('이동 중에 도착한 말은 판정 뒤에 따라간다 (#2608 M-B)'
     expect(bottomPill()).toBeNull();
   });
 
+  it('「안읽음으로」가 끝 근처에 앉고 붙은 말이 없으면, 판정 뒤에 움직이지 않는다 — 구분선이 창 맨 위에 남는다', async () => {
+    // 끝에서 50pt 앞에 앉은 착지는 판정이 「따라가기」다. 그래도 붙은 말이 없으면 틈을
+    // 메우지 않는다: 메우면 방금 창 맨 위에 놓은 구분선이 창 밖으로 밀려난다.
+    mount({channelId: 'ch', lastReadSeq: 6, unreadCount: 2});
+    await settleAtBottom();
+    reportDividerAbove();
+    const toEnd = jest
+      .spyOn(FlatList.prototype, 'scrollToEnd')
+      .mockImplementation(() => {});
+    fireEvent.press(screen.getByTestId('jump-unread'));
+    for (const y of [3190, 3175, 3160, 3150]) {
+      await sleep(60);
+      scrollBy(y);
+    }
+    await sleep(450);
+    expect(toEnd).not.toHaveBeenCalled();
+    expect(bottomPill()).toBeNull();
+
+    // 판정은 「따라가기」였다 — 그 뒤에 붙는 말은 따라간다.
+    fireEvent(list(), 'contentSizeChange', 390, 4100);
+    expect(toEnd).toHaveBeenCalled();
+  });
+
   it('붙은 말이 없고 끝에 앉았으면, 판정 뒤에 더 움직이지 않는다', async () => {
     const {rerender} = await mountAtTheEnd();
     const toEnd = jest
