@@ -626,6 +626,39 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
         }
     }
 
+    // ADR-0188 R0.1 (A′) — 「에이전트 컨트롤은 member-scope host에 kill만」,
+    // enforced where the row would be made. Only a spawn card asks a host
+    // question (`remote_host` is `Some` only then), so the control this approval
+    // releases is a spawn — never the `kill` an agent keeps — and whoever
+    // requested it is its origin (`requested_by`: the agent, on the REST
+    // ledger's card and on the spawn tool's alike). An agent's spawn is never
+    // approved onto somebody's own machine, by its owner included: approving it
+    // would only make a dispatched row the poll withholds. Refused before the
+    // first write, so the card stays pending — the decider can still pick a
+    // workspace host, or reject. The origin is read rather than assumed, although
+    // every spawn card is an agent's today: the rule is about agents, and a card
+    // a person asks for themselves (ADR-0188 R2) must not inherit it by accident.
+    if let (true, Some(_)) = (input.approve, remote_host) {
+        if momo_t3::work_control::member_is_agent_in_tx(
+            conn,
+            input.workspace_id,
+            approval.requested_by,
+        )
+        .await
+        .map_err(control_failure)?
+        {
+            return Ok(Ok(refusal(
+                approval.id,
+                input.member_id,
+                momo_t3::work_control::REFUSAL_MEMBER_HOST_AGENT_CONTROL,
+                "an agent's work cannot be sent to a member-scoped work host; pick a \
+                 workspace host or reject",
+                StatusCode::FORBIDDEN,
+                now,
+            )));
+        }
+    }
+
     // ---- expiry: settle it rather than merely refusing (Swift :198-221) ----
     if approval.expires_at.is_some_and(|expires| expires <= now) {
         return Ok(Ok(settle_expired(
@@ -1484,12 +1517,14 @@ pub(crate) async fn expire_run(
 ///   pick, else the card's default. That is exactly what [`resolve_host_choice`]
 ///   already settled and judged eligible, so it is read from there rather than
 ///   recomputed.
-/// * **Rejecting** — nothing will run, so it is the host the card points at
-///   when the person says no: their pick when it is one the card offers, else
-///   the card's default. A pick the card never offered cannot point it anywhere
-///   (the same rule `resolve_host_choice` applies to an approval's pick), so
-///   naming some other host is not a way to settle a card that sits on
-///   somebody's laptop.
+/// * **Rejecting** — nothing will run, so it is the host **the card** points at:
+///   its default, else the host the request itself named
+///   ([`requested_execution_host`] — a tool-path card can pre-select nothing).
+///   The decider's pick is **ignored** (ADR-0188 R0.1, #2582). It chooses
+///   nothing on a rejection, so all it could still choose is which ownership
+///   rule applies — and a team box is a selectable candidate on every card, so
+///   honouring it let a colleague settle a card sitting on somebody's laptop by
+///   "picking" the VPS while saying no.
 /// * `None` for an approval that asks no host question — every approval that is
 ///   not a spawn. ADR-0188 D3 says nothing about who decides those.
 fn decision_reference_host(
@@ -1503,10 +1538,21 @@ fn decision_reference_host(
     if !offers_host_choice(&approval.payload) {
         return None;
     }
-    input
-        .selected_host_id
-        .filter(|picked| selectable_host_ids(&approval.payload).contains(picked))
-        .or_else(|| default_execution_host(&approval.payload))
+    default_execution_host(&approval.payload)
+        .or_else(|| requested_execution_host(&approval.payload))
+}
+
+/// `execution.requested_host_id` — the host the request itself named: the
+/// REST ledger's `target_host_id`, or the `work.session.spawn` tool's `host_id`
+/// argument (`momo_t3::work_control::spawn_execution_object` writes it on both
+/// producers). What a rejection is judged against when the card pre-selected
+/// nothing.
+fn requested_execution_host(payload: &Value) -> Option<Uuid> {
+    payload
+        .get("execution")
+        .and_then(|execution| execution.get("requested_host_id"))
+        .and_then(Value::as_str)
+        .and_then(|raw| Uuid::parse_str(raw).ok())
 }
 
 /// `execution.tool` — the tool a spawn card asks to start, as
@@ -1887,6 +1933,123 @@ mod tests {
             serde_json::from_value(decision.receipt).expect("receipt decodes");
         assert_eq!(receipt.status, "run_not_parked");
         assert!(receipt.result.is_none(), "nothing survived the rollback");
+    }
+
+    fn spawn_card(execution: Value) -> LockedApproval {
+        LockedApproval {
+            id: Uuid::from_u128(1),
+            workspace_id: Uuid::from_u128(2),
+            run_id: Uuid::from_u128(3),
+            channel_id: Uuid::from_u128(4),
+            requested_by: Uuid::from_u128(5),
+            request_message_id: Some(Uuid::from_u128(6)),
+            action_type: momo_t3::work_control::ACTION_TYPE_WORK_SPAWN.to_string(),
+            payload: json!({ "execution": execution }),
+            status: "pending".to_string(),
+            expires_at: None,
+            agent_model: "hermes-agent".to_string(),
+            run_input: json!({}),
+            step_count: 0,
+            max_steps: 50,
+            depth: 0,
+        }
+    }
+
+    fn decision(approve: bool, pick: Option<Uuid>) -> DecisionInput<'static> {
+        DecisionInput {
+            workspace_id: Uuid::from_u128(2),
+            approval_id: Uuid::from_u128(1),
+            route_run_id: None,
+            member_id: Uuid::from_u128(7),
+            via_token_id: None,
+            approve,
+            reason: None,
+            client_decision_id: Uuid::from_u128(8),
+            selected_host_id: pick,
+            public_origin: None,
+        }
+    }
+
+    /// ADR-0188 R0.1 (#2582) — a rejection is judged on the host the **card**
+    /// points at, never on the decider's pick; an approval on the host it will
+    /// really run on.
+    #[test]
+    fn a_rejection_is_judged_on_the_card_and_never_on_the_pick() {
+        let laptop = Uuid::from_u128(10);
+        let vps = Uuid::from_u128(11);
+        let candidates = json!([
+            {"host_id": laptop.to_string(), "selectable": true},
+            {"host_id": vps.to_string(), "selectable": true},
+        ]);
+        let card = spawn_card(json!({
+            "requested_host_id": vps.to_string(),
+            "default_host_id": laptop.to_string(),
+            "host_candidates": candidates,
+        }));
+        let nothing_runs = HostChoice { selected: None };
+
+        // The card sits on the laptop: picking the VPS (a candidate the card
+        // offers) while rejecting does not move it, and neither does no pick.
+        for pick in [Some(vps), None, Some(Uuid::from_u128(99))] {
+            assert_eq!(
+                decision_reference_host(&card, &decision(false, pick), &nothing_runs),
+                Some(laptop),
+                "rejecting with pick {pick:?}"
+            );
+        }
+        // …and the other way round: a card on the VPS stays on the VPS when
+        // the laptop is picked.
+        let team_card = spawn_card(json!({
+            "requested_host_id": vps.to_string(),
+            "default_host_id": vps.to_string(),
+            "host_candidates": candidates,
+        }));
+        assert_eq!(
+            decision_reference_host(&team_card, &decision(false, Some(laptop)), &nothing_runs),
+            Some(vps)
+        );
+
+        // A card that pre-selected nothing is judged on the host the request
+        // named.
+        let bare = spawn_card(json!({
+            "requested_host_id": laptop.to_string(),
+            "default_host_id": null,
+            "host_candidates": [],
+        }));
+        assert_eq!(
+            decision_reference_host(&bare, &decision(false, Some(vps)), &nothing_runs),
+            Some(laptop)
+        );
+        let no_host_at_all = spawn_card(json!({
+            "requested_host_id": null,
+            "default_host_id": null,
+            "host_candidates": [],
+        }));
+        assert_eq!(
+            decision_reference_host(&no_host_at_all, &decision(false, None), &nothing_runs),
+            None
+        );
+
+        // Approving is judged on the host the spawn will run on, which
+        // `resolve_host_choice` has already settled.
+        assert_eq!(
+            decision_reference_host(
+                &card,
+                &decision(true, Some(vps)),
+                &HostChoice {
+                    selected: Some(vps)
+                }
+            ),
+            Some(vps)
+        );
+
+        // No execution object: no host question, whatever was sent.
+        let mut plain = spawn_card(json!({}));
+        plain.payload = json!({"tool_call": {"name": "work.session.end"}});
+        assert_eq!(
+            decision_reference_host(&plain, &decision(false, Some(vps)), &nothing_runs),
+            None
+        );
     }
 
     /// The link is built by concatenation, so the code's alphabet is checked

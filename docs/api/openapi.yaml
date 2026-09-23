@@ -3060,10 +3060,16 @@ paths:
       operationId: registerWorkHost
       summary: Register an execution host for a member or workspace.
       description: >
-        Human bearer only. Any active workspace member may register either
-        scope; ownerMemberId is always the registering member. The row and
-        work.host.registered audit event commit in one tenant transaction.
-        Capabilities are boolean tool-availability flags only.
+        Human bearer only. Any active workspace member may register a
+        member-scoped host; a workspace-scoped (team) host requires a workspace
+        owner or admin (403 `error.code: workspace_host_admin_required`), and an
+        `app` host — the desktop app on its owner's own machine — registers
+        member-scoped only (400 `error.code: app_host_member_scope_required`,
+        refused rather than rewritten). ADR-0188 R0.1: every remote-host defence
+        keys on `scope = member`, so the scope is not the registrant's free
+        choice. ownerMemberId is always the registering member. The role is
+        judged in the same tenant transaction as the insert. Capabilities are
+        boolean tool-availability flags only.
       security:
         - bearerAuth: []
       parameters:
@@ -3082,7 +3088,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/WorkHostResponse"
         "400":
-          description: Invalid scope, type, display name, public key, or capabilities.
+          description: >
+            Invalid scope, type, display name, public key, or capabilities; or
+            an `app` host asked to be workspace-scoped (`error.code:
+            app_host_member_scope_required`).
           content:
             application/json:
               schema:
@@ -3090,7 +3099,10 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: Agent bearer, workspace mismatch, or inactive membership.
+          description: >
+            Agent bearer, workspace mismatch, or inactive membership; or a
+            workspace-scoped host asked for by a member who is not a workspace
+            owner/admin (`error.code: workspace_host_admin_required`).
           content:
             application/json:
               schema:
@@ -3494,7 +3506,14 @@ paths:
         lowercase hex>\n<lowercase request UUID>` with its registered Ed25519
         key. The request UUID is consumed atomically once and retained for ten
         minutes. Only unrevoked status=dispatched controls targeted at that
-        host are returned; no human or agent bearer is accepted.
+        host are returned; no human or agent bearer is accepted. On a
+        member-scoped (remote) host the poll also withholds every control but
+        `kill` whose requester is not the host's owner — so every agent
+        `input`/`read`/`spawn` — and every shell spawn (ADR-0188 R0.1: rows
+        dispatched before R0 are not delivered). A withheld control stays
+        `dispatched`; the poll writes nothing. Since R0.1 (A′) the decision
+        route and the spawn tool no longer create such rows, so the withholding
+        is the defence for rows made before.
       security:
         - workHostAuth: []
       parameters:
@@ -4222,7 +4241,14 @@ paths:
             Caller is not an active member of the source session's anchor
             channel (ADR-0143 D3 — eligibility is channel membership, not the
             source member_id), or the target is a member-scoped work host owned
-            by somebody else.
+            by somebody else, or (ADR-0188 R0, `error.code:
+            remote_host_shell_refused`) the session is a shell and the target is
+            a member-scoped host — refused even for its owner, because a resume
+            writes a spawn and a remote host never spawns a shell.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Source session does not exist in this workspace.
         "409":
@@ -6187,9 +6213,16 @@ paths:
       operationId: decideApproval
       summary: Approve or reject a pending approval (idempotent).
       description: >
-        Human-only: any other principal (agent bearer, signed work host) is a
-        403 receipt `human_principal_required`, checked before the idempotency
-        replay (ADR-0188 D3). `client_decision_id` provides idempotency — retrying the
+        Human-only (ADR-0188 D3). An agent bearer is refused by the
+        authentication middleware before the handler runs — the generic 403
+        error envelope (`agent bearer is not allowed for this route`), not a
+        receipt. A work host cannot sign this route at all (no approval route is
+        on the host-signable allow-list), so a `MomoHost` request is the
+        ordinary signed-request 401. The handler additionally refuses any
+        principal that is not a person with a 403 receipt
+        `human_principal_required`, before the idempotency replay — a second
+        layer no request reaches through the middleware today.
+        `client_decision_id` provides idempotency — retrying the
         same decision returns the original receipt (200); a different
         decision under the same `client_decision_id` returns a 409 receipt
         with status `idempotency_conflict`.
@@ -6200,13 +6233,24 @@ paths:
         does not substitute (403 receipt `remote_host_owner_required`). The host
         judged is the one the decision is about: when approving, the host the
         spawn finally runs on (the `hostId` pick, else the card's default); when
-        rejecting, the host the card points at (a pick the card offers, else its
-        default). Approving a shell onto a member-scoped host is refused even for
-        its owner (403 receipt `remote_host_shell_refused`). Both are judged
-        before the first write. Expected failures (403/404/409)
+        rejecting, the host the card points at — its default, else the host the
+        request named. A `hostId` sent with a rejection is ignored (ADR-0188
+        R0.1): nothing runs, so it could only have chosen which ownership rule
+        applies. Approving a shell onto a member-scoped host is refused even for
+        its owner (403 receipt `remote_host_shell_refused`). And since ADR-0188
+        R0.1 (A′) no spawn an agent requested is approved onto a member-scoped
+        host at all, by its owner either (403 receipt
+        `member_host_agent_control_refused`): an agent's control reaches a
+        member-scoped host as a `kill` only. Every spawn card is an agent's
+        (the `work.spawn` ledger card and the `work.session.spawn` tool card),
+        so a card that pre-selects a member's laptop must be approved onto a
+        workspace host or rejected; the card stays `pending` after the refusal.
+        All three are judged before the first write, in that order (owner,
+        shell, agent). Expected failures (403/404/409)
         return the SAME receipt schema (not the generic error envelope) with
         a diagnostic `status`; the generic error envelope is used only for
-        400 body/path mismatches and 401 auth failures.
+        400 body/path mismatches, 401 auth failures, and the middleware's 403
+        refusal of an agent bearer.
 
 
         ADR-0186 D2/D4 — approving an approval whose `action_type` is
@@ -6264,16 +6308,21 @@ paths:
           description: >
             Receipt-shaped expected failure — `forbidden` (not human / not a
             channel member), `human_principal_required` (the caller is not a
-            person), `remote_host_owner_required` (work headed to a
+            person — the handler's own layer, see above), `remote_host_owner_required` (work headed to a
             member-scoped host decided by someone other than its owner),
             `remote_host_shell_refused` (a shell approved onto a member-scoped
-            host), or `role_required` when the decider does not hold
+            host), `member_host_agent_control_refused` (an agent's spawn approved
+            onto a member-scoped host — refused for its owner too; the card
+            stays `pending`), or `role_required` when the decider does not hold
             the `required_role` the workspace action published (ADR-0186 D2).
             `role_required` does **not** consume the approval: it stays
             `pending`, no ledger row is written, and the request card is patched
             with `last_attempt: "role_required"`. That key is **removed** again
             by whichever decision finally settles the card (approve or reject),
             so a client reads it by value and may also read it by presence.
+            The one 403 that is not a receipt is an agent bearer's: the
+            authentication middleware answers it with the generic error
+            envelope.
           headers:
             Cache-Control:
               description: Always `no-store` (ADR-0186 D4).
@@ -6286,7 +6335,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ApprovalDecisionReceipt"
+                oneOf:
+                  - $ref: "#/components/schemas/ApprovalDecisionReceipt"
+                  - $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Receipt-shaped expected failure (approval not found).
           headers:
@@ -7963,7 +8014,10 @@ components:
                 ADR-0188 R0. Current codes: `remote_host_kill_only` (an agent
                 bearer addressed input/read/spawn to a member-scoped host),
                 `remote_host_shell_refused` (a shell was asked of a
-                member-scoped host).
+                member-scoped host), `workspace_host_admin_required` (a
+                workspace-scoped host registered by a member who is not a
+                workspace owner/admin), `app_host_member_scope_required` (an
+                `app` host registered with a scope other than `member`).
 
     # ---- Memory Plane (ADR-0129 / MOMO-526) ---------------------------------
     MemoryScope:
@@ -12304,7 +12358,16 @@ components:
           description: >
             Arbitrary JSON object; includes the server-computed
             `mention_member_ids` array when the message mentions members.
-            Omitted when empty.
+            Omitted when empty. On a `type: tool_result` row the props are
+            `{call_id, output, is_error}` and `body` repeats `output`. A tool
+            call the server refuses is answered with `is_error: true`, and an
+            `output` that names the refusal's stable word in parentheses — the
+            sentence may be reworded, the word is not. `work.session.spawn`
+            (ADR-0188 R0.1): `remote_host_kill_only` when the call itself names
+            a member-scoped host (refused before any approval card — the word
+            the REST ledger gives the same request); and, from the executor's
+            re-check of an approved call, `remote_host_owner_required`,
+            `remote_host_shell_refused` or `member_host_agent_control_refused`.
         runId:
           type: string
           format: uuid
@@ -13507,8 +13570,13 @@ components:
             picker, for an approval whose payload carries an `execution` object
             (a `work.spawn` control or a `work.session.spawn` tool call). Omit to
             accept `execution.default_host_id`; sending it on an approval that
-            offers no picker is a 400, and sending one outside
-            `execution.host_candidates[].selectable` is a 403. Not part of the
+            offers no picker is a 400, and approving onto one outside
+            `execution.host_candidates[].selectable` is a 403. Approving an
+            agent's spawn onto a member-scoped candidate (or accepting a default
+            that is one) is a 403 receipt `member_host_agent_control_refused`
+            (ADR-0188 R0.1 A′) — the picker still lists such hosts. On a
+            rejection it is ignored (ADR-0188 R0.1): nothing runs, and the
+            decision is judged on the host the card points at. Not part of the
             idempotency key: a replayed decision answers the original receipt.
 
     ApprovalDecisionReceipt:
@@ -13518,7 +13586,8 @@ components:
         approved/rejected; expected failures reuse this shape with a
         diagnostic status (e.g. idempotency_conflict, forbidden, role_required,
         human_principal_required, remote_host_owner_required,
-        remote_host_shell_refused, not_found, bad_request, expired,
+        remote_host_shell_refused, member_host_agent_control_refused,
+        not_found, bad_request, expired,
         action_unavailable, action_args_invalid, public_origin_unavailable,
         run_not_parked, or the approval's current status on a 409).
 

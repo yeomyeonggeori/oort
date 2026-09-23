@@ -436,6 +436,43 @@ pub async fn fetch_work_control_in_tx(
 /// `session_id` is NULL for a spawn, so a spawn is never withheld: it names no
 /// session yet, and the one it will create is not the one anybody is typing
 /// into.
+///
+/// ## ADR-0188 R0.1 (#2582) — what a remote host may be handed at all
+///
+/// R0 refuses, at creation and at decision time, everything an agent or a
+/// colleague could once send to somebody's own machine: an agent's `input` and
+/// `read`, a standing auto-approval, a colleague's approval, a shell. None of
+/// that reaches a row already **dispatched** before R0 existed — and this poll is
+/// exactly what would hand such a row to the first daemon that asks
+/// (`momo-workd`, #2571). So on a **remote host** (`scope = 'member'`) the
+/// delivery itself states the rule, whatever path wrote the row:
+///
+/// * `kill` is always delivered — the one control that only takes work away;
+/// * every other kind is delivered only when its requester is **the host's
+///   owner** (ADR-0188 D3: 「결정자·지시자 = host 소유자」). An agent can never
+///   be that owner — a host is registered by a human bearer — so every
+///   agent-originated `input`/`read`/`spawn` is withheld, auto-approved or
+///   card-approved alike; so is a colleague's, e.g. a takeover written before
+///   #1139 made resume ask whose host the target was;
+/// * a **shell** spawn is never delivered, the owner's included — the same test
+///   [`remote_host_refuses_tool_in_tx`] applies before a decision (one SQL
+///   text for both, `shell_tool_sql`).
+///
+/// Since R0.1 (A′) no entry point *makes* such a row any more — the decision
+/// route will not approve an agent's spawn onto a remote host, and the spawn
+/// tool refuses a call that names one — so this clause is the defence in depth
+/// for the rows made before that: pre-R0 dispatches, and approvals granted in
+/// between.
+///
+/// A withheld row is **left `dispatched`**, not failed, for the reasons the
+/// control-window clause above gives and one more: this is a `GET`, and a poll
+/// that settled ledger rows would make their outcome depend on when a host
+/// happened to ask. Expiring abandoned rows is ADR-0188 D7's TTL, an R1 entry
+/// condition. The host never learns a withheld row's id, so only its owner can
+/// still settle one (`acknowledge`'s human arm) — their own authority.
+///
+/// Workspace-scoped hosts are outside goal A and are handed exactly what they
+/// were before.
 pub async fn pending_controls_for_host_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -448,6 +485,10 @@ pub async fn pending_controls_for_host_in_tx(
     // copy of that list. One column list is worth more than one join keyword;
     // the host row is reached by primary key either way, so the rows are the
     // same rows.
+    let shell_commands: Vec<String> = SHELL_LAUNCH_COMMANDS
+        .iter()
+        .map(|command| (*command).to_string())
+        .collect();
     let sql = format!(
         "SELECT {CONTROL_COLUMNS} \
            FROM work_control \
@@ -467,12 +508,29 @@ pub async fn pending_controls_for_host_in_tx(
                  AND w.ended_at IS NULL \
                  AND w.lease_expires_at > clock_timestamp() \
             ) \
+            AND NOT EXISTS ( \
+              SELECT 1 FROM work_host h \
+               WHERE h.id = work_control.target_host_id \
+                 AND h.workspace_id = work_control.workspace_id \
+                 AND h.scope = '{HOST_SCOPE_MEMBER}' \
+                 AND work_control.kind <> '{KIND_KILL}' \
+                 AND ( \
+                   work_control.requester_member_id <> h.owner_member_id \
+                   OR (work_control.kind = '{KIND_SPAWN}' AND {shell}) \
+                 ) \
+            ) \
           ORDER BY created_at, id \
-          LIMIT 100"
+          LIMIT 100",
+        shell = shell_tool_sql(
+            "work_control.workspace_id",
+            "(work_control.payload->>'tool')",
+            "$3"
+        ),
     );
     let rows = sqlx::query(&sql)
         .bind(workspace_id)
         .bind(host_id)
+        .bind(&shell_commands)
         .fetch_all(&mut *conn)
         .await?;
     rows.iter()
@@ -891,6 +949,20 @@ pub fn target_host_scope_allows(host: &TargetWorkHost, session_owner_member_id: 
 // The fourth R0 rule — only the host's owner decides work headed to it — is a
 // property of the decision route, which reads [`remote_host_owner_in_tx`].
 //
+// R0.1 (#2582) closes the two ways round those rules the R0 security review
+// found: a row **dispatched before R0** is not delivered to a remote host
+// unless R0 would have let it through ([`pending_controls_for_host_in_tx`]), and
+// the scope itself is no longer the registrant's free choice
+// ([`REFUSAL_WORKSPACE_HOST_ADMIN_REQUIRED`],
+// [`REFUSAL_APP_HOST_MEMBER_SCOPE_REQUIRED`], enforced by the register route).
+//
+// R0.1 (A′) then enforces 「에이전트 컨트롤은 kill만」 where such a row would be
+// **made**, so the ledger never holds a dispatched agent spawn the poll would
+// only withhold: the decision route refuses to approve an agent's spawn onto a
+// remote host ([`REFUSAL_MEMBER_HOST_AGENT_CONTROL`]), the spawn tool refuses a
+// call that names one ([`REFUSAL_REMOTE_HOST_KILL_ONLY`]), and the executor
+// re-checks both. The poll's clause stays, as the defence for rows made before.
+//
 // Workspace-scoped hosts are outside goal A (ADR-0188 D3) and keep every rule
 // they had.
 
@@ -937,6 +1009,24 @@ pub const REFUSAL_REMOTE_HOST_SHELL: &str = "remote_host_shell_refused";
 /// Somebody other than the remote host's owner tried to decide work headed to
 /// it.
 pub const REFUSAL_REMOTE_HOST_OWNER_REQUIRED: &str = "remote_host_owner_required";
+/// ADR-0188 R0.1 (#2582) — a member who is not a workspace admin asked to
+/// register a workspace-scoped host. Every refusal above keys on
+/// `scope = 'member'`, so letting anybody call their own laptop a team box would
+/// be a registration option that switches R0 off.
+pub const REFUSAL_WORKSPACE_HOST_ADMIN_REQUIRED: &str = "workspace_host_admin_required";
+/// ADR-0188 R0.1 (#2582) — an `app` host (the desktop app on somebody's own
+/// machine, tier `local`) asked to be registered workspace-scoped. It is a
+/// remote host whatever scope it names, so it registers `member` or not at all.
+pub const REFUSAL_APP_HOST_MEMBER_SCOPE_REQUIRED: &str = "app_host_member_scope_required";
+/// ADR-0188 R0.1 (A′, #2582) — an **approval** would send an agent's non-`kill`
+/// control to a remote host: a person approving an agent's spawn card onto a
+/// member-scoped host, or the executor about to run such an approved spawn.
+///
+/// The request-side twin is [`REFUSAL_REMOTE_HOST_KILL_ONLY`] — the agent
+/// *asked* for it (the REST ledger, or `work.session.spawn` naming the host).
+/// Two words because two different acts are refused, and the reader of each is
+/// different: this one is answered to whoever decided, that one to the agent.
+pub const REFUSAL_MEMBER_HOST_AGENT_CONTROL: &str = "member_host_agent_control_refused";
 
 /// ADR-0188 D3 — 「에이전트 컨트롤은 kill만(불변식)」: may an **agent bearer**
 /// address a control of this kind to a host of this scope?
@@ -950,6 +1040,31 @@ pub const REFUSAL_REMOTE_HOST_OWNER_REQUIRED: &str = "remote_host_owner_required
 /// an agent's own request.
 pub fn agent_control_allowed(host_scope: &str, kind: &str) -> bool {
     host_scope != HOST_SCOPE_MEMBER || kind == KIND_KILL
+}
+
+/// Is this member an agent (`member.kind = 'agent'`)?
+///
+/// ADR-0188 R0.1 (A′) asks it of whoever **originated** a control before an
+/// approval may send it to a remote host — an approval's `requested_by`, which
+/// is the requesting agent on both spawn producers (the REST ledger's card and
+/// the `work.session.spawn` tool's). Soft-deleted members keep their kind, so a
+/// departed agent's request is still an agent's.
+pub async fn member_is_agent_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<bool, T3Error> {
+    let agent: bool = sqlx::query_scalar(
+        "SELECT EXISTS ( \
+                  SELECT 1 FROM member \
+                   WHERE id = $2 AND workspace_id = $1 AND kind = 'agent' \
+                )",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(agent)
 }
 
 /// The owner a decision about work headed to this host must come from — or
@@ -995,29 +1110,46 @@ pub async fn remote_host_refuses_tool_in_tx(
         .iter()
         .map(|command| (*command).to_string())
         .collect();
-    let refused: bool = sqlx::query_scalar(
+    let sql = format!(
         "SELECT EXISTS ( \
                   SELECT 1 FROM work_host \
                    WHERE id = $2 AND workspace_id = $1 AND scope = $4 \
                 ) \
-            AND ( \
-                  $3 = $5 \
-                  OR EXISTS ( \
-                       SELECT 1 FROM work_tool_profile \
-                        WHERE workspace_id = $1 AND tool_key = $3 \
-                          AND launch_template->>'command' = ANY($6) \
-                     ) \
-                )",
-    )
-    .bind(workspace_id)
-    .bind(host_id)
-    .bind(tool)
-    .bind(HOST_SCOPE_MEMBER)
-    .bind(TOOL_SHELL)
-    .bind(&shell_commands)
-    .fetch_one(&mut *conn)
-    .await?;
+            AND {shell}",
+        shell = shell_tool_sql("$1", "$3", "$5"),
+    );
+    let refused: bool = sqlx::query_scalar(&sql)
+        .bind(workspace_id)
+        .bind(host_id)
+        .bind(tool)
+        .bind(HOST_SCOPE_MEMBER)
+        .bind(&shell_commands)
+        .fetch_one(&mut *conn)
+        .await?;
     Ok(refused)
+}
+
+/// The SQL test for 「`tool` is a shell in `workspace`」: the seeded
+/// [`TOOL_SHELL`] key, or a profile whose launch command is one of
+/// [`SHELL_LAUNCH_COMMANDS`] (bound by the caller as the `text[]` parameter
+/// `commands`). Each argument is an SQL expression spliced in as written.
+///
+/// One text for both readers — [`remote_host_refuses_tool_in_tx`], which
+/// refuses a shell before anyone can approve it onto a remote host, and
+/// [`pending_controls_for_host_in_tx`], which withholds one dispatched before
+/// that refusal existed — so the decision and the delivery cannot come to
+/// disagree about what a shell is. Every profile counts, enabled or not: a
+/// disabled shell is still a shell.
+fn shell_tool_sql(workspace: &str, tool: &str, commands: &str) -> String {
+    format!(
+        "({tool} = '{TOOL_SHELL}' \
+          OR EXISTS ( \
+               SELECT 1 FROM work_tool_profile p \
+                WHERE p.workspace_id = {workspace} \
+                  AND p.tool_key = {tool} \
+                  AND p.launch_template->>'command' = ANY({commands}) \
+             ))"
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -2092,6 +2224,9 @@ mod tests {
             REFUSAL_REMOTE_HOST_KILL_ONLY,
             REFUSAL_REMOTE_HOST_SHELL,
             REFUSAL_REMOTE_HOST_OWNER_REQUIRED,
+            REFUSAL_WORKSPACE_HOST_ADMIN_REQUIRED,
+            REFUSAL_APP_HOST_MEMBER_SCOPE_REQUIRED,
+            REFUSAL_MEMBER_HOST_AGENT_CONTROL,
         ];
         for (index, code) in codes.iter().enumerate() {
             assert!(code.chars().all(|c| c.is_ascii_lowercase() || c == '_'));
