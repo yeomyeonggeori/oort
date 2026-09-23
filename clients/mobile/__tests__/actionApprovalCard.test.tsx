@@ -837,7 +837,7 @@ describe('#2513 — 영속 결과 카드 (부록 B)', () => {
     // 이 앱의 다른 「여기서는 못 한다」 문장과 같은 모양 — 할 일을 이름으로, 자리로
     // 끝난다(design-review M-4). 서버의 버튼 캡션을 옮겨 붙이지 않는다.
     expect(elsewhere.props.children).toBe(
-      '초대 관리와 새 링크 만들기는 데스크톱이나 웹에서 할 수 있습니다.',
+      '링크 관리와 새 링크 만들기는 데스크톱이나 웹에서 할 수 있습니다.',
     );
     expect(elsewhere.props.children).not.toContain('에서 보기');
     // 누를 것이 아니다 — 없는 방으로 가는 버튼을 세우지 않는다.

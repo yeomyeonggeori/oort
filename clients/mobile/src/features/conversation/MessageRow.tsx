@@ -1033,9 +1033,13 @@ const ACTION_RESULT_TONE: Readonly<
  * 없다 — 무엇을 이어 갈지 모르면서 「데스크톱에서 하세요」라고 말하지 않는다.
  * 섹션 이름은 넣지 않는다: 데스크톱·웹에서는 **이 카드 자신이** 그 섹션으로 가는
  * 문을 든다(`ActionResultBody` 의 `next`).
+ *
+ * 낱말은 바로 위 줄(`ACTION_RESULT_SECRET_ONCE_NOTE` — 「링크는 … 다시 필요하면 새로
+ * 만드세요」)의 「링크」를 잇는다. 「초대」는 이 앱의 `src/` 에서 워크스페이스 참여
+ * 화면 하나에 예약된 낱말이다(#1584 — `conversationHygiene.test.tsx`).
  */
 const ACTION_RESULT_ELSEWHERE: Readonly<Record<string, string>> = {
-  'invite.create': '초대 관리와 새 링크 만들기는 데스크톱이나 웹에서 할 수 있습니다.',
+  'invite.create': '링크 관리와 새 링크 만들기는 데스크톱이나 웹에서 할 수 있습니다.',
 };
 
 /**
