@@ -12,8 +12,8 @@
 //!   is this host's identity and nobody else's business.
 
 use std::collections::BTreeMap;
-use std::io::Write as _;
-use std::os::unix::fs::OpenOptionsExt as _;
+use std::io::{Read as _, Write as _};
+use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -33,6 +33,54 @@ pub enum ConfigError {
     Parse { path: String, message: String },
     #[error("invalid config: {0}")]
     Invalid(String),
+    #[error("{path}: {detail}; it must be this user's own file that no one else can write")]
+    Unsafe { path: String, detail: String },
+}
+
+/// Read a file this host takes orders from — the config (which executables
+/// run) and the registration state (whose instructions count): not a symlink,
+/// a regular file, owned by this user, writable by no one else (#2602 L-4).
+/// Checked on the open descriptor and read from it, so what is checked is
+/// what is read.
+pub fn read_owned_file(path: &Path) -> Result<String, ConfigError> {
+    let io = |source: std::io::Error| ConfigError::Io {
+        path: path.display().to_string(),
+        source,
+    };
+    let refuse = |detail: String| ConfigError::Unsafe {
+        path: path.display().to_string(),
+        detail,
+    };
+    let mut file = match std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(error) if error.raw_os_error() == Some(libc::ELOOP) => {
+            return Err(refuse("a symbolic link".to_string()))
+        }
+        Err(error) => return Err(io(error)),
+    };
+    let metadata = file.metadata().map_err(io)?;
+    if !metadata.file_type().is_file() {
+        return Err(refuse("not a regular file".to_string()));
+    }
+    // SAFETY: `geteuid` has no preconditions and cannot fail.
+    let uid = unsafe { libc::geteuid() };
+    if metadata.uid() != uid {
+        return Err(refuse(format!(
+            "owned by uid {}, not {uid}",
+            metadata.uid()
+        )));
+    }
+    let mode = metadata.mode() & 0o777;
+    if mode & 0o022 != 0 {
+        return Err(refuse(format!("mode {mode:04o} lets others write it")));
+    }
+    let mut raw = String::new();
+    file.read_to_string(&mut raw).map_err(io)?;
+    Ok(raw)
 }
 
 fn default_poll_interval_ms() -> u64 {
@@ -45,6 +93,10 @@ fn default_heartbeat_interval_ms() -> u64 {
 
 fn default_acp_start_timeout_ms() -> u64 {
     60_000
+}
+
+fn default_max_sessions() -> usize {
+    4
 }
 
 /// The owner-authored host configuration.
@@ -74,6 +126,10 @@ pub struct WorkdConfig {
     pub heartbeat_interval_ms: u64,
     #[serde(default = "default_acp_start_timeout_ms")]
     pub acp_start_timeout_ms: u64,
+    /// Most remote sessions (agent processes) at once; a spawn beyond it is
+    /// refused with `host_busy` (#2602 L-2).
+    #[serde(default = "default_max_sessions")]
+    pub max_sessions: usize,
 }
 
 /// One allowlisted tool.
@@ -94,10 +150,7 @@ pub struct ToolEntry {
 
 impl WorkdConfig {
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
-        let raw = std::fs::read_to_string(path).map_err(|source| ConfigError::Io {
-            path: path.display().to_string(),
-            source,
-        })?;
+        let raw = read_owned_file(path)?;
         let config: Self = serde_json::from_str(&raw).map_err(|error| ConfigError::Parse {
             path: path.display().to_string(),
             message: error.to_string(),
@@ -129,6 +182,14 @@ impl WorkdConfig {
             if !entry.executable.is_absolute() {
                 return invalid(format!("tools.{key}.executable must be an absolute path"));
             }
+            if policy::check_adapter_admitted(entry.adapter).is_err() {
+                // #2602 M-2: said at startup, not only as a refused control.
+                return invalid(format!(
+                    "tools.{key}: the {:?} adapter is not admitted for remote sessions \
+                     (no mode asks before every command and write; ADR-0188 D6)",
+                    entry.adapter
+                ));
+            }
             if let Some(argument) = entry
                 .args
                 .iter()
@@ -152,6 +213,9 @@ impl WorkdConfig {
         }
         if !(1_000..=600_000).contains(&self.acp_start_timeout_ms) {
             return invalid("acp_start_timeout_ms must be within 1000...600000".to_string());
+        }
+        if !(1..=16).contains(&self.max_sessions) {
+            return invalid("max_sessions must be within 1...16".to_string());
         }
         Ok(())
     }
@@ -194,14 +258,20 @@ pub struct HostState {
     pub host_id: Uuid,
     pub owner_member_id: Uuid,
     pub public_key: String,
+    /// The host's scope as the server registered it. `run` serves `member`
+    /// only (ADR-0188 D3, #2602 M-4); a state file without it predates the
+    /// field and is refused until re-registered.
+    #[serde(default)]
+    pub scope: String,
 }
+
+/// The only host scope `momo-workd run` serves (ADR-0188 D3: a desktop host is
+/// its owner's; team hosts are outside goal A).
+pub const SERVED_SCOPE: &str = "member";
 
 impl HostState {
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
-        let raw = std::fs::read_to_string(path).map_err(|source| ConfigError::Io {
-            path: path.display().to_string(),
-            source,
-        })?;
+        let raw = read_owned_file(path)?;
         serde_json::from_str(&raw).map_err(|error| ConfigError::Parse {
             path: path.display().to_string(),
             message: error.to_string(),
@@ -215,7 +285,12 @@ impl HostState {
             source,
         };
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(io)?;
+            // A new folder is this user's alone (#2602 L-4).
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(parent)
+                .map_err(io)?;
         }
         let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
         let _ = std::fs::remove_file(&temporary);
@@ -281,6 +356,7 @@ mod tests {
         let config = parse(base_json()).expect("valid");
         assert_eq!(config.poll_interval_ms, 2_000);
         assert_eq!(config.heartbeat_interval_ms, 30_000);
+        assert_eq!(config.max_sessions, 4);
         assert_eq!(config.server_base(), "https://oort.example.com");
     }
 
@@ -329,6 +405,20 @@ mod tests {
     }
 
     #[test]
+    fn a_codex_tool_entry_is_refused_at_load() {
+        let mut value = base_json();
+        value["tools"]["codex"] = serde_json::json!({
+            "adapter": "codex", "executable": "/usr/local/bin/codex-acp"
+        });
+        match parse(value) {
+            Err(ConfigError::Invalid(message)) => {
+                assert!(message.contains("not admitted"), "{message}")
+            }
+            other => panic!("a codex entry must be refused, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn unknown_adapters_and_fields_are_refused() {
         let mut value = base_json();
         value["tools"]["claude"]["adapter"] = "shell".into();
@@ -353,10 +443,50 @@ mod tests {
             host_id: Uuid::from_u128(2),
             owner_member_id: Uuid::from_u128(3),
             public_key: "AAAA".to_string(),
+            scope: "member".to_string(),
         };
         state.save(&path).unwrap();
         assert_eq!(std::fs::metadata(&path).unwrap().mode() & 0o777, 0o600);
+        assert_eq!(std::fs::metadata(&dir).unwrap().mode() & 0o777, 0o700);
         assert_eq!(HostState::load(&path).unwrap(), state);
+        // A state file from before the field reads with an empty scope, which
+        // `run` refuses (re-register), rather than defaulting to member.
+        std::fs::write(
+            &path,
+            r#"{"server_url":"https://oort.example.com","workspace_id":"00000000-0000-0000-0000-000000000001","host_id":"00000000-0000-0000-0000-000000000002","owner_member_id":"00000000-0000-0000-0000-000000000003","public_key":"AAAA"}"#,
+        )
+        .unwrap();
+        assert_eq!(HostState::load(&path).unwrap().scope, "");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_config_or_state_others_can_write_or_swap_is_refused() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir =
+            std::env::temp_dir().join(format!("momo-workd-owned-{}", Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("workd.json");
+        std::fs::write(&config, serde_json::to_vec(&base_json()).unwrap()).unwrap();
+        std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o644)).unwrap();
+        WorkdConfig::load(&config).expect("the owner's 0644 config is read");
+
+        std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o664)).unwrap();
+        match WorkdConfig::load(&config) {
+            Err(ConfigError::Unsafe { detail, .. }) => assert!(detail.contains("0664")),
+            other => panic!("a group-writable config must be refused, got {other:?}"),
+        }
+        std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let link = dir.join("linked.json");
+        std::os::unix::fs::symlink(&config, &link).unwrap();
+        match WorkdConfig::load(&link) {
+            Err(ConfigError::Unsafe { detail, .. }) => assert!(detail.contains("symbolic link")),
+            other => panic!("a symlinked config must be refused, got {other:?}"),
+        }
+        match HostState::load(&link) {
+            Err(ConfigError::Unsafe { .. }) => {}
+            other => panic!("a symlinked state must be refused, got {other:?}"),
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 }

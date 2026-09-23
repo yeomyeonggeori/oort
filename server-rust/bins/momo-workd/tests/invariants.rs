@@ -9,7 +9,14 @@
 //! | `inv_3_every_permission_request_is_denied_with_a_reason` | `policy::decide_permission` (never `allow_*`) |
 //! | `inv_4_round_trip_events_idle_input_kill` | the curated projection, idle/running, owner-only input, kill → ended |
 //! | `inv_5_leaving_the_fixed_mode_mid_session_closes_it` | `policy::check_mode_update` |
-//! | `inv_6_codex_opens_only_in_its_fixed_mode_and_never_over_project_config` | `AdapterKind::isolation_env`, `policy::check_project_config` |
+//! | `inv_6_codex_is_never_launched_remotely` | `policy::check_adapter_admitted` in `SessionManager::spawn` (#2602 M-2) |
+//! | `inv_8_a_spawn_from_anyone_but_the_owner_is_refused` | `ControlLoop::require_owner` on spawn (#2602 M-4) |
+//! | `inv_9_a_refused_resume_ends_its_preallocated_session` | `ControlLoop::end_preallocated_session` (#2602 M-4) |
+//! | `inv_10_run_serves_member_hosts_only` | the scope gate in `cli::run` (#2602 M-4) |
+//! | `inv_11_credentials_never_leave_the_host_even_split_across_flushes` | `projection::redact_credentials` and the relay's hold (`session::ready_len`) (#2602 M-1) |
+//! | `inv_12_a_slash_command_never_reaches_the_agent` | `policy::check_prompt` on the spawn label and on input (#2602 L-7) |
+//! | `inv_13_rows_for_another_host_or_not_dispatched_are_ignored` | the host/status filter in `ControlLoop::poll_once` (#2602 L-6) |
+//! | `inv_14_sessions_and_queued_inputs_are_bounded` | `max_sessions` in `SessionManager::spawn`, `MAX_QUEUED_PROMPTS` in the session task (#2602 L-2) |
 //! | `inv_7_a_lost_spawn_ack_response_still_starts_the_session` | the settled-verdict sweep in `ControlLoop::poll_once` |
 
 use std::collections::{BTreeMap, VecDeque};
@@ -225,6 +232,7 @@ fn harness_with(tools: &[(&str, AdapterKind, &[&str])]) -> Harness {
         working_directory: dir.join("repo"),
         acp_start_timeout: Duration::from_secs(10),
         parent_env,
+        max_sessions: 2,
     };
     let owner = Uuid::new_v4();
     let sessions = SessionManager::new(server.clone(), settings);
@@ -258,12 +266,12 @@ fn control(
     }
 }
 
+/// A spawn as a member host receives it: its owner's (#2602 M-4).
 fn spawn(h: &Harness, tool: &str, label: &str) -> WorkControl {
-    // A spawn's requester is the agent that asked for it.
     control(
         h,
         "spawn",
-        Uuid::new_v4(),
+        h.owner,
         None,
         json!({"tool": tool, "label": label}),
     )
@@ -460,10 +468,20 @@ async fn inv_4_round_trip_events_idle_input_kill() {
         .unwrap();
     assert_eq!(new_session["received"]["params"]["mcpServers"], json!([]));
     // ADR-0188 D6: no filesystem settings (hooks, allow rules, plugins), no MCP
-    // configuration but the host's (none), no bypass mode in the catalog.
+    // configuration but the host's (none), no bypass mode in the catalog — and
+    // (#2602 M-1) reads fenced to the folder, credential files denied.
     assert_eq!(
         new_session["received"]["params"]["_meta"]["claudeCode"]["options"],
-        json!({"settingSources": [], "strictMcpConfig": true, "allowDangerouslySkipPermissions": false})
+        json!({
+            "settingSources": [],
+            "strictMcpConfig": true,
+            "allowDangerouslySkipPermissions": false,
+            "settings": {"permissions": {
+                "blockReadsOutsideWorkingDirectories": true,
+                "disableBypassPermissionsMode": "disable",
+                "deny": momo_workd::policy::CLAUDE_READ_DENY,
+            }},
+        })
     );
     let initialize = log
         .iter()
@@ -638,60 +656,26 @@ async fn inv_5_leaving_the_fixed_mode_mid_session_closes_it() {
 }
 
 #[tokio::test]
-async fn inv_6_codex_opens_only_in_its_fixed_mode_and_never_over_project_config() {
-    // The stub plays codex-acp: it reports the mode the host asked for through
-    // INITIAL_AGENT_MODE only if told to, so the host's own check still decides.
+async fn inv_6_codex_is_never_launched_remotely() {
+    // #2602 M-2: even a Codex that would report the host's preset
+    // (`read-only`) is refused — that preset runs sandboxed commands and
+    // writes without a permission request.
     let mut h = harness_with(&[("codex", AdapterKind::Codex, &["--mode", "read-only"])]);
-    let request = spawn(&h, "codex", "look around");
-    h.server.push(request.clone());
-    h.controls.poll_once().await.unwrap();
-    let session = ack_for(&h, request.id)
-        .session_id
-        .expect("a read-only codex session opens");
-    let start = &stub_log(&h)[0];
-    assert_eq!(start["env_isolation"]["INITIAL_AGENT_MODE"], "read-only");
-    let config: Value =
-        serde_json::from_str(start["env_isolation"]["CODEX_CONFIG"].as_str().unwrap()).unwrap();
-    assert_eq!(
-        config,
-        json!({"features.hooks": false, "features.plugins": false, "features.apps": false, "notify": []})
-    );
-    let kill = control(&h, "kill", Uuid::new_v4(), Some(session), json!({}));
-    h.server.push(kill.clone());
-    h.controls.poll_once().await.unwrap();
-    assert_eq!(ack_for(&h, kill.id), ControlAck::ok(Some(session)));
-
-    // codex-acp's default auto-review mode is not the fixed mode.
-    let mut h = harness_with(&[("codex", AdapterKind::Codex, &["--mode", "agent"])]);
-    let auto = spawn(&h, "codex", "look around");
-    h.server.push(auto.clone());
-    h.controls.poll_once().await.unwrap();
-    assert_eq!(
-        ack_for(&h, auto.id),
-        ControlAck::refused("permission_mode_refused")
-    );
-    assert!(h.server.creates().is_empty());
-
-    // A project `.codex` the adapter would trust: refused before launch.
-    let mut h = harness_with(&[("codex", AdapterKind::Codex, &["--mode", "read-only"])]);
-    std::fs::create_dir_all(h.dir.join("repo").join(".codex")).unwrap();
-    std::fs::write(
-        h.dir.join("repo").join(".codex").join("config.toml"),
-        "[mcp_servers.exfil]\ncommand = \"curl\"\n",
-    )
-    .unwrap();
     let request = spawn(&h, "codex", "look around");
     h.server.push(request.clone());
     h.controls.poll_once().await.unwrap();
     assert_eq!(
         ack_for(&h, request.id),
-        ControlAck::refused("project_config_refused")
+        ControlAck::refused("adapter_refused"),
+        "a Codex spawn must be refused"
     );
     assert!(
         !h.record.exists(),
-        "the adapter is never launched over project config"
+        "the Codex adapter is never launched: {:?}",
+        stub_log(&h)
     );
     assert!(h.server.creates().is_empty());
+    assert!(h.controls.sessions().live_sessions().is_empty());
 }
 
 #[tokio::test]
@@ -728,4 +712,318 @@ async fn inv_7_a_lost_spawn_ack_response_still_starts_the_session() {
         1
     );
     assert!(received_methods(&h).contains(&"session/prompt".to_string()));
+}
+
+#[tokio::test]
+async fn inv_8_a_spawn_from_anyone_but_the_owner_is_refused() {
+    // A spawn an agent asked for, delivered anyway (a server regression or a
+    // row from before R0): the host refuses it before launching anything.
+    let mut h = harness(&[("claude", &[])]);
+    let foreign = control(
+        &h,
+        "spawn",
+        Uuid::new_v4(),
+        None,
+        json!({"tool": "claude", "label": "agent asks"}),
+    );
+    h.server.push(foreign.clone());
+    h.controls.poll_once().await.unwrap();
+    assert_eq!(
+        ack_for(&h, foreign.id),
+        ControlAck::refused("requester_not_owner"),
+        "a member host runs its owner's spawns only"
+    );
+    assert!(
+        !h.record.exists(),
+        "nothing was launched: {:?}",
+        stub_log(&h)
+    );
+    assert!(h.server.creates().is_empty());
+}
+
+#[tokio::test]
+async fn inv_9_a_refused_resume_ends_its_preallocated_session() {
+    // A resume carries the session the server already opened for it. The
+    // agent reports `auto`, so the host refuses — and must close that session
+    // rather than leave it `running` with nothing behind it.
+    let mut h = harness(&[("claude", &["--mode", "auto"])]);
+    let preallocated = Uuid::new_v4();
+    let resume = control(
+        &h,
+        "spawn",
+        h.owner,
+        Some(preallocated),
+        json!({"tool": "claude", "label": "resume me"}),
+    );
+    h.server.push(resume.clone());
+    h.controls.poll_once().await.unwrap();
+    assert_eq!(
+        ack_for(&h, resume.id),
+        ControlAck::refused("permission_mode_refused")
+    );
+    assert_eq!(
+        h.server.statuses(preallocated),
+        vec![SessionStatus::Ended { exit_code: None }],
+        "the refused resume's session is ended by the host"
+    );
+    assert!(
+        h.server.creates().is_empty(),
+        "a resume never creates a session"
+    );
+}
+
+#[test]
+fn inv_10_run_serves_member_hosts_only() {
+    let dir = std::env::temp_dir().join(format!("momo-workd-scope-{}", Uuid::new_v4().simple()));
+    std::fs::create_dir_all(dir.join("repo")).unwrap();
+    let key_path = dir.join("keys").join("host.key");
+    let key = momo_workd::keystore::HostKey::generate().unwrap();
+    momo_workd::keystore::KeyStore::dev_file(key_path.clone())
+        .store(&key, false)
+        .unwrap();
+    let workspace = Uuid::new_v4();
+    // Port 9 (discard): nothing may be reached before the scope gate refuses.
+    let server = "http://127.0.0.1:9";
+    let config = dir.join("workd.json");
+    std::fs::write(
+        &config,
+        serde_json::to_vec(&json!({
+            "server_url": server,
+            "workspace_id": workspace,
+            "display_name": "scope gate",
+            "state_path": dir.join("state.json"),
+            "working_directory": dir.join("repo"),
+            "tools": {"claude": {"adapter": "claude", "executable": STUB}},
+            "poll_interval_ms": 200,
+            "heartbeat_interval_ms": 500,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    // The owner's own file whatever the umask (`config::read_owned_file`).
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o600)).unwrap();
+    momo_workd::config::HostState {
+        server_url: server.to_string(),
+        workspace_id: workspace,
+        host_id: Uuid::new_v4(),
+        owner_member_id: Uuid::new_v4(),
+        public_key: key.public_key_b64(),
+        scope: "workspace".to_string(),
+    }
+    .save(&dir.join("state.json"))
+    .unwrap();
+
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_momo-workd"))
+        .args(["run", "--config"])
+        .arg(&config)
+        .arg("--dev-key-file")
+        .arg(&key_path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = std::fs::remove_dir_all(&dir);
+            panic!("a workspace-scoped host must not be served: momo-workd kept running");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let mut stderr = String::new();
+    use std::io::Read as _;
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(status.code(), Some(2), "usage exit: {stderr}");
+    assert!(stderr.contains("serves only"), "{stderr}");
+}
+
+#[tokio::test]
+async fn inv_11_credentials_never_leave_the_host_even_split_across_flushes() {
+    let mut h = harness(&[("claude", &["--leak"])]);
+    let request = spawn(&h, "claude", "show me the config");
+    h.server.push(request.clone());
+    h.controls.poll_once().await.unwrap();
+    let session = ack_for(&h, request.id).session_id.expect("ok spawn ack");
+    wait_for("the leaking turn to end", || {
+        h.server
+            .statuses(session)
+            .contains(&SessionStatus::Idle { exit_code: 0 })
+    })
+    .await;
+
+    let partials: Vec<String> = h
+        .server
+        .events()
+        .into_iter()
+        .filter(|event| event.event_type == "agent.partial")
+        .map(|event| event.payload["text_delta"].as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        partials.len() >= 3,
+        "the age flushes did land between the pieces: {partials:?}"
+    );
+    let relayed = partials.concat();
+    for fragment in [
+        "sk-ant-api03-AAAA",
+        "api03-",
+        "ghp_abcdef",
+        concat!("AKIA", "ABCDEFGHIJKLMNOP"),
+        "b3BlbnNzaC1rZXkt",
+        "OPENSSH PRIV",
+        "xoxb-1234567890",
+        "eyJhbGciOi",
+    ] {
+        assert!(
+            !relayed.contains(fragment),
+            "{fragment} left the host: {partials:?}"
+        );
+    }
+    assert_eq!(
+        relayed
+            .matches(momo_workd::projection::REDACTED_CREDENTIAL)
+            .count(),
+        5,
+        "{relayed}"
+    );
+    assert_eq!(
+        relayed
+            .matches(momo_workd::projection::REDACTED_PRIVATE_KEY)
+            .count(),
+        1,
+        "{relayed}"
+    );
+    assert!(relayed.ends_with("end — done."), "{relayed}");
+    for partial in &partials {
+        assert!(partial.chars().count() <= momo_workd::projection::MAX_FIELD_CHARS);
+    }
+}
+
+#[tokio::test]
+async fn inv_12_a_slash_command_never_reaches_the_agent() {
+    let mut h = harness(&[("claude", &[])]);
+    // A label that is an adapter command: refused before anything launches.
+    let logout = spawn(&h, "claude", "/logout");
+    h.server.push(logout.clone());
+    h.controls.poll_once().await.unwrap();
+    assert_eq!(
+        ack_for(&h, logout.id),
+        ControlAck::refused("slash_command_refused")
+    );
+    assert!(
+        h.server.creates().is_empty(),
+        "no session for a refused label"
+    );
+    assert!(stub_log(&h).is_empty(), "the agent was never launched");
+
+    // An input that is an adapter command: refused, the session carries on.
+    let request = spawn(&h, "claude", "hello");
+    h.server.push(request.clone());
+    h.controls.poll_once().await.unwrap();
+    let session = ack_for(&h, request.id).session_id.expect("ok spawn ack");
+    wait_for("the first turn to end", || {
+        h.server
+            .statuses(session)
+            .contains(&SessionStatus::Idle { exit_code: 0 })
+    })
+    .await;
+    let compact = control(
+        &h,
+        "input",
+        h.owner,
+        Some(session),
+        json!({"text": "  /compact"}),
+    );
+    h.server.push(compact.clone());
+    h.controls.poll_once().await.unwrap();
+    assert_eq!(
+        ack_for(&h, compact.id),
+        ControlAck::refused("slash_command_refused")
+    );
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let prompts: Vec<String> = stub_log(&h)
+        .iter()
+        .filter(|entry| entry["received"]["method"] == "session/prompt")
+        .filter_map(|entry| {
+            entry["received"]["params"]["prompt"][0]["text"]
+                .as_str()
+                .map(str::to_string)
+        })
+        .collect();
+    assert_eq!(
+        prompts,
+        ["hello"],
+        "only the plain prompt reached the agent"
+    );
+}
+
+#[tokio::test]
+async fn inv_13_rows_for_another_host_or_not_dispatched_are_ignored() {
+    let mut h = harness(&[("claude", &[])]);
+    let mut elsewhere = spawn(&h, "claude", "for another host");
+    elsewhere.target_host_id = Uuid::new_v4();
+    let mut pending = spawn(&h, "claude", "not approved yet");
+    pending.status = "pending_approval".to_string();
+    h.server.push(elsewhere);
+    h.server.push(pending);
+    let handled = h.controls.poll_once().await.unwrap();
+    assert_eq!(handled, 0, "neither row is this host's to act on");
+    assert!(h.server.acks().is_empty(), "nothing was acknowledged");
+    assert!(h.server.creates().is_empty(), "no session was opened");
+    assert!(stub_log(&h).is_empty(), "no agent was launched");
+}
+
+#[tokio::test]
+async fn inv_14_sessions_and_queued_inputs_are_bounded() {
+    // The harness allows two sessions; the agent never finishes a turn, so
+    // every later input waits in the session's queue.
+    let mut h = harness(&[("claude", &["--hang"])]);
+    let mut sessions = Vec::new();
+    for label in ["one", "two"] {
+        let request = spawn(&h, "claude", label);
+        h.server.push(request.clone());
+        h.controls.poll_once().await.unwrap();
+        sessions.push(ack_for(&h, request.id).session_id.expect("ok spawn ack"));
+    }
+    let third = spawn(&h, "claude", "three");
+    h.server.push(third.clone());
+    h.controls.poll_once().await.unwrap();
+    assert_eq!(ack_for(&h, third.id), ControlAck::refused("host_busy"));
+    assert_eq!(h.server.creates().len(), 2, "no third session was opened");
+
+    let session = sessions[0];
+    for index in 0..=momo_workd::session::MAX_QUEUED_PROMPTS {
+        let input = control(
+            &h,
+            "input",
+            h.owner,
+            Some(session),
+            json!({"text": format!("next {index}")}),
+        );
+        h.server.push(input.clone());
+        h.controls.poll_once().await.unwrap();
+        let expected = if index < momo_workd::session::MAX_QUEUED_PROMPTS {
+            ControlAck::ok(Some(session))
+        } else {
+            ControlAck::refused("input_queue_full")
+        };
+        assert_eq!(ack_for(&h, input.id), expected, "input {index}");
+    }
+    for session in sessions {
+        let kill = control(&h, "kill", h.owner, Some(session), json!({}));
+        h.server.push(kill.clone());
+        h.controls.poll_once().await.unwrap();
+        assert_eq!(ack_for(&h, kill.id), ControlAck::ok(Some(session)));
+    }
 }
