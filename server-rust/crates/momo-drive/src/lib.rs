@@ -81,7 +81,7 @@ pub const MAX_ATTACHMENT_BYTES: i64 = 100 * 1024 * 1024;
 ///   carries the 100 MB ceiling at ~233 kbit/s sustained where no edge limit
 ///   applies.
 ///
-/// Google's resumable sessions live a week because they can be *resumed*
+/// Google's resumable sessions live a week, and they can be *resumed*
 /// (`308 Resume Incomplete`). This route has no resume protocol — one PUT
 /// carries the whole body, and every client restarts a failed transfer with a
 /// new session — so a longer lifetime would only widen the window in which an
