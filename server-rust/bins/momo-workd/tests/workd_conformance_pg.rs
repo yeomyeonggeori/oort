@@ -12,15 +12,27 @@
 //!
 //! The server runs as `momo_app` (NOBYPASSRLS); fixtures and ledger reads use
 //! the superuser. Dispatched controls are written straight to `work_control`:
-//! how a control *becomes* dispatched is the server's business (and ADR-0188 R0
-//! changes it for member-scoped hosts); what this suite measures is the host's
-//! half — poll, apply, ack, session, events, end.
+//! how a control *becomes* dispatched is the server's business; what this suite
+//! measures is the host's half — poll, apply, ack, session, events, end — and,
+//! on a member host, which controls reach the host at all.
 //!
-//! | test | what it proves |
-//! |---|---|
-//! | `wdc_1_register_heartbeat_spawn_events_kill_round_trip` | register with the owner's token → v2 heartbeat marks the host online → spawn → curated events (answer, plan, tool kind, denial + reason) → idle → kill → ended; no listening TCP socket. The heartbeat step needs the #2570 server (v2 heartbeat). |
-//! | `wdc_2_shell_and_auto_mode_are_refused_on_the_ledger` | a remote `shell` spawn and an agent in `auto` mode are refused with their labels, and no session exists |
-//! | `wdc_3_a_revoked_host_stops` | ADR-0188 D7: after revoke the host gets 401 and exits (code 3) |
+//! ## Which host each test runs on (ADR-0188 D3, #2570 R0, #2582 R0.1 + A′)
+//!
+//! A member-scoped host (what `momo-workd register` always creates) receives
+//! `kill` from anyone and every other kind only when its **owner** asked for
+//! it — never a shell, never an agent's spawn. So an agent spawn round trip is
+//! measured on a **workspace-scoped** host, registered in the test by the
+//! workspace owner through the server API (`register_workspace_host`) and then
+//! served by the unmodified `momo-workd run`. The product CLI stays member-only
+//! (ADR-0188 D3: team hosts are outside goal A), and the member rules are
+//! measured end to end in `wdc_4`.
+//!
+//! | test | host | what it proves |
+//! |---|---|---|
+//! | `wdc_1_heartbeat_spawn_events_kill_round_trip` | workspace | v2 heartbeat marks the host online → agent spawn → curated events (answer, plan, tool kind, denial + reason) → idle → kill → ended; no listening TCP socket |
+//! | `wdc_2_shell_and_auto_mode_are_refused_on_the_ledger` | workspace | a delivered `shell` spawn and an agent in `auto` mode are refused by the host with their labels, and no session exists |
+//! | `wdc_3_a_revoked_host_stops` | member | ADR-0188 D7: after revoke the host gets 401 and exits (code 3) |
+//! | `wdc_4_a_member_host_takes_its_owner_and_kill_only` | member | `momo-workd register` → the agent's spawn request is refused (`remote_host_kill_only`) and an agent-origin dispatched spawn is never delivered, while the owner's resume onto the same host completes and an agent's `kill` is delivered |
 
 use std::net::SocketAddr;
 use std::os::unix::fs::MetadataExt as _;
@@ -144,6 +156,9 @@ struct Fixture {
     owner_email: String,
     channel: Uuid,
     agent: Uuid,
+    /// A running run of `agent` in `channel` — what an agent-bearer control
+    /// request binds to.
+    run: Uuid,
 }
 
 async fn seed_fixture(su: &PgPool, app: &PgPool) -> Fixture {
@@ -244,13 +259,59 @@ async fn seed_fixture(su: &PgPool, app: &PgPool) -> Fixture {
     .execute(su)
     .await
     .expect("seed agent membership");
+    sqlx::query(
+        "INSERT INTO membership (workspace_id, channel_id, member_id, role) \
+         VALUES ($1, $2, $3, 'member') \
+         ON CONFLICT (channel_id, member_id) DO UPDATE SET left_at = NULL",
+    )
+    .bind(workspace)
+    .bind(channel)
+    .bind(agent)
+    .execute(su)
+    .await
+    .expect("seed agent channel membership");
+    let run = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO agent_run \
+           (id, workspace_id, agent_member_id, channel_id, status, input, idempotency_key) \
+         VALUES ($1, $2, $3, $4, 'running'::run_status, $5, $6)",
+    )
+    .bind(run)
+    .bind(workspace)
+    .bind(agent)
+    .bind(channel)
+    .bind(json!({"type": "work", "title": "wdc", "brief": "wdc"}))
+    .bind(format!("wdc2571:{run}"))
+    .execute(su)
+    .await
+    .expect("seed agent run");
     Fixture {
         workspace,
         owner,
         owner_email,
         channel,
         agent,
+        run,
     }
+}
+
+/// An `agent_bearer` for `fixture.agent` with `work:control`.
+async fn agent_bearer(su: &PgPool, fixture: &Fixture) -> String {
+    let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let token = format!("momo_agent_v1.{}.{secret}", fixture.workspace);
+    sqlx::query(
+        "INSERT INTO token (workspace_id, kind, actor_member_id, subject_member_id, \
+                            token_hash, scopes, label) \
+         VALUES ($1, 'agent_bearer', $2, NULL, digest($3::text, 'sha256'), \
+                 ARRAY['work:control'], 'wdc-2571')",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.agent)
+    .bind(&token)
+    .execute(su)
+    .await
+    .expect("seed agent bearer");
+    token
 }
 
 async fn login(http: &reqwest::Client, base: &str, fixture: &Fixture) -> String {
@@ -369,6 +430,58 @@ impl Workd {
             "the owner's token never reaches a log line"
         );
         serde_json::from_slice(&output.stdout).expect("register prints one JSON line")
+    }
+
+    /// Option (a) of the R0.1 adaptation: the **workspace owner** registers a
+    /// workspace-scoped host through the server API (#2582: owner/admin only),
+    /// and this installation is handed that host's key and state, exactly as
+    /// `register` would have left them. `momo-workd run` then serves it
+    /// unmodified. The product CLI itself never registers a workspace host.
+    async fn register_as_workspace_host(
+        &self,
+        http: &reqwest::Client,
+        base: &str,
+        token: &str,
+        fixture: &Fixture,
+    ) -> Uuid {
+        let key = momo_workd::keystore::HostKey::generate().expect("host key");
+        momo_workd::keystore::KeyStore::dev_file(self.key.clone())
+            .store(&key, false)
+            .expect("dev key file");
+        let response = http
+            .post(format!(
+                "{base}/v1/workspaces/{}/work-hosts",
+                fixture.workspace
+            ))
+            .bearer_auth(token)
+            .json(&json!({
+                "scope": "workspace",
+                "type": "workd",
+                "displayName": "wdc-2571 team host",
+                "publicKey": key.public_key_b64(),
+                "capabilities": {"acp": true, "terminal_attach": false},
+            }))
+            .send()
+            .await
+            .expect("register workspace host");
+        assert_eq!(
+            response.status(),
+            201,
+            "the workspace owner may register a team host"
+        );
+        let body: Value = response.json().await.expect("host body");
+        assert_eq!(body["workHost"]["scope"], "workspace");
+        let host = Uuid::parse_str(body["workHost"]["id"].as_str().expect("id")).unwrap();
+        momo_workd::config::HostState {
+            server_url: base.to_string(),
+            workspace_id: fixture.workspace,
+            host_id: host,
+            owner_member_id: fixture.owner,
+            public_key: key.public_key_b64(),
+        }
+        .save(&self.dir.join("state").join("host.json"))
+        .expect("host state");
+        host
     }
 
     fn start(&mut self) -> u32 {
@@ -507,6 +620,50 @@ async fn host_row(
         .expect("the registered host is listed")
 }
 
+/// A second member host of the owner, registered straight through the API —
+/// the "old laptop" a session is resumed away from. Never served.
+async fn register_idle_member_host(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    fixture: &Fixture,
+) -> Uuid {
+    let key = momo_workd::keystore::HostKey::generate().expect("host key");
+    let response = http
+        .post(format!(
+            "{base}/v1/workspaces/{}/work-hosts",
+            fixture.workspace
+        ))
+        .bearer_auth(token)
+        .json(&json!({
+            "scope": "member",
+            "type": "workd",
+            "displayName": "wdc-2571 old laptop",
+            "publicKey": key.public_key_b64(),
+        }))
+        .send()
+        .await
+        .expect("register old laptop");
+    assert_eq!(response.status(), 201);
+    let body: Value = response.json().await.expect("host body");
+    Uuid::parse_str(body["workHost"]["id"].as_str().expect("id")).unwrap()
+}
+
+/// The offline sweep's own transition (`momo_t3::sweep`), written directly:
+/// the old laptop went away and its session is waiting to be resumed.
+async fn orphan_session(su: &PgPool, session: Uuid) {
+    let moved = sqlx::query(
+        "UPDATE work_session SET status = 'orphaned', idle_at = NULL, host_lost_at = NULL \
+          WHERE id = $1 AND status IN ('running', 'idle')",
+    )
+    .bind(session)
+    .execute(su)
+    .await
+    .expect("orphan the source session")
+    .rows_affected();
+    assert_eq!(moved, 1, "the source session was running");
+}
+
 fn listening_tcp_sockets(pid: u32) -> String {
     let output = Command::new("lsof")
         .args(["-nP", "-a", "-p", &pid.to_string(), "-iTCP", "-sTCP:LISTEN"])
@@ -517,7 +674,7 @@ fn listening_tcp_sockets(pid: u32) -> String {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
-async fn wdc_1_register_heartbeat_spawn_events_kill_round_trip() {
+async fn wdc_1_heartbeat_spawn_events_kill_round_trip() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let app_pool = momo_app_pool().await;
@@ -526,31 +683,12 @@ async fn wdc_1_register_heartbeat_spawn_events_kill_round_trip() {
     let http = reqwest::Client::new();
     let token = login(&http, &base, &fixture).await;
 
-    // ---- register: the owner's token, the key's public half only ----------
+    // ---- a workspace-scoped host (an agent spawn only reaches one) --------
     let mut workd = Workd::new(&base, &fixture, &[("claude", &["--permission"])]);
-    let registered = workd.register(&token).await;
-    let host = Uuid::parse_str(registered["hostId"].as_str().expect("hostId")).unwrap();
-    assert_eq!(
-        registered["ownerMemberId"],
-        json!(fixture.owner.to_string())
-    );
-    let key_mode = std::fs::metadata(&workd.key).unwrap().mode() & 0o777;
-    assert_eq!(key_mode, 0o600, "the dev key file is private");
-    let row = host_row(&http, &base, &token, &fixture, host).await;
-    assert_eq!(
-        row["scope"], "member",
-        "ADR-0188 D3: a desktop host is its owner's"
-    );
-    assert_eq!(row["type"], "workd");
-    assert_eq!(row["ownerMemberId"], json!(fixture.owner.to_string()));
-    let stored_key = std::fs::read_to_string(&workd.key).unwrap();
-    assert!(
-        !serde_json::to_string(&row)
-            .unwrap()
-            .contains(stored_key.trim()),
-        "the server never sees the private key"
-    );
-    eprintln!("wdc_1: registered host {host}");
+    let host = workd
+        .register_as_workspace_host(&http, &base, &token, &fixture)
+        .await;
+    eprintln!("wdc_1: workspace host {host} registered by the workspace owner");
 
     // ---- run: no listening socket of any kind ------------------------------
     let pid = workd.start();
@@ -689,13 +827,13 @@ async fn wdc_1_register_heartbeat_spawn_events_kill_round_trip() {
     eprintln!("wdc_1: kill {kill} acked, session ended");
 
     // ---- heartbeat (v2, #2570) ---------------------------------------------------
-    // The host has been heartbeating since it started. Only a server that serves
-    // the ADR-0188 D7 v2 heartbeat (#2570) accepts it; the v1 route refuses the
-    // v2 request and the host stays offline.
+    // The host has been heartbeating since it started. Only the ADR-0188 D7 v2
+    // heartbeat is accepted; a v1 body would leave the host offline.
     let row = host_row(&http, &base, &token, &fixture, host).await;
     assert_eq!(
-        row["online"], true,
-        "the v2-signed heartbeat must mark the host online (requires the #2570 server)\n--- workd log ---\n{}",
+        row["online"],
+        true,
+        "the v2-signed heartbeat must mark the host online\n--- workd log ---\n{}",
         workd.log_tail()
     );
     assert!(row["lastSeenAtMs"].as_i64().is_some());
@@ -716,13 +854,17 @@ async fn wdc_2_shell_and_auto_mode_are_refused_on_the_ledger() {
     let token = login(&http, &base, &fixture).await;
 
     // The owner allowlisted something called `shell` (a launchable agent), and
-    // a Claude whose own settings put it in `auto` mode.
+    // a Claude whose own settings put it in `auto` mode. On a workspace host
+    // the server delivers both spawns, so the refusals measured here are the
+    // host's own (a member host never receives a shell spawn: `wdc_4`).
     let mut workd = Workd::new(
         &base,
         &fixture,
         &[("shell", &[]), ("claude", &["--mode", "auto"])],
     );
-    let host = Uuid::parse_str(workd.register(&token).await["hostId"].as_str().unwrap()).unwrap();
+    let host = workd
+        .register_as_workspace_host(&http, &base, &token, &fixture)
+        .await;
     workd.start();
 
     let shell = insert_control(
@@ -820,4 +962,235 @@ async fn wdc_3_a_revoked_host_stops() {
     );
     workd.child = None;
     eprintln!("wdc_3: revoked host {host} stopped with exit 3");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn wdc_4_a_member_host_takes_its_owner_and_kill_only() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed_fixture(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, &fixture).await;
+    let agent_token = agent_bearer(&su, &fixture).await;
+    let workspace = fixture.workspace;
+
+    // ---- register: the owner's token, the key's public half only ----------
+    let mut workd = Workd::new(&base, &fixture, &[("claude", &[])]);
+    let registered = workd.register(&token).await;
+    let host = Uuid::parse_str(registered["hostId"].as_str().expect("hostId")).unwrap();
+    assert_eq!(
+        registered["ownerMemberId"],
+        json!(fixture.owner.to_string())
+    );
+    let key_mode = std::fs::metadata(&workd.key).unwrap().mode() & 0o777;
+    assert_eq!(key_mode, 0o600, "the dev key file is private");
+    let row = host_row(&http, &base, &token, &fixture, host).await;
+    assert_eq!(
+        row["scope"], "member",
+        "ADR-0188 D3: a desktop host is its owner's"
+    );
+    assert_eq!(row["type"], "workd");
+    assert_eq!(row["ownerMemberId"], json!(fixture.owner.to_string()));
+    let stored_key = std::fs::read_to_string(&workd.key).unwrap();
+    assert!(
+        !serde_json::to_string(&row)
+            .unwrap()
+            .contains(stored_key.trim()),
+        "the server never sees the private key"
+    );
+    eprintln!("wdc_4: registered member host {host}");
+    workd.start();
+
+    // ---- refused: an agent asking to spawn on its owner's machine ----------
+    let asked = http
+        .post(format!("{base}/v1/workspaces/{workspace}/work-controls"))
+        .bearer_auth(&agent_token)
+        .json(&json!({
+            "channelId": fixture.channel,
+            "runId": fixture.run,
+            "targetHostId": host,
+            "kind": "spawn",
+            "payload": {"tool": "claude", "label": "agent asks"},
+        }))
+        .send()
+        .await
+        .expect("agent spawn request");
+    let status = asked.status().as_u16();
+    let body: Value = asked.json().await.expect("refusal body");
+    assert_eq!(
+        (status, body["error"]["code"].as_str()),
+        (403, Some("remote_host_kill_only")),
+        "an agent's spawn request for a member host is refused: {body}"
+    );
+    eprintln!("wdc_4: agent spawn request refused 403 remote_host_kill_only");
+
+    // ---- an agent-origin spawn already on the ledger ------------------------
+    // Shaped like a row dispatched before R0 (an auto-approved agent spawn).
+    // A member host must never receive it (#2582 R0.1).
+    let legacy = insert_control(
+        &su,
+        &fixture,
+        host,
+        fixture.agent,
+        None,
+        "spawn",
+        json!({"tool": "claude", "label": "legacy agent spawn"}),
+    )
+    .await;
+
+    // ---- the owner resumes an orphaned session onto this host --------------
+    let old_laptop = register_idle_member_host(&http, &base, &token, &fixture).await;
+    let created = http
+        .post(format!("{base}/v1/workspaces/{workspace}/work-sessions"))
+        .bearer_auth(&token)
+        .json(&json!({
+            "channelId": fixture.channel,
+            "hostId": old_laptop,
+            "tool": "claude",
+            "label": "resume me",
+        }))
+        .send()
+        .await
+        .expect("create the source session");
+    assert_eq!(
+        created.status(),
+        201,
+        "the owner opens a session on the old laptop"
+    );
+    let created: Value = created.json().await.expect("source body");
+    let source = Uuid::parse_str(created["workSession"]["id"].as_str().expect("id")).unwrap();
+    orphan_session(&su, source).await;
+    let resumed = http
+        .post(format!(
+            "{base}/v1/workspaces/{workspace}/work-sessions/{source}/resume"
+        ))
+        .bearer_auth(&token)
+        .json(&json!({"targetHostId": host}))
+        .send()
+        .await
+        .expect("resume");
+    assert_eq!(
+        resumed.status(),
+        201,
+        "the owner may resume onto their own host"
+    );
+    let resumed: Value = resumed.json().await.expect("resumed body");
+    assert_eq!(resumed["workSession"]["hostId"], json!(host.to_string()));
+    let session = Uuid::parse_str(resumed["workSession"]["id"].as_str().expect("id")).unwrap();
+    let (resume_control, requester): (Uuid, Uuid) = sqlx::query_as(
+        "SELECT id, requester_member_id FROM work_control WHERE session_id = $1 AND kind = 'spawn'",
+    )
+    .bind(session)
+    .fetch_one(&su)
+    .await
+    .expect("the resume's spawn control");
+    assert_eq!(
+        requester, fixture.owner,
+        "the resume is the owner's own control"
+    );
+    wait_until("the resume spawn ack", &workd, || async {
+        (control_state(&su, resume_control).await == ("acked".to_string(), Some(session)))
+            .then_some(())
+    })
+    .await;
+    wait_until("the resumed turn to go idle", &workd, || async {
+        (session_status(&su, session).await == "idle").then_some(())
+    })
+    .await;
+    let root: Uuid = sqlx::query_scalar("SELECT root_message_id FROM work_session WHERE id = $1")
+        .bind(session)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    let replies: Value = http
+        .get(format!(
+            "{base}/v1/workspaces/{workspace}/channels/{}/messages/{root}/replies",
+            fixture.channel
+        ))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("read the session thread")
+        .json()
+        .await
+        .expect("replies body");
+    let answer: String = replies["messages"]
+        .as_array()
+        .expect("messages")
+        .iter()
+        .filter(|row| {
+            row["props"]["event_type"] == "agent.partial"
+                && row["props"]["event"]["work_session_id"] == json!(session.to_string())
+        })
+        .map(|row| {
+            row["props"]["event"]["text_delta"]
+                .as_str()
+                .unwrap_or_default()
+        })
+        .collect();
+    assert_eq!(answer, "stub heard: resume me — done.");
+    eprintln!(
+        "wdc_4: owner resume {resume_control} delivered and acked; session {session} ran its first turn"
+    );
+
+    // ---- the agent's row never reached the host -----------------------------
+    // The host polled throughout the round trip above; this row was in the same
+    // queue the whole time.
+    assert_eq!(
+        control_state(&su, legacy).await,
+        ("dispatched".to_string(), None),
+        "an agent-origin spawn must never reach a member host\n--- workd log ---\n{}",
+        workd.log_tail()
+    );
+    let prompts: Vec<String> = workd
+        .record("claude")
+        .iter()
+        .filter(|entry| entry["received"]["method"] == "session/prompt")
+        .filter_map(|entry| {
+            entry["received"]["params"]["prompt"][0]["text"]
+                .as_str()
+                .map(str::to_string)
+        })
+        .collect();
+    assert_eq!(
+        prompts,
+        ["resume me"],
+        "only the owner's instruction reached the agent"
+    );
+    let sessions: i64 = sqlx::query_scalar("SELECT count(*) FROM work_session WHERE host_id = $1")
+        .bind(host)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(
+        sessions, 1,
+        "the resumed session is the host's only session"
+    );
+    eprintln!("wdc_4: agent-origin spawn {legacy} still dispatched (withheld)");
+
+    // ---- kill reaches a member host from anyone ----------------------------
+    let kill = insert_control(
+        &su,
+        &fixture,
+        host,
+        fixture.agent,
+        Some(session),
+        "kill",
+        json!({}),
+    )
+    .await;
+    wait_until("the kill ack", &workd, || async {
+        (control_state(&su, kill).await.0 == "acked").then_some(())
+    })
+    .await;
+    wait_until("the session to end", &workd, || async {
+        (session_status(&su, session).await == "ended").then_some(())
+    })
+    .await;
+    eprintln!("wdc_4: agent kill {kill} delivered, session ended");
+
+    assert_eq!(workd.stop().await, Some(0), "SIGTERM is a clean stop");
 }
