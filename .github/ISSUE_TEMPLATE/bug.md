@@ -29,7 +29,7 @@ labels: ["type:bug", "status:ready"]
 - [ ] [rust]/[web]/[mobile] 해당 트리 게이트 green: <영향 패키지>
 - [ ] 회귀 방지(가능하면 테스트 추가)
 - [ ] 선행/인접 패키지 빌드 안 깨짐
-- [ ] runtime 결함이면 재현·수정을 `runtime-unverified` 여부와 함께 STATUS.md에 표기
+- [ ] runtime 결함이면 재현·수정을 `runtime-unverified` 여부와 함께 PR 본문 「검증」 절에 표기
 
 ## Depends on
 <!-- 선행 이슈가 있으면. 예: Depends on #NN -->
