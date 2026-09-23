@@ -167,7 +167,7 @@ CI alternative: `.github/workflows/release-desktop.yml` (dispatch only; self-hos
 |---|---|
 | `Developer ID Application: Kwak Seongjae (YWQQFQM38J)` | valid. Issued under the **G1** "Developer ID Certification Authority", so notAfter is **2027-02-01**. **[owner] renew under G2 before then.** Stapled builds remain valid after expiry. |
 | notarytool profile `momo-notary` | `xcrun notarytool history --keychain-profile momo-notary` exits 0. 72 past submissions (71 Accepted); most recent 2026-09-17. |
-| minisign updater key `~/.momo-secrets/momo-updater.key` | present; signing works with the publish script's defaults (offline test on a scratch dummy file). Key-protection details are kept out of the repo. |
+| minisign updater key `~/.momo-secrets/momo-updater.key` | present. **Since 2026-09-23 the key is password-protected** (same key pair; password in the login keychain item `momo-updater-key`, every read prompts). Export `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` from the keychain before publishing (`docs/NEXT_CHANNEL.md` §8.1). |
 | `gh` authentication to `momo-alpha` | admin/push |
 | `cargo-tauri` | 2.11.2 (rustc 1.95.0, Xcode 26.5) |
 
