@@ -1,5 +1,35 @@
 # 기획 저널 보관 — 2026-09
 
+## 2026-09-07 · Fable · ★클린 슬레이트 D-0 진단 완료 — 인벤토리·후보·ADR-0183(Proposed) 기안, 성재 결재 대기
+
+- 지시(성재 02:5x): 「clean slate라고 생각하고 불필요한 문서·Swift 코드 같은 레거시를 걷어내자. 코드베이스·문서 경량화, 남은 작업도 그 기반으로 재설계」 → 계획 `claudedocs/resume-2026-09-07/PLAN-clean-slate-diagnosis.md` §2 실행(read-only 실측).
+- 산출: `docs/planning/research/2026-09-07-clean-slate-inventory.md`(형상·LOC·접촉일·스크립트 배선·문서 참조·은퇴 흔적·게이트·라이브 의존) · `2026-09-07-clean-slate-candidates.md`(상위 20 + 영역별 + 감량 합) · **ADR-0183 Proposed**(정본 목록 D1 · 증보 1 삭제 게이트 → 「출시 범위 판정」 D3 · Swift 삭제 D4 · 이중 정본 D5 · 로테이션 규칙 D6 · LS-0~6).
+- 실측 요지: 파일 3,416 · 코드 ≈768k · md 107k. 은퇴 결정 난 채 남은 것 = Swift 4트리 222/78k(게이트: local_gate swift+runtime 7 프로파일·verifier 66본이 아직 빌드, 병합 권위엔 0) · web-legacy 26.8k(CI 계약 레인 1 + local_gate web 프로파일이 붙듦, 서빙·소비자 0) · mobile-spike 19.6k · infra/prod(SQL 4본은 Rust 이미지가 COPY — 이전 필요) · 핸드오프 닫힘/무참조 196 · research 비인용 ≈160. 감량 후보 ≈870 파일(25%)·≈203k LOC(23%).
+- 열린 것(성재 결정 5): ①PushRelay 지금 삭제(권고) ②workd/T3 데몬 삭제(권고, Rust 측 유지) ③`research/` ADR 인용분만 ④`claudedocs/` gitignore ⑤LS-0 정책 감사 자율 집행. 다음: Accept → `2026-09-07-lightening-program.md`(LS 티켓+G1/G2 재편성) → LS-0 ∥ LS-4 브리프 → 워커 발사는 go.
+
+## 2026-09-06 · Fable(+Opus 5 검수) · ★W3 파도 1 완결 — 엔진 4/4(SH-2·SH-4a·SH-4b·SH-3b) + ST-1, 셀프호스팅 문서 영문 정본·공개 엣지·day-2 CLI main 정본화
+
+- 결재: 「런칭 준비 마무리?」 아니오(G1은 W3 뒤) → 엔진 우선 + UXUI 안정화 권장 채택 → go.
+- 엔진(planner 검토): SH-2 #2110(R3, 승격 u 감사 5파일) · SH-4a #2115(설치 실측 개입 0) · SH-4b #2119 · SH-3b #2123(R3, 왕복 실측, 승격 x 감사 6파일) → main=6d42c1b4.
+- UXUI: ST-1 #2114(R1 FAIL B2·H3 → R2 FAIL B1·H1 → R3 FAIL B0·H1 → R4 FAIL B0·H2 → R5 FAIL B0·H1 → R6 PASS(B0·H0·M2·N4)) — 상한 3·백로그 가드·버스트 결정성 0/30·캡처 시계 고정(벽시계가 진짜 원인)·오프너 grant 핀. 랜딩 #2114 → 승격 y #2131 + sync #2132/#2133.
+- 발행: #2124 정책 파일 · #2130. DEVIATION 3행 accepted. PIPELINE §3 게이트 목록·체인 산출물 검사.
+- 교훈 ⑳~㉕: 미션 게이트 목록 명시 · 템플릿화 시 게이트 동반 상향 · 오라클의 배포 형상 인지 · 브리프 수용 숫자의 실사 · 체인 산출물 검사 · 엔진 레인 planner 검토 회전.
+- 다음: G1 잔여 편성(UXUI W3 + SH-5a·SH-6a) 성재 결재.
+
+## 2026-09-05 (저녁) · Fable(+Opus 5 검수) · ★W1 uxui 3차 파도 완결 — UX-R2a·UX-R2b 폐곡선 랜딩, 승격 q·r, 사고 2건(워커 사망·gitleaks 오탐)
+
+- 랜딩: UX-R2a #2088(R1 FAIL B0·H4 → R2 PASS → R3 CI 스캔 미니) → 승격 q #2092 + sync #2093/#2094(main 15e6e3e2). UX-R2b #2089(R1 FAIL B2·H4 → R2 FAIL B0·H1 → R3 PASS(B0·H0·M2·N4)) → 승격 r #2096 + sync #2097/#2099 → main=831315ae(sync 뒤 uxui 2ce432c2·engine 282a53f7). W1 uxui 8건 전부 main 정본화.
+- 발행: #2090(폰 패리티) · #2091(R2a 잔여) · #2095(R2b 잔여) · #2057 N-4 빈도 보고. DEVIATION 2행 accepted(R2a 상한 80→100 서버 미러·마커 join 시점 / R2b 백스톱 표면·exit both). PIPELINE §3 spawn 세션 분리.
+- 사고·교훈: 런처 태스크 정지가 nohup 워커 2기를 같이 죽임 → setsid spawn + 프로세스 부재 감시 · planner 이음새 `KEY = "…"`가 gitleaks 오탐 → SLOT + 지문 트리아지(커밋 범위 스캔) · 공유 파일은 동일 바이트로 무충돌 · 브리프 숫자/표면명은 정본 실사 · 로딩 중 판정 동결 축 상설.
+- 다음: 다음 파도 편성(성재 결재) · ITO(G1).
+
+## 2026-09-05 · Fable(+Opus 5 검수) · ★W1 uxui 2차 파도 완결 — UX-R1e 7회전·UX-R1b 10회전+병합 랜딩, 승격 n·o
+
+- 랜딩: UX-R1e #2071(R7 PASS: 인구 태그/role 477·미눌림 0, `--surface-pressed` §2.2 자 확정, 와이드 행 채움만, 3짝 102장) → 승격 n #2077. UX-R1b #2072(R10 PASS: 스레드 죽은 창 0·Dialog 클릭 관통 0ms(#2073)·축소 모션 hang 0·`motion_lib_scope` 패밀리) + R11 트랙 병합(코드 충돌 3파일) → 승격 o #2081(정책 감사) + sync #2082/#2083 → main=0bef6bf4.
+- 발행·정리: #2076·#2080 후속, #2073 close, #2074·#2075 선재, #2050 플레이크 원장. DEVIATION 2행 accepted + ADR-0179 D1 정오표.
+- 교훈: 「하네스 참·제품 거짓」+「실패할 수 없는 단정」이 두 티켓 17회전을 지배 — 미션 규율(인구=태그/role·가드=정의·모든 return·연결 노드·관측 경로) 상설 · 전 회전 수리의 회귀 먼저 · 브랜치 보호 base 최신(트랙 팁 병합, 충돌은 워커+병합 검수) · 게이트 플레이크는 원장 기록 후 재실행.
+- 다음: R2a·R2b 발사(go) · ITO 준비.
+
 ## 2026-09-04 (저녁) · Fable · ★결정 4건 집행(바닥 동시 상한 3·#2057 확정·7월 pending 정리) + R1e/R1b 발사 준비 — go 대기
 
 - 결정: #2050 N-2 동시 상한 3(ADR-0179 D3 정오표) · #2057 이징 기반 단일 상한 확정 · DEVIATION 7월 3건 판정(MOMO-412 유효 → #2066 `accepted`, MOMO-471/474 macOS 은퇴 → `noted`, #495 close) · 출시 계획 머리글 정정.

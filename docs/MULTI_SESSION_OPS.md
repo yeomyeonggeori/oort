@@ -1,6 +1,6 @@
 # 공유 워크트리 운영
 
-한 이슈 = 한 브랜치·워크트리·PR. 모델·병렬 상한은 [PIPELINE](planning/PIPELINE.md), 트랙/승격 권한은 [TRACKS](TRACKS.md)에만 정의한다.
+한 이슈 = 한 브랜치·워크트리·PR. 모델·병렬 판단은 [PIPELINE](planning/PIPELINE.md), 트랙/승격 권한은 [TRACKS](TRACKS.md)에만 정의한다.
 
 ## 0. 역할과 소유권
 서로 다른 기획 범위는 병렬로 진행할 수 있다. 같은 파일군의 구현은 분리하거나 순서를 정한다. 공용 통합은 `integration` 범위를 맡은 세션 하나가 수행한다. 다른 하네스에서도 같은 scope/session 기록을 읽는다.

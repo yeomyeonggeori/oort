@@ -1,0 +1,63 @@
+appId: app.momo.ios
+name: 92-action-role-required-capture
+---
+# 92-action-role-required-capture — 행동 승인 카드의 **403 뒤** 사진 (#2513 · #1084).
+#
+# `measure/` 의 표면들은 저 혼자 서서 찍히는데, 이 상태는 그럴 수 없다: 「관리자가
+# 승인해야 합니다」와 무장 해제는 결정이 **실제로 나가고** 403 영수증이 돌아와야
+# 선다. `ApprovalDecision` 의 상태는 prop 으로 세울 수 없고, 세울 수 있게 하는
+# 것은 배송 컴포넌트에 하네스 전용 문을 하나 더 내는 일이다(`initialArmed` 한
+# 개로 충분히 비싸다). 그래서 이 레인은 **정말로 누르고**, 서버 자리는 표면
+# `ACTION-ROLE-REQUIRED` 의 `DecisionStub` 이 403 `{status: "role_required"}` 로
+# 진다. 코어 `decideApproval` 과 폰 `ApprovalDecision` 은 전부 진짜다.
+#
+# 로그인도 서버도 필요 없고 `launchApp` 도 없다 — 앱을 다시 띄우면 계측 인자가
+# 아니라 보통의 앱이 뜬다(`90-mention-sheet-capture.yaml` 과 같은 사정).
+#
+# 쓰는 법(사람이 부른다):
+#
+#   xcrun simctl launch <udid> app.momo.ios --args \
+#     -momoMeasure ACTION-ROLE-REQUIRED -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro --device <udid> test clients/mobile/maestro/92-action-role-required-capture.yaml
+#   xcrun simctl io <udid> screenshot --type=png action2513-role-required-dark.png
+#
+# 라이트는 `LIGHT-ACTION-ROLE-REQUIRED`.
+#
+# id 는 표면의 승인 id(`ap-1`)를 접두로 한 testID 다(`MessageRow` →
+# `card-approval-{approvalId}`). 메시지 행은 VoiceOver 에게는 요소 하나로 묶여 있지만
+# (`accessible`), Maestro 의 계층에는 행 안의 testID 가 그대로 나온다 —
+# `maestro hierarchy` 실측(2026-09-23, iPhone 17 Pro): `card-approval-ap-1-approve`
+# bounds [204,308][331,352]. 그래서 좌표가 아니라 id 로 누른다.
+- extendedWaitUntil:
+    visible:
+      id: "card-approval-ap-1-approve"
+    timeout: 60000
+- tapOn:
+    id: "card-approval-ap-1-approve"
+- extendedWaitUntil:
+    visible:
+      id: "card-approval-ap-1-commit"
+    timeout: 10000
+- waitForAnimationToEnd:
+    timeout: 2000
+- takeScreenshot: action-armed
+- tapOn:
+    id: "card-approval-ap-1-commit"
+# 확정 가드(400ms). 무장 직후의 탭이 그 창 안이었다면 컨트롤은 보내지 않고
+# 「방금 누른 것과 이어진 동작」이라고 말한다 — 사람이 하듯 한 번 더 누른다.
+- runFlow:
+    when:
+      visible:
+        id: "card-approval-ap-1-too-fast"
+    commands:
+      - tapOn:
+          id: "card-approval-ap-1-commit"
+- extendedWaitUntil:
+    visible:
+      id: "card-approval-ap-1-error"
+    timeout: 10000
+- assertNotVisible:
+    id: "card-approval-ap-1-commit"
+- assertVisible:
+    id: "card-approval-ap-1-approve"
+- takeScreenshot: action-role-required
