@@ -163,11 +163,14 @@ spctl -a -t exec -vv /tmp/check/oort.app
 
 로그인 셸에서. 실패하면 여기서 멈춘다.
 
+**업데이터 키 암호:** 2026-09-23부터 필수다. 게시하는 셸에서 로그인 키체인 항목 `momo-updater-key`의 암호를 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 환경변수로 내보낸다.
+- 키체인 확인 창에서 허용한다.
+- 값은 화면·로그·문서에 내지 않는다.
+- 이 문서는 대입 명령을 싣지 않는다(`test_next_channel_hygiene.sh`).
+
 ```sh
 test -f ~/.momo-secrets/momo-updater.key && echo "minisign key: present"
-# 업데이터 키 암호(2026-09-23부터 필수). 키체인 확인 창에서 허용한다. 값은 출력하지 않는다.
-export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(security find-generic-password -s momo-updater-key -w)"
-test -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" || { echo "updater key password missing (keychain momo-updater-key)"; exit 1; }
+test -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" || { echo "updater key password not exported (keychain item momo-updater-key)"; exit 1; }
 security find-identity -v -p codesigning | grep -F "Developer ID Application: Kwak Seongjae (YWQQFQM38J)"
 xcrun notarytool history --keychain-profile momo-notary >/dev/null && echo "notary profile: ok"
 command -v cargo >/dev/null && cargo tauri --version
