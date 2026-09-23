@@ -57,7 +57,7 @@
 //!   session in `INITIAL_AGENT_MODE` (default `agent`, an auto-review mode) and
 //!   merges the JSON object in `CODEX_CONFIG` into each thread's config
 //!   overrides, next to its own `features` table. Measured with the real
-//!   adapter and codex 0.146.1: dotted keys (`features.hooks`) travel as
+//!   adapter and codex-cli 0.156.1: dotted keys (`features.hooks`) travel as
 //!   separate overrides beside that table, and whichever codex applies last
 //!   wins — the flag was lost in one order. One nested `features` table is
 //!   merged by the adapter into its own and survives in every order (#2602
