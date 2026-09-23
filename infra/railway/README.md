@@ -229,7 +229,8 @@ includes Production.
 
 1. Create the project and the services from `railway.json` (image, start
    command, pre-deploy, volumes, variables as tabled). Give **caddy** the public
-   domain (custom or `*.up.railway.app`) on port 8080.
+   domain (custom or `*.up.railway.app`) on port 8080 first: the generator needs
+   it as `RAILWAY_PUBLIC_DOMAIN`, and the shared variables come from that run.
 2. **postgres** → wait until it accepts connections.
 3. **centrifugo**.
 4. **api** — pre-deploy runs roles then migrations; the deploy fails if either
@@ -267,8 +268,17 @@ scripts/oort doctor --tier t2 --env ~/.momo-secrets/railway-oort.env --json
 ```
 
 `public.websocket` sends `Origin: https://<domain>` over HTTP/1.1, so an empty
-or wrong Centrifugo `allowed_origins` fails it (403). Two things the doctor
-cannot see, because every response that carries them needs a signed-in session:
+or wrong Centrifugo `allowed_origins` fails it (403). From a machine outside
+the project, `public.*`, `stack.healthz` and `stack.agent_port` are the
+meaningful rows: `stack.outbox`, `stack.migrate_idempotency` and
+`roles.momo_notifier` read Postgres at `postgres.railway.internal` and fail on
+the connection there. Run the full doctor as the image one-off inside the
+project (`docs/SELF_HOST_AGENT.md` §3.4 Day-2). An image's own `scripts/oort`
+is that image's version: the Origin-sending `public.websocket` is in images
+built after #2205.
+
+Two things the doctor cannot see, because every response that carries them
+needs a signed-in session:
 
 - the sign-in response's `realtimeWebSocketUrl` must be
   `wss://<domain>/connection/websocket` (not `ws://`), and
