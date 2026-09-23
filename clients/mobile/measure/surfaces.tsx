@@ -50,7 +50,11 @@ import {AgentActivityBar} from '../src/features/agents/turnSurfaces';
 import {markAgentWorking, resetAgentWorking} from '../src/features/agents/workingSignal';
 import {RealtimeContext} from '../src/realtime/RealtimeProvider';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
-import {Timeline} from '../src/features/conversation/Timeline';
+import {
+  Timeline,
+  type PillState,
+  type TimelineGeometry,
+} from '../src/features/conversation/Timeline';
 import {Screen, ScreenHeader} from '../src/design/atoms';
 import {ThemeControl} from '../src/design/ThemeControl';
 import {parseExecutionPlan} from '@momo/core/lib/executionPlan';
@@ -1185,6 +1189,438 @@ function StoppedRow({
   );
 }
 
+/**
+ * #1892 — 두 점프 필이 **함께** 선 순간, 그리고 각각을 누른 뒤의 착지.
+ *
+ * 이 장은 저 혼자 한 자리까지 간다: 진입 수렴이 바닥에 앉힌 뒤(최대 4초 — 여유를
+ * 두고 3초) 목록 가운데로 옮기고, 거기서 남의 말 두 통을 더 받는다. 그러면 위
+ * 필은 방을 연 순간의 수(28 — 구분선과 같은 수)를, 아래 필은 떠난 뒤 붙은
+ * 수(2)를 말한다. 같은 낱말이 두 다른 모집단을 세는 것이 한 장에서 읽힌다 —
+ * 그것이 「동결 N」이다.
+ *
+ * 누르는 것은 이 파일이 아니라 Maestro 가 한다(`maestro/91-jump-pills-capture.yaml`).
+ * 누른 뒤의 착지를 찍으려면 정말로 눌러야 한다: 이 장이 스스로 스크롤해서
+ * 「착지」를 흉내 내면, 사진은 필이 아니라 흉내를 찍는다.
+ *
+ * 문장은 한 팀의 배포 스레드다. 줄 길이가 들쭉날쭉한 것은 일부러다 — 한 줄짜리
+ * 행만으로는 `scrollToIndex` 가 측정 안 된 행을 겨누는 회복 경로가 안 불린다.
+ */
+const JUMP_PILL_LINES = [
+  '배포 체크리스트 공유합니다. 각자 담당 항목 확인 부탁드려요.',
+  '인증 서버 설정은 제가 봤습니다.',
+  '스테이징 데이터베이스 마이그레이션 0186 끝났습니다. 롤백 스크립트도 같이 올렸어요.',
+  '좋아요.',
+  'CDN 캐시 무효화는 배포 직후 한 번 더 돌리겠습니다.',
+  '결제 모듈 회귀 테스트 312건 전부 통과했습니다. 느린 테스트 두 건은 따로 표시해 두었어요.',
+  '확인했습니다.',
+  '모바일 빌드는 오늘 저녁에 올라갑니다.',
+] as const;
+
+/** 고정된 동일성 — 판독 줄이 다시 그려질 때 컴포저까지 다시 그리지 않게. */
+const NOOP = () => {};
+
+const JUMP_PILL_COUNT = 40;
+/** 떠난 뒤 도착하는 두 줄. 다른 줄과 겹치지 않는 본문 — 착지를 글자로 확인한다. */
+const JUMP_PILL_ARRIVALS = [
+  '롤백 리허설 끝났습니다. 이상 없어요.',
+  '배포 창 10시 확정으로 공지 올렸습니다.',
+] as const;
+/** 커서. 구분선은 이 다음 줄 위에 선다. */
+const JUMP_PILL_CURSOR = 12;
+
+function jumpPillMessage(seq: number): Message {
+  const line = JUMP_PILL_LINES[seq % JUMP_PILL_LINES.length];
+  return {
+    ...MESSAGE,
+    id: `00000000-0000-7000-8000-${String(1892_000 + seq).padStart(12, '0')}`,
+    seq,
+    hlcTs: seq,
+    authorMemberId: seq % 3 === 0 ? SELF : seq % 3 === 1 ? OTHER : AGENT,
+    body: seq % 5 === 0 ? `${line}\n${JUMP_PILL_LINES[(seq + 3) % JUMP_PILL_LINES.length]}` : line,
+    createdAtMs: NOW + seq * 60_000,
+    thread: undefined,
+  };
+}
+
+const JUMP_PILL_HISTORY: Message[] = Array.from(
+  {length: JUMP_PILL_COUNT},
+  (_, i) => jumpPillMessage(i + 1),
+);
+
+function JumpPillsStage(): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const listRef = React.useRef<unknown>(null);
+  const metricsRef = React.useRef<TimelineGeometry | null>(null);
+  const pillsRef = React.useRef<PillState | null>(null);
+  const [messages, setMessages] = React.useState<Message[]>(JUMP_PILL_HISTORY);
+  const [geometryLine, setGeometryLine] = React.useState('기하 측정 중…');
+  const [traceLine, setTraceLine] = React.useState('');
+  React.useEffect(() => {
+    const move = setTimeout(() => {
+      const geometry = metricsRef.current;
+      if (geometry === null || geometry.contentHeight <= 0) return;
+      (
+        listRef.current as {
+          scrollToOffset?: (options: {offset: number; animated: boolean}) => void;
+        } | null
+      )?.scrollToOffset?.({
+        offset: Math.max(
+          0,
+          geometry.contentHeight * 0.55 - geometry.viewportHeight / 2,
+        ),
+        animated: false,
+      });
+    }, 3000);
+    // 남의 말 두 통. 내 말이었다면 아래 필은 세지 않는다(웹 M-3 과 같은 판정).
+    // 본문이 다른 줄과 겹치지 않는 것은 일부러다: Maestro 가 「아래 필을 누른 뒤
+    // 이 두 줄이 화면에 있는가」를 **글자로** 기다린다 — 착지의 증거가 좌표가
+    // 아니라 도착한 줄 자체다.
+    const arrive = setTimeout(() => {
+      setMessages(current => [
+        ...current,
+        {
+          ...jumpPillMessage(JUMP_PILL_COUNT + 1),
+          authorMemberId: OTHER,
+          body: JUMP_PILL_ARRIVALS[0],
+        },
+        {
+          ...jumpPillMessage(JUMP_PILL_COUNT + 2),
+          authorMemberId: AGENT,
+          body: JUMP_PILL_ARRIVALS[1],
+        },
+      ]);
+    }, 3800);
+    // 목록이 스스로 보고한 기하를 사진 위에 적는다. 「착지했다」는 그림만으로는
+    // 반쯤만 증명된다 — 끝까지 남은 거리가 숫자로 함께 찍혀야 한다. 둘째 줄은
+    // 오프셋이 바뀐 순간들의 기록이다(이전 변화로부터의 ms → 오프셋/콘텐츠). 한
+    // 장의 사진이 「어디에 섰나」뿐 아니라 「어떻게 거기 갔나」도 말한다.
+    //
+    // 표본은 40ms 마다 **ref 에만** 쌓고, 화면에 옮기는 것은 250ms 마다다. 표본마다
+    // 상태를 바꾸면 이 장이 초당 스물다섯 번 다시 그려지고, 그 JS 부하가 재려는
+    // 스크롤 자체를 늦춘다(첫 판이 그랬다 — 진입 수렴이 끝을 162pt 앞두고 멈췄다).
+    let last: number | null = null;
+    let lastAt = 0;
+    const changes: string[] = [];
+    let line = '';
+    const sample = setInterval(() => {
+      const geometry = metricsRef.current;
+      if (geometry === null) return;
+      const offset = Math.round(geometry.offsetY);
+      const content = Math.round(geometry.contentHeight);
+      const left = content - (offset + Math.round(geometry.viewportHeight));
+      line = `오프셋 ${offset} · 콘텐츠 ${content} · 창 ${Math.round(
+        geometry.viewportHeight,
+      )} · 끝까지 ${left}`;
+      if (offset !== last) {
+        const now = Date.now();
+        changes.push(`+${last === null ? 0 : now - lastAt}→${offset}/${content}`);
+        if (changes.length > 7) changes.shift();
+        last = offset;
+        lastAt = now;
+      }
+    }, 40);
+    const readout = setInterval(() => {
+      const pills = pillsRef.current;
+      const verdict =
+        pills === null
+          ? ''
+          : ` · 구분선 ${pills.relation ?? '미보고'} · 래치 ${
+              pills.latched ? pills.latchNote ?? '예' : '아니오'
+            } · 앉음 ${pills.settled ? '예' : '아니오'}`;
+      const next = line === '' ? '' : line + verdict;
+      setGeometryLine(current => (current === next || next === '' ? current : next));
+      const trace = changes.join(' ');
+      setTraceLine(current => (current === trace ? current : trace));
+    }, 250);
+    return () => {
+      clearTimeout(move);
+      clearTimeout(arrive);
+      clearInterval(sample);
+      clearInterval(readout);
+    };
+  }, []);
+  return (
+    <Screen>
+      <Text style={styles.label}>
+        위 = 연 순간의 안읽음(동결 28) · 아래 = 떠난 뒤 붙은 남의 말 (#1892)
+      </Text>
+      <Text style={styles.label} testID="jump-pills-geometry">
+        {geometryLine}
+      </Text>
+      <Text style={styles.label} numberOfLines={2}>
+        {traceLine}
+      </Text>
+      <ScreenHeader title="배포" onBack={NOOP} titleTestID="measure-title" />
+      <ConversationLayout
+        list={
+          <Timeline
+            messages={messages}
+            directory={DIRECTORY}
+            status="ready"
+            channelKind="public"
+            myMemberId={SELF}
+            nowMs={NOW + 3_000_000}
+            lastReadSeq={JUMP_PILL_CURSOR}
+            unreadCount={JUMP_PILL_COUNT - JUMP_PILL_CURSOR}
+            jumpPills
+            pillsRef={pillsRef}
+            metricsRef={metricsRef}
+            listRef={listRef as never}
+          />
+        }
+        composer={
+          <Composer
+            recipient="place"
+            channelLabel="배포"
+            directory={DIRECTORY}
+            draftKey="measure:jump-pills"
+            onSend={NOOP}
+          />
+        }
+      />
+    </Screen>
+  );
+}
+
+// =============================================================================
+// #1892 R1 — 방을 **옮긴 뒤**의 두 필, 그리고 다른 방으로의 착지
+// (design-review 2594 H-1 · M-1 · M-4).
+//
+// 앱의 순서를 그대로 재연한다. 대화 화면은 방을 옮길 때 목록을 언마운트하지 않고
+// (`channelId` 만 바뀐다), `useTimeline` 은 **효과에서** 비운다. 그래서 목록이 보는
+// 것은 늘 세 렌더다:
+//
+//   switch   새 방 id + 앞 방의 행
+//   loading  새 방 id + 빈 메시지
+//   b        새 방의 첫 페이지
+//
+// 새 방에서는 에이전트가 일하고 있어 「작업 중」 자리가 셋 내내 목록을 붙잡는다 —
+// 리뷰가 짚은, 목록이 한 번도 비지 않는 판이다.
+//
+// 앞 방은 짧다. 바닥에 앉은 자리에서 구분선이 보여 래치가 걸린다(판독 줄 「래치
+// seen@…」). 그 래치가 새 방으로 넘어오면 새 방의 「안읽음으로」가 서지 않는다 —
+// 사진이 그것을 잰다. 누르는 것과 키보드를 올리는 것은 Maestro 가 한다
+// (`maestro/93-jump-pills-rooms-capture.yaml`, 착지는 `94-`).
+//
+// `land` 가 `middle` 이면 새 방의 첫 페이지와 **같은 렌더에서** 그 방 가운데 줄로
+// 가는 점프를 건다(ADE 「대화로」). 새 목록의 첫 레이아웃 보고보다 점프가 먼저 오는
+// 순서다 — 첫 판에서는 늦게 온 그 보고가 진입 수렴을 태워 목록을 바닥으로 끌었다
+// (R1 M-1).
+//
+// `end` 면 같은 자리에서 **가장 새 메시지**로 간다 — #2584 이후 가장 흔한 알림 탭
+// 착지다(design-review 2594 R2 H-A). 목표는 끝에 clamp 되고, R2 는 거기서 「최신
+// 메시지로 이동」을 세운 채 따라가기를 끈 채로 두었다. 착지하고 9초 뒤 남의 말이 한
+// 통 붙는다 — 목록이 그것을 따라가야 한다(`maestro/95-`).
+// =============================================================================
+
+type RoomPhase = 'a' | 'switch' | 'loading' | 'b';
+
+const ROOM_A_COUNT = 6;
+/** 앞 방의 커서. 안읽음 두 줄 — 바닥에 앉으면 구분선이 창 안이다. */
+const ROOM_A_CURSOR = 4;
+/** 새 방의 커서와 수 — 바닥에 앉으면 구분선은 창 위쪽 밖이다. */
+const ROOM_B_CURSOR = JUMP_PILL_CURSOR;
+/** 다른 방 착지의 목적지. 다른 줄과 겹치지 않는 본문 — 착지를 글자로 확인한다. */
+const ROOM_B_LANDING_SEQ = 24;
+const ROOM_B_LANDING_BODY = '롤백 리허설 일정은 목요일 오후로 잡았습니다.';
+
+function roomMessage(room: 'a' | 'b', seq: number): Message {
+  const base = jumpPillMessage(seq);
+  return {
+    ...base,
+    id: `00000000-0000-7000-8${room === 'a' ? 'a' : 'b'}00-${String(
+      1892_000 + seq,
+    ).padStart(12, '0')}`,
+    channelId: room === 'a' ? 'room-a' : 'room-b',
+    body:
+      room === 'b' && seq === ROOM_B_LANDING_SEQ ? ROOM_B_LANDING_BODY : base.body,
+  };
+}
+
+const ROOM_A_HISTORY: Message[] = Array.from({length: ROOM_A_COUNT}, (_, i) =>
+  roomMessage('a', i + 1),
+);
+const ROOM_B_HISTORY: Message[] = Array.from({length: JUMP_PILL_COUNT}, (_, i) =>
+  roomMessage('b', i + 1),
+);
+/** 새 방에서 일하는 에이전트 — 이 자리가 목록을 붙잡는다. 동일성 고정. */
+const ROOM_B_WORKING = [{memberId: AGENT}] as const;
+const ROOM_B_LANDING = {
+  messageId: ROOM_B_HISTORY[ROOM_B_LANDING_SEQ - 1].id,
+  seq: ROOM_B_LANDING_SEQ,
+  token: 1,
+};
+
+/** 끝 근처 착지(R2 H-A)의 목적지 — 가장 새 메시지. 본문으로 착지를 확인한다. */
+const ROOM_B_NEWEST_BODY = '오늘 배포 마무리 공지 올렸습니다.';
+/** 착지 뒤 도착하는 남의 말. 목록이 따라가는지 본문으로 확인한다. */
+const ROOM_B_ARRIVAL_BODY = '방금 배포 창 닫혔습니다. 모두 수고하셨어요.';
+const ROOM_B_END_HISTORY: Message[] = ROOM_B_HISTORY.map(message =>
+  message.seq === JUMP_PILL_COUNT ? {...message, body: ROOM_B_NEWEST_BODY} : message,
+);
+const ROOM_B_ARRIVAL: Message = {
+  ...roomMessage('b', JUMP_PILL_COUNT + 1),
+  authorMemberId: OTHER,
+  body: ROOM_B_ARRIVAL_BODY,
+};
+const ROOM_B_WITH_ARRIVAL: Message[] = [...ROOM_B_END_HISTORY, ROOM_B_ARRIVAL];
+const ROOM_B_LANDING_END = {
+  messageId: ROOM_B_END_HISTORY[JUMP_PILL_COUNT - 1].id,
+  seq: JUMP_PILL_COUNT,
+  token: 1,
+};
+
+function JumpPillsRoomsStage({
+  land,
+}: {
+  land: 'none' | 'middle' | 'end';
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const listRef = React.useRef<unknown>(null);
+  const metricsRef = React.useRef<TimelineGeometry | null>(null);
+  const pillsRef = React.useRef<PillState | null>(null);
+  const [phase, setPhase] = React.useState<RoomPhase>('a');
+  const [arrived, setArrived] = React.useState(false);
+  const [readout, setReadout] = React.useState('기하 측정 중…');
+  const [trace, setTrace] = React.useState('');
+  React.useEffect(() => {
+    if (land !== 'end') return undefined;
+    // 새 방의 첫 페이지(9초)와 착지 뒤, 흐름이 착지를 한 장 찍을 시간을 둔다. Maestro
+    // 드라이버가 뜨는 데만 몇 초가 들어서, 12초로는 착지 사진에 이미 이 줄이 찍혔다.
+    const arrive = setTimeout(() => setArrived(true), 18000);
+    return () => clearTimeout(arrive);
+  }, [land]);
+  React.useEffect(() => {
+    // 앞 방에서 진입 수렴이 앉고(최대 4초) 래치가 걸릴 시간, 그리고 Maestro 가
+    // 드라이버를 띄워 앞 방을 한 장 찍을 시간을 둔다(3초로는 흐름이 첫 판독을 하기
+    // 전에 방이 바뀌었다).
+    const toSwitch = setTimeout(() => setPhase('switch'), 8000);
+    const toLoading = setTimeout(() => setPhase('loading'), 8300);
+    const toB = setTimeout(() => setPhase('b'), 9000);
+    // 오프셋이 바뀐 순간들(`JumpPillsStage` 와 같은 기록): 새 방에서 목록이 **어떻게**
+    // 거기 갔는지. 표본은 40ms 마다 ref 에만 쌓고, 화면에는 250ms 마다 옮긴다 —
+    // 표본마다 상태를 바꾸면 재려는 스크롤을 늦춘다.
+    let last: number | null = null;
+    let lastAt = 0;
+    const changes: string[] = [];
+    const sample = setInterval(() => {
+      const geometry = metricsRef.current;
+      if (geometry === null) return;
+      const offset = Math.round(geometry.offsetY);
+      if (offset === last) return;
+      const now = Date.now();
+      changes.push(
+        `+${last === null ? 0 : now - lastAt}→${offset}/${Math.round(
+          geometry.contentHeight,
+        )}`,
+      );
+      if (changes.length > 9) changes.shift();
+      last = offset;
+      lastAt = now;
+    }, 40);
+    const tick = setInterval(() => {
+      const geometry = metricsRef.current;
+      const pills = pillsRef.current;
+      if (geometry === null || pills === null) return;
+      const left = Math.round(
+        geometry.contentHeight - (geometry.offsetY + geometry.viewportHeight),
+      );
+      const next = `끝까지 ${left} · 구분선 ${pills.relation ?? '미보고'} · 래치 ${
+        pills.latched ? pills.latchNote ?? '예' : '아니오'
+      } · 앉음 ${pills.settled ? '예' : '아니오'}`;
+      setReadout(current => (current === next ? current : next));
+      const joined = changes.join(' ');
+      setTrace(current => (current === joined ? current : joined));
+    }, 250);
+    return () => {
+      clearTimeout(toSwitch);
+      clearTimeout(toLoading);
+      clearTimeout(toB);
+      clearInterval(sample);
+      clearInterval(tick);
+    };
+  }, []);
+  const inB = phase !== 'a';
+  const roomB =
+    land === 'end'
+      ? arrived
+        ? ROOM_B_WITH_ARRIVAL
+        : ROOM_B_END_HISTORY
+      : ROOM_B_HISTORY;
+  const messages =
+    phase === 'a' || phase === 'switch'
+      ? ROOM_A_HISTORY
+      : phase === 'loading'
+        ? []
+        : roomB;
+  const landing =
+    phase !== 'b'
+      ? undefined
+      : land === 'middle'
+        ? ROOM_B_LANDING
+        : land === 'end'
+          ? ROOM_B_LANDING_END
+          : undefined;
+  return (
+    <Screen>
+      <Text style={styles.label} testID="jump-pills-rooms-phase">
+        {`방 ${inB ? 'B' : 'A'} · 단계 ${phase}${
+          land === 'middle'
+            ? ' · 다른 방 착지'
+            : land === 'end'
+              ? ' · 끝 근처 착지'
+              : ''
+        } (#1892 R1)`}
+      </Text>
+      <Text style={styles.label} testID="jump-pills-rooms-readout">
+        {readout}
+      </Text>
+      <Text style={styles.label} numberOfLines={2}>
+        {trace}
+      </Text>
+      <ScreenHeader
+        title={inB ? '배포' : '디자인'}
+        onBack={NOOP}
+        titleTestID="measure-title"
+      />
+      <ConversationLayout
+        list={
+          <Timeline
+            messages={messages}
+            directory={DIRECTORY}
+            status={phase === 'loading' ? 'loading' : 'ready'}
+            channelId={inB ? 'room-b' : 'room-a'}
+            channelKind="public"
+            myMemberId={SELF}
+            nowMs={NOW + 3_000_000}
+            lastReadSeq={inB ? ROOM_B_CURSOR : ROOM_A_CURSOR}
+            unreadCount={
+              inB
+                ? JUMP_PILL_COUNT - ROOM_B_CURSOR
+                : ROOM_A_COUNT - ROOM_A_CURSOR
+            }
+            working={inB ? ROOM_B_WORKING : undefined}
+            jumpTarget={landing}
+            jumpPills
+            pillsRef={pillsRef}
+            metricsRef={metricsRef}
+            listRef={listRef as never}
+          />
+        }
+        composer={
+          <Composer
+            recipient="place"
+            channelLabel={inB ? '배포' : '디자인'}
+            directory={DIRECTORY}
+            draftKey="measure:jump-pills-rooms"
+            onSend={NOOP}
+          />
+        }
+      />
+    </Screen>
+  );
+}
+
 export function Surface({name}: {name: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   // 이슈 #1112 — 고정 여부만 다른 두 시트. 낱말이 상태를 따라 뒤집히는 것을 한
@@ -1628,6 +2064,18 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           <RecoveryDivider seq={4821} source="backfill" />
         </Frame>
       );
+    // #1892 — 안읽음·최신 점프 필. 누르는 것은 `maestro/91-jump-pills-capture.yaml`.
+    case 'jump-pills':
+      return <JumpPillsStage />;
+    // #1892 R1 — 방을 옮긴 뒤의 필(H-1)·키보드(M-4), 그리고 다른 방 착지(M-1).
+    // 흐름은 `maestro/93-`(방 옮기기·키보드)과 `94-`(다른 방 착지).
+    case 'jump-pills-rooms':
+      return <JumpPillsRoomsStage land="none" />;
+    case 'jump-pills-land':
+      return <JumpPillsRoomsStage land="middle" />;
+    // R2 H-A — 가장 새 메시지로의 다른 방 착지와 그 뒤의 따라가기. `maestro/95-`.
+    case 'jump-pills-land-end':
+      return <JumpPillsRoomsStage land="end" />;
     case 'row':
       return (
         <Frame label="행 — 반응 칩과 스레드 앵커는 항상 보이는 진입점">
