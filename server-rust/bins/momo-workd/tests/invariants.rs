@@ -9,11 +9,12 @@
 //! | `inv_3_every_permission_request_is_denied_with_a_reason` | `policy::decide_permission` (never `allow_*`) |
 //! | `inv_4_round_trip_events_idle_input_kill` | the curated projection, idle/running, owner-only input, kill → ended |
 //! | `inv_5_leaving_the_fixed_mode_mid_session_closes_it` | `policy::check_mode_update` |
-//! | `inv_6_codex_is_never_launched_remotely` | `policy::check_adapter_admitted` in `SessionManager::spawn` (#2602 M-2) |
+//! | `inv_6_codex_runs_only_from_the_hosts_own_home` | `policy::prepare_codex_home` and `policy::check_project_config` in `SessionManager::spawn`, the Codex launch environment (ADR-0188 §8, #2607) |
 //! | `inv_8_a_spawn_from_anyone_but_the_owner_is_refused` | `ControlLoop::require_owner` on spawn (#2602 M-4) |
 //! | `inv_9_a_refused_resume_ends_its_preallocated_session` | `ControlLoop::end_preallocated_session` (#2602 M-4) |
 //! | `inv_10_run_serves_member_hosts_only` | the scope gate in `cli::run` (#2602 M-4) |
 //! | `inv_11_credentials_never_leave_the_host_even_split_across_flushes` | `projection::redact_credentials` and the relay's hold (`session::ready_len`) (#2602 M-1) |
+//! | `inv_11b_codex_events_are_sanitised_and_split_the_same_way` | the same relay for a Codex session (ADR-0188 §8, #2607) |
 //! | `inv_12_a_slash_command_never_reaches_the_agent` | `policy::check_prompt` on the spawn label and on input (#2602 L-7) |
 //! | `inv_13_rows_for_another_host_or_not_dispatched_are_ignored` | the host/status filter in `ControlLoop::poll_once` (#2602 L-6) |
 //! | `inv_14_sessions_and_queued_inputs_are_bounded` | `max_sessions` in `SessionManager::spawn`, `MAX_QUEUED_PROMPTS` in the session task (#2602 L-2) |
@@ -33,7 +34,7 @@ use momo_workd::client::{
 };
 use momo_workd::config::ToolEntry;
 use momo_workd::controls::ControlLoop;
-use momo_workd::policy::AdapterKind;
+use momo_workd::policy::{AdapterKind, CodexHome};
 use momo_workd::session::{
     SessionManager, SessionSettings, MODE_ESCAPED_DETAIL, PERMISSION_DENIED_DETAIL,
 };
@@ -191,6 +192,7 @@ struct Harness {
     channel: Uuid,
     record: PathBuf,
     dir: PathBuf,
+    codex: CodexHome,
 }
 
 impl Drop for Harness {
@@ -235,8 +237,10 @@ fn harness_with(tools: &[(&str, AdapterKind, &[&str])]) -> Harness {
         acp_start_timeout: Duration::from_secs(10),
         parent_env,
         max_sessions: 2,
+        codex: CodexHome::beside(&dir.join("state").join("host.json")),
     };
     let owner = Uuid::new_v4();
+    let codex = settings.codex.clone();
     let sessions = SessionManager::new(server.clone(), settings);
     Harness {
         controls: ControlLoop::new(server.clone(), sessions, owner),
@@ -245,7 +249,22 @@ fn harness_with(tools: &[(&str, AdapterKind, &[&str])]) -> Harness {
         channel: Uuid::new_v4(),
         record,
         dir,
+        codex,
     }
+}
+
+/// The owner signed Codex in to the host's own home once
+/// (`CODEX_HOME=… codex login`); only the file's presence matters here.
+fn sign_in_codex(h: &Harness) {
+    use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&h.codex.home)
+        .unwrap();
+    let auth = h.codex.home.join("auth.json");
+    std::fs::write(&auth, "{\"auth_mode\":\"test\"}").unwrap();
+    std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o600)).unwrap();
 }
 
 fn control(
@@ -658,26 +677,78 @@ async fn inv_5_leaving_the_fixed_mode_mid_session_closes_it() {
 }
 
 #[tokio::test]
-async fn inv_6_codex_is_never_launched_remotely() {
-    // #2602 M-2: even a Codex that would report the host's preset
-    // (`read-only`) is refused — that preset runs sandboxed commands and
-    // writes without a permission request.
-    let mut h = harness_with(&[("codex", AdapterKind::Codex, &["--mode", "read-only"])]);
-    let request = spawn(&h, "codex", "look around");
-    h.server.push(request.clone());
+async fn inv_6_codex_runs_only_from_the_hosts_own_home() {
+    // ADR-0188 §8 (2026-09-24): Codex runs inside its accepted sandbox, from
+    // the host's own CODEX_HOME, signed in there by the owner.
+    let mut h = harness_with(&[(
+        "codex",
+        AdapterKind::Codex,
+        &["--codex-modes", "--mode", "read-only"],
+    )]);
+
+    // Not signed in to the host's home yet: refused before anything launches.
+    let early = spawn(&h, "codex", "look around");
+    h.server.push(early.clone());
     h.controls.poll_once().await.unwrap();
     assert_eq!(
-        ack_for(&h, request.id),
-        ControlAck::refused("adapter_refused"),
-        "a Codex spawn must be refused"
+        ack_for(&h, early.id),
+        ControlAck::refused("codex_login_required")
     );
-    assert!(
-        !h.record.exists(),
-        "the Codex adapter is never launched: {:?}",
-        stub_log(&h)
+    assert!(!h.record.exists(), "nothing launched: {:?}", stub_log(&h));
+
+    // A project `.codex` in the folder is still refused.
+    sign_in_codex(&h);
+    std::fs::create_dir_all(h.dir.join("repo").join(".codex")).unwrap();
+    let project = spawn(&h, "codex", "look around");
+    h.server.push(project.clone());
+    h.controls.poll_once().await.unwrap();
+    assert_eq!(
+        ack_for(&h, project.id),
+        ControlAck::refused("project_config_refused")
     );
-    assert!(h.server.creates().is_empty());
-    assert!(h.controls.sessions().live_sessions().is_empty());
+    assert!(!h.record.exists());
+    std::fs::remove_dir_all(h.dir.join("repo").join(".codex")).unwrap();
+
+    // Signed in: the session runs, from the host's home, in the fixed preset.
+    let request = spawn(&h, "codex", "summarise the repo");
+    h.server.push(request.clone());
+    h.controls.poll_once().await.unwrap();
+    let session = ack_for(&h, request.id).session_id.expect("ok spawn ack");
+    wait_for("the first turn to end", || {
+        h.server
+            .statuses(session)
+            .contains(&SessionStatus::Idle { exit_code: 0 })
+    })
+    .await;
+    let log = stub_log(&h);
+    let env = &log[0]["env_isolation"];
+    assert_eq!(
+        env["CODEX_HOME"].as_str().map(PathBuf::from),
+        Some(h.codex.home.clone()),
+        "the owner's ~/.codex is never Codex's home"
+    );
+    assert_eq!(
+        env["TMPDIR"].as_str().map(PathBuf::from),
+        Some(h.codex.tmp.clone())
+    );
+    assert_eq!(env["INITIAL_AGENT_MODE"], "read-only");
+    let config: Value = serde_json::from_str(env["CODEX_CONFIG"].as_str().unwrap()).unwrap();
+    for feature in momo_workd::policy::CODEX_DISABLED_FEATURES {
+        assert_eq!(config["features"][*feature], false, "{feature}");
+    }
+    assert_eq!(
+        std::fs::read_to_string(h.codex.home.join("config.toml")).unwrap(),
+        momo_workd::policy::codex_home_config(),
+        "the host's own config, written before the session"
+    );
+    let answer: String = h
+        .server
+        .events()
+        .iter()
+        .filter(|event| event.event_type == "agent.partial")
+        .map(|event| event.payload["text_delta"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(answer, "stub heard: summarise the repo — done.");
 }
 
 #[tokio::test]
@@ -854,10 +925,73 @@ fn inv_10_run_serves_member_hosts_only() {
 #[tokio::test]
 async fn inv_11_credentials_never_leave_the_host_even_split_across_flushes() {
     let mut h = harness(&[("claude", &["--leak"])]);
-    let request = spawn(&h, "claude", "show me the config");
+    assert_nothing_leaks(&mut h, "claude").await;
+}
+
+#[tokio::test]
+async fn inv_11b_codex_events_are_sanitised_and_split_the_same_way() {
+    // ADR-0188 §8: Codex reads the whole disk, so the event-stream
+    // sanitisation (#2602 M-1) is what stands between a read secret and the
+    // server — the same relay, the same result.
+    let mut h = harness_with(&[
+        (
+            "codex",
+            AdapterKind::Codex,
+            &["--codex-modes", "--mode", "read-only", "--leak"],
+        ),
+        (
+            "codex-long",
+            AdapterKind::Codex,
+            &[
+                "--codex-modes",
+                "--mode",
+                "read-only",
+                "--long-answer",
+                "9000",
+            ],
+        ),
+    ]);
+    sign_in_codex(&h);
+    assert_nothing_leaks(&mut h, "codex").await;
+
+    // And a long Codex answer is split into fields of at most 3,500
+    // characters without losing a character.
+    let request = spawn(&h, "codex-long", "write a lot");
     h.server.push(request.clone());
     h.controls.poll_once().await.unwrap();
     let session = ack_for(&h, request.id).session_id.expect("ok spawn ack");
+    wait_for("the long turn to end", || {
+        h.server
+            .statuses(session)
+            .contains(&SessionStatus::Idle { exit_code: 0 })
+    })
+    .await;
+    let partials: Vec<String> = h
+        .server
+        .events()
+        .into_iter()
+        .filter(|event| {
+            event.event_type == "agent.partial"
+                && event.payload["work_session_id"] == json!(session)
+        })
+        .map(|event| event.payload["text_delta"].as_str().unwrap().to_string())
+        .collect();
+    assert!(partials.len() >= 3, "9,000 characters take three fields");
+    assert!(partials
+        .iter()
+        .all(|partial| partial.chars().count() <= momo_workd::projection::MAX_FIELD_CHARS));
+    let long: String = "lorem ".chars().cycle().take(9000).collect();
+    assert_eq!(
+        partials.concat(),
+        format!("stub heard: write a lot{long} — done.")
+    );
+}
+
+async fn assert_nothing_leaks(h: &mut Harness, tool: &str) {
+    let request = spawn(h, tool, "show me the config");
+    h.server.push(request.clone());
+    h.controls.poll_once().await.unwrap();
+    let session = ack_for(h, request.id).session_id.expect("ok spawn ack");
     wait_for("the leaking turn to end", || {
         h.server
             .statuses(session)

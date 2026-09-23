@@ -10,7 +10,7 @@
 //! | leaving the fixed mode mid-session closes the remote path | [`check_mode_update`] |
 //! | no remote `shell` | [`check_remote_tool`] |
 //! | remote text never runs an adapter slash command | [`check_prompt`] |
-//! | only ACP adapters with a permission bridge | [`AdapterKind`], [`check_adapter_admitted`] |
+//! | only ACP adapters with a permission bridge; Codex inside its accepted sandbox (ADR-0188 §8) | [`AdapterKind`], [`prepare_codex_home`] |
 //! | every ACP permission request is denied until the R1 bridge lands | [`decide_permission`] |
 //! | project hooks / MCP servers / allow rules are not applied | [`AdapterKind::isolation_env`], [`session_new_params`], [`check_project_config`] |
 //! | no TCP port | nothing in this crate binds a socket; the conformance test checks the process |
@@ -42,19 +42,22 @@
 //!   2.1.280: with the fence, a `Read` of `/etc/hosts` failed without even a
 //!   permission request, and `cat /etc/hosts` reached the permission bridge
 //!   (and was denied).
-//! * **Codex — not admitted (#2602 M-2).** `@agentclientprotocol/codex-acp`
-//!   1.13.0 has three presets and sends the chosen preset's approval policy on
-//!   every turn (`approvalPolicy: agentMode.approvalPolicy`, its only
-//!   producer). Even the strictest, `read-only` ("Ask for approval"), is
-//!   `on-request` with a `workspaceWrite` sandbox: sandboxed commands and writes
-//!   in the folder run without a permission request. No preset asks before
-//!   every command (`untrusted` occurs nowhere in the adapter). So the
-//!   permission bridge that ADR-0188 D6 calls the real defence does not hold,
-//!   and [`check_adapter_admitted`] refuses Codex — in the config and at spawn —
-//!   until ADR-0188 decides otherwise.
+//! * **Codex — admitted inside its sandbox (ADR-0188 §8, 2026-09-24).**
+//!   `@agentclientprotocol/codex-acp` 1.13.0 has three presets and sends the
+//!   chosen preset's approval policy and sandbox on every turn. The strictest,
+//!   `read-only` ("Ask for approval"), is `on-request` with a `workspaceWrite`
+//!   sandbox and no network: commands and writes inside the folder (and `/tmp`
+//!   and `$TMPDIR`) run without a permission request, reads see the whole disk,
+//!   and anything that must leave the sandbox is an approval request that
+//!   reaches the permission bridge (#2602 M-2, #2607 measurements). ADR-0188
+//!   §8 accepts that sandbox as the boundary on these conditions, all enforced
+//!   here: a host-only `CODEX_HOME` holding only the sign-in
+//!   ([`prepare_codex_home`]; the owner's `~/.codex` — its MCP servers, rules,
+//!   hooks, plugins and instructions — is never read), `TMPDIR` pointed at a
+//!   host folder, the features below switched off, no project `.codex`, and
+//!   the process tree ended with the session (`crate::proctree`).
 //!
-//!   The isolation below stays correct for that day. The adapter starts every
-//!   session in `INITIAL_AGENT_MODE` (default `agent`, an auto-review mode) and
+//!   The adapter starts every session in `INITIAL_AGENT_MODE` (default `agent`, an auto-review mode) and
 //!   merges the JSON object in `CODEX_CONFIG` into each thread's config
 //!   overrides, next to its own `features` table. Measured with the real
 //!   adapter and codex-cli 0.156.1: dotted keys (`features.hooks`) travel as
@@ -88,9 +91,13 @@ pub enum Refusal {
     ToolNotAllowlisted,
     /// ADR-0188 D6: the agent is not in the host's fixed permission mode.
     PermissionModeRefused,
-    /// ADR-0188 D6: the adapter's permission requests do not cover every
-    /// command and write, so it is not launched remotely (#2602 M-2).
-    AdapterRefused,
+    /// ADR-0188 §8: Codex has not been signed in to the host's own
+    /// `CODEX_HOME` yet (`CODEX_HOME=<path> codex login`, once).
+    CodexLoginRequired,
+    /// ADR-0188 §8: the host's own `CODEX_HOME` is not private to the owner,
+    /// sits inside the allowed folder, or carries configuration beyond the
+    /// sign-in (instructions, rules, hooks, prompts).
+    CodexHomeRefused,
     /// ADR-0188 D6: the folder carries project agent configuration the adapter
     /// would apply and the host cannot switch off.
     ProjectConfigRefused,
@@ -126,7 +133,8 @@ impl Refusal {
             Self::ShellRefused => "shell_refused",
             Self::ToolNotAllowlisted => "tool_not_allowlisted",
             Self::PermissionModeRefused => "permission_mode_refused",
-            Self::AdapterRefused => "adapter_refused",
+            Self::CodexLoginRequired => "codex_login_required",
+            Self::CodexHomeRefused => "codex_home_refused",
             Self::ProjectConfigRefused => "project_config_refused",
             Self::WorkdirUnavailable => "workdir_unavailable",
             Self::AgentStartFailed => "agent_start_failed",
@@ -178,11 +186,18 @@ impl AdapterKind {
 
     /// Environment the host sets on the adapter so project hooks, MCP servers
     /// and allow rules are not applied (ADR-0188 D6). Set after the owner's own
-    /// environment, so an inherited value cannot win.
-    pub fn isolation_env(self) -> Vec<(String, String)> {
+    /// environment, so an inherited value cannot win. Codex also gets the
+    /// host's own home and temp folder ([`CodexHome`], ADR-0188 §8).
+    pub fn isolation_env(self, codex: &CodexHome) -> Vec<(String, String)> {
         match self {
             Self::Claude => Vec::new(),
             Self::Codex => vec![
+                // The host's own Codex home: the owner's `~/.codex` (its MCP
+                // servers, rules, hooks, plugins, instructions) is never read.
+                ("CODEX_HOME".to_string(), codex.home.display().to_string()),
+                // The sandbox keeps `$TMPDIR` writable: make it a host folder
+                // rather than the owner's per-user temp.
+                ("TMPDIR".to_string(), codex.tmp.display().to_string()),
                 // Otherwise every session opens in the auto-review mode.
                 (
                     "INITIAL_AGENT_MODE".to_string(),
@@ -197,11 +212,7 @@ impl AdapterKind {
                 // flags were lost whenever the table came last (#2602 M-3).
                 (
                     "CODEX_CONFIG".to_string(),
-                    json!({
-                        "features": {"hooks": false, "plugins": false, "apps": false},
-                        "notify": [],
-                    })
-                    .to_string(),
+                    json!({"features": codex_disabled_features(), "notify": []}).to_string(),
                 ),
             ],
         }
@@ -276,12 +287,13 @@ pub fn launch_spec(
     entry: &ToolEntry,
     cwd: &Path,
     parent_env: impl IntoIterator<Item = (String, String)>,
+    codex: &CodexHome,
 ) -> LaunchSpec {
     let mut env: Vec<(String, String)> = parent_env
         .into_iter()
         .filter(|(key, _)| !is_withheld_env(key))
         .collect();
-    for (key, value) in entry.adapter.isolation_env() {
+    for (key, value) in entry.adapter.isolation_env(codex) {
         env.retain(|(existing, _)| existing != &key);
         env.push((key, value));
     }
@@ -297,18 +309,15 @@ pub fn launch_spec(
 /// `cwd` up to its git root. `codex-acp` trusts the session folder, codex then
 /// loads `.codex/config.toml` from each of those directories, and its
 /// deep-merged layers leave the host no override that removes a project MCP
-/// server or rule. `codex_home` (the owner's own `~/.codex`) is the user layer,
-/// not a project one, and is skipped. Claude's project settings are switched
-/// off by `settingSources: []`, so nothing is refused for it here.
-pub fn check_project_config(
-    adapter: AdapterKind,
-    cwd: &Path,
-    codex_home: Option<&Path>,
-) -> Result<(), Refusal> {
+/// server or rule. With the host's own `CODEX_HOME` (ADR-0188 §8) the owner's
+/// `~/.codex` is no longer the user layer, so a folder whose chain reaches it
+/// (the home folder itself) is refused like any other project `.codex`.
+/// Claude's project settings are switched off by `settingSources: []`, so
+/// nothing is refused for it here.
+pub fn check_project_config(adapter: AdapterKind, cwd: &Path) -> Result<(), Refusal> {
     if adapter != AdapterKind::Codex {
         return Ok(());
     }
-    let codex_home = codex_home.and_then(|home| std::fs::canonicalize(home).ok());
     // The directories codex reads project layers from: `cwd` and its parents up
     // to the repository root (only `cwd` when there is no repository).
     let mut chain: Vec<PathBuf> = Vec::new();
@@ -324,32 +333,189 @@ pub fn check_project_config(
         chain.truncate(1);
     }
     for directory in chain {
-        let dot_codex = directory.join(".codex");
-        if !dot_codex.exists() {
-            continue;
-        }
-        let is_user_home = codex_home
-            .as_deref()
-            .is_some_and(|home| std::fs::canonicalize(&dot_codex).ok().as_deref() == Some(home));
-        if !is_user_home {
+        if directory.join(".codex").exists() {
             return Err(Refusal::ProjectConfigRefused);
         }
     }
     Ok(())
 }
 
-/// Where Codex keeps the owner's own configuration: `$CODEX_HOME`, else
-/// `$HOME/.codex`.
-pub fn codex_home(env: &[(String, String)]) -> Option<PathBuf> {
-    let lookup = |name: &str| {
-        env.iter()
-            .find(|(key, _)| key == name)
-            .map(|(_, value)| value.clone())
-            .filter(|value| !value.is_empty())
-    };
-    lookup("CODEX_HOME")
-        .map(PathBuf::from)
-        .or_else(|| lookup("HOME").map(|home| Path::new(&home).join(".codex")))
+// ---------------------------------------------------------------------------
+// Codex's host-only home (ADR-0188 §8)
+// ---------------------------------------------------------------------------
+
+/// Codex features a remote session runs without (ADR-0188 §8): the user-layer
+/// extension points (hooks, plugins, apps and connectors, MCP installs for
+/// skills) and everything that acts outside the command sandbox (computer and
+/// browser control, local automations, an automated approval reviewer).
+/// Measured with codex-cli 0.155.1 `features list` under the host home: every
+/// one reads `false` with this table as a `-c features={…}` override.
+pub const CODEX_DISABLED_FEATURES: &[&str] = &[
+    "hooks",
+    "plugins",
+    "apps",
+    "remote_plugin",
+    "plugin_sharing",
+    "skill_mcp_dependency_install",
+    "computer_use",
+    "browser_use",
+    "browser_use_external",
+    "browser_use_full_cdp_access",
+    "in_app_browser",
+    "in_app_local_automation",
+    "guardian_approval",
+];
+
+fn codex_disabled_features() -> Value {
+    Value::Object(
+        CODEX_DISABLED_FEATURES
+            .iter()
+            .map(|feature| (feature.to_string(), Value::Bool(false)))
+            .collect(),
+    )
+}
+
+/// The host's own `config.toml` for Codex, rewritten before every Codex
+/// session: the sign-in stays in a file here, nothing else is configured, and
+/// the same features are off again at this layer.
+pub fn codex_home_config() -> String {
+    let mut config = String::from(
+        "# Written by momo-workd before every remote Codex session (ADR-0188 §8).\n\
+         # The host's own Codex home: the sign-in only. Changes here are replaced.\n\
+         cli_auth_credentials_store = \"file\"\n\
+         notify = []\n\
+         \n\
+         [features]\n",
+    );
+    for feature in CODEX_DISABLED_FEATURES {
+        config.push_str(&format!("{feature} = false\n"));
+    }
+    config
+}
+
+/// Entries of a Codex home that would configure the agent beyond the sign-in
+/// (instructions, exec-policy rules, hooks, custom prompts). Codex itself
+/// writes its caches, logs, session records and system skills there; those
+/// are not configuration and are left alone.
+const CODEX_HOME_FORBIDDEN: &[&str] = &[
+    "AGENTS.md",
+    "AGENTS.override.md",
+    "hooks.json",
+    "rules",
+    "prompts",
+];
+
+/// Where the host keeps Codex's home and temp folder: beside the registration
+/// state, owned by the host (ADR-0188 §8).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodexHome {
+    pub home: PathBuf,
+    pub tmp: PathBuf,
+}
+
+impl CodexHome {
+    pub fn beside(state_path: &Path) -> Self {
+        let folder = state_path.parent().unwrap_or_else(|| Path::new("."));
+        Self {
+            home: folder.join("codex-home"),
+            tmp: folder.join("codex-tmp"),
+        }
+    }
+
+    /// The command that signs Codex in to this home.
+    pub fn login_command(&self) -> String {
+        format!("CODEX_HOME=\"{}\" codex login", self.home.display())
+    }
+}
+
+fn private_dir(path: &Path) -> Result<(), Refusal> {
+    use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
+    if !path.exists() {
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(path)
+            .map_err(|_| Refusal::CodexHomeRefused)?;
+    }
+    let metadata = std::fs::symlink_metadata(path).map_err(|_| Refusal::CodexHomeRefused)?;
+    // SAFETY: `geteuid` has no preconditions and cannot fail.
+    let uid = unsafe { libc::geteuid() };
+    if !metadata.is_dir() || metadata.uid() != uid || metadata.mode() & 0o077 != 0 {
+        return Err(Refusal::CodexHomeRefused);
+    }
+    Ok(())
+}
+
+/// ADR-0188 §8, before every Codex session: the host's own `CODEX_HOME` and
+/// temp folder exist and are the owner's alone (`0700`), neither lies inside
+/// the allowed folder (the sandbox may write there), the home holds the
+/// sign-in and no configuration beyond it, and its `config.toml` is the
+/// host's. Without a sign-in the session is refused with
+/// `codex_login_required`; the owner signs in once with
+/// [`CodexHome::login_command`] — the host never copies the owner's
+/// credentials.
+pub fn prepare_codex_home(codex: &CodexHome, cwd: &Path) -> Result<(), Refusal> {
+    use std::io::Write as _;
+    use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _};
+    private_dir(&codex.home)?;
+    private_dir(&codex.tmp)?;
+    for folder in [&codex.home, &codex.tmp] {
+        let folder = std::fs::canonicalize(folder).map_err(|_| Refusal::CodexHomeRefused)?;
+        if folder.starts_with(cwd) || cwd.starts_with(&folder) {
+            return Err(Refusal::CodexHomeRefused);
+        }
+    }
+    for entry in CODEX_HOME_FORBIDDEN {
+        let path = codex.home.join(entry);
+        let present = match std::fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_dir() => std::fs::read_dir(&path)
+                .map(|mut entries| entries.next().is_some())
+                .unwrap_or(true),
+            Ok(_) => true,
+            Err(_) => false,
+        };
+        if present {
+            return Err(Refusal::CodexHomeRefused);
+        }
+    }
+    let config = codex.home.join("config.toml");
+    let wanted = codex_home_config();
+    if std::fs::read_to_string(&config).ok().as_deref() != Some(wanted.as_str()) {
+        let temporary = codex
+            .home
+            .join(format!(".config.toml.tmp-{}", std::process::id()));
+        let _ = std::fs::remove_file(&temporary);
+        let written = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&temporary)
+            .and_then(|mut file| {
+                file.write_all(wanted.as_bytes())
+                    .and_then(|()| file.sync_all())
+            })
+            .and_then(|()| std::fs::rename(&temporary, &config));
+        if written.is_err() {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(Refusal::CodexHomeRefused);
+        }
+    }
+    // The sign-in: a private regular file (codex writes it `0600`).
+    match std::fs::symlink_metadata(codex.home.join("auth.json")) {
+        Ok(metadata) => {
+            // SAFETY: `geteuid` has no preconditions and cannot fail.
+            let uid = unsafe { libc::geteuid() };
+            if !metadata.file_type().is_file()
+                || metadata.uid() != uid
+                || metadata.mode() & 0o077 != 0
+            {
+                return Err(Refusal::CodexHomeRefused);
+            }
+            Ok(())
+        }
+        Err(_) => Err(Refusal::CodexLoginRequired),
+    }
 }
 
 /// `session/new` params: the resolved folder, **no** MCP servers, and the
@@ -431,17 +597,6 @@ pub fn is_valid_tool_key(raw: &str) -> bool {
 // ---------------------------------------------------------------------------
 // the invariants
 // ---------------------------------------------------------------------------
-
-/// ADR-0188 D6 「원격 spawn은 ACP 권한 다리가 있는 도구만」: only an adapter
-/// whose permission requests cover every command and write is launched. Claude
-/// in `default` asks before every edit and command. Codex has no such mode (see
-/// the module docs, #2602 M-2) and is refused until ADR-0188 is revised.
-pub fn check_adapter_admitted(adapter: AdapterKind) -> Result<(), Refusal> {
-    match adapter {
-        AdapterKind::Claude => Ok(()),
-        AdapterKind::Codex => Err(Refusal::AdapterRefused),
-    }
-}
 
 /// Remote text is a prompt, never an adapter command (#2602 L-7). Both
 /// adapters run a first line that starts with `/` as their own verb — Codex's
@@ -568,6 +723,19 @@ mod tests {
         }
     }
 
+    fn codex_fixture() -> CodexHome {
+        CodexHome::beside(Path::new("/state/workd/host.json"))
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "momo-workd-policy-{name}-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::canonicalize(dir).unwrap()
+    }
+
     #[test]
     fn shell_is_refused_in_any_case() {
         assert_eq!(check_remote_tool("shell"), Err(Refusal::ShellRefused));
@@ -654,6 +822,7 @@ mod tests {
                 ),
                 ("PATH".to_string(), "/usr/bin".to_string()),
             ],
+            &codex_fixture(),
         );
         assert_eq!(spec.program, PathBuf::from("/opt/agents/bin/adapter"));
         assert_eq!(spec.args.first().map(String::as_str), Some("--owner-flag"));
@@ -698,7 +867,9 @@ mod tests {
         for rule in ["Read(~/.ssh/**)", "Read(~/.codex/**)", "Read(**/.env)"] {
             assert!(deny.contains(&rule), "{rule} is denied");
         }
-        assert!(AdapterKind::Claude.isolation_env().is_empty());
+        assert!(AdapterKind::Claude
+            .isolation_env(&codex_fixture())
+            .is_empty());
     }
 
     #[test]
@@ -712,7 +883,11 @@ mod tests {
                     "agent-full-access".to_string(),
                 ),
                 ("CODEX_CONFIG".to_string(), "{}".to_string()),
+                // The owner's own settings must not win either (ADR-0188 §8).
+                ("CODEX_HOME".to_string(), "/Users/me/.codex".to_string()),
+                ("TMPDIR".to_string(), "/var/folders/xx/T/".to_string()),
             ],
+            &codex_fixture(),
         );
         let value = |name: &str| {
             let matches: Vec<&String> = spec
@@ -725,12 +900,25 @@ mod tests {
             matches[0].clone()
         };
         assert_eq!(value("INITIAL_AGENT_MODE"), "read-only");
+        assert_eq!(value("CODEX_HOME"), "/state/workd/codex-home");
+        assert_eq!(value("TMPDIR"), "/state/workd/codex-tmp");
         let config: Value = serde_json::from_str(&value("CODEX_CONFIG")).unwrap();
-        // #2602 M-3: one nested table, no dotted keys beside it.
-        assert_eq!(
-            config,
-            json!({"features": {"hooks": false, "plugins": false, "apps": false}, "notify": []})
-        );
+        // #2602 M-3: one nested table, no dotted keys beside it. ADR-0188 §8:
+        // every feature that extends the agent or acts outside the sandbox off.
+        let features = config["features"].as_object().unwrap();
+        assert_eq!(features.len(), CODEX_DISABLED_FEATURES.len());
+        for feature in [
+            "hooks",
+            "plugins",
+            "apps",
+            "computer_use",
+            "browser_use",
+            "in_app_local_automation",
+            "guardian_approval",
+        ] {
+            assert_eq!(features[feature], false, "{feature}");
+        }
+        assert_eq!(config["notify"], json!([]));
         assert!(config
             .as_object()
             .unwrap()
@@ -748,7 +936,7 @@ mod tests {
     #[test]
     fn the_adapter_merge_keeps_every_codex_flag_in_one_table() {
         let (_, raw) = AdapterKind::Codex
-            .isolation_env()
+            .isolation_env(&codex_fixture())
             .into_iter()
             .find(|(key, _)| key == "CODEX_CONFIG")
             .unwrap();
@@ -760,14 +948,11 @@ mod tests {
             .unwrap_or_default();
         features.insert("cwd_relative_turn_diffs".into(), json!(false));
         config.insert("features".into(), Value::Object(features));
-        assert_eq!(
-            Value::Object(config.clone()),
-            json!({
-                "features": {"hooks": false, "plugins": false, "apps": false,
-                             "cwd_relative_turn_diffs": false},
-                "notify": []
-            })
-        );
+        let merged = config["features"].as_object().unwrap();
+        assert_eq!(merged.len(), CODEX_DISABLED_FEATURES.len() + 1);
+        assert!(CODEX_DISABLED_FEATURES
+            .iter()
+            .all(|feature| merged[*feature] == false));
         assert_eq!(
             config
                 .keys()
@@ -779,13 +964,85 @@ mod tests {
     }
 
     #[test]
-    fn only_claude_is_admitted_remotely() {
-        assert_eq!(check_adapter_admitted(AdapterKind::Claude), Ok(()));
+    fn the_codex_home_is_private_signed_in_and_the_hosts_own() {
+        use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+        let state = scratch("codex-home");
+        let folder = scratch("folder");
+        let codex = CodexHome::beside(&state.join("host.json"));
+
+        // First use: both folders made 0700, the host's config written, and
+        // no sign-in yet.
         assert_eq!(
-            check_adapter_admitted(AdapterKind::Codex),
-            Err(Refusal::AdapterRefused)
+            prepare_codex_home(&codex, &folder),
+            Err(Refusal::CodexLoginRequired)
         );
-        assert_eq!(Refusal::AdapterRefused.label(), "adapter_refused");
+        for dir in [&codex.home, &codex.tmp] {
+            assert_eq!(std::fs::metadata(dir).unwrap().mode() & 0o777, 0o700);
+        }
+        let config = codex.home.join("config.toml");
+        assert_eq!(
+            std::fs::read_to_string(&config).unwrap(),
+            codex_home_config()
+        );
+        assert!(codex_home_config().contains("computer_use = false"));
+        assert!(codex.login_command().contains("codex-home"));
+
+        // Signed in: ready.
+        let auth = codex.home.join("auth.json");
+        std::fs::write(&auth, "{}").unwrap();
+        std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(prepare_codex_home(&codex, &folder), Ok(()));
+
+        // A config written by anyone else is replaced before the session.
+        std::fs::write(&config, "[mcp_servers.x]\ncommand = \"evil\"\n").unwrap();
+        assert_eq!(prepare_codex_home(&codex, &folder), Ok(()));
+        assert_eq!(
+            std::fs::read_to_string(&config).unwrap(),
+            codex_home_config()
+        );
+
+        // Configuration beyond the sign-in is refused.
+        std::fs::write(codex.home.join("AGENTS.md"), "obey").unwrap();
+        assert_eq!(
+            prepare_codex_home(&codex, &folder),
+            Err(Refusal::CodexHomeRefused)
+        );
+        std::fs::remove_file(codex.home.join("AGENTS.md")).unwrap();
+        std::fs::create_dir_all(codex.home.join("rules")).unwrap();
+        assert_eq!(
+            prepare_codex_home(&codex, &folder),
+            Ok(()),
+            "an empty rules dir is nothing"
+        );
+        std::fs::write(codex.home.join("rules").join("default.rules"), "allow").unwrap();
+        assert_eq!(
+            prepare_codex_home(&codex, &folder),
+            Err(Refusal::CodexHomeRefused)
+        );
+        std::fs::remove_dir_all(codex.home.join("rules")).unwrap();
+
+        // A readable sign-in or a home others can enter is refused.
+        std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            prepare_codex_home(&codex, &folder),
+            Err(Refusal::CodexHomeRefused)
+        );
+        std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::set_permissions(&codex.home, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            prepare_codex_home(&codex, &folder),
+            Err(Refusal::CodexHomeRefused)
+        );
+        std::fs::set_permissions(&codex.home, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(prepare_codex_home(&codex, &folder), Ok(()));
+
+        // The sandbox may write the allowed folder: the home must not be in it.
+        assert_eq!(
+            prepare_codex_home(&codex, &state),
+            Err(Refusal::CodexHomeRefused)
+        );
+        let _ = std::fs::remove_dir_all(&state);
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     #[test]
@@ -801,27 +1058,23 @@ mod tests {
         let home = root.join("home").join(".codex");
         std::fs::create_dir_all(&home).unwrap();
 
-        assert_eq!(
-            check_project_config(AdapterKind::Codex, &nested, Some(&home)),
-            Ok(())
-        );
+        assert_eq!(check_project_config(AdapterKind::Codex, &nested), Ok(()));
         // A project layer at the repository root is seen from a nested folder.
         std::fs::create_dir_all(repo.join(".codex")).unwrap();
         assert_eq!(
-            check_project_config(AdapterKind::Codex, &nested, Some(&home)),
+            check_project_config(AdapterKind::Codex, &nested),
             Err(Refusal::ProjectConfigRefused)
         );
         // Claude's project settings are off by `settingSources: []` instead.
-        assert_eq!(
-            check_project_config(AdapterKind::Claude, &nested, Some(&home)),
-            Ok(())
-        );
-        // The owner's own CODEX_HOME is the user layer, not a project one.
+        assert_eq!(check_project_config(AdapterKind::Claude, &nested), Ok(()));
+        // With the host's own CODEX_HOME (ADR-0188 §8) the owner's `~/.codex`
+        // is no longer the user layer: reached from the folder, it is a
+        // project layer like any other and is refused.
         std::fs::remove_dir_all(repo.join(".codex")).unwrap();
         std::os::unix::fs::symlink(&home, repo.join(".codex")).unwrap();
         assert_eq!(
-            check_project_config(AdapterKind::Codex, &nested, Some(&home)),
-            Ok(())
+            check_project_config(AdapterKind::Codex, &nested),
+            Err(Refusal::ProjectConfigRefused)
         );
         let _ = std::fs::remove_dir_all(root);
     }

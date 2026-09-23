@@ -7,6 +7,7 @@
 //!                        permission outcome, to PATH as JSON lines
 //!   --mode ID            `currentModeId` reported by `session/new` (default `default`)
 //!   --no-modes           omit `modes` from `session/new`
+//!   --codex-modes        report codex-acp's preset catalog instead of Claude's
 //!   --permission         during each prompt, ask `session/request_permission`
 //!   --escape-mode ID     during each prompt, report `current_mode_update` → ID
 //!   --escape-via-config  report that escape as `config_option_update` instead
@@ -19,6 +20,8 @@
 //!                        `setsid()` — the shape of a codex shell tool — and
 //!                        writes "<sleeper pid> <helper pid>" to PATH
 //!   --exit-after-turn    exit on its own after answering the first prompt
+//!   --long-answer N      during each prompt, answer N more characters in one
+//!                        chunk (words of `lorem` separated by spaces)
 //!
 //! Anything else on the command line (the host's isolation arguments) is
 //! accepted and recorded.
@@ -32,6 +35,7 @@ struct Options {
     record: Option<String>,
     mode: String,
     modes: bool,
+    codex_modes: bool,
     permission: bool,
     escape_mode: Option<String>,
     escape_via_config: bool,
@@ -39,6 +43,7 @@ struct Options {
     leak: bool,
     setsid_grandchild: Option<String>,
     exit_after_turn: bool,
+    long_answer: usize,
 }
 
 fn parse() -> Options {
@@ -46,6 +51,7 @@ fn parse() -> Options {
         record: None,
         mode: "default".to_string(),
         modes: true,
+        codex_modes: false,
         permission: false,
         escape_mode: None,
         escape_via_config: false,
@@ -53,6 +59,7 @@ fn parse() -> Options {
         leak: false,
         setsid_grandchild: None,
         exit_after_turn: false,
+        long_answer: 0,
     };
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
@@ -60,6 +67,7 @@ fn parse() -> Options {
             "--record" => options.record = args.next(),
             "--mode" => options.mode = args.next().unwrap_or_default(),
             "--no-modes" => options.modes = false,
+            "--codex-modes" => options.codex_modes = true,
             "--permission" => options.permission = true,
             "--escape-mode" => options.escape_mode = args.next(),
             "--escape-via-config" => options.escape_via_config = true,
@@ -67,6 +75,9 @@ fn parse() -> Options {
             "--leak" => options.leak = true,
             "--setsid-grandchild" => options.setsid_grandchild = args.next(),
             "--exit-after-turn" => options.exit_after_turn = true,
+            "--long-answer" => {
+                options.long_answer = args.next().and_then(|n| n.parse().ok()).unwrap_or(0)
+            }
             _ => {}
         }
     }
@@ -131,6 +142,18 @@ impl Stub {
             json!({"sessionUpdate": "agent_message_chunk",
                    "content": {"type": "text", "text": format!("stub heard: {text}")}}),
         );
+        if self.options.long_answer > 0 {
+            let text: String = "lorem "
+                .chars()
+                .cycle()
+                .take(self.options.long_answer)
+                .collect();
+            self.update(
+                &session_id,
+                json!({"sessionUpdate": "agent_message_chunk",
+                       "content": {"type": "text", "text": text}}),
+            );
+        }
         if self.options.leak {
             // Synthetic, well-formed credentials — never real, and assembled
             // with `concat!` so this source carries no scanner-shaped literal.
@@ -263,14 +286,23 @@ impl Stub {
                 Some("session/new") => {
                     let mut result = json!({"sessionId": "stub-session-1"});
                     if self.options.modes {
-                        result["modes"] = json!({
-                            "currentModeId": self.options.mode,
-                            "availableModes": [
+                        let catalog = if self.options.codex_modes {
+                            json!([
+                                {"id": "read-only", "name": "Ask for approval"},
+                                {"id": "agent", "name": "Approve for me"},
+                                {"id": "agent-full-access", "name": "Full access"}
+                            ])
+                        } else {
+                            json!([
                                 {"id": "default", "name": "Default"},
                                 {"id": "acceptEdits", "name": "Accept Edits"},
                                 {"id": "plan", "name": "Plan"},
                                 {"id": "bypassPermissions", "name": "Bypass Permissions"}
-                            ]
+                            ])
+                        };
+                        result["modes"] = json!({
+                            "currentModeId": self.options.mode,
+                            "availableModes": catalog,
                         });
                     }
                     self.respond(&id, result);
@@ -312,6 +344,9 @@ fn grandchild_helper(path: &str) {
             Ok(())
         });
     }
+    // Never waited for on purpose: this helper outlives the sleeper and ends
+    // only by SIGKILL, and the test checks that the host's census reaps both.
+    #[allow(clippy::zombie_processes)]
     let sleeper = sleeper.spawn().expect("spawn the detached sleeper");
     let _ = std::fs::write(path, format!("{} {}\n", sleeper.id(), std::process::id()));
     // Outlive the sleeper too: only a SIGKILL ends this process.
@@ -351,6 +386,8 @@ fn main() {
         "env_isolation": {
             "INITIAL_AGENT_MODE": std::env::var("INITIAL_AGENT_MODE").ok(),
             "CODEX_CONFIG": std::env::var("CODEX_CONFIG").ok(),
+            "CODEX_HOME": std::env::var("CODEX_HOME").ok(),
+            "TMPDIR": std::env::var("TMPDIR").ok(),
         },
     }));
     stub.serve();

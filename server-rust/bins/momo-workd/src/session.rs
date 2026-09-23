@@ -90,6 +90,8 @@ pub struct SessionSettings {
     pub parent_env: Vec<(String, String)>,
     /// Most sessions (agent processes) this host runs at once (#2602 L-2).
     pub max_sessions: usize,
+    /// Codex's host-only home and temp folder (ADR-0188 §8).
+    pub codex: policy::CodexHome,
 }
 
 /// Most instructions one session keeps queued behind its running turn
@@ -164,22 +166,31 @@ impl SessionManager {
             .get(tool)
             .cloned()
             .ok_or(Refusal::ToolNotAllowlisted)?;
-        // ADR-0188 D6: only an adapter whose permission requests cover every
-        // command and write (#2602 M-2). The config refuses Codex too; this is
-        // the check that holds even for settings built some other way.
-        policy::check_adapter_admitted(entry.adapter)?;
         // (3) The allowed folder, resolved at every spawn.
         let cwd = std::fs::canonicalize(&self.settings.working_directory)
             .ok()
             .filter(|path| path.is_dir())
             .ok_or(Refusal::WorkdirUnavailable)?;
         // Project agent configuration the adapter would apply regardless.
-        policy::check_project_config(
-            entry.adapter,
+        policy::check_project_config(entry.adapter, &cwd)?;
+        // ADR-0188 §8: Codex runs only from the host's own home, signed in.
+        if entry.adapter == AdapterKind::Codex {
+            if let Err(refusal) = policy::prepare_codex_home(&self.settings.codex, &cwd) {
+                if refusal == Refusal::CodexLoginRequired {
+                    tracing::warn!(
+                        login = %self.settings.codex.login_command(),
+                        "Codex is not signed in to the host's own home; sign in once with this command"
+                    );
+                }
+                return Err(refusal);
+            }
+        }
+        let spec = policy::launch_spec(
+            &entry,
             &cwd,
-            policy::codex_home(&self.settings.parent_env).as_deref(),
-        )?;
-        let spec = policy::launch_spec(&entry, &cwd, self.settings.parent_env.clone());
+            self.settings.parent_env.clone(),
+            &self.settings.codex,
+        );
         let mut conn = AcpConnection::spawn(&spec).map_err(|error| {
             tracing::warn!(tool, error = %error, "agent launch failed");
             Refusal::AgentStartFailed

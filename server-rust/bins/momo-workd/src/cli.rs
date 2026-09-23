@@ -20,6 +20,7 @@ use crate::client::{self, ClientError, HostClient};
 use crate::config::{ConfigError, HostState, WorkdConfig, SERVED_SCOPE};
 use crate::controls::{heartbeat_loop, ControlLoop};
 use crate::keystore::{HostKey, KeyStore, KeyStoreError};
+use crate::policy::{AdapterKind, CodexHome};
 use crate::session::{SessionManager, SessionSettings};
 
 /// The environment variable `register` reads the owner's token from.
@@ -255,6 +256,26 @@ pub async fn run(config_path: PathBuf, dev_key_file: Option<PathBuf>) -> Result<
         )
         .map_err(CliError::Register)?,
     );
+    // ADR-0188 §8: Codex runs from the host's own home, signed in once there.
+    let codex = CodexHome::beside(&config.state_path);
+    if config
+        .tools
+        .values()
+        .any(|entry| entry.adapter == AdapterKind::Codex)
+    {
+        let signed_in = codex.home.join("auth.json").exists();
+        tracing::info!(
+            home = %codex.home.display(),
+            signed_in,
+            "Codex runs from the host's own home (ADR-0188 §8)"
+        );
+        if !signed_in {
+            tracing::warn!(
+                login = %codex.login_command(),
+                "sign Codex in to the host's own home once; until then Codex sessions are refused"
+            );
+        }
+    }
     let sessions = SessionManager::new(
         api.clone(),
         SessionSettings {
@@ -263,6 +284,7 @@ pub async fn run(config_path: PathBuf, dev_key_file: Option<PathBuf>) -> Result<
             acp_start_timeout: Duration::from_millis(config.acp_start_timeout_ms),
             parent_env: std::env::vars().collect(),
             max_sessions: config.max_sessions,
+            codex,
         },
     );
     let mut controls = ControlLoop::new(api.clone(), sessions, state.owner_member_id);
