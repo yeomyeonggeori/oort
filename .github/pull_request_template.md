@@ -20,8 +20,8 @@ Rust는 fmt --all / clippy -D warnings / workspace tests.
 - 실행 결과 / 증거:
 - runtime-unverified / 남은 검증:
 
-## STATUS 영향
-<!-- 검증된 변화 1–3줄 또는 STATUS 링크. -->
+## 요약
+<!-- 사용자·운영자가 알아야 할 변화 1–3줄. 릴리스 노트와 CHANGELOG의 재료다. 검증 증거는 위 「검증」 절이 정본이다(STATUS.md는 2026-09-23 동결). -->
 
 ## 계획 이탈
 <!-- 수용기준·ADR·패킷과 다른 점 및 영향. 없으면 없음. -->
@@ -32,4 +32,4 @@ Rust는 fmt --all / clippy -D warnings / workspace tests.
 
 <!-- 공개 API/보안/DB/방향/스택 변경 시 Accepted ADR 링크를 적는다.
 통합자는 current PR CI·Policy integrity·exact-base verifier와 local evidence를 확인한다.
-M7/owner 승인 없는 release·스토어·공증·external TestFlight는 진행하지 않는다. -->
+M7 등급(내부 M7-I·스토어 M7-S)과 owner 승인 없는 release·공증·TestFlight·스토어 배포는 진행하지 않는다. -->

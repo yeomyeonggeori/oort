@@ -25,7 +25,7 @@
 | 축 | 항목 | 상태 |
 |---|---|---|
 | 외부 셀프호스터 3 | 하네스 복붙 1 · 그록봇 1 · Railway 1 — 각자 E2E-A/B를 외부인이 재현 + 인테이크 | 모집·운영(성재) |
-| **iOS 앱스토어 v0** | RN 앱: #20 계정 삭제 흐름(5.1.1(v)) · #21 PrivacyInfo.xcprivacy+암호화 신고 · #22 UGC 모더레이션 4종+EULA · #30 스토어 메타/스크린샷 · #31 빌드 업로드→심사 · **RN TestFlight 런북 신설**(Swift 런북은 LS-3에서 삭제) · **Dawn relay live 기동 + 실기기 APNs 실수신**(2026-09-08 보류 2번, `checklist-apns-real-device.md`) · 폰 잔여 #2030·#2011·#1964·#1396·#2090 중 v0 필수분 | 미착수(G1' 뒤) |
+| **iOS 앱스토어 v0** | RN 앱: #20 계정 삭제 흐름(5.1.1(v)) · #21 PrivacyInfo.xcprivacy+암호화 신고 · #22 UGC 모더레이션 4종+EULA · #30 스토어 메타/스크린샷 · #31 빌드 업로드→심사 · **RN TestFlight 런북 신설**(Swift 런북은 LS-3에서 삭제) · **Dawn relay live 기동 + 실기기 APNs 실수신**(09-08 보류는 ADR-0187 D4로 해제 — 실기기 푸시는 M7-I 필수) · 폰 잔여 #2030·#2011·#1964·#1396·#2090 중 v0 필수분 | 미착수(G1' 뒤) |
 | 셀프호스트 완결(SH-7) | #1265(G1'-2) · #2193 momo_notifier 롤 · #2066 OUTBOUND_WEBHOOK_MASTER_KEY 분리 · #2029 기기 목록/해제 · #2010 SAS 동봉 | 이슈 있음 |
 | 에이전트 표면 | #2016 도구 카탈로그 GET · #1957 UX-R4a enabledTools(blocked) · #1405·#1400 hosted DTO/불변성 · #1345 ACP 감사(재랜딩 범위) | 이슈 있음 |
 | LAUNCH_READY | 릴리스 매니페스트·이미지 서명·NEXT_CHANNEL·SECURITY 검토(ADR-0100 증거) | 편성 시 |
