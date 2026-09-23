@@ -1016,10 +1016,13 @@ function TimelineInner({
   const settleEntry = useCallback(() => {
     if (entrySettledRef.current) return;
     entrySettledRef.current = true;
+    // 측정 seam 은 렌더마다 쓰인다. 앉는 순간 화면이 바뀌지 않으면(착지가 필을 그대로
+    // 두면) 다시 그려지지 않아 사진이 옛 값을 읽으므로, 여기서도 적는다(R2 N-B 캡처).
+    if (pillsRef?.current) pillsRef.current = {...pillsRef.current, settled: true};
     // 앉은 자리에서 이미 보이는 구분선은 본 것이다. 뒤에 새 메시지가 그것을 위로
     // 밀어내도 위 필이 「안 본 경계」처럼 서지 않는다(웹 IO 의 첫 보고와 같은 판정).
     armLatchIfDividerSeen();
-  }, [armLatchIfDividerSeen]);
+  }, [armLatchIfDividerSeen, pillsRef]);
 
   /**
    * 따라가기 판정을 내리는 문 — `followingRef` 와 필(`atBottom`)을 한 번에 맞춘다.

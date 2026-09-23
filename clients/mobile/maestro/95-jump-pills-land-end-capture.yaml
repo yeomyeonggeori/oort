@@ -1,0 +1,42 @@
+appId: app.momo.ios
+name: 95-jump-pills-land-end-capture
+---
+# 95-jump-pills-land-end-capture — 가장 새 메시지로의 다른 방 착지와, 그 뒤의
+# 따라가기 (#1892 R2 H-A).
+#
+# `-momoMeasure JUMP-PILLS-LAND-END` 는 93·94 와 같은 방 옮기기를 하고, 새 방의 첫
+# 페이지와 같은 렌더에서 **가장 새 메시지**로 가는 점프를 건다 — #2584 이후 가장 흔한
+# 알림 탭 착지다. 목표는 끝에 clamp 된다. R2 는 거기서 「최신 메시지로 이동」을 세운 채
+# 따라가기를 끈 채로 두었다. 착지하고 9초 뒤 남의 말이 한 통 붙는다.
+#
+#   xcrun simctl launch booted app.momo.ios --args \
+#     -momoMeasure JUMP-PILLS-LAND-END -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro test clients/mobile/maestro/95-jump-pills-land-end-capture.yaml
+#
+# 라이트는 `LIGHT-JUMP-PILLS-LAND-END`.
+#
+# 두 장:
+#   jump-pills-land-end-landed    가장 새 메시지에 앉았다 — 「최신으로」가 없다
+#   jump-pills-land-end-followed  붙은 남의 말이 화면에 있다 — 목록이 따라갔고 필이 없다
+- extendedWaitUntil:
+    visible: ".*방 B · 단계 b.*"
+    timeout: 60000
+# 착지의 증거는 좌표가 아니라 **도착한 줄**이다(91 과 같은 규율, 부분 일치).
+- extendedWaitUntil:
+    visible: ".*오늘 배포 마무리 공지 올렸습니다.*"
+    timeout: 20000
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertNotVisible:
+    id: "jump-latest"
+- takeScreenshot: jump-pills-land-end-landed
+
+# 따라가지 않으면 이 줄은 접힌 아래에 붙어 끝내 보이지 않는다 — 그것이 R2 의 결함이다.
+- extendedWaitUntil:
+    visible: ".*방금 배포 창 닫혔습니다.*"
+    timeout: 20000
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertNotVisible:
+    id: "jump-latest"
+- takeScreenshot: jump-pills-land-end-followed

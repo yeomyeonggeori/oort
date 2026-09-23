@@ -1402,9 +1402,15 @@ function JumpPillsStage(): React.JSX.Element {
 // 사진이 그것을 잰다. 누르는 것과 키보드를 올리는 것은 Maestro 가 한다
 // (`maestro/93-jump-pills-rooms-capture.yaml`, 착지는 `94-`).
 //
-// `land` 면 새 방의 첫 페이지와 **같은 렌더에서** 그 방 가운데 줄로 가는 점프를
-// 건다(ADE 「대화로」). 새 목록의 첫 레이아웃 보고보다 점프가 먼저 오는 순서다 —
-// 첫 판에서는 늦게 온 그 보고가 진입 수렴을 태워 목록을 바닥으로 끌었다(R1 M-1).
+// `land` 가 `middle` 이면 새 방의 첫 페이지와 **같은 렌더에서** 그 방 가운데 줄로
+// 가는 점프를 건다(ADE 「대화로」). 새 목록의 첫 레이아웃 보고보다 점프가 먼저 오는
+// 순서다 — 첫 판에서는 늦게 온 그 보고가 진입 수렴을 태워 목록을 바닥으로 끌었다
+// (R1 M-1).
+//
+// `end` 면 같은 자리에서 **가장 새 메시지**로 간다 — #2584 이후 가장 흔한 알림 탭
+// 착지다(design-review 2594 R2 H-A). 목표는 끝에 clamp 되고, R2 는 거기서 「최신
+// 메시지로 이동」을 세운 채 따라가기를 끈 채로 두었다. 착지하고 9초 뒤 남의 말이 한
+// 통 붙는다 — 목록이 그것을 따라가야 한다(`maestro/95-`).
 // =============================================================================
 
 type RoomPhase = 'a' | 'switch' | 'loading' | 'b';
@@ -1445,14 +1451,45 @@ const ROOM_B_LANDING = {
   token: 1,
 };
 
-function JumpPillsRoomsStage({land}: {land: boolean}): React.JSX.Element {
+/** 끝 근처 착지(R2 H-A)의 목적지 — 가장 새 메시지. 본문으로 착지를 확인한다. */
+const ROOM_B_NEWEST_BODY = '오늘 배포 마무리 공지 올렸습니다.';
+/** 착지 뒤 도착하는 남의 말. 목록이 따라가는지 본문으로 확인한다. */
+const ROOM_B_ARRIVAL_BODY = '방금 배포 창 닫혔습니다. 모두 수고하셨어요.';
+const ROOM_B_END_HISTORY: Message[] = ROOM_B_HISTORY.map(message =>
+  message.seq === JUMP_PILL_COUNT ? {...message, body: ROOM_B_NEWEST_BODY} : message,
+);
+const ROOM_B_ARRIVAL: Message = {
+  ...roomMessage('b', JUMP_PILL_COUNT + 1),
+  authorMemberId: OTHER,
+  body: ROOM_B_ARRIVAL_BODY,
+};
+const ROOM_B_WITH_ARRIVAL: Message[] = [...ROOM_B_END_HISTORY, ROOM_B_ARRIVAL];
+const ROOM_B_LANDING_END = {
+  messageId: ROOM_B_END_HISTORY[JUMP_PILL_COUNT - 1].id,
+  seq: JUMP_PILL_COUNT,
+  token: 1,
+};
+
+function JumpPillsRoomsStage({
+  land,
+}: {
+  land: 'none' | 'middle' | 'end';
+}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const listRef = React.useRef<unknown>(null);
   const metricsRef = React.useRef<TimelineGeometry | null>(null);
   const pillsRef = React.useRef<PillState | null>(null);
   const [phase, setPhase] = React.useState<RoomPhase>('a');
+  const [arrived, setArrived] = React.useState(false);
   const [readout, setReadout] = React.useState('기하 측정 중…');
   const [trace, setTrace] = React.useState('');
+  React.useEffect(() => {
+    if (land !== 'end') return undefined;
+    // 새 방의 첫 페이지(9초)와 착지 뒤, 흐름이 착지를 한 장 찍을 시간을 둔다. Maestro
+    // 드라이버가 뜨는 데만 몇 초가 들어서, 12초로는 착지 사진에 이미 이 줄이 찍혔다.
+    const arrive = setTimeout(() => setArrived(true), 18000);
+    return () => clearTimeout(arrive);
+  }, [land]);
   React.useEffect(() => {
     // 앞 방에서 진입 수렴이 앉고(최대 4초) 래치가 걸릴 시간, 그리고 Maestro 가
     // 드라이버를 띄워 앞 방을 한 장 찍을 시간을 둔다(3초로는 흐름이 첫 판독을 하기
@@ -1504,17 +1541,35 @@ function JumpPillsRoomsStage({land}: {land: boolean}): React.JSX.Element {
     };
   }, []);
   const inB = phase !== 'a';
+  const roomB =
+    land === 'end'
+      ? arrived
+        ? ROOM_B_WITH_ARRIVAL
+        : ROOM_B_END_HISTORY
+      : ROOM_B_HISTORY;
   const messages =
     phase === 'a' || phase === 'switch'
       ? ROOM_A_HISTORY
       : phase === 'loading'
         ? []
-        : ROOM_B_HISTORY;
+        : roomB;
+  const landing =
+    phase !== 'b'
+      ? undefined
+      : land === 'middle'
+        ? ROOM_B_LANDING
+        : land === 'end'
+          ? ROOM_B_LANDING_END
+          : undefined;
   return (
     <Screen>
       <Text style={styles.label} testID="jump-pills-rooms-phase">
         {`방 ${inB ? 'B' : 'A'} · 단계 ${phase}${
-          land ? ' · 다른 방 착지' : ''
+          land === 'middle'
+            ? ' · 다른 방 착지'
+            : land === 'end'
+              ? ' · 끝 근처 착지'
+              : ''
         } (#1892 R1)`}
       </Text>
       <Text style={styles.label} testID="jump-pills-rooms-readout">
@@ -1545,7 +1600,7 @@ function JumpPillsRoomsStage({land}: {land: boolean}): React.JSX.Element {
                 : ROOM_A_COUNT - ROOM_A_CURSOR
             }
             working={inB ? ROOM_B_WORKING : undefined}
-            jumpTarget={land && phase === 'b' ? ROOM_B_LANDING : undefined}
+            jumpTarget={landing}
             jumpPills
             pillsRef={pillsRef}
             metricsRef={metricsRef}
@@ -2015,9 +2070,12 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // #1892 R1 — 방을 옮긴 뒤의 필(H-1)·키보드(M-4), 그리고 다른 방 착지(M-1).
     // 흐름은 `maestro/93-`(방 옮기기·키보드)과 `94-`(다른 방 착지).
     case 'jump-pills-rooms':
-      return <JumpPillsRoomsStage land={false} />;
+      return <JumpPillsRoomsStage land="none" />;
     case 'jump-pills-land':
-      return <JumpPillsRoomsStage land />;
+      return <JumpPillsRoomsStage land="middle" />;
+    // R2 H-A — 가장 새 메시지로의 다른 방 착지와 그 뒤의 따라가기. `maestro/95-`.
+    case 'jump-pills-land-end':
+      return <JumpPillsRoomsStage land="end" />;
     case 'row':
       return (
         <Frame label="행 — 반응 칩과 스레드 앵커는 항상 보이는 진입점">
