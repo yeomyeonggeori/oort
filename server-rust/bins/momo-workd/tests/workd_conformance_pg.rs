@@ -1,5 +1,6 @@
-//! DB-backed conformance for **#2571** (ADR-0188 R1, first slice): the real
-//! `momo-workd` binary against the real server router on an isolated PG.
+//! DB-backed conformance for **#2571** (ADR-0188 R1, first slice) and its
+//! hardening **#2602** (R1.1): the real `momo-workd` binary against the real
+//! server router on an isolated PG.
 //!
 //! `#[ignore]` — needs a `pgvector/pgvector:pg18` superuser DB plus the runtime
 //! roles, exactly like `momo-server`'s `*_conformance_pg` suites:
@@ -11,35 +12,54 @@
 //! ```
 //!
 //! The server runs as `momo_app` (NOBYPASSRLS); fixtures and ledger reads use
-//! the superuser. Dispatched controls are written straight to `work_control`:
-//! how a control *becomes* dispatched is the server's business; what this suite
-//! measures is the host's half — poll, apply, ack, session, events, end — and,
-//! on a member host, which controls reach the host at all.
+//! the superuser. A kill or a pre-R0 row is written straight to `work_control`:
+//! how such a control *becomes* dispatched is the server's business; what this
+//! suite measures is the host's half — poll, apply, ack, session, events, end —
+//! and, on a member host, which controls reach the host at all.
 //!
-//! ## Which host each test runs on (ADR-0188 D3, #2570 R0, #2582 R0.1 + A′)
+//! ## Every served host is a member host (ADR-0188 D3, #2602 M-4)
 //!
-//! A member-scoped host (what `momo-workd register` always creates) receives
-//! `kill` from anyone and every other kind only when its **owner** asked for
-//! it — never a shell, never an agent's spawn. So an agent spawn round trip is
-//! measured on a **workspace-scoped** host, registered in the test by the
-//! workspace owner through the server API (`register_workspace_host`) and then
-//! served by the unmodified `momo-workd run`. The product CLI stays member-only
-//! (ADR-0188 D3: team hosts are outside goal A), and the member rules are
-//! measured end to end in `wdc_4`.
+//! `momo-workd run` serves only the member-scoped host `momo-workd register`
+//! creates, and there a spawn or an input is its owner's or nothing. So the
+//! spawn round trip is the **owner's**, through the REST ledger with the
+//! owner's human bearer: a session the owner opened on a second laptop is
+//! orphaned (the sweep's transition) and resumed onto the served host
+//! ([`owner_resume`]). That is the one owner-origin spawn the server dispatches
+//! to a member host today — `POST …/work-controls` takes an agent bearer only, a
+//! human `POST …/work-sessions` records a session without dispatching anything,
+//! and the host-signed session create (`dispatched_spawn_owner_in_tx`) accepts
+//! only a spawn an **agent** requested, so a fresh owner-origin spawn row would
+//! be delivered and then refused at create (409).
 //!
-//! | test | host | what it proves |
-//! |---|---|---|
-//! | `wdc_1_heartbeat_spawn_events_kill_round_trip` | workspace | v2 heartbeat marks the host online → agent spawn → curated events (answer, plan, tool kind, denial + reason) → idle → kill → ended; no listening TCP socket |
-//! | `wdc_2_shell_and_auto_mode_are_refused_on_the_ledger` | workspace | a delivered `shell` spawn and an agent in `auto` mode are refused by the host with their labels, and no session exists |
-//! | `wdc_3_a_revoked_host_stops` | member | ADR-0188 D7: after revoke the host gets 401 and exits (code 3) |
-//! | `wdc_4_a_member_host_takes_its_owner_and_kill_only` | member | `momo-workd register` → the agent's spawn request is refused (`remote_host_kill_only`) and an agent-origin dispatched spawn is never delivered, while the owner's resume onto the same host completes and an agent's `kill` is delivered |
+//! The #2582 adaptation measured the agent spawn round trip on a
+//! workspace-scoped host the workspace owner registered through the API. That
+//! no longer holds: `run` refuses every registration that is not `member`
+//! (`wdc_5`), and a member host never receives an agent's spawn (`wdc_4`).
+//!
+//! Every request the server receives passes a recorder ([`Recorder`]), so the
+//! suite can say what crossed the wire — not only what the server kept (#2602
+//! M-5).
+//!
+//! | test | what it proves |
+//! |---|---|
+//! | `wdc_1_owner_resume_round_trip_and_no_seed_on_the_wire` | `momo-workd register` → the v2 heartbeat marks the host online; no listening TCP socket; the owner's resume → the pre-allocated session → curated events (answer, plan, tool kind, denial + reason) → idle → the owner's kill → ended; and no request, from `register` to the last ack, carries the host key's seed in any encoding |
+//! | `wdc_2_refusals_on_a_member_host` | the owner's resume onto an agent that opens in `auto` is refused by the host (`permission_mode_refused`) and the session the server allocated for it is ended by the host; a shell is refused at the resume (403 `remote_host_shell_refused`) and never reaches the host |
+//! | `wdc_3_a_revoked_host_stops` | ADR-0188 D7: after revoke the host gets 401 and exits (code 3) |
+//! | `wdc_4_a_member_host_takes_its_owner_and_kill_only` | the agent's spawn request is refused (`remote_host_kill_only`) and an agent-origin dispatched spawn is never delivered, while the owner's resume completes and an agent's `kill` is delivered; no seed on the wire |
+//! | `wdc_5_a_workspace_host_is_not_served` | a workspace-scoped host registered through the API by the workspace owner: `momo-workd run` refuses it (exit 2) and sends nothing |
 
 use std::net::SocketAddr;
-use std::os::unix::fs::MetadataExt as _;
-use std::path::PathBuf;
+use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+use axum::body::Body;
+use axum::extract::{Request, State};
+use axum::middleware::Next;
+use axum::response::Response;
+use base64::Engine as _;
 
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx;
@@ -133,7 +153,129 @@ fn ensure_schema_and_roles() {
     *ready = true;
 }
 
-async fn start_server(pool: PgPool) -> String {
+/// Every request the in-process server received, as the wire carried it: the
+/// method, the path with its query, every header, and the body bytes (#2602
+/// M-5).
+#[derive(Clone, Default)]
+struct Recorder(Arc<Mutex<Vec<Recorded>>>);
+
+struct Recorded {
+    method: String,
+    path: String,
+    headers: Vec<(String, Vec<u8>)>,
+    body: Vec<u8>,
+}
+
+async fn record(State(recorder): State<Recorder>, request: Request, next: Next) -> Response {
+    let (parts, body) = request.into_parts();
+    let body = axum::body::to_bytes(body, usize::MAX)
+        .await
+        .expect("buffer the request body");
+    recorder.0.lock().unwrap().push(Recorded {
+        method: parts.method.to_string(),
+        path: parts.uri.to_string(),
+        headers: parts
+            .headers
+            .iter()
+            .map(|(name, value)| (name.as_str().to_string(), value.as_bytes().to_vec()))
+            .collect(),
+        body: body.to_vec(),
+    });
+    next.run(Request::from_parts(parts, Body::from(body))).await
+}
+
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty()
+        && haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
+}
+
+impl Recorder {
+    /// No request carried the host key's seed — raw, base64 (standard or
+    /// URL-safe, padded or not) or hex (either case) — in its path, in any
+    /// header, or in its body. The recorder must also have seen the
+    /// registration and the host's signed traffic, so an empty log cannot pass.
+    /// A failure names the request, the place and the encoding, never a value.
+    fn assert_seed_never_sent(&self, key_file: &Path, public_key: &str) {
+        use base64::engine::general_purpose::{
+            STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD,
+        };
+        let seed = STANDARD
+            .decode(
+                std::fs::read_to_string(key_file)
+                    .expect("dev key file")
+                    .trim(),
+            )
+            .expect("the dev key file holds base64");
+        assert_eq!(seed.len(), 32, "an Ed25519 seed");
+        let hex: String = seed.iter().map(|byte| format!("{byte:02x}")).collect();
+        let needles = [
+            ("raw bytes", seed.clone()),
+            ("base64", STANDARD.encode(&seed).into_bytes()),
+            (
+                "unpadded base64",
+                STANDARD_NO_PAD.encode(&seed).into_bytes(),
+            ),
+            ("URL-safe base64", URL_SAFE.encode(&seed).into_bytes()),
+            (
+                "unpadded URL-safe base64",
+                URL_SAFE_NO_PAD.encode(&seed).into_bytes(),
+            ),
+            ("hex", hex.clone().into_bytes()),
+            ("upper-case hex", hex.to_uppercase().into_bytes()),
+        ];
+        let requests = self.0.lock().unwrap();
+        let signed = requests
+            .iter()
+            .filter(|request| {
+                request
+                    .headers
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case("x-momo-work-host-signature"))
+            })
+            .count();
+        let registered = requests.iter().any(|request| {
+            request.method == "POST"
+                && request.path.ends_with("/work-hosts")
+                && contains(&request.body, public_key.as_bytes())
+        });
+        eprintln!(
+            "recorder: {} requests on the wire, {signed} host-signed",
+            requests.len()
+        );
+        assert!(
+            registered,
+            "the recorder saw the registration carry the public key"
+        );
+        assert!(signed > 0, "the recorder saw the host's signed requests");
+        for (index, request) in requests.iter().enumerate() {
+            let mut places: Vec<(String, &[u8])> = vec![
+                ("the path".to_string(), request.path.as_bytes()),
+                ("the body".to_string(), &request.body),
+            ];
+            for (name, value) in &request.headers {
+                places.push((format!("header {name}"), value));
+            }
+            for (encoding, needle) in &needles {
+                for (place, bytes) in &places {
+                    assert!(
+                        !contains(bytes, needle),
+                        "request #{index} ({}) carried the host key seed ({encoding}) in {place}",
+                        request.method
+                    );
+                }
+            }
+        }
+    }
+}
+
+struct Server {
+    base: String,
+    recorder: Recorder,
+}
+
+async fn start_server(pool: PgPool) -> Server {
     let state = AppState::new(
         pool,
         TEST_JWT_SECRET.to_string(),
@@ -143,11 +285,18 @@ async fn start_server(pool: PgPool) -> String {
         .await
         .expect("bind momo-server");
     let address: SocketAddr = listener.local_addr().expect("server address");
-    let app = build_app(state);
+    let recorder = Recorder::default();
+    let app = build_app(state).layer(axum::middleware::from_fn_with_state(
+        recorder.clone(),
+        record,
+    ));
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
-    format!("http://{address}")
+    Server {
+        base: format!("http://{address}"),
+        recorder,
+    }
 }
 
 struct Fixture {
@@ -389,6 +538,8 @@ impl Workd {
             .unwrap(),
         )
         .unwrap();
+        // The owner's own file whatever the umask (`config::read_owned_file`).
+        std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o600)).unwrap();
         Self {
             key: dir.join("keys").join("host.key"),
             log: dir.join("workd.log"),
@@ -432,11 +583,10 @@ impl Workd {
         serde_json::from_slice(&output.stdout).expect("register prints one JSON line")
     }
 
-    /// Option (a) of the R0.1 adaptation: the **workspace owner** registers a
-    /// workspace-scoped host through the server API (#2582: owner/admin only),
-    /// and this installation is handed that host's key and state, exactly as
-    /// `register` would have left them. `momo-workd run` then serves it
-    /// unmodified. The product CLI itself never registers a workspace host.
+    /// A workspace-scoped host, registered by the **workspace owner** through
+    /// the server API (#2582: owner/admin only), with this installation handed
+    /// its key and state as `register` would have left them. The product CLI
+    /// never registers one, and `run` refuses to serve one (`wdc_5`).
     async fn register_as_workspace_host(
         &self,
         http: &reqwest::Client,
@@ -665,6 +815,121 @@ async fn orphan_session(su: &PgPool, session: Uuid) {
     assert_eq!(moved, 1, "the source session was running");
 }
 
+/// The owner's own spawn onto `host` (see the module docs): a session the owner
+/// opens on an idle second laptop, orphaned the way the sweep would, then
+/// resumed onto `host` with the owner's human bearer. Returns the resume
+/// response as the server gave it.
+#[allow(clippy::too_many_arguments)]
+async fn owner_resume(
+    su: &PgPool,
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    fixture: &Fixture,
+    host: Uuid,
+    tool: &str,
+    label: &str,
+) -> reqwest::Response {
+    let workspace = fixture.workspace;
+    let old_laptop = register_idle_member_host(http, base, token, fixture).await;
+    let created = http
+        .post(format!("{base}/v1/workspaces/{workspace}/work-sessions"))
+        .bearer_auth(token)
+        .json(&json!({
+            "channelId": fixture.channel,
+            "hostId": old_laptop,
+            "tool": tool,
+            "label": label,
+        }))
+        .send()
+        .await
+        .expect("create the source session");
+    assert_eq!(
+        created.status(),
+        201,
+        "the owner opens a session on the old laptop"
+    );
+    let created: Value = created.json().await.expect("source body");
+    let source = Uuid::parse_str(created["workSession"]["id"].as_str().expect("id")).unwrap();
+    orphan_session(su, source).await;
+    http.post(format!(
+        "{base}/v1/workspaces/{workspace}/work-sessions/{source}/resume"
+    ))
+    .bearer_auth(token)
+    .json(&json!({"targetHostId": host}))
+    .send()
+    .await
+    .expect("resume")
+}
+
+/// A resume the server accepted: the new session on `host` and its spawn
+/// control, which is the owner's own.
+async fn accepted_resume(
+    su: &PgPool,
+    fixture: &Fixture,
+    host: Uuid,
+    response: reqwest::Response,
+) -> (Uuid, Uuid) {
+    assert_eq!(
+        response.status(),
+        201,
+        "the owner may resume onto their own host"
+    );
+    let body: Value = response.json().await.expect("resumed body");
+    assert_eq!(body["workSession"]["hostId"], json!(host.to_string()));
+    let session = Uuid::parse_str(body["workSession"]["id"].as_str().expect("id")).unwrap();
+    let (control, requester): (Uuid, Uuid) = sqlx::query_as(
+        "SELECT id, requester_member_id FROM work_control WHERE session_id = $1 AND kind = 'spawn'",
+    )
+    .bind(session)
+    .fetch_one(su)
+    .await
+    .expect("the resume's spawn control");
+    assert_eq!(
+        requester, fixture.owner,
+        "the resume is the owner's own control"
+    );
+    (session, control)
+}
+
+/// The session's `work_session_event` rows, as the thread shows them.
+async fn session_events(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    fixture: &Fixture,
+    su: &PgPool,
+    session: Uuid,
+) -> Vec<Value> {
+    let root: Uuid = sqlx::query_scalar("SELECT root_message_id FROM work_session WHERE id = $1")
+        .bind(session)
+        .fetch_one(su)
+        .await
+        .unwrap();
+    let replies: Value = http
+        .get(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages/{root}/replies",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("read the session thread")
+        .json()
+        .await
+        .expect("replies body");
+    replies["messages"]
+        .as_array()
+        .expect("messages")
+        .iter()
+        .filter(|row| {
+            row["props"]["kind"] == "work_session_event"
+                && row["props"]["event"]["work_session_id"] == json!(session.to_string())
+        })
+        .cloned()
+        .collect()
+}
+
 fn listening_tcp_sockets(pid: u32) -> String {
     let output = Command::new("lsof")
         .args(["-nP", "-a", "-p", &pid.to_string(), "-iTCP", "-sTCP:LISTEN"])
@@ -675,21 +940,27 @@ fn listening_tcp_sockets(pid: u32) -> String {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
-async fn wdc_1_heartbeat_spawn_events_kill_round_trip() {
+async fn wdc_1_owner_resume_round_trip_and_no_seed_on_the_wire() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let app_pool = momo_app_pool().await;
     let fixture = seed_fixture(&su, &app_pool).await;
-    let base = start_server(app_pool).await;
+    let server = start_server(app_pool).await;
+    let base = server.base.as_str();
     let http = reqwest::Client::new();
-    let token = login(&http, &base, &fixture).await;
+    let token = login(&http, base, &fixture).await;
 
-    // ---- a workspace-scoped host (an agent spawn only reaches one) --------
-    let mut workd = Workd::new(&base, &fixture, &[("claude", &["--permission"])]);
-    let host = workd
-        .register_as_workspace_host(&http, &base, &token, &fixture)
-        .await;
-    eprintln!("wdc_1: workspace host {host} registered by the workspace owner");
+    // ---- register: a member host, the owner's -----------------------------
+    let mut workd = Workd::new(base, &fixture, &[("claude", &["--permission"])]);
+    let registered = workd.register(&token).await;
+    let host = Uuid::parse_str(registered["hostId"].as_str().expect("hostId")).unwrap();
+    let row = host_row(&http, base, &token, &fixture, host).await;
+    assert_eq!(
+        row["scope"], "member",
+        "ADR-0188 D3: a desktop host is its owner's"
+    );
+    let public_key = row["publicKey"].as_str().expect("publicKey").to_string();
+    eprintln!("wdc_1: member host {host} registered by its owner");
 
     // ---- run: no listening socket of any kind ------------------------------
     let pid = workd.start();
@@ -700,57 +971,33 @@ async fn wdc_1_heartbeat_spawn_events_kill_round_trip() {
         "ADR-0188 D2: momo-workd opens no TCP port"
     );
 
-    // ---- spawn → session → curated events → idle ----------------------------
-    let spawn = insert_control(
+    // ---- the owner's resume → session → curated events → idle -------------
+    let resumed = owner_resume(
         &su,
+        &http,
+        base,
+        &token,
         &fixture,
         host,
-        fixture.agent,
-        None,
-        "spawn",
-        json!({"tool": "claude", "label": "summarise the repo"}),
+        "claude",
+        "summarise the repo",
     )
     .await;
-    let session = wait_until("the spawn ack", &workd, || async {
-        match control_state(&su, spawn).await {
-            (status, Some(session)) if status == "acked" => Some(session),
-            _ => None,
-        }
+    let (session, spawn) = accepted_resume(&su, &fixture, host, resumed).await;
+    wait_until("the resume spawn ack", &workd, || async {
+        (control_state(&su, spawn).await == ("acked".to_string(), Some(session))).then_some(())
     })
     .await;
-    eprintln!("wdc_1: spawn {spawn} acked with session {session}");
+    eprintln!("wdc_1: the owner's resume {spawn} acked with session {session}");
     wait_until("the first turn to go idle", &workd, || async {
         (session_status(&su, session).await == "idle").then_some(())
     })
     .await;
 
-    let root: Uuid = sqlx::query_scalar("SELECT root_message_id FROM work_session WHERE id = $1")
-        .bind(session)
-        .fetch_one(&su)
-        .await
-        .unwrap();
-    let replies: Value = http
-        .get(format!(
-            "{base}/v1/workspaces/{}/channels/{}/messages/{root}/replies",
-            fixture.workspace, fixture.channel
-        ))
-        .bearer_auth(&token)
-        .send()
-        .await
-        .expect("read the session thread")
-        .json()
-        .await
-        .expect("replies body");
-    let events: Vec<&Value> = replies["messages"]
-        .as_array()
-        .expect("messages")
-        .iter()
-        .filter(|row| row["props"]["kind"] == "work_session_event")
-        .collect();
+    let events = session_events(&http, base, &token, &fixture, &su, session).await;
     let of_type = |kind: &str| -> Vec<&Value> {
         events
             .iter()
-            .copied()
             .filter(|row| row["props"]["event_type"] == kind)
             .collect()
     };
@@ -806,12 +1053,12 @@ async fn wdc_1_heartbeat_spawn_events_kill_round_trip() {
         events.len()
     );
 
-    // ---- kill → acked → ended -------------------------------------------------
+    // ---- the owner's kill → acked → ended -------------------------------------
     let kill = insert_control(
         &su,
         &fixture,
         host,
-        fixture.agent,
+        fixture.owner,
         Some(session),
         "kill",
         json!({}),
@@ -828,9 +1075,9 @@ async fn wdc_1_heartbeat_spawn_events_kill_round_trip() {
     eprintln!("wdc_1: kill {kill} acked, session ended");
 
     // ---- heartbeat (v2, #2570) ---------------------------------------------------
-    // The host has been heartbeating since it started. Only the ADR-0188 D7 v2
-    // heartbeat is accepted; a v1 body would leave the host offline.
-    let row = host_row(&http, &base, &token, &fixture, host).await;
+    // Only the ADR-0188 D7 v2 heartbeat is accepted; a v1 body would leave the
+    // host offline.
+    let row = host_row(&http, base, &token, &fixture, host).await;
     assert_eq!(
         row["online"],
         true,
@@ -841,75 +1088,74 @@ async fn wdc_1_heartbeat_spawn_events_kill_round_trip() {
     eprintln!("wdc_1: host online via v2 heartbeat");
 
     assert_eq!(workd.stop().await, Some(0), "SIGTERM is a clean stop");
+
+    // ---- #2602 M-5: what crossed the wire, register to the last ack -------
+    server
+        .recorder
+        .assert_seed_never_sent(&workd.key, &public_key);
+    eprintln!("wdc_1: no request carried the host key seed");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
-async fn wdc_2_shell_and_auto_mode_are_refused_on_the_ledger() {
+async fn wdc_2_refusals_on_a_member_host() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let app_pool = momo_app_pool().await;
     let fixture = seed_fixture(&su, &app_pool).await;
-    let base = start_server(app_pool).await;
+    let server = start_server(app_pool).await;
+    let base = server.base.as_str();
     let http = reqwest::Client::new();
-    let token = login(&http, &base, &fixture).await;
+    let token = login(&http, base, &fixture).await;
 
-    // The owner allowlisted something called `shell` (a launchable agent), and
-    // a Claude whose own settings put it in `auto` mode. On a workspace host
-    // the server delivers both spawns, so the refusals measured here are the
-    // host's own (a member host never receives a shell spawn: `wdc_4`).
+    // The owner's Claude opens in `auto` (its own settings say so), and the
+    // workspace catalog also carries a `shell` tool.
+    sqlx::query(
+        "INSERT INTO work_tool_profile \
+           (workspace_id, tool_key, display_name, launch_template, enabled, created_by, updated_by) \
+         VALUES ($1, 'shell', 'shell', $2, true, $3, $3) \
+         ON CONFLICT (workspace_id, tool_key) DO UPDATE SET enabled = true",
+    )
+    .bind(fixture.workspace)
+    .bind(json!({"command": "zsh", "arguments": []}))
+    .bind(fixture.owner)
+    .execute(&su)
+    .await
+    .expect("seed a shell tool profile");
     let mut workd = Workd::new(
-        &base,
+        base,
         &fixture,
-        &[("shell", &[]), ("claude", &["--mode", "auto"])],
+        &[("claude", &["--mode", "auto"]), ("shell", &[])],
     );
-    let host = workd
-        .register_as_workspace_host(&http, &base, &token, &fixture)
-        .await;
+    let host = Uuid::parse_str(workd.register(&token).await["hostId"].as_str().unwrap()).unwrap();
     workd.start();
 
-    let shell = insert_control(
+    // ---- auto mode: the host refuses and ends the allocated session -------
+    let resumed = owner_resume(
         &su,
+        &http,
+        base,
+        &token,
         &fixture,
         host,
-        fixture.agent,
-        None,
-        "spawn",
-        json!({"tool": "shell", "label": "open a shell"}),
+        "claude",
+        "fix the bug",
     )
     .await;
-    let auto = insert_control(
-        &su,
-        &fixture,
-        host,
-        fixture.agent,
-        None,
-        "spawn",
-        json!({"tool": "claude", "label": "fix the bug"}),
-    )
+    let (session, spawn) = accepted_resume(&su, &fixture, host, resumed).await;
+    wait_until("the refused spawn", &workd, || async {
+        (control_state(&su, spawn).await.0 == "failed").then_some(())
+    })
     .await;
-    for (control, label) in [(shell, "shell_refused"), (auto, "permission_mode_refused")] {
-        wait_until(label, &workd, || async {
-            (control_state(&su, control).await.0 == "failed").then_some(())
-        })
-        .await;
-        assert_eq!(
-            ack_error_label(&su, &fixture, control).await.as_deref(),
-            Some(label),
-            "the refusal reaches the room with its reason"
-        );
-        eprintln!("wdc_2: control {control} failed with {label}");
-    }
-    let sessions: i64 = sqlx::query_scalar("SELECT count(*) FROM work_session WHERE host_id = $1")
-        .bind(host)
-        .fetch_one(&su)
-        .await
-        .unwrap();
-    assert_eq!(sessions, 0, "no session exists for a refused spawn");
-    assert!(
-        workd.record("shell").is_empty(),
-        "the shell entry was never launched"
+    assert_eq!(
+        ack_error_label(&su, &fixture, spawn).await.as_deref(),
+        Some("permission_mode_refused"),
+        "the refusal reaches the room with its reason"
     );
+    wait_until("the host to end the allocated session", &workd, || async {
+        (session_status(&su, session).await == "ended").then_some(())
+    })
+    .await;
     let methods: Vec<String> = workd
         .record("claude")
         .iter()
@@ -920,6 +1166,43 @@ async fn wdc_2_shell_and_auto_mode_are_refused_on_the_ledger() {
         ["initialize", "session/new"],
         "no prompt reached an auto-mode agent"
     );
+    eprintln!("wdc_2: resume {spawn} failed with permission_mode_refused; session {session} ended by the host");
+
+    // ---- shell: refused at the resume, never delivered ----------------------
+    let resumed = owner_resume(
+        &su,
+        &http,
+        base,
+        &token,
+        &fixture,
+        host,
+        "shell",
+        "open a shell",
+    )
+    .await;
+    let status = resumed.status().as_u16();
+    let body: Value = resumed.json().await.expect("refusal body");
+    assert_eq!(
+        (status, body["error"]["code"].as_str()),
+        (403, Some("remote_host_shell_refused")),
+        "a shell never goes to a member host, not even the owner's: {body}"
+    );
+    let shell_controls: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM work_control WHERE target_host_id = $1 AND payload->>'tool' = 'shell'",
+    )
+    .bind(host)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        shell_controls, 0,
+        "no shell control was written for this host"
+    );
+    assert!(
+        workd.record("shell").is_empty(),
+        "the shell entry was never launched"
+    );
+    eprintln!("wdc_2: shell resume refused 403 remote_host_shell_refused");
     assert_eq!(workd.stop().await, Some(0));
 }
 
@@ -930,11 +1213,12 @@ async fn wdc_3_a_revoked_host_stops() {
     let su = superuser_pool().await;
     let app_pool = momo_app_pool().await;
     let fixture = seed_fixture(&su, &app_pool).await;
-    let base = start_server(app_pool).await;
+    let server = start_server(app_pool).await;
+    let base = server.base.as_str();
     let http = reqwest::Client::new();
-    let token = login(&http, &base, &fixture).await;
+    let token = login(&http, base, &fixture).await;
 
-    let mut workd = Workd::new(&base, &fixture, &[("claude", &[])]);
+    let mut workd = Workd::new(base, &fixture, &[("claude", &[])]);
     let host = Uuid::parse_str(workd.register(&token).await["hostId"].as_str().unwrap()).unwrap();
     workd.start();
     tokio::time::sleep(Duration::from_millis(600)).await;
@@ -972,14 +1256,15 @@ async fn wdc_4_a_member_host_takes_its_owner_and_kill_only() {
     let su = superuser_pool().await;
     let app_pool = momo_app_pool().await;
     let fixture = seed_fixture(&su, &app_pool).await;
-    let base = start_server(app_pool).await;
+    let server = start_server(app_pool).await;
+    let base = server.base.as_str();
     let http = reqwest::Client::new();
-    let token = login(&http, &base, &fixture).await;
+    let token = login(&http, base, &fixture).await;
     let agent_token = agent_bearer(&su, &fixture).await;
     let workspace = fixture.workspace;
 
     // ---- register: the owner's token, the key's public half only ----------
-    let mut workd = Workd::new(&base, &fixture, &[("claude", &[])]);
+    let mut workd = Workd::new(base, &fixture, &[("claude", &[])]);
     let registered = workd.register(&token).await;
     let host = Uuid::parse_str(registered["hostId"].as_str().expect("hostId")).unwrap();
     assert_eq!(
@@ -988,20 +1273,14 @@ async fn wdc_4_a_member_host_takes_its_owner_and_kill_only() {
     );
     let key_mode = std::fs::metadata(&workd.key).unwrap().mode() & 0o777;
     assert_eq!(key_mode, 0o600, "the dev key file is private");
-    let row = host_row(&http, &base, &token, &fixture, host).await;
+    let row = host_row(&http, base, &token, &fixture, host).await;
     assert_eq!(
         row["scope"], "member",
         "ADR-0188 D3: a desktop host is its owner's"
     );
     assert_eq!(row["type"], "workd");
     assert_eq!(row["ownerMemberId"], json!(fixture.owner.to_string()));
-    let stored_key = std::fs::read_to_string(&workd.key).unwrap();
-    assert!(
-        !serde_json::to_string(&row)
-            .unwrap()
-            .contains(stored_key.trim()),
-        "the server never sees the private key"
-    );
+    let public_key = row["publicKey"].as_str().expect("publicKey").to_string();
     eprintln!("wdc_4: registered member host {host}");
     workd.start();
 
@@ -1043,55 +1322,18 @@ async fn wdc_4_a_member_host_takes_its_owner_and_kill_only() {
     .await;
 
     // ---- the owner resumes an orphaned session onto this host --------------
-    let old_laptop = register_idle_member_host(&http, &base, &token, &fixture).await;
-    let created = http
-        .post(format!("{base}/v1/workspaces/{workspace}/work-sessions"))
-        .bearer_auth(&token)
-        .json(&json!({
-            "channelId": fixture.channel,
-            "hostId": old_laptop,
-            "tool": "claude",
-            "label": "resume me",
-        }))
-        .send()
-        .await
-        .expect("create the source session");
-    assert_eq!(
-        created.status(),
-        201,
-        "the owner opens a session on the old laptop"
-    );
-    let created: Value = created.json().await.expect("source body");
-    let source = Uuid::parse_str(created["workSession"]["id"].as_str().expect("id")).unwrap();
-    orphan_session(&su, source).await;
-    let resumed = http
-        .post(format!(
-            "{base}/v1/workspaces/{workspace}/work-sessions/{source}/resume"
-        ))
-        .bearer_auth(&token)
-        .json(&json!({"targetHostId": host}))
-        .send()
-        .await
-        .expect("resume");
-    assert_eq!(
-        resumed.status(),
-        201,
-        "the owner may resume onto their own host"
-    );
-    let resumed: Value = resumed.json().await.expect("resumed body");
-    assert_eq!(resumed["workSession"]["hostId"], json!(host.to_string()));
-    let session = Uuid::parse_str(resumed["workSession"]["id"].as_str().expect("id")).unwrap();
-    let (resume_control, requester): (Uuid, Uuid) = sqlx::query_as(
-        "SELECT id, requester_member_id FROM work_control WHERE session_id = $1 AND kind = 'spawn'",
+    let resumed = owner_resume(
+        &su,
+        &http,
+        base,
+        &token,
+        &fixture,
+        host,
+        "claude",
+        "resume me",
     )
-    .bind(session)
-    .fetch_one(&su)
-    .await
-    .expect("the resume's spawn control");
-    assert_eq!(
-        requester, fixture.owner,
-        "the resume is the owner's own control"
-    );
+    .await;
+    let (session, resume_control) = accepted_resume(&su, &fixture, host, resumed).await;
     wait_until("the resume spawn ack", &workd, || async {
         (control_state(&su, resume_control).await == ("acked".to_string(), Some(session)))
             .then_some(())
@@ -1101,35 +1343,15 @@ async fn wdc_4_a_member_host_takes_its_owner_and_kill_only() {
         (session_status(&su, session).await == "idle").then_some(())
     })
     .await;
-    let root: Uuid = sqlx::query_scalar("SELECT root_message_id FROM work_session WHERE id = $1")
-        .bind(session)
-        .fetch_one(&su)
+    let answer: String = session_events(&http, base, &token, &fixture, &su, session)
         .await
-        .unwrap();
-    let replies: Value = http
-        .get(format!(
-            "{base}/v1/workspaces/{workspace}/channels/{}/messages/{root}/replies",
-            fixture.channel
-        ))
-        .bearer_auth(&token)
-        .send()
-        .await
-        .expect("read the session thread")
-        .json()
-        .await
-        .expect("replies body");
-    let answer: String = replies["messages"]
-        .as_array()
-        .expect("messages")
         .iter()
-        .filter(|row| {
-            row["props"]["event_type"] == "agent.partial"
-                && row["props"]["event"]["work_session_id"] == json!(session.to_string())
-        })
+        .filter(|row| row["props"]["event_type"] == "agent.partial")
         .map(|row| {
             row["props"]["event"]["text_delta"]
                 .as_str()
                 .unwrap_or_default()
+                .to_string()
         })
         .collect();
     assert_eq!(answer, "stub heard: resume me — done.");
@@ -1194,4 +1416,48 @@ async fn wdc_4_a_member_host_takes_its_owner_and_kill_only() {
     eprintln!("wdc_4: agent kill {kill} delivered, session ended");
 
     assert_eq!(workd.stop().await, Some(0), "SIGTERM is a clean stop");
+    server
+        .recorder
+        .assert_seed_never_sent(&workd.key, &public_key);
+    eprintln!("wdc_4: no request carried the host key seed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn wdc_5_a_workspace_host_is_not_served() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed_fixture(&su, &app_pool).await;
+    let server = start_server(app_pool).await;
+    let base = server.base.as_str();
+    let http = reqwest::Client::new();
+    let token = login(&http, base, &fixture).await;
+
+    let mut workd = Workd::new(base, &fixture, &[("claude", &[])]);
+    let host = workd
+        .register_as_workspace_host(&http, base, &token, &fixture)
+        .await;
+    let before = server.recorder.0.lock().unwrap().len();
+    workd.start();
+    let child = workd.child.as_mut().unwrap();
+    let status = tokio::time::timeout(Duration::from_secs(15), child.wait())
+        .await
+        .unwrap_or_else(|_| panic!("a workspace host must not be served\n{}", workd.log_tail()))
+        .expect("exit status");
+    workd.child = None;
+    let log = std::fs::read_to_string(&workd.log).unwrap_or_default();
+    assert_eq!(status.code(), Some(2), "usage exit\n{log}");
+    assert!(log.contains("serves only"), "{log}");
+    assert_eq!(
+        server.recorder.0.lock().unwrap().len(),
+        before,
+        "the refused host sent nothing"
+    );
+    let row = host_row(&http, base, &token, &fixture, host).await;
+    assert_eq!(
+        row["online"], false,
+        "a host that is not served never comes online"
+    );
+    eprintln!("wdc_5: workspace host {host} refused by run (exit 2), nothing sent");
 }
