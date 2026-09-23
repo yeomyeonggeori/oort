@@ -18,7 +18,16 @@ import sys
 import tempfile
 from pathlib import Path
 
-APP_SERVICES = ("api", "relay", "webhook-sender", "agent-worker")
+# #2205: notifier and push-relay run the same image (push path on the team
+# instance), so they drift from latest.json exactly like the other four.
+APP_SERVICES = (
+    "api",
+    "relay",
+    "webhook-sender",
+    "agent-worker",
+    "notifier",
+    "push-relay",
+)
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 FROM_RE = re.compile(r"^FROM\s+(\S+)(?:\s+[Aa][Ss]\s+(\S+))?\s*$")
 COPY_FROM_RE = re.compile(r"^COPY\s+--from=(\S+)\s+(\S+)\s+(\S+)\s*$")
@@ -318,6 +327,8 @@ MUTATIONS: tuple[tuple[str, str], ...] = (
     ("relay", "service relay image"),
     ("webhook-sender", "service webhook-sender image"),
     ("agent-worker", "service agent-worker image"),
+    ("notifier", "service notifier image"),
+    ("push-relay", "service push-relay image"),
     ("caddy", "Dockerfile.caddy ARG OORT_IMAGE"),
     ("missing-api", "service api image missing"),
     ("missing-caddy-arg", "Dockerfile.caddy ARG OORT_IMAGE count"),

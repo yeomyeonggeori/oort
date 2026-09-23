@@ -841,7 +841,7 @@ outside the heredoc (44 on stdout).
 
 | `--platform` | Tier | Public origin from | Postgres | Keys set by hand | Output |
 |---|---|---|---|---|---|
-| `railway` (alias `--railway`) | T2 | `RAILWAY_PUBLIC_DOMAIN` | plugin `DATABASE_URL` | `CENT_API_URL` · `WORKER_DATABASE_URL` · `CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS` (`infra/railway/README.md`) | KEY=value on stdout, no file, no `MOMO_HOSTED_DELIVERY_ENABLED`, stamp `MOMO_SELF_HOST_PLATFORM=railway` outside the heredoc |
+| `railway` (alias `--railway`) | T2 | `RAILWAY_PUBLIC_DOMAIN` | `DATABASE_URL` of the PG18 + pgvector image service, composed by hand (`infra/railway/README.md`) | the README's hand-mapped table (≥9; the generator's stderr names `CENT_API_URL` · `WORKER_DATABASE_URL` · `CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS`) | KEY=value on stdout, no file, no `MOMO_HOSTED_DELIVERY_ENABLED`, stamp `MOMO_SELF_HOST_PLATFORM=railway` outside the heredoc |
 | `fly` | T1 | `--public-origin https://<host>` (required) | compose `postgres` | none | `infra/rust/local.secrets.env` as the local path + `MOMO_SELF_HOST_PLATFORM=fly` |
 | `aws-lightsail` | T1 | same | compose `postgres` | none | same, `MOMO_SELF_HOST_PLATFORM=aws-lightsail` |
 | `gcp-vm` | T1 | same | compose `postgres` | none | same, `MOMO_SELF_HOST_PLATFORM=gcp-vm` |
@@ -879,10 +879,13 @@ Human approval points (owner's account and bill): AWS login/SSO,
 Cloud install of the same stack: [`infra/railway/README.md`](../infra/railway/README.md).
 Caddy is the public service (Railway TLS); api stays internal so
 `/v1/centrifugo/*` stays an exclusive 403 (`infra/railway/Caddyfile.railway`).
-Postgres is the Railway plugin. LiveKit is not included.
+Postgres is the compose PG18 + pgvector image as its own service with a
+volume — the Railway Postgres template has no pgvector. LiveKit is not
+included.
 
-After the plugin `DATABASE_URL` and the caddy public hostname exist, the
-same generator prints Railway variables (no file, no compose stack):
+After you compose that service's `DATABASE_URL` (README) and the caddy
+public hostname exists, the same generator prints Railway variables (no
+file, no compose stack):
 
 ```sh
 scripts/self_host_env.sh --platform railway
@@ -893,7 +896,9 @@ is the generator heredoc plus `oort_public_edge_env_keys` — do not type
 `OORT_SITE_ADDRESS` / `OORT_CSP_CONNECT_SRC` by hand. Local provider opt-in
 (`--allow-local-provider`) is for local installs only; this template does
 not carry those keys. Gate:
-`scripts/oort doctor --json` (`public.healthz` · `public.websocket`).
+`scripts/oort doctor --json` (`public.healthz` · `public.websocket`), plus the
+README's by-hand checks: the sign-in `realtimeWebSocketUrl` is `wss://` and a
+QR device link carries `https://`.
 
 ### Fly.io
 
