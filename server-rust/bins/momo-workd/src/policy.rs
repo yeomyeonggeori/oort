@@ -1,0 +1,675 @@
+//! ADR-0188 D6 — execution isolation, enforced by the host from the first
+//! session. Every rule here is a small pure function so a test can remove it and
+//! watch the guarded behaviour come back (the red proofs in `tests/`).
+//!
+//! | invariant (ADR-0188 §3) | where |
+//! |---|---|
+//! | executable and arguments come from the host allowlist, never from the server | [`launch_spec`] (config: `crate::config::ToolEntry`) |
+//! | a configuration that asks for bypass/auto is refused | [`is_forbidden_launch_argument`] |
+//! | the permission mode is fixed; bypass/auto at session start → no session | [`check_session_modes`] |
+//! | leaving the fixed mode mid-session closes the remote path | [`check_mode_update`] |
+//! | no remote `shell` | [`check_remote_tool`] |
+//! | only ACP adapters with a permission bridge | [`AdapterKind`] |
+//! | every ACP permission request is denied until the R1 bridge lands | [`decide_permission`] |
+//! | project hooks / MCP servers / allow rules are not applied | [`AdapterKind::isolation_env`], [`session_new_params`], [`check_project_config`] |
+//! | no TCP port | nothing in this crate binds a socket; the conformance test checks the process |
+//!
+//! ## How each adapter is isolated (measured 2026-09-23 against the published sources)
+//!
+//! Neither adapter reads configuration flags from its own command line, so the
+//! switches travel in `session/new` `_meta` (Claude) and the environment (Codex).
+//!
+//! * **Claude** — `@agentclientprotocol/claude-agent-acp` 0.81.0 spreads
+//!   `_meta.claudeCode.options` over its Agent SDK defaults
+//!   (`settingSources: ["user","project","local"]`), and Agent SDK 0.3.280
+//!   documents `settingSources: []` as "SDK isolation mode" (no user, project or
+//!   local settings: no hooks, no permission allow rules, no plugins; only the
+//!   managed-policy tier) and `strictMcpConfig: true` as "only the MCP servers
+//!   passed programmatically" (`.mcp.json`, user settings and plugins ignored).
+//!   `allowDangerouslySkipPermissions: false` is the adapter's own host opt-out:
+//!   `bypassPermissions` leaves the mode catalog and a settings demand for it is
+//!   clamped to `default`. Login is not a setting and is unaffected; CLAUDE.md
+//!   (loaded only with the `project` source) is not read either.
+//! * **Codex** — `@agentclientprotocol/codex-acp` 1.13.0 starts every session in
+//!   `INITIAL_AGENT_MODE` (default `agent`, an auto-review mode) and merges the
+//!   JSON object in `CODEX_CONFIG` into each thread's config overrides; codex
+//!   0.146 turns hooks, plugins and apps off by feature flag. The adapter also
+//!   marks the session folder *trusted*, which loads the project's
+//!   `.codex/config.toml`, and codex deep-merges config layers
+//!   (`codex-rs/config/src/merge.rs`), so no override can remove a project MCP
+//!   server or rule. The host therefore refuses a Codex session wherever a
+//!   project `.codex` exists ([`check_project_config`]).
+
+use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
+use serde_json::{json, Value};
+
+use crate::acp::LaunchSpec;
+use crate::config::ToolEntry;
+
+/// The tool key ADR-0188 D6 forbids remotely, whatever the allowlist says.
+pub const REMOTE_SHELL_TOOL: &str = "shell";
+
+/// Why a control was refused. `label()` is the ack's `errorLabel`, which the
+/// server relays to the room on `work.control.acked`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusal {
+    /// ADR-0188 D6: no remote `shell`.
+    ShellRefused,
+    /// The spawn names a tool this host does not allowlist.
+    ToolNotAllowlisted,
+    /// ADR-0188 D6: the agent is not in the host's fixed permission mode.
+    PermissionModeRefused,
+    /// ADR-0188 D6: the folder carries project agent configuration the adapter
+    /// would apply and the host cannot switch off.
+    ProjectConfigRefused,
+    /// The allowed folder does not resolve to a directory.
+    WorkdirUnavailable,
+    /// The adapter could not be started or did not complete the ACP handshake.
+    AgentStartFailed,
+    /// The server refused the session create.
+    SessionCreateFailed,
+    /// ADR-0188 D3 (host side): only the host owner may steer a session.
+    RequesterNotOwner,
+    /// The control addresses a session this host is not running.
+    SessionNotFound,
+    /// The session's remote path was closed (mode escape) or it is ending.
+    SessionClosed,
+    /// A kind this host does not serve (`read`, anything new).
+    UnsupportedControl,
+    /// The control's payload is not the shape its kind requires.
+    InvalidControl,
+}
+
+impl Refusal {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ShellRefused => "shell_refused",
+            Self::ToolNotAllowlisted => "tool_not_allowlisted",
+            Self::PermissionModeRefused => "permission_mode_refused",
+            Self::ProjectConfigRefused => "project_config_refused",
+            Self::WorkdirUnavailable => "workdir_unavailable",
+            Self::AgentStartFailed => "agent_start_failed",
+            Self::SessionCreateFailed => "session_create_failed",
+            Self::RequesterNotOwner => "requester_not_owner",
+            Self::SessionNotFound => "session_not_found",
+            Self::SessionClosed => "session_closed",
+            Self::UnsupportedControl => "unsupported_control",
+            Self::InvalidControl => "invalid_control",
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// adapters
+// ---------------------------------------------------------------------------
+
+/// The ACP adapters this host launches. A closed set: an adapter is admitted
+/// only once its permission requests are known to reach the host (ADR-0188 D6
+/// "원격 spawn은 ACP 권한 다리가 있는 도구만") and its isolation switches are
+/// known.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AdapterKind {
+    /// Claude Code through its ACP adapter.
+    Claude,
+    /// Codex through its ACP adapter.
+    Codex,
+}
+
+/// Codex's session preset the host fixes (`codex-acp` `AgentMode.ReadOnly`,
+/// "Ask for approval": approvals on request, reviewed by the user).
+pub const CODEX_FIXED_MODE: &str = "read-only";
+
+impl AdapterKind {
+    /// The one permission mode a remote session may be in. Anything else —
+    /// at start or later — is refused rather than corrected.
+    pub fn fixed_mode(self) -> &'static str {
+        match self {
+            // Claude Code's `default` ("Manual"): edits and commands ask.
+            Self::Claude => "default",
+            // Not `agent` (auto-review) and not `agent-full-access` (never asks).
+            Self::Codex => CODEX_FIXED_MODE,
+        }
+    }
+
+    /// Environment the host sets on the adapter so project hooks, MCP servers
+    /// and allow rules are not applied (ADR-0188 D6). Set after the owner's own
+    /// environment, so an inherited value cannot win.
+    pub fn isolation_env(self) -> Vec<(String, String)> {
+        match self {
+            Self::Claude => Vec::new(),
+            Self::Codex => vec![
+                // Otherwise every session opens in the auto-review mode.
+                (
+                    "INITIAL_AGENT_MODE".to_string(),
+                    CODEX_FIXED_MODE.to_string(),
+                ),
+                // Per-thread config overrides. codex 0.146 passes them on as
+                // `-c`-style overrides (`app-server/src/config_manager.rs`
+                // `load_with_cli_overrides`), splits each key on `.`
+                // (`config/src/overrides.rs` `apply_toml_override`) into a
+                // session-flags layer, and deep-merges that over the user and
+                // project layers — so these leaves replace the configured
+                // values, where an empty table would have changed nothing.
+                (
+                    "CODEX_CONFIG".to_string(),
+                    json!({
+                        "features.hooks": false,
+                        "features.plugins": false,
+                        "features.apps": false,
+                        "notify": [],
+                    })
+                    .to_string(),
+                ),
+            ],
+        }
+    }
+
+    /// `session/new` `_meta` for the same purpose, when the adapter reads one.
+    pub fn session_new_meta(self) -> Option<Value> {
+        match self {
+            Self::Claude => Some(json!({
+                "claudeCode": {
+                    "options": {
+                        "settingSources": [],
+                        "strictMcpConfig": true,
+                        "allowDangerouslySkipPermissions": false,
+                    }
+                }
+            })),
+            Self::Codex => None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// launch
+// ---------------------------------------------------------------------------
+
+/// Environment variables never handed to an agent: the host's own
+/// configuration (including the one-shot registration token) is not the
+/// agent's business.
+fn is_withheld_env(key: &str) -> bool {
+    key.starts_with("MOMO_") || key.starts_with("OORT_")
+}
+
+/// Build the launch for one allowlisted tool. The only inputs are the owner's
+/// allowlist entry, the resolved folder, and the host's own environment — no
+/// server-provided value reaches the command line.
+pub fn launch_spec(
+    entry: &ToolEntry,
+    cwd: &Path,
+    parent_env: impl IntoIterator<Item = (String, String)>,
+) -> LaunchSpec {
+    let mut env: Vec<(String, String)> = parent_env
+        .into_iter()
+        .filter(|(key, _)| !is_withheld_env(key))
+        .collect();
+    for (key, value) in entry.adapter.isolation_env() {
+        env.retain(|(existing, _)| existing != &key);
+        env.push((key, value));
+    }
+    LaunchSpec {
+        program: entry.executable.clone(),
+        args: entry.args.clone(),
+        env,
+        cwd: cwd.to_path_buf(),
+    }
+}
+
+/// ADR-0188 D6 for Codex: refuse a folder with a project `.codex` anywhere from
+/// `cwd` up to its git root. `codex-acp` trusts the session folder, codex then
+/// loads `.codex/config.toml` from each of those directories, and its
+/// deep-merged layers leave the host no override that removes a project MCP
+/// server or rule. `codex_home` (the owner's own `~/.codex`) is the user layer,
+/// not a project one, and is skipped. Claude's project settings are switched
+/// off by `settingSources: []`, so nothing is refused for it here.
+pub fn check_project_config(
+    adapter: AdapterKind,
+    cwd: &Path,
+    codex_home: Option<&Path>,
+) -> Result<(), Refusal> {
+    if adapter != AdapterKind::Codex {
+        return Ok(());
+    }
+    let codex_home = codex_home.and_then(|home| std::fs::canonicalize(home).ok());
+    // The directories codex reads project layers from: `cwd` and its parents up
+    // to the repository root (only `cwd` when there is no repository).
+    let mut chain: Vec<PathBuf> = Vec::new();
+    let mut repository_root = false;
+    for directory in cwd.ancestors() {
+        chain.push(directory.to_path_buf());
+        if directory.join(".git").exists() {
+            repository_root = true;
+            break;
+        }
+    }
+    if !repository_root {
+        chain.truncate(1);
+    }
+    for directory in chain {
+        let dot_codex = directory.join(".codex");
+        if !dot_codex.exists() {
+            continue;
+        }
+        let is_user_home = codex_home
+            .as_deref()
+            .is_some_and(|home| std::fs::canonicalize(&dot_codex).ok().as_deref() == Some(home));
+        if !is_user_home {
+            return Err(Refusal::ProjectConfigRefused);
+        }
+    }
+    Ok(())
+}
+
+/// Where Codex keeps the owner's own configuration: `$CODEX_HOME`, else
+/// `$HOME/.codex`.
+pub fn codex_home(env: &[(String, String)]) -> Option<PathBuf> {
+    let lookup = |name: &str| {
+        env.iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.clone())
+            .filter(|value| !value.is_empty())
+    };
+    lookup("CODEX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| lookup("HOME").map(|home| Path::new(&home).join(".codex")))
+}
+
+/// `session/new` params: the resolved folder, **no** MCP servers, and the
+/// adapter's isolation `_meta` when it has one.
+pub fn session_new_params(adapter: AdapterKind, cwd: &Path) -> Value {
+    let mut params = json!({
+        "cwd": cwd.display().to_string(),
+        "mcpServers": [],
+    });
+    if let Some(meta) = adapter.session_new_meta() {
+        params["_meta"] = meta;
+    }
+    params
+}
+
+/// Arguments that would relax the fixed permission mode or re-open a
+/// configuration source. Matched case-insensitively as substrings, so
+/// `--permission-mode=bypassPermissions` and `-c approval_policy="never"` are
+/// both caught.
+pub fn is_forbidden_launch_argument(argument: &str) -> bool {
+    const NEEDLES: &[&str] = &[
+        "dangerously",
+        "bypass",
+        "yolo",
+        "full-auto",
+        "full_auto",
+        "permission-mode",
+        "permission_mode",
+        "approval_policy",
+        "approval-policy",
+        "ask-for-approval",
+        "sandbox_mode",
+        "sandbox-mode",
+        "--sandbox",
+        "acceptedits",
+        "dontask",
+        "allowedtools",
+        "allowed-tools",
+        "mcp",
+        "setting-sources",
+        "settings",
+        "hooks",
+    ];
+    let lowered = argument.to_ascii_lowercase();
+    NEEDLES.iter().any(|needle| lowered.contains(needle))
+}
+
+/// `^[a-z0-9][a-z0-9._-]{1,63}$` — the server's work tool key.
+pub fn is_valid_tool_key(raw: &str) -> bool {
+    let mut characters = raw.chars();
+    let first_ok = characters
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+    let rest: Vec<char> = characters.collect();
+    first_ok
+        && (1..=63).contains(&rest.len())
+        && rest
+            .iter()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "._-".contains(*c))
+}
+
+// ---------------------------------------------------------------------------
+// the invariants
+// ---------------------------------------------------------------------------
+
+/// ADR-0188 D6: a remote spawn of `shell` is refused, before the allowlist is
+/// even consulted — an owner who allowlisted something called `shell` still
+/// does not get a remote shell.
+pub fn check_remote_tool(tool: &str) -> Result<(), Refusal> {
+    if tool.trim().eq_ignore_ascii_case(REMOTE_SHELL_TOOL) {
+        return Err(Refusal::ShellRefused);
+    }
+    Ok(())
+}
+
+/// ADR-0188 D6: the session must be in the adapter's fixed mode when it opens.
+/// `modes` is the `session/new` result's `modes` object. An adapter that does
+/// not report a mode cannot prove it is not in bypass/auto, so it is refused
+/// too — the host does not guess.
+pub fn check_session_modes(adapter: AdapterKind, modes: Option<&Value>) -> Result<(), Refusal> {
+    let current = modes
+        .and_then(|modes| modes.get("currentModeId"))
+        .and_then(Value::as_str);
+    match current {
+        Some(mode) if mode == adapter.fixed_mode() => Ok(()),
+        _ => Err(Refusal::PermissionModeRefused),
+    }
+}
+
+/// ADR-0188 D6: a mid-session mode change away from the fixed mode closes the
+/// remote path.
+pub fn check_mode_update(adapter: AdapterKind, mode: &str) -> Result<(), Refusal> {
+    if mode == adapter.fixed_mode() {
+        Ok(())
+    } else {
+        Err(Refusal::PermissionModeRefused)
+    }
+}
+
+/// One `session/request_permission` option.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermissionOption {
+    pub option_id: String,
+    pub kind: String,
+}
+
+/// The host's answer to a permission request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PermissionDecision {
+    /// Select the agent's own one-time rejection.
+    Reject { option_id: String },
+    /// No one-time rejection on offer: answer `cancelled`, which every ACP agent
+    /// must treat as "not permitted".
+    Cancelled,
+}
+
+impl PermissionDecision {
+    /// The `session/request_permission` result.
+    pub fn to_result(&self) -> Value {
+        match self {
+            Self::Reject { option_id } => {
+                json!({"outcome": {"outcome": "selected", "optionId": option_id}})
+            }
+            Self::Cancelled => json!({"outcome": {"outcome": "cancelled"}}),
+        }
+    }
+}
+
+/// Parse the options of a `session/request_permission` request.
+pub fn permission_options(params: &Value) -> Vec<PermissionOption> {
+    params
+        .get("options")
+        .and_then(Value::as_array)
+        .map(|options| {
+            options
+                .iter()
+                .filter_map(|option| {
+                    Some(PermissionOption {
+                        option_id: option.get("optionId")?.as_str()?.to_string(),
+                        kind: option
+                            .get("kind")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// ADR-0188 D5/D6 until the R1 permission bridge exists: **every** request is
+/// denied. Never an `allow_*` option, and never `reject_always` either — a
+/// persistent rule would be written into the agent's settings, and ADR-0188 D5
+/// keeps the host from writing rule files.
+pub fn decide_permission(options: &[PermissionOption]) -> PermissionDecision {
+    options
+        .iter()
+        .find(|option| option.kind == "reject_once")
+        .map(|option| PermissionDecision::Reject {
+            option_id: option.option_id.clone(),
+        })
+        .unwrap_or(PermissionDecision::Cancelled)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn entry(adapter: AdapterKind) -> ToolEntry {
+        ToolEntry {
+            adapter,
+            executable: PathBuf::from("/opt/agents/bin/adapter"),
+            args: vec!["--owner-flag".to_string()],
+        }
+    }
+
+    #[test]
+    fn shell_is_refused_in_any_case() {
+        assert_eq!(check_remote_tool("shell"), Err(Refusal::ShellRefused));
+        assert_eq!(check_remote_tool("SHELL"), Err(Refusal::ShellRefused));
+        assert_eq!(check_remote_tool(" shell "), Err(Refusal::ShellRefused));
+        assert_eq!(check_remote_tool("claude"), Ok(()));
+    }
+
+    #[test]
+    fn only_the_fixed_mode_opens_a_session() {
+        let modes = |current: &str| json!({"currentModeId": current, "availableModes": []});
+        assert_eq!(
+            check_session_modes(AdapterKind::Claude, Some(&modes("default"))),
+            Ok(())
+        );
+        for mode in [
+            "bypassPermissions",
+            "acceptEdits",
+            "plan",
+            "dontAsk",
+            "auto",
+        ] {
+            assert_eq!(
+                check_session_modes(AdapterKind::Claude, Some(&modes(mode))),
+                Err(Refusal::PermissionModeRefused),
+                "{mode}"
+            );
+        }
+        assert_eq!(
+            check_session_modes(AdapterKind::Claude, None),
+            Err(Refusal::PermissionModeRefused),
+            "no reported mode is not proof of a safe mode"
+        );
+        assert_eq!(check_mode_update(AdapterKind::Claude, "default"), Ok(()));
+        assert_eq!(
+            check_mode_update(AdapterKind::Claude, "bypassPermissions"),
+            Err(Refusal::PermissionModeRefused)
+        );
+    }
+
+    #[test]
+    fn permission_requests_are_never_allowed() {
+        let options = |kinds: &[&str]| -> Vec<PermissionOption> {
+            kinds
+                .iter()
+                .map(|kind| PermissionOption {
+                    option_id: format!("id-{kind}"),
+                    kind: kind.to_string(),
+                })
+                .collect()
+        };
+        assert_eq!(
+            decide_permission(&options(&["allow_always", "allow_once", "reject_once"])),
+            PermissionDecision::Reject {
+                option_id: "id-reject_once".into()
+            }
+        );
+        assert_eq!(
+            decide_permission(&options(&["allow_always", "allow_once"])),
+            PermissionDecision::Cancelled
+        );
+        assert_eq!(
+            decide_permission(&options(&["allow_once", "reject_always"])),
+            PermissionDecision::Cancelled,
+            "reject_always would write a rule file"
+        );
+        assert_eq!(decide_permission(&[]), PermissionDecision::Cancelled);
+        assert_eq!(
+            PermissionDecision::Cancelled.to_result(),
+            json!({"outcome": {"outcome": "cancelled"}})
+        );
+    }
+
+    #[test]
+    fn the_launch_comes_from_the_allowlist_and_withholds_host_env() {
+        let spec = launch_spec(
+            &entry(AdapterKind::Claude),
+            Path::new("/work/repo"),
+            vec![
+                ("HOME".to_string(), "/Users/me".to_string()),
+                (
+                    "MOMO_WORKD_REGISTER_TOKEN".to_string(),
+                    "secret".to_string(),
+                ),
+                ("PATH".to_string(), "/usr/bin".to_string()),
+            ],
+        );
+        assert_eq!(spec.program, PathBuf::from("/opt/agents/bin/adapter"));
+        assert_eq!(spec.args.first().map(String::as_str), Some("--owner-flag"));
+        assert_eq!(spec.cwd, PathBuf::from("/work/repo"));
+        assert!(spec.env.iter().any(|(key, _)| key == "HOME"));
+        assert!(
+            !spec.env.iter().any(|(key, _)| key.starts_with("MOMO_")),
+            "the registration token must not reach an agent"
+        );
+        let params = session_new_params(AdapterKind::Claude, Path::new("/work/repo"));
+        assert_eq!(params["mcpServers"], json!([]));
+        assert_eq!(params["cwd"], "/work/repo");
+    }
+
+    #[test]
+    fn claude_is_isolated_through_session_meta() {
+        let params = session_new_params(AdapterKind::Claude, Path::new("/work/repo"));
+        let options = &params["_meta"]["claudeCode"]["options"];
+        assert_eq!(
+            options["settingSources"],
+            json!([]),
+            "no user/project/local settings"
+        );
+        assert_eq!(
+            options["strictMcpConfig"], true,
+            "no .mcp.json, user or plugin MCP"
+        );
+        assert_eq!(
+            options["allowDangerouslySkipPermissions"], false,
+            "no bypass mode"
+        );
+        assert!(AdapterKind::Claude.isolation_env().is_empty());
+    }
+
+    #[test]
+    fn codex_is_isolated_through_its_environment_and_wins_over_inherited_values() {
+        let spec = launch_spec(
+            &entry(AdapterKind::Codex),
+            Path::new("/work/repo"),
+            vec![
+                (
+                    "INITIAL_AGENT_MODE".to_string(),
+                    "agent-full-access".to_string(),
+                ),
+                ("CODEX_CONFIG".to_string(), "{}".to_string()),
+            ],
+        );
+        let value = |name: &str| {
+            let matches: Vec<&String> = spec
+                .env
+                .iter()
+                .filter(|(key, _)| key == name)
+                .map(|(_, value)| value)
+                .collect();
+            assert_eq!(matches.len(), 1, "{name} is set exactly once");
+            matches[0].clone()
+        };
+        assert_eq!(value("INITIAL_AGENT_MODE"), "read-only");
+        let config: Value = serde_json::from_str(&value("CODEX_CONFIG")).unwrap();
+        assert_eq!(config["features.hooks"], false);
+        assert_eq!(config["features.plugins"], false);
+        assert_eq!(config["features.apps"], false);
+        assert_eq!(config["notify"], json!([]));
+        assert!(session_new_params(AdapterKind::Codex, Path::new("/w"))
+            .get("_meta")
+            .is_none());
+    }
+
+    #[test]
+    fn a_codex_session_is_refused_where_a_project_codex_folder_exists() {
+        let root = std::env::temp_dir().join(format!(
+            "momo-workd-policy-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let repo = root.join("repo");
+        let nested = repo.join("service");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        let home = root.join("home").join(".codex");
+        std::fs::create_dir_all(&home).unwrap();
+
+        assert_eq!(
+            check_project_config(AdapterKind::Codex, &nested, Some(&home)),
+            Ok(())
+        );
+        // A project layer at the repository root is seen from a nested folder.
+        std::fs::create_dir_all(repo.join(".codex")).unwrap();
+        assert_eq!(
+            check_project_config(AdapterKind::Codex, &nested, Some(&home)),
+            Err(Refusal::ProjectConfigRefused)
+        );
+        // Claude's project settings are off by `settingSources: []` instead.
+        assert_eq!(
+            check_project_config(AdapterKind::Claude, &nested, Some(&home)),
+            Ok(())
+        );
+        // The owner's own CODEX_HOME is the user layer, not a project one.
+        std::fs::remove_dir_all(repo.join(".codex")).unwrap();
+        std::os::unix::fs::symlink(&home, repo.join(".codex")).unwrap();
+        assert_eq!(
+            check_project_config(AdapterKind::Codex, &nested, Some(&home)),
+            Ok(())
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn bypass_style_arguments_are_recognised() {
+        for argument in [
+            "--dangerously-skip-permissions",
+            "--permission-mode",
+            "bypassPermissions",
+            "-c approval_policy=never",
+            "--sandbox=danger-full-access",
+            "--mcp-config=/tmp/x.json",
+            "--settings",
+        ] {
+            assert!(is_forbidden_launch_argument(argument), "{argument}");
+        }
+        for argument in ["--model", "opus", "--verbose"] {
+            assert!(!is_forbidden_launch_argument(argument), "{argument}");
+        }
+    }
+
+    #[test]
+    fn tool_keys_follow_the_server_vocabulary() {
+        assert!(is_valid_tool_key("claude"));
+        assert!(is_valid_tool_key("codex-acp"));
+        assert!(!is_valid_tool_key("c"));
+        assert!(!is_valid_tool_key("Claude"));
+        assert!(!is_valid_tool_key("-x"));
+    }
+}
