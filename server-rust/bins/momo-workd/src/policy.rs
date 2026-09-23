@@ -172,8 +172,8 @@ impl Refusal {
 
 /// The ACP adapters this host launches. A closed set: an adapter is admitted
 /// only once its permission requests are known to reach the host (ADR-0188 D6
-/// "원격 spawn은 ACP 권한 다리가 있는 도구만") and its isolation switches are
-/// known.
+/// "원격 spawn은 ACP 권한 다리가 있는 도구만") — Codex inside the sandbox
+/// boundary ADR-0188 §8 accepts — and its isolation switches are known.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AdapterKind {
@@ -204,7 +204,8 @@ impl AdapterKind {
     /// session is refused; leaving it later closes the session.
     pub fn fixed_mode(self) -> &'static str {
         match self {
-            // Claude Code's `default` ("Manual"): edits and commands ask.
+            // Claude Code's `default` ("Manual"): every edit and every command
+            // outside its built-in read-only set asks (ADR-0188 §8.3).
             Self::Claude => "default",
             // Not `agent` (auto-review) and not `agent-full-access` (never asks).
             Self::Codex => CODEX_FIXED_MODE,
@@ -997,6 +998,19 @@ mod tests {
     /// Claude session, for measuring it against the real adapter
     /// (`cargo test -p momo-workd --lib claude_meta_for_measurement --
     /// --ignored --nocapture`).
+    /// Not a check: prints the exact `CODEX_CONFIG` the host sets, for
+    /// measuring it against the real adapter.
+    #[test]
+    #[ignore = "prints the Codex `CODEX_CONFIG` for a measurement"]
+    fn codex_config_for_measurement() {
+        let (_, config) = AdapterKind::Codex
+            .isolation_env(&codex_fixture())
+            .into_iter()
+            .find(|(key, _)| key == "CODEX_CONFIG")
+            .unwrap();
+        println!("{config}");
+    }
+
     #[test]
     #[ignore = "prints the Claude `_meta` for a measurement"]
     fn claude_meta_for_measurement() {
