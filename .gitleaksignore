@@ -259,11 +259,9 @@ b97d2240178b601d1f5e9b1183b36c00a5a14641:clients/web/src/features/welcome/freshS
 9819c1ca1a8520998c42b175863ad8db9f216eda:infra/railway/README.md:generic-api-key:88
 # scripts/tests/test_image_day2_tools.sh:41 — PGDG 공개키 파일(server-rust/apt/ACCC4CF8.asc)의 sha256 핀 상수. 해시 리터럴이지 자격증명이 아님(PR #2372, SH-11e-2).
 9f8aae5d96df3d27b04c80d3518753e656378058:scripts/tests/test_image_day2_tools.sh:generic-api-key:41
-
-# 2026-09-23 #2205 단계 1 — 같은 오탐의 재발(카탈로그를 서비스별 variables 로 다시 쓰며 줄이 옮겨졌다).
-# Railway 사설 DNS 상의 api 서비스 주소(서비스명.railway.internal:포트)를 generic-api-key 가 키로 읽는다.
-# 자격증명 아님: 다시 봤고 값은 위 SH-5a 항목과 같은 Centrifugo subscribe proxy 엔드포인트다.
-#   infra/railway/railway.json  services.centrifugo.variables 의 subscribe proxy endpoint
-#   infra/railway/README.md     같은 주소를 백틱으로 인용한 한 줄(Centrifugo 절)
+# 2026-09-23 #2205 Railway 설정 PR — 위 2026-09-08 항목과 같은 오탐의 새 커밋: Railway 사설 DNS 상의 api 서비스 HTTP 주소.
+# generic-api-key 가 서비스명:포트를 키로 읽는다. 자격증명이 아니다(#2573에 선반영 — all-refs 스캔이 로컬 워커 브랜치를 막지 않게).
+#   infra/railway/railway.json  Centrifugo subscribe proxy endpoint
+#   infra/railway/README.md     같은 주소를 백틱으로 인용한 한 줄
 78a8d385b91fe062fc3f87ddd579dac3ec5a9cba:infra/railway/railway.json:generic-api-key:55
 78a8d385b91fe062fc3f87ddd579dac3ec5a9cba:infra/railway/README.md:generic-api-key:136

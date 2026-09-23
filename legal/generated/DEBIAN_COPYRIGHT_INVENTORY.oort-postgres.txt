@@ -1,4 +1,4 @@
-# provenance: exact local image oort-postgres:1332-notice built from infra/rust/postgres-pgbackrest/Dockerfile. Installed dpkg packages only.
+# provenance: exact local image oort-postgres:2572-arm64 (linux/arm64) built from infra/rust/postgres-pgbackrest/Dockerfile at 41bccfca. Installed dpkg packages only.
 # debian-copyright-inventory/v1
 # columns: package <TAB> version <TAB> license_fields <TAB> class <TAB> copyright_path
 # class copyleft includes GPL/LGPL/AGPL and is never written as permissive.
@@ -98,7 +98,7 @@ libsemanage2	3.8.1-1	GPL-2|LGPL-2.1+	copyleft	/usr/share/doc/libsemanage2/copyri
 libsepol2	3.8.1-1	GPL-2|GPL-2+|LGPL-2.1+|Zlib	copyleft	/usr/share/doc/libsepol2/copyright
 libsmartcols1	2.41-5	BSD-2-clause|BSD-3-clause|BSD-4-clause|BSLA|Expat|GPL-2|GPL-2+|GPL-3+|ISC|LGPL|LGPL-2+|LGPL-2.1+|LGPL-3+|public-domain	copyleft	/usr/share/doc/libsmartcols1/copyright
 libsqlite3-0	3.46.1-7+deb13u1	GPL-2+|public-domain	copyleft	/usr/share/doc/libsqlite3-0/copyright
-libssh2-1t64	1.11.1-1+deb13u1	BSD3|ISC	permissive	/usr/share/doc/libssh2-1t64/copyright
+libssh2-1t64	1.11.1-1+deb13u2	BSD3|ISC	permissive	/usr/share/doc/libssh2-1t64/copyright
 libssl3t64	3.5.6-1~deb13u2	Apache-2.0|Artistic|Artistic or GPL-1+|GPL-1+	copyleft	/usr/share/doc/libssl3t64/copyright
 libstdc++6	14.2.0-19	(no License: field)	other	/usr/share/doc/libstdc++6/copyright
 libsystemd0	257.13-1~deb13u1	CC0-1.0|Expat|GPL-2 with Linux-syscall-note exception|GPL-2+|LGPL-2.1+|public-domain	copyleft	/usr/share/doc/libsystemd0/copyright
