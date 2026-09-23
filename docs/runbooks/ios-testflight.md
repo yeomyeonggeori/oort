@@ -25,13 +25,15 @@
 |---|---|---|
 | 개발자 팀 | `YWQQFQM38J` (Individual, 유료) | Apple Developer › Membership |
 | ASC 앱 레코드 | 이름 `momo`, Apple ID `6792002019`, 번들 `app.momo.ios` | ASC › 앱 |
-| 배포 인증서 | 유효한 `Apple Distribution` 1개 (2027-06-29 만료) | `security find-identity -v -p codesigning` — 이름만 본다 |
+| 인증서 | 유효한 `Apple Distribution` 1개(2027-06-29 만료, 내보내기 서명)와 `Apple Development` 1개(2027-06-30 만료, 아카이브 서명) | `security find-identity -v -p codesigning` — 이름만 본다 |
 | App Store 프로파일 | `iOS Team Store Provisioning Profile: app.momo.ios` (aps `production`, App Group `group.app.momo.ios`), `iOS Team Store Provisioning Profile: app.momo.ios.NotificationService` — 둘 다 Xcode 관리형, 2027-07-09 만료 | `~/Library/Developer/Xcode/UserData/Provisioning Profiles`. 스크립트가 이름으로 찾고, 없으면 멈춘다 |
+| 개발 프로파일 | `iOS Team Provisioning Profile: app.momo.ios`, `iOS Team Provisioning Profile: app.momo.ios.NotificationService` — Xcode 관리형, 2027-07-17 만료. 아카이브 단계 서명에 쓰인다 | 같은 폴더. 스크립트가 같이 확인한다 |
 | 도구 | Xcode 26.5, 시스템 CocoaPods `1.17.0`(= `Podfile.lock`의 `COCOAPODS`), node ≥ `clients/mobile/.node-version` | `xcodebuild -version`, `pod --version`, `node --version` |
 | 업로드 인증 (§5 A) | Xcode › Settings › Accounts에 팀 계정이 로그인돼 있다 | 계정 화면. 세션이 살아 있는지는 로컬에서 확인할 수 없다 |
 | 업로드 인증 (§5 B) | ASC API 키(`.p8`)와 Key ID, Issuer ID | ASC › Users and Access › Integrations. **2026-09-23 기준 Issuer ID 기록이 없다.** 이 Mac에 있는 두 번째 `.p8`이 ASC 키인지 APNs 키인지도 확인되지 않았다 |
 
-- 키체인에 **폐기된** `Apple Distribution` 인증서가 같은 이름으로 하나 더 있다. 스크립트는 프로파일에 든 인증서로 identity를 고르므로 막히지 않는다. 이름으로 서명하는 다른 도구가 헷갈리지 않게 owner가 지운다.
+- 키체인에 **폐기된** `Apple Distribution` 인증서가 같은 이름으로 하나 더 있다. 이름으로 서명하는 도구가 헷갈리지 않게 owner가 지운다.
+- **momo 프로파일은 전부 Xcode 관리형이다**(`IsXcodeManaged=true`, 개발용·App Store용 모두). 그래서 수동 서명에는 쓸 수 없고 자동 서명만 된다(§4). 수동 프로파일을 새로 만드는 것은 이 런북의 범위가 아니다.
 - `.p8` 파일은 `~/.momo-secrets/`에 권한 `0400`으로 둔다. 명령줄에는 경로만 쓰고 내용은 쓰지 않는다.
 - 이 런북은 인증서·프로파일을 만들거나 폐기하지 않는다. 프로파일이 없거나 만료됐으면 멈추고 owner에게 넘긴다.
 
@@ -69,28 +71,32 @@ bash "<작업 디렉터리>/clients/mobile/scripts/archive-release.sh"
 
 - **main 커밋이나 태그에서 만든다**(M7-I I-1). 공용 루트 체크아웃을 바꾸지 않도록 별도 워크트리를 쓴다. 스크립트는 `clients/mobile`이나 `packages/momo-core`에 커밋되지 않은 변경이 있으면 멈춘다. 새 워크트리에 `node_modules`나 `ios/Pods`가 없으면 스크립트가 lock대로 설치한다.
 - 같은 날 다시 만들면 `--seq N`을 붙인다. 출력 위치를 정하려면 `--out DIR`을 쓴다(레포 밖만 된다). 기본은 새 임시 디렉터리다.
-- **서명.** 설치된 App Store 프로파일 두 개로 명령줄에서만 수동 서명한다.
-  - 프로젝트 파일에는 서명 identity를 넣지 않는다. Xcode Cloud의 Apple 관리형 서명이 기본값 상태를 기대하고, `projectShape.test.ts`가 이를 지킨다.
-  - `-allowProvisioningUpdates`를 넘기지 않으므로 Apple Developer 사이트와 통신하지 않는다. 인증서·프로파일도 만들지 않는다.
-- **검사.** 아카이브 직후 스크립트가 [`ci_post_xcodebuild.sh`](../../clients/mobile/ios/ci_scripts/ci_post_xcodebuild.sh)를 돌린다. 이 스크립트는 Xcode Cloud가 빌드마다 돌리는 것과 같다. 다음을 확인한다.
+- **서명 — 두 단계.** momo 프로파일이 전부 Xcode 관리형이라(§1) Xcode의 표준 흐름을 그대로 쓴다. 2026-09-23 실측 결과다.
+  - 아카이브는 자동 서명 그대로다. `Apple Development` 인증서와 개발 프로파일(`iOS Team Provisioning Profile: …`)이 쓰이고, 서명된 `aps-environment`는 `development`다.
+  - 내보내기(`-exportArchive`, `signingStyle=automatic`)가 App Store 프로파일과 `Apple Distribution` 인증서로 다시 서명한다. 서명된 `aps-environment`는 `production`이 된다.
+  - 두 단계 모두 `-allowProvisioningUpdates` 없이, Apple Developer 사이트와 통신하지 않고 끝난다. 인증서·프로파일도 만들지 않는다.
+  - 막힌 길 두 가지: 수동 서명은 Xcode가 거부한다(`… is Xcode managed, but signing settings require a manually managed profile`). 자동 서명에 `CODE_SIGN_IDENTITY="Apple Distribution"`을 얹는 것도 거부한다(`… is automatically signed for development, but a conflicting code signing identity Apple Distribution has been manually specified`).
+  - 프로젝트 파일에는 서명 설정을 넣지 않는다. Xcode Cloud의 Apple 관리형 서명이 기본값 상태를 기대하고, `projectShape.test.ts`가 이를 지킨다.
+- **검사 — 올라갈 배포 서명본에.** 스크립트가 내보낸 IPA를 풀어 아카이브 모양(`export-as-archive/Products/Applications/MomoMobile.app`)으로 놓고 [`ci_post_xcodebuild.sh`](../../clients/mobile/ios/ci_scripts/ci_post_xcodebuild.sh)를 돌린다. Xcode Cloud가 빌드마다 돌리는 것과 같은 스크립트다. 다음을 확인한다.
   - NSE가 앱에 임베드됐다.
   - 앱과 NSE가 각자 자기 번들 ID로 서명됐다.
   - 서명된 엔타이틀먼트에 공유 키체인 그룹 `YWQQFQM38J.app.momo.ios.shared`가 있다.
   - NSE에는 `aps-environment`가 없다.
   - 앱의 서명된 `aps-environment`와 Info.plist `MomoAPNSEnvironment`가 모두 `production`이다.
-  - 이어서 스크립트가 따로 확인하는 것: 앱·NSE의 `CFBundleVersion`이 빌드 번호와 같다. `ITSAppUsesNonExemptEncryption=false`와 권한 문구 3개(카메라·마이크·사진)가 빌드된 앱에 들어 있다.
-- 아카이브만 다시 검사하려면 `CI_ARCHIVE_PATH=<xcarchive> bash clients/mobile/ios/ci_scripts/ci_post_xcodebuild.sh`를 쓴다.
+  - 이어서 스크립트가 따로 확인하는 것: 앱·NSE의 `CFBundleVersion`이 빌드 번호와 같다. `ITSAppUsesNonExemptEncryption=false`와 권한 문구 3개(카메라·마이크·사진)가 들어 있다. 서명이 `Apple Distribution`이고 프로파일이 두 App Store 프로파일이다.
+- 다시 검사하려면 `CI_ARCHIVE_PATH=<출력 디렉터리>/export-as-archive bash clients/mobile/ios/ci_scripts/ci_post_xcodebuild.sh`를 쓴다. 개발 서명인 `.xcarchive`를 가리키면 마지막 검사(APNs 환경 일치)에서 실패한다. 그 아카이브는 `development`로 서명돼 있기 때문이고, 정상이다.
 - **산출물**(출력 디렉터리):
 
   | 파일 | 내용 |
   |---|---|
-  | `MomoMobile-<build>.xcarchive` | 업로드할 아카이브 |
-  | `export/*.ipa` | 같은 서명으로 로컬에 내보낸 IPA. 업로드는 하지 않았다 |
+  | `MomoMobile-<build>.xcarchive` | 업로드할 아카이브(개발 서명. 업로드 때 다시 서명된다) |
+  | `export/*.ipa` | 배포 서명으로 로컬에 내보낸 IPA. 업로드는 하지 않았다 |
+  | `export-as-archive/` | 검사용으로 IPA를 푼 것 |
   | `ExportOptions-upload.plist` | §5에서 쓴다. `ExportOptions-export.plist`와 `destination`만 다르다 |
-  | `build-info.txt` | M7-I I-1 사실: 커밋, 버전, 빌드 번호, 서명 인증서 이름, 프로파일 이름, `package-lock.json`·`Podfile.lock` SHA-256, 도구 버전 |
+  | `build-info.txt` | M7-I I-1 사실: 커밋, 버전, 빌드 번호, 서명 인증서 이름, 프로파일 이름, `aps-environment`(아카이브·내보내기), `package-lock.json`·`Podfile.lock`·IPA SHA-256, 도구 버전 |
   | `archive.log`, `export.log`, `ci_post_xcodebuild.log` | 원문 로그 |
 
-- 검증한 경로는 이 스크립트뿐이다. Xcode 앱의 Product › Archive는 자동 서명이라 서명 주체가 달라질 수 있다. 이 런북의 경로로 쓰지 않는다.
+- Xcode 앱의 Product › Archive도 같은 자동 서명이라 아카이브 단계는 같다. 다만 빌드 번호 규칙, 커밋 확인, 배포 서명본 검사, 빌드 사실 기록은 스크립트만 한다. 그래서 스크립트를 쓴다.
 - 실패하면 멈춘다. 서명 설정을 바꾸거나 `-allowProvisioningUpdates`를 더해 우회하지 않는다.
 
 ## 5. 업로드 — owner 승인 뒤, 건마다
@@ -98,9 +104,13 @@ bash "<작업 디렉터리>/clients/mobile/scripts/archive-release.sh"
 **이 절의 명령은 #2568에서 실행하지 않았다(미검증).** 업로드 전에 두 가지를 남긴다. 승인은 성재의 발화를 그대로 인용해 PR이나 이슈에 적는다. 같은 자리에 `build-info.txt` 전문을 붙인다.
 
 업로드용 ExportOptions에는 다음이 들어 있다.
-- `method=app-store-connect`, `signingStyle=manual`, 두 번들 ID → 위 두 프로파일, `teamID=YWQQFQM38J`.
+- `method=app-store-connect`, `signingStyle=automatic`, `teamID=YWQQFQM38J`.
+  - 설치된 App Store 프로파일이 Xcode 관리형이라 `manual`로는 쓸 수 없다(§4 서명).
+  - 자동 서명 내보내기라 `provisioningProfiles`·`signingCertificate`는 넣지 않는다. Xcode가 `signingCertificate`를 거부한다.
 - `testFlightInternalTestingOnly=true`: 이 빌드는 external TestFlight나 App Store로 가지 못한다.
 - `manageAppVersionAndBuildNumber=false`: 번호를 바꾸지 않는다.
+
+**`-allowProvisioningUpdates`의 부작용.** 이 플래그는 xcodebuild가 Xcode 계정이나 ASC 키로 Apple과 통신하게 한다. Xcode 26.5 도움말에 따르면 자동 서명 타깃에 대해서는 프로파일·App ID·인증서를 "만들고 갱신한다". 로컬 프로파일이 유효하면 그대로 쓰는 것이 보통이지만, 새 프로파일이나 클라우드 관리 배포 인증서가 생길 수 있다. 업로드를 owner가 직접 하거나 owner가 승인한 사람만 하는 이유다. 워커는 이 플래그를 쓰지 않는다.
 
 ### 경로 A — Xcode 계정 세션
 
@@ -112,8 +122,8 @@ xcodebuild -exportArchive \
   -allowProvisioningUpdates
 ```
 
-- `-allowProvisioningUpdates`는 xcodebuild가 Xcode에 로그인된 계정으로 Apple과 통신하게 한다. Xcode 26.5 도움말에 따르면 수동 서명 타깃에서는 없거나 갱신된 프로파일을 **내려받기만** 한다. 위 ExportOptions가 `manual`이므로 인증서·프로파일을 만들지 않는다.
-- GUI로 할 때는 `open "<출력 디렉터리>/MomoMobile-<build>.xcarchive"`로 Organizer를 열고 Distribute App에서 App Store Connect 업로드를 고른다. 서명은 **수동**으로 위 두 프로파일을 고른다. 자동을 고르면 Xcode가 프로파일과 클라우드 관리 인증서를 만들 수 있다(`xcodebuild -help`의 `signingStyle` 설명). 내부 테스트 전용 선택지는 켜고, 버전·빌드 번호 관리는 끈다.
+- Xcode › Settings › Accounts에 로그인된 팀 계정을 쓴다. 위의 부작용 문단을 먼저 읽는다.
+- GUI로 할 때는 `open "<출력 디렉터리>/MomoMobile-<build>.xcarchive"`로 Organizer를 연다. Distribute App에서 App Store Connect 업로드를 고르고, 내부 테스트 전용 선택지는 켜고, 버전·빌드 번호 관리는 끈다. 서명은 자동 그대로 둔다. 수동은 같은 이유로 쓸 수 없다.
 
 ### 경로 B — ASC API 키
 
@@ -129,7 +139,7 @@ xcodebuild -exportArchive \
 ```
 
 - 키는 ASC › Users and Access › Integrations에 있는 App Store Connect API 키여야 한다. APNs 키로는 안 된다.
-- 로컬 IPA를 `xcrun altool --upload-package "<ipa>" --api-key "<Key ID>" --api-issuer "<Issuer ID>" --p8-file-path "<.p8 경로>"`로 올릴 수도 있다. 다만 이 경로에서 `testFlightInternalTestingOnly`가 유지되는지는 확인하지 않았다. 위 xcodebuild 경로를 쓴다.
+- 로컬 IPA를 `xcrun altool --upload-package "<ipa>" --api-key "<Key ID>" --api-issuer "<Issuer ID>" --p8-file-path "<.p8 경로>"`로 올릴 수도 있다. 이 경로는 다시 서명하지 않으므로 `-allowProvisioningUpdates`의 부작용이 없다. 다만 `testFlightInternalTestingOnly`가 IPA에 남아 유지되는지는 확인하지 않았다. 확인 전에는 위 xcodebuild 경로를 쓴다.
 
 ### 업로드 뒤
 

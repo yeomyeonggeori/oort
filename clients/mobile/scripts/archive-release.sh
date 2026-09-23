@@ -7,11 +7,11 @@
 #
 #   1. 작업 트리가 커밋과 같은지 본다. 증거 빌드는 커밋에서 나와야 한다(M7-I I-1).
 #   2. Pods 를 시스템 `pod`(Podfile.lock 의 COCOAPODS 버전)으로 맞춘다.
-#   3. 빌드 번호를 아래 규칙으로 정해 Release 아카이브를 만든다.
-#   4. ios/ci_scripts/ci_post_xcodebuild.sh 로 NSE 임베드·서명된 엔타이틀먼트·
-#      aps-environment=production 을 검사한다.
-#   5. 같은 서명으로 IPA 를 로컬에 내보내고(destination=export), 업로드용
-#      ExportOptions 와 빌드 사실(build-info.txt)을 남긴다.
+#   3. 빌드 번호를 아래 규칙으로 정해 Release 아카이브를 만든다(개발 서명).
+#   4. IPA 를 로컬에 내보낸다(destination=export). 여기서 배포 서명이 입혀진다.
+#   5. 내보낸 앱에 ios/ci_scripts/ci_post_xcodebuild.sh 를 돌려 NSE 임베드·서명된
+#      엔타이틀먼트·aps-environment=production 을 검사하고, 업로드용 ExportOptions 와
+#      빌드 사실(build-info.txt)을 남긴다.
 #
 # ## 하지 않는 일
 #
@@ -20,17 +20,26 @@
 #
 # **Apple Developer 사이트와 통신하지 않는다.** `-allowProvisioningUpdates` 를 일부러
 # 넘기지 않는다. xcodebuild 도움말대로 그 플래그는 자동 서명 타깃에 대해 프로파일·
-# App ID·인증서를 "만들고 갱신한다". 이 스크립트는 이 Mac 에 이미 설치된 App Store
-# 프로파일 두 개로 **수동 서명**만 한다. 프로파일이 없으면 만들지 않고 멈춘다.
+# App ID·인증서를 "만들고 갱신한다". 이 스크립트는 이 Mac 에 이미 설치된 프로파일만
+# 쓴다. 없으면 만들지 않고 멈춘다.
 #
-# ## 서명을 왜 명령줄에서만 바꾸나
+# ## 서명 — Xcode 관리형 프로파일, 자동 서명(2026-09-23 실측)
 #
-# 프로젝트 파일에는 서명 identity 를 박지 않는다(__tests__/projectShape.test.ts 가
-# 지킨다. Xcode Cloud 의 Apple 관리형 서명이 기본값 상태를 기대한다, #1115).
-# 대신 아카이브 한 번에만 수동 서명을 얹는다. 명령줄 설정은 모든 타깃에 같은 값으로
-# 걸리므로, 앱과 NSE 가 각자 자기 프로파일을 받도록 프로파일 이름을 `$(TARGET_NAME)`
-# 으로 골라 쓴다. 한 프로파일로 둘 다 서명하면 ASC 가 반려한다(앱과 확장은 각각 서명).
-# Pods 의 리소스 번들 타깃은 CODE_SIGNING_ALLOWED=NO 라 이 설정의 영향을 받지 않는다.
+# 이 Mac 의 momo 프로파일은 개발용·App Store 용 모두 Xcode 관리형(IsXcodeManaged=true)
+# 이다. 그래서 두 가지가 막혀 있다.
+#   - 수동 서명: "Provisioning profile … is Xcode managed, but signing settings require a
+#     manually managed profile." 수동 프로파일을 새로 만드는 것은 범위 밖이다.
+#   - 자동 서명 + CODE_SIGN_IDENTITY="Apple Distribution": "… is automatically signed for
+#     development, but a conflicting code signing identity Apple Distribution has been
+#     manually specified."
+# 남는 길은 Xcode 의 표준 흐름이다. 아카이브는 자동 서명 그대로(Apple Development +
+# 개발 프로파일, 서명된 aps-environment=development) 만들고, 내보내기
+# (signingStyle=automatic)가 설치된 App Store 프로파일과 Apple Distribution 인증서로
+# 다시 서명한다(aps-environment=production). 둘 다 네트워크 없이 된다.
+# 그래서 검사는 아카이브가 아니라 내보낸 앱에 한다. 실제로 올라가는 것이 그것이다.
+#
+# 프로젝트 파일에는 서명 설정을 넣지 않는다(__tests__/projectShape.test.ts 가 지킨다.
+# Xcode Cloud 의 Apple 관리형 서명이 기본값 상태를 기대한다, #1115).
 #
 # ## 빌드 번호 규칙
 #
@@ -51,9 +60,11 @@ WORKSPACE="$APP_DIR/ios/MomoMobile.xcworkspace"
 TEAM_ID="YWQQFQM38J"
 APP_BUNDLE_ID="app.momo.ios"
 NSE_BUNDLE_ID="app.momo.ios.NotificationService"
-# Xcode 가 관리하는 App Store 프로파일의 이름. Xcode 가 다시 받아도 이름은 같다.
-APP_PROFILE="iOS Team Store Provisioning Profile: $APP_BUNDLE_ID"
-NSE_PROFILE="iOS Team Store Provisioning Profile: $NSE_BUNDLE_ID"
+# Xcode 관리형 프로파일의 이름. Xcode 가 다시 받아도 이름은 같다.
+APP_STORE_PROFILE="iOS Team Store Provisioning Profile: $APP_BUNDLE_ID"
+NSE_STORE_PROFILE="iOS Team Store Provisioning Profile: $NSE_BUNDLE_ID"
+APP_DEV_PROFILE="iOS Team Provisioning Profile: $APP_BUNDLE_ID"
+NSE_DEV_PROFILE="iOS Team Provisioning Profile: $NSE_BUNDLE_ID"
 # 규칙의 기준일 2026-09-01 을 1970-01-01 부터 센 일수. `date -d`/`date -j` 를 쓰지 않고
 # 산수로만 날짜를 다뤄야 리눅스 CI 의 jest 에서도 같은 답이 나온다.
 BUILD_EPOCH_DAY=20697
@@ -207,6 +218,9 @@ fi
 cmp -s ios/Podfile.lock ios/Pods/Manifest.lock || die "ios/Pods 가 Podfile.lock 과 맞지 않는다"
 
 # ---- 서명 자산: 이름과 존재만 본다 --------------------------------------------
+#
+# 아카이브는 개발 프로파일로, 내보내기는 App Store 프로파일로 서명된다(헤더). 네 개가
+# 모두 있어야 Apple 과 통신하지 않고 끝까지 간다. 없으면 만들지 않고 여기서 멈춘다.
 profile_installed() {
   local want="$1" dir file name
   for dir in "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" \
@@ -220,18 +234,35 @@ profile_installed() {
   done
   return 1
 }
-for profile in "$APP_PROFILE" "$NSE_PROFILE"; do
+for profile in "$APP_STORE_PROFILE" "$NSE_STORE_PROFILE" "$APP_DEV_PROFILE" "$NSE_DEV_PROFILE"; do
   profile_installed "$profile" || die "프로파일 '$profile' 이 이 Mac 에 없다.
        이 스크립트는 프로파일을 만들지 않는다. 런북의 준비물 절을 본다."
 done
-# 폐기된 Distribution 인증서가 같은 이름으로 키체인에 남아 있을 수 있다. 수동 서명은
-# 프로파일에 든 인증서와 맞는 identity 만 고르므로 그것과 섞이지 않는다.
-valid_distribution="$(security find-identity -v -p codesigning 2>/dev/null |
-  grep '"Apple Distribution: ' | grep -cv 'CSSMERR\|REVOKED\|EXPIRED' || true)"
-[ "${valid_distribution:-0}" -ge 1 ] || die "유효한 Apple Distribution 인증서가 키체인에 없다"
-log "서명 자산: App Store 프로파일 2개, 유효한 Apple Distribution identity 있음"
+valid_identity() {
+  local count
+  count="$(security find-identity -v -p codesigning 2>/dev/null |
+    grep "\"$1: " | grep -cv 'CSSMERR\|REVOKED\|EXPIRED' || true)"
+  [ "${count:-0}" -ge 1 ]
+}
+valid_identity "Apple Development" || die "유효한 Apple Development 인증서가 키체인에 없다"
+valid_identity "Apple Distribution" || die "유효한 Apple Distribution 인증서가 키체인에 없다"
+log "서명 자산: 개발·App Store 프로파일 각 2개, 유효한 Apple Development·Distribution identity 있음"
 
-# ---- 3. 아카이브 -------------------------------------------------------------
+plist_value() { plutil -extract "$2" raw -o - "$1/Info.plist" 2>/dev/null || true; }
+profile_name_of() {
+  security cms -D -i "$1/embedded.mobileprovision" 2>/dev/null | plutil -extract Name raw -o - - 2>/dev/null || echo '-'
+}
+# 첫 Authority 줄이 서명한 인증서의 이름이다. awk 가 입력을 끝까지 읽어야 codesign 이
+# SIGPIPE 를 받지 않는다(pipefail).
+signer_of() {
+  codesign -dv --verbose=2 "$1" 2>&1 | awk -F= '/^Authority=/ && !seen {print $2; seen = 1}'
+}
+aps_of() {
+  codesign -d --entitlements - --xml "$1" 2>/dev/null | sed -n '/<?xml/,/<\/plist>/p' |
+    plutil -extract aps-environment raw -o - - 2>/dev/null || echo '-'
+}
+
+# ---- 3. 아카이브(개발 서명) ----------------------------------------------------
 mkdir -p build
 log "archive → $ARCHIVE (log: $OUT/archive.log)"
 if ! xcodebuild archive \
@@ -242,45 +273,32 @@ if ! xcodebuild archive \
   -archivePath "$ARCHIVE" \
   -derivedDataPath build/release \
   CURRENT_PROJECT_VERSION="$BUILD" \
-  CODE_SIGN_STYLE=Manual \
-  CODE_SIGN_IDENTITY="Apple Distribution" \
-  'PROVISIONING_PROFILE_SPECIFIER=$(MOMO_STORE_PROFILE_$(TARGET_NAME))' \
-  "MOMO_STORE_PROFILE_MomoMobile=$APP_PROFILE" \
-  "MOMO_STORE_PROFILE_MomoMobileNotificationService=$NSE_PROFILE" \
   >"$OUT/archive.log" 2>&1; then
   grep -E 'error:|\*\* ARCHIVE FAILED' "$OUT/archive.log" | tail -20 >&2 || true
   die "아카이브 실패. 전체 로그: $OUT/archive.log"
 fi
 grep -F '** ARCHIVE SUCCEEDED **' "$OUT/archive.log" >/dev/null || die "성공 표지가 로그에 없다: $OUT/archive.log"
 
-# ---- 4. 검사 -----------------------------------------------------------------
-APP="$ARCHIVE/Products/Applications/MomoMobile.app"
-APPEX="$APP/PlugIns/MomoMobileNotificationService.appex"
-log "ci_post_xcodebuild.sh (log: $OUT/ci_post_xcodebuild.log)"
-CI_ARCHIVE_PATH="$ARCHIVE" CI_XCODEBUILD_ACTION=archive \
-  bash ios/ci_scripts/ci_post_xcodebuild.sh 2>&1 | tee "$OUT/ci_post_xcodebuild.log"
+ARCHIVED_APP="$ARCHIVE/Products/Applications/MomoMobile.app"
+ARCHIVED_APPEX="$ARCHIVED_APP/PlugIns/MomoMobileNotificationService.appex"
+[ -d "$ARCHIVED_APPEX" ] || die "아카이브에 알림 확장이 없다: $ARCHIVED_APPEX"
+# 아카이브 단계 서명은 사실로 적기만 한다. 개발 서명이라 aps-environment 가 development
+# 이고, 그래서 ci_post_xcodebuild.sh 는 5단계(APNs 환경 일치)에서 이 아카이브를 거부한다.
+# 검사는 아래에서 실제로 올라갈 배포 서명본에 한다.
+ARCHIVE_SIGNER="$(signer_of "$ARCHIVED_APP")"
+ARCHIVE_APS="$(aps_of "$ARCHIVED_APP")"
+echo "archive-stage: signer='$ARCHIVE_SIGNER' app_profile='$(profile_name_of "$ARCHIVED_APP")' aps-environment=$ARCHIVE_APS"
 
-plist_value() { plutil -extract "$2" raw -o - "$1/Info.plist" 2>/dev/null || true; }
-for bundle in "$APP" "$APPEX"; do
-  got="$(plist_value "$bundle" CFBundleVersion)"
-  [ "$got" = "$BUILD" ] || die "$(basename "$bundle") CFBundleVersion 이 '$got' 이다(기대 $BUILD)"
-done
-MARKETING_VERSION="$(plist_value "$APP" CFBundleShortVersionString)"
-[ "$(plist_value "$APPEX" CFBundleShortVersionString)" = "$MARKETING_VERSION" ] ||
-  die "앱과 NSE 의 CFBundleShortVersionString 이 다르다"
-[ "$(plist_value "$APP" ITSAppUsesNonExemptEncryption)" = "false" ] ||
-  die "빌드된 앱에 ITSAppUsesNonExemptEncryption=false 가 없다"
-for key in NSCameraUsageDescription NSMicrophoneUsageDescription NSPhotoLibraryUsageDescription; do
-  [ -n "$(plist_value "$APP" "$key")" ] || die "빌드된 앱에 $key 가 없다(ITMS-90683)"
-done
-echo "ok: CFBundleVersion=$BUILD (앱·NSE), CFBundleShortVersionString=$MARKETING_VERSION, 수출 신고·권한 문구 3개"
-
-# ---- 5. 로컬 내보내기와 업로드 준비 --------------------------------------------
+# ---- 4. 로컬 내보내기(배포 서명, 업로드 없음) ------------------------------------
 #
 # 두 plist 는 destination 만 다르다. testFlightInternalTestingOnly 는 이 빌드가
 # external TestFlight 나 App Store 로 가지 못하게 한다(M7-I 증거 빌드는 내부 전용).
 # manageAppVersionAndBuildNumber=false 가 없으면 업로드 때 Xcode 가 위 규칙의 번호를
 # 바꿀 수 있다(기본값 YES).
+#
+# signingStyle=automatic 이다. 프로파일이 Xcode 관리형이라 manual 은 쓸 수 없다(헤더).
+# 자동 서명 내보내기에는 provisioningProfiles·signingCertificate 를 넣지 않는다 —
+# Xcode 가 signingCertificate 를 거부한다("Remove the "signingCertificate" entry …").
 write_export_options() {
   cat >"$1" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -293,17 +311,8 @@ write_export_options() {
 	<false/>
 	<key>method</key>
 	<string>app-store-connect</string>
-	<key>provisioningProfiles</key>
-	<dict>
-		<key>$APP_BUNDLE_ID</key>
-		<string>$APP_PROFILE</string>
-		<key>$NSE_BUNDLE_ID</key>
-		<string>$NSE_PROFILE</string>
-	</dict>
-	<key>signingCertificate</key>
-	<string>Apple Distribution</string>
 	<key>signingStyle</key>
-	<string>manual</string>
+	<string>automatic</string>
 	<key>teamID</key>
 	<string>$TEAM_ID</string>
 	<key>testFlightInternalTestingOnly</key>
@@ -333,22 +342,57 @@ for candidate in "$OUT/export"/*.ipa; do
 done
 [ -n "$IPA" ] || die "IPA 가 만들어지지 않았다: $OUT/export"
 
+# ---- 5. 검사 — 올라갈 배포 서명본에 ---------------------------------------------
+#
+# IPA 를 풀어 ci_post_xcodebuild.sh 가 읽는 아카이브 모양
+# (<dir>/Products/Applications/MomoMobile.app)으로 놓고 그대로 돌린다. Xcode Cloud 가
+# 빌드마다 돌리는 검사와 같은 스크립트, 같은 기준이다. 실패하면 여기서 멈춘다.
+EXPORTED="$OUT/export-as-archive"
+rm -rf "$OUT/export-unzipped" "$EXPORTED"
+mkdir -p "$OUT/export-unzipped" "$EXPORTED/Products/Applications"
+ditto -x -k "$IPA" "$OUT/export-unzipped"
+cp -R "$OUT/export-unzipped/Payload/MomoMobile.app" "$EXPORTED/Products/Applications/"
+APP="$EXPORTED/Products/Applications/MomoMobile.app"
+APPEX="$APP/PlugIns/MomoMobileNotificationService.appex"
+log "ci_post_xcodebuild.sh — 내보낸 IPA 의 앱 (log: $OUT/ci_post_xcodebuild.log)"
+CI_ARCHIVE_PATH="$EXPORTED" CI_XCODEBUILD_ACTION=archive \
+  bash ios/ci_scripts/ci_post_xcodebuild.sh 2>&1 | tee "$OUT/ci_post_xcodebuild.log"
+
+for bundle in "$APP" "$APPEX"; do
+  got="$(plist_value "$bundle" CFBundleVersion)"
+  [ "$got" = "$BUILD" ] || die "$(basename "$bundle") CFBundleVersion 이 '$got' 이다(기대 $BUILD)"
+done
+MARKETING_VERSION="$(plist_value "$APP" CFBundleShortVersionString)"
+[ "$(plist_value "$APPEX" CFBundleShortVersionString)" = "$MARKETING_VERSION" ] ||
+  die "앱과 NSE 의 CFBundleShortVersionString 이 다르다"
+[ "$(plist_value "$APP" ITSAppUsesNonExemptEncryption)" = "false" ] ||
+  die "내보낸 앱에 ITSAppUsesNonExemptEncryption=false 가 없다"
+for key in NSCameraUsageDescription NSMicrophoneUsageDescription NSPhotoLibraryUsageDescription; do
+  [ -n "$(plist_value "$APP" "$key")" ] || die "내보낸 앱에 $key 가 없다(ITMS-90683)"
+done
+EXPORT_SIGNER="$(signer_of "$APP")"
+case "$EXPORT_SIGNER" in
+  "Apple Distribution: "*) ;;
+  *) die "내보낸 앱이 배포 인증서로 서명되지 않았다(서명: '$EXPORT_SIGNER')" ;;
+esac
+[ "$(profile_name_of "$APP")" = "$APP_STORE_PROFILE" ] || die "내보낸 앱의 프로파일이 '$APP_STORE_PROFILE' 이 아니다"
+[ "$(profile_name_of "$APPEX")" = "$NSE_STORE_PROFILE" ] || die "내보낸 NSE 의 프로파일이 '$NSE_STORE_PROFILE' 이 아니다"
+echo "ok: CFBundleVersion=$BUILD (앱·NSE), CFBundleShortVersionString=$MARKETING_VERSION, 수출 신고·권한 문구 3개, 배포 서명·App Store 프로파일"
+
 # ---- 빌드 사실(M7-I I-1) -----------------------------------------------------
-profile_name_of() {
-  security cms -D -i "$1/embedded.mobileprovision" 2>/dev/null | plutil -extract Name raw -o - - 2>/dev/null || echo '?'
-}
-# 첫 Authority 줄이 서명한 인증서의 이름이다. awk 가 입력을 끝까지 읽어야 codesign 이
-# SIGPIPE 를 받지 않는다(pipefail).
-signer="$(codesign -dv --verbose=2 "$APP" 2>&1 | awk -F= '/^Authority=/ && !seen {print $2; seen = 1}')"
 {
   echo "commit: $COMMIT"
   echo "marketing_version: $MARKETING_VERSION"
   echo "build: $BUILD"
-  echo "signer: $signer"
+  echo "signer: $EXPORT_SIGNER"
   echo "app_profile: $(profile_name_of "$APP")"
   echo "nse_profile: $(profile_name_of "$APPEX")"
+  echo "aps_environment: $(aps_of "$APP")"
+  echo "archive_stage_signer: $ARCHIVE_SIGNER"
+  echo "archive_stage_aps_environment: $ARCHIVE_APS"
   echo "package_lock_sha256: $(shasum -a 256 package-lock.json | awk '{print $1}')"
   echo "podfile_lock_sha256: $(shasum -a 256 ios/Podfile.lock | awk '{print $1}')"
+  echo "ipa_sha256: $(shasum -a 256 "$IPA" | awk '{print $1}')"
   echo "xcode: $(xcodebuild -version | tr '\n' ' ' | sed 's/ *$//')"
   echo "cocoapods: $SYSTEM_POD"
   echo "node: $(node --version)"
