@@ -1,6 +1,6 @@
 # 목표 A 실행 계획 (2026-09-23, Opus 5.5 planner)
 
-> 결정은 ADR-0187(Accepted)에 있고, 원격 작업은 ADR-0188(Proposed)에 있다. 배포 게이트는 [M7](../cicd/03-store-readiness-gate.md)의 M7-I·M7-S다.
+> 결정은 ADR-0187(Accepted)에 있고, 원격 작업은 ADR-0188(Accepted)에 있다. 배포 게이트는 [M7](../cicd/03-store-readiness-gate.md)의 M7-I·M7-S다.
 > 이 문서는 **파도 표와 iOS 범위 권고안**만 둔다. 진행 상태의 정본은 [CURRENT_STATE](CURRENT_STATE.md)와 이슈다. 대체하는 편성: `2026-09-22-plan-revision.md` §4, `2026-09-02-launch-program-plan.md` 09-08 상자.
 
 ## 1. 끝 그림
@@ -13,8 +13,12 @@
   - 데스크탑의 Claude Code·Codex 세션을 따라가며 권한 요청을 승인한다.
   - 이 모두를 Tailscale 없이 한다.
 
-## 2. iOS 범위 (2026-09-23 성재 확정)
-**성재 결정:** 「원격 작업까지 팀 배포 전에」. M7-I 팀 배포는 ADR-0188 R1(데스크탑 세션 관전·권한 승인)까지 기다린다. 「독」은 기안자 읽기(데스크탑 작업 세션을 따라가고 폰에서 작업을 끝까지 요청)대로 둔다. 내부 테스트 기간은 기안자 기본값 2주다(S-1 하한과 같다. 성재 이의 시 조정).
+## 2. iOS 범위 (2026-09-23 — 경계는 성재 결정, 표는 기안자 권고)
+- **성재 결정(결재 질문 응답):** 「원격 작업까지 팀 배포 전에」. M7-I 팀 배포는 ADR-0188 R1(데스크탑 세션 관전·권한 승인)까지 기다린다.
+- **기안자:**
+  - 「독」은 기안자 읽기(데스크탑 작업 세션을 따라가고 폰에서 작업을 끝까지 요청)대로 둔다. 결재 질문 문안에 이 읽기를 적었고, 성재는 이의가 없었다.
+  - 내부 테스트 기간은 기본값 2주다. S-1 하한과 같고, 성재 확정을 기다린다.
+  - 아래 표의 칸 배치는 기안자 권고다.
 
 표의 기준은 두 가지다. 매일 쓰는 빈도, 그리고 Buzz 모바일 실측선(부록 A)이다. Buzz 모바일은 대화와 관전까지이고, 승인·작업 생성·중단이 없으며 공개 푸시도 아직 없다. **Codex·Claude 같은 원격 작업은 Buzz를 넘는 부분**이라 ADR-0188로 따로 짓는다.
 
@@ -33,16 +37,17 @@
 
 | 파도 | 레인 | 내용 | 완료 신호 |
 |---|---|---|---|
-| **W1** | 인스턴스(engine) | Railway 설정 PR(#2205): 시작 명령, PG18+pgvector, Centrifugo 변수 이름, `X-Forwarded-Proto`, api 드라이브 볼륨, push relay·notifier, **doctor 거짓 초록 수리**. 이어서 v0.1.6 이미지 발행(owner 승인)과 `oort-team` 배포. 백업·업그레이드 1회 | 수리된 doctor PASS, `wss://` 광고, 두 탭 실시간, 재배포 뒤 첨부 생존 |
-| W1 | 데스크탑 배포(planner) | `npm --prefix clients/web ci`, 증거 빌드(owner Mac 직접 전달), #1607 Railway 로그인 확인. next 채널 게시(#1281)는 배포 채널 결정 뒤 | owner Mac에서 공증 DMG로 Railway 로그인·실시간 |
-| W1 | iOS 배포(uxui) | 권한 문구(사진·마이크), `ITSAppUsesNonExemptEncryption`, 빌드 번호 방식, Pods, Release 아카이브, TestFlight owner 1인 그룹 업로드(owner 승인), RN TestFlight 런북, #1115 정리 | 성재 폰에 TestFlight 설치, 앱 종료 상태 푸시 1회 |
-| W1 | iOS 대화 1(uxui) | #1084+#2513, #1964, #1892, 푸시 탭 라우팅 | design-review B0·H0 |
+| **W1** | 인스턴스(engine) | Railway 설정 PR(#2205): 시작 명령, PG18+pgvector, Centrifugo 변수 이름, `X-Forwarded-Proto`, api 드라이브 볼륨, push relay·notifier, **doctor 거짓 초록 수리**. 이어서 v0.1.6 이미지 발행(owner 승인)과 `oort-team` 배포. 백업·업그레이드 1회 | 수리된 doctor PASS, `wss://` 광고, 두 탭 실시간, 백업을 별도 PG에 복원해 로그인·최근 메시지 확인, 이미지 업그레이드 뒤 메시지·첨부 보존 |
+| W1 | 데스크탑 배포(planner) | `npm --prefix clients/web ci`, 증거 빌드(owner Mac 직접 전달, `--public` 무업로드), #1607 Railway 로그인 확인 | owner Mac에서 공증 DMG로 Railway 로그인·실시간 |
+| W1 | iOS 배포(uxui) | #2568: 권한 문구(사진·마이크), `ITSAppUsesNonExemptEncryption`, 빌드 번호 방식, Pods, Release 아카이브, TestFlight owner 1인 그룹 업로드(owner 승인), RN TestFlight 런북, #1115 정리 | 성재 폰에 TestFlight 설치, 앱 종료 상태 푸시 1회 |
+| W1 | iOS 대화 1(uxui) | #1084+#2513, #1964, #1892, 푸시 탭 이동(#2569) | design-review B0·H0 |
 | **W2** | iOS 대화 2(uxui) | #1048, #1083, #1049, 배지 | design-review B0·H0 |
-| W1–W2 | 원격 R0·R1(engine+uxui) | ADR-0188 Accepted(09-23). R0 #2570·workd #2571은 09-23 착수. R0는 오늘 코드의 위험을 먼저 막는다(결정자=소유자, 에이전트 컨트롤은 kill만, 원격 auto-approve·shell 금지, heartbeat v2). R1 진입 조건은 권한 승인 새 RLS 테이블, NSE 토큰 축소, refresh 재사용 계열 폐기다. R1은 `momo-workd`, host 등록 GUI, 권한 다리, 폰 작업 탭 | 데스크탑 세션을 폰에서 보고 권한 승인 1회, 불변식 red proof |
+| W1–W2 | 원격 R0·R1(engine+uxui) | ADR-0188 Accepted(09-23). R0 #2570·workd #2571은 09-23 착수. R0는 오늘 코드의 위험을 먼저 막는다(결정자=소유자, 에이전트 컨트롤은 kill만, 원격 auto-approve·shell 금지, heartbeat v2). R1 진입 조건은 권한 승인 새 RLS 테이블, NSE 토큰 축소, refresh 재사용 계열 폐기다. R1은 `momo-workd`, host 등록 GUI, 권한 다리, 폰 작업 탭이다. workd #2571은 R0 랜딩 뒤에만 머지하고, 폰 경로(작업 탭·권한 다리)는 R1 진입 조건이 모두 충족된 뒤 연다 | 데스크탑 세션을 폰에서 보고 권한 승인 1회, 불변식 red proof |
 | W2 | AX-6(engine) | #2512 초대 E2E를 Railway 인스턴스 위에서 | 보고서 PR |
-| **W3** | M7-I | **원격 R1 완료가 전제**(성재 결정). 데스크탑·iOS PASS 기록과 owner 승인, 팀 배포, **내부 테스트 시작** | PASS 표 2행 |
-| W3 | 원격 R2 | ADR-0146 개정(서명을 인가 조건으로)이 먼저다. 이어서 사람 기기 키 서명, 폰에서 새 작업, 예약·끼어들기, 허용 폴더 id | 폰에서 시킨 작업 1건을 끝까지 따라감 |
-| **W4** | 스토어 | S-0 크래시 계측, #20–#22·#30·#34·#35, 원격 R3, M7-S, #31 제출 | App Store 심사 제출 |
+| W2 | 크래시 계측(S-0) | 세션 분모를 가진 크래시 계측을 켠다(07 문서를 RN·Tauri 기준으로 개정). W3 내부 테스트가 S-1의 분모가 되게 하기 위해서다 | 계측 대시보드에 데스크탑·iOS 세션 수가 잡힌다 |
+| **W3** | M7-I | **전제:** 원격 R1 완료(성재 결정), R0·R1 보안 재검수 PASS, S-0 켜짐. 데스크탑·iOS PASS 기록과 owner 승인, 팀 배포, **내부 테스트 시작**. #1281 = PASS 뒤 첫 팀 next 게시(건별 승인) | PASS 표 2행 |
+| W3 | 원격 R2 | R1 보안 재검수 PASS와 ADR-0146 개정(서명을 인가 조건으로)이 먼저다. 이어서 사람 기기 키 서명, 폰에서 새 작업, 예약·끼어들기, 허용 폴더 id | 폰에서 시킨 작업 1건을 끝까지 따라감 |
+| **W4** | 스토어 | #20–#22·#30·#34·#35, 원격 R3, M7-S, #31 제출 | App Store 심사 제출 |
 
 내부 테스트에서 나온 불편은 전부 이슈로 만들고, W3부터 파도 사이에 끼워 처리한다. 웹·데스크탑의 남은 UX 파도(UX-R·DS 잔여)는 목표 A 동안 **내부 테스트 불편으로 올라온 것만** 한다.
 
@@ -54,8 +59,9 @@
    - Apple Developer에서 APNs 키 `4SSR3XS7WZ`의 환경 범위에 Production이 있는지 확인
    - Xcode › Settings › Accounts 세션이 유효한지 확인
    - 폐기된 Distribution 인증서를 키체인에서 삭제
+   - **첫 TestFlight 업로드 전:** ASC의 내부 그룹 자동 배포와 Xcode Cloud TestFlight 액션이 꺼져 있는지 확인하고 날짜를 남긴다(M7 증거 빌드 조건)
 3. **기기:** TestFlight 초대 수락, 실기기 푸시 확인, M7-I 스모크 30분.
-4. **배포 건마다 owner 승인:** TestFlight 업로드와 공증 DMG 전달 때 승인 한 줄을 받는다.
+4. **배포 건마다 owner 승인:** TestFlight 업로드, 공증 DMG 전달, next 게시 때 승인 한 줄(발화 인용)을 받는다.
 5. **나중에:** Developer ID 인증서(G1, 2027-02-01 만료)를 G2로 갱신한다.
 
 ## 부록 A — Buzz 모바일 실측 (2026-09-23)

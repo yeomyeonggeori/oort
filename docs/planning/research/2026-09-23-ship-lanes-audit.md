@@ -1,4 +1,10 @@
 > **레포 사본(2026-09-23).** 목표 A W1 배포 레인(Railway·데스크탑·iOS)의 읽기 전용 감사 원본이다. Opus 5.5 서브에이전트가 작성했다. 레포에 올리면서 세션 로컬 경로와 미상 키의 식별자를 가렸다. 결정은 ADR-0187, 게이트는 `docs/cicd/03-store-readiness-gate.md`, 원격 작업은 ADR-0188이 정본이다. 이 문서는 근거 자료다.
+>
+> **2026-09-23 개정 M7이 대체하는 권고:**
+> - 대상 절: B.4-1, B.5, C.4-1, C.6, D.1, D.4. 감사는 개정 전 M7을 전제로 썼다.
+> - next 게시는 M7-I PASS와 건별 승인 뒤에만 한다.
+> - 증거 빌드는 `--public` 무업로드와 스테이징 매니페스트로 한다.
+> - ASC 자동 배포와 Xcode Cloud TestFlight 액션은 끈다.
 
 # oort ship-lanes audit: Railway / Desktop (Tauri) / iOS (RN)
 
@@ -214,7 +220,6 @@ No code required. Owner: 1–2 h of hands-on time plus 5–60 min waiting on not
 - Identities:
   - Apple Distribution: **1 valid** (issued 2026-06-29 14:31 UTC, expires 2027-06-29; it appears twice, same certificate) and **1 revoked** (14:22 UTC, `CSSMERR_TP_CERT_REVOKED`).
   - Developer ID Application: expires 2027-02-01.
-  - Apple Development (9PNSKD4N37): expires 2027-06-30.
 - **[owner]** delete the revoked Distribution identity from the login keychain. It makes signing *by name* ambiguous.
 - Profiles (`~/Library/Developer/Xcode/UserData/Provisioning Profiles`):
   | Name | App ID | Expires | aps | Notes |
@@ -224,12 +229,11 @@ No code required. Owner: 1–2 h of hands-on time plus 5–60 min waiting on not
   | iOS Team Provisioning Profile: app.momo.ios | dev | 2027-07-17 | development | 2 devices |
   | iOS Team Provisioning Profile: …NotificationService | dev | 2027-07-17 | — | 2 devices |
   | iOS Team Provisioning Profile: * | wildcard dev | 2027-08-02 | — | |
-  | (4 × `com.kwakseongjae.booky*`) | another app | 2027-06 | | not relevant |
 - Xcode: `IDEProvisioningTeamByIdentifier` holds team `YWQQFQM38J` (Individual, paid), so an account is configured. Whether the session token is still valid is [unknown]; check Xcode › Settings › Accounts.
 - `a local key folder`:
   - `AuthKey_4SSR3XS7WZ.p8` is the **APNs key** (see A.6).
   - `the second .p8 key` (2026-07-13) is **not referenced anywhere** in the repo, git history, `~/.codex`, or `~/.claude`, so its type is **[unknown]**. It could be an App Store Connect API key, but **no Issuer ID is recorded anywhere** and the repo has 0 GitHub secrets. The owner can check ASC › Users and Access › Integrations; a key listed there is ASC API, otherwise it is an APNs or other key. An Individual key cannot run provisioning.
-  - Both files are **mode 644** on the Desktop. **[owner]** `chmod 400` them and move them to `~/.momo-secrets/`.
+  - Both files are **mode 644** in a local folder. **[owner]** `chmod 400` them and move them to `~/.momo-secrets/`.
 
 ### C.3 Xcode Cloud (the existing lane)
 - ASC app record "momo" `6792002019`. Workflow "Default", retargeted 2026-08-09 to `clients/mobile/ios/MomoMobile.xcworkspace` with scheme `MomoMobile`.
@@ -265,7 +269,7 @@ No code required. Owner: 1–2 h of hands-on time plus 5–60 min waiting on not
 3. **Build numbers [fix].** `CURRENT_PROJECT_VERSION = 1` and `MARKETING_VERSION = 1.0` are the same for both targets. Choose one upload path. If both Xcode Cloud (which numbers in the 2000s) and local uploads are used, local builds must use a higher number, or the upload is rejected with ITMS-90062.
 4. **Export compliance [fix, optional].** `ITSAppUsesNonExemptEncryption` is absent, so every build asks the compliance question in ASC before testers can install. Add `false` if accurate (the app uses only HTTPS/TLS).
 5. **Relay environment and phone connection [fix/owner].** The relay must be `MOMO_APNS_ENV=production` (A.6). On Railway, the QR device link is broken until A.4-5 is fixed; the workaround is typing the `https://` server URL by hand in ConnectScreen.
-6. **Xcode account session and the the second .p8 key key type [unknown/owner]**, as noted in C.2.
+6. **Xcode account session and the second key's type [unknown/owner]**, as noted in C.2.
 
 ### C.6 App Store / external TestFlight
 Blocked by M7, whose doc must be rewritten to RN and Tauri criteria and then PASSed. Also blocked by the remaining-work-map items: #20 in-app account deletion (5.1.1(v)), #21 privacy manifest and encryption declaration, #22 UGC moderation (report, block, filter, contact) plus EULA, #30 store metadata and screenshots, and #31 upload and review. Also needed: the RN TestFlight runbook, and a real-device APNs receipt proven end to end (checklist §4-1: a fake token gets `400 BadDeviceToken` first, then a real device).

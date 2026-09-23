@@ -3,7 +3,7 @@
 > 세션 종료 시 공용 계약에 따라 짧은 항목을 맨 위에 추가한다.
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 갱신할 때 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
-## 2026-09-23 · Opus 5.5(+서브에이전트 조사 4·리뷰어 C·보안 검수) · ★목표 A 확정 — ADR-0187(목표·배포 두 등급·절차) · ADR-0188 Proposed(폰 원격 작업) · 목표 A 계획
+## 2026-09-23 · Opus 5.5(+서브에이전트 조사 4·리뷰어 C·보안 검수) · ★목표 A 확정 — ADR-0187(목표·배포 두 등급·절차) · ADR-0188 Proposed→Accepted(폰 원격 작업) · 목표 A 계획
 
 - **모델 전환 리뷰(Fable 09-22 작업 인수):**
   - 목표 정의가 6번 바뀌었다.
@@ -15,13 +15,13 @@
   - Railway 기본, Tailscale 보조
   - iOS = Buzz 모바일 + Codex/Claude식 원격 작업
   - 실기기 푸시 필수
-  - TestFlight → App Store, M7 두 등급
+  - TestFlight·App Store 둘 다 목표, M7 두 등급(순서는 기안자 도출)
   - Grok 은퇴 · Opus 5.5 서브에이전트 · 고정 병렬 상한 없음
   - 묶음 승격과 STATUS 폐지는 확인을 위임
-  - Railway 로그인(성재)
+- **성재 조치:** Railway 로그인.
 - **산출:**
   - #2565(PR #2566): ADR-0187 · M7-I/M7-S · TRACKS 묶음 승격 · STATUS 동결 · PIPELINE
-  - 계획 `2026-09-23-goal-a-plan.md` · ADR-0188(Proposed) · ROADMAP §0–§2 · 배포 레인 감사(research)
+  - 계획 `2026-09-23-goal-a-plan.md` · ADR-0188(Proposed → 2차 결재로 Accepted) · ROADMAP §0–§2 · 배포 레인 감사(research)
 - **조사 4:**
   - Buzz 모바일: 승인·작업 생성·공개 푸시 없음
   - Codex/Claude: host outbound → 벤더 relay, VPN 없음
@@ -44,19 +44,22 @@
   - ADR-0188 Accept
   - 데스크탑 next = 팀 채널
   - W1 전부 승인: 코드 레인, Railway 배포와 APNs sealed 변수, v0.1.6 발행, 첫 증거 빌드 2종
-- **착수:** 워커 7기(Opus 5.5 서브에이전트)
+- **착수:** 워커 8기(Opus 5.5 서브에이전트)
   - #2205 Railway 설정
   - #2568 TestFlight 준비
   - #1084+#2513 승인 카드
   - #1964·#1892 안읽음·점프
   - #2569 푸시 탭
   - #2570 R0
-  - #2571 workd
-  - 이와 별도로 v0.1.6 publish-images를 dispatch했다(release 승인 대기). CSP 프리퍼블리시 게이트가 scratch 경로에서 Colima 마운트 문제로 한 번 실패했고, 홈 경로로 옮겨 PASS했다.
-- **보안 위생(성재 요청):**
+  - #2571 workd(R0 랜딩 뒤 머지)
+  - #2572 PG 이미지 libssh2 수리. v0.1.6 발행이 실패한 원인이다: 고정한 deb13u1 arm64 파일이 Debian pool에서 삭제되어 404를 받았다. deb13u2(CVE 6건)와 영구 URL로 고친다.
+  - 이와 별도로 v0.1.6 publish-images를 dispatch했다(run 35810234902, 성재 release 승인). PG 이미지 단계에서 실패했고(#2572), 앱 이미지만 아키별로 푸시됐다. 목록·증명은 없으며 릴리스가 아니다.
+  - CSP 프리퍼블리시 게이트는 scratch 경로에서 Colima 마운트 문제로 한 번 실패했고, 홈 경로로 옮겨 PASS했다.
+- **보안 위생**(성재 「보안 위생 관련해서도 처리해줘」):
   - `.p8` → `~/.momo-secrets`(400, 폴더 700)
   - 업데이터 키에 암호를 걸었다(같은 키 쌍, 공개키 불변, 암호는 키체인 `momo-updater-key`)
-- **다음:** 워커 PR 수거·독립 검수·랜딩 → #2566·#2567 감사·랜딩 → 묶음 승격 → Railway 단계 2 → TestFlight·데스크탑 증거 빌드.
+- **랜딩:** #2566 → track/engine(a5c9b109). 리뷰어 C R1 FAIL → R2 FAIL → R3 PASS, 정책 감사와 exact-base verifier PASS.
+- **다음:** #2567 랜딩 → #2572 랜딩 → 묶음 승격 → v0.1.6 재발행 → Railway 단계 2 → TestFlight·데스크탑 증거 빌드. 워커 PR 수거·독립 검수·랜딩.
 
 ## 2026-09-22 (저녁) · Fable(+Opus 5 워커·리뷰어 C·design-review) · ★AX 축 초대 1종 폐곡선 main 정본화 — AX-2·3a·3b·4 + #2066·#2498·#2476·#2044 8건 랜딩
 

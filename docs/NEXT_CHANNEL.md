@@ -167,6 +167,7 @@ spctl -a -t exec -vv /tmp/check/oort.app
 test -f ~/.momo-secrets/momo-updater.key && echo "minisign key: present"
 # 업데이터 키 암호(2026-09-23부터 필수). 키체인 확인 창에서 허용한다. 값은 출력하지 않는다.
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(security find-generic-password -s momo-updater-key -w)"
+test -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" || { echo "updater key password missing (keychain momo-updater-key)"; exit 1; }
 security find-identity -v -p codesigning | grep -F "Developer ID Application: Kwak Seongjae (YWQQFQM38J)"
 xcrun notarytool history --keychain-profile momo-notary >/dev/null && echo "notary profile: ok"
 command -v cargo >/dev/null && cargo tauri --version
