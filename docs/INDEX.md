@@ -129,6 +129,6 @@
 2. **순서 SoT = `message.seq`**. 에이전트 = 사람과 동일 `member`(kind='agent').
 3. **멀티테넌시:** `workspace→channel→membership`, 모든 행 `workspace_id`, RLS FORCE.
 4. **`schema_v0.sql` 이동·수정 금지.**
-5. **🔒 게이트:** 스토어/공증 배포(M8)·external TestFlight는 검수 게이트(M7) PASS + `docs/cicd/03` PASS 블록 기록 후에만.
+5. **🔒 게이트:** 팀 배포는 M7-I, 스토어·공개 공증 배포(M8)·external TestFlight는 M7-S PASS 기록(`docs/cicd/03`) 뒤에만.
 6. **런타임 미검증 정직 표기.**
 7. **permissive 라이선스 유지.** 법무 텍스트는 **법률 자문 아님**.

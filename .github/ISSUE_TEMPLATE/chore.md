@@ -20,7 +20,7 @@ labels: ["type:chore", "status:ready", "agent:codex-ok"]
 ## Acceptance (검증 등급 + 체크박스)
 - [ ] [ci]/[infra]/[manual] <검증 명령 또는 산출 파일>
 - [ ] 기존 빌드/워크플로우 안 깨짐 (`make build` green 유지)
-- [ ] (release 관련이면) 🔒 게이트(M7) PASS 전 `release-desktop.yml` 미트리거 불변식 준수
+- [ ] (release 관련이면) 🔒 M7 등급(M7-I·M7-S) PASS와 owner 승인 전 `release-desktop.yml`·`publish_next_build.sh` 미실행 불변식 준수
 - [ ] 관련 docs 갱신(증거는 PR 본문)
 
 ## Depends on

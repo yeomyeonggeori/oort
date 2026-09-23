@@ -6,13 +6,13 @@
 | 레인 | 역할 | 현재 구성 |
 |---|---|---|
 | product-owner | 방향·ADR·로드맵·출시 권한 | 성재 |
-| planner / orchestrator | 기획·검수·워커 지시·체크포인트·통합 | **Opus 5.5 / Claude Code**(기본). GPT-6 Astra / Codex도 동등한 역할로 허용. 작업 범위별 owner는 하나 |
+| planner / orchestrator | 기획·검수·워커 지시·체크포인트·통합 | **Opus 5.5 / Claude Code**(2026-09-23 성재가 세션 모델을 전환 — 레인 기본값 확정은 성재 확인 대기), **Fable / Claude Code**, **GPT-6 Astra / Codex**. 동등한 역할이며 작업 범위별 owner는 하나 |
 | worker | 구현·관련 시험·PR·인계 | **Opus 5.5 서브에이전트**(Claude Code Agent 도구, 부모 모델 상속). Grok 레인은 2026-09-23 은퇴 |
-| reviewer-code | 구현 맥락과 분리한 변경·회귀·증거 검수 | fresh 컨텍스트 서브에이전트. diff 사본과 변경 후 파일 사본만 읽는다 |
+| reviewer-code | 구현 맥락과 분리한 변경·회귀·증거 검수 | fresh 컨텍스트 서브에이전트. diff 사본과 변경 후 파일 사본을 검수 대상으로 삼고, 사실 확인을 위해 레포를 읽기 전용으로 본다 |
 | reviewer-design | 해당 표면의 캡처·preflight·루브릭 검수 | design-review 에이전트 fresh 컨텍스트 |
 | integrator / momo-main | 순차 트랙 통합·승인 범위의 승격·sync | 공용 `integration` 범위를 맡은 orchestrator 한 세션 |
 
-모델 전환은 공용 체크포인트로 owner·진행 결과를 인계한 뒤 계속한다. 사용할 수 없는 모델로 임의 대체하지 않는다.
+승인된 레인 모델끼리만 전환하고, 전환 전에 공용 체크포인트로 owner·진행 결과를 인계한다. 지정 모델을 쓸 수 없으면 다른 모델로 임의 대체하지 않고 진행 결과와 남은 작업을 보존한다. 체크포인트에 실제 사용 모델을 기록한다.
 
 ## 2. 병렬 판단과 위치
 고정 병렬 상한은 두지 않는다(2026-09-23 성재). orchestrator가 아래 기준으로 판단한다.

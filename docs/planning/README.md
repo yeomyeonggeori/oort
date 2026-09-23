@@ -1,6 +1,6 @@
 # 공용 기획·오케스트레이션
 
-Codex와 Claude Code는 같은 [AGENTS](../../AGENTS.md), [CURRENT_STATE](CURRENT_STATE.md), 로컬 체크포인트를 사용한다. 역할의 현재 모델·상한은 [PIPELINE](PIPELINE.md)에만 정의한다.
+Codex와 Claude Code는 같은 [AGENTS](../../AGENTS.md), [CURRENT_STATE](CURRENT_STATE.md), 로컬 체크포인트를 사용한다. 역할의 현재 모델·병렬 판단은 [PIPELINE](PIPELINE.md)에만 정의한다.
 
 ## 시작·재개
 `scripts/planning_context.sh`는 현재 checkout과 최신 스냅샷, 공용 로컬 작업 기록을 출력한다. 과거 결정 조사에는 `--details`, 실시간 이슈/PR 조회에는 `--github`를 사용한다. 일반 구현자는 배정된 이슈와 관련 파일부터 읽는다.

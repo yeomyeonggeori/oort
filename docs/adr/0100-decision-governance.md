@@ -56,4 +56,4 @@
 
 ## 증보 2026-09-23 — 증거의 정본은 PR 본문
 
-ADR-0187 D8(성재 결재)로 「증거는 STATUS」를 「증거는 PR 본문」으로 바꾼다. 이슈마다 `STATUS.md`를 고치던 규칙은 모든 병렬 PR이 한 파일을 고쳐 충돌 해소가 상시 작업이 되는 비용을 낳았다. `STATUS.md`는 동결된 역사 기록으로 남기고, 릴리스 요약은 `CHANGELOG.md`와 GitHub Release가 맡는다. 「결정은 ADR, 계획은 ROADMAP」은 그대로다.
+ADR-0187 D8(성재 위임·기안자 확인)로 「증거는 STATUS」를 「증거는 PR 본문」으로 바꾼다. 이슈마다 `STATUS.md`를 고치던 규칙은 모든 병렬 PR이 한 파일을 고쳐 충돌 해소가 상시 작업이 되는 비용을 낳았다. `STATUS.md`는 동결된 역사 기록으로 남기고, 릴리스 요약은 `CHANGELOG.md`와 GitHub Release가 맡는다. 「결정은 ADR, 계획은 ROADMAP」은 그대로다.
