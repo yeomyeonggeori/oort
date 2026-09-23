@@ -20,12 +20,29 @@
 //! reasoning, not the answer, and at token granularity they would spend the
 //! session's event budget (240/min) on text nobody asked to see.
 //!
-//! Text that does cross is display-sanitised: bidirectional-override and
-//! invisible formatting characters are removed, as are C0 controls other than
-//! newline and tab, so a relayed line cannot render differently from what it is
-//! (ADR-0188 D5 정화 규칙, event-stream half).
+//! Text that does cross is sanitised (ADR-0188 D5 정화 규칙, event-stream half):
+//!
+//! * display — bidirectional-override and invisible formatting characters are
+//!   removed, as are C0 controls other than newline and tab, so a relayed line
+//!   cannot render differently from what it is ([`sanitize_text`]);
+//! * credentials — PEM private-key blocks and recognisable tokens (`sk-…`
+//!   including `sk-ant-…`, `gh?_…`/`github_pat_…`, `AKIA…`/`ASIA…`, `xox?-…`,
+//!   JWTs) are replaced before anything is sent ([`redact_credentials`]; the
+//!   relay also holds back a trailing fragment so a credential split across two
+//!   flushes is still whole when it is scanned, #2602 M-1);
+//! * size — no field carries more than [`MAX_FIELD_CHARS`] characters. Streamed
+//!   answer text is cut into consecutive fields of at most that size
+//!   ([`chunk_field`]); a single-valued field keeps its head and tail
+//!   ([`bound_field`]).
 
 use serde_json::{json, Map, Value};
+
+/// ADR-0188 D5: the most characters one relayed field carries.
+pub const MAX_FIELD_CHARS: usize = 3_500;
+/// What a redacted credential becomes on the wire.
+pub const REDACTED_CREDENTIAL: &str = "[redacted credential]";
+/// What a redacted private-key block becomes on the wire.
+pub const REDACTED_PRIVATE_KEY: &str = "[redacted private key]";
 
 /// Most plan entries relayed from one `plan` update.
 pub const MAX_PLAN_ENTRIES: usize = 50;
@@ -170,10 +187,10 @@ fn tool_kind(raw: &str) -> &'static str {
 
 fn plan_entry(entry: &Value) -> Option<Value> {
     let content = entry.get("content").and_then(Value::as_str)?;
-    let content: String = sanitize_text(content)
-        .chars()
-        .take(MAX_PLAN_ENTRY_CHARS)
-        .collect();
+    let content = bound_field(
+        &redact_credentials(&sanitize_text(content)),
+        MAX_PLAN_ENTRY_CHARS,
+    );
     if content.trim().is_empty() {
         return None;
     }
@@ -210,20 +227,224 @@ fn is_disallowed(character: char) -> bool {
     ) || (character.is_control() && character != '\n' && character != '\t')
 }
 
-/// Split `text` into pieces of at most `limit` UTF-8 bytes, on char boundaries.
-pub fn chunk_utf8(text: &str, limit: usize) -> Vec<String> {
+/// Split `text` into consecutive fields of at most `max_chars` characters and
+/// `max_bytes` UTF-8 bytes each, on character boundaries (nothing is dropped).
+pub fn chunk_field(text: &str, max_chars: usize, max_bytes: usize) -> Vec<String> {
     let mut chunks = Vec::new();
     let mut current = String::new();
+    let mut characters = 0usize;
     for character in text.chars() {
-        if current.len() + character.len_utf8() > limit {
+        if characters == max_chars || current.len() + character.len_utf8() > max_bytes {
             chunks.push(std::mem::take(&mut current));
+            characters = 0;
         }
         current.push(character);
+        characters += 1;
     }
     if !current.is_empty() {
         chunks.push(current);
     }
     chunks
+}
+
+/// A single-valued field of at most `max_chars` characters: over the limit,
+/// its head and tail are kept around an elision mark (ADR-0188 D5 「앞뒤를
+/// 남기고 자른다」).
+pub fn bound_field(text: &str, max_chars: usize) -> String {
+    let total = text.chars().count();
+    if total <= max_chars {
+        return text.to_string();
+    }
+    let mark = " … ";
+    let keep = max_chars.saturating_sub(mark.chars().count());
+    let head = keep.div_ceil(2);
+    let tail = keep - head;
+    let mut bounded: String = text.chars().take(head).collect();
+    bounded.push_str(mark);
+    bounded.extend(text.chars().skip(total - tail));
+    bounded
+}
+
+/// Replace private-key blocks and recognisable credential tokens.
+///
+/// Hand-written scanners, not a regex engine (none is in the workspace graph):
+/// every pattern is a fixed prefix followed by a run of a known alphabet, and
+/// each prefix must start at a token boundary so words that merely contain it
+/// (`risk-assessment`) are left alone.
+pub fn redact_credentials(text: &str) -> String {
+    redact_tokens(&redact_private_keys(text))
+}
+
+const PEM_BEGIN: &str = "-----BEGIN ";
+const PEM_END: &str = "-----END ";
+const PEM_DASHES: &str = "-----";
+
+/// Where a PEM header that names a private key starts, and where it ends.
+fn find_private_key_header(text: &str, from: usize) -> Option<(usize, Option<usize>)> {
+    let mut search = from;
+    while let Some(offset) = text[search..].find(PEM_BEGIN) {
+        let begin = search + offset;
+        let label_start = begin + PEM_BEGIN.len();
+        match text[label_start..].find(PEM_DASHES) {
+            Some(close) => {
+                let label = &text[label_start..label_start + close];
+                let header_end = label_start + close + PEM_DASHES.len();
+                if label.contains("PRIVATE KEY") {
+                    return Some((begin, Some(header_end)));
+                }
+                search = header_end;
+            }
+            // The header itself is not finished: it may be a private key.
+            None => return Some((begin, None)),
+        }
+    }
+    None
+}
+
+/// Where the END line of a private-key block closes, searching from `from`.
+fn find_private_key_footer(text: &str, from: usize) -> Option<usize> {
+    let mut search = from;
+    while let Some(offset) = text[search..].find(PEM_END) {
+        let end = search + offset;
+        let label_start = end + PEM_END.len();
+        let close = text[label_start..].find(PEM_DASHES)?;
+        let footer_end = label_start + close + PEM_DASHES.len();
+        if text[label_start..label_start + close].contains("PRIVATE KEY") {
+            return Some(footer_end);
+        }
+        search = footer_end;
+    }
+    None
+}
+
+fn redact_private_keys(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut position = 0;
+    while let Some((begin, header_end)) = find_private_key_header(text, position) {
+        out.push_str(&text[position..begin]);
+        out.push_str(REDACTED_PRIVATE_KEY);
+        // An unfinished header or an unterminated block is redacted to the end.
+        match header_end.and_then(|header_end| find_private_key_footer(text, header_end)) {
+            Some(footer_end) => position = footer_end,
+            None => return out,
+        }
+    }
+    out.push_str(&text[position..]);
+    out
+}
+
+/// The start of an unterminated private-key block (or of an unfinished PEM
+/// header), if the text ends inside one: the relay holds everything from here
+/// until the block closes.
+pub fn open_private_key_block(text: &str) -> Option<usize> {
+    let mut position = 0;
+    let mut open = None;
+    while let Some((begin, header_end)) = find_private_key_header(text, position) {
+        match header_end.and_then(|header_end| find_private_key_footer(text, header_end)) {
+            Some(footer_end) => position = footer_end,
+            None => {
+                open = Some(begin);
+                break;
+            }
+        }
+    }
+    open
+}
+
+fn is_token_char(character: char) -> bool {
+    character.is_ascii_alphanumeric() || character == '_' || character == '-'
+}
+
+/// Whether `character` can occur inside a credential token this module
+/// recognises (PEM blocks aside): base64url and the JWT separator. A credential
+/// never straddles any other character.
+pub fn is_credential_char(character: char) -> bool {
+    is_token_char(character) || character == '.'
+}
+
+fn run_len(text: &str, allowed: impl Fn(char) -> bool) -> usize {
+    text.char_indices()
+        .find(|(_, character)| !allowed(*character))
+        .map(|(index, _)| index)
+        .unwrap_or(text.len())
+}
+
+/// The byte length of a credential token starting exactly at `rest`, if any.
+fn credential_len(rest: &str) -> Option<usize> {
+    let base64url = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
+    let alnum = |c: char| c.is_ascii_alphanumeric();
+    // OpenAI and Anthropic keys (`sk-…`, `sk-proj-…`, `sk-ant-…`).
+    if let Some(body) = rest.strip_prefix("sk-") {
+        let run = run_len(body, base64url);
+        return (run >= 20).then_some(3 + run);
+    }
+    // GitHub tokens.
+    if let Some(body) = rest.strip_prefix("github_pat_") {
+        let run = run_len(body, |c| c.is_ascii_alphanumeric() || c == '_');
+        return (run >= 20).then_some(11 + run);
+    }
+    let bytes = rest.as_bytes();
+    if bytes.len() > 4
+        && bytes.starts_with(b"gh")
+        && matches!(bytes[2], b'p' | b'o' | b'u' | b's' | b'r')
+        && bytes[3] == b'_'
+    {
+        let run = run_len(&rest[4..], alnum);
+        return (run >= 30).then_some(4 + run);
+    }
+    // AWS access key ids: exactly 16 more upper-case alphanumerics.
+    if rest.starts_with("AKIA") || rest.starts_with("ASIA") {
+        let run = run_len(&rest[4..], |c| c.is_ascii_uppercase() || c.is_ascii_digit());
+        return (run == 16).then_some(20);
+    }
+    // Slack tokens.
+    if bytes.len() > 5
+        && bytes.starts_with(b"xox")
+        && matches!(bytes[3], b'a' | b'b' | b'p' | b'r' | b's' | b'o')
+        && bytes[4] == b'-'
+    {
+        let run = run_len(&rest[5..], |c| c.is_ascii_alphanumeric() || c == '-');
+        return (run >= 10).then_some(5 + run);
+    }
+    // JWTs: three base64url segments, the first two JSON objects (`eyJ`).
+    if rest.starts_with("eyJ") {
+        let first = run_len(rest, base64url);
+        let after_first = &rest[first..];
+        if first >= 10 && after_first.starts_with(".eyJ") {
+            let second = run_len(&after_first[1..], base64url);
+            let after_second = &after_first[1 + second..];
+            if second >= 10 && after_second.starts_with('.') {
+                let third = run_len(&after_second[1..], base64url);
+                if third >= 8 {
+                    return Some(first + 1 + second + 1 + third);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn redact_tokens(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut previous: Option<char> = None;
+    let mut index = 0;
+    while index < text.len() {
+        let rest = &text[index..];
+        let at_boundary = previous.is_none_or(|character| !is_token_char(character));
+        if at_boundary {
+            if let Some(length) = credential_len(rest) {
+                out.push_str(REDACTED_CREDENTIAL);
+                index += length;
+                previous = text[..index].chars().next_back();
+                continue;
+            }
+        }
+        let character = rest.chars().next().expect("index is on a char boundary");
+        out.push(character);
+        previous = Some(character);
+        index += character.len_utf8();
+    }
+    out
 }
 
 #[cfg(test)]
@@ -354,14 +575,83 @@ mod tests {
         assert_eq!(sanitize_text("👩\u{200D}💻 성재"), "👩\u{200D}💻 성재");
     }
 
+    // Synthetic credentials: well-formed, never real.
+    // Synthetic, well-formed shapes — never real. Assembled with `concat!` so
+    // the source carries no scanner-shaped literal (scripts/check_secrets.sh
+    // scans every ref).
+    const SK_ANT: &str = concat!(
+        "sk-",
+        "ant-api03-",
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    );
+    const GHP: &str = concat!("ghp", "_abcdefghijklmnopqrstuvwxyz0123456789");
+    const AWS: &str = concat!("AKIA", "ABCDEFGHIJKLMNOP");
+    const SLACK: &str = concat!("xoxb", "-1234567890-abcdefghij");
+    const JWT: &str = concat!(
+        "eyJhbGciOiJIUzI1NiJ9",
+        ".",
+        "eyJzdWIiOiIxMjM0NTY3ODkwIn0",
+        ".",
+        "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
+    );
+    const PEM: &str = concat!(
+        "-----BEGIN OPENSSH ",
+        "PRIVATE KEY-----\n",
+        "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ\n",
+        "-----END OPENSSH ",
+        "PRIVATE KEY-----"
+    );
+
     #[test]
-    fn chunks_never_split_a_character_or_exceed_the_limit() {
-        let text = "가".repeat(3000); // 9000 bytes
-        let chunks = chunk_utf8(&text, 4096);
+    fn every_credential_shape_is_redacted() {
+        let text = format!("key {SK_ANT} gh {GHP} aws {AWS} slack {SLACK} jwt {JWT}\n{PEM}\nafter");
+        let clean = redact_credentials(&text);
+        for secret in [SK_ANT, GHP, AWS, SLACK, JWT, "b3BlbnNzaC1rZXkt"] {
+            assert!(!clean.contains(secret), "{secret} survived: {clean}");
+        }
+        assert_eq!(clean.matches(REDACTED_CREDENTIAL).count(), 5, "{clean}");
+        assert_eq!(clean.matches(REDACTED_PRIVATE_KEY).count(), 1, "{clean}");
+        assert!(clean.ends_with("\nafter"));
+    }
+
+    #[test]
+    fn words_that_merely_contain_a_prefix_are_left_alone() {
+        for text in [
+            "risk-assessment-for-the-quarter-2026",
+            "the task-sk-list",
+            "AKIA is a prefix",
+            "eyJ.not.a.jwt",
+            "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
+        ] {
+            assert_eq!(redact_credentials(text), text);
+        }
+    }
+
+    #[test]
+    fn an_unterminated_private_key_is_redacted_to_the_end_and_reported_open() {
+        let text = concat!("before\n-----BEGIN RSA ", "PRIVATE KEY-----\nMIIEow");
+        assert_eq!(
+            redact_credentials(text),
+            format!("before\n{REDACTED_PRIVATE_KEY}")
+        );
+        assert_eq!(open_private_key_block(text), Some("before\n".len()));
+        assert_eq!(open_private_key_block("-----BEGIN OPENSSH PRIV"), Some(0));
+        assert_eq!(open_private_key_block(PEM), None);
+        assert_eq!(open_private_key_block("no key"), None);
+    }
+
+    #[test]
+    fn fields_are_bounded_and_chunks_lose_nothing() {
+        let long = "가".repeat(10_000);
+        let chunks = chunk_field(&long, MAX_FIELD_CHARS, 4_096);
         assert!(chunks
             .iter()
-            .all(|chunk| chunk.len() <= 4096 && !chunk.is_empty()));
-        assert_eq!(chunks.concat(), text);
-        assert!(chunk_utf8("", 4096).is_empty());
+            .all(|chunk| chunk.chars().count() <= MAX_FIELD_CHARS && chunk.len() <= 4_096));
+        assert_eq!(chunks.concat(), long);
+
+        let bounded = bound_field(&"x".repeat(10_000), MAX_FIELD_CHARS);
+        assert_eq!(bounded.chars().count(), MAX_FIELD_CHARS);
+        assert!(bounded.contains(" … "));
+        assert_eq!(bound_field("short", MAX_FIELD_CHARS), "short");
     }
 }

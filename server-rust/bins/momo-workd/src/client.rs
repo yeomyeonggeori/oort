@@ -32,6 +32,10 @@ const SENT_AT_HEADER: &str = "X-Momo-Work-Host-Sent-At";
 const SIGNATURE_HEADER: &str = "X-Momo-Work-Host-Signature";
 const REQUEST_ID_HEADER: &str = "X-Momo-Work-Host-Request-ID";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// The most bytes the host reads from one response (#2602 L-2). The largest
+/// real answer — a page of pending controls — is a few KiB; anything past this
+/// is refused rather than buffered.
+pub const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ClientError {
@@ -258,13 +262,11 @@ fn http_client() -> Result<reqwest::Client, ClientError> {
 
 async fn read_response(response: reqwest::Response) -> Result<Vec<u8>, ClientError> {
     let status = response.status();
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| ClientError::Transport(error.to_string()))?;
+    // The status line is the answer; a 401's body is not needed to act on it.
     if status == reqwest::StatusCode::UNAUTHORIZED {
         return Err(ClientError::Unauthorized);
     }
+    let bytes = read_capped(response, MAX_RESPONSE_BYTES).await?;
     if !status.is_success() {
         let message = serde_json::from_slice::<Value>(&bytes)
             .ok()
@@ -280,6 +282,33 @@ async fn read_response(response: reqwest::Response) -> Result<Vec<u8>, ClientErr
         });
     }
     Ok(bytes.to_vec())
+}
+
+/// Read a body chunk by chunk and stop at `limit`, whether or not the server
+/// announced a length.
+async fn read_capped(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<Vec<u8>, ClientError> {
+    let too_large = || ClientError::Transport(format!("response larger than {limit} bytes"));
+    if response
+        .content_length()
+        .is_some_and(|length| length > limit as u64)
+    {
+        return Err(too_large());
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| ClientError::Transport(error.to_string()))?
+    {
+        if body.len() + chunk.len() > limit {
+            return Err(too_large());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }
 
 fn decode<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T, ClientError> {
@@ -552,5 +581,73 @@ mod tests {
             serde_json::to_value(ControlAck::refused("shell_refused")).unwrap(),
             json!({"ok": false, "errorLabel": "shell_refused"})
         );
+    }
+
+    /// One HTTP/1.1 exchange on a loopback socket: read the request, answer
+    /// with `head` and then `body_bytes` bytes of JSON-ish filler.
+    fn serve_once(head: &'static str, body_bytes: usize) -> std::net::SocketAddr {
+        use std::io::{Read as _, Write as _};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = [0u8; 4096];
+            let _ = socket.read(&mut request);
+            let _ = socket.write_all(head.as_bytes());
+            let chunk = vec![b' '; 64 * 1024];
+            let mut sent = 0;
+            while sent < body_bytes {
+                let take = chunk.len().min(body_bytes - sent);
+                if socket.write_all(&chunk[..take]).is_err() {
+                    break;
+                }
+                sent += take;
+            }
+        });
+        address
+    }
+
+    async fn read_from(address: std::net::SocketAddr) -> Result<Vec<u8>, ClientError> {
+        let response = http_client()
+            .unwrap()
+            .get(format!("http://{address}/"))
+            .send()
+            .await
+            .expect("loopback response head");
+        read_response(response).await
+    }
+
+    #[tokio::test]
+    async fn a_response_past_the_cap_is_refused_with_or_without_a_length() {
+        // No length announced: the body is cut off while it streams.
+        let address = serve_once(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n",
+            2 * MAX_RESPONSE_BYTES,
+        );
+        match read_from(address).await {
+            Err(ClientError::Transport(message)) => assert!(message.contains("larger than")),
+            other => panic!(
+                "an unbounded body must be refused, got {:?}",
+                other.map(|b| b.len())
+            ),
+        }
+        // An announced length past the cap is refused before reading.
+        let address = serve_once(
+            "HTTP/1.1 200 OK\r\ncontent-length: 2097152\r\nconnection: close\r\n\r\n",
+            0,
+        );
+        match read_from(address).await {
+            Err(ClientError::Transport(message)) => assert!(message.contains("larger than")),
+            other => panic!(
+                "an oversized length must be refused, got {:?}",
+                other.map(|b| b.len())
+            ),
+        }
+        // A body within the cap is read whole.
+        let address = serve_once(
+            "HTTP/1.1 200 OK\r\ncontent-length: 1000\r\nconnection: close\r\n\r\n",
+            1000,
+        );
+        assert_eq!(read_from(address).await.unwrap().len(), 1000);
     }
 }
