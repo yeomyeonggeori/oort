@@ -615,4 +615,257 @@ mod tests {
             DriveError::FileNotFound
         );
     }
+
+    // ---- #2615: the capability is single-use and expires ------------------
+
+    fn session_file(archive: &LocalDriveArchive, token: &str) -> PathBuf {
+        archive.root.join(SESSIONS_DIR).join(token)
+    }
+
+    fn epoch_ms_now() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after 1970")
+            .as_millis() as i64
+    }
+
+    /// Rewrite one field of a session file the way an old binary, a restored
+    /// backup or the passage of time would have left it.
+    fn edit_session(
+        archive: &LocalDriveArchive,
+        token: &str,
+        edit: impl FnOnce(&mut serde_json::Value),
+    ) {
+        let path = session_file(archive, token);
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).expect("session file")).expect("session json");
+        edit(&mut value);
+        fs::write(&path, serde_json::to_vec(&value).expect("json")).expect("rewrite session");
+    }
+
+    async fn stored_bytes(archive: &LocalDriveArchive, file_id: &str) -> Vec<u8> {
+        collect(
+            archive
+                .file_content(file_id, MAX_ATTACHMENT_BYTES)
+                .await
+                .expect("content"),
+        )
+        .await
+    }
+
+    /// **Red proof (#2615).** The first upload spends the capability. Before
+    /// the fix the session file outlived the PUT, so the same URL could swap
+    /// the bytes of an attachment that had already been completed and posted
+    /// — same mime and same length were the only conditions.
+    #[tokio::test]
+    async fn an_upload_capability_is_spent_by_its_first_upload() {
+        let (dir, _guard) = temp_root();
+        let archive = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9").expect("open");
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "contract.txt", "text/plain", 5)
+            .await
+            .expect("session");
+        let token = token_from(&session);
+        archive
+            .accept_stub_upload(&token, Some("text/plain"), b"hello".to_vec())
+            .await
+            .expect("first upload");
+
+        // Same mime, same length: the only shape the old checks let through.
+        let replay = archive
+            .accept_stub_upload(&token, Some("text/plain"), b"HACKD".to_vec())
+            .await;
+        let now_stored = stored_bytes(&archive, &session.drive_file_id).await;
+        assert_eq!(
+            (replay, String::from_utf8_lossy(&now_stored).into_owned()),
+            (Err(DriveError::FileNotFound), "hello".to_string()),
+            "a spent capability must answer not-found and leave the landed bytes alone"
+        );
+        assert!(
+            !session_file(&archive, &token).exists(),
+            "the session file is removed by the upload that spent it"
+        );
+
+        // Restart-surviving backend: a fresh process over the same volume
+        // must not find the capability either.
+        let reopened = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9").expect("reopen");
+        assert_eq!(
+            reopened
+                .accept_stub_upload(&token, Some("text/plain"), b"HACKD".to_vec())
+                .await
+                .expect_err("still spent after a restart"),
+            DriveError::FileNotFound
+        );
+        assert_eq!(
+            stored_bytes(&reopened, &session.drive_file_id).await,
+            b"hello"
+        );
+    }
+
+    /// An object a janitor removed must not come back through the URL that
+    /// first wrote it. Separates "the session is spent" from "an existing
+    /// object is never overwritten": here there is no object left to protect.
+    #[tokio::test]
+    async fn a_deleted_object_cannot_be_resurrected_through_its_old_capability() {
+        let (dir, _guard) = temp_root();
+        let archive = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9").expect("open");
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "note.txt", "text/plain", 5)
+            .await
+            .expect("session");
+        let token = token_from(&session);
+        archive
+            .accept_stub_upload(&token, Some("text/plain"), b"hello".to_vec())
+            .await
+            .expect("first upload");
+        archive
+            .delete(&session.drive_file_id)
+            .await
+            .expect("janitor delete");
+        assert_eq!(
+            archive
+                .accept_stub_upload(&token, Some("text/plain"), b"HACKD".to_vec())
+                .await
+                .expect_err("spent capability"),
+            DriveError::FileNotFound
+        );
+        assert_eq!(
+            archive
+                .file_metadata(&session.drive_file_id)
+                .await
+                .expect_err("nothing was resurrected"),
+            DriveError::FileNotFound
+        );
+    }
+
+    /// A session file that comes back after its upload landed — a volume
+    /// restored from a backup taken mid-upload — must not be able to
+    /// overwrite the object that landed. Its expiry is still in the future.
+    #[tokio::test]
+    async fn a_resurrected_session_cannot_overwrite_an_object_that_landed() {
+        let (dir, _guard) = temp_root();
+        let archive = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9").expect("open");
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "contract.txt", "text/plain", 5)
+            .await
+            .expect("session");
+        let token = token_from(&session);
+        let saved = fs::read(session_file(&archive, &token)).expect("session file");
+        archive
+            .accept_stub_upload(&token, Some("text/plain"), b"hello".to_vec())
+            .await
+            .expect("first upload");
+
+        fs::write(session_file(&archive, &token), &saved).expect("restore session file");
+        edit_session(&archive, &token, |value| {
+            value["expires_at_ms"] = serde_json::json!(epoch_ms_now() + 3_600_000);
+        });
+        assert_eq!(
+            archive
+                .accept_stub_upload(&token, Some("text/plain"), b"HACKD".to_vec())
+                .await
+                .expect_err("an object that landed is never replaced"),
+            DriveError::FileNotFound
+        );
+        assert_eq!(
+            stored_bytes(&archive, &session.drive_file_id).await,
+            b"hello"
+        );
+    }
+
+    /// An expired capability is refused before its bytes are looked at, and
+    /// forgotten: the session file goes with the refusal.
+    #[tokio::test]
+    async fn an_expired_capability_is_refused_and_forgotten() {
+        let (dir, _guard) = temp_root();
+        let archive = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9").expect("open");
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "note.txt", "text/plain", 5)
+            .await
+            .expect("session");
+        let token = token_from(&session);
+        edit_session(&archive, &token, |value| {
+            value["expires_at_ms"] = serde_json::json!(epoch_ms_now() - 1);
+        });
+        assert_eq!(
+            archive
+                .accept_stub_upload(&token, Some("text/plain"), b"hello".to_vec())
+                .await
+                .expect_err("expired"),
+            DriveError::FileNotFound
+        );
+        assert_eq!(
+            archive
+                .file_metadata(&session.drive_file_id)
+                .await
+                .expect_err("no bytes landed"),
+            DriveError::FileNotFound
+        );
+        assert!(
+            !session_file(&archive, &token).exists(),
+            "an expired session is removed when it is refused"
+        );
+    }
+
+    /// Session files written before #2615 carry no expiry — and every
+    /// completed upload left one behind. They are refused, never treated as
+    /// immortal, or every URL ever handed out would stay live after the fix.
+    #[tokio::test]
+    async fn a_session_file_without_an_expiry_is_refused() {
+        let (dir, _guard) = temp_root();
+        let archive = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9").expect("open");
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "note.txt", "text/plain", 5)
+            .await
+            .expect("session");
+        let token = token_from(&session);
+        edit_session(&archive, &token, |value| {
+            value
+                .as_object_mut()
+                .expect("session object")
+                .remove("expires_at_ms");
+        });
+        assert_eq!(
+            archive
+                .accept_stub_upload(&token, Some("text/plain"), b"hello".to_vec())
+                .await
+                .expect_err("a legacy session has no lifetime left"),
+            DriveError::FileNotFound
+        );
+        assert!(!session_file(&archive, &token).exists());
+    }
+
+    /// The retry policy: a PUT the archive refuses before storing anything
+    /// (wrong length, wrong mime) leaves the capability usable, like a Google
+    /// resumable session that has not received its bytes yet.
+    #[tokio::test]
+    async fn a_refused_upload_does_not_spend_the_capability() {
+        let (dir, _guard) = temp_root();
+        let archive = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9").expect("open");
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "note.txt", "text/plain", 5)
+            .await
+            .expect("session");
+        let token = token_from(&session);
+        assert!(matches!(
+            archive
+                .accept_stub_upload(&token, Some("text/plain"), b"too long".to_vec())
+                .await,
+            Err(DriveError::InvalidArguments(_))
+        ));
+        assert!(matches!(
+            archive
+                .accept_stub_upload(&token, Some("image/png"), b"hello".to_vec())
+                .await,
+            Err(DriveError::InvalidArguments(_))
+        ));
+        archive
+            .accept_stub_upload(&token, Some("text/plain"), b"hello".to_vec())
+            .await
+            .expect("the corrected upload lands");
+        assert_eq!(
+            stored_bytes(&archive, &session.drive_file_id).await,
+            b"hello"
+        );
+    }
 }

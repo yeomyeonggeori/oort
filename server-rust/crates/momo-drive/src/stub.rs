@@ -299,6 +299,38 @@ mod tests {
         );
     }
 
+    /// **Red proof (#2615).** The first upload spends the capability; a replay
+    /// of the same URL — same mime, same length — cannot swap the bytes.
+    #[tokio::test]
+    async fn an_upload_capability_is_spent_by_its_first_upload() {
+        let archive = StubDriveArchive::new("http://127.0.0.1:9");
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "contract.txt", "text/plain", 5)
+            .await
+            .expect("session");
+        let token = session.upload_url.rsplit('/').next().expect("token");
+        archive
+            .accept_stub_upload(token, Some("text/plain"), b"hello".to_vec())
+            .await
+            .expect("first upload");
+
+        let replay = archive
+            .accept_stub_upload(token, Some("text/plain"), b"HACKD".to_vec())
+            .await;
+        let now_stored = collect(
+            archive
+                .file_content(&session.drive_file_id, 1024)
+                .await
+                .expect("content"),
+        )
+        .await;
+        assert_eq!(
+            (replay, String::from_utf8_lossy(&now_stored).into_owned()),
+            (Err(DriveError::FileNotFound), "hello".to_string()),
+            "a spent capability must answer not-found and leave the landed bytes alone"
+        );
+    }
+
     #[tokio::test]
     async fn a_read_over_the_ceiling_is_refused_rather_than_buffered() {
         let archive = StubDriveArchive::new("http://127.0.0.1:9");
