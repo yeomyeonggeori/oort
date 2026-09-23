@@ -24,6 +24,27 @@
 //! the same way — outside [`crate::auth::require_principal`] — and authenticates
 //! inside the handler, exactly like `terminal_attach::validate`.
 //!
+//! ## ADR-0188 R0.1: the scope is not the registrant's free choice
+//!
+//! Every ADR-0188 R0 defence — the owner as sole decider, an agent's `kill`
+//! only, no standing auto-approval, no shell — keys on `scope = 'member'` (「원격
+//! host = `scope='member'`인 모든 host」). A registration that let anybody
+//! call their own laptop a team box would therefore switch R0 off from the
+//! request body. So `register` refuses two shapes by name, before anything is
+//! written (#2582):
+//!
+//! * `scope = "workspace"` from a member who is not a workspace owner/admin —
+//!   403 `error.code: workspace_host_admin_required`. A team host is the
+//!   workspace's to add, the same line BYOC enrolment already draws;
+//! * `type = "app"` with any scope but `member` — 400 `error.code:
+//!   app_host_member_scope_required`, from anybody. An `app` host is the desktop
+//!   app on its owner's own machine (tier `local`): a remote host whatever it
+//!   calls itself. Refused rather than quietly rewritten, so the scope a client
+//!   sent is never silently not the scope it got.
+//!
+//! Registration only: a row written before this rule keeps the scope it has
+//! (an owner or admin can revoke it).
+//!
 //! ## ADR-0188 D7 (R0): the heartbeat is a v2 signed request
 //!
 //! It used to sign its own v1 payload, `momo.work_host.heartbeat.v1\n{ws}\n
@@ -68,6 +89,9 @@ use momo_auth::{
     touch_work_host_last_seen, NewWorkHost, Principal, WorkHostRecord,
 };
 use momo_db::{with_tenant_tx, DbError};
+use momo_t3::work_control::{
+    REFUSAL_APP_HOST_MEMBER_SCOPE_REQUIRED, REFUSAL_WORKSPACE_HOST_ADMIN_REQUIRED,
+};
 use momo_wire::{
     record_provenance, EntityRef, ProvenanceError, Signer, ENTITY_WORK_HOST_HEARTBEAT,
 };
@@ -112,6 +136,20 @@ pub(crate) fn validated_type(raw: &str) -> Result<String, ApiError> {
     } else {
         Err(ApiError::bad_request("type must be app, workd, or cloud"))
     }
+}
+
+/// ADR-0188 R0.1 — an `app` host is always a remote host: it registers
+/// member-scoped or not at all (see the module docs). Pure, so it is judged with
+/// the other shape checks, before any row is read.
+pub(crate) fn validated_scope_for_type(scope: &str, host_type: &str) -> Result<(), ApiError> {
+    if host_type == "app" && scope != "member" {
+        return Err(ApiError::coded(
+            StatusCode::BAD_REQUEST,
+            REFUSAL_APP_HOST_MEMBER_SCOPE_REQUIRED,
+            "an app work host is its owner's own machine and registers member-scoped",
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn validated_display_name(raw: &str) -> Result<String, ApiError> {
@@ -185,7 +223,9 @@ pub(crate) fn work_host_dto(record: WorkHostRecord) -> Result<WorkHostDto, ApiEr
     })
 }
 
-/// `POST /v1/workspaces/{ws}/work-hosts` → 201 (Swift `register`, :120-188).
+/// `POST /v1/workspaces/{ws}/work-hosts` → 201 (Swift `register`, :120-188),
+/// narrowed by ADR-0188 R0.1: a workspace-scoped host needs a workspace
+/// owner/admin, and an `app` host is member-scoped (module docs).
 pub async fn register(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -195,10 +235,13 @@ pub async fn register(
     require_human(&principal, "work host management requires a human bearer")?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
 
+    let scope = validated_scope(&request.scope)?;
+    let host_type = validated_type(&request.host_type)?;
+    validated_scope_for_type(&scope, &host_type)?;
     let new = NewWorkHost {
-        scope: validated_scope(&request.scope)?,
+        scope,
         owner_member_id: principal.member_id,
-        host_type: validated_type(&request.host_type)?,
+        host_type,
         display_name: validated_display_name(&request.display_name)?,
         public_key: validated_public_key(&request.public_key)?,
         capabilities_json: validated_capabilities(request.capabilities.as_ref())?,
@@ -210,22 +253,26 @@ pub async fn register(
         Box::pin(async move {
             // Membership is checked inside the same transaction as the insert
             // (Swift :138-142): a member removed mid-flight cannot register.
-            if active_workspace_role(conn, workspace_id, member_id)
-                .await?
-                .is_none()
-            {
-                return Ok(None);
+            // So is the role, for the same reason — an admin demoted mid-flight
+            // cannot add a team host on the strength of the role they had.
+            let Some(role) = active_workspace_role(conn, workspace_id, member_id).await? else {
+                return Ok(Err(ApiError::forbidden("not an active workspace member")));
+            };
+            if new.scope == "workspace" && !role.is_admin() {
+                return Ok(Err(ApiError::coded(
+                    StatusCode::FORBIDDEN,
+                    REFUSAL_WORKSPACE_HOST_ADMIN_REQUIRED,
+                    "a workspace-scoped work host requires a workspace owner or admin",
+                )));
             }
             let host_id = insert_work_host(conn, workspace_id, &new).await?;
-            let record = load_work_host(conn, host_id).await?;
-            Ok::<_, DbError>(Some(record))
+            Ok::<_, DbError>(Ok(load_work_host(conn, host_id).await?))
         })
     })
     .await
     .map_err(|error| ApiError::internal("work_hosts.register", error))?;
 
-    let record = outcome
-        .ok_or_else(|| ApiError::forbidden("not an active workspace member"))?
+    let record = outcome?
         .ok_or_else(|| ApiError::internal("work_hosts.register", "work host reload failed"))?;
     Ok((
         StatusCode::CREATED,
@@ -287,6 +334,11 @@ pub async fn list(
 /// they are written anyway: they are the checks that stay correct if the pin
 /// ever moves, and a route that reads a queue must be able to state whose queue
 /// it is without deferring to a module.
+///
+/// *What* the queue holds is the ledger's answer, not this route's: on a
+/// member-scoped host it withholds every non-`kill` control its owner did not
+/// request, and every shell (ADR-0188 R0.1 —
+/// [`momo_t3::pending_controls_for_host_in_tx`]).
 pub async fn pending_controls(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -486,6 +538,35 @@ mod tests {
         );
         assert_eq!(validated_type("CLOUD").unwrap(), "cloud");
         assert!(validated_type("vm").is_err());
+    }
+
+    /// ADR-0188 R0.1: an `app` host is a remote host whatever scope it asks
+    /// for — refused by name with a code, not rewritten. Every other type keeps
+    /// both scopes here; who may pick `workspace` is the handler's role check.
+    #[test]
+    fn an_app_host_registers_member_scoped_or_not_at_all() {
+        let refused = validated_scope_for_type("workspace", "app").unwrap_err();
+        assert_eq!(refused.status, StatusCode::BAD_REQUEST);
+        assert_eq!(refused.code, Some("app_host_member_scope_required"));
+        assert!(validated_scope_for_type("member", "app").is_ok());
+        for host_type in ["workd", "cloud"] {
+            for scope in ["member", "workspace"] {
+                assert!(
+                    validated_scope_for_type(scope, host_type).is_ok(),
+                    "{host_type}/{scope}"
+                );
+            }
+        }
+        // It judges the **normalised** values the validators return.
+        assert_eq!(
+            validated_scope_for_type(
+                &validated_scope(" Workspace ").unwrap(),
+                &validated_type("APP").unwrap()
+            )
+            .unwrap_err()
+            .code,
+            Some(REFUSAL_APP_HOST_MEMBER_SCOPE_REQUIRED)
+        );
     }
 
     #[test]

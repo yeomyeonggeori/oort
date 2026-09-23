@@ -30,6 +30,15 @@
 //! | `r0_8_the_spawn_tool_refuses_a_remote_host_it_was_not_given` | D3·D6, executor half | the remote-host block in `tool_exec::spawn_session_in_tx` |
 //! | `r0_9_a_shell_is_not_resumed_onto_a_remote_host` | D6, resume half | the shell check in `work_sessions::resume_in_tx` |
 //!
+//! **R0.1** (#2582) — the ways round R0 its security review found:
+//!
+//! | test | R0.1 item | the guard whose removal turns it red |
+//! |---|---|---|
+//! | `r01_1_only_a_workspace_admin_registers_a_workspace_host` | Medium: scope as a registration option | the role check in `work_hosts::register` |
+//! | `r01_2_an_app_host_is_never_workspace_scoped` | Medium: `type=app` is always remote | `work_hosts::validated_scope_for_type` in `register` |
+//! | `r01_3_a_remote_host_is_not_handed_what_r0_would_refuse` | Low 1: rows dispatched before R0 | the member-host clause in `momo_t3::pending_controls_for_host_in_tx` |
+//! | `r01_4_a_rejection_is_judged_on_the_card_not_the_pick` | Low 2: the rejecting decider's pick | the reject branch of `approvals::decision_reference_host` |
+//!
 //! Every refusal test also takes the **legitimate** path at the end — the owner
 //! deciding, a team host, a `kill` — so none of them can pass by a route that
 //! refuses everything.
@@ -1661,4 +1670,638 @@ async fn r0_9_a_shell_is_not_resumed_onto_a_remote_host() {
 
     let moved = resume(spare).await.expect("resume");
     assert_eq!(moved.status(), 201, "a team box may take the shell");
+}
+
+// ===========================================================================
+// ADR-0188 R0.1 (#2582) — the ways round R0 its security review found
+// ===========================================================================
+
+/// `POST …/work-hosts` as a person, with a fresh key.
+async fn register_host(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    workspace: Uuid,
+    scope: &str,
+    host_type: &str,
+) -> reqwest::Response {
+    let (_, public_key) = host_keypair();
+    http.post(format!("{base}/v1/workspaces/{workspace}/work-hosts"))
+        .bearer_auth(token)
+        .json(&json!({
+            "scope": scope,
+            "type": host_type,
+            "displayName": format!("{scope} {host_type}"),
+            "publicKey": public_key,
+        }))
+        .send()
+        .await
+        .expect("register work host")
+}
+
+async fn host_count(su: &PgPool, workspace: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM work_host WHERE workspace_id = $1")
+        .bind(workspace)
+        .fetch_one(su)
+        .await
+        .expect("count work hosts")
+}
+
+/// A running session on `host`, opened by the person holding `token`.
+async fn open_session(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    tenant: &Tenant,
+    host: Uuid,
+    label: &str,
+) -> Uuid {
+    let created = http
+        .post(format!(
+            "{base}/v1/workspaces/{}/work-sessions",
+            tenant.workspace
+        ))
+        .bearer_auth(token)
+        .json(&json!({
+            "channelId": tenant.channel,
+            "hostId": host,
+            "tool": TOOL,
+            "label": label,
+        }))
+        .send()
+        .await
+        .expect("create work session");
+    assert_eq!(created.status(), 201, "the session {label} opens");
+    let created: Value = created.json().await.expect("session body");
+    Uuid::parse_str(created["workSession"]["id"].as_str().expect("id")).expect("uuid")
+}
+
+/// A `dispatched` control written straight to the ledger as the superuser —
+/// the shape a row dispatched **before R0** has, which no route writes any more.
+#[allow(clippy::too_many_arguments)]
+async fn insert_dispatched(
+    su: &PgPool,
+    tenant: &Tenant,
+    host: Uuid,
+    requester: Uuid,
+    session: Option<Uuid>,
+    kind: &str,
+    payload: Value,
+) -> Uuid {
+    sqlx::query_scalar(
+        "INSERT INTO work_control \
+           (workspace_id, channel_id, requester_member_id, target_host_id, session_id, \
+            kind, payload, status) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'dispatched') \
+         RETURNING id",
+    )
+    .bind(tenant.workspace)
+    .bind(tenant.channel)
+    .bind(requester)
+    .bind(host)
+    .bind(session)
+    .bind(kind)
+    .bind(payload)
+    .fetch_one(su)
+    .await
+    .expect("insert a dispatched control")
+}
+
+/// What `host`'s own signed poll hands it, in delivery order — the one way a
+/// daemon learns what to run.
+async fn poll_pending(
+    http: &reqwest::Client,
+    base: &str,
+    workspace: Uuid,
+    host: Uuid,
+    seed: &[u8; 32],
+) -> Vec<Uuid> {
+    let response = SignedRequest::new(
+        reqwest::Method::GET,
+        &pending_path(workspace, host),
+        workspace,
+        host,
+        seed,
+        Vec::new(),
+    )
+    .send(http, base)
+    .await;
+    assert_eq!(response.status(), 200, "a host polls its own queue");
+    let body: Value = response.json().await.expect("pending body");
+    body["workControls"]
+        .as_array()
+        .expect("workControls")
+        .iter()
+        .map(|control| Uuid::parse_str(control["id"].as_str().expect("id")).expect("uuid"))
+        .collect()
+}
+
+async fn approval_payload(su: &PgPool, approval: Uuid) -> Value {
+    sqlx::query_scalar("SELECT payload FROM approval WHERE id = $1")
+        .bind(approval)
+        .fetch_one(su)
+        .await
+        .expect("approval payload")
+}
+
+// ---------------------------------------------------------------------------
+// R0.1 Medium — the scope is not a registration option
+// ---------------------------------------------------------------------------
+
+/// **RED PROOF — 관리자 아닌 멤버의 `scope=workspace` 등록 거부.** Every R0 defence
+/// keys on `scope = 'member'`, so a member who could register their own laptop
+/// as a team box would switch all of them off from the request body.
+///
+/// A plain member asking for `workspace` is 403 `workspace_host_admin_required`
+/// and leaves no row. The same member still registers their own machine
+/// member-scoped, and a workspace admin and the owner still add team hosts — so
+/// the refusal is about the role, not the route.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn r01_1_only_a_workspace_admin_registers_a_workspace_host() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let (_member, member_email) = seed_human(&su, tenant.workspace, "member", "팀원").await;
+    let (_admin, admin_email) = seed_teammate(&su, &tenant).await;
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let member_token = login(&http, &base, tenant.workspace, &member_email).await;
+    let admin_token = login(&http, &base, tenant.workspace, &admin_email).await;
+    let owner_token = login(&http, &base, tenant.workspace, &tenant.owner_email).await;
+
+    let before = host_count(&su, tenant.workspace).await;
+    let (status, code, message) = error_of(
+        register_host(
+            &http,
+            &base,
+            &member_token,
+            tenant.workspace,
+            "workspace",
+            "workd",
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(
+        status, 403,
+        "a plain member cannot add a team host: {message}"
+    );
+    assert_eq!(code, json!("workspace_host_admin_required"), "{message}");
+    assert_eq!(
+        host_count(&su, tenant.workspace).await,
+        before,
+        "and nothing was registered"
+    );
+
+    // ---- the member's own machine is still theirs to register ---------------
+    let own = register_host(
+        &http,
+        &base,
+        &member_token,
+        tenant.workspace,
+        "member",
+        "workd",
+    )
+    .await;
+    assert_eq!(own.status(), 201, "a member registers their own machine");
+    let own: Value = own.json().await.expect("host body");
+    assert_eq!(own["workHost"]["scope"], json!("member"));
+
+    // ---- a team host is the workspace's to add ------------------------------
+    for (token, who) in [
+        (&admin_token, "a workspace admin"),
+        (&owner_token, "the workspace owner"),
+    ] {
+        let added =
+            register_host(&http, &base, token, tenant.workspace, "workspace", "workd").await;
+        assert_eq!(added.status(), 201, "{who} adds a team host");
+        let added: Value = added.json().await.expect("host body");
+        assert_eq!(added["workHost"]["scope"], json!("workspace"), "{who}");
+    }
+}
+
+/// **RED PROOF — `type=app` host는 scope와 무관하게 원격.** An `app` host is the
+/// desktop app on its owner's own machine. Asked for as a team host it is
+/// refused — 400 `app_host_member_scope_required`, for the workspace owner as
+/// much as for a member — rather than quietly rewritten, and nothing is
+/// registered. Member-scoped it registers, and R0 then holds for it: the agent
+/// may address it with `kill` only.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn r01_2_an_app_host_is_never_workspace_scoped() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let (_member, member_email) = seed_human(&su, tenant.workspace, "member", "팀원").await;
+    let run = seed_run(&su, &tenant).await;
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let owner_token = login(&http, &base, tenant.workspace, &tenant.owner_email).await;
+    let member_token = login(&http, &base, tenant.workspace, &member_email).await;
+    let bearer = agent_bearer(&su, &tenant).await;
+
+    let before = host_count(&su, tenant.workspace).await;
+    for (token, who) in [
+        (&owner_token, "the workspace owner"),
+        (&member_token, "a member"),
+    ] {
+        let (status, code, message) = error_of(
+            register_host(&http, &base, token, tenant.workspace, "workspace", "app").await,
+        )
+        .await;
+        assert_eq!(status, 400, "{who}: an app host as a team host: {message}");
+        assert_eq!(code, json!("app_host_member_scope_required"), "{who}");
+    }
+    assert_eq!(
+        host_count(&su, tenant.workspace).await,
+        before,
+        "no app host became a team host"
+    );
+
+    // ---- member-scoped, it registers — and is a remote host ------------------
+    let laptop = register_host(
+        &http,
+        &base,
+        &owner_token,
+        tenant.workspace,
+        "member",
+        "app",
+    )
+    .await;
+    assert_eq!(laptop.status(), 201, "the owner registers their own laptop");
+    let laptop: Value = laptop.json().await.expect("host body");
+    assert_eq!(laptop["workHost"]["scope"], json!("member"));
+    let laptop = Uuid::parse_str(laptop["workHost"]["id"].as_str().expect("id")).expect("uuid");
+
+    let (status, code, message) = error_of(
+        agent_control(
+            &http,
+            &base,
+            &bearer,
+            &tenant,
+            json!({
+                "channelId": tenant.channel,
+                "runId": run,
+                "targetHostId": laptop,
+                "kind": "spawn",
+                "payload": {"tool": TOOL, "label": "노트북에서"},
+            }),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, 403, "{message}");
+    assert_eq!(code, json!("remote_host_kill_only"), "R0 holds for it");
+}
+
+// ---------------------------------------------------------------------------
+// R0.1 Low 1 — rows dispatched before R0 are not handed to a remote host
+// ---------------------------------------------------------------------------
+
+/// **RED PROOF — R0 이전에 dispatch된 컨트롤의 전달 차단.** R0 refuses these at
+/// creation and decision time; it cannot reach a row that was already
+/// `dispatched` before it existed, and the signed poll is what would hand that
+/// row to the first `momo-workd` (#2571) that asks. So every pre-R0 shape is
+/// written straight to the ledger here — no route writes them any more — and
+/// the owner's laptop polls:
+///
+/// * an agent's `input` and `read` (ADR-0114 D4, never approved);
+/// * an agent's spawn a standing auto-approval dispatched (no card);
+/// * an agent's spawn a **colleague** approved onto the laptop (a real card,
+///   its pre-R0 decision replayed as the superuser);
+/// * the owner's own `shell`, and a shell under another key (`bash-2` → `bash`);
+/// * a colleague's takeover onto the laptop (the shape resume could write
+///   before #1139 asked whose host a target was).
+///
+/// None of them is delivered, and none is failed either — they are withheld,
+/// still `dispatched`, because the poll writes nothing. What the laptop **is**
+/// handed is the agent's `kill` and its owner's own takeover, oldest first; and
+/// the same shapes on a team box are all delivered, exactly as before.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn r01_3_a_remote_host_is_not_handed_what_r0_would_refuse() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    seed_tool_profile(&su, tenant.workspace, tenant.owner, "bash-2", "bash").await;
+    let (teammate, _) = seed_teammate(&su, &tenant).await;
+    let (laptop, laptop_seed) = seed_laptop(&su, &tenant).await;
+    let (vps, vps_seed) =
+        seed_host(&su, &tenant, tenant.owner, "workspace", "workd", "팀 VPS").await;
+    let run = seed_run(&su, &tenant).await;
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let owner_token = login(&http, &base, tenant.workspace, &tenant.owner_email).await;
+    let bearer = agent_bearer(&su, &tenant).await;
+    let on_laptop = open_session(&http, &base, &owner_token, &tenant, laptop, "노트북 세션").await;
+    let on_vps = open_session(&http, &base, &owner_token, &tenant, vps, "VPS 세션").await;
+
+    // ---- a colleague's approval onto the laptop, as a pre-R0 decision left it
+    let carded = request_spawn(&http, &base, &bearer, &tenant, run, vps, TOOL, "팀원 승인").await;
+    let card = approval_for(&su, carded).await;
+    sqlx::query(
+        "UPDATE approval SET status = 'approved', decided_by = $2, decided_at = clock_timestamp() \
+          WHERE id = $1",
+    )
+    .bind(card)
+    .bind(teammate)
+    .execute(&su)
+    .await
+    .expect("the colleague's pre-R0 approval");
+    sqlx::query(
+        "UPDATE work_control SET status = 'dispatched', target_host_id = $2, \
+                updated_at = clock_timestamp() \
+          WHERE id = $1",
+    )
+    .bind(carded)
+    .bind(laptop)
+    .execute(&su)
+    .await
+    .expect("…dispatched onto the owner's laptop");
+
+    // ---- the other pre-R0 shapes, on the owner's laptop ----------------------
+    let spawn = |tool: &str, label: &str| json!({"tool": tool, "label": label});
+    let mut withheld = vec![(
+        carded,
+        "an agent's spawn a colleague approved onto the laptop",
+    )];
+    for (requester, session, kind, payload, why) in [
+        (
+            tenant.agent,
+            Some(on_laptop),
+            "input",
+            json!({"text": "rm -rf ~"}),
+            "an agent's input (ADR-0114 D4, never approved)",
+        ),
+        (
+            tenant.agent,
+            Some(on_laptop),
+            "read",
+            json!({"tail_lines": 200}),
+            "an agent's read",
+        ),
+        (
+            tenant.agent,
+            None,
+            "spawn",
+            spawn(TOOL, "자동승인"),
+            "an agent's auto-approved spawn (no card)",
+        ),
+        (
+            tenant.owner,
+            None,
+            "spawn",
+            spawn("shell", "셸"),
+            "the owner's own shell",
+        ),
+        (
+            tenant.owner,
+            None,
+            "spawn",
+            spawn("bash-2", "이름만 다른 셸"),
+            "a shell under another key",
+        ),
+        (
+            teammate,
+            None,
+            "spawn",
+            spawn(TOOL, "남의 노트북"),
+            "a colleague's takeover onto the laptop (before #1139)",
+        ),
+    ] {
+        let control =
+            insert_dispatched(&su, &tenant, laptop, requester, session, kind, payload).await;
+        withheld.push((control, why));
+    }
+    let kill = insert_dispatched(
+        &su,
+        &tenant,
+        laptop,
+        tenant.agent,
+        Some(on_laptop),
+        "kill",
+        json!({}),
+    )
+    .await;
+    let takeover = insert_dispatched(
+        &su,
+        &tenant,
+        laptop,
+        tenant.owner,
+        None,
+        "spawn",
+        spawn(TOOL, "주인의 이어받기"),
+    )
+    .await;
+
+    // ---- the same shapes on a team box ---------------------------------------
+    let mut team = Vec::new();
+    for (requester, session, kind, payload) in [
+        (
+            tenant.agent,
+            Some(on_vps),
+            "input",
+            json!({"text": "상태 알려줘"}),
+        ),
+        (tenant.agent, None, "spawn", spawn("shell", "팀 셸")),
+        (teammate, None, "spawn", spawn(TOOL, "팀 일")),
+    ] {
+        team.push(insert_dispatched(&su, &tenant, vps, requester, session, kind, payload).await);
+    }
+
+    // ---- the laptop's own poll ------------------------------------------------
+    let delivered = poll_pending(&http, &base, tenant.workspace, laptop, &laptop_seed).await;
+    for (control, why) in &withheld {
+        assert!(
+            !delivered.contains(control),
+            "handed to the owner's laptop: {why} ({control}) — the poll answered {delivered:?}"
+        );
+    }
+    assert_eq!(
+        delivered,
+        vec![kill, takeover],
+        "the laptop is handed the agent's kill and its owner's own takeover, oldest first"
+    );
+    for (control, why) in &withheld {
+        assert_eq!(
+            control_row(&su, *control).await.0,
+            "dispatched",
+            "{why}: withheld, not failed — the poll writes nothing"
+        );
+    }
+
+    // ---- a team box is outside goal A -----------------------------------------
+    assert_eq!(
+        poll_pending(&http, &base, tenant.workspace, vps, &vps_seed).await,
+        team,
+        "a team box is handed every shape it was before"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// R0.1 Low 2 — a rejection is judged on the card, not on the decider's pick
+// ---------------------------------------------------------------------------
+
+/// **RED PROOF — 거부 판정의 host는 pick이 아니라 카드.** A rejection runs
+/// nothing, so the decider's `hostId` chooses nothing — except, before R0.1,
+/// which ownership rule applied. A team box is a selectable candidate on every
+/// card, so a colleague could settle a card sitting on the owner's laptop by
+/// "picking" the VPS while saying no.
+///
+/// The card defaults to the laptop: the colleague's rejection is 403
+/// `remote_host_owner_required` whatever they pick, and changes nothing. A card
+/// that pre-selected nothing is judged on the host its request named. The owner
+/// then rejects their own card (with a pick, which is ignored), and a card that
+/// defaults to the team box is still the colleague's to refuse — picking the
+/// laptop does not make it the owner's.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn r01_4_a_rejection_is_judged_on_the_card_not_the_pick() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let (_teammate, teammate_email) = seed_teammate(&su, &tenant).await;
+    let (laptop, _) = seed_laptop(&su, &tenant).await;
+    let vps = seed_team_box(&su, &tenant, "팀 VPS").await;
+    let run = seed_run(&su, &tenant).await;
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let owner_token = login(&http, &base, tenant.workspace, &tenant.owner_email).await;
+    let teammate_token = login(&http, &base, tenant.workspace, &teammate_email).await;
+    let bearer = agent_bearer(&su, &tenant).await;
+
+    let control = request_spawn(&http, &base, &bearer, &tenant, run, vps, TOOL, "리팩터링").await;
+    let approval = approval_for(&su, control).await;
+    let payload = approval_payload(&su, approval).await;
+    assert_eq!(
+        payload["execution"]["default_host_id"],
+        json!(laptop.to_string()),
+        "the card sits on the owner's laptop: {}",
+        payload["execution"]
+    );
+    assert!(
+        payload["execution"]["host_candidates"]
+            .as_array()
+            .expect("candidates")
+            .iter()
+            .any(|row| row["host_id"] == json!(vps.to_string()) && row["selectable"] == true),
+        "and offers the team box, so a pick of it is one the card allows"
+    );
+
+    for (pick, why) in [
+        (Some(vps), "rejecting with the team box picked"),
+        (Some(laptop), "rejecting with the laptop picked"),
+        (None, "rejecting with no pick"),
+    ] {
+        let (status, receipt) = decide(
+            &http,
+            &base,
+            &teammate_token,
+            tenant.workspace,
+            approval,
+            false,
+            pick,
+        )
+        .await;
+        assert_eq!(status, 403, "{why}: {receipt}");
+        assert_eq!(
+            receipt["status"],
+            json!("remote_host_owner_required"),
+            "{why}: {receipt}"
+        );
+        assert_eq!(
+            control_row(&su, control).await.0,
+            "pending_approval",
+            "{why}"
+        );
+        assert_eq!(approval_status(&su, approval).await, "pending", "{why}");
+    }
+
+    // ---- a card that pre-selected nothing: the host its request named ---------
+    let bare = request_spawn(&http, &base, &bearer, &tenant, run, vps, TOOL, "빈 카드").await;
+    let bare_approval = approval_for(&su, bare).await;
+    sqlx::query(
+        "UPDATE approval \
+            SET payload = jsonb_set( \
+                  jsonb_set(payload, '{execution,default_host_id}', 'null'::jsonb), \
+                  '{execution,requested_host_id}', to_jsonb($2::text)) \
+          WHERE id = $1",
+    )
+    .bind(bare_approval)
+    .bind(laptop.to_string())
+    .execute(&su)
+    .await
+    .expect("a card that asks for the laptop and pre-selects nothing");
+    let (status, receipt) = decide(
+        &http,
+        &base,
+        &teammate_token,
+        tenant.workspace,
+        bare_approval,
+        false,
+        Some(vps),
+    )
+    .await;
+    assert_eq!(status, 403, "a card that names the laptop: {receipt}");
+    assert_eq!(receipt["status"], json!("remote_host_owner_required"));
+    assert_eq!(approval_status(&su, bare_approval).await, "pending");
+
+    // ---- the owner refuses their own card; the pick changes nothing ----------
+    let (status, receipt) = decide(
+        &http,
+        &base,
+        &owner_token,
+        tenant.workspace,
+        approval,
+        false,
+        Some(vps),
+    )
+    .await;
+    assert_eq!(status, 200, "the owner rejects their own card: {receipt}");
+    assert_eq!(receipt["status"], json!("rejected"));
+    assert_eq!(control_row(&su, control).await.0, "denied");
+
+    // ---- a card on the team box is anybody's in the room to refuse -----------
+    sqlx::query(
+        "INSERT INTO work_host_last_used (workspace_id, member_id, host_id) \
+         VALUES ($1, $2, $3) \
+         ON CONFLICT (workspace_id, member_id) DO UPDATE SET host_id = EXCLUDED.host_id",
+    )
+    .bind(tenant.workspace)
+    .bind(tenant.owner)
+    .bind(vps)
+    .execute(&su)
+    .await
+    .expect("the owner last sent work to the team box");
+    let team = request_spawn(&http, &base, &bearer, &tenant, run, vps, TOOL, "팀 일").await;
+    let team_approval = approval_for(&su, team).await;
+    assert_eq!(
+        approval_payload(&su, team_approval).await["execution"]["default_host_id"],
+        json!(vps.to_string()),
+        "마지막 사용 puts this card on the team box"
+    );
+    let (status, receipt) = decide(
+        &http,
+        &base,
+        &teammate_token,
+        tenant.workspace,
+        team_approval,
+        false,
+        Some(laptop),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "picking the laptop does not make a team-box card the owner's: {receipt}"
+    );
+    assert_eq!(control_row(&su, team).await.0, "denied");
 }

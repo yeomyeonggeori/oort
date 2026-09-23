@@ -41,8 +41,10 @@
 //!
 //! Not proved: *when*. `created_at` is the server's clock, not the actor's.
 //! Freshness is each surface's own affair and is unchanged by this module — the
-//! work-host surfaces already carry `sentAtMs` inside the signed bytes plus the
-//! ±5-minute skew window (and, for v2, one-time `requestID` consumption); the
+//! work-host surfaces carry `sentAtMs` inside the signed bytes plus the
+//! ±5-minute skew window and one-time `requestID` consumption (every live
+//! work-host surface is `momo.work_host.request.v2` since ADR-0188 R0 moved the
+//! heartbeat onto it; the retired v1 heartbeat had the clock window alone); the
 //! message surface binds the actor's own `client_msg_id`, which the write path's
 //! `(channel_id, author_member_id, client_msg_id)` uniqueness already collapses,
 //! so a replayed message signature can only ever re-attach to the one message it
@@ -59,12 +61,18 @@ use crate::signing::{heartbeat_payload, request_payload, sha256_hex, verify_base
 
 /// Schema tag for the one signing payload this ADR had to invent
 /// (`momo.provenance.<surface>.v1`, following the workd `momo.<area>.<event>.vN`
-/// convention). The two work-host surfaces reuse the formats workd **already**
-/// signs — inventing a parallel format for them would mean changing the daemon,
-/// and a second format over the same act is a drift surface, not a feature.
+/// convention). The work-host surfaces reuse the format workd **already** signs
+/// for every request, `momo.work_host.request.v2` — inventing a parallel format
+/// for them would mean changing the daemon, and a second format over the same
+/// act is a drift surface, not a feature.
 pub const MESSAGE_SCHEMA_V1: &str = "momo.provenance.message.v1";
 
 /// `entity_type` for a signed work-host heartbeat; `entity_id` = the host id.
+///
+/// Since ADR-0188 R0 (D7) the heartbeat is an ordinary v2 signed request, so a
+/// new row under this type holds [`SignedAction::WorkHostRequest`] bytes; rows
+/// recorded before R0 hold [`SignedAction::WorkHostHeartbeat`] (v1) bytes. The
+/// type names the act, not the byte format.
 pub const ENTITY_WORK_HOST_HEARTBEAT: &str = "work_host.heartbeat";
 /// `entity_type` for a signed terminal-attach validation; `entity_id` = the work
 /// session whose attach was validated.
@@ -158,15 +166,23 @@ pub struct MessageContent<'a> {
 /// not scattered across three route files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SignedAction<'a> {
-    /// The heartbeat workd already signs: `momo.work_host.heartbeat.v1`.
+    /// The **retired** v1 heartbeat, `momo.work_host.heartbeat.v1` — workspace,
+    /// host and clock, with no request id and no body digest.
+    ///
+    /// Nothing signs or accepts it any more: ADR-0188 R0 (D7) made the heartbeat
+    /// a v2 signed request ([`Self::WorkHostRequest`], recorded under
+    /// [`ENTITY_WORK_HOST_HEARTBEAT`]) and the server refuses v1 with the
+    /// ordinary 401. It is kept only so the `work_host.heartbeat` rows recorded
+    /// before R0 can still be re-derived and re-verified.
     WorkHostHeartbeat {
         workspace_id: Uuid,
         host_id: Uuid,
         sent_at_ms: i64,
     },
-    /// The signed request workd already makes: `momo.work_host.request.v2`
-    /// (binds method, path, workspace, host, clock, **raw body digest**, and the
-    /// one-time request id).
+    /// The signed request workd makes for every call, the heartbeat included
+    /// since ADR-0188 R0: `momo.work_host.request.v2` (binds method, path,
+    /// workspace, host, clock, **raw body digest**, and the one-time request
+    /// id).
     WorkHostRequest {
         method: &'a str,
         path: &'a str,
@@ -246,7 +262,11 @@ impl SignedAction<'_> {
         }
     }
 
-    /// The `entity_type` this surface records under.
+    /// The `entity_type` this surface was first recorded under.
+    ///
+    /// A default, not the rule: [`record_provenance`] takes the [`EntityRef`]
+    /// from its caller, and since ADR-0188 R0 the heartbeat records
+    /// [`Self::WorkHostRequest`] bytes under [`ENTITY_WORK_HOST_HEARTBEAT`].
     pub fn entity_type(&self) -> &'static str {
         match self {
             SignedAction::WorkHostHeartbeat { .. } => ENTITY_WORK_HOST_HEARTBEAT,
@@ -468,8 +488,10 @@ mod tests {
         }
     }
 
-    /// The two work-host surfaces must be byte-identical to what workd already
-    /// signs — a divergence here would silently reject every real daemon.
+    /// The work-host variants must be byte-identical to the `signing` builders —
+    /// the v2 request is what workd signs, and a divergence would silently
+    /// reject every real daemon; the retired v1 heartbeat must still re-derive
+    /// the bytes of the rows recorded before ADR-0188 R0.
     #[test]
     fn work_host_surfaces_reuse_the_existing_workd_formats() {
         let ws = Uuid::from_u128(1);
