@@ -20,7 +20,7 @@ labels: ["type:chore", "status:ready", "agent:codex-ok"]
 ## Acceptance (검증 등급 + 체크박스)
 - [ ] [ci]/[infra]/[manual] <검증 명령 또는 산출 파일>
 - [ ] 기존 빌드/워크플로우 안 깨짐 (`make build` green 유지)
-- [ ] (release 관련이면) 🔒 `release-desktop.yml`·`publish_next_build.sh`는 dry-run 외 실행을 증거 빌드 owner 승인 또는 해당 M7 등급 PASS + 배포 건마다 owner 승인 뒤에만 한다. next 채널 발행은 ADR-0187 §4 결정 전 금지
+- [ ] (release 관련이면) 🔒 `release-desktop.yml`·`publish_next_build.sh`는 dry-run 외 실행을 증거 빌드 owner 승인 또는 해당 M7 등급 PASS + 배포 건마다 owner 승인 뒤에만 한다. next 채널 발행도 M7-I PASS + 건별 owner 승인 뒤에만
 - [ ] 관련 docs 갱신(증거는 PR 본문)
 
 ## Depends on
