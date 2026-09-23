@@ -29,9 +29,17 @@ import {COPY_RECEIPT_MS, copyText} from './copy';
 // 시간도 코드 상자와 액션 시트가 쓰는 `COPY_RECEIPT_MS` 그대로다 — 같은 동사가
 // 한 화면에서 두 가지 계약을 갖지 않게.
 //
-// 복사가 실패하면 라벨이 바뀌지 않는다(웹 `useClipboardCopy` 와 같다). 대신 값이
-// `selectable` 이라 길게 눌러 직접 고를 수 있다 — 클립보드 권한이 막힌 기기에서도
-// 전달할 길이 하나는 남는다.
+// 복사가 실패하면 라벨이 바뀌지 않는다(웹 `useClipboardCopy` 와 같다).
+//
+// ## 값은 고를 수 없다 — 웹의 `select-all` 을 옮기지 않은 이유 (design-review M-3)
+//
+// 이 컴포넌트는 메시지 행 **안**에 선다. 그 행은 길게 누르면 액션 시트를 열고,
+// iOS 의 텍스트 선택은 그 자체가 길게 누르기라 둘이 같은 제스처를 다툰다 — 그래서
+// 시트가 있는 행은 선택을 끈다는 것이 이 행의 규칙이다(`MessageRow` 의
+// `selectable={!actionable}`). 여기서만 켜면, 링크를 길게 눌러 복사하려던 사람은
+// 시트를 만나고 시트의 「메시지 복사하기」는 링크가 아니라 메시지 본문을 준다.
+// 옮기는 길은 둘이고 둘 다 값을 정확히 준다: 이 버튼, 그리고 VoiceOver 로터의
+// 「링크 복사하기」(`MessageRow` 의 `momoCopyLinkOnce`).
 //
 // ## 값은 자르지 않는다 (웹 R1 B1)
 //
@@ -80,10 +88,7 @@ export function LinkOnce({
         {LINK_ONCE_LEAD}
       </Sentence>
       <View style={styles.row}>
-        <Text
-          selectable
-          style={styles.value}
-          testID={`${testIDPrefix}-link-once-value`}>
+        <Text style={styles.value} testID={`${testIDPrefix}-link-once-value`}>
           {secret.value}
         </Text>
         <Pressable
@@ -105,9 +110,13 @@ export function LinkOnce({
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    wrap: {gap: space.sm, paddingTop: space.xs},
-    lead: {fontSize: font.label, lineHeight: line.label, color: color.text},
-    row: {flexDirection: 'row', alignItems: 'center', gap: space.sm},
+    wrap: {gap: space.xs, paddingTop: space.xs},
+    // 영수증(`cardNote`, 12pt/600)과 **같은 크기**다. 위계는 무게로만 선다 — 영수증이
+    // 굵고 이 문장은 보통이다(`MessageRow` 의 노트 격 규칙: 크기는 안 쓴다).
+    lead: {fontSize: font.meta, lineHeight: line.meta, color: color.text},
+    // 값을 버튼 높이 가운데에 세우면 값이 아래로 밀려 리드가 값보다 영수증 쪽에
+    // 붙는다(design-review M-1 실측: 리드→URL 20pt). 위로 붙여 리드가 값을 설명하게.
+    row: {flexDirection: 'row', alignItems: 'flex-start', gap: space.sm},
     // 라틴 URL 한 덩어리다. 코드 상자와 같은 서체라 「이것은 값이다」가 모양으로
     // 읽힌다(`MessageBody` 의 `code`).
     value: {

@@ -540,6 +540,74 @@ describe('#1084 — 403 은 「관리자가 승인해야 합니다」와 무장 
 });
 
 // =============================================================================
+describe('design-review H-1 — 카드가 누가 결정하는지를 한 가지로만 말한다', () => {
+  const DEFAULT_LEAD = '실행 전에 회원님의 허가가 필요합니다.';
+
+  it('행동 승인 카드는 「회원님의 허가」 머리 문장을 세우지 않는다 — 결정 권한 행과 부딪친다', () => {
+    renderRow({});
+    const card = screen.getByTestId('agent-card');
+    expect(within(card).getByText('관리자만 승인할 수 있습니다.')).toBeTruthy();
+    expect(within(card).queryByText(DEFAULT_LEAD)).toBeNull();
+    // 컨트롤은 그대로 선다.
+    expect(within(card).getByTestId(`${PREFIX}-approve`)).toBeTruthy();
+  });
+
+  it('403 뒤에도 서로 반박하는 문장이 함께 서지 않는다', async () => {
+    installDecision(() =>
+      jsonResponse(403, {approval_id: APPROVAL_ID, status: 'role_required'}),
+    );
+    renderRow({});
+    await armAndCommit('approve');
+    await screen.findByTestId(`${PREFIX}-error`);
+    const card = screen.getByTestId('agent-card');
+    expect(within(card).queryByText(DEFAULT_LEAD)).toBeNull();
+    expect(within(card).getByText(roleRequiredCopy('admin'))).toBeTruthy();
+  });
+
+  it('도구 호출 승인은 머리 문장을 그대로 든다 (회귀 0)', () => {
+    renderRow({
+      message: approvalMessage({
+        approval_id: APPROVAL_ID,
+        title: 'github.search_issues 실행 허가',
+        approval_status: 'pending',
+      }),
+    });
+    expect(
+      within(screen.getByTestId('agent-card')).getByText(DEFAULT_LEAD),
+    ).toBeTruthy();
+    // 사실 표가 없으니 가르는 선도 없다 — 이 카드의 기존 캡처가 낡지 않는다.
+    expect(screen.queryByTestId('approval-action-footer')).toBeNull();
+  });
+
+  it('행동 승인의 컨트롤·영수증 자리는 사실 표와 선 하나로 갈린다 (M-1)', () => {
+    const pending = renderRow({});
+    const footer = screen.getByTestId('approval-action-footer');
+    expect(within(footer).getByTestId(`${PREFIX}-approve`)).toBeTruthy();
+    const style = flat(footer.props.style);
+    expect(style.borderTopWidth).toBe(StyleSheet.hairlineWidth);
+    expect(style.borderTopColor).toBe(color.border);
+    // 영수증과 링크도 같은 자리에 선다.
+    pending.unmount();
+    renderRow({
+      gates: new Map(),
+      receipts: new Map([
+        [
+          APPROVAL_ID,
+          {
+            note: '승인을 기록했습니다.',
+            status: 'approved',
+            secretOnce: {kind: 'invite_link', value: SECRET, expiresAtMs: null},
+          },
+        ],
+      ]),
+    });
+    const settled = screen.getByTestId('approval-action-footer');
+    expect(within(settled).getByTestId('card-approval-receipt')).toBeTruthy();
+    expect(within(settled).getByTestId('card-approval-link-once')).toBeTruthy();
+  });
+});
+
+// =============================================================================
 describe('#2513 — 행동 승인 카드의 행·사유·결정 권한 (부록 A)', () => {
   it('action 행 셋(역할·횟수·만료)과 사유·결정 권한을 그린다', () => {
     renderRow({});
@@ -628,8 +696,10 @@ describe('#2513 — 1회 링크는 영수증 자리에만 선다 (ADR-0182 ① �
     const value = within(card).getByTestId('card-approval-link-once-value');
     expect(value.props.children).toBe(SECRET);
     expect(value.props.numberOfLines).toBeUndefined();
-    // 클립보드가 막혀도 길게 눌러 고를 수 있다.
-    expect(value.props.selectable).toBe(true);
+    // 고를 수 없다(design-review M-3). 이 값은 길게 누르면 액션 시트가 열리는 행
+    // 안에 있고, 그 행의 규칙은 「시트가 있으면 선택은 끈다」다 — 켜면 두 길게
+    // 누르기가 다투고, 시트의 복사는 링크가 아니라 메시지 본문을 준다.
+    expect(value.props.selectable).not.toBe(true);
     expect(within(card).queryByTestId(`${PREFIX}-approve`)).toBeNull();
   });
 
@@ -761,16 +831,31 @@ describe('#2513 — 영속 결과 카드 (부록 B)', () => {
     );
   });
 
-  it('「멤버와 초대에서 보기」는 문이 아니라 데스크톱·웹으로 가는 문장이다 (폰에 화면이 없다)', () => {
+  it('「멤버와 초대에서 보기」는 문이 아니라 할 일과 자리를 말하는 문장이다 (폰에 화면이 없다)', () => {
     renderResult();
     const elsewhere = screen.getByTestId('action-result-elsewhere');
+    // 이 앱의 다른 「여기서는 못 한다」 문장과 같은 모양 — 할 일을 이름으로, 자리로
+    // 끝난다(design-review M-4). 서버의 버튼 캡션을 옮겨 붙이지 않는다.
     expect(elsewhere.props.children).toBe(
-      '데스크톱이나 웹에서 이어 갈 수 있습니다: 설정 › 멤버와 초대에서 보기',
+      '초대 관리와 새 링크 만들기는 데스크톱이나 웹에서 할 수 있습니다.',
     );
+    expect(elsewhere.props.children).not.toContain('에서 보기');
     // 누를 것이 아니다 — 없는 방으로 가는 버튼을 세우지 않는다.
     expect(
       within(screen.getByTestId('agent-card')).queryAllByRole('button'),
     ).toHaveLength(0);
+  });
+
+  it('목적지는 알아도 할 일을 모르는 행동에는 문장이 없다', () => {
+    // `webhook.create` 는 코어 표가 목적지를 안다. 그러나 이 빌드는 그 행동 뒤에
+    // 사람이 할 일을 문장으로 모른다 — 모르는 채 「데스크톱에서 하세요」라고
+    // 말하지 않는다.
+    renderResult({
+      action_id: 'webhook.create',
+      next: {label: '설정 › 웹훅에서 보기', href: '/settings?section=webhooks'},
+    });
+    expect(screen.queryByTestId('action-result-elsewhere')).toBeNull();
+    expect(screen.getByTestId('action-result-note')).toBeTruthy();
   });
 
   it('모르는 목적지(부록 B 원문 `section=invites`)에는 그 문장도 서지 않는다 — 웹 R1 H1', () => {

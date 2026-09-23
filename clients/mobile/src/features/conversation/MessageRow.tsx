@@ -105,7 +105,10 @@ import {
 /** 표가 없는 표면(측정 하네스·검색 미리보기)에서 매번 새 Map 을 짓지 않으려고. */
 const EMPTY_GATES: ReadonlyMap<string, ApprovalGate> = new Map();
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
-import {ApprovalDecision} from '../inbox/ApprovalDecision';
+import {
+  ApprovalDecision,
+  DEFAULT_DECISION_LEAD,
+} from '../inbox/ApprovalDecision';
 import {LinkOnce} from './LinkOnce';
 import {Sentence} from '../../design/atoms';
 import {AttachmentList} from '../attachments/AttachmentList';
@@ -998,13 +1001,17 @@ function CompletionReportCardView({
  *
  * 웹은 이 자리에 설정으로 가는 버튼을 세운다. **폰에는 그 설정 화면이 없다**
  * (`src/screens/` — 멤버·초대 관리 화면 부재). 없는 방으로 가는 문은 버튼이 아니라
- * 문장이다(`LoginHandoffCardView` 머리말과 같은 규율). 그래서 서버가 붙인 이름을
- * 그대로 들고 「데스크톱이나 웹에서 이어 갈 수 있습니다」라고 말한다.
+ * 문장이다(`LoginHandoffCardView` 머리말과 같은 규율). 문장은 이 앱의 다른 「여기서는
+ * 못 한다」 문장과 같은 모양이다 — **할 일을 이름으로** 말하고 「데스크톱에서 할 수
+ * 있습니다」로 끝난다(`SidebarScreen` 의 「채널 만들기와 멤버 추가는 …」). 앞 판은
+ * 서버의 버튼 캡션을 콜론 뒤에 옮겨 붙였고, 무엇을 이어 가는지 말하지 않았다
+ * (design-review M-4).
  *
- * 그 문장도 **목적지를 아는 경우에만** 선다. 웹이 모르는 섹션에 문을 세우지 않는
- * 것과 같은 fail-closed 다(웹 R1 H1): 부록 B 원문의 `?section=invites` 처럼 실물
- * 화면이 없는 주소를 「웹에서 볼 수 있다」고 말하면 거짓 안내다. 「아는 목적지」의
- * 표는 코어의 것을 쓴다(`actionDestination` — 팔레트가 같은 질문에 쓰는 그 표).
+ * 그 문장은 **목적지를 아는 경우에만** 선다. 판정은 웹과 방식이 다르다 — 웹은 설정
+ * 섹션 목록(`isReachableHref`)을, 폰은 코어의 행동→목적지 표(`actionDestination`,
+ * 팔레트가 같은 질문에 쓰는 표)를 묻는다. 오늘 `invite.create` 에서 두 답은 같고,
+ * 부록 B 원문의 `?section=invites` 처럼 실물 화면이 없는 주소에는 둘 다 아무것도
+ * 세우지 않는다(웹 R1 H1 의 fail-closed).
  *
  * 색은 웹과 같은 규칙이다. `role_required` 가 `warn` 인 것은 실패가 아니라 **때**의
  * 문제이기 때문이고(웹 `ACTION_RESULT_CHIP_CLASS` 독스트링), 폰에서는 그 역할을
@@ -1020,17 +1027,31 @@ const ACTION_RESULT_TONE: Readonly<
 };
 
 /**
- * 결과 카드의 「다음 길」 문장. 목적지를 모르면 `null` — 문장도 서지 않는다.
+ * 행동마다 「그다음 할 일」과 그 일을 하는 곳. 이 빌드가 문장을 아는 행동만.
  *
- * 서버의 이름(`next.label`)을 조사 없이 콜론 뒤에 둔다. 조사를 붙이려면 서버
- * 낱말의 끝소리를 읽어야 하는데, 그 이름은 이 빌드가 짓지 않은 문자열이다.
+ * 문장이 할 일을 이름으로 말하므로 행동마다 따로 적는다. 모르는 행동에는 문장이
+ * 없다 — 무엇을 이어 갈지 모르면서 「데스크톱에서 하세요」라고 말하지 않는다.
+ * 섹션 이름은 넣지 않는다: 데스크톱·웹에서는 **이 카드 자신이** 그 섹션으로 가는
+ * 문을 든다(`ActionResultBody` 의 `next`).
+ */
+const ACTION_RESULT_ELSEWHERE: Readonly<Record<string, string>> = {
+  'invite.create': '초대 관리와 새 링크 만들기는 데스크톱이나 웹에서 할 수 있습니다.',
+};
+
+/**
+ * 결과 카드의 「다음 길」 문장. 목적지를 모르거나 문장을 모르면 `null`.
  */
 export function actionResultElsewhereCopy(
   card: AgentActionResultCard,
 ): string | null {
   if (card.next === null) return null;
   if (actionDestination(card.actionId) !== card.next.href) return null;
-  return `데스크톱이나 웹에서 이어 갈 수 있습니다: ${card.next.label}`;
+  return Object.prototype.hasOwnProperty.call(
+    ACTION_RESULT_ELSEWHERE,
+    card.actionId,
+  )
+    ? ACTION_RESULT_ELSEWHERE[card.actionId]
+    : null;
 }
 
 /**
@@ -1136,6 +1157,39 @@ function ActionResultCardView({
           {elsewhere}
         </Sentence>
       ) : null}
+    </View>
+  );
+}
+
+/**
+ * 승인 카드의 아래쪽 — 컨트롤, 또는 그 자리에 선 영수증·1회 링크.
+ *
+ * **행동 승인에서만** 사실 표와 선 하나로 가른다 (#2513 design-review H-1·M-1).
+ * 행동 승인 카드는 사실 행이 다섯까지 서고, 그 바로 아래에 같은 간격으로 영수증이나
+ * 버튼이 오면 「무엇이 기록됐고 지금 무엇을 하는가」가 여섯째 사실 행처럼 읽힌다.
+ * 웹이 같은 자리를 `border-t border-line` 으로 가르는 것과 같은 선이다(`--line`
+ * 은 폰 `border` — 선이지 컨트롤이 아니다).
+ *
+ * 도구 호출 승인은 **한 픽셀도 바꾸지 않는다**. 거기는 사실 표가 없어 가를 것이
+ * 없고, 바꾸면 그 카드의 기존 캡처들이 낡은 증언이 된다(`measure/surfaces.tsx`
+ * 머리말의 규율). 할 말이 없으면(`children` 이 비면) 선도 서지 않는다.
+ */
+function ApprovalFooter({
+  isAction,
+  styles,
+  children,
+}: {
+  isAction: boolean;
+  styles: ReturnType<typeof buildStyles>;
+  children: React.ReactNode;
+}): React.JSX.Element | null {
+  if (children === null || children === undefined || children === false) {
+    return null;
+  }
+  if (!isAction) return <>{children}</>;
+  return (
+    <View style={styles.actionFooter} testID="approval-action-footer">
+      {children}
     </View>
   );
 }
@@ -1319,6 +1373,7 @@ function AgentCard({
             `null` 은 「할 말이 없다」가 아니라 **「컨트롤이 선다」**이다. 그래서
             아래 갈래가 셋이다: 문장 / 컨트롤 / (둘 다 아님 — 재개 제안).
             ===================================================================== */}
+        <ApprovalFooter isAction={card.action !== null} styles={styles}>
         {note !== null ? (
           <>
             <Text
@@ -1351,6 +1406,10 @@ function AgentCard({
                 ? roleRequiredCopy(card.action.requiredRole)
                 : null
             }
+            // 누가 결정할 수 있는지는 행동 승인에서 사실 행(「결정 권한」)이
+            // 이미 말한다. 컨트롤이 「회원님의 허가」를 다시 단정하면 그 행과
+            // 부딪친다(design-review H-1) — 행동 승인은 머리 문장을 세우지 않는다.
+            lead={card.action !== null ? null : DEFAULT_DECISION_LEAD}
             /* 호스트 후보는 **카드 스냅샷**에서 온다(이슈 1114). 위 주석의 규율과
                어긋나 보이지만 아니다: 그 규율은 시계가 움직이면 바뀌는 사실
                (만료·이미 결정됨)을 원장에서 읽으라는 것이고, 후보 목록은 승인이
@@ -1365,6 +1424,7 @@ function AgentCard({
             testIDPrefix={`card-approval-${approval.approvalId}`}
           />
         ) : null}
+        </ApprovalFooter>
       </View>
     );
   }
@@ -3489,6 +3549,12 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // 선언해야 한 줄로 읽힌다 — RN 은 줄 상자 가운데에 글자를 놓고 컨테이너를
   // 건너뛰는 기준선 정렬이 없다(`tokens.ts` 의 `line` 머리말).
   factRows: {gap: space.xs, paddingTop: space.xs},
+  actionFooter: {
+    marginTop: space.xs,
+    paddingTop: space.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: color.border,
+  },
   factRow: {flexDirection: 'row', gap: space.sm},
   factLabel: {
     fontSize: font.meta,

@@ -77,6 +77,16 @@ export const CONFIRM_GUARD_MS = 400;
  */
 type NoticeTone = 'error' | 'quiet';
 
+/**
+ * 컨트롤 머리의 기본 문장. 인박스와 도구 호출 승인 카드가 쓴다.
+ *
+ * 「회원님의 허가」는 **누구나 결정할 수 있는** 승인에서만 참이다 — 도구 호출
+ * 승인은 채널의 사람 멤버면 누구나 결정한다(ADR-0186 §1.2). 역할이 걸린 행동
+ * 승인에서 이 문장은 바로 위 「관리자만 승인할 수 있습니다」와 정면으로 부딪친다
+ * (#2513 design-review H-1). 그래서 호출자가 바꾸거나 뺄 수 있다(`lead`).
+ */
+export const DEFAULT_DECISION_LEAD = '실행 전에 회원님의 허가가 필요합니다.';
+
 export function ApprovalDecision({
   approvalId,
   reversible = false,
@@ -87,6 +97,7 @@ export function ApprovalDecision({
   initialArmed = null,
   approveConfirm = null,
   forbiddenCopy = null,
+  lead = DEFAULT_DECISION_LEAD,
 }: {
   approvalId: string;
   /**
@@ -170,6 +181,16 @@ export function ApprovalDecision({
    * 뜻할 수 있는 것은 그것 하나다.
    */
   forbiddenCopy?: string | null;
+  /**
+   * 버튼 위 머리 문장. `null` 이면 세우지 않는다 (#2513 design-review H-1).
+   *
+   * 행동 승인 카드는 누가 결정할 수 있는지를 이미 사실 행(「결정 권한」)으로
+   * 말한다. 그 아래에서 컨트롤이 읽는 사람의 권한을 다시 단정하면 — 기본 문장은
+   * 「회원님의 허가가 필요합니다」다 — 카드가 한 화면에서 두 가지를 말하고, 403
+   * 뒤에는 「관리자가 승인해야 합니다」까지 세 문장이 서로를 반박한다. 웹의
+   * `ApprovalActions` 가 같은 칸(`lead`)을 호출자에게 열어 둔 것과 같은 모양이다.
+   */
+  lead?: string | null;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {workspaceId} = useSession();
@@ -296,7 +317,7 @@ export function ApprovalDecision({
   if (armed === null) {
     return (
       <View style={styles.bar} testID={`${testIDPrefix}-actions`}>
-        <Text style={styles.lead}>실행 전에 회원님의 허가가 필요합니다.</Text>
+        {lead !== null ? <Sentence style={styles.lead}>{lead}</Sentence> : null}
         {execution !== null ? (
           <SpawnHostChoice
             plan={execution}
@@ -370,7 +391,7 @@ export function ApprovalDecision({
 
   return (
     <View style={styles.bar} testID={`${testIDPrefix}-confirm`}>
-      <Text style={styles.consequence}>{consequence}</Text>
+      <Sentence style={styles.consequence}>{consequence}</Sentence>
       {/* 픽커는 확정 화면에서도 자리를 지킨다. 사라지면 사람은 자기가 무엇을 고른
           채 확정하는지 볼 수 없고, 확인이 판단의 근거 옆에 있어야 한다는 이 파일의
           원칙이 무너진다. 대신 잠긴다 — 확정 문장이 이미 목적지를 말했고, 그 아래에서
@@ -424,15 +445,15 @@ export function ApprovalDecision({
         </Pressable>
       </View>
       {tooFast ? (
-        <Text style={styles.hint} testID={`${testIDPrefix}-too-fast`}>
+        <Sentence style={styles.hint} testID={`${testIDPrefix}-too-fast`}>
           방금 누른 탭과 이어진 동작이라 보내지 않았습니다. 문장을 확인하고 다시
           누르세요.
-        </Text>
+        </Sentence>
       ) : null}
       {errorCopy !== null ? (
-        <Text style={styles.error} testID={`${testIDPrefix}-error`}>
+        <Sentence style={styles.error} testID={`${testIDPrefix}-error`}>
           {errorCopy}
-        </Text>
+        </Sentence>
       ) : null}
     </View>
   );
