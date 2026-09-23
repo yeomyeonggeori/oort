@@ -23,6 +23,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
@@ -1793,4 +1794,83 @@ async fn the_stub_archive_spends_an_upload_url_on_its_first_put() {
     let fixture = seed(&su, &app_pool).await;
     let base = start_server(app_pool.clone()).await;
     a_replayed_upload_url_must_not_touch_published_bytes(&base, &fixture).await;
+}
+
+/// **Red proof (#2615).** An upload URL presented after its session lifetime
+/// is refused over HTTP by both archives, and nothing it carried lands —
+/// completion still finds no file and the row stays `pending`. The archives
+/// are minted with a zero lifetime so the proof does not wait out
+/// `UPLOAD_SESSION_TTL`.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn an_expired_upload_url_is_refused_by_both_archives() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let dir = ArchiveDir::new("expired");
+    let dir_str = dir.path();
+    let (local, _local_archive) = start_server_with(app_pool.clone(), move |base| {
+        Arc::new(
+            LocalDriveArchive::open(Some(dir_str.as_str()), &base)
+                .expect("local archive")
+                .with_upload_session_ttl(Duration::ZERO),
+        )
+    })
+    .await;
+    let (stub, _stub_archive) = start_server_with(app_pool.clone(), |base| {
+        Arc::new(StubDriveArchive::new(&base).with_upload_session_ttl(Duration::ZERO))
+    })
+    .await;
+
+    for (label, base) in [("local", local), ("stub", stub)] {
+        let http = reqwest::Client::new();
+        let alice = login(&http, &base, fixture.workspace, &fixture.alice).await;
+        const BYTES: &[u8] = b"too-late";
+        let created = http
+            .post(uploads_url(&base, fixture.workspace, fixture.channel))
+            .bearer_auth(&alice)
+            .json(&json!({"name": "late.txt", "mime": "text/plain", "size": BYTES.len()}))
+            .send()
+            .await
+            .expect("create upload");
+        assert_eq!(created.status(), 201, "{label}");
+        let created: Value = created.json().await.expect("body");
+        let attachment_id = created["id"].as_str().expect("id").to_string();
+        let upload_url = created["uploadUrl"].as_str().expect("uploadUrl");
+
+        let late = http
+            .put(upload_url)
+            .header(reqwest::header::CONTENT_TYPE, "text/plain")
+            .body(BYTES.to_vec())
+            .send()
+            .await
+            .expect("late put");
+        assert!(
+            matches!(late.status().as_u16(), 404 | 410),
+            "{label}: an expired upload URL must be refused, got {}",
+            late.status()
+        );
+
+        let completed = http
+            .post(format!(
+                "{base}/v1/workspaces/{}/channels/{}/attachments/{attachment_id}/complete",
+                fixture.workspace, fixture.channel
+            ))
+            .bearer_auth(&alice)
+            .send()
+            .await
+            .expect("complete");
+        assert_eq!(
+            completed.status(),
+            404,
+            "{label}: the refused bytes never reached the archive"
+        );
+        let status: String = sqlx::query_scalar("SELECT status FROM attachment WHERE id = $1")
+            .bind(Uuid::parse_str(&attachment_id).expect("uuid"))
+            .fetch_one(&su)
+            .await
+            .expect("row");
+        assert_eq!(status, "pending", "{label}: nothing completed");
+    }
 }

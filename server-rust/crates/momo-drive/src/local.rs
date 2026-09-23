@@ -9,10 +9,19 @@
 //! Restart-surviving (unlike the stub): sessions and objects are files, so a
 //! deployed environment may select this backend. A missing directory is
 //! created at open; an unwritable one is a boot error, not a silent 503.
+//!
+//! A session file is a **single-use capability with a deadline** (#2615): the
+//! first accepted upload deletes it before a byte is written, and it carries
+//! its own `expires_at_ms` so the deadline survives a restart. A session file
+//! with no deadline was written before #2615 — every completed upload left one
+//! behind — and is refused, never treated as immortal. An object that has
+//! landed is never overwritten through a session, whatever brought that
+//! session back (a volume restored from a backup taken mid-upload).
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -22,7 +31,7 @@ use uuid::Uuid;
 
 use crate::{
     nonempty, uploaded_size_refusal, valid_drive_id, DriveArchive, DriveContent, DriveError,
-    DriveFile, DriveUploadSession, MAX_ATTACHMENT_BYTES,
+    DriveFile, DriveUploadSession, MAX_ATTACHMENT_BYTES, UPLOAD_SESSION_TTL,
 };
 
 const OBJECTS_DIR: &str = "objects";
@@ -37,11 +46,32 @@ struct StoredMeta {
     size_bytes: i64,
 }
 
+/// One `sessions/{token}` file: what the upload must look like, and until when
+/// the token may deliver it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PendingSession {
+    file_id: String,
+    name: String,
+    mime: String,
+    size_bytes: i64,
+    /// Wall-clock deadline, Unix epoch milliseconds. `None` only in a file an
+    /// older binary wrote, which is refused as expired.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expires_at_ms: Option<i64>,
+}
+
+impl PendingSession {
+    fn expired(&self, now_ms: i64) -> bool {
+        self.expires_at_ms.is_none_or(|deadline| now_ms >= deadline)
+    }
+}
+
 /// Filesystem archive keyed by opaque ids.
 #[derive(Debug)]
 pub struct LocalDriveArchive {
     root: PathBuf,
     base_url: String,
+    session_ttl: Duration,
     lock: Mutex<()>,
 }
 
@@ -53,8 +83,17 @@ impl LocalDriveArchive {
         Ok(LocalDriveArchive {
             root,
             base_url: base_url.trim_end_matches('/').to_string(),
+            session_ttl: UPLOAD_SESSION_TTL,
             lock: Mutex::new(()),
         })
+    }
+
+    /// Replace [`UPLOAD_SESSION_TTL`] for sessions this instance mints.
+    /// Verifiers pass `Duration::ZERO` to prove an expired capability is
+    /// refused without waiting out the real lifetime.
+    pub fn with_upload_session_ttl(mut self, ttl: Duration) -> LocalDriveArchive {
+        self.session_ttl = ttl;
+        self
     }
 
     /// Remove a stored object. Not on [`DriveArchive`]: v0 routes never delete.
@@ -184,6 +223,18 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), DriveError> {
     })
 }
 
+/// Wall clock in Unix epoch milliseconds — the unit a session file stores, so
+/// a deadline outlives the process that set it.
+fn epoch_ms_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_millis().min(i64::MAX as u128) as i64)
+}
+
+fn duration_ms(duration: Duration) -> i64 {
+    duration.as_millis().min(i64::MAX as u128) as i64
+}
+
 fn read_meta(root: &Path, file_id: &str) -> Result<StoredMeta, DriveError> {
     let path = meta_path(root, file_id)?;
     refuse_symlink(&path)?;
@@ -210,19 +261,15 @@ impl DriveArchive for LocalDriveArchive {
         let _guard = self.lock.lock().await;
         let token = Uuid::new_v4().to_string().to_lowercase();
         let file_id = format!("local-{}", Uuid::new_v4().to_string().to_lowercase());
-        let pending = StoredMeta {
+        let pending = PendingSession {
+            file_id: file_id.clone(),
             name: name.to_string(),
             mime: mime.to_string(),
             size_bytes,
+            expires_at_ms: Some(epoch_ms_now().saturating_add(duration_ms(self.session_ttl))),
         };
         let session = session_path(&self.root, &token)?;
-        let body = serde_json::to_vec(&serde_json::json!({
-            "file_id": file_id,
-            "name": pending.name,
-            "mime": pending.mime,
-            "size_bytes": pending.size_bytes,
-        }))
-        .map_err(|_| DriveError::UpstreamFailure)?;
+        let body = serde_json::to_vec(&pending).map_err(|_| DriveError::UpstreamFailure)?;
         atomic_write(&session, &body)?;
         // Boot-time assembly only. When `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL` is
         // `same-origin`, momo-server rewrites this URL from the request's
@@ -284,45 +331,47 @@ impl DriveArchive for LocalDriveArchive {
         let _guard = self.lock.lock().await;
         let session = session_path(&self.root, token)?;
         let raw = fs::read(&session).map_err(|_| DriveError::FileNotFound)?;
-        let pending: serde_json::Value =
+        let pending: PendingSession =
             serde_json::from_slice(&raw).map_err(|_| DriveError::FileNotFound)?;
-        let file_id = pending
-            .get("file_id")
-            .and_then(|v| v.as_str())
-            .ok_or(DriveError::FileNotFound)?;
-        let declared_mime = pending
-            .get("mime")
-            .and_then(|v| v.as_str())
-            .ok_or(DriveError::FileNotFound)?;
-        let declared_size = pending
-            .get("size_bytes")
-            .and_then(|v| v.as_i64())
-            .ok_or(DriveError::FileNotFound)?;
-        let name = pending
-            .get("name")
-            .and_then(|v| v.as_str())
-            .ok_or(DriveError::FileNotFound)?;
+        let object = object_path(&self.root, &pending.file_id)?;
+        let meta = meta_path(&self.root, &pending.file_id)?;
+        let landed = object.exists() || meta.exists();
+        if pending.expired(epoch_ms_now()) || landed {
+            // A capability that can no longer be used is forgotten with its
+            // refusal, and the refusal is the unknown-token one.
+            let _ = fs::remove_file(&session);
+            return Err(DriveError::FileNotFound);
+        }
         let measured = bytes.len() as i64;
-        if let Some(error) = uploaded_size_refusal(declared_size, measured) {
+        if let Some(error) = uploaded_size_refusal(pending.size_bytes, measured) {
             return Err(error);
         }
         if let Some(mime) = mime {
-            if !mime.is_empty() && mime != declared_mime {
+            if !mime.is_empty() && mime != pending.mime {
                 return Err(DriveError::InvalidArguments(
                     "uploaded mime does not match the session".into(),
                 ));
             }
         }
-        let object = object_path(&self.root, file_id)?;
-        let meta = meta_path(&self.root, file_id)?;
-        atomic_write(&object, &bytes)?;
         let stored = StoredMeta {
-            name: name.to_string(),
-            mime: declared_mime.to_string(),
+            name: pending.name,
+            mime: pending.mime,
             size_bytes: measured,
         };
         let meta_bytes = serde_json::to_vec(&stored).map_err(|_| DriveError::UpstreamFailure)?;
-        atomic_write(&meta, &meta_bytes)?;
+        // Spend the capability BEFORE a byte is stored. The other order leaves
+        // a window — a failed delete, a crash — in which the bytes have landed
+        // and the URL still opens; this order fails closed: a storage failure
+        // costs the client a new session, which is how every client retries.
+        fs::remove_file(&session).map_err(|_| DriveError::UpstreamFailure)?;
+        if let Err(error) =
+            atomic_write(&object, &bytes).and_then(|()| atomic_write(&meta, &meta_bytes))
+        {
+            // Nothing half-landed stays behind a spent session.
+            let _ = fs::remove_file(&object);
+            let _ = fs::remove_file(&meta);
+            return Err(error);
+        }
         Ok(())
     }
 }
@@ -622,13 +671,6 @@ mod tests {
         archive.root.join(SESSIONS_DIR).join(token)
     }
 
-    fn epoch_ms_now() -> i64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("clock after 1970")
-            .as_millis() as i64
-    }
-
     /// Rewrite one field of a session file the way an old binary, a restored
     /// backup or the passage of time would have left it.
     fn edit_session(
@@ -670,6 +712,10 @@ mod tests {
             .accept_stub_upload(&token, Some("text/plain"), b"hello".to_vec())
             .await
             .expect("first upload");
+        assert!(
+            !session_file(&archive, &token).exists(),
+            "the upload that landed spent the session: its file is gone"
+        );
 
         // Same mime, same length: the only shape the old checks let through.
         let replay = archive
@@ -681,11 +727,6 @@ mod tests {
             (Err(DriveError::FileNotFound), "hello".to_string()),
             "a spent capability must answer not-found and leave the landed bytes alone"
         );
-        assert!(
-            !session_file(&archive, &token).exists(),
-            "the session file is removed by the upload that spent it"
-        );
-
         // Restart-surviving backend: a fresh process over the same volume
         // must not find the capability either.
         let reopened = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9").expect("reopen");
@@ -833,6 +874,96 @@ mod tests {
             DriveError::FileNotFound
         );
         assert!(!session_file(&archive, &token).exists());
+    }
+
+    /// Every session this binary mints carries the shared deadline — without
+    /// it the legacy refusal above would turn away every upload.
+    #[tokio::test]
+    async fn a_minted_session_carries_the_shared_deadline() {
+        let (dir, _guard) = temp_root();
+        let archive = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9").expect("open");
+        assert_eq!(archive.session_ttl, UPLOAD_SESSION_TTL);
+        let before = epoch_ms_now();
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "note.txt", "text/plain", 5)
+            .await
+            .expect("session");
+        let after = epoch_ms_now();
+        let stored: PendingSession = serde_json::from_slice(
+            &fs::read(session_file(&archive, &token_from(&session))).expect("session file"),
+        )
+        .expect("session json");
+        let ttl = duration_ms(UPLOAD_SESSION_TTL);
+        let deadline = stored.expires_at_ms.expect("a deadline is written");
+        assert!(
+            (before + ttl..=after + ttl).contains(&deadline),
+            "deadline {deadline} is not mint time + {ttl} ms ({before}..={after})"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_zero_lifetime_session_is_born_expired() {
+        let (dir, _guard) = temp_root();
+        let archive = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9")
+            .expect("open")
+            .with_upload_session_ttl(Duration::ZERO);
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "note.txt", "text/plain", 5)
+            .await
+            .expect("session");
+        assert_eq!(
+            archive
+                .accept_stub_upload(&token_from(&session), Some("text/plain"), b"hello".to_vec())
+                .await
+                .expect_err("expired on arrival"),
+            DriveError::FileNotFound
+        );
+    }
+
+    /// Fail closed: the capability is spent before a byte is stored, so a
+    /// storage failure can never leave landed bytes behind a live URL. The
+    /// failure is forced by squatting a directory on the temp name
+    /// `atomic_write` needs — first for the object, then for its metadata.
+    #[tokio::test]
+    async fn a_storage_failure_spends_the_capability_and_leaves_nothing_behind() {
+        for blocked_suffix in [".tmp", ".meta.tmp"] {
+            let (dir, _guard) = temp_root();
+            let archive =
+                LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9").expect("open");
+            let session = archive
+                .create_resumable_upload(Uuid::nil(), "note.txt", "text/plain", 5)
+                .await
+                .expect("session");
+            let token = token_from(&session);
+            let objects = archive.root.join(OBJECTS_DIR);
+            fs::create_dir(objects.join(format!("{}{blocked_suffix}", session.drive_file_id)))
+                .expect("squat the temp name");
+
+            assert_eq!(
+                archive
+                    .accept_stub_upload(&token, Some("text/plain"), b"hello".to_vec())
+                    .await
+                    .expect_err("storage fails"),
+                DriveError::UpstreamFailure,
+                "blocked {blocked_suffix}"
+            );
+            assert!(
+                !session_file(&archive, &token).exists(),
+                "blocked {blocked_suffix}: the session was spent before storage was attempted"
+            );
+            assert!(
+                !objects.join(&session.drive_file_id).exists(),
+                "blocked {blocked_suffix}: no half-landed object stays behind"
+            );
+            assert_eq!(
+                archive
+                    .accept_stub_upload(&token, Some("text/plain"), b"hello".to_vec())
+                    .await
+                    .expect_err("the client starts a new session"),
+                DriveError::FileNotFound,
+                "blocked {blocked_suffix}"
+            );
+        }
     }
 
     /// The retry policy: a PUT the archive refuses before storing anything

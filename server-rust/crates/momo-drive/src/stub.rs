@@ -14,6 +14,11 @@
 //!    [`DriveError::FileNotFound`] until an upload lands, which is what makes
 //!    "complete before uploading" a 404 in tests exactly as it is against Drive.
 //!
+//! And one is added (#2615): **the upload URL is spent by its first accepted
+//! upload and expires after [`UPLOAD_SESSION_TTL`]**, the contract
+//! [`DriveArchive::accept_stub_upload`] states. Sessions and landed objects are
+//! therefore two maps — a session can leave without taking the bytes with it.
+//!
 //! `file_metadata` reports the declared name/mime and the **measured** byte
 //! count once bytes have landed (a `size: 0` session is unknown, not a promise
 //! of an empty file). A verifier that needs the completion route's mismatch
@@ -21,6 +26,7 @@
 //! will not invent a size that contradicts the bytes it accepted.
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -29,37 +35,66 @@ use uuid::Uuid;
 
 use crate::{
     uploaded_size_refusal, DriveArchive, DriveContent, DriveError, DriveFile, DriveUploadSession,
-    MAX_ATTACHMENT_BYTES,
+    MAX_ATTACHMENT_BYTES, UPLOAD_SESSION_TTL,
 };
 
+/// A capability that has not been spent yet.
 #[derive(Debug, Clone)]
 struct PendingUpload {
     file_id: String,
     name: String,
     mime: String,
     size_bytes: i64,
-    bytes: Option<Vec<u8>>,
+    created_at: Instant,
+}
+
+/// Bytes that landed, with the declaration they landed against.
+#[derive(Debug, Clone)]
+struct StoredObject {
+    name: String,
+    mime: String,
+    bytes: Vec<u8>,
 }
 
 /// In-memory archive keyed by capability token.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct StubDriveArchive {
     base_url: String,
+    session_ttl: Duration,
     state: Mutex<StubState>,
+}
+
+impl Default for StubDriveArchive {
+    /// Written out rather than derived: a derived `Duration` would be zero and
+    /// every session would be born expired.
+    fn default() -> StubDriveArchive {
+        StubDriveArchive::new("")
+    }
 }
 
 #[derive(Debug, Default)]
 struct StubState {
+    /// Live capabilities by token. One leaves on its first accepted upload,
+    /// or when it is presented after expiring.
     sessions: HashMap<String, PendingUpload>,
-    file_token: HashMap<String, String>,
+    /// Landed bytes by file id. Written once; no token reaches them again.
+    objects: HashMap<String, StoredObject>,
 }
 
 impl StubDriveArchive {
     pub fn new(base_url: &str) -> StubDriveArchive {
         StubDriveArchive {
             base_url: base_url.trim_end_matches('/').to_string(),
+            session_ttl: UPLOAD_SESSION_TTL,
             state: Mutex::new(StubState::default()),
         }
+    }
+
+    /// Replace [`UPLOAD_SESSION_TTL`]. Verifiers pass `Duration::ZERO` to prove
+    /// an expired capability is refused without waiting out the real lifetime.
+    pub fn with_upload_session_ttl(mut self, ttl: Duration) -> StubDriveArchive {
+        self.session_ttl = ttl;
+        self
     }
 }
 
@@ -91,10 +126,9 @@ impl DriveArchive for StubDriveArchive {
                 name: name.to_string(),
                 mime: mime.to_string(),
                 size_bytes,
-                bytes: None,
+                created_at: Instant::now(),
             },
         );
-        state.file_token.insert(file_id.clone(), token.clone());
         Ok(DriveUploadSession {
             drive_file_id: file_id,
             upload_url: format!("{}/__momo_stub/drive/uploads/{token}", self.base_url),
@@ -103,22 +137,12 @@ impl DriveArchive for StubDriveArchive {
 
     async fn file_metadata(&self, file_id: &str) -> Result<DriveFile, DriveError> {
         let state = self.state.lock().await;
-        let pending = state
-            .file_token
-            .get(file_id)
-            .and_then(|token| state.sessions.get(token))
-            .filter(|pending| pending.bytes.is_some())
-            .ok_or(DriveError::FileNotFound)?;
-        let size_bytes = pending
-            .bytes
-            .as_ref()
-            .expect("filtered to landed bytes")
-            .len() as i64;
+        let object = state.objects.get(file_id).ok_or(DriveError::FileNotFound)?;
         Ok(DriveFile {
-            drive_file_id: pending.file_id.clone(),
-            name: pending.name.clone(),
-            mime: pending.mime.clone(),
-            size_bytes,
+            drive_file_id: file_id.to_string(),
+            name: object.name.clone(),
+            mime: object.mime.clone(),
+            size_bytes: object.bytes.len() as i64,
         })
     }
 
@@ -128,16 +152,12 @@ impl DriveArchive for StubDriveArchive {
         max_bytes: i64,
     ) -> Result<DriveContent, DriveError> {
         let state = self.state.lock().await;
-        let pending = state
-            .file_token
-            .get(file_id)
-            .and_then(|token| state.sessions.get(token))
-            .ok_or(DriveError::FileNotFound)?;
-        let bytes = pending.bytes.clone().ok_or(DriveError::FileNotFound)?;
-        if bytes.len() as i64 > max_bytes {
+        let object = state.objects.get(file_id).ok_or(DriveError::FileNotFound)?;
+        if object.bytes.len() as i64 > max_bytes {
             return Err(DriveError::ContentTooLarge);
         }
-        let mime = pending.mime.clone();
+        let bytes = object.bytes.clone();
+        let mime = object.mime.clone();
         let size_bytes = bytes.len() as i64;
         Ok(DriveContent {
             mime,
@@ -153,10 +173,20 @@ impl DriveArchive for StubDriveArchive {
         bytes: Vec<u8>,
     ) -> Result<(), DriveError> {
         let mut state = self.state.lock().await;
-        let pending = state
-            .sessions
-            .get_mut(token)
-            .ok_or(DriveError::FileNotFound)?;
+        let (expired, landed) = match state.sessions.get(token) {
+            None => return Err(DriveError::FileNotFound),
+            Some(pending) => (
+                pending.created_at.elapsed() >= self.session_ttl,
+                state.objects.contains_key(&pending.file_id),
+            ),
+        };
+        if expired || landed {
+            // A capability that can no longer be used is forgotten with its
+            // refusal, and the refusal is the unknown-token one.
+            state.sessions.remove(token);
+            return Err(DriveError::FileNotFound);
+        }
+        let pending = &state.sessions[token];
         if let Some(error) = uploaded_size_refusal(pending.size_bytes, bytes.len() as i64) {
             return Err(error);
         }
@@ -167,7 +197,20 @@ impl DriveArchive for StubDriveArchive {
                 ));
             }
         }
-        pending.bytes = Some(bytes);
+        // Spent by this upload: the token leaves in the same critical section
+        // that stores the bytes, so no second PUT can ever find it.
+        let pending = state
+            .sessions
+            .remove(token)
+            .expect("the session was read under this lock");
+        state.objects.insert(
+            pending.file_id,
+            StoredObject {
+                name: pending.name,
+                mime: pending.mime,
+                bytes,
+            },
+        );
         Ok(())
     }
 }
@@ -313,6 +356,10 @@ mod tests {
             .accept_stub_upload(token, Some("text/plain"), b"hello".to_vec())
             .await
             .expect("first upload");
+        assert!(
+            !archive.state.lock().await.sessions.contains_key(token),
+            "the upload that landed spent the session"
+        );
 
         let replay = archive
             .accept_stub_upload(token, Some("text/plain"), b"HACKD".to_vec())
@@ -329,6 +376,107 @@ mod tests {
             (Err(DriveError::FileNotFound), "hello".to_string()),
             "a spent capability must answer not-found and leave the landed bytes alone"
         );
+    }
+
+    /// A session that reappears for an object that already landed — the
+    /// local archive's restored-backup case, reproduced here by hand — still
+    /// cannot overwrite it.
+    #[tokio::test]
+    async fn a_resurrected_session_cannot_overwrite_an_object_that_landed() {
+        let archive = StubDriveArchive::new("http://127.0.0.1:9");
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "contract.txt", "text/plain", 5)
+            .await
+            .expect("session");
+        let token = session.upload_url.rsplit('/').next().expect("token");
+        let saved = archive.state.lock().await.sessions[token].clone();
+        archive
+            .accept_stub_upload(token, Some("text/plain"), b"hello".to_vec())
+            .await
+            .expect("first upload");
+        archive
+            .state
+            .lock()
+            .await
+            .sessions
+            .insert(token.to_string(), saved);
+        assert_eq!(
+            archive
+                .accept_stub_upload(token, Some("text/plain"), b"HACKD".to_vec())
+                .await
+                .expect_err("an object that landed is never replaced"),
+            DriveError::FileNotFound
+        );
+        let content = archive
+            .file_content(&session.drive_file_id, 1024)
+            .await
+            .expect("content");
+        assert_eq!(collect(content).await, b"hello");
+    }
+
+    #[tokio::test]
+    async fn an_expired_capability_is_refused_and_forgotten() {
+        let archive =
+            StubDriveArchive::new("http://127.0.0.1:9").with_upload_session_ttl(Duration::ZERO);
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "note.txt", "text/plain", 5)
+            .await
+            .expect("session");
+        let token = session.upload_url.rsplit('/').next().expect("token");
+        assert_eq!(
+            archive
+                .accept_stub_upload(token, Some("text/plain"), b"hello".to_vec())
+                .await
+                .expect_err("expired"),
+            DriveError::FileNotFound
+        );
+        assert_eq!(
+            archive
+                .file_metadata(&session.drive_file_id)
+                .await
+                .expect_err("no bytes landed"),
+            DriveError::FileNotFound
+        );
+        assert!(archive.state.lock().await.sessions.is_empty());
+    }
+
+    #[test]
+    fn the_default_lifetime_is_the_shared_one() {
+        assert_eq!(StubDriveArchive::default().session_ttl, UPLOAD_SESSION_TTL);
+        assert_eq!(StubDriveArchive::new("x").session_ttl, UPLOAD_SESSION_TTL);
+    }
+
+    /// The retry policy: a PUT refused before storage leaves the capability
+    /// usable, like a Google resumable session that has not received its bytes.
+    #[tokio::test]
+    async fn a_refused_upload_does_not_spend_the_capability() {
+        let archive = StubDriveArchive::new("http://127.0.0.1:9");
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "note.txt", "text/plain", 5)
+            .await
+            .expect("session");
+        let token = session.upload_url.rsplit('/').next().expect("token");
+        assert!(matches!(
+            archive
+                .accept_stub_upload(token, Some("text/plain"), b"too long".to_vec())
+                .await,
+            Err(DriveError::InvalidArguments(_))
+        ));
+        assert!(matches!(
+            archive
+                .accept_stub_upload(token, Some("image/png"), b"hello".to_vec())
+                .await,
+            Err(DriveError::InvalidArguments(_))
+        ));
+        archive
+            .accept_stub_upload(token, Some("text/plain"), b"hello".to_vec())
+            .await
+            .expect("the corrected upload lands");
+        let content = archive
+            .file_content(&session.drive_file_id, 1024)
+            .await
+            .expect("content");
+        assert_eq!(collect(content).await, b"hello");
     }
 
     #[tokio::test]
