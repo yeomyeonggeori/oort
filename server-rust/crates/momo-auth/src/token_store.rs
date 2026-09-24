@@ -209,8 +209,18 @@ pub enum RegistrationSession {
 ///   * logout first → this read waits, re-reads the committed row, and sees
 ///     `revoked_at` set → [`RegistrationSession::Ended`].
 ///
-/// Either order leaves no live registration under a dead session. One row, so
-/// it cannot invert the id-ordered multi-row locks logout and refresh share.
+/// That holds for the access row the logout itself revokes — and only that
+/// row. A plain rotation does not revoke the access half it replaces, so an
+/// OLDER access token of the same lineage still authenticates for the rest of
+/// its 15 minutes after the logout has ended the lineage. It finds its own row
+/// live here and binds a new registration to the dead lineage (review L1,
+/// measured as REVIEW-R3). Not a regression — before #2677 every registration
+/// outlived its session for good — but not closed either: that needs a lineage
+/// liveness check in this lock, or lineage-wide access revocation at logout
+/// (a token-model change, so an ADR). Follow-up #2696.
+///
+/// One row, so it cannot invert the id-ordered multi-row locks logout and
+/// refresh share.
 const LOCK_SESSION_FOR_REGISTRATION_SQL: &str = "SELECT session_id, \
             revoked_at IS NOT NULL AS revoked \
        FROM token \
