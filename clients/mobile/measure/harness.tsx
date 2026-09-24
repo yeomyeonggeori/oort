@@ -182,11 +182,6 @@ const THREAD_ROOT = makeShortMessage(THREAD_ROOT_SEQ);
 const wait = (ms: number) => new Promise<void>(r => setTimeout(() => r(), ms));
 
 /**
- * The Korean keyboard's height on an iPhone 17 Pro, in points. Used only when
- * the simulator refuses to raise the real one; on a device the OS supplies the
- * number and this constant is never read.
- */
-/**
  * How far past the composer's top edge the sent row's last pixel may sit and
  * still count as on screen, in points (#2586 R1 H-1). Half a point is the
  * rounding between two `measureInWindow` readings of neighbouring views — the
@@ -194,6 +189,19 @@ const wait = (ms: number) => new Promise<void>(r => setTimeout(() => r(), ms));
  */
 const VISIBLE_SLOP_PX = 0.5;
 
+/**
+ * When the second 「세 화면 뒤」 reading is taken, in ms after the first (#2654
+ * R2 N-5). The first lands inside the landing hold (`Timeline.tsx`
+ * `LANDING_HOLD_MS` 600, from release + 50ms), where the hold is still putting
+ * the list back; this one lands after it, on the list as it rests.
+ */
+const AFTER_HOLD_MS = 900;
+
+/**
+ * The Korean keyboard's height on an iPhone 17 Pro, in points. Used only when
+ * the simulator refuses to raise the real one; on a device the OS supplies the
+ * number and this constant is never read.
+ */
 const KEYBOARD_HEIGHT_PT = 336;
 
 /**
@@ -468,6 +476,13 @@ interface Results {
   /** Judged on the sent row's last pixel, like `selfSendVisible` (R1 H-1). */
   nearSendVisible: boolean | null;
   nearSentBottomY: number | null;
+  /**
+   * The same verdict read again once the landing hold is over (#2654 R2 N-5) —
+   * the first reading is inside it. A list the hold was still pinning passes
+   * the first and fails this one.
+   */
+  nearSendRestVisible: boolean | null;
+  nearSentRestBottomY: number | null;
   /** How far from the end it started, so the number has a scale. */
   nearSendFromPx: number | null;
   /**
@@ -555,6 +570,8 @@ const EMPTY: Results = {
   nearSendGapPx: null,
   nearSendVisible: null,
   nearSentBottomY: null,
+  nearSendRestVisible: null,
+  nearSentRestBottomY: null,
   nearSendFromPx: null,
   dismissOffsetShiftPx: null,
   dismissAnchorShiftPx: null,
@@ -1030,6 +1047,22 @@ function Harness(): React.JSX.Element {
           nearSendVisible: next.nearSendVisible,
           nearSentBottomY: next.nearSentBottomY,
           nearSendFromPx: next.nearSendFromPx,
+        }));
+
+        // The same reading once the landing hold is over (N-5): the one above
+        // is inside it, while the hold may still be putting the list back.
+        await wait(AFTER_HOLD_MS);
+        const restBottom = await measureNodeBottom(anchorRef);
+        const restDock = await measureNode(dockRef);
+        next.nearSentRestBottomY = restBottom;
+        next.nearSendRestVisible =
+          restBottom !== null && restDock !== null
+            ? restBottom <= restDock + VISIBLE_SLOP_PX
+            : null;
+        setResults(current => ({
+          ...current,
+          nearSendRestVisible: next.nearSendRestVisible,
+          nearSentRestBottomY: next.nearSentRestBottomY,
         }));
       }
 
@@ -1590,6 +1623,17 @@ function Harness(): React.JSX.Element {
                 )} · 행 아랫변 ${px(results.nearSentBottomY)})`
           }
           pass={results.nearSendVisible}
+        />
+        <Row
+          label="세 화면 뒤 — 착지 유지가 끝난 뒤"
+          value={
+            results.nearSendRestVisible === null
+              ? '측정 중…'
+              : `${results.nearSendRestVisible ? '보인다' : '가려짐'} (행 아랫변 ${px(
+                  results.nearSentRestBottomY,
+                )})`
+          }
+          pass={results.nearSendRestVisible}
         />
         <Text style={styles.meta}>
           {`보낸 행 y ${
