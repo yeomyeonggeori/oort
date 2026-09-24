@@ -954,6 +954,16 @@ function TimelineInner({
   /** Is that pin being served by instant corrections rather than one glide? */
   const convergingRef = useRef(false);
   /**
+   * A finger is on the glass — from `onScrollBeginDrag` to `onScrollEndDrag` (#2686).
+   * While it is, a follow glide claims nothing: the finger's own reports decide
+   * (`followGlide`).
+   */
+  const fingerOnListRef = useRef(false);
+  /** When a follow glide's pin lapses, its verdict is taken again (`followGlide`). */
+  const followSettleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  /**
    * Is a correction currently travelling to the end?
    *
    * State rather than a ref because it has to reach the scroll view: while it is
@@ -1697,6 +1707,12 @@ function TimelineInner({
       clearTimeout(convergeTimerRef.current);
       convergeTimerRef.current = undefined;
     }
+    // A follow glide's claim ends with every other one (#2686): whoever cancels
+    // here — a travel, a finger, a jump, a room change — judges for itself.
+    if (followSettleTimerRef.current !== undefined) {
+      clearTimeout(followSettleTimerRef.current);
+      followSettleTimerRef.current = undefined;
+    }
     convergingRef.current = false;
   }, []);
 
@@ -2024,6 +2040,9 @@ function TimelineInner({
     cancelFocus();
     cancelJumpTravel();
     scrollPinUntilRef.current = 0;
+    // 새 방의 행은 새 스크롤뷰가 받는다(`listKey`) — 앞 스크롤뷰 위의 손가락은
+    // 떨어짐을 알리지 못한다 (#2686).
+    fingerOnListRef.current = false;
     setChasingTail(false);
   }, [channelId, cancelConvergence, cancelFocus, cancelJumpTravel]);
 
@@ -2036,6 +2055,7 @@ function TimelineInner({
    * from a second ago nor a channel opened a moment ago gets to argue.
    */
   const onScrollBeginDrag = useCallback(() => {
+    fingerOnListRef.current = true;
     onReaderTookList?.();
     cancelConvergence();
     // The reader has taken the list; a focus move queued by a jump would pull
@@ -2077,6 +2097,74 @@ function TimelineInner({
     onReaderTookList,
   ]);
 
+  /** 손가락이 떨어졌다 — 그 뒤의 따라가기 활강은 다시 제 핀을 건다 (#2686). */
+  const onScrollEndDrag = useCallback(() => {
+    fingerOnListRef.current = false;
+  }, []);
+
+  // ===========================================================================
+  // ## 따라가기 활강도 이 목록이 낸 이동이다 (#2686, 실측)
+  //
+  // 바닥에서 읽는 사람에게 새 행이 오면 목록은 끝으로 미끄러진다. 그 활강에 두 결함이
+  // 있었다(iPhone 13 mini · Release · 목 서버, 12줄 답 ≈298pt 가 2.5초마다):
+  //
+  //   t=2490 콘텐츠 +298 → 활강. t=2492 첫 보고는 오프셋 그대로라 끝까지 298.3
+  //   → `onScroll` 이 「사람이 떠났다」로 읽어 따라가기를 풀었다(120pt 문턱). 활강은
+  //   3569 에 서서 끝까지 217, 「최신 메시지로 이동」이 섰고, 다음 12줄 답(t=4996)은
+  //   따라가지 않아 **516pt** 모자랐다.
+  //
+  //   1. **핀이 없었다.** 전송·진입·「최신으로」는 제 이동 동안 `scrollPinUntilRef` 를
+  //      걸어 두지만(머리말 RN-P3), 따라가기 활강은 걸지 않았다. 120pt 를 넘는 행
+  //      하나 — 4줄 넘는 에이전트 답, 이 제품에서 흔한 것 — 면 활강의 첫 보고가 문턱을
+  //      넘는다. 그래서 활강 동안(`GLIDE_SETTLE_MS`) 핀을 건다.
+  //   2. **목표가 어림이었다.** `scrollToEnd` 는 목록의 셀 기록으로 끝을 셈한다
+  //      (`VirtualizedList.js:135`). 콘텐츠 보고는 새 셀의 레이아웃 보고보다 먼저 오므로
+  //      (Fabric 은 부모의 레이아웃 이벤트를 먼저 낸다) 그 순간 새 행은 아직 재지 않았고,
+  //      평균 높이(81.3)로 어림한 목표는 298 − 81.3 = 217 모자랐다. 3줄 행(101)이면
+  //      22.4pt — 마지막 줄이 가려진다. 그래서 목표는 방금 보고된 콘텐츠의 끝이다
+  //      (`contentEnd`) — 「최신으로」(#1892)와 착지 유지가 이미 쓰는 그 끝이다.
+  //
+  // **손가락은 즉시 이긴다.** 손가락이 목록 위에 있는 동안 온 행은 핀을 걸지 않는다 —
+  // 걸면 손가락의 보고가 핀 안에서 버려지고, 따라가기가 켜진 채 남아 다음 행이 목록을
+  // 손가락 밑에서 끌어간다. 손가락이 먼저 있던 핀은 `onScrollBeginDrag` 가 거둔다.
+  //
+  // **핀이 풀릴 때 다시 판정한다** (#2680 R2 N-2 의 이 경로 몫). 핀 안의 보고는 판정을
+  // 내리지 않으므로, 손가락 없는 이동(VoiceOver 가 초점 행을 보이게 옮김·상태 막대 탭)이
+  // 핀 안에서 시작해 끝나면 그 판정이 핀과 함께 사라진다. 풀리는 순간 선 자리에서 다시
+  // 판정하므로, 그런 이동을 되돌리는 것은 **같은 핀 창(350ms) 안에 다음 행이 올 때뿐**
+  // 이다. 착지 유지(`holdLanding`)와 달리 이 핀은 목록을 스스로 되돌리지 않는다.
+  // ===========================================================================
+  const followGlide = useCallback(() => {
+    const geometry = geometryRef.current;
+    if (geometry.contentHeight > 0 && geometry.viewportHeight > 0) {
+      listRef.current?.scrollToOffset({
+        offset: contentEnd(geometry),
+        animated: true,
+      });
+    } else {
+      listRef.current?.scrollToEnd({animated: true});
+    }
+    if (fingerOnListRef.current) return;
+    const until = Date.now() + GLIDE_SETTLE_MS;
+    // A longer claim already holds the scroll (a landing hold) — it covers this.
+    if (until <= scrollPinUntilRef.current) return;
+    scrollPinUntilRef.current = until;
+    if (followSettleTimerRef.current !== undefined) {
+      clearTimeout(followSettleTimerRef.current);
+    }
+    followSettleTimerRef.current = setTimeout(() => {
+      followSettleTimerRef.current = undefined;
+      // Someone took the scroll since — their own verdict stands.
+      if (scrollPinUntilRef.current !== until) return;
+      scrollPinUntilRef.current = 0;
+      if (jumpTravelRef.current !== null || pendingVerdictRef.current !== null) {
+        return;
+      }
+      const left = distanceToEnd(geometryRef.current);
+      if (left !== null) noteFollowing(left <= FOLLOW_THRESHOLD_PX);
+    }, GLIDE_SETTLE_MS);
+  }, [listRef, noteFollowing]);
+
   // Follow the tail only when the reader is already there. Anyone scrolled back
   // is READING, and yanking them to the bottom because someone else typed is
   // the same lost-place complaint the reversed list caused, arriving by a
@@ -2109,14 +2197,16 @@ function TimelineInner({
         // Instant while a far send is climbing the clamp — a glide there is a
         // 300ms round trip per viewport, and there are as many rounds as there
         // are viewports between the reader and the end.
-        listRef.current?.scrollToEnd({animated: !convergingRef.current});
+        if (convergingRef.current) listRef.current?.scrollToEnd({animated: false});
+        // Otherwise a glide, pinned and aimed at the content just reported (#2686).
+        else followGlide();
       }
       // `listRef` is listed because it can be the caller's ref object rather than
       // this component's own — a prop, so the linter is right that it is not
       // guaranteed stable. Ref objects are compared by identity and the harness
       // passes one fixed object, so this costs nothing at runtime.
     },
-    [convergeToEnd, listRef, noteGeometry, resolvePendingVerdict],
+    [convergeToEnd, followGlide, listRef, noteGeometry, resolvePendingVerdict],
   );
 
   // My own send: always, and from wherever they were. Skipped on the first
@@ -2628,6 +2718,7 @@ function TimelineInner({
       CellRendererComponent={TimelineCell}
       onScroll={onScroll}
       onScrollBeginDrag={onScrollBeginDrag}
+      onScrollEndDrag={onScrollEndDrag}
       scrollEventThrottle={16}
       onContentSizeChange={onContentSizeChange}
       onLayout={onLayout}
