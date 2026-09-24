@@ -46,6 +46,7 @@
 // =============================================================================
 
 import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces';
+import type {NotificationLanding} from '../push/tapArrival';
 
 /**
  * The v0 tabs.
@@ -104,6 +105,14 @@ export interface OpenConversation {
    * what lets a miss be *explained* instead of swallowed (B12 R2 High-3).
    */
   anchor?: {messageId: string; seq: number};
+  /**
+   * 알림 본문을 눌러 열렸을 때만 선다 — 어디에 착지할지 (#2569).
+   *
+   * `anchor` 와 따로 있는 이유: 알림은 식별자만 나르므로(ADR-0120) `seq` 가 없고,
+   * 답글이면 채널 위에 스레드를 열어야 한다. `token` 은 탭마다 새로 서서, 같은
+   * 메시지를 가리키는 두 번의 탭이 두 번 착지한다.
+   */
+  notification?: NotificationLanding;
 }
 
 /**
@@ -203,6 +212,7 @@ export const INITIAL_NAV: NavState = {
 export type NavAction =
   | {type: 'selectTab'; tab: Tab}
   | {type: 'openConversation'; conversation: OpenConversation}
+  | {type: 'openFromNotification'; conversation: OpenConversation}
   | {type: 'openSearch'; initialQuery?: string}
   | {type: 'openAgent'; agent: OpenAgent}
   | {type: 'openWorkSession'; workSession: OpenWorkSession}
@@ -241,6 +251,20 @@ export function navReducer(state: NavState, action: NavAction): NavState {
       };
     case 'openConversation':
       return {...state, conversation: action.conversation};
+    case 'openFromNotification':
+      // 알림은 **새 입구**다 (#2569). 그 순간 무엇이 열려 있었든 — 검색, 한
+      // 에이전트, 작업 상세, 다른 대화 — 사람은 그곳에서 이 대화로 온 것이 아니라
+      // 잠금 화면이나 배너에서 왔다. 그 층들 위에 대화를 얹으면 뒤로가기가
+      // 사람이 지나온 적 없는 화면으로 떨어진다. 그래서 대화 탭 위의 대화 하나로
+      // 연다: 뒤로 한 번이면 대화 목록이다.
+      return {
+        tab: 'channels',
+        conversation: action.conversation,
+        search: null,
+        agent: null,
+        workSession: null,
+        hosted: null,
+      };
     case 'openSearch':
       return {
         ...state,

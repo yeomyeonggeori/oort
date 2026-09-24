@@ -1782,6 +1782,14 @@ export function Surface({name}: {name: string}): React.JSX.Element {
               onDismiss={() => {}}
               testID="jump-missed-search"
             />
+            {/* 여섯째가 #2569 다 — 알림 본문 탭. 순서값이 없으므로 세션처럼
+                언제나 「모르는」 갈래이고, 주어는 자기 것이다. */}
+            <NoticeBlock
+              headline={jumpMissedNotice('unknown', 'notification').headline}
+              detail={jumpMissedNotice('unknown', 'notification').detail}
+              onDismiss={() => {}}
+              testID="jump-missed-notification"
+            />
           </View>
         </Frame>
       );

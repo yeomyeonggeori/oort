@@ -69,6 +69,7 @@ import {useOnline} from '../features/inbox/useOnline';
 import {usePendingApprovals} from '../features/conversation/usePendingApprovals';
 import {
   jumpMissedNotice,
+  jumpNoticeSpeech,
   type JumpSubject,
 } from '../features/conversation/jumpNotice';
 import {
@@ -108,6 +109,10 @@ import {
   useRoleLabels,
 } from '../features/workspace/queries';
 import {useNow} from '../lib/useNow';
+import {
+  planNotificationLanding,
+  type NotificationLanding,
+} from '../push/tapArrival';
 import {useRealtime} from '../realtime/RealtimeProvider';
 import {useSession} from '../session/useSession';
 
@@ -235,6 +240,7 @@ export default function ConversationScreen({
   channelId,
   title,
   anchor,
+  notification,
   onBack,
   onOpenConversation,
   onOpenAgent,
@@ -252,6 +258,11 @@ export default function ConversationScreen({
    * at the bottom of a channel (B12 R2 High-3) — 모르면 모른다고 말한다.
    */
   anchor?: {messageId: string; seq: number};
+  /**
+   * 알림 본문 탭이 가리킨 자리 (#2569). 답글이면 스레드를 열고 그 안에서,
+   * 아니면 채널에서 그 메시지에 착지한다. `token` 이 바뀔 때마다 한 번이다.
+   */
+  notification?: NotificationLanding;
   onBack: () => void;
   /**
    * 다른 방을 연다 (이슈 1137).
@@ -281,6 +292,17 @@ export default function ConversationScreen({
   const markRead = useMarkRead();
 
   const timeline = useTimeline(rail, workspaceId, channelId, member.id);
+  /**
+   * 타임라인이 **이 방의** 첫 페이지를 들고 있다 (#2569).
+   *
+   * `timeline.status` 로는 모른다: 이 화면은 방을 옮길 때 다시 마운트되지 않고
+   * `channelId` 만 갈아 끼우므로, 바뀐 첫 렌더의 `status` 는 앞 방의 'ready' 이고
+   * `state` 에는 앞 방의 행이 있다. 다른 방으로 가는 두 착지 — 알림 탭(아래)과 ADE
+   * 카드의 「대화로」 — 가 이 문을 함께 쓴다.
+   */
+  const timelineHoldsThisChannel =
+    timeline.loadedChannelId !== null &&
+    uuidEq(timeline.loadedChannelId, channelId);
   const [profileMemberId, setProfileMemberId] = useState<string | null>(null);
   const profileMember = useMemo(
     () => memberFor(directory, profileMemberId ?? undefined),
@@ -689,6 +711,23 @@ export default function ConversationScreen({
 
   // ---- the action surface ---------------------------------------------------
   const [thread, setThread] = useState<Message | null>(null);
+  /**
+   * 알림이 연 스레드 안에서 착지할 답글 (#2569). 사람이 스레드를 직접 열거나
+   * 닫으면 비운다 — 그때는 알림이 가리킨 자리로 끌려갈 이유가 없다.
+   */
+  const [threadLanding, setThreadLanding] = useState<{
+    messageId: string;
+    token: number;
+  } | null>(null);
+  /**
+   * 알림 착지가 무엇에 내려앉았는지의 한 문장 (#2569). `inThread` 면 스레드 판 **안**에
+   * 선다(#2584 리뷰 N-2) — 채널 쪽 자리는 스레드 판이 덮는다. 그래서 스레드를 닫거나
+   * 다른 스레드를 열면 그 문장도 함께 물러난다: 그 스레드에 대한 말이었기 때문이다.
+   */
+  const [notificationNotice, setNotificationNotice] = useState<{
+    text: string;
+    inThread: boolean;
+  } | null>(null);
   const hint = useLongPressHint();
 
   // ---- ADE 관제 (이슈 1137, ADR-0154 D2) ------------------------------------
@@ -935,12 +974,16 @@ export default function ConversationScreen({
     if (pendingAnchor === null) return;
     // 아직 그 방이 아니다. 다른 방에서는 **절대** 쏘지 않는다.
     if (!uuidEq(pendingAnchor.channelId, channelId)) return;
-    if (timeline.status !== 'ready') return;
+    // 그리고 **그 방의** 첫 페이지가 온 뒤에 쏜다(#2584 R2 관찰 1). `status` 가
+    // 'ready' 인지로 물으면, 방이 바뀐 첫 렌더의 'ready' 는 앞 방의 것이라 비어 가는
+    // 목록에서 점프가 빗나가 「찾지 못했습니다」가 한 번 번쩍인다 — 이 앵커가 한 박자
+    // 들고 있는 이유 그 자체다.
+    if (!timelineHoldsThisChannel) return;
     setPendingAnchor(null);
     // 세션 원장은 순서값을 나르지 않는다. 없는 seq 를 지어내지 않고, 그 대가로
     // 못 찾았을 때의 문장은 「더 위에 있다」로 정밀해지지 못한다.
     requestJump('session', pendingAnchor.messageId, null);
-  }, [pendingAnchor, channelId, timeline.status, requestJump]);
+  }, [pendingAnchor, channelId, timelineHoldsThisChannel, requestJump]);
 
   const onOpenAdeAnchor = useCallback(
     (targetChannelId: string, targetTitle: string, messageId: string) => {
@@ -1033,7 +1076,15 @@ export default function ConversationScreen({
   const jumpTargetRef = useRef<typeof jumpTarget>(null);
   jumpTargetRef.current = jumpTarget;
   const onJumpMissed = useCallback((reason: 'older' | 'unknown') => {
-    setJumpMissed(jumpMissedNotice(reason, jumpSubjectRef.current));
+    const notice = jumpMissedNotice(reason, jumpSubjectRef.current);
+    setJumpMissed(notice);
+    // 알림으로 온 점프만 소리를 낸다 (#2584 리뷰 M-2). 다른 넷(인용·고정·검색·세션)은
+    // 사람이 **이 화면에서** 누른 것의 답이라 상자가 누른 자리 곁에 선다. 알림은 잠금
+    // 화면에서 눌렀고 문장은 앱 안에 선다 — 화면을 보지 않는 사람에게는 알림을
+    // 눌렀는데 아무 일도 없었던 것과 같다. 셸의 다른 알림 문장(`fail`)과 같은 규율이다.
+    if (jumpSubjectRef.current === 'notification') {
+      AccessibilityInfo.announceForAccessibility(jumpNoticeSpeech(notice));
+    }
     const target = jumpTargetRef.current;
     if (target === null) return;
     setAwaitingJump({messageId: target.messageId, seq: target.seq});
@@ -1082,7 +1133,11 @@ export default function ConversationScreen({
     resend,
     reload,
   } = timeline;
-  const openThread = useCallback((message: Message) => setThread(message), []);
+  const openThread = useCallback((message: Message) => {
+    setThreadLanding(null);
+    setNotificationNotice(current => (current?.inThread ? null : current));
+    setThread(message);
+  }, []);
   const onStartReached = useCallback(() => void loadOlder(), [loadOlder]);
   const onResend = useCallback(
     (message: Message) =>
@@ -1098,7 +1153,11 @@ export default function ConversationScreen({
     (clientMsgId: string) => void resend(clientMsgId),
     [resend],
   );
-  const closeThread = useCallback(() => setThread(null), []);
+  const closeThread = useCallback(() => {
+    setThread(null);
+    setThreadLanding(null);
+    setNotificationNotice(current => (current?.inThread ? null : current));
+  }, []);
   // 같은 이유로 고정된다. 이 화면은 턴이 열려 있는 동안 초당 한 번 다시 그려지고,
   // 인라인이면 그때마다 `StopTurnControl`(자체 상태 셋을 든 컴포넌트)이 새 엘리먼트가
   // 된다 — 사람이 「중단」을 겨누고 있는 바로 그 컨트롤을.
@@ -1182,6 +1241,151 @@ export default function ConversationScreen({
     // 사실로 말할 수 있다 — `Timeline` 이 로드된 가장 오래된 seq 와 견준다.
     requestJump('search', anchor.messageId, anchor.seq);
   }, [anchor, timeline.status, requestJump]);
+
+  // ---- 알림이 가리킨 자리에 **내려앉는다** (#2569) --------------------------
+  //
+  // 다섯 번째 호출자이고 같은 기계를 탄다(`requestJump` → `jumpTarget`). 새로 든
+  // 것은 둘이다.
+  //
+  // **어느 방의 첫 페이지인가를 묻는다.** 이 화면은 `channelId` 만 갈아 끼우므로,
+  // 다른 대화가 열려 있던 중에 알림을 누르면 바뀐 첫 렌더의 `timeline.status` 는
+  // 앞 방의 'ready' 이고 `state` 에는 앞 방의 행이 있다. 그 순간 쏘면 앞 방에서
+  // 스레드 루트를 찾고, 빈 목록에서 점프가 빗나가 「찾지 못했습니다」가 한 번
+  // 번쩍인다. `loadedChannelId` 가 이 방을 가리킬 때까지 기다린다.
+  //
+  // **답글이면 스레드를 연다.** 루트가 로드돼 있을 때만이다 — 없는 루트를 지어낼
+  // 수 없으므로, 그때는 채널에서 그 답글(채널의 행이다)에 착지하고 이유를 말한다.
+  // 판정은 `planNotificationLanding` 이 하고 여기서는 실행만 한다.
+  //
+  // 착지하는 동안 이 화면을 덮고 있던 층은 걷는다. 같은 방에서 알림을 눌렀을 때
+  // 고정 목록이나 관제 목록, 다른 스레드가 떠 있으면 착지가 그 뒤에서 일어난다.
+  // 방을 옮기면 그 문장은 이 화면의 사실이 아니다. 착지 효과보다 **먼저**
+  // 선언한다 — 같은 커밋에서 둘 다 돌면 나중 것이 이긴다.
+  useEffect(() => setNotificationNotice(null), [channelId]);
+  const landedNotificationRef = useRef<number | null>(null);
+  const timelineMessages = timeline.state.messages;
+
+  // ---- 탭 **뒤에** 읽은 행으로만 판정한다 (#2584 design-review R2 H-1) ----------
+  //
+  // 같은 방을 열어 둔 채 앱이 뒤로 갔다. 15초 뒤 소켓이 끊기고(ADR-0137 D4) 상대의
+  // 새 메시지는 알림으로만 왔다. 그 알림을 누르면 이 화면은 다시 마운트되지 않고
+  // `channelId` 도 그대로라, 타임라인은 **탭 앞에 읽은** 이 방의 첫 페이지를 들고
+  // 있다(`timelineHoldsThisChannel` 은 「어느 방인가」만 묻는다). 그 행으로 판정하면
+  // 방금 온 메시지는 없고, 점프는 빗나가 「찾지 못했습니다 / 위로 올려 이전 대화를
+  // 더 불러오세요」를 세우고 낭독했다 — 메시지는 더 새것이고 아래에서 오는데. 문장을
+  // 따라 위로 올린 사람은 레일이 복구하는 순간 대기 점프(`awaitingJump`)에 끌려
+  // 내려왔다.
+  //
+  // 셸이 M-1 에서 지키는 규율을 여기에도 건다: **탭 뒤에 읽은 것만으로 없다고
+  // 말한다**(`useNotificationTapRouting` 의 `dataUpdatedAt ≥ 도착`). 알림은 커밋 뒤에야
+  // 나가므로(relay 가 outbox 를 읽는다) 탭 뒤에 나간 REST 읽기는 그 메시지를 반드시
+  // 본다 — 소켓이 끊겨 있어도.
+  //
+  //   다른 방·첫 마운트   그 방의 첫 페이지는 방이 바뀐 뒤(= 탭 뒤)에 나간다. 그대로
+  //                       기다린다 — 추가 읽기 없음.
+  //   같은 방             탭을 처음 본 순간 이미 이 방을 들고 있다 → 꼬리를 다시
+  //                       읽고(`catchUp`) 그 뒤에 판정한다. 한 번의 왕복이다.
+  //   그 읽기가 실패      모르는 채로는 말하지 않는다. 레일이 다시 붙어 스스로 따라잡은
+  //                       신호(복구 표지 `recoveryMarkers` 가 탭 뒤에 늘었다)를
+  //                       기다린다. 보이지 않는 기다림이므로 시계를 단다 — 세션
+  //                       앵커와 같은 30초(`PENDING_ANCHOR_TTL_MS`). 시간이 다 되면
+  //                       **조용히** 접는다. 시간 끝에 「찾지 못했습니다」를 세우면
+  //                       그것이 바로 없애려던 거짓 문장이다.
+  const catchUpTimeline = timeline.catchUp;
+  const recoveryMarkCount = timeline.recoveryMarkers.length;
+  const [landingRead, setLandingRead] = useState<{
+    token: number;
+    state: 'reading' | 'waiting-rail' | 'fresh';
+  } | null>(null);
+  /** 탭을 처음 본 순간 — 그때 이 방을 들고 있었는가, 복구 표지는 몇 개였는가. */
+  const landingSightRef = useRef<{token: number; markers: number} | null>(null);
+  useEffect(() => {
+    if (!notification) return;
+    if (landingSightRef.current?.token === notification.token) return;
+    const {token} = notification;
+    landingSightRef.current = {token, markers: recoveryMarkCount};
+    if (!timelineHoldsThisChannel) {
+      setLandingRead({token, state: 'fresh'});
+      return;
+    }
+    setLandingRead({token, state: 'reading'});
+    catchUpTimeline().then(
+      () =>
+        setLandingRead(current =>
+          current?.token === token ? {token, state: 'fresh'} : current,
+        ),
+      () =>
+        setLandingRead(current =>
+          current?.token === token && current.state === 'reading'
+            ? {token, state: 'waiting-rail'}
+            : current,
+        ),
+    );
+  }, [
+    notification,
+    timelineHoldsThisChannel,
+    recoveryMarkCount,
+    catchUpTimeline,
+  ]);
+  // 레일이 스스로 따라잡았다 — 탭 뒤에 복구 표지가 늘었다(재구독의 재생 또는 역채움).
+  useEffect(() => {
+    const sight = landingSightRef.current;
+    if (sight === null || landingRead?.token !== sight.token) return;
+    if (landingRead.state === 'fresh') return;
+    if (recoveryMarkCount > sight.markers) {
+      setLandingRead({token: sight.token, state: 'fresh'});
+    }
+  }, [recoveryMarkCount, landingRead]);
+  // 보이지 않는 기다림의 시계.
+  useEffect(() => {
+    if (landingRead?.state !== 'waiting-rail') return undefined;
+    const {token} = landingRead;
+    const timer = setTimeout(() => {
+      landedNotificationRef.current = token;
+      setLandingRead(current => (current?.token === token ? null : current));
+    }, PENDING_ANCHOR_TTL_MS);
+    return () => clearTimeout(timer);
+  }, [landingRead]);
+
+  useEffect(() => {
+    if (!notification || !timelineHoldsThisChannel) return;
+    if (landedNotificationRef.current === notification.token) return;
+    if (landingRead?.token !== notification.token) return;
+    if (landingRead.state !== 'fresh') return;
+    landedNotificationRef.current = notification.token;
+    const plan = planNotificationLanding(timelineMessages, notification);
+    setPinsOpen(false);
+    setAdeOpen(false);
+    closeMemberProfile();
+    setThread(plan.thread);
+    setThreadLanding(
+      plan.thread
+        ? {messageId: notification.messageId, token: notification.token}
+        : null,
+    );
+    if (plan.jumpInChannel) {
+      requestJump('notification', notification.messageId, null);
+    }
+    setNotificationNotice(
+      plan.notice === null
+        ? null
+        : {text: plan.notice, inThread: plan.thread !== null},
+    );
+    if (plan.notice !== null) {
+      AccessibilityInfo.announceForAccessibility(plan.notice);
+    }
+  }, [
+    notification,
+    timelineHoldsThisChannel,
+    landingRead,
+    timelineMessages,
+    requestJump,
+    closeMemberProfile,
+  ]);
+  const dismissNotificationNotice = useCallback(
+    () => setNotificationNotice(null),
+    [],
+  );
 
   /**
    * 기다리던 줄이 도착했다 → **그때 데려간다** (#1209 리뷰 High).
@@ -1293,6 +1497,18 @@ export default function ConversationScreen({
                   detail={jumpMissed.detail}
                   onDismiss={cancelJump}
                   testID="jump-missed"
+                />
+              </View>
+            ) : null}
+            {/* 알림이 가리킨 것이 사라졌거나 스레드를 못 열었을 때의 한 문장
+                (#2569). 착지는 이미 일어났고 이것은 그 착지가 **무엇에** 내려앉았는지를
+                말하는 영수증이라, 점프 고지와 같은 자리·같은 상자를 쓴다. */}
+            {notificationNotice && !notificationNotice.inThread ? (
+              <View style={styles.notice}>
+                <NoticeBlock
+                  headline={notificationNotice.text}
+                  onDismiss={dismissNotificationNotice}
+                  testID="notification-landing-notice"
                 />
               </View>
             ) : null}
@@ -1412,6 +1628,15 @@ export default function ConversationScreen({
           root={thread}
           workspaceId={workspaceId}
           channelId={channelId}
+          landOn={threadLanding ?? undefined}
+          notice={
+            notificationNotice?.inThread
+              ? {
+                  text: notificationNotice.text,
+                  onDismiss: dismissNotificationNotice,
+                }
+              : undefined
+          }
           timeline={timeline}
           directory={directory}
           myMemberId={member.id}
