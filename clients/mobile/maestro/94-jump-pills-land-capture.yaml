@@ -1,0 +1,38 @@
+appId: app.momo.ios
+name: 94-jump-pills-land-capture
+---
+# 94-jump-pills-land-capture — 다른 방으로의 착지 (#1892 R1 M-1).
+#
+# `-momoMeasure JUMP-PILLS-LAND` 는 93 과 같은 방 옮기기를 하고, 새 방의 첫 페이지와
+# **같은 렌더에서** 그 방 가운데 줄로 가는 점프를 건다(ADE 「대화로」). 새 목록의 첫
+# 레이아웃 보고보다 점프가 먼저 오는 순서다. 첫 판에서는 늦게 온 그 보고가 진입
+# 수렴을 태워 목록을 바닥으로 끌었고, 착지 틴트는 화면 밖 행에 걸렸다.
+#
+#   xcrun simctl launch booted app.momo.ios --args \
+#     -momoMeasure JUMP-PILLS-LAND -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro test clients/mobile/maestro/94-jump-pills-land-capture.yaml
+#
+# 라이트는 `LIGHT-JUMP-PILLS-LAND`.
+#
+# 한 장:
+#   jump-pills-land  목적지 줄이 화면에 틴트와 함께 서 있고, 목록은 바닥이 아니다
+#                    (「최신으로」가 선다, 판독 줄 「끝까지」가 0 보다 크다)
+- extendedWaitUntil:
+    visible: ".*방 B · 단계 b.*"
+    timeout: 60000
+# 착지의 증거는 좌표가 아니라 **도착한 줄**이다(91 과 같은 규율, 부분 일치).
+- extendedWaitUntil:
+    visible: ".*롤백 리허설 일정은 목요일 오후로 잡았습니다.*"
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: "jump-latest"
+    timeout: 10000
+# 늦게 오는 레이아웃 보고가 목록을 끌어내리는지 볼 시간을 둔다 — 진입 수렴은
+# 최대 4초다. 그 뒤에도 같은 줄이 화면에 있어야 한다.
+- waitForAnimationToEnd:
+    timeout: 5000
+- extendedWaitUntil:
+    visible: ".*롤백 리허설 일정은 목요일 오후로 잡았습니다.*"
+    timeout: 3000
+- takeScreenshot: jump-pills-land

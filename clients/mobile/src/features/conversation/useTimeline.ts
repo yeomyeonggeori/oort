@@ -130,6 +130,31 @@ export interface ResumeInfo {
 export interface UseTimelineResult {
   state: TimelineState;
   status: 'loading' | 'ready' | 'error';
+  /**
+   * The channel whose head page `state` holds, or null while one is being read
+   * (#2569).
+   *
+   * `status` cannot say this on its own. This hook keeps its state across a
+   * channel switch until its effect runs, so on the render where `channelId`
+   * changes `status` is still the PREVIOUS channel's 'ready' and `state` still
+   * holds that channel's rows. A caller that acts once "the timeline is ready" —
+   * a notification landing on one message — would act on the wrong room.
+   */
+  loadedChannelId: string | null;
+  /**
+   * Read this channel's tail from Postgres **now** — everything after the newest
+   * row held (#2584 design-review R2 H-1).
+   *
+   * The rail is transport, not truth. A conversation left open in the background
+   * keeps its rows while the socket is dropped (ADR-0137 D4), and nothing re-reads
+   * them when the same room is shown again: a notification tap for that room lands
+   * on rows read before the tap. A caller that must judge "is this message here?"
+   * against the server's present — the notification landing — reads first.
+   *
+   * Rejects when the read fails. Rows that arrive after the person moved to
+   * another channel are dropped, not merged into the one now on screen.
+   */
+  catchUp: () => Promise<void>;
   resume: ResumeInfo;
   recoveryMarkers: RecoveryMarker[];
   /** Channel-level echoes awaiting their server seq. Never inside `state`. */
@@ -199,6 +224,7 @@ export function useTimeline(
 ): UseTimelineResult {
   const [state, setState] = useState<TimelineState>(emptyTimeline);
   const [status, setStatus] = useState<UseTimelineResult['status']>('loading');
+  const [loadedChannelId, setLoadedChannelId] = useState<string | null>(null);
   const [resume, setResume] = useState<ResumeInfo>({
     lastRecovered: null,
     lastBackfillCount: 0,
@@ -568,7 +594,7 @@ export function useTimeline(
   );
 
   const backfillAfter = useCallback(
-    async (channel: string) => {
+    async (channel: string, stillCurrent: () => boolean = () => true) => {
       let after = newestSeqRef.current ?? 0;
       let total = 0;
       for (;;) {
@@ -576,6 +602,7 @@ export function useTimeline(
           after,
           limit: PAGE_LIMIT,
         });
+        if (!stillCurrent()) break;
         if (page.messages.length === 0) break;
         total += page.messages.length;
         applyBatch(page.messages);
@@ -592,6 +619,12 @@ export function useTimeline(
   useEffect(() => {
     channelRef.current = channelId;
   }, [channelId]);
+
+  const catchUp = useCallback(async () => {
+    const channel = channelRef.current;
+    if (!channel) return;
+    await backfillAfter(channel, () => channelRef.current === channel);
+  }, [backfillAfter]);
 
   // Drop echoes whose confirmed twin has landed in the seq stream even though
   // the POST that created them never resolved. That case is real: if the write
@@ -614,6 +647,7 @@ export function useTimeline(
     updatePending(() => []);
     setState(emptyTimeline());
     setStatus('loading');
+    setLoadedChannelId(null);
     setReachedStart(false);
     setRecoveryMarkers([]);
     setResume({lastRecovered: null, lastBackfillCount: 0, resubscribeCount: 0});
@@ -628,6 +662,7 @@ export function useTimeline(
         applyBatch(page.messages);
         setReachedStart(page.nextBefore === undefined);
         setStatus('ready');
+        setLoadedChannelId(channelId);
       })
       .catch(() => {
         if (!cancelled) setStatus('error');
@@ -793,6 +828,8 @@ export function useTimeline(
   return {
     state,
     status,
+    loadedChannelId,
+    catchUp,
     resume,
     recoveryMarkers,
     pending: channelPending,

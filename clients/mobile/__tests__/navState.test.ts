@@ -353,3 +353,47 @@ describe('sign-out', () => {
     expect(navReducer(deep, {type: 'reset'})).toEqual(INITIAL_NAV);
   });
 });
+
+describe('a notification is a new way in (#2569)', () => {
+  const FROM_PUSH = {
+    channelId: 'CH-9',
+    title: '#배포',
+    notification: {messageId: 'MSG-1', threadRootId: null, token: 1},
+  };
+
+  it('opens on 대화 with every other layer taken down', () => {
+    // The person came from the lock screen, not from the agent they happened to
+    // have open. Stacking the conversation over that layer would make 뒤로 land
+    // somewhere they never walked through.
+    const deep: NavState = {
+      tab: 'agents',
+      conversation: OPEN,
+      search: {initialQuery: '배포'},
+      agent: {
+        memberId: 'cccccccc-1111-4111-8111-cccccccccccc',
+        displayName: '김인턴',
+        handle: 'kim-intern',
+      },
+      workSession: {sessionId: 'ws-1'},
+      hosted: {kind: 'list'},
+    };
+    expect(
+      navReducer(deep, {type: 'openFromNotification', conversation: FROM_PUSH}),
+    ).toEqual({
+      tab: 'channels',
+      conversation: FROM_PUSH,
+      search: null,
+      agent: null,
+      workSession: null,
+      hosted: null,
+    });
+  });
+
+  it('comes back to the conversation list in one step', () => {
+    const opened = navReducer(
+      {...INITIAL_NAV, tab: 'inbox'},
+      {type: 'openFromNotification', conversation: FROM_PUSH},
+    );
+    expect(navReducer(opened, {type: 'back'})).toEqual(INITIAL_NAV);
+  });
+});

@@ -13,8 +13,10 @@
       모르는 브라우저는 무시하므로 잃는 것이 없다.
 
       user-scalable=no와 maximum-scale은 쓰지 않는다: 확대를 막는 것은 접근성을
-      끄는 것이다. iOS가 입력창에서 자동 확대하는 문제는 폼 컨트롤 글자를 16px로
-      두는 것으로 푼다(tokens.css @layer base).
+      끄는 것이다. iOS가 입력창에서 자동 확대하는 문제는 폼 컨트롤 글자를 16px
+      이상으로 두는 것으로 푼다(tokens.css의 --field-text-floor와 그것을 쓰는
+      @layer base 입력 칸 규칙, #2616). 사파리는 interactive-widget도 읽지 않으므로
+      키보드가 줄이는 높이는 src/app/viewportHeight.ts가 따라간다.
     -->
     <meta
       name="viewport"
