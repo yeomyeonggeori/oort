@@ -58,6 +58,7 @@ export function ThreadPanel({
   onClose,
   onReplySent,
   onOpenProfile,
+  onReaderTookList,
 }: {
   root: Message;
   /** Production supplies both; isolated legacy render fixtures may omit them. */
@@ -86,6 +87,12 @@ export function ThreadPanel({
    * rather than somewhere above it.
    */
   onReplySent?: () => void;
+  /**
+   * 사람이 이 판의 목록을 잡았다 (#2632 N-1). 대화 화면이 아직 판정을 기다리는 알림
+   * 착지를 접는 신호다 — 채널 목록의 같은 신호와 한 규칙이다. 판이 채널을 덮고
+   * 있으면 사람이 잡는 목록은 이쪽이다.
+   */
+  onReaderTookList?: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -297,6 +304,7 @@ export function ThreadPanel({
                 showRollup={false}
                 onResendPending={clientMsgId => void timeline.resend(clientMsgId)}
                 jumpTarget={jumpTarget}
+                onReaderTookList={onReaderTookList}
               />
             </>
           }
