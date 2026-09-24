@@ -1038,6 +1038,27 @@ describe('바닥에서 읽는 중에 새 답이 와도 끝에 앉는다 (#2686)'
     }).toEqual({movedFromFinger: 0, latest: true});
   });
 
+  // 착지 유지(진입·먼 전송·「최신으로」, 도착 + 650ms)는 손가락 없는 이동을 끝으로
+  // 되돌리고, 그동안 핀이 판정을 막아 필이 서지 않는다(#2680 R2 N-2 의 그 창). 유지 안에서
+  // 온 답의 활강이 그 핀을 제 것(350ms)으로 줄이거나 풀면, 유지가 되돌리는 사이 필이
+  // 번쩍인다.
+  it('착지 유지 안에서 온 답의 활강은 유지의 핀을 줄이지 않는다 — 유지가 되돌리는 동안 필이 서지 않는다', async () => {
+    const room = await enterRoom({...TEAM_ROOM, listEstimate: true});
+    for (let frame = 0; frame < 150 && room.settle === null; frame += 1) {
+      await frames(room, 1);
+    }
+    expect(room.settle).not.toBeNull(); // 진입이 앉았다 — 유지는 이제 시작이다
+    room.watching = true;
+    await room.push(12); // 유지 안에서 답이 온다
+    await frames(room, 25); // 400ms — 활강의 핀(350ms)은 지났고 유지는 아직이다
+    await act(async () => {
+      room.native.moveWithoutFinger(room.native.end() - 600);
+    });
+    await frames(room, 60);
+
+    expect(followVerdict(room)).toEqual(AT_THE_END);
+  });
+
   // #2680 R2 N-2 의 판정: 핀 안의 보고는 따라가기 판정을 내리지 않는다. 손가락 없는
   // 이동(VoiceOver·상태 막대)이 핀 안에서 시작해 끝나면 그 판정이 핀과 함께 사라진다 —
   // 핀이 풀릴 때 선 자리에서 다시 판정해야, 다음 답이 읽던 사람을 끝으로 끌어가지 않는다.
