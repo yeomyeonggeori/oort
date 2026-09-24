@@ -14,6 +14,11 @@ v2는 APNs `thread-id`(`root_id ?? channel_id`)와 `category`
 REST 대상인 `approval_id`를 `momo` 봉투에 싣고, `badge`는 ADR-0109의 활성 채널별
 unread 수 합계를 서버가 계산한다. 이 메타데이터는 모두 id-only 경계 안에 있다.
 
+`aps.sound`는 relay가 category마다 정한 고정 문자열이다(#2669, 표는
+`server-rust/bins/momo-push-relay/src/dispatch.rs`의 `CATEGORY_SOUNDS`). 지금은
+네 category 모두 시스템 기본 소리 `default`를 싣는다. 소리를 끄는 사용자 설정은
+기기의 OS가 적용하므로 relay는 기본값만 보낸다. 대화 내용은 싣지 않는다.
+
 ## 운영 모드 3종
 
 ### 1. Dawn 공용 (App Store 앱 기본)

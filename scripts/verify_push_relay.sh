@@ -176,11 +176,13 @@ test "$STATUS" = 429
 test -s "$CAPTURE"
 head -n 1 "$CAPTURE" >"$TMP_ROOT/captured.json"
 test "$(jq -r 'keys | sort | join(",")' "$TMP_ROOT/captured.json")" = "aps,momo"
-test "$(jq -r '.aps | keys | sort | join(",")' "$TMP_ROOT/captured.json")" = "alert,badge,category,content-available,mutable-content,thread-id"
+test "$(jq -r '.aps | keys | sort | join(",")' "$TMP_ROOT/captured.json")" = "alert,badge,category,content-available,mutable-content,sound,thread-id"
 test "$(jq -r '.aps.alert | keys | sort | join(",")' "$TMP_ROOT/captured.json")" = "body,title"
 test "$(jq -r '.aps.alert.title' "$TMP_ROOT/captured.json")" = "oort"
 test "$(jq -r '.aps.alert.body' "$TMP_ROOT/captured.json")" = "새 알림"
 test "$(jq -r '.aps.category' "$TMP_ROOT/captured.json")" = "momo.mention"
+# #2669: mention is a sounding category (dispatch.rs CATEGORY_SOUNDS).
+test "$(jq -r '.aps.sound' "$TMP_ROOT/captured.json")" = "default"
 test "$(jq -r '.aps["thread-id"]' "$TMP_ROOT/captured.json")" = "33333333-3333-3333-3333-333333333333"
 test "$(jq -r '.momo | keys | sort | join(",")' "$TMP_ROOT/captured.json")" = "channel_id,collapse_id,message_id,reason,schema,server_id,workspace_id"
 test "$(jq -r '.momo.schema' "$TMP_ROOT/captured.json")" = "momo.push.notification.v2"
@@ -242,4 +244,4 @@ assert_refuses_to_boot "empty server registry" MOMO_RELAY_SERVERS \
   MOMO_APNS_ALLOW_STUB=1 \
   MOMO_PUSH_RELAY_PORT="$PORT"
 
-echo "PASS: signed v2 dispatch + APNs category/thread-id + 410 passthrough + static placeholder alert, bad signature 401, unregistered 401, replay idempotent, rate limit 429, id-only body field 400, fail-closed boot refusals (stub opt-in, missing credential, unreadable .p8, empty registry)"
+echo "PASS: signed v2 dispatch + APNs category/thread-id/sound + 410 passthrough + static placeholder alert, bad signature 401, unregistered 401, replay idempotent, rate limit 429, id-only body field 400, fail-closed boot refusals (stub opt-in, missing credential, unreadable .p8, empty registry)"
