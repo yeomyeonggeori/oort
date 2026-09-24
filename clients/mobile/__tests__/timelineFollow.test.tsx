@@ -101,9 +101,15 @@ function mount(selfSendToken = 0, messages: Message[] = HISTORY) {
  * measures the correction itself). While it runs it holds the scroll, so a test
  * that fired a scroll event straight after this one would be firing into a
  * closed door — and would pass without measuring anything. So the list reports
- * that it landed at the bottom, and a frame is let through for the correction to
- * see that and hand the scroll back. Everything after this line is the ordinary
- * life of an open channel, which is what these tests are about.
+ * that it landed at the bottom, and the correction is let run until it hands the
+ * scroll back. Everything after this line is the ordinary life of an open
+ * channel, which is what these tests are about.
+ *
+ * Handing it back is not one frame any more (#2604): the correction arrives once
+ * the content has held still for `ENTRY_QUIET_MS` (150ms), and then keeps the list
+ * on the end for `LANDING_HOLD_MS` (600ms, from release + one 50ms round) the way
+ * a far send does. A scroll event inside that hold is still the correction's, so
+ * this waits for both: 150 + up to two 50ms rounds + 650, with slack.
  */
 async function settleInitialLayout() {
   fireEvent(screen.getByTestId('timeline-list'), 'contentSizeChange', 390, 4000);
@@ -115,6 +121,16 @@ async function settleInitialLayout() {
     },
   });
   await flushFrame();
+  await wait(ENTRY_HANDS_BACK_MS);
+}
+
+/** `ENTRY_QUIET_MS` 150 + two rounds (100) + `LANDING_HOLD_MS` from release (650) + slack. */
+const ENTRY_HANDS_BACK_MS = 1000;
+
+async function wait(ms: number) {
+  await act(async () => {
+    await new Promise(resolve => setTimeout(resolve, ms));
+  });
 }
 
 /** Put the reader up in the history: far from the end, so `following` is false. */

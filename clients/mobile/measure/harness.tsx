@@ -182,6 +182,22 @@ const THREAD_ROOT = makeShortMessage(THREAD_ROOT_SEQ);
 const wait = (ms: number) => new Promise<void>(r => setTimeout(() => r(), ms));
 
 /**
+ * How far past the composer's top edge the sent row's last pixel may sit and
+ * still count as on screen, in points (#2586 R1 H-1). Half a point is the
+ * rounding between two `measureInWindow` readings of neighbouring views — the
+ * row and the dock share that edge exactly when the list is at its end.
+ */
+const VISIBLE_SLOP_PX = 0.5;
+
+/**
+ * When the second 「세 화면 뒤」 reading is taken, in ms after the first (#2654
+ * R2 N-5). The first lands inside the landing hold (`Timeline.tsx`
+ * `LANDING_HOLD_MS` 600, from release + 50ms), where the hold is still putting
+ * the list back; this one lands after it, on the list as it rests.
+ */
+const AFTER_HOLD_MS = 900;
+
+/**
  * The Korean keyboard's height on an iPhone 17 Pro, in points. Used only when
  * the simulator refuses to raise the real one; on a device the OS supplies the
  * number and this constant is never read.
@@ -418,6 +434,12 @@ interface Results {
   selfSendVisible: boolean | null;
   /** The raw readings behind it, so a failure names its own kind. */
   sentRowY: number | null;
+  /**
+   * The sent row's LAST pixel (#2586 R1 H-1). The verdict is judged on this, not
+   * on `sentRowY`: a row whose top edge is above the composer can still have
+   * its text cut by it, and the top-edge verdict passed with 164.7pt hidden.
+   */
+  sentRowBottomY: number | null;
   dockY: number | null;
   /**
    * The list footer's last pixel, in window coordinates — i.e. where the content
@@ -451,7 +473,16 @@ interface Results {
    * re-read something looks like.
    */
   nearSendGapPx: number | null;
+  /** Judged on the sent row's last pixel, like `selfSendVisible` (R1 H-1). */
   nearSendVisible: boolean | null;
+  nearSentBottomY: number | null;
+  /**
+   * The same verdict read again once the landing hold is over (#2654 R2 N-5) —
+   * the first reading is inside it. A list the hold was still pinning passes
+   * the first and fails this one.
+   */
+  nearSendRestVisible: boolean | null;
+  nearSentRestBottomY: number | null;
   /** How far from the end it started, so the number has a scale. */
   nearSendFromPx: number | null;
   /**
@@ -530,6 +561,7 @@ const EMPTY: Results = {
   travelBlocked: null,
   selfSendVisible: null,
   sentRowY: null,
+  sentRowBottomY: null,
   dockY: null,
   tailBottomY: null,
   tailGapPx: null,
@@ -537,6 +569,9 @@ const EMPTY: Results = {
   selfSendTrace: null,
   nearSendGapPx: null,
   nearSendVisible: null,
+  nearSentBottomY: null,
+  nearSendRestVisible: null,
+  nearSentRestBottomY: null,
   nearSendFromPx: null,
   dismissOffsetShiftPx: null,
   dismissAnchorShiftPx: null,
@@ -864,11 +899,13 @@ function Harness(): React.JSX.Element {
       }, 100);
 
       let sentY: number | null = null;
+      let sentBottom: number | null = null;
       let dockY: number | null = null;
       let tailBottom: number | null = null;
       for (let attempt = 0; attempt < 8; attempt++) {
         await wait(400);
         sentY = await measureAnchor();
+        sentBottom = await measureNodeBottom(anchorRef);
         dockY = await measureNode(dockRef);
         tailBottom = await measureNodeBottom(tailRef);
         // The correction is bounded (`SELF_SEND_PIN_MS`), so keep looking until
@@ -886,6 +923,7 @@ function Harness(): React.JSX.Element {
               ...heights,
             )}) · n=${offsets.length}`;
       next.sentRowY = sentY;
+      next.sentRowBottomY = sentBottom;
       next.dockY = dockY;
       next.tailBottomY = tailBottom;
       next.tailGapPx =
@@ -905,9 +943,12 @@ function Harness(): React.JSX.Element {
       // the anchor scan states: an unmeasured case must never be reported as a
       // measured one — and the converse, which the last batch paid for, is that
       // a case the instrument CAN see must not be filed as unmeasured.
+      // Visible means the WHOLE row is above the composer — its last pixel, not
+      // its first (#2586 R1 H-1: the top-edge reading passed a row whose text
+      // the composer was cutting).
       next.selfSendVisible =
-        sentY !== null && dockY !== null
-          ? sentY < dockY
+        sentBottom !== null && dockY !== null
+          ? sentBottom <= dockY + VISIBLE_SLOP_PX
           : next.tailGapPx !== null && next.tailGapPx > 1
           ? false
           : null;
@@ -915,6 +956,7 @@ function Harness(): React.JSX.Element {
         ...current,
         selfSendVisible: next.selfSendVisible,
         sentRowY: next.sentRowY,
+        sentRowBottomY: next.sentRowBottomY,
         dockY: next.dockY,
         tailBottomY: next.tailBottomY,
         tailGapPx: next.tailGapPx,
@@ -977,11 +1019,13 @@ function Harness(): React.JSX.Element {
         setSelfSendToken(token => token + 1);
 
         let nearSent: number | null = null;
+        let nearSentBottom: number | null = null;
         let nearDock: number | null = null;
         let nearTail: number | null = null;
         for (let attempt = 0; attempt < 8; attempt++) {
           await wait(400);
           nearSent = await measureAnchor();
+          nearSentBottom = await measureNodeBottom(anchorRef);
           nearDock = await measureNode(dockRef);
           nearTail = await measureNodeBottom(tailRef);
           if (nearSent !== null && nearDock !== null) break;
@@ -990,9 +1034,10 @@ function Harness(): React.JSX.Element {
           nearTail === null || nearDock === null
             ? null
             : Math.round((nearTail - nearDock) * 10) / 10;
+        next.nearSentBottomY = nearSentBottom;
         next.nearSendVisible =
-          nearSent !== null && nearDock !== null
-            ? nearSent < nearDock
+          nearSentBottom !== null && nearDock !== null
+            ? nearSentBottom <= nearDock + VISIBLE_SLOP_PX
             : next.nearSendGapPx !== null && next.nearSendGapPx > 1
             ? false
             : null;
@@ -1000,7 +1045,24 @@ function Harness(): React.JSX.Element {
           ...current,
           nearSendGapPx: next.nearSendGapPx,
           nearSendVisible: next.nearSendVisible,
+          nearSentBottomY: next.nearSentBottomY,
           nearSendFromPx: next.nearSendFromPx,
+        }));
+
+        // The same reading once the landing hold is over (N-5): the one above
+        // is inside it, while the hold may still be putting the list back.
+        await wait(AFTER_HOLD_MS);
+        const restBottom = await measureNodeBottom(anchorRef);
+        const restDock = await measureNode(dockRef);
+        next.nearSentRestBottomY = restBottom;
+        next.nearSendRestVisible =
+          restBottom !== null && restDock !== null
+            ? restBottom <= restDock + VISIBLE_SLOP_PX
+            : null;
+        setResults(current => ({
+          ...current,
+          nearSendRestVisible: next.nearSendRestVisible,
+          nearSentRestBottomY: next.nearSentRestBottomY,
         }));
       }
 
@@ -1558,14 +1620,25 @@ function Harness(): React.JSX.Element {
                   results.nearSendVisible ? '보인다' : '가려짐'
                 } (출발 ${signedPx(results.nearSendFromPx)} → 남음 ${signedPx(
                   results.nearSendGapPx,
-                )})`
+                )} · 행 아랫변 ${px(results.nearSentBottomY)})`
           }
           pass={results.nearSendVisible}
+        />
+        <Row
+          label="세 화면 뒤 — 착지 유지가 끝난 뒤"
+          value={
+            results.nearSendRestVisible === null
+              ? '측정 중…'
+              : `${results.nearSendRestVisible ? '보인다' : '가려짐'} (행 아랫변 ${px(
+                  results.nearSentRestBottomY,
+                )})`
+          }
+          pass={results.nearSendRestVisible}
         />
         <Text style={styles.meta}>
           {`보낸 행 y ${
             results.dockY === null ? '측정 중…' : px(results.sentRowY) === '측정 중…' ? '행 미마운트' : px(results.sentRowY)
-          } · 컴포저 상단 y ${px(results.dockY)}`}
+          }–${px(results.sentRowBottomY)} · 컴포저 상단 y ${px(results.dockY)}`}
         </Text>
         <Text style={styles.meta}>
           {`대화 끝 y ${px(results.tailBottomY)} · 컴포저까지 ${signedPx(
