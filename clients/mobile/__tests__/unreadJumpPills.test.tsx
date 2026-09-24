@@ -15,7 +15,7 @@ import {join} from 'path';
 import React from 'react';
 import {AccessibilityInfo, FlatList, Keyboard} from 'react-native';
 
-import {Timeline} from '../src/features/conversation/Timeline';
+import {Timeline, type PillState} from '../src/features/conversation/Timeline';
 import {
   countNewerThan,
   countUnreadJump,
@@ -107,6 +107,9 @@ interface MountProps {
   selfSendToken?: number;
 }
 
+/** 진입이 앉았는지를 읽는 자리 — `settleAtBottom` 이 기다린다. 마운트마다 새로 만든다. */
+let pills: React.MutableRefObject<PillState | null> = {current: null};
+
 function element(listRef: ListRef, over: MountProps = {}) {
   return (
     <Timeline
@@ -123,11 +126,13 @@ function element(listRef: ListRef, over: MountProps = {}) {
       selfSendToken={over.selfSendToken}
       jumpPills={over.jumpPills ?? true}
       listRef={listRef}
+      pillsRef={pills}
     />
   );
 }
 
 function mount(over: MountProps = {}) {
+  pills = {current: null};
   const listRef = React.createRef<FlatList<TimelineStreamItem>>() as ListRef;
   const view = render(element(listRef, over));
   const rerender = (next: MountProps) => view.rerender(element(listRef, {...over, ...next}));
@@ -188,6 +193,9 @@ async function flushFrame() {
  * 진입: 목록이 첫 콘텐츠 크기를 알리고 바닥에 앉았다고 보고한다. 진입 수렴이
  * 그것을 보고 도착을 선언하면 — 그때가 이 목록이 「출발점에 앉은」 순간이다.
  * 이것 없이 보고를 부르면 마운트 순간(오프셋 0)의 보고를 흉내 내는 것이 된다.
+ *
+ * 도착은 콘텐츠가 `ENTRY_QUIET_MS`(150ms) 동안 멈춘 뒤에 선언된다(#2604) — 한
+ * 프레임 뒤가 아니다. 그 선언(`PillState.settled`)을 기다린다.
  */
 async function settleAtBottom() {
   fireEvent(list(), 'contentSizeChange', 390, 4000);
@@ -199,6 +207,10 @@ async function settleAtBottom() {
     },
   });
   await flushFrame();
+  for (let waited = 0; waited < 2000 && pills.current?.settled !== true; waited += 20) {
+    await sleep(20);
+  }
+  expect(pills.current?.settled).toBe(true);
 }
 
 /** 사람이 위로 올라가 읽는다 — 바닥에서 멀다. */

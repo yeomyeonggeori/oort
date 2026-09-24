@@ -595,5 +595,47 @@ describe('먼 전송 — 방금 보낸 내 메시지가 창 안에 선다 (#2586
     const sentRow = frames[frames.length - 2];
     expect(sentRow.y + sentRow.h).toBeLessThanOrEqual(native.offset + BEFORE.viewport + 0.5);
   });
+
+  // 착지 유지는 손가락에게 진다 (#2654 R2 N-4). 판정은 착지 유지의 창(도착 + 50ms 부터
+  // 600ms)이 **다 지난 뒤**에 한다 — 다음 50ms 틱 전에 보면 유지가 손가락을 되돌리는
+  // 것을 볼 수 없다(기존 「자리를 내준다」 시험들이 그래서 사보타주에도 초록이었다).
+  it('보낸 뒤 착지를 붙드는 동안 손가락이 목록을 잡으면, 손가락이 이긴다', async () => {
+    const {native, rerender} = mount(HISTORY, BEFORE);
+    await enter(BEFORE);
+    // 진입도 도착 뒤 착지를 붙든다(#2604). 그 유지가 끝난 뒤에 읽으러 올라간다 — 이
+    // 시험은 **전송의** 유지만 잰다.
+    await rounds(12);
+    fireEvent(screen.getByTestId('timeline-list'), 'scrollBeginDrag');
+    await act(async () => {
+      native.drag(400);
+      await new Promise(resolve => setTimeout(resolve, 60));
+    });
+
+    const sent: Layout = {...BEFORE, cells: [...BEFORE.cells, SENT_H]};
+    native.onDetach = () => {
+      const cells = [...sent.cells];
+      cells[1] = ROW_H - 78.3;
+      native.setLayout({...sent, cells});
+    };
+    native.setLayout(sent);
+    rerender([...HISTORY, SENT], 1);
+    for (let round = 0; round < 25 && !native.shoves.includes(-78.3); round += 1) {
+      await rounds(1);
+    }
+    await rounds(2);
+    // 다시 붙으며 −78.3 밀렸고, 착지 유지의 틱이 끝으로 되돌렸다 — 유지가 서 있다.
+    expect(native.shoves).toContain(-78.3);
+    expect(native.offset).toBeCloseTo(native.end, 1);
+
+    // 사람이 목록을 잡고 조금 올린다 — 방금 보낸 글 위를 다시 읽으려고.
+    const readAt = native.end - 300;
+    fireEvent(screen.getByTestId('timeline-list'), 'scrollBeginDrag');
+    await act(async () => {
+      native.drag(readAt);
+    });
+    await rounds(12); // 720ms — 남은 유지 창 전부
+
+    expect(native.offset).toBeCloseTo(readAt, 1);
+  });
 });
 
