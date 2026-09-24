@@ -410,31 +410,60 @@ pub async fn content(
 /// never-issued token answers the same 404 — which status a client sees says
 /// nothing about which URLs once worked, and every client already restarts a
 /// failed upload with a new session.
+///
+/// **The body is not read until the capability has been checked (#2628).**
+/// The extractor is the raw [`Body`], so nothing is buffered before this
+/// function runs; the token's shape is checked here, and the archive checks the
+/// session and the announced `Content-Length` before it pulls the first chunk,
+/// then writes the body as it arrives. A PUT with a made-up token costs the
+/// server its headers, not its body — before #2628 the `Bytes` extractor held
+/// up to 100 MB of it in memory first, for anyone who asked.
+///
+/// **This route answers 404 for a capability it refuses, and for nothing
+/// else** — malformed, unknown, spent, expired. The per-IP gate around it
+/// (`rate_limit::per_ip_drive_upload`) spends an address's budget on exactly
+/// those 404s and never refuses a live capability, so keep every other refusal
+/// here on its own status.
 pub async fn stub_upload(
     State(state): State<AppState>,
     Path(token): Path<String>,
-    headers: axum::http::HeaderMap,
-    body: axum::body::Bytes,
+    headers: HeaderMap,
+    body: Body,
 ) -> Result<StatusCode, ApiError> {
     // The same `^[a-f0-9-]{36}$` shape Swift required. A token that is not a
     // lowercase UUID cannot be one this process issued, so it is refused before
-    // the archive is asked about it.
-    let is_token = token.len() == 36
-        && token
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase() || byte == b'-');
-    if !is_token {
+    // the archive is asked about it — and before a byte of the body is read.
+    if !is_upload_token(&token) {
         return Err(ApiError::not_found("stub upload session not found"));
     }
     let mime = headers
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok());
+    let content_length = headers
+        .get(header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<u64>().ok());
     state
         .drive
-        .accept_stub_upload(&token, mime, body.to_vec())
+        .accept_stub_upload(
+            &token,
+            mime,
+            content_length,
+            momo_drive::upload_body(body.into_data_stream()),
+        )
         .await
         .map_err(drive_error)?;
     Ok(StatusCode::OK)
+}
+
+/// Whether `token` has the shape of a capability this process mints: a
+/// lowercase hyphenated UUID. An uppercase alias of a live token is refused
+/// here, so a case-insensitive filesystem never sees it.
+fn is_upload_token(token: &str) -> bool {
+    token.len() == 36
+        && token
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase() || byte == b'-')
 }
 
 #[cfg(test)]
@@ -488,16 +517,14 @@ mod tests {
         }
     }
 
-    /// The stub token shape, asserted directly: a path segment that is not a
-    /// lowercase UUID must never reach the archive.
+    /// The stub token shape, asserted on the route's own predicate (it used to
+    /// be a copy, which a change to the route could not turn red — #2624
+    /// review S12): a path segment that is not a lowercase UUID must never
+    /// reach the archive. `tests/drive_upload_edge.rs` asserts the same over
+    /// HTTP.
     #[test]
     fn a_stub_token_must_be_a_lowercase_uuid() {
-        let ok = |token: &str| {
-            token.len() == 36
-                && token.bytes().all(|byte| {
-                    byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase() || byte == b'-'
-                })
-        };
+        let ok = is_upload_token;
         assert!(ok("3f2504e0-4f89-41d3-9a0c-0305e82c3301"));
         assert!(!ok("3F2504E0-4F89-41D3-9A0C-0305E82C3301"), "uppercase");
         assert!(!ok("../../etc/passwd"));

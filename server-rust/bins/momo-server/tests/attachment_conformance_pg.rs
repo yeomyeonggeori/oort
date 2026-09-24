@@ -33,7 +33,7 @@ use momo_db::sqlx::Row;
 use momo_db::PgPool;
 use momo_drive::{
     DriveArchive, DriveContent, DriveError, DriveFile, DriveUploadSession, LocalDriveArchive,
-    StubDriveArchive, MAX_ATTACHMENT_BYTES,
+    StubDriveArchive, UploadBody, MAX_ATTACHMENT_BYTES,
 };
 use momo_messaging::{create_channel, ChannelKind, NewChannel};
 use momo_server::{build_app, AppState};
@@ -769,9 +769,12 @@ impl DriveArchive for DivergentMimeArchive {
         &self,
         token: &str,
         mime: Option<&str>,
-        bytes: Vec<u8>,
+        content_length: Option<u64>,
+        body: UploadBody,
     ) -> Result<(), DriveError> {
-        self.inner.accept_stub_upload(token, mime, bytes).await
+        self.inner
+            .accept_stub_upload(token, mime, content_length, body)
+            .await
     }
 }
 
@@ -1480,9 +1483,12 @@ impl DriveArchive for DivergentSizeArchive {
         &self,
         token: &str,
         mime: Option<&str>,
-        bytes: Vec<u8>,
+        content_length: Option<u64>,
+        body: UploadBody,
     ) -> Result<(), DriveError> {
-        self.inner.accept_stub_upload(token, mime, bytes).await
+        self.inner
+            .accept_stub_upload(token, mime, content_length, body)
+            .await
     }
 }
 
@@ -1873,4 +1879,143 @@ async fn an_expired_upload_url_is_refused_by_both_archives() {
             .expect("row");
         assert_eq!(status, "pending", "{label}: nothing completed");
     }
+}
+
+// ---------------------------------------------------------------------------
+// #2628 — a restored drive volume does not reopen an upload URL
+// ---------------------------------------------------------------------------
+
+fn copy_tree(from: &std::path::Path, to: &std::path::Path) {
+    std::fs::create_dir_all(to).expect("mkdir");
+    for entry in std::fs::read_dir(from).expect("read_dir").flatten() {
+        let target = to.join(entry.file_name());
+        if entry.file_type().expect("file type").is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), &target).expect("copy");
+        }
+    }
+}
+
+/// **Red proof (#2628, #2624 review R11).** The operator restores only the
+/// drive volume, from a snapshot taken after a session was created and before
+/// its upload — PostgreSQL untouched, so the attachment is still `complete`
+/// and posted. The snapshot holds the session file and no object, so the
+/// landed-object check has nothing to see and the deadline is an hour away.
+/// Before the fix the replay answered 200 and Bob then read the forged bytes
+/// under the completed attachment id. The restarted server clears the
+/// restored session instead.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_restored_drive_volume_does_not_reopen_a_completed_upload_url() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let dir = ArchiveDir::new("restore");
+    let snapshot = ArchiveDir::new("restore-snapshot");
+    let before_dir = dir.path();
+    let (base, _before) = start_server_with(app_pool.clone(), move |base| {
+        Arc::new(LocalDriveArchive::open(Some(before_dir.as_str()), &base).expect("local archive"))
+    })
+    .await;
+    let http = reqwest::Client::new();
+    let alice = login(&http, &base, fixture.workspace, &fixture.alice).await;
+    let bob = login(&http, &base, fixture.workspace, &fixture.bob).await;
+
+    const ORIGINAL: &[u8] = b"signed-contract-v1";
+    const FORGED: &[u8] = b"signed-contract-XX";
+    let created = http
+        .post(uploads_url(&base, fixture.workspace, fixture.channel))
+        .bearer_auth(&alice)
+        .json(&json!({"name": "contract.txt", "mime": "text/plain", "size": ORIGINAL.len()}))
+        .send()
+        .await
+        .expect("create upload");
+    assert_eq!(created.status(), 201);
+    let created: Value = created.json().await.expect("body");
+    let attachment_id = created["id"].as_str().expect("id").to_string();
+    let upload_url = created["uploadUrl"]
+        .as_str()
+        .expect("uploadUrl")
+        .to_string();
+
+    // The snapshot: the session exists, the object does not yet.
+    copy_tree(&dir.0, &snapshot.0);
+
+    assert_eq!(
+        http.put(&upload_url)
+            .header(reqwest::header::CONTENT_TYPE, "text/plain")
+            .body(ORIGINAL.to_vec())
+            .send()
+            .await
+            .expect("put")
+            .status(),
+        200
+    );
+    let completed = http
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/attachments/{attachment_id}/complete",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&alice)
+        .send()
+        .await
+        .expect("complete");
+    assert_eq!(completed.status(), 200);
+    let sent = http
+        .post(messages_url(&base, fixture.workspace, fixture.channel))
+        .bearer_auth(&alice)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "type": "text",
+            "body": "계약서입니다",
+            "attachmentIds": [attachment_id],
+        }))
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(sent.status(), 201);
+
+    // Restore the drive volume alone, and restart the server over it.
+    std::fs::remove_dir_all(&dir.0).expect("lose the volume");
+    copy_tree(&snapshot.0, &dir.0);
+    let after_dir = dir.path();
+    let (restored, _after) = start_server_with(app_pool.clone(), move |base| {
+        Arc::new(LocalDriveArchive::open(Some(after_dir.as_str()), &base).expect("local archive"))
+    })
+    .await;
+    let replay_url = upload_url.replacen(&base, &restored, 1);
+    assert_ne!(
+        replay_url, upload_url,
+        "the replay goes to the restarted server"
+    );
+
+    let replay = http
+        .put(&replay_url)
+        .header(reqwest::header::CONTENT_TYPE, "text/plain")
+        .body(FORGED.to_vec())
+        .send()
+        .await
+        .expect("replayed put");
+    let replay_status = replay.status().as_u16();
+    let read = http
+        .get(content_url(
+            &restored,
+            fixture.workspace,
+            fixture.channel,
+            &attachment_id,
+        ))
+        .bearer_auth(&bob)
+        .send()
+        .await
+        .expect("content");
+    let read_status = read.status().as_u16();
+    let read_bytes = read.bytes().await.expect("bytes").to_vec();
+    assert!(
+        matches!(replay_status, 404 | 410) && read_bytes != FORGED,
+        "#2628: after a drive-only restore the replay answered {replay_status} and Bob now \
+         reads {read_status} {:?} under the completed attachment",
+        String::from_utf8_lossy(&read_bytes),
+    );
 }
