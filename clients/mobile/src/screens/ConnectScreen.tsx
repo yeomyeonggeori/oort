@@ -34,6 +34,7 @@ import {useCameraPermissions} from 'expo-camera';
 import NetInfo from '@react-native-community/netinfo';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
+  AccessibilityInfo,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -384,6 +385,16 @@ export default function ConnectScreen({
       if (failure.suggestSignIn) setMode('signIn');
     }
   }, [email, inviteCode, joining, password, serverUrl]);
+
+  // A failure is also SAID, once, when it arrives (#2678 R1) — the web banner is
+  // `role="alert"`. On the phone that is `announceForAccessibility`, as in the
+  // attachment tray and the approval card: `accessibilityLiveRegion` is
+  // Android-only and would be a second reading there. Keyed on the failure
+  // object, which `onSubmit` creates once per answer, so a re-render (the mode
+  // following "로그인하세요") does not say it again.
+  useEffect(() => {
+    if (phase.failure) AccessibilityInfo.announceForAccessibility(phase.failure.message);
+  }, [phase.failure]);
 
   const toggleMode = useCallback(() => {
     setMode(current => (current === 'join' ? 'signIn' : 'join'));
@@ -814,19 +825,16 @@ export default function ConnectScreen({
             />
           </Field>
 
-          {/* A plain wrapper, only to report where the button is (#2678). One
-              child in the content's gap chain, as the button alone was. */}
-          <View onLayout={rowLayout.action}>
-            <PrimaryButton
-              label={joining ? '초대 코드로 참여' : '로그인'}
-              busyLabel={joining ? '참여 중' : '로그인 중'}
-              busy={phase.busy}
-              disabled={!canSubmit}
-              onPress={() => void onSubmit()}
-              testID="submit-button"
-            />
-          </View>
-
+          {/* ABOVE the button, as on the web (`ConnectPage` puts the failure over
+              its submit), and that is the #2678 R1 fix, not taste. The button
+              is pressed with the keyboard up, and the row after it is the
+              keyboard's top edge: rendered below, this sentence arrived behind
+              the keyboard (iPhone 13 mini: banner 468–514, keyboard 468). Here it
+              sits between the focused field and the button — inside the block
+              the reveal keeps above the keyboard — and its arrival pushes the
+              button's row down, which is itself a reveal trigger. A direct child
+              of the content, like every row: the button's `onLayout` reports
+              content coordinates only because its parent is the content. */}
           {phase.failure ? (
             <FailureBanner
               message={phase.failure.message}
@@ -842,6 +850,19 @@ export default function ConnectScreen({
               testID="failure"
             />
           ) : null}
+
+          {/* A plain wrapper, only to report where the button is (#2678). One
+              child in the content's gap chain, as the button alone was. */}
+          <View onLayout={rowLayout.action}>
+            <PrimaryButton
+              label={joining ? '초대 코드로 참여' : '로그인'}
+              busyLabel={joining ? '참여 중' : '로그인 중'}
+              busy={phase.busy}
+              disabled={!canSubmit}
+              onPress={() => void onSubmit()}
+              testID="submit-button"
+            />
+          </View>
 
           <Pressable
             accessibilityRole="button"
