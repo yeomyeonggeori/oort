@@ -1067,16 +1067,35 @@ export async function restoreSession(): Promise<LoginResponse | null> {
   return restoredLoginResponse(persisted, token);
 }
 
+export interface LogoutOptions {
+  /**
+   * Host cleanup that needs the leaving session one last time — the phone
+   * revoking its push registration (#2677, ADR-0120 D4). Runs AFTER the local
+   * wipe (the person is already out) and BEFORE the server revocation (the last
+   * moment the captured access token still authenticates), with that token.
+   * Awaited so its request is on the wire before the token dies; a rejection is
+   * swallowed — it never stops the revocation.
+   */
+  beforeRevoke?: (accessToken: string) => Promise<unknown>;
+}
+
 /**
  * Log out completely. The local wipe happens FIRST and unconditionally, so a
  * slow or failing network can never leave a usable token on the device; the
  * server revocation then runs with the captured pair as a best effort.
  */
-export async function logout(): Promise<void> {
+export async function logout(options: LogoutOptions = {}): Promise<void> {
   const access = coreSession().getAccessToken();
   const refresh = coreSession().getRefreshToken();
   coreSession().clearSession();
   if (!access) return; // nothing the server will accept a revocation for
+  if (options.beforeRevoke) {
+    try {
+      await options.beforeRevoke(access);
+    } catch {
+      // Best effort by contract: the session still has to end.
+    }
+  }
   const revoke = (accessToken: string, refreshToken: string | null) =>
     rawRequest(
       "/v1/auth/logout",
