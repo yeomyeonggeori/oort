@@ -521,6 +521,54 @@ describe('what the upload declares stays true of the code (#2568)', () => {
   });
 });
 
+describe('the app icon App Store Connect requires (#2643)', () => {
+  // The first TestFlight upload (build 3023) was rejected with 90713 (no
+  // CFBundleIconName), 90022 (iPhone 120) and 90023 (iPad 152/167). The RN
+  // template's AppIcon set held a Contents.json and no image, and every local
+  // build and gate stayed green. actool derives those Info.plist keys and every
+  // device size from one 1024 image (the single-size catalog), so the guard is
+  // on that one file.
+  const ICONSET = join(APP_ROOT, 'ios/MomoMobile/Images.xcassets/AppIcon.appiconset');
+  const images = () =>
+    JSON.parse(readFileSync(join(ICONSET, 'Contents.json'), 'utf8')).images as Array<
+      Record<string, string>
+    >;
+
+  it('is one universal 1024 image, present as a real file', () => {
+    const list = images();
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({idiom: 'universal', platform: 'ios', size: '1024x1024'});
+    expect(list[0].filename).toBeTruthy();
+    expect(existsSync(join(ICONSET, list[0].filename))).toBe(true);
+  });
+
+  it('is a 1024x1024 PNG without an alpha channel', () => {
+    // App Store Connect rejects an icon with alpha. The PNG header says it
+    // directly: IHDR colour type 2 is RGB; 6 is RGBA and 4 is grey + alpha, and
+    // a tRNS chunk would make even an RGB image transparent.
+    const png = readFileSync(join(ICONSET, images()[0].filename));
+    expect(png.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+    expect(png.toString('latin1', 12, 16)).toBe('IHDR');
+    expect(png.readUInt32BE(16)).toBe(1024);
+    expect(png.readUInt32BE(20)).toBe(1024);
+    expect(png[25]).toBe(2);
+    const chunks: string[] = [];
+    for (let at = 8; at + 8 <= png.length; at += 12 + png.readUInt32BE(at)) {
+      chunks.push(png.toString('latin1', at + 4, at + 8));
+    }
+    expect(chunks).not.toContain('tRNS');
+    expect(chunks[chunks.length - 1]).toBe('IEND');
+  });
+
+  it('is the set the app target compiles', () => {
+    // Both configurations of the app target; the extension has no icon.
+    expect(
+      readFileSync(PBXPROJ, 'utf8').match(/ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;/g)
+        ?.length,
+    ).toBe(2);
+  });
+});
+
 describe('the local upload build number rule (#2568)', () => {
   // Xcode Cloud numbers its builds in the 2000s (2035, 2039). Local uploads
   // take 3000 + the KST day count since 2026-09-01, so the two never collide
