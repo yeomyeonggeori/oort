@@ -14,6 +14,8 @@ import { releaseAfter, SESSION_HYDRATE_BUDGET_MS } from "@/app/boot";
 import { trackViewportHeight } from "@/app/viewportHeight";
 import { initFocusModality } from "@/design/focusModality";
 import { initTheme } from "@/design/theme";
+import { installDesktopDropGuard } from "@/lib/desktopDropGuard";
+import { IS_TAURI } from "@/lib/env";
 import "@/design/tokens.css";
 
 // 셸 높이의 근거 (goal B9). 첫 렌더보다 먼저 켠다: 로그인 화면도 셸 밖의 표면이라
@@ -27,6 +29,11 @@ trackViewportHeight();
 // 모듈이 가진 선택이 문서와 어긋나지 않는다는 사실이다.
 initTheme();
 initFocusModality(document);
+
+// 데스크탑 셸만 (#2671). 셸이 끌기를 WebKit에 넘기므로(`dragDropEnabled: false`),
+// 받는 곳 없이 놓인 파일·링크가 창을 그 파일·주소로 옮기지 않게 여기서 삼킨다.
+// 브라우저 탭은 건드리지 않는다. 자세한 까닭은 lib/desktopDropGuard.ts.
+if (IS_TAURI) installDesktopDropGuard(window);
 
 // StrictMode is intentionally OFF: its dev-only double-invocation would
 // double-subscribe the Centrifugo rail and make the realtime/resume demo
