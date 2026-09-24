@@ -533,8 +533,6 @@ echo "[test-push-relay-stub-e2e] #2677 qa logout → mention → nothing for the
 CAPTURES_BEFORE="$(capture_lines)"
 api POST /v1/auth/logout "$QA_TOKEN" "$(jq -cn --arg refreshToken "$QA_REFRESH" '{refreshToken:$refreshToken}')"
 expect 200 "qa logout"
-LIVE_TOKENS="$(psql_at "SELECT count(*) FROM push_token WHERE device_id = '$DEVICE_ID' AND invalidated_at IS NULL")"
-test "$LIVE_TOKENS" = 0 || fail "#2677 logout left the signed-out device's push token live ($LIVE_TOKENS)"
 mention_qa "after-logout"
 wait_candidate_done "$MENTION_ID"
 CAPTURES_AFTER="$(capture_lines)"
@@ -542,6 +540,8 @@ test "$CAPTURES_AFTER" = "$CAPTURES_BEFORE" \
   || fail "#2677 the signed-out device still got a push (captures $CAPTURES_BEFORE → $CAPTURES_AFTER)"
 DISPATCHED="$(psql_at "SELECT count(*) FROM push_dispatch_log WHERE message_id = '$MENTION_ID'")"
 test "$DISPATCHED" = 0 || fail "#2677 a dispatch was logged for the signed-out device ($DISPATCHED)"
+LIVE_TOKENS="$(psql_at "SELECT count(*) FROM push_token WHERE device_id = '$DEVICE_ID' AND invalidated_at IS NULL")"
+test "$LIVE_TOKENS" = 0 || fail "#2677 logout left the signed-out device's push token live ($LIVE_TOKENS)"
 echo "PASS: #2677 logout → mention → 0 dispatch, 0 capture (push_token invalidated)"
 
 # The check above must be able to fail. Sign back in, re-register the same phone
