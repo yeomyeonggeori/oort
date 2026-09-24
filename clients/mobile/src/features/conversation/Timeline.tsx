@@ -1210,6 +1210,17 @@ function TimelineInner({
     setUnreadLatched(true);
   }, [relationNow]);
 
+  /**
+   * 「앉았다」를 여는 **하나뿐인 문** (#2680 R1 H-1).
+   *
+   * `entrySettledRef` 를 참으로 쓰는 곳은 여기뿐이다. 이 순간에 함께 서야 하는 것이
+   * 셋 — 래치의 무장, 측정 seam, 옛 페이지 문(`olderReady`) — 이고, 문을 비껴 ref
+   * 만 쓰는 길이 하나라도 있으면 그 뒤의 모든 `settleEntry()` 가 첫 줄에서 돌아가
+   * 나머지가 방문 내내 닫힌 채 남는다. 실제로 그랬다: 진입이 앉기 전에 「안읽음」
+   * 필을 누르면 `jumpToUnread` 가 ref 를 직접 썼고, 착지·손가락·풀림의 `settleEntry()`
+   * 가 모두 헛돌아 `onStartReached` 가 끝내 붙지 않았다(리뷰 재현: 필 → 착지 → 손가락
+   * 으로 맨 위 → 옛 페이지 부름 0).
+   */
   const settleEntry = useCallback(() => {
     if (entrySettledRef.current) return;
     entrySettledRef.current = true;
@@ -2176,9 +2187,13 @@ function TimelineInner({
   const jumpToUnread = useCallback(() => {
     const index = itemsRef.current.findIndex(item => item.kind === 'unread');
     if (index < 0) return;
+    // 누르는 것이 곧 앉음이다 — 진입이 아직 끝을 쫓고 있었어도. 문은 `settleEntry`
+    // 하나다(#2680 R1 H-1): ref 만 쓰면 옛 페이지 문이 이 방문 내내 닫힌다. 래치는
+    // 그 뒤에 건다 — 필이 서 있었다는 것은 구분선이 창 위에 있었다는 것이라 문의
+    // 「봤다」 판정은 아무것도 하지 않지만, 이 누름의 기록(`pressed`)이 마지막 말이다.
+    settleEntry();
     latchNoteRef.current = 'pressed';
     setUnreadLatched(true);
-    entrySettledRef.current = true;
     cancelConvergence();
     cancelFocus();
     scrollPinUntilRef.current = 0;
@@ -2192,7 +2207,14 @@ function TimelineInner({
     travelToIndex(index, 0, !reduceMotionRef.current, delayMs =>
       focusRow(focusTarget, delayMs),
     );
-  }, [cancelConvergence, cancelFocus, focusRow, reduceMotionRef, travelToIndex]);
+  }, [
+    cancelConvergence,
+    cancelFocus,
+    focusRow,
+    reduceMotionRef,
+    settleEntry,
+    travelToIndex,
+  ]);
 
   // 아래 필은 전송과 같은 여정이다 — 먼 과거에서 끝까지 가는 길은 RN-P3 가 이미
   // 닦았고(측정된 클램프를 오르는 즉시 라운드), 두 번째 길을 내면 그 수리를 다시
