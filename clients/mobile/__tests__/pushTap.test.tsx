@@ -285,6 +285,11 @@ interface FetchOptions {
     channelId: string,
     after: number,
   ) => Response | Promise<Response> | undefined;
+  /**
+   * 한 방의 **첫 페이지** 읽기(`after`·`before` 없는 `/messages`)에 직접 답한다 —
+   * 그 읽기를 붙들어 두려고 있다(#2632 N-3). `undefined` 면 서버 그대로.
+   */
+  headResponder?: (channelId: string) => Response | Promise<Response> | undefined;
 }
 
 type FetchInit = {method?: string; body?: unknown};
@@ -375,6 +380,10 @@ function installFetch(options: FetchOptions = {}): jest.Mock {
         return jsonResponse(200, {
           messages: all.filter(m => (m as {seq: number}).seq > since),
         });
+      }
+      if (!/[?&]before=/.test(url)) {
+        const answered = options.headResponder?.(channelId);
+        if (answered !== undefined) return answered;
       }
       return jsonResponse(200, {messages: all});
     }
@@ -1679,5 +1688,432 @@ describe('같은 방 복귀 탭 — 탭 뒤에 읽은 것만으로 없다고 말
     await waitFor(() => expect(landedIds()).toContain(RANDOM_REPLY_B), SETTLE);
     await sleep(400);
     expect(toIndex.mock.calls.length - before).toBe(1);
+  });
+});
+
+// =============================================================================
+// 「있다」는 언제든, 「없다」는 탭 뒤 REST 읽기의 답으로만 (#2632 — #2584 R3 후속).
+//
+// #2584 는 같은 방 복귀 탭을 탭 뒤의 꼬리 읽기(`catchUp`)로 판정하게 했다. R3 리뷰가
+// 그 규율이 새는 자리를 남겼다:
+//
+//   M-1  레일의 재생 표지가 읽기를 앞질러 「없다」를 판정했다(relay 적체 때 재생에
+//        그 행이 아직 없다) — 거짓 「찾지 못했습니다」와 회수되지 않는 낭독.
+//   M-2  읽기가 「있다」까지 막았다 — 이미 들고 있는 행·스레드 루트도, 읽기가
+//        실패하면 가지 않았다.
+//   N-1  보이지 않는 기다림 뒤의 늦은 착지가 사람이 잡은 목록을 옮겼다.
+//   N-3  같은 방의 첫 페이지가 오는 중의 탭을, 탭 **앞에** 떠난 그 페이지로 판정했다.
+//   O-2  레일 역채움이 방을 옮긴 뒤에 온 답을 새 방에 섞을 수 있었다.
+//
+// 시험마다 서버의 뒤늦은 행(`serverLater`)은 `beforeEach` 가 비운다 — R3 리뷰 N-2 가
+// 짚은 탐침의 모듈 상태 누수가 여기서는 없다.
+// =============================================================================
+
+interface Held {
+  promise: Promise<Response>;
+  release: (answer: Response) => void;
+}
+
+/** 답을 붙들어 둔 요청 하나 — 테스트가 답할 때까지 온다. */
+function held(): Held {
+  let release: (answer: Response) => void = () => {};
+  const promise = new Promise<Response>(resolve => {
+    release = resolve;
+  });
+  return {promise, release};
+}
+
+/** 그 방의 `?after=` 읽기들(따라잡기·역채움)의 `after` 값, 나간 순서대로. */
+function afterReadsOf(fetchMock: jest.Mock, channelId: string): number[] {
+  return fetchMock.mock.calls
+    .map(([url]) => String(url))
+    .filter(
+      url =>
+        url.toLowerCase().includes(channelId) &&
+        url.includes('/messages') &&
+        /[?&]after=/.test(url),
+    )
+    .map(url => Number(/[?&]after=(\d+)/.exec(url)?.[1]));
+}
+
+/** 채널 목록이 들고 있는 메시지 id 들. */
+function rowsHeld(): string[] {
+  const list = screen
+    .UNSAFE_getAllByType(FlatList)
+    .find(node => node.props.testID === 'timeline-list');
+  const data = (list?.props.data ?? []) as {
+    kind?: string;
+    message?: {id?: string};
+  }[];
+  return data
+    .filter(item => item.kind === 'message')
+    .map(item => String(item.message?.id).toLowerCase());
+}
+
+/** 처음 붙은 뒤의 레일 — 첫 `subscribed` 를 보내 둔다(그때의 역채움은 새것이 없다). */
+async function railAttached(): Promise<void> {
+  await act(async () => {
+    channelSub(GENERAL)?.__subscribed({recovered: false});
+  });
+  await sleep(50);
+}
+
+const NEW_REPLY_ID = 'aaaaaaaa-0000-4000-8000-000000000098';
+
+describe('「있다」는 언제든, 「없다」는 탭 뒤 읽기로만 (#2632)', () => {
+  it('꼬리 읽기가 오는 동안 레일이 빈 재생으로 다시 붙어도(relay 적체) 「없다」를 말하지 않는다 — 읽기가 답하면 착지 (M-1, 탐침 edge-b2)', async () => {
+    const gates: Held[] = [];
+    let holdNext = false;
+    installFetch({
+      afterResponder: channelId => {
+        if (channelId !== GENERAL || !holdNext) return undefined;
+        holdNext = false;
+        const gate = held();
+        gates.push(gate);
+        return gate.promise;
+      },
+    });
+    const emitAppState = captureAppState();
+    renderShell();
+    await waitForSidebar();
+    await openGeneral();
+    await railAttached();
+    const toIndex = jest
+      .spyOn(FlatList.prototype, 'scrollToIndex')
+      .mockImplementation(() => {});
+
+    act(() => emitAppState('background'));
+    commitLater(GENERAL, NEW_ROW);
+    holdNext = true;
+    await tapWhileRunning(apnsPayload({messageId: NEW_ID}));
+    act(() => emitAppState('active'));
+    await sleep(50);
+    expect(gates).toHaveLength(1); // 탭 뒤의 꼬리 읽기가 가는 중이다
+
+    // 레일이 다시 붙었다 — 복구됐지만 재생에 seq 17 이 아직 없다(relay 가 밀렸다).
+    await act(async () => {
+      channelSub(GENERAL)?.__subscribed({recovered: true, publications: []});
+    });
+    await sleep(150);
+    expect(missAnnouncements()).toEqual([]);
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
+    expect(toIndex).not.toHaveBeenCalled();
+
+    // 탭 뒤의 REST 읽기가 답한다 — 그 행은 서버에 있다.
+    await act(async () => {
+      gates[0].release(jsonResponse(200, {messages: [NEW_ROW]}));
+    });
+    await waitFor(() => expect(movedToRow(NEW_ID, toIndex)).toBe(true), SETTLE);
+    expect(toIndex).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
+    expect(missAnnouncements()).toEqual([]);
+  });
+
+  it('읽기가 실패한 뒤 레일이 빈 재생으로 다시 붙어도 「없다」를 말하지 않는다 — 탭 뒤에 다시 읽어 착지 (M-1)', async () => {
+    let failNext = false;
+    const fetchMock = installFetch({
+      afterResponder: channelId => {
+        if (channelId !== GENERAL || !failNext) return undefined;
+        failNext = false;
+        return jsonResponse(503, {error: {message: 'offline'}});
+      },
+    });
+    const emitAppState = captureAppState();
+    renderShell();
+    await waitForSidebar();
+    await openGeneral();
+    await railAttached();
+    const toIndex = jest
+      .spyOn(FlatList.prototype, 'scrollToIndex')
+      .mockImplementation(() => {});
+
+    act(() => emitAppState('background'));
+    commitLater(GENERAL, NEW_ROW);
+    failNext = true; // 탭 뒤의 첫 꼬리 읽기가 실패한다
+    await tapWhileRunning(apnsPayload({messageId: NEW_ID}));
+    act(() => emitAppState('active'));
+    await sleep(100);
+    const readsBeforeReplay = afterReadsOf(fetchMock, GENERAL).length;
+
+    await act(async () => {
+      channelSub(GENERAL)?.__subscribed({recovered: true, publications: []});
+    });
+    await sleep(150);
+    expect(missAnnouncements()).toEqual([]);
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
+    // 레일이 돌아왔다는 신호로 **탭 뒤에** 다시 읽었고, 그 답이 착지를 정했다.
+    await waitFor(() => expect(movedToRow(NEW_ID, toIndex)).toBe(true), SETTLE);
+    expect(afterReadsOf(fetchMock, GENERAL).length).toBeGreaterThan(
+      readsBeforeReplay,
+    );
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
+    expect(missAnnouncements()).toEqual([]);
+  });
+
+  it('들고 있는 메시지는 읽지 않고 곧바로 착지한다 — 꼬리 읽기가 실패하는 망에서도 (M-2, 탐침 edge-b1)', async () => {
+    const fetchMock = installFetch({
+      afterResponder: channelId =>
+        channelId === GENERAL
+          ? jsonResponse(503, {error: {message: 'offline'}})
+          : undefined,
+    });
+    const emitAppState = captureAppState();
+    renderShell();
+    await waitForSidebar();
+    await openGeneral();
+    const toIndex = jest
+      .spyOn(FlatList.prototype, 'scrollToIndex')
+      .mockImplementation(() => {});
+
+    act(() => emitAppState('background'));
+    commitLater(GENERAL, NEW_ROW);
+    act(() => emitAppState('active'));
+    // 소켓은 살아 있었다(유예 안에 돌아왔다) — 레일이 그 행을 먼저 들고 왔다.
+    await railDelivers(17, NEW_ID, NEW_BODY);
+    expect(rowsHeld()).toContain(NEW_ID);
+    const readsBefore = afterReadsOf(fetchMock, GENERAL).length;
+
+    await tapWhileRunning(apnsPayload({messageId: NEW_ID}));
+    await waitFor(() => expect(movedToRow(NEW_ID, toIndex)).toBe(true), SETTLE);
+    // 들고 있으니 읽지 않았다.
+    expect(afterReadsOf(fetchMock, GENERAL).length).toBe(readsBefore);
+    expect(toIndex).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
+    expect(missAnnouncements()).toEqual([]);
+  });
+
+  it('스레드 루트를 들고 있으면 꼬리 읽기가 실패해도 스레드를 열고 그 답글에 착지한다 (M-2, 탐침 edge-c3)', async () => {
+    installFetch({
+      afterResponder: channelId =>
+        channelId === GENERAL
+          ? jsonResponse(503, {error: {message: 'offline'}})
+          : undefined,
+    });
+    const emitAppState = captureAppState();
+    renderShell();
+    await waitForSidebar();
+    await openGeneral();
+
+    act(() => emitAppState('background'));
+    commitLater(
+      GENERAL,
+      message(17, NEW_REPLY_ID, {rootId: ROOT, body: '방금 단 답글'}),
+    );
+    await tapWhileRunning(
+      apnsPayload({
+        messageId: NEW_REPLY_ID,
+        threadId: ROOT,
+        category: 'momo.message',
+        reason: 'dm',
+      }),
+    );
+    act(() => emitAppState('active'));
+
+    // 루트는 첫 페이지에 있다 — 스레드는 자기 답글을 스스로 읽는다(`loadReplies`).
+    await waitFor(
+      () => expect(screen.getByTestId('thread-title')).toBeTruthy(),
+      SETTLE,
+    );
+    await waitFor(() => expect(landedIds()).toContain(NEW_REPLY_ID), SETTLE);
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
+    expect(missAnnouncements()).toEqual([]);
+  });
+
+  it('읽기가 실패해 기다리는 중에 레일이 그 행을 들고 오면(표지 없이) 곧바로 착지한다 — 「있다」는 언제든 (M-2)', async () => {
+    let failNext = false;
+    installFetch({
+      afterResponder: channelId => {
+        if (channelId !== GENERAL || !failNext) return undefined;
+        failNext = false;
+        return jsonResponse(503, {error: {message: 'offline'}});
+      },
+    });
+    const emitAppState = captureAppState();
+    renderShell();
+    await waitForSidebar();
+    await openGeneral();
+    const toIndex = jest
+      .spyOn(FlatList.prototype, 'scrollToIndex')
+      .mockImplementation(() => {});
+
+    act(() => emitAppState('background'));
+    commitLater(GENERAL, NEW_ROW);
+    failNext = true;
+    await tapWhileRunning(apnsPayload({messageId: NEW_ID}));
+    act(() => emitAppState('active'));
+    await sleep(100);
+    expect(toIndex).not.toHaveBeenCalled(); // 모른다 — 기다린다
+
+    // 소켓은 멀쩡했다 — 재구독 없이 발행 한 통으로 그 행이 온다.
+    await railDelivers(17, NEW_ID, NEW_BODY);
+    await waitFor(() => expect(movedToRow(NEW_ID, toIndex)).toBe(true), SETTLE);
+    expect(toIndex).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
+    expect(missAnnouncements()).toEqual([]);
+  });
+
+  it('보이지 않는 기다림 중에 사람이 목록을 잡으면 그 기다림은 접힌다 — 늦게 온 읽기가 목록을 옮기지 않는다 (N-1, 탐침 edge-b3)', async () => {
+    const gates: Held[] = [];
+    let holdNext = false;
+    installFetch({
+      afterResponder: channelId => {
+        if (channelId !== GENERAL || !holdNext) return undefined;
+        holdNext = false;
+        const gate = held();
+        gates.push(gate);
+        return gate.promise;
+      },
+    });
+    const emitAppState = captureAppState();
+    renderShell();
+    await waitForSidebar();
+    await openGeneral();
+    const toIndex = jest
+      .spyOn(FlatList.prototype, 'scrollToIndex')
+      .mockImplementation(() => {});
+
+    act(() => emitAppState('background'));
+    commitLater(GENERAL, NEW_ROW);
+    holdNext = true;
+    await tapWhileRunning(apnsPayload({messageId: NEW_ID}));
+    act(() => emitAppState('active'));
+    await sleep(100);
+
+    // 읽기가 느린 동안 사람이 목록을 잡았다.
+    fireEvent(screen.getAllByTestId('timeline-list')[0], 'scrollBeginDrag');
+    await act(async () => {
+      gates[0].release(jsonResponse(200, {messages: [NEW_ROW]}));
+    });
+    await sleep(300);
+    expect(rowsHeld()).toContain(NEW_ID); // 그 행은 왔다 — 목록에는 있다
+    expect(toIndex).not.toHaveBeenCalled(); // 그러나 잡은 목록을 옮기지 않았다
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
+    expect(missAnnouncements()).toEqual([]);
+  });
+
+  it('읽기가 실패해 레일을 기다리는 중에 목록을 잡으면, 늦게 온 역채움도 목록을 옮기지 않는다 (N-1, 탐침 edge2-b4)', async () => {
+    let failNext = false;
+    installFetch({
+      afterResponder: channelId => {
+        if (channelId !== GENERAL || !failNext) return undefined;
+        failNext = false;
+        return jsonResponse(503, {error: {message: 'offline'}});
+      },
+    });
+    const emitAppState = captureAppState();
+    renderShell();
+    await waitForSidebar();
+    await openGeneral();
+    await railAttached();
+    const toIndex = jest
+      .spyOn(FlatList.prototype, 'scrollToIndex')
+      .mockImplementation(() => {});
+
+    act(() => emitAppState('background'));
+    commitLater(GENERAL, NEW_ROW);
+    failNext = true;
+    await tapWhileRunning(apnsPayload({messageId: NEW_ID}));
+    act(() => emitAppState('active'));
+    await sleep(100);
+
+    fireEvent(screen.getAllByTestId('timeline-list')[0], 'scrollBeginDrag');
+    // 소켓이 돌아와 다시 붙었다 — 복구 안 됨 → 레일이 REST 로 꼬리를 역채운다.
+    await act(async () => {
+      channelSub(GENERAL)?.__subscribed({recovered: false});
+    });
+    await sleep(300);
+    expect(rowsHeld()).toContain(NEW_ID);
+    expect(toIndex).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
+    expect(missAnnouncements()).toEqual([]);
+  });
+
+  it('같은 방의 첫 페이지가 오는 중에 탭이 와도, 탭 앞에 떠난 그 페이지로 「없다」를 말하지 않는다 — 따라잡은 뒤 착지 (N-3, 탐침 edge3-e1)', async () => {
+    const heads: Held[] = [];
+    let holdHead = false;
+    const fetchMock = installFetch({
+      headResponder: channelId => {
+        if (channelId !== GENERAL || !holdHead) return undefined;
+        holdHead = false;
+        const gate = held();
+        heads.push(gate);
+        return gate.promise;
+      },
+    });
+    const emitAppState = captureAppState();
+    renderShell();
+    await waitForSidebar();
+    holdHead = true;
+    fireEvent.press(screen.getByTestId(`sidebar-row-channel:${GENERAL}`));
+    await waitFor(
+      () =>
+        expect(screen.getByTestId('conversation-title')).toHaveTextContent(
+          'general',
+        ),
+      SETTLE,
+    );
+    expect(heads).toHaveLength(1); // 첫 페이지 읽기가 떠났다 — 아직 답이 없다
+    const toIndex = jest
+      .spyOn(FlatList.prototype, 'scrollToIndex')
+      .mockImplementation(() => {});
+
+    act(() => emitAppState('background'));
+    commitLater(GENERAL, NEW_ROW); // 그 읽기가 떠난 뒤에 커밋됐다
+    await tapWhileRunning(apnsPayload({messageId: NEW_ID}));
+    act(() => emitAppState('active'));
+    await sleep(50);
+
+    // 탭 **앞에** 떠난 읽기의 답이 온다 — 그 행은 없다(그때는 커밋 전이었다).
+    await act(async () => {
+      heads[0].release(jsonResponse(200, {messages: GENERAL_HEAD}));
+    });
+    await sleep(100);
+    expect(missAnnouncements()).toEqual([]);
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
+
+    // 첫 페이지 뒤에 탭 뒤의 꼬리 읽기로 따라잡고, 그 답으로 착지한다.
+    await waitFor(() => expect(movedToRow(NEW_ID, toIndex)).toBe(true), SETTLE);
+    expect(afterReadsOf(fetchMock, GENERAL)).toContain(16);
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
+    expect(missAnnouncements()).toEqual([]);
+  });
+
+  it('레일 역채움이 오는 동안 방을 옮기면, 늦게 온 그 답은 새 방의 목록에 섞이지 않는다 (O-2)', async () => {
+    const gates: Held[] = [];
+    let holdNext = false;
+    installFetch({
+      afterResponder: channelId => {
+        if (channelId !== GENERAL || !holdNext) return undefined;
+        holdNext = false;
+        const gate = held();
+        gates.push(gate);
+        return gate.promise;
+      },
+    });
+    renderShell();
+    await waitForSidebar();
+    await openGeneral();
+    await railAttached();
+
+    // 레일이 다시 붙었다(복구 안 됨) → 역채움 읽기가 떠났다 — 답은 붙들어 둔다.
+    commitLater(GENERAL, NEW_ROW);
+    holdNext = true;
+    await act(async () => {
+      channelSub(GENERAL)?.__subscribed({recovered: false});
+    });
+    await sleep(50);
+    expect(gates).toHaveLength(1);
+
+    // 그 사이 사람이 다른 방(#random)으로 갔다.
+    await tapWhileRunning(apnsPayload({channelId: RANDOM, messageId: RANDOM_MSG}));
+    await expectLanded('random', RANDOM_MSG, false);
+
+    // #general 의 역채움 답이 이제 온다. #random 의 목록은 그것을 들지 않는다.
+    await act(async () => {
+      gates[0].release(jsonResponse(200, {messages: [NEW_ROW]}));
+    });
+    await sleep(200);
+    expect(screen.getByTestId('conversation-title')).toHaveTextContent('random');
+    expect(rowsHeld()).not.toContain(NEW_ID);
   });
 });
