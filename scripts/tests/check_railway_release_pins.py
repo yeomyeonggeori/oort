@@ -18,7 +18,16 @@ import sys
 import tempfile
 from pathlib import Path
 
-APP_SERVICES = ("api", "relay", "webhook-sender", "agent-worker")
+# #2205: notifier and push-relay run the same image (push path on the team
+# instance), so they drift from latest.json exactly like the other four.
+APP_SERVICES = (
+    "api",
+    "relay",
+    "webhook-sender",
+    "agent-worker",
+    "notifier",
+    "push-relay",
+)
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 FROM_RE = re.compile(r"^FROM\s+(\S+)(?:\s+[Aa][Ss]\s+(\S+))?\s*$")
 COPY_FROM_RE = re.compile(r"^COPY\s+--from=(\S+)\s+(\S+)\s+(\S+)\s*$")
@@ -28,10 +37,11 @@ WEB_STAGE_FROM = "${OORT_IMAGE}"
 WEB_STAGE_NAME = "web"
 WEB_SRC = "/opt/momo/web"
 WEB_DEST = "/srv/web"
-# Last published pin before v0.1.5. Mutations must use this exact previous
-# digest so the proof is a real drift, not a no-op rewrite of the current pin.
+# Last published pin before v0.1.6 (= v0.1.5). Mutations must use this exact
+# previous digest so the proof is a real drift, not a no-op rewrite of the
+# current pin. Move it forward with every release bump.
 PREVIOUS_APP_DIGEST = (
-    "sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f"
+    "sha256:5481c14eccab99d3cbce51fd8b8710fe6fd671e673652cb3e30422b0e66f7a85"
 )
 
 
@@ -318,6 +328,8 @@ MUTATIONS: tuple[tuple[str, str], ...] = (
     ("relay", "service relay image"),
     ("webhook-sender", "service webhook-sender image"),
     ("agent-worker", "service agent-worker image"),
+    ("notifier", "service notifier image"),
+    ("push-relay", "service push-relay image"),
     ("caddy", "Dockerfile.caddy ARG OORT_IMAGE"),
     ("missing-api", "service api image missing"),
     ("missing-caddy-arg", "Dockerfile.caddy ARG OORT_IMAGE count"),

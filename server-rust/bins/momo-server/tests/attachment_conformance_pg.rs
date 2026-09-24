@@ -23,6 +23,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
@@ -1628,4 +1629,248 @@ async fn a_known_declaration_that_disagrees_with_the_archive_still_fails() {
         .await
         .expect("row");
     assert_eq!(status, "failed");
+}
+
+// ---------------------------------------------------------------------------
+// #2615 — an upload URL is a one-shot capability
+// ---------------------------------------------------------------------------
+
+/// A fresh local-volume archive directory, removed when the guard drops.
+struct ArchiveDir(PathBuf);
+
+impl ArchiveDir {
+    fn new(label: &str) -> ArchiveDir {
+        let dir = std::env::temp_dir().join(format!(
+            "oort-drive-2615-{label}-{}-{}",
+            std::process::id(),
+            Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp archive");
+        ArchiveDir(dir)
+    }
+
+    fn path(&self) -> String {
+        self.0.to_string_lossy().into_owned()
+    }
+}
+
+impl Drop for ArchiveDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn content_url(base: &str, workspace: Uuid, channel: Uuid, attachment: &str) -> String {
+    format!("{base}/v1/workspaces/{workspace}/channels/{channel}/attachments/{attachment}/content")
+}
+
+async fn read_content(http: &reqwest::Client, url: &str, token: &str) -> Vec<u8> {
+    let response = http
+        .get(url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("content");
+    assert_eq!(response.status(), 200, "a published attachment is readable");
+    response.bytes().await.expect("bytes").to_vec()
+}
+
+/// Session → PUT → complete → post to the room → Bob reads it; then replay
+/// the same upload URL with forged bytes of the same mime and length — the
+/// only shape the archive's size/mime checks ever let through.
+async fn a_replayed_upload_url_must_not_touch_published_bytes(base: &str, fixture: &Fixture) {
+    let http = reqwest::Client::new();
+    let alice = login(&http, base, fixture.workspace, &fixture.alice).await;
+    let bob = login(&http, base, fixture.workspace, &fixture.bob).await;
+
+    const ORIGINAL: &[u8] = b"quarterly-report-v1";
+    const FORGED: &[u8] = b"quarterly-report-XX";
+    assert_eq!(ORIGINAL.len(), FORGED.len());
+
+    let created = http
+        .post(uploads_url(base, fixture.workspace, fixture.channel))
+        .bearer_auth(&alice)
+        .json(&json!({"name": "report.txt", "mime": "text/plain", "size": ORIGINAL.len()}))
+        .send()
+        .await
+        .expect("create upload");
+    assert_eq!(created.status(), 201);
+    let created: Value = created.json().await.expect("body");
+    let attachment_id = created["id"].as_str().expect("id").to_string();
+    let upload_url = created["uploadUrl"]
+        .as_str()
+        .expect("uploadUrl")
+        .to_string();
+
+    let first = http
+        .put(&upload_url)
+        .header(reqwest::header::CONTENT_TYPE, "text/plain")
+        .body(ORIGINAL.to_vec())
+        .send()
+        .await
+        .expect("first put");
+    assert_eq!(first.status(), 200, "the first PUT lands");
+
+    let completed = http
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/attachments/{attachment_id}/complete",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&alice)
+        .send()
+        .await
+        .expect("complete");
+    assert_eq!(completed.status(), 200);
+
+    let sent = http
+        .post(messages_url(base, fixture.workspace, fixture.channel))
+        .bearer_auth(&alice)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "type": "text",
+            "body": "분기 보고서입니다",
+            "attachmentIds": [attachment_id],
+        }))
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(
+        sent.status(),
+        201,
+        "the attachment is published to the room"
+    );
+
+    let content = content_url(base, fixture.workspace, fixture.channel, &attachment_id);
+    assert_eq!(read_content(&http, &content, &bob).await, ORIGINAL);
+
+    // The replay. Whoever holds the URL — the uploader, a proxy log, a
+    // shoulder — must not be able to change what the room already read.
+    let replay = http
+        .put(&upload_url)
+        .header(reqwest::header::CONTENT_TYPE, "text/plain")
+        .body(FORGED.to_vec())
+        .send()
+        .await
+        .expect("replayed put");
+    let replay_status = replay.status().as_u16();
+    let after = read_content(&http, &content, &bob).await;
+    assert!(
+        matches!(replay_status, 404 | 410) && after == ORIGINAL,
+        "#2615: replaying a spent upload URL answered {replay_status} and the published \
+         attachment now reads {:?} (it was {:?})",
+        String::from_utf8_lossy(&after),
+        String::from_utf8_lossy(ORIGINAL),
+    );
+}
+
+/// **Red proof (#2615).** The local-volume archive — the one the Railway team
+/// instance and every self-host default run — spends an upload URL on its
+/// first PUT. Before the fix the replay answered 200 and Bob's next read
+/// returned the forged bytes.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn the_local_archive_spends_an_upload_url_on_its_first_put() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let dir = ArchiveDir::new("replay");
+    let dir_str = dir.path();
+    let (base, _archive) = start_server_with(app_pool.clone(), move |base| {
+        Arc::new(LocalDriveArchive::open(Some(dir_str.as_str()), &base).expect("local archive"))
+    })
+    .await;
+    a_replayed_upload_url_must_not_touch_published_bytes(&base, &fixture).await;
+}
+
+/// **Red proof (#2615).** The same contract on the in-memory stub, which the
+/// verifiers and this suite run against.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn the_stub_archive_spends_an_upload_url_on_its_first_put() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool.clone()).await;
+    a_replayed_upload_url_must_not_touch_published_bytes(&base, &fixture).await;
+}
+
+/// **Red proof (#2615).** An upload URL presented after its session lifetime
+/// is refused over HTTP by both archives, and nothing it carried lands —
+/// completion still finds no file and the row stays `pending`. The archives
+/// are minted with a zero lifetime so the proof does not wait out
+/// `UPLOAD_SESSION_TTL`.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn an_expired_upload_url_is_refused_by_both_archives() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let dir = ArchiveDir::new("expired");
+    let dir_str = dir.path();
+    let (local, _local_archive) = start_server_with(app_pool.clone(), move |base| {
+        Arc::new(
+            LocalDriveArchive::open(Some(dir_str.as_str()), &base)
+                .expect("local archive")
+                .with_upload_session_ttl(Duration::ZERO),
+        )
+    })
+    .await;
+    let (stub, _stub_archive) = start_server_with(app_pool.clone(), |base| {
+        Arc::new(StubDriveArchive::new(&base).with_upload_session_ttl(Duration::ZERO))
+    })
+    .await;
+
+    for (label, base) in [("local", local), ("stub", stub)] {
+        let http = reqwest::Client::new();
+        let alice = login(&http, &base, fixture.workspace, &fixture.alice).await;
+        const BYTES: &[u8] = b"too-late";
+        let created = http
+            .post(uploads_url(&base, fixture.workspace, fixture.channel))
+            .bearer_auth(&alice)
+            .json(&json!({"name": "late.txt", "mime": "text/plain", "size": BYTES.len()}))
+            .send()
+            .await
+            .expect("create upload");
+        assert_eq!(created.status(), 201, "{label}");
+        let created: Value = created.json().await.expect("body");
+        let attachment_id = created["id"].as_str().expect("id").to_string();
+        let upload_url = created["uploadUrl"].as_str().expect("uploadUrl");
+
+        let late = http
+            .put(upload_url)
+            .header(reqwest::header::CONTENT_TYPE, "text/plain")
+            .body(BYTES.to_vec())
+            .send()
+            .await
+            .expect("late put");
+        assert!(
+            matches!(late.status().as_u16(), 404 | 410),
+            "{label}: an expired upload URL must be refused, got {}",
+            late.status()
+        );
+
+        let completed = http
+            .post(format!(
+                "{base}/v1/workspaces/{}/channels/{}/attachments/{attachment_id}/complete",
+                fixture.workspace, fixture.channel
+            ))
+            .bearer_auth(&alice)
+            .send()
+            .await
+            .expect("complete");
+        assert_eq!(
+            completed.status(),
+            404,
+            "{label}: the refused bytes never reached the archive"
+        );
+        let status: String = sqlx::query_scalar("SELECT status FROM attachment WHERE id = $1")
+            .bind(Uuid::parse_str(&attachment_id).expect("uuid"))
+            .fetch_one(&su)
+            .await
+            .expect("row");
+        assert_eq!(status, "pending", "{label}: nothing completed");
+    }
 }

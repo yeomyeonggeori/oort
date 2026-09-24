@@ -1,7 +1,8 @@
 # 로컬 셀프호스트 엣지 (#1229). 정본 절차: docs/SELF_HOST.md
 #
 # infra/rust/Caddyfile 의 로컬 쌍둥이다. 하는 일은 같다 — SPA를 서빙하고
-# /v1 · /hooks · /healthz · /connection 을 같은 오리진에서 프록시한다. 다른 것은 딱 하나,
+# /v1 · /hooks · /__momo_stub · /healthz · /connection 을 같은 오리진에서 프록시한다
+# (라우트 패리티: scripts/tests/test_public_edge.sh ⑥). 다른 것은 딱 하나,
 # **사이트 주소**다.
 #
 #   infra/rust/Caddyfile   {$OORT_SITE_ADDRESS}  → 자동 HTTPS. env 가 없으면
@@ -45,8 +46,11 @@
 	}
 	# ADR-0169 — local archive PUT is same-origin. The capability URL the
 	# client is handed is `$origin/__momo_stub/drive/uploads/{token}`; without
-	# this matcher the catch-all SPA handle would serve index.html and the
-	# upload would 200 an HTML body. Hosted google does not use this path.
+	# this matcher the catch-all SPA handle takes it and file_server answers
+	# the PUT (and the desktop's preflight OPTIONS) 405 `Allow: GET, HEAD` —
+	# only a GET would get index.html (#2609, measured). Hosted google does not
+	# use this path. Route parity with the other edges:
+	# scripts/tests/test_public_edge.sh ⑥.
 	handle /__momo_stub/* {
 		reverse_proxy api:8080
 	}

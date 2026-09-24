@@ -1,0 +1,60 @@
+[package]
+name = "momo-workd"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# ADR-0188 D2 — the desktop work host. It dials OUT to the team server only
+# (register, v2-signed heartbeat, pending-controls, ack, session create/PATCH)
+# and drives ACP agents over stdio. It opens no listening socket of any kind.
+#
+# The loop is a library so the invariant tests can drive one control at a time
+# against a fake server; `src/main.rs` is the CLI shell.
+[lib]
+name = "momo_workd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "momo-workd"
+path = "src/main.rs"
+
+# `src/bin/momo-workd-acp-stub.rs` is auto-discovered on purpose (no `[[bin]]`
+# entry): it is the test-only fake ACP agent the invariant and conformance tests
+# launch through `CARGO_BIN_EXE_momo-workd-acp-stub`. Declaring it here would make
+# `server-rust/Dockerfile`'s stub-source dependency layer fail on a missing
+# path; auto-discovery simply does not see it there. Nothing ships it.
+
+[dependencies]
+# The v2 request format is signed by the same bytes the server verifies with —
+# one crate, so signer and verifier cannot drift (ADR-0188 D2).
+momo-wire = { path = "../../crates/momo-wire" }
+
+tokio = { workspace = true, features = ["process", "io-util", "time", "sync", "signal"] }
+reqwest.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+ed25519-dalek.workspace = true
+base64.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+# Already in the lock (0.2.17, via uuid/rand): the host key seed comes from the
+# OS CSPRNG directly rather than from UUIDv4 bytes, which carry fixed bits.
+getrandom = "0.2"
+libc.workspace = true
+
+# The host key lives in the data-protection keychain as a ThisDeviceOnly item
+# (ADR-0188 D2). `OSX_10_15` exposes `kSecUseDataProtectionKeychain`.
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = { version = "3.7", features = ["OSX_10_15"] }
+
+[dev-dependencies]
+# PG conformance (tests/workd_conformance_pg.rs, #[ignore]): the real server
+# router in-process, the real `momo-workd` binary as a child process.
+momo-server = { path = "../momo-server" }
+momo-db = { path = "../../crates/momo-db" }
+momo-messaging = { path = "../../crates/momo-messaging" }
+axum.workspace = true

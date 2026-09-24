@@ -79,14 +79,6 @@ pub struct WorkHostOwnership {
     pub already_revoked: bool,
 }
 
-/// The credential half of a host row, taken under `FOR UPDATE`
-/// (Swift `heartbeat` :231-243).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkHostCredential {
-    pub public_key: String,
-    pub active: bool,
-}
-
 /// The `hostJSONSelect` column list, as typed columns rather than a JSON
 /// document. Same expressions, same rounding.
 const HOST_COLUMNS: &str = "h.id, \
@@ -210,32 +202,13 @@ pub async fn mark_work_host_revoked(
     Ok(())
 }
 
-/// Lock the credential a heartbeat must be verified against
-/// (Swift `heartbeat` :231-243).
-///
-/// The row lock is taken **before** the signature is checked, exactly like
-/// Swift: a concurrent revoke must not be able to slip between "the key was
-/// valid" and "last_seen_at was stamped".
-pub async fn lock_work_host_credential(
-    conn: &mut PgConnection,
-    host_id: Uuid,
-) -> Result<Option<WorkHostCredential>, sqlx::Error> {
-    let row = sqlx::query(
-        "SELECT public_key, revoked_at IS NULL AS active \
-           FROM work_host WHERE id = $1 FOR UPDATE",
-    )
-    .bind(host_id)
-    .fetch_optional(&mut *conn)
-    .await?;
-    let Some(row) = row else { return Ok(None) };
-    Ok(Some(WorkHostCredential {
-        public_key: row.try_get("public_key")?,
-        active: row.try_get("active")?,
-    }))
-}
-
 /// Stamp liveness. `false` means the host was revoked in the meantime and the
 /// caller must answer 401 (Swift `heartbeat` :256-268).
+///
+/// Since ADR-0188 D7 the heartbeat authenticates as a v2 signed request in its
+/// own transaction (signature verified, request id consumed) before this runs,
+/// so `revoked_at IS NULL` here is what keeps a revoke that lands in between
+/// from being overwritten by a stamp.
 pub async fn touch_work_host_last_seen(
     conn: &mut PgConnection,
     host_id: Uuid,

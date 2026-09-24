@@ -802,12 +802,20 @@ The public overlay passes that env into the container. Empty env makes
 compose/`caddy validate` fail. That is the actual ACME misfire block. Start
 this overlay **only on a machine that holds DNS for that host**. Do not
 name it on local. `--compose` cannot change the canonical file set, so on
-the deploy host call compose directly for the public overlay:
+the deploy host call compose directly for the public overlay. Keep
+`local.override.yml` in the set: it carries the attachment archive the
+generator turns on (`drive-init` and the `drive-archive` volume) and the
+loopback `web` service that doctor `stack.compose_ps` requires. Without it
+compose recreates the api with no archive volume and the api refuses to
+boot (`MOMO_DRIVE_LOCAL_DIR could not be created or is not writable`,
+restart loop — measured, #2609). This is the same three-file set
+`infra/fly/entrypoint.sh` runs:
 
 ```sh
 ENV_FILE=infra/rust/local.secrets.env
 docker compose --env-file "$ENV_FILE" \
   -f infra/rust/docker-compose.rust.yml \
+  -f infra/rust/local.override.yml \
   -f infra/rust/caddy.override.yml up -d
 ```
 
@@ -817,7 +825,7 @@ and order ACME.
 
 | | Local (this document's default) | Public origin |
 |---|---|---|
-| Edge | `local.override.yml` + `Caddyfile.local` (`:80`) | `caddy.override.yml` + `Caddyfile` (`{$OORT_SITE_ADDRESS}`) |
+| Edge | `local.override.yml` + `Caddyfile.local` (`:80`) | `caddy.override.yml` + `Caddyfile` (`{$OORT_SITE_ADDRESS}`), on top of `local.override.yml` (archive volume) |
 | Address | `http://localhost:<port>` | Operator-declared `https://<host>` |
 | CSP connect-src | loopback `ws://localhost:*` / `ws://127.0.0.1:*` | `OORT_CSP_CONNECT_SRC` derived by `--public-origin` |
 
@@ -841,7 +849,7 @@ outside the heredoc (44 on stdout).
 
 | `--platform` | Tier | Public origin from | Postgres | Keys set by hand | Output |
 |---|---|---|---|---|---|
-| `railway` (alias `--railway`) | T2 | `RAILWAY_PUBLIC_DOMAIN` | plugin `DATABASE_URL` | `CENT_API_URL` · `WORKER_DATABASE_URL` · `CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS` (`infra/railway/README.md`) | KEY=value on stdout, no file, no `MOMO_HOSTED_DELIVERY_ENABLED`, stamp `MOMO_SELF_HOST_PLATFORM=railway` outside the heredoc |
+| `railway` (alias `--railway`) | T2 | `RAILWAY_PUBLIC_DOMAIN` | `DATABASE_URL` of the PG18 + pgvector image service, composed by hand (`infra/railway/README.md`) | the README's hand-mapped table (≥9; the generator's stderr names `CENT_API_URL` · `WORKER_DATABASE_URL` · `CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS`) | KEY=value on stdout, no file, no `MOMO_HOSTED_DELIVERY_ENABLED`, stamp `MOMO_SELF_HOST_PLATFORM=railway` outside the heredoc |
 | `fly` | T1 | `--public-origin https://<host>` (required) | compose `postgres` | none | `infra/rust/local.secrets.env` as the local path + `MOMO_SELF_HOST_PLATFORM=fly` |
 | `aws-lightsail` | T1 | same | compose `postgres` | none | same, `MOMO_SELF_HOST_PLATFORM=aws-lightsail` |
 | `gcp-vm` | T1 | same | compose `postgres` | none | same, `MOMO_SELF_HOST_PLATFORM=gcp-vm` |
@@ -879,21 +887,32 @@ Human approval points (owner's account and bill): AWS login/SSO,
 Cloud install of the same stack: [`infra/railway/README.md`](../infra/railway/README.md).
 Caddy is the public service (Railway TLS); api stays internal so
 `/v1/centrifugo/*` stays an exclusive 403 (`infra/railway/Caddyfile.railway`).
-Postgres is the Railway plugin. LiveKit is not included.
+Postgres is the compose PG18 + pgvector image as its own service with a
+volume — the Railway Postgres template has no pgvector. LiveKit is not
+included.
 
-After the plugin `DATABASE_URL` and the caddy public hostname exist, the
-same generator prints Railway variables (no file, no compose stack):
+After you compose that service's `DATABASE_URL` (README) and the caddy
+public hostname exists, the same generator prints Railway variables (no
+file, no compose stack):
 
 ```sh
-scripts/self_host_env.sh --platform railway
+scripts/self_host_env.sh --platform railway --claim
 ```
 
-`RAILWAY_PUBLIC_DOMAIN` and `DATABASE_URL` are required. The output key set
+`RAILWAY_PUBLIC_DOMAIN` and `DATABASE_URL` are required. `--claim` matches
+`railway.json`, whose api variables carry `MOMO_BOOTSTRAP_CLAIM` rather than an
+owner password; without it pre-deploy has the owner email and no password and
+refuses to start (exit 2). For the password variant, generate without
+`--claim` and on api replace `MOMO_BOOTSTRAP_CLAIM` with
+`MOMO_INITIAL_OWNER_PASSWORD` = `${{shared.MOMO_INITIAL_OWNER_PASSWORD}}`. The output key set
 is the generator heredoc plus `oort_public_edge_env_keys` — do not type
 `OORT_SITE_ADDRESS` / `OORT_CSP_CONNECT_SRC` by hand. Local provider opt-in
 (`--allow-local-provider`) is for local installs only; this template does
 not carry those keys. Gate:
-`scripts/oort doctor --json` (`public.healthz` · `public.websocket`).
+`scripts/oort doctor --json` (`public.healthz` · `public.websocket`), plus the
+README's by-hand checks: the sign-in `realtimeWebSocketUrl` is `wss://` and a
+QR device link carries `https://`. The README's client-IP gate must PASS before
+the claim link is shared or anyone is invited.
 
 ### Fly.io
 
