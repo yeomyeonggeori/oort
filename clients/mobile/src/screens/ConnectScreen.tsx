@@ -134,9 +134,9 @@ import {
 // about itself — row `onLayout`, the list's own height, its offset — so there is
 // no keyboard frame to reconcile. It runs when a field takes focus, when a row
 // moves (the address hint appears on the first keystroke and pushes the rows
-// below it down), and when the keyboard has ARRIVED — not when the list reports
-// its new height, which is the obvious moment and was measured not to work (the
-// note at the `keyboardDidShow` listener).
+// below it down), when the list reports a new height, and once more when the
+// keyboard has ARRIVED. The last two are both needed, and the device decided
+// which covers what (the note at the `keyboardDidShow` listener).
 //
 // **Why not the conversation's `KeyboardPane`.** The pane only translates: it
 // lifts everything by the keyboard's height, and that is right where the content
@@ -251,10 +251,13 @@ export default function ConnectScreen({
     };
   }, [reveal]);
 
-  /** Recorded, not acted on — see the `keyboardDidShow` listener for why. */
-  const onFormLayout = useCallback((event: LayoutChangeEvent) => {
-    room.current.viewport = event.nativeEvent.layout.height;
-  }, []);
+  const onFormLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      room.current.viewport = event.nativeEvent.layout.height;
+      reveal();
+    },
+    [reveal],
+  );
 
   const onFormScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -275,19 +278,24 @@ export default function ConnectScreen({
     if (focusedRef.current === field) focusedRef.current = null;
   }, []);
 
-  // The keyboard's ARRIVAL is when the reveal can act — not the moment the list
-  // reports its new height. Measured on the device: that height is final in JS
-  // as soon as the keyboard starts to move, but `KeyboardAvoidingView` animates
-  // the real frame along with the keyboard (383ms), and a `scrollTo` issued
-  // meanwhile is clamped by UIKit to the old, taller frame — a no-op whenever the
-  // form fits it (a returning person's stored address: the button stayed 60pt
-  // under). Moving to the password field makes it the common case: iOS lowers and
-  // raises the keyboard for a secure field (`keyboardWillHide` →
-  // `keyboardWillShow`), the list grows and shrinks back, a reveal to 103.7
-  // vanished into the clamp, and UIKit then scrolled only the caret in — the
-  // field's bottom on the keyboard's edge, the 로그인 button 61pt under it.
-  // `keyboardDidShow` comes once the frame is final and after UIKit has started
-  // that caret scroll, so this reveal is the one that stands.
+  // Two moments the keyboard gives, and the device showed each one failing alone.
+  //
+  //   - **The list's new height** (`onFormLayout`) is the moment for a keyboard
+  //     that changes IN PLACE — tapping from the address to the email field swaps
+  //     the URL keyboard for the email one with no animation, and the probe saw
+  //     `keyboardDidShow` arrive first and the new height (418) after it. Without
+  //     this, the button stayed 10pt under.
+  //   - **`keyboardDidShow`** is the moment for a keyboard that TRAVELS. The new
+  //     height is final in JS as soon as it starts to move, but
+  //     `KeyboardAvoidingView` animates the real frame along with it (383ms), and
+  //     a `scrollTo` issued meanwhile is clamped by UIKit to the old, taller frame
+  //     — a no-op whenever the form fits it (a returning person's stored address:
+  //     the button stayed 60pt under). Moving to the password field makes it the
+  //     common case: iOS lowers and raises the keyboard for a secure field, the
+  //     reveal to 103.7 vanished into the clamp, and UIKit then scrolled only the
+  //     caret in — the field's bottom on the keyboard's edge, the 로그인 button
+  //     61pt under. `keyboardDidShow` comes once the frame is final and after
+  //     UIKit has started that caret scroll, so this reveal is the one that stands.
   useEffect(() => {
     const arrived = Keyboard.addListener('keyboardDidShow', reveal);
     return () => arrived.remove();
