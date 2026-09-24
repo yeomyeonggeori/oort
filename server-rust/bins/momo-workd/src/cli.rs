@@ -257,7 +257,10 @@ pub async fn run(config_path: PathBuf, dev_key_file: Option<PathBuf>) -> Result<
         .map_err(CliError::Register)?,
     );
     // ADR-0188 §8: Codex runs from the host's own home, signed in once there.
-    let codex = CodexHome::beside(&config.state_path);
+    // #2630 F5: with an empty host folder as its HOME; the commands it runs
+    // get the owner's HOME back.
+    let codex = CodexHome::beside(&config.state_path)
+        .with_owner_home(std::env::var_os("HOME").map(PathBuf::from));
     if config
         .tools
         .values()
@@ -275,6 +278,12 @@ pub async fn run(config_path: PathBuf, dev_key_file: Option<PathBuf>) -> Result<
                 "sign Codex in to the host's own home once; until then Codex sessions are refused"
             );
         }
+        if codex.owner_home.is_none() {
+            tracing::warn!(
+                "no absolute HOME: the commands Codex runs keep the host's empty folder as HOME \
+                 (toolchains under the owner's home, such as rustup, will not be found)"
+            );
+        }
     }
     let sessions = SessionManager::new(
         api.clone(),
@@ -282,6 +291,7 @@ pub async fn run(config_path: PathBuf, dev_key_file: Option<PathBuf>) -> Result<
             tools: config.tools.clone(),
             working_directory: config.working_directory.clone(),
             acp_start_timeout: Duration::from_millis(config.acp_start_timeout_ms),
+            // Filtered per launch to `policy::AGENT_ENV_ALLOWLIST` (#2630 F1).
             parent_env: std::env::vars().collect(),
             max_sessions: config.max_sessions,
             codex,
