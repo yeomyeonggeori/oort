@@ -394,6 +394,8 @@ mod tests {
             .starts_with("authorization: bearer "));
         let object: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(object["aps"]["alert"]["title"], "oort");
+        // #2669: the body that would reach Apple carries the category's sound.
+        assert_eq!(object["aps"]["sound"], "default");
         let text = String::from_utf8_lossy(&body);
         assert!(!text.contains("apns_token"));
         let _ = std::fs::remove_file(&key_path);
