@@ -18,6 +18,7 @@
 //! | `signing_back_in_on_the_same_phone_rebinds_the_registration` | leave `session_id` out of the reclaim UPDATE branch |
 //! | `logging_out_one_phone_leaves_the_other_phone_alone` | invalidate by member instead of by session on logout |
 //! | `logout_never_touches_a_registration_it_cannot_attribute` | same over-reach, against a pre-lineage (NULL) row |
+//! | `a_logout_racing_an_in_flight_registration_still_ends_it` | drop `FOR SHARE` from `lock_session_for_registration` |
 //! | `unlinking_a_linked_phone_ends_its_registration` | drop the unlink invalidation, or mint a fresh lineage on the linked refresh |
 //! | `a_password_change_ends_every_registration_of_the_member` | drop the password-change invalidation |
 //! | `a_password_reset_claim_ends_every_registration_of_the_member` | drop the reset-claim invalidation |
@@ -721,6 +722,110 @@ async fn logout_never_touches_a_registration_it_cannot_attribute() {
         w.drain_to(&legacy).await,
         1,
         "the legacy row still delivers"
+    );
+}
+
+/// The race `register_device` closes with `lock_session_for_registration`: a
+/// phone registers at launch and the person taps sign-out while that request
+/// is still in flight. The registration transaction here is held open right
+/// after the real lock call (the rest of `register_device` cannot be paused, so
+/// its two writes are replayed by hand with the lineage the lock returned);
+/// the logout is the real route.
+///
+/// With the share lock the logout WAITS for the registration and then ends the
+/// row it wrote. Without it the logout commits first, its invalidation sees
+/// nothing, and the row written afterwards lives on under a dead session.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_logout_racing_an_in_flight_registration_still_ends_it() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let session = w.person_login().await;
+    let access_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM token WHERE token_hash = digest($1::text, 'sha256')")
+            .bind(&session.access)
+            .fetch_one(&w.su)
+            .await
+            .expect("the access row the phone registers with");
+
+    let phone = Phone::new();
+    let app = momo_app_pool().await;
+    let (locked_tx, locked_rx) = tokio::sync::oneshot::channel::<()>();
+    let (proceed_tx, proceed_rx) = tokio::sync::oneshot::channel::<()>();
+    let (workspace, person, device_id, apns_token) = (
+        w.workspace,
+        w.person_id,
+        phone.device_id,
+        phone.apns_token.clone(),
+    );
+    let registration = tokio::spawn(async move {
+        momo_db::with_tenant_tx(&app, workspace, move |conn| {
+            Box::pin(async move {
+                let lineage = match momo_auth::lock_session_for_registration(
+                    conn, workspace, person, access_id,
+                )
+                .await?
+                {
+                    momo_auth::RegistrationSession::Live(Some(lineage)) => lineage,
+                    other => panic!("a live post-088 session is expected, got {other:?}"),
+                };
+                locked_tx.send(()).expect("signal: lock held");
+                proceed_rx.await.expect("signal: proceed");
+                sqlx::query(
+                    "INSERT INTO device (id, workspace_id, member_id, platform) \
+                     VALUES ($1, $2, $3, 'ios'::device_platform)",
+                )
+                .bind(device_id)
+                .bind(workspace)
+                .bind(person)
+                .execute(&mut *conn)
+                .await?;
+                sqlx::query(
+                    "INSERT INTO push_token \
+                       (workspace_id, device_id, member_id, apns_token, env, topic, session_id) \
+                     VALUES ($1, $2, $3, $4, 'sandbox'::push_env, $5, $6)",
+                )
+                .bind(workspace)
+                .bind(device_id)
+                .bind(person)
+                .bind(&apns_token)
+                .bind(TOPIC)
+                .bind(lineage)
+                .execute(&mut *conn)
+                .await?;
+                Ok::<(), momo_db::DbError>(())
+            })
+        })
+        .await
+    });
+    locked_rx.await.expect("the registration holds its lock");
+
+    let (http, base, pair) = (w.http.clone(), w.base.clone(), session.clone());
+    let logout = tokio::spawn(async move {
+        http.post(format!("{base}/v1/auth/logout"))
+            .bearer_auth(&pair.access)
+            .json(&json!({ "refreshToken": pair.refresh }))
+            .send()
+            .await
+            .expect("logout")
+            .status()
+            .as_u16()
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    assert!(
+        !logout.is_finished(),
+        "logout must wait for the registration that holds its session row"
+    );
+
+    proceed_tx.send(()).expect("release the registration");
+    registration
+        .await
+        .expect("registration task")
+        .expect("registration commits");
+    assert_eq!(logout.await.expect("logout task"), 200, "logout succeeds");
+    assert!(
+        !w.registration_live(&phone).await,
+        "the registration committed during the logout must still end with the session"
     );
 }
 
