@@ -135,7 +135,7 @@ use provider::{
 use tool_exec::ToolContext;
 
 /// What the producer transaction decided about one tool call.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ToolDisposition {
     /// An approval exists and the run is parked on it.
     Parked { approval_id: Uuid },
@@ -152,6 +152,12 @@ enum ToolDisposition {
     },
     /// G3's budget is spent. The loop stops here.
     StepExhausted,
+    /// Refused before any approval existed — nothing to ask anyone, nothing to
+    /// run. The model is answered with `result` (ADR-0188 R0.1 A′: a spawn that
+    /// names a member-scoped host — `AgentWorker::refused_spawn_target`).
+    Refused {
+        result: momo_agent::tools::ToolResult,
+    },
 }
 
 /// ADR-0181 welcome job pre-flight: create the opener run, or post the static
@@ -1055,6 +1061,34 @@ impl AgentWorker {
                     .await;
                 Settlement::Skipped
             }
+            Ok(ToolDisposition::Refused { result }) => {
+                // No card was raised and nothing ran. The refusal is answered
+                // the way a refused execution is — a `tool_result` beside the
+                // call, then the turn's answer — so the room and the model read
+                // the same sentence a RunNow refusal would have given them.
+                let context = ToolContext {
+                    workspace_id: job.workspace_id,
+                    run_id,
+                    channel_id: payload.channel_id,
+                    agent_member_id: payload.agent_member_id,
+                    approved_by: payload.agent_member_id,
+                    approved_host_id: None,
+                };
+                match tool_exec::write_result(&self.pool, &context, result).await {
+                    Ok(result) => {
+                        self.finish_tool_turn(job, payload, run_id, &result.output, usage)
+                            .await
+                    }
+                    Err(error) => {
+                        self.settle_retryable(
+                            job,
+                            &format!("tool refusal record failed: {error}"),
+                            &transport.endpoint,
+                        )
+                        .await
+                    }
+                }
+            }
             Ok(ToolDisposition::RunNow {
                 authorized_by,
                 host_id,
@@ -1172,6 +1206,14 @@ impl AgentWorker {
                 // would race the run's other consumers.
                 if !consume_run_step_in_tx(conn, run_id, step_ceiling).await? {
                     return Ok(ToolDisposition::StepExhausted);
+                }
+
+                // ADR-0188 R0.1 (A′) — a spawn that names somebody's own machine
+                // is refused here, before anything could be asked or run. The
+                // step is still spent: a model that keeps naming the laptop is
+                // bounded by G3 like any other loop.
+                if let Some(result) = Self::refused_spawn_target(conn, workspace_id, &call).await? {
+                    return Ok(ToolDisposition::Refused { result });
                 }
 
                 if !reason.requires_approval() {
@@ -1308,6 +1350,56 @@ impl AgentWorker {
         .await
     }
 
+    /// ADR-0188 R0.1 (A′) — the request-side half of 「에이전트 컨트롤은
+    /// member-scope host에 kill만」 on the tool channel: a `work.session.spawn`
+    /// whose `host_id` names a member-scoped host is refused before any card
+    /// exists. The REST ledger refuses the same request with the same word
+    /// (`remote_host_kill_only`, `routes::work_controls`), so an agent reads one
+    /// answer whichever channel it asked through.
+    ///
+    /// `host_id` is read straight from the arguments rather than through
+    /// [`tool_exec::spawn_arguments`]: naming somebody's laptop is refused for
+    /// that alone, even when another argument is wrong too. A call that names no
+    /// host goes on to its card, and the decision route applies the same rule to
+    /// whichever host is picked there. Revocation is not a filter — a revoked
+    /// laptop is still somebody's laptop.
+    async fn refused_spawn_target(
+        conn: &mut PgConnection,
+        workspace_id: Uuid,
+        call: &ToolCall,
+    ) -> Result<Option<momo_agent::tools::ToolResult>, DbError> {
+        if momo_agent::tools::normalize(&call.name)
+            != momo_agent::tools::normalize(WORK_SESSION_SPAWN)
+        {
+            return Ok(None);
+        }
+        let Some(host_id) = call
+            .arguments
+            .get("host_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .and_then(|raw| Uuid::parse_str(raw).ok())
+        else {
+            return Ok(None);
+        };
+        if momo_t3::work_control::remote_host_owner_in_tx(conn, workspace_id, host_id)
+            .await
+            .map_err(t3_as_db)?
+            .is_none()
+        {
+            return Ok(None);
+        }
+        Ok(Some(momo_agent::tools::ToolResult::error(
+            &call.call_id,
+            format!(
+                "That work host is a member's own machine: an agent's work is never sent \
+                 there, only a stop is ({}). Omit `host_id` so the person approving picks \
+                 a workspace host, or name one.",
+                momo_t3::work_control::REFUSAL_REMOTE_HOST_KILL_ONLY
+            ),
+        )))
+    }
+
     /// The spawn-specific half of the approval decision (#1114).
     ///
     /// Answers three things in one read, because they are one question — *may
@@ -1366,19 +1458,28 @@ impl AgentWorker {
         // ADR-0114 D5: the host owner may have pre-authorised this tool. The
         // permission is theirs and it is per-tool, so it opens the gate for a
         // spawn of `codex` and says nothing about `shell`.
-        let auto_approved = momo_t3::work_control::spawn_is_auto_approved_in_tx(
-            conn,
-            workspace_id,
-            owner_member_id,
-            &arguments.tool,
-        )
-        .await
-        .map_err(t3_as_db)?
+        //
+        // It is judged for the host the gate would open onto — the default the
+        // executor would run on — because ADR-0188 R0 made the host part of the
+        // question: a remote (member-scoped) host is never auto-approved, so a
+        // default that is somebody's own laptop raises the card and its owner
+        // decides.
+        let auto_approved = match default_host_id {
+            Some(host_id) => momo_t3::work_control::spawn_is_auto_approved_in_tx(
+                conn,
+                workspace_id,
+                owner_member_id,
+                &arguments.tool,
+                host_id,
+            )
+            .await
+            .map_err(t3_as_db)?,
             // An auto-approval with nowhere to run is not an approval. Falling
             // through to the card is the honest answer: it shows the person why
             // (every candidate greyed, with its reason) instead of failing in
             // the executor with nobody watching.
-            && default_host_id.is_some();
+            None => false,
+        };
 
         Ok(Some(SpawnExecution {
             execution: momo_t3::work_control::spawn_execution_object(

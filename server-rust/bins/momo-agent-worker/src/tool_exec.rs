@@ -41,8 +41,9 @@ use momo_messaging::{cent_channel, send_message_in_tx, MessageType, NewMessage};
 use momo_outbox::{emit_outbox, OutboxKind};
 use momo_t3::work_control::{
     bind_control_session_in_tx, control_event_payload, insert_work_control_in_tx,
-    mark_control_dispatched_in_tx, spawn_host_ineligible_reason_in_tx, validated_label,
-    validated_tool_key, NewWorkControl, KIND_SPAWN, STATUS_APPROVED,
+    mark_control_dispatched_in_tx, remote_host_owner_in_tx, remote_host_refuses_tool_in_tx,
+    spawn_host_ineligible_reason_in_tx, validated_label, validated_tool_key, NewWorkControl,
+    KIND_SPAWN, STATUS_APPROVED,
 };
 use momo_t3::{
     acquire_slot_in_tx, allocate_uuid_v7, card_props, cloud_host_id_for_host,
@@ -541,6 +542,7 @@ async fn spawn_session(
     let workspace_id = context.workspace_id;
     let channel_id = context.channel_id;
     let agent_member_id = context.agent_member_id;
+    let approved_by = context.approved_by;
     let call_id = call.call_id.clone();
 
     let owner_member_id = match momo_db::with_tenant_tx(pool, workspace_id, move |conn| {
@@ -583,6 +585,7 @@ async fn spawn_session(
                     workspace_id,
                     owner_member_id,
                     agent_member_id,
+                    approved_by,
                     channel_id,
                     host_id,
                     expected_cloud_host_id: cloud_host_id,
@@ -628,6 +631,10 @@ struct SpawnInTx {
     workspace_id: Uuid,
     owner_member_id: Uuid,
     agent_member_id: Uuid,
+    /// Whose authority opened the gate: the person who decided the card, the
+    /// owner whose standing auto-approval did, or — for a G6 exemption — the
+    /// agent itself (`ToolContext::approved_by`).
+    approved_by: Uuid,
     channel_id: Uuid,
     host_id: Uuid,
     expected_cloud_host_id: Option<Uuid>,
@@ -668,6 +675,55 @@ async fn spawn_session_in_tx(
         return Ok(ToolResult::error(
             call_id,
             format!("That work host cannot run this session ({reason})."),
+        ));
+    }
+    // **ADR-0188 R0 — the remote host, at the last gate before a session.**
+    //
+    // The decision route already refuses these before a card can be approved
+    // (`routes::approvals`). They are asked again here because this executor
+    // has callers that never pass through a card: a standing auto-approval
+    // (which R0 closes for remote hosts upstream) and a G6 exemption, whose
+    // `approved_by` is the agent itself. The owner and shell refusals keep their
+    // own words first; since R0.1 (A′) the block then refuses outright — an
+    // agent's spawn never lands on somebody's own machine, whoever said yes.
+    if let Some(host_owner) =
+        remote_host_owner_in_tx(conn, input.workspace_id, input.host_id).await?
+    {
+        if input.approved_by != host_owner {
+            return Ok(ToolResult::error(
+                call_id,
+                "That work host is its owner's own machine, and only they can \
+                 approve work on it (remote_host_owner_required).",
+            ));
+        }
+        if remote_host_refuses_tool_in_tx(
+            conn,
+            input.workspace_id,
+            input.host_id,
+            &input.arguments.tool,
+        )
+        .await?
+        {
+            return Ok(ToolResult::error(
+                call_id,
+                "A shell cannot be started on a member's own work host \
+                 (remote_host_shell_refused).",
+            ));
+        }
+        // ADR-0188 R0.1 (A′) — and not at all as an agent's spawn, whoever
+        // approved it. This executor only ever runs an agent's call (the row
+        // below names the agent as its requester), and 「에이전트 컨트롤은
+        // member-scope host에 kill만」 means such a row may not be made: the
+        // poll would withhold it and the card would read as done. The decision
+        // route and the tool's own request check refuse this first; what reaches
+        // here is an approval granted before them, or a path that bypassed both.
+        return Ok(ToolResult::error(
+            call_id,
+            format!(
+                "That work host is a member's own machine, and an agent's work is never \
+                 started there, whoever approved it ({}). Ask for it on a workspace host.",
+                momo_t3::work_control::REFUSAL_MEMBER_HOST_AGENT_CONTROL
+            ),
         ));
     }
     if !work_tool_is_enabled_in_tx(conn, input.workspace_id, &input.arguments.tool).await? {
@@ -876,7 +932,11 @@ fn tool_failure(call_id: &str, error: T3Error) -> ToolResult {
 /// rows share a channel and an author (the agent said both things), so sharing a
 /// key too made the guard treat the result as a retry of the card and fold it
 /// away: the room saw the ask and never the answer.
-async fn write_result(
+///
+/// Crate-visible because the worker also answers a call it refuses **before**
+/// any approval (ADR-0188 R0.1 A′, `ToolDisposition::Refused`), and that answer
+/// must stand beside the call exactly as an executed one does.
+pub(crate) async fn write_result(
     pool: &PgPool,
     context: &ToolContext,
     result: ToolResult,
