@@ -148,6 +148,100 @@ pub async fn token_state(
     Ok(TokenState::Active { id })
 }
 
+// ---------------------------------------------------------------------------
+// session lineage (#2677)
+// ---------------------------------------------------------------------------
+//
+// A *session* is what a person signs in to and later signs out of. On the wire
+// it is an access/refresh pair, but the pair is replaced on every refresh, so
+// no single `token.id` names the session for longer than ~15 minutes. The
+// lineage id does: both halves of a sign-in carry the same `token.session_id`,
+// and every rotation copies it onto the replacement pair.
+//
+// Authentication never reads it. It exists so something registered *under* a
+// session — today a phone's push token — can be ended *with* that session:
+// logout and the linked-device disconnect end one lineage, a password change or
+// a membership exit ends all of the member's.
+
+/// A fresh lineage for a session that did not exist before this request
+/// (login, join, claim, password change, device-link redeem). A refresh must
+/// NOT call this: it inherits the lineage of the pair it replaces
+/// ([`session_id_of`]), or a logout after the first rotation would end a
+/// lineage no registration was ever bound to.
+pub fn new_session_id() -> Uuid {
+    Uuid::new_v4()
+}
+
+/// The lineage of one `token` row. `None` for an unknown id and for a row
+/// minted before migration 088 — a legacy session receives a lineage at its
+/// next rotation (`refresh` falls back to [`new_session_id`]).
+pub async fn session_id_of(
+    conn: &mut PgConnection,
+    token_id: Uuid,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    sqlx::query_scalar::<_, Option<Uuid>>("SELECT session_id FROM token WHERE id = $1")
+        .bind(token_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map(|value| value.flatten())
+}
+
+/// What the credential behind a push registration says about its session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegistrationSession {
+    /// A live session row, now share-locked for the rest of the transaction.
+    /// `None` is a pre-088 row: live, but with no lineage to bind to.
+    Live(Option<Uuid>),
+    /// A session row revoked after the auth middleware accepted it — a logout
+    /// (or disconnect, or password change) committed in between.
+    Ended,
+    /// Not a session credential at all (an agent bearer, say). Nothing to bind.
+    NotASession,
+}
+
+/// Share-lock the calling session's token row and read its lineage.
+///
+/// `FOR SHARE` is what closes the race with a concurrent logout. Logout takes
+/// `FOR UPDATE` on the same access row (`lock_member_session_tokens_by_ids`)
+/// before it revokes and invalidates:
+///   * registration first → logout waits for this transaction to commit, then
+///     invalidates the row this registration wrote;
+///   * logout first → this read waits, re-reads the committed row, and sees
+///     `revoked_at` set → [`RegistrationSession::Ended`].
+///
+/// Either order leaves no live registration under a dead session. One row, so
+/// it cannot invert the id-ordered multi-row locks logout and refresh share.
+const LOCK_SESSION_FOR_REGISTRATION_SQL: &str = "SELECT session_id, \
+            revoked_at IS NOT NULL AS revoked \
+       FROM token \
+      WHERE id = $1 \
+        AND workspace_id = $2 \
+        AND actor_member_id = $3 \
+        AND kind = 'session' \
+      FOR SHARE";
+
+/// See [`LOCK_SESSION_FOR_REGISTRATION_SQL`]. `conn` must carry the tenant GUC.
+pub async fn lock_session_for_registration(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    token_id: Uuid,
+) -> Result<RegistrationSession, sqlx::Error> {
+    let row = sqlx::query(LOCK_SESSION_FOR_REGISTRATION_SQL)
+        .bind(token_id)
+        .bind(workspace_id)
+        .bind(member_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    let Some(row) = row else {
+        return Ok(RegistrationSession::NotASession);
+    };
+    if row.try_get::<bool, _>("revoked")? {
+        return Ok(RegistrationSession::Ended);
+    }
+    Ok(RegistrationSession::Live(row.try_get("session_id")?))
+}
+
 /// Record a freshly issued session JWT so it can be revoked later (Swift
 /// `TokenStore.record`).
 ///
@@ -155,7 +249,9 @@ pub async fn token_state(
 /// [`crate::IssuedToken`] returns, so the row and the token can never disagree.
 /// Every App JWT carries a random `jti`, so `ON CONFLICT (token_hash) DO
 /// NOTHING` is a defensive guard against a (practically impossible) sha256
-/// collision, not a dedupe path.
+/// collision, not a dedupe path. `session_id` is the lineage both halves of the
+/// pair share (#2677).
+#[allow(clippy::too_many_arguments)]
 pub async fn record_session_token(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -164,12 +260,14 @@ pub async fn record_session_token(
     label: &str,
     scopes: &[String],
     expires_at_unix: i64,
+    session_id: Uuid,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO token \
-           (workspace_id, kind, actor_member_id, token_hash, scopes, label, expires_at) \
+           (workspace_id, kind, actor_member_id, token_hash, scopes, label, expires_at, \
+            session_id) \
          VALUES \
-           ($1, 'session', $2, digest($3::text, 'sha256'), $4, $5, to_timestamp($6)) \
+           ($1, 'session', $2, digest($3::text, 'sha256'), $4, $5, to_timestamp($6), $7) \
          ON CONFLICT (token_hash) DO NOTHING",
     )
     .bind(workspace_id)
@@ -178,12 +276,13 @@ pub async fn record_session_token(
     .bind(scopes)
     .bind(label)
     .bind(expires_at_unix as f64)
+    .bind(session_id)
     .execute(&mut *conn)
     .await?;
     Ok(())
 }
 
-/// ADR-0180 extras on a freshly minted session row.
+/// ADR-0180 extras on a freshly minted session row, plus the #2677 lineage.
 pub struct DeviceSessionRecord<'a> {
     pub raw_token: &'a str,
     pub label: &'a str,
@@ -191,6 +290,8 @@ pub struct DeviceSessionRecord<'a> {
     pub expires_at_unix: i64,
     pub device_label: Option<&'a str>,
     pub pending_sas: bool,
+    /// Same value on both halves of the pair; inherited on rotation.
+    pub session_id: Uuid,
 }
 
 /// Record a session token with the ADR-0180 device-link extras: an optional
@@ -205,9 +306,10 @@ pub async fn record_session_token_with_device(
     let inserted: Option<Uuid> = sqlx::query_scalar(
         "INSERT INTO token \
            (workspace_id, kind, actor_member_id, token_hash, scopes, label, \
-            expires_at, device_label, pending_sas) \
+            expires_at, device_label, pending_sas, session_id) \
          VALUES \
-           ($1, 'session', $2, digest($3::text, 'sha256'), $4, $5, to_timestamp($6), $7, $8) \
+           ($1, 'session', $2, digest($3::text, 'sha256'), $4, $5, to_timestamp($6), $7, $8, \
+            $9) \
          ON CONFLICT (token_hash) DO NOTHING \
          RETURNING id",
     )
@@ -219,6 +321,7 @@ pub async fn record_session_token_with_device(
     .bind(record.expires_at_unix as f64)
     .bind(record.device_label)
     .bind(record.pending_sas)
+    .bind(record.session_id)
     .fetch_optional(&mut *conn)
     .await?;
     if let Some(id) = inserted {
@@ -322,6 +425,11 @@ const REVOKE_PRIVILEGED_SQL: &str = "UPDATE token \
 
 /// Revoke every still-live **session** token of one member (access + refresh).
 /// Agent bearers are left alone — password rotation is not a member exile.
+///
+/// Ending every session also ends everything registered under them: the
+/// route that commits this must invalidate the member's push registrations in
+/// the same transaction (`momo_push::invalidate_member_push_tokens_in_tx`,
+/// #2677). This crate cannot do it itself — `push_token` SQL is momo-push's.
 pub async fn revoke_member_session_tokens(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -596,6 +704,40 @@ mod tests {
         assert!(
             REVOKE_MEMBER_SESSION_BY_IDS_SQL.contains("id = ANY($3::uuid[])"),
             "per-device revoke must name the id set"
+        );
+    }
+
+    /// #2677 — the registration lock must stay a *share* lock on the caller's
+    /// own session row. Drop `FOR SHARE` and a logout can commit between the
+    /// read and the registration's write, leaving a live push token under a
+    /// dead session; drop the owner/kind predicates and a registration could
+    /// bind to someone else's lineage.
+    #[test]
+    fn the_registration_lock_is_a_share_lock_on_the_callers_session_row() {
+        for needle in [
+            "id = $1",
+            "workspace_id = $2",
+            "actor_member_id = $3",
+            "kind = 'session'",
+            "FOR SHARE",
+        ] {
+            assert!(
+                LOCK_SESSION_FOR_REGISTRATION_SQL.contains(needle),
+                "lock_session_for_registration lost `{needle}`"
+            );
+        }
+        assert!(
+            !LOCK_SESSION_FOR_REGISTRATION_SQL.contains("revoked_at IS NULL"),
+            "an ended session must be SEEN (and refused), not filtered into NotASession"
+        );
+    }
+
+    #[test]
+    fn a_fresh_lineage_is_never_reused() {
+        assert_ne!(
+            new_session_id(),
+            new_session_id(),
+            "two sign-ins must never share a lineage"
         );
     }
 

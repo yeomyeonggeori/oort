@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::issue::{sign_access, sign_refresh, IssuedToken};
 use crate::token_store::{
-    lock_member_session_tokens_by_ids, record_session_token_with_device,
+    lock_member_session_tokens_by_ids, new_session_id, record_session_token_with_device,
     revoke_member_session_tokens_by_ids, DeviceSessionRecord, SESSION_LABEL_ACCESS,
     SESSION_LABEL_REFRESH,
 };
@@ -285,6 +285,9 @@ pub async fn consume_device_link_in_tx(
     let refresh =
         sign_refresh(member_id, workspace_id, scopes, jwt_secret).map_err(sign_to_sqlx)?;
 
+    // The phone's session starts here, so it gets a lineage of its own — not
+    // the issuer's. Disconnecting this phone (D5) must end exactly this one.
+    let session_id = new_session_id();
     let access_id = record_session_token_with_device(
         conn,
         workspace_id,
@@ -296,6 +299,7 @@ pub async fn consume_device_link_in_tx(
             expires_at_unix: access.expires_at,
             device_label: Some(device_name),
             pending_sas,
+            session_id,
         },
     )
     .await?;
@@ -310,6 +314,7 @@ pub async fn consume_device_link_in_tx(
             expires_at_unix: refresh.expires_at,
             device_label: Some(device_name),
             pending_sas,
+            session_id,
         },
     )
     .await?;
@@ -714,6 +719,37 @@ pub async fn revoke_linked_device_in_tx(
         return Ok(LinkedDeviceRevoke::NotFound);
     }
     Ok(LinkedDeviceRevoke::Revoked)
+}
+
+/// Read through the refresh half: the link row keeps pointing at the pair after
+/// [`revoke_linked_device_in_tx`], and rotations rebind it without changing the
+/// lineage.
+const LINKED_DEVICE_SESSION_ID_SQL: &str = "SELECT t.session_id \
+      FROM device_link_token d \
+      JOIN token t \
+        ON t.id = d.redeemed_refresh_token_id \
+       AND t.workspace_id = d.workspace_id \
+     WHERE d.workspace_id = $1 \
+       AND d.member_id = $2 \
+       AND d.id = $3 \
+       AND t.actor_member_id = $2";
+
+/// The session lineage (`token.session_id`, #2677) of the pair currently bound
+/// to one linked device — the session a disconnect ends. `None` for an unknown
+/// link or a pair minted before migration 088.
+pub async fn linked_device_session_id_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    device_id: Uuid,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    sqlx::query_scalar::<_, Option<Uuid>>(LINKED_DEVICE_SESSION_ID_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(device_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map(|value| value.flatten())
 }
 
 /// Point a locked consumed link at the rotated session pair and kill the

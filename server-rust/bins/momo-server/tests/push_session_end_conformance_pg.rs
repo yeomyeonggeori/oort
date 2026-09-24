@@ -411,7 +411,10 @@ impl World {
     async fn register(&self, session: &Session, phone: &Phone) {
         let response = self
             .http
-            .post(format!("{}/v1/workspaces/{}/devices", self.base, self.workspace))
+            .post(format!(
+                "{}/v1/workspaces/{}/devices",
+                self.base, self.workspace
+            ))
             .bearer_auth(&session.access)
             .json(&json!({
                 "deviceId": phone.device_id.to_string(),
@@ -443,7 +446,10 @@ impl World {
             .expect("logout");
         assert_eq!(response.status().as_u16(), 200, "logout succeeds");
         let body: Value = response.json().await.expect("logout body");
-        assert_eq!(body["revokedRefresh"], true, "logout killed the refresh half");
+        assert_eq!(
+            body["revokedRefresh"], true,
+            "logout killed the refresh half"
+        );
     }
 
     async fn rotate(&self, session: &Session) -> Session {
@@ -479,7 +485,11 @@ impl World {
     /// One real notifier drain over THIS workspace's candidates only, returning
     /// what reached the relay for `phone`.
     async fn drain_to(&self, phone: &Phone) -> usize {
-        self.drain().await.iter().filter(|d| is_for(d, phone)).count()
+        self.drain()
+            .await
+            .iter()
+            .filter(|d| is_for(d, phone))
+            .count()
     }
 
     async fn drain(&self) -> Vec<PushDispatch> {
@@ -499,7 +509,11 @@ impl World {
         .expect("park foreign push candidates");
 
         let relay = RecordingDispatcher::accepting();
-        let drain = PushDrain::new(self.notifier.clone(), PushConfig::for_target(), relay.clone());
+        let drain = PushDrain::new(
+            self.notifier.clone(),
+            PushConfig::for_target(),
+            relay.clone(),
+        );
         let stats = drain.drain_once(64).await.expect("drain");
         assert_eq!(stats.failed, 0, "no candidate failed");
         assert_eq!(stats.requeued, 0, "no candidate was requeued");
@@ -703,7 +717,11 @@ async fn logout_never_touches_a_registration_it_cannot_attribute() {
         "a web logout must not end a phone registration it cannot attribute"
     );
     w.send("legacy row").await;
-    assert_eq!(w.drain_to(&legacy).await, 1, "the legacy row still delivers");
+    assert_eq!(
+        w.drain_to(&legacy).await,
+        1,
+        "the legacy row still delivers"
+    );
 }
 
 /// ADR-0180 D5: 설정 › 기기 disconnects a linked phone. The phone's session
@@ -747,7 +765,11 @@ async fn unlinking_a_linked_phone_ends_its_registration() {
     w.register(&linked, &phone).await;
     let _rotated = w.rotate(&linked).await;
     w.send("linked phone").await;
-    assert_eq!(w.drain_to(&phone).await, 1, "control: the linked phone is notified");
+    assert_eq!(
+        w.drain_to(&phone).await,
+        1,
+        "control: the linked phone is notified"
+    );
 
     let listed = w
         .http
@@ -774,14 +796,22 @@ async fn unlinking_a_linked_phone_ends_its_registration() {
         .send()
         .await
         .expect("unlink");
-    assert_eq!(unlinked.status().as_u16(), 204, "desktop disconnects the phone");
+    assert_eq!(
+        unlinked.status().as_u16(),
+        204,
+        "desktop disconnects the phone"
+    );
 
     assert!(
         !w.registration_live(&phone).await,
         "disconnecting a linked phone must invalidate its push registration"
     );
     w.send("after unlink").await;
-    assert_eq!(w.drain_to(&phone).await, 0, "an unlinked phone receives no push");
+    assert_eq!(
+        w.drain_to(&phone).await,
+        0,
+        "an unlinked phone receives no push"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -816,7 +846,11 @@ async fn a_password_change_ends_every_registration_of_the_member() {
         "a password change revokes every session — and every registration they made"
     );
     w.send("after password change").await;
-    assert_eq!(w.drain_to(&phone).await, 0, "the phone is signed out and silent");
+    assert_eq!(
+        w.drain_to(&phone).await,
+        0,
+        "the phone is signed out and silent"
+    );
 }
 
 #[tokio::test]
@@ -850,14 +884,22 @@ async fn a_password_reset_claim_ends_every_registration_of_the_member() {
         .send()
         .await
         .expect("claim reset");
-    assert_eq!(claimed.status().as_u16(), 200, "the reset claim is consumed");
+    assert_eq!(
+        claimed.status().as_u16(),
+        200,
+        "the reset claim is consumed"
+    );
 
     assert!(
         !w.registration_live(&phone).await,
         "a password reset revokes every session — and every registration they made"
     );
     w.send("after reset").await;
-    assert_eq!(w.drain_to(&phone).await, 0, "the phone is signed out and silent");
+    assert_eq!(
+        w.drain_to(&phone).await,
+        0,
+        "the phone is signed out and silent"
+    );
 }
 
 /// Suspension alone hides the phone (judgment reads only active members), which
@@ -926,7 +968,10 @@ async fn leaving_the_workspace_ends_every_registration_of_the_member() {
     let desktop = w.person_login().await;
     let left = w
         .http
-        .delete(format!("{}/v1/workspaces/{}/members/me", w.base, w.workspace))
+        .delete(format!(
+            "{}/v1/workspaces/{}/members/me",
+            w.base, w.workspace
+        ))
         .bearer_auth(&desktop.access)
         .send()
         .await

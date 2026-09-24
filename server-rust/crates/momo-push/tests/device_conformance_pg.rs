@@ -703,8 +703,9 @@ async fn a_registration_under_an_ended_session_is_refused() {
     )
     .await
     .expect("the registration transaction itself does not fail");
-    assert!(
-        outcome.is_err(),
+    assert_eq!(
+        outcome.err(),
+        Some(DeviceRejection::SessionEnded),
         "a registration made under an ended session must be refused"
     );
 
