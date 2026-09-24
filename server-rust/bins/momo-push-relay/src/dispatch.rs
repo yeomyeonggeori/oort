@@ -33,6 +33,44 @@ const REQUIRED_KEYS: &[&str] = &[
 const ALLOWED_REASONS: &[&str] = &["dm", "mention", "approval_request", "resume_offer"];
 const ALLOWED_CATEGORIES: &[&str] = &["momo.message", "momo.mention", "momo.approval", "momo.work"];
 
+/// APNs `aps.sound` per category (#2669).
+///
+/// | category | sound | why |
+/// |---|---|---|
+/// | `momo.message` | `default` | A DM: a person wrote to you. |
+/// | `momo.mention` | `default` | Someone named you. |
+/// | `momo.approval` | `default` | An agent is waiting on your decision. |
+/// | `momo.work` | `default` | It reaches one person through the same judgment as the rows above: a work-session card in your DM or naming you, or the owner-only `resume_offer`, which is itself an `approval_request` message. The category follows the message's shape, not its urgency, so a silent row would make a DM quieter just because it carries a card. |
+///
+/// `"default"` is the system sound. The person's own settings (sound off for
+/// oort, Focus, the silent switch) are applied by the OS on the device, so the
+/// relay sends the same default to everyone and never tries to decide them.
+///
+/// **No silent kind today.** Silence (`None`, key omitted) is for a push that
+/// shows nothing, such as a quiet refresh (`content-available` only,
+/// `apns-push-type: background`). The relay has no such kind: every dispatch it
+/// accepts goes out as `apns-push-type: alert` with the placeholder alert
+/// (`sender.rs`), so every one of them sounds. `work_session_idle` would fall
+/// under `momo.work`, but the relay refuses that reason (ADR-0120 부록 A,
+/// undecided). Revisit the `momo.work` row when that appendix is decided.
+///
+/// Every category in [`ALLOWED_CATEGORIES`] has exactly one row here.
+const CATEGORY_SOUNDS: &[(&str, Option<&str>)] = &[
+    ("momo.message", Some("default")),
+    ("momo.mention", Some("default")),
+    ("momo.approval", Some("default")),
+    ("momo.work", Some("default")),
+];
+
+/// The [`CATEGORY_SOUNDS`] row for `category`. A category the table does not
+/// name is silent, and `decode_closed` never lets one through.
+fn sound_for(category: &str) -> Option<&'static str> {
+    CATEGORY_SOUNDS
+        .iter()
+        .find(|(name, _)| *name == category)
+        .and_then(|(_, sound)| *sound)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PushDispatch {
     pub schema: String,
@@ -179,6 +217,10 @@ pub struct ApnsPayload {
 pub struct Aps {
     pub alert: ApsAlert,
     pub badge: i64,
+    /// `"default"`, or omitted for silence — never `null`. See
+    /// [`CATEGORY_SOUNDS`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sound: Option<&'static str>,
     #[serde(rename = "thread-id")]
     pub thread_id: String,
     pub category: String,
@@ -216,6 +258,7 @@ impl ApnsPayload {
                     body: "새 알림",
                 },
                 badge: dispatch.badge,
+                sound: sound_for(&dispatch.category),
                 thread_id: dispatch.thread_id.clone(),
                 category: dispatch.category.clone(),
                 mutable_content: 1,
@@ -357,6 +400,35 @@ mod tests {
                 ),
             }
         }
+    }
+
+    /// The code table names every allowed category exactly once, so a new
+    /// category cannot fall through to the unnamed (silent) arm by omission.
+    #[test]
+    fn the_sound_table_names_every_allowed_category_exactly_once() {
+        let rows: Vec<&str> = CATEGORY_SOUNDS
+            .iter()
+            .map(|(category, _)| *category)
+            .collect();
+        let unique: BTreeSet<&str> = rows.iter().copied().collect();
+        assert_eq!(unique.len(), rows.len(), "duplicate row in {rows:?}");
+        let allowed: BTreeSet<&str> = ALLOWED_CATEGORIES.iter().copied().collect();
+        assert_eq!(unique, allowed);
+    }
+
+    /// The silent arm drops the key. `"sound": null` would not be silence:
+    /// APNs takes a sound name string or a dictionary, and null is neither.
+    #[test]
+    fn a_silent_aps_omits_the_sound_key_instead_of_sending_null() {
+        assert_eq!(sound_for("momo.not-a-category"), None);
+        let dispatch = PushDispatch::decode_closed(DISPATCH_JSON.as_bytes()).unwrap();
+        let mut payload = ApnsPayload::from_dispatch(&dispatch);
+        payload.aps.sound = None;
+        let encoded = serde_json::to_vec(&payload).unwrap();
+        let object: Value = serde_json::from_slice(&encoded).unwrap();
+        let aps = object["aps"].as_object().unwrap();
+        assert!(!aps.contains_key("sound"), "aps = {aps:?}");
+        assert!(!String::from_utf8(encoded).unwrap().contains("sound"));
     }
 
     #[test]
