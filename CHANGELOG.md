@@ -28,6 +28,7 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 - ADR-0188 R0: remote-host defences — the host owner decides, agents may only kill on member hosts, remote auto-approve and remote shell are refused, heartbeat v2. (#2576)
 - ADR-0188 R0.1 + (A′): non-admins cannot register workspace-scoped hosts, app hosts are member-scoped only, member hosts receive only the owner's non-shell controls and everyone's kill, and agent-originated non-kill controls to member hosts are refused at decision, tool-request and executor time. (#2597)
 - ADR-0188 R1.1: `momo-workd` hardening — credential redaction in outgoing events, Claude reads fenced to the working folder, Codex refused remotely until #2607, owner-only spawn on member hosts, request-recorder proof that the host key never leaves the machine. (#2605)
+- ADR-0188 R1.2: remote Codex runs sandboxed in a host-owned home — it never reads the owner's `~/.codex`, starts with no MCP servers and with 13 out-of-sandbox features turned off, and needs a one-time `codex login` into that home. A Claude session that does not start in the fixed permission mode is corrected before its first prompt, and refused if the agent does not confirm it. (#2621)
 
 ### Not in this release
 - Nothing here is in a published image yet; the next server tag is cut from `main` after the batch promotion.
