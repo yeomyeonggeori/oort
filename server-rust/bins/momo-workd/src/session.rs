@@ -13,7 +13,9 @@
 //! 4. the allowed folder must resolve (`realpath`) to a directory, and carry no
 //!    project agent configuration the adapter would apply regardless
 //!    ([`policy::check_project_config`]); for Codex, the host's own home is
-//!    ready and signed in ([`policy::prepare_codex_home`], ADR-0188 §8);
+//!    ready and signed in, and Codex's own `HOME` holds no skill layer
+//!    ([`policy::prepare_codex_home`], ADR-0188 §8, #2630 F5); the agent gets
+//!    the allowlisted part of the host's environment only (#2630 F1);
 //! 5. ACP `initialize` — the process must be the adapter its entry names
 //!    ([`policy::AdapterKind::agent_name`]) — then `session/new` with no MCP
 //!    servers and the adapter's isolation switches;
@@ -113,7 +115,8 @@ pub struct SessionSettings {
     pub tools: BTreeMap<String, ToolEntry>,
     pub working_directory: PathBuf,
     pub acp_start_timeout: Duration,
-    /// The host's environment at startup; filtered per launch by the policy.
+    /// The host's environment at startup; only `policy::AGENT_ENV_ALLOWLIST`
+    /// of it reaches an agent (`policy::launch_spec`, #2630 F1).
     pub parent_env: Vec<(String, String)>,
     /// Most sessions (agent processes) this host runs at once (#2602 L-2).
     pub max_sessions: usize,
