@@ -75,6 +75,11 @@ const STUB: &str = env!("CARGO_BIN_EXE_momo-workd-acp-stub");
 const TEST_JWT_SECRET: &str = "wdc-2571-workd-conformance-secret";
 const TEST_PASSWORD: &str = "wdc-2571-conformance-password";
 const PERMISSION_DENIED_DETAIL: &str = momo_workd::session::PERMISSION_DENIED_DETAIL;
+/// #2630 F1: synthetic credentials planted in `momo-workd run`'s environment.
+const PLANTED_ENV: [(&str, &str); 2] = [
+    ("ZZ_TEST_TOKEN", "zz-fake-token-2630"),
+    ("ZZ_TEST_API_KEY", "zz-fake-api-key-2630"),
+];
 
 fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("set DATABASE_URL to a pgvector/pg18 superuser DB")
@@ -694,6 +699,9 @@ impl Workd {
             .arg("--dev-key-file")
             .arg(&self.key)
             .env("MOMO_WORKD_LOG", "momo_workd=debug,info")
+            // #2630 F1: fake credentials in the host's own environment; no
+            // agent and no command an agent runs may see them.
+            .envs(PLANTED_ENV)
             .stdout(std::process::Stdio::null())
             .stderr(log)
             .kill_on_drop(true)
@@ -1103,6 +1111,28 @@ async fn wdc_1_owner_resume_round_trip_and_no_seed_on_the_wire() {
         "wdc_1: {} session events on the ledger, denial + reason present",
         events.len()
     );
+    // #2630 F1, through the real `run`: the host's environment reached
+    // neither the agent nor a command it ran.
+    let start = &workd.record("claude")[0];
+    for list in ["env_keys", "command_env_keys"] {
+        let names: Vec<&str> = start[list]
+            .as_array()
+            .unwrap_or_else(|| panic!("{list} recorded: {start}"))
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        for (planted, _) in PLANTED_ENV {
+            assert!(
+                !names.contains(&planted),
+                "{planted} reached the agent ({list}): {names:?}"
+            );
+        }
+        assert!(
+            !names.iter().any(|name| name.starts_with("MOMO_")),
+            "{names:?}"
+        );
+    }
+    eprintln!("wdc_1: the planted host credentials reached neither the agent nor its command");
 
     // ---- the owner's kill → acked → ended -------------------------------------
     let kill = insert_control(

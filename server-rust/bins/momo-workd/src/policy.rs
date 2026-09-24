@@ -966,19 +966,46 @@ mod tests {
         );
     }
 
+    /// A host environment as a terminal hands it over: what an agent needs,
+    /// the host's own configuration, credentials (#2630 F1), and the
+    /// adapters' own configuration switches.
+    fn host_environment() -> Vec<(String, String)> {
+        [
+            ("HOME", "/Users/me"),
+            ("PATH", "/usr/bin"),
+            ("USER", "me"),
+            ("LOGNAME", "me"),
+            ("SHELL", "/bin/zsh"),
+            ("TERM", "xterm-256color"),
+            ("TMPDIR", "/var/folders/xx/T/"),
+            ("LANG", "ko_KR.UTF-8"),
+            ("LC_CTYPE", "UTF-8"),
+            ("MOMO_WORKD_REGISTER_TOKEN", "secret"),
+            ("OORT_ANYTHING", "secret"),
+            ("ZZ_TEST_TOKEN", "zz-fake-token-2630"),
+            ("ZZ_TEST_API_KEY", "zz-fake-api-key-2630"),
+            ("OPENAI_API_KEY", "zz-fake"),
+            ("ANTHROPIC_API_KEY", "zz-fake"),
+            ("GITHUB_TOKEN", "zz-fake"),
+            ("AWS_SECRET_ACCESS_KEY", "zz-fake"),
+            ("SSH_AUTH_SOCK", "/private/tmp/agent.sock"),
+            ("DISABLE_MCP_CONFIG_FILTERING", "true"),
+            ("CODEX_PATH", "/tmp/evil-codex"),
+            ("CLAUDE_CODE_USE_BEDROCK", "1"),
+            ("NODE_OPTIONS", "--require /tmp/x.js"),
+            ("HTTPS_PROXY", "http://user:pass@proxy:3128"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect()
+    }
+
     #[test]
     fn the_launch_comes_from_the_allowlist_and_withholds_host_env() {
         let spec = launch_spec(
             &entry(AdapterKind::Claude),
             Path::new("/work/repo"),
-            vec![
-                ("HOME".to_string(), "/Users/me".to_string()),
-                (
-                    "MOMO_WORKD_REGISTER_TOKEN".to_string(),
-                    "secret".to_string(),
-                ),
-                ("PATH".to_string(), "/usr/bin".to_string()),
-            ],
+            host_environment(),
             &codex_fixture(),
         );
         assert_eq!(spec.program, PathBuf::from("/opt/agents/bin/adapter"));
@@ -989,9 +1016,50 @@ mod tests {
             !spec.env.iter().any(|(key, _)| key.starts_with("MOMO_")),
             "the registration token must not reach an agent"
         );
+        // #2630 F1: only the allowlist reaches an agent — no credential, no
+        // host or adapter configuration.
+        let mut passed: Vec<&str> = spec.env.iter().map(|(key, _)| key.as_str()).collect();
+        passed.sort_unstable();
+        assert_eq!(
+            passed,
+            ["HOME", "LANG", "LC_CTYPE", "LOGNAME", "PATH", "SHELL", "TERM", "TMPDIR", "USER"],
+            "only the allowlist passes"
+        );
         let params = session_new_params(AdapterKind::Claude, Path::new("/work/repo"));
         assert_eq!(params["mcpServers"], json!([]));
         assert_eq!(params["cwd"], "/work/repo");
+    }
+
+    #[test]
+    fn a_symlinked_sign_in_is_refused() {
+        // #2630 F3: `auth.json` must be the home's own regular file. A link to
+        // a private regular file elsewhere (which `metadata` would follow and
+        // accept) is refused.
+        use std::os::unix::fs::PermissionsExt as _;
+        let state = scratch("codex-auth-link");
+        let folder = scratch("folder");
+        let codex = CodexHome::beside(&state.join("host.json"));
+        assert_eq!(
+            prepare_codex_home(&codex, &folder),
+            Err(Refusal::CodexLoginRequired)
+        );
+        let elsewhere = state.join("somebody-elses-auth.json");
+        std::fs::write(&elsewhere, "{}").unwrap();
+        std::fs::set_permissions(&elsewhere, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let auth = codex.home.join("auth.json");
+        std::os::unix::fs::symlink(&elsewhere, &auth).unwrap();
+        assert_eq!(
+            prepare_codex_home(&codex, &folder),
+            Err(Refusal::CodexHomeRefused),
+            "a symlinked auth.json is refused"
+        );
+        // The same file as the home's own regular file is the sign-in.
+        std::fs::remove_file(&auth).unwrap();
+        std::fs::copy(&elsewhere, &auth).unwrap();
+        std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(prepare_codex_home(&codex, &folder), Ok(()));
+        let _ = std::fs::remove_dir_all(&state);
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     /// Not a check: prints the exact `session/new` `_meta` the host sends a

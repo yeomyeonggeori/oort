@@ -196,7 +196,16 @@ struct Harness {
     record: PathBuf,
     dir: PathBuf,
     codex: CodexHome,
+    /// The owner's `HOME` in the host's environment: a fixture folder holding
+    /// an owner-layer Codex skill (`.agents/skills/zz-owner-skill`), never the
+    /// real one.
+    owner_home: PathBuf,
 }
+
+/// #2630 F1: fake credentials planted in the host's environment. Synthetic,
+/// and shaped like the names codex's own default excludes look for.
+const PLANTED_TOKEN: (&str, &str) = ("ZZ_TEST_TOKEN", "zz-fake-token-2630");
+const PLANTED_API_KEY: (&str, &str) = ("ZZ_TEST_API_KEY", "zz-fake-api-key-2630");
 
 impl Drop for Harness {
     fn drop(&mut self) {
@@ -228,9 +237,25 @@ fn harness_with(tools: &[(&str, AdapterKind, &[&str])]) -> Harness {
     std::fs::create_dir_all(dir.join("repo")).unwrap();
     let record = dir.join("stub.jsonl");
     let server = FakeServer::new();
-    let mut parent_env: Vec<(String, String)> = std::env::vars().collect();
+    let owner_home = dir.join("owner-home");
+    let owner_skill = owner_home
+        .join(".agents")
+        .join("skills")
+        .join("zz-owner-skill");
+    std::fs::create_dir_all(&owner_skill).unwrap();
+    std::fs::write(
+        owner_skill.join("SKILL.md"),
+        "---\nname: zz-owner-skill\ndescription: an owner-layer skill (fixture)\n---\n",
+    )
+    .unwrap();
+    let mut parent_env: Vec<(String, String)> =
+        std::env::vars().filter(|(key, _)| key != "HOME").collect();
+    parent_env.push(("HOME".into(), owner_home.display().to_string()));
     // Present in the host's own environment; must never reach an agent.
     parent_env.push(("MOMO_WORKD_REGISTER_TOKEN".into(), "owner-token".into()));
+    for (key, value) in [PLANTED_TOKEN, PLANTED_API_KEY] {
+        parent_env.push((key.into(), value.into()));
+    }
     let settings = SessionSettings {
         tools: tools
             .iter()
@@ -253,6 +278,7 @@ fn harness_with(tools: &[(&str, AdapterKind, &[&str])]) -> Harness {
         record,
         dir,
         codex,
+        owner_home,
     }
 }
 
@@ -466,6 +492,54 @@ async fn inv_2_a_session_outside_the_fixed_mode_is_corrected_before_its_first_pr
         ControlAck::refused("permission_mode_refused")
     );
     assert!(h.server.creates().is_empty());
+
+    // #2630 F2: the agent's LAST report is its mode. `default` then `auto`
+    // with the answer is `auto`: refused, whatever the first report said.
+    let mut h = harness(&[(
+        "flips",
+        &["--mode", "auto", "--set-mode-reports", "default,auto"],
+    )]);
+    let flips = spawn(&h, "flips", "fix the bug");
+    h.server.push(flips.clone());
+    h.controls.poll_once().await.unwrap();
+    assert_eq!(
+        ack_for(&h, flips.id),
+        ControlAck::refused("permission_mode_refused"),
+        "default then auto: the last report wins"
+    );
+    assert!(h.server.creates().is_empty());
+    assert!(!received_methods(&h)
+        .iter()
+        .any(|method| method == "session/prompt"));
+    // And after the answer: `auto` then `default` is `default` — the
+    // correction is confirmed by the later report, not refused by the first.
+    let mut h = harness(&[(
+        "settles",
+        &[
+            "--mode",
+            "auto",
+            "--set-mode-reports",
+            "auto,default",
+            "--set-mode-reports-late",
+        ],
+    )]);
+    let settles = spawn(&h, "settles", "fix the bug");
+    h.server.push(settles.clone());
+    h.controls.poll_once().await.unwrap();
+    let session = ack_for(&h, settles.id)
+        .session_id
+        .expect("auto then default: the last report wins");
+    wait_for("the confirmed turn to end", || {
+        h.server
+            .statuses(session)
+            .contains(&SessionStatus::Idle { exit_code: 0 })
+    })
+    .await;
+    let prompt_modes: Vec<String> = stub_log(&h)
+        .iter()
+        .filter_map(|entry| entry["prompt_mode"].as_str().map(str::to_string))
+        .collect();
+    assert_eq!(prompt_modes, ["default"]);
 }
 
 #[tokio::test]
@@ -1486,5 +1560,112 @@ async fn inv_19_an_open_key_header_does_not_hold_the_rest_of_the_answer() {
     assert!(
         relayed.contains("visible tail"),
         "the answer after the block arrives"
+    );
+}
+
+/// The names an agent may see from the host's environment (#2630 F1), written
+/// out here rather than read from the policy: this is the contract the test
+/// holds the policy to.
+fn allowed_from_host(name: &str) -> bool {
+    [
+        "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "TMPDIR", "LANG",
+    ]
+    .contains(&name)
+        || name.starts_with("LC_")
+}
+
+fn names(value: &Value) -> Vec<String> {
+    value
+        .as_array()
+        .unwrap_or_else(|| panic!("a list of names: {value}"))
+        .iter()
+        .map(|name| name.as_str().unwrap().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn inv_20_the_hosts_environment_never_reaches_an_agent_or_its_commands() {
+    // #2630 F1 (the #2621 re-review): the host's environment went to the
+    // agent whole, minus MOMO_*/OORT_*, and from there to every command the
+    // agent runs without asking. Two fake credentials are planted in it.
+    let mut h = harness_with(&[
+        ("claude", AdapterKind::Claude, &[]),
+        (
+            "codex",
+            AdapterKind::Codex,
+            &["--codex-modes", "--mode", "read-only"],
+        ),
+    ]);
+    sign_in_codex(&h);
+    for tool in ["claude", "codex"] {
+        one_turn(&mut h, tool).await;
+    }
+    let starts: Vec<Value> = stub_log(&h)
+        .into_iter()
+        .filter(|entry| entry.get("env_keys").is_some())
+        .collect();
+    assert_eq!(starts.len(), 2, "one launch per adapter");
+    for start in &starts {
+        let codex = start["env_isolation"]["CODEX_HOME"].is_string();
+        let agent = names(&start["env_keys"]);
+        let command = names(&start["command_env_keys"]);
+        for planted in [
+            PLANTED_TOKEN.0,
+            PLANTED_API_KEY.0,
+            "MOMO_WORKD_REGISTER_TOKEN",
+        ] {
+            assert!(
+                !agent.iter().any(|name| name == planted),
+                "{planted} reached the agent (codex: {codex}): {agent:?}"
+            );
+            assert!(
+                !command.iter().any(|name| name == planted),
+                "{planted} reached a command the agent ran (codex: {codex}): {command:?}"
+            );
+        }
+        // Only the allowlist, and what the host sets itself.
+        let host_set: &[&str] = if codex {
+            &[
+                "CODEX_HOME",
+                "TMPDIR",
+                "INITIAL_AGENT_MODE",
+                "CODEX_CONFIG",
+                "HOME",
+            ]
+        } else {
+            &[]
+        };
+        for name in &agent {
+            assert!(
+                allowed_from_host(name) || host_set.contains(&name.as_str()),
+                "{name} is neither allowlisted nor set by the host (codex: {codex})"
+            );
+        }
+    }
+    // #2630 F5: Codex reads the user skill layer from `$HOME/.agents/skills`
+    // (codex `ext/skills/src/host_roots.rs`), so its HOME is not the owner's.
+    let codex_start = starts
+        .iter()
+        .find(|start| start["env_isolation"]["CODEX_HOME"].is_string())
+        .unwrap();
+    let codex_home_dir = codex_start["env_isolation"]["HOME"]
+        .as_str()
+        .map(PathBuf::from)
+        .expect("Codex runs with a HOME");
+    assert_ne!(
+        codex_home_dir, h.owner_home,
+        "the owner's HOME (and its ~/.agents/skills) is never Codex's"
+    );
+    assert!(!codex_home_dir.join(".agents").exists());
+    let claude_start = starts
+        .iter()
+        .find(|start| !start["env_isolation"]["CODEX_HOME"].is_string())
+        .unwrap();
+    assert_eq!(
+        claude_start["env_isolation"]["HOME"]
+            .as_str()
+            .map(PathBuf::from),
+        Some(h.owner_home.clone()),
+        "Claude keeps the owner's HOME: its sign-in lives there"
     );
 }
