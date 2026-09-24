@@ -26,6 +26,10 @@ mod notification;
 // iOS/Android — both are desktop-only and so are these modules.
 #[cfg(desktop)]
 mod opener;
+// What the capability and window config owe the web bundle's drag regions and
+// file drops (#2671). Tests only.
+#[cfg(test)]
+mod shell_contract;
 #[cfg(desktop)]
 mod updater;
 
@@ -43,6 +47,14 @@ use tauri_plugin_deep_link::DeepLinkExt;
 #[tauri::command]
 fn app_version(app: tauri::AppHandle) -> String {
     app.package_info().version.to_string()
+}
+
+/// The compiled app context: config, embedded assets and the resolved
+/// capability ACL. One function so the tests can ask Tauri's own resolver
+/// what this build allows (`shell_contract.rs`) — the macro may only expand
+/// once per crate.
+fn context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -129,6 +141,6 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .run(context())
         .expect("error while running momo desktop shell");
 }
