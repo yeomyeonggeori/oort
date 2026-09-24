@@ -594,8 +594,16 @@ export function useTimeline(
   );
 
   const backfillAfter = useCallback(
-    async (channel: string, stillCurrent: () => boolean = () => true) => {
-      let after = newestSeqRef.current ?? 0;
+    async (
+      channel: string,
+      stillCurrent: () => boolean = () => true,
+      // 어디서부터 메우는가. 주지 않으면 지금 든 가장 새 행 뒤다. 머리 페이지를
+      // 기다린 역채움은 **머리의 끝**을 준다(#2633) — 그 사이 레일이 가져온 행 뒤에서
+      // 시작하면, 머리와 레일 사이에 커밋된 행을 영영 건너뛴다. `null` 은 빈 방이다.
+      from?: number | null,
+    ) => {
+      let after =
+        from === undefined ? (newestSeqRef.current ?? 0) : (from ?? 0);
       let total = 0;
       for (;;) {
         const page = await fetchMessages(workspaceId, channel, {
@@ -655,6 +663,29 @@ export function useTimeline(
     setReactions(reactionsRef.current);
     applyPins(emptyPins());
 
+    // 복구되지 않은 (재)구독은 REST 로 꼬리를 메운다. 머리 페이지가 이미 왔으면
+    // 곧바로, 아직이면 **머리가 온 뒤** 그 끝에서(#2633).
+    //
+    // 레일의 답(웹소켓 한 왕복)은 머리 읽기(HTTP·DB 한 왕복)보다 먼저 오기 쉽다. 그때
+    // 곧바로 메우면 기준 seq 가 없어(`newestSeqRef` = null) `after=0` 에서 시작하고,
+    // 가득 찬 페이지가 오는 동안 계속 읽는다 — 방을 열 때마다 방의 처음부터
+    // 끝까지다(#2584 R3 관찰 1). 머리를 기다려도 잃는 것은 없다: 머리가 나간 뒤
+    // 커밋된 행은 머리의 끝 뒤를 읽는 이 한 번이 가져오고, 구독 뒤의 행은 레일이
+    // 가져온다. 머리 읽기가 실패하면 메우지 않는다 — 다시 읽기가 처음부터 다시 한다.
+    let headLanded = false;
+    let backfillOnHead: 'first' | 'resubscribe' | null = null;
+    const healTail = (isFirst: boolean, from?: number | null) => {
+      backfillAfter(channelId, () => !cancelled, from)
+        .then(count => {
+          if (cancelled || isFirst) return;
+          setResume(r => ({...r, lastBackfillCount: count}));
+          addMarker('backfill');
+        })
+        .catch(() => {
+          /* the rail is live again; the next resubscribe heals it */
+        });
+    };
+
     // 1) REST head (descending page; the merge is order-agnostic).
     fetchMessages(workspaceId, channelId, {limit: HEAD_LIMIT})
       .then(page => {
@@ -663,6 +694,17 @@ export function useTimeline(
         setReachedStart(page.nextBefore === undefined);
         setStatus('ready');
         setLoadedChannelId(channelId);
+        headLanded = true;
+        if (backfillOnHead !== null) {
+          const isFirst = backfillOnHead === 'first';
+          backfillOnHead = null;
+          const headEnd = page.messages.reduce<number | null>(
+            (max, message) =>
+              max === null || message.seq > max ? message.seq : max,
+            null,
+          );
+          healTail(isFirst, headEnd);
+        }
       })
       .catch(() => {
         if (!cancelled) setStatus('error');
@@ -706,18 +748,15 @@ export function useTimeline(
         }));
         if (!recovered) {
           // A non-recovered (re)subscribe may have missed publications: pull the
-          // authoritative tail from Postgres. Safe on first subscribe too.
-          // 방을 옮기면(또는 다시 읽으면) 이 효과의 `cancelled` 가 선다. 그 뒤에 온
-          // 답은 새 방의 목록에 섞이면 안 된다 (#2632 O-2 — `catchUp` 과 같은 가드).
-          backfillAfter(channelId, () => !cancelled)
-            .then(count => {
-              if (cancelled || isFirst) return;
-              setResume(r => ({...r, lastBackfillCount: count}));
-              addMarker('backfill');
-            })
-            .catch(() => {
-              /* the rail is live again; the next resubscribe heals it */
-            });
+          // authoritative tail from Postgres. Safe on first subscribe too — but
+          // only from a known baseline: before the head has landed there is none,
+          // so the heal waits for it (#2633, above).
+          if (headLanded) {
+            healTail(isFirst);
+          } else {
+            backfillOnHead =
+              isFirst && backfillOnHead !== 'resubscribe' ? 'first' : 'resubscribe';
+          }
         } else if (!isFirst) {
           // The transport replayed the gap. centrifuge-js flushes recovered
           // publications synchronously right after `subscribed`, so the marker

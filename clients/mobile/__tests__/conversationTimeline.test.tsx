@@ -99,7 +99,7 @@ function jsonResponse(status: number, body: unknown): Response {
 
 interface Routes {
   /** Answers `GET .../messages`, keyed by the query string it was called with. */
-  messages?: (url: string) => Response;
+  messages?: (url: string) => Response | Promise<Response>;
   send?: (body: Record<string, unknown>) => Response;
 }
 
@@ -575,5 +575,157 @@ describe('#1166 — 페이지 읽기가 run 의 종결을 들고 온다', () => 
     expect(
       streamStopMark(row, isStreamRunEnded(row, endedRunIds())),
     ).toBeNull();
+  });
+});
+
+// =============================================================================
+// #2633 — 첫 구독이 머리 페이지보다 먼저 와도 방의 역사 전체를 긷지 않는다.
+//
+// 복구되지 않은 첫 `subscribed` 는 REST `?after` 로 꼬리를 메운다 — 머리 읽기가
+// 끝난 뒤와 구독이 선 뒤 사이의 틈을 막으려는 것이다. 그런데 레일의 답(웹소켓 한
+// 왕복)이 머리 읽기(HTTP·DB 한 왕복)보다 먼저 오면 그 순간 기준 seq 가 없다
+// (`newestSeqRef` = null). 역채움은 `after=0` 에서 시작하고, 가득 찬 페이지가 오는
+// 동안 계속 읽는다 — 방을 열 때마다 방의 처음부터 끝까지(#2584 R3 관찰 1, 리뷰어
+// 탐침 `[edge4-o1]`, 워커의 Release 요청 로그 `limit=50` → `limit=50&after=0`).
+//
+// 가짜 서버는 방 하나를 통째로 든다: 머리 읽기는 가장 새 50행을 내림차순으로,
+// `?after=N` 은 seq > N 을 오름차순으로 `limit` 만큼 답한다(서버
+// `list_channel_page` 의 After 분기와 같은 모양).
+// =============================================================================
+
+/** 1..rows 의 방. 머리·`?after` 두 읽기에 서버처럼 답한다. */
+function longRoom(rows: number, later: number[] = []) {
+  const seqs = [...Array.from({length: rows}, (_, i) => i + 1), ...later];
+  return (url: string): Response => {
+    const limit = Number(/[?&]limit=(\d+)/.exec(url)?.[1] ?? 50);
+    const after = /[?&]after=(\d+)/.exec(url);
+    if (after !== null) {
+      const since = Number(after[1]);
+      return jsonResponse(200, {
+        messages: seqs.filter(seq => seq > since).slice(0, limit).map(seq => message(seq)),
+      });
+    }
+    const head = seqs.slice(-limit).reverse();
+    return jsonResponse(200, {
+      messages: head.map(seq => message(seq)),
+      ...(seqs.length > limit ? {nextBefore: head[head.length - 1]} : {}),
+    });
+  };
+}
+
+/** 이 방의 메시지 읽기들(GET)의 질의 문자열, 나간 순서대로. */
+function messageReads(log: FetchLog): string[] {
+  return log.urls
+    .filter(url => url.includes('/messages'))
+    .map(url => url.split('?')[1] ?? '');
+}
+
+/** 머리 읽기(`after`·`before` 없는 첫 요청)만 붙들어 두는 서버. */
+function holdingHead(answer: (url: string) => Response) {
+  let release: (() => void) | null = null;
+  const route = (url: string): Response | Promise<Response> => {
+    if (/[?&](after|before)=/.test(url) || release !== null) return answer(url);
+    return new Promise<Response>(resolve => {
+      release = () => resolve(answer(url));
+    });
+  };
+  return {route, release: () => release?.()};
+}
+
+describe('#2633 — 첫 구독이 머리 페이지보다 먼저 와도 방 역사 전체를 긷지 않는다', () => {
+  it.each([60, 3000])(
+    '%i행 방 — after=0 역채움이 없고, 방 진입 읽기 수는 방 길이와 무관하게 2회다',
+    async rows => {
+      const head = holdingHead(longRoom(rows));
+      const log = installFetch({messages: head.route});
+      const {rail, subscription} = makeRail();
+      const {result} = renderTimeline(rail);
+
+      // 레일이 먼저 답한다 — 머리 읽기는 아직 오는 중이다.
+      await act(async () => {
+        subscription().__subscribed({recovered: false});
+      });
+      await act(async () => {
+        head.release();
+      });
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      });
+
+      const reads = messageReads(log);
+      // 방 진입의 메시지 읽기 수 — 수리 전에는 방 길이에 비례했다.
+      expect(reads.length).toBe(2); // 머리 한 번 + 머리 뒤 꼬리 한 번
+      expect(reads.filter(query => /[?&]after=0\b/.test(query))).toEqual([]);
+      expect(reads[1]).toBe(`limit=50&after=${rows}`);
+      expect(result.current.state.messages.length).toBe(50);
+    },
+  );
+
+  it('미뤄 둔 역채움은 머리 페이지의 끝에서 시작한다 — 그 사이 레일로 온 행 뒤가 아니라', async () => {
+    // 머리 읽기가 서버에서 먼저 돌았다(3000까지). 그 뒤 3001..3004 가 커밋됐고,
+    // 레일은 구독 뒤의 3005 만 가져왔다. 틈(3001..3004)은 REST 만 메울 수 있다.
+    // 머리의 답은 서버가 3000까지만 알던 때의 스냅샷이다.
+    const head = holdingHead(longRoom(3000));
+    let answeredHead = false;
+    const log = installFetch({
+      messages: url => {
+        if (!/[?&](after|before)=/.test(url) && !answeredHead) {
+          answeredHead = true;
+          return head.route(url);
+        }
+        return longRoom(3000, [3001, 3002, 3003, 3004, 3005])(url);
+      },
+    });
+    const {rail, subscription} = makeRail();
+    const {result} = renderTimeline(rail);
+
+    await act(async () => {
+      subscription().__subscribed({recovered: false});
+      subscription().__emit('publication', {data: frame(3005)});
+    });
+    await act(async () => {
+      head.release();
+    });
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    await waitFor(() =>
+      expect(result.current.state.messages.some(m => m.seq === 3002)).toBe(true),
+    );
+
+    const reads = messageReads(log);
+    expect(reads.filter(query => /[?&]after=0\b/.test(query))).toEqual([]);
+    expect(reads).toContain('limit=50&after=3000');
+    const seqs = result.current.state.messages.map(m => m.seq);
+    expect(seqs.slice(-6)).toEqual([3000, 3001, 3002, 3003, 3004, 3005]);
+  });
+
+  it('머리 읽기가 실패하면 미뤄 둔 역채움도 하지 않는다 — 오류 상태에서 방 역사를 긷지 않는다', async () => {
+    let failHead: (() => void) | null = null;
+    const log = installFetch({
+      messages: url => {
+        if (!/[?&](after|before)=/.test(url)) {
+          return new Promise<Response>(resolve => {
+            failHead = () => resolve(jsonResponse(500, {error: {message: 'boom'}}));
+          });
+        }
+        return longRoom(3000)(url);
+      },
+    });
+    const {rail, subscription} = makeRail();
+    const {result} = renderTimeline(rail);
+
+    await act(async () => {
+      subscription().__subscribed({recovered: false});
+    });
+    await act(async () => {
+      failHead?.();
+    });
+    await waitFor(() => expect(result.current.status).toBe('error'));
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    });
+    expect(messageReads(log).filter(query => /[?&]after=/.test(query))).toEqual(
+      [],
+    );
   });
 });
