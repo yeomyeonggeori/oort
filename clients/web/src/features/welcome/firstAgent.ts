@@ -33,7 +33,12 @@ export const DETECT_CAP_MS = 5 * 60_000;
 export const FIRST_AGENT_TITLE = "첫 에이전트 연결";
 export const FIRST_AGENT_SKIP_SENTENCE =
   "나중에 설정 › 연결 › 에이전트 자격에서 이어갈 수 있습니다.";
-export const FIRST_AGENT_SKIP_LABEL = "나중에";
+/**
+ * 머리 줄 오른쪽의 건너뛰기 (#2616). 「나중에」는 무엇을 미루는지 말하지 않아서
+ * 폰에서 건너뛰기로 읽히지 않았다(성재: 「스킵하는 버튼 있으면 좋을거같고」).
+ * S1·표시 이름 단계의 건너뛰기와 같은 말이다.
+ */
+export const FIRST_AGENT_SKIP_LABEL = "지금은 건너뛰기";
 export const FIRST_AGENT_CONTINUE_LABEL = "계속";
 export const FIRST_AGENT_RECHECK_LABEL = "다시 확인";
 export const FIRST_AGENT_RETRY_LABEL = "다시 시도";

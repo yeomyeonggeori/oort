@@ -1,6 +1,18 @@
-import React, {useEffect, useRef} from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import {AppState, type AppStateStatus} from 'react-native';
-import {addNotificationResponseReceivedListener} from 'expo-notifications';
+import {
+  addNotificationResponseReceivedListener,
+  clearLastNotificationResponse,
+  getLastNotificationResponse,
+  type NotificationResponse,
+} from 'expo-notifications';
 
 import {useSession} from '../session/useSession';
 import {getAccessToken, subscribeSession} from '../storage/secureSession';
@@ -10,6 +22,7 @@ import {apnsEnvironment, keychainAccessGroup} from './native';
 import {ensurePushPermission, fetchApnsToken, handlePushResponse} from './notifications';
 import {clearPushFetchSession, publishPushFetchSession} from './pushFetchSession';
 import {registerWithRetry} from './registration';
+import {tapArrival, tapResponseKey, type TapArrival} from './tapArrival';
 
 // =============================================================================
 // The one place push is switched on (goal RN-N1).
@@ -32,6 +45,25 @@ import {registerWithRetry} from './registration';
 // =============================================================================
 
 const LOG = '[push]';
+
+/**
+ * 가장 최근의 본문 탭 (#2569). `token` 은 탭마다 새로 서므로, 받는 쪽은 그것
+ * 하나로 「이미 처리했는가」를 판정한다.
+ */
+export interface PushArrival {
+  token: number;
+  arrival: TapArrival;
+}
+
+const PushArrivalContext = createContext<PushArrival | null>(null);
+
+/**
+ * 셸이 읽는 자리. 이 프로바이더 밖에서는 언제나 null 이다 — 측정 하네스처럼
+ * 알림이 없는 트리에서 부르면 아무 일도 일어나지 않는 것이 맞다.
+ */
+export function usePushArrival(): PushArrival | null {
+  return useContext(PushArrivalContext);
+}
 
 export default function PushProvider({
   children,
@@ -155,9 +187,56 @@ export default function PushProvider({
     return () => subscription.remove();
   }, [workspaceId]);
 
-  // ---- 4. Notification actions --------------------------------------------
+  // ---- 4. Notification actions, and where a body tap goes -----------------
+  //
+  // ## 본문 탭은 세 길로 온다 (#2569)
+  //
+  //   백그라운드   앱이 살아 있다. 네이티브가 응답을 내보내고 아래 리스너가 받는다.
+  //   포그라운드   같은 리스너다. 알림 센터를 내려 지난 알림을 누른 경우이고, 그때
+  //                화면에는 이미 무언가 열려 있다 — 여는 쪽(`openFromNotification`)이
+  //                그것을 걷는다.
+  //   종료         탭이 앱을 **띄웠다.** 리스너는 세션이 복원된 뒤에야 붙으므로 그
+  //                이벤트는 이미 지나갔다. expo 의 `EmitterModule` 이 마지막 응답을
+  //                들고 있다(`getLastNotificationResponse`) — 그것만이 그 탭을 본다.
+  //                조인 링크의 `getInitialURL()` 과 같은 구멍, 같은 답이다.
+  //
+  // 리스너를 **먼저** 붙이고 마지막 응답을 읽는다. 반대로 두면 그 사이에 온 탭은
+  // 두 길 어디에도 없다. 두 길이 같은 탭을 두 번 들고 오면 `seen` 이 하나로 접는다.
+  //
+  // 마지막 응답에서는 **본문 탭만** 받는다(`tapArrival` 이 나머지를 null 로
+  // 돌린다). 승인·거절·답장은 누른 그 순간의 행동이다 — 로그아웃 뒤 다시
+  // 로그인해 이 프로바이더가 새로 붙을 때 잠금 화면의 승인을 되풀이하면 안 된다.
+  const [arrival, setArrival] = useState<PushArrival | null>(null);
+  const seen = useRef(new Set<string>());
+  const nextToken = useRef(0);
+
+  const deliverTap = useCallback(
+    (response: NotificationResponse) => {
+      const next = tapArrival(response, workspaceId);
+      if (next === null) return;
+      const key = tapResponseKey(response);
+      if (seen.current.has(key)) return;
+      seen.current.add(key);
+      // 들었으면 비운다. 남겨 두면 로그아웃·재로그인으로 이 트리가 다시 붙을 때
+      // 이미 착지한 탭이 한 번 더 온다. 비우지 **못해도** 착지는 한다 — 비우기는
+      // 위생이지 이 탭의 조건이 아니다.
+      try {
+        clearLastNotificationResponse();
+      } catch (cause) {
+        console.warn(`${LOG} could not clear the last notification response`, cause);
+      }
+      nextToken.current += 1;
+      console.log(
+        `${LOG} tap -> ${next.kind === 'target' ? 'open' : next.reason}`,
+      );
+      setArrival({token: nextToken.current, arrival: next});
+    },
+    [workspaceId],
+  );
+
   useEffect(() => {
     const subscription = addNotificationResponseReceivedListener(response => {
+      deliverTap(response);
       void handlePushResponse(response, {signedInWorkspaceId: workspaceId})
         .then(result => {
           // 원장이 이미 다른 답을 들고 있었으면 그 사실까지 남긴다 (2R H5).
@@ -170,8 +249,19 @@ export default function PushProvider({
         })
         .catch(cause => console.error(`${LOG} action failed`, cause));
     });
+
+    let launchedBy: NotificationResponse | null = null;
+    try {
+      launchedBy = getLastNotificationResponse();
+    } catch (cause) {
+      // 모듈이 없는 빌드에서는 이 길 자체가 없다. 백그라운드·포그라운드 탭은
+      // 위 리스너가 여전히 받는다.
+      console.warn(`${LOG} last notification response unavailable`, cause);
+    }
+    if (launchedBy) deliverTap(launchedBy);
+
     return () => subscription.remove();
-  }, [workspaceId]);
+  }, [workspaceId, deliverTap]);
 
   // ---- 5. Sign-out ---------------------------------------------------------
   useEffect(
@@ -184,5 +274,9 @@ export default function PushProvider({
     [],
   );
 
-  return <>{children}</>;
+  return (
+    <PushArrivalContext.Provider value={arrival}>
+      {children}
+    </PushArrivalContext.Provider>
+  );
 }
