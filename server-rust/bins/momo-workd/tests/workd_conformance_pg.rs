@@ -42,8 +42,8 @@
 //!
 //! | test | what it proves |
 //! |---|---|
-//! | `wdc_1_owner_resume_round_trip_and_no_seed_on_the_wire` | `momo-workd register` → the v2 heartbeat marks the host online; no listening TCP socket; the owner's resume → the pre-allocated session → curated events (answer, plan, tool kind, denial + reason) → idle → the owner's kill → ended; and no request, from `register` to the last ack, carries the host key's seed in any encoding |
-//! | `wdc_2_mode_correction_codex_and_refusals_on_a_member_host` | the owner's resume onto an agent that opens in `auto` is corrected to the fixed mode before its first prompt and runs (#2607); one that refuses the correction is refused (`permission_mode_refused`) and the session the server allocated for it is ended by the host; a Codex resume runs from the host's own `CODEX_HOME` (ADR-0188 §8); a shell is refused at the resume (403 `remote_host_shell_refused`) and never reaches the host |
+//! | `wdc_1_owner_resume_round_trip_and_no_seed_on_the_wire` | `momo-workd register` → the v2 heartbeat marks the host online; no listening TCP socket; the owner's resume → the pre-allocated session → curated events (answer, plan, tool kind, denial + reason) → idle → the owner's kill → ended; no request, from `register` to the last ack, carries the host key's seed in any encoding; and fake credentials planted in `run`'s environment reach neither the agent nor a command it runs (#2630 F1) |
+//! | `wdc_2_mode_correction_codex_and_refusals_on_a_member_host` | the owner's resume onto an agent that opens in `auto` is corrected to the fixed mode before its first prompt and runs (#2607); one that refuses the correction is refused (`permission_mode_refused`) and the session the server allocated for it is ended by the host; a Codex resume runs from the host's own `CODEX_HOME`, with the host's own folder as `HOME` and the confined command environment in its config (ADR-0188 §8, #2630); a shell is refused at the resume (403 `remote_host_shell_refused`) and never reaches the host |
 //! | `wdc_3_a_revoked_host_stops` | ADR-0188 D7: after revoke the host gets 401 and exits (code 3) |
 //! | `wdc_4_a_member_host_takes_its_owner_and_kill_only` | the agent's spawn request is refused (`remote_host_kill_only`) and an agent-origin dispatched spawn is never delivered, while the owner's resume completes and an agent's `kill` is delivered; no seed on the wire |
 //! | `wdc_5_a_workspace_host_is_not_served` | a workspace-scoped host registered through the API by the workspace owner: `momo-workd run` refuses it (exit 2) and sends nothing |
@@ -1329,7 +1329,21 @@ async fn wdc_2_mode_correction_codex_and_refusals_on_a_member_host() {
         Some(workd.codex_home()),
         "Codex runs from the host's own home"
     );
-    eprintln!("wdc_2: Codex resume {codex_spawn} ran from the host's own CODEX_HOME");
+    // #2630 F5: and with the host's own empty folder as its HOME, so the
+    // owner's `~/.agents/skills` is not its user skill layer.
+    assert_eq!(
+        start["env_isolation"]["HOME"].as_str().map(PathBuf::from),
+        Some(workd.dir.join("state").join("codex-user-home")),
+        "Codex's HOME is the host's own folder"
+    );
+    let config =
+        std::fs::read_to_string(workd.codex_home().join("config.toml")).expect("host config");
+    assert!(
+        config.contains("[shell_environment_policy]\ninherit = \"core\"\n")
+            && config.contains("shell_snapshot = false\n"),
+        "the host's config confines what Codex's commands see (#2630 F1): {config}"
+    );
+    eprintln!("wdc_2: Codex resume {codex_spawn} ran from the host's own CODEX_HOME and HOME");
 
     // ---- shell: refused at the resume, never delivered ----------------------
     let resumed = owner_resume(

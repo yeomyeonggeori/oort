@@ -82,7 +82,8 @@ fn fixture() -> Fixture {
     }
     let repo = root.join("repo");
     std::fs::create_dir_all(&repo).unwrap();
-    let codex = CodexHome::beside(&root.join("state").join("host.json"));
+    let codex = CodexHome::beside(&root.join("state").join("host.json"))
+        .with_owner_home(Some(owner_home.clone()));
     // No sign-in on purpose: nothing may reach an OpenAI endpoint. The home,
     // its temp folder and the host's config are prepared all the same.
     assert_eq!(

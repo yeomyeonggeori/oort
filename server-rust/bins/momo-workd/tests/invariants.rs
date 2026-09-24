@@ -5,7 +5,7 @@
 //! | test | the guard whose removal turns it red |
 //! |---|---|
 //! | `inv_1_remote_shell_is_refused_even_when_allowlisted` | `policy::check_remote_tool` in `SessionManager::spawn` |
-//! | `inv_2_a_session_outside_the_fixed_mode_is_corrected_before_its_first_prompt_or_refused` | `policy::check_session_modes`, `session::correct_mode` and `policy::check_mode_confirmed` in `session::handshake` (ADR-0188 §8, #2607) |
+//! | `inv_2_a_session_outside_the_fixed_mode_is_corrected_before_its_first_prompt_or_refused` | `policy::check_session_modes`, `session::correct_mode` and `policy::check_mode_confirmed` in `session::handshake` (ADR-0188 §8, #2607); the agent's last mode report wins, before and after its answer (#2630 F2) |
 //! | `inv_3_every_permission_request_is_denied_with_a_reason` | `policy::decide_permission` (never `allow_*`) |
 //! | `inv_4_round_trip_events_idle_input_kill` | the curated projection, idle/running, owner-only input, kill → ended |
 //! | `inv_5_leaving_the_fixed_mode_mid_session_closes_it` | `policy::check_mode_update` |
@@ -24,6 +24,7 @@
 //! | `inv_18_a_token_split_by_a_tool_event_is_still_masked` | `EventRelay::status` flushing only complete lines (#2607 N-4) |
 //! | `inv_19_an_open_key_header_does_not_hold_the_rest_of_the_answer` | the open-key hold bound in `session::ready_len` (#2607 N-5) |
 //! | `inv_7_a_lost_spawn_ack_response_still_starts_the_session` | the settled-verdict sweep in `ControlLoop::poll_once` |
+//! | `inv_20_the_hosts_environment_never_reaches_an_agent_or_its_commands` | `policy::AGENT_ENV_ALLOWLIST` in `policy::launch_spec` (#2630 F1); `HOME` in Codex's isolation environment (#2630 F5) |
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -265,7 +266,8 @@ fn harness_with(tools: &[(&str, AdapterKind, &[&str])]) -> Harness {
         acp_start_timeout: Duration::from_secs(10),
         parent_env,
         max_sessions: 2,
-        codex: CodexHome::beside(&dir.join("state").join("host.json")),
+        codex: CodexHome::beside(&dir.join("state").join("host.json"))
+            .with_owner_home(Some(owner_home.clone())),
     };
     let owner = Uuid::new_v4();
     let codex = settings.codex.clone();
@@ -889,7 +891,7 @@ async fn inv_6_codex_runs_only_from_the_hosts_own_home() {
     }
     assert_eq!(
         std::fs::read_to_string(h.codex.home.join("config.toml")).unwrap(),
-        momo_workd::policy::codex_home_config(),
+        momo_workd::policy::codex_home_config(&h.codex),
         "the host's own config, written before the session"
     );
     let answer: String = h
@@ -1655,6 +1657,10 @@ async fn inv_20_the_hosts_environment_never_reaches_an_agent_or_its_commands() {
     assert_ne!(
         codex_home_dir, h.owner_home,
         "the owner's HOME (and its ~/.agents/skills) is never Codex's"
+    );
+    assert_eq!(
+        codex_home_dir, h.codex.user_home,
+        "Codex's HOME is the host's own empty folder"
     );
     assert!(!codex_home_dir.join(".agents").exists());
     let claude_start = starts
