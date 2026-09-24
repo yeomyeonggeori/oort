@@ -221,6 +221,16 @@ function record(input: RequestInfo | URL, init?: RequestInit): Call {
   return call;
 }
 
+// The core's rotation single flight is module state: a test that fails before
+// releasing its rotation must not leave the next test's logout joining it.
+let releaseOutstandingRotation: (() => void) | null = null;
+
+afterEach(async () => {
+  releaseOutstandingRotation?.();
+  releaseOutstandingRotation = null;
+  await new Promise(settle => setTimeout(settle, 0));
+});
+
 /**
  * The server as state: which tokens are alive, whether this phone's
  * registration is, and a refresh whose ANSWER the test releases. The server
@@ -233,6 +243,7 @@ function fakeServer({linked}: {linked: boolean}) {
   const live = new Set(['access-token-1', 'refresh-token-1']);
   const state = {registrationLive: true, deleteStatus: null as number | null};
   const rotationAnswer = deferred<void>();
+  releaseOutstandingRotation = () => rotationAnswer.resolve();
   let minted = 1;
   globalThis.fetch = jest.fn(
     async (input: RequestInfo | URL, init?: RequestInit) => {
