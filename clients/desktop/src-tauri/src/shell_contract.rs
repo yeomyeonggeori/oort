@@ -16,7 +16,10 @@
 //!   returns `true`, so wry never calls WKWebView's own `performDragOperation`)
 //!   and the page receives only `tauri://drag-drop` with paths — no HTML5
 //!   events, no `File` objects. `dragDropEnabled: false` hands drags back to
-//!   WebKit, which is the same path the browser build already uses.
+//!   WebKit, which is the same path the browser build already uses. The
+//!   price is WebKit's default for a drop nobody claims: the window navigates
+//!   to the dropped file or link. The web bundle's `desktopDropGuard.ts`,
+//!   installed only in this shell, swallows those.
 //!
 //! `clients/web/src/app/desktopShellContract.test.ts` pins the same two
 //! settings from the web side, where CI runs it; this crate's tests run
