@@ -329,18 +329,34 @@ const KEEP_VISIBLE_POSITION = {minIndexForVisible: 0} as const;
 // **토글은 그대로 둔다.** prop 을 아예 떼지 않는 판(실험 A)도 방 여덟 개를 고쳤지만,
 // 그것은 RN-P3 가 잰 먼 이동의 설계를 바꾸는 일이다. 그 판에서는 먼 홉 한 번이
 // 4,808pt 되밀렸다가 다음 홉에 돌아왔고, 전송 뒤 끝에 앉은 목록의 콘텐츠가 ±9.3pt 로
-// 2분 가까이 되풀이 흔들렸다(둘 다 원인 미규명). `measure/`
-// 하네스의 RN-P3 두 줄은 원판·실험 A·이 수리가 같은 띠였다 — 「중간에서」 3,190–3,406px
-// FAIL(원래의 실패 그대로), 「세 화면 뒤」 149–178px. 원판만 두 번 0px 였는데, 붙는
-// 순간의 낡은 앵커가 끝 너머로 민 것을 따라가기가 끝에 되붙인 우연이었다.
+// 2분 가까이 되풀이 흔들렸다(둘 다 원인 미규명).
 //
-// **닫히지 않는 것**: 다시 붙는 트랜잭션은 여전히 뗄 때의 앵커를 쓴다. 이제는 같은
-// 행이라 그 행이 이동 동안 실제로 움직인 만큼만 옮긴다(잰 값: 세 화면 뒤 전송 한
-// 번에서 −78.3pt — 따라가기 문턱 120pt 안). 이동이 렌더 창(위아래 10화면)보다 멀면
-// 앵커 행 자체가 가상화로 언마운트되고 그 뷰는 여전히 재활용될 수 있다 — `converge`
-// 의 넘침 되돌림과 `holdLanding` 이 계속 지는 자리다. 완전한 수리는 네이티브(앵커
-// tag·superview 검사를 컬링과 무관하게)이고, 이 앱의 RN 코어는 prebuilt
-// (`React-Core-prebuilt`)다.
+// ## 다시 붙을 때 무엇이 남고, 모드마다 무엇이 막는가 (#2586 R1 H-1·M-1, 실측)
+//
+// 다시 붙는 트랜잭션은 여전히 **뗄 때 기록한 앵커**의 이동량을 더한다. 이제 그 앵커는
+// 같은 행이지만, 그 행이 이동 동안 실제로 움직인 만큼은 그대로 더해진다.
+//
+//   - **진입**(`entry`): 앵커는 0번 셀이다(목록이 오프셋 0 에서 서고 첫 트랜잭션이
+//     기록한다). `VirtualizedList` 는 첫 `initialNumToRender` 개 셀을 렌더 마스크에서
+//     빼지 않으므로(`_createRenderMask`, VirtualizedList.js:531-536) 그 뷰는 재활용되지
+//     않고, 그 위에는 머리뿐이다 — 이동량 0, 따로 막는 장치 없음. **예외 둘**: 머리
+//     높이가 바뀔 때(옛 페이지를 부르는 동안 16→36→30.3pt), 그리고 진입 수렴 중에 옛
+//     페이지가 위에 붙을 때(오프셋 0 에서 서는 순간 `onStartReached` 가 곧바로 부른다)
+//     0번 셀이 다른 행이 된다. 잰 값: 120행 방(첫 페이지 50)에서 그 행이 61번으로
+//     밀려 렌더 창 밖에서 언마운트됐고, 다시 붙을 때 +849.7pt 밀렸다. 막는 장치 없음 —
+//     같은 진입에서 드러나는 조기 도착(#2604)과 함께 볼 자리다.
+//   - **먼 전송**(`send`)·**먼 「최신으로」**(`latest`): 앵커는 이동이 시작될 때 창 맨
+//     위의 행이다. 이동 동안 렌더 창이 끝으로 내려가면 그 행 위의 스페이서가 셀별
+//     기록으로 다시 셈해지고 그 아래 행이 함께 움직인다(잰 값 −20.6·−30.6·−78.3pt).
+//     도착한 목록이 그만큼 끝에서 밀려나므로 `holdLanding` 이 도착 뒤
+//     `LANDING_HOLD_MS` 동안 손가락 없는 이동을 끝으로 되돌린다. 전송이 이 보호를 받는
+//     것은 R1 H-1 부터다 — 「내 메시지는 나에게 온다」.
+//   - **가까운 전송·「최신으로」**: prop 을 떼지 않으므로 낡은 앵커가 없다.
+//   - `converge` 의 넘침 되돌림은 **수렴 라운드 안에서만** 돈다. 다시 붙는 것은 풀린
+//     뒤라서 그 밀림을 보지 못한다.
+//
+// 완전한 수리는 네이티브(앵커의 tag·superview 검사를 컬링과 무관하게)이고, 이 앱의 RN
+// 코어는 prebuilt(`React-Core-prebuilt`)다.
 // =============================================================================
 function TimelineCell({
   // `VirtualizedList` 가 식별용으로 넘기는 값들 — 네이티브 뷰의 prop 이 아니다.
@@ -505,7 +521,9 @@ export function resetTimelineRenderItemCount(): void {
 // view, and the anchor MVCP replayed on the way back belonged to another row —
 // on the nine-row room that scrolled the list 913.7pt past its end, a blank
 // screen. `TimelineCell` keeps each cell's view through the toggle; the note
-// above it has the numbers and the reason the toggle itself stays.
+// above it has the numbers, the reason the toggle itself stays, and what the
+// re-attach still does per travel (a far send is now held at the end for it —
+// `holdLanding`).
 
 /**
  * How long to leave between correction rounds, in ms.
@@ -1682,10 +1700,39 @@ function TimelineInner({
        * movement off the end that no finger made is put back.
        *
        * #2586 measured why that anchor was wrong: its view had been rebuilt
-       * for another row while the prop was off. `TimelineCell` closes that for
-       * every row still mounted; the hold stays for a travel long enough to
-       * unmount the anchor row itself, whose view can still come back as
-       * someone else's.
+       * for another row while the prop was off. `TimelineCell` keeps every
+       * mounted row's view, so the anchor is now the right row — and the
+       * re-attach still moves the list by however far THAT row moved while
+       * the prop was off (#2586 R1 H-1, measured below).
+       *
+       * **A far send is held the same way**, for the rule at the top of this
+       * file: my own message always comes to me. Measured on the simulator
+       * (Release, a send from three screens back): the loop arrived exactly on
+       * the end and released, and the re-attach then moved the list −78.3pt
+       * with nothing after it (200 rows), or −30.6pt followed by a follow that
+       * stopped 10.6pt short (120 rows) — the message just sent was cut at the
+       * bottom of the list. The anchor row had moved
+       * because, as the window slid toward the end, `VirtualizedList`
+       * re-derived its top spacer from per-cell records taken under different
+       * layouts (the header is 16, 36 or 30.3pt as older pages load), and
+       * every row below that spacer moved with it: `m-101` 8005.3 → 7984.7
+       * while the anchor was off. Nothing in JavaScript can make the scroll
+       * view forget that anchor (the only guard is native — the tag check
+       * behind `enableViewCulling`), so the list is put back instead: at
+       * `contentEnd` from the scroll view's own report, which also corrects a
+       * follow that `scrollToEnd` aims from those same stale records.
+       *
+       * What it gives and costs, measured (Release, 10 far sends): 9 sat
+       * within 1pt of the end (7 of 7 in the 120-row room, 2 of 3 in the
+       * 200-row room). The moved position is on screen from the re-attach
+       * (+3–11ms) to the first tick (+50–67ms). In the tenth, the put-back
+       * landed on an offset where `VirtualizedList`'s window flips one cell in
+       * and out of its spacer (content 28384.7 ↔ 28379 every ~130ms); the flip
+       * outlived the hold and the send ended 5.7pt short. Answering the shove
+       * inside the scroll report that carries it, instead of at the tick, was
+       * tried and measured worse: the instant put-back met that flip in 2 of 6
+       * sends (content 9823 ↔ 9813.7) and they ended 9.4–10pt short. A finger
+       * ends the hold at once (`onScrollBeginDrag` → `cancelConvergence`).
        */
       const holdLanding = (firstTickAt: number) => {
         const until = firstTickAt + LANDING_HOLD_MS;
@@ -1721,8 +1768,14 @@ function TimelineInner({
         // And the list is where it was going to rest, so what is on screen now is
         // what the reader sees (#1892 — the latch waits for exactly this).
         settleEntry();
-        if (mode !== 'latest') return;
+        // A far send and a far 「최신으로」 both took the prop off and both came to
+        // the end, so both are met by the stale anchor the moment `setChasingTail`
+        // above puts it back — see `holdLanding`. Entry is not: its anchor is
+        // cell 0 (see `TimelineCell`'s note for what that covers and what it does
+        // not).
+        if (mode === 'entry') return;
         if (arrived) holdLanding(Date.now() + CONVERGE_ROUND_MS);
+        if (mode !== 'latest') return;
         // The pill that had VoiceOver's focus is gone; the row it brought the
         // reader to takes it (#1892 R1 M-3). When the travel could not finish
         // (R2 N-C) that row is still where the reader asked to go, and focusing
@@ -1755,12 +1808,18 @@ function TimelineInner({
         // anchor, and the first transaction after it returns applies the anchor
         // recorded BEFORE the travel straight to `contentOffset`
         // (`_adjustForMaintainVisibleContentPosition`). That is where the blank
-        // list comes from, and it also followed a far entry and a far send when
-        // they released. #2586 measured the source — while the prop is off
+        // list came from. #2586 measured the source — while the prop is off
         // every cell is flattened and the anchor's view comes back as another
-        // row's — and `TimelineCell` removes it for every row still mounted.
-        // What is left is a travel longer than the render window, whose anchor
-        // row is itself unmounted; this branch and `holdLanding` are for that.
+        // row's — and `TimelineCell` removes that for every row still mounted.
+        //
+        // **This branch only runs inside the rounds**, i.e. before release. The
+        // re-attach that moves a list happens AFTER release, so it is never this
+        // branch that answers it: `holdLanding` does, for `latest` and `send`,
+        // and entry has no after-release guard (the per-mode table is in
+        // `TimelineCell`'s note). What can still reach this branch is content
+        // that shrinks under a list already sitting at its end while the rounds
+        // run — the prop is off then, so nothing native moves the offset, and
+        // `scrollTo` itself is clamped.
         const overshot = left !== null && left < -ARRIVED_PX;
         if (overshot) {
           listRef.current?.scrollToOffset({

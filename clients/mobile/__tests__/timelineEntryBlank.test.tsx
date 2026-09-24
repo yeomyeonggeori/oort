@@ -49,9 +49,16 @@ import {SessionProvider} from '../src/session/useSession';
 //   - 그 이중이 기대는 사실 — prop 이 빠진 커밋에서도 셀 래퍼가 전부 뷰로 남는다 — 을
 //     커밋마다 직접 본다. 토글이 실제로 일어났다는 것도 함께 본다(안 일어났으면 이
 //     단정은 아무것도 재지 않은 것이다).
-//   - 첫 페이지의 행이 전부 렌더 범위에 든다. 이것은 jsdom 에서 빨개질 수 없다 —
-//     기기에서도 렌더 범위는 0–9 전부였다. 빈 화면은 행이 없어서가 아니라 오프셋이
-//     행 밖이어서였고, 그것을 재는 것이 이중 테스트다.
+//   - 첫 페이지의 행이 전부 렌더 범위에 든다. 이것은 이 시험 환경(`testEnvironment:
+//     'node'` — 네이티브 레이아웃이 없다)에서 빨개질 수 없다 — 기기에서도 렌더 범위는
+//     0–9 전부였다. 빈 화면은 행이 없어서가 아니라 오프셋이 행 밖이어서였고, 그것을
+//     재는 것이 이중 테스트다.
+//   - (R1 H-1) 먼 전송: 이동 동안 앵커 행이 움직이면 다시 붙는 트랜잭션이 그만큼 목록을
+//     끝에서 밀어낸다(기기 −78.3pt). 방금 보낸 행의 아랫변이 창 안에 있는지 단정한다.
+//
+// 이중은 `collapsable={false}` 인 자식만 「제 뷰를 지킨다」로 센다. 실제 Fabric 은
+// testID·배경색·접근성 prop 으로도 뷰를 만든다 — 그런 방식의 대안 수리는 이 이중에서
+// RED 로 읽힌다(보수적인 쪽이다, R1 N-1).
 // =============================================================================
 
 const SELF = '11111111-2586-4000-8000-000000000001';
@@ -147,47 +154,55 @@ const GATES: ReadonlyMap<string, ApprovalGate> = new Map([
 
 // ---- 잰 기하 -----------------------------------------------------------------
 //
-// 콘텐츠 자식의 자리(frame y·높이)를 **순서대로** — 머리, 셀 열 개(오늘 구분선 + 9행),
-// 꼬리. 시뮬레이터의 `VirtualizedList` 셀 계측(`_listMetrics`)과 머리·꼬리 길이에서
-// 옮겼다. 창 529.3 · 콘텐츠 952 · 끝 422.7 도 같은 실측이다.
+// 콘텐츠 자식의 높이를 **순서대로** — 머리, 셀들, 꼬리. 시뮬레이터의 `VirtualizedList`
+// 셀 계측(`_listMetrics`)과 머리·꼬리 길이에서 옮겼다. 자리(y)는 커밋마다 높이에서
+// 다시 셈한다 — 이동 동안 높이가 바뀌는 경우(R1 H-1)를 같은 이중으로 재기 위해서다.
+interface Layout {
+  header: number;
+  cells: readonly number[];
+  footer: number;
+  viewport: number;
+}
+
 interface Geometry {
   frames: readonly {y: number; h: number}[];
   content: number;
   viewport: number;
 }
 
-const DEPLOY_9: Geometry = {
-  frames: [
-    {y: 0, h: 30.33}, // 머리
-    {y: 30.33, h: 36}, // 오늘
-    {y: 66.33, h: 79},
-    {y: 145.33, h: 79},
-    {y: 224.33, h: 102},
-    {y: 326.33, h: 78}, // 스레드 루트
-    {y: 404.33, h: 98}, // 인라인 답글
-    {y: 502.33, h: 98}, // 인라인 답글(멘션)
-    {y: 600.33, h: 186}, // 승인 카드
-    {y: 786.33, h: 79}, // 멘션
-    {y: 865.33, h: 78.67}, // 마지막 행
-    {y: 944, h: 8}, // 꼬리
-  ],
-  content: 952,
+/**
+ * `CONTENT_ALIGNMENT`(`flexGrow: 1` + `flex-end`) 그대로: 창보다 짧은 콘텐츠는 창
+ * 바닥으로 붙고 콘텐츠 높이는 창 높이가 된다.
+ */
+function geometryOf(layout: Layout): Geometry {
+  const heights = [layout.header, ...layout.cells, layout.footer];
+  const total = heights.reduce((sum, h) => sum + h, 0);
+  let y = Math.max(0, layout.viewport - total);
+  const frames = heights.map(h => {
+    const frame = {y, h};
+    y += h;
+    return frame;
+  });
+  return {frames, content: Math.max(total, layout.viewport), viewport: layout.viewport};
+}
+
+/** #배포 9행: 창 529.3 · 콘텐츠 952 · 끝 422.7 (실측). */
+const DEPLOY_9: Layout = {
+  header: 30.33,
+  // 오늘 · 행 셋 · 스레드 루트 · 인라인 답글 둘 · 승인 카드 · 멘션 · 마지막 행
+  cells: [36, 79, 79, 102, 78, 98, 98, 186, 79, 78.67],
+  footer: 8,
   viewport: 529.33,
 };
 
 /**
- * 짧은 방(2행)은 `flexGrow` + `flex-end` 로 창 바닥에 붙는다 — 콘텐츠 = 창.
+ * 짧은 방(2행)은 창 바닥에 붙는다 — 콘텐츠 = 창.
  * 실측: 머리 341 · 오늘 371.3 · 행 407.3/464.3 · 꼬리 521.3 · 창 529.3.
  */
-const SHORT_2: Geometry = {
-  frames: [
-    {y: 341, h: 30.33},
-    {y: 371.33, h: 36},
-    {y: 407.33, h: 57},
-    {y: 464.33, h: 57},
-    {y: 521.33, h: 8},
-  ],
-  content: 529.33,
+const SHORT_2: Layout = {
+  header: 30.33,
+  cells: [36, 57, 57],
+  footer: 8,
   viewport: 529.33,
 };
 
@@ -210,6 +225,11 @@ type ReactTestInstance = ReturnType<typeof screen.getByTestId>;
 //      clamp 된다. 옮긴 뒤 스크롤 보고가 JS 로 온다.
 class NativeScrollDouble {
   offset = 0;
+  geometry: Geometry;
+  /** 다시 붙으며 앵커를 적용한 이동량들 — 시나리오가 실제로 일어났는지의 증거. */
+  readonly shoves: number[] = [];
+  /** prop 이 처음 빠지는 커밋에서 한 번 부른다(이동 동안의 변화를 심는 자리). */
+  onDetach: (() => void) | null = null;
   private views: {role: number; viewId: number}[] = [];
   private pool: number[] = [];
   private nextViewId = 1;
@@ -218,10 +238,21 @@ class NativeScrollDouble {
   private observing = false;
   private queue: (() => void)[] = [];
 
-  constructor(private readonly geometry: Geometry) {}
+  constructor(layout: Layout) {
+    this.geometry = geometryOf(layout);
+  }
 
   get end(): number {
     return Math.max(0, this.geometry.content - this.geometry.viewport);
+  }
+
+  /** 높이가 바뀌었다 — 네이티브는 콘텐츠 크기를 다음 틈에 보고한다. */
+  setLayout(layout: Layout) {
+    this.geometry = geometryOf(layout);
+    const content = this.geometry.content;
+    setTimeout(() => {
+      screen.getByTestId('timeline-list').props.onContentSizeChange(375, content);
+    }, 0);
   }
 
   /** 한 번의 커밋. `children` 은 콘텐츠 직계 자식들이 스스로 뷰를 지키는가. */
@@ -229,6 +260,11 @@ class NativeScrollDouble {
     // willMount — 옛 prop 으로 앵커를 기록한다. 이 스크롤뷰가 처음 선 커밋에는 아직
     // 관찰자가 아니므로 기록하지 않는다(RCTMountingTransactionObserverCoordinator).
     if (this.observing && this.prevMvcp) this.recordAnchor();
+    if (this.prevMvcp && !mvcp && this.onDetach !== null) {
+      const detach = this.onDetach;
+      this.onDetach = null;
+      detach();
+    }
 
     const formsView = children.map(preserved => mvcp || preserved);
     const kept: {role: number; viewId: number}[] = [];
@@ -253,6 +289,7 @@ class NativeScrollDouble {
         const delta = this.geometry.frames[now.role].y - this.anchor.recordedY;
         if (Math.abs(delta) > 0.5) {
           this.offset += delta; // clamp 없음 — `_adjustForMaintainVisibleContentPosition`
+          this.shoves.push(Math.round(delta * 10) / 10);
           this.enqueue(() => {});
         }
       }
@@ -359,8 +396,8 @@ interface CommitSeen {
   cellsKeepViews: boolean;
 }
 
-function mount(messages: Message[], geometry: Geometry) {
-  const native = new NativeScrollDouble(geometry);
+function mount(messages: Message[], layout: Layout) {
+  const native = new NativeScrollDouble(layout);
   const seen: CommitSeen[] = [];
   const listRef = React.createRef<FlatList<TimelineStreamItem>>() as ListRef;
   const client = new QueryClient({defaultOptions: {queries: {retry: false, gcTime: 0}}});
@@ -374,30 +411,31 @@ function mount(messages: Message[], geometry: Geometry) {
     seen.push({mvcp, cellsKeepViews: preserved.slice(1, -1).every(Boolean)});
     native.commit(mvcp, preserved);
   };
-  render(
+  const tree = (rows: Message[], selfSendToken: number) => (
     <QueryClientProvider client={client}>
       <SessionProvider member={ME}>
         <Profiler id="timeline" onRender={onCommit}>
           <Timeline
-            messages={messages}
+            messages={rows}
             directory={DIRECTORY}
             status="ready"
             channelId={CHANNEL}
             myMemberId={SELF}
             nowMs={at(31)}
-            lastReadSeq={messages.length}
+            lastReadSeq={rows.length}
             unreadCount={0}
             approvalGates={GATES}
             approvalsProvided
             reachedStart
-            selfSendToken={0}
+            selfSendToken={selfSendToken}
             jumpPills
             listRef={listRef}
           />
         </Profiler>
       </SessionProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const view = render(tree(messages, 0));
   rendered = true;
   onCommit();
   // 목록의 스크롤 명령은 네이티브 이중으로 간다(규칙 4).
@@ -406,17 +444,24 @@ function mount(messages: Message[], geometry: Geometry) {
   jest
     .spyOn(flat, 'scrollToOffset')
     .mockImplementation(({offset}: {offset: number}) => native.command(offset));
-  return {native, seen};
+  const rerender = (rows: Message[], selfSendToken: number) =>
+    view.rerender(tree(rows, selfSendToken));
+  return {native, seen, rerender};
 }
 
 /** 진입 — 창이 재지고, 콘텐츠가 보고되고, 수렴이 끝날 만큼 시간이 흐른다. */
-async function enter(geometry: Geometry) {
+async function enter(layout: Layout) {
+  const geometry = geometryOf(layout);
   fireEvent(screen.getByTestId('timeline-list'), 'layout', {
     nativeEvent: {layout: {x: 0, y: 0, width: 375, height: geometry.viewport}},
   });
   fireEvent(screen.getByTestId('timeline-list'), 'contentSizeChange', 375, geometry.content);
   // rAF 한 번 + 수렴 라운드(50ms)들 + 풀린 뒤 네이티브가 한 번 더 도는 시간.
-  for (let round = 0; round < 8; round += 1) {
+  await rounds(8);
+}
+
+async function rounds(count: number) {
+  for (let round = 0; round < count; round += 1) {
     await act(async () => {
       await new Promise(resolve => setTimeout(resolve, 60));
     });
@@ -434,7 +479,7 @@ describe('긴 첫 페이지 + 스레드·승인 행 — 목록이 비지 않는�
     await enter(DEPLOY_9);
 
     // 끝(422.7)에 앉았다 — 되돌린 수리에서는 1336.3(기기와 같은 값)이다.
-    expect(native.offset).toBeCloseTo(DEPLOY_9.content - DEPLOY_9.viewport, 1);
+    expect(native.offset).toBeCloseTo(952 - DEPLOY_9.viewport, 1);
     const visible = native.visibleRoles();
     // 끝 행(첨자 10 = 「저도 로그 확인했습니다…」)과 승인 카드 아래 멘션이 창 안이다.
     expect(visible).toContain(10);
@@ -448,11 +493,7 @@ describe('긴 첫 페이지 + 스레드·승인 행 — 목록이 비지 않는�
     });
     expect(native.visibleRoles()).toEqual(expect.arrayContaining([1, 2, 3]));
     // 그리고 그 자리에 둔다 — 끝으로 도로 끌어내리지 않는다.
-    for (let round = 0; round < 4; round += 1) {
-      await act(async () => {
-        await new Promise(resolve => setTimeout(resolve, 60));
-      });
-    }
+    await rounds(4);
     expect(native.offset).toBe(0);
   });
 
@@ -479,15 +520,80 @@ describe('긴 첫 페이지 + 스레드·승인 행 — 목록이 비지 않는�
   });
 
   it('첫 페이지의 모든 행이 렌더 범위에 든다', async () => {
-    // jsdom 은 이 단정을 빨갛게 만들 수 없다 — 기기에서도 렌더 범위는 0–9 전부였고
-    // 빈 화면은 오프셋이 행 밖이어서였다(위 테스트). 이 단정이 지키는 것은 수리가
-    // 범위를 줄여 빈 화면을 「덜 보이게」 만드는 일이 없다는 것이다.
+    // 이 시험 환경(`testEnvironment: 'node'`)은 이 단정을 빨갛게 만들 수 없다 — 기기에서도
+    // 렌더 범위는 0–9 전부였고 빈 화면은 오프셋이 행 밖이어서였다(위 테스트). 이 단정이
+    // 지키는 것은 수리가 범위를 줄여 빈 화면을 「덜 보이게」 만드는 일이 없다는 것이다.
     mount(FIXTURE, DEPLOY_9);
     await enter(DEPLOY_9);
     for (const message of FIXTURE) {
       expect(screen.getAllByText(message.body ?? '', {exact: false}).length).toBeGreaterThan(0);
     }
-    expect(contentChildren()).toHaveLength(DEPLOY_9.frames.length);
+    expect(contentChildren()).toHaveLength(geometryOf(DEPLOY_9).frames.length);
+  });
+});
+
+// =============================================================================
+// 먼 전송 — 다시 붙는 앵커가 방금 보낸 내 메시지를 창 밖으로 밀어내지 않는다 (R1 H-1)
+//
+// 기기(Release, 목 서버, 세 화면 뒤에서 보냄): 수렴이 끝(28407.3)에 도착해 풀린 2ms 뒤,
+// prop 이 다시 붙으며 목록이 −78.3pt 밀렸고 그 뒤로 아무 일도 없었다 — 보낸 행이 목록
+// 아래에서 잘렸다. 120행 방에서는 −30.6pt. 원인: 이동 동안 렌더 창이 끝으로 내려가며
+// `VirtualizedList` 가 위쪽 스페이서를 셀별 기록으로 다시 셈했고(그 기록은 서로 다른
+// 머리 높이 아래서 잰 것이다), 그 아래 행이 전부 함께 움직였다 — 앵커 `m-101` 도
+// 8005.3 → 7984.7. 다시 붙는 트랜잭션은 그 이동량을 그대로 더한다.
+//
+// 이중에서는 그 스페이서 재셈을 「앵커 위의 행 하나가 78.3pt 줄었다」로 심는다 — prop 이
+// 빠지는 커밋에서 한 번. 기기와 같은 양, 같은 순서다.
+// =============================================================================
+describe('먼 전송 — 방금 보낸 내 메시지가 창 안에 선다 (#2586 R1 H-1)', () => {
+  const ROW_H = 250;
+  const SENT_H = 79;
+  const BEFORE: Layout = {
+    header: 30.33,
+    cells: [36, ...Array.from({length: 8}, () => ROW_H)], // 오늘 + 8행
+    footer: 8,
+    viewport: 529.33,
+  };
+  const HISTORY = Array.from({length: 8}, (_, i) =>
+    row(i + 1, i % 2 === 0 ? MINSU : HANEUL, `거슬러 읽는 ${i + 1}번째 글`, 1 + i),
+  );
+  const SENT = row(9, SELF, '세 화면 뒤에서 보낸 내 메시지', 31);
+
+  it('세 화면 뒤에서 보내면 끝에 앉고, 보낸 행의 아랫변이 창 안에 있다', async () => {
+    const {native, seen, rerender} = mount(HISTORY, BEFORE);
+    await enter(BEFORE);
+    expect(native.offset).toBeCloseTo(native.end, 1); // 진입은 끝(1545)에 앉았다
+
+    // 사람이 위로 올라가 읽는다 — 창 맨 위는 2번째 글(첨자 3, y 316.33)이다.
+    fireEvent(screen.getByTestId('timeline-list'), 'scrollBeginDrag');
+    await act(async () => {
+      native.drag(400);
+      await new Promise(resolve => setTimeout(resolve, 60));
+    });
+    expect(native.end - native.offset).toBeGreaterThan(BEFORE.viewport); // 먼 전송이다
+
+    // 보낸다. 메아리 행이 끝에 붙고, prop 이 빠지는 순간 앵커 위의 행이 78.3pt 준다.
+    const sent: Layout = {...BEFORE, cells: [...BEFORE.cells, SENT_H]};
+    native.onDetach = () => {
+      const cells = [...sent.cells];
+      cells[1] = ROW_H - 78.3; // 1번째 글 — 앵커(2번째 글) 바로 위
+      native.setLayout({...sent, cells});
+    };
+    native.setLayout(sent);
+    const detachedAt = seen.length;
+    rerender([...HISTORY, SENT], 1);
+    await rounds(25);
+
+    // 시나리오가 실제로 일어났다: prop 이 빠졌다가 다시 붙었고, 붙으며 −78.3 을 적용했다.
+    expect(seen.slice(detachedAt).some(commit => !commit.mvcp)).toBe(true);
+    expect(seen[seen.length - 1].mvcp).toBe(true);
+    expect(native.shoves).toContain(-78.3);
+
+    // 끝에 앉았고, 방금 보낸 행(마지막 셀)의 아랫변이 창 안에 있다.
+    expect(native.offset).toBeCloseTo(native.end, 1);
+    const frames = native.geometry.frames;
+    const sentRow = frames[frames.length - 2];
+    expect(sentRow.y + sentRow.h).toBeLessThanOrEqual(native.offset + BEFORE.viewport + 0.5);
   });
 });
 
