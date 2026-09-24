@@ -706,6 +706,33 @@ describe('방을 옮기면 필의 판정을 새로 한다 — 방의 정체성 (
     expect(listRef.current).not.toBeNull();
     expect(listRef.current).not.toBe(roomA);
   });
+
+  it('앞 방 위에 있던 손가락은 새 방에서 떨어진 것으로 본다 — 새 방의 긴 답도 활강에 핀을 건다 (#2686)', async () => {
+    // 새 방의 행은 새 스크롤뷰가 받으므로 앞 스크롤뷰 위의 손가락은 `scrollEndDrag` 를
+    // 보내지 못한다. 손가락이 남아 있다고 읽으면 새 방의 따라가기 활강이 핀을 걸지 않고,
+    // 120pt 넘는 새 행의 첫 보고가 따라가기를 푼다.
+    const {rerender} = mount({channelId: 'ch'});
+    await settleAtBottom();
+    fireEvent(list(), 'scrollBeginDrag'); // 잡은 채로 방이 바뀐다
+
+    switchToRoomB(rerender, {lastReadSeq: 104, unreadCount: 0});
+    await settleAtBottom();
+    await sleep(700); // 진입의 착지 유지(도착 + 650ms)가 끝났다 — 바닥에서 읽는 중
+    expect(bottomPill()).toBeNull();
+
+    // 에이전트의 긴 답(300pt). 활강의 첫 보고: 오프셋은 아직 그대로다.
+    watchToEnd();
+    fireEvent(list(), 'contentSizeChange', 390, 4300);
+    fireEvent.scroll(list(), {
+      nativeEvent: {
+        contentOffset: {y: 3200},
+        contentSize: {height: 4300, width: 390},
+        layoutMeasurement: {height: 800, width: 390},
+      },
+    });
+
+    expect(bottomPill()).toBeNull();
+  });
 });
 
 // ---- 점프가 진입을 가져간다 (design-review 2594 R1 M-1) --------------------------

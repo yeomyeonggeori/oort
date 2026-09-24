@@ -2127,6 +2127,10 @@ function TimelineInner({
   // **손가락은 즉시 이긴다.** 손가락이 목록 위에 있는 동안 온 행은 핀을 걸지 않는다 —
   // 걸면 손가락의 보고가 핀 안에서 버려지고, 따라가기가 켜진 채 남아 다음 행이 목록을
   // 손가락 밑에서 끌어간다. 손가락이 먼저 있던 핀은 `onScrollBeginDrag` 가 거둔다.
+  // 손가락이 떨어진 뒤의 관성(`onMomentumScroll…`)은 손가락으로 치지 않는다: 바닥에서
+  // 튕기는 목록에 새 행이 오면 따라가는 것이 맞고, 위로 던진 목록은 120pt 안에서 이미
+  // 따라가기를 놓는다. 둘 사이의 좁은 틈 — 던지자마자 행이 오면 활강이 던짐을
+  // 끊는다 — 은 수리 전에도 같았다(활강 자체는 그대로다).
   //
   // **핀이 풀릴 때 다시 판정한다** (#2680 R2 N-2 의 이 경로 몫). 핀 안의 보고는 판정을
   // 내리지 않으므로, 손가락 없는 이동(VoiceOver 가 초점 행을 보이게 옮김·상태 막대 탭)이
@@ -2146,20 +2150,18 @@ function TimelineInner({
     }
     if (fingerOnListRef.current) return;
     const until = Date.now() + GLIDE_SETTLE_MS;
-    // A longer claim already holds the scroll (a landing hold) — it covers this.
-    if (until <= scrollPinUntilRef.current) return;
-    scrollPinUntilRef.current = until;
+    // Never shorter than a claim already holding the scroll (a landing hold).
+    scrollPinUntilRef.current = Math.max(scrollPinUntilRef.current, until);
     if (followSettleTimerRef.current !== undefined) {
       clearTimeout(followSettleTimerRef.current);
     }
     followSettleTimerRef.current = setTimeout(() => {
       followSettleTimerRef.current = undefined;
-      // Someone took the scroll since — their own verdict stands.
+      // A longer claim still holds the scroll, or someone ended this one — a
+      // finger, a travel, a jump (they come through `cancelConvergence`, which
+      // drops this timer too). Their verdict stands.
       if (scrollPinUntilRef.current !== until) return;
       scrollPinUntilRef.current = 0;
-      if (jumpTravelRef.current !== null || pendingVerdictRef.current !== null) {
-        return;
-      }
       const left = distanceToEnd(geometryRef.current);
       if (left !== null) noteFollowing(left <= FOLLOW_THRESHOLD_PX);
     }, GLIDE_SETTLE_MS);

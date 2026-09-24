@@ -995,6 +995,26 @@ describe('바닥에서 읽는 중에 새 답이 와도 끝에 앉는다 (#2686)'
     }).toEqual({movedFromFinger: 0, latest: true, blankFrames: 0});
   });
 
+  it('손가락을 뗀 뒤에 온 긴 답은 다시 핀을 건다 — 끝에 앉고 필이 서지 않는다', async () => {
+    const room = await readingAtTheBottom();
+    await act(async () => {
+      fireEvent(list(), 'scrollBeginDrag');
+      room.native.drag(room.native.end() - 60); // 조금 올렸다가
+    });
+    await frames(room, 3);
+    await act(async () => {
+      room.native.drag(room.native.end()); // 바닥으로 되돌리고
+    });
+    await act(async () => {
+      fireEvent(list(), 'scrollEndDrag', LIFT); // 뗀다
+    });
+    await frames(room, 10);
+    await room.push(12);
+    await frames(room, 60);
+
+    expect(followVerdict(room)).toEqual(AT_THE_END);
+  });
+
   it('활강 도중에 손가락이 잡으면 활강은 그 자리에서 진다', async () => {
     const room = await readingAtTheBottom();
     await room.push(12);
