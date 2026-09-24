@@ -13,7 +13,7 @@
 | Tier | 플랫폼 | 계약 |
 |---|---|---|
 | **T1 compose 컴퓨트** | 로컬 · VPS(Hetzner/DO/…) · **Fly.io(단일 VM+볼륨)** · **AWS Lightsail/EC2** · GCP VM · 그록봇 VM | 현행 compose 정본 그대로. doctor `stack.*`·day-2 CLI 전부 유효 |
-| **T2 관리형 컨테이너+PG** | **Railway**(서비스 6+PG 플러그인, SH-5a) · AWS ECS/Fargate+RDS · Cloud Run+Cloud SQL | 이미지·엣지·env는 정본 파생, **day-2 계약 v2**(D4) 필요 |
+| **T2 관리형 컨테이너+PG** | **Railway**(서비스 9 — PG18+pgvector는 플러그인이 아니라 이미지 서비스, 정본 `infra/railway/railway.json`; 2026-09-24 정정, #2580) · AWS ECS/Fargate+RDS · Cloud Run+Cloud SQL | 이미지·엣지·env는 정본 파생, **day-2 계약 v2**(D4) 필요 |
 | **T3 엣지 전용** | **Cloudflare**(DNS·Tunnel·TLS) | 컴퓨트 아님(Containers는 유휴 정지·영속 디스크 미문서 — PG·장수 WS 부적합). T1/T2 앞단으로만 편성 |
 Cloudflare Containers·Workers를 컴퓨트로 쓰는 경로는 **채택하지 않는다**(재검토 조건: 영속 볼륨·상시 인스턴스가 문서화될 때).
 

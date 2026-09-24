@@ -59,9 +59,13 @@ export function HandleField({
         label
       )}
       <div className="relative">
+        {/* data-field-adornment: 칸 안에 그려지는 글자라 칸의 글자 바닥을 함께
+            받는다(tokens.css 입력 칸 규칙, #2616). 없으면 폰에서 핸들은 16px인데
+            앞의 @만 14px로 남는다. */}
         <span
           className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-ink-muted"
           aria-hidden="true"
+          data-field-adornment=""
         >
           @
         </span>

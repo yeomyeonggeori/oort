@@ -43,7 +43,7 @@
 //! | test | what it proves |
 //! |---|---|
 //! | `wdc_1_owner_resume_round_trip_and_no_seed_on_the_wire` | `momo-workd register` → the v2 heartbeat marks the host online; no listening TCP socket; the owner's resume → the pre-allocated session → curated events (answer, plan, tool kind, denial + reason) → idle → the owner's kill → ended; and no request, from `register` to the last ack, carries the host key's seed in any encoding |
-//! | `wdc_2_refusals_on_a_member_host` | the owner's resume onto an agent that opens in `auto` is refused by the host (`permission_mode_refused`) and the session the server allocated for it is ended by the host; a shell is refused at the resume (403 `remote_host_shell_refused`) and never reaches the host |
+//! | `wdc_2_mode_correction_codex_and_refusals_on_a_member_host` | the owner's resume onto an agent that opens in `auto` is corrected to the fixed mode before its first prompt and runs (#2607); one that refuses the correction is refused (`permission_mode_refused`) and the session the server allocated for it is ended by the host; a Codex resume runs from the host's own `CODEX_HOME` (ADR-0188 §8); a shell is refused at the resume (403 `remote_host_shell_refused`) and never reaches the host |
 //! | `wdc_3_a_revoked_host_stops` | ADR-0188 D7: after revoke the host gets 401 and exits (code 3) |
 //! | `wdc_4_a_member_host_takes_its_owner_and_kill_only` | the agent's spawn request is refused (`remote_host_kill_only`) and an agent-origin dispatched spawn is never delivered, while the owner's resume completes and an agent's `kill` is delivered; no seed on the wire |
 //! | `wdc_5_a_workspace_host_is_not_served` | a workspace-scoped host registered through the API by the workspace owner: `momo-workd run` refuses it (exit 2) and sends nothing |
@@ -198,9 +198,7 @@ impl Recorder {
     /// registration and the host's signed traffic, so an empty log cannot pass.
     /// A failure names the request, the place and the encoding, never a value.
     fn assert_seed_never_sent(&self, key_file: &Path, public_key: &str) {
-        use base64::engine::general_purpose::{
-            STANDARD, STANDARD_NO_PAD, URL_SAFE, URL_SAFE_NO_PAD,
-        };
+        use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
         let seed = STANDARD
             .decode(
                 std::fs::read_to_string(key_file)
@@ -210,21 +208,36 @@ impl Recorder {
             .expect("the dev key file holds base64");
         assert_eq!(seed.len(), 32, "an Ed25519 seed");
         let hex: String = seed.iter().map(|byte| format!("{byte:02x}")).collect();
-        let needles = [
-            ("raw bytes", seed.clone()),
-            ("base64", STANDARD.encode(&seed).into_bytes()),
+        let mut needles: Vec<(String, Vec<u8>)> = vec![
+            ("raw bytes".to_string(), seed.clone()),
+            ("hex".to_string(), hex.clone().into_bytes()),
             (
-                "unpadded base64",
-                STANDARD_NO_PAD.encode(&seed).into_bytes(),
+                "upper-case hex".to_string(),
+                hex.to_uppercase().into_bytes(),
             ),
-            ("URL-safe base64", URL_SAFE.encode(&seed).into_bytes()),
-            (
-                "unpadded URL-safe base64",
-                URL_SAFE_NO_PAD.encode(&seed).into_bytes(),
-            ),
-            ("hex", hex.clone().into_bytes()),
-            ("upper-case hex", hex.to_uppercase().into_bytes()),
         ];
+        // #2607 N-8: base64 at every alignment. Wrapped in something else — a
+        // PKCS#8 DER prefix of 16 bytes, say — the seed starts 0, 1 or 2 bytes
+        // into a 3-byte group, and each start encodes it differently. The 40
+        // characters that depend on seed bytes alone are the needle: after the
+        // first group (which mixes in what comes before) and before the last
+        // (which may mix in what comes after).
+        for (alphabet, standard) in [("base64", true), ("URL-safe base64", false)] {
+            for shift in 0..3usize {
+                let mut shifted = vec![0u8; shift];
+                shifted.extend_from_slice(&seed);
+                let encoded = if standard {
+                    STANDARD.encode(&shifted)
+                } else {
+                    URL_SAFE_NO_PAD.encode(&shifted)
+                };
+                let start = if shift == 0 { 0 } else { 4 };
+                needles.push((
+                    format!("{alphabet}, seed {shift} byte(s) into a group"),
+                    encoded.as_bytes()[start..start + 40].to_vec(),
+                ));
+            }
+        }
         let requests = self.0.lock().unwrap();
         let signed = requests
             .iter()
@@ -276,6 +289,10 @@ struct Server {
 }
 
 async fn start_server(pool: PgPool) -> Server {
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::WARN)
+        .with_test_writer()
+        .try_init();
     let state = AppState::new(
         pool,
         TEST_JWT_SECRET.to_string(),
@@ -507,6 +524,8 @@ impl Workd {
     fn new(base: &str, fixture: &Fixture, tools: &[(&str, &[&str])]) -> Self {
         let dir = std::env::temp_dir().join(format!("momo-wdc-{}", Uuid::new_v4().simple()));
         std::fs::create_dir_all(dir.join("repo")).unwrap();
+        // The owner's own folder whatever the umask (`config::check_parent_folder`).
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
         let tools: serde_json::Map<String, Value> = tools
             .iter()
             .map(|(key, extra)| {
@@ -547,6 +566,38 @@ impl Workd {
             dir,
             child: None,
         }
+    }
+
+    /// Add a Codex allowlist entry (the stub, speaking as codex-acp).
+    fn add_codex_tool(&self, key: &str, extra: &[&str]) {
+        let mut config: Value =
+            serde_json::from_slice(&std::fs::read(&self.config).unwrap()).unwrap();
+        let mut args = vec![
+            "--record".to_string(),
+            self.dir.join(format!("{key}.jsonl")).display().to_string(),
+        ];
+        args.extend(extra.iter().map(|arg| arg.to_string()));
+        config["tools"][key] = json!({"adapter": "codex", "executable": STUB, "args": args});
+        std::fs::write(&self.config, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
+    }
+
+    /// Codex's host-only home, beside the registration state (ADR-0188 §8).
+    fn codex_home(&self) -> PathBuf {
+        self.dir.join("state").join("codex-home")
+    }
+
+    /// The owner signed Codex in to the host's own home once
+    /// (`CODEX_HOME=… codex login`); only the file's presence matters here.
+    fn sign_in_codex(&self) {
+        use std::os::unix::fs::DirBuilderExt as _;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(self.codex_home())
+            .unwrap();
+        let auth = self.codex_home().join("auth.json");
+        std::fs::write(&auth, "{\"auth_mode\":\"test\"}").unwrap();
+        std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
 
     fn record(&self, key: &str) -> Vec<Value> {
@@ -844,12 +895,12 @@ async fn owner_resume(
         .send()
         .await
         .expect("create the source session");
-    assert_eq!(
-        created.status(),
-        201,
-        "the owner opens a session on the old laptop"
-    );
+    let created_status = created.status();
     let created: Value = created.json().await.expect("source body");
+    assert_eq!(
+        created_status, 201,
+        "the owner opens a session on the old laptop: {created}"
+    );
     let source = Uuid::parse_str(created["workSession"]["id"].as_str().expect("id")).unwrap();
     orphan_session(su, source).await;
     http.post(format!(
@@ -1098,7 +1149,7 @@ async fn wdc_1_owner_resume_round_trip_and_no_seed_on_the_wire() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
-async fn wdc_2_refusals_on_a_member_host() {
+async fn wdc_2_mode_correction_codex_and_refusals_on_a_member_host() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let app_pool = momo_app_pool().await;
@@ -1108,29 +1159,46 @@ async fn wdc_2_refusals_on_a_member_host() {
     let http = reqwest::Client::new();
     let token = login(&http, base, &fixture).await;
 
-    // The owner's Claude opens in `auto` (its own settings say so), and the
-    // workspace catalog also carries a `shell` tool.
-    sqlx::query(
-        "INSERT INTO work_tool_profile \
-           (workspace_id, tool_key, display_name, launch_template, enabled, created_by, updated_by) \
-         VALUES ($1, 'shell', 'shell', $2, true, $3, $3) \
-         ON CONFLICT (workspace_id, tool_key) DO UPDATE SET enabled = true",
-    )
-    .bind(fixture.workspace)
-    .bind(json!({"command": "zsh", "arguments": []}))
-    .bind(fixture.owner)
-    .execute(&su)
-    .await
-    .expect("seed a shell tool profile");
+    // The workspace catalog carries three more tools: Codex, a `shell`, and —
+    // under the one other key the session ledger accepts (`work_session_tool_ck`)
+    // — a Claude that will not take the correction. The host allowlist, not
+    // the key, decides what runs.
+    for (tool, command) in [
+        ("opencode", "claude-agent-acp"),
+        ("codex", "codex-acp"),
+        ("shell", "zsh"),
+    ] {
+        sqlx::query(
+            "INSERT INTO work_tool_profile \
+               (workspace_id, tool_key, display_name, launch_template, enabled, created_by, updated_by) \
+             VALUES ($1, $2, $2, $3, true, $4, $4) \
+             ON CONFLICT (workspace_id, tool_key) DO UPDATE SET enabled = true",
+        )
+        .bind(fixture.workspace)
+        .bind(tool)
+        .bind(json!({"command": command, "arguments": []}))
+        .bind(fixture.owner)
+        .execute(&su)
+        .await
+        .expect("seed a work tool profile");
+    }
+    // The owner's Claude opens in `auto` (its own settings say so); one
+    // refuses the correction.
     let mut workd = Workd::new(
         base,
         &fixture,
-        &[("claude", &["--mode", "auto"]), ("shell", &[])],
+        &[
+            ("claude", &["--mode", "auto"]),
+            ("opencode", &["--mode", "auto", "--set-mode-error"]),
+            ("shell", &[]),
+        ],
     );
+    workd.add_codex_tool("codex", &["--codex-modes", "--mode", "read-only"]);
     let host = Uuid::parse_str(workd.register(&token).await["hostId"].as_str().unwrap()).unwrap();
+    workd.sign_in_codex();
     workd.start();
 
-    // ---- auto mode: the host refuses and ends the allocated session -------
+    // ---- auto mode, corrected before the first prompt ----------------------
     let resumed = owner_resume(
         &su,
         &http,
@@ -1143,30 +1211,95 @@ async fn wdc_2_refusals_on_a_member_host() {
     )
     .await;
     let (session, spawn) = accepted_resume(&su, &fixture, host, resumed).await;
-    wait_until("the refused spawn", &workd, || async {
-        (control_state(&su, spawn).await.0 == "failed").then_some(())
+    wait_until("the corrected resume to go idle", &workd, || async {
+        (session_status(&su, session).await == "idle").then_some(())
     })
     .await;
     assert_eq!(
-        ack_error_label(&su, &fixture, spawn).await.as_deref(),
+        control_state(&su, spawn).await,
+        ("acked".to_string(), Some(session))
+    );
+    let log = workd.record("claude");
+    let methods: Vec<&str> = log
+        .iter()
+        .filter_map(|entry| entry["received"]["method"].as_str())
+        .collect();
+    let set_mode = methods
+        .iter()
+        .position(|m| *m == "session/set_mode")
+        .expect("corrected");
+    let prompt = methods
+        .iter()
+        .position(|m| *m == "session/prompt")
+        .expect("prompted");
+    assert!(
+        set_mode < prompt,
+        "corrected before the first prompt: {methods:?}"
+    );
+    assert!(log.iter().any(|entry| entry["prompt_mode"] == "default"));
+    eprintln!("wdc_2: resume {spawn} opened in auto, corrected to default before its first prompt");
+
+    // ---- a correction the agent refuses: refused, allocated session ended --
+    let resumed = owner_resume(
+        &su,
+        &http,
+        base,
+        &token,
+        &fixture,
+        host,
+        "opencode",
+        "fix the bug",
+    )
+    .await;
+    let (stuck, stuck_spawn) = accepted_resume(&su, &fixture, host, resumed).await;
+    wait_until("the refused spawn", &workd, || async {
+        (control_state(&su, stuck_spawn).await.0 == "failed").then_some(())
+    })
+    .await;
+    assert_eq!(
+        ack_error_label(&su, &fixture, stuck_spawn).await.as_deref(),
         Some("permission_mode_refused"),
         "the refusal reaches the room with its reason"
     );
     wait_until("the host to end the allocated session", &workd, || async {
-        (session_status(&su, session).await == "ended").then_some(())
+        (session_status(&su, stuck).await == "ended").then_some(())
     })
     .await;
-    let methods: Vec<String> = workd
-        .record("claude")
-        .iter()
-        .filter_map(|entry| entry["received"]["method"].as_str().map(str::to_string))
-        .collect();
-    assert_eq!(
-        methods,
-        ["initialize", "session/new"],
-        "no prompt reached an auto-mode agent"
+    assert!(
+        !workd
+            .record("opencode")
+            .iter()
+            .any(|entry| entry["received"]["method"] == "session/prompt"),
+        "no prompt reached an agent that stayed in auto"
     );
-    eprintln!("wdc_2: resume {spawn} failed with permission_mode_refused; session {session} ended by the host");
+    eprintln!("wdc_2: resume {stuck_spawn} refused the correction → permission_mode_refused, session {stuck} ended by the host");
+
+    // ---- Codex, from the host's own home (ADR-0188 §8) ---------------------
+    let resumed = owner_resume(
+        &su,
+        &http,
+        base,
+        &token,
+        &fixture,
+        host,
+        "codex",
+        "summarise the repo",
+    )
+    .await;
+    let (codex_session, codex_spawn) = accepted_resume(&su, &fixture, host, resumed).await;
+    wait_until("the Codex resume to go idle", &workd, || async {
+        (session_status(&su, codex_session).await == "idle").then_some(())
+    })
+    .await;
+    let start = &workd.record("codex")[0];
+    assert_eq!(
+        start["env_isolation"]["CODEX_HOME"]
+            .as_str()
+            .map(PathBuf::from),
+        Some(workd.codex_home()),
+        "Codex runs from the host's own home"
+    );
+    eprintln!("wdc_2: Codex resume {codex_spawn} ran from the host's own CODEX_HOME");
 
     // ---- shell: refused at the resume, never delivered ----------------------
     let resumed = owner_resume(

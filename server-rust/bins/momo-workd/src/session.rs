@@ -1,18 +1,26 @@
 //! Work sessions: one ACP agent process and one task per server session.
 //!
-//! A spawn goes through the D6 checks in a fixed order, and **nothing is
-//! started until each earlier check passed**:
+//! A spawn goes through the D6 checks in this order, and **nothing is
+//! started until each earlier check passed** (the owner check,
+//! `ControlLoop::require_owner`, comes before all of them):
 //!
-//! 1. `shell` refused ([`policy::check_remote_tool`]);
-//! 2. the tool must be in the host allowlist, which alone decides the binary
+//! 1. the label, which becomes the first prompt, is not an adapter command
+//!    ([`policy::check_prompt`]); the host is under its session limit; a
+//!    resume does not name a session this host already runs;
+//! 2. `shell` refused ([`policy::check_remote_tool`]);
+//! 3. the tool must be in the host allowlist, which alone decides the binary
 //!    and its arguments ([`policy::launch_spec`]);
-//! 3. the allowed folder must resolve (`realpath`) to a directory, and carry no
+//! 4. the allowed folder must resolve (`realpath`) to a directory, and carry no
 //!    project agent configuration the adapter would apply regardless
-//!    ([`policy::check_project_config`]);
-//! 4. ACP `initialize` + `session/new` with no MCP servers and the adapter's
-//!    isolation switches;
-//! 5. the agent must report the adapter's fixed permission mode
-//!    ([`policy::check_session_modes`]) — only then is a server session created.
+//!    ([`policy::check_project_config`]); for Codex, the host's own home is
+//!    ready and signed in ([`policy::prepare_codex_home`], ADR-0188 §8);
+//! 5. ACP `initialize` — the process must be the adapter its entry names
+//!    ([`policy::AdapterKind::agent_name`]) — then `session/new` with no MCP
+//!    servers and the adapter's isolation switches;
+//! 6. the agent must be in the adapter's fixed permission mode, or be
+//!    corrected to it and confirm ([`policy::check_session_modes`],
+//!    [`policy::check_mode_confirmed`]) — only then is a server session
+//!    created, and only after that the first prompt sent.
 //!
 //! After that the session task owns the agent. It relays the curated event
 //! stream ([`crate::projection`]), answers every `session/request_permission`
@@ -35,7 +43,7 @@ use crate::client::{
     now_ms, AcpEvent, ClientError, CreateSession, HostApi, SessionStatus, WorkControl,
 };
 use crate::config::ToolEntry;
-use crate::policy::{self, AdapterKind, Refusal};
+use crate::policy::{self, AdapterKind, ModeAtOpen, Refusal};
 use crate::projection::{self, chunk_field, Projection, MAX_FIELD_CHARS};
 
 /// ACP protocol version this client speaks.
@@ -47,22 +55,38 @@ const TEXT_FLUSH_BYTES: usize = 3_000;
 /// …or once it has waited this long.
 const TEXT_FLUSH_AGE: Duration = Duration::from_millis(400);
 const RELAY_TICK: Duration = Duration::from_millis(200);
-/// The longest trailing credential-shaped run a size/age flush holds back —
-/// longer than any single token recognised in practice, large JWTs included.
-/// Only a longer unbroken run is sent while it may still be growing.
+/// The longest unfinished line (or, past that, unbroken run) a flush holds
+/// back — longer than any single credential in practice, large JWTs included.
 const MAX_HELD_RUN_BYTES: usize = 16_384;
+/// The longest open private-key block the relay holds (#2607 N-5): a real
+/// PEM key is a few KiB (RSA-8192 is about 6.5 KiB). Past this the block is
+/// sent masked to the end and the text after it flows again.
+const MAX_HELD_KEY_BYTES: usize = 16_384;
 
-/// How much of the buffered text a size or age flush may send: everything
-/// before an unterminated private-key block (or unfinished PEM header), and
-/// before the trailing run of credential characters (bounded) — either of
-/// which the next chunk may complete into a credential.
+/// How much of the buffered text a flush before the end of a message may
+/// send: only **complete lines**, and nothing from an open private-key block
+/// on — the rest may still become one credential with what comes next (a
+/// token, a `secret=` value, a URL with a password, a key's next line).
+///
+/// Bounds (#2607 N-5): an open key block longer than [`MAX_HELD_KEY_BYTES`]
+/// is released (masked to the end by the scan); an unfinished line longer
+/// than [`MAX_HELD_RUN_BYTES`] keeps only its trailing unbroken run, and a
+/// run longer than that is released too.
 fn ready_len(text: &str) -> usize {
-    let cut = projection::open_private_key_block(text).unwrap_or(text.len());
+    let cut = match projection::open_private_key_block(text) {
+        Some(start) if text.len() - start > MAX_HELD_KEY_BYTES => return text.len(),
+        Some(start) => start,
+        None => text.len(),
+    };
     let head = &text[..cut];
+    let line_start = head.rfind('\n').map_or(0, |newline| newline + 1);
+    if head.len() - line_start <= MAX_HELD_RUN_BYTES {
+        return line_start;
+    }
     let run_start = head
         .char_indices()
         .rev()
-        .find(|(_, character)| !projection::is_credential_char(*character))
+        .find(|(_, character)| character.is_whitespace())
         .map(|(index, character)| index + character.len_utf8())
         .unwrap_or(0);
     if head.len() - run_start <= MAX_HELD_RUN_BYTES {
@@ -72,6 +96,9 @@ fn ready_len(text: &str) -> usize {
     }
 }
 const TERMINATE_GRACE: Duration = Duration::from_secs(3);
+/// After the agent accepted `session/set_mode`, how long the host waits for
+/// its report of the new mode when it did not arrive with the answer.
+const MODE_CONFIRM_GRACE: Duration = Duration::from_secs(2);
 const CANCEL_GRACE: Duration = Duration::from_secs(2);
 
 /// Shown on the session stream when a permission request is refused.
@@ -90,6 +117,8 @@ pub struct SessionSettings {
     pub parent_env: Vec<(String, String)>,
     /// Most sessions (agent processes) this host runs at once (#2602 L-2).
     pub max_sessions: usize,
+    /// Codex's host-only home and temp folder (ADR-0188 §8).
+    pub codex: policy::CodexHome,
 }
 
 /// Most instructions one session keeps queued behind its running turn
@@ -134,6 +163,12 @@ impl SessionManager {
         self.sessions.keys().copied().collect()
     }
 
+    /// Whether this host is running `session_id`.
+    pub fn runs(&mut self, session_id: Uuid) -> bool {
+        self.reap();
+        self.sessions.contains_key(&session_id)
+    }
+
     /// Forget sessions whose task has finished (the agent exited on its own).
     pub fn reap(&mut self) {
         self.sessions.retain(|_, handle| !handle.task.is_finished());
@@ -151,6 +186,14 @@ impl SessionManager {
         };
         // The label becomes the first prompt: never an adapter command.
         policy::check_prompt(label)?;
+        // A resume names the session the server allocated for it; one this
+        // host already runs is not opened a second time (#2607 N-6).
+        if control
+            .session_id
+            .is_some_and(|session_id| self.runs(session_id))
+        {
+            return Err(Refusal::InvalidControl);
+        }
         self.reap();
         if self.sessions.len() >= self.settings.max_sessions {
             return Err(Refusal::HostBusy);
@@ -164,36 +207,54 @@ impl SessionManager {
             .get(tool)
             .cloned()
             .ok_or(Refusal::ToolNotAllowlisted)?;
-        // ADR-0188 D6: only an adapter whose permission requests cover every
-        // command and write (#2602 M-2). The config refuses Codex too; this is
-        // the check that holds even for settings built some other way.
-        policy::check_adapter_admitted(entry.adapter)?;
         // (3) The allowed folder, resolved at every spawn.
         let cwd = std::fs::canonicalize(&self.settings.working_directory)
             .ok()
             .filter(|path| path.is_dir())
             .ok_or(Refusal::WorkdirUnavailable)?;
         // Project agent configuration the adapter would apply regardless.
-        policy::check_project_config(
-            entry.adapter,
+        policy::check_project_config(entry.adapter, &cwd)?;
+        // ADR-0188 §8: Codex runs only from the host's own home, signed in.
+        if entry.adapter == AdapterKind::Codex {
+            if let Err(refusal) = policy::prepare_codex_home(&self.settings.codex, &cwd) {
+                if refusal == Refusal::CodexLoginRequired {
+                    tracing::warn!(
+                        login = %self.settings.codex.login_command(),
+                        "Codex is not signed in to the host's own home; sign in once with this command"
+                    );
+                }
+                return Err(refusal);
+            }
+        }
+        let spec = policy::launch_spec(
+            &entry,
             &cwd,
-            policy::codex_home(&self.settings.parent_env).as_deref(),
-        )?;
-        let spec = policy::launch_spec(&entry, &cwd, self.settings.parent_env.clone());
+            self.settings.parent_env.clone(),
+            &self.settings.codex,
+        );
         let mut conn = AcpConnection::spawn(&spec).map_err(|error| {
             tracing::warn!(tool, error = %error, "agent launch failed");
             Refusal::AgentStartFailed
         })?;
 
         // (4) + (5): handshake, then the mode check.
-        let acp_session_id =
-            match handshake(&conn, entry.adapter, &cwd, self.settings.acp_start_timeout).await {
-                Ok(id) => id,
-                Err(refusal) => {
-                    conn.terminate(TERMINATE_GRACE).await;
-                    return Err(refusal);
-                }
-            };
+        let acp_session_id = match handshake(
+            &mut conn,
+            entry.adapter,
+            &cwd,
+            self.settings.acp_start_timeout,
+        )
+        .await
+        {
+            Ok(id) => id,
+            Err(refusal) => {
+                conn.terminate(TERMINATE_GRACE).await;
+                return Err(refusal);
+            }
+        };
+        // The first census while the adapter is certainly alive: what it
+        // started at launch is known before any turn can end with its exit.
+        conn.observe_tree();
 
         let session_id = match control.session_id {
             // A resume spawn: the server pre-allocated the session.
@@ -301,9 +362,11 @@ impl SessionManager {
     }
 }
 
-/// `initialize` → `session/new` → mode check. Returns the ACP session id.
+/// `initialize` → `session/new` → mode check, and the correction to the
+/// fixed mode when the agent opened in another one. Returns the ACP session
+/// id. Nothing is prompted until this returns.
 async fn handshake(
-    conn: &AcpConnection,
+    conn: &mut AcpConnection,
     adapter: AdapterKind,
     cwd: &std::path::Path,
     timeout: Duration,
@@ -337,6 +400,20 @@ async fn handshake(
         tracing::warn!("ACP agent negotiated an unsupported protocol version");
         return Err(Refusal::AgentStartFailed);
     }
+    // #2607 N-9: the adapter the allowlist entry names, before `session/new`
+    // (codex-acp trusts the folder and reads its `.codex` there).
+    let name = initialized
+        .pointer("/agentInfo/name")
+        .and_then(Value::as_str)
+        .unwrap_or("<none>");
+    if name != adapter.agent_name() {
+        tracing::warn!(
+            reported = name,
+            expected = adapter.agent_name(),
+            "the allowlisted executable is not the adapter its entry names; session refused"
+        );
+        return Err(Refusal::AdapterMismatch);
+    }
     let created = conn
         .request(
             "session/new",
@@ -354,20 +431,100 @@ async fn handshake(
         .filter(|id| !id.is_empty())
         .ok_or(Refusal::AgentStartFailed)?
         .to_string();
-    // ADR-0188 D6: bypass/auto (or anything but the fixed mode) → no session.
-    if let Err(refusal) = policy::check_session_modes(adapter, created.get("modes")) {
-        let reported = created
-            .pointer("/modes/currentModeId")
-            .and_then(|mode| mode.as_str())
-            .unwrap_or("<none>");
-        tracing::warn!(
-            reported,
-            required = adapter.fixed_mode(),
-            "agent is not in the host's fixed permission mode; session refused"
-        );
-        return Err(refusal);
+    // ADR-0188 D6 as amended (§8): the fixed mode before the first prompt —
+    // corrected and confirmed when the agent opened in another one.
+    let opened = created
+        .pointer("/modes/currentModeId")
+        .and_then(|mode| mode.as_str())
+        .unwrap_or("<none>")
+        .to_string();
+    match policy::check_session_modes(adapter, created.get("modes")) {
+        Ok(ModeAtOpen::Fixed) => {}
+        Ok(ModeAtOpen::Correct) => {
+            if let Err(refusal) = correct_mode(conn, adapter, &acp_session_id, timeout).await {
+                tracing::warn!(
+                    opened = %opened,
+                    required = adapter.fixed_mode(),
+                    "the agent's mode could not be corrected and confirmed; session refused"
+                );
+                return Err(refusal);
+            }
+            tracing::info!(
+                opened = %opened,
+                now = adapter.fixed_mode(),
+                "agent opened outside the fixed mode; corrected before the first prompt"
+            );
+        }
+        Err(refusal) => {
+            tracing::warn!(
+                opened = %opened,
+                required = adapter.fixed_mode(),
+                "agent does not offer the host's fixed permission mode; session refused"
+            );
+            return Err(refusal);
+        }
     }
     Ok(acp_session_id)
+}
+
+/// `session/set_mode` to the fixed mode, then the agent's own confirmation:
+/// the last mode it reports — with its answer, or within
+/// [`MODE_CONFIRM_GRACE`] after it — must be the fixed one
+/// ([`policy::check_mode_confirmed`]). Anything else it sent meanwhile is
+/// handed back to the connection for the session task.
+async fn correct_mode(
+    conn: &mut AcpConnection,
+    adapter: AdapterKind,
+    acp_session_id: &str,
+    timeout: Duration,
+) -> Result<(), Refusal> {
+    let fixed = adapter.fixed_mode();
+    conn.request(
+        "session/set_mode",
+        json!({"sessionId": acp_session_id, "modeId": fixed}),
+        timeout,
+    )
+    .await
+    .map_err(|failure| {
+        tracing::warn!(error = %failure, "the agent refused session/set_mode");
+        Refusal::PermissionModeRefused
+    })?;
+    let mut reported: Option<String> = None;
+    let mut others = Vec::new();
+    // Everything the agent wrote before its answer is queued by now.
+    while let Some(message) = conn.try_next_incoming() {
+        match mode_report(&message) {
+            Some(mode) => reported = Some(mode),
+            None => others.push(message),
+        }
+    }
+    if reported.as_deref() != Some(fixed) {
+        let deadline = tokio::time::Instant::now() + MODE_CONFIRM_GRACE.min(timeout);
+        while reported.as_deref() != Some(fixed) {
+            match tokio::time::timeout_at(deadline, conn.next_incoming()).await {
+                Ok(Some(message)) => match mode_report(&message) {
+                    Some(mode) => reported = Some(mode),
+                    None => others.push(message),
+                },
+                _ => break,
+            }
+        }
+    }
+    conn.unread(others);
+    policy::check_mode_confirmed(adapter, reported.as_deref())
+}
+
+/// The mode an agent message reports, if it is a mode report.
+fn mode_report(message: &Incoming) -> Option<String> {
+    match message {
+        Incoming::Notification { method, params } if method == "session/update" => {
+            match projection::project(params) {
+                Projection::ModeChanged(mode) => Some(mode),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -462,6 +619,9 @@ impl SessionTask {
                     }
                 }
                 Event::Tick => {
+                    // Keep the census current, so a tool that left the
+                    // adapter's group is known before anything can orphan it.
+                    self.conn.observe_tree();
                     self.relay.flush_due().await;
                     if self.start_pending {
                         self.start_next_turn().await
@@ -481,6 +641,18 @@ impl SessionTask {
     }
 
     async fn on_incoming(&mut self, message: Incoming) -> Option<End> {
+        // A tool is running or asking to: count the tree now rather than at
+        // the next tick — the adapter may exit before it and orphan the tool.
+        let tool_activity = match &message {
+            Incoming::Notification { params, .. } => params
+                .pointer("/update/sessionUpdate")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| kind.starts_with("tool_call")),
+            Incoming::Request { .. } => true,
+        };
+        if tool_activity {
+            self.conn.observe_tree();
+        }
         match message {
             Incoming::Notification { method, params } if method == "session/update" => {
                 match projection::project(&params) {
@@ -564,6 +736,7 @@ impl SessionTask {
         &mut self,
         result: Result<RpcResult, oneshot::error::RecvError>,
     ) -> Option<End> {
+        self.conn.observe_tree();
         self.relay.flush_text().await;
         let exit_code = match &result {
             Ok(Ok(value))
@@ -619,6 +792,7 @@ impl SessionTask {
                 (self.conn.wait_exit(TERMINATE_GRACE).await, None, true)
             }
             End::ModeEscaped => {
+                self.relay.flush_text().await;
                 self.relay
                     .status(projection::status_payload(
                         "thinking",
@@ -733,8 +907,12 @@ impl EventRelay {
         }
     }
 
+    /// Text before the status goes first — but only what can safely go: a
+    /// trailing fragment stays to be joined with the text after the status
+    /// (#2607 N-4). Everything is flushed only when a turn or the session
+    /// ends.
     pub async fn status(&mut self, payload: Map<String, Value>) {
-        self.flush_text().await;
+        self.flush_ready().await;
         self.send("agent.status", payload).await;
     }
 
@@ -744,7 +922,7 @@ impl EventRelay {
     /// (ADR-0188 D5: previews go to the owner's devices only, and that bridge is
     /// R1's next slice).
     pub async fn permission_denied(&mut self) {
-        self.flush_text().await;
+        self.flush_ready().await;
         let mut decided = Map::new();
         decided.insert("action".into(), json!("decided"));
         decided.insert("status".into(), json!("rejected"));
@@ -805,10 +983,13 @@ mod tests {
 
     #[test]
     fn a_flush_holds_what_the_next_chunk_could_complete_into_a_credential() {
-        // The trailing credential-shaped run waits for the next chunk.
-        assert_eq!(ready_len("see sk-ant-api03-"), "see ".len());
-        assert_eq!(ready_len("token=\"eyJhbGciOi.eyJzdWIi"), "token=\"".len());
-        assert_eq!(ready_len("aws AKIA"), "aws ".len());
+        // Only complete lines go before the message ends.
+        assert_eq!(ready_len("see sk-ant-api03-"), 0);
+        assert_eq!(
+            ready_len("line one\nAWS_SECRET_ACCESS_KEY = "),
+            "line one\n".len()
+        );
+        assert_eq!(ready_len("aws AKIA\n"), "aws AKIA\n".len());
         // So does an unfinished PEM header or an open block, spaces and all.
         assert_eq!(ready_len("key:\n-----BEGIN OPENSSH PRIV"), "key:\n".len());
         let open = concat!("key:\n-----BEGIN OPENSSH ", "PRIVATE KEY-----\nb3Blbn\n");
@@ -821,12 +1002,25 @@ mod tests {
         );
         assert_eq!(ready_len(closed), closed.len());
         assert_eq!(ready_len("done.\n"), "done.\n".len());
-        // The hold is bounded: an unbroken run past the bound is sent.
+        // The holds are bounded: a line past the bound keeps only its last
+        // run, an unbroken run past the bound is sent…
         let long = "x".repeat(MAX_HELD_RUN_BYTES + 1);
         assert_eq!(ready_len(&long), long.len());
         assert_eq!(
             ready_len(&format!("a {}", "x".repeat(MAX_HELD_RUN_BYTES))),
             2
+        );
+        // …and so is an open key block past its bound (#2607 N-5).
+        let flood = format!(
+            "{}{}",
+            concat!("-----BEGIN RSA ", "PRIVATE KEY-----\n"),
+            "lorem ipsum\n".repeat(MAX_HELD_KEY_BYTES / 12 + 1)
+        );
+        assert_eq!(ready_len(&flood), flood.len());
+        assert_eq!(
+            projection::redact_credentials(&flood),
+            projection::REDACTED_PRIVATE_KEY,
+            "released masked to the end"
         );
     }
 }

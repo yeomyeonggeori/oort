@@ -12352,38 +12352,38 @@ async function captureFirstAgentScenes(browser, scheme) {
   };
   const tapTargetsByPose = {
     cards: [
-      ["first-agent-skip", "나중에"],
+      ["first-agent-skip", "지금은 건너뛰기"],
       ["first-agent-continue", "계속"],
       ["first-agent-reentry", "재진입"],
     ],
     "one-time": [
-      ["first-agent-skip", "나중에"],
+      ["first-agent-skip", "지금은 건너뛰기"],
       ["first-agent-reentry", "재진입"],
     ],
     detecting: [
-      ["first-agent-skip", "나중에"],
+      ["first-agent-skip", "지금은 건너뛰기"],
       ["first-agent-reentry", "재진입"],
     ],
     "cap-exceeded": [
-      ["first-agent-skip", "나중에"],
+      ["first-agent-skip", "지금은 건너뛰기"],
       ["first-agent-recheck", "다시 확인"],
       ["first-agent-reentry", "재진입"],
     ],
     done: [
-      ["first-agent-skip", "나중에"],
+      ["first-agent-skip", "지금은 건너뛰기"],
       ["first-agent-mention-action", "첫 멘션"],
       ["first-agent-reentry", "재진입"],
     ],
     loading: [
-      ["first-agent-skip", "나중에"],
+      ["first-agent-skip", "지금은 건너뛰기"],
       ["first-agent-reentry", "재진입"],
     ],
     offline: [
-      ["first-agent-skip", "나중에"],
+      ["first-agent-skip", "지금은 건너뛰기"],
       ["first-agent-reentry", "재진입"],
     ],
     error: [
-      ["first-agent-skip", "나중에"],
+      ["first-agent-skip", "지금은 건너뛰기"],
       ["first-agent-reentry", "재진입"],
     ],
   };
