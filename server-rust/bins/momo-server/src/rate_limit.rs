@@ -335,10 +335,12 @@ pub async fn per_ip_device_link(
 /// Per-IP budget for **refused** upload capabilities (#2628; #2631 review R12).
 ///
 /// Mounted with `route_layer` on `/__momo_stub/drive/uploads/{token}`, but it
-/// lets the handler decide first: the handler checks the capability without
-/// reading a byte of the body and answers **404** for every capability it
-/// refuses — malformed, unknown, spent or expired — and for nothing else. Only
-/// that 404 spends the address's budget; once it is spent, the address's
+/// lets the handler decide first: the handler answers **404** for every
+/// capability it refuses — malformed, unknown, spent or expired — and for
+/// nothing else. Most of those refusals come before a byte of the body is read;
+/// a capability that was live when its body started and was spent by a
+/// concurrent PUT, or expired, before the body finished is refused after it.
+/// Only that 404 spends the address's budget; once it is spent, the address's
 /// refusals become 429s.
 ///
 /// A live capability is never refused on this axis and spends none of it.
@@ -346,7 +348,14 @@ pub async fn per_ip_device_link(
 /// TCP passthrough, a Cloudflare tunnel, Railway without `X-Real-IP` — one
 /// address is the whole instance, and a budget that counted every PUT would let
 /// an anonymous fake-token flood refuse every real attachment and avatar upload.
-/// What the budget still bounds is how fast one address may guess.
+///
+/// **This budget does not slow guessing.** The handler runs first, so a PUT
+/// from an address whose budget is spent is still handled in full: a wrong
+/// token gets 429 where it would have got 404, a live one lands as before. All
+/// the budget adds is 429 + `Retry-After`, and one WARN line per burst, on one
+/// address's excess refusals. The defence against guessing is the token: 122
+/// random bits (UUIDv4), spent by its first upload, dead after
+/// `momo_drive::UPLOAD_SESSION_TTL`.
 ///
 /// The surface logged is the route's shape: the token in the path is a
 /// capability and never reaches a log line.

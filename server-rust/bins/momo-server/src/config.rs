@@ -347,13 +347,15 @@ pub struct RateLimitConfig {
     /// anyone who knows the path shape. Its own key, so upload traffic and the
     /// join/claim surfaces cannot starve each other.
     ///
-    /// Why 120 a minute: a message carries at most 20 attachments and every
-    /// client uploads them one PUT at a time, so one person's heaviest burst is
-    /// 20 PUTs plus retries (each retry is a new session and a new PUT). 120
-    /// leaves room for six such bursts from one address — an office NAT — in
-    /// the same minute, while a flood from one address is held to two requests
-    /// a second. Every legitimate PUT also needs a session an authenticated
-    /// member created first.
+    /// Only **refused** capabilities spend it (#2631 review R12; see
+    /// `rate_limit::per_ip_drive_upload`): a live upload is never refused on
+    /// this axis. A working client meets a refusal only for a URL that was
+    /// spent or expired, and then restarts with a new session, so 120 refusals
+    /// a minute is far above what one address's real traffic produces — an
+    /// office NAT, or a whole instance whose clients all arrive from the edge's
+    /// address. What it adds is 429 + `Retry-After` and one WARN line per burst
+    /// on the excess; it does not slow guessing, which the token's 122 random
+    /// bits, single use and one-hour lifetime answer.
     pub drive_upload_per_ip_limit: u32,
 }
 

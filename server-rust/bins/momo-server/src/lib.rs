@@ -1364,7 +1364,9 @@ pub fn build_app(state: AppState) -> Router {
     // (#2631 review R12): it lets the handler decide and spends the address's
     // budget only on a refused capability (the route's 404), so a fake-token
     // flood from an edge address that every client shares cannot turn a live
-    // upload into a 429. A refusal reads no body, so neither does its 429.
+    // upload into a 429. A refusal made before the body reads none, and neither
+    // does its 429; a capability refused at commit (spent by a concurrent PUT,
+    // or expired mid-body) is refused, and counted, after its body was read.
     let app = if accepts_stub_uploads {
         app.route(
             "/__momo_stub/drive/uploads/{token}",
