@@ -3,6 +3,7 @@
 - Status: **Accepted** (2026-09-23 성재 결재 — 결재 질문 「ADR-0188(폰 원격 작업) 권고안을 Accept할까요?」에 「Accept」. 기안 Opus 5.5, 독립 보안 검수 R1 FAIL → R2 PASS 뒤 개정 문안 반영본. 결재 기록 §7)
 - Date: 2026-09-23
 - 개정: 2026-09-24 §8 — 성재 결정 두 가지(Codex 「샌드박스 자동 실행 수용」, Claude 기본 모드가 auto인 기기 「시작 직후 교정」)와 R1.1 보안 재검수 N-1~N-10 반영(#2607). D6 문구와 §3 불변식 한 줄을 고쳤다.
+- 개정: 2026-09-24 §8.1 — R1.2 보안 재검수(#2621) 후속 R1.3(#2630). 조건 1·2를 보강하고 조건 8(환경 변수 허용목록)을 더했다. RR-3을 보강하고 RR-6을 더했다. F5 선택 근거와 운영 메모를 적었다. §3 불변식 문구는 바꾸지 않았다.
 - Deciders: 성재
 - 발제: ADR-0187 D3 — 성재 「그 정도 수준의 원격 작업 그리고 알림 시스템 그리고 데스크탑에서 사용자들이 했던 걸 트래킹하고 온전히 독까지 요청할 수 있는 마치 코덱스나 클라우드에 iOS 앱 같은 느낌」, D2 「테이스케일 안 쓰고 iOS 앱을 쓰는 걸 목표로」
 - 승계(Accepted, 이 ADR은 현행 스택 위에 다시 세운다):
@@ -299,21 +300,82 @@ oort는 벤더 클라우드 자리에 **팀 자신의 Railway 서버**가 있으
    - `AGENTS.md`·`rules/`·`hooks.json`·`prompts/`가 생기면 거부한다.
    - host는 자격을 복사하지 않는다. 소유자가 한 번 `CODEX_HOME=<경로> codex login`을 한다. 그 전에는 `codex_login_required`로 거부한다.
    - home과 temp 폴더가 허용 폴더 안에 있으면 거부한다(샌드박스가 폴더를 쓸 수 있으므로).
-2. **features 끄기**: hooks·plugins·apps·remote_plugin·plugin_sharing·skill_mcp_dependency_install·computer_use·browser_use·browser_use_external·browser_use_full_cdp_access·in_app_browser·in_app_local_automation·guardian_approval.
+   - **Codex 프로세스의 `HOME`도 host 전용 빈 폴더다**(`<state 폴더>/codex-user-home`, 0700, #2630 F5). 선택 근거는 아래 「F5 선택」이다.
+     - 거기에 `.agents`나 zsh 시작 파일(`.zshenv`·`.zprofile`·`.zshrc`·`.zlogin`)이 생기면 거부한다.
+     - 샌드박스는 이 폴더를 쓸 수 없다. 쓸 수 있는 곳은 작업 폴더, `/tmp`, `$TMPDIR`뿐이다.
+2. **features 끄기**: hooks·plugins·apps·remote_plugin·plugin_sharing·skill_mcp_dependency_install·computer_use·browser_use·browser_use_external·browser_use_full_cdp_access·in_app_browser·in_app_local_automation·guardian_approval·memories·shell_snapshot.
    - 샌드박스 밖에서 행동하는 기능(컴퓨터·브라우저 제어, 로컬 자동화, 자동 승인자)과 사용자 층 확장점이다.
-   - `CODEX_CONFIG`의 중첩 `features` 표 하나와 host `config.toml` 두 층에 둔다. 실측: 13개 모두 `false`.
+   - `memories`(#2630 F7)는 세션을 넘는 기억이다. 지금은 기본값이 꺼짐이지만, 기본값이 바뀌어도 꺼져 있게 한다.
+   - `shell_snapshot`(#2630 F1)은 기본값이 켜짐이다.
+     - thread를 시작할 때 로그인 셸로 `.zshrc`를 읽는다.
+     - 그 뒤 모든 명령 앞에서 그 셸의 export를 다시 건다.
+     - 그래서 켜 두면 조건 8의 명령 환경 제한이 무너진다(실측).
+   - `CODEX_CONFIG`의 중첩 `features` 표 하나와 host `config.toml` 두 층에 둔다. 실측(codex-cli 0.155.1 `features list`): 15개 모두 `false`.
 3. **프로젝트 `.codex` 거부.** host home을 쓰면 폴더에서 닿는 소유자 `~/.codex`도 프로젝트 층이 되므로 거부한다.
 4. **자손 트리 종료(L-1)**: kill·revoke·스스로 종료 뒤 `setsid()`로 그룹을 떠난 도구 프로세스까지 끝낸다(프로세스 census, pid·시작 시각으로 식별).
 5. **어댑터 정체 확인**: `initialize`의 `agentInfo.name`이 허용목록 항목의 어댑터와 다르면 `session/new` 전에 거부한다(N-9).
 6. **이벤트 정화**가 Codex 세션에도 똑같이 적용된다(가림, 필드 3,500자 분할).
 7. 소유자만 spawn(M-4)과 에이전트 기원 거부(A′)는 그대로다.
+8. **환경 변수 허용목록**(#2630 F1, Claude에도 같다).
+   - host 환경 변수 가운데 에이전트에 넘기는 것은 `PATH` `HOME` `USER` `LOGNAME` `SHELL` `TERM` `TMPDIR` `LANG` `LC_*`뿐이다.
+   - Codex에는 host가 정한 `CODEX_HOME` `TMPDIR` `HOME` `INITIAL_AGENT_MODE` `CODEX_CONFIG`를 더한다.
+   - Codex 명령의 환경은 host `config.toml`로 한 번 더 좁힌다.
+     - `[shell_environment_policy]`: `inherit = "core"`, 기본 제외(`*KEY*`·`*SECRET*`·`*TOKEN*`) 켬. codex 기본값은 모두 상속이다.
+     - `set.HOME`: 소유자 HOME. 명령은 이것으로 소유자 HOME을 돌려받는다.
+     - `set.ZDOTDIR`: 조건 1의 빈 폴더. 그래서 명령의 zsh가 소유자 시작 파일을 읽지 않는다.
+   - 실측(codex-cli 0.155.1, 모델 호출 없음)은 `server-rust/bins/momo-workd/tests/codex_isolation_real.rs`에 있다.
+     - 가짜 자격을 Codex 프로세스 env와 소유자 `.zshrc`·`.zprofile`·`.zshenv`에 심었다.
+     - `codex sandbox`의 seatbelt 명령과 `thread/shellCommand` 실행 경로 어디에서도 보이지 않았다.
+     - `TMPDIR`(host 폴더)와 `PATH`는 보존됐다.
+   - 결과: API 키·프록시·CA 인증서 env로는 에이전트를 돌릴 수 없다. 로그인(Claude Code 로그인, `CODEX_HOME=… codex login`)으로만 돈다.
+
+**F5 선택(#2630).** 소유자의 `~/.agents/skills`가 원격 Codex 세션에 실리는 문제(재검수 F5)의 세 선택지를 부작용 실측으로 비교했다. 실측은 codex-cli 0.155.1 `skills/list`, 임시 HOME 픽스처로 했다.
+- **① 채택: Codex 프로세스의 `HOME`을 host 빈 폴더로.**
+  - codex는 사용자 스킬 층을 `$HOME/.agents/skills`에서 읽는다(codex `ext/skills/src/host_roots.rs`).
+  - 실측: 픽스처 소유자 스킬이 목록에서 사라졌다.
+  - 부작용 실측: 명령의 `HOME`까지 바뀌면 rustup의 `cargo`·`rustc`가 실패했다(`~/.rustup`을 못 만듦). git 전역 신원도 없어졌다.
+  - 그래서 명령에는 `set.HOME`으로 소유자 HOME을 돌려줬다. 실측: `cargo` 동작, git 신원 있음. 스킬 목록은 여전히 비어 있었다.
+- **② 기각: `~/.agents/skills`가 비어 있지 않으면 거부.** 이 Mac에는 52개가 있다. 원격 Codex가 소유자의 Mac에서 늘 거부된다.
+- **③ 기각: `[skills] include_instructions = false`.**
+  - 자동 목록만 숨긴다. 스킬 발견은 그대로이고, 실측 목록에 소유자 스킬이 남았다.
+  - 프롬프트의 `$이름` 언급은 여전히 그 SKILL.md 전문을 싣는다(codex `ext/skills/src/extension.rs` `contribute`, `selection.rs`).
 
 **잔여 위험(이름을 붙여 둔다):**
 - **RR-1 디스크 전체 읽기.** Codex는 승인 없이 `~/.ssh` 같은 파일을 읽을 수 있다. 읽은 내용이 답변에 실리면 가림(§8.4)이 인식하는 모양만 막는다. 가림은 보조 방어다.
 - **RR-2 `/tmp` 쓰기.** 샌드박스가 턴마다 `/tmp`를 쓰기 가능으로 보낸다(설정으로 바꿀 수 없음).
 - **RR-3 프로젝트 지시문.** 폴더의 `AGENTS.md`는 읽힌다. 저장소 내용의 프롬프트 주입 면이다.
+  - **이전 샌드박스 세션이 이 지시 파일을 쓸 수 있다**(#2630 F6).
+    - 위조 지시로 연 세션이 승인 없이 `<폴더>/AGENTS.md`를 쓰면 다음 Codex 세션이 그것을 읽는다.
+    - 샌드박스의 보호 메타데이터는 `.git`·`.agents`·`.codex`뿐이다(codex `protocol/src/permissions.rs`).
+    - host는 세션마다 같은 `working_directory`를 쓴다.
+  - **저장소의 `.agents/skills`도 읽힌다.** codex는 저장소 루트부터 폴더까지의 `.agents/skills`를 저장소 층 스킬로 싣는다(`ext/skills/src/host_roots.rs` `repo_agents_skill_roots`). 이미 저장소에 있는 스킬이 주입 면이다.
+  - **D6 세션당 worktree 전까지의 완화**
+    - 샌드박스 세션이 남길 수 있는 것은 평범한 파일뿐이다. `.agents`·`.codex`·`.git`을 새로 만들거나 고치는 것은 보호 메타데이터가 막는다.
+    - 남긴 파일은 `git status`에 보인다. 소유자는 원격 세션 뒤와 다음 세션 전에 `git status`로 확인한다.
+    - 세션당 worktree(D6)가 들어오면 세션 사이의 지속이 끊긴다.
 - **RR-4 세션 기록.** Codex가 host home에 세션 기록(도구 출력 포함)을 남긴다. 0700 폴더다.
 - **RR-5 census 사이의 분리.** 한 tick(200 ms) 안에 이중 fork로 떨어져 나간 자손은 놓칠 수 있다.
+- **RR-6 환경 변수 상속**(#2630 F1).
+  - 에이전트는 자기 환경을 승인 없이 돌리는 명령에 그대로 넘긴다.
+  - #2621까지는 host 환경에서 `MOMO_*`/`OORT_*`만 빼고 전부 넘겼다. 그래서 `*_TOKEN`·`*_KEY`가 샌드박스 명령 출력에 보였다(재현: 수리 전 시험 원문, #2630 PR 본문).
+  - 공격 경로는 침해 서버의 소유자 지시 위조와 저장소 내용의 프롬프트 주입이다.
+  - 수리는 조건 8이다. 허용목록, Codex 명령 환경 제한, `shell_snapshot` 끔(조건 2), `ZDOTDIR`이다.
+  - **수리 뒤 남는 범위**
+    - 허용목록의 값(`HOME`·`USER`·`PATH` 등)은 에이전트와 명령이 본다. 자격은 아니다.
+    - 파일에 적힌 비밀은 RR-1(디스크 전체 읽기)로 여전히 읽힌다. 소유자 셸 시작 파일도 파일로는 읽힌다. 닫은 것은 환경 경로다.
+    - 소유자의 기본 셸이 bash면 Codex 명령의 로그인 셸이 `~/.bash_profile`·`~/.profile`을 읽는다(`ZDOTDIR`은 zsh에만 적용). 이 Mac은 zsh다.
+    - Claude 명령
+      - `default` 모드에서 `env`·`printenv`·`echo $X`·`ps -E`/`ps e…`는 내장 읽기 전용 집합 밖이다. 그래서 승인을 물어 권한 다리에 오고, R1 동안 거부된다.
+      - 판정 근거는 Claude Code 2.1.280 코드와 내장 문서다(읽기 전용 목록, `echo` 정규식은 `$` 제외, `ps`는 `e` 포함 인자를 위험으로 봄). `autoAllowBashIfSandboxed: false`(§8.3)도 걸려 있다.
+      - 실제 세션 실측은 하지 않았다(모델 호출 필요). 명령이 받는 환경은 어차피 허용목록뿐이다.
+      - Claude Code의 셸 스냅숏은 `PATH`만 export한다(실측: 소유자 스냅숏 파일의 export 1줄).
+    - 같은 사용자 다른 프로세스의 환경(`ps eww`)은 이 Mac에서 샌드박스 밖에서도 보이지 않았다. Codex 샌드박스는 `/bin/ps` 실행을 막았다(실측). Linux의 `/proc/<pid>/environ`은 실측하지 않았다.
+    - 명령의 `set.HOME`을 쓰지 못하면(`HOME`이 절대 경로가 아닌 채로 host가 뜬 경우) Codex 명령은 빈 폴더를 `HOME`으로 쓴다. 안전 쪽이지만 rustup 같은 도구는 못 찾는다.
+
+**운영 메모(#2630 F4).** **샌드박스 Codex는 커밋할 수 없다.**
+- `.git`이 보호 메타데이터라 `git commit`은 샌드박스 밖으로 나가는 요청(승격)이 된다. R1 동안 권한 다리가 거부한다.
+- 원격 Codex 세션의 결과는 작업 폴더의 변경으로 남는다. 커밋은 소유자가 한다.
+- `GIT_CONFIG_*` 경화는 여전히 남은 일이다.
 
 ### 8.2 Claude — 고정 모드 밖에서 열린 세션의 시작 직후 교정
 

@@ -17,7 +17,12 @@
 //!   --set-mode-error     answer every `session/set_mode` with an error
 //!   --set-mode-silent    take the mode and answer `{}` without reporting it
 //!                        (codex-acp 1.13.0 does this)
-//!   --set-mode-reports ID  answer `{}` but report ID as the mode
+//!   --set-mode-reports ID[,ID…]
+//!                        answer `{}` but report each ID as the mode, in order
+//!                        (the last one is the mode the stub says it is in)
+//!   --set-mode-reports-late
+//!                        answer `{}` first and send the reports 300 ms later,
+//!                        so they arrive after the host has its answer
 //!   --permission         during each prompt, ask `session/request_permission`
 //!   --escape-mode ID     during each prompt, report `current_mode_update` → ID
 //!   --escape-via-config  report that escape as `config_option_update` instead
@@ -40,6 +45,10 @@
 //!
 //! Anything else on the command line (the host's isolation arguments) is
 //! accepted and recorded.
+//!
+//! At start it records the NAMES (never the values) of its environment, and
+//! of the environment a command it starts sees (`/usr/bin/env`, the way an
+//! agent's own tool inherits the agent's environment) — #2630 F1.
 
 use std::fs::OpenOptions;
 use std::io::{BufRead as _, Write as _};
@@ -64,6 +73,7 @@ struct Options {
     set_mode_error: bool,
     set_mode_silent: bool,
     set_mode_reports: Option<String>,
+    set_mode_reports_late: bool,
     agent_name: Option<String>,
 }
 
@@ -86,6 +96,7 @@ fn parse() -> Options {
         set_mode_error: false,
         set_mode_silent: false,
         set_mode_reports: None,
+        set_mode_reports_late: false,
         agent_name: None,
     };
     let mut args = std::env::args().skip(1);
@@ -105,6 +116,7 @@ fn parse() -> Options {
             "--set-mode-error" => options.set_mode_error = true,
             "--set-mode-silent" => options.set_mode_silent = true,
             "--set-mode-reports" => options.set_mode_reports = args.next(),
+            "--set-mode-reports-late" => options.set_mode_reports_late = true,
             "--agent-name" => options.agent_name = args.next(),
             "--split-by-status" => options.split_by_status = true,
             "--pem-flood" => {
@@ -200,8 +212,23 @@ impl Stub {
             return;
         }
         self.current_mode = requested.clone();
-        if !self.options.set_mode_silent {
-            let reported = self.options.set_mode_reports.clone().unwrap_or(requested);
+        let reports: Vec<String> = if self.options.set_mode_silent {
+            Vec::new()
+        } else {
+            match &self.options.set_mode_reports {
+                Some(list) => list.split(',').map(str::to_string).collect(),
+                None => vec![requested],
+            }
+        };
+        if let Some(last) = reports.last() {
+            // What the stub says it is in is what it last reported.
+            self.current_mode = last.clone();
+        }
+        if self.options.set_mode_reports_late {
+            self.respond(id, json!({}));
+            std::thread::sleep(std::time::Duration::from_millis(300));
+        }
+        for reported in reports {
             self.update(
                 &session_id,
                 json!({"sessionUpdate": "config_option_update", "configOptions": [
@@ -210,7 +237,9 @@ impl Stub {
                 ]}),
             );
         }
-        self.respond(id, json!({}));
+        if !self.options.set_mode_reports_late {
+            self.respond(id, json!({}));
+        }
     }
 
     fn prompt(&mut self, id: &Value, params: &Value) {
@@ -504,12 +533,40 @@ fn main() {
         "argv": std::env::args().skip(1).collect::<Vec<_>>(),
         "cwd": std::env::current_dir().map(|dir| dir.display().to_string()).unwrap_or_default(),
         "env_has_momo": std::env::vars().any(|(key, _)| key.starts_with("MOMO_")),
+        // Names only: a value never reaches the record.
+        "env_keys": env_names(std::env::vars().map(|(key, _)| key)),
+        "command_env_keys": command_env_names(),
         "env_isolation": {
             "INITIAL_AGENT_MODE": std::env::var("INITIAL_AGENT_MODE").ok(),
             "CODEX_CONFIG": std::env::var("CODEX_CONFIG").ok(),
             "CODEX_HOME": std::env::var("CODEX_HOME").ok(),
             "TMPDIR": std::env::var("TMPDIR").ok(),
+            "HOME": std::env::var("HOME").ok(),
         },
     }));
     stub.serve();
+}
+
+fn env_names(names: impl Iterator<Item = String>) -> Vec<String> {
+    let mut names: Vec<String> = names.collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// The variable names a command this agent starts sees: `/usr/bin/env`
+/// inherits the stub's environment exactly as an agent's shell tool inherits
+/// the agent's. `None` when it cannot run.
+fn command_env_names() -> Option<Vec<String>> {
+    let output = std::process::Command::new("/usr/bin/env")
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    Some(env_names(text.lines().filter_map(|line| {
+        let (name, _) = line.split_once('=')?;
+        (!name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+            .then(|| name.to_string())
+    })))
 }
