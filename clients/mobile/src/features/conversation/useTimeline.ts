@@ -707,7 +707,9 @@ export function useTimeline(
         if (!recovered) {
           // A non-recovered (re)subscribe may have missed publications: pull the
           // authoritative tail from Postgres. Safe on first subscribe too.
-          backfillAfter(channelId)
+          // 방을 옮기면(또는 다시 읽으면) 이 효과의 `cancelled` 가 선다. 그 뒤에 온
+          // 답은 새 방의 목록에 섞이면 안 된다 (#2632 O-2 — `catchUp` 과 같은 가드).
+          backfillAfter(channelId, () => !cancelled)
             .then(count => {
               if (cancelled || isFirst) return;
               setResume(r => ({...r, lastBackfillCount: count}));
