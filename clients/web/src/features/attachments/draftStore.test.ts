@@ -232,6 +232,48 @@ describe("upload orchestration", () => {
     expect(readSurface(KEY).drafts[0].status).toBe("uploaded");
   });
 
+  it("retries a refused upload URL with a fresh session, never the spent one (#2615)", async () => {
+    // 서버의 업로드 URL은 1회용이고 만료된다(#2615). 소비·만료된 URL은 404다.
+    // 재시도가 옛 URL로 다시 PUT하면 영원히 404이므로, 세션부터 새로 연다.
+    createAttachmentUpload
+      .mockResolvedValueOnce({
+        id: "att-spent",
+        status: "pending",
+        uploadUrl: "https://archive.invalid/spent",
+      })
+      .mockResolvedValueOnce({
+        id: "att-fresh",
+        status: "pending",
+        uploadUrl: "https://archive.invalid/fresh",
+      });
+    const refused = manualUpload();
+    addFiles(KEY, TARGET, [file("a.log", 8)]);
+    await settle();
+    refused.fail("status", 404);
+    await settle();
+    expect(readSurface(KEY).drafts[0]).toMatchObject({
+      status: "failed",
+      issue: "unavailable",
+    });
+
+    const retried = manualUpload();
+    retryDraft(KEY, TARGET, readSurface(KEY).drafts[0].localId);
+    await settle();
+    retried.finish();
+    await settle();
+    await settle();
+
+    expect(readSurface(KEY).drafts[0].status).toBe("uploaded");
+    expect(createAttachmentUpload).toHaveBeenCalledTimes(2);
+    expect(putAttachmentBytes.mock.calls.map(([url]) => url)).toEqual([
+      "https://archive.invalid/spent",
+      "https://archive.invalid/fresh",
+    ]);
+    expect(completeAttachmentUpload.mock.calls).toEqual([
+      ["ws", "ch", "att-fresh"],
+    ]);
+  });
+
   it("aborts the byte transfer when the chip is removed", async () => {
     const upload = manualUpload();
     addFiles(KEY, TARGET, [file("a.log", 8)]);

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # SH-2 / #1926 — public edge template: site address + CSP connect-src env,
 # ACME fail-closed when unset, wildcard rejection, local deny order.
+# #2609 ⑥ — local-archive upload route parity on every edge Caddyfile.
 # bats is not in the toolchain; this file is the suite.
 set -euo pipefail
 
@@ -330,5 +331,302 @@ fi
 grep_count="$( { git grep -n 'app.oor7.com' || true; } | wc -l | tr -d ' ')"
 printf '[test-public-edge] repo grep app.oor7.com count=%s\n' "$grep_count"
 pass "public Caddyfile template has 0 app.oor7.com hits (repo count printed)"
+
+# ---------------------------------------------------------------------------
+# ⑥ local-archive upload route parity on every edge Caddyfile (#2609).
+#
+# The generator writes MOMO_DRIVE_ARCHIVE_BACKEND=local for every install —
+# loopback, T1 public origin (fly · aws-lightsail · gcp-vm · VPS),
+# host-network and Railway — so the upload capability URL is always
+# `$origin/__momo_stub/drive/uploads/{token}` (ADR-0169, momo-drive local.rs).
+# An edge without a /__momo_stub/* route hands that PUT to the SPA catch-all,
+# whose file_server answers 405: upload 405 → complete 404 → send 409, and
+# the desktop's preflight OPTIONS 405. Measured on Railway (#2205) and then on
+# this T1 template (#2609); each time the edge files were guarded by different
+# tests and none of them asserted this route.
+#
+# What this section asserts, on the rendered `caddy adapt` JSON (what Caddy
+# actually serves from, so file order and formatting do not matter):
+#   * the edge set is DISCOVERED — every tracked `infra/**/Caddyfile*` — not
+#     listed, so a new platform edge cannot sit outside the table (the #2297
+#     blind spot);
+#   * on every edge /__momo_stub/* is a sibling of /v1/* in the site's handle
+#     table (not nested in the SPA handle), matched by path alone — any method,
+#     because the desktop (tauri origin) PUT is cross-origin and its OPTIONS
+#     preflight must reach the api's CORS layer — and its route body is the
+#     /v1/* body: same upstream, same header_up lines, no rewrite;
+#   * every edge routes the same set of paths the way it routes /v1/*.
+# Each property has a scratch-copy RED below; committed files are untouched.
+#
+# Neighbouring guards own the rest and are deliberately not repeated here:
+#   clients/web/gates/gate-csp-deploy.mjs TARGETS   response headers + CSP
+#     (web lane, a listed set: infra/rust/Caddyfile · Caddyfile.local ·
+#      Caddyfile.railway — Caddyfile.host-network is not in it)
+#   scripts/tests/test_webhook_inbound_contract.sh  /hooks/* line shape and
+#     the per-file X-Forwarded-For allowlist (the same three files)
+#   scripts/verify_public_edge_centrifugo_contract.sh  /v1/centrifugo/* is an
+#     exclusive 403 before /v1/* (infra/rust/Caddyfile; Railway via the
+#     fixture root in test_railway_template.sh)
+# ---------------------------------------------------------------------------
+EDGE_ENV_ARGS=(
+  -e "OORT_SITE_ADDRESS=${FIXTURE_HOST}"
+  -e "OORT_CSP_CONNECT_SRC=${FIXTURE_CSP}"
+  -e "PORT=8080"
+  -e "MOMO_WEB_PORT=18088"
+  -e "MOMO_RUST_API_PORT=18080"
+  -e "CENT_HOST_PORT=18000"
+)
+edge_adapt() {
+  # usage: edge_adapt <Caddyfile> <out.json>. Fed on stdin: scratch copies live
+  # in TMPDIR, which Colima does not share into its VM.
+  docker run --rm -i "${EDGE_ENV_ARGS[@]}" "$CADDY_IMAGE" \
+    sh -c 'cat >/tmp/Caddyfile && caddy adapt --config /tmp/Caddyfile --adapter caddyfile' \
+    <"$1" >"$2" 2>"$2.err"
+}
+
+EDGE_DIR="$TMP_ROOT/edge-parity"
+mkdir -p "$EDGE_DIR"
+EDGE_MANIFEST="$EDGE_DIR/committed.tsv"
+: >"$EDGE_MANIFEST"
+edge_count=0
+while IFS= read -r edge_file; do
+  [ -n "$edge_file" ] || continue
+  edge_count=$((edge_count + 1))
+  edge_json="$EDGE_DIR/committed-${edge_count}.json"
+  edge_adapt "$ROOT/$edge_file" "$edge_json" || {
+    cat "$edge_json.err" >&2
+    fail "caddy adapt of ${edge_file} failed (the fixture env must cover every placeholder an edge reads)"
+  }
+  printf '%s\t%s\n' "$edge_file" "$edge_json" >>"$EDGE_MANIFEST"
+done <<EOF
+$(git ls-files -- infra | awk -F/ '$NF ~ /^Caddyfile/' | LC_ALL=C sort)
+EOF
+[ "$edge_count" -ge 4 ] || fail "edge discovery found ${edge_count} tracked infra/**/Caddyfile* (expected ≥ 4: rust ×3 + railway)"
+grep -Fq "$(printf 'infra/rust/Caddyfile\t')" "$EDGE_MANIFEST" || fail "edge discovery missed infra/rust/Caddyfile"
+
+cat >"$EDGE_DIR/edge_parity.py" <<'PY'
+"""Verdict over rendered `caddy adapt` JSON; argv[1] = TSV of <label>\t<json>."""
+import json
+import sys
+
+STUB = "/__momo_stub/*"
+API = "/v1/*"
+
+
+def path_only(route):
+    """The one path of a route matched by path alone, else None."""
+    match = route.get("match")
+    if not isinstance(match, list) or len(match) != 1:
+        return None
+    only = match[0]
+    if not isinstance(only, dict) or set(only) != {"path"} or len(only["path"]) != 1:
+        return None
+    return only["path"][0]
+
+
+def mentions(route, path):
+    return any(path in (m.get("path") or []) for m in route.get("match") or [] if isinstance(m, dict))
+
+
+def body(route):
+    return {key: value for key, value in route.items() if key != "match"}
+
+
+def route_lists(node):
+    """Every `routes` array in the document, outermost first."""
+    if isinstance(node, dict):
+        if isinstance(node.get("routes"), list):
+            yield node["routes"]
+        for value in node.values():
+            yield from route_lists(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from route_lists(value)
+
+
+def handlers(route):
+    """(handler chain, reverse_proxy upstreams, reverse_proxy header ops) of a route."""
+    chain, dials, header_ops = [], [], []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if "handler" in node:
+                chain.append(node["handler"])
+            if node.get("handler") == "reverse_proxy":
+                dials.extend(u.get("dial") for u in node.get("upstreams") or [])
+                header_ops.append(node.get("headers") or {})
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(route.get("handle"))
+    return chain, dials, header_ops
+
+
+def upstreams(route):
+    return handlers(route)[1]
+
+
+def body_difference(stub, api):
+    names = ("handlers", "upstream", "header_up")
+    parts = ["%s %s vs %s" % (name, json.dumps(mine), json.dumps(theirs))
+             for name, mine, theirs in zip(names, handlers(stub), handlers(api)) if mine != theirs]
+    if stub.get("group") != api.get("group"):
+        parts.append("handle group %r vs %r" % (stub.get("group"), api.get("group")))
+    return "; ".join(parts) or "other route keys"
+
+
+def verdict(label, doc):
+    problems = []
+    tables = [routes for routes in route_lists(doc) if any(path_only(r) == API for r in routes)]
+    if len(tables) != 1:
+        return ["%s: expected one site handle table holding %s, found %d" % (label, API, len(tables))], None
+    routes = tables[0]
+    api = next(r for r in routes if path_only(r) == API)
+    siblings = [r for r in routes if mentions(r, STUB)]
+    anywhere = [r for table in route_lists(doc) for r in table if mentions(r, STUB)]
+    if not siblings:
+        if anywhere:
+            problems.append(
+                "%s: %s is nested, not a sibling of %s in the site handle table — the SPA "
+                "handle's try_files/file_server run around it" % (label, STUB, API))
+        else:
+            problems.append(
+                "%s: %s is missing — the SPA catch-all answers the upload PUT 405 "
+                "(upload 405 → complete 404 → send 409, #2609)" % (label, STUB))
+    elif len(siblings) != 1:
+        problems.append("%s: %d routes mention %s (want exactly 1)" % (label, len(siblings), STUB))
+    else:
+        stub = siblings[0]
+        if path_only(stub) != STUB:
+            problems.append(
+                "%s: %s matcher is not path-only: %s — a method/host restriction drops the "
+                "desktop preflight (OPTIONS) onto the SPA handle" % (label, STUB, json.dumps(stub.get("match"))))
+        if body(stub) != body(api):
+            problems.append(
+                "%s: %s route body differs from %s — %s (required: same upstream, same header_up, no rewrite)"
+                % (label, STUB, API, body_difference(stub, api)))
+    api_paths = sorted(path_only(r) for r in routes if path_only(r) and body(r) == body(api))
+    return problems, {"api_paths": api_paths, "upstream": upstreams(api)}
+
+
+problems = []
+views = []
+for raw in open(sys.argv[1], encoding="utf-8"):
+    label, path = raw.rstrip("\n").split("\t", 1)
+    found, view = verdict(label, json.load(open(path, encoding="utf-8")))
+    problems.extend(found)
+    if view is not None:
+        views.append((label, view))
+        if not found:
+            print("[edge-parity] %s: %s → %s, sibling of %s, path-only, same route body; api paths %s"
+                  % (label, STUB, ",".join(view["upstream"]), API, " ".join(view["api_paths"])))
+if views:
+    reference_label, reference = views[0]
+    for label, view in views[1:]:
+        if view["api_paths"] != reference["api_paths"]:
+            problems.append(
+                "parity: %s routes %s like %s, %s routes %s" % (
+                    label, view["api_paths"], API, reference_label, reference["api_paths"]))
+for problem in problems:
+    print("[edge-parity] RED %s" % problem)
+if problems:
+    raise SystemExit(1)
+print("[edge-parity] %d edges route the same api paths: %s" % (len(views), " ".join(views[0][1]["api_paths"])))
+PY
+
+python3 "$EDGE_DIR/edge_parity.py" "$EDGE_MANIFEST" || \
+  fail "local-archive upload route parity RED on the committed edges (see [edge-parity] lines)"
+pass "every tracked edge Caddyfile (${edge_count}) routes /__momo_stub/* like /v1/*: sibling, path-only, same upstream and header_up; same api path set on every edge"
+
+cat >"$EDGE_DIR/sabotage.py" <<'PY'
+"""Write one sabotaged copy of an edge file: argv = mode src dst."""
+import re
+import sys
+from pathlib import Path
+
+mode, src, dst = sys.argv[1:4]
+text = Path(src).read_text(encoding="utf-8")
+block_re = re.compile(r"^\thandle /__momo_stub/\* \{\n(?:\t\t.*\n)*?\t\}\n", re.M)
+blocks = block_re.findall(text)
+if len(blocks) != 1:
+    raise SystemExit("sabotage anchor: %s holds %d top-level /__momo_stub/* blocks (want 1)" % (src, len(blocks)))
+block = blocks[0]
+opener = "\thandle /__momo_stub/* {\n"
+if mode == "removed":
+    out = block_re.sub("", text)
+elif mode == "nested":
+    spa = "\thandle {\n\t\troot * /srv/web\n"
+    if text.count(spa) != 1:
+        raise SystemExit("sabotage anchor: SPA handle not found in %s" % src)
+    moved = "".join("\t" + line for line in block.splitlines(True))
+    out = block_re.sub("", text).replace(spa, spa + moved, 1)
+elif mode == "method-put":
+    out = text.replace(opener, "\t@momo_stub_put {\n\t\tpath /__momo_stub/*\n\t\tmethod PUT\n\t}\n"
+                       "\thandle @momo_stub_put {\n", 1)
+elif mode == "strip-prefix":
+    out = text.replace(opener, opener + "\t\turi strip_prefix /__momo_stub\n", 1)
+elif mode == "wrong-upstream":
+    moved = re.sub(r"reverse_proxy \S+", "reverse_proxy centrifugo:8000", block, count=1)
+    out = text.replace(block, moved, 1)
+elif mode == "no-header_up":
+    moved = re.sub(r"^\t\t\theader_up .*\n", "", block, flags=re.M)
+    if moved == block:
+        raise SystemExit("sabotage anchor: no header_up lines in the %s block" % src)
+    out = text.replace(block, moved, 1)
+else:
+    raise SystemExit("unknown sabotage mode %s" % mode)
+if out == text:
+    raise SystemExit("sabotage %s changed nothing in %s" % (mode, src))
+Path(dst).write_text(out, encoding="utf-8")
+PY
+
+edge_sabotage() {
+  # usage: edge_sabotage <edge file> <mode> <phrase the RED must name> [<second phrase>]
+  local target="$1" mode="$2" want="$3" want2="${4:-}" tag variant out ec
+  tag="$(printf '%s-%s' "$target" "$mode" | tr '/.' '__')"
+  variant="$EDGE_DIR/${tag}.Caddyfile"
+  python3 "$EDGE_DIR/sabotage.py" "$mode" "$ROOT/$target" "$variant" || \
+    fail "sabotage ${mode} on ${target}: could not build the scratch copy"
+  edge_adapt "$variant" "$EDGE_DIR/${tag}.json" || {
+    cat "$EDGE_DIR/${tag}.json.err" >&2
+    fail "sabotage ${mode} on ${target}: caddy adapt of the scratch copy failed"
+  }
+  awk -F'\t' -v target="$target" -v json="$EDGE_DIR/${tag}.json" \
+    'BEGIN { OFS = "\t" } $1 == target { $2 = json } { print }' \
+    "$EDGE_MANIFEST" >"$EDGE_DIR/${tag}.tsv"
+  set +e
+  out="$(python3 "$EDGE_DIR/edge_parity.py" "$EDGE_DIR/${tag}.tsv" 2>&1)"
+  ec=$?
+  set -e
+  [ "$ec" -ne 0 ] || fail "sabotage ${mode} on ${target} still PASSED — the parity check is not load-bearing"
+  for phrase in "$want" ${want2:+"$want2"}; do
+    printf '%s\n' "$out" | grep -F "RED" | grep -Fq "$phrase" || {
+      printf '%s\n' "$out" >&2
+      fail "sabotage ${mode} on ${target} went RED without naming '${phrase}'"
+    }
+  done
+  printf '[test-public-edge] sabotage %-14s %-33s → %s\n' "$mode" "$target" \
+    "$(printf '%s\n' "$out" | grep -F "RED" | grep -F "$want" | head -1 | sed 's/^\[edge-parity\] //')"
+}
+
+sabotage_count=0
+while IFS="$(printf '\t')" read -r edge_file _json; do
+  # Removing the block must fail both the per-edge check and the cross-edge set.
+  edge_sabotage "$edge_file" removed "is missing" "parity:"
+  sabotage_count=$((sabotage_count + 1))
+  if grep -Eq "$(printf '^\t\t\theader_up ')" "$ROOT/$edge_file"; then
+    edge_sabotage "$edge_file" no-header_up "route body differs"
+    sabotage_count=$((sabotage_count + 1))
+  fi
+done <"$EDGE_MANIFEST"
+edge_sabotage infra/rust/Caddyfile nested "is nested"
+edge_sabotage infra/rust/Caddyfile method-put "not path-only"
+edge_sabotage infra/rust/Caddyfile strip-prefix "route body differs"
+edge_sabotage infra/rust/Caddyfile wrong-upstream "route body differs"
+sabotage_count=$((sabotage_count + 4))
+pass "sabotage (${sabotage_count} scratch copies): block removed on each edge, header_up dropped, nested in the SPA handle, PUT-only matcher, strip_prefix, wrong upstream → RED; committed edges untouched"
 
 printf '[test-public-edge] PASS complete\n'

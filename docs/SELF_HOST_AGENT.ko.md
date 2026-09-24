@@ -384,12 +384,15 @@ scripts/self_host_env.sh --public-origin https://<host>
 4. `--compose` 는 canonical 파일 집합을 바꿀 수 없다. **공개** 오버레이는
    그 DNS를 소유한 기계에서만 켠다. 빈 `OORT_SITE_ADDRESS` 는 compose /
    `caddy validate` 를 실패시킨다 — ACME 오발 브레이크다. 노트북에서 이
-   오버레이를 올리지 마라.
+   오버레이를 올리지 마라. `local.override.yml` 은 집합에 남긴다(첨부 보관소
+   볼륨과 doctor 가 요구하는 `web` 서비스). 빠지면 api 가 보관소 없이 다시
+   만들어져 기동을 거부한다(#2609, 실측).
 
 ```sh
 ENV_FILE=infra/rust/local.secrets.env
 docker compose --env-file "$ENV_FILE" \
   -f infra/rust/docker-compose.rust.yml \
+  -f infra/rust/local.override.yml \
   -f infra/rust/caddy.override.yml up -d
 ```
 

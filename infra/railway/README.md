@@ -25,7 +25,7 @@ moves, update all of them in the same change
 |---|---|---|---|---|
 | **postgres** | `pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7…` (compose pin) | image default | `/var/lib/postgresql` | no |
 | **centrifugo** | `centrifugo/centrifugo:v6@sha256:8ba0c944…` (compose pin) | `centrifugo` | — | no — Caddy `/connection/*` |
-| **api** | `ghcr.io/yeomyeonggeori/oort@sha256:…` | `/bin/sh -c '… exec setpriv … momo-rust-entrypoint api'` + pre-deploy | `/var/lib/oort/drive` | no — Caddy `/v1/*`, `/hooks/*`, `/healthz` |
+| **api** | `ghcr.io/yeomyeonggeori/oort@sha256:…` | `/bin/sh -c '… exec setpriv … momo-rust-entrypoint api'` + pre-deploy | `/var/lib/oort/drive` | no — Caddy `/v1/*`, `/hooks/*`, `/__momo_stub/*`, `/healthz` |
 | **relay** | same image | `momo-rust-entrypoint relay` | — | no |
 | **webhook-sender** | same image | `momo-rust-entrypoint webhook-sender` | — | no |
 | **agent-worker** | same image | `momo-rust-entrypoint agent-worker` | — | no |
@@ -168,7 +168,7 @@ Railway terminates TLS and hands Caddy plain HTTP (`Caddyfile.railway`:
 `{ http_port {$PORT} }` and `http://{$OORT_SITE_ADDRESS}`). Caddy without
 `trusted_proxies` overwrites the incoming `X-Forwarded-Proto` with the scheme it
 received (`http`), and the api derives `realtimeWebSocketUrl` and the QR
-device-link origin from that header (ADR-0167). So the three
+device-link origin from that header (ADR-0167). So the four
 `reverse_proxy api.railway.internal:8080` blocks set `header_up
 X-Forwarded-Proto https` — deterministic, because a Railway public domain is
 always TLS. Do not "fix" realtime with an absolute
@@ -179,7 +179,7 @@ off the device-link SAS requirement (`is_public_origin_mode()` is true only for
 
 ### Client IP: the per-IP limits and what feeds them
 
-The same three blocks set `header_up X-Forwarded-For {http.request.header.X-Real-IP}`.
+The same four blocks set `header_up X-Forwarded-For {http.request.header.X-Real-IP}`.
 The api keys its per-IP limits on `rate_limit::client_ip`: the first
 `X-Forwarded-For` value, or else the socket peer.
 
@@ -251,17 +251,27 @@ closed and switch the edge configuration as below.
    ```
    	log {
    		output stdout
-   		format json
+   		format filter {
+   			wrap json
+   			fields {
+   				request>uri delete
+   			}
+   		}
    	}
    ```
-   redeploy caddy, send a few requests, and read `"remote_ip"` (the
+   The filter drops the request URI: upload capability URLs
+   (`/__momo_stub/drive/uploads/<capability>`) and `/hooks/<token>` are
+   secrets, and this step needs only `remote_ip` (#2609 — measured: a plain
+   `format json` access log wrote the capability on every request; with the
+   filter the access log has no `uri` field and still has `remote_ip`).
+   Redeploy caddy, send a few requests, and read `"remote_ip"` (the
    `{remote_host}` of each request) in the caddy logs, e.g.
    `railway logs --service caddy | grep -o '"remote_ip":"[^"]*"' | sort | uniq -c`.
    Community reports say `100.0.0.0/8` (unofficial). Remove the `log` block
    afterwards.
 2. If the forged `X-Forwarded-For` in step 5 never won (the edge strips it and
    its first value is the client — Railway's own advice), trust the edge and
-   drop the three `header_up X-Forwarded-For` lines:
+   drop the four `header_up X-Forwarded-For` lines:
    ```
    {
    	http_port {$PORT}
@@ -285,7 +295,7 @@ closed and switch the edge configuration as below.
    	}
    }
    ```
-   and in each of the three api blocks
+   and in each of the four api blocks
    `header_up X-Forwarded-For {client_ip}`. Verified locally: for both
    `203.0.113.7` and a forged `198.51.100.9, 203.0.113.7` the api receives
    exactly `203.0.113.7`.
@@ -318,6 +328,11 @@ runs it as is.
 Drive (attachments): the generator sets `MOMO_DRIVE_ARCHIVE_BACKEND=local` and
 `MOMO_DRIVE_LOCAL_DIR=/var/lib/oort/drive`. Give api a volume at
 `/var/lib/oort/drive`; without it attachments disappear on every redeploy.
+The client uploads with a same-origin `PUT` to
+`https://<domain>/__momo_stub/drive/uploads/<capability>` (ADR-0169), so
+`Caddyfile.railway` proxies `/__momo_stub/*` to the api; without that handle
+the SPA handle takes the `PUT` and answers 405, and the upload never completes
+(measured on Railway: upload 405 → complete 404 → message send 409).
 Railway volumes mount root-owned and the image runs as uid 10001, which fails
 the drive check at boot (`MOMO_DRIVE_LOCAL_DIR could not be created or is not
 writable`). Pre-deploy cannot fix it (no volumes there). So api runs with
