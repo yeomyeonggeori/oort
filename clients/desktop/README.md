@@ -49,9 +49,12 @@ src-tauri/
   src/keychain.rs     # refresh token in the OS credential store
   src/updater.rs      # check / install / relaunch over the minisign manifest
   src/shell_contract.rs # tests: what capabilities/ + tauri.conf.json owe the web
-                      # bundle's drag regions and file drops (#2671)
+                      # bundle's drag regions and file drops (#2671) and the
+                      # notification plugin's boot probe (#2676)
   capabilities/       # core:default + core:window:allow-start-dragging for the
-                      # web's data-tauri-drag-region top bars (#2671); app
+                      # web's data-tauri-drag-region top bars (#2671) +
+                      # notification:allow-is-permission-granted for the
+                      # notification plugin's page script (#2676); app
                       # commands need no permission entry
   icons/              # generated via `cargo tauri icon app-icon.png`
 ```
@@ -94,9 +97,9 @@ interface HostedAgentProbe {
 | `deep_link_take_pending` | — | `DeepLinkJoin[]` | Drains links buffered before the webview subscribed **and** marks it ready. Call once. |
 | `discovery_start` | `{ timeoutMs?: number }` | `void` \| error | Default 4000 ms, capped at 30000. Results arrive as events. |
 | `discovery_stop` | — | `void` | Idempotent. |
-| `notification_permission` | — | `"granted" \| "denied" \| "default"` | No prompt. |
-| `notification_request_permission` | — | same | Prompts if the platform needs it. Desktop always grants. |
-| `notification_show` | `{ title: string, body?: string }` | `boolean` | `false` = not shown because permission is not granted. |
+| `notification_permission` | — | `"granted" \| "denied" \| "default"` | No prompt. Desktop: always `"granted"` — the plugin does not read the OS setting (#2676). |
+| `notification_request_permission` | — | same | Desktop: always `"granted"`, no prompt. macOS asks on the first `notification_show` instead (#2676). |
+| `notification_show` | `{ title: string, body?: string }` | `boolean` | `false` = not shown because permission is not granted. Desktop never returns `false`: a banner macOS drops is still `true` (#2676). |
 | `keychain_available` | — | `boolean` | Probes the credential store. |
 | `keychain_load_refresh_token` | — | `string \| null` | |
 | `keychain_store_refresh_token` | `{ token: string }` | `void` \| error | Rejects an empty token. |
@@ -299,6 +302,38 @@ called at the moment a notification is first worth showing — an OS permission
 dialog at boot, before anyone has a reason to want notifications, is the fastest
 way to earn a permanent "no".
 
+**The capability and the plugin's page script (#2676).** App commands are not
+gated by `capabilities/` (there is no app ACL manifest), so the banners never
+needed a `notification:*` grant. The plugin itself still injects a script into
+every page: it replaces `window.Notification` and, everywhere but Windows, asks
+`plugin:notification|is_permission_granted` once at document start without a
+`.catch`. Before #2676 that probe was refused and every launch logged
+`notification.is_permission_granted not allowed …` as an unhandled rejection
+(a release build words it `Command plugin:notification|is_permission_granted
+not allowed by ACL` — tauri 2.11.5 source, not measured). The capability now
+grants that one read-only permission and nothing else: `notify` and
+`request_permission` stay refused, so no page script can post a banner or raise
+a prompt. Nothing in the web bundle reads `window.Notification`.
+
+**What macOS actually does (measured 2026-09-24, macOS 27.0, see Measured).**
+The plugin's desktop half answers `Granted` to every permission question; the
+OS decides on the first banner instead.
+
+- The first `notification_show` from a bundle macOS has not seen raises the
+  system alert 「'<app>' 알림 — 경고, 사운드, 아이콘 배지가 알림에 포함될 수
+  있습니다」 with 옵션 → 허용 / 허용 안 함. That first notification is not shown
+  as a banner (`usernoted`: `authorizationStatus: Denied` → `not visible`);
+  after 허용 it appears in Notification Center's list.
+- After 허용, banners show while oort is in the background. While oort is the
+  front app macOS files the notification in the list without a banner — the
+  web rail's `focused` skip means it is never sent then anyway.
+- After 허용 안 함, every banner is dropped, while `notification_permission`
+  still says `granted` and `notification_show` still returns `true`. The app
+  cannot see the OS decision (Known gaps).
+- The answer is kept per bundle identifier and signing requirement: a rebuild
+  with the same identifier and signing identity kept it, a new identifier was
+  asked again.
+
 **Which events notify is the web layer's decision, and it now has an owner:**
 `clients/web/src/features/notifications/` (MOMO-607). The shell is told to show a
 banner for exactly two things — a mention the server recorded, and an approval
@@ -433,6 +468,32 @@ the **release-page zip** installed into `/Applications`, not a local build:
   re-creating the tarball after stapling.
 - mDNS discovery worked in the packaged build (`MacBook-Pro-2.local:28000`).
 
+### 2026-09-24, macOS 27.0 arm64, dev-signed debug bundles (#2676)
+
+`cargo tauri build --debug --bundles app` with `--config` giving each run its
+own bundle identifier, product name and deep-link scheme (the installed
+`app.momo.desktop` and its keychain item untouched — no sign-in), signed
+`Apple Development`. A page probe called the commands directly; the OS side
+was read from `log stream` (`usernoted`, `NotificationCenter`) and the
+`usernoted` database.
+
+- Before (capability without `notification:*`): at load
+  `notification.is_permission_granted not allowed. Permissions associated with
+  this command: notification:allow-is-permission-granted, notification:default`
+  as an unhandled rejection; `window.Notification.permission` stays `default`.
+  `notification_permission` → `granted`, `notification_show` → `true`.
+- First banner of a new bundle → the OS permission alert, that notification
+  not visible; 허용 → next banner `Presenting … as banner` and on screen.
+- After (`notification:allow-is-permission-granted`): no rejection,
+  `Notification.permission` → `granted`, `is_permission_granted` → `true`;
+  `notify` and `request_permission` still refused; banner shown with the
+  identifier's earlier 허용 carried over.
+- 허용 안 함 → `Authorization set … allow: NO`; later banners `not visible`,
+  while `notification_permission` → `granted` and `notification_show` → `true`.
+- Focus: switching to another app fires `blur` (`document.hasFocus()` false),
+  clicking the window fires `focus` — the signals the rail's `focused` rule
+  reads.
+
 ## Known gaps
 
 - **Local release builds do not follow the updater channel (ITO-0 T-D / #1281).**
@@ -486,3 +547,12 @@ the **release-page zip** installed into `/Applications`, not a local build:
 - Notification click routing: see the Notification section. The shell cannot
   report a click, so "click the banner, land on the channel" is an approximation
   on the web side rather than an OS-reported event.
+- **The app cannot see a macOS notification denial (#2676).**
+  `tauri-plugin-notification`'s desktop half answers `Granted` without asking
+  the OS. After 허용 안 함 every banner is dropped silently (measured), while
+  `notification_permission` still says `granted` — so the settings panel
+  (`DesktopNotificationGroup`) shows 켜짐 (from the code; the panel needs
+  sign-in and was not driven). Turning oort off in 시스템 설정 › 알림 should
+  look the same (not measured). The first banner of a fresh install is spent
+  on the OS permission alert. Reading the real state needs a
+  `UNUserNotificationCenter` path in Rust; the plugin has none today.

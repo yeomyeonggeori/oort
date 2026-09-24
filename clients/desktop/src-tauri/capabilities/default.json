@@ -1,7 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: core:default, plus start_dragging for the web bundle's data-tauri-drag-region top bars (#2671). App commands need no entry here.",
+  "description": "Main window: core:default, plus start_dragging for the web bundle's data-tauri-drag-region top bars (#2671), plus the read-only permission probe the notification plugin's page script sends at every launch (#2676). Banners go out through app commands, which need no entry here.",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-start-dragging"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "notification:allow-is-permission-granted"
+  ]
 }
