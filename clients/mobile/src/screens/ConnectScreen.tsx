@@ -32,7 +32,7 @@ import {
 import type {DeviceLinkPrefill} from '@momo/core/features/auth/deepLink';
 import {useCameraPermissions} from 'expo-camera';
 import NetInfo from '@react-native-community/netinfo';
-import React, {useCallback, useEffect, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   KeyboardAvoidingView,
   Linking,
@@ -43,6 +43,9 @@ import {
   Text,
   TextInput,
   View,
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
 import {
   FailureBanner,
@@ -62,6 +65,8 @@ import {useJoinPrefill} from '../deeplink/joinLink';
 import {deviceLinkDevice} from '../features/deviceLink/deviceIdentity';
 import {focusTextInput} from '../features/deviceLink/focusTextInput';
 import {QrScannerSheet} from '../features/deviceLink/QrScannerSheet';
+import {formRevealOffset, type RevealSpan} from '../lib/formReveal';
+import {useReduceMotionRef} from '../lib/useReduceMotion';
 import {isOnlineFromNetInfo} from '../query/queryClient';
 import {SESSION_EXPIRED_NOTICE} from '../session/authGate';
 import {
@@ -100,6 +105,46 @@ import {
 // the iOS IME's composition state so that jamo stopped combining entirely
 // (표준 produced `ㅇㅏㄴㄴㅕㅇㅎㅏㅅㅔㅇㅛ` for 안녕하세요). The invite code and
 // the server address are held to the same rule as the composer will be.
+//
+// ## With the keyboard up, the focused field and the button stay above it (#2678)
+//
+// Measured on an iPhone 13 mini (375×812, Release): with the address typed and
+// the email field focused, the password field sat 26pt under the keyboard's top
+// edge (468) and the 로그인 button 87pt under it. A Maestro `tapOn:
+// password-input` landed on the keyboard, and the repo's login flow typed the
+// password into the EMAIL field. At AX sizes a tap on the next field hit the
+// keyboard outright (AX1: the email field 35pt under), and at AX5 the focused
+// address field itself was 2pt under — the D6 class (ADR-0112): a control the
+// keyboard reaches while the eye cannot.
+//
+// The viewport was right. `KeyboardAvoidingView` sized it exactly: the list's
+// bottom edge stood on the keyboard's top edge (468 = 468). Its known trap —
+// measuring its own frame in PARENT coordinates, see `ConversationLayout` — does
+// not apply here, because this screen is the root of the tree (`App → Gate →
+// ConnectScreen`) and `Screen` starts at the window's top, so parent coordinates
+// ARE window coordinates. What was missing is the scroll: nothing moved the
+// focused field into the viewport the keyboard left, and UIKit's own
+// scroll-to-caret stops at the caret line (the password field was still 3pt
+// under after it).
+//
+// So the form scrolls itself (`formReveal`): the focused field always, whole;
+// the primary button too whenever field and button fit together, moving as
+// little as possible. Everything is in content coordinates the list reports
+// about itself — row `onLayout`, the list's own height, its offset — so there is
+// no keyboard frame to reconcile. It runs when a field takes focus and whenever
+// the list's height changes (the keyboard arriving, or changing type: the URL
+// keyboard is 317pt, the email/password keyboard 344pt with its 암호 bar).
+//
+// **Why not the conversation's `KeyboardPane`.** The pane only translates: it
+// lifts everything by the keyboard's height, and that is right where the content
+// is bottom-anchored (the newest message on the composer). Here it would carry
+// the TOP of the form under the clip — the address field (y 217) would go
+// 344pt up, out of sight, at the very moment it is focused. A form needs the
+// viewport to shrink and the focused row scrolled in; the pane has no such
+// mode, and giving it one is native work. **Why not
+// `automaticallyAdjustKeyboardInsets`:** it scrolls the caret line (+15pt) into
+// view, not the button, and a second thing scrolling the same list is the
+// fight #2604 spent a round untangling.
 //
 // ## What this screen does NOT do when it succeeds
 //
@@ -155,6 +200,80 @@ export default function ConnectScreen({
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
   const fields = useRef<Partial<Record<ConnectField, TextInput | null>>>({});
+
+  // ---- the keyboard's room (#2678, header) --------------------------------
+  // Refs, not state: these change on every scroll frame and every keyboard
+  // travel, and nothing on screen is drawn from them.
+  const scrollRef = useRef<ScrollView>(null);
+  const reduceMotionRef = useReduceMotionRef();
+  const room = useRef<{
+    /** The list's own height — the viewport the keyboard left. */
+    viewport: number;
+    offset: number;
+    /** Each field's row and the primary button, in content coordinates. */
+    rows: Partial<Record<ConnectField | 'action', RevealSpan>>;
+  }>({viewport: 0, offset: 0, rows: {}});
+  const focusedRef = useRef<ConnectField | null>(null);
+
+  const reveal = useCallback(() => {
+    const focused = focusedRef.current;
+    if (focused === null) return;
+    const {viewport, offset, rows} = room.current;
+    const target = formRevealOffset({
+      viewport,
+      offset,
+      field: rows[focused],
+      action: rows.action,
+      // The form's own row gap: the revealed block sits one row away from the
+      // keyboard and from the top edge.
+      margin: space.lg,
+    });
+    if (target === null) return;
+    scrollRef.current?.scrollTo({y: target, animated: !reduceMotionRef.current});
+  }, [reduceMotionRef]);
+
+  /** Row `onLayout`s, one stable function per row. A row that moves re-reveals. */
+  const rowLayout = useMemo(() => {
+    const note = (key: ConnectField | 'action') => (event: LayoutChangeEvent) => {
+      const {y, height} = event.nativeEvent.layout;
+      room.current.rows[key] = {top: y, bottom: y + height};
+      reveal();
+    };
+    return {
+      server: note('server'),
+      code: note('code'),
+      email: note('email'),
+      password: note('password'),
+      action: note('action'),
+    };
+  }, [reveal]);
+
+  const onFormLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      room.current.viewport = event.nativeEvent.layout.height;
+      reveal();
+    },
+    [reveal],
+  );
+
+  const onFormScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      room.current.offset = event.nativeEvent.contentOffset.y;
+    },
+    [],
+  );
+
+  const focused = useCallback(
+    (field: ConnectField) => {
+      focusedRef.current = field;
+      reveal();
+    },
+    [reveal],
+  );
+
+  const blurred = useCallback((field: ConnectField) => {
+    if (focusedRef.current === field) focusedRef.current = null;
+  }, []);
 
   useEffect(() => {
     // The radio, not the server. Knowing there is no network turns a 15-second
@@ -243,6 +362,10 @@ export default function ConnectScreen({
   const toggleMode = useCallback(() => {
     setMode(current => (current === 'join' ? 'signIn' : 'join'));
     setPhase(IDLE);
+    // The invite code row goes away with the join form and reports nothing as it
+    // leaves; a stale row here would be revealed where nothing is.
+    delete room.current.rows.code;
+    if (focusedRef.current === 'code') focusedRef.current = null;
   }, []);
 
   const leaveSasToForm = useCallback(() => {
@@ -481,10 +604,15 @@ export default function ConnectScreen({
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
+          ref={scrollRef}
           style={styles.flex}
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag">
+          keyboardDismissMode="on-drag"
+          onLayout={onFormLayout}
+          onScroll={onFormScroll}
+          scrollEventThrottle={16}
+          testID="connect-form">
           <Sentence style={styles.title}>
             {joining ? '워크스페이스에 참여' : 'oort에 연결'}
           </Sentence>
@@ -547,7 +675,10 @@ export default function ConnectScreen({
             />
           ) : null}
 
-          <Field label="서버 주소" hint="워크스페이스에 초대받은 주소">
+          <Field
+            label="서버 주소"
+            hint="워크스페이스에 초대받은 주소"
+            onLayout={rowLayout.server}>
             <TextInput
               ref={node => {
                 fields.current.server = node;
@@ -571,6 +702,8 @@ export default function ConnectScreen({
               onSubmitEditing={() =>
                 (joining ? fields.current.code : fields.current.email)?.focus()
               }
+              onFocus={() => focused('server')}
+              onBlur={() => blurred('server')}
               testID="server-url-input"
             />
           </Field>
@@ -585,7 +718,7 @@ export default function ConnectScreen({
           ) : null}
 
           {joining ? (
-            <Field label="초대 코드">
+            <Field label="초대 코드" onLayout={rowLayout.code}>
               <TextInput
                 ref={node => {
                   fields.current.code = node;
@@ -599,12 +732,14 @@ export default function ConnectScreen({
                 accessibilityLabel="초대 코드"
                 returnKeyType="next"
                 onSubmitEditing={() => fields.current.email?.focus()}
+                onFocus={() => focused('code')}
+                onBlur={() => blurred('code')}
                 testID="invite-code-input"
               />
             </Field>
           ) : null}
 
-          <Field label="이메일">
+          <Field label="이메일" onLayout={rowLayout.email}>
             <TextInput
               ref={node => {
                 fields.current.email = node;
@@ -619,6 +754,8 @@ export default function ConnectScreen({
               accessibilityLabel="이메일"
               returnKeyType="next"
               onSubmitEditing={() => fields.current.password?.focus()}
+              onFocus={() => focused('email')}
+              onBlur={() => blurred('email')}
               testID="email-input"
             />
           </Field>
@@ -629,7 +766,8 @@ export default function ConnectScreen({
               joining
                 ? '이 워크스페이스에서 쓸 비밀번호를 새로 정합니다'
                 : undefined
-            }>
+            }
+            onLayout={rowLayout.password}>
             <TextInput
               ref={node => {
                 fields.current.password = node;
@@ -644,18 +782,24 @@ export default function ConnectScreen({
               onSubmitEditing={() => {
                 if (canSubmit) void onSubmit();
               }}
+              onFocus={() => focused('password')}
+              onBlur={() => blurred('password')}
               testID="password-input"
             />
           </Field>
 
-          <PrimaryButton
-            label={joining ? '초대 코드로 참여' : '로그인'}
-            busyLabel={joining ? '참여 중' : '로그인 중'}
-            busy={phase.busy}
-            disabled={!canSubmit}
-            onPress={() => void onSubmit()}
-            testID="submit-button"
-          />
+          {/* A plain wrapper, only to report where the button is (#2678). One
+              child in the content's gap chain, as the button alone was. */}
+          <View onLayout={rowLayout.action}>
+            <PrimaryButton
+              label={joining ? '초대 코드로 참여' : '로그인'}
+              busyLabel={joining ? '참여 중' : '로그인 중'}
+              busy={phase.busy}
+              disabled={!canSubmit}
+              onPress={() => void onSubmit()}
+              testID="submit-button"
+            />
+          </View>
 
           {phase.failure ? (
             <FailureBanner
@@ -691,15 +835,18 @@ export default function ConnectScreen({
 function Field({
   label,
   hint,
+  onLayout,
   children,
 }: {
   label: string;
   hint?: string;
+  /** Where this row is, for the keyboard reveal (#2678). */
+  onLayout?: (event: LayoutChangeEvent) => void;
   children: React.ReactNode;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
-    <View style={styles.field}>
+    <View style={styles.field} onLayout={onLayout}>
       <Text style={styles.label}>{label}</Text>
       {children}
       {hint ? <Sentence style={styles.fieldHint}>{hint}</Sentence> : null}
