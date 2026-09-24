@@ -19,6 +19,7 @@ import {
   Text,
   View,
   findNodeHandle,
+  type CellRendererProps,
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -279,13 +280,128 @@ const ARRIVED_PX = 1;
 const PROGRESS_PX = 1;
 
 /**
+ * How long the content must hold still before an entry may call itself
+ * arrived, in ms (#2604).
+ *
+ * An entry that stands on the end of what the list has measured so far is not
+ * at the end of the room: `VirtualizedList` keeps rendering the rest in batches
+ * (`maxToRenderPerBatch` 10 rows per `updateCellsBatchingPeriod` 50ms), and each
+ * batch moves the end. The loop used to declare arrival in the gap between two
+ * batches, release, and leave the next batch to the follow path — a glide whose
+ * first report is still far from the end reads as "the reader left" and
+ * revokes `following`. Measured (Release, a 120-row room): released at 3425.3
+ * of a content that went on growing to 9600.7 for another 402ms, and stopped at
+ * 4986.7.
+ *
+ * The batches in that entry arrived 57–68ms apart once the list sat on the end
+ * (content reports at +160, +226, +294, +361, +428, +490ms). 150ms is more than
+ * two of those gaps, so a quiet window this long means the batches have
+ * stopped rather than paused. Growth is read from EVERY report that carries a
+ * content length (`noteGeometry`), not only `onContentSizeChange`: a scroll
+ * event can carry a length the content report has not announced yet (the same
+ * entry: scroll reports at 1606.3 while the last content report said 1543), and
+ * a window that listened to one of them would miss what the other saw first.
+ *
+ * A device slower than that — batches more than this apart — can still release
+ * between two of them. `holdLanding` covers the entry after it arrives for
+ * that reason (see there).
+ */
+const ENTRY_QUIET_MS = 150;
+
+/**
  * The prepend correction, as one stable object so the prop does not churn.
  *
  * See the header for why `minIndexForVisible` is 0 and why that 0 is
  * load-bearing. It is hoisted here because a send now has to be able to take it
- * OFF — see `KEEPING_POSITION_FIGHTS_A_LONG_SCROLL` below.
+ * OFF — see `KEEPING_POSITION_FIGHTS_A_LONG_SCROLL` below — and taking it off has
+ * a side effect that `TimelineCell` right below exists to cancel (#2586).
  */
 const KEEP_VISIBLE_POSITION = {minIndexForVisible: 0} as const;
+
+// =============================================================================
+// ## 셀은 prop 이 빠져도 제 네이티브 뷰를 지킨다 (#2586, 실측)
+//
+// 증상: 화면보다 긴 첫 페이지에 스레드·승인 행이 섞인 방을 열면 목록 자리가 통째로
+// 빈다. iPhone 13 mini(375pt)·Release·목 서버의 이슈 9행(#배포)에서 잰 값:
+//
+//     진입 수렴 도착 422.7(= 콘텐츠 952 − 창 529.3) → 풀림 → 2ms 뒤 스크롤 보고 1336.3
+//
+// 끝을 913.7pt 넘었고, 렌더 범위는 0–9 전부인데 창에 걸린 행은 0개였다. 이분 탐색의
+// 방 여덟 개가 모두 **꼬리의 y − 첫 셀의 y** 만큼 밀렸다(배포 944 − 30.3, 잡담 2행
+// 521.3 − 371.3 = 150, 승인 카드 둘 521.3 − 90 = 431.3 …) — 행의 종류가 아니라 첫
+// 페이지가 한 배치(10행) 안에 드는가가 갈랐다. 평범한 글 14행만 반대로 24.3pt 모자랐다.
+//
+// 기전 — lldb 로 네이티브 앵커를 직접 읽어서 가렸다:
+//
+//   1. 먼 이동은 `maintainVisibleContentPosition` 을 뗐다 붙인다(`chasingTail`).
+//   2. RN 의 `ScrollView.js:1732` 는 **같은 prop 의 유무로** 콘텐츠 자식의 납작화를
+//      정한다: `collapsableChildren={!preserveChildren}`, `preserveChildren =
+//      maintainVisibleContentPosition != null`. 떼는 커밋에서 `VirtualizedList` 의 셀
+//      래퍼가 전부 납작해져 네이티브 뷰가 Fabric 의 재활용 풀로 가고, 붙이는 커밋에서
+//      그 풀에서 **다른 자리로** 다시 나온다.
+//   3. 네이티브 MVCP(`RCTScrollViewComponentView.mm`)는 앵커를 뷰의 약한 포인터와
+//      그때의 frame 으로 들고 있다. 다시 붙는 트랜잭션은 앵커를 새로 기록하지 않고
+//      (`willMount` 는 아직 빠진 prop 을 본다) 「그 뷰의 지금 frame − 기록한 frame」을
+//      contentOffset 에 clamp 없이 더한다. 그 뷰가 다른 행의 것이 됐는지 보는 tag
+//      검사(:1086)는 `enableViewCulling` 일 때만 돈다 — 기본값은 꺼짐이다.
+//
+//   잰 사슬(잡담 2행): 앵커 = 오늘 구분선의 뷰(tag 740, y 371.33) → 뗀 뒤 그 뷰가 풀에
+//   있다(tag 0, 콘텐츠 밖) → 붙인 트랜잭션에서 **꼬리의 뷰로** 돌아왔다(tag 804, y
+//   521.33) → 오프셋 0 → 150. 9행 방에서는 같은 식으로 944 − 30.3 = 913.7.
+//
+// 그래서 셀 래퍼가 prop 과 무관하게 **언제나 제 뷰를 지킨다**. 쉬는 동안(prop 이 붙어
+// 있는 동안) 래퍼는 원래 뷰였으므로 쉬는 목록은 한 픽셀도 달라지지 않고, 달라지는 것은
+// 이동 동안 래퍼가 풀로 가지 않는다는 것 하나다 — 앵커가 가리키는 뷰가 붙는 순간에도
+// 같은 행이다. 잰 결과: 방 여덟 개 모두 끝에 픽셀 단위로 앉았고, 14행의 −24.3 도 0이
+// 됐다.
+//
+// **토글은 그대로 둔다.** prop 을 아예 떼지 않는 판(실험 A)도 방 여덟 개를 고쳤지만,
+// 그것은 RN-P3 가 잰 먼 이동의 설계를 바꾸는 일이다. 그 판에서는 먼 홉 한 번이
+// 4,808pt 되밀렸다가 다음 홉에 돌아왔고, 전송 뒤 끝에 앉은 목록의 콘텐츠가 ±9.3pt 로
+// 2분 가까이 되풀이 흔들렸다(둘 다 원인 미규명).
+//
+// ## 다시 붙을 때 무엇이 남고, 모드마다 무엇이 막는가 (#2586 R1 H-1·M-1, 실측)
+//
+// 다시 붙는 트랜잭션은 여전히 **뗄 때 기록한 앵커**의 이동량을 더한다. 이제 그 앵커는
+// 같은 행이지만, 그 행이 이동 동안 실제로 움직인 만큼은 그대로 더해진다.
+//
+//   - **진입**(`entry`): 앵커는 0번 셀이다(목록이 오프셋 0 에서 서고 첫 트랜잭션이
+//     기록한다). `VirtualizedList` 는 첫 `initialNumToRender` 개 셀을 렌더 마스크에서
+//     빼지 않으므로(`_createRenderMask`, VirtualizedList.js:531-536) 그 뷰는 재활용되지
+//     않고, 그 위에는 머리뿐이다 — 이동량 0. 그 0 을 깨던 것은 진입 수렴 중에 붙는 옛
+//     페이지였다(오프셋 0 에서 서는 순간 `onStartReached` 가 곧바로 불렀다): 0번 셀이
+//     61번으로 밀려 렌더 창 밖에서 언마운트되고, 머리는 16→36→30.3pt 로 바뀌었다. 잰
+//     값: 120행 방(첫 페이지 50)에서 다시 붙을 때 +849.7pt, 그때의 끝을 36pt 넘었다.
+//     **이제 옛 페이지는 진입이 앉은 뒤에만 부른다**(`olderReady`, #2604) — 진입 동안
+//     0번 셀이 다른 행이 되지 않고 머리도 그대로다. 남는 이동량은 작다: 잰 값(120행·
+//     200행 방, 7/7)으로 0번 셀이 이동 동안 9.3pt 내려가(표본 17.7 → 25.3) 다시 붙을
+//     때 +9.3pt, 끝을 9.3pt 넘었다. 그래서 도착 뒤에는 먼 전송과 같은 `holdLanding` 이
+//     선다 — 첫 틱(+50–67ms)이 끝으로 되돌렸다. 배치가 `ENTRY_QUIET_MS` 보다 뜸한 느린
+//     기기에서 도착 뒤에 자라는 끝도 같은 유지가 받는다.
+//   - **먼 전송**(`send`)·**먼 「최신으로」**(`latest`): 앵커는 이동이 시작될 때 창 맨
+//     위의 행이다. 이동 동안 렌더 창이 끝으로 내려가면 그 행 위의 스페이서가 셀별
+//     기록으로 다시 셈해지고 그 아래 행이 함께 움직인다. 잰 값: 다시 붙을 때 밀린 양
+//     −30.6pt(120행)·−78.3pt(200행). 120행 실행에서 16ms 표집으로 잡은 앵커 행 자체의
+//     이동은 −20.6pt 였다 — 표집 사이의 변화까지 더해진 것이 −30.6 이다.
+//     도착한 목록이 그만큼 끝에서 밀려나므로 `holdLanding` 이 도착 뒤
+//     `LANDING_HOLD_MS` 동안 손가락 없는 이동을 끝으로 되돌린다. 전송이 이 보호를 받는
+//     것은 R1 H-1 부터다 — 「내 메시지는 나에게 온다」.
+//   - **가까운 전송·「최신으로」**: prop 을 떼지 않으므로 낡은 앵커가 없다.
+//   - `converge` 의 넘침 되돌림은 **수렴 라운드 안에서만** 돈다. 다시 붙는 것은 풀린
+//     뒤라서 그 밀림을 보지 못한다.
+//
+// 완전한 수리는 네이티브(앵커의 tag·superview 검사를 컬링과 무관하게)이고, 이 앱의 RN
+// 코어는 prebuilt(`React-Core-prebuilt`)다.
+// =============================================================================
+function TimelineCell({
+  // `VirtualizedList` 가 식별용으로 넘기는 값들 — 네이티브 뷰의 prop 이 아니다.
+  cellKey: _cellKey,
+  index: _index,
+  item: _item,
+  ...cell
+}: CellRendererProps<FoldedTimelineItem>): React.JSX.Element {
+  return <View {...cell} collapsable={false} />;
+}
 
 /**
  * 반응이 하나도 없는 표면이 매번 새로 만들던 빈 맵.
@@ -433,6 +549,16 @@ export function resetTimelineRenderItemCount(): void {
 // TOP). So the pin comes off for the length of the correction and goes straight
 // back on. `__tests__/timelineRender.test.tsx` still holds the resting value,
 // because that is the one every other moment of this list's life uses.
+//
+// **Taking it off has a side effect this note did not know about** (#2586,
+// measured). The same prop decides whether the content view's children are
+// flattened (`ScrollView.js:1732`), so every toggle rebuilt every cell's native
+// view, and the anchor MVCP replayed on the way back belonged to another row —
+// on the nine-row room that scrolled the list 913.7pt past its end, a blank
+// screen. `TimelineCell` keeps each cell's view through the toggle; the note
+// above it has the numbers, the reason the toggle itself stays, and what the
+// re-attach still does per travel (a far send is now held at the end for it —
+// `holdLanding`).
 
 /**
  * How long to leave between correction rounds, in ms.
@@ -476,10 +602,12 @@ function contentEnd(geometry: TimelineGeometry): number {
 }
 
 /**
- * How long 「최신으로」 keeps the list on the end after arriving, in ms (#1892).
- * Long enough to outlast the adjustment measured in `holdLanding` (it came one
- * round after release); short enough that nobody could have meant to scroll in
- * it — and a finger ends it at once anyway (`onScrollBeginDrag`).
+ * How long a travel that took the prop off keeps the list on the end after
+ * arriving, in ms — 「최신으로」 (#1892), a far send (#2586 R1 H-1) and an entry
+ * (#2604). Long enough to outlast the adjustment measured in `holdLanding` (it
+ * came one round after release) and the batches an entry releases between on a
+ * slow device; short enough that nobody could have meant to scroll in it — and
+ * a finger ends it at once anyway (`onScrollBeginDrag`).
  */
 const LANDING_HOLD_MS = 600;
 
@@ -607,6 +735,7 @@ function TimelineInner({
   jumpTarget,
   onJumpMissed,
   onJumpLanded,
+  onReaderTookList,
   jumpPills = false,
   pillsRef,
   tailRef,
@@ -745,6 +874,12 @@ function TimelineInner({
   /** 점프가 실제로 착지했다. 앞선 「못 찾았습니다」 고지를 거두는 신호. */
   onJumpLanded?: () => void;
   /**
+   * 사람이 목록을 잡았다 — 손가락의 `scrollBeginDrag` (#2632 N-1). 대화 화면이
+   * 아직 판정을 기다리는 알림 착지를 접는 신호다: 늦게 온 답이 잡은 목록을 옮기면
+   * 안 된다.
+   */
+  onReaderTookList?: () => void;
+  /**
    * 위 「안읽음으로」·아래 「최신으로」 점프 필을 띄우는가 (#1892).
    *
    * 채널 대화만 켠다 — 웹도 채널 타임라인에만 둔다. 스레드 패널은 짧고 안읽음
@@ -839,10 +974,21 @@ function TimelineInner({
     contentHeight: 0,
     viewportHeight: 0,
   });
+  /** When the content height last changed, in ms — see `ENTRY_QUIET_MS` (#2604). */
+  const lastGrowthAtRef = useRef(0);
 
   const noteGeometry = useCallback(
     (next: Partial<TimelineGeometry>) => {
+      const before = geometryRef.current.contentHeight;
       geometryRef.current = {...geometryRef.current, ...next};
+      // Whichever report carries a new content length first — a scroll event
+      // or `onContentSizeChange` — is when it grew (`ENTRY_QUIET_MS`, #2604).
+      if (
+        next.contentHeight !== undefined &&
+        Math.abs(next.contentHeight - before) > PROGRESS_PX
+      ) {
+        lastGrowthAtRef.current = Date.now();
+      }
       if (metricsRef) metricsRef.current = geometryRef.current;
     },
     [metricsRef],
@@ -945,6 +1091,24 @@ function TimelineInner({
    * (design-review H-1 오발)과 같은 모양이고, 폰에서 그 스윕은 진입 수렴이다.
    */
   const entrySettledRef = useRef(false);
+  /**
+   * 옛 페이지를 불러도 되는가 — 진입이 출발점에 앉은 뒤에만 (#2604).
+   *
+   * 마운트한 목록은 오프셋 0 에 서고, `VirtualizedList` 는 그 자리를 「맨 위에 닿았다」로
+   * 읽어 첫 보고에서 곧바로 `onStartReached` 를 부른다(`distanceFromStart` 0). 그 순간은
+   * 진입 수렴이 끝으로 가기 직전의 한 프레임일 뿐 사람이 위로 올라간 것이 아니다. 그
+   * 부름이 가져온 옛 페이지는 진입 수렴 한가운데서 0번 셀 위에 붙는다 — 진입의 MVCP
+   * 앵커가 바로 그 0번 셀이므로, 다시 붙을 때 앵커는 렌더 창 밖으로 밀려 재활용된 뷰가
+   * 되고 목록이 임의의 양만큼 밀린다. 옛 페이지를 부르는 동안 머리 높이도
+   * 16→36→30.3pt 로 흔들린다. 잰 값(Release, 첫 페이지 50행 + 옛 페이지 두 장인
+   * 120행 방): 다시 붙을 때 +849.7pt, 그때의 끝을 36pt 넘었다.
+   *
+   * 그래서 옛 페이지는 목록이 출발점에 앉은 뒤(`settleEntry` — 진입 도착, 손가락,
+   * 점프 착지)에만 부른다. 끝에 앉은 목록은 맨 위에서 멀어 `VirtualizedList` 가 부르지
+   * 않고, 사람이 위로 올라가 맨 위에 가까워지면 그때 부른다. 그 붙음은 MVCP 가 켜진
+   * 채 새로 기록한 앵커로 보정된다 — 이 목록이 처음부터 의도한 앞붙이기 보정이다.
+   */
+  const [olderReady, setOlderReady] = useState(false);
 
   /** 구분선이 **지금** 창의 어디에 있는가. 렌더를 기다리지 않고 ref 로 판정한다. */
   const relationNow = useCallback(
@@ -985,6 +1149,7 @@ function TimelineInner({
     // 아니다.
     didInitialScrollRef.current = false;
     entrySettledRef.current = false;
+    setOlderReady(false);
     viewableKeysRef.current = NO_KEYS;
     latchNoteRef.current = null;
   }
@@ -1014,6 +1179,10 @@ function TimelineInner({
    * 새 방의 「안읽음으로」는 서지 않았다. 자리표시가 없던 길은 로딩 표시가 목록을
    * 언마운트하므로 늘 새 스크롤뷰였고, 그래서 멀쩡했다.
    *
+   * #2586 이 그 「낡은 앵커」를 쟀다 — prop 이 빠진 동안 셀이 납작해져 뷰가 재활용 풀을
+   * 거쳐 다른 행의 것이 된다. `TimelineCell` 이 남아 있는 행의 뷰는 지키지만, 방이
+   * 바뀌면 행이 통째로 바뀌므로 앵커 행 자체가 사라진다. 새 스크롤뷰가 여전히 맞다.
+   *
    * 그래서 새 방의 행이 도착하면 **새 스크롤뷰**에서 받는다(`key`). 모든 방 진입이
    * 첫 마운트와 같은 길을 탄다. 행이 빈 동안은 앞 방의 이름을 그대로 들고 있다 —
    * 방이 바뀐 첫 렌더(앞 방의 행)나 빈 목록에서 다시 마운트하면, 새 목록은 앞 방의
@@ -1041,9 +1210,22 @@ function TimelineInner({
     setUnreadLatched(true);
   }, [relationNow]);
 
+  /**
+   * 「앉았다」를 여는 **하나뿐인 문** (#2680 R1 H-1).
+   *
+   * `entrySettledRef` 를 참으로 쓰는 곳은 여기뿐이다. 이 순간에 함께 서야 하는 것이
+   * 셋 — 래치의 무장, 측정 seam, 옛 페이지 문(`olderReady`) — 이고, 문을 비껴 ref
+   * 만 쓰는 길이 하나라도 있으면 그 뒤의 모든 `settleEntry()` 가 첫 줄에서 돌아가
+   * 나머지가 방문 내내 닫힌 채 남는다. 실제로 그랬다: 진입이 앉기 전에 「안읽음」
+   * 필을 누르면 `jumpToUnread` 가 ref 를 직접 썼고, 착지·손가락·풀림의 `settleEntry()`
+   * 가 모두 헛돌아 `onStartReached` 가 끝내 붙지 않았다(리뷰 재현: 필 → 착지 → 손가락
+   * 으로 맨 위 → 옛 페이지 부름 0).
+   */
   const settleEntry = useCallback(() => {
     if (entrySettledRef.current) return;
     entrySettledRef.current = true;
+    // 이제부터 맨 위에 닿는 것은 사람이 올라간 것이다 — 옛 페이지를 불러도 된다(#2604).
+    setOlderReady(true);
     // 측정 seam 은 렌더마다 쓰인다. 앉는 순간 화면이 바뀌지 않으면(착지가 필을 그대로
     // 두면) 다시 그려지지 않아 사진이 옛 값을 읽으므로, 여기서도 적는다(R2 N-B 캡처).
     if (pillsRef?.current) pillsRef.current = {...pillsRef.current, settled: true};
@@ -1603,6 +1785,57 @@ function TimelineInner({
        * an anchor recorded before the jump. The pill is a thing a person
        * presses and then looks at, so for a short while after arriving any
        * movement off the end that no finger made is put back.
+       *
+       * #2586 measured why that anchor was wrong: its view had been rebuilt
+       * for another row while the prop was off. `TimelineCell` keeps every
+       * mounted row's view, so the anchor is now the right row — and the
+       * re-attach still moves the list by however far THAT row moved while
+       * the prop was off (#2586 R1 H-1, measured below).
+       *
+       * **A far send is held the same way**, for the rule at the top of this
+       * file: my own message always comes to me. Measured on the simulator
+       * (Release, a send from three screens back): the loop arrived exactly on
+       * the end and released, and the re-attach then moved the list −78.3pt
+       * with nothing after it (200 rows), or −30.6pt followed by a follow that
+       * stopped 10.7pt short (120 rows) — the message just sent was cut at the
+       * bottom of the list. The anchor row had moved
+       * because, as the window slid toward the end, `VirtualizedList`
+       * re-derived its top spacer from per-cell records taken under different
+       * layouts (the header is 16, 36 or 30.3pt as older pages load), and
+       * every row below that spacer moved with it — in the 120-row run the
+       * sampled anchor row `m-101` went 8005.3 → 7984.7 (−20.6) while the
+       * anchor was off, and the re-attach applied −30.6 (the samples are 16ms
+       * apart, so they bound the movement rather than catch all of it).
+       * Nothing in JavaScript can make the scroll
+       * view forget that anchor (the only guard is native — the tag check
+       * behind `enableViewCulling`), so the list is put back instead: at
+       * `contentEnd` from the scroll view's own report, which also corrects a
+       * follow that `scrollToEnd` aims from those same stale records.
+       *
+       * What it gives and costs, measured (Release, 10 far sends): 9 sat
+       * within 1pt of the end (7 of 7 in the 120-row room, 2 of 3 in the
+       * 200-row room). The moved position is on screen from the re-attach
+       * (+3–11ms) to the first tick (+50–67ms). In the tenth, the put-back
+       * landed on an offset where `VirtualizedList`'s window flips one cell in
+       * and out of its spacer (content 28384.7 ↔ 28379 every ~130ms); the flip
+       * outlived the hold and the send ended 5.7pt short. Answering the shove
+       * inside the scroll report that carries it, instead of at the tick, was
+       * tried and measured worse: the instant put-back met that flip in 2 of 6
+       * sends (content 9823 ↔ 9813.7) and they ended 9.4–10pt short. A finger
+       * ends the hold at once (`onScrollBeginDrag` → `cancelConvergence`).
+       *
+       * **An entry is held too** (#2604). No older page lands while it travels
+       * any more (`olderReady`), so its anchor is still cell 0 — but cell 0
+       * still drifts while the prop is off: measured (Release, 120- and 200-row
+       * rooms, 7 of 7 entries) it went down 9.3pt (samples 17.7 → 25.3), and the
+       * re-attach put the list 9.3pt past the end. Without the hold it rested
+       * there; held, the first tick put it back (+50–67ms). The end can also
+       * still move: the loop arrives once the content has held still for
+       * `ENTRY_QUIET_MS`, and on a device whose batches come further apart than
+       * that it arrives in a gap. The next batch would meet the follow path,
+       * whose glide reads as the reader leaving on its first report (711pt from
+       * the end, measured) and gives up `following`; held, it is met by an
+       * instant tick under the pin instead.
        */
       const holdLanding = (firstTickAt: number) => {
         const until = firstTickAt + LANDING_HOLD_MS;
@@ -1638,8 +1871,12 @@ function TimelineInner({
         // And the list is where it was going to rest, so what is on screen now is
         // what the reader sees (#1892 — the latch waits for exactly this).
         settleEntry();
-        if (mode !== 'latest') return;
+        // All three travels took the prop off and came to the end. A far send and
+        // a far 「최신으로」 are met by the stale anchor the moment `setChasingTail`
+        // above puts it back; an entry by an end that can still grow — see
+        // `holdLanding` for both, and `TimelineCell`'s note for the table.
         if (arrived) holdLanding(Date.now() + CONVERGE_ROUND_MS);
+        if (mode !== 'latest') return;
         // The pill that had VoiceOver's focus is gone; the row it brought the
         // reader to takes it (#1892 R1 M-3). When the travel could not finish
         // (R2 N-C) that row is still where the reader asked to go, and focusing
@@ -1672,10 +1909,17 @@ function TimelineInner({
         // anchor, and the first transaction after it returns applies the anchor
         // recorded BEFORE the travel straight to `contentOffset`
         // (`_adjustForMaintainVisibleContentPosition`). That is where the blank
-        // list comes from, it also follows a far entry and a far send when they
-        // release, and fixing it at its source — so that the stale anchor is
-        // never applied — is #2588's to decide, together with #2586. Until then
-        // this branch and `holdLanding` put the list back after it was shoved.
+        // list came from. #2586 measured the source — while the prop is off
+        // every cell is flattened and the anchor's view comes back as another
+        // row's — and `TimelineCell` removes that for every row still mounted.
+        //
+        // **This branch only runs inside the rounds**, i.e. before release. The
+        // re-attach that moves a list happens AFTER release, so it is never this
+        // branch that answers it: `holdLanding` does, for all three modes (the
+        // per-mode table is in `TimelineCell`'s note). What can still reach this
+        // branch is content that shrinks under a list already sitting at its end
+        // while the rounds run — the prop is off then, so nothing native moves
+        // the offset, and `scrollTo` itself is clamped.
         const overshot = left !== null && left < -ARRIVED_PX;
         if (overshot) {
           listRef.current?.scrollToOffset({
@@ -1691,12 +1935,19 @@ function TimelineInner({
           release(false);
           return;
         }
-        if (geometry.offsetY > furthest + PROGRESS_PX) {
-          furthest = geometry.offsetY;
+        // An entry standing on the end of a list that is still measuring is
+        // standing on the end of the rows measured SO FAR — the next batch moves
+        // it. So entry arrives only once the content has held still for
+        // `ENTRY_QUIET_MS` (#2604), and until then growth counts as progress:
+        // the loop is not stuck, it is waiting for the list to finish.
+        const settling =
+          mode === 'entry' && now - lastGrowthAtRef.current < ENTRY_QUIET_MS;
+        if (geometry.offsetY > furthest + PROGRESS_PX || settling) {
+          furthest = Math.max(furthest, geometry.offsetY);
           idleStop = Math.min(now + CONVERGE_IDLE_MS, hardStop);
           scrollPinUntilRef.current = idleStop;
         }
-        if (!overshot && left !== null && left <= ARRIVED_PX) {
+        if (!overshot && !settling && left !== null && left <= ARRIVED_PX) {
           release(true);
           return;
         }
@@ -1785,6 +2036,7 @@ function TimelineInner({
    * from a second ago nor a channel opened a moment ago gets to argue.
    */
   const onScrollBeginDrag = useCallback(() => {
+    onReaderTookList?.();
     cancelConvergence();
     // The reader has taken the list; a focus move queued by a jump would pull
     // VoiceOver back to where they are leaving (#1892 R1 M-3).
@@ -1817,7 +2069,13 @@ function TimelineInner({
     // is the likeliest prelude to them scrolling UP into history, which is the
     // one thing that must never move under them.
     setChasingTail(false);
-  }, [cancelConvergence, cancelFocus, cancelJumpTravel, settleEntry]);
+  }, [
+    cancelConvergence,
+    cancelFocus,
+    cancelJumpTravel,
+    settleEntry,
+    onReaderTookList,
+  ]);
 
   // Follow the tail only when the reader is already there. Anyone scrolled back
   // is READING, and yanking them to the bottom because someone else typed is
@@ -1827,7 +2085,8 @@ function TimelineInner({
     (_width: number, height: number) => {
       // The one place the true content length is announced, and therefore the
       // signal that the tail spacer has grown past the clamp described in the
-      // header. A send in flight is waiting for exactly this.
+      // header. A send in flight is waiting for exactly this — and an entry waits
+      // for it to STOP (`ENTRY_QUIET_MS`, #2604; `noteGeometry` notes the growth).
       noteGeometry({contentHeight: height});
       resolvePendingVerdict();
       if (!didInitialScrollRef.current) {
@@ -1928,9 +2187,13 @@ function TimelineInner({
   const jumpToUnread = useCallback(() => {
     const index = itemsRef.current.findIndex(item => item.kind === 'unread');
     if (index < 0) return;
+    // 누르는 것이 곧 앉음이다 — 진입이 아직 끝을 쫓고 있었어도. 문은 `settleEntry`
+    // 하나다(#2680 R1 H-1): ref 만 쓰면 옛 페이지 문이 이 방문 내내 닫힌다. 래치는
+    // 그 뒤에 건다 — 필이 서 있었다는 것은 구분선이 창 위에 있었다는 것이라 문의
+    // 「봤다」 판정은 아무것도 하지 않지만, 이 누름의 기록(`pressed`)이 마지막 말이다.
+    settleEntry();
     latchNoteRef.current = 'pressed';
     setUnreadLatched(true);
-    entrySettledRef.current = true;
     cancelConvergence();
     cancelFocus();
     scrollPinUntilRef.current = 0;
@@ -1944,7 +2207,14 @@ function TimelineInner({
     travelToIndex(index, 0, !reduceMotionRef.current, delayMs =>
       focusRow(focusTarget, delayMs),
     );
-  }, [cancelConvergence, cancelFocus, focusRow, reduceMotionRef, travelToIndex]);
+  }, [
+    cancelConvergence,
+    cancelFocus,
+    focusRow,
+    reduceMotionRef,
+    settleEntry,
+    travelToIndex,
+  ]);
 
   // 아래 필은 전송과 같은 여정이다 — 먼 과거에서 끝까지 가는 길은 RN-P3 가 이미
   // 닦았고(측정된 클램프를 오르는 즉시 라운드), 두 번째 길을 내면 그 수리를 다시
@@ -2352,6 +2622,10 @@ function TimelineInner({
       maintainVisibleContentPosition={
         chasingTail ? undefined : KEEP_VISIBLE_POSITION
       }
+      // …and the reason taking it off above no longer empties the list: every
+      // cell keeps its native view while it is off, so the anchor it comes back
+      // to is still the same row (#2586 — `TimelineCell`).
+      CellRendererComponent={TimelineCell}
       onScroll={onScroll}
       onScrollBeginDrag={onScrollBeginDrag}
       scrollEventThrottle={16}
@@ -2362,7 +2636,8 @@ function TimelineInner({
       // changes on the fly, which is why `jumpPills` may not change either.
       onViewableItemsChanged={jumpPills ? onViewableItemsChanged : undefined}
       viewabilityConfig={jumpPills ? PILL_VIEWABILITY : undefined}
-      onStartReached={reachedStart ? undefined : onStartReached}
+      // 옛 페이지는 목록이 출발점에 앉은 뒤에만 부른다 — `olderReady` (#2604).
+      onStartReached={reachedStart || !olderReady ? undefined : onStartReached}
       onStartReachedThreshold={0.5}
       ListHeaderComponent={listHeader}
       ListFooterComponent={listFooter}
