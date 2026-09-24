@@ -272,6 +272,43 @@ fn workd_keypair() -> ([u8; 32], String) {
     (seed, BASE64.encode(public))
 }
 
+/// A heartbeat as a daemon sends it since ADR-0188 D7: an ordinary v2 signed
+/// request — `momo.work_host.request.v2` over `POST`, the raw path, tenant,
+/// host, clock, the empty body's digest and a fresh one-time request id, all in
+/// the `MomoHost` headers. There is no v1 body any more.
+async fn signed_heartbeat(
+    http: &reqwest::Client,
+    base: &str,
+    workspace: Uuid,
+    host: Uuid,
+    seed: &[u8; 32],
+) -> reqwest::Response {
+    let path = format!("/v1/workspaces/{workspace}/work-hosts/{host}/heartbeat");
+    let sent_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let request_id = Uuid::new_v4();
+    let payload = momo_wire::signing::request_payload(
+        "POST",
+        &path,
+        workspace,
+        host,
+        sent_at_ms,
+        &momo_wire::signing::sha256_hex(b""),
+        request_id,
+    );
+    let signature = momo_wire::signing::sign_base64(seed, &payload).expect("sign heartbeat");
+    http.post(format!("{base}{path}"))
+        .header("Authorization", format!("MomoHost {host}"))
+        .header("X-Momo-Work-Host-Sent-At", sent_at_ms.to_string())
+        .header("X-Momo-Work-Host-Signature", signature)
+        .header("X-Momo-Work-Host-Request-ID", request_id.to_string())
+        .send()
+        .await
+        .expect("heartbeat")
+}
+
 // ---------------------------------------------------------------------------
 // the T3 curve
 // ---------------------------------------------------------------------------
@@ -435,46 +472,18 @@ async fn t3_smoke_enroll_register_session_settle() {
     assert_eq!(cloud_host["cloudHost"]["state"], json!("ready"));
     assert_eq!(cloud_host["cloudHost"]["hostId"], json!(host_id));
 
-    // ---- heartbeat (signed, outside the auth middleware) -----------------
-    let sent_at_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as i64;
+    // ---- heartbeat (v2-signed, outside the auth middleware) ---------------
     let host_uuid = Uuid::parse_str(&host_id).expect("host uuid");
-    let signature = momo_wire::signing::sign_base64(
-        &signing_seed,
-        &momo_wire::signing::heartbeat_payload(workspace, host_uuid, sent_at_ms),
-    )
-    .expect("sign heartbeat");
-    let response = http
-        .post(format!(
-            "{base}/v1/workspaces/{workspace}/work-hosts/{host_id}/heartbeat"
-        ))
-        .json(&json!({"sentAtMs": sent_at_ms, "signature": signature}))
-        .send()
-        .await
-        .expect("heartbeat");
+    let response = signed_heartbeat(&http, &base, workspace, host_uuid, &signing_seed).await;
     assert_eq!(response.status(), 200, "a signed heartbeat needs no bearer");
     let beat: Value = response.json().await.expect("heartbeat body");
     assert_eq!(beat["workHost"]["online"], json!(true));
 
-    // Signed by a DIFFERENT key over the same payload — a well-formed 64-byte
+    // Signed by a DIFFERENT key over a well-formed request — a valid 64-byte
     // signature that simply is not this host's. (Mutating base64 characters
     // would be a coin flip on whether the chosen character occurs at all.)
     let (impostor_seed, _) = workd_keypair();
-    let impostor_signature = momo_wire::signing::sign_base64(
-        &impostor_seed,
-        &momo_wire::signing::heartbeat_payload(workspace, host_uuid, sent_at_ms),
-    )
-    .expect("sign with the wrong key");
-    let forged = http
-        .post(format!(
-            "{base}/v1/workspaces/{workspace}/work-hosts/{host_id}/heartbeat"
-        ))
-        .json(&json!({"sentAtMs": sent_at_ms, "signature": impostor_signature}))
-        .send()
-        .await
-        .expect("forged heartbeat");
+    let forged = signed_heartbeat(&http, &base, workspace, host_uuid, &impostor_seed).await;
     assert_eq!(
         forged.status(),
         401,

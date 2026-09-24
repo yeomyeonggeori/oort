@@ -11,6 +11,57 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+### Added
+- Phone: approve or reject an approval card right in the timeline, and a result card after the decision; a one-time invite link is shown once and never stored. (#2585)
+- Phone: unread badge and divider follow the same computed state as web; opening a conversation clears a desktop "mark unread" only after it has been drawn. (#2593)
+- Phone: "jump to unread" and "jump to latest" pills with web copy, VoiceOver focus on landing, and a scroll machine that settles on movement instead of a clock. (#2594, #2614, #2622)
+- Phone: tapping a push notification opens the message, thread reply or approval it points to and lands on it — also after a cold start or from the background; when that conversation is already open, the tail is re-read first so the screen never says a message is missing before it has arrived. (#2584)
+- Railway team-instance template (T2): nine-service catalog on v0.1.6 digests, start commands that drop root, sealed APNs key handling, Centrifugo literals pinned to `infra/centrifugo.json`, a client-IP measurement gate before any claim link or invite is shared, and the local-storage upload route (`/__momo_stub/*`) on the Railway edge. (#2580, #2606)
+- `momo-workd` skeleton for ADR-0188 remote work: dial-out registration, signed v2 heartbeat, control polling, ACP sessions under D6 isolation (not distributed yet). (#2579)
+- Phone browser onboarding: inputs no longer trigger iOS focus zoom (16px floor on touch and narrow screens), no sideways drag during step transitions, and "지금은 건너뛰기" sits at the top of the agent step. (#2620)
+- iOS TestFlight preparation: privacy usage strings, export-compliance flag, build-number scheme, a release archive script that refuses non-`main` commits, and the TestFlight runbook. (#2587)
+
+### Fixed
+- Self-hosted public origin (T1): attachment uploads work — the edge now routes `/__momo_stub/*` to the api (it answered 405 before), and every edge Caddyfile is checked for the same route. (#2625)
+
+### Security
+- Local-storage upload URLs are one-time and expire after an hour; a published attachment can no longer be overwritten by replaying its upload URL. (#2624)
+- ADR-0188 R0: remote-host defences — the host owner decides, agents may only kill on member hosts, remote auto-approve and remote shell are refused, heartbeat v2. (#2576)
+- ADR-0188 R0.1 + (A′): non-admins cannot register workspace-scoped hosts, app hosts are member-scoped only, member hosts receive only the owner's non-shell controls and everyone's kill, and agent-originated non-kill controls to member hosts are refused at decision, tool-request and executor time. (#2597)
+- ADR-0188 R1.1: `momo-workd` hardening — credential redaction in outgoing events, Claude reads fenced to the working folder, owner-only spawn on member hosts, request-recorder proof that the host key never leaves the machine. (#2605)
+- ADR-0188 R1.2: remote Codex runs sandboxed in a host-owned home — it never reads the owner's `~/.codex`, starts with no MCP servers and with 13 out-of-sandbox features turned off, and needs a one-time `codex login` into that home. A Claude session that does not start in the fixed permission mode is corrected before its first prompt, and refused if the agent does not confirm it. (#2621)
+
+### Not in this release
+- Nothing here is in a published image yet; the next server tag is cut from `main` after the batch promotion.
+- runtime-unverified: real-device APNs, TestFlight install and push-tap landing on a device (evidence build pending, #2584).
+- Known phone defect outside this batch: a long first page with thread or approval rows can leave the list blank (#2586, in progress).
+
+## [0.1.6] - 2026-09-23
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.6>. Tag target: `main=ab58a111`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images.
+
+### Added
+- Agent workspace actions (ADR-0186): the agent proposes, a human approves, the server executes. Agent Port tool `oort_action_propose`, `GET /v1/workspaces/{ws}/actions`, v1 action `invite.create` (admin approval); the one-time invite link travels only in the decision response, with `Cache-Control: no-store`. (#2508, #2509)
+- Web: command registry and ⌘K command groups (#2524); action card catalog v1 — action row, `action_result`, one-time link (#2540).
+- Linked devices list and revoke: `GET/DELETE /v1/auth/devices` (ADR-0180 D5) and web settings › 기기. (#2468, #2490)
+
+### Changed
+- Webhook master keys are split from `JWT_HMAC`: `WEBHOOK_INGRESS_MASTER_KEY` and `OUTBOUND_WEBHOOK_MASTER_KEY`, with an audit on the ingress budget (ADR-0004 amendment 4). **Upgrading:** both keys must be in the env or webhook-sender refuses to boot; run the generator with the current `JWT_HMAC` exported and it copies that value into both keys, so issued webhook and doorbell secrets survive. (#2523)
+- Overlay layer order (scrim, surface, transient confirmation). (#2485)
+
+### Security
+- Refresh and revoke of a linked device are serialized. (#2537)
+- PostgreSQL image: libssh2 `1.11.1-1+deb13u2` (CVE-2026-66032, CVE-2026-66033, CVE-2026-66034, CVE-2026-66035, CVE-2026-58050, CVE-2026-58051); package URLs moved to the permanent archives (snapshot.debian.org, apt-archive.postgresql.org). (#2573)
+
+### Docs
+- Goal A (ADR-0187): deploy gate grades M7-I/M7-S, bundle promotion, `STATUS.md` frozen. (#2566)
+- Phone remote work design ADR-0188 Accepted. (#2575)
+
+### Not in this release
+- ADR-0188 R0 (remote-host defence, #2576) is on `track/engine`, not in this image.
+- runtime-unverified: published-image E2E re-measure, the Railway team instance deploy and real-device APNs (#2205).
+- The phone's empty list on long conversations (#2586) is a client defect outside this release.
+
 ## [0.1.5] - 2026-09-11
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.5>. Tag target: `main=803ae7d5`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`.

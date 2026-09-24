@@ -1,0 +1,515 @@
+//! TEST-ONLY fake ACP agent for `momo-workd`'s invariant and conformance tests.
+//! Not shipped: no release path builds it, and it does nothing but speak a
+//! scripted slice of ACP over stdio.
+//!
+//! Flags (all optional):
+//!   --record PATH        append every received message, plus argv/cwd and the
+//!                        permission outcome, to PATH as JSON lines
+//!   --mode ID            `currentModeId` reported by `session/new` (default `default`)
+//!   --no-modes           omit `modes` from `session/new`
+//!   --codex-modes        report codex-acp's preset catalog instead of Claude's,
+//!                        and codex-acp's `agentInfo.name`
+//!   --agent-name NAME    `agentInfo.name` in the `initialize` answer
+//!   `session/set_mode`   by default behaves like claude-agent-acp 0.81.0: an
+//!                        offered mode is taken, reported as a `mode`
+//!                        `config_option_update`, then answered `{}`; an
+//!                        unknown one is an error. Overrides:
+//!   --set-mode-error     answer every `session/set_mode` with an error
+//!   --set-mode-silent    take the mode and answer `{}` without reporting it
+//!                        (codex-acp 1.13.0 does this)
+//!   --set-mode-reports ID  answer `{}` but report ID as the mode
+//!   --permission         during each prompt, ask `session/request_permission`
+//!   --escape-mode ID     during each prompt, report `current_mode_update` → ID
+//!   --escape-via-config  report that escape as `config_option_update` instead
+//!   --hang               never answer `session/prompt` until cancelled
+//!   --leak               during each prompt, stream synthetic credentials in
+//!                        slow chunks that split a token and a PEM header
+//!   --setsid-grandchild PATH
+//!                        at start, launch a helper child (same process group,
+//!                        ignores SIGTERM) that launches `sleep 600` after
+//!                        `setsid()` — the shape of a codex shell tool — and
+//!                        writes "<sleeper pid> <helper pid>" to PATH
+//!   --exit-after-turn    exit on its own after answering the first prompt
+//!   --long-answer N      during each prompt, answer N more characters in one
+//!                        chunk (words of `lorem` separated by spaces)
+//!   --split-by-status    during each prompt, write a synthetic token in two
+//!                        chunks with a tool call between them (Probe B)
+//!   --pem-flood N        during each prompt, open a PEM private-key header,
+//!                        write N bytes of lines that never close it, pause,
+//!                        then write a visible tail (Probe D)
+//!
+//! Anything else on the command line (the host's isolation arguments) is
+//! accepted and recorded.
+
+use std::fs::OpenOptions;
+use std::io::{BufRead as _, Write as _};
+
+use serde_json::{json, Value};
+
+struct Options {
+    record: Option<String>,
+    mode: String,
+    modes: bool,
+    codex_modes: bool,
+    permission: bool,
+    escape_mode: Option<String>,
+    escape_via_config: bool,
+    hang: bool,
+    leak: bool,
+    setsid_grandchild: Option<String>,
+    exit_after_turn: bool,
+    long_answer: usize,
+    split_by_status: bool,
+    pem_flood: usize,
+    set_mode_error: bool,
+    set_mode_silent: bool,
+    set_mode_reports: Option<String>,
+    agent_name: Option<String>,
+}
+
+fn parse() -> Options {
+    let mut options = Options {
+        record: None,
+        mode: "default".to_string(),
+        modes: true,
+        codex_modes: false,
+        permission: false,
+        escape_mode: None,
+        escape_via_config: false,
+        hang: false,
+        leak: false,
+        setsid_grandchild: None,
+        exit_after_turn: false,
+        long_answer: 0,
+        split_by_status: false,
+        pem_flood: 0,
+        set_mode_error: false,
+        set_mode_silent: false,
+        set_mode_reports: None,
+        agent_name: None,
+    };
+    let mut args = std::env::args().skip(1);
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--record" => options.record = args.next(),
+            "--mode" => options.mode = args.next().unwrap_or_default(),
+            "--no-modes" => options.modes = false,
+            "--codex-modes" => options.codex_modes = true,
+            "--permission" => options.permission = true,
+            "--escape-mode" => options.escape_mode = args.next(),
+            "--escape-via-config" => options.escape_via_config = true,
+            "--hang" => options.hang = true,
+            "--leak" => options.leak = true,
+            "--setsid-grandchild" => options.setsid_grandchild = args.next(),
+            "--exit-after-turn" => options.exit_after_turn = true,
+            "--set-mode-error" => options.set_mode_error = true,
+            "--set-mode-silent" => options.set_mode_silent = true,
+            "--set-mode-reports" => options.set_mode_reports = args.next(),
+            "--agent-name" => options.agent_name = args.next(),
+            "--split-by-status" => options.split_by_status = true,
+            "--pem-flood" => {
+                options.pem_flood = args.next().and_then(|n| n.parse().ok()).unwrap_or(0)
+            }
+            "--long-answer" => {
+                options.long_answer = args.next().and_then(|n| n.parse().ok()).unwrap_or(0)
+            }
+            _ => {}
+        }
+    }
+    options
+}
+
+struct Stub {
+    options: Options,
+    /// The mode the stub is in: `--mode`, then whatever `session/set_mode` set.
+    current_mode: String,
+    out: std::io::Stdout,
+    lines: std::io::Lines<std::io::StdinLock<'static>>,
+    next_id: i64,
+}
+
+impl Stub {
+    fn record(&self, entry: Value) {
+        if let Some(path) = &self.options.record {
+            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+                let _ = writeln!(file, "{entry}");
+            }
+        }
+    }
+
+    fn send(&mut self, message: Value) {
+        let mut out = self.out.lock();
+        let _ = writeln!(out, "{message}");
+        let _ = out.flush();
+    }
+
+    fn respond(&mut self, id: &Value, result: Value) {
+        self.send(json!({"jsonrpc": "2.0", "id": id, "result": result}));
+    }
+
+    fn update(&mut self, session_id: &str, update: Value) {
+        self.send(json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {"sessionId": session_id, "update": update},
+        }));
+    }
+
+    /// Read the next message, recording it. `None` on EOF.
+    fn read(&mut self) -> Option<Value> {
+        loop {
+            let line = self.lines.next()?.ok()?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let message: Value = serde_json::from_str(&line).unwrap_or(Value::Null);
+            self.record(json!({"received": message}));
+            return Some(message);
+        }
+    }
+
+    fn catalog(&self) -> Value {
+        if self.options.codex_modes {
+            json!([
+                {"id": "read-only", "name": "Ask for approval"},
+                {"id": "agent", "name": "Approve for me"},
+                {"id": "agent-full-access", "name": "Full access"}
+            ])
+        } else {
+            json!([
+                {"id": "default", "name": "Default"},
+                {"id": "acceptEdits", "name": "Accept Edits"},
+                {"id": "plan", "name": "Plan"},
+                {"id": "bypassPermissions", "name": "Bypass Permissions"}
+            ])
+        }
+    }
+
+    fn set_mode(&mut self, id: &Value, params: &Value) {
+        let session_id = params["sessionId"].as_str().unwrap_or_default().to_string();
+        let requested = params["modeId"].as_str().unwrap_or_default().to_string();
+        let offered = self
+            .catalog()
+            .as_array()
+            .is_some_and(|modes| modes.iter().any(|mode| mode["id"] == json!(requested)));
+        if self.options.set_mode_error || !offered {
+            self.send(json!({
+                "jsonrpc": "2.0", "id": id,
+                "error": {"code": -32603, "message": "Internal error"}
+            }));
+            return;
+        }
+        self.current_mode = requested.clone();
+        if !self.options.set_mode_silent {
+            let reported = self.options.set_mode_reports.clone().unwrap_or(requested);
+            self.update(
+                &session_id,
+                json!({"sessionUpdate": "config_option_update", "configOptions": [
+                    {"id": "mode", "name": "Mode", "category": "mode", "type": "select",
+                     "currentValue": reported, "options": []}
+                ]}),
+            );
+        }
+        self.respond(id, json!({}));
+    }
+
+    fn prompt(&mut self, id: &Value, params: &Value) {
+        let session_id = params["sessionId"].as_str().unwrap_or_default().to_string();
+        self.record(json!({"prompt_mode": self.current_mode}));
+        let text = params["prompt"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        self.update(
+            &session_id,
+            json!({"sessionUpdate": "agent_message_chunk",
+                   "content": {"type": "text", "text": format!("stub heard: {text}")}}),
+        );
+        if self.options.split_by_status {
+            // Synthetic — never real — and assembled so this source carries
+            // no scanner-shaped literal.
+            self.update(
+                &session_id,
+                json!({"sessionUpdate": "agent_message_chunk",
+                       "content": {"type": "text", "text": concat!(" key sk-", "ant-api03-AAAA")}}),
+            );
+            self.update(
+                &session_id,
+                json!({"sessionUpdate": "tool_call", "toolCallId": "call-split",
+                       "title": "Read file", "kind": "read", "status": "pending"}),
+            );
+            self.update(
+                &session_id,
+                json!({"sessionUpdate": "agent_message_chunk",
+                       "content": {"type": "text",
+                                   "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA end\n"}}),
+            );
+        }
+        if self.options.pem_flood > 0 {
+            let mut flood = String::from(concat!("\n-----BEGIN RSA ", "PRIVATE KEY-----\n"));
+            while flood.len() < self.options.pem_flood {
+                flood.push_str("lorem ipsum dolor\n");
+            }
+            self.update(
+                &session_id,
+                json!({"sessionUpdate": "agent_message_chunk",
+                       "content": {"type": "text", "text": flood}}),
+            );
+            std::thread::sleep(std::time::Duration::from_millis(700));
+            self.update(
+                &session_id,
+                json!({"sessionUpdate": "agent_message_chunk",
+                       "content": {"type": "text", "text": "visible tail\n"}}),
+            );
+        }
+        if self.options.long_answer > 0 {
+            let text: String = "lorem "
+                .chars()
+                .cycle()
+                .take(self.options.long_answer)
+                .collect();
+            self.update(
+                &session_id,
+                json!({"sessionUpdate": "agent_message_chunk",
+                       "content": {"type": "text", "text": text}}),
+            );
+        }
+        if self.options.leak {
+            // Synthetic, well-formed credentials — never real, and assembled
+            // with `concat!` so this source carries no scanner-shaped literal.
+            // The pauses are longer than the host's age flush, so its flushes
+            // land inside the `sk-ant-` token and inside the PEM header.
+            for piece in [
+                concat!(" leak sk-", "ant-api03-"),
+                concat!(
+                    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA gh ghp",
+                    "_abcdefghijklmnopqrstuvwxyz0123456789 aws AKIA",
+                    "ABCDEFGHIJKLMNOP\n-----BEGIN OPENSSH PRIV"
+                ),
+                "ATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ\n",
+                concat!(
+                    "-----END OPENSSH PRIVATE KEY-----\nslack xoxb",
+                    "-1234567890-abcdefghij jwt eyJhbGciOiJIUzI1NiJ9",
+                    ".",
+                    "eyJzdWIiOiIxMjM0NTY3ODkwIn0",
+                    ".",
+                    "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U end"
+                ),
+            ] {
+                self.update(
+                    &session_id,
+                    json!({"sessionUpdate": "agent_message_chunk",
+                           "content": {"type": "text", "text": piece}}),
+                );
+                std::thread::sleep(std::time::Duration::from_millis(700));
+            }
+        }
+        self.update(
+            &session_id,
+            json!({"sessionUpdate": "agent_thought_chunk",
+                   "content": {"type": "text", "text": "private reasoning"}}),
+        );
+        self.update(
+            &session_id,
+            json!({"sessionUpdate": "plan", "entries": [
+                {"content": "Read the code", "priority": "high", "status": "in_progress"},
+                {"content": "Report back", "priority": "medium", "status": "pending"}
+            ]}),
+        );
+        self.update(
+            &session_id,
+            json!({"sessionUpdate": "tool_call", "toolCallId": "call-1",
+                   "title": "Run `cat ~/.ssh/id_ed25519`", "kind": "execute",
+                   "status": "pending", "rawInput": {"command": "cat ~/.ssh/id_ed25519"}}),
+        );
+        if self.options.permission {
+            let request_id = self.next_id;
+            self.next_id += 1;
+            self.send(json!({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "session/request_permission",
+                "params": {
+                    "sessionId": session_id,
+                    "toolCall": {"toolCallId": "call-1", "title": "Run `cat ~/.ssh/id_ed25519`", "kind": "execute"},
+                    "options": [
+                        {"optionId": "allow-always", "name": "Always Allow", "kind": "allow_always"},
+                        {"optionId": "allow-once", "name": "Allow", "kind": "allow_once"},
+                        {"optionId": "reject-once", "name": "Reject", "kind": "reject_once"}
+                    ]
+                }
+            }));
+            // Wait for the host's answer; anything else that arrives meanwhile is
+            // recorded by `read` and otherwise ignored.
+            let outcome = loop {
+                match self.read() {
+                    None => return,
+                    Some(message) if message["id"] == json!(request_id) => {
+                        break message["result"]["outcome"].clone();
+                    }
+                    Some(_) => {}
+                }
+            };
+            self.record(json!({"permission_outcome": outcome}));
+            let allowed = outcome["outcome"] == "selected"
+                && outcome["optionId"]
+                    .as_str()
+                    .is_some_and(|id| id.starts_with("allow"));
+            self.update(
+                &session_id,
+                json!({"sessionUpdate": "tool_call_update", "toolCallId": "call-1",
+                       "status": if allowed { "completed" } else { "failed" }}),
+            );
+        }
+        if let Some(mode) = self.options.escape_mode.clone() {
+            let update = if self.options.escape_via_config {
+                json!({"sessionUpdate": "config_option_update", "configOptions": [
+                    {"id": "model", "name": "Model", "category": "model", "type": "select",
+                     "currentValue": "stub-model", "options": []},
+                    {"id": "mode", "name": "Mode", "category": "mode", "type": "select",
+                     "currentValue": mode, "options": []}
+                ]})
+            } else {
+                json!({"sessionUpdate": "current_mode_update", "currentModeId": mode})
+            };
+            self.update(&session_id, update);
+        }
+        if self.options.hang {
+            loop {
+                match self.read() {
+                    None => return,
+                    Some(message) if message["method"] == "session/cancel" => {
+                        self.respond(id, json!({"stopReason": "cancelled"}));
+                        return;
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+        self.update(
+            &session_id,
+            json!({"sessionUpdate": "agent_message_chunk",
+                   "content": {"type": "text", "text": " — done."}}),
+        );
+        self.respond(id, json!({"stopReason": "end_turn"}));
+    }
+
+    fn serve(&mut self) {
+        while let Some(message) = self.read() {
+            let id = message.get("id").cloned().unwrap_or(Value::Null);
+            match message["method"].as_str() {
+                Some("initialize") => {
+                    let name = self.options.agent_name.clone().unwrap_or_else(|| {
+                        if self.options.codex_modes {
+                            "@agentclientprotocol/codex-acp".to_string()
+                        } else {
+                            "@agentclientprotocol/claude-agent-acp".to_string()
+                        }
+                    });
+                    self.respond(
+                        &id,
+                        json!({"protocolVersion": 1, "agentCapabilities": {"loadSession": false},
+                               "authMethods": [],
+                               "agentInfo": {"name": name, "title": "stub", "version": "0"}}),
+                    );
+                }
+                Some("session/new") => {
+                    let mut result = json!({"sessionId": "stub-session-1"});
+                    if self.options.modes {
+                        result["modes"] = json!({
+                            "currentModeId": self.options.mode,
+                            "availableModes": self.catalog(),
+                        });
+                    }
+                    self.respond(&id, result);
+                }
+                Some("session/set_mode") => {
+                    let params = message["params"].clone();
+                    self.set_mode(&id, &params);
+                }
+                Some("session/prompt") => {
+                    let params = message["params"].clone();
+                    self.prompt(&id, &params);
+                    if self.options.exit_after_turn {
+                        return;
+                    }
+                }
+                Some(_) if id.is_null() => {}
+                Some(_) => self.send(json!({
+                    "jsonrpc": "2.0", "id": id,
+                    "error": {"code": -32601, "message": "stub: method not found"}
+                })),
+                None => {}
+            }
+        }
+    }
+}
+
+/// `--grandchild-helper PATH`: the helper process behind `--setsid-grandchild`.
+/// Stays in the agent's process group but ignores SIGTERM and never exits on
+/// its own (only a SIGKILL ends it), and starts a sleeper in a session of its
+/// own (a group signal cannot reach it at all).
+fn grandchild_helper(path: &str) {
+    use std::os::unix::process::CommandExt as _;
+    // SAFETY: plain syscalls; `setsid` in the forked child before exec is
+    // async-signal-safe.
+    unsafe {
+        libc::signal(libc::SIGTERM, libc::SIG_IGN);
+    }
+    let mut sleeper = std::process::Command::new("/bin/sleep");
+    sleeper.arg("600");
+    unsafe {
+        sleeper.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+    // Never waited for on purpose: this helper outlives the sleeper and ends
+    // only by SIGKILL, and the test checks that the host's census reaps both.
+    #[allow(clippy::zombie_processes)]
+    let sleeper = sleeper.spawn().expect("spawn the detached sleeper");
+    let _ = std::fs::write(path, format!("{} {}\n", sleeper.id(), std::process::id()));
+    // Outlive the sleeper too: only a SIGKILL ends this process.
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(60));
+    }
+}
+
+fn main() {
+    let mut raw = std::env::args().skip(1);
+    if raw.next().as_deref() == Some("--grandchild-helper") {
+        grandchild_helper(&raw.next().unwrap_or_default());
+        return;
+    }
+    let options = parse();
+    // Kept alive (never waited for) so the helper stays this process's child.
+    let _helper = options.setsid_grandchild.as_ref().map(|path| {
+        std::process::Command::new(std::env::current_exe().expect("stub path"))
+            .args(["--grandchild-helper", path])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn the grandchild helper")
+    });
+    let stdin: &'static std::io::Stdin = Box::leak(Box::new(std::io::stdin()));
+    let mut stub = Stub {
+        current_mode: options.mode.clone(),
+        options,
+        out: std::io::stdout(),
+        lines: stdin.lock().lines(),
+        next_id: 9000,
+    };
+    stub.record(json!({
+        "argv": std::env::args().skip(1).collect::<Vec<_>>(),
+        "cwd": std::env::current_dir().map(|dir| dir.display().to_string()).unwrap_or_default(),
+        "env_has_momo": std::env::vars().any(|(key, _)| key.starts_with("MOMO_")),
+        "env_isolation": {
+            "INITIAL_AGENT_MODE": std::env::var("INITIAL_AGENT_MODE").ok(),
+            "CODEX_CONFIG": std::env::var("CODEX_CONFIG").ok(),
+            "CODEX_HOME": std::env::var("CODEX_HOME").ok(),
+            "TMPDIR": std::env::var("TMPDIR").ok(),
+        },
+    }));
+    stub.serve();
+}

@@ -339,15 +339,9 @@ pub async fn validate(
     // The `{host}` pin is the authenticator's own now (`scoped_host_id_from_path`
     // reads it from the raw path, which is what the signature covers). Parsing it
     // here as well is kept as the cheap 401 for a malformed id, not as the pin.
-    let signed = authenticate_signed_host_request(
-        &state,
-        &method,
-        uri.path(),
-        &headers,
-        &body,
-        workspace_id,
-    )
-    .await?;
+    let signed =
+        authenticate_signed_host_request(&state, &method, &uri, &headers, &body, workspace_id)
+            .await?;
 
     let request: ValidateTerminalAttachRequest =
         serde_json::from_slice(&body).map_err(|_| invalid_capability())?;

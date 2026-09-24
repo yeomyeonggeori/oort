@@ -2,6 +2,7 @@
 
 - Status: **Accepted** (2026-09-23 성재 결재 — 결재 질문 「ADR-0188(폰 원격 작업) 권고안을 Accept할까요?」에 「Accept」. 기안 Opus 5.5, 독립 보안 검수 R1 FAIL → R2 PASS 뒤 개정 문안 반영본. 결재 기록 §7)
 - Date: 2026-09-23
+- 개정: 2026-09-24 §8 — 성재 결정 두 가지(Codex 「샌드박스 자동 실행 수용」, Claude 기본 모드가 auto인 기기 「시작 직후 교정」)와 R1.1 보안 재검수 N-1~N-10 반영(#2607). D6 문구와 §3 불변식 한 줄을 고쳤다.
 - Deciders: 성재
 - 발제: ADR-0187 D3 — 성재 「그 정도 수준의 원격 작업 그리고 알림 시스템 그리고 데스크탑에서 사용자들이 했던 걸 트래킹하고 온전히 독까지 요청할 수 있는 마치 코덱스나 클라우드에 iOS 앱 같은 느낌」, D2 「테이스케일 안 쓰고 iOS 앱을 쓰는 걸 목표로」
 - 승계(Accepted, 이 ADR은 현행 스택 위에 다시 세운다):
@@ -166,16 +167,18 @@ oort는 벤더 클라우드 자리에 **팀 자신의 Railway 서버**가 있으
 - **D6은 R1의 첫 workd부터 적용한다.** 서버 카탈로그(`launch_template`)를 받아 실행하는 현행 계약은 원격 host에서 쓰지 않는다.
 - **권한 모드는 host가 스스로 고정한다(불변식).**
   - 실행 파일과 인자는 서버 `launch_template`이 아니라 **host 허용목록**에서 정한다.
-  - 설정(에이전트 설정 파일·allow 규칙)이 bypass·auto를 요구하면 세션을 열지 않는다.
-  - bypass·auto로 떠 있는 세션에는 폰 input과 승인을 거부한다. 세션 중 모드가 기본을 벗어나면 폰 경로를 닫는다.
+  - 세션이 고정 모드 밖(bypass·auto 등)으로 열리면 host가 **첫 프롬프트 전에 고정 모드로 교정하고, 에이전트의 모드 보고로 확인한다.** 확인되지 않으면 세션을 열지 않는다(2026-09-24 개정, §8.2).
+  - bypass·auto로 떠 있는 세션에는 폰 input과 승인을 거부한다. 세션 중 모드가 기본을 벗어나면 세션을 닫는다.
   - 원격 세션은 프로젝트의 hooks·MCP 서버·allow 규칙을 읽지 않는다. 권한 다리를 우회하는 길이기 때문이다.
 - **원격 spawn은 ACP 권한 다리가 있는 도구만 받는다(불변식).** `shell`은 원격에서 거부한다.
+  - Codex는 모든 명령·쓰기 전에 묻는 모드가 없다. §8.1의 조건 아래 **샌드박스 경계를 수용**해서 연다(2026-09-24 개정).
 - **허용 폴더:**
   - 소유자가 **데스크탑에서** 저장소 루트를 정한다.
   - 폰은 host가 발급한 **불투명 폴더 id**만 보낸다. 경로는 서버에 싣지 않는다.
   - host는 매 spawn마다 `realpath`로 대조하고, worktree 경로를 스스로 만든다. 기본은 세션당 git worktree 하나다.
   - host가 돌리는 git은 hooks와 fsmonitor를 끈다.
   - **허용 폴더는 샌드박스가 아니다.** 권한 다리와 모드 고정이 실제 방어다.
+  - 2026-09-24 개정(§8): Claude의 Bash는 OS sandbox 안에서 돈다. Codex는 수용된 샌드박스가 폴더 안의 방어다.
 - **diff:** host가 요청을 받을 때 계산해 짧게 캐시한다. raw diff는 서버에 저장하거나 로그하지 않는다. 세션 카드에는 `+42 −18` 같은 통계만 둔다.
 
 ### D7. 끄는 스위치·만료·폐기
@@ -206,7 +209,7 @@ oort는 벤더 클라우드 자리에 **팀 자신의 Railway 서버**가 있으
   - 에이전트 컨트롤은 member-scope host에 `kill`만(D3)
   - 소유자 지시 판별(D3)
   - 폰 경로의 bypass·auto·「항상 허용」 금지와 host 모드 고정(D5·D6)
-  - 원격 spawn은 ACP 권한 다리가 있는 도구만, 원격 `shell` 금지(D6)
+  - 원격 spawn은 ACP 권한 다리가 있는 도구만, 원격 `shell` 금지(D6). Codex는 §8.1 조건 아래 샌드박스 경계로 연다(2026-09-24 개정)
   - 잘린 미리보기는 펼치기 전 허용 불가, 미리보기 소유자 전용(D5)
   - 서버에 폴더 경로 비저장(D6)
   - workd TCP 포트 없음(D2)
@@ -255,6 +258,9 @@ oort는 벤더 클라우드 자리에 **팀 자신의 Railway 서버**가 있으
 - **신뢰 가정:** 서버·DB 관리자는 컨트롤 행을 직접 넣을 수 있다. R2의 사람 기기 키 서명이 이 가정을 좁힌다. host는 서명 없는 사람 컨트롤을 거부한다.
 
 ## 7. 결재 기록
+- **2026-09-24 성재.** #2605(R1.1)가 올린 결재 질문 두 개에 답했다. 개정 내용은 §8이다.
+  - Codex 원격 작업: 「샌드박스 자동 실행 수용」
+  - Claude 기본 모드가 auto인 기기: 「시작 직후 교정」
 - **2026-09-23 성재.** 결재 질문 네 개에 한 번에 답했다.
   - 이 ADR의 권고안: 「Accept」
   - iOS 범위: 「원격 작업까지 팀 배포 전에」. M7-I 팀 배포가 이 ADR의 R1(데스크탑 세션 관전·권한 승인)을 기다린다.
@@ -264,3 +270,82 @@ oort는 벤더 클라우드 자리에 **팀 자신의 Railway 서버**가 있으
   - 폰 경로(작업 탭·권한 다리)는 R1 진입 조건이 모두 충족된 뒤에 연다.
   - R0·R1이 끝나면 보안 검수를 다시 받는다(§4).
 
+## 8. 개정 (2026-09-24, R1.2 #2607)
+
+본문 결정은 위 D6·§3에 표시한 곳만 바꿨다. 나머지는 이 절이 더한다.
+
+### 8.1 Codex — 샌드박스 자동 실행 수용
+
+**결정(성재, 2026-09-24):** 「샌드박스 자동 실행 수용」.
+
+**배경.** Codex(`@agentclientprotocol/codex-acp` 1.13.0)에는 모든 명령·쓰기 전에 묻는 모드가 없다(#2602 실측). 가장 엄한 `read-only` 프리셋도 턴마다 `on-request` 승인과 `workspaceWrite` 샌드박스(네트워크 없음)를 보낸다.
+
+**수용하는 것.** 실측(codex-cli 0.155.1 seatbelt, codex-acp 1.13.0, 2026-09-24):
+- 작업 폴더 안 명령 실행과 쓰기가 승인 없이 일어난다.
+- `/tmp`와 `$TMPDIR` 쓰기도 승인 없이 된다. host는 `$TMPDIR`을 host 전용 폴더로 바꾼다. `/tmp`는 남는다(잔여 위험 RR-2).
+- 네트워크는 없다(샌드박스 안 `curl` 종료 코드 6).
+- 읽기는 디스크 전체를 본다(잔여 위험 RR-1).
+- 샌드박스 밖으로 나가는 명령(권한 상승 요청)은 ACP 권한 요청으로 권한 다리에 온다. R1 동안 host는 모두 거부한다(폴더 밖 `touch`: 승인 요청 → 거부 → 실행 안 됨).
+
+**§3 불변식과의 관계.** 샌드박스 안 자동 실행은 「승인 우회」가 아니다. 수용한 샌드박스 경계다.
+- `work_auto_approve`(spawn 자동 승인) 금지와는 다른 층이다. spawn은 여전히 소유자 기원만 받는다(D3, #2602 M-4·A′).
+- 샌드박스 밖으로 나가는 요청은 모두 권한 다리를 거친다.
+- 폰에서 bypass·auto·「항상 허용」을 고를 수 없다는 불변식은 그대로다. Codex 고정 모드는 `read-only`다.
+
+**조건(모두 충족해야 연다. host가 매 spawn마다 강제한다):**
+1. **host 전용 `CODEX_HOME`**(`<state 폴더>/codex-home`, 0700). 소유자의 `~/.codex`는 읽지 않는다.
+   - 실측: 소유자 home의 MCP 서버 12개 → host home 0개.
+   - 들어 있는 것은 sign-in(`auth.json`)과 host가 매번 다시 쓰는 `config.toml`뿐이다.
+   - `AGENTS.md`·`rules/`·`hooks.json`·`prompts/`가 생기면 거부한다.
+   - host는 자격을 복사하지 않는다. 소유자가 한 번 `CODEX_HOME=<경로> codex login`을 한다. 그 전에는 `codex_login_required`로 거부한다.
+   - home과 temp 폴더가 허용 폴더 안에 있으면 거부한다(샌드박스가 폴더를 쓸 수 있으므로).
+2. **features 끄기**: hooks·plugins·apps·remote_plugin·plugin_sharing·skill_mcp_dependency_install·computer_use·browser_use·browser_use_external·browser_use_full_cdp_access·in_app_browser·in_app_local_automation·guardian_approval.
+   - 샌드박스 밖에서 행동하는 기능(컴퓨터·브라우저 제어, 로컬 자동화, 자동 승인자)과 사용자 층 확장점이다.
+   - `CODEX_CONFIG`의 중첩 `features` 표 하나와 host `config.toml` 두 층에 둔다. 실측: 13개 모두 `false`.
+3. **프로젝트 `.codex` 거부.** host home을 쓰면 폴더에서 닿는 소유자 `~/.codex`도 프로젝트 층이 되므로 거부한다.
+4. **자손 트리 종료(L-1)**: kill·revoke·스스로 종료 뒤 `setsid()`로 그룹을 떠난 도구 프로세스까지 끝낸다(프로세스 census, pid·시작 시각으로 식별).
+5. **어댑터 정체 확인**: `initialize`의 `agentInfo.name`이 허용목록 항목의 어댑터와 다르면 `session/new` 전에 거부한다(N-9).
+6. **이벤트 정화**가 Codex 세션에도 똑같이 적용된다(가림, 필드 3,500자 분할).
+7. 소유자만 spawn(M-4)과 에이전트 기원 거부(A′)는 그대로다.
+
+**잔여 위험(이름을 붙여 둔다):**
+- **RR-1 디스크 전체 읽기.** Codex는 승인 없이 `~/.ssh` 같은 파일을 읽을 수 있다. 읽은 내용이 답변에 실리면 가림(§8.4)이 인식하는 모양만 막는다. 가림은 보조 방어다.
+- **RR-2 `/tmp` 쓰기.** 샌드박스가 턴마다 `/tmp`를 쓰기 가능으로 보낸다(설정으로 바꿀 수 없음).
+- **RR-3 프로젝트 지시문.** 폴더의 `AGENTS.md`는 읽힌다. 저장소 내용의 프롬프트 주입 면이다.
+- **RR-4 세션 기록.** Codex가 host home에 세션 기록(도구 출력 포함)을 남긴다. 0700 폴더다.
+- **RR-5 census 사이의 분리.** 한 tick(200 ms) 안에 이중 fork로 떨어져 나간 자손은 놓칠 수 있다.
+
+### 8.2 Claude — 고정 모드 밖에서 열린 세션의 시작 직후 교정
+
+**결정(성재, 2026-09-24):** 「시작 직후 교정」. 소유자의 평소 Claude Code 설정은 건드리지 않는다.
+
+- 세션을 연 직후, 첫 프롬프트 전에 현재 모드가 고정 모드(`default`)와 다르면 `session/set_mode`로 고정 모드를 요청한다.
+- **확인**은 에이전트 자신의 모드 보고다. `current_mode_update`나 `mode` config option이 고정 모드여야 한다. 응답(`{}`)만으로는 확인이 아니다.
+- 확인되지 않으면(오류, 보고 없음, 다른 모드 보고) `permission_mode_refused`로 닫는다.
+- 고정 모드가 목록에 없거나 모드를 보고하지 않는 에이전트는 교정하지 않고 거부한다.
+- 세션 중 이탈은 종료한다(기존 규칙).
+- 실측(claude-agent-acp 0.81.0, 성재 Mac의 `defaultMode: auto`, 프롬프트 없이): 세션은 `auto`로 열렸다. `session/set_mode default` → `mode` config option `default` 보고가 `{}` 응답보다 먼저 왔다. `bypassPermissions`·없는 모드는 오류였다.
+
+### 8.3 Claude — 읽기와 Bash (재검수 N-1)
+
+- **정정.** Claude `default`가 묻는 범위는 「내장 읽기 전용 명령 집합(`cat`·`grep`·`find`·읽기 git 등)을 뺀 모든 명령과 모든 쓰기」다. 파일을 이름으로 부르지 않는 읽기(`grep -r pattern .`)는 Read deny 규칙에도 걸리지 않는다. 실측으로 폴더의 `.env`를 읽었다.
+- **그래서 Bash는 Claude Code의 OS sandbox 안에서 돈다.** 플래그 설정 층(`--settings`)으로 켠다.
+  - `enabled`
+  - `failIfUnavailable: true`: sandbox가 없으면 sandbox 없이 돌지 않고 세션이 멈춘다.
+  - `autoAllowBashIfSandboxed: false`: 기본값 true면 sandbox 안 명령이 묻지 않고 돈다.
+  - `allowUnsandboxedCommands: false`: `dangerouslyDisableSandbox`가 무시된다.
+  - `filesystem.denyRead`: 폴더 안 자격 파일 패턴
+  - `credentials.files`: 소유자 홈의 자격 폴더를 deny
+- 실측(프롬프트 1회): 같은 `grep -r`는 `.env`에서 `Operation not permitted`였다. 폴더 안 `touch`는 권한 다리에서 거부됐다. `dangerouslyDisableSandbox`로 다시 돌린 grep도 같은 결과였다.
+- 허용 폴더가 `/`, 홈, 홈의 조상이면 config를 거부한다.
+
+### 8.4 가림은 보조 방어다 (재검수 N-2)
+
+- D5의 「인식되는 자격 문자열을 가린다」는 **보조 방어**다. 모양을 인식할 뿐이다. 협조하는 모델이 인코딩하거나 쪼개면 막지 못한다.
+- 읽기를 막는 것은 울타리·sandbox(§8.3)와 Codex 조건(§8.1)이다.
+- 그 안에서 값싼 우회는 막는다.
+  - 보이지 않는 문자와 전각 문자를 접은 사본에서 검사한다.
+  - PEM 헤더를 느슨하게 맞추고, base64로 감싼 키와 헤더 없는 키 본문도 잡는다.
+  - 고유 접두는 어디서 시작해도 잡는다.
+  - 계열: Anthropic·OpenAI·Stripe·GitHub·GitLab·npm·Slack·Google API·AWS(id·secret)·JWT·URL 비밀번호
+  - 릴레이는 메시지가 끝나기 전에는 완결된 줄만 보낸다. 다른 이벤트가 사이에 껴도 끝 조각을 붙잡아 둔다. 열린 키 블록 보류에는 상한이 있다.
