@@ -394,12 +394,16 @@ scripts/self_host_env.sh --public-origin https://<host>
 4. `--compose` cannot change the canonical file set. Start the **public**
    overlay only on the machine that owns that DNS. Empty `OORT_SITE_ADDRESS`
    makes compose / `caddy validate` fail — that is the ACME misfire brake.
-   Do not bring this overlay up on a laptop.
+   Do not bring this overlay up on a laptop. Keep `local.override.yml` in
+   the set (the attachment archive volume and the `web` service doctor
+   requires); without it the api is recreated with no archive and refuses
+   to boot (#2609, measured).
 
 ```sh
 ENV_FILE=infra/rust/local.secrets.env
 docker compose --env-file "$ENV_FILE" \
   -f infra/rust/docker-compose.rust.yml \
+  -f infra/rust/local.override.yml \
   -f infra/rust/caddy.override.yml up -d
 ```
 

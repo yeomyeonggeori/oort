@@ -251,10 +251,20 @@ closed and switch the edge configuration as below.
    ```
    	log {
    		output stdout
-   		format json
+   		format filter {
+   			wrap json
+   			fields {
+   				request>uri delete
+   			}
+   		}
    	}
    ```
-   redeploy caddy, send a few requests, and read `"remote_ip"` (the
+   The filter drops the request URI: upload capability URLs
+   (`/__momo_stub/drive/uploads/<capability>`) and `/hooks/<token>` are
+   secrets, and this step needs only `remote_ip` (#2609 — measured: a plain
+   `format json` access log wrote the capability on every request; with the
+   filter the access log has no `uri` field and still has `remote_ip`).
+   Redeploy caddy, send a few requests, and read `"remote_ip"` (the
    `{remote_host}` of each request) in the caddy logs, e.g.
    `railway logs --service caddy | grep -o '"remote_ip":"[^"]*"' | sort | uniq -c`.
    Community reports say `100.0.0.0/8` (unofficial). Remove the `log` block

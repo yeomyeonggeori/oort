@@ -13,7 +13,9 @@
 #   * X-Forwarded-Proto: adapt JSON (static) and a live echo upstream behind the
 #     committed Caddyfile.railway (https) vs a copy without header_up (http);
 #   * local-archive upload route: a PUT to /__momo_stub/drive/uploads/… reaches
-#     the api; a copy without the /__momo_stub/* block does not (SPA handle);
+#     the api with its path unchanged; a copy without the /__momo_stub/* block
+#     gets file_server's 405 (SPA handle), a copy with `uri strip_prefix` hands
+#     the api the wrong path (#2606 review Lows, fixed in #2609);
 #   * Centrifugo booted from the catalog's own variables: Origin upgrade 101 and
 #     API-key publish 200; without the v6 names 403 / 401.
 set -euo pipefail
@@ -618,22 +620,30 @@ pass "verify_public_edge_centrifugo_contract.sh RED when Caddyfile.railway 403 o
 # ---------------------------------------------------------------------------
 # ⑤ live X-Forwarded-Proto / X-Forwarded-For (#2205, review R2). What the api
 # actually receives: an echo upstream aliased api.railway.internal answers
-# "<X-Forwarded-Proto> <X-Forwarded-For>". Requests carry what Railway's edge
-# sends — `X-Forwarded-Proto: https` and `X-Real-IP: <client>` — plus a
-# client-forged `X-Forwarded-For` that must not reach the api.
-#   committed          → "https 203.0.113.7" on all four api paths
+# "<X-Forwarded-Proto> <X-Forwarded-For> <request URI>". Requests carry what
+# Railway's edge sends — `X-Forwarded-Proto: https` and `X-Real-IP: <client>` —
+# plus a client-forged `X-Forwarded-For` that must not reach the api.
+#   committed          → "https 203.0.113.7 <path>" on all four api paths
 #   no X-Forwarded-Proto line → "http …"  (ws:// realtime URL, http:// QR origin)
 #   no X-Forwarded-For line   → the edge's peer IP (one bucket for every client)
 #   committed, no X-Real-IP   → empty XFF: rate_limit::client_ip falls back to
 #                               its socket peer
+# The URI is echoed so a rewrite in front of the api (`uri strip_prefix`,
+# `handle_path`) is RED here (#2606 review Low, #2609): the api routes by exact path.
+# Every probe edge carries a one-line /srv/web/index.html, as the Railway image
+# does, so a route that falls through to the SPA handle fails the way Railway
+# fails — GET gets the SPA document, PUT gets file_server's 405.
 # ---------------------------------------------------------------------------
 EDGE_CLIENT_IP="203.0.113.7"
 FORGED_XFF="198.51.100.9"
+PROBE_WEB="$TMP_ROOT/probe-web"
+mkdir -p "$PROBE_WEB"
+printf '<!doctype html><title>spa</title>\n' >"$PROBE_WEB/index.html"
 docker network create "$PROBE_NET" >/dev/null
 docker run -d --name "${PROBE_PREFIX}-echo" --network "$PROBE_NET" \
   --network-alias api.railway.internal \
   -e 'ECHO_CADDYFILE=:8080 {
-	respond "{http.request.header.X-Forwarded-Proto} {http.request.header.X-Forwarded-For}"
+	respond "{http.request.header.X-Forwarded-Proto} {http.request.header.X-Forwarded-For} {http.request.uri}"
 }' \
   "$CADDY_IMAGE" \
   sh -c 'printf "%s\n" "$ECHO_CADDYFILE" >/tmp/Caddyfile && exec caddy run --config /tmp/Caddyfile --adapter caddyfile' \
@@ -648,6 +658,9 @@ start_edge() {
     -e "PORT=8080" \
     "$CADDY_IMAGE" caddy run --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
   docker cp "$2" "${PROBE_PREFIX}-$1:/etc/caddy/Caddyfile" >/dev/null
+  # The directory, not the file: /srv/web does not exist in the caddy image and
+  # `docker cp` of a file into a missing directory fails.
+  docker cp "$PROBE_WEB/." "${PROBE_PREFIX}-$1:/srv/web" >/dev/null
   docker start "${PROBE_PREFIX}-$1" >/dev/null
 }
 
@@ -682,28 +695,28 @@ until [ -n "$(edge_seen "$EDGE_PORT" /healthz)" ] && [ -n "$(edge_seen "$EDGE_NO
 done
 for path in /v1/xff-probe /hooks/xff-probe /__momo_stub/drive/uploads/xff-probe /healthz; do
   seen="$(edge_seen "$EDGE_PORT" "$path")"
-  printf '[test-railway-template] edge committed %s → api sees XFP/XFF=%s\n' "$path" "$seen"
-  [ "$seen" = "https ${EDGE_CLIENT_IP}" ] || \
-    fail "committed Caddyfile.railway on ${path}: api saw '${seen}' (want 'https ${EDGE_CLIENT_IP}'; a forged XFF must not pass)"
+  printf '[test-railway-template] edge committed %s → api sees XFP/XFF/URI=%s\n' "$path" "$seen"
+  [ "$seen" = "https ${EDGE_CLIENT_IP} ${path}" ] || \
+    fail "committed Caddyfile.railway on ${path}: api saw '${seen}' (want 'https ${EDGE_CLIENT_IP} ${path}'; a forged XFF must not pass and the path must arrive unchanged)"
   seen="$(edge_seen "$EDGE_NOXFP_PORT" "$path")"
-  printf '[test-railway-template] edge no-XFP-line %s → api sees XFP/XFF=%s\n' "$path" "$seen"
+  printf '[test-railway-template] edge no-XFP-line %s → api sees XFP/XFF/URI=%s\n' "$path" "$seen"
   case "$seen" in
-    "http ${EDGE_CLIENT_IP}") ;;
+    "http ${EDGE_CLIENT_IP} ${path}") ;;
     *) fail "sabotage (no X-Forwarded-Proto line) on ${path}: api saw '${seen}' — probe is not load-bearing (want http)" ;;
   esac
   seen="$(edge_seen "$EDGE_NOXFF_PORT" "$path")"
-  printf '[test-railway-template] edge no-XFF-line %s → api sees XFP/XFF=%s\n' "$path" "$seen"
+  printf '[test-railway-template] edge no-XFF-line %s → api sees XFP/XFF/URI=%s\n' "$path" "$seen"
   case "$seen" in
-    "https ${EDGE_CLIENT_IP}" | "https ${FORGED_XFF}"* | "https ") \
+    "https ${EDGE_CLIENT_IP} ${path}" | "https ${FORGED_XFF}"* | "https  ${path}") \
       fail "sabotage (no X-Forwarded-For line) on ${path}: api saw '${seen}' — probe is not load-bearing (want the edge peer IP)" ;;
-    "https "*) ;;
+    "https "*" ${path}") ;;
     *) fail "sabotage (no X-Forwarded-For line) on ${path}: unexpected '${seen}'" ;;
   esac
 done
 seen="$(edge_seen "$EDGE_PORT" /v1/xff-probe no-real-ip)"
-printf '[test-railway-template] edge committed without X-Real-IP → api sees XFP/XFF=%s (empty XFF → client_ip uses its socket peer)\n' "$seen"
-[ "$seen" = "https " ] || fail "committed edge without X-Real-IP: api saw '${seen}' (want an empty XFF, never the forged one)"
-pass "live: committed edge gives the api X-Forwarded-Proto=https and X-Forwarded-For=X-Real-IP on /v1, /hooks, /__momo_stub, /healthz (forged XFF dropped); without either line RED"
+printf '[test-railway-template] edge committed without X-Real-IP → api sees XFP/XFF/URI=%s (empty XFF → client_ip uses its socket peer)\n' "$seen"
+[ "$seen" = "https  /v1/xff-probe" ] || fail "committed edge without X-Real-IP: api saw '${seen}' (want an empty XFF, never the forged one)"
+pass "live: committed edge gives the api X-Forwarded-Proto=https, X-Forwarded-For=X-Real-IP and the unchanged path on /v1, /hooks, /__momo_stub, /healthz (forged XFF dropped); without either header line RED"
 
 # ---------------------------------------------------------------------------
 # ⑤b local-archive upload route (#2205 stage 2, measured on Railway). The
@@ -712,6 +725,12 @@ pass "live: committed edge gives the api X-Forwarded-Proto=https and X-Forwarded
 # momo-drive local.rs). Without a /__momo_stub/* handle the catch-all SPA handle
 # takes the PUT and file_server answers 405 — measured on Railway as upload
 # 405 → complete 404 → message send 409.
+#
+# The extraction is anchored to a top-level line (`^\thandle`, re.M): a block
+# nested inside the SPA handle is "found 0" here, not a regex that swallows
+# the SPA body up to the next `\t}` (#2606 review Low, #2609). Route parity with the
+# other edges (sibling of /v1/*, path-only, same body) is
+# scripts/tests/test_public_edge.sh ⑥.
 # ---------------------------------------------------------------------------
 STUB_STRIPPED="$TMP_ROOT/Caddyfile.no-stub"
 python3 - "$CADDYFILE_RAILWAY" "$STUB_STRIPPED" <<'PY'
@@ -719,14 +738,29 @@ import re, sys
 from pathlib import Path
 src, dst = Path(sys.argv[1]), Path(sys.argv[2])
 text = src.read_text()
-block = re.compile(r"\thandle /__momo_stub/\* \{\n(?:\t\t.*\n)*?\t\}\n")
+block = re.compile(r"^\thandle /__momo_stub/\* \{\n(?:\t\t.*\n)*?\t\}\n", re.M)
 found = block.findall(text)
 if len(found) != 1:
     raise SystemExit("expected exactly one /__momo_stub/* handle block, found %d" % len(found))
 dst.write_text(block.sub("", text))
 PY
+# A rewrite in front of the api keeps the route and both header lines (③b
+# counts stay 4 0 4 0) but hands the api /drive/uploads/…, which it answers 404.
+STUB_REWRITTEN="$TMP_ROOT/Caddyfile.stub-strip-prefix"
+python3 - "$CADDYFILE_RAILWAY" "$STUB_REWRITTEN" <<'PY'
+import sys
+from pathlib import Path
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+opener = "\thandle /__momo_stub/* {\n"
+if text.count(opener) != 1:
+    raise SystemExit("could not locate the /__momo_stub/* handle to sabotage")
+dst.write_text(text.replace(opener, opener + "\t\turi strip_prefix /__momo_stub\n", 1))
+PY
 start_edge edge-no-stub "$STUB_STRIPPED"
+start_edge edge-stub-strip "$STUB_REWRITTEN"
 EDGE_NOSTUB_PORT="$(published_port "${PROBE_PREFIX}-edge-no-stub" 8080)"
+EDGE_STRIP_PORT="$(published_port "${PROBE_PREFIX}-edge-stub-strip" 8080)"
 edge_put() {
   # usage: edge_put <port> <path> → "<body> <http code>"
   curl -sS -m 5 -X PUT -H "Host: ${FIXTURE_HOST}" -H 'Content-Type: text/plain' \
@@ -734,26 +768,33 @@ edge_put() {
     -w ' %{http_code}' "http://127.0.0.1:$1$2" 2>/dev/null || true
 }
 i=0
-until [ -n "$(edge_seen "$EDGE_NOSTUB_PORT" /healthz)" ]; do
+until [ -n "$(edge_seen "$EDGE_NOSTUB_PORT" /healthz)" ] && [ -n "$(edge_seen "$EDGE_STRIP_PORT" /healthz)" ]; do
   i=$((i + 1))
-  [ "$i" -lt 50 ] || fail "live upload-route probe: the no-stub edge did not answer"
+  [ "$i" -lt 50 ] || fail "live upload-route probe: the no-stub / strip-prefix edges did not answer"
   sleep 0.2
 done
-got="$(edge_put "$EDGE_PORT" /__momo_stub/drive/uploads/route-probe)"
-printf '[test-railway-template] edge committed PUT /__momo_stub/drive/uploads/… → %s\n' "$got"
-[ "$got" = "https ${EDGE_CLIENT_IP} 200" ] || \
-  fail "committed Caddyfile.railway: PUT /__momo_stub/drive/uploads/… answered '${got}' (want the api echo 'https ${EDGE_CLIENT_IP}' and 200)"
-got="$(edge_put "$EDGE_NOSTUB_PORT" /__momo_stub/drive/uploads/route-probe)"
-printf '[test-railway-template] edge no-stub-block PUT /__momo_stub/drive/uploads/… → %s\n' "$got"
-# The probe edge has no /srv/web, so the SPA handle answers 404 here; on
-# Railway, with the SPA baked into the image, file_server answers the PUT 405.
-# Either way the PUT never reaches the api.
+UPLOAD_PROBE=/__momo_stub/drive/uploads/route-probe
+got="$(edge_put "$EDGE_PORT" "$UPLOAD_PROBE")"
+printf '[test-railway-template] edge committed PUT %s → %s\n' "$UPLOAD_PROBE" "$got"
+[ "$got" = "https ${EDGE_CLIENT_IP} ${UPLOAD_PROBE} 200" ] || \
+  fail "committed Caddyfile.railway: PUT ${UPLOAD_PROBE} answered '${got}' (want the api echo 'https ${EDGE_CLIENT_IP} ${UPLOAD_PROBE}' and 200)"
+got="$(edge_put "$EDGE_NOSTUB_PORT" "$UPLOAD_PROBE")"
+printf '[test-railway-template] edge no-stub-block PUT %s → %s\n' "$UPLOAD_PROBE" "$got"
+# The probe edge carries the SPA's index.html like the Railway image, so the
+# catch-all handle's file_server answers the PUT exactly as Railway did: 405.
 case "$got" in
-  "https ${EDGE_CLIENT_IP} 200") fail "sabotage (no /__momo_stub/* block): the PUT still reached the api — probe is not load-bearing" ;;
-  " 404" | " 405") ;;
-  *) fail "sabotage (no /__momo_stub/* block): unexpected '${got}' (want the SPA handle's 404/405, never the api)" ;;
+  "https ${EDGE_CLIENT_IP} "*" 200") fail "sabotage (no /__momo_stub/* block): the PUT still reached the api — probe is not load-bearing" ;;
+  " 405") ;;
+  *) fail "sabotage (no /__momo_stub/* block): unexpected '${got}' (want file_server's 405, the Railway failure shape — never the api)" ;;
 esac
-pass "live: PUT /__momo_stub/drive/uploads/… reaches the api (local archive upload, ADR-0169); without the block the SPA handle answers it (RED)"
+got="$(edge_put "$EDGE_STRIP_PORT" "$UPLOAD_PROBE")"
+printf '[test-railway-template] edge strip-prefix PUT %s → %s\n' "$UPLOAD_PROBE" "$got"
+case "$got" in
+  "https ${EDGE_CLIENT_IP} ${UPLOAD_PROBE} 200") fail "sabotage (uri strip_prefix /__momo_stub): the api still saw the full path — the URI echo is not load-bearing" ;;
+  "https ${EDGE_CLIENT_IP} /drive/uploads/route-probe 200") ;;
+  *) fail "sabotage (uri strip_prefix /__momo_stub): unexpected '${got}'" ;;
+esac
+pass "live: PUT ${UPLOAD_PROBE} reaches the api with its path unchanged (local archive upload, ADR-0169); without the block file_server answers 405, with a strip_prefix the api sees /drive/uploads/… (both RED)"
 
 # ---------------------------------------------------------------------------
 # ⑥ live Centrifugo from the catalog's own variables (#2205, audit §A.4-4).
