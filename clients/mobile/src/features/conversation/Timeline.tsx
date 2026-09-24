@@ -19,6 +19,7 @@ import {
   Text,
   View,
   findNodeHandle,
+  type CellRendererProps,
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -283,9 +284,73 @@ const PROGRESS_PX = 1;
  *
  * See the header for why `minIndexForVisible` is 0 and why that 0 is
  * load-bearing. It is hoisted here because a send now has to be able to take it
- * OFF — see `KEEPING_POSITION_FIGHTS_A_LONG_SCROLL` below.
+ * OFF — see `KEEPING_POSITION_FIGHTS_A_LONG_SCROLL` below — and taking it off has
+ * a side effect that `TimelineCell` right below exists to cancel (#2586).
  */
 const KEEP_VISIBLE_POSITION = {minIndexForVisible: 0} as const;
+
+// =============================================================================
+// ## 셀은 prop 이 빠져도 제 네이티브 뷰를 지킨다 (#2586, 실측)
+//
+// 증상: 화면보다 긴 첫 페이지에 스레드·승인 행이 섞인 방을 열면 목록 자리가 통째로
+// 빈다. iPhone 13 mini(375pt)·Release·목 서버의 이슈 9행(#배포)에서 잰 값:
+//
+//     진입 수렴 도착 422.7(= 콘텐츠 952 − 창 529.3) → 풀림 → 2ms 뒤 스크롤 보고 1336.3
+//
+// 끝을 913.7pt 넘었고, 렌더 범위는 0–9 전부인데 창에 걸린 행은 0개였다. 이분 탐색의
+// 방 여덟 개가 모두 **꼬리의 y − 첫 셀의 y** 만큼 밀렸다(배포 944 − 30.3, 잡담 2행
+// 521.3 − 371.3 = 150, 승인 카드 둘 521.3 − 90 = 431.3 …) — 행의 종류가 아니라 첫
+// 페이지가 한 배치(10행) 안에 드는가가 갈랐다. 평범한 글 14행만 반대로 24.3pt 모자랐다.
+//
+// 기전 — lldb 로 네이티브 앵커를 직접 읽어서 가렸다:
+//
+//   1. 먼 이동은 `maintainVisibleContentPosition` 을 뗐다 붙인다(`chasingTail`).
+//   2. RN 의 `ScrollView.js:1732` 는 **같은 prop 의 유무로** 콘텐츠 자식의 납작화를
+//      정한다: `collapsableChildren={!preserveChildren}`, `preserveChildren =
+//      maintainVisibleContentPosition != null`. 떼는 커밋에서 `VirtualizedList` 의 셀
+//      래퍼가 전부 납작해져 네이티브 뷰가 Fabric 의 재활용 풀로 가고, 붙이는 커밋에서
+//      그 풀에서 **다른 자리로** 다시 나온다.
+//   3. 네이티브 MVCP(`RCTScrollViewComponentView.mm`)는 앵커를 뷰의 약한 포인터와
+//      그때의 frame 으로 들고 있다. 다시 붙는 트랜잭션은 앵커를 새로 기록하지 않고
+//      (`willMount` 는 아직 빠진 prop 을 본다) 「그 뷰의 지금 frame − 기록한 frame」을
+//      contentOffset 에 clamp 없이 더한다. 그 뷰가 다른 행의 것이 됐는지 보는 tag
+//      검사(:1086)는 `enableViewCulling` 일 때만 돈다 — 기본값은 꺼짐이다.
+//
+//   잰 사슬(잡담 2행): 앵커 = 오늘 구분선의 뷰(tag 740, y 371.33) → 뗀 뒤 그 뷰가 풀에
+//   있다(tag 0, 콘텐츠 밖) → 붙인 트랜잭션에서 **꼬리의 뷰로** 돌아왔다(tag 804, y
+//   521.33) → 오프셋 0 → 150. 9행 방에서는 같은 식으로 944 − 30.3 = 913.7.
+//
+// 그래서 셀 래퍼가 prop 과 무관하게 **언제나 제 뷰를 지킨다**. 쉬는 동안(prop 이 붙어
+// 있는 동안) 래퍼는 원래 뷰였으므로 쉬는 목록은 한 픽셀도 달라지지 않고, 달라지는 것은
+// 이동 동안 래퍼가 풀로 가지 않는다는 것 하나다 — 앵커가 가리키는 뷰가 붙는 순간에도
+// 같은 행이다. 잰 결과: 방 여덟 개 모두 끝에 픽셀 단위로 앉았고, 14행의 −24.3 도 0이
+// 됐다.
+//
+// **토글은 그대로 둔다.** prop 을 아예 떼지 않는 판(실험 A)도 방 여덟 개를 고쳤지만,
+// 그것은 RN-P3 가 잰 먼 이동의 설계를 바꾸는 일이다. 그 판에서는 먼 홉 한 번이
+// 4,808pt 되밀렸다가 다음 홉에 돌아왔고, 전송 뒤 끝에 앉은 목록의 콘텐츠가 ±9.3pt 로
+// 2분 가까이 되풀이 흔들렸다(둘 다 원인 미규명). `measure/`
+// 하네스의 RN-P3 두 줄은 원판·실험 A·이 수리가 같은 띠였다 — 「중간에서」 3,190–3,406px
+// FAIL(원래의 실패 그대로), 「세 화면 뒤」 149–178px. 원판만 두 번 0px 였는데, 붙는
+// 순간의 낡은 앵커가 끝 너머로 민 것을 따라가기가 끝에 되붙인 우연이었다.
+//
+// **닫히지 않는 것**: 다시 붙는 트랜잭션은 여전히 뗄 때의 앵커를 쓴다. 이제는 같은
+// 행이라 그 행이 이동 동안 실제로 움직인 만큼만 옮긴다(잰 값: 세 화면 뒤 전송 한
+// 번에서 −78.3pt — 따라가기 문턱 120pt 안). 이동이 렌더 창(위아래 10화면)보다 멀면
+// 앵커 행 자체가 가상화로 언마운트되고 그 뷰는 여전히 재활용될 수 있다 — `converge`
+// 의 넘침 되돌림과 `holdLanding` 이 계속 지는 자리다. 완전한 수리는 네이티브(앵커
+// tag·superview 검사를 컬링과 무관하게)이고, 이 앱의 RN 코어는 prebuilt
+// (`React-Core-prebuilt`)다.
+// =============================================================================
+function TimelineCell({
+  // `VirtualizedList` 가 식별용으로 넘기는 값들 — 네이티브 뷰의 prop 이 아니다.
+  cellKey: _cellKey,
+  index: _index,
+  item: _item,
+  ...cell
+}: CellRendererProps<FoldedTimelineItem>): React.JSX.Element {
+  return <View {...cell} collapsable={false} />;
+}
 
 /**
  * 반응이 하나도 없는 표면이 매번 새로 만들던 빈 맵.
@@ -433,6 +498,14 @@ export function resetTimelineRenderItemCount(): void {
 // TOP). So the pin comes off for the length of the correction and goes straight
 // back on. `__tests__/timelineRender.test.tsx` still holds the resting value,
 // because that is the one every other moment of this list's life uses.
+//
+// **Taking it off has a side effect this note did not know about** (#2586,
+// measured). The same prop decides whether the content view's children are
+// flattened (`ScrollView.js:1732`), so every toggle rebuilt every cell's native
+// view, and the anchor MVCP replayed on the way back belonged to another row —
+// on the nine-row room that scrolled the list 913.7pt past its end, a blank
+// screen. `TimelineCell` keeps each cell's view through the toggle; the note
+// above it has the numbers and the reason the toggle itself stays.
 
 /**
  * How long to leave between correction rounds, in ms.
@@ -1013,6 +1086,10 @@ function TimelineInner({
    * **`357`** 로 밀려났고, 목록은 구분선이 보이는 그 자리에 서서 래치가 걸렸다 —
    * 새 방의 「안읽음으로」는 서지 않았다. 자리표시가 없던 길은 로딩 표시가 목록을
    * 언마운트하므로 늘 새 스크롤뷰였고, 그래서 멀쩡했다.
+   *
+   * #2586 이 그 「낡은 앵커」를 쟀다 — prop 이 빠진 동안 셀이 납작해져 뷰가 재활용 풀을
+   * 거쳐 다른 행의 것이 된다. `TimelineCell` 이 남아 있는 행의 뷰는 지키지만, 방이
+   * 바뀌면 행이 통째로 바뀌므로 앵커 행 자체가 사라진다. 새 스크롤뷰가 여전히 맞다.
    *
    * 그래서 새 방의 행이 도착하면 **새 스크롤뷰**에서 받는다(`key`). 모든 방 진입이
    * 첫 마운트와 같은 길을 탄다. 행이 빈 동안은 앞 방의 이름을 그대로 들고 있다 —
@@ -1603,6 +1680,12 @@ function TimelineInner({
        * an anchor recorded before the jump. The pill is a thing a person
        * presses and then looks at, so for a short while after arriving any
        * movement off the end that no finger made is put back.
+       *
+       * #2586 measured why that anchor was wrong: its view had been rebuilt
+       * for another row while the prop was off. `TimelineCell` closes that for
+       * every row still mounted; the hold stays for a travel long enough to
+       * unmount the anchor row itself, whose view can still come back as
+       * someone else's.
        */
       const holdLanding = (firstTickAt: number) => {
         const until = firstTickAt + LANDING_HOLD_MS;
@@ -1672,10 +1755,12 @@ function TimelineInner({
         // anchor, and the first transaction after it returns applies the anchor
         // recorded BEFORE the travel straight to `contentOffset`
         // (`_adjustForMaintainVisibleContentPosition`). That is where the blank
-        // list comes from, it also follows a far entry and a far send when they
-        // release, and fixing it at its source — so that the stale anchor is
-        // never applied — is #2588's to decide, together with #2586. Until then
-        // this branch and `holdLanding` put the list back after it was shoved.
+        // list comes from, and it also followed a far entry and a far send when
+        // they released. #2586 measured the source — while the prop is off
+        // every cell is flattened and the anchor's view comes back as another
+        // row's — and `TimelineCell` removes it for every row still mounted.
+        // What is left is a travel longer than the render window, whose anchor
+        // row is itself unmounted; this branch and `holdLanding` are for that.
         const overshot = left !== null && left < -ARRIVED_PX;
         if (overshot) {
           listRef.current?.scrollToOffset({
@@ -2352,6 +2437,10 @@ function TimelineInner({
       maintainVisibleContentPosition={
         chasingTail ? undefined : KEEP_VISIBLE_POSITION
       }
+      // …and the reason taking it off above no longer empties the list: every
+      // cell keeps its native view while it is off, so the anchor it comes back
+      // to is still the same row (#2586 — `TimelineCell`).
+      CellRendererComponent={TimelineCell}
       onScroll={onScroll}
       onScrollBeginDrag={onScrollBeginDrag}
       scrollEventThrottle={16}
