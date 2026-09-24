@@ -66,6 +66,11 @@ pub fn notification_request_permission<R: Runtime>(
 /// Returns `Ok(false)` when permission is not granted — a refused notification is
 /// a normal state, not a failure, and the caller should not have to distinguish
 /// "the user said no" from "the notification centre broke" in a catch block.
+///
+/// On desktop the plugin reports `Granted` without asking the OS, so this is
+/// `Ok(true)` even when macOS drops the banner: the first banner of a new
+/// bundle raises the OS permission alert instead of showing, and after
+/// 허용 안 함 none show (measured, #2676; `clients/desktop/README.md`).
 #[tauri::command]
 pub fn notification_show<R: Runtime>(
     app: AppHandle<R>,

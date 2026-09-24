@@ -209,7 +209,11 @@ describe('그래도 손가락이 이긴다', () => {
     const {spy} = mount();
     contentSize(900);
     scrolled(100, 900); // 도착 — 앵커가 스크롤을 돌려준다
-    await flushFrame();
+    // 돌려주는 것은 콘텐츠가 `ENTRY_QUIET_MS`(150ms) 멈춘 뒤의 도착, 그리고 그 뒤
+    // `LANDING_HOLD_MS`(600ms, 도착 + 50ms 부터)의 착지 유지가 끝났을 때다(#2604).
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    });
     spy.mockClear();
 
     scrolled(0, 4000); // 이제 이것은 진짜로 사람이 올라간 것이다
