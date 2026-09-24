@@ -35,6 +35,9 @@ src-tauri/
   Cargo.toml          # momo-desktop (tauri 2, release: LTO + strip + opt-level=s)
   tauri.conf.json     # devUrl → clients/web dev; frontendDist → ../../web/dist
                       # plugins.deep-link.desktop.schemes = ["momo"]
+                      # main window dragDropEnabled: false — drags go to the
+                      # page as HTML5 events (composer drop, sidebar reorder),
+                      # not to tauri://drag-drop (#2671)
   Info.plist          # macOS keys the bundler does NOT generate (mDNS, ATS)
   src/main.rs         # thin entry → lib.rs run()
   src/lib.rs          # plugin registration, command table, deep-link wiring
@@ -45,7 +48,11 @@ src-tauri/
   src/detect.rs       # passive local hosted-agent signatures (T-5)
   src/keychain.rs     # refresh token in the OS credential store
   src/updater.rs      # check / install / relaunch over the minisign manifest
-  capabilities/       # core:default only (app commands need no permission entry)
+  src/shell_contract.rs # tests: what capabilities/ + tauri.conf.json owe the web
+                      # bundle's drag regions and file drops (#2671)
+  capabilities/       # core:default + core:window:allow-start-dragging for the
+                      # web's data-tauri-drag-region top bars (#2671); app
+                      # commands need no permission entry
   icons/              # generated via `cargo tauri icon app-icon.png`
 ```
 
