@@ -2,6 +2,7 @@ import {execFileSync, execSync} from 'child_process';
 import {existsSync, readFileSync, readdirSync, statSync} from 'fs';
 import {join, resolve} from 'path';
 import * as ts from 'typescript';
+import {darkPalette, lightPalette} from '../src/design/tokens';
 import {NSE_KEYCHAIN_ACCESS_GROUP} from '../src/storage/secureSession';
 
 // =============================================================================
@@ -566,6 +567,112 @@ describe('the app icon App Store Connect requires (#2643)', () => {
       readFileSync(PBXPROJ, 'utf8').match(/ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;/g)
         ?.length,
     ).toBe(2);
+  });
+});
+
+describe('the launch screen is the boot background and nothing else (#2668)', () => {
+  // TestFlight build 3023.1 opened on the RN template's launch screen:
+  // 「MomoMobile」 and 「Powered by React Native」 on system white, unchanged since
+  // the scaffold (faebfcaf). Apple's HIG asks for a launch screen that is the
+  // first screen with its content taken out — no words, no logo — so the only
+  // thing this one may carry is the background the boot screen paints next.
+  //
+  // Three surfaces paint that background before any content exists, in order:
+  // the launch storyboard, the React root view (React Native paints it
+  // `systemBackgroundColor`, pure white or black, until JS draws its first frame
+  // — RCTRootViewFactory.mm), and the boot screen (`Booting` in App.tsx, token
+  // `bg`). One named colour feeds the first two and has to equal the token that
+  // feeds the third, or opening the app blinks. Every assertion below is on a
+  // file, because a blink is invisible to every test that renders React.
+  const IOS_APP = join(APP_ROOT, 'ios/MomoMobile');
+  const COLOR_NAME = 'LaunchBackground';
+  const plist = readFileSync(join(IOS_APP, 'Info.plist'), 'utf8');
+  const storyboardName = plist.match(
+    /<key>UILaunchStoryboardName<\/key>\s*<string>([^<]*)<\/string>/,
+  )?.[1];
+  const storyboard = () =>
+    readFileSync(join(IOS_APP, `${storyboardName}.storyboard`), 'utf8');
+
+  // An asset catalog colour component is written in one of three encodings,
+  // depending on which input method Xcode's inspector last saved it with.
+  const componentByte = (value: string): number =>
+    /^0x[0-9a-f]{2}$/i.test(value)
+      ? parseInt(value.slice(2), 16)
+      : value.includes('.')
+        ? Math.round(parseFloat(value) * 255)
+        : parseInt(value, 10);
+  const hex = (components: Record<string, string>): string =>
+    '#' +
+    ['red', 'green', 'blue']
+      .map(channel => componentByte(components[channel]).toString(16).padStart(2, '0'))
+      .join('');
+
+  it('is the storyboard Info.plist launches', () => {
+    // Otherwise every check below could pass on a file iOS never shows.
+    expect(storyboardName).toBe('LaunchScreen');
+    expect(storyboard()).toContain('launchScreen="YES"');
+  });
+
+  it('carries no words and no mark', () => {
+    const xml = storyboard();
+    expect(xml).not.toContain('Powered by React Native');
+    expect(xml).not.toContain('MomoMobile');
+    expect(xml.match(/<label\b/g) ?? []).toHaveLength(0);
+    expect(xml.match(/<imageView\b/g) ?? []).toHaveLength(0);
+    // Not only labels: a button title or a text view is text too. Background
+    // only means the view has nothing inside it.
+    expect(xml).not.toContain('<subviews>');
+    expect(xml).not.toMatch(/\btext="/);
+  });
+
+  it('paints one named colour, not a system one', () => {
+    const backgrounds = [
+      ...storyboard().matchAll(/<color key="backgroundColor"([^>]*)\/>/g),
+    ].map(m => m[1]);
+    expect(backgrounds).toHaveLength(1);
+    expect(backgrounds[0]).toContain(`name="${COLOR_NAME}"`);
+    expect(backgrounds[0]).not.toContain('systemColor=');
+  });
+
+  it('is the boot background in both schemes, byte for byte', () => {
+    const colors = JSON.parse(
+      readFileSync(
+        join(IOS_APP, `Images.xcassets/${COLOR_NAME}.colorset/Contents.json`),
+        'utf8',
+      ),
+    ).colors as Array<{
+      idiom: string;
+      appearances?: Array<{appearance: string; value: string}>;
+      color: {'color-space': string; components: Record<string, string>};
+    }>;
+    // Two entries, because the boot screen has two palettes. A high-contrast
+    // variant here would have nothing on the JS side to match.
+    expect(colors).toHaveLength(2);
+    const any = colors.find(entry => entry.appearances === undefined);
+    const dark = colors.find(entry =>
+      entry.appearances?.some(a => a.appearance === 'luminosity' && a.value === 'dark'),
+    );
+    // sRGB, because that is how React Native reads a hex string
+    // (RCTDefaultReactNativeFactoryDelegate.defaultColorSpace). The same bytes
+    // in Display P3 would be a different colour on this phone's screen.
+    for (const entry of [any, dark]) {
+      expect(entry?.idiom).toBe('universal');
+      expect(entry?.color['color-space']).toBe('srgb');
+      expect(componentByte(entry!.color.components.alpha)).toBe(255);
+    }
+    expect(hex(any!.color.components)).toBe(lightPalette.bg);
+    expect(hex(dark!.color.components)).toBe(darkPalette.bg);
+  });
+
+  it('is what the React root view paints until the first frame', () => {
+    // A statement at the start of a line, so a comment naming it does not count.
+    const swift = readFileSync(join(IOS_APP, 'AppDelegate.swift'), 'utf8');
+    expect(swift).toMatch(
+      new RegExp(
+        `^\\s*rootView\\.backgroundColor\\s*=\\s*UIColor\\(named:\\s*"${COLOR_NAME}"\\)`,
+        'm',
+      ),
+    );
   });
 });
 

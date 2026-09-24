@@ -85,6 +85,20 @@ class AppDelegate: ExpoAppDelegate {
 }
 
 class ReactNativeDelegate: ExpoReactNativeFactoryDelegate {
+  // The React root view is what a cold start shows between the launch screen
+  // and JS's first frame (the boot screen, `Booting` in App.tsx). React Native
+  // paints it `systemBackgroundColor` — pure white or pure black
+  // (RCTRootViewFactory.mm) — between two surfaces painted the token `bg`, and
+  // that gap is a blink on every launch. LaunchBackground is the colour asset
+  // LaunchScreen.storyboard paints; projectShape.test.ts holds it equal to `bg`
+  // in both schemes (#2668).
+  //
+  // `super` first: Expo hands this call on to its subscribers.
+  override func customize(_ rootView: UIView) {
+    super.customize(rootView)
+    rootView.backgroundColor = UIColor(named: "LaunchBackground") ?? rootView.backgroundColor
+  }
+
   override func sourceURL(for bridge: RCTBridge) -> URL? {
     self.bundleURL()
   }
