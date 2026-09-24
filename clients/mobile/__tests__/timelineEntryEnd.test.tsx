@@ -26,7 +26,8 @@ import {Timeline, type PillState} from '../src/features/conversation/Timeline';
 //   t=490  콘텐츠는 9600.7 까지 자랐고 목록은 4986.7 / 끝 9071 에 서 있다.
 //
 // 결함 둘이 겹친다(진입 중 옛 페이지 · 조기 도착과 활강 중 따라가기 해제). 수리는
-// 셋이고, 이 파일이 하나씩 잠근다(`Timeline.tsx`).
+// 셋이고, 이 파일이 하나씩 잠근다(`Timeline.tsx`). 넷째는 리뷰 R1 이 찾은 D 의 구멍이다
+// (아래 「문」).
 //
 //   D  옛 페이지는 진입이 앉은 뒤에만 부른다(`olderReady`). 진입 앵커가 제 행에 남는다.
 //      → 방 셋의 시험. 되돌리면 팀 방이 끝을 8908pt 넘고 빈 프레임이 선다.
@@ -37,6 +38,11 @@ import {Timeline, type PillState} from '../src/features/conversation/Timeline';
 //      +9.3pt 를 더했고(0번 셀 표본 17.7 → 25.3), 배치가 `ENTRY_QUIET_MS` 보다 뜸한
 //      기기는 도착 뒤에도 자란다. → +9.3 시험(되돌리면 끝을 9.3pt 넘은 채 선다)과
 //      느린 기기 시험(되돌리면 3239pt 모자란다).
+//   문 「앉았다」를 여는 곳은 `settleEntry` 하나다(#2680 R1 H-1). 「안읽음」 필이 ref 를
+//      직접 써서, 앉기 전에 누르면 D 의 문이 방문 내내 닫혔다. → 안 읽은 열 행이 있는
+//      팀 방의 두 시험(진입 판정, 「앉기 전 필 → 착지 → 손가락으로 맨 위 → 옛 페이지」).
+//      되돌리면 옛 페이지를 한 번도 부르지 않는다. 같은 결함의 이중 없는 판은
+//      `timelineOlderReady.test.tsx` 다.
 //
 // 이중의 밀림 크기(되돌린 D 의 8908pt)는 후입선출 풀 모형의 값이다. 기기의 진실은
 // +849.7pt 이고, 둘 다 같은 부류(재활용된 앵커 뷰)로 빨개진다.
@@ -565,7 +571,7 @@ async function enterRoom(shape: RoomShape): Promise<Room> {
           unreadCount={
             shape.lastReadSeq === undefined
               ? 0
-              : messages.filter(row => row.seq > (shape.lastReadSeq ?? 0)).length
+              : messages.filter(sent => sent.seq > (shape.lastReadSeq ?? 0)).length
           }
           loadingOlder={loadingOlder}
           reachedStart={reachedStart}
