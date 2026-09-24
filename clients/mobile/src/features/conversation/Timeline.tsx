@@ -347,7 +347,9 @@ const KEEP_VISIBLE_POSITION = {minIndexForVisible: 0} as const;
 //     같은 진입에서 드러나는 조기 도착(#2604)과 함께 볼 자리다.
 //   - **먼 전송**(`send`)·**먼 「최신으로」**(`latest`): 앵커는 이동이 시작될 때 창 맨
 //     위의 행이다. 이동 동안 렌더 창이 끝으로 내려가면 그 행 위의 스페이서가 셀별
-//     기록으로 다시 셈해지고 그 아래 행이 함께 움직인다(잰 값 −20.6·−30.6·−78.3pt).
+//     기록으로 다시 셈해지고 그 아래 행이 함께 움직인다. 잰 값: 다시 붙을 때 밀린 양
+//     −30.6pt(120행)·−78.3pt(200행). 120행 실행에서 16ms 표집으로 잡은 앵커 행 자체의
+//     이동은 −20.6pt 였다 — 표집 사이의 변화까지 더해진 것이 −30.6 이다.
 //     도착한 목록이 그만큼 끝에서 밀려나므로 `holdLanding` 이 도착 뒤
 //     `LANDING_HOLD_MS` 동안 손가락 없는 이동을 끝으로 되돌린다. 전송이 이 보호를 받는
 //     것은 R1 H-1 부터다 — 「내 메시지는 나에게 온다」.
@@ -1722,8 +1724,11 @@ function TimelineInner({
        * because, as the window slid toward the end, `VirtualizedList`
        * re-derived its top spacer from per-cell records taken under different
        * layouts (the header is 16, 36 or 30.3pt as older pages load), and
-       * every row below that spacer moved with it: `m-101` 8005.3 → 7984.7
-       * while the anchor was off. Nothing in JavaScript can make the scroll
+       * every row below that spacer moved with it — in the 120-row run the
+       * sampled anchor row `m-101` went 8005.3 → 7984.7 (−20.6) while the
+       * anchor was off, and the re-attach applied −30.6 (the samples are 16ms
+       * apart, so they bound the movement rather than catch all of it).
+       * Nothing in JavaScript can make the scroll
        * view forget that anchor (the only guard is native — the tag check
        * behind `enableViewCulling`), so the list is put back instead: at
        * `contentEnd` from the scroll view's own report, which also corrects a
