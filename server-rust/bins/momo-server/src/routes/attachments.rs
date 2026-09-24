@@ -417,9 +417,13 @@ pub async fn content(
 /// session and the announced `Content-Length` before it pulls the first chunk,
 /// then writes the body as it arrives. A PUT with a made-up token costs the
 /// server its headers, not its body — before #2628 the `Bytes` extractor held
-/// up to 100 MB of it in memory first, for anyone who asked. The per-IP gate in
-/// front of this route (`rate_limit::per_ip_drive_upload`) bounds how often
-/// one address may ask at all.
+/// up to 100 MB of it in memory first, for anyone who asked.
+///
+/// **This route answers 404 for a capability it refuses, and for nothing
+/// else** — malformed, unknown, spent, expired. The per-IP gate around it
+/// (`rate_limit::per_ip_drive_upload`) spends an address's budget on exactly
+/// those 404s and never refuses a live capability, so keep every other refusal
+/// here on its own status.
 pub async fn stub_upload(
     State(state): State<AppState>,
     Path(token): Path<String>,

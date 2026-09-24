@@ -384,6 +384,142 @@ async fn one_address_is_held_to_its_budget_and_answered_before_the_body() {
     );
 }
 
+/// A complete PUT from `ip` (as the edge would name it in `X-Forwarded-For`).
+async fn full_put_from(address: SocketAddr, token: &str, bytes: &[u8], ip: &str) -> u16 {
+    reqwest::Client::new()
+        .put(format!("http://{address}{}", upload_path(token)))
+        .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+        .header("X-Forwarded-For", ip)
+        .body(bytes.to_vec())
+        .send()
+        .await
+        .expect("put")
+        .status()
+        .as_u16()
+}
+
+async fn fake_put_from(address: SocketAddr, ip: &str) -> Answer {
+    let mut headers = announced(ANNOUNCED, "application/octet-stream");
+    headers.push(("X-Forwarded-For", ip.to_string()));
+    probe(
+        address,
+        &upload_path(&Uuid::new_v4().to_string()),
+        &headers,
+        &[0u8; SENT],
+    )
+    .await
+    .expect("an answer")
+}
+
+/// **Red proof (#2631 review R12).** Where every client reaches the api from
+/// the edge's own address — Fly T1's TCP passthrough, a Cloudflare tunnel,
+/// Railway without `X-Real-IP` — one address is the whole instance. The budget
+/// is therefore spent only by capabilities the route refuses: a fake-token
+/// flood turns further fakes into 429s, and a live capability from the same
+/// address still lands, before and after the budget is gone, without spending
+/// any of it.
+#[tokio::test]
+async fn a_live_capability_is_never_refused_by_the_address_budget() {
+    let edge = serve(RateLimitConfig {
+        drive_upload_per_ip_limit: 3,
+        ..RateLimitConfig::default()
+    })
+    .await;
+    const EDGE: &str = "203.0.113.50";
+
+    for upload in 0..5 {
+        let (token, _) = mint(&edge.archive, "application/octet-stream", 5).await;
+        assert_eq!(
+            full_put_from(edge.address, &token, b"hello", EDGE).await,
+            200,
+            "#2631: live upload {upload} from the shared address must land, and spends no budget"
+        );
+    }
+    for attempt in 0..3 {
+        let answer = fake_put_from(edge.address, EDGE).await;
+        assert_eq!(
+            answer.status, 404,
+            "fake {attempt} spends the budget: {answer:?}"
+        );
+    }
+    let refused = fake_put_from(edge.address, EDGE).await;
+    assert_eq!(
+        refused.status, 429,
+        "the budget is gone for refusals: {refused:?}"
+    );
+
+    let (token, file_id) = mint(&edge.archive, "application/octet-stream", 5).await;
+    assert_eq!(
+        full_put_from(edge.address, &token, b"hello", EDGE).await,
+        200,
+        "#2631: a live capability from an address whose budget is spent must still land"
+    );
+    assert_eq!(
+        edge.archive
+            .file_metadata(&file_id)
+            .await
+            .expect("landed")
+            .size_bytes,
+        5
+    );
+    let still = fake_put_from(edge.address, EDGE).await;
+    assert_eq!(
+        still.status, 429,
+        "and the next fake is still refused: {still:?}"
+    );
+}
+
+/// Each public surface keeps its own budget per address (#2631 review S10):
+/// spending the join budget does not refuse an upload, and spending the upload
+/// budget does not refuse a join.
+#[tokio::test]
+async fn the_upload_budget_and_the_join_budget_are_independent() {
+    let edge = serve(RateLimitConfig {
+        per_ip_limit: 1,
+        drive_upload_per_ip_limit: 1,
+        ..RateLimitConfig::default()
+    })
+    .await;
+    let join = |ip: &'static str| async move {
+        reqwest::Client::new()
+            .post(format!("http://{}/v1/join", edge.address))
+            .header("X-Forwarded-For", ip)
+            .json(&serde_json::json!({"code": "not-a-code"}))
+            .send()
+            .await
+            .expect("join")
+            .status()
+            .as_u16()
+    };
+
+    // Address A spends its join budget; its uploads are untouched.
+    assert_ne!(
+        join("198.51.100.1").await,
+        429,
+        "the first join is within budget"
+    );
+    assert_eq!(join("198.51.100.1").await, 429, "the join budget is spent");
+    let upload = fake_put_from(edge.address, "198.51.100.1").await;
+    assert_eq!(
+        upload.status, 404,
+        "a spent join budget must not refuse an upload: {upload:?}"
+    );
+
+    // Address B spends its upload budget; its joins are untouched.
+    let b = "198.51.100.2";
+    assert_eq!(fake_put_from(edge.address, b).await.status, 404);
+    assert_eq!(
+        fake_put_from(edge.address, b).await.status,
+        429,
+        "the upload budget is spent"
+    );
+    assert_ne!(
+        join(b).await,
+        429,
+        "a spent upload budget must not refuse a join"
+    );
+}
+
 /// The shipped default is on. `0` is how an operator turns it off, and the
 /// boot says so when they do.
 #[test]

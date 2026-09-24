@@ -171,6 +171,19 @@ pub fn prepare_local_dir(path: &str) -> Result<PathBuf, &'static str> {
     if root.exists() && !root.is_dir() {
         return Err("MOMO_DRIVE_LOCAL_DIR could not be created or is not writable");
     }
+    // #2631 review R11: opening the archive clears every file in these two
+    // directories. Through a symlink that would be some other directory's
+    // files, so a linked one is a boot error rather than something to follow.
+    // They only ever hold this archive's own short-lived files, so there is no
+    // reason to put them anywhere else.
+    for dir in [SESSIONS_DIR, INCOMING_DIR] {
+        if fs::symlink_metadata(root.join(dir)).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            return Err(
+                "MOMO_DRIVE_LOCAL_DIR has a symlinked sessions/ or incoming/ directory; \
+                 the archive clears those at start and will not do it through a link",
+            );
+        }
+    }
     fs::create_dir_all(root.join(OBJECTS_DIR))
         .map_err(|_| "MOMO_DRIVE_LOCAL_DIR could not be created or is not writable")?;
     fs::create_dir_all(root.join(SESSIONS_DIR))
@@ -326,15 +339,33 @@ fn publish(from: &Path, to: &Path) -> Result<(), DriveError> {
     fs::rename(from, to).map_err(|_| DriveError::UpstreamFailure)
 }
 
+/// Removes a body file under `incoming/` when dropped, however the upload
+/// ended: published (the file was renamed away and this is a no-op), refused,
+/// or cut off because the future was dropped mid-stream — a cancelled request
+/// (#2631 review R10). The next start clears `incoming/` as well; this keeps a
+/// running process from collecting them in between.
+struct PartFile(PathBuf);
+
+impl Drop for PartFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
 /// Write `body` into `part` as it arrives, refusing at the first byte over the
 /// ceiling or past a known declaration. Returns the measured length.
+///
+/// The file is created synchronously: a create still in flight on the blocking
+/// pool when the future is dropped would land after [`PartFile`] had already
+/// cleaned up. Every write after it goes to that file descriptor, so a dropped
+/// future can only ever leave an unlinked inode behind.
 async fn stream_into(part: &Path, mut body: UploadBody, declared: i64) -> Result<i64, DriveError> {
-    let mut file = tokio::fs::OpenOptions::new()
+    let file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(part)
-        .await
         .map_err(|_| DriveError::UpstreamFailure)?;
+    let mut file = tokio::fs::File::from_std(file);
     let mut length = ReceivedLength::new(declared);
     while let Some(chunk) = body.next().await {
         let chunk = chunk.map_err(|_| interrupted_upload())?;
@@ -465,26 +496,17 @@ impl DriveArchive for LocalDriveArchive {
         // 3. The body, into a private file — outside the lock, so one slow
         // upload never holds up another — and refused at the first byte too
         // many. A refusal here stores nothing and spends nothing.
-        let part = self
-            .root
-            .join(INCOMING_DIR)
-            .join(format!("{}.{PART_SUFFIX}", Uuid::new_v4()));
-        let measured = match stream_into(&part, body, first.size_bytes).await {
-            Ok(measured) => measured,
-            Err(error) => {
-                let _ = fs::remove_file(&part);
-                return Err(error);
-            }
-        };
+        let part = PartFile(
+            self.root
+                .join(INCOMING_DIR)
+                .join(format!("{}.{PART_SUFFIX}", Uuid::new_v4())),
+        );
+        let measured = stream_into(&part.0, body, first.size_bytes).await?;
 
-        // 4. Checked again, spent, published — one critical section.
-        let published = {
-            let _guard = self.lock.lock().await;
-            self.spend_and_publish(token, &first, &part, measured)
-        };
-        // Gone after a publish; the refused body otherwise.
-        let _ = fs::remove_file(&part);
-        published
+        // 4. Checked again, spent, published — one critical section. `part`
+        // removes the body file on the way out unless the publish moved it.
+        let _guard = self.lock.lock().await;
+        self.spend_and_publish(token, &first, &part.0, measured)
     }
 }
 
@@ -1778,5 +1800,100 @@ mod tests {
                 .expect_err("nothing landed after the restore"),
             DriveError::FileNotFound
         );
+    }
+
+    // ---- #2631 review: R10 (cancelled uploads) and R11 (linked directories) --
+
+    /// **Red proof (#2631 review R10).** A request cancelled mid-body — its
+    /// future dropped, not an error the archive sees — leaves no body file in
+    /// `incoming/` and spends nothing: the same URL still takes the upload.
+    #[tokio::test]
+    async fn a_dropped_upload_leaves_no_part_behind_and_spends_nothing() {
+        let (dir, _guard) = temp_root();
+        let archive = std::sync::Arc::new(
+            LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9").expect("open"),
+        );
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "note.txt", "text/plain", 5)
+            .await
+            .expect("session");
+        let token = token_from(&session);
+        let (sender, receiver) =
+            futures::channel::mpsc::unbounded::<Result<Bytes, std::io::Error>>();
+        let upload = {
+            let archive = archive.clone();
+            let token = token.clone();
+            tokio::spawn(async move {
+                archive
+                    .accept_stub_upload(&token, Some("text/plain"), None, receiver.boxed())
+                    .await
+            })
+        };
+        sender
+            .unbounded_send(Ok(Bytes::from_static(b"hel")))
+            .expect("send");
+        wait_for_part(&archive, 3).await;
+
+        upload.abort();
+        assert!(
+            upload.await.expect_err("cancelled").is_cancelled(),
+            "the upload future was dropped, not finished"
+        );
+        drop(sender);
+        let mut left = incoming(&archive);
+        for _ in 0..100 {
+            if left.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            left = incoming(&archive);
+        }
+        assert_eq!(
+            left,
+            Vec::<String>::new(),
+            "#2631: a cancelled upload left its body file behind"
+        );
+        archive
+            .accept_stub_upload(&token, Some("text/plain"), None, body(b"hello"))
+            .await
+            .expect("the cancelled upload spent nothing");
+        assert_eq!(
+            stored_bytes(&archive, &session.drive_file_id).await,
+            b"hello"
+        );
+    }
+
+    /// **Red proof (#2631 review R11).** Opening the archive clears every file
+    /// in `sessions/` and `incoming/`. Either one being a symlink would clear
+    /// another directory's files through it, so it is a boot error instead —
+    /// and the files behind the link are untouched.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_sessions_or_incoming_directory_is_refused_at_boot() {
+        for linked in [SESSIONS_DIR, INCOMING_DIR] {
+            let (dir, _guard) = temp_root();
+            let root = dir.join("archive");
+            let elsewhere = dir.join("elsewhere");
+            fs::create_dir_all(&root).expect("root");
+            fs::create_dir_all(&elsewhere).expect("elsewhere");
+            let precious = elsewhere.join("precious");
+            fs::write(&precious, b"not the archive's").expect("precious");
+            std::os::unix::fs::symlink(&elsewhere, root.join(linked)).expect("symlink");
+
+            assert!(
+                prepare_local_dir(root.to_str().expect("utf8")).is_err(),
+                "{linked}: a linked directory must be a boot error"
+            );
+            assert_eq!(
+                LocalDriveArchive::open(root.to_str(), "http://127.0.0.1:9").expect_err("refused"),
+                DriveError::Unavailable,
+                "{linked}"
+            );
+            assert_eq!(
+                fs::read(&precious).expect("still there"),
+                b"not the archive's",
+                "#2631: {linked}: the start-up clearing reached through the link"
+            );
+        }
     }
 }

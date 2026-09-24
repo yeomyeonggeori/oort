@@ -332,26 +332,67 @@ pub async fn per_ip_device_link(
     .await
 }
 
-/// Per-IP gate for the public upload PUT (#2628). Mounted with `route_layer`
-/// on `/__momo_stub/drive/uploads/{token}`, so it runs — and a 429 is answered —
-/// before the handler, and so before a byte of the body is read. The surface
-/// logged is the route's shape: the token in the path is a capability and never
-/// reaches a log line.
+/// Per-IP budget for **refused** upload capabilities (#2628; #2631 review R12).
+///
+/// Mounted with `route_layer` on `/__momo_stub/drive/uploads/{token}`, but it
+/// lets the handler decide first: the handler checks the capability without
+/// reading a byte of the body and answers **404** for every capability it
+/// refuses — malformed, unknown, spent or expired — and for nothing else. Only
+/// that 404 spends the address's budget; once it is spent, the address's
+/// refusals become 429s.
+///
+/// A live capability is never refused on this axis and spends none of it.
+/// Where every client reaches the api from the edge's own address — Fly T1's
+/// TCP passthrough, a Cloudflare tunnel, Railway without `X-Real-IP` — one
+/// address is the whole instance, and a budget that counted every PUT would let
+/// an anonymous fake-token flood refuse every real attachment and avatar upload.
+/// What the budget still bounds is how fast one address may guess.
+///
+/// The surface logged is the route's shape: the token in the path is a
+/// capability and never reaches a log line.
 pub async fn per_ip_drive_upload(
     State(state): State<AppState>,
     request: Request,
     next: Next,
 ) -> Response {
-    gate_per_ip(
-        state,
-        request,
-        next,
-        "ip:drive-upload",
-        |config| config.drive_upload_per_ip_limit,
-        "PUT /__momo_stub/drive/uploads/{token}",
-    )
-    .await
+    let config: &RateLimitConfig = &state.rate_limit.config;
+    let limit = config.drive_upload_per_ip_limit;
+    let peer = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ConnectInfo(address)| *address);
+    let ip = client_ip(request.headers(), peer);
+
+    let response = next.run(request).await;
+    if limit == 0 || response.status() != StatusCode::NOT_FOUND {
+        return response;
+    }
+    let Some(ip) = ip else {
+        return response;
+    };
+    let verdict = state.rate_limit.limiter.check(
+        &format!("{DRIVE_UPLOAD_KEY}:{ip}"),
+        limit,
+        Duration::from_secs(config.window_seconds),
+    );
+    if verdict.allowed {
+        return response;
+    }
+    if verdict.should_log {
+        tracing::warn!(
+            ip = %ip,
+            limit,
+            window_seconds = config.window_seconds,
+            surface = "PUT /__momo_stub/drive/uploads/{token}",
+            "rate limit exceeded (per-ip, refused upload capabilities)"
+        );
+    }
+    too_many_requests(verdict.retry_after_seconds)
 }
+
+/// The upload budget's own key prefix — never the join/claim prefixes, so
+/// spending one surface's budget cannot refuse another's (#2631 review S10).
+const DRIVE_UPLOAD_KEY: &str = "ip:drive-upload";
 
 async fn gate_per_ip(
     state: AppState,

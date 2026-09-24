@@ -1360,9 +1360,11 @@ pub fn build_app(state: AppState) -> Router {
     // body and hands it to the archive unread, and a raw body is not what that
     // limit applies to; the 100 MB ceiling is enforced by the archive as the
     // bytes arrive (`momo_drive::ReceivedLength`), after the capability and the
-    // announced length were checked. What does stand in front is the per-IP
-    // gate, the same `route_layer` shape as `/v1/join`: it runs before the
-    // handler, so a 429 costs no body either.
+    // announced length were checked. Around the handler sits the per-IP gate
+    // (#2631 review R12): it lets the handler decide and spends the address's
+    // budget only on a refused capability (the route's 404), so a fake-token
+    // flood from an edge address that every client shares cannot turn a live
+    // upload into a 429. A refusal reads no body, so neither does its 429.
     let app = if accepts_stub_uploads {
         app.route(
             "/__momo_stub/drive/uploads/{token}",
