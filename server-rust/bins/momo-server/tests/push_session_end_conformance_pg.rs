@@ -25,6 +25,17 @@
 //! | `suspension_ends_registrations_and_reinstatement_does_not_revive_them` | drop the suspend invalidation |
 //! | `removal_ends_every_registration_of_the_member` | drop the remove invalidation |
 //! | `leaving_the_workspace_ends_every_registration_of_the_member` | drop the self-leave invalidation |
+//! | `a_password_change_also_ends_a_registration_from_before_the_lineage` | scope the member-wide invalidation to `session_id IS NOT NULL` |
+//! | `an_access_only_logout_leaves_a_session_that_can_still_rotate` | let a logout that did not revoke the refresh half end the lineage anyway |
+//! | `a_logout_holding_a_spent_refresh_cannot_end_the_session` | end the lineage on any presented refresh, not only one this call revoked (`revoked_now`) |
+//! | `the_upgrade_silences_a_phone_that_signed_out_before_it` | drop the 088 backfill |
+//! | `a_phone_signed_in_across_the_upgrade_rebinds_on_its_next_launch` | drop the 088 backfill, or narrow it to members with no live session |
+//! | `set_owner_ends_the_owners_registrations_and_only_theirs` | drop the `push_token` UPDATE from `set_initial_owner.sql` |
+//!
+//! The two `the_upgrade…`/`…across_the_upgrade…` tests and the set-owner test
+//! each run in a database of their own ([`ScratchDb`]): the first two must put
+//! rows in place BEFORE migration 088 runs, and set-owner rewrites the demo
+//! owner every other suite shares.
 //!
 //! `#[ignore]` — needs a real Postgres plus the runtime roles:
 //!
@@ -41,7 +52,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
+use momo_db::migrate::{default_migrations_dir, discover_migrations, run_migrations, SeedMode};
 use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::PgPool;
@@ -55,6 +66,11 @@ const TEST_JWT_SECRET: &str = "push-session-end-conformance-signing-secret";
 const TEST_PASSWORD: &str = "push-session-end-password";
 const NEW_PASSWORD: &str = "push-session-end-password-2";
 const TOPIC: &str = "kim.dawn.momo.e2e";
+
+/// The workspace and owner `002_seed.sql` creates and `set_initial_owner.sql`
+/// rotates (both ids are literals in that file).
+const DEMO_WORKSPACE: Uuid = Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_0001);
+const DEMO_OWNER: Uuid = Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_0101);
 
 // ---------------------------------------------------------------------------
 // harness
@@ -76,15 +92,19 @@ fn role_password(env_key: &str, fallback: &str) -> String {
 }
 
 async fn superuser_pool() -> PgPool {
+    superuser_pool_at(&database_url()).await
+}
+
+async fn superuser_pool_at(url: &str) -> PgPool {
     PgPoolOptions::new()
         .max_connections(8)
-        .connect(&database_url())
+        .connect(url)
         .await
         .expect("connect to conformance DB as superuser")
 }
 
-async fn role_pool(role: &str, env_key: &str, fallback: &str) -> PgPool {
-    let options: PgConnectOptions = database_url()
+async fn role_pool_at(url: &str, role: &str, env_key: &str, fallback: &str) -> PgPool {
+    let options: PgConnectOptions = url
         .parse()
         .expect("DATABASE_URL parses as a postgres connect string");
     let options = options
@@ -99,12 +119,17 @@ async fn role_pool(role: &str, env_key: &str, fallback: &str) -> PgPool {
 
 /// The API role (NOBYPASSRLS): every route under test runs as this.
 async fn momo_app_pool() -> PgPool {
-    role_pool("momo_app", "MOMO_APP_PASSWORD", "momo_app_dev_pw").await
+    momo_app_pool_at(&database_url()).await
+}
+
+async fn momo_app_pool_at(url: &str) -> PgPool {
+    role_pool_at(url, "momo_app", "MOMO_APP_PASSWORD", "momo_app_dev_pw").await
 }
 
 /// The drain's credential (BYPASSRLS), exactly as the notifier process holds it.
-async fn momo_notifier_pool() -> PgPool {
-    role_pool(
+async fn momo_notifier_pool_at(url: &str) -> PgPool {
+    role_pool_at(
+        url,
         "momo_notifier",
         "MOMO_NOTIFIER_PASSWORD",
         "momo_notifier_dev_pw",
@@ -141,12 +166,19 @@ fn ensure_schema_and_roles() {
     }
     run_migrations(&database_url(), &default_migrations_dir(), SeedMode::None)
         .expect("apply all migrations");
+    apply_bootstrap_roles(&database_url());
+    *ready = true;
+}
+
+/// The runtime roles and their grants. The roles are cluster-wide, the grants
+/// per database (`current_database()`), so a scratch database needs its own run.
+fn apply_bootstrap_roles(url: &str) {
     let path = PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../../infra/rust/sql/bootstrap_roles.sql"
     ));
     let status = Command::new(resolve_psql())
-        .arg(database_url())
+        .arg(url)
         .args(["-v", "ON_ERROR_STOP=1"])
         .arg("--no-psqlrc")
         .arg("--quiet")
@@ -156,7 +188,94 @@ fn ensure_schema_and_roles() {
         .status()
         .expect("spawn psql for bootstrap_roles.sql");
     assert!(status.success(), "bootstrap_roles.sql failed to apply");
-    *ready = true;
+}
+
+/// A database of its own, created from the conformance superuser connection and
+/// dropped when the test is done.
+///
+/// Two kinds of test need one. A migration's data step (088's backfill) only
+/// ever sees rows that exist when it runs, so its proof must write "yesterday's"
+/// rows into a database that stops at 087 and THEN upgrade it — the shared
+/// conformance database is already past 088. And `set_initial_owner.sql`
+/// rewrites the demo owner's credentials, which the shared database must keep.
+///
+/// A failed test leaves its database behind inside the throwaway conformance
+/// container; nothing here can reach a database the test did not create.
+struct ScratchDb {
+    name: String,
+    url: String,
+}
+
+impl ScratchDb {
+    async fn create() -> ScratchDb {
+        let name = format!("pse_scratch_{}", Uuid::new_v4().simple());
+        let admin = superuser_pool().await;
+        sqlx::query(&format!("CREATE DATABASE {name}"))
+            .execute(&admin)
+            .await
+            .expect("create scratch database");
+        admin.close().await;
+        let url = database_url_named(&name);
+        ScratchDb { name, url }
+    }
+
+    /// Apply the canonical migrations up to and including `last` — the state of
+    /// an instance that has not yet received the later ones. The runner keys
+    /// its history on file names, so a later [`ScratchDb::migrate_all`] applies
+    /// exactly the files after `last` (the same files, never copies).
+    fn migrate_through(&self, last: i64) {
+        let dir = std::env::temp_dir().join(format!("{}_migrations", self.name));
+        std::fs::create_dir_all(&dir).expect("scratch migrations dir");
+        for migration in discover_migrations(&default_migrations_dir()).expect("discover") {
+            if migration.version <= last {
+                std::os::unix::fs::symlink(&migration.path, dir.join(&migration.name))
+                    .expect("link a canonical migration");
+            }
+        }
+        let report = run_migrations(&self.url, &dir, SeedMode::None);
+        std::fs::remove_dir_all(&dir).expect("remove scratch migrations dir");
+        let report = report.expect("migrations through the given version apply");
+        assert_eq!(
+            report.applied.len() as i64,
+            last,
+            "a fresh database applies every file up to {last}"
+        );
+    }
+
+    /// Bring the database to the current tree; returns what this call applied.
+    fn migrate_all(&self) -> Vec<String> {
+        run_migrations(&self.url, &default_migrations_dir(), SeedMode::None)
+            .expect("apply the remaining migrations")
+            .applied
+    }
+
+    async fn drop(self) {
+        let admin = superuser_pool().await;
+        sqlx::query(&format!(
+            "DROP DATABASE IF EXISTS {} WITH (FORCE)",
+            self.name
+        ))
+        .execute(&admin)
+        .await
+        .expect("drop scratch database");
+        admin.close().await;
+    }
+}
+
+/// `DATABASE_URL` with its database name replaced (query string kept).
+fn database_url_named(name: &str) -> String {
+    let base = database_url();
+    let (head, query) = match base.split_once('?') {
+        Some((head, query)) => (head.to_string(), Some(query.to_string())),
+        None => (base.clone(), None),
+    };
+    let slash = head.rfind('/').expect("DATABASE_URL names a database");
+    let mut url = format!("{}/{name}", &head[..slash]);
+    if let Some(query) = query {
+        url.push('?');
+        url.push_str(&query);
+    }
+    url
 }
 
 async fn start_server(pool: PgPool) -> String {
@@ -320,37 +439,155 @@ async fn seed_dm(su: &PgPool, workspace: Uuid, members: [Uuid; 2]) -> Uuid {
     channel
 }
 
-async fn world() -> World {
-    ensure_schema_and_roles();
-    let su = superuser_pool().await;
-    let notifier = momo_notifier_pool().await;
+/// Who is in the room before any server starts. Plain rows only, so the same
+/// seed also works on a scratch database that is still at 087.
+struct Fixture {
+    workspace: Uuid,
+    sender_email: String,
+    person_id: Uuid,
+    person_email: String,
+    dm: Uuid,
+}
+
+async fn seed_fixture(su: &PgPool) -> Fixture {
     let workspace = Uuid::new_v4();
     sqlx::query("INSERT INTO workspace (id, slug, name) VALUES ($1, $2, $2)")
         .bind(workspace)
         .bind(format!("pse-{workspace}"))
-        .execute(&su)
+        .execute(su)
         .await
         .expect("seed workspace");
-    let (sender_id, sender_email) = seed_human(&su, workspace, "owner").await;
-    let (person_id, person_email) = seed_human(&su, workspace, "member").await;
-    let dm = seed_dm(&su, workspace, [sender_id, person_id]).await;
-
-    let base = start_server(momo_app_pool().await).await;
-    let host = base.trim_start_matches("http://").to_string();
-    let http = reqwest::Client::new();
-    let sender = login(&http, &base, workspace, &sender_email, TEST_PASSWORD).await;
-    World {
-        su,
-        notifier,
-        http,
-        base,
-        host,
+    let (sender_id, sender_email) = seed_human(su, workspace, "owner").await;
+    let (person_id, person_email) = seed_human(su, workspace, "member").await;
+    let dm = seed_dm(su, workspace, [sender_id, person_id]).await;
+    Fixture {
         workspace,
+        sender_email,
         person_id,
         person_email,
-        sender,
         dm,
     }
+}
+
+async fn world() -> World {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed_fixture(&su).await;
+    World::open(&database_url(), su, fixture).await
+}
+
+impl World {
+    /// Start the API on `url`'s database as `momo_app`, hold the notifier's
+    /// credential for the drain, and sign the sender in.
+    async fn open(url: &str, su: PgPool, fixture: Fixture) -> World {
+        let notifier = momo_notifier_pool_at(url).await;
+        let base = start_server(momo_app_pool_at(url).await).await;
+        let host = base.trim_start_matches("http://").to_string();
+        let http = reqwest::Client::new();
+        let sender = login(
+            &http,
+            &base,
+            fixture.workspace,
+            &fixture.sender_email,
+            TEST_PASSWORD,
+        )
+        .await;
+        World {
+            su,
+            notifier,
+            http,
+            base,
+            host,
+            workspace: fixture.workspace,
+            person_id: fixture.person_id,
+            person_email: fixture.person_email,
+            sender,
+            dm: fixture.dm,
+        }
+    }
+}
+
+/// A registration as the server wrote it before 088 — the statement
+/// `register_device` ran then, with no `session_id` column to fill. Also the
+/// shape of a post-088 row nobody could attribute. Works at 087 and after.
+async fn seed_unbound_registration(su: &PgPool, workspace: Uuid, member: Uuid, phone: &Phone) {
+    sqlx::query(
+        "INSERT INTO device (id, workspace_id, member_id, platform) \
+         VALUES ($1, $2, $3, 'ios'::device_platform)",
+    )
+    .bind(phone.device_id)
+    .bind(workspace)
+    .bind(member)
+    .execute(su)
+    .await
+    .expect("seed unbound device");
+    sqlx::query(
+        "INSERT INTO push_token (workspace_id, device_id, member_id, apns_token, env, topic) \
+         VALUES ($1, $2, $3, $4, 'sandbox'::push_env, $5)",
+    )
+    .bind(workspace)
+    .bind(phone.device_id)
+    .bind(member)
+    .bind(&phone.apns_token)
+    .bind(TOPIC)
+    .execute(su)
+    .await
+    .expect("seed unbound push token");
+}
+
+/// A session signed in before 088: a real pair signed with the server's key,
+/// recorded with the statement `record_session_token` ran then (no lineage).
+async fn seed_pre_088_session(su: &PgPool, workspace: Uuid, member: Uuid) -> Session {
+    let scopes = vec!["messages:write".to_string(), "messages:read".to_string()];
+    let access = momo_auth::sign_access(member, workspace, &scopes, TEST_JWT_SECRET)
+        .expect("sign a pre-088 access token");
+    let refresh = momo_auth::sign_refresh(member, workspace, &scopes, TEST_JWT_SECRET)
+        .expect("sign a pre-088 refresh token");
+    for (raw, label, expires_at) in [
+        (&access.token, "access", access.expires_at),
+        (&refresh.token, "refresh", refresh.expires_at),
+    ] {
+        sqlx::query(
+            "INSERT INTO token \
+               (workspace_id, kind, actor_member_id, token_hash, scopes, label, expires_at) \
+             VALUES \
+               ($1, 'session', $2, digest($3::text, 'sha256'), $4, $5, to_timestamp($6))",
+        )
+        .bind(workspace)
+        .bind(member)
+        .bind(raw)
+        .bind(&scopes)
+        .bind(label)
+        .bind(expires_at as f64)
+        .execute(su)
+        .await
+        .expect("record a pre-088 session token");
+    }
+    Session {
+        access: access.token,
+        refresh: refresh.token,
+    }
+}
+
+/// An existing instance the day before this PR deploys: every migration up to
+/// 087 applied long ago, and people already in the workspace. Whatever the test
+/// writes next is "yesterday's" data.
+async fn instance_at_087(db: &ScratchDb) -> (PgPool, Fixture) {
+    db.migrate_through(87);
+    let su = superuser_pool_at(&db.url).await;
+    let fixture = seed_fixture(&su).await;
+    (su, fixture)
+}
+
+/// The deploy: `migrate` applies 088 (and only 088), then the new API starts.
+async fn upgrade_to_088(db: &ScratchDb, su: PgPool, fixture: Fixture) -> World {
+    assert_eq!(
+        db.migrate_all(),
+        vec!["088_push_session_lineage.sql".to_string()],
+        "the upgrade applies 088 and nothing else"
+    );
+    apply_bootstrap_roles(&db.url);
+    World::open(&db.url, su, fixture).await
 }
 
 // ---------------------------------------------------------------------------
@@ -549,6 +786,61 @@ impl World {
         let status = response.status().as_u16();
         assert!((200..300).contains(&status), "{path} answered {status}");
     }
+
+    /// `POST /v1/auth/logout` exactly as given — `refresh: None` sends no body,
+    /// which is the access-only logout. Returns the status and the JSON body.
+    async fn logout_with(&self, access: &str, refresh: Option<&str>) -> (u16, Value) {
+        let request = self
+            .http
+            .post(format!("{}/v1/auth/logout", self.base))
+            .bearer_auth(access);
+        let request = match refresh {
+            Some(refresh) => request.json(&json!({ "refreshToken": refresh })),
+            None => request,
+        };
+        let response = request.send().await.expect("logout");
+        let status = response.status().as_u16();
+        (status, response.json().await.expect("logout body"))
+    }
+
+    /// How many of the person's session rows are still usable.
+    async fn live_person_sessions(&self) -> i64 {
+        sqlx::query_scalar(
+            "SELECT count(*) FROM token \
+              WHERE workspace_id = $1 AND actor_member_id = $2 AND kind = 'session' \
+                AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())",
+        )
+        .bind(self.workspace)
+        .bind(self.person_id)
+        .fetch_one(&self.su)
+        .await
+        .expect("count live sessions")
+    }
+
+    /// The lineage a presented token belongs to (`token.session_id`).
+    async fn lineage_of(&self, raw_token: &str) -> Option<Uuid> {
+        sqlx::query_scalar::<_, Option<Uuid>>(
+            "SELECT session_id FROM token WHERE token_hash = digest($1::text, 'sha256')",
+        )
+        .bind(raw_token)
+        .fetch_one(&self.su)
+        .await
+        .expect("read token lineage")
+    }
+
+    /// The lineage the phone's live registration is bound to (`None` when it
+    /// has no live registration, or one with no lineage).
+    async fn registration_lineage(&self, phone: &Phone) -> Option<Uuid> {
+        sqlx::query_scalar::<_, Option<Uuid>>(
+            "SELECT session_id FROM push_token \
+              WHERE device_id = $1 AND invalidated_at IS NULL",
+        )
+        .bind(phone.device_id)
+        .fetch_optional(&self.su)
+        .await
+        .expect("read registration lineage")
+        .flatten()
+    }
 }
 
 fn is_for(dispatch: &PushDispatch, phone: &Phone) -> bool {
@@ -679,9 +971,99 @@ async fn logging_out_one_phone_leaves_the_other_phone_alone() {
     );
 }
 
-/// A registration from before the session lineage existed (`session_id` NULL)
-/// cannot be attributed to any session, so no single-session logout may take
-/// it. The phone re-registers on every launch, which binds it.
+/// Design judgment 5 (L5 in the review): a logout that revokes only the access
+/// half — no body, a shape `@momo/core` never sends but the API accepts — does
+/// not end the session. Its refresh half is alive and can rotate, so the phone
+/// is still signed in and keeps its registration. The session, and with it the
+/// registration, ends when a logout kills the refresh half.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn an_access_only_logout_leaves_a_session_that_can_still_rotate() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let phone = Phone::new();
+    let session = w.person_login().await;
+    w.register(&session, &phone).await;
+
+    let (status, body) = w.logout_with(&session.access, None).await;
+    assert_eq!(status, 200, "an access-only logout succeeds");
+    assert_eq!(body["revokedAccess"], true, "it revoked the access half");
+    assert_eq!(
+        body["revokedRefresh"], false,
+        "and never saw a refresh half"
+    );
+    assert!(
+        w.registration_live(&phone).await,
+        "a session that can still rotate has not ended, and neither has its registration"
+    );
+    w.send("after an access-only logout").await;
+    assert_eq!(
+        w.drain_to(&phone).await,
+        1,
+        "the phone is still signed in and still notified"
+    );
+
+    let rotated = w.rotate(&session).await;
+    w.logout(&rotated).await;
+    assert!(
+        !w.registration_live(&phone).await,
+        "the logout that kills the refresh half ends the session and its registration"
+    );
+    w.send("after the full logout").await;
+    assert_eq!(
+        w.drain_to(&phone).await,
+        0,
+        "no push after the session ended"
+    );
+}
+
+/// M1 in the review, server half. Logout checks only signatures, so what it may
+/// end is decided by what it actually revoked (`revoked_now`). A refresh half a
+/// rotation already spent is no longer the session — its successor is. The
+/// client race the phone/core PR closes (logout sent with the pair a rotation
+/// was spending) must therefore end nothing here: the session lives on in the
+/// successor pair, and that pair's logout ends it. Loosening the gate would let
+/// anyone holding a stale pair end a session they no longer hold.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_logout_holding_a_spent_refresh_cannot_end_the_session() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let phone = Phone::new();
+    let spent = w.person_login().await;
+    w.register(&spent, &phone).await;
+    let successor = w.rotate(&spent).await;
+
+    let (status, body) = w.logout_with(&spent.access, Some(&spent.refresh)).await;
+    assert_eq!(status, 200, "a logout with a spent pair still answers 200");
+    assert_eq!(
+        body["revokedRefresh"], false,
+        "the rotation had already spent that refresh half"
+    );
+    assert!(
+        w.registration_live(&phone).await,
+        "a spent pair cannot end the session its successor still holds"
+    );
+
+    w.logout(&successor).await;
+    assert!(
+        !w.registration_live(&phone).await,
+        "the successor pair's logout ends the session and its registration"
+    );
+    w.send("after the successor's logout").await;
+    assert_eq!(
+        w.drain_to(&phone).await,
+        0,
+        "no push after the session ended"
+    );
+}
+
+/// A registration with no lineage (`session_id` NULL) cannot be attributed to
+/// any session, so no single-session logout may take it. 088 invalidates every
+/// such row that exists when it runs; one can still appear later — written by
+/// the old server while a deploy is under way, or by a credential that is not a
+/// session. A launch re-registers and binds it; a member-wide end takes it
+/// regardless (`a_password_change_also_ends_a_registration_from_before_the_lineage`).
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn logout_never_touches_a_registration_it_cannot_attribute() {
@@ -958,6 +1340,49 @@ async fn a_password_change_ends_every_registration_of_the_member() {
     );
 }
 
+/// L3 in the review. The member-wide ends are the ONLY path that reaches a
+/// registration with no lineage: no single session can claim it. So a password
+/// change must end those too, not just the rows it can attribute.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_password_change_also_ends_a_registration_from_before_the_lineage() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let unbound = Phone::new();
+    seed_unbound_registration(&w.su, w.workspace, w.person_id, &unbound).await;
+    assert_eq!(
+        w.registration_lineage(&unbound).await,
+        None,
+        "control: a live registration with no lineage"
+    );
+    assert!(w.registration_live(&unbound).await, "control: it is live");
+
+    let desktop = w.person_login().await;
+    let changed = w
+        .http
+        .patch(format!(
+            "{}/v1/workspaces/{}/members/me/password",
+            w.base, w.workspace
+        ))
+        .bearer_auth(&desktop.access)
+        .json(&json!({ "currentPassword": TEST_PASSWORD, "newPassword": NEW_PASSWORD }))
+        .send()
+        .await
+        .expect("change password");
+    assert_eq!(changed.status().as_u16(), 200, "password change succeeds");
+
+    assert!(
+        !w.registration_live(&unbound).await,
+        "every session ended, so every registration ends — attributable or not"
+    );
+    w.send("after password change").await;
+    assert_eq!(
+        w.drain_to(&unbound).await,
+        0,
+        "the unattributed phone is silent too"
+    );
+}
+
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn a_password_reset_claim_ends_every_registration_of_the_member() {
@@ -1086,4 +1511,210 @@ async fn leaving_the_workspace_ends_every_registration_of_the_member() {
         !w.registration_live(&phone).await,
         "leaving revokes every session; their registrations end with them"
     );
+}
+
+// ---------------------------------------------------------------------------
+// what 088 finds when it runs (H1), and the operator's set-owner (L2)
+// ---------------------------------------------------------------------------
+
+/// H1 in the review — REVIEW-GAP-A made into a proof of the upgrade itself.
+///
+/// A phone signed out BEFORE this PR deployed. The old server wrote its
+/// registration with no lineage and its logout revoked the session without
+/// touching push. After the upgrade nothing can reach that row: there is no
+/// session left to end, and a member-wide end needs a password change or an
+/// exit. Without 088's backfill it is notified for good (the review measured
+/// `dispatches=1`); with it, the upgrade itself silences the phone.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_upgrade_silences_a_phone_that_signed_out_before_it() {
+    let _lock = test_lock().await;
+    let db = ScratchDb::create().await;
+    let (su, fixture) = instance_at_087(&db).await;
+    let signed_out = Phone::new();
+    seed_unbound_registration(&su, fixture.workspace, fixture.person_id, &signed_out).await;
+    let old = seed_pre_088_session(&su, fixture.workspace, fixture.person_id).await;
+    // The old logout: both halves revoked, the registration left alone.
+    sqlx::query(
+        "UPDATE token SET revoked_at = now() \
+          WHERE token_hash IN (digest($1::text, 'sha256'), digest($2::text, 'sha256'))",
+    )
+    .bind(&old.access)
+    .bind(&old.refresh)
+    .execute(&su)
+    .await
+    .expect("the old server's logout");
+
+    let w = upgrade_to_088(&db, su, fixture).await;
+
+    // REVIEW-GAP-A, after the upgrade: in and out again on the web.
+    let web = w.person_login().await;
+    w.logout(&web).await;
+    assert_eq!(
+        w.live_person_sessions().await,
+        0,
+        "the person has no live session anywhere"
+    );
+    w.send("after the upgrade").await;
+    let dispatches = w.drain_to(&signed_out).await;
+    println!("H1 legacy signed-out phone dispatches={dispatches}");
+    assert_eq!(
+        dispatches, 0,
+        "a phone that signed out before the upgrade receives nothing after it"
+    );
+    assert!(
+        !w.registration_live(&signed_out).await,
+        "088 invalidated the registration no session could end"
+    );
+    drop(w);
+    db.drop().await;
+}
+
+/// The cost of the full backfill (integrator decision (b)) and how it heals.
+///
+/// A phone still signed in across the upgrade loses its registration with
+/// everyone else's: no pre-088 row says which session made it. It is silent
+/// until its next cold start, where the boot rotation gives the pre-088 session
+/// its lineage, PushProvider registers the same device and APNs token again,
+/// and the reclaim UPDATE binds the row to that lineage — so this phone's own
+/// logout ends it from then on.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_phone_signed_in_across_the_upgrade_rebinds_on_its_next_launch() {
+    let _lock = test_lock().await;
+    let db = ScratchDb::create().await;
+    let (su, fixture) = instance_at_087(&db).await;
+    let phone = Phone::new();
+    seed_unbound_registration(&su, fixture.workspace, fixture.person_id, &phone).await;
+    let signed_in = seed_pre_088_session(&su, fixture.workspace, fixture.person_id).await;
+
+    let w = upgrade_to_088(&db, su, fixture).await;
+
+    w.send("right after the upgrade").await;
+    let dispatches = w.drain_to(&phone).await;
+    println!("H1 legacy signed-in phone before its next launch dispatches={dispatches}");
+    assert_eq!(
+        dispatches, 0,
+        "the cost of the full backfill: a signed-in phone is silent until it registers again"
+    );
+
+    // The next cold start: the boot rotation first …
+    let launched = w.rotate(&signed_in).await;
+    let lineage = w
+        .lineage_of(&launched.access)
+        .await
+        .expect("the first rotation gives a pre-088 session its lineage");
+    // … then PushProvider registers the same device and APNs token (reclaim).
+    w.register(&launched, &phone).await;
+    assert_eq!(
+        w.registration_lineage(&phone).await,
+        Some(lineage),
+        "the reclaimed registration is bound to the session that made it"
+    );
+    w.send("after the next launch").await;
+    assert_eq!(w.drain_to(&phone).await, 1, "the phone is notified again");
+
+    w.logout(&launched).await;
+    w.send("after signing out").await;
+    assert_eq!(
+        w.drain_to(&phone).await,
+        0,
+        "and its own logout now ends the registration"
+    );
+    drop(w);
+    db.drop().await;
+}
+
+/// `momo-migrate set-owner` exactly as the binary runs `set_initial_owner.sql`
+/// (`psql_file`: the file's own BEGIN/COMMIT, `ON_ERROR_STOP`, both values
+/// through the environment only — never argv).
+fn run_set_owner(url: &str, email: &str, password: &str) {
+    let path = PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../infra/rust/sql/set_initial_owner.sql"
+    ));
+    let status = Command::new(resolve_psql())
+        .arg(url)
+        .args(["-v", "ON_ERROR_STOP=1"])
+        .arg("--no-psqlrc")
+        .arg("--quiet")
+        .arg("-f")
+        .arg(path)
+        .env("MOMO_INITIAL_OWNER_EMAIL", email)
+        .env("MOMO_INITIAL_OWNER_PASSWORD", password)
+        .status()
+        .expect("spawn psql for set_initial_owner.sql");
+    assert!(status.success(), "set_initial_owner.sql failed to apply");
+}
+
+/// L2 in the review. `set-owner` is a credential rotation at the database-owner
+/// boundary and already revokes every session of the owner, like a password
+/// reset. So, like a password reset, it ends every registration those sessions
+/// made — and only the owner's.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn set_owner_ends_the_owners_registrations_and_only_theirs() {
+    let _lock = test_lock().await;
+    let db = ScratchDb::create().await;
+    assert!(
+        !db.migrate_all().is_empty(),
+        "a fresh database applies the tree"
+    );
+    apply_bootstrap_roles(&db.url);
+    let su = superuser_pool_at(&db.url).await;
+
+    // The operator's first run gives the seeded owner a way in.
+    let owner_email = format!("owner-{}@push-session-end.test", Uuid::new_v4().simple());
+    run_set_owner(&db.url, &owner_email, TEST_PASSWORD);
+    let (teammate_id, teammate_email) = seed_human(&su, DEMO_WORKSPACE, "member").await;
+    let dm = seed_dm(&su, DEMO_WORKSPACE, [teammate_id, DEMO_OWNER]).await;
+    let w = World::open(
+        &db.url,
+        su,
+        Fixture {
+            workspace: DEMO_WORKSPACE,
+            sender_email: teammate_email,
+            person_id: DEMO_OWNER,
+            person_email: owner_email,
+            dm,
+        },
+    )
+    .await;
+
+    let owners_phone = Phone::new();
+    let owner = w.person_login().await;
+    w.register(&owner, &owners_phone).await;
+    let teammates_phone = Phone::new();
+    let teammate = w.sender.clone();
+    w.register(&teammate, &teammates_phone).await;
+    w.send("before the rotation").await;
+    assert_eq!(
+        w.drain_to(&owners_phone).await,
+        1,
+        "control: the owner's phone is notified"
+    );
+
+    // The rotation.
+    run_set_owner(&db.url, &w.person_email, NEW_PASSWORD);
+    assert_eq!(
+        w.live_person_sessions().await,
+        0,
+        "control: set-owner revoked every session of the owner"
+    );
+    assert!(
+        !w.registration_live(&owners_phone).await,
+        "set-owner ends every registration the owner's sessions made"
+    );
+    assert!(
+        w.registration_live(&teammates_phone).await,
+        "a teammate's registration is not the owner's to end"
+    );
+    w.send("after the rotation").await;
+    assert_eq!(
+        w.drain_to(&owners_phone).await,
+        0,
+        "the owner's old phone is silent"
+    );
+    drop(w);
+    db.drop().await;
 }
