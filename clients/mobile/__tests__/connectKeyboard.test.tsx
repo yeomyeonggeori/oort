@@ -49,6 +49,9 @@ import {__resetServerBaseCache} from '../src/storage/serverBase';
 //   6. UIKit 의 캐럿 스크롤 — 키보드가 선 뒤 포커스한 칸이 창 밖이면 UIKit 이 그 칸의
 //      아랫변을 창 아랫변에 맞춘다(기기: 비밀번호 칸 424–468, 버튼 61pt 가려짐).
 //      그 다음에 JS 가 `keyboardDidShow` 를 받는다.
+//   7. 순서 — 애니메이션이 있는 변화(383ms)는 목록의 새 높이가 먼저, `keyboardDidShow`
+//      가 나중이다. 그 자리에서 종류만 바뀌는 변화(0ms)는 거꾸로, `keyboardDidShow` 가
+//      먼저 오고 새 높이가 뒤따른다(기기 탐침: 18936 did-show, 18940 높이 418).
 //
 // 5·6 은 첫 수리를 기기에 올려 잰 뒤에 더했다: 「다음」으로 비밀번호 칸에 가면 iOS 가
 // 키보드를 내렸다 다시 올리고(`keyboardWillHide` → `keyboardWillShow`, 각 383ms), 수리의
@@ -303,6 +306,28 @@ class KeyboardDouble {
     );
   }
 
+  /**
+   * 키보드가 그 자리에서 종류만 바뀐다(URL → 이메일, 0ms). 기기에서 잰 순서 그대로:
+   * `keyboardWillShow` 와 `keyboardDidShow` 가 **함께** 오고, 그 **뒤에** 목록의 새 높이가
+   * 온다 — 애니메이션이 없으니 실제 프레임은 곧바로 최종값이다. UIKit 의 캐럿 스크롤도
+   * 그 프레임에서 곧바로 돈다.
+   */
+  async keyboardSwitch(height: number) {
+    this.keyboard = height;
+    await act(async () => {
+      this.emit('keyboardWillShow', height, 0);
+      this.emit('keyboardDidShow', height, 0);
+    });
+    const padding = (this.kav().instance as {state: {bottom: number}}).state.bottom;
+    this.nativeViewport = SCREEN_H - TOP_INSET - padding;
+    this.moveTo(this.offset);
+    const input = this.focusedInput;
+    if (input !== null && input.bottom - this.offset > this.nativeViewport) {
+      this.moveTo(input.bottom - this.nativeViewport);
+    }
+    await this.layout();
+  }
+
   /** 규칙 1: 키보드가 움직이기 시작한다(`will`). KAV 가 창을 정하고, 목록이 그것을 알린다. */
   async keyboardWill(kind: 'show' | 'hide', height: number, durationMs: number) {
     this.keyboard = kind === 'show' ? height : 0;
@@ -400,8 +425,7 @@ async function walk(geometry: Geometry) {
   await blur('server-url-input');
   await focus('email-input');
   native.focusInput(inputs.email);
-  await native.keyboardWill('show', KEYBOARD.text, 0);
-  await native.keyboardDid(0);
+  await native.keyboardSwitch(KEYBOARD.text);
   const email = {
     field: native.hidden(inputs.email),
     next: native.hidden(inputs.password),
