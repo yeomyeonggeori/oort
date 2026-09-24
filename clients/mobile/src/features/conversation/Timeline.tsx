@@ -607,6 +607,7 @@ function TimelineInner({
   jumpTarget,
   onJumpMissed,
   onJumpLanded,
+  onReaderTookList,
   jumpPills = false,
   pillsRef,
   tailRef,
@@ -744,6 +745,12 @@ function TimelineInner({
   onJumpMissed?: (reason: 'older' | 'unknown') => void;
   /** 점프가 실제로 착지했다. 앞선 「못 찾았습니다」 고지를 거두는 신호. */
   onJumpLanded?: () => void;
+  /**
+   * 사람이 목록을 잡았다 — 손가락의 `scrollBeginDrag` (#2632 N-1). 대화 화면이
+   * 아직 판정을 기다리는 알림 착지를 접는 신호다: 늦게 온 답이 잡은 목록을 옮기면
+   * 안 된다.
+   */
+  onReaderTookList?: () => void;
   /**
    * 위 「안읽음으로」·아래 「최신으로」 점프 필을 띄우는가 (#1892).
    *
@@ -1785,6 +1792,7 @@ function TimelineInner({
    * from a second ago nor a channel opened a moment ago gets to argue.
    */
   const onScrollBeginDrag = useCallback(() => {
+    onReaderTookList?.();
     cancelConvergence();
     // The reader has taken the list; a focus move queued by a jump would pull
     // VoiceOver back to where they are leaving (#1892 R1 M-3).
@@ -1817,7 +1825,13 @@ function TimelineInner({
     // is the likeliest prelude to them scrolling UP into history, which is the
     // one thing that must never move under them.
     setChasingTail(false);
-  }, [cancelConvergence, cancelFocus, cancelJumpTravel, settleEntry]);
+  }, [
+    cancelConvergence,
+    cancelFocus,
+    cancelJumpTravel,
+    settleEntry,
+    onReaderTookList,
+  ]);
 
   // Follow the tail only when the reader is already there. Anyone scrolled back
   // is READING, and yanking them to the bottom because someone else typed is

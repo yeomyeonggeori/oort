@@ -110,6 +110,7 @@ import {
 } from '../features/workspace/queries';
 import {useNow} from '../lib/useNow';
 import {
+  notificationTargetHeld,
   planNotificationLanding,
   type NotificationLanding,
 } from '../push/tapArrival';
@@ -1265,77 +1266,124 @@ export default function ConversationScreen({
   const landedNotificationRef = useRef<number | null>(null);
   const timelineMessages = timeline.state.messages;
 
-  // ---- 탭 **뒤에** 읽은 행으로만 판정한다 (#2584 design-review R2 H-1) ----------
+  // ---- 「있다」는 언제든, 「없다」는 탭 **뒤의** 읽기로만 (#2584 R2 H-1 · #2632) --------
   //
   // 같은 방을 열어 둔 채 앱이 뒤로 갔다. 15초 뒤 소켓이 끊기고(ADR-0137 D4) 상대의
   // 새 메시지는 알림으로만 왔다. 그 알림을 누르면 이 화면은 다시 마운트되지 않고
-  // `channelId` 도 그대로라, 타임라인은 **탭 앞에 읽은** 이 방의 첫 페이지를 들고
-  // 있다(`timelineHoldsThisChannel` 은 「어느 방인가」만 묻는다). 그 행으로 판정하면
-  // 방금 온 메시지는 없고, 점프는 빗나가 「찾지 못했습니다 / 위로 올려 이전 대화를
-  // 더 불러오세요」를 세우고 낭독했다 — 메시지는 더 새것이고 아래에서 오는데. 문장을
-  // 따라 위로 올린 사람은 레일이 복구하는 순간 대기 점프(`awaitingJump`)에 끌려
-  // 내려왔다.
+  // `channelId` 도 그대로라, 타임라인은 **탭 앞에 읽은** 이 방의 행을 들고 있다
+  // (`timelineHoldsThisChannel` 은 「어느 방인가」만 묻는다). 그 행으로 「없다」를
+  // 판정하면 점프가 빗나가 「찾지 못했습니다 / 위로 올려 이전 대화를 더
+  // 불러오세요」를 세우고 낭독한다 — 메시지는 더 새것이고 아래에서 오는데(R2 H-1).
   //
-  // 셸이 M-1 에서 지키는 규율을 여기에도 건다: **탭 뒤에 읽은 것만으로 없다고
-  // 말한다**(`useNotificationTapRouting` 의 `dataUpdatedAt ≥ 도착`). 알림은 커밋 뒤에야
-  // 나가므로(relay 가 outbox 를 읽는다) 탭 뒤에 나간 REST 읽기는 그 메시지를 반드시
-  // 본다 — 소켓이 끊겨 있어도.
+  // 셸이 M-1 에서 지키는 규율을 여기에도 건다. 두 판정은 무게가 다르다:
   //
-  //   다른 방·첫 마운트   그 방의 첫 페이지는 방이 바뀐 뒤(= 탭 뒤)에 나간다. 그대로
-  //                       기다린다 — 추가 읽기 없음.
-  //   같은 방             탭을 처음 본 순간 이미 이 방을 들고 있다 → 꼬리를 다시
-  //                       읽고(`catchUp`) 그 뒤에 판정한다. 한 번의 왕복이다.
-  //   그 읽기가 실패      모르는 채로는 말하지 않는다. 레일이 다시 붙어 스스로 따라잡은
-  //                       신호(복구 표지 `recoveryMarkers` 가 탭 뒤에 늘었다)를
-  //                       기다린다. 보이지 않는 기다림이므로 시계를 단다 — 세션
-  //                       앵커와 같은 30초(`PENDING_ANCHOR_TTL_MS`). 시간이 다 되면
-  //                       **조용히** 접는다. 시간 끝에 「찾지 못했습니다」를 세우면
-  //                       그것이 바로 없애려던 거짓 문장이다.
+  //   「있다」  대상 메시지나 그 스레드 루트를 **들고 있으면** 언제든 곧바로 착지한다
+  //            (`notificationTargetHeld`). 들고 있는 행은 읽기가 늦거나 실패해도
+  //            여기 있다 — 기다리게 하면 실패한 망에서 탭이 아무 일도 안 한다
+  //            (R3 M-2). 레일이 가져온 행(발행·재생·역채움)도 도착하는 대로 센다.
+  //   「없다」  탭 **뒤에** 나간 REST 읽기가 답한 다음에만(`'fresh'`). 알림은 커밋
+  //            뒤에 나가므로(relay 가 outbox 를 읽는다) 탭 뒤의 읽기는 그 메시지를
+  //            반드시 본다 — 소켓이 끊겨 있어도. 레일의 복구 표지는 판정하지 않는다:
+  //            relay 가 밀리면 재생에 그 행이 아직 없다(R3 M-1).
+  //
+  // 탭을 처음 본 순간:
+  //   다른 방·첫 마운트        그 방의 첫 페이지는 방이 바뀐 뒤(= 탭 뒤)에 나간다 →
+  //                            그 답이 곧 탭 뒤의 읽기다.
+  //   같은 방·첫 페이지 오는 중 그 읽기는 탭 **앞에** 떠났다 → 첫 페이지가 온 뒤
+  //                            꼬리를 다시 읽는다(R3 N-3, `'awaiting-head'`).
+  //   같은 방·들고 있음        꼬리를 다시 읽고(`catchUp`) 그 답으로 「없다」를 판정한다.
+  //   그 읽기가 실패           말하지 않는다. 레일이 다시 붙으면(복구 표지) 탭 뒤에
+  //                            **다시 읽는다** — 판정은 그 답이 한다. 보이지 않는
+  //                            기다림이라 세션 앵커와 같은 30초 시계를 달고, 다 되면
+  //                            조용히 접는다.
+  //
+  // 기다리는 동안 사람이 목록을 잡으면(`onReaderTookList`) 기다림을 접는다(R3 N-1) —
+  // 늦게 온 답이 잡은 목록을 옮기면 안 된다. `cancelJump` 의 「닫기가 곧 취소」와 같은
+  // 규율이고, 이 기다림에는 상자가 없으니 손가락이 그 닫기다.
   const catchUpTimeline = timeline.catchUp;
   const recoveryMarkCount = timeline.recoveryMarkers.length;
   const [landingRead, setLandingRead] = useState<{
     token: number;
-    state: 'reading' | 'waiting-rail' | 'fresh';
+    state: 'awaiting-head' | 'reading' | 'waiting-rail' | 'fresh';
   } | null>(null);
-  /** 탭을 처음 본 순간 — 그때 이 방을 들고 있었는가, 복구 표지는 몇 개였는가. */
+  const landingReadRef = useRef(landingRead);
+  landingReadRef.current = landingRead;
+  /** 탭을 처음 본 순간의 복구 표지 수 — 그 뒤에 늘면 레일이 다시 붙은 것이다. */
   const landingSightRef = useRef<{token: number; markers: number} | null>(null);
+  /** 앞 커밋까지 이 화면이 보이던 방 — 탭과 함께 방이 바뀌었는가(N-3). */
+  const shownChannelRef = useRef<string | null>(null);
+  const openThreadRootId = thread?.id ?? null;
+  const landingHeld = useMemo(
+    () =>
+      notification !== undefined &&
+      timelineHoldsThisChannel &&
+      notificationTargetHeld(timelineMessages, notification, openThreadRootId),
+    [notification, timelineHoldsThisChannel, timelineMessages, openThreadRootId],
+  );
+  /** 탭 **뒤에** 꼬리를 읽는다. 답하면 「없다」를 판정해도 된다. */
+  const readAfterTap = useCallback(
+    (token: number) => {
+      setLandingRead({token, state: 'reading'});
+      catchUpTimeline().then(
+        () =>
+          setLandingRead(current =>
+            current?.token === token ? {token, state: 'fresh'} : current,
+          ),
+        () =>
+          setLandingRead(current =>
+            current?.token === token && current.state === 'reading'
+              ? {token, state: 'waiting-rail'}
+              : current,
+          ),
+      );
+    },
+    [catchUpTimeline],
+  );
   useEffect(() => {
     if (!notification) return;
     if (landingSightRef.current?.token === notification.token) return;
     const {token} = notification;
     landingSightRef.current = {token, markers: recoveryMarkCount};
+    const roomChanged =
+      shownChannelRef.current === null ||
+      !uuidEq(shownChannelRef.current, channelId);
     if (!timelineHoldsThisChannel) {
-      setLandingRead({token, state: 'fresh'});
+      setLandingRead({token, state: roomChanged ? 'fresh' : 'awaiting-head'});
       return;
     }
-    setLandingRead({token, state: 'reading'});
-    catchUpTimeline().then(
-      () =>
-        setLandingRead(current =>
-          current?.token === token ? {token, state: 'fresh'} : current,
-        ),
-      () =>
-        setLandingRead(current =>
-          current?.token === token && current.state === 'reading'
-            ? {token, state: 'waiting-rail'}
-            : current,
-        ),
-    );
+    // 들고 있으면 읽지 않는다 — 아래 착지 효과가 이 커밋에서 곧바로 내려앉는다.
+    if (landingHeld) return;
+    readAfterTap(token);
   }, [
     notification,
+    channelId,
     timelineHoldsThisChannel,
+    landingHeld,
     recoveryMarkCount,
-    catchUpTimeline,
+    readAfterTap,
   ]);
-  // 레일이 스스로 따라잡았다 — 탭 뒤에 복구 표지가 늘었다(재구독의 재생 또는 역채움).
+  // 위 효과 **뒤에** 선언한다 — 같은 커밋에서 위 효과는 앞 커밋의 방을 읽어야 한다.
+  useEffect(() => {
+    shownChannelRef.current = channelId;
+  }, [channelId]);
+  // 같은 방의 첫 페이지가 왔다 — 탭 앞에 떠난 그 답으로는 「없다」를 말하지 않는다(N-3).
+  useEffect(() => {
+    if (landingRead?.state !== 'awaiting-head') return;
+    if (landedNotificationRef.current === landingRead.token) return;
+    if (!timelineHoldsThisChannel || landingHeld) return;
+    readAfterTap(landingRead.token);
+  }, [landingRead, timelineHoldsThisChannel, landingHeld, readAfterTap]);
+  // 읽기가 실패한 뒤 레일이 다시 붙었다(복구 표지가 늘었다) → 탭 뒤에 다시 읽는다.
+  // 표지 자체로는 판정하지 않는다: 재생에는 그 행이 아직 없을 수 있다(R3 M-1).
+  // 읽는 중에 온 표지는 셀 필요가 없다 — 그 읽기가 답한다.
   useEffect(() => {
     const sight = landingSightRef.current;
     if (sight === null || landingRead?.token !== sight.token) return;
-    if (landingRead.state === 'fresh') return;
-    if (recoveryMarkCount > sight.markers) {
-      setLandingRead({token: sight.token, state: 'fresh'});
-    }
-  }, [recoveryMarkCount, landingRead]);
+    if (landingRead.state !== 'waiting-rail') return;
+    if (recoveryMarkCount <= sight.markers) return;
+    sight.markers = recoveryMarkCount;
+    readAfterTap(sight.token);
+  }, [recoveryMarkCount, landingRead, readAfterTap]);
   // 보이지 않는 기다림의 시계.
   useEffect(() => {
     if (landingRead?.state !== 'waiting-rail') return undefined;
@@ -1346,12 +1394,22 @@ export default function ConversationScreen({
     }, PENDING_ANCHOR_TTL_MS);
     return () => clearTimeout(timer);
   }, [landingRead]);
+  // 사람이 목록을 잡았다 — 아직 판정을 기다리는 착지는 접는다(R3 N-1). 읽기는 그대로
+  // 둔다: 그 행은 목록에 들어와야 하고, 다만 목록을 옮기지 않는다.
+  const onReaderTookList = useCallback(() => {
+    const pending = landingReadRef.current;
+    if (pending === null) return;
+    if (landedNotificationRef.current === pending.token) return;
+    landedNotificationRef.current = pending.token;
+    setLandingRead(null);
+  }, []);
 
   useEffect(() => {
     if (!notification || !timelineHoldsThisChannel) return;
     if (landedNotificationRef.current === notification.token) return;
-    if (landingRead?.token !== notification.token) return;
-    if (landingRead.state !== 'fresh') return;
+    const fresh =
+      landingRead?.token === notification.token && landingRead.state === 'fresh';
+    if (!landingHeld && !fresh) return;
     landedNotificationRef.current = notification.token;
     const plan = planNotificationLanding(timelineMessages, notification);
     setPinsOpen(false);
@@ -1378,6 +1436,7 @@ export default function ConversationScreen({
     notification,
     timelineHoldsThisChannel,
     landingRead,
+    landingHeld,
     timelineMessages,
     requestJump,
     closeMemberProfile,
@@ -1546,6 +1605,7 @@ export default function ConversationScreen({
               jumpTarget={jumpTarget ?? undefined}
               onJumpMissed={onJumpMissed}
               onJumpLanded={clearJumpNotice}
+              onReaderTookList={onReaderTookList}
               // 위 「안읽음으로」·아래 「최신으로」 (#1892). 위 필의 N 은 위의
               // 동결 스냅샷(`unreadCount`) 그대로다 — 구분선과 같은 수.
               jumpPills
@@ -1644,6 +1704,7 @@ export default function ConversationScreen({
           onClose={closeThread}
           onReplySent={bumpSelfSend}
           onOpenProfile={showMemberProfile}
+          onReaderTookList={onReaderTookList}
         />
       ) : null}
 

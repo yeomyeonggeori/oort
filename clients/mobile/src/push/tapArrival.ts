@@ -194,6 +194,39 @@ export interface NotificationLandingPlan {
  *   첫 페이지에 그 답글이 있을 때다(채널 히스토리는 답글을 거르지 않으므로 대개
  *   있다). 없으면 스레드가 불러온 묘비가 스스로 말한다.
  */
+/**
+ * 알림이 가리킨 것을 이 행들이 **이미 들고 있는가** (#2632 — #2584 R3 M-2).
+ *
+ * 대상 메시지, 또는 답글이면 그 스레드 루트. `planNotificationLanding` 이 착지할
+ * 곳을 찾는 바로 그 두 행이다 — 대상이 있으면 그 행에 착지하고, 루트가 있으면
+ * 스레드를 연다. 스레드 판은 **열리면서** 자기 답글을 읽으므로(`loadReplies`) 그
+ * 답글은 판이 스스로 찾는다.
+ *
+ * 단, 그 스레드가 **이미 열려 있으면** 루트로는 세지 않는다(`openThreadRootId`).
+ * 루트가 그대로인 판은 답글을 다시 읽지 않아서, 탭 앞에 읽은 답글들 위에 착지를
+ * 건다 — 새 답글은 거기 없다(R3 리뷰가 고쳤다고 적은 `[edge-c2]` 의 길). 그때는
+ * 답글 자신이 들려 있어야 「있다」다.
+ *
+ * 「있다」는 언제 판정해도 참이다: 들고 있는 행은 읽기가 늦거나 실패해도 여기 있다.
+ * 「없다」만이 탭 **뒤의** 읽기를 기다린다 — 탭 앞에 읽은 행에서 빠진 것은 아직 안
+ * 온 것일 수 있다. 화면은 이 함수로 그 둘을 가른다.
+ */
+export function notificationTargetHeld(
+  messages: readonly Message[],
+  landing: Pick<NotificationLanding, 'messageId' | 'threadRootId'>,
+  openThreadRootId: string | null = null,
+): boolean {
+  if (messages.some(message => uuidEq(message.id, landing.messageId))) {
+    return true;
+  }
+  const rootId = landing.threadRootId;
+  if (rootId === null) return false;
+  if (openThreadRootId !== null && uuidEq(openThreadRootId, rootId)) {
+    return false;
+  }
+  return messages.some(message => uuidEq(message.id, rootId));
+}
+
 export function planNotificationLanding(
   messages: readonly Message[],
   landing: Pick<NotificationLanding, 'messageId' | 'threadRootId'>,
