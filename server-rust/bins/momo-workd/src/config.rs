@@ -51,6 +51,9 @@ pub fn read_owned_file(path: &Path) -> Result<String, ConfigError> {
         path: path.display().to_string(),
         detail,
     };
+    // #2607 N-10: a folder someone else can write into lets them swap the
+    // file between two reads.
+    check_parent_folder(path)?;
     let mut file = match std::fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
@@ -81,6 +84,57 @@ pub fn read_owned_file(path: &Path) -> Result<String, ConfigError> {
     let mut raw = String::new();
     file.read_to_string(&mut raw).map_err(io)?;
     Ok(raw)
+}
+
+/// The folder holding a file the host takes orders from: owned by this user
+/// (or root) and writable by no one else (#2607 N-10).
+pub fn check_parent_folder(path: &Path) -> Result<(), ConfigError> {
+    let parent = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let metadata = std::fs::metadata(parent).map_err(|source| ConfigError::Io {
+        path: parent.display().to_string(),
+        source,
+    })?;
+    // SAFETY: `geteuid` has no preconditions and cannot fail.
+    let uid = unsafe { libc::geteuid() };
+    let mode = metadata.mode() & 0o7777;
+    let detail = if !metadata.is_dir() {
+        Some("its folder is not a directory".to_string())
+    } else if metadata.uid() != uid && metadata.uid() != 0 {
+        Some(format!("its folder is owned by uid {}", metadata.uid()))
+    } else if mode & 0o022 != 0 {
+        Some(format!(
+            "its folder (mode {mode:04o}) lets others write into it"
+        ))
+    } else {
+        None
+    };
+    match detail {
+        Some(detail) => Err(ConfigError::Unsafe {
+            path: path.display().to_string(),
+            detail,
+        }),
+        None => Ok(()),
+    }
+}
+
+/// The allowed folder is a project folder: not `/`, not the home folder, and
+/// not a folder above it (#2607 N-1). Those would put the owner's credential
+/// folders inside the read fence and under every command's reach.
+pub fn check_working_directory(folder: &Path, home: Option<&Path>) -> Result<(), String> {
+    let resolve = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let folder = resolve(folder);
+    let too_wide =
+        folder.parent().is_none() || home.is_some_and(|home| resolve(home).starts_with(&folder));
+    if too_wide {
+        return Err(format!(
+            "working_directory {} is `/`, the home folder or above it; allow a project folder",
+            folder.display()
+        ));
+    }
+    Ok(())
 }
 
 fn default_poll_interval_ms() -> u64 {
@@ -169,6 +223,9 @@ impl WorkdConfig {
         if !self.working_directory.is_absolute() {
             return invalid("working_directory must be an absolute path".to_string());
         }
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        check_working_directory(&self.working_directory, home.as_deref())
+            .map_err(ConfigError::Invalid)?;
         if !self.state_path.is_absolute() {
             return invalid("state_path must be an absolute path".to_string());
         }
@@ -181,14 +238,6 @@ impl WorkdConfig {
             }
             if !entry.executable.is_absolute() {
                 return invalid(format!("tools.{key}.executable must be an absolute path"));
-            }
-            if policy::check_adapter_admitted(entry.adapter).is_err() {
-                // #2602 M-2: said at startup, not only as a refused control.
-                return invalid(format!(
-                    "tools.{key}: the {:?} adapter is not admitted for remote sessions \
-                     (no mode asks before every command and write; ADR-0188 D6)",
-                    entry.adapter
-                ));
             }
             if let Some(argument) = entry
                 .args
@@ -285,13 +334,15 @@ impl HostState {
             source,
         };
         if let Some(parent) = path.parent() {
-            // A new folder is this user's alone (#2602 L-4).
+            // A new folder is this user's alone (#2602 L-4); one that already
+            // exists must be too (#2607 N-10).
             std::fs::DirBuilder::new()
                 .recursive(true)
                 .mode(0o700)
                 .create(parent)
                 .map_err(io)?;
         }
+        check_parent_folder(path)?;
         let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
         let _ = std::fs::remove_file(&temporary);
         let mut file = std::fs::OpenOptions::new()
@@ -405,17 +456,15 @@ mod tests {
     }
 
     #[test]
-    fn a_codex_tool_entry_is_refused_at_load() {
+    fn a_codex_tool_entry_is_accepted_at_load() {
+        // ADR-0188 §8 (2026-09-24): Codex runs inside its accepted sandbox;
+        // the conditions are checked at every spawn, not here.
         let mut value = base_json();
         value["tools"]["codex"] = serde_json::json!({
             "adapter": "codex", "executable": "/usr/local/bin/codex-acp"
         });
-        match parse(value) {
-            Err(ConfigError::Invalid(message)) => {
-                assert!(message.contains("not admitted"), "{message}")
-            }
-            other => panic!("a codex entry must be refused, got {other:?}"),
-        }
+        let config = parse(value).expect("a codex entry is accepted");
+        assert_eq!(config.tools["codex"].adapter, AdapterKind::Codex);
     }
 
     #[test]
@@ -461,11 +510,74 @@ mod tests {
     }
 
     #[test]
+    fn the_allowed_folder_is_a_project_folder() {
+        let home = Path::new("/Users/me");
+        for wide in ["/", "/Users", "/Users/me", "/Users/me/"] {
+            assert!(
+                check_working_directory(Path::new(wide), Some(home)).is_err(),
+                "{wide}"
+            );
+        }
+        for project in ["/Users/me/src/app", "/opt/work"] {
+            assert!(
+                check_working_directory(Path::new(project), Some(home)).is_ok(),
+                "{project}"
+            );
+        }
+        // A config naming the home folder is refused at load.
+        let mut value = base_json();
+        value["working_directory"] = std::env::var("HOME").unwrap().into();
+        assert!(
+            matches!(parse(value), Err(ConfigError::Invalid(message)) if message.contains("home folder"))
+        );
+    }
+
+    #[test]
+    fn a_config_or_state_in_a_folder_others_can_write_is_refused() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir =
+            std::env::temp_dir().join(format!("momo-workd-folder-{}", Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let config = dir.join("workd.json");
+        std::fs::write(&config, serde_json::to_vec(&base_json()).unwrap()).unwrap();
+        std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o600)).unwrap();
+        WorkdConfig::load(&config).expect("a private folder is fine");
+
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        match WorkdConfig::load(&config) {
+            Err(ConfigError::Unsafe { detail, .. }) => {
+                assert!(detail.contains("folder"), "{detail}")
+            }
+            other => panic!("a world-writable folder must be refused, got {other:?}"),
+        }
+        let state = HostState {
+            server_url: "https://oort.example.com".to_string(),
+            workspace_id: Uuid::from_u128(1),
+            host_id: Uuid::from_u128(2),
+            owner_member_id: Uuid::from_u128(3),
+            public_key: "AAAA".to_string(),
+            scope: "member".to_string(),
+        };
+        assert!(
+            matches!(
+                state.save(&dir.join("state.json")),
+                Err(ConfigError::Unsafe { .. })
+            ),
+            "no state is written into a folder others can write"
+        );
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn a_config_or_state_others_can_write_or_swap_is_refused() {
         use std::os::unix::fs::PermissionsExt as _;
         let dir =
             std::env::temp_dir().join(format!("momo-workd-owned-{}", Uuid::new_v4().simple()));
         std::fs::create_dir_all(&dir).unwrap();
+        // The owner's own folder whatever the umask (`check_parent_folder`).
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
         let config = dir.join("workd.json");
         std::fs::write(&config, serde_json::to_vec(&base_json()).unwrap()).unwrap();
         std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o644)).unwrap();

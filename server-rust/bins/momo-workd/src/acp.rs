@@ -12,10 +12,14 @@
 //!   credentials, and nothing here forwards it anywhere (ADR-0125 D10).
 //! * **A line over [`MAX_LINE_BYTES`] ends the connection.** An agent cannot make
 //!   the host buffer without bound.
-//! * **The child runs in its own process group**, so terminating a session also
-//!   terminates whatever the adapter spawned (`claude`, `codex`, their tools).
+//! * **Ending a session ends the whole tree the adapter started.** The child
+//!   runs in its own process group, and because a tool can leave that group
+//!   (codex runs commands after `setsid()`), the host also keeps a census of
+//!   every descendant ([`crate::proctree`]) and signals each of them. SIGKILL
+//!   follows SIGTERM for whatever is left, whether or not the adapter itself
+//!   exited in time (#2602 L-1).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -26,6 +30,8 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt as _, AsyncRead, AsyncWriteExt as _, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot};
+
+use crate::proctree::ProcessTree;
 
 /// Longest JSON-RPC line accepted from an agent.
 pub const MAX_LINE_BYTES: usize = 8 * 1024 * 1024;
@@ -73,10 +79,16 @@ type Pending = Arc<Mutex<HashMap<i64, oneshot::Sender<RpcResult>>>>;
 pub struct AcpConnection {
     child: Child,
     pid: Option<u32>,
+    /// Set once the child has been waited for: its pid, and so its process
+    /// group id, may then be reused and is never signalled again.
+    reaped: bool,
+    tree: ProcessTree,
     outbound: mpsc::UnboundedSender<Vec<u8>>,
     pending: Pending,
     next_id: AtomicI64,
     incoming: mpsc::Receiver<Incoming>,
+    /// Messages taken off `incoming` and handed back ([`Self::unread`]).
+    unread: VecDeque<Incoming>,
 }
 
 impl AcpConnection {
@@ -125,11 +137,14 @@ impl AcpConnection {
 
         Ok(Self {
             child,
+            tree: ProcessTree::new(pid.map_or(-1, |pid| pid as i32)),
             pid,
+            reaped: false,
             outbound,
             pending,
             next_id: AtomicI64::new(1),
             incoming,
+            unread: VecDeque::new(),
         })
     }
 
@@ -194,6 +209,9 @@ impl AcpConnection {
 
     /// Next agent→client message; `None` once the agent's stdout closed.
     pub async fn next_incoming(&mut self) -> Option<Incoming> {
+        if let Some(message) = self.unread.pop_front() {
+            return Some(message);
+        }
         self.incoming.recv().await
     }
 
@@ -203,38 +221,118 @@ impl AcpConnection {
     /// response, so once a response has arrived, everything the agent wrote
     /// ahead of it is available here.
     pub fn try_next_incoming(&mut self) -> Option<Incoming> {
+        if let Some(message) = self.unread.pop_front() {
+            return Some(message);
+        }
         self.incoming.try_recv().ok()
     }
 
-    /// Stop the agent: close its stdin, then SIGTERM its process group, then
-    /// SIGKILL if it is still there. Returns a shell-style exit code
-    /// (`128 + signal` for a signal death).
-    pub async fn terminate(&mut self, grace: Duration) -> i32 {
-        if let Ok(Some(status)) = self.child.try_wait() {
-            return exit_code(status);
-        }
-        self.signal_group(libc::SIGTERM);
-        if let Ok(Ok(status)) = tokio::time::timeout(grace, self.child.wait()).await {
-            return exit_code(status);
-        }
-        self.signal_group(libc::SIGKILL);
-        match self.child.wait().await {
-            Ok(status) => exit_code(status),
-            Err(_) => 128 + libc::SIGKILL,
+    /// Hand messages back, in order, ahead of anything not yet read.
+    pub fn unread(&mut self, messages: impl IntoIterator<Item = Incoming>) {
+        let mut messages: Vec<Incoming> = messages.into_iter().collect();
+        while let Some(message) = messages.pop() {
+            self.unread.push_front(message);
         }
     }
 
-    /// Wait for a child that is exiting on its own (stdout already closed).
+    /// Record the agent's current process tree ([`ProcessTree::census`]). The
+    /// session task calls this on every tick, so a tool that leaves the
+    /// adapter's group is known before the adapter can exit and orphan it.
+    pub fn observe_tree(&mut self) {
+        self.tree.census();
+    }
+
+    /// Stop the agent and everything it started: close its stdin, SIGTERM
+    /// its process group and every descendant the census has seen, and after
+    /// `grace` SIGKILL whatever is left — also when the adapter itself exited
+    /// in time, since its tools may not have. Returns a shell-style exit code
+    /// (`128 + signal` for a signal death).
+    pub async fn terminate(&mut self, grace: Duration) -> i32 {
+        // While the adapter is alive it is the root of its tree: take the
+        // census now, before an exit re-parents its children to launchd.
+        self.tree.census();
+        if let Some(code) = self.try_reap() {
+            self.end_leftovers(grace).await;
+            return code;
+        }
+        self.signal_group(libc::SIGTERM);
+        self.tree.signal_members(libc::SIGTERM);
+        let exited = match tokio::time::timeout(grace, self.child.wait()).await {
+            Ok(Ok(status)) => {
+                self.reaped = true;
+                Some(exit_code(status))
+            }
+            _ => None,
+        };
+        // Anything started meanwhile, from the members still alive.
+        self.tree.census();
+        if exited.is_none() {
+            self.signal_group(libc::SIGKILL);
+        }
+        self.tree.signal_members(libc::SIGKILL);
+        match exited {
+            Some(code) => code,
+            None => {
+                let code = match self.child.wait().await {
+                    Ok(status) => exit_code(status),
+                    Err(_) => 128 + libc::SIGKILL,
+                };
+                self.reaped = true;
+                code
+            }
+        }
+    }
+
+    /// Wait for a child that is exiting on its own (stdout already closed),
+    /// then end what it left running.
     pub async fn wait_exit(&mut self, grace: Duration) -> i32 {
+        self.tree.census();
         match tokio::time::timeout(grace, self.child.wait()).await {
-            Ok(Ok(status)) => exit_code(status),
+            Ok(Ok(status)) => {
+                self.reaped = true;
+                self.end_leftovers(grace).await;
+                exit_code(status)
+            }
             _ => self.terminate(grace).await,
         }
     }
 
+    /// The adapter is gone; its descendants get SIGTERM, then SIGKILL.
+    async fn end_leftovers(&mut self, grace: Duration) {
+        self.tree.census();
+        if self.tree.running().is_empty() {
+            return;
+        }
+        self.tree.signal_members(libc::SIGTERM);
+        let deadline = tokio::time::Instant::now() + grace;
+        while tokio::time::Instant::now() < deadline && !self.tree.running().is_empty() {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        self.tree.census();
+        self.tree.signal_members(libc::SIGKILL);
+    }
+
+    fn try_reap(&mut self) -> Option<i32> {
+        if self.reaped {
+            return Some(-1);
+        }
+        match self.child.try_wait() {
+            Ok(Some(status)) => {
+                self.reaped = true;
+                Some(exit_code(status))
+            }
+            _ => None,
+        }
+    }
+
     fn signal_group(&self, signal: i32) {
+        // Only while the child is unreaped: its pid is then still its own and
+        // no other process group can have taken the same id.
+        if self.reaped {
+            return;
+        }
         if let Some(pid) = self.pid {
-            // SAFETY: plain syscall; a stale pgid only yields ESRCH.
+            // SAFETY: plain syscall on our own child's process group.
             unsafe {
                 libc::killpg(pid as libc::pid_t, signal);
             }
@@ -243,6 +341,18 @@ impl AcpConnection {
 
     pub fn pid(&self) -> Option<u32> {
         self.pid
+    }
+}
+
+impl Drop for AcpConnection {
+    /// A connection dropped without [`AcpConnection::terminate`] (the host is
+    /// shutting down around it) still takes the agent's whole tree with it.
+    fn drop(&mut self) {
+        self.tree.census();
+        if self.try_reap().is_none() {
+            self.signal_group(libc::SIGKILL);
+        }
+        self.tree.signal_members(libc::SIGKILL);
     }
 }
 
