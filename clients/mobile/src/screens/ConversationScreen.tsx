@@ -1704,6 +1704,7 @@ export default function ConversationScreen({
           onClose={closeThread}
           onReplySent={bumpSelfSend}
           onOpenProfile={showMemberProfile}
+          onReaderTookList={onReaderTookList}
         />
       ) : null}
 

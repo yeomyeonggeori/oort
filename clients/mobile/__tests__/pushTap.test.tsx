@@ -2027,6 +2027,69 @@ describe('「있다」는 언제든, 「없다」는 탭 뒤 읽기로만 (#2632
     expect(missAnnouncements()).toEqual([]);
   });
 
+  it('스레드 판이 채널을 덮고 있을 때 그 판의 목록을 잡아도 기다림은 접힌다 (N-1, 같은 스레드)', async () => {
+    const gates: Held[] = [];
+    let holdNext = false;
+    installFetch({
+      afterResponder: channelId => {
+        if (channelId !== GENERAL || !holdNext) return undefined;
+        holdNext = false;
+        const gate = held();
+        gates.push(gate);
+        return gate.promise;
+      },
+    });
+    const emitAppState = captureAppState();
+    // 목록 측정이 없는 시험에서 진짜 `scrollToIndex` 는 실패해 회복 라운드를 돈다.
+    // 첫 착지부터 가짜로 받아, 앞 착지의 회복이 뒤의 셈에 섞이지 않게 한다.
+    const toIndex = jest
+      .spyOn(FlatList.prototype, 'scrollToIndex')
+      .mockImplementation(() => {});
+    renderShell();
+    await waitForSidebar();
+    await tapWhileRunning(apnsPayload(TARGETS['스레드 답글'].aim));
+    await expectLanded('general', REPLY, true);
+    await sleep(400);
+    const jumpsBefore = toIndex.mock.calls.length;
+
+    // 같은 스레드가 열린 채, 그 스레드의 새 답글 알림 — 채널 꼬리 읽기를 기다린다.
+    act(() => emitAppState('background'));
+    commitLater(
+      GENERAL,
+      message(17, NEW_REPLY_ID, {rootId: ROOT, body: '같은 스레드의 새 답글'}),
+    );
+    holdNext = true;
+    await tapWhileRunning(
+      apnsPayload({
+        messageId: NEW_REPLY_ID,
+        threadId: ROOT,
+        category: 'momo.message',
+        reason: 'dm',
+      }),
+    );
+    act(() => emitAppState('active'));
+    await sleep(100);
+    expect(gates).toHaveLength(1);
+
+    // 사람이 잡은 것은 스레드 판의 목록이다(채널 목록은 그 아래 덮여 있다).
+    const lists = screen.getAllByTestId('timeline-list');
+    fireEvent(lists[lists.length - 1], 'scrollBeginDrag');
+    await act(async () => {
+      gates[0].release(
+        jsonResponse(200, {
+          messages: [
+            message(17, NEW_REPLY_ID, {rootId: ROOT, body: '같은 스레드의 새 답글'}),
+          ],
+        }),
+      );
+    });
+    await sleep(300);
+    expect(rowsHeld()).toContain(NEW_REPLY_ID);
+    expect(toIndex.mock.calls.length).toBe(jumpsBefore); // 잡은 뒤로는 옮기지 않았다
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
+    expect(missAnnouncements()).toEqual([]);
+  });
+
   it('읽기가 실패해 레일을 기다리는 중에 목록을 잡으면, 늦게 온 역채움도 목록을 옮기지 않는다 (N-1, 탐침 edge2-b4)', async () => {
     let failNext = false;
     installFetch({
