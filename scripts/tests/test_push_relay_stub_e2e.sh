@@ -474,6 +474,9 @@ test "$(jq -r '.aps.alert.title' <<<"$LINE")" = "oort"
 test "$(jq -r '.aps.alert.body' <<<"$LINE")" = "새 알림"
 test "$(jq -r '.momo.schema' <<<"$LINE")" = "momo.push.notification.v2"
 test "$(jq -r '.momo.reason' <<<"$LINE")" = "mention"
+# #2669: the mention reached APNs as momo.mention with the default sound.
+test "$(jq -r '.aps.category' <<<"$LINE")" = "momo.mention"
+test "$(jq -r '.aps.sound' <<<"$LINE")" = "default"
 if grep -Fqe "$SECRET_BODY" <<<"$CAPTURE"; then
   fail "conversation body bytes leaked into APNs capture"
 fi
