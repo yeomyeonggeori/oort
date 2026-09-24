@@ -24,6 +24,17 @@ export interface JumpNotice {
 }
 
 /**
+ * 고지를 **소리로** 말할 때의 한 덩이 (#2584 리뷰 M-2).
+ *
+ * 상자는 두 줄(무슨 일인지 · 무엇을 하면 되는지)이고, 머리줄은 제목이라 마침표가
+ * 없다. 이어 읽을 때 그 자리에 쉼을 둔다. 화면과 낭독이 **같은 상수**에서 오므로
+ * 둘은 갈라질 수 없다.
+ */
+export function jumpNoticeSpeech(notice: JumpNotice): string {
+  return `${notice.headline}. ${notice.detail}`;
+}
+
+/**
  * **무엇을** 찾다 못 찾았는가 (#1193 · #1196).
  *
  * 같은 기계를 **네 곳**이 탄다. 인용을 누른 사람에게 「인용한 원본」이라고 말하는
@@ -44,7 +55,7 @@ export interface JumpNotice {
  * 조사가 낱말마다 갈린다: 「원본은 · 원본을」과 「메시지는 · 메시지를」. 그래서
  * 주어를 접두사로 갈아 끼울 수 없고, 문장을 통째로 든다.
  */
-export type JumpSubject = 'quote' | 'pin' | 'search' | 'session';
+export type JumpSubject = 'quote' | 'pin' | 'search' | 'session' | 'notification';
 
 /**
  * 「위쪽에 있다」고 **단정할 수 있는** 주어의 문장.
@@ -106,6 +117,18 @@ export function jumpMissedNotice(
     // 거짓말은 초록으로 보존된다.
     return {
       headline: '이 작업을 시작한 메시지를 이 화면에서 찾지 못했습니다',
+      detail: ASK,
+    };
+  }
+  if (subject === 'notification') {
+    // 다섯 번째 주어 (#2569). 알림을 누른 사람은 인용도 검색도 한 적이 없다 —
+    // 남의 낱말로 말하면 #1193·#1196 이 걷어낸 그 거짓말이 돌아온다.
+    //
+    // 세션 앵커와 같은 이유로 `reason` 을 보지 않는다: 알림은 식별자만 나르므로
+    // (ADR-0120 D2-A) 순서값이 없고, 그래서 「더 위쪽에 있습니다」는 이 자리에서
+    // 말할 자격이 없는 문장이다.
+    return {
+      headline: '알림이 가리킨 메시지를 이 화면에서 찾지 못했습니다',
       detail: ASK,
     };
   }

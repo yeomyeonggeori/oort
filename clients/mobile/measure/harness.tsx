@@ -17,6 +17,7 @@ import {Composer} from '../src/features/conversation/Composer';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
 import {
   Timeline,
+  type PillState,
   type TimelineGeometry,
 } from '../src/features/conversation/Timeline';
 import {color, font, SAFE_GUTTER, space} from '../src/design/tokens';
@@ -125,6 +126,23 @@ const INITIAL_COUNT = 200;
  * tail-follow at the bottom) could flatter the result.
  */
 const ANCHOR_SEQ = FIRST_SEQ + 45;
+
+/**
+ * #1892 — the channel stage carries an unread boundary and the jump pills, so the
+ * two anchor claims below are read with the pills ON rather than about a list
+ * that never had them.
+ *
+ * The boundary sits well BELOW the anchor on purpose. The anchor is reached by
+ * scanning down from offset 0, and a scan that passed through the divider would
+ * count as having seen it (the pill latch), so a divider above the anchor would
+ * take the top pill off the screen before either claim was read. Below it, the
+ * reader at the anchor is away from the bottom, so the 「최신으로」 pill stands
+ * over the list for both claims — and it changes its own label in the very
+ * moment claim 1 measures ("최신 메시지로 이동" → "새 메시지 1개 보기"). Which
+ * pills were standing is read off the list itself (`pillsRef`), not assumed.
+ */
+const UNREAD_CURSOR_SEQ = FIRST_SEQ + 150;
+const UNREAD_COUNT = INITIAL_COUNT - 151;
 
 // ---- goal RN-U1: the SHORT conversation ------------------------------------
 //
@@ -491,6 +509,9 @@ interface Results {
   threadTrace: string | null;
 
   originSentByRn: string | null;
+  /** #1892: which pills were on screen when each anchor claim was read. */
+  pillsAtIncoming: string | null;
+  pillsAtPrepend: string | null;
   note: string;
 }
 
@@ -526,6 +547,8 @@ const EMPTY: Results = {
   threadRootGapPx: null,
   threadTrace: null,
   originSentByRn: null,
+  pillsAtIncoming: null,
+  pillsAtPrepend: null,
   note: '측정 중…',
 };
 
@@ -552,6 +575,7 @@ function Harness(): React.JSX.Element {
   const anchorRef = useRef<View | null>(null);
   const tailRef = useRef<View | null>(null);
   const metricsRef = useRef<TimelineGeometry | null>(null);
+  const pillsRef = useRef<PillState | null>(null);
   const dockRef = useRef<View | null>(null);
   const listRef = useRef<FlatList<never> | null>(null);
   const inputRef = useRef<TextInput | null>(null);
@@ -756,6 +780,7 @@ function Harness(): React.JSX.Element {
       let after = await measureAnchor();
       next.incomingShiftPx =
         after === null ? -1 : Math.round(Math.abs(after - before) * 10) / 10;
+      next.pillsAtIncoming = pillLabel(pillsRef.current);
 
       // ---- 2. older messages are prepended ---------------------------------
       await wait(400);
@@ -780,6 +805,7 @@ function Harness(): React.JSX.Element {
         next.prependShiftPx =
           after === null ? -1 : Math.round(Math.abs(after - before) * 10) / 10;
       }
+      next.pillsAtPrepend = pillLabel(pillsRef.current);
       // Merged, not replaced: the keyboard and Origin probes run on their own
       // schedules and have already written into this object. Rebuilding it from
       // the blank record is how the Origin reading kept disappearing.
@@ -787,8 +813,20 @@ function Harness(): React.JSX.Element {
         ...current,
         incomingShiftPx: next.incomingShiftPx,
         prependShiftPx: next.prependShiftPx,
+        pillsAtIncoming: next.pillsAtIncoming,
+        pillsAtPrepend: next.pillsAtPrepend,
         note: next.note,
       }));
+      // Its own line, now: the combined MOMO_MEASURE line waits for the keyboard
+      // probe, and a run that dies there should not take these two with it.
+      console.log(
+        `MOMO_MEASURE_PILLS ${JSON.stringify({
+          incomingShiftPx: next.incomingShiftPx,
+          prependShiftPx: next.prependShiftPx,
+          pillsAtIncoming: next.pillsAtIncoming,
+          pillsAtPrepend: next.pillsAtPrepend,
+        })}`,
+      );
 
       // ---- 2b. my own message comes to me (RN-C5) --------------------------
       // The reader is still mid-history from the step above, which is exactly
@@ -1459,6 +1497,11 @@ function Harness(): React.JSX.Element {
           value={px(results.prependShiftPx)}
           pass={passes(results.prependShiftPx)}
         />
+        <Text style={styles.meta}>
+          {`점프 필(#1892) — 도착 때: ${results.pillsAtIncoming ?? '측정 중…'} · 프리펜드 때: ${
+            results.pillsAtPrepend ?? '측정 중…'
+          }`}
+        </Text>
         <Row
           label="컴포저 하단과 키보드 상단 간격"
           value={px(results.keyboardGapPx)}
@@ -1645,6 +1688,10 @@ function Harness(): React.JSX.Element {
               tailRef={tailRef}
               metricsRef={metricsRef}
               listRef={listRef as never}
+              lastReadSeq={UNREAD_CURSOR_SEQ}
+              unreadCount={UNREAD_COUNT}
+              jumpPills
+              pillsRef={pillsRef}
             />
           }
           composer={
@@ -1662,6 +1709,16 @@ function Harness(): React.JSX.Element {
       </View>
     </View>
   );
+}
+
+/** Which pills the list said were standing. `null` = the seam never answered. */
+function pillLabel(pills: PillState | null): string | null {
+  if (pills === null) return null;
+  const shown = [
+    pills.unread ? '위(안읽음으로)' : null,
+    pills.latest ? '아래(최신으로)' : null,
+  ].filter(Boolean);
+  return shown.length === 0 ? '없음' : shown.join(' + ');
 }
 
 function passes(value: number | null): boolean | null {

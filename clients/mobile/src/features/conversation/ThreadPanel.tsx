@@ -3,7 +3,7 @@ import {THREAD_COMPOSER_PLACEHOLDER} from '@momo/core/features/chat/composerCopy
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {StyleSheet, Text, View} from 'react-native';
-import {ErrorState, Screen, ScreenHeader} from '../../design/atoms';
+import {ErrorState, NoticeBlock, Screen, ScreenHeader} from '../../design/atoms';
 import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {EdgeSwipeBack} from '../../nav/EdgeSwipeBack';
@@ -49,6 +49,8 @@ export function ThreadPanel({
   root,
   workspaceId,
   channelId,
+  landOn,
+  notice,
   timeline,
   directory,
   myMemberId,
@@ -61,6 +63,17 @@ export function ThreadPanel({
   /** Production supplies both; isolated legacy render fixtures may omit them. */
   workspaceId?: string;
   channelId?: string;
+  /**
+   * 알림이 이 스레드를 열었을 때 착지할 답글 (#2569). 답글이 **다 온 뒤에** 건다 —
+   * `loadReplies` 가 끝나기 전의 목록에는 루트 하나뿐이라, 그때 쏘면 빗나간다.
+   */
+  landOn?: {messageId: string; token: number};
+  /**
+   * 그 착지가 무엇에 내려앉았는지의 한 문장 (#2584 리뷰 N-2) — 지금은 「이 알림의
+   * 메시지는 삭제됐습니다」 하나다. 채널과 같은 상자·같은 testID 를 쓴다: 같은 사실을
+   * 두 모양으로 말할 이유가 없고, 두 자리에 동시에 서는 일은 없다(화면이 한쪽만 준다).
+   */
+  notice?: {text: string; onDismiss: () => void};
   timeline: UseTimelineResult;
   directory: Directory;
   myMemberId: string;
@@ -77,6 +90,19 @@ export function ThreadPanel({
   const styles = useStyles(buildStyles);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [reloadNonce, setReloadNonce] = useState(0);
+  // 루트가 바뀌면 판정도 새로 한다 — **렌더 중에** (#2584 design-review R2 N-A).
+  //
+  // 이 판은 스레드를 옮길 때 다시 마운트되지 않는다(대화 화면이 `root` 만 갈아
+  // 끼운다). 아래 효과가 'loading' 으로 되돌리기 전의 첫 렌더에는 `status` 가 **앞
+  // 스레드의** 'ready' 라, 알림이 같은 방의 다른 스레드를 열면 착지 점프가 답글을
+  // 읽기 전에 한 번 걸리고 'ready' 에서 한 번 더 걸렸다 — 스크롤이 두 번. 채널이
+  // `loadedChannelId`·`judgedChannel` 로 푼 것과 같은 자리다(방의 정체성 대신 루트의
+  // 정체성).
+  const [judgedRootId, setJudgedRootId] = useState(root.id);
+  if (!uuidEq(judgedRootId, root.id)) {
+    setJudgedRootId(root.id);
+    setStatus('loading');
+  }
 
   const {loadReplies} = timeline;
   useEffect(() => {
@@ -114,6 +140,20 @@ export function ThreadPanel({
   );
 
   const messages = useMemo(() => [liveRoot, ...replies], [liveRoot, replies]);
+
+  // 채널의 점프와 같은 기계다(`Timeline.jumpTarget`). 토큰이 바뀌는 순간 한 번
+  // 돌므로, 답글이 도착해 `ready` 가 되는 그 렌더에서 처음 모습을 드러낸다.
+  const landingMessageId = landOn?.messageId;
+  const landingToken = landOn?.token;
+  const jumpTarget = useMemo(
+    () =>
+      landingMessageId !== undefined &&
+      landingToken !== undefined &&
+      status === 'ready'
+        ? {messageId: landingMessageId, seq: null, token: landingToken}
+        : undefined,
+    [landingMessageId, landingToken, status],
+  );
 
   const {toggleReaction, editBody, removeMessage, togglePin} = timeline;
   const actions = useMemo<MessageRowActions>(
@@ -218,37 +258,47 @@ export function ThreadPanel({
         />
         <ConversationLayout
           list={
-            <Timeline
-              messages={messages}
-              directory={directory}
-              // The root is always present, so this list is never empty and the
-              // "no replies yet" invitation belongs beside the composer instead.
-              status="ready"
-              pending={pending}
-              reactions={timeline.reactions}
-              // 이슈 #1146 M1 — 채널과 **같은 지도**다. 행마다의 `pinned` 는
-              // `Timeline` 이 여기서 유도하므로, 이것 없이 `onTogglePin` 만 주면
-              // 이미 고정된 답글이 「고정하기」라고 말한다.
-              pins={timeline.pins}
-              myMemberId={myMemberId}
-              // A thread has no older page to fetch: `loadReplies` walks every
-              // cursor before it resolves.
-              reachedStart
-              nowMs={nowMs}
-              actions={actions}
-              selfSendToken={selfSendToken}
-              // 여기서는 루트 하나를 빼면 전부 답글이다. 행마다 「답글」이라고
-              // 적는 것은 정보의 모양을 한 소음이다 — 채널에서는 그 표식이
-              // 유일한 단서지만, 여기서는 화면 제목이 이미 스레드다.
-              markReplies={false}
-              // 그리고 루트 행의 「답글 N개 · 마지막 …」도 그리지 않는다. 롤업은
-              // **채널에서 "여기 스레드가 있다"를 알리는 장치**이고, 이미 그 스레드를
-              // 열어 둔 사람에게는 자기가 서 있는 곳의 이름을 다시 읽어 주는 것에
-              // 불과하다. 핸들러가 없으니 글로 그려지긴 했지만, 문제는 눌리느냐가
-              // 아니라 **그 줄이 여기서 할 말이 없다**는 것이었다.
-              showRollup={false}
-              onResendPending={clientMsgId => void timeline.resend(clientMsgId)}
-            />
+            <>
+              {notice ? (
+                <NoticeBlock
+                  headline={notice.text}
+                  onDismiss={notice.onDismiss}
+                  testID="notification-landing-notice"
+                />
+              ) : null}
+              <Timeline
+                messages={messages}
+                directory={directory}
+                // The root is always present, so this list is never empty and the
+                // "no replies yet" invitation belongs beside the composer instead.
+                status="ready"
+                pending={pending}
+                reactions={timeline.reactions}
+                // 이슈 #1146 M1 — 채널과 **같은 지도**다. 행마다의 `pinned` 는
+                // `Timeline` 이 여기서 유도하므로, 이것 없이 `onTogglePin` 만 주면
+                // 이미 고정된 답글이 「고정하기」라고 말한다.
+                pins={timeline.pins}
+                myMemberId={myMemberId}
+                // A thread has no older page to fetch: `loadReplies` walks every
+                // cursor before it resolves.
+                reachedStart
+                nowMs={nowMs}
+                actions={actions}
+                selfSendToken={selfSendToken}
+                // 여기서는 루트 하나를 빼면 전부 답글이다. 행마다 「답글」이라고
+                // 적는 것은 정보의 모양을 한 소음이다 — 채널에서는 그 표식이
+                // 유일한 단서지만, 여기서는 화면 제목이 이미 스레드다.
+                markReplies={false}
+                // 그리고 루트 행의 「답글 N개 · 마지막 …」도 그리지 않는다. 롤업은
+                // **채널에서 "여기 스레드가 있다"를 알리는 장치**이고, 이미 그 스레드를
+                // 열어 둔 사람에게는 자기가 서 있는 곳의 이름을 다시 읽어 주는 것에
+                // 불과하다. 핸들러가 없으니 글로 그려지긴 했지만, 문제는 눌리느냐가
+                // 아니라 **그 줄이 여기서 할 말이 없다**는 것이었다.
+                showRollup={false}
+                onResendPending={clientMsgId => void timeline.resend(clientMsgId)}
+                jumpTarget={jumpTarget}
+              />
+            </>
           }
           composer={
             <View>

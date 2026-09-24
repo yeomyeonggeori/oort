@@ -1146,6 +1146,23 @@ function drawnText(node: unknown): string[] {
   return drawnText(children);
 }
 
+describe('#2608 N-E — `scrollToIndex` 는 이동을 거는 문 하나로만 부른다', () => {
+  // 가상 목록은 아직 안 잰 목표를 `onScrollToIndexFailed` 로 **동기** 보고하고, 그 회복은
+  // 걸린 점프 이동의 일부다(`Timeline.tsx` `beginJumpTravel`). 이동 없이 부른
+  // `scrollToIndex` 는 실패를 조용히 삼킨다 — 「눌렀는데 아무 일도 안 일어남」.
+  // 그래서 부르는 자리를 **개수로** 센다(허용목록이 아니라, README §5.5 ②): 문 하나.
+  // 날짜로 가기·스레드 루트로 가기 같은 새 이동은 그 문(`travelToIndex`)을 탄다.
+  it('src 안의 `.scrollToIndex(` 호출은 정확히 하나, Timeline 의 문 안이다', () => {
+    const hits: string[] = [];
+    for (const file of sourceFiles(SRC_DIR)) {
+      const text = fs.readFileSync(file, 'utf8');
+      const count = (text.match(/\.scrollToIndex\(/g) ?? []).length;
+      for (let i = 0; i < count; i += 1) hits.push(path.relative(SRC_DIR, file));
+    }
+    expect(hits).toEqual(['features/conversation/Timeline.tsx']);
+  });
+});
+
 describe('#1478 — 공백만 있는 본문 (웹 `hasRenderableBody` 의 폰 짝)', () => {
   // 이 행은 `body !== ''` 로 물었다. 공백만 있는 본문은 그것을 통과해 본문 칸을
   // 얻고, `<Text>` 가 그 공백을 그대로 그려 카드 위에 빈 줄이 섰다. 판정은 이제
