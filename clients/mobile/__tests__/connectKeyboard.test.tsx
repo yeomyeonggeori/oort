@@ -39,12 +39,21 @@ import {__resetServerBaseCache} from '../src/storage/serverBase';
 //      `KeyboardAvoidingView` 는 진짜 코드가 돈다(자기 `onLayout` 프레임 50/762 기준).
 //   2. 목록의 창 — KAV 가 정한 아래 여백만큼 목록의 높이를 줄여 `onLayout` 으로 알린다.
 //   3. 행의 자리 — 목록 콘텐츠의 직계 행 가운데 `onLayout` 을 가진 것에 잰 frame 을 준다.
-//   4. 스크롤 — 목록의 `scrollTo` 를 받아 끝으로 clamp 하고, `onScroll` 로 알린다.
+//   4. 스크롤 — 목록의 `scrollTo` 를 받아 **실제 프레임**의 끝으로 clamp 하고,
+//      `onScroll` 로 알린다.
+//   5. 창의 애니메이션 — KAV 는 새 여백을 키보드와 같은 시간(383ms) 동안 애니메이션한다.
+//      JS 의 `onLayout` 은 첫 순간에 최종값을 말하지만 UIKit 의 프레임은 아직 옛 크기라,
+//      그 사이의 `scrollTo` 는 옛 프레임으로 잘린다 — 폼이 옛 창에 다 들면 아무 일도
+//      일어나지 않는다. 창이 **커지는** 쪽은 곧바로 서고, UIKit 이 오프셋을 범위 안으로
+//      되돌린다(기기: 키보드가 내려가는 순간 오프셋 0).
+//   6. UIKit 의 캐럿 스크롤 — 키보드가 선 뒤 포커스한 칸이 창 밖이면 UIKit 이 그 칸의
+//      아랫변을 창 아랫변에 맞춘다(기기: 비밀번호 칸 424–468, 버튼 61pt 가려짐).
+//      그 다음에 JS 가 `keyboardDidShow` 를 받는다.
 //
-// UIKit 이 포커스 순간에 캐럿을 보이게 하려고 스스로 굴리는 것은 옮기지 않았다(기기에서
-// 그 결과도 캐럿 줄까지였다 — 비밀번호 칸 3pt·이메일 칸 12pt 가 여전히 가려졌다).
-// 판정은 **화면 좌표**로 한다: 행의 자리 − 오프셋 + 창 위 여백이 창 윗변과 키보드 윗변
-// 사이에 드는가.
+// 5·6 은 첫 수리를 기기에 올려 잰 뒤에 더했다: 「다음」으로 비밀번호 칸에 가면 iOS 가
+// 키보드를 내렸다 다시 올리고(`keyboardWillHide` → `keyboardWillShow`, 각 383ms), 수리의
+// 첫 `scrollTo(103.7)` 는 커진 옛 프레임에 잘려 사라졌다. 판정은 **화면 좌표**로 한다:
+// 행의 자리 − 오프셋 + 창 위 여백이 창 윗변과 키보드 윗변 사이에 드는가.
 // =============================================================================
 
 const SCREEN_H = 812;
@@ -165,7 +174,12 @@ function rowName(row: Node, index: number): string {
 class KeyboardDouble {
   offset = 0;
   keyboard = 0;
-  viewport = SCREEN_H - TOP_INSET;
+  /** 목록이 JS 에 알린 창 — KAV 가 정한 값, 키보드 이벤트 순간에 최종값이다. */
+  jsViewport = SCREEN_H - TOP_INSET;
+  /** UIKit 이 clamp 에 쓰는 실제 프레임. KAV 는 키보드와 함께 애니메이션한다(규칙 5). */
+  nativeViewport = SCREEN_H - TOP_INSET;
+  /** 포커스한 입력 상자 — UIKit 의 캐럿 스크롤이 본다(규칙 6). */
+  private focusedInput: Span | null = null;
   private announced = new Map<string, string>();
 
   constructor(readonly geometry: Geometry) {}
@@ -182,20 +196,26 @@ class KeyboardDouble {
     return Math.max(...Object.values(this.geometry.rows).map(row => row.bottom)) + CONTENT_PAD_BOTTOM;
   }
 
+  private moveTo(y: number) {
+    const next = Math.min(Math.max(0, y), Math.max(0, this.contentHeight() - this.nativeViewport));
+    if (next === this.offset) return;
+    this.offset = next;
+    this.scroll().props.onScroll?.({
+      nativeEvent: {
+        contentOffset: {x: 0, y: this.offset},
+        contentSize: {width: 375, height: this.contentHeight()},
+        layoutMeasurement: {width: 375, height: this.nativeViewport},
+      },
+    });
+  }
+
   /** 마운트 뒤의 첫 레이아웃: KAV 의 프레임, 목록의 창, 행들. */
   async mount() {
     const instance = this.scroll().instance as {scrollTo: (...args: unknown[]) => void};
     jest.spyOn(instance, 'scrollTo').mockImplementation((...args: unknown[]) => {
       const target = args[0] as {y?: number} | number | undefined;
-      const y = typeof target === 'object' && target !== null ? target.y ?? 0 : Number(args[1] ?? 0);
-      this.offset = Math.min(Math.max(0, y), Math.max(0, this.contentHeight() - this.viewport));
-      this.scroll().props.onScroll?.({
-        nativeEvent: {
-          contentOffset: {x: 0, y: this.offset},
-          contentSize: {width: 375, height: this.contentHeight()},
-          layoutMeasurement: {width: 375, height: this.viewport},
-        },
-      });
+      // 규칙 4: 실제 프레임으로 clamp — 애니메이션 중이면 옛 프레임이다.
+      this.moveTo(typeof target === 'object' && target !== null ? target.y ?? 0 : Number(args[1] ?? 0));
     });
     await act(async () => {
       const kav = this.kav().instance as {_onLayout: (event: unknown) => Promise<void>};
@@ -212,8 +232,14 @@ class KeyboardDouble {
     await act(async () => {
       const padding = (this.kav().instance as {state: {bottom: number}}).state.bottom;
       const viewport = SCREEN_H - TOP_INSET - padding;
-      if (force || viewport !== this.viewport) {
-        this.viewport = viewport;
+      if (force || viewport !== this.jsViewport) {
+        this.jsViewport = viewport;
+        // 규칙 5: 창이 커지는 쪽은 곧바로 서고 UIKit 이 오프셋을 범위 안으로 되돌린다
+        // (기기: 키보드가 내려가는 순간 오프셋 0). 줄어드는 쪽은 키보드와 함께 간다.
+        if (viewport > this.nativeViewport) {
+          this.nativeViewport = viewport;
+          this.moveTo(this.offset);
+        }
         this.scroll().props.onLayout?.({
           nativeEvent: {layout: {x: 0, y: 0, width: 375, height: viewport}},
         });
@@ -238,27 +264,60 @@ class KeyboardDouble {
     });
   }
 
-  /** iOS 는 칸을 옮길 때마다 `keyboardWillShow` 를 다시 보낸다 — 높이가 같아도. */
-  async showKeyboard(height: number) {
-    this.keyboard = height;
-    await act(async () => {
-      (Keyboard as unknown as {_emitter: {emit: (name: string, event: unknown) => void}})._emitter.emit(
-        'keyboardWillShow',
-        {
-          endCoordinates: {height, screenX: 0, screenY: SCREEN_H - height, width: 375},
-          duration: 250,
-          easing: 'keyboard',
+  focusInput(input: Span | null) {
+    this.focusedInput = input;
+  }
+
+  private emit(name: string, height: number, durationMs: number) {
+    (Keyboard as unknown as {_emitter: {emit: (event: string, payload: unknown) => void}})._emitter.emit(
+      name,
+      {
+        endCoordinates: {
+          height,
+          screenX: 0,
+          screenY: name.endsWith('Hide') ? SCREEN_H : SCREEN_H - height,
+          width: 375,
         },
-      );
+        duration: durationMs,
+        easing: 'keyboard',
+      },
+    );
+  }
+
+  /** 규칙 1: 키보드가 움직이기 시작한다(`will`). KAV 가 창을 정하고, 목록이 그것을 알린다. */
+  async keyboardWill(kind: 'show' | 'hide', height: number, durationMs: number) {
+    this.keyboard = kind === 'show' ? height : 0;
+    await act(async () => {
+      this.emit(kind === 'show' ? 'keyboardWillShow' : 'keyboardWillHide', height, durationMs);
     });
     await this.layout();
+  }
+
+  /**
+   * 키보드가 섰다. 실제 프레임이 최종값이 되고(규칙 5), UIKit 이 포커스한 칸의 캐럿이
+   * 창 밖이면 그 칸의 아랫변을 창 아랫변에 맞춘다(규칙 6 — 기기: 비밀번호 칸 424–468).
+   * 그 **뒤에** JS 가 `keyboardDidShow` 를 받는다(네이티브가 먼저, JS 는 다음 틱).
+   */
+  async keyboardDid(durationMs: number) {
+    await act(async () => {
+      jest.advanceTimersByTime(durationMs);
+    });
+    await act(async () => {
+      this.nativeViewport = this.jsViewport;
+      this.moveTo(this.offset);
+      const input = this.focusedInput;
+      if (input !== null && input.bottom - this.offset > this.nativeViewport) {
+        this.moveTo(input.bottom - this.nativeViewport);
+      }
+      if (this.keyboard > 0) this.emit('keyboardDidShow', this.keyboard, durationMs);
+    });
   }
 
   /** 화면 좌표에서 그 칸이 창 윗변과 키보드 윗변 사이에 온전히 드는가 — 아니면 가려진 pt. */
   hidden(span: Span): number {
     const top = TOP_INSET + span.top - this.offset;
     const bottom = TOP_INSET + span.bottom - this.offset;
-    const floor = Math.min(SCREEN_H - this.keyboard, TOP_INSET + this.viewport);
+    const floor = Math.min(SCREEN_H - this.keyboard, TOP_INSET + this.nativeViewport);
     const under = Math.max(0, bottom - floor);
     const over = Math.max(0, TOP_INSET - top);
     return Math.round((under + over) * 10) / 10;
@@ -278,6 +337,7 @@ async function blur(id: string) {
 }
 
 beforeEach(() => {
+  jest.useFakeTimers();
   __resetSessionStore();
   __resetServerBaseCache();
   jest.spyOn(Linking, 'getInitialURL').mockResolvedValue(null);
@@ -285,10 +345,22 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  jest.useRealTimers();
   jest.restoreAllMocks();
 });
 
-/** 서버 주소를 적고(힌트가 선다) 세 칸을 차례로 연다 — 저장소의 `00-login` 과 같은 길. */
+/** 키보드가 오르내리는 시간 — 기기의 `keyboardWillShow` 가 실은 값(383.3ms). */
+const TRAVEL_MS = 383;
+
+/**
+ * 서버 주소가 적힌 채(저장된 주소로 돌아온 사람, 힌트가 서 있다) 세 칸을 차례로 연다 —
+ * 저장소의 `00-login` 과 같은 순서, 기기에서 잰 키보드 이벤트 그대로:
+ *
+ *   - 주소 칸 — 키보드가 올라온다(URL 키보드, 383ms).
+ *   - 이메일 칸 탭 — 키보드가 그 자리에서 종류만 바뀐다(344pt, 0ms).
+ *   - 키보드의 「다음」으로 비밀번호 칸 — iOS 가 키보드를 **내렸다가 다시 올린다**(보안
+ *     입력은 다른 키보드다). 목록의 창이 커졌다가 다시 준다.
+ */
 async function walk(geometry: Geometry) {
   render(<ConnectScreen />);
   fireEvent.changeText(screen.getByTestId('server-url-input'), 'http://127.0.0.1:18586');
@@ -297,7 +369,9 @@ async function walk(geometry: Geometry) {
   const {inputs, rows} = geometry;
 
   await focus('server-url-input');
-  await native.showKeyboard(KEYBOARD.url);
+  native.focusInput(inputs.server);
+  await native.keyboardWill('show', KEYBOARD.url, TRAVEL_MS);
+  await native.keyboardDid(TRAVEL_MS);
   const server = {
     field: native.hidden(inputs.server),
     next: native.hidden(inputs.email),
@@ -306,17 +380,21 @@ async function walk(geometry: Geometry) {
 
   await blur('server-url-input');
   await focus('email-input');
-  await native.showKeyboard(KEYBOARD.text);
+  native.focusInput(inputs.email);
+  await native.keyboardWill('show', KEYBOARD.text, 0);
+  await native.keyboardDid(0);
   const email = {
     field: native.hidden(inputs.email),
     next: native.hidden(inputs.password),
     action: native.hidden(rows.action),
   };
 
-  // 키보드의 「다음」— 칸이 옮겨 가도 키보드 높이는 같다(창이 바뀌지 않는다).
+  await native.keyboardWill('hide', KEYBOARD.text, TRAVEL_MS);
   await blur('email-input');
+  await native.keyboardWill('show', KEYBOARD.text, TRAVEL_MS);
   await focus('password-input');
-  await native.showKeyboard(KEYBOARD.text);
+  native.focusInput(inputs.password);
+  await native.keyboardDid(TRAVEL_MS);
   const password = {field: native.hidden(inputs.password), action: native.hidden(rows.action)};
 
   return {server, email, password};
