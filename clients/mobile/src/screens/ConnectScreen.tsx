@@ -132,11 +132,11 @@ import {
 // the primary button too whenever field and button fit together, moving as
 // little as possible. Everything is in content coordinates the list reports
 // about itself — row `onLayout`, the list's own height, its offset — so there is
-// no keyboard frame to reconcile. It runs when a field takes focus, whenever the
-// list's height changes (the keyboard arriving, or changing type: the URL
-// keyboard is 317pt, the email/password keyboard 344pt with its 암호 bar), and
-// once more when the keyboard has arrived — the note at that listener says why
-// the middle one alone was measured to vanish.
+// no keyboard frame to reconcile. It runs when a field takes focus, when a row
+// moves (the address hint appears on the first keystroke and pushes the rows
+// below it down), and when the keyboard has ARRIVED — not when the list reports
+// its new height, which is the obvious moment and was measured not to work (the
+// note at the `keyboardDidShow` listener).
 //
 // **Why not the conversation's `KeyboardPane`.** The pane only translates: it
 // lifts everything by the keyboard's height, and that is right where the content
@@ -251,13 +251,10 @@ export default function ConnectScreen({
     };
   }, [reveal]);
 
-  const onFormLayout = useCallback(
-    (event: LayoutChangeEvent) => {
-      room.current.viewport = event.nativeEvent.layout.height;
-      reveal();
-    },
-    [reveal],
-  );
+  /** Recorded, not acted on — see the `keyboardDidShow` listener for why. */
+  const onFormLayout = useCallback((event: LayoutChangeEvent) => {
+    room.current.viewport = event.nativeEvent.layout.height;
+  }, []);
 
   const onFormScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -278,17 +275,19 @@ export default function ConnectScreen({
     if (focusedRef.current === field) focusedRef.current = null;
   }, []);
 
-  // …and once more when the keyboard has ARRIVED. Measured on the device, the
-  // list's height is final in JS the moment the keyboard starts to move, but
-  // `KeyboardAvoidingView` animates the real frame along with the keyboard
-  // (383ms), and a `scrollTo` issued meanwhile is clamped by UIKit to the old,
-  // taller frame — a no-op whenever the form fits it. Moving to the password
-  // field makes that the common case: iOS lowers and raises the keyboard for a
-  // secure field (`keyboardWillHide` → `keyboardWillShow`), the list grows and
-  // shrinks back, the first reveal (to 103.7) vanished into the clamp, and
-  // UIKit then scrolled only the caret in — the field's bottom on the keyboard's
-  // edge, the 로그인 button 61pt under it. `keyboardDidShow` comes after UIKit
-  // has started that scroll, so this reveal is the one that stands.
+  // The keyboard's ARRIVAL is when the reveal can act — not the moment the list
+  // reports its new height. Measured on the device: that height is final in JS
+  // as soon as the keyboard starts to move, but `KeyboardAvoidingView` animates
+  // the real frame along with the keyboard (383ms), and a `scrollTo` issued
+  // meanwhile is clamped by UIKit to the old, taller frame — a no-op whenever the
+  // form fits it (a returning person's stored address: the button stayed 60pt
+  // under). Moving to the password field makes it the common case: iOS lowers and
+  // raises the keyboard for a secure field (`keyboardWillHide` →
+  // `keyboardWillShow`), the list grows and shrinks back, a reveal to 103.7
+  // vanished into the clamp, and UIKit then scrolled only the caret in — the
+  // field's bottom on the keyboard's edge, the 로그인 button 61pt under it.
+  // `keyboardDidShow` comes once the frame is final and after UIKit has started
+  // that caret scroll, so this reveal is the one that stands.
   useEffect(() => {
     const arrived = Keyboard.addListener('keyboardDidShow', reveal);
     return () => arrived.remove();

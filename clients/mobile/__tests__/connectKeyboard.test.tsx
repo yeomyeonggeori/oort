@@ -95,6 +95,25 @@ const LARGE: Geometry = {
   },
 };
 
+/** 기본 크기, 주소를 아직 적지 않아 힌트가 없을 때 — 힌트 아래 행이 31pt 위에 있다. */
+const LARGE_EMPTY: Geometry = {
+  rows: {
+    title: {top: 24, bottom: 55},
+    subtitle: {top: 71, bottom: 91},
+    qr: {top: 107, bottom: 151},
+    server: {top: 167, bottom: 254},
+    email: {top: 270, bottom: 333},
+    password: {top: 350, bottom: 413},
+    action: {top: 430, bottom: 474},
+    toggle: {top: 490, bottom: 534},
+  },
+  inputs: {
+    server: {top: 190, bottom: 233},
+    email: {top: 290, bottom: 333},
+    password: {top: 370, bottom: 413},
+  },
+};
+
 /** AX1 (accessibility-medium). */
 const AX1: Geometry = {
   rows: {
@@ -182,7 +201,7 @@ class KeyboardDouble {
   private focusedInput: Span | null = null;
   private announced = new Map<string, string>();
 
-  constructor(readonly geometry: Geometry) {}
+  constructor(public geometry: Geometry) {}
 
   private scroll() {
     return screen.UNSAFE_getByType(ScrollView);
@@ -425,6 +444,40 @@ describe('연결 화면 — 포커스한 칸과 주 버튼이 키보드 위에 �
       email: {field: 0, next: 0, action: 0},
       password: {field: 0, action: 0},
     });
+  });
+
+  it('주소를 적는 동안 힌트가 서며 아래 행이 내려가도, 로그인 버튼은 키보드 위에 남는다', async () => {
+    render(<ConnectScreen />);
+    const native = new KeyboardDouble(LARGE_EMPTY);
+    await native.mount();
+    await focus('server-url-input');
+    native.focusInput(LARGE_EMPTY.inputs.server);
+    await native.keyboardWill('show', KEYBOARD.url, TRAVEL_MS);
+    await native.keyboardDid(TRAVEL_MS);
+    const before = native.hidden(LARGE_EMPTY.rows.action);
+
+    // 첫 글자에 힌트(「요청 주소: …」)가 서고, 그 아래 행이 31pt 내려간다. 키보드는 그대로다.
+    await act(async () => {
+      fireEvent.changeText(screen.getByTestId('server-url-input'), 'h');
+    });
+    native.geometry = LARGE;
+    await native.layout();
+
+    expect({before, after: native.hidden(LARGE.rows.action)}).toEqual({before: 0, after: 0});
+  });
+
+  it('키보드 이벤트가 없어도(하드웨어 키보드) 포커스를 옮기면 그 칸이 창에 든다 — AX5', async () => {
+    render(<ConnectScreen />);
+    fireEvent.changeText(screen.getByTestId('server-url-input'), 'http://127.0.0.1:18586');
+    const native = new KeyboardDouble(AX5);
+    await native.mount();
+    // 소프트웨어 키보드가 없다 — 창은 762 그대로이고, 비밀번호 칸은 화면 아래(1142)에 있다.
+    await focus('password-input');
+
+    expect({
+      field: native.hidden(AX5.inputs.password),
+      action: native.hidden(AX5.rows.action),
+    }).toEqual({field: 0, action: 0});
   });
 
   it('AX5: 포커스한 칸은 언제나 온전하고, 마지막 칸에서는 버튼도 온전하다', async () => {
