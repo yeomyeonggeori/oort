@@ -205,16 +205,18 @@ echo "ok: MomoAPNSEnvironment=$aps_plist, signed aps-environment=$aps_signed"
 # TARGETED_DEVICE_FAMILY includes the iPad). The build, the signing and every
 # check above were green: an AppIcon set without an image compiles with no
 # warning. actool writes these keys and Assets.car only from a set that has one.
+# On iOS it writes CFBundleIconName inside each CFBundlePrimaryIcon, not at the
+# top level (Xcode 26.5, #2643 rehearsal), so that is where it is read.
 missing=""
-[ -n "$(plist_value "$APP" CFBundleIconName)" ] || missing="$missing CFBundleIconName"
 for key in CFBundleIcons 'CFBundleIcons~ipad'; do
-  plutil -extract "$key" xml1 -o - "$APP/Info.plist" >/dev/null 2>&1 || missing="$missing $key"
+  [ -n "$(plist_value "$APP" "$key.CFBundlePrimaryIcon.CFBundleIconName")" ] ||
+    missing="$missing $key.CFBundlePrimaryIcon.CFBundleIconName"
 done
 [ -f "$APP/Assets.car" ] || missing="$missing Assets.car"
 [ -z "$missing" ] ||
   fail "the app has no app icon — missing:$missing.
        App Store Connect rejects this upload (90713/90022/90023). The AppIcon set in
        ios/MomoMobile/Images.xcassets must hold its 1024 image (#2643)."
-echo "ok: CFBundleIconName=$(plist_value "$APP" CFBundleIconName), CFBundleIcons, CFBundleIcons~ipad and Assets.car present"
+echo "ok: CFBundleIconName=$(plist_value "$APP" CFBundleIcons.CFBundlePrimaryIcon.CFBundleIconName) in CFBundleIcons and CFBundleIcons~ipad, Assets.car present"
 
 log "notification-service embed and app icon verified on a profile-signed archive"

@@ -93,7 +93,7 @@ bash "<작업 디렉터리>/clients/mobile/scripts/archive-release.sh"
   - 서명된 엔타이틀먼트에 공유 키체인 그룹 `YWQQFQM38J.app.momo.ios.shared`가 있다.
   - NSE에는 `aps-environment`가 없다.
   - 앱의 서명된 `aps-environment`와 Info.plist `MomoAPNSEnvironment`가 모두 `production`이다.
-  - 앱 아이콘이 들어 있다: Info.plist에 `CFBundleIconName`, `CFBundleIcons`, `CFBundleIcons~ipad`가 있고 앱에 `Assets.car`가 있다. 없으면 ASC가 업로드를 거부한다(90713·90022·90023, #2643).
+  - 앱 아이콘이 들어 있다: Info.plist의 `CFBundleIcons`와 `CFBundleIcons~ipad`에 각각 `CFBundlePrimaryIcon.CFBundleIconName`이 있고, 앱에 `Assets.car`가 있다. 없으면 ASC가 업로드를 거부한다(90713·90022·90023, #2643). iOS에서 actool은 `CFBundleIconName`을 최상위가 아니라 이 자리에 쓴다.
   - 이어서 스크립트가 따로 확인하는 것: 앱·NSE의 `CFBundleVersion`이 빌드 번호와 같다. `ITSAppUsesNonExemptEncryption=false`와 권한 문구 3개(카메라·마이크·사진)가 들어 있다. 서명이 `Apple Distribution`이고 프로파일이 두 App Store 프로파일이다.
   - 앱 Info.plist에 `TFInternalTestingOnly=true`가 있다. `testFlightInternalTestingOnly=true`로 내보내면 Xcode가 넣는 키다(아카이브에는 없다). 서명된 번들 안에 있으므로 이 IPA는 어떤 경로로 올려도 내부 테스트 전용이다.
 - 다시 검사하려면 `CI_ARCHIVE_PATH=<출력 디렉터리>/export-as-archive bash clients/mobile/ios/ci_scripts/ci_post_xcodebuild.sh`를 쓴다. 개발 서명인 `.xcarchive`를 가리키면 APNs 환경 일치 검사에서 실패한다. 그 아카이브는 `development`로 서명돼 있기 때문이고, 정상이다.
