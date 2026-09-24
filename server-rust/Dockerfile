@@ -127,6 +127,7 @@ COPY server-rust/bins/momo-push-relay/Cargo.toml bins/momo-push-relay/
 COPY server-rust/bins/momo-relay/Cargo.toml bins/momo-relay/
 COPY server-rust/bins/momo-server/Cargo.toml bins/momo-server/
 COPY server-rust/bins/momo-webhook-sender/Cargo.toml bins/momo-webhook-sender/
+COPY server-rust/bins/momo-workd/Cargo.toml bins/momo-workd/
 RUN set -eux; \
     for manifest in crates/*/Cargo.toml bins/*/Cargo.toml; do \
       dir=$(dirname "$manifest"); \

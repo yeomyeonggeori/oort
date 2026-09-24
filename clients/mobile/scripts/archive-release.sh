@@ -13,8 +13,9 @@
 #   3. 빌드 번호를 아래 규칙으로 정해 Release 아카이브를 만든다(개발 서명).
 #   4. IPA 를 로컬에 내보낸다(destination=export). 여기서 배포 서명이 입혀진다.
 #   5. 내보낸 앱에 ios/ci_scripts/ci_post_xcodebuild.sh 를 돌려 NSE 임베드·서명된
-#      엔타이틀먼트·aps-environment=production 을 검사하고, 업로드용 ExportOptions 와
-#      빌드 사실(build-info.txt)을 남긴다.
+#      엔타이틀먼트·aps-environment=production·앱 아이콘(CFBundleIcons·
+#      CFBundleIcons~ipad 의 CFBundleIconName, Assets.car, #2643)을 검사하고, 업로드용
+#      ExportOptions 와 빌드 사실(build-info.txt)을 남긴다.
 #
 # ## 하지 않는 일
 #

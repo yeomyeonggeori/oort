@@ -730,12 +730,18 @@ scripts/self_host_env.sh --public-origin https://<host>
 validate` 가 실패한다. 그것이 ACME 오발사 차단의 실체다. 이 오버레이는 **그
 호스트의 DNS 를 가진 머신에서만** 기동한다. 로컬에서 이름 부르지 마라.
 `--compose` 는 canonical file 집합을 바꾸지 못하므로, 공개 오버레이는 배포
-호스트에서 compose 를 직접 호출한다:
+호스트에서 compose 를 직접 호출한다. `local.override.yml` 은 집합에 남긴다.
+생성기가 켜는 첨부 보관소(`drive-init` 과 `drive-archive` 볼륨)와 doctor
+`stack.compose_ps` 가 요구하는 루프백 `web` 서비스가 그 파일에 있다. 빠지면
+compose 가 보관소 볼륨 없이 api 를 다시 만들고, api 는 기동을 거부한다
+(`MOMO_DRIVE_LOCAL_DIR could not be created or is not writable`, 재시작 반복 —
+실측, #2609). `infra/fly/entrypoint.sh` 가 쓰는 세 파일 집합과 같다:
 
 ```sh
 ENV_FILE=infra/rust/local.secrets.env
 docker compose --env-file "$ENV_FILE" \
   -f infra/rust/docker-compose.rust.yml \
+  -f infra/rust/local.override.yml \
   -f infra/rust/caddy.override.yml up -d
 ```
 
@@ -744,7 +750,7 @@ docker compose --env-file "$ENV_FILE" \
 
 | | 로컬(이 문서의 기본) | 공개 오리진 |
 |---|---|---|
-| 엣지 | `local.override.yml` + `Caddyfile.local` (`:80`) | `caddy.override.yml` + `Caddyfile` (`{$OORT_SITE_ADDRESS}`) |
+| 엣지 | `local.override.yml` + `Caddyfile.local` (`:80`) | `caddy.override.yml` + `Caddyfile` (`{$OORT_SITE_ADDRESS}`), `local.override.yml`(보관소 볼륨) 위에 |
 | 주소 | `http://localhost:<port>` | 운영자가 선언한 `https://<host>` |
 | CSP connect-src | 루프백 `ws://localhost:*` / `ws://127.0.0.1:*` | `--public-origin` 이 파생한 `OORT_CSP_CONNECT_SRC` |
 
@@ -766,7 +772,7 @@ heredoc + `oort_public_edge_env_keys`, 43키)은 늘지 않는다: T1 행은 her
 
 | `--platform` | Tier | 공개 오리진 소스 | Postgres | 손으로 넣는 키 | 출력 |
 |---|---|---|---|---|---|
-| `railway` (별칭 `--railway`) | T2 | `RAILWAY_PUBLIC_DOMAIN` | 플러그인 `DATABASE_URL` | `CENT_API_URL` · `WORKER_DATABASE_URL` · `CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS` (`infra/railway/README.md`) | stdout KEY=value, 파일 없음, `MOMO_HOSTED_DELIVERY_ENABLED` 없음, 스탬프 `MOMO_SELF_HOST_PLATFORM=railway`는 heredoc 밖 |
+| `railway` (별칭 `--railway`) | T2 | `RAILWAY_PUBLIC_DOMAIN` | PG18 + pgvector 이미지 서비스의 `DATABASE_URL`, 손으로 조립(`infra/railway/README.md`) | README의 수기 매핑 표(9개 이상. 생성기 stderr는 `CENT_API_URL` · `WORKER_DATABASE_URL` · `CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS`만 댄다) | stdout KEY=value, 파일 없음, `MOMO_HOSTED_DELIVERY_ENABLED` 없음, 스탬프 `MOMO_SELF_HOST_PLATFORM=railway`는 heredoc 밖 |
 | `fly` | T1 | `--public-origin https://<host>` (필수) | compose `postgres` | 없음 | 로컬 경로와 같은 `infra/rust/local.secrets.env` + `MOMO_SELF_HOST_PLATFORM=fly` |
 | `aws-lightsail` | T1 | 같음 | compose `postgres` | 없음 | 같음, `MOMO_SELF_HOST_PLATFORM=aws-lightsail` |
 | `gcp-vm` | T1 | 같음 | compose `postgres` | 없음 | 같음, `MOMO_SELF_HOST_PLATFORM=gcp-vm` |
@@ -802,21 +808,31 @@ Budgets 이메일, DNS A, `terraform destroy`. 게이트:
 
 같은 스택의 클라우드 설치: [`infra/railway/README.md`](../infra/railway/README.md).
 공개 서비스는 Caddy(Railway TLS), api는 내부 — `/v1/centrifugo/*` 전용 403
-(`infra/railway/Caddyfile.railway`). Postgres는 Railway 플러그인. LiveKit 없음.
+(`infra/railway/Caddyfile.railway`). Postgres는 compose와 같은 PG18 + pgvector
+이미지를 볼륨 달린 서비스로 둔다 — Railway Postgres 템플릿에는 pgvector가 없다.
+LiveKit 없음.
 
-플러그인 `DATABASE_URL`과 caddy 공개 호스트명이 생긴 뒤, 같은 생성기가
-Railway 변수를 출력한다(파일 없음, compose 스택 발명 없음):
+그 서비스의 `DATABASE_URL`을 조립하고(README) caddy 공개 호스트명이 생긴 뒤,
+같은 생성기가 Railway 변수를 출력한다(파일 없음, compose 스택 발명 없음):
 
 ```sh
-scripts/self_host_env.sh --platform railway
+scripts/self_host_env.sh --platform railway --claim
 ```
 
-`RAILWAY_PUBLIC_DOMAIN`과 `DATABASE_URL`은 필수다. 출력 키 집합은 생성기
+`RAILWAY_PUBLIC_DOMAIN`과 `DATABASE_URL`은 필수다. `--claim`은
+`railway.json`과 짝이다. 그 api 변수에는 owner 비밀번호가 아니라
+`MOMO_BOOTSTRAP_CLAIM`이 있고, `--claim` 없이 만들면 pre-deploy에 owner
+이메일만 있어 기동을 거부한다(exit 2). 비밀번호 방식을 쓰려면 `--claim`
+없이 만들고 api에서 `MOMO_BOOTSTRAP_CLAIM`을 `MOMO_INITIAL_OWNER_PASSWORD` =
+`${{shared.MOMO_INITIAL_OWNER_PASSWORD}}`로 바꾼다. 출력 키 집합은 생성기
 heredoc + `oort_public_edge_env_keys` — `OORT_SITE_ADDRESS` /
 `OORT_CSP_CONNECT_SRC`를 손으로 적지 마라. 로컬 provider opt-in
 (`--allow-local-provider`)은 로컬 설치 전용이며 이 템플릿은 그 키를 싣지
 않는다. 게이트:
-`scripts/oort doctor --json` (`public.healthz` · `public.websocket`).
+`scripts/oort doctor --json` (`public.healthz` · `public.websocket`)과 README의
+손 점검 — 로그인 응답 `realtimeWebSocketUrl`이 `wss://`, QR 기기 연결이
+`https://`. README의 클라이언트 IP 관문이 PASS하기 전에는 claim 링크를
+공유하거나 누구도 초대하지 않는다.
 
 ### Fly.io
 

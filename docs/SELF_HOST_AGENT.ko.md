@@ -99,7 +99,7 @@ bridge/iptables가 막힌 VM의 루프백 내부 URL + compose `network_mode: ho
 | **Fly.io** (단일 VM + 볼륨) | T1 | §3.5 · [`infra/fly/README.md`](../infra/fly/README.md) | 사용자 로그인의 `flyctl` → 사용자 토큰의 Fly REST → 브라우저. | `fly auth login`; Fly 결제(볼륨·전용 IPv4); 선택 커스텀 도메인 DNS; `fly apps destroy`(볼륨 삭제). | Fly 계정; 볼륨 달린 VM 1대; 그 위의 T1 도구. | VM 위에서 T1 compose 절차 §3.2(`caddy.override.yml` + `Caddyfile`, TLS 패스스루). env `scripts/self_host_env.sh --platform fly --public-origin https://<host>` 를 볼륨에. Fly 호스트명 또는 커스텀 도메인. | VPS와 같음. |
 | **AWS Lightsail / EC2** | T1 | §3.6 · [`infra/aws/README.md`](../infra/aws/README.md) (SH-11c) | 사용자 세션의 `aws` CLI / AWS MCP → REST → 브라우저. | AWS SSO/로그인; `terraform apply`(plan 리소스 수); Budgets 이메일; DNS A; `terraform destroy`(데이터 디스크). | 클라우드 계정; IAM 사용자/SSO 역할(루트 금지); VM + 추가 디스크 + 도메인. | VM 위에서 T1 compose 절차 §3.2; env `--platform aws-lightsail --public-origin https://<host>`. 운영자 도메인. | VPS와 같음. |
 | **GCP VM** | T1 | §3.7 · SH-11c 패턴의 프로비저닝 레시피 | 사용자 세션의 `gcloud` → REST → 브라우저. | GCP 가입·결제; OAuth 동의; DNS 레코드. | AWS와 같음. | VM 위에서 T1 compose 절차 §3.2; env `--platform gcp-vm --public-origin https://<host>`. 운영자 도메인. | VPS와 같음. |
-| **Railway** | T2 | §3.4 · 에이전트 경로 실측은 SH-11a | 사용자 OAuth 세션의 `railway` CLI(`railway setup agent`) / 원격 MCP `mcp.railway.com` → REST → 브라우저. | Railway 가입·결제; CLI/MCP의 OAuth 로그인; caddy에 공개 도메인 부여. | Railway 계정; Postgres 플러그인; 이 기계에 Docker 불필요(발행 이미지). | 공개 엣지는 Caddy 서비스(`Caddyfile.railway`), api는 내부. env는 `scripts/self_host_env.sh --platform railway`(별칭 `--railway`)가 `RAILWAY_PUBLIC_DOMAIN` + `DATABASE_URL`에서; 손으로 넣는 키 셋(`infra/railway/README.md`). 플랫폼 호스트명. | 배포 오리진에서 doctor PASS(`public.healthz`, `public.websocket`). Day-2: 이미지 one-off `scripts/oort backup --tier t2 --env <env>`, `scripts/oort restore <dump> --tier t2 --yes --env <env>`, `scripts/oort upgrade --tier t2 --yes --env <env>`, `scripts/oort doctor --tier t2 --json`. `--tier t2`는 `MOMO_SELF_HOST_PLATFORM`(railway)과 같아야 한다. dump는 `MIGRATE_DATABASE_URL`만. one-off의 플랫폼 CLI/MCP는 SH-11a. |
+| **Railway** | T2 | §3.4 · 에이전트 경로 실측은 SH-11a | 사용자 OAuth 세션의 `railway` CLI(`railway setup agent`) / 원격 MCP `mcp.railway.com` → REST → 브라우저. | Railway 가입·결제; CLI/MCP의 OAuth 로그인; caddy에 공개 도메인 부여. | Railway 계정(볼륨이 되는 플랜); PG18 + pgvector 이미지 서비스; 이 기계에 Docker 불필요(발행 이미지). | 공개 엣지는 Caddy 서비스(`Caddyfile.railway`), api는 내부. env는 `scripts/self_host_env.sh --platform railway --claim`(별칭 `--railway`)이 `RAILWAY_PUBLIC_DOMAIN` + `DATABASE_URL`에서; 손으로 넣는 키(9개 이상, `infra/railway/README.md`). 플랫폼 호스트명. | 배포 오리진에서 doctor PASS(`public.healthz`, `public.websocket`). Day-2: 이미지 one-off `scripts/oort backup --tier t2 --env <env>`, `scripts/oort restore <dump> --tier t2 --yes --env <env>`, `scripts/oort upgrade --tier t2 --yes --env <env>`, `scripts/oort doctor --tier t2 --json`. `--tier t2`는 `MOMO_SELF_HOST_PLATFORM`(railway)과 같아야 한다. dump는 `MIGRATE_DATABASE_URL`만. one-off의 플랫폼 CLI/MCP는 SH-11a. |
 | **Cloudflare** (엣지 전용) | T3 | §3.8 · 레시피 SH-11d (`infra/cloudflare/`) — T1/T2 행 앞단의 DNS · Tunnel · TLS | MCP `mcp.cloudflare.com`(OAuth = 승인) 또는 사용자 API 토큰 REST(`Zone:DNS:Edit` + Tunnel) → 호스트의 `cloudflared`. `wrangler`는 쓰지 않는다(Workers/Pages CLI이지 DNS/Tunnel이 아님). | Cloudflare 가입 / MCP OAuth 또는 API 토큰; 레지스트라의 네임서버 위임; 호스트의 터널 토큰; 정리 확인. | 이미 떠 있는 T1/T2 행(doctor PASS). 컴퓨트가 아니다: Containers/Workers는 채택하지 않는다(ADR-0184 D1). 사용자가 「Cloudflare로」라고 하면 먼저 T1/T2를 고른다. | 앞에 세운 행을 감싼다; 오리진은 그 행의 엣지와 `/v1/centrifugo/*` 403 순서를 유지. Cloudflare DNS의 공개 호스트명(모드 A) 또는 루프백 Caddy로의 named tunnel(모드 B). | 감싼 행과 같고, Cloudflare 호스트명 경유로 `public.*` PASS. `public.*` skip은 사용자 오류다(§3.8) — PASS가 아니다. |
 | **Grok Bot VM** (Tailscale Funnel) | T1 | §3.3 | VM 안의 셸(compose) + `tailscale` CLI. | Tailscale 로그인·Funnel 켜기(4~5 클릭); 1회용 claim URL 열기. 계정 0개 + 고정 URL은 이 플레이북이 **달성하지 못한다**(RA-7). | curl, tar, Docker Engine + Compose v2, openssl, jq. git 불필요. durable 디렉터리 `/workspace`. Tailscale 계정 1개. | 루프백 Caddy + 웹 포트로 Tailscale Funnel. 여기서 `caddy.override.yml` 을 **켜지 마라** (ACME). `--public-origin` 은 Funnel URL을 Centrifugo에 등록한다. `/workspace` 아래 Funnel state가 살아 있는 동안 `https://<machine>.<tailnet>.ts.net`. | Funnel 오리진 기준 공개 검사 포함 doctor PASS, 1회용 claim URL을 사용자에게 회신, `/workspace` 첫날 덤프. |
 
@@ -384,12 +384,15 @@ scripts/self_host_env.sh --public-origin https://<host>
 4. `--compose` 는 canonical 파일 집합을 바꿀 수 없다. **공개** 오버레이는
    그 DNS를 소유한 기계에서만 켠다. 빈 `OORT_SITE_ADDRESS` 는 compose /
    `caddy validate` 를 실패시킨다 — ACME 오발 브레이크다. 노트북에서 이
-   오버레이를 올리지 마라.
+   오버레이를 올리지 마라. `local.override.yml` 은 집합에 남긴다(첨부 보관소
+   볼륨과 doctor 가 요구하는 `web` 서비스). 빠지면 api 가 보관소 없이 다시
+   만들어져 기동을 거부한다(#2609, 실측).
 
 ```sh
 ENV_FILE=infra/rust/local.secrets.env
 docker compose --env-file "$ENV_FILE" \
   -f infra/rust/docker-compose.rust.yml \
+  -f infra/rust/local.override.yml \
   -f infra/rust/caddy.override.yml up -d
 ```
 
@@ -1447,27 +1450,37 @@ curl -sS -o /tmp/oort-disconnect-complete.body -w '%{http_code}' \
 
 카탈로그: [`infra/railway/README.md`](../../infra/railway/README.md) ·
 [`infra/railway/railway.json`](../../infra/railway/railway.json).
-compose와 같은 GHCR 이미지(`releases/latest.json`), 커맨드 넷
-(`api` · `relay` · `webhook-sender` · `agent-worker`), 공개 엣지는 Caddy,
-Centrifugo는 `CENTRIFUGO_*`(파일 마운트 없음), Postgres는 플러그인.
+compose와 같은 GHCR 이미지(`releases/latest.json`), 커맨드 여섯
+(`api` · `relay` · `webhook-sender` · `agent-worker` · `notifier` ·
+`push-relay`, 모두 `momo-rust-entrypoint <role>`로 시작), 공개 엣지는 Caddy,
+Centrifugo는 `CENTRIFUGO_*`(파일 마운트 없음), Postgres는 볼륨 달린
+PG18 + pgvector 이미지 서비스.
 LiveKit은 이 템플릿에 없다. 이 레포가 싣지 않는 compose 스택을 만들지
 마라. 플랫폼 시크릿을 대화에 붙이지 마라.
 
-1. Railway 계정 + 프로젝트. Postgres 플러그인을 붙인다. `railway.json`의
-   서비스 여섯(이미지, `startCommand`, api `preDeployCommand`)을 만든다.
+1. Railway 계정 + 프로젝트. `railway.json`의 서비스(이미지, `startCommand`,
+   api `preDeployCommand`, 볼륨, `variables`)를 만든다.
    공개 도메인은 **caddy**에. api는 내부에 둔다.
-2. 플러그인 URL과 caddy 호스트명이 생긴 뒤:
+2. postgres 서비스의 `DATABASE_URL`을 조립하고(README) caddy 호스트명이
+   생긴 뒤:
 
 ```sh
-scripts/self_host_env.sh --platform railway
+scripts/self_host_env.sh --platform railway --claim
 ```
 
    (`--railway`는 별칭.) 환경에 `RAILWAY_PUBLIC_DOMAIN`과 `DATABASE_URL`이
    필요하다(둘 중 하나라도 없으면 명시 실패 — doctor `public.*` skip이
-   아니다). 어떤 변수를 읽고 어떤 키가 손에 남는지는 `platform_profiles`
+   아니다). `--claim`은 `railway.json`과 짝이다. 그 api 변수에는 owner
+   비밀번호가 아니라 `MOMO_BOOTSTRAP_CLAIM`이 있다. `--claim` 없이 만들면
+   pre-deploy에 owner 이메일만 있고 비밀번호가 없어 기동을 거부한다(exit 2).
+   비밀번호 방식을 쓰려면 `--claim` 없이 만들고, api에서
+   `MOMO_BOOTSTRAP_CLAIM`을 `MOMO_INITIAL_OWNER_PASSWORD` =
+   `${{shared.MOMO_INITIAL_OWNER_PASSWORD}}`로 바꾼다(api 시작 셈이 서버
+   기동 전에 이미 뺀다). 어떤 변수를 읽고 어떤 키가 손에 남는지는 `platform_profiles`
    행이 말한다. stdout KEY=value를
-   Railway 변수로 넣는다. 생성기 파일에 없는 compose 보간 키 셋
-   (`CENT_API_URL`, `WORKER_DATABASE_URL`, Centrifugo proxy 헤더)은 README.
+   Railway 공유 변수로 넣고, 서비스마다 `railway.json`의 `variables`를 준다.
+   compose가 이름을 바꾸거나 조립하는 값(9개 이상, Centrifugo v6 이름 넷 포함)은
+   README의 수기 매핑 표에 있다. 생성기 stderr는 셋만 댄다.
 3. 배포. api preDeploy(런타임 롤 → migrate)가 끝나고 caddy `/healthz`가
    답할 때까지 기다린다.
 4. 게이트:
@@ -1476,8 +1489,11 @@ scripts/self_host_env.sh --platform railway
 scripts/oort doctor --json
 ```
 
-   `public.healthz`와 `public.websocket`이 PASS여야 한다. 남길 인스턴스가
-   아니면 프로젝트를 지운다.
+   `public.healthz`와 `public.websocket`이 PASS이고 README의 손 점검
+   (`wss://` 실시간 주소, `https://` QR origin)도 통과해야 한다. README의
+   클라이언트 IP 관문이 PASS하기 전에는 claim 링크를 공유하거나 누구도
+   초대하지 않는다. 남길
+   인스턴스가 아니면 프로젝트를 지운다 — 팀 인스턴스(#2205)는 남긴다.
 
 **플랫폼 URL이 생긴 뒤 게이트:** `scripts/oort doctor --json` 에서
 `public.healthz` pass.

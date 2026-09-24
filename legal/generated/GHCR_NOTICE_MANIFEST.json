@@ -1,13 +1,13 @@
 {
   "counts": {
-    "cargo": 294,
+    "cargo": 297,
     "npm": 467,
-    "unique_blobs": 380
+    "unique_blobs": 381
   },
   "format": "ghcr-notice-bundle/v1",
   "generator": "scripts/generate_ghcr_notice_bundle.py",
   "image_files": {
-    "GHCR_THIRD_PARTY_NOTICES.txt": "f128a57316b7911c6d64b21c11efa9382923668f71bdf3444a654babbdaa81de",
+    "GHCR_THIRD_PARTY_NOTICES.txt": "eeb6e26056f131497c0970ce04af1919543e6ce9caf360535b60c331cbd32e3e",
     "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
     "NOTICE": "bb85609df736f68f239429c5d7fd929183d80d109fdc1ba54a21a52489c53882",
     "THIRD_PARTY_NOTICES.md": "38b3ef09142e28aa47260819f21ed5cdbc22eee85568efdc9b832e727c14869b"
@@ -15,7 +15,7 @@
   "inputs": {
     "clarify_sha256": "82ccac6d0af1fb9029a27b19e0ac8b3708e5be2eb6909ce22e6a4128ab6a19d4",
     "clients_web_package_lock_sha256": "61de099231ddb9d0634864b3b03bda1e167bdc78296cb64d31e3586e2a5af858",
-    "server_rust_cargo_lock_sha256": "2f6137a2e22782b979e0fa5e3f2198701c855545a9120e4efaeef876107b0ebb",
+    "server_rust_cargo_lock_sha256": "f6b1349cf350983b62557e1e63c8a39150a25af49de4607aa3dcd457de0d053f",
     "spdx_texts_sha256": {
       "0BSD.txt": "3662a9adfe6feddb077f96dfad3cb30408540a2a3eae5a656b7ff4375e622be0",
       "Apache-2.0.txt": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
@@ -29,8 +29,8 @@
     }
   },
   "outputs": {
-    "bundle_sha256": "f128a57316b7911c6d64b21c11efa9382923668f71bdf3444a654babbdaa81de",
-    "sha256_manifest_sha256": "57eb959a9a81600bafda50817d5bf41a9b9dba601268f8597613c9fc36d29044"
+    "bundle_sha256": "eeb6e26056f131497c0970ce04af1919543e6ce9caf360535b60c331cbd32e3e",
+    "sha256_manifest_sha256": "2a8136c49e026262ff8c5031042460247d6ef949e8e2eb0d04b9329391da5d5d"
   },
   "packages": [
     {
@@ -563,6 +563,27 @@
       "source": "package-tree",
       "spdx": "Apache-2.0 OR MIT",
       "version": "0.9.6"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3",
+          "source": "package-tree"
+        }
+      ],
+      "name": "core-foundation",
+      "repository": "https://github.com/servo/core-foundation-rs",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.10.1"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
@@ -3491,6 +3512,48 @@
       "source": "package-tree",
       "spdx": "MIT OR Apache-2.0",
       "version": "1.2.0"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "91e934255ba3b2f21103d68c5581c23ef34aa95c4628e4405b8c901935e11c69",
+          "source": "package-tree"
+        }
+      ],
+      "name": "security-framework",
+      "repository": "https://github.com/kornelski/rust-security-framework",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "3.7.0"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "91e934255ba3b2f21103d68c5581c23ef34aa95c4628e4405b8c901935e11c69",
+          "source": "package-tree"
+        }
+      ],
+      "name": "security-framework-sys",
+      "repository": "https://github.com/kornelski/rust-security-framework",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "2.17.0"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",

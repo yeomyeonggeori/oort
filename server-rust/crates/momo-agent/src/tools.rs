@@ -234,13 +234,17 @@ pub fn catalog_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: WORK_SESSION_SPAWN,
-            // The last sentence is the one that changes model behaviour: it tells
-            // the model that naming a host is a suggestion, so it stops inventing
-            // uuids when it has not been given one.
+            // The last two sentences are the ones that change model behaviour:
+            // naming a host is a suggestion, so it stops inventing uuids when it
+            // has not been given one; and a member's own machine is never a
+            // target (ADR-0188 R0.1 A′ — the call is refused, not carded), so it
+            // does not spend a step learning that.
             description: "Start a coding tool in a new work session on one of this \
              workspace's registered hosts. Requires human approval, and the \
              person approving chooses which host it runs on — propose `host_id` \
-             only if you were told which host to use.",
+             only if you were told which host to use. Never propose a member's \
+             own machine (a member-scoped host): an agent's work is not sent \
+             there, and such a call is refused.",
             parameters: json!({
                 "type": "object",
                 "properties": {

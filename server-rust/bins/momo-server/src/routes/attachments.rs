@@ -403,6 +403,13 @@ pub async fn content(
 /// authorization is the unguessable token in the path, and the token names one
 /// pre-declared file. A declared length of 0 is unknown; the received length is
 /// measured and the 100 MB ceiling is enforced on those bytes.
+///
+/// The token is **single-use and expires** (#2615,
+/// [`momo_drive::UPLOAD_SESSION_TTL`]): the upload it accepts spends it, so the
+/// URL cannot replace bytes that were completed and posted. A spent, expired or
+/// never-issued token answers the same 404 — which status a client sees says
+/// nothing about which URLs once worked, and every client already restarts a
+/// failed upload with a new session.
 pub async fn stub_upload(
     State(state): State<AppState>,
     Path(token): Path<String>,
