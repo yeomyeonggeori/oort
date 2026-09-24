@@ -202,11 +202,26 @@ describe('the 에이전트 section', () => {
 });
 
 describe('unread counts are the server’s', () => {
+  // A CONSISTENT row: cursor 0, head 3, and the server's own count agreeing.
+  // Before #1964 this fixture said `unreadCount: 3` over a channel whose head was
+  // seq 0 — which only passed because the row read that field straight through.
+  // The count is composed now (ADR-0178 D3), so the row has to describe a
+  // channel that could exist; the marked cases live in
+  // `markUnreadConsumption.test.tsx`.
   const unread = new Map([
-    ['ch-general', readState({channelId: 'ch-general', unreadCount: 3, mentionCount: 1})],
+    [
+      'ch-general',
+      readState({
+        channelId: 'ch-general',
+        lastReadSeq: 0,
+        latestSeq: 3,
+        unreadCount: 3,
+        mentionCount: 1,
+      }),
+    ],
   ]);
 
-  it('renders the projection as given', () => {
+  it('renders the projection as given when nothing is marked', () => {
     const sections = buildSidebarSections(input({unreadByChannel: unread}));
     expect(section(sections, 'channels')?.data[0]).toMatchObject({
       unreadCount: 3,

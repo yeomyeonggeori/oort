@@ -533,6 +533,13 @@ describe('R2 M-7 server base is not kept on a failed redeem', () => {
     );
     render(<ConnectScreen />);
     await waitFor(() => expect(screen.getByTestId('device-link-failure')).toBeTruthy());
+    // The 401 came from the QR's own server B, not from stored A. Without this the
+    // test would also pass if the stale QR were never redeemed at all.
+    expect(
+      fetchMock.mock.calls.some(
+        call => String(call[0]) === `${SERVER_B}/v1/auth/device-link/redeem`,
+      ),
+    ).toBe(true);
     expect(screen.getByTestId('server-url-input').props.value).toBe(STORED_SERVER_A);
     expect(mmkvStore.get('momo.mobile.server.v1')).toBe(STORED_SERVER_A);
   });

@@ -219,8 +219,11 @@ export default function InboxScreen({
 
   const markRead = useMarkRead();
   const marking = useMutation({
+    // 멘션 하나를 치운 것은 채널을 연 것이 아니다 (ADR-0178 D6). 이 광고가
+    // `explicit_open` 을 들면 데스크탑에서 건 「여기부터 안 읽음」이 그 방을 한
+    // 번도 안 연 사람의 손에서 지워진다.
     mutationFn: ({channelId, seq}: {channelId: string; seq: number}) =>
-      markRead(channelId, seq),
+      markRead(channelId, seq, 'inbox_mention'),
   });
 
   const onRowPress = useCallback(

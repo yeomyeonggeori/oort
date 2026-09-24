@@ -13,6 +13,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react-native';
 import React from 'react';
 
@@ -238,6 +239,11 @@ function jsonResponse(status: number, body: unknown): Response {
 interface Routes {
   workSessions?: () => Response | Promise<Response>;
   workHosts?: () => Response | Promise<Response>;
+  /**
+   * 한 방의 메시지 읽기에 직접 답한다. `undefined` 면 기본(빈 방)이다 — 새 방의 첫
+   * 페이지를 붙들어 두려고 있다 (#2584 R2 관찰 1).
+   */
+  messages?: (url: string) => Response | Promise<Response> | undefined;
 }
 
 interface FetchLog {
@@ -262,7 +268,9 @@ function installFetch(routes: Routes = {}): FetchLog {
     }
     if (url.includes('/roster')) return jsonResponse(200, {members: ROSTER});
     if (url.includes('/read-state')) return jsonResponse(200, {read_states: []});
-    if (url.includes('/messages')) return jsonResponse(200, {messages: []});
+    if (url.includes('/messages')) {
+      return routes.messages?.(url) ?? jsonResponse(200, {messages: []});
+    }
     if (url.includes('/reactions')) return jsonResponse(200, {});
     if (url.includes('/approvals')) return jsonResponse(200, {approvals: []});
     throw new Error(`unrouted request: ${url}`);
@@ -955,6 +963,77 @@ describe('「대화로」 — 그 작업을 낳은 줄까지', () => {
     // 되지 못한다 — 같은 파일의 팔레트 게이트가 그 사실을 따로 잠근다.
     expect(style.borderLeftColor).toBe(color.textFaint);
     expect(style.borderLeftColor).not.toBe(color.border);
+  });
+
+  // #2584 design-review R2 관찰 1 — 이 앵커는 「새 방의 타임라인이 도착하기 전에
+  // 점프를 걸면 그 즉시 「찾지 못했습니다」가 뜬다」를 이유로 한 박자 들고 있었는데,
+  // 그 박자를 `timeline.status === 'ready'` 로 쟀다. 방이 바뀐 첫 렌더의 'ready' 는 앞
+  // 방의 것이다. 새 방의 첫 페이지를 붙들어 두면 그 번쩍임이 그대로 남아 보인다.
+  /** 점프 고지가 섰으면 그 글, 없으면 null — 실패하면 무엇이 섰는지 원문으로 보인다. */
+  function jumpNoticeText(): string | null {
+    const notice = screen.queryByTestId('jump-missed');
+    if (notice === null) return null;
+    return within(notice)
+      .queryAllByText(/.+/)
+      .map(node => String(node.props.children))
+      .join(' / ');
+  }
+
+  it('다른 방의 카드는 그 방의 첫 페이지가 오기 전에 「찾지 못했습니다」를 세우지 않는다', async () => {
+    const orphaned = WORK_SESSIONS.find(row => row.id === 'SESSION-ORPHANED');
+    const rootId = orphaned?.rootMessageId ?? '';
+    let releaseBuild: ((answer: Response) => void) | null = null;
+    installFetch({
+      messages: url =>
+        url.includes(`/channels/${BUILD}/`) && !url.includes('after=')
+          ? new Promise<Response>(resolve => {
+              releaseBuild = resolve;
+            })
+          : undefined,
+    });
+    await openConversation(GENERAL);
+    await openBothTurns();
+    await waitFor(() => expect(screen.getByTestId('ade-summary')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('ade-summary'));
+    await waitFor(() => expect(screen.getByTestId('ade-card-list')).toBeTruthy());
+
+    fireEvent.press(screen.getByTestId('ade-card-anchor-session|session-orphaned'));
+    await waitFor(() =>
+      expect(screen.getByTestId('conversation-title')).toHaveTextContent(/build/),
+    );
+    await waitFor(() => expect(releaseBuild).not.toBeNull());
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    });
+    // 첫 페이지가 오는 중이다. 그 메시지가 있는지 없는지는 아직 모른다.
+    expect(jumpNoticeText()).toBeNull();
+
+    // 첫 페이지가 그 메시지를 들고 온다 → 그때 착지한다. 끝까지 고지는 없다.
+    await act(async () => {
+      releaseBuild?.(
+        jsonResponse(200, {
+          messages: [
+            {
+              id: rootId,
+              channelId: BUILD,
+              seq: 2,
+              hlcTs: 2,
+              hlcCount: 0,
+              authorMemberId: SELF_ID,
+              type: 'text',
+              body: '빌드 캐시 정리해 줘',
+              state: 'sent',
+              createdAtMs: 1_700_000_000_000,
+            },
+          ],
+        }),
+      );
+    });
+    await waitFor(() => expect(jumpTargetOf()?.messageId).toBe(rootId));
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    });
+    expect(jumpNoticeText()).toBeNull();
   });
 
   it('다른 방의 카드는 그 방을 열고 나서 착지한다', async () => {
