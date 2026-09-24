@@ -21,6 +21,7 @@ import {registerPushCategories} from './categories';
 import {apnsEnvironment, keychainAccessGroup} from './native';
 import {ensurePushPermission, fetchApnsToken, handlePushResponse} from './notifications';
 import {clearPushFetchSession, publishPushFetchSession} from './pushFetchSession';
+import {useAppIconBadge} from './appBadge';
 import {registerWithRetry} from './registration';
 import {tapArrival, tapResponseKey, type TapArrival} from './tapArrival';
 
@@ -273,6 +274,12 @@ export default function PushProvider({
     },
     [],
   );
+
+  // ---- 6. The app icon badge (#2670) ---------------------------------------
+  // The relay's number on every push, brought back to the server's unread total
+  // whenever a read lands or the app returns — and cleared at 0 and on
+  // sign-out. The rules and the one number it may use are in `appBadge.ts`.
+  useAppIconBadge(workspaceId);
 
   return (
     <PushArrivalContext.Provider value={arrival}>
