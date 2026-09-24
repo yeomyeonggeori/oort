@@ -35,9 +35,12 @@ reqwest = { workspace = true, features = ["stream"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+# `fs` + `io-util` (#2628): the local archive writes an upload body to disk as
+# it streams in instead of holding it in memory. Features only — tokio is
+# already in the graph with both, so Cargo.lock does not move.
+tokio = { workspace = true, features = ["sync", "fs", "io-util"] }
 tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

@@ -13,6 +13,8 @@
 //! | only ACP adapters with a permission bridge; Codex inside its accepted sandbox (ADR-0188 §8) | [`AdapterKind`], [`prepare_codex_home`] |
 //! | every ACP permission request is denied until the R1 bridge lands | [`decide_permission`] |
 //! | project hooks / MCP servers / allow rules are not applied | [`AdapterKind::isolation_env`], [`session_new_params`], [`check_project_config`] |
+//! | the host's environment reaches an agent, and the commands it runs, only through an allowlist (#2630 F1) | [`AGENT_ENV_ALLOWLIST`] in [`launch_spec`]; for Codex's commands also [`codex_home_config`] |
+//! | the owner's user skill layer is not loaded into a remote Codex session (#2630 F5) | `HOME` in [`AdapterKind::isolation_env`], [`prepare_codex_home`] |
 //! | no TCP port | nothing in this crate binds a socket; the conformance test checks the process |
 //!
 //! ## How each adapter is isolated (measured 2026-09-23 against the published sources)
@@ -66,7 +68,10 @@
 //!   ([`prepare_codex_home`]; the owner's `~/.codex` — its MCP servers, rules,
 //!   hooks, plugins and instructions — is never read), `TMPDIR` pointed at a
 //!   host folder, the features below switched off, no project `.codex`, and
-//!   the process tree ended with the session (`crate::proctree`).
+//!   the process tree ended with the session (`crate::proctree`). #2630 adds
+//!   an empty host folder as Codex's `HOME` (codex reads the user skill layer
+//!   from `$HOME/.agents/skills`) and confines what its commands see of the
+//!   environment ([`codex_home_config`]).
 //!
 //!   The adapter starts every session in `INITIAL_AGENT_MODE` (default `agent`, an auto-review mode) and
 //!   merges the JSON object in `CODEX_CONFIG` into each thread's config
@@ -215,7 +220,7 @@ impl AdapterKind {
     /// Environment the host sets on the adapter so project hooks, MCP servers
     /// and allow rules are not applied (ADR-0188 D6). Set after the owner's own
     /// environment, so an inherited value cannot win. Codex also gets the
-    /// host's own home and temp folder ([`CodexHome`], ADR-0188 §8).
+    /// host's own home, temp folder and `HOME` ([`CodexHome`], ADR-0188 §8).
     pub fn isolation_env(self, codex: &CodexHome) -> Vec<(String, String)> {
         match self {
             Self::Claude => Vec::new(),
@@ -226,6 +231,12 @@ impl AdapterKind {
                 // The sandbox keeps `$TMPDIR` writable: make it a host folder
                 // rather than the owner's per-user temp.
                 ("TMPDIR".to_string(), codex.tmp.display().to_string()),
+                // #2630 F5: codex loads the user skill layer from
+                // `$HOME/.agents/skills` (codex `ext/skills/src/host_roots.rs`),
+                // so its HOME is an empty host folder, never the owner's. The
+                // commands it runs get the owner's HOME back from the host's
+                // `config.toml` ([`codex_home_config`]).
+                ("HOME".to_string(), codex.user_home.display().to_string()),
                 // Otherwise every session opens in the auto-review mode.
                 (
                     "INITIAL_AGENT_MODE".to_string(),
@@ -353,16 +364,52 @@ fn claude_credential_files() -> Vec<Value> {
 // launch
 // ---------------------------------------------------------------------------
 
-/// Environment variables never handed to an agent: the host's own
-/// configuration (including the one-shot registration token) is not the
-/// agent's business.
-fn is_withheld_env(key: &str) -> bool {
-    key.starts_with("MOMO_") || key.starts_with("OORT_")
+/// #2630 F1 — the only variables of the host's own environment an agent is
+/// given. Everything else stays with the host, because an agent passes its
+/// environment on to every command it runs, and a remote session runs
+/// commands without asking: Claude's read-only set and Codex's accepted
+/// sandbox (ADR-0188 §8). A remote instruction — forged by a compromised
+/// server or injected by the repository's contents — could otherwise have a
+/// command print it.
+///
+/// | name | why an agent needs it |
+/// |---|---|
+/// | `PATH` | the adapter's interpreter (`#!/usr/bin/env node`) and the tools its commands run |
+/// | `HOME` | where the adapters keep their sign-in and state (Claude Code's `~/.claude*`); Codex gets a host folder instead ([`CodexHome::user_home`]) |
+/// | `USER`, `LOGNAME` | the account the sign-in is stored under (keychain lookups), and tools that ask who is running them |
+/// | `SHELL` | the shell the agents run commands with |
+/// | `TERM` | terminal capabilities of the tools they run |
+/// | `TMPDIR` | the per-user temp folder; Codex gets a host folder instead (ADR-0188 §8) |
+/// | `LANG`, `LC_*` | locale and encoding of what the commands print |
+///
+/// Withheld, among everything else: the host's own configuration (`MOMO_*`,
+/// `OORT_*` — the one-shot registration token included); credentials
+/// (`*_TOKEN`, `*_KEY`, `*_SECRET`, `SSH_AUTH_SOCK`, cloud CLIs); proxy and CA
+/// settings; and the adapters' own switches, so the owner's environment
+/// cannot configure a remote session — codex-acp 1.13.0 reads `CODEX_PATH`,
+/// `MODEL_PROVIDER`, `DEFAULT_AUTH_REQUEST`, `DISABLE_MCP_CONFIG_FILTERING` and
+/// `CODEX_API_KEY`/`OPENAI_API_KEY` from its environment (`dist/index.js`),
+/// Claude Code its `ANTHROPIC_*`/`CLAUDE_CODE_*` switches. So a remote
+/// session runs signed in (Claude Code's login, `CODEX_HOME=… codex login`),
+/// never on an API key from the environment.
+pub const AGENT_ENV_ALLOWLIST: &[&str] = &[
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "TMPDIR", "LANG",
+];
+
+/// The locale categories (`LC_ALL`, `LC_CTYPE`, …), allowed by prefix.
+pub const AGENT_ENV_ALLOWED_PREFIX: &str = "LC_";
+
+/// Whether a variable of the host's environment is handed to an agent
+/// ([`AGENT_ENV_ALLOWLIST`]).
+pub fn is_passed_env(key: &str) -> bool {
+    AGENT_ENV_ALLOWLIST.contains(&key) || key.starts_with(AGENT_ENV_ALLOWED_PREFIX)
 }
 
 /// Build the launch for one allowlisted tool. The only inputs are the owner's
 /// allowlist entry, the resolved folder, and the host's own environment — no
-/// server-provided value reaches the command line.
+/// server-provided value reaches the command line. Of that environment only
+/// [`AGENT_ENV_ALLOWLIST`] passes; the adapter's isolation environment is set
+/// over it.
 pub fn launch_spec(
     entry: &ToolEntry,
     cwd: &Path,
@@ -371,7 +418,7 @@ pub fn launch_spec(
 ) -> LaunchSpec {
     let mut env: Vec<(String, String)> = parent_env
         .into_iter()
-        .filter(|(key, _)| !is_withheld_env(key))
+        .filter(|(key, _)| is_passed_env(key))
         .collect();
     for (key, value) in entry.adapter.isolation_env(codex) {
         env.retain(|(existing, _)| existing != &key);
@@ -430,6 +477,14 @@ pub fn check_project_config(adapter: AdapterKind, cwd: &Path) -> Result<(), Refu
 /// browser control, local automations, an automated approval reviewer).
 /// Measured with codex-cli 0.155.1 `features list` under the host home: every
 /// one reads `false` with this table as a `-c features={…}` override.
+///
+/// #2630 adds two. `memories` (F7): the cross-session memory pipeline is off
+/// by default today (`features/src/lib.rs`, `MemoryTool`), and stays off if
+/// that default changes. `shell_snapshot` (F1): on by default, it runs a
+/// login shell that sources the user's `.zshrc` at thread start and wraps
+/// every later command in `. <snapshot>`, which re-exports everything that
+/// shell had — Codex's whole environment and the owner's startup-file exports
+/// — past `[shell_environment_policy]` (measured, `tests/codex_isolation_real.rs`).
 pub const CODEX_DISABLED_FEATURES: &[&str] = &[
     "hooks",
     "plugins",
@@ -444,6 +499,8 @@ pub const CODEX_DISABLED_FEATURES: &[&str] = &[
     "in_app_browser",
     "in_app_local_automation",
     "guardian_approval",
+    "memories",
+    "shell_snapshot",
 ];
 
 fn codex_disabled_features() -> Value {
@@ -455,10 +512,40 @@ fn codex_disabled_features() -> Value {
     )
 }
 
+/// A path as a TOML basic string, or `None` when it is not one (not UTF-8,
+/// or a control character, which TOML would need escaped). JSON's escapes
+/// (`\"`, `\\`, `\n`, `\uXXXX`) are all TOML escapes, and `serde_json` never
+/// writes the one that is not (`\/`); DEL, which it leaves raw, is refused
+/// with the rest.
+fn toml_string(path: &Path) -> Option<String> {
+    let text = path.to_str()?;
+    if text.chars().any(char::is_control) {
+        return None;
+    }
+    serde_json::to_string(text).ok()
+}
+
 /// The host's own `config.toml` for Codex, rewritten before every Codex
-/// session: the sign-in stays in a file here, nothing else is configured, and
-/// the same features are off again at this layer.
-pub fn codex_home_config() -> String {
+/// session: the sign-in stays in a file here, the same features are off
+/// again at this layer, and what a command Codex runs sees is confined
+/// (#2630):
+///
+/// * `[shell_environment_policy]`: a command starts from the core variables
+///   of Codex's environment only (`inherit = "core"`: `PATH`, `SHELL`,
+///   `TMPDIR`, `TEMP`, `TMP`, `HOME`, `LANG`, `LC_ALL`, `LC_CTYPE`, `LOGNAME`,
+///   `USER` — codex `protocol/src/shell_environment.rs`), with codex's
+///   `*KEY*`/`*SECRET*`/`*TOKEN*` excludes on besides. Codex's own defaults
+///   pass everything (`inherit = All`, `ignore_default_excludes = true`,
+///   `config/src/shell_environment_policy.rs`). It holds only with
+///   `shell_snapshot` off ([`CODEX_DISABLED_FEATURES`]).
+/// * `set.HOME` gives a command the owner's home back: Codex itself runs with
+///   an empty host folder as `HOME` (F5, [`CodexHome::user_home`]), and a
+///   command without the owner's home loses its toolchains (measured:
+///   rustup's `cargo` fails, git has no identity).
+/// * `set.ZDOTDIR` is that empty folder, so the zsh a command runs in reads
+///   no startup file of the owner's (`.zshenv`, `.zprofile`, `.zshrc`,
+///   `.zlogin`) — the exports in them stay out of commands (measured).
+pub fn codex_home_config(codex: &CodexHome) -> String {
     let mut config = String::from(
         "# Written by momo-workd before every remote Codex session (ADR-0188 §8).\n\
          # The host's own Codex home: the sign-in only. Changes here are replaced.\n\
@@ -469,6 +556,21 @@ pub fn codex_home_config() -> String {
     );
     for feature in CODEX_DISABLED_FEATURES {
         config.push_str(&format!("{feature} = false\n"));
+    }
+    config.push_str(
+        "\n\
+         # #2630: what a command Codex runs sees of the environment.\n\
+         [shell_environment_policy]\n\
+         inherit = \"core\"\n\
+         ignore_default_excludes = false\n\
+         \n\
+         [shell_environment_policy.set]\n",
+    );
+    if let Some(home) = codex.owner_home.as_deref().and_then(toml_string) {
+        config.push_str(&format!("HOME = {home}\n"));
+    }
+    if let Some(zdotdir) = toml_string(&codex.user_home) {
+        config.push_str(&format!("ZDOTDIR = {zdotdir}\n"));
     }
     config
 }
@@ -485,12 +587,28 @@ const CODEX_HOME_FORBIDDEN: &[&str] = &[
     "prompts",
 ];
 
-/// Where the host keeps Codex's home and temp folder: beside the registration
-/// state, owned by the host (ADR-0188 §8).
+/// Entries of Codex's `HOME` ([`CodexHome::user_home`]) that would be read as
+/// the owner's: the user skill layer (`.agents/skills`, #2630 F5) and the zsh
+/// startup files a command's shell reads from `ZDOTDIR`.
+const CODEX_USER_HOME_FORBIDDEN: &[&str] =
+    &[".agents", ".zshenv", ".zprofile", ".zshrc", ".zlogin"];
+
+/// Where the host keeps Codex's home, temp folder and `HOME`: beside the
+/// registration state, owned by the host (ADR-0188 §8).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodexHome {
+    /// `CODEX_HOME`.
     pub home: PathBuf,
+    /// `TMPDIR`, which the sandbox keeps writable.
     pub tmp: PathBuf,
+    /// `HOME` of the Codex process (#2630 F5): an empty host folder, so the
+    /// owner's `~/.agents/skills` is never loaded as Codex's user skill layer
+    /// — and it is `ZDOTDIR` for the commands Codex runs.
+    pub user_home: PathBuf,
+    /// The owner's own home, handed back to those commands as their `HOME`
+    /// ([`codex_home_config`]). `None` when the host was started without an
+    /// absolute `HOME`: its commands then keep `user_home`.
+    pub owner_home: Option<PathBuf>,
 }
 
 impl CodexHome {
@@ -499,13 +617,36 @@ impl CodexHome {
         Self {
             home: folder.join("codex-home"),
             tmp: folder.join("codex-tmp"),
+            user_home: folder.join("codex-user-home"),
+            owner_home: None,
         }
+    }
+
+    /// The owner's home for the commands Codex runs (the host's `HOME`).
+    pub fn with_owner_home(mut self, home: Option<PathBuf>) -> Self {
+        self.owner_home = home.filter(|home| home.is_absolute());
+        self
     }
 
     /// The command that signs Codex in to this home.
     pub fn login_command(&self) -> String {
         format!("CODEX_HOME=\"{}\" codex login", self.home.display())
     }
+}
+
+/// Whether `folder` holds any of `names`; a directory counts once it has an
+/// entry (an unreadable one counts).
+fn holds_any(folder: &Path, names: &[&str]) -> bool {
+    names.iter().any(|name| {
+        let path = folder.join(name);
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_dir() => std::fs::read_dir(&path)
+                .map(|mut entries| entries.next().is_some())
+                .unwrap_or(true),
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    })
 }
 
 fn private_dir(path: &Path) -> Result<(), Refusal> {
@@ -526,10 +667,11 @@ fn private_dir(path: &Path) -> Result<(), Refusal> {
     Ok(())
 }
 
-/// ADR-0188 §8, before every Codex session: the host's own `CODEX_HOME` and
-/// temp folder exist and are the owner's alone (`0700`), neither lies inside
-/// the allowed folder (the sandbox may write there), the home holds the
-/// sign-in and no configuration beyond it, and its `config.toml` is the
+/// ADR-0188 §8, before every Codex session: the host's own `CODEX_HOME`, temp
+/// folder and Codex `HOME` exist and are the owner's alone (`0700`), none lies
+/// inside the allowed folder (the sandbox may write there), the home holds
+/// the sign-in and no configuration beyond it, Codex's `HOME` holds no skill
+/// layer and no shell startup file (#2630 F5), and the `config.toml` is the
 /// host's. Without a sign-in the session is refused with
 /// `codex_login_required`; the owner signs in once with
 /// [`CodexHome::login_command`] — the host never copies the owner's
@@ -539,27 +681,23 @@ pub fn prepare_codex_home(codex: &CodexHome, cwd: &Path) -> Result<(), Refusal> 
     use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _};
     private_dir(&codex.home)?;
     private_dir(&codex.tmp)?;
-    for folder in [&codex.home, &codex.tmp] {
+    private_dir(&codex.user_home)?;
+    for folder in [&codex.home, &codex.tmp, &codex.user_home] {
         let folder = std::fs::canonicalize(folder).map_err(|_| Refusal::CodexHomeRefused)?;
         if folder.starts_with(cwd) || cwd.starts_with(&folder) {
             return Err(Refusal::CodexHomeRefused);
         }
     }
-    for entry in CODEX_HOME_FORBIDDEN {
-        let path = codex.home.join(entry);
-        let present = match std::fs::symlink_metadata(&path) {
-            Ok(metadata) if metadata.is_dir() => std::fs::read_dir(&path)
-                .map(|mut entries| entries.next().is_some())
-                .unwrap_or(true),
-            Ok(_) => true,
-            Err(_) => false,
-        };
-        if present {
-            return Err(Refusal::CodexHomeRefused);
-        }
+    if holds_any(&codex.home, CODEX_HOME_FORBIDDEN)
+        || holds_any(&codex.user_home, CODEX_USER_HOME_FORBIDDEN)
+        // `ZDOTDIR` must be written into the config, or the owner's startup
+        // files would be read again.
+        || toml_string(&codex.user_home).is_none()
+    {
+        return Err(Refusal::CodexHomeRefused);
     }
     let config = codex.home.join("config.toml");
-    let wanted = codex_home_config();
+    let wanted = codex_home_config(codex);
     if std::fs::read_to_string(&config).ok().as_deref() != Some(wanted.as_str()) {
         let temporary = codex
             .home
@@ -848,6 +986,7 @@ mod tests {
 
     fn codex_fixture() -> CodexHome {
         CodexHome::beside(Path::new("/state/workd/host.json"))
+            .with_owner_home(Some(PathBuf::from("/Users/me")))
     }
 
     fn scratch(name: &str) -> PathBuf {
@@ -966,19 +1105,46 @@ mod tests {
         );
     }
 
+    /// A host environment as a terminal hands it over: what an agent needs,
+    /// the host's own configuration, credentials (#2630 F1), and the
+    /// adapters' own configuration switches.
+    fn host_environment() -> Vec<(String, String)> {
+        [
+            ("HOME", "/Users/me"),
+            ("PATH", "/usr/bin"),
+            ("USER", "me"),
+            ("LOGNAME", "me"),
+            ("SHELL", "/bin/zsh"),
+            ("TERM", "xterm-256color"),
+            ("TMPDIR", "/var/folders/xx/T/"),
+            ("LANG", "ko_KR.UTF-8"),
+            ("LC_CTYPE", "UTF-8"),
+            ("MOMO_WORKD_REGISTER_TOKEN", "secret"),
+            ("OORT_ANYTHING", "secret"),
+            ("ZZ_TEST_TOKEN", "zz-fake-token-2630"),
+            ("ZZ_TEST_API_KEY", "zz-fake-api-key-2630"),
+            ("OPENAI_API_KEY", "zz-fake"),
+            ("ANTHROPIC_API_KEY", "zz-fake"),
+            ("GITHUB_TOKEN", "zz-fake"),
+            ("AWS_SECRET_ACCESS_KEY", "zz-fake"),
+            ("SSH_AUTH_SOCK", "/private/tmp/agent.sock"),
+            ("DISABLE_MCP_CONFIG_FILTERING", "true"),
+            ("CODEX_PATH", "/tmp/evil-codex"),
+            ("CLAUDE_CODE_USE_BEDROCK", "1"),
+            ("NODE_OPTIONS", "--require /tmp/x.js"),
+            ("HTTPS_PROXY", "http://user:pass@proxy:3128"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect()
+    }
+
     #[test]
     fn the_launch_comes_from_the_allowlist_and_withholds_host_env() {
         let spec = launch_spec(
             &entry(AdapterKind::Claude),
             Path::new("/work/repo"),
-            vec![
-                ("HOME".to_string(), "/Users/me".to_string()),
-                (
-                    "MOMO_WORKD_REGISTER_TOKEN".to_string(),
-                    "secret".to_string(),
-                ),
-                ("PATH".to_string(), "/usr/bin".to_string()),
-            ],
+            host_environment(),
             &codex_fixture(),
         );
         assert_eq!(spec.program, PathBuf::from("/opt/agents/bin/adapter"));
@@ -989,9 +1155,50 @@ mod tests {
             !spec.env.iter().any(|(key, _)| key.starts_with("MOMO_")),
             "the registration token must not reach an agent"
         );
+        // #2630 F1: only the allowlist reaches an agent — no credential, no
+        // host or adapter configuration.
+        let mut passed: Vec<&str> = spec.env.iter().map(|(key, _)| key.as_str()).collect();
+        passed.sort_unstable();
+        assert_eq!(
+            passed,
+            ["HOME", "LANG", "LC_CTYPE", "LOGNAME", "PATH", "SHELL", "TERM", "TMPDIR", "USER"],
+            "only the allowlist passes"
+        );
         let params = session_new_params(AdapterKind::Claude, Path::new("/work/repo"));
         assert_eq!(params["mcpServers"], json!([]));
         assert_eq!(params["cwd"], "/work/repo");
+    }
+
+    #[test]
+    fn a_symlinked_sign_in_is_refused() {
+        // #2630 F3: `auth.json` must be the home's own regular file. A link to
+        // a private regular file elsewhere (which `metadata` would follow and
+        // accept) is refused.
+        use std::os::unix::fs::PermissionsExt as _;
+        let state = scratch("codex-auth-link");
+        let folder = scratch("folder");
+        let codex = CodexHome::beside(&state.join("host.json"));
+        assert_eq!(
+            prepare_codex_home(&codex, &folder),
+            Err(Refusal::CodexLoginRequired)
+        );
+        let elsewhere = state.join("somebody-elses-auth.json");
+        std::fs::write(&elsewhere, "{}").unwrap();
+        std::fs::set_permissions(&elsewhere, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let auth = codex.home.join("auth.json");
+        std::os::unix::fs::symlink(&elsewhere, &auth).unwrap();
+        assert_eq!(
+            prepare_codex_home(&codex, &folder),
+            Err(Refusal::CodexHomeRefused),
+            "a symlinked auth.json is refused"
+        );
+        // The same file as the home's own regular file is the sign-in.
+        std::fs::remove_file(&auth).unwrap();
+        std::fs::copy(&elsewhere, &auth).unwrap();
+        std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(prepare_codex_home(&codex, &folder), Ok(()));
+        let _ = std::fs::remove_dir_all(&state);
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     /// Not a check: prints the exact `session/new` `_meta` the host sends a
@@ -1078,19 +1285,20 @@ mod tests {
 
     #[test]
     fn codex_is_isolated_through_its_environment_and_wins_over_inherited_values() {
+        let mut host = host_environment();
+        host.extend([
+            (
+                "INITIAL_AGENT_MODE".to_string(),
+                "agent-full-access".to_string(),
+            ),
+            ("CODEX_CONFIG".to_string(), "{}".to_string()),
+            // The owner's own settings must not win either (ADR-0188 §8).
+            ("CODEX_HOME".to_string(), "/Users/me/.codex".to_string()),
+        ]);
         let spec = launch_spec(
             &entry(AdapterKind::Codex),
             Path::new("/work/repo"),
-            vec![
-                (
-                    "INITIAL_AGENT_MODE".to_string(),
-                    "agent-full-access".to_string(),
-                ),
-                ("CODEX_CONFIG".to_string(), "{}".to_string()),
-                // The owner's own settings must not win either (ADR-0188 §8).
-                ("CODEX_HOME".to_string(), "/Users/me/.codex".to_string()),
-                ("TMPDIR".to_string(), "/var/folders/xx/T/".to_string()),
-            ],
+            host,
             &codex_fixture(),
         );
         let value = |name: &str| {
@@ -1106,6 +1314,28 @@ mod tests {
         assert_eq!(value("INITIAL_AGENT_MODE"), "read-only");
         assert_eq!(value("CODEX_HOME"), "/state/workd/codex-home");
         assert_eq!(value("TMPDIR"), "/state/workd/codex-tmp");
+        // #2630 F5: Codex's HOME is the host's empty folder, not the owner's.
+        assert_eq!(value("HOME"), "/state/workd/codex-user-home");
+        // #2630 F1: of the host's environment, the allowlist only.
+        let mut passed: Vec<&str> = spec.env.iter().map(|(key, _)| key.as_str()).collect();
+        passed.sort_unstable();
+        assert_eq!(
+            passed,
+            [
+                "CODEX_CONFIG",
+                "CODEX_HOME",
+                "HOME",
+                "INITIAL_AGENT_MODE",
+                "LANG",
+                "LC_CTYPE",
+                "LOGNAME",
+                "PATH",
+                "SHELL",
+                "TERM",
+                "TMPDIR",
+                "USER"
+            ]
+        );
         let config: Value = serde_json::from_str(&value("CODEX_CONFIG")).unwrap();
         // #2602 M-3: one nested table, no dotted keys beside it. ADR-0188 §8:
         // every feature that extends the agent or acts outside the sandbox off.
@@ -1119,6 +1349,9 @@ mod tests {
             "browser_use",
             "in_app_local_automation",
             "guardian_approval",
+            // #2630 F7 and F1.
+            "memories",
+            "shell_snapshot",
         ] {
             assert_eq!(features[feature], false, "{feature}");
         }
@@ -1172,24 +1405,55 @@ mod tests {
         use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
         let state = scratch("codex-home");
         let folder = scratch("folder");
-        let codex = CodexHome::beside(&state.join("host.json"));
+        let codex = CodexHome::beside(&state.join("host.json"))
+            .with_owner_home(Some(PathBuf::from("/Users/me")));
 
-        // First use: both folders made 0700, the host's config written, and
-        // no sign-in yet.
+        // First use: the three folders made 0700, the host's config written,
+        // and no sign-in yet.
         assert_eq!(
             prepare_codex_home(&codex, &folder),
             Err(Refusal::CodexLoginRequired)
         );
-        for dir in [&codex.home, &codex.tmp] {
+        for dir in [&codex.home, &codex.tmp, &codex.user_home] {
             assert_eq!(std::fs::metadata(dir).unwrap().mode() & 0o777, 0o700);
         }
         let config = codex.home.join("config.toml");
         assert_eq!(
             std::fs::read_to_string(&config).unwrap(),
-            codex_home_config()
+            codex_home_config(&codex)
         );
-        assert!(codex_home_config().contains("computer_use = false"));
+        assert!(codex_home_config(&codex).contains("computer_use = false"));
         assert!(codex.login_command().contains("codex-home"));
+
+        // #2630 F5: Codex's HOME never holds a skill layer or a zsh startup
+        // file (the host made it empty; only someone outside the sandbox can
+        // write there).
+        for (entry, content) in [
+            (
+                ".agents/skills/planted/SKILL.md",
+                "---\nname: planted\n---\n",
+            ),
+            (".zshrc", "export PLANTED=1\n"),
+            (".zshenv", "export PLANTED=1\n"),
+        ] {
+            let path = codex.user_home.join(entry);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, content).unwrap();
+            assert_eq!(
+                prepare_codex_home(&codex, &folder),
+                Err(Refusal::CodexHomeRefused),
+                "{entry} in Codex's HOME"
+            );
+            let top = entry.split('/').next().unwrap();
+            let _ = std::fs::remove_dir_all(codex.user_home.join(top));
+            let _ = std::fs::remove_file(codex.user_home.join(top));
+        }
+        std::fs::create_dir_all(codex.user_home.join(".agents")).unwrap();
+        assert_eq!(
+            prepare_codex_home(&codex, &folder),
+            Err(Refusal::CodexLoginRequired),
+            "an empty .agents is nothing"
+        );
 
         // Signed in: ready.
         let auth = codex.home.join("auth.json");
@@ -1202,7 +1466,7 @@ mod tests {
         assert_eq!(prepare_codex_home(&codex, &folder), Ok(()));
         assert_eq!(
             std::fs::read_to_string(&config).unwrap(),
-            codex_home_config()
+            codex_home_config(&codex)
         );
 
         // Configuration beyond the sign-in is refused.
@@ -1247,6 +1511,45 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&state);
         let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn the_host_config_confines_what_a_codex_command_sees() {
+        // #2630 F1/F5: the exact block codex reads (measured against codex
+        // 0.155.1 in tests/codex_isolation_real.rs).
+        let config = codex_home_config(&codex_fixture());
+        let tail = config
+            .split_once("[shell_environment_policy]\n")
+            .map(|(_, tail)| tail)
+            .expect("a [shell_environment_policy] table");
+        assert_eq!(
+            tail,
+            "inherit = \"core\"\n\
+             ignore_default_excludes = false\n\
+             \n\
+             [shell_environment_policy.set]\n\
+             HOME = \"/Users/me\"\n\
+             ZDOTDIR = \"/state/workd/codex-user-home\"\n"
+        );
+        for feature in ["memories = false\n", "shell_snapshot = false\n"] {
+            assert!(config.contains(feature), "{feature}");
+        }
+        // A home TOML needs escaped is written escaped; one it cannot hold is
+        // left out (the commands then keep Codex's own HOME).
+        let quoted = CodexHome::beside(Path::new("/state/workd/host.json"))
+            .with_owner_home(Some(PathBuf::from("/Users/o\"brien\\x")));
+        assert!(codex_home_config(&quoted).contains("HOME = \"/Users/o\\\"brien\\\\x\"\n"));
+        let control = CodexHome::beside(Path::new("/state/workd/host.json"))
+            .with_owner_home(Some(PathBuf::from("/Users/a\nZDOTDIR = \"/\"")));
+        assert!(!codex_home_config(&control).contains("HOME = \"/Users/a"));
+        assert_eq!(
+            codex_home_config(&control).matches("ZDOTDIR").count(),
+            1,
+            "no second key smuggled in"
+        );
+        let relative = CodexHome::beside(Path::new("/state/workd/host.json"))
+            .with_owner_home(Some(PathBuf::from("me")));
+        assert_eq!(relative.owner_home, None);
     }
 
     #[test]

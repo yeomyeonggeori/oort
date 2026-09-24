@@ -46,7 +46,6 @@ pub use realtime_advert::{
 
 use std::sync::Arc;
 
-use axum::extract::DefaultBodyLimit;
 use axum::http::HeaderMap;
 use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
@@ -1356,12 +1355,27 @@ pub fn build_app(state: AppState) -> Router {
     // The stand-in for Google's resumable session URL. Public for the same
     // reason that URL is: the client uploading has no bearer to present to it,
     // and its authorization is the unguessable token in the path.
+    //
+    // #2628: no `DefaultBodyLimit` here, on purpose. The handler takes the raw
+    // body and hands it to the archive unread, and a raw body is not what that
+    // limit applies to; the 100 MB ceiling is enforced by the archive as the
+    // bytes arrive (`momo_drive::ReceivedLength`), after the capability and the
+    // announced length were checked. Around the handler sits the per-IP gate
+    // (#2631 review R12): it lets the handler decide and spends the address's
+    // budget only on a refused capability (the route's 404), so a fake-token
+    // flood from an edge address that every client shares cannot turn a live
+    // upload into a 429. A refusal made before the body reads none, and neither
+    // does its 429; a capability refused at commit (spent by a concurrent PUT,
+    // or expired mid-body) is refused, and counted, after its body was read.
     let app = if accepts_stub_uploads {
         app.route(
             "/__momo_stub/drive/uploads/{token}",
-            put(routes::attachments::stub_upload).layer(DefaultBodyLimit::max(
-                momo_drive::MAX_ATTACHMENT_BYTES as usize,
-            )),
+            put(routes::attachments::stub_upload).route_layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    rate_limit::per_ip_drive_upload,
+                ),
+            ),
         )
     } else {
         app

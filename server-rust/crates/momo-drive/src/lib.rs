@@ -65,9 +65,10 @@ pub const MAX_ATTACHMENT_BYTES: i64 = 100 * 1024 * 1024;
 /// archive's `…/__momo_stub/drive/uploads/{token}` — stays usable after
 /// [`DriveArchive::create_resumable_upload`] minted it (#2615).
 ///
-/// The clock runs until the archive sees the PUT's **whole body**: the route
-/// buffers the body before it calls [`DriveArchive::accept_stub_upload`], so
-/// this must cover one complete transfer, not only its first byte.
+/// The clock runs until the archive has the PUT's **whole body**: the
+/// capability is checked before the first byte is read and again when the last
+/// one has arrived (#2628), so this must cover one complete transfer, not only
+/// its first byte.
 ///
 /// * Every client creates the session immediately before its PUT (web and
 ///   desktop `draftStore.uploadOne`, phone `draftStore.uploadOne`, workspace
@@ -120,6 +121,105 @@ pub fn uploaded_size_refusal(declared: i64, actual: i64) -> Option<DriveError> {
         ));
     }
     None
+}
+
+/// A PUT body as an archive receives it: the chunks as the transport delivers
+/// them, or the transport's failure (#2628).
+///
+/// The route hands it over **unread** — not a byte buffered — so an archive
+/// that refuses the capability, or refuses what the headers already say, never
+/// pulls a byte, and one that accepts it stores the chunks as they arrive. The
+/// 100 MB ceiling is therefore the archive's to enforce while it reads; no
+/// extractor limit stands in front of this stream.
+pub type UploadBody = BoxStream<'static, Result<Bytes, std::io::Error>>;
+
+/// Wrap any byte stream (the route's request body) as an [`UploadBody`]. Here
+/// rather than in the route so the server needs no stream combinators of its
+/// own.
+pub fn upload_body<S, E>(stream: S) -> UploadBody
+where
+    S: futures::Stream<Item = Result<Bytes, E>> + Send + 'static,
+    E: std::error::Error + Send + Sync + 'static,
+{
+    use futures::{StreamExt, TryStreamExt};
+    stream.map_err(std::io::Error::other).boxed()
+}
+
+/// What the request line and headers already decide about an upload, checked
+/// **before** a byte of the body is read (#2628): a body whose announced length
+/// is over the ceiling, or contradicts a known declaration, or whose mime
+/// contradicts the session's, is refused without being received.
+///
+/// Refusals here leave the capability usable, like every refusal before
+/// storage.
+pub(crate) fn refuse_before_body(
+    declared_size: i64,
+    declared_mime: &str,
+    mime: Option<&str>,
+    content_length: Option<u64>,
+) -> Result<(), DriveError> {
+    if let Some(announced) = content_length {
+        let announced = i64::try_from(announced).unwrap_or(i64::MAX);
+        if let Some(error) = uploaded_size_refusal(declared_size, announced) {
+            return Err(error);
+        }
+    }
+    if let Some(mime) = mime {
+        if !mime.is_empty() && mime != declared_mime {
+            return Err(DriveError::InvalidArguments(
+                "uploaded mime does not match the session".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The refusal for a body the transport did not deliver in full — the client
+/// went away mid-transfer. Nothing was stored, so the capability stays usable.
+pub(crate) fn interrupted_upload() -> DriveError {
+    DriveError::InvalidArguments("upload body was interrupted".into())
+}
+
+/// Counts a body as it streams in and refuses at the **first byte too many**:
+/// over the 100 MB ceiling, or past a known declaration. A body is never read
+/// further than it could still be accepted (#2628).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ReceivedLength {
+    declared: i64,
+    received: i64,
+}
+
+impl ReceivedLength {
+    pub(crate) fn new(declared: i64) -> ReceivedLength {
+        ReceivedLength {
+            declared,
+            received: 0,
+        }
+    }
+
+    pub(crate) fn add(&mut self, chunk: usize) -> Result<(), DriveError> {
+        self.received = self
+            .received
+            .saturating_add(i64::try_from(chunk).unwrap_or(i64::MAX));
+        if self.received > MAX_ATTACHMENT_BYTES {
+            return Err(DriveError::ContentTooLarge);
+        }
+        if !declared_size_is_unknown(self.declared) && self.received > self.declared {
+            return Err(DriveError::InvalidArguments(
+                "uploaded size does not match the session".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// The measured length, once the body has ended — refused if it fell short
+    /// of a known declaration.
+    pub(crate) fn finish(&self) -> Result<i64, DriveError> {
+        match uploaded_size_refusal(self.declared, self.received) {
+            Some(error) => Err(error),
+            None => Ok(self.received),
+        }
+    }
 }
 
 /// `X-Upload-Content-Length` for a Google resumable session. Unknown
@@ -236,20 +336,30 @@ pub trait DriveArchive: Send + Sync + std::fmt::Debug {
     /// Accept bytes for a stub session. Non-stub backends refuse: an upload that
     /// reached the server at all means the client used the wrong URL.
     ///
-    /// **A session accepts one upload (#2615).** The first PUT that passes the
-    /// size and mime checks spends it, before a byte is stored — Google's
-    /// resumable session is likewise done once its upload completes. A spent,
-    /// expired ([`UPLOAD_SESSION_TTL`]) or never-issued token is the same
+    /// **Order (#2628) — nothing is read that could not be accepted:**
+    /// 1. the capability is checked before the first byte of `body` is pulled;
+    /// 2. what the headers already say (`content_length`, `mime`) is checked
+    ///    before the first byte too;
+    /// 3. the body is read chunk by chunk and refused at the first byte over the
+    ///    ceiling or past a known declaration;
+    /// 4. the capability is checked again, then spent, then the bytes land.
+    ///
+    /// **A session accepts one upload (#2615).** The upload that passes every
+    /// check spends it, before its bytes become readable — Google's resumable
+    /// session is likewise done once its upload completes. A spent, expired
+    /// ([`UPLOAD_SESSION_TTL`]) or never-issued token is the same
     /// [`DriveError::FileNotFound`], so the route answers no question about
     /// which capabilities once existed. A refusal before storage (wrong length,
-    /// wrong mime, over the ceiling) leaves the session usable until it
-    /// expires, like a Google session that has not received its bytes yet. An
-    /// object that has landed is never overwritten through a capability.
+    /// wrong mime, over the ceiling, a body the client broke off) leaves the
+    /// session usable until it expires, like a Google session that has not
+    /// received its bytes yet. An object that has landed is never overwritten
+    /// through a capability.
     async fn accept_stub_upload(
         &self,
         _token: &str,
         _mime: Option<&str>,
-        _bytes: Vec<u8>,
+        _content_length: Option<u64>,
+        _body: UploadBody,
     ) -> Result<(), DriveError> {
         Err(DriveError::FileNotFound)
     }
@@ -566,6 +676,75 @@ mod tests {
             upload_content_length_header_value(12),
             Some("12".to_string())
         );
+    }
+
+    /// #2628 (review of #2624, S11): the lifetime is pinned from both sides. It
+    /// is a security bound — how long a leaked, unused URL is worth anything —
+    /// and a functional one — it must outlast one whole transfer through the
+    /// slowest edge we ship behind (Railway closes a request at 15 minutes).
+    #[test]
+    fn the_upload_session_lifetime_is_bounded_from_both_sides() {
+        assert!(
+            UPLOAD_SESSION_TTL <= Duration::from_secs(60 * 60),
+            "an unused upload URL must not stay usable for more than an hour: {UPLOAD_SESSION_TTL:?}"
+        );
+        assert!(
+            UPLOAD_SESSION_TTL >= Duration::from_secs(15 * 60),
+            "an upload URL must outlast Railway's 15-minute request ceiling: {UPLOAD_SESSION_TTL:?}"
+        );
+    }
+
+    /// The first byte too many is refused — over a known declaration, or over
+    /// the ceiling for an unknown one — and a short body is refused at the end.
+    #[test]
+    fn a_streamed_length_is_refused_at_the_first_byte_too_many() {
+        let mut known = ReceivedLength::new(5);
+        assert_eq!(known.add(5), Ok(()));
+        assert!(matches!(known.add(1), Err(DriveError::InvalidArguments(_))));
+
+        let mut short = ReceivedLength::new(5);
+        assert_eq!(short.add(4), Ok(()));
+        assert!(matches!(
+            short.finish(),
+            Err(DriveError::InvalidArguments(_))
+        ));
+
+        let mut unknown = ReceivedLength::new(0);
+        assert_eq!(unknown.add(MAX_ATTACHMENT_BYTES as usize), Ok(()));
+        assert_eq!(unknown.finish(), Ok(MAX_ATTACHMENT_BYTES));
+        assert_eq!(unknown.add(1), Err(DriveError::ContentTooLarge));
+
+        let mut exact = ReceivedLength::new(3);
+        assert_eq!(exact.add(1), Ok(()));
+        assert_eq!(exact.add(2), Ok(()));
+        assert_eq!(exact.finish(), Ok(3));
+    }
+
+    /// What the headers announce is judged before the body: the ceiling first,
+    /// then a known declaration, then the mime.
+    #[test]
+    fn what_the_headers_announce_is_refused_before_the_body() {
+        assert_eq!(
+            refuse_before_body(5, "text/plain", None, Some(MAX_ATTACHMENT_BYTES as u64 + 1)),
+            Err(DriveError::ContentTooLarge)
+        );
+        assert_eq!(
+            refuse_before_body(0, "text/plain", None, Some(u64::MAX)),
+            Err(DriveError::ContentTooLarge)
+        );
+        assert!(matches!(
+            refuse_before_body(5, "text/plain", None, Some(6)),
+            Err(DriveError::InvalidArguments(_))
+        ));
+        assert!(matches!(
+            refuse_before_body(5, "text/plain", Some("image/png"), Some(5)),
+            Err(DriveError::InvalidArguments(_))
+        ));
+        assert_eq!(
+            refuse_before_body(0, "text/plain", Some("text/plain"), Some(9)),
+            Ok(())
+        );
+        assert_eq!(refuse_before_body(5, "text/plain", Some(""), None), Ok(()));
     }
 
     #[test]
