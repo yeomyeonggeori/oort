@@ -117,6 +117,10 @@ jest.mock('expo-notifications', () => ({
   // existing suite; `__tests__/pushTap.test.tsx` overrides it per test.
   getLastNotificationResponse: jest.fn(() => null),
   clearLastNotificationResponse: jest.fn(),
+  // #2670 — the app icon badge. `true` is what the native side answers when the
+  // person allowed badges; `__tests__/appIconBadge.test.tsx` reads the calls.
+  setBadgeCountAsync: jest.fn(async () => true),
+  getBadgeCountAsync: jest.fn(async () => 0),
   // Present so that importing it is an error a test can see, rather than
   // `undefined is not a function` at the call site. Nothing in this client may
   // call it: it mints an Expo-service token and routes our notifications through
