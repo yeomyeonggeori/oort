@@ -1312,12 +1312,13 @@ export default function ConversationScreen({
   const landingSightRef = useRef<{token: number; markers: number} | null>(null);
   /** 앞 커밋까지 이 화면이 보이던 방 — 탭과 함께 방이 바뀌었는가(N-3). */
   const shownChannelRef = useRef<string | null>(null);
+  const openThreadRootId = thread?.id ?? null;
   const landingHeld = useMemo(
     () =>
       notification !== undefined &&
       timelineHoldsThisChannel &&
-      notificationTargetHeld(timelineMessages, notification),
-    [notification, timelineHoldsThisChannel, timelineMessages],
+      notificationTargetHeld(timelineMessages, notification, openThreadRootId),
+    [notification, timelineHoldsThisChannel, timelineMessages, openThreadRootId],
   );
   /** 탭 **뒤에** 꼬리를 읽는다. 답하면 「없다」를 판정해도 된다. */
   const readAfterTap = useCallback(

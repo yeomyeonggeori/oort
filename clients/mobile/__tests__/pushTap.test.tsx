@@ -1952,6 +1952,42 @@ describe('「있다」는 언제든, 「없다」는 탭 뒤 읽기로만 (#2632
     expect(missAnnouncements()).toEqual([]);
   });
 
+  it('같은 스레드가 이미 열려 있으면 루트를 들고 있어도 그 새 답글은 탭 뒤에 읽고 착지한다 (탐침 edge-c2 회귀 가드)', async () => {
+    const fetchMock = installFetch();
+    const emitAppState = captureAppState();
+    renderShell();
+    await waitForSidebar();
+    await tapWhileRunning(apnsPayload(TARGETS['스레드 답글'].aim));
+    await expectLanded('general', REPLY, true);
+    await sleep(400);
+    const readsBefore = afterReadsOf(fetchMock, GENERAL).length;
+
+    // 같은 스레드(ROOT)가 열린 채 뒤로 갔고, 그 스레드의 새 답글이 서버에만 있다.
+    // 열린 스레드 판은 루트가 그대로라 답글을 다시 읽지 않는다 — 루트를 들고 있다는
+    // 것만으로는 그 답글이 「있다」가 아니다.
+    act(() => emitAppState('background'));
+    commitLater(
+      GENERAL,
+      message(17, NEW_REPLY_ID, {rootId: ROOT, body: '같은 스레드의 새 답글'}),
+    );
+    await tapWhileRunning(
+      apnsPayload({
+        messageId: NEW_REPLY_ID,
+        threadId: ROOT,
+        category: 'momo.message',
+        reason: 'dm',
+      }),
+    );
+    act(() => emitAppState('active'));
+
+    await waitFor(() => expect(landedIds()).toContain(NEW_REPLY_ID), SETTLE);
+    expect(screen.getByTestId('thread-title')).toBeTruthy();
+    // 채널의 꼬리 읽기(탭 뒤)가 그 답글을 가져왔다.
+    expect(afterReadsOf(fetchMock, GENERAL).length).toBeGreaterThan(readsBefore);
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
+    expect(missAnnouncements()).toEqual([]);
+  });
+
   it('보이지 않는 기다림 중에 사람이 목록을 잡으면 그 기다림은 접힌다 — 늦게 온 읽기가 목록을 옮기지 않는다 (N-1, 탐침 edge-b3)', async () => {
     const gates: Held[] = [];
     let holdNext = false;
