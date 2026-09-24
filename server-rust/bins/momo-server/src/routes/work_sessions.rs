@@ -1840,6 +1840,24 @@ async fn resume_in_tx(
     {
         return Ok(Err(resume_target_status(rejection)));
     }
+    // ADR-0188 D6 (R0) — 원격 shell 금지. A takeover writes a `spawn` control
+    // (below), so it is a spawn like any other and a remote (member-scoped)
+    // target refuses a shell here too — even for the lineage's own person,
+    // because the invariant is about the tool, not about who asks.
+    if momo_t3::work_control::remote_host_refuses_tool_in_tx(
+        conn,
+        workspace_id,
+        target_host_id,
+        &source.tool,
+    )
+    .await?
+    {
+        return Ok(Err(ApiError::coded(
+            StatusCode::FORBIDDEN,
+            momo_t3::work_control::REFUSAL_REMOTE_HOST_SHELL,
+            "a shell cannot be resumed onto a member-scoped work host",
+        )));
+    }
 
     if let Err(error) = acquire_slot_in_tx(conn, workspace_id, member_id, target_host_id).await {
         return Ok(Err(match error {

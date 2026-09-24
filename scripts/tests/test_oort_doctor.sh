@@ -622,13 +622,25 @@ APPLIED_N="$(docker exec -i "$PG_CID" psql -U momo -d momo -At -c "SELECT count(
 [ "$APPLIED_N" = "$EXPECTED_MIG" ] || \
   fail "seeded schema_migrations count ${APPLIED_N} != expected ${EXPECTED_MIG}"
 
-python3 - "$MOCK_PORT" "$EXPECTED_MIG" <<'PY' &
+# #2205: the mock also answers the public WebSocket upgrade the way Centrifugo
+# v6 does — 101 when Origin is in allowed_origins, 403 when it is not, and 101
+# when NO Origin is sent (the blind spot the old doctor probe sat in). Its
+# allowlist and /healthz shape are read per request from MOCK_CONFIG, and every
+# upgrade's Origin (or <none>) is appended to MOCK_ORIGIN_LOG.
+MOCK_CONFIG="$SANDBOX/mock-config.json"
+MOCK_ORIGIN_LOG="$SANDBOX/mock-origins.log"
+: >"$MOCK_ORIGIN_LOG"
+python3 - "$MOCK_PORT" "$EXPECTED_MIG" "$MOCK_CONFIG" "$MOCK_ORIGIN_LOG" <<'PY' &
+import base64
+import hashlib
 import json
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 port = int(sys.argv[1])
 applied = int(sys.argv[2])
+config_path = sys.argv[3]
+origin_log = sys.argv[4]
 body = json.dumps({
     "status": "ok",
     "service": "momo-server",
@@ -636,14 +648,52 @@ body = json.dumps({
     "schema": {"applied": applied, "head": "086_device_link_token.sql"},
 }).encode()
 
+
+def config():
+    try:
+        with open(config_path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path.split("?")[0] == "/healthz":
+        path = self.path.split("?")[0]
+        if path == "/healthz":
+            if config().get("healthz") == "empty":
+                # A Caddy site that does not match the Host answers this.
+                self.send_response(200)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            return
+        if path == "/connection/websocket" and self.headers.get("Upgrade", "").lower() == "websocket":
+            origin = self.headers.get("Origin")
+            with open(origin_log, "a", encoding="utf-8") as fh:
+                fh.write((origin if origin is not None else "<none>") + "\n")
+            if origin is not None and origin not in config().get("allowed_origins", []):
+                self.send_response(403)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            accept = base64.b64encode(
+                hashlib.sha1(
+                    (self.headers.get("Sec-WebSocket-Key", "") + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()
+                ).digest()
+            ).decode()
+            self.wfile.write(
+                (
+                    "HTTP/1.1 101 Switching Protocols\r\n"
+                    "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+                    "Sec-WebSocket-Accept: %s\r\n\r\n" % accept
+                ).encode()
+            )
             return
         self.send_response(404)
         self.end_headers()
@@ -678,6 +728,7 @@ printf '%s' "$HEALTHZ_BODY" | jq -e '.status=="ok" and .service=="momo-server" a
 # server on 127.0.0.1 and rewrite a public fixture hostname via PATH curl.
 T2_FIXTURE_HOST="t2.example.test"
 T2_FIXTURE_ORIGIN="http://${T2_FIXTURE_HOST}:${MOCK_PORT}"
+printf '{"allowed_origins": ["%s"], "healthz": "json"}\n' "$T2_FIXTURE_ORIGIN" >"$MOCK_CONFIG"
 REAL_CURL="$(command -v curl)"
 mkdir -p "$SANDBOX/bin"
 cat >"$SANDBOX/bin/curl" <<EOF
@@ -685,8 +736,10 @@ cat >"$SANDBOX/bin/curl" <<EOF
 set -euo pipefail
 args=()
 for a in "\$@"; do
+  # URLs only: a header such as "Origin: http://${T2_FIXTURE_HOST}:…" must reach
+  # the mock exactly as the doctor wrote it (#2205).
   case "\$a" in
-    *://${T2_FIXTURE_HOST}*)
+    http://${T2_FIXTURE_HOST}* | https://${T2_FIXTURE_HOST}*)
       a="\${a//${T2_FIXTURE_HOST}/127.0.0.1}"
       ;;
   esac
@@ -789,6 +842,53 @@ if grep -F -- "$TOKEN_PG" "$OUT" "$ERR" >/dev/null; then
   fail "T2 doctor leaked postgres password"
 fi
 pass "T2 doctor ids=${T2_COUNT} match T1; stack.* skip only compose_ps; other 5 pass"
+
+# #2205 — public.* must be able to fail. In the run above the mock allowlist
+# holds the fixture origin, so public.websocket can pass only because the
+# doctor sent exactly that Origin (a real client always does).
+[ "$(check_field "$OUT" public.websocket status)" = "pass" ] || \
+  fail "T2 public.websocket want pass (Origin allowed): $(check_field "$OUT" public.websocket detail)"
+grep -Fxq "$T2_FIXTURE_ORIGIN" "$MOCK_ORIGIN_LOG" || \
+  fail "doctor WS probe did not send Origin ${T2_FIXTURE_ORIGIN}: $(tr '\n' ' ' <"$MOCK_ORIGIN_LOG")"
+if grep -Fxq '<none>' "$MOCK_ORIGIN_LOG"; then
+  fail "doctor WS probe sent an upgrade without Origin"
+fi
+[ "$(check_field "$OUT" public.healthz status)" = "pass" ] || \
+  fail "T2 public.healthz want pass: $(check_field "$OUT" public.healthz detail)"
+pass "public.websocket sends Origin ${T2_FIXTURE_ORIGIN} over http(s)+Upgrade (101); public.healthz sees momo-server JSON"
+
+# Red: empty allowed_origins — what Centrifugo gets when the Railway catalog
+# does not map CENTRIFUGO_ALLOWED_ORIGINS to its v6 name.
+printf '{"allowed_origins": [], "healthz": "json"}\n' >"$MOCK_CONFIG"
+OUT="$SANDBOX/t2-empty-origins.json"
+ERR="$SANDBOX/t2-empty-origins.err"
+code="$(run_doctor "$T2_ENV" "$OUT" "$ERR" --json --tier t2)"
+[ "$(check_field "$OUT" public.websocket status)" = "fail" ] || \
+  fail "empty allowed_origins: public.websocket status=$(check_field "$OUT" public.websocket status) (want fail)"
+detail="$(check_field "$OUT" public.websocket detail)"
+printf '%s' "$detail" | grep -Fq '403' || fail "empty allowed_origins detail must name 403: $detail"
+printf '%s' "$detail" | grep -Fq "$T2_FIXTURE_ORIGIN" || fail "empty allowed_origins detail must name the Origin: $detail"
+[ "$code" != "0" ] || fail "empty allowed_origins still exited 0"
+# The pre-#2205 probe shape (no Origin) against the same empty allowlist is
+# still 101 — the reason that check could not fail.
+old_code="$(curl -sS --http1.1 -m 3 -o /dev/null -w '%{http_code}' \
+  -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
+  -H "Sec-WebSocket-Key: $(openssl rand -base64 16 | tr -d '\n')" \
+  "${T2_FIXTURE_ORIGIN}/connection/websocket" 2>/dev/null || true)"
+[ "$old_code" = "101" ] || fail "no-Origin probe against empty allowlist want 101 (blind spot), got ${old_code}"
+pass "sabotage empty allowed_origins → public.websocket fail (403, Origin named); a no-Origin probe still gets 101"
+
+# Red: an empty 200 on /healthz (a Caddy site that does not match the Host).
+printf '{"allowed_origins": ["%s"], "healthz": "empty"}\n' "$T2_FIXTURE_ORIGIN" >"$MOCK_CONFIG"
+OUT="$SANDBOX/t2-empty-healthz.json"
+ERR="$SANDBOX/t2-empty-healthz.err"
+code="$(run_doctor "$T2_ENV" "$OUT" "$ERR" --json --tier t2)"
+[ "$(check_field "$OUT" public.healthz status)" = "fail" ] || \
+  fail "empty-200 /healthz: public.healthz status=$(check_field "$OUT" public.healthz status) (want fail)"
+printf '%s' "$(check_field "$OUT" public.healthz detail)" | grep -Fq 'momo-server' || \
+  fail "empty-200 /healthz detail: $(check_field "$OUT" public.healthz detail)"
+pass "sabotage empty-200 /healthz → public.healthz fail (200 without momo-server JSON is not the api)"
+printf '{"allowed_origins": ["%s"], "healthz": "json"}\n' "$T2_FIXTURE_ORIGIN" >"$MOCK_CONFIG"
 
 # Sabotage: GRANT DELETE ON outbox still passed attribute-only checks (N-2).
 docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 \

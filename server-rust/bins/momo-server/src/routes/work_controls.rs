@@ -29,6 +29,22 @@
 //! `pending_approval` control has no statement in this binary that can dispatch
 //! it.
 //!
+//! ## ADR-0188 R0 — the remote host (`scope = 'member'`)
+//!
+//! A member-scoped host is somebody's own machine, and R0 narrows the rule above
+//! there before any phone can reach it:
+//!
+//! * an **agent bearer** may address it with `kill` only — `input`, `read` and
+//!   `spawn` answer 403 `remote_host_kill_only` (ADR-0114 D4·D5 are replaced on
+//!   this scope);
+//! * path 2 is closed: `work_auto_approve` never covers it
+//!   (`spawn_is_auto_approved_in_tx` judges the target host's scope);
+//! * path 1's human must be **the host's owner** — enforced where the decision is
+//!   made, in [`crate::routes::approvals`], against the host the spawn will
+//!   finally run on.
+//!
+//! Workspace-scoped hosts are outside goal A and keep every rule they had.
+//!
 //! ## The daemon arm (#1114, closing #1132's first deviation)
 //!
 //! Swift accepts either the registering human owner *or* a `MomoHost`-signed
@@ -75,18 +91,18 @@ use momo_db::PgConnection;
 use momo_messaging::{cent_channel, send_message_in_tx, MessageType, NewMessage};
 use momo_outbox::{emit_outbox, OutboxKind};
 use momo_t3::work_control::{
-    active_host_owner_in_tx, bind_control_approval_message_in_tx, control_event_payload,
-    control_run_binding_in_tx, default_spawn_host, disable_auto_approve_in_tx,
-    enable_auto_approve_in_tx, fail_approved_control_in_tx, insert_work_control_in_tx,
-    last_used_spawn_host_in_tx, list_auto_approvals_in_tx, lock_work_control_in_tx,
-    mark_control_dispatched_in_tx, record_host_last_used_in_tx,
+    active_host_owner_in_tx, agent_control_allowed, bind_control_approval_message_in_tx,
+    control_event_payload, control_run_binding_in_tx, default_spawn_host,
+    disable_auto_approve_in_tx, enable_auto_approve_in_tx, fail_approved_control_in_tx,
+    insert_work_control_in_tx, last_used_spawn_host_in_tx, list_auto_approvals_in_tx,
+    lock_work_control_in_tx, mark_control_dispatched_in_tx, record_host_last_used_in_tx,
     session_control_lineage_status_in_tx, settle_control_ack_in_tx,
     spawn_ack_session_matches_in_tx, spawn_execution_object, spawn_host_candidates_in_tx,
     spawn_is_auto_approved_in_tx, target_host_scope_allows, target_work_host_in_tx,
     validated_error_label, validated_payload, validated_session_shape, validated_tool_key,
     work_host_is_active_in_tx, NewWorkControl, WorkControlRow, ACTION_TYPE_WORK_SPAWN,
-    APPROVAL_SOURCE_WORK_CONTROL, KIND_INPUT, KIND_KILL, KIND_READ, KIND_SPAWN, STATUS_APPROVED,
-    STATUS_DISPATCHED, STATUS_PENDING_APPROVAL,
+    APPROVAL_SOURCE_WORK_CONTROL, KIND_INPUT, KIND_KILL, KIND_READ, KIND_SPAWN,
+    REFUSAL_REMOTE_HOST_KILL_ONLY, STATUS_APPROVED, STATUS_DISPATCHED, STATUS_PENDING_APPROVAL,
 };
 use momo_t3::{
     active_control_window_in_tx, expire_lapsed_control_windows_in_tx, work_tool_is_enabled_in_tx,
@@ -260,6 +276,19 @@ async fn create_in_tx(conn: &mut PgConnection, input: CreateInput) -> Rejectable
             "member-scoped work host belongs to another session owner",
         )));
     }
+    // ADR-0188 D3 (R0) — 「에이전트 컨트롤은 kill만」. A member-scoped host is
+    // somebody's own machine; from an agent bearer it accepts the off switch
+    // and nothing else. This replaces ADR-0114 D4·D5 on that scope: `input` and
+    // `read` no longer ride on a lineage approved once, and `spawn` does not
+    // come from an agent's own request at all. Refused before the first write,
+    // so a refused agent leaves no row, no card and no audit entry behind.
+    if !agent_control_allowed(&host.scope, input.kind) {
+        return Ok(Err(ApiError::coded(
+            StatusCode::FORBIDDEN,
+            REFUSAL_REMOTE_HOST_KILL_ONLY,
+            "agent controls on a member-scoped work host are limited to kill",
+        )));
+    }
 
     let tool = input.payload.get("tool").and_then(Value::as_str);
     if input.kind == KIND_SPAWN {
@@ -363,11 +392,19 @@ async fn create_in_tx(conn: &mut PgConnection, input: CreateInput) -> Rejectable
     }
 
     // ADR-0114 D5. Only a spawn can be pre-authorised; input/read/kill are
-    // already inside a lineage a human approved once.
+    // already inside a lineage a human approved once. The target host is part
+    // of the question since ADR-0188 R0: a remote (member-scoped) host is never
+    // auto-approved, whatever the owner ticked.
     let auto_approved = match (input.kind, tool) {
         (KIND_SPAWN, Some(tool)) => {
-            spawn_is_auto_approved_in_tx(conn, input.workspace_id, binding.owner_human_id, tool)
-                .await?
+            spawn_is_auto_approved_in_tx(
+                conn,
+                input.workspace_id,
+                binding.owner_human_id,
+                tool,
+                input.target_host_id,
+            )
+            .await?
         }
         _ => false,
     };

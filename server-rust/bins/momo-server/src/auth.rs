@@ -760,10 +760,12 @@ async fn authenticate_signed_host(
         return Err(signed_request_unauthorized());
     };
 
+    // The whole URI, not `path`: a query string is outside the signature, and
+    // the authenticator refuses one only if it can see it (ADR-0188 D7).
     let signed = authenticate_signed_host_request(
         &state,
         &parts.method,
-        &path,
+        &parts.uri,
         &parts.headers,
         &bytes,
         workspace_id,

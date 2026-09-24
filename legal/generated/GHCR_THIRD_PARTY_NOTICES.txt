@@ -8,12 +8,12 @@
 # legal sufficiency. Debian OS-layer licenses are inventoried separately
 # inside each image; GPL/LGPL there are copyleft, not permissive.
 #
-# cargo.lock.sha256: 2f6137a2e22782b979e0fa5e3f2198701c855545a9120e4efaeef876107b0ebb
+# cargo.lock.sha256: f6b1349cf350983b62557e1e63c8a39150a25af49de4607aa3dcd457de0d053f
 # web.package-lock.sha256: 61de099231ddb9d0634864b3b03bda1e167bdc78296cb64d31e3586e2a5af858
 # clarify.sha256: 82ccac6d0af1fb9029a27b19e0ac8b3708e5be2eb6909ce22e6a4128ab6a19d4
-# cargo.packages: 294
+# cargo.packages: 297
 # npm.packages: 467
-# unique.license.blobs: 380
+# unique.license.blobs: 381
 #
 ## Package index
 # ecosystem <TAB> name <TAB> version <TAB> spdx <TAB> copyright <TAB> source <TAB> file_sha256[,file_sha256]
@@ -43,6 +43,7 @@ cargo	chacha20	0.10.1	MIT OR Apache-2.0	copyright notice that is included in or 
 cargo	chrono	0.4.45	MIT OR Apache-2.0	Copyright (c) 2014, Kang Seonghoon.; copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	946c9835d8034d24404f8cfec5f4654cee5dad17e944afc3d06d742cf2882831
 cargo	cipher	0.4.4	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,5c7bd92d1f096f12203dc1b601e3cb17484fa1b023e30b6b8edcc80e416237ec
 cargo	const-oid	0.9.6	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,bada9e7ed8dc00d63502053c455d7c8d7575dfb7e8277a2a832531844d900682
+cargo	core-foundation	0.10.1	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3
 cargo	core-foundation-sys	0.8.7	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3
 cargo	cpufeatures	0.2.17	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,ae9baa7beea910273c2f384c2a6b721fb7bd02bda3436074a1072e4ee689f985
 cargo	cpufeatures	0.3.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,ae9baa7beea910273c2f384c2a6b721fb7bd02bda3436074a1072e4ee689f985
@@ -186,6 +187,8 @@ cargo	rustls-webpki	0.103.13	ISC	Copyright 2015 Brian Smith.; copyright notice a
 cargo	rustversion	1.0.23	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	ryu	1.0.23	Apache-2.0 OR BSL-1.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566
 cargo	scopeguard	1.2.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,fb77f0a9c53e473abe5103c8632ef9f0f2874d4fb3f17cb2d8c661aab9cee9d7
+cargo	security-framework	3.7.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,91e934255ba3b2f21103d68c5581c23ef34aa95c4628e4405b8c901935e11c69
+cargo	security-framework-sys	2.17.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,91e934255ba3b2f21103d68c5581c23ef34aa95c4628e4405b8c901935e11c69
 cargo	semver	1.0.28	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	serde	1.0.229	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 cargo	serde_core	1.0.229	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
@@ -19710,6 +19713,31 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+-----
+
+### sha256:91e934255ba3b2f21103d68c5581c23ef34aa95c4628e4405b8c901935e11c69
+# as-filed: LICENSE-MIT
+-----
+The MIT License (MIT)
+
+Copyright (c) 2015 Steven Fackler
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 -----
 
 ### sha256:92b81db30f7ab6d693e0af5661a40d273ca1947e891123ed823924192c10cbc7
