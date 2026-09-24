@@ -1,3 +1,4 @@
+import {refreshSessionOutcome} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {render, waitFor} from '@testing-library/react-native';
 import React from 'react';
@@ -176,5 +177,236 @@ describe('로그아웃 — 이 폰의 푸시 등록을 지운다 (#2677)', () =>
     expect(calls.filter(call => call.method === 'DELETE')).toEqual([]);
     // 로그아웃이 기기 id를 새로 발급하면 다음 등록이 서버에 죽은 행을 하나 더 남긴다.
     expect(store.map.has(NON_SECRET_KEYS.pushDeviceId)).toBe(false);
+  });
+});
+
+// =============================================================================
+// #2677 리뷰 R1 — 회전 경쟁(M1), 훅을 기다린다(L4), 짧은 deadline(L6).
+//
+// M1은 리뷰의 REVIEW-GAP-B·GAP-B-linked를 이 폰으로 옮긴 것이다. 서버는 회전
+// 요청을 받는 순간 P1을 쓰고 P2를 발급한다. 폰이 그 응답을 받기 전에 로그아웃하면,
+// 폰은 이미 쓰인 P1으로 logout을 보낸다. 서버는 `revokedRefresh:false`를 답하고
+// P2는 서버에서 30일 산다. QR 연결 폰은 회전이 P1의 access까지 죽였으므로
+// DELETE도 401이고, 등록도 산다. 아래 가짜 서버는 그 상태를 그대로 들고 있다.
+// =============================================================================
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(settle => {
+    resolve = settle;
+  });
+  return {promise, resolve};
+}
+
+function jsonResponse(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: {'Content-Type': 'application/json'},
+  });
+}
+
+function record(input: RequestInfo | URL, init?: RequestInit): Call {
+  const url = new URL(String(input));
+  const call = {
+    method: init?.method ?? 'GET',
+    path: url.pathname,
+    authorization: new Headers(init?.headers).get('Authorization'),
+  };
+  calls.push(call);
+  return call;
+}
+
+/**
+ * The server as state: which tokens are alive, whether this phone's
+ * registration is, and a refresh whose ANSWER the test releases. The server
+ * has already rotated when the request arrives — that is the race.
+ * Logout follows #2685: a logout that revokes a live refresh half ends the
+ * session, and its registration with it.
+ */
+function fakeServer({linked}: {linked: boolean}) {
+  const accessOf = new Map([['refresh-token-1', 'access-token-1']]);
+  const live = new Set(['access-token-1', 'refresh-token-1']);
+  const state = {registrationLive: true, deleteStatus: null as number | null};
+  const rotationAnswer = deferred<void>();
+  let minted = 1;
+  globalThis.fetch = jest.fn(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const call = record(input, init);
+      const bearer = call.authorization?.replace(/^Bearer /, '') ?? null;
+      const body =
+        typeof init?.body === 'string' && init.body !== ''
+          ? (JSON.parse(init.body) as {refreshToken?: string})
+          : {};
+      if (call.path === '/v1/auth/refresh') {
+        const presented = body.refreshToken ?? '';
+        let answer = jsonResponse(
+          {error: {message: 'refresh token already used or revoked'}},
+          401,
+        );
+        if (live.delete(presented)) {
+          // A QR-linked rotation also kills the access half it replaces.
+          if (linked) live.delete(accessOf.get(presented) ?? '');
+          minted += 1;
+          const pair = {
+            accessToken: `access-token-${minted}`,
+            refreshToken: `refresh-token-${minted}`,
+          };
+          live.add(pair.accessToken);
+          live.add(pair.refreshToken);
+          accessOf.set(pair.refreshToken, pair.accessToken);
+          answer = jsonResponse(pair);
+        }
+        await rotationAnswer.promise; // the answer is late; the state above is not
+        return answer;
+      }
+      if (call.method === 'DELETE' && call.path === DEVICE_PATH) {
+        const ok = bearer !== null && live.has(bearer);
+        if (ok) state.registrationLive = false;
+        state.deleteStatus = ok ? 200 : 401;
+        return ok
+          ? jsonResponse({status: 'ok'})
+          : jsonResponse({error: {message: 'token has been revoked'}}, 401);
+      }
+      if (call.path === LOGOUT_PATH) {
+        const revokedAccess = bearer !== null && live.delete(bearer);
+        const revokedRefresh =
+          typeof body.refreshToken === 'string' && live.delete(body.refreshToken);
+        if (revokedRefresh) state.registrationLive = false;
+        return jsonResponse({
+          status: 'ok',
+          revokedAccess,
+          revokedRefresh,
+          alreadyRevoked: !(revokedAccess || revokedRefresh),
+        });
+      }
+      return jsonResponse({status: 'ok'});
+    },
+  ) as unknown as typeof fetch;
+  return {
+    state,
+    liveRefreshTokens: () => [...live].filter(token => token.startsWith('refresh')),
+    releaseRotation: () => rotationAnswer.resolve(),
+  };
+}
+
+describe('로그아웃 — 진행 중인 회전에 합류한다 (#2677 리뷰 M1)', () => {
+  it('회전이 도는 중에 로그아웃해도 서버에 산 세션이 남지 않는다 (REVIEW-GAP-B)', async () => {
+    store.set(NON_SECRET_KEYS.pushDeviceId, DEVICE);
+    const server = fakeServer({linked: false});
+
+    const rotation = refreshSessionOutcome(); // 어딘가의 401이 시작한 회전
+    signOutFromApp()();
+    expect(getAccessToken()).toBeNull(); // 사람은 즉시 나간다
+    server.releaseRotation();
+    await rotation;
+    await waitFor(() =>
+      expect(calls.some(call => call.path === LOGOUT_PATH)).toBe(true),
+    );
+
+    // 한 번에 비교해 RED 가 서버 상태 전체를 보여 주게 한다.
+    expect({
+      logoutAuthorization: calls.find(call => call.path === LOGOUT_PATH)
+        ?.authorization,
+      liveRefreshTokens: server.liveRefreshTokens(),
+      registrationLive: server.state.registrationLive,
+    }).toEqual({
+      logoutAuthorization: 'Bearer access-token-2',
+      liveRefreshTokens: [], // 서버에 산 세션(P2)이 남지 않는다
+      registrationLive: false,
+    });
+    expect(getAccessToken()).toBeNull(); // 회전 결과가 세션을 되살리지 않는다
+  });
+
+  it('QR 연결 폰: 회전이 옛 access를 죽여도 DELETE는 새 access로 가고 등록이 끝난다 (REVIEW-GAP-B-linked)', async () => {
+    store.set(NON_SECRET_KEYS.pushDeviceId, DEVICE);
+    const server = fakeServer({linked: true});
+
+    const rotation = refreshSessionOutcome();
+    signOutFromApp()();
+    expect(getAccessToken()).toBeNull();
+    server.releaseRotation();
+    await rotation;
+    await waitFor(() =>
+      expect(calls.some(call => call.path === LOGOUT_PATH)).toBe(true),
+    );
+
+    expect({
+      deleteAuthorization: calls.find(call => call.method === 'DELETE')
+        ?.authorization,
+      deleteStatus: server.state.deleteStatus,
+      registrationLive: server.state.registrationLive,
+      liveRefreshTokens: server.liveRefreshTokens(),
+    }).toEqual({
+      deleteAuthorization: 'Bearer access-token-2',
+      deleteStatus: 200,
+      registrationLive: false,
+      liveRefreshTokens: [],
+    });
+    expect(getAccessToken()).toBeNull();
+  });
+});
+
+describe('로그아웃 — 기기 등록 삭제를 기다린다 (#2677 리뷰 L4)', () => {
+  it('DELETE가 끝나기 전에는 POST /v1/auth/logout이 없다', async () => {
+    store.set(NON_SECRET_KEYS.pushDeviceId, DEVICE);
+    const gate = deferred<void>();
+    globalThis.fetch = jest.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const call = record(input, init);
+        if (call.method === 'DELETE') await gate.promise;
+        return jsonResponse({status: 'ok'});
+      },
+    ) as unknown as typeof fetch;
+
+    signOutFromApp()();
+    await waitFor(() =>
+      expect(calls.some(call => call.method === 'DELETE')).toBe(true),
+    );
+    await new Promise(settle => setTimeout(settle, 50));
+    expect(calls.some(call => call.path === LOGOUT_PATH)).toBe(false);
+
+    gate.resolve();
+    await waitFor(() =>
+      expect(calls.some(call => call.path === LOGOUT_PATH)).toBe(true),
+    );
+  });
+});
+
+describe('로그아웃 — 기기 등록 삭제에는 짧은 deadline (#2677 리뷰 L6)', () => {
+  /** 이 폰이 서버 로그아웃을 늦출 수 있는 최대 시간. devices.ts 의 근거를 본다. */
+  const DELETE_DEADLINE_MS = 4_000;
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('DELETE가 응답하지 않아도 서버 로그아웃은 4초 안에 간다', async () => {
+    store.set(NON_SECRET_KEYS.pushDeviceId, DEVICE);
+    jest.useFakeTimers();
+    globalThis.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const call = record(input, init);
+      if (call.method === 'DELETE') {
+        // A request that never answers: it ends only when its deadline aborts it.
+        return new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener('abort', () =>
+            reject(new Error('aborted')),
+          );
+        });
+      }
+      return Promise.resolve(jsonResponse({status: 'ok'}));
+    }) as unknown as typeof fetch;
+
+    signOutFromApp()();
+    await jest.advanceTimersByTimeAsync(DELETE_DEADLINE_MS - 1);
+    expect(calls.some(call => call.method === 'DELETE')).toBe(true);
+    expect(calls.some(call => call.path === LOGOUT_PATH)).toBe(false);
+
+    await jest.advanceTimersByTimeAsync(2);
+    expect(calls.some(call => call.path === LOGOUT_PATH)).toBe(true);
   });
 });
