@@ -47,6 +47,8 @@ scripts/self_host_pg_dump.sh --output-dir /var/tmp/oort-backups
 
 첨부 바이트는 Postgres 밖에 있다. 같은 백업 세트에 보관소 디렉터리(compose 볼륨 `DRIVE_VOLUME_NAME`, 기본 `oort-drive` → 컨테이너 `MOMO_DRIVE_LOCAL_DIR=/var/lib/oort/drive`)를 동반 복사한다. 덤프만 복원하면 메시지 행은 남고 파일은 없다.
 
+보관소 디렉터리는 api를 멈춘 채로 되돌리고 그다음 api를 띄운다. api는 기동할 때 보관소의 대기 중 업로드 세션(`sessions/`)과 받다 만 파일(`incoming/`)을 비운다. 실행 중인 api 밑에서 되돌리면 백업 시점에 열려 있던 업로드 URL이 최대 1시간 다시 쓰일 수 있다(#2628).
+
 덤프 구현은 `scripts/lib/pg_dump_custom.sh` 하나다. 리허설 게이트 `scripts/verify_backup_restore_rehearsal.sh` 도 같은 함수를 쓴다.
 
 ## T2 (관리형 컨테이너 + PG 플러그인)
