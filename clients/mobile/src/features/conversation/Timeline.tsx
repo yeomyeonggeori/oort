@@ -374,7 +374,7 @@ const KEEP_VISIBLE_POSITION = {minIndexForVisible: 0} as const;
 //     값: 120행 방(첫 페이지 50)에서 다시 붙을 때 +849.7pt, 그때의 끝을 36pt 넘었다.
 //     **이제 옛 페이지는 진입이 앉은 뒤에만 부른다**(`olderReady`, #2604) — 진입 동안
 //     0번 셀이 다른 행이 되지 않고 머리도 그대로다. 남는 이동량은 작다: 잰 값(120행·
-//     200행 방, 6/6)으로 0번 셀이 이동 동안 9.3pt 내려가(표본 17.7 → 25.3) 다시 붙을
+//     200행 방, 7/7)으로 0번 셀이 이동 동안 9.3pt 내려가(표본 17.7 → 25.3) 다시 붙을
 //     때 +9.3pt, 끝을 9.3pt 넘었다. 그래서 도착 뒤에는 먼 전송과 같은 `holdLanding` 이
 //     선다 — 첫 틱(+50–67ms)이 끝으로 되돌렸다. 배치가 `ENTRY_QUIET_MS` 보다 뜸한 느린
 //     기기에서 도착 뒤에 자라는 끝도 같은 유지가 받는다.
@@ -1816,7 +1816,7 @@ function TimelineInner({
        * **An entry is held too** (#2604). No older page lands while it travels
        * any more (`olderReady`), so its anchor is still cell 0 — but cell 0
        * still drifts while the prop is off: measured (Release, 120- and 200-row
-       * rooms, 6 of 6 entries) it went down 9.3pt (samples 17.7 → 25.3), and the
+       * rooms, 7 of 7 entries) it went down 9.3pt (samples 17.7 → 25.3), and the
        * re-attach put the list 9.3pt past the end. Without the hold it rested
        * there; held, the first tick put it back (+50–67ms). The end can also
        * still move: the loop arrives once the content has held still for
