@@ -731,7 +731,8 @@ describe('방을 옮기면 필의 판정을 새로 한다 — 방의 정체성 (
       },
     });
 
-    expect(bottomPill()).toBeNull();
+    // 필이 섰다면 그 문장이 보이도록 — 빨개질 때 무엇이 섰는지 원문으로 남는다.
+    expect(bottomPill() === null ? null : pillSentence('jump-latest')).toBeNull();
   });
 });
 
