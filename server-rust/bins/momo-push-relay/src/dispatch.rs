@@ -256,6 +256,7 @@ mod tests {
             BTreeSet::from([
                 "alert",
                 "badge",
+                "sound",
                 "thread-id",
                 "category",
                 "mutable-content",
@@ -264,6 +265,7 @@ mod tests {
         );
         assert_eq!(aps["thread-id"], "33333333-3333-3333-3333-333333333333");
         assert_eq!(aps["category"], "momo.mention");
+        assert_eq!(aps["sound"], "default");
         let alert = aps["alert"].as_object().unwrap();
         let alert_keys: BTreeSet<&str> = alert.keys().map(String::as_str).collect();
         assert_eq!(alert_keys, BTreeSet::from(["title", "body"]));
@@ -299,6 +301,61 @@ mod tests {
                 !text.contains(forbidden),
                 "id-only payload contained {forbidden}"
             );
+        }
+    }
+
+    /// The `aps` object the relay would send for one accepted dispatch of
+    /// `category`, with `reason` the judgment pairs it with.
+    fn serialized_aps(category: &str, reason: &str) -> serde_json::Map<String, Value> {
+        let mut json = DISPATCH_JSON
+            .replace(
+                "\"category\":\"momo.mention\"",
+                &format!("\"category\":\"{category}\""),
+            )
+            .replace(
+                "\"reason\":\"mention\"",
+                &format!("\"reason\":\"{reason}\""),
+            );
+        if category == "momo.approval" {
+            json = json.replace(
+                "\"channel_id\"",
+                "\"approval_id\":\"55555555-5555-5555-5555-555555555555\",\"channel_id\"",
+            );
+        }
+        let dispatch = PushDispatch::decode_closed(json.as_bytes()).unwrap();
+        let encoded = serde_json::to_vec(&ApnsPayload::from_dispatch(&dispatch)).unwrap();
+        let object: serde_json::Map<String, Value> = serde_json::from_slice(&encoded).unwrap();
+        object["aps"].as_object().unwrap().clone()
+    }
+
+    /// #2669 — the per-category sound table, written out here rather than read
+    /// from the code, so changing a row there turns this red. A fifth category
+    /// cannot join `ALLOWED_CATEGORIES` without a row here.
+    #[test]
+    fn every_category_sounds_as_its_row_in_the_table_says() {
+        let table: &[(&str, &str, Option<&str>)] = &[
+            ("momo.message", "dm", Some("default")),
+            ("momo.mention", "mention", Some("default")),
+            ("momo.approval", "approval_request", Some("default")),
+            ("momo.work", "resume_offer", Some("default")),
+        ];
+        let rows: BTreeSet<&str> = table.iter().map(|(category, _, _)| *category).collect();
+        let allowed: BTreeSet<&str> = ALLOWED_CATEGORIES.iter().copied().collect();
+        assert_eq!(rows, allowed, "every allowed category needs a sound row");
+
+        for (category, reason, sound) in table {
+            let aps = serialized_aps(category, reason);
+            match sound {
+                Some(sound) => assert_eq!(
+                    aps.get("sound").and_then(Value::as_str),
+                    Some(*sound),
+                    "{category} must carry aps.sound = {sound:?}; aps = {aps:?}"
+                ),
+                None => assert!(
+                    !aps.contains_key("sound"),
+                    "{category} must be silent; aps = {aps:?}"
+                ),
+            }
         }
     }
 
