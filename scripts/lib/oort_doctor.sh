@@ -1406,7 +1406,7 @@ EOF
 }
 
 oort_doctor_check_public() {
-  local origins origin tok ws_origin ws_key code
+  local origins origin tok ws_url ws_key code body
   if [ -n "${RAILWAY_ENVIRONMENT:-}${RAILWAY_PUBLIC_DOMAIN:-}" ] && ! oort_doctor_has CENTRIFUGO_ALLOWED_ORIGINS; then oort_doctor_record public.healthz major fail "Railway 형상인데 CENTRIFUGO_ALLOWED_ORIGINS 없음 (skip 금지)" "scripts/self_host_env.sh --railway"; oort_doctor_record public.websocket major fail "Railway 형상인데 공개 Origin 없음" ""; return; fi
   if ! oort_doctor_has CENTRIFUGO_ALLOWED_ORIGINS; then
     oort_doctor_skip_public "--public-origin 흔적 없음 (CENTRIFUGO_ALLOWED_ORIGINS 없음)"
@@ -1431,37 +1431,55 @@ oort_doctor_check_public() {
     oort_doctor_skip_public "curl 없음 — 공개 오리진 검사 생략"
     return
   fi
-  code="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' "${origin}/healthz" 2>/dev/null || true)"
+  # #2205: a bare 200 is not the api. A Caddy site that does not match the Host
+  # (OORT_SITE_ADDRESS ≠ the public domain; Railway's own healthcheck Host)
+  # answers an EMPTY 200, so the body must be the api's /healthz JSON.
+  body="$(mktemp "${TMPDIR:-/tmp}/oort-doctor-public-healthz.XXXXXX")"
+  code="$(curl -sS -m 5 -o "$body" -w '%{http_code}' "${origin}/healthz" 2>/dev/null || true)"
   [ -n "$code" ] || code="000"
-  if [ "$code" = "200" ]; then
-    oort_doctor_record public.healthz major pass "공개 ${origin}/healthz 200" ""
+  if [ "$code" = "200" ] && grep -Eq '"service"[[:space:]]*:[[:space:]]*"momo-server"' "$body" 2>/dev/null; then
+    oort_doctor_record public.healthz major pass "공개 ${origin}/healthz 200 (momo-server)" ""
+  elif [ "$code" = "200" ]; then
+    oort_doctor_record public.healthz major fail \
+      "공개 Origin /healthz 200 이지만 api 응답이 아니다 (momo-server JSON 없음 — Caddy 사이트 불일치의 빈 200)" \
+      "OORT_SITE_ADDRESS 가 공개 도메인과 같은지, /healthz 가 api 로 가는지 확인하라."
   else
     oort_doctor_record public.healthz major fail \
       "공개 Origin /healthz HTTP ${code}" \
       "터널/Caddy 와 CENTRIFUGO_ALLOWED_ORIGINS 를 확인하라."
   fi
-  case "$origin" in
-    https://*) ws_origin="wss://${origin#https://}/connection/websocket" ;;
-    http://*) ws_origin="ws://${origin#http://}/connection/websocket" ;;
-    *) ws_origin="" ;;
-  esac
-  if [ -z "$ws_origin" ]; then
-    oort_doctor_record public.websocket major skip "WS URL 을 파생하지 못했다" ""
-    return
-  fi
+  rm -f "$body"
+  # #2205: the upgrade a browser, the desktop app and the phone actually make.
+  #   * Origin is sent. Centrifugo lets an upgrade WITHOUT Origin through even
+  #     when allowed_origins is empty (measured: 101), and answers 403 to every
+  #     real client — without the header this check could not fail.
+  #   * http(s):// + Upgrade headers, not ws(s)://. curl builds without
+  #     WebSocket support (macOS curl 8.7, the image's Debian curl 7.88) answer
+  #     `Protocol "wss" not supported` = 000 before any request is made.
+  #   * --http1.1: HTTP/2 has no Connection: Upgrade, and a TLS edge would
+  #     otherwise negotiate h2.
+  # After a real 101 curl keeps reading until -m expires (exit 28); the status
+  # line was already recorded in %{http_code}, so the `|| true` keeps it. -m 2
+  # bounds that wait; a handshake to a remote TLS edge fits well inside it.
+  ws_url="${origin}/connection/websocket"
   ws_key="$(openssl rand -base64 16 | tr -d '\n')"
-  code="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' \
+  code="$(curl -sS --http1.1 -m 2 -o /dev/null -w '%{http_code}' \
     -H 'Connection: Upgrade' \
     -H 'Upgrade: websocket' \
     -H 'Sec-WebSocket-Version: 13' \
     -H "Sec-WebSocket-Key: ${ws_key}" \
-    "$ws_origin" 2>/dev/null || true)"
+    -H "Origin: ${origin}" \
+    "$ws_url" 2>/dev/null || true)"
   [ -n "$code" ] || code="000"
   if [ "$code" = "101" ]; then
-    oort_doctor_record public.websocket major pass "공개 WS upgrade 101" ""
+    oort_doctor_record public.websocket major pass "공개 WS upgrade 101 (Origin ${origin})" ""
+  elif [ "$code" = "403" ]; then
+    oort_doctor_record public.websocket major fail \
+      "공개 WS upgrade 403 — Centrifugo 가 Origin ${origin} 을 거절했다" \
+      "Centrifugo 허용목록(v6 이름 CENTRIFUGO_CLIENT_ALLOWED_ORIGINS)에 공개 Origin 이 있는지 확인하라."
   else
     oort_doctor_record public.websocket major fail \
-      "공개 WS upgrade HTTP ${code} (101 필요)" \
+      "공개 WS upgrade HTTP ${code} (101 필요, Origin ${origin})" \
       "Centrifugo Origin 허용목록과 터널 WSS 를 확인하라."
   fi
 }

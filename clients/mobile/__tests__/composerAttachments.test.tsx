@@ -491,6 +491,57 @@ describe('Composer 첨부 렌더·발송', () => {
     ).toEqual({disabled: true});
   });
 
+  it('소비·만료된 업로드 URL(404)은 새 세션으로 재시도하고 옛 URL을 다시 쓰지 않는다 (#2615)', async () => {
+    // 서버의 업로드 URL은 1회용이고 만료된다(#2615). 옛 URL로 다시 PUT하면 영원히
+    // 404이므로 재시도는 세션부터 새로 연다.
+    createUpload
+      .mockResolvedValueOnce({
+        id: 'upload-spent',
+        status: 'pending',
+        uploadUrl: 'https://upload.example/spent',
+      })
+      .mockResolvedValueOnce({
+        id: 'upload-fresh',
+        status: 'pending',
+        uploadUrl: 'https://upload.example/fresh',
+      });
+    completeUpload.mockResolvedValue(completedRow('attachment-fresh'));
+    fileSystem.__state.uploadStatus = 404;
+    documentPicker.__state.result = {
+      canceled: false,
+      assets: [
+        {
+          uri: 'file:///docs/brief.pdf',
+          name: 'brief.pdf',
+          size: 8,
+          mimeType: 'application/pdf',
+        },
+      ],
+    };
+    renderComposer();
+    openPicker('file');
+
+    await waitFor(() =>
+      expect(screen.getByTestId('attachment-draft-retry')).toBeTruthy(),
+    );
+    expect(completeUpload).not.toHaveBeenCalled();
+
+    fileSystem.__state.uploadStatus = 200;
+    fireEvent.press(screen.getByTestId('attachment-draft-retry'));
+    await waitFor(() =>
+      expect(screen.getByText(new RegExp(ATTACH_COPY.uploaded))).toBeTruthy(),
+    );
+
+    expect(createUpload).toHaveBeenCalledTimes(2);
+    expect(fileSystem.__state.uploads.map(upload => upload.url)).toEqual([
+      'https://upload.example/spent',
+      'https://upload.example/fresh',
+    ]);
+    expect(completeUpload.mock.calls).toEqual([
+      [TARGET.workspaceId, TARGET.channelId, 'upload-fresh'],
+    ]);
+  });
+
   it('보관소 미연결을 토스트 없이 트레이 안 코어 문장으로 남긴다', async () => {
     createUpload.mockRejectedValue(new ApiError(503, 'archive unavailable'));
     documentPicker.__state.result = {

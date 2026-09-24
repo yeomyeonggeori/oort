@@ -1,9 +1,12 @@
-# Railway 공개 엣지 (#2205). 정본은 infra/rust/Caddyfile — 이 파일은 TLS 이중
-# 종단만 갈라 낸다. Railway가 HTTPS를 끊고 컨테이너에는 HTTP를 넘기므로
-# 사이트는 http://{$OORT_SITE_ADDRESS} 이고, Railway PORT 에 맞추려고
-# http_port 만 전역으로 연다. auto_https off + :8080 사이트 주소는 쓰지 않는다
-# (그 형태는 금지). 업스트림만 compose DNS(api/centrifugo) 대신
-# *.railway.internal. 키 이름 정본: oort_public_edge_env_keys.
+# Railway 공개 엣지 (#2205). 정본은 infra/rust/Caddyfile 이고 라우트 표는 같다
+# (/__momo_stub/* 포함 — #2609, 패리티 가드 scripts/tests/test_public_edge.sh ⑥).
+# 이 파일은 TLS 이중 종단과 그 결과만 갈라 낸다. Railway가 HTTPS를 끊고
+# 컨테이너에는 HTTP를 넘기므로 사이트는 http://{$OORT_SITE_ADDRESS} 이고,
+# Railway PORT 에 맞추려고 http_port 만 전역으로 연다. auto_https off + :8080
+# 사이트 주소는 쓰지 않는다(그 형태는 금지). 업스트림은 compose DNS
+# (api/centrifugo) 대신 *.railway.internal 이고, api 로 가는 네 블록은
+# header_up 두 줄(X-Forwarded-Proto · X-Forwarded-For)을 단다 — 이유는 아래
+# 주석. 키 이름 정본: oort_public_edge_env_keys.
 # OORT_SITE_ADDRESS / OORT_CSP_CONNECT_SRC / PORT 가 없으면 caddy adapt 가 실패한다.
 {
 	http_port {$PORT}
@@ -38,7 +41,7 @@ http://{$OORT_SITE_ADDRESS} {
 		# Caddy file_server가 확장자로 타입을 붙인다 — 브라우저가 그 선언을
 		# 추측으로 덮어쓸 이유가 없다.
 		X-Content-Type-Options "nosniff"
-		# 첨부 업로드 목적지(www.googleapis.com)로 나가는 요청에 이 사이트의
+		# 첨부 업로드 목적지(google 백엔드의 www.googleapis.com)로 나가는 요청에 이 사이트의
 		# 주소를 싣지 않는다. 이 앱은 리퍼러를 읽는 표면이 없고(OAuth 리디렉트
 		# 플로우 없음 — ADR-0147 링크는 붙여넣기다), 외부로 여는 링크도 리퍼러를
 		# 요구하지 않으므로 가장 좁은 값이 아무것도 깨뜨리지 않는다.
@@ -50,17 +53,64 @@ http://{$OORT_SITE_ADDRESS} {
 	# neither a missing nor a guessed CENT_PROXY_SECRET can reach the API from
 	# the public edge.  The API's own constant-time secret check remains the
 	# second, private-network boundary.
+	#
+	# ── api 로 가는 네 블록의 X-Forwarded-Proto https (#2205, 감사 §A.4-5) ──
+	# Railway 가 TLS 를 끊고 이 컨테이너에는 평문 HTTP 를 넘긴다. Caddy 는
+	# trusted_proxies 가 없으면 들어온 X-Forwarded-Proto 를 버리고 자기가 받은
+	# 스킴(http)으로 덮어쓴다 — 실측: 에지가 https 를 실어 보내도 api 는 http 를
+	# 본다. api 는 그 값으로 same-origin 주소를 만든다(ADR-0167):
+	# realtimeWebSocketUrl 이 ws:// 가 되고(모든 클라가 이 주소만 쓴다,
+	# ADR-0110) QR 기기 연결 origin 이 http:// 가 된다. Railway 공개 도메인은
+	# 항상 TLS 이므로 https 고정이 결정적이다. trusted_proxies 는 Railway 에지
+	# IP 대역을 모르므로 쓰지 않는다. MOMO_CENTRIFUGO_WS_URL 을 절대 wss:// 로
+	# 박는 우회는 금지 — 실시간만 고치고 기기 연결 SAS 요구를 꺼 버린다
+	# (is_public_origin_mode 는 same-origin 일 때만 참).
+	# /connection/* 는 Centrifugo 로 가고 Centrifugo 는 이 헤더를 읽지 않는다.
+	#
+	# ── 같은 네 블록의 X-Forwarded-For (#2205 R2) ────────────────────────
+	# 같은 이유로 Caddy 는 에지가 준 X-Forwarded-For 도 버리고 자기 peer(Railway
+	# 에지 IP)로 덮는다. api 의 rate_limit::client_ip 는 XFF 첫 값을 쓰므로 모든
+	# 클라이언트가 에지 IP 하나로 모여, /v1/claim·/v1/join·비밀번호 변경의 IP별
+	# 한도가 익명 누구나 소진할 수 있는 전역 버킷이 된다. Railway 에지가 붙이는
+	# X-Real-IP 를 XFF 로 넘긴다. X-Real-IP 가 없으면 빈 값이 가고 client_ip 는
+	# 소켓 peer, 곧 이 caddy 컨테이너 주소로 떨어진다(모두 한 버킷). X-Real-IP 가
+	# 진짜 클라이언트인지는 Railway 거동이다 — CDN 경로에서는 CDN 에지 주소라는
+	# 보고가 있다. README 「Client-IP gate」가 PASS 하기 전에는 claim 링크를
+	# 공유하지 않고 팀을 초대하지 않는다. FAIL 이면 같은 절의 trusted_proxies
+	# 설정으로 바꾼다.
 	handle /v1/centrifugo/* {
 		respond 403
 	}
 	handle /v1/* {
-		reverse_proxy api.railway.internal:8080
+		reverse_proxy api.railway.internal:8080 {
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-For {http.request.header.X-Real-IP}
+		}
 	}
 	handle /hooks/* {
-		reverse_proxy api.railway.internal:8080
+		reverse_proxy api.railway.internal:8080 {
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-For {http.request.header.X-Real-IP}
+		}
+	}
+	# ADR-0169 — 로컬 보관소(MOMO_DRIVE_ARCHIVE_BACKEND=local) 업로드 PUT 은 같은
+	# 오리진이다. 클라가 받는 capability URL 은
+	# `$origin/__momo_stub/drive/uploads/{token}` 이다(momo-drive local.rs). 이
+	# matcher 가 없으면 마지막 SPA handle 이 받고, file_server 는 PUT 에 405 를
+	# 준다 — #2205 단계 2 실측(첨부 업로드 405 → complete 404 → 메시지 409).
+	# infra/rust/Caddyfile · Caddyfile.local · Caddyfile.host-network 과 같은
+	# 라우트다(패리티 가드: scripts/tests/test_public_edge.sh ⑥).
+	handle /__momo_stub/* {
+		reverse_proxy api.railway.internal:8080 {
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-For {http.request.header.X-Real-IP}
+		}
 	}
 	handle /healthz {
-		reverse_proxy api.railway.internal:8080
+		reverse_proxy api.railway.internal:8080 {
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-For {http.request.header.X-Real-IP}
+		}
 	}
 	handle /connection/* {
 		reverse_proxy centrifugo.railway.internal:8000
@@ -80,14 +130,16 @@ http://{$OORT_SITE_ADDRESS} {
 		#
 		#  connect-src {$OORT_CSP_CONNECT_SRC}
 		#    생성기가 --public-origin 에서 파생한다. 기본 토큰:
-		#    'self' = REST(/v1/*) 와 첨부 다운로드/미리보기 프록시
+		#    'self' = REST(/v1/*), 첨부 다운로드/미리보기 프록시, 그리고 로컬
+		#    보관소 업로드 PUT(/__momo_stub/*, ADR-0169 — 바이트가 이 엣지를 지난다)
 		#    https://<host> / wss://<host> = 같은 호스트 REST·레일
-		#    https://www.googleapis.com = **첨부 바이트가 이 서버를 지나지 않는
-		#    유일한 요청**(ADR-0151 D1). 브라우저가 Drive 재개 가능 세션 주소로
-		#    직접 PUT 한다. 이 한 토큰이 빠지면 첨부 업로드가 즉사한다 — #1206이
-		#    실제로 밟았고 #1207이 닫은 그 사고다. 호스트는 추측이 아니라 서버가
-		#    강제한다: momo-drive/src/google.rs:380 이 Location 헤더가
-		#    "https://www.googleapis.com/" 로 시작하지 않으면 세션을 거절한다.
+		#    https://www.googleapis.com = google 백엔드에서 **첨부 바이트가 이
+		#    서버를 지나지 않는 유일한 요청**(ADR-0151 D1). 브라우저가 Drive 재개
+		#    가능 세션 주소로 직접 PUT 한다. 이 한 토큰이 빠지면 첨부 업로드가
+		#    즉사한다 — #1206이 실제로 밟았고 #1207이 닫은 그 사고다. 호스트는
+		#    추측이 아니라 서버가 강제한다: momo-drive/src/google.rs:380 이
+		#    Location 헤더가 "https://www.googleapis.com/" 로 시작하지 않으면
+		#    세션을 거절한다.
 		#    MOMO_LIVEKIT_* URL 이 env 에 있으면 그 오리진도 붙는다.
 		#    와일드카드는 생성기가 거절한다 (#1792).
 		#
