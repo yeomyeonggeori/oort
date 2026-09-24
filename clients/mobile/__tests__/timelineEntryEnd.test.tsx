@@ -348,6 +348,18 @@ class NativeListDouble {
     });
   }
 
+  /**
+   * `scrollToIndex` — 그 행의 frame 으로 간다(`viewPosition` 0 은 창 맨 위). 목록은
+   * 셀 기록으로 셈하지만, 이중은 그 행이 실제로 선 자리를 안다. 그려지지 않은 행이면
+   * `false` — 목록의 `onScrollToIndexFailed` 길이다.
+   */
+  commandRow(key: string, viewPosition: number, animated: boolean): boolean {
+    const frame = this.frames.get(key);
+    if (frame === undefined) return false;
+    this.command(frame.y - viewPosition * (VIEWPORT - frame.h), animated);
+    return true;
+  }
+
   drag(to: number) {
     this.stopGlide();
     this.offset = this.clamp(to);
@@ -422,6 +434,11 @@ interface RoomShape {
    * 키워 심는다 — 앵커가 움직였다는 사실만 옮기고, 까닭은 옮기지 않는다.
    */
   anchorDriftPx?: number;
+  /**
+   * 안 읽은 것이 있는 방(#2680 R1 H-1): 이 seq 까지 읽었다. 구분선이 그 뒤에 서고,
+   * 구분선이 창 위에 있으면 「안읽음」 필이 선다. 없으면 끝까지 읽은 방이다.
+   */
+  lastReadSeq?: number;
 }
 
 interface StartCall {
@@ -445,8 +462,12 @@ const TEAM_ROOM: RoomShape = {
   networkMs: 8,
 };
 
+/** 같은 팀 방에 안 읽은 열 행 — 구분선이 110번 뒤에 서고, 진입 내내 「안읽음」 필이 선다. */
+const UNREAD_TEAM_ROOM: RoomShape = {...TEAM_ROOM, lastReadSeq: 110};
+
 const ROOMS: [string, RoomShape][] = [
   ['팀 방 — 첫 페이지 50행, 옛 페이지 둘(반은 전날)', TEAM_ROOM],
+  ['안 읽은 열 행이 있는 팀 방 — 「안읽음」 필이 선다', UNREAD_TEAM_ROOM],
   [
     '옛 페이지가 없는 50행 방',
     {firstPage: range(71, 120), olderPages: [], yesterdayUpTo: 60, networkMs: 8},
@@ -540,8 +561,12 @@ async function enterRoom(shape: RoomShape): Promise<Room> {
           channelId={CHANNEL}
           myMemberId={SELF}
           nowMs={TODAY + 121 * 60_000}
-          lastReadSeq={messages[messages.length - 1]?.seq ?? null}
-          unreadCount={0}
+          lastReadSeq={shape.lastReadSeq ?? messages[messages.length - 1]?.seq ?? null}
+          unreadCount={
+            shape.lastReadSeq === undefined
+              ? 0
+              : messages.filter(row => row.seq > (shape.lastReadSeq ?? 0)).length
+          }
           loadingOlder={loadingOlder}
           reachedStart={reachedStart}
           onStartReached={onStartReached}
@@ -566,6 +591,18 @@ async function enterRoom(shape: RoomShape): Promise<Room> {
     .spyOn(flat, 'scrollToOffset')
     .mockImplementation((params: {offset: number; animated?: boolean | null}) =>
       native.command(params.offset, params.animated !== false),
+    );
+  jest
+    .spyOn(flat, 'scrollToIndex')
+    .mockImplementation(
+      (params: {index: number; viewPosition?: number; animated?: boolean | null}) => {
+        const props = screen.getByTestId('timeline-list').props as {
+          data: unknown[];
+          keyExtractor: (item: unknown, index: number) => string;
+        };
+        const key = props.keyExtractor(props.data[params.index], params.index);
+        native.commandRow(key, params.viewPosition ?? 0, params.animated !== false);
+      },
     );
   // 마운트: 창이 재지고(기기 t=14), 첫 커밋의 레이아웃·콘텐츠 보고가 뒤따른다.
   await act(async () => {
@@ -687,6 +724,46 @@ describe('방에 들어가면 끝에 앉는다 (#2604)', () => {
     await frames(room, 50); // 800ms
 
     expect(pt(room.native.offset - readAt)).toBe(0);
+  });
+
+  // #2680 R1 H-1 — 앉기 전의 필은 옛 페이지 문을 닫힌 채 두었다. 필은 앉음을 기다리지
+  // 않고(구분선이 창 위면 선다), 진입은 콘텐츠가 멈춘 뒤에야 앉는다 — 그 사이에 누르는
+  // 것은 사람이 실제로 하는 일이다.
+  it('안읽음 방: 진입이 앉기 전에 필을 누르고 손가락으로 맨 위에 가면, 옛 페이지가 붙는다', async () => {
+    const room = await enterRoom(UNREAD_TEAM_ROOM);
+    // 필이 서고, 진입은 아직 앉지 않은 첫 순간.
+    let frame = 0;
+    for (; frame < 60 && screen.queryByTestId('jump-unread') === null; frame += 1) {
+      await frames(room, 1);
+    }
+    const pressedBeforeSettle = room.pillsRef.current?.settled !== true;
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('jump-unread'));
+    });
+    await frames(room, 60); // 점프가 가서 앉고(활강 330ms + 멈춤 판정 250ms), 유지가 끝난다
+    const divider = room.native.visibleMessages().includes('m-111');
+
+    // 사람이 목록을 잡고 맨 위로 올린다.
+    await act(async () => {
+      fireEvent(screen.getByTestId('timeline-list'), 'scrollBeginDrag');
+      room.native.drag(0);
+    });
+    const contentBefore = room.native.content();
+    await frames(room, 60);
+
+    expect({
+      pressedBeforeSettle,
+      landedOnDivider: divider,
+      olderCalls: room.startCalls.length > 0,
+      olderGrew: room.native.content() - contentBefore > 3000,
+      blankFrames: room.native.blanks.length,
+    }).toEqual({
+      pressedBeforeSettle: true,
+      landedOnDivider: true,
+      olderCalls: true,
+      olderGrew: true,
+      blankFrames: 0,
+    });
   });
 
   it('옛 페이지는 사람이 맨 위에 닿을 때 부르고, 붙어도 빈 화면이 없다', async () => {
