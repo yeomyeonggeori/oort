@@ -4,7 +4,8 @@ import { OortCloudField } from "./OortCloudField";
 
 /**
  * S0: a single-look deep-space landing. Two choices, no progress bar.
- * The mark path is the product OortMark; only scale and colour change.
+ * The mark is the product OortMark (display geometry at this size); only
+ * scale and colour change.
  * Hero lockup is mark + wordmark "oort" + one-line intro (#1882).
  */
 export function LandingStep({
@@ -31,7 +32,7 @@ export function LandingStep({
           data-testid="onboarding-lockup"
         >
           <div className="onboarding-mark" data-testid="onboarding-mark">
-            <OortMark className="text-onboarding-accent" />
+            <OortMark className="text-onboarding-accent" optical="display" />
           </div>
           <h1
             className="onboarding-wordmark font-semibold leading-none tracking-tight"

@@ -56,7 +56,8 @@
     "capture:devices": "npm run build && node scripts/capture-devices.mjs",
     "capture:actions": "npm run build && node scripts/capture-actions.mjs",
     "capture:phone-onboarding": "npm run build:design && node scripts/capture-phone-onboarding.mjs",
-    "icons:pwa": "node scripts/render-pwa-icons.mjs",
+    "icons:mark": "node scripts/brand-mark.mjs",
+    "icons:brand": "node scripts/brand-mark.mjs && node scripts/render-brand-icons.mjs",
     "extract:emoji": "node scripts/extract-emoji-catalog.mjs",
     "build:ade-gate": "vite build --mode ade-gate --outDir artifacts/dist-ade-gate"
   },
