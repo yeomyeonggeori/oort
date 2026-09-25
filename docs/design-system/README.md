@@ -312,14 +312,13 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
   배치 57곳, 그중 인접 레이블조차 없는 36곳**(QuickSwitcher 12곳 포함). 이 축을 재는
   기계는 없다(§5.3).
 
-**로컬 SVG 예외 목록은 아래 여섯 파일로 닫혀 있다.** 브랜드 글리프 다섯과, 데이터가
+**로컬 SVG 예외 목록은 아래 다섯 파일로 닫혀 있다.** 브랜드 글리프 넷과, 데이터가
 행렬로 그려진 QR 하나. QR은 아이콘이 아니다: 글리프가 아니라 스캔용 페이로드를
 모듈 격자로 렌더한 것이다. 기능 아이콘이 아니다.
 
 | 파일 | 존치 사유 |
 |---|---|
 | `clients/web/src/design/brand/OortMark.tsx` | Lucide에 없는 제품 브랜드 마크(C2-04 Bubble). 앱 안에서 `currentColor`를 상속한다. 기하 정본과 치수는 [`docs/brand/mark`](../brand/mark/README.md)다. |
-| `clients/web/src/design/brand/KomettoMark.tsx` | 온보딩 S0의 대표 로고인 코메토 K6 플랫 얼굴(#2732). 앱 아이콘과 같은 캐릭터이고, 얼굴 창의 림은 C2-04 링과 같은 문법(링 + 말풍선 꼬리)이다. S0 한 벌 토큰(`--onboarding-kometto-*`)으로 칠하고 32px 미만에서는 쓰지 않는다. |
 | `clients/web/src/features/auth/OortCloudMarks.tsx` | S0 오르트 구름 산포(혜성·소행성·4촉 별) 라인아트. Lucide에 없는 도메인 글리프이고 기능 아이콘으로 재사용하지 않는다. |
 | `clients/web/src/features/settings/DeviceLinkCard.tsx` | 기기 연결 딥링크를 담는 스캔용 QR 행렬. Lucide `QrCode`는 16px 아이콘이라 페이로드를 인코드하지 못한다 (#1989). |
 | `clients/web/public/oort-mark.svg` | CSS가 닿지 않는 문서·배포·링크 미리보기용 정적 브랜드 자산. |
@@ -538,11 +537,11 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 
 | # | 결정 | 지금 상태 |
 |---|---|---|
-| 1 | 반경 `md` 10 vs 8을 맞출 것인가, "플랫폼별로 다름 + 사유"를 정식 개념으로 둘 것인가 | 분기가 세어지고 상한이 걸려 있다(§2.4) |
+| 1 | 반경 `md` 10 vs 8을 맞출 것인가, "플랫폼별로 다름 + 사유"를 정식 개념으로 둘 것인가 | **결정됨** [ADR-0189](../adr/0189-design-system-2-dawn-sky-multi-theme.md) D6: 플랫폼층 사다리로 정식화한다. 이 절(§2.4)의 개정과 시험 이관은 DS2-1(#2713)이 한다 |
 | 2 | 모션 토큰을 신설할 것인가 | **결정됨** ADR-0179. UX-R0(#1958)이 사다리·눌림·강제 기제를 랜딩. 표면 이관은 UX-R1a~e |
 | 3 | 렌더 스윕(컨트롤 경계·터치 크기 전수)을 넣을 것인가 | 기법은 이미 레포에 있다(`gate-shell-layout.mjs`가 계산 스타일 파싱 + 휘도 계산) |
 | 4 | `@axe-core/playwright`로 렌더 텍스트 대비(1.4.3)를 잴 것인가 | MPL-2.0 — permissive-only 정책에 명시 필요. **1.4.11은 커버 안 되므로 우리 시험 유지 필수** |
 | 5 | 한국어 텍스트 검사를 만들 것인가 | 선례 없음. **우리가 선례가 될 자리** |
 | 6 | 폰 taste 스킬 방언 · design-review 계약 재조준 | ADR-0159 D4 — Swift 삭제 배치에 흡수 |
 | 7 | `light-dark()`의 실제 브라우저 하한선 | Tauri macOS는 WKWebView(OS 버전에 묶임). **미확인** |
-| 8 | 액센트 후보 세트 확정 | ADR-0174 D2. BZ-5a가 시안을 산출하고, 성재 확인 후 머지 |
+| 8 | 액센트 후보 세트 확정 | **결정됨** [ADR-0189](../adr/0189-design-system-2-dawn-sky-multi-theme.md) D2·D3: 테마 3종(새벽하늘·흑연·노을띠) × 모드, 신호 프리셋 4종과 커스텀 hex. 값은 [테마 토큰 표](themes-2.0.md)에 있다 |

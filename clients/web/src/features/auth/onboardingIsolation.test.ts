@@ -6,10 +6,6 @@ import { describe, expect, it } from "vitest";
 const landing = readFileSync(new URL("./LandingStep.tsx", import.meta.url), "utf8");
 const connect = readFileSync(new URL("./ConnectPage.tsx", import.meta.url), "utf8");
 const claim = readFileSync(new URL("./ClaimPage.tsx", import.meta.url), "utf8");
-const kometto = readFileSync(
-  new URL("../../design/brand/KomettoMark.tsx", import.meta.url),
-  "utf8"
-);
 const tokens = readFileSync(
   new URL("../../design/tokens.css", import.meta.url),
   "utf8"
@@ -33,13 +29,9 @@ describe("onboarding S0 and brand lockup stay outside custom accent", () => {
     expect(landing).not.toMatch(/\btext-accent\b/);
   });
 
-  it("paints the S0 hero 코메토 with its own S0 tokens only (#2732)", () => {
+  it("shows the owner-chosen 코메토 reference as the S0 hero, not a recolourable mark (#2732)", () => {
     expect(landing).toMatch(/<KomettoMark\b/);
-    const fillClasses = [...kometto.matchAll(/\bfill-[a-z-]+/g)].map((m) => m[0]);
-    expect(fillClasses.length).toBe(5);
-    expect(kometto).toMatch(/kometto-stop-hood/);
-    for (const cls of fillClasses) expect(cls).toMatch(/^fill-onboarding-kometto-/);
-    expect(kometto).not.toMatch(/currentColor|\baccent\b/);
+    expect(landing).not.toMatch(/<OortMark\b/);
   });
 
   it("pins S0 and brand lockup to the Dawn accent pair", () => {

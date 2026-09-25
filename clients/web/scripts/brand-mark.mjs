@@ -150,20 +150,14 @@ function circleArcForward(c, R, from, to) {
   return `A${fmt(R)} ${fmt(R)} 0 ${large} 1 ${pt(to)}`;
 }
 
-/**
- * 마크 한 벌의 기하. 링(꼬리·홈 포함) path, 위성 path, 치수 표.
- * bite=false는 위성 쪽 홈을 파지 않은 링이다. 코메토 얼굴 창의 림(#2732)이 이
- * 판을 쓴다(구멍 r만 16으로 키운다). 림 둘레에는 위성 대신 후드가 있으므로 홈이
- * 있을 이유가 없다. 말풍선 꼬리의 원과 접점은 R·꼬리 파라미터에만 달려 있어,
- * 구멍을 키워도 마크와 좌표가 같다.
- */
-export function buildMark(p, { bite: withBite = true } = {}) {
+/** 마크 한 벌의 기하. 링(꼬리·홈 포함) path, 위성 path, 치수 표. */
+export function buildMark(p) {
   const C = [p.cx, p.cy];
   const S = [p.cx + p.sat, p.cy - p.sat];
   const T = [p.cx - p.tip, p.cy + p.tip];
   const knock = p.s + p.g;
   const satDist = len(sub(S, C));
-  if (withBite && satDist - knock <= p.r) throw new Error("홈이 구멍까지 닿는다");
+  if (satDist - knock <= p.r) throw new Error("홈이 구멍까지 닿는다");
 
   // 홈: 바깥 원과 틈 원의 두 교점. qa는 반시계 쪽, qb는 시계 쪽.
   const [qa, qb] = circleIntersections(C, p.R, S, knock);
@@ -193,29 +187,19 @@ export function buildMark(p, { bite: withBite = true } = {}) {
   const tipCenter = add(T, mul(unit(add(e1, e2)), p.tipR / Math.sin(half)));
 
   // 바깥 윤곽: qb에서 시계 방향으로 돌아 꼬리를 지나 qa, 홈을 파고 qb로.
-  const tail = [
+  const S_ = S;
+  const outline = [
+    `M${pt(qb)}`,
+    circleArcForward(C, p.R, qb, f1.onCircle),
     arcTo(f1.center, p.fillet, f1.onCircle, f1.onLine),
     `L${pt(t1)}`,
     arcTo(tipCenter, p.tipR, t1, t2),
     `L${pt(f2.onLine)}`,
     arcTo(f2.center, p.fillet, f2.onLine, f2.onCircle),
-  ];
-  const outline = withBite
-    ? [
-        `M${pt(qb)}`,
-        circleArcForward(C, p.R, qb, f1.onCircle),
-        ...tail,
-        circleArcForward(C, p.R, f2.onCircle, qa),
-        arcTo(S, knock, qa, qb),
-        "Z",
-      ].join("")
-    : [
-        // 홈 없는 림: 꼬리 왼쪽 접점에서 시계 방향으로 링을 한 바퀴 돌아 꼬리로.
-        `M${pt(f2.onCircle)}`,
-        circleArcForward(C, p.R, f2.onCircle, f1.onCircle),
-        ...tail,
-        "Z",
-      ].join("");
+    circleArcForward(C, p.R, f2.onCircle, qa),
+    arcTo(S_, knock, qa, qb),
+    "Z",
+  ].join("");
   // 구멍: 반대 방향으로 돌아 nonzero에서도 비고, evenodd에서도 빈다.
   const hole = [
     `M${pt([p.cx + p.r, p.cy])}`,
@@ -263,205 +247,10 @@ export function buildMark(p, { bite: withBite = true } = {}) {
     bbox,
     reach,
   };
-  return { ring, satellite, dims, tail: tail.join(""), tailGeom: { C, T, b1, b2, e1, e2, t1, t2, tipCenter } };
-}
-
-// ---- 코메토 K6 플랫 얼굴 (#2732) ---------------------------------------------
-//
-// 앱 아이콘과 온보딩 S0의 대표 로고. 원본 탐색본은
-// claudedocs/brand-2.0/round3/K6-flat-mini.png·K6-flat-light.png·K6-flat-dark.png
-// (래스터, 로컬 전용)이고, 여기서도 트레이스하지 않았다. 여섯 조각이다(그리는 순서).
-//
-//   혜성 꼬리 — 후드 뒤 오른쪽에서 흘러나와 오른쪽 아래로 넓어지는 한 덩어리.
-//               후드색 → 호박 → 살구 세 띠(단단한 멈춤점 그라데이션, 평면색).
-//   후드  — 연하늘 물방울. 원에서 오른쪽 위로 끝이 솟아 구슬로 끝나고, 왼쪽 아래
-//           말풍선 꼬리를 한 겹 둘러싼다(후드 테두리). 그래서 말풍선 꼬리는 어떤
-//           바탕에서도 후드 위에 선다.
-//   얼굴  — 잉크 원. 림 바깥 지름의 0.8 (탐색본 실측 약 0.8).
-//   림    — C2-04 마크와 **같은 문법**: 원 링 + 135° 말풍선 꼬리. buildMark로
-//           그리되 치수는 캐릭터 판독이 우선이다(R=20은 마크와 같고, 구멍이
-//           r=16으로 커서 림 두께 0.2R. 마크는 0.4R). 말풍선 꼬리의 축·밑변·끝각은
-//           마크와 같은 파라미터다.
-//   눈    — 무광 흰 점 둘(오프화이트). 빛나지 않는다(index.md: 흑마도사와의 거리).
-//   구슬  — 후드 끝의 호박 구슬. 마크의 위성과 같은 −45° 대각선, 같은 호박색.
-//
-// 자유 곡선(3차 베지에)은 후드 끝과 혜성 꼬리뿐이다. 두 끝은 후드 원의 접선
-// 방향으로 들어가므로 원과 이음매가 매끈하다. 제어점은 CHARACTER의 각·거리로 정한다.
-export const CHARACTER = {
-  // 림: PARAMS.regular 위에 덮어쓰는 값. 나머지(중심, R, 말풍선 꼬리)는 마크와 같다.
-  rim: { r: 16 },
-  hoodR: 25, // 후드 원 반지름. 림 바깥 R=20에 1.25배
-  // 후드 원 중심의 링 중심 기준 오프셋. 구슬 쪽(−45°)으로 밀어 왼쪽 아래는 얇고
-  // 오른쪽 위는 두툼한 물방울이 된다.
-  hoodShift: [1.5, -1.5],
-  sleeve: 2.5, // 말풍선 꼬리를 두르는 후드 테두리 두께
-  bead: 27, // 구슬 중심의 링 중심 기준 오프셋(−45° 대각선이라 x=−y). 1.91R
-  beadR: 4.5,
-  eyeR: 3.5, // 눈 반지름. 얼굴 반지름 16의 0.22 (실측 0.2)
-  eyeDx: 7, // 눈 중심의 좌우 거리 (실측 0.54×얼굴 반지름)
-  eyeDy: 1.5, // 눈이 얼굴 중심보다 아래로 내려간 거리 (실측 0.1×얼굴 반지름)
-  hoodLeft: { angle: -170, reach: 15 },
-  tipTop: { at: [-3, -1.6], angle: 0, reach: 11 },
-  tipBottom: { at: [-2.4, 2.8], angle: 225, reach: 6 },
-  hoodRight: { angle: -30, reach: 10 },
-  // 혜성 꼬리(R1 리뷰 H-2). 머리 뒤에서 흘러나와 오른쪽 아래로 넓어지다 뾰족하게
-  // 끝나는 한 덩어리. 뿌리 두 점은 후드 원 안(반지름 hoodR−3)의 각, tip은 후드 원
-  // 중심 기준 끝점. 바깥 변은 뿌리에서 원의 접선으로 떠나 tipIn 방향으로 끝에
-  // 닿고, 안쪽 변은 끝에서 tipOut 방향으로 떠나 뿌리로 접선을 따라 돌아온다.
-  comet: {
-    rootTop: -20,
-    rootBottom: 80,
-    tip: [40, 33],
-    rootOut: 26,
-    tipIn: { angle: 35, reach: 6 },
-    tipOut: { angle: 188, reach: 20 },
-    rootIn: 16,
-  },
-  // 띠 경계. 후드 원 중심에서 잰 거리의 비(끝까지 = 1). 동심원 띠라 경계가 머리를
-  // 감싸며 흐름을 따라간다(K6 플랫판과 같다). 후드색 → 호박 → 살구.
-  cometBands: [0.52, 0.76],
-};
-
-export const CHARACTER_COLORS = {
-  hood: "#a1cefd", // K6-flat-mini의 후드 색(픽셀 표본). tokens.css --onboarding-kometto-hood
-  face: COLORS.ink,
-  rim: COLORS.paper,
-  eye: COLORS.paper,
-  bead: COLORS.amber,
-  cometMid: COLORS.amber, // 혜성 꼬리 가운데 띠
-  cometEnd: "#f28066", // 혜성 꼬리 끝 띠, 새벽 살구. K6-flat-light 표본 #fe7e63를 한 단 가라앉혔다
-};
-
-const circlePath = (c, r) =>
-  `M${pt([c[0] + r, c[1]])}A${fmt(r)} ${fmt(r)} 0 1 1 ${pt([c[0] - r, c[1]])}A${fmt(r)} ${fmt(r)} 0 1 1 ${pt([c[0] + r, c[1]])}Z`;
-
-/** 코메토 얼굴 한 벌. 좌표계는 PARAMS.regular(64 격자)와 같다. */
-export function buildCharacter(k = CHARACTER, p = PARAMS.regular) {
-  const C = [p.cx, p.cy];
-  const rimP = { ...p, ...k.rim };
-  const mark = buildMark(rimP, { bite: false });
-  const B = [p.cx + k.bead, p.cy - k.bead];
-  const deg = (a) => rad(a);
-  const H = add(C, k.hoodShift);
-  const PL = polar(H, k.hoodR, deg(k.hoodLeft.angle));
-  const PR = polar(H, k.hoodR, deg(k.hoodRight.angle));
-  const T1 = add(B, k.tipTop.at);
-  const T2 = add(B, k.tipBottom.at);
-  // 원의 시계 방향 접선은 각 + 90°. 왼쪽은 그 방향으로 떠나고, 오른쪽은 그 방향으로 들어온다.
-  const cL1 = polar(PL, k.hoodLeft.reach, deg(k.hoodLeft.angle + 90));
-  const cL2 = polar(T1, -k.tipTop.reach, deg(k.tipTop.angle));
-  const cR1 = polar(T2, k.tipBottom.reach, deg(k.tipBottom.angle));
-  const cR2 = polar(PR, k.hoodRight.reach, deg(k.hoodRight.angle - 90));
-  // 후드 테두리: 말풍선 꼬리를 sleeve만큼 바깥으로 민 윤곽. 두 변은 평행 이동,
-  // 둥근 끝은 같은 중심에서 반지름 tipR + sleeve. 밑변은 링 중심으로 닫는다(후드 원 안).
-  const g = mark.tailGeom;
-  const outward = (e, other) => {
-    const n = [-e[1], e[0]];
-    return dot(n, other) < 0 ? n : mul(n, -1);
-  };
-  const n1 = outward(g.e1, g.e2);
-  const n2 = outward(g.e2, g.e1);
-  const w = k.sleeve;
-  const sleeve = [
-    `M${pt(C)}`,
-    `L${pt(add(g.b1, mul(n1, w)))}`,
-    `L${pt(add(g.t1, mul(n1, w)))}`,
-    arcTo(g.tipCenter, rimP.tipR + w, add(g.t1, mul(n1, w)), add(g.t2, mul(n2, w))),
-    `L${pt(add(g.b2, mul(n2, w)))}`,
-    "Z",
-  ].join("");
-  const hood =
-    [
-      `M${pt(PL)}`,
-      `C${pt(cL1)} ${pt(cL2)} ${pt(T1)}`,
-      `L${pt(T2)}`,
-      `C${pt(cR1)} ${pt(cR2)} ${pt(PR)}`,
-      `A${fmt(k.hoodR)} ${fmt(k.hoodR)} 0 1 1 ${pt(PL)}`,
-      "Z",
-    ].join("") + sleeve;
-  // 혜성 꼬리
-  const cm = k.comet;
-  const rootR = k.hoodR - 3;
-  const RA = polar(H, rootR, deg(cm.rootTop));
-  const RB = polar(H, rootR, deg(cm.rootBottom));
-  const F = add(H, cm.tip);
-  const comet = [
-    `M${pt(RA)}`,
-    `C${pt(polar(RA, cm.rootOut, deg(cm.rootTop + 90)))} ${pt(sub(F, mul([Math.cos(deg(cm.tipIn.angle)), Math.sin(deg(cm.tipIn.angle))], cm.tipIn.reach)))} ${pt(F)}`,
-    `C${pt(polar(F, cm.tipOut.reach, deg(cm.tipOut.angle)))} ${pt(polar(RB, cm.rootIn, deg(cm.rootBottom - 90)))} ${pt(RB)}`,
-    "Z",
-  ].join("");
-  // 띠: 후드 원 중심에서 끝점까지를 반지름으로 하는 동심원 그라데이션.
-  const cometAxis = { center: H, r: len(sub(F, H)) };
-  const axisDir = unit(sub(F, H));
-  const eyeL = [p.cx - k.eyeDx, p.cy + k.eyeDy];
-  const eyeRc = [p.cx + k.eyeDx, p.cy + k.eyeDy];
-  const tailTip = mark.dims.bbox;
-  const bbox = {
-    left: Math.min(H[0] - k.hoodR, tailTip.left - w),
-    right: B[0] + k.beadR,
-    top: Math.min(B[1] - k.beadR, H[1] - k.hoodR),
-    bottom: Math.max(H[1] + k.hoodR, tailTip.bottom + w),
-  };
-  const withComet = {
-    ...bbox,
-    right: Math.max(bbox.right, F[0]),
-    bottom: Math.max(bbox.bottom, F[1]),
-  };
-  const upLeft = [Math.cos(rad(-150)), Math.sin(rad(-150))];
-  const hoodEdgeAlong = (u) => {
-    const v = sub(C, H);
-    const b = dot(v, u);
-    return -b + Math.sqrt(b * b - (dot(v, v) - k.hoodR * k.hoodR));
-  };
-  // 후드 원 중심에서 끝점 쪽으로, 반지름 비 t인 자리(띠 표본점).
-  const along = (t) => add(H, mul(axisDir, cometAxis.r * t));
-  // 크기별 판독 검사가 읽는 표본점(64 격자 좌표).
-  const probes = {
-    face: [p.cx, p.cy - rimP.r / 2],
-    eye: eyeRc,
-    betweenEyes: [p.cx, p.cy + k.eyeDy],
-    rim: [p.cx + (rimP.R + rimP.r) / 2, p.cy],
-    hood: add(C, mul(upLeft, (rimP.R + hoodEdgeAlong(upLeft)) / 2)),
-    bead: B,
-    // 말풍선 꼬리 가운데(둥근 끝 중심). 둘레는 후드 테두리다.
-    tail: g.tipCenter,
-    tailRing: add(g.tipCenter, mul(unit(sub(g.tipCenter, C)), rimP.tipR + w / 2)),
-    cometMid: along((k.cometBands[0] + k.cometBands[1]) / 2),
-    cometEnd: along(k.cometBands[1] + (1 - k.cometBands[1]) * 0.35),
-  };
-  const mid = [(bbox.left + bbox.right) / 2, (bbox.top + bbox.bottom) / 2];
-  // 머리에서 가장 먼 점: 구슬, 후드 원, 후드 테두리를 두른 말풍선 꼬리 끝.
-  const reach = Math.max(
-    len(sub(B, mid)) + k.beadR,
-    len(sub(H, mid)) + k.hoodR,
-    len(sub(g.tipCenter, mid)) + rimP.tipR + w
-  );
-  return {
-    hood,
-    face: circlePath(C, rimP.r),
-    rim: mark.ring,
-    tail: mark.tail,
-    eyes: circlePath(eyeL, k.eyeR) + circlePath(eyeRc, k.eyeR),
-    bead: circlePath(B, k.beadR),
-    comet,
-    cometAxis,
-    dims: {
-      bbox,
-      bboxWithComet: withComet,
-      probes,
-      reach,
-      beadDistanceRatio: len(sub(B, C)) / p.R,
-      faceRatio: rimP.r / rimP.R,
-      rimThicknessRatio: (rimP.R - rimP.r) / rimP.R,
-    },
-  };
+  return { ring, satellite, dims };
 }
 
 // ---- 변형 SVG ---------------------------------------------------------------
-
-const CHARACTER_HEADER = (what) =>
-  `<!-- oort 코메토 K6 플랫 얼굴 — ${what}. 림은 C2-04 마크의 링이다. 생성물: clients/web/scripts/brand-mark.mjs가 쓴다. 손으로 고치지 않는다(docs/brand/mark/README.md). -->`;
 
 const HEADER = (what) =>
   `<!-- oort 마크 C2-04 Bubble — ${what}. 생성물: clients/web/scripts/brand-mark.mjs가 쓴다. 손으로 고치지 않는다(docs/brand/mark/README.md). -->`;
@@ -477,168 +266,9 @@ function monoSvg(geo, grid, color, what) {
 `;
 }
 
-/**
- * 앱 아이콘판. 1024 정사각 캔버스에 코메토 얼굴을 놓는다(#2732).
- * frame=full   : iOS·PWA. 바탕이 캔버스 끝까지(런처가 자기 모양으로 자른다).
- * frame=macos  : macOS 아이콘 그리드. 824 둥근 사각형(모서리 185.4)이 100 여백을
- *                두고 앉는다. 모서리 바깥은 투명.
- * 크기: 바탕 한 변에 대한 얼굴 경계 상자의 비(fill). 경계 상자 중심이 아니라
- * 후드 원의 중심을 판 중심에서 offset만큼 옮긴 자리에 둔다. 구슬이 오른쪽 위로
- * 뻗으므로 경계 상자 중심에 두면 무게(후드 원)가 왼쪽 아래로 처진다.
- */
-export const APP_ICON = {
-  canvas: 1024,
-  macos: { inset: 100, side: 824, radius: 185.4 },
-  // 머리(혜성 꼬리 제외) 경계 상자가 판 한 변에서 차지하는 비.
-  fill: 0.64,
-  // 링 중심의 판 중심 기준 위치(판 한 변 비). 혜성 꼬리가 오른쪽 아래로 흐르므로
-  // 머리는 왼쪽 위로 조금 올린다.
-  offset: [-0.07, -0.03],
-};
-
-/**
- * 앱 아이콘 바탕 후보(#2732 R1). 권장안은 APP_BACKGROUND. 나머지는
- * `--candidates <dir>`로만 렌더한다(PR 첨부용, 커밋하지 않는다).
- * badge가 있으면 판 가운데에 원을 하나 더 깐다(K6-flat-light·dark의 배지 원).
- *   cream  오프화이트 판 + 크림 원 (K6-flat-light)
- *   navy   잉크 판 + 새벽 직전 남색 원 (K6-flat-dark)
- *   dawn   밝은 새벽하늘: 위 남색 → 라벤더 → 아래 살구빛 지평선
- */
-export const BACKGROUNDS = {
-  cream: { stops: [[0, COLORS.paper]], badge: { color: "#ece5d8", r: 0.4 } },
-  navy: { stops: [[0, COLORS.ink]], badge: { color: "#252a3a", r: 0.4 } },
-  dawn: { stops: [[0, "#34497f"], [0.55, "#7f86bd"], [1, "#f2b596"]] },
-};
-export const APP_BACKGROUND = "navy";
-
-/** 혜성 꼬리 띠(단단한 멈춤점). */
-function cometGradient(ch, id = "comet") {
-  const c = CHARACTER_COLORS;
-  const [a, b] = CHARACTER.cometBands;
-  const { center, r } = ch.cometAxis;
-  return `<radialGradient id="${id}" gradientUnits="userSpaceOnUse" cx="${fmt(center[0])}" cy="${fmt(center[1])}" r="${fmt(r)}">
-      <stop offset="0" stop-color="${c.hood}"/><stop offset="${a}" stop-color="${c.hood}"/>
-      <stop offset="${a}" stop-color="${c.cometMid}"/><stop offset="${b}" stop-color="${c.cometMid}"/>
-      <stop offset="${b}" stop-color="${c.cometEnd}"/><stop offset="1" stop-color="${c.cometEnd}"/>
-    </radialGradient>`;
-}
-
-/** 캐릭터 레이어(혜성 꼬리 → 후드 → 얼굴 → 림 → 눈 → 구슬). 색은 CHARACTER_COLORS. */
-function characterLayers(ch, indent = "    ") {
-  const c = CHARACTER_COLORS;
-  return [
-    `<path fill="url(#comet)" d="${ch.comet}"/>`,
-    `<path fill="${c.hood}" d="${ch.hood}"/>`,
-    `<path fill="${c.face}" d="${ch.face}"/>`,
-    `<path fill="${c.rim}" fill-rule="evenodd" d="${ch.rim}"/>`,
-    `<path fill="${c.eye}" d="${ch.eyes}"/>`,
-    `<path fill="${c.bead}" d="${ch.bead}"/>`,
-  ]
-    .map((line) => indent + line)
-    .join("\n");
-}
-
-/** W3C maskable 안전 원(지름 80%)의 반지름에 반올림 여유 0.95를 곱한 값. */
-export const SAFE_RADIUS = 0.4 * 0.95;
-
-/**
- * 얼굴을 판 위 어디에 얼마나 크게 놓는가. frame=maskable은 머리 경계 상자 중심을
- * 캔버스 중심에 두고, 머리의 가장 먼 점(dims.reach)이 안전 원 안에 들게 줄인다.
- * 혜성 꼬리는 안전 원 밖으로 흘러도 된다(잘려도 머리가 남는다).
- */
-export function appIconPlacement(frame) {
-  const { canvas, macos, fill, offset } = APP_ICON;
-  const ch = buildCharacter();
-  const p = PARAMS.regular;
-  const bb = ch.dims.bbox;
-  const side = Math.max(bb.right - bb.left, bb.bottom - bb.top);
-  let scale;
-  let tx;
-  let ty;
-  if (frame === "maskable") {
-    scale = Math.min((canvas * fill) / side, (canvas * SAFE_RADIUS) / ch.dims.reach);
-    tx = canvas / 2 - scale * ((bb.left + bb.right) / 2);
-    ty = canvas / 2 - scale * ((bb.top + bb.bottom) / 2);
-  } else {
-    const plate = frame === "macos" ? macos.side : canvas;
-    const origin = frame === "macos" ? macos.inset : 0;
-    scale = (plate * fill) / side;
-    tx = origin + plate * (0.5 + offset[0]) - scale * p.cx;
-    ty = origin + plate * (0.5 + offset[1]) - scale * p.cy;
-  }
-  return { ch, scale: Math.round(scale * 1000) / 1000, tx: Math.round(tx * 100) / 100, ty: Math.round(ty * 100) / 100 };
-}
-
-export function appIconSvg(frame, background = APP_BACKGROUND) {
-  const { canvas, macos } = APP_ICON;
-  const { ch, scale, tx, ty } = appIconPlacement(frame);
-  const bgDef = BACKGROUNDS[background];
-  const stops = bgDef.stops;
-  const paint = stops.length === 1 ? stops[0][1] : "url(#sky)";
-  const sky =
-    stops.length === 1
-      ? ""
-      : `
-    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-${stops.map(([o, c]) => `      <stop offset="${o}" stop-color="${c}"/>`).join("\n")}
-    </linearGradient>`;
-  const plateShape =
-    frame === "macos"
-      ? `<rect x="${macos.inset}" y="${macos.inset}" width="${macos.side}" height="${macos.side}" rx="${macos.radius}"`
-      : `<rect width="${canvas}" height="${canvas}"`;
-  const plate = frame === "macos" ? macos.side : canvas;
-  const badge = bgDef.badge
-    ? `\n  <circle cx="${canvas / 2}" cy="${canvas / 2}" r="${fmt(plate * bgDef.badge.r)}" fill="${bgDef.badge.color}"/>`
-    : "";
-  const what = {
-    macos: "macOS 앱 아이콘(그리드 824/1024)",
-    full: "iOS·PWA 앱 아이콘(전면)",
-    maskable: "PWA maskable(안전 원 안)",
-  }[frame];
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${canvas} ${canvas}" width="${canvas}" height="${canvas}">
-  ${CHARACTER_HEADER(`${what}, 바탕 ${background}`)}
-  <defs>${sky}
-    <clipPath id="plate">${plateShape}/></clipPath>
-    ${cometGradient(ch)}
-  </defs>
-  ${plateShape} fill="${paint}"/>${badge}
-  <g clip-path="url(#plate)">
-  <g transform="translate(${fmt(tx)} ${fmt(ty)}) scale(${scale})">
-${characterLayers(ch)}
-  </g>
-  </g>
-</svg>
-`;
-}
-
-/** 배경 없는 코메토 얼굴(문서·배포 페이지·온보딩 S0 사본의 기준본). */
-/**
- * 배경 없는 판의 viewBox. 혜성 꼬리까지 담는 정사각이고, **가로 중심은 링 중심**이다
- * (#2732 리뷰 M-3, R1 리뷰 H-1). 혜성 꼬리가 오른쪽으로 흘러도 얼굴이 S0 워드마크
- * 축 위에 선다. 둘레에 0.5 여백을 둬 구슬·꼬리 끝이 잘리지 않는다.
- */
-export function characterViewBox(ch = buildCharacter(), p = PARAMS.regular) {
-  const bb = ch.dims.bboxWithComet;
-  const half = Math.max(p.cx - bb.left, bb.right - p.cx, (bb.bottom - bb.top) / 2) + 0.5;
-  const midY = (bb.top + bb.bottom) / 2;
-  return [p.cx - half, midY - half, 2 * half, 2 * half].map(fmt).join(" ");
-}
-
-function characterSvg() {
-  const ch = buildCharacter();
-  const vb = characterViewBox(ch);
-  const side = vb.split(" ")[2];
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" width="${side}" height="${side}">
-  ${CHARACTER_HEADER("배경 없는 판")}
-  <defs>
-    ${cometGradient(ch)}
-  </defs>
-  <g>
-${characterLayers(ch)}
-  </g>
-</svg>
-`;
-}
+// 앱 아이콘(iOS·macOS·PWA)은 #2732부터 이 마크가 아니라 owner가 고른 코메토 K6
+// 플랫 레퍼런스 래스터에서 떠낸다(render-brand-icons.mjs, docs/brand/mark/README.md).
+// 이 파일은 C2-04 마크(단색판·파비콘·배경 없는 판)만 쓴다.
 
 /** 탭 파비콘: 어두운 둥근 타일 + small 기하. 24 격자를 1.25배(30)로 키워 타일에 1 여백으로 앉힌다.
  *  마크 경계 상자가 타일의 약 70%를 차지한다. 16px 탭에서 틈이 1px에 가깝게 남도록 여백을 줄였다(#2650 리뷰 M3). */
@@ -652,10 +282,10 @@ function faviconSvg(geo) {
     Lucide 기능 아이콘으로 바꾸지 않고 로컬 SVG로 남긴다.
 
     색은 토큰이 아니라 리터럴이다(CSS 캐스케이드 밖에서 탭이 직접 읽는다).
-    값은 앱 아이콘판과 같다: 바탕 ${COLORS.ink}(surface 토큰 다크), 링 ${COLORS.paper}
-    (surface 토큰 라이트), 위성 ${COLORS.amber}(accent 토큰 다크). XML 주석 안에는
-    하이픈 두 개를 쓸 수 없어 토큰 이름을 풀어 적었다. 폰 홈 화면·Dock·탭이
-    같은 마크, 같은 세 색을 보인다. 스킴을 따라가지 않는다.
+    바탕 ${COLORS.ink}(surface 토큰 다크), 링 ${COLORS.paper}(surface 토큰 라이트),
+    위성 ${COLORS.amber}(accent 토큰 다크). XML 주석 안에는 하이픈 두 개를 쓸 수
+    없어 토큰 이름을 풀어 적었다. 스킴을 따라가지 않는다. 앱 아이콘(코메토
+    레퍼런스, #2732)이 32px 미만에서 읽히지 않는 자리를 이 타일이 맡는다.
   -->
   <rect width="32" height="32" rx="7" fill="${COLORS.ink}"/>
   <g transform="translate(1 1) scale(1.25)" fill-rule="evenodd">
@@ -706,9 +336,6 @@ export function outputs() {
       [resolve(MARK_DIR, "oort-mark-white.svg")]: monoSvg(regular, g, COLORS.white, "단색 흰색"),
       [resolve(MARK_DIR, "oort-mark-amber.svg")]: monoSvg(regular, g, COLORS.amber, "단색 호박"),
       [resolve(MARK_DIR, "oort-mark-small-black.svg")]: monoSvg(small, gs, COLORS.ink, "16~32px 광학 보정판, 단색 검정"),
-      [resolve(MARK_DIR, "oort-kometto.svg")]: characterSvg(),
-      [resolve(MARK_DIR, "oort-app-icon.svg")]: appIconSvg("full"),
-      [resolve(MARK_DIR, "oort-app-icon-macos.svg")]: appIconSvg("macos"),
       [resolve(PUBLIC_DIR, "favicon.svg")]: faviconSvg(small),
       [resolve(PUBLIC_DIR, "oort-mark.svg")]: publicMarkSvg(small),
     },

@@ -4,9 +4,8 @@ import { OortCloudField } from "./OortCloudField";
 
 /**
  * S0: a single-look deep-space landing. Two choices, no progress bar.
- * The hero mark is the 코메토 K6 flat character (#2732), the same one as the
- * app icon. Its face-window rim uses the C2-04 grammar (ring + speech tail);
- * the small lockups elsewhere keep OortMark.
+ * The hero mark is the owner-chosen 코메토 K6 flat reference (#2732), the
+ * same picture as the app icon; the small lockups elsewhere keep OortMark.
  * Hero lockup is mark + wordmark "oort" + one-line intro (#1882).
  */
 export function LandingStep({
