@@ -929,6 +929,19 @@ mod tests {
             rotate_sql.contains("UPDATE token"),
             "the deliberate rotation must still revoke live sessions"
         );
+        // #2677 (review L2): ending every session ends every push registration
+        // those sessions made, as a password reset does — or the old owner's
+        // phone keeps the new owner's notifications. The real proof is
+        // `set_owner_ends_the_owners_registrations_and_only_theirs` in
+        // momo-server's push_session_end_conformance_pg; this is its tripwire.
+        assert!(
+            rotate_sql.contains("UPDATE push_token"),
+            "the deliberate rotation must also end the owner's push registrations"
+        );
+        assert!(
+            !bootstrap_sql.contains("UPDATE push_token"),
+            "a restart must never end a push registration"
+        );
 
         let claim = resolve_path(None, "infra/rust/sql/bootstrap_owner_claim_if_absent.sql");
         assert!(claim.is_file(), "{}", claim.display());

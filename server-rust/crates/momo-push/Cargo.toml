@@ -11,6 +11,11 @@ momo-db = { path = "../momo-db" }         # with_tenant_tx = the sole RLS GUC se
 # `active_workspace_role` — so "active member of this workspace" keeps one
 # definition across every route rather than gaining a push-flavoured copy.
 momo-messaging = { path = "../momo-messaging" }
+# #2677 — `lock_session_for_registration`: a registration binds to the calling
+# session's lineage under a share lock on that `token` row. `token` SQL stays in
+# momo-auth (it owns that table); this crate only calls it. momo-auth depends on
+# neither this crate nor momo-messaging, so the edge adds no cycle.
+momo-auth = { path = "../momo-auth" }
 
 async-trait.workspace = true
 chrono.workspace = true

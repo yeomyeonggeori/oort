@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # SH-10 / #1255 stub E2E: compose rust + push overlay, device register → mention
 # → notifier → relay stub capture (id-only) → receipt → push_dispatch_log.
+# #2677: then logout → mention → nothing reaches the relay for that device.
 # Never contacts Apple. Isolated compose project; never touches oort-pgdata.
 set -euo pipefail
 
@@ -425,6 +426,8 @@ api POST /v1/join "" "$(jq -cn --arg code "$INVITE_CODE" --arg password "$JOIN_P
 expect 201 "join qa-push"
 QA_TOKEN="$(printf '%s' "$HTTP_BODY" | jq -r '.accessToken')"
 [ -n "$QA_TOKEN" ] && [ "$QA_TOKEN" != null ] || fail "qa accessToken missing"
+QA_REFRESH="$(printf '%s' "$HTTP_BODY" | jq -r '.refreshToken')"
+[ -n "$QA_REFRESH" ] && [ "$QA_REFRESH" != null ] || fail "qa refreshToken missing"
 
 DEVICE_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
 APNS_TOKEN="$(python3 -c 'print("ab"*32)')"
@@ -490,6 +493,81 @@ APNS_STATUS="$(printf '%s\n' "$LOG_ROW" | awk -F '\t' '{print $2}')"
 test "$APNS_STATUS" = 200
 
 echo "PASS: stub E2E device-register → mention → notifier → id-only capture → push_dispatch_log (Apple never contacted)"
+
+# ---------------------------------------------------------------------------
+# #2677 — a signed-out phone must receive nothing, not even the placeholder.
+# Same stack, production role grants: the QA session logs out with its refresh
+# half (as @momo/core does), the owner mentions it again, and the relay stub
+# must capture nothing new. The candidate still settles — as "nobody to notify".
+# ---------------------------------------------------------------------------
+psql_at() {
+  compose exec -T postgres psql -U momo -d momo -At -v ON_ERROR_STOP=1 -c "$1"
+}
+
+capture_lines() {
+  compose exec -T push-relay sh -c 'cat /tmp/apns-capture.jsonl 2>/dev/null || true' \
+    | grep -c . || true
+}
+
+mention_qa() {
+  api POST "/v1/workspaces/$WS/channels/$CH/messages" "$OWNER_TOKEN" "$(jq -cn \
+    --arg clientMsgId "$(python3 -c 'import uuid; print(uuid.uuid4())')" --arg body "@qa-push $1" \
+    '{clientMsgId:$clientMsgId,body:$body}')"
+  expect 201 "send mention ($1)"
+  MENTION_ID="$(printf '%s' "$HTTP_BODY" | jq -r '.id // .message.id // empty')"
+  [ -n "$MENTION_ID" ] || fail "mention id missing ($1)"
+}
+
+wait_candidate_done() {
+  local status=""
+  for _ in $(seq 1 60); do
+    status="$(psql_at "SELECT status::text FROM outbox WHERE kind = 'push_candidate' AND payload->>'message_id' = '$1'" 2>/dev/null || true)"
+    [ "$status" = "done" ] && return 0
+    sleep 1
+  done
+  compose logs notifier >&2 || true
+  fail "push candidate for $1 did not settle (status=${status:-none})"
+}
+
+echo "[test-push-relay-stub-e2e] #2677 qa logout → mention → nothing for the signed-out device"
+CAPTURES_BEFORE="$(capture_lines)"
+api POST /v1/auth/logout "$QA_TOKEN" "$(jq -cn --arg refreshToken "$QA_REFRESH" '{refreshToken:$refreshToken}')"
+expect 200 "qa logout"
+mention_qa "after-logout"
+wait_candidate_done "$MENTION_ID"
+CAPTURES_AFTER="$(capture_lines)"
+test "$CAPTURES_AFTER" = "$CAPTURES_BEFORE" \
+  || fail "#2677 the signed-out device still got a push (captures $CAPTURES_BEFORE → $CAPTURES_AFTER)"
+DISPATCHED="$(psql_at "SELECT count(*) FROM push_dispatch_log WHERE message_id = '$MENTION_ID'")"
+test "$DISPATCHED" = 0 || fail "#2677 a dispatch was logged for the signed-out device ($DISPATCHED)"
+LIVE_TOKENS="$(psql_at "SELECT count(*) FROM push_token WHERE device_id = '$DEVICE_ID' AND invalidated_at IS NULL")"
+test "$LIVE_TOKENS" = 0 || fail "#2677 logout left the signed-out device's push token live ($LIVE_TOKENS)"
+echo "PASS: #2677 logout → mention → 0 dispatch, 0 capture (push_token invalidated)"
+
+# The check above must be able to fail. Sign back in, re-register the same phone
+# (the reclaim branch binds it to the NEW session), then sever that binding by
+# hand — a registration no session can claim, the pre-088 shape — and log out
+# again: this time the logout has nothing to end and the mention IS captured.
+echo "[test-push-relay-stub-e2e] #2677 sabotage: unbound registration survives logout → captured"
+api POST /v1/auth/login "" "$(jq -cn --arg password "$JOIN_PASSWORD" --arg workspace "$WS" \
+  '{email:"qa@example.test",password:$password,workspace:$workspace}')"
+expect 200 "qa login again"
+QA_TOKEN="$(printf '%s' "$HTTP_BODY" | jq -r '.accessToken')"
+QA_REFRESH="$(printf '%s' "$HTTP_BODY" | jq -r '.refreshToken')"
+api POST "/v1/workspaces/$WS/devices" "$QA_TOKEN" "$(jq -cn \
+  --arg deviceId "$DEVICE_ID" --arg apnsToken "$APNS_TOKEN" \
+  '{deviceId:$deviceId,platform:"ios",apnsToken:$apnsToken,env:"sandbox",topic:"com.example.test.oort"}')"
+expect 200 "re-register device"
+psql_at "UPDATE push_token SET session_id = NULL WHERE device_id = '$DEVICE_ID'" >/dev/null
+api POST /v1/auth/logout "$QA_TOKEN" "$(jq -cn --arg refreshToken "$QA_REFRESH" '{refreshToken:$refreshToken}')"
+expect 200 "qa logout (unbound)"
+CAPTURES_BEFORE="$(capture_lines)"
+mention_qa "after-unbound-logout"
+wait_candidate_done "$MENTION_ID"
+CAPTURES_AFTER="$(capture_lines)"
+[ "$CAPTURES_AFTER" -gt "$CAPTURES_BEFORE" ] \
+  || fail "#2677 sabotage: the unbound registration was expected to still be captured ($CAPTURES_BEFORE → $CAPTURES_AFTER)"
+echo "PASS: #2677 sabotage unbound registration → logout leaves it live → captured (the check above can fail)"
 
 echo "[test-push-relay-stub-e2e] sabotage: REVOKE SELECT ON work_cloud_host_transition FROM momo_notifier → RED"
 compose exec -T postgres psql -U momo -d momo -v ON_ERROR_STOP=1 -c \
