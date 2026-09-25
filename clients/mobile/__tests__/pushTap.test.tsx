@@ -1288,11 +1288,19 @@ function latestPillSaid(): string | null {
 /**
  * 남의 말이 하나 붙는다: 레일로 한 줄이 오고, 목록이 그만큼 자란다. 따라가는 목록은
  * 그 자람에 끝으로 간다 — 그 요청을 돌려준다.
+ *
+ * 끝으로 가는 문은 둘이다(#2686). 바닥에서 따라가는 활강은 방금 보고된 콘텐츠의 끝으로
+ * 가고(`scrollToOffset`, `FOLLOW_GLIDE`), 먼 이동의 즉시 라운드는 `scrollToEnd` 다. 둘 다
+ * 받는다 — 하나만 보면 다른 문으로 간 따라가기를 놓치고 「데려가지 않는다」가 헛돈다.
  */
-async function someoneElseTalks(seq: number): Promise<jest.SpyInstance> {
-  const toEnd = jest
+async function someoneElseTalks(seq: number): Promise<jest.Mock> {
+  const toEnd = jest.fn();
+  jest
     .spyOn(FlatList.prototype, 'scrollToEnd')
-    .mockImplementation(() => {});
+    .mockImplementation(params => toEnd(params));
+  jest
+    .spyOn(FlatList.prototype, 'scrollToOffset')
+    .mockImplementation(params => toEnd(params));
   await act(async () => {
     channelSub(LONG)?.__emit('publication', {
       data: {
@@ -1318,6 +1326,9 @@ async function someoneElseTalks(seq: number): Promise<jest.SpyInstance> {
   fireEvent(channelList(), 'contentSizeChange', 390, CONTENT + 100);
   return toEnd;
 }
+
+/** 따라가는 활강 — 자란 콘텐츠(4100)의 끝, 창 800 위. */
+const FOLLOW_GLIDE = {offset: CONTENT + 100 - VIEWPORT, animated: true};
 
 /**
  * 다른 방(#general)을 읽고 있다 — 끝에 앉아 따라가는 중이다. 백그라운드 착지는 이
@@ -1358,7 +1369,7 @@ describe('#2594 이동 규칙 위의 알림 착지 — 끝 근처면 따라가�
     expect(latestPillSaid()).toBeNull();
 
     const toEnd = await someoneElseTalks(9);
-    expect(toEnd).toHaveBeenCalled();
+    expect(toEnd).toHaveBeenCalledWith(FOLLOW_GLIDE);
     expect(latestPillSaid()).toBeNull();
   });
 
@@ -1379,7 +1390,7 @@ describe('#2594 이동 규칙 위의 알림 착지 — 끝 근처면 따라가�
     expect(latestPillSaid()).toBeNull();
 
     const toEnd = await someoneElseTalks(9);
-    expect(toEnd).toHaveBeenCalled();
+    expect(toEnd).toHaveBeenCalledWith(FOLLOW_GLIDE);
     expect(latestPillSaid()).toBeNull();
   });
 
