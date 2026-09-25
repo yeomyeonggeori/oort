@@ -42,25 +42,31 @@ Do NOT default to: purple/blue/indigo AI gradients, glassy hero cards, three-equ
 
 Full palette, measured contrast, spacing/radius/text scales, and the procedure for adding a token: **`references/tokens.md`**. Do not restate hex values anywhere else, and do not copy them into a component.
 
-The identity is "Dawn" (night to first light): warm paper surfaces, a single amber accent (호박, the horizon at first light) as the **default** binding, and a predawn slate-blue reserved for agents. Indigo/violet is not merely discouraged: Tailwind's stock palette is cleared in `tokens.css`, so `bg-indigo-500` does not compile.
+The identity is "Dawn Sky" (새벽하늘, ADR-0189): an apricot-to-pale-blue canvas, white surfaces floating on it, **ink** for the primary action, **amber for signals only** (unread, mention, caret, focus ring), and a predawn slate-blue reserved for agents. Values live in core (`packages/momo-core/src/design/themes.ts`); `tokens.css` `:root` carries Dawn Sky and `themes/palettes/<id>.css` (generated) rebind all roles via `:root[data-palette]`. Indigo/violet is not merely discouraged: Tailwind's stock palette is cleared in `tokens.css`, so `bg-indigo-500` does not compile.
 
-Components still consume **semantic tokens only**. A curated accent rebinds `--accent` / `--accent-soft` / `--on-accent` via `:root[data-accent=…]` in `src/design/themes/`. That directory is the only other place raw hex may live, and only as a pre-validated binding (ADR-0174 D5). Arbitrary color pickers and hex in components stay forbidden.
+Components still consume **semantic tokens only**. The roles that matter most:
+- `bg-primary text-on-primary` — the primary button, send, the "mentions me" count. Never recolored by a theme preset or custom color.
+- `bg-signal text-on-signal` — unread count, self mention. `text-signal-text` / `bg-signal-soft` — mention text and its tint. **Never `text-accent`**: `--signal` is a 3:1 non-text color; text uses `--signal-text` (a test fails on `text-accent`).
+- `--accent*` are migration aliases of `--signal*` (DS2-7 removes them); `--surface-raised` → `--surface`, `--surface-sidebar` → `--sheet`. Page/pane backgrounds use `bg-pane`.
+
+The ADR-0174 accent ids in `src/design/themes/*.css` rebind the four signal roles only. That directory is the only other place raw hex may live, and only as a pre-validated binding (ADR-0174 D5). Arbitrary color pickers and hex in components stay forbidden.
 
 Rules:
 - **Zero raw hex / `rgb()` / `hsl()` literals in component files.** Color reaches a component only as a token utility (`bg-surface`, `text-ink-muted`, `border-line-strong`).
-- **ONE accent per surface** = `--accent`. Agent identity uses `--agent` on avatar/badge only, never a different bubble shape or row background tint. Status colors from `--danger` / `--ok` / `--warn` only.
+- **ONE signal per surface** = `--signal`, and ONE primary action = ink. Agent identity uses `--agent` on avatar/badge only (and the rounded-square avatar shape), never a different bubble shape or row background tint. Status colors from `--danger` / `--ok` / `--warn` only.
 - **Color Consistency Lock**: once a surface accent is set, the whole surface uses it. Sections do not invert theme. One theme per color scheme.
-- **No pure `#000000` / `#ffffff`.** The light "paper" white is `#fffefb`. Use the surface tokens; they adapt to scheme via `light-dark()`.
+- **No pure `#000000` / `#ffffff`.** The light "paper" white is `#fffefc`. Use the surface tokens; they adapt to scheme via `light-dark()`.
 - **Contrast is verified, not eyeballed.** `clients/web/src/design/tokens.contrast.test.ts` measures every foreground against every surface in both schemes (AA 4.5:1, control borders 3:1) and asserts the agent/accent hue gap and the empty indigo band. Accent bindings are measured the same way in `src/design/themes/catalog.contrast.test.ts` (adding a theme file without a passing pair fails closed). Retuning a hex without running `npm test` is not a change, it is a guess.
 - **S0 and the brand lockup are outside custom accent** (ADR-0174 D4). They keep the Dawn pair.
-- **Real translucency via `backdrop-filter` + token overlay**, never a semi-transparent solid pretending to be glass, and never as decoration.
+- **Glass only through the `glass` utility** (`--glass` + blur 22 + saturate 1.4, opaque under reduced transparency / more contrast / no `backdrop-filter`). Never a semi-transparent solid pretending to be glass, and never as decoration.
+- **Buttons are filled pills, not outlines** (ADR-0189 D6). `<Button>` primary = ink, secondary/outline = `--surface-muted` fill, destructive = `--danger-fill`, ghost = none; `size="icon"` is a 34px circle. A 3:1 `border-line-strong` outline is for **text input vessels only** (`Input`, `Select`, composer).
 
 ## 3. Tailwind scale (fixed, compiler-enforced)
 
 The scales are closed sets in `tokens.css`: the dynamic spacing multiplier, the stock radius scale, and the stock text sizes are all cleared. An off-grid class does not silently render at the wrong size, it fails to compile.
 
 - **Spacing only from {4, 8, 12, 16, 24, 32}px** = Tailwind `1, 2, 3, 4, 6, 8` (plus `0` and the 1px `px` hairline). `p-5`, `py-1.5`, `p-[13px]`, `gap-[15px]` are violations. Control heights are a separate axis: `h-control-sm` / `h-control` / `h-control-lg`.
-- **Radius only from the token scale**: `rounded-sm` (6, controls) / `rounded-md` (10, cards) / `rounded-lg` (14, dialogs). No `rounded-[12px]`, no mixing by feel.
+- **Radius only from the web ladder** (ADR-0189 D6): `rounded-sm` 6 (code chip) / `rounded-md` 10 (badge, tag, menu item) / `rounded-lg` 14 (row selection, input vessel) / `rounded-xl` 18 (pane) / `rounded-2xl` 20 (card, dialog) / `rounded-full` (buttons, icon buttons, count badges). No `rounded-[12px]`, no mixing by feel.
 - **Typography via semantic roles, not size inflation**: `text-timestamp` / `text-meta` / `text-body` / `text-title` / `text-display`. No `text-sm`, no `text-[13px]`, no external font. Hierarchy via weight + `text-ink-muted`, max 2 weights per component.
 - **Numbers** (counters, costs, seq, token counts) carry `data-numeric` (tabular-nums from the base layer) plus `font-mono` and right-alignment where they form a column. Never animate faster than the data changes; no count-up theater.
 - **Shell geometry** comes from named utilities (`app-shell`), not arbitrary grid values.
@@ -100,12 +106,12 @@ Every surface ships **empty / loading / error / offline**:
 
 | Banned | Instead |
 |---|---|
-| Purple/indigo/blue AI gradient hero or `bg-gradient` splash on product surfaces | Flat token surfaces; gradient only on the landing site, never in-app |
+| Purple/indigo/blue AI gradient hero or `bg-gradient` splash on product surfaces | Token surfaces. The one in-app gradient is the theme's canvas (`canvas-gradient` utility, built from the `--canvas-*` tokens of the active palette, ADR-0189 D6). Components never write `bg-gradient`, hex stops, or a second gradient; the agent card border is two tokens (agent → signal) |
 | Toast/snackbar stacks (`sonner`, `useToast` stacks) | Inline banners in context, or OS notifications via Tauri |
 | Oversized rounded "web cards" wrapping every list row | Flat rows with separators/hover; `Card` only when elevation means grouping |
 | Centered empty state with illustration | One line of copy + one action button |
 | Emoji as functional icons | lucide icons, one style/weight per surface |
-| Full-width filled iOS-style buttons in dialogs | Standard bordered buttons, trailing-aligned, default action emphasized |
+| Full-width filled iOS-style buttons in dialogs | Filled pills sized to their label (ADR-0189), trailing-aligned, the primary action in ink |
 | Raw JSON dumps in user-facing cards | Typed key-value rows (`dl`); raw payload behind a `Collapsible` disclosure |
 | Decorative status dots / pulsing dots without meaning | Status indicators only when bound to real state, text-first, no pulse |
 | Section-number eyebrows ("001 · SETTINGS"), uppercase-tracking micro-labels (>1 per surface) | Sentence-case plain headers |
