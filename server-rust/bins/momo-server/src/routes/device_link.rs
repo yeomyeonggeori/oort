@@ -25,14 +25,15 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::{Extension, Json};
 use momo_auth::{
     confirm_device_link_sas_in_tx, consume_device_link_in_tx, device_link_status_in_tx,
-    issue_device_link_in_tx, list_linked_devices_in_tx, mint_device_link_token,
-    normalized_device_link_token, normalized_device_name, normalized_device_platform,
-    resolve_device_link_workspace, revoke_linked_device_in_tx, DeviceLinkConfirm,
-    DeviceLinkMutation, DeviceLinkSpecInvalid, DeviceLinkStatusKind, LinkedDevice,
-    LinkedDeviceRevoke, Principal,
+    issue_device_link_in_tx, linked_device_session_id_in_tx, list_linked_devices_in_tx,
+    mint_device_link_token, normalized_device_link_token, normalized_device_name,
+    normalized_device_platform, resolve_device_link_workspace, revoke_linked_device_in_tx,
+    DeviceLinkConfirm, DeviceLinkMutation, DeviceLinkSpecInvalid, DeviceLinkStatusKind,
+    LinkedDevice, LinkedDeviceRevoke, Principal,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
+use momo_push::invalidate_session_push_tokens_in_tx;
 
 use crate::dto::{
     DeviceLinkConfirmResponse, DeviceLinkDevice, DeviceLinkIssueResponse, DeviceLinkRedeemRequest,
@@ -390,6 +391,18 @@ pub async fn revoke_device(
             .await
             .map_err(DbError::from)?;
             if outcome == LinkedDeviceRevoke::Revoked {
+                // The phone's session just ended; so does its push
+                // registration, in the same commit (#2677). Otherwise a lost
+                // or handed-over phone disconnected from 설정 › 기기 keeps
+                // receiving the placeholder and the badge.
+                if let Some(session_id) =
+                    linked_device_session_id_in_tx(conn, workspace_id, member_id, device_id)
+                        .await
+                        .map_err(DbError::from)?
+                {
+                    invalidate_session_push_tokens_in_tx(conn, workspace_id, member_id, session_id)
+                        .await?;
+                }
                 write_audit(
                     conn,
                     &AuditEntry::new(workspace_id, "device.unlinked")

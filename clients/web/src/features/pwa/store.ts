@@ -24,8 +24,9 @@ import { IS_TAURI } from "@/lib/env";
 //                         따라가는 색은 index.html의 theme-color 두 줄이 계속
 //                         담당한다.
 //   icons                 192(런처)·512(스플래시)·512 maskable(런처가 자기
-//                         모양으로 잘라내는 판). 전부 favicon.svg에서 떠낸다
-//                         (scripts/render-pwa-icons.mjs). 새로 그린 그림은 없다.
+//                         모양으로 잘라내는 판). 폰 앱 아이콘과 같은 전면판
+//                         (docs/brand/mark/oort-app-icon.svg)에서 떠낸다
+//                         (scripts/render-brand-icons.mjs, #2650).
 // =============================================================================
 
 /** 한 번 권했다는 기억. 값이 아니라 존재 여부만 읽는다. */

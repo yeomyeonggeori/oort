@@ -163,9 +163,14 @@ describe('스킴 왕복 — 세 값이 화면 끝까지 간다', () => {
       </ThemeProvider>,
     );
     fireEvent.press(screen.getByTestId('theme-light'));
-    const selected = flatten(screen.getByTestId('theme-light').props.style);
-    expect(selected.borderColor).toBe(lightPalette.accent);
-    expect(selected.backgroundColor).toBe(lightPalette.accentSurface);
+    // 카드의 바탕과 고른 줄의 글자가 둘 다 라이트 팔레트에서 온다 (#2702 에서
+    // 세그먼트가 목록형 선택지로 바뀐 뒤의 두 신호).
+    expect(flatten(screen.getByTestId('theme-control').props.style).backgroundColor).toBe(
+      lightPalette.surface,
+    );
+    expect(flatten(screen.getByText('라이트').props.style).color).toBe(
+      lightPalette.accentText,
+    );
   });
 
   it('「시스템」 칸이 지금 무엇으로 풀리는지 보조기술에게 말한다', () => {
@@ -199,31 +204,31 @@ describe('스킴 왕복 — 세 값이 화면 끝까지 간다', () => {
     expect(screen.getByTestId('theme-light').props.accessibilityHint).toBeUndefined();
   });
 
-  it('안 고른 칸의 테두리는 **컨트롤의** 테두리다 — 두 스킴에서 3:1 위 (리뷰 M-1)', () => {
-    // `border` 는 배경 위 3:1 아래이고(`paletteContrast.test.ts` 가 그것을 잰다),
-    // 토큰 자신이 「선이지 컨트롤이 아니다」라고 적는다. 안 고른 칸은 채움도 글자
-    // 강조도 없으므로 테두리 하나가 「여기가 버튼이다」를 말하는 전부이고, 그래서
-    // 그 값은 hairline 이 아니라 컨트롤 테두리여야 한다.
-    //
-    // 두 스킴에서 함께 잰다: 라이트에서만 확인하면 다크의 회귀를 놓치고, 이 결함이
-    // 처음 눈에 띈 것도 라이트 판 사진에서였다.
-    // 아무것도 고르지 않았으므로(기본 = 시스템) 「라이트」 칸은 어느 스킴에서든
-    // 안 고른 칸이다 — 고른 칸을 읽으면 accent 가 나와 이 단정이 무의미해진다.
+  it('고른 줄만 체크가 보이고, 글자색과 굵기도 함께 바뀐다 — 신호가 하나가 아니다 (#2702)', () => {
+    // U2 의 세그먼트는 안 고른 칸의 **테두리**가 「여기가 버튼이다」의 전부라 그 값을
+    // 3:1 위로 재야 했다(리뷰 M-1). #2702 의 선택지는 카드 안의 줄이라 누를 수 있다는
+    // 것은 줄 자체가 말하고, 이 단정이 지는 것은 **어느 줄이 골라졌는가**가 체크
+    // 하나에만 실려 있지 않다는 것이다 — 체크는 손가락이 덮는다.
     act(() => setSystemColorScheme('light'));
     render(
       <ThemeProvider>
         <ThemeControl />
       </ThemeProvider>,
     );
-    const border = () =>
-      flatten(screen.getByTestId('theme-light').props.style).borderColor;
+    const ink = (label: string) => flatten(screen.getByText(label).props.style);
 
-    expect(border()).toBe(lightPalette.textFaint);
-    expect(border()).not.toBe(lightPalette.border);
+    // 기본 = 시스템. 체크는 그 줄에만 있고, 나머지 두 줄은 자리만 지킨다.
+    expect(screen.getByTestId('theme-system-check')).toBeTruthy();
+    expect(screen.queryByTestId('theme-light-check')).toBeNull();
+    expect(ink('시스템').color).toBe(lightPalette.accentText);
+    expect(ink('시스템').fontWeight).toBe('600');
+    expect(ink('라이트').color).toBe(lightPalette.text);
 
-    act(() => setSystemColorScheme('dark'));
-    expect(border()).toBe(darkPalette.textFaint);
-    expect(border()).not.toBe(darkPalette.border);
+    fireEvent.press(screen.getByTestId('theme-dark'));
+    expect(screen.getByTestId('theme-dark-check')).toBeTruthy();
+    expect(screen.queryByTestId('theme-system-check')).toBeNull();
+    expect(ink('다크').color).toBe(darkPalette.accentText);
+    expect(ink('시스템').color).toBe(darkPalette.text);
   });
 
   it('고른 칸만 selected 다 — 셋 중 하나', () => {

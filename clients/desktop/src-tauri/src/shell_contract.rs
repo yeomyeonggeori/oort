@@ -257,3 +257,33 @@ fn the_traffic_lights_share_the_titlebar_toggles_centre_line() {
         "lights centre {light_centre}pt vs toggle centre {toggle_centre}pt"
     );
 }
+
+fn csp_directive<'a>(csp: &'a str, name: &str) -> Vec<&'a str> {
+    csp.split(';')
+        .map(|part| part.split_whitespace().collect::<Vec<_>>())
+        .find(|tokens| tokens.first() == Some(&name))
+        .map(|tokens| tokens[1..].to_vec())
+        .unwrap_or_default()
+}
+
+/// Tauri 2's invoke first tries `fetch(ipc://localhost/<cmd>)`
+/// (`http://ipc.localhost` on Windows/Android). A `connect-src` that refuses
+/// it makes every command fall back to the postMessage JSON path, which cannot
+/// carry a raw body: `open_pdf_attachment` then answers "expected raw bytes"
+/// in the shipped bundle (#2701 R1, security review H-1).
+#[test]
+fn the_shipped_csp_lets_the_ipc_protocol_through() {
+    let conf: Value = serde_json::from_str(CONF).unwrap();
+    let csp = conf["app"]["security"]["csp"]
+        .as_str()
+        .expect("app.security.csp");
+    let connect = csp_directive(csp, "connect-src");
+    assert!(connect.contains(&"ipc:"), "connect-src = {connect:?}");
+    assert!(
+        connect.contains(&"http://ipc.localhost"),
+        "connect-src = {connect:?}"
+    );
+    // Control: opening the IPC transport did not open an embed or worker path.
+    assert_eq!(csp_directive(csp, "frame-src"), ["'none'"]);
+    assert_eq!(csp_directive(csp, "object-src"), ["'none'"]);
+}

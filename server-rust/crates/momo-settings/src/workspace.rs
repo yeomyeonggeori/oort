@@ -393,6 +393,11 @@ pub struct RevokedTokens {
 /// Revoke every live token the leaving member authenticates with or is the
 /// subject of, and report the split. `COALESCE(revoked_at, now())` keeps an
 /// already-revoked token's original timestamp (Swift parity).
+///
+/// Every session of the member ends here, so the route that commits this must
+/// also invalidate the member's push registrations in the same transaction
+/// (`momo_push::invalidate_member_push_tokens_in_tx`, #2677) — this crate does
+/// not own `push_token` SQL.
 pub async fn revoke_member_tokens_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,

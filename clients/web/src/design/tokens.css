@@ -673,6 +673,12 @@
    * 있다는 사실이 스크롤바 없이도 읽힌다. */
   --spacing-tray-max: 240px;
 
+  /* 트레이 칩의 이미지 썸네일 한 변 (#2701). 칩 두 줄(이름 body + 상태 meta +
+   * 진행 막대 자리)이 서는 높이에 맞춘 정사각형이라, 썸네일이 있는 칩과 없는 칩의
+   * 글줄이 같은 자리에서 시작한다. 로딩·디코드 실패에도 같은 상자가 서서 칩이
+   * 도착 순간에 자라지 않는다. 캔버스는 이 값의 두 배로 그린다(draftThumbnail.ts). */
+  --spacing-tray-thumb: 48px;
+
   /* S0 히어로 마크 (#1882). #1869의 96px(24px 제품 마크 ×4)를 1.5배한 바닥.
    * `.onboarding-mark`가 이 값과 12vw 사이에서 clamp하고, 상한은 같은 값의
    * 4/3(192)이라 큰 창에서 락업이 한없이 커지지 않는다. 제품 셸은 size-6. */
@@ -2430,17 +2436,18 @@
   height: 100%;
 }
 
-/* Second path of OortMark is the orbit (two outer arcs). Bound to that
-   document order: do not reorder OortMark's paths. pathLength=1 on the
-   element normalizes the raw length (~23) so dasharray 1 draws the stroke
-   over the full 1.1s instead of snapping on (dasharray 64 > path length). */
+/* Second path of OortMark is the satellite (C2-04 Bubble, #2650). Bound to
+   that document order: do not reorder OortMark's paths. The satellite arrives
+   from its orbit outward and settles into the bite over the same 1.1s the
+   old orbit stroke drew, so the wordmark (1.1s) and tagline (1.4s) still
+   follow it. fill-box keeps the scale centred on the satellite itself. */
 .onboarding-mark svg path:nth-of-type(2) {
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
-  animation: onboarding-orbit-draw 1.1s ease-out forwards;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: onboarding-satellite-arrive 1.1s ease-out backwards;
 }
 
-/* Sequential reveal after the orbit draw: wordmark at 1.1s, copy at 1.4s.
+/* Sequential reveal after the satellite arrives: wordmark at 1.1s, copy at 1.4s.
    Same 300ms fade as the step fade-in. backwards keeps them hidden until
    their delay; reduced-motion below drops this to opacity 1 immediately. */
 .onboarding-wordmark {
@@ -2577,9 +2584,14 @@
   animation-name: onboarding-mask-reveal-up;
 }
 
-@keyframes onboarding-orbit-draw {
+@keyframes onboarding-satellite-arrive {
+  from {
+    opacity: 0;
+    transform: translate(40%, -40%) scale(0.6);
+  }
   to {
-    stroke-dashoffset: 0;
+    opacity: 1;
+    transform: none;
   }
 }
 
@@ -2695,7 +2707,7 @@
   }
 
   .onboarding-mark svg path:nth-of-type(2) {
-    stroke-dashoffset: 0;
+    transform: none;
   }
 }
 

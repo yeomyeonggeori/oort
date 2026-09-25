@@ -12,6 +12,8 @@ import {
   failUpload,
   formatBytes,
   formatMimeLabel,
+  hasPdfSignature,
+  isPdfAttachment,
   INLINE_PREVIEW_MAX_BYTES,
   isRetryableIssue,
   issueForStatus,
@@ -24,6 +26,7 @@ import {
   sendBlockCopy,
   sendBlockReason,
   sentAttachmentsOf,
+  showsDraftThumbnail,
   showsInlinePreview,
   splitFileName,
   uploadIssueCopy,
@@ -432,5 +435,53 @@ describe("presentation", () => {
     // 않는다.
     expect(showsInlinePreview({ ...image, mime: "image/svg+xml" })).toBe(false);
     expect(showsInlinePreview({ ...image, mime: "application/pdf" })).toBe(false);
+  });
+});
+
+describe("attachment preview (#2701)", () => {
+  it("thumbnails a draft under the same raster rule the timeline uses", () => {
+    const image = picked({ name: "screen.png", mime: "image/png", sizeBytes: 64_000 });
+    expect(showsDraftThumbnail(image)).toBe(true);
+    // SVG 는 로컬 파일이어도 같은 판정이다: 트레이에서 그린 것을 타임라인이 카드로
+    // 바꾸면 한 파일이 두 모양을 갖는다.
+    expect(showsDraftThumbnail({ ...image, mime: "image/svg+xml" })).toBe(false);
+    expect(
+      showsDraftThumbnail({ ...image, sizeBytes: INLINE_PREVIEW_MAX_BYTES + 1 })
+    ).toBe(false);
+    // 크기를 모르는 파일은 상한 아래라고 가정하지 않는다.
+    expect(showsDraftThumbnail({ ...image, sizeKnown: false, sizeBytes: 0 })).toBe(
+      false
+    );
+    expect(showsDraftThumbnail(picked())).toBe(false);
+  });
+
+  it("names a PDF by its declared type, parameters and case included", () => {
+    const pdf = { id: "p", name: "spec.pdf", mime: "application/pdf", sizeBytes: 1 };
+    expect(isPdfAttachment(pdf)).toBe(true);
+    expect(isPdfAttachment({ ...pdf, mime: " Application/PDF; charset=binary" })).toBe(
+      true
+    );
+    // 이름이 .pdf 여도 선언이 다르면 PDF 로 열지 않는다. 열기는 선언과 바이트가
+    // 둘 다 PDF 일 때만이다.
+    expect(isPdfAttachment({ ...pdf, mime: "text/html" })).toBe(false);
+    expect(isPdfAttachment({ ...pdf, mime: "application/octet-stream" })).toBe(false);
+  });
+
+  it("accepts only bytes that carry the %PDF- header", () => {
+    const enc = (text: string) => new TextEncoder().encode(text);
+    expect(hasPdfSignature(enc("%PDF-1.7\n%...."))).toBe(true);
+    // 규격이 허용하는 머리 앞 잡음(1024바이트 안)은 받는다.
+    expect(hasPdfSignature(enc(`${" ".repeat(10)}%PDF-1.4`))).toBe(true);
+    expect(hasPdfSignature(enc(`${" ".repeat(1100)}%PDF-1.4`))).toBe(false);
+    // HTML 을 PDF 라고 선언해 올린 파일이 이 앱 출처의 문서로 열리지 않는다.
+    expect(hasPdfSignature(enc("<html><script>alert(1)</script>"))).toBe(false);
+    expect(hasPdfSignature(new Uint8Array())).toBe(false);
+  });
+
+  it("carries the open copy in the shared vocabulary", () => {
+    expect(ATTACH_COPY.openPdf).toBe("새 창에서 PDF 열기");
+    expect(ATTACH_COPY.pdfOpenFailed).toMatch(/내려받/);
+    expect(ATTACH_COPY.pdfNotPdf).toMatch(/내려받/);
+    expect(ATTACH_COPY.pdfPopupBlocked).toMatch(/팝업/);
   });
 });
