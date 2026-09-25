@@ -355,7 +355,8 @@ focused fixture만 `MOMO_MIGRATIONS_DIR`, `MOMO_BOOTSTRAP_ROLES_SQL`,
 삼고 이 override가 존재하면 SQL 전에 거절한다.
 
 `MOMO_INITIAL_OWNER_*`는 **두 커맨드가 공유하되 뜻이 다르다**(#1227): `migrate`는
-「없으면 만든다」(멱등, 세션 무손상), `migrate set-owner`는 「무조건 회전한다」(세션 무효화).
+「없으면 만든다」(멱등, 세션 무손상), `migrate set-owner`는 「무조건 회전한다」(세션 무효화.
+그 세션들이 등록한 폰 푸시도 함께 끝난다, #2677).
 compose는 두 서비스 모두에 이미 이 이름을 넘기고 있었으므로 compose 변경은 없다.
 
 `PROVIDER_LINK_MASTER_KEY`는 `agent-worker`가 `${VAR:?}`로 **요구**한다 — 템플릿에서

@@ -39,8 +39,9 @@ pub mod judgment;
 
 pub use candidate::PushCandidate;
 pub use device::{
-    list_devices, register_device, revoke_device, DeviceRecord, DeviceRegistration,
-    PushTokenRecord, RegisterOutcome, RevokeOutcome,
+    invalidate_member_push_tokens_in_tx, invalidate_session_push_tokens_in_tx, list_devices,
+    register_device, revoke_device, DeviceRecord, DeviceRegistration, PushTokenRecord,
+    RegisterOutcome, RevokeOutcome,
 };
 pub use dispatch::{
     category_for, collapse_id, DispatchOutcome, DispatchTarget, PushCategory, PushDispatch,

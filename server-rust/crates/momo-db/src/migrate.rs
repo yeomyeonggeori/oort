@@ -420,19 +420,25 @@ mod tests {
     /// enumerate it are rewritten (`hosted_agent_connection_scopes_ck`,
     /// `token_hosted_binding_ck`, `hosted_oauth_request_scope_ck`). No table,
     /// column or index is added; schema_v0.sql is not modified.
+    ///
+    /// 088 is #2677's push session lineage: nullable `token.session_id` (shared
+    /// by a sign-in's pair, inherited on rotation) and `push_token.session_id`
+    /// (the session a registration was made under), plus one partial index. A
+    /// session that ends invalidates its registrations; the judgment SQL and the
+    /// notifier's grants are unchanged. schema_v0.sql is not modified.
     #[test]
-    fn discovers_contiguous_migrations_001_to_087() {
+    fn discovers_contiguous_migrations_001_to_088() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            87,
-            "expected 87 migrations under {}",
+            88,
+            "expected 88 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 87);
+        assert_eq!(migrations.last().unwrap().version, 88);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {
