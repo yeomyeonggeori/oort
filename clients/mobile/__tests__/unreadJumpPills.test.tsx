@@ -706,6 +706,34 @@ describe('방을 옮기면 필의 판정을 새로 한다 — 방의 정체성 (
     expect(listRef.current).not.toBeNull();
     expect(listRef.current).not.toBe(roomA);
   });
+
+  it('앞 방 위에 있던 손가락은 새 방에서 떨어진 것으로 본다 — 새 방의 긴 답도 활강에 핀을 건다 (#2686)', async () => {
+    // 새 방의 행은 새 스크롤뷰가 받으므로 앞 스크롤뷰 위의 손가락은 `scrollEndDrag` 를
+    // 보내지 못한다. 손가락이 남아 있다고 읽으면 새 방의 따라가기 활강이 핀을 걸지 않고,
+    // 120pt 넘는 새 행의 첫 보고가 따라가기를 푼다.
+    const {rerender} = mount({channelId: 'ch'});
+    await settleAtBottom();
+    fireEvent(list(), 'scrollBeginDrag'); // 잡은 채로 방이 바뀐다
+
+    switchToRoomB(rerender, {lastReadSeq: 104, unreadCount: 0});
+    await settleAtBottom();
+    await sleep(700); // 진입의 착지 유지(도착 + 650ms)가 끝났다 — 바닥에서 읽는 중
+    expect(bottomPill()).toBeNull();
+
+    // 에이전트의 긴 답(300pt). 활강의 첫 보고: 오프셋은 아직 그대로다.
+    watchToEnd();
+    fireEvent(list(), 'contentSizeChange', 390, 4300);
+    fireEvent.scroll(list(), {
+      nativeEvent: {
+        contentOffset: {y: 3200},
+        contentSize: {height: 4300, width: 390},
+        layoutMeasurement: {height: 800, width: 390},
+      },
+    });
+
+    // 필이 섰다면 그 문장이 보이도록 — 빨개질 때 무엇이 섰는지 원문으로 남는다.
+    expect(bottomPill() === null ? null : pillSentence('jump-latest')).toBeNull();
+  });
 });
 
 // ---- 점프가 진입을 가져간다 (design-review 2594 R1 M-1) --------------------------
@@ -764,9 +792,7 @@ describe('점프가 진입을 가져간다 (R1 M-1)', () => {
     expect(toIndex).toHaveBeenCalledWith(
       expect.objectContaining({viewPosition: 0.5}),
     );
-    const toEnd = jest
-      .spyOn(FlatList.prototype, 'scrollToEnd')
-      .mockImplementation(() => {});
+    const toEnd = watchToEnd();
 
     // 늦게 도착한 첫 레이아웃 보고. 진입 앵커가 여기서 타면 목록은 바닥에 서고,
     // 착지 틴트는 화면 밖 행에 걸린다.
@@ -819,9 +845,7 @@ describe('점프가 진입을 가져간다 (R1 M-1)', () => {
     // (788/1399), 그 스크롤 보고가 따라가기를 켰다. 다음 콘텐츠 증가가 목록을 꼬리로
     // 활강시켜 착지는 끝내 보이지 않았다.
     jest.spyOn(FlatList.prototype, 'scrollToIndex').mockImplementation(() => {});
-    const toEnd = jest
-      .spyOn(FlatList.prototype, 'scrollToEnd')
-      .mockImplementation(() => {});
+    const toEnd = watchToEnd();
     mount({channelId: 'ch', jumpTarget: {messageId: 'msg-2', seq: 2, token: 1}});
 
     fireEvent.scroll(list(), {
@@ -866,11 +890,29 @@ async function mountAtTheEnd(over: MountProps = {}) {
 
 const TO_NEWEST = {messageId: 'msg-8', seq: 8, token: 1};
 
+/**
+ * 「끝으로 가라」는 요청의 기록 (#2686). 끝으로 가는 문은 둘이다 — 바닥에서 따라가는
+ * 활강은 방금 보고된 콘텐츠의 끝으로 가고(`scrollToOffset`, `followedTo`), 진입·먼
+ * 이동의 즉시 라운드·착지 뒤 메우기는 `scrollToEnd` 다. 둘 다 받는다: 하나만 보면 다른
+ * 문으로 간 따라가기를 놓치고 「따라가지 않는다」가 헛돈다.
+ */
+function watchToEnd(): jest.Mock {
+  const toEnd = jest.fn();
+  jest
+    .spyOn(FlatList.prototype, 'scrollToEnd')
+    .mockImplementation(params => toEnd(params));
+  jest
+    .spyOn(FlatList.prototype, 'scrollToOffset')
+    .mockImplementation(params => toEnd(params));
+  return toEnd;
+}
+
+/** 따라가는 활강 하나 — 콘텐츠 `height` 의 끝(창 800 위)으로 미끄러진다. */
+const followedTo = (height: number) => ({offset: height - 800, animated: true});
+
 /** 남의 메시지가 붙는다. 따라가면 목록이 끝으로 간다. */
 function someoneElseTalks() {
-  const toEnd = jest
-    .spyOn(FlatList.prototype, 'scrollToEnd')
-    .mockImplementation(() => {});
+  const toEnd = watchToEnd();
   fireEvent(list(), 'contentSizeChange', 390, 4100);
   return toEnd;
 }
@@ -889,7 +931,7 @@ describe('끝 근처 착지 — 이동이 멈추면 바닥을 다시 판정한�
     const toEnd = someoneElseTalks();
 
     expect(bottomPill()).toBeNull();
-    expect(toEnd).toHaveBeenCalled();
+    expect(toEnd).toHaveBeenCalledWith(followedTo(4100));
   });
 
   it('움직이는 동안 매 프레임 보고가 오고 마지막 보고가 끝 근처면, 멈춘 뒤 따라가기로 돌아온다', async () => {
@@ -906,7 +948,7 @@ describe('끝 근처 착지 — 이동이 멈추면 바닥을 다시 판정한�
     const toEnd = someoneElseTalks();
 
     expect(bottomPill()).toBeNull();
-    expect(toEnd).toHaveBeenCalled();
+    expect(toEnd).toHaveBeenCalledWith(followedTo(4100));
   });
 
   it('탐침 B(대조): 같은 보고가 늦게 와도 같은 결과다', async () => {
@@ -917,7 +959,7 @@ describe('끝 근처 착지 — 이동이 멈추면 바닥을 다시 판정한�
     const toEnd = someoneElseTalks();
 
     expect(bottomPill()).toBeNull();
-    expect(toEnd).toHaveBeenCalled();
+    expect(toEnd).toHaveBeenCalledWith(followedTo(4100));
   });
 
   it('보고가 아예 오지 않는 착지(목표가 지금 자리)도 곧 따라가기로 돌아온다', async () => {
@@ -929,7 +971,7 @@ describe('끝 근처 착지 — 이동이 멈추면 바닥을 다시 판정한�
     const toEnd = someoneElseTalks();
 
     expect(bottomPill()).toBeNull();
-    expect(toEnd).toHaveBeenCalled();
+    expect(toEnd).toHaveBeenCalledWith(followedTo(4100));
   });
 
   it('끝 근처에 착지하는 동안 「최신으로」는 한 번도 서지 않는다', async () => {
@@ -959,7 +1001,7 @@ describe('끝 근처 착지 — 이동이 멈추면 바닥을 다시 판정한�
     const toEnd = someoneElseTalks();
 
     expect(bottomPill()).toBeNull();
-    expect(toEnd).toHaveBeenCalled();
+    expect(toEnd).toHaveBeenCalledWith(followedTo(4100));
   });
 
   it('VoiceOver 세 손가락 스크롤처럼 드래그 없는 이동으로 끝에 돌아와도 판정이 막히지 않는다', async () => {
@@ -973,7 +1015,7 @@ describe('끝 근처 착지 — 이동이 멈추면 바닥을 다시 판정한�
     const toEnd = someoneElseTalks();
 
     expect(bottomPill()).toBeNull();
-    expect(toEnd).toHaveBeenCalled();
+    expect(toEnd).toHaveBeenCalledWith(followedTo(4100));
   });
 
   it('멀리 착지하면 이동이 멈춘 뒤 「최신으로」가 서고, 따라가지 않는다', async () => {
@@ -1035,7 +1077,11 @@ describe('끝 근처 착지 — 이동이 멈추면 바닥을 다시 판정한�
           highestMeasuredFrameIndex: 3,
         });
       });
-    jest.spyOn(FlatList.prototype, 'scrollToOffset').mockImplementation(() => {});
+    // 회복은 대략의 자리로 `scrollToOffset`(즉시)을 쓴다. 따라가는 활강은 같은 문의
+    // animated 판이다(#2686) — 그것이 없어야 한다.
+    const toOffset = jest
+      .spyOn(FlatList.prototype, 'scrollToOffset')
+      .mockImplementation(() => {});
     const toEnd = jest
       .spyOn(FlatList.prototype, 'scrollToEnd')
       .mockImplementation(() => {});
@@ -1063,6 +1109,7 @@ describe('끝 근처 착지 — 이동이 멈추면 바닥을 다시 판정한�
     fireEvent(list(), 'contentSizeChange', 390, 3100);
 
     expect(toEnd).not.toHaveBeenCalled();
+    expect(toOffset).not.toHaveBeenCalledWith(expect.objectContaining({animated: true}));
     expect(bottomPill()).not.toBeNull();
   });
 
@@ -1115,9 +1162,7 @@ describe('이동 중에 도착한 말은 판정 뒤에 따라간다 (#2608 M-B)'
     await sleep(200);
     atTheEnd(); // 착지 보고
     await sleep(100);
-    const toEnd = jest
-      .spyOn(FlatList.prototype, 'scrollToEnd')
-      .mockImplementation(() => {});
+    const toEnd = watchToEnd();
     arriveDuringTravel(rerender, TO_NEWEST, 9, 4100); // 이동은 아직 걸려 있다
     expect(toEnd).not.toHaveBeenCalled(); // 가는 동안에는 끌어내리지 않는다
     await sleep(600);
@@ -1133,9 +1178,7 @@ describe('이동 중에 도착한 말은 판정 뒤에 따라간다 (#2608 M-B)'
     await sleep(200);
     atTheEnd();
     await sleep(100);
-    const toEnd = jest
-      .spyOn(FlatList.prototype, 'scrollToEnd')
-      .mockImplementation(() => {});
+    const toEnd = watchToEnd();
     arriveDuringTravel(rerender, TO_NEWEST, 9, 4300);
     await sleep(600);
 
@@ -1163,9 +1206,7 @@ describe('이동 중에 도착한 말은 판정 뒤에 따라간다 (#2608 M-B)'
     mount({channelId: 'ch', lastReadSeq: 6, unreadCount: 2});
     await settleAtBottom();
     reportDividerAbove();
-    const toEnd = jest
-      .spyOn(FlatList.prototype, 'scrollToEnd')
-      .mockImplementation(() => {});
+    const toEnd = watchToEnd();
     fireEvent.press(screen.getByTestId('jump-unread'));
     for (const y of [3190, 3175, 3160, 3150]) {
       await sleep(60);
@@ -1177,7 +1218,7 @@ describe('이동 중에 도착한 말은 판정 뒤에 따라간다 (#2608 M-B)'
 
     // 판정은 「따라가기」였다 — 그 뒤에 붙는 말은 따라간다.
     fireEvent(list(), 'contentSizeChange', 390, 4100);
-    expect(toEnd).toHaveBeenCalled();
+    expect(toEnd).toHaveBeenCalledWith(followedTo(4100));
   });
 
   it('붙은 말이 없고 끝에 앉았으면, 판정 뒤에 더 움직이지 않는다', async () => {
@@ -1215,12 +1256,10 @@ describe('기하를 모른 채 끝난 이동은 첫 기하 보고에서 판정�
     await sleep(400); // 기하 없이 이동이 끝난다
     layoutReport(800);
     fireEvent(list(), 'contentSizeChange', 390, 800);
-    const toEnd = jest
-      .spyOn(FlatList.prototype, 'scrollToEnd')
-      .mockImplementation(() => {});
+    const toEnd = watchToEnd();
     arriveDuringTravel(rerender, TO_NEWEST, 9, 900);
 
-    expect(toEnd).toHaveBeenCalled();
+    expect(toEnd).toHaveBeenCalledWith(followedTo(900));
     expect(bottomPill()).toBeNull();
   });
 
@@ -1230,9 +1269,7 @@ describe('기하를 모른 채 끝난 이동은 첫 기하 보고에서 판정�
     layoutReport(800);
     fireEvent(list(), 'contentSizeChange', 390, 4000); // 오프셋 0, 끝까지 3200
     expect(pillSentence('jump-latest')).toBe('최신 메시지로 이동');
-    const toEnd = jest
-      .spyOn(FlatList.prototype, 'scrollToEnd')
-      .mockImplementation(() => {});
+    const toEnd = watchToEnd();
     arriveDuringTravel(rerender, TO_NEWEST, 9, 4100);
 
     expect(toEnd).not.toHaveBeenCalled();
@@ -1299,7 +1336,7 @@ describe('주장했던 성질을 시험이 잡는다 (#2608 N-F)', () => {
     expect(calls.filter(ms => ms > 1700)).toEqual([]); // 받침 뒤로는 하나도 없다
     // 판정은 났다: 목록은 끝에 앉은 채였으므로 따라가기로 돌아온다.
     const toEnd = someoneElseTalks();
-    expect(toEnd).toHaveBeenCalled();
+    expect(toEnd).toHaveBeenCalledWith(followedTo(4100));
   });
 });
 
@@ -1349,12 +1386,10 @@ describe('미룬 판정의 수명주기 — 여덟 줄이 저마다 시험에 �
     const {rerender} = await pendingVerdict();
     fireEvent(list(), 'contentSizeChange', 390, 850); // 창을 아직 모른다
     layoutReport(800); // 이제 안다 — 끝까지 50
-    const toEnd = jest
-      .spyOn(FlatList.prototype, 'scrollToEnd')
-      .mockImplementation(() => {});
+    const toEnd = watchToEnd();
     arriveDuringTravel(rerender, TO_NEWEST, 9, 950);
 
-    expect(toEnd).toHaveBeenCalled();
+    expect(toEnd).toHaveBeenCalledWith(followedTo(950));
     expect(bottomPill()).toBeNull();
   });
 
@@ -1384,9 +1419,7 @@ describe('미룬 판정의 수명주기 — 여덟 줄이 저마다 시험에 �
     rerender({jumpTarget: second});
     await sleep(30);
     scrollBy(3150); // 새 이동이 아직 움직인다 — 이 보고가 옛 판정을 풀면 「따라가기」
-    const toEnd = jest
-      .spyOn(FlatList.prototype, 'scrollToEnd')
-      .mockImplementation(() => {});
+    const toEnd = watchToEnd();
     arriveDuringTravel(rerender, second, 9, 4100);
 
     expect(toEnd).not.toHaveBeenCalled();

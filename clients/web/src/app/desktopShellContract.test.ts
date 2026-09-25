@@ -25,9 +25,17 @@ import { titlebarDragProps } from "./sidebarPane";
 //    권한이 없으면 거부되고, 실행할 때마다 처리되지 않은 거부가 하나 남는다.
 //    배너 자체는 앱 명령(`src/lib/tauri.ts`의 `notification_*`)으로 나가서
 //    이 권한과 무관하다. 그래서 읽기 전용 확인 하나만 준다.
+// 4. 신호등과 사이드바 토글의 세로 중심선(#2700). 신호등은 셸이 네이티브로
+//    그리고(`trafficLightPosition`), 토글은 이 번들의 `app-titlebar` 줄 가운데
+//    선다. 둘은 서로를 모른다. 한쪽만 바뀌면 어긋나고, 번들 시험도 셸 시험도
+//    각각은 초록이다. 그래서 여기서 두 값을 한 식으로 묶는다.
 // =============================================================================
 
 const desktopDir = new URL("../../../desktop/src-tauri/", import.meta.url);
+const tokensCss = readFileSync(
+  fileURLToPath(new URL("../design/tokens.css", import.meta.url)),
+  "utf8"
+);
 
 function readShellJson(path: string): unknown {
   return JSON.parse(readFileSync(fileURLToPath(new URL(path, desktopDir)), "utf8"));
@@ -38,8 +46,16 @@ interface Capability {
   permissions?: Array<string | { identifier: string }>;
 }
 
+interface TauriWindow {
+  label?: string;
+  dragDropEnabled?: boolean;
+  titleBarStyle?: string;
+  hiddenTitle?: boolean;
+  trafficLightPosition?: { x: number; y: number };
+}
+
 interface TauriConf {
-  app?: { windows?: Array<{ label?: string; dragDropEnabled?: boolean }> };
+  app?: { windows?: TauriWindow[]; security?: { csp?: string } };
 }
 
 const capability = readShellJson("capabilities/default.json") as Capability;
@@ -70,5 +86,101 @@ describe("데스크탑 셸 계약 (#2671, #2676)", () => {
     // `notification:default`나 `allow-notify`는 페이지 스크립트가 배너를 띄우거나
     // 권한을 묻게 연다. 앱의 알림은 앱 명령으로 나가므로 그 권한은 필요 없다.
     expect(notification).toEqual(["notification:allow-is-permission-granted"]);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// #2700 — 신호등 중심선 = 토글 중심선
+//
+// 실측(2026-09-25, macOS 27.0 26A428, tauri-runtime-wry 2.11.4 / tao 0.35.3,
+// Retina 2x, `screencapture -l` 창 캡처의 픽셀 경계 ÷ 2):
+//   trafficLightPosition.y = 14   → 신호등 원 5.0–19.0pt, 중심 12.0pt
+//   trafficLightPosition.y = 21.5 → 신호등 원 12.5–26.5pt, 중심 19.5pt
+// 두 점이 기울기 1로 이어진다: 신호등 중심 = y − 2. tao는 버튼 컨테이너의 높이를
+// 「버튼 높이 + y」로 늘릴 뿐 버튼의 y를 직접 두지 않으므로, 이 2pt는 설정이
+// 아니라 AppKit 배치에서 나온 값이다. OS가 신호등을 다시 그리면 다시 잰다.
+//
+// 토글: `app-titlebar`는 border-box 높이 `--spacing-control-lg`(40)에 아래
+// 테두리 1px이다. 내용 상자는 39px이고 `align-items: center`라 토글 중심은
+// 19.5px. 같은 캡처에서 토글 아이콘 경계 12.5–26.5pt, 중심 19.5pt로 확인했다.
+// 수정 전(y=14)에는 7.5pt 어긋나 있었다(성재 스크린샷과 같은 모양).
+// -----------------------------------------------------------------------------
+
+/** 신호등 중심 − `trafficLightPosition.y` (pt). 음수 = 중심이 y보다 위. 위 실측. */
+const LIGHT_CENTER_MINUS_Y = -2;
+
+function pxToken(name: string): number {
+  const match = tokensCss.match(new RegExp(`${name}:\\s*(\\d+(?:\\.\\d+)?)px;`));
+  if (!match) throw new Error(`${name} not found in tokens.css`);
+  return Number(match[1]);
+}
+
+function utilityBlock(name: string): string {
+  const start = tokensCss.indexOf(`@utility ${name} {`);
+  if (start < 0) throw new Error(`@utility ${name} not found`);
+  const end = tokensCss.indexOf("\n}", start);
+  return tokensCss.slice(start, end);
+}
+
+describe("타이틀바 신호등과 사이드바 토글의 세로 정렬 (#2700)", () => {
+  const main = conf.app?.windows?.find((w) => (w.label ?? "main") === "main");
+  const titlebar = utilityBlock("app-titlebar");
+
+  it("신호등이 웹 콘텐츠 위에 떠 있는 Overlay 타이틀바다", () => {
+    // Overlay가 아니면 신호등은 네이티브 제목줄 안에 있고 웹 줄은 그 아래에서
+    // 시작한다. 아래 정렬 계산이 성립하는 전제다.
+    expect(main?.titleBarStyle).toBe("Overlay");
+    expect(main?.hiddenTitle).toBe(true);
+  });
+
+  it("app-titlebar 줄은 control-lg 높이에 아래 테두리 1px, 토글은 세로 가운데", () => {
+    expect(titlebar).toMatch(/block-size:\s*var\(--spacing-control-lg\);/);
+    expect(titlebar).toMatch(/border-block-end:\s*1px solid/);
+    expect(titlebar).toMatch(/align-items:\s*center;/);
+  });
+
+  it("신호등 중심과 토글 중심이 1pt 안에서 맞는다", () => {
+    const rowHeight = pxToken("--spacing-control-lg");
+    const borderBottom = 1;
+    const toggleCenter = (rowHeight - borderBottom) / 2;
+    const y = main?.trafficLightPosition?.y;
+    expect(typeof y).toBe("number");
+    const lightsCenter = (y as number) + LIGHT_CENTER_MINUS_Y;
+    expect(Math.abs(lightsCenter - toggleCenter)).toBeLessThanOrEqual(1);
+  });
+});
+
+// 5. 셸 IPC 전송로(#2701 R1, 보안 검수 H-1). Tauri 2 의 invoke 는 먼저
+//    `fetch(ipc://localhost/<cmd>)`(Windows·Android 는 `http://ipc.localhost`)
+//    로 간다. `connect-src` 가 그것을 막으면 콘솔 경고 한 줄과 함께 postMessage
+//    JSON 경로로 조용히 내려앉고, 그 경로는 raw 본문(`Uint8Array`)을 싣지 못한다.
+//    JSON 인자만 쓰던 명령은 그래도 돌아서 아무도 몰랐고, raw 본문을 쓰는 첫
+//    명령(`open_pdf_attachment`)이 출하 번들에서 「expected raw bytes」로 죽었다.
+//    이 두 출처는 새 콘텐츠 출처가 아니라 셸 자신의 명령 전송로다.
+function cspDirective(csp: string, name: string): string[] {
+  const directive = csp
+    .split(";")
+    .map((part) => part.trim().split(/\s+/))
+    .find(([key]) => key === name);
+  return directive ? directive.slice(1) : [];
+}
+
+describe("셸 IPC 전송로 (#2701 R1)", () => {
+  it("출하 CSP 의 connect-src 가 Tauri 커스텀 프로토콜 IPC 를 허용한다", () => {
+    const csp = conf.app?.security?.csp ?? "";
+    const connect = cspDirective(csp, "connect-src");
+    expect(connect).toContain("ipc:");
+    expect(connect).toContain("http://ipc.localhost");
+  });
+
+  it("IPC 를 연 것 말고는 콘텐츠 출처가 넓어지지 않았다", () => {
+    const csp = conf.app?.security?.csp ?? "";
+    // 임베드·워커·스크립트 경계는 그대로다. PDF 를 이 경로로 열지 않는 이유가
+    // 여기 있다(content.ts PDF 절).
+    expect(cspDirective(csp, "frame-src")).toEqual(["'none'"]);
+    expect(cspDirective(csp, "object-src")).toEqual(["'none'"]);
+    expect(cspDirective(csp, "worker-src")).toEqual(["'none'"]);
+    expect(cspDirective(csp, "script-src")).toEqual(["'self'"]);
+    expect(cspDirective(csp, "img-src")).toEqual(["'self'", "data:"]);
   });
 });

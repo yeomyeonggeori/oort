@@ -155,6 +155,15 @@ async function flushFrame() {
   });
 }
 
+/**
+ * 끝으로 가는 두 번째 문 (#2686). 바닥에서 따라가는 활강은 목록의 어림(`scrollToEnd`)이
+ * 아니라 방금 보고된 콘텐츠의 끝으로 간다(`scrollToOffset`). 「데려가지 않는다」는 두 문을
+ * 함께 봐야 헛돌지 않는다 — `scrollToEnd` 만 보면 활강으로 간 따라가기를 놓친다.
+ */
+function spyGlide(listRef: ReturnType<typeof mount>['listRef']) {
+  return jest.spyOn(listRef.current!, 'scrollToOffset');
+}
+
 afterEach(cleanup);
 
 describe('내가 보내면 따라간다', () => {
@@ -297,12 +306,14 @@ describe('내가 보내면 따라간다', () => {
       // 있고 싶은지 말하고 있고, 1초 전의 전송에게 반박권은 없다.
       const {view, listRef} = mount(0);
       const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
+      const glide = spyGlide(listRef);
       await settleInitialLayout();
       scrollAwayFromBottom();
       spy.mockClear();
 
       await sendFromMidHistory(view, listRef);
       spy.mockClear();
+      glide.mockClear();
 
       fireEvent(screen.getByTestId('timeline-list'), 'scrollBeginDrag', {
         nativeEvent: {
@@ -315,6 +326,7 @@ describe('내가 보내면 따라간다', () => {
       tailSpacerGrows();
 
       expect(spy).not.toHaveBeenCalled();
+      expect(glide).not.toHaveBeenCalled();
     });
   });
 
@@ -331,10 +343,12 @@ describe('남이 보내면 읽던 자리를 지킨다', () => {
   it('끝에서 떨어져 있으면 새 메시지가 와도 데려가지 않는다', async () => {
     const {view, listRef} = mount(0);
     const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
+    const glide = spyGlide(listRef);
 
     await settleInitialLayout();
     scrollAwayFromBottom();
     spy.mockClear();
+    glide.mockClear();
 
     // 남의 메시지가 도착한다: 토큰은 그대로다.
     act(() => {
@@ -353,11 +367,12 @@ describe('남이 보내면 읽던 자리를 지킨다', () => {
     fireEvent(screen.getByTestId('timeline-list'), 'contentSizeChange', 390, 4300);
 
     expect(spy).not.toHaveBeenCalled();
+    expect(glide).not.toHaveBeenCalled();
   });
 
   it('끝에 있을 때는 새 메시지를 따라간다', async () => {
     const {listRef} = mount(0);
-    const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
+    const spy = spyGlide(listRef);
 
     await settleInitialLayout();
     // 바닥 근처: distanceFromEnd 0.
@@ -371,7 +386,8 @@ describe('남이 보내면 읽던 자리를 지킨다', () => {
     spy.mockClear();
 
     fireEvent(screen.getByTestId('timeline-list'), 'contentSizeChange', 390, 4300);
-    expect(spy).toHaveBeenCalled();
+    // 방금 보고된 콘텐츠의 끝(4300 − 800)으로 미끄러진다 — 목록의 어림이 아니다(#2686).
+    expect(spy).toHaveBeenCalledWith({offset: 3500, animated: true});
   });
 });
 

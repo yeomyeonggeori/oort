@@ -33,6 +33,15 @@ export function pushDeviceId(): string {
   return created;
 }
 
+/**
+ * The device id this install has registered under, or `null` if it never
+ * tried. Sign-out reads this rather than `pushDeviceId()`: minting an id just
+ * to revoke it would leave the next registration a dead row on the server.
+ */
+export function registeredPushDeviceId(): string | null {
+  return nonSecretStore().getString(NON_SECRET_KEYS.pushDeviceId) || null;
+}
+
 export interface PushRegistrationRequest {
   workspaceId: string;
   apnsToken: string;

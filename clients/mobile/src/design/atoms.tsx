@@ -42,6 +42,16 @@ import {usePalette, useStyles} from './theme';
 // 거짓말"). The RN shell inherits the fix rather than re-earning it.
 // =============================================================================
 
+/**
+ * 머리 줄(바)에 서는 **컨트롤** 글자의 Dynamic Type 배율 상한 (#2702).
+ *
+ * 머리 줄은 한 줄이고 폭이 고정이다. AX5 에서 「메시지 검색」과 아바타가 제
+ * 크기대로 자라면 제목 「대화」가 「대·」로 잘렸고, 시트의 「닫기」가 「닫·」가
+ * 됐다(Release 캡처). iOS 의 바 단추도 같은 이유로 무한히 자라지 않는다. 본문과
+ * 목록은 이 상한 밖이다 — 읽는 글자는 끝까지 자란다.
+ */
+export const BAR_CONTROL_MAX_SCALE = 1.6;
+
 /** Every tappable thing in this app is at least this tall. */
 const hitStyle = {minHeight: TOUCH_TARGET, justifyContent: 'center'} as const;
 
@@ -487,6 +497,132 @@ export function SectionLabel({label}: {label: string}): React.JSX.Element {
   );
 }
 
+// =============================================================================
+// 묶음 카드 — 설정 같은 목록의 한 묶음 (#2702).
+//
+// 프로필 시트가 처음 쓴다: 테마 · 알림 · 연결 · 계정이 각자 둥근 카드 하나에
+// 담기고, 카드 위에 작은 머리글이 선다. iOS 설정 앱과 Buzz 의 프로필이 같은
+// 문법이고, 사람이 「이 화면은 나에 관한 설정이다」를 읽는 모양이 이것이다.
+//
+// 카드의 모서리는 `radius.md` — 웹 `--radius-md` 가 「cards, list groups」라고
+// 이름 붙인 자리다. 새 반경을 들이지 않는다(디자인 시스템 2.0, #2703 의 몫).
+// 카드와 바탕을 가르는 것은 채움(`surface`)이고 테두리는 hairline `border` —
+// 선이지 컨트롤이 아니다. 누를 수 있는 줄은 오른쪽의 ›, 또는 강조색 글자가 말한다.
+// =============================================================================
+
+export function GroupSection({
+  label,
+  children,
+  testID,
+}: {
+  label?: string;
+  children: React.ReactNode;
+  testID?: string;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <View style={styles.group} testID={testID}>
+      {label ? (
+        <Text accessibilityRole="header" style={styles.groupLabel}>
+          {label}
+        </Text>
+      ) : null}
+      <View style={styles.groupCard}>{children}</View>
+    </View>
+  );
+}
+
+/**
+ * 묶음 카드 안의 한 줄.
+ *
+ * `onPress` 가 있으면 누르는 줄, 없으면 읽는 줄이다. `separated` 는 위 줄과의
+ * 가는 선 — 카드의 첫 줄에는 주지 않는다. `tone="danger"` 는 파괴 행(로그아웃)이고
+ * 글자가 위험색으로 선다.
+ */
+export function GroupRow({
+  title,
+  detail,
+  value,
+  chevron = false,
+  tone = 'default',
+  separated = false,
+  onPress,
+  accessibilityLabel,
+  accessibilityHint,
+  accessibilityRole,
+  accessibilityState,
+  trailing,
+  testID,
+}: {
+  title: string;
+  detail?: string;
+  value?: string;
+  chevron?: boolean;
+  tone?: 'default' | 'danger' | 'accent';
+  separated?: boolean;
+  onPress?: () => void;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
+  accessibilityRole?: 'button' | 'radio';
+  accessibilityState?: {selected?: boolean};
+  trailing?: React.ReactNode;
+  testID?: string;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const body = (
+    <>
+      <View style={styles.groupRowText}>
+        <Text
+          style={[
+            styles.groupRowTitle,
+            tone === 'danger' && styles.groupRowTitleDanger,
+            tone === 'accent' && styles.groupRowTitleAccent,
+          ]}>
+          {title}
+        </Text>
+        {detail ? (
+          <Sentence style={styles.groupRowDetail}>{detail}</Sentence>
+        ) : null}
+      </View>
+      {value ? (
+        <Text style={styles.groupRowValue} numberOfLines={1}>
+          {value}
+        </Text>
+      ) : null}
+      {trailing ?? null}
+      {chevron ? (
+        <Text style={styles.groupRowChevron} importantForAccessibility="no">
+          ›
+        </Text>
+      ) : null}
+    </>
+  );
+  const rowStyle = [styles.groupRow, separated && styles.groupRowSeparated];
+  if (!onPress) {
+    return (
+      <View
+        accessible
+        accessibilityLabel={accessibilityLabel}
+        style={rowStyle}
+        testID={testID}>
+        {body}
+      </View>
+    );
+  }
+  return (
+    <Pressable
+      accessibilityRole={accessibilityRole ?? 'button'}
+      accessibilityLabel={accessibilityLabel ?? title}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={accessibilityState}
+      onPress={onPress}
+      style={({pressed}) => [...rowStyle, pressed && styles.pressed]}
+      testID={testID}>
+      {body}
+    </Pressable>
+  );
+}
+
 const buildStyles = (color: Palette) => StyleSheet.create({
   screen: {flex: 1, backgroundColor: color.bg},
   header: {
@@ -608,4 +744,37 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.4,
   },
+  group: {paddingHorizontal: SAFE_GUTTER, gap: space.sm},
+  groupLabel: {
+    fontSize: font.label,
+    color: color.textMuted,
+    fontWeight: '600',
+    paddingHorizontal: space.xs,
+  },
+  groupCard: {
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.border,
+    backgroundColor: color.surface,
+    overflow: 'hidden',
+  },
+  groupRow: {
+    ...hitStyle,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+  },
+  groupRowSeparated: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: color.border,
+  },
+  groupRowText: {flex: 1, gap: space.xs},
+  groupRowTitle: {fontSize: font.body, color: color.text},
+  groupRowTitleDanger: {color: color.danger, fontWeight: '600'},
+  groupRowTitleAccent: {color: color.accentText, fontWeight: '600'},
+  groupRowDetail: {fontSize: font.label, color: color.textMuted, lineHeight: 18},
+  groupRowValue: {fontSize: font.body, color: color.textMuted, flexShrink: 1},
+  groupRowChevron: {fontSize: font.heading, color: color.textFaint},
 });

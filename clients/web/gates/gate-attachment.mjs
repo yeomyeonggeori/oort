@@ -24,6 +24,10 @@
 //      값이 있을 때만    넘긴 파일에 재시도 버튼을 다는 것은 죽은 컨트롤이다.
 //   5. 타임라인이        이미지는 인라인으로 펴지고 그 밖은 카드다. 두 모양 다
 //      두 모양을 갖는다  이름과 「타입 · 크기」를 말하고 내려받기를 갖는다.
+//   5b. 미리보기(#2701) 트레이의 이미지 칩은 썸네일(`data:`, 배포 CSP 아래에서
+//      실제로 디코드된 그림)을 갖고, 타임라인 이미지는 라이트박스로 열려 Esc 로
+//      닫히며 포커스가 여는 버튼으로 돌아오고, PDF 카드는 머리가 `%PDF-` 인
+//      바이트만 `application/pdf` 로 재타입해 opener 없는 새 창에 건다.
 //   6. **첨부 없는 경로가 그대로다** — 파일을 한 번도 안 붙인 메시지의 DOM에는
 //      첨부 노드가 하나도 없고, 컴포저의 전송 조건도 이전과 같다.
 //
@@ -156,6 +160,8 @@ const channelA = "00000000-0000-7000-8000-000000000201";
 const PLAIN_MSG = "0199dddd-0000-7000-8000-000000000001";
 const FILE_MSG = "0199dddd-0000-7000-8000-000000000002";
 const IMAGE_MSG = "0199dddd-0000-7000-8000-000000000003";
+// #2701: PDF 카드의 「새 창에서 열기」와 라이트박스를 한 판에서 본다.
+const PDF_MSG = "0199dddd-0000-7000-8000-000000000004";
 
 const FILE_ATTACHMENT = {
   id: "0199eeee-0000-7000-8000-0000000000f1",
@@ -169,6 +175,14 @@ const IMAGE_ATTACHMENT = {
   mime: "image/png",
   sizeBytes: 4096,
 };
+const PDF_ATTACHMENT = {
+  id: "0199eeee-0000-7000-8000-0000000000f3",
+  name: "Q3-온보딩-리뷰.pdf",
+  mime: "application/pdf",
+  sizeBytes: 182_000,
+};
+/** 머리가 `%PDF-` 인 최소 본문. 뷰어가 그릴 필요는 없고 머리 판정만 통과하면 된다. */
+const PDF_BYTES = Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n");
 
 /**
  * 프록시가 돌려주는 진짜 PNG 바이트. 손으로 인코딩하는 이유는 **1x1 이면
@@ -355,6 +369,14 @@ function page() {
       body: "지연 곡선입니다.",
       createdAtMs: FIRST_AT + 120_000,
       attachments: [IMAGE_ATTACHMENT],
+    }),
+    row({
+      id: PDF_MSG,
+      seq: 103,
+      authorMemberId: peerId,
+      body: "3분기 온보딩 리뷰 자료 공유합니다. 12쪽 표가 이번 논의의 핵심입니다.",
+      createdAtMs: FIRST_AT + 180_000,
+      attachments: [PDF_ATTACHMENT],
     }),
   ];
 }
@@ -582,6 +604,15 @@ async function installRoutes(context, archive, sink) {
       // 배포에서 401 이 될 요청을 초록으로 통과시키게 된다.
       if (request.headers().authorization === undefined) {
         return json(route, { error: { message: "unauthorized" } }, 401);
+      }
+      if (path.includes(PDF_ATTACHMENT.id)) {
+        return route.fulfill({
+          status: 200,
+          // 서버처럼 선언은 믿지 않게 둔다: 클라가 머리로 판정하고 스스로 재타입한다.
+          contentType: "application/octet-stream",
+          headers: { "content-disposition": "attachment" },
+          body: PDF_BYTES,
+        });
       }
       return route.fulfill({
         status: 200,
@@ -1116,6 +1147,116 @@ async function exerciseTimeline(browser) {
 }
 
 
+// ---- #2701. 미리보기: 트레이 썸네일 · 라이트박스 · PDF 새 창 ---------------
+
+async function exercisePreview(browser) {
+  const archive = createArchive();
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    reducedMotion: "reduce",
+  });
+  const page_ = await context.newPage();
+  await installRealtimeSocket(page_);
+  await installRoutes(context, archive);
+  await login(page_);
+  await openChannel(page_);
+
+  // ① 트레이 썸네일. jsdom 이 아니라 진짜 Chromium 이 디코드하고, 그림의 원천이
+  //    `data:` 라서 배포 CSP(`img-src 'self' data:`) 아래에서도 선다.
+  const shot = fixturePath("deny-after-denial.png", makePng(1600, 900));
+  await page_.locator('input[type="file"]').first().setInputFiles(shot);
+  const thumb = page_.getByTestId("attachment-chip-thumb");
+  await thumb.waitFor({ timeout: 15_000 });
+  const thumbFacts = await thumb.evaluate((img) => ({
+    src: img.getAttribute("src") ?? "",
+    natural: img.naturalWidth,
+    width: img.getBoundingClientRect().width,
+    height: img.getBoundingClientRect().height,
+  }));
+  expect(thumbFacts.src.startsWith("data:image/png"), "트레이 썸네일이 data: 가 아니다");
+  expect(thumbFacts.natural === 96, `썸네일이 96px 로 그려지지 않았다 (${thumbFacts.natural})`);
+  expect(
+    thumbFacts.width === 48 && thumbFacts.height === 48,
+    `썸네일 상자가 48px 정사각형이 아니다 (${thumbFacts.width}x${thumbFacts.height})`
+  );
+  await page_.getByTestId("attachment-clear").click();
+
+  // ② 라이트박스: 열고, Esc 로 닫고, 포커스가 여는 버튼으로 돌아온다.
+  const imageRow = page_.locator(
+    `[data-testid="timeline-message"][data-message-id="${IMAGE_MSG.toLowerCase()}"]`
+  );
+  const opener = imageRow.locator('[data-testid="attachment-image"] button').first();
+  await opener.click();
+  await page_.getByTestId("image-lightbox-ready").waitFor({ timeout: 15_000 });
+  await page_.keyboard.press("Escape");
+  await page_.getByTestId("image-lightbox").waitFor({ state: "detached", timeout: 5_000 });
+  const focusBack = await opener.evaluate((node) => node === document.activeElement);
+  expect(focusBack, "라이트박스를 닫은 뒤 포커스가 여는 버튼으로 돌아오지 않았다");
+
+  // ③ PDF: 새 창이 열리고, 그 문서는 opener 가 없는 application/pdf blob 이다.
+  const pdfRow = page_.locator(
+    `[data-testid="timeline-message"][data-message-id="${PDF_MSG.toLowerCase()}"]`
+  );
+  const openPdf = pdfRow.getByTestId("attachment-open-pdf");
+  expect((await openPdf.count()) === 1, "PDF 카드에 열기가 없다");
+  expect(
+    (await pdfRow.getByTestId("attachment-download").count()) === 1,
+    "PDF 카드에서 내려받기가 사라졌다"
+  );
+  const fileRow = page_.locator(
+    `[data-testid="timeline-message"][data-message-id="${FILE_MSG.toLowerCase()}"]`
+  );
+  expect(
+    (await fileRow.getByTestId("attachment-open-pdf").count()) === 0,
+    "PDF 가 아닌 카드에 열기가 섰다"
+  );
+  // 새 창에 건 Blob 의 타입을 제품 밖에서 기록한다(계측이지 제품 수정이 아니다).
+  // 헤드리스 Chromium 에는 PDF 뷰어가 없어 새 창의 탐색이 내려받기로 끝나므로,
+  // 문서 타입을 새 창에서 읽는 대신 건 순간의 Blob 타입을 읽는다.
+  await page_.evaluate(() => {
+    const original = URL.createObjectURL.bind(URL);
+    window.__pdfBlobTypes = [];
+    URL.createObjectURL = (blob) => {
+      window.__pdfBlobTypes.push(blob.type);
+      return original(blob);
+    };
+  });
+  const popupPromise = context.waitForEvent("page", { timeout: 10_000 });
+  await openPdf.click();
+  const popup = await popupPromise;
+  // 헤드리스는 내려받기, 헤드풀은 뷰어. 어느 쪽이든 그 주소는 blob: 이다.
+  // 요청 자체를 본다: 헤드리스에서는 탐색이 ERR_ABORTED(내려받기 전환)로 끝나
+  // waitForURL 이 거절되므로, 창이 blob: 을 요청했다는 사실을 잡는다.
+  const landed = await Promise.any([
+    popup.waitForEvent("download", { timeout: 10_000 }).then((d) => d.url()),
+    popup
+      .waitForEvent("request", {
+        predicate: (request) => request.url().startsWith("blob:"),
+        timeout: 10_000,
+      })
+      .then((request) => request.url()),
+    popup.waitForURL(/^blob:/, { timeout: 10_000 }).then(() => popup.url()),
+  ]).catch(() => popup.url());
+  expect(landed.startsWith("blob:"), `PDF 창이 blob: 으로 가지 않았다 (${landed})`);
+  const blobTypes = await page_.evaluate(() => window.__pdfBlobTypes);
+  expect(
+    blobTypes.length === 1 && blobTypes[0] === "application/pdf",
+    `새 창에 건 Blob 이 application/pdf 가 아니다 (${JSON.stringify(blobTypes)})`
+  );
+  const openerCut = await popup.evaluate(() => window.opener === null).catch(() => true);
+  expect(openerCut, "PDF 창이 opener 를 쥐고 있다");
+  // 실패 줄은 늘 서 있고(낭독용 live region) 비어 있어야 한다.
+  expect(
+    (await pdfRow.getByTestId("attachment-open-failed").innerText()).trim() === "",
+    "PDF 를 열고도 실패 문장이 섰다"
+  );
+  await popup.close();
+
+  await context.close();
+  console.log("[6b] 트레이 썸네일은 data: 로 서고, 라이트박스는 Esc·포커스 복귀를 지키고,");
+  console.log("     PDF 는 opener 없는 application/pdf 창으로 열린다 (#2701)");
+}
+
 // ---- B-3. 막대는 실제로 움직이고, 100%를 먼저 말하지 않는다 ------------------
 //
 // 앞 판의 게이트는 막대의 **존재**만 단정했고, 그래서 「전송 내내 0」이 초록으로
@@ -1574,6 +1715,70 @@ async function captureShots(browser) {
       await context.close();
     }
 
+    // ⑩ #2701 트레이 썸네일 · 라이트박스 · PDF 카드.
+    {
+      const { context, page_ } = await openBoard({ scheme });
+      await page_
+        .locator('input[type="file"]')
+        .first()
+        .setInputFiles([
+          fixturePath("deny-after-denial.png", makePng(1600, 900)),
+          fixturePath("drain-2026-08-09.log", "line\n"),
+        ]);
+      await page_.getByTestId("attachment-chip-thumb").waitFor({ timeout: 15_000 });
+      await shot(page_, `tray-thumb-${scheme}`);
+      await page_.getByTestId("attachment-clear").click();
+
+      await page_.waitForFunction(
+        (id) =>
+          document
+            .querySelector(
+              `[data-testid="timeline-message"][data-message-id="${id}"] [data-testid="attachment-image"]`
+            )
+            ?.getAttribute("data-preview") === "ready",
+        IMAGE_MSG.toLowerCase(),
+        { timeout: 20_000 }
+      );
+      await shot(page_, `timeline-preview-${scheme}`);
+
+      await page_
+        .locator(
+          `[data-testid="timeline-message"][data-message-id="${IMAGE_MSG.toLowerCase()}"] [data-testid="attachment-image"] button`
+        )
+        .first()
+        .click();
+      await page_.getByTestId("image-lightbox-ready").waitFor({ timeout: 15_000 });
+      await shot(page_, `lightbox-${scheme}`);
+      await page_.keyboard.press("Escape");
+      await page_.getByTestId("image-lightbox").waitFor({ state: "detached" });
+
+      // PDF 열기 실패 문장 (design-review M1): 선언은 PDF 인데 바이트가 HTML 인 판.
+      // 페이지 라우트가 컨텍스트 라우트보다 먼저다 — 이 판에서만 프록시가 거짓말한다.
+      await page_.route(`**/${PDF_ATTACHMENT.id}/content`, (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/pdf",
+          body: "<html><body>not a pdf</body></html>",
+        })
+      );
+      const pdfRow = page_.locator(
+        `[data-testid="timeline-message"][data-message-id="${PDF_MSG.toLowerCase()}"]`
+      );
+      await pdfRow.getByTestId("attachment-open-pdf").click();
+      await page_.waitForFunction(
+        () =>
+          (document.querySelector('[data-testid="attachment-open-failed"]')
+            ?.textContent ?? "") !== "",
+        undefined,
+        { timeout: 10_000 }
+      );
+      for (const extra of context.pages()) {
+        if (extra !== page_) await extra.close().catch(() => {});
+      }
+      await shot(page_, `pdf-open-failed-${scheme}`);
+      await context.close();
+    }
+
     // ⑨ 드래그 강조 (앞 판 증거에 없던 상태).
     {
       const { context, page_ } = await openBoard({ scheme });
@@ -1595,7 +1800,7 @@ async function captureShots(browser) {
   }
   console.log(
     "[shots] artifacts/attachment/{uploading,queued,verifying,uploaded,failed,timeline," +
-      "thread-failed,phone-failed,overflow,dragging}-{light,dark}.png"
+      "thread-failed,phone-failed,overflow,dragging,tray-thumb,timeline-preview,lightbox,pdf-open-failed}-{light,dark}.png"
   );
 }
 
@@ -1617,6 +1822,7 @@ async function main() {
       await exerciseOverflow(browser);
       await exerciseFailure(browser);
       await exerciseTimeline(browser);
+      await exercisePreview(browser);
       if (process.env.ATTACH_GATE_SHOTS === "1") await captureShots(browser);
     } finally {
       await browser.close();
