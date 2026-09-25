@@ -372,8 +372,12 @@ describe('기하가 시안 A #a-home 과 같다', () => {
     fireEvent.press(
       screen.getByTestId('page-sheet-scrim', {includeHiddenElements: true}),
     );
-    await waitFor(() => expect(screen.queryByTestId('new-message-sheet')).toBeNull());
-  });
+    // 미끄러져 나가는 260ms 를 기다린다. 부하가 높은 러너에서 기본 1s 가 모자란
+    // 적이 있어(부하 13, 1.8~4.1s) 넉넉히 준다 — 재는 것은 「닫힌다」이지 속도가 아니다.
+    await waitFor(() => expect(screen.queryByTestId('new-message-sheet')).toBeNull(), {
+      timeout: 8000,
+    });
+  }, 15000);
 
   it('탭 목록의 끝이 탭바 밑에 숨지 않는다 — 시안 .a-scroll 의 140', async () => {
     installFetch();

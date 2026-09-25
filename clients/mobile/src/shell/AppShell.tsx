@@ -93,10 +93,24 @@ export default function AppShell({member}: {member: Member}): React.JSX.Element 
 /** 한 번 열린 뒤로 마운트된 채 남는 자리들. 탭 셋과, 탭이던 두 층. */
 type Place = Tab | 'agentList' | 'workList';
 
-function Shell(): React.JSX.Element {
+/**
+ * 셸 본체. 앱은 `AppShell`이 프로바이더 셋 안에서 세운다.
+ *
+ * 내보내는 이유는 **캡처 하네스** 하나다(`measure/surfaces.tsx`의 `shell-*`):
+ * 셸 크롬(탭바·FAB·시트)은 탭과 시트가 열린 판을 시안 옆에 나란히 놓아야 확인되고,
+ * 시뮬레이터에서 그 판을 손으로 만들 수 없다. 두 시작값은 그 판을 고르는 것이고,
+ * 앱은 기본값(홈, 시트 닫힘)만 쓴다.
+ */
+export function Shell({
+  initialNav = INITIAL_NAV,
+  initialComposeOpen = false,
+}: {
+  initialNav?: typeof INITIAL_NAV;
+  initialComposeOpen?: boolean;
+} = {}): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const [nav, dispatch] = useReducer(navReducer, INITIAL_NAV);
-  const [composeOpen, setComposeOpen] = useState(false);
+  const [nav, dispatch] = useReducer(navReducer, initialNav);
+  const [composeOpen, setComposeOpen] = useState(initialComposeOpen);
   const mentionCount = useMentionCount();
   // 알림 본문 탭 → 대화 하나 (#2569). 못 가면 그 이유 한 문장을 대화 목록에 둔다.
   // 지금의 자리를 함께 건넨다: 답을 기다리는 탭은 사람이 다른 곳을 고르면 접힌다.
@@ -149,7 +163,7 @@ function Shell(): React.JSX.Element {
   // from `nav` and is only ever read during the render that already follows the
   // change, so putting it in state would be a second render for a value the
   // first one could already see.
-  const visited = useRef<Set<Place>>(new Set<Place>([INITIAL_NAV.tab]));
+  const visited = useRef<Set<Place>>(new Set<Place>([initialNav.tab]));
   visited.current.add(nav.tab);
   if (nav.agentList) visited.current.add('agentList');
   if (nav.workList) visited.current.add('workList');
