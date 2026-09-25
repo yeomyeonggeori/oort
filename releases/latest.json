@@ -1,28 +1,28 @@
 {
-  "version": "v0.1.7",
-  "released_at": "2026-09-24",
+  "version": "v0.1.8",
+  "released_at": "2026-09-25",
   "images": {
     "app": {
       "ref": "ghcr.io/yeomyeonggeori/oort",
-      "digest_list": "sha256:4d00a0d03e1e16805277eb6888181ffbc815222ccf4994ada788945a06e80e8c",
+      "digest_list": "sha256:6a10669b557c9077d43b1f501649f4cb36c398ffa33172ea01887a0d9bc1da79",
       "digests": {
-        "amd64": "sha256:4b48398e622c95c44141cadb2417a58fd67fae5c3bd79684560f03808cfd6ec6",
-        "arm64": "sha256:c092f058191833eb87d3ebff1531ce41abec906b6481f7888e8204ee1cf9f90a"
+        "amd64": "sha256:ce6911c0303528cb794f5b133952095ba1af21698f767f22c033c6fdc14d8cb2",
+        "arm64": "sha256:6b105a23751013ebf5ccafd5ce10b9978cff446f67be7dca812bbd54d45ca167"
       }
     },
     "postgres": {
       "ref": "ghcr.io/yeomyeonggeori/oort-postgres",
-      "digest_list": "sha256:16a248695b53c8f9ac71e136f22f28296a08c3f1e2c5426049312c90b9c5e4c3",
+      "digest_list": "sha256:5ce9365f126ff7aa20a3b70893907ed0afc616ede2a8309ffaf75c63da4766b3",
       "digests": {
-        "amd64": "sha256:99d44f6b07f0197508b0412c2f1a5259b7ffbb103abe05bf9e2a842601285b6d",
-        "arm64": "sha256:29b1269f4ceb2b4413f8d6f3d919468fd2f2cf2c338598718db3d0594e0c5bde"
+        "amd64": "sha256:a79c2d59e958fa997feb78b38fa85e536dee235ae4c91d587f44508f76de64ba",
+        "arm64": "sha256:44148f603692d44d24a2b571a9e88e9e9dc52f7e8778e96613dd9edab2296a95"
       }
     }
   },
   "attestation": {
-    "verify_cmd": "gh attestation verify \"oci://ghcr.io/yeomyeonggeori/oort@sha256:4d00a0d03e1e16805277eb6888181ffbc815222ccf4994ada788945a06e80e8c\" --repo yeomyeonggeori/oort --predicate-type https://slsa.dev/provenance/v1"
+    "verify_cmd": "gh attestation verify \"oci://ghcr.io/yeomyeonggeori/oort@sha256:6a10669b557c9077d43b1f501649f4cb36c398ffa33172ea01887a0d9bc1da79\" --repo yeomyeonggeori/oort --predicate-type https://slsa.dev/provenance/v1"
   },
   "sources": {
-    "release_url": "https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.7"
+    "release_url": "https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.8"
   }
 }

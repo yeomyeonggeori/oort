@@ -19,8 +19,21 @@
 //!    handling writes the same column.
 //! 4. **The raw `apns_token` never leaves PostgreSQL** — responses and audit
 //!    rows carry only the trailing 8 characters, computed by `right()` in SQL.
+//!
+//! And one this server adds (#2677):
+//!
+//! 5. **A registration lives as long as the session that made it.** Each token
+//!    row records the lineage (`token.session_id`) of the session it was
+//!    registered under. Ending that session — logout, a linked-device
+//!    disconnect — invalidates the rows of that lineage
+//!    ([`invalidate_session_push_tokens_in_tx`]); ending every session of a
+//!    member — password change or reset, suspension, removal, leaving —
+//!    invalidates all of the member's ([`invalidate_member_push_tokens_in_tx`]).
+//!    Rotating a session ends nothing. The judgment SQL is untouched: it already
+//!    skips invalidated rows, and the notifier gains no access to `token`.
 
 use chrono::{DateTime, Utc};
+use momo_auth::{lock_session_for_registration, RegistrationSession};
 use momo_db::{with_tenant_tx_prelude, DbError, PgPool};
 use momo_messaging::active_workspace_role;
 use sqlx::{PgConnection, Row};
@@ -308,6 +321,28 @@ pub async fn register_device(
                 return Ok(Err(rejection));
             }
 
+            // 0) #2677 — which session is this registration made under? The
+            //    row is share-locked until commit, so a logout of that session
+            //    either waits for this registration (and then invalidates it)
+            //    or has already committed (and we refuse here, before any
+            //    write). No credential without a session row (an agent bearer)
+            //    binds nothing, and neither does a pre-088 session.
+            let session_id = match via_token_id {
+                None => None,
+                Some(token_id) => {
+                    match lock_session_for_registration(conn, workspace_id, member_id, token_id)
+                        .await
+                        .map_err(DbError::from)?
+                    {
+                        RegistrationSession::Live(lineage) => lineage,
+                        RegistrationSession::NotASession => None,
+                        RegistrationSession::Ended => {
+                            return Ok(Err(DeviceRejection::SessionEnded));
+                        }
+                    }
+                }
+            };
+
             // 1) Actor binding on the device row. `deviceId` is client-stable,
             //    so an existing row must already belong to the caller.
             let existing = sqlx::query(
@@ -407,11 +442,16 @@ pub async fn register_device(
             // 5) Upsert the incoming token.
             match existing_token_id {
                 Some(token_id) => {
+                    // `session_id` is rewritten, never kept: a phone signing
+                    // back in re-sends the same token, and the row must now
+                    // belong to the NEW session — left on the old lineage it
+                    // would outlive this one's logout (#2677).
                     sqlx::query(
                         "UPDATE push_token \
                             SET device_id = $1, \
                                 member_id = $2, \
                                 topic = $3, \
+                                session_id = $5, \
                                 invalidated_at = NULL, \
                                 updated_at = now() \
                           WHERE id = $4",
@@ -420,6 +460,7 @@ pub async fn register_device(
                     .bind(member_id)
                     .bind(&registration.topic)
                     .bind(token_id)
+                    .bind(session_id)
                     .execute(&mut *conn)
                     .await
                     .map_err(classify_registration_write)?;
@@ -430,8 +471,9 @@ pub async fn register_device(
                     // must surface as a conflict, never a 500.
                     let inserted = sqlx::query(
                         "INSERT INTO push_token \
-                           (workspace_id, device_id, member_id, apns_token, env, topic) \
-                         VALUES ($1, $2, $3, $4, $5::push_env, $6) \
+                           (workspace_id, device_id, member_id, apns_token, env, topic, \
+                            session_id) \
+                         VALUES ($1, $2, $3, $4, $5::push_env, $6, $7) \
                          ON CONFLICT (apns_token, env) DO NOTHING \
                          RETURNING id",
                     )
@@ -441,6 +483,7 @@ pub async fn register_device(
                     .bind(&registration.apns_token)
                     .bind(&registration.env)
                     .bind(&registration.topic)
+                    .bind(session_id)
                     .fetch_optional(&mut *conn)
                     .await
                     .map_err(classify_registration_write)?;
@@ -570,6 +613,67 @@ pub async fn revoke_device(
 }
 
 // ---------------------------------------------------------------------------
+// Session end (#2677)
+// ---------------------------------------------------------------------------
+
+/// One session ended: its lineage's live registrations end with it.
+///
+/// The member predicate is belt-and-braces — a lineage never spans members —
+/// and `invalidated_at IS NULL` keeps a repeated logout a no-op that reports 0.
+/// Never `DELETE` (contract 3).
+const INVALIDATE_SESSION_SQL: &str = "UPDATE push_token \
+        SET invalidated_at = now(), updated_at = now() \
+      WHERE workspace_id = $1 \
+        AND member_id = $2 \
+        AND session_id = $3 \
+        AND invalidated_at IS NULL";
+
+/// Every session of the member ended: all of the member's live registrations
+/// end, lineage or not — including pre-088 rows no single session can claim.
+const INVALIDATE_MEMBER_SQL: &str = "UPDATE push_token \
+        SET invalidated_at = now(), updated_at = now() \
+      WHERE workspace_id = $1 \
+        AND member_id = $2 \
+        AND invalidated_at IS NULL";
+
+/// Invalidate the registrations made under one session lineage — the push
+/// half of logout and of the linked-device disconnect (ADR-0120 D4, ADR-0180
+/// D5). Runs inside the caller's tenant transaction, next to the token
+/// revocation, so the session and its registrations end in one commit.
+/// Returns how many rows this call flipped.
+pub async fn invalidate_session_push_tokens_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    session_id: Uuid,
+) -> Result<u64, DbError> {
+    Ok(sqlx::query(INVALIDATE_SESSION_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(session_id)
+        .execute(&mut *conn)
+        .await?
+        .rows_affected())
+}
+
+/// Invalidate every registration of one member — the push half of any path
+/// that revokes all of the member's sessions at once (password change or reset,
+/// suspension, removal, leaving the workspace). Same transaction rule as
+/// [`invalidate_session_push_tokens_in_tx`].
+pub async fn invalidate_member_push_tokens_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<u64, DbError> {
+    Ok(sqlx::query(INVALIDATE_MEMBER_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .execute(&mut *conn)
+        .await?
+        .rows_affected())
+}
+
+// ---------------------------------------------------------------------------
 // Shared plumbing
 // ---------------------------------------------------------------------------
 
@@ -689,6 +793,44 @@ mod tests {
             validated_app_build(Some(&"9".repeat(65))),
             Err(DeviceInputError::AppBuild)
         );
+    }
+
+    /// #2677 — ending a session must reach only that session's registrations,
+    /// and ending a member only that member's. Drop `session_id = $3` and one
+    /// phone's logout silences every other phone of the person; drop the
+    /// `invalidated_at IS NULL` guard and a repeated logout reports rows it did
+    /// not flip. Neither may ever delete (contract 3).
+    #[test]
+    fn session_end_invalidation_is_scoped_and_never_deletes() {
+        for needle in [
+            "workspace_id = $1",
+            "member_id = $2",
+            "session_id = $3",
+            "invalidated_at IS NULL",
+            "SET invalidated_at = now()",
+        ] {
+            assert!(
+                INVALIDATE_SESSION_SQL.contains(needle),
+                "the per-session invalidation lost `{needle}`"
+            );
+        }
+        for needle in [
+            "workspace_id = $1",
+            "member_id = $2",
+            "invalidated_at IS NULL",
+            "SET invalidated_at = now()",
+        ] {
+            assert!(
+                INVALIDATE_MEMBER_SQL.contains(needle),
+                "the per-member invalidation lost `{needle}`"
+            );
+        }
+        for sql in [INVALIDATE_SESSION_SQL, INVALIDATE_MEMBER_SQL] {
+            assert!(
+                !sql.contains("DELETE"),
+                "revocation is invalidated_at, never DELETE"
+            );
+        }
     }
 
     /// The raw APNs token must never be *selected* out of PostgreSQL. Grepping
