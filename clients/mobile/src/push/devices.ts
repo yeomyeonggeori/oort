@@ -84,21 +84,50 @@ export async function registerDevice(
 }
 
 /**
- * Revoke this device on sign-out, so the server stops sending pushes a
- * signed-out phone can no longer resolve.
+ * Deadline for the sign-out DELETE (#2677 review L6).
  *
- * Best effort: the caller must not block sign-out on it. The access token is
- * about to be discarded either way, and the server drops the registration when
- * the token stops working.
+ * The request runs inside the core's `beforeRevoke` window, and the core
+ * AWAITS it before `POST /v1/auth/logout` — the call that actually ends the
+ * session (and, on a current server, the registration with it). On the shared
+ * 15-second deadline a stalled DELETE held that revocation back for up to 15
+ * seconds, and an app killed in that window lost both requests. The session
+ * connection is warm when a person signs out, so a healthy server answers in
+ * well under a second; 4 seconds still covers a slow cellular link with a fresh
+ * TLS handshake, while capping the delay the revocation can suffer. Losing the
+ * DELETE on a stalled link costs little: the current server ends the
+ * registration with the session.
+ */
+export const REVOKE_DEVICE_TIMEOUT_MS = 4_000;
+
+/**
+ * Revoke this device on sign-out (ADR-0120 D4), so the server stops sending
+ * pushes a signed-out phone can no longer resolve — which the notification
+ * extension would otherwise show as the relay's placeholder, badge included
+ * (#2677).
+ *
+ * `accessToken` is explicit because the caller runs after the local wipe:
+ * `logout()` clears the session store first, so `authHeaders()` would send
+ * nothing. It is the leaving session's token, captured by the core and handed
+ * to `beforeRevoke`, and this request has to land before `/v1/auth/logout`
+ * kills it.
+ *
+ * Best effort. A server that ends a session's registrations itself (#2677
+ * server half) does not need this call; an older self-hosted one does, and on
+ * either it makes the device row's state true immediately.
+ *
+ * Bounded by {@link REVOKE_DEVICE_TIMEOUT_MS}, not the shared 15-second
+ * deadline, because the server revocation waits for it.
  */
 export async function revokeDevice(
   workspaceId: string,
   deviceId: string,
+  accessToken: string,
 ): Promise<boolean> {
   try {
     const response = await fetchWithDeadline(
       `${apiBase()}/v1/workspaces/${workspaceId}/devices/${deviceId}`,
-      {method: 'DELETE', headers: authHeaders()},
+      {method: 'DELETE', headers: {Authorization: `Bearer ${accessToken}`}},
+      REVOKE_DEVICE_TIMEOUT_MS,
     );
     return response.ok;
   } catch {
