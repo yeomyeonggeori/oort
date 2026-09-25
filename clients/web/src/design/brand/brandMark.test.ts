@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -88,5 +89,40 @@ describe("oort 마크는 한 기하에서 나온다", () => {
     for (const src of [...hrefs, ...manifest.icons.map((icon) => icon.src)]) {
       expect(existsSync(join(WEB_ROOT, "public", src)), src).toBe(true);
     }
+  });
+});
+
+// ---- 코메토 레퍼런스 (#2732 R2) ------------------------------------------------
+//
+// 앱 아이콘과 S0 히어로는 owner가 고른 레퍼런스 래스터를 그대로 쓴다. 픽셀이
+// 레퍼런스에서 파생됐는지는 scripts/render-brand-icons.mjs가 크로미움으로 잰다.
+// 여기서는 그 검사가 기대는 전제를 본다: 원본이 owner 파일 그대로이고, 검사가
+// 같은 해시를 고정하고, 앱 안 히어로가 그 파생 래스터를 가리킨다.
+
+const pngHeader = (path: string) => {
+  const png = readFileSync(path);
+  return { w: png.readUInt32BE(16), h: png.readUInt32BE(20), colorType: png[25] };
+};
+
+describe("코메토 앱 아이콘·S0 히어로는 owner 레퍼런스에서 나온다", () => {
+  const source = join(REPO_ROOT, "docs/brand/kometto/K6-flat-dark.png");
+  const renderer = read(join(WEB_ROOT, "scripts/render-brand-icons.mjs"));
+
+  it("원본은 1254 정사각 불투명이고, 렌더 검사가 그 해시를 고정한다", () => {
+    const sha = createHash("sha256").update(readFileSync(source)).digest("hex");
+    expect(renderer).toContain(`SOURCE_SHA256 = "${sha}"`);
+    expect(pngHeader(source)).toEqual({ w: 1254, h: 1254, colorType: 2 });
+  });
+
+  it("S0 히어로는 레퍼런스에서 오려 낸 래스터를 쓴다(다시 그린 SVG가 아니다)", () => {
+    const mark = read(join(WEB_ROOT, "src/design/brand/KomettoMark.tsx"));
+    expect(mark).toMatch(/from "@\/assets\/brand\/kometto-badge\.png"/);
+    expect(mark).not.toMatch(/<svg\b|<path\b/);
+    expect(pngHeader(join(WEB_ROOT, "src/assets/brand/kometto-badge.png"))).toEqual({ w: 576, h: 576, colorType: 6 });
+  });
+
+  it("앱 아이콘을 그리던 SVG 판은 남아 있지 않다", () => {
+    for (const file of ["oort-app-icon.svg", "oort-app-icon-macos.svg", "oort-kometto.svg"])
+      expect(existsSync(join(MARK_DIR, file)), file).toBe(false);
   });
 });
