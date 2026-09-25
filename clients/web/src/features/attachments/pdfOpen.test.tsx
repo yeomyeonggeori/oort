@@ -136,6 +136,31 @@ describe("openPdfAttachment", () => {
     expect(target.close).not.toHaveBeenCalled();
   });
 
+  it("releases the blob: URL after its lifetime, not before", async () => {
+    // 가짜 타이머는 jsdom FileReader 를 멈추므로 쓰지 않는다. 예약만 붙잡는다.
+    const scheduled: Array<{ run: () => void; ms: number | undefined }> = [];
+    const realSetTimeout = globalThis.setTimeout;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+      run: () => void,
+      ms?: number
+    ) => {
+      if (ms === 60_000) {
+        scheduled.push({ run, ms });
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      }
+      return realSetTimeout(run, ms);
+    }) as typeof setTimeout);
+    fetchAttachmentContent.mockResolvedValue(bytes("%PDF-1.7\n", "application/pdf"));
+    const target = fakeWindow();
+    await openPdfAttachment("ws", "ch", PDF, target as unknown as Window);
+    const revoke = URL.revokeObjectURL as unknown as ReturnType<typeof vi.fn>;
+    // 걸자마자 놓지 않는다(뷰어가 읽기 전에 주소가 죽는다).
+    expect(revoke).not.toHaveBeenCalled();
+    expect(scheduled).toHaveLength(1);
+    scheduled[0]?.run();
+    expect(revoke).toHaveBeenCalledWith("blob:http://localhost/1");
+  });
+
   it("refuses bytes that are not a PDF and closes the window it opened", async () => {
     fetchAttachmentContent.mockResolvedValue(
       bytes("<html><script>alert(document.cookie)</script>", "application/pdf")
