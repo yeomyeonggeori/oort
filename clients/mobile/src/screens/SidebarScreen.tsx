@@ -14,6 +14,7 @@ import {
   View,
 } from 'react-native';
 import {
+  BAR_CONTROL_MAX_SCALE,
   CountBadge,
   EmptyState,
   ErrorState,
@@ -114,7 +115,11 @@ export function SearchEntryAction({
       onPress={onPress}
       style={({pressed}) => [styles.headerAction, pressed && styles.pressed]}
       testID="open-message-search">
-      <Text style={styles.headerActionLabel}>{SEARCH_SURFACE_NAME}</Text>
+      <Text
+        style={styles.headerActionLabel}
+        maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+        {SEARCH_SURFACE_NAME}
+      </Text>
     </Pressable>
   );
 }
@@ -176,7 +181,11 @@ export function ProfileAvatarButton({
       onPress={onPress}
       style={({pressed}) => [styles.avatarButton, pressed && styles.avatarPressed]}
       testID="profile-avatar">
-      <Avatar directory={directory} memberId={memberId} />
+      {/* 사진 없는 이니셜 얼굴은 바탕 위 1.07:1 이다 — 이 앱의 계정 문이 이것
+          하나이므로 3:1 을 넘는 가장자리(`textFaint`)를 두른다 (리뷰 M1). */}
+      <View style={styles.avatarRing}>
+        <Avatar directory={directory} memberId={memberId} />
+      </View>
     </Pressable>
   );
 }
@@ -609,6 +618,11 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     borderRadius: radius.pill,
   },
   avatarPressed: {opacity: 0.6},
+  avatarRing: {
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: color.textFaint,
+  },
   headerActionLabel: {fontSize: font.label, color: color.accentText, fontWeight: '600'},
   fallthrough: {
     minHeight: TOUCH_TARGET,

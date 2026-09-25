@@ -203,6 +203,21 @@ describe('프로필 시트', () => {
     expect(screen.queryByTestId('profile-sheet')).toBeNull();
   });
 
+  it('시트를 끌어내려 닫으면(onRequestClose/onDismiss) 아바타가 다시 연다', async () => {
+    // pageSheet 의 끌어내림은 네이티브가 닫고 RN 이 알린다. 알림이 부모의 「열림」을
+    // 내리지 못하면 아바타가 죽는다 — 두 경로를 각각 흘려 본다.
+    await openSheet();
+    for (const signal of ['onRequestClose', 'onDismiss'] as const) {
+      const sheet = screen.getByTestId('profile-sheet');
+      act(() => {
+        sheet.props[signal]();
+      });
+      expect(screen.queryByTestId('profile-sheet')).toBeNull();
+      fireEvent.press(screen.getByTestId('profile-avatar'));
+      expect(screen.getByTestId('profile-sheet')).toBeTruthy();
+    }
+  });
+
   it('테마 줄이 선택지를 열고, 고른 것이 저장되며 줄의 값이 바뀐다', async () => {
     await openSheet();
     expect(screen.getByTestId('profile-theme-row')).toHaveTextContent(/시스템/);

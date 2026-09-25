@@ -1,9 +1,14 @@
-import {
-  effectivePresenceLabel,
-} from '@momo/core/features/presence/model';
+import {effectivePresenceLabel} from '@momo/core/features/presence/model';
 import {visibleCustomStatus} from '@momo/core/features/presence/customStatus';
-import {memberFor, type Directory} from '@momo/core/features/workspace/directory';
-import {effectivePresence, type EffectivePresence, type Member} from '@momo/core/lib/api';
+import {
+  memberFor,
+  type Directory,
+} from '@momo/core/features/workspace/directory';
+import {
+  effectivePresence,
+  type EffectivePresence,
+  type Member,
+} from '@momo/core/lib/api';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   Linking,
@@ -19,12 +24,27 @@ import {
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 
-import {GroupRow, GroupSection, Sentence} from '../../design/atoms';
+import {
+  BAR_CONTROL_MAX_SCALE,
+  GroupRow,
+  GroupSection,
+  Sentence,
+} from '../../design/atoms';
 import {ThemeControl} from '../../design/ThemeControl';
 import {themeChoiceLabel, useStyles, useTheme} from '../../design/theme';
-import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {
+  font,
+  radius,
+  SAFE_GUTTER,
+  space,
+  TOUCH_TARGET,
+  type Palette,
+} from '../../design/tokens';
 import {useNow} from '../../lib/useNow';
-import {pushPermissionDetail, usePushPermission} from '../../push/permissionStatus';
+import {
+  pushPermissionDetail,
+  usePushPermission,
+} from '../../push/permissionStatus';
 import {getServerBase} from '../../storage/serverBase';
 import {Avatar} from '../conversation/Avatar';
 import {currentAppVersionLabel} from './appVersion';
@@ -88,7 +108,8 @@ export function ProfileSheet({
       presentationStyle="pageSheet"
       onRequestClose={onClose}
       onDismiss={onClose}
-      testID="profile-sheet">
+      testID="profile-sheet"
+    >
       <SafeAreaProvider>
         <SheetBody
           member={member}
@@ -131,15 +152,30 @@ function SheetBody({
           {page === 'theme' ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="내 프로필로 돌아가기"
+              accessibilityLabel="프로필"
               onPress={() => setPage('profile')}
-              style={({pressed}) => [styles.navButton, pressed && styles.pressed]}
-              testID="profile-back">
-              <Text style={styles.navButtonLabel}>‹ 프로필</Text>
+              style={({pressed}) => [
+                styles.navButton,
+                pressed && styles.pressed,
+              ]}
+              testID="profile-back"
+            >
+              <Text
+                style={styles.navButtonLabel}
+                numberOfLines={1}
+                maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+              >
+                ‹ 프로필
+              </Text>
             </Pressable>
           ) : null}
         </View>
-        <Text accessibilityRole="header" style={styles.navTitle} numberOfLines={1}>
+        <Text
+          accessibilityRole="header"
+          style={styles.navTitle}
+          numberOfLines={1}
+          maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+        >
           {page === 'theme' ? '테마' : '내 프로필'}
         </Text>
         <View style={[styles.navSide, styles.navSideEnd]}>
@@ -148,8 +184,15 @@ function SheetBody({
             accessibilityLabel="내 프로필 닫기"
             onPress={onClose}
             style={({pressed}) => [styles.navButton, pressed && styles.pressed]}
-            testID="profile-close">
-            <Text style={styles.navButtonLabel}>닫기</Text>
+            testID="profile-close"
+          >
+            <Text
+              style={styles.navButtonLabel}
+              numberOfLines={1}
+              maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+            >
+              닫기
+            </Text>
           </Pressable>
         </View>
       </View>
@@ -160,7 +203,8 @@ function SheetBody({
           styles.content,
           {paddingBottom: Math.max(insets.bottom, space.lg) + space.lg},
         ]}
-        testID="profile-scroll">
+        testID="profile-scroll"
+      >
         {page === 'theme' ? (
           <ThemePage />
         ) : (
@@ -234,16 +278,27 @@ function ProfilePage({
   return (
     <>
       <View style={styles.hero}>
-        <Avatar directory={directory} memberId={member.id} size={HERO_AVATAR} />
+        <View style={styles.heroRing}>
+          <Avatar
+            directory={directory}
+            memberId={member.id}
+            size={HERO_AVATAR}
+          />
+        </View>
         <View style={styles.heroText}>
           <Text
             accessibilityRole="header"
             style={styles.name}
             numberOfLines={2}
-            testID="self-profile-name">
+            testID="self-profile-name"
+          >
             {member.displayName}
           </Text>
-          <Text style={styles.handle} numberOfLines={1} testID="self-profile-handle">
+          <Text
+            style={styles.handle}
+            numberOfLines={1}
+            testID="self-profile-handle"
+          >
             @{member.handle}
           </Text>
         </View>
@@ -252,7 +307,8 @@ function ProfilePage({
             accessible
             accessibilityLabel={`내 상태: ${effectivePresenceLabel(presence)}`}
             style={[styles.pill, pillTone(styles, presence)]}
-            testID="self-profile-presence">
+            testID="self-profile-presence"
+          >
             <View style={[styles.pillDot, dotTone(styles, presence)]} />
             <Text style={[styles.pillLabel, pillLabelTone(styles, presence)]}>
               {effectivePresenceLabel(presence)}
@@ -260,7 +316,10 @@ function ProfilePage({
           </View>
         ) : null}
         {customLine ? (
-          <Sentence style={styles.customStatus} testID="self-profile-custom-status">
+          <Sentence
+            style={styles.customStatus}
+            testID="self-profile-custom-status"
+          >
             {customLine}
           </Sentence>
         ) : null}
@@ -308,15 +367,23 @@ function ProfilePage({
       <GroupSection label="계정">
         {confirming ? (
           <View style={styles.confirm} testID="sign-out-confirm-block">
-            <Sentence style={styles.confirmText}>
-              이 기기에서 로그아웃합니다. 보내지 않은 초안도 이 기기에서 지워집니다.
-            </Sentence>
+            {/* 웹 `ProfileCard` 의 확인 대화상자와 같은 두 문장이다 (리뷰 M5). */}
+            <View style={styles.confirmCopy}>
+              <Text style={styles.confirmTitle}>로그아웃할까요?</Text>
+              <Sentence style={styles.confirmText}>
+                로그아웃하면 이 기기에 쓰다 만 초안이 지워집니다.
+              </Sentence>
+            </View>
             <View style={styles.confirmActions}>
               <Pressable
                 accessibilityRole="button"
                 onPress={() => setConfirming(false)}
-                style={({pressed}) => [styles.confirmButton, pressed && styles.pressed]}
-                testID="sign-out-cancel">
+                style={({pressed}) => [
+                  styles.confirmButton,
+                  pressed && styles.pressed,
+                ]}
+                testID="sign-out-cancel"
+              >
                 <Text style={styles.confirmCancelLabel}>취소</Text>
               </Pressable>
               <Pressable
@@ -327,7 +394,8 @@ function ProfilePage({
                   styles.confirmDanger,
                   pressed && styles.confirmDangerPressed,
                 ]}
-                testID="sign-out-confirm">
+                testID="sign-out-confirm"
+              >
                 <Text style={styles.confirmDangerLabel}>로그아웃</Text>
               </Pressable>
             </View>
@@ -393,101 +461,134 @@ function dotTone(styles: Styles, presence: EffectivePresence) {
   }
 }
 
-const buildStyles = (color: Palette) => StyleSheet.create({
-  root: {flex: 1, backgroundColor: color.bg},
-  nav: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minHeight: TOUCH_TARGET + space.md,
-    paddingHorizontal: space.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: color.border,
-  },
-  // 양옆 칸의 폭이 같아야 제목이 가운데에 선다.
-  navSide: {flex: 1, flexDirection: 'row'},
-  navSideEnd: {justifyContent: 'flex-end'},
-  navTitle: {
-    flexShrink: 1,
-    fontSize: font.body,
-    fontWeight: '600',
-    color: color.text,
-    textAlign: 'center',
-  },
-  navButton: {
-    minHeight: TOUCH_TARGET,
-    justifyContent: 'center',
-    paddingHorizontal: space.sm,
-    borderRadius: radius.sm,
-  },
-  navButtonLabel: {fontSize: font.body, color: color.accentText, fontWeight: '600'},
-  pressed: {backgroundColor: color.surfacePressed},
-  content: {paddingTop: space.xl, gap: space.xl},
-  hero: {
-    alignItems: 'center',
-    gap: space.md,
-    paddingHorizontal: SAFE_GUTTER,
-  },
-  heroText: {alignItems: 'center', gap: space.xs},
-  name: {
-    fontSize: font.title,
-    fontWeight: '700',
-    color: color.text,
-    textAlign: 'center',
-  },
-  handle: {fontSize: font.label, color: color.textMuted},
-  pill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
-    paddingHorizontal: space.md,
-    paddingVertical: space.xs,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-  },
-  pillOk: {backgroundColor: color.okSurface, borderColor: color.okBorder},
-  pillWarn: {backgroundColor: color.warnSurface, borderColor: color.warnBorder},
-  pillDanger: {backgroundColor: color.dangerSurface, borderColor: color.dangerBorder},
-  pillMuted: {backgroundColor: color.surface, borderColor: color.border},
-  pillDot: {width: space.sm, height: space.sm, borderRadius: radius.pill},
-  dotOk: {backgroundColor: color.ok},
-  dotWarn: {backgroundColor: color.warn},
-  dotDanger: {backgroundColor: color.danger},
-  dotMuted: {backgroundColor: color.textFaint},
-  pillLabel: {fontSize: font.label, fontWeight: '600'},
-  pillLabelOk: {color: color.ok},
-  pillLabelWarn: {color: color.warn},
-  pillLabelDanger: {color: color.dangerText},
-  pillLabelMuted: {color: color.textMuted},
-  customStatus: {fontSize: font.label, color: color.textMuted, textAlign: 'center'},
-  themePage: {paddingHorizontal: SAFE_GUTTER, gap: space.sm},
-  caption: {
-    fontSize: font.label,
-    color: color.textMuted,
-    lineHeight: 18,
-    paddingHorizontal: space.xs,
-  },
-  confirm: {padding: space.lg, gap: space.md},
-  confirmText: {fontSize: font.label, color: color.text, lineHeight: 18},
-  confirmActions: {flexDirection: 'row', gap: space.sm},
-  confirmButton: {
-    flex: 1,
-    minHeight: TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    // 채움도 강조도 없는 버튼이라 테두리가 「여기가 버튼이다」의 전부다 — 3:1 을
-    // 넘는 `textFaint`(웹 `--line-strong` 자리)를 쓴다 (#1155 · 리뷰 M-1 의 규칙).
-    borderColor: color.textFaint,
-  },
-  confirmCancelLabel: {fontSize: font.body, color: color.text},
-  // 파괴 확인은 채움으로 선다 — 이 시트에서 되돌릴 수 없는 유일한 행동이다.
-  confirmDanger: {backgroundColor: color.dangerFill, borderColor: color.dangerFill},
-  confirmDangerPressed: {opacity: 0.85},
-  confirmDangerLabel: {fontSize: font.body, color: color.onDangerFill, fontWeight: '600'},
-  version: {
-    fontSize: font.meta,
-    color: color.textFaint,
-    textAlign: 'center',
-  },
-});
+const buildStyles = (color: Palette) =>
+  StyleSheet.create({
+    root: {flex: 1, backgroundColor: color.bg},
+    nav: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      minHeight: TOUCH_TARGET + space.md,
+      paddingHorizontal: space.sm,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: color.border,
+    },
+    // 양옆 칸의 폭이 같아야 제목이 가운데에 선다.
+    navSide: {flex: 1, flexDirection: 'row'},
+    navSideEnd: {justifyContent: 'flex-end'},
+    navTitle: {
+      flexShrink: 1,
+      fontSize: font.body,
+      fontWeight: '600',
+      color: color.text,
+      textAlign: 'center',
+    },
+    navButton: {
+      minHeight: TOUCH_TARGET,
+      justifyContent: 'center',
+      paddingHorizontal: space.sm,
+      borderRadius: radius.sm,
+    },
+    navButtonLabel: {
+      fontSize: font.body,
+      color: color.accentText,
+      fontWeight: '600',
+    },
+    pressed: {backgroundColor: color.surfacePressed},
+    content: {paddingTop: space.xl, gap: space.xl},
+    hero: {
+      alignItems: 'center',
+      gap: space.md,
+      paddingHorizontal: SAFE_GUTTER,
+    },
+    // 사진 없는 이니셜 얼굴은 `surface` 채움이라 바탕 위에서 1.07:1 이다(리뷰 M1).
+    // 3:1 을 넘는 한 줄(`textFaint`, 웹 `--line-strong`)로 가장자리를 준다.
+    heroRing: {
+      borderRadius: radius.pill,
+      borderWidth: 1,
+      borderColor: color.textFaint,
+    },
+    heroText: {alignItems: 'center', gap: space.xs},
+    name: {
+      fontSize: font.title,
+      fontWeight: '700',
+      color: color.text,
+      textAlign: 'center',
+    },
+    handle: {fontSize: font.label, color: color.textMuted},
+    pill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: space.sm,
+      paddingHorizontal: space.md,
+      paddingVertical: space.xs,
+      borderRadius: radius.pill,
+    },
+    // 테두리가 없다 (리뷰 M2) — 작은 테두리 알약은 이 팔레트에서 **컨트롤** 문법이고
+    // (디자인 시스템 §2.2), 이 알약은 누를 수 없다. 채움만으로 상태를 말한다.
+    pillOk: {backgroundColor: color.okSurface},
+    pillWarn: {backgroundColor: color.warnSurface},
+    pillDanger: {backgroundColor: color.dangerSurface},
+    pillMuted: {backgroundColor: color.surface},
+    pillDot: {width: space.sm, height: space.sm, borderRadius: radius.pill},
+    dotOk: {backgroundColor: color.ok},
+    dotWarn: {backgroundColor: color.warn},
+    dotDanger: {backgroundColor: color.danger},
+    dotMuted: {backgroundColor: color.textFaint},
+    pillLabel: {fontSize: font.label, fontWeight: '600'},
+    pillLabelOk: {color: color.ok},
+    pillLabelWarn: {color: color.warn},
+    pillLabelDanger: {color: color.dangerText},
+    pillLabelMuted: {color: color.textMuted},
+    customStatus: {
+      fontSize: font.label,
+      color: color.textMuted,
+      textAlign: 'center',
+    },
+    themePage: {paddingHorizontal: SAFE_GUTTER, gap: space.sm},
+    caption: {
+      fontSize: font.label,
+      color: color.textMuted,
+      lineHeight: 18,
+      paddingHorizontal: space.xs,
+    },
+    confirm: {padding: space.lg, gap: space.md},
+    confirmCopy: {gap: space.xs},
+    confirmTitle: {fontSize: font.body, color: color.text, fontWeight: '600'},
+    confirmText: {
+      fontSize: font.label,
+      color: color.textMuted,
+      lineHeight: 18,
+    },
+    confirmActions: {flexDirection: 'row', gap: space.sm},
+    confirmButton: {
+      flex: 1,
+      minHeight: TOUCH_TARGET,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: space.sm,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      // 채움도 강조도 없는 버튼이라 테두리가 「여기가 버튼이다」의 전부다 — 3:1 을
+      // 넘는 `textFaint`(웹 `--line-strong` 자리)를 쓴다 (#1155 · 리뷰 M-1 의 규칙).
+      borderColor: color.textFaint,
+    },
+    confirmCancelLabel: {fontSize: font.body, color: color.text},
+    // 파괴 확인은 채움으로 선다 — 이 시트에서 되돌릴 수 없는 유일한 행동이다.
+    confirmDanger: {
+      backgroundColor: color.dangerFill,
+      borderColor: color.dangerFill,
+    },
+    confirmDangerPressed: {opacity: 0.85},
+    confirmDangerLabel: {
+      fontSize: font.body,
+      color: color.onDangerFill,
+      fontWeight: '600',
+    },
+    // `textMuted` — `textFaint` 는 선 토큰이라 글자로는 AA 아래다 (리뷰 M3). 버그
+    // 신고에 옮겨 적히는 줄이다.
+    version: {
+      fontSize: font.meta,
+      color: color.textMuted,
+      textAlign: 'center',
+    },
+  });

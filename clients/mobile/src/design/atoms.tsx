@@ -42,6 +42,16 @@ import {usePalette, useStyles} from './theme';
 // 거짓말"). The RN shell inherits the fix rather than re-earning it.
 // =============================================================================
 
+/**
+ * 머리 줄(바)에 서는 **컨트롤** 글자의 Dynamic Type 배율 상한 (#2702).
+ *
+ * 머리 줄은 한 줄이고 폭이 고정이다. AX5 에서 「메시지 검색」과 아바타가 제
+ * 크기대로 자라면 제목 「대화」가 「대·」로 잘렸고, 시트의 「닫기」가 「닫·」가
+ * 됐다(Release 캡처). iOS 의 바 단추도 같은 이유로 무한히 자라지 않는다. 본문과
+ * 목록은 이 상한 밖이다 — 읽는 글자는 끝까지 자란다.
+ */
+export const BAR_CONTROL_MAX_SCALE = 1.6;
+
 /** Every tappable thing in this app is at least this tall. */
 const hitStyle = {minHeight: TOUCH_TARGET, justifyContent: 'center'} as const;
 
