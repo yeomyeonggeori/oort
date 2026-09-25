@@ -200,7 +200,8 @@ describe('프로필 시트', () => {
   it('닫기로 닫힌다', async () => {
     await openSheet();
     fireEvent.press(screen.getByTestId('profile-close'));
-    expect(screen.queryByTestId('profile-sheet')).toBeNull();
+    // 셸의 페이지 시트(#2714)는 닫기에서도 미끄러져 나간 뒤 사라진다.
+    await waitFor(() => expect(screen.queryByTestId('profile-sheet')).toBeNull());
   });
 
   it('시트를 끌어내려 닫으면(onRequestClose/onDismiss) 아바타가 다시 연다', async () => {

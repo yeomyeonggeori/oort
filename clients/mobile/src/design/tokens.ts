@@ -26,7 +26,7 @@ import {
   normalizeHex,
   toOklch,
 } from '@momo/core/design/color';
-import {GLASS_FALLBACK_OPACITY} from '@momo/core/design/themes';
+import {ELEVATION, GLASS_FALLBACK_OPACITY} from '@momo/core/design/themes';
 import {DEFAULT_THEME_ID, ds2Roles, type Mode, type ThemeId} from './ds2Tokens';
 
 /** iOS HIG minimum tappable edge, in points. Not negotiable per-screen. */
@@ -294,6 +294,16 @@ export interface Palette {
   glassFallback: string;
   /** 유리의 가장자리 한 줄(시안 `--glassLine`). 테마 밖의 셸 상수다. */
   glassLine: string;
+  /**
+   * 고도 두 단(ADR-0179 D6) — RN `boxShadow` 문자열. 색이 아니라 그림자 레시피다.
+   *
+   * 라이트는 core `ELEVATION`의 두 레시피 그대로다. 다크는 시안 A `.A.dark`의
+   * `--sh1`·`--sh2`다: core 는 「다크에서 윗면 하이라이트를 더한다」까지만 적고,
+   * 따뜻한 갈색 그림자(`rgba(30,24,20,…)`)는 어두운 바닥 위에서 보이지 않으므로
+   * 시안은 다크 그림자를 검정으로 짙게 다시 적었다. 시안을 따른다.
+   */
+  elevationRest: string;
+  elevationFloat: string;
 }
 
 
@@ -328,6 +338,12 @@ export const DS2_ROLE_MAP = {
   ok: 'ok',
   okSurface: 'ok-soft',
 } as const satisfies Partial<Record<keyof Palette, string>>;
+
+/** 시안 A `.A.dark`의 `--sh1`·`--sh2` (Palette 주석). */
+const DARK_ELEVATION = {
+  rest: 'inset 0 1px 0 rgba(255,255,255,.04), 0 10px 28px -12px rgba(0,0,0,.6)',
+  float: 'inset 0 1px 0 rgba(255,255,255,.06), 0 18px 44px -12px rgba(0,0,0,.75)',
+} as const;
 
 /** 유리 한 줄(시안 `--glassLine`). 테마 표 밖이라 여기서 모드별로 든다. */
 const GLASS_LINE: Readonly<Record<Mode, string>> = {
@@ -392,6 +408,8 @@ export function paletteFrom(theme: ThemeId, mode: Mode): Palette {
         .toString(16)
         .padStart(2, '0'),
     glassLine: rgbaToHex8(GLASS_LINE[mode]),
+    elevationRest: mode === 'light' ? ELEVATION.rest : DARK_ELEVATION.rest,
+    elevationFloat: mode === 'light' ? ELEVATION.float : DARK_ELEVATION.float,
     shadow: '#000000',
   };
 }
@@ -438,6 +456,44 @@ export const radius = {
   sm: 6,
   md: 8,
   pill: 999,
+} as const;
+
+/**
+ * 디자인 시스템 2.0 폰 반경 사다리 (ADR-0189 D6, themes-2.0 §5).
+ *
+ * `radius`(여명 3단)와 따로 둔다: 그 표는 웹 `--radius-*`와 이름을 대조하는
+ * 시험(`designSystem.test.ts`)이 아직 읽고, ADR-0189 D6은 폰·웹 반경의 값 대조를
+ * 폐기했다 — 이름만 공유하고 값은 플랫폼마다다. DS2 화면(셸부터)은 이 사다리를 쓴다.
+ */
+export const ds2Radius = {
+  /** 배지·태그. */
+  badge: 10,
+  /** 행 선택·입력. */
+  row: 14,
+  /** 카드·묶음. */
+  card: 20,
+  /** 컴포저. */
+  composer: 26,
+  /** 페이지 시트 위 모서리. */
+  sheet: 30,
+  pill: 999,
+} as const;
+
+/**
+ * 디자인 시스템 2.0 폰 타입 (ADR-0189 D6, themes-2.0 §5 「타입」).
+ *
+ * `badge`만 표 밖이다: 시안 A `.a-tab .dot{font-size:10.5px}` — 탭바 점 안의 수.
+ * 글자라기보다 도형에 가까운 자리라 아바타 이니셜(`MessageRow` 10·11)과 같은 부류다.
+ */
+export const ds2Type = {
+  largeTitle: 30,
+  title: 24,
+  headline: 17,
+  body: 16,
+  callout: 15,
+  subhead: 13.5,
+  caption: 12,
+  badge: 10.5,
 } as const;
 
 /**

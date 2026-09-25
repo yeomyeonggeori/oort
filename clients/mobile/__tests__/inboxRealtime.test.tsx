@@ -264,7 +264,7 @@ async function readingAChannel() {
   // 「낡은 답을 들고 있었다」가 아니라 「아직 아무것도 못 받았다」를 재게 된다.
   fireEvent.press(screen.getByTestId('tab-inbox'));
   await waitFor(() => expect(screen.getByTestId('inbox-empty')).toBeTruthy());
-  fireEvent.press(screen.getByTestId('tab-channels'));
+  fireEvent.press(screen.getByTestId('tab-home'));
   await waitFor(() => expect(agentSub()).toBeTruthy());
 }
 

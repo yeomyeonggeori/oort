@@ -472,6 +472,11 @@ describe('간격 스윕 — 격자 밖 여백이 늘지 않는다', () => {
    */
   const REMAINING: Readonly<Record<string, number>> = {
     'design/atoms.tsx': 3,
+    // 시안 A 값 그대로 (DS2-2 #2714): 시트 손잡이 위 여백 10(`.a-grab` 위
+    // `.a-sheet{padding:10px 16px 0}`), 「받는 사람」 머리글 왼쪽 6(`.a-glabel
+    // {margin:20px 0 8px 6px}`). 시안을 그대로 옮기라는 결정이 격자보다 앞선다.
+    'design/PageSheet.tsx': 1,
+    'shell/NewMessageSheet.tsx': 1,
     'features/ade/AdeControlPanel.tsx': 1,
     'features/agents/turnSurfaces.tsx': 2,
     'features/conversation/MessageActionSheet.tsx': 1,

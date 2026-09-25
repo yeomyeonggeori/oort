@@ -58,9 +58,15 @@ const hitStyle = {minHeight: TOUCH_TARGET, justifyContent: 'center'} as const;
 export function Screen({
   children,
   style,
+  onCanvas = false,
 }: {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
+  /**
+   * 셸의 그라데이션 바닥 위에 **투명하게** 선다 (ADR-0189 D1, DS2-2 #2714).
+   * 탭 화면 셋(홈·인박스·검색)이 켠다. 층(대화·에이전트 등)은 끄고 밑을 덮는다.
+   */
+  onCanvas?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
@@ -68,7 +74,15 @@ export function Screen({
   // bar, a scroll view's content inset), and applying it here as well would
   // stack two gaps on a phone with a home indicator.
   return (
-    <View style={[styles.screen, {paddingTop: insets.top}, style]}>{children}</View>
+    <View
+      style={[
+        styles.screen,
+        onCanvas && styles.screenOnCanvas,
+        {paddingTop: insets.top},
+        style,
+      ]}>
+      {children}
+    </View>
   );
 }
 
@@ -625,6 +639,7 @@ export function GroupRow({
 
 const buildStyles = (color: Palette) => StyleSheet.create({
   screen: {flex: 1, backgroundColor: color.bg},
+  screenOnCanvas: {backgroundColor: 'transparent'},
   header: {
     flexDirection: 'row',
     alignItems: 'center',

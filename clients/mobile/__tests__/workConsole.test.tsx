@@ -336,7 +336,9 @@ afterEach(() => {
 async function openWorkTab(): Promise<void> {
   renderShell();
   await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
-  fireEvent.press(screen.getByTestId('tab-work'));
+  // 탭이던 것이 FAB 시트의 문이 되었다 (ADR-0189 D1, #2714).
+  fireEvent.press(screen.getByTestId('shell-fab'));
+  fireEvent.press(screen.getByTestId('new-message-work'));
   await waitFor(() => expect(screen.getByTestId('work-list')).toBeTruthy());
 }
 
@@ -345,12 +347,16 @@ describe('workspace-wide 작업 tab', () => {
     const fetchMock = installFetch();
     renderShell();
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
-    expect(screen.getByTestId('tab-work')).toBeTruthy();
+    expect(screen.getByTestId('shell-fab')).toBeTruthy();
     expect(
       fetchMock.mock.calls.some(([url]) => String(url).includes('/work-sessions')),
     ).toBe(false);
 
-    fireEvent.press(screen.getByTestId('tab-work'));
+    // 탭이던 것이 FAB 시트의 문이 되었다 (ADR-0189 D1, #2714).
+
+    fireEvent.press(screen.getByTestId('shell-fab'));
+
+    fireEvent.press(screen.getByTestId('new-message-work'));
     expect(screen.getByTestId('work-loading')).toBeTruthy();
     await waitFor(() => expect(screen.getByTestId('work-list')).toBeTruthy());
     expect(screen.getByTestId('work-title')).toHaveTextContent('작업 콘솔');
@@ -409,7 +415,8 @@ describe('workspace-wide 작업 tab', () => {
       fetchMock.mock.calls.filter(([url]) => String(url).includes('/work-sessions'))
         .length;
     const before = reads();
-    fireEvent.press(screen.getByTestId('tab-channels'));
+    // 층을 닫는다 — 탭바는 층 뒤에 있어 누를 수 없다(ADR-0189 D1, #2714).
+    fireEvent.press(screen.getByLabelText('작업 콘솔 닫기'));
     jest.useFakeTimers();
     act(() => jest.advanceTimersByTime(120_000));
     expect(reads()).toBe(before);
@@ -419,7 +426,9 @@ describe('workspace-wide 작업 tab', () => {
     installFetch({workSessions: () => jsonResponse(200, {workSessions: []})});
     renderShell();
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('tab-work'));
+    // 탭이던 것이 FAB 시트의 문이 되었다 (ADR-0189 D1, #2714).
+    fireEvent.press(screen.getByTestId('shell-fab'));
+    fireEvent.press(screen.getByTestId('new-message-work'));
     await waitFor(() => expect(screen.getByTestId('work-empty')).toBeTruthy());
   });
 
@@ -435,7 +444,9 @@ describe('workspace-wide 작업 tab', () => {
     });
     renderShell();
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('tab-work'));
+    // 탭이던 것이 FAB 시트의 문이 되었다 (ADR-0189 D1, #2714).
+    fireEvent.press(screen.getByTestId('shell-fab'));
+    fireEvent.press(screen.getByTestId('new-message-work'));
     await waitFor(() => expect(screen.getByTestId('work-error')).toBeTruthy());
     expect(screen.queryByText(/DO_NOT_RENDER_SERVER_BODY/)).toBeNull();
     fireEvent.press(screen.getByTestId('work-error-retry'));
@@ -586,12 +597,10 @@ describe('read-only phone-native work detail', () => {
     expect([darkPalette.textFaint, lightPalette.textFaint]).toContain(
       filterStyle.borderColor,
     );
-    const agentTabLabel = screen.getByTestId('tab-label-agents');
-    const agentTabStyle = StyleSheet.flatten(agentTabLabel.props.style);
-    expect(agentTabLabel.props.numberOfLines).toBeUndefined();
-    expect(agentTabLabel.props.allowFontScaling).not.toBe(false);
-    expect(agentTabStyle.flexShrink).toBe(1);
-    expect(agentTabStyle.textAlign).toBe('center');
+    // 탭바 글자가 큰 글씨에서 자라는지를 여기서 쟀었다. DS2-2(#2714)의 탭바는 시안
+    // A 대로 아이콘만 들고(이름은 VoiceOver 라벨), 그 기하·라벨은
+    // `shellChrome.test.tsx` 가 잰다. 이 층의 나가는 길은 머리의 뒤로가기다.
+    expect(screen.getByLabelText('작업 콘솔 닫기')).toBeTruthy();
     expect(screen.getByTestId('work-title')).toHaveProp(
       'accessibilityRole',
       'header',
