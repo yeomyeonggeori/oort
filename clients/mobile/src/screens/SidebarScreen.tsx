@@ -26,9 +26,10 @@ import {
   TapRow,
 } from '../design/atoms';
 import {useRefreshControl} from '../design/refresh';
+import {AVATAR_SIZE} from '@momo/core/features/workspace/avatar';
+import {type Directory} from '@momo/core/features/workspace/directory';
 import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
 import {usePalette, useStyles} from '../design/theme';
-import {ThemeControl} from '../design/ThemeControl';
 import {
   buildSidebarSections,
   CHANNEL_LIST_FAILED,
@@ -36,6 +37,9 @@ import {
   type SidebarRow,
 } from '../features/sidebar/rows';
 import {useChannels, useDirectory, useReadStates} from '../features/workspace/queries';
+import {Avatar} from '../features/conversation/Avatar';
+import {ProfileSheet} from '../features/profile/ProfileSheet';
+import {useRealtime} from '../realtime/RealtimeProvider';
 import {useSession} from '../session/useSession';
 
 // =============================================================================
@@ -143,6 +147,40 @@ export function SearchFallthrough({
   );
 }
 
+/**
+ * 머리 오른쪽의 내 얼굴 — 내 프로필 시트를 여는 문 (#2702).
+ *
+ * Buzz·Slack 모바일이 같은 자리에 둔다: 계정은 매일 보는 목록의 발치가 아니라
+ * 머리 한구석에 작게 있고, 누르면 그 안에서 테마·알림·로그아웃이 열린다.
+ *
+ * 얼굴 자체(`Avatar`)는 보조기술에서 숨는다 — 그래서 이 버튼이 라벨을 **직접**
+ * 진다. 라벨이 없으면 VoiceOver 는 이름 없는 버튼 하나를 읽는다.
+ */
+export function ProfileAvatarButton({
+  directory,
+  memberId,
+  name,
+  onPress,
+}: {
+  directory: Directory;
+  memberId: string;
+  name: string;
+  onPress: () => void;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`내 프로필, ${name}`}
+      accessibilityHint="테마·알림·로그아웃을 엽니다."
+      onPress={onPress}
+      style={({pressed}) => [styles.avatarButton, pressed && styles.avatarPressed]}
+      testID="profile-avatar">
+      <Avatar directory={directory} memberId={memberId} />
+    </Pressable>
+  );
+}
+
 export default function SidebarScreen({
   openChannelId,
   onOpenConversation,
@@ -175,6 +213,8 @@ export default function SidebarScreen({
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const {member, workspaceId, signOut} = useSession();
+  const realtime = useRealtime();
+  const [profileOpen, setProfileOpen] = useState(false);
   const channelsQuery = useChannels(workspaceId);
   const directoryQuery = useDirectory(workspaceId);
   const readStates = useReadStates(workspaceId);
@@ -273,7 +313,17 @@ export default function SidebarScreen({
     <Screen>
       <ScreenHeader
         title="대화"
-        right={<SearchEntryAction onPress={() => onOpenSearch()} />}
+        right={
+          <View style={styles.headerActions}>
+            <SearchEntryAction onPress={() => onOpenSearch()} />
+            <ProfileAvatarButton
+              directory={directoryQuery.directory}
+              memberId={member.id}
+              name={member.displayName}
+              onPress={() => setProfileOpen(true)}
+            />
+          </View>
+        }
       />
 
       <View style={styles.searchWrap}>
@@ -394,11 +444,15 @@ export default function SidebarScreen({
         />
       )}
 
-      <AccountFooter
-        name={member.displayName}
-        handle={member.handle}
-        onSignOut={signOut}
-      />
+      {profileOpen ? (
+        <ProfileSheet
+          member={member}
+          directory={directoryQuery.directory}
+          connected={realtime.status === 'connected'}
+          onSignOut={signOut}
+          onClose={() => setProfileOpen(false)}
+        />
+      ) : null}
     </Screen>
   );
 }
@@ -471,88 +525,6 @@ function Row({
 }
 
 /**
- * The account line, and the only place a person can leave.
- *
- * A settings screen is outside v0 (ADR-0137 D5 puts 설정 on the desktop), so this
- * is deliberately one row and not the first plank of one. The confirmation is
- * inline rather than a native alert because signing out is the only irreversible
- * thing in this batch, and because an inline step is assertable in a test.
- *
- * ## 그리고 「테마」 (U2)
- *
- * 설정 화면이 없다는 사실은 그대로다. 그래서 스킴을 고르는 세 칸도 새 화면이
- * 아니라 **이 발치**로 온다 — 계정 줄이 이미 여기 서 있으므로 이 자리는 이 앱에서
- * 「나에 관한 것」이 사는 곳이고, 그것이 두 번째 널판이 되는 것과 설정 화면을
- * 세우는 것은 다른 크기의 일이다. 두 줄이 되는 대신 한 줄이 붐비지 않는다:
- * 계정+로그아웃이 첫 줄, 테마 세 칸이 둘째 줄이다.
- */
-function AccountFooter({
-  name,
-  handle,
-  onSignOut,
-}: {
-  name: string;
-  handle: string;
-  onSignOut: () => void;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  const [confirming, setConfirming] = useState(false);
-  return (
-    <View style={styles.footerStack}>
-      <View style={styles.footer}>
-        <View style={styles.rowText}>
-          <Text style={styles.footerName} numberOfLines={1}>
-              {name}
-            </Text>
-            <Text style={styles.rowMeta} numberOfLines={1}>
-              @{handle}
-            </Text>
-          </View>
-          {confirming ? (
-            <View style={styles.confirmRow}>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => setConfirming(false)}
-                style={({pressed}) => [
-                  styles.footerButton,
-                  pressed && styles.pressed,
-                ]}
-                testID="sign-out-cancel">
-                <Text style={styles.footerButtonLabel}>취소</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                onPress={onSignOut}
-                style={({pressed}) => [
-                  styles.footerButton,
-                  styles.footerButtonDanger,
-                  pressed && styles.pressed,
-                ]}
-                testID="sign-out-confirm">
-                <Text style={styles.footerButtonDangerLabel}>로그아웃</Text>
-              </Pressable>
-            </View>
-          ) : (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setConfirming(true)}
-              style={({pressed}) => [
-                styles.footerButton,
-                pressed && styles.pressed,
-              ]}
-              testID="sign-out">
-              <Text style={styles.footerButtonLabel}>로그아웃</Text>
-            </Pressable>
-          )}
-        </View>
-        {/* 두 번째 널판 — 스킴 세 칸 (U2). 계정 줄 **아래**인 것은 이것이 계정에
-            관한 것이 아니라 이 기기의 보기 설정이기 때문이다. */}
-        <ThemeControl />
-      </View>
-    );
-  }
-
-/**
  * Why a DM could not be opened.
  *
  * The core carries per-surface failure copy for the surfaces it owns
@@ -618,55 +590,25 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   rowTitleUnread: {fontWeight: '700'},
   rowHandle: {fontSize: font.meta, color: color.textFaint, flexShrink: 1},
   rowMeta: {fontSize: font.meta, color: color.textFaint},
-  // 발치의 두 줄을 한 판으로 묶는다 (U2). 테두리와 배경이 **묶음**에 있는 이유는
-  // 그것이 목록과 발치를 가르는 선이기 때문이다 — 계정 줄에 그대로 두면 테마 줄이
-  // 그 선 아래에 따로 떠서 발치가 두 조각으로 읽힌다.
-  footerStack: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: color.border,
-    backgroundColor: color.bg,
-  },
-  footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    paddingHorizontal: SAFE_GUTTER,
-    paddingVertical: space.sm,
-  },
-  footerName: {fontSize: font.label, color: color.text, fontWeight: '600'},
-  confirmRow: {flexDirection: 'row', gap: space.sm},
-  footerButton: {
-    minHeight: TOUCH_TARGET,
-    justifyContent: 'center',
-    paddingHorizontal: space.md,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    // `border` 가 아니다 (#1155 동반 관찰). 바로 아래 이웃인 `ThemeControl` 의 안 고른
-    // 칸이 리뷰 M-1 에서 같은 이유로 이 토큰을 떠났고, 이 버튼만 남아 한 판
-    // (`footerStack`) 안에서 선명한 테두리 위에 흐린 테두리가 얹혔다.
-    //
-    // 근거는 이웃 맞추기가 아니라 이웃과 **같은 사실**이다: 채움도 글자 강조도 없는
-    // 버튼이라 테두리 하나가 「여기가 버튼이다」를 말하는 전부인데, `border` 는 바탕
-    // (`bg`) 위에서 다크 1.428:1 · 라이트 1.315:1 로 컨트롤 테두리의 3:1 아래이고
-    // 토큰 자신이 「선이지 컨트롤이 아니다」라고 적는다. `textFaint` 는 웹
-    // `--line-strong` 과 **같은 값**이고 두 스킴 모두 3:1 을 넘는다(3.562:1 · 3.587:1).
-    //
-    // 확인은 `shell.test.tsx` 가 그려진 트리에서 두 테두리를 나란히 읽어 한다.
-    borderColor: color.textFaint,
-  },
-  // 확인 상태의 파괴 버튼은 이 규칙 밖이다 — 테두리 말고 **글자**(`danger`, 굵게)가
-  // 이미 「여기가 버튼이다」를 말하므로 테두리가 유일한 신호가 아니다.
-  footerButtonDanger: {borderColor: color.dangerBorder},
-  footerButtonLabel: {fontSize: font.label, color: color.textMuted},
-  footerButtonDangerLabel: {fontSize: font.label, color: color.danger, fontWeight: '600'},
   pressed: {backgroundColor: color.surfacePressed},
+  headerActions: {flexDirection: 'row', alignItems: 'center', gap: space.xs},
   headerAction: {
     minHeight: TOUCH_TARGET,
     justifyContent: 'center',
     paddingHorizontal: space.sm,
-    marginRight: -space.sm,
     borderRadius: radius.sm,
   },
+  // 44 상자 안의 32 얼굴. 오른쪽으로 남는 6 을 거둬 얼굴의 가장자리가 목록의
+  // 거터(`SAFE_GUTTER`)에 맞선다 — 검색 글자가 전에 `-space.sm` 로 하던 일이다.
+  avatarButton: {
+    width: TOUCH_TARGET,
+    height: TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: -(TOUCH_TARGET - AVATAR_SIZE) / 2,
+    borderRadius: radius.pill,
+  },
+  avatarPressed: {opacity: 0.6},
   headerActionLabel: {fontSize: font.label, color: color.accentText, fontWeight: '600'},
   fallthrough: {
     minHeight: TOUCH_TARGET,

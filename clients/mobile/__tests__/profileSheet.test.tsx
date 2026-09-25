@@ -11,12 +11,13 @@ import {
 } from '@testing-library/react-native';
 import {getPermissionsAsync} from 'expo-notifications';
 import React from 'react';
-import {Linking} from 'react-native';
+import {Linking, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {ThemeProvider} from '../src/design/theme';
+import {darkPalette, lightPalette} from '../src/design/tokens';
 import {appVersionLabel} from '../src/features/profile/appVersion';
 import AppShell from '../src/shell/AppShell';
 import {NON_SECRET_KEYS} from '../src/storage/kv';
@@ -233,6 +234,25 @@ describe('프로필 시트', () => {
     fireEvent.press(screen.getByTestId('sign-out'));
     fireEvent.press(screen.getByTestId('sign-out-confirm'));
     expect(getPersistedSession()).toBeNull();
+  });
+
+  it('확인의 「취소」는 3:1 위 컨트롤 테두리를, 「로그아웃」은 파괴 채움을 입는다', async () => {
+    // U2·#1155 에서 발치의 로그아웃 버튼이 지던 규칙을 시트로 옮긴다: 채움도 강조도
+    // 없는 버튼은 테두리 하나가 「여기가 버튼이다」의 전부이므로 hairline `border`
+    // (바탕 위 3:1 아래) 가 아니라 `textFaint`(웹 `--line-strong`)를 쓴다.
+    await openSheet();
+    fireEvent.press(screen.getByTestId('sign-out'));
+    const style = (id: string) =>
+      StyleSheet.flatten(screen.getByTestId(id).props.style) ?? {};
+    expect([darkPalette.textFaint, lightPalette.textFaint]).toContain(
+      style('sign-out-cancel').borderColor,
+    );
+    expect([darkPalette.border, lightPalette.border]).not.toContain(
+      style('sign-out-cancel').borderColor,
+    );
+    expect([darkPalette.dangerFill, lightPalette.dangerFill]).toContain(
+      style('sign-out-confirm').backgroundColor,
+    );
   });
 
   it('알림이 허용돼 있으면 그렇게 말하고 설정 문은 없다', async () => {
