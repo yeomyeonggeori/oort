@@ -23,11 +23,15 @@ function sourceFiles(dir: string): string[] {
 describe("onboarding S0 and brand lockup stay outside custom accent", () => {
   it("paints S0 with onboarding tokens, not --accent", () => {
     expect(landing).toContain("bg-onboarding-space");
-    expect(landing).toContain("text-onboarding-accent");
     expect(landing).toContain("bg-onboarding-accent");
     expect(landing).toContain("text-onboarding-on-accent");
     expect(landing).not.toMatch(/\bbg-accent\b/);
     expect(landing).not.toMatch(/\btext-accent\b/);
+  });
+
+  it("shows the owner-chosen 코메토 reference as the S0 hero, not a recolourable mark (#2732)", () => {
+    expect(landing).toMatch(/<KomettoMark\b/);
+    expect(landing).not.toMatch(/<OortMark\b/);
   });
 
   it("pins S0 and brand lockup to the Dawn accent pair", () => {

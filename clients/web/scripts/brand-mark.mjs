@@ -266,46 +266,9 @@ function monoSvg(geo, grid, color, what) {
 `;
 }
 
-/**
- * 앱 아이콘판. 1024 정사각 캔버스에 마크를 놓는다.
- * frame=full   : iOS·PWA. 바탕이 캔버스 끝까지(런처가 자기 모양으로 자른다).
- * frame=macos  : macOS 아이콘 그리드. 824 둥근 사각형(모서리 185.4)이 100 여백을
- *                두고 앉는다. 모서리 바깥은 투명.
- * 마크 크기: 바탕 한 변에 대한 마크 경계 상자의 비. iOS 템플릿의 중심 원(지름
- * 약 0.6)에 링과 위성이 함께 들어가게 잡았다.
- */
-export const APP_ICON = {
-  canvas: 1024,
-  macos: { inset: 100, side: 824, radius: 185.4 },
-  markFill: 0.6,
-};
-
-function appIconSvg(geo, p, frame) {
-  const { canvas, macos, markFill } = APP_ICON;
-  const plate = frame === "macos" ? macos.side : canvas;
-  const origin = frame === "macos" ? macos.inset : 0;
-  const bb = geo.dims.bbox;
-  const w = bb.right - bb.left;
-  const h = bb.bottom - bb.top;
-  const scale = (plate * markFill) / Math.max(w, h);
-  // 경계 상자의 중심을 판의 중심에 둔다.
-  const tx = origin + plate / 2 - scale * (bb.left + w / 2);
-  const ty = origin + plate / 2 - scale * (bb.top + h / 2);
-  const bg =
-    frame === "macos"
-      ? `<rect x="${macos.inset}" y="${macos.inset}" width="${macos.side}" height="${macos.side}" rx="${macos.radius}" fill="${COLORS.ink}"/>`
-      : `<rect width="${canvas}" height="${canvas}" fill="${COLORS.ink}"/>`;
-  const what = frame === "macos" ? "macOS 앱 아이콘(그리드 824/1024)" : "iOS·PWA 앱 아이콘(전면)";
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${canvas} ${canvas}" width="${canvas}" height="${canvas}">
-  ${HEADER(what)}
-  ${bg}
-  <g transform="translate(${fmt(tx)} ${fmt(ty)}) scale(${fmt(scale * 1000) / 1000})" fill-rule="evenodd">
-    <path fill="${COLORS.paper}" d="${geo.ring}"/>
-    <path fill="${COLORS.amber}" d="${geo.satellite}"/>
-  </g>
-</svg>
-`;
-}
+// 앱 아이콘(iOS·macOS·PWA)은 #2732부터 이 마크가 아니라 owner가 고른 코메토 K6
+// 플랫 레퍼런스 래스터에서 떠낸다(render-brand-icons.mjs, docs/brand/mark/README.md).
+// 이 파일은 C2-04 마크(단색판·파비콘·배경 없는 판)만 쓴다.
 
 /** 탭 파비콘: 어두운 둥근 타일 + small 기하. 24 격자를 1.25배(30)로 키워 타일에 1 여백으로 앉힌다.
  *  마크 경계 상자가 타일의 약 70%를 차지한다. 16px 탭에서 틈이 1px에 가깝게 남도록 여백을 줄였다(#2650 리뷰 M3). */
@@ -319,10 +282,10 @@ function faviconSvg(geo) {
     Lucide 기능 아이콘으로 바꾸지 않고 로컬 SVG로 남긴다.
 
     색은 토큰이 아니라 리터럴이다(CSS 캐스케이드 밖에서 탭이 직접 읽는다).
-    값은 앱 아이콘판과 같다: 바탕 ${COLORS.ink}(surface 토큰 다크), 링 ${COLORS.paper}
-    (surface 토큰 라이트), 위성 ${COLORS.amber}(accent 토큰 다크). XML 주석 안에는
-    하이픈 두 개를 쓸 수 없어 토큰 이름을 풀어 적었다. 폰 홈 화면·Dock·탭이
-    같은 마크, 같은 세 색을 보인다. 스킴을 따라가지 않는다.
+    바탕 ${COLORS.ink}(surface 토큰 다크), 링 ${COLORS.paper}(surface 토큰 라이트),
+    위성 ${COLORS.amber}(accent 토큰 다크). XML 주석 안에는 하이픈 두 개를 쓸 수
+    없어 토큰 이름을 풀어 적었다. 스킴을 따라가지 않는다. 앱 아이콘(코메토
+    레퍼런스, #2732)이 32px 미만에서 읽히지 않는 자리를 이 타일이 맡는다.
   -->
   <rect width="32" height="32" rx="7" fill="${COLORS.ink}"/>
   <g transform="translate(1 1) scale(1.25)" fill-rule="evenodd">
@@ -373,8 +336,6 @@ export function outputs() {
       [resolve(MARK_DIR, "oort-mark-white.svg")]: monoSvg(regular, g, COLORS.white, "단색 흰색"),
       [resolve(MARK_DIR, "oort-mark-amber.svg")]: monoSvg(regular, g, COLORS.amber, "단색 호박"),
       [resolve(MARK_DIR, "oort-mark-small-black.svg")]: monoSvg(small, gs, COLORS.ink, "16~32px 광학 보정판, 단색 검정"),
-      [resolve(MARK_DIR, "oort-app-icon.svg")]: appIconSvg(regular, PARAMS.regular, "full"),
-      [resolve(MARK_DIR, "oort-app-icon-macos.svg")]: appIconSvg(regular, PARAMS.regular, "macos"),
       [resolve(PUBLIC_DIR, "favicon.svg")]: faviconSvg(small),
       [resolve(PUBLIC_DIR, "oort-mark.svg")]: publicMarkSvg(small),
     },
