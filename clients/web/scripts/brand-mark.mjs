@@ -304,11 +304,22 @@ export const CHARACTER = {
   tipTop: { at: [-3, -1.6], angle: 0, reach: 11 },
   tipBottom: { at: [-2.4, 2.8], angle: 225, reach: 6 },
   hoodRight: { angle: -30, reach: 10 },
-  // 혜성 꼬리. 뿌리 두 점은 후드 원 안(반지름 hoodR−3)의 각, 끝은 후드 원 중심
-  // 기준 방울의 중심과 반지름. out/in은 바깥·안쪽 변의 제어점 거리.
-  comet: { rootTop: -35, rootBottom: 55, end: [27, 29], endR: 11, out: [22, 10], in: [8, 12] },
-  // 띠 경계(꼬리 축 위의 비). 후드색 → 호박 → 살구.
-  cometBands: [0.36, 0.68],
+  // 혜성 꼬리(R1 리뷰 H-2). 머리 뒤에서 흘러나와 오른쪽 아래로 넓어지다 뾰족하게
+  // 끝나는 한 덩어리. 뿌리 두 점은 후드 원 안(반지름 hoodR−3)의 각, tip은 후드 원
+  // 중심 기준 끝점. 바깥 변은 뿌리에서 원의 접선으로 떠나 tipIn 방향으로 끝에
+  // 닿고, 안쪽 변은 끝에서 tipOut 방향으로 떠나 뿌리로 접선을 따라 돌아온다.
+  comet: {
+    rootTop: -20,
+    rootBottom: 80,
+    tip: [40, 33],
+    rootOut: 26,
+    tipIn: { angle: 35, reach: 6 },
+    tipOut: { angle: 188, reach: 20 },
+    rootIn: 16,
+  },
+  // 띠 경계. 후드 원 중심에서 잰 거리의 비(끝까지 = 1). 동심원 띠라 경계가 머리를
+  // 감싸며 흐름을 따라간다(K6 플랫판과 같다). 후드색 → 호박 → 살구.
+  cometBands: [0.52, 0.76],
 };
 
 export const CHARACTER_COLORS = {
@@ -373,20 +384,16 @@ export function buildCharacter(k = CHARACTER, p = PARAMS.regular) {
   const rootR = k.hoodR - 3;
   const RA = polar(H, rootR, deg(cm.rootTop));
   const RB = polar(H, rootR, deg(cm.rootBottom));
-  const E = add(H, cm.end);
-  const axisDir = unit(sub(E, H));
-  const side = [-axisDir[1], axisDir[0]]; // 꼬리 축의 오른쪽(시계 방향) 법선
-  const EA = sub(E, mul(side, cm.endR)); // 방울의 바깥(위·오른쪽) 접점
-  const EB = add(E, mul(side, cm.endR)); // 방울의 안쪽(아래·왼쪽) 접점
+  const F = add(H, cm.tip);
   const comet = [
     `M${pt(RA)}`,
-    `C${pt(polar(RA, cm.out[0], deg(cm.rootTop + 90)))} ${pt(sub(EA, mul(axisDir, cm.out[1])))} ${pt(EA)}`,
-    `A${fmt(cm.endR)} ${fmt(cm.endR)} 0 0 1 ${pt(EB)}`,
-    `C${pt(sub(EB, mul(axisDir, cm.in[1])))} ${pt(polar(RB, cm.in[0], deg(cm.rootBottom - 90 + 180)))} ${pt(RB)}`,
+    `C${pt(polar(RA, cm.rootOut, deg(cm.rootTop + 90)))} ${pt(sub(F, mul([Math.cos(deg(cm.tipIn.angle)), Math.sin(deg(cm.tipIn.angle))], cm.tipIn.reach)))} ${pt(F)}`,
+    `C${pt(polar(F, cm.tipOut.reach, deg(cm.tipOut.angle)))} ${pt(polar(RB, cm.rootIn, deg(cm.rootBottom - 90)))} ${pt(RB)}`,
     "Z",
   ].join("");
-  // 띠 방향: 후드 원 중심 → 방울 끝. 그라데이션 벡터(사용자 좌표).
-  const cometAxis = { from: H, to: add(E, mul(axisDir, cm.endR)) };
+  // 띠: 후드 원 중심에서 끝점까지를 반지름으로 하는 동심원 그라데이션.
+  const cometAxis = { center: H, r: len(sub(F, H)) };
+  const axisDir = unit(sub(F, H));
   const eyeL = [p.cx - k.eyeDx, p.cy + k.eyeDy];
   const eyeRc = [p.cx + k.eyeDx, p.cy + k.eyeDy];
   const tailTip = mark.dims.bbox;
@@ -398,8 +405,8 @@ export function buildCharacter(k = CHARACTER, p = PARAMS.regular) {
   };
   const withComet = {
     ...bbox,
-    right: Math.max(bbox.right, E[0] + cm.endR),
-    bottom: Math.max(bbox.bottom, E[1] + cm.endR),
+    right: Math.max(bbox.right, F[0]),
+    bottom: Math.max(bbox.bottom, F[1]),
   };
   const upLeft = [Math.cos(rad(-150)), Math.sin(rad(-150))];
   const hoodEdgeAlong = (u) => {
@@ -407,7 +414,8 @@ export function buildCharacter(k = CHARACTER, p = PARAMS.regular) {
     const b = dot(v, u);
     return -b + Math.sqrt(b * b - (dot(v, v) - k.hoodR * k.hoodR));
   };
-  const along = (t) => add(cometAxis.from, mul(sub(cometAxis.to, cometAxis.from), t));
+  // 후드 원 중심에서 끝점 쪽으로, 반지름 비 t인 자리(띠 표본점).
+  const along = (t) => add(H, mul(axisDir, cometAxis.r * t));
   // 크기별 판독 검사가 읽는 표본점(64 격자 좌표).
   const probes = {
     face: [p.cx, p.cy - rimP.r / 2],
@@ -420,7 +428,7 @@ export function buildCharacter(k = CHARACTER, p = PARAMS.regular) {
     tail: g.tipCenter,
     tailRing: add(g.tipCenter, mul(unit(sub(g.tipCenter, C)), rimP.tipR + w / 2)),
     cometMid: along((k.cometBands[0] + k.cometBands[1]) / 2),
-    cometEnd: E,
+    cometEnd: along(k.cometBands[1] + (1 - k.cometBands[1]) * 0.35),
   };
   const mid = [(bbox.left + bbox.right) / 2, (bbox.top + bbox.bottom) / 2];
   // 머리에서 가장 먼 점: 구슬, 후드 원, 후드 테두리를 두른 말풍선 꼬리 끝.
@@ -507,12 +515,12 @@ export const APP_BACKGROUND = "navy";
 function cometGradient(ch, id = "comet") {
   const c = CHARACTER_COLORS;
   const [a, b] = CHARACTER.cometBands;
-  const { from, to } = ch.cometAxis;
-  return `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${fmt(from[0])}" y1="${fmt(from[1])}" x2="${fmt(to[0])}" y2="${fmt(to[1])}">
+  const { center, r } = ch.cometAxis;
+  return `<radialGradient id="${id}" gradientUnits="userSpaceOnUse" cx="${fmt(center[0])}" cy="${fmt(center[1])}" r="${fmt(r)}">
       <stop offset="0" stop-color="${c.hood}"/><stop offset="${a}" stop-color="${c.hood}"/>
       <stop offset="${a}" stop-color="${c.cometMid}"/><stop offset="${b}" stop-color="${c.cometMid}"/>
       <stop offset="${b}" stop-color="${c.cometEnd}"/><stop offset="1" stop-color="${c.cometEnd}"/>
-    </linearGradient>`;
+    </radialGradient>`;
 }
 
 /** 캐릭터 레이어(혜성 꼬리 → 후드 → 얼굴 → 림 → 눈 → 구슬). 색은 CHARACTER_COLORS. */
@@ -605,15 +613,15 @@ ${characterLayers(ch)}
 
 /** 배경 없는 코메토 얼굴(문서·배포 페이지·온보딩 S0 사본의 기준본). */
 /**
- * 배경 없는 판의 viewBox. 혜성 꼬리까지 담는 정사각이고, 둘레에 0.5 여백을 둔다.
- * 가로 중심은 경계 상자 중심이다. 혜성 꼬리가 오른쪽으로 흘러 머리 쪽 무게와
- * 맞선다(S0에서 워드마크 축과의 정렬은 캡처로 확인한다).
+ * 배경 없는 판의 viewBox. 혜성 꼬리까지 담는 정사각이고, **가로 중심은 링 중심**이다
+ * (#2732 리뷰 M-3, R1 리뷰 H-1). 혜성 꼬리가 오른쪽으로 흘러도 얼굴이 S0 워드마크
+ * 축 위에 선다. 둘레에 0.5 여백을 둬 구슬·꼬리 끝이 잘리지 않는다.
  */
-export function characterViewBox(ch = buildCharacter()) {
+export function characterViewBox(ch = buildCharacter(), p = PARAMS.regular) {
   const bb = ch.dims.bboxWithComet;
-  const half = Math.max(bb.right - bb.left, bb.bottom - bb.top) / 2 + 0.5;
-  const mid = [(bb.left + bb.right) / 2, (bb.top + bb.bottom) / 2];
-  return [mid[0] - half, mid[1] - half, 2 * half, 2 * half].map(fmt).join(" ");
+  const half = Math.max(p.cx - bb.left, bb.right - p.cx, (bb.bottom - bb.top) / 2) + 0.5;
+  const midY = (bb.top + bb.bottom) / 2;
+  return [p.cx - half, midY - half, 2 * half, 2 * half].map(fmt).join(" ");
 }
 
 function characterSvg() {

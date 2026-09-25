@@ -1,14 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="3.5 1 71 71" width="71" height="71">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-11 -9 84 84" width="84" height="84">
   <!-- oort 코메토 K6 플랫 얼굴 — 배경 없는 판. 림은 C2-04 마크의 링이다. 생성물: clients/web/scripts/brand-mark.mjs가 쓴다. 손으로 고치지 않는다(docs/brand/mark/README.md). -->
   <defs>
-    <linearGradient id="comet" gradientUnits="userSpaceOnUse" x1="32.5" y1="31.5" x2="67" y2="68.55">
-      <stop offset="0" stop-color="#a1cefd"/><stop offset="0.36" stop-color="#a1cefd"/>
-      <stop offset="0.36" stop-color="#f0a850"/><stop offset="0.68" stop-color="#f0a850"/>
-      <stop offset="0.68" stop-color="#f28066"/><stop offset="1" stop-color="#f28066"/>
-    </linearGradient>
+    <radialGradient id="comet" gradientUnits="userSpaceOnUse" cx="32.5" cy="31.5" r="51.86">
+      <stop offset="0" stop-color="#a1cefd"/><stop offset="0.52" stop-color="#a1cefd"/>
+      <stop offset="0.52" stop-color="#f0a850"/><stop offset="0.76" stop-color="#f0a850"/>
+      <stop offset="0.76" stop-color="#f28066"/><stop offset="1" stop-color="#f28066"/>
+    </radialGradient>
   </defs>
   <g>
-    <path fill="url(#comet)" d="M50.52 18.88C63.14 36.9 60.74 45.69 67.55 53A11 11 0 0 1 51.45 68C43.27 59.21 38.57 54.11 45.12 49.52Z"/>
+    <path fill="url(#comet)" d="M53.17 23.98C62.07 48.41 67.59 61.06 72.5 64.5C52.69 61.72 52.08 50.39 36.32 53.17Z"/>
     <path fill="#a1cefd" d="M7.88 27.16C10.48 12.39 44 4.4 55 4.4L55.6 8.8C51.36 4.56 49.15 10.34 54.15 19A25 25 0 1 1 7.88 27.16ZM31 33L21.41 52.54L14.35 54.62A4 4 0 0 1 9.38 49.65L11.46 42.59Z"/>
     <path fill="#17161a" d="M47 33A16 16 0 1 1 15 33A16 16 0 1 1 47 33Z"/>
     <path fill="#f7f6f3" fill-rule="evenodd" d="M13.54 42.76A20 20 0 1 1 21.24 50.46A1.5 1.5 0 0 0 20.08 50.33L13.64 52.22A1.5 1.5 0 0 1 11.78 50.36L13.67 43.92A1.5 1.5 0 0 0 13.54 42.76ZM47 33A16 16 0 1 0 15 33A16 16 0 1 0 47 33Z"/>
