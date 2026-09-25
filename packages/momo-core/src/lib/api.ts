@@ -708,16 +708,26 @@ function parseError(res: HttpResponse): ApiError {
  */
 export type RefreshOutcome = "rotated" | "rejected" | "unreachable";
 
-let refreshInFlight: Promise<RefreshOutcome> | null = null;
+/**
+ * One rotation, as the single flight carries it. `pair` is what the server
+ * minted, kept even when the store dropped it — a `logout()` that wiped the
+ * session while the request was in the air has to revoke THIS pair, because
+ * the one it captured was spent by the rotation (#2677 review M1).
+ */
+interface Rotation {
+  outcome: RefreshOutcome;
+  pair: RefreshResponse | null;
+}
 
-/** The detailed rotation. Use this wherever the *reason* changes what you do. */
-export function refreshSessionOutcome(): Promise<RefreshOutcome> {
-  refreshInFlight ??= (async () => {
+let rotationInFlight: Promise<Rotation> | null = null;
+
+function rotateSession(): Promise<Rotation> {
+  rotationInFlight ??= (async (): Promise<Rotation> => {
     try {
       const refreshToken = coreSession().getRefreshToken();
       // Having no token to present is not a network problem: there is nothing
       // to rotate and nothing to keep waiting for.
-      if (!refreshToken) return "rejected";
+      if (!refreshToken) return { outcome: "rejected", pair: null };
       const res = await rawRequest(
         "/v1/auth/refresh",
         { method: "POST", body: JSON.stringify({ refreshToken }) },
@@ -725,21 +735,28 @@ export function refreshSessionOutcome(): Promise<RefreshOutcome> {
       );
       if (!res.ok) {
         coreSession().markAuthExpired();
-        return "rejected";
+        return { outcome: "rejected", pair: null };
       }
       const pair = refreshResponseFromWire(res.json<unknown>());
+      // A no-op when a logout wiped the store meanwhile; `pair` still reaches
+      // that logout through the result.
       coreSession().applyRotation(pair.accessToken, pair.refreshToken);
-      return "rotated";
+      return { outcome: "rotated", pair };
     } catch {
       // Offline, unreachable server, or a blown deadline: the caller keeps
       // rendering cached content (P15) and the session is not declared dead,
       // because nothing answered to say it is.
-      return "unreachable";
+      return { outcome: "unreachable", pair: null };
     } finally {
-      refreshInFlight = null;
+      rotationInFlight = null;
     }
   })();
-  return refreshInFlight;
+  return rotationInFlight;
+}
+
+/** The detailed rotation. Use this wherever the *reason* changes what you do. */
+export function refreshSessionOutcome(): Promise<RefreshOutcome> {
+  return rotateSession().then((rotation) => rotation.outcome);
 }
 
 /** Boolean view, for callers that only need "did I end up with a usable token". */
@@ -1067,16 +1084,56 @@ export async function restoreSession(): Promise<LoginResponse | null> {
   return restoredLoginResponse(persisted, token);
 }
 
+export interface LogoutOptions {
+  /**
+   * Host cleanup that needs the leaving session one last time — the phone
+   * revoking its push registration (#2677, ADR-0120 D4). Runs AFTER the local
+   * wipe (the person is already out) and BEFORE the server revocation (the last
+   * moment the leaving access token still authenticates), with that token: the
+   * captured one, or the one a rotation in flight minted. Awaited — the
+   * revocation waits until it settles, so its request is answered before the
+   * token dies; bound its own deadline accordingly. A rejection is swallowed —
+   * it never stops the revocation.
+   */
+  beforeRevoke?: (accessToken: string) => Promise<unknown>;
+}
+
 /**
  * Log out completely. The local wipe happens FIRST and unconditionally, so a
  * slow or failing network can never leave a usable token on the device; the
- * server revocation then runs with the captured pair as a best effort.
+ * server revocation then runs as a best effort with the leaving pair.
+ *
+ * The leaving pair is the captured one — unless a refresh rotation is in the
+ * air. Then the captured pair is already spent: the server revoked its refresh
+ * half when the request arrived, and the pair it minted comes back to a store
+ * this function has just wiped (the host's `applyRotation` drops it). Revoking
+ * the spent pair ends nothing (`revokedRefresh:false`) and the minted pair would
+ * live on the server for 30 days; a QR-linked rotation has also killed the
+ * captured access half, so `beforeRevoke` would be refused too. So the network
+ * half joins the rotation and uses what it minted (#2677 review M1). When the
+ * rotation fails, the captured pair is all there is, as before.
  */
-export async function logout(): Promise<void> {
-  const access = coreSession().getAccessToken();
-  const refresh = coreSession().getRefreshToken();
+export async function logout(options: LogoutOptions = {}): Promise<void> {
+  const rotation = rotationInFlight;
+  let access = coreSession().getAccessToken();
+  let refresh = coreSession().getRefreshToken();
   coreSession().clearSession();
+  if (rotation) {
+    // Never rejects: the rotation turns its own failures into an outcome.
+    const { pair } = await rotation;
+    if (pair) {
+      access = pair.accessToken;
+      refresh = pair.refreshToken;
+    }
+  }
   if (!access) return; // nothing the server will accept a revocation for
+  if (options.beforeRevoke) {
+    try {
+      await options.beforeRevoke(access);
+    } catch {
+      // Best effort by contract: the session still has to end.
+    }
+  }
   const revoke = (accessToken: string, refreshToken: string | null) =>
     rawRequest(
       "/v1/auth/logout",
