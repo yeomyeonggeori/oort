@@ -1,0 +1,65 @@
+/* GENERATED from packages/momo-core/src/design (ADR-0189 D5). Do not edit by hand.
+ * Regenerate: npm --prefix clients/web run gen:palettes
+ * Drift test: clients/web/src/design/themes/palettes/palettes.drift.test.ts */
+:root[data-palette="graphite"] {
+  --canvas-top: light-dark(#f3f4f6, #0b0c0e);
+  --canvas-mid: light-dark(#f3f4f6, #0b0c0e);
+  --canvas-bottom: light-dark(#f3f4f6, #0b0c0e);
+  --surface: light-dark(#fdfdfe, #141518);
+  --surface-muted: light-dark(#f3f4f6, #1b1d21);
+  --sheet: light-dark(#f3f4f6, #101113);
+  --ink: light-dark(#0f1115, #edeef0);
+  --ink-muted: light-dark(#5b606b, #9a9ea8);
+  --icon: light-dark(#80858f, #7d818b);
+  --line: light-dark(#e4e6ea, #25272c);
+  --line-strong: light-dark(#878c96, #6c707a);
+  --primary: light-dark(#0f1115, #edeef0);
+  --on-primary: light-dark(#fdfdfe, #0b0c0e);
+  --signal: light-dark(#2754e0, #7596ff);
+  --on-signal: light-dark(#fdfdfe, #0b0c0e);
+  --signal-text: light-dark(#2754e0, #7596ff);
+  --signal-soft: light-dark(#e8eefd, #1a2340);
+  --agent: light-dark(#0b7a74, #45c9c0);
+  --agent-soft: light-dark(#e1f3f1, #0f2a28);
+  --ok: light-dark(#1f7a43, #4dc27f);
+  --ok-soft: light-dark(#e1f2e7, #173325);
+  --warn: light-dark(#8a5c00, #d4a72c);
+  --warn-soft: light-dark(#ffedd4, #372e1b);
+  --danger: light-dark(#c4312b, #ff6a60);
+  --danger-soft: light-dark(#ffe9e5, #402a26);
+  --surface-hover: light-dark(#ededee, #1a1b1e);
+  --surface-pressed: light-dark(#e6e6e7, #1f2023);
+  --muted-soft: light-dark(#dfdfe0, #242528);
+  --danger-fill: light-dark(#c4312b, #ff6a60);
+  --on-danger-fill: light-dark(#fdfdfe, #0b0c0e);
+  --glass: light-dark(rgba(253,253,254,.72), rgba(20,21,24,.72));
+  --scrim: light-dark(rgba(20,18,16,.34), rgba(0,0,0,.55));
+}
+
+:root[data-palette="graphite"][data-signal="seongun"] {
+  --signal: light-dark(#9c447c, #f890bc);
+  --on-signal: light-dark(#fdfdfe, #0b0c0e);
+  --signal-text: light-dark(#9c447c, #f890bc);
+  --signal-soft: light-dark(#f1e2eb, #3b2b34);
+}
+
+:root[data-palette="graphite"][data-signal="hongyeom"] {
+  --signal: light-dark(#66002c, #fe5a94);
+  --on-signal: light-dark(#fdfdfe, #0b0c0e);
+  --signal-text: light-dark(#66002c, #fe5a94);
+  --signal-soft: light-dark(#ead9dd, #3d242e);
+}
+
+:root[data-palette="graphite"][data-signal="hyeseong"] {
+  --signal: light-dark(#8b005a, #ff4bcc);
+  --on-signal: light-dark(#fdfdfe, #0b0c0e);
+  --signal-text: light-dark(#8b005a, #ff4bcc);
+  --signal-soft: light-dark(#f0dce5, #3e2337);
+}
+
+:root[data-palette="graphite"][data-signal="gamram"] {
+  --signal: light-dark(#005400, #8cb858);
+  --on-signal: light-dark(#fdfdfe, #0b0c0e);
+  --signal-text: light-dark(#005400, #8cb858);
+  --signal-soft: light-dark(#dae4da, #293126);
+}

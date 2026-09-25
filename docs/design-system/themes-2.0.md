@@ -1,6 +1,6 @@
 # 테마 토큰 표 — 디자인 시스템 2.0
 
-> 결정: [ADR-0189](../adr/0189-design-system-2-dawn-sky-multi-theme.md). 이 문서는 그 결정에 쓰는 **값과 실측 결과**를 담는다. 코드의 정본은 DS2-0(#2712)이 `packages/momo-core`에 세운다. 그때까지는 이 표가 기준이다. 둘이 어긋나면 core가 이긴다. 그 경우 이 표를 core에서 다시 생성한다.
+> 결정: [ADR-0189](../adr/0189-design-system-2-dawn-sky-multi-theme.md). 이 문서는 그 결정에 쓰는 **값과 실측 결과**를 담는다. 코드의 정본은 `packages/momo-core/src/design/themes.ts`다(DS2-0, #2712). 둘이 어긋나면 core가 이긴다. 그 경우 이 표를 core에서 다시 적는다. §2 값과 §3 실측은 웹 `clients/web/src/design/themes/palettes/themes2.doc.test.ts`가 core와 한 칸씩 대조한다.
 >
 > 출처는 로컬 방향 제안서 `claudedocs/design-2.0/brief.md` §3·§6과 시안 `mockups.html`의 CSS 변수다. 두 파일 모두 gitignore 대상이다. 시안에 없던 값과 기준을 못 넘어 고친 값은 §1에 모았고, 전부 §3에서 쟀다.
 
@@ -68,6 +68,26 @@
 - 94% 대체값의 글자 대비는 새벽하늘 기준 라이트 ink 17.59~17.64, ink-muted 6.55~6.57, 다크 ink 14.79~14.95, ink-muted 6.94~7.01이다(세 정지점 위에서 잼).
 - 실제 유리 대비는 렌더 캡처 위에서만 잴 수 있다(`runtime-unverified`).
 - 노을띠 데스크탑 워크스페이스 레일의 더 짙은 띠(라이트 `#141A31`, 다크 `#090D19`)는 장식 값이다. 그 위 `on-band`는 15.24/16.73, `on-band-muted`는 9.38/7.80이다.
+
+### 표 밖 역할 (core 계산값)
+
+ADR-0189 D5에 따라 표에 없는 역할은 DS2-0이 새 표면 위에서 다시 계산했다. 손으로 고른 값이 아니라 `themes.ts` `deriveRoles`가 표의 값에서 계산하므로, 테마를 더하면 함께 생긴다. 규칙은 다음과 같다.
+
+- `surface-hover`: `surface`에서 잉크 쪽으로 OKLCH 명도만 옮겨, `surface`·`sheet` 위에서 두 자(대비 1.05 이상, OKLab 0.02 이상)를 처음 넘는 값.
+- `surface-pressed`: 거기서 한 단 더. `surface`·`sheet`·`surface-hover` 위에서 넘는다.
+- `muted-soft`: 톤 없는 칩 그릇. `surface`·`sheet`·`surface-hover`·`surface-pressed` 위에서 넘는다.
+- `danger-fill`: `danger`가 모든 면에서 3:1을 넘고 그 위 잉크가 4.5:1을 넘으면 `danger` 그대로다. 여섯 조합 모두 그렇다.
+- `on-danger-fill`: 그 모드의 `on-primary`와 `ink` 가운데 대비가 큰 쪽.
+
+세 채움 위에서 `ink`·`ink-muted`가 4.5:1을 넘는 것도 core 시험이 잰다.
+
+| 역할 | 새벽하늘 라이트 | 새벽하늘 다크 | 흑연 다크 | 흑연 라이트 | 노을띠 라이트 | 노을띠 다크 |
+|---|---|---|---|---|---|---|
+| surface-hover | `#ECEBE9` | `#20232A` | `#1A1B1E` | `#EDEDEE` | `#ECEAE5` | `#252A34` |
+| surface-pressed | `#E5E4E2` | `#25282F` | `#1F2023` | `#E6E6E7` | `#E5E3DE` | `#2A2F39` |
+| muted-soft | `#DEDDDB` | `#2A2D35` | `#242528` | `#DFDFE0` | `#DEDCD7` | `#2F353F` |
+| danger-fill | `#BE2C4F` | `#FF6B63` | `#FF6A60` | `#C4312B` | `#C0302A` | `#FF6B63` |
+| on-danger-fill | `#FFFEFC` | `#16171B` | `#0B0C0E` | `#FDFDFE` | `#FFFDF8` | `#161A25` |
 
 ## 3. 대비 실측
 
@@ -164,6 +184,41 @@ WCAG 2.1 상대 휘도로 계산했다. 텍스트 기준은 4.5, 비텍스트 �
 - OKLab 거리의 위험색 기준은 시안 원래 값 `#C0302A`/`#FF6B63`이다. §1에서 바꾼 `danger`로 다시 재도 모두 0.07 이상이다(최소는 홍염 다크 0.083, 독립 검수 R1 재계산).
 - `dawn`은 프리셋으로 옮기지 않는다. 테마 기본 신호(`signal: null`)가 그 자리를 대신한다.
 
+### 보정 엔진 결과 — 네 프리셋 × 여섯 조합 (DS2-0)
+
+`packages/momo-core/src/design/signal.ts` `resolveSignal`의 출력이다. 네 프리셋은 여섯 조합 모두에서 통과하거나 보정된다. 거절은 없다. 노을띠 라이트는 신호가 어두운 띠 위에서도 3:1을 넘어야 해서 네 프리셋 모두 명도를 올렸다. 새벽하늘과 흑연은 두 모드 모두 보정 없이 통과한다. 새벽하늘 행의 신호 값은 위 표와 같다.
+
+- `on-signal`은 그 모드의 `ink`·`on-primary` 가운데 대비가 큰 쪽이다. 위 표의 `on-signal` 열은 시안의 옛 잉크(`#FFFEFB`·`#17161A`)로 잰 값이라 둘째 자리가 조금 다르다.
+- `signal-text`는 신호의 색상각·채도로 명도만 옮긴 값이고, `signal-soft`는 표면에서 신호 쪽으로 OKLab 14%(라이트)·20%(다크) 섞은 값이다. 둘 다 엔진이 늘 계산한다. 테마 기본 신호(`signal: null`)는 엔진을 거치지 않고 §2의 값을 쓴다.
+- 거절 조건: `#RRGGBB`가 아닐 때, 명도를 옮겨도 조건을 못 채울 때, 보정 뒤 `agent`·`danger`와 OKLab 0.07 미만일 때. 명도는 [0.2, 0.97] 안에서만 골라 순백·순흑이 나가지 않는다.
+
+| 프리셋 | 테마 · 모드 | 입력 | `signal` | `on-signal` | `signal-text` | `signal-soft` | 보정 |
+|---|---|---|---|---|---|---|---|
+| seongun | 새벽하늘 라이트 | `#9C447C` | `#9C447C` | `#FFFEFC` | `#9C447C` | `#F3E3E9` | 그대로 |
+| seongun | 새벽하늘 다크 | `#F890BC` | `#F890BC` | `#16171B` | `#F890BC` | `#423340` | 그대로 |
+| seongun | 흑연 라이트 | `#9C447C` | `#9C447C` | `#FDFDFE` | `#9C447C` | `#F1E2EB` | 그대로 |
+| seongun | 흑연 다크 | `#F890BC` | `#F890BC` | `#0B0C0E` | `#F890BC` | `#3B2B34` | 그대로 |
+| seongun | 노을띠 라이트 | `#9C447C` | `#A84F87` | `#FFFDF8` | `#A14981` | `#F4E4E8` | 명도 보정 |
+| seongun | 노을띠 다크 | `#F890BC` | `#F890BC` | `#161A25` | `#F890BC` | `#473948` | 그대로 |
+| hongyeom | 새벽하늘 라이트 | `#66002C` | `#66002C` | `#FFFEFC` | `#66002C` | `#ECDADC` | 그대로 |
+| hongyeom | 새벽하늘 다크 | `#FE5A94` | `#FE5A94` | `#16171B` | `#FF6599` | `#452C39` | 그대로 |
+| hongyeom | 흑연 라이트 | `#66002C` | `#66002C` | `#FDFDFE` | `#66002C` | `#EAD9DD` | 그대로 |
+| hongyeom | 흑연 다크 | `#FE5A94` | `#FE5A94` | `#0B0C0E` | `#FE5A94` | `#3D242E` | 그대로 |
+| hongyeom | 노을띠 라이트 | `#66002C` | `#B14E6A` | `#FFFDF8` | `#A94763` | `#F6E4E3` | 명도 보정 |
+| hongyeom | 노을띠 다크 | `#FE5A94` | `#FE5A94` | `#161A25` | `#FF75A1` | `#4A3242` | 그대로 |
+| hyeseong | 새벽하늘 라이트 | `#8B005A` | `#8B005A` | `#FFFEFC` | `#8B005A` | `#F2DDE4` | 그대로 |
+| hyeseong | 새벽하늘 다크 | `#FF4BCC` | `#FF4BCC` | `#16171B` | `#FF5BCE` | `#452B42` | 그대로 |
+| hyeseong | 흑연 라이트 | `#8B005A` | `#8B005A` | `#FDFDFE` | `#8B005A` | `#F0DCE5` | 그대로 |
+| hyeseong | 흑연 다크 | `#FF4BCC` | `#FF4BCC` | `#0B0C0E` | `#FF4BCC` | `#3E2337` | 그대로 |
+| hyeseong | 노을띠 라이트 | `#8B005A` | `#BB3E83` | `#FFFDF8` | `#B4387D` | `#F8E3E7` | 명도 보정 |
+| hyeseong | 노을띠 다크 | `#FF4BCC` | `#FF4BCC` | `#161A25` | `#FF6CD1` | `#4A314B` | 그대로 |
+| gamram | 새벽하늘 라이트 | `#005400` | `#005400` | `#FFFEFC` | `#005400` | `#DCE5D8` | 그대로 |
+| gamram | 새벽하늘 다크 | `#8CB858` | `#8CB858` | `#16171B` | `#8CB858` | `#2F3A31` | 그대로 |
+| gamram | 흑연 라이트 | `#005400` | `#005400` | `#FDFDFE` | `#005400` | `#DAE4DA` | 그대로 |
+| gamram | 흑연 다크 | `#8CB858` | `#8CB858` | `#0B0C0E` | `#8CB858` | `#293126` | 그대로 |
+| gamram | 노을띠 라이트 | `#005400` | `#357D31` | `#FFFDF8` | `#2F772B` | `#E2EBDB` | 명도 보정 |
+| gamram | 노을띠 다크 | `#8CB858` | `#8CB858` | `#161A25` | `#8CB858` | `#33403A` | 그대로 |
+
 ## 5. 플랫폼층과 밀도
 
 이름만 공유하고 값은 플랫폼마다 따로 둔다(ADR-0189 D6). 테마는 이 표를 바꾸지 않는다.
@@ -205,3 +260,13 @@ WCAG 2.1 상대 휘도로 계산했다. 텍스트 기준은 4.5, 비텍스트 �
 | DS2-8 | #2720 | 밀도 옵션 | DS2-1, DS2-3, DS2-4, DS2-6, DS2-7 |
 
 상위 이슈는 #2703(모바일)과 #2704(데스크탑·웹)다. 로고·마스코트는 #2705에서 정한다. 정식 앱 아이콘은 #2650에서 정한다.
+
+## 7. 접근성 설정의 RN 노출 (ADR-0189 D7, DS2-0 확인)
+
+iOS 「대비 증가」는 React Native에서 읽을 수 있다. 폰이 쓰는 RN 0.86.2 기준으로 확인했다.
+
+- `AccessibilityInfo.isDarkerSystemColorsEnabled()`: iOS 전용. 네이티브 `RCTAccessibilityManager`가 `UIAccessibilityDarkerSystemColorsEnabled()`를 돌려준다. 이것이 설정 앱의 「대비 증가」다. Android에서는 늘 `false`다.
+- 이벤트 `darkerSystemColorsChanged`: `UIAccessibilityDarkerSystemColorsStatusDidChangeNotification`을 받아 바뀐 값을 보낸다. `AccessibilityInfo.addEventListener`로 구독한다.
+- `DynamicColorIOS({light, dark, highContrastLight, highContrastDark})`: 시스템이 대비 증가 여부에 따라 색을 고른다. 다만 D7의 고대비 규칙(평면 바닥, 불투명 유리, 카드 테두리, 보조 글자를 `ink`로)은 색 하나를 바꾸는 것보다 넓다. 그래서 적용은 위 조회와 이벤트로 하는 것을 기본으로 둔다. 적용은 DS2-2 이후 폰 셸의 일이다.
+- 투명도 줄이기는 `AccessibilityInfo.isReduceTransparencyEnabled()`와 `reduceTransparencyChanged` 이벤트로 읽는다(D7).
+- 실기기에서 켜고 끄며 확인하지는 않았다(`runtime-unverified`). 근거는 설치된 RN 소스(`Libraries/Components/AccessibilityInfo/AccessibilityInfo.js`, `React/CoreModules/RCTAccessibilityManager.mm`)다.
