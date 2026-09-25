@@ -785,9 +785,11 @@ function GalleryBody() {
       {PILL_VARIANTS.map(({ variant, label, title }) => (
         <StateRow key={variant} title={`Button ${variant}: ${title}`} states={PRIMITIVE_STATES}>
           {(state) => (
-            <Button type="button" variant={variant} {...controlProps(state)}>
-              {label}
-            </Button>
+            <div className="flex">
+              <Button type="button" variant={variant} {...controlProps(state)}>
+                {label}
+              </Button>
+            </div>
           )}
         </StateRow>
       ))}
