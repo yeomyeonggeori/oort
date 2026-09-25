@@ -210,3 +210,50 @@ fn app_commands_are_not_gated_by_the_capability() {
         serde_json::json!(["is_permission_granted"])
     );
 }
+
+/// The traffic lights and the sidebar toggle share one centre line (#2700).
+///
+/// The lights are native (`trafficLightPosition`), the toggle sits in the
+/// middle of the web bundle's `app-titlebar` row. Neither knows the other, so
+/// a change to either side alone drifts them apart while both sides' own tests
+/// stay green. Measured 2026-09-25 (macOS 27.0 26A428, tauri-runtime-wry
+/// 2.11.4 / tao 0.35.3, Retina window capture): the light's visible centre is
+/// `y - 2` pt (y 14 → 12.0, y 21.5 → 19.5). The row is `--spacing-control-lg`
+/// tall, border-box, with a 1px bottom border, so the toggle's centre is
+/// `(control-lg - 1) / 2` = 19.5. Before the fix they were 7.5pt apart.
+/// `clients/web/src/app/desktopShellContract.test.ts` pins the same relation
+/// from the web side, where CI runs it.
+#[test]
+fn the_traffic_lights_share_the_titlebar_toggles_centre_line() {
+    const TOKENS: &str = include_str!("../../../web/src/design/tokens.css");
+    const LIGHT_CENTRE_MINUS_Y: f64 = -2.0;
+
+    let conf: Value = serde_json::from_str(CONF).unwrap();
+    let main = conf["app"]["windows"]
+        .as_array()
+        .expect("app.windows")
+        .iter()
+        .find(|w| w["label"].as_str().unwrap_or("main") == "main")
+        .expect("main window");
+    // The relation only holds with the lights floating over the web content.
+    assert_eq!(main["titleBarStyle"], "Overlay", "main window = {main}");
+    assert_eq!(main["hiddenTitle"], true, "main window = {main}");
+
+    let control_lg: f64 = TOKENS
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("--spacing-control-lg:"))
+        .and_then(|v| v.trim().strip_suffix("px;"))
+        .expect("--spacing-control-lg in tokens.css")
+        .trim()
+        .parse()
+        .unwrap();
+    let toggle_centre = (control_lg - 1.0) / 2.0;
+    let y = main["trafficLightPosition"]["y"]
+        .as_f64()
+        .expect("trafficLightPosition.y");
+    let light_centre = y + LIGHT_CENTRE_MINUS_Y;
+    assert!(
+        (light_centre - toggle_centre).abs() <= 1.0,
+        "lights centre {light_centre}pt vs toggle centre {toggle_centre}pt"
+    );
+}
