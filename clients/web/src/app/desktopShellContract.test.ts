@@ -55,7 +55,7 @@ interface TauriWindow {
 }
 
 interface TauriConf {
-  app?: { windows?: TauriWindow[] };
+  app?: { windows?: TauriWindow[]; security?: { csp?: string } };
 }
 
 const capability = readShellJson("capabilities/default.json") as Capability;
@@ -147,5 +147,40 @@ describe("타이틀바 신호등과 사이드바 토글의 세로 정렬 (#2700)
     expect(typeof y).toBe("number");
     const lightsCenter = (y as number) + LIGHT_CENTER_MINUS_Y;
     expect(Math.abs(lightsCenter - toggleCenter)).toBeLessThanOrEqual(1);
+  });
+});
+
+// 5. 셸 IPC 전송로(#2701 R1, 보안 검수 H-1). Tauri 2 의 invoke 는 먼저
+//    `fetch(ipc://localhost/<cmd>)`(Windows·Android 는 `http://ipc.localhost`)
+//    로 간다. `connect-src` 가 그것을 막으면 콘솔 경고 한 줄과 함께 postMessage
+//    JSON 경로로 조용히 내려앉고, 그 경로는 raw 본문(`Uint8Array`)을 싣지 못한다.
+//    JSON 인자만 쓰던 명령은 그래도 돌아서 아무도 몰랐고, raw 본문을 쓰는 첫
+//    명령(`open_pdf_attachment`)이 출하 번들에서 「expected raw bytes」로 죽었다.
+//    이 두 출처는 새 콘텐츠 출처가 아니라 셸 자신의 명령 전송로다.
+function cspDirective(csp: string, name: string): string[] {
+  const directive = csp
+    .split(";")
+    .map((part) => part.trim().split(/\s+/))
+    .find(([key]) => key === name);
+  return directive ? directive.slice(1) : [];
+}
+
+describe("셸 IPC 전송로 (#2701 R1)", () => {
+  it("출하 CSP 의 connect-src 가 Tauri 커스텀 프로토콜 IPC 를 허용한다", () => {
+    const csp = conf.app?.security?.csp ?? "";
+    const connect = cspDirective(csp, "connect-src");
+    expect(connect).toContain("ipc:");
+    expect(connect).toContain("http://ipc.localhost");
+  });
+
+  it("IPC 를 연 것 말고는 콘텐츠 출처가 넓어지지 않았다", () => {
+    const csp = conf.app?.security?.csp ?? "";
+    // 임베드·워커·스크립트 경계는 그대로다. PDF 를 이 경로로 열지 않는 이유가
+    // 여기 있다(content.ts PDF 절).
+    expect(cspDirective(csp, "frame-src")).toEqual(["'none'"]);
+    expect(cspDirective(csp, "object-src")).toEqual(["'none'"]);
+    expect(cspDirective(csp, "worker-src")).toEqual(["'none'"]);
+    expect(cspDirective(csp, "script-src")).toEqual(["'self'"]);
+    expect(cspDirective(csp, "img-src")).toEqual(["'self'", "data:"]);
   });
 });

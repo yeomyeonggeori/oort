@@ -121,6 +121,15 @@ export function readSurface(key: string): Surface {
   return read(key);
 }
 
+/**
+ * 이 초안이 들고 있는 `File`. 트레이 썸네일(#2701)이 읽는다. 지운 초안은
+ * undefined 다 — 썸네일 캐시는 `File` 을 키로 한 WeakMap 이라 여기서 놓으면
+ * 같이 놓인다.
+ */
+export function draftFile(localId: string): File | undefined {
+  return files.get(localId);
+}
+
 export function useAttachmentSurface(key: string): Surface {
   return useSyncExternalStore(
     subscribe,

@@ -179,6 +179,18 @@ export const ATTACH_COPY = {
   sendBlockedFailed: "실패한 첨부를 지운 뒤 보낼 수 있습니다.",
   /** 드롭이 폴더를 받았다. 폴더는 첨부가 아니다. */
   folderRejected: "폴더는 붙일 수 없습니다. 안에 있는 파일을 골라 주세요.",
+  /** PDF 카드의 열기 (#2701). 어디서 열리는지까지가 이름이다. */
+  openPdf: "새 창에서 PDF 열기",
+  /** 데스크탑 셸의 같은 행동. 셸은 새 창 대신 OS 의 PDF 뷰어로 연다. */
+  openPdfDesktop: "기본 앱에서 PDF 열기",
+  /** 그 열기가 진행 중. 바이트를 받는 동안이다. */
+  openingPdf: "PDF 여는 중",
+  /** 프록시가 바이트를 주지 못했다. */
+  pdfOpenFailed: "PDF를 열지 못했습니다. 다시 시도하거나 파일을 내려받으세요.",
+  /** 선언은 PDF 인데 바이트가 아니다. 이 출처의 문서로 열지 않는다. */
+  pdfNotPdf: "PDF 형식이 아니어서 열 수 없습니다. 파일을 내려받아 확인하세요.",
+  /** 브라우저가 새 창을 막았다. 다음 행동은 사람 쪽 설정이다. */
+  pdfPopupBlocked: "새 창이 막혔습니다. 브라우저의 팝업 차단을 풀거나 파일을 내려받으세요.",
 } as const;
 
 /**
@@ -702,8 +714,59 @@ export function isImageMime(mime: string): boolean {
  * 돌지 않게), 그 판단을 화면이 뒤집을 이유가 없다.
  */
 export function showsInlinePreview(attachment: MessageAttachment): boolean {
-  const mime = attachment.mime.trim().toLowerCase();
+  return isSafeRasterPreview(attachment.mime, attachment.sizeBytes);
+}
+
+function isSafeRasterPreview(rawMime: string, sizeBytes: number): boolean {
+  const mime = rawMime.trim().toLowerCase();
   if (!isImageMime(mime)) return false;
   if (mime.startsWith("image/svg")) return false;
-  return attachment.sizeBytes <= INLINE_PREVIEW_MAX_BYTES;
+  return sizeBytes <= INLINE_PREVIEW_MAX_BYTES;
+}
+
+/**
+ * 컴포저 트레이가 이 초안을 썸네일로 그릴 것인가 (#2701).
+ *
+ * 타임라인의 `showsInlinePreview`와 **같은 판정**이다. 트레이에서 그림이던 파일이
+ * 보낸 뒤 타임라인에서 카드로 바뀌면 한 파일이 두 모양을 갖는다. 다른 점은 하나:
+ * 크기를 모르는 파일(`sizeKnown: false`)은 상한 아래라고 가정하지 않는다.
+ */
+export function showsDraftThumbnail(
+  draft: Pick<AttachmentDraft, "mime" | "sizeBytes" | "sizeKnown">
+): boolean {
+  if (!draft.sizeKnown) return false;
+  return isSafeRasterPreview(draft.mime, draft.sizeBytes);
+}
+
+/** 선언된 타입이 PDF 인가. 매개변수(`; charset=…`)와 대소문자는 보지 않는다. */
+export function isPdfAttachment(attachment: Pick<MessageAttachment, "mime">): boolean {
+  const essence = attachment.mime.trim().toLowerCase().split(";")[0]?.trim();
+  return essence === "application/pdf";
+}
+
+/** PDF 머리(`%PDF-`)를 찾는 범위. 규격(ISO 32000 부록 H)이 앞 잡음을 허용한다. */
+const PDF_HEADER_WINDOW = 1024;
+const PDF_HEADER = [0x25, 0x50, 0x44, 0x46, 0x2d]; // "%PDF-"
+
+/**
+ * 바이트가 정말 PDF 인가 (#2701).
+ *
+ * 선언은 올린 사람이 정한다. HTML 을 `application/pdf` 로 선언해 올린 파일을 이
+ * 앱 출처의 새 창에 걸면, 서버가 `nosniff` 와 `Content-Disposition: attachment`
+ * 로 막아 둔 실행 경로를 화면이 되살리게 된다. 그래서 열기는 선언과 바이트가
+ * 둘 다 PDF 일 때만이고, 이 함수가 그 두 번째 조건이다.
+ */
+export function hasPdfSignature(bytes: Uint8Array): boolean {
+  const limit = Math.min(bytes.length, PDF_HEADER_WINDOW) - PDF_HEADER.length;
+  for (let start = 0; start <= limit; start++) {
+    let match = true;
+    for (let i = 0; i < PDF_HEADER.length; i++) {
+      if (bytes[start + i] !== PDF_HEADER[i]) {
+        match = false;
+        break;
+      }
+    }
+    if (match) return true;
+  }
+  return false;
 }

@@ -8,9 +8,9 @@
 // permission, no keychain) when there is no shell underneath.
 //
 // The Rust half lives in `clients/desktop/src-tauri/src/{deeplink,discovery,
-// notification,keychain,updater,detect}.rs` and the command/event contract is
-// documented in `clients/desktop/README.md`. Keep the three in sync — a renamed
-// command fails at runtime, not at compile time.
+// notification,keychain,updater,detect,opener,pdf_viewer}.rs` and the
+// command/event contract is documented in `clients/desktop/README.md`. Keep
+// the three in sync — a renamed command fails at runtime, not at compile time.
 //
 // `@tauri-apps/api` is imported DYNAMICALLY on purpose. Vite splits it into its
 // own chunk that a browser tab never requests, so the desktop bridge costs the
@@ -186,6 +186,28 @@ export async function openExternalUrl(url: string): Promise<boolean> {
     console.warn("[momo] external link did not open", error);
     return false;
   }
+}
+
+// ---- PDF attachments (#2701) ------------------------------------------------
+
+/**
+ * Open PDF bytes in the OS default viewer. Throws when the shell refused or the
+ * viewer did not launch; a browser tab has no such path and throws too.
+ *
+ * The bytes go as a RAW invoke body (no JSON number array for a 100 MB file),
+ * and the display name rides a percent-encoded header because a raw body has
+ * nowhere else to carry it. The Rust side (`pdf_viewer.rs`) re-checks the
+ * `%PDF-` header and derives its own `.pdf` file name from this one.
+ */
+export async function openPdfInDesktopViewer(
+  bytes: Uint8Array,
+  name: string
+): Promise<void> {
+  if (!IS_TAURI) throw new Error("desktop viewer unavailable");
+  const { invoke: call } = await core();
+  await call<void>("open_pdf_attachment", bytes, {
+    headers: { "x-oort-file-name": encodeURIComponent(name) },
+  });
 }
 
 // ---- local hosted-agent detection (T-5) ------------------------------------

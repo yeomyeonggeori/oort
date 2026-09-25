@@ -105,6 +105,7 @@ interface HostedAgentProbe {
 | `keychain_store_refresh_token` | `{ token: string }` | `void` \| error | Rejects an empty token. |
 | `keychain_clear_refresh_token` | — | `void` \| error | Succeeds when there was nothing to delete. |
 | `open_external_url` | `{ url: string }` | `void` \| error | Opens one **https** URL in the OS browser. Rejects anything else. Desktop only. |
+| `open_pdf_attachment` | raw bytes (invoke body) + header `x-oort-file-name` (percent-encoded) | `void` \| error | Writes one PDF to `<app cache>/pdf-preview/<unique>/<name>.pdf` and opens it in the OS default viewer (#2701). Rejects a body without a `%PDF-` header in its first 1 KiB or over 100 MiB; the name is re-derived (always `.pdf`, no separators). Each copy (dir 0700, file 0600) is removed 10 minutes after launch; copies older than an hour are swept at app start and on every call. The raw body only survives the custom-protocol IPC transport, so the shell CSP must keep `connect-src ipc: http://ipc.localhost` (pinned by `shell_contract.rs` and `desktopShellContract.test.ts`; without it every invoke silently falls back to postMessage JSON). Desktop only. |
 | `detect_hosted_agents` | — | `HostedAgentProbe[]` | Passive allowlist only (app bundle path, bundle id, process name). Never scans ports. Empty-flags, not an error, when nothing matches. Desktop only. |
 | `app_version` | — | `string` | The running build, e.g. `0.1.0-next.1`. |
 | `updater_check` | — | `AvailableUpdate \| null` \| error | `null` = already newest. **Rejects** on a failed check; see below. |
