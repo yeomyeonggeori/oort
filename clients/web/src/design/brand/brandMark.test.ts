@@ -98,59 +98,66 @@ describe("oort 마크는 한 기하에서 나온다", () => {
 
 // ---- 코메토 K6 플랫 얼굴 (#2732) ---------------------------------------------
 
-const KOMETTO_PARTS = ["hood", "face", "rim", "eyes", "bead"] as const;
+const KOMETTO_PARTS = ["comet", "hood", "face", "rim", "eyes", "bead"] as const;
 
 function komettoComponent() {
   const source = read(join(WEB_ROOT, "src/design/brand/KomettoMark.tsx"));
   return KOMETTO_PARTS.map((part) => source.match(new RegExp(`\\n  ${part}: "([^"]+)"`))?.[1]);
 }
 
-/** `M{x+r} {y}A{r} {r} ...` 꼴 원 path의 중심. */
-function circleCenter(d: string) {
+/** `M{x+r} {y}A{r} {r} ...` 꼴 원 path의 중심과 반지름. */
+function circleOf(d: string) {
   const m = d.match(/^M([-\d.]+) ([-\d.]+)A([-\d.]+) /);
   if (!m) throw new Error(`원이 아니다: ${d}`);
-  return [Number(m[1]) - Number(m[3]), Number(m[2])];
+  return { c: [Number(m[1]) - Number(m[3]), Number(m[2])], r: Number(m[3]) };
 }
+const circleCenter = (d: string) => circleOf(d).c;
 
-describe("코메토 얼굴은 C2-04 마크와 한 기하다", () => {
+describe("코메토 얼굴은 C2-04 마크와 같은 문법이다", () => {
   const kometto = read(join(MARK_DIR, "oort-kometto.svg"));
-  const [hood, face, rim, eyes, bead] = paths(kometto);
+  const [comet, hood, face, rim, eyes, bead] = paths(kometto);
   const markRing = paths(read(join(MARK_DIR, "oort-mark-black.svg")))[0];
+  const markHole = markRing.slice(markRing.indexOf("ZM") + 1);
+  const rimHole = rim.slice(rim.indexOf("ZM") + 1);
 
-  it("다섯 조각이 후드 → 얼굴 → 림 → 눈 → 구슬 순서다", () => {
-    expect(paths(kometto)).toHaveLength(5);
-    expect(hood).toMatch(/C/); // 후드만 자유 곡선이다
+  it("여섯 조각이 혜성 꼬리 → 후드 → 얼굴 → 림 → 눈 → 구슬 순서다", () => {
+    expect(paths(kometto)).toHaveLength(6);
+    expect(comet).toMatch(/C/);
+    expect(hood).toMatch(/C/);
+    expect(kometto).toMatch(/<path fill="url\(#comet\)"/);
   });
 
-  it("림은 C2-04 regular 링과 같은 꼬리·같은 구멍·같은 바깥 원이다(홈만 없다)", () => {
-    // 말풍선 꼬리: 오목 모서리 → 변 → 둥근 끝 → 변 → 오목 모서리. 마크의 링 path에서
-    // 첫 번째 「A1.5 1.5」부터 꼬리가 끝나는 오목 모서리까지를 잘라 그대로 찾는다.
+  it("림은 C2-04 링과 같은 말풍선 꼬리·같은 바깥 원이고, 얼굴 창만 0.8로 크다", () => {
+    // 말풍선 꼬리: 오목 모서리 → 변 → 둥근 끝 → 변 → 오목 모서리. 좌표까지 같다.
     const tail = markRing.match(/A1\.5 1\.5 0 0 0 [^A]+L[^A]+A1\.5 1\.5 0 0 1 [^L]+L[^A]+A1\.5 1\.5 0 0 0 [-\d.]+ [-\d.]+/)?.[0];
     expect(tail, "마크 링에서 꼬리를 찾지 못했다").toBeDefined();
     expect(rim).toContain(tail!);
-    // 구멍(얼굴 창)
-    const hole = markRing.slice(markRing.indexOf("ZM") + 1);
-    expect(rim.endsWith(hole)).toBe(true);
-    // 바깥 원은 R=20 한 개. 위성 홈(A8 8)은 림에 없다.
     expect(rim).toMatch(/A20 20 0 1 1 /);
     expect(markRing).toMatch(/A8 8 /);
     expect(rim).not.toMatch(/A8 8 /);
-    // 얼굴은 구멍과 같은 원이다
-    expect(circleCenter(face)).toEqual(circleCenter(hole));
+    // 얼굴 창: 마크의 구멍과 같은 중심, 반지름은 바깥 20의 0.8
+    const hole = circleOf(rimHole);
+    expect(hole.c).toEqual(circleOf(markHole).c);
+    expect(hole.r / 20).toBeCloseTo(0.8, 5);
+    expect(circleOf(face)).toEqual(hole);
+  });
+
+  it("후드는 말풍선 꼬리를 한 겹 두른다(테두리 조각이 후드 path 안에 있다)", () => {
+    expect(hood.split("M").length - 1).toBe(2);
+    expect(hood).toMatch(/A4 4 /); // 꼬리 끝 둥글림 1.5 + 테두리 2.5
   });
 
   it("구슬은 위성과 같은 −45° 대각선 위에 있고 같은 호박색이다", () => {
     const satellite = paths(read(join(MARK_DIR, "oort-mark-black.svg")))[1];
-    const [rx, ry] = circleCenter(rim.slice(rim.indexOf("ZM") + 1));
+    const [rx, ry] = circleCenter(rimHole);
     const [sx, sy] = circleCenter(satellite);
     const [bx, by] = circleCenter(bead);
     expect(sx - rx).toBeCloseTo(-(sy - ry), 5);
     expect(bx - rx).toBeCloseTo(-(by - ry), 5);
-    expect(bx - rx).toBeGreaterThan(sx - rx); // 후드 끝으로 물러났다
-    // 단색 호박판의 색 = 파비콘 위성의 색 = 코메토 구슬의 색
+    expect(bx - rx).toBeGreaterThan(sx - rx);
     const amber = read(join(MARK_DIR, "oort-mark-amber.svg")).match(/<g fill="(#[0-9a-f]{6})"/)?.[1];
     expect(amber).toBeDefined();
-    expect(fills(kometto)[4]).toBe(amber);
+    expect(fills(kometto).at(-1)).toBe(amber);
     expect(fills(read(join(WEB_ROOT, "public/favicon.svg")))[1]).toBe(amber);
   });
 
@@ -165,18 +172,14 @@ describe("코메토 얼굴은 C2-04 마크와 한 기하다", () => {
   it("앱 아이콘 두 판은 같은 얼굴을 싣는다", () => {
     for (const file of ["oort-app-icon.svg", "oort-app-icon-macos.svg"]) {
       const icon = read(join(MARK_DIR, file));
-      expect(paths(icon), file).toEqual([hood, face, rim, eyes, bead]);
-      expect(fills(icon), file).toEqual(fills(kometto));
+      expect(paths(icon), file).toEqual([comet, hood, face, rim, eyes, bead]);
     }
   });
 
-  it("KomettoMark는 같은 path이고, S0 토큰은 앱 아이콘과 같은 색이다", () => {
-    expect(komettoComponent()).toEqual([hood, face, rim, eyes, bead]);
-    // viewBox도 같다. 가로 중심이 링 중심이라 S0에서 얼굴이 워드마크 축 위에 선다.
+  it("KomettoMark는 같은 path·viewBox이고, S0 토큰은 앱 아이콘과 같은 색이다", () => {
+    expect(komettoComponent()).toEqual([comet, hood, face, rim, eyes, bead]);
     const viewBox = kometto.match(/viewBox="([^"]+)"/)?.[1];
     expect(read(join(WEB_ROOT, "src/design/brand/KomettoMark.tsx"))).toContain(`viewBox: "${viewBox}"`);
-    const [x, , w] = viewBox!.split(" ").map(Number);
-    expect(x + w / 2).toBe(circleCenter(face)[0]);
     const css = read(join(WEB_ROOT, "src/design/tokens.css"));
     const token = (name: string) => css.match(new RegExp(`--onboarding-kometto-${name}:\\s*(#[0-9a-f]{6});`))?.[1];
     const [hoodFill, faceFill, rimFill, eyeFill, beadFill] = fills(kometto);
@@ -185,17 +188,24 @@ describe("코메토 얼굴은 C2-04 마크와 한 기하다", () => {
     expect(token("rim")).toBe(rimFill);
     expect(token("rim")).toBe(eyeFill);
     expect(token("bead")).toBe(beadFill);
+    // 혜성 띠: 후드색 → 호박 → 살구
+    const stops = [...kometto.matchAll(/stop-color="(#[0-9a-f]{6})"/g)].map((m) => m[1]);
+    expect([...new Set(stops)]).toEqual([token("hood"), token("comet-mid"), token("comet-end")]);
   });
 
-  it("얼굴 색끼리, 그리고 앱 아이콘 바탕의 모든 멈춤점과 비텍스트 대비 3:1 이상이다", () => {
+  it("얼굴 색끼리, 그리고 앱 아이콘 바탕(판·배지)과 비텍스트 대비 3:1 이상이다", () => {
     const [hoodFill, faceFill, rimFill, eyeFill, beadFill] = fills(kometto);
     expect(contrast(rimFill, faceFill)).toBeGreaterThanOrEqual(3);
     expect(contrast(eyeFill, faceFill)).toBeGreaterThanOrEqual(3);
     const icon = read(join(MARK_DIR, "oort-app-icon.svg"));
-    const stops = [...icon.matchAll(/stop-color="(#[0-9a-f]{6})"/g)].map((m) => m[1]);
-    expect(stops.length).toBeGreaterThanOrEqual(1);
-    for (const stop of stops)
-      for (const fill of [hoodFill, beadFill, rimFill])
-        expect(contrast(fill, stop), `${fill} / ${stop}`).toBeGreaterThanOrEqual(3);
+    const sky = icon.match(/<linearGradient id="sky"[\s\S]*?<\/linearGradient>/)?.[0] ?? "";
+    const grounds = [
+      ...[...sky.matchAll(/stop-color="(#[0-9a-f]{6})"/g)].map((m) => m[1]),
+      ...[...icon.matchAll(/<(?:rect|circle)\b[^>]*fill="(#[0-9a-f]{6})"/g)].map((m) => m[1]),
+    ];
+    expect(grounds.length).toBeGreaterThanOrEqual(1);
+    for (const ground of grounds)
+      for (const fill of [hoodFill, beadFill])
+        expect(contrast(fill, ground), `${fill} / ${ground}`).toBeGreaterThanOrEqual(3);
   });
 });

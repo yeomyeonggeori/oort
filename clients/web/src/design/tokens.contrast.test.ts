@@ -935,6 +935,8 @@ describe("onboarding S0 palette (single look)", () => {
       "onboarding-kometto-face",
       "onboarding-kometto-rim",
       "onboarding-kometto-bead",
+      "onboarding-kometto-comet-mid",
+      "onboarding-kometto-comet-end",
     ]) {
       expect(ONBOARDING[name], name).toMatch(/^#[0-9a-f]{6}$/i);
     }

@@ -37,13 +37,13 @@
 //     (후드·구슬·말풍선 꼬리)을 바탕 그라데이션의 **모든 멈춤점**과 잰다. 1024
 //     렌더의 실제 픽셀로도 다시 잰다. 림/후드는 재기만 하고 기준을 걸지 않는다
 //     (README 「대비」: 림은 얼굴과의 경계로 읽힌다)
-//   - 색: 1024 렌더의 표본점(얼굴·눈·림·후드·구슬)이 정해진 색 그대로다
+//   - 색: 1024 렌더의 표본점(얼굴·눈·림·후드·구슬·말풍선 꼬리·혜성 두 띠)이 정해진 색 그대로다
 //   - 판독: 코메토 전면판을 여러 크기로 그린 뒤 다시 키워, 눈·눈 사이·말풍선
 //     꼬리 자리의 밝기가 제 색 쪽인지 잰다. 32px 이상 나가는 크기에서 모두 0.5 이상
 //   - 틈: C2-04 small 기하와 실제 파비콘 타일을 16·24·32px로 그렸을 때 위성과 링
 //     사이 틈 한가운데 픽셀이 바탕 쪽에 가깝다
 //   - icns 16px 칸이 C2-04 small 타일이다(코메토가 아니다)
-//   - maskable: 가장 먼 픽셀이 지름 80% 안전 원 안에 있다
+//   - maskable: 머리(혜성 꼬리 제외)의 가장 먼 픽셀이 지름 80% 안전 원 안에 있다
 // =============================================================================
 
 import { execFileSync } from "node:child_process";
@@ -99,6 +99,8 @@ const ICNS_TILE_SLOTS = [
 ];
 /** 문서용으로 함께 재는 작은 크기(검사 기준을 걸지 않는다: 여기서 무너진다). */
 const PROBE_SMALL_PX = [16, 20, 24, 29];
+/** 혜성 꼬리의 띠 색을 요구하는 가장 작은 크기. 그보다 작으면 꼬리는 한 덩어리로만 보여도 된다. */
+const COMET_MIN_PX = 64;
 /** 판독 기준. 0=둘레 색, 1=제 색. 표본점이 절반 이상 제 색 쪽이어야 읽힌다. */
 const LEGIBLE = 0.5;
 
@@ -164,16 +166,19 @@ export function contrast(a, b) {
  */
 function characterPairs(background) {
   const c = CHARACTER_COLORS;
-  const stops = BACKGROUNDS[background].stops.map(([, hex]) => hex);
-  const worst = (fg) => stops.reduce((m, bg) => Math.min(m, contrast(fg, bg)), Infinity);
-  const worstStop = (fg) => stops.reduce((a, bg) => (contrast(fg, bg) < contrast(fg, a) ? bg : a));
+  const def = BACKGROUNDS[background];
+  // 캐릭터가 닿는 바탕 색: 판의 모든 멈춤점과 배지 원.
+  const grounds = [...def.stops.map(([, hex]) => hex), ...(def.badge ? [def.badge.color] : [])];
+  const worst = (fg) => grounds.reduce((m, bg) => Math.min(m, contrast(fg, bg)), Infinity);
+  const worstGround = (fg) => grounds.reduce((a, bg) => (contrast(fg, bg) < contrast(fg, a) ? bg : a));
   return [
     { name: "림 / 얼굴", pair: `${c.rim} / ${c.face}`, ratio: contrast(c.rim, c.face), required: true },
     { name: "눈 / 얼굴", pair: `${c.eye} / ${c.face}`, ratio: contrast(c.eye, c.face), required: true },
-    { name: "후드 / 바탕(최저)", pair: `${c.hood} / ${worstStop(c.hood)}`, ratio: worst(c.hood), required: true },
-    { name: "구슬 / 바탕(최저)", pair: `${c.bead} / ${worstStop(c.bead)}`, ratio: worst(c.bead), required: true },
-    { name: "말풍선 꼬리 / 바탕(최저)", pair: `${c.rim} / ${worstStop(c.rim)}`, ratio: worst(c.rim), required: true },
-    { name: "림 / 후드 (기준 없음)", pair: `${c.rim} / ${c.hood}`, ratio: contrast(c.rim, c.hood), required: false },
+    { name: "후드 / 바탕(최저)", pair: `${c.hood} / ${worstGround(c.hood)}`, ratio: worst(c.hood), required: true },
+    { name: "구슬 / 바탕(최저)", pair: `${c.bead} / ${worstGround(c.bead)}`, ratio: worst(c.bead), required: true },
+    { name: "혜성 호박 띠 / 바탕(최저, 기준 없음)", pair: `${c.cometMid} / ${worstGround(c.cometMid)}`, ratio: worst(c.cometMid), required: false },
+    { name: "혜성 살구 띠 / 바탕(최저, 기준 없음)", pair: `${c.cometEnd} / ${worstGround(c.cometEnd)}`, ratio: worst(c.cometEnd), required: false },
+    { name: "말풍선 꼬리 / 후드 테두리 (기준 없음)", pair: `${c.rim} / ${c.hood}`, ratio: contrast(c.rim, c.hood), required: false },
   ];
 }
 
@@ -239,7 +244,7 @@ async function measure(page) {
 
   await page.setContent("<!doctype html><html><body></body></html>");
   return page.evaluate(
-    async ({ smallSrc, fullSrc, plates, maskSrc, favSrc, favGap, favRing, gapMid, ringMid, grid, probes, colors }) => {
+    async ({ smallSrc, fullSrc, plates, maskSrc, maskBgSrc, favSrc, favGap, favRing, gapMid, ringMid, grid, probes, colors }) => {
       const load = (src) =>
         new Promise((ok, no) => {
           const img = new Image();
@@ -316,6 +321,21 @@ async function measure(page) {
       const Lface = lumHex(colors.face);
       const Leye = lumHex(colors.eye);
       const Lrim = lumHex(colors.rim);
+      const Lhood = lumHex(colors.hood);
+      const rgbHex = (h) => {
+        const n = parseInt(h.slice(1), 16);
+        return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+      };
+      const rgbAt = (data, p) => {
+        const i = (Math.floor(p[1] * 1024) * 1024 + Math.floor(p[0] * 1024)) * 4;
+        return [data.data[i], data.data[i + 1], data.data[i + 2]];
+      };
+      const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+      // 띠 색이 읽히는 정도: 바탕에서 제 색까지 가는 길의 몇 할을 왔나.
+      const colorness = (d, b, p, hex) => {
+        const want = rgbHex(hex);
+        return 1 - dist(rgbAt(d, p), want) / dist(rgbAt(b, p), want);
+      };
       const legibility = {};
       for (const plate of plates) {
        legibility[plate.name] = {};
@@ -323,14 +343,17 @@ async function measure(page) {
         const pr = plate.probes;
         const d = up((await draw(plate.src, size, null)).canvas);
         const b = up((await draw(plate.bg, size, null)).canvas);
-        const tailBg = at(b, pr.tail);
         legibility[plate.name][size] = {
           // 눈 자리가 얼굴보다 눈 쪽이다
           eye: (at(d, pr.eye) - Lface) / (Leye - Lface),
           // 두 눈 사이가 얼굴색으로 남는다(두 점이 한 덩어리로 붙지 않는다)
           between: (Leye - at(d, pr.betweenEyes)) / (Leye - Lface),
           // 말풍선 꼬리 끝이 바탕보다 림 색 쪽이다
-          tail: (at(d, pr.tail) - tailBg) / (Lrim - tailBg),
+          // 말풍선 꼬리 가운데가 둘레(후드 테두리)보다 림 색 쪽이다
+          tail: (at(d, pr.tail) - Lhood) / (Lrim - Lhood),
+          // 혜성 꼬리의 두 띠가 제 색으로 읽힌다
+          cometMid: colorness(d, b, pr.cometMid, colors.cometMid),
+          cometEnd: colorness(d, b, pr.cometEnd, colors.cometEnd),
         };
        }
       }
@@ -347,32 +370,33 @@ async function measure(page) {
         hood: hex(full, ...P(probes.hood)),
         bead: hex(full, ...P(probes.bead)),
         tail: hex(full, ...P(probes.tail)),
+        cometMid: hex(full, ...P(probes.cometMid)),
+        cometEnd: hex(full, ...P(probes.cometEnd)),
       };
 
       // ---- maskable 도달 거리 ----
+      // 바탕만 그린 판(그라데이션·배지 포함)과 픽셀마다 비교해 캐릭터 픽셀만 센다.
       const { data: mask } = await draw(maskSrc, 512, null);
-      const bgAt = (x, y) => {
-        const i = (y * 512 + x) * 4;
-        return [mask.data[i], mask.data[i + 1], mask.data[i + 2]];
-      };
+      const { data: maskBg } = await draw(maskBgSrc, 512, null);
       let reach = 0;
-      for (let y = 0; y < 512; y++) {
-        // 그라데이션 바탕: 같은 줄의 가장 왼쪽 픽셀을 그 줄의 바탕색으로 본다.
-        const [bgR, bgG, bgB] = bgAt(0, y);
+      for (let y = 0; y < 512; y++)
         for (let x = 0; x < 512; x++) {
           const i = (y * 512 + x) * 4;
           const diff =
-            Math.abs(mask.data[i] - bgR) + Math.abs(mask.data[i + 1] - bgG) + Math.abs(mask.data[i + 2] - bgB);
+            Math.abs(mask.data[i] - maskBg.data[i]) +
+            Math.abs(mask.data[i + 1] - maskBg.data[i + 1]) +
+            Math.abs(mask.data[i + 2] - maskBg.data[i + 2]);
           if (diff > 24) reach = Math.max(reach, Math.hypot(x + 0.5 - 256, y + 0.5 - 256));
         }
-      }
       return { gaps, legibility, fullPixels, reach: reach / 512 };
     },
     {
       smallSrc: svg(SMALL),
       fullSrc,
       plates,
-      maskSrc: appIconSvg("maskable"),
+      // 안전 원은 머리만 잰다. 혜성 꼬리는 런처가 잘라도 머리가 남는다.
+      maskSrc: appIconSvg("maskable").replace(/\s*<path fill="url\(#comet\)"[^>]*\/>/, ""),
+      maskBgSrc: bgOnly(appIconSvg("maskable")),
       favSrc,
       favGap: inFav(gapMid),
       favRing: inFav(ringMid),
@@ -558,6 +582,8 @@ async function main() {
       ["hood", c.hood],
       ["bead", c.bead],
       ["tail", c.rim],
+      ["cometMid", c.cometMid],
+      ["cometEnd", c.cometEnd],
     ])
       if (fp[key] !== want) fail(`전면판 ${key} 표본 픽셀 ${fp[key]} ≠ ${want}`);
     const stops = BACKGROUNDS[APP_BACKGROUND].stops;
@@ -570,7 +596,6 @@ async function main() {
       ["1024 렌더 눈 / 얼굴", fp.eye, fp.face],
       ["1024 렌더 후드 / 아래 바탕", fp.hood, fp.bottom],
       ["1024 렌더 구슬 / 위 바탕", fp.bead, fp.corner],
-      ["1024 렌더 꼬리 / 아래 바탕", fp.tail, fp.bottom],
     ].map(([name, a, b]) => {
       const ratio = contrast(a, b);
       if (ratio < 3) fail(`대비 ${name}: ${ratio.toFixed(2)}:1 < 3:1`);
@@ -590,7 +615,7 @@ async function main() {
     ])
       for (const size of sizes)
         for (const [k, v] of Object.entries(m.legibility[plate][size]))
-          if (!(v >= LEGIBLE)) fail(`코메토 ${plate} ${size}px: ${k} ${v.toFixed(2)} < ${LEGIBLE} (얼굴이 뭉개진다)`);
+          if (!(k.startsWith("comet") && size < COMET_MIN_PX) && !(v >= LEGIBLE)) fail(`코메토 ${plate} ${size}px: ${k} ${v.toFixed(2)} < ${LEGIBLE} (둘레에 먹힌다)`);
     if (m.reach > SAFE_RADIUS + 0.005) fail(`maskable: 얼굴이 안전 원 밖까지 간다 (${m.reach.toFixed(3)} > ${SAFE_RADIUS})`);
 
     console.log("\n== PNG");
@@ -607,7 +632,7 @@ async function main() {
       console.log(`\n== 코메토 판독, ${plate} 판 (0=둘레 색, 1=제 색, ${min}px 이상에서 ${LEGIBLE} 이상)`);
       for (const [size, l] of Object.entries(m.legibility[plate]))
         console.log(
-          `${String(size).padStart(4)}px  눈 ${l.eye.toFixed(2)}  눈 사이 ${l.between.toFixed(2)}  꼬리 ${l.tail.toFixed(2)}${
+          `${String(size).padStart(4)}px  눈 ${l.eye.toFixed(2)}  눈 사이 ${l.between.toFixed(2)}  말풍선 꼬리 ${l.tail.toFixed(2)}  혜성 호박 ${l.cometMid.toFixed(2)}  살구 ${l.cometEnd.toFixed(2)}${
             Number(size) < min ? "  (C2-04 small 자리)" : ""
           }`
         );

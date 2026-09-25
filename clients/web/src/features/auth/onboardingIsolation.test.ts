@@ -37,6 +37,7 @@ describe("onboarding S0 and brand lockup stay outside custom accent", () => {
     expect(landing).toMatch(/<KomettoMark\b/);
     const fillClasses = [...kometto.matchAll(/\bfill-[a-z-]+/g)].map((m) => m[0]);
     expect(fillClasses.length).toBe(5);
+    expect(kometto).toMatch(/kometto-stop-hood/);
     for (const cls of fillClasses) expect(cls).toMatch(/^fill-onboarding-kometto-/);
     expect(kometto).not.toMatch(/currentColor|\baccent\b/);
   });
