@@ -931,6 +931,10 @@ describe("onboarding S0 palette (single look)", () => {
       "onboarding-accent",
       "onboarding-on-accent",
       "onboarding-line",
+      "onboarding-kometto-hood",
+      "onboarding-kometto-face",
+      "onboarding-kometto-rim",
+      "onboarding-kometto-bead",
     ]) {
       expect(ONBOARDING[name], name).toMatch(/^#[0-9a-f]{6}$/i);
     }
@@ -961,6 +965,19 @@ describe("onboarding S0 palette (single look)", () => {
   it("keeps the S0 control outline at 3:1 on the space field", () => {
     expect(
       contrast(ONBOARDING["onboarding-line"], ONBOARDING["onboarding-space"])
+    ).toBeGreaterThanOrEqual(3);
+  });
+
+  it("keeps the S0 코메토 hero readable: silhouette on space, face window inside (#2732)", () => {
+    const space = ONBOARDING["onboarding-space"];
+    for (const part of ["hood", "bead", "rim"]) {
+      expect(
+        contrast(ONBOARDING[`onboarding-kometto-${part}`], space),
+        `${part} on space`
+      ).toBeGreaterThanOrEqual(3);
+    }
+    expect(
+      contrast(ONBOARDING["onboarding-kometto-rim"], ONBOARDING["onboarding-kometto-face"])
     ).toBeGreaterThanOrEqual(3);
   });
 

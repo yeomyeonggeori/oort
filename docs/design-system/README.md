@@ -312,13 +312,14 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
   배치 57곳, 그중 인접 레이블조차 없는 36곳**(QuickSwitcher 12곳 포함). 이 축을 재는
   기계는 없다(§5.3).
 
-**로컬 SVG 예외 목록은 아래 다섯 파일로 닫혀 있다.** 브랜드 글리프 넷과, 데이터가
+**로컬 SVG 예외 목록은 아래 여섯 파일로 닫혀 있다.** 브랜드 글리프 다섯과, 데이터가
 행렬로 그려진 QR 하나. QR은 아이콘이 아니다: 글리프가 아니라 스캔용 페이로드를
 모듈 격자로 렌더한 것이다. 기능 아이콘이 아니다.
 
 | 파일 | 존치 사유 |
 |---|---|
 | `clients/web/src/design/brand/OortMark.tsx` | Lucide에 없는 제품 브랜드 마크(C2-04 Bubble). 앱 안에서 `currentColor`를 상속한다. 기하 정본과 치수는 [`docs/brand/mark`](../brand/mark/README.md)다. |
+| `clients/web/src/design/brand/KomettoMark.tsx` | 온보딩 S0의 대표 로고인 코메토 K6 플랫 얼굴(#2732). 앱 아이콘과 같은 얼굴이고, 얼굴 창의 림이 C2-04 링이다. S0 한 벌 토큰(`--onboarding-kometto-*`)으로 칠하고 32px 미만에서는 쓰지 않는다. |
 | `clients/web/src/features/auth/OortCloudMarks.tsx` | S0 오르트 구름 산포(혜성·소행성·4촉 별) 라인아트. Lucide에 없는 도메인 글리프이고 기능 아이콘으로 재사용하지 않는다. |
 | `clients/web/src/features/settings/DeviceLinkCard.tsx` | 기기 연결 딥링크를 담는 스캔용 QR 행렬. Lucide `QrCode`는 16px 아이콘이라 페이로드를 인코드하지 못한다 (#1989). |
 | `clients/web/public/oort-mark.svg` | CSS가 닿지 않는 문서·배포·링크 미리보기용 정적 브랜드 자산. |

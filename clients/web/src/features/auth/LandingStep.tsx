@@ -1,11 +1,12 @@
 import type { Ref } from "react";
-import { OortMark } from "@/design/brand/OortMark";
+import { KomettoMark } from "@/design/brand/KomettoMark";
 import { OortCloudField } from "./OortCloudField";
 
 /**
  * S0: a single-look deep-space landing. Two choices, no progress bar.
- * The mark is the product OortMark (display geometry at this size); only
- * scale and colour change.
+ * The hero mark is the 코메토 K6 flat face (#2732), the same face as the app
+ * icon. Its rim is the C2-04 ring, so the product mark is still the face
+ * window; the small lockups elsewhere keep OortMark.
  * Hero lockup is mark + wordmark "oort" + one-line intro (#1882).
  */
 export function LandingStep({
@@ -32,7 +33,7 @@ export function LandingStep({
           data-testid="onboarding-lockup"
         >
           <div className="onboarding-mark" data-testid="onboarding-mark">
-            <OortMark className="text-onboarding-accent" optical="display" />
+            <KomettoMark />
           </div>
           <h1
             className="onboarding-wordmark font-semibold leading-none tracking-tight"

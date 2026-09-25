@@ -55,6 +55,7 @@ const SHIPPED_SOURCES = filesUnder(SRC_DIR, /\.tsx?$/)
 describe("ADR-0172 lucide 아이콘 경계", () => {
   it("기능 표면의 raw SVG는 브랜드 글리프와 데이터 행렬(QR)만 남는다", () => {
     expect(LOCAL_SVG_COMPONENTS).toEqual([
+      "src/design/brand/KomettoMark.tsx",
       "src/design/brand/OortMark.tsx",
       "src/features/auth/OortCloudMarks.tsx",
       "src/features/settings/DeviceLinkCard.tsx",
