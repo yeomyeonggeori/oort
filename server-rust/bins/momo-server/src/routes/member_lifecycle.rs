@@ -10,6 +10,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use momo_auth::{Principal, WorkspaceRole};
 use momo_db::audit::{write_audit, AuditEntry};
+use momo_push::invalidate_member_push_tokens_in_tx;
 use momo_settings::{
     change_channel_role_in_tx, change_workspace_role_in_tx, create_workspace_ban_in_tx,
     delete_workspace_ban_in_tx, leave_channel_in_tx, list_workspace_bans_in_tx,
@@ -241,6 +242,13 @@ async fn set_status(
                     .await?
                 {
                     Ok(applied) => {
+                        // Suspension revokes every token of the member; the
+                        // phones registered under those sessions must not come
+                        // back to life on reinstatement (#2677).
+                        if transition == StatusTransition::Suspend {
+                            invalidate_member_push_tokens_in_tx(conn, workspace_id, target_id)
+                                .await?;
+                        }
                         write_audit(
                             conn,
                             &AuditEntry::new(workspace_id, transition.action())
@@ -305,6 +313,9 @@ pub async fn remove(
                 .await?
                 {
                     Ok(applied) => {
+                        // Removal revokes every token of the member, and with
+                        // them every push registration (#2677).
+                        invalidate_member_push_tokens_in_tx(conn, workspace_id, target_id).await?;
                         write_audit(
                             conn,
                             &AuditEntry::new(workspace_id, "member.removed")

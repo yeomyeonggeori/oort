@@ -36,6 +36,7 @@ use momo_auth::{
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
+use momo_push::invalidate_member_push_tokens_in_tx;
 
 use crate::dto::{ClaimRequest, LoginResponse, MemberDto};
 use crate::error::{db_error, ApiError};
@@ -100,6 +101,13 @@ pub async fn claim(
                         } else {
                             ("owner.claim", "momo.owner.claim.v1")
                         };
+                    // A reset revokes every session of the member
+                    // (`consume_claim_in_tx`); their push registrations end in
+                    // the same commit (#2677). An owner bootstrap revokes none.
+                    if outcome.claim_kind == momo_auth::CLAIM_KIND_PASSWORD_RESET {
+                        invalidate_member_push_tokens_in_tx(conn, workspace_id, outcome.member_id)
+                            .await?;
+                    }
                     write_audit(
                         conn,
                         &AuditEntry::new(workspace_id, action)

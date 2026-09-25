@@ -21,6 +21,7 @@ use momo_auth::{
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_messaging::get_member;
+use momo_push::invalidate_member_push_tokens_in_tx;
 use uuid::Uuid;
 
 use crate::dto::{ChangePasswordRequest, LoginResponse, MemberDto, PasswordResetClaimResponse};
@@ -189,6 +190,10 @@ pub async fn change_own_password(
                 )
                 .await?;
                 if let PasswordChangeMutation::Applied { sessions_revoked } = mutation {
+                    // The change revoked every session of the member (the
+                    // caller gets a fresh one below); every phone registered
+                    // under them stops receiving pushes now (#2677).
+                    invalidate_member_push_tokens_in_tx(conn, workspace_id, member_id).await?;
                     write_audit(
                         conn,
                         &AuditEntry::new(workspace_id, "member.password_changed")

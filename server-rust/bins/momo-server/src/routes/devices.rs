@@ -47,6 +47,9 @@ fn rejection(rejection: DeviceRejection) -> ApiError {
         | DeviceRejection::TokenOwnedByAnotherMember => StatusCode::FORBIDDEN,
         DeviceRejection::PlatformImmutable => StatusCode::CONFLICT,
         DeviceRejection::DeviceNotFound => StatusCode::NOT_FOUND,
+        // #2677: the caller's session ended mid-request. Same 401 the auth
+        // middleware gives this token on its next request.
+        DeviceRejection::SessionEnded => StatusCode::UNAUTHORIZED,
     };
     ApiError::new(status, rejection.message())
 }
@@ -180,6 +183,15 @@ mod tests {
         assert_eq!(
             rejection(DeviceRejection::DeviceNotFound).status,
             StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            rejection(DeviceRejection::SessionEnded).status,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            rejection(DeviceRejection::SessionEnded).message,
+            "token has been revoked",
+            "the middleware's wording for the same state"
         );
     }
 

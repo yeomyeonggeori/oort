@@ -68,6 +68,17 @@ BEGIN
    WHERE workspace_id = '00000000-0000-7000-8000-000000000001'
      AND actor_member_id = '00000000-0000-7000-8000-000000000101'
      AND revoked_at IS NULL;
+
+  -- #2677: every push registration those sessions made ends with them, as on a
+  -- password change or reset — otherwise the previous holder's phone keeps
+  -- receiving the owner's notifications. Every registration of the owner,
+  -- with or without a session lineage; rows are invalidated, never deleted.
+  UPDATE push_token
+     SET invalidated_at = now(),
+         updated_at = now()
+   WHERE workspace_id = '00000000-0000-7000-8000-000000000001'
+     AND member_id = '00000000-0000-7000-8000-000000000101'
+     AND invalidated_at IS NULL;
 END
 $$;
 

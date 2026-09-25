@@ -68,6 +68,11 @@ pub enum DeviceRejection {
     PlatformImmutable,
     /// No such device in this tenant. 404.
     DeviceNotFound,
+    /// The session this registration was made under ended after the auth
+    /// middleware accepted it (#2677) — a logout, disconnect or password change
+    /// committed in between. 401, with the middleware's own wording, because
+    /// that is exactly what the next request on this token will hear.
+    SessionEnded,
 }
 
 impl DeviceRejection {
@@ -81,6 +86,7 @@ impl DeviceRejection {
             }
             DeviceRejection::PlatformImmutable => "device platform cannot change",
             DeviceRejection::DeviceNotFound => "device not found",
+            DeviceRejection::SessionEnded => "token has been revoked",
         }
     }
 }
