@@ -154,6 +154,10 @@ export function Avatar({
             identity.kind === 'agent' && styles.initialAgent,
             initialSized,
           ]}
+          // 이니셜은 상자에 갇힌 표지다 — 보조기술에서 숨고, 상자는 글자 크기를
+          // 따라 커지지 않는다. 그래서 확대 글자에서 상자를 넘치지 않게 배율을
+          // 묶는다(#2702 AX 캡처: 머리의 32 원에서 「곽」이 테두리를 넘었다).
+          maxFontSizeMultiplier={AVATAR_INITIAL_MAX_SCALE}
           testID="avatar-initial">
           {identity.fallback.text}
         </Text>
@@ -166,6 +170,9 @@ export function Avatar({
     </View>
   );
 }
+
+/** 이니셜의 Dynamic Type 배율 상한. 32 상자에 13pt 한 글자가 여백을 지키는 끝. */
+const AVATAR_INITIAL_MAX_SCALE = 1.3;
 
 const buildStyles = (color: Palette) => StyleSheet.create({
   box: {

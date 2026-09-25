@@ -4,7 +4,7 @@ import {
 import {visibleCustomStatus} from '@momo/core/features/presence/customStatus';
 import {memberFor, type Directory} from '@momo/core/features/workspace/directory';
 import {effectivePresence, type EffectivePresence, type Member} from '@momo/core/lib/api';
-import React, {useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   Linking,
   Modal,
@@ -118,6 +118,11 @@ function SheetBody({
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
   const [page, setPage] = useState<Page>('profile');
+  const scrollRef = useRef<ScrollView>(null);
+  const revealEnd = useCallback(
+    () => scrollRef.current?.scrollToEnd({animated: true}),
+    [],
+  );
 
   return (
     <View style={styles.root}>
@@ -150,6 +155,7 @@ function SheetBody({
       </View>
 
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={[
           styles.content,
           {paddingBottom: Math.max(insets.bottom, space.lg) + space.lg},
@@ -164,6 +170,7 @@ function SheetBody({
             connected={connected}
             onOpenTheme={() => setPage('theme')}
             onSignOut={onSignOut}
+            onRevealEnd={revealEnd}
           />
         )}
       </ScrollView>
@@ -189,18 +196,28 @@ function ProfilePage({
   connected,
   onOpenTheme,
   onSignOut,
+  onRevealEnd,
 }: {
   member: Member;
   directory: Directory;
   connected: boolean;
   onOpenTheme: () => void;
   onSignOut: () => void;
+  /** 확인 블록이 열리면 시트를 끝까지 내린다 — 두 버튼이 접힌 곳 아래에 서지 않게. */
+  onRevealEnd: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {choice} = useTheme();
   const push = usePushPermission();
   const now = useNow();
   const [confirming, setConfirming] = useState(false);
+
+  // 375pt 기본 크기에서 확인 블록의 두 버튼이 화면 아래로 나갔다(#2702 캡처) —
+  // 「로그아웃」을 누른 사람에게 다음 단계가 보이지 않으면 버튼이 안 먹은 것으로
+  // 읽힌다. 블록이 그려진 **뒤에** 내린다.
+  useEffect(() => {
+    if (confirming) onRevealEnd();
+  }, [confirming, onRevealEnd]);
 
   const self = memberFor(directory, member.id);
   // 명부가 아직 안 왔으면 알약을 그리지 않는다 — 선언을 모르는 채 「온라인」을
