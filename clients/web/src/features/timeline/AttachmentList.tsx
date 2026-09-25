@@ -149,7 +149,7 @@ function FileCard({
   );
   if (!opensPdf) return card;
   return (
-    <div className="flex min-w-0 flex-col gap-1">
+    <div className="flex min-w-0 flex-col">
       {card}
       {/* 열기 실패는 카드 **아래** 한 줄이다. 카드 안에 두면 `w-fit` 카드가 긴
           문장만큼 넓어져 두 버튼이 오른쪽으로 튄다(design-review M1). 이 줄은
@@ -157,7 +157,9 @@ function FileCard({
       <p
         ref={openFailureRef}
         role="status"
-        className="max-w-pane-lg text-meta text-danger"
+        // 간격은 문장이 있을 때만 (design-review L5): 빈 줄이 PDF 카드 아래에만
+        // 4px 를 영구히 남기지 않게.
+        className={cn("max-w-pane-lg text-meta text-danger", openFailure !== null && "mt-1")}
         data-testid="attachment-open-failed"
       >
         {openFailure === null ? null : pdfOpenFailureCopy(openFailure)}
