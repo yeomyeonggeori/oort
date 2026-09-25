@@ -1,6 +1,14 @@
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
 
+import {contrast as coreContrast} from '@momo/core/design/color';
+import {
+  COLOR_ROLES,
+  THEMES as CORE_THEMES,
+  contrastPairs,
+} from '@momo/core/design/themes';
+
+import {DS2_COMBOS, ds2Roles, THEMES} from '../src/design/ds2Tokens';
 import {
   darkPalette,
   lightPalette,
@@ -292,6 +300,14 @@ describe('두 팔레트가 같은 역할표를 든다', () => {
 // 팔레트와 맞춘다. 기대값을 여기 베껴 적으면 웹이 움직인 날 폰만 조용히 뒤처지므로,
 // 출처는 언제나 그 파일이다.
 //
+// **ADR-0189 D6 — 이 대조는 이행 중이다.** 원천은 이제 core(`@momo/core/design/
+// themes`)이고, 폰과 웹이 모두 core를 대조한다. 대조 범위는 공유층(색 역할·모션·
+// 층 이름)으로 줄고, 반경·타입은 값을 대조하지 않는다. 이 블록이 재는 것은 아직
+// 화면을 그리는 ADR-0174 값(웹 `tokens.css`와 폰 `tokens.ts`)이고, 폰 팔레트가
+// core 표로 옮겨 가는 DS2-2(#2714)에서 이 블록의 출처가 core로 바뀐다. 그 전에
+// 출처를 core로 돌리면 폰은 아직 DS1 값을 들고 있으므로 옳은 이유로 빨개진다.
+// core를 읽는 경로와 그 표의 대비는 파일 끝 「DS2 공유층」 블록이 지금 잰다.
+//
 // 범위가 자랐다. #1155 때 이 자리에는 *"범위는 accent 가족뿐이다 — 전부를 재면 이
 // 스위트는 「무엇이 정렬됐는가」가 아니라 「무엇이 아직 안 됐는가」를 말하게 된다"* 가
 // 적혀 있었고, 그 문장은 그때 참이었다. 지금은 짝이 있는 역할이 전부 정렬됐으므로
@@ -563,4 +579,49 @@ describe('#1155·#1164 — 두 팔레트가 웹 정본과 값 단위로 같다',
       expect(hueGap(palette.dangerFill, palette.danger)).toBeLessThan(15);
     },
   );
+});
+
+// =============================================================================
+// ADR-0189 D5·D6 — DS2 공유층. 원천은 core이고 폰은 그것을 경로로 직접 읽는다.
+//
+// 값은 여기 베껴 적지 않는다. 폰의 어댑터(`ds2Tokens.ts`)가 core 표를 **그대로**
+// 들고 있는지(같은 객체), 역할 이름이 core 목록과 같은지, 그리고 그 표가 폰
+// 런타임(jest + Metro와 같은 경로 풀이)에서도 대비 기준을 넘는지를 잰다. 전 조합
+// 대비의 정본 시험은 core `themes.test.ts`다. 여기서 한 번 더 도는 것은 경로가
+// 폰에서 실제로 풀린다는 증거이고, 어긋나면 이 파일이 빨개진다.
+// =============================================================================
+
+describe('DS2 공유층 — 원천은 core (ADR-0189 D5·D6)', () => {
+  it('폰 어댑터가 core 표를 그대로 든다(복사가 아니라 같은 객체)', () => {
+    expect(THEMES).toBe(CORE_THEMES);
+  });
+
+  it('여섯 조합 전부', () => {
+    expect(DS2_COMBOS.map(([t, m]) => `${t}/${m}`)).toEqual([
+      'dawnsky/light',
+      'dawnsky/dark',
+      'graphite/light',
+      'graphite/dark',
+      'noeul/light',
+      'noeul/dark',
+    ]);
+  });
+
+  it.each(DS2_COMBOS)('%s %s — 공유 색 역할이 core 목록 그대로다', (theme, mode) => {
+    const roles = ds2Roles(theme, mode);
+    for (const role of COLOR_ROLES) {
+      expect([role, roles[role]]).toEqual([role, CORE_THEMES[theme][mode].color[role]]);
+    }
+    expect(roles['canvas-top']).toBe(CORE_THEMES[theme][mode].canvas[0]);
+  });
+
+  it('core 대비 쌍 356개가 폰 런타임에서도 기준을 넘는다', () => {
+    const pairs = contrastPairs();
+    expect(pairs.length).toBe(356);
+    const failing = pairs.filter(p => coreContrast(p.fg, p.bg) < p.min);
+    expect(failing).toEqual([]);
+    // 폰 자체의 WCAG 식과 core 식이 같은 값을 낸다 — 두 자가 갈라지지 않는다.
+    const probe = pairs[0];
+    expect(contrast(probe.fg, probe.bg)).toBeCloseTo(coreContrast(probe.fg, probe.bg), 10);
+  });
 });

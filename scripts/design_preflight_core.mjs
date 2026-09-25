@@ -137,6 +137,21 @@ const CATEGORIES = [
   },
 ];
 
+// ---- 토큰 원천 예외 (ADR-0189 D5, #2712) ------------------------------------
+//
+// 디자인 시스템 2.0은 테마 × 모드 × 역할의 **값**을 코어에 둔다(웹 `themes/`
+// 생성본과 폰이 같은 표를 읽게 하려는 결정). 그 표가 들어 있는 두 파일만
+// raw_color 에서 뺀다. 웹 pre-flight 가 `src/design/tokens.css`·`themes/` 를 빼는
+// 것과 같은 성질의 예외이고, 파일 이름으로 닫혀 있다: 같은 폴더의 다른 파일
+// (생성기·이행·밀도)이나 코어 어디에서든 색 문자열이 새로 나오면 계속 빨갛다.
+// em-dash·과장 어휘·진행 낱말은 이 두 파일에서도 그대로 잰다.
+const TOKEN_SOURCE_FILES = new Set(["design/themes.ts", "design/signal.ts"]);
+
+function categoriesFor(file) {
+  const rel = relative(CORE_SRC, file).split("\\").join("/");
+  return TOKEN_SOURCE_FILES.has(rel) ? CATEGORIES.filter((c) => c.key !== "raw_color") : CATEGORIES;
+}
+
 // 파일 분류·스캔·허용 마커는 웹과 공유한다 (scripts/design_preflight_ast.mjs).
 // 마커의 낱말(`design-preflight-allow`)과 다는 자리(문자열 줄의 뒤꼬리 주석 또는
 // 그 칸의 머리 주석)도 거기 적혀 있다.
@@ -149,7 +164,7 @@ function scanCore() {
   const results = [];
   for (const file of walk(CORE_SRC).filter(shipsStrings)) {
     const text = readFileSync(file, "utf8");
-    for (const hit of scanSource(ts, file, text, CATEGORIES)) {
+    for (const hit of scanSource(ts, file, text, categoriesFor(file))) {
       results.push({ ...hit, file: relative(REPO_ROOT, file) });
     }
   }
@@ -274,6 +289,37 @@ const SELFTEST_CASES = [
     why: "과장 어휘도 사용자 문장의 문제다",
     src: 'export const NOTE = "손쉽게 이어서 작업하세요";',
   },
+  // ---- 토큰 원천 예외 (ADR-0189 D5, #2712) — 닫힌 두 파일만, raw_color 만.
+  {
+    want: [],
+    file: "design/themes.ts",
+    why: "테마 원천 표의 hex 는 예외 목록의 파일에서만 통과한다",
+    src: 'export const SURFACE = "#FFFEFC";',
+  },
+  {
+    want: [],
+    file: "design/signal.ts",
+    why: "신호 프리셋 표도 원천이다",
+    src: 'export const SEONGUN = { light: "#9C447C" };',
+  },
+  {
+    want: ["emdash"],
+    file: "design/signal.ts",
+    why: "예외는 raw_color 하나뿐이다 — 원천 파일의 거절 문구도 em-dash 를 잰다",
+    src: 'export const REASON = "쓸 수 없어요 — 다른 색을 고르세요";',
+  },
+  {
+    want: ["raw_color"],
+    file: "design/themesCss.ts",
+    why: "같은 폴더라도 예외 목록 밖 파일의 색 문자열은 빨갛다",
+    src: 'export const FALLBACK = "#FFFEFC";',
+  },
+  {
+    want: ["raw_color"],
+    file: "features/design/themes.ts",
+    why: "이름이 같아도 경로가 다르면 예외가 아니다",
+    src: 'export const SURFACE = "#FFFEFC";',
+  },
   // ---- progress_word · latin_particle (#1511) — 정의와 케이스 본대는
   // design_preflight_ast.mjs·web_strings 쪽. 여기는 코어에 실재하던 두 모양만.
   {
@@ -312,7 +358,7 @@ function runSelftest() {
   const failures = runCases(
     ts,
     CORE_SRC,
-    SELFTEST_CASES.map((c) => ({ ...c, categories: CATEGORIES })),
+    SELFTEST_CASES.map((c) => ({ ...c, categories: categoriesFor(join(CORE_SRC, c.file)) })),
     "core string-literal separation rule self-test"
   );
   console.log("");

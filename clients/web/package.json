@@ -11,6 +11,7 @@
     "typecheck": "tsc -b --noEmit && tsc --noEmit -p tsconfig.measure.json",
     "lint": "eslint .",
     "test": "vitest run",
+    "gen:palettes": "vite-node scripts/gen-palettes.ts",
     "smoke": "node e2e/smoke.mjs",
     "smoke:connect": "node e2e/connect.mjs",
     "gate:inject": "node gates/inject.mjs",
