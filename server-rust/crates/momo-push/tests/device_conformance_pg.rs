@@ -655,3 +655,64 @@ async fn the_raw_apns_token_never_leaves_the_database() {
         serde_json::json!(&token[token.len() - 8..])
     );
 }
+
+/// #2677 — insert a `session`/`access` row the way `record_session_token`
+/// does, already revoked: the state a registration meets when the phone's
+/// logout commits between the auth middleware's liveness check and the
+/// registration transaction.
+async fn seed_ended_session_access(su: &PgPool, tenant: &Tenant) -> Uuid {
+    sqlx::query_scalar(
+        "INSERT INTO token \
+           (workspace_id, kind, actor_member_id, token_hash, scopes, label, \
+            expires_at, revoked_at) \
+         VALUES ($1, 'session', $2, digest($3::text, 'sha256'), \
+                 ARRAY['messages:read']::text[], 'access', \
+                 now() + interval '15 minutes', now()) \
+         RETURNING id",
+    )
+    .bind(tenant.workspace_id)
+    .bind(tenant.member_a)
+    .bind(Uuid::new_v4().to_string())
+    .fetch_one(su)
+    .await
+    .expect("seed an ended session access row")
+}
+
+/// #2677 — a registration whose session ended before this transaction could
+/// lock it must not commit. Logout invalidates the registrations it can see; a
+/// row committed after that would outlive the session and keep the signed-out
+/// phone receiving pushes.
+///
+/// Drop the session check from `register_device` and this goes red.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn a_registration_under_an_ended_session_is_refused() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let tenant = seed_tenant(&su).await;
+    let token_id = seed_ended_session_access(&su, &tenant).await;
+    let device_id = Uuid::new_v4();
+
+    let outcome = register_device(
+        &app,
+        tenant.workspace_id,
+        tenant.member_a,
+        Some(token_id),
+        &registration(device_id, &hex_token(0x77)),
+    )
+    .await
+    .expect("the registration transaction itself does not fail");
+    assert_eq!(
+        outcome.err(),
+        Some(DeviceRejection::SessionEnded),
+        "a registration made under an ended session must be refused"
+    );
+
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM push_token WHERE device_id = $1")
+        .bind(device_id)
+        .fetch_one(&su)
+        .await
+        .expect("count tokens");
+    assert_eq!(rows, 0, "nothing was written for the refused registration");
+}

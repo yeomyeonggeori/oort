@@ -106,9 +106,10 @@ pub use agent_scope::{
 };
 pub use device_link::{
     confirm_device_link_sas_in_tx, consume_device_link_in_tx, device_link_status_in_tx,
-    find_linked_device_id_by_refresh_in_tx, issue_device_link_in_tx, list_linked_devices_in_tx,
-    lock_linked_device_in_tx, mint_device_link_token, normalized_device_link_token,
-    normalized_device_name, normalized_device_platform, rebind_device_link_session_in_tx,
+    find_linked_device_id_by_refresh_in_tx, issue_device_link_in_tx,
+    linked_device_session_id_in_tx, list_linked_devices_in_tx, lock_linked_device_in_tx,
+    mint_device_link_token, normalized_device_link_token, normalized_device_name,
+    normalized_device_platform, rebind_device_link_session_in_tx,
     rebind_locked_device_link_session_in_tx, resolve_device_link_workspace,
     revoke_linked_device_in_tx, DeviceLinkConfirm, DeviceLinkInputError, DeviceLinkMutation,
     DeviceLinkSpecInvalid, DeviceLinkStatus, DeviceLinkStatusKind, IssuedDeviceLink, LinkedDevice,
@@ -177,11 +178,12 @@ pub use realtime::{
 };
 pub use token_store::{
     carries_privileged_scope, has_active_realtime_credential, lock_member_session_tokens_by_ids,
-    record_session_token, record_session_token_with_device, revoke_member_session_tokens,
+    lock_session_for_registration, new_session_id, record_session_token,
+    record_session_token_with_device, revoke_member_session_tokens,
     revoke_member_session_tokens_by_ids, revoke_privileged_session_tokens, revoke_token,
-    session_device_label, token_state, without_privileged_scopes, DeviceSessionRecord,
-    RevokeOutcome, TokenRejection, TokenState, PRIVILEGED_SCOPES, SCOPE_REALTIME_SUBSCRIBE,
-    SESSION_LABEL_ACCESS, SESSION_LABEL_REFRESH,
+    session_device_label, session_id_of, token_state, without_privileged_scopes,
+    DeviceSessionRecord, RegistrationSession, RevokeOutcome, TokenRejection, TokenState,
+    PRIVILEGED_SCOPES, SCOPE_REALTIME_SUBSCRIBE, SESSION_LABEL_ACCESS, SESSION_LABEL_REFRESH,
 };
 pub use work_host_request::{
     consume_work_host_request_id, load_work_host_signing_credential, WorkHostSigningCredential,

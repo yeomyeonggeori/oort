@@ -11,6 +11,28 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-09-25
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.8>. Tag target: `main=088da65b`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. No database migration since 0.1.7: upgrading swaps the images only.
+
+### Added
+- Push notifications play the default sound for messages, mentions, approvals and work alerts. (#2672)
+- Desktop: the top of the window drags the window, and files can be dropped into the app. (#2674)
+
+### Fixed
+- Phone: a long conversation no longer leaves the whole list blank. (#2654)
+- Phone: opening a team room settles at the end instead of stopping short. (#2680)
+- Phone: push-tap landing — a message is only called missing after the tail is re-read, and one already held lands at once. (#2645)
+- Phone: the first subscription backfill starts after the head page instead of reading the room's whole history (a 3,000-row room: 62 reads → 2). (#2649)
+- Phone: the launch screen shows only the boot background, without template text. (#2673)
+- Phone: the app badge follows the unread total and clears with it. (#2675)
+- Desktop: the OS notification permission check no longer errors — the capability grants the notification commands it needs. (#2683)
+
+### Not in this release
+- The server image carries the push sound (push-relay) and the web bundle's desktop drop guard. The phone entries ship in iOS builds and the desktop entries in desktop builds, not in the image.
+- Dropping a device's push registration on logout or session revoke (#2685, #2692) landed after the build commit and ships in the next release.
+- runtime-unverified: real-device APNs sound and badge, TestFlight install (M7-I evidence build).
+
 ## [0.1.7] - 2026-09-24
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.7>. Tag target: `main=1dd9ceea`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. No database migration since 0.1.6: upgrading swaps the images only.
