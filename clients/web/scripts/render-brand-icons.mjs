@@ -86,6 +86,17 @@ export const CHARACTER_MIN_PX = 32;
 /** 코메토 전면판이 실제로 나가는 크기들. iOS는 1024 한 장에서 시스템이 줄인다
  *  (설정 29pt·Spotlight 40pt·홈 60pt의 2x/3x). macOS는 icns 16@2x부터 512@2x. */
 const SHIPPED_CHARACTER_PX = [32, 40, 58, 60, 64, 80, 87, 120, 128, 180, 192, 256, 512];
+/** macOS 판은 824 그리드 안에 앉아 같은 픽셀 크기에서 얼굴이 전면판의 0.8배다.
+ *  그래서 판독 선을 macOS 판 자체로 다시 잰다(#2732 리뷰 H-1). 32px 칸(16@2x,
+ *  32@1x)에서 무너지므로 icns는 64px 칸부터 코메토, 그 아래 세 칸은 C2-04 타일이다. */
+export const MACOS_CHARACTER_MIN_PX = 64;
+const MACOS_SHIPPED_PX = [64, 128, 256, 512, 1024];
+const MACOS_PROBE_SMALL_PX = [16, 32];
+const ICNS_TILE_SLOTS = [
+  ["icon_16x16.png", 16],
+  ["icon_16x16@2x.png", 32],
+  ["icon_32x32.png", 32],
+];
 /** 문서용으로 함께 재는 작은 크기(검사 기준을 걸지 않는다: 여기서 무너진다). */
 const PROBE_SMALL_PX = [16, 20, 24, 29];
 /** 판독 기준. 0=둘레 색, 1=제 색. 표본점이 절반 이상 제 색 쪽이어야 읽힌다. */
@@ -188,7 +199,7 @@ async function shoot(page, source, size, { transparent = false } = {}) {
   return page.screenshot({ type: "png", omitBackground: transparent });
 }
 
-/** 전면판 1024 좌표계에서 캐릭터 표본점의 위치(캔버스 비, 0~1). */
+/** 1024 캔버스 좌표계에서 캐릭터 표본점의 위치(캔버스 비, 0~1). */
 function probesOn(frame) {
   const { ch, scale, tx, ty } = appIconPlacement(frame);
   return Object.fromEntries(
@@ -218,12 +229,17 @@ async function measure(page) {
   const inFav = ([x, y]) => [fvx + fvk * x, fvy + fvk * y];
 
   const fullSrc = svg(FULL);
+  const macSrc = svg(MACOS);
   // 바탕만 남긴 판: 판독 검사에서 표본점 자리의 「둘레 색」을 얻는다.
-  const bgOnlySrc = fullSrc.replace(/<g transform="[^"]*">[\s\S]*?<\/g>/, "");
+  const bgOnly = (src) => src.replace(/<g transform="[^"]*">[\s\S]*?<\/g>/, "");
+  const plates = [
+    { name: "full", src: fullSrc, bg: bgOnly(fullSrc), probes: probesOn("full"), sizes: [...PROBE_SMALL_PX, ...SHIPPED_CHARACTER_PX] },
+    { name: "macos", src: macSrc, bg: bgOnly(macSrc), probes: probesOn("macos"), sizes: [...MACOS_PROBE_SMALL_PX, ...MACOS_SHIPPED_PX] },
+  ];
 
   await page.setContent("<!doctype html><html><body></body></html>");
   return page.evaluate(
-    async ({ smallSrc, fullSrc, bgOnlySrc, maskSrc, favSrc, favGap, favRing, gapMid, ringMid, grid, probes, sizes, colors }) => {
+    async ({ smallSrc, fullSrc, plates, maskSrc, favSrc, favGap, favRing, gapMid, ringMid, grid, probes, colors }) => {
       const load = (src) =>
         new Promise((ok, no) => {
           const img = new Image();
@@ -301,18 +317,22 @@ async function measure(page) {
       const Leye = lumHex(colors.eye);
       const Lrim = lumHex(colors.rim);
       const legibility = {};
-      for (const size of sizes) {
-        const d = up((await draw(fullSrc, size, null)).canvas);
-        const b = up((await draw(bgOnlySrc, size, null)).canvas);
-        const tailBg = at(b, probes.tail);
-        legibility[size] = {
+      for (const plate of plates) {
+       legibility[plate.name] = {};
+       for (const size of plate.sizes) {
+        const pr = plate.probes;
+        const d = up((await draw(plate.src, size, null)).canvas);
+        const b = up((await draw(plate.bg, size, null)).canvas);
+        const tailBg = at(b, pr.tail);
+        legibility[plate.name][size] = {
           // 눈 자리가 얼굴보다 눈 쪽이다
-          eye: (at(d, probes.eye) - Lface) / (Leye - Lface),
+          eye: (at(d, pr.eye) - Lface) / (Leye - Lface),
           // 두 눈 사이가 얼굴색으로 남는다(두 점이 한 덩어리로 붙지 않는다)
-          between: (Leye - at(d, probes.betweenEyes)) / (Leye - Lface),
+          between: (Leye - at(d, pr.betweenEyes)) / (Leye - Lface),
           // 말풍선 꼬리 끝이 바탕보다 림 색 쪽이다
-          tail: (at(d, probes.tail) - tailBg) / (Lrim - tailBg),
+          tail: (at(d, pr.tail) - tailBg) / (Lrim - tailBg),
         };
+       }
       }
 
       // ---- 1024 전면판 표본 색 ----
@@ -351,7 +371,7 @@ async function measure(page) {
     {
       smallSrc: svg(SMALL),
       fullSrc,
-      bgOnlySrc,
+      plates,
       maskSrc: appIconSvg("maskable"),
       favSrc,
       favGap: inFav(gapMid),
@@ -360,67 +380,70 @@ async function measure(page) {
       ringMid,
       grid: small.grid,
       probes: probesOn("full"),
-      sizes: [...PROBE_SMALL_PX, ...SHIPPED_CHARACTER_PX],
       colors: CHARACTER_COLORS,
     }
   );
 }
 
-/** icns를 풀어 16px 칸을 favicon.svg 렌더로 바꾸고 다시 묶는다. */
+/** icns를 풀어 32px 이하 세 칸을 favicon.svg 렌더로 바꾸고 다시 묶는다. */
 async function patchIcnsSmallSlot(page) {
   const icns = resolve(TAURI_DIR, "icons/icon.icns");
   const work = mkdtempSync(join(tmpdir(), "oort-icns-"));
   const set = join(work, "icon.iconset");
   try {
     execFileSync("iconutil", ["-c", "iconset", icns, "-o", set]);
-    writeFileSync(join(set, "icon_16x16.png"), withSrgb(await shoot(page, svg(FAVICON), 16, { transparent: true })));
+    for (const [slot, px] of ICNS_TILE_SLOTS)
+      writeFileSync(join(set, slot), withSrgb(await shoot(page, svg(FAVICON), px, { transparent: true })));
     execFileSync("iconutil", ["-c", "icns", set, "-o", icns]);
-    console.log(`patched ${rel(icns)} (16px 칸 = C2-04 small 타일)`);
+    console.log(`patched ${rel(icns)} (${ICNS_TILE_SLOTS.map(([s]) => s).join(", ")} = C2-04 small 타일)`);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
 }
 
-/** icns의 16px 칸이 C2-04 small 타일인지 본다: 파비콘 16 렌더와의 평균 차가 작고,
- *  코메토 전면판 16 렌더와의 평균 차보다 확실히 작아야 한다. */
-async function checkIcnsSmallSlot(page) {
+/** icns의 작은 칸들이 C2-04 small 타일인지 본다: 칸마다 같은 크기의 파비콘 렌더와의
+ *  평균 차가 작고, 같은 크기의 macOS 코메토 렌더와의 평균 차보다 확실히 작아야 한다. */
+async function checkIcnsSmallSlots(page) {
   const icns = resolve(TAURI_DIR, "icons/icon.icns");
   const work = mkdtempSync(join(tmpdir(), "oort-icns-"));
   const set = join(work, "icon.iconset");
+  const out = {};
   try {
     execFileSync("iconutil", ["-c", "iconset", icns, "-o", set]);
-    const slot = readFileSync(join(set, "icon_16x16.png")).toString("base64");
-    const w = readFileSync(join(set, "icon_16x16.png")).readUInt32BE(16);
-    if (w !== 16) fail(`icon.icns 16px 칸의 폭이 ${w}`);
-    const fav = (await shoot(page, svg(FAVICON), 16, { transparent: true })).toString("base64");
-    const mac = (await shoot(page, svg(MACOS), 16, { transparent: true })).toString("base64");
-    const diff = await page.evaluate(
-      async ({ slot, fav, mac }) => {
-        const decode = (b64) =>
-          new Promise((ok) => {
-            const img = new Image();
-            img.onload = () => {
-              const c = document.createElement("canvas");
-              c.width = c.height = 16;
-              const ctx = c.getContext("2d");
-              ctx.drawImage(img, 0, 0, 16, 16);
-              ok(ctx.getImageData(0, 0, 16, 16).data);
-            };
-            img.src = "data:image/png;base64," + b64;
-          });
-        const [a, f, m] = [await decode(slot), await decode(fav), await decode(mac)];
-        const mad = (x, y) => {
-          let s = 0;
-          for (let i = 0; i < x.length; i++) s += Math.abs(x[i] - y[i]);
-          return s / x.length;
-        };
-        return { favicon: mad(a, f), character: mad(a, m) };
-      },
-      { slot, fav, mac }
-    );
-    if (!(diff.favicon < 4 && diff.favicon * 3 < diff.character))
-      fail(`icon.icns 16px 칸이 C2-04 small 타일이 아니다 (파비콘과 ${diff.favicon.toFixed(1)}, 코메토와 ${diff.character.toFixed(1)})`);
-    return diff;
+    for (const [name, px] of ICNS_TILE_SLOTS) {
+      const buf = readFileSync(join(set, name));
+      if (buf.readUInt32BE(16) !== px) fail(`icon.icns ${name}의 폭이 ${buf.readUInt32BE(16)}, 기대 ${px}`);
+      const fav = (await shoot(page, svg(FAVICON), px, { transparent: true })).toString("base64");
+      const mac = (await shoot(page, svg(MACOS), px, { transparent: true })).toString("base64");
+      const diff = await page.evaluate(
+        async ({ slot, fav, mac, px }) => {
+          const decode = (b64) =>
+            new Promise((ok) => {
+              const img = new Image();
+              img.onload = () => {
+                const c = document.createElement("canvas");
+                c.width = c.height = px;
+                const ctx = c.getContext("2d");
+                ctx.drawImage(img, 0, 0, px, px);
+                ok(ctx.getImageData(0, 0, px, px).data);
+              };
+              img.src = "data:image/png;base64," + b64;
+            });
+          const [a, f, m] = [await decode(slot), await decode(fav), await decode(mac)];
+          const mad = (x, y) => {
+            let s = 0;
+            for (let i = 0; i < x.length; i++) s += Math.abs(x[i] - y[i]);
+            return s / x.length;
+          };
+          return { favicon: mad(a, f), character: mad(a, m) };
+        },
+        { slot: buf.toString("base64"), fav, mac, px }
+      );
+      if (!(diff.favicon < 4 && diff.favicon * 3 < diff.character))
+        fail(`icon.icns ${name}이 C2-04 small 타일이 아니다 (파비콘과 ${diff.favicon.toFixed(1)}, 코메토와 ${diff.character.toFixed(1)})`);
+      out[name] = diff;
+    }
+    return out;
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -512,7 +535,7 @@ async function main() {
     }
     const icns = readFileSync(resolve(TAURI_DIR, "icons/icon.icns"));
     if (icns.toString("latin1", 0, 4) !== "icns") fail("icons/icon.icns: icns 헤더가 아니다");
-    const icnsSlot = await checkIcnsSmallSlot(page);
+    const icnsSlots = await checkIcnsSmallSlots(page);
 
     // 대비: 캐릭터(권장 바탕) + C2-04 마크
     const contrasts = characterPairs(APP_BACKGROUND).map((p) => {
@@ -561,28 +584,34 @@ async function main() {
       if (!(g.favicon.gap < 0.5 && g.favicon.ring - g.favicon.gap > 0.35))
         fail(`favicon.svg ${size}px: 틈이 뭉개진다 (틈 ${g.favicon.gap.toFixed(2)}, 링 ${g.favicon.ring.toFixed(2)})`);
     }
-    for (const size of SHIPPED_CHARACTER_PX) {
-      const l = m.legibility[size];
-      for (const [k, v] of Object.entries(l))
-        if (!(v >= LEGIBLE)) fail(`코메토 ${size}px: ${k} ${v.toFixed(2)} < ${LEGIBLE} (얼굴이 뭉개진다)`);
-    }
+    for (const [plate, sizes] of [
+      ["full", SHIPPED_CHARACTER_PX],
+      ["macos", MACOS_SHIPPED_PX],
+    ])
+      for (const size of sizes)
+        for (const [k, v] of Object.entries(m.legibility[plate][size]))
+          if (!(v >= LEGIBLE)) fail(`코메토 ${plate} ${size}px: ${k} ${v.toFixed(2)} < ${LEGIBLE} (얼굴이 뭉개진다)`);
     if (m.reach > SAFE_RADIUS + 0.005) fail(`maskable: 얼굴이 안전 원 밖까지 간다 (${m.reach.toFixed(3)} > ${SAFE_RADIUS})`);
 
     console.log("\n== PNG");
     for (const [path, r] of results) console.log(`${path}  ${r.w}x${r.h}  색유형 ${r.colorType}  sRGB ${r.srgb ? "o" : "x"}`);
     console.log(`app-icon.png 알파: ${JSON.stringify(alpha)}`);
-    console.log(
-      `icon.icns 16px 칸 평균 차: 파비콘 ${icnsSlot.favicon.toFixed(1)} / 코메토 ${icnsSlot.character.toFixed(1)}`
-    );
+    for (const [name, d] of Object.entries(icnsSlots))
+      console.log(`icon.icns ${name} 평균 차: 파비콘 ${d.favicon.toFixed(1)} / 코메토 ${d.character.toFixed(1)}`);
     console.log(`\n== 대비 (WCAG 1.4.11, 3:1 이상, 바탕 ${APP_BACKGROUND})`);
     for (const [name, pair, ratio] of contrasts) console.log(`${name}  ${pair}  ${ratio}:1`);
-    console.log(`\n== 코메토 판독 (0=둘레 색, 1=제 색, ${CHARACTER_MIN_PX}px 이상에서 ${LEGIBLE} 이상)`);
-    for (const [size, l] of Object.entries(m.legibility))
-      console.log(
-        `${String(size).padStart(4)}px  눈 ${l.eye.toFixed(2)}  눈 사이 ${l.between.toFixed(2)}  꼬리 ${l.tail.toFixed(2)}${
-          Number(size) < CHARACTER_MIN_PX ? "  (C2-04 small 자리)" : ""
-        }`
-      );
+    for (const [plate, min] of [
+      ["full", CHARACTER_MIN_PX],
+      ["macos", MACOS_CHARACTER_MIN_PX],
+    ]) {
+      console.log(`\n== 코메토 판독, ${plate} 판 (0=둘레 색, 1=제 색, ${min}px 이상에서 ${LEGIBLE} 이상)`);
+      for (const [size, l] of Object.entries(m.legibility[plate]))
+        console.log(
+          `${String(size).padStart(4)}px  눈 ${l.eye.toFixed(2)}  눈 사이 ${l.between.toFixed(2)}  꼬리 ${l.tail.toFixed(2)}${
+            Number(size) < min ? "  (C2-04 small 자리)" : ""
+          }`
+        );
+    }
     console.log("\n== C2-04 틈 가운데 잉크 비율 (0=바탕, 1=잉크)");
     for (const [size, g] of Object.entries(m.gaps))
       console.log(

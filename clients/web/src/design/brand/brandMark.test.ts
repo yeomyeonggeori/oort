@@ -172,6 +172,11 @@ describe("코메토 얼굴은 C2-04 마크와 한 기하다", () => {
 
   it("KomettoMark는 같은 path이고, S0 토큰은 앱 아이콘과 같은 색이다", () => {
     expect(komettoComponent()).toEqual([hood, face, rim, eyes, bead]);
+    // viewBox도 같다. 가로 중심이 링 중심이라 S0에서 얼굴이 워드마크 축 위에 선다.
+    const viewBox = kometto.match(/viewBox="([^"]+)"/)?.[1];
+    expect(read(join(WEB_ROOT, "src/design/brand/KomettoMark.tsx"))).toContain(`viewBox: "${viewBox}"`);
+    const [x, , w] = viewBox!.split(" ").map(Number);
+    expect(x + w / 2).toBe(circleCenter(face)[0]);
     const css = read(join(WEB_ROOT, "src/design/tokens.css"));
     const token = (name: string) => css.match(new RegExp(`--onboarding-kometto-${name}:\\s*(#[0-9a-f]{6});`))?.[1];
     const [hoodFill, faceFill, rimFill, eyeFill, beadFill] = fills(kometto);

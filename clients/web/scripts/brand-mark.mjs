@@ -520,12 +520,24 @@ ${characterLayers(ch)}
 }
 
 /** 배경 없는 코메토 얼굴(문서·배포 페이지·온보딩 S0 사본의 기준본). */
+/**
+ * 배경 없는 판의 viewBox. 정사각이고, 가로 중심이 **링 중심**이다(경계 상자 중심이
+ * 아니다). 구슬이 오른쪽 위로 뻗어 경계 상자 중심에 두면 얼굴이 워드마크 축에서
+ * 왼쪽으로 밀린다(#2732 리뷰 M-3). 둘레에 0.5 여백을 둬 구슬 가장자리가 잘리지 않는다.
+ */
+export function characterViewBox(ch = buildCharacter(), p = PARAMS.regular) {
+  const bb = ch.dims.bbox;
+  const half = Math.max(p.cx - bb.left, bb.right - p.cx, (bb.bottom - bb.top) / 2) + 0.5;
+  const midY = (bb.top + bb.bottom) / 2;
+  return [p.cx - half, midY - half, 2 * half, 2 * half].map(fmt).join(" ");
+}
+
 function characterSvg() {
   const ch = buildCharacter();
-  const bb = ch.dims.bbox;
-  const vb = [bb.left, bb.top, bb.right - bb.left, bb.bottom - bb.top].map(fmt).join(" ");
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" width="${fmt(bb.right - bb.left)}" height="${fmt(bb.bottom - bb.top)}">
-  ${CHARACTER_HEADER("배경 없는 판")}
+  const vb = characterViewBox(ch);
+  const side = vb.split(" ")[2];
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" width="${side}" height="${side}">
+  ${CHARACTER_HEADER("배경 없는 판, 어두운 바탕 전용(밝은 바탕에서는 말풍선 꼬리가 사라진다)")}
   <g>
 ${characterLayers(ch)}
   </g>
