@@ -88,6 +88,15 @@ jest.mock('expo-modules-core', () => ({
   requireNativeViewManager: jest.fn(() => require('react-native').View),
 }));
 
+// #2702 — the profile sheet's version line. ESM like the rest of Expo, so it is
+// mocked for the same reason. The values are deliberately not this app's real
+// version: a test that asserts them proves the line reads the native answer
+// rather than a string someone typed into the component.
+jest.mock('expo-application', () => ({
+  nativeApplicationVersion: '9.8.7',
+  nativeBuildVersion: '65',
+}));
+
 jest.mock('expo-notifications', () => ({
   // The real value, copied from
   // node_modules/expo-notifications/src/NotificationsEmitter.ts:16. A test that
