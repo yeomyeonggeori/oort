@@ -110,6 +110,12 @@ pub fn run() {
         .manage(deeplink::DeepLinkState::default())
         .manage(discovery::DiscoveryState::default())
         .setup(|app| {
+            // PDF copies a previous run left behind lose their removal timers
+            // with that run; sweep the stale ones now (#2701 R1, review M-3).
+            #[cfg(desktop)]
+            if let Ok(cache) = app.path().app_cache_dir() {
+                pdf_viewer::sweep_cache(&cache);
+            }
             // Windows and Linux hand a deep link to a NEW process as an argv
             // entry rather than to the running one, and the scheme has to be
             // registered with the OS at runtime there. macOS registers it from
