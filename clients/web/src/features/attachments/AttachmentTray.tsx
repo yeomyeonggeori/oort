@@ -13,6 +13,7 @@ import {
   sendBlockReason,
   type AttachmentDraft,
 } from "@momo/core/features/attachments/model";
+import { useDraftThumbnail, type DraftThumbnailState } from "./draftThumbnail";
 
 // =============================================================================
 // 컴포저의 첨부 자리 (ADR-0151 D2 / #1202 첨부 축).
@@ -54,6 +55,50 @@ const PROGRESS_ROW_CLASS = "block h-marker w-full";
 /** 줄 상자를 만드는 공백 한 칸. 빈 <p> 는 높이가 0 이라 예약이 되지 않는다. */
 const NBSP = "\u00a0";
 
+/**
+ * 칩 왼쪽의 그림 자리 (#2701). 안전한 래스터 이미지면 48px 정사각형이 서고,
+ * 바이트를 디코드하는 동안과 디코드하지 못한 뒤에도 **같은 상자**가 선다 —
+ * 썸네일이 도착하는 순간 칩이 자라면 트레이 아래 입력창이 밀린다. 그 밖의 파일은
+ * 지금까지의 16px 아이콘 그대로다.
+ *
+ * 썸네일의 `alt` 는 비어 있다: 바로 옆에 파일명이 있고, 보조기술이 같은 이름을
+ * 두 번 읽을 이유가 없다(장식 이미지).
+ */
+function DraftVisual({
+  thumbnail,
+  danger,
+  Icon,
+}: {
+  thumbnail: DraftThumbnailState;
+  danger: boolean;
+  Icon: typeof ImageIcon;
+}) {
+  const iconClass = cn("size-4 shrink-0", danger ? "text-danger" : "text-ink-muted");
+  if (thumbnail.status === "none") {
+    return <Icon aria-hidden="true" className={iconClass} />;
+  }
+  if (thumbnail.status === "ready") {
+    return (
+      <img
+        src={thumbnail.dataUrl}
+        alt=""
+        draggable={false}
+        data-testid="attachment-chip-thumb"
+        className="size-tray-thumb shrink-0 rounded-sm border border-line object-cover"
+      />
+    );
+  }
+  // 로딩과 실패: 같은 중립 상자, 그 안에 아이콘. 셔머 없음(SKILL §4).
+  return (
+    <span
+      aria-hidden="true"
+      className="flex size-tray-thumb shrink-0 items-center justify-center rounded-sm border border-line bg-surface-hover"
+    >
+      <Icon className={iconClass} />
+    </span>
+  );
+}
+
 function DraftChip({
   draft,
   onRemove,
@@ -70,6 +115,7 @@ function DraftChip({
   // 잰 값이 없는 동안은 값 없는 막대(indeterminate)를 그리고 퍼센트를 찍지 않는다.
   const measured = uploading && line.percent !== null;
   const Icon = isImageMime(draft.mime) ? ImageIcon : FileText;
+  const thumbnail = useDraftThumbnail(draft);
   const retryable =
     draft.status === "failed" &&
     draft.issue !== undefined &&
@@ -79,15 +125,10 @@ function DraftChip({
     <li
       data-testid="attachment-chip"
       data-attachment-status={draft.status}
+      data-thumb={thumbnail.status}
       className="flex items-center gap-2 rounded-sm px-2 py-1 hover:bg-surface-hover"
     >
-      <Icon
-        aria-hidden="true"
-        className={cn(
-          "size-4 shrink-0",
-          line.danger ? "text-danger" : "text-ink-muted"
-        )}
-      />
+      <DraftVisual thumbnail={thumbnail} danger={line.danger} Icon={Icon} />
       <span className="flex min-w-0 flex-1 flex-col gap-px">
         {/* 가운데에서 생략한다 (리뷰 N-A). 끝에서 자르면 확장자가 가장 먼저
             죽고, 확장자는 파일을 서로 구별해 주는 조각이다. 이름 열에는 이제

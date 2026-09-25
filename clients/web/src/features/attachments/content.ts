@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import {
+  ATTACH_COPY,
+  hasPdfSignature,
+} from "@momo/core/features/attachments/model";
 import { fetchAttachmentContent } from "@momo/core/lib/api";
 
 // =============================================================================
@@ -195,6 +199,112 @@ export async function downloadAttachment(
     // 즉시 놓으면 Safari 가 저장을 시작하기 전에 주소가 죽는다. 한 틱 뒤에.
     setTimeout(() => URL.revokeObjectURL(href), 0);
   }
+}
+
+// ---- PDF 열기 (#2701) ------------------------------------------------------
+//
+// 임베드 뷰어가 아니라 새 창인 이유는 CSP 다. 웹은 `default-src 'self'`(그래서
+// `frame-src`·`object-src` 도 'self'), 데스크탑은 `frame-src 'none'; object-src
+// 'none'` 이다. 받은 바이트는 `blob:` 이나 `data:` 로만 화면에 걸 수 있는데 둘 다
+// 'self' 가 아니므로 `<iframe>`·`<embed>` 는 빈 상자가 된다. CSP 를 넓히는 것은
+// 보안 경계 변경이라 이 티켓의 권한이 아니다.
+//
+// 새 **최상위** 창의 탐색은 CSP 의 관할이 아니므로 `blob:` 을 걸 수 있다. 그 대신
+// 그 창은 이 앱과 같은 출처의 문서다. 그래서 두 가지를 못 박는다:
+//   1. Blob 타입은 서버가 준 타입이 아니라 이 쪽이 정한 `application/pdf` 다.
+//      브라우저는 그것을 PDF 뷰어로 열지 HTML 로 해석하지 않는다.
+//   2. 바이트 머리가 `%PDF-` 가 아니면 열지 않는다(`hasPdfSignature`).
+//
+// 창은 **클릭 순간** 먼저 연다(`window.open("")`). 바이트를 기다린 뒤에 열면
+// 사용자 활성화가 만료돼 팝업 차단에 걸린다. 그 빈 창은 같은 출처라 `opener` 를
+// 끊고, 바이트가 오면 `location.replace` 로 주소만 바꾼다.
+
+export type PdfOpenFailure = "blocked" | "not-pdf" | "failed";
+
+export class PdfOpenError extends Error {
+  readonly reason: PdfOpenFailure;
+  constructor(reason: PdfOpenFailure) {
+    super(`pdf open ${reason}`);
+    this.name = "PdfOpenError";
+    this.reason = reason;
+  }
+}
+
+/**
+ * 새 창에 걸린 `blob:` 주소를 놓을 때까지의 시간. 즉시 놓으면 뷰어가 문서를 읽기
+ * 전에 주소가 죽는다. 1분이면 느린 뷰어도 읽고, 탭 하나가 PDF 를 무한정 쥐지 않는다.
+ */
+const PDF_URL_LIFETIME_MS = 60_000;
+
+/** 머리 판정에 읽는 바이트 수. `hasPdfSignature` 의 창과 같다. */
+const PDF_HEAD_BYTES = 1024;
+
+function readAsArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (result instanceof ArrayBuffer) resolve(result);
+      else reject(new Error("pdf head"));
+    };
+    reader.onerror = () => reject(new Error("pdf head"));
+    reader.readAsArrayBuffer(blob);
+  });
+}
+
+/** 클릭 순간 부른다. 막혔으면 null 이다. */
+export function openPdfWindow(): Window | null {
+  const target = window.open("", "_blank");
+  if (target === null) return null;
+  try {
+    target.opener = null;
+  } catch {
+    /* 교차 출처가 되는 브라우저는 없지만, 끊지 못해도 열기는 계속한다. */
+  }
+  try {
+    // 바이트가 오기 전의 빈 창이 흰 면으로만 서 있지 않게 한 줄을 적는다.
+    // 마크업이 아니라 텍스트 노드다: 이 문서는 이 앱과 같은 출처다.
+    target.document.title = ATTACH_COPY.openingPdf;
+    target.document.body.textContent = ATTACH_COPY.openingPdf;
+  } catch {
+    /* 적지 못해도 열기는 계속한다. */
+  }
+  return target;
+}
+
+/**
+ * 열어 둔 창에 PDF 를 건다. 실패하면 그 창을 닫고 `PdfOpenError` 를 던진다 —
+ * 빈 창을 남겨 두는 것은 화면이 아무 말도 안 하는 것과 같다.
+ */
+export async function openPdfAttachment(
+  workspaceId: string,
+  channelId: string,
+  attachment: { id: string; name: string },
+  target: Window
+): Promise<void> {
+  try {
+    target.opener = null;
+  } catch {
+    /* openPdfWindow 와 같은 이유 */
+  }
+  let body: Blob;
+  let head: ArrayBuffer;
+  try {
+    body = await fetchAttachmentContent(workspaceId, channelId, attachment.id);
+    // 머리만 읽는다. 판정에 필요한 것은 앞 1 KB 이고, 본문은 Blob 째로 다시
+    // 감싸면 된다 — 100 MB PDF 를 ArrayBuffer 로 한 번 더 복사할 이유가 없다.
+    head = await readAsArrayBuffer(body.slice(0, PDF_HEAD_BYTES));
+  } catch {
+    target.close();
+    throw new PdfOpenError("failed");
+  }
+  if (!hasPdfSignature(new Uint8Array(head))) {
+    target.close();
+    throw new PdfOpenError("not-pdf");
+  }
+  const href = URL.createObjectURL(new Blob([body], { type: "application/pdf" }));
+  target.location.replace(href);
+  setTimeout(() => URL.revokeObjectURL(href), PDF_URL_LIFETIME_MS);
 }
 
 /** 테스트 전용. 모듈 전역 캐시가 테스트 사이를 넘어가지 않게 한다. */

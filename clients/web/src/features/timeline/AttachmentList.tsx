@@ -3,6 +3,12 @@ import { useRef, useState } from "react";
 import { useSession } from "@/app/session";
 import { cn } from "@/design/lib/cn";
 import { AttachmentDownloadButton } from "@/features/attachments/AttachmentDownloadButton";
+import { AttachmentOpenPdfButton } from "@/features/attachments/AttachmentOpenPdfButton";
+import {
+  canOpenPdf,
+  pdfOpenFailureCopy,
+} from "@/features/attachments/pdfOpenModel";
+import type { PdfOpenFailure } from "@/features/attachments/content";
 import { useAttachmentPreview } from "@/features/attachments/content";
 import { ImageLightbox } from "@/features/attachments/ImageLightbox";
 import { lightboxAttachments } from "@/features/attachments/imageLightboxModel";
@@ -25,6 +31,8 @@ import {
 //
 //   이미지(상한 아래)  인라인 미리보기 + 그 아래 한 줄(이름 · 타입 · 크기)
 //   그 밖의 전부       파일 카드(아이콘 · 이름 · 타입 · 크기 · 내려받기)
+//                      PDF 카드는 「새 창에서 열기」를 하나 더 갖는다(#2701,
+//                      웹만: 데스크탑 셸은 새 창을 열지 못한다)
 //
 // SVG 는 이미지여도 카드다. 서버가 프록시 응답에 `nosniff` 와
 // `Content-Disposition: attachment` 를 붙인 이유가 정확히 그것 — 올라온 SVG 안의
@@ -85,6 +93,7 @@ function FileCard({
   attachment: MessageAttachment;
 }) {
   const [failed, setFailed] = useState(false);
+  const [openFailure, setOpenFailure] = useState<PdfOpenFailure | null>(null);
   const Icon = isImageMime(attachment.mime) ? ImageIcon : FileText;
   return (
     <div
@@ -102,7 +111,28 @@ function FileCard({
             {ATTACH_COPY.downloadFailed}
           </span>
         )}
+        {openFailure !== null && (
+          // 실패는 제자리에서 문장으로 (SKILL §5). 무엇이 일어났고 다음에 무엇을
+          // 하는지가 한 줄에 있고, 옆의 내려받기가 그 다음 행동이다.
+          <span
+            role="status"
+            className="text-meta text-danger"
+            data-testid="attachment-open-failed"
+          >
+            {pdfOpenFailureCopy(openFailure)}
+          </span>
+        )}
       </span>
+      {/* PDF 만 연다 (#2701). 순서는 「보기 → 내려받기」: 더 가벼운 행동이 먼저다. */}
+      {canOpenPdf(attachment) && (
+        <AttachmentOpenPdfButton
+          workspaceId={workspaceId}
+          channelId={channelId}
+          attachment={attachment}
+          onStarted={() => setOpenFailure(null)}
+          onFailed={setOpenFailure}
+        />
+      )}
       <AttachmentDownloadButton
         workspaceId={workspaceId}
         channelId={channelId}
