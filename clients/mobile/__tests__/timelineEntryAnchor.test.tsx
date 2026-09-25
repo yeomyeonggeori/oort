@@ -94,10 +94,13 @@ function mount() {
     />,
   );
   const spy = jest.spyOn(listRef.current!, 'scrollToEnd');
+  // 끝으로 가는 두 번째 문(#2686): 바닥에서 따라가는 활강은 방금 보고된 콘텐츠의 끝으로
+  // 간다(`scrollToOffset`). 「데려가지 않는다」·「활강하지 않는다」는 두 문을 함께 본다.
+  const glide = jest.spyOn(listRef.current!, 'scrollToOffset');
   fireEvent(screen.getByTestId('timeline-list'), 'layout', {
     nativeEvent: {layout: {width: 390, height: 800}},
   });
-  return {listRef, spy};
+  return {listRef, spy, glide};
 }
 
 function contentSize(height: number) {
@@ -138,12 +141,15 @@ describe('채널을 열면 최신 메시지 앞이다', () => {
     // 진입에서 애니메이션은 두 번 틀린다. 사람이 「어중간한 위쪽」을 실제로 보게
     // 되고(그것이 성재가 본 화면이다), 그 활강의 중간 지점이 곧바로 `following` 을
     // 끄는 스크롤 이벤트가 된다.
-    const {spy} = mount();
+    const {spy, glide} = mount();
     contentSize(900);
     await flushFrame();
     expect(spy).toHaveBeenCalled();
     for (const [options] of spy.mock.calls) {
       expect(options).toEqual({animated: false});
+    }
+    for (const [options] of glide.mock.calls) {
+      expect(options).toEqual(expect.objectContaining({animated: false}));
     }
   });
 
@@ -187,9 +193,10 @@ describe('그래도 손가락이 이긴다', () => {
     // 수리가 「진입 뒤 400ms 는 무조건 바닥으로」가 되면 이 배치가 고치려는 것과
     // 정반대의 결함이 생긴다 — 열자마자 위로 올라가 읽으려는 사람을 도로 끌어내리는
     // 것. 마감시각은 의도에 대한 추측이지만 끄는 손가락은 아니다.
-    const {spy} = mount();
+    const {spy, glide} = mount();
     contentSize(900);
     spy.mockClear();
+    glide.mockClear();
 
     fireEvent(screen.getByTestId('timeline-list'), 'scrollBeginDrag', {
       nativeEvent: {
@@ -203,10 +210,11 @@ describe('그래도 손가락이 이긴다', () => {
     contentSize(4600);
 
     expect(spy).not.toHaveBeenCalled();
+    expect(glide).not.toHaveBeenCalled();
   });
 
   it('앵커가 끝난 뒤에는 위에 있는 사람을 남이 말했다고 데려가지 않는다', async () => {
-    const {spy} = mount();
+    const {spy, glide} = mount();
     contentSize(900);
     scrolled(100, 900); // 도착 — 앵커가 스크롤을 돌려준다
     // 돌려주는 것은 콘텐츠가 `ENTRY_QUIET_MS`(150ms) 멈춘 뒤의 도착, 그리고 그 뒤
@@ -215,10 +223,12 @@ describe('그래도 손가락이 이긴다', () => {
       await new Promise(resolve => setTimeout(resolve, 1000));
     });
     spy.mockClear();
+    glide.mockClear();
 
     scrolled(0, 4000); // 이제 이것은 진짜로 사람이 올라간 것이다
     contentSize(4300);
 
     expect(spy).not.toHaveBeenCalled();
+    expect(glide).not.toHaveBeenCalled();
   });
 });

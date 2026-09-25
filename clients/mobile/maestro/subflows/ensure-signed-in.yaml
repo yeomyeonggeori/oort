@@ -50,7 +50,7 @@ name: ensure-signed-in
           id: "password-input"
       - eraseText
       - inputText: ${PASSWORD}
-      - hideKeyboard
+      # With the keyboard up — see the note at the same step in 00-login.yaml.
       - tapOn:
           id: "submit-button"
       # A successful sign-in raises the keychain prompt and then the push

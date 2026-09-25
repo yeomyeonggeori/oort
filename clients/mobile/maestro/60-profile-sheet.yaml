@@ -1,0 +1,78 @@
+appId: app.momo.ios
+name: 60-profile-sheet
+# No `env:` block — see the note at the top of 00-login.yaml.
+---
+# 60-profile-sheet — 머리의 아바타가 여는 내 프로필 시트 (#2702).
+#
+# jest 가 못 보는 것 하나를 여기서 본다: **끌어내려 닫은 시트가 다시 열리는가.**
+# 시트는 네이티브 pageSheet 이고, 끌어내림을 RN 이 부모에게 알리지 못하면
+# 시트는 내려갔는데 부모의 「열림」이 참으로 남아 아바타가 죽는다. 그 결함은
+# 두 번째 탭에서만 보이므로 이 흐름은 닫고 **다시 연다**.
+#
+# 로그아웃은 누르지 않는다 — 이 흐름은 다른 흐름과 같은 스택에서 혼자 돌 수
+# 있어야 하고, 세션을 지우면 다음 흐름이 로그인부터 다시 한다. 로그아웃의 확인
+# 단계는 `__tests__/profileSheet.test.tsx` 가 진다.
+#
+# lane-phone.sh 의 기본 목록에는 없다. 부를 때:
+#   maestro test -e SERVER_URL=… -e EMAIL=… -e PASSWORD=… \
+#     clients/mobile/maestro/60-profile-sheet.yaml
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+
+# 대화 목록 발치에는 계정 줄이 더는 없다.
+- assertNotVisible:
+    id: "sign-out"
+
+- tapOn:
+    id: "profile-avatar"
+- extendedWaitUntil:
+    visible:
+      id: "self-profile-name"
+    timeout: 20000
+- assertVisible:
+    id: "profile-theme-row"
+- assertVisible:
+    id: "profile-push-row"
+
+# 테마는 시트 안의 한 장이다: 들어갔다 돌아온다.
+- tapOn:
+    id: "profile-theme-row"
+- extendedWaitUntil:
+    visible:
+      id: "theme-control"
+    timeout: 10000
+- tapOn:
+    id: "profile-back"
+- extendedWaitUntil:
+    visible:
+      id: "self-profile-name"
+    timeout: 10000
+
+# 끌어내려 닫는다 — 그리고 다시 열린다.
+- swipe:
+    start: 50%, 12%
+    end: 50%, 95%
+    duration: 400
+- extendedWaitUntil:
+    notVisible:
+      id: "self-profile-name"
+    timeout: 10000
+- extendedWaitUntil:
+    visible:
+      id: "sidebar-list"
+    timeout: 10000
+- tapOn:
+    id: "profile-avatar"
+- extendedWaitUntil:
+    visible:
+      id: "self-profile-name"
+    timeout: 10000
+
+# 닫기 단추로도 닫힌다.
+- tapOn:
+    id: "profile-close"
+- extendedWaitUntil:
+    notVisible:
+      id: "self-profile-name"
+    timeout: 10000

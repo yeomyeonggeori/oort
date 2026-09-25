@@ -83,9 +83,16 @@ export function avatarImageSource(
 export function Avatar({
   directory,
   memberId,
+  size = AVATAR_SIZE,
 }: {
   directory: Directory;
   memberId: string;
+  /**
+   * 그리는 크기. 기본은 코어의 `AVATAR_SIZE`(타임라인·머리 버튼)이고, 프로필
+   * 시트의 큰 얼굴만 이것을 키운다 (#2702). 모양·색·폴백 판정은 크기와 무관하게
+   * 코어가 답한 그대로다.
+   */
+  size?: number;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   // 서버 주소를 **의존성으로 든다.** `apiBase()` 를 메모 안에서만 부르면 기기가
@@ -99,6 +106,23 @@ export function Avatar({
   const source = avatarImageSource(identity, base);
   const carriesColor = avatarCarriesIdentityColor(identity.kind);
   const round = AVATAR_SHAPE[identity.kind] === 'round';
+  const sized =
+    size === AVATAR_SIZE
+      ? null
+      : {
+          width: size,
+          height: size,
+          ...(round ? {borderRadius: size / 2} : null),
+        };
+  // 이니셜은 상자의 절반 남짓 — 기본 크기에서 `font.label`(13) 이 32 에 앉는
+  // 비율을 그대로 키운다.
+  const initialSized =
+    size === AVATAR_SIZE
+      ? null
+      : {
+          fontSize: Math.round((font.label * size) / AVATAR_SIZE),
+          lineHeight: Math.round(((font.label + space.xs) * size) / AVATAR_SIZE),
+        };
 
   return (
     <View
@@ -110,17 +134,30 @@ export function Avatar({
         !carriesColor && styles.unknown,
         carriesColor && identity.kind === 'agent' && styles.agent,
         carriesColor && identity.kind === 'human' && styles.human,
+        sized,
       ]}
       testID={`avatar-${identity.kind}`}>
       {source !== null ? (
         <Image
           source={{uri: source}}
-          style={[styles.image, round ? styles.round : styles.roundedSquare]}
+          style={[
+            styles.image,
+            round ? styles.round : styles.roundedSquare,
+            sized,
+          ]}
           testID="avatar-image"
         />
       ) : identity.fallback.kind === 'initial' ? (
         <Text
-          style={[styles.initial, identity.kind === 'agent' && styles.initialAgent]}
+          style={[
+            styles.initial,
+            identity.kind === 'agent' && styles.initialAgent,
+            initialSized,
+          ]}
+          // 이니셜은 상자에 갇힌 표지다 — 보조기술에서 숨고, 상자는 글자 크기를
+          // 따라 커지지 않는다. 그래서 확대 글자에서 상자를 넘치지 않게 배율을
+          // 묶는다(#2702 AX 캡처: 머리의 32 원에서 「곽」이 테두리를 넘었다).
+          maxFontSizeMultiplier={AVATAR_INITIAL_MAX_SCALE}
           testID="avatar-initial">
           {identity.fallback.text}
         </Text>
@@ -133,6 +170,9 @@ export function Avatar({
     </View>
   );
 }
+
+/** 이니셜의 Dynamic Type 배율 상한. 32 상자에 13pt 한 글자가 여백을 지키는 끝. */
+const AVATAR_INITIAL_MAX_SCALE = 1.3;
 
 const buildStyles = (color: Palette) => StyleSheet.create({
   box: {

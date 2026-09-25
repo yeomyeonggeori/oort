@@ -71,6 +71,25 @@ import {Timeline, type PillState} from '../src/features/conversation/Timeline';
 // 높이는 그 방에서 잰 값이다: 머리 16(빈 머리)·36(스피너)·40.33(「대화의 시작」,
 // 첫 셀 y), 꼬리 8, 날짜 구분선 36, 행 57·79·101(한·두·세 줄 = seq % 3), 창 529.33.
 // 시계는 가짜다 — 16ms 한 프레임씩 나아가고, 같은 입력이면 같은 사슬이 나온다.
+//
+// ## 바닥에서 읽는 중에 새 답이 올 때 (#2686) — 이중이 기대는 둘을 더 옮긴다
+//
+// 맨 아래 describe 가 쓴다(`listEstimate`). 진입 시험들은 예전 이중 그대로다.
+//
+//   8. 콘텐츠 보고가 새 셀의 레이아웃 보고보다 **먼저** 온다. Fabric 은 한 트랜잭션의
+//      레이아웃 이벤트를 부모부터 낸다 — 콘텐츠 컨테이너(`onContentSizeChange`), 그다음
+//      그 자식인 셀(`onLayout`).
+//   9. `scrollToEnd` 는 목록 **자신의 셀 기록**으로 끝을 셈한다(`VirtualizedList.scrollToEnd`
+//      → `getCellMetricsApprox`). 아직 재지 않은 끝 행은 평균 높이로 어림한다. 그래서
+//      이중은 `scrollToEnd` 를 가로채지 않고 목록의 진짜 코드가 셈하게 둔 뒤, 한 단계
+//      아래(`VirtualizedList.scrollToOffset`)에서 명령을 받는다.
+//
+// 잰 사슬(iPhone 13 mini · Release · 목 서버 「흐르는 방」, 12줄 답이 2.5초마다):
+//   t=2490 콘텐츠 4017.3 → 4315.3(+298) → 따라가기 활강. 목표는 3487.7 + 81.3(평균)
+//   t=2492 첫 보고: 오프셋 그대로, 끝까지 298.3 → 「사람이 떠났다」로 읽혀 따라가기 해제
+//   t=2797 활강이 낡은 목표 3569 에 선다 — 끝까지 217. 「최신 메시지로 이동」
+//   t=4996 다음 12줄 답 — 따라가지 않는다. 끝까지 **516.0**
+// 줄 수로 정해지는 행 높이: 한 줄 57, 한 줄 더할 때마다 22(12줄 299 — 기기 298).
 // =============================================================================
 
 const SELF = '11111111-2604-4000-8000-000000000001';
@@ -129,12 +148,23 @@ function busyRow(seq: number, yesterdayUpTo: number): Message {
 const range = (from: number, to: number) =>
   Array.from({length: to - from + 1}, (_, i) => from + i);
 
+/** 에이전트의 답 — `lines` 줄 (#2686). 방의 행과 같은 모양이고 오늘 온다. */
+function answerRow(seq: number, lines: number): Message {
+  return {
+    ...busyRow(seq, 0),
+    authorMemberId: HERMES,
+    body: Array.from({length: lines}, (_, k) => `긴 답 ${seq}번째 글의 ${k + 1}번째 줄입니다.`).join('\n'),
+  };
+}
+
 // ---- 잰 기하 ---------------------------------------------------------------------
 const VIEWPORT = 529.33;
 const HEADER = {idle: 16, loading: 36, start: 40.33};
 const FOOTER = 8;
 const DIVIDER = 36;
 const ROW_BY_LINES = [57, 79, 101];
+/** 한 줄 57, 한 줄 더할 때마다 22 — 위 셋과 같은 식이다(#2686 의 긴 답). */
+const rowOfLines = (lines: number) => ROW_BY_LINES[0] + 22 * (lines - 1);
 const FRAME_MS = 16;
 /** UIKit `setContentOffset:animated:` — 기기 표본 4274.3 → 4986.7 이 329ms 에 걸렸다. */
 const GLIDE_MS = 330;
@@ -228,6 +258,8 @@ class NativeListDouble {
     private readonly heightOf: (child: Child) => number,
     /** 커밋에서 레이아웃 보고까지(ms). 0 은 다음 틱이다. */
     private readonly lagMs = 0,
+    /** 규칙 8 (#2686): 콘텐츠 보고가 셀의 레이아웃 보고보다 먼저 온다. */
+    private readonly contentFirst = false,
   ) {}
 
   private layout(children: Child[]): Map<string, Frame> {
@@ -306,6 +338,7 @@ class NativeListDouble {
 
   /** 커밋 뒤의 레이아웃 보고: 셀마다 `onLayout`, 그리고 콘텐츠 크기. */
   private announce() {
+    if (this.contentFirst) this.announceContent();
     for (const child of this.children) {
       if (child.spacer !== null) continue;
       const frame = this.frames.get(child.id);
@@ -316,6 +349,10 @@ class NativeListDouble {
       this.announced.set(child.id, signature);
       onLayout({nativeEvent: {layout: {x: 0, y: frame.y, width: 375, height: frame.h}}});
     }
+    if (!this.contentFirst) this.announceContent();
+  }
+
+  private announceContent() {
     const content = this.content();
     if (Math.abs(content - this.announcedContent) < 0.01) return;
     this.announcedContent = content;
@@ -370,6 +407,15 @@ class NativeListDouble {
     this.stopGlide();
     this.offset = this.clamp(to);
     this.report();
+  }
+
+  /**
+   * 손가락 없는 이동 (#2686, #2680 R2 N-2) — VoiceOver 가 초점 행을 보이게 옮기거나 상태
+   * 막대를 누른 것처럼 `scrollBeginDrag` 없이 목록이 움직인다. 한 번에 옮기고 보고도
+   * 한 번이다 — 보고가 전부 핀 안에 떨어지는, 가장 좁은 모양이다.
+   */
+  moveWithoutFinger(to: number) {
+    this.drag(to);
   }
 
   report() {
@@ -445,6 +491,11 @@ interface RoomShape {
    * 구분선이 창 위에 있으면 「안읽음」 필이 선다. 없으면 끝까지 읽은 방이다.
    */
   lastReadSeq?: number;
+  /**
+   * 규칙 8·9 (#2686): 콘텐츠 보고가 셀 보고보다 먼저 오고, `scrollToEnd` 는 목록의
+   * 셀 기록으로 끝을 셈한다. 끄면 예전 이중 — `scrollToEnd` 가 이중의 진짜 끝으로 간다.
+   */
+  listEstimate?: boolean;
 }
 
 interface StartCall {
@@ -458,6 +509,11 @@ interface Room {
   /** 진입이 도착을 선언한 순간(`settleEntry`)의 자리. */
   settle: {offset: number; content: number} | null;
   pillsRef: React.MutableRefObject<PillState | null>;
+  /** 에이전트의 답 하나가 도착한다(#2686) — `lines` 줄. */
+  push: (lines: number) => Promise<void>;
+  /** `watchLatest()` 뒤로 「최신 메시지로 이동」이 서 있던 프레임 수. */
+  latestFrames: number;
+  watching: boolean;
 }
 
 /** 목 서버 busy-120: 첫 페이지 50행, 옛 페이지 둘(반은 전날). 팀 방의 보통 모양이다. */
@@ -499,6 +555,7 @@ async function frames(room: Room, count: number) {
     if (room.settle === null && room.pillsRef.current?.settled === true) {
       room.settle = {offset: room.native.offset, content: room.native.content()};
     }
+    if (room.watching && room.pillsRef.current?.latest === true) room.latestFrames += 1;
   }
 }
 
@@ -511,6 +568,10 @@ async function enterRoom(shape: RoomShape): Promise<Room> {
     count: 0,
     /** MVCP 가 한 번이라도 빠졌다 — `anchorDriftPx` 가 그때부터 선다. */
     detached: false,
+    /** 도착한 답의 줄 수, seq 로 (#2686). */
+    answers: new Map<number, number>(),
+    /** 답을 붙이는 문 — `RoomView` 가 렌더마다 건다. */
+    append: (_row: Message) => {},
   };
   const heightOf = (child: Child): number => {
     if (child.spacer !== null) return child.spacer;
@@ -520,10 +581,14 @@ async function enterRoom(shape: RoomShape): Promise<Room> {
       return (state.reachedStart && state.count > 0 ? HEADER.start : HEADER.idle) + drift;
     }
     if (child.id.endsWith('-footer')) return FOOTER;
-    if (isMessage(child.id)) return ROW_BY_LINES[Number(child.id.slice(2)) % 3];
+    if (isMessage(child.id)) {
+      const seq = Number(child.id.slice(2));
+      const lines = state.answers.get(seq);
+      return lines === undefined ? ROW_BY_LINES[seq % 3] : rowOfLines(lines);
+    }
     return DIVIDER;
   };
-  const native = new NativeListDouble(heightOf, shape.lagMs ?? 0);
+  const native = new NativeListDouble(heightOf, shape.lagMs ?? 0, shape.listEstimate === true);
   const startCalls: StartCall[] = [];
   const startedAt = Date.now();
   let rendered = false;
@@ -544,6 +609,7 @@ async function enterRoom(shape: RoomShape): Promise<Room> {
     state.loadingOlder = loadingOlder;
     state.reachedStart = reachedStart;
     state.count = messages.length;
+    state.append = answer => setMessages(current => [...current, answer]);
     // `useTimeline.loadOlder` 의 모양: 부르는 중이면 무시하고, 한 장씩 앞에 붙인다.
     const onStartReached = useCallback(() => {
       startCalls.push({at: Date.now() - startedAt, settled: pillsRef.current?.settled === true});
@@ -588,16 +654,27 @@ async function enterRoom(shape: RoomShape): Promise<Room> {
   render(<RoomView />);
   rendered = true;
   const flat = listRef.current!;
-  jest
-    .spyOn(flat, 'scrollToEnd')
-    .mockImplementation((params?: {animated?: boolean | null}) =>
-      native.command('end', params?.animated !== false),
-    );
-  jest
-    .spyOn(flat, 'scrollToOffset')
-    .mockImplementation((params: {offset: number; animated?: boolean | null}) =>
-      native.command(params.offset, params.animated !== false),
-    );
+  if (shape.listEstimate === true) {
+    // 규칙 9: `scrollToEnd` 는 목록의 진짜 코드가 셀 기록으로 셈한다. 명령은 그 한 단계
+    // 아래에서 받는다 — `FlatList.scrollToOffset` 도 같은 문을 지난다.
+    const inner = (flat as unknown as {_listRef: {scrollToOffset: unknown}})._listRef;
+    jest
+      .spyOn(inner as {scrollToOffset: (p: {offset: number; animated?: boolean | null}) => void}, 'scrollToOffset')
+      .mockImplementation((params: {offset: number; animated?: boolean | null}) =>
+        native.command(params.offset, params.animated !== false),
+      );
+  } else {
+    jest
+      .spyOn(flat, 'scrollToEnd')
+      .mockImplementation((params?: {animated?: boolean | null}) =>
+        native.command('end', params?.animated !== false),
+      );
+    jest
+      .spyOn(flat, 'scrollToOffset')
+      .mockImplementation((params: {offset: number; animated?: boolean | null}) =>
+        native.command(params.offset, params.animated !== false),
+      );
+  }
   jest
     .spyOn(flat, 'scrollToIndex')
     .mockImplementation(
@@ -617,7 +694,16 @@ async function enterRoom(shape: RoomShape): Promise<Room> {
       nativeEvent: {layout: {x: 0, y: 0, width: 375, height: VIEWPORT}},
     });
   });
-  return {native, startCalls, settle: null, pillsRef};
+  let nextSeq = Math.max(...shape.firstPage) + 1;
+  const push = async (lines: number) => {
+    const seq = nextSeq;
+    nextSeq += 1;
+    state.answers.set(seq, lines);
+    await act(async () => {
+      state.append(answerRow(seq, lines));
+    });
+  };
+  return {native, startCalls, settle: null, pillsRef, push, latestFrames: 0, watching: false};
 }
 
 const pt = (value: number) => (Math.abs(value) <= 1 ? 0 : Math.round(value * 10) / 10);
@@ -794,5 +880,203 @@ describe('방에 들어가면 끝에 앉는다 (#2604)', () => {
     // 붙는 동안 MVCP 는 창 맨 위의 첫 서브뷰(오늘 구분선)를 제자리에 두므로, 옛 페이지의
     // 오늘 행(61–70)은 그 구분선 **아래로** 들어온다 — 이 이슈 밖의 앞붙이기 앵커
     // 성질이라 여기서는 단정하지 않는다.
+  });
+});
+
+// =============================================================================
+// 바닥에서 읽는 중에 새 답이 와도 끝에 앉는다 (#2686)
+//
+// 진입과 무관한 **따라가기 경로**(`onContentSizeChange` → 활강)다. 결함 둘이 겹친다.
+//
+//   해제  120pt 를 넘는 새 행 하나면 활강의 첫 보고가 「끝에서 멀다」 — 사람이 떠난
+//         것으로 읽혀 따라가기가 풀린다. 필이 서고, 다음 답은 따라가지 않는다.
+//   낡은 목표  활강의 목표가 목록의 어림이다(규칙 9). 새 행을 아직 재지 않았으면 평균
+//         높이로 셈하므로 긴 행일수록 모자란다 — 3줄 행이면 마지막 줄이 가려진다.
+//
+// 판정은 **끝난 시점**의 자리다(#2680 R2 N-1). 필은 끝난 시점과, 답이 오기 시작한 뒤
+// 한 프레임이라도 섰는지를 함께 본다.
+// =============================================================================
+
+/** 방에 들어가 진입이 앉고 착지 유지가 끝났다 — 바닥에서 읽고 있는 사람. */
+async function readingAtTheBottom(): Promise<Room> {
+  const room = await enterRoom({...TEAM_ROOM, listEstimate: true});
+  await frames(room, 150); // 2.4초 — 진입은 ~0.3초에 앉고, 유지는 도착 + 650ms 에 끝난다
+  // 전제: 끝에 앉았고 필이 없다. 여기서 틀리면 뒤의 판정은 따라가기를 잰 것이 아니다.
+  expect(followVerdict(room)).toEqual(AT_THE_END);
+  room.watching = true;
+  return room;
+}
+
+/** 따라가기의 판정 — 끝난 시점의 자리와 필. */
+function followVerdict(room: Room) {
+  return {
+    /** 끝까지 남은 거리(음수는 끝을 넘음). */
+    shortOfEnd: pt(room.native.end() - room.native.offset),
+    /** 끝난 시점에 「최신 메시지로 이동」이 서 있다. */
+    latest: room.pillsRef.current?.latest === true,
+    /** 답이 오기 시작한 뒤 그 필이 서 있던 프레임 수 — 번쩍임도 센다. */
+    latestFrames: room.latestFrames,
+    blankFrames: room.native.blanks.length,
+  };
+}
+
+const AT_THE_END = {shortOfEnd: 0, latest: false, latestFrames: 0, blankFrames: 0};
+
+const list = () => screen.getByTestId('timeline-list');
+
+/** 손가락이 떨어진다 — 속도 없이(관성 없음). */
+const LIFT = {nativeEvent: {velocity: {x: 0, y: 0}}};
+
+describe('바닥에서 읽는 중에 새 답이 와도 끝에 앉는다 (#2686)', () => {
+  // 기기 사슬 그대로: 12줄 답(≈298pt)이 2.5초마다 둘.
+  it('12줄 답이 2.5초 간격으로 둘 와도 끝에 앉고, 「최신 메시지로 이동」이 서지 않는다', async () => {
+    const room = await readingAtTheBottom();
+    await room.push(12);
+    await frames(room, 156); // 2.5초
+    await room.push(12);
+    await frames(room, 60);
+
+    expect(followVerdict(room)).toEqual(AT_THE_END);
+  });
+
+  // 따라가기는 풀리지 않지만(101pt < 120) 목표가 어림이다 — 기기 22.4pt(101 − 평균 78.6).
+  it('재지 않은 3줄 답도 목록의 어림이 아니라 콘텐츠의 끝에 앉는다', async () => {
+    const room = await readingAtTheBottom();
+    await room.push(3);
+    await frames(room, 60);
+
+    expect(followVerdict(room)).toEqual(AT_THE_END);
+  });
+
+  it.each([
+    [12, 250],
+    [12, 500],
+    [4, 250],
+    [4, 500],
+    [3, 250],
+    [3, 500],
+  ])('%i줄 답이 %ims 간격으로 여섯 번 이어져도 끝에 앉는다', async (lines, every) => {
+    const room = await readingAtTheBottom();
+    for (let answer = 0; answer < 6; answer += 1) {
+      await room.push(lines);
+      await frames(room, Math.round(every / FRAME_MS));
+    }
+    await frames(room, 60);
+
+    expect(followVerdict(room)).toEqual(AT_THE_END);
+  });
+
+  // 손가락은 즉시 이긴다. 잡은 동안 온 답은 핀을 다시 걸지 않는다 — 걸면 손가락의 보고가
+  // 핀 안에서 버려지고, 따라가기가 켜진 채 남아 다음 답이 목록을 손가락 밑에서 끌어간다.
+  it('손가락이 목록을 잡은 동안 온 답은 핀을 다시 걸지 않는다 — 손가락이 둔 자리에 남는다', async () => {
+    const room = await readingAtTheBottom();
+    await act(async () => {
+      fireEvent(list(), 'scrollBeginDrag');
+      room.native.drag(room.native.end() - 30); // 바닥에서 잡고 조금 끈다 — 아직 따라가는 중
+    });
+    await room.push(12); // 잡은 동안 답이 온다
+    await frames(room, 2);
+    const fingerAt = room.native.end() - 400;
+    await act(async () => {
+      room.native.drag(fingerAt); // 손가락이 위로 끈다
+    });
+    await frames(room, 3);
+    await room.push(12); // 손가락은 아직 목록 위에 있다
+    await frames(room, 3);
+    await act(async () => {
+      fireEvent(list(), 'scrollEndDrag', LIFT);
+    });
+    await frames(room, 60);
+
+    expect({
+      movedFromFinger: pt(room.native.offset - fingerAt),
+      latest: room.pillsRef.current?.latest === true,
+      blankFrames: room.native.blanks.length,
+    }).toEqual({movedFromFinger: 0, latest: true, blankFrames: 0});
+  });
+
+  it('손가락을 뗀 뒤에 온 긴 답은 다시 핀을 건다 — 끝에 앉고 필이 서지 않는다', async () => {
+    const room = await readingAtTheBottom();
+    await act(async () => {
+      fireEvent(list(), 'scrollBeginDrag');
+      room.native.drag(room.native.end() - 60); // 조금 올렸다가
+    });
+    await frames(room, 3);
+    await act(async () => {
+      room.native.drag(room.native.end()); // 바닥으로 되돌리고
+    });
+    await act(async () => {
+      fireEvent(list(), 'scrollEndDrag', LIFT); // 뗀다
+    });
+    await frames(room, 10);
+    await room.push(12);
+    await frames(room, 60);
+
+    expect(followVerdict(room)).toEqual(AT_THE_END);
+  });
+
+  it('활강 도중에 손가락이 잡으면 활강은 그 자리에서 진다', async () => {
+    const room = await readingAtTheBottom();
+    await room.push(12);
+    await frames(room, 5); // 활강 80ms
+    const fingerAt = room.native.end() - 400;
+    await act(async () => {
+      fireEvent(list(), 'scrollBeginDrag');
+      room.native.drag(fingerAt);
+    });
+    await frames(room, 3);
+    await room.push(4);
+    await frames(room, 3);
+    await act(async () => {
+      fireEvent(list(), 'scrollEndDrag', LIFT);
+    });
+    await frames(room, 60);
+
+    expect({
+      movedFromFinger: pt(room.native.offset - fingerAt),
+      latest: room.pillsRef.current?.latest === true,
+    }).toEqual({movedFromFinger: 0, latest: true});
+  });
+
+  // 착지 유지(진입·먼 전송·「최신으로」, 도착 + 650ms)는 손가락 없는 이동을 끝으로
+  // 되돌리고, 그동안 핀이 판정을 막아 필이 서지 않는다(#2680 R2 N-2 의 그 창). 유지 안에서
+  // 온 답의 활강이 그 핀을 제 것(350ms)으로 줄이거나 풀면, 유지가 되돌리는 사이 필이
+  // 번쩍인다.
+  it('착지 유지 안에서 온 답의 활강은 유지의 핀을 줄이지 않는다 — 유지가 되돌리는 동안 필이 서지 않는다', async () => {
+    const room = await enterRoom({...TEAM_ROOM, listEstimate: true});
+    for (let frame = 0; frame < 150 && room.settle === null; frame += 1) {
+      await frames(room, 1);
+    }
+    expect(room.settle).not.toBeNull(); // 진입이 앉았다 — 유지는 이제 시작이다
+    room.watching = true;
+    await room.push(12); // 유지 안에서 답이 온다
+    await frames(room, 25); // 400ms — 활강의 핀(350ms)은 지났고 유지는 아직이다
+    await act(async () => {
+      room.native.moveWithoutFinger(room.native.end() - 600);
+    });
+    await frames(room, 60);
+
+    expect(followVerdict(room)).toEqual(AT_THE_END);
+  });
+
+  // #2680 R2 N-2 의 판정: 핀 안의 보고는 따라가기 판정을 내리지 않는다. 손가락 없는
+  // 이동(VoiceOver·상태 막대)이 핀 안에서 시작해 끝나면 그 판정이 핀과 함께 사라진다 —
+  // 핀이 풀릴 때 선 자리에서 다시 판정해야, 다음 답이 읽던 사람을 끝으로 끌어가지 않는다.
+  it('활강의 핀 안에서 손가락 없이 옮겨진 목록은 핀이 풀릴 때 다시 판정한다 — 다음 답이 끌어가지 않는다', async () => {
+    const room = await readingAtTheBottom();
+    await room.push(12);
+    await frames(room, 3); // 활강 48ms — 핀 안
+    const movedTo = room.native.end() - 600;
+    await act(async () => {
+      room.native.moveWithoutFinger(movedTo);
+    });
+    await frames(room, 30); // 480ms — 핀(350ms)이 풀렸다
+    await room.push(3);
+    await frames(room, 30);
+
+    expect({
+      movedFromThere: pt(room.native.offset - movedTo),
+      latest: room.pillsRef.current?.latest === true,
+    }).toEqual({movedFromThere: 0, latest: true});
   });
 });

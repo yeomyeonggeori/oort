@@ -11,8 +11,10 @@ import {
   isRetryableIssue,
   sendBlockCopy,
   sendBlockReason,
+  showsDraftThumbnail,
   type AttachmentDraft,
 } from "@momo/core/features/attachments/model";
+import { useDraftThumbnail, type DraftThumbnailState } from "./draftThumbnail";
 
 // =============================================================================
 // 컴포저의 첨부 자리 (ADR-0151 D2 / #1202 첨부 축).
@@ -54,12 +56,69 @@ const PROGRESS_ROW_CLASS = "block h-marker w-full";
 /** 줄 상자를 만드는 공백 한 칸. 빈 <p> 는 높이가 0 이라 예약이 되지 않는다. */
 const NBSP = "\u00a0";
 
+/**
+ * 칩 왼쪽의 그림 자리 (#2701). 안전한 래스터 이미지면 48px 정사각형이 서고,
+ * 바이트를 디코드하는 동안과 디코드하지 못한 뒤에도 **같은 상자**가 선다 —
+ * 썸네일이 도착하는 순간 칩이 자라면 트레이 아래 입력창이 밀린다. 그 밖의 파일은
+ * 지금까지의 16px 아이콘 그대로다.
+ *
+ * 썸네일의 `alt` 는 비어 있다: 바로 옆에 파일명이 있고, 보조기술이 같은 이름을
+ * 두 번 읽을 이유가 없다(장식 이미지).
+ */
+function DraftVisual({
+  thumbnail,
+  danger,
+  Icon,
+  alignToThumb,
+}: {
+  thumbnail: DraftThumbnailState;
+  danger: boolean;
+  Icon: typeof ImageIcon;
+  /** 트레이에 썸네일 칩이 하나라도 있으면 아이콘 칩도 같은 **폭**을 잡는다. */
+  alignToThumb: boolean;
+}) {
+  const iconClass = cn("size-4 shrink-0", danger ? "text-danger" : "text-ink-muted");
+  if (thumbnail.status === "none") {
+    // 섞인 트레이에서 파일명 열이 칩마다 다른 x 에서 시작하지 않게, 폭만 맞춘다.
+    // 높이는 그대로라 아이콘 칩은 자라지 않는다(20개 상한의 밀도를 지킨다).
+    return alignToThumb ? (
+      <span aria-hidden="true" className="flex w-tray-thumb shrink-0 justify-center">
+        <Icon className={iconClass} />
+      </span>
+    ) : (
+      <Icon aria-hidden="true" className={iconClass} />
+    );
+  }
+  if (thumbnail.status === "ready") {
+    return (
+      <img
+        src={thumbnail.dataUrl}
+        alt=""
+        draggable={false}
+        data-testid="attachment-chip-thumb"
+        className="size-tray-thumb shrink-0 rounded-sm border border-line object-cover"
+      />
+    );
+  }
+  // 로딩과 실패: 같은 중립 상자, 그 안에 아이콘. 셔머 없음(SKILL §4).
+  return (
+    <span
+      aria-hidden="true"
+      className="flex size-tray-thumb shrink-0 items-center justify-center rounded-sm border border-line bg-surface-hover"
+    >
+      <Icon className={iconClass} />
+    </span>
+  );
+}
+
 function DraftChip({
   draft,
+  alignToThumb,
   onRemove,
   onRetry,
 }: {
   draft: AttachmentDraft;
+  alignToThumb: boolean;
   onRemove: (localId: string) => void;
   onRetry: (localId: string) => void;
 }) {
@@ -70,6 +129,7 @@ function DraftChip({
   // 잰 값이 없는 동안은 값 없는 막대(indeterminate)를 그리고 퍼센트를 찍지 않는다.
   const measured = uploading && line.percent !== null;
   const Icon = isImageMime(draft.mime) ? ImageIcon : FileText;
+  const thumbnail = useDraftThumbnail(draft);
   const retryable =
     draft.status === "failed" &&
     draft.issue !== undefined &&
@@ -79,14 +139,14 @@ function DraftChip({
     <li
       data-testid="attachment-chip"
       data-attachment-status={draft.status}
+      data-thumb={thumbnail.status}
       className="flex items-center gap-2 rounded-sm px-2 py-1 hover:bg-surface-hover"
     >
-      <Icon
-        aria-hidden="true"
-        className={cn(
-          "size-4 shrink-0",
-          line.danger ? "text-danger" : "text-ink-muted"
-        )}
+      <DraftVisual
+        thumbnail={thumbnail}
+        danger={line.danger}
+        Icon={Icon}
+        alignToThumb={alignToThumb}
       />
       <span className="flex min-w-0 flex-1 flex-col gap-px">
         {/* 가운데에서 생략한다 (리뷰 N-A). 끝에서 자르면 확장자가 가장 먼저
@@ -270,6 +330,7 @@ export function AttachmentTray({
   // 버튼 옆이 아니라 트레이 발치이고, 그 규율은 오프라인 줄이 이미 세워 뒀다.
   const blocked = sendBlockReason(drafts);
   const blockedCopy = sendBlockCopy(drafts);
+  const alignToThumb = drafts.some(showsDraftThumbnail);
 
   if (drafts.length === 0 && rejected === 0 && folders === 0) return null;
 
@@ -319,6 +380,7 @@ export function AttachmentTray({
             <DraftChip
               key={draft.localId}
               draft={draft}
+              alignToThumb={alignToThumb}
               onRemove={onRemove}
               onRetry={onRetry}
             />
