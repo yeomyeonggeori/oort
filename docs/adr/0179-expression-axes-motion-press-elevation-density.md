@@ -4,7 +4,7 @@
 - 발제: `docs/planning/research/2026-09-02-launch-rediagnosis-two-pillars-brief.md` §2 근원 R1·R2·R6 / 편성 `docs/planning/2026-09-02-launch-program-plan.md` D-1·UX-R0·DS-0
 - 관련: ADR-0159(오르트 구름 디자인 시스템 — §2.6 "모션은 전면 토큰 축이 없다") · ADR-0174(외양 커스터마이제이션 — 밀도·폰트는 BZ-5b) · ADR-0172(아이콘) · ADR-0137 D5(폰 v0) · buzz `desktop/src/shared/styles/globals/motion.css`(Apache-2.0)
 
-> **증보 2026-09-25 — [ADR-0189](0189-design-system-2-dawn-sky-multi-theme.md) D4가 D7의 밀도 3단을 2단(`comfortable`·`compact`)으로 바꾼다.** 루트 속성 방식과 글자 크기 축은 유지한다.
+> **증보 2026-09-25 — [ADR-0189](0189-design-system-2-dawn-sky-multi-theme.md) D4가 D7의 밀도 3단을 2단(`comfortable`·`compact`)으로 바꾼다.** 루트 속성 방식과 글자 크기 축은 유지한다. D10⑤(폰이 웹 `tokens.css`의 모션·밀도 값을 파생·대조)는 ADR-0189 D5로 바뀐다. 원천은 core이고, 웹과 폰이 모두 core를 대조한다. 밀도 2단은 성재 확인 대기 항목 4다.
 
 ## 맥락
 
