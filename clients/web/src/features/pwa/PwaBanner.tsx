@@ -120,8 +120,12 @@ function Row({
       <div className="ms-auto flex shrink-0 items-center gap-2">
         {action && (
           <Button
-            variant="outline"
+            // 회색 띠(--surface-hover) 위의 보조 알약은 채움이 띠보다 밝아 얼룩이 된다.
+            // 시안 A가 시트·바닥 위 알약에 쓰는 문법(`.a-sh-top .edit`: --surface +
+            // rest 그림자)으로 선다 (DS2-1 #2713 design-review M1).
+            variant="ghost"
             size="sm"
+            className="bg-surface shadow-sm"
             data-mobile-tap="primary"
             data-testid={action.testId}
             onClick={action.run}

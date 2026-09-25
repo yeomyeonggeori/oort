@@ -890,8 +890,11 @@ export function Sidebar({
                         actions={
                           canCreate ? (
                             <Button
-                              variant="outline"
+                              // 시트 위에서 보조 채움은 1.01로 사라진다. 시안 A의
+                              // 시트 위 알약(--surface + rest 그림자)으로 선다.
+                              variant="ghost"
                               size="sm"
+                              className="bg-surface shadow-sm"
                               onClick={() => openCreateChannel()}
                               data-testid="sidebar-create-channel"
                             >
