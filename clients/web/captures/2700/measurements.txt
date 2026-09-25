@@ -1,0 +1,9 @@
+# #2700 titlebar centre lines, debug build window captures (screencapture -l, Retina 2x, px/2 = pt). macOS 27.0 26A428, tauri-runtime-wry 2.11.4.
+# before = trafficLightPosition.y 14, after = 21.5. exitfs = after Ctrl+Cmd+F in and out. resized = 800x560.
+before-y14-light.png: lights bbox=(16.0, 5.0, 76.0, 19.0) centre=12.00pt | toggle icon bbox=(87.5, 12.5, 100.5, 26.5) centre=19.50pt | delta=+7.50pt
+after-light-default.png: lights bbox=(16.0, 12.5, 76.0, 26.5) centre=19.50pt | toggle icon bbox=(87.5, 12.5, 100.5, 26.5) centre=19.50pt | delta=+0.00pt
+after-dark-default.png: lights bbox=(16.0, 12.5, 76.0, 26.5) centre=19.50pt | toggle icon bbox=(87.5, 12.5, 100.5, 26.5) centre=19.50pt | delta=+0.00pt
+after-light-collapsed.png: lights bbox=(16.0, 12.5, 76.0, 26.5) centre=19.50pt | toggle icon bbox=(87.5, 12.5, 100.5, 26.5) centre=19.50pt | delta=+0.00pt
+after-dark-collapsed.png: lights bbox=(16.0, 12.5, 76.0, 26.5) centre=19.50pt | toggle icon bbox=(87.5, 12.5, 100.5, 26.5) centre=19.50pt | delta=+0.00pt
+after-light-resized.png: lights bbox=(16.0, 12.5, 76.0, 26.5) centre=19.50pt | toggle icon bbox=(87.5, 12.5, 100.5, 26.5) centre=19.50pt | delta=+0.00pt
+after-light-exitfs.png: lights bbox=(16.0, 12.5, 76.0, 26.5) centre=19.50pt | toggle icon bbox=(87.5, 12.5, 100.5, 26.5) centre=19.50pt | delta=+0.00pt
