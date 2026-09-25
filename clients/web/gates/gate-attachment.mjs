@@ -1245,8 +1245,9 @@ async function exercisePreview(browser) {
   );
   const openerCut = await popup.evaluate(() => window.opener === null).catch(() => true);
   expect(openerCut, "PDF 창이 opener 를 쥐고 있다");
+  // 실패 줄은 늘 서 있고(낭독용 live region) 비어 있어야 한다.
   expect(
-    (await pdfRow.getByTestId("attachment-open-failed").count()) === 0,
+    (await pdfRow.getByTestId("attachment-open-failed").innerText()).trim() === "",
     "PDF 를 열고도 실패 문장이 섰다"
   );
   await popup.close();
@@ -1748,6 +1749,33 @@ async function captureShots(browser) {
         .click();
       await page_.getByTestId("image-lightbox-ready").waitFor({ timeout: 15_000 });
       await shot(page_, `lightbox-${scheme}`);
+      await page_.keyboard.press("Escape");
+      await page_.getByTestId("image-lightbox").waitFor({ state: "detached" });
+
+      // PDF 열기 실패 문장 (design-review M1): 선언은 PDF 인데 바이트가 HTML 인 판.
+      // 페이지 라우트가 컨텍스트 라우트보다 먼저다 — 이 판에서만 프록시가 거짓말한다.
+      await page_.route(`**/${PDF_ATTACHMENT.id}/content`, (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/pdf",
+          body: "<html><body>not a pdf</body></html>",
+        })
+      );
+      const pdfRow = page_.locator(
+        `[data-testid="timeline-message"][data-message-id="${PDF_MSG.toLowerCase()}"]`
+      );
+      await pdfRow.getByTestId("attachment-open-pdf").click();
+      await page_.waitForFunction(
+        () =>
+          (document.querySelector('[data-testid="attachment-open-failed"]')
+            ?.textContent ?? "") !== "",
+        undefined,
+        { timeout: 10_000 }
+      );
+      for (const extra of context.pages()) {
+        if (extra !== page_) await extra.close().catch(() => {});
+      }
+      await shot(page_, `pdf-open-failed-${scheme}`);
       await context.close();
     }
 
@@ -1772,7 +1800,7 @@ async function captureShots(browser) {
   }
   console.log(
     "[shots] artifacts/attachment/{uploading,queued,verifying,uploaded,failed,timeline," +
-      "thread-failed,phone-failed,overflow,dragging,tray-thumb,timeline-preview,lightbox}-{light,dark}.png"
+      "thread-failed,phone-failed,overflow,dragging,tray-thumb,timeline-preview,lightbox,pdf-open-failed}-{light,dark}.png"
   );
 }
 

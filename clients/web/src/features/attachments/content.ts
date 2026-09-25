@@ -4,6 +4,7 @@ import {
   hasPdfSignature,
 } from "@momo/core/features/attachments/model";
 import { fetchAttachmentContent } from "@momo/core/lib/api";
+import { openPdfInDesktopViewer } from "@/lib/tauri";
 
 // =============================================================================
 // 첨부 바이트를 화면으로 (ADR-0151 D2 / #1202 첨부 축).
@@ -233,6 +234,11 @@ export class PdfOpenError extends Error {
 /**
  * 새 창에 걸린 `blob:` 주소를 놓을 때까지의 시간. 즉시 놓으면 뷰어가 문서를 읽기
  * 전에 주소가 죽는다. 1분이면 느린 뷰어도 읽고, 탭 하나가 PDF 를 무한정 쥐지 않는다.
+ *
+ * 알고 둔 대가 (design-review L2): 1분 뒤 그 탭을 새로고침하면 오류 페이지가 되고,
+ * 뷰어의 제목·저장 이름은 파일명이 아니라 blob UUID 다. 저장은 카드의 내려받기가
+ * 맡는다(이름이 붙는다). 이것을 「고치려고」 수명을 늘리면 탭마다 PDF 전체가
+ * 메모리에 남는다.
  */
 const PDF_URL_LIFETIME_MS = 60_000;
 
@@ -305,6 +311,37 @@ export async function openPdfAttachment(
   const href = URL.createObjectURL(new Blob([body], { type: "application/pdf" }));
   target.location.replace(href);
   setTimeout(() => URL.revokeObjectURL(href), PDF_URL_LIFETIME_MS);
+}
+
+/**
+ * 데스크탑 셸의 PDF 열기 (#2701).
+ *
+ * 셸에는 새 창도 임베드도 없다(wry 가 `window.open` 을 버리고, CSP 가
+ * `frame-src 'none'; object-src 'none'`). 그래서 같은 프록시 바이트를 네이티브
+ * 명령(`open_pdf_attachment`, `pdf_viewer.rs`)에 넘겨 OS 기본 PDF 뷰어로 연다.
+ * 머리 판정은 여기서 한 번, 셸에서 한 번 더 한다 — 네이티브 경계는 호출자의
+ * 규율을 물려받지 않는다.
+ */
+export async function openPdfAttachmentInDesktop(
+  workspaceId: string,
+  channelId: string,
+  attachment: { id: string; name: string }
+): Promise<void> {
+  let bytes: Uint8Array;
+  try {
+    const blob = await fetchAttachmentContent(workspaceId, channelId, attachment.id);
+    bytes = new Uint8Array(await readAsArrayBuffer(blob));
+  } catch {
+    throw new PdfOpenError("failed");
+  }
+  if (!hasPdfSignature(bytes.subarray(0, PDF_HEAD_BYTES))) {
+    throw new PdfOpenError("not-pdf");
+  }
+  try {
+    await openPdfInDesktopViewer(bytes, attachment.name);
+  } catch {
+    throw new PdfOpenError("failed");
+  }
 }
 
 /** 테스트 전용. 모듈 전역 캐시가 테스트 사이를 넘어가지 않게 한다. */

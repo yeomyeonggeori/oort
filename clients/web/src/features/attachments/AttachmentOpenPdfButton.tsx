@@ -3,10 +3,12 @@ import { useState } from "react";
 import { cn } from "@/design/lib/cn";
 import {
   openPdfAttachment,
+  openPdfAttachmentInDesktop,
   openPdfWindow,
   PdfOpenError,
   type PdfOpenFailure,
 } from "@/features/attachments/content";
+import { pdfOpenLabel, pdfOpenMode } from "@/features/attachments/pdfOpenModel";
 import {
   ATTACH_COPY,
   type MessageAttachment,
@@ -29,6 +31,10 @@ export function AttachmentOpenPdfButton({
   onFailed?: (reason: PdfOpenFailure) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const mode = pdfOpenMode();
+  const label = pdfOpenLabel(mode);
+  const fail = (error: unknown) =>
+    onFailed?.(error instanceof PdfOpenError ? error.reason : "failed");
 
   return (
     <button
@@ -39,6 +45,13 @@ export function AttachmentOpenPdfButton({
         // <body>로 던지지 않는다). 같은 요청을 두 번 보내지 않을 뿐이다.
         if (busy) return;
         onStarted?.();
+        if (mode === "desktop") {
+          setBusy(true);
+          void openPdfAttachmentInDesktop(workspaceId, channelId, attachment)
+            .catch(fail)
+            .finally(() => setBusy(false));
+          return;
+        }
         // 창은 await **앞**에서 연다. 뒤에서 열면 팝업 차단에 걸린다.
         const target = openPdfWindow();
         if (target === null) {
@@ -47,13 +60,11 @@ export function AttachmentOpenPdfButton({
         }
         setBusy(true);
         void openPdfAttachment(workspaceId, channelId, attachment, target)
-          .catch((error: unknown) =>
-            onFailed?.(error instanceof PdfOpenError ? error.reason : "failed")
-          )
+          .catch(fail)
           .finally(() => setBusy(false));
       }}
-      aria-label={`${attachment.name} ${ATTACH_COPY.openPdf}`}
-      title={busy ? ATTACH_COPY.openingPdf : ATTACH_COPY.openPdf}
+      aria-label={`${attachment.name} ${label}`}
+      title={busy ? ATTACH_COPY.openingPdf : label}
       data-testid="attachment-open-pdf"
       data-busy={busy ? "" : undefined}
       data-row-action=""

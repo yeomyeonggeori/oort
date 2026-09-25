@@ -16,7 +16,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 //     열리는 길을 닫는다).
 //   - 팝업 차단은 await 뒤의 window.open 에서 일어난다. 그래서 창은 클릭 순간
 //     먼저 열고, 바이트가 오면 그 창의 주소를 바꾼다.
-//   - 데스크탑 셸(wry)은 새 창 요청을 버리므로 거기서는 버튼을 세우지 않는다.
+//   - 데스크탑 셸(wry)은 새 창 요청을 버리므로 거기서는 새 창 대신 네이티브
+//     명령(pdf_viewer.rs)에 바이트를 넘겨 OS 기본 뷰어로 연다. 머리 판정은 넘기기
+//     전에 여기서도 한다.
 
 const fetchAttachmentContent = vi.fn();
 
@@ -29,6 +31,10 @@ vi.mock("@/app/session", () => ({
 }));
 
 const env = vi.hoisted(() => ({ tauri: false }));
+const openPdfInDesktopViewer = vi.fn();
+vi.mock("@/lib/tauri", () => ({
+  openPdfInDesktopViewer: (...args: unknown[]) => openPdfInDesktopViewer(...args),
+}));
 vi.mock("@/lib/env", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/env")>();
   return {
@@ -88,6 +94,7 @@ beforeEach(() => {
   created = [];
   env.tauri = false;
   fetchAttachmentContent.mockReset();
+  openPdfInDesktopViewer.mockReset();
   Object.defineProperty(URL, "createObjectURL", {
     configurable: true,
     value: vi.fn((blob: Blob) => {
@@ -230,10 +237,76 @@ describe("timeline PDF card", () => {
     expect(target.close).toHaveBeenCalled();
   });
 
-  it("does not render a dead open control inside the desktop shell", () => {
+  it("opens through the OS viewer inside the desktop shell, never window.open", async () => {
     env.tauri = true;
+    fetchAttachmentContent.mockResolvedValue(bytes("%PDF-1.7\n", "application/octet-stream"));
+    openPdfInDesktopViewer.mockResolvedValue(undefined);
+    const open = vi.spyOn(window, "open");
     render([PDF]);
-    expect(host.querySelector('[data-testid="attachment-open-pdf"]')).toBeNull();
-    expect(host.querySelector('[data-testid="attachment-download"]')).not.toBeNull();
+    const button = host.querySelector<HTMLButtonElement>(
+      '[data-testid="attachment-open-pdf"]'
+    );
+    expect(button?.getAttribute("aria-label")).toBe(`${PDF.name} 기본 앱에서 PDF 열기`);
+    act(() => button?.click());
+    await waitFor(() => expect(openPdfInDesktopViewer).toHaveBeenCalledTimes(1));
+    expect(open).not.toHaveBeenCalled();
+    const [sent, name] = openPdfInDesktopViewer.mock.calls[0] as [Uint8Array, string];
+    expect(new TextDecoder().decode(sent)).toBe("%PDF-1.7\n");
+    expect(name).toBe(PDF.name);
+    expect(host.querySelector('[data-testid="attachment-open-failed"]')?.textContent).toBe("");
+  });
+
+  it("does not hand non-PDF bytes to the desktop shell", async () => {
+    env.tauri = true;
+    fetchAttachmentContent.mockResolvedValue(bytes("#!/bin/sh\n", "application/pdf"));
+    render([PDF]);
+    act(() =>
+      host
+        .querySelector<HTMLButtonElement>('[data-testid="attachment-open-pdf"]')
+        ?.click()
+    );
+    await waitFor(() =>
+      expect(
+        host.querySelector('[data-testid="attachment-open-failed"]')?.textContent
+      ).toMatch(/PDF 형식/)
+    );
+    expect(openPdfInDesktopViewer).not.toHaveBeenCalled();
+  });
+
+  it("says so when the desktop viewer does not launch", async () => {
+    env.tauri = true;
+    fetchAttachmentContent.mockResolvedValue(bytes("%PDF-1.4\n", "application/pdf"));
+    openPdfInDesktopViewer.mockRejectedValue(new Error("viewer launcher failed"));
+    render([PDF]);
+    act(() =>
+      host
+        .querySelector<HTMLButtonElement>('[data-testid="attachment-open-pdf"]')
+        ?.click()
+    );
+    await waitFor(() =>
+      expect(
+        host.querySelector('[data-testid="attachment-open-failed"]')?.textContent
+      ).toMatch(/열지 못했습니다/)
+    );
+  });
+
+  it("keeps one failure sentence per card", async () => {
+    vi.spyOn(window, "open").mockReturnValue(null);
+    render([PDF]);
+    act(() =>
+      host
+        .querySelector<HTMLButtonElement>('[data-testid="attachment-open-pdf"]')
+        ?.click()
+    );
+    expect(host.querySelector('[data-testid="attachment-open-failed"]')?.textContent).toMatch(
+      /팝업/
+    );
+    fetchAttachmentContent.mockReturnValue(new Promise(() => {}));
+    act(() =>
+      host
+        .querySelector<HTMLButtonElement>('[data-testid="attachment-download"]')
+        ?.click()
+    );
+    expect(host.querySelector('[data-testid="attachment-open-failed"]')?.textContent).toBe("");
   });
 });
