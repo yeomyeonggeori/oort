@@ -20,6 +20,8 @@ import {
 import {authGate, type AuthGate} from './authGate';
 import {clearAllDrafts} from '../features/conversation/drafts';
 import {clearAllAttachmentDrafts} from '../features/attachments/draftStore';
+import {revokeDevice} from '../push/devices';
+import {registeredPushDeviceId} from '../push/registration';
 
 // =============================================================================
 // The session, as React sees it.
@@ -218,12 +220,29 @@ export function SessionProvider({
     return () => clearAllAttachmentDrafts();
   }, [attachmentSessionKey]);
 
+  const workspaceId = member.workspaceId;
   const signOut = useCallback(() => {
     // Fire and forget, exactly as the web client does and for the reason the
     // core's `logout()` documents: the local wipe inside it is synchronous and
     // unconditional, so the person is out before the revocation resolves and a
     // dead network cannot trap them inside a session they asked to leave.
-    void logout();
+    //
+    // 이 폰의 푸시 등록도 여기서 지운다 (#2677, ADR-0120 D4). 지우지 않으면 로그아웃한
+    // 폰이 앞 사람의 「oort / 새 알림」과 배지를 계속 받는다 — 알림 확장은 세션이
+    // 없으면 relay 자리표시를 그대로 띄운다. 요청은 코어의 `beforeRevoke` 창에서
+    // 간다: 로컬 세션은 이미 지워졌고(사람은 기다리지 않는다) 서버 세션은 아직
+    // 살아 있는, 떠나는 토큰이 마지막으로 인증되는 순간이다. 새 서버는 세션이 끝날
+    // 때 등록을 스스로 끝내므로 이 호출은 보조다 — 옛 셀프호스트 서버에서도 같은
+    // 결과를 내고, 어느 쪽이든 서버의 기록을 곧바로 참으로 만든다.
+    const deviceId = registeredPushDeviceId();
+    void logout(
+      deviceId === null
+        ? {}
+        : {
+            beforeRevoke: accessToken =>
+              revokeDevice(workspaceId, deviceId, accessToken),
+          },
+    );
     // Every cached answer in here was fetched with the credential that was just
     // destroyed, and some of it (channel names, member names) is the previous
     // person's. Clearing is not an optimisation.
@@ -239,7 +258,7 @@ export function SessionProvider({
     // native PUT이 살아 있을 수 있다. 화면만 비우지 않고 진행 중 PUT도 취소하며,
     // 늦게 도착한 create/complete 응답도 세션 세대 경계에서 버린다 (#1703).
     clearAllAttachmentDrafts();
-  }, [queryClient]);
+  }, [queryClient, workspaceId]);
 
   const value = useMemo<SignedInSession>(
     () => ({member, workspaceId: member.workspaceId, signOut}),

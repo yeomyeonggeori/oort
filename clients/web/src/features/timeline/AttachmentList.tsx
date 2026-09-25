@@ -1,8 +1,14 @@
 import { FileText, ImageIcon } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSession } from "@/app/session";
 import { cn } from "@/design/lib/cn";
 import { AttachmentDownloadButton } from "@/features/attachments/AttachmentDownloadButton";
+import { AttachmentOpenPdfButton } from "@/features/attachments/AttachmentOpenPdfButton";
+import {
+  canOpenPdf,
+  pdfOpenFailureCopy,
+} from "@/features/attachments/pdfOpenModel";
+import type { PdfOpenFailure } from "@/features/attachments/content";
 import { useAttachmentPreview } from "@/features/attachments/content";
 import { ImageLightbox } from "@/features/attachments/ImageLightbox";
 import { lightboxAttachments } from "@/features/attachments/imageLightboxModel";
@@ -25,6 +31,8 @@ import {
 //
 //   이미지(상한 아래)  인라인 미리보기 + 그 아래 한 줄(이름 · 타입 · 크기)
 //   그 밖의 전부       파일 카드(아이콘 · 이름 · 타입 · 크기 · 내려받기)
+//                      PDF 카드는 「열기」를 하나 더 갖는다(#2701: 웹은 새 창,
+//                      데스크탑 셸은 OS 기본 PDF 뷰어)
 //
 // SVG 는 이미지여도 카드다. 서버가 프록시 응답에 `nosniff` 와
 // `Content-Disposition: attachment` 를 붙인 이유가 정확히 그것 — 올라온 SVG 안의
@@ -85,8 +93,24 @@ function FileCard({
   attachment: MessageAttachment;
 }) {
   const [failed, setFailed] = useState(false);
+  const [openFailure, setOpenFailure] = useState<PdfOpenFailure | null>(null);
   const Icon = isImageMime(attachment.mime) ? ImageIcon : FileText;
-  return (
+  const opensPdf = canOpenPdf(attachment);
+  const openFailureRef = useRef<HTMLParagraphElement | null>(null);
+  // 실패 줄이 타임라인 맨 아래 행에서 생기면 컴포저 뒤로 들어간다(캡처에서 실측:
+  // 행이 자라도 목록은 따라 내려가지 않는다). 문장이 선 순간 그 줄만 보이는
+  // 자리로 당긴다. `nearest` 라 이미 보이면 아무것도 움직이지 않고, behavior 를
+  // 주지 않아 즉시 이동이다(움직임 연출 없음).
+  useEffect(() => {
+    if (openFailure !== null) openFailureRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [openFailure]);
+  // 한 카드에 실패 문장은 하나다 (design-review M1): 어느 행동을 새로 시작하든
+  // 앞 행동의 실패는 지운다. 빨간 두 줄이 서로 다른 과거를 말하지 않게.
+  const clearFailures = () => {
+    setFailed(false);
+    setOpenFailure(null);
+  };
+  const card = (
     <div
       data-testid="attachment-card"
       className={cn(
@@ -103,14 +127,43 @@ function FileCard({
           </span>
         )}
       </span>
+      {/* PDF 만 연다 (#2701). 순서는 「보기 → 내려받기」: 더 가벼운 행동이 먼저다. */}
+      {opensPdf && (
+        <AttachmentOpenPdfButton
+          workspaceId={workspaceId}
+          channelId={channelId}
+          attachment={attachment}
+          onStarted={clearFailures}
+          onFailed={setOpenFailure}
+        />
+      )}
       <AttachmentDownloadButton
         workspaceId={workspaceId}
         channelId={channelId}
         attachment={attachment}
         joinsMessageRow
-        onStarted={() => setFailed(false)}
+        onStarted={clearFailures}
         onFailed={() => setFailed(true)}
       />
+    </div>
+  );
+  if (!opensPdf) return card;
+  return (
+    <div className="flex min-w-0 flex-col">
+      {card}
+      {/* 열기 실패는 카드 **아래** 한 줄이다. 카드 안에 두면 `w-fit` 카드가 긴
+          문장만큼 넓어져 두 버튼이 오른쪽으로 튄다(design-review M1). 이 줄은
+          비어 있어도 서 있어서(높이 0) 문장이 들어오는 순간 낭독된다. */}
+      <p
+        ref={openFailureRef}
+        role="status"
+        // 간격은 문장이 있을 때만 (design-review L5): 빈 줄이 PDF 카드 아래에만
+        // 4px 를 영구히 남기지 않게.
+        className={cn("max-w-pane-lg text-meta text-danger", openFailure !== null && "mt-1")}
+        data-testid="attachment-open-failed"
+      >
+        {openFailure === null ? null : pdfOpenFailureCopy(openFailure)}
+      </p>
     </div>
   );
 }
