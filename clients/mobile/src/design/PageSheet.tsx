@@ -227,5 +227,8 @@ const buildStyles = (color: Palette) =>
       borderRadius: GRAB.height / 2,
       backgroundColor: `${color.text}38`,
     },
-    body: {flex: 1, paddingHorizontal: 16},
+    // 가로 여백은 자식이 진다. 시안 `.a-sheet{padding:10px 16px 0}`의 16 은 자식의
+    // `SAFE_GUTTER`(16)가 이미 들고 있고, 여기서 한 번 더 주면 묶음 카드가 32 로
+    // 들어간다(design-review M1).
+    body: {flex: 1},
   });

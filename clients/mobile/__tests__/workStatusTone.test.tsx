@@ -52,6 +52,9 @@ const INK_ROLE: Readonly<Record<string, (color: Palette) => string>> = {
   'text-ink-muted': color => color.textMuted,
   'text-warn': color => color.warn,
   'text-accent': color => color.accentText,
+  // DS2-1(#2713): core SESSION_STATUS_CLASS 의 orphaned 가 text-signal-text 로 옮겼다.
+  // 폰 팔레트의 accentText 는 DS2-2(#2714)부터 core signal-text 그 자체다(DS2_ROLE_MAP).
+  'text-signal-text': color => color.accentText,
   'text-ok': color => color.ok,
 };
 

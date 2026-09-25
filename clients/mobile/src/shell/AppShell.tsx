@@ -168,6 +168,15 @@ export function Shell({
   if (nav.agentList) visited.current.add('agentList');
   if (nav.workList) visited.current.add('workList');
   const workConsole = workConsoleAvailable();
+  // 셸 위에 층이 하나라도 서 있는가. 크롬은 그 밑에 그려지고(트리 순서), 보조기술
+  // 에서도 숨는다(`ShellChrome` 의 `coveredProps`).
+  const covered =
+    nav.conversation !== null ||
+    nav.agentList ||
+    nav.agent !== null ||
+    nav.workList ||
+    nav.workSession !== null ||
+    nav.hosted !== null;
 
   return (
     <Canvas>
@@ -220,8 +229,9 @@ export function Shell({
         current={nav.tab}
         inboxCount={mentionCount}
         onSelect={tab => dispatch({type: 'selectTab', tab})}
+        covered={covered}
       />
-      <InkFab onPress={() => setComposeOpen(true)} />
+      <InkFab onPress={() => setComposeOpen(true)} covered={covered} />
 
       {/* 탭이던 두 층 (ADR-0189 D1). FAB 시트가 열고, 한 번 열린 뒤로는 닫혀도
           마운트된 채 남는다 — 탭일 때와 같은 이유(스크롤 자리)로. */}

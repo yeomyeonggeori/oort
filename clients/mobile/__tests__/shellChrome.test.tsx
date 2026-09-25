@@ -27,7 +27,7 @@ import {
 } from '../src/design/tokens';
 import {TABS, tabLabel} from '../src/nav/state';
 import AppShell from '../src/shell/AppShell';
-import {SHELL} from '../src/shell/ShellChrome';
+import {SHELL, tabWidthFor} from '../src/shell/ShellChrome';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
@@ -344,11 +344,65 @@ describe('기하가 시안 A #a-home 과 같다', () => {
     expect([icon.width, icon.height]).toEqual([26, 26]);
   });
 
-  it('탭바와 FAB 이 375pt 폭에서 겹치지 않는다', () => {
-    // 폭 = 78×3 + 2×2 + 6×2 + 테두리 2 = 252. 좌 16 + 252 + 틈 + 64 + 우 16.
-    const barWidth = SHELL.tabWidth * 3 + SHELL.barGap * 2 + SHELL.barPadding * 2 + 2;
-    expect(barWidth).toBe(252);
-    expect(SHELL.inset + barWidth + SHELL.fab + SHELL.inset).toBeLessThan(375);
+  it.each([320, 350, 375, 390, 402])(
+    '%ipt 창에서 탭바와 FAB 이 겹치지 않고, 탭은 44 를 넘는다 (review H1)',
+    width => {
+      const tab = tabWidthFor(width);
+      const bar = tab * 3 + SHELL.barGap * 2 + SHELL.barPadding * 2 + 2;
+      expect(tab).toBeGreaterThanOrEqual(TOUCH_TARGET);
+      expect(SHELL.inset + bar + SHELL.minGap + SHELL.fab + SHELL.inset).toBeLessThanOrEqual(
+        width,
+      );
+    },
+  );
+
+  it('375pt 이상에서는 시안의 78 그대로다 — 폭 252', () => {
+    for (const width of [375, 390, 402, 430]) {
+      expect([width, tabWidthFor(width)]).toEqual([width, 78]);
+    }
+    expect(tabWidthFor(320)).toBe(66);
+  });
+
+  it('320pt 창에서 렌더된 탭이 줄어든 폭을 든다', async () => {
+    const rn = jest.requireActual('react-native') as typeof import('react-native');
+    const spy = jest
+      .spyOn(rn, 'useWindowDimensions')
+      .mockReturnValue({width: 320, height: 568, scale: 2, fontScale: 1});
+    installFetch();
+    await renderReady();
+    expect(flat('tab-home').width).toBe(66);
+    spy.mockRestore();
+  });
+
+  it('층이 열리면 탭바와 FAB 이 층 **밑**에 있다 (review B1)', async () => {
+    // RN 새 아키텍처에서 zIndex 는 트리 순서보다 앞선다. 크롬이 zIndex 를 들면 대화
+    // 층 위에 서서 컴포저를 가리고 눌린다. 그래서 두 가지를 잰다: 크롬에 zIndex 가
+    // 없고, 층이 트리에서 크롬보다 **뒤**에 있다(= 위에 그려진다).
+    installFetch();
+    await renderReady();
+    fireEvent.press(screen.getByTestId('sidebar-row-channel:ch-general'));
+    await waitFor(() => expect(screen.getByTestId('conversation-pane')).toBeTruthy());
+    for (const id of ['shell-tabbar', 'shell-fab']) {
+      const style = StyleSheet.flatten(
+        screen.getByTestId(id, {includeHiddenElements: true}).props.style,
+      );
+      expect([id, style.zIndex]).toEqual([id, undefined]);
+    }
+    const order = screen
+      .UNSAFE_root.findAll(
+        (node: {props: {testID?: string}}) =>
+          ['shell-tabbar', 'shell-fab', 'conversation-pane'].includes(
+            node.props.testID ?? '',
+          ),
+        {deep: true},
+      )
+      .map((node: {props: {testID?: string}}) => node.props.testID)
+      .filter((id: string | undefined, i: number, all: Array<string | undefined>) =>
+        all.indexOf(id) === i,
+      );
+    expect(order).toEqual(['shell-tabbar', 'shell-fab', 'conversation-pane']);
+    // 층이 크롬을 덮으므로 보조기술 트리에서도 크롬은 가려진다.
+    expect(screen.queryByTestId('shell-fab')).toBeNull();
   });
 
   it('페이지 시트: 위 58 · 반경 30 · 시트 바탕 · 38×5 손잡이', async () => {

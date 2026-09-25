@@ -4,6 +4,7 @@ import {useMutation} from '@tanstack/react-query';
 import React, {useMemo, useState} from 'react';
 import {
   FlatList,
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -23,10 +24,13 @@ import {
   ds2Radius,
   ds2Type,
   font,
+  SAFE_GUTTER,
+  slopTo,
   space,
   TOUCH_TARGET,
   type Palette,
 } from '../design/tokens';
+import {SHELL_ICONS, SHELL_ICON_SIZE} from '../design/icons';
 import {Avatar} from '../features/conversation/Avatar';
 import {useDirectory} from '../features/workspace/queries';
 import {openDmFailureCopy} from '../screens/SidebarScreen';
@@ -129,23 +133,33 @@ function SheetBody({
   // 서는 순간 시트가 아직 내려가는 중이면 두 움직임이 겹쳐 보인다.
   const header = (
     <View>
+      {/* 시안 `.a-sh-top`: 왼쪽 42pt 원형 닫기(`.a-cbtn`, ×). 시안의 오른쪽 「편집」
+          자리는 이 시트에 할 일이 없어 비우고, 가운데에 시트의 이름을 둔다. */}
       <View style={styles.titleRow}>
-        <Text
-          accessibilityRole="header"
-          style={styles.title}
-          maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-          새 메시지
-        </Text>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="새 메시지 닫기"
           onPress={slideClose}
+          hitSlop={slopTo(CLOSE_SIZE)}
           style={({pressed}) => [styles.close, pressed && styles.pressed]}
           testID="new-message-close">
-          <Text style={styles.closeLabel} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-            닫기
-          </Text>
+          <Image
+            source={SHELL_ICONS.x}
+            style={{
+              width: SHELL_ICON_SIZE.x,
+              height: SHELL_ICON_SIZE.x,
+              tintColor: palette.text,
+            }}
+          />
         </Pressable>
+        <Text
+          accessibilityRole="header"
+          style={styles.title}
+          numberOfLines={1}
+          maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+          새 메시지
+        </Text>
+        <View style={styles.closeBalance} />
       </View>
 
       <GroupSection testID="new-message-doors">
@@ -248,28 +262,45 @@ function SheetBody({
   );
 }
 
+/** 시안 `.a-cbtn{width:42px;height:42px}`. 44 에 모자란 2 는 `hitSlop` 이 진다. */
+const CLOSE_SIZE = 42;
+
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
     list: {paddingBottom: space.xl * 2},
+    // 시트 몸은 가로 여백을 주지 않는다(`PageSheet`). 묶음 카드(`GroupSection`)는
+    // 자기 16 을 들고, 나머지 줄은 여기서 같은 16 을 든다 — 왼쪽 가장자리가 하나다.
     titleRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
-      minHeight: TOUCH_TARGET,
+      gap: space.md,
+      paddingHorizontal: SAFE_GUTTER,
+      marginBottom: space.md,
     },
-    title: {fontSize: ds2Type.headline, fontWeight: '700', color: color.text},
+    title: {
+      flex: 1,
+      textAlign: 'center',
+      fontSize: ds2Type.headline,
+      fontWeight: '700',
+      color: color.text,
+    },
     close: {
-      minHeight: TOUCH_TARGET,
-      minWidth: TOUCH_TARGET,
-      alignItems: 'flex-end',
+      width: CLOSE_SIZE,
+      height: CLOSE_SIZE,
+      borderRadius: CLOSE_SIZE / 2,
+      alignItems: 'center',
       justifyContent: 'center',
+      backgroundColor: color.surface,
+      boxShadow: color.elevationRest,
     },
-    closeLabel: {fontSize: font.body, color: color.text, fontWeight: '600'},
+    closeBalance: {width: CLOSE_SIZE},
     pressed: {opacity: 0.6},
     label: {
       marginTop: space.lg,
       marginBottom: space.sm,
-      marginLeft: 6,
+      // 시트 여백 16 + 시안 `.a-glabel{margin-left:6px}`. 격자 밖 값이라 잔량 목록에
+      // 올라 있다(`designSystem.test.ts`) — 식으로 감춰 스윕을 피하지 않는다.
+      marginLeft: 22,
       fontSize: font.label,
       fontWeight: '700',
       color: color.textMuted,
@@ -285,12 +316,15 @@ const buildStyles = (color: Palette) =>
       fontSize: font.body,
       color: color.text,
       marginBottom: space.sm,
+      marginHorizontal: SAFE_GUTTER,
     },
     person: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: space.md,
       minHeight: 54,
+      paddingVertical: space.xs,
+      marginHorizontal: SAFE_GUTTER - space.sm,
       paddingHorizontal: space.sm,
       borderRadius: ds2Radius.row,
     },
@@ -300,7 +334,7 @@ const buildStyles = (color: Palette) =>
     personHandle: {fontSize: font.label, color: color.textMuted},
     empty: {
       paddingVertical: space.lg,
-      paddingHorizontal: space.sm,
+      paddingHorizontal: SAFE_GUTTER,
       fontSize: font.body,
       color: color.textMuted,
     },

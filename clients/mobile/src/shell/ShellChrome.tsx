@@ -1,11 +1,18 @@
 import React, {createContext, useContext} from 'react';
-import {Image, Pressable, StyleSheet, Text, View} from 'react-native';
+import {
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
 import {GlassSurface} from '../design/glass';
 import {SHELL_ICONS, SHELL_ICON_SIZE, type ShellIconName} from '../design/icons';
 import {BAR_CONTROL_MAX_SCALE} from '../design/atoms';
 import {usePalette, useStyles} from '../design/theme';
-import {ds2Type, type Palette} from '../design/tokens';
+import {ds2Type, TOUCH_TARGET, type Palette} from '../design/tokens';
 import {tabLabel, visibleTabs, type Tab} from '../nav/state';
 
 // =============================================================================
@@ -17,11 +24,11 @@ import {tabLabel, visibleTabs, type Tab} from '../nav/state';
 //
 //   .a-bg   linear-gradient(180deg, bgTop 0%, bgMid 46%, bgBot 100%)
 //   .a-tab  left 16 · bottom 30 · height 64 · radius 32 · padding 6 · gap 2 ·
-//           glass + blur(22) · 1px glassLine · sh2 · z 20
+//           glass + blur(22) · 1px glassLine · sh2 (z 20 은 옮기지 않는다 — bar 주석)
 //   .a-tab button   78×52 · radius 26 · ink2 / on: ink 8% 채움 + ink
 //   .a-tab .dot     top 10 · right 22 · 17×17 · radius 9 · accent / onAccent ·
 //                   10.5/800 · 가로 4 · 2px surface 고리
-//   .a-fab  right 16 · bottom 30 · 64 원 · primary / onPrimary · sh2 · z 20
+//   .a-fab  right 16 · bottom 30 · 64 원 · primary / onPrimary · sh2
 //   .a-fade left 0 · right 0 · bottom 0 · height 150 ·
 //           linear-gradient(180deg, transparent, bgBot 62%)
 //
@@ -44,7 +51,26 @@ export const SHELL = {
   dot: 17,
   /** 시안 `.a-scroll{padding-bottom:140px}` — 목록 끝이 탭바 밑에 숨지 않게. */
   clearance: 140,
+  /** 탭바와 FAB 사이에 남길 최소 틈. 시안(390)에서는 42 가 남는다. */
+  minGap: 8,
 } as const;
+
+/** 테두리 두 줄 + 가로 여백 둘 + 틈 둘 — 탭 폭 밖에서 탭바가 먹는 폭. */
+const BAR_CHROME = 2 + SHELL.barPadding * 2 + SHELL.barGap * 2;
+
+/**
+ * 창 폭에서 탭 하나의 폭.
+ *
+ * 시안 값(78)은 375pt 이상에서 그대로다: 16 + 252 + 틈 + 64 + 16 = 348 + 틈. 그보다 좁은
+ * 창(iPad Slide Over 320, 확대 모드 320)에서는 78 을 지키면 탭바 끝이 FAB 밑으로
+ * 28pt 들어간다(design-review H1). 그때만 탭을 줄여 FAB 앞 `minGap` 에서 멈춘다.
+ * 줄여도 터치 44 아래로는 가지 않는다 — 320 에서 66 이다.
+ */
+export function tabWidthFor(windowWidth: number): number {
+  const room =
+    windowWidth - SHELL.inset * 2 - SHELL.fab - SHELL.minGap - BAR_CHROME;
+  return Math.max(TOUCH_TARGET, Math.min(SHELL.tabWidth, Math.floor(room / 3)));
+}
 
 // ---- 탭 화면의 아래 여백 ------------------------------------------------------
 
@@ -91,11 +117,28 @@ const TAB_ICON: Readonly<Record<Tab, ShellIconName>> = {
   search: 'search',
 };
 
+/**
+ * 층이 셸을 덮은 동안 크롬을 보조기술에서 숨긴다. 층은 크롬 **위**에 그려지므로
+ * 손가락은 크롬에 닿지 않는데, VoiceOver 는 트리를 훑어 가려진 탭바·FAB 을 읽고
+ * 누를 수 있다 — 대화 층은 늘 모달이 아니다(`AppShell` 의 `accessibilityViewIsModal`).
+ */
+function coveredProps(covered: boolean) {
+  return covered
+    ? ({
+        accessibilityElementsHidden: true,
+        importantForAccessibility: 'no-hide-descendants',
+      } as const)
+    : {};
+}
+
 export function FloatingTabBar({
   current,
   inboxCount,
   onSelect,
+  covered = false,
 }: {
+  /** 층이 셸을 덮고 있는가(`coveredProps`). */
+  covered?: boolean;
   current: Tab;
   /** 인박스 점의 수. 0이면 점이 없다. */
   inboxCount: number;
@@ -103,12 +146,13 @@ export function FloatingTabBar({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const tabWidth = tabWidthFor(useWindowDimensions().width);
   return (
     <GlassSurface
       radius={SHELL.barHeight / 2}
       style={styles.bar}
       testID="shell-tabbar">
-      <View accessibilityRole="tablist" style={styles.barRow}>
+      <View accessibilityRole="tablist" style={styles.barRow} {...coveredProps(covered)}>
         {visibleTabs().map(tab => {
           const selected = tab === current;
           const badge = tab === 'inbox' ? inboxCount : 0;
@@ -124,6 +168,7 @@ export function FloatingTabBar({
               onPress={() => onSelect(tab)}
               style={({pressed}) => [
                 styles.tab,
+                {width: tabWidth},
                 selected && styles.tabOn,
                 pressed && styles.pressed,
               ]}
@@ -158,7 +203,14 @@ export function FloatingTabBar({
 
 // ---- 잉크 FAB ----------------------------------------------------------------
 
-export function InkFab({onPress}: {onPress: () => void}): React.JSX.Element {
+export function InkFab({
+  onPress,
+  covered = false,
+}: {
+  onPress: () => void;
+  /** 층이 셸을 덮고 있는가(`coveredProps`). */
+  covered?: boolean;
+}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   return (
@@ -168,6 +220,7 @@ export function InkFab({onPress}: {onPress: () => void}): React.JSX.Element {
       accessibilityHint="받는 사람을 고르거나 에이전트를 부릅니다."
       onPress={onPress}
       style={({pressed}) => [styles.fab, pressed && styles.fabPressed]}
+      {...coveredProps(covered)}
       testID="shell-fab">
       <Image
         source={SHELL_ICONS.plus}
@@ -209,7 +262,10 @@ const buildStyles = (color: Palette) =>
       borderWidth: 1,
       borderColor: color.glassLine,
       boxShadow: color.elevationFloat,
-      zIndex: 20,
+      // 시안의 `z-index:20` 은 옮기지 않는다. RN 새 아키텍처에서 zIndex 는 형제의
+      // 그리기·누르기 순서를 트리 순서보다 앞세우므로, 여기 20 을 두면 탭바가 뒤에
+      // 열리는 층(대화·에이전트 목록)의 **위**에 서서 컴포저를 가린다(design-review
+      // B1). 셸은 크롬을 층보다 먼저 그리므로 트리 순서만으로 시안의 겹침이 선다.
     },
     // 시안은 `box-sizing: border-box`라 1px 테두리가 높이 64 안에 든다. 세로 여백
     // 6에서 그 1을 빼야 안쪽이 52가 되어 탭 52가 넘치지 않는다. 가로는 폭이 내용에서
@@ -262,7 +318,7 @@ const buildStyles = (color: Palette) =>
       justifyContent: 'center',
       backgroundColor: color.primary,
       boxShadow: color.elevationFloat,
-      zIndex: 20,
+      // zIndex 없음 — 위 `bar` 주석과 같은 이유.
     },
     fabPressed: {backgroundColor: color.text, opacity: 0.85},
   });
