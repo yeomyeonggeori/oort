@@ -88,9 +88,15 @@ name: 00-login
 - eraseText
 - inputText: ${PASSWORD}
 
-# The submit button sits under the keyboard on this device; tapping it while the
-# keyboard is up hits the keyboard.
-- hideKeyboard
+# The button is tapped with the keyboard UP, the way a person does it (#2678).
+# The form keeps the focused field and the 로그인 button above the keyboard
+# (`src/lib/formReveal.ts`). The `hideKeyboard` that used to stand here did
+# close the keyboard (its run on a 375pt iPhone 13 mini, Release, before #2678:
+# "Hide Keyboard... COMPLETED"); the flow still failed one step earlier. The
+# password field's centre sat on the keyboard's Passwords bar (26pt under the
+# keyboard's top edge), so `tapOn: password-input` above landed on the bar, the
+# password went into the EMAIL field (its value was `capture-password`, the
+# password field empty) and 로그인 stayed disabled.
 - assertVisible:
     id: "submit-button"
 - tapOn:
