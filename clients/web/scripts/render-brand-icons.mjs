@@ -25,8 +25,8 @@
 //   - sRGB: 떠낸 PNG마다 sRGB 청크가 있다(#2650 N-3: 태그 없이 기본값에 기대지 않는다)
 //   - 대비: 앱 아이콘 링·위성과 바탕의 비텍스트 대비 3:1 이상(WCAG 1.4.11). 값은
 //     색 상수에서 계산하고, 1024 렌더의 실제 픽셀로도 다시 잰다
-//   - 틈: small 기하를 16·24·32px로 그렸을 때 위성과 링 사이 틈 한가운데 픽셀이
-//     바탕 쪽에 가깝다(뭉개지지 않는다)
+//   - 틈: small 기하와 실제 파비콘 타일을 16·24·32px로 그렸을 때 위성과 링 사이
+//     틈 한가운데 픽셀이 바탕 쪽에 가깝다(뭉개지지 않는다)
 //   - maskable: 마크의 가장 먼 픽셀이 지름 80% 안전 원 안에 있다
 // =============================================================================
 
@@ -176,6 +176,12 @@ async function measure(page) {
   const fullSrc = svg(FULL);
   const maskSrc = maskableSvg();
   const smallSrc = svg(SMALL);
+  const favSrc = svg(FAVICON);
+  // 파비콘 타일 안에서의 마크 변환(favicon.svg의 translate/scale)을 읽는다.
+  const [, fvx, fvy, fvk] = favSrc
+    .match(/<g transform="translate\(([-\d.]+) ([-\d.]+)\) scale\(([-\d.]+)\)"/)
+    .map(Number);
+  const inFav = ([x, y]) => [fvx + fvk * x, fvy + fvk * y];
   const regularSrc = svg(resolve(MARK_DIR, "oort-mark-black.svg"));
   const reg = PARAMS.regular;
   const R = [reg.cx + reg.sat, reg.cy - reg.sat];
@@ -188,7 +194,7 @@ async function measure(page) {
 
   await page.setContent("<!doctype html><html><body></body></html>");
   return page.evaluate(
-    async ({ smallSrc, regularSrc, fullSrc, maskSrc, gapMid, ringMid, regGapMid, grids, fullRing, fullSat }) => {
+    async ({ smallSrc, regularSrc, fullSrc, maskSrc, favSrc, favGap, favRing, gapMid, ringMid, regGapMid, grids, fullRing, fullSat }) => {
       const load = (src) =>
         new Promise((ok, no) => {
           const img = new Image();
@@ -225,6 +231,19 @@ async function measure(page) {
             ring: inkAt(s, ringMid[0] * k, ringMid[1] * k),
           },
           regular: { gap: inkAt(r, regGapMid[0] * kr, regGapMid[1] * kr) },
+        };
+        // 실제로 나가는 파비콘 타일(어두운 바탕, 밝은 링): 밝기로 잉크 비율을 잰다.
+        const f = await draw(favSrc, size, null);
+        const kf = size / 32;
+        const lum = (x, y) => {
+          const i = (Math.floor(y) * f.width + Math.floor(x)) * 4;
+          return f.data[i + 1] / 255;
+        };
+        const tile = lum(size / 2, 1);
+        const paper = lum(favRing[0] * kf, favRing[1] * kf);
+        gaps[size].favicon = {
+          gap: (lum(favGap[0] * kf, favGap[1] * kf) - tile) / (0.965 - tile),
+          ring: (paper - tile) / (0.965 - tile),
         };
       }
       // 1024 전면판의 실제 픽셀: 바탕(모서리), 링(왼쪽 가운데 몸통), 위성 중심
@@ -268,6 +287,9 @@ async function measure(page) {
       grids: { small: small.grid, regular: reg.grid },
       fullRing: toFull([reg.cx - (reg.R + reg.r) / 2, reg.cy]),
       fullSat: toFull(R),
+      favSrc,
+      favGap: inFav(gapMid),
+      favRing: inFav(ringMid),
     }
   );
 }
@@ -363,6 +385,8 @@ async function main() {
       // 틈 가운데가 잉크 절반 미만이고 링 몸통보다 확실히 옅어야 틈이 보인다.
       if (!(g.small.gap < 0.5 && g.small.ring - g.small.gap > 0.35))
         fail(`small ${size}px: 틈이 뭉개진다 (틈 ${g.small.gap.toFixed(2)}, 링 ${g.small.ring.toFixed(2)})`);
+      if (!(g.favicon.gap < 0.5 && g.favicon.ring - g.favicon.gap > 0.35))
+        fail(`favicon.svg ${size}px: 틈이 뭉개진다 (틈 ${g.favicon.gap.toFixed(2)}, 링 ${g.favicon.ring.toFixed(2)})`);
     }
     if (m.reach > SAFE_RADIUS + 0.005) fail(`maskable: 마크가 안전 원 밖까지 간다 (${m.reach.toFixed(3)} > ${SAFE_RADIUS})`);
 
@@ -374,7 +398,7 @@ async function main() {
     console.log("\n== 틈 가운데 잉크 비율 (0=바탕, 1=잉크)");
     for (const [size, g] of Object.entries(m.gaps))
       console.log(
-        `${size}px  small 틈 ${g.small.gap.toFixed(2)} / 링 ${g.small.ring.toFixed(2)}   regular 틈 ${g.regular.gap.toFixed(2)}`
+        `${size}px  small 틈 ${g.small.gap.toFixed(2)} / 링 ${g.small.ring.toFixed(2)}   favicon 틈 ${g.favicon.gap.toFixed(2)} / 링 ${g.favicon.ring.toFixed(2)}   regular 틈 ${g.regular.gap.toFixed(2)}`
       );
     console.log(`\n== maskable 도달 거리 ${m.reach.toFixed(3)} (안전 ${SAFE_RADIUS})`);
   } finally {

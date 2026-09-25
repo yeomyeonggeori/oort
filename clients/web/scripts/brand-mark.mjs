@@ -72,7 +72,7 @@ export const PARAMS = {
     sat: 7,
     s: 3,
     g: 1.5,
-    tip: 8,
+    tip: 9,
     spread: 16,
     tipR: 0.75,
     fillet: 0.5,
@@ -307,7 +307,8 @@ function appIconSvg(geo, p, frame) {
 `;
 }
 
-/** 탭 파비콘: 어두운 둥근 타일 + small 기하. 타일 32, 마크 24 격자에 4 여백. */
+/** 탭 파비콘: 어두운 둥근 타일 + small 기하. 24 격자를 1.25배(30)로 키워 타일에 1 여백으로 앉힌다.
+ *  마크 경계 상자가 타일의 약 70%를 차지한다. 16px 탭에서 틈이 1px에 가깝게 남도록 여백을 줄였다(#2650 리뷰 M3). */
 function faviconSvg(geo) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
   <!--
@@ -324,7 +325,7 @@ function faviconSvg(geo) {
     같은 마크, 같은 세 색을 보인다. 스킴을 따라가지 않는다.
   -->
   <rect width="32" height="32" rx="7" fill="${COLORS.ink}"/>
-  <g transform="translate(4 4)" fill-rule="evenodd">
+  <g transform="translate(1 1) scale(1.25)" fill-rule="evenodd">
     <path fill="${COLORS.paper}" d="${geo.ring}"/>
     <path fill="${COLORS.amber}" d="${geo.satellite}"/>
   </g>
