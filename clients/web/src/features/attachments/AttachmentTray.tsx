@@ -11,6 +11,7 @@ import {
   isRetryableIssue,
   sendBlockCopy,
   sendBlockReason,
+  showsDraftThumbnail,
   type AttachmentDraft,
 } from "@momo/core/features/attachments/model";
 import { useDraftThumbnail, type DraftThumbnailState } from "./draftThumbnail";
@@ -68,14 +69,25 @@ function DraftVisual({
   thumbnail,
   danger,
   Icon,
+  alignToThumb,
 }: {
   thumbnail: DraftThumbnailState;
   danger: boolean;
   Icon: typeof ImageIcon;
+  /** 트레이에 썸네일 칩이 하나라도 있으면 아이콘 칩도 같은 **폭**을 잡는다. */
+  alignToThumb: boolean;
 }) {
   const iconClass = cn("size-4 shrink-0", danger ? "text-danger" : "text-ink-muted");
   if (thumbnail.status === "none") {
-    return <Icon aria-hidden="true" className={iconClass} />;
+    // 섞인 트레이에서 파일명 열이 칩마다 다른 x 에서 시작하지 않게, 폭만 맞춘다.
+    // 높이는 그대로라 아이콘 칩은 자라지 않는다(20개 상한의 밀도를 지킨다).
+    return alignToThumb ? (
+      <span aria-hidden="true" className="flex w-tray-thumb shrink-0 justify-center">
+        <Icon className={iconClass} />
+      </span>
+    ) : (
+      <Icon aria-hidden="true" className={iconClass} />
+    );
   }
   if (thumbnail.status === "ready") {
     return (
@@ -101,10 +113,12 @@ function DraftVisual({
 
 function DraftChip({
   draft,
+  alignToThumb,
   onRemove,
   onRetry,
 }: {
   draft: AttachmentDraft;
+  alignToThumb: boolean;
   onRemove: (localId: string) => void;
   onRetry: (localId: string) => void;
 }) {
@@ -128,7 +142,12 @@ function DraftChip({
       data-thumb={thumbnail.status}
       className="flex items-center gap-2 rounded-sm px-2 py-1 hover:bg-surface-hover"
     >
-      <DraftVisual thumbnail={thumbnail} danger={line.danger} Icon={Icon} />
+      <DraftVisual
+        thumbnail={thumbnail}
+        danger={line.danger}
+        Icon={Icon}
+        alignToThumb={alignToThumb}
+      />
       <span className="flex min-w-0 flex-1 flex-col gap-px">
         {/* 가운데에서 생략한다 (리뷰 N-A). 끝에서 자르면 확장자가 가장 먼저
             죽고, 확장자는 파일을 서로 구별해 주는 조각이다. 이름 열에는 이제
@@ -311,6 +330,7 @@ export function AttachmentTray({
   // 버튼 옆이 아니라 트레이 발치이고, 그 규율은 오프라인 줄이 이미 세워 뒀다.
   const blocked = sendBlockReason(drafts);
   const blockedCopy = sendBlockCopy(drafts);
+  const alignToThumb = drafts.some(showsDraftThumbnail);
 
   if (drafts.length === 0 && rejected === 0 && folders === 0) return null;
 
@@ -360,6 +380,7 @@ export function AttachmentTray({
             <DraftChip
               key={draft.localId}
               draft={draft}
+              alignToThumb={alignToThumb}
               onRemove={onRemove}
               onRetry={onRetry}
             />

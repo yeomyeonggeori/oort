@@ -2,6 +2,7 @@
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // PDF 열기 (#2701).
@@ -190,12 +191,10 @@ describe("timeline PDF card", () => {
     // 사용자 활성화가 살아 있는 동안 창이 이미 열렸다.
     expect(open).toHaveBeenCalledTimes(1);
     expect(button?.getAttribute("aria-busy")).toBe("true");
-    await act(async () => {
-      release(bytes("%PDF-1.4\n", "application/pdf"));
-      await new Promise((done) => setTimeout(done, 0));
-    });
-    expect(target.location.replace).toHaveBeenCalledTimes(1);
-    expect(button?.hasAttribute("aria-busy")).toBe(false);
+    act(() => release(bytes("%PDF-1.4\n", "application/pdf")));
+    // FileReader 는 jsdom 에서 여러 틱에 걸쳐 끝난다. 한 틱을 가정하지 않는다.
+    await waitFor(() => expect(target.location.replace).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(button?.hasAttribute("aria-busy")).toBe(false));
   });
 
   it("says a blocked popup out loud instead of doing nothing", async () => {
@@ -218,15 +217,16 @@ describe("timeline PDF card", () => {
     const target = fakeWindow();
     vi.spyOn(window, "open").mockReturnValue(target as unknown as Window);
     render([PDF]);
-    await act(async () => {
+    act(() =>
       host
         .querySelector<HTMLButtonElement>('[data-testid="attachment-open-pdf"]')
-        ?.click();
-      await new Promise((done) => setTimeout(done, 0));
-    });
-    expect(
-      host.querySelector('[data-testid="attachment-open-failed"]')?.textContent
-    ).toMatch(/PDF 형식/);
+        ?.click()
+    );
+    await waitFor(() =>
+      expect(
+        host.querySelector('[data-testid="attachment-open-failed"]')?.textContent
+      ).toMatch(/PDF 형식/)
+    );
     expect(target.close).toHaveBeenCalled();
   });
 

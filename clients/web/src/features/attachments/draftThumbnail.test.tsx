@@ -127,6 +127,17 @@ describe("composer tray thumbnail", () => {
     expect(createImageBitmap).not.toHaveBeenCalled();
   });
 
+  it("aligns an icon chip's name column to the thumbnail column in a mixed tray", async () => {
+    addFiles(KEY, TARGET, [file("curve.png", "image/png"), file("drain.log", "text/plain")]);
+    renderTray();
+    await flush();
+    renderTray();
+    const [, logChip] = [...host.querySelectorAll('[data-testid="attachment-chip"]')];
+    expect(logChip?.querySelector(".w-tray-thumb")).not.toBeNull();
+    // 폭만 맞춘다: 아이콘 칩은 48px 로 자라지 않는다.
+    expect(logChip?.querySelector(".size-tray-thumb")).toBeNull();
+  });
+
   it("falls back to the icon when the browser cannot decode the image", async () => {
     createImageBitmap.mockRejectedValue(new Error("decode"));
     addFiles(KEY, TARGET, [file("IMG_0412.heic", "image/heic")]);
