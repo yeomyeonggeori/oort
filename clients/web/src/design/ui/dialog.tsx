@@ -132,7 +132,7 @@ export const DialogContent = React.forwardRef<
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
-          "dialog-panel layer-overlay-surface fixed left-1/2 top-8 flex w-full max-w-pane-md -translate-x-1/2 flex-col rounded-lg border border-line bg-surface-raised text-ink shadow-lg",
+          "dialog-panel layer-overlay-surface fixed left-1/2 top-8 flex w-full max-w-pane-md -translate-x-1/2 flex-col rounded-2xl border border-line bg-surface-raised text-ink shadow-lg",
           MODAL_CONTENT_MOTION,
           className
         )}

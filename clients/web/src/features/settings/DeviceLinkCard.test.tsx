@@ -142,7 +142,7 @@ function accessibleName(el: Element): string {
 function filledAccentButtons(root: ParentNode): HTMLButtonElement[] {
   return [...root.querySelectorAll("button")].filter((button) => {
     const cls = button.className;
-    return /\bbg-accent\b/.test(cls) && /\btext-on-accent\b/.test(cls);
+    return /\bbg-primary\b/.test(cls) && /\btext-on-primary\b/.test(cls);
   });
 }
 
@@ -360,12 +360,12 @@ describe("DeviceLinkCard R2 proofs", () => {
   it("keeps at most one filled-accent control in idle, live, expired", async () => {
     const host = mount();
     expect(filledAccentButtons(host)).toHaveLength(1);
-    expect(testId("device-link-create").className).toMatch(/\bbg-accent\b/);
+    expect(testId("device-link-create").className).toMatch(/\bbg-primary\b/);
     expect(testId("device-link-create").className).not.toMatch(/\bw-full\b/);
 
     await createLink();
     expect(filledAccentButtons(host)).toHaveLength(0);
-    expect(testId("device-link-create").className).toMatch(/\bborder-line-strong\b/);
+    expect(testId("device-link-create").className).toMatch(/\bbg-surface-muted\b/);
     expect(
       document.querySelector('[data-testid="device-link-confirm-sas"]')
     ).toBeNull();
@@ -376,7 +376,7 @@ describe("DeviceLinkCard R2 proofs", () => {
     await flush();
     expect(filledAccentButtons(host)).toHaveLength(1);
     expect(testId("device-link-create").textContent).toContain("다시 만들기");
-    expect(testId("device-link-create").className).toMatch(/\bbg-accent\b/);
+    expect(testId("device-link-create").className).toMatch(/\bbg-primary\b/);
   });
 
   it("renders a version-8 QR at module pitch at least the named floor", async () => {

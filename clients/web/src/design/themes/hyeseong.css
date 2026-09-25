@@ -1,7 +1,11 @@
-/* 혜성 — comet. Plum coma in both schemes. */
-:root[data-accent="hyeseong"],
+/* 혜성 — ADR-0174 액센트 id의 DS2 이행 바인딩 (ADR-0189 D3, DS2-1 #2713).
+ * 신호 프리셋 `hyeseong`의 새벽하늘 값(core `resolvePreset`).
+ * 값은 생성본 palettes/dawnsky.css와 같고 catalog.contrast.test.ts가 core와 대조한다.
+ * 새벽하늘 전용이다: DS2-7이 data-accent를 data-signal로 옮기면 이 파일은 걷힌다. */
+:root[data-palette="dawnsky"][data-accent="hyeseong"],
 [data-accent-swatch="hyeseong"] {
-  --accent: light-dark(#8b005a, #ff4bcc);
-  --accent-soft: light-dark(#f1e0e8, #33242d);
-  --on-accent: light-dark(#fffefb, #17161a);
+  --signal: light-dark(#8b005a, #ff4bcc);
+  --on-signal: light-dark(#fffefc, #16171b);
+  --signal-text: light-dark(#8b005a, #ff5bce);
+  --signal-soft: light-dark(#f2dde4, #452b42);
 }

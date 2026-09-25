@@ -1,9 +1,11 @@
-/* Dawn / 새벽 — default amber binding (ADR-0174 D1).
- * Values are the tokens.css :root pair; restated so the catalog is uniform
- * and catalog.contrast.test.ts can treat every file as an input. */
-:root[data-accent="dawn"],
+/* 새벽 — ADR-0174 액센트 id의 DS2 이행 바인딩 (ADR-0189 D3, DS2-1 #2713).
+ * 테마 기본 신호(`signal: null`, ADR-0189 D3 이행표).
+ * 값은 생성본 palettes/dawnsky.css와 같고 catalog.contrast.test.ts가 core와 대조한다.
+ * 새벽하늘 전용이다: DS2-7이 data-accent를 data-signal로 옮기면 이 파일은 걷힌다. */
+:root[data-palette="dawnsky"][data-accent="dawn"],
 [data-accent-swatch="dawn"] {
-  --accent: light-dark(#a54c08, #f0a850);
-  --accent-soft: light-dark(#f4e7d6, #33261a);
-  --on-accent: light-dark(#fffefb, #17161a);
+  --signal: light-dark(#c2410c, #ff8a4c);
+  --on-signal: light-dark(#fffefc, #16171b);
+  --signal-text: light-dark(#af3908, #ff9a62);
+  --signal-soft: light-dark(#fbe9de, #392418);
 }

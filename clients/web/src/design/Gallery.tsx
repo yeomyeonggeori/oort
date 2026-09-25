@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Hash } from "lucide-react";
+import { ArrowUp, Hash, Search } from "lucide-react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cn } from "@/design/lib/cn";
 import { setTheme, useSystemScheme, useThemeChoice } from "@/design/theme";
@@ -98,6 +98,16 @@ const BUTTON_STATES = INTERACTION_STATES;
 const FIELD_STATES = ["rest", "focus", "disabled"] as const;
 const SIDEBAR_STATES = ["rest", "hover", "focus"] as const;
 const CHIP_STATES = ["rest", "hover", "focus", "disabled"] as const;
+/** DS2-1 새 프리미티브의 네 상태 (#2713 수용기준: 새 프리미티브 × 4상태). */
+const PRIMITIVE_STATES = ["rest", "hover", "focus", "disabled"] as const;
+
+/** 채움 알약 네 변형. outline 은 secondary 와 같은 채움이라 따로 두지 않는다. */
+const PILL_VARIANTS = [
+  { variant: "default", label: "초안 미리 보기", title: "주 행동 · 잉크 채움" },
+  { variant: "secondary", label: "멈추기", title: "보조 · surface-muted 채움" },
+  { variant: "ghost", label: "나중에", title: "조용한 행동 · 채움 없음" },
+  { variant: "destructive", label: "채널 삭제", title: "파괴 · danger-fill 채움" },
+] as const;
 
 const MOTION_VOCABULARY = [
   "press",
@@ -587,7 +597,7 @@ function GalleryBody() {
     <div
       data-testid="design-gallery"
       data-gallery-root=""
-      className="h-full min-h-0 overflow-y-auto bg-surface p-6 text-ink"
+      className="h-full min-h-0 overflow-y-auto bg-pane p-6 text-ink"
     >
       <header className="flex flex-col gap-4 border-b border-line pb-6">
         <h1 className="text-display font-medium">디자인 갤러리</h1>
@@ -761,6 +771,72 @@ function GalleryBody() {
           </Export>
         )}
       </StateRow>
+
+      <section
+        data-testid="ds2-primitives"
+        className="flex flex-col gap-3 border-b border-line py-6"
+      >
+        <h2 className="text-title font-medium text-ink">새벽하늘 프리미티브 (DS2-1)</h2>
+        <p className="text-meta text-ink-muted">
+          채움 알약·원형 아이콘 버튼·카드(rest)·유리. 위 스킴 토글로 라이트·다크를 본다.
+        </p>
+      </section>
+
+      {PILL_VARIANTS.map(({ variant, label, title }) => (
+        <StateRow key={variant} title={`Button ${variant}: ${title}`} states={PRIMITIVE_STATES}>
+          {(state) => (
+            <Button type="button" variant={variant} {...controlProps(state)}>
+              {label}
+            </Button>
+          )}
+        </StateRow>
+      ))}
+
+      <StateRow title="Button icon: 원형 아이콘 버튼" states={PRIMITIVE_STATES}>
+        {(state) => (
+          <div className="flex items-center gap-2">
+            <Button type="button" size="icon" aria-label="보내기" {...controlProps(state)}>
+              <ArrowUp aria-hidden="true" />
+            </Button>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              aria-label="검색"
+              {...controlProps(state)}
+            >
+              <Search aria-hidden="true" />
+            </Button>
+          </div>
+        )}
+      </StateRow>
+
+      <section className="flex flex-col gap-3 border-b border-line py-6">
+        <h2 className="text-title font-medium text-ink">신호와 주 행동</h2>
+        <p className="text-meta text-ink-muted">
+          안 읽음 수는 신호, 나를 부른 수는 잉크(시안 `.a-badge.at`), 멘션 글자는 신호 글자.
+        </p>
+        <div className="flex flex-wrap items-center gap-4">
+          <span className="rounded-full bg-signal px-1 text-timestamp font-bold text-on-signal">5</span>
+          <span className="rounded-full bg-primary px-1 text-timestamp font-bold text-on-primary">@2</span>
+          <span className="rounded-sm bg-signal-soft px-1 font-semibold text-signal-text">@김인턴</span>
+          <span className="rounded-sm bg-signal px-1 font-semibold text-on-signal">@곽성재</span>
+        </div>
+      </section>
+
+      <section className="flex flex-col gap-3 border-b border-line py-6">
+        <h2 className="text-title font-medium text-ink">Glass: 유리 재료</h2>
+        <p className="text-meta text-ink-muted">
+          바닥 그라데이션 위의 유리 그릇(시안 `.a-search`). 투명도 줄이기·고대비·미지원은 불투명.
+          실제 대비는 캡처 위에서만 잰다(runtime-unverified).
+        </p>
+        <div className="canvas-gradient rounded-xl p-6">
+          <div className="glass flex h-field max-w-pane items-center gap-2 rounded-lg px-3 text-body text-ink-muted shadow-sm">
+            <Search className="size-4 shrink-0" aria-hidden="true" />
+            검색과 이동
+          </div>
+        </div>
+      </section>
 
       <StateRow
         title="Input"

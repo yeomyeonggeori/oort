@@ -20,6 +20,9 @@
   var LEGACY_KEY = "momo.web.theme.v1";
   var ATTR = "data-theme";
   var ACCENT_ATTR = "data-accent";
+  // 테마 팔레트 (ADR-0189 D3). DS2-1은 새벽하늘 하나다. 고르는 자리는 DS2-7.
+  var PALETTE_ATTR = "data-palette";
+  var PALETTE = "dawnsky";
   // 시스템을 따를 때 브라우저 크롬이 쓰던 색. 고정을 풀 때 되돌릴 자리다.
   var SYSTEM_COLOR_ATTR = "data-theme-color-system";
 
@@ -46,6 +49,7 @@
     // 읽을 선택이 없으면 시스템+새벽이고, 그것이 이 앱의 기본값이다.
   }
 
+  document.documentElement.setAttribute(PALETTE_ATTR, PALETTE);
   document.documentElement.setAttribute(ACCENT_ATTR, accent);
 
   // "system"과 미지의 값은 같은 답을 받는다: 스킴 스탬프를 붙이지 않는 것.

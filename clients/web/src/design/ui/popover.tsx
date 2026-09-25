@@ -39,7 +39,7 @@ export const PopoverContent = React.forwardRef<
       sideOffset={sideOffset}
       collisionPadding={8}
       className={cn(
-        "layer-overlay-surface w-pane-picker rounded-lg border border-line bg-surface-raised p-3 text-ink shadow-lg",
+        "layer-overlay-surface w-pane-picker rounded-2xl border border-line bg-surface-raised p-3 text-ink shadow-lg",
         POPOVER_MOTION,
         className
       )}

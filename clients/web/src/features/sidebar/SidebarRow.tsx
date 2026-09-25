@@ -124,7 +124,7 @@ export function SidebarRow({
       {trailing}
       {hasMention ? (
         <span
-          className="shrink-0 rounded-sm bg-accent px-1 text-timestamp font-medium text-on-accent"
+          className="shrink-0 rounded-full bg-primary px-1 text-timestamp font-bold text-on-primary"
           data-numeric
           data-testid="mention-badge"
         >
@@ -132,7 +132,7 @@ export function SidebarRow({
         </span>
       ) : hasUnread ? (
         <span
-          className="shrink-0 text-timestamp text-ink-muted"
+          className="shrink-0 rounded-full bg-signal px-1 text-timestamp font-bold text-on-signal"
           data-numeric
           data-testid="unread-count"
         >
@@ -301,7 +301,7 @@ export function SidebarSection({
         </h2>
         {collapsed && hasMention ? (
           <span
-            className="shrink-0 rounded-sm bg-accent px-1 text-timestamp font-medium text-on-accent"
+            className="shrink-0 rounded-full bg-primary px-1 text-timestamp font-bold text-on-primary"
             data-numeric
             data-testid={`section-unread-${sectionId}`}
           >

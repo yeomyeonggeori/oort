@@ -80,7 +80,7 @@ describe("WelcomeKickoffStage", () => {
     for (const [index, body] of WELCOME_KICKOFF_SHAPES.entries()) {
       expect(marks[index]?.getAttribute("data-onboarding-body")).toBe(String(body.index));
       expect(marks[index]?.className).toContain(
-        body.tone === "accent" ? "text-accent" : "text-ink"
+        body.tone === "accent" ? "text-signal-text" : "text-ink"
       );
     }
     const kinds = WELCOME_KICKOFF_SHAPES.map((body) => body.kind);

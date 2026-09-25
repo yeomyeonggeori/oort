@@ -20,6 +20,6 @@ describe("channelHeaderControlClass", () => {
   it("keeps a pressed terminal on accent-soft, not a second fill", () => {
     const className = channelHeaderControlClass({ pressed: true });
     expect(className).toContain("bg-accent-soft");
-    expect(className).toContain("text-accent");
+    expect(className).toContain("text-signal-text");
   });
 });

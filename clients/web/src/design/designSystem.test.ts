@@ -222,7 +222,7 @@ describe("타이포 축", () => {
 
 function radiusSteps(): Record<string, number> {
   const steps: Record<string, number> = {};
-  for (const found of CSS.matchAll(/^\s*--radius-([a-z]+):\s*([\d.]+)px;/gm)) {
+  for (const found of CSS.matchAll(/^\s*--radius-([a-z0-9]+):\s*([\d.]+)px;/gm)) {
     steps[found[1]] = Number(found[2]);
   }
   return steps;
@@ -231,16 +231,27 @@ function radiusSteps(): Record<string, number> {
 const RADIUS = radiusSteps();
 
 describe("반경 축", () => {
-  it("세 단계뿐이고 서로 다르다", () => {
-    // 주석이 *"three steps, nothing else"* 라고 선언한다. 네 번째가 생기면
-    // 「버튼과 카드와 다이얼로그」라는 세 자리의 문법이 무너진다.
-    expect(Object.keys(RADIUS).sort()).toEqual(["lg", "md", "sm"]);
-    expect(new Set(Object.values(RADIUS)).size).toBe(3);
+  it("웹 플랫폼 사다리 6·10·14·18·20 다섯 값 + pill 이다 (ADR-0189 D6)", () => {
+    // 3단(6·10·14)이 플랫폼층 사다리로 바뀌었다. 여섯째 칸 pill 은 Tailwind 정적
+    // 유틸 `rounded-full` 이라 토큰이 없다. 사다리 밖 값이 생기면 이 표를 고쳐야
+    // 컴파일된다 — 「반경은 사다리의 값뿐」이 문장이 아니라 사실이다.
+    expect(RADIUS).toEqual({ sm: 6, md: 10, lg: 14, xl: 18, "2xl": 20 });
   });
 
-  it("작은 것부터 큰 것으로 — 컨트롤 < 카드 < 다이얼로그", () => {
-    expect(RADIUS.sm).toBeLessThan(RADIUS.md);
-    expect(RADIUS.md).toBeLessThan(RADIUS.lg);
+  it("작은 것부터 큰 것으로 — 코드 칩 < 배지 < 행·입력 < 본문 판 < 카드", () => {
+    const order = ["sm", "md", "lg", "xl", "2xl"] as const;
+    for (let i = 1; i < order.length; i += 1) {
+      expect(RADIUS[order[i - 1]]).toBeLessThan(RADIUS[order[i]]);
+    }
+  });
+
+  it("프리미티브가 사다리의 자기 자리에 선다", () => {
+    const read = (file: string) => codeOnly(readFileSync(`${UI_DIR}/${file}`, "utf8"));
+    expect(read("button.tsx")).toMatch(/\brounded-full\b/);
+    expect(read("input.tsx")).toMatch(/\brounded-lg\b/);
+    expect(read("select.tsx")).toMatch(/\brounded-lg\b/);
+    expect(read("card.tsx")).toMatch(/\brounded-2xl\b/);
+    expect(read("dialog.tsx")).toMatch(/\brounded-2xl\b/);
   });
 });
 
@@ -277,18 +288,11 @@ const CONTAINER_PRIMITIVES = [
 /**
  * 아직 `--line` 을 든 컨트롤 경계의 **남은 수**. 목록이 아니라 상한이다.
  *
- * `button.tsx` 의 `secondary` 변형 하나 — 경계 `--line` 이 라이트 1.32:1 · 다크
- * 1.43:1 이고 채움(`--surface-raised`)도 1.07:1 이라 WCAG 1.4.11 의 「채움이
- * 식별시키면 경계 면제」에도 걸리지 않는다. 바로 옆 `outline` 변형은 같은 모양의
- * 버튼인데 `--line-strong`(3.59/3.56:1)을 든다.
- *
- * 수리는 #1210 의 자리다(이 티켓은 문서·가드 층이다). 여기 있는 것은 **≤ 이고 = 이
- * 아니다**: #1210 이 이 하나를 닫으면 0 이 되어 조용히 통과하고, 새로 하나가 들어오면
- * 빨개진다. 등호로 적으면 수리가 이 파일을 붉게 만든다 — 가드가 수리를 벌하면 안 된다.
+ * 마지막 하나였던 `button.tsx` 의 `secondary` 변형(#1210)은 DS2-1(#2713, ADR-0189
+ * D6)에서 테두리 없는 채움 알약이 되며 닫혔다. 상한은 0 이다 — 새로 하나가
+ * 들어오면 빨개진다.
  */
-const WEAK_CONTROL_BORDERS: Readonly<Record<string, number>> = {
-  "button.tsx": 1, // secondary 변형 (#1210)
-};
+const WEAK_CONTROL_BORDERS: Readonly<Record<string, number>> = {};
 
 /** 클래스 리스트에 나타난 `border-line`(강한 선이 아닌 것)의 수. */
 function weakLineCount(source: string): number {

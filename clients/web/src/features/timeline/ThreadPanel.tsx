@@ -187,7 +187,7 @@ function ThreadPanelFrame({
         if (overlayOwnsEscape(undefined, event.nativeEvent)) return;
         closePanel();
       }}
-      className="thread-pane flex h-full flex-col overflow-hidden border-l border-line bg-surface data-[state=closed]:pointer-events-none"
+      className="thread-pane flex h-full flex-col overflow-hidden border-l border-line bg-pane data-[state=closed]:pointer-events-none"
     >
       <div
         ref={slideRef}

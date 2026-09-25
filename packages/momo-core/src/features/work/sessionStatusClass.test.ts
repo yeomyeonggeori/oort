@@ -61,7 +61,7 @@ describe("수명주기 칩에는 초록이 없다 (#1491)", () => {
 describe("색을 버는 사실은 사람을 기다리는 것뿐이다", () => {
   it("강조를 드는 상태는 호스트 연결 끊김 하나다", () => {
     const accented = KEYS.filter((key) =>
-      SESSION_STATUS_CLASS[key].includes("text-accent")
+      SESSION_STATUS_CLASS[key].includes("text-signal-text")
     );
     expect(accented).toEqual(["orphaned"]);
   });

@@ -609,7 +609,7 @@ export function FirstAgentStage({
     // 가면 화면 전체가 머리 줄째 왼쪽으로 24px 끌렸다가 되돌아왔다(WebKit
     // iPhone 실측, scrollLeft 24). clip은 스크롤 상자를 만들지 않고 넘친 몫만
     // 자르므로 미끄러짐은 화면 끝에서 들어오는 그대로다.
-    <div className="flex min-h-full flex-col overflow-x-clip bg-surface">
+    <div className="flex min-h-full flex-col overflow-x-clip bg-pane">
       <header
         className="onboarding-step-chrome"
         data-testid="onboarding-step-chrome"
