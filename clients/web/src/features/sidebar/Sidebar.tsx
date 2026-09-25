@@ -560,9 +560,9 @@ export function Sidebar({
             {/* 데스크톱 접기 토글은 타이틀바에 한 자리만 산다 (#1864). 여기 두면
                 접는 순간 입구가 사라진다. */}
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
-              className="tap-target min-w-0 flex-1 justify-between"
+              className="tap-target glass min-w-0 flex-1 justify-between rounded-lg text-ink-muted shadow-sm"
               onClick={onOpenQuickSwitcher}
               data-testid="open-quick-switcher"
             >
