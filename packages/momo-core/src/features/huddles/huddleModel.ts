@@ -186,7 +186,7 @@ export function huddleErrorCopy(kind: HuddleErrorKind): string {
     case "microphone-missing":
       return "사용할 수 있는 마이크를 찾지 못했습니다. 오디오 입력 장치를 연결한 뒤 다시 참가하세요.";
     case "expired":
-      return "참가 토큰이 만료되어 연결이 끊겼습니다. 허들에 다시 참가하세요.";
+      return "참가 준비 시간이 지나 연결하지 못했습니다. 허들에 다시 참가하세요.";
     case "connection":
       return "허들 오디오 연결이 끊겼습니다. 네트워크를 확인한 뒤 다시 참가하세요.";
     case "unknown":
