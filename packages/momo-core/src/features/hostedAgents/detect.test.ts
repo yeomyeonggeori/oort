@@ -4,10 +4,12 @@ import type { HostedAgentConnection } from "./model";
 import {
   GROK_HOSTED_AGENT_ID,
   HOSTED_AGENT_SIGNATURES,
+  LOCAL_HARNESS_IDS,
   hostedAgentDetected,
   hostedAgentSignature,
   hostedPresetIdForMember,
   matchHostedAgentMember,
+  normalizeLocalHarnessProbes,
   planHostedInvite,
   type HostedAgentProbe,
 } from "./detect";
@@ -227,5 +229,53 @@ describe("초대 계획은 미설치에서 침묵하고 활성 연결을 다시 
         })
       ).toBeNull();
     }
+  });
+});
+
+describe("로컬 하네스 감지 (#2813)", () => {
+  it("id 는 셸 STATUS_COMMANDS 와 같은 claude·codex 둘이다", () => {
+    expect(LOCAL_HARNESS_IDS).toEqual(["claude", "codex"]);
+  });
+
+  it("셸 응답을 허용목록 순서로 옮긴다", () => {
+    expect(
+      normalizeLocalHarnessProbes([
+        { id: "codex", installed: true, auth: "needs_login" },
+        { id: "claude", installed: true, auth: "logged_in" },
+      ])
+    ).toEqual([
+      { id: "claude", installed: true, auth: "logged_in" },
+      { id: "codex", installed: true, auth: "needs_login" },
+    ]);
+  });
+
+  it("브라우저·실패는 둘 다 미설치·unknown 이다", () => {
+    const none = [
+      { id: "claude", installed: false, auth: "unknown" },
+      { id: "codex", installed: false, auth: "unknown" },
+    ];
+    expect(normalizeLocalHarnessProbes([])).toEqual(none);
+    expect(normalizeLocalHarnessProbes(null)).toEqual(none);
+    expect(normalizeLocalHarnessProbes("oops")).toEqual(none);
+  });
+
+  it("모르는 id·필드·auth 는 통과하지 않는다", () => {
+    const out = normalizeLocalHarnessProbes([
+      { id: "grok", installed: true, auth: "logged_in" },
+      {
+        id: "claude",
+        installed: true,
+        auth: "expired",
+        path: "/opt/homebrew/bin/claude",
+        detail: "sk-ant-oat01-FAKE",
+      },
+      { id: "codex", installed: false, auth: "logged_in" },
+    ]);
+    expect(out).toEqual([
+      { id: "claude", installed: true, auth: "unknown" },
+      { id: "codex", installed: false, auth: "unknown" },
+    ]);
+    expect(JSON.stringify(out)).not.toContain("sk-ant");
+    expect(JSON.stringify(out)).not.toContain("/opt/homebrew");
   });
 });
