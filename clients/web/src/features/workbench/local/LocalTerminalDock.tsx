@@ -409,7 +409,9 @@ export function LocalTerminalDock({
           renderPane={(pane) => <LocalTerminalPane pane={pane} platform={platform} sessions={sessions} />}
           onRequestClose={requestClose}
           onCloseLastPane={onCloseLastPane}
-          notice={notice ?? runningPaneNotice(sessionMap, ids)}
+          notice={notice}
+          lingeringNotice={runningPaneNotice(sessionMap, ids)}
+          crampedHelp={dock.fullscreen ? undefined : "⌃⇧` 전체 화면"}
         />
       </div>
       <Dialog open={confirm !== null} onOpenChange={(open) => !open && setConfirm(null)}>

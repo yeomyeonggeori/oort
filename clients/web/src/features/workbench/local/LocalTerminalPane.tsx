@@ -165,6 +165,9 @@ export function LocalTerminalPane({
       terminalRef.current = terminal;
 
       const refit = () => {
+        // 가려진 칸(최대화·좁은 자리)은 PTY 크기를 정하지 않는다. 트리 자리에서
+        // 짜부라진 크기로 TUI를 다시 그리게 하지 않는다(design-review R6 M-1).
+        if (mount.closest("[inert]") !== null) return;
         try {
           fit.fit();
         } catch {
@@ -193,6 +196,10 @@ export function LocalTerminalPane({
 
       const observer = new ResizeObserver(refit);
       observer.observe(mount);
+      // 가림이 풀리는 순간에도 맞춘다(크기 변화 알림이 가림 해제보다 먼저 올 수 있다).
+      const section = mount.closest("[data-pane-id]");
+      const inertWatch = new MutationObserver(refit);
+      if (section) inertWatch.observe(section, { attributes: true, attributeFilter: ["inert"] });
       const media = window.matchMedia("(prefers-color-scheme: dark)");
       const applyTheme = () => {
         terminal.options.theme = readTheme(mount, selection, cursor);
@@ -203,6 +210,7 @@ export function LocalTerminalPane({
 
       cleanup = () => {
         observer.disconnect();
+        inertWatch.disconnect();
         media.removeEventListener("change", applyTheme);
         unsubscribeTheme();
         data.dispose();

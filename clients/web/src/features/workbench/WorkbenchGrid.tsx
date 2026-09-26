@@ -87,6 +87,17 @@ export interface WorkbenchGridProps {
    * 않는다(PTY 크기 변경 없음). 격자 자신의 거부 문구가 먼저다.
    */
   notice?: string | null;
+  /**
+   * 자리가 좁아 한 칸만 보일 때(cramped) 격자 문장 뒤에 붙일 호스트의 길(예: 도크의
+   * 「⌃⇧` 전체 화면」). macOS 키캡으로 적는다.
+   */
+  crampedHelp?: string;
+  /**
+   * 호스트의 오래 가는 알림(도는 칸의 저장 실패 등). 좁은 자리 안내보다 뒤다:
+   * 칸이 왜 사라졌는지가 먼저 읽혀야 한다. `notice`는 방금 한 일에 대한 답이라
+   * 좁은 자리 안내보다 앞이다.
+   */
+  lingeringNotice?: string | null;
   label?: string;
   className?: string;
 }
@@ -103,9 +114,12 @@ const STORAGE_COPY =
 
 const IDLE_HINT = "⌘D 오른쪽으로 분할 · ⌘⇧D 아래로 분할 · ⌘⌥화살표 칸 이동 · ⌘] 다음 칸 · ⌘⇧↵ 최대화";
 
-function crampedHint(index: number, hidden: number): string {
-  return `자리가 좁아 ${index}번 칸만 보입니다. 칸 ${hidden}개는 가려져 있습니다. 도크를 키우거나 칸을 닫으세요.`;
+function crampedHint(index: number, hidden: number, help: string | undefined): string {
+  const ways = ["⌘] 다음 칸", ...(help ? [help] : []), "칸 닫기"].join(" · ");
+  return `자리가 좁아 ${index}번 칸만 보입니다(칸 ${hidden}개 가려짐). ${ways}`;
 }
+
+const CRAMPED_MAXIMIZE_COPY = "자리가 좁아 이미 한 칸만 보입니다. 다른 칸은 ⌘]로 넘어갑니다.";
 
 function maximizedHint(index: number, hidden: number): string {
   return `${index}번 칸 최대화, 칸 ${hidden}개가 가려져 있습니다 · ⌘⇧↵ 되돌리기`;
@@ -171,6 +185,8 @@ export function WorkbenchGrid({
   onCloseLastPane,
   onRequestClose,
   notice: hostNotice = null,
+  crampedHelp,
+  lingeringNotice = null,
   label = "작업 공간 격자",
   className,
 }: WorkbenchGridProps) {
@@ -178,6 +194,7 @@ export function WorkbenchGrid({
   const size = useMeasuredSize(areaRef, sizeOverride);
   const platform = platformProp ?? detectPlatform();
   const [notice, setNotice] = useState<string | null>(null);
+  const crampedRef = useRef(false);
 
   // 끌기 중 pointermove는 최신 배치를 봐야 한다(렌더를 기다리지 않는다).
   const layoutRef = useRef(layout);
@@ -228,6 +245,11 @@ export function WorkbenchGrid({
         case "close":
           return requestClose(current.focused);
         case "toggle-maximize":
+          // 자리가 좁아 이미 한 칸만 보인다. 저장 배치의 최대화를 몰래 뒤집지 않는다.
+          if (crampedRef.current) {
+            setNotice(CRAMPED_MAXIMIZE_COPY);
+            return;
+          }
           return apply(toggleMaximize(current));
         case "focus-cycle":
           return apply(focusCycle(current, command.delta), false);
@@ -271,11 +293,19 @@ export function WorkbenchGrid({
   // 그리는 배치: 저장된 배치를 지금 크기에 맞춘 것(칸 최소 크기 보장). 저장된
   // 배치는 바꾸지 않는다. 너무 작으면 포커스 칸만 보인다(#2774 R5).
   const { layout: shown, cramped } = fitLayoutToSize(layout, size);
+  crampedRef.current = cramped;
   const ids = paneIds(layout.root);
   const single = layout.root.kind === "pane";
-  const crampedCopy = cramped ? crampedHint(ids.indexOf(shown.focused) + 1, ids.length - 1) : null;
+  const crampedCopy = cramped
+    ? modLabel(platform, crampedHint(ids.indexOf(shown.focused) + 1, ids.length - 1, crampedHelp))
+    : null;
+  // 순서: 방금 한 일에 대한 답(격자·호스트) > 좁은 자리 안내 > 오래 가는 알림 > 저장 실패.
   const message =
-    notice ?? hostNotice ?? crampedCopy ?? (storage === "unavailable" ? STORAGE_COPY : null);
+    notice ??
+    hostNotice ??
+    crampedCopy ??
+    lingeringNotice ??
+    (storage === "unavailable" ? STORAGE_COPY : null);
   const hint =
     layout.maximized !== null
       ? maximizedHint(ids.indexOf(layout.maximized) + 1, ids.length - 1)
@@ -287,12 +317,20 @@ export function WorkbenchGrid({
     size,
     platform,
     single,
+    cramped,
+    userMaximized: layout.maximized,
     renderPane,
     paneTitle,
     onFocusPane: (id) => apply(focusPane(layoutRef.current, id), false),
     onSplit: (id, axis) => apply(splitPane(layoutRef.current, id, axis, sizeRef.current)),
     onClose: requestClose,
-    onMaximize: (id) => apply(toggleMaximize(layoutRef.current, id)),
+    onMaximize: (id) => {
+      if (cramped) {
+        setNotice(CRAMPED_MAXIMIZE_COPY);
+        return;
+      }
+      apply(toggleMaximize(layoutRef.current, id));
+    },
     onResize: (splitId, ratio) => apply(resizeSplit(layoutRef.current, splitId, ratio, sizeRef.current), false),
     onNudge: (splitId, delta) => apply(nudgeSplit(layoutRef.current, splitId, delta, sizeRef.current), false),
     onToggleRatio: (splitId) => apply(toggleSplitRatio(layoutRef.current, splitId, sizeRef.current), false),
@@ -342,6 +380,10 @@ export function WorkbenchGrid({
 }
 
 interface RenderContext {
+  /** 자리가 좁아 포커스 칸만 보인다(최대화 단추가 할 일이 없다). */
+  cramped: boolean;
+  /** 사람이 최대화한 칸(저장 배치). 단추의 눌림은 이것만 말한다. */
+  userMaximized: PaneId | null;
   layout: WorkbenchLayout;
   ids: PaneId[];
   size: Size;
@@ -496,6 +538,7 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
   const focused = layout.focused === id;
   const maximized = layout.maximized === id;
   const covered = layout.maximized !== null && !maximized;
+  const userMaximized = ctx.userMaximized === id;
   const info: WorkbenchPaneInfo = { id, index, focused, maximized };
   const title = ctx.paneTitle?.(info) ?? `칸 ${index}`;
   const ref = useRef<HTMLElement>(null);
@@ -579,14 +622,14 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
           <Rows2 />
         </PaneButton>
         <PaneButton
-          label={maximized ? "최대화 끄기" : "칸 최대화"}
+          label={userMaximized ? "최대화 끄기" : "칸 최대화"}
           platform={platform}
           keycap="⌘⇧↵"
-          disabled={ctx.single}
-          pressed={maximized}
+          disabled={ctx.single || ctx.cramped}
+          pressed={userMaximized}
           onClick={() => ctx.onMaximize(id)}
         >
-          {maximized ? <Minimize2 /> : <Maximize2 />}
+          {userMaximized ? <Minimize2 /> : <Maximize2 />}
         </PaneButton>
         <PaneButton
           label="칸 닫기"

@@ -306,6 +306,44 @@ async function interactions(browser, origin) {
     report.scenes.push(`light-${scene}-${width}x${height}`);
     await c7.close();
   }
+  // R6 B-1 / H-1 / M-1: 좁은 자리(cramped)에서 최대화 단추는 눌림을 거짓으로
+  // 말하지 않고 저장 배치를 몰래 바꾸지 않는다. 안내가 되는 길(⌘], 전체 화면)을
+  // 말한다. 가려진 칸은 PTY 크기를 정하지 않는다.
+  {
+    const c8 = await browser.newContext({ viewport: { width: 720, height: 480 }, colorScheme: "light", reducedMotion: "reduce" });
+    const p8 = await c8.newPage();
+    await p8.goto(`${origin}/#/design/local-terminal?scene=stack3`);
+    await p8.getByTestId("local-terminal-dock").waitFor();
+    await waitOutput(p8);
+    const r8 = await p8.evaluate(() => {
+      const visible = Array.from(document.querySelectorAll('[data-testid="workbench-pane"]')).find(
+        (e) => getComputedStyle(e).visibility !== "hidden"
+      );
+      const btn = visible?.querySelector('button[aria-pressed]');
+      return {
+        pressed: btn?.getAttribute("aria-pressed"),
+        disabled: btn?.getAttribute("aria-disabled"),
+        notice: document.querySelector('[data-testid="workbench-notice"]')?.textContent ?? "",
+      };
+    });
+    check("cramped: 최대화 단추가 눌림을 말하지 않고 꺼져 있다", r8.pressed === "false" && r8.disabled === "true", r8);
+    check("cramped: 안내가 ⌘]와 전체 화면을 말한다", r8.notice.includes("⌘]") && r8.notice.includes("전체 화면"), { notice: r8.notice });
+    // 단추·키를 눌러도 저장 배치의 최대화가 켜지지 않는다: 전체 화면으로 풀면 세 칸이 다 보인다.
+    await p8.evaluate(() => {
+      const visible = Array.from(document.querySelectorAll('[data-testid="workbench-pane"]')).find(
+        (e) => getComputedStyle(e).visibility !== "hidden"
+      );
+      visible?.querySelector("button[aria-pressed]")?.click();
+    });
+    await p8.keyboard.press("Meta+Shift+Enter");
+    await p8.getByTestId("local-terminal-fullscreen").click();
+    await p8.waitForTimeout(400);
+    const shownPanes = await p8.evaluate(() =>
+      Array.from(document.querySelectorAll('[data-testid="workbench-pane"]')).filter((e) => getComputedStyle(e).visibility !== "hidden").length
+    );
+    check("cramped 뒤 전체 화면: 몰래 켜진 최대화 없이 세 칸이 다 보인다", shownPanes === 3, { shownPanes });
+    await c8.close();
+  }
   // R3 H: 터미널에서 ⌘J로 연 칸 목록을 Esc로 닫으면 캐럿이 터미널로 돌아간다.
   {
     const { context: c5, page: p5 } = await open(browser, origin, "light", "four");
