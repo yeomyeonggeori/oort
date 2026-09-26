@@ -74,6 +74,8 @@ export function connectGuide(
     pendingInviteCode?: boolean;
     /** 가입은 됐고 표시 이름 저장만 실패했다(fail-forward). */
     nameSaveFailed?: boolean;
+    /** 가입 뒤 표시 이름만 다시 저장하는 중. */
+    savingName?: boolean;
   } = {}
 ): ConnectGuide {
   const state = connectGuideState(step, condition);
@@ -84,6 +86,9 @@ export function connectGuide(
   if (step === "join" && options.nameSaveFailed && state === "trouble") {
     // 가입 실패로 읽히면 안 된다: 계정은 이미 있다.
     return { state, expression, line: "팀에는 들어왔는데 이름을 저장하지 못했어요." };
+  }
+  if (step === "join" && options.savingName && state === "checking") {
+    return { state, expression, line: "이름을 저장하고 있어요." };
   }
   if (step === "welcome" && options.pendingInviteCode && state === "awaiting") {
     return { state, expression, line: "초대 코드를 받았어요. 어느 팀 서버인가요?" };

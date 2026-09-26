@@ -480,7 +480,7 @@ describe("D1 로그인 한 화면 (#2809 OB2-3)", () => {
     await act(async () => resolve(session));
   });
 
-  it("on a rejected sign-in: 당황, the error in place, and the password gone", async () => {
+  it("on a rejected sign-in: 당황, the error at the password field with the next step, and the password gone", async () => {
     setServerBase("https://team.example.com");
     login.mockRejectedValue(new ApiError(401, "invalid credentials"));
     const onLoggedIn = vi.fn();
@@ -488,14 +488,34 @@ describe("D1 로그인 한 화면 (#2809 OB2-3)", () => {
     fill("login-email", "seongjae@dawn.example");
     fill("login-password", "wrong-horse");
     await submitForm();
-    await vi.waitFor(() => expect(q("login-error")).not.toBeNull());
+    await vi.waitFor(() => expect(q("login-password-error")).not.toBeNull());
     expect(guideExpression()).toBe("flustered");
     expect(guideLine()).toBe("들어가지 못했어요.");
     expect((q("login-password") as HTMLInputElement).value).toBe("");
     expect(focused()).toBe("login-password");
-    expect(q("login-error")?.getAttribute("role")).toBe("alert");
-    expect(q("login-error")?.textContent).not.toContain("다시 시도");
+    const error = q("login-password-error");
+    expect(error?.getAttribute("role")).toBe("alert");
+    expect(error?.textContent).toMatch(/다시 넣고/);
+    expect(q("login-password")?.getAttribute("aria-describedby")).toBe("connect-password-error");
+    expect(q("login-error")).toBeNull();
     expect(onLoggedIn).not.toHaveBeenCalled();
+    fill("login-password", "x");
+    expect(q("login-password-error")).toBeNull();
+    expect(guideExpression()).toBe("idle");
+  });
+
+  it("says an empty field at that field instead of asking the server", async () => {
+    setServerBase("https://team.example.com");
+    mount();
+    fill("login-password", "");
+    fill("login-email", "");
+    await submitForm();
+    expect(q("login-email-error")?.textContent).toBe("이메일을 넣으세요.");
+    expect(login).not.toHaveBeenCalled();
+    fill("login-email", "seongjae@dawn.example");
+    await submitForm();
+    expect(q("login-password-error")?.textContent).toBe("비밀번호를 넣으세요.");
+    expect(login).not.toHaveBeenCalled();
   });
 
   it("on a server that does not answer: 당황 and the password gone too", async () => {
@@ -727,11 +747,12 @@ describe("D1′ 초대 수락 한 화면 (#2810 OB2-4)", () => {
     expect(focused()).toBe("connect-entry");
   });
 
-  it("sends an already-redeemed invite to D1 on the same server", async () => {
+  it("sends an already-redeemed invite to D1 on the same server, as guidance not a failure", async () => {
     joinWithInvite.mockRejectedValue(new ApiError(409, "invite already redeemed by this email"));
     await joinFromLink();
     await vi.waitFor(() => expect(q("onboarding-sign-in")).not.toBeNull());
     expect(q("login-error")?.textContent).toContain("로그인하세요");
+    expect(guideExpression()).toBe("idle");
   });
 
   it("keeps a transport failure on D1′ with a retry", async () => {
@@ -741,6 +762,37 @@ describe("D1′ 초대 수락 한 화면 (#2810 OB2-4)", () => {
     expect(q("onboarding-join")).not.toBeNull();
     expect(q("login-error")?.textContent).toContain("다시 시도");
     expect((q("login-password") as HTMLInputElement).value).toBe("new-pass");
+  });
+
+  it("keeps the invite when 뒤로 leaves a link-opened D1′, and 계속 returns to it", () => {
+    window.history.replaceState(null, "", `/?code=${CODE}`);
+    mount();
+    click("onboarding-back");
+    expect(q("onboarding-welcome")).not.toBeNull();
+    expect(guideLine()).toBe("초대 코드를 받았어요. 어느 팀 서버인가요?");
+    click("connect-entry-submit");
+    expect(q("onboarding-join")).not.toBeNull();
+  });
+
+  it("drops the invite on 링크 다시 넣기 after a code verdict", async () => {
+    joinWithInvite.mockRejectedValue(new ApiError(404, "invite not found"));
+    await joinFromLink();
+    await vi.waitFor(() => expect(q("login-error")).not.toBeNull());
+    act(() => (q("login-error")?.querySelector("button") as HTMLButtonElement).click());
+    expect(guideLine()).toBe("안녕하세요, 저는 코메토예요. 어디로 갈까요?");
+    click("connect-entry-submit");
+    expect(q("onboarding-sign-in")).not.toBeNull();
+  });
+
+  it("says it is saving the name, not joining, while a name retry runs", async () => {
+    changeMyDisplayName.mockRejectedValueOnce(new ApiError(500, "engine boom"));
+    await joinFromLink({ name: "성재" });
+    await vi.waitFor(() => expect(q("onboarding-profile-banner")).not.toBeNull());
+    changeMyDisplayName.mockImplementation(() => new Promise(() => undefined));
+    const retry = q("onboarding-profile-banner")?.querySelector("button") as HTMLButtonElement;
+    await act(async () => retry.click());
+    expect(guideExpression()).toBe("thinking");
+    expect(guideLine()).toBe("이름을 저장하고 있어요.");
   });
 
   it("offers 로그인 for someone who already has an account here", () => {

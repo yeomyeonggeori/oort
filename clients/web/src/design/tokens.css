@@ -3610,13 +3610,24 @@
   background-color: var(--ok);
 }
 
-/* 줄 안의 [여기로]: 시안 `.btn.sec` 34 높이, 테두리. 온보딩 틀의 보조 행동 문법이다. */
+/* 줄 안의 [여기로]: 시안 `.btn.sec` 34 높이, 테두리. 온보딩 틀의 보조 행동 문법이다.
+ * 레이어 밖 규칙이 유틸의 hover를 이기므로 hover도 여기서 준다. */
 .onboarding-action-sm {
   flex: none;
   min-block-size: 34px;
   border-radius: var(--radius-md);
   border: 1px solid var(--line-strong);
   background-color: transparent;
+}
+
+.onboarding-action-sm:hover {
+  background-color: var(--surface-hover);
+}
+
+/* 가입 뒤(이름 저장 실패) 잠긴 이메일·비밀번호 칸은 잠긴 것으로 보인다. */
+.onboarding-field:read-only {
+  background-color: var(--surface-muted);
+  color: var(--ink-muted);
 }
 
 @layer base {

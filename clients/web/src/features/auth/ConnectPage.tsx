@@ -9,6 +9,7 @@ import {
 import { ArrowLeft, FlaskConical } from "lucide-react";
 import { usePrefersReducedMotion } from "@/design/hooks/usePrefersReducedMotion";
 import {
+  ApiError,
   changeMyDisplayName,
   joinWithInvite,
   login,
@@ -150,6 +151,10 @@ export function ConnectPage({
   const [inviteCode, setInviteCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<ConnectFailure | null>(null);
+  const [fieldError, setFieldError] = useState<{
+    field: "email" | "password";
+    message: string;
+  } | null>(null);
   const [pendingFocus, setPendingFocus] = useState<Focus | null>(null);
   // 가입은 됐고 표시 이름 저장만 실패한 상태(fail-forward). 계정이 생겼으므로
   // 이 화면은 더 이상 가입 폼이 아니다: 뒤로가 없고 이메일·비밀번호는 잠긴다.
@@ -322,8 +327,15 @@ export function ConnectPage({
     }
   }
 
-  function backToWelcome() {
+  /**
+   * D0로 돌아간다. 링크로 연 D1′에서 뒤로를 누르면 초대 코드를 들고 간다: D0이
+   * 「초대 코드를 받았어요. 어느 팀 서버인가요?」로 이어받고 [계속]은 다시 D1′이다.
+   * 코드 판정 오류의 [링크 다시 넣기]는 코드를 버린다(그 코드는 쓸 수 없다).
+   */
+  function backToWelcome(options: { keepInvite?: boolean } = {}) {
     setFailure(null);
+    setFieldError(null);
+    setPendingCode(options.keepInvite && step === "join" && inviteCode !== "" ? inviteCode : null);
     setEntry(serverUrl);
     goTo("welcome");
     focusLater("entry");
@@ -331,12 +343,33 @@ export function ConnectPage({
 
   async function signIn() {
     setFailure(null);
+    setFieldError(null);
+    // 빈 칸은 서버에 묻기 전에 그 칸에서 말한다.
+    if (email.trim() === "") {
+      setFieldError({ field: "email", message: "이메일을 넣으세요." });
+      focusLater("email");
+      return;
+    }
+    if (password === "") {
+      setFieldError({ field: "password", message: "비밀번호를 넣으세요." });
+      focusLater("password");
+      return;
+    }
     setBusy(true);
     try {
       const session = await login(email, password, workspace);
       onLoggedIn(session);
     } catch (err) {
-      setFailure(signInFailureCopy(err));
+      const copy = signInFailureCopy(err);
+      if (err instanceof ApiError && err.status === 401) {
+        // 이메일·비밀번호 판정은 문제 자리(비밀번호 칸)에서 다음 행동과 함께 말한다.
+        setFieldError({
+          field: "password",
+          message: `${copy.message} 비밀번호를 다시 넣고 들어가기를 누르세요.`,
+        });
+      } else {
+        setFailure(copy);
+      }
       // 비밀번호는 실패 뒤에 남기지 않는다(#2809). 다시 넣고 들어간다.
       setPassword("");
       focusLater("password");
@@ -439,8 +472,10 @@ export function ConnectPage({
     step,
     {
       offline: !online,
+      // 409 「이미 가입한 초대」로 D1에 넘어온 것은 실패가 아니라 안내다.
       failed:
-        failure !== null ||
+        (failure !== null && !(step === "sign-in" && failure.suggestSignIn)) ||
+        (step === "sign-in" && fieldError !== null) ||
         profileError !== null ||
         (step === "welcome" && entryError !== null),
       busy: busy || profileBusy,
@@ -448,6 +483,7 @@ export function ConnectPage({
     {
       pendingInviteCode: pendingCode !== null,
       nameSaveFailed: joined !== null && profileError !== null,
+      savingName: joined !== null && profileBusy,
     }
   );
 
@@ -488,7 +524,7 @@ export function ConnectPage({
         tone="error"
         message={failure.message}
         actionLabel={relink ? "링크 다시 넣기" : retry ? "다시 시도" : undefined}
-        onAction={relink ? backToWelcome : retry ? () => void join() : undefined}
+        onAction={relink ? () => backToWelcome() : retry ? () => void join() : undefined}
         testId="login-error"
       />
     );
@@ -506,32 +542,54 @@ export function ConnectPage({
     <OnboardingColumn testId="onboarding-sign-in">
       <div data-onboarding-screen="sign-in" className="contents">
         <KomettoGuide as="h1" expression={guide.expression} line={guide.line} detail={guide.detail} />
-        <ServerChip base={chipBase} onChange={backToWelcome} changeDisabled={busy} />
+        <ServerChip base={chipBase} onChange={() => backToWelcome()} changeDisabled={busy} />
         {notices}
         <form onSubmit={onSignInSubmit} className="flex flex-col gap-4" noValidate>
-          <OnboardingFieldBlock id="connect-email" label="이메일">
+          <OnboardingFieldBlock
+            id="connect-email"
+            label="이메일"
+            error={fieldError?.field === "email" ? fieldError.message : null}
+            errorId="connect-email-error"
+            errorTestId="login-email-error"
+          >
             <Input
               id="connect-email"
               ref={emailRef}
               className={ONBOARDING_FIELD_CLASS}
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                if (fieldError?.field === "email") setFieldError(null);
+              }}
               autoComplete="username"
               required
+              aria-invalid={fieldError?.field === "email" || undefined}
+              aria-describedby={fieldError?.field === "email" ? "connect-email-error" : undefined}
               data-testid="login-email"
             />
           </OnboardingFieldBlock>
-          <OnboardingFieldBlock id="connect-password" label="비밀번호">
+          <OnboardingFieldBlock
+            id="connect-password"
+            label="비밀번호"
+            error={fieldError?.field === "password" ? fieldError.message : null}
+            errorId="connect-password-error"
+            errorTestId="login-password-error"
+          >
             <Input
               id="connect-password"
               ref={passwordRef}
               className={ONBOARDING_FIELD_CLASS}
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                if (fieldError?.field === "password") setFieldError(null);
+              }}
               autoComplete="current-password"
               required
+              aria-invalid={fieldError?.field === "password" || undefined}
+              aria-describedby={fieldError?.field === "password" ? "connect-password-error" : undefined}
               data-testid="login-password"
             />
           </OnboardingFieldBlock>
@@ -782,7 +840,7 @@ export function ConnectPage({
               variant="ghost"
               data-testid="onboarding-back"
               onPointerDown={(event) => event.stopPropagation()}
-              onClick={backToWelcome}
+              onClick={() => backToWelcome({ keepInvite: true })}
             >
               <ArrowLeft aria-hidden="true" />
               뒤로
