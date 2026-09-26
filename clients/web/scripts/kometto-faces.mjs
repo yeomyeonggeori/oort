@@ -275,10 +275,10 @@ export async function composeInPage({ src, gen, theme, dark, crop, erode, luma, 
 //   1. 키잉: 네 모서리에서 flood fill. 「바깥 바탕 ↔ 원판색」 선분까지 거리 ≤ KEY_T인
 //      픽셀이 배경이다(두 색 사이 안티앨리어싱도 함께 걷힌다).
 //   2. 가장자리 2px 띠만 투영 매팅: 가장 가까운 배경 픽셀 색을 바탕, 가장 가까운 안쪽
-//      캐릭터 픽셀 색을 전경으로 보고 알파를 매긴 뒤 바탕색을 걷어 낸다(흰 테·남색 테 방지).
+//      캐릭터 픽셀 색을 전경으로 보고 알파를 매긴다. 띠의 색은 가장 가까운 안쪽 픽셀 색이다.
 //   3. 원호 자름 페이드: 몸이 배지 원에서 잘린 자리(캐릭터가 원판이 아니라 바깥 바탕과
 //      맞닿고 그 자리가 배지 원 반지름 ±CUT_R_TOL 안)에서 안쪽으로 FADE_FRAC×크기 동안
-//      알파를 smoothstep으로 0까지 내린다. 거리는 자름 경계 픽셀에서 잰 챔퍼 거리다.
+//      알파를 smoothstep으로 0까지 내린다. 거리는 자름 경계 픽셀까지의 유클리드 거리다.
 //      잘린 단면이 딱딱한 원호로 보이지 않고 몸이 아래로 사라지게 한다.
 
 export const KEY_T = 10;
@@ -380,7 +380,6 @@ export async function cutInPage({ src, badge, disc, size, mode, cmp, keyT, fadeF
       }
     return j;
   };
-  const localBg = new Float32Array(N * 3);
   for (let y = 0; y < size; y++)
     for (let x = 0; x < size; x++) {
       const p = y * size + x;
@@ -389,7 +388,6 @@ export async function cutInPage({ src, badge, disc, size, mode, cmp, keyT, fadeF
       const b = nearest(x, y, (q) => key[q]);
       const f = nearest(x, y, (q) => !key[q] && !band[q]);
       const B = b < 0 ? bg : [d[b], d[b + 1], d[b + 2]];
-      localBg.set(B, p * 3);
       if (f < 0) {
         alpha[p] = 0.5;
         continue;
@@ -424,33 +422,25 @@ export async function cutInPage({ src, badge, disc, size, mode, cmp, keyT, fadeF
         cutPx++;
       }
     }
-  // 챔퍼 거리(3-4 근사, /3).
-  const A = 1;
-  const Bd = Math.SQRT2;
-  for (let y = 0; y < size; y++)
-    for (let x = 0; x < size; x++) {
-      const p = y * size + x;
-      let v = dist[p];
-      if (x > 0) v = Math.min(v, dist[p - 1] + A);
-      if (y > 0) {
-        v = Math.min(v, dist[p - size] + A);
-        if (x > 0) v = Math.min(v, dist[p - size - 1] + Bd);
-        if (x < size - 1) v = Math.min(v, dist[p - size + 1] + Bd);
-      }
-      dist[p] = v;
+  // 유클리드 거리(자름 경계 픽셀까지 정확한 거리). 챔퍼 근사는 페이드 띠에 세로 결을 남겼다
+  // (#2806 재검수 Medium 1).
+  const cuts = [];
+  for (let p = 0; p < N; p++) if (dist[p] === 0) cuts.push(p % size, (p / size) | 0);
+  const F0 = fadeFrac * size;
+  for (let p = 0; p < N; p++) {
+    if (dist[p] === 0 || alpha[p] === 0) continue;
+    const x = p % size;
+    const y = (p / size) | 0;
+    let m = INF;
+    for (let c = 0; c < cuts.length; c += 2) {
+      const dx = cuts[c] - x;
+      const dy = cuts[c + 1] - y;
+      const dd = dx * dx + dy * dy;
+      if (dd < m) m = dd;
     }
-  for (let y = size - 1; y >= 0; y--)
-    for (let x = size - 1; x >= 0; x--) {
-      const p = y * size + x;
-      let v = dist[p];
-      if (x < size - 1) v = Math.min(v, dist[p + 1] + A);
-      if (y < size - 1) {
-        v = Math.min(v, dist[p + size] + A);
-        if (x < size - 1) v = Math.min(v, dist[p + size + 1] + Bd);
-        if (x > 0) v = Math.min(v, dist[p + size - 1] + Bd);
-      }
-      dist[p] = v;
-    }
+    dist[p] = Math.sqrt(m);
+    if (dist[p] > F0) dist[p] = INF;
+  }
   const F = fadeFrac * size;
   for (let p = 0; p < N; p++) {
     if (alpha[p] === 0 || dist[p] >= F) continue;
@@ -458,16 +448,20 @@ export async function cutInPage({ src, badge, disc, size, mode, cmp, keyT, fadeF
     alpha[p] *= t * t * (3 - 2 * t);
   }
 
-  // 색: 반투명 가장자리 띠는 바탕색을 걷어 낸다. 페이드 구간은 색을 그대로 둔다.
-  for (let p = 0; p < N; p++) {
-    const i = p * 4;
-    if (band[p] && alpha[p] > 0 && alpha[p] < 1) {
-      for (let cc = 0; cc < 3; cc++) {
-        const B = localBg[p * 3 + cc];
-        d[i + cc] = Math.min(255, Math.max(0, Math.round((d[i + cc] - B * (1 - alpha[p])) / alpha[p])));
-      }
+  // 색: 가장자리 띠는 가장 가까운 안쪽 캐릭터 픽셀의 색을 쓴다. 바탕색을 역산하면 값이 넘쳐
+  // 노란·청록 테가 생겼다(#2806 재검수 Medium 2). 페이드 구간은 색을 그대로 둔다.
+  const src0 = new Uint8ClampedArray(d);
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      const p = y * size + x;
+      if (!band[p] || alpha[p] === 0) continue;
+      const f = nearest(x, y, (q) => !key[q] && !band[q]);
+      if (f < 0) continue;
+      const i = p * 4;
+      d[i] = src0[f];
+      d[i + 1] = src0[f + 1];
+      d[i + 2] = src0[f + 2];
     }
-  }
   const out = new Uint8ClampedArray(d);
   for (let p = 0; p < N; p++) out[p * 4 + 3] = Math.round(alpha[p] * 255);
   if (mode === "render") {
