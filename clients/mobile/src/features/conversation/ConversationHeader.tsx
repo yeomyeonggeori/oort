@@ -128,7 +128,7 @@ export function ConversationHeader({
           <View style={styles.titleBlock}>
             <View style={styles.titleLine}>
               {kind === 'dm' && peerId ? (
-                <Avatar directory={directory} memberId={peerId} size={CONV.titleFace} />
+                <Avatar directory={directory} memberId={peerId} size={CONV.titleFace} ground="muted" />
               ) : kind === 'public' || kind === 'private' ? (
                 <Image
                   accessibilityElementsHidden

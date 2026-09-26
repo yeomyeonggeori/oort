@@ -535,6 +535,9 @@ describe('치수가 시안에서 온다', () => {
       screen.getByTestId('avatar-human', {includeHiddenElements: true}).props.style,
     );
     expect([face.width, face.height, face.borderRadius]).toEqual([40, 40, 20]);
+    // 대화 바닥은 거의 surface 라 surface 원은 녹는다(실데이터 캡처) — surface2 + 선.
+    expect(face.backgroundColor).toBe(darkPalette.surfaceMuted);
+    expect(face.borderColor).toBe(darkPalette.border);
   });
 
   it('컴포저 반경이 DS2 사다리의 컴포저 단과 같다', () => {

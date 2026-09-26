@@ -860,7 +860,7 @@ function StepRow({
       {meta !== undefined ? (
         <Text
           style={[styles.stepMeta, metaStyle]}
-          numberOfLines={2}
+          numberOfLines={1}
           accessibilityLabel={metaAccessibilityLabel}>
           {meta}
         </Text>
@@ -2555,6 +2555,7 @@ function MessageRowInner({
                   directory={directory}
                   memberId={message.authorMemberId}
                   size={CONV.avatar}
+                  ground="muted"
                 />
               </Pressable>
             ) : (
@@ -2562,6 +2563,7 @@ function MessageRowInner({
                 directory={directory}
                 memberId={message.authorMemberId}
                 size={CONV.avatar}
+                ground="muted"
               />
             )}
           </View>
@@ -3265,7 +3267,7 @@ export function WorkingRow({
       testID={`working-row-${memberId}`}>
       <View style={[styles.rowInner, styles.rowAvatarReserve]}>
         <View style={styles.rowAvatar}>
-          <Avatar directory={directory} memberId={memberId} size={CONV.avatar} />
+          <Avatar directory={directory} memberId={memberId} size={CONV.avatar} ground="muted" />
         </View>
         <View style={styles.authorRow}>
           <Text
@@ -3350,7 +3352,7 @@ export function PendingRow({
       <View style={[styles.rowInner, styles.rowAvatarReserve]}>
         {startsGroup ? (
           <View style={styles.rowAvatar}>
-            <Avatar directory={directory} memberId={pending.authorMemberId} size={CONV.avatar} />
+            <Avatar directory={directory} memberId={pending.authorMemberId} size={CONV.avatar} ground="muted" />
           </View>
         ) : null}
         {startsGroup ? (
@@ -3726,14 +3728,15 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   /**
    * 시안 `.a-day span{background:var(--glass);border:1px solid var(--glassLine);
    * border-radius:999px;padding:3px 11px}`. 목록 안 알약은 흐림 없이 틴트만 —
-   * 바닥이 이미 평평해 흐릴 것이 없다.
+   * 바닥이 이미 평평해 흐릴 것이 없다. 선은 `line` 이다: 라이트의 `glassLine`(흰 70%)은
+   * 흰 바닥 위에서 사라져 알약이 맨 글자로 보였다(실데이터 캡처).
    */
   dayPill: {
     paddingVertical: CONV.dayPadY,
     paddingHorizontal: CONV.dayPadX,
     borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: color.glassLine,
+    borderColor: color.border,
     backgroundColor: color.glass,
   },
   /** 떠 있는 알약의 자리 — 목록 틀 위쪽 가운데. */
@@ -3821,7 +3824,16 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   /** `.a-step.run{font-weight:600;color:var(--agent)}`. */
   stepLabelRun: {fontWeight: '600', color: color.agent},
   /** `.a-step .mt{margin-left:auto;font-size:12px;color:var(--ink2)}`. */
-  stepMeta: {marginLeft: 'auto', flexShrink: 1, fontSize: font.meta, color: color.textMuted, textAlign: 'right'},
+  // 오른쪽 메타는 짧은 낱말(상태·세부)이라 줄지 않는다 — 줄면 「생각 / 중」처럼 음절이
+  // 갈린다(실데이터 캡처). 긴 세부는 폭 상한 안에서 말줄임한다.
+  stepMeta: {
+    marginLeft: 'auto',
+    flexShrink: 0,
+    maxWidth: '40%',
+    fontSize: font.meta,
+    color: color.textMuted,
+    textAlign: 'right',
+  },
   stepMark: {
     width: CONV.stepMark,
     height: CONV.stepMark,
