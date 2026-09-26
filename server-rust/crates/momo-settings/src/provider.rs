@@ -281,7 +281,7 @@ fn is_exact_host_token(token: &str) -> bool {
         && !token.ends_with('.')
 }
 
-fn local_hosts_from_env() -> Vec<String> {
+pub(crate) fn local_hosts_from_env() -> Vec<String> {
     parse_local_hosts(std::env::var("AGENT_PROVIDER_LOCAL_HOSTS").ok().as_deref())
 }
 
@@ -334,6 +334,8 @@ pub enum BaseUrlInvalid {
     LoopbackPortMissing,
     #[error("non-loopback baseUrl must use https://")]
     PlaintextRemote,
+    #[error("baseUrl must not target a private, loopback, link-local, or metadata address")]
+    PrivateAddress,
 }
 
 /// The write gate every stored provider base URL passes (Swift
@@ -390,7 +392,26 @@ fn validated_base_url_with_local_hosts(
         return Err(BaseUrlInvalid::PlaintextRemote);
     }
 
+    // #2852: an `https://` authority that is itself a private / loopback /
+    // link-local / metadata literal (or a `*.localhost` name) is refused here.
+    // Names are decided at connect time by the worker's resolver
+    // (`crate::egress`), because only the resolved address says where a name
+    // points *now*.
+    let policy = crate::egress::EgressPolicy {
+        allow_local: allow_local_loopback,
+        local_hosts: local_hosts.to_vec(),
+        operator_hosts: Vec::new(),
+    };
+    if policy.check_host(&parts.host).is_err() {
+        return Err(BaseUrlInvalid::PrivateAddress);
+    }
+
     Ok(parts.rebuild())
+}
+
+/// The lower-cased host of an absolute URL (IPv6 without brackets), or `None`.
+pub(crate) fn url_host(raw: &str) -> Option<String> {
+    split_url(raw).map(|parts| parts.host)
 }
 
 /// The strict `scheme://host[:port][/path]` decomposition both gates share.
@@ -653,6 +674,63 @@ mod tests {
             validated_base_url_with_local_hosts("https://host.docker.internal/v1", false, &listed,)
                 .expect("https listed host, flag off"),
             "https://host.docker.internal/v1"
+        );
+    }
+
+    /// #2852: an `https://` authority that is itself a non-public address
+    /// literal is refused at write time, whatever the flag says, unless it is
+    /// the operator's own opt-in (flag ∧ physical loopback / exact listed host).
+    #[test]
+    fn https_private_address_literals_are_refused_at_write_time() {
+        for raw in [
+            "https://169.254.169.254/latest",
+            "https://10.0.0.5/v1",
+            "https://172.16.3.4:8443/v1",
+            "https://192.168.1.10/v1",
+            "https://127.0.0.2/v1",
+            "https://100.64.0.1/v1",
+            "https://0.0.0.0/v1",
+            "https://[::ffff:169.254.169.254]/v1",
+            "https://[::ffff:7f00:1]/v1",
+            "https://[fe80::1]/v1",
+            "https://[fd00:ec2::254]/v1",
+            "https://[::]/v1",
+            "https://metadata.localhost/v1",
+            "https://2130706433/v1",
+            "https://0xa9.0xfe.0xa9.0xfe/latest",
+            "https://[::ffff:0:a9fe:a9fe]/v1",
+        ] {
+            for flag in [false, true] {
+                assert_eq!(
+                    validated_base_url_with_local_hosts(raw, flag, &[]).expect_err(raw),
+                    BaseUrlInvalid::PrivateAddress,
+                    "{raw} flag={flag}"
+                );
+            }
+        }
+        // Public literals and names still pass: the name is decided at connect
+        // time (DNS), not here.
+        assert_eq!(
+            validated_base_url_with_local_hosts("https://93.184.216.34/v1", false, &[])
+                .expect("public literal"),
+            "https://93.184.216.34/v1"
+        );
+        assert_eq!(
+            validated_base_url_with_local_hosts("https://[2606:4700::1111]/v1", false, &[])
+                .expect("public v6 literal"),
+            "https://[2606:4700::1111]/v1"
+        );
+        // The operator's exact-listed private host keeps working under the flag.
+        let listed = parse_local_hosts(Some("10.0.0.5"));
+        assert_eq!(
+            validated_base_url_with_local_hosts("https://10.0.0.5/v1", true, &listed)
+                .expect("listed + flag"),
+            "https://10.0.0.5/v1"
+        );
+        assert_eq!(
+            validated_base_url_with_local_hosts("https://10.0.0.5/v1", false, &listed)
+                .expect_err("listed, flag off"),
+            BaseUrlInvalid::PrivateAddress
         );
     }
 

@@ -27,9 +27,9 @@ import {
   AI_CONNECT_SKIPPED_LINE,
   JOIN_CAP_LINE,
   JOIN_OFF_LINE,
-  LOGIN_ACTION_LABEL,
   LOGIN_POLL_WINDOW_MS,
 } from "@momo/core/features/onboarding/aiConnect";
+import { LOGIN_ACTION_LABEL } from "@momo/core/features/onboarding/harnessLogin";
 import { clearAllDrafts, draftKey, readDraft } from "@/features/chat/draftStore";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { detectLocalHarnesses, openTerminalApp } from "@/lib/tauri";
@@ -82,6 +82,17 @@ vi.mock("@/lib/tauri", async (importOriginal) => {
     detectHostedAgents: vi.fn(async () => []),
     openTerminalApp: vi.fn(async () => true),
     openExternalUrl: vi.fn(async () => true),
+    // 이 시험의 앱에는 PTY가 없다: 로그인 모달은 Phase 1 폴백으로 물러난다.
+    // 모달·PTY 흐름 자체는 harnessLogin/*.test.ts가 가짜 CLI로 잰다.
+    desktopPty: {
+      spawn: vi.fn(async () => {
+        throw new Error("local terminal unavailable");
+      }),
+      write: vi.fn(async () => undefined),
+      resize: vi.fn(async () => undefined),
+      kill: vi.fn(async () => undefined),
+      ack: vi.fn(async () => undefined),
+    },
   };
 });
 
@@ -343,7 +354,9 @@ function rowIds(host: HTMLElement): string[] {
   );
 }
 
-function mountStage(): HTMLElement {
+function mountStage(
+  props: { mode?: "onboarding" | "reentry"; reentryFrom?: "agents" | "settings" } = {}
+): HTMLElement {
   queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false, staleTime: 30_000, refetchOnWindowFocus: false },
@@ -360,6 +373,7 @@ function mountStage(): HTMLElement {
       SessionProvider,
       { value: sessionValue() },
       createElement(HashRouter, null, createElement(FirstAgentStage, {
+        ...props,
         onContinue: () => {
           continued += 1;
         },
@@ -581,8 +595,8 @@ describe("알약과 선택", () => {
   });
 });
 
-describe("「Claude로 로그인」 버튼이 없다 (ADR-0193 D2)", () => {
-  it("로그인 필요 줄의 행동은 「터미널에서 로그인」과 복사뿐이다", async () => {
+describe("로그인 버튼은 공식 CLI 이름이다 (ADR-0193 D2 개정)", () => {
+  it("로그인 필요 줄의 행동은 「Codex로 로그인」 하나이고, 기본 흐름에 명령·터미널이 없다", async () => {
     subscriptionOn();
     const host = mountStage();
     await waitFor(() => q(host, "ai-connect-login-codex") !== null, "login row");
@@ -590,24 +604,37 @@ describe("「Claude로 로그인」 버튼이 없다 (ADR-0193 D2)", () => {
       (node) => `${node.textContent ?? ""} ${node.getAttribute("aria-label") ?? ""}`
     );
     const offenders = labels.filter((text) =>
-      /(Claude|ChatGPT|OpenAI|Anthropic|Codex)\s*(로|으로)\s*로그인/.test(text)
+      /(Claude|ChatGPT|OpenAI|Anthropic)\s*(로|으로)\s*로그인/.test(text)
     );
     expect(offenders).toEqual([]);
-    expect(q(host, "ai-connect-login-open-codex")?.textContent).toBe(LOGIN_ACTION_LABEL);
-    expect(q(host, "ai-connect-login-command-codex")?.textContent).toBe("$ codex login");
+    expect(q(host, "ai-connect-login-open-codex")?.textContent).toBe(LOGIN_ACTION_LABEL.codex);
+    expect(host.textContent).not.toContain("codex login");
+    expect(host.querySelector("code")).toBeNull();
     expect(q(host, "ai-connect-login-claude")).toBeNull();
+    // 평문 버튼: 그림·로고가 없다.
+    expect(q(host, "ai-connect-login-open-codex")?.querySelector("svg, img")).toBeNull();
   });
 });
 
-describe("터미널에서 로그인 → 2초 재확인 → 120초 뒤 다시 확인", () => {
-  it("명령을 복사하고 터미널을 연 뒤, 로그인됨이 오면 준비됨이 된다", async () => {
+function dq(testId: string): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+}
+
+describe("로그인 모달 → PTY 없음 → Phase 1 폴백 → 2초 재확인 → 120초 뒤 다시 확인", () => {
+  it("모달이 열리고, PTY가 없으면 명령 복사·터미널 열기로 넘긴 뒤 로그인됨이 오면 준비됨이 된다", async () => {
     subscriptionOn();
     const host = mountStage();
     await waitFor(() => q(host, "ai-connect-login-open-codex") !== null, "login row");
+    click(q(host, "ai-connect-login-open-codex"));
+    await waitFor(() => dq("harness-login-dialog") !== null, "dialog");
+    await waitFor(() => dq("harness-login-fallback-open") !== null, "fallback");
+    expect(dq("harness-login-dialog")?.getAttribute("data-phase")).toBe("failed");
+    expect(dq("harness-login-fallback")?.textContent).toContain("codex login");
     vi.useFakeTimers();
     const calls = vi.mocked(detectLocalHarnesses).mock.calls.length;
     vi.mocked(detectLocalHarnesses).mockResolvedValue([CLAUDE_READY, CODEX_LOGIN]);
-    click(q(host, "ai-connect-login-open-codex"));
+    click(dq("harness-login-fallback-open"));
+    await flush();
     await flush();
     await flush();
     expect(clipboard).toContain("codex login");
@@ -645,9 +672,12 @@ describe("터미널에서 로그인 → 2초 재확인 → 120초 뒤 다시 확
     subscriptionOn();
     const host = mountStage();
     await waitFor(() => q(host, "ai-connect-login-open-codex") !== null, "login row");
+    click(q(host, "ai-connect-login-open-codex"));
+    await waitFor(() => dq("harness-login-fallback-open") !== null, "fallback");
     vi.useFakeTimers();
     vi.setSystemTime(5_000_000);
-    click(q(host, "ai-connect-login-open-codex"));
+    click(dq("harness-login-fallback-open"));
+    await flush();
     await flush();
     await flush();
     await act(async () => {
@@ -1073,6 +1103,89 @@ describe("자동 통과", () => {
     mountStage();
     await waitFor(() => continued === 1, "provider auto-pass");
     expect(readFirstAgentMarker(WS)).toBe("done");
+  });
+});
+
+describe("재진입 (#2870, RCA 1-b): 설정·에이전트 화면에서 다시 연 같은 화면", () => {
+  it("연결이 이미 있어도 자동 통과하지 않고 목록이 서며, 표지를 쓰지 않는다", async () => {
+    vi.mocked(listHostedConnections).mockResolvedValue({
+      connections: [wireConnection({ status: "active" })],
+    });
+    vi.mocked(fetchProviderLink).mockResolvedValue({
+      ...unconfiguredLink,
+      configured: true,
+      source: "database",
+    });
+    subscriptionOn();
+    const host = mountStage({ mode: "reentry" });
+    await waitFor(() => rowIds(host).length > 0, "rows");
+    await flush();
+    expect(continued).toBe(0);
+    expect(rowIds(host).slice(0, 2)).toEqual(["claude", "codex"]);
+    expect(readFirstAgentMarker(WS)).toBeNull();
+    expect(q(host, "first-agent-loading")).toBeNull();
+  });
+
+  it("진행 점 대신 [뒤로], 건너뛰기 대신 [닫기], 재진입 문장은 없다", async () => {
+    const host = mountStage({ mode: "reentry" });
+    await waitFor(() => rowIds(host).length > 0, "rows");
+    expect(q(host, "ai-connect-reentry-back")?.textContent).toContain("뒤로");
+    expect(q(host, "onboarding-dots")).toBeNull();
+    expect(q(host, "first-agent-skip")?.textContent).toBe("닫기");
+    expect(q(host, "first-agent-reentry-line")).toBeNull();
+  });
+
+  it("[닫기]는 졸림 화면 없이 출발지로 돌아가고 skipped 를 남기지 않는다", async () => {
+    const host = mountStage({ mode: "reentry", reentryFrom: "settings" });
+    await waitFor(() => rowIds(host).length > 0, "rows");
+    click(q(host, "first-agent-skip"));
+    await flush();
+    expect(q(host, "first-agent-skipped")).toBeNull();
+    expect(window.location.hash).toBe("#/settings?section=ai");
+    expect(continued).toBe(1);
+    expect(readFirstAgentMarker(WS)).toBeNull();
+  });
+
+  it("[뒤로]는 에이전트 화면으로 돌아간다", async () => {
+    const host = mountStage({ mode: "reentry", reentryFrom: "agents" });
+    await waitFor(() => rowIds(host).length > 0, "rows");
+    click(q(host, "ai-connect-reentry-back"));
+    await flush();
+    expect(window.location.hash).toBe("#/agents");
+    expect(continued).toBe(1);
+  });
+
+  it("API 키 줄은 설정 › AI 연결로 가고 deferred 를 쓰지 않는다", async () => {
+    const host = mountStage({ mode: "reentry", reentryFrom: "agents" });
+    await waitFor(() => host.querySelector("#ai-connect-api-key") !== null, "rows");
+    pick(host, "api-key");
+    await flush();
+    expect(window.location.hash).toBe("#/settings?section=ai");
+    expect(readFirstAgentMarker(WS)).toBeNull();
+    expect(continued).toBe(1);
+  });
+
+  it("합류 중간 단계의 [뒤로]는 화면을 닫지 않고 목록으로 돌아간다", async () => {
+    subscriptionOn();
+    const host = mountStage({ mode: "reentry" });
+    await waitFor(() => rowIds(host).includes("claude"), "rows");
+    pick(host, "claude");
+    await waitFor(() => q(host, "first-agent-connect") !== null, "connect");
+    click(q(host, "ai-connect-reentry-back"));
+    await waitFor(() => rowIds(host).length > 0, "back to rows");
+    expect(continued).toBe(0);
+  });
+
+  it("구독 합류는 온보딩과 같은 요청(owner_only + claude_code)을 보낸다", async () => {
+    subscriptionOn();
+    const host = mountStage({ mode: "reentry" });
+    await waitFor(() => rowIds(host).includes("claude"), "rows");
+    pick(host, "claude");
+    await waitFor(() => vi.mocked(createHostedConnection).mock.calls.length === 1, "create");
+    expect(vi.mocked(createHostedConnection).mock.calls[0]?.[1]).toMatchObject({
+      invocationScope: "owner_only",
+      subscriptionHarness: "claude_code",
+    });
   });
 });
 

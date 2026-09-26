@@ -14,7 +14,7 @@ import { useOffline } from "@/features/common/useOffline";
 import { useWorkHosts, useWorkSessions } from "./useWorkSessions";
 import { ObserverTerminal, TerminalShortNotice } from "./ObserverTerminal";
 import { useSession } from "@/app/session";
-import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
+import { useSurfaceProvided } from "@/features/capabilities/useSurfaceProvided";
 
 function readPx(name: string): number {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name);
@@ -87,7 +87,7 @@ export function TerminalDock({
   const navigate = useNavigate();
   // 「작업 콘솔 보기」는 `/work` 로 간다. 그 라우트는 `workConsole` 판정 뒤에만
   // 있으므로(App.tsx), 같은 판정 없이 버튼을 세우면 빈 화면으로 보내는 CTA가 된다.
-  const workConsoleProvided = isSurfaceProvided("workConsole");
+  const workConsoleProvided = useSurfaceProvided("workConsole");
   const offline = useOffline();
   const sessionsQuery = useWorkSessions(workspaceId);
   const hostsQuery = useWorkHosts(workspaceId);

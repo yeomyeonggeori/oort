@@ -415,7 +415,7 @@ export function ChoiceRadios({
             />
             <span className="flex min-w-0 flex-col gap-px">
               <span className="text-body text-ink">{choice.label}</span>
-              <span className="text-meta text-ink-muted">{choice.detail}</span>
+              <span className="break-keep text-meta text-ink-muted">{choice.detail}</span>
             </span>
           </label>
         ))}
@@ -722,7 +722,13 @@ export function ConfirmButton({
   onAskingChange,
   disabled,
   testId,
+  triggerClassName,
 }: {
+  /**
+   * 트리거의 고정 클래스. 판 위(sheet)처럼 기본 채움이 배경에 묻히는 자리가
+   * 그 자리의 문법(`bg-surface shadow-sm`, 위험 글자색)을 입힌다 (#2877).
+   */
+  triggerClassName?: string;
   label: string;
   /**
    * Full accessible name for a button one list renders per row. "삭제" eight
@@ -867,7 +873,7 @@ export function ConfirmButton({
         aria-busy={busy || undefined}
         aria-label={triggerName}
         aria-describedby={disabled ? describedBy : undefined}
-        className={cn(disabled && "opacity-50")}
+        className={cn(triggerClassName, disabled && "opacity-50")}
         onClick={() => {
           if (disabled || busy) return;
           setAsking(true);

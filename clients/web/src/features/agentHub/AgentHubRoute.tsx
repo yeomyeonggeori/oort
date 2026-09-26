@@ -105,6 +105,7 @@ import { HostedAgentWizard } from "@/features/hostedAgents/HostedAgentWizard";
 import { HostedConnectionSection } from "@/features/hostedAgents/HostedConnectionSection";
 import type { HostedWizardLaunch } from "@/features/hostedAgents/hostedWizardLaunch";
 import { HOSTED_WIZARD_TITLE } from "@momo/core/features/hostedAgents/wizard";
+import { SubscriptionAgentEntryButton } from "@/features/welcome/SubscriptionAgentEntry";
 import {
   isSurfaceProvided,
   type SurfaceId,
@@ -366,12 +367,14 @@ export function AgentHubRoute() {
               봅니다.
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-3">
+          {/* 머리 행동이 셋이 되며(#2870) 폰 폭에서 줄을 넘긴다. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
             {!directoryQuery.isPending && !directoryQuery.isError && (
               <span className="text-meta text-ink-muted" data-numeric>
                 {agents.length}명
               </span>
             )}
+            {mayCreate && <SubscriptionAgentEntryButton from="agents" />}
             {mayCreate && hostedPairingProvided && (
               <Button
                 type="button"

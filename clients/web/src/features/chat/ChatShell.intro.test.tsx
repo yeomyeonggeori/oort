@@ -160,6 +160,14 @@ vi.mock("@/features/work/WorkPanel", () => ({
   WorkPanel: () => null,
 }));
 
+// #2780: 헤더 도크 판정은 호스트 목록(React Query)을 읽는다. 이 파일은 도크를
+// 재지 않으므로 호스트 없음(셀프호스트 기본)으로 고정한다.
+vi.mock("@/features/capabilities/useSurfaceProvided", () => ({
+  useSurfaceProvided: () => false,
+  useSurfaceProvidedPredicate: () => () => false,
+  useWorkHostPresence: () => "absent",
+}));
+
 vi.mock("@/features/work/TerminalDock", () => ({
   TerminalDock: () => null,
 }));

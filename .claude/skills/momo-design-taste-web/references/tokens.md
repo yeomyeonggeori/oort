@@ -99,6 +99,17 @@ S0 onboarding is the one surface that does **not** use `light-dark()`. It is a s
 | `--onboarding-on-accent` | `#12111a` | label on the S0 filled choice |
 | `--onboarding-line` | `#8b8996` | S0 outline choice |
 
+The local terminal pane (#2849) has its own palette, `--term-*`, because xterm paints the terminal body and shell programs pick colors assuming a terminal background, not the app surface. The pairs are `light-dark()` like the app roles, but the pane frame pins the scheme with `data-term-scheme="dark|light"` (default dark, even when the app is light); 「앱 테마 따르기」 stamps nothing and inherits the root. Pane border, header and status row stay on app tokens. Derived from the VS Code default terminal ANSI hues (MIT) and retuned; measured in `tokens.contrast.test.ts` "local terminal palette":
+
+| token | light / dark | rule |
+|---|---|---|
+| `--term-bg`, `--term-fg` | `#fffefc`/`#14161b`, `#1f2127`/`#e3e4e8` | fg on bg ≥ 4.5:1 |
+| `--term-selection`, `--term-selection-inactive` | `#cfe0f5`/`#2f4a6b`, `#e6e8ec`/`#262a33` | fg on selection ≥ 4.5:1 |
+| `--term-ansi-*` (16) | see tokens.css | text colors ≥ 4.5:1, `bright-black` (dim) ≥ 3:1; background-role colors (dark `black`, light `white`/`bright-white`) only need to differ from bg and carry fg at 4.5:1 |
+| cursor | `--signal` read inside the frame | ≥ 3:1 on `--term-bg` for every theme's signal |
+
+One deliberate divergence from VS Code: in the light scheme VS Code turns ANSI `white` into a dark gray text color (`#555555`). Here `white`/`bright-white` stay light, mirroring dark's `black`, so a program that paints them as segment backgrounds keeps its shape. The cost is that text printed in ANSI white on the light scheme is near-invisible; the light choice is opt-in and its settings copy warns that dark-assuming prompts read worse.
+
 `--scrim` is the one token that is not opaque, and the only one whose two
 schemes are not the same color at different lightness. It exists because a
 scrim is a **direction**, not a color: it must darken whatever it covers so the

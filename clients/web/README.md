@@ -165,6 +165,7 @@ Values live in `.env.local` (gitignored); `.env.local.example` carries the names
 | `VITE_MOMO_DEV_PASSWORD` | `""` | **test-period login prefill** — password |
 | `VITE_MOMO_HYDRATE_BUDGET_MS` | `1200` | first-paint budget; gate seam, do not set in a deploy |
 | `VITE_MOMO_BOOT_RESTORE_BUDGET_MS` | `2500` | resume budget; gate seam, do not set in a deploy |
+| `VITE_MOMO_SUBSCRIPTION_AGENTS` | on | subscription (`owner_only`) rows in AI 연결 (#2870). Unset/blank/`1`/`true` = on, any other value (`0`) = off. The server kill switch `MOMO_SUBSCRIPTION_AGENTS_ENABLED` must also be on |
 
 The two prefill knobs are **build-time only and blank by default**, so the
 production web `dist` and any desktop build made without them prefill nothing —

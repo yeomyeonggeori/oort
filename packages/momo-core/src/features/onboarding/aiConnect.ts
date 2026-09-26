@@ -15,8 +15,10 @@ import type { SubscriptionHarnessWire } from "../hostedAgents/model";
 // 웹이 한다. 규율:
 //
 // - 「Claude로 로그인」「ChatGPT로 로그인」을 만들 문장이 여기 없다(D2). 로그인은
-//   공식 CLI가 터미널에서 끝낸다. 로그인이 필요한 줄의 행동은 「터미널에서 로그인」
-//   하나이고, 그것은 CLI 명령 한 줄을 복사하고 OS 터미널을 여는 것이다.
+//   공식 CLI가 끝낸다. 로그인이 필요한 줄의 행동은 「Claude Code로 로그인」
+//   「Codex로 로그인」 하나이고, 앱 모달이 숨은 PTY에서 공식 로그인 명령을 돌린다
+//   (#2816, `harnessLogin.ts`). PTY가 없으면 CLI 명령 한 줄을 복사하고 OS 터미널을
+//   여는 Phase 1로 물러난다.
 // - 알약은 CLI가 **스스로 알린** 종료 코드의 번역이다(ADR-0190 D3-a). oort는
 //   토큰·자격 파일을 읽지 않는다.
 // - 구독 줄은 세 게이트가 모두 열릴 때만 선다: 데스크탑 셸 · 빌드 플래그 · 서버
@@ -57,8 +59,8 @@ export const HARNESS_BRAIN: Record<LocalHarnessId, string> = {
  * - `desktop-only`: 웹(데스크탑 아님). 구독 줄 대신 「데스크탑 앱에서…」 한 줄.
  * - `server-off`: 서버 킬 스위치가 꺼졌거나 서버가 그 값을 모른다. 구독 줄을
  *   숨기고 API 키 줄이 맨 위, 이유 한 줄.
- * - `hidden`: 빌드 플래그가 꺼진 빌드(팀 배포). #2815 랜딩 전 노출 금지. 아무
- *   말도 하지 않는다 — 아직 없는 기능을 광고하지 않는다.
+ * - `hidden`: 빌드 플래그로 구독 표면을 걷은 빌드(`VITE_MOMO_SUBSCRIPTION_AGENTS=0`,
+ *   기본은 켬 #2870). 아무 말도 하지 않는다: 이 빌드에 없는 기능을 광고하지 않는다.
  */
 export type SubscriptionSurface = "rows" | "desktop-only" | "server-off" | "hidden";
 
@@ -84,8 +86,8 @@ export function aiConnectRows(surface: SubscriptionSurface): readonly AiConnectR
 
 /**
  * 구독 줄의 상태 알약 다섯(이슈 #2814 계약, Buzz SetupStep 문법).
- * 한 알약이 한 행동이다: 설치 필요 → 설치 안내 열기, 로그인 필요 → 터미널에서
- * 로그인, 다시 확인 → 다시 묻기. 확인 중·준비됨은 행동이 없다.
+ * 한 알약이 한 행동이다: 설치 필요 → 설치 안내 열기, 로그인 필요 → 줄 아래의
+ * 로그인 버튼, 다시 확인 → 다시 묻기. 확인 중·준비됨은 행동이 없다.
  */
 export type HarnessPill = "install" | "login" | "checking" | "ready" | "recheck";
 
@@ -102,7 +104,7 @@ export const HARNESS_PILL_LABEL: Record<HarnessPill, string> = {
  *
  * - 아직 한 번도 못 물었으면(`probe === null`) 확인 중.
  * - 미설치 → 설치 필요. 로그인됨 → 준비됨.
- * - 「터미널에서 로그인」 뒤 2초 재확인이 도는 동안 → 확인 중.
+ * - Phase 1(터미널 복사) 뒤 2초 재확인이 도는 동안 → 확인 중.
  * - 그 창(120초)이 끝났으면 → 다시 확인.
  * - 설치돼 있는데 CLI가 답하지 않음(`unknown`: 시간 초과 등) → 다시 확인.
  */
@@ -138,12 +140,12 @@ export function loginPollNext(elapsedMs: number): number | "stop" {
 }
 
 /**
- * 「터미널에서 로그인」이 복사하는 명령. 공식 CLI의 로그인 입구 그대로다
- * (`claude`는 첫 실행에서 로그인을 연다, `codex login`). oort가 로그인을
- * 대신하지 않는다.
+ * PTY가 없을 때(Phase 1 폴백) 복사해 OS 터미널에서 칠 명령. 앱 모달이 숨은
+ * PTY에서 돌리는 로그인 명령(셸 `LOGIN_COMMANDS`, ADR-0190 D3-f)과 같은 입구다.
+ * oort가 로그인을 대신하지 않는다.
  */
 export const HARNESS_LOGIN_COMMAND: Record<LocalHarnessId, string> = {
-  claude: "claude",
+  claude: "claude auth login --claudeai",
   codex: "codex login",
 };
 
@@ -274,7 +276,7 @@ export const AI_CONNECT_ROW_COPY: Record<AiConnectRowId, AiConnectRowCopy> = {
   },
   "api-key": {
     title: "API 키 · 팀 에이전트",
-    detail: "Anthropic·OpenAI 키 · 팀 누구나 부를 수 있어요",
+    detail: "OpenAI 호환 API 키 · 팀 누구나 부를 수 있어요",
     mark: "키",
   },
   grok: {
@@ -293,12 +295,11 @@ export const AI_CONNECT_BOUNDARY_NOTE =
   "상태는 CLI가 스스로 알려 준 값이에요. oort는 로그인 정보를 읽거나 옮기지 않아요. 구독으로 도는 에이전트는 나만 부를 수 있고, 팀 모두가 부를 에이전트는 API 키로 붙여요.";
 
 export const AI_CONNECT_DESKTOP_ONLY_NOTE =
-  "데스크탑 앱에서 이 맥의 Claude Code를 붙일 수 있어요.";
+  "데스크탑 앱에서 이 맥의 Claude Code·Codex를 붙일 수 있어요.";
 
 export const AI_CONNECT_SERVER_OFF_NOTE =
   "이 서버는 지금 구독 에이전트를 받지 않아요. 팀 에이전트는 API 키로 붙여요.";
 
-export const LOGIN_ACTION_LABEL = "터미널에서 로그인";
 export const COPY_ACTION_LABEL = "복사";
 export const COPIED_LABEL = "복사됨";
 export const OPEN_TERMINAL_LABEL = "터미널에서 열기";
@@ -331,6 +332,20 @@ export const AI_CONNECT_SKIP_LABEL = "지금은 건너뛰기";
 export const AI_CONNECT_REENTRY = "나중에 설정 › AI 연결에서 이어갈 수 있습니다.";
 export const AI_CONNECT_SKIPPED_LINE = "설정 › AI 연결에서 언제든 이어서 할 수 있어요.";
 export const AI_CONNECT_CONTINUE_LABEL = "계속";
+
+// ---- 재진입 (#2870, RCA 1-b·1-c) -------------------------------------------
+//
+// 설정 › AI 연결과 에이전트 화면에서 같은 화면을 다시 연다. 온보딩의 [지금은
+// 건너뛰기]는 재진입에서 [닫기]가 되고, 진행 점 자리에 [뒤로]가 선다.
+
+export const AI_CONNECT_BACK_LABEL = "뒤로";
+export const AI_CONNECT_CLOSE_LABEL = "닫기";
+
+/** 설정 › AI 연결 맨 위 블록의 제목·설명·행동. 해요체(ADR-0193 D11 구독 문구). */
+export const SUBSCRIPTION_ENTRY_TITLE = "내 구독 에이전트";
+export const SUBSCRIPTION_ENTRY_DETAIL =
+  "이 맥의 Claude Code·Codex 로그인으로 생각하는 개인 에이전트예요. 나만 부를 수 있어요.";
+export const SUBSCRIPTION_ENTRY_ACTION = "내 구독 에이전트 붙이기";
 
 // ---- 합류 세 상태 (같은 화면) -------------------------------------------------
 

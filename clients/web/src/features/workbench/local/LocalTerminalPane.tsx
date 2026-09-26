@@ -8,6 +8,7 @@ import type { WorkbenchPaneInfo } from "../WorkbenchGrid";
 import { localSessions, type LocalSessions, type LocalSessionView } from "./localSessions";
 import { attachHangulInput, isImeProcessedKey } from "./hangulInput";
 import type { ITheme, Terminal } from "./localTerminalRuntime";
+import { terminalSchemeAttribute, useTerminalTheme } from "./terminalTheme";
 
 // Reading this as: 작업 공간 격자의 로컬 터미널 칸 for internal team users on
 // Tauri desktop, density 7/10, motion 0/10.
@@ -26,24 +27,84 @@ import type { ITheme, Terminal } from "./localTerminalRuntime";
 // 그것을 버린다. hangulInput.ts가 그 사건을 받아 DEL과 새 글자로 보낸다.
 //
 // 색은 관전 터미널(ObserverTerminal)과 같은 방식으로 DOM에서 읽는다. 토큰을
-// 다시 적지 않는다.
+// 다시 적지 않는다. 팔레트는 tokens.css의 `--term-*`이고(#2849), 칸 틀이
+// `data-term-scheme`으로 스킴을 고정하면 틀 안의 탐침이 그 스킴의 값을 낸다.
+// 기본은 어둡게다(앱이 라이트여도 칸은 어둡다). 칸 머리·테두리·상태 줄은 틀
+// 밖이라 앱 테마를 따른다.
+
+type AnsiKey =
+  | "black"
+  | "red"
+  | "green"
+  | "yellow"
+  | "blue"
+  | "magenta"
+  | "cyan"
+  | "white"
+  | "brightBlack"
+  | "brightRed"
+  | "brightGreen"
+  | "brightYellow"
+  | "brightBlue"
+  | "brightMagenta"
+  | "brightCyan"
+  | "brightWhite";
+
+/** ANSI 16색 탐침. Tailwind가 읽을 수 있게 클래스 이름을 글자 그대로 적는다. */
+const ANSI_PROBES: ReadonlyArray<readonly [AnsiKey, string]> = [
+  ["black", "text-term-ansi-black"],
+  ["red", "text-term-ansi-red"],
+  ["green", "text-term-ansi-green"],
+  ["yellow", "text-term-ansi-yellow"],
+  ["blue", "text-term-ansi-blue"],
+  ["magenta", "text-term-ansi-magenta"],
+  ["cyan", "text-term-ansi-cyan"],
+  ["white", "text-term-ansi-white"],
+  ["brightBlack", "text-term-ansi-bright-black"],
+  ["brightRed", "text-term-ansi-bright-red"],
+  ["brightGreen", "text-term-ansi-bright-green"],
+  ["brightYellow", "text-term-ansi-bright-yellow"],
+  ["brightBlue", "text-term-ansi-bright-blue"],
+  ["brightMagenta", "text-term-ansi-bright-magenta"],
+  ["brightCyan", "text-term-ansi-bright-cyan"],
+  ["brightWhite", "text-term-ansi-bright-white"],
+];
 
 type TerminalTheme = Pick<
   ITheme,
-  "background" | "foreground" | "cursor" | "cursorAccent" | "selectionBackground"
+  | "background"
+  | "foreground"
+  | "cursor"
+  | "cursorAccent"
+  | "selectionBackground"
+  | "selectionInactiveBackground"
+  | AnsiKey
 >;
 
-function readTheme(surface: HTMLElement, selection: HTMLElement, cursor: HTMLElement): TerminalTheme {
+/** 칸 틀 안의 탐침에서 xterm 테마 전체를 읽는다. */
+export function readTerminalTheme(surface: HTMLElement, probes: HTMLElement): TerminalTheme {
   const surfaceStyle = getComputedStyle(surface);
-  return {
+  const probe = (name: string) => probes.querySelector<HTMLElement>(`[data-term-probe="${name}"]`);
+  const bgOf = (name: string) => {
+    const el = probe(name);
+    return el ? getComputedStyle(el).backgroundColor : undefined;
+  };
+  const theme: TerminalTheme = {
     background: surfaceStyle.backgroundColor,
     foreground: surfaceStyle.color,
     // 입력을 받는 터미널이므로 커서가 보여야 한다. 신호색(한 표면 하나의 신호)이
-    // 곧 캐럿 색이다(design-taste-web §2 「caret」).
-    cursor: getComputedStyle(cursor).backgroundColor,
+    // 곧 캐럿 색이다(design-taste-web §2 「caret」). 탐침이 틀 안에 있어 터미널
+    // 스킴의 신호색이다.
+    cursor: bgOf("cursor"),
     cursorAccent: surfaceStyle.backgroundColor,
-    selectionBackground: getComputedStyle(selection).backgroundColor,
+    selectionBackground: bgOf("selection"),
+    selectionInactiveBackground: bgOf("selection-inactive"),
   };
+  for (const [key] of ANSI_PROBES) {
+    const el = probe(key);
+    if (el) theme[key] = getComputedStyle(el).color;
+  }
+  return theme;
 }
 
 /** 캐럿이 이미 이 칸(머리 포함) 안에 있는가. */
@@ -111,15 +172,25 @@ export function LocalTerminalPane({
   pane,
   platform,
   sessions = localSessions(),
+  label,
+  restartable = true,
 }: {
   pane: WorkbenchPaneInfo;
   platform: KeyPlatform;
   sessions?: LocalSessions;
+  /** 터미널의 접근성 이름. 없으면 격자 칸 이름(「N번 칸 로컬 터미널」). */
+  label?: string;
+  /**
+   * 끝난 칸에 「다시 시작」을 두는가. 로그인 모달(#2816)은 끄고 자기 [다시 시도]로
+   * 흐름을 다시 연다(모달 밖에서 로그인 명령이 다시 뜨지 않게).
+   */
+  restartable?: boolean;
 }) {
   const view = useLocalSessionView(pane.id, sessions);
   const mountRef = useRef<HTMLDivElement>(null);
-  const selectionProbeRef = useRef<HTMLSpanElement>(null);
-  const cursorProbeRef = useRef<HTMLSpanElement>(null);
+  const probesRef = useRef<HTMLDivElement>(null);
+  const applyThemeRef = useRef<(() => void) | null>(null);
+  const { theme: terminalTheme } = useTerminalTheme();
   const terminalRef = useRef<Terminal | null>(null);
   const [runtimeFailed, setRuntimeFailed] = useState(false);
   const platformRef = useRef(platform);
@@ -139,9 +210,8 @@ export function LocalTerminalPane({
         return;
       }
       const mount = mountRef.current;
-      const selection = selectionProbeRef.current;
-      const cursor = cursorProbeRef.current;
-      if (cancelled || !mount || !selection || !cursor) return;
+      const probes = probesRef.current;
+      if (cancelled || !mount || !probes) return;
       const style = getComputedStyle(mount);
       const terminal = new runtime.Terminal({
         fontFamily: style.fontFamily,
@@ -153,7 +223,7 @@ export function LocalTerminalPane({
         cursorInactiveStyle: "none",
         macOptionIsMeta: false,
         allowProposedApi: true,
-        theme: readTheme(mount, selection, cursor),
+        theme: readTerminalTheme(mount, probes),
       });
       terminal.attachCustomKeyEventHandler(
         (event) => !isImeProcessedKey(event) && !isTerminalAppKey(event, platformRef.current)
@@ -202,8 +272,9 @@ export function LocalTerminalPane({
       if (section) inertWatch.observe(section, { attributes: true, attributeFilter: ["inert"] });
       const media = window.matchMedia("(prefers-color-scheme: dark)");
       const applyTheme = () => {
-        terminal.options.theme = readTheme(mount, selection, cursor);
+        terminal.options.theme = readTerminalTheme(mount, probes);
       };
+      applyThemeRef.current = applyTheme;
       media.addEventListener("change", applyTheme);
       const unsubscribeTheme = subscribeTheme(applyTheme);
       if (pane.focused && !paneOwnsFocus(mount)) terminal.focus();
@@ -213,6 +284,7 @@ export function LocalTerminalPane({
         inertWatch.disconnect();
         media.removeEventListener("change", applyTheme);
         unsubscribeTheme();
+        applyThemeRef.current = null;
         data.dispose();
         binary.dispose();
         resized.dispose();
@@ -239,6 +311,13 @@ export function LocalTerminalPane({
     terminalRef.current?.focus();
   }, [pane.focused]);
 
+  // 설정 › 터미널에서 테마를 바꾸면 틀의 `data-term-scheme`이 바뀐다. 탐침은
+  // 커밋 뒤에야 새 스킴의 값을 내므로 효과에서 다시 읽는다(저장소 구독자에서
+  // 읽으면 한 박자 늦은 색을 읽는다).
+  useEffect(() => {
+    applyThemeRef.current?.();
+  }, [terminalTheme]);
+
   const phase = view?.phase ?? "starting";
 
   return (
@@ -246,20 +325,36 @@ export function LocalTerminalPane({
       {/* 틀과 마운트는 두 상자다. FitAddon은 부모의 계산 높이를 테두리 상자로
           읽어서, 마운트에 안쪽 여백이 있으면 한 줄을 더 제안한다(ObserverTerminal
           머리말의 실측). 여백은 바깥 틀이 진다. */}
-      <div className="flex min-h-0 flex-1 flex-col px-2 pt-2">
+      <div
+        className="flex min-h-0 flex-1 flex-col bg-term-bg px-2 pt-2"
+        data-term-scheme={terminalSchemeAttribute(terminalTheme)}
+        data-testid="local-terminal-frame"
+      >
         <div
           ref={mountRef}
           role="group"
-          aria-label={`${pane.index}번 칸 로컬 터미널`}
-          aria-description="입력은 이 터미널로 갑니다. ⌃` 도크 닫기, ⌘] 다음 칸."
+          aria-label={label ?? `${pane.index}번 칸 로컬 터미널`}
+          aria-description={
+            label === undefined ? "입력은 이 터미널로 갑니다. ⌃` 도크 닫기, ⌘] 다음 칸." : undefined
+          }
           data-testid="local-terminal"
           data-phase={phase}
-          className="min-h-0 flex-1 overflow-hidden bg-surface font-mono text-meta text-ink"
+          className="min-h-0 flex-1 overflow-hidden bg-term-bg font-mono text-meta text-term-fg"
         />
+        <div ref={probesRef} aria-hidden="true" className="hidden">
+          <span data-term-probe="selection" className="bg-term-selection" />
+          <span data-term-probe="selection-inactive" className="bg-term-selection-inactive" />
+          <span data-term-probe="cursor" className="bg-signal" />
+          {ANSI_PROBES.map(([key, className]) => (
+            <span key={key} data-term-probe={key} className={className} />
+          ))}
+        </div>
       </div>
-      <span ref={selectionProbeRef} aria-hidden="true" className="hidden bg-accent-soft" />
-      <span ref={cursorProbeRef} aria-hidden="true" className="hidden bg-signal" />
-      <PaneFooter view={view} runtimeFailed={runtimeFailed} onRestart={() => void sessions.restart(pane.id)} />
+      <PaneFooter
+        view={view}
+        runtimeFailed={runtimeFailed}
+        onRestart={restartable ? () => void sessions.restart(pane.id) : null}
+      />
     </div>
   );
 }
@@ -271,7 +366,7 @@ function PaneFooter({
 }: {
   view: LocalSessionView | null;
   runtimeFailed: boolean;
-  onRestart: () => void;
+  onRestart: (() => void) | null;
 }) {
   // 문장은 짧게: 240px 칸(최소 폭)에서도 두 줄 안에 든다. 다음 행동은 단추가 말한다.
   let message: string | null = null;
@@ -308,7 +403,7 @@ function PaneFooter({
         >
           {message ?? ""}
         </p>
-        {action ? (
+        {action && onRestart ? (
           <Button
             type="button"
             variant="ghost"

@@ -12,7 +12,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Channel, RosterMember } from "@momo/core/lib/api";
+import type { Channel, RosterMember, WorkHost } from "@momo/core/lib/api";
 import { emptySidebarPrefs } from "@momo/core/features/sidebar/sidebarSections";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { WORK_SURFACE_IDS } from "@momo/core/features/capabilities/serverSurfaces";
@@ -148,6 +148,19 @@ vi.mock("@/features/timeline/ThreadPanel", () => ({
 }));
 
 const workFlag = { provided: false };
+
+// #2780: 정적 표 절반은 위 `workFlag`가, 런타임 절반은 이 호스트 목록이 정한다.
+// 목록은 진짜 `useWorkHosts` 경로로 흐른다: 화면이 부르는 GET만 이 자리에서 바꾼다.
+const hostList: { hosts: WorkHost[] } = { hosts: [] };
+
+vi.mock("@momo/core/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
+  return {
+    ...actual,
+    fetchWorkHosts: async () => hostList.hosts,
+    fetchWorkSessions: async () => [],
+  };
+});
 
 vi.mock("@momo/core/features/capabilities/serverSurfaces", async (importOriginal) => {
   const actual =
@@ -365,6 +378,7 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 };
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
+let mountedClient: QueryClient | null = null;
 
 function sessionValue(): SessionContextValue {
   return {
@@ -402,6 +416,7 @@ async function mount(): Promise<HTMLElement> {
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
   client.setQueryData(["roster", WS], [self]);
+  mountedClient = client;
   const tree: ReactElement = createElement(
     QueryClientProvider,
     { client },
@@ -456,6 +471,45 @@ async function mount(): Promise<HTMLElement> {
   return host;
 }
 
+/**
+ * 호스트 목록 조회가 끝날 때까지 기다린다. 끝나기 전에 「0개」를 세면, 판정을
+ * 상수 참으로 바꿔도 초록이다(아직 아무것도 모르는 첫 그림을 센 것이라서).
+ */
+async function hostsSettled(): Promise<void> {
+  await vi.waitFor(() => {
+    expect(mountedClient?.getQueryState(["work-hosts", WS])?.status).toBe(
+      "success"
+    );
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
+
+function entryCounts(): Record<string, number> {
+  return Object.fromEntries(
+    ENTRY_TEST_IDS.map((id) => [
+      id,
+      document.querySelectorAll(`[data-testid="${id}"]`).length,
+    ])
+  );
+}
+
+function onlineHost(overrides: Partial<WorkHost> = {}): WorkHost {
+  return {
+    id: "00000000-0000-7000-8000-000000000301",
+    workspaceId: WS,
+    scope: "workspace",
+    ownerMemberId: MEMBER_ID,
+    type: "workd",
+    displayName: "팀 맥 미니",
+    capabilities: {},
+    createdAtMs: 1_800_000_000_000,
+    online: true,
+    ...overrides,
+  };
+}
+
 function countWorkEntries(root: ParentNode = document): number {
   return ENTRY_TEST_IDS.reduce(
     (sum, id) => sum + root.querySelectorAll(`[data-testid="${id}"]`).length,
@@ -486,6 +540,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   workFlag.provided = false;
+  hostList.hosts = [];
   shell.desktop = false;
   resetDockStateForTest();
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -506,6 +561,7 @@ afterEach(() => {
   }
   mountedHost?.remove();
   mountedHost = null;
+  mountedClient = null;
   vi.unstubAllGlobals();
 });
 
@@ -589,5 +645,57 @@ describe("로컬 터미널 진입점 (#2774)", () => {
     );
     expect(dockSnapshot().open).toBe(false);
     expect(host.querySelector('[data-testid="observer-dock-stub"]')).not.toBeNull();
+  });
+});
+
+describe("작업 표면 런타임 판정: 온라인 호스트 (#2780)", () => {
+  it("정적 표가 접혀 있고 온라인 호스트가 없으면 진입점이 0이다", async () => {
+    workFlag.provided = false;
+    hostList.hosts = [
+      onlineHost({ online: false }),
+      onlineHost({
+        id: "00000000-0000-7000-8000-000000000302",
+        revokedAtMs: 1_800_000_000_000,
+      }),
+    ];
+    await mount();
+    await hostsSettled();
+    expect(entryCounts()).toEqual({
+      "nav-work-console": 0,
+      "nav-workstreams": 0,
+      "switcher-work-console": 0,
+      "switcher-workstreams": 0,
+      "settings-nav-code": 0,
+      "open-terminal-dock": 0,
+    });
+  });
+
+  it("정적 표가 접혀 있어도 온라인 호스트가 있으면 작업 콘솔·설정·관전 도크가 선다(작업 흐름은 아니다)", async () => {
+    workFlag.provided = false;
+    hostList.hosts = [onlineHost({ online: false }), onlineHost()];
+    await mount();
+    await hostsSettled();
+    await vi.waitFor(() => {
+      expect(entryCounts()).toEqual({
+        "nav-work-console": 1,
+        "nav-workstreams": 0,
+        "switcher-work-console": 1,
+        "switcher-workstreams": 0,
+        "settings-nav-code": 1,
+        "open-terminal-dock": 1,
+      });
+    });
+  });
+
+  it("데스크탑 로컬 터미널은 호스트가 없어도 선다(ADR-0190)", async () => {
+    shell.desktop = true;
+    workFlag.provided = false;
+    hostList.hosts = [];
+    const host = await mount();
+    await hostsSettled();
+    expect(
+      host.querySelectorAll('[data-testid="open-terminal-dock"]').length
+    ).toBe(1);
+    expect(entryCounts()["nav-work-console"]).toBe(0);
   });
 });

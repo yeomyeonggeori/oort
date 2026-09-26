@@ -94,6 +94,13 @@ use momo_agent::{
     MENTION_JOB_METHOD_WORKER,
 };
 use momo_agent::{
+    hosted_skip_notice_body, hosted_skip_notice_key, hosted_skip_notice_props,
+    lock_and_find_recent_server_notice_in_tx, HostedSkipReason, RecentNotice,
+    HOSTED_SKIP_NOTICE_AUDIT_SCHEMA, HOSTED_SKIP_NOTICE_KIND, HOSTED_SKIP_NOTICE_POSTED_ACTION,
+    HOSTED_SKIP_NOTICE_SOURCE, HOSTED_SKIP_NOTICE_THROTTLED_ACTION,
+    HOSTED_SKIP_NOTICE_THROTTLE_SECONDS,
+};
+use momo_agent::{
     lock_and_find_recent_notice_in_tx, notice_root, notice_thread_key, owner_only_gate,
     subscription_notice_body, subscription_notice_props, SubscriptionNoticeKind,
     SKIP_OWNER_ONLY_NON_OWNER, SKIP_SUBSCRIPTION_AGENTS_DISABLED, SUBSCRIPTION_NOTICE_AUDIT_SCHEMA,
@@ -189,10 +196,15 @@ pub(crate) async fn route_agent_mentions_in_tx(
     // B13 / QA H7 — the 1:1 DM rule. Skipped entirely for an agent-authored
     // send: `resolve_dm_addressing` would answer `AuthorIsNotHuman` anyway, and
     // not asking is one fewer query on the A2A path.
+    // Whether this room is a DM at all — the hosted skip line needs it (a DM
+    // can never be approved for hosted delivery, so "approve this room" would
+    // be a false sentence there).
+    let mut in_dm = false;
     let dm_target = if send.author_is_agent {
         None
     } else {
         let audience = load_dm_audience_in_tx(&mut *conn, send.channel_id).await?;
+        in_dm = audience.is_dm;
         match resolve_dm_addressing(&audience, send.author_member_id, send.author_is_agent) {
             DmAddressing::Addressed(agent_member_id) => Some(agent_member_id),
             // Every other verdict is an ordinary "no": a group channel, a human↔
@@ -304,7 +316,15 @@ pub(crate) async fn route_agent_mentions_in_tx(
                     &trigger,
                     agent,
                     *addressing,
-                    "hosted_delivery_not_enabled",
+                    HostedSkipReason::DeliveryNotEnabled.as_str(),
+                )
+                .await?;
+                // #2871 — the audit row alone is invisible from the timeline.
+                hosted_skip_notice(
+                    &mut *conn,
+                    &send,
+                    agent,
+                    HostedSkipReason::DeliveryNotEnabled,
                 )
                 .await?;
                 continue;
@@ -316,7 +336,7 @@ pub(crate) async fn route_agent_mentions_in_tx(
                     &trigger,
                     agent,
                     *addressing,
-                    "hosted_connection_unavailable",
+                    HostedSkipReason::ConnectionUnavailable.as_str(),
                 )
                 .await?;
                 // ADR-0193 D5 — the owner called and there is no live
@@ -336,6 +356,19 @@ pub(crate) async fn route_agent_mentions_in_tx(
                         SubscriptionNoticeKind::OfflineNotQueued,
                     )
                     .await?;
+                } else {
+                    // #2871 — every other agent without a live connection
+                    // (a workspace hosted agent, or a subscription agent whose
+                    // connection expired or was disconnected and needs a new
+                    // pairing) is told so, with the door that re-pairs it.
+                    // Never both lines: they would share `client_msg_id`.
+                    hosted_skip_notice(
+                        &mut *conn,
+                        &send,
+                        agent,
+                        HostedSkipReason::ConnectionUnavailable,
+                    )
+                    .await?;
                 }
                 continue;
             };
@@ -353,7 +386,21 @@ pub(crate) async fn route_agent_mentions_in_tx(
                     &trigger,
                     agent,
                     *addressing,
-                    "hosted_channel_unapproved",
+                    HostedSkipReason::ChannelUnapproved.as_str(),
+                )
+                .await?;
+                // A DM is never approvable (`confirm_hosted_connection_in_tx`
+                // takes `kind <> 'dm'` only), so it gets the sentence that is
+                // true there and no door to a screen that would refuse it.
+                hosted_skip_notice(
+                    &mut *conn,
+                    &send,
+                    agent,
+                    if in_dm {
+                        HostedSkipReason::DirectMessageNotApprovable
+                    } else {
+                        HostedSkipReason::ChannelUnapproved
+                    },
                 )
                 .await?;
                 continue;
@@ -776,6 +823,112 @@ async fn subscription_notice(
             .target("message", send.message_id)
             .via_token(send.via_token_id)
             .with_schema(SUBSCRIPTION_NOTICE_AUDIT_SCHEMA, detail),
+    )
+    .await?;
+    Ok(())
+}
+
+/// #2871 — say, in the conversation, why a hosted agent did not answer.
+///
+/// A `system` line authored by the agent member (the paused line's shape: a
+/// server fact about the agent, not the agent speaking), written through the
+/// single message path in the send's own transaction — `channel_seq` bump,
+/// `message` INSERT, broadcast outbox INSERT. At most once per thread, person,
+/// reason and [`HOSTED_SKIP_NOTICE_THROTTLE_SECONDS`]; a held-back line leaves
+/// an audit row instead so "why only one line" is still answerable.
+///
+/// `client_msg_id` is the trigger's id, so a replayed send cannot stack a
+/// second copy even before the throttle is asked.
+async fn hosted_skip_notice(
+    conn: &mut PgConnection,
+    send: &MentionSend<'_>,
+    agent: &MentionCandidate,
+    reason: HostedSkipReason,
+) -> Result<(), DbError> {
+    let thread_key = notice_thread_key(send.channel_id, send.root_id);
+    let key = hosted_skip_notice_key(
+        agent.member_id,
+        send.channel_id,
+        thread_key,
+        send.author_member_id,
+        reason,
+    );
+    let recent = lock_and_find_recent_server_notice_in_tx(
+        &mut *conn,
+        RecentNotice {
+            key: &key,
+            workspace_id: send.workspace_id,
+            channel_id: send.channel_id,
+            author_member_id: agent.member_id,
+            source: HOSTED_SKIP_NOTICE_SOURCE,
+            kind_prop: "reason",
+            kind: reason.as_str(),
+            recipient_member_id: send.author_member_id,
+            thread_key,
+            window_seconds: HOSTED_SKIP_NOTICE_THROTTLE_SECONDS,
+        },
+    )
+    .await?;
+    let mut detail = serde_json::json!({
+        "notice": HOSTED_SKIP_NOTICE_KIND,
+        "reason": reason.as_str(),
+        "channel_id": send.channel_id,
+        "trigger_message_id": send.message_id,
+        "thread_key": thread_key,
+    });
+    if recent {
+        write_audit(
+            &mut *conn,
+            &AuditEntry::new(send.workspace_id, HOSTED_SKIP_NOTICE_THROTTLED_ACTION)
+                .by(send.author_member_id)
+                .about(agent.member_id)
+                .target("message", send.message_id)
+                .via_token(send.via_token_id)
+                .with_schema(HOSTED_SKIP_NOTICE_AUDIT_SCHEMA, detail),
+        )
+        .await?;
+        return Ok(());
+    }
+    let sent = send_thread_notice_in_tx(
+        &mut *conn,
+        send.workspace_id,
+        NewMessage {
+            channel_id: send.channel_id,
+            author_member_id: agent.member_id,
+            message_type: MessageType::System,
+            body: Some(hosted_skip_notice_body(reason, &agent.display_name)),
+            props: hosted_skip_notice_props(
+                reason,
+                agent.member_id,
+                send.author_member_id,
+                thread_key,
+                send.message_id,
+            ),
+            // Where the caller spoke: the thread they were in, or the main
+            // timeline right under their message (the paused line's place).
+            root_id: send.root_id,
+            reply_to_id: None,
+            client_msg_id: Some(send.message_id),
+            run_id: None,
+            hlc_ts: None,
+            hlc_count: None,
+        },
+    )
+    .await?;
+    if let Some(object) = detail.as_object_mut() {
+        object.insert(
+            "notice_message_id".into(),
+            serde_json::json!(sent.message.id),
+        );
+    }
+    write_audit(
+        &mut *conn,
+        &AuditEntry::new(send.workspace_id, HOSTED_SKIP_NOTICE_POSTED_ACTION)
+            .by(send.author_member_id)
+            .about(agent.member_id)
+            .target("message", send.message_id)
+            .via_token(send.via_token_id)
+            .with_schema(HOSTED_SKIP_NOTICE_AUDIT_SCHEMA, detail),
     )
     .await?;
     Ok(())

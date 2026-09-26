@@ -96,11 +96,23 @@ export function useWorkSessions(
   });
 }
 
-export function useWorkHosts(workspaceId: string) {
+/**
+ * 워크스페이스의 호스트 목록. `refetchIntervalMs`는 `useWorkSessions`와 같은
+ * 이유로 인자다: 한 키에 `useQuery`를 둘 두면 어느 `queryFn`이 도는지가 마운트
+ * 순서에 달린다. 작업 표면 판정(#2780)은 호스트가 켜지고 꺼지는 것을 봐야 하므로
+ * 주기를 넘기고, 다른 화면은 지금까지대로 넘기지 않는다.
+ */
+export function useWorkHosts(
+  workspaceId: string,
+  refetchIntervalMs?: number,
+  enabled: boolean = true
+) {
   return useQuery({
     queryKey: ["work-hosts", workspaceId],
     queryFn: () => fetchWorkHosts(workspaceId),
     staleTime: 60_000,
+    refetchInterval: refetchIntervalMs ?? false,
+    enabled: enabled && workspaceId !== "",
   });
 }
 

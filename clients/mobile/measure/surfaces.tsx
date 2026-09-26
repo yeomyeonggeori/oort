@@ -3172,6 +3172,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         <View style={styles.fill}>
           <Shell />
           <ProfileSheet
+            workspaceId={HARNESS_MEMBER.workspaceId}
             member={HARNESS_MEMBER}
             directory={makeDirectory(SHELL_ROSTER)}
             connected
@@ -3611,6 +3612,11 @@ function seedShell(surface: string): void {
   }
 
   harnessClient.setQueryData(['roster', ADE_WS], SHELL_ROSTER);
+  // 프로필 시트의 알림 일시 중지 줄(#2848)이 읽는 규칙. 씨앗이 없으면 줄이 잠긴다.
+  harnessClient.setQueryData(['settings', 'notification-rules', ADE_WS], {
+    dnd: false,
+    mentionOverridesMute: false,
+  });
   const channel = (id: string, name: string, kind: 'public' | 'private') => ({
     id,
     workspaceId: ADE_WS,

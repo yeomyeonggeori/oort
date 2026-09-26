@@ -16,6 +16,8 @@ import {
 } from "@/app/shellNav";
 import { restoreDialogOpenerFocus } from "@/design/ui/dialog";
 import { restoreSettingsOpener } from "@/features/settings/settingsFocus";
+import { AI_CONNECT_REENTRY_PATH } from "@/features/welcome/aiConnectReentry";
+import { useInertRefWhile } from "@/app/inert";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { queryClient } from "@/app/queryClient";
 import { resetRouteQueries } from "@/app/retryScope";
@@ -44,7 +46,7 @@ import {
   closeAdeDrawer,
   useAdeDrawerOpen,
 } from "@/features/ade/adeDrawerStore";
-import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
+import { SurfaceGate } from "@/features/capabilities/SurfaceGate";
 import { isDesktop } from "@/lib/tauri";
 import { cn } from "@/design/lib/cn";
 import { LocalTerminalDock } from "@/features/workbench/local/LocalTerminalDock";
@@ -110,6 +112,10 @@ export function AppShell({
     asDrawer: isMobile,
     setCollapsed: setSidebarPaneCollapsed,
   });
+  // AI 연결 재진입(#2893)은 셸 안의 라우트지만 화면은 셸 전체를 덮는 전면 층이다
+  // (body 포털). 덮인 셸은 탭 순서와 접근성 트리에서 빠진다. 언마운트하지 않는
+  // 것이 요점이다: 실시간 연결·도크·서랍이 그대로 산다.
+  useInertRefWhile(sidebarPaint.shellRef, routePath === AI_CONNECT_REENTRY_PATH);
   const previousMobileRef = useRef(isMobile);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerOpenerRef = useRef<HTMLElement | null>(null);
@@ -165,7 +171,14 @@ export function AppShell({
   // 고르면(서랍은 라우트만 덮으므로 사이드바는 살아 있다) 방금 고른 그 채널이
   // 서랍 뒤에 가려진 채 열린다 — 위 서랍이 고치려던 그 결함 그대로다. 한 셸에
   // 서랍이 둘인데 규칙이 둘이면 사람은 어느 쪽도 못 배운다.
+  //
+  // AI 연결 재진입(#2893)은 예외다. 그 층은 표면을 옮기는 것이 아니라 잠시 덮는
+  // 것이고, 닫으면 떠난 자리로 돌아온다. 들고 나는 두 번 모두 서랍을 그대로 둔다.
+  const previousRoutePath = useRef(routePath);
   useEffect(() => {
+    const previous = previousRoutePath.current;
+    previousRoutePath.current = routePath;
+    if (previous === AI_CONNECT_REENTRY_PATH || routePath === AI_CONNECT_REENTRY_PATH) return;
     setDrawerOpen(false);
     closeAdeDrawer();
   }, [routePath]);
@@ -347,8 +360,11 @@ export function AppShell({
                * 빈 자리도 남기지 않는다(근거는 코어 `adeSummarySegments` 주석).
                * `?stress=N`은 합성 행만 그리는 순수 스크롤 측정이라 소켓도 REST도
                * 없다: 여기서 원장을 부르면 그 측정이 네트워크까지 재게 된다. */}
-              {!stress && !isSettingsSurface && isSurfaceProvided("ade") && (
-                <AdeSummaryLine />
+              {/* #2780: 관제는 온라인 호스트가 있을 때만 선다(SurfaceGate). */}
+              {!stress && !isSettingsSurface && (
+                <SurfaceGate surface="ade">
+                  <AdeSummaryLine />
+                </SurfaceGate>
               )}
               {/* 라우트 하나가 던져도 사이드바·⌘K·설정·로그아웃은 살아 있어야
                * 한다. 앱 루트 경계만 있으면 채팅에서 난 오류가 셸을 통째로
@@ -397,10 +413,11 @@ export function AppShell({
                 {/* 관제 서랍은 라우트 상자를 덮는다(tokens.css `ade-drawer`).
                  * 작업 패널과 형제인 것이 요점이다: 카드를 누르면 서랍이 닫히고
                  * 그 자리에 패널이 서므로 둘이 겹쳐 있는 순간이 없다. */}
-                {!stress &&
-                  adeDrawerOpen &&
-                  !isSettingsSurface &&
-                  isSurfaceProvided("ade") && <AdeDrawer />}
+                {!stress && adeDrawerOpen && !isSettingsSurface && (
+                  <SurfaceGate surface="ade">
+                    <AdeDrawer />
+                  </SurfaceGate>
+                )}
               </div>
               {/* 로컬 터미널 도크(#2774, ADR-0190 D1): 데스크탑 셸에서만. 브라우저
                * 탭에는 로컬 PTY가 없으므로 도크도, ⌃` 키도 없다. */}

@@ -106,6 +106,7 @@ import { DRAWER_SCRIM_MOTION } from "@/design/motion";
 import { MOVE_UNREAD_CHANNEL_SHORTCUT } from "@/app/keyboardShortcuts";
 import { ShortcutHelpDialog } from "@/app/ShortcutHelpDialog";
 import { DraftsNavItem } from "@/features/drafts/DraftsNavItem";
+import { useSurfaceProvided } from "@/features/capabilities/useSurfaceProvided";
 
 // =============================================================================
 // Sidebar (R-1 §1): workspace header, the two global surfaces (인박스 / 활동),
@@ -170,6 +171,7 @@ export function Sidebar({
   const { session, workspaceId, connStatus } = useSession();
   const navigate = useNavigate();
   const navRef = useRef<HTMLDivElement>(null);
+  const workConsoleProvided = useSurfaceProvided("workConsole");
 
   // 폰에서 이 사이드바는 서랍이다 (goal B6). 닫혀 있는 동안에는 화면 밖으로
   // 밀려 있을 뿐 DOM에는 남아 있으므로(스크롤 위치와 마운트를 지킨다), 탭 순서와
@@ -660,8 +662,9 @@ export function Sidebar({
                 {/* TC-1 (#1758): 전역 작업 세션 목록. 채널 헤더 터미널은
                     도크이고, 우측 WorkPanel 은 이 경로의 `open-work-panel` 이
                     연다. 표면 삭제 금지 — 셀프호스트 기본은 진입점만 접는다
-                    (#2166, isSurfaceProvided("workConsole")). */}
-                {isSurfaceProvided("workConsole") && (
+                    (#2166). #2780: 정적 표가 아니라 온라인 호스트 유무로
+                    펼친다(useSurfaceProvided). */}
+                {workConsoleProvided && (
                   <SidebarRow
                     to="/work"
                     icon={<SquareTerminal className="size-4" />}

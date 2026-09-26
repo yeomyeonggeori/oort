@@ -213,13 +213,48 @@ impl OpenAiOAuthCredential {
     }
 }
 
+/// The envelope discriminator for an Anthropic API key (#2872). The same string
+/// is the credential kind the settings surface projects.
+pub const ANTHROPIC_KEY_KIND: &str = "anthropic-key";
+
 /// What a provider link's sealed box actually contains.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Debug` is hand-written (#2872): a derived one printed `Bearer("sk-…")`, and
+/// a credential enum is exactly the value someone adds to a `tracing` field.
+#[derive(Clone, PartialEq, Eq)]
 pub enum LinkCredential {
     /// The legacy shape: an opaque gateway bearer, stored as its own plaintext.
     Bearer(String),
     /// ADR-0147: an OpenAI subscription OAuth grant.
     OpenAiOAuth(Box<OpenAiOAuthCredential>),
+    /// #2872: an Anthropic console API key (BYOK, ADR-0147 증보 / ADR-0193 (c)).
+    /// Its kind selects the Anthropic Messages wire, exactly as the OAuth kind
+    /// selects the Responses wire — the key never rides as a Bearer.
+    AnthropicKey(String),
+}
+
+impl std::fmt::Debug for LinkCredential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LinkCredential::Bearer(_) => f.write_str("Bearer(<redacted>)"),
+            LinkCredential::AnthropicKey(_) => f.write_str("AnthropicKey(<redacted>)"),
+            LinkCredential::OpenAiOAuth(credential) => {
+                f.debug_tuple("OpenAiOAuth").field(credential).finish()
+            }
+        }
+    }
+}
+
+/// The sealed shape of [`LinkCredential::AnthropicKey`].
+#[derive(Serialize, Deserialize)]
+struct AnthropicKeyEnvelope {
+    kind: String,
+    api_key: String,
+}
+
+#[derive(Deserialize)]
+struct KindProbe {
+    kind: Option<String>,
 }
 
 impl LinkCredential {
@@ -230,9 +265,24 @@ impl LinkCredential {
         if !trimmed.starts_with('{') {
             return LinkCredential::Bearer(trimmed.to_string());
         }
-        match serde_json::from_str::<OAuthEnvelope>(trimmed) {
-            Ok(envelope) if envelope.kind == OAUTH_OPENAI_KIND => {
-                LinkCredential::OpenAiOAuth(Box::new(envelope.into_credential()))
+        let kind = serde_json::from_str::<KindProbe>(trimmed)
+            .ok()
+            .and_then(|probe| probe.kind);
+        match kind.as_deref() {
+            Some(OAUTH_OPENAI_KIND) => match serde_json::from_str::<OAuthEnvelope>(trimmed) {
+                Ok(envelope) => LinkCredential::OpenAiOAuth(Box::new(envelope.into_credential())),
+                Err(_) => LinkCredential::Bearer(trimmed.to_string()),
+            },
+            Some(ANTHROPIC_KEY_KIND) => {
+                // Review N4: a damaged Anthropic envelope fails CLOSED — an
+                // empty key (not usable, so the worker never calls with it),
+                // never the envelope JSON re-read as a Bearer for another wire.
+                match serde_json::from_str::<AnthropicKeyEnvelope>(trimmed) {
+                    Ok(envelope) => {
+                        LinkCredential::AnthropicKey(envelope.api_key.trim().to_string())
+                    }
+                    Err(_) => LinkCredential::AnthropicKey(String::new()),
+                }
             }
             _ => LinkCredential::Bearer(trimmed.to_string()),
         }
@@ -251,6 +301,11 @@ impl LinkCredential {
                     // alive, and an empty plaintext is refused by `seal_bearer`.
                     .unwrap_or_default()
             }
+            LinkCredential::AnthropicKey(api_key) => serde_json::to_string(&AnthropicKeyEnvelope {
+                kind: ANTHROPIC_KEY_KIND.to_string(),
+                api_key: api_key.clone(),
+            })
+            .unwrap_or_default(),
         }
     }
 
@@ -258,7 +313,7 @@ impl LinkCredential {
     /// holds a grant that has not been exchanged for one yet.
     pub fn presentable_bearer(&self) -> &str {
         match self {
-            LinkCredential::Bearer(bearer) => bearer,
+            LinkCredential::Bearer(bearer) | LinkCredential::AnthropicKey(bearer) => bearer,
             LinkCredential::OpenAiOAuth(credential) => {
                 credential.presentable_access_token().unwrap_or("")
             }
@@ -270,30 +325,34 @@ impl LinkCredential {
     /// *usable* rather than half-written.
     pub fn is_present(&self) -> bool {
         match self {
-            LinkCredential::Bearer(bearer) => !bearer.trim().is_empty(),
+            LinkCredential::Bearer(bearer) | LinkCredential::AnthropicKey(bearer) => {
+                !bearer.trim().is_empty()
+            }
             LinkCredential::OpenAiOAuth(credential) => !credential.refresh_token.trim().is_empty(),
         }
     }
 
-    /// `bearer` | `oauth-openai` — a non-secret label for responses and logs.
+    /// `bearer` | `oauth-openai` | `anthropic-key` — a non-secret label for
+    /// responses and logs.
     pub fn kind_label(&self) -> &'static str {
         match self {
             LinkCredential::Bearer(_) => "bearer",
             LinkCredential::OpenAiOAuth(_) => OAUTH_OPENAI_KIND,
+            LinkCredential::AnthropicKey(_) => ANTHROPIC_KEY_KIND,
         }
     }
 
     pub fn as_openai_oauth(&self) -> Option<&OpenAiOAuthCredential> {
         match self {
             LinkCredential::OpenAiOAuth(credential) => Some(credential),
-            LinkCredential::Bearer(_) => None,
+            LinkCredential::Bearer(_) | LinkCredential::AnthropicKey(_) => None,
         }
     }
 
     pub fn as_openai_oauth_mut(&mut self) -> Option<&mut OpenAiOAuthCredential> {
         match self {
             LinkCredential::OpenAiOAuth(credential) => Some(credential),
-            LinkCredential::Bearer(_) => None,
+            LinkCredential::Bearer(_) | LinkCredential::AnthropicKey(_) => None,
         }
     }
 
@@ -393,6 +452,39 @@ mod tests {
         assert_eq!(credential.presentable_bearer(), "sk-live-abcdefgh");
         assert_eq!(credential.kind_label(), "bearer");
         assert!(credential.is_present());
+    }
+
+    /// #2872: the Anthropic envelope round-trips, selects its own kind, and its
+    /// `Debug` carries no key (nor does a bearer's).
+    #[test]
+    fn an_anthropic_key_round_trips_and_never_debug_prints() {
+        let credential = LinkCredential::AnthropicKey("sk-ant-api03-SECRETVALUE".into());
+        let sealed = credential.to_sealed_plaintext();
+        assert!(sealed.contains(ANTHROPIC_KEY_KIND));
+        let reopened = LinkCredential::parse(&sealed);
+        assert_eq!(reopened, credential);
+        assert_eq!(reopened.kind_label(), "anthropic-key");
+        assert_eq!(reopened.presentable_bearer(), "sk-ant-api03-SECRETVALUE");
+        assert!(reopened.is_present());
+        assert!(reopened.as_openai_oauth().is_none());
+        for value in [
+            format!("{reopened:?}"),
+            format!("{:?}", LinkCredential::Bearer("sk-live-SECRETVALUE".into())),
+        ] {
+            assert!(!value.contains("SECRETVALUE"), "{value}");
+        }
+        // Review N4: a damaged envelope fails closed — still the Anthropic
+        // kind, and not present, so nothing is ever sent with it.
+        for damaged in [
+            r#"{"kind":"anthropic-key","api_key":"  "}"#,
+            r#"{"kind":"anthropic-key"}"#,
+            r#"{"kind":"anthropic-key","api_key":7}"#,
+        ] {
+            let credential = LinkCredential::parse(damaged);
+            assert_eq!(credential.kind_label(), "anthropic-key", "{damaged}");
+            assert!(!credential.is_present(), "{damaged}");
+            assert_eq!(credential.presentable_bearer(), "");
+        }
     }
 
     /// A `{`-leading plaintext that is not this envelope must stay a bearer.

@@ -1479,6 +1479,22 @@ async fn an_inactive_hosted_agent_fails_closed_and_never_falls_back_to_managed()
     .await
     .unwrap();
     assert_eq!(reason, "hosted_connection_unavailable");
+    // #2871 — a workspace hosted agent without a live connection says so.
+    let notices = hosted_notices(&su, fixture.workspace, fixture.channel).await;
+    assert_eq!(notices.len(), 1, "one visible line: {notices:?}");
+    assert_notice(
+        &notices[0],
+        fixture.hosted_agent,
+        fixture.human,
+        "hosted_connection_unavailable",
+        "의 연결이 끊겨 있어서 답하지 못했어요. \
+         워크스페이스 관리자가 설정 › 연결 › 에이전트 자격에서 다시 연결할 수 있어요.",
+    );
+    assert_eq!(
+        notices[0]["props"]["notice_action"]["href"],
+        json!("/settings?section=agents")
+    );
+    assert_notice_broadcast(&su, fixture.workspace, &notices[0]).await;
 
     // The managed agent in the SAME workspace and channel is unaffected.
     let managed_handle = hosted_handle(&su, fixture.managed_agent).await;
@@ -1560,11 +1576,311 @@ async fn the_closed_production_gate_routes_a_hosted_agent_nowhere() {
     .await
     .unwrap();
     assert_eq!(reason, "hosted_delivery_not_enabled");
+
+    // #2871 ① one visible line, in the main timeline under the call, with the
+    // operator guide as the way out.
+    let notices = hosted_notices(&su, fixture.workspace, fixture.channel).await;
+    assert_eq!(notices.len(), 1, "one visible line: {notices:?}");
+    assert_notice(
+        &notices[0],
+        fixture.hosted_agent,
+        fixture.human,
+        "hosted_delivery_not_enabled",
+        "에게 메시지를 전달하지 못했어요. 이 서버에서 외부 에이전트 전달이 꺼져 있어요. \
+         서버 관리자에게 [켜는 방법](https://github.com/yeomyeonggeori/oort/blob/main/docs/SELF_HOST.md#hosted-agent-agent-port-on-self-host)을 전해 주세요.",
+    );
+    assert!(
+        notices[0]["root_id"].is_null(),
+        "a top-level call is answered top-level"
+    );
+    assert!(notices[0]["props"].get("notice_action").is_none());
+    assert_notice_broadcast(&su, fixture.workspace, &notices[0]).await;
+
+    // ② the same person again inside ten minutes → no second line, one audit.
+    let mention = |body: String| {
+        let client = client.clone();
+        let url = format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        );
+        let jwt = fixture.human_jwt.clone();
+        async move {
+            let sent: Value = client
+                .post(url)
+                .bearer_auth(jwt)
+                .json(&json!({"clientMsgId": Uuid::new_v4(), "body": body}))
+                .send()
+                .await
+                .expect("mention send")
+                .json()
+                .await
+                .expect("mention body");
+            sent
+        }
+    };
+    mention(format!("@{handle} again")).await;
+    assert_eq!(
+        hosted_notices(&su, fixture.workspace, fixture.channel)
+            .await
+            .len(),
+        1,
+        "the throttle holds the repeat back"
+    );
+    let throttled: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id=$1 \
+           AND action='agent.hosted_skip.notice_throttled'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(throttled, 1, "and says so in the audit log");
+
+    // ③ a call inside a thread is a different conversation: told there.
+    let root: Value = mention("a thread root".to_string()).await;
+    let root_id = root["id"].as_str().expect("root id").to_string();
+    let reply: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{handle} in a thread"),
+            "rootId": root_id,
+        }))
+        .send()
+        .await
+        .expect("thread mention")
+        .json()
+        .await
+        .expect("thread mention body");
+    assert!(reply["id"].is_string(), "{reply}");
+    let notices = hosted_notices(&su, fixture.workspace, fixture.channel).await;
+    assert_eq!(notices.len(), 2, "one more, in the thread: {notices:?}");
+    assert_eq!(
+        notices[1]["root_id"].as_str().map(str::to_lowercase),
+        Some(root_id.to_lowercase()),
+        "posted into the thread the caller spoke in"
+    );
+
+    // ④ after ten minutes the top-level repeat is told again.
+    sqlx::query(
+        "UPDATE message SET created_at = created_at - make_interval(mins => 11) \
+          WHERE workspace_id=$1 AND props->>'source'='server.hosted_agent.notice.v1'",
+    )
+    .bind(fixture.workspace)
+    .execute(&su)
+    .await
+    .unwrap();
+    mention(format!("@{handle} later")).await;
+    assert_eq!(
+        hosted_notices(&su, fixture.workspace, fixture.channel)
+            .await
+            .len(),
+        3,
+        "the throttle is a window, not permanent silence"
+    );
+
+    // ⑤ RLS: another workspace's GUC sees none of these lines.
+    let app_reader = momo_app_pool().await;
+    let mut tx = app_reader.begin().await.unwrap();
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(Uuid::new_v4().to_string())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let foreign: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE props->>'source'='server.hosted_agent.notice.v1'",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(foreign, 0, "another workspace sees zero rows");
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(fixture.workspace.to_string())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let own: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE props->>'source'='server.hosted_agent.notice.v1'",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(own, 3, "and the owning workspace sees them through RLS");
+    tx.rollback().await.unwrap();
+
+    let jobs: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='agent_job' \
+           AND partition_key=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(jobs, 0, "telling is not delivering");
     // The tools themselves stay reachable: the gate is on delivery, and the
     // human already approved this connection's scopes.
     assert!(!list_tools(&client, &base, &fixture.hosted_bearer)
         .await
         .is_empty());
+}
+
+/// #2871 H-1 — a 1:1 DM can never be approved for hosted delivery
+/// (`confirm_hosted_connection_in_tx` takes `kind <> 'dm'` only), so the
+/// line there must not ask anyone to approve it, and must not open a door to a
+/// screen that refuses DMs. The audit still records the gate that refused it.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_dm_with_a_hosted_agent_says_dms_are_not_delivered_without_a_door() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    let dm = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO channel (id, workspace_id, kind, name, topic, dm_key, created_by) \
+         VALUES ($1, $2, 'dm', NULL, NULL, $3, $4)",
+    )
+    .bind(dm)
+    .bind(fixture.workspace)
+    .bind(dm.to_string())
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .expect("seed dm");
+    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
+        .bind(dm)
+        .bind(fixture.workspace)
+        .execute(&su)
+        .await
+        .expect("seed dm seq");
+    for member in [fixture.human, fixture.hosted_agent] {
+        sqlx::query(
+            "INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)",
+        )
+        .bind(fixture.workspace)
+        .bind(dm)
+        .bind(member)
+        .execute(&su)
+        .await
+        .expect("seed dm membership");
+    }
+
+    // Security review Medium-3: whoever names the agent must not be able to
+    // plant a link in this server-voiced line.
+    sqlx::query("UPDATE member SET display_name=$2 WHERE id=$1")
+        .bind(fixture.hosted_agent)
+        .bind("[보안 재인증](https://evil.example)")
+        .execute(&su)
+        .await
+        .expect("rename agent");
+
+    // No handle: the 1:1 DM rule addresses the agent by itself.
+    let sent: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{dm}/messages",
+            fixture.workspace
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"clientMsgId": Uuid::new_v4(), "body": "배포 결과 정리해줄래요?"}))
+        .send()
+        .await
+        .expect("dm send")
+        .json()
+        .await
+        .expect("dm body");
+    assert!(sent["id"].is_string(), "{sent}");
+
+    let reason: String = sqlx::query_scalar(
+        "SELECT detail->>'reason' FROM audit_log WHERE workspace_id=$1 \
+           AND action='agent.mention.skipped' ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        reason, "hosted_channel_unapproved",
+        "the gate that refused it"
+    );
+
+    let notices = hosted_notices(&su, fixture.workspace, dm).await;
+    assert_eq!(notices.len(), 1, "one visible line: {notices:?}");
+    assert_notice(
+        &notices[0],
+        fixture.hosted_agent,
+        fixture.human,
+        "hosted_dm_not_approvable",
+        "에게 전달되지 않아요. 외부 에이전트는 승인된 채널에서 불러 주세요.",
+    );
+    let body = notices[0]["body"].as_str().unwrap();
+    assert!(
+        !body.contains("승인해"),
+        "never asks to approve a DM: {body}"
+    );
+    assert_eq!(
+        body,
+        "1:1 대화는 ［보안 재인증］(https：//evil.example)에게 전달되지 않아요. \
+         외부 에이전트는 승인된 채널에서 불러 주세요.",
+        "the name is inert: no `[..](..)` and no `http(s)://` survive"
+    );
+    assert!(
+        notices[0]["props"].get("notice_action").is_none(),
+        "no door to a screen that refuses DMs"
+    );
+    assert_notice_broadcast(&su, fixture.workspace, &notices[0]).await;
+}
+
+/// #2871 — the hosted skip lines in one channel, oldest first.
+async fn hosted_notices(pool: &PgPool, workspace: Uuid, channel: Uuid) -> Vec<Value> {
+    sqlx::query_scalar(
+        "SELECT jsonb_build_object('id', id, 'type', type, 'body', body, \
+                'author', author_member_id, 'root_id', root_id, 'props', props) \
+           FROM message WHERE workspace_id=$1 AND channel_id=$2 \
+            AND props->>'source'='server.hosted_agent.notice.v1' ORDER BY seq",
+    )
+    .bind(workspace)
+    .bind(channel)
+    .fetch_all(pool)
+    .await
+    .expect("hosted notices")
+}
+
+fn assert_notice(notice: &Value, agent: Uuid, caller: Uuid, reason: &str, body_tail: &str) {
+    assert_eq!(notice["type"], "system", "{notice}");
+    assert_eq!(
+        notice["author"],
+        json!(agent),
+        "authored by the agent member"
+    );
+    assert_eq!(notice["props"]["kind"], "agent_hosted_skip");
+    assert_eq!(notice["props"]["reason"], reason);
+    assert_eq!(notice["props"]["notice_for_member_id"], json!(caller));
+    let body = notice["body"].as_str().expect("body");
+    assert!(body.ends_with(body_tail), "{body}");
+}
+
+/// The line reached realtime the only legal way: a broadcast outbox row
+/// written beside it.
+async fn assert_notice_broadcast(pool: &PgPool, workspace: Uuid, notice: &Value) {
+    let id = notice["id"].as_str().expect("notice id").to_lowercase();
+    let rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='broadcast' \
+           AND lower(payload::text) LIKE '%' || $2 || '%'",
+    )
+    .bind(workspace)
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .expect("broadcast rows");
+    assert!(rows >= 1, "the notice has a broadcast outbox row");
 }
 
 async fn hosted_handle(pool: &PgPool, member: Uuid) -> String {
@@ -1804,6 +2120,22 @@ async fn an_unapproved_channel_never_reaches_the_hosted_job_path() {
     .await
     .unwrap();
     assert_eq!(reason, "hosted_channel_unapproved");
+    // #2871 — the caller is told, in that room, and shown the door.
+    let notices = hosted_notices(&su, fixture.workspace, fixture.private_channel).await;
+    assert_eq!(notices.len(), 1, "one visible line: {notices:?}");
+    assert_notice(
+        &notices[0],
+        fixture.hosted_agent,
+        fixture.human,
+        "hosted_channel_unapproved",
+        "에게 승인되지 않아서 전달하지 못했어요. \
+         워크스페이스 관리자가 설정 › 연결 › 에이전트 자격에서 이 채널을 승인할 수 있어요.",
+    );
+    assert_eq!(
+        notices[0]["props"]["notice_action"],
+        json!({"label": "에이전트 자격 열기", "href": "/settings?section=agents"})
+    );
+    assert_notice_broadcast(&su, fixture.workspace, &notices[0]).await;
 
     let (status, claimed) = call(
         &client,

@@ -565,6 +565,8 @@ export function GroupRow({
   accessibilityHint,
   accessibilityRole,
   accessibilityState,
+  disabled = false,
+  leading,
   trailing,
   testID,
 }: {
@@ -577,16 +579,23 @@ export function GroupRow({
   onPress?: () => void;
   accessibilityLabel?: string;
   accessibilityHint?: string;
-  accessibilityRole?: 'button' | 'radio';
-  accessibilityState?: {selected?: boolean};
+  accessibilityRole?: 'button' | 'radio' | 'switch';
+  accessibilityState?: {selected?: boolean; checked?: boolean; disabled?: boolean};
+  /** 누를 수 없는 동안(읽는 중·쓰는 중). 줄은 보이되 흐려지고 눌리지 않는다. */
+  disabled?: boolean;
+  /** 제목 앞의 작은 표지(상태 점 등). 장식이라 읽히지 않게 넘긴다. */
+  leading?: React.ReactNode;
   trailing?: React.ReactNode;
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const body = (
     <>
+      {leading ?? null}
       <View style={styles.groupRowText}>
         <Text
+          // 큰 글씨에서 「18:00까\n지」처럼 어절 가운데서 끊기지 않게.
+          lineBreakStrategyIOS="hangul-word"
           style={[
             styles.groupRowTitle,
             tone === 'danger' && styles.groupRowTitleDanger,
@@ -628,9 +637,18 @@ export function GroupRow({
       accessibilityRole={accessibilityRole ?? 'button'}
       accessibilityLabel={accessibilityLabel ?? title}
       accessibilityHint={accessibilityHint}
-      accessibilityState={accessibilityState}
+      accessibilityState={
+        disabled ? {...accessibilityState, disabled: true} : accessibilityState
+      }
+      // `false` 를 넘기지 않는다 — Pressable 은 그것도 접근성 상태에 섞어 기존 줄의
+      // 상태 모양을 바꾼다.
+      disabled={disabled ? true : undefined}
       onPress={onPress}
-      style={({pressed}) => [...rowStyle, pressed && styles.pressed]}
+      style={({pressed}) => [
+        ...rowStyle,
+        pressed && !disabled && styles.pressed,
+        disabled && styles.groupRowDisabled,
+      ]}
       testID={testID}>
       {body}
     </Pressable>
@@ -792,4 +810,5 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   groupRowDetail: {fontSize: font.label, color: color.textMuted, lineHeight: 18},
   groupRowValue: {fontSize: font.body, color: color.textMuted, flexShrink: 1},
   groupRowChevron: {fontSize: font.heading, color: color.textFaint},
+  groupRowDisabled: {opacity: 0.55},
 });
