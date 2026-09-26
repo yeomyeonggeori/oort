@@ -44,7 +44,7 @@ import {
   closeAdeDrawer,
   useAdeDrawerOpen,
 } from "@/features/ade/adeDrawerStore";
-import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
+import { SurfaceGate } from "@/features/capabilities/SurfaceGate";
 import { isDesktop } from "@/lib/tauri";
 import { cn } from "@/design/lib/cn";
 import { LocalTerminalDock } from "@/features/workbench/local/LocalTerminalDock";
@@ -347,8 +347,11 @@ export function AppShell({
                * 빈 자리도 남기지 않는다(근거는 코어 `adeSummarySegments` 주석).
                * `?stress=N`은 합성 행만 그리는 순수 스크롤 측정이라 소켓도 REST도
                * 없다: 여기서 원장을 부르면 그 측정이 네트워크까지 재게 된다. */}
-              {!stress && !isSettingsSurface && isSurfaceProvided("ade") && (
-                <AdeSummaryLine />
+              {/* #2780: 관제는 온라인 호스트가 있을 때만 선다(SurfaceGate). */}
+              {!stress && !isSettingsSurface && (
+                <SurfaceGate surface="ade">
+                  <AdeSummaryLine />
+                </SurfaceGate>
               )}
               {/* 라우트 하나가 던져도 사이드바·⌘K·설정·로그아웃은 살아 있어야
                * 한다. 앱 루트 경계만 있으면 채팅에서 난 오류가 셸을 통째로
@@ -397,10 +400,11 @@ export function AppShell({
                 {/* 관제 서랍은 라우트 상자를 덮는다(tokens.css `ade-drawer`).
                  * 작업 패널과 형제인 것이 요점이다: 카드를 누르면 서랍이 닫히고
                  * 그 자리에 패널이 서므로 둘이 겹쳐 있는 순간이 없다. */}
-                {!stress &&
-                  adeDrawerOpen &&
-                  !isSettingsSurface &&
-                  isSurfaceProvided("ade") && <AdeDrawer />}
+                {!stress && adeDrawerOpen && !isSettingsSurface && (
+                  <SurfaceGate surface="ade">
+                    <AdeDrawer />
+                  </SurfaceGate>
+                )}
               </div>
               {/* 로컬 터미널 도크(#2774, ADR-0190 D1): 데스크탑 셸에서만. 브라우저
                * 탭에는 로컬 PTY가 없으므로 도크도, ⌃` 키도 없다. */}

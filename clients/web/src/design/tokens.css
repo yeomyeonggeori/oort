@@ -164,6 +164,45 @@
   --layer-overlay-scrim: 200;
   --layer-overlay-surface: 300;
 
+  /* --- 로컬 터미널 칸 팔레트 (#2849) ------------------------------------
+   *
+   * 앱 역할이 아니라 xterm이 그리는 터미널의 색이다. 칸 틀이
+   * `data-term-scheme="dark|light"`로 `color-scheme`을 고정하면 아래 쌍이 그
+   * 쪽으로 갈린다. 기본은 어둡게(앱이 라이트여도 칸은 어둡다). 「앱 테마
+   * 따르기」는 스킴을 찍지 않아 루트를 따른다. 칸 테두리와 머리 줄은 계속
+   * 앱 토큰이다.
+   *
+   * 출처: VS Code 기본 터미널 ANSI 색(microsoft/vscode
+   * `terminalColorRegistry.ts`, MIT)의 색상 계열을 참고해 아래 기준으로 다시
+   * 맞췄다. 값은 원본과 같지 않다. 순수 흑백은 쓰지 않는다.
+   *   - 기본 전경 / 바탕 ≥ 4.5:1, 전경 / 선택 영역 ≥ 4.5:1
+   *   - 글자로 쓰는 ANSI 색 / 바탕 ≥ 4.5:1
+   *   - 흐린 색(bright-black) / 바탕 ≥ 3:1
+   *   - 바탕 역할 색(어둡게의 black, 밝게의 white·bright-white)은 글자 기준
+   *     밖이고, 바탕과 구분만 된다.
+   *   - 커서는 신호색(`--signal`)이고 바탕 대비 ≥ 3:1이다.
+   * 측정: tokens.contrast.test.ts 「local terminal palette」. */
+  --term-bg: light-dark(#fffefc, #14161b);
+  --term-fg: light-dark(#1f2127, #e3e4e8);
+  --term-selection: light-dark(#cfe0f5, #2f4a6b);
+  --term-selection-inactive: light-dark(#e6e8ec, #262a33);
+  --term-ansi-black: light-dark(#2b2d33, #33363f);
+  --term-ansi-red: light-dark(#b8231f, #f2635f);
+  --term-ansi-green: light-dark(#17753d, #3fcf8e);
+  --term-ansi-yellow: light-dark(#8a6400, #e5c547);
+  --term-ansi-blue: light-dark(#1d5fb8, #5aa2f0);
+  --term-ansi-magenta: light-dark(#9c2b9c, #d77bd8);
+  --term-ansi-cyan: light-dark(#0b6f86, #3dc2d9);
+  --term-ansi-white: light-dark(#e6e4e0, #cfd1d6);
+  --term-ansi-bright-black: light-dark(#7c7f88, #6e737e);
+  --term-ansi-bright-red: light-dark(#cc3a33, #ff8580);
+  --term-ansi-bright-green: light-dark(#1a7f43, #6ee0a8);
+  --term-ansi-bright-yellow: light-dark(#946c00, #f5dc6e);
+  --term-ansi-bright-blue: light-dark(#2f6fca, #85bcf7);
+  --term-ansi-bright-magenta: light-dark(#ad3fad, #e69ce6);
+  --term-ansi-bright-cyan: light-dark(#137d96, #6fd6e6);
+  --term-ansi-bright-white: light-dark(#f3f1ee, #f2f3f5);
+
   /* --- onboarding S0, single look (BZ-6a / #1869) -----------------------
    *
    * S0 is the one surface that does not follow OS light/dark. It is a deep
@@ -271,6 +310,17 @@
 }
 
 :root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* 로컬 터미널 칸의 스킴 고정 (#2849). 루트 스탬프와 같은 문법이다. 칸 틀이
+ * 찍고, 그 안의 `--term-*`·`--signal`(커서)이 이 스킴으로 갈린다. 「앱 테마
+ * 따르기」는 찍지 않는다. */
+[data-term-scheme="light"] {
+  color-scheme: light;
+}
+
+[data-term-scheme="dark"] {
   color-scheme: dark;
 }
 
@@ -743,6 +793,26 @@
   --color-onboarding-accent: var(--onboarding-accent);
   --color-onboarding-on-accent: var(--onboarding-on-accent);
   --color-onboarding-line: var(--onboarding-line);
+  --color-term-bg: var(--term-bg);
+  --color-term-fg: var(--term-fg);
+  --color-term-selection: var(--term-selection);
+  --color-term-selection-inactive: var(--term-selection-inactive);
+  --color-term-ansi-black: var(--term-ansi-black);
+  --color-term-ansi-red: var(--term-ansi-red);
+  --color-term-ansi-green: var(--term-ansi-green);
+  --color-term-ansi-yellow: var(--term-ansi-yellow);
+  --color-term-ansi-blue: var(--term-ansi-blue);
+  --color-term-ansi-magenta: var(--term-ansi-magenta);
+  --color-term-ansi-cyan: var(--term-ansi-cyan);
+  --color-term-ansi-white: var(--term-ansi-white);
+  --color-term-ansi-bright-black: var(--term-ansi-bright-black);
+  --color-term-ansi-bright-red: var(--term-ansi-bright-red);
+  --color-term-ansi-bright-green: var(--term-ansi-bright-green);
+  --color-term-ansi-bright-yellow: var(--term-ansi-bright-yellow);
+  --color-term-ansi-bright-blue: var(--term-ansi-bright-blue);
+  --color-term-ansi-bright-magenta: var(--term-ansi-bright-magenta);
+  --color-term-ansi-bright-cyan: var(--term-ansi-bright-cyan);
+  --color-term-ansi-bright-white: var(--term-ansi-bright-white);
 
 }
 

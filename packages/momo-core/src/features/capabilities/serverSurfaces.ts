@@ -11,6 +11,8 @@ import { buildMode } from "../../runtime/host";
 // 여기는 **그 판정이 사는 한 곳**이다. 표면별 제공 여부가 코드 여기저기 흩어지면
 // 다음 배치가 라우트를 이식하고도 화면은 계속 "준비 중"이라고 말한다. 이식하는
 // 사람이 고쳐야 할 것은 아래 표의 `provided: false` 한 줄이어야 한다.
+// 예외는 `HOST_GATED_SURFACE_IDS`의 셋이다(#2780): 서버는 이미 싣고 있고, 펼칠지는
+// 그 워크스페이스에 온라인 호스트가 있는가라는 런타임 사실이 정한다.
 //
 // ## 두 겹으로 막는다
 //
@@ -89,6 +91,66 @@ export const WORK_SURFACE_IDS: readonly SurfaceId[] = [
   "ade",
 ];
 
+/**
+ * 정적 표가 아니라 **런타임 사실**로 펼치는 작업 표면 (#2780, 작업 공간 M2).
+ *
+ * 이 셋은 서버 라우트가 이미 서 있다. 모자란 것은 서버가 아니라 그 워크스페이스에
+ * 붙은 코드 실행 호스트다. 그래서 「이 서버가 싣는가」라는 표의 질문으로는 답이
+ * 안 나오고, 표를 손으로 뒤집으면 호스트가 없는 셀프호스트에서 막다른 길이 선다.
+ * 판정은 「이 워크스페이스에 온라인 호스트가 있는가」로 한다(`hasOnlineWorkHost`).
+ *
+ * `workstreams`는 여기 없다: 그 라우트는 아직 서버에 없다(404). 호스트가 있어도
+ * 열 곳이 없다.
+ *
+ * 로컬 터미널 레인(데스크탑 ⌃`, ADR-0190 D1)은 이 판정 밖이다. 호스트 없이도
+ * 데스크탑이면 선다.
+ */
+export const HOST_GATED_SURFACE_IDS: readonly SurfaceId[] = [
+  "workConsole",
+  "work",
+  "ade",
+];
+
+/** 호스트 목록에서 이 판정이 읽는 두 칸. */
+export interface WorkHostPresenceFact {
+  online: boolean;
+  revokedAtMs?: number | null;
+}
+
+/**
+ * 이 워크스페이스에 지금 온라인인 호스트가 하나라도 있는가.
+ *
+ * `online`은 서버의 90초 heartbeat 창이다(`work_host_store.rs`). 해지된 호스트는
+ * heartbeat가 남아 있어도 세지 않는다. 목록을 아직 받지 못했으면(`undefined`)
+ * 거짓이다: 모르는 것을 있다고 그리면 누른 뒤에야 빈 화면을 만난다.
+ */
+export function hasOnlineWorkHost(
+  hosts: readonly WorkHostPresenceFact[] | null | undefined
+): boolean {
+  if (!hosts) return false;
+  return hosts.some(
+    (host) =>
+      host.online === true &&
+      (host.revokedAtMs === undefined || host.revokedAtMs === null)
+  );
+}
+
+/**
+ * 정적 판정과 런타임 사실을 합친 표면 판정.
+ *
+ * `staticProvided`는 호출하는 쪽이 `isSurfaceProvided(id)`로 구해 넘긴다. 여기서
+ * 직접 부르지 않는 이유는 시험 이음매다: 화면 시험이 정적 절반을 모듈 경계에서
+ * 바꿔 끼울 수 있어야 런타임 절반만 따로 잴 수 있다.
+ */
+export function surfaceProvidedWithHosts(
+  id: SurfaceId,
+  staticProvided: boolean,
+  onlineHost: boolean
+): boolean {
+  if (staticProvided) return true;
+  return HOST_GATED_SURFACE_IDS.includes(id) && onlineHost;
+}
+
 export interface ServerSurface {
   id: SurfaceId;
   /**
@@ -137,32 +199,39 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
   workConsole: {
     id: "workConsole",
     label: "작업 콘솔",
+    // #2780: 정적 값은 거짓으로 두고, 온라인 호스트가 있으면 런타임에 펼친다
+    // (`HOST_GATED_SURFACE_IDS`). 아래 문구는 호스트가 없을 때 하는 말이다.
     provided: false,
-    absentReason: "이 서버는 작업 콘솔을 기본으로 열지 않습니다.",
-    fallback: "채널에서 글로 이야기하면 에이전트가 그대로 답합니다.",
+    absentReason: "이 워크스페이스에 연결된 코드 실행 호스트가 아직 없습니다.",
+    fallback: "호스트가 연결되면 작업 콘솔이 열립니다. 그동안 에이전트와는 채널에서 이야기할 수 있습니다.",
     measured:
       "셀프호스트 1차 목표(2026-09-07 §5-2): workd/T3 데몬을 쓰지 않으므로 " +
-      "전역 작업 콘솔(/work) 진입점을 숨긴다. 라우트와 컴포넌트는 유지.",
+      "전역 작업 콘솔(/work) 진입점을 숨긴다. 라우트와 컴포넌트는 유지. " +
+      "#2780(2026-09-27): 정적 표 대신 GET work-hosts의 online(90초 heartbeat) 호스트 유무로 펼친다.",
   },
   work: {
     id: "work",
     label: "코드 실행 호스트",
+    // #2780: 런타임 판정(`HOST_GATED_SURFACE_IDS`). 위 줄과 같은 이유다.
     provided: false,
-    absentReason: "이 서버는 코드 실행 호스트를 기본으로 다루지 않습니다.",
-    fallback: "에이전트는 채널에서 바로 이야기할 수 있습니다.",
+    absentReason: "이 워크스페이스에 연결된 코드 실행 호스트가 아직 없습니다.",
+    fallback: "호스트가 연결되면 여기서 작업 세션을 볼 수 있습니다. 그동안 에이전트와는 채널에서 이야기할 수 있습니다.",
     measured:
       "셀프호스트 1차 목표(2026-09-07 §5-2): 설정 › 코드 실행 호스트와 작업 세션 " +
-      "패널은 workd 레지스트리를 전제한다. 진입점만 접고 화면 코드는 남긴다.",
+      "패널은 workd 레지스트리를 전제한다. 진입점만 접고 화면 코드는 남긴다. " +
+      "#2780(2026-09-27): 정적 표 대신 온라인 호스트 유무로 펼친다.",
   },
   ade: {
     id: "ade",
     label: "관제",
+    // #2780: 런타임 판정(`HOST_GATED_SURFACE_IDS`). 위 두 줄과 같은 이유다.
     provided: false,
-    absentReason: "이 서버는 작업 관제를 기본으로 보여 주지 않습니다.",
+    absentReason: "이 워크스페이스에 연결된 코드 실행 호스트가 아직 없습니다.",
     fallback: "에이전트가 한 일은 채널 메시지에서 확인할 수 있습니다.",
     measured:
       "셀프호스트 1차 목표(2026-09-07 §5-2): ADE 요약 줄·서랍은 작업 세션 원장을 " +
-      "전제한다. 진입점만 접고 컴포넌트는 유지.",
+      "전제한다. 진입점만 접고 컴포넌트는 유지. " +
+      "#2780(2026-09-27): 정적 표 대신 온라인 호스트 유무로 펼친다.",
   },
   approvals: {
     id: "approvals",

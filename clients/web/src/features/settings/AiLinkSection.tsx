@@ -40,6 +40,7 @@ import {
   type KeyValue,
 } from "./SettingsFields";
 import { AiLinkChain, ChainProbeResult } from "./AiLinkChain";
+import { SubscriptionAgentEntryCard } from "@/features/welcome/SubscriptionAgentEntry";
 import {
   accessTokenStatus,
   buildOAuthLinkBody,
@@ -441,6 +442,10 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
     else submitKey();
   }
 
+  // 구독 줄 재진입(#2870). provider 연결의 운영자 판정과 별개라 로딩·403 분기에도
+  // 선다: 운영자가 아닌 owner도 자기 구독 에이전트는 붙일 수 있다.
+  const subscriptionEntry = <SubscriptionAgentEntryCard from="settings" />;
+
   const lines = [
     "에이전트가 사용할 provider를 이 서버 전체에 하나로 연결합니다.",
     "자격증명은 이 서버에만 저장되고 응답으로 다시 내려오지 않습니다. 저장한 뒤에는 등록 여부와 마지막 4자리만 보입니다.",
@@ -449,6 +454,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
   if (query.isPending) {
     return (
       <SectionShell title="AI 연결" lines={lines}>
+        {subscriptionEntry}
         <Skeleton ready={false} rows={4} />
       </SectionShell>
     );
@@ -457,6 +463,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
   if (query.isError) {
     return (
       <SectionShell title="AI 연결" lines={lines}>
+        {subscriptionEntry}
         {isOperatorDenied(query.error) ? (
           <OperatorNotice
             who="provider 연결은 이 서버의 운영자만 바꿀 수 있습니다."
@@ -560,6 +567,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
 
   return (
     <SectionShell title="AI 연결" lines={lines}>
+      {subscriptionEntry}
       {!link.configured && !editing && (
         <EmptyInvite
           headline="에이전트가 쓸 AI를 연결하세요."
