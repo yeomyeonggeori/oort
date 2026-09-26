@@ -582,14 +582,8 @@ async function flowFirstAgent(browser, origin, scheme) {
   }
 }
 
-async function flowPhoneLink(browser, origin, scheme) {
-  const { context, page } = await newPhonePage(browser, scheme);
-  await login(page, origin);
-  await page.evaluate(() => sessionStorage.setItem("momo.web.phoneLinkFirstRun.v1", "pending"));
-  await page.reload({ waitUntil: "networkidle" });
-  await measureScene(page, scheme, { name: "phone-link", ready: "onboarding-phone-link" });
-  await context.close();
-}
+// 로그인 뒤 「폰에서도 쓰기」 전체 화면은 #2818(ADR-0193 D7)에서 첫 대화 채널
+// 카드가 됐다. 폭 390 캡처는 scripts/capture-phone-link-card.mjs가 찍는다.
 
 async function main() {
   if (!PROFILE) throw new Error(`Playwright device profile missing: ${PROFILE_NAME}`);
@@ -615,7 +609,6 @@ async function main() {
         await flowJoin(browser, preview.origin, scheme);
         await flowClaim(browser, preview.origin, scheme);
         await flowFirstAgent(browser, preview.origin, scheme);
-        await flowPhoneLink(browser, preview.origin, scheme);
       }
     } finally {
       await browser.close();

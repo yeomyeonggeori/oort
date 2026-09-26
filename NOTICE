@@ -39,6 +39,10 @@ scripts/check_npm_licenses.mjs; direct phone dependencies that an ADR
 introduced are named in legal/THIRD_PARTY_NOTICES.md ("Phone client
 direct additions"), currently expo-blur (MIT, ADR-0189) and the Lucide
 icon paths (ISC) rasterized into clients/mobile/src/design/icons.
+Direct desktop dependencies an ADR introduced are named there too
+("Desktop client direct additions"), currently portable-pty (MIT,
+ADR-0190) and libc (MIT OR Apache-2.0); the Tauri desktop Cargo graph
+is license-gated by scripts/check_cargo_licenses.sh.
 
 Named runtime companions operators actually run next to these images:
 

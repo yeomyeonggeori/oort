@@ -2,7 +2,11 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LoginResponse } from "@momo/core/lib/api";
-import { PHONE_LINK_FIRST_RUN_KEY } from "@/features/auth/phoneLinkFirstRunStore";
+import {
+  clearPhoneLinkCardForTests,
+  phoneLinkCardKey,
+  readPhoneLinkCard,
+} from "./phoneLinkCardStore";
 import { clearAllFirstAgentMarkers, firstAgentIsPending } from "./firstAgentStore";
 import { clearFreshSignup, peekFreshSignup } from "./freshSignup";
 import { peekKickoffSettled, resetKickoffHoldForTests } from "./firstRunGate";
@@ -31,6 +35,7 @@ const session: LoginResponse = {
 
 function reset() {
   sessionStorage.clear();
+  clearPhoneLinkCardForTests(session.member.workspaceId);
   clearAllFirstAgentMarkers();
   clearFreshSignup();
   resetKickoffHoldForTests();
@@ -65,11 +70,11 @@ describe("recordFreshSignupFirstRun (#2301)", () => {
     expect(peekKickoffSettled()).toBe(true);
     const keys = recordWrites(() => recordFreshSignupFirstRun(session));
     expect(keys).toEqual([
-      PHONE_LINK_FIRST_RUN_KEY,
+      phoneLinkCardKey(session.member.workspaceId),
       FIRST_AGENT_PENDING_SLOT,
       FRESH_SIGNUP_SLOT,
     ]);
-    expect(sessionStorage.getItem(PHONE_LINK_FIRST_RUN_KEY)).toBe("pending");
+    expect(readPhoneLinkCard(session.member.workspaceId)).toBe("pending");
     expect(firstAgentIsPending(session.member.workspaceId)).toBe(true);
     expect(peekFreshSignup()).toEqual({
       workspaceId: session.member.workspaceId,
@@ -82,7 +87,10 @@ describe("recordFreshSignupFirstRun (#2301)", () => {
     const keys = recordWrites(() =>
       recordFirstRunPending(session.member.workspaceId)
     );
-    expect(keys).toEqual([PHONE_LINK_FIRST_RUN_KEY, FIRST_AGENT_PENDING_SLOT]);
+    expect(keys).toEqual([
+      phoneLinkCardKey(session.member.workspaceId),
+      FIRST_AGENT_PENDING_SLOT,
+    ]);
     expect(firstAgentIsPending(session.member.workspaceId)).toBe(true);
     expect(peekFreshSignup()).toBeNull();
     expect(peekKickoffSettled()).toBe(true);

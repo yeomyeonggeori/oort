@@ -10,7 +10,10 @@ import { applyLogin, clearSession } from "@/lib/session";
 import { useRestoredSession } from "@/app/session";
 import { clearRecentServers } from "./recentServers";
 import { ConnectPage } from "./ConnectPage";
-import { PHONE_LINK_FIRST_RUN_KEY } from "./phoneLinkFirstRunStore";
+import {
+  clearPhoneLinkCardForTests,
+  readPhoneLinkCard,
+} from "@/features/welcome/phoneLinkCardStore";
 import { firstAgentIsPending } from "@/features/welcome/firstAgentStore";
 import { releaseSessionRestore, holdSessionRestore, sessionRestoreHeld } from "./onboardingSessionHold";
 
@@ -116,7 +119,7 @@ beforeEach(() => {
   clearSession();
   setServerBase(null);
   clearRecentServers();
-  sessionStorage.removeItem(PHONE_LINK_FIRST_RUN_KEY);
+  clearPhoneLinkCardForTests(session.member.workspaceId);
   sessionStorage.removeItem(FRESH_SIGNUP_SLOT);
   window.history.replaceState(null, "", "/");
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -649,7 +652,7 @@ describe("D1′ 초대 수락 한 화면 (#2810 OB2-4)", () => {
     await vi.waitFor(() => expect(onLoggedIn).toHaveBeenCalledTimes(1));
     expect(fetchRoster).toHaveBeenCalledWith(session.member.workspaceId);
     expect(firstAgentIsPending(session.member.workspaceId)).toBe(false);
-    expect(sessionStorage.getItem(PHONE_LINK_FIRST_RUN_KEY)).toBe("pending");
+    expect(readPhoneLinkCard(session.member.workspaceId)).toBe("pending");
   });
 
   it("keeps AI 연결 when the team has no active agent, or when the directory did not answer", async () => {
