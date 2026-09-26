@@ -33,14 +33,19 @@ ALTER TABLE notification_rule
   ADD COLUMN presence_prev_dnd       boolean     NULL,
   ADD COLUMN presence_prev_dnd_until timestamptz NULL;
 
+-- 모양 CHECK는 기억 컬럼(새 코드만 쓴다)에만 건다. `dnd_until`/`presence_dnd_until`
+-- 에는 걸지 않는다: 이전 digest로 롤백하면 v0.1.10 서버가 이 스키마 위에서 뜨고,
+-- 그 서버의 `PUT notification-rules {dnd:false}`와 `PUT presence {status:auto}`는
+-- 새 컬럼을 모른 채 게이트만 끈다. CHECK가 있으면 두 해제 경로가 위반으로 500이
+-- 되어 사용자가 방해 금지·일시 중지에서 빠져나올 수 없다. 게이트(`dnd`,
+-- `presence_status`)가 꺼진 행 옆에 남은 기한은 무해하다 — 모든 reader가 게이트를
+-- 먼저 보고, 새 코드는 쓸 때 정규화한다(dnd=false → NULL, status≠dnd → NULL).
 ALTER TABLE notification_rule
-  ADD CONSTRAINT notification_rule_dnd_until_ck
-    CHECK (dnd_until IS NULL OR dnd),
   ADD CONSTRAINT notification_rule_presence_prev_ck
     CHECK (presence_prev_dnd_until IS NULL OR presence_prev_dnd IS TRUE);
 
 COMMENT ON COLUMN notification_rule.dnd_until IS
-  'ADR-0124 증보 2. 알림 일시 중지 만료. NULL=기한 없음. 판정 시점 비교(lazy), sweeper 없음.';
+  'ADR-0124 증보 2. 알림 일시 중지 만료. NULL=기한 없음. dnd=true일 때만 의미가 있다. 판정 시점 비교(lazy), sweeper 없음.';
 COMMENT ON COLUMN notification_rule.presence_prev_dnd IS
   'ADR-0124 증보 2 묶음 기억. 방해 금지로 켜기 전 dnd 값. NULL=묶음 없음.';
 COMMENT ON COLUMN notification_rule.presence_prev_dnd_until IS
@@ -49,9 +54,5 @@ COMMENT ON COLUMN notification_rule.presence_prev_dnd_until IS
 ALTER TABLE member
   ADD COLUMN presence_dnd_until timestamptz NULL;
 
-ALTER TABLE member
-  ADD CONSTRAINT member_presence_dnd_until_ck
-    CHECK (presence_dnd_until IS NULL OR presence_status = 'dnd');
-
 COMMENT ON COLUMN member.presence_dnd_until IS
-  'ADR-0124 증보 2. 선언 상태 방해 금지 만료. NULL=기한 없음. 읽기 경계에서 지난 기한의 dnd는 auto로 투영.';
+  'ADR-0124 증보 2. 선언 상태 방해 금지 만료. NULL=기한 없음. presence_status=dnd일 때만 의미가 있다. 읽기 경계에서 지난 기한의 dnd는 auto로 투영.';

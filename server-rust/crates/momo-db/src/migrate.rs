@@ -436,7 +436,9 @@ mod tests {
     /// 090 is #2850's notification pause expiry and DND bundle (ADR-0124 증보
     /// 2): `notification_rule` gains `dnd_until` and the bundle memory
     /// (`presence_prev_dnd`, `presence_prev_dnd_until`), `member` gains
-    /// `presence_dnd_until`, each with a shape CHECK. Both tables stay under
+    /// `presence_dnd_until`; only the bundle memory carries a shape CHECK (the
+    /// expiry columns carry none so a rolled-back v0.1.10 can still clear DND
+    /// and the pause). Both tables stay under
     /// their existing FORCE RLS policy; no table or policy is added.
     /// schema_v0.sql is not modified.
     #[test]

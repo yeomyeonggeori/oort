@@ -100,10 +100,10 @@ MOMO-477 단일 goal: `018_notification_pref` migration((workspace, member, chan
 
 ### D9. 저장·API
 
-- migration `090_notification_rule_dnd_until`: `notification_rule.dnd_until`, `presence_prev_dnd`, `presence_prev_dnd_until`, `member.presence_dnd_until`과 모양 CHECK. 새 테이블은 없다. 두 테이블 모두 기존 RLS FORCE 정책 아래 있다.
+- migration `090_notification_rule_dnd_until`: `notification_rule.dnd_until`, `presence_prev_dnd`, `presence_prev_dnd_until`, `member.presence_dnd_until`. 모양 CHECK는 기억 컬럼에만 건다. 기한 컬럼에는 걸지 않는다 — 이전 digest로 롤백한 v0.1.10 서버가 새 컬럼을 모른 채 게이트(`dnd`, `presence_status`)만 끄는 해제 쓰기가 위반으로 막히지 않게 하기 위해서다. 게이트가 꺼진 행의 기한은 모든 reader가 무시하고, 새 코드는 쓸 때 NULL로 정규화한다. 롤백 중 잔여 강등: 구 판정은 `dnd_until`을 모르므로 기한 있는 일시 중지는 「끌 때까지」가 된다(끌 수는 있다). 새 테이블은 없다. 두 테이블 모두 기존 RLS FORCE 정책 아래 있다.
 - `GET/PUT /v1/workspaces/{ws}/notification-rules`: 요청에 `dndUntilMs`(선택)를 더한다. 생략하면 진행 중인 기한을 유지하고, `null`이면 기한 없음, 값은 미래여야 한다(아니면 400). `dnd=false`면 기한을 지운다. 응답에 `dndUntilMs`(진행 중일 때만 값, 아니면 null)를 더하고 `dnd`는 유효 값이다. audit 페이로드에 `dnd_until_ms`를 더한다.
 - `PUT /v1/workspaces/{ws}/presence`: 요청에 `dndUntilMs`(선택, `status=dnd`에서만 값 허용, 미래여야 함)를 더한다. 응답과 `type: presence` 브로드캐스트(`dnd_until_ms`)에 진행 중인 기한을 싣는다. 기한이 지난 방해 금지는 `auto`로 답한다.
-- 로스터 행에 `dndUntilMs`(진행 중일 때만)를 싣는다. 만료 시각에는 이벤트가 없으므로 동료 클라이언트가 이 값으로 표시를 내린다.
+- 로스터 행에 `dndUntilMs`(진행 중일 때만)를 싣는다. 만료 시각에는 이벤트가 없으므로 동료 클라이언트가 이 값으로 표시를 내린다. 동료에게 보이는 것은 선언 상태의 기한(`member.presence_dnd_until`)뿐이다. 이것은 본인이 남에게 보이라고 고른 표시의 일부이고, ADR-0176 `statusExpiresAtMs`가 로스터에 실리는 선례와 같다. 합집합으로 더 길어질 수 있는 사적 `notification_rule.dnd_until`은 본인 응답에만 있다. 이 필드를 모르는 구 클라이언트는 만료 뒤 로스터 재조회나 다음 브로드캐스트까지 방해 금지 표시를 유지한다(재조회 시 서버가 `auto`로 투영해 스스로 풀린다).
 - audit: `PUT notification-rules`는 기존대로 `notification_rule.updated`를 남긴다. presence 쓰기 안의 묶음은 presence의 무감사 관례(ADR-0176, 과감사 금지)를 따라 audit 행을 남기지 않는다.
 - 클라이언트 문구: 방해 금지 설명에 「알림도 함께 멈춰요」. 시간 선택 UI(30분, 1시간, 내일까지, 직접)는 uxui 후속 이슈다.
 

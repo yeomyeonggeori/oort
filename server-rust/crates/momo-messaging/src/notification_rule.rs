@@ -103,19 +103,50 @@ impl StoredRule {
     }
 }
 
-/// Read (and row-lock, when `lock`) the stored rule together with the database
+/// How [`load_rule`] reads the row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Load {
+    /// Plain read (GET).
+    Read,
+    /// Row-lock an existing row; an absent row stays absent (release: nothing
+    /// to restore, nothing written).
+    Lock,
+    /// Insert the default row if absent, then row-lock it (every path that
+    /// writes), so two first writers serialize instead of the later upsert
+    /// overwriting the earlier one's switches.
+    Materialize,
+}
+
+/// Read (and row-lock, per `mode`) the stored rule together with the database
 /// clock, so every expiry comparison in one transaction uses the same `now()`
 /// the judgment SQL uses.
 async fn load_rule(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
-    lock: bool,
+    mode: Load,
 ) -> Result<(StoredRule, DateTime<Utc>), DbError> {
     let now: DateTime<Utc> = sqlx::query_scalar("SELECT now()")
         .fetch_one(&mut *conn)
         .await?;
-    let sql = if lock {
+    if mode == Load::Materialize {
+        // `FOR UPDATE` on an absent row locks nothing: two first writers would
+        // both compute from the defaults and the later upsert would overwrite
+        // the earlier one's switches. Materialize the default row first so the
+        // lock below always has a row to hold (second writer waits here).
+        // Today the presence path is also serialized by its member `FOR
+        // UPDATE` against the FK `KEY SHARE` a first rule INSERT takes; this
+        // guard does not lean on that.
+        sqlx::query(
+            "INSERT INTO notification_rule (workspace_id, member_id) VALUES ($1, $2) \
+             ON CONFLICT (workspace_id, member_id) DO NOTHING",
+        )
+        .bind(workspace_id)
+        .bind(member_id)
+        .execute(&mut *conn)
+        .await?;
+    }
+    let sql = if mode != Load::Read {
         "SELECT dnd, dnd_until, mention_overrides_mute, presence_prev_dnd, presence_prev_dnd_until \
            FROM notification_rule \
           WHERE workspace_id = $1 AND member_id = $2 \
@@ -180,7 +211,7 @@ pub async fn get_notification_rule_in_tx(
     workspace_id: Uuid,
     member_id: Uuid,
 ) -> Result<NotificationRule, DbError> {
-    let (stored, now) = load_rule(conn, workspace_id, member_id, false).await?;
+    let (stored, now) = load_rule(conn, workspace_id, member_id, Load::Read).await?;
     Ok(stored.effective(now))
 }
 
@@ -203,7 +234,7 @@ pub async fn set_notification_rule_in_tx(
     update: impl Into<NotificationRuleUpdate>,
 ) -> Result<NotificationRule, DbError> {
     let update = update.into();
-    let (current, now) = load_rule(conn, workspace_id, member_id, true).await?;
+    let (current, now) = load_rule(conn, workspace_id, member_id, Load::Materialize).await?;
     let dnd_until = if !update.dnd {
         None
     } else {
@@ -271,7 +302,7 @@ pub(crate) async fn engage_presence_dnd_bundle_in_tx(
     member_id: Uuid,
     dnd_until: Option<DateTime<Utc>>,
 ) -> Result<NotificationRule, DbError> {
-    let (current, now) = load_rule(conn, workspace_id, member_id, true).await?;
+    let (current, now) = load_rule(conn, workspace_id, member_id, Load::Materialize).await?;
     // Snapshot once. Re-snapshotting while the bundle is in force would capture
     // the bundled value itself and releasing DND would then keep the pause on.
     let (prev_dnd, prev_until) = match current.prev_dnd {
@@ -297,7 +328,7 @@ pub(crate) async fn release_presence_dnd_bundle_in_tx(
     workspace_id: Uuid,
     member_id: Uuid,
 ) -> Result<NotificationRule, DbError> {
-    let (current, now) = load_rule(conn, workspace_id, member_id, true).await?;
+    let (current, now) = load_rule(conn, workspace_id, member_id, Load::Lock).await?;
     let Some(prev_dnd) = current.prev_dnd else {
         return Ok(current.effective(now));
     };

@@ -29,6 +29,8 @@
 //! | `re_choosing_dnd_does_not_resnapshot_the_bundled_value` | re-snapshot on every engage |
 //! | `an_explicit_pause_edit_breaks_the_bundle` | keep `presence_prev_*` on a pause-changing rule PUT, or engage on every DND write |
 //! | `the_bundle_rolls_back_with_the_presence_write` | write the pause on a second connection/transaction |
+//! | `a_rolled_back_server_can_still_clear_a_timed_dnd` | put back a CHECK tying `dnd_until`/`presence_dnd_until` to its gate in 090 |
+//! | `a_first_write_race_does_not_drop_the_mention_exception` | engage with `Load::Lock` AND drop the member `FOR UPDATE` (two guards: either alone keeps it green) |
 //! | `an_expired_dnd_reads_as_auto_everywhere` | drop the lazy expiry from `effective_presence` or the roster `CASE` |
 //!
 //! `#[ignore]` because it needs a real Postgres. Run:
@@ -1062,4 +1064,171 @@ async fn an_expired_dnd_reads_as_auto_everywhere() {
     .await;
     assert_eq!(bundle_memory(&su, human).await, Some((None, None)));
     assert_eq!(rule(&app, workspace, human).await, OFF);
+}
+
+/// Rollback safety (review #2901 H1): 090 is forward-only and a rollback
+/// redeploys the previous digest, so v0.1.10 runs on this schema. Its two exits
+/// — `PUT notification-rules {dnd:false}` and `PUT presence {status:auto}` —
+/// know nothing of the expiry columns and only turn the gate off. Replayed here
+/// with v0.1.10's exact SQL, both must succeed on a member in a timed, bundled
+/// DND; a shape CHECK on the expiry columns would make both a 500 and trap the
+/// member. The residual downgrade (old judgment ignores `dnd_until`, so a timed
+/// pause becomes "until turned off") is accepted and documented.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a real Postgres"]
+async fn a_rolled_back_server_can_still_clear_a_timed_dnd() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let workspace = seed_workspace(&su).await;
+    let human = seed_member(&su, workspace, "human").await;
+
+    let until = at(Duration::hours(1));
+    declare(
+        &app,
+        workspace,
+        human,
+        PresenceStatus::Dnd,
+        StatusPatch::Set(Some(until)),
+        CustomStatusPatch::default(),
+    )
+    .await;
+
+    // v0.1.10 `PUT notification-rules {dnd:false, mentionOverridesMute:false}`.
+    with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            sqlx::query(
+                "INSERT INTO notification_rule \
+                   (workspace_id, member_id, dnd, mention_overrides_mute) \
+                 VALUES ($1, $2, $3, $4) \
+                 ON CONFLICT (workspace_id, member_id) \
+                 DO UPDATE SET dnd = EXCLUDED.dnd, \
+                               mention_overrides_mute = EXCLUDED.mention_overrides_mute, \
+                               updated_at = now()",
+            )
+            .bind(workspace)
+            .bind(human)
+            .bind(false)
+            .bind(false)
+            .execute(&mut *conn)
+            .await?;
+            Ok::<_, DbError>(())
+        })
+    })
+    .await
+    .expect("v0.1.10 pause-off write must succeed on the 090 schema");
+
+    // v0.1.10 `PUT presence {status:auto}` (status-only body: no custom patch).
+    let returned: Option<String> = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            let row: Option<String> = sqlx::query_scalar(
+                "UPDATE member \
+                    SET presence_status = $1::presence_status, \
+                        status_emoji = CASE WHEN $4 THEN $5 ELSE status_emoji END, \
+                        status_text = CASE WHEN $6 THEN $7 ELSE status_text END, \
+                        status_expires_at = CASE WHEN $8 THEN $9 ELSE status_expires_at END, \
+                        updated_at = now() \
+                  WHERE id = $2 \
+                    AND workspace_id = $3 \
+                    AND kind = 'human' \
+                    AND deleted_at IS NULL \
+                RETURNING presence_status::text",
+            )
+            .bind("auto")
+            .bind(human)
+            .bind(workspace)
+            .bind(false)
+            .bind(None::<String>)
+            .bind(false)
+            .bind(None::<String>)
+            .bind(false)
+            .bind(None::<DateTime<Utc>>)
+            .fetch_optional(&mut *conn)
+            .await?;
+            Ok::<_, DbError>(row)
+        })
+    })
+    .await
+    .expect("v0.1.10 leave-DND write must succeed on the 090 schema");
+    assert_eq!(returned.as_deref(), Some("auto"));
+
+    // v0.1.10 judgment predicate now delivers.
+    let old_delivers: bool = sqlx::query_scalar(
+        "SELECT COALESCE(dnd, false) = false FROM notification_rule WHERE member_id = $1",
+    )
+    .bind(human)
+    .fetch_one(&su)
+    .await
+    .expect("old judgment predicate");
+    assert!(old_delivers, "the rolled-back server must deliver again");
+
+    // Rolled forward again, the stale expiry beside a false gate is harmless.
+    assert_eq!(rule(&app, workspace, human).await, OFF);
+    let presence = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move { declared_presence_for(conn, human).await })
+    })
+    .await
+    .expect("read")
+    .expect("human");
+    assert_eq!(presence.status, PresenceStatus::Auto);
+    assert_eq!(presence.dnd_until, None);
+}
+
+/// Review #2901 M1: a member with no rule row. Device A's first rule PUT
+/// (mention exception on) is open; device B chooses DND at the same moment.
+/// `FOR UPDATE` on an absent row locks nothing, so without materializing the
+/// row first B would compute from the defaults and its upsert, landing after
+/// A commits, would silently reset the mention exception.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a real Postgres"]
+async fn a_first_write_race_does_not_drop_the_mention_exception() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let workspace = seed_workspace(&su).await;
+    let human = seed_member(&su, workspace, "human").await;
+
+    let mut tx_a = app.begin().await.expect("begin A");
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(workspace.to_string())
+        .execute(&mut *tx_a)
+        .await
+        .expect("bind A");
+    set_notification_rule_in_tx(
+        &mut tx_a,
+        workspace,
+        human,
+        NotificationRule {
+            mention_overrides_mute: true,
+            ..OFF
+        },
+    )
+    .await
+    .expect("A writes, uncommitted");
+
+    let app_b = app.clone();
+    let b = tokio::spawn(async move {
+        declare(
+            &app_b,
+            workspace,
+            human,
+            PresenceStatus::Dnd,
+            StatusPatch::Absent,
+            CustomStatusPatch::default(),
+        )
+        .await
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    tx_a.commit().await.expect("commit A");
+    b.await.expect("B joins");
+
+    assert_eq!(
+        rule(&app, workspace, human).await,
+        NotificationRule {
+            dnd: true,
+            dnd_until: None,
+            mention_overrides_mute: true,
+        },
+        "B must build on A's committed row, not overwrite it with defaults"
+    );
 }
