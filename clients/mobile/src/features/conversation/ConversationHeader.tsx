@@ -232,6 +232,9 @@ const buildStyles = (color: Palette) =>
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: color.surface,
+      // 다크에서 surface 원이 유리 띠에 녹아 「원형 버튼」이라는 모양이 약했다(검수 L-7).
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: color.border,
       boxShadow: color.elevationRest,
     },
     circlePressed: {backgroundColor: color.surfacePressed},

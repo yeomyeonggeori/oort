@@ -92,7 +92,6 @@ import {
 } from 'react-native';
 import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {usePalette, useStyles} from '../../design/theme';
-import {GlassSurface} from '../../design/glass';
 import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
 import {COPY_RECEIPT_MS, copyText} from './copy';
 import {MessageBody, bodyAffordances, openLink} from './MessageBody';
@@ -417,13 +416,13 @@ export function FloatingDayPill({
       importantForAccessibility="no-hide-descendants"
       style={styles.dayFloat}
       testID="floating-day">
-      <GlassSurface radius={radius.pill} style={styles.dayPillFloat}>
+      <View style={styles.dayPillFloat}>
         <DividerLabel
           segments={dayDividerSegments(atMs, nowMs)}
           tone={DIVIDER_TONE.day}
           strong
         />
-      </GlassSurface>
+      </View>
     </View>
   );
 }
@@ -857,6 +856,7 @@ function StepRow({
       <StepMark state={state} />
       <Text
         style={[styles.stepLabel, state === 'run' && styles.stepLabelRun]}
+        lineBreakStrategyIOS="hangul-word"
         numberOfLines={2}>
         {label}
       </Text>
@@ -1684,6 +1684,14 @@ function AgentCard({
   }
 
   const cost = card.kind === 'turn' ? card.cost : null;
+  // 도구 카드의 단계 줄이 이미 말한 값(도구 이름·대상)은 아래 줄에서 다시 세우지
+  // 않는다(DS2-4 검수 M-6). 단계 줄에 없는 값만 남는다 — 버리는 것이 아니라 중복을
+  // 걷는다. 턴 카드는 그대로다.
+  const stepLine = card.kind === 'tool' ? frameSentence(card.frame) : null;
+  const detailRows =
+    stepLine === null
+      ? card.detail.rows
+      : card.detail.rows.filter(row => !stepLine.includes(row.value));
   return (
     <AgentCardFrame testID="agent-card">
       {card.kind === 'tool' ? (
@@ -1737,9 +1745,9 @@ function AgentCard({
             .join(' · ')}
         </Text>
       ) : null}
-      {card.detail.rows.length > 0 ? (
+      {detailRows.length > 0 || card.detail.withheld > 0 ? (
         <View style={styles.detailRows}>
-          {card.detail.rows.map(row => (
+          {detailRows.map(row => (
             <View key={row.label} style={styles.detailRow}>
               <Text style={styles.detailLabel}>{row.label}</Text>
               <Text style={styles.detailValue} numberOfLines={3}>
@@ -3750,8 +3758,13 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     right: 0,
     alignItems: 'center',
   },
-  /** 떠 있는 알약 — 흐림 + 틴트(`GlassSurface`) 위에 선과 sh1. */
+  /**
+   * 떠 있는 알약 — **불투명** surface 위에 선과 sh1 (DS2-4 검수 B-1). 시안은 유리지만,
+   * 12pt 글자가 얇은 유리 위에 서면 밑의 16pt 본문 획과 섞여 둘 다 읽히지 않았다
+   * (실데이터 캡처). Buzz 의 알약도 불투명에 가까운 흰 바탕이다.
+   */
   dayPillFloat: {
+    backgroundColor: color.surface,
     paddingVertical: CONV.dayPadY,
     paddingHorizontal: CONV.dayPadX,
     borderRadius: radius.pill,

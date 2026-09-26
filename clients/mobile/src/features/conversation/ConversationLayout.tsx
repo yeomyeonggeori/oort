@@ -1,7 +1,7 @@
 import React from 'react';
 import {StyleSheet, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {type Palette} from '../../design/tokens';
+import {space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {KeyboardPane} from '../../lib/keyboardPane';
 
@@ -101,6 +101,9 @@ import {KeyboardPane} from '../../lib/keyboardPane';
 // that prop changes and would take the property back from the native side.
 // =============================================================================
 
+/** 올라온 키보드와 도크 바닥 사이의 틈(Buzz·iMessage 의 숨 쉴 틈). */
+export const KEYBOARD_GAP = space.sm;
+
 export function ConversationLayout({
   list,
   composer,
@@ -120,7 +123,11 @@ export function ConversationLayout({
           is the only thing this side still decides: how much of the keyboard's
           height is already paid for as padding. */}
       <KeyboardPane
-        bottomInset={insets.bottom}
+        // 알약 컴포저가 키보드에 붙지 않게 틈을 남긴다(DS2-4 검수 M-1): 네이티브는
+        // `키보드 높이 - bottomInset` 만큼 올리므로, 인셋을 틈만큼 덜 넘기면 그만큼 더
+        // 올라간다. 쉬는 상태의 여백(패딩)은 그대로 상수다 — 두 규칙(움직이는 것은
+        // 변환, 안 움직이는 것은 상수)이 둘 다 산다.
+        bottomInset={Math.max(0, insets.bottom - KEYBOARD_GAP)}
         style={[styles.root, {paddingBottom: insets.bottom}]}
         testID="conversation-layout">
         <View style={styles.list}>{list}</View>

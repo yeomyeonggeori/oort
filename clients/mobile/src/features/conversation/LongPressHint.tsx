@@ -1,5 +1,5 @@
 import React, {useCallback, useEffect, useState} from 'react';
-import {Image, Pressable, StyleSheet, Text, View} from 'react-native';
+import {AccessibilityInfo, Image, Pressable, StyleSheet, Text, View} from 'react-native';
 import {ds2Radius, font, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
 import {usePalette, useStyles} from '../../design/theme';
@@ -82,8 +82,28 @@ export function LongPressHint({
   const palette = usePalette();
   useEffect(() => {
     if (!visible) return;
-    const timer = setTimeout(onDismiss, LONG_PRESS_HINT_MS);
-    return () => clearTimeout(timer);
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    // 화면을 보지 않는 사람에게는 **말하고, 스스로 닫지 않는다**(DS2-4 검수 M-5,
+    // WCAG 2.2.1). 초점이 닿기 전에 사라지는 안내는 안내가 아니다 — 누르거나 길게
+    // 누르기를 한 번 쓰면 닫힌다.
+    AccessibilityInfo.isScreenReaderEnabled().then(
+      reader => {
+        if (!alive) return;
+        if (reader) {
+          AccessibilityInfo.announceForAccessibility(HINT);
+        } else {
+          timer = setTimeout(onDismiss, LONG_PRESS_HINT_MS);
+        }
+      },
+      () => {
+        if (alive) timer = setTimeout(onDismiss, LONG_PRESS_HINT_MS);
+      },
+    );
+    return () => {
+      alive = false;
+      if (timer !== null) clearTimeout(timer);
+    };
   }, [visible, onDismiss]);
   if (!visible) return null;
   return (

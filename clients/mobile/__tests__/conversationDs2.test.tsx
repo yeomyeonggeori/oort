@@ -4,7 +4,7 @@ import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {act, cleanup, fireEvent, render, screen} from '@testing-library/react-native';
 import React from 'react';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
-import {ActionSheetIOS, StyleSheet} from 'react-native';
+import {AccessibilityInfo, ActionSheetIOS, StyleSheet} from 'react-native';
 
 import {darkPalette, lightPalette, slopTo, TOUCH_TARGET} from '../src/design/tokens';
 import {FixedScheme} from '../src/design/theme';
@@ -279,11 +279,13 @@ describe('길게 누르기 안내 — 상주 줄이 아니라 첫 1회 코치마
     expect(screen.queryByTestId('long-press-hint')).toBeNull();
   });
 
-  it('스스로 물러난다', () => {
+  it('스스로 물러난다', async () => {
     jest.useFakeTimers();
     try {
+      jest.spyOn(AccessibilityInfo, 'isScreenReaderEnabled').mockResolvedValue(false);
       __setNonSecretStore(memoryStore() as never);
       render(<Host />);
+      await act(async () => {});
       expect(screen.getByTestId('long-press-hint')).toBeTruthy();
       act(() => {
         jest.advanceTimersByTime(LONG_PRESS_HINT_MS - 1);
@@ -295,6 +297,27 @@ describe('길게 누르기 안내 — 상주 줄이 아니라 첫 1회 코치마
       expect(screen.queryByTestId('long-press-hint')).toBeNull();
     } finally {
       jest.useRealTimers();
+    }
+  });
+
+  it('VoiceOver 가 켜져 있으면 말하고, 스스로 닫지 않는다 (WCAG 2.2.1)', async () => {
+    jest.useFakeTimers();
+    try {
+      jest.spyOn(AccessibilityInfo, 'isScreenReaderEnabled').mockResolvedValue(true);
+      const announce = jest
+        .spyOn(AccessibilityInfo, 'announceForAccessibility')
+        .mockImplementation(() => {});
+      __setNonSecretStore(memoryStore() as never);
+      render(<Host />);
+      await act(async () => {});
+      expect(announce).toHaveBeenCalledWith('메시지를 길게 누르면 답글·반응·고치기');
+      act(() => {
+        jest.advanceTimersByTime(LONG_PRESS_HINT_MS * 3);
+      });
+      expect(screen.getByTestId('long-press-hint')).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+      jest.restoreAllMocks();
     }
   });
 
@@ -338,6 +361,25 @@ describe('떠 있는 날짜 알약 — 창 맨 위 행이 속한 날', () => {
   it('아무것도 안 보이면 없다', () => {
     expect(floatingDayFor(ITEMS, [])).toBeNull();
     expect(floatingDayFor(ITEMS, ['gone'])).toBeNull();
+  });
+});
+
+describe('떠 있는 날짜 알약은 스크롤 중에만 선다 (검수 B-1)', () => {
+  it('쉬는 화면에서는 없다 — Timeline 이 손가락·관성 신호로만 세운다', () => {
+    const code = require('node:fs').readFileSync(
+      require('node:path').resolve(__dirname, '../src/features/conversation/Timeline.tsx'),
+      'utf8',
+    );
+    expect(code).toContain('dayPillLive && floatingDay !== null');
+    expect(code).toMatch(/onMomentumScrollEnd=\{jumpPills \? releaseDayPill/);
+  });
+
+  it('알약 바탕이 불투명이다 — 밑 본문 획과 섞이지 않는다', () => {
+    const {FloatingDayPill} = jest.requireActual('../src/features/conversation/MessageRow');
+    render(<FloatingDayPill atMs={1_760_000_000_000} nowMs={1_760_000_000_000} />);
+    const pill = screen.getByTestId('floating-day', {includeHiddenElements: true});
+    const face = flatten((pill.children[0] as {props: {style: unknown}}).props.style);
+    expect(face.backgroundColor).toBe(darkPalette.surface);
   });
 });
 
@@ -393,6 +435,20 @@ describe('에이전트 카드 — 단계 표지(완료·진행·실패)는 있�
     );
     expect(screen.getByTestId('agent-card-steps')).toBeTruthy();
     expect(screen.getByTestId(`step-mark-${mark}`)).toBeTruthy();
+  });
+
+  it('단계 줄이 말한 도구·대상을 아래 줄에서 다시 세우지 않는다 (검수 M-6)', () => {
+    render(
+      <MessageRow
+        message={toolMessage('succeeded')}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={1_760_000_000_000}
+      />,
+    );
+    expect(screen.queryByText('github.search')).toBeNull();
+    expect(screen.getByText(/github\.search 실행/)).toBeTruthy();
   });
 
   it('카드 틀은 1.5 그라데이션 테두리 + r20 (시안 `.a-card`)', () => {

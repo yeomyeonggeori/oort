@@ -507,6 +507,16 @@ export function floatingDayFor(
   return null;
 }
 
+/**
+ * 떠 있는 날짜 알약이 손을 뗀 뒤 머무는 시간, ms (DS2-4 검수 B-1).
+ *
+ * owner 표의 사양은 「스크롤 **중** 상단 고정」이다. 첫 판은 맨 위 구분선이 창 밖이면
+ * 쉬는 화면에서도 늘 떠 있어서, 창 맨 위 줄의 글자를 영구히 덮었다. 이제 알약은
+ * 손가락이 목록을 잡는 순간 서고, 관성까지 멈춘 뒤 이만큼 머물다 물러난다 — 방금
+ * 어디까지 왔는지 읽을 틈이다.
+ */
+export const DAY_PILL_LINGER_MS = 1200;
+
 function sameFloatingDay(
   a: {key: string} | null,
   b: {key: string} | null,
@@ -1118,6 +1128,27 @@ function TimelineInner({
   const [relationState, setRelationState] =
     useState<DividerViewportRelation | null>(null);
   const [unreadLatched, setUnreadLatched] = useState(false);
+  /** 떠 있는 날짜 알약이 지금 서는가 — 스크롤 중(과 멈춘 뒤 잠깐)만 참이다. */
+  const [dayPillLive, setDayPillLive] = useState(false);
+  const dayPillTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdDayPill = useCallback(() => {
+    if (dayPillTimerRef.current !== null) clearTimeout(dayPillTimerRef.current);
+    dayPillTimerRef.current = null;
+    setDayPillLive(true);
+  }, []);
+  const releaseDayPill = useCallback(() => {
+    if (dayPillTimerRef.current !== null) clearTimeout(dayPillTimerRef.current);
+    dayPillTimerRef.current = setTimeout(() => {
+      dayPillTimerRef.current = null;
+      setDayPillLive(false);
+    }, DAY_PILL_LINGER_MS);
+  }, []);
+  useEffect(
+    () => () => {
+      if (dayPillTimerRef.current !== null) clearTimeout(dayPillTimerRef.current);
+    },
+    [],
+  );
   /** 떠 있는 날짜 알약의 날(`floatingDayFor`). 같은 날이면 상태를 바꾸지 않는다. */
   const [floatingDay, setFloatingDay] = useState<{key: string; atMs: number} | null>(
     null,
@@ -2138,12 +2169,15 @@ function TimelineInner({
     cancelJumpTravel,
     settleEntry,
     onReaderTookList,
+    holdDayPill,
   ]);
 
   /** 손가락이 떨어졌다 — 그 뒤의 따라가기 활강은 다시 제 핀을 건다 (#2686). */
   const onScrollEndDrag = useCallback(() => {
     fingerOnListRef.current = false;
-  }, []);
+    // 관성이 이어지면 `onMomentumScrollBegin` 이 다시 붙잡는다.
+    releaseDayPill();
+  }, [releaseDayPill]);
 
   // ===========================================================================
   // ## 따라가기 활강도 이 목록이 낸 이동이다 (#2686, 실측)
@@ -2768,6 +2802,9 @@ function TimelineInner({
       onScroll={onScroll}
       onScrollBeginDrag={onScrollBeginDrag}
       onScrollEndDrag={onScrollEndDrag}
+      // 떠 있는 날짜 알약만 관성을 본다(DS2-4 B-1) — 따라가기 판정은 여기 없다.
+      onMomentumScrollBegin={jumpPills ? holdDayPill : undefined}
+      onMomentumScrollEnd={jumpPills ? releaseDayPill : undefined}
       scrollEventThrottle={16}
       onContentSizeChange={onContentSizeChange}
       onLayout={onLayout}
@@ -2826,7 +2863,7 @@ function TimelineInner({
       {list}
       {/* 떠 있는 날짜 알약(DS2-4). 위 필(「안 읽은 곳으로」)과 같은 자리라, 그 필이
           서 있는 동안은 물러난다 — 할 일이 있는 필이 날짜보다 앞선다. */}
-      {floatingDay !== null && !showJumpUnread ? (
+      {dayPillLive && floatingDay !== null && !showJumpUnread ? (
         <FloatingDayPill atMs={floatingDay.atMs} nowMs={nowMs} />
       ) : null}
       {showJumpUnread ? (

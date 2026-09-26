@@ -1373,7 +1373,9 @@ export function Composer({
           // 답한다 — 그 분업과 그것이 구하지 못하는 띠는 이 파일의 「절 예산」
           // 머리말에 있다.
           placeholder={shownPlaceholder}
-          placeholderTextColor={palette.textFaint}
+          // 자리 글자가 이제 「@로 부르기」를 알리는 유일한 문장이다 — 시안의 @ 도구
+          // 버튼을 뺐으므로(DS2-4 검수 M-4). `textFaint` 는 알약 위 3.6~3.8:1 이었다.
+          placeholderTextColor={palette.textMuted}
           accessibilityLabel={placeholder ?? composerFieldLabel(channelLabel, recipient)}
           multiline
           // 이 상자에서 한국어가 **낱말 가운데서** 끊기지 않는다 (#1422 폰 몫).

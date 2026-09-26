@@ -324,7 +324,7 @@ export function ApprovalDecision({
 
   if (armed === null) {
     return (
-      <View style={styles.bar} testID={`${testIDPrefix}-actions`}>
+      <View style={[styles.bar, pill && styles.pillBar]} testID={`${testIDPrefix}-actions`}>
         {lead !== null ? <Sentence style={styles.lead}>{lead}</Sentence> : null}
         {execution !== null ? (
           <SpawnHostChoice
@@ -402,7 +402,7 @@ export function ApprovalDecision({
         );
 
   return (
-    <View style={styles.bar} testID={`${testIDPrefix}-confirm`}>
+    <View style={[styles.bar, pill && styles.pillBar]} testID={`${testIDPrefix}-confirm`}>
       <Sentence style={styles.consequence}>{consequence}</Sentence>
       {/* 픽커는 확정 화면에서도 자리를 지킨다. 사라지면 사람은 자기가 무엇을 고른
           채 확정하는지 볼 수 없고, 확인이 판단의 근거 옆에 있어야 한다는 이 파일의
@@ -542,6 +542,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   buttonInert: {opacity: 0.6},
   /** 시안 `.a-pill{border-radius:19px}` — 높이는 엄지 바닥 44 를 지킨다. */
   pillButton: {borderRadius: radius.pill},
+  /** 카드 안에서는 카드 패딩이 아래를 진다 — 인박스용 아래 여백을 겹치지 않는다(검수 L-2). */
+  pillBar: {paddingBottom: 0},
   /** `.a-pill.sec{background:var(--surface2);color:var(--ink)}`. */
   pillQuiet: {borderWidth: 0, backgroundColor: color.surfaceMuted},
   /** `.a-pill.pri{background:var(--primary);color:var(--onPrimary)}`. */
