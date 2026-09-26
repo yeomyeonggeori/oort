@@ -1,0 +1,36 @@
+/* =============================================================================
+ * 작업 공간 격자 (#2773). 분할 비율은 런타임 값이라 Tailwind 클래스로 적을 수
+ * 없고, 컴포넌트는 style 속성을 쓰지 않는다(SKILL §1). 그래서 비율은 ref가
+ * `--wb-share` 사용자 속성으로 걸고, 여기 규칙이 그것을 flex 몫으로 읽는다.
+ * 색은 쓰지 않는다. 색은 컴포넌트의 토큰 클래스가 진다.
+ * ========================================================================== */
+
+.wb-split {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0px;
+}
+
+.wb-split[data-axis="row"] {
+  flex-direction: row;
+}
+
+.wb-split[data-axis="column"] {
+  flex-direction: column;
+}
+
+/* 분할의 두 자식. 몫은 경계를 뺀 길이에서 나눈다(core computeGeometry와 같은 식). */
+.wb-share {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: var(--wb-share, 1) 1 0px;
+}
+
+/* 최대화: 칸은 트리 자리에 그대로 두고(터미널을 떼지 않는다) 격자 전체를 덮는다.
+ * 격자 뿌리가 포함 블록이다. 분할 상자는 position을 갖지 않는다. */
+.wb-maximized {
+  position: absolute;
+  inset: 0;
+}
