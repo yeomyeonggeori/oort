@@ -33,6 +33,8 @@ function member(id: string, kind: "human" | "agent", displayName: string): Roste
     channelCount: 0,
     channelIds: [],
     capabilities: [],
+    createdAtMs: 0,
+    updatedAtMs: 0,
   };
 }
 

@@ -39,6 +39,8 @@ function human(id: string, displayName: string): RosterMember {
     channelCount: 0,
     channelIds: [],
     capabilities: [],
+    createdAtMs: 0,
+    updatedAtMs: 0,
   };
 }
 
