@@ -193,8 +193,8 @@ pub async fn append_message_reference_in_tx(
     channel_id: Uuid,
     message_id: Uuid,
 ) -> Result<Vec<(Uuid, i64)>, DbError> {
-    let source_message_seq: i64 = sqlx::query_scalar(
-        "SELECT seq FROM message \
+    let (source_message_seq, source_author_member_id): (i64, Uuid) = sqlx::query_as(
+        "SELECT seq, author_member_id FROM message \
           WHERE workspace_id=$1 AND channel_id=$2 AND id=$3 FOR SHARE",
     )
     .bind(workspace_id)
@@ -215,7 +215,10 @@ pub async fn append_message_reference_in_tx(
            JOIN membership cm \
              ON cm.workspace_id=hc.workspace_id AND cm.member_id=hc.agent_member_id \
             AND cm.channel_id=$2 AND cm.left_at IS NULL \
+           JOIN agent a \
+             ON a.workspace_id=hc.workspace_id AND a.member_id=hc.agent_member_id \
           WHERE hc.workspace_id=$1 AND hc.agent_member_id=$3 AND hc.id=$4 \
+            AND (a.invocation_scope <> 'owner_only' OR a.owner_human_id=$5) \
             AND hc.status='active' AND hc.proved_at IS NOT NULL \
             AND t.kind='agent_bearer' \
             AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
@@ -234,6 +237,7 @@ pub async fn append_message_reference_in_tx(
     .bind(channel_id)
     .bind(agent_member_id)
     .bind(connection_id)
+    .bind(source_author_member_id)
     .fetch_all(&mut *conn)
     .await?;
 
@@ -313,10 +317,19 @@ pub async fn append_message_reference_in_tx(
 /// producer cannot widen delivery merely by asking a different question. The
 /// caller still passes each pair back into an append, which re-proves the
 /// authority under the same transaction rather than trusting this list.
+///
+/// ADR-0193 D4·D6 (#2815): an `owner_only` (subscription) agent is a recipient
+/// only of its owner's messages, and of nothing at all while the operator's
+/// kill switch is engaged. This is the path by which a thread reply — or any
+/// other message in an approved channel — reaches a hosted runtime (and, via
+/// the inbox counter, its doorbell), so it is where "a non-owner's message is
+/// not delivered" is enforced for everything that is not a mention job.
 pub async fn hosted_inbox_recipients_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     channel_id: Uuid,
+    author_member_id: Uuid,
+    subscription_agents_enabled: bool,
 ) -> Result<Vec<(Uuid, Uuid)>, DbError> {
     let rows: Vec<(Uuid, Uuid)> = sqlx::query_as(
         "SELECT hc.agent_member_id, hc.id \
@@ -330,7 +343,11 @@ pub async fn hosted_inbox_recipients_in_tx(
            JOIN membership cm \
              ON cm.workspace_id=hc.workspace_id AND cm.member_id=hc.agent_member_id \
             AND cm.channel_id=$2 AND cm.left_at IS NULL \
+           JOIN agent a \
+             ON a.workspace_id=hc.workspace_id AND a.member_id=hc.agent_member_id \
           WHERE hc.workspace_id=$1 \
+            AND (a.invocation_scope <> 'owner_only' \
+                 OR ($4 AND a.owner_human_id=$3)) \
             AND hc.status='active' AND hc.proved_at IS NOT NULL \
             AND t.kind='agent_bearer' \
             AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
@@ -347,6 +364,8 @@ pub async fn hosted_inbox_recipients_in_tx(
     )
     .bind(workspace_id)
     .bind(channel_id)
+    .bind(author_member_id)
+    .bind(subscription_agents_enabled)
     .fetch_all(&mut *conn)
     .await?;
     Ok(rows)
@@ -376,8 +395,16 @@ pub async fn fan_out_message_reference_in_tx(
     channel_id: Uuid,
     message_id: Uuid,
     author_member_id: Uuid,
+    subscription_agents_enabled: bool,
 ) -> Result<Vec<(Uuid, i64)>, DbError> {
-    let recipients = hosted_inbox_recipients_in_tx(conn, workspace_id, channel_id).await?;
+    let recipients = hosted_inbox_recipients_in_tx(
+        conn,
+        workspace_id,
+        channel_id,
+        author_member_id,
+        subscription_agents_enabled,
+    )
+    .await?;
     let mut appended = Vec::new();
     for (agent_member_id, connection_id) in recipients {
         if agent_member_id == author_member_id {

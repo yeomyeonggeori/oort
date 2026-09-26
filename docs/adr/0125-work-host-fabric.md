@@ -1,6 +1,7 @@
 # ADR-0125: Work Host Fabric — 세션이 앱 수명을 넘는다 (self-host workd + oort Cloud)
 
 - Status: **Accepted** (2026-07-19, 성재 — D1~D8 권고안 전체 승인. 파생 487~490은 0114 v0 배치(483~486) 랜딩 후 순차 발급)
+- 증보: 2026-09-26 — 원격 호스트 등록 경로(한 줄 설치·QR 페어링, 페어링 코드 초안, 설정 묶음)는 ADR-0192가 정한다. 팀 샌드박스 호스트(scope=workspace)는 목표 A 뒤 A4 ADR로 미룬다(ADR-0192 D7)
 - 관련: ADR-0114(Accepted — D8 host_id 훅이 본 ADR의 접합점), ADR-0121(Accepted — D1-C oort Cloud 범위 제외분을 본 ADR이 인수, D5-A "운영을 판다" BM 승계), ADR-0004·MOMO-234(자격증명 비유입 — 전 계층 불변), ADR-0120(PushRelay — 호스트 등록·outbound 다이얼 패턴의 원형), research/17-work-host-fabric/00(레퍼런스 실사·비용 모델·성재 보정 2건)
 - 발단: 성재 숙원 — "0114 v0 한계(세션=맥 앱 수명)를 뚫는다. 셀프호스팅 또는 유료 cloud, SSH 베이스, 로컬 있으면 물어보고 로컬."
 

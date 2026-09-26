@@ -1765,7 +1765,7 @@ paths:
         "400": {description: Invalid closed input, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
-        "409": {description: Handle already exists, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Handle already exists, or invocationScope owner_only while subscription agents are disabled on this server (ADR-0193 D6), content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
     get:
       tags: [agents]
       operationId: listHostedAgentConnections
@@ -9446,6 +9446,17 @@ components:
         doorbellSecretMasked: {type: string, description: Non-secret display tail. Never the Bearer.}
         doorbellLastFiredAtMs: {type: integer, format: int64}
         doorbellLastStatus: {type: string}
+        invocationScope:
+          type: string
+          enum: [workspace, owner_only]
+          description: >
+            ADR-0193 D4 (#2815). owner_only = a subscription agent only its
+            owner (the human who created the connection) may invoke. Reported
+            by create, list and get; omitted by lifecycle transitions.
+        subscriptionHarness:
+          type: string
+          enum: [claude_code, codex]
+          description: Which official CLI the owner runs. Present only on owner_only agents.
 
     RegisterHostedDoorbellRequest:
       type: object
@@ -9475,6 +9486,20 @@ components:
         displayName: {type: string, minLength: 1}
         handle: {type: string, minLength: 1}
         authMode: {type: string, enum: [static_bearer], default: static_bearer}
+        invocationScope:
+          type: string
+          enum: [workspace, owner_only]
+          default: workspace
+          description: >
+            ADR-0193 D4 (#2815). owner_only joins through the subscription
+            path: the new agent is the caller's own and only the caller may
+            invoke it. Requires subscriptionHarness. Refused with 409 while
+            the server's MOMO_SUBSCRIPTION_AGENTS_ENABLED switch is off. The
+            scope is final: no API reopens it.
+        subscriptionHarness:
+          type: string
+          enum: [claude_code, codex]
+          description: Required with invocationScope owner_only and refused without it.
 
     CreateHostedAgentConnectionResponse:
       type: object
@@ -12149,7 +12174,7 @@ components:
         GET /v1/workspaces/{workspaceId} workspace object. Identity plus the
         member-readable roleLabels and welcome projections. The settings bag
         is never included.
-      required: [id, slug, name, updatedAtMs, roleLabels, welcomePrompt]
+      required: [id, slug, name, updatedAtMs, roleLabels, welcomePrompt, subscriptionAgentsEnabled]
       properties:
         id: {type: string, format: uuid}
         slug: {type: string}
@@ -12176,6 +12201,13 @@ components:
           description: >
             Effective welcome prompt. Canonical default when the settings
             key is absent (ADR-0181 D8).
+        subscriptionAgentsEnabled:
+          type: boolean
+          description: >
+            ADR-0193 D6 (#2815). The server's MOMO_SUBSCRIPTION_AGENTS_ENABLED
+            kill switch (instance-wide, default true). false = the
+            subscription path is off: clients hide the subscription rows and
+            put the API-key row first; owner_only agents receive no calls.
 
     WorkspaceResponse:
       type: object

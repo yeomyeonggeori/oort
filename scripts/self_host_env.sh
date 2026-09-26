@@ -2314,6 +2314,10 @@ DRIVE_VOLUME_NAME=$DRIVE_VOLUME
 
 # --- 허들 / LiveKit (#1856) ------------------------------------------------
 # LAN/원격 클라 배치면 이 값을 그 호스트의 클라 도달 가능 IP로 바꿔라.
+# 유령 참가자 스윕(#2758, huddle 프로파일의 huddle-notifier)은 새 키가
+# 필요 없다: 쓰기 연결은 위 MOMO_APP_DATABASE_URL(momo_app, RLS)을, 읽기는
+# NOTIFIER_DATABASE_URL을 그대로 쓰고, LiveKit에는 compose 사설망으로 닿는다.
+# MOMO_LIVEKIT_API_KEY·SECRET·URL을 넣어 허들을 켜면 스윕도 함께 돈다.
 MOMO_LIVEKIT_NODE_IP=127.0.0.1
 EOF
 chmod 600 "$ENV_FILE"

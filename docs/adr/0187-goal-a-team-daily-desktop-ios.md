@@ -2,6 +2,7 @@
 
 - Status: **Accepted** (2026-09-23 성재 결정). 각 결정에서 **방향은 「성재」 줄의 원문**이다. **「정리」 줄은 원문을 요약한 것**이고 새 내용이 없다. **세부는 「기안자 도출」 줄**이고, §4 확정점과 함께 성재 확인을 기다린다. D6은 성재가 고른 A안에 적혀 있던 연기 목록이고, D8은 성재 위임에 따른 기안자 확인이다. 원문 출처는 §5.
 - Date: 2026-09-23
+- 증보: 2026-09-26 — 허들 P0·P1과 로컬 워크벤치 M1을 목표 A에 넣는다(파일 끝 증보 절)
 - Deciders: 성재
 - 기안: Opus 5.5 planner (2026-09-23 재진단 리뷰 뒤)
 - 대체:
@@ -176,3 +177,8 @@
   - `docs/legal/00`·`01`, `docs/cicd/00`(등급·증거 문구)
   - `docs/planning/README.md`, `docs/MULTI_SESSION_OPS.md`, `docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`, `docs/runbooks/development-validation.md`, `docs/planning/CURRENT_STATE.md`
   - 대체 표시: `docs/planning/2026-09-02-launch-program-plan.md`, `2026-09-07-first-goal-two-cases.md`, `2026-09-08-remaining-work-map.md`
+
+## 증보 2026-09-26 — 허들 P0·P1과 로컬 워크벤치 M1을 목표 A에 넣는다
+- **성재:** 「전부 권장대로 가자」(허들 2.0 Q2 「목표 A에 허들을 넣을까」, 작업 공간 2.0 Q1 「로컬 워크벤치 M1을 목표 A 안에서 R1과 병렬로」의 권장안). 기록은 ADR-0122 증보 2026-09-26과 ADR-0190~0192(#2754).
+- **허들 P0·P1이 목표 A 범위다.** P0는 #2757·#2758·#2759·#2761, P1은 #2760·#2762~#2768이다. 녹음·전사·요약(P2, #2770·#2771)과 CallKit(#2769)은 목표 A 밖이다. `infra/railway/railway.json`의 「huddle deferred」 문구는 #2759에서 바뀐다. 기안자 확인: `docs/cicd/03-store-readiness-gate.md`에 허들 항목이 없으므로, 이 편입이 M7-I 팀 배포의 진입 조건을 바꾸지는 않는다. iOS 허들의 마이크 사용 문구와 팀 내부 고지는 **M7-I 범위**다. 허들로 생기는 스토어 등급 항목(App Privacy 신고, `PrivacyInfo.xcprivacy`, 개인정보처리방침 갱신)은 **M7-S 항목**으로 두고, 이 증보가 목표 A의 첫 이정표(M7-I 팀 배포) 안으로 당기지 않는다.
+- **로컬 워크벤치 M1이 목표 A 범위다**(ADR-0190). R1과 병렬인 데스크탑 UXUI 줄이고 서버 변경이 없다: #2772~#2777, #2789. 에이전트 칸(M2)은 ADR-0188 R1과, 계정·쿼터(M3)는 R2와 같은 줄로 간다. 원격 호스트 세팅(M4), 팀 샌드박스(M5), 커넥터 C2~C4는 목표 A 밖이다(ADR-0192 D7).
