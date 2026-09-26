@@ -596,6 +596,82 @@ fn code_only(src: &str) -> String {
     out
 }
 
+/// The contents of every string literal (plain and raw), comments skipped,
+/// one per line.
+fn string_contents(src: &str) -> String {
+    let b: Vec<char> = src.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        let next = b.get(i + 1).copied();
+        if c == '/' && next == Some('/') {
+            while i < b.len() && b[i] != '\n' {
+                i += 1;
+            }
+        } else if c == '/' && next == Some('*') {
+            i += 2;
+            while i + 1 < b.len() && !(b[i] == '*' && b[i + 1] == '/') {
+                i += 1;
+            }
+            i += 2;
+        } else if (c == 'r' || (c == 'b' && next == Some('r')))
+            && !b
+                .get(i.wrapping_sub(1))
+                .is_some_and(|p| p.is_alphanumeric() || *p == '_')
+            && {
+                let mut j = i + if c == 'b' { 2 } else { 1 };
+                while b.get(j) == Some(&'#') {
+                    j += 1;
+                }
+                b.get(j) == Some(&'"')
+            }
+        {
+            i += if c == 'b' { 2 } else { 1 };
+            let mut hashes = 0;
+            while b[i] == '#' {
+                hashes += 1;
+                i += 1;
+            }
+            i += 1;
+            while i < b.len() {
+                if b[i] == '"' && (0..hashes).all(|k| b.get(i + 1 + k) == Some(&'#')) {
+                    i += 1 + hashes;
+                    break;
+                }
+                out.push(b[i]);
+                i += 1;
+            }
+            out.push('\n');
+        } else if c == '"' {
+            i += 1;
+            while i < b.len() && b[i] != '"' {
+                if b[i] == '\\' {
+                    out.push(b[i]);
+                    i += 1;
+                }
+                if i < b.len() {
+                    out.push(b[i]);
+                    i += 1;
+                }
+            }
+            out.push('\n');
+            i += 1;
+        } else if c == '\'' && next == Some('\\') {
+            i += 2;
+            while i < b.len() && b[i] != '\'' {
+                i += 1;
+            }
+            i += 1;
+        } else if c == '\'' && b.get(i + 2) == Some(&'\'') {
+            i += 3;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
 fn idents(code: &str) -> Vec<&str> {
     code.split(|c: char| !(c.is_alphanumeric() || c == '_'))
         .filter(|t| !t.is_empty())
@@ -697,6 +773,36 @@ fn nothing_but_the_command_table_reaches_the_pty() {
         }
     }
 
+    // No other module may inject script into a webview or carry a PTY
+    // command name in a string: local-origin JS injected by, say, the deep
+    // link handler would pass the capability (#2824 R2 N-M1).
+    for (name, src) in &sources {
+        if name == "pty.rs" || name == "shell_contract.rs" {
+            continue;
+        }
+        let code = code_only(src);
+        let injected: Vec<&str> = idents(&code)
+            .into_iter()
+            .filter(|t| {
+                [
+                    "eval",
+                    "eval_with_callback",
+                    "evaluate_script",
+                    "with_webview",
+                ]
+                .contains(t)
+            })
+            .collect();
+        assert!(injected.is_empty(), "{name} injects script: {injected:?}");
+        let strings = string_contents(src);
+        for needle in ["pty_", "__TAURI_INTERNALS__", "__TAURI_INVOKE__", "invoke("] {
+            assert!(
+                !strings.contains(needle),
+                "{name} carries {needle:?} in a string"
+            );
+        }
+    }
+
     // App exit and page (re)load end every session.
     let lib = code_only(LIB_RS);
     for arm in [
@@ -754,7 +860,11 @@ fn nothing_but_the_command_table_reaches_the_pty() {
         .collect();
     assert!(used.is_empty(), "pty.rs uses {used:?}");
 
-    // Exactly the five commands leave the module, every one of them async.
+    // Exactly the five commands leave the module. `pty_write` must be sync:
+    // only sync commands run in IPC arrival order, and keystroke order is
+    // the contract (#2824 R2 — async measured ~42% adjacent swaps). Every
+    // other command must be async: they may block, and a sync command runs
+    // on the main thread (#2824 H1).
     let lines: Vec<&str> = pty.lines().map(str::trim).collect();
     let mut commands = Vec::new();
     for (i, line) in lines.iter().enumerate() {
@@ -763,11 +873,34 @@ fn nothing_but_the_command_table_reaches_the_pty() {
                 .iter()
                 .find(|l| !l.starts_with("#[") && !l.is_empty())
                 .unwrap();
-            let name = decl
-                .strip_prefix("pub async fn ")
-                .unwrap_or_else(|| panic!("command is not `pub async fn`: {decl}"));
-            commands.push(name.split(['(', '<']).next().unwrap().to_string());
+            let (sync, rest) = match (
+                decl.strip_prefix("pub async fn "),
+                decl.strip_prefix("pub fn "),
+            ) {
+                (Some(rest), _) => (false, rest),
+                (None, Some(rest)) => (true, rest),
+                _ => panic!("unexpected command declaration: {decl}"),
+            };
+            let name = rest.split(['(', '<']).next().unwrap().to_string();
+            if name == "pty_write" {
+                assert!(sync, "pty_write must be sync (input order): {decl}");
+                assert!(!line.contains("async"), "{line}");
+            } else {
+                assert!(!sync, "{name} must be async (off the main thread): {decl}");
+            }
+            commands.push(name);
         }
+    }
+    // The sync one only enqueues: no PTY I/O, no sleeping, no spawning.
+    let write_body = &pty[pty.find("pub fn pty_write(").unwrap()..];
+    let write_body = &write_body[..write_body.find("\n}\n").unwrap()];
+    for banned in ["write_all", "sleep", "spawn", "wait", "lock()"] {
+        assert!(!write_body.contains(banned), "pty_write body uses {banned}");
+    }
+    let enqueue = &pty[pty.find("pub fn write(&self").unwrap()..];
+    let enqueue = &enqueue[..enqueue.find("\n    }\n").unwrap()];
+    for banned in ["write_all", "flush", "sleep", "master", ".recv"] {
+        assert!(!enqueue.contains(banned), "PtyManager::write uses {banned}");
     }
     assert_eq!(commands, PTY_COMMANDS, "pty.rs commands");
 }
@@ -784,4 +917,9 @@ fn the_source_filter_sees_through_comments_and_strings() {
         "{code}"
     );
     assert!(ids.contains(&"d"), "{code}");
+    let strings = string_contents(
+        "// \"pty_spawn\" in a comment\nlet a = \"x\"; let b = r#\"invoke('pty_spawn')\"#; let c = '\"';",
+    );
+    assert!(strings.contains("invoke('pty_spawn')"), "{strings}");
+    assert_eq!(strings.matches("pty_").count(), 1, "{strings}");
 }

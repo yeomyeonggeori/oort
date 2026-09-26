@@ -7,10 +7,12 @@
 //   pty_kill    { id }
 //   pty_ack     { id, bytes }   output flow control (see `OUTPUT_HIGH_WATER`)
 //
-// Every command is `async`: Tauri runs a sync command on the thread that
-// received the IPC request, which on macOS is the main (event loop) thread.
-// Nothing here may block that thread — not a write to a child that stopped
-// reading, not the login-PATH probe (#2824 review H1).
+// Tauri runs a sync command on the thread that received the IPC request —
+// on macOS the main (event loop) thread — and an async one on a worker pool,
+// one task per call. So: everything that can block (spawn, the login-PATH
+// probe) is async and never on the main thread (#2824 review H1); `pty_write`
+// is sync, because input order is the order calls run in and only the main
+// thread runs them in arrival order (#2824 R2) — it only enqueues.
 //
 // The boundary, in the order a request meets it:
 //
@@ -856,8 +858,15 @@ pub async fn pty_spawn(
 /// Keystrokes and pastes: raw bytes in the invoke body, the session id in
 /// `x-oort-pty-id`. Raw bodies need the `ipc:` transport the CSP keeps open.
 /// Queued, never written inline; `busy` when the child is not reading.
+///
+/// **Deliberately sync** (#2824 R2): an async command is spawned per call on
+/// a multi-thread runtime, so two keystrokes can be enqueued in the wrong
+/// order — measured 1,2xx adjacent swaps and a lost tail in 3,000 unawaited
+/// writes. Sync commands run in IPC arrival order on the main thread, which
+/// is safe here because `PtyManager::write` only enqueues (a short map lock,
+/// one copy of at most 1 MiB, a channel send) and never touches the PTY.
 #[tauri::command]
-pub async fn pty_write(state: State<'_, PtyState>, request: Request<'_>) -> Result<(), String> {
+pub fn pty_write(state: State<'_, PtyState>, request: Request<'_>) -> Result<(), String> {
     let InvokeBody::Raw(bytes) = request.body() else {
         return Err("refused: expected raw bytes".to_string());
     };
@@ -1399,6 +1408,39 @@ mod tests {
         manager.kill(id).unwrap();
         assert!(start.elapsed() < Duration::from_millis(100));
         sink.wait_exit(SLOW);
+    }
+
+    /// Queued input reaches the child in order and in full: 3,000 writes
+    /// fired back to back arrive as 0..2999, nothing lost (#2824 R2 — the
+    /// dispatch half of this is the app smoke in the PR).
+    #[test]
+    fn queued_input_arrives_in_order_and_in_full() {
+        let dir = std::env::temp_dir().join(format!("oort-pty-order-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("order.txt");
+        let _ = std::fs::remove_file(&file);
+        let script: &'static str = Box::leak(
+            format!("stty -echo; echo ready; cat > '{}'", file.display()).into_boxed_str(),
+        );
+        let plan = sh(script);
+        let manager = PtyManager::default();
+        let sink = Arc::new(Recorder::default());
+        let id = manager
+            .spawn(&plan, build_command(&plan, path_env()), sink.clone())
+            .unwrap();
+        sink.wait_for("ready", SLOW);
+        for i in 0..3000 {
+            manager.write(id, format!("{i}\n").as_bytes()).unwrap();
+        }
+        manager.write(id, b"\x04").unwrap();
+        sink.wait_exit(SLOW);
+        let got: Vec<usize> = std::fs::read_to_string(&file)
+            .unwrap()
+            .lines()
+            .map(|l| l.parse().unwrap())
+            .collect();
+        assert_eq!(got, (0..3000).collect::<Vec<_>>());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Kill reaches a job the interactive shell put in its own process group,
