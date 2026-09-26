@@ -426,19 +426,25 @@ mod tests {
     /// (the session a registration was made under), plus one partial index. A
     /// session that ends invalidates its registrations; the judgment SQL and the
     /// notifier's grants are unchanged. schema_v0.sql is not modified.
+    ///
+    /// 089 is #2815's subscription-agent scope (ADR-0193 D4): `agent`
+    /// gains `invocation_scope` (`workspace` | `owner_only`) and
+    /// `subscription_harness`, a shape CHECK, and a trigger that makes
+    /// `owner_only` final. `agent` stays under its existing FORCE RLS policy; no
+    /// table or policy is added. schema_v0.sql is not modified.
     #[test]
-    fn discovers_contiguous_migrations_001_to_088() {
+    fn discovers_contiguous_migrations_001_to_089() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            88,
-            "expected 88 migrations under {}",
+            89,
+            "expected 89 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 88);
+        assert_eq!(migrations.last().unwrap().version, 89);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

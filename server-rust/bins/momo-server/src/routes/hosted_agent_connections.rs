@@ -60,6 +60,68 @@ fn dto(connection: HostedConnection) -> HostedAgentConnectionDto {
         doorbell_secret_masked: None,
         doorbell_last_fired_at_ms: None,
         doorbell_last_status: None,
+        invocation_scope: None,
+        subscription_harness: None,
+    }
+}
+
+/// ADR-0193 D4 (#2815) — stamp each connection's agent scope onto its DTO.
+///
+/// One read for the whole page; an agent the read did not return (it cannot
+/// happen: the connection's FK is the agent row) leaves the fields omitted
+/// rather than guessing "workspace".
+async fn attach_invocation_scopes(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: uuid::Uuid,
+    dtos: &mut [HostedAgentConnectionDto],
+) -> Result<(), momo_db::DbError> {
+    let ids: Vec<uuid::Uuid> = dtos
+        .iter()
+        .filter_map(|dto| uuid::Uuid::parse_str(&dto.agent_member_id).ok())
+        .collect();
+    let scopes = momo_agent::load_invocation_scopes_in_tx(conn, workspace_id, &ids).await?;
+    for dto in dtos.iter_mut() {
+        if let Some((_, scope, harness)) = scopes
+            .iter()
+            .find(|(id, _, _)| id.to_string() == dto.agent_member_id)
+        {
+            dto.invocation_scope = Some(scope.clone());
+            dto.subscription_harness = harness.clone();
+        }
+    }
+    Ok(())
+}
+
+/// The create body's scope, validated before a transaction opens.
+///
+/// `Ok(None)` = a workspace agent (the existing path). `Ok(Some(harness))` =
+/// the subscription path. Every other combination is a 400: a harness without
+/// `owner_only` would be a subscription agent anyone could call, and an
+/// `owner_only` without a harness has no true offline sentence.
+fn requested_owner_only(
+    request: &CreateHostedAgentConnectionRequest,
+) -> Result<Option<momo_agent::SubscriptionHarness>, ApiError> {
+    match (
+        request.invocation_scope.as_deref(),
+        request.subscription_harness.as_deref(),
+    ) {
+        (None | Some(momo_agent::INVOCATION_SCOPE_WORKSPACE), None) => Ok(None),
+        (Some(momo_agent::INVOCATION_SCOPE_OWNER_ONLY), Some(harness)) => {
+            momo_agent::SubscriptionHarness::parse(harness)
+                .map(Some)
+                .ok_or_else(|| {
+                    ApiError::bad_request("subscriptionHarness must be claude_code or codex")
+                })
+        }
+        (Some(momo_agent::INVOCATION_SCOPE_OWNER_ONLY), None) => Err(ApiError::bad_request(
+            "invocationScope owner_only requires subscriptionHarness",
+        )),
+        (None | Some(momo_agent::INVOCATION_SCOPE_WORKSPACE), Some(_)) => Err(
+            ApiError::bad_request("subscriptionHarness requires invocationScope owner_only"),
+        ),
+        (Some(_), _) => Err(ApiError::bad_request(
+            "invocationScope must be workspace or owner_only",
+        )),
     }
 }
 
@@ -135,6 +197,16 @@ pub async fn create(
     if request.auth_mode != "static_bearer" {
         return Err(ApiError::bad_request("authMode must equal static_bearer"));
     }
+    let owner_only = requested_owner_only(&request)?;
+    // ADR-0193 D6 — with the operator's switch off, the subscription path does
+    // not exist: refused before a transaction opens, so no agent, connection
+    // or pairing credential is ever written for it.
+    if owner_only.is_some() && !state.agent_port.config.subscription_agents_enabled {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "subscription agents are disabled on this server",
+        ));
+    }
     let display_name = normalized_join_display_name(&request.display_name)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     let handle = normalized_requested_handle(Some(&request.handle))
@@ -188,6 +260,22 @@ pub async fn create(
                 {
                     return Err(momo_db::DbError::from(momo_db::sqlx::Error::RowNotFound));
                 }
+                // ADR-0193 D4 — the owner is the human creating it
+                // (`owner_human_id` above), and the scope is recorded in the
+                // same transaction as the identity, so there is no window in
+                // which the new agent exists as a team agent.
+                if let Some(harness) = owner_only {
+                    if !momo_agent::mark_agent_owner_only_in_tx(
+                        conn,
+                        workspace_id,
+                        member.id,
+                        harness,
+                    )
+                    .await?
+                    {
+                        return Err(momo_db::DbError::from(momo_db::sqlx::Error::RowNotFound));
+                    }
+                }
                 let issuance =
                     create_hosted_connection_in_tx(conn, workspace_id, member.id, actor_member_id)
                         .await?;
@@ -200,7 +288,15 @@ pub async fn create(
                         .via_token(via_token_id)
                         .with_schema(
                             "momo.hosted_agent.connection.created.v1",
-                            json!({"auth_mode":"static_bearer","status":"pairing_pending"}),
+                            json!({
+                                "auth_mode": "static_bearer",
+                                "status": "pairing_pending",
+                                "invocation_scope": if owner_only.is_some() {
+                                    momo_agent::INVOCATION_SCOPE_OWNER_ONLY
+                                } else {
+                                    momo_agent::INVOCATION_SCOPE_WORKSPACE
+                                },
+                            }),
                         ),
                 )
                 .await?;
@@ -209,10 +305,20 @@ pub async fn create(
         })
         .await,
     )?;
+    let mut connection = dto(issuance.connection);
+    connection.invocation_scope = Some(
+        if owner_only.is_some() {
+            momo_agent::INVOCATION_SCOPE_OWNER_ONLY
+        } else {
+            momo_agent::INVOCATION_SCOPE_WORKSPACE
+        }
+        .to_string(),
+    );
+    connection.subscription_harness = owner_only.map(|harness| harness.as_str().to_string());
     Ok(no_store(
         StatusCode::CREATED,
         CreateHostedAgentConnectionResponse {
-            connection: dto(issuance.connection),
+            connection,
             pairing_credential: issuance.pairing_credential,
             pairing_expires_at_ms: issuance.pairing_expires_at_ms,
         },
@@ -228,7 +334,7 @@ pub async fn list(
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let actor = principal.member_id;
     let doorbell_enabled = state.webhook.doorbell_enabled;
-    let (rows, doorbells) = settle_db(
+    let dtos = settle_db(
         "hosted_agent_connections.list",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
@@ -241,22 +347,24 @@ pub async fn list(
                 } else {
                     Vec::new()
                 };
-                Ok(Ok((rows, doorbells)))
+                let mut doorbells = doorbells
+                    .into_iter()
+                    .collect::<std::collections::HashMap<_, _>>();
+                let mut dtos: Vec<HostedAgentConnectionDto> = rows
+                    .into_iter()
+                    .map(|row| {
+                        let id = row.id;
+                        attach_doorbell(dto(row), doorbells.remove(&id))
+                    })
+                    .collect();
+                attach_invocation_scopes(conn, workspace_id, &mut dtos).await?;
+                Ok(Ok(dtos))
             })
         })
         .await,
     )?;
-    let mut doorbells = doorbells
-        .into_iter()
-        .collect::<std::collections::HashMap<_, _>>();
     Ok(Json(HostedAgentConnectionListResponse {
-        connections: rows
-            .into_iter()
-            .map(|row| {
-                let id = row.id;
-                attach_doorbell(dto(row), doorbells.remove(&id))
-            })
-            .collect(),
+        connections: dtos,
     }))
 }
 
@@ -270,7 +378,7 @@ pub async fn get(
     let connection_id = path_uuid(&connection, "invalid hosted connection id")?;
     let actor = principal.member_id;
     let doorbell_enabled = state.webhook.doorbell_enabled;
-    let (row, artifacts, doorbell) = settle_db(
+    let (connection, artifacts) = settle_db(
         "hosted_agent_connections.get",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
@@ -290,13 +398,16 @@ pub async fn get(
                 } else {
                     None
                 };
-                Ok(Ok((row, artifacts, doorbell)))
+                let mut projected = [attach_doorbell(dto(row), doorbell)];
+                attach_invocation_scopes(conn, workspace_id, &mut projected).await?;
+                let [projected] = projected;
+                Ok(Ok((projected, artifacts)))
             })
         })
         .await,
     )?;
     Ok(Json(HostedAgentConnectionResponse {
-        connection: attach_doorbell(dto(row), doorbell),
+        connection,
         cleanup_artifacts: artifact_dtos(artifacts),
     }))
 }

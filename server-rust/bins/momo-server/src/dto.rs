@@ -2220,6 +2220,12 @@ pub struct WorkspaceDto {
     /// Effective welcome prompt. The canonical default when the settings key
     /// is absent (ADR-0181 D8).
     pub welcome_prompt: String,
+    /// ADR-0193 D6 (#2815) — the operator's `MOMO_SUBSCRIPTION_AGENTS_ENABLED`.
+    /// `false` = the subscription path is off on this server: clients hide the
+    /// 「이 맥의 Claude Code · Codex」 rows and put the API-key row first.
+    /// An instance setting, served on every workspace read so a member can see
+    /// it without an operator-only surface.
+    pub subscription_agents_enabled: bool,
 }
 
 /// Swift `WorkspaceResponse` (`DTOs.swift:777-779`). The client unwraps
@@ -3371,6 +3377,16 @@ pub struct CreateHostedAgentConnectionRequest {
     pub handle: String,
     #[serde(default = "default_static_bearer")]
     pub auth_mode: String,
+    /// ADR-0193 D4 (#2815). `"owner_only"` joins through the subscription path:
+    /// the agent is the caller's own and only the caller may invoke it. Absent
+    /// or `"workspace"` is the existing team agent. Refused (409) while the
+    /// operator's `MOMO_SUBSCRIPTION_AGENTS_ENABLED` switch is off.
+    #[serde(default)]
+    pub invocation_scope: Option<String>,
+    /// Required with `invocationScope: "owner_only"`, refused without it:
+    /// `"claude_code"` or `"codex"` — which official CLI the owner runs.
+    #[serde(default)]
+    pub subscription_harness: Option<String>,
 }
 
 fn default_static_bearer() -> String {
@@ -3401,6 +3417,13 @@ pub struct HostedAgentConnectionDto {
     pub doorbell_last_fired_at_ms: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub doorbell_last_status: Option<String>,
+    /// ADR-0193 D4 (#2815) — `"workspace"` or `"owner_only"`. Reported by
+    /// create, list and get; omitted by the lifecycle transitions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invocation_scope: Option<String>,
+    /// `"claude_code"` / `"codex"` on an `owner_only` agent; omitted otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subscription_harness: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

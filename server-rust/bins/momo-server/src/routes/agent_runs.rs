@@ -140,6 +140,7 @@ pub async fn create(
     let actor_member_id = principal.member_id;
     let via_token_id = audit_via_token_id(&principal);
     let client_run_id = request.client_run_id;
+    let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
 
     let outcome = settle_db(
         "agent_runs.create",
@@ -157,6 +158,31 @@ pub async fn create(
                 else {
                     return Ok(Err(ApiError::not_found("active channel agent not found")));
                 };
+                // ADR-0193 D4·D6 (#2815) — a work request is a call, and a
+                // subscription agent takes calls from its owner only (and from
+                // nobody while the operator's switch is off). Checked before
+                // the hosted refusal below, so the answer names the real
+                // boundary and stays in force once hosted work runs exist.
+                // There is no thread to answer in here, so the refusal is the
+                // response itself rather than an agent-attributed notice.
+                if momo_agent::agent_is_owner_only_in_tx(conn, workspace_id, agent_member_id)
+                    .await?
+                {
+                    let owner = momo_agent::agent_owner_in_tx(conn, workspace_id, agent_member_id)
+                        .await?
+                        .flatten();
+                    if owner != Some(actor_member_id) {
+                        return Ok(Err(ApiError::forbidden(
+                            "this subscription agent takes requests from its owner only",
+                        )));
+                    }
+                    if !subscription_agents_enabled {
+                        return Ok(Err(ApiError::new(
+                            StatusCode::CONFLICT,
+                            "subscription agents are disabled on this server",
+                        )));
+                    }
+                }
                 // Hosted delivery remains production-disabled before any run,
                 // job, outbox, or message row can exist. Idempotency cannot
                 // override this boundary because no hosted run is legal yet.

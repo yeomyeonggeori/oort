@@ -460,6 +460,11 @@ pub struct SendExtras<'a> {
     /// wire says *that* a stream is being opened and this crate says *what* that
     /// means.
     pub opens_stream: bool,
+    /// ADR-0193 D6 (#2815) — the operator's subscription-agent kill switch is
+    /// **engaged**. Named for the non-default state on purpose: `Default` must
+    /// mean the shipped default (the path on), so every existing caller that
+    /// builds `SendExtras::default()` keeps its hosted fan-out unchanged.
+    pub subscription_agents_disabled: bool,
 }
 
 /// Why a REST send was refused before it could commit.
@@ -744,6 +749,40 @@ pub async fn send_message_in_tx(
     .await
 }
 
+/// A server-composed line **in a thread**, on the raw spine (#2815).
+///
+/// [`send_message_in_tx`] with one difference: when `input.root_id` is set, the
+/// root's rollup is bumped and `thread.updated` is published beside the reply —
+/// the same `ThreadPolicy::Maintain` the product spine uses — so a reply a
+/// client never sent still shows up as a reply. Everything else stays on the
+/// raw spine's side of the line, deliberately:
+///
+/// * **no mention pass** — the body is server copy. ADR-0193's notices name the
+///   agent's owner by display name, and re-reading that as a mention would badge
+///   the owner every time somebody else called their agent;
+/// * **no hosted-inbox fan-out** — a notice is not something any other hosted
+///   runtime should be woken to answer.
+///
+/// The caller must have validated the root (it is the trigger's own thread, or
+/// the trigger itself).
+pub async fn send_thread_notice_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    input: NewMessage,
+) -> Result<SentMessage, DbError> {
+    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input).await?;
+    finish_send_in_tx(
+        conn,
+        workspace_id,
+        message,
+        deduped,
+        MentionPolicy::Skip,
+        ThreadPolicy::Maintain,
+        AttachmentPolicy::Skip,
+    )
+    .await
+}
+
 /// The REST send path's spine (B1.2): [`send_message_in_tx`] plus the mention
 /// pass, with an optional provenance assertion — one function because Swift's
 /// `MessageRoutes.send` is one path, and because the three steps have an order
@@ -788,6 +827,7 @@ pub async fn send_message_with_mentions_in_tx(
         attachment_ids,
         via_token_id,
         opens_stream,
+        subscription_agents_disabled,
     } = extras;
     if let Some(signature) = signature {
         if input.client_msg_id.is_none() {
@@ -884,6 +924,7 @@ pub async fn send_message_with_mentions_in_tx(
         sent.message.channel_id,
         sent.message.id,
         sent.message.author_member_id,
+        !subscription_agents_disabled,
     )
     .await?;
     Ok(Ok(sent))

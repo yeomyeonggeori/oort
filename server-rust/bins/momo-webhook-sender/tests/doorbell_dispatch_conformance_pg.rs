@@ -311,6 +311,7 @@ async fn append_message(pool: &PgPool, hosted: &Hosted, author: Uuid, body: &str
                 channel,
                 sent.message.id,
                 author,
+                true,
             )
             .await?;
             Ok(())

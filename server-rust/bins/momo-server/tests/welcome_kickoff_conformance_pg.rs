@@ -176,6 +176,7 @@ async fn start_server_with_delivery(pool: PgPool, hosted_delivery_enabled: bool)
         per_agent_limit: 0,
         per_ip_limit: 0,
         hosted_delivery_enabled,
+        subscription_agents_enabled: true,
         oauth: Default::default(),
     });
     let app = build_app(state);
