@@ -35,6 +35,7 @@ tauri-plugin-notification = "2"
 mdns-sd = "0.20"               # pure-Rust _momo._tcp browse, no async runtime
 url = "2"
 percent-encoding = "2"         # RFC 3986 decoding for the deep link contract
+# Local terminal lane (ADR-0190 D1, #2772): the app process opens the PTY. MIT.
 portable-pty = "0.9.0"
 
 # Self-update (MOMO-606). Desktop-only plugin: the updater replaces an app
@@ -54,6 +55,7 @@ keyring = { version = "3", features = ["windows-native"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3", features = ["sync-secret-service"] }
 
+# PTY sessions end by process group (killpg), #2772. MIT OR Apache-2.0.
 [target."cfg(unix)".dependencies]
 libc = "0.2"
 

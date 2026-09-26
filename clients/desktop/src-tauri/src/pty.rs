@@ -343,9 +343,14 @@ pub trait PtySink: Send + Sync + 'static {
     fn exit(&self, exit: PtyExit);
 }
 
+type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
+
 struct Session {
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    /// Its own lock: a write can block (a child that stopped reading fills
+    /// the tty buffer), and it must not hold the session map while it does —
+    /// kill, resize and app exit need that map.
+    writer: SharedWriter,
     pid: i32,
 }
 
@@ -390,7 +395,7 @@ impl PtyManager {
             id,
             Session {
                 master: pair.master,
-                writer,
+                writer: Arc::new(Mutex::new(writer)),
                 pid,
             },
         );
@@ -426,12 +431,17 @@ impl PtyManager {
         if bytes.len() > MAX_WRITE_BYTES {
             return Err("refused: write too large".into());
         }
-        let mut sessions = self.sessions.lock().unwrap();
-        let session = sessions.get_mut(&id).ok_or_else(|| unknown(id))?;
-        session
-            .writer
+        let writer = self
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&id)
+            .map(|s| s.writer.clone())
+            .ok_or_else(|| unknown(id))?;
+        let mut writer = writer.lock().unwrap();
+        writer
             .write_all(bytes)
-            .and_then(|_| session.writer.flush())
+            .and_then(|_| writer.flush())
             .map_err(|e| format!("write: {e}"))
     }
 
@@ -1009,5 +1019,46 @@ mod tests {
             .write(999, &vec![b'a'; MAX_WRITE_BYTES + 1])
             .unwrap_err()
             .contains("too large"));
+    }
+
+    /// A child that stops reading (a frozen TUI) fills the tty buffer and
+    /// blocks the writer. Kill must still get through.
+    #[test]
+    fn a_blocked_write_does_not_block_kill() {
+        let plan = SpawnPlan {
+            program: "/bin/sh".into(),
+            args: vec!["-c", "stty raw -echo; echo ready; sleep 600"],
+            cwd: home(),
+            size: (80, 24),
+            path: None,
+        };
+        let manager = Arc::new(PtyManager::default());
+        let sink = Arc::new(Recorder::default());
+        let id = manager
+            .spawn(
+                &plan,
+                build_command(&plan, base(&[("PATH", "/usr/bin:/bin")])),
+                sink.clone(),
+            )
+            .unwrap();
+        sink.wait_for("ready", Duration::from_secs(20));
+        let m = manager.clone();
+        std::thread::spawn(move || {
+            let _ = m.write(id, &vec![b'x'; MAX_WRITE_BYTES]);
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        let (tx, rx) = mpsc::channel();
+        let m = manager.clone();
+        std::thread::spawn(move || {
+            let start = Instant::now();
+            let r = m.kill(id);
+            let _ = tx.send((r, start.elapsed()));
+        });
+        let (result, took) = rx
+            .recv_timeout(Duration::from_secs(3))
+            .expect("kill blocked behind a stuck write");
+        result.unwrap();
+        assert!(took < Duration::from_secs(1), "{took:?}");
+        sink.wait_exit(Duration::from_secs(10));
     }
 }
