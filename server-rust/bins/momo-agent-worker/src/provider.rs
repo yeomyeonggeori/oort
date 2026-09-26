@@ -53,6 +53,7 @@
 //! |---|---|---|
 //! | [`LinkCredential::Bearer`] (every row that exists today, and the env fallback) | chat/completions | `POST {base_url}/chat/completions` |
 //! | [`LinkCredential::OpenAiOAuth`] (ADR-0147) | Responses | `POST {base_url}/responses` |
+//! | [`LinkCredential::AnthropicKey`] (#2872) | Anthropic Messages ([`crate::anthropic`]) | `POST {base_url}/messages`, `x-api-key` |
 //!
 //! The mapping is on the credential rather than on the base URL because the base
 //! URL is free text an operator types, and guessing a protocol from a hostname is
@@ -91,6 +92,7 @@ use momo_settings::{CascadeDecision, LinkCredential};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::anthropic::AnthropicMessagesProvider;
 use crate::egress::EgressGuard;
 use crate::responses::OpenAiResponsesProvider;
 use momo_settings::EgressPolicy;
@@ -232,6 +234,9 @@ pub enum ProviderWire {
     /// `POST {base_url}/responses` — the OpenAI Responses API, which is what a
     /// ChatGPT subscription OAuth token is entitled to call (ADR-0147 이행).
     Responses,
+    /// `POST {base_url}/messages` — Anthropic Messages, `x-api-key` auth
+    /// (#2872). Selected by the `anthropic-key` envelope kind.
+    AnthropicMessages,
 }
 
 impl ProviderWire {
@@ -244,6 +249,7 @@ impl ProviderWire {
         match credential {
             LinkCredential::Bearer(_) => ProviderWire::ChatCompletions,
             LinkCredential::OpenAiOAuth(_) => ProviderWire::Responses,
+            LinkCredential::AnthropicKey(_) => ProviderWire::AnthropicMessages,
         }
     }
 
@@ -252,6 +258,7 @@ impl ProviderWire {
         match self {
             ProviderWire::ChatCompletions => "/chat/completions",
             ProviderWire::Responses => "/responses",
+            ProviderWire::AnthropicMessages => "/messages",
         }
     }
 
@@ -260,6 +267,7 @@ impl ProviderWire {
         match self {
             ProviderWire::ChatCompletions => "chat_completions",
             ProviderWire::Responses => "responses",
+            ProviderWire::AnthropicMessages => "anthropic_messages",
         }
     }
 }
@@ -345,6 +353,33 @@ pub enum ProviderError {
 }
 
 impl ProviderError {
+    /// Replace every occurrence of `secret` in the message (#2872).
+    ///
+    /// A provider's error body is echoed into [`HttpStatus`](Self::HttpStatus)
+    /// for diagnosis, and a gateway that answers `401 invalid key sk-…` would
+    /// otherwise carry the key into `agent_run.error`, a log line, and the
+    /// failure notice in the channel. Secrets shorter than 8 characters are
+    /// left alone — replacing `"dev"` everywhere would garble the sentence
+    /// without protecting anything.
+    pub fn scrub(self, secret: &str) -> ProviderError {
+        let secret = secret.trim();
+        if secret.chars().count() < 8 {
+            return self;
+        }
+        let clean = |message: String| message.replace(secret, "<redacted>");
+        match self {
+            ProviderError::HttpStatus(status, message) => {
+                ProviderError::HttpStatus(status, clean(message))
+            }
+            ProviderError::Unreachable(message) => ProviderError::Unreachable(clean(message)),
+            ProviderError::InvalidResponse(message) => {
+                ProviderError::InvalidResponse(clean(message))
+            }
+            ProviderError::ErrorEnvelope(message) => ProviderError::ErrorEnvelope(clean(message)),
+            ProviderError::EgressDenied(message) => ProviderError::EgressDenied(clean(message)),
+        }
+    }
+
     /// Swift `ProviderCascade.decide` (:54-77) as a two-valued question: is this
     /// worth trying again, or is retrying it spending budget on a guaranteed
     /// repeat?
@@ -523,7 +558,17 @@ async fn post(
     body: &serde_json::Value,
     accept: Option<&str>,
 ) -> Result<reqwest::Response, ProviderError> {
-    let mut request_builder = client.post(endpoint.url()).bearer_auth(&endpoint.bearer);
+    let mut request_builder = client.post(endpoint.url());
+    request_builder = match endpoint.wire {
+        // #2872: Anthropic authenticates with `x-api-key`; no Authorization
+        // header is sent, so the key reaches exactly one header.
+        ProviderWire::AnthropicMessages => request_builder
+            .header("x-api-key", &endpoint.bearer)
+            .header("anthropic-version", crate::anthropic::ANTHROPIC_VERSION),
+        ProviderWire::ChatCompletions | ProviderWire::Responses => {
+            request_builder.bearer_auth(&endpoint.bearer)
+        }
+    };
     if let Some(account_id) = endpoint
         .account_id
         .as_deref()
@@ -572,6 +617,7 @@ async fn post(
 pub struct WireRoutedProvider {
     chat_completions: Arc<dyn ChatProvider>,
     responses: Arc<dyn ChatProvider>,
+    anthropic: Arc<dyn ChatProvider>,
     /// #2852: the pre-request half of the egress guard. `None` only for
     /// injected in-process providers, which open no socket.
     guard: Option<EgressGuard>,
@@ -581,10 +627,12 @@ impl WireRoutedProvider {
     pub fn new(
         chat_completions: Arc<dyn ChatProvider>,
         responses: Arc<dyn ChatProvider>,
+        anthropic: Arc<dyn ChatProvider>,
     ) -> WireRoutedProvider {
         WireRoutedProvider {
             chat_completions,
             responses,
+            anthropic,
             guard: None,
         }
     }
@@ -598,7 +646,8 @@ impl WireRoutedProvider {
         let client = guard.client(reqwest::Client::builder().timeout(request_timeout))?;
         let mut provider = WireRoutedProvider::new(
             Arc::new(OpenAiCompatProvider::from_client(client.clone())),
-            Arc::new(OpenAiResponsesProvider::from_client(client)),
+            Arc::new(OpenAiResponsesProvider::from_client(client.clone())),
+            Arc::new(AnthropicMessagesProvider::from_client(client)),
         );
         provider.guard = Some(guard);
         Ok(provider)
@@ -625,7 +674,9 @@ impl ChatProvider for WireRoutedProvider {
                 self.chat_completions.complete(endpoint, request).await
             }
             ProviderWire::Responses => self.responses.complete(endpoint, request).await,
+            ProviderWire::AnthropicMessages => self.anthropic.complete(endpoint, request).await,
         }
+        .map_err(|error| error.scrub(&endpoint.bearer))
     }
 
     /// Forwarded, not defaulted: the whole point of this router is that a real
@@ -650,7 +701,13 @@ impl ChatProvider for WireRoutedProvider {
                     .complete_streaming(endpoint, request, sink)
                     .await
             }
+            ProviderWire::AnthropicMessages => {
+                self.anthropic
+                    .complete_streaming(endpoint, request, sink)
+                    .await
+            }
         }
+        .map_err(|error| error.scrub(&endpoint.bearer))
     }
 }
 
@@ -1377,7 +1434,8 @@ mod tests {
     async fn the_router_sends_each_wire_to_its_own_adapter_and_only_that_one() {
         let chat = Arc::new(MockChatProvider::echo());
         let responses = Arc::new(MockChatProvider::echo());
-        let router = WireRoutedProvider::new(chat.clone(), responses.clone());
+        let anthropic = Arc::new(MockChatProvider::echo());
+        let router = WireRoutedProvider::new(chat.clone(), responses.clone(), anthropic.clone());
         let request = ChatRequest {
             tools: Vec::new(),
             momo_tools: Vec::new(),
@@ -1405,5 +1463,70 @@ mod tests {
         assert_eq!(responses.calls().len(), 1, "still one; no double dispatch");
         assert_eq!(chat.calls()[0].wire, ProviderWire::ChatCompletions);
         assert_eq!(responses.calls()[0].wire, ProviderWire::Responses);
+
+        // #2872: the Anthropic kind reaches the Messages adapter and nothing else.
+        let claude = ProviderEndpoint {
+            base_url: "http://mock".to_string(),
+            wire: ProviderWire::for_credential(&LinkCredential::AnthropicKey(
+                "sk-ant-api03-x".into(),
+            )),
+            ..ProviderEndpoint::default()
+        };
+        assert_eq!(claude.url(), "http://mock/messages");
+        router.complete(&claude, &request).await.expect("routed");
+        assert_eq!(anthropic.calls().len(), 1);
+        assert_eq!(chat.calls().len(), 1);
+        assert_eq!(responses.calls().len(), 1);
+    }
+
+    /// #2872: a provider that echoes the key into its error body never carries
+    /// it out of the router — on any wire.
+    #[tokio::test]
+    async fn an_echoed_key_is_scrubbed_from_every_error_the_router_returns() {
+        struct Echo;
+        #[async_trait]
+        impl ChatProvider for Echo {
+            async fn complete(
+                &self,
+                endpoint: &ProviderEndpoint,
+                _request: &ChatRequest,
+            ) -> Result<ChatCompletion, ProviderError> {
+                Err(ProviderError::HttpStatus(
+                    401,
+                    format!("invalid x-api-key: {}", endpoint.bearer),
+                ))
+            }
+        }
+        let router = WireRoutedProvider::new(Arc::new(Echo), Arc::new(Echo), Arc::new(Echo));
+        let request = ChatRequest {
+            tools: Vec::new(),
+            momo_tools: Vec::new(),
+            model: "m".to_string(),
+            messages: vec![ChatMessage::user("q")],
+            max_tokens: None,
+        };
+        for wire in [
+            ProviderWire::ChatCompletions,
+            ProviderWire::Responses,
+            ProviderWire::AnthropicMessages,
+        ] {
+            let endpoint = ProviderEndpoint {
+                base_url: "http://mock".into(),
+                bearer: "sk-ant-api03-LEAKCANARY".into(),
+                wire,
+                ..ProviderEndpoint::default()
+            };
+            for error in [
+                router.complete(&endpoint, &request).await.unwrap_err(),
+                router
+                    .complete_streaming(&endpoint, &request, &DiscardDeltas)
+                    .await
+                    .unwrap_err(),
+            ] {
+                let text = error.to_string();
+                assert!(!text.contains("LEAKCANARY"), "{wire:?}: {text}");
+                assert!(text.contains("<redacted>"), "{text}");
+            }
+        }
     }
 }

@@ -73,6 +73,7 @@
 //! deviation list with what it costs.
 
 pub mod a2a;
+pub mod anthropic;
 pub mod completion_report;
 pub mod config;
 pub mod context;

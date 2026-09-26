@@ -2798,10 +2798,19 @@ pub struct ProviderLinkResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_by: Option<String>,
     pub diagnostics: Vec<String>,
-    /// `bearer` | `oauth-openai` — what the vault holds (ADR-0147 결정 1).
-    /// Absent when the env fallback is in force, because env has no vault.
+    /// `bearer` | `oauth-openai` | `anthropic-key` — what the vault holds
+    /// (ADR-0147 결정 1, #2872). Absent when the env fallback is in force,
+    /// because env has no vault.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credential_kind: Option<String>,
+    /// #2872: the wire a key link speaks — `openai` (chat/completions) or
+    /// `anthropic` (Messages). Absent for the env fallback and for an OAuth
+    /// link, whose wire is fixed by ADR-0147.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format: Option<&'static str>,
+    /// #2872: BYOK presets (OpenAI, Anthropic, xAI, OpenRouter) the form can
+    /// offer. Starting points only — a preset is saved as an ordinary link.
+    pub presets: &'static [momo_settings::ProviderPreset],
     /// ADR-0147 제약: the non-secret metadata that says whose subscription this
     /// link spends, and that the path is internal-only. Absent for a bearer link.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2857,6 +2866,11 @@ pub struct PutProviderLinkRequest {
     /// own local login (결정 3 — momo relays no browser flow).
     #[serde(default)]
     pub oauth: Option<PutProviderOAuthRequest>,
+    /// #2872: `openai` (default — every client that predates the field) or
+    /// `anthropic`. Only meaningful with `bearer`: an Anthropic console key is
+    /// sealed as the `anthropic-key` kind, which selects the Messages wire.
+    #[serde(default)]
+    pub format: Option<String>,
 }
 
 /// The OAuth half of a `PUT /v1/provider/link`.
