@@ -1,10 +1,16 @@
 // Local terminal lane (ADR-0190 D1·D2, #2772): the desktop app process opens
-// the PTY, the app webview draws it. Four commands plus two channels:
+// the PTY, the app webview draws it. Five commands plus two channels:
 //
 //   pty_spawn   { program, cwd?, cols, rows } + onOutput + onExit -> id
 //   pty_write   raw bytes (invoke body) + header `x-oort-pty-id`
 //   pty_resize  { id, cols, rows }
 //   pty_kill    { id }
+//   pty_ack     { id, bytes }   output flow control (see `OUTPUT_HIGH_WATER`)
+//
+// Every command is `async`: Tauri runs a sync command on the thread that
+// received the IPC request, which on macOS is the main (event loop) thread.
+// Nothing here may block that thread — not a write to a child that stopped
+// reading, not the login-PATH probe (#2824 review H1).
 //
 // The boundary, in the order a request meets it:
 //
@@ -29,15 +35,17 @@
 //
 // Nothing else in the shell reaches this module: no event listener, no deep
 // link, no discovery result and nothing from the server opens, writes or
-// resizes a PTY. `shell_contract.rs` pins that by source (ADR-0190 D1).
+// resizes a PTY. The one outside caller is `lib.rs`: the command table, and
+// ending every session on app exit and when the main page (re)loads.
+// `shell_contract.rs` pins that by source (ADR-0190 D1).
 // Raw output stays on this machine; it is never sent to the server (D2).
 
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{mpsc, Arc, Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::{mpsc, Arc, Condvar, Mutex, OnceLock};
 use std::time::Duration;
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
@@ -47,13 +55,38 @@ use serde::{Deserialize, Serialize};
 /// source of truth, this list only bounds what may be asked for).
 pub const HARNESSES: &[&str] = &["claude", "codex", "grok"];
 
-/// Account variables removed from every PTY's environment (ADR-0191 D2).
-/// Profile folders (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) are #2777's call.
+/// Variables removed from every PTY's environment. ADR-0191 D2 names the
+/// first four ("같은 변수" — the list is open); the rest are the same kind of
+/// thing, added on the #2824 security review: other providers' keys, endpoint
+/// and backend switches that silently change which account or bill a harness
+/// uses, nested-session markers, and the updater signing key a developer may
+/// have exported. Profile folders (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) are
+/// #2777's call.
 pub const STRIPPED_ENV: &[&str] = &[
+    // ADR-0191 D2
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "CLAUDE_CODE_OAUTH_TOKEN",
     "OPENAI_API_KEY",
+    // other harness credentials
+    "XAI_API_KEY",
+    "GROK_API_KEY",
+    "CODEX_API_KEY",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    // account / endpoint / backend switches
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_VERTEX_PROJECT_ID",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "OPENAI_BASE_URL",
+    "OPENAI_ORG_ID",
+    "OPENAI_PROJECT",
+    // a harness launched from inside another one
+    "CLAUDECODE",
+    "CLAUDE_CODE_ENTRYPOINT",
+    // dev builds: the updater signing key
+    "TAURI_SIGNING_PRIVATE_KEY",
+    "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
 ];
 
 pub const MAX_SESSIONS: usize = 32;
@@ -63,6 +96,15 @@ pub const MAX_ROWS: u16 = 500;
 /// than this is split by the web layer.
 pub const MAX_WRITE_BYTES: usize = 1 << 20;
 pub const ID_HEADER: &str = "x-oort-pty-id";
+/// Keystrokes waiting for the child. A write that would push the queue past
+/// this is refused whole ("busy") and nothing of it is sent: the web layer
+/// retries or tells the user the terminal is not reading.
+pub const MAX_QUEUED_WRITE_BYTES: usize = 4 << 20;
+/// Output sent to the webview and not yet acknowledged with `pty_ack`. At
+/// this mark the reader stops reading the PTY, so the kernel buffer fills and
+/// the child blocks on its own writes — memory stays bounded however fast the
+/// child prints.
+pub const OUTPUT_HIGH_WATER: usize = 1 << 20;
 
 const FALLBACK_LANG: &str = "en_US.UTF-8";
 const READ_CHUNK: usize = 16 * 1024;
@@ -195,6 +237,11 @@ pub fn check_shell(host: &HostFacts) -> Result<PathBuf, String> {
 }
 
 fn find_on_path(name: &str, path: &OsString) -> Option<PathBuf> {
+    // `dir.join("/bin/sh")` would replace `dir`; the allowlist already stops
+    // such an id, this stops it a second time.
+    if name.is_empty() || name.contains('/') || name.contains("..") {
+        return None;
+    }
     std::env::split_paths(path)
         .filter(|dir| dir.is_absolute())
         .map(|dir| dir.join(name))
@@ -246,7 +293,9 @@ pub fn build_command(
 }
 
 impl HostFacts {
-    pub fn current() -> Result<Self, String> {
+    /// This machine, as `program` needs it. The login shell is run (for its
+    /// PATH) only for a harness, and only after it passed `/etc/shells`.
+    pub fn current(program: &Program) -> Result<Self, String> {
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
             .ok_or_else(|| "refused: HOME unset".to_string())?
@@ -260,13 +309,23 @@ impl HostFacts {
             .filter(|l| l.starts_with('/'))
             .map(PathBuf::from)
             .collect();
-        let path = harness_path(&home, shell.as_deref());
-        Ok(Self {
+        let mut facts = Self {
             home,
             shell,
             allowed_shells,
-            path,
-        })
+            path: OsString::new(),
+        };
+        if matches!(program, Program::Harness { .. }) {
+            let probe = facts.shell_to_probe();
+            facts.path = harness_path(&facts.home, probe.as_deref());
+        }
+        Ok(facts)
+    }
+
+    /// The shell the login-PATH probe may run: only one `/etc/shells` lists
+    /// (#2824 review L1 — never execute `$SHELL` before checking it).
+    fn shell_to_probe(&self) -> Option<PathBuf> {
+        check_shell(self).ok()
     }
 }
 
@@ -281,7 +340,7 @@ fn harness_path(home: &Path, shell: Option<&Path>) -> OsString {
     for source in [login, std::env::var_os("PATH")].into_iter().flatten() {
         dirs.extend(std::env::split_paths(&source));
     }
-    for extra in [".local/bin", ".claude/local", ".bun/bin", ".npm-global/bin"] {
+    for extra in [".local/bin", ".bun/bin", ".npm-global/bin"] {
         dirs.push(home.join(extra));
     }
     dirs.push("/opt/homebrew/bin".into());
@@ -300,8 +359,13 @@ fn harness_path(home: &Path, shell: Option<&Path>) -> OsString {
 fn probe_login_path(shell: &Path) -> Option<OsString> {
     use std::process::{Command, Stdio};
     const MARK: &str = "__OORT_PATH__";
-    let mut child = Command::new(shell)
-        .args(["-l", "-c", &format!("printf '{MARK}%s{MARK}' \"$PATH\"")])
+    let mut command = Command::new(shell);
+    command.args(["-l", "-c", &format!("printf '{MARK}%s{MARK}' \"$PATH\"")]);
+    // Its own group, so a timeout takes whatever the rc files started too
+    // (a grandchild holding stdout would otherwise keep the reader alive).
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -315,6 +379,8 @@ fn probe_login_path(shell: &Path) -> Option<OsString> {
         let _ = tx.send(out);
     });
     let out = rx.recv_timeout(Duration::from_secs(3));
+    #[cfg(unix)]
+    signal_group(child.id() as i32, SIG_KILL);
     let _ = child.kill();
     let _ = child.wait();
     let out = out.ok()?;
@@ -343,20 +409,56 @@ pub trait PtySink: Send + Sync + 'static {
     fn exit(&self, exit: PtyExit);
 }
 
-type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
+/// Output credit: bytes handed to the sink and not yet acknowledged.
+#[derive(Default)]
+struct Flow {
+    unacked: Mutex<usize>,
+    wake: Condvar,
+    closed: AtomicBool,
+}
+
+impl Flow {
+    /// Block the reader (never a command) while the webview is behind.
+    fn wait_for_credit(&self) {
+        let mut unacked = self.unacked.lock().unwrap();
+        while *unacked >= OUTPUT_HIGH_WATER && !self.closed.load(Ordering::Acquire) {
+            unacked = self
+                .wake
+                .wait_timeout(unacked, Duration::from_millis(200))
+                .unwrap()
+                .0;
+        }
+    }
+    fn sent(&self, n: usize) {
+        *self.unacked.lock().unwrap() += n;
+    }
+    fn ack(&self, n: usize) {
+        let mut unacked = self.unacked.lock().unwrap();
+        *unacked = unacked.saturating_sub(n);
+        self.wake.notify_all();
+    }
+    fn close(&self) {
+        self.closed.store(true, Ordering::Release);
+        self.wake.notify_all();
+    }
+}
 
 struct Session {
     master: Box<dyn MasterPty + Send>,
-    /// Its own lock: a write can block (a child that stopped reading fills
-    /// the tty buffer), and it must not hold the session map while it does —
-    /// kill, resize and app exit need that map.
-    writer: SharedWriter,
+    /// Keystrokes go to the session's writer thread; a command only enqueues.
+    input: mpsc::Sender<Vec<u8>>,
+    queued: Arc<AtomicUsize>,
+    flow: Arc<Flow>,
+    /// Session leader = session id (portable-pty calls setsid).
     pid: i32,
 }
 
 #[derive(Default)]
 pub struct PtyManager {
     sessions: Arc<Mutex<HashMap<u32, Session>>>,
+    /// Sessions spawned or being spawned; reserved before spawning so two
+    /// concurrent spawns cannot both pass the cap.
+    live: Arc<AtomicUsize>,
     next_id: AtomicU32,
 }
 
@@ -367,9 +469,21 @@ impl PtyManager {
         cmd: CommandBuilder,
         sink: Arc<dyn PtySink>,
     ) -> Result<u32, String> {
-        if self.sessions.lock().unwrap().len() >= MAX_SESSIONS {
+        if self.live.fetch_add(1, Ordering::AcqRel) >= MAX_SESSIONS {
+            self.live.fetch_sub(1, Ordering::AcqRel);
             return Err(format!("refused: {MAX_SESSIONS} terminals already open"));
         }
+        self.spawn_reserved(plan, cmd, sink).inspect_err(|_| {
+            self.live.fetch_sub(1, Ordering::AcqRel);
+        })
+    }
+
+    fn spawn_reserved(
+        &self,
+        plan: &SpawnPlan,
+        cmd: CommandBuilder,
+        sink: Arc<dyn PtySink>,
+    ) -> Result<u32, String> {
         let pair = native_pty_system()
             .openpty(pty_size(plan.size))
             .map_err(|e| format!("openpty: {e}"))?;
@@ -391,29 +505,51 @@ impl PtyManager {
             .map_err(|e| format!("writer: {e}"))?;
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
+        let (input, keystrokes) = mpsc::channel::<Vec<u8>>();
+        let queued = Arc::new(AtomicUsize::new(0));
+        let flow = Arc::new(Flow::default());
+
+        {
+            let queued = queued.clone();
+            std::thread::Builder::new()
+                .name(format!("pty-{id}-write"))
+                .spawn(move || write_loop(writer, keystrokes, queued))
+                .map_err(|e| format!("writer thread: {e}"))?;
+        }
+        let (drained_tx, drained_rx) = mpsc::channel::<()>();
+        {
+            let (flow, sink) = (flow.clone(), sink.clone());
+            std::thread::Builder::new()
+                .name(format!("pty-{id}-read"))
+                .spawn(move || read_loop(reader, sink, flow, drained_tx))
+                .map_err(|e| format!("reader thread: {e}"))?;
+        }
         self.sessions.lock().unwrap().insert(
             id,
             Session {
                 master: pair.master,
-                writer: Arc::new(Mutex::new(writer)),
+                input,
+                queued,
+                flow: flow.clone(),
                 pid,
             },
         );
 
-        let (drained_tx, drained_rx) = mpsc::channel::<()>();
-        let out = sink.clone();
-        std::thread::Builder::new()
-            .name(format!("pty-{id}-read"))
-            .spawn(move || read_loop(reader, out, drained_tx))
-            .map_err(|e| format!("reader thread: {e}"))?;
-
         let sessions = self.sessions.clone();
+        let live = self.live.clone();
         std::thread::Builder::new()
             .name(format!("pty-{id}-wait"))
             .spawn(move || {
                 let status = child.wait();
+                // The leader is gone; whatever it left in its session (a
+                // job that ignores SIGHUP, a disowned background job) goes
+                // too, or it would keep the terminal — and the reader — open
+                // with no session left to reach it.
+                end_session(pid);
+                flow.close();
                 let _ = drained_rx.recv_timeout(DRAIN_GRACE);
                 sessions.lock().unwrap().remove(&id);
+                live.fetch_sub(1, Ordering::AcqRel);
                 let (code, signal) = match status {
                     Ok(s) => match s.signal() {
                         Some(sig) => (None, Some(sig.to_string())),
@@ -427,22 +563,41 @@ impl PtyManager {
         Ok(id)
     }
 
+    /// Queue keystrokes for the child. Never blocks: a child that is not
+    /// reading fills the queue and further writes are refused whole.
     pub fn write(&self, id: u32, bytes: &[u8]) -> Result<(), String> {
         if bytes.len() > MAX_WRITE_BYTES {
             return Err("refused: write too large".into());
         }
-        let writer = self
+        let (input, queued) = self
             .sessions
             .lock()
             .unwrap()
             .get(&id)
-            .map(|s| s.writer.clone())
+            .map(|s| (s.input.clone(), s.queued.clone()))
             .ok_or_else(|| unknown(id))?;
-        let mut writer = writer.lock().unwrap();
-        writer
-            .write_all(bytes)
-            .and_then(|_| writer.flush())
-            .map_err(|e| format!("write: {e}"))
+        let before = queued.fetch_add(bytes.len(), Ordering::AcqRel);
+        if before + bytes.len() > MAX_QUEUED_WRITE_BYTES {
+            queued.fetch_sub(bytes.len(), Ordering::AcqRel);
+            return Err("busy: the terminal is not reading its input".into());
+        }
+        input.send(bytes.to_vec()).map_err(|_| {
+            queued.fetch_sub(bytes.len(), Ordering::AcqRel);
+            unknown(id)
+        })
+    }
+
+    /// The webview drew `bytes` more of this session's output.
+    pub fn ack(&self, id: u32, bytes: usize) -> Result<(), String> {
+        let flow = self
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&id)
+            .map(|s| s.flow.clone())
+            .ok_or_else(|| unknown(id))?;
+        flow.ack(bytes);
+        Ok(())
     }
 
     pub fn resize(&self, id: u32, cols: u16, rows: u16) -> Result<(), String> {
@@ -455,8 +610,9 @@ impl PtyManager {
             .map_err(|e| format!("resize: {e}"))
     }
 
-    /// Hang up the session's process group; SIGKILL whatever ignores that.
-    /// The exit arrives on the session's exit channel.
+    /// Hang up every process in the session — the shell and each job's
+    /// process group — then SIGKILL what ignored that. The exit arrives on
+    /// the session's exit channel.
     pub fn kill(&self, id: u32) -> Result<(), String> {
         let pid = self
             .sessions
@@ -465,15 +621,16 @@ impl PtyManager {
             .get(&id)
             .map(|s| s.pid)
             .ok_or_else(|| unknown(id))?;
-        hang_up(pid);
+        signal_session(pid, SIG_HUP);
         std::thread::spawn(move || {
             std::thread::sleep(KILL_GRACE);
-            force_kill(pid);
+            // Re-enumerated by session id: a pid reused since is not in it.
+            signal_session(pid, SIG_KILL);
         });
         Ok(())
     }
 
-    /// App exit: every session's process group goes, synchronously.
+    /// App exit and page reload: every session goes, synchronously.
     pub fn kill_all(&self) {
         let pids: Vec<i32> = self
             .sessions
@@ -483,9 +640,9 @@ impl PtyManager {
         if pids.is_empty() {
             return;
         }
-        pids.iter().copied().for_each(hang_up);
+        pids.iter().for_each(|&pid| signal_session(pid, SIG_HUP));
         std::thread::sleep(Duration::from_millis(150));
-        pids.iter().copied().for_each(force_kill);
+        pids.iter().for_each(|&pid| signal_session(pid, SIG_KILL));
     }
 
     #[cfg(test)]
@@ -500,12 +657,39 @@ impl Drop for PtyManager {
     }
 }
 
-fn read_loop(mut reader: Box<dyn Read + Send>, sink: Arc<dyn PtySink>, drained: mpsc::Sender<()>) {
+fn write_loop(
+    mut writer: Box<dyn Write + Send>,
+    keystrokes: mpsc::Receiver<Vec<u8>>,
+    queued: Arc<AtomicUsize>,
+) {
+    let mut broken = false;
+    // Ends when the session (the only sender) is dropped.
+    for chunk in keystrokes {
+        if !broken {
+            broken = writer
+                .write_all(&chunk)
+                .and_then(|_| writer.flush())
+                .is_err();
+        }
+        queued.fetch_sub(chunk.len(), Ordering::AcqRel);
+    }
+}
+
+fn read_loop(
+    mut reader: Box<dyn Read + Send>,
+    sink: Arc<dyn PtySink>,
+    flow: Arc<Flow>,
+    drained: mpsc::Sender<()>,
+) {
     let mut buf = vec![0u8; READ_CHUNK];
     loop {
+        flow.wait_for_credit();
         match reader.read(&mut buf) {
             Ok(0) | Err(_) => break,
-            Ok(n) => sink.output(buf[..n].to_vec()),
+            Ok(n) => {
+                flow.sent(n);
+                sink.output(buf[..n].to_vec());
+            }
         }
     }
     let _ = drained.send(());
@@ -524,43 +708,107 @@ fn unknown(id: u32) -> String {
     format!("no terminal {id}")
 }
 
-/// The child is a session leader (portable-pty calls setsid), so its pid is
-/// also its process group id.
 #[cfg(unix)]
-fn hang_up(pid: i32) {
-    if pid > 0 {
-        unsafe {
-            libc::killpg(pid, libc::SIGHUP);
+const SIG_HUP: i32 = libc::SIGHUP;
+#[cfg(unix)]
+const SIG_KILL: i32 = libc::SIGKILL;
+#[cfg(not(unix))]
+const SIG_HUP: i32 = 1;
+#[cfg(not(unix))]
+const SIG_KILL: i32 = 9;
+
+/// The leader's exit: hang up what is left of its session, SIGKILL the rest.
+fn end_session(sid: i32) {
+    if session_members(sid).is_empty() {
+        return;
+    }
+    signal_session(sid, SIG_HUP);
+    let deadline = std::time::Instant::now() + KILL_GRACE;
+    while std::time::Instant::now() < deadline && !session_members(sid).is_empty() {
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    signal_session(sid, SIG_KILL);
+}
+
+/// Signal every process whose session id is `sid`. An interactive login shell
+/// runs each job in its own process group (job control), so signalling only
+/// the leader's group would miss them (#2824 review M1).
+#[cfg(unix)]
+fn signal_session(sid: i32, signal: i32) {
+    if sid <= 0 {
+        return;
+    }
+    // Twice: a member may fork between the listing and the signal. Only
+    // members are signalled — never a bare group id, which may have been
+    // reused once the session is gone (#2824 review L2).
+    for _ in 0..2 {
+        for pid in session_members(sid) {
+            unsafe {
+                libc::kill(pid, signal);
+            }
         }
     }
 }
 
 #[cfg(unix)]
-fn force_kill(pid: i32) {
-    if pid > 0 {
+fn signal_group(pgid: i32, signal: i32) {
+    if pgid > 0 {
         unsafe {
-            libc::killpg(pid, libc::SIGKILL);
+            libc::killpg(pgid, signal);
         }
     }
+}
+
+/// Live pids in session `sid`.
+#[cfg(target_os = "macos")]
+fn session_members(sid: i32) -> Vec<i32> {
+    if sid <= 0 {
+        return Vec::new();
+    }
+    let mut pids = vec![0i32; 8192];
+    let bytes = (pids.len() * std::mem::size_of::<i32>()) as libc::c_int;
+    let n = unsafe { libc::proc_listallpids(pids.as_mut_ptr().cast(), bytes) };
+    if n <= 0 {
+        return vec![sid];
+    }
+    pids.truncate(n as usize);
+    pids.into_iter()
+        .filter(|&pid| pid > 0 && unsafe { libc::getsid(pid) } == sid)
+        .collect()
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn session_members(sid: i32) -> Vec<i32> {
+    if sid <= 0 {
+        return Vec::new();
+    }
+    let Ok(dir) = std::fs::read_dir("/proc") else {
+        return vec![sid];
+    };
+    dir.filter_map(|e| e.ok()?.file_name().to_str()?.parse::<i32>().ok())
+        .filter(|&pid| unsafe { libc::getsid(pid) } == sid)
+        .collect()
 }
 
 // The terminal lane ships on macOS (ADR-0190 D1). Elsewhere the commands
-// exist but a session cannot be signalled by group; closing the master still
-// hangs the console up when the session is dropped.
+// exist but a session cannot be signalled by id; dropping the master still
+// hangs the console up.
 #[cfg(not(unix))]
-fn hang_up(_pid: i32) {}
+fn signal_session(_sid: i32, _signal: i32) {}
 #[cfg(not(unix))]
-fn force_kill(_pid: i32) {}
+fn session_members(_sid: i32) -> Vec<i32> {
+    Vec::new()
+}
 
 // ---------------------------------------------------------------------------
-// Tauri commands
+// Tauri commands — all async, see the module header
 // ---------------------------------------------------------------------------
 
 use tauri::ipc::{Channel, InvokeBody, InvokeResponseBody, Request};
 use tauri::State;
 
 #[derive(Default)]
-pub struct PtyState(pub PtyManager);
+pub struct PtyState(pub Arc<PtyManager>);
 
 struct ChannelSink {
     output: Channel<InvokeResponseBody>,
@@ -569,7 +817,8 @@ struct ChannelSink {
 
 impl PtySink for ChannelSink {
     fn output(&self, bytes: Vec<u8>) {
-        // A closed webview must not stall the child: drop the bytes.
+        // Bounded by `OUTPUT_HIGH_WATER`: the reader stops until the page
+        // acknowledges, so Tauri's channel queue cannot grow without limit.
         let _ = self.output.send(InvokeResponseBody::Raw(bytes));
     }
     fn exit(&self, exit: PtyExit) {
@@ -577,32 +826,38 @@ impl PtySink for ChannelSink {
     }
 }
 
-/// Open one PTY. Output arrives on `on_output` as raw bytes (`ArrayBuffer`),
-/// the exit once on `on_exit`.
+/// Open one PTY. Output arrives on `on_output` as raw bytes (`ArrayBuffer`)
+/// and must be acknowledged with `pty_ack`; the exit arrives once on
+/// `on_exit`.
 #[tauri::command]
-pub fn pty_spawn(
+pub async fn pty_spawn(
     state: State<'_, PtyState>,
     request: SpawnRequest,
     on_output: Channel<InvokeResponseBody>,
     on_exit: Channel<PtyExit>,
 ) -> Result<u32, String> {
-    let host = HostFacts::current()?;
-    let plan = plan_spawn(&request, &host)?;
-    let cmd = build_command(&plan, std::env::vars_os());
-    state.0.spawn(
-        &plan,
-        cmd,
-        Arc::new(ChannelSink {
+    let manager = state.0.clone();
+    // The login-PATH probe and openpty/fork block; keep them off the async
+    // workers as well as off the main thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        let host = HostFacts::current(&request.program)?;
+        let plan = plan_spawn(&request, &host)?;
+        let cmd = build_command(&plan, std::env::vars_os());
+        let sink = Arc::new(ChannelSink {
             output: on_output,
             exit: on_exit,
-        }),
-    )
+        });
+        manager.spawn(&plan, cmd, sink)
+    })
+    .await
+    .map_err(|e| format!("spawn did not run: {e}"))?
 }
 
 /// Keystrokes and pastes: raw bytes in the invoke body, the session id in
 /// `x-oort-pty-id`. Raw bodies need the `ipc:` transport the CSP keeps open.
+/// Queued, never written inline; `busy` when the child is not reading.
 #[tauri::command]
-pub fn pty_write(state: State<'_, PtyState>, request: Request<'_>) -> Result<(), String> {
+pub async fn pty_write(state: State<'_, PtyState>, request: Request<'_>) -> Result<(), String> {
     let InvokeBody::Raw(bytes) = request.body() else {
         return Err("refused: expected raw bytes".to_string());
     };
@@ -616,13 +871,24 @@ pub fn pty_write(state: State<'_, PtyState>, request: Request<'_>) -> Result<(),
 }
 
 #[tauri::command]
-pub fn pty_resize(state: State<'_, PtyState>, id: u32, cols: u16, rows: u16) -> Result<(), String> {
+pub async fn pty_resize(
+    state: State<'_, PtyState>,
+    id: u32,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
     state.0.resize(id, cols, rows)
 }
 
 #[tauri::command]
-pub fn pty_kill(state: State<'_, PtyState>, id: u32) -> Result<(), String> {
+pub async fn pty_kill(state: State<'_, PtyState>, id: u32) -> Result<(), String> {
     state.0.kill(id)
+}
+
+/// The page drew `bytes` more of session `id`'s output.
+#[tauri::command]
+pub async fn pty_ack(state: State<'_, PtyState>, id: u32, bytes: u32) -> Result<(), String> {
+    state.0.ack(id, bytes as usize)
 }
 
 #[cfg(test)]
@@ -738,6 +1004,18 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_path_probe_only_runs_a_listed_shell() {
+        let mut h = host(OsString::new());
+        assert_eq!(h.shell_to_probe(), Some(PathBuf::from("/bin/zsh")));
+        for shell in ["/tmp/evil-sh", "zsh"] {
+            h.shell = Some(shell.into());
+            assert_eq!(h.shell_to_probe(), None, "{shell}");
+        }
+        h.shell = None;
+        assert_eq!(h.shell_to_probe(), None);
+    }
+
     // --- folder --------------------------------------------------------------
 
     #[test]
@@ -821,9 +1099,10 @@ mod tests {
         assert_eq!(env["EDITOR"], "vim");
         assert_eq!(env["LANG"], "ko_KR.UTF-8", "the user's locale wins");
         assert_eq!(env["TERM"], "xterm-256color");
-        // ADR-0191 D2 names these four; the list is the contract.
+        // ADR-0191 D2's four lead the list; the rest came from the #2824
+        // review. A shorter list is a regression.
         assert_eq!(
-            STRIPPED_ENV,
+            STRIPPED_ENV[..4],
             [
                 "ANTHROPIC_API_KEY",
                 "ANTHROPIC_AUTH_TOKEN",
@@ -831,6 +1110,16 @@ mod tests {
                 "OPENAI_API_KEY"
             ]
         );
+        for key in [
+            "XAI_API_KEY",
+            "GROK_API_KEY",
+            "CODEX_API_KEY",
+            "ANTHROPIC_BASE_URL",
+            "CLAUDECODE",
+        ] {
+            assert!(STRIPPED_ENV.contains(&key), "{key}");
+        }
+        assert_eq!(STRIPPED_ENV.len(), 19);
     }
 
     #[test]
@@ -907,7 +1196,7 @@ mod tests {
     /// spawn → 한글 echo → resize → kill, through the user's real login shell.
     #[test]
     fn a_login_shell_round_trips_hangul_resizes_and_dies_on_kill() {
-        let host = HostFacts::current().unwrap();
+        let host = HostFacts::current(&Program::Shell).unwrap();
         let plan = plan_spawn(&shell_request(None), &host).unwrap();
         let cmd = build_command(&plan, std::env::vars_os());
         let manager = PtyManager::default();
@@ -1021,44 +1310,245 @@ mod tests {
             .contains("too large"));
     }
 
-    /// A child that stops reading (a frozen TUI) fills the tty buffer and
-    /// blocks the writer. Kill must still get through.
-    #[test]
-    fn a_blocked_write_does_not_block_kill() {
-        let plan = SpawnPlan {
+    fn sh(script: &'static str) -> SpawnPlan {
+        SpawnPlan {
             program: "/bin/sh".into(),
-            args: vec!["-c", "stty raw -echo; echo ready; sleep 600"],
+            args: vec!["-c", script],
             cwd: home(),
             size: (80, 24),
             path: None,
-        };
-        let manager = Arc::new(PtyManager::default());
+        }
+    }
+
+    /// `/bin/zsh -f -i`: interactive, so job control is on and every job gets
+    /// its own process group — what a real login shell pane does.
+    fn interactive_zsh() -> SpawnPlan {
+        SpawnPlan {
+            program: "/bin/zsh".into(),
+            args: vec!["-f", "-i"],
+            cwd: home(),
+            size: (80, 24),
+            path: None,
+        }
+    }
+
+    fn path_env() -> Vec<(OsString, OsString)> {
+        base(&[("PATH", "/usr/bin:/bin")])
+    }
+
+    /// First `<tag>=<digits>` in the output (the typed line only has `$$`).
+    fn number_after(text: &str, tag: &str) -> Option<i32> {
+        let needle = format!("{tag}=");
+        text.match_indices(&needle).find_map(|(at, _)| {
+            let digits: String = text[at + needle.len()..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            digits.parse().ok()
+        })
+    }
+
+    fn wait_number(sink: &Recorder, tag: &str) -> i32 {
+        let start = Instant::now();
+        loop {
+            if let Some(n) = number_after(&sink.text(), tag) {
+                return n;
+            }
+            assert!(start.elapsed() < SLOW, "no {tag}=<pid>: {:?}", sink.text());
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+
+    /// A child that is not reading its input (a build, `sleep`, a frozen TUI)
+    /// fills the tty and a blocking write would hang whoever called it — on
+    /// the real app, the main thread (#2824 review H1). Writes only enqueue:
+    /// each returns at once, and past `MAX_QUEUED_WRITE_BYTES` they are
+    /// refused whole with `busy`.
+    #[test]
+    fn a_write_to_a_child_that_is_not_reading_never_blocks() {
+        let plan = sh("echo ready; sleep 600");
+        let manager = PtyManager::default();
         let sink = Arc::new(Recorder::default());
         let id = manager
+            .spawn(&plan, build_command(&plan, path_env()), sink.clone())
+            .unwrap();
+        sink.wait_for("ready", SLOW);
+        let paste = "a\n".repeat(32 * 1024).into_bytes(); // 64 KiB of lines
+        let mut accepted = 0usize;
+        let busy = loop {
+            let start = Instant::now();
+            let result = manager.write(id, &paste);
+            let took = start.elapsed();
+            assert!(took < Duration::from_millis(100), "write took {took:?}");
+            match result {
+                Ok(()) => accepted += paste.len(),
+                Err(e) => break e,
+            }
+            assert!(
+                accepted <= MAX_QUEUED_WRITE_BYTES + (64 << 10),
+                "never refused"
+            );
+        };
+        assert!(busy.starts_with("busy"), "{busy}");
+        assert!(
+            accepted >= MAX_QUEUED_WRITE_BYTES - (64 << 10),
+            "{accepted}"
+        );
+
+        let start = Instant::now();
+        manager.kill(id).unwrap();
+        assert!(start.elapsed() < Duration::from_millis(100));
+        sink.wait_exit(SLOW);
+    }
+
+    /// Kill reaches a job the interactive shell put in its own process group,
+    /// even one that ignores SIGHUP (#2824 review M1).
+    #[test]
+    fn kill_ends_every_job_of_an_interactive_shell() {
+        let plan = interactive_zsh();
+        let manager = PtyManager::default();
+        let sink = Arc::new(Recorder::default());
+        let id = manager
+            .spawn(&plan, build_command(&plan, path_env()), sink.clone())
+            .unwrap();
+        let shell = manager.sessions.lock().unwrap()[&id].pid;
+        manager
+            .write(id, b"sh -c 'trap \"\" HUP; echo JOB=$$; exec sleep 600'\r")
+            .unwrap();
+        let job = wait_number(&sink, "JOB");
+        let job_group = unsafe { libc::getpgid(job) };
+        assert_ne!(job_group, shell, "job control put the job in its own group");
+        assert!(alive(job));
+
+        manager.kill(id).unwrap();
+        sink.wait_exit(SLOW);
+        wait_dead(job, Duration::from_secs(5));
+    }
+
+    /// A shell that exits on its own takes what it left behind — here a
+    /// disowned background job that ignores SIGHUP. Otherwise the job keeps
+    /// the terminal (and the reader thread) alive with no session to reach it.
+    #[test]
+    fn a_shell_that_exits_takes_its_leftover_jobs() {
+        let plan = interactive_zsh();
+        let manager = PtyManager::default();
+        let sink = Arc::new(Recorder::default());
+        let id = manager
+            .spawn(&plan, build_command(&plan, path_env()), sink.clone())
+            .unwrap();
+        manager
+            .write(id, b"(trap '' HUP; exec sleep 600) & echo BG=$!; disown\r")
+            .unwrap();
+        let job = wait_number(&sink, "BG");
+        assert!(alive(job));
+        manager.write(id, b"exit\r").unwrap();
+        sink.wait_exit(SLOW);
+        wait_dead(job, Duration::from_secs(5));
+        assert_eq!(manager.len(), 0);
+    }
+
+    /// Counts output without keeping it (the flow tests move 100 MB).
+    #[derive(Default)]
+    struct Counter {
+        bytes: AtomicUsize,
+        exit: Mutex<Option<PtyExit>>,
+    }
+
+    impl PtySink for Counter {
+        fn output(&self, bytes: Vec<u8>) {
+            self.bytes.fetch_add(bytes.len(), Ordering::AcqRel);
+        }
+        fn exit(&self, exit: PtyExit) {
+            *self.exit.lock().unwrap() = Some(exit);
+        }
+    }
+
+    /// Output that nobody acknowledges stops at the high-water mark: the
+    /// reader pauses, the child blocks, nothing piles up in memory (#2824
+    /// review M3). Acknowledging lets output flow again.
+    #[test]
+    fn unacknowledged_output_stops_at_the_high_water_mark() {
+        let plan = sh("yes | head -c 100000000; echo; echo DONE");
+        let manager = PtyManager::default();
+        let sink = Arc::new(Counter::default());
+        let id = manager
+            .spawn(&plan, build_command(&plan, path_env()), sink.clone())
+            .unwrap();
+        let start = Instant::now();
+        while sink.bytes.load(Ordering::Acquire) < OUTPUT_HIGH_WATER {
+            assert!(start.elapsed() < SLOW, "never reached the mark");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        std::thread::sleep(Duration::from_millis(800));
+        let held = sink.bytes.load(Ordering::Acquire);
+        assert!(
+            held <= OUTPUT_HIGH_WATER + READ_CHUNK,
+            "{held} bytes unacked"
+        );
+        std::thread::sleep(Duration::from_millis(400));
+        assert_eq!(
+            sink.bytes.load(Ordering::Acquire),
+            held,
+            "reader kept going"
+        );
+        assert!(
+            sink.exit.lock().unwrap().is_none(),
+            "child should be blocked"
+        );
+
+        // Now draw what arrives: output flows again, 20 MB of it, and the
+        // window never exceeds the mark.
+        let mut acked = 0usize;
+        let start = Instant::now();
+        while acked < 20_000_000 {
+            assert!(
+                start.elapsed() < Duration::from_secs(60),
+                "stalled at {acked}"
+            );
+            let now = sink.bytes.load(Ordering::Acquire);
+            assert!(
+                now - acked <= OUTPUT_HIGH_WATER + READ_CHUNK,
+                "{}",
+                now - acked
+            );
+            if now > acked {
+                manager.ack(id, now - acked).unwrap();
+                acked = now;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        manager.kill(id).unwrap();
+        let start = Instant::now();
+        while sink.exit.lock().unwrap().is_none() {
+            assert!(start.elapsed() < SLOW, "no exit after kill");
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+
+    #[test]
+    fn the_harness_list_is_pinned_and_ids_are_names() {
+        // Widening this list is a product decision (ADR-0190 D3), not a patch.
+        assert_eq!(HARNESSES, ["claude", "codex", "grok"]);
+        let bin = fake_bin().into_os_string();
+        for name in ["/bin/sh", "../claude", "a/claude", "", ".."] {
+            assert!(find_on_path(name, &bin).is_none(), "{name:?}");
+        }
+        assert!(find_on_path("claude", &bin).is_some());
+    }
+
+    #[test]
+    fn the_session_cap_is_enforced() {
+        let manager = PtyManager::default();
+        manager.live.store(MAX_SESSIONS, Ordering::Release);
+        let plan = sh("true");
+        let err = manager
             .spawn(
                 &plan,
-                build_command(&plan, base(&[("PATH", "/usr/bin:/bin")])),
-                sink.clone(),
+                build_command(&plan, path_env()),
+                Arc::new(Recorder::default()),
             )
-            .unwrap();
-        sink.wait_for("ready", Duration::from_secs(20));
-        let m = manager.clone();
-        std::thread::spawn(move || {
-            let _ = m.write(id, &vec![b'x'; MAX_WRITE_BYTES]);
-        });
-        std::thread::sleep(Duration::from_millis(300));
-        let (tx, rx) = mpsc::channel();
-        let m = manager.clone();
-        std::thread::spawn(move || {
-            let start = Instant::now();
-            let r = m.kill(id);
-            let _ = tx.send((r, start.elapsed()));
-        });
-        let (result, took) = rx
-            .recv_timeout(Duration::from_secs(3))
-            .expect("kill blocked behind a stuck write");
-        result.unwrap();
-        assert!(took < Duration::from_secs(1), "{took:?}");
-        sink.wait_exit(Duration::from_secs(10));
+            .unwrap_err();
+        assert!(err.contains("already open"), "{err}");
+        assert_eq!(manager.live.load(Ordering::Acquire), MAX_SESSIONS);
     }
 }

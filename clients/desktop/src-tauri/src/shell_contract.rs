@@ -324,7 +324,13 @@ fn the_shipped_csp_runs_only_bundled_scripts() {
 const PTY_CAPABILITY: &str = include_str!("../capabilities/pty.json");
 const BUILD_RS: &str = include_str!("../build.rs");
 const LIB_RS: &str = include_str!("lib.rs");
-const PTY_COMMANDS: [&str; 4] = ["pty_spawn", "pty_write", "pty_resize", "pty_kill"];
+const PTY_COMMANDS: [&str; 5] = [
+    "pty_spawn",
+    "pty_write",
+    "pty_resize",
+    "pty_kill",
+    "pty_ack",
+];
 
 /// Commands inside one `generate_handler![...]` block, `module::` stripped.
 fn handler_blocks(src: &str) -> Vec<Vec<String>> {
@@ -479,7 +485,8 @@ fn only_the_local_terminal_capability_grants_pty_and_none_is_remote() {
                     "allow-pty-spawn",
                     "allow-pty-write",
                     "allow-pty-resize",
-                    "allow-pty-kill"
+                    "allow-pty-kill",
+                    "allow-pty-ack"
                 ]
             );
         } else {
@@ -495,99 +502,286 @@ fn only_the_local_terminal_capability_grants_pty_and_none_is_remote() {
     );
     assert_eq!(
         permission_ids(&pty).len(),
-        4,
+        PTY_COMMANDS.len(),
         "pty.json grants only the PTY"
     );
 }
 
-/// ADR-0190 D1: nothing but the webview's own command calls opens, writes,
-/// resizes or kills a PTY. The only files that may name the module are
-/// `pty.rs` and `lib.rs`, and in `lib.rs` only as the handler entries, the
-/// managed state and the exit cleanup. A deep-link handler, a discovery
-/// result, an event listener or a server message that reached the PTY would
-/// have to add a reference somewhere else — RED here.
-#[test]
-fn nothing_but_the_command_table_reaches_the_pty() {
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src");
-    let mut files: Vec<_> = std::fs::read_dir(dir)
-        .unwrap()
-        .map(|e| e.unwrap().path())
-        .filter(|p| p.extension().is_some_and(|x| x == "rs"))
-        .collect();
-    files.sort();
-    let mentions = |src: &str| -> Vec<String> {
-        src.lines()
-            .map(str::trim)
-            .filter(|l| !l.starts_with("//"))
-            .filter(|l| {
-                l.contains("pty::")
-                    || l.contains("PtyState")
-                    || l.contains("PtyManager")
-                    || l.contains("portable_pty")
-                    || l.contains("mod pty")
-            })
-            .map(str::to_string)
-            .collect()
-    };
-    for path in &files {
-        let name = path.file_name().unwrap().to_string_lossy();
-        let src = std::fs::read_to_string(path).unwrap();
-        match name.as_ref() {
-            "pty.rs" | "shell_contract.rs" => {}
-            "lib.rs" => {
-                let allowed = [
-                    "mod pty;",
-                    "pty::pty_spawn,",
-                    "pty::pty_write,",
-                    "pty::pty_resize,",
-                    "pty::pty_kill,",
-                    ".manage(pty::PtyState::default())",
-                    "if let Some(state) = _app.try_state::<pty::PtyState>() {",
-                ];
-                for line in mentions(&src) {
-                    assert!(allowed.contains(&line.as_str()), "lib.rs: {line}");
+/// Rust source with comments removed and string/char literal contents blanked,
+/// so prose and messages cannot trip the checks below and code cannot hide in
+/// them. Line structure is kept.
+fn code_only(src: &str) -> String {
+    let b: Vec<char> = src.chars().collect();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0;
+    let blank = |c: char| if c == '\n' { '\n' } else { ' ' };
+    while i < b.len() {
+        let c = b[i];
+        let next = b.get(i + 1).copied();
+        if c == '/' && next == Some('/') {
+            while i < b.len() && b[i] != '\n' {
+                i += 1;
+            }
+        } else if c == '/' && next == Some('*') {
+            i += 2;
+            while i + 1 < b.len() && !(b[i] == '*' && b[i + 1] == '/') {
+                out.push(blank(b[i]));
+                i += 1;
+            }
+            i += 2;
+        } else if (c == 'r' || (c == 'b' && next == Some('r')))
+            && !b
+                .get(i.wrapping_sub(1))
+                .is_some_and(|p| p.is_alphanumeric() || *p == '_')
+            && {
+                let mut j = i + if c == 'b' { 2 } else { 1 };
+                while b.get(j) == Some(&'#') {
+                    j += 1;
+                }
+                b.get(j) == Some(&'"')
+            }
+        {
+            // Raw string: r"..", r#".."#, br#".."#
+            i += if c == 'b' { 2 } else { 1 };
+            let mut hashes = 0;
+            while b[i] == '#' {
+                hashes += 1;
+                i += 1;
+            }
+            i += 1; // opening quote
+            out.push('"');
+            loop {
+                if i >= b.len() {
+                    break;
+                }
+                if b[i] == '"' && (0..hashes).all(|k| b.get(i + 1 + k) == Some(&'#')) {
+                    i += 1 + hashes;
+                    break;
+                }
+                out.push(blank(b[i]));
+                i += 1;
+            }
+            out.push('"');
+        } else if c == '"' {
+            out.push('"');
+            i += 1;
+            while i < b.len() && b[i] != '"' {
+                if b[i] == '\\' {
+                    out.push(' ');
+                    i += 1;
+                }
+                if i < b.len() {
+                    out.push(blank(b[i]));
+                    i += 1;
                 }
             }
-            _ => assert!(
-                mentions(&src).is_empty(),
-                "{name} reaches the PTY: {:?}",
-                mentions(&src)
-            ),
+            out.push('"');
+            i += 1;
+        } else if c == '\'' && next == Some('\\') {
+            // '\n', '\'', '\\', '\u{..}'
+            i += 2;
+            while i < b.len() && b[i] != '\'' {
+                i += 1;
+            }
+            i += 1;
+            out.push_str("' '");
+        } else if c == '\'' && b.get(i + 2) == Some(&'\'') {
+            i += 3;
+            out.push_str("' '");
+        } else {
+            out.push(c);
+            i += 1;
         }
     }
-    // The module itself listens to nothing and talks to no network: its only
-    // inputs are the four commands.
-    let pty = std::fs::read_to_string(format!("{dir}/pty.rs")).unwrap();
-    let code: String = pty[..pty.find("#[cfg(test)]\nmod tests").unwrap_or(pty.len())]
-        .lines()
-        .filter(|l| !l.trim_start().starts_with("//"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    for banned in [
-        ".listen(",
-        ".listen_any(",
-        ".once(",
-        "on_open_url",
-        "deeplink",
-        "discovery",
+    out
+}
+
+fn idents(code: &str) -> Vec<&str> {
+    code.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .filter(|t| !t.is_empty())
+        .collect()
+}
+
+/// Every `.rs` under `src/`, recursively, relative path → source.
+fn crate_sources() -> Vec<(String, String)> {
+    fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, String)>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(&path, root, out);
+            } else if path.extension().is_some_and(|x| x == "rs") {
+                let rel = path
+                    .strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
+                out.push((rel, std::fs::read_to_string(&path).unwrap()));
+            }
+        }
+    }
+    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
+    let mut out = Vec::new();
+    walk(root, root, &mut out);
+    out.sort();
+    out
+}
+
+/// An identifier that names the PTY module or anything it exports.
+fn is_pty_ident(token: &str) -> bool {
+    token == "pty"
+        || token.starts_with("pty_")
+        || token.starts_with("Pty")
+        || token == "portable_pty"
+        || [
+            "SpawnRequest",
+            "SpawnPlan",
+            "HostFacts",
+            "Program",
+            "plan_spawn",
+            "build_command",
+            "native_pty_system",
+            "CommandBuilder",
+        ]
+        .contains(&token)
+}
+
+/// ADR-0190 D1: nothing but the webview's own command calls opens, writes,
+/// resizes or kills a PTY.
+///
+/// * Across the whole crate (`src/**`, recursively), identifiers that name the
+///   module or its items — `pty`, `pty_*`, `Pty*`, `portable_pty`, the spawn
+///   types — appear only in `pty.rs`, in this test file, and in `lib.rs` on
+///   the exact lines below. An alias (`use crate::pty as term`), a new
+///   submodule, or a deep-link/discovery handler that reached the PTY would
+///   have to name it somewhere else — RED.
+/// * `pty.rs` itself uses no event, listener, emitter, socket or network API
+///   (by identifier, so UFCS and `emit_to` count), and each of its commands is
+///   `async` (a sync command runs on the main thread — #2824 review H1).
+#[test]
+fn nothing_but_the_command_table_reaches_the_pty() {
+    const LIB_ALLOWED: &[&str] = &[
+        "mod pty;",
+        "pty::pty_spawn,",
+        "pty::pty_write,",
+        "pty::pty_resize,",
+        "pty::pty_kill,",
+        "pty::pty_ack,",
+        ".manage(pty::PtyState::default())",
+        "if let Some(state) = _app.try_state::<pty::PtyState>() {",
+        "if let Some(state) = webview.try_state::<pty::PtyState>() {",
+    ];
+    let sources = crate_sources();
+    assert!(sources.iter().any(|(n, _)| n == "pty.rs"));
+    for (name, src) in &sources {
+        let code = code_only(src);
+        match name.as_str() {
+            "pty.rs" | "shell_contract.rs" => {}
+            "lib.rs" => {
+                for line in code.lines() {
+                    if idents(line).into_iter().any(is_pty_ident) {
+                        assert!(
+                            LIB_ALLOWED.contains(&line.trim()),
+                            "lib.rs reaches the PTY: {}",
+                            line.trim()
+                        );
+                    }
+                }
+            }
+            _ => {
+                let hits: Vec<&str> = idents(&code)
+                    .into_iter()
+                    .filter(|t| is_pty_ident(t))
+                    .collect();
+                assert!(hits.is_empty(), "{name} reaches the PTY: {hits:?}");
+            }
+        }
+    }
+
+    // App exit and page (re)load end every session.
+    let lib = code_only(LIB_RS);
+    for arm in [
+        "if let tauri::RunEvent::Exit = _event {",
+        "payload.event() == tauri::webview::PageLoadEvent::Started",
+    ] {
+        let at = lib
+            .find(arm)
+            .unwrap_or_else(|| panic!("lib.rs lacks {arm}"));
+        assert!(
+            lib[at..]
+                .lines()
+                .take(5)
+                .any(|l| l.trim() == "state.0.kill_all();"),
+            "{arm} must kill every PTY session"
+        );
+    }
+
+    let pty_src = &sources.iter().find(|(n, _)| n == "pty.rs").unwrap().1;
+    let pty = code_only(
+        &pty_src[..pty_src
+            .find("#[cfg(test)]\nmod tests")
+            .unwrap_or(pty_src.len())],
+    );
+    let banned = [
+        "listen",
+        "listen_any",
+        "once",
+        "once_any",
+        "unlisten",
+        "Listener",
+        "emit",
+        "emit_to",
+        "emit_filter",
+        "emit_str",
+        "Emitter",
+        "eval",
+        "net",
+        "TcpListener",
         "TcpStream",
         "UdpSocket",
+        "UnixListener",
+        "UnixStream",
+        "UnixDatagram",
         "reqwest",
-        "emit(",
-    ] {
-        assert!(!code.contains(banned), "pty.rs contains {banned}");
+        "hyper",
+        "on_open_url",
+        "deep_link",
+        "deeplink",
+        "discovery",
+    ];
+    let used: Vec<&str> = idents(&pty)
+        .into_iter()
+        .filter(|t| banned.contains(t))
+        .collect();
+    assert!(used.is_empty(), "pty.rs uses {used:?}");
+
+    // Exactly the five commands leave the module, every one of them async.
+    let lines: Vec<&str> = pty.lines().map(str::trim).collect();
+    let mut commands = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        if *line == "#[tauri::command]" || line.starts_with("#[tauri::command(") {
+            let decl = lines[i + 1..]
+                .iter()
+                .find(|l| !l.starts_with("#[") && !l.is_empty())
+                .unwrap();
+            let name = decl
+                .strip_prefix("pub async fn ")
+                .unwrap_or_else(|| panic!("command is not `pub async fn`: {decl}"));
+            commands.push(name.split(['(', '<']).next().unwrap().to_string());
+        }
     }
-    // App exit ends every session (the acceptance's "앱 종료 시 자식 정리").
-    let exit_arm = LIB_RS
-        .find("if let tauri::RunEvent::Exit = _event {")
-        .expect("lib.rs handles RunEvent::Exit");
-    assert!(
-        LIB_RS[exit_arm..]
-            .lines()
-            .take(5)
-            .any(|l| l.trim() == "state.0.kill_all();"),
-        "RunEvent::Exit must kill every PTY session"
+    assert_eq!(commands, PTY_COMMANDS, "pty.rs commands");
+}
+
+#[test]
+fn the_source_filter_sees_through_comments_and_strings() {
+    let code = code_only(
+        "let a = \"pty::x // not a comment\"; // pty in a comment\nlet b = r#\"emit_to\"#; let c = '\"'; /* TcpListener */ let d = pty;",
     );
-    // Exactly four commands leave the module.
-    assert_eq!(code.matches("#[tauri::command]").count(), 4);
+    let ids = idents(&code);
+    assert_eq!(ids.iter().filter(|t| is_pty_ident(t)).count(), 1, "{code}");
+    assert!(
+        !ids.contains(&"emit_to") && !ids.contains(&"TcpListener"),
+        "{code}"
+    );
+    assert!(ids.contains(&"d"), "{code}");
 }

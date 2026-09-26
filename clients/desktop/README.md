@@ -59,7 +59,7 @@ src-tauri/
                       # allow-<command> per app command. build.rs declares an
                       # app ACL manifest (#2772), so an app command without a
                       # grant is refused.
-                      # pty.json: the four pty_* commands, main webview,
+                      # pty.json: the five pty_* commands, main webview,
                       # local origin only, no remote URLs (ADR-0190 D1)
   icons/              # generated via `cargo tauri icon app-icon.png`
 ```
@@ -116,10 +116,11 @@ interface HostedAgentProbe {
 | `updater_check` | — | `AvailableUpdate \| null` \| error | `null` = already newest. **Rejects** on a failed check; see below. |
 | `updater_install` | — | `void` \| error | Downloads, verifies minisign, swaps the bundle. Does not restart. |
 | `updater_relaunch` | — | never returns | Restarts into the installed build. |
-| `pty_spawn` | `{ request: { program: {kind:"shell"} \| {kind:"harness", id:"claude"\|"codex"\|"grok"}, cwd?: string, cols, rows }, onOutput: Channel<ArrayBuffer>, onExit: Channel<PtyExit> }` | `number` (session id) \| error | Local terminal lane (ADR-0190 D1·D2, #2772). `shell` = `$SHELL -l` (must be in /etc/shells); `harness` = that CLI resolved on this machine's login PATH. No path or argv from the webview (unknown fields are refused). `cwd` must be a directory inside home (default home). `cols` 2–1000, `rows` 1–500, at most 32 sessions. The environment drops `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `OPENAI_API_KEY` (ADR-0191 D2), sets `TERM=xterm-256color`, and `LANG=en_US.UTF-8` only when no locale is set. Output bytes arrive raw on `onOutput`; `onExit` fires once with `{ id, code: number\|null, signal: string\|null }`. Granted only by `capabilities/pty.json`. Desktop only. |
-| `pty_write` | raw bytes (invoke body) + header `x-oort-pty-id` | `void` \| error | Keystrokes/pastes, ≤ 1 MiB per call. Rejects a JSON body. Needs the `ipc:` transport (same CSP note as `open_pdf_attachment`). |
+| `pty_spawn` | `{ request: { program: {kind:"shell"} \| {kind:"harness", id:"claude"\|"codex"\|"grok"}, cwd?: string, cols, rows }, onOutput: Channel<ArrayBuffer>, onExit: Channel<PtyExit> }` | `number` (session id) \| error | Local terminal lane (ADR-0190 D1·D2, #2772). `shell` = `$SHELL -l` (must be in /etc/shells); `harness` = that CLI resolved on this machine's login PATH (the login shell is only run after the /etc/shells check). No path or argv from the webview (unknown fields are refused). `cwd` must be a directory inside home (default home). `cols` 2–1000, `rows` 1–500, at most 32 sessions. The environment drops the account/endpoint variables in `pty.rs` `STRIPPED_ENV` (ADR-0191 D2's four plus the #2824 review's additions), sets `TERM=xterm-256color`, and `LANG=en_US.UTF-8` only when no locale is set. Output bytes arrive raw on `onOutput` and **must be acknowledged** with `pty_ack`: after 1 MiB unacknowledged the shell stops reading the PTY and the child blocks. `onExit` fires once with `{ id, code: number\|null, signal: string\|null }`. When the shell exits, whatever it left in its session is ended too. Every `pty_*` command is async (never on the main thread) and granted only by `capabilities/pty.json`. A (re)load of the main page ends every session. Desktop only. |
+| `pty_write` | raw bytes (invoke body) + header `x-oort-pty-id` | `void` \| error | Keystrokes/pastes, ≤ 1 MiB per call. Queued for the session's writer thread, never written inline. When 4 MiB are already waiting (the child is not reading its input) the write is refused whole with an error starting `busy` and nothing of it is sent. Rejects a JSON body. Needs the `ipc:` transport (same CSP note as `open_pdf_attachment`). |
 | `pty_resize` | `{ id, cols, rows }` | `void` \| error | Same bounds as spawn. |
-| `pty_kill` | `{ id }` | `void` \| error | SIGHUP to the session's process group, SIGKILL after 0.5 s. The exit arrives on `onExit`. App exit (`RunEvent::Exit`) does this for every session. |
+| `pty_kill` | `{ id }` | `void` \| error | SIGHUP to every process in the session (each job's group included), SIGKILL 0.5 s later to what is left. The exit arrives on `onExit`. App exit (`RunEvent::Exit`) does this for every session. |
+| `pty_ack` | `{ id, bytes }` | `void` \| error | The page drew `bytes` more output of session `id` (flow control, see `pty_spawn`). Batch it (e.g. every 64 KiB or 16 ms): one ack per output chunk costs an IPC round trip per ~1 KiB (#2824 R1 smoke: per-chunk acks took the app to ~700 MB RSS on 200 MB of output; batched acks held it at ~110 MB). |
 
 ```ts
 interface AvailableUpdate {

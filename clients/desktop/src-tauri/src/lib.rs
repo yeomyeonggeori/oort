@@ -31,7 +31,7 @@ mod opener;
 #[cfg(desktop)]
 mod pdf_viewer;
 // Local terminal lane (ADR-0190 D1·D2, #2772): the app process opens the PTY,
-// the webview draws it. Reachable only through the four `pty_*` commands,
+// the webview draws it. Reachable only through the five `pty_*` commands,
 // which only `capabilities/pty.json` grants.
 #[cfg(desktop)]
 mod pty;
@@ -99,6 +99,7 @@ pub fn run() {
             pty::pty_write,
             pty::pty_resize,
             pty::pty_kill,
+            pty::pty_ack,
         ]);
 
     #[cfg(not(desktop))]
@@ -115,6 +116,17 @@ pub fn run() {
         keychain::keychain_clear_refresh_token,
         app_version,
     ]);
+
+    // A (re)loaded main page cannot reach the sessions the previous page
+    // opened (their channels died with it), so they end here (#2824 M3).
+    #[cfg(desktop)]
+    let builder = builder.on_page_load(|webview, payload| {
+        if webview.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started {
+            if let Some(state) = webview.try_state::<pty::PtyState>() {
+                state.0.kill_all();
+            }
+        }
+    });
 
     builder
         .manage(deeplink::DeepLinkState::default())

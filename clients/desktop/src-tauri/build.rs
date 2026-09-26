@@ -49,4 +49,5 @@ const APP_COMMANDS: &[&str] = &[
     "pty_write",
     "pty_resize",
     "pty_kill",
+    "pty_ack",
 ];
