@@ -209,10 +209,11 @@ pub use effort::{
 };
 pub use error::AgentError;
 pub use hosted_notice::{
-    hosted_skip_notice_body, hosted_skip_notice_key, hosted_skip_notice_props, HostedSkipReason,
-    HOSTED_DELIVERY_GUIDE_URL, HOSTED_SKIP_ACTION_HREF, HOSTED_SKIP_NOTICE_AUDIT_SCHEMA,
-    HOSTED_SKIP_NOTICE_KIND, HOSTED_SKIP_NOTICE_POSTED_ACTION, HOSTED_SKIP_NOTICE_SOURCE,
-    HOSTED_SKIP_NOTICE_THROTTLED_ACTION, HOSTED_SKIP_NOTICE_THROTTLE_SECONDS,
+    hosted_skip_notice_body, hosted_skip_notice_key, hosted_skip_notice_props, inert_display_name,
+    HostedSkipReason, HOSTED_DELIVERY_GUIDE_URL, HOSTED_SKIP_ACTION_HREF,
+    HOSTED_SKIP_NOTICE_AUDIT_SCHEMA, HOSTED_SKIP_NOTICE_KIND, HOSTED_SKIP_NOTICE_POSTED_ACTION,
+    HOSTED_SKIP_NOTICE_SOURCE, HOSTED_SKIP_NOTICE_THROTTLED_ACTION,
+    HOSTED_SKIP_NOTICE_THROTTLE_SECONDS,
 };
 pub use korean::{attach_particle, has_final_consonant, particle_for, ParticlePair};
 pub use mention::{

@@ -1773,6 +1773,15 @@ async fn a_dm_with_a_hosted_agent_says_dms_are_not_delivered_without_a_door() {
         .expect("seed dm membership");
     }
 
+    // Security review Medium-3: whoever names the agent must not be able to
+    // plant a link in this server-voiced line.
+    sqlx::query("UPDATE member SET display_name=$2 WHERE id=$1")
+        .bind(fixture.hosted_agent)
+        .bind("[보안 재인증](https://evil.example)")
+        .execute(&su)
+        .await
+        .expect("rename agent");
+
     // No handle: the 1:1 DM rule addresses the agent by itself.
     let sent: Value = client
         .post(format!(
@@ -1815,6 +1824,12 @@ async fn a_dm_with_a_hosted_agent_says_dms_are_not_delivered_without_a_door() {
     assert!(
         !body.contains("승인해"),
         "never asks to approve a DM: {body}"
+    );
+    assert_eq!(
+        body,
+        "1:1 대화는 ［보안 재인증］(https：//evil.example)에게 전달되지 않아요. \
+         외부 에이전트는 승인된 채널에서 불러 주세요.",
+        "the name is inert: no `[..](..)` and no `http(s)://` survive"
     );
     assert!(
         notices[0]["props"].get("notice_action").is_none(),

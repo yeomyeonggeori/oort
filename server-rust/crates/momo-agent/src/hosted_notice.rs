@@ -99,6 +99,8 @@ impl HostedSkipReason {
 /// by a topic/subject particle: 「에게」 and 「의」 do not change with the
 /// final consonant, so a Latin name reads cleanly without the 「은(는)」 hedge.
 pub fn hosted_skip_notice_body(reason: HostedSkipReason, agent_display_name: &str) -> String {
+    let inert = inert_display_name(agent_display_name);
+    let agent_display_name = inert.as_str();
     match reason {
         HostedSkipReason::DeliveryNotEnabled => format!(
             "{agent_display_name}에게 메시지를 전달하지 못했어요. 이 서버에서 외부 에이전트 전달이 꺼져 있어요. \
@@ -116,6 +118,23 @@ pub fn hosted_skip_notice_body(reason: HostedSkipReason, agent_display_name: &st
             "1:1 대화는 {agent_display_name}에게 전달되지 않아요. 외부 에이전트는 승인된 채널에서 불러 주세요."
         ),
     }
+}
+
+/// A display name made unable to become markup in the clients' renderer
+/// (security review Medium-3, #2889).
+///
+/// The body is parsed by `momo-core` `markdown.ts` on web and phone. That
+/// parser has **no backslash escape**, so escaping is not an option; instead
+/// the two constructs that produce a link are made impossible to form:
+/// `[label](href)` needs ASCII brackets (swapped for their fullwidth forms),
+/// and a bare link needs `http(s)://` (the colon becomes fullwidth). A backtick
+/// could open a code span that swallows the guide link after it, so it is
+/// swapped too. An ordinary name contains none of these and is unchanged.
+pub fn inert_display_name(name: &str) -> String {
+    name.replace('[', "［")
+        .replace(']', "］")
+        .replace('`', "｀")
+        .replace("://", "：//")
 }
 
 /// `message.props` of a hosted skip line. The throttle reads `source`,
@@ -197,6 +216,42 @@ mod tests {
                 "no particle hedge after a Latin name"
             );
         }
+    }
+
+    /// Security review Medium-3 (#2889): the body is rendered as markdown, and
+    /// whoever names an agent must not be able to plant a link inside a
+    /// server-voiced line. The only link a body may carry is the guide's.
+    #[test]
+    fn an_agent_name_cannot_plant_a_link_in_the_server_line() {
+        for name in [
+            "[보안 재인증](https://evil.example)",
+            "https://evil.example/login",
+            "HTTP://evil.example",
+            "[x](http://evil.example)",
+        ] {
+            for reason in [
+                HostedSkipReason::DeliveryNotEnabled,
+                HostedSkipReason::ConnectionUnavailable,
+                HostedSkipReason::ChannelUnapproved,
+                HostedSkipReason::DirectMessageNotApprovable,
+            ] {
+                let body = hosted_skip_notice_body(reason, name);
+                let lower = body.to_lowercase();
+                assert!(!lower.contains("://evil"), "bare url survives: {body}");
+                let without_guide =
+                    body.replace(&format!("[켜는 방법]({HOSTED_DELIVERY_GUIDE_URL})"), "");
+                assert!(
+                    !without_guide.contains("]("),
+                    "link syntax survives: {body}"
+                );
+                assert!(!without_guide.contains('['), "{body}");
+            }
+        }
+        // An ordinary name is left exactly as typed.
+        assert!(
+            hosted_skip_notice_body(HostedSkipReason::ChannelUnapproved, "Claude Code (beta)")
+                .contains("Claude Code (beta)에게")
+        );
     }
 
     #[test]
