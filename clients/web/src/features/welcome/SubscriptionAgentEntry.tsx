@@ -61,8 +61,11 @@ function useSubscriptionEntrySurface(): SubscriptionSurface | null {
     retry: false,
     enabled: override === null && SUBSCRIPTION_AGENTS_BUILD_FLAG,
   });
+  // 명부 조회가 실패하면 내 역할을 모른다. `canCreateAgent`는 역할이 없을 때
+  // 문을 열어 두므로(명부 밖 사람 가정), 실패를 「정착」으로 넘기면 일반 멤버에게도
+  // 입구가 서고 누르면 서버가 403으로 막는다(#2893). 실패는 정착이 아니다.
   const mayJoin = canCreateAgentNow(
-    !directory.isPending,
+    !directory.isPending && !directory.isError,
     session.member.kind,
     memberFor(directory.directory, session.member.id)?.role
   );

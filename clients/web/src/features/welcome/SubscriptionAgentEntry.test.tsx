@@ -177,6 +177,27 @@ describe("설정 › AI 연결 입구 (#2870)", () => {
     expect(q("subscription-entry")).toBeNull();
   });
 
+  it("명부 조회가 실패하면 입구를 세우지 않는다(#2893: 역할을 모르면 합류 권한도 모른다)", async () => {
+    vi.mocked(fetchRoster).mockRejectedValue(new ApiError(500, "roster down"));
+    mount(createElement(SubscriptionAgentEntryCard, { from: "settings" }));
+    await settle();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(q("subscription-entry")).toBeNull();
+    expect(q("subscription-entry-open")).toBeNull();
+  });
+
+  it("명부 조회가 실패하면 에이전트 화면 머리 버튼도 없다(#2893)", async () => {
+    vi.mocked(fetchRoster).mockRejectedValue(new ApiError(500, "roster down"));
+    mount(createElement(SubscriptionAgentEntryButton, { from: "agents" }));
+    await settle();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(q("agent-hub-subscription-entry")).toBeNull();
+  });
+
   it("데스크탑 앱이 아니면 버튼 대신 이유 한 줄", async () => {
     envSlot.tauri = false;
     mount(createElement(SubscriptionAgentEntryCard, { from: "settings" }));
