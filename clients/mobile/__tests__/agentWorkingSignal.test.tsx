@@ -13,6 +13,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react-native';
 import React from 'react';
 
@@ -360,7 +361,9 @@ function renderShell() {
 async function openAgentsTab() {
   renderShell();
   await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
-  fireEvent.press(screen.getByTestId('tab-agents'));
+  // 탭이던 것이 FAB 시트의 문이 되었다 (ADR-0189 D1, #2714).
+  fireEvent.press(screen.getByTestId('shell-fab'));
+  fireEvent.press(screen.getByTestId('new-message-agents'));
   await waitFor(() => expect(screen.getByTestId('agents-list')).toBeTruthy());
   await waitFor(() => expect(agentSub()).toBeTruthy());
 }
@@ -668,7 +671,9 @@ describe('연결이 끊기면 화면이 그렇다고 말한다 (2R H2·M4)', () 
     // 버튼은 자기 요소다. 읽히지 않는 것은 없다.
     const bar = screen.getByTestId('composer-working');
     expect(bar.props.accessible).not.toBe(true);
-    expect(screen.getByLabelText(/김인턴.*승인을 기다립니다|김인턴.*작업 중/)).toBeTruthy();
+    // 막대 **안**에서 찾는다: 홈의 「작업 중」 카드(DS2-3)가 대화 층 밑에 마운트된 채
+    // 같은 턴을 같은 낱말로 말하므로, 화면 전체에서 찾으면 둘이 걸린다.
+    expect(within(bar).getByLabelText(/김인턴.*승인을 기다립니다|김인턴.*작업 중/)).toBeTruthy();
     expect(screen.getByLabelText(TURN_STALE_SENTENCE)).toBeTruthy();
     // ③ 헤더 부제가 활동 줄과 같은 말을 한다. 「연결 중…」이면 같은 화면에서 두
     //    문장이 서로를 부정한다 (M3).

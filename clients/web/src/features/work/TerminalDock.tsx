@@ -238,7 +238,7 @@ export function TerminalDock({
       data-short={short ? "" : undefined}
       onKeyDown={onDockKeyDown}
       className={cn(
-        "flex flex-col border-t border-line bg-surface outline-none focus-visible:focus-ring",
+        "flex flex-col border-t border-line bg-pane outline-none focus-visible:focus-ring",
         short
           ? "terminal-dock-short"
           : shownExpanded

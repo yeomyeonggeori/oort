@@ -1,7 +1,11 @@
-/* 감람 — forest olivine. Darkened off `--ok` so the two greens stay two greens. */
-:root[data-accent="gamram"],
+/* 감람 — ADR-0174 액센트 id의 DS2 이행 바인딩 (ADR-0189 D3, DS2-1 #2713).
+ * 신호 프리셋 `gamram`의 새벽하늘 값(core `resolvePreset`).
+ * 값은 생성본 palettes/dawnsky.css와 같고 catalog.contrast.test.ts가 core와 대조한다.
+ * 새벽하늘 전용이다: DS2-7이 data-accent를 data-signal로 옮기면 이 파일은 걷힌다. */
+:root[data-palette="dawnsky"][data-accent="gamram"],
 [data-accent-swatch="gamram"] {
-  --accent: light-dark(#005400, #8cb858);
-  --accent-soft: light-dark(#dcefda, #272d23);
-  --on-accent: light-dark(#fffefb, #17161a);
+  --signal: light-dark(#005400, #8cb858);
+  --on-signal: light-dark(#fffefc, #16171b);
+  --signal-text: light-dark(#005400, #8cb858);
+  --signal-soft: light-dark(#dce5d8, #2f3a31);
 }

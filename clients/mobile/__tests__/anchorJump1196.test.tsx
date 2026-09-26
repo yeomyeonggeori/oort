@@ -252,11 +252,11 @@ async function openConversation(): Promise<void> {
   );
 }
 
-/** 사이드바 → 검색 → 결과 한 건 누르기. 사람이 실제로 걷는 길 그대로다. */
+/** 홈 → 검색 탭 → 결과 한 건 누르기. 사람이 실제로 걷는 길 그대로다(DS2-3: 머리의 문이 탭바로). */
 async function openFromSearch(): Promise<void> {
   renderShell();
   await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
-  fireEvent.press(screen.getByTestId('open-message-search'));
+  fireEvent.press(screen.getByTestId('tab-search'));
   await waitFor(() => expect(screen.getByTestId('search-input')).toBeTruthy());
   fireEvent.changeText(screen.getByTestId('search-input'), '배포 로그');
   await waitFor(() => expect(screen.getByTestId('search-results')).toBeTruthy(), {

@@ -664,7 +664,7 @@ function OpenLinkRow({ url, storageKey }: { url: string; storageKey: string }) {
           });
         }}
         className={cn(
-          "flex items-center gap-2 border-t border-line px-3 py-2 text-meta text-accent press hover:bg-surface-hover",
+          "flex items-center gap-2 border-t border-line px-3 py-2 text-meta text-signal-text press hover:bg-surface-hover",
           "focus-visible:focus-ring"
         )}
       >

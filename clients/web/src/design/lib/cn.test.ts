@@ -94,14 +94,21 @@ describe("cn: role and color are different axes", () => {
 });
 
 describe("Button keeps its label color at every size", () => {
-  // R2 H2: the accent fill is unreadable if `text-meta` evicts `text-on-accent`.
-  // Button renders `cn(buttonVariants(...))`, so the merge is what ships.
-  it("filled sizes all carry text-on-accent", () => {
+  // R2 H2: the primary fill is unreadable if `text-meta` evicts its label
+  // colour. Button renders `cn(buttonVariants(...))`, so the merge is what
+  // ships. DS2-1: the primary fill is ink (`bg-primary`), labelled `text-on-primary`.
+  it("filled sizes all carry text-on-primary", () => {
     for (const size of ["default", "sm", "lg", "icon"] as const) {
       expect(cn(buttonVariants({ variant: "default", size }))).toContain(
-        "text-on-accent"
+        "text-on-primary"
       );
     }
+  });
+
+  it("a caller's padding replaces the pill padding instead of stacking (DS2-1)", () => {
+    const merged = cn(buttonVariants({ variant: "default", size: "default" }), "px-2");
+    expect(merged).toContain("px-2");
+    expect(merged).not.toContain("px-pill-inline");
   });
 
   it("the small size is still 12px", () => {

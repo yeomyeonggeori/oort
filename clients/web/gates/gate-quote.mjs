@@ -632,8 +632,8 @@ async function exercise(browser) {
     const accent = probeWith("border-accent border-l-2", (s) => s.borderLeftColor);
     // 앰버가 이 표면에서 이미 맡고 있는 세 뜻. 로그에 함께 남겨, 「인용이 저것들과
     // 같은 색인가」를 사람이 눈이 아니라 숫자로 확인할 수 있게 한다.
-    const mention = probeWith("text-accent", (s) => s.color);
-    const unreadRule = probeWith("bg-accent", (s) => s.backgroundColor);
+    const mention = probeWith("text-signal-text", (s) => s.color);
+    const unreadRule = probeWith("bg-signal", (s) => s.backgroundColor);
     const anchorTint = probeWith("bg-accent-soft", (s) => s.backgroundColor);
 
     const blocks = document.querySelectorAll('[data-testid="quote-block"]');

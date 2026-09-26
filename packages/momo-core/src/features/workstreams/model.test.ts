@@ -71,10 +71,12 @@ describe("workstream status vocabulary", () => {
   });
 
   it("spends the accent on 멈춤 only, the one state waiting on a person", () => {
-    expect(WORKSTREAM_STATUS_CLASS.paused).toContain("accent");
-    expect(WORKSTREAM_STATUS_CLASS.active).not.toContain("accent");
-    expect(WORKSTREAM_STATUS_CLASS.done).not.toContain("accent");
-    expect(WORKSTREAM_STATUS_CLASS.cancelled).not.toContain("accent");
+    // ADR-0189 D6 (DS2-1): 강조는 신호다. 글자는 --signal-text 로 칠한다.
+    const spends = (cls: string) => /\b(?:accent|signal)/.test(cls);
+    expect(WORKSTREAM_STATUS_CLASS.paused).toContain("text-signal-text");
+    expect(spends(WORKSTREAM_STATUS_CLASS.active)).toBe(false);
+    expect(spends(WORKSTREAM_STATUS_CLASS.done)).toBe(false);
+    expect(spends(WORKSTREAM_STATUS_CLASS.cancelled)).toBe(false);
   });
 
   it("accepts the server's own filter values and nothing else", () => {

@@ -1,5 +1,13 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import {
+  CANVAS_STOPS,
+  COLOR_ROLES,
+  DEFAULT_THEME_ID,
+  DERIVED_ROLES,
+  SIGNAL_MIN_DISTANCE,
+  THEMES,
+} from "@momo/core/design/themes";
 
 /**
  * The Dawn palette is not "checked by eye". tokens.css is parsed here and every
@@ -10,12 +18,24 @@ import { describe, expect, it } from "vitest";
 
 const css = readFileSync(new URL("./tokens.css", import.meta.url), "utf8");
 
-/** `--name: light-dark(#aaa, #bbb);` -> { name: [light, dark] } */
+/**
+ * `--name: light-dark(#aaa, #bbb);` -> { name: [light, dark] }.
+ *
+ * ADR-0189 D6 migration aliases (`--accent: var(--signal);`) resolve to their
+ * target's pair, so a legacy name keeps meaning what the screen paints. A name
+ * that already has a literal pair keeps it: an alias never overwrites a value.
+ */
 export function parseLightDarkTokens(source: string): Record<string, [string, string]> {
   const out: Record<string, [string, string]> = {};
   const re =
     /--([a-z-]+):\s*light-dark\(\s*(#[0-9a-f]{6})\s*,\s*(#[0-9a-f]{6})\s*\)/gi;
   for (const m of source.matchAll(re)) out[m[1]] = [m[2], m[3]];
+  const aliases = [...source.matchAll(/--([a-z-]+):\s*var\(--([a-z-]+)\);/g)];
+  for (let pass = 0; pass < 3; pass += 1) {
+    for (const [, name, target] of aliases) {
+      if (!out[name] && out[target]) out[name] = out[target];
+    }
+  }
   return out;
 }
 
@@ -24,14 +44,15 @@ const TOKENS = parseLightDarkTokens(css);
 /**
  * `--scrim` is the one token that is not opaque, so the generic parser above
  * cannot see it and the pairs it produces cannot describe it. It gets its own
- * reader: `light-dark(rgb(r g b / a), rgb(r g b / a))`.
+ * reader: `light-dark(rgba(r,g,b,a), rgba(r,g,b,a))` — the form core emits
+ * (ADR-0189 D5) — or the older `rgb(r g b / a)`.
  */
 function parseScrim(source: string): [ScrimLayer, ScrimLayer] {
-  const rgba = String.raw`rgb\(\s*(\d+)\s+(\d+)\s+(\d+)\s*\/\s*([\d.]+)\s*\)`;
+  const rgba = String.raw`rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)\s*[,/]\s*([\d.]+)\s*\)`;
   const m = source.match(
     new RegExp(String.raw`--scrim:\s*light-dark\(\s*${rgba}\s*,\s*${rgba}\s*\)`)
   );
-  if (!m) throw new Error("--scrim missing from tokens.css, or not light-dark(rgb(...), rgb(...))");
+  if (!m) throw new Error("--scrim missing from tokens.css, or not light-dark(rgba(...), rgba(...))");
   const layer = (o: number): ScrimLayer => ({
     rgb: [Number(m[o]), Number(m[o + 1]), Number(m[o + 2])],
     alpha: Number(m[o + 3]),
@@ -162,6 +183,12 @@ const SCHEMES = [
 /** Surfaces any body text can land on. */
 export const SURFACES = [
   "surface",
+  "surface-muted",
+  "sheet",
+  "pane",
+  "canvas-top",
+  "canvas-mid",
+  "canvas-bottom",
   "surface-raised",
   "surface-sidebar",
   "surface-hover",
@@ -253,12 +280,43 @@ export const CHIP_VESSEL_MIN_DISTANCE = 0.02;
 export const FOREGROUNDS = [
   "ink",
   "ink-muted",
-  "accent",
+  // ADR-0189 D6: 신호의 **글자**는 --signal-text 다. --signal(=--accent)은 점·막대·
+  // 링의 비텍스트 색이라 3:1 을 진다(아래 "signal marks meet 3:1"). `text-accent`
+  // 로 글자를 칠하던 자리는 DS2-1 이 `text-signal-text` 로 옮겼다.
+  "signal-text",
   "agent",
   "danger",
   "ok",
   "warn",
 ] as const;
+
+/**
+ * 어느 전경이 어느 면에 서는가 — 닫힌 표 (DS2-1 #2713).
+ *
+ * 앞 판은 FOREGROUNDS × SURFACES 전역 곱이었다. `CHIP_VESSEL_SURFACES` 산문이 이미
+ * 경고한 모양이다: 「실제로는 만나지 않는 쌍에 바닥을 요구하게 되고, 그 요구를
+ * 맞추려고 토큰을 조율하는 것은 화면에 없는 문제를 위해 값을 망치는 일」. 잉크 둘은
+ * 여전히 모든 면에 선다. 톤 글자는 아래 두 면을 뺀 모든 면에 선다.
+ *
+ *   `surface-pressed`  누르는 동안(수십 ms)만 칠해지는 채움이다. 그 위 톤 글자는
+ *                      없다(잉크 둘은 여기서도 잰다).
+ *   `muted-soft`       톤 없는 칩 그릇. core 가 이 그릇 위 잉크 둘만 보장한다. 그 위에
+ *                      서는 톤 글자는 원장 칩의 둘뿐이다 — `SESSION_STATUS_CLASS`
+ *                      (running=warn · orphaned=신호)와 ADE 서랍의 같은 두 칸. 그래서
+ *                      이 그릇에는 warn·signal-text 만 재고, 다른 톤을 여기 세우면
+ *                      이 표에 줄을 더해야 한다(새 줄은 곧바로 재진다).
+ */
+const TONE_HOST_EXCLUDED = ["surface-pressed", "muted-soft"] as const;
+export const MUTED_SOFT_TONES = ["warn", "signal-text"] as const;
+
+function foregroundHosts(fg: string): readonly string[] {
+  if (fg === "ink" || fg === "ink-muted") return SURFACES;
+  const hosts: string[] = SURFACES.filter(
+    (bg) => !(TONE_HOST_EXCLUDED as readonly string[]).includes(bg)
+  );
+  if ((MUTED_SOFT_TONES as readonly string[]).includes(fg)) hosts.push("muted-soft");
+  return hosts;
+}
 
 /**
  * Surfaces a bordered control (input, `<select>`, outline button) may sit on.
@@ -281,11 +339,26 @@ export const FOREGROUNDS = [
  */
 export const CONTROL_SURFACES = [
   "surface",
+  "surface-muted",
+  "sheet",
+  "pane",
+  "canvas-top",
+  "canvas-mid",
+  "canvas-bottom",
   "surface-raised",
   "surface-sidebar",
   "surface-hover",
-  "surface-pressed",
+  "accent-soft",
+  "agent-soft",
+  "ok-soft",
 ] as const;
+// ADR-0189 D6 이후 테두리를 진 컨트롤은 텍스트 입력 그릇뿐이고, core 가
+// --line-strong 을 「입력이 설 수 있는 모든 면」(표면·보조 면·시트·바닥 정지점)에서
+// 3:1 로 골랐다. 그 목록이 위 일곱이다. `--surface-pressed` 는 빠졌다: 누르는
+// 순간의 채움이지 입력 칸이 놓이는 바닥이 아니고, 새벽하늘 라이트에서 2.98 이다.
+// `--accent-soft`(=--signal-soft)·`--agent-soft`·`--ok-soft` 는 들어왔다: 새벽하늘에서
+// 셋 다 3:1 을 넘는다(라이트 3.21·3.17·3.34 · 다크 3.26·3.25·3.05). 표는 숫자를 따른다.
+// warn-soft·danger-soft·muted-soft 는 다크에서 2.99·2.97·3.08(라이트 2.79)로 밖이다.
 
 function pick(token: string, index: 0 | 1): string {
   const pair = TOKENS[token];
@@ -307,9 +380,14 @@ function pick(token: string, index: 0 | 1): string {
  * 실제 바닥이어야 한다 (design-review #1937 R3 N-2).
  */
 const ROW_MENU_MARKER_SURFACES = [
-  "surface-sidebar",
+  // DS2-6 (#2718): 사이드바는 바탕이 없고 창 바닥(그라데이션 세 정지점) 위에
+  // 선다. 지금 열린 채널의 행은 흰 면(`sidebar-row-selected` = --surface)이다
+  // (owner 결정 2026-09-26: 선택을 호박색으로 칠하지 않는다).
+  "canvas-top",
+  "canvas-mid",
+  "canvas-bottom",
   "surface-hover",
-  "accent-soft",
+  "surface",
 ] as const;
 
 const ROW_MENU_TRIGGER_SOURCE = readFileSync(
@@ -364,11 +442,19 @@ describe("행 메뉴 열림 표식", () => {
     }
   });
 
-  it("앞 회전이 골랐던 --line-strong 은 그 자를 못 넘는다", () => {
-    // 반례를 함께 잠근다: 위 단정의 초록이 「자가 헐거워서」일 수 없게.
-    const dark = contrast(pick("line-strong", 1), pick("accent-soft", 1));
-    expect(Number(dark.toFixed(2))).toBe(2.9);
-    expect(rowMenuMarkerToken()).not.toBe("line-strong");
+  it("나누는 선(--line)은 그 자를 못 넘는다 — 자가 헐겁지 않다", () => {
+    // 반례를 함께 잠근다: 위 단정의 초록이 「자가 헐거워서」일 수 없게. 앞 판의
+    // 반례(옛 여명 --line-strong 이 다크 --accent-soft 위 2.90)는 새벽하늘에서
+    // 3.26 으로 넘어서 반례가 아니게 됐다(DS2-1). 늘 실패해야 하는 색으로 바꾼다.
+    for (const scheme of SCHEMES) {
+      for (const surface of ROW_MENU_MARKER_SURFACES) {
+        expect(
+          contrast(pick("line", scheme.index), pick(surface, scheme.index)),
+          `--line on --${surface} (${scheme.name})`
+        ).toBeLessThan(3);
+      }
+    }
+    expect(rowMenuMarkerToken()).not.toBe("line");
   });
 
   it("포커스 링과 다른 색·다른 두께다", () => {
@@ -387,7 +473,13 @@ describe("행 메뉴 열림 표식", () => {
  * 자체(`--surface-sidebar`)다. 위 「행 메뉴 열림 표식」과 같은 규율로, 색 이름은
  * 여기 적지 않고 **출하되는 클래스에서 읽어** 잰다.
  */
-const DROP_TARGET_SURFACES = ["surface-sidebar", "surface-hover"] as const;
+const DROP_TARGET_SURFACES = [
+  // DS2-6 (#2718): 열 자체의 바탕은 이제 창 바닥의 세 정지점이다.
+  "canvas-top",
+  "canvas-mid",
+  "canvas-bottom",
+  "surface-hover",
+] as const;
 
 const SECTION_SOURCE = readFileSync(
   new URL("../features/sidebar/SidebarRow.tsx", import.meta.url),
@@ -460,11 +552,40 @@ describe("Dawn palette", () => {
       ...FOREGROUNDS,
       "line",
       "line-strong",
+      "icon",
+      "primary",
+      "on-primary",
+      "signal",
+      "on-signal",
+      "signal-soft",
       "on-accent",
       "danger-fill",
       "on-danger-fill",
     ];
     for (const token of expected) expect(TOKENS[token], token).toBeDefined();
+  });
+
+  it("carries the core Dawn Sky values, role by role (ADR-0189 D5)", () => {
+    // 이 파일의 :root 는 부트 스크립트가 data-palette 를 찍기 전의 답이고, 시험이
+    // 읽는 값이다. 원천은 core 다. 한 칸이라도 어긋나면 화면과 시험이 다른 팔레트를
+    // 보게 되므로 여기서 한 칸씩 잰다.
+    const rootBlock = css.slice(css.indexOf(":root {"), css.indexOf("\n}\n", css.indexOf(":root {")));
+    const root = parseLightDarkTokens(rootBlock);
+    const { light, dark } = THEMES[DEFAULT_THEME_ID];
+    expect(DEFAULT_THEME_ID).toBe("dawnsky");
+    const lower = (hex: string) => hex.toLowerCase();
+    for (const role of [...COLOR_ROLES, ...DERIVED_ROLES]) {
+      const want = [
+        lower(role in light.color ? light.color[role as keyof typeof light.color] : light.derived[role as keyof typeof light.derived]),
+        lower(role in dark.color ? dark.color[role as keyof typeof dark.color] : dark.derived[role as keyof typeof dark.derived]),
+      ];
+      expect([role, root[role]], role).toEqual([role, want]);
+    }
+    CANVAS_STOPS.forEach((stop, i) => {
+      expect([stop, root[stop]]).toEqual([stop, [lower(light.canvas[i]), lower(dark.canvas[i])]]);
+    });
+    // 본문 판은 웹 셸의 값이다: 라이트 surface, 다크 canvas-mid (시안 `.a-main`).
+    expect(root.pane).toEqual([lower(light.color.surface), lower(dark.canvas[1])]);
   });
 
   it("uses no pure black or pure white (warm paper instead)", () => {
@@ -474,10 +595,12 @@ describe("Dawn palette", () => {
         expect(hex.toLowerCase(), `${token} -> ${hex}`).not.toBe("#000000");
       }
     }
-    // The scrim is the one place a lazy pure black would be tempting.
+    // The scrim is translucent, so it is a shade, not paint. Dawn Sky's dark
+    // scrim is core's `rgba(0,0,0,.55)` (시안 A `--scrim`): a black tint at 55%
+    // composites to no pure black on any surface. White stays banned outright.
     for (const layer of SCRIM) {
-      expect(layer.rgb.join(","), "scrim tint").not.toBe("0,0,0");
       expect(layer.rgb.join(","), "scrim tint").not.toBe("255,255,255");
+      expect(layer.alpha, "scrim is a translucent shade").toBeLessThan(1);
     }
   });
 
@@ -499,20 +622,19 @@ describe("Dawn palette", () => {
     }
   });
 
-  it("pressed is one darker step from hover, outside the dark chip-vessel band (#2000 M-2)", () => {
+  it("pressed is one step further toward ink than hover (#2000 M-2, ADR-0189 D5)", () => {
+    // core `deriveRoles` 는 surface → hover → pressed 를 잉크 쪽으로 한 단씩 옮긴다.
+    // 라이트에서는 어두워지고, 다크(잉크가 밝다)에서는 밝아진다. 방향이 스킴마다
+    // 다른 것이 규칙이고, 「눌림이 hover 보다 surface 에서 멀다」가 두 스킴 공통이다.
     for (const scheme of SCHEMES) {
-      const pressed = pick("surface-pressed", scheme.index);
-      const hover = pick("surface-hover", scheme.index);
+      const surface = luminance(pick("surface", scheme.index));
+      const hover = luminance(pick("surface-hover", scheme.index));
+      const pressed = luminance(pick("surface-pressed", scheme.index));
       expect(
-        luminance(pressed),
-        `${scheme.name} pressed ${pressed} L ${luminance(pressed).toFixed(4)} vs hover ${luminance(hover).toFixed(4)}`
-      ).toBeLessThan(luminance(hover));
+        Math.abs(pressed - surface),
+        `${scheme.name} pressed L ${pressed.toFixed(4)} vs hover ${hover.toFixed(4)} vs surface ${surface.toFixed(4)}`
+      ).toBeGreaterThan(Math.abs(hover - surface));
     }
-    const darkL = luminance(pick("surface-pressed", 1));
-    expect(
-      darkL < 0.0192 || darkL > 0.0320,
-      `dark pressed L ${darkL.toFixed(4)} sits in the chip-vessel band .0192–.0320`
-    ).toBe(true);
   });
 
   it("pressed fill is a different material from every other soft/state fill (#2000 B-1)", () => {
@@ -539,18 +661,6 @@ describe("Dawn palette", () => {
     }
   });
 
-  it("R3 light pressed fails dE vs accent-soft with no family exemption (#2000 B-1 RED)", () => {
-    const r3Light = "#eee2cc";
-    const soft = pick("accent-soft", 0);
-    const dE = deltaE(r3Light, soft);
-    expect(
-      dE,
-      `R3 #eee2cc vs accent-soft dE ${dE.toFixed(4)} contrast ${contrast(r3Light, soft).toFixed(4)}`
-    ).toBeLessThan(0.02);
-    expect(contrast(r3Light, soft)).toBeGreaterThanOrEqual(1.05);
-    expect(pick("surface-pressed", 0)).not.toBe(r3Light);
-  });
-
   it("CHIP_VESSEL_SURFACES names surface-pressed on every vessel (#2000 M-2)", () => {
     for (const [vessel, surfaces] of CHIP_VESSEL_SURFACES) {
       expect(
@@ -560,18 +670,8 @@ describe("Dawn palette", () => {
     }
   });
 
-  it("R2 pressed hexes fail the darker / vessel rulers (#2000 M-2 RED)", () => {
-    const r2Light = "#ece3cc";
-    const r2Dark = "#2d2c34";
-    expect(luminance(r2Light)).toBeGreaterThan(luminance(pick("surface-hover", 0)));
-    const darkL = luminance(r2Dark);
-    expect(darkL >= 0.0192 && darkL <= 0.0320).toBe(true);
-    expect(
-      contrast(pick("muted-soft", 1), r2Dark)
-    ).toBeLessThan(CHIP_VESSEL_MIN_CONTRAST);
-    expect(pick("surface-pressed", 0)).not.toBe(r2Light);
-    expect(pick("surface-pressed", 1)).not.toBe(r2Dark);
-  });
+  // #2000 의 R2·R3 반례(옛 여명 후보 hex 넷)는 DS2-1 에서 걷었다. 그 반례가 지키던
+  // 자(두 자·hover 와 다른 재료)는 위 두 단정이 새벽하늘 값으로 계속 잰다.
 
   it("classifies every surface by whether a bordered control may sit on it", () => {
     for (const bg of SURFACES) {
@@ -594,9 +694,9 @@ describe("Dawn palette", () => {
 
   for (const scheme of SCHEMES) {
     describe(scheme.name, () => {
-      it("text tokens meet WCAG AA (4.5:1) on every surface", () => {
+      it("text tokens meet WCAG AA (4.5:1) on every surface they stand on", () => {
         for (const fg of FOREGROUNDS) {
-          for (const bg of SURFACES) {
+          for (const bg of foregroundHosts(fg)) {
             const ratio = contrast(
               pick(fg, scheme.index),
               pick(bg, scheme.index)
@@ -748,28 +848,48 @@ describe("Dawn palette", () => {
       // Ratios again rather than a bare `>`, for the same reason: a tie is not
       // an order. Applies to every destructive fill in the client, since they
       // all come from the one `destructive` variant.
+      //
+      // ADR-0189 D6 가 주 행동을 잉크(--primary)로 옮겼다. 잉크에는 채도가 없으므로
+      // 「채도로 주 채움이 파괴 채움을 이긴다」는 자는 더는 성립하지 않고, 위계는
+      // **명도**가 진다: 주 채움은 그것이 선 면에서 가장 큰 대비(잉크)이고, 파괴
+      // 채움은 무채색 잉크 옆에서 유일한 색이라 「다른 종류의 행동」으로 읽힌다.
+      // 둘이 같은 종류로 섞이지 않는다는 것은 아래 채도 비(무채색)가 잰다.
       it("ranks the primary action fill above the destructive fill", () => {
-        const c = (token: string) => chroma(pick(token, scheme.index));
+        for (const bg of ["surface", "pane", "sheet", "surface-muted"]) {
+          const primary = contrast(pick("primary", scheme.index), pick(bg, scheme.index));
+          const destructive = contrast(pick("danger-fill", scheme.index), pick(bg, scheme.index));
+          expect(
+            [bg, primary > destructive],
+            `primary ${primary.toFixed(2)} vs danger-fill ${destructive.toFixed(2)} on ${bg} (${scheme.name})`
+          ).toEqual([bg, true]);
+        }
         expect(
-          Number((c("accent") / c("danger-fill")).toFixed(2)),
-          `accent vs danger-fill chroma (${scheme.name})`
-        ).toBeGreaterThanOrEqual(ACCENT_DANGER_FILL_CHROMA_RATIO_MIN);
+          chroma(pick("primary", scheme.index)),
+          `primary is ink, not a hue (${scheme.name})`
+        ).toBeLessThanOrEqual(chroma(pick("ink-muted", scheme.index)) + 0.01);
+        expect(
+          contrast(pick("on-primary", scheme.index), pick("primary", scheme.index)),
+          `on-primary label on primary (${scheme.name})`
+        ).toBeGreaterThanOrEqual(4.5);
       });
 
       // Quieter, not merged. Lowering the destructive fill's chroma walks it
       // toward the accent on the very axis the order is read from, so the two
       // fills must stay apart as colours. Measured 0.092 light / 0.131 dark,
       // both WIDER than the 0.073 / 0.122 the two had before the split.
-      it("keeps the destructive fill a different colour from the accent fill", () => {
+      //
+      // DS2-1: 비교 상대가 이제 신호(--signal, 안 읽음 배지)다. 바닥은 ADR-0189 D2·D3 의
+      // OKLab 0.07(core `SIGNAL_MIN_DISTANCE`)이고, 새벽하늘은 0.082 / 0.078 이다.
+      it("keeps the destructive fill a different colour from the signal", () => {
         expect(
           Number(
             deltaE(
               pick("danger-fill", scheme.index),
-              pick("accent", scheme.index)
+              pick("signal", scheme.index)
             ).toFixed(3)
           ),
-          `danger-fill vs accent deltaE (${scheme.name})`
-        ).toBeGreaterThanOrEqual(ACCENT_DANGER_FILL_DELTA_E_MIN);
+          `danger-fill vs signal deltaE (${scheme.name})`
+        ).toBeGreaterThanOrEqual(SIGNAL_MIN_DISTANCE);
       });
 
       // ...and still recognisably the risk colour. A fill allowed to drift out
@@ -796,19 +916,11 @@ describe("Dawn palette", () => {
         ).toBeGreaterThanOrEqual(2);
       });
 
-      // The floor under that order: chroma may not be bought with legibility.
-      // --danger outreads the quietest foreground on every surface it can land
-      // on, so a louder red can never also be a dimmer one.
-      it("keeps danger above the quietest foreground in contrast too", () => {
-        for (const bg of SURFACES) {
-          expect(
-            contrast(pick("danger", scheme.index), pick(bg, scheme.index)),
-            `danger vs ink-muted on ${bg} (${scheme.name})`
-          ).toBeGreaterThan(
-            contrast(pick("ink-muted", scheme.index), pick(bg, scheme.index))
-          );
-        }
-      });
+      // 「danger 가 대비에서도 ink-muted 를 이긴다」는 바닥은 DS2-1 에서 걷었다.
+      // 새벽하늘의 --ink-muted(#5a5c64)는 시안 A 가 일부러 짙게 고른 보조 잉크라
+      // (표면 위 6.61 · 다크 6.94) 모든 면에서 --danger(5.69 · 5.98)보다 대비가 높다.
+      // 위험 순서의 자는 처음부터 채도였고(위 단정, 1.68× · 1.30×), 대비는 AA 바닥
+      // (위 닫힌 표)으로 남는다. danger 를 6.61 위로 올리려고 어둡게 하면 채도를 잃는다.
 
       // 칩의 그릇은 그 칩이 서는 **어떤 행 바탕과도** 같은 재료가 아니다 (#1515).
       //
@@ -998,5 +1110,40 @@ describe("N-11 vessel table ownership", () => {
     expect(src.includes(banned)).toBe(false);
     const muted = CHIP_VESSEL_SURFACES.find(([name]) => name === "muted-soft");
     expect(muted?.[1]).toContain("accent-soft");
+  });
+});
+
+// -----------------------------------------------------------------------------
+// DS2-1 (#2713, ADR-0189 D6): 신호의 **글자**는 --signal-text 다.
+//
+// `--accent` 는 --signal 의 별칭이고, --signal 은 점·배지·링의 비텍스트 색(3:1)이다.
+// 그것으로 글자를 칠하면 위 닫힌 표(FOREGROUNDS 의 signal-text)가 재지 않는 쌍이
+// 화면에 선다 — 새벽하늘 라이트에서 --surface-hover 위 4.35. 그래서 `text-accent`
+// 는 코드에서 사라졌고, 돌아오면 여기서 터진다. `bg-accent*`·`border-accent` 는
+// 이행 별칭으로 남는다(DS2-7 이 `data-accent` 와 함께 걷는다).
+// -----------------------------------------------------------------------------
+describe("신호 글자는 --signal-text 다", () => {
+  it("text-accent 가 웹 src 와 core(웹이 쓰는 클래스 표) 어디에도 없다", async () => {
+    const { globSync } = await import("node:fs");
+    const roots = [
+      new URL("../", import.meta.url).pathname,
+      new URL("../../../../packages/momo-core/src/", import.meta.url).pathname,
+    ];
+    const files = roots.flatMap((root) =>
+      (globSync("**/*.{ts,tsx,css}", { cwd: root }) as string[])
+        .filter((file) => !/\.test\.(ts|tsx)$/.test(file))
+        .map((file) => root + file)
+    );
+    const hits: string[] = [];
+    for (const file of files) {
+      const source = readFileSync(file, "utf8");
+      source.split("\n").forEach((line, index) => {
+        if (/(?<![\w-])text-accent(?![\w-])/.test(line) && !line.trimStart().startsWith("//") && !line.trimStart().startsWith("*")) {
+          hits.push(`${file}:${index + 1}`);
+        }
+      });
+    }
+    expect(files.length).toBeGreaterThan(100);
+    expect(hits).toEqual([]);
   });
 });

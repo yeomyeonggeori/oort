@@ -60,7 +60,7 @@ export const WORKSTREAM_STATUS_LABEL: Readonly<Record<WorkstreamStatus, string>>
  */
 export const WORKSTREAM_STATUS_CLASS: Readonly<Record<WorkstreamStatus, string>> = {
   active: "bg-muted-soft text-ink",
-  paused: "bg-muted-soft text-accent",
+  paused: "bg-muted-soft text-signal-text",
   done: "bg-muted-soft text-ok",
   cancelled: "bg-muted-soft text-ink-muted",
 };

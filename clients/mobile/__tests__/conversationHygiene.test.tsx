@@ -738,12 +738,24 @@ describe('#1076 — 인용 점프가 도착했다고 말한다', () => {
 
   it('띠가 아니라 물듦이다 — 고도(`surface`)로 오해되지 않을 만큼만', () => {
     const tint = contrast(color.warnSurface, color.bg);
-    // 배경과 구별은 되고(고도 한 단 1.100 보다 크다 — 이 순위가 #1164 에서 팔레트가
+    // 배경과 구별은 되고(고도 한 단보다 크다 — 이 순위가 #1164 에서 팔레트가
     // 웹으로 옮겨간 뒤에도 살아 있도록 여섯 상태 채움이 배경 대비 같은 걸음을 들고
     // 따라갔다),
     expect(tint).toBeGreaterThan(contrast(color.surface, color.bg));
     // 같은 팔레트의 다른 부드러운 단들과 한 계단이다(카드가 되지 않는다).
-    expect(tint).toBeLessThan(1.25);
+    //
+    // 여기에 절대 문턱 1.25 가 있었다. 여명 다크의 soft 단들이 1.16~1.2 에 모여
+    // 있을 때 그은 선이다. 팔레트가 core 새벽하늘로 옮겨 가자(ADR-0189 D5, #2714)
+    // 다크 soft 단 전체가 한 걸음 진해졌고(warn 1.302 · danger 1.309 · ok 1.275),
+    // 착지 틴트는 그 가족 **안에** 그대로 있다. 그래서 문턱이 아니라 순위로 적는다:
+    // 가장 진한 형제 soft 단을 넘지 않는다.
+    const siblings = [
+      color.accentSurface,
+      color.agentSurface,
+      color.dangerSurface,
+      color.okSurface,
+    ].map(fill => contrast(fill, color.bg));
+    expect(tint).toBeLessThanOrEqual(Math.max(...siblings));
     expect(tint).toBeLessThan(contrast(color.dangerSurface, color.bg) + 0.05);
   });
 

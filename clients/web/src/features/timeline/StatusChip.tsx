@@ -43,7 +43,7 @@ const TURN_CHIP_CLASS: Readonly<Record<AgentTurnStatus, string>> = {
   queued: "bg-surface-hover text-ink-muted",
   thinking: "bg-surface-hover text-warn",
   streaming: "bg-surface-hover text-warn",
-  "awaiting-approval": "bg-accent-soft text-accent",
+  "awaiting-approval": "bg-accent-soft text-signal-text",
   done: "bg-surface-hover text-ok",
   error: "bg-surface-hover text-danger",
   stalled: "bg-surface-hover text-warn",
@@ -51,7 +51,7 @@ const TURN_CHIP_CLASS: Readonly<Record<AgentTurnStatus, string>> = {
 };
 
 const APPROVAL_CHIP_CLASS: Readonly<Record<ApprovalStatus, string>> = {
-  pending: "bg-accent-soft text-accent",
+  pending: "bg-accent-soft text-signal-text",
   approved: "bg-surface-hover text-ok",
   rejected: "bg-surface-hover text-danger",
   expired: "bg-surface-hover text-ink-muted",
@@ -99,7 +99,7 @@ export function ApprovalChip({ status }: { status: ApprovalStatus }) {
 const LOGIN_HANDOFF_CHIP_CLASS: Readonly<
   Record<LoginHandoffOutcome | LoginHandoffPhase, string>
 > = {
-  waiting: "bg-accent-soft text-accent",
+  waiting: "bg-accent-soft text-signal-text",
   returned: "bg-surface-hover text-ok",
   expired: "bg-surface-hover text-warn",
   session_ended: "bg-surface-hover text-ink-muted",
@@ -200,7 +200,7 @@ export function StreamCaret() {
     <span
       aria-hidden="true"
       data-testid="stream-caret"
-      className="caret-stream ml-px inline-block h-3 w-px shrink-0 bg-accent align-middle"
+      className="caret-stream ml-px inline-block h-3 w-px shrink-0 bg-signal align-middle"
     />
   );
 }

@@ -34,6 +34,11 @@ This NOTICE does not:
 Not covered by the GHCR generated bundle: the Tauri desktop Cargo graph,
 the React Native npm graph, CocoaPods/native notices, and the retired
 SwiftPM snapshot (kept only as history in legal/THIRD_PARTY_NOTICES.md).
+The React Native graph is license-gated in full by
+scripts/check_npm_licenses.mjs; direct phone dependencies that an ADR
+introduced are named in legal/THIRD_PARTY_NOTICES.md ("Phone client
+direct additions"), currently expo-blur (MIT, ADR-0189) and the Lucide
+icon paths (ISC) rasterized into clients/mobile/src/design/icons.
 
 Named runtime companions operators actually run next to these images:
 

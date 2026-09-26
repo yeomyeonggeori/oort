@@ -2,211 +2,138 @@
 @import "./motion.css";
 
 /* =============================================================================
- * momo 여명(Dawn) design tokens — MOMO-597 / ADR-0133 P1.
+ * oort design tokens — 새벽하늘(Dawn Sky), 디자인 시스템 2.0 (ADR-0189).
+ * 이전 판: 여명(Dawn) MOMO-597 / ADR-0133 P1.
  *
- * Source of truth for every color, spacing step, radius and text role in
- * clients/web. Component files carry ZERO raw color literals and ZERO arbitrary
- * spacing: they may only reference the utilities generated here.
+ * Source of truth for every spacing step, radius and text role in clients/web,
+ * and the web face of the color roles whose values live in core
+ * (`packages/momo-core/src/design/themes.ts`, ADR-0189 D5). Component files
+ * carry ZERO raw color literals and ZERO arbitrary spacing: they may only
+ * reference the utilities generated here.
  *
  * Contract (mirrored in .claude/skills/momo-design-taste-web/references/tokens.md
  * and verified mechanically by src/design/tokens.contrast.test.ts):
- *   - one accent per surface (--accent, default 호박/amber horizon). Curated
- *     bindings in src/design/themes/ rebind --accent/--accent-soft/--on-accent
- *     via :root[data-accent]; components still consume the semantic tokens.
+ *   - the primary action is ink (--primary); signals (unread, mention, caret,
+ *     focus ring) are --signal. --accent is a migration alias of --signal.
+ *   - themes rebind colors only: `themes/palettes/<id>.css` (generated from
+ *     core) via :root[data-palette]; the ADR-0174 accent ids rebind the signal
+ *     four via :root[data-accent] until DS2-7 moves them to data-signal.
  *   - agent identity is --agent (predawn slate-blue) on avatar/badge only
- *   - every foreground token meets WCAG AA (>= 4.5:1) on every surface token,
- *     in BOTH schemes; --line-strong (control borders) meets >= 3:1
- *   - no pure #000000 / #ffffff anywhere: the light "paper" white is #fffefb
+ *   - every foreground role meets WCAG AA (>= 4.5:1) on every surface, in BOTH
+ *     schemes and every theme (core measures 356 pairs); --line-strong (text
+ *     input vessels) meets >= 3:1
+ *   - no pure #000000 / #ffffff anywhere: the light "paper" white is #fffefc
  *   - light/dark come from one declaration via CSS light-dark(); there is no
  *     second copy of the palette to drift from
  *
  * Scheme selection follows the OS by default (color-scheme: light dark).
  * :root[data-theme="light"|"dark"] pins it (used by the screenshot capture).
- * :root[data-accent] rebinds the accent family (ADR-0174). S0 and .brand-lockup
- * pin that family back to Dawn.
+ * S0 and .brand-lockup pin the signal family back to the Dawn Sky default.
  * ========================================================================== */
 
 :root {
   color-scheme: light dark;
 
-  /* --- surfaces (warm paper by day, near-night sky after dark) ----------- */
-  --surface: light-dark(#f7f6f3, #17161a);
-  --surface-raised: light-dark(#fffefb, #201f24);
-  --surface-sidebar: light-dark(#efece6, #1b1a1f);
-  --surface-hover: light-dark(#e7e3db, #26252c);
-  /* --- 본문 행의 눌림 채움 (#2000 R4 / #1515) ---------------------------
-   * `--surface-hover` 에서 한 단 **더 어두운** 방향. 같은 재료 여부는 §2.2 의
-   * 한 쌍(대비 ≥ 1.05 **그리고** OKLab dE ≥ 0.02)이지, 색상 가족 면제가 아니다.
-   * R3 라이트 #eee2cc 는 accent-soft 와 대비 1.0526 · dE 0.0185 — 「대비는
-   * 넘는데 눈에는 같은 회색」. R2 (#ece3cc / #2d2c34) 는 라이트가 hover 보다
-   * 밝고 다크가 칩 그릇 띠(.0192~.0320) 안이다.
+  /* =========================================================================
+   * 색 — 새벽하늘(dawnsky) 기본값 (ADR-0189 D2·D5, DS2-1 #2713).
    *
-   * 라이트 #efe2c8: hover 보다 어둡고(L 0.769136 < 0.770416). vs hover 대비
-   * 1.0016 · dE 0.0257 · Δhue 0.00°. vs accent-soft 대비 1.0528 · dE 0.0210.
-   * ink 12.512 · ink-muted 4.5013 (AA 4.5, 여유 0.0013) · line-strong 3.024
-   * (≥3, 여유 0.024). 4.55 / 3.05 여유를 같이 넘는 해는 라이트 띠에 없다
-   * (hover 자신이 muted 4.508 · line 3.029). 그릇 1.101–1.118 / 0.038–0.048.
-   * 다크 #262335: 띠 밖(L 0.0187). vs hover 1.007 · dE 0.0204. ink-muted 5.395.
-   * `--line-strong` 양쪽 ≥3 이라 컨트롤 표면으로 분류된다. */
-  --surface-pressed: light-dark(#efe2c8, #262335);
+   * 값의 원천은 core(`packages/momo-core/src/design/themes.ts`)다. 이 블록은
+   * 생성본 `themes/palettes/dawnsky.css`와 같은 값이고, 부트 스크립트가
+   * `data-palette`를 찍기 전(그리고 시험이 이 파일을 읽을 때)의 답이다.
+   * `tokens.contrast.test.ts`가 이 블록이 core 표와 한 칸씩 같다는 것을 잰다.
+   * 대비의 전수 측정(356쌍)은 core 시험이 진다. 역할과 이유는
+   * `docs/design-system/themes-2.0.md` §2·§3.
+   *
+   * 주 행동과 신호는 갈라져 있다(ADR-0189 D6).
+   *   --primary  잉크. 주 버튼·보내기·FAB의 채움. 커스텀 색이 바꾸지 않는다.
+   *   --signal   호박. 안 읽음·멘션·커서·포커스 링. 테마·프리셋·커스텀이 바꾼다.
+   * `--accent`는 이행 중인 별칭이고 `--signal`을 가리킨다(아래 「별칭」).
+   * ====================================================================== */
 
-  /* --- lines: --line separates, --line-strong outlines controls (3:1) ----
-   * #1866: 라이트 --line 만 한 단계 옅게 (#dcd8d0 → #e4e0d8). --line-strong 은
-   * 라이트 --surface-hover 위 3.03:1 이라 RGB +1 이 2.99 로 3:1(WCAG 1.4.11)이
-   * 깨지므로 그대로 둔다. 다크 항 무접촉. */
-  --line: light-dark(#e4e0d8, #34323b);
-  --line-strong: light-dark(#84817d, #6f6e73);
+  /* --- 바닥: 세로 그라데이션 세 정지점. 조립은 셸의 일이다(DS2-6). ------- */
+  --canvas-top: light-dark(#f7eadb, #231d1b);
+  --canvas-mid: light-dark(#efedea, #171a20);
+  --canvas-bottom: light-dark(#e2e9f3, #0f141c);
 
-  /* --- text -------------------------------------------------------------- */
-  --ink: light-dark(#24211c, #ececf1);
-  --ink-muted: light-dark(#6a655f, #9b98a3);
+  /* --- 면 ---------------------------------------------------------------
+   * --surface        카드·떠 있는 판·컴포저의 흰 면(시안 `--surface`).
+   * --surface-muted  보조 채움(시안 `--surface2`): 보조 알약·단계 묶음·코드 칩.
+   * --sheet          시트와 사이드바 바탕.
+   * --pane           본문 판(시안 `.a-main`): 라이트는 --surface, 다크는
+   *                  --canvas-mid. 다크에서 카드(--surface)가 판보다 밝아야 뜬다.
+   *                  core 역할이 아니라 웹 셸의 값이라 두 원천 값을 그대로 옮긴다. */
+  --surface: light-dark(#fffefc, #1b1e25);
+  --surface-muted: light-dark(#f3f1ee, #252933);
+  --sheet: light-dark(#f4f2ef, #14171d);
+  --pane: light-dark(#fffefc, #171a20);
 
-  /* --- the single accent: 호박(amber horizon) ---------------------------- */
-  --accent: light-dark(#a54c08, #f0a850);
-  --accent-soft: light-dark(#f4e7d6, #33261a);
-  --on-accent: light-dark(#fffefb, #17161a);
+  /* --- 상호작용 채움과 톤 없는 그릇 — core `deriveRoles`의 계산값 --------
+   * 두 자(대비 1.05 이상, OKLab 0.02 이상)로 --surface·--sheet 위에서 잰 값이다
+   * (themes-2.0.md 「표 밖 역할」). hover → pressed → muted-soft 순으로 한 단씩
+   * 잉크 쪽이다. 상태 토큰을 그릇으로 빌려 쓰지 않는다는 #1515 규칙은 그대로다. */
+  --surface-hover: light-dark(#ecebe9, #20232a);
+  --surface-pressed: light-dark(#e5e4e2, #25282f);
+  --muted-soft: light-dark(#dedddb, #2a2d35);
 
-  /* --- agent identity: predawn slate-blue (never neon AI purple) --------- */
-  --agent: light-dark(#4a6785, #7fa0c4);
-  --agent-soft: light-dark(#e6ebf2, #1e2836);
+  /* --- 선: --line은 나누고, --line-strong은 텍스트 입력 그릇을 그린다 -----
+   * ADR-0189 D6: 버튼은 채움 알약이고, 3:1 테두리는 입력 그릇에만 남는다.
+   * --line-strong은 모든 면(표면·시트·바닥 정지점) 위에서 3:1을 넘는다. */
+  --line: light-dark(#e7e4df, #2c3039);
+  --line-strong: light-dark(#85837e, #737782);
 
-  /* --- 칩의 그릇: 톤 없는 옅은 채움 (#1515 / design-review #1514 H-2) ----
-   *
-   * ## 무엇이 잘못됐었나
-   *
-   * 수명주기 칩(`SESSION_STATUS_CLASS`)의 바탕이 --surface-hover 였다. 그런데 그
-   * 토큰은 **행이 주목받았다**는 상태의 이름이다 — 목록 행의 hover 와 펼침이 같은
-   * 값을 쓴다. 그래서 사람이 가리키고 있는 행에서 칩 바탕과 행 바탕이 한 픽셀도
-   * 다르지 않았고(대비 1.00) 그릇이 사라졌다. 읽히는 순간에만 사라지는 그릇은
-   * 없는 것보다 나쁘다: 「종료됨」이 배지가 아니라 줄 끝의 글자 조각이 된다.
-   *
-   * 상태 토큰을 정적인 그릇으로 빌려 쓴 것이 결함의 실체다. 상태는 켜졌다 꺼지고
-   * 그릇은 늘 거기 있어야 하므로, 둘이 한 값을 나눠 가지면 **상태가 켜진 동안
-   * 그릇이 꺼진다.** 그래서 고치는 자리는 칩의 클래스가 아니라 팔레트다.
-   *
-   * ## 왜 중립 램프에서 고를 수 없었나 — 라이트의 산술
-   *
-   * 「그냥 다른 회색」이 답이 아닌 것은 취향이 아니라 계산이다. 이 팔레트의 전경
-   * 톤은 전부 밝은 바탕을 위해 조율돼 있어서, 라이트에서 --ink-muted(#6a655f)가
-   * AA(4.5)를 지키려면 바탕 휘도가 **0.769 이상**이어야 한다. 그런데
-   * --surface-hover 의 휘도가 0.7704다 — 바닥에 이미 붙어 있다. 즉 라이트에서 칩
-   * 그릇이 설 수 있는 띠는 [0.769, 0.9911(종이)]뿐이고, 그 띠의 양 끝 사이 최대
-   * 대비조차 1.27:1이다. 다섯 표면(hover .7704 · accent-soft .8124 · sidebar
-   * .8405 · surface .9216 · raised .9911)이 그 띠를 이미 나눠 갖고 있어, **여섯
-   * 번째 중립이 얻을 수 있는 최선의 최소 분리는 1.06:1**이다(가장 넓은 빈칸
-   * [.8124, .9216]의 기하 중점). 명도만으로 그릇을 세우는 설계는 여기서 끝난다.
-   *
-   * 그래서 남는 자가 **명도 아닌 축**이다 — MOMO-641 이 위험 위계에서 이미 같은
-   * 결론을 냈다: 「AA 를 한참 넘긴 두 톤은 대비 축에서 구분되지 않고, 남는 차이가
-   * 채도였다」. 그때 쓴 자를 그릇에도 그대로 쓴다. 이 값은 종이 계열의 색상(라이트
-   * hue 82 · 다크 297)을 지키면서 중립 램프에서 비켜서 있고, 명도가 못 버는 자리를
-   * 그 비켜섬이 메운다: --surface 위에서는 그릇이 더 물들었고(C 0.0103 대 0.0041,
-   * 2.5배), --accent-soft 위에서는 덜 물들었다(0.0103 대 0.0267). 방향은 반대지만
-   * 둘 다 「같은 재료가 아니다」를 말한다.
-   *
-   * 그 「비켜섬」을 재는 자가 OKLab 거리다(--danger-fill 이 --accent 와 섞이지
-   * 않았음을 증명한 그 자). 그릇과 행 바탕 사이 최소 거리는 **0.0207**(라이트
-   * --surface)이고, 대비로는 1.061밖에 안 되는 그 쌍이 거리로는 --accent-soft
-   * 쌍(0.0256)과 같은 급이다. 두 자를 함께 걸어 두는 이유가 이것이다 — 하나만
-   * 걸면 「대비는 통과하는데 눈에는 같은 회색」이 통과한다.
-   *
-   * ## 실측 (tokens.contrast.test.ts 가 두 스킴에서 잰다)
-   *
-   *   그릇 vs 이 칩이 실제로 서는 행 바탕 — 라이트 surface 1.061/dE 0.0207 ·
-   *   surface-hover 1.117/0.0366 · accent-soft 1.062/0.0256 / 다크 1.346/0.1036 ·
-   *   1.135/0.0380 · 1.095/0.0470. 최악 대비 1.061 · 최악 거리 0.0207이고,
-   *   고치기 전의 최악은 대비 1.000 · 거리 0.0000이었다.
-   *   최악 전경 AA — 라이트 ink-muted 5.03 · 다크 ok 4.70.
-   *   --line-strong 다크 2.65(<3) — 그러므로 이 그릇은 **테두리 진 컨트롤이 설 수
-   *   있는 표면이 아니다**. 위 「모든 표면을 분류한다」 단정이 그 사실을 값으로
-   *   지킨다.
-   *
-   * 이름이 --surface-* 가 아니라 -soft 가족인 이유: 이것은 「무엇이 그 위에
-   * 서는가」로 갈리는 표면 축이 아니라 **한 톤의 옅은 채움**이고, 그 축에는
-   * --accent-soft · --agent-soft 가 이미 서 있다. 톤이 없는 자리의 그 값이
-   * 이것이다(잉크는 --ink-muted). #1516 이 같은 가족에 ok/warn/danger 를 채우면서
-   * 이 값과 한 평면(라이트 휘도 .85~.87 · 다크 .028~.029)에 선다 — 명도가
-   * 「그릇」을, 색상이 「어느 톤인가」를 말한다. */
-  --muted-soft: light-dark(#f3efe8, #302e36);
+  /* --- 글자와 아이콘 ---------------------------------------------------- */
+  --ink: light-dark(#16171b, #f1f1f3);
+  --ink-muted: light-dark(#5a5c64, #a4a7b0);
+  --icon: light-dark(#7c7f88, #8a8e98);
 
-  /* --- 톤별 그릇: 측정을 나르는 칩의 채움 (#1516 / design-review #1514 H-3) -
-   *
-   * ## 무엇이 잘못됐었나
-   *
-   * 검증 칩(세션이 스스로 보고한 게이트 결과)은 #1463 에서 테두리를 얻었다 —
-   * --surface-raised + --line. 그 테두리가 그때 산 것은 「행이 무슨 바탕이든 그릇이
-   * 남는다」였는데, 이 팔레트에서 **1px 테두리로 둘러싼 작은 알약은 컨트롤 문법**
-   * 이다(입력·<select>·아웃라인 버튼이 전부 그 모양이다). 그래서 읽는 사람에게
-   * 「통과 12」가 누를 수 있는 것으로 보였다. 팔레트의 계약상으로는 컨트롤이
-   * 아니다 — --line 은 나누는 선이고 컨트롤은 --line-strong 이 그린다(위 33행, 그
-   * 규칙은 designSystem.test.ts 가 강제한다). 즉 **토큰 계약과 화면이 서로 다른
-   * 말을 하고 있었고**, 그럴 때 이기는 쪽은 언제나 화면이다.
-   *
-   * 테두리를 그냥 걷는 것은 답이 아니다 — 그러면 #1463 H1(그릇 유지)이 되돌아온다.
-   * 이 칩은 상세의 --surface-raised 카드 위에도 서므로, 중립 채움만 남기면 그
-   * 카드에서 그릇이 사라진다.
-   *
-   * ## 결정: 그릇이 자기 톤으로 물든다
-   *
-   * 테두리가 지고 있던 일을 **채움의 색상**이 진다. 색이 있는 채움은 중립 표면과
-   * 명도가 가까워도 구분된다 — --accent-soft 가 --surface-hover 위에서 대비 1.051
-   * 뿐인데도 사라지지 않는 것이 그 증거이고, 이 팔레트는 그 자를 MOMO-641 에서 이미
-   * 위험 위계의 척도로 세워 두었다.
-   *
-   * 그리고 그릇이 톤을 갖는 것은 장식이 아니라 **격의 구분**이다. 한 행에 두 칩이
-   * 선다: 원장이 이 세션을 무엇이라 부르는가(수명주기)와 이 세션이 스스로 보고한
-   * 측정(검증). #1515 가 앞쪽 그릇을 톤 없는 --muted-soft 로 고정한 근거가 「색을
-   * 버는 것은 측정이다」였으므로, 그 규칙의 나머지 반쪽이 여기다 — **측정을 나르는
-   * 칩만 그릇까지 물든다.** 그래서 #1463 M2 가 지적한 충돌(수명주기 running 도
-   * warn, 게이트 unknown·pending 도 warn — 한 행에 같은 모양 호박색 알약 둘)이
-   * 잉크가 아니라 **그릇**에서 갈린다: 앞은 중립 그릇, 뒤는 warn 그릇.
-   *
-   * skip(건너뜀)만 --muted-soft 로 떨어진다. 예외가 아니라 규칙 그 자체다 — 게이트가
-   * 아무것도 재지 않았다는 뜻이므로 물들일 톤이 없다.
-   *
-   * ## 한 평면, 색상만 다르다
-   *
-   * 네 그릇(muted 포함)은 스킴마다 **한 평면**에 선다: 라이트 휘도 .85~.87 · 다크
-   * .028~.029. 명도가 「이것은 그릇이다」를 말하고 색상이 「어느 톤인가」를 말한다 —
-   * 두 축이 한 가지씩만 진다. 평면을 고른 것도 산술이다. 다크에서 --ok 의 AA 가
-   * 휘도 .0320 에서 끊기고, 동시에 --surface-hover(.0192)보다 위여야 --line-strong
-   * 3:1 을 넘지 않아 「컨트롤이 설 수 있는 표면」으로 오분류되지 않는다. 남는 구간이
-   * .0192~.0320 이고 그 안이 .0285 다.
-   *
-   * 라이트 danger 만 평면에서 1% 아래(.8519)에 선다: sRGB 에서 이 명도의 빨강은
-   * 채도가 모자라 R 채널 상한에서 클립되고, 그러면 --muted-soft 와의 OKLab 거리가
-   * 0.0169 로 내려가 나란히 선 두 그릇이 구분되지 않는다. 1% 내려 채도를 사면
-   * 0.0203 이 된다.
-   *
-   * ## 실측 (tokens.contrast.test.ts 가 두 스킴에서 잰다)
-   *
-   *   그릇 vs 이 칩이 서는 행 바탕(surface · surface-hover · surface-raised) —
-   *   라이트 최악 1.061(warn-soft on surface) · 다크 최악 1.134(warn-soft on
-   *   surface-hover).
-   *   나란히 선 중립 그릇(--muted-soft)과의 OKLab 거리 — 라이트 최소 0.0203 ·
-   *   다크 최소 0.0379.
-   *   각 그릇이 자기 톤의 색상 가족 안에 있다(<= 15도, 실측 최대 2.7도) — 「초록
-   *   그릇에 붉은 잉크」는 대비만으로는 잡히지 않는다.
-   *   최악 전경 AA — 라이트 ink-muted on danger-soft 4.96 · 다크 ok on
-   *   danger-soft 4.68. 뒤엣것은 이 팔레트 **전체**의 다크 최악 쌍이기도 하다
-   *   (앞 판은 ok on accent-soft 5.15였다). */
-  --ok-soft: light-dark(#e0f4e2, #243323);
-  --warn-soft: light-dark(#ffedd4, #372e1b);
-  --danger-soft: light-dark(#ffe9e5, #402a26);
+  /* --- 주 행동: 잉크 채움 (다크에서는 뒤집힌 밝은 잉크) ------------------ */
+  --primary: light-dark(#16171b, #f1f1f3);
+  --on-primary: light-dark(#fffefc, #16171b);
 
-  /* --- 스크림: 다이얼로그 뒤를 덮는 층 (MOMO-614 R1) ---------------------
-   * 스크림은 색이 아니라 방향이다: 어느 스킴에서든 뒤를 **어둡게** 해서 앞의
-   * 패널이 앞으로 나오게 만든다. 이것을 --ink/20으로 대신하면 다크에서
-   * --ink가 거의 흰색(#ececf1)이라 오버레이가 배경을 오히려 밝히고, 패널
-   * (--surface-raised)이 주변보다 어두워져 초점이 뒤로 물러난다. 그래서 이
-   * 층은 잉크를 빌려 쓰지 않고 자기 토큰을 갖는다.
-   *
-   * 알파는 스킴마다 다르다. 밝은 종이를 24%로 눌러 얻는 분리를, 이미 어두운
-   * 밤하늘에서 얻으려면 훨씬 더 짙어야 한다(62%). 두 값 모두 합성 후 휘도를
-   * tokens.contrast.test.ts가 잰다: 스크림은 모든 표면을 어둡게 해야 하고,
-   * 스크림 걸린 어떤 표면보다 --surface-raised가 밝아야 한다. */
-  --scrim: light-dark(rgb(36 33 28 / 0.24), rgb(9 8 11 / 0.62));
+  /* --- 신호: 안 읽음·멘션·커서 ----------------------------------------- */
+  --signal: light-dark(#c2410c, #ff8a4c);
+  --on-signal: light-dark(#fffefc, #16171b);
+  --signal-text: light-dark(#af3908, #ff9a62);
+  --signal-soft: light-dark(#fbe9de, #392418);
 
+  /* --- 에이전트 정체: 새벽 남색 (never neon AI purple) ------------------ */
+  --agent: light-dark(#2f5b8a, #8db3e2);
+  --agent-soft: light-dark(#e3ecf6, #1b2a3c);
+
+  /* --- 상태와 톤 그릇 --------------------------------------------------
+   * 위험 순서(danger > warn > ink-muted)는 채도(OKLab C)로 잰다(MOMO-641).
+   * --danger-fill은 파괴 채움이고 새벽하늘에서는 --danger와 같은 값이다
+   * (모든 면에서 3:1, 그 위 글자 4.5:1 — core 계산). */
+  --ok: light-dark(#0e7740, #4cc47e);
+  --ok-soft: light-dark(#e4f5ea, #173325);
+  --warn: light-dark(#855900, #d4a72c);
+  --warn-soft: light-dark(#fff0db, #372e1b);
+  --danger: light-dark(#be2c4f, #ff6b63);
+  --danger-soft: light-dark(#ffedeb, #402a26);
+  --danger-fill: light-dark(#be2c4f, #ff6b63);
+  --on-danger-fill: light-dark(#fffefc, #16171b);
+
+  /* --- 유리·스크림 ------------------------------------------------------
+   * 유리는 반투명이라 위 대비 표로 잴 수 없다. 투명도 줄이기·미지원·고대비에서는
+   * 불투명으로 그린다(`glass` 유틸, ADR-0189 D7). --glass-line은 시안의 유리
+   * 가장자리 하이라이트이고 core 역할이 아니다(웹 값).
+   * 스크림은 색이 아니라 방향이다: 어느 스킴에서든 뒤를 어둡게 한다. */
+  --glass: light-dark(rgba(255,254,252,.74), rgba(32,35,43,.72));
+  --glass-line: light-dark(rgba(255,255,255,.7), rgba(255,255,255,.07));
+  --scrim: light-dark(rgba(20,18,16,.34), rgba(0,0,0,.55));
+
+  /* --- 별칭 (이행 중, ADR-0189 D6) --------------------------------------
+   * 옛 이름을 쓰는 소비처가 새 역할을 가리키게 한다. 새 코드는 오른쪽 이름을
+   * 쓴다. 남은 소비처 수는 DS2-1 PR 본문에 센다. DS2-7이 `data-accent`를 걷을 때
+   * `--accent*`도 함께 걷는다.
+   *   --surface-raised → --surface   카드·다이얼로그·팝오버의 면
+   *   --surface-sidebar → --sheet    사이드바(셸의 그라데이션 바닥은 DS2-6)
+   *   --accent* → --signal*          신호(주 버튼은 --primary로 옮겼다) */
+  --surface-raised: var(--surface);
+  --surface-sidebar: var(--sheet);
+  --accent: var(--signal);
+  --accent-soft: var(--signal-soft);
+  --on-accent: var(--on-signal);
   /* --- overlay layers (#2044 #2075 #1919) --------------------------------
    * Hit testing, not elevation. `--elevation-float` says the panel is raised;
    * these three names say which stacking context it occupies. Order is the
@@ -237,49 +164,6 @@
   --layer-overlay-scrim: 200;
   --layer-overlay-surface: 300;
 
-  /* --- status ------------------------------------------------------------
-   * 위험 위계는 취향이 아니라 순서다: --danger > --warn > --ink-muted. 한 표면에
-   * 두 톤이 나란히 서면 더 위험한 쪽이 먼저 눈에 들어와야 한다(MOMO-641). 이
-   * 순서가 다스리는 것은 **전경 톤**이다: 글자·칩·점·막대처럼 위험도끼리 겨루는
-   * 자리(references/tokens.md §3a 표 A).
-   *
-   * 그 순서를 재는 자는 대비가 아니라 **채도(OKLab C)**다. 다크의 옛 --danger
-   * (#f2b8b5)는 --warn(#d4a72c)보다 대비가 오히려 높았는데도(10.55 vs 8.03 on
-   * --surface) 더 조용하게 읽혔다: 둘 다 AA를 한참 넘겨 가독성으로는 구분되지
-   * 않고, 남는 차이가 채도였기 때문이다(0.068 vs 0.141 — 역전). 라이트는
-   * 처음부터 채도 순서가 맞았고(0.178 > 0.108 > 0.011) 그래서 위계도 맞았다.
-   *
-   * sRGB에서 빨강은 노랑만큼 밝아질 수 없으므로 "채도도 높고 대비도 warn보다
-   * 높은 다크 danger"는 존재하지 않는다. 그래서 순서의 척도를 채도로 고정하고,
-   * 대비는 바닥선(모든 표면 AA + --ink-muted보다 높음)으로 남긴다. 세 조건 전부
-   * tokens.contrast.test.ts가 두 스킴에서 잰다. */
-  --danger: light-dark(#b3261e, #ff796b);
-
-  /* 파괴 액션의 **채움** (MOMO-642 R1 H-2). 채도를 순서의 자로 세운 뒤, 그 자가
-   * 다스리는 표면 목록에서 채움 버튼이 빠져 있었다. 그래서 위 --danger가 그대로
-   * bg-danger로 칠해졌고, 설정 > 앱 상세 행에서 코랄 `설치 해제`가 앰버 주 버튼
-   * `내 사용 허용` 옆에 서서 **이 팔레트 자신의 자로 재면 파괴 보조가 주 액션을
-   * 이겼다**(라이트 1.31x, 다크 1.24x). MOMO-641이 고친 역전과 같은 종류가 방향만
-   * 바뀐 것이다.
-   *
-   * 토큰을 하나 더 두는 것은 취향이 아니라 산술의 결과다. 다크에서 전경 톤은
-   * --warn(C 0.1407)을 1.15배 이겨야 하므로 C >= 0.162가 필요하고, 주 액션
-   * --accent(C 0.1336)를 이기지 않으려면 C <= 0.116이어야 한다. 두 구간의
-   * 교집합은 공집합이다: 하나의 --danger로 두 순서를 동시에 만족시킬 수 있는
-   * 빨강은 존재하지 않는다. 그래서 위험을 **말하는** 톤과 위험을 **실행하는**
-   * 채움이 이름을 나눠 갖는다.
-   *
-   * 채움은 더 크게 외치는 대신 더 무겁게 가라앉는다: 같은 색상(hue 차 9/6도로
-   * 같은 위험 계열)에서 채도만 accent 아래로 내리고 명도를 낮췄다. 그 결과 두
-   * 채움은 오히려 **전보다 더 멀어졌다**(OKLab dE 라이트 0.073 -> 0.092, 다크
-   * 0.122 -> 0.131) — 조용해진 것이지 주 버튼에 섞인 것이 아니다. 네 조건 전부
-   * (accent > 채움 채도비 >= 1.15, dE >= 0.08, 위험 계열 hue 차 <= 15도, 라벨 AA)
-   * tokens.contrast.test.ts가 두 스킴에서 잰다. */
-  --danger-fill: light-dark(#8c393d, #dc817e);
-  --on-danger-fill: light-dark(#fffefb, #17161a);
-  --ok: light-dark(#187533, #57ab5a);
-  --warn: light-dark(#8a5c00, #d4a72c);
-
   /* --- onboarding S0, single look (BZ-6a / #1869) -----------------------
    *
    * S0 is the one surface that does not follow OS light/dark. It is a deep
@@ -306,7 +190,14 @@
   --font-onboarding-wordmark: calc(var(--spacing-onboarding-mark) / 3);
 
   /* --- shell geometry ---------------------------------------------------- */
-  --w-sidebar: 240px;
+  /* 사이드바 목록 열 (DS2-6 #2718, 시안 A `.a-side` 268). 워크스페이스 레일
+   * (`--spacing-rail`, ADR-0161)은 시안에 없는 열이라 그 옆에 붙고, 목록 열이
+   * 시안의 폭을 그대로 갖는다. 그래서 사이드바 전체 폭은 둘의 합이다(324).
+   * 설정의 목록 열은 앱 사이드바를 대체하는 다른 표면이라 옛 폭(240)을
+   * 따로 이름으로 갖는다(`--w-settings-nav`). */
+  --w-sidebar-list: 268px;
+  --w-sidebar: calc(var(--spacing-rail) + var(--w-sidebar-list));
+  --w-settings-nav: 240px;
 
   /* 드로어로 설 때의 사이드바 (B6). 폰에서는 사이드바가 행을 나눠 갖지 않고 채널
    * 표면을 **덮으므로**, 열을 좁게 유지할 이유가 사라진다. 280px는 390px 폰
@@ -383,15 +274,20 @@
   color-scheme: dark;
 }
 
-/* ADR-0174 D4: custom accent does not recolor S0 or the brand lockup.
- * Values match the Dawn pair in :root. S0 paints with `--onboarding-*`;
- * `.brand-lockup` is the Connect/Claim mark+wordmark that still uses
- * `--accent`. */
+/* ADR-0174 D4: a chosen signal does not recolor S0 or the brand lockup.
+ * Values match the Dawn Sky default signal in :root. S0 paints with
+ * `--onboarding-*`; `.brand-lockup` is the Connect/Claim mark+wordmark that
+ * still uses `--accent`. The alias is pinned too: `--accent: var(--signal)` is
+ * resolved on :root, so re-pinning --signal alone would not reach it. */
 .onboarding-landing,
 .brand-lockup {
-  --accent: light-dark(#a54c08, #f0a850);
-  --accent-soft: light-dark(#f4e7d6, #33261a);
-  --on-accent: light-dark(#fffefb, #17161a);
+  --signal: light-dark(#c2410c, #ff8a4c);
+  --on-signal: light-dark(#fffefc, #16171b);
+  --signal-text: light-dark(#af3908, #ff9a62);
+  --signal-soft: light-dark(#fbe9de, #392418);
+  --accent: var(--signal);
+  --accent-soft: var(--signal-soft);
+  --on-accent: var(--on-signal);
 }
 
 @theme {
@@ -440,6 +336,18 @@
   --spacing-control-sm: 28px;
   --spacing-control: 32px;
   --spacing-control-lg: 40px;
+
+  /* 새벽하늘 프리미티브의 기하 (ADR-0189 D1, DS2-1 #2713). 값은 시안 A의 CSS에서
+   * 그대로 옮겼다: 채움 알약 `.a-pill` 높이 38·가로 여백 15, 사이드바 검색 그릇
+   * `.a-search` 높이 36, 아이콘 버튼 `.a-ibtn`·데스크탑 보내기 `.a-send` 34.
+   * 28/32/40 사다리 어느 것도 아니고, 시안에서 벗어나지 않으려고 이름을 준다.
+   * 카드 안 여백 14는 core `DENSITY.comfortable.cardPadding`이다(ADR-0189 D4,
+   * compact 10은 DS2-8). 폰 폭(600 미만)의 44px 하한은 `tap-target`이 그대로 진다. */
+  --spacing-pill: 38px;
+  --spacing-pill-inline: 15px;
+  --spacing-field: 36px;
+  --spacing-icon-button: 34px;
+  --spacing-card: 14px;
 
   /* 인박스 리마인더 행의 ⋯ 그릇 (#1888 B-2).
    *
@@ -697,11 +605,34 @@
    * width of this one sentence, not a column. */
   --spacing-onboarding-copy: 360px;
 
-  /* --- radius: three steps, nothing else --------------------------------- */
+  /* --- radius: the web platform ladder (ADR-0189 D6) ---------------------
+   * 6 · 10 · 14 · 18 · 20 · pill. 이름만 폰과 공유하고 값은 대조하지 않는다
+   * (폰은 10·14·20·26·30·pill). pill은 Tailwind 정적 유틸 `rounded-full`이다.
+   * sm/md/lg 세 값은 옛 3단과 같은 값이라 기존 소비처의 기하는 움직이지 않는다.
+   * 프리미티브가 새 자리로 옮겼다: 버튼은 pill, 입력은 lg, 카드는 2xl. */
   --radius-*: initial;
-  --radius-sm: 6px; /* buttons, chips, inputs */
-  --radius-md: 10px; /* cards, list groups */
-  --radius-lg: 14px; /* dialogs, sheets */
+  --radius-sm: 6px; /* 코드 칩 */
+  --radius-md: 10px; /* 배지·태그·아이콘 칸 */
+  --radius-lg: 14px; /* 행 선택·입력 그릇 */
+  --radius-xl: 18px; /* 본문 판 (셸, DS2-6) */
+  --radius-2xl: 20px; /* 카드·다이얼로그 */
+
+  /* --- elevation: rest·float two steps (ADR-0179 D6, recipe ADR-0189) -----
+   * 시안 A의 --sh1(rest)·--sh2(float). 다크는 그림자 대신 안쪽 하이라이트 1px로
+   * 층을 나눈다(시안 `.A.dark`). 레시피가 스킴마다 다른데 light-dark()는 색에만
+   * 쓸 수 있으므로, 두 스킴의 층을 한 목록에 모두 두고 다른 스킴의 층은 투명으로
+   * 지운다. 테마는 그림자를 바꾸지 않는다(ADR-0189 D2). 이름은 motion.css의
+   * `--elevation-rest`·`--elevation-float`가 가리킨다. */
+  --shadow-sm:
+    inset 0 1px 0 light-dark(rgba(255,255,255,0), rgba(255,255,255,.04)),
+    0 1px 2px light-dark(rgba(40,30,20,.05), rgba(0,0,0,0)),
+    0 8px 24px -10px light-dark(rgba(40,30,20,.14), rgba(0,0,0,0)),
+    0 10px 28px -12px light-dark(rgba(0,0,0,0), rgba(0,0,0,.6));
+  --shadow-lg:
+    inset 0 1px 0 light-dark(rgba(255,255,255,0), rgba(255,255,255,.06)),
+    0 16px 40px -12px light-dark(rgba(30,24,20,.28), rgba(0,0,0,0)),
+    0 2px 6px light-dark(rgba(30,24,20,.06), rgba(0,0,0,0)),
+    0 18px 44px -12px light-dark(rgba(0,0,0,0), rgba(0,0,0,.75));
 
   /* --- text roles, not size inflation ------------------------------------ */
   --text-*: initial;
@@ -729,13 +660,28 @@
   --default-transition-timing-function: var(--motion-ease-standard);
 
   /* Clear Tailwind's stock palette: bg-indigo-500 and friends must not exist,
-   * so the only reachable colors are the Dawn tokens below. */
+   * so the only reachable colors are the Dawn Sky roles below. */
   --color-*: initial;
   --color-transparent: transparent;
   --color-current: currentColor;
   --color-inherit: inherit;
 
+  --color-canvas-top: var(--canvas-top);
+  --color-canvas-mid: var(--canvas-mid);
+  --color-canvas-bottom: var(--canvas-bottom);
   --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-sheet: var(--sheet);
+  --color-pane: var(--pane);
+  --color-glass: var(--glass);
+  --color-glass-line: var(--glass-line);
+  --color-icon: var(--icon);
+  --color-primary: var(--primary);
+  --color-on-primary: var(--on-primary);
+  --color-signal: var(--signal);
+  --color-on-signal: var(--on-signal);
+  --color-signal-text: var(--signal-text);
+  --color-signal-soft: var(--signal-soft);
   --color-surface-raised: var(--surface-raised);
   --color-surface-sidebar: var(--surface-sidebar);
   --color-surface-hover: var(--surface-hover);
@@ -949,6 +895,75 @@
 @utility focus-ring-on-fill {
   --focus-ring-ink: var(--on-accent);
 }
+/* 잉크 채움(주 버튼·보내기) 위의 링 (ADR-0189 D6, DS2-1). 신호색 링은 잉크 위에서
+ * 대비가 모자라지 않지만, 채움 안쪽에 서는 인셋 링은 그 채움의 전경색이어야
+ * 채움 가장자리와 갈린다 — --on-accent 규칙과 같은 이유다. */
+@utility focus-ring-on-primary {
+  --focus-ring-ink: var(--on-primary);
+}
+
+/* =============================================================================
+ * 유리 재료 (ADR-0189 D1·D7, DS2-1 #2713). 시안 A `.a-search`·`.a-comp`·`.a-tab`.
+ *
+ * 반투명 면 + 뒤 흐림. 반투명이라 대비 표로 잴 수 없고(themes-2.0 §2), 그래서
+ * 읽기를 해칠 수 있는 세 경우에 불투명으로 물러난다:
+ *   - backdrop-filter 미지원: --surface 94% (D7, 새벽하늘 ink 17.6·ink-muted 6.6)
+ *   - 투명도 줄이기(prefers-reduced-transparency: reduce): 불투명 --surface
+ *   - 고대비(prefers-contrast: more): 불투명 --surface + --line-strong 테두리
+ * 실제 렌더 대비는 캡처 위에서만 잴 수 있다(runtime-unverified). 흐림 22·채도 1.4는
+ * 시안의 컴포저·탭바 값이다.
+ * ========================================================================== */
+@utility glass {
+  background-color: var(--glass);
+  border: 1px solid var(--glass-line);
+  -webkit-backdrop-filter: blur(22px) saturate(1.4);
+  backdrop-filter: blur(22px) saturate(1.4);
+
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    background-color: color-mix(in srgb, var(--surface) 94%, transparent);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    background-color: var(--surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  @media (prefers-contrast: more) {
+    background-color: var(--surface);
+    border-color: var(--line-strong);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* 바닥 그라데이션 (ADR-0189 D1·D6). 시안 A 데스크탑 창 `.a-win`: 160°, 가운데
+ * 정지점 42%. 컴포넌트가 hex나 `bg-gradient`로 그라데이션을 적으면 계속 막히고
+ * (프리플라이트 ai_gradient), 이 한 유틸만 테마의 `canvas` 토큰 셋으로 그린다.
+ * 평면 테마는 세 정지점이 같아 평면이 된다. 고대비에서는 `canvas-mid` 평면이다
+ * (D7). 셸(DS2-6)이 창 바닥에 쓴다. DS2-1은 갤러리의 유리 견본 바닥에만 쓴다. */
+@utility canvas-gradient {
+  background-color: var(--canvas-mid);
+  background-image: linear-gradient(
+    160deg,
+    var(--canvas-top) 0%,
+    var(--canvas-mid) 42%,
+    var(--canvas-bottom) 100%
+  );
+
+  @media (prefers-contrast: more) {
+    background-image: none;
+  }
+}
+
+/* 카드의 고대비 테두리 (ADR-0189 D7). 평소 카드는 테두리 없이 rest 그림자로
+ * 뜨고(시안 `.a-group`), 고대비에서는 --line-strong 1px를 두른다. 테두리 자리는
+ * 늘 투명하게 잡아 두어 설정이 바뀌어도 상자가 1px 움직이지 않는다. */
+@utility card-edge {
+  border: 1px solid transparent;
+
+  @media (prefers-contrast: more) {
+    border-color: var(--line-strong);
+  }
+}
 
 /* ADR-0179 D1 소비 유틸. 표면은 duration-[0-9]+ 를 적지 않고 이 이름을 든다.
  * `.press` 는 위 @layer utilities 블록(transition-colors 뒤)이 소유한다. */
@@ -1117,8 +1132,64 @@
     transition: grid-template-columns var(--duration-sidebar)
       var(--motion-ease-standard);
 
+    /* 창 바닥 (DS2-6 #2718, 시안 A `.a-win`). 창 전체가 그라데이션이고, 사이드바는
+     * 그 위에 녹아 자기 바탕이 없다. 본문은 그 위에 떠 있는 판 하나다(`app-pane`).
+     * 그라데이션 식은 `canvas-gradient`와 같다(160°, 가운데 42%). 셸이 그 유틸을
+     * 클래스로 들지 않는 이유는 아래 첫 층(띠) 때문이다: 두 층을 한 목록에
+     * 적어야 순서가 선다.
+     *
+     * 첫 층은 띠(`--band`, 노을띠)다. 띠가 있는 테마에서 사이드바 열은 띠 위에
+     * 서고, 띠가 없는 테마에서는 `var(--band, transparent)`가 투명이라 층이
+     * 사라진다. 사이드바가 자기 바탕을 칠하지 않고 셸이 칠하는 이유는 신호등
+     * 줄이다: 상단 줄(`app-titlebar`)은 셸의 첫 행 전체를 가로지르므로, 띠를
+     * 사이드바에만 칠하면 신호등 뒤 40px만 띠 밖에 남는다. */
+    background-color: var(--canvas-mid);
+    background-image:
+      linear-gradient(var(--band, transparent), var(--band, transparent)),
+      linear-gradient(
+        160deg,
+        var(--canvas-top) 0%,
+        var(--canvas-mid) 42%,
+        var(--canvas-bottom) 100%
+      );
+    background-size:
+      var(--w-sidebar) 100%,
+      100% 100%;
+    background-repeat: no-repeat;
+
+    /* 본문 판은 첫 행(상단 줄)까지 올라가 창 위쪽 인셋 8에서 시작한다. 상단 줄은
+     * 여전히 첫 행 전체를 가로지르고(신호등 옆 토글의 자리, #2700 계약), 판이
+     * DOM에서 뒤에 오므로 그 줄의 둘째 열 위를 덮는다. 인셋은 위·오른쪽·아래
+     * 8이고 왼쪽은 0이다: 사이드바가 판의 왼쪽 여백이다. */
+    > main {
+      grid-row: 1 / -1;
+      grid-column: 2;
+      margin-block: var(--spacing-2);
+      margin-inline: 0 var(--spacing-2);
+    }
+
     &[data-sidebar-collapsed] {
       grid-template-columns: 0px 1fr;
+      background-size:
+        0px 100%,
+        100% 100%;
+
+      /* 접히면 사이드바 열이 0이고, 신호등 옆 토글은 그 자리(상단 줄 첫 열의
+       * 인셋 80)에 남아야 한다(#1864 「토글은 자리를 옮기지 않는다」). 판이 첫
+       * 행까지 올라가 있으면 그 토글을 덮는다. 그래서 접힌 동안 판은 상단 줄
+       * 아래(둘째 행)에서 시작하고, 왼쪽에도 인셋 8을 둔다. */
+      > main {
+        grid-row: 2;
+        margin-block-start: 0;
+        margin-inline-start: var(--spacing-2);
+      }
+    }
+
+    @media (prefers-contrast: more) {
+      background-image: linear-gradient(
+        var(--band, transparent),
+        var(--band, transparent)
+      );
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -1132,10 +1203,15 @@
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
     transition: none;
+    /* 설정 전면은 떠 있는 판 문법 밖이다(DS2-6 범위 밖, 설정 자기 목록 열). */
+    background: var(--pane);
 
     > main {
       grid-row: 1;
       grid-column: 1;
+      margin: 0;
+      border-radius: 0;
+      box-shadow: none;
     }
   }
 
@@ -1194,6 +1270,9 @@
     inset-inline-start: 0;
     inline-size: var(--w-sidebar-drawer);
     z-index: var(--layer-overlay-surface);
+    /* 넓은 창에서 사이드바는 바탕이 없다(셸의 바닥 위에 녹는다, DS2-6). 서랍은
+     * 본문 위를 덮으므로 자기 바탕이 있어야 한다: 띠가 있으면 띠, 없으면 시트. */
+    background-color: var(--band, var(--sheet));
     /* 논리 속성이 아닌 이유: transform은 물리 축만 안다. 이 앱은 ko/LTR이고,
      * RTL이 생기면 여기가 뒤집을 자리다. */
     transform: translateX(-100%);
@@ -1227,12 +1306,467 @@
   }
 }
 
+/* =============================================================================
+ * DS2-6 데스크탑 셸 (#2718, ADR-0189, 시안 A `mockups.html #a-desk`).
+ *
+ * 창 전체가 그라데이션 바닥이고(`app-shell`), 사이드바는 그 위에 녹아 자기
+ * 바탕이 없으며, 본문은 떠 있는 판 하나다(`app-pane`). 값은 시안 CSS에서
+ * 그대로 가져왔다. 웹 사다리(6·10·14·18·20·pill)나 타입 역할(11·12·14·16·20)
+ * 밖의 값(검색 반경 12, 지금 카드 반경 16, 13.5·12.5·17·18 글자)은 시안의 셸
+ * 자리에만 쓰는 값이라 역할로 올리지 않고 이 유틸들 안에 가둔다. 차이 표는
+ * PR 본문과 `desktopShell.ds2.test.ts`가 진다. 글자는 rem이라 글자 크기
+ * 설정(큰 글씨)을 따른다.
+ * ========================================================================== */
+
+/* 본문 판 (시안 `.a-main`): 인셋 8 · 반경 18 · rest 그림자 + 1px 선 고리.
+ * 폰 폭(600 미만)에서는 판이 창 자체라 반경·그림자가 없다(서랍 문법 B6).
+ * 고대비에서는 고리가 --line-strong이 된다(D7, `card-edge`와 같은 규칙). */
+@utility app-pane {
+  background-color: var(--pane);
+
+  @media (width >= 600px) {
+    border-radius: var(--radius-xl);
+    box-shadow:
+      var(--elevation-rest),
+      0 0 0 1px var(--line);
+    overflow: clip;
+
+    @media (prefers-contrast: more) {
+      box-shadow:
+        var(--elevation-rest),
+        0 0 0 1px var(--line-strong);
+    }
+  }
+}
+
+/* 본문 판의 색은 테마를 따른다: 라이트는 --surface, 다크는 --canvas-mid(시안
+ * `.A.dark .a-main`). `tokens.css :root`의 --pane은 새벽하늘의 두 값을 글자로
+ * 적어 둔 것이고(대비 시험이 그 칸을 읽는다), 팔레트가 찍힌 루트에서는 여기서
+ * 그 팔레트의 역할을 다시 가리킨다. `light-dark(var(), var())` 중첩을 쓰지 않는
+ * 이유는 DS2-1이 WKWebView에서 재지 못한 자리라서다(runtime-unverified). */
+:root[data-palette] {
+  --pane: var(--surface);
+}
+:root[data-palette][data-theme="dark"] {
+  --pane: var(--canvas-mid);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-palette]:not([data-theme="light"]) {
+    --pane: var(--canvas-mid);
+  }
+}
+
+/* 띠 위의 글자 (노을띠 `band`, themes-2.0 §3 「띠 위 규칙」).
+ *
+ * 띠 위에는 on-band·on-band-muted·signal만 선다(DS2-0 시험의 금지 규칙).
+ * 사이드바는 수십 개 컴포넌트가 ink·ink-muted·icon·agent·primary를 읽으므로,
+ * 컴포넌트마다 분기하지 않고 사이드바 범위에서 그 역할들을 띠 역할로 다시
+ * 묶는다. 띠가 없는 테마에서는 `var(--on-band, …)`가 뒤 값(루트의 원래 역할)을
+ * 답해 아무것도 바뀌지 않는다. 그래서 이 규칙은 테마 이름을 모른다.
+ *
+ * 원래 값은 루트에서 한 번 받아 둔다(`--*-base`). 사이드바 안에서 흰 면에 서는
+ * 것(선택 행, 검색, 지금 카드, 배너)은 `band-surface`로 원래 역할을 되찾는다.
+ * 띠 위의 채움(호버·눌림)과 선은 시안 C의 `--bandFill`·`--bandLine`처럼
+ * on-band를 옅게 섞는다. 띠가 없으면 이 섞음이 무효가 되어 뒤 값으로 떨어진다. */
+:root {
+  --ink-base: var(--ink);
+  --ink-muted-base: var(--ink-muted);
+  --icon-base: var(--icon);
+  --agent-base: var(--agent);
+  --agent-soft-base: var(--agent-soft);
+  --danger-base: var(--danger);
+  --warn-base: var(--warn);
+  --line-base: var(--line);
+  --primary-base: var(--primary);
+  --on-primary-base: var(--on-primary);
+  --surface-hover-base: var(--surface-hover);
+  --surface-pressed-base: var(--surface-pressed);
+  --band-fill: color-mix(in srgb, var(--on-band) 10%, transparent);
+  --band-fill-strong: color-mix(in srgb, var(--on-band) 16%, transparent);
+  --band-line: color-mix(in srgb, var(--on-band) 12%, transparent);
+  --glass-base: var(--glass);
+  /* 띠 위의 유리는 불투명한 흰 면이다: 반투명 흰 면이 남색 띠를 비치면 회색
+   * 진흙이 되고, 그 위 잉크의 대비를 잴 수 없다. on-band 0% 섞기는 띠가 있을
+   * 때만 유효한 값을 만드는 장치다(없으면 무효 → 원래 유리). */
+  --band-glass: color-mix(in srgb, var(--on-band) 0%, var(--surface));
+}
+
+.sidebar-drawer,
+.app-shell:not([data-sidebar-collapsed]) > .app-titlebar {
+  --ink: var(--on-band, var(--ink-base));
+  --ink-muted: var(--on-band-muted, var(--ink-muted-base));
+  --icon: var(--on-band-muted, var(--icon-base));
+  --agent: var(--on-band, var(--agent-base));
+  --agent-soft: var(--band-fill, var(--agent-soft-base));
+  /* warn과 danger는 띠 위에서 서로 다른 on-band 단계다: 연결 막대(연결 중 =
+   * warn, 끊김 = danger)가 색 하나로 상태를 말하므로 둘이 같은 흰색이 되면
+   * 가를 수 없다(검수 R2 M). */
+  --warn: var(--on-band-muted, var(--warn-base));
+  --danger: var(--on-band, var(--danger-base));
+  --line: var(--band-line, var(--line-base));
+  --primary: var(--on-band, var(--primary-base));
+  --on-primary: var(--band, var(--on-primary-base));
+  --surface-hover: var(--band-fill, var(--surface-hover-base));
+  --surface-pressed: var(--band-fill-strong, var(--surface-pressed-base));
+  --glass: var(--band-glass, var(--glass-base));
+  color: var(--ink);
+}
+
+@utility band-surface {
+  --ink: var(--ink-base);
+  --ink-muted: var(--ink-muted-base);
+  --icon: var(--icon-base);
+  --agent: var(--agent-base);
+  --agent-soft: var(--agent-soft-base);
+  --warn: var(--warn-base);
+  --danger: var(--danger-base);
+  --line: var(--line-base);
+  --primary: var(--primary-base);
+  --on-primary: var(--on-primary-base);
+  --surface-hover: var(--surface-hover-base);
+  --surface-pressed: var(--surface-pressed-base);
+}
+
+/* 흰 면 채움을 가진 자식은 클래스로 알 수 있다: 사이드바 안에서 그 채움을 든
+ * 요소는 `band-surface`를 잊어도 원래 글자 역할을 되찾는다(DS2-6 R1 H-3 — 빈
+ * 목록의 「채널 만들기」, 배너의 「다시 시도」 알약). 띠 없는 테마에서는 되찾을
+ * 것이 원래 값이라 아무 일도 하지 않는다. */
+.sidebar-drawer :is(.bg-surface, .bg-surface-muted, .bg-surface-raised) {
+  --ink: var(--ink-base);
+  --ink-muted: var(--ink-muted-base);
+  --icon: var(--icon-base);
+  --agent: var(--agent-base);
+  --agent-soft: var(--agent-soft-base);
+  --warn: var(--warn-base);
+  --danger: var(--danger-base);
+  --line: var(--line-base);
+  --primary: var(--primary-base);
+  --on-primary: var(--on-primary-base);
+  --surface-hover: var(--surface-hover-base);
+  --surface-pressed: var(--surface-pressed-base);
+}
+
+/* 레일의 「현재」 마커. 타일 밖 바닥 위에 서므로 바닥의 글자 역할을 쓴다: 띠가
+ * 있으면 on-band, 없으면 잉크. 선택은 호박색이 아니다(owner 결정 2026-09-26). */
+@utility rail-marker {
+  background-color: var(--on-band, var(--ink-base));
+}
+
+/* 사이드바 목록 열 (시안 `.a-side`: 안 여백 14 12 12 14, 줄 간격 2). 위 여백은
+ * 상단 줄(40)이 이미 진다. */
+@utility sidebar-list {
+  padding-block: var(--spacing-1) var(--spacing-3);
+  padding-inline: 14px var(--spacing-3);
+}
+
+/* 행 사이 간격 2 (시안 `.a-side { gap: 2px }`). 리듬 스케일(4부터) 밖의 값이라
+ * 이 목록 자리에만 둔다. 선택 행의 rest 그림자가 옆 행과 붙지 않는 틈이다. */
+@utility sidebar-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* 워크스페이스 머리 (시안 `.a-ws`): 로고 34 원 + 이름 18/800. */
+@utility sidebar-ws {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: var(--spacing-1) 6px 10px;
+}
+@utility sidebar-ws-logo {
+  display: block;
+  flex: none;
+  inline-size: 34px;
+  block-size: 34px;
+  border-radius: 9999px;
+  background-color: var(--surface);
+  box-shadow: var(--elevation-rest);
+  overflow: hidden;
+}
+@utility sidebar-ws-name {
+  min-inline-size: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1.125rem;
+  line-height: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+
+/* 검색 입구 (시안 `.a-search`): 높이 36 · 반경 12 · 유리 + rest · 13.5 글자.
+ * 반경 12는 웹 사다리(14) 밖이다. 시안을 따른다(PR 차이 표). 유리와 고대비
+ * 물러남은 `glass` 유틸이 진다. */
+@utility sidebar-search {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  min-block-size: var(--spacing-field);
+  border-radius: 12px;
+  padding-inline: 10px;
+  margin-block-end: 10px;
+  font-size: 0.84375rem;
+  line-height: 1.25rem;
+  color: var(--ink-muted);
+  box-shadow: var(--elevation-rest);
+}
+@utility sidebar-kbd {
+  margin-inline-start: auto;
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  background-color: var(--surface-muted);
+  font-size: 0.71875rem;
+  line-height: 1rem;
+  font-weight: 500;
+  color: var(--ink-muted);
+}
+
+/* 행 (시안 `.a-srow`): 높이 34 · 좌우 10 · 반경 10 · 간격 10 · 14 글자 ·
+ * 아이콘 18. 안 읽음은 굵기(700)와 잉크 아이콘이다. 선택 행은 흰 면 + rest
+ * 그림자로 띄운다(`sidebar-row-selected`, owner 결정 2026-09-26: 호박색으로
+ * 칠하지 않는다. 호박색은 안 읽음·멘션 신호에만). */
+@utility sidebar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-block-size: 34px;
+  padding-inline: 10px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  letter-spacing: -0.005em;
+  color: var(--ink);
+
+  & [data-row-icon] {
+    display: flex;
+    flex: none;
+    color: var(--icon);
+  }
+  & [data-row-icon] svg {
+    inline-size: 1.125rem;
+    block-size: 1.125rem;
+  }
+  &[data-unread] {
+    font-weight: 700;
+  }
+  &[data-unread] [data-row-icon] {
+    color: var(--ink);
+  }
+}
+@utility sidebar-row-selected {
+  background-color: var(--surface);
+  box-shadow: var(--elevation-rest);
+  font-weight: 700;
+
+  & [data-row-icon] {
+    color: var(--ink);
+  }
+
+  @media (prefers-contrast: more) {
+    box-shadow:
+      var(--elevation-rest),
+      inset 0 0 0 1px var(--line-strong);
+  }
+}
+
+/* 행 끝의 수 (시안 `.a-srow .a-badge`): 19 · 좌우 6 · 11/700 알약. */
+@utility sidebar-badge {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  min-inline-size: 19px;
+  block-size: 19px;
+  padding-inline: 6px;
+  border-radius: 9999px;
+  font-size: var(--text-timestamp);
+  line-height: 1;
+  font-weight: 700;
+}
+
+/* 섹션 머리 (시안 `.a-slabel`): 12.5/700 ink-muted, 셰브론 14, 위 여백 14. */
+@utility sidebar-section-head {
+  padding-block-start: 14px;
+}
+@utility sidebar-section-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-block-size: var(--spacing-control-sm);
+  padding-inline: 10px;
+  font-size: 0.78125rem;
+  line-height: 1rem;
+  font-weight: 700;
+  color: var(--ink-muted);
+
+  & svg {
+    inline-size: 0.875rem;
+    block-size: 0.875rem;
+  }
+}
+
+/* 작업 중 카드 (시안 `.a-side .a-now`): 유리 + rest · 반경 16 · 안 여백 11.
+ * 반경 16은 사다리 밖이다(시안 값). 에이전트 칸 26 · 반경 8. */
+@utility sidebar-now {
+  display: block;
+  margin-block: 6px var(--spacing-1);
+  padding: 11px;
+  border-radius: 16px;
+  box-shadow: var(--elevation-rest);
+  color: var(--ink);
+}
+@utility sidebar-now-agent {
+  display: grid;
+  flex: none;
+  place-items: center;
+  inline-size: 26px;
+  block-size: 26px;
+  border-radius: 8px;
+  background-color: var(--agent-soft);
+  color: var(--agent);
+
+  & svg {
+    inline-size: 0.875rem;
+    block-size: 0.875rem;
+  }
+}
+@utility sidebar-now-name {
+  font-size: 0.84375rem;
+  line-height: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+@utility sidebar-now-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: auto;
+  font-size: 0.78125rem;
+  line-height: 1rem;
+  font-weight: 600;
+}
+@utility sidebar-now-dot {
+  inline-size: 7px;
+  block-size: 7px;
+  border-radius: 9999px;
+  background-color: currentColor;
+}
+@utility sidebar-now-line {
+  margin-block-start: 6px;
+  font-size: 0.78125rem;
+  line-height: 1.125rem;
+  color: var(--ink-muted);
+}
+
+/* 본문 머리 (시안 `.a-mhd`): 높이 60 · 좌 24 우 18 · 제목 17/800 · 토픽 13.5.
+ * 폰 폭에서는 헤더가 서랍 토글과 제목 한 줄이라 예전 기하(좌우 16)다. */
+@utility channel-head {
+  gap: var(--spacing-3);
+  padding-inline: var(--spacing-4);
+  border-block-end: 1px solid var(--line);
+
+  @media (width >= 600px) {
+    min-block-size: 60px;
+    padding-inline: var(--spacing-6) 18px;
+
+    & [data-head-icon] svg {
+      inline-size: 1.125rem;
+      block-size: 1.125rem;
+    }
+  }
+}
+/* 판 안의 한 선 (시안 `.a-mbody { padding: 18px 24px 0 }`). 메시지 행·날짜
+ * 구분선·채널 소개는 자기 좌우 16(px-4)을 갖고 스레드 패널(320)과 함께 쓰이므로,
+ * 채널 타임라인 띠가 넓은 창에서만 8을 더해 머리(24)·컴포저(24)와 한 선을 만든다. */
+@utility timeline-inset {
+  @media (width >= 600px) {
+    padding-inline: var(--spacing-2);
+  }
+}
+
+@utility channel-head-title {
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  font-weight: 600;
+
+  @media (width >= 600px) {
+    font-size: 1.0625rem;
+    line-height: 1.5rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+}
+@utility channel-head-topic {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.84375rem;
+  line-height: 1.25rem;
+  color: var(--ink-muted);
+}
+
+/* 떠 있는 컴포저 (시안 `.a-dcomp`): 좌우 24 · 아래 18 · 반경 20 · float 그림자 +
+ * 1px 선 고리 · 흰 면. 시안은 타임라인 위에 절대 위치로 얹지만 여기서는 흐름
+ * 안에 선다(PR 차이 표: 높이가 트레이·라우팅 줄·줄바꿈으로 바뀌고, 타임라인의
+ * 바닥 고정과 「최신으로」가 그 높이를 알아야 한다). 폰 폭에서는 예전 그릇이다. */
+@utility composer-dock {
+  border-block-start: 1px solid var(--line);
+
+  /* 판 안의 다른 줄(트레이·인용·라우팅·활동)은 각자 좌우 24(px-6)로 카드의
+   * 가장자리와 선다. 카드 인셋은 폼이 진다. */
+  @media (width >= 600px) {
+    border-block-start: 0;
+
+    & > form {
+      padding: var(--spacing-2) var(--spacing-6) 18px;
+    }
+  }
+}
+/* 첨부 트레이 (ADR-0151 D2). 폰에서는 컴포저 그릇 위 경계선 한 줄로 나뉜
+ * 띠이고, 넓은 창에서는 떠 있는 카드 위에 선도 바탕도 없이 카드 가장자리(좌우
+ * 24)에 맞춰 선다 — 카드 위에 또 하나의 띠를 그으면 판 안에 층이 셋이 된다. */
+@utility attachment-tray {
+  border-block-end: 1px solid var(--line);
+  padding: var(--spacing-2) var(--spacing-3);
+
+  @media (width >= 600px) {
+    border-block-end: 0;
+    padding: var(--spacing-2) var(--spacing-6) 0;
+  }
+}
+
+@utility composer-card {
+  background-color: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+
+  @media (width >= 600px) {
+    border-color: var(--line);
+    border-radius: var(--radius-2xl);
+    box-shadow: var(--elevation-float);
+    padding: var(--spacing-1) var(--spacing-1) 2px var(--spacing-1);
+
+    @media (prefers-contrast: more) {
+      border-color: var(--line-strong);
+    }
+  }
+}
+
 /* 앱 상단 줄 (#1864). 데스크톱에서만 선다: 토글이 사이드바 안에 있으면 접는
  * 순간 입구가 사라진다. 트래픽라이트 옆 고정 자리(buzz). 웹에서는 같은 줄이
  * 일반 상단 바이고, Tauri Overlay일 때만 `data-tauri-drag-region`이 인셋을 연다.
  * 버튼은 그 속성을 갖지 않는다. 높이·테두리를 바꾸면 토글 중심선(19.5)이 움직이고,
  * 셸의 `trafficLightPosition.y`도 함께 옮겨야 한다(#2700,
- * desktopShellContract.test.ts). */
+ * desktopShellContract.test.ts).
+ *
+ * DS2-6(#2718): 줄은 창 바닥(셸의 그라데이션·띠) 위에 녹는다. 바탕이 없고, 아래
+ * 테두리 1px은 투명하게 **자리만** 지킨다. 테두리를 지우면 내용 상자가 39에서
+ * 40이 되어 토글 중심이 19.5에서 20으로 내려가고, 네이티브 신호등과 0.5pt
+ * 어긋난다. 시안의 `.tb`(28 높이, 위 여백 14)는 신호등 중심 28이라 따르지 않는다
+ * (#2700 실측 계약이 이긴다, PR 「시안과의 차이」). */
 @utility app-titlebar {
   display: flex;
   grid-row: 1;
@@ -1240,8 +1774,8 @@
   align-items: center;
   block-size: var(--spacing-control-lg);
   padding-inline: var(--spacing-2);
-  border-block-end: 1px solid var(--line);
-  background-color: var(--surface);
+  border-block-end: 1px solid transparent;
+  background-color: transparent;
 
   &[data-tauri-drag-region] {
     padding-inline-start: var(--titlebar-inset);
@@ -1262,7 +1796,7 @@
   min-block-size: var(--spacing-control-lg);
   padding-inline: var(--spacing-2);
   border-block-end: 1px solid var(--line);
-  background-color: var(--surface);
+  background-color: var(--pane);
 
   &[data-tauri-drag-region] {
     padding-inline-start: var(--titlebar-inset);
@@ -1547,7 +2081,7 @@
 }
 
 /* 설정의 두 열 (B6 / #1867). 앱 사이드바를 대체하므로 넓은 창의 목록 폭은
- * `--w-sidebar`(240px)다. 390px 폰에서는 그 열이 본문을 밀어내므로 목록이
+ * `--w-settings-nav`(240px)다. 390px 폰에서는 그 열이 본문을 밀어내므로 목록이
  * 본문 위로 올라가 가로로 눕는다. */
 @utility settings-layout {
   display: flex;
@@ -1562,7 +2096,7 @@
 /* 자격 행 3열 (#2204 R8). 임의 `grid-cols-[…]` 금지 — 밴드 폭은
  * `--spacing-action-band` 이름이다. `lg`(뷰포트 ≥1024) 에서만 붙인다.
  *
- * 산술: 설정 셸은 ≥600에서 사이드바 `--w-sidebar`(240) + 본문 p-6(48).
+ * 산술: 설정 셸은 ≥600에서 목록 `--w-settings-nav`(240) + 본문 p-6(48).
  * 1024 → 본문 ≥736, 목록 ≈734. 목록 − 테두리 2 − ps-3 12 − band 240 −
  * column-gap 12×2 − facts. 실측 이름 상자: SHORT 김인턴 302.5 / hermes 282.4
  * (LONG 45자도 302.5). 둘 다 ≥ 144, 여유 있음. 720 → 본문 ≈430. 같은 3열은
@@ -1584,7 +2118,7 @@
 }
 
 @utility settings-nav {
-  inline-size: var(--w-sidebar);
+  inline-size: var(--w-settings-nav);
   flex-shrink: 0;
   overflow-y: auto;
   border-inline-end: 1px solid var(--line);
@@ -2430,23 +2964,18 @@
   animation: onboarding-mark-float 8s ease-in-out 1.1s infinite;
 }
 
-.onboarding-mark svg {
+/* The S0 hero is the owner-chosen 코메토 K6 reference raster (#2732 R2,
+   KomettoMark). It is one image, so the old per-path satellite arrival
+   (#2650) became one arrival of the whole badge over the same 1.1s; the
+   wordmark (1.1s) and tagline (1.4s) still follow it. */
+.onboarding-mark img {
   display: block;
   width: 100%;
   height: 100%;
+  animation: onboarding-mark-arrive 1.1s ease-out backwards;
 }
 
-/* Second path of OortMark is the orbit (two outer arcs). Bound to that
-   document order: do not reorder OortMark's paths. pathLength=1 on the
-   element normalizes the raw length (~23) so dasharray 1 draws the stroke
-   over the full 1.1s instead of snapping on (dasharray 64 > path length). */
-.onboarding-mark svg path:nth-of-type(2) {
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
-  animation: onboarding-orbit-draw 1.1s ease-out forwards;
-}
-
-/* Sequential reveal after the orbit draw: wordmark at 1.1s, copy at 1.4s.
+/* Sequential reveal after the mark arrives: wordmark at 1.1s, copy at 1.4s.
    Same 300ms fade as the step fade-in. backwards keeps them hidden until
    their delay; reduced-motion below drops this to opacity 1 immediately. */
 .onboarding-wordmark {
@@ -2583,9 +3112,14 @@
   animation-name: onboarding-mask-reveal-up;
 }
 
-@keyframes onboarding-orbit-draw {
+@keyframes onboarding-mark-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
   to {
-    stroke-dashoffset: 0;
+    opacity: 1;
+    transform: none;
   }
 }
 
@@ -2676,7 +3210,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .onboarding-mark,
-  .onboarding-mark svg path:nth-of-type(2),
+  .onboarding-mark img,
   .onboarding-wordmark,
   .onboarding-tagline,
   .onboarding-cloud-body,
@@ -2700,8 +3234,8 @@
     transform: translate(-50%, -50%) rotate(var(--onboarding-body-rotate, 0deg));
   }
 
-  .onboarding-mark svg path:nth-of-type(2) {
-    stroke-dashoffset: 0;
+  .onboarding-mark img {
+    transform: none;
   }
 }
 
@@ -2788,9 +3322,17 @@
     overscroll-behavior-y: contain;
   }
 
+  /* 커서는 신호다 (ADR-0189 D6, 시안 `.a-comp .txt::after`). 글을 쓰는 자리의
+   * 깜빡이는 막대가 안 읽음·멘션과 같은 색으로 「여기」를 말한다. */
+  input,
+  textarea,
+  [contenteditable="true"] {
+    caret-color: var(--signal);
+  }
+
   body {
     margin: 0;
-    background: var(--surface);
+    background: var(--pane);
     color: var(--ink);
     font-family: var(--font-sans);
     font-size: var(--text-body);

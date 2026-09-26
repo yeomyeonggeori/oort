@@ -29,7 +29,7 @@ export const ContextMenuContent = React.forwardRef<
       ref={ref}
       collisionPadding={8}
       className={cn(
-        "layer-overlay-surface min-w-pane-sm rounded-md border border-line bg-surface-raised p-1 text-ink shadow-lg",
+        "layer-overlay-surface min-w-pane-sm rounded-lg border border-line bg-surface-raised p-1 text-ink shadow-lg",
         POPOVER_MOTION,
         className
       )}

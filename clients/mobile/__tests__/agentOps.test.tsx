@@ -379,23 +379,29 @@ afterEach(() => {
 async function openAgentsTab(scheme?: ColorScheme) {
   renderShell(scheme);
   await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
-  fireEvent.press(screen.getByTestId('tab-agents'));
+  // 탭이던 것이 FAB 시트의 문이 되었다 (ADR-0189 D1, #2714).
+  fireEvent.press(screen.getByTestId('shell-fab'));
+  fireEvent.press(screen.getByTestId('new-message-agents'));
   await waitFor(() => expect(screen.getByTestId('agents-list')).toBeTruthy());
 }
 
 describe('the 에이전트 tab exists at all', () => {
-  it('is the third tab, and does not fetch anything until it is opened', async () => {
+  it('is reached from the FAB sheet, and does not fetch anything until it is opened', async () => {
     // The whole point of the lazy mount: a person who never opens this tab must
     // not pay for the ledger, the host registry and one profile read per agent.
     const fetchMock = installFetch();
     renderShell();
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
-    expect(screen.getByTestId('tab-agents')).toBeTruthy();
+    expect(screen.getByTestId('shell-fab')).toBeTruthy();
     expect(
       fetchMock.mock.calls.some(([url]) => String(url).includes('/work-sessions')),
     ).toBe(false);
 
-    fireEvent.press(screen.getByTestId('tab-agents'));
+    // 탭이던 것이 FAB 시트의 문이 되었다 (ADR-0189 D1, #2714).
+
+    fireEvent.press(screen.getByTestId('shell-fab'));
+
+    fireEvent.press(screen.getByTestId('new-message-agents'));
     await waitFor(() =>
       expect(
         fetchMock.mock.calls.some(([url]) => String(url).includes('/work-sessions')),

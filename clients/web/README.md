@@ -623,7 +623,7 @@ The liveness claim, and the two things a terminal costs:
 seam). iOS의 홈 화면 추가 자체는 워커와 무관하므로 http에서도 전체 화면으로 뜬다.
 
 ```bash
-npm run icons:pwa           # favicon.svg -> public/icon-*.png (마크를 고쳤을 때만)
+npm run icons:brand         # 마크 기하 -> SVG -> 웹·데스크탑·폰 아이콘 전부 + 검사 (마크를 고쳤을 때만, docs/brand/mark)
 npm run capture:standalone  # 실측 + artifacts/pwa/*.png
 ```
 

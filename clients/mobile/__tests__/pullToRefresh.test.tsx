@@ -232,7 +232,9 @@ describe('에이전트 탭', () => {
     const fetchMock = installFetch();
     renderShell();
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('tab-agents'));
+    // 탭이던 것이 FAB 시트의 문이 되었다 (ADR-0189 D1, #2714).
+    fireEvent.press(screen.getByTestId('shell-fab'));
+    fireEvent.press(screen.getByTestId('new-message-agents'));
     await waitFor(() => expect(screen.getByTestId('agents-list')).toBeTruthy());
 
     const before = {
@@ -252,7 +254,9 @@ describe('에이전트 탭', () => {
     const fetchMock = installFetch({emptyRoster: true});
     renderShell();
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
-    fireEvent.press(screen.getByTestId('tab-agents'));
+    // 탭이던 것이 FAB 시트의 문이 되었다 (ADR-0189 D1, #2714).
+    fireEvent.press(screen.getByTestId('shell-fab'));
+    fireEvent.press(screen.getByTestId('new-message-agents'));
     await waitFor(() => expect(screen.getByTestId('agents-empty')).toBeTruthy());
 
     const before = callsTo(fetchMock, '/roster');

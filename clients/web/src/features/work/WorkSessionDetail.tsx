@@ -207,7 +207,7 @@ function EventRow({ row, streamOpen }: { row: WorkEventRow; streamOpen: boolean 
           <span
             aria-hidden="true"
             data-testid="work-stream-caret"
-            className="caret-stream pl-px text-body text-accent"
+            className="caret-stream pl-px text-body text-signal"
           >
             ▌
           </span>
@@ -833,7 +833,7 @@ export function WorkSessionDetail({
         className="isolate min-h-0 flex-1 overflow-y-auto"
         data-testid="work-detail-scroll"
       >
-        <div className="sticky top-0 z-10 border-b border-line bg-surface">
+        <div className="sticky top-0 z-10 border-b border-line bg-pane">
           <div className="flex items-center gap-2 px-4 py-2">
             <button
               ref={backRef}
@@ -1180,7 +1180,7 @@ export function WorkSessionDetail({
                 className={cn(
                   CHIP_CLASS,
                   controlNotice.state === "open"
-                    ? "bg-accent-soft text-accent"
+                    ? "bg-accent-soft text-signal-text"
                     : controlNotice.outcome === "returned"
                       ? "bg-surface-hover text-ok"
                       : controlNotice.outcome === "expired"

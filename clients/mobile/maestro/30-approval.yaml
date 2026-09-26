@@ -149,7 +149,7 @@ name: 30-approval
 # has to leave awaiting_approval and finish, and the runner then checks the work
 # session row actually changed.
 - tapOn:
-    id: "tab-channels"
+    id: "tab-home"
 - tapOn:
     id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
 - extendedWaitUntil:
