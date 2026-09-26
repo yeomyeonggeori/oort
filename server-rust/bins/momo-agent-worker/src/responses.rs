@@ -481,6 +481,9 @@ impl ResponseStream {
     /// arrive with the final message and prove nothing a reader could not
     /// already see.
     pub fn push_to(&mut self, chunk: &[u8], sink: &dyn DeltaSink) {
+        if self.outcome.is_some() {
+            return;
+        }
         if let Some(raw) = self.non_sse.as_mut() {
             if raw.len() + chunk.len() > NON_SSE_FALLBACK_LIMIT {
                 self.non_sse = None;
@@ -489,12 +492,19 @@ impl ResponseStream {
             }
         }
 
-        self.buffer.extend_from_slice(chunk);
-        while let Some(index) = self.buffer.iter().position(|byte| *byte == b'\n') {
-            let line: Vec<u8> = self.buffer.drain(..=index).collect();
-            let line = line.strip_suffix(b"\n").unwrap_or(&line);
-            let line = line.strip_suffix(b"\r").unwrap_or(line);
-            self.line(&String::from_utf8_lossy(line), sink);
+        // Review M-2: scan only the new bytes, and bound the pending line.
+        let lines = match crate::sse::take_lines(&mut self.buffer, chunk) {
+            Ok(lines) => lines,
+            Err(error) => {
+                self.outcome = Some(Err(error));
+                return;
+            }
+        };
+        for line in lines {
+            self.line(&String::from_utf8_lossy(&line), sink);
+            if self.outcome.is_some() {
+                return;
+            }
         }
     }
 
@@ -553,6 +563,13 @@ impl ResponseStream {
         } else if line.starts_with(':') {
             // A comment — the keep-alive an idle stream sends.
         } else if let Some(value) = field(line, "data") {
+            if self.data.len() + value.len() + 1 > crate::sse::MAX_EVENT_BYTES {
+                self.outcome = Some(Err(crate::sse::over_limit(
+                    "SSE event",
+                    crate::sse::MAX_EVENT_BYTES,
+                )));
+                return;
+            }
             if !self.data.is_empty() {
                 self.data.push('\n');
             }
@@ -598,6 +615,13 @@ impl ResponseStream {
             // openai-python `ResponseTextDeltaEvent`.
             "response.output_text.delta" => {
                 if let Some(delta) = event.get("delta").and_then(Value::as_str) {
+                    if self.text.len() + delta.len() > crate::sse::MAX_TEXT_BYTES {
+                        self.outcome = Some(Err(crate::sse::over_limit(
+                            "answer text",
+                            crate::sse::MAX_TEXT_BYTES,
+                        )));
+                        return;
+                    }
                     self.text.push_str(delta);
                     self.deltas += 1;
                     // Reported even though it is also accumulated: the
@@ -714,6 +738,32 @@ struct RawOutputTokensDetails {
 
 #[cfg(test)]
 mod tests {
+
+    /// Review M-2 (the same pattern, fixed once): a newline-free flood ends
+    /// the Responses stream at the line ceiling, quickly and non-retryably.
+    #[test]
+    fn a_newline_free_flood_is_refused_at_the_ceiling() {
+        let started = std::time::Instant::now();
+        let mut stream = ResponseStream::new();
+        let chunk = vec![b'x'; 64 * 1024];
+        let mut fed = 0;
+        for _ in 0..1024 {
+            fed += chunk.len();
+            stream.push(&chunk);
+            if stream.is_terminal() {
+                break;
+            }
+        }
+        assert!(stream.is_terminal());
+        assert!(fed <= crate::sse::MAX_LINE_BYTES + chunk.len());
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+        let error = stream.finish().expect_err("refused");
+        assert!(
+            matches!(error, ProviderError::InvalidResponse(_)),
+            "{error:?}"
+        );
+        assert!(!error.is_retryable());
+    }
     use super::*;
 
     /// **The live 400, locked as a fixture** (goal SRV-HOT1).
