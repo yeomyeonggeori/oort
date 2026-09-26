@@ -284,4 +284,23 @@ describe("HarnessLoginDialog", () => {
     });
     expect(document.activeElement).toBe(radio);
   });
+
+  it("[다시 시도] 겹 누름의 둘째 누름은 새로 선 [취소]로 모달을 닫지 않는다", async () => {
+    const onClose = vi.fn();
+    cli.probes = [{ id: "claude", installed: true, auth: "needs_login" }];
+    mount("claude", { onClose });
+    await flush();
+    act(() => cli.exit?.({ id: 7, code: 0, signal: null }));
+    await flush();
+    act(() => {
+      dq("harness-login-retry")!.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+    });
+    await flush();
+    act(() => {
+      dq("harness-login-cancel")!.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 2 }));
+    });
+    expect(onClose).not.toHaveBeenCalled();
+    click(dq("harness-login-cancel"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

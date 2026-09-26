@@ -41,7 +41,10 @@ class FakeMirror implements MirrorTerminal {
   }
 }
 
-function fakeCli(probesAfter: LocalHarnessProbe[] | Error = []) {
+function fakeCli(
+  probesAfter: LocalHarnessProbe[] | Error = [],
+  options: { mirrorDelayMs?: number } = {}
+) {
   const spawns: PtySpawnRequest[] = [];
   const writes: Uint8Array[] = [];
   const kills: number[] = [];
@@ -63,13 +66,19 @@ function fakeCli(probesAfter: LocalHarnessProbe[] | Error = []) {
     kill: vi.fn(async (id) => void kills.push(id)),
     ack: vi.fn(async () => undefined),
   };
-  const loadMirror = async (): Promise<MirrorFactory> => ({
+  const loadMirror = async (): Promise<MirrorFactory> => {
+    // 첫 열림의 xterm 청크 읽기를 흉내 낸다.
+    if (options.mirrorDelayMs) await new Promise((r) => setTimeout(r, options.mirrorDelayMs));
+    return factory;
+  };
+  const factory: MirrorFactory = {
     create(cols, rows) {
       const mirror = new FakeMirror(cols, rows);
       mirrors.push(mirror);
-      return { mirror, serialize: () => "" };
+      // 저장 경로가 살아 있으면 이 직렬화가 저장된다(URL·토큰을 담는다).
+      return { mirror, serialize: () => `${FAKE_URL} ${FAKE_TOKEN} ${PASTED}` };
     },
-  });
+  };
   const detect = vi.fn(async () => {
     if (probesAfter instanceof Error) throw probesAfter;
     return probesAfter;
@@ -105,12 +114,20 @@ const LOGGED_IN: LocalHarnessProbe[] = [{ id: "claude", installed: true, auth: "
 const NEEDS_LOGIN: LocalHarnessProbe[] = [{ id: "claude", installed: true, auth: "needs_login" }];
 
 let setItem: ReturnType<typeof vi.spyOn>;
+let idbOpen: ReturnType<typeof vi.fn>;
+/** 저장소를 건드리는 모든 문(읽기·지우기 포함). 로그인 세션은 저장소를 하나도 만지지 않는다. */
+let storageTouches: ReturnType<typeof vi.spyOn>[];
 let consoleSpies: ReturnType<typeof vi.spyOn>[];
 
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   setItem = vi.spyOn(Storage.prototype, "setItem");
+  storageTouches = (["getItem", "removeItem", "key", "clear"] as const).map((m) =>
+    vi.spyOn(Storage.prototype, m)
+  );
+  idbOpen = vi.fn();
+  vi.stubGlobal("indexedDB", { open: idbOpen, deleteDatabase: idbOpen });
   consoleSpies = (["log", "info", "warn", "error", "debug"] as const).map((level) =>
     vi.spyOn(console, level)
   );
@@ -119,6 +136,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 /** URL·코드·토큰이 이 기기의 저장소와 콘솔 어디에도 없다. */
@@ -132,6 +150,14 @@ function expectNothingKept() {
     }
   }
   expect(setItem).not.toHaveBeenCalled();
+  expect(idbOpen).not.toHaveBeenCalled();
+  for (const touch of storageTouches) expect(touch).not.toHaveBeenCalled();
+  expect(localStorage.length + sessionStorage.length).toBe(0);
+}
+
+/** 스크롤백 저장 타이머(800ms, 최대 3s)가 모두 지나간 뒤에 본다(#2902 M2). */
+async function pastPersistWindow() {
+  await vi.advanceTimersByTimeAsync(3_500);
 }
 
 describe("loginController (가짜 CLI)", () => {
@@ -147,14 +173,17 @@ describe("loginController (가짜 CLI)", () => {
   });
 
   it("콜백 성공: CLI가 끝나고 상태 명령이 로그인됨이면 연결됨", async () => {
+    vi.useFakeTimers();
     const cli = fakeCli(LOGGED_IN);
     const login = createLoginController("claude", "browser", cli.deps);
     login.open();
     await flush();
     cli.printLoginScreen();
+    await pastPersistWindow();
     expect(login.getState().status).toEqual({ phase: "waiting" });
     cli.exit(0);
     await flush();
+    await pastPersistWindow();
     expect(cli.detect).toHaveBeenCalledTimes(1);
     expect(login.getState().status).toEqual({ phase: "connected" });
     // 출력은 미러가 그렸다(그리기만).
@@ -164,6 +193,7 @@ describe("loginController (가짜 CLI)", () => {
   });
 
   it("코드 입력: 붙인 코드를 Enter와 함께 PTY 입력으로만 넘긴다", async () => {
+    vi.useFakeTimers();
     const cli = fakeCli(LOGGED_IN);
     const login = createLoginController("claude", "browser", cli.deps);
     login.open();
@@ -171,6 +201,7 @@ describe("loginController (가짜 CLI)", () => {
     cli.printLoginScreen();
     login.submitCode(`  ${PASTED}\n`);
     await flush();
+    await pastPersistWindow();
     expect(cli.writes.map((b) => new TextDecoder().decode(b))).toEqual([`${PASTED}\r`]);
     cli.exit(0);
     await flush();
@@ -214,6 +245,31 @@ describe("loginController (가짜 CLI)", () => {
     await flush();
     expect(cli.detect).not.toHaveBeenCalled();
     expectNothingKept();
+  });
+
+  it("첫 열림에 터미널 청크를 읽는 동안 취소해도 로그인 CLI가 주인 없이 뜨지 않는다 (#2902 M1)", async () => {
+    vi.useFakeTimers();
+    const cli = fakeCli(LOGGED_IN, { mirrorDelayMs: 20 });
+    const login = createLoginController("claude", "browser", cli.deps);
+    login.open();
+    login.dispose();
+    await vi.advanceTimersByTimeAsync(100);
+    // 띄우지 않았거나, 띄웠다면 곧바로 끝냈다: 살아 있는 PTY가 없다.
+    expect(cli.spawns.length - cli.kills.length).toBe(0);
+    expect(cli.spawns).toEqual([]);
+  });
+
+  it("청크를 읽은 뒤(spawn 응답 대기 중) 취소하면 spawn 1·kill 1", async () => {
+    vi.useFakeTimers();
+    const cli = fakeCli(LOGGED_IN);
+    const login = createLoginController("claude", "browser", cli.deps);
+    login.open();
+    await Promise.resolve();
+    await Promise.resolve();
+    login.dispose();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(cli.spawns.length).toBe(1);
+    expect(cli.kills).toEqual([1]);
   });
 
   it("시간 초과: 5분 뒤 PTY를 끝내고 실패로 둔다. 그 뒤의 종료는 무시한다", async () => {

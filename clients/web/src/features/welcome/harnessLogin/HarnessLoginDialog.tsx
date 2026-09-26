@@ -316,7 +316,12 @@ function LoginDialogBody({
             type="button"
             variant="outline"
             className="ai-connect-secondary"
-            onClick={onClose}
+            onClick={(event) => {
+              // [다시 시도]를 두 번 누르면 둘째 누름이 같은 자리에 새로 선 [취소]에
+              // 떨어진다(#2902 L1). 겹 누름의 둘째부터는 취소로 받지 않는다.
+              if (event.detail > 1) return;
+              onClose();
+            }}
             data-testid="harness-login-cancel"
           >
             {LOGIN_CANCEL_LABEL}
