@@ -8,18 +8,21 @@
 // produces so the next trace can be read against it:
 //
 //   subscribeTimeout (connecting code 3)  exactly `timeout` (5 s) after a
-//     subscribe goes unanswered. Centrifugo processes one connection's commands
-//     one at a time unless `client.concurrency` is set, and every subscribe here
-//     crosses the subscribe proxy to the API — so N subscriptions × proxy
-//     latency > 5 s drops the WHOLE connection, on every reconnect, forever.
-//     The 4985 ms socket in the trace has this shape.
+//     subscribe goes unanswered. IF Centrifugo answers one connection's
+//     commands one at a time (its documented default without
+//     `client.concurrency` — taken from the docs, NOT measured against the team
+//     server), and every subscribe here crosses the subscribe proxy to the API,
+//     then N subscriptions × proxy latency > 5 s drops the WHOLE connection, on
+//     every reconnect. The mock below is serial on purpose to show that shape.
+//     The 4985 ms socket in the trace has it.
 //   noPing (connecting code 2)            server ping interval + 10 s = 35 s.
 //     The 34.5 s socket has this shape.
 //
-// Neither is 20.7 s. The only fixed timer in this client that can produce a
-// 20.7 s lifetime is the 15 s background grace (armed 5.7 s after connecting;
-// `realtimeTransport.test.ts`) — which is why the instrumentation, not this
-// file, has to name the trigger of the observed pair.
+// Neither is 20.7 s. The one fixed timer in this client that CAN produce a
+// 20.7 s lifetime is the 15 s background grace armed 5.7 s after connecting
+// (`realtimeTransport.test.ts`), and the RCA already judged that a poor fit for
+// a back-to-back pair — so the instrumentation, not this file, has to name the
+// trigger of the observed pair.
 // =============================================================================
 
 type Handler = ((ev?: unknown) => void) | null;

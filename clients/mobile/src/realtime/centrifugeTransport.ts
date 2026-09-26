@@ -274,20 +274,19 @@ export function createRealtimeTransport(
           if (graceTimer !== null) {
             clearTimeout(graceTimer);
           }
+          // RCA 2026-09-26 H1 asked whether a grace timer that fell due while
+          // iOS held the app suspended can run before the AppState `active`
+          // event on wake and close a socket the person is about to look at.
+          // It can, and nothing here can tell: RN updates
+          // `AppState.currentState` inside the same native event dispatch
+          // that calls this file's listener, so re-reading it from the timer
+          // still says `background`. Not guarded, deliberately — a timer that
+          // ran late after a real suspension most often finds a socket that
+          // is dead anyway, and the reconnect that follows is right. What the
+          // person used to SEE (「연결이 끊겼습니다」 for the second it took)
+          // is what the display grace now absorbs (#2751).
           graceTimer = setTimeout(() => {
             graceTimer = null;
-            // iOS suspends a backgrounded app, timers included. On wake a timer
-            // that fell due while suspended can run BEFORE the AppState `active`
-            // event is delivered, and the policy — still believing it is in
-            // the background — would then close the live socket of someone
-            // who is looking at the screen, and reopen it a moment later (RCA
-            // 2026-09-26 H1). Ask the platform what is true now, and let a
-            // foreground reading cancel the drop the ordinary way.
-            const current = AppState.currentState;
-            if (current !== 'background' && current !== 'unknown' && current != null) {
-              dispatch({kind: 'visibility', status: toVisibility(current)});
-              return;
-            }
             dispatch({kind: 'grace-elapsed'});
           }, action.delayMs);
           break;

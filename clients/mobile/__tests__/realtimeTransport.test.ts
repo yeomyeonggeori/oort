@@ -18,9 +18,8 @@ import {
 // (`jest.setup.js`) with fake timers and a hand-driven AppState.
 // =============================================================================
 
-// Only `AppState` is read from react-native by the transport. A hand-driven one
-// lets a test say what the platform reports NOW independently of what change
-// events it has delivered — which is exactly the order problem iOS has on wake.
+// Only `AppState` is read from react-native by the transport; a hand-driven one
+// delivers transitions synchronously, as RN does.
 const appState: {
   currentState: string;
   handlers: ((status: string) => void)[];
@@ -182,23 +181,8 @@ describe('foreground return', () => {
   });
 });
 
-describe('the grace timer racing the wake-up (RCA H1)', () => {
-  it('does not close the socket of someone already looking at the app', () => {
-    const client = start();
-    emitAppState('background');
-    // iOS resumes the app: the platform already reads `active`, but the change
-    // event has not been delivered when the overdue grace timer runs.
-    appState.currentState = 'active';
-    advance(BACKGROUND_GRACE_MS);
-    expect(client.disconnectCount).toBe(0);
-    // …and the late event changes nothing.
-    emitAppState('active');
-    expect(client.disconnectCount).toBe(0);
-  });
-});
-
 describe('instrumentation (#2751)', () => {
-  it('reproduces the 20.7 s shape: background 5.7 s after connecting → grace drop at 20.7 s, with lifetime and cause recorded', () => {
+  it('records lifetime and cause — e.g. the one client timer that CAN yield 20.7 s (background 5.7 s after connecting → 15 s grace drop); a mechanism demo, not the confirmed trigger', () => {
     const client = start();
     client.__emit('connected', {});
     advance(5_700);

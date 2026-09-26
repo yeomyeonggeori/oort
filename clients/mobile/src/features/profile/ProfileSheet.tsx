@@ -429,8 +429,8 @@ function ProfilePage({
         style={styles.version}
         testID="profile-version"
         onLongPress={copyDiagnostics}
-        accessibilityHint="길게 누르면 연결 기록을 복사합니다">
-        {diagCopied ? '연결 기록을 복사했습니다' : currentAppVersionLabel()}
+        accessibilityHint="길게 누르면 연결 기록을 복사합니다.">
+        {diagCopied ? '연결 기록 복사됨' : currentAppVersionLabel()}
       </Text>
     </>
   );

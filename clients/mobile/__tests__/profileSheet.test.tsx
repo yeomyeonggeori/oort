@@ -327,7 +327,7 @@ describe('프로필 시트', () => {
     expect(copied).toMatch(/ connected/);
     expect(copied).not.toMatch(/api\.example\.com|wss?:\/\//);
     expect(screen.getByTestId('profile-version')).toHaveTextContent(
-      '연결 기록을 복사했습니다',
+      '연결 기록 복사됨',
     );
   });
 });
