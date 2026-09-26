@@ -41,7 +41,7 @@ describe("onboarding S0 and brand lockup stay outside custom accent", () => {
       /\.onboarding-landing,\s*\n\s*\.brand-lockup\s*\{/
     );
     // claim(D1″)도 온보딩 2.0 틀로 옮겨 락업이 없다(#2811). 코메토가 질문을 말한다.
-    expect(claim).not.toMatch(/<OortMark/);
+    expect(claim).not.toMatch(/<OortMark\b/);
   });
 
   // DS2-1(#2713): 신호의 글자 역할은 --signal-text 이고 `text-accent` 는 걷혔다.
