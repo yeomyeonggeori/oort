@@ -76,6 +76,7 @@ pub mod a2a;
 pub mod completion_report;
 pub mod config;
 pub mod context;
+pub mod egress;
 pub mod oauth;
 pub mod partial;
 pub mod payload;
@@ -398,8 +399,14 @@ impl AgentWorker {
         // Both wires, routed by the sealed envelope kind (B5.4b). A binary that
         // built only one adapter would answer every OAuth turn with a 404 from
         // the wrong path, which reads as "the model is missing".
-        let provider = http_provider(config.request_timeout)?;
-        let refresher = Arc::new(HttpTokenRefresher::new(config.request_timeout));
+        // #2852: the provider call may only reach addresses the egress policy
+        // accepts. The env transport's own host is operator configuration and
+        // stays reachable (compose's `mock-hermes`, a host gateway).
+        let provider = http_provider(config.request_timeout, config.egress.clone())?;
+        let refresher = Arc::new(HttpTokenRefresher::new(
+            config.request_timeout,
+            config.egress.clone(),
+        ));
         Ok(AgentWorker::with_refresher(
             pool, provider, refresher, config,
         ))
@@ -408,7 +415,10 @@ impl AgentWorker {
     /// Build from an existing pool + provider (conformance tests), with the real
     /// token endpoint client.
     pub fn new(pool: PgPool, provider: Arc<dyn ChatProvider>, config: WorkerConfig) -> AgentWorker {
-        let refresher = Arc::new(HttpTokenRefresher::new(config.request_timeout));
+        let refresher = Arc::new(HttpTokenRefresher::new(
+            config.request_timeout,
+            config.egress.clone(),
+        ));
         AgentWorker::with_refresher(pool, provider, refresher, config)
     }
 
