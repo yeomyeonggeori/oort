@@ -95,11 +95,16 @@ export const DEFAULT_SETTINGS_SECTION: SettingsSectionId = "profile";
  *
  * 런타임 사실을 읽으므로(셸 종류·서버 표면) 상수가 아니라 함수다.
  */
-export function reachableSettingsSections(): SettingsSectionMeta[] {
+export function reachableSettingsSections(
+  // #2780: 작업 표면은 런타임(온라인 호스트) 판정이다. 훅을 부를 수 있는 쪽
+  // (`SettingsRoute`)은 `useSurfaceProvidedPredicate()`를 넘기고, 훅 밖에서 묻는
+  // 쪽은 정적 표로 답한다.
+  provided: (surface: SurfaceId) => boolean = isSurfaceProvided
+): SettingsSectionMeta[] {
   return SETTINGS_SECTIONS.filter(
     (item) =>
       (!item.desktopOnly || isDesktop()) &&
-      (item.surface === undefined || isSurfaceProvided(item.surface))
+      (item.surface === undefined || provided(item.surface))
   );
 }
 

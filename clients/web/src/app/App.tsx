@@ -33,6 +33,7 @@ import { WorkstreamDetailRoute } from "@/features/workstreams/WorkstreamDetailRo
 import { SearchRoute } from "@/features/search/SearchRoute";
 import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 import { SurfaceUnavailableRoute } from "@/features/capabilities/SurfaceUnavailable";
+import { SurfaceRoute } from "@/features/capabilities/SurfaceGate";
 import { forgetQuota } from "@momo/core/features/settings/quotaModel";
 import { forgetUsage } from "@momo/core/features/settings/usageModel";
 import { resetAdeDrawer } from "@/features/ade/adeDrawerStore";
@@ -320,11 +321,10 @@ export function App() {
           <Route
             path="work"
             element={
-              isSurfaceProvided("workConsole") ? (
+              // #2780: 정적 표가 아니라 온라인 호스트 유무로 연다.
+              <SurfaceRoute surface="workConsole">
                 <WorkConsoleRoute />
-              ) : (
-                <SurfaceUnavailableRoute surface="workConsole" />
-              )
+              </SurfaceRoute>
             }
           />
           {/* 메시지 검색 (goal B12 H5). 서버가 이미 싣고 있는 경로 위에 선다. */}
