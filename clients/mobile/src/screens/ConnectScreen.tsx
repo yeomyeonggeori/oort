@@ -730,7 +730,7 @@ export default function ConnectScreen({
         }
         bottom={
           <>
-            {sasFailure ? null : (
+            {sasFailure || !online ? null : (
               <View style={styles.sys} testID="device-link-sas-wait">
                 <OnboardingSpinner color={palette.textMuted} />
                 <Sentence style={styles.sysText}>{DEVICE_LINK_SAS_WAIT_COPY}</Sentence>
@@ -803,7 +803,7 @@ export default function ConnectScreen({
       : linkFailure
         ? {expression: 'flustered' as const, line: LINK_FAILED_LINE, detail: undefined}
         : !online
-          ? {expression: 'flustered' as const, line: OFFLINE_LINE, detail: '네트워크가 연결되면 QR을 찍어요.'}
+          ? {expression: 'flustered' as const, line: OFFLINE_LINE, detail: '네트워크가 연결되면 QR을 찍을 수 있어요.'}
           : {expression: 'idle' as const, line: WELCOME_LINE, detail: WELCOME_DETAIL};
     const guideTestID = permissionDenied
       ? 'qr-permission-denied'
@@ -872,7 +872,7 @@ export default function ConnectScreen({
               <>
                 <Text
                   style={[styles.wordmark, dark && styles.wordmarkAfterBadge]}
-                  accessibilityRole="header">
+                  accessibilityRole="text">
                   oort
                 </Text>
                 <Sentence style={styles.tagline}>{WELCOME_TAGLINE}</Sentence>
@@ -1155,7 +1155,9 @@ export default function ConnectScreen({
                 onPress={toggleMode}
                 style={({pressed}) => [styles.reentry, pressed && styles.reentryPressed]}
                 testID="mode-toggle">
-                <Text style={styles.reentryText}>
+                <Text
+                  style={styles.reentryText}
+                  lineBreakStrategyIOS="hangul-word">
                   이미 이 서버 계정이 있나요? <Text style={styles.reentryLink}>로그인</Text>
                 </Text>
               </Pressable>

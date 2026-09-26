@@ -187,7 +187,8 @@ export function OnboardingButton({
       style={({pressed}) => [
         styles.button,
         primary ? styles.buttonPrimary : styles.buttonSecondary,
-        inert && styles.buttonInert,
+        // 진행 중에는 잉크 채움을 그대로 둔다: 흰 표시기와 「로그인 중」이 그 위에서 읽힌다.
+        disabled === true && !busy && styles.buttonInert,
         pressed &&
           !inert &&
           (primary
@@ -205,7 +206,7 @@ export function OnboardingButton({
         style={[
           styles.buttonLabel,
           primary ? styles.onPrimary : styles.onSecondary,
-          inert && !busy && styles.labelInert,
+          disabled === true && !busy && styles.labelInert,
         ]}
         numberOfLines={2}
       >
@@ -418,7 +419,8 @@ const buildStyles = (color: Palette) =>
       justifyContent: 'center',
       gap: PHONE_OB.mainGap,
     },
-    bottom: {gap: PHONE_OB.bottomGap},
+    // 큰 글씨에서 flexGrow 여백이 0으로 줄어도 질문과 행동이 한 덩어리로 붙지 않게.
+    bottom: {gap: PHONE_OB.bottomGap, paddingTop: PHONE_OB.mainGapWide},
     topBar: {
       minHeight: PHONE_OB.topBar,
       flexDirection: 'row',

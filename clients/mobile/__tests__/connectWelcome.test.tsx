@@ -182,3 +182,31 @@ describe('M2 확인 번호', () => {
     expect(lastConnectRoute()).toBe('qr');
   });
 });
+
+describe('OnboardingButton — the busy state stays readable (#2819 design-review H1)', () => {
+  // A busy button used to take the pale inert fill while keeping the white
+  // label and spinner: 「로그인 중」 at about 1.1:1. Busy keeps the ink fill.
+  it('keeps the ink fill and the on-primary label while busy; only disabled goes pale', () => {
+    const {OnboardingButton} = require('../src/features/onboarding/OnboardingControls');
+    const {FixedScheme} = require('../src/design/theme');
+    const {lightPalette} = require('../src/design/tokens');
+    const {StyleSheet} = require('react-native');
+    const fill = (id: string) =>
+      StyleSheet.flatten(
+        screen.getByTestId(id).props.style,
+      ) as {backgroundColor?: string};
+    render(
+      <FixedScheme scheme="light">
+        <OnboardingButton label="로그인" busy busyLabel="로그인 중" onPress={() => {}} testID="busy" />
+        <OnboardingButton label="로그인" disabled onPress={() => {}} testID="off" />
+      </FixedScheme>,
+    );
+    expect(fill('busy').backgroundColor).toBe(lightPalette.primary);
+    const busyLabel = screen.getByText('로그인 중');
+    expect(StyleSheet.flatten(busyLabel.props.style).color).toBe(lightPalette.onPrimary);
+    expect(fill('off').backgroundColor).toBe(lightPalette.surfaceMuted);
+    expect(StyleSheet.flatten(screen.getAllByText('로그인')[0].props.style).color).toBe(
+      lightPalette.textMuted,
+    );
+  });
+});
