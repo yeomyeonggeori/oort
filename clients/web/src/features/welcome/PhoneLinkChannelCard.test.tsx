@@ -220,6 +220,10 @@ describe("PhoneLinkChannelCard", () => {
       "idle"
     );
     expect(q("phone-link-card-kometto")?.getAttribute("aria-hidden")).toBe("true");
+    // 킥오프 띠(#2817)와 같은 그림: KomettoFace band(52), 표정도 같이 간다.
+    const face = q("phone-link-card-kometto")?.querySelector("[data-testid='kometto-face']");
+    expect(face?.getAttribute("data-size")).toBe("band");
+    expect(face?.getAttribute("data-expression")).toBe("idle");
     const status = card?.querySelector('[role="status"]');
     expect(status?.textContent).toContain(PHONE_LINK_CARD_COPY.title);
     expect(q("phone-link-card-create")?.textContent).toBe("QR 만들기");
@@ -242,6 +246,9 @@ describe("PhoneLinkChannelCard", () => {
     expect(
       q("phone-link-card-kometto")?.getAttribute("data-expression")
     ).toBe("sleepy");
+    const small = q("phone-link-card-kometto")?.querySelector("[data-testid='kometto-face']");
+    expect(small?.getAttribute("data-size")).toBe("band-small");
+    expect(small?.getAttribute("data-expression")).toBe("sleepy");
     const link = q("phone-link-card-settings") as HTMLAnchorElement | null;
     expect(link?.getAttribute("href")).toBe(PHONE_LINK_SETTINGS_HREF);
     // 사라진 [나중에] 대신 포커스가 재진입 링크로 간다.

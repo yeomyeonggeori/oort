@@ -5,8 +5,8 @@ import { createRequire } from "node:module";
 import { compile } from "tailwindcss";
 import { describe, expect, it } from "vitest";
 import {
+  WELCOME_KICKOFF_EXIT_ANIMATION_NAME,
   WELCOME_KICKOFF_EXIT_CLASS,
-  WELCOME_KICKOFF_MARK_CLASS,
 } from "@/design/motion";
 
 const require_ = createRequire(import.meta.url);
@@ -14,8 +14,8 @@ const STAGE_TSX = readFileSync(
   new URL("./WelcomeKickoffStage.tsx", import.meta.url),
   "utf8"
 );
-const MOTION_CSS = readFileSync(
-  new URL("../../design/motion.css", import.meta.url),
+const TOKENS_CSS = readFileSync(
+  new URL("../../design/tokens.css", import.meta.url),
   "utf8"
 );
 
@@ -59,66 +59,55 @@ function classSnippet(css: string, className: string): string {
   return css.slice(from, from + 240);
 }
 
-describe("welcome kickoff compiled motion", () => {
-  it("rise uses instant stagger, arrival duration, arrival ease; no ms literals in the utility", async () => {
-    expect(MOTION_CSS).toMatch(
-      /animation-delay:\s*calc\(\s*var\(--stagger-index,\s*0\)\s*\*\s*var\(--motion-instant\)\s*\)/
-    );
-    const css = await compileClasses([WELCOME_KICKOFF_MARK_CLASS]);
-    const snippet = classSnippet(css, WELCOME_KICKOFF_MARK_CLASS);
-    expect(snippet).toMatch(/var\(--motion-instant\)/);
-    expect(snippet).toMatch(/var\(--motion-arrival\)/);
-    expect(snippet).toMatch(/var\(--motion-ease-arrival\)/);
-    expect(snippet).not.toMatch(/\d+ms/);
-  });
-
-  it("exit uses --motion-standard and both fill", async () => {
+describe("welcome kickoff band compiled motion (#2817)", () => {
+  it("collapse is ADR-0193 D11 line-slide: 650ms, cubic-bezier(0.22,1,0.36,1), fill both", async () => {
     const css = await compileClasses([WELCOME_KICKOFF_EXIT_CLASS]);
     const snippet = classSnippet(css, WELCOME_KICKOFF_EXIT_CLASS);
-    expect(snippet).toMatch(/var\(--motion-standard\)/);
+    expect(snippet).toContain(WELCOME_KICKOFF_EXIT_ANIMATION_NAME);
+    expect(snippet).toMatch(/650ms/);
+    expect(snippet).toMatch(/cubic-bezier\(0\.22,\s*1,\s*0\.36,\s*1\)/);
     expect(snippet).toMatch(/\bboth\b/);
     expect(snippet).not.toMatch(/backwards/);
-    expect(snippet).not.toMatch(/\d+ms/);
   });
 
-  it("stage source has no duration-N class and no ms literals", () => {
+  it("collapse keyframe closes the row (grid 0fr), its gap, and its opacity", () => {
+    const frames = TOKENS_CSS.match(
+      new RegExp(`@keyframes\\s+${WELCOME_KICKOFF_EXIT_ANIMATION_NAME}\\s*\\{([\\s\\S]*?)\\n\\}`)
+    )?.[1];
+    expect(frames, "collapse keyframe missing").toBeTruthy();
+    expect(frames).toMatch(/grid-template-rows:\s*0fr/);
+    expect(frames).toMatch(/opacity:\s*0/);
+    expect(frames).toMatch(/margin-block-end:\s*0/);
+  });
+
+  it("band row is a one-track grid and its clip lets the track reach 0", async () => {
+    const css = await compileClasses(["welcome-band", "welcome-band-clip"]);
+    expect(classSnippet(css, "welcome-band")).toMatch(/grid-template-rows:\s*1fr/);
+    const clip = classSnippet(css, "welcome-band-clip");
+    expect(clip).toMatch(/min-block-size:\s*0/);
+    expect(clip).toMatch(/overflow:\s*hidden/);
+  });
+
+  it("band source has no duration-N class and no ms literals", () => {
     const code = codeOnly(STAGE_TSX);
     expect(code).not.toMatch(/duration-\d+/);
     expect(code).not.toMatch(/\d+ms/);
   });
 
-  it("reduced-motion pose transform equals the rise end-state transform", async () => {
-    const css = await compileClasses(["welcome-kickoff-body", WELCOME_KICKOFF_MARK_CLASS]);
-    const body = classSnippet(css, "welcome-kickoff-body");
-    const toBlock = css.match(
-      /@keyframes\s+motion-welcome-kickoff-rise\s*\{[\s\S]*?to\s*\{([^}]*)\}/
-    )?.[1];
-    expect(toBlock, "rise to-keyframe missing").toBeTruthy();
-    const pose =
-      body.match(/transform:\s*([^;]+);/)?.[1]?.replace(/\s+/g, " ").trim();
-    const end =
-      toBlock?.match(/transform:\s*([^;]+);/)?.[1]?.replace(/\s+/g, " ").trim();
-    expect(pose).toBe("translateY(0) rotate(var(--onboarding-body-rotate, 0deg))");
-    expect(end).toBe(pose);
-    expect(body).not.toMatch(/transform:\s*none/);
+  it("the constellation is gone: no welcome-kickoff-body / -mark rule survives", async () => {
+    const css = await compileClasses(["welcome-kickoff-body", "welcome-kickoff-mark"]);
+    expect(css).not.toMatch(/\.welcome-kickoff-(body|mark)\b/);
+    expect(TOKENS_CSS).not.toMatch(/\.welcome-kickoff-(body|mark)\b/);
   });
 
-  it("every data-onboarding-body and data-stagger-index selector begins with a class", async () => {
-    const css = await compileClasses([
-      "welcome-kickoff-body",
-      WELCOME_KICKOFF_MARK_CLASS,
-    ]);
+  it("every data-onboarding-body selector begins with a class", async () => {
+    const css = await compileClasses(["onboarding-cloud-body"]);
     const mentioned: string[] = [];
     for (const chunk of css.split("}")) {
       const open = chunk.lastIndexOf("{");
       if (open < 0) continue;
       const raw = chunk.slice(0, open);
-      if (
-        !raw.includes("data-onboarding-body") &&
-        !raw.includes("data-stagger-index")
-      ) {
-        continue;
-      }
+      if (!raw.includes("data-onboarding-body")) continue;
       for (const piece of raw.split(",")) {
         const lines = piece
           .replace(/\/\*[\s\S]*?\*\//g, "")
@@ -126,20 +115,13 @@ describe("welcome kickoff compiled motion", () => {
           .map((line) => line.trim())
           .filter(Boolean);
         const sel = lines[lines.length - 1] ?? "";
-        if (
-          !sel.includes("data-onboarding-body") &&
-          !sel.includes("data-stagger-index")
-        ) {
-          continue;
-        }
+        if (!sel.includes("data-onboarding-body")) continue;
         mentioned.push(sel);
       }
     }
     expect(mentioned.length).toBeGreaterThan(0);
     for (const sel of mentioned) {
-      expect(sel, `unscoped ${sel}`).toMatch(
-        /^\.(onboarding-cloud-body|welcome-kickoff-body|welcome-kickoff-mark)\[/
-      );
+      expect(sel, `unscoped ${sel}`).toMatch(/^\.onboarding-cloud-body\[/);
     }
   });
 });

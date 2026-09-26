@@ -64,14 +64,12 @@ const out: {
   isPlayEntrance: ((id: string) => boolean) | null;
   consume: ((id: string) => void) | null;
   capUnmountedArrivals: (() => void) | null;
-  pinArrivalGrant: ((id: string | null) => void) | null;
   loadOlder: (() => Promise<void>) | null;
   messages: Message[];
 } = {
   isPlayEntrance: null,
   consume: null,
   capUnmountedArrivals: null,
-  pinArrivalGrant: null,
   loadOlder: null,
   messages: [],
 };
@@ -82,7 +80,6 @@ function Probe({ channelId }: { channelId: string }): ReactElement {
     out.isPlayEntrance = t.isPlayEntrance;
     out.consume = t.consumeEntrance;
     out.capUnmountedArrivals = t.capUnmountedArrivals;
-    out.pinArrivalGrant = t.pinArrivalGrant;
     out.loadOlder = t.loadOlder;
     out.messages = t.state.messages;
   });
@@ -339,57 +336,6 @@ describe("useTimeline arrival counts", () => {
         out.isPlayEntrance?.((row as Message).id)
       ).length
     ).toBe(0);
-  });
-
-  it("핀 후 라이브 배치 4건이 와도 opener grant 는 남는다", async () => {
-    const opener = "0199cccc-0000-7000-8000-000000000401";
-    const extras = [
-      "0199cccc-0000-7000-8000-000000000402",
-      "0199cccc-0000-7000-8000-000000000403",
-      "0199cccc-0000-7000-8000-000000000404",
-      "0199cccc-0000-7000-8000-000000000405",
-    ];
-    await mount(CH);
-    await act(async () => {
-      rail.handlers?.onSubscribed({ recovered: false });
-      rail.handlers?.onMessage(frame(opener, OTHER, 30));
-    });
-    expect(out.isPlayEntrance?.(opener)).toBe(true);
-    act(() => out.pinArrivalGrant?.(opener));
-    await act(async () => {
-      extras.forEach((id, i) => rail.handlers?.onMessage(frame(id, OTHER, 31 + i)));
-    });
-    expect(out.isPlayEntrance?.(opener)).toBe(true);
-    expect(extras.filter((id) => out.isPlayEntrance?.(id)).length).toBe(2);
-  });
-
-  it("채널 전환은 A 의 핀을 버려서 B 에서 외국 id 가 살아남지 않는다", async () => {
-    // The reset `pinnedEntranceRef.current = null` exists so a pin from A
-    // cannot protect a foreign id in B. Channel switch already empties
-    // playOnMount; a keep that is not in the set is a no-op. So B's live
-    // batch includes A's opener id — the leaked keep is then in the set
-    // and eviction differs: opener survives, B's oldest extra is dropped.
-    // Deleting the reset line makes opener isPlayEntrance true here.
-    const opener = "0199cccc-0000-7000-8000-000000000401";
-    const inB = [
-      opener,
-      "0199cccc-0000-7000-8000-000000000412",
-      "0199cccc-0000-7000-8000-000000000413",
-      "0199cccc-0000-7000-8000-000000000414",
-    ];
-    await mount(CH);
-    await act(async () => {
-      rail.handlers?.onSubscribed({ recovered: false });
-      rail.handlers?.onMessage(frame(opener, OTHER, 30));
-    });
-    act(() => out.pinArrivalGrant?.(opener));
-    await mount(CH2);
-    await act(async () => {
-      rail.handlers?.onSubscribed({ recovered: false });
-      inB.forEach((id, i) => rail.handlers?.onMessage(frame(id, OTHER, 10 + i)));
-    });
-    expect(out.isPlayEntrance?.(opener)).toBe(false);
-    expect(inB.slice(1).every((id) => out.isPlayEntrance?.(id))).toBe(true);
   });
 
   it("채널 전환은 남은 grant 를 버린다", async () => {

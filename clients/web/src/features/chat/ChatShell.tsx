@@ -101,7 +101,8 @@ import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { FirstMentionOnboarding } from "@/features/hostedAgents/FirstMentionOnboarding";
 import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
-import { useWelcomeKickoff, welcomePlayEntrance } from "@/features/welcome/useWelcomeKickoff";
+import { useWelcomeKickoff } from "@/features/welcome/useWelcomeKickoff";
+import { WelcomeKickoffStage } from "@/features/welcome/WelcomeKickoffStage";
 import { PhoneLinkChannelCard } from "@/features/welcome/PhoneLinkChannelCard";
 import { shouldMountPhoneLinkCard } from "@/features/welcome/phoneLinkCard";
 import {
@@ -255,15 +256,10 @@ export function ChatShell() {
       kickoffPhase: welcome.phase,
       kickoffSettled,
     });
-  const isPlayEntrance = useCallback(
-    (id: string) =>
-      welcomePlayEntrance(welcome.holdEntranceId, id, timeline.isPlayEntrance),
-    [welcome.holdEntranceId, timeline]
-  );
-  const pinArrivalGrant = timeline.pinArrivalGrant;
-  useEffect(() => {
-    pinArrivalGrant(welcome.holdEntranceId);
-  }, [pinArrivalGrant, welcome.holdEntranceId]);
+  const welcomeBandPhase =
+    stressCount === 0 && channelId !== null && welcome.phase !== "hidden"
+      ? welcome.phase
+      : null;
 
   // 「작성 중」 수신 (ADR-0149). **보이는 채널만** 구독한다 - 그것이 이 레일의 유일한
   // 폭 제어다. 스트레스 픽스처에는 서버가 없으므로 걸지 않는다.
@@ -1290,13 +1286,11 @@ export function ChatShell() {
                   openAddMember({ id: channelId, name: channel.name ?? label });
               }}
               onStartWriting={focusComposer}
-              isPlayEntrance={isPlayEntrance}
+              isPlayEntrance={timeline.isPlayEntrance}
               onEntranceConsumed={timeline.consumeEntrance}
               capUnmountedArrivals={timeline.capUnmountedArrivals}
               welcomePhase={welcome.phase}
-              welcomeReducedMotion={welcome.reducedMotion}
               welcomeHoldWriteAction={welcome.holdWriteAction}
-              onWelcomeExitComplete={welcome.onExitComplete}
             />
           ) : (
             <Skeleton ready={!channelsQuery.isLoading} rows={6} className="p-4">
@@ -1340,6 +1334,16 @@ export function ChatShell() {
             (R2 H4). 손가락 기기에서만, 한 번만, 컴포저 바로 위에서. */}
         {/* 「폰에서도」 카드 (#2818, ADR-0193 D7): 첫 대화 채널에서만, 킥오프가
             끝난 뒤, 타임라인 아래(오프너를 가리지 않는다) 컴포저 바로 위. */}
+        {/* 첫 대화 코메토 띠 (#2817, ADR-0193 D5): 같은 자리의 「폰에서도」 카드와
+            phase로 갈린다. 띠가 접힌 뒤(hidden + 정착)에야 카드가 선다. */}
+        {welcomeBandPhase && (
+          <WelcomeKickoffStage
+            phase={welcomeBandPhase}
+            reducedMotion={welcome.reducedMotion}
+            speaker={welcome.speaker}
+            onExitComplete={welcome.onExitComplete}
+          />
+        )}
         {phoneLinkCardMounted && (
           <PhoneLinkChannelCard
             workspaceId={workspaceId}

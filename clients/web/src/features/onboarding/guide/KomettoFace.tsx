@@ -5,6 +5,12 @@ import { KOMETTO_EXPRESSION_ASSETS } from "./komettoExpressions";
 
 export type KomettoGuideSize = "head" | "hero";
 
+/**
+ * 머리·히어로 말고 채널 띠(#2817·#2818)의 52px 자리, 그리고 폰 카드 접힌 줄의
+ * 32px(코메토 최소 크기). 말풍선과 짝이 아니라 face만 쓴다.
+ */
+export type KomettoFaceSize = KomettoGuideSize | "band" | "band-small";
+
 type FaceState = {
   shown: KomettoExpression;
   /** 크로스페이드 동안 사라지는 앞 표정. 없으면 null. */
@@ -32,7 +38,7 @@ export function KomettoFace({
   size = "head",
 }: {
   expression: KomettoExpression;
-  size?: KomettoGuideSize;
+  size?: KomettoFaceSize;
 }) {
   const reduced = usePrefersReducedMotion();
   const [face, setFace] = useState<FaceState>({

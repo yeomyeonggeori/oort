@@ -276,9 +276,9 @@ describe("Timeline channel intro leading row", () => {
     composer.remove();
   });
 
-  it("hides 첫 메시지 쓰기 while the welcome stage is mounted", () => {
+  it("hides 첫 메시지 쓰기 while the welcome band is up (the band itself lives above the composer, #2817)", () => {
     const root = mount({ welcomePhase: "stage" });
-    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).not.toBeNull();
+    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
     expect(root.querySelector("[data-testid='timeline-empty-primary']")).toBeNull();
     expect(root.textContent).not.toContain(EMPTY_WRITE_ACTION_LABEL);
     expect(root.querySelector("[data-testid='timeline-empty-secondary']")).not.toBeNull();
