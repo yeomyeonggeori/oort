@@ -2163,6 +2163,8 @@ function TimelineInner({
     // is the likeliest prelude to them scrolling UP into history, which is the
     // one thing that must never move under them.
     setChasingTail(false);
+    // 떠 있는 날짜 알약은 손가락이 목록을 잡는 순간 선다(DS2-4 B-1).
+    holdDayPill();
   }, [
     cancelConvergence,
     cancelFocus,
