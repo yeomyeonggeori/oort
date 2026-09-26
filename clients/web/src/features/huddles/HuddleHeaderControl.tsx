@@ -66,14 +66,14 @@ function HuddleIconButton({
   return (
     <Button
       type="button"
-      variant="outline"
+      variant="ghost"
       size="icon"
       onClick={onClick}
       aria-label={label}
       title={label}
       aria-busy={busy || undefined}
       data-testid={testId}
-      className="shrink-0 text-ink-muted"
+      className="shrink-0 rounded-md text-ink-muted"
     >
       {children}
     </Button>

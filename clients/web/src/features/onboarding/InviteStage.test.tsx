@@ -244,12 +244,12 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
     expect(issue?.getAttribute("role") ?? issue?.tagName.toLowerCase()).toBe("button");
     expect(skip?.getAttribute("role") ?? skip?.tagName.toLowerCase()).toBe("button");
     const primary = buttonVariants({ variant: "default" });
-    expect(primary).toContain("bg-accent");
-    expect(primary).toContain("text-on-accent");
-    expect(issue?.className).toContain("bg-accent");
-    expect(issue?.className).toContain("text-on-accent");
+    expect(primary).toContain("bg-primary");
+    expect(primary).toContain("text-on-primary");
+    expect(issue?.className).toContain("bg-primary");
+    expect(issue?.className).toContain("text-on-primary");
     expect(issue?.textContent).toBe(INVITE_CREATE_LABEL);
-    expect(skip?.className).not.toContain("bg-accent");
+    expect(skip?.className).not.toContain("bg-primary");
     expect(skip?.className).not.toContain("border-line-strong");
   });
 
@@ -310,7 +310,7 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
       '[data-testid="onboarding-s2-continue"]'
     ) as HTMLButtonElement | null;
     expect(continueBtn).not.toBeNull();
-    expect(continueBtn?.className).toContain("bg-accent");
+    expect(continueBtn?.className).toContain("bg-primary");
     expect(host.querySelectorAll('[data-testid="invite-copy-card"]')).toHaveLength(1);
     expect(host.querySelector('[data-testid="invite-copy-link"]')).toBeNull();
   });
@@ -339,15 +339,15 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
     expect(copyBtn, "copy").not.toBeNull();
     expect(continueBtn?.textContent).toBe("계속");
     expect(copyBtn?.textContent).toBe(INVITE_COPY_CARD_LABEL);
-    expect(continueBtn?.className).toContain("bg-accent");
-    expect(continueBtn?.className).toContain("text-on-accent");
-    expect(continueBtn?.className.split(/\s+/)).toContain("h-control");
-    expect(copyBtn?.className).toContain("border-line-strong");
-    expect(copyBtn?.className).not.toContain("bg-accent");
-    expect(copyBtn?.className.split(/\s+/)).toContain("h-control");
+    expect(continueBtn?.className).toContain("bg-primary");
+    expect(continueBtn?.className).toContain("text-on-primary");
+    expect(continueBtn?.className.split(/\s+/)).toContain("h-pill");
+    expect(copyBtn?.className).toContain("bg-surface-muted"); // ADR-0189 D6: 보조는 채움 알약
+    expect(copyBtn?.className).not.toContain("bg-primary");
+    expect(copyBtn?.className.split(/\s+/)).toContain("h-pill");
     expect(copyBtn?.className.split(/\s+/)).not.toContain("h-control-sm");
     const outline = buttonVariants({ variant: "outline", size: "default" });
-    expect(outline).toContain("h-control");
+    expect(outline).toContain("h-pill");
     expect(outline).not.toContain("h-control-sm");
   });
 

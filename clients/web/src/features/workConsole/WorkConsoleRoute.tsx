@@ -481,7 +481,7 @@ export function WorkConsoleRoute() {
         <section
           aria-label="작업 세션 상세"
           data-work-console-detail=""
-          className="flex min-h-0 min-w-0 flex-col bg-surface"
+          className="flex min-h-0 min-w-0 flex-col bg-pane"
         >
           {projectionsPending && showingDetail ? (
             <Skeleton ready={false} rows={7} className="p-4" />

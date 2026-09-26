@@ -27,6 +27,7 @@ describe("onboarding S0 and brand lockup stay outside custom accent", () => {
     expect(landing).toContain("text-onboarding-on-accent");
     expect(landing).not.toMatch(/\bbg-accent\b/);
     expect(landing).not.toMatch(/\btext-accent\b/);
+    expect(landing).not.toMatch(/\btext-signal-text\b/);
   });
 
   it("shows the owner-chosen 코메토 reference as the S0 hero, not a recolourable mark (#2732)", () => {
@@ -43,14 +44,16 @@ describe("onboarding S0 and brand lockup stay outside custom accent", () => {
     expect(claim).toContain("brand-lockup");
   });
 
-  it("wraps every OortMark painted with text-accent in .brand-lockup", () => {
+  // DS2-1(#2713): 신호의 글자 역할은 --signal-text 이고 `text-accent` 는 걷혔다.
+  // 마크는 같은 신호색을 입으므로 같은 가둠(`.brand-lockup`)이 그대로 필요하다.
+  it("wraps every OortMark painted with the signal text colour in .brand-lockup", () => {
     const hits: { file: string; near: string }[] = [];
     for (const file of sourceFiles(srcRoot)) {
       const source = readFileSync(file, "utf8");
       const re = /<OortMark\b([^>]*)\/?>/g;
       for (const match of source.matchAll(re)) {
         const attrs = match[1] ?? "";
-        if (!/\btext-accent\b/.test(attrs)) continue;
+        if (!/\btext-(?:accent|signal-text)\b/.test(attrs)) continue;
         if (/\btext-onboarding-accent\b/.test(attrs)) continue;
         const from = Math.max(0, (match.index ?? 0) - 400);
         hits.push({
@@ -61,7 +64,7 @@ describe("onboarding S0 and brand lockup stay outside custom accent", () => {
     }
     // Gateway, account, profile (S3), claim, and post-claim S2. A sixth site
     // without `.brand-lockup` nearby is leftover below.
-    expect(hits, "OortMark text-accent sites").toHaveLength(5);
+    expect(hits, "OortMark signal-text sites").toHaveLength(5);
     const leftover = hits.filter((hit) => !hit.near.includes("brand-lockup"));
     expect(leftover, leftover.map((hit) => hit.file).join(", ")).toEqual([]);
   });

@@ -44,13 +44,13 @@ describe("message mention rendering", () => {
 
     expect(html).toContain('data-mention-handle="intern-kim"');
     expect(html).toContain('data-testid="message-mention"');
-    expect(html).toContain('class="text-accent"');
+    expect(html).toContain('class="rounded-sm px-1 font-semibold bg-signal-soft text-signal-text"');
     expect(html).toContain("@missing @gone");
     expect(html).not.toContain('data-mention-handle="missing"');
     expect(html).not.toContain('data-mention-handle="gone"');
   });
 
-  it("adds the accent-soft treatment only to a self mention", () => {
+  it("fills only a self mention with the signal (DS2-1)", () => {
     const html = renderToStaticMarkup(
       <MessageBody
         body="@Seongjae @intern-kim"
@@ -61,9 +61,10 @@ describe("message mention rendering", () => {
 
     expect(html).toContain('data-testid="message-self-mention"');
     expect(html).toContain(
-      'class="text-accent bg-accent-soft font-semibold"'
+      'class="rounded-sm px-1 font-semibold bg-signal text-on-signal"'
     );
     expect(html).toContain('data-mention-handle="intern-kim"');
-    expect(html.match(/bg-accent-soft/g)).toHaveLength(1);
+    expect(html.match(/bg-signal text-on-signal/g)).toHaveLength(1);
+    expect(html.match(/bg-signal-soft/g)).toHaveLength(1);
   });
 });

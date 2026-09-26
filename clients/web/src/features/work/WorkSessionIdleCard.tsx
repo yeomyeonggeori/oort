@@ -44,7 +44,7 @@ export function WorkSessionIdleCard({
       <span className="px-3 py-2 text-meta text-ink-muted">
         이 시각에 작업 도구 실행이 끝나 세션이 대기 상태로 전환됐습니다.
       </span>
-      <span className="border-t border-line px-3 py-2 text-meta font-medium text-accent">
+      <span className="border-t border-line px-3 py-2 text-meta font-medium text-signal-text">
         현재 세션 보기
       </span>
     </button>

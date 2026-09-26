@@ -572,7 +572,7 @@ export function ConnectPage({
     <Card className="mx-auto w-full max-w-sm" data-testid="onboarding-gateway">
       <CardHeader>
         <h1 className="brand-lockup flex items-center gap-2 font-semibold leading-none tracking-tight">
-          <OortMark className="size-6 shrink-0 text-accent" />
+          <OortMark className="size-6 shrink-0 text-signal-text" />
           <span className="text-title">oort</span>
         </h1>
         <CardDescription>
@@ -615,7 +615,7 @@ export function ConnectPage({
     <Card className="mx-auto w-full max-w-sm" data-testid="onboarding-account">
       <CardHeader>
         <h1 className="brand-lockup flex items-center gap-2 font-semibold leading-none tracking-tight">
-          <OortMark className="size-6 shrink-0 text-accent" />
+          <OortMark className="size-6 shrink-0 text-signal-text" />
           <span className="text-title">oort</span>
         </h1>
         <CardDescription>
@@ -745,7 +745,7 @@ export function ConnectPage({
     <Card className="mx-auto w-full max-w-sm" data-testid="onboarding-profile">
       <CardHeader>
         <h1 className="brand-lockup flex items-center gap-2 font-semibold leading-none tracking-tight">
-          <OortMark className="size-6 shrink-0 text-accent" />
+          <OortMark className="size-6 shrink-0 text-signal-text" />
           <span className="text-title">oort</span>
         </h1>
         <CardDescription>
@@ -902,7 +902,7 @@ export function ConnectPage({
     // 48px에서 들여오는 650ms 동안 앱 스크롤러(main.tsx)에 24px 가로 넘침이
     // 생겼다(WebKit iPhone 실측). 폰에서는 그 사이 화면이 옆으로 끌린다. clip은
     // 스크롤 상자를 만들지 않고 넘친 몫만 자른다. FirstAgentStage와 같은 자리다.
-    <div className="flex min-h-full flex-col overflow-x-clip bg-surface">
+    <div className="flex min-h-full flex-col overflow-x-clip bg-pane">
       <header
         className="onboarding-step-chrome"
         data-testid="onboarding-step-chrome"

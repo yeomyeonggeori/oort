@@ -149,7 +149,7 @@ function QuoteContent({
 /**
  * 인용의 모양. **accent가 여기 닿지 않는다** (design-review B-1).
  *
- * 이 화면에서 앰버(`--accent`)는 이미 세 뜻을 갖고 있다: **멘션**(`text-accent`,
+ * 이 화면에서 앰버(`--accent`)는 이미 세 뜻을 갖고 있다: **멘션**(`text-signal-text`,
  * 나를 불렀다) · **미읽 경계**(`bg-accent` 1px 규칙) · **앵커 착지**
  * (`bg-accent-soft`, 방금 여기로 왔다). 인용은 그 셋과 관계없는 「참조」이므로 같은
  * 색을 쓰면 「저 글을 가리킨다」가 「나를 불렀다」로 읽힌다.

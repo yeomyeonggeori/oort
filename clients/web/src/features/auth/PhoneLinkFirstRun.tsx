@@ -10,7 +10,7 @@ import { titlebarDragProps } from "@/app/sidebarPane";
  */
 export function PhoneLinkFirstRun({ onEnterApp }: { onEnterApp: () => void }) {
   return (
-    <div className="flex min-h-full flex-col bg-surface">
+    <div className="flex min-h-full flex-col bg-pane">
       <header
         className="onboarding-step-chrome"
         data-testid="onboarding-step-chrome"

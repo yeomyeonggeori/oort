@@ -560,9 +560,9 @@ export function Sidebar({
             {/* 데스크톱 접기 토글은 타이틀바에 한 자리만 산다 (#1864). 여기 두면
                 접는 순간 입구가 사라진다. */}
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
-              className="tap-target min-w-0 flex-1 justify-between"
+              className="tap-target glass min-w-0 flex-1 justify-between rounded-lg text-ink-muted shadow-sm"
               onClick={onOpenQuickSwitcher}
               data-testid="open-quick-switcher"
             >
@@ -890,8 +890,11 @@ export function Sidebar({
                         actions={
                           canCreate ? (
                             <Button
-                              variant="outline"
+                              // 시트 위에서 보조 채움은 1.01로 사라진다. 시안 A의
+                              // 시트 위 알약(--surface + rest 그림자)으로 선다.
+                              variant="ghost"
                               size="sm"
+                              className="bg-surface shadow-sm"
                               onClick={() => openCreateChannel()}
                               data-testid="sidebar-create-channel"
                             >

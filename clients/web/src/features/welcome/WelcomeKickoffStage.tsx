@@ -82,7 +82,7 @@ export function WelcomeKickoffStage({
                 key={`${body.kind}-${body.index}`}
                 className={cn(
                   "welcome-kickoff-body flex items-center justify-center",
-                  body.tone === "accent" ? "text-accent" : "text-ink",
+                  body.tone === "accent" ? "text-signal-text" : "text-ink",
                   !reducedMotion && WELCOME_KICKOFF_MARK_CLASS
                 )}
                 data-onboarding-body={String(body.index)}

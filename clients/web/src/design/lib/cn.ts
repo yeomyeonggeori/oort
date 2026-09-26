@@ -30,7 +30,8 @@ const TEXT_ROLES = ["timestamp", "meta", "body", "title", "display"] as const;
  * action-sm/action/action-band(96/144/240) · chat-min · rail 3종 · pane 5종 · settings-nav ·
  * diff-body · terminal-body · terminal-dock 3종 · terminal-floor ·
  * timeline-strip · preview-frame · unfurl-hero · tray-max · tray-thumb · onboarding-mark ·
- * onboarding-copy · overflow-bowl.
+ * onboarding-copy · overflow-bowl · 새벽하늘 프리미티브(ADR-0189, DS2-1) pill ·
+ * pill-inline · field · icon-button · card.
  * `--spacing-px`만 뺀다 — `w-px`류는
  * stock Tailwind라 tailwind-merge가 이미 안다. 이 목록과 tokens.css의 일치는
  * cn.test.ts가 정본을 읽어 단정한다.
@@ -78,6 +79,11 @@ export const NAMED_MEASURES = [
   "onboarding-mark",
   "onboarding-copy",
   "overflow-bowl",
+  "pill",
+  "pill-inline",
+  "field",
+  "icon-button",
+  "card",
 ] as const;
 
 /** Overlay stacking names (#2044). One spelling only: the `layer-*` class.
@@ -101,6 +107,11 @@ const twMerge = extendTailwindMerge({
       h: [{ h: [...NAMED_MEASURES] }],
       "min-h": [{ "min-h": [...NAMED_MEASURES] }],
       "max-h": [{ "max-h": [...NAMED_MEASURES] }],
+      // DS2-1: 프리미티브가 이름 치수를 패딩·정사각에도 쓴다(`px-pill-inline`,
+      // `p-card`, `size-icon-button`). 호출처가 `px-2` 를 넘기면 나중 것이 이긴다.
+      size: [{ size: [...NAMED_MEASURES] }],
+      p: [{ p: [...NAMED_MEASURES] }],
+      px: [{ px: [...NAMED_MEASURES] }],
       z: [{ layer: [...LAYER_NAMES] }],
     },
   },

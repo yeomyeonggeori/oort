@@ -13006,8 +13006,9 @@ async function captureAccentCandidates(_sharedBrowser, scheme) {
       await page.evaluate((accentId) => {
         document.documentElement.setAttribute("data-accent", accentId);
       }, id);
-      await waitUntilTokenPaint(page, '[data-testid="timeline-empty-primary"]', "--accent");
-      await waitUntilTokenPaint(page, '[data-testid="mention-badge"]', "--accent");
+      // DS2-1: 주 버튼은 잉크(--primary)이고 액센트가 바꾸지 않는다. 칠이 끝났는지만 본다.
+      await waitUntilTokenPaint(page, '[data-testid="timeline-empty-primary"]', "--primary");
+      await waitUntilTokenPaint(page, '[data-testid="mention-badge"]', "--primary");
       await waitUntilTokenPaint(
         page,
         '[data-testid="channel-item"][aria-current="page"]',

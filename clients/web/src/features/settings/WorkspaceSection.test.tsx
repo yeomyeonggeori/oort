@@ -488,7 +488,7 @@ describe("워크스페이스 이름 E1", () => {
       "내 이름으로 저장"
     );
     const filled = [...host.querySelectorAll('[data-testid="workspace-rename"] button')].filter(
-      (button) => button.className.includes("bg-accent")
+      (button) => button.className.includes("bg-primary")
     );
     expect(filled).toHaveLength(1);
     expect(filled[0]?.textContent).toBe("내 이름으로 저장");

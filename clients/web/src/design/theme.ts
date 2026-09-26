@@ -1,4 +1,6 @@
 import { useSyncExternalStore } from "react";
+import { ROOT_ATTRIBUTES } from "@momo/core/design/appearance";
+import { DEFAULT_THEME_ID, type ThemeId } from "@momo/core/design/themes";
 import {
   ACCENT_ATTRIBUTE,
   DEFAULT_ACCENT_ID,
@@ -109,6 +111,21 @@ const THEME_COLOR_SELECTOR = "meta[name='theme-color'][media]";
  * 이지 선택이 아니고, 둘이 어긋나지 않는지는 theme.test.ts가 그 파일을 읽어서
  * 확인한다.
  */
+/** 테마 팔레트를 고르는 루트 속성 (ADR-0189 D3). 스킴(`data-theme`)과 따로 간다. */
+export const PALETTE_ATTRIBUTE = ROOT_ATTRIBUTES.palette;
+
+/**
+ * 지금 화면이 쓰는 팔레트. DS2-1(#2713)은 새벽하늘 하나만 찍는다 — 테마를 고르는
+ * 자리와 저장(v2)은 DS2-7(#2719)의 일이다. theme-boot.js가 같은 값을 먼저 찍는다.
+ */
+export const ACTIVE_PALETTE_ID: ThemeId = DEFAULT_THEME_ID;
+
+export function applyPalette(palette: ThemeId, doc?: ThemeDocument): void {
+  const target = doc ?? (typeof document === "undefined" ? null : document);
+  if (!target) return;
+  target.documentElement.setAttribute(PALETTE_ATTRIBUTE, palette);
+}
+
 export function applyAccent(accent: AccentId, doc?: ThemeDocument): void {
   const target = doc ?? (typeof document === "undefined" ? null : document);
   if (!target) return;
@@ -268,6 +285,7 @@ export function setAccent(next: AccentId): void {
  * 적용이다.
  */
 export function initTheme(): void {
+  applyPalette(ACTIVE_PALETTE_ID);
   applyTheme(appearance.scheme);
   applyAccent(appearance.accent);
 }

@@ -118,9 +118,12 @@ function InlineNode({
     const self = mentions.selfHandle === node.handle;
     return (
       <span
+        // 시안 A `.a-mention`: 신호 글자 + 신호 옅은 채움, 반경 6·가로 4, 600.
+        // 나를 부른 멘션은 시안에 없다. 「나를 불렀다」는 신호의 뜻 그대로라 채운
+        // 신호(--signal + --on-signal, 5.14:1)로 한 단 더 앞에 세운다.
         className={cn(
-          "text-accent",
-          self && "bg-accent-soft font-semibold"
+          "rounded-sm px-1 font-semibold",
+          self ? "bg-signal text-on-signal" : "bg-signal-soft text-signal-text"
         )}
         data-mention-handle={node.handle}
         data-testid={self ? "message-self-mention" : "message-mention"}
@@ -144,7 +147,7 @@ function InlineNode({
         event.preventDefault();
         void openExternalUrl(node.href);
       }}
-      className="text-accent underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring"
+      className="text-signal-text underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring"
     >
       <InlineNodes nodes={node.children} mentions={mentions} />
     </a>

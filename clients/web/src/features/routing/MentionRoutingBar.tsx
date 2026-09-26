@@ -384,7 +384,7 @@ function OneTargetRow({
       {expanded && (
         <div
           id="composer-routing-fields"
-          className="flex flex-col gap-2 border-t border-line bg-surface px-4 pb-2 pt-2"
+          className="flex flex-col gap-2 border-t border-line bg-pane px-4 pb-2 pt-2"
         >
           <RoutingFields
             idPrefix="composer-routing"
@@ -603,7 +603,7 @@ function ManyTargetRow({
       {expanded && (
         <div
           id="composer-routing-fields"
-          className="flex flex-col gap-2 border-t border-line bg-surface px-4 pb-2 pt-2"
+          className="flex flex-col gap-2 border-t border-line bg-pane px-4 pb-2 pt-2"
         >
           <p className="text-meta text-ink-muted">
             고른 값은 부른 {count}명 모두에게 같이 적용됩니다. 메시지 한 건에는

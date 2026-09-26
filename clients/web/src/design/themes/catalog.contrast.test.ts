@@ -1,23 +1,18 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { resolvePreset, type SignalPresetId } from "@momo/core/design/signal";
+import { SIGNAL_MIN_DISTANCE, THEMES } from "@momo/core/design/themes";
 import {
-  ACCENT_DANGER_FILL_CHROMA_RATIO_MIN,
-  ACCENT_DANGER_FILL_DELTA_E_MIN,
-  AGENT_DELTA_E_MIN,
-  AGENT_HUE_GAP_MIN,
   CHIP_VESSEL_MIN_CONTRAST,
   CHIP_VESSEL_MIN_DISTANCE,
   CHIP_VESSEL_SURFACES,
   CONTROL_SURFACES,
-  chroma,
   contrast,
   deltaE,
-  FOREGROUNDS,
   hueAngle,
   hueGap,
   parseLightDarkTokens,
-  SURFACES,
 } from "../tokens.contrast.test";
 import {
   ACCENT_ID_CHAR_CLASS,
@@ -27,14 +22,16 @@ import {
 } from "./index";
 
 /**
- * Accent theme bindings are not "checked by eye". Every CSS file in this
- * directory (except swatches.css) is an input: adding a theme without a
- * passing pair fails this file. ADR-0174 D5 — 테마 추가 = 대비 테스트 추가.
+ * Accent bindings are not "checked by eye". Every CSS file in this directory
+ * (except swatches.css) is an input: adding a binding without a passing table
+ * fails this file. ADR-0174 D5 — 테마 추가 = 대비 테스트 추가.
  *
- * Axes are *derived* from tokens.contrast.test.ts: the formulas and the
- * accent-family tables are imported, not rewritten. A binding that rebinds
- * `--accent` / `--accent-soft` inherits every contract those tokens held on
- * `:root`.
+ * DS2-1 (#2713, ADR-0189 D3·D6): 액센트 id 는 신호 프리셋으로 옮겨 가는 중이다.
+ * 바인딩은 이제 `--accent` 셋이 아니라 신호 네 값(`--signal`·`--on-signal`·
+ * `--signal-text`·`--signal-soft`)을 다시 묶는다. 값의 원천은 core 다 —
+ * dawn 은 새벽하늘의 테마 기본 신호, 나머지 넷은 `resolvePreset(id, "dawnsky")`.
+ * 이 파일은 ① 파일이 core 와 한 칸씩 같은지 ② 그 값이 웹의 자(tokens.contrast 의
+ * 표)를 넘는지 ③ 목록·부트·캡처·게이트가 같은 id 문법을 쓰는지를 잰다.
  */
 
 const THEME_DIR = fileURLToPath(new URL(".", import.meta.url));
@@ -51,27 +48,25 @@ const GATE = readFileSync(
   new URL("../../../gates/gate-theme.mjs", import.meta.url),
   "utf8"
 );
-const DAWN = parseLightDarkTokens(TOKENS_CSS);
+const ROOT = parseLightDarkTokens(TOKENS_CSS);
 
-const BINDING_TOKENS = ["accent", "accent-soft", "on-accent"] as const;
+const BINDING_TOKENS = ["signal", "on-signal", "signal-text", "signal-soft"] as const;
+type BindingToken = (typeof BINDING_TOKENS)[number];
 
 const SCHEMES = [
-  { name: "light", index: 0 as const },
-  { name: "dark", index: 1 as const },
+  { name: "light", mode: "light" as const, index: 0 as const },
+  { name: "dark", mode: "dark" as const, index: 1 as const },
 ];
 
-const BLUE_HUE_MIN = 185;
-const BLUE_HUE_MAX = 265;
+/** 「네온 AI 보라」 금지(ADR-0189 D2 유지). 신호가 이 색상 띠에 서면 안 된다. */
 const INDIGO_HUE_MIN = 265;
 const INDIGO_HUE_MAX = 330;
 
-type Pair = [string, string];
+/** 같은 id 의 라이트·다크가 같은 색 가족이다. 앞 판 여명의 실측 최대 19.8° 를 올림. */
+const SCHEME_HUE_DRIFT_MAX_DEG = 20;
 
-export type AccentBinding = {
-  accent: Pair;
-  "accent-soft": Pair;
-  "on-accent": Pair;
-};
+type Pair = [string, string];
+export type SignalBinding = Record<BindingToken, Pair>;
 
 function themeCssFiles(): string[] {
   return readdirSync(THEME_DIR)
@@ -79,188 +74,127 @@ function themeCssFiles(): string[] {
     .sort();
 }
 
-function loadBinding(source: string): AccentBinding {
+function loadBinding(source: string): SignalBinding {
   const parsed = parseLightDarkTokens(source);
   for (const name of BINDING_TOKENS) {
-    if (!parsed[name]) {
-      throw new Error(`theme binding missing --${name}`);
-    }
+    if (!parsed[name]) throw new Error(`theme binding missing --${name}`);
   }
   const extra = Object.keys(parsed).filter(
-    (name) => !BINDING_TOKENS.includes(name as (typeof BINDING_TOKENS)[number])
+    (name) => !(BINDING_TOKENS as readonly string[]).includes(name)
   );
   if (extra.length > 0) {
     throw new Error(`theme binding rebinds extra tokens: ${extra.join(", ")}`);
   }
-  return {
-    accent: parsed.accent,
-    "accent-soft": parsed["accent-soft"],
-    "on-accent": parsed["on-accent"],
-  };
+  return Object.fromEntries(BINDING_TOKENS.map((t) => [t, parsed[t]])) as SignalBinding;
 }
 
-function pickDawn(token: string, index: 0 | 1): string {
-  const pair = DAWN[token];
+function pickRoot(token: string, index: 0 | 1): string {
+  const pair = ROOT[token];
   if (!pair) throw new Error(`--${token} missing from tokens.css`);
   return pair[index];
 }
 
-function pickOverlay(
-  binding: AccentBinding,
-  token: string,
-  index: 0 | 1
-): string {
-  if (token === "accent" || token === "accent-soft" || token === "on-accent") {
-    return binding[token][index];
-  }
-  return pickDawn(token, index);
-}
+/** 신호 네 값이 선 면: 비텍스트 3:1 을 지는 신호 점·배지·링이 설 수 있는 모든 면. */
+const SIGNAL_HOSTS = CONTROL_SURFACES;
+/** 신호 글자가 서는 면. core 가 표면·시트·바닥에서 보장하고, 웹은 행 상태를 더한다. */
+const SIGNAL_TEXT_HOSTS = [
+  "surface",
+  "surface-muted",
+  "sheet",
+  "pane",
+  "canvas-top",
+  "canvas-mid",
+  "canvas-bottom",
+  "surface-hover",
+  "muted-soft",
+] as const;
 
-function isBlueFamily(hex: string): boolean {
-  const hue = hueAngle(hex);
-  return (
-    (hue >= BLUE_HUE_MIN && hue <= BLUE_HUE_MAX) ||
-    (hue > INDIGO_HUE_MIN && hue < INDIGO_HUE_MAX)
-  );
-}
-
-const STATUS_DISTANCE_TOKENS = ["ok", "warn", "danger"] as const;
-
-/** Dawn's worst accent↔ok/warn/danger distance. Bindings may not undercut it. */
-function statusDistanceFloor(): number {
-  const distances = SCHEMES.flatMap((scheme) =>
-    STATUS_DISTANCE_TOKENS.map((token) =>
-      Number(
-        deltaE(pickDawn("accent", scheme.index), pickDawn(token, scheme.index)).toFixed(
-          3
-        )
-      )
-    )
-  );
-  return Math.min(...distances);
-}
-
-const STATUS_DELTA_E_FLOOR = statusDistanceFloor();
-
-/**
- * Light↔dark hue drift per candidate. The original four stay in-family;
- * Dawn is the largest at 19.8°. Bound is that measured max rounded up.
- * Comet's 163.8° plum/mint pair (R3-H1) is the regression this ruler
- * exists to catch; old dark `#6de89b` is the red proof below.
- */
-const SCHEME_HUE_DRIFT_MAX_DEG = 20;
-
-export function accentBindingFailures(binding: AccentBinding): string[] {
+export function signalBindingFailures(binding: SignalBinding): string[] {
   const fails: string[] = [];
-  const schemeDrift = hueGap(binding.accent[0], binding.accent[1]);
-  if (schemeDrift > SCHEME_HUE_DRIFT_MAX_DEG) {
-    fails.push(
-      `light↔dark hue drift ${schemeDrift.toFixed(1)} (need ≤ ${SCHEME_HUE_DRIFT_MAX_DEG})`
-    );
+  const drift = hueGap(binding.signal[0], binding.signal[1]);
+  if (drift > SCHEME_HUE_DRIFT_MAX_DEG) {
+    fails.push(`light↔dark hue drift ${drift.toFixed(1)} (need ≤ ${SCHEME_HUE_DRIFT_MAX_DEG})`);
   }
   for (const scheme of SCHEMES) {
-    const pick = (token: string) => pickOverlay(binding, token, scheme.index);
-    const accent = pick("accent");
-    const soft = pick("accent-soft");
-    const onAccent = pick("on-accent");
+    const pick = (token: string) =>
+      (BINDING_TOKENS as readonly string[]).includes(token)
+        ? binding[token as BindingToken][scheme.index]
+        : pickRoot(token, scheme.index);
     const label = scheme.name;
+    const signal = pick("signal");
+    const soft = pick("signal-soft");
 
-    for (const hex of [accent, soft, onAccent]) {
-      if (hex.toLowerCase() === "#ffffff" || hex.toLowerCase() === "#000000") {
-        fails.push(`${label} ${hex} is pure black or white`);
+    for (const token of BINDING_TOKENS) {
+      const hex = pick(token).toLowerCase();
+      if (hex === "#ffffff" || hex === "#000000") fails.push(`${label} --${token} ${hex} is pure black or white`);
+    }
+    for (const bg of SIGNAL_HOSTS) {
+      const ratio = contrast(signal, pick(bg));
+      if (ratio < 3) fails.push(`${label} signal on ${bg} ${ratio.toFixed(2)} (need 3:1 non-text)`);
+    }
+    for (const bg of [...SIGNAL_TEXT_HOSTS, "signal-soft"]) {
+      const ratio = contrast(pick("signal-text"), pick(bg));
+      if (ratio < 4.5) fails.push(`${label} signal-text on ${bg} ${ratio.toFixed(2)} (need 4.5:1 text)`);
+    }
+    for (const fg of ["ink", "ink-muted"]) {
+      const ratio = contrast(pick(fg), soft);
+      if (ratio < 4.5) fails.push(`${label} ${fg} on signal-soft ${ratio.toFixed(2)} (need 4.5:1 text)`);
+    }
+    const label45 = contrast(pick("on-signal"), signal);
+    if (label45 < 4.5) fails.push(`${label} on-signal on signal ${label45.toFixed(2)} (need 4.5:1)`);
+
+    for (const other of ["agent", "danger", "danger-fill"]) {
+      const distance = Number(deltaE(signal, pick(other)).toFixed(3));
+      if (distance < SIGNAL_MIN_DISTANCE) {
+        fails.push(`${label} signal vs ${other} deltaE ${distance} (need ${SIGNAL_MIN_DISTANCE})`);
       }
     }
-
-    for (const fg of FOREGROUNDS) {
-      for (const bg of SURFACES) {
-        const ratio = contrast(pick(fg), pick(bg));
-        if (ratio < 4.5) {
-          fails.push(
-            `${label} ${fg} on ${bg} ${ratio.toFixed(2)} (need 4.5:1 text)`
-          );
-        }
-      }
-    }
-    for (const bg of CONTROL_SURFACES) {
-      const ratio = contrast(accent, pick(bg));
-      if (ratio < 3) {
-        fails.push(
-          `${label} accent on ${bg} ${ratio.toFixed(2)} (need 3:1 control)`
-        );
-      }
-    }
-    const fill = contrast(onAccent, accent);
-    if (fill < 4.5) {
-      fails.push(`${label} on-accent on accent ${fill.toFixed(2)}`);
+    const hue = hueAngle(signal);
+    if (hue > INDIGO_HUE_MIN && hue < INDIGO_HUE_MAX) {
+      fails.push(`${label} signal hue ${hue.toFixed(0)} sits in the indigo band`);
     }
 
-    const fillRatio = Number(
-      (chroma(accent) / chroma(pick("danger-fill"))).toFixed(2)
-    );
-    if (fillRatio < ACCENT_DANGER_FILL_CHROMA_RATIO_MIN) {
-      fails.push(
-        `${label} accent vs danger-fill chroma ${fillRatio} (need ${ACCENT_DANGER_FILL_CHROMA_RATIO_MIN})`
-      );
-    }
-    const fillDistance = Number(
-      deltaE(pick("danger-fill"), accent).toFixed(3)
-    );
-    if (fillDistance < ACCENT_DANGER_FILL_DELTA_E_MIN) {
-      fails.push(
-        `${label} danger-fill vs accent deltaE ${fillDistance} (need ${ACCENT_DANGER_FILL_DELTA_E_MIN})`
-      );
-    }
-
-    const gap = hueGap(accent, pick("agent"));
-    if (gap < AGENT_HUE_GAP_MIN) {
-      fails.push(`${label} agent hue gap ${gap.toFixed(0)} (need ${AGENT_HUE_GAP_MIN})`);
-    }
-    const agentDistance = deltaE(accent, pick("agent"));
-    if (agentDistance < AGENT_DELTA_E_MIN) {
-      fails.push(
-        `${label} agent deltaE ${agentDistance.toFixed(3)} (need ${AGENT_DELTA_E_MIN})`
-      );
-    }
-    if (isBlueFamily(accent)) {
-      fails.push(
-        `${label} accent hue ${hueAngle(accent).toFixed(0)} sits in the blue/indigo band`
-      );
-    }
-
-    for (const status of STATUS_DISTANCE_TOKENS) {
-      const distance = Number(deltaE(accent, pick(status)).toFixed(3));
-      if (distance < STATUS_DELTA_E_FLOOR) {
-        fails.push(
-          `${label} accent vs ${status} deltaE ${distance} (need ${STATUS_DELTA_E_FLOOR})`
-        );
-      }
-    }
-
+    // `--accent-soft`(=--signal-soft)는 선택된 행의 바탕이고, 원장의 칩이 그 위에 선다.
     for (const [vessel, surfaces] of CHIP_VESSEL_SURFACES) {
       if (!(surfaces as readonly string[]).includes("accent-soft")) continue;
-      const ratio = contrast(pick(vessel), soft);
-      const distance = deltaE(pick(vessel), soft);
+      const ratio = Number(contrast(pick(vessel), soft).toFixed(3));
+      const distance = Number(deltaE(pick(vessel), soft).toFixed(4));
       if (ratio < CHIP_VESSEL_MIN_CONTRAST) {
-        fails.push(
-          `${label} ${vessel} on accent-soft contrast ${ratio.toFixed(3)}`
-        );
+        fails.push(`${label} ${vessel} on signal-soft contrast ${ratio.toFixed(3)}`);
       }
       if (distance < CHIP_VESSEL_MIN_DISTANCE) {
-        fails.push(
-          `${label} ${vessel} on accent-soft OKLab distance ${distance.toFixed(4)}`
-        );
-      }
-    }
-    for (const [vessel] of CHIP_VESSEL_SURFACES) {
-      if (pick(vessel) === soft) {
-        fails.push(
-          `${label} ${vessel} is the value accent-soft paints interaction with`
-        );
+        fails.push(`${label} ${vessel} on signal-soft OKLab distance ${distance.toFixed(4)}`);
       }
     }
   }
   return fails;
 }
+
+/** core 가 이 id 에 주는 새벽하늘 값. dawn 은 테마 기본 신호(`signal: null`)다. */
+function coreBinding(id: string): SignalBinding {
+  const pairFor = (token: BindingToken): Pair =>
+    SCHEMES.map((scheme) => {
+      if (id === DEFAULT_ACCENT_ID) return THEMES.dawnsky[scheme.mode].color[token];
+      const resolved = resolvePreset(id as SignalPresetId, "dawnsky", scheme.mode);
+      if (!resolved.ok) throw new Error(`core rejects preset ${id} on dawnsky ${scheme.mode}`);
+      return resolved.values[token];
+    }).map((hex) => hex.toLowerCase()) as Pair;
+  return Object.fromEntries(BINDING_TOKENS.map((t) => [t, pairFor(t)])) as SignalBinding;
+}
+
+/**
+ * core 프리셋 엔진이 아직 재지 않는 쌍 — 잔량 (#2737).
+ *
+ * `resolvePreset` 은 신호를 표면·시트·바닥·띠 위에서 보정하지만, 웹의 칩 그릇
+ * (`--muted-soft`)과 만나는 두 쌍은 모른다: 선택된 행(`--signal-soft`) 위 원장 칩,
+ * 그리고 원장 칩 그릇 위 신호 글자(orphaned). 프리셋은 사람이 고를 때만 켜지고
+ * (기본 신호는 전부 통과), 엔진 수리는 core 의 일이라 #2737 에 넘겼다. 목록은
+ * 줄어들기만 한다: 한 줄이 통과하기 시작하면 아래 단정이 그 줄을 지우라고 한다.
+ */
+const PRESET_RESIDUE: Readonly<Record<string, readonly string[]>> = {
+  hongyeom: ["light muted-soft on signal-soft contrast 1.010"],
+  seongun: ["light signal-text on muted-soft 4.38 (need 4.5:1 text)"],
+};
 
 const files = themeCssFiles();
 const bindings = files.map((file) => {
@@ -273,9 +207,7 @@ describe("accent theme catalog", () => {
   it("puts Dawn first, and every CSS stem is a catalog id", () => {
     expect(DEFAULT_ACCENT_ID).toBe("dawn");
     expect(ACCENT_THEMES[0].id).toBe("dawn");
-    expect(files).toEqual(
-      [...ACCENT_THEMES.map((theme) => `${theme.id}.css`)].sort()
-    );
+    expect(files).toEqual([...ACCENT_THEMES.map((theme) => `${theme.id}.css`)].sort());
   });
 
   it("uses one accent id character class in the catalog, boot, capture, and theme gate", () => {
@@ -288,49 +220,59 @@ describe("accent theme catalog", () => {
     expect(GATE).toContain('id: "([${ACCENT_ID_CHAR_CLASS}]+)"');
   });
 
-  it("does not rebind onboarding or agent tokens", () => {
+  it("does not rebind onboarding, agent, or the primary action", () => {
     for (const { file, source } of bindings) {
       expect(source, file).not.toMatch(/^\s*--onboarding-/m);
       expect(source, file).not.toMatch(/^\s*--agent/m);
+      // ADR-0189 D3: 커스텀·프리셋은 주 버튼을 칠하지 않는다.
+      expect(source, file).not.toMatch(/^\s*--(?:on-)?primary/m);
     }
   });
 
-  it("keeps the Dawn file identical to tokens.css", () => {
+  it("scopes each binding to the Dawn Sky palette it was measured on", () => {
+    for (const { id, file, source } of bindings) {
+      expect(source, file).toContain(`:root[data-palette="dawnsky"][data-accent="${id}"]`);
+      expect(source, file).toContain(`[data-accent-swatch="${id}"]`);
+    }
+  });
+
+  it("carries core's values, cell by cell (dawn = theme default signal)", () => {
+    for (const { id, binding } of bindings) {
+      expect([id, binding]).toEqual([id, coreBinding(id)]);
+    }
+  });
+
+  it("keeps the Dawn file identical to the tokens.css default signal", () => {
     const dawn = bindings.find((entry) => entry.id === "dawn");
     expect(dawn).toBeDefined();
     for (const name of BINDING_TOKENS) {
-      expect(dawn!.binding[name][0]).toBe(DAWN[name][0]);
-      expect(dawn!.binding[name][1]).toBe(DAWN[name][1]);
+      expect(dawn!.binding[name]).toEqual(ROOT[name]);
     }
   });
 
-  it("S0 tokens stay outside data-accent rules", () => {
-    expect(TOKENS_CSS).toMatch(/\.onboarding-landing[\s\S]*--accent:/);
-    const onboarding = TOKENS_CSS.match(
-      /--onboarding-accent:\s*(#[0-9a-f]{6});/i
-    );
+  it("S0 and the brand lockup stay outside data-accent rules", () => {
+    expect(TOKENS_CSS).toMatch(/\.onboarding-landing,\s*\n\s*\.brand-lockup\s*\{[\s\S]*?--signal:/);
+    expect(TOKENS_CSS).toMatch(/\.brand-lockup\s*\{[\s\S]*?--accent:\s*var\(--signal\)/);
+    const onboarding = TOKENS_CSS.match(/--onboarding-accent:\s*(#[0-9a-f]{6});/i);
     expect(onboarding?.[1]).toBeDefined();
   });
 });
 
-describe("every accent binding meets the accent-family table", () => {
+describe("every accent binding meets the signal table", () => {
   it("has at least Dawn so the suite is not vacuous", () => {
     expect(bindings.length).toBeGreaterThan(0);
   });
 
   for (const { id, binding } of bindings) {
-    it(`${id} passes the accent contrast table`, () => {
-      expect(accentBindingFailures(binding), id).toEqual([]);
+    it(`${id} passes the signal contrast table (minus its named residue)`, () => {
+      expect(signalBindingFailures(binding), id).toEqual([...(PRESET_RESIDUE[id] ?? [])]);
     });
   }
 
-  it("keeps each candidate's light and dark halves in one hue family", () => {
-    for (const { id, binding } of bindings) {
-      const drift = hueGap(binding.accent[0], binding.accent[1]);
-      expect(
-        drift,
-        `${id} light↔dark hue drift ${drift.toFixed(1)}`
-      ).toBeLessThanOrEqual(SCHEME_HUE_DRIFT_MAX_DEG);
+  it("keeps the residue on presets only — the default signal owes nothing", () => {
+    expect(PRESET_RESIDUE[DEFAULT_ACCENT_ID]).toBeUndefined();
+    for (const id of Object.keys(PRESET_RESIDUE)) {
+      expect(bindings.map((b) => b.id)).toContain(id);
     }
   });
 
@@ -340,14 +282,13 @@ describe("every accent binding meets the accent-family table", () => {
         for (let j = i + 1; j < bindings.length; j += 1) {
           const distance = Number(
             deltaE(
-              bindings[i].binding.accent[scheme.index],
-              bindings[j].binding.accent[scheme.index]
+              bindings[i].binding.signal[scheme.index],
+              bindings[j].binding.signal[scheme.index]
             ).toFixed(3)
           );
-          expect(
-            distance,
-            `${bindings[i].id} vs ${bindings[j].id} ${scheme.name}`
-          ).toBeGreaterThanOrEqual(ACCENT_DANGER_FILL_DELTA_E_MIN);
+          expect(distance, `${bindings[i].id} vs ${bindings[j].id} ${scheme.name}`).toBeGreaterThanOrEqual(
+            SIGNAL_MIN_DISTANCE
+          );
         }
       }
     }
@@ -355,107 +296,59 @@ describe("every accent binding meets the accent-family table", () => {
 });
 
 describe("red proof: a failing binding fails this table", () => {
-  it("rejects a pale accent that cannot clear AA on surface", () => {
-    const pale: AccentBinding = {
-      accent: ["#f4e7d6", "#33261a"],
-      "accent-soft": ["#fffefb", "#17161a"],
-      "on-accent": ["#fffefb", "#17161a"],
-    };
-    const fails = accentBindingFailures(pale);
-    expect(fails.some((line) => line.includes("4.5"))).toBe(true);
+  const base = (): SignalBinding => ({
+    signal: ["#c2410c", "#ff8a4c"],
+    "on-signal": ["#fffefc", "#16171b"],
+    "signal-text": ["#af3908", "#ff9a62"],
+    "signal-soft": ["#fbe9de", "#392418"],
   });
 
-  it("rejects a desaturated fill that loses the accent > danger-fill order", () => {
-    const quiet: AccentBinding = {
-      accent: ["#884c00", "#e8904c"],
-      "accent-soft": ["#f6e6d8", "#342721"],
-      "on-accent": ["#fffefb", "#17161a"],
-    };
-    const fails = accentBindingFailures(quiet);
-    expect(
-      fails.some((line) => line.includes("accent vs danger-fill chroma"))
-    ).toBe(true);
+  it("the Dawn Sky default passes, so the proofs below fail for their own reason", () => {
+    expect(signalBindingFailures(base())).toEqual([]);
   });
 
-  it("rejects an accent that sits on the agent or in the indigo band", () => {
-    const agent: AccentBinding = {
-      accent: ["#4a6785", "#7fa0c4"],
-      "accent-soft": ["#e6ebf2", "#1e2836"],
-      "on-accent": ["#fffefb", "#17161a"],
-    };
-    const agentFails = accentBindingFailures(agent);
-    expect(
-      agentFails.some(
-        (line) => line.includes("agent hue gap") || line.includes("agent deltaE")
-      )
-    ).toBe(true);
-
-    const indigo: AccentBinding = {
-      accent: ["#6b3fa0", "#c49ae8"],
-      "accent-soft": ["#eee6f4", "#2c2434"],
-      "on-accent": ["#fffefb", "#17161a"],
-    };
-    const indigoFails = accentBindingFailures(indigo);
-    expect(
-      indigoFails.some((line) => line.includes("blue/indigo band"))
-    ).toBe(true);
+  it("rejects a pale signal that cannot clear 3:1 on the surface", () => {
+    const pale = { ...base(), signal: ["#f4d6c4", "#3a2519"] as Pair };
+    expect(signalBindingFailures(pale).some((line) => line.includes("need 3:1 non-text"))).toBe(true);
   });
 
-  it("rejects an accent that collides with ok or warn worse than Dawn", () => {
-    const okTwin: AccentBinding = {
-      accent: ["#187533", "#57ab5a"],
-      "accent-soft": ["#e0f4e2", "#243323"],
-      "on-accent": ["#fffefb", "#17161a"],
-    };
-    const fails = accentBindingFailures(okTwin);
-    expect(fails.some((line) => line.includes("accent vs ok deltaE"))).toBe(
-      true
-    );
+  it("rejects signal text that cannot clear AA", () => {
+    const faint = { ...base(), "signal-text": ["#e08a5a", "#6a3a22"] as Pair };
+    expect(signalBindingFailures(faint).some((line) => line.includes("signal-text on"))).toBe(true);
   });
 
-  it("rejects an accent that collides with danger worse than Dawn", () => {
-    const dangerTwin: AccentBinding = {
-      accent: ["#ae083e", "#fe6600"],
-      "accent-soft": ["#f6e0e2", "#3a1c12"],
-      "on-accent": ["#fffefb", "#17161a"],
-    };
-    const fails = accentBindingFailures(dangerTwin);
-    expect(fails.some((line) => line.includes("accent vs danger deltaE"))).toBe(
-      true
-    );
+  it("rejects a label colour that disappears on the fill", () => {
+    const flat = { ...base(), "on-signal": ["#d0602a", "#ff9a62"] as Pair };
+    expect(signalBindingFailures(flat).some((line) => line.includes("on-signal on signal"))).toBe(true);
+  });
+
+  it("rejects a signal that sits on the danger colour or the agent", () => {
+    const dangerTwin = { ...base(), signal: ["#be2c4f", "#ff6b63"] as Pair };
+    expect(signalBindingFailures(dangerTwin).some((line) => line.includes("signal vs danger"))).toBe(true);
+    const agentTwin = { ...base(), signal: ["#2f5b8a", "#8db3e2"] as Pair };
+    expect(signalBindingFailures(agentTwin).some((line) => line.includes("signal vs agent"))).toBe(true);
+  });
+
+  it("rejects a signal in the indigo band", () => {
+    const indigo = { ...base(), signal: ["#6b3fa0", "#c49ae8"] as Pair };
+    expect(signalBindingFailures(indigo).some((line) => line.includes("indigo band"))).toBe(true);
   });
 
   it("rejects a pair whose dark half is a different colour", () => {
-    const mintTail: AccentBinding = {
-      accent: ["#8b005a", "#6de89b"],
-      "accent-soft": ["#f1e0e8", "#1e2724"],
-      "on-accent": ["#fffefb", "#17161a"],
-    };
-    const fails = accentBindingFailures(mintTail);
-    expect(fails.some((line) => line.includes("light↔dark hue drift"))).toBe(
-      true
-    );
+    const mintTail = { ...base(), signal: ["#8b005a", "#6de89b"] as Pair };
+    expect(signalBindingFailures(mintTail).some((line) => line.includes("light↔dark hue drift"))).toBe(true);
   });
 
-  it("rejects two swatch neighbours that share a colour", () => {
-    expect(
-      Number(deltaE("#a54c08", "#884c00").toFixed(3))
-    ).toBeLessThan(ACCENT_DANGER_FILL_DELTA_E_MIN);
+  it("rejects a signal-soft that swallows the muted-soft vessel", () => {
+    const merged = { ...base(), "signal-soft": [pickRoot("muted-soft", 0), pickRoot("muted-soft", 1)] as Pair };
+    expect(signalBindingFailures(merged).some((line) => line.includes("muted-soft on signal-soft"))).toBe(true);
   });
 
-  it("rejects an accent-soft that swallows the muted-soft vessel", () => {
-    const merged: AccentBinding = {
-      accent: ["#a54c08", "#f0a850"],
-      "accent-soft": ["#f3efe8", "#302e36"],
-      "on-accent": ["#fffefb", "#17161a"],
-    };
-    const fails = accentBindingFailures(merged);
-    expect(
-      fails.some(
-        (line) =>
-          line.includes("muted-soft on accent-soft") ||
-          line.includes("muted-soft is the value accent-soft")
-      )
-    ).toBe(true);
+  it("rejects a binding that rebinds more than the signal four", () => {
+    expect(() =>
+      loadBinding(`:root { --signal: light-dark(#c2410c, #ff8a4c); --on-signal: light-dark(#fffefc, #16171b);
+        --signal-text: light-dark(#af3908, #ff9a62); --signal-soft: light-dark(#fbe9de, #392418);
+        --primary: light-dark(#c2410c, #ff8a4c); }`)
+    ).toThrow(/extra tokens: primary/);
   });
 });

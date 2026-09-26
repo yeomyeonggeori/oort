@@ -1,8 +1,36 @@
-# Dawn tokens (web): implemented reference
+# Dawn Sky tokens (web): implemented reference
 
-Implementation of record: **`clients/web/src/design/tokens.css`**. This file
-documents it; it does not define it. When the two disagree, the CSS wins and
-this file is stale, so update both in the same commit.
+Implementation of record: **`clients/web/src/design/tokens.css`** for spacing,
+radius, text, shadow and shell geometry. **Color values live in core**
+(`packages/momo-core/src/design/themes.ts`, ADR-0189 D5) and their measured
+table is [`docs/design-system/themes-2.0.md`](../../../../docs/design-system/themes-2.0.md).
+This file documents both; it does not define them. When they disagree, core
+(color) and the CSS (everything else) win and this file is stale.
+
+## 0. Design system 2.0 (새벽하늘, DS2-1 #2713) — read this first
+
+§1–§3 below record the **DS1 Dawn (여명)** palette and the reasoning behind its
+rulers. The rulers still hold (AA 4.5 text, 3:1 non-text, chip vessel 1.05 /
+OKLab 0.02, risk order by chroma); the hex values quoted there are history.
+The DS2 roles:
+
+| role | light | dark | use |
+|---|---|---|---|
+| `--canvas-top/mid/bottom` | `#f7eadb` → `#efedea` → `#e2e9f3` | `#231d1b` → `#171a20` → `#0f141c` | window canvas, `canvas-gradient` utility only |
+| `--surface` | `#fffefc` | `#1b1e25` | cards, floating panels, composer (`--surface-raised` aliases it) |
+| `--surface-muted` | `#f3f1ee` | `#252933` | secondary pill fill, step groups, code chip |
+| `--sheet` | `#f4f2ef` | `#14171d` | sheets, sidebar (`--surface-sidebar` aliases it) |
+| `--pane` | `#fffefc` | `#171a20` | the main pane / page background (`bg-pane`) |
+| `--primary` / `--on-primary` | `#16171b` / `#fffefc` | `#f1f1f3` / `#16171b` | primary button, send, FAB, "mentions me" count |
+| `--signal` / `--on-signal` | `#c2410c` / `#fffefc` | `#ff8a4c` / `#16171b` | unread count, caret, focus ring, self mention (3:1 non-text) |
+| `--signal-text` / `--signal-soft` | `#af3908` / `#fbe9de` | `#ff9a62` / `#392418` | mention text and tint, unread boundary label (4.5 text) |
+| `--glass` | `rgba(255,254,252,.74)` | `rgba(32,35,43,.72)` | `glass` utility only |
+
+`--accent*` are aliases of `--signal*` during the migration; `text-accent` is
+gone (a test fails on it). Full role list and every measured pair: themes-2.0.md
+§2–§3. The web contrast suite measures a **closed** foreground × host table
+(`tokens.contrast.test.ts` `foregroundHosts`) and checks `:root` against core
+cell by cell.
 
 Mechanical verifier: `clients/web/src/design/tokens.contrast.test.ts` (runs in
 `npm test`). Every ratio quoted below is produced by that test, not estimated.
@@ -422,14 +450,17 @@ Markers are a fourth axis: `w-marker` 2px, the current-workspace accent bar
 (R-1 §1). The rhythm scale has no 2px step and `w-0.5` does not compile, so the
 bar gets a named token instead of widening the closed set.
 
-**Radius: three steps, nothing else.** `--radius-*: initial` clears the stock
-scale first.
+**Radius: the web platform ladder (ADR-0189 D6).** `--radius-*: initial` clears
+the stock scale first. Names are shared with the phone, values are not.
 
 | class | px | use |
 |---|---|---|
-| `rounded-sm` | 6 | buttons, chips, inputs |
-| `rounded-md` | 10 | cards, list groups |
-| `rounded-lg` | 14 | dialogs, sheets |
+| `rounded-sm` | 6 | code chip, mention chip |
+| `rounded-md` | 10 | badge, tag, menu item |
+| `rounded-lg` | 14 | row selection, input vessel, menu panel |
+| `rounded-xl` | 18 | main pane (shell, DS2-6) |
+| `rounded-2xl` | 20 | card, dialog, popover |
+| `rounded-full` | pill | buttons, circular icon buttons, count badges |
 
 **Text roles, not sizes.** `--text-*: initial` clears `text-sm`/`text-xs`, so a
 component must name a role and cannot reach for size inflation:
@@ -593,10 +624,13 @@ pins one scheme; the screenshot capture uses browser-level
 `light-dark()` path the product uses and nothing is themed specially for the
 shot.
 
-Accent bindings are a second stamp: `:root[data-accent="<id>"]` redefines
-`--accent` / `--accent-soft` / `--on-accent` only. The default id is `dawn`.
-Onboarding S0 and `.brand-lockup` pin those three tokens back to Dawn
-(ADR-0174 D4). Preference lives in `momo.web.appearance.v1` on this device.
+The palette is a second stamp: `:root[data-palette="<theme>"]` (boot always
+stamps `dawnsky` until DS2-7 adds the picker). Accent bindings are a third:
+`:root[data-palette="dawnsky"][data-accent="<id>"]` redefines the four signal
+roles only; the default id `dawn` is the theme's own signal. Onboarding S0 and
+`.brand-lockup` pin the signal family (and the `--accent` alias) back to the
+Dawn Sky default (ADR-0174 D4). Preference lives in `momo.web.appearance.v1` on
+this device (v2 arrives with DS2-7).
 
 ## 7. Adding a token
 

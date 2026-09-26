@@ -13,6 +13,7 @@ import {
   COMPLETION_TONE_SOFT_TOKEN,
   COMPLETION_TONE_TOKEN,
 } from "@/features/timeline/completionTone";
+import { parseLightDarkTokens } from "../../design/tokens.contrast.test";
 
 // =============================================================================
 // 세션 검증 칩이 **카드와 같은 다리**로 칠해지는가 (UXC-C).
@@ -133,16 +134,13 @@ describe("세션 표면이 칩을 우회하지 않는다", () => {
 
 /** 토큰 한 줄의 light-dark() 두 값을 [light, dark] 로 (`completionTone.test.ts` 의 잣대). */
 function tokenValues(name: string): [string, string] {
-  const match = css.match(
-    new RegExp(
-      `${name}:\\s*light-dark\\(\\s*(#[0-9a-f]{6})\\s*,\\s*(#[0-9a-f]{6})\\s*\\)`,
-      "i"
-    )
-  );
-  if (match === null) {
+  // DS2-1(#2713): 옛 이름(`--accent`·`--surface-raised`)은 이제 `var(--…)` 별칭이다.
+  // 별칭을 따라가 화면이 칠하는 값을 읽는다(`parseLightDarkTokens`, 한 자).
+  const pair = parseLightDarkTokens(css)[name.replace(/^--/, "")];
+  if (pair === undefined) {
     throw new Error(`${name} 이 tokens.css 에 light-dark() 한 쌍으로 없다`);
   }
-  return [match[1].toLowerCase(), match[2].toLowerCase()];
+  return [pair[0].toLowerCase(), pair[1].toLowerCase()];
 }
 
 const SCHEMES = ["라이트", "다크"] as const;

@@ -151,31 +151,45 @@ describe("검수 #1 재검토 — 채워진 컨트롤 위 대비 (design-review 
 
   it("링 색(--on-accent) ≠ 채움 색(--accent) — amber-on-amber 로 사라지지 않는다", () => {
     // red proof 의 핵심: 채워진 컨트롤에서 링 색과 fill 색이 같으면 안 된다.
-    // focus-ring-on-fill 이 링을 --on-accent 로, bg-accent 는 fill 을 --accent 로 준다.
-    expect(tokenValue("--on-accent")).not.toEqual(tokenValue("--accent"));
+    // DS2-1: --accent·--on-accent 는 --signal·--on-signal 의 별칭이라 값은 그 둘에서 읽는다.
+    expect(tokenValue("--on-accent")).toBe("var(--on-signal)");
+    expect(tokenValue("--accent")).toBe("var(--signal)");
+    expect(tokenValue("--on-signal")).not.toEqual(tokenValue("--signal"));
     // --on-accent 는 --danger-fill 컨트롤도 덮는다(값이 --on-danger-fill 과 같다).
-    expect(tokenValue("--on-accent")).toEqual(tokenValue("--on-danger-fill"));
+    expect(tokenValue("--on-signal")).toEqual(tokenValue("--on-danger-fill"));
+  });
+
+  it("focus-ring-on-primary 는 링 색을 잉크 채움의 전경색(--on-primary)으로 세운다 (DS2-1)", async () => {
+    const css = await buildCss(["focus-ring-on-primary"]);
+    const rule = focusRingRule(css, "focus-ring-on-primary");
+    expect(rule.selector).not.toContain(":focus");
+    expect(rule.body).toMatch(/--focus-ring-ink:\s*var\(--on-primary\)/);
+    expect(tokenValue("--on-primary")).not.toEqual(tokenValue("--primary"));
   });
 
   it("accent/danger 채움 컨트롤은 focus-ring-on-fill 을 든다", () => {
     // button 의 두 채움 변형 — 채움과 focus-ring-on-fill 이 같은 변형 문자열에.
     const button = readFileSync(`${HERE}/ui/button.tsx`, "utf8");
     for (const [fill, line] of [
-      ["bg-accent", /default:[^,]*bg-accent[^,]*focus-ring-on-fill/s],
+      ["bg-primary", /default:[^,]*bg-primary[^,]*focus-ring-on-primary/s],
       ["bg-danger-fill", /destructive:[^,]*bg-danger-fill[^,]*focus-ring-on-fill/s],
     ] as const) {
       expect(button, `button.tsx ${fill} 변형`).toMatch(line);
     }
-    // 손으로 그린 accent 보내기 버튼도(ThreadComposer).
+    // 손으로 그린 보내기 버튼도(ThreadComposer). DS2-1 에서 잉크 원형이 됐다.
     const thread = readFileSync(
       `${HERE}/../features/timeline/ThreadComposer.tsx`,
       "utf8"
     );
+    let sends = 0;
     for (const line of thread.split("\n")) {
-      if (line.includes("bg-accent") && line.includes("focus-visible:focus-ring")) {
-        expect(line, "ThreadComposer 보내기 버튼").toContain("focus-ring-on-fill");
+      if (/\bbg-(?:accent|primary)\b/.test(line) && line.includes("focus-visible:focus-ring")) {
+        sends += 1;
+        expect(line, "ThreadComposer 보내기 버튼").toContain("focus-ring-on-primary");
+        expect(line, "ThreadComposer 보내기 버튼").toContain("bg-primary");
       }
     }
+    expect(sends, "ThreadComposer 보내기 버튼을 찾았다").toBe(1);
   });
 
   it("N-10: every focus-ring-on-fill is paired with a ring and an accent fill, or named in residue", () => {
