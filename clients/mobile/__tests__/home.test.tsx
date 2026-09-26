@@ -587,6 +587,8 @@ describe('홈 — 「작업 중」 카드', () => {
     const idle = screen.getByTestId('home-agents-idle');
     expect(idle).toHaveTextContent(/에이전트 부르기/);
     expect(idle).toHaveTextContent(/2명/);
+    // 큰 글씨에서 두 줄로 감길 때 「에이전트 부 / 르기」가 되지 않게(R1 재캡처).
+    expect(screen.getByText('에이전트 부르기').props.lineBreakStrategyIOS).toBe('hangul-word');
     fireEvent.press(idle);
     await waitFor(() => expect(screen.getByTestId('agent-list-pane')).toBeTruthy());
   });

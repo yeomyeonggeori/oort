@@ -992,7 +992,7 @@ function IdleAgentsRow({
       <AgentSquare size={HOME.rowFace} corner={HOME.rowAgentCorner} glyph={HOME.rowAgentGlyph} />
       <View style={styles.idleText}>
         {/* 동사가 잘리면 문이 무엇인지 사라진다(AX, 리뷰 M4) — 두 줄까지 감는다. */}
-        <Text style={styles.rowTitle} numberOfLines={2}>
+        <Text style={styles.rowTitle} numberOfLines={2} lineBreakStrategyIOS="hangul-word">
           에이전트 부르기
         </Text>
         {/* 보조 줄은 이름 **아래**에 선다. 오른쪽 끝에 두면 큰 글씨에서 이름이
