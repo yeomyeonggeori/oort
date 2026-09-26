@@ -3137,6 +3137,16 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       return <Shell initialNav={{...INITIAL_NAV, tab: 'search'}} />;
     case 'shell-fab-sheet':
       return <Shell initialComposeOpen />;
+    // 검수 R1 B1: 층이 열리면 크롬이 그 **밑**에 있어야 한다. 대화 층을 연 판.
+    case 'shell-conversation':
+      return (
+        <Shell
+          initialNav={{
+            ...INITIAL_NAV,
+            conversation: {channelId: 'ch-agent-lab', title: '#agent-lab'},
+          }}
+        />
+      );
     case 'shell-profile-sheet':
       return (
         <View style={styles.fill}>
