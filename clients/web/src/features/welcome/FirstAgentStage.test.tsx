@@ -27,9 +27,9 @@ import {
   AI_CONNECT_SKIPPED_LINE,
   JOIN_CAP_LINE,
   JOIN_OFF_LINE,
-  LOGIN_ACTION_LABEL,
   LOGIN_POLL_WINDOW_MS,
 } from "@momo/core/features/onboarding/aiConnect";
+import { LOGIN_ACTION_LABEL } from "@momo/core/features/onboarding/harnessLogin";
 import { clearAllDrafts, draftKey, readDraft } from "@/features/chat/draftStore";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { detectLocalHarnesses, openTerminalApp } from "@/lib/tauri";
@@ -82,6 +82,17 @@ vi.mock("@/lib/tauri", async (importOriginal) => {
     detectHostedAgents: vi.fn(async () => []),
     openTerminalApp: vi.fn(async () => true),
     openExternalUrl: vi.fn(async () => true),
+    // 이 시험의 앱에는 PTY가 없다: 로그인 모달은 Phase 1 폴백으로 물러난다.
+    // 모달·PTY 흐름 자체는 harnessLogin/*.test.ts가 가짜 CLI로 잰다.
+    desktopPty: {
+      spawn: vi.fn(async () => {
+        throw new Error("local terminal unavailable");
+      }),
+      write: vi.fn(async () => undefined),
+      resize: vi.fn(async () => undefined),
+      kill: vi.fn(async () => undefined),
+      ack: vi.fn(async () => undefined),
+    },
   };
 });
 
@@ -584,8 +595,8 @@ describe("알약과 선택", () => {
   });
 });
 
-describe("「Claude로 로그인」 버튼이 없다 (ADR-0193 D2)", () => {
-  it("로그인 필요 줄의 행동은 「터미널에서 로그인」과 복사뿐이다", async () => {
+describe("로그인 버튼은 공식 CLI 이름이다 (ADR-0193 D2 개정)", () => {
+  it("로그인 필요 줄의 행동은 「Codex로 로그인」 하나이고, 기본 흐름에 명령·터미널이 없다", async () => {
     subscriptionOn();
     const host = mountStage();
     await waitFor(() => q(host, "ai-connect-login-codex") !== null, "login row");
@@ -593,24 +604,37 @@ describe("「Claude로 로그인」 버튼이 없다 (ADR-0193 D2)", () => {
       (node) => `${node.textContent ?? ""} ${node.getAttribute("aria-label") ?? ""}`
     );
     const offenders = labels.filter((text) =>
-      /(Claude|ChatGPT|OpenAI|Anthropic|Codex)\s*(로|으로)\s*로그인/.test(text)
+      /(Claude|ChatGPT|OpenAI|Anthropic)\s*(로|으로)\s*로그인/.test(text)
     );
     expect(offenders).toEqual([]);
-    expect(q(host, "ai-connect-login-open-codex")?.textContent).toBe(LOGIN_ACTION_LABEL);
-    expect(q(host, "ai-connect-login-command-codex")?.textContent).toBe("$ codex login");
+    expect(q(host, "ai-connect-login-open-codex")?.textContent).toBe(LOGIN_ACTION_LABEL.codex);
+    expect(host.textContent).not.toContain("codex login");
+    expect(host.querySelector("code")).toBeNull();
     expect(q(host, "ai-connect-login-claude")).toBeNull();
+    // 평문 버튼: 그림·로고가 없다.
+    expect(q(host, "ai-connect-login-open-codex")?.querySelector("svg, img")).toBeNull();
   });
 });
 
-describe("터미널에서 로그인 → 2초 재확인 → 120초 뒤 다시 확인", () => {
-  it("명령을 복사하고 터미널을 연 뒤, 로그인됨이 오면 준비됨이 된다", async () => {
+function dq(testId: string): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+}
+
+describe("로그인 모달 → PTY 없음 → Phase 1 폴백 → 2초 재확인 → 120초 뒤 다시 확인", () => {
+  it("모달이 열리고, PTY가 없으면 명령 복사·터미널 열기로 넘긴 뒤 로그인됨이 오면 준비됨이 된다", async () => {
     subscriptionOn();
     const host = mountStage();
     await waitFor(() => q(host, "ai-connect-login-open-codex") !== null, "login row");
+    click(q(host, "ai-connect-login-open-codex"));
+    await waitFor(() => dq("harness-login-dialog") !== null, "dialog");
+    await waitFor(() => dq("harness-login-fallback-open") !== null, "fallback");
+    expect(dq("harness-login-dialog")?.getAttribute("data-phase")).toBe("failed");
+    expect(dq("harness-login-fallback")?.textContent).toContain("codex login");
     vi.useFakeTimers();
     const calls = vi.mocked(detectLocalHarnesses).mock.calls.length;
     vi.mocked(detectLocalHarnesses).mockResolvedValue([CLAUDE_READY, CODEX_LOGIN]);
-    click(q(host, "ai-connect-login-open-codex"));
+    click(dq("harness-login-fallback-open"));
+    await flush();
     await flush();
     await flush();
     expect(clipboard).toContain("codex login");
@@ -648,9 +672,12 @@ describe("터미널에서 로그인 → 2초 재확인 → 120초 뒤 다시 확
     subscriptionOn();
     const host = mountStage();
     await waitFor(() => q(host, "ai-connect-login-open-codex") !== null, "login row");
+    click(q(host, "ai-connect-login-open-codex"));
+    await waitFor(() => dq("harness-login-fallback-open") !== null, "fallback");
     vi.useFakeTimers();
     vi.setSystemTime(5_000_000);
-    click(q(host, "ai-connect-login-open-codex"));
+    click(dq("harness-login-fallback-open"));
+    await flush();
     await flush();
     await flush();
     await act(async () => {

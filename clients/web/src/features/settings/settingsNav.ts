@@ -53,10 +53,14 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   // 있다」). 브라우저에도 선다: 그 탭에는 로컬 터미널이 없다고 말하는 자리다.
   { id: "terminal", label: "터미널", group: "개인" },
   { id: "updates", label: "업데이트", group: "개인", desktopOnly: true },
+  // AI 연결은 개인 묶음 맨 아래다(#2877, 제안서 Q3). 이름과 id 는 그대로다:
+  // 「설정 › AI 연결」 문구가 서버의 에이전트 안내 문장·온보딩에 박혀 있다. 첫 절이
+  // 내 구독(이 맥)이 되었으므로 개인에 서고, 팀 연결(운영자) 절은 같은 페이지 안에서
+  // 자물쇠로 가른다.
+  { id: "ai", label: "AI 연결", group: "개인" },
   { id: "workspace", label: "워크스페이스", group: "워크스페이스" },
   { id: "plugins", label: "앱", group: "워크스페이스" },
   { id: "members", label: "멤버와 초대", group: "워크스페이스" },
-  { id: "ai", label: "AI 연결", group: "연결" },
   { id: "agents", label: "에이전트 자격", group: "연결" },
   { id: "code", label: "코드 실행 호스트", group: "연결", surface: "work" },
   { id: "usage", label: "사용량", group: "연결" },
