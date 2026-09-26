@@ -24,6 +24,7 @@ import { DevicesSection } from "./DevicesSection";
 import { AgentCredentialsSection } from "./AgentCredentialsSection";
 import { AiLinkSection } from "./AiLinkSection";
 import { AppearanceSection } from "./AppearanceSection";
+import { TerminalSection } from "./TerminalSection";
 import { LinkPreviewSection } from "./LinkPreviewSection";
 import { EventSubscriptionSection } from "./EventSubscriptionSection";
 import { InviteSection } from "./InviteSection";
@@ -252,6 +253,7 @@ export function SettingsRoute() {
           {section === "account" && <AccountSection />}
           {section === "devices" && <DevicesSection offline={offline} />}
           {section === "appearance" && <AppearanceSection />}
+          {section === "terminal" && <TerminalSection />}
           {section === "link-previews" && <LinkPreviewSection />}
           {section === "notifications" && (
             <NotificationRulesSection offline={offline} />

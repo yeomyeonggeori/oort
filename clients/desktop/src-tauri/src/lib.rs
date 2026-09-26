@@ -8,6 +8,7 @@
 //   keychain      refresh token at rest           -> commands
 //   updater       self-replace the app bundle     -> commands + progress event
 //   detect        local hosted-agent signatures   -> command (T-5; passive only)
+//   harnesses     claude/codex installed + login  -> command (#2813; exit code only)
 //
 // Everything above is exposed to the web bundle as plain app commands and two
 // events; the contract is documented in `clients/desktop/README.md` and consumed
@@ -19,6 +20,14 @@ mod deeplink;
 #[cfg(desktop)]
 mod detect;
 mod discovery;
+// Where harness CLIs live on this Mac (ADR-0190 D3), shared by every caller
+// that resolves `claude`/`codex` to an absolute path.
+#[cfg(desktop)]
+mod harness_path;
+// `claude auth status` / `codex login status`, exit code only (#2813,
+// ADR-0190 D3-a). The only harness commands the shell runs on its own.
+#[cfg(desktop)]
+mod harness_status;
 mod keychain;
 mod notification;
 // Handing a URL to the platform browser needs a platform browser, and the
@@ -30,10 +39,18 @@ mod opener;
 // platform" shape as `opener`, for bytes the webview cannot show itself.
 #[cfg(desktop)]
 mod pdf_viewer;
+// Local terminal lane (ADR-0190 D1·D2, #2772): the app process opens the PTY,
+// the webview draws it. Reachable only through the five `pty_*` commands,
+// which only `capabilities/pty.json` grants.
+#[cfg(desktop)]
+mod pty;
 // What the capability and window config owe the web bundle's drag regions and
 // file drops (#2671). Tests only.
 #[cfg(test)]
 mod shell_contract;
+// AI 연결 Phase 1 (#2814): brings Terminal.app forward. No arguments.
+#[cfg(desktop)]
+mod terminal_app;
 #[cfg(desktop)]
 mod updater;
 
@@ -71,6 +88,7 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updater::UpdaterState::default())
+        .manage(pty::PtyState::default())
         .invoke_handler(tauri::generate_handler![
             deeplink::deep_link_take_pending,
             discovery::discovery_start,
@@ -85,10 +103,17 @@ pub fn run() {
             opener::open_external_url,
             pdf_viewer::open_pdf_attachment,
             detect::detect_hosted_agents,
+            harness_status::detect_local_harnesses,
+            terminal_app::open_terminal_app,
             app_version,
             updater::updater_check,
             updater::updater_install,
             updater::updater_relaunch,
+            pty::pty_spawn,
+            pty::pty_write,
+            pty::pty_resize,
+            pty::pty_kill,
+            pty::pty_ack,
         ]);
 
     #[cfg(not(desktop))]
@@ -105,6 +130,17 @@ pub fn run() {
         keychain::keychain_clear_refresh_token,
         app_version,
     ]);
+
+    // A (re)loaded main page cannot reach the sessions the previous page
+    // opened (their channels died with it), so they end here (#2824 M3).
+    #[cfg(desktop)]
+    let builder = builder.on_page_load(|webview, payload| {
+        if webview.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started {
+            if let Some(state) = webview.try_state::<pty::PtyState>() {
+                state.0.kill_all();
+            }
+        }
+    });
 
     builder
         .manage(deeplink::DeepLinkState::default())
@@ -152,6 +188,17 @@ pub fn run() {
 
             Ok(())
         })
-        .run(context())
-        .expect("error while running momo desktop shell");
+        .build(context())
+        .expect("error while building momo desktop shell")
+        .run(|_app, _event| {
+            // Closing the app ends every local terminal's process group
+            // (#2772). `Exit` rather than `ExitRequested`: the latter can be
+            // vetoed, the former is the last event before the process ends.
+            #[cfg(desktop)]
+            if let tauri::RunEvent::Exit = _event {
+                if let Some(state) = _app.try_state::<pty::PtyState>() {
+                    state.0.kill_all();
+                }
+            }
+        });
 }

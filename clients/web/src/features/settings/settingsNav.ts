@@ -16,6 +16,7 @@ export type SettingsSectionId =
   | "appearance"
   | "link-previews"
   | "notifications"
+  | "terminal"
   | "updates"
   | "ai"
   | "agents"
@@ -48,6 +49,9 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   { id: "appearance", label: "테마", group: "개인" },
   { id: "link-previews", label: "링크 미리보기", group: "개인" },
   { id: "notifications", label: "알림 규칙", group: "개인" },
+  // 로컬 터미널의 단축키 표(#2774, ADR-0190 D5 「이 목록은 설정에서 볼 수
+  // 있다」). 브라우저에도 선다: 그 탭에는 로컬 터미널이 없다고 말하는 자리다.
+  { id: "terminal", label: "터미널", group: "개인" },
   { id: "updates", label: "업데이트", group: "개인", desktopOnly: true },
   { id: "workspace", label: "워크스페이스", group: "워크스페이스" },
   { id: "plugins", label: "앱", group: "워크스페이스" },

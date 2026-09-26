@@ -197,6 +197,9 @@ describe("huddle user states", () => {
       "브라우저 설정에서 마이크를 허용"
     );
     expect(huddleErrorCopy("expired")).toContain("다시 참가");
+    // #2757: "expired" is only reachable before connecting now, so it must
+    // not claim a live call was cut.
+    expect(huddleErrorCopy("expired")).not.toContain("끊겼");
   });
 
   it("keeps SecurityError scoped to media capture and names CSP refusal", () => {

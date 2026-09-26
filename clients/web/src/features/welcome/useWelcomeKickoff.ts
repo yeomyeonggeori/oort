@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { uuidEq } from "@momo/core/lib/api";
 import { memberFor, type Directory } from "@momo/core/features/workspace/directory";
 import { prefersReducedMotion } from "@/app/sidebarPane";
 import type { RealtimeHandle } from "@/lib/realtime";
@@ -13,13 +12,19 @@ import {
   isWelcomeDecisionPending,
   messagesBelongToChannel,
   readShownMarker,
+  welcomeBandSpeaker,
   writeShownMarker,
+  type WelcomeBandSpeaker,
   type WelcomeKickoffPhase,
 } from "./welcomeKickoff";
 
 /**
- * Mount gates, opener exit, 120s backstop, and the hold that keeps
- * enter-conversation off the opener row until the stage's exit animationend.
+ * Mount gates, opener exit, 120s backstop.
+ *
+ * #2817: the kickoff is a band above the composer, outside the message list,
+ * so the opener row no longer waits for the band's exit to play its arrival.
+ * Mockup D5 shows the opener row and the joy band together. (ADR-0181 D7's
+ * exit→arrival order was a same-list rule: the stage row sat above the opener.)
  */
 export function useWelcomeKickoff(input: {
   workspaceId: string;
@@ -34,7 +39,7 @@ export function useWelcomeKickoff(input: {
   realtime: RealtimeHandle | null;
 }): {
   phase: WelcomeKickoffPhase;
-  holdEntranceId: string | null;
+  speaker: WelcomeBandSpeaker;
   holdWriteAction: boolean;
   reducedMotion: boolean;
   onExitComplete: () => void;
@@ -136,15 +141,13 @@ export function useWelcomeKickoff(input: {
     setPhase("hidden");
   }, [persistExit]);
 
+  // Reduced-motion also passes through `exiting`: the band swaps to joy and
+  // leaves after the hold without collapsing (issue: 표정 교체만).
   const beginExit = useCallback(() => {
     const current = phaseRef.current;
     if (current !== "stage" && current !== "backstop") return;
-    if (prefersReducedMotion()) {
-      finish();
-      return;
-    }
     setPhase("exiting");
-  }, [finish]);
+  }, []);
 
   useEffect(() => {
     if ((phase === "stage" || phase === "backstop") && openerId) {
@@ -181,12 +184,6 @@ export function useWelcomeKickoff(input: {
     };
   }, [realtime, workspaceId, channelId, directory, phase, beginExit]);
 
-  const holdEntranceId =
-    openerId &&
-    (phase === "stage" || phase === "exiting" || phase === "backstop")
-      ? openerId
-      : null;
-
   const holdWriteAction =
     phase === "stage" ||
     phase === "exiting" ||
@@ -205,26 +202,9 @@ export function useWelcomeKickoff(input: {
 
   return {
     phase,
-    holdEntranceId,
+    speaker: welcomeBandSpeaker(directory.members, memberId),
     holdWriteAction,
     reducedMotion: prefersReducedMotion(),
     onExitComplete: finish,
   };
-}
-
-export function welcomeHoldsEntrance(
-  holdEntranceId: string | null,
-  messageId: string
-): boolean {
-  return holdEntranceId !== null && uuidEq(holdEntranceId, messageId);
-}
-
-/** ChatShell and the Chromium harness share this composition (N12). */
-export function welcomePlayEntrance(
-  holdEntranceId: string | null,
-  messageId: string,
-  storePlay: ((id: string) => boolean) | undefined
-): boolean {
-  if (welcomeHoldsEntrance(holdEntranceId, messageId)) return false;
-  return storePlay?.(messageId) ?? false;
 }

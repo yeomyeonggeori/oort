@@ -62,3 +62,15 @@ export const TEST_PREFILL_ACTIVE = DEV_EMAIL !== "" || DEV_PASSWORD !== "";
 export const IS_TAURI =
   typeof window !== "undefined" &&
   ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
+
+/**
+ * AI 연결의 구독 줄(#2814 OB2-8) 빌드 플래그. BUILD-TIME, 기본 꺼짐.
+ *
+ * #2815 OB2-9(서버 소유자 전용 호출)가 팀 인스턴스에 서기 전에는 팀 배포 빌드에
+ * 구독 줄을 노출하지 않는다(이슈 계약). `VITE_MOMO_SUBSCRIPTION_AGENTS=1`로 켠
+ * 빌드만 구독 줄을 그리고, 그때도 서버 킬 스위치(`subscriptionAgentsEnabled`)가
+ * 참이어야 한다. design 모드(캡처)는 포즈가 켠다.
+ */
+export const SUBSCRIPTION_AGENTS_BUILD_FLAG =
+  env.VITE_MOMO_SUBSCRIPTION_AGENTS === "1";
+

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the signed desktop app (#2761, ADR-0122 D-H3).
+  The bundler passes this file to codesign through
+  `tauri.conf.json > bundle > macOS > entitlements`.
+
+  Keep it to what the app actually needs. WKWebView's JIT runs in WebKit's own
+  WebContent process, and the keychain works without an entitlement, so neither
+  belongs here.
+
+  com.apple.security.device.audio-input: huddle microphone. Under the hardened
+  runtime, TCC denies the microphone without showing a prompt when this is
+  missing. The prompt text is NSMicrophoneUsageDescription in Info.plist.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+</dict>
+</plist>

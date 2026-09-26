@@ -121,6 +121,30 @@ export interface HostedAgentConnection {
   doorbellSecretMasked?: string;
   doorbellLastFiredAtMs?: number;
   doorbellLastStatus?: string;
+  /**
+   * ADR-0193 D4 (#2815, openapi `HostedAgentConnection.invocationScope`).
+   * `owner_only` = 구독 경로로 합류해 소유자만 부를 수 있는 에이전트. create·list·get
+   * 이 싣고 생명주기 전이 응답은 생략한다. 모르는 값·부재는 생략이다.
+   */
+  invocationScope?: HostedInvocationScope;
+  /** owner_only 에이전트가 쓰는 공식 CLI. owner_only 일 때만 있다. */
+  subscriptionHarness?: SubscriptionHarnessWire;
+}
+
+/** 서버 enum 그대로 (openapi `invocationScope`). */
+export type HostedInvocationScope = "workspace" | "owner_only";
+
+/** 서버 enum 그대로 (openapi `subscriptionHarness`). 하이픈이 아니라 밑줄이다. */
+export type SubscriptionHarnessWire = "claude_code" | "codex";
+
+function toInvocationScope(raw: string | undefined): HostedInvocationScope | undefined {
+  return raw === "workspace" || raw === "owner_only" ? raw : undefined;
+}
+
+function toSubscriptionHarness(
+  raw: string | undefined
+): SubscriptionHarnessWire | undefined {
+  return raw === "claude_code" || raw === "codex" ? raw : undefined;
 }
 
 /**
@@ -203,6 +227,8 @@ export function toHostedConnection(value: unknown): HostedAgentConnection | null
   const doorbellSecretMasked = str(row, "doorbellSecretMasked");
   const doorbellLastFiredAtMs = num(row, "doorbellLastFiredAtMs");
   const doorbellLastStatus = str(row, "doorbellLastStatus");
+  const invocationScope = toInvocationScope(str(row, "invocationScope"));
+  const subscriptionHarness = toSubscriptionHarness(str(row, "subscriptionHarness"));
   return {
     id,
     agentMemberId,
@@ -220,6 +246,8 @@ export function toHostedConnection(value: unknown): HostedAgentConnection | null
       ? { doorbellLastFiredAtMs }
       : {}),
     ...(doorbellLastStatus ? { doorbellLastStatus } : {}),
+    ...(invocationScope ? { invocationScope } : {}),
+    ...(subscriptionHarness ? { subscriptionHarness } : {}),
   };
 }
 

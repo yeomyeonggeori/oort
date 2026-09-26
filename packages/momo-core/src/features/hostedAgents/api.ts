@@ -3,6 +3,7 @@ import { fetchWithDeadline } from "../../lib/http";
 import { responseRecord } from "../../lib/wire";
 import { apiBase, coreSession } from "../../runtime/host";
 import type { HostedConfirmApproval } from "./approval";
+import type { HostedInvocationScope, SubscriptionHarnessWire } from "./model";
 import type { OauthApproveRequest, OauthDenyRequest } from "./oauthConsent";
 
 // =============================================================================
@@ -71,6 +72,13 @@ export interface CreateHostedConnectionInput {
   displayName: string;
   handle: string;
   authMode: string;
+  /**
+   * ADR-0193 D4 (#2815). 구독 경로 합류는 `owner_only` + `subscriptionHarness`
+   * 둘을 함께 보낸다(하나만 오면 서버 400). 서버 킬 스위치가 꺼져 있으면 409.
+   * 팀 에이전트 경로는 둘 다 생략한다(서버 기본 `workspace`).
+   */
+  invocationScope?: HostedInvocationScope;
+  subscriptionHarness?: SubscriptionHarnessWire;
 }
 
 /**

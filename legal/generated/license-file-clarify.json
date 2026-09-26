@@ -39,6 +39,14 @@
       "reason": "install tree has no LICENSE file. lockfile SPDX Apache-2.0 OR MIT.",
       "spdx_texts": ["Apache-2.0", "MIT"]
     },
+    "@xterm/addon-serialize@0.14.0": {
+      "reason": "npm tarball ships README+lib+typings only (#2774 local terminal scrollback). lockfile SPDX MIT; upstream xtermjs/xterm.js LICENSE is MIT.",
+      "spdx_texts": ["MIT"]
+    },
+    "@xterm/headless@6.0.0": {
+      "reason": "npm tarball ships README+lib-headless+typings only (#2774 local terminal mirror). lockfile SPDX MIT; upstream xtermjs/xterm.js LICENSE is MIT.",
+      "spdx_texts": ["MIT"]
+    },
     "esrecurse@4.3.0": {
       "reason": "install tree has no LICENSE file. lockfile SPDX BSD-2-Clause.",
       "spdx_texts": ["BSD-2-Clause"]

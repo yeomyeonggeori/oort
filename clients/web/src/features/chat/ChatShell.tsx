@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Hash, Lock, MessageSquare, SquareTerminal } from "lucide-react";
 import {
@@ -59,6 +66,8 @@ import { ThreadPanel } from "@/features/timeline/ThreadPanel";
 import { LongPressHint } from "@/features/timeline/LongPressHint";
 import { WorkPanel } from "@/features/work/WorkPanel";
 import { TerminalDock } from "@/features/work/TerminalDock";
+import { toggleDock, useDockState } from "@/features/workbench/local/dockState";
+import { isDesktop } from "@/lib/tauri";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { useWorkPanelTarget } from "@/features/agents/workLogStore";
 import type { WorkScope } from "@momo/core/features/work/workSessionModel";
@@ -70,6 +79,7 @@ import {
 } from "@momo/core/features/timeline/stress";
 import { Composer } from "@/features/chat/Composer";
 import { canCreateChannelNow } from "@momo/core/features/channels/model";
+import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
 import { useOpenAddChannelMember } from "@/features/channels/useAddChannelMember";
 import {
@@ -93,7 +103,14 @@ import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { FirstMentionOnboarding } from "@/features/hostedAgents/FirstMentionOnboarding";
 import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
-import { useWelcomeKickoff, welcomePlayEntrance } from "@/features/welcome/useWelcomeKickoff";
+import { useWelcomeKickoff } from "@/features/welcome/useWelcomeKickoff";
+import { WelcomeKickoffStage } from "@/features/welcome/WelcomeKickoffStage";
+import { PhoneLinkChannelCard } from "@/features/welcome/PhoneLinkChannelCard";
+import { shouldMountPhoneLinkCard } from "@/features/welcome/phoneLinkCard";
+import {
+  peekKickoffSettled,
+  subscribeFirstRun,
+} from "@/features/welcome/firstRunGate";
 
 // =============================================================================
 // Channel surface (R-1 §3): header, offline banner, timeline, composer, thread
@@ -228,15 +245,23 @@ export function ChatShell() {
     directory,
     realtime: stressCount > 0 ? null : realtime,
   });
-  const isPlayEntrance = useCallback(
-    (id: string) =>
-      welcomePlayEntrance(welcome.holdEntranceId, id, timeline.isPlayEntrance),
-    [welcome.holdEntranceId, timeline]
+  const kickoffSettled = useSyncExternalStore(
+    subscribeFirstRun,
+    peekKickoffSettled,
+    peekKickoffSettled
   );
-  const pinArrivalGrant = timeline.pinArrivalGrant;
-  useEffect(() => {
-    pinArrivalGrant(welcome.holdEntranceId);
-  }, [pinArrivalGrant, welcome.holdEntranceId]);
+  const phoneLinkCardMounted =
+    stressCount === 0 &&
+    channelId !== null &&
+    shouldMountPhoneLinkCard({
+      channel,
+      kickoffPhase: welcome.phase,
+      kickoffSettled,
+    });
+  const welcomeBandPhase =
+    stressCount === 0 && channelId !== null && welcome.phase !== "hidden"
+      ? welcome.phase
+      : null;
 
   // 「작성 중」 수신 (ADR-0149). **보이는 채널만** 구독한다 - 그것이 이 레일의 유일한
   // 폭 제어다. 스트레스 픽스처에는 서버가 없으므로 걸지 않는다.
@@ -378,8 +403,21 @@ export function ChatShell() {
   //     사이드바 「작업 콘솔」(`/work`) 의 `open-work-panel` → `?work-panel=1`.
   //   * 도크와 WorkPanel 은 XOR — 같은 세션의 ObserverTerminal 이중 마운트 금지.
   //     도크는 채팅 열 안, 컴포저 위에 앉고 컴포저를 덮지 않는다.
+  //   * #2753: 도크는 사이드바 「작업 콘솔」·설정 「코드 실행 호스트」와 같은
+  //     #2166 판정(`isSurfaceProvided("work")`) 뒤에 선다. 관전할 바이트를
+  //     내보내는 호스트가 없는 서버(셀프호스트 기본)에서 헤더 버튼만 살아
+  //     있으면 막다른 길이다. 로컬 워크벤치(M1, agent-workspace-2.0 §3.10)가
+  //     들어오면 이 진입점은 그 로컬 터미널 진입점으로 대체된다.
+  //   * #2774: 데스크탑 셸에서는 이 버튼이 로컬 터미널 도크(⌃`)를 연다. 관전
+  //     도크의 헤더 진입점은 거기서 로컬 도크로 대체된다(관전은 작업 패널에
+  //     남는다). 브라우저에는 로컬 PTY가 없으므로 지금까지대로 관전 도크다.
+  const localTerminal = isDesktop();
+  const localDock = useDockState();
+  const terminalDockProvided = !localTerminal && isSurfaceProvided("work");
+  const terminalButtonShown = localTerminal || terminalDockProvided;
   const [workOpen, setWorkOpen] = useState(false);
   const [dockOpen, setDockOpen] = useState(false);
+  const terminalPressed = localTerminal ? localDock.open : dockOpen;
   const terminalToggleRef = useRef<HTMLButtonElement>(null);
   useEffect(() => setDockOpen(false), [channelId]);
   const [workScope, setWorkScope] = useState<WorkScope>("channel");
@@ -1030,23 +1068,29 @@ export function ChatShell() {
           >
             {/* TC-1 (#1758): 헤더 SquareTerminal 은 하단 터미널 도크만 연다.
                 채널 컨텍스트의 관전 진입은 도크가 승계한다. 이 testid 를
-                `open-work-panel` 로 남기면 게이트가 도크를 패널로 착각한다. */}
-            {stressCount === 0 && (
+                `open-work-panel` 로 남기면 게이트가 도크를 패널로 착각한다.
+                #2753: 작업 표면이 없는 서버에서는 버튼 자체를 내놓지 않는다. */}
+            {stressCount === 0 && terminalButtonShown && (
               <button
                 ref={terminalToggleRef}
                 type="button"
-                onClick={() => {
+                onClick={(event) => {
+                  if (localTerminal) {
+                    toggleDock(event.currentTarget);
+                    return;
+                  }
                   setWorkOpen(false);
                   setDockOpen((open) => !open);
                 }}
-                aria-pressed={dockOpen}
-                {...(dockOpen
+                aria-pressed={terminalPressed}
+                {...(dockOpen && !localTerminal
                   ? { "aria-controls": "channel-terminal-dock" }
                   : {})}
                 aria-label="터미널"
-                title="터미널"
+                aria-keyshortcuts={localTerminal ? "Control+`" : undefined}
+                title={localTerminal ? "터미널 (⌃`)" : "터미널"}
                 data-testid="open-terminal-dock"
-                className={channelHeaderControlClass({ pressed: dockOpen })}
+                className={channelHeaderControlClass({ pressed: terminalPressed })}
               >
                 <SquareTerminal aria-hidden="true" className="size-4" />
               </button>
@@ -1256,13 +1300,11 @@ export function ChatShell() {
                   openAddMember({ id: channelId, name: channel.name ?? label });
               }}
               onStartWriting={focusComposer}
-              isPlayEntrance={isPlayEntrance}
+              isPlayEntrance={timeline.isPlayEntrance}
               onEntranceConsumed={timeline.consumeEntrance}
               capUnmountedArrivals={timeline.capUnmountedArrivals}
               welcomePhase={welcome.phase}
-              welcomeReducedMotion={welcome.reducedMotion}
               welcomeHoldWriteAction={welcome.holdWriteAction}
-              onWelcomeExitComplete={welcome.onExitComplete}
             />
           ) : (
             <Skeleton ready={!channelsQuery.isLoading} rows={6} className="p-4">
@@ -1298,12 +1340,31 @@ export function ChatShell() {
           )}
         </div>
 
-        {dockOpen && stressCount === 0 && (
+        {dockOpen && stressCount === 0 && terminalDockProvided && (
           <TerminalDock channelId={channelId} onClose={closeDock} />
         )}
 
         {/* 폰에는 액션이 있다는 것을 말해 주는 것이 화면에 하나도 없었다
             (R2 H4). 손가락 기기에서만, 한 번만, 컴포저 바로 위에서. */}
+        {/* 「폰에서도」 카드 (#2818, ADR-0193 D7): 첫 대화 채널에서만, 킥오프가
+            끝난 뒤, 타임라인 아래(오프너를 가리지 않는다) 컴포저 바로 위. */}
+        {/* 첫 대화 코메토 띠 (#2817, ADR-0193 D5): 같은 자리의 「폰에서도」 카드와
+            phase로 갈린다. 띠가 접힌 뒤(hidden + 정착)에야 카드가 선다. */}
+        {welcomeBandPhase && (
+          <WelcomeKickoffStage
+            phase={welcomeBandPhase}
+            reducedMotion={welcome.reducedMotion}
+            speaker={welcome.speaker}
+            onExitComplete={welcome.onExitComplete}
+          />
+        )}
+        {phoneLinkCardMounted && (
+          <PhoneLinkChannelCard
+            workspaceId={workspaceId}
+            offline={offline}
+            onDismissed={focusComposer}
+          />
+        )}
         {stressCount === 0 && channelId !== null && <LongPressHint />}
         {stressCount === 0 && channelId !== null && (
           <Composer

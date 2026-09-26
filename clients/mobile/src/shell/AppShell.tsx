@@ -1,10 +1,20 @@
 import type {Member} from '@momo/core/lib/api';
-import React, {useCallback, useReducer, useRef, useState} from 'react';
+import {canCreateChannelNow} from '@momo/core/features/channels/model';
+import {memberFor} from '@momo/core/features/workspace/directory';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from 'react';
 import {StyleSheet, View} from 'react-native';
 import type {Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
 import {AgentWorkingRail} from '../features/agents/AgentWorkingRail';
 import {useMentionCount} from '../features/inbox/useInbox';
+import {useDirectory} from '../features/workspace/queries';
 import {EdgeSwipeBack} from '../nav/EdgeSwipeBack';
 import {
   INITIAL_NAV,
@@ -14,6 +24,7 @@ import {
   type OpenHostedConnection,
   type Tab,
 } from '../nav/state';
+import {NotificationPrimerGate} from '../features/onboarding/NotificationPrimer';
 import PushProvider from '../push/PushProvider';
 import {useNotificationTapRouting} from '../push/useNotificationTapRouting';
 import {RealtimeProvider} from '../realtime/RealtimeProvider';
@@ -27,19 +38,21 @@ import SearchScreen from '../screens/SearchScreen';
 import SidebarScreen from '../screens/SidebarScreen';
 import WorkConsoleScreen from '../screens/WorkConsoleScreen';
 import WorkSessionDetailScreen from '../screens/WorkSessionDetailScreen';
-import {SessionProvider} from '../session/useSession';
+import {SessionProvider, useSession} from '../session/useSession';
+import {NewChannelSheet} from './NewChannelSheet';
 import {NewMessageSheet} from './NewMessageSheet';
+import {PlusMenu, type PlusMenuItem} from './PlusMenu';
 import {
   Canvas,
-  FloatingTabBar,
-  InkFab,
   ScrollFade,
+  ShellBottomBar,
   TabBarClearanceProvider,
 } from './ShellChrome';
 
 // =============================================================================
-// The signed-in tree: three tabs on a gradient canvas, a floating pill tab bar,
-// an ink FAB, and the surfaces that cover them (ADR-0189 D1, DS2-2 #2714).
+// The signed-in tree: three tabs on a gradient canvas, a centred pill tab bar
+// with a small + beside it, and the surfaces that cover them (ADR-0189 D1,
+// DS2-2 #2714; the + and its menu are DS2-2b #2750).
 //
 // `SessionProvider` is mounted here rather than in `App.tsx` so that everything
 // below can take a signed-in member for granted. The gate above has already
@@ -57,7 +70,7 @@ import {
 //
 // "Stays mounted" is about not LOSING a position, and a tab nobody has opened
 // has no position to lose. The search tab and the two layers that used to be
-// tabs (에이전트 · 작업 — now opened from the FAB sheet) cost real requests on
+// tabs (에이전트 · 작업 — now opened from the + menu) cost real requests on
 // mount, and firing those on launch would spend a phone's radio on a screen the
 // person may never open. So the set of places that have been visited is
 // tracked and each is rendered from its first visit onward: mounting is
@@ -84,11 +97,16 @@ export default function AppShell({member}: {member: Member}): React.JSX.Element 
       <PushProvider>
         <RealtimeProvider>
           <Shell />
+          {/* M3 알림 미리 안내(#2820). 권한이 아직 안 물어졌을 때만 셸 위에 선다. */}
+          <NotificationPrimerGate />
         </RealtimeProvider>
       </PushProvider>
     </SessionProvider>
   );
 }
+
+/** + 가 연 것: 메뉴, 또는 그 메뉴가 넘긴 무거운 시트. */
+export type CreateStep = 'menu' | 'dm' | 'channel' | null;
 
 /** 한 번 열린 뒤로 마운트된 채 남는 자리들. 탭 셋과, 탭이던 두 층. */
 type Place = Tab | 'agentList' | 'workList';
@@ -97,20 +115,31 @@ type Place = Tab | 'agentList' | 'workList';
  * 셸 본체. 앱은 `AppShell`이 프로바이더 셋 안에서 세운다.
  *
  * 내보내는 이유는 **캡처 하네스** 하나다(`measure/surfaces.tsx`의 `shell-*`):
- * 셸 크롬(탭바·FAB·시트)은 탭과 시트가 열린 판을 시안 옆에 나란히 놓아야 확인되고,
- * 시뮬레이터에서 그 판을 손으로 만들 수 없다. 두 시작값은 그 판을 고르는 것이고,
- * 앱은 기본값(홈, 시트 닫힘)만 쓴다.
+ * 셸 크롬(탭바·+·메뉴·시트)은 탭과 메뉴가 열린 판을 시안 옆에 나란히 놓아야
+ * 확인되고, 시뮬레이터에서 그 판을 손으로 만들 수 없다. 시작값들은 그 판을 고르는
+ * 것이고, 앱은 기본값(홈, 메뉴·시트 닫힘)만 쓴다.
  */
 export function Shell({
   initialNav = INITIAL_NAV,
-  initialComposeOpen = false,
+  initialCreate = null,
 }: {
   initialNav?: typeof INITIAL_NAV;
-  initialComposeOpen?: boolean;
+  /** 처음부터 열어 둘 + 메뉴나 그 뒤의 시트. */
+  initialCreate?: CreateStep;
 } = {}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const [nav, dispatch] = useReducer(navReducer, initialNav);
-  const [composeOpen, setComposeOpen] = useState(initialComposeOpen);
+  // + 가 여는 것: 메뉴, 또는 메뉴에서 고른 무거운 시트 하나. 한 번에 하나만 선다.
+  const [create, setCreate] = useState<CreateStep>(initialCreate);
+  const closeCreate = useCallback(() => setCreate(null), []);
+  const {member, workspaceId} = useSession();
+  const directoryQuery = useDirectory(workspaceId);
+  // 채널 만들기는 오너·관리자만(ADR-0128). 명단이 오기 전에는 행을 세우지 않는다 —
+  // 세웠다가 거두는 것이 한 박자 늦게 서는 것보다 나쁘다(core `canCreateChannelNow`).
+  const canCreateChannel = canCreateChannelNow(
+    !directoryQuery.isPending,
+    memberFor(directoryQuery.directory, member.id)?.role,
+  );
   const mentionCount = useMentionCount();
   // 알림 본문 탭 → 대화 하나 (#2569). 못 가면 그 이유 한 문장을 대화 목록에 둔다.
   // 지금의 자리를 함께 건넨다: 답을 기다리는 탭은 사람이 다른 곳을 고르면 접힌다.
@@ -172,6 +201,48 @@ export function Shell({
   if (nav.agentList) visited.current.add('agentList');
   if (nav.workList) visited.current.add('workList');
   const workConsole = workConsoleAvailable();
+
+  // + 메뉴의 행. 순서는 Buzz 의 무게 순서(가장 자주 → 드물게)가 아니라 이 제품의
+  // 동사 순서다: 사람에게 말하기, 방 만들기, 에이전트 부르기, 에이전트의 일 보기.
+  // 「채널 둘러보기」는 없다 — 서버가 참여하지 않은 공개 채널을 내주지도, 스스로
+  // 들어가게 하지도 않는다(PR #2750 「남은 일」).
+  const plusItems = useMemo<PlusMenuItem[]>(() => {
+    const items: PlusMenuItem[] = [
+      {
+        key: 'dm',
+        icon: 'dm',
+        label: '새 DM',
+        hint: '받는 사람을 고르는 시트를 엽니다.',
+        onPress: () => setCreate('dm'),
+      },
+    ];
+    if (canCreateChannel) {
+      items.push({
+        key: 'channel',
+        icon: 'channel',
+        label: '새 채널',
+        hint: '채널 이름과 공개 범위를 정하는 시트를 엽니다.',
+        onPress: () => setCreate('channel'),
+      });
+    }
+    items.push({
+      key: 'agents',
+      icon: 'agent',
+      label: '에이전트 부르기',
+      hint: '에이전트 목록을 엽니다.',
+      onPress: onOpenAgentList,
+    });
+    if (workConsole) {
+      items.push({
+        key: 'work',
+        icon: 'work',
+        label: '작업 콘솔',
+        hint: '에이전트가 하고 있는 일을 봅니다.',
+        onPress: () => dispatch({type: 'openWorkList'}),
+      });
+    }
+    return items;
+  }, [canCreateChannel, onOpenAgentList, workConsole]);
   // 셸 위에 층이 하나라도 서 있는가. 크롬은 그 밑에 그려지고(트리 순서), 보조기술
   // 에서도 숨는다(`ShellChrome` 의 `coveredProps`).
   const covered =
@@ -181,6 +252,11 @@ export function Shell({
     nav.workList ||
     nav.workSession !== null ||
     nav.hosted !== null;
+  // 메뉴가 열린 채 다른 길(알림 탭 등)로 층이 서면 메뉴를 **접는다**. 숨기기만 하면
+  // 층이 닫힐 때 아무도 부르지 않은 메뉴가 다시 뜬다(design-review L1).
+  useEffect(() => {
+    if (covered) setCreate(open => (open === 'menu' ? null : open));
+  }, [covered]);
 
   return (
     <Canvas>
@@ -230,15 +306,24 @@ export function Shell({
       </TabBarClearanceProvider>
 
       <ScrollFade />
-      <FloatingTabBar
+      <ShellBottomBar
         current={nav.tab}
         inboxCount={mentionCount}
-        onSelect={tab => dispatch({type: 'selectTab', tab})}
+        onSelect={tab => {
+          setCreate(null);
+          dispatch({type: 'selectTab', tab});
+        }}
+        onPlus={() => setCreate(open => (open === 'menu' ? null : 'menu'))}
+        plusOpen={create === 'menu'}
         covered={covered}
       />
-      <InkFab onPress={() => setComposeOpen(true)} covered={covered} />
+      {/* 메뉴는 크롬 바로 뒤, 층들 앞에 그린다: 탭바 위에 떠야 하고, 층이 열리는
+          순간(행을 고른 순간)에는 이미 닫혀 있다. */}
+      {create === 'menu' && !covered ? (
+        <PlusMenu items={plusItems} onClose={closeCreate} />
+      ) : null}
 
-      {/* 탭이던 두 층 (ADR-0189 D1). FAB 시트가 열고, 한 번 열린 뒤로는 닫혀도
+      {/* 탭이던 두 층 (ADR-0189 D1). + 메뉴가 열고, 한 번 열린 뒤로는 닫혀도
           마운트된 채 남는다 — 탭일 때와 같은 이유(스크롤 자리)로. */}
       {visited.current.has('workList') && workConsole ? (
         <EdgeSwipeBack
@@ -360,13 +445,16 @@ export function Shell({
         </EdgeSwipeBack>
       ) : null}
 
-      {composeOpen ? (
+      {create === 'dm' ? (
         <NewMessageSheet
-          workConsole={workConsole}
-          onOpenAgentList={onOpenAgentList}
-          onOpenWorkList={() => dispatch({type: 'openWorkList'})}
           onOpenConversation={onOpenConversation}
-          onClose={() => setComposeOpen(false)}
+          onClose={closeCreate}
+        />
+      ) : null}
+      {create === 'channel' ? (
+        <NewChannelSheet
+          onOpenConversation={onOpenConversation}
+          onClose={closeCreate}
         />
       ) : null}
     </Canvas>

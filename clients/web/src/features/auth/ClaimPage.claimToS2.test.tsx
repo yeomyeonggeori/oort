@@ -287,6 +287,37 @@ function unmountApp() {
   resetOwnerOnboardingLoadState();
 }
 
+describe("claim D1″ on the onboarding 2.0 frame (#2811)", () => {
+  it("says the question through 코메토 and shows the first of four dots", async () => {
+    const host = await mountApp();
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="claim-submit"]')).not.toBeNull();
+    });
+    expect(host.querySelector('[data-testid="onboarding-frame"]')).not.toBeNull();
+    expect(host.querySelector(".brand-lockup")).toBeNull();
+    const title = host.querySelector('[data-testid="claim-title"]');
+    expect(title?.tagName).toBe("H1");
+    expect(title?.textContent).toBe("이 서버의 첫 주인이에요.");
+    expect(host.querySelector('[data-testid="kometto-guide-detail"]')?.textContent).toBe(
+      "비밀번호를 정해요."
+    );
+    expect(
+      host.querySelector('[data-testid="kometto-guide"]')?.getAttribute("data-expression")
+    ).toBe("idle");
+    const dots = host.querySelector('[data-testid="onboarding-dots"]');
+    expect(dots?.getAttribute("data-total")).toBe("4");
+    expect(dots?.getAttribute("data-current")).toBe("1");
+    for (const id of ["claim-password", "claim-confirm"]) {
+      expect(host.querySelector(`[data-testid="${id}"]`)?.className, id).toContain(
+        "onboarding-field"
+      );
+    }
+    expect(host.querySelector('[data-testid="claim-submit"]')?.className).toContain(
+      "onboarding-action"
+    );
+  });
+});
+
 describe("claim → S1 through App restore hold (B-1)", () => {
   it("renders S1 after claim applyLogin instead of the session-restoring skeleton", async () => {
     // A late hold cancels an in-flight restore and parks the skeleton.
@@ -295,9 +326,13 @@ describe("claim → S1 through App restore hold (B-1)", () => {
     const host = await mountApp();
     await submitClaimFrom(host);
     expect(host.querySelector('[data-testid="onboarding-s1"]')).not.toBeNull();
-    expect(host.querySelector('[data-testid="onboarding-progress"]')?.textContent).toBe(
-      "1/2"
-    );
+    expect(
+      host.querySelector('[data-testid="onboarding-dots"]')?.getAttribute("data-current")
+    ).toBe("2");
+    expect(
+      host.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
+    ).toBe("4단계 중 2단계");
+    expect(host.querySelector('[data-testid="onboarding-progress"]')).toBeNull();
     expect(host.querySelector('[data-testid="onboarding-s2"]')).toBeNull();
     expect(host.querySelector('[data-testid="session-restoring"]')).toBeNull();
     expect(restoreSession).not.toHaveBeenCalled();
@@ -307,7 +342,7 @@ describe("claim → S1 through App restore hold (B-1)", () => {
 });
 
 describe("claim → S1 submit → S2", () => {
-  it("calls E1 and E2 once then renders S2 at 2/2", async () => {
+  it("calls E1 and E2 once then renders S2 at dot 3 of 4", async () => {
     const host = await mountApp();
     await submitClaimFrom(host);
     await vi.waitFor(() => {
@@ -329,9 +364,13 @@ describe("claim → S1 submit → S2", () => {
       handle: "seongjae",
       displayName: "성재",
     });
-    expect(host.querySelector('[data-testid="onboarding-progress"]')?.textContent).toBe(
-      "2/2"
-    );
+    expect(
+      host.querySelector('[data-testid="onboarding-dots"]')?.getAttribute("data-current")
+    ).toBe("3");
+    expect(
+      host.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
+    ).toBe("4단계 중 3단계");
+    expect(host.querySelector('[data-testid="onboarding-progress"]')).toBeNull();
     expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe(
       JSON.stringify({ invite: true })
     );

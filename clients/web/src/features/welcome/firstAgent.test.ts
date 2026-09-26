@@ -3,10 +3,14 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HOSTED_PRESETS } from "@momo/core/features/hostedAgents/presets";
 import {
+  JOIN_CAP_DETAIL,
+  JOIN_CAP_LINE,
+  joinWaitingLine,
+} from "@momo/core/features/onboarding/aiConnect";
+import {
   DETECT_CAP_MS,
   DETECT_INITIAL_MS,
   DETECT_MAX_DELAY_MS,
-  FIRST_AGENT_CAP_COPY,
   FIRST_AGENT_CARDS,
   FIRST_AGENT_CLAUDE_DETAIL,
   FIRST_AGENT_CODEX_DETAIL,
@@ -14,10 +18,6 @@ import {
   FIRST_AGENT_DETAIL_FORBIDDEN,
   FIRST_AGENT_DETECTING_WAIT,
   FIRST_AGENT_GROK_WHAT_HAPPENS,
-  FIRST_AGENT_LEAD_CAP,
-  FIRST_AGENT_LEAD_CARDS,
-  FIRST_AGENT_LEAD_DETECTING,
-  FIRST_AGENT_LEAD_MENTION,
   FIRST_AGENT_OPENAI_DETAIL,
   FIRST_AGENT_STAGE_ORDER,
   copyClaimsConnected,
@@ -27,7 +27,6 @@ import {
   firstAgentCaptureDetected,
   firstAgentCaptureSecret,
   firstAgentDetectingDetail,
-  firstAgentLead,
   isHostedDetected,
   nextDetectDelayMs,
   parseFirstAgentCapturePose,
@@ -86,12 +85,8 @@ describe("첫 에이전트 카드 4종", () => {
 });
 
 describe("로그인 뒤 first-run 순서", () => {
-  it("렌더 계약은 킥오프 → 첫 에이전트 → 폰 연결이다", () => {
-    expect(FIRST_AGENT_STAGE_ORDER).toEqual([
-      "kickoff",
-      "first-agent",
-      "phone-link",
-    ]);
+  it("렌더 계약은 킥오프 → 첫 에이전트다(폰 연결은 첫 대화 채널 카드, #2818)", () => {
+    expect(FIRST_AGENT_STAGE_ORDER).toEqual(["kickoff", "first-agent"]);
   });
 });
 
@@ -122,12 +117,12 @@ describe("감지는 서버 상태만 본다", () => {
   });
 
   it("감지 문장은 연결됨을 말하지 않는다", () => {
-    expect(copyClaimsConnected(FIRST_AGENT_LEAD_DETECTING)).toBe(false);
+    expect(copyClaimsConnected(joinWaitingLine("Claude Code"))).toBe(false);
     expect(copyClaimsConnected(FIRST_AGENT_DETECTING_WAIT)).toBe(false);
     expect(copyClaimsConnected(firstAgentDetectingDetail("grok"))).toBe(false);
-    expect(copyClaimsConnected(FIRST_AGENT_CAP_COPY)).toBe(false);
-    expect(FIRST_AGENT_CAP_COPY).not.toBe(FIRST_AGENT_LEAD_CAP);
-    expect(FIRST_AGENT_CAP_COPY).not.toMatch(/[—–]/);
+    expect(copyClaimsConnected(JOIN_CAP_LINE)).toBe(false);
+    expect(copyClaimsConnected(JOIN_CAP_DETAIL)).toBe(false);
+    expect(JOIN_CAP_LINE).not.toMatch(/[—–]/);
     expect(copyClaimsConnected("\u{c5f0}\u{acb0}\u{b428}")).toBe(true);
   });
 
@@ -137,15 +132,6 @@ describe("감지는 서버 상태만 본다", () => {
     expect(firstAgentDetectingDetail("grok")).toContain("그록봇");
     expect(firstAgentDetectingDetail("grok")).not.toContain("감지는 서버");
     expect(src("./firstAgent.ts")).toContain("감지는 서버 상태만 따른다는 문장은 여기 주석");
-  });
-});
-
-describe("단계별 리드", () => {
-  it("카드·발급·감지·멘션 리드가 갈린다", () => {
-    expect(firstAgentLead("cards")).toBe(FIRST_AGENT_LEAD_CARDS);
-    expect(firstAgentLead("detecting")).toBe(FIRST_AGENT_LEAD_DETECTING);
-    expect(firstAgentLead("mention")).toBe(FIRST_AGENT_LEAD_MENTION);
-    expect(firstAgentLead("cards")).not.toBe(firstAgentLead("detecting"));
   });
 });
 
@@ -178,7 +164,7 @@ describe("사보타주 ② 서버 전에 연결됨을 말하면 붉다", () => {
     expect(FIRST_AGENT_CONNECTED_CLAIM).toBe("연결됨");
     expect(copyClaimsConnected("연결됨")).toBe(true);
     expect(copyClaimsConnected("\u{c5f0}\u{acb0}\u{b428}")).toBe(true);
-    expect(copyClaimsConnected(FIRST_AGENT_LEAD_DETECTING)).toBe(false);
+    expect(copyClaimsConnected(joinWaitingLine("그록봇"))).toBe(false);
   });
 });
 
@@ -221,14 +207,15 @@ describe("캡처 비밀은 디자인 모드만", () => {
     });
   });
 
-  it("디자인 모드에서 detected 픽스처는 done 만이다", () => {
+  it("디자인 모드에서 detected 픽스처는 합류 자세(done·sub-joined)만이다", () => {
     vi.stubEnv("MODE", "design");
     const fixture = firstAgentCaptureDetected("done");
     expect(fixture).not.toBeNull();
     expect(fixture?.status).toBe("detected");
     expect(fixture?.agentMemberId).not.toBe("");
+    expect(firstAgentCaptureDetected("sub-joined")).not.toBeNull();
     for (const pose of FIRST_AGENT_CAPTURE_POSES) {
-      if (pose === "done") continue;
+      if (pose === "done" || pose === "sub-joined") continue;
       expect(firstAgentCaptureDetected(pose), pose).toBeNull();
     }
     expect(firstAgentCaptureDetected(null)).toBeNull();

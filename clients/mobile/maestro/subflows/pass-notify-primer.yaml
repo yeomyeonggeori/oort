@@ -1,0 +1,25 @@
+appId: app.momo.ios
+name: pass-notify-primer
+---
+# M3 알림 미리 안내 (#2820, ADR-0193 D8). After a sign-in on a simulator whose
+# notification permission is still undecided, the app shows this screen over
+# the shell and raises the iOS prompt only when 「계속」 is tapped. The prompt
+# itself is then dismissed by `dismiss-system-alerts.yaml` (「허용 안 함」), so a
+# lane run never grants notifications by accident.
+#
+# Conditional on purpose: a simulator that already answered the prompt (or
+# the one-time prompt was consumed by an earlier run) skips M3 entirely, and
+# that is the behaviour under test too. To see M3 again on a simulator:
+#   xcrun simctl privacy <udid> reset notifications app.momo.ios
+# (or uninstall the app).
+- extendedWaitUntil:
+    visible:
+      id: "notify-primer-continue|sidebar-list"
+    timeout: 60000
+- runFlow:
+    when:
+      visible:
+        id: "notify-primer-continue"
+    commands:
+      - tapOn:
+          id: "notify-primer-continue"

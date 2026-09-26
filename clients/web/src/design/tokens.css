@@ -349,6 +349,13 @@
   --spacing-icon-button: 34px;
   --spacing-card: 14px;
 
+  /* 첫 대화 채널의 코메토 띠 (#2818, ADR-0193 D7). 값은 온보딩 2.0 시안 D5
+   * `.kband`에서 그대로 옮겼다: 코메토 52, 띠 버튼 높이 34. 온보딩 머리(72)·
+   * 히어로(280)와 다른 자리라 따로 이름을 준다. 34는 --spacing-icon-button과
+   * 값만 같고 뜻이 다르다(아이콘 원형 버튼이 아니라 글자 버튼의 높이). */
+  --spacing-kometto-band: 52px;
+  --spacing-band-action: 34px;
+
   /* 인박스 리마인더 행의 ⋯ 그릇 (#1888 B-2).
    *
    * 그릇은 tap-target(44, 600px 미만) + p-px×2 + border 1px×2 = 48. 행은
@@ -604,6 +611,30 @@
    * slack so a heavier KR face cannot re-wrap. Not a pane: this is the
    * width of this one sentence, not a column. */
   --spacing-onboarding-copy: 360px;
+
+  /* 온보딩 2.0 공통 틀 (ADR-0193 D11, #2807 OB2-1). 값은 시안
+   * `claudedocs/onboarding-2.0/mockups.html`의 CSS를 그대로 옮겼다.
+   *   guide-head 72   `.guide .k` 코메토 머리. 모든 온보딩 화면 머리의 크기
+   *   guide-hero 280  첫 화면·완료·첫 대화의 히어로(D11 데스크탑 280)
+   *   top 56          `.ob-top` 진행 점 줄의 높이(창 타이틀바 아래)
+   *   col 440         `.col` 질문 한 개의 열 폭(입력 그릇 + 행동)
+   *   control 44      `.input`·`.btn` 높이. 폼 1급 버튼의 폰 44pt와 같다
+   *   dot 6 / dot-bar 26  `.dots i`와 `.dots i.on` 점과 현재 칸 막대 */
+  --spacing-onboarding-guide-head: 72px;
+  --spacing-onboarding-guide-hero: 280px;
+  --spacing-onboarding-top: 56px;
+  --spacing-onboarding-col: 440px;
+  --spacing-onboarding-control: 44px;
+  --spacing-onboarding-dot: 6px;
+  --spacing-onboarding-dot-bar: 26px;
+
+  /* 온보딩 2.0 D2 「우리 팀 이름」의 두 칸 배치 (#2811 OB2-5). 시안 D2 값 그대로:
+   *   wide 720       `.col` 질문 열 + 미리보기를 합친 폭(max-width:720px)
+   *   aside 250      오른쪽 「사이드바 미리보기」 칸(grid 1fr 250px)
+   *   aside-gap 28   두 칸 사이(gap:28px). 리듬 24·32 사이의 시안 값이다 */
+  --spacing-onboarding-wide: 720px;
+  --spacing-onboarding-aside: 250px;
+  --spacing-onboarding-aside-gap: 28px;
 
   /* --- radius: the web platform ladder (ADR-0189 D6) ---------------------
    * 6 · 10 · 14 · 18 · 20 · pill. 이름만 폰과 공유하고 값은 대조하지 않는다
@@ -1712,6 +1743,37 @@
  * 1px 선 고리 · 흰 면. 시안은 타임라인 위에 절대 위치로 얹지만 여기서는 흐름
  * 안에 선다(PR 차이 표: 높이가 트레이·라우팅 줄·줄바꿈으로 바뀌고, 타임라인의
  * 바닥 고정과 「최신으로」가 그 높이를 알아야 한다). 폰 폭에서는 예전 그릇이다. */
+/* 첫 대화 채널의 코메토 띠 (#2818). 좌우는 컴포저 카드와 같은 선에 선다:
+ * 폰 16, 600 이상 24(composer-dock의 form 인셋). 컴포저와의 틈은 시안 D5
+ * `.composer` 위 12다(600 이상은 form 위 8 + 여기 4). */
+@utility kometto-band {
+  margin-inline: var(--spacing-4);
+  margin-block-end: var(--spacing-2);
+
+  @media (width >= 600px) {
+    margin-inline: var(--spacing-6);
+    margin-block-end: var(--spacing-1);
+  }
+}
+
+/* 띠 안에서 열린 기기 연결 카드는 600 이상에서 문장과 같은 선(코메토 52 +
+ * 틈 12)에 선다. 폰 폭에서는 QR 칸을 줄이지 않으려고 들여쓰지 않는다. */
+@utility kometto-band-body {
+  @media (width >= 600px) {
+    padding-inline-start: calc(var(--spacing-kometto-band) + var(--spacing-3));
+  }
+}
+
+/* 폰 폭에서는 띠의 버튼 묶음이 문장 아래 줄로 내려간다. 문장을 두세 줄로
+ * 쪼개지 않기 위해서다. 들여쓰기는 코메토 52 + 틈 12로 문장과 같은 선이다. */
+@utility kometto-band-actions {
+  @media (width < 600px) {
+    flex-basis: 100%;
+    padding-inline-start: calc(var(--spacing-kometto-band) + var(--spacing-3));
+  }
+}
+
+
 @utility composer-dock {
   border-block-start: 1px solid var(--line);
 
@@ -3026,39 +3088,40 @@
   animation-delay: 0.45s;
 }
 
-/* Named consumers only (UX-R2b M7): the S0 cloud and the welcome marks.
+/* Named consumer only (UX-R2b M7): the S0 cloud. The welcome constellation
+   that shared these poses left with #2817 (the kickoff is a Kometto band now).
    A bare [data-onboarding-body] selector is a global leak; the compiled-CSS
    guard in welcomeKickoff.motion.test.ts goes red if one returns. */
-.onboarding-cloud-body[data-onboarding-body="0"], .welcome-kickoff-body[data-onboarding-body="0"] { --onboarding-body-top: 50%; --onboarding-body-left: 96%; --onboarding-body-size: 22px; --onboarding-body-rotate: -24deg; }
-.onboarding-cloud-body[data-onboarding-body="1"], .welcome-kickoff-body[data-onboarding-body="1"] { --onboarding-body-top: 64%; --onboarding-body-left: 91%; --onboarding-body-size: 24px; --onboarding-body-rotate: -7deg; }
-.onboarding-cloud-body[data-onboarding-body="2"], .welcome-kickoff-body[data-onboarding-body="2"] { --onboarding-body-top: 77%; --onboarding-body-left: 86%; --onboarding-body-size: 26px; --onboarding-body-rotate: 10deg; }
-.onboarding-cloud-body[data-onboarding-body="3"], .welcome-kickoff-body[data-onboarding-body="3"] { --onboarding-body-top: 81%; --onboarding-body-left: 88%; --onboarding-body-size: 28px; --onboarding-body-rotate: -22deg; }
-.onboarding-cloud-body[data-onboarding-body="4"], .welcome-kickoff-body[data-onboarding-body="4"] { --onboarding-body-top: 78%; --onboarding-body-left: 10%; --onboarding-body-size: 30px; --onboarding-body-rotate: -5deg; }
-.onboarding-cloud-body[data-onboarding-body="5"], .welcome-kickoff-body[data-onboarding-body="5"] { --onboarding-body-top: 79%; --onboarding-body-left: 90%; --onboarding-body-size: 32px; --onboarding-body-rotate: 12deg; }
-.onboarding-cloud-body[data-onboarding-body="6"], .welcome-kickoff-body[data-onboarding-body="6"] { --onboarding-body-top: 62%; --onboarding-body-left: 5%; --onboarding-body-size: 34px; --onboarding-body-rotate: -20deg; }
-.onboarding-cloud-body[data-onboarding-body="7"], .welcome-kickoff-body[data-onboarding-body="7"] { --onboarding-body-top: 76%; --onboarding-body-left: 93%; --onboarding-body-size: 36px; --onboarding-body-rotate: -3deg; }
-.onboarding-cloud-body[data-onboarding-body="8"], .welcome-kickoff-body[data-onboarding-body="8"] { --onboarding-body-top: 58%; --onboarding-body-left: 6%; --onboarding-body-size: 22px; --onboarding-body-rotate: 14deg; }
-.onboarding-cloud-body[data-onboarding-body="9"], .welcome-kickoff-body[data-onboarding-body="9"] { --onboarding-body-top: 70%; --onboarding-body-left: 16%; --onboarding-body-size: 24px; --onboarding-body-rotate: -18deg; }
-.onboarding-cloud-body[data-onboarding-body="10"], .welcome-kickoff-body[data-onboarding-body="10"] { --onboarding-body-top: 73%; --onboarding-body-left: 8%; --onboarding-body-size: 26px; --onboarding-body-rotate: -1deg; }
-.onboarding-cloud-body[data-onboarding-body="11"], .welcome-kickoff-body[data-onboarding-body="11"] { --onboarding-body-top: 66%; --onboarding-body-left: 12%; --onboarding-body-size: 28px; --onboarding-body-rotate: 16deg; }
-.onboarding-cloud-body[data-onboarding-body="12"], .welcome-kickoff-body[data-onboarding-body="12"] { --onboarding-body-top: 67%; --onboarding-body-left: 11%; --onboarding-body-size: 30px; --onboarding-body-rotate: -16deg; }
-.onboarding-cloud-body[data-onboarding-body="13"], .welcome-kickoff-body[data-onboarding-body="13"] { --onboarding-body-top: 54%; --onboarding-body-left: 4%; --onboarding-body-size: 32px; --onboarding-body-rotate: 1deg; }
-.onboarding-cloud-body[data-onboarding-body="14"], .welcome-kickoff-body[data-onboarding-body="14"] { --onboarding-body-top: 40%; --onboarding-body-left: 4%; --onboarding-body-size: 34px; --onboarding-body-rotate: 18deg; }
-.onboarding-cloud-body[data-onboarding-body="15"], .welcome-kickoff-body[data-onboarding-body="15"] { --onboarding-body-top: 50%; --onboarding-body-left: 4%; --onboarding-body-size: 36px; --onboarding-body-rotate: -14deg; }
-.onboarding-cloud-body[data-onboarding-body="16"], .welcome-kickoff-body[data-onboarding-body="16"] { --onboarding-body-top: 35%; --onboarding-body-left: 4%; --onboarding-body-size: 22px; --onboarding-body-rotate: 3deg; }
-.onboarding-cloud-body[data-onboarding-body="17"], .welcome-kickoff-body[data-onboarding-body="17"] { --onboarding-body-top: 20%; --onboarding-body-left: 10%; --onboarding-body-size: 24px; --onboarding-body-rotate: 20deg; }
-.onboarding-cloud-body[data-onboarding-body="18"], .welcome-kickoff-body[data-onboarding-body="18"] { --onboarding-body-top: 16%; --onboarding-body-left: 26%; --onboarding-body-size: 26px; --onboarding-body-rotate: -12deg; }
-.onboarding-cloud-body[data-onboarding-body="19"], .welcome-kickoff-body[data-onboarding-body="19"] { --onboarding-body-top: 8%; --onboarding-body-left: 37%; --onboarding-body-size: 28px; --onboarding-body-rotate: 5deg; }
-.onboarding-cloud-body[data-onboarding-body="20"], .welcome-kickoff-body[data-onboarding-body="20"] { --onboarding-body-top: 11%; --onboarding-body-left: 27%; --onboarding-body-size: 30px; --onboarding-body-rotate: 22deg; }
-.onboarding-cloud-body[data-onboarding-body="21"], .welcome-kickoff-body[data-onboarding-body="21"] { --onboarding-body-top: 4%; --onboarding-body-left: 41%; --onboarding-body-size: 32px; --onboarding-body-rotate: -10deg; }
-.onboarding-cloud-body[data-onboarding-body="22"], .welcome-kickoff-body[data-onboarding-body="22"] { --onboarding-body-top: 2%; --onboarding-body-left: 56%; --onboarding-body-size: 34px; --onboarding-body-rotate: 7deg; }
-.onboarding-cloud-body[data-onboarding-body="23"], .welcome-kickoff-body[data-onboarding-body="23"] { --onboarding-body-top: 5%; --onboarding-body-left: 71%; --onboarding-body-size: 36px; --onboarding-body-rotate: 24deg; }
-.onboarding-cloud-body[data-onboarding-body="24"], .welcome-kickoff-body[data-onboarding-body="24"] { --onboarding-body-top: 19%; --onboarding-body-left: 79%; --onboarding-body-size: 22px; --onboarding-body-rotate: -8deg; }
-.onboarding-cloud-body[data-onboarding-body="25"], .welcome-kickoff-body[data-onboarding-body="25"] { --onboarding-body-top: 12%; --onboarding-body-left: 72%; --onboarding-body-size: 24px; --onboarding-body-rotate: 9deg; }
-.onboarding-cloud-body[data-onboarding-body="26"], .welcome-kickoff-body[data-onboarding-body="26"] { --onboarding-body-top: 20%; --onboarding-body-left: 84%; --onboarding-body-size: 26px; --onboarding-body-rotate: -23deg; }
-.onboarding-cloud-body[data-onboarding-body="27"], .welcome-kickoff-body[data-onboarding-body="27"] { --onboarding-body-top: 32%; --onboarding-body-left: 96%; --onboarding-body-size: 28px; --onboarding-body-rotate: -6deg; }
-.onboarding-cloud-body[data-onboarding-body="28"], .welcome-kickoff-body[data-onboarding-body="28"] { --onboarding-body-top: 46%; --onboarding-body-left: 96%; --onboarding-body-size: 30px; --onboarding-body-rotate: 11deg; }
-.onboarding-cloud-body[data-onboarding-body="29"], .welcome-kickoff-body[data-onboarding-body="29"] { --onboarding-body-top: 61%; --onboarding-body-left: 96%; --onboarding-body-size: 32px; --onboarding-body-rotate: -21deg; }
+.onboarding-cloud-body[data-onboarding-body="0"] { --onboarding-body-top: 50%; --onboarding-body-left: 96%; --onboarding-body-size: 22px; --onboarding-body-rotate: -24deg; }
+.onboarding-cloud-body[data-onboarding-body="1"] { --onboarding-body-top: 64%; --onboarding-body-left: 91%; --onboarding-body-size: 24px; --onboarding-body-rotate: -7deg; }
+.onboarding-cloud-body[data-onboarding-body="2"] { --onboarding-body-top: 77%; --onboarding-body-left: 86%; --onboarding-body-size: 26px; --onboarding-body-rotate: 10deg; }
+.onboarding-cloud-body[data-onboarding-body="3"] { --onboarding-body-top: 81%; --onboarding-body-left: 88%; --onboarding-body-size: 28px; --onboarding-body-rotate: -22deg; }
+.onboarding-cloud-body[data-onboarding-body="4"] { --onboarding-body-top: 78%; --onboarding-body-left: 10%; --onboarding-body-size: 30px; --onboarding-body-rotate: -5deg; }
+.onboarding-cloud-body[data-onboarding-body="5"] { --onboarding-body-top: 79%; --onboarding-body-left: 90%; --onboarding-body-size: 32px; --onboarding-body-rotate: 12deg; }
+.onboarding-cloud-body[data-onboarding-body="6"] { --onboarding-body-top: 62%; --onboarding-body-left: 5%; --onboarding-body-size: 34px; --onboarding-body-rotate: -20deg; }
+.onboarding-cloud-body[data-onboarding-body="7"] { --onboarding-body-top: 76%; --onboarding-body-left: 93%; --onboarding-body-size: 36px; --onboarding-body-rotate: -3deg; }
+.onboarding-cloud-body[data-onboarding-body="8"] { --onboarding-body-top: 58%; --onboarding-body-left: 6%; --onboarding-body-size: 22px; --onboarding-body-rotate: 14deg; }
+.onboarding-cloud-body[data-onboarding-body="9"] { --onboarding-body-top: 70%; --onboarding-body-left: 16%; --onboarding-body-size: 24px; --onboarding-body-rotate: -18deg; }
+.onboarding-cloud-body[data-onboarding-body="10"] { --onboarding-body-top: 73%; --onboarding-body-left: 8%; --onboarding-body-size: 26px; --onboarding-body-rotate: -1deg; }
+.onboarding-cloud-body[data-onboarding-body="11"] { --onboarding-body-top: 66%; --onboarding-body-left: 12%; --onboarding-body-size: 28px; --onboarding-body-rotate: 16deg; }
+.onboarding-cloud-body[data-onboarding-body="12"] { --onboarding-body-top: 67%; --onboarding-body-left: 11%; --onboarding-body-size: 30px; --onboarding-body-rotate: -16deg; }
+.onboarding-cloud-body[data-onboarding-body="13"] { --onboarding-body-top: 54%; --onboarding-body-left: 4%; --onboarding-body-size: 32px; --onboarding-body-rotate: 1deg; }
+.onboarding-cloud-body[data-onboarding-body="14"] { --onboarding-body-top: 40%; --onboarding-body-left: 4%; --onboarding-body-size: 34px; --onboarding-body-rotate: 18deg; }
+.onboarding-cloud-body[data-onboarding-body="15"] { --onboarding-body-top: 50%; --onboarding-body-left: 4%; --onboarding-body-size: 36px; --onboarding-body-rotate: -14deg; }
+.onboarding-cloud-body[data-onboarding-body="16"] { --onboarding-body-top: 35%; --onboarding-body-left: 4%; --onboarding-body-size: 22px; --onboarding-body-rotate: 3deg; }
+.onboarding-cloud-body[data-onboarding-body="17"] { --onboarding-body-top: 20%; --onboarding-body-left: 10%; --onboarding-body-size: 24px; --onboarding-body-rotate: 20deg; }
+.onboarding-cloud-body[data-onboarding-body="18"] { --onboarding-body-top: 16%; --onboarding-body-left: 26%; --onboarding-body-size: 26px; --onboarding-body-rotate: -12deg; }
+.onboarding-cloud-body[data-onboarding-body="19"] { --onboarding-body-top: 8%; --onboarding-body-left: 37%; --onboarding-body-size: 28px; --onboarding-body-rotate: 5deg; }
+.onboarding-cloud-body[data-onboarding-body="20"] { --onboarding-body-top: 11%; --onboarding-body-left: 27%; --onboarding-body-size: 30px; --onboarding-body-rotate: 22deg; }
+.onboarding-cloud-body[data-onboarding-body="21"] { --onboarding-body-top: 4%; --onboarding-body-left: 41%; --onboarding-body-size: 32px; --onboarding-body-rotate: -10deg; }
+.onboarding-cloud-body[data-onboarding-body="22"] { --onboarding-body-top: 2%; --onboarding-body-left: 56%; --onboarding-body-size: 34px; --onboarding-body-rotate: 7deg; }
+.onboarding-cloud-body[data-onboarding-body="23"] { --onboarding-body-top: 5%; --onboarding-body-left: 71%; --onboarding-body-size: 36px; --onboarding-body-rotate: 24deg; }
+.onboarding-cloud-body[data-onboarding-body="24"] { --onboarding-body-top: 19%; --onboarding-body-left: 79%; --onboarding-body-size: 22px; --onboarding-body-rotate: -8deg; }
+.onboarding-cloud-body[data-onboarding-body="25"] { --onboarding-body-top: 12%; --onboarding-body-left: 72%; --onboarding-body-size: 24px; --onboarding-body-rotate: 9deg; }
+.onboarding-cloud-body[data-onboarding-body="26"] { --onboarding-body-top: 20%; --onboarding-body-left: 84%; --onboarding-body-size: 26px; --onboarding-body-rotate: -23deg; }
+.onboarding-cloud-body[data-onboarding-body="27"] { --onboarding-body-top: 32%; --onboarding-body-left: 96%; --onboarding-body-size: 28px; --onboarding-body-rotate: -6deg; }
+.onboarding-cloud-body[data-onboarding-body="28"] { --onboarding-body-top: 46%; --onboarding-body-left: 96%; --onboarding-body-size: 30px; --onboarding-body-rotate: 11deg; }
+.onboarding-cloud-body[data-onboarding-body="29"] { --onboarding-body-top: 61%; --onboarding-body-left: 96%; --onboarding-body-size: 32px; --onboarding-body-rotate: -21deg; }
 
 .onboarding-transition-line[data-onboarding-effect="fade"]
   > .onboarding-transition-content {
@@ -3174,6 +3237,33 @@
   }
 }
 
+/* 킥오프 띠(#2817)의 접힘. 바깥 격자 한 칸이 1fr → 0fr로 줄고 안쪽 칸은
+ * `min-height: 0`으로 따라 줄어든다(높이를 재지 않는다). 컴포저와의 틈도 함께
+ * 닫힌다. 시간과 곡선은 ADR-0193 D11 line-slide(650ms, 0.22/1/0.36/1)이고
+ * onboarding-transition-line과 같은 값이다. reduced-motion이면 이 클래스를
+ * 붙이지 않는다(표정만 바뀌고 띠는 바로 빠진다). */
+@utility welcome-band {
+  display: grid;
+  grid-template-rows: 1fr;
+}
+
+@utility welcome-band-clip {
+  min-block-size: 0;
+  overflow: hidden;
+}
+
+@keyframes motion-welcome-band-collapse {
+  to {
+    grid-template-rows: 0fr;
+    opacity: 0;
+    margin-block-end: 0;
+  }
+}
+
+@utility welcome-kickoff-exit {
+  animation: motion-welcome-band-collapse 650ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 @keyframes onboarding-mask-reveal-up {
   from {
     filter: blur(8px);
@@ -3237,6 +3327,825 @@
   .onboarding-mark img {
     transform: none;
   }
+}
+
+/* =============================================================================
+ * 온보딩 2.0 공통 틀 (ADR-0193 D10·D11, #2807 OB2-1).
+ *
+ * 값은 시안 `claudedocs/onboarding-2.0/mockups.html`(owner 공유본
+ * https://claude.ai/artifact/6FQJ6LbTEXNN1j4uYE5nGz)의 CSS를 그대로 옮겼다.
+ *   바닥    `.canvas`   180°, 가운데 정지점 42% (셸의 `canvas-gradient`는 160°)
+ *   별      `.stars`    다크에서만. 라이트에서는 투명이다
+ *   열      `.ob-top` 56 · `.ob-body` 0 24 40 · `.col` 440, 간격 16
+ *   안내자  `.guide`    72 머리 + 말풍선, 아래 정렬, 간격 12
+ *   말풍선  `.bubble`   --surface, 18 18 18 6, 12 16, rest 그림자
+ *   점      `.dots`     6 점, 현재 26 막대 신호색, 지난 칸 잉크 흐림, 간격 6.
+ *                       남은 칸만 --line-strong(시안 --mutedSoft는 3:1 미달)
+ *   그릇    `.input`    44, 반경 10, --surface, --line-strong 테두리
+ *   행동    `.btn`      44, 반경 10. 주 = 잉크 채움, 보조 = --line-strong 테두리
+ *
+ * 모션(D11): 표정 바꿈은 제자리 크로스페이드 --motion-instant(120),
+ * 기쁨 진입 때 꼬리 흔들기 한 번 = instant × 3(360). 사다리 밖 숫자를 손으로
+ * 적지 않는다(ADR-0179 D10). reduced-motion이면 둘 다 없다.
+ * ========================================================================== */
+
+@utility onboarding-canvas {
+  background-color: var(--canvas-mid);
+  background-image: linear-gradient(
+    180deg,
+    var(--canvas-top) 0%,
+    var(--canvas-mid) 42%,
+    var(--canvas-bottom) 100%
+  );
+
+  @media (prefers-contrast: more) {
+    background-image: none;
+  }
+}
+
+/* 시안 `.stars`: 다크 바닥의 옅은 별 일곱. 라이트에서는 색이 투명이라 안 보인다.
+ * 점 위치는 시안 그대로다. 장식이고 움직이지 않는다. */
+.onboarding-canvas-stars {
+  --onboarding-star-a: light-dark(transparent, rgba(255,255,255,.55));
+  --onboarding-star-b: light-dark(transparent, rgba(255,255,255,.45));
+  --onboarding-star-c: light-dark(transparent, rgba(255,220,190,.6));
+  --onboarding-star-d: light-dark(transparent, rgba(255,255,255,.35));
+  --onboarding-star-e: light-dark(transparent, rgba(255,255,255,.4));
+  --onboarding-star-f: light-dark(transparent, rgba(255,255,255,.3));
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1px 1px at 12% 18%, var(--onboarding-star-a) 50%, transparent 51%),
+    radial-gradient(1px 1px at 72% 12%, var(--onboarding-star-b) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 86% 34%, var(--onboarding-star-c) 50%, transparent 51%),
+    radial-gradient(1px 1px at 28% 44%, var(--onboarding-star-d) 50%, transparent 51%),
+    radial-gradient(1px 1px at 55% 26%, var(--onboarding-star-e) 50%, transparent 51%),
+    radial-gradient(1px 1px at 8% 70%, var(--onboarding-star-f) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 92% 76%, var(--onboarding-star-d) 50%, transparent 51%);
+
+  @media (prefers-contrast: more) {
+    display: none;
+  }
+}
+
+/* 틀 위의 스텝 크롬: 바닥이 비치는 56 줄, 선 없음. 뒤로 · 점(가운데) · 끝 칸.
+ * 트래픽라이트 인셋·드래그 계약은 `onboarding-step-chrome` 유틸 그대로다. */
+.onboarding-frame > .onboarding-step-chrome {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  min-block-size: var(--spacing-onboarding-top);
+  border-block-end: 0;
+  background-color: transparent;
+}
+
+.onboarding-frame > .onboarding-step-chrome > :first-child {
+  justify-self: start;
+}
+
+.onboarding-frame > .onboarding-step-chrome > :last-child {
+  justify-self: end;
+}
+
+.onboarding-frame-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--spacing-6) 40px;
+}
+
+.onboarding-frame-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
+  inline-size: 100%;
+  max-inline-size: var(--spacing-onboarding-col);
+}
+
+/* --- KomettoGuide ------------------------------------------------------ */
+
+.kometto-guide {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--spacing-3);
+}
+
+/* 히어로는 코메토가 위, 말풍선이 아래(시안 폰 M0). 꼬리 없는 둥근 풍선이다. */
+.kometto-guide[data-size="hero"] {
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.kometto-face {
+  position: relative;
+  flex: none;
+  inline-size: var(--spacing-onboarding-guide-head);
+  block-size: var(--spacing-onboarding-guide-head);
+}
+
+.kometto-face[data-size="hero"] {
+  inline-size: var(--spacing-onboarding-guide-hero);
+  block-size: var(--spacing-onboarding-guide-hero);
+}
+
+/* 첫 대화 채널 띠(#2817 킥오프 · #2818 폰 연결)의 코메토. 시안 D5 `.kband img` 52. */
+.kometto-face[data-size="band"] {
+  inline-size: var(--spacing-kometto-band);
+  block-size: var(--spacing-kometto-band);
+}
+
+/* 폰 카드 접힌 줄(#2818). 32px 미만은 쓰지 않는다(docs/brand/mark 「작은 크기」). */
+.kometto-face[data-size="band-small"] {
+  inline-size: var(--spacing-8);
+  block-size: var(--spacing-8);
+}
+
+/* 두 겹(떠나는 표정·오는 표정)이 같은 상자에 겹친다. 머리가 움직이지 않는다. */
+.kometto-face-layer {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: contain;
+}
+
+.kometto-face-layer[data-phase="entering"] {
+  animation: onboarding-fade-in var(--motion-instant) linear backwards;
+}
+
+.kometto-face-layer[data-phase="leaving"] {
+  animation: motion-fade-out var(--motion-instant) linear both;
+}
+
+/* 꼬리 흔들기. 표정 에셋이 한 장짜리 래스터라 꼬리만 떼어 돌릴 수 없어서, 꼬리가
+ * 있는 아래쪽을 축으로 몸 전체를 작게 흔든다(PR 「시안과의 차이」). */
+.kometto-face[data-wag="true"] {
+  transform-origin: 50% 85%;
+  animation: kometto-wag calc(var(--motion-instant) * 3) var(--motion-ease-standard) 1;
+}
+
+.kometto-guide-bubble {
+  position: relative;
+  min-inline-size: 0;
+  padding: var(--spacing-3) var(--spacing-4);
+  border-radius: var(--radius-xl) var(--radius-xl) var(--radius-xl) var(--spacing-onboarding-dot);
+  background-color: var(--surface);
+  box-shadow: var(--elevation-rest);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
+.kometto-guide[data-size="hero"] .kometto-guide-bubble {
+  border-radius: var(--radius-xl);
+}
+
+@keyframes kometto-wag {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-6deg);
+  }
+  60% {
+    transform: rotate(5deg);
+  }
+}
+
+/* --- 진행 점 ------------------------------------------------------------- */
+
+.onboarding-dots {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-onboarding-dot);
+}
+
+/* 남은 칸은 시안의 --muted-soft(바닥 위 약 1.1:1)가 아니라 --line-strong이다.
+ * 점 세 상태 모두 바닥 세 정지점 위에서 비텍스트 3:1을 넘는다(WCAG 1.4.11,
+ * core ONBOARDING_DOT_ROLES + guide.test.ts, #2807 planner 판정). */
+.onboarding-dot {
+  display: block;
+  inline-size: var(--spacing-onboarding-dot);
+  block-size: var(--spacing-onboarding-dot);
+  border-radius: calc(var(--spacing-onboarding-dot) / 2);
+  background-color: var(--line-strong);
+}
+
+.onboarding-dot[data-state="done"] {
+  background-color: var(--ink-muted);
+}
+
+.onboarding-dot[data-state="current"] {
+  inline-size: var(--spacing-onboarding-dot-bar);
+  background-color: var(--signal);
+}
+
+/* --- 입력 그릇과 행동 (틀의 문법) --------------------------------------- */
+
+.onboarding-field {
+  min-block-size: var(--spacing-onboarding-control);
+  border-radius: var(--radius-md);
+  background-color: var(--surface);
+  font-size: var(--text-title);
+}
+
+.onboarding-action {
+  min-block-size: var(--spacing-onboarding-control);
+  border-radius: var(--radius-md);
+}
+
+.onboarding-action[data-variant="secondary"] {
+  border: 1px solid var(--line-strong);
+  background-color: transparent;
+}
+
+/* --- D4 AI 연결 (#2814 OB2-8, 시안 D4 `.opt`·`.pill`·`.note`·`.term`) ------
+ * 값은 시안 CSS 그대로다. 사다리 밖 값만 사다리로 옮겼다(PR 「시안과의 차이」):
+ *   col 600 · gap 12   `.col` max-width:600 · gap:12 (틀의 440보다 넓다)
+ *   opt 14 16 · r14    `.opt` padding · radius → --radius-lg(14)
+ *   mark 40 · r11      `.opt .lg` → 반경 --radius-md(10)
+ *   radio 18 · dot 9   `.radio`
+ *   pill 5 8 · 11/600  `.pill` → 글자 --text-timestamp(11)
+ *   note 12 14 · r12   `.note` → 반경 --radius-md(10)
+ *   term 8 10 · r8     `.term` → 반경 --radius-sm(6)
+ * 머리 줄 아래 본문은 위에서 시작한다(시안 `justify-content:flex-start;padding-top:18px`). */
+.onboarding-frame-body:has(.ai-connect-col) {
+  justify-content: flex-start;
+  padding-block-start: 18px;
+}
+
+.ai-connect-col {
+  max-inline-size: 600px;
+  gap: var(--spacing-3);
+}
+
+.ai-connect-opt {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background-color: var(--surface);
+  box-shadow: var(--elevation-rest);
+}
+
+.ai-connect-opt[data-selected="true"] {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink), var(--elevation-rest);
+}
+
+.ai-connect-opt[data-selectable="true"]:not([data-selected="true"]):hover {
+  background-color: var(--surface-hover);
+}
+
+.ai-connect-opt-label {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 14px;
+  min-inline-size: 0;
+  cursor: pointer;
+}
+
+.ai-connect-opt[data-selectable="false"] .ai-connect-opt-label {
+  cursor: default;
+}
+
+/* 시안 `.radio`: 18 원, 1.5 테두리 --line-strong, 켜지면 잉크 테두리 + 9 점. */
+.ai-connect-radio {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  flex: none;
+  inline-size: 18px;
+  block-size: 18px;
+  margin: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-strong);
+  background-color: transparent;
+}
+
+.ai-connect-radio:checked {
+  border-color: var(--ink);
+}
+
+.ai-connect-radio:checked::after {
+  content: "";
+  inline-size: 9px;
+  block-size: 9px;
+  border-radius: 50%;
+  background-color: var(--ink);
+}
+
+.ai-connect-radio:disabled {
+  opacity: 0.5;
+}
+
+.ai-connect-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  inline-size: 40px;
+  block-size: 40px;
+  border-radius: var(--radius-md);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+/* 시안의 글자 타일 색. Claude는 시안 #F3E6DC/#9A4A1E, Codex는 #E2E6EC/#2B3440,
+ * 그록봇은 #E6E6E6/#222. 다크 값은 같은 색상을 바닥 쪽으로 내린 것이다
+ * (시안 다크에 D4 프레임이 없다). 글자 대비는 두 스킴 모두 4.5:1 이상. */
+.ai-connect-mark[data-mark="claude"] {
+  background-color: light-dark(#f3e6dc, #3a2a21);
+  color: light-dark(#9a4a1e, #eaa47a);
+}
+
+.ai-connect-mark[data-mark="codex"] {
+  background-color: light-dark(#e2e6ec, #262c36);
+  color: light-dark(#2b3440, #c9d2de);
+}
+
+.ai-connect-mark[data-mark="api-key"] {
+  background-color: var(--agent-soft);
+  color: var(--agent);
+}
+
+.ai-connect-mark[data-mark="grok"] {
+  background-color: light-dark(#e6e6e6, #2a2a2c);
+  color: light-dark(#222222, #e4e4e6);
+}
+
+.ai-connect-title {
+  display: block;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+  word-break: keep-all;
+}
+
+.ai-connect-detail {
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 1.45;
+  word-break: keep-all;
+}
+
+.ai-connect-pill {
+  flex: none;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 999px;
+  font-size: var(--text-timestamp);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.ai-connect-pill[data-tone="ok"] {
+  background-color: var(--ok-soft);
+  color: var(--ok);
+}
+
+.ai-connect-pill[data-tone="warn"] {
+  background-color: var(--warn-soft);
+  color: var(--warn);
+}
+
+.ai-connect-pill[data-tone="mute"] {
+  background-color: var(--muted-soft);
+  color: var(--ink-muted);
+}
+
+.ai-connect-pill[data-tone="sig"] {
+  background-color: var(--signal-soft);
+  color: var(--signal-text);
+}
+
+/* 알약이 행동일 때(설치 필요·다시 확인): 톤은 mute 그대로(오렌지는 진행 점과
+ * 포커스만, D11), 눌리는 것은 테두리와 밑줄로 보인다. 포인터 최소 24를 받고
+ * 600 미만에서는 tap-target까지 자란다(design-review H2·M1·M2). */
+.ai-connect-pill-action {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 24px;
+  border: 1px solid var(--line-strong);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+
+  &:hover {
+    background-color: var(--surface-hover);
+  }
+
+  @media (width < 600px) {
+    min-block-size: var(--tap-target);
+    padding-inline: var(--spacing-3);
+  }
+}
+
+.ai-connect-note {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background-color: var(--agent-soft);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: keep-all;
+}
+
+.ai-connect-note-icon {
+  flex: none;
+  inline-size: 16px;
+  block-size: 16px;
+  margin-block-start: 1px;
+  color: var(--agent);
+}
+
+/* 시안 `.term`: 모노 12.5, --surface2 바탕, 안쪽 8 10. */
+.ai-connect-term,
+.ai-connect-command {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  min-inline-size: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background-color: var(--surface-muted);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.ai-connect-term-action,
+.ai-connect-command-actions > button {
+  flex: none;
+  font-family: var(--font-sans);
+
+  /* 폰(600 미만)에서는 손가락 44를 받는다. 데스크탑은 시안 28 그대로. */
+  @media (width < 600px) {
+    min-block-size: var(--tap-target);
+  }
+}
+
+/* 시안 `.btn.sec`: 테두리 --line-strong, 바탕 투명. 명령 줄 바탕(--surface-muted)과
+ * 같은 outline 채움은 보이지 않아서 테두리로 선다. */
+.ai-connect-secondary {
+  border: 1px solid var(--line-strong);
+  background-color: transparent;
+
+  &:hover {
+    background-color: var(--surface-hover);
+  }
+}
+
+.ai-connect-term {
+  @media (width < 600px) {
+    flex-wrap: wrap;
+  }
+}
+
+/* 연결 명령은 길다(주소 + 연결 값). 한 줄로 자르지 않고 접어서 전부 보인다:
+ * 사람이 복사 전에 무엇을 붙여 넣는지 읽을 수 있어야 한다. */
+.ai-connect-command {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.ai-connect-command-text {
+  flex: 1 1 16rem;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.ai-connect-command-actions {
+  display: flex;
+  flex: none;
+  gap: var(--spacing-1);
+  margin-inline-start: auto;
+  font-family: var(--font-sans);
+}
+
+/* 주 행동(잉크 채움, flex 1) + 건너뛰기(ghost). 시안 `display:flex;gap:10px`. */
+.ai-connect-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  @media (width < 600px) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.ai-connect-skip {
+  min-block-size: 36px;
+  color: var(--ink-muted);
+  font-weight: 500;
+
+  @media (width < 600px) {
+    min-block-size: var(--tap-target);
+  }
+}
+
+.ai-connect-joined {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  min-inline-size: 0;
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background-color: var(--surface);
+  box-shadow: var(--elevation-rest);
+}
+
+/* --- claim 뒤 S1·S2 (#2811 OB2-5, 시안 D2·brief D3) ---------------------- */
+
+/* 시안 D2: 질문 열(1fr) + 미리보기(250), 간격 28, 가운데 정렬. 768 미만에서는
+ * 미리보기가 물러나고 질문 열이 440으로 돌아간다(시안 폰 화면에는 미리보기가 없다). */
+.onboarding-wide {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--spacing-onboarding-aside);
+  gap: var(--spacing-onboarding-aside-gap);
+  align-items: center;
+  inline-size: 100%;
+  max-inline-size: var(--spacing-onboarding-wide);
+
+  @media (width < 768px) {
+    grid-template-columns: minmax(0, 1fr);
+    max-inline-size: var(--spacing-onboarding-col);
+  }
+}
+
+/* 시안 D2 표시 이름 · 핸들 두 칸(1fr 1fr, 간격 12). 좁은 폭에서는 한 칸씩. */
+.onboarding-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-3);
+  align-items: start;
+
+  @media (width < 600px) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 시안 D2 오른쪽 유리 칸: 반경 16, 안쪽 14, --sh1. 유리 자체는 `glass` 유틸. */
+.onboarding-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  padding: 14px;
+  border-radius: 16px;
+  box-shadow: var(--elevation-rest);
+
+  @media (width < 768px) {
+    display: none;
+  }
+}
+
+/* 워크스페이스 타일(시안 30, 반경 9, 잉크 채움)과 사람 아바타(28 원). 사람 색은
+ * 시안의 손 그라데이션 대신 `Avatar`의 사람 표기(--surface-hover)다. */
+.onboarding-preview-ws,
+.onboarding-preview-me {
+  display: grid;
+  flex: none;
+  place-items: center;
+  font-size: var(--text-meta);
+  font-weight: 700;
+}
+
+.onboarding-preview-ws {
+  inline-size: 30px;
+  block-size: 30px;
+  border-radius: 9px;
+  background-color: var(--primary);
+  color: var(--on-primary);
+  font-size: var(--text-body);
+}
+
+/* 빈 입력이면 타일은 채움 없이 점선 자리만(검은 빈 사각이 깨진 아바타로 읽힌다). */
+.onboarding-preview-ws[data-empty],
+.onboarding-preview-me[data-empty] {
+  border: 1px dashed var(--line-strong);
+  background-color: transparent;
+}
+
+.onboarding-preview-me {
+  inline-size: 28px;
+  block-size: 28px;
+  border-radius: 50%;
+  background-color: var(--surface-hover);
+  color: var(--ink);
+}
+
+/* 시안 `.reentry`: 가운데 작은 글씨. 건너뛰기 행동이 이 줄 맨 앞에 붙는다. */
+.onboarding-reentry {
+  color: var(--ink-muted);
+  font-size: var(--text-meta);
+  line-height: var(--text-meta--line-height);
+  text-align: center;
+  word-break: keep-all;
+}
+
+/* 시안 `.btn.ghost`를 문장 안에 인라인으로(display:inline-flex;height:auto;padding:0).
+ * 시안처럼 둘레 문장(12.5)보다 한 단 크다(15/500 → 사다리 text-body 14/500). 행동이
+ * 캡션에 묻히지 않게 하는 크기 대비다(design-review High, #2811).
+ * 폰(600 미만)에서는 손가락 44를 받는 제 줄로 올라서고 가운뎃점은 숨는다. */
+.onboarding-skip {
+  display: inline-flex;
+  block-size: auto;
+  min-block-size: 0;
+  min-inline-size: 0;
+  padding: 0;
+  color: var(--ink-muted);
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  font-weight: 500;
+  vertical-align: baseline;
+
+  &:hover {
+    background-color: transparent;
+    color: var(--ink);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  @media (width < 600px) {
+    display: flex;
+    min-block-size: var(--tap-target);
+    min-inline-size: var(--tap-target);
+    margin-inline: auto;
+    padding-inline: var(--spacing-3);
+  }
+}
+
+.onboarding-reentry-sep {
+  @media (width < 600px) {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kometto-face,
+  .kometto-face-layer {
+    animation: none;
+    transform: none;
+  }
+
+  .kometto-face-layer[data-phase="leaving"] {
+    display: none;
+  }
+}
+
+/* =============================================================================
+ * 로그인 전 온보딩 2.0 화면 (ADR-0193 D7·D11, #2808 D0 · #2809 D1 · #2810 D1′).
+ *
+ * 값은 시안 `claudedocs/onboarding-2.0/mockups.html`의 CSS를 옮겼다.
+ *   D0     `.d0`       1fr 440 두 칸, 간격 64, 최대 1000. 좁으면 한 칸으로 쌓는다
+ *   히어로 `.hero-k`   280(D11 데스크탑). 좁은 창은 200(D11 폰 크기)
+ *   워드   `.wordmark` 40 / 800 / -0.045em
+ *   칸     `.field`    라벨 13/600 잉크 흐림, 간격 6
+ *   칩     `.chip`     28 알약, surface-muted, 간격 6
+ *   줄     `.svr`      glass, 12 10 12 12 → 반경은 사다리의 lg 14, 초록 점 8
+ *   구분   `.divider`  선 1 · 글 12.5 → text-meta
+ * 글자 크기는 닫힌 사다리를 쓴다(시안 13·12.5 → text-meta 12, PR 「시안과의 차이」).
+ * ========================================================================== */
+
+.onboarding-welcome {
+  display: grid;
+  grid-template-columns: 1fr var(--spacing-onboarding-col);
+  gap: 64px;
+  align-items: center;
+  inline-size: 100%;
+  max-inline-size: 1000px;
+  padding-block-end: var(--spacing-4);
+}
+
+.onboarding-welcome-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-3);
+  text-align: center;
+}
+
+.onboarding-welcome-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-inline-size: 0;
+}
+
+.onboarding-welcome-wordmark {
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  line-height: 1;
+  color: var(--ink);
+}
+
+@media (max-width: 899px) {
+  .onboarding-welcome {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--spacing-6);
+    max-inline-size: var(--spacing-onboarding-col);
+  }
+
+  .onboarding-welcome .kometto-face[data-size="hero"] {
+    inline-size: 200px;
+    block-size: 200px;
+  }
+}
+
+.onboarding-field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.onboarding-field-label {
+  font-size: var(--text-meta);
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.onboarding-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  min-block-size: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background-color: var(--surface-muted);
+  color: var(--ink-muted);
+  font-size: var(--text-meta);
+}
+
+.onboarding-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink-muted);
+  font-size: var(--text-meta);
+}
+
+.onboarding-divider::before,
+.onboarding-divider::after {
+  content: "";
+  flex: 1;
+  block-size: 1px;
+  background-color: var(--line);
+}
+
+/* 유리는 `glass` 유틸이 진다(web taste §2). 여기는 줄의 기하만. */
+.onboarding-server-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  padding: 10px var(--spacing-3);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elevation-rest);
+}
+
+.onboarding-server-dot {
+  flex: none;
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background-color: var(--ok);
+}
+
+/* 줄 안의 [여기로]: 시안 `.btn.sec` 34 높이, 테두리. 온보딩 틀의 보조 행동 문법이다.
+ * 레이어 밖 규칙이 유틸의 hover를 이기므로 hover도 여기서 준다. */
+.onboarding-action-sm {
+  flex: none;
+  min-block-size: 34px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-strong);
+  background-color: transparent;
+}
+
+.onboarding-action-sm:hover {
+  background-color: var(--surface-hover);
+}
+
+/* 가입 뒤(이름 저장 실패) 잠긴 이메일·비밀번호 칸은 잠긴 것으로 보인다. */
+.onboarding-field:read-only {
+  background-color: var(--surface-muted);
+  color: var(--ink-muted);
 }
 
 @layer base {

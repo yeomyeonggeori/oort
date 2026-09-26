@@ -1,22 +1,29 @@
 #!/usr/bin/env node
 // =============================================================================
-// oort 앱 아이콘·S0 히어로·파비콘의 래스터를 떠내고 검사한다 (#2650, #2732).
+// oort 앱 아이콘·S0 히어로·파비콘의 래스터를 떠내고 검사한다 (#2650, #2732, #2752).
 //
 //   npm run icons:brand           -> brand-mark.mjs로 C2-04 SVG를 다시 쓴 뒤 이 파일
 //   node scripts/render-brand-icons.mjs --check-only
 //                                 -> 다시 뜨지 않고 커밋된 래스터만 검사
+//   node scripts/render-brand-icons.mjs --faces-only [--check-only]
+//                                 -> 코메토 표정 6종(#2806, kometto-faces.mjs)만 합성·검사
 //
-// 앱 아이콘과 온보딩 S0 히어로는 owner가 고른 **코메토 K6 플랫 레퍼런스 래스터를
-// 그대로** 크롭·리사이즈한다(#2732 R2, owner 2026-09-26: 「레퍼런스 선택한걸 왜
-// 그대로 안쓰고 굳이 다른 형태로 만들어 ?」). 다시 그리거나 비례를 바꾸지 않는다.
-// 원본은 docs/brand/kometto/K6-flat-dark.png(1254×1254, 불투명)이고, 해시를 아래에
-// 고정한다. 떠내는 것:
+// 앱 아이콘과 온보딩 S0 히어로는 owner가 고른 **코메토 레퍼런스 래스터를 그대로**
+// 크롭·리사이즈한다(#2732 R2, owner 2026-09-26: 「레퍼런스 선택한걸 왜 그대로 안쓰고
+// 굳이 다른 형태로 만들어 ?」). 다시 그리거나 비례를 바꾸지 않는다. 원본은 두 장이고,
+// 해시를 아래에 고정한다.
 //
-//   폰    clients/mobile/ios/.../AppIcon-1024.png   원본을 1024로(바탕이 끝까지, RGB)
+//   앱 아이콘  docs/brand/kometto/I4-closeup-ink.png(1254×1254, 불투명, full-bleed)
+//              #2752, owner 2026-09-26: 「원형 부분을 없애고 정방형 앱 아이콘 틀을 온전히」
+//   S0 히어로  docs/brand/kometto/K6-flat-dark.png(1254×1254, 남색 배지 원) — #2732 그대로
+//
+// 떠내는 것:
+//
+//   폰    clients/mobile/ios/.../AppIcon-1024.png   I4 전체를 1024로(바탕이 끝까지, RGB)
 //   웹    public/apple-touch-icon.png  180 / public/icon-192.png / public/icon-512.png
-//         public/icon-maskable-512.png 원본을 줄여 배지 원이 안전 원 안에 들게, 둘레는 원본 바탕색
-//         src/assets/brand/kometto-badge.png  S0 히어로. 배지 원만 오려 낸 576 RGBA
-//   데스크탑 clients/desktop/src-tauri/app-icon.png  1024 RGBA, 824 그리드 둥근 판 안에 원본
+//         public/icon-maskable-512.png I4 전체를 512로(icon-512와 같다). 얼굴 창·눈이 안전 원 안
+//         src/assets/brand/kometto-badge.png  S0 히어로. K6의 배지 원만 오려 낸 576 RGBA
+//   데스크탑 clients/desktop/src-tauri/app-icon.png  1024 RGBA, 824 그리드 둥근 판 안에 I4 전체
 //         → `cargo tauri icon app-icon.png`가 icons/*(icns·ico 포함)를 만든다
 //         → icns의 32px 이하 세 칸을 C2-04 small 타일(favicon.svg)로 바꿔 끼운다(iconutil)
 //   탭    public/favicon-32.png  C2-04 small 타일(favicon.svg)
@@ -25,14 +32,17 @@
 // 꼬리가 읽히지 않는다(docs/brand/mark/README.md). 그 자리는 C2-04 small 타일이다.
 //
 // 검사(하나라도 어기면 exit 1):
-//   - 원본: 커밋된 레퍼런스의 sha256이 고정값과 같다
+//   - 원본: 커밋된 레퍼런스 두 장의 sha256이 고정값과 같다
 //   - 파생: 캐릭터 래스터마다, 원본을 같은 크기·같은 자리로 따로 줄여 그린 것과
 //     픽셀을 비교한다. 평균 차(0–255)와 16 넘게 다른 픽셀의 비율이 임계 안이다
 //   - 크기·알파·sRGB: IHDR 크기, iOS·웹 전면판은 RGB(알파 없음), macOS·S0는 RGBA
 //   - macOS 판: 모서리 밖 투명, 판 안 불투명. S0 배지: 원 밖 투명, 가운데 불투명
-//   - maskable: 바탕과 다른 가장 먼 픽셀이 지름 80% 안전 원 안
+//   - maskable: I4의 얼굴 창(림 안 잉크)과 두 눈이 지름 80% 안전 원 안(원본 픽셀에서 잰다)
 //   - icns 32px 이하 세 칸이 C2-04 small 타일이다
+//   - Dock 산출물(icns 64px 이상 칸, icons/64·128·256·512 PNG)이 app-icon.png에서 나왔다
 //   - C2-04: 단색판·파비콘 대비 3:1, small·파비콘 16/24/32px 틈(#2650)
+//   - 코메토 표정 6종(#2806): 생성 크롭 sha256, 얼굴 창 밖 = K6 원본, 표정끼리 구분,
+//     투명 컷 에셋(웹 576·폰 600)이 합성에서 파생(kometto-faces.mjs 머리말)
 // =============================================================================
 
 import { createHash } from "node:crypto";
@@ -44,6 +54,7 @@ import { fileURLToPath } from "node:url";
 import { crc32 } from "node:zlib";
 import { chromium } from "playwright";
 import { COLORS, PARAMS, buildMark } from "./brand-mark.mjs";
+import { FACE_IDS, checkFaces, renderFaces } from "./kometto-faces.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = resolve(WEB_ROOT, "..", "..");
@@ -62,12 +73,20 @@ const SMALL = resolve(MARK_DIR, "oort-mark-small-black.svg");
 
 // ---- 레퍼런스 ------------------------------------------------------------------
 
-/** owner가 고른 원본. claudedocs/brand-2.0/round3/K6-flat-dark.png와 같은 바이트. */
-export const SOURCE = resolve(REPO_ROOT, "docs/brand/kometto/K6-flat-dark.png");
-export const SOURCE_SHA256 = "f0a75497fc609277ce5515ef96455f8f6d83d236dfa581290611b00ca08bab58";
-const SOURCE_SIZE = 1254;
-/** 원본의 남색 배지 원(픽셀 실측: 가로 96–1157, 세로 95–). 캐릭터는 모두 이 원 안이다. */
+/** 앱 아이콘 원본(#2752). claudedocs/brand-2.0/round4/I4-closeup-ink.png와 같은 바이트. */
+export const ICON_SOURCE = resolve(REPO_ROOT, "docs/brand/kometto/I4-closeup-ink.png");
+export const ICON_SOURCE_SHA256 = "d53a929d5f04bc013f20e0c436d08b8555caf82cc1f9a947bc7ea6f2494f9947";
+/** S0 히어로 원본(#2732). claudedocs/brand-2.0/round3/K6-flat-dark.png와 같은 바이트. */
+export const BADGE_SOURCE = resolve(REPO_ROOT, "docs/brand/kometto/K6-flat-dark.png");
+export const BADGE_SOURCE_SHA256 = "f0a75497fc609277ce5515ef96455f8f6d83d236dfa581290611b00ca08bab58";
+const SOURCE_SIZE = 1254; // 두 원본 모두
+/** K6의 남색 배지 원(픽셀 실측: 가로 96–1157, 세로 95–). 캐릭터는 모두 이 원 안이다. */
 export const SOURCE_BADGE = { cx: 626.5, cy: 625.5, r: 530.5 };
+/**
+ * I4 얼굴의 씨앗 픽셀(원본 좌표). maskable 검사가 여기서 원본을 flood fill 해 얼굴 창
+ * (림 안쪽 잉크)과 두 눈(흰 점)의 영역을 재고, 그 가장 먼 픽셀이 안전 원 안인지 본다.
+ */
+const ICON_FACE_SEEDS = { window: [495, 712], eyes: [[293, 774], [659, 774]] };
 
 const MACOS = { inset: 100, side: 824, radius: 185.4 };
 /** W3C maskable 안전 원(지름 80%)의 반지름에 반올림 여유 0.95를 곱한 값. */
@@ -151,12 +170,9 @@ const MARK_PAIRS = [
 // 원본 한 장을 CSS로 놓고 크로미움 스크린샷을 뜬다(RGB 전면판은 불투명 스크린샷,
 // macOS·S0는 투명 바탕). 줄이기는 크로미움 이미지 보간(고품질)이 맡는다.
 
-const sourceUrl = () => "data:image/png;base64," + readFileSync(SOURCE).toString("base64");
-
-/** 원본 바탕색(네 모서리 평균). maskable 둘레를 채운다. */
-function sourceBackground() {
-  return "rgb(22 20 25)";
-}
+/** S0 배지는 K6, 나머지 앱 아이콘은 I4에서 뜬다. */
+const sourceOf = (kind) => (kind === "badge" ? BADGE_SOURCE : ICON_SOURCE);
+const sourceUrl = (kind) => "data:image/png;base64," + readFileSync(sourceOf(kind)).toString("base64");
 
 /** 판 종류별로 원본을 어디에 얼마나 크게 놓는가(캔버스 좌표). */
 function placement(kind) {
@@ -166,11 +182,10 @@ function placement(kind) {
       return { canvas: 1024, x: 0, y: 0, size: 1024 };
     case "macos":
       return { canvas: 1024, x: MACOS.inset, y: MACOS.inset, size: MACOS.side, radius: MACOS.radius };
-    case "maskable": {
-      // 배지 원이 안전 원 안에 들게 줄이고, 원 중심을 캔버스 중심에.
-      const k = (512 * SAFE_RADIUS) / r;
-      return { canvas: 512, x: 256 - cx * k, y: 256 - cy * k, size: SOURCE_SIZE * k, fill: sourceBackground() };
-    }
+    case "maskable":
+      // I4는 바탕이 끝까지 차는 정방형이라 줄이면 가장자리에 이음매가 생긴다. 전체를
+      // 그대로 쓴다(icon-512와 같다). 원형 마스크에서는 오른쪽 위 구슬이 잘린다(README).
+      return { canvas: 512, x: 0, y: 0, size: 512 };
     case "badge": {
       // 배지 원 하나를 캔버스에 꽉 차게. 원 밖은 투명.
       const k = S0_SIZE / (2 * r);
@@ -200,12 +215,12 @@ async function renderFromSource(page, kind, out) {
   const scale = (out ?? p.canvas) / p.canvas;
   await page.setContent(
     `<!doctype html><html><head><style>
-       html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:${p.fill ?? "transparent"}}
+       html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent}
        .frame{position:absolute;overflow:hidden;${clip}}
        img{position:absolute;display:block}
      </style></head><body>
      <div class="frame" style="left:${frame.left * scale}px;top:${frame.top * scale}px;width:${frame.w * scale}px;height:${frame.h * scale}px">
-       <img src="${sourceUrl()}" style="left:${frame.img.left * scale}px;top:${frame.img.top * scale}px;width:${frame.img.size * scale}px;height:${frame.img.size * scale}px">
+       <img src="${sourceUrl(kind)}" style="left:${frame.img.left * scale}px;top:${frame.img.top * scale}px;width:${frame.img.size * scale}px;height:${frame.img.size * scale}px">
      </div></body></html>`,
     { waitUntil: "load" }
   );
@@ -240,10 +255,6 @@ async function derivedDiff(page, path, kind) {
       const b = c2.getContext("2d");
       b.imageSmoothingEnabled = true;
       b.imageSmoothingQuality = "high";
-      if (p.fill) {
-        b.fillStyle = p.fill;
-        b.fillRect(0, 0, size, size);
-      }
       b.drawImage(ref, p.x * k, p.y * k, p.size * k, p.size * k);
       const A = a.getImageData(0, 0, size, size).data;
       const B = b.getImageData(0, 0, size, size).data;
@@ -272,7 +283,7 @@ async function derivedDiff(page, path, kind) {
         }
       return { mean: sum / n, over: over / n, n };
     },
-    { b64: png.toString("base64"), src: sourceUrl(), size, k, p, kind, macos: MACOS }
+    { b64: png.toString("base64"), src: sourceUrl(kind), size, k, p, kind, macos: MACOS }
   );
 }
 
@@ -343,7 +354,7 @@ async function measureGaps(page) {
 async function pixelFacts(page) {
   const b64 = (p) => readFileSync(p).toString("base64");
   return page.evaluate(
-    async ({ mac, badge, mask }) => {
+    async ({ mac, badge, icon, seeds, srcSize, mp }) => {
       const decode = (data, size) =>
         new Promise((ok) => {
           const img = new Image();
@@ -359,22 +370,47 @@ async function pixelFacts(page) {
       const m = await decode(mac, 1024);
       const a = (d, x, y) => d.data[(y * d.width + x) * 4 + 3];
       const b = await decode(badge, 576);
-      const k = await decode(mask, 512);
-      const [r0, g0, b0] = [k.data[0], k.data[1], k.data[2]];
-      let reach = 0;
-      for (let y = 0; y < 512; y++)
-        for (let x = 0; x < 512; x++) {
-          const i = (y * 512 + x) * 4;
-          if (Math.abs(k.data[i] - r0) + Math.abs(k.data[i + 1] - g0) + Math.abs(k.data[i + 2] - b0) > 24)
-            reach = Math.max(reach, Math.hypot(x + 0.5 - 256, y + 0.5 - 256));
+      // maskable 안전 원: I4 원본에서 얼굴 창(림 안 잉크)과 두 눈(흰 점)을 flood fill로
+      // 잡고, maskable 배치로 옮긴 가장 먼 픽셀까지의 거리를 캔버스 폭 비율로 잰다.
+      const src = await decode(icon, srcSize);
+      const px = (x, y) => {
+        const i = (y * srcSize + x) * 4;
+        return [src.data[i], src.data[i + 1], src.data[i + 2]];
+      };
+      const region = ([sx, sy], test) => {
+        const seen = new Uint8Array(srcSize * srcSize);
+        const stack = [[sx, sy]];
+        let reach = 0;
+        let n = 0;
+        while (stack.length) {
+          const [x, y] = stack.pop();
+          if (x < 0 || y < 0 || x >= srcSize || y >= srcSize || seen[y * srcSize + x]) continue;
+          seen[y * srcSize + x] = 1;
+          if (!test(px(x, y))) continue;
+          n++;
+          const ox = (mp.x + ((x + 0.5) * mp.size) / srcSize) / mp.canvas - 0.5;
+          const oy = (mp.y + ((y + 0.5) * mp.size) / srcSize) / mp.canvas - 0.5;
+          reach = Math.max(reach, Math.hypot(ox, oy));
+          stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
         }
+        return { reach, n };
+      };
+      const ink = ([r, g, bl]) => r + g + bl < 120;
+      const white = ([r, g, bl]) => Math.min(r, g, bl) > 235;
       return {
         macos: { corner: a(m, 2, 2), outside: a(m, 60, 512), gridEdge: a(m, 102, 512), center: a(m, 512, 512) },
         badge: { corner: a(b, 3, 3), edgeOut: a(b, 40, 40), center: a(b, 288, 288) },
-        reach: reach / 512,
+        face: { window: region(seeds.window, ink), eyes: seeds.eyes.map((e) => region(e, white)) },
       };
     },
-    { mac: b64(resolve(TAURI_DIR, "app-icon.png")), badge: b64(S0_BADGE), mask: b64(resolve(PUBLIC_DIR, "icon-maskable-512.png")) }
+    {
+      mac: b64(resolve(TAURI_DIR, "app-icon.png")),
+      badge: b64(S0_BADGE),
+      icon: b64(ICON_SOURCE),
+      seeds: ICON_FACE_SEEDS,
+      srcSize: SOURCE_SIZE,
+      mp: placement("maskable"),
+    }
   );
 }
 
@@ -455,6 +491,64 @@ async function checkIcnsSmallSlots(page) {
   }
 }
 
+/**
+ * Dock에 실제로 나가는 파일(icns 64px 이상 칸, icons/*.png)이 app-icon.png에서 나왔는지.
+ * `cargo tauri icon`을 다시 돌리지 않아 이전 그림이 남으면 여기서 잡힌다(#2752 리뷰 M-1).
+ * RGBA 평균 차(0–255)가 TAURI_DERIVED_MAX 이하여야 한다. 실측은 0.00(1024)–3.78(64, Tauri와
+ * 크로미움 리샘플 차)이고, 이전 K6 산출물이면 약 44다.
+ */
+const TAURI_DERIVED_MAX = 8;
+const ICNS_LARGE_SLOTS = ["icon_32x32@2x.png", "icon_128x128.png", "icon_256x256.png", "icon_512x512.png", "icon_512x512@2x.png"];
+const TAURI_PNGS = ["64x64.png", "128x128.png", "128x128@2x.png", "icon.png"];
+
+async function checkTauriDerived(page) {
+  const icns = resolve(TAURI_DIR, "icons/icon.icns");
+  const work = mkdtempSync(join(tmpdir(), "oort-icns-"));
+  const set = join(work, "icon.iconset");
+  const out = [];
+  try {
+    execFileSync("iconutil", ["-c", "iconset", icns, "-o", set]);
+    const targets = [
+      ...ICNS_LARGE_SLOTS.map((n) => [`icon.icns ${n}`, readFileSync(join(set, n))]),
+      ...TAURI_PNGS.map((n) => [`icons/${n}`, readFileSync(resolve(TAURI_DIR, "icons", n))]),
+    ];
+    const master = readFileSync(resolve(TAURI_DIR, "app-icon.png")).toString("base64");
+    for (const [name, buf] of targets) {
+      const px = buf.readUInt32BE(16);
+      const mean = await page.evaluate(
+        async ({ slot, master, px }) => {
+          const load = (b64) =>
+            new Promise((ok) => {
+              const img = new Image();
+              img.onload = () => ok(img);
+              img.src = "data:image/png;base64," + b64;
+            });
+          const draw = (img) => {
+            const c = document.createElement("canvas");
+            c.width = c.height = px;
+            const ctx = c.getContext("2d");
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = "high";
+            ctx.drawImage(img, 0, 0, px, px);
+            return ctx.getImageData(0, 0, px, px).data;
+          };
+          const [a, m] = [draw(await load(slot)), draw(await load(master))];
+          let s = 0;
+          for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - m[i]);
+          return s / a.length;
+        },
+        { slot: buf.toString("base64"), master, px }
+      );
+      if (!(mean <= TAURI_DERIVED_MAX))
+        fail(`${name}: app-icon.png에서 나오지 않았다 (평균 차 ${mean.toFixed(2)} > ${TAURI_DERIVED_MAX}). cargo tauri icon을 다시 돌렸나`);
+      out.push([name, px, mean]);
+    }
+    return out;
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
 // ---- main ------------------------------------------------------------------
 
 const CHARACTER_OUTPUTS = [
@@ -467,13 +561,49 @@ const CHARACTER_OUTPUTS = [
   [S0_BADGE, "badge", S0_SIZE, { rgb: false }],
 ];
 
+function printFaces(r) {
+  console.log("\n== 코메토 표정 (#2806)");
+  for (const [path, s] of r.shas) console.log(`원본 ${path}  sha256 ${s.slice(0, 16)}…`);
+  for (const [id, c] of r.composites)
+    console.log(
+      `합성 ${id}  창 밖 다른 픽셀 ${c.outsideDiff}  대기 대비 변화 ${(c.changed * 100).toFixed(1)}%  최소 구분 ${(Math.min(...Object.values(c.distinct)) * 100).toFixed(1)}%`
+    );
+  for (const [path, w] of r.assets)
+    console.log(
+      `${path}  ${w.size}px  평균 차 ${w.mean.toFixed(2)}  16 초과 ${(w.over * 100).toFixed(2)}%  알파 어긋남 ${(w.alphaOff * 100).toFixed(2)}%  알파 모서리/원판/얼굴 ${w.corner}/${w.discPx}/${w.face}  자름 경계 ${w.cutPx}px`
+    );
+  console.log(`대기 웹 에셋 ↔ kometto-badge.png(불투명 자리) 평균 차 ${r.idleVsS0.mean.toFixed(2)}  16 초과 ${(r.idleVsS0.over * 100).toFixed(2)}%`);
+}
+
 async function main() {
   const checkOnly = process.argv.includes("--check-only");
+  const facesOnly = process.argv.includes("--faces-only");
   const browser = await chromium.launch();
   const page = await browser.newPage({ deviceScaleFactor: 1 });
+  const faceOpts = { repoRoot: REPO_ROOT, webRoot: WEB_ROOT, withSrgb, fail, rel, s0Badge: S0_BADGE, log: (m) => console.log(m.replace(REPO_ROOT + "/", "")) };
+  if (facesOnly) {
+    try {
+      if (!checkOnly) await renderFaces(page, faceOpts);
+      printFaces(await checkFaces(page, faceOpts));
+    } finally {
+      await browser.close();
+    }
+    if (failures.length) {
+      console.error("\nFAIL\n- " + failures.join("\n- "));
+      process.exit(1);
+    }
+    console.log(`\nOK (표정 ${FACE_IDS.length}종 × 웹·폰)`);
+    return;
+  }
   try {
-    const sha = createHash("sha256").update(readFileSync(SOURCE)).digest("hex");
-    if (sha !== SOURCE_SHA256) fail(`${rel(SOURCE)}: sha256 ${sha} ≠ 고정값 ${SOURCE_SHA256} (owner 레퍼런스가 아니다)`);
+    const shas = [
+      [ICON_SOURCE, ICON_SOURCE_SHA256],
+      [BADGE_SOURCE, BADGE_SOURCE_SHA256],
+    ].map(([path, pinned]) => {
+      const sha = createHash("sha256").update(readFileSync(path)).digest("hex");
+      if (sha !== pinned) fail(`${rel(path)}: sha256 ${sha} ≠ 고정값 ${pinned} (owner 레퍼런스가 아니다)`);
+      return [path, sha];
+    });
 
     if (!checkOnly) {
       mkdirSync(dirname(S0_BADGE), { recursive: true });
@@ -486,6 +616,7 @@ async function main() {
       execFileSync("cargo", ["tauri", "icon", "app-icon.png"], { cwd: TAURI_DIR, stdio: "inherit" });
       await patchIcnsSmallSlots(page);
     }
+    if (!checkOnly) await renderFaces(page, faceOpts);
 
     // ---- 검사 ----
     const results = [];
@@ -506,7 +637,13 @@ async function main() {
     if (mf.center !== 255 || mf.gridEdge !== 255) fail(`app-icon.png: 판이 불투명하지 않다 ${JSON.stringify(mf)}`);
     const bf = facts.badge;
     if (bf.corner !== 0 || bf.edgeOut !== 0 || bf.center !== 255) fail(`kometto-badge.png: 원 밖이 투명하지 않거나 가운데가 비었다 ${JSON.stringify(bf)}`);
-    if (facts.reach > SAFE_RADIUS + 0.005) fail(`maskable: 배지가 안전 원 밖까지 간다 (${facts.reach.toFixed(3)} > ${SAFE_RADIUS})`);
+    // 얼굴 창은 W3C 안전 원(0.4) 경계까지 온다(실측 0.400). 눈은 여유 0.95를 둔 원 안.
+    const { window: win, eyes } = facts.face;
+    if (win.n < 100000 || eyes.some((e) => e.n < 5000))
+      fail(`maskable: I4 얼굴을 원본에서 찾지 못했다 (창 ${win.n}px, 눈 ${eyes.map((e) => e.n).join("/")}px)`);
+    if (win.reach > 0.4 + 0.005) fail(`maskable: 얼굴 창이 안전 원 밖까지 간다 (${win.reach.toFixed(3)} > 0.4)`);
+    for (const e of eyes)
+      if (e.reach > SAFE_RADIUS) fail(`maskable: 눈이 안전 원 밖까지 간다 (${e.reach.toFixed(3)} > ${SAFE_RADIUS})`);
 
     for (const [name, size] of [
       ["32x32.png", 32],
@@ -521,6 +658,7 @@ async function main() {
     const icns = readFileSync(resolve(TAURI_DIR, "icons/icon.icns"));
     if (icns.toString("latin1", 0, 4) !== "icns") fail("icons/icon.icns: icns 헤더가 아니다");
     const icnsSlots = await checkIcnsSmallSlots(page);
+    const tauriDerived = await checkTauriDerived(page);
 
     const contrasts = MARK_PAIRS.map(([name, a, b]) => {
       const ratio = contrast(a, b);
@@ -535,7 +673,7 @@ async function main() {
         fail(`favicon.svg ${size}px: 틈이 뭉개진다 (틈 ${g.favicon.gap.toFixed(2)}, 링 ${g.favicon.ring.toFixed(2)})`);
     }
 
-    console.log(`\n== 레퍼런스 ${rel(SOURCE)}  sha256 ${sha.slice(0, 16)}…`);
+    for (const [path, sha] of shas) console.log(`\n== 레퍼런스 ${rel(path)}  sha256 ${sha.slice(0, 16)}…`);
     console.log("\n== PNG");
     for (const [path, r] of results) console.log(`${path}  ${r.w}x${r.h}  색유형 ${r.colorType}  sRGB ${r.srgb ? "o" : "x"}`);
     console.log(`app-icon.png 알파: ${JSON.stringify(mf)}   kometto-badge.png 알파: ${JSON.stringify(bf)}`);
@@ -543,7 +681,9 @@ async function main() {
     for (const [path, kind, d] of derived)
       console.log(`${path}  [${kind}]  평균 차 ${d.mean.toFixed(2)}  16 초과 ${(d.over * 100).toFixed(2)}%`);
     for (const [name, d] of Object.entries(icnsSlots))
-      console.log(`icon.icns ${name} 평균 차: 파비콘 ${d.favicon.toFixed(1)} / 코메토 ${d.character.toFixed(1)}`);
+      console.log(`icon.icns ${name} 평균 차: 파비콘 ${d.favicon.toFixed(1)} / I4 ${d.character.toFixed(1)}`);
+    console.log(`\n== Dock 산출물 ← app-icon.png (RGBA 평균 차 ≤ ${TAURI_DERIVED_MAX})`);
+    for (const [name, px, mean] of tauriDerived) console.log(`${name}  ${px}px  평균 차 ${mean.toFixed(2)}`);
     console.log("\n== C2-04 대비 (WCAG 1.4.11, 3:1 이상)");
     for (const [name, pair, ratio] of contrasts) console.log(`${name}  ${pair}  ${ratio}:1`);
     console.log("\n== C2-04 틈 가운데 잉크 비율 (0=바탕, 1=잉크)");
@@ -551,7 +691,10 @@ async function main() {
       console.log(
         `${size}px  small 틈 ${g.small.gap.toFixed(2)} / 링 ${g.small.ring.toFixed(2)}   favicon 틈 ${g.favicon.gap.toFixed(2)} / 링 ${g.favicon.ring.toFixed(2)}`
       );
-    console.log(`\n== maskable 도달 거리 ${facts.reach.toFixed(3)} (안전 ${SAFE_RADIUS})`);
+    printFaces(await checkFaces(page, faceOpts));
+    console.log(
+      `\n== maskable 안전 원 (캔버스 폭 비율)  얼굴 창 ${win.reach.toFixed(3)} (≤ 0.4)  눈 ${eyes.map((e) => e.reach.toFixed(3)).join(" / ")} (≤ ${SAFE_RADIUS})`
+    );
   } finally {
     await browser.close();
   }

@@ -51,13 +51,13 @@ name: 40-agents-tab
 # before tapping would time out on a healthy app.
 - extendedWaitUntil:
     visible:
-      id: "shell-fab"
+      id: "shell-plus"
     timeout: 30000
-# 에이전트·작업은 탭이 아니라 FAB 시트의 문이다 (ADR-0189 D1, #2714).
+# 에이전트·작업은 탭이 아니라 + 메뉴의 행이다 (ADR-0189 D1, #2714 → #2750).
 - tapOn:
-    id: "shell-fab"
+    id: "shell-plus"
 - tapOn:
-    id: "new-message-agents"
+    id: "plus-menu-agents"
 - extendedWaitUntil:
     visible:
       id: "agents-list"
@@ -138,11 +138,11 @@ name: 40-agents-tab
 # Wake it back up — see the header.
 - tapOn:
     id: "header-back"
-# 에이전트·작업은 탭이 아니라 FAB 시트의 문이다 (ADR-0189 D1, #2714).
+# 에이전트·작업은 탭이 아니라 + 메뉴의 행이다 (ADR-0189 D1, #2714 → #2750).
 - tapOn:
-    id: "shell-fab"
+    id: "shell-plus"
 - tapOn:
-    id: "new-message-agents"
+    id: "plus-menu-agents"
 - extendedWaitUntil:
     visible:
       id: "agent-row-${AGENT_MEMBER_ID}"

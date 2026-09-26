@@ -24,6 +24,7 @@ export function HandleField({
   label = "핸들",
   onBlur,
   reserveErrorSlot = false,
+  inputClassName,
 }: {
   id: string;
   value: string;
@@ -39,6 +40,8 @@ export function HandleField({
   label?: ReactNode;
   onBlur?: (event: FocusEvent<HTMLInputElement>) => void;
   reserveErrorSlot?: boolean;
+  /** 입력 그릇에 덧입힐 클래스(온보딩 틀의 44/10 그릇, #2811). */
+  inputClassName?: string;
 }) {
   const normalized = normalizeHandle(value);
   const showPreview =
@@ -82,7 +85,7 @@ export function HandleField({
             [error ? errorId : null, describedBy ?? null].filter(Boolean).join(" ") ||
             undefined
           }
-          className="pl-8"
+          className={cn(inputClassName, "pl-8")}
           data-testid={testId}
           onChange={handleChange}
           onBlur={onBlur}

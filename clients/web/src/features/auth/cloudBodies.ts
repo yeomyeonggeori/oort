@@ -17,10 +17,10 @@ export interface CloudBody {
   tone: CloudBodyTone;
 }
 
-/** Wander amplitude (px). Must match the rAF loop in OortCloudField. */
+/** Wander amplitude (px). The S0 rAF loop (OortCloudField) left with #2808; the welcome kickoff still reads the field. */
 export const CLOUD_WANDER_X = 26;
 export const CLOUD_WANDER_Y = 20;
-/** Pointer-repel push (px). Must match the rAF loop in OortCloudField. */
+/** Pointer-repel push (px). Kept for the exclusion geometry below. */
 export const CLOUD_REPEL_STRENGTH = 110;
 
 /**

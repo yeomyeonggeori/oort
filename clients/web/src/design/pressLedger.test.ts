@@ -66,10 +66,13 @@ const SIDEBAR_ROW_SRC = readFileSync(
   new URL("../features/sidebar/SidebarRow.tsx", import.meta.url),
   "utf8"
 );
-const LANDING_SRC = readFileSync(
-  new URL("../features/auth/LandingStep.tsx", import.meta.url),
+// 옛 S0 두 CTA는 D0(#2808)의 [계속] 하나가 됐다. 그 버튼은 `<Button>`이라 press를
+// 프리미티브에서 받는다.
+const WELCOME_SRC = readFileSync(
+  new URL("../features/auth/WelcomeStep.tsx", import.meta.url),
   "utf8"
 );
+const BUTTON_SRC = readFileSync(new URL("./ui/button.tsx", import.meta.url), "utf8");
 const REACTION_SRC = readFileSync(
   new URL("../features/timeline/ReactionChips.tsx", import.meta.url),
   "utf8"
@@ -1266,7 +1269,6 @@ const DUAL_TRANSITION = SITES.filter(
  */
 const RESIDUE: readonly (readonly [string, number])[] = [
   ["clients/web/src/features/attachments/AttachmentTray.tsx", 2],
-  ["clients/web/src/features/auth/ConnectPage.tsx", 1],
   ["clients/web/src/features/inbox/InboxRoute.tsx", 1],
   ["clients/web/src/features/plugins/PluginSection.tsx", 1],
   ["clients/web/src/features/routing/MentionRoutingBar.tsx", 1],
@@ -1275,10 +1277,9 @@ const RESIDUE: readonly (readonly [string, number])[] = [
   ["clients/web/src/features/timeline/MessageBody.tsx", 1],
   ["clients/web/src/features/timeline/MessageRow.tsx", 1],
   ["clients/web/src/features/timeline/PendingRow.tsx", 1],
-  ["clients/web/src/features/welcome/WelcomeKickoffStage.tsx", 1],
 ];
 
-const CEILING = 12;
+const CEILING = 10;
 
 function countedByFile(sites: PressSite[]): [string, number][] {
   const counted = new Map<string, number>();
@@ -1329,12 +1330,6 @@ function constString(source: string, name: string): string {
   const bits = [...match[1].matchAll(/"([^"]*)"/g)].map((m) => m[1]);
   if (bits.length === 0) throw new Error(`${name} 문자열 없음`);
   return bits.join(" ");
-}
-
-function classBeforeTestId(source: string, testId: string): string {
-  const idx = source.indexOf(`data-testid="${testId}"`);
-  expect(idx, testId).toBeGreaterThan(-1);
-  return source.slice(Math.max(0, idx - 500), idx);
 }
 
 function sourceFile(source: string, fileName: string): ts.SourceFile {
@@ -1666,14 +1661,10 @@ export function Probe() {
     }
   });
 
-  it("S0 CTA 는 press 를 들고 메뉴 행은 채움만 든다 (N-5)", () => {
-    const landing = stripComments(LANDING_SRC);
-    expect(classBeforeTestId(landing, "onboarding-choose-server")).toMatch(
-      /\bpress\b/
-    );
-    expect(classBeforeTestId(landing, "onboarding-choose-invite")).toMatch(
-      /\bpress\b/
-    );
+  it("D0 계속은 press 를 들고 메뉴 행은 채움만 든다 (N-5)", () => {
+    const welcome = stripComments(WELCOME_SRC);
+    expect(welcome).toMatch(/<Button\b[^>]*?data-testid="connect-entry-submit"/);
+    expect(stripComments(BUTTON_SRC)).toMatch(/const buttonVariants = cva\(\s*"[^"]*\bpress\b/);
     const menu = stripComments(MENU_SRC);
     expect(menu).toMatch(/function menuRowClass[\s\S]*?\bpress-instant-fill\b/);
     expect(menu).toMatch(/function menuRowClass[\s\S]*?active:bg-surface-pressed/);
