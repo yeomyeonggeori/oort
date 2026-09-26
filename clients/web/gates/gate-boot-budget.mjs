@@ -151,11 +151,11 @@ async function main() {
     const started = Date.now();
     await page.goto(origin, { waitUntil: "commit" });
 
-    // Stored server skips S0, so the first usable connect surface is S1
-    // (gateway). Email lives on S2 and is a click away, not part of boot.
+    // Stored server skips D0, so the first usable connect surface is D1
+    // (sign-in, #2809): server chip + email + password on one screen.
     let elapsed = null;
     try {
-      await page.waitForSelector('[data-testid="onboarding-gateway"]', {
+      await page.waitForSelector('[data-testid="onboarding-sign-in"]', {
         state: "visible",
         timeout: CEILING_MS,
       });
