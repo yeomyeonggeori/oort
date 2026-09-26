@@ -9,10 +9,10 @@
 # inside each image; GPL/LGPL there are copyleft, not permissive.
 #
 # cargo.lock.sha256: a477d1d553fb62f6fbb08a013651e52b03d383021491a37881c697ecf3fbf0ec
-# web.package-lock.sha256: 7f3477beb4a4382da2a14a58222120c0129177da70e371df19012d20c2ee7d96
-# clarify.sha256: 82ccac6d0af1fb9029a27b19e0ac8b3708e5be2eb6909ce22e6a4128ab6a19d4
+# web.package-lock.sha256: 3fe4cf55556ea18354f1024dfe564626553ceacb9310b290404e9e2af5ee736a
+# clarify.sha256: fcb9ac157804777c306cebdcc24f804992a74fcf87c27d42dbc5d9370a7ed8e6
 # cargo.packages: 297
-# npm.packages: 467
+# npm.packages: 469
 # unique.license.blobs: 381
 #
 ## Package index
@@ -546,6 +546,8 @@ npm	@vitest/snapshot	2.1.9	MIT	Copyright (c) 2021-Present Vitest Team	package-tr
 npm	@vitest/spy	2.1.9	MIT	Copyright (c) 2021-Present Vitest Team	package-tree	ddc110f3b89cc397cee99d3d64c4f746928b7a3bac02fed15101eb4d367079f6
 npm	@vitest/utils	2.1.9	MIT	Copyright (c) 2021-Present Vitest Team	package-tree	ddc110f3b89cc397cee99d3d64c4f746928b7a3bac02fed15101eb4d367079f6
 npm	@xterm/addon-fit	0.11.0	MIT	Copyright (c) 2019, The xterm.js authors (https://github.com/xtermjs/xterm.js)	package-tree	e256f01188af527e4d06d21d06fbf785ae9c50d4b328bf03cbe0ba7f0aa4228f
+npm	@xterm/addon-serialize	0.14.0	MIT	copyright not stated in license file	clarify	f9c4c77baa3828004ee54b8a4f2db2e88ed44a6237a493965bf551fac0fcb62d
+npm	@xterm/headless	6.0.0	MIT	copyright not stated in license file	clarify	f9c4c77baa3828004ee54b8a4f2db2e88ed44a6237a493965bf551fac0fcb62d
 npm	@xterm/xterm	6.0.0	MIT	Copyright (c) 2017-2019, The xterm.js authors (https://github.com/xtermjs/xterm.js); Copyright (c) 2014-2016, SourceLair Private Company (https://www.sourcelair.com); Copyright (c) 2012-2013, Christopher Jeffrey (https://github.com/chjj/)	package-tree	b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd
 npm	acorn	8.17.0	MIT	Copyright (C) 2012-2022 by various contributors (see AUTHORS)	package-tree	76a876cf886ff9be2a8b5e2e86514fed06223c8c9f0c1e9ee9606e93841e00b7
 npm	acorn-jsx	5.3.2	MIT	Copyright (C) 2012-2017 by Ingvar Stepanyan	package-tree	cfa72b62b9ae173078823a3796b25c027a9071046a263beddf966df67018ce06

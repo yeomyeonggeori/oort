@@ -15,8 +15,6 @@ import {
 import {
   BAR_CONTROL_MAX_SCALE,
   FailureBanner,
-  GroupRow,
-  GroupSection,
 } from '../design/atoms';
 import {PageSheet, usePageSheetClose} from '../design/PageSheet';
 import {usePalette, useStyles} from '../design/theme';
@@ -37,44 +35,30 @@ import {openDmFailureCopy} from '../screens/SidebarScreen';
 import {useSession} from '../session/useSession';
 
 // =============================================================================
-// FAB 시트 — 「새 메시지」와 「에이전트 부르기」 (ADR-0189 D1, DS2-2 #2714).
+// 새 DM 시트 — + 메뉴의 「새 DM」이 여는 사람 고르기 (DS2-2b #2750; 처음은 DS2-2 #2714).
 //
-// 잉크 FAB은 이 시트를 연다. 시안은 FAB 한 개(`aria-label="새 메시지"`)만 그리고
-// 그 뒤를 그리지 않았으므로, 시트의 모양은 셸의 페이지 시트(`PageSheet`, 시안
-// `.a-sheet`)를 그대로 쓰고 안의 줄은 이미 있는 묶음 카드 문법(`GroupSection`)을
-// 쓴다. 새 모양을 만들지 않는다.
+// + 메뉴(`PlusMenu`)는 가볍게 문만 든다. 사람을 고르는 일은 목록과 검색이 필요한
+// 무거운 일이라 이 시트로 넘어온다. 시트의 그릇은 셸의 페이지 시트(`PageSheet`, 시안
+// `.a-sheet`)다.
 //
-// 세 가지를 담는다:
+// DS2-2 에서 이 시트 위에 있던 두 문(에이전트 부르기·작업 콘솔)은 + 메뉴의 행으로
+// 옮겼다 — 기능은 그대로이고 한 번 덜 누른다.
 //
-//   에이전트 부르기  에이전트 목록 층을 연다 — 사라진 「에이전트」 탭의 문
-//                    (수용기준 「기능 손실 0」). 홈이 그 자리를 흡수하면(DS2-3)
-//                    이 줄이 남을지는 그 이슈가 정한다.
-//   작업 콘솔        서버가 그 표면을 내줄 때만. 사라진 「작업」 탭의 문.
-//   받는 사람        워크스페이스의 사람과 에이전트. 누르면 서버가 그 둘의 DM 을
-//                    열어 주고(없으면 만든다) 그 대화로 간다. 폰에서 처음으로 **아직
-//                    DM 이 없는 사람**에게 말을 걸 수 있는 문이다.
+// 받는 사람: 워크스페이스의 사람과 에이전트. 누르면 서버가 그 둘의 DM 을 열어 주고
+// (없으면 만든다) 그 대화로 간다. 폰에서 **아직 DM 이 없는 사람**에게 말을 걸 수 있는
+// 문이다.
 // =============================================================================
 
 export function NewMessageSheet({
-  workConsole,
-  onOpenAgentList,
-  onOpenWorkList,
   onOpenConversation,
   onClose,
 }: {
-  /** 작업 콘솔 줄을 세울지(서버 표면). */
-  workConsole: boolean;
-  onOpenAgentList: () => void;
-  onOpenWorkList: () => void;
   onOpenConversation: (channelId: string, title: string) => void;
   onClose: () => void;
 }): React.JSX.Element {
   return (
-    <PageSheet onClose={onClose} accessibilityLabel="새 메시지" testID="new-message-sheet">
+    <PageSheet onClose={onClose} accessibilityLabel="새 DM" testID="new-dm-sheet">
       <SheetBody
-        workConsole={workConsole}
-        onOpenAgentList={onOpenAgentList}
-        onOpenWorkList={onOpenWorkList}
         onOpenConversation={onOpenConversation}
         onClose={onClose}
       />
@@ -83,15 +67,9 @@ export function NewMessageSheet({
 }
 
 function SheetBody({
-  workConsole,
-  onOpenAgentList,
-  onOpenWorkList,
   onOpenConversation,
   onClose,
 }: {
-  workConsole: boolean;
-  onOpenAgentList: () => void;
-  onOpenWorkList: () => void;
   onOpenConversation: (channelId: string, title: string) => void;
   onClose: () => void;
 }): React.JSX.Element {
@@ -129,64 +107,14 @@ function SheetBody({
     },
   });
 
-  // 층을 여는 줄은 시트를 **즉시** 걷는다(미끄러지지 않는다). 새 층이 셸 위에
-  // 서는 순간 시트가 아직 내려가는 중이면 두 움직임이 겹쳐 보인다.
   const header = (
     <View>
-      {/* 시안 `.a-sh-top`: 왼쪽 42pt 원형 닫기(`.a-cbtn`, ×). 시안의 오른쪽 「편집」
-          자리는 이 시트에 할 일이 없어 비우고, 가운데에 시트의 이름을 둔다. */}
-      <View style={styles.titleRow}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="새 메시지 닫기"
-          onPress={slideClose}
-          hitSlop={slopTo(CLOSE_SIZE)}
-          style={({pressed}) => [styles.close, pressed && styles.pressed]}
-          testID="new-message-close">
-          <Image
-            source={SHELL_ICONS.x}
-            style={{
-              width: SHELL_ICON_SIZE.x,
-              height: SHELL_ICON_SIZE.x,
-              tintColor: palette.text,
-            }}
-          />
-        </Pressable>
-        <Text
-          accessibilityRole="header"
-          style={styles.title}
-          numberOfLines={1}
-          maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-          새 메시지
-        </Text>
-        <View style={styles.closeBalance} />
-      </View>
-
-      <GroupSection testID="new-message-doors">
-        <GroupRow
-          title="에이전트 부르기"
-          detail="에이전트 목록에서 골라 대화를 엽니다."
-          chevron
-          onPress={() => {
-            onClose();
-            onOpenAgentList();
-          }}
-          testID="new-message-agents"
-        />
-        {workConsole ? (
-          <GroupRow
-            title="작업 콘솔"
-            detail="에이전트가 하고 있는 일을 봅니다."
-            chevron
-            separated
-            onPress={() => {
-              onClose();
-              onOpenWorkList();
-            }}
-            testID="new-message-work"
-          />
-        ) : null}
-      </GroupSection>
+      <SheetTitleRow
+        title="새 DM"
+        closeLabel="새 DM 닫기"
+        onClose={slideClose}
+        testID="new-dm"
+      />
 
       <Text accessibilityRole="header" style={styles.label}>
         받는 사람
@@ -201,7 +129,7 @@ function SheetBody({
         autoCorrect={false}
         clearButtonMode="while-editing"
         accessibilityLabel="받는 사람 찾기"
-        testID="new-message-search"
+        testID="new-dm-search"
       />
       {openDm.isError ? (
         <FailureBanner
@@ -211,7 +139,7 @@ function SheetBody({
               ? undefined
               : () => openDm.mutate(openDm.variables as string)
           }
-          testID="new-message-error"
+          testID="new-dm-error"
         />
       ) : null}
     </View>
@@ -226,7 +154,7 @@ function SheetBody({
       keyboardDismissMode="on-drag"
       contentContainerStyle={styles.list}
       ListEmptyComponent={
-        <Text style={styles.empty} testID="new-message-empty">
+        <Text style={styles.empty} testID="new-dm-empty">
           {query.trim() === ''
             ? '말을 걸 수 있는 사람이 아직 없습니다.'
             : `'${query.trim()}'에 맞는 사람이 없습니다.`}
@@ -244,7 +172,7 @@ function SheetBody({
             disabled={openDm.isPending}
             onPress={() => openDm.mutate(item.id)}
             style={({pressed}) => [styles.person, pressed && styles.personPressed]}
-            testID={`new-message-person-${item.handle}`}>
+            testID={`new-dm-person-${item.handle}`}>
             <Avatar directory={directoryQuery.directory} memberId={item.id} />
             <View style={styles.personText}>
               <Text style={styles.personName} numberOfLines={1}>
@@ -257,7 +185,7 @@ function SheetBody({
           </Pressable>
         );
       }}
-      testID="new-message-list"
+      testID="new-dm-list"
     />
   );
 }
@@ -265,11 +193,61 @@ function SheetBody({
 /** 시안 `.a-cbtn{width:42px;height:42px}`. 44 에 모자란 2 는 `hitSlop` 이 진다. */
 const CLOSE_SIZE = 42;
 
+/**
+ * 시안 `.a-sh-top`: 왼쪽 42pt 원형 닫기(`.a-cbtn`, ×), 가운데 시트 이름, 오른쪽
+ * 행위 자리(`trailing`, 시안의 「편집」 자리). 행위가 없으면 닫기와 같은 폭의 빈 칸이
+ * 이름을 가운데에 둔다. 새 DM·새 채널 두 시트가 같은 머리를 쓴다.
+ */
+export function SheetTitleRow({
+  title,
+  closeLabel,
+  onClose,
+  trailing,
+  testID,
+}: {
+  title: string;
+  closeLabel: string;
+  onClose: () => void;
+  trailing?: React.ReactNode;
+  testID: string;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const palette = usePalette();
+  return (
+    <View style={styles.titleRow}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={closeLabel}
+        onPress={onClose}
+        hitSlop={slopTo(CLOSE_SIZE)}
+        style={({pressed}) => [styles.close, pressed && styles.pressed]}
+        testID={`${testID}-close`}>
+        <Image
+          source={SHELL_ICONS.x}
+          style={{
+            width: SHELL_ICON_SIZE.x,
+            height: SHELL_ICON_SIZE.x,
+            tintColor: palette.text,
+          }}
+        />
+      </Pressable>
+      <Text
+        accessibilityRole="header"
+        style={styles.title}
+        numberOfLines={1}
+        maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+        {title}
+      </Text>
+      {trailing ?? <View style={styles.closeBalance} />}
+    </View>
+  );
+}
+
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
     list: {paddingBottom: space.xl * 2},
-    // 시트 몸은 가로 여백을 주지 않는다(`PageSheet`). 묶음 카드(`GroupSection`)는
-    // 자기 16 을 들고, 나머지 줄은 여기서 같은 16 을 든다 — 왼쪽 가장자리가 하나다.
+    // 시트 몸은 가로 여백을 주지 않는다(`PageSheet`). 줄마다 여기서 같은 16 을
+    // 든다 — 왼쪽 가장자리가 하나다.
     titleRow: {
       flexDirection: 'row',
       alignItems: 'center',

@@ -11,6 +11,7 @@ import {
   type NotificationResponse,
 } from 'expo-notifications';
 
+import {shouldAskNotifications} from '../features/onboarding/phoneFlow';
 import {PUSH_ACTION} from './contract';
 import {parsePushEnvelope, threadRootId, type PushEnvelope} from './envelope';
 
@@ -45,19 +46,42 @@ import {parsePushEnvelope, threadRootId, type PushEnvelope} from './envelope';
 
 export type PushPermission = 'granted' | 'denied' | 'undetermined';
 
-/** Ask for notification permission, or report what was already decided.
- *  iOS only ever shows the prompt once; after that this reports the standing
- *  answer and the person has to change it in Settings. */
-export async function ensurePushPermission(): Promise<PushPermission> {
-  const current = await getPermissionsAsync();
-  if (current.granted) return 'granted';
-  if (!current.canAskAgain) return 'denied';
+/**
+ * 알림 권한이 지금 어디에 서 있는가. **읽기만** 한다 (#2820).
+ *
+ *   granted  허용됨. 토큰을 받고 등록한다.
+ *   ask      아무도 묻지 않았다. M3 알림 미리 안내가 설 자리다.
+ *   settled  그 밖(거부, provisional·ephemeral). 묻지 않는다.
+ *
+ * 이 파일에는 「안 물었으면 묻는」 함수가 없다. 예전의 `ensurePushPermission()`은
+ * 세션이 서자마자 설명 없이 iOS 창을 띄웠고, iOS는 그 창을 한 번만 띄운다
+ * (ADR-0193 D8). 창은 M3의 [계속]과 설정 › 알림에서만 `askPushPermission()`으로 뜬다.
+ */
+export type PushGate = 'granted' | 'ask' | 'settled';
 
+export function pushGateFrom(
+  settings: Parameters<typeof shouldAskNotifications>[0],
+): PushGate {
+  if (settings.granted) return 'granted';
+  return shouldAskNotifications(settings) ? 'ask' : 'settled';
+}
+
+export async function readPushGate(): Promise<PushGate> {
+  return pushGateFrom(await getPermissionsAsync());
+}
+
+/**
+ * iOS 알림 허용 창을 띄운다. **사람이 누른 버튼에서만** 부른다(M3 [계속],
+ * 설정 › 알림). 이미 정해진 권한이면 iOS가 창 없이 서 있는 답을 돌려준다.
+ */
+export async function askPushPermission(): Promise<PushGate> {
   const requested = await requestPermissionsAsync({
     ios: {allowAlert: true, allowBadge: true, allowSound: true},
   });
-  if (requested.granted) return 'granted';
-  return requested.canAskAgain ? 'undetermined' : 'denied';
+  const gate = pushGateFrom(requested);
+  // 창을 닫고도 「아직 안 물음」으로 읽히면(창이 뜨지 못한 경우) 다시 묻지 않는다.
+  // M3에 사람을 가두는 것보다 설정 › 알림으로 보내는 편이 낫다.
+  return gate === 'ask' ? 'settled' : gate;
 }
 
 /**

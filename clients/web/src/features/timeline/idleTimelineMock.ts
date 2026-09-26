@@ -3,8 +3,8 @@ import { emptyTimeline } from "@momo/core/features/timeline/model";
 
 /**
  * Shared idle `useTimeline` mock (#2050 R3 N-3 / R4 N-3). ChatShell.intro /
- * .skel and markUnread.rollback.visit each held a hand-extended copy;
- * ChatShell reading `pinArrivalGrant` made all three drift. One helper,
+ * .skel and markUnread.rollback.visit each held a hand-extended copy, and
+ * a new ChatShell read made all three drift. One helper,
  * `satisfies UseTimelineResult` so a dropped member is a type error.
  */
 export function idleTimelineMock(
@@ -36,7 +36,6 @@ export function idleTimelineMock(
     removeUnfurls: async () => undefined,
     isPlayEntrance: () => false,
     consumeEntrance: () => undefined,
-    pinArrivalGrant: () => undefined,
     capUnmountedArrivals: () => undefined,
   } satisfies UseTimelineResult;
 }

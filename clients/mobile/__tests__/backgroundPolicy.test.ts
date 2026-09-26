@@ -55,10 +55,15 @@ describe('the 15-second grace period', () => {
     expect(actions).toEqual([
       {kind: 'arm-grace', delayMs: 15_000},
       {kind: 'cancel-grace'},
+      // `resume` leaves a connected socket alone (the transport checks), so a
+      // kept socket still means no reconnect, no token fetch and no recovery
+      // replay — the benefit the grace period exists to buy. It exists for the
+      // other case: a socket that died with the radio while away and is now
+      // sitting in a backoff `connect()` cannot cut short (#2751).
+      {kind: 'resume'},
     ]);
-    // No reconnect, so no token fetch and no recovery replay — which is the
-    // entire benefit the grace period exists to buy.
     expect(actions).not.toContainEqual({kind: 'connect'});
+    expect(actions).not.toContainEqual({kind: 'force-reconnect'});
     expect(state.gracePending).toBe(false);
   });
 
@@ -79,7 +84,7 @@ describe('the 15-second grace period', () => {
       {kind: 'grace-elapsed'},
       {kind: 'visibility', status: 'active'},
     ]);
-    expect(actions[actions.length - 1]).toEqual({kind: 'connect'});
+    expect(actions[actions.length - 1]).toEqual({kind: 'resume'});
   });
 
   it('does not drop when the timer fires after the person already returned', () => {

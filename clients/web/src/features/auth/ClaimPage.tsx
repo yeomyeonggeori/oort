@@ -1,19 +1,27 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { claimOwnerPassword, type LoginResponse, type Member } from "@momo/core/lib/api";
 import { claimFailureCopy, type ClaimFailure } from "@momo/core/features/auth/claimModel";
+import {
+  expressionForState,
+  onboardingDots,
+  type GuideState,
+} from "@momo/core/features/onboarding/guide";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-} from "@/design/ui/card";
-import { OortMark } from "@/design/brand/OortMark";
+import { titlebarDragProps } from "@/app/sidebarPane";
+import { IS_TAURI } from "@/lib/env";
 import { InlineBanner } from "@/features/common/States";
 import { useBrowserOffline } from "@/features/common/useOffline";
 import { recordFreshSignupFirstRun } from "@/features/welcome/freshSignupFirstRun";
 import { OwnerOnboarding } from "@/features/onboarding/OwnerOnboarding";
+import { KomettoGuide } from "@/features/onboarding/guide/KomettoGuide";
+import { OnboardingDots } from "@/features/onboarding/guide/OnboardingDots";
+import {
+  ONBOARDING_ACTION_CLASS,
+  ONBOARDING_FIELD_CLASS,
+  OnboardingColumn,
+  OnboardingFrame,
+} from "@/features/onboarding/guide/OnboardingFrame";
 import {
   finishOwnerOnboardingInvite,
   markOwnerOnboardingPending,
@@ -26,7 +34,17 @@ import {
 } from "./onboardingSessionHold";
 
 // Reading this as: onboarding claim-password form for self-host operators on
-// web+Tauri, density 6/10, motion 2/10.
+// web+Tauri, density 5/10, motion 2/10.
+//
+// 온보딩 2.0 D1″(ADR-0193 D11, #2811): 카드와 C2-04 락업 대신 새벽하늘 바닥 위에
+// 코메토 머리 + 한 문장. 점은 claim 경로 넷의 첫 칸이다(ADR-0185 증보 §5-2).
+// 비밀번호 규칙·실패 착지·세션 보류 순서는 그대로다.
+
+const CLAIM_LINE = "이 서버의 첫 주인이에요.";
+const CLAIM_DETAIL = "비밀번호를 정해요.";
+const CLAIM_BLOCKED_LINE = "이 링크로는 비밀번호를 정할 수 없어요.";
+const CLAIM_TROUBLE_LINE = "비밀번호를 아직 정하지 못했어요.";
+const CLAIM_OFFLINE_LINE = "연결이 끊겨서 잠깐 기다려요.";
 
 function FieldLabel({
   children,
@@ -145,142 +163,162 @@ export function ClaimPage({
     );
   }
 
+  const guideState: GuideState =
+    !showForm || failure !== null || offline ? "trouble" : "awaiting";
+  const guideLine = !showForm
+    ? CLAIM_BLOCKED_LINE
+    : failure !== null
+      ? CLAIM_TROUBLE_LINE
+      : offline
+        ? CLAIM_OFFLINE_LINE
+        : CLAIM_LINE;
+
   return (
-    <div className="flex min-h-full items-center justify-center p-6">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <h1 className="brand-lockup flex items-center gap-2 font-semibold leading-none tracking-tight">
-            <OortMark className="size-6 shrink-0 text-signal-text" />
-            <span className="text-title">oort</span>
-          </h1>
-          <CardDescription>
-            {showForm
-              ? "첫 비밀번호를 설정합니다."
-              : "이 링크로는 비밀번호를 설정할 수 없습니다."}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {offline && (
+    <OnboardingFrame
+      top={
+        <header
+          className="onboarding-step-chrome"
+          data-testid="onboarding-step-chrome"
+          {...titlebarDragProps(IS_TAURI)}
+        >
+          <span />
+          <OnboardingDots dots={onboardingDots("claim", "claim")} />
+          <span aria-hidden="true" />
+        </header>
+      }
+    >
+      <OnboardingColumn testId="claim-column">
+        <KomettoGuide
+          as="h1"
+          expression={expressionForState(guideState)}
+          line={guideLine}
+          detail={guideState === "awaiting" ? CLAIM_DETAIL : undefined}
+          lineTestId="claim-title"
+        />
+        {offline && (
+          <InlineBanner
+            tone="neutral"
+            message="오프라인입니다. 네트워크가 연결되면 다시 시도하세요."
+            testId="claim-offline"
+          />
+        )}
+
+        {missingToken && (
+          <div
+            ref={landingRef}
+            tabIndex={-1}
+            className="focus-visible:focus-ring"
+            data-landing="claim-failure"
+          >
             <InlineBanner
-              tone="neutral"
-              message="오프라인입니다. 네트워크가 연결되면 다시 시도하세요."
-              testId="claim-offline"
+              tone="error"
+              message="이 링크는 유효하지 않습니다. 받은 주소를 그대로 여세요."
+              testId="claim-missing-token"
             />
-          )}
+          </div>
+        )}
 
-          {missingToken && (
-            <div
-              ref={landingRef}
-              tabIndex={-1}
-              className="focus-visible:focus-ring"
-              data-landing="claim-failure"
-            >
-              <InlineBanner
-                tone="error"
-                message="이 링크는 유효하지 않습니다. 받은 주소를 그대로 여세요."
-                testId="claim-missing-token"
-              />
-            </div>
-          )}
-
-          {showForm ? (
-            <form onSubmit={onSubmit} className="flex flex-col gap-6">
-              {failure && (
-                <div
-                  ref={landingRef}
-                  tabIndex={-1}
-                  className="focus-visible:focus-ring"
-                  data-landing="claim-failure"
-                >
-                  <InlineBanner
-                    tone="error"
-                    message={failure.message}
-                    testId="claim-error"
-                  />
-                </div>
-              )}
-              <div className="flex flex-col gap-3">
-                <label htmlFor="claim-password" className="flex flex-col gap-1 text-body">
-                  <FieldLabel>새 비밀번호</FieldLabel>
-                  <Input
-                    id="claim-password"
-                    type="password"
-                    autoComplete="new-password"
-                    maxLength={1024}
-                    value={password}
-                    onChange={(e) => {
-                      setPassword(e.target.value);
-                      setMismatch(false);
-                    }}
-                    required
-                    data-testid="claim-password"
-                  />
-                </label>
-                <label htmlFor="claim-confirm" className="flex flex-col gap-1 text-body">
-                  <FieldLabel>비밀번호 확인</FieldLabel>
-                  <Input
-                    id="claim-confirm"
-                    type="password"
-                    autoComplete="new-password"
-                    maxLength={1024}
-                    value={confirm}
-                    onChange={(e) => {
-                      setConfirm(e.target.value);
-                      setMismatch(false);
-                    }}
-                    required
-                    aria-invalid={mismatch || undefined}
-                    aria-describedby={mismatch ? "claim-mismatch" : undefined}
-                    data-testid="claim-confirm"
-                  />
-                  {mismatch && (
-                    <p
-                      id="claim-mismatch"
-                      role="alert"
-                      className="text-meta text-danger"
-                      data-testid="claim-mismatch"
-                    >
-                      두 칸의 비밀번호가 같지 않습니다.
-                    </p>
-                  )}
-                </label>
+        {showForm ? (
+          <form onSubmit={onSubmit} className="flex flex-col gap-4">
+            {failure && (
+              <div
+                ref={landingRef}
+                tabIndex={-1}
+                className="focus-visible:focus-ring"
+                data-landing="claim-failure"
+              >
+                <InlineBanner
+                  tone="error"
+                  message={failure.message}
+                  testId="claim-error"
+                />
               </div>
-              <Button
-                type="submit"
-                disabled={busy || offline}
-                title={offline ? "오프라인 상태에서는 연결할 수 없습니다." : undefined}
-                data-testid="claim-submit"
+            )}
+            <div className="flex flex-col gap-4">
+              <label htmlFor="claim-password" className="flex flex-col gap-1 text-body">
+                <FieldLabel>새 비밀번호</FieldLabel>
+                <Input
+                  id="claim-password"
+                  className={ONBOARDING_FIELD_CLASS}
+                  type="password"
+                  autoComplete="new-password"
+                  maxLength={1024}
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setMismatch(false);
+                  }}
+                  required
+                  data-testid="claim-password"
+                />
+              </label>
+              <label htmlFor="claim-confirm" className="flex flex-col gap-1 text-body">
+                <FieldLabel>비밀번호 확인</FieldLabel>
+                <Input
+                  id="claim-confirm"
+                  className={ONBOARDING_FIELD_CLASS}
+                  type="password"
+                  autoComplete="new-password"
+                  maxLength={1024}
+                  value={confirm}
+                  onChange={(e) => {
+                    setConfirm(e.target.value);
+                    setMismatch(false);
+                  }}
+                  required
+                  aria-invalid={mismatch || undefined}
+                  aria-describedby={mismatch ? "claim-mismatch" : undefined}
+                  data-testid="claim-confirm"
+                />
+                {mismatch && (
+                  <p
+                    id="claim-mismatch"
+                    role="alert"
+                    className="text-meta text-danger"
+                    data-testid="claim-mismatch"
+                  >
+                    두 칸의 비밀번호가 같지 않습니다.
+                  </p>
+                )}
+              </label>
+            </div>
+            <Button
+              type="submit"
+              className={ONBOARDING_ACTION_CLASS}
+              disabled={busy || offline}
+              title={offline ? "오프라인 상태에서는 연결할 수 없습니다." : undefined}
+              data-testid="claim-submit"
+            >
+              {busy ? "설정 중…" : "비밀번호 설정"}
+            </Button>
+          </form>
+        ) : (
+          <>
+            {failure && (
+              <div
+                ref={landingRef}
+                tabIndex={-1}
+                className="focus-visible:focus-ring"
+                data-landing="claim-failure"
               >
-                {busy ? "설정 중…" : "비밀번호 설정"}
-              </Button>
-            </form>
-          ) : (
-            <>
-              {failure && (
-                <div
-                  ref={landingRef}
-                  tabIndex={-1}
-                  className="focus-visible:focus-ring"
-                  data-landing="claim-failure"
-                >
-                  <InlineBanner
-                    tone="error"
-                    message={failure.message}
-                    testId="claim-error"
-                  />
-                </div>
-              )}
-              <Button
-                type="button"
-                onClick={openConnectScreen}
-                data-testid="claim-open-connect"
-              >
-                로그인 화면 열기
-              </Button>
-            </>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+                <InlineBanner
+                  tone="error"
+                  message={failure.message}
+                  testId="claim-error"
+                />
+              </div>
+            )}
+            <Button
+              type="button"
+              className={ONBOARDING_ACTION_CLASS}
+              onClick={openConnectScreen}
+              data-testid="claim-open-connect"
+            >
+              로그인 화면 열기
+            </Button>
+          </>
+        )}
+      </OnboardingColumn>
+    </OnboardingFrame>
   );
 }

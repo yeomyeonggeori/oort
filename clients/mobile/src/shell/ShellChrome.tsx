@@ -16,59 +16,80 @@ import {ds2Type, TOUCH_TARGET, type Palette} from '../design/tokens';
 import {tabLabel, visibleTabs, type Tab} from '../nav/state';
 
 // =============================================================================
-// 폰 셸의 크롬 — 바닥, 떠 있는 알약 탭바, 잉크 FAB, 스크롤 페이드
-// (ADR-0189 D1, 시안 A `#a-home`, DS2-2 #2714).
+// 폰 셸의 크롬 — 바닥, 가운데 알약 탭바, 작은 + 단추, 스크롤 페이드
+// (ADR-0189 D1, 시안 A `#a-home`; 크기·배치는 DS2-2b #2750 에서 Buzz 로 줄였다).
 //
-// 값은 시안 CSS 그대로다. 옮긴 곳을 줄마다 적어 두어, 시안과 대조할 때 이 파일이
-// 원문 역할을 하게 한다:
+// ## 사양 표 (393pt 기준, Buzz 캡처 IMG_4161 1206px = 393pt → 3.07px/pt 로 환산)
 //
-//   .a-bg   linear-gradient(180deg, bgTop 0%, bgMid 46%, bgBot 100%)
-//   .a-tab  left 16 · bottom 30 · height 64 · radius 32 · padding 6 · gap 2 ·
-//           glass + blur(22) · 1px glassLine · sh2 (z 20 은 옮기지 않는다 — bar 주석)
-//   .a-tab button   78×52 · radius 26 · ink2 / on: ink 8% 채움 + ink
-//   .a-tab .dot     top 10 · right 22 · 17×17 · radius 9 · accent / onAccent ·
-//                   10.5/800 · 가로 4 · 2px surface 고리
-//   .a-fab  right 16 · bottom 30 · 64 원 · primary / onPrimary · sh2
+//   | 항목            | Buzz 실측          | 이전 oort(DS2-2)       | 이 파일                    |
+//   |-----------------|--------------------|------------------------|----------------------------|
+//   | 탭바 배치       | 가운데             | 왼쪽 16                | 가운데(묶음 전체가)        |
+//   | 탭바 크기       | ≈211×53            | 252×64                 | 212×54                     |
+//   | 탭(선택 채움)   | ≈67×46             | 78×52                  | 66×46 · 반경 23            |
+//   | 탭바 여백       | ≈3.5               | 6 · 틈 2               | 4 · 틈 2                   |
+//   | 새로 만들기     | 별도 FAB 없음      | 오른쪽 64 원 FAB       | 알약 옆 54 원 +(틈 8)      |
+//   | + 누르면        | 작은 어두운 팝오버 | 전면 시트              | 작은 팝오버(`PlusMenu`)    |
+//   | 하단 크롬 폭    | 211                | 16+252…64+16 = 전폭    | 212 + 8 + 54 = 274         |
+//   | 바닥에서        | ≈34                | 30                     | 30(시안 A 값 유지)         |
+//
+// 재질·색은 시안 A 그대로다(owner 결정: 레퍼런스는 크기·배치만 Buzz):
+//
+//   .a-tab  glass + blur(22) · 1px glassLine · sh2 (z 20 은 옮기지 않는다 — bar 주석)
+//   .a-tab button   ink2 / on: ink 8% 채움 + ink
+//   .a-tab .dot     17×17 · accent / onAccent · 10.5/800 · 가로 4 · 2px surface 고리
+//                   (자리는 탭이 줄어든 비율로 옮긴다: top 8 · right 16)
+//   .a-fab  primary / onPrimary · sh2 — 지름만 64 → 54(탭바 높이와 같다)
 //   .a-fade left 0 · right 0 · bottom 0 · height 150 ·
 //           linear-gradient(180deg, transparent, bgBot 62%)
 //
 // 탭바는 아이콘만 든다. 시안이 그렇고, 이름은 VoiceOver 라벨이 진다(탭마다
 // `tabLabel`). 아이콘이 글자를 대신하므로 Dynamic Type 으로 커질 글자가 탭바에
-// 없다 — 옛 탭바가 큰 글자에서 세로로 자라던 규칙은 이 탭바에 물려받을 대상이 없다.
+// 없다.
+//
+// + 는 탭바 **밖**의 형제다. `tablist` 안에 넣으면 VoiceOver 가 「탭, 4개 중 4번째」로
+// 읽어 행위를 자리로 오해하게 한다. 두 배치 안(알약 안 네 번째 칸 / 알약 옆 작은
+// 원)을 캡처로 비교했고 옆 원을 골랐다 — PR #2750 본문 「배치 비교」.
 // =============================================================================
 
-/** 시안 수치. 캡처와 시험이 같은 이름을 읽는다. */
+/** 사양 수치. 캡처와 시험이 같은 이름을 읽는다. */
 export const SHELL = {
-  inset: 16,
   bottom: 30,
-  barHeight: 64,
-  barPadding: 6,
+  barHeight: 54,
+  /** 안쪽 여백. 세로는 테두리 1 을 포함한다: 1 + 3 + 46 + 3 + 1 = 54. */
+  barPadding: 4,
   barGap: 2,
-  tabWidth: 78,
-  tabHeight: 52,
-  fab: 64,
+  tabWidth: 66,
+  tabHeight: 46,
+  /** + 원의 지름 — 탭바 높이와 같다. 두 도형의 윗선·아랫선이 한 줄에 선다. */
+  plus: 54,
+  /** 탭바와 + 사이. */
+  plusGap: 8,
+  /** 좁은 창에서 크롬이 창 가장자리에 남길 최소 여백. */
+  minInset: 16,
   fadeHeight: 150,
   dot: 17,
   /** 시안 `.a-scroll{padding-bottom:140px}` — 목록 끝이 탭바 밑에 숨지 않게. */
   clearance: 140,
-  /** 탭바와 FAB 사이에 남길 최소 틈. 시안(390)에서는 42 가 남는다. */
-  minGap: 8,
 } as const;
 
 /** 테두리 두 줄 + 가로 여백 둘 + 틈 둘 — 탭 폭 밖에서 탭바가 먹는 폭. */
 const BAR_CHROME = 2 + SHELL.barPadding * 2 + SHELL.barGap * 2;
 
+/** 탭 폭에서 탭바의 폭. */
+export function barWidthFor(tabWidth: number): number {
+  return tabWidth * 3 + BAR_CHROME;
+}
+
 /**
  * 창 폭에서 탭 하나의 폭.
  *
- * 시안 값(78)은 375pt 이상에서 그대로다: 16 + 252 + 틈 + 64 + 16 = 348 + 틈. 그보다 좁은
- * 창(iPad Slide Over 320, 확대 모드 320)에서는 78 을 지키면 탭바 끝이 FAB 밑으로
- * 28pt 들어간다(design-review H1). 그때만 탭을 줄여 FAB 앞 `minGap` 에서 멈춘다.
- * 줄여도 터치 44 아래로는 가지 않는다 — 320 에서 66 이다.
+ * 사양 값(66)은 306pt 창까지 그대로 들어간다: 16 + 212 + 8 + 54 + 16 = 306. 그보다
+ * 좁은 창은 폰에 없지만(최소 320), 식은 줄여서 가장자리 여백 16 을 지키고 44 아래로는
+ * 가지 않는다.
  */
 export function tabWidthFor(windowWidth: number): number {
   const room =
-    windowWidth - SHELL.inset * 2 - SHELL.fab - SHELL.minGap - BAR_CHROME;
+    windowWidth - SHELL.minInset * 2 - SHELL.plus - SHELL.plusGap - BAR_CHROME;
   return Math.max(TOUCH_TARGET, Math.min(SHELL.tabWidth, Math.floor(room / 3)));
 }
 
@@ -131,109 +152,160 @@ function coveredProps(covered: boolean) {
     : {};
 }
 
-export function FloatingTabBar({
+/**
+ * 하단 크롬 — 가운데 정렬된 알약 탭바와 + 단추 한 묶음.
+ *
+ * 가운데 정렬은 창 폭 전체를 차지하는 절대 띠로 하고, 띠 자신은 누름을 받지 않는다
+ * (`box-none`). 띠가 누름을 먹으면 탭바 양옆 빈 자리에서 목록의 마지막 줄이 눌리지
+ * 않는다.
+ */
+export function ShellBottomBar({
   current,
   inboxCount,
   onSelect,
+  onPlus,
+  plusOpen = false,
   covered = false,
 }: {
-  /** 층이 셸을 덮고 있는가(`coveredProps`). */
-  covered?: boolean;
   current: Tab;
   /** 인박스 점의 수. 0이면 점이 없다. */
   inboxCount: number;
   onSelect: (tab: Tab) => void;
+  onPlus: () => void;
+  /** + 메뉴가 열려 있는가(보조기술의 「펼쳐짐」). */
+  plusOpen?: boolean;
+  /** 층이 셸을 덮고 있는가(`coveredProps`). */
+  covered?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const palette = usePalette();
   const tabWidth = tabWidthFor(useWindowDimensions().width);
   return (
-    <GlassSurface
-      radius={SHELL.barHeight / 2}
-      style={styles.bar}
-      testID="shell-tabbar">
-      <View accessibilityRole="tablist" style={styles.barRow} {...coveredProps(covered)}>
-        {visibleTabs().map(tab => {
-          const selected = tab === current;
-          const badge = tab === 'inbox' ? inboxCount : 0;
-          const icon = TAB_ICON[tab];
-          return (
-            <Pressable
-              key={tab}
-              accessibilityRole="tab"
-              accessibilityState={{selected}}
-              accessibilityLabel={
-                badge > 0 ? `${tabLabel(tab)}, 멘션 ${badge}개` : tabLabel(tab)
-              }
-              onPress={() => onSelect(tab)}
-              style={({pressed}) => [
-                styles.tab,
-                {width: tabWidth},
-                selected && styles.tabOn,
-                pressed && styles.pressed,
-              ]}
-              testID={`tab-${tab}`}>
-              <Image
-                source={SHELL_ICONS[icon]}
-                style={{
-                  width: SHELL_ICON_SIZE[icon],
-                  height: SHELL_ICON_SIZE[icon],
-                  tintColor: selected ? palette.text : palette.textMuted,
-                }}
-                testID={`tab-icon-${tab}`}
+    <View pointerEvents="box-none" style={styles.band} testID="shell-bottom">
+      <GlassSurface
+        radius={SHELL.barHeight / 2}
+        style={styles.bar}
+        testID="shell-tabbar">
+        <View style={styles.barRow}>
+          <View accessibilityRole="tablist" style={styles.tabs} {...coveredProps(covered)}>
+            {visibleTabs().map(tab => (
+              <TabButton
+                key={tab}
+                tab={tab}
+                width={tabWidth}
+                selected={tab === current}
+                badge={tab === 'inbox' ? inboxCount : 0}
+                onPress={() => onSelect(tab)}
               />
-              {badge > 0 ? (
-                <View style={styles.dot} testID={`tab-dot-${tab}`}>
-                  <Text
-                    style={styles.dotLabel}
-                    maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
-                    importantForAccessibility="no"
-                    accessibilityElementsHidden>
-                    {badge > 99 ? '99+' : String(badge)}
-                  </Text>
-                </View>
-              ) : null}
-            </Pressable>
-          );
-        })}
-      </View>
-    </GlassSurface>
+            ))}
+          </View>
+        </View>
+      </GlassSurface>
+      <PlusButton onPress={onPlus} open={plusOpen} covered={covered} />
+    </View>
   );
 }
 
-// ---- 잉크 FAB ----------------------------------------------------------------
-
-export function InkFab({
+function TabButton({
+  tab,
+  width,
+  selected,
+  badge,
   onPress,
-  covered = false,
+}: {
+  tab: Tab;
+  width: number;
+  selected: boolean;
+  badge: number;
+  onPress: () => void;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const palette = usePalette();
+  const icon = TAB_ICON[tab];
+  return (
+    <Pressable
+      accessibilityRole="tab"
+      accessibilityState={{selected}}
+      accessibilityLabel={
+        badge > 0 ? `${tabLabel(tab)}, 멘션 ${badge}개` : tabLabel(tab)
+      }
+      onPress={onPress}
+      style={({pressed}) => [
+        styles.tab,
+        {width},
+        selected && styles.tabOn,
+        pressed && styles.pressed,
+      ]}
+      testID={`tab-${tab}`}>
+      <Image
+        source={SHELL_ICONS[icon]}
+        style={{
+          width: SHELL_ICON_SIZE[icon],
+          height: SHELL_ICON_SIZE[icon],
+          tintColor: selected ? palette.text : palette.textMuted,
+        }}
+        testID={`tab-icon-${tab}`}
+      />
+      {badge > 0 ? (
+        <View style={styles.dot} testID={`tab-dot-${tab}`}>
+          <Text
+            style={styles.dotLabel}
+            maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+            importantForAccessibility="no"
+            accessibilityElementsHidden>
+            {badge > 99 ? '99+' : String(badge)}
+          </Text>
+        </View>
+      ) : null}
+    </Pressable>
+  );
+}
+
+// ---- + 단추 ------------------------------------------------------------------
+
+/** + 단추의 VoiceOver 이름. 메뉴의 이름도 같다 — 무엇을 열었는지 한 낱말로 잇는다. */
+export const PLUS_LABEL = '새로 만들기';
+
+function PlusButton({
+  onPress,
+  open,
+  covered,
 }: {
   onPress: () => void;
-  /** 층이 셸을 덮고 있는가(`coveredProps`). */
-  covered?: boolean;
+  open: boolean;
+  covered: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel="새 메시지"
-      accessibilityHint="받는 사람을 고르거나 에이전트를 부릅니다."
+      accessibilityLabel={PLUS_LABEL}
+      // 행은 역할·서버 표면에 따라 달라진다(새 채널·작업 콘솔). 힌트가 목록을 읊으면
+      // 없는 행을 안내하게 되므로 무엇이 열리는지만 말한다(design-review M2).
+      accessibilityHint="만들기 메뉴를 엽니다."
+      accessibilityState={{expanded: open}}
       onPress={onPress}
-      style={({pressed}) => [styles.fab, pressed && styles.fabPressed]}
+      style={({pressed}) => [
+        styles.plus,
+        pressed && styles.plusPressed,
+      ]}
       {...coveredProps(covered)}
-      testID="shell-fab">
+      testID="shell-plus">
       <Image
         source={SHELL_ICONS.plus}
         style={{
-          width: SHELL_ICON_SIZE.plus,
-          height: SHELL_ICON_SIZE.plus,
+          width: PLUS_ICON,
+          height: PLUS_ICON,
           tintColor: palette.onPrimary,
         }}
-        testID="shell-fab-icon"
+        testID="shell-plus-icon"
       />
     </Pressable>
   );
 }
+
+/** + 글리프. 26 래스터를 24 로 그린다 — 지름이 64 → 54 로 준 만큼 따라 준다. */
+export const PLUS_ICON = 24;
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
@@ -253,10 +325,17 @@ const buildStyles = (color: Palette) =>
       // 시작한다 — 시안의 `transparent`가 브라우저에서 그리는 것과 같은 그림이다.
       experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasBottom}00 0%, ${color.canvasBottom} 62%)`,
     },
-    bar: {
+    band: {
       position: 'absolute',
-      left: SHELL.inset,
+      left: 0,
+      right: 0,
       bottom: SHELL.bottom,
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'center',
+      gap: SHELL.plusGap,
+    },
+    bar: {
       height: SHELL.barHeight,
       borderRadius: SHELL.barHeight / 2,
       borderWidth: 1,
@@ -267,17 +346,17 @@ const buildStyles = (color: Palette) =>
       // 열리는 층(대화·에이전트 목록)의 **위**에 서서 컴포저를 가린다(design-review
       // B1). 셸은 크롬을 층보다 먼저 그리므로 트리 순서만으로 시안의 겹침이 선다.
     },
-    // 시안은 `box-sizing: border-box`라 1px 테두리가 높이 64 안에 든다. 세로 여백
-    // 6에서 그 1을 빼야 안쪽이 52가 되어 탭 52가 넘치지 않는다. 가로는 폭이 내용에서
-    // 나오므로(auto) 6 그대로다: 78×3 + 2×2 + 6×2 + 테두리 2 = 252.
+    // 시안은 `box-sizing: border-box`라 1px 테두리가 높이 안에 든다. 세로 여백 4 에서
+    // 그 1을 빼야 안쪽이 46이 되어 탭 46이 넘치지 않는다: 1 + 3 + 46 + 3 + 1 = 54.
+    // 가로는 폭이 내용에서 나오므로(auto) 4 그대로다: 66×3 + 2×2 + 4×2 + 테두리 2 = 212.
     barRow: {
       flex: 1,
       flexDirection: 'row',
       alignItems: 'center',
-      gap: SHELL.barGap,
       paddingVertical: SHELL.barPadding - 1,
       paddingHorizontal: SHELL.barPadding,
     },
+    tabs: {flexDirection: 'row', alignItems: 'center', gap: SHELL.barGap},
     tab: {
       width: SHELL.tabWidth,
       height: SHELL.tabHeight,
@@ -290,8 +369,8 @@ const buildStyles = (color: Palette) =>
     pressed: {opacity: 0.6},
     dot: {
       position: 'absolute',
-      top: 10,
-      right: 22,
+      top: 8,
+      right: 16,
       minWidth: SHELL.dot,
       height: SHELL.dot,
       // 시안 9 는 높이 17 의 절반을 넘어 브라우저가 8.5 로 자른다 — 둥근 끝의 산수다.
@@ -307,18 +386,15 @@ const buildStyles = (color: Palette) =>
       fontWeight: '800',
       color: color.onAccent,
     },
-    fab: {
-      position: 'absolute',
-      right: SHELL.inset,
-      bottom: SHELL.bottom,
-      width: SHELL.fab,
-      height: SHELL.fab,
-      borderRadius: SHELL.fab / 2,
+    plus: {
+      width: SHELL.plus,
+      height: SHELL.plus,
+      borderRadius: SHELL.plus / 2,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: color.primary,
       boxShadow: color.elevationFloat,
       // zIndex 없음 — 위 `bar` 주석과 같은 이유.
     },
-    fabPressed: {backgroundColor: color.text, opacity: 0.85},
+    plusPressed: {opacity: 0.8},
   });

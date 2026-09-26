@@ -80,27 +80,6 @@ export const MAX_SIMULTANEOUS_ARRIVALS = 3;
 const HEAD_LIMIT = 50;
 const PAGE_LIMIT = 50;
 
-/** Like `capArrivalSet`, but never deletes `keep`. Size may stay above `max`
- *  only when every remaining id is the pinned one. */
-function capArrivalSetKeeping(
-  ids: Set<string>,
-  max: number,
-  keep: string | null
-): void {
-  const pinned = keep?.toLowerCase() ?? null;
-  while (ids.size > max) {
-    let oldest: string | undefined;
-    for (const id of ids) {
-      if (id !== pinned) {
-        oldest = id;
-        break;
-      }
-    }
-    if (oldest === undefined) break;
-    ids.delete(oldest);
-  }
-}
-
 export interface ResumeInfo {
   /** How the last (re)subscribe resolved. */
   lastRecovered: boolean | null;
@@ -176,13 +155,6 @@ export interface UseTimelineResult {
   /** ADR-0179 D3 — live-arrival grant still waiting for first mount. */
   isPlayEntrance: (messageId: string) => boolean;
   consumeEntrance: (messageId: string) => void;
-  /**
-   * Pin a grant so `MAX_SIMULTANEOUS_ARRIVALS` eviction cannot drop it.
-   * ChatShell passes the welcome opener (`holdEntranceId`) here: a same-tick
-   * live batch ≥4 would otherwise evict the oldest grant, which is the
-   * opener UX-R2b holds until stage exit.
-   */
-  pinArrivalGrant: (messageId: string | null) => void;
   /**
    * Evict unmounted leftover grants (scrolled-up backlog). Timeline calls
    * this when the reader is not at the bottom. Mounted rows consume
@@ -292,7 +264,6 @@ export function useTimeline(
   const heldIdsRef = useRef(new Set<string>());
   const consumedArrivalIdsRef = useRef(new Set<string>());
   const playOnMountRef = useRef(new Set<string>());
-  const pinnedEntranceRef = useRef<string | null>(null);
   const pendingRef = useRef<PendingMessage[]>([]);
 
   const isPlayEntrance = useCallback(
@@ -302,24 +273,8 @@ export function useTimeline(
   const consumeEntrance = useCallback((messageId: string) => {
     playOnMountRef.current.delete(messageId.toLowerCase());
   }, []);
-  const pinArrivalGrant = useCallback((messageId: string | null) => {
-    const pinned = messageId?.toLowerCase() ?? null;
-    pinnedEntranceRef.current = pinned;
-    if (pinned && consumedArrivalIdsRef.current.has(pinned)) {
-      playOnMountRef.current.add(pinned);
-      capArrivalSetKeeping(
-        playOnMountRef.current,
-        MAX_SIMULTANEOUS_ARRIVALS,
-        pinned
-      );
-    }
-  }, []);
   const capUnmountedArrivals = useCallback(() => {
-    capArrivalSetKeeping(
-      playOnMountRef.current,
-      MAX_PENDING_ARRIVAL_GRANTS,
-      pinnedEntranceRef.current
-    );
+    capArrivalSet(playOnMountRef.current, MAX_PENDING_ARRIVAL_GRANTS);
   }, []);
 
   const applyBatch = useCallback(
@@ -362,11 +317,7 @@ export function useTimeline(
       const liveNew =
         meta.provenance === "live" && meta.eventType === "message.new";
       if (liveNew) {
-        capArrivalSetKeeping(
-          playOnMountRef.current,
-          MAX_SIMULTANEOUS_ARRIVALS,
-          pinnedEntranceRef.current
-        );
+        capArrivalSet(playOnMountRef.current, MAX_SIMULTANEOUS_ARRIVALS);
       }
       // N-1 / N-5: heldIdsRef is uncapped per channel visit and alreadyHeld
       // short-circuits takeArrivalPlay before this ledger is read. Replay
@@ -575,7 +526,6 @@ export function useTimeline(
     heldIdsRef.current = new Set();
     consumedArrivalIdsRef.current = new Set();
     playOnMountRef.current = new Set();
-    pinnedEntranceRef.current = null;
     updatePending(() => []);
     setState(emptyTimeline());
     setStatus("loading");
@@ -943,7 +893,6 @@ export function useTimeline(
     removeUnfurls,
     isPlayEntrance,
     consumeEntrance,
-    pinArrivalGrant,
     capUnmountedArrivals,
   };
 }

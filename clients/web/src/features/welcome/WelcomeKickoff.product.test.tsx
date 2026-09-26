@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-// Product path: real Timeline + real useTimeline store + useWelcomeKickoff.
+// Product path: real Timeline + real useTimeline store + useWelcomeKickoff,
+// with the kickoff band beside the list the way ChatShell mounts it (#2817).
 
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -8,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import {
   act,
   createElement,
+  Fragment,
   forwardRef,
   useEffect,
   useImperativeHandle,
@@ -32,10 +34,16 @@ import { Timeline } from "@/features/timeline/Timeline";
 import { useTimeline } from "@/features/timeline/useTimeline";
 import type { RealtimeHandle } from "@/lib/realtime";
 import { markFreshSignup, peekFreshSignup, clearFreshSignup } from "./freshSignup";
-import { useWelcomeKickoff, welcomePlayEntrance } from "./useWelcomeKickoff";
+import { useWelcomeKickoff } from "./useWelcomeKickoff";
+import { WelcomeKickoffStage } from "./WelcomeKickoffStage";
 import {
-  WELCOME_BACKSTOP_COPY,
+  WELCOME_BACKSTOP_AFTER,
+  WELCOME_BACKSTOP_BEFORE,
   WELCOME_BACKSTOP_MS,
+  WELCOME_BACKSTOP_TITLE,
+  WELCOME_BAND_JOY_COPY,
+  WELCOME_BAND_JOY_HOLD_MS,
+  WELCOME_BAND_SLEEPY_COPY,
   readShownMarker,
   welcomeShownKey,
   writeShownMarker,
@@ -316,19 +324,40 @@ function WelcomeFed(props: {
     directory: props.directory ?? directory,
     realtime,
   });
-  return createElement(Timeline, {
-    messages: props.messages,
-    directory,
-    status: "ready",
-    reachedStart: true,
-    channelKind: "public",
-    channelName: "general",
-    isPlayEntrance: () => false,
-    welcomePhase: welcome.phase,
-    welcomeReducedMotion: welcome.reducedMotion,
-    welcomeHoldWriteAction: welcome.holdWriteAction,
-    onWelcomeExitComplete: welcome.onExitComplete,
-  });
+  return withBand(
+    createElement(Timeline, {
+      messages: props.messages,
+      directory,
+      status: "ready",
+      reachedStart: true,
+      channelKind: "public",
+      channelName: "general",
+      isPlayEntrance: () => false,
+      welcomePhase: welcome.phase,
+      welcomeHoldWriteAction: welcome.holdWriteAction,
+    }),
+    welcome
+  );
+}
+
+/** ChatShell's composition: the list, then the band above the composer. */
+function withBand(
+  list: ReactElement,
+  welcome: ReturnType<typeof useWelcomeKickoff>
+): ReactElement {
+  return createElement(
+    Fragment,
+    null,
+    list,
+    welcome.phase === "hidden"
+      ? null
+      : createElement(WelcomeKickoffStage, {
+          phase: welcome.phase,
+          reducedMotion: welcome.reducedMotion,
+          speaker: welcome.speaker,
+          onExitComplete: welcome.onExitComplete,
+        })
+  );
 }
 
 function WelcomeTimeline(props: {
@@ -356,25 +385,21 @@ function WelcomeTimeline(props: {
     directory: resolvedDirectory,
     realtime,
   });
-  const pinArrivalGrant = timeline.pinArrivalGrant;
-  useEffect(() => {
-    pinArrivalGrant(welcome.holdEntranceId);
-  }, [pinArrivalGrant, welcome.holdEntranceId]);
-  return createElement(Timeline, {
-    messages: timeline.state.messages,
-    directory: resolvedDirectory,
-    status: timeline.status === "error" ? "error" : "ready",
-    reachedStart: true,
-    channelKind: "public",
-    channelName: props.channelName ?? "general",
-    isPlayEntrance: (id: string) =>
-      welcomePlayEntrance(welcome.holdEntranceId, id, timeline.isPlayEntrance),
-    onEntranceConsumed: timeline.consumeEntrance,
-    welcomePhase: welcome.phase,
-    welcomeReducedMotion: welcome.reducedMotion,
-    welcomeHoldWriteAction: welcome.holdWriteAction,
-    onWelcomeExitComplete: welcome.onExitComplete,
-  });
+  return withBand(
+    createElement(Timeline, {
+      messages: timeline.state.messages,
+      directory: resolvedDirectory,
+      status: timeline.status === "error" ? "error" : "ready",
+      reachedStart: true,
+      channelKind: "public",
+      channelName: props.channelName ?? "general",
+      isPlayEntrance: timeline.isPlayEntrance,
+      onEntranceConsumed: timeline.consumeEntrance,
+      welcomePhase: welcome.phase,
+      welcomeHoldWriteAction: welcome.holdWriteAction,
+    }),
+    welcome
+  );
 }
 
 async function settle(): Promise<void> {
@@ -461,36 +486,55 @@ function restAgentMessage(): Message {
   };
 }
 
+const BAND = "[data-testid='welcome-kickoff-stage']";
+
+/**
+ * Joy hold → collapse class → collapse animationend → band gone. Needs fake
+ * timers (the hold is `WELCOME_BAND_JOY_HOLD_MS`).
+ */
+async function finishBandExit(root: HTMLElement): Promise<void> {
+  const band = root.querySelector(BAND);
+  expect(band?.getAttribute("data-state")).toBe("joy");
+  expect(band?.textContent).toContain(WELCOME_BAND_JOY_COPY);
+  expect(band?.classList.contains(WELCOME_KICKOFF_EXIT_CLASS)).toBe(false);
+  await act(async () => {
+    vi.advanceTimersByTime(WELCOME_BAND_JOY_HOLD_MS);
+  });
+  expect(band?.classList.contains(WELCOME_KICKOFF_EXIT_CLASS)).toBe(true);
+  act(() => {
+    const event = new Event("animationend", { bubbles: true });
+    Object.defineProperty(event, "animationName", {
+      value: WELCOME_KICKOFF_EXIT_ANIMATION_NAME,
+    });
+    band?.dispatchEvent(event);
+  });
+  await settle();
+  expect(root.querySelector(BAND)).toBeNull();
+}
+
 describe("welcome kickoff product path", () => {
-  it("opener arrives → stage exits, enter-conversation on exactly one row, seam cleared, shown-marker written", async () => {
+  it("opener arrives → band turns to joy while the opener plays its arrival, then collapses; seam cleared, shown-marker written", async () => {
+    vi.useFakeTimers();
     const root = await mountWelcome();
-    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).not.toBeNull();
+    expect(root.querySelector(BAND)?.getAttribute("data-state")).toBe("working");
     await act(async () => {
       rail.handlers?.onMessage(
         frame(OPENER_ID, AGENT, 1, "시작할까요? 이 워크스페이스에서 같이 일해요.")
       );
     });
     await settle();
-    const stage = root.querySelector("[data-testid='welcome-kickoff-stage']");
-    expect(stage?.classList.contains(WELCOME_KICKOFF_EXIT_CLASS)).toBe(true);
-    expect(entranceCount(root)).toBe(0);
-    act(() => {
-      const event = new Event("animationend", { bubbles: true });
-      Object.defineProperty(event, "animationName", {
-        value: WELCOME_KICKOFF_EXIT_ANIMATION_NAME,
-      });
-      stage?.dispatchEvent(event);
-    });
-    await settle();
-    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
+    // Mockup D5: the opener row and the joy band are on screen together. The
+    // band is outside the list, so the row no longer waits for its exit.
+    expect(entranceCount(root)).toBe(1);
+    await finishBandExit(root);
     expect(entranceCount(root)).toBe(1);
     expect(peekFreshSignup()).toBeNull();
     expect(readShownMarker(WS, ME)).toBe(true);
   });
 
-  it("stage mounted + live batch of 5 including the opener → opener still plays exactly once and the stage exits", async () => {
+  it("band mounted + same-tick live batch of 5 including the opener → band exits; arrivals stay under the simultaneous cap", async () => {
+    vi.useFakeTimers();
     const root = await mountWelcome();
-    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).not.toBeNull();
     const extra = [
       "0199eeee-0000-7000-8000-000000000511",
       "0199eeee-0000-7000-8000-000000000512",
@@ -508,84 +552,8 @@ describe("welcome kickoff product path", () => {
       });
     });
     await settle();
-    const stage = root.querySelector("[data-testid='welcome-kickoff-stage']");
-    expect(stage).not.toBeNull();
-    expect(stage?.classList.contains(WELCOME_KICKOFF_EXIT_CLASS)).toBe(true);
-    expect(
-      [...root.querySelectorAll("[data-testid='timeline-message']")].some(
-        (node) =>
-          node.getAttribute("data-message-id") === OPENER_ID &&
-          node.classList.contains(ENTER_CONVERSATION_CLASS)
-      )
-    ).toBe(false);
-    act(() => {
-      const event = new Event("animationend", { bubbles: true });
-      Object.defineProperty(event, "animationName", {
-        value: WELCOME_KICKOFF_EXIT_ANIMATION_NAME,
-      });
-      stage?.dispatchEvent(event);
-    });
-    await settle();
-    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
-    const opener = [...root.querySelectorAll("[data-testid='timeline-message']")].find(
-      (node) => node.getAttribute("data-message-id") === OPENER_ID
-    );
-    expect(opener).toBeTruthy();
-    expect(opener?.classList.contains(ENTER_CONVERSATION_CLASS)).toBe(true);
-    expect(
-      [...root.querySelectorAll("[data-testid='timeline-message']")].filter(
-        (node) =>
-          node.getAttribute("data-message-id") === OPENER_ID &&
-          node.classList.contains(ENTER_CONVERSATION_CLASS)
-      )
-    ).toHaveLength(1);
-  });
-
-  it("stage mounted + opener pinned, then a later live batch of 4 → opener still plays exactly once", async () => {
-    const root = await mountWelcome();
-    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).not.toBeNull();
-    await act(async () => {
-      rail.handlers?.onMessage(
-        frame(OPENER_ID, AGENT, 1, "시작할까요? 이 워크스페이스에서 같이 일해요.")
-      );
-    });
-    await settle();
-    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).not.toBeNull();
-    const later = [
-      "0199eeee-0000-7000-8000-000000000521",
-      "0199eeee-0000-7000-8000-000000000522",
-      "0199eeee-0000-7000-8000-000000000523",
-      "0199eeee-0000-7000-8000-000000000524",
-    ] as const;
-    await act(async () => {
-      later.forEach((id, i) => {
-        rail.handlers?.onMessage(frame(id, AGENT, i + 2, `핀 이후 라이브 ${i + 2}`));
-      });
-    });
-    await settle();
-    const stage = root.querySelector("[data-testid='welcome-kickoff-stage']");
-    expect(stage).not.toBeNull();
-    act(() => {
-      const event = new Event("animationend", { bubbles: true });
-      Object.defineProperty(event, "animationName", {
-        value: WELCOME_KICKOFF_EXIT_ANIMATION_NAME,
-      });
-      stage?.dispatchEvent(event);
-    });
-    await settle();
-    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
-    const opener = [...root.querySelectorAll("[data-testid='timeline-message']")].find(
-      (node) => node.getAttribute("data-message-id") === OPENER_ID
-    );
-    expect(opener).toBeTruthy();
-    expect(opener?.classList.contains(ENTER_CONVERSATION_CLASS)).toBe(true);
-    expect(
-      [...root.querySelectorAll("[data-testid='timeline-message']")].filter(
-        (node) =>
-          node.getAttribute("data-message-id") === OPENER_ID &&
-          node.classList.contains(ENTER_CONVERSATION_CLASS)
-      )
-    ).toHaveLength(1);
+    expect(entranceCount(root)).toBeLessThanOrEqual(3);
+    await finishBandExit(root);
   });
 
   it("120s without an opener → guidance card; seam cleared and shown-marker written; later opener still exits the card", async () => {
@@ -596,7 +564,11 @@ describe("welcome kickoff product path", () => {
       vi.advanceTimersByTime(WELCOME_BACKSTOP_MS);
     });
     const card = root.querySelector("[data-testid='welcome-kickoff-backstop']");
-    expect(card?.textContent).toContain(WELCOME_BACKSTOP_COPY);
+    expect(card?.getAttribute("data-state")).toBe("backstop");
+    expect(card?.textContent).toContain(WELCOME_BACKSTOP_TITLE);
+    expect(card?.textContent).toContain(
+      `${WELCOME_BACKSTOP_BEFORE}${AGENTS_NAV.label}${WELCOME_BACKSTOP_AFTER}`
+    );
     expect(card?.textContent).not.toMatch(/실패|오류|error|fail/i);
     expect((card?.textContent ?? "").split(AGENTS_NAV.label).length - 1).toBe(1);
     expect(peekFreshSignup()).toBeNull();
@@ -610,18 +582,9 @@ describe("welcome kickoff product path", () => {
       );
     });
     await settle();
-    const exiting = root.querySelector("[data-testid='welcome-kickoff-backstop']");
-    expect(exiting?.classList.contains(WELCOME_KICKOFF_EXIT_CLASS)).toBe(true);
-    act(() => {
-      const event = new Event("animationend", { bubbles: true });
-      Object.defineProperty(event, "animationName", {
-        value: WELCOME_KICKOFF_EXIT_ANIMATION_NAME,
-      });
-      exiting?.dispatchEvent(event);
-    });
-    await settle();
     expect(root.querySelector("[data-testid='welcome-kickoff-backstop']")).toBeNull();
     expect(entranceCount(root)).toBe(1);
+    await finishBandExit(root);
   });
 
   it("120s without an opener → reload of #general shows no stage and no card replay", async () => {
@@ -702,10 +665,7 @@ describe("welcome kickoff product path", () => {
       rail.handlers?.onMessage(frame(HUMAN_MSG_ID, HUMAN, 1, "안녕하세요"));
     });
     await settle();
-    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).not.toBeNull();
-    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")?.classList.contains(
-      WELCOME_KICKOFF_EXIT_CLASS
-    )).toBe(false);
+    expect(root.querySelector(BAND)?.getAttribute("data-state")).toBe("working");
     expect(peekFreshSignup()).not.toBeNull();
   });
 
@@ -722,11 +682,7 @@ describe("welcome kickoff product path", () => {
       );
     });
     await settle();
-    expect(
-      root
-        .querySelector("[data-testid='welcome-kickoff-stage']")
-        ?.classList.contains(WELCOME_KICKOFF_EXIT_CLASS)
-    ).toBe(true);
+    expect(root.querySelector(BAND)?.getAttribute("data-state")).toBe("joy");
   });
 
   it("agent.partial frame exits the stage without a message yet", async () => {
@@ -744,26 +700,35 @@ describe("welcome kickoff product path", () => {
       });
     });
     await settle();
-    expect(
-      root
-        .querySelector("[data-testid='welcome-kickoff-stage']")
-        ?.classList.contains(WELCOME_KICKOFF_EXIT_CLASS)
-    ).toBe(true);
+    expect(root.querySelector(BAND)?.getAttribute("data-state")).toBe("joy");
   });
 
-  it("reduced-motion: no stagger custom property, immediate exit", async () => {
+  it("reduced-motion: joy face swap only, then the band leaves without collapsing", async () => {
+    vi.useFakeTimers();
     reducedMotion = true;
     const root = await mountWelcome();
-    const stage = root.querySelector("[data-testid='welcome-kickoff-stage']");
-    expect(stage).not.toBeNull();
-    expect(stage?.querySelector("[data-stagger-index]")).toBeNull();
+    expect(root.querySelector(BAND)).not.toBeNull();
     await act(async () => {
       rail.handlers?.onMessage(
         frame(OPENER_ID, AGENT, 1, "시작할까요? 이 워크스페이스에서 같이 일해요.")
       );
     });
     await settle();
-    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
+    const band = root.querySelector(BAND);
+    expect(band?.getAttribute("data-state")).toBe("joy");
+    expect(band?.querySelector("[data-testid='kometto-face']")?.getAttribute("data-expression")).toBe(
+      "happy"
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(WELCOME_BAND_JOY_HOLD_MS - 1);
+    });
+    expect(root.querySelector(BAND)).not.toBeNull();
+    expect(band?.classList.contains(WELCOME_KICKOFF_EXIT_CLASS)).toBe(false);
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    await settle();
+    expect(root.querySelector(BAND)).toBeNull();
     // takeArrivalPlay returns false under reduced-motion (existing enter-conversation rule).
     expect(entranceCount(root)).toBe(0);
     expect(peekFreshSignup()).toBeNull();
@@ -801,6 +766,7 @@ describe("welcome kickoff product path", () => {
   });
 
   it("empty channel + pending directory → no stage; roster success → stage then opener exits once", async () => {
+    vi.useFakeTimers();
     const empty = makeDirectory([]);
     host = document.createElement("div");
     document.body.append(host);
@@ -846,18 +812,66 @@ describe("welcome kickoff product path", () => {
       );
     });
     await settle();
-    const stage = host.querySelector("[data-testid='welcome-kickoff-stage']");
-    expect(stage?.classList.contains(WELCOME_KICKOFF_EXIT_CLASS)).toBe(true);
-    act(() => {
-      const event = new Event("animationend", { bubbles: true });
-      Object.defineProperty(event, "animationName", {
-        value: WELCOME_KICKOFF_EXIT_ANIMATION_NAME,
-      });
-      stage?.dispatchEvent(event);
+    expect(entranceCount(host)).toBe(1);
+    await finishBandExit(host);
+    expect(entranceCount(host)).toBe(1);
+  });
+
+  it("working band names the one awake agent with the right particle", async () => {
+    const root = await mountWelcome();
+    const band = root.querySelector(BAND);
+    expect(band?.textContent).toContain("김인턴이 인사하러 오고 있어요.");
+    expect(band?.querySelector("[data-testid='kometto-face']")?.getAttribute("data-expression")).toBe(
+      "working"
+    );
+    expect(band?.querySelector("[role='status']")).not.toBeNull();
+  });
+
+  it("my hosted agent still paused (no CLI session yet) → sleepy band; it stays sleepy past the 120s backstop", async () => {
+    vi.useFakeTimers();
+    const mine: RosterMember = {
+      ...agentMember(),
+      displayName: "곽성재의 Claude",
+      paused: true,
+      ownerHumanId: ME,
+    };
+    const root = await mountWelcome({
+      directory: makeDirectory([humanMember(), mine]),
+    });
+    const band = root.querySelector(BAND);
+    expect(band?.getAttribute("data-state")).toBe("sleepy");
+    expect(band?.textContent).toContain(WELCOME_BAND_SLEEPY_COPY);
+    expect(band?.querySelector("[data-testid='kometto-face']")?.getAttribute("data-expression")).toBe(
+      "sleepy"
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(WELCOME_BACKSTOP_MS);
+    });
+    // The 120s clock still runs (ADR-0181 D7: seam settles, marker written) …
+    expect(readShownMarker(WS, ME)).toBe(true);
+    // … but the sentence already says where to act, so it is not replaced.
+    expect(root.querySelector("[data-testid='welcome-kickoff-backstop']")).toBeNull();
+    expect(root.querySelector(BAND)?.getAttribute("data-state")).toBe("sleepy");
+    await act(async () => {
+      rail.handlers?.onMessage(frame(OPENER_ID, AGENT, 1, "안녕하세요 @곽성재님"));
     });
     await settle();
-    expect(host.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
-    expect(entranceCount(host)).toBe(1);
+    await finishBandExit(root);
+  });
+
+  it("a paused agent that is not mine → no Claude Code sentence (working, unnamed)", async () => {
+    const theirs: RosterMember = {
+      ...agentMember(),
+      paused: true,
+      ownerHumanId: HUMAN,
+    };
+    const root = await mountWelcome({
+      directory: makeDirectory([humanMember(), theirs]),
+    });
+    const band = root.querySelector(BAND);
+    expect(band?.getAttribute("data-state")).toBe("working");
+    expect(band?.textContent).not.toContain("Claude Code");
+    expect(band?.textContent).toContain("에이전트가 인사하러 오고 있어요.");
   });
 
   it("stage mounted → no 첫 메시지 쓰기", async () => {
@@ -877,7 +891,7 @@ describe("welcome kickoff product path", () => {
   });
 
   it.skipIf(!chromiumAvailable)(
-    "exit fill both: no frame above end opacity after animationend (Chromium)",
+    "band collapse fill both: no frame above end opacity or height after animationend (Chromium)",
     async () => {
       let chromium: typeof import("playwright").chromium;
       try {
@@ -904,49 +918,63 @@ describe("welcome kickoff product path", () => {
           return { path, base: dirname(path), content: readFileSync(path, "utf8") };
         },
       });
-      const css = compiler.build([WELCOME_KICKOFF_EXIT_CLASS]);
+      const css = compiler.build([
+        WELCOME_KICKOFF_EXIT_CLASS,
+        "welcome-band",
+        "welcome-band-clip",
+        "kometto-band",
+      ]);
       const browser = await chromium.launch();
       try {
         const page = await browser.newPage();
         await page.emulateMedia({ reducedMotion: "no-preference" });
         await page.setContent(
           `<!doctype html><html><head><style>${css}</style></head><body>
-            <div id="stage" class="${WELCOME_KICKOFF_EXIT_CLASS}">팀이 준비하고 있어요</div>
+            <div id="stage" class="welcome-band kometto-band ${WELCOME_KICKOFF_EXIT_CLASS}">
+              <div class="welcome-band-clip"><p>첫 대화가 시작됐어요.</p></div>
+            </div>
           </body></html>`
         );
-        const measured = await page.evaluate(async () => {
+        const measured = await page.evaluate(async (name) => {
           const stage = document.getElementById("stage");
           if (!stage) throw new Error("missing stage");
-          return await new Promise<{ samples: number[]; maxAfterEnd: number }>(
-            (resolve, reject) => {
-              const timeout = window.setTimeout(
-                () => reject(new Error("stage exit animationend did not fire")),
-                2000
-              );
-              stage.addEventListener("animationend", (event) => {
-                if (event.animationName !== "motion-fade-out") return;
-                const samples: number[] = [];
-                const sample = () => {
-                  samples.push(Number(getComputedStyle(stage).opacity));
-                  if (samples.length >= 8) {
-                    window.clearTimeout(timeout);
-                    resolve({
-                      samples,
-                      maxAfterEnd: Math.max(...samples),
-                    });
-                    return;
-                  }
-                  requestAnimationFrame(sample);
-                };
+          return await new Promise<{
+            samples: number[];
+            maxAfterEnd: number;
+            maxHeightAfterEnd: number;
+          }>((resolve, reject) => {
+            const timeout = window.setTimeout(
+              () => reject(new Error("band collapse animationend did not fire")),
+              3000
+            );
+            stage.addEventListener("animationend", (event) => {
+              if (event.animationName !== name) return;
+              const samples: number[] = [];
+              const heights: number[] = [];
+              const sample = () => {
+                samples.push(Number(getComputedStyle(stage).opacity));
+                heights.push(stage.getBoundingClientRect().height);
+                if (samples.length >= 8) {
+                  window.clearTimeout(timeout);
+                  resolve({
+                    samples,
+                    maxAfterEnd: Math.max(...samples),
+                    maxHeightAfterEnd: Math.max(...heights),
+                  });
+                  return;
+                }
                 requestAnimationFrame(sample);
-              });
-            }
-          );
-        });
+              };
+              requestAnimationFrame(sample);
+            });
+          });
+        }, WELCOME_KICKOFF_EXIT_ANIMATION_NAME);
         console.info(
           `welcome kickoff H1 fill-both maxAfterEnd=${measured.maxAfterEnd.toFixed(4)} samples=${measured.samples.map((n) => n.toFixed(4)).join(",")}`
         );
         expect(measured.maxAfterEnd).toBeLessThan(0.02);
+        // Collapse, not just fade: the row gives its height back to the list.
+        expect(measured.maxHeightAfterEnd).toBeLessThan(1);
       } finally {
         await browser.close();
       }

@@ -188,6 +188,14 @@ codesign --verify --strict --deep "$APP_PATH" 2>>"$WORK/codesign.log" || {
   echo "[next-publish] the bundler did not produce a valid signature (APPLE_SIGNING_IDENTITY?)" >&2
   exit 1; }
 codesign -dv --verbose=2 "$APP_PATH" 2>&1 | grep -E "^(Identifier|Authority|TeamIdentifier|Runtime)" || true
+# 허들 마이크(#2761, ADR-0122 D-H3). hardened runtime 서명에서 이 엔타이틀먼트가
+# 빠지면 TCC는 창도 띄우지 않고 마이크를 거부한다. tauri.conf.json
+# `bundle.macOS.entitlements`가 번들러에 넘기는 값이다. 서명 결과를 여기서 한 번 더 잰다.
+if ! codesign -d --entitlements - --xml "$APP_PATH" 2>/dev/null \
+    | grep -q "com.apple.security.device.audio-input"; then
+  echo "[next-publish] signed app lacks com.apple.security.device.audio-input (tauri.conf.json bundle.macOS.entitlements?)" >&2
+  exit 1
+fi
 
 # dmg 는 번들러가 이미 서명했을 수도 있고 아닐 수도 있다. --strict 가 실패하면
 # Developer ID 로 한 번 서명하고 다시 잰다. --deep 은 디스크 이미지에 쓰지 않는다.

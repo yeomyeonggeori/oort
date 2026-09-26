@@ -1,0 +1,59 @@
+/* =============================================================================
+ * 작업 공간 격자 (#2773). 분할 비율은 런타임 값이라 Tailwind 클래스로 적을 수
+ * 없고, 컴포넌트는 style 속성을 쓰지 않는다(SKILL §1). 그래서 비율은 ref가
+ * `--wb-share` 사용자 속성으로 걸고, 여기 규칙이 그것을 flex 몫으로 읽는다.
+ * 색은 쓰지 않는다. 색은 컴포넌트의 토큰 클래스가 진다.
+ * ========================================================================== */
+
+.wb-split {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0px;
+}
+
+.wb-split[data-axis="row"] {
+  flex-direction: row;
+}
+
+.wb-split[data-axis="column"] {
+  flex-direction: column;
+}
+
+/* 분할의 두 자식. 몫은 경계를 뺀 길이에서 나눈다(core computeGeometry와 같은 식). */
+.wb-share {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: var(--wb-share, 1) 1 0px;
+}
+
+/* 최대화: 칸은 트리 자리에 그대로 두고(터미널을 떼지 않는다) 격자 전체를 덮는다.
+ * 격자 뿌리가 포함 블록이다. 분할 상자는 position을 갖지 않는다. */
+.wb-maximized {
+  position: absolute;
+  inset: 0;
+}
+
+/* =============================================================================
+ * 로컬 터미널 도크 (#2774). 높이는 본문 판에 대한 비율이고 런타임 값이라
+ * `--dock-ratio`로 건다(격자 몫과 같은 이유). 바닥 두 개는 core dockStore의
+ * DOCK_MIN_PX·DOCK_ROUTE_FLOOR_PX와 같은 값이다. 저장된 비율이 창보다 커도
+ * 여기서 한 번 더 잘린다.
+ * ========================================================================== */
+
+.local-dock {
+  display: flex;
+  flex-direction: column;
+  /* 배치가 요구하는 높이(core dockMinPx)까지 키우되, 채널 바닥 160px은 남긴다.
+   * 그래도 모자라면 격자가 포커스 칸 하나만 보인다(fitLayoutToSize cramped).
+   * 도크는 판을 넘지 않는다. 바닥 두 값은 core DOCK_MIN_PX·DOCK_ROUTE_FLOOR_PX다. */
+  min-height: max(160px, min(var(--dock-min, 160px), calc(100% - 160px)));
+  max-height: calc(100% - 160px);
+  flex: 0 0 calc(var(--dock-ratio, 0.4) * 100%);
+}
+
+.local-dock[data-fullscreen] {
+  max-height: none;
+  flex: 1 1 0px;
+}

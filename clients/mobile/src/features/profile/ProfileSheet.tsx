@@ -42,8 +42,11 @@ import {
   pushPermissionDetail,
   usePushPermission,
 } from '../../push/permissionStatus';
+import {usePushPrompt} from '../../push/PushProvider';
 import {getServerBase} from '../../storage/serverBase';
 import {Avatar} from '../conversation/Avatar';
+import {formatRealtimeDiagnostics} from '../../realtime/diagnostics';
+import {COPY_RECEIPT_MS, copyText} from '../conversation/copy';
 import {currentAppVersionLabel} from './appVersion';
 
 // =============================================================================
@@ -249,8 +252,26 @@ function ProfilePage({
   const styles = useStyles(buildStyles);
   const {choice} = useTheme();
   const push = usePushPermission();
+  const prompt = usePushPrompt();
   const now = useNow();
   const [confirming, setConfirming] = useState(false);
+  const [diagCopied, setDiagCopied] = useState(false);
+
+  // 버전 줄을 길게 누르면 실시간 연결 기록을 복사한다(#2751). 폰 소켓이 왜
+  // 끊겼는지는 서버 로그로 판정되지 않았고, 이유 코드는 클라이언트에만 있다.
+  // 기록에는 코드·수명·네트워크 종류만 있고 식별 정보는 없다(`diagnostics.ts`).
+  // 숨은 동작이라 화면에는 영수증 한 줄만 잠깐 보인다.
+  const copyDiagnostics = useCallback(() => {
+    const text = `${currentAppVersionLabel()}\n${formatRealtimeDiagnostics()}`;
+    void copyText(text).then(ok => {
+      if (ok) setDiagCopied(true);
+    });
+  }, []);
+  useEffect(() => {
+    if (!diagCopied) return;
+    const id = setTimeout(() => setDiagCopied(false), COPY_RECEIPT_MS);
+    return () => clearTimeout(id);
+  }, [diagCopied]);
 
   // 375pt 기본 크기에서 확인 블록의 두 버튼이 화면 아래로 나갔다(#2702 캡처) —
   // 「로그아웃」을 누른 사람에게 다음 단계가 보이지 않으면 버튼이 안 먹은 것으로
@@ -339,6 +360,17 @@ function ProfilePage({
           detail={pushPermissionDetail(push)}
           testID="profile-push-row"
         />
+        {push === 'undetermined' ? (
+          <GroupRow
+            title="알림 켜기"
+            tone="accent"
+            chevron
+            separated
+            onPress={() => void prompt.ask()}
+            accessibilityHint="iOS 알림 허용 창을 엽니다."
+            testID="profile-push-ask"
+          />
+        ) : null}
         {push === 'denied' ? (
           <GroupRow
             title="설정에서 알림 켜기"
@@ -406,8 +438,12 @@ function ProfilePage({
         )}
       </GroupSection>
 
-      <Text style={styles.version} testID="profile-version">
-        {currentAppVersionLabel()}
+      <Text
+        style={styles.version}
+        testID="profile-version"
+        onLongPress={copyDiagnostics}
+        accessibilityHint="길게 누르면 연결 기록을 복사합니다.">
+        {diagCopied ? '연결 기록 복사됨' : currentAppVersionLabel()}
       </Text>
     </>
   );

@@ -8,9 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LoginResponse } from "@momo/core/lib/api";
 import { applyLogin, clearSession } from "@/lib/session";
-import {
-  markPhoneLinkFirstRunPending,
-} from "@/features/auth/phoneLinkFirstRunStore";
+import { markPhoneLinkCardPending } from "@/features/welcome/phoneLinkCardStore";
 import { markFirstAgentPending } from "@/features/welcome/firstAgentStore";
 import { resetKickoffHoldForTests } from "@/features/welcome/firstRunGate";
 
@@ -123,6 +121,7 @@ afterEach(() => {
   queryClient?.clear();
   queryClient = null;
   sessionStorage.clear();
+  localStorage.clear();
   clearSession();
   vi.unstubAllGlobals();
 });
@@ -150,18 +149,17 @@ async function mountApp(): Promise<HTMLElement> {
   return host;
 }
 
-describe("App post-login first-agent then phone (#2216)", () => {
-  it("둘 다 pending 이면 첫 에이전트가 폰보다 먼저 선다", async () => {
+describe("App post-login first-agent (#2216) · 폰은 채널 카드 (#2818)", () => {
+  it("둘 다 pending 이면 첫 에이전트가 선다", async () => {
     applyLogin(session);
     markFirstAgentPending(session.member.workspaceId);
-    markPhoneLinkFirstRunPending();
+    markPhoneLinkCardPending(session.member.workspaceId);
     const host = await mountApp();
     const appSrc = readFileSync(resolve(process.cwd(), "src/app/App.tsx"), "utf8");
     expect(appSrc).toContain("createRealtime(");
     expect(appSrc).toContain("resolveSpikeRealtimeUrl");
     expect(appSrc).not.toMatch(/connStatus:\s*"connected"/);
     expect(host.querySelector('[data-testid="first-agent-stage"]')).not.toBeNull();
-    expect(host.querySelector('[data-testid="onboarding-phone-link"]')).toBeNull();
     expect(host.querySelector('[data-testid="channel-list"]')).toBeNull();
   });
 });

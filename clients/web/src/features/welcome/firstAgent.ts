@@ -17,11 +17,13 @@ import {
 // 감지 판정은 서버 status 만 본다. 클라가 「연결됨」을 먼저 말하지 않는다.
 // =============================================================================
 
-/** 로그인 뒤 first-run 순서. 킥오프는 웰컴 채널, 이 스테이지, 폰 연결. */
+/**
+ * 로그인 뒤 first-run 순서. 킥오프는 웰컴 채널, 그 다음 이 스테이지. 폰 연결은
+ * 게이트 단계가 아니라 첫 대화 채널 카드다(#2818, ADR-0193 D7).
+ */
 export const FIRST_AGENT_STAGE_ORDER = [
   "kickoff",
   "first-agent",
-  "phone-link",
 ] as const;
 
 export type FirstAgentStageId = (typeof FIRST_AGENT_STAGE_ORDER)[number];
@@ -30,19 +32,7 @@ export const DETECT_INITIAL_MS = 2_000;
 export const DETECT_MAX_DELAY_MS = 30_000;
 export const DETECT_CAP_MS = 5 * 60_000;
 
-export const FIRST_AGENT_TITLE = "첫 에이전트 연결";
-export const FIRST_AGENT_SKIP_SENTENCE =
-  "나중에 설정 › 연결 › 에이전트 자격에서 이어갈 수 있습니다.";
-/**
- * 머리 줄 오른쪽의 건너뛰기 (#2616). 「나중에」는 무엇을 미루는지 말하지 않아서
- * 폰에서 건너뛰기로 읽히지 않았다(성재: 「스킵하는 버튼 있으면 좋을거같고」).
- * S1·표시 이름 단계의 건너뛰기와 같은 말이다.
- */
-export const FIRST_AGENT_SKIP_LABEL = "지금은 건너뛰기";
-export const FIRST_AGENT_CONTINUE_LABEL = "계속";
-export const FIRST_AGENT_RECHECK_LABEL = "다시 확인";
 export const FIRST_AGENT_RETRY_LABEL = "다시 시도";
-export const FIRST_AGENT_MENTION_ACTION = "채널에서 첫 멘션 쓰기";
 export const FIRST_AGENT_REENTRY_LABEL = "설정 › 연결 › 에이전트 자격";
 export const FIRST_AGENT_REENTRY_HREF = "/settings?section=agents";
 export const FIRST_AGENT_AI_HREF = "/settings?section=ai";
@@ -50,13 +40,6 @@ export const FIRST_AGENT_AI_HREF = "/settings?section=ai";
 export const FIRST_AGENT_HEADING_ID = "first-agent-heading";
 export const FIRST_AGENT_OFFLINE_REASON_ID = "first-agent-offline-reason";
 export const FIRST_AGENT_ERROR_REASON_ID = "first-agent-error-reason";
-
-export const FIRST_AGENT_LEAD_CARDS = "팀에 붙일 에이전트를 고르세요.";
-export const FIRST_AGENT_LEAD_ISSUING = "연결 값을 에이전트 쪽에 넣으세요.";
-export const FIRST_AGENT_LEAD_DETECTING =
-  "에이전트가 연결 값으로 접속하면 이 화면이 바뀝니다.";
-export const FIRST_AGENT_LEAD_CAP = "아직 감지되지 않았습니다.";
-export const FIRST_AGENT_LEAD_MENTION = "감지된 에이전트에게 첫 멘션을 보냅니다.";
 
 export const FIRST_AGENT_DETECTING_WAIT =
   "이 서버가 에이전트 접속을 확인하면 다음 화면으로 넘어갑니다.";
@@ -68,8 +51,6 @@ export const FIRST_AGENT_LIST_ERROR = "연결 목록을 불러오지 못했습�
 export const FIRST_AGENT_OFFLINE_REASON =
   "연결이 끊겼습니다. 목록은 이어서 볼 수 있고, 발급은 다시 연결된 뒤에 할 수 있습니다.";
 
-export const FIRST_AGENT_CAP_COPY =
-  "5분이 지났습니다. 에이전트가 연결 값으로 접속했는지 다시 확인하세요.";
 export const FIRST_AGENT_RECHECKING = "다시 확인 중…";
 
 export const FIRST_AGENT_CONNECTED_CLAIM = "연결됨";
@@ -79,8 +60,6 @@ export const FIRST_AGENT_OPENAI_DETAIL =
 
 export const FIRST_AGENT_GROK_WHAT_HAPPENS =
   "고르면 그록봇 연결 값을 발급합니다.";
-
-export const FIRST_AGENT_CHOICE_LEGEND = "무엇을 붙이나요";
 
 export const FIRST_AGENT_DETAIL_FORBIDDEN = [
   "아래",
@@ -161,14 +140,6 @@ export function firstAgentCard(id: FirstAgentCardId): FirstAgentCard {
   return (
     FIRST_AGENT_CARDS.find((card) => card.id === id) ?? FIRST_AGENT_CARDS[0]!
   );
-}
-
-export function firstAgentLead(step: FirstAgentStep): string {
-  if (step === "issuing") return FIRST_AGENT_LEAD_ISSUING;
-  if (step === "detecting") return FIRST_AGENT_LEAD_DETECTING;
-  if (step === "cap-exceeded") return FIRST_AGENT_LEAD_CAP;
-  if (step === "mention" || step === "done") return FIRST_AGENT_LEAD_MENTION;
-  return FIRST_AGENT_LEAD_CARDS;
 }
 
 /**
@@ -278,9 +249,13 @@ export function shouldAutoPass(
 export type FirstAgentStep =
   | "cards"
   | "issuing"
+  /** 구독 합류 ①: 연결 명령 한 줄(#2814). 감지는 여기서부터 돈다. */
+  | "connect"
   | "detecting"
   | "cap-exceeded"
   | "mention"
+  /** [지금은 건너뛰기] 뒤 코메토 졸림 한 화면(#2814). */
+  | "skipped"
   | "done";
 
 export type FirstAgentCapturePose =
@@ -291,7 +266,20 @@ export type FirstAgentCapturePose =
   | "done"
   | "loading"
   | "offline"
-  | "error";
+  | "error"
+  // AI 연결 D4 (#2814). 구독 줄 알약 다섯·킬 스위치·웹·합류 세 상태·건너뛰기.
+  | "sub-probing"
+  | "sub-ready"
+  | "sub-install"
+  | "sub-polling"
+  | "sub-recheck"
+  | "server-off"
+  | "web"
+  | "sub-connect"
+  | "sub-waiting"
+  | "sub-cap"
+  | "sub-joined"
+  | "skipped";
 
 export const FIRST_AGENT_CAPTURE_POSES: readonly FirstAgentCapturePose[] = [
   "cards",
@@ -302,20 +290,24 @@ export const FIRST_AGENT_CAPTURE_POSES: readonly FirstAgentCapturePose[] = [
   "loading",
   "offline",
   "error",
+  "sub-probing",
+  "sub-ready",
+  "sub-install",
+  "sub-polling",
+  "sub-recheck",
+  "server-off",
+  "web",
+  "sub-connect",
+  "sub-waiting",
+  "sub-cap",
+  "sub-joined",
+  "skipped",
 ];
 
 export function parseFirstAgentCapturePose(
   raw: string | null
 ): FirstAgentCapturePose | null {
-  if (raw === "cards") return "cards";
-  if (raw === "one-time") return "one-time";
-  if (raw === "detecting") return "detecting";
-  if (raw === "cap-exceeded") return "cap-exceeded";
-  if (raw === "done") return "done";
-  if (raw === "loading") return "loading";
-  if (raw === "offline") return "offline";
-  if (raw === "error") return "error";
-  return null;
+  return FIRST_AGENT_CAPTURE_POSES.find((pose) => pose === raw) ?? null;
 }
 
 export function readFirstAgentCapturePoseFromLocation(): FirstAgentCapturePose | null {
@@ -355,7 +347,7 @@ export function firstAgentCaptureDetected(
   pose: FirstAgentCapturePose | null = null
 ): HostedAgentConnection | null {
   if (import.meta.env.MODE !== "design") return null;
-  if (pose !== "done") return null;
+  if (pose !== "done" && pose !== "sub-joined") return null;
   const agent = firstAgentCaptureAgent();
   return {
     id: "019f9a01-0000-7000-8000-0000000005c1",
@@ -367,5 +359,23 @@ export function firstAgentCaptureDetected(
     approvedScopes: [],
     createdAtMs: 1_700_000_000_000,
     updatedAtMs: 1_700_000_000_000,
+  };
+}
+
+/** 캡처 `sub-*` 픽스처: 구독 합류 화면의 이름·연결 값. 제품 경로는 쓰지 않는다. */
+export function firstAgentCaptureSubscription(): {
+  agentDisplayName: string;
+  agentHandle: string;
+  endpoint: string;
+  credential: string;
+} {
+  if (import.meta.env.MODE !== "design") {
+    return { agentDisplayName: "", agentHandle: "", endpoint: "", credential: "" };
+  }
+  return {
+    agentDisplayName: "성재의 Claude",
+    agentHandle: "seongjae-claude",
+    endpoint: "https://oort-team.example.com/v1/mcp/agent-port",
+    credential: "momo_pair_v1.capture.once-only-fixture-do-not-repeat",
   };
 }
