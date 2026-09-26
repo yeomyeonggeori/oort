@@ -116,7 +116,7 @@ import {
   DEFAULT_DECISION_LEAD,
 } from '../inbox/ApprovalDecision';
 import {LinkOnce} from './LinkOnce';
-import {Sentence} from '../../design/atoms';
+import {BAR_CONTROL_MAX_SCALE, Sentence} from '../../design/atoms';
 import {AttachmentList} from '../attachments/AttachmentList';
 import {
   approvalCardNote,
@@ -324,6 +324,9 @@ function DividerLabel({
   const styles = useStyles(buildStyles);
   return (
     <Text
+      // 날짜 알약은 도형이다 — 최대 글씨에서 끝없이 자라면 떠 있는 알약이 창 위쪽
+      // 줄들을 덮는다(AX 캡처). 바의 컨트롤과 같은 1.6 배에서 멈춘다.
+      maxFontSizeMultiplier={strong ? BAR_CONTROL_MAX_SCALE : undefined}
       style={[
         styles.dividerLabel,
         strong && styles.dividerLabelStrong,

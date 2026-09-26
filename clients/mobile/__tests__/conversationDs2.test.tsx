@@ -508,6 +508,21 @@ describe.each([
 });
 
 describe('치수가 시안에서 온다', () => {
+  it('날짜 알약 글자는 최대 글씨에서 1.6 배에서 멈춘다 — 떠 있는 알약이 줄을 덮지 않게', () => {
+    const {FloatingDayPill, DayDivider} = jest.requireActual(
+      '../src/features/conversation/MessageRow',
+    );
+    for (const node of [
+      <FloatingDayPill atMs={1_760_000_000_000} nowMs={1_760_000_000_000} />,
+      <DayDivider atMs={1_760_000_000_000} nowMs={1_760_000_000_000} />,
+    ]) {
+      const view = render(node);
+      const label = view.getByText('오늘', {includeHiddenElements: true});
+      expect(label.props.maxFontSizeMultiplier).toBe(1.6);
+      view.unmount();
+    }
+  });
+
   it('메시지 얼굴은 40 이다 — owner 표 「아바타 40」(시안 36 보다 표가 이긴다)', () => {
     render(
       <MessageRow
