@@ -6,11 +6,12 @@ import { describe, expect, it } from "vitest";
 // 허들 마이크가 서명된 데스크탑 앱에서 열리려면 셸이 해 줘야 하는 것(#2761,
 // ADR-0122 D-H3).
 //
-// 허들은 이 번들의 LiveKit 경로가 `getUserMedia`로 마이크를 연다. 브라우저와
-// dev 빌드에서는 아래 셋이 없어도 동작한다. 서명된 DMG에서만 조용히 막힌다.
+// 허들은 이 번들의 LiveKit 경로가 `getUserMedia`로 마이크를 연다. 브라우저에서는
+// 아래 셋이 필요 없다. 번들 시험은 초록인 채로 서명된 앱에서만 조용히 막힌다.
 //
 // 1. `Info.plist`의 `NSMicrophoneUsageDescription`. macOS 권한 창에 나오는
-//    문장이다. 없으면 TCC가 마이크를 요청한 앱을 거부한다.
+//    문장이다. 없으면 WebKit이 `navigator.mediaDevices`를 아예 내주지 않는다
+//    (서명 빌드 실측).
 // 2. `com.apple.security.device.audio-input` 엔타이틀먼트. 번들러는 hardened
 //    runtime으로 서명하고, 그 아래에서 이 값이 없으면 TCC가 창도 띄우지 않고
 //    마이크를 거부한다.

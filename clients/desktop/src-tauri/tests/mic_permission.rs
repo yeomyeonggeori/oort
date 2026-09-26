@@ -2,12 +2,13 @@
 //! (#2761, ADR-0122 D-H3).
 //!
 //! * `NSMicrophoneUsageDescription` in `Info.plist`. It is the sentence in the
-//!   macOS permission prompt, and TCC refuses an app that asks for the
-//!   microphone without one.
+//!   macOS permission prompt. Without it WebKit does not expose
+//!   `navigator.mediaDevices` to the page (measured on a signed build).
 //! * `com.apple.security.device.audio-input` in the entitlements the bundler
 //!   signs with. The bundler signs with the hardened runtime by default, and
-//!   under it TCC denies the microphone without a prompt when this entitlement
-//!   is missing.
+//!   under it tccd denies the microphone without a prompt when this entitlement
+//!   is missing ("requires entitlement com.apple.security.device.audio-input
+//!   but it is missing", measured).
 //! * `tauri.conf.json > bundle > macOS > entitlements` pointing at that file.
 //!   Without the pointer the file exists and nothing signs with it.
 //!
@@ -57,8 +58,14 @@ fn info_plist_explains_the_microphone_prompt() {
         .trim();
     assert!(!text.is_empty(), "NSMicrophoneUsageDescription is empty");
     // The prompt says why, in the app's language, and that it is huddles only.
-    assert!(text.contains("허들"), "prompt does not mention 허들: {text}");
-    assert!(text.contains("마이크"), "prompt does not mention 마이크: {text}");
+    assert!(
+        text.contains("허들"),
+        "prompt does not mention 허들: {text}"
+    );
+    assert!(
+        text.contains("마이크"),
+        "prompt does not mention 마이크: {text}"
+    );
     assert!(
         !text.contains('—') && !text.contains('–'),
         "user-visible copy has an em-dash: {text}"
@@ -72,7 +79,11 @@ fn the_bundler_signs_with_an_entitlements_file() {
         .as_str()
         .expect("tauri.conf.json bundle.macOS.entitlements is not set");
     let full = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
-    assert!(full.is_file(), "entitlements file missing: {}", full.display());
+    assert!(
+        full.is_file(),
+        "entitlements file missing: {}",
+        full.display()
+    );
 }
 
 #[test]
