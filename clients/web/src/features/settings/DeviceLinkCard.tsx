@@ -340,7 +340,12 @@ export function DeviceLinkCard({
           ? "이 코드는 만료됐습니다. 다시 만들면 새 QR이 나옵니다."
           : phase === "pending"
             ? "이 QR은 지금 살아 있습니다. 폰 카메라로 찍으세요."
-            : "이 계정을 폰에서도 쓰려면 QR을 만드세요.";
+            : embedded && !banner
+              ? // 띠의 [QR 만들기]가 이미 발급을 걸었다. 여기서 버튼을 약속하지 않는다.
+                offline
+                ? "다시 연결되면 QR을 만듭니다."
+                : "QR을 만들고 있습니다."
+              : "이 계정을 폰에서도 쓰려면 QR을 만드세요.";
 
   return (
     <div

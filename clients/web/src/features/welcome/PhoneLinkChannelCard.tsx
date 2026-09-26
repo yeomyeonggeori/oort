@@ -77,6 +77,7 @@ export function PhoneLinkChannelCard({
   const focusSettingsRef = useRef(false);
   // [QR 만들기]·연결 성공도 누른 컨트롤을 치운다. 포커스가 body로 떨어지지 않게
   // 다음 자리를 정한다: 열리면 QR 영역, 연결되면 [닫기](design-review H2).
+  const sectionRef = useRef<HTMLElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const focusNextRef = useRef<"body" | "close" | null>(null);
@@ -155,6 +156,7 @@ export function PhoneLinkChannelCard({
 
   return (
     <section
+      ref={sectionRef}
       className="kometto-band flex flex-col gap-3 rounded-lg bg-surface-muted py-2 pl-2 pr-card"
       aria-label="폰 연결"
       data-testid="phone-link-card"
@@ -210,7 +212,6 @@ export function PhoneLinkChannelCard({
         <div
           ref={bodyRef}
           tabIndex={-1}
-          aria-label="폰 연결 QR"
           className="kometto-band-body flex min-w-0 flex-col items-start rounded-lg focus-visible:focus-ring"
           data-testid="phone-link-card-body"
         >
@@ -219,7 +220,15 @@ export function PhoneLinkChannelCard({
             embedded
             offline={offline}
             onLinked={() => {
-              focusNextRef.current = "close";
+              // 연결 성공은 폴링이 부를 수도 있다(사람이 누르지 않은 순간). 포커스가
+              // 이 카드 안에 있었을 때만 [닫기]로 옮긴다. 컴포저에서 쓰던 입력을
+              // 빼앗지 않는다(design-review R2 H2-R). 밖이면 role="status" 문장이
+              // 연결됨을 말한다. 판정은 QR 영역이 사라지기 전, 여기서 한다.
+              const active = document.activeElement;
+              focusNextRef.current =
+                active instanceof Node && sectionRef.current?.contains(active)
+                  ? "close"
+                  : null;
               setLinked(true);
               setOpen(false);
               dismissPhoneLinkCard(workspaceId);

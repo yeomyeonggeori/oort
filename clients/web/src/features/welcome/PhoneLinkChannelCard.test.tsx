@@ -341,6 +341,43 @@ describe("PhoneLinkChannelCard", () => {
     expect(cls).not.toMatch(/\bbg-(signal|accent)/);
   });
 
+  it("폴링이 연결을 알려도 컴포저에서 쓰던 포커스를 빼앗지 않는다(R2 H2-R)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    markPhoneLinkCardPending(WS);
+    const composer = document.createElement("textarea");
+    document.body.append(composer);
+    try {
+      mount();
+      click("phone-link-card-create");
+      await flush();
+      expect(q("device-link-qr")).not.toBeNull();
+      composer.focus();
+      expect(document.activeElement).toBe(composer);
+      getDeviceLink.mockResolvedValue({
+        status: "consumed",
+        device: { id: "d1", name: "성재 iPhone" },
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_500);
+      });
+      await flush();
+      expect(q("phone-link-card")?.getAttribute("data-state")).toBe("linked");
+      expect(document.activeElement).toBe(composer);
+    } finally {
+      composer.remove();
+    }
+  });
+
+  it("띠 안 기기 연결 카드는 없는 버튼을 약속하지 않는다(발급 중·오프라인)", async () => {
+    markPhoneLinkCardPending(WS);
+    mount(undefined, false, true);
+    click("phone-link-card-create");
+    await flush();
+    const body = q("phone-link-card-body")?.textContent ?? "";
+    expect(body).not.toContain("QR을 만드세요");
+    expect(body).toContain("다시 연결되면 QR을 만듭니다.");
+  });
+
   it("살아 있는 연결이 있으면 [QR 만들기]가 새로 발급하지 않고 복원한다", async () => {
     markPhoneLinkCardPending(WS);
     writeDeviceLinkLive({
