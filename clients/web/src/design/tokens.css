@@ -3564,6 +3564,312 @@
   background-color: transparent;
 }
 
+/* --- D4 AI 연결 (#2814 OB2-8, 시안 D4 `.opt`·`.pill`·`.note`·`.term`) ------
+ * 값은 시안 CSS 그대로다. 사다리 밖 값만 사다리로 옮겼다(PR 「시안과의 차이」):
+ *   col 600 · gap 12   `.col` max-width:600 · gap:12 (틀의 440보다 넓다)
+ *   opt 14 16 · r14    `.opt` padding · radius → --radius-lg(14)
+ *   mark 40 · r11      `.opt .lg` → 반경 --radius-md(10)
+ *   radio 18 · dot 9   `.radio`
+ *   pill 5 8 · 11/600  `.pill` → 글자 --text-timestamp(11)
+ *   note 12 14 · r12   `.note` → 반경 --radius-md(10)
+ *   term 8 10 · r8     `.term` → 반경 --radius-sm(6)
+ * 머리 줄 아래 본문은 위에서 시작한다(시안 `justify-content:flex-start;padding-top:18px`). */
+.onboarding-frame-body:has(.ai-connect-col) {
+  justify-content: flex-start;
+  padding-block-start: 18px;
+}
+
+.ai-connect-col {
+  max-inline-size: 600px;
+  gap: var(--spacing-3);
+}
+
+.ai-connect-opt {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background-color: var(--surface);
+  box-shadow: var(--elevation-rest);
+}
+
+.ai-connect-opt[data-selected="true"] {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink), var(--elevation-rest);
+}
+
+.ai-connect-opt[data-selectable="true"]:not([data-selected="true"]):hover {
+  background-color: var(--surface-hover);
+}
+
+.ai-connect-opt-label {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 14px;
+  min-inline-size: 0;
+  cursor: pointer;
+}
+
+.ai-connect-opt[data-selectable="false"] .ai-connect-opt-label {
+  cursor: default;
+}
+
+/* 시안 `.radio`: 18 원, 1.5 테두리 --line-strong, 켜지면 잉크 테두리 + 9 점. */
+.ai-connect-radio {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  flex: none;
+  inline-size: 18px;
+  block-size: 18px;
+  margin: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-strong);
+  background-color: transparent;
+}
+
+.ai-connect-radio:checked {
+  border-color: var(--ink);
+}
+
+.ai-connect-radio:checked::after {
+  content: "";
+  inline-size: 9px;
+  block-size: 9px;
+  border-radius: 50%;
+  background-color: var(--ink);
+}
+
+.ai-connect-radio:disabled {
+  opacity: 0.5;
+}
+
+.ai-connect-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  inline-size: 40px;
+  block-size: 40px;
+  border-radius: var(--radius-md);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+/* 시안의 글자 타일 색. Claude는 시안 #F3E6DC/#9A4A1E, Codex는 #E2E6EC/#2B3440,
+ * 그록봇은 #E6E6E6/#222. 다크 값은 같은 색상을 바닥 쪽으로 내린 것이다
+ * (시안 다크에 D4 프레임이 없다). 글자 대비는 두 스킴 모두 4.5:1 이상. */
+.ai-connect-mark[data-mark="claude"] {
+  background-color: light-dark(#f3e6dc, #3a2a21);
+  color: light-dark(#9a4a1e, #eaa47a);
+}
+
+.ai-connect-mark[data-mark="codex"] {
+  background-color: light-dark(#e2e6ec, #262c36);
+  color: light-dark(#2b3440, #c9d2de);
+}
+
+.ai-connect-mark[data-mark="api-key"] {
+  background-color: var(--agent-soft);
+  color: var(--agent);
+}
+
+.ai-connect-mark[data-mark="grok"] {
+  background-color: light-dark(#e6e6e6, #2a2a2c);
+  color: light-dark(#222222, #e4e4e6);
+}
+
+.ai-connect-title {
+  display: block;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+  word-break: keep-all;
+}
+
+.ai-connect-detail {
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 1.45;
+  word-break: keep-all;
+}
+
+.ai-connect-pill {
+  flex: none;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 999px;
+  font-size: var(--text-timestamp);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.ai-connect-pill[data-tone="ok"] {
+  background-color: var(--ok-soft);
+  color: var(--ok);
+}
+
+.ai-connect-pill[data-tone="warn"] {
+  background-color: var(--warn-soft);
+  color: var(--warn);
+}
+
+.ai-connect-pill[data-tone="mute"] {
+  background-color: var(--muted-soft);
+  color: var(--ink-muted);
+}
+
+.ai-connect-pill[data-tone="sig"] {
+  background-color: var(--signal-soft);
+  color: var(--signal-text);
+}
+
+/* 알약이 행동일 때(설치 필요·다시 확인): 톤은 mute 그대로(오렌지는 진행 점과
+ * 포커스만, D11), 눌리는 것은 테두리와 밑줄로 보인다. 포인터 최소 24를 받고
+ * 600 미만에서는 tap-target까지 자란다(design-review H2·M1·M2). */
+.ai-connect-pill-action {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 24px;
+  border: 1px solid var(--line-strong);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+
+  &:hover {
+    background-color: var(--surface-hover);
+  }
+
+  @media (width < 600px) {
+    min-block-size: var(--tap-target);
+    padding-inline: var(--spacing-3);
+  }
+}
+
+.ai-connect-note {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background-color: var(--agent-soft);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: keep-all;
+}
+
+.ai-connect-note-icon {
+  flex: none;
+  inline-size: 16px;
+  block-size: 16px;
+  margin-block-start: 1px;
+  color: var(--agent);
+}
+
+/* 시안 `.term`: 모노 12.5, --surface2 바탕, 안쪽 8 10. */
+.ai-connect-term,
+.ai-connect-command {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  min-inline-size: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background-color: var(--surface-muted);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.ai-connect-term-action,
+.ai-connect-command-actions > button {
+  flex: none;
+  font-family: var(--font-sans);
+
+  /* 폰(600 미만)에서는 손가락 44를 받는다. 데스크탑은 시안 28 그대로. */
+  @media (width < 600px) {
+    min-block-size: var(--tap-target);
+  }
+}
+
+/* 시안 `.btn.sec`: 테두리 --line-strong, 바탕 투명. 명령 줄 바탕(--surface-muted)과
+ * 같은 outline 채움은 보이지 않아서 테두리로 선다. */
+.ai-connect-secondary {
+  border: 1px solid var(--line-strong);
+  background-color: transparent;
+
+  &:hover {
+    background-color: var(--surface-hover);
+  }
+}
+
+.ai-connect-term {
+  @media (width < 600px) {
+    flex-wrap: wrap;
+  }
+}
+
+/* 연결 명령은 길다(주소 + 연결 값). 한 줄로 자르지 않고 접어서 전부 보인다:
+ * 사람이 복사 전에 무엇을 붙여 넣는지 읽을 수 있어야 한다. */
+.ai-connect-command {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.ai-connect-command-text {
+  flex: 1 1 16rem;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.ai-connect-command-actions {
+  display: flex;
+  flex: none;
+  gap: var(--spacing-1);
+  margin-inline-start: auto;
+  font-family: var(--font-sans);
+}
+
+/* 주 행동(잉크 채움, flex 1) + 건너뛰기(ghost). 시안 `display:flex;gap:10px`. */
+.ai-connect-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  @media (width < 600px) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.ai-connect-skip {
+  min-block-size: 36px;
+  color: var(--ink-muted);
+  font-weight: 500;
+
+  @media (width < 600px) {
+    min-block-size: var(--tap-target);
+  }
+}
+
+.ai-connect-joined {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  min-inline-size: 0;
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background-color: var(--surface);
+  box-shadow: var(--elevation-rest);
+}
+
 /* --- claim 뒤 S1·S2 (#2811 OB2-5, 시안 D2·brief D3) ---------------------- */
 
 /* 시안 D2: 질문 열(1fr) + 미리보기(250), 간격 28, 가운데 정렬. 768 미만에서는

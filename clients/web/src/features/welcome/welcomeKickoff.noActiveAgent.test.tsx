@@ -30,7 +30,7 @@ import { Timeline } from "@/features/timeline/Timeline";
 import { useTimeline } from "@/features/timeline/useTimeline";
 import type { RealtimeHandle } from "@/lib/realtime";
 import { FirstAgentStage } from "./FirstAgentStage";
-import { FIRST_AGENT_TITLE } from "./firstAgent";
+import { AI_CONNECT_QUESTION } from "@momo/core/features/onboarding/aiConnect";
 import { WelcomeKickoffStage } from "./WelcomeKickoffStage";
 import {
   clearAllFirstAgentMarkers,
@@ -517,7 +517,7 @@ describe("no-active-agent hold (#2335)", () => {
     await settle();
 
     expect(root.querySelector("[data-testid='first-agent-stage']")).not.toBeNull();
-    expect(root.textContent).toContain(FIRST_AGENT_TITLE);
+    expect(root.textContent).toContain(AI_CONNECT_QUESTION);
     expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
     expect(root.querySelectorAll("[data-testid='welcome-kickoff-backstop']")).toHaveLength(
       0

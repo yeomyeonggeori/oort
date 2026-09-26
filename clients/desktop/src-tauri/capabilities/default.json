@@ -23,6 +23,7 @@
     "allow-open-pdf-attachment",
     "allow-detect-hosted-agents",
     "allow-detect-local-harnesses",
+    "allow-open-terminal-app",
     "allow-app-version",
     "allow-updater-check",
     "allow-updater-install",
