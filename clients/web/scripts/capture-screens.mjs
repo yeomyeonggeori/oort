@@ -9345,21 +9345,49 @@ async function captureMarkUnreadScenes(browser, scheme) {
   return shots;
 }
 
-// UX-R2b welcome kickoff (#2002). Scenes only — startGuardedPreview is untouched.
-// Arrival is driven through the product store path (`oort.capture.message.new`
-// → useTimeline applyBatch), not a stage prop.
+// UX-R2b welcome kickoff (#2002) → #2817 first-conversation Kometto band.
+// Scenes only — startGuardedPreview is untouched. Arrival is driven through
+// the product store path (`oort.capture.message.new` → useTimeline
+// applyBatch), not a stage prop. The band lives above the composer, so there
+// is no timeline row to scroll to. Two desktop window sizes: the Tauri default
+// (1100×760) and a near-minimum window (720×560; minWidth 720).
+const WELCOME_BAND_VIEWPORTS = [
+  { width: 1100, height: 760, suffix: "" },
+  { width: 720, height: 560, suffix: "-720" },
+];
+
+/** A fresh workspace: me + the agent I just joined (mockup D5 「성재의 Claude」). */
+function welcomeRoster({ paused }) {
+  const me = ROSTER.find((member) => member.id === ME);
+  const agent = ROSTER.find((member) => member.id === HERMES);
+  return [
+    me,
+    {
+      ...agent,
+      displayName: "곽성재의 Claude",
+      handle: "seongjae-claude",
+      ownerHumanId: ME,
+      paused,
+    },
+  ];
+}
+
 async function captureWelcomeKickoffScenes(browser, scheme) {
   beginScene("welcome-arrived");
   const shots = [];
 
   async function openWelcome(reducedMotion, options = {}) {
+    const viewport = options.viewport ?? VIEWPORT;
     const context = await browser.newContext({
-      viewport: VIEWPORT,
+      viewport: { width: viewport.width, height: viewport.height },
       deviceScaleFactor: 2,
       colorScheme: scheme,
       reducedMotion,
     });
     await installMocks(context);
+    await context.route("**/v1/workspaces/*/roster", (route) =>
+      json(route, { members: welcomeRoster({ paused: Boolean(options.paused) }) })
+    );
     await context.route("**/v1/workspaces/*/channels/*/messages*", (route) => {
       const url = new URL(route.request().url());
       if (url.pathname.includes("/replies")) return route.fallback();
@@ -9386,6 +9414,12 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
           "oort.freshSignup.v1",
           JSON.stringify({ workspaceId, memberId })
         );
+        // recordFreshSignupFirstRun also marks the 「폰에서도」 card pending
+        // (#2818): the band hands the same slot over to it.
+        localStorage.setItem(
+          `oort.phoneLinkCard.v1:${workspaceId.toLowerCase()}`,
+          "pending"
+        );
       },
       { workspaceId: WORKSPACE_ID, memberId: ME }
     );
@@ -9402,20 +9436,10 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
     return { context, page };
   }
 
-  async function waitForWelcomeStage(page) {
-    const empty = page.getByTestId("timeline-empty");
+  async function waitForWelcomeBand(page, state) {
+    const band = page.getByTestId("welcome-kickoff-stage");
     try {
-      await empty.waitFor({ state: "visible", timeout: 15_000 });
-    } catch (err) {
-      // Empty intro is optional: a nonempty #general still mounts the stage.
-      // Timeout is the only miss we accept; anything else is a real fail.
-      const name = err instanceof Error ? err.name : "";
-      const message = err instanceof Error ? err.message : String(err);
-      if (name !== "TimeoutError" && !message.includes("Timeout")) throw err;
-    }
-    const stage = page.getByTestId("welcome-kickoff-stage");
-    try {
-      await stage.waitFor({ state: "attached", timeout: 10_000 });
+      await band.waitFor({ state: "visible", timeout: 15_000 });
     } catch (err) {
       const dump = await page.evaluate(() => ({
         hash: location.hash,
@@ -9423,50 +9447,21 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
         shown: Object.keys(localStorage).filter((k) =>
           k.includes("welcomeKickoff")
         ),
-        introEmpty: Boolean(document.querySelector('[data-testid="timeline-empty"]')),
-        introStarted: Boolean(
-          document.querySelector('[data-testid="message-channel-intro"]')
-        ),
         messages: document.querySelectorAll('[data-testid="timeline-message"]').length,
-        copy: document.body.innerText.includes("팀이 준비하고 있어요"),
       }));
       const cause = err instanceof Error ? err.message : String(err);
       throw new Error(`welcome-kickoff-stage missing ${JSON.stringify(dump)} (${cause})`);
     }
-    try {
-      await scrollTimelineRowIntoView(page, "welcome-kickoff-stage", "welcome-kickoff");
-    } catch (err) {
-      if (!String(err).includes("자리가 멎지 않았다")) throw err;
-      await page.waitForTimeout(200);
-      await scrollTimelineRowIntoView(page, "welcome-kickoff-stage", "welcome-kickoff");
-    }
-    await stage.waitFor({ state: "visible" });
+    await page.waitForFunction(
+      (want) =>
+        document
+          .querySelector('[data-testid="welcome-kickoff-stage"]')
+          ?.getAttribute("data-state") === want,
+      state
+    );
   }
 
-  {
-    const { context, page } = await openWelcome("no-preference");
-    await waitForWelcomeStage(page);
-    await waitForAnimations(page);
-    const path = beginSceneFromShotPath(`${OUT_DIR}/welcome-stage-${scheme}.png`);
-    await page.screenshot({ path });
-    shots.push(path);
-    await context.close();
-  }
-
-  {
-    const { context, page } = await openWelcome("reduce");
-    await waitForWelcomeStage(page);
-    await waitForAnimations(page);
-    const path = beginSceneFromShotPath(`${OUT_DIR}/welcome-stage-reduce-${scheme}.png`);
-    await page.screenshot({ path });
-    shots.push(path);
-    await context.close();
-  }
-
-  {
-    const { context, page } = await openWelcome("no-preference");
-    await waitForWelcomeStage(page);
-    await waitForAnimations(page);
+  async function deliverOpener(page) {
     await page.evaluate(
       ({ channelId, agentId }) => {
         window.dispatchEvent(
@@ -9479,7 +9474,7 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
               hlcCount: 0,
               authorMemberId: agentId,
               type: "text",
-              body: "시작할까요? 이 워크스페이스에서 같이 일해요.",
+              body: "안녕하세요 @곽성재님, 저는 이 맥의 Claude Code로 돌아가는 성재님의 에이전트예요. 여기서 부르면 바로 일을 받아요. 오늘 무엇부터 같이 할까요?",
               state: "sent",
               createdAtMs: 1_704_067_200_000,
             },
@@ -9488,17 +9483,56 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
       },
       { channelId: GENERAL_ID, agentId: HERMES }
     );
-    await page.getByTestId("timeline-message").waitFor({ state: "visible" });
-    await page.waitForFunction(
-      () =>
-        [...document.querySelectorAll('[data-testid="timeline-message"]')].some(
-          (node) => node.classList.contains("enter-conversation")
-        )
-    );
-    await waitForAnimations(page);
-    const path = beginSceneFromShotPath(`${OUT_DIR}/welcome-arrived-${scheme}.png`);
+  }
+
+  async function shoot(page, name) {
+    const vp = page.viewportSize() ?? VIEWPORT;
+    await page.mouse.move(vp.width + 80, vp.height + 80);
+    const path = beginSceneFromShotPath(`${OUT_DIR}/${name}-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
+  }
+
+  for (const viewport of WELCOME_BAND_VIEWPORTS) {
+    {
+      const { context, page } = await openWelcome("no-preference", { viewport });
+      await waitForWelcomeBand(page, "working");
+      await waitForAnimations(page);
+      await shoot(page, `welcome-band-working${viewport.suffix}`);
+      await context.close();
+    }
+    {
+      const { context, page } = await openWelcome("no-preference", {
+        viewport,
+        paused: true,
+      });
+      await waitForWelcomeBand(page, "sleepy");
+      await waitForAnimations(page);
+      await shoot(page, `welcome-band-sleepy${viewport.suffix}`);
+      await context.close();
+    }
+    {
+      // Joy is a 1.2s hold before the band folds; shoot inside it, after the
+      // 120ms crossfade and the 360ms wag.
+      const { context, page } = await openWelcome("reduce", { viewport });
+      await waitForWelcomeBand(page, "working");
+      await deliverOpener(page);
+      await waitForWelcomeBand(page, "joy");
+      await page.getByTestId("timeline-message").waitFor({ state: "visible" });
+      await shoot(page, `welcome-band-joy${viewport.suffix}`);
+      await context.close();
+    }
+  }
+
+  {
+    const { context, page } = await openWelcome("no-preference");
+    await waitForWelcomeBand(page, "working");
+    await deliverOpener(page);
+    await waitForWelcomeBand(page, "joy");
+    await page.getByTestId("welcome-kickoff-stage").waitFor({ state: "detached" });
+    await page.getByTestId("phone-link-card").waitFor({ state: "visible" });
+    await waitForAnimations(page);
+    await shoot(page, "welcome-arrived");
     await context.close();
   }
 
@@ -9508,16 +9542,12 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
     });
     beginScene("welcome-backstop");
     try {
-      await waitForWelcomeStage(page);
+      await waitForWelcomeBand(page, "working");
       await page.clock.fastForward(120_000);
       await page.getByTestId("welcome-kickoff-backstop").waitFor({ state: "visible" });
       await page.clock.resume();
       await waitForAnimations(page);
-      const vp = page.viewportSize() ?? VIEWPORT;
-      await page.mouse.move(vp.width + 80, vp.height + 80);
-      const path = beginSceneFromShotPath(`${OUT_DIR}/welcome-backstop-${scheme}.png`);
-      await page.screenshot({ path });
-      shots.push(path);
+      await shoot(page, "welcome-band-backstop");
       await context.close();
     } finally {
       setActiveCaptureScene("default");
@@ -14424,6 +14454,11 @@ async function main() {
             }))
           );
         }
+      } else if (profile === "welcome") {
+        for (const scheme of ["light", "dark"]) {
+          assertThisPreview();
+          all.push(...(await captureWelcomeKickoffScenes(browser, scheme)));
+        }
       } else if (profile === "first-agent") {
         for (const scheme of ["light", "dark"]) {
           assertThisPreview();
@@ -14479,6 +14514,7 @@ async function main() {
         profile !== "accent" &&
         profile !== "gallery" &&
         profile !== "agents" &&
+        profile !== "welcome" &&
         profile !== "first-agent"
       ) {
         for (const scheme of ["light", "dark"]) {

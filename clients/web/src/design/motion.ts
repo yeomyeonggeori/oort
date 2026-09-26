@@ -39,8 +39,7 @@ export const PRESS_CLASS = "press";
 export const ENTER_CONVERSATION_CLASS = "enter-conversation";
 export const ENTER_CONVERSATION_ANIMATION_NAME = "motion-enter-conversation";
 
-/** UX-R2b / ADR-0181 D7. Stage rise; stagger delay is `--stagger-index × --motion-instant`. */
-export const WELCOME_KICKOFF_MARK_CLASS = "welcome-kickoff-mark";
-/** Stage/card exit. Fill `both` so the faded frame holds until unmount. */
+/** #2817 / ADR-0193 D11. 첫 대화 킥오프 띠의 접힘(line-slide). Fill `both`라 접힌
+ * 끝이 React가 노드를 걷을 때까지 남는다. keyframe은 tokens.css(온보딩 650ms 자리). */
 export const WELCOME_KICKOFF_EXIT_CLASS = "welcome-kickoff-exit";
-export const WELCOME_KICKOFF_EXIT_ANIMATION_NAME = "motion-fade-out";
+export const WELCOME_KICKOFF_EXIT_ANIMATION_NAME = "motion-welcome-band-collapse";
