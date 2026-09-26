@@ -39,6 +39,8 @@ import {
   HOME,
   WorkingCard,
 } from '../src/screens/SidebarScreen';
+import SidebarScreen from '../src/screens/SidebarScreen';
+import {SessionProvider} from '../src/session/useSession';
 import AppShell from '../src/shell/AppShell';
 import {NON_SECRET_KEYS} from '../src/storage/kv';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
@@ -738,5 +740,32 @@ describe('검수 R1', () => {
     expect(CTL_SLOP_MORE.top + 20 + CTL_SLOP_MORE.bottom).toBe(44);
     // 두 글리프 사이 틈(14)을 둘이 나눠 갖는다 — 합이 틈을 넘지 않는다.
     expect(CTL_SLOP_MORE.right + CTL_SLOP_DOWN.left).toBeLessThanOrEqual(HOME.ctlGap);
+  });
+});
+
+describe('고지는 목록 상태와 무관하게 선다', () => {
+  it('목록이 실패해도 알림 탭 영수증이 오류 상자와 함께 선다 (#2569 · #2584 M-1)', async () => {
+    globalThis.fetch = jest.fn(async (url: string) => {
+      if (url.includes('/channels')) return jsonResponse(500, {error: {message: 'boom'}});
+      if (url.includes('/roster')) return jsonResponse(200, {members: ROSTER});
+      return jsonResponse(200, {});
+    }) as unknown as typeof fetch;
+    queryClient = new QueryClient({
+      defaultOptions: {queries: {retry: false, gcTime: 0}, mutations: {retry: false, gcTime: 0}},
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionProvider member={SELF}>
+          <SidebarScreen
+            openChannelId={null}
+            onOpenConversation={() => {}}
+            onOpenSearch={() => {}}
+            notificationNotice="그 대화를 열지 못했습니다."
+          />
+        </SessionProvider>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('channels-error')).toBeTruthy());
+    expect(screen.getByTestId('notification-tap-notice')).toBeTruthy();
   });
 });

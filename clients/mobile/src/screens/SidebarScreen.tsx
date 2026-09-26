@@ -71,7 +71,14 @@ import {useRealtime} from '../realtime/RealtimeProvider';
 import {useSession} from '../session/useSession';
 import {apiBase} from '../storage/serverBase';
 
-/** 브랜드 배지(코메토 K6, `docs/brand/kometto`)를 44 원으로 오려 낸 판. */
+/**
+ * 브랜드 배지(코메토 K6, `docs/brand/kometto/K6-flat-dark.png`)를 44 원으로 오려 낸 판.
+ *
+ * 다시 만드는 법: 원본의 배지 원(중심 626.5·625.5, 반지름 530.5 — `docs/brand/mark/
+ * README.md`)을 상자 (96,95)–(1157,1156)로 오리고, 44·88·132 로 줄인 뒤 원 밖을 투명하게.
+ * 다시 그리지 않는다. 웹 `render-brand-icons.mjs` 의 검사 밖이라 그 파이프라인에 올리는
+ * 것은 후속이다(PR 남은 일).
+ */
 const BRAND_BADGE = require('../design/brand/kometto-badge.png');
 
 // =============================================================================
@@ -515,6 +522,10 @@ export default function SidebarScreen({
         />
       </View>
 
+      {/* 고지는 목록 상태와 무관하게 선다 — 알림 탭이 막힌 이유는 목록이 실패했을 때
+          가장 필요하다(#2584 M-1, `CHANNEL_LIST_FAILED` 가 두 곳에서 말한다). */}
+      <View style={styles.noticeWrap}>{notices}</View>
+
       {loading ? (
         <LoadingState label="채널 목록을 불러오는 중입니다." testID="channels-loading" />
       ) : listFailed ? (
@@ -543,7 +554,6 @@ export default function SidebarScreen({
           keyExtractor={row => row.key}
           ListHeaderComponent={
             <>
-              {notices}
               {card ? (
                 <WorkingCard
                   card={card}
@@ -1191,7 +1201,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
 
   // ---- 목록 ------------------------------------------------------------------
   listContent: {paddingTop: HOME.scrollTop, paddingHorizontal: HOME.scrollX},
-  bannerWrap: {paddingBottom: space.sm},
+  bannerWrap: {paddingBottom: space.sm, paddingHorizontal: HOME.scrollX},
+  noticeWrap: {paddingTop: space.md},
   filterWrap: {paddingBottom: space.md},
   filter: {
     minHeight: TOUCH_TARGET,
