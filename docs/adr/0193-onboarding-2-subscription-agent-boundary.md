@@ -7,6 +7,7 @@
 - 기안: Opus 5.5 worker(#2805)
 - 근거 자료: 제안서 `claudedocs/onboarding-2.0/brief.md`(§1 현황 감사, §2 Buzz·Aside 조사, §3 구독 연동과 약관, §4 흐름, §5 이슈 후보)와 시안 `claudedocs/onboarding-2.0/mockups.html`. 둘 다 gitignore 대상이라 로컬에만 있다. owner 공유본 시안은 https://claude.ai/artifact/6FQJ6LbTEXNN1j4uYE5nGz 이다. 이 ADR이 결정에 필요한 내용을 옮겨 적었다.
 - 증보: ADR-0190 D3(Q4), ADR-0147(Q2), ADR-0185 §5-2·§6(Q6·Q8). 각 파일 끝 「증보 2026-09-26 — 온보딩 2.0」 절이 이 ADR을 가리킨다.
+- 증보(이 ADR): 2026-09-27 AI 계정(#2876, #2816 결재) — D2 로그인 버튼 이름, D3 목록 확장 가리킴, Anthropic 약관 판단. 파일 끝 「증보 2026-09-27 — AI 계정」 절
 - 관계: ADR-0004(provider 자격 비유입), ADR-0101(에이전트 = 1급 멤버, 봇 래핑 금지), ADR-0180(기기 연결 QR), ADR-0181(웰컴 킥오프, D5 정적 문구 경로), ADR-0182(토스트 금지), ADR-0187(목표 A, 실기기 푸시 필수), ADR-0188(원격 결정자 = 소유자), ADR-0189(DS2 새벽하늘), ADR-0191 D2(공식 바이너리, 토큰 비열람), ADR-0192 D5(로그인이 든 체크포인트는 소유자 1인 것)
 
 ## Context
@@ -169,3 +170,48 @@
   - Q7 코메토 플랫 표정 6종을 만든다. 3D 시트는 참고로만.
   - Q8 진행 점을 AI 연결까지 한 줄로. 필수 화면 수와 `OWNER_ONBOARDING_STAGES`는 그대로(ADR-0185 §5-2 주석).
   - 레퍼런스 캡처 요청 철회, 공개 자료 조사로 대체(D13).
+
+---
+
+## 증보 2026-09-27 — AI 계정: 로그인 버튼 이름(D2)·실행 목록 확장(D3)·약관 판단
+
+- Status: **Accepted** (2026-09-27 성재 결재)
+- 결재 인용: (1) #2816 최신 코멘트, 성재 2026-09-27 「claude code 구독을 붙일 때 어사이드나 실제 클로드 앱처럼 구글 로그인처럼 클로드 로그인 모달을 띄우고 웹에서 로그인하고 redirect시키면 연동되는 구조를 채택해 줘」. (2) AI 계정 제안서 §6 Q1~Q7, 성재 2026-09-27 「전부 권장대로」. 시안 https://claude.ai/artifact/Y8GWHyaW2Z41bKxKB2uutB
+- 기안: Opus 5.5 worker(#2876)
+- 근거 자료: 제안서 `claudedocs/ai-accounts/brief.md` §2.3·§4.3·§8·§9(gitignore, 로컬). 아래 약관 인용은 2026-09-27에 1차 출처에서 다시 읽은 원문이다.
+
+### D2 개정 — 로그인 버튼과 모달
+- D2의 「화면에 「Claude로 로그인」「ChatGPT로 로그인」 버튼을 그리지 않는다. 버튼 이름은 「터미널에서 로그인」이다」를 이렇게 바꾼다.
+  - 버튼은 **「Claude Code로 로그인」**, **「Codex로 로그인」**이다. 누르면 앱 모달이 뜨고, 앱이 숨은 PTY에서 공식 CLI 로그인 명령을 수정 없이 돌리며, CLI가 시스템 브라우저로 claude.ai(또는 ChatGPT) 로그인을 열고 localhost 콜백으로 끝난다(#2816). 명령 목록은 ADR-0190 D3-f다.
+  - 「Claude로 로그인」「ChatGPT로 로그인」처럼 **oort가 claude.ai·ChatGPT 로그인을 제공하는 것으로 읽히는 이름은 여전히 쓰지 않는다.** 로그인하는 주체가 공식 CLI라는 것이 이름에 드러나야 한다.
+  - 「터미널에서 로그인」은 모달 안의 「터미널로 보기」 접힘 링크로 남는다.
+- oort 자체 OAuth 클라이언트로 claude.ai 로그인을 띄우거나 구독 토큰을 받는 구조는 금지다(D2 본문 그대로).
+
+### D3 — 목록 확장
+- D3의 결정 본문은 ADR-0190 파일 끝에 있다. 2026-09-27 증보로 D3-d(구조화 출력 허용 필드), D3-e(앱 명령 로컬 실행기, Codex만), D3-f(프로필 로그인·로그아웃 실행), D3-g(시험)가 더해졌다. D3의 「두 명령만」「종료 코드만」은 그 목록들과 함께 읽는다.
+
+### 약관 판단 (2026-09-27, 1차 출처)
+출처: https://code.claude.com/docs/en/legal-and-compliance (「Can customers offer Claude Code in their products?」「Using the Claude Code name and logo」「Authentication and credential use」), https://code.claude.com/docs/en/agent-sdk/overview (Note, 「Branding guidelines」, 「License and terms」)
+
+**1. 앱이 `claude -p`(headless)를 사용자 구독으로 띄우는 것 — 예외 밖으로 판단한다. 열지 않는다.**
+- 원문(legal-and-compliance): “Anthropic does not permit third-party developers to offer Claude.ai login into their own applications, or to route requests through Free, Pro, or Max plan credentials on behalf of their users.”
+- 원문(같은 절, 예외): “Nor does it prevent an end user from signing in to the unmodified Claude Code binary with their own Claude subscription, including where a platform hosts Claude Code as described under *Can customers offer Claude Code in their products?* above.”
+- 원문(Agent SDK overview, Note): “Unless previously approved, Anthropic does not allow third party developers to offer claude.ai login or rate limits for their products, including agents built on the Claude Agent SDK.”
+- 원문(Agent SDK overview): “To drive the same agent loop from a language other than Python or TypeScript, run the CLI as a subprocess with the `-p` flag and `--output-format json`.”
+- 판단: 예외가 허용하는 것은 **최종 사용자가 수정 없는 바이너리에 자기 구독으로 로그인하는 것**이다. 앱이 자기 기능(앱 명령)을 풀려고 `claude -p`를 프로그램으로 띄우면, 문서가 Agent SDK와 같은 루프라고 적은 모양이 되고, 그 경우 「제3자 제품에 claude.ai 로그인이나 rate limit을 제공하지 않는다」에 걸린다. 사용자 본인의 기기·본인 결과라는 점은 완화 사유지만, 문서가 그 구분을 두지 않으므로 보수적으로 읽는다. 그래서 ADR-0190 D3-e의 로컬 실행기는 Claude 구독으로 열지 않는다. Anthropic의 사전 승인(“Unless previously approved”)을 받거나 문서가 바뀌면 새 증보로 다시 연다.
+- 이 판단은 사람이 로컬 칸에서 직접 `claude`를 쓰는 것(ADR-0190 D2)과 로그인 자체(D3-f)를 막지 않는다. 둘 다 「최종 사용자가 수정 없는 바이너리에 자기 구독으로 로그인해 쓰는」 예외 안이다. 로그인은 “sign-in to a Claude account must complete through Anthropic's own flow”를 따른다. 공식 CLI가 claude.ai 로그인 화면을 열고, oort는 URL·코드·토큰을 보지 않는다.
+
+**2. 버튼 문구 「Claude Code로 로그인」 — 조건부로 쓸 수 있다고 판단한다.**
+- 원문(legal-and-compliance, 「Using the Claude Code name and logo」): “You can accurately say, in plain text, that your product has Claude Code preinstalled or that it runs Claude Code. But you can't use the Claude Code or Anthropic names or logos as part of your own product, feature, or company name, in your own logo, or in a way that suggests Anthropic built, endorses, or is partnered with your product.”
+- 원문(Agent SDK overview, 「Branding guidelines」, Not permitted): “"Claude Code" or "Claude Code Agent"” / “Your product should maintain its own branding and not appear to be Claude Code or any Anthropic product.”
+- 판단: 이 버튼은 「공식 Claude Code가 로그인한다」는 사실을 **평문으로 정확히 말하는 행동 문구**이고, oort의 기능·화면·제품 이름이 아니다. 아래 조건을 지키면 쓸 수 있다고 본다.
+  - 평문만 쓴다. Claude·Anthropic 로고, 브랜드 색, 「Sign in with …」식 연합 로그인 버튼 모양을 쓰지 않는다.
+  - 기능·섹션·메뉴 이름으로 쓰지 않는다. 설정 섹션은 「AI 연결」, 계정 줄은 「Claude · 개인」처럼 하네스 이름 + 사용자 라벨이다.
+  - 모달 문장이 사실을 적는다: 공식 Claude Code가 브라우저에서 로그인을 처리하고, oort는 로그인 정보를 보지 않는다는 것. 제휴·보증으로 읽히는 문장(「Anthropic 공식 연동」 등)은 쓰지 않는다.
+- 남는 위험(이 증보 범위 밖, 기록만): ADR-0188 D4의 에이전트 멤버 이름 「성재의 Claude Code · MacBook」은 Agent SDK 브랜딩 지침의 “"Claude Code" or "Claude Code Agent"” 금지와 닿을 수 있다. 에이전트 이름은 기능 이름에 가깝기 때문이다. 이름 규칙을 다시 볼지는 별도 판단으로 넘긴다.
+
+**3. Codex(ChatGPT 구독).** OpenAI의 「제3자 도구 안 ChatGPT 로그인」 명시 조항은 찾지 못했다(제안서 §2.3). 공식 `codex` 바이너리를 app-server로 부리는 것은 OpenAI가 「제품 안 깊은 통합(인증 포함)」용으로 문서화한 경로라(https://learn.chatgpt.com/docs/app-server) 가장 안전한 해석으로 받아들인다. `auth.json` 토큰을 꺼내 직접 부르는 길은 계속 금지다.
+
+### 결재 기록(증보)
+- **2026-09-27 성재:** #2816 로그인 모달 결재(위 인용 1), AI 계정 Q1~Q7 「전부 권장대로」(인용 2).
+- worker 판단: 약관 1·2·3은 2026-09-27 1차 출처 재확인 결과다. 1(Claude headless 실행기 닫음)은 제안서 Q4 권장안이 「Commercial Terms 확인 뒤에 연다」고 건 조건의 결과이며, 2의 조건은 #2816 구현의 머지 조건이다.
