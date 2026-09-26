@@ -20,6 +20,8 @@ import type { OauthApproveRequest, OauthDenyRequest } from "./oauthConsent";
 //   POST …/{id}/disconnect/complete                                         complete
 //   PUT  …/{id}/doorbell                                                    register doorbell (ADR-0171)
 //   DELETE …/{id}/doorbell                                                  unregister doorbell
+//   GET/PUT/DELETE …/{id}/dm-approvals[/{channel}]                          1:1 DM 승인 (#2915)
+//   GET  /v1/workspaces/{ws}/channels/{channel}/agent-dm-delivery           DM 전달 상태 (#2891)
 //
 // 아래 셋은 HAP-UX2(#1362)가 열었다. 앞선 다섯과 한 파일에 사는 이유는 자격증명
 // 경계가 같기 때문이다 — 다만 방향이 반대다: 앞의 셋이 원문을 **받아** 오는 반면
@@ -240,6 +242,49 @@ export function unregisterHostedDoorbell(
     method: "DELETE",
     cache: "no-store",
   });
+}
+
+// ---- 1:1 DM 승인 (ADR-0162 증보 2 / #2915) -----------------------------------
+//
+// 비밀값이 오가지 않는다. 응답은 방 id·멤버 id·상태 단어뿐이고, 서버가
+// `Cache-Control: no-store` 를 붙이는 것은 승인 상태가 캐시에서 되살아나지 않게
+// 하려는 것이라 요청도 같은 방향으로 보낸다.
+
+/** 200. 소유자·워크스페이스 관리자만 읽는다(그 밖은 403). */
+export function getHostedDmApprovals(
+  workspaceId: string,
+  connectionId: string
+): Promise<unknown> {
+  return hostedRequest(`${connection(workspaceId, connectionId)}/dm-approvals`, {
+    cache: "no-store",
+  });
+}
+
+/** 200. 소유자만(403). 구독 에이전트의 타인 DM·소유자 DM은 409, 1:1 DM 아님은 422. */
+export function setHostedDmApproval(
+  workspaceId: string,
+  connectionId: string,
+  channelId: string,
+  approve: boolean
+): Promise<unknown> {
+  return hostedRequest(
+    `${connection(workspaceId, connectionId)}/dm-approvals/${encodeURIComponent(channelId)}`,
+    { method: approve ? "PUT" : "DELETE", cache: "no-store" }
+  );
+}
+
+/**
+ * 200. 이 DM에서 지금 말하면 에이전트에게 전달되는지(#2891 컴포저 힌트).
+ * 내가 사람 멤버인 에이전트 1:1 DM이 아니면 `state: null`.
+ */
+export function getAgentDmDelivery(
+  workspaceId: string,
+  channelId: string
+): Promise<unknown> {
+  return hostedRequest(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/agent-dm-delivery`,
+    { cache: "no-store" }
+  );
 }
 
 // ---- OAuth resource-owner consent (HAP-E7 / #1368, HAP-UX4 / #1369) ---------
