@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { toHostedConnection } from "../hostedAgents/model";
+import * as harnessLogin from "./harnessLogin";
 import {
   AI_CONNECT_BOUNDARY_NOTE,
   AI_CONNECT_ROW_COPY,
   HARNESS_LOGIN_COMMAND,
   HARNESS_PILL_LABEL,
-  LOGIN_ACTION_LABEL,
   LOGIN_POLL_INTERVAL_MS,
   LOGIN_POLL_WINDOW_MS,
   SUBSCRIPTION_HARNESS_WIRE,
@@ -124,7 +124,7 @@ describe("로그인 재확인: 2초마다, 120초까지", () => {
   });
 });
 
-describe("「Claude로 로그인」 버튼을 만들 문장이 없다 (ADR-0193 D2)", () => {
+describe("「Claude로 로그인」 버튼을 만들 문장이 없다 (ADR-0193 D2, 2026-09-27 개정)", () => {
   it("no exported string names a provider login button", () => {
     const strings: string[] = [];
     const walk = (value: unknown) => {
@@ -143,16 +143,22 @@ describe("「Claude로 로그인」 버튼을 만들 문장이 없다 (ADR-0193 
       }
     };
     walk(aiConnect);
-    expect(strings.length).toBeGreaterThan(20);
+    walk(harnessLogin);
+    expect(strings.length).toBeGreaterThan(40);
+    // 개정 D2: 로그인하는 주체가 공식 CLI인 「Claude Code로」「Codex로」만 된다.
+    // 제공자·서비스 이름(Claude·ChatGPT·OpenAI·Anthropic) 바로 뒤의 「로 로그인」은 없다.
     const offenders = strings.filter((text) =>
-      /(Claude|ChatGPT|OpenAI|Anthropic|Codex)\s*(로|으로)\s*로그인/.test(text)
+      /(Claude|ChatGPT|OpenAI|Anthropic|claude\.ai)\s*(로|으로)\s*로그인/.test(text)
     );
     expect(offenders).toEqual([]);
-    expect(LOGIN_ACTION_LABEL).toBe("터미널에서 로그인");
+    // 제휴·보증으로 읽히는 말이 없다(ADR-0193 증보 약관 판단 2).
+    expect(strings.filter((text) => /공식 연동|파트너|제휴|인증된|Sign in with/i.test(text))).toEqual(
+      []
+    );
   });
 
-  it("the login action copies the official CLI entry, nothing else", () => {
-    expect(HARNESS_LOGIN_COMMAND).toEqual({ claude: "claude", codex: "codex login" });
+  it("the Phase 1 fallback copies the same official sign-in entry the dialog runs", () => {
+    expect(HARNESS_LOGIN_COMMAND).toEqual({ claude: "claude auth login --claudeai", codex: "codex login" });
   });
 
   it("the boundary note says oort does not read the login", () => {

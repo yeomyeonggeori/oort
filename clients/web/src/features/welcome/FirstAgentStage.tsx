@@ -112,6 +112,7 @@ import {
 } from "@/features/onboarding/guide/OnboardingFrame";
 import { isDefaultWelcomeChannel } from "./welcomeKickoff";
 import { AiConnectList } from "./AiConnectList";
+import { HarnessLoginDialog, type HarnessLoginFixture } from "./harnessLogin/HarnessLoginDialog";
 import { SubscriptionConnectBlock } from "./SubscriptionConnectBlock";
 import { useLocalHarnessWatch } from "./useLocalHarnessWatch";
 import {
@@ -204,6 +205,7 @@ function captureHarness(pose: FirstAgentCapturePose | null): {
   if (pose === null) return null;
   const ready: LocalHarnessProbe = { id: "claude", installed: true, auth: "logged_in" };
   const codexLogin: LocalHarnessProbe = { id: "codex", installed: true, auth: "needs_login" };
+  const claudeLogin: LocalHarnessProbe = { id: "claude", installed: true, auth: "needs_login" };
   switch (pose) {
     case "sub-probing":
       return { surface: "rows", probes: null };
@@ -215,6 +217,10 @@ function captureHarness(pose: FirstAgentCapturePose | null): {
           { id: "codex", installed: false, auth: "unknown" },
         ],
       };
+    case "login-waiting":
+    case "login-connected":
+    case "login-failed":
+      return { surface: "rows", probes: [claudeLogin, codexLogin] };
     case "sub-polling":
       return {
         surface: "rows",
@@ -239,6 +245,20 @@ function captureHarness(pose: FirstAgentCapturePose | null): {
       return { surface: "rows", probes: [ready, codexLogin] };
     default:
       return { surface: "hidden", probes: [] };
+  }
+}
+
+/** design 캡처의 로그인 모달 세 상태(#2816). 캡처는 PTY를 만들지 않는다. */
+function captureLogin(pose: FirstAgentCapturePose | null): HarnessLoginFixture | null {
+  switch (pose) {
+    case "login-waiting":
+      return { status: { phase: "waiting" } };
+    case "login-connected":
+      return { status: { phase: "connected" } };
+    case "login-failed":
+      return { status: { phase: "failed", reason: "timeout" } };
+    default:
+      return null;
   }
 }
 
@@ -349,6 +369,11 @@ export function FirstAgentStage({
     fixture: capture ? { probes: capture.probes, watch: capture.watch } : null,
   });
   const rows = aiConnectRows(surface);
+  const loginFixture = captureLogin(pose);
+  const [loginFor, setLoginFor] = useState<LocalHarnessId | null>(() =>
+    loginFixture ? "claude" : null
+  );
+  const closeLogin = useCallback(() => setLoginFor(null), []);
 
   const refreshRoster = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: rosterQueryKey(workspaceId) });
@@ -1002,7 +1027,7 @@ export function FirstAgentStage({
               selected={selected}
               onSelect={setSelected}
               pill={harness.pill}
-              onLoginStart={harness.startLoginWatch}
+              onLoginOpen={setLoginFor}
               onRecheck={harness.recheck}
               grokPill={grokPill}
               locked={listLocked}
@@ -1122,6 +1147,13 @@ export function FirstAgentStage({
           refreshRoster();
           setStep("detecting");
         }}
+      />
+      <HarnessLoginDialog
+        harness={loginFor}
+        onClose={closeLogin}
+        onConnected={harness.recheck}
+        onFallbackStarted={harness.startLoginWatch}
+        fixture={loginFixture}
       />
     </OnboardingFrame>
   );

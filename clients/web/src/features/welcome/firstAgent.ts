@@ -279,7 +279,11 @@ export type FirstAgentCapturePose =
   | "sub-waiting"
   | "sub-cap"
   | "sub-joined"
-  | "skipped";
+  | "skipped"
+  // 로그인 모달 세 상태 (#2816).
+  | "login-waiting"
+  | "login-connected"
+  | "login-failed";
 
 export const FIRST_AGENT_CAPTURE_POSES: readonly FirstAgentCapturePose[] = [
   "cards",
@@ -302,6 +306,9 @@ export const FIRST_AGENT_CAPTURE_POSES: readonly FirstAgentCapturePose[] = [
   "sub-cap",
   "sub-joined",
   "skipped",
+  "login-waiting",
+  "login-connected",
+  "login-failed",
 ];
 
 export function parseFirstAgentCapturePose(

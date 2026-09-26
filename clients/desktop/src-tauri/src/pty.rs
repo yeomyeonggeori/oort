@@ -28,6 +28,9 @@
 //    to an absolute path HERE with `harness_path` (inherited PATH + fixed
 //    install folders; no login shell is run to ask for its PATH, #2813). No extra arguments pass
 //    through — in particular no permission-bypass flag (ADR-0190 D2).
+//    `login` is one row of `LOGIN_COMMANDS` (ADR-0190 D3-f, #2816): the
+//    official CLI's own sign-in command with its arguments fixed here. The
+//    page names a harness and a method, never an argument.
 // 3. **Where.** `cwd` must canonicalize to a directory inside the user's home.
 //    Validation happens before the command builder sees the path: portable-pty
 //    silently falls back to $HOME for a cwd that is not a directory.
@@ -99,7 +102,52 @@ pub enum Program {
     Shell,
     /// One of `HARNESSES`, resolved on this machine.
     Harness { id: String },
+    /// The official CLI's sign-in command: one row of `LOGIN_COMMANDS`.
+    Login { id: String, method: LoginMethod },
 }
+
+/// How the CLI finishes its sign-in. `Browser` = the CLI opens the system
+/// browser and waits for its own localhost callback; `Device` = a device code
+/// the person types on the provider's page (Codex only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LoginMethod {
+    Browser,
+    Device,
+}
+
+/// One allowlisted sign-in: harness id, method, fixed arguments.
+#[derive(Debug, PartialEq, Eq)]
+pub struct LoginCommand {
+    pub id: &'static str,
+    pub method: LoginMethod,
+    pub args: &'static [&'static str],
+}
+
+/// The complete sign-in allowlist (ADR-0190 D3-f rows A1, A3, A4; checked
+/// against `claude` 2.1.280 and `codex-cli` 0.156.1 `--help`). The program is
+/// the id itself, resolved like any harness. No API-billing, SSO, e-mail,
+/// key or token variant, and no config override: a login that takes a key or
+/// token on stdin is not on this path. The CLI opens the browser, receives
+/// the callback and keeps what it receives in its own store; this process
+/// only moves the terminal's bytes to the page and never looks at them.
+pub const LOGIN_COMMANDS: &[LoginCommand] = &[
+    LoginCommand {
+        id: "claude",
+        method: LoginMethod::Browser,
+        args: &["auth", "login", "--claudeai"],
+    },
+    LoginCommand {
+        id: "codex",
+        method: LoginMethod::Browser,
+        args: &["login"],
+    },
+    LoginCommand {
+        id: "codex",
+        method: LoginMethod::Device,
+        args: &["login", "--device-auth"],
+    },
+];
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -150,6 +198,24 @@ pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan,
                 cwd,
                 size,
                 path: None,
+            })
+        }
+        Program::Login { id, method } => {
+            if request.cwd.is_some() {
+                return Err("refused: a sign-in runs in the home folder".into());
+            }
+            let row = LOGIN_COMMANDS
+                .iter()
+                .find(|row| row.id == id.as_str() && row.method == *method)
+                .ok_or_else(|| format!("refused: no {method:?} sign-in for {id:?}"))?;
+            let program = harness_path::find_on_path(row.id, &host.path)
+                .ok_or_else(|| format!("refused: {id} is not installed on this machine"))?;
+            Ok(SpawnPlan {
+                program,
+                args: row.args.to_vec(),
+                cwd,
+                size,
+                path: Some(host.path.clone()),
             })
         }
         Program::Harness { id } => {
@@ -264,7 +330,7 @@ impl HostFacts {
             allowed_shells,
             path: OsString::new(),
         };
-        if matches!(program, Program::Harness { .. }) {
+        if matches!(program, Program::Harness { .. } | Program::Login { .. }) {
             facts.path =
                 harness_path::search_path(Some(&facts.home), std::env::var_os("PATH").as_ref());
         }
@@ -1473,5 +1539,253 @@ mod tests {
             .unwrap_err();
         assert!(err.contains("already open"), "{err}");
         assert_eq!(manager.live.load(Ordering::Acquire), MAX_SESSIONS);
+    }
+
+    // --- sign-in (ADR-0190 D3-f, #2816) --------------------------------------
+
+    fn login_request(id: &str, method: LoginMethod) -> SpawnRequest {
+        SpawnRequest {
+            program: Program::Login {
+                id: id.into(),
+                method,
+            },
+            cwd: None,
+            cols: 80,
+            rows: 24,
+        }
+    }
+
+    /// Production part of this file.
+    fn production() -> &'static str {
+        include_str!("pty.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap()
+    }
+
+    #[test]
+    fn the_sign_in_list_is_exactly_three_fixed_commands() {
+        // Widening this list is an ADR change (ADR-0190 D3-f), not a patch.
+        assert_eq!(
+            LOGIN_COMMANDS,
+            &[
+                LoginCommand {
+                    id: "claude",
+                    method: LoginMethod::Browser,
+                    args: &["auth", "login", "--claudeai"],
+                },
+                LoginCommand {
+                    id: "codex",
+                    method: LoginMethod::Browser,
+                    args: &["login"],
+                },
+                LoginCommand {
+                    id: "codex",
+                    method: LoginMethod::Device,
+                    args: &["login", "--device-auth"],
+                },
+            ]
+        );
+        // Every sign-in program is a harness a pane may start anyway.
+        assert!(LOGIN_COMMANDS.iter().all(|row| HARNESSES.contains(&row.id)));
+    }
+
+    #[test]
+    fn the_sign_in_request_names_a_harness_and_a_method_only() {
+        let ok: SpawnRequest = serde_json::from_str(
+            r#"{"program":{"kind":"login","id":"codex","method":"device"},"cols":80,"rows":24}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            ok.program,
+            login_request("codex", LoginMethod::Device).program
+        );
+        for extra in [
+            r#"{"program":{"kind":"login","id":"claude","method":"browser","args":["--console"]},"cols":80,"rows":24}"#,
+            r#"{"program":{"kind":"login","id":"claude","method":"browser","env":{"CLAUDE_CONFIG_DIR":"/tmp"}},"cols":80,"rows":24}"#,
+            r#"{"program":{"kind":"login","id":"claude","method":"browser","profile":"/tmp/x"},"cols":80,"rows":24}"#,
+            r#"{"program":{"kind":"login","id":"claude","method":"console"},"cols":80,"rows":24}"#,
+            r#"{"program":{"kind":"login","id":"claude"},"cols":80,"rows":24}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<SpawnRequest>(extra).is_err(),
+                "accepted {extra}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sign_in_resolves_one_row_here_and_refuses_the_rest() {
+        let bin = login_bin("plan");
+        let host = host(bin.clone().into_os_string());
+        let plan = plan_spawn(&login_request("claude", LoginMethod::Browser), &host).unwrap();
+        assert_eq!(plan.program, bin.join("claude"));
+        assert_eq!(plan.args, ["auth", "login", "--claudeai"]);
+        assert_eq!(plan.cwd, home());
+        assert_eq!(plan.path.as_deref(), Some(host.path.as_os_str()));
+        let plan = plan_spawn(&login_request("codex", LoginMethod::Device), &host).unwrap();
+        assert_eq!(plan.args, ["login", "--device-auth"]);
+
+        // Claude has no device flow here; grok has no sign-in; ids are names.
+        for (id, method) in [
+            ("claude", LoginMethod::Device),
+            ("grok", LoginMethod::Browser),
+            ("../claude", LoginMethod::Browser),
+            ("/bin/sh", LoginMethod::Browser),
+            ("sh", LoginMethod::Browser),
+        ] {
+            let err = plan_spawn(&login_request(id, method), &host).unwrap_err();
+            assert!(err.starts_with("refused"), "{id} {method:?}: {err}");
+        }
+        // A sign-in always runs in home; the page cannot pick the folder.
+        let mut with_cwd = login_request("claude", LoginMethod::Browser);
+        with_cwd.cwd = Some(home().to_string_lossy().into_owned());
+        assert!(plan_spawn(&with_cwd, &host)
+            .unwrap_err()
+            .starts_with("refused"));
+        // Not installed.
+        let empty = self::host(OsString::from("/nonexistent-2816"));
+        assert!(
+            plan_spawn(&login_request("codex", LoginMethod::Browser), &empty)
+                .unwrap_err()
+                .contains("not installed")
+        );
+        std::fs::remove_dir_all(bin).ok();
+    }
+
+    /// The shell source names none of the sign-in variants D3-f keeps off
+    /// this path, and never prints or logs: terminal bytes go to the page's
+    /// channel and nowhere else.
+    #[test]
+    fn no_other_sign_in_flag_and_no_logging_in_the_shell_source() {
+        let src = production();
+        for needle in [
+            "--console",
+            "--sso",
+            "--email",
+            "--with-api-key",
+            "--with-access-token",
+            "--dangerously",
+            "\"-c\"",
+            "\"--config\"",
+            "\"logout\"",
+        ] {
+            assert!(!src.contains(needle), "pty.rs names {needle}");
+        }
+        for needle in [
+            "println!",
+            "eprintln!",
+            "print!(",
+            "eprint!(",
+            "dbg!(",
+            "log::",
+            "tracing::",
+            "std::fs::write",
+            "File::create",
+        ] {
+            assert!(!src.contains(needle), "pty.rs uses {needle}");
+        }
+    }
+
+    const FAKE_URL: &str = "https://claude.ai/oauth/authorize?code_challenge=FAKE2816";
+    const FAKE_TOKEN: &str = "sk-ant-oat01-FAKE2816TOKENvalue";
+    const FAKE_CODE: &str = "PASTED-2816-code";
+
+    /// A folder with fake `claude` and `codex` sign-in commands: each checks
+    /// its exact argv, prints URL- and token-shaped lines, then either waits
+    /// for a pasted code (`claude`) or finishes as if the browser called
+    /// back (`codex`).
+    fn login_bin(tag: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("oort-2816-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let claude = format!(
+            "#!/bin/sh\n\
+             [ \"$#\" = 3 ] && [ \"$1\" = auth ] && [ \"$2\" = login ] && [ \"$3\" = --claudeai ] || exit 9\n\
+             echo 'Opening browser: {FAKE_URL}'\n\
+             printf 'Paste code here if prompted > '\n\
+             read code\n\
+             [ \"$code\" = '{FAKE_CODE}' ] || exit 3\n\
+             echo 'token {FAKE_TOKEN}'\n\
+             echo 'Login successful.'\n"
+        );
+        let codex = format!(
+            "#!/bin/sh\n\
+             if [ \"$#\" = 1 ] && [ \"$1\" = login ]; then echo 'browser {FAKE_URL}'; exit 0; fi\n\
+             if [ \"$#\" = 2 ] && [ \"$1\" = login ] && [ \"$2\" = --device-auth ]; then echo 'code ABCD-EFGH'; exit 0; fi\n\
+             exit 9\n"
+        );
+        for (name, body) in [("claude", claude), ("codex", codex)] {
+            let file = dir.join(name);
+            std::fs::write(&file, body).unwrap();
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn a_fake_sign_in_runs_with_its_fixed_argv_and_takes_a_pasted_code() {
+        let bin = login_bin("code");
+        let host = host(bin.clone().into_os_string());
+        let manager = PtyManager::default();
+
+        // Claude: waits at the prompt until the page writes the pasted code.
+        let plan = plan_spawn(&login_request("claude", LoginMethod::Browser), &host).unwrap();
+        let sink = Arc::new(Recorder::default());
+        let id = manager
+            .spawn(&plan, build_command(&plan, path_env()), sink.clone())
+            .unwrap();
+        sink.wait_for("Paste code", SLOW);
+        manager
+            .write(id, format!("{FAKE_CODE}\r").as_bytes())
+            .unwrap();
+        let exit = sink.wait_exit(SLOW);
+        assert_eq!(exit.code, Some(0), "output: {:?}", sink.text());
+        // The bytes reached the page's sink (to be drawn only if asked).
+        assert!(sink.text().contains(FAKE_TOKEN));
+
+        // Codex, both methods: argv is exactly the row's.
+        for method in [LoginMethod::Browser, LoginMethod::Device] {
+            let plan = plan_spawn(&login_request("codex", method), &host).unwrap();
+            let sink = Arc::new(Recorder::default());
+            manager
+                .spawn(&plan, build_command(&plan, path_env()), sink.clone())
+                .unwrap();
+            assert_eq!(
+                sink.wait_exit(SLOW).code,
+                Some(0),
+                "{method:?}: {:?}",
+                sink.text()
+            );
+        }
+        std::fs::remove_dir_all(bin).ok();
+    }
+
+    #[test]
+    fn a_wrong_code_fails_and_cancel_ends_a_waiting_sign_in() {
+        let bin = login_bin("cancel");
+        let host = host(bin.clone().into_os_string());
+        let manager = PtyManager::default();
+        let plan = plan_spawn(&login_request("claude", LoginMethod::Browser), &host).unwrap();
+
+        let sink = Arc::new(Recorder::default());
+        let id = manager
+            .spawn(&plan, build_command(&plan, path_env()), sink.clone())
+            .unwrap();
+        sink.wait_for("Paste code", SLOW);
+        manager.write(id, b"not-the-code\r").unwrap();
+        assert_eq!(sink.wait_exit(SLOW).code, Some(3));
+
+        // Cancel (and the page's timeout, which calls the same kill).
+        let sink = Arc::new(Recorder::default());
+        let id = manager
+            .spawn(&plan, build_command(&plan, path_env()), sink.clone())
+            .unwrap();
+        sink.wait_for("Paste code", SLOW);
+        manager.kill(id).unwrap();
+        let exit = sink.wait_exit(SLOW);
+        assert_ne!(exit.code, Some(0), "{exit:?}");
+        std::fs::remove_dir_all(bin).ok();
     }
 }

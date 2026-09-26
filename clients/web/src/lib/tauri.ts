@@ -259,9 +259,14 @@ export async function detectLocalHarnesses(): Promise<LocalHarnessProbe[]> {
 
 /**
  * What a pane asks the shell to run. Never a path or an argv: `shell` is the
- * login shell, `harness` one id the shell resolves on this Mac (ADR-0190 D1·D3).
+ * login shell, `harness` one id the shell resolves on this Mac (ADR-0190 D1·D3),
+ * `login` one row of the shell's sign-in list (ADR-0190 D3-f, #2816) — only the
+ * sign-in dialog builds it, never the dock.
  */
-export type PtyProgram = { kind: "shell" } | { kind: "harness"; id: "claude" | "codex" | "grok" };
+export type PtyProgram =
+  | { kind: "shell" }
+  | { kind: "harness"; id: "claude" | "codex" | "grok" }
+  | { kind: "login"; id: "claude" | "codex"; method: "browser" | "device" };
 
 export interface PtyExit {
   id: number;

@@ -12270,12 +12270,16 @@ async function captureFirstAgentScenes(browser, scheme) {
     loading: "first-agent-loading",
     offline: "first-agent-offline",
     error: "first-agent-error",
+    // 로그인 모달 세 상태 (#2816).
+    "login-waiting": "harness-login-dialog",
+    "login-connected": "harness-login-dialog",
+    "login-failed": "harness-login-dialog",
   };
   const tapTargetsByPose = {
     "sub-ready": [
       ["first-agent-continue", "주 행동"],
       ["first-agent-skip", "지금은 건너뛰기"],
-      ["ai-connect-login-open-codex", "터미널에서 로그인"],
+      ["ai-connect-login-open-codex", "Codex로 로그인"],
     ],
     "sub-connect": [["first-agent-skip", "지금은 건너뛰기"]],
     "sub-cap": [
@@ -12317,8 +12321,18 @@ async function captureFirstAgentScenes(browser, scheme) {
     const loginButtons = await page.evaluate(() =>
       [...document.querySelectorAll("button, a")]
         .map((el) => `${el.textContent ?? ""} ${el.getAttribute("aria-label") ?? ""}`)
-        .filter((text) => /(Claude|ChatGPT|OpenAI|Anthropic|Codex)\s*(로|으로)\s*로그인/.test(text))
+        .filter((text) => /(Claude|ChatGPT|OpenAI|Anthropic)\s*(로|으로)\s*로그인/.test(text))
     );
+    // 로그인 모달 기본 흐름에는 터미널 칸이 없다(#2816): 접힘 링크만 선다.
+    if (pose.startsWith("login-")) {
+      const terminal = await page.evaluate(() => ({
+        pane: document.querySelector('[data-testid="harness-login-terminal"], .xterm') !== null,
+        code: document.querySelector('[data-testid="harness-login-dialog"] code') !== null,
+      }));
+      if (terminal.pane || terminal.code) {
+        throw new Error(`first-agent ${pose} ${scheme}: 기본 흐름에 터미널이 보인다`);
+      }
+    }
     if (loginButtons.length > 0) {
       throw new Error(
         `first-agent ${pose} ${scheme}: provider 로그인 버튼 ${JSON.stringify(loginButtons)}`

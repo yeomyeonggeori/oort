@@ -3906,6 +3906,53 @@
   font-family: var(--font-sans);
 }
 
+/* 로그인이 필요한 줄 아래 한 줄(#2816): 짧은 안내 + [Claude Code로 로그인].
+ * 명령 줄(.ai-connect-term)과 같은 들여쓰기·반경이되 바탕이 없다. 기본 흐름에
+ * 터미널 글꼴·명령 문자열을 보이지 않는다. */
+.ai-connect-login {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  min-inline-size: 0;
+  /* .ai-connect-term 의 가로 안쪽 여백(10px)과 같은 들여쓰기. */
+  padding-inline: 10px;
+
+  @media (width < 600px) {
+    flex-wrap: wrap;
+  }
+}
+
+/* 로그인 모달(#2816). 패널 폭은 dialog-panel의 max-w-pane-md 그대로. */
+.harness-login .kometto-guide {
+  inline-size: 100%;
+}
+
+/* 접힘 링크(「터미널로 보기」·「브라우저에 코드가 나왔나요?」). 밑줄 글자 단추:
+ * 기본 흐름에서 눈에 띄지 않되 키보드로 닿는다. */
+.harness-login-disclosure {
+  align-self: flex-start;
+  border-radius: var(--radius-sm);
+  color: var(--ink-muted);
+  font-size: var(--text-meta);
+  line-height: var(--text-meta--line-height);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+
+  &:hover {
+    color: var(--ink);
+  }
+}
+
+/* 펼친 로그인 터미널: 고정 높이 칸 하나. 칸 안쪽은 LocalTerminalPane이 그린다. */
+.harness-login-terminal {
+  display: flex;
+  block-size: 15rem;
+  min-inline-size: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+
 /* 주 행동(잉크 채움, flex 1) + 건너뛰기(ghost). 시안 `display:flex;gap:10px`. */
 .ai-connect-actions {
   display: flex;
