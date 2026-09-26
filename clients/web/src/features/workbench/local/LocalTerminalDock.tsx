@@ -155,6 +155,7 @@ export function LocalTerminalDock({
         return;
       }
       setNotice(null);
+      layoutRef.current = result.layout;
       setLayout(result.layout);
     },
     [dock.open, sessions, setLayout]
@@ -247,6 +248,28 @@ export function LocalTerminalDock({
     closeDock();
   }, [setLayout]);
 
+  /**
+   * 메뉴에서 세션을 열거나 칸을 고른 뒤에는 캐럿이 그 칸의 터미널에 가야 한다.
+   * Radix는 닫힐 때 트리거로 캐럿을 돌려주는데, 그러면 곧바로 친 키가 어디로도
+   * 가지 않는다(design-review R2 H1). 고른 경우에만 그 복귀를 막고 포커스 칸으로
+   * 보낸다. Esc로 그냥 닫으면 트리거로 돌아간다.
+   */
+  const pickedRef = useRef(false);
+  const onMenuCloseAutoFocus = (event: Event) => {
+    if (!pickedRef.current) return;
+    pickedRef.current = false;
+    event.preventDefault();
+    focusFocusedPane();
+  };
+  const focusFocusedPane = () => {
+    requestAnimationFrame(() => {
+      const root = rootRef.current;
+      const pane = root?.querySelector<HTMLElement>(`[data-pane-id="${layoutRef.current.focused}"]`);
+      const input = pane?.querySelector<HTMLElement>(".xterm-helper-textarea");
+      (input ?? pane)?.focus({ preventScroll: true });
+    });
+  };
+
   if (!dock.open) return null;
 
   const ids = paneIds(layout.root);
@@ -275,16 +298,7 @@ export function LocalTerminalDock({
             이 기기에서만 돌고 서버에 기록하지 않습니다.
           </p>
         )}
-        <p
-          role="status"
-          aria-live="polite"
-          className={cn("min-w-0 flex-1 truncate px-2 text-meta text-ink", !notice && "sr-only")}
-          title={notice ?? undefined}
-          data-testid="local-terminal-dock-notice"
-        >
-          {notice ?? ""}
-        </p>
-        {notice ? null : <span className="flex-1" />}
+        <span className="flex-1" />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button type="button" variant="ghost" size="sm" data-testid="local-terminal-new" aria-keyshortcuts="Control+Shift+N">
@@ -293,15 +307,24 @@ export function LocalTerminalDock({
               <ChevronDown aria-hidden className="size-4" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => newSession({ kind: "shell" })} data-testid="local-terminal-new-shell">
+          <DropdownMenuContent align="end" onCloseAutoFocus={onMenuCloseAutoFocus}>
+            <DropdownMenuItem
+              onSelect={() => {
+                pickedRef.current = true;
+                newSession({ kind: "shell" });
+              }}
+              data-testid="local-terminal-new-shell"
+            >
               셸
               <span className="ml-auto pl-4 text-meta text-ink-muted">⌃⇧N</span>
             </DropdownMenuItem>
             {harnesses.map((h) => (
               <DropdownMenuItem
                 key={h.id}
-                onSelect={() => newSession({ kind: "harness", id: h.id })}
+                onSelect={() => {
+                  pickedRef.current = true;
+                  newSession({ kind: "harness", id: h.id });
+                }}
                 data-testid={`local-terminal-new-${h.id}`}
               >
                 {HARNESS_LABEL[h.id] ?? h.id}
@@ -318,13 +341,21 @@ export function LocalTerminalDock({
               <ListTree />
             </DockIconButton>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" data-testid="local-terminal-jump-list">
+          <DropdownMenuContent
+            align="end"
+            data-testid="local-terminal-jump-list"
+            onCloseAutoFocus={onMenuCloseAutoFocus}
+          >
             {ids.map((id, i) => (
               <DropdownMenuItem
                 key={id}
                 onSelect={() => {
+                  pickedRef.current = true;
                   const result = focusPane(layoutRef.current, id);
-                  if (result.ok) setLayout(result.layout);
+                  if (result.ok) {
+                    layoutRef.current = result.layout;
+                    setLayout(result.layout);
+                  }
                 }}
               >
                 <span data-numeric className="w-4 font-mono text-meta text-ink-muted">
@@ -358,6 +389,16 @@ export function LocalTerminalDock({
           <X />
         </DockIconButton>
       </header>
+      {/* 도크 알림은 머리 줄 밖 제 줄에 둔다: 최소 창 폭(도크 약 400px)에서도
+          다음 행동까지 다 읽히게 줄을 바꾼다(design-review R2 M1). */}
+      <p
+        role="status"
+        aria-live="polite"
+        className={cn("break-keep px-3 pb-1 text-meta text-ink", !notice && "sr-only")}
+        data-testid="local-terminal-dock-notice"
+      >
+        {notice ?? ""}
+      </p>
       <div ref={bodyRef} className="flex min-h-0 flex-1 flex-col px-2 pb-1">
         <WorkbenchGrid
           className="flex-1"

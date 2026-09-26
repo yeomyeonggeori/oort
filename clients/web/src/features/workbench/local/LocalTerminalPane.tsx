@@ -267,12 +267,19 @@ function PaneFooter({
   return (
     <div
       className={cn(
-        "flex min-h-control-sm shrink-0 items-center gap-2 border-t border-line px-3 text-meta",
+        // 상태 문장은 자르지 않는다: 무슨 일과 다음 행동이 240px 칸에서도 다 읽혀야
+        // 한다(design-review R2 B1). 좁으면 줄을 바꾸고 단추는 아랫줄로 간다.
+        "flex min-h-control-sm shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-line px-3 py-1 text-meta",
         message ? "text-ink" : "hidden"
       )}
       data-testid="local-terminal-status"
     >
-      <p role="status" aria-live="polite" className="min-w-0 flex-1 truncate" title={detail ? `${message ?? ""} (${detail})` : (message ?? undefined)}>
+      <p
+        role="status"
+        aria-live="polite"
+        className="min-w-0 flex-1 basis-40 break-keep"
+        title={detail ? `${message ?? ""} (${detail})` : undefined}
+      >
         {message ?? ""}
       </p>
       {action ? (

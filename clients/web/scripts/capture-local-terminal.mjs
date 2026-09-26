@@ -163,6 +163,70 @@ async function interactions(browser, origin) {
   );
   check("다시 열면 전의 화면이 그대로다(미러에서 다시 그림)", kept === true);
   await context.close();
+
+  // R2 H1: 메뉴에서 새 세션을 고른 뒤 바로 친 키가 새 칸의 터미널에 들어간다.
+  {
+    const { context: c2, page: p2 } = await open(browser, origin, "light", "one");
+    await p2.getByTestId("local-terminal-dock").waitFor();
+    await waitOutput(p2);
+    await p2.getByTestId("local-terminal-new").click();
+    await p2.getByTestId("local-terminal-new-shell").click();
+    await p2.waitForFunction(() => document.querySelectorAll('[data-testid="workbench-pane"]').length === 2);
+    await p2.waitForTimeout(300);
+    await p2.keyboard.type("whoami-after-menu");
+    await p2.waitForTimeout(300);
+    const landed = await p2.evaluate(() => {
+      const pane = document.querySelector('[data-testid="workbench-pane"][data-focused]');
+      return pane?.querySelector(".xterm-rows")?.textContent?.includes("whoami-after-menu") ?? false;
+    });
+    check("메뉴로 연 새 칸에 바로 입력된다", landed);
+    // 칸 목록(⌘J)으로 1번 칸을 고르고 친다.
+    await p2.getByTestId("local-terminal-jump").click();
+    await p2.getByTestId("local-terminal-jump-list").getByRole("menuitem").first().click();
+    await p2.waitForTimeout(300);
+    await p2.keyboard.type("picked-from-list");
+    await p2.waitForTimeout(300);
+    const landed2 = await p2.evaluate(() => {
+      const pane = document.querySelector('[data-testid="workbench-pane"][data-pane-id="p1"]');
+      return pane?.querySelector(".xterm-rows")?.textContent?.includes("picked-from-list") ?? false;
+    });
+    check("칸 목록에서 고른 칸에 바로 입력된다", landed2);
+    await c2.close();
+  }
+
+  // R2 B1·M1: 좁은 칸·최소 창 폭에서도 상태 문장과 알림이 잘리지 않는다.
+  for (const [scene, width] of [["failed-four", 900], ["exited-four", 900], ["failed-four", 640], ["exited-four", 640]]) {
+    const context3 = await browser.newContext({ viewport: { width, height: 700 }, colorScheme: "light", reducedMotion: "reduce" });
+    const p3 = await context3.newPage();
+    await p3.goto(`${origin}/#/design/local-terminal?scene=${scene}`);
+    await p3.getByTestId("local-terminal-restart").first().waitFor();
+    const clipped = await p3.evaluate(() =>
+      Array.from(document.querySelectorAll('[data-testid="local-terminal-status"] [role="status"]')).filter(
+        (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1
+      ).length
+    );
+    const paneW = await p3.evaluate(() => document.querySelector('[data-testid="workbench-pane"]')?.getBoundingClientRect().width);
+    check(`${scene}@${width}: 칸 상태 문장이 잘리지 않는다`, clipped === 0, { clipped, paneW });
+    await p3.screenshot({ path: resolve(OUT_DIR, `light-${scene}-${width}.png`) });
+    report.scenes.push(`light-${scene}-${width}`);
+    await context3.close();
+  }
+  {
+    const context4 = await browser.newContext({ viewport: { width: 420, height: 700 }, colorScheme: "light", reducedMotion: "reduce" });
+    const p4 = await context4.newPage();
+    await p4.goto(`${origin}/#/design/local-terminal?scene=four`);
+    await p4.getByTestId("local-terminal-dock").waitFor();
+    await p4.keyboard.press("Control+Shift+KeyN");
+    await p4.getByTestId("local-terminal-dock-notice").filter({ hasText: "칸이 좁아" }).waitFor();
+    const n = await p4.evaluate(() => {
+      const el = document.querySelector('[data-testid="local-terminal-dock-notice"]');
+      return { clipped: el.scrollWidth > el.clientWidth + 1, text: el.textContent };
+    });
+    check("420 폭: 도크 알림이 다음 행동까지 보인다", !n.clipped && n.text.includes("키우세요"), n);
+    await p4.screenshot({ path: resolve(OUT_DIR, "light-notice-420.png") });
+    report.scenes.push("light-notice-420");
+    await context4.close();
+  }
 }
 
 async function main() {

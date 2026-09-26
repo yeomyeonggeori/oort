@@ -229,10 +229,10 @@ export interface TerminalAppBinding {
  */
 export const TERMINAL_APP_BINDINGS: readonly TerminalAppBinding[] = [
   { id: "toggle-dock", description: "터미널 도크 열고 닫기", keycaps: ["⌃`"], note: "한글 입력 중에도 같은 자판으로 됩니다." },
-  { id: "toggle-fullscreen", description: "전체 화면 작업 공간", keycaps: ["⌃⇧`"] },
+  { id: "toggle-fullscreen", description: "전체 화면 켜고 끄기", keycaps: ["⌃⇧`"], note: "도크를 본문 판 전체로 키웁니다." },
   { id: "new-session", description: "새 세션", keycaps: ["⌃⇧N", "⌘T"], note: "⌘T는 도크에 포커스가 있을 때만 됩니다." },
   ...WORKBENCH_BINDINGS.map((b) => ({ id: b.id, description: b.description, keycaps: b.keycaps })),
-  { id: "jump-palette", description: "세션 점프 목록", keycaps: ["⌘J"] },
+  { id: "jump-palette", description: "칸 목록 열기", keycaps: ["⌘J"] },
   { id: "next-waiting", description: "다음 「나를 기다림」으로", keycaps: ["⌃⇧J"] },
 ];
 

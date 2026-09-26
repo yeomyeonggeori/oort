@@ -23,7 +23,7 @@ import { openDock, resetDockStateForTest, toggleDockFullscreen, useDockState } f
 // 디자인 검수가 라이트·다크에서 도크를 보는 자리다. 실제 PTY는 데스크탑 debug
 // 앱에서 확인한다(PR 본문).
 //
-// `?scene=one|four|full|exited|failed|settings-web|settings-desktop`
+// `?scene=one|four|full|exited|failed|exited-four|failed-four|settings-web|settings-desktop`
 
 const ENC = new TextEncoder();
 
@@ -84,7 +84,7 @@ export function LocalTerminalHarness() {
   const sessions = useMemo(
     () =>
       createLocalSessions({
-        pty: demoPty(scene === "exited" ? "exited" : scene === "failed" ? "failed" : "live"),
+        pty: demoPty(scene.startsWith("exited") ? "exited" : scene.startsWith("failed") ? "failed" : "live"),
         loadMirror: loadBrowserMirror,
         storage: () => null,
       }),
@@ -94,7 +94,7 @@ export function LocalTerminalHarness() {
 
   useMemo(() => {
     try {
-      const layout = scene === "four" || scene === "full" ? fourLayout() : defaultWorkbenchLayout();
+      const layout = scene === "four" || scene === "full" || scene.endsWith("-four") ? fourLayout() : defaultWorkbenchLayout();
       window.localStorage.setItem(workbenchLayoutEntry(DOCK_SESSION_KEY), serializeWorkbenchLayout(layout));
     } catch {
       /* 저장소 없는 캡처 */
@@ -103,7 +103,7 @@ export function LocalTerminalHarness() {
 
   useEffect(() => {
     resetDockStateForTest();
-    if (scene === "one" || scene === "four" || scene === "exited" || scene === "failed") openDock();
+    if (scene !== "full") openDock();
     if (scene === "full") toggleDockFullscreen();
   }, [scene]);
 
