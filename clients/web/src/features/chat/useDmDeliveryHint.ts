@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { ApiError } from "@momo/core/lib/api";
 import { getAgentDmDelivery } from "@momo/core/features/hostedAgents/api";
 import {
   dmComposerHint,
@@ -20,8 +21,8 @@ import {
 // 전달되므로, 문장은 서버의 `agent-dm-delivery` 답을 따른다.
 //
 //   * 답을 기다리는 동안: 문장 없음. 모르는 채로 「답합니다」를 약속하지 않는다.
-//   * 답이 없을 때(이 경로가 없는 옛 서버, 네트워크 실패): 이전 문장. 관리형
-//     에이전트만 있던 서버의 동작 그대로다.
+//   * 이 경로가 없는 옛 서버(404): 이전 문장. 관리형 에이전트만 있던 서버의
+//     동작 그대로다. 그 밖의 실패(5xx·타임아웃·오프라인): 문장 없음.
 //   * 모르는 상태 단어: 문장 없음.
 // =============================================================================
 
@@ -56,9 +57,14 @@ export function useDmDeliveryHint({
     ownerName: null as string | null,
   };
   if (delivery.isPending) return null;
-  if (delivery.isError || delivery.data === null) {
-    return dmComposerHint("open", names);
+  if (delivery.isError) {
+    // 옛 문장은 이 경로가 없는 옛 서버(404)에서만 참이다. 5xx·타임아웃·오프라인은
+    // 모르는 것이므로 약속하지 않는다(design-review H).
+    return delivery.error instanceof ApiError && delivery.error.status === 404
+      ? dmComposerHint("open", names)
+      : null;
   }
+  if (delivery.data === null) return null;
   const state = delivery.data.state;
   if (state === null) return null;
   const ownerId = delivery.data.ownerMemberId;

@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { ConfirmButton, StatusChip } from "@/features/settings/SettingsFields";
@@ -69,18 +69,18 @@ export function DmApprovalSection({
   writesLocked: boolean;
 }) {
   const client = useQueryClient();
-  const noteId = useId();
   const key = dmApprovalsQueryKey(workspaceId, connectionId);
-  const [failure, setFailure] = useState<{ channelId: string; message: string } | null>(
-    null
-  );
+  const [failure, setFailure] = useState<{
+    channelId: string;
+    message: string;
+  } | null>(null);
   const [live, setLive] = useState("");
 
   const list = useQuery({
     queryKey: key,
     queryFn: async () => {
       const parsed = parseHostedDmApprovals(
-        await getHostedDmApprovals(workspaceId, connectionId)
+        await getHostedDmApprovals(workspaceId, connectionId),
       );
       if (parsed === null) throw new Error("dm approvals: unexpected shape");
       return parsed;
@@ -89,14 +89,17 @@ export function DmApprovalSection({
   });
 
   const write = useMutation({
-    mutationFn: async (input: { row: HostedDmApprovalRow; approve: boolean }) => {
+    mutationFn: async (input: {
+      row: HostedDmApprovalRow;
+      approve: boolean;
+    }) => {
       const row = parseHostedDmApprovalWrite(
         await setHostedDmApproval(
           workspaceId,
           connectionId,
           input.row.channelId,
-          input.approve
-        )
+          input.approve,
+        ),
       );
       if (row === null) throw new Error("dm approval: unexpected shape");
       return row;
@@ -104,21 +107,21 @@ export function DmApprovalSection({
     onSuccess: (row, input) => {
       setFailure(null);
       client.setQueryData<HostedDmApprovals>(key, (current) =>
-        current === undefined ? current : applyHostedDmApproval(current, row)
+        current === undefined ? current : applyHostedDmApproval(current, row),
       );
       void client.invalidateQueries({ queryKey: key });
       const name = nameOf(input.row.counterpartMemberId);
       setLive(
         input.approve
           ? `${name}님과의 대화를 열었습니다.`
-          : `${name}님과의 대화를 닫았습니다.`
+          : `${name}님과의 대화를 닫았습니다.`,
       );
     },
     onError: (error, input) =>
       setFailure({
         channelId: input.row.channelId,
         message: dmApprovalFailureMessage(
-          error instanceof ApiError ? error.status : null
+          error instanceof ApiError ? error.status : null,
         ),
       }),
   });
@@ -139,13 +142,16 @@ export function DmApprovalSection({
       data-testid="hosted-dm-approval-section"
     >
       <div className="flex min-w-0 flex-col gap-1">
-        <h4 className="text-body font-semibold text-ink">{DM_APPROVAL_HEADLINE}</h4>
+        <h4 className="text-body font-semibold text-ink">
+          {DM_APPROVAL_HEADLINE}
+        </h4>
         <p className="break-keep text-meta text-ink-muted">
-          {data?.ownerOnly ? DM_APPROVAL_OWNER_ONLY_LEAD : dmApprovalLead(agentLabel)}
+          {data?.ownerOnly
+            ? DM_APPROVAL_OWNER_ONLY_LEAD
+            : dmApprovalLead(agentLabel)}
         </p>
         {data !== undefined && !data.canEdit && (
           <p
-            id={noteId}
             className="break-keep text-meta text-ink-muted"
             data-testid="hosted-dm-approval-readonly"
           >
@@ -153,7 +159,10 @@ export function DmApprovalSection({
           </p>
         )}
         {data?.canEdit && offline && (
-          <p id={OFFLINE_NOTE_ID} className="break-keep text-meta text-ink-muted">
+          <p
+            id={OFFLINE_NOTE_ID}
+            className="break-keep text-meta text-ink-muted"
+          >
             {DM_APPROVAL_OFFLINE_NOTE}
           </p>
         )}
@@ -189,14 +198,19 @@ export function DmApprovalSection({
       )}
 
       {data !== undefined && data.dms.length > 0 && (
-        <ul className="flex min-w-0 flex-col divide-y divide-line" data-testid="hosted-dm-approval-list">
+        <ul
+          className="flex min-w-0 flex-col divide-y divide-line"
+          data-testid="hosted-dm-approval-list"
+        >
           {data.dms.map((row) => {
             const name = nameOf(row.counterpartMemberId);
             const editable =
-              data.canEdit && (row.state === "approved" || row.state === "unapproved");
+              data.canEdit &&
+              (row.state === "approved" || row.state === "unapproved");
             const opening = row.state === "unapproved";
             const busy =
-              write.isPending && write.variables?.row.channelId === row.channelId;
+              write.isPending &&
+              write.variables?.row.channelId === row.channelId;
             return (
               <li
                 key={row.channelId}
@@ -204,37 +218,48 @@ export function DmApprovalSection({
                 data-testid="hosted-dm-approval-row"
                 data-state={row.state}
               >
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <span className="min-w-0 flex-1 truncate text-body text-ink">
+                {/* 이름은 줄이지 않는다: 여는 것은 그 사람의 대화를 건네는 승인이라
+                    누구인지가 이 줄의 전부다. 폭이 모자라면 칩과 버튼이 아래로
+                    내려간다(이름의 flex-basis 가 내용 폭이라 wrap 이 먼저 일어난다). */}
+                <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+                  <span className="grow break-keep text-body text-ink">
                     {name}님과의 대화
                   </span>
-                  <StatusChip tone={dmApprovalStateTone(row.state)}>
-                    {dmApprovalStateLabel(row.state)}
-                  </StatusChip>
-                  {editable && (
-                    <ConfirmButton
-                      label={opening ? DM_APPROVAL_OPEN_LABEL : DM_APPROVAL_CLOSE_LABEL}
-                      subject={`${name}님과의 대화`}
-                      question={
-                        opening
-                          ? dmApprovalOpenQuestion(name)
-                          : dmApprovalCloseQuestion(name)
-                      }
-                      confirmLabel={
-                        opening ? DM_APPROVAL_OPEN_CONFIRM : DM_APPROVAL_CLOSE_CONFIRM
-                      }
-                      confirmDestructive={!opening}
-                      busy={busy}
-                      busyLabel={DM_APPROVAL_BUSY_LABEL}
-                      disabled={locked && !busy}
-                      describedBy={offline ? OFFLINE_NOTE_ID : undefined}
-                      onConfirm={() => {
-                        if (locked || write.isPending) return;
-                        write.mutate({ row, approve: opening });
-                      }}
-                      testId="hosted-dm-approval-toggle"
-                    />
-                  )}
+                  <span className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
+                    <StatusChip tone={dmApprovalStateTone(row.state)}>
+                      {dmApprovalStateLabel(row.state)}
+                    </StatusChip>
+                    {editable && (
+                      <ConfirmButton
+                        label={
+                          opening
+                            ? DM_APPROVAL_OPEN_LABEL
+                            : DM_APPROVAL_CLOSE_LABEL
+                        }
+                        subject={`${name}님과의 대화`}
+                        question={
+                          opening
+                            ? dmApprovalOpenQuestion(name)
+                            : dmApprovalCloseQuestion(name)
+                        }
+                        confirmLabel={
+                          opening
+                            ? DM_APPROVAL_OPEN_CONFIRM
+                            : DM_APPROVAL_CLOSE_CONFIRM
+                        }
+                        confirmDestructive={!opening}
+                        busy={busy}
+                        busyLabel={DM_APPROVAL_BUSY_LABEL}
+                        disabled={locked && !busy}
+                        describedBy={offline ? OFFLINE_NOTE_ID : undefined}
+                        onConfirm={() => {
+                          if (locked || write.isPending) return;
+                          write.mutate({ row, approve: opening });
+                        }}
+                        testId="hosted-dm-approval-toggle"
+                      />
+                    )}
+                  </span>
                 </div>
                 {failure?.channelId === row.channelId && (
                   <InlineBanner

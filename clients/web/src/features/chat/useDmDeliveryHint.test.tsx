@@ -94,6 +94,13 @@ describe("useDmDeliveryHint", () => {
     expect(seen.at(-1)).toBe("멘션 없이 바로 말하면 Claude Code가 답합니다");
   });
 
+  it("promises nothing when the lookup fails for any other reason", async () => {
+    const { ApiError } = await import("@momo/core/lib/api");
+    vi.mocked(getAgentDmDelivery).mockRejectedValue(new ApiError(503, "unavailable"));
+    await settle();
+    expect(seen.at(-1)).toBeNull();
+  });
+
   it("keeps the old sentence on a server without the route", async () => {
     const { ApiError } = await import("@momo/core/lib/api");
     vi.mocked(getAgentDmDelivery).mockRejectedValue(new ApiError(404, "not found"));
