@@ -13,7 +13,8 @@
 //! | `non_owner_calls_are_not_delivered_and_answered_once` | ① mention/DM/thread reply/work request → 0 delivered, 1 notice | `owner_only_gate` non-owner arm, inbox fan-out owner predicate, work-run owner check |
 //! | same | ② 10-min re-call → +0 notice; after 10 min → +1 | `lock_and_find_recent_notice_in_tx` |
 //! | `the_owners_call_is_delivered_with_no_notice` | ③ owner → 1 job, 0 notice | (gate does not block everyone) |
-//! | `an_offline_owner_call_is_queued_answered_once_and_claimed_on_reconnect` | ④ | `recently_seen` offline branch |
+//! | `an_offline_owner_call_is_queued_answered_once_and_claimed_on_reconnect` | ④ queued, claimed on reconnect, liveness moves | `recently_seen` offline branch |
+//! | `an_owner_call_before_the_connection_is_live_says_the_future_sentence_only` | ④ nothing queued | `reconnectable` offline branch |
 //! | `the_kill_switch_stops_every_delivery_and_turning_it_on_resumes` | ⑤ + client value + join refusal + tool view | `owner_only_gate` switch arm, `tool_view_for`, create refusal |
 //! | `a_notice_is_one_write_and_another_workspace_sees_zero_rows` | ⑥ single tx + RLS | (RLS FORCE) |
 //! | `owner_only_can_never_be_reopened` | D4 「소유자는 바꿀 수 없다」 | migration 089 trigger |
@@ -44,6 +45,8 @@ const NON_OWNER_BODY: &str =
     "성재의 개인 에이전트예요. 팀이 함께 부르는 에이전트는 설정 › AI 연결에서 붙일 수 있어요.";
 const OFFLINE_QUEUED_BODY: &str =
     "지금은 오프라인이에요. 맥에서 Claude Code를 다시 열면 이어서 답할게요.";
+const OFFLINE_NOT_QUEUED_BODY: &str =
+    "지금은 오프라인이에요. 맥에서 Claude Code를 다시 열면 답할 수 있어요.";
 const DISABLED_BODY: &str =
     "지금은 이 서버에서 구독 에이전트를 쓸 수 없어요. 설정 › AI 연결에서 API 키로 연결할 수 있어요.";
 
@@ -872,6 +875,142 @@ async fn an_offline_owner_call_is_queued_answered_once_and_claimed_on_reconnect(
         claimed_jobs, 2,
         "both queued calls are handed over: {claimed}"
     );
+    // The liveness signal the offline branch reads actually moves: the CLI's
+    // visit touched its credential, so the next call counts as online.
+    let fresh: bool = sqlx::query_scalar(
+        "SELECT last_used_at > now() - interval '1 minute' FROM token WHERE id=$1",
+    )
+    .bind(f.token)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(fresh, "an Agent Port request refreshes token.last_used_at");
+    send(&client, &base, &f, &f.owner_jwt, f.channel, &mention, None).await;
+    assert_eq!(jobs(&su, &f).await, 3);
+    assert_eq!(
+        notices(&su, &f).await.len(),
+        1,
+        "back online: no offline sentence"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// ④' — the owner calls before the connection is live: nothing is queued, so
+// only the sentence about the future is true
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (2815-*)"]
+async fn an_owner_call_before_the_connection_is_live_says_the_future_sentence_only() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su).await;
+    // A second owner_only agent of the same owner whose connection is still
+    // `detected` (the CLI dialed in; not yet proved) — no active credential.
+    let pending = Uuid::new_v4();
+    let pending_handle = format!("pend-{}", &pending.simple().to_string()[..12]);
+    sqlx::query(
+        "INSERT INTO member(id, workspace_id, kind, display_name, handle) \
+         VALUES($1,$2,'agent','Claude Code',$3)",
+    )
+    .bind(pending)
+    .bind(f.workspace)
+    .bind(&pending_handle)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO agent(member_id, workspace_id, model, base_url, owner_human_id, config) \
+         VALUES($1,$2,'hosted-agent','https://hosted-agent.invalid/disabled',$3, \
+                '{\"execution_mode\":\"hosted_dial_in\"}'::jsonb)",
+    )
+    .bind(pending)
+    .bind(f.workspace)
+    .bind(f.owner)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE agent SET invocation_scope='owner_only', subscription_harness='claude_code' \
+         WHERE workspace_id=$1 AND member_id=$2",
+    )
+    .bind(f.workspace)
+    .bind(pending)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO workspace_membership(workspace_id, member_id, role) VALUES($1,$2,'member')",
+    )
+    .bind(f.workspace)
+    .bind(pending)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO agent_profile(agent_member_id, workspace_id, updated_by, paused) \
+         VALUES($1,$2,$3,false)",
+    )
+    .bind(pending)
+    .bind(f.workspace)
+    .bind(f.owner)
+    .execute(&su)
+    .await
+    .unwrap();
+    join(&su, f.workspace, f.channel, pending).await;
+    sqlx::query(
+        "INSERT INTO hosted_agent_connection( \
+           workspace_id,agent_member_id,status,pairing_consumed_at,detected_at,detected_by, \
+           approved_channel_ids,approved_scopes,created_by) \
+         VALUES($1,$2,'detected',now(),now(),$2,$3,ARRAY['agent:port:connect']::text[],$4)",
+    )
+    .bind(f.workspace)
+    .bind(pending)
+    .bind(vec![f.channel])
+    .bind(f.owner)
+    .execute(&su)
+    .await
+    .unwrap();
+    let pending_fixture = Fixture {
+        agent: pending,
+        agent_handle: pending_handle.clone(),
+        ..f.clone()
+    };
+    let base = start_server(momo_app_pool().await, true).await;
+    let client = reqwest::Client::new();
+    let mention = format!("@{pending_handle} 들려?");
+
+    send(&client, &base, &f, &f.owner_jwt, f.channel, &mention, None).await;
+    assert_eq!(
+        jobs(&su, &pending_fixture).await,
+        0,
+        "no live connection: the existing skip, no new queue"
+    );
+    assert_eq!(
+        last_skip_reason(&su, &f).await,
+        "hosted_connection_unavailable"
+    );
+    let posted = notices(&su, &pending_fixture).await;
+    assert_eq!(posted.len(), 1, "{posted:?}");
+    assert_eq!(
+        posted[0].0, OFFLINE_NOT_QUEUED_BODY,
+        "no 「이어서」: nothing was queued"
+    );
+
+    // A teammate in the same state hears only whose agent this is.
+    send(
+        &client,
+        &base,
+        &f,
+        &f.teammate_jwt,
+        f.channel,
+        &mention,
+        None,
+    )
+    .await;
+    let posted = notices(&su, &pending_fixture).await;
+    assert_eq!(posted.len(), 2);
+    assert_eq!(posted[1].0, NON_OWNER_BODY);
 }
 
 // ---------------------------------------------------------------------------
