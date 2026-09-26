@@ -312,22 +312,100 @@ export async function webInPage({ src, badge, cut, size, mode, cmp }) {
   const sctx = s0.getContext("2d");
   sctx.drawImage(img, 0, 0, 8, 8, 0, 0, 8, 8);
   const bg = sctx.getImageData(4, 4, 1, 1).data;
-  const alphaAt = (x, y, i) => {
-    const r = Math.hypot(x + 0.5 - size / 2, y + 0.5 - size / 2);
-    if (cut === "circle") return Math.min(1, Math.max(0, size / 2 - r)); // 1px 안티앨리어싱
-    // background: 원 안쪽(가장자리 4px 전)은 불투명, 그 밖은 바탕과의 차로 알파.
-    if (r < size / 2 - 4) return 1;
-    const diff = Math.max(Math.abs(d[i] - bg[0]), Math.abs(d[i + 1] - bg[1]), Math.abs(d[i + 2] - bg[2]));
-    return Math.min(1, Math.max(0, (diff - 4) / 12));
-  };
   const alpha = new Float32Array(size * size);
-  for (let y = 0; y < size; y++)
-    for (let x = 0; x < size; x++) {
-      const p = y * size + x;
-      alpha[p] = alphaAt(x, y, p * 4);
+  if (cut === "circle") {
+    for (let y = 0; y < size; y++)
+      for (let x = 0; x < size; x++) {
+        const r = Math.hypot(x + 0.5 - size / 2, y + 0.5 - size / 2);
+        alpha[y * size + x] = Math.min(1, Math.max(0, size / 2 - r)); // 1px 안티앨리어싱
+      }
+  } else {
+    // background: 원이 정원이 아니고 꼬리가 원 밖으로 나온다(K6-flat-light).
+    //   1. 네 모서리에서 바탕과 거의 같은 픽셀(최대 채널 차 ≤ 6)을 flood fill → 바탕(알파 0)
+    //   2. 바탕에 닿지 않는 픽셀은 전부 불투명(원 안의 색 경계는 건드리지 않는다)
+    //   3. 바탕에서 2px 안의 가장자리 띠만 투영 매팅: 띠 밖의 가장 가까운 전경 픽셀을 전경색으로
+    //      보고 (픽셀 - 바탕)을 (전경 - 바탕)에 투영한 비율. 선 위에 없으면(잔차 > 12) 바탕과의 차
+    const diffAt = (i) => Math.max(Math.abs(d[i] - bg[0]), Math.abs(d[i + 1] - bg[1]), Math.abs(d[i + 2] - bg[2]));
+    const isBg = new Uint8Array(size * size);
+    const stack = [0, size - 1, (size - 1) * size, size * size - 1];
+    while (stack.length) {
+      const p = stack.pop();
+      if (isBg[p] || diffAt(p * 4) > 6) continue;
+      isBg[p] = 1;
+      const x = p % size;
+      if (x > 0) stack.push(p - 1);
+      if (x < size - 1) stack.push(p + 1);
+      if (p >= size) stack.push(p - size);
+      if (p < size * (size - 1)) stack.push(p + size);
     }
+    const near = (x, y, rad) => {
+      for (let dy = -rad; dy <= rad; dy++)
+        for (let dx = -rad; dx <= rad; dx++) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx >= 0 && ny >= 0 && nx < size && ny < size && isBg[ny * size + nx]) return true;
+        }
+      return false;
+    };
+    const band = new Uint8Array(size * size);
+    for (let y = 0; y < size; y++)
+      for (let x = 0; x < size; x++) {
+        const p = y * size + x;
+        if (isBg[p]) continue;
+        if (near(x, y, 2)) band[p] = 1;
+        else alpha[p] = 1;
+      }
+    for (let y = 0; y < size; y++)
+      for (let x = 0; x < size; x++) {
+        const p = y * size + x;
+        if (!band[p]) continue;
+        const i = p * 4;
+        const simple = Math.min(1, Math.max(0, (diffAt(i) - 3) / 19));
+        let j = -1;
+        let best = Infinity;
+        for (let dy = -4; dy <= 4; dy++)
+          for (let dx = -4; dx <= 4; dx++) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+            const q = ny * size + nx;
+            if (isBg[q] || band[q]) continue;
+            const dd = dx * dx + dy * dy;
+            if (dd < best) {
+              best = dd;
+              j = q * 4;
+            }
+          }
+        if (j < 0) {
+          alpha[p] = simple;
+          continue;
+        }
+        let num = 0;
+        let den = 0;
+        for (let c = 0; c < 3; c++) {
+          const f = d[j + c] - bg[c];
+          num += (d[i + c] - bg[c]) * f;
+          den += f * f;
+        }
+        if (den < 100) {
+          alpha[p] = simple;
+          continue;
+        }
+        const t = Math.min(1, Math.max(0, num / den));
+        let res = 0;
+        for (let c = 0; c < 3; c++) res += (d[i + c] - bg[c] - t * (d[j + c] - bg[c])) ** 2;
+        alpha[p] = Math.sqrt(res) > 12 ? simple : t;
+      }
+  }
   if (mode === "render") {
-    for (let p = 0; p < size * size; p++) d[p * 4 + 3] = Math.round(alpha[p] * 255);
+    for (let p = 0; p < size * size; p++) {
+      const i = p * 4;
+      const a = alpha[p];
+      // 반투명 가장자리는 바탕색을 걷어 낸다(흰 테·검은 테 방지).
+      if (cut === "background" && a > 0 && a < 1)
+        for (let c = 0; c < 3; c++) d[i + c] = Math.min(255, Math.max(0, Math.round((d[i + c] - bg[c] * (1 - a)) / a)));
+      d[i + 3] = Math.round(a * 255);
+    }
     ctx.putImageData(D, 0, 0);
     return { png: c.toDataURL("image/png").split(",")[1] };
   }
