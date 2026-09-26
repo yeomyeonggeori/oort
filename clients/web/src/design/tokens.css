@@ -3688,16 +3688,20 @@
   color: var(--signal-text);
 }
 
-/* 알약이 행동일 때(설치 필요·다시 확인): 알약 모양 그대로, 눌리는 표지만 더한다.
- * 손가락 자리는 줄 높이(68)가 받치고, 600 미만에서는 tap-target까지 자란다. */
+/* 알약이 행동일 때(설치 필요·다시 확인): 톤은 mute 그대로(오렌지는 진행 점과
+ * 포커스만, D11), 눌리는 것은 테두리와 밑줄로 보인다. 포인터 최소 24를 받고
+ * 600 미만에서는 tap-target까지 자란다(design-review H2·M1·M2). */
 .ai-connect-pill-action {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 24px;
+  border: 1px solid var(--line-strong);
   cursor: pointer;
   text-decoration: underline;
-  text-decoration-color: transparent;
   text-underline-offset: 2px;
 
   &:hover {
-    text-decoration-color: currentColor;
+    background-color: var(--surface-hover);
   }
 
   @media (width < 600px) {
@@ -3781,7 +3785,6 @@
   flex: 1 1 16rem;
   min-inline-size: 0;
   overflow-wrap: anywhere;
-  word-break: break-all;
 }
 
 .ai-connect-command-actions {

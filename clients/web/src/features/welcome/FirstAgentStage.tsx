@@ -20,6 +20,7 @@ import {
   AI_CONNECT_CONTINUE_LABEL,
   AI_CONNECT_DESKTOP_ONLY_NOTE,
   AI_CONNECT_LIST_ERROR_LINE,
+  AI_CONNECT_OFFLINE_LINE,
   GROK_LABEL,
   AI_CONNECT_PROBING_LINE,
   AI_CONNECT_QUESTION,
@@ -75,6 +76,7 @@ import type { HostedWizardLaunch } from "@/features/hostedAgents/hostedWizardLau
 import {
   createHostedConnection,
   getHostedConnection,
+  regenerateHostedPairing,
 } from "@momo/core/features/hostedAgents/api";
 import {
   HOSTED_AUTH_MODE,
@@ -289,6 +291,11 @@ export function FirstAgentStage({
   const [joinPending, setJoinPending] = useState(false);
   const [serverRefused, setServerRefused] = useState(false);
   const autoPassedRef = useRef(false);
+  const lastJoinRef = useRef<{
+    harness: LocalHarnessId;
+    connectionId: string;
+    agentDisplayName: string;
+  } | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const prevStepRef = useRef(step);
 
@@ -350,11 +357,20 @@ export function FirstAgentStage({
 
   const nowMs = useTickingNow(step === "detecting");
 
+  const inJoin = join !== null && (step === "connect" || step === "detecting" || step === "cap-exceeded");
+  const transitionKey = inJoin ? "join" : step;
+
+  // 단계가 바뀌면 문장에 포커스를 둔다. 합류 ①·②·상한 사이는 같은 화면이라
+  // 옮기지 않는다: 방금 누른 버튼에서 키보드 위치를 뺏지 않고, 바뀐 문장은
+  // 말풍선의 aria-live가 알린다.
+  const prevKeyRef = useRef(transitionKey);
   useEffect(() => {
     if (prevStepRef.current === step) return;
     prevStepRef.current = step;
-    headingRef.current?.focus();
-  }, [step]);
+    const sameScreen = prevKeyRef.current === "join" && transitionKey === "join";
+    prevKeyRef.current = transitionKey;
+    if (!sameScreen) headingRef.current?.focus();
+  }, [step, transitionKey]);
 
   // 첫 준비된 구독 줄을 미리 고른다(시안: Claude Code 줄이 선택된 채로 선다).
   useEffect(() => {
@@ -456,6 +472,32 @@ export function FirstAgentStage({
     setJoinFailure(null);
     setJoinPending(true);
     setStep("connect");
+    // 같은 CLI를 다시 고르면 새 에이전트를 만들지 않고 그 연결의 값만 다시 받는다
+    // ([다른 AI 고르기] 뒤 두 번째 「성재의 Claude」가 생기지 않게, design-review M4).
+    const previous = lastJoinRef.current;
+    if (previous && previous.harness === id) {
+      setJoin({ harness: id, agentDisplayName: previous.agentDisplayName, plan: null });
+      const endpointAgain = agentPortEndpoint(absoluteApiBase());
+      try {
+        if (endpointAgain === null) throw new Error("no agent port endpoint");
+        const revealed = parsePairingIssuance(
+          await regenerateHostedPairing(workspaceId, previous.connectionId),
+          { connectionId: previous.connectionId }
+        );
+        setJoin({
+          harness: id,
+          agentDisplayName: previous.agentDisplayName,
+          plan: subscriptionConnectPlan(id, endpointAgain, revealed.pairingCredential),
+        });
+        setConnectionId(previous.connectionId);
+        setDetectStartedAtMs(Date.now());
+        setNextPollMs(DETECT_INITIAL_MS);
+      } catch (error) {
+        setJoinFailure(hostedFailureMessage("regenerate", error));
+      }
+      setJoinPending(false);
+      return;
+    }
     const taken = new Set(
       [...directory.members.map((member) => member.handle.toLowerCase()), ...extraTaken]
     );
@@ -479,6 +521,11 @@ export function FirstAgentStage({
         plan: subscriptionConnectPlan(id, endpoint, revealed.pairingCredential),
       });
       setConnectionId(revealed.connection.id);
+      lastJoinRef.current = {
+        harness: id,
+        connectionId: revealed.connection.id,
+        agentDisplayName: identity.displayName,
+      };
       setDetectStartedAtMs(Date.now());
       setNextPollMs(DETECT_INITIAL_MS);
       refreshRoster();
@@ -579,8 +626,13 @@ export function FirstAgentStage({
   const mentionAgent = previewHintedAgent(directory.members, hintedAgentMemberId);
   const mentionApproved =
     detected !== null && connectionAllowsChannel(detected, welcomeChannelId);
-  const rosterAgent =
+  const rosterMember =
     mentionAgent === null ? null : (memberFor(directory, mentionAgent.agentMemberId) ?? null);
+  // 캡처 `sub-joined`만: 픽스처 명부의 이름 대신 합류한 이름을 아바타에도 쓴다.
+  const rosterAgent =
+    pose === "sub-joined" && rosterMember && join
+      ? { ...rosterMember, displayName: join.agentDisplayName }
+      : rosterMember;
 
   const autoPassing =
     pose === null &&
@@ -635,6 +687,7 @@ export function FirstAgentStage({
       default: {
         if (joinFailure) return { state: "trouble", line: joinFailure };
         if (showError) return { state: "trouble", line: AI_CONNECT_LIST_ERROR_LINE };
+        if (showOffline) return { state: "trouble", line: AI_CONNECT_OFFLINE_LINE };
         if (surface === "rows") {
           if (harness.probes === null) {
             return { state: "checking", line: AI_CONNECT_PROBING_LINE };
@@ -712,96 +765,92 @@ export function FirstAgentStage({
 
     if (step === "issuing") return null;
 
-    if (step === "connect") {
+    // 합류 ①·②·상한은 한 몸이다: 연결 명령 블록이 같은 자리에 남아 복사 상태와
+    // 「터미널을 열지 못했습니다」 문장이 단계가 바뀌어도 살아 있다(design-review H3).
+    if (step === "connect" || step === "detecting" || step === "cap-exceeded") {
+      const testId =
+        step === "connect"
+          ? "first-agent-connect"
+          : step === "detecting"
+            ? "first-agent-detecting"
+            : "first-agent-cap-exceeded";
+      const blockSlot = join ? (
+        joinFailure ? (
+          <InlineBanner
+            message={joinFailure}
+            actionLabel={JOIN_RETRY_LABEL}
+            onAction={() => {
+              void startSubscriptionJoin(join.harness);
+            }}
+            testId="first-agent-connect-error"
+          />
+        ) : join.plan ? (
+          <SubscriptionConnectBlock
+            harness={join.harness}
+            plan={join.plan}
+            openAsPrimary={step === "connect"}
+            onHandedOff={() => {
+              if (step === "connect") setStep("detecting");
+            }}
+          />
+        ) : (
+          <div role="status" className="w-full" data-testid="first-agent-connect-pending">
+            <Skeleton ready={false} rows={1} className="p-0" />
+          </div>
+        )
+      ) : null;
       return (
-        <div className="flex min-w-0 flex-col gap-3" data-testid="first-agent-connect">
-          {joinFailure ? (
-            <InlineBanner
-              message={joinFailure}
-              actionLabel={JOIN_RETRY_LABEL}
-              onAction={() => {
-                if (join) void startSubscriptionJoin(join.harness);
-              }}
-              testId="first-agent-connect-error"
-            />
-          ) : join?.plan ? (
-            <SubscriptionConnectBlock
-              harness={join.harness}
-              plan={join.plan}
-              onHandedOff={() => setStep("detecting")}
-            />
-          ) : (
-            <div role="status" className="w-full" data-testid="first-agent-connect-pending">
-              <Skeleton ready={false} rows={1} className="p-0" />
+        <div className="flex min-w-0 flex-col gap-3" data-testid={testId}>
+          {blockSlot}
+          {step === "detecting" && (
+            <div role="status" className="flex min-w-0 flex-col gap-1">
+              <p
+                className="flex min-w-0 flex-wrap items-baseline gap-2 text-meta text-ink-muted"
+                data-testid="first-agent-elapsed"
+              >
+                <span data-numeric>{elapsedLabel(detectStartedAtMs, nowMs)}</span>
+                <span>{formatDetectPollWait(nextPollMs)}</span>
+              </p>
+              {!join && (
+                <p className="break-keep text-body text-ink-muted">
+                  {firstAgentDetectingDetail("grok")}
+                </p>
+              )}
             </div>
           )}
-          <div className="ai-connect-actions">
-            <Button
-              type="button"
-              variant="ghost"
-              className="ai-connect-skip"
-              onClick={handleBackToList}
-              data-testid="first-agent-back"
-            >
-              {JOIN_BACK_LABEL}
-            </Button>
-            {skipButton}
-          </div>
-          {reentry}
-        </div>
-      );
-    }
-
-    if (step === "detecting") {
-      return (
-        <div className="flex min-w-0 flex-col gap-3" data-testid="first-agent-detecting">
-          {join?.plan && (
-            <SubscriptionConnectBlock harness={join.harness} plan={join.plan} onHandedOff={() => undefined} />
-          )}
-          <div role="status" className="flex min-w-0 flex-col gap-1">
+          {step === "cap-exceeded" && (
             <p
-              className="flex min-w-0 flex-wrap items-baseline gap-2 text-meta text-ink-muted"
-              data-testid="first-agent-elapsed"
+              role="status"
+              className="break-keep text-meta text-ink-muted"
+              data-testid="first-agent-recheck-status"
             >
-              <span data-numeric>{elapsedLabel(detectStartedAtMs, nowMs)}</span>
-              <span>{formatDetectPollWait(nextPollMs)}</span>
+              {recheckStatus ?? ""}
             </p>
-            {!join && (
-              <p className="break-keep text-body text-ink-muted">
-                {firstAgentDetectingDetail("grok")}
-              </p>
-            )}
-          </div>
-          <div className="ai-connect-actions">{skipButton}</div>
-          {reentry}
-        </div>
-      );
-    }
-
-    if (step === "cap-exceeded") {
-      return (
-        <div className="flex min-w-0 flex-col gap-3" data-testid="first-agent-cap-exceeded">
-          {join?.plan && (
-            <SubscriptionConnectBlock harness={join.harness} plan={join.plan} onHandedOff={() => undefined} />
           )}
-          <p
-            role="status"
-            className="break-keep text-meta text-ink-muted"
-            data-testid="first-agent-recheck-status"
-          >
-            {recheckStatus ?? ""}
-          </p>
           <div className="ai-connect-actions">
-            <Button
-              type="button"
-              className={cn(ONBOARDING_ACTION_CLASS, "flex-1")}
-              onClick={() => {
-                void handleRecheck();
-              }}
-              data-testid="first-agent-recheck"
-            >
-              {JOIN_RECHECK_LABEL}
-            </Button>
+            {step === "cap-exceeded" && (
+              <Button
+                type="button"
+                className={cn(ONBOARDING_ACTION_CLASS, "flex-1")}
+                onClick={() => {
+                  void handleRecheck();
+                }}
+                data-testid="first-agent-recheck"
+              >
+                {JOIN_RECHECK_LABEL}
+              </Button>
+            )}
+            {join && step === "connect" && (
+              <Button
+                type="button"
+                variant="ghost"
+                className="ai-connect-skip"
+                onClick={handleBackToList}
+                data-testid="first-agent-back"
+              >
+                {JOIN_BACK_LABEL}
+              </Button>
+            )}
             {skipButton}
           </div>
           {reentry}
@@ -920,6 +969,7 @@ export function FirstAgentStage({
               onRecheck={harness.recheck}
               grokPill={grokPill}
               locked={listLocked}
+              probed={harness.probes !== null}
               describedBy={
                 showOffline
                   ? FIRST_AGENT_OFFLINE_REASON_ID
@@ -975,7 +1025,7 @@ export function FirstAgentStage({
         </header>
       }
     >
-      <OnboardingSlideTransition transitionKey={step} className="flex w-full justify-center">
+      <OnboardingSlideTransition transitionKey={transitionKey} className="flex w-full justify-center">
         <div
           className="onboarding-frame-col ai-connect-col"
           data-testid="first-agent-stage"

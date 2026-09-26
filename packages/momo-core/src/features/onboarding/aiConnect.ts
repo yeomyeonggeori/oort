@@ -358,6 +358,7 @@ export function joinWaitingLine(label: string): string {
 }
 
 export const AI_CONNECT_LIST_ERROR_LINE = "연결 목록을 불러오지 못했어요.";
+export const AI_CONNECT_OFFLINE_LINE = "지금은 서버에 닿지 않아요.";
 export const GROK_LABEL = "그록봇";
 export const CONNECT_COMMAND_ARIA = "연결 명령";
 export const CONNECT_HANDED_OFF_STATUS =

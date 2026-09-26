@@ -44,6 +44,7 @@ export function AiConnectList({
   onRecheck,
   grokPill,
   locked,
+  probed,
   describedBy,
 }: {
   rows: readonly AiConnectRowId[];
@@ -56,6 +57,12 @@ export function AiConnectList({
   grokPill: string | null;
   /** 오프라인·목록 오류. 줄은 보이고 고를 수 없다. */
   locked: boolean;
+  /**
+   * 셸이 한 번이라도 답했는가. 답하기 전의 「확인 중…」은 아직 모르는 상태라
+   * 로그인 명령 줄을 세우지 않는다(design-review H1). 답한 뒤의 「확인 중…」은
+   * 「터미널에서 로그인」 뒤 재확인이다.
+   */
+  probed: boolean;
   describedBy?: string;
 }) {
   return (
@@ -78,8 +85,8 @@ export function AiConnectList({
         const pillId = `${inputId}-pill`;
         const needsLogin =
           isSubscriptionRow(id) &&
-          (harnessPill === "login" || harnessPill === "checking" || harnessPill === "recheck") &&
-          harnessPill !== null;
+          probed &&
+          (harnessPill === "login" || harnessPill === "checking" || harnessPill === "recheck");
         return (
           <div key={id} className="flex min-w-0 flex-col gap-2">
             <div
@@ -175,7 +182,7 @@ function HarnessPillControl({
         type="button"
         id={pillId}
         className="ai-connect-pill ai-connect-pill-action press focus-visible:focus-ring"
-        data-tone="sig"
+        data-tone="mute"
         aria-label={`${HARNESS_LABEL[id]} ${label}`}
         onClick={() => onRecheck(id)}
         data-testid={`ai-connect-pill-${id}`}

@@ -16,6 +16,7 @@ import {
   createHostedConnection,
   getHostedConnection,
   listHostedConnections,
+  regenerateHostedPairing,
 } from "@momo/core/features/hostedAgents/api";
 import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
 import {
@@ -558,13 +559,25 @@ describe("알약과 선택", () => {
     expect(q(host, "first-agent-heading")?.textContent).toBe(AI_CONNECT_QUESTION);
   });
 
-  it("감지가 끝나기 전에는 확인 중… 이고 코메토는 생각한다", async () => {
+  it("감지가 끝나기 전에는 확인 중… 이고 코메토는 생각하며, 로그인 명령 줄은 없다", async () => {
     subscriptionOn();
     vi.mocked(detectLocalHarnesses).mockImplementation(() => new Promise(() => undefined));
     const host = mountStage();
     await waitFor(() => q(host, "ai-connect-pill-claude") !== null, "pill");
     expect(q(host, "ai-connect-pill-claude")?.textContent).toBe("확인 중…");
     expect(q(host, "kometto-guide")?.getAttribute("data-expression")).toBe("thinking");
+    expect(q(host, "ai-connect-login-claude")).toBeNull();
+    expect(q(host, "ai-connect-login-codex")).toBeNull();
+  });
+
+  it("다시 확인 알약은 오렌지(신호색)가 아니다 (D11)", async () => {
+    subscriptionOn([CLAUDE_READY, { id: "codex", installed: true, auth: "unknown" }]);
+    const host = mountStage();
+    await waitFor(
+      () => q(host, "ai-connect-pill-codex")?.getAttribute("data-pill") === "recheck",
+      "recheck"
+    );
+    expect(q(host, "ai-connect-pill-codex")?.getAttribute("data-tone")).not.toBe("sig");
   });
 });
 
@@ -729,6 +742,54 @@ describe("구독 합류: 연결 명령 → 감지 대기 → 합류 (같은 화�
     expect(q(host, "first-agent-heading")?.textContent).toBe("곽성재의 Claude가 들어왔어요.");
     expect(q(host, "kometto-guide")?.getAttribute("data-expression")).toBe("happy");
     expect(q(host, "first-agent-mention-action")?.textContent).toBe("계속");
+  });
+
+  it("터미널을 열지 못하면 그 문장이 감지 대기 화면에 남는다", async () => {
+    subscriptionOn();
+    vi.mocked(openTerminalApp).mockResolvedValueOnce(false);
+    const host = mountStage();
+    await waitFor(
+      () => host.querySelector<HTMLInputElement>("#ai-connect-claude")?.checked === true,
+      "preselected"
+    );
+    click(q(host, "first-agent-continue"));
+    await waitFor(() => q(host, "first-agent-connect-open") !== null, "open");
+    const open = q(host, "first-agent-connect-open");
+    open?.focus();
+    click(open);
+    await waitFor(() => q(host, "first-agent-detecting") !== null, "waiting");
+    await waitFor(
+      () => q(host, "first-agent-connect-status")?.textContent === "터미널을 열지 못했습니다. 명령을 복사해 직접 여세요.",
+      "failure sentence"
+    );
+    expect(q(host, "first-agent-connect-status")?.getAttribute("role")).toBe("status");
+    expect(document.activeElement?.id).not.toBe("first-agent-heading");
+  });
+
+  it("[다른 AI 고르기] 뒤 같은 CLI를 다시 고르면 새 에이전트 대신 값만 다시 받는다", async () => {
+    subscriptionOn();
+    vi.mocked(regenerateHostedPairing).mockResolvedValue({
+      connection: wireConnection(),
+      pairingCredential: "momo_pair_v1.regenerated-value",
+      pairingExpiresAtMs: Date.now() + 600_000,
+    });
+    const host = mountStage();
+    await waitFor(
+      () => host.querySelector<HTMLInputElement>("#ai-connect-claude")?.checked === true,
+      "preselected"
+    );
+    click(q(host, "first-agent-continue"));
+    await waitFor(() => q(host, "first-agent-back") !== null, "back");
+    click(q(host, "first-agent-back"));
+    await waitFor(() => rowIds(host).length === 4, "list again");
+    click(host.querySelector("#ai-connect-claude"));
+    click(q(host, "first-agent-continue"));
+    await waitFor(
+      () => (q(host, "first-agent-connect-command-text")?.textContent ?? "").includes("regenerated-value"),
+      "regenerated"
+    );
+    expect(vi.mocked(createHostedConnection)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(regenerateHostedPairing)).toHaveBeenCalledWith(WS, CONNECTION_ID);
   });
 
   it("5분 상한이면 당황 + 다시 확인", async () => {
@@ -1075,6 +1136,39 @@ describe("틀 (ADR-0193 D10·D11)", () => {
       mountedRoot = null;
       host.remove();
     }
+  });
+});
+
+describe("긴 이름은 합류 카드 안에서 자른다", () => {
+  it("60자 이름·핸들은 truncate + min-w-0 이고 title 은 측정에 맡긴다", async () => {
+    const LONG = "김인턴-데이터플랫폼-온콜 Agent Runtime Operations Assistant 김인턴-온콜대기열용자";
+    expect(LONG.length).toBeGreaterThanOrEqual(60);
+    let rosterCalls = 0;
+    vi.mocked(fetchRoster).mockImplementation(async () => {
+      rosterCalls += 1;
+      return rosterCalls === 1 ? [human] : [human, { ...agent, displayName: LONG }];
+    });
+    let status = "pairing_pending";
+    vi.mocked(getHostedConnection).mockImplementation(async () => ({
+      connection: wireConnection({ status }),
+      cleanupArtifacts: [],
+    }));
+    const host = mountStage();
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    await grokToDetecting(host);
+    await waitFor(() => vi.mocked(fetchRoster).mock.calls.length >= 2, "roster");
+    status = "detected";
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    await waitFor(() => q(host, "first-agent-mention-name")?.textContent === LONG, "name");
+    for (const id of ["first-agent-mention-name", "first-agent-mention-handle"]) {
+      const cls = q(host, id)?.className.split(/\s+/) ?? [];
+      expect(cls, id).toContain("truncate");
+      expect(cls, id).toContain("min-w-0");
+    }
+    expect(q(host, "first-agent-mention-column")?.className.split(/\s+/)).toContain("min-w-0");
   });
 });
 

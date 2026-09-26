@@ -16,6 +16,7 @@ import { cn } from "@/design/lib/cn";
 import { useClipboardCopy } from "@/design/hooks/useClipboardCopy";
 import { Button } from "@/design/ui/button";
 import { openTerminalApp } from "@/lib/tauri";
+import { ONBOARDING_ACTION_CLASS } from "@/features/onboarding/guide/OnboardingFrame";
 
 // Reading this as: onboarding (구독 합류 ① 연결 명령) for internal team users
 // on web+Tauri, density 6/10, motion 0/10.
@@ -34,10 +35,13 @@ import { openTerminalApp } from "@/lib/tauri";
 export function SubscriptionConnectBlock({
   harness,
   plan,
+  openAsPrimary = false,
   onHandedOff,
 }: {
   harness: LocalHarnessId;
   plan: SubscriptionConnectPlan;
+  /** 합류 ①: 「터미널에서 열기」가 이 단계의 주 행동(잉크, 틀 폭)이다. ②·상한에서는 명령 줄 안 보조. */
+  openAsPrimary?: boolean;
   /** 복사 또는 터미널 열기 뒤. ① → ② 감지 대기로 넘어간다. */
   onHandedOff: () => void;
 }) {
@@ -61,14 +65,18 @@ export function SubscriptionConnectBlock({
       </div>
     );
   }
-  return <CommandLine command={plan.command} onHandedOff={onHandedOff} />;
+  return (
+    <CommandLine command={plan.command} openAsPrimary={openAsPrimary} onHandedOff={onHandedOff} />
+  );
 }
 
 function CommandLine({
   command,
+  openAsPrimary,
   onHandedOff,
 }: {
   command: string;
+  openAsPrimary: boolean;
   onHandedOff: () => void;
 }) {
   const { copied, copy } = useClipboardCopy(command);
@@ -100,16 +108,18 @@ function CommandLine({
         <div className="ai-connect-command-actions">
           {/* 구독 합류는 데스크탑에서만 열린다(구독 줄 게이트). 셸이 없으면
               openTerminalApp 이 false 를 돌려 「직접 여세요」 문장이 선다. */}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="ai-connect-secondary"
-            onClick={() => void handleOpen()}
-            data-testid="first-agent-connect-open"
-          >
-            {OPEN_TERMINAL_LABEL}
-          </Button>
+          {!openAsPrimary && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="ai-connect-secondary"
+              onClick={() => void handleOpen()}
+              data-testid="first-agent-connect-open"
+            >
+              {OPEN_TERMINAL_LABEL}
+            </Button>
+          )}
           <Button
             type="button"
             variant="ghost"
@@ -122,6 +132,16 @@ function CommandLine({
           </Button>
         </div>
       </div>
+      {openAsPrimary && (
+        <Button
+          type="button"
+          className={ONBOARDING_ACTION_CLASS}
+          onClick={() => void handleOpen()}
+          data-testid="first-agent-connect-open"
+        >
+          {OPEN_TERMINAL_LABEL}
+        </Button>
+      )}
       <p
         role="status"
         className={cn("break-keep text-meta text-ink-muted", status === null && "sr-only")}
