@@ -1,5 +1,14 @@
-import {effectivePresenceLabel} from '@momo/core/features/presence/model';
-import {visibleCustomStatus} from '@momo/core/features/presence/customStatus';
+import {
+  declaredStatusLabel,
+  effectivePresenceLabel,
+  PRESENCE_MENU_LABEL,
+  PRESENCE_OPTIONS,
+} from '@momo/core/features/presence/model';
+import {
+  CUSTOM_STATUS_DIALOG_TITLE,
+  statusExpiryShortLabel,
+  visibleCustomStatus,
+} from '@momo/core/features/presence/customStatus';
 import {
   memberFor,
   type Directory,
@@ -8,6 +17,7 @@ import {
   effectivePresence,
   type EffectivePresence,
   type Member,
+  type PresenceStatus,
 } from '@momo/core/lib/api';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
@@ -15,6 +25,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from 'react-native';
@@ -28,7 +39,12 @@ import {
 } from '../../design/atoms';
 import {PageSheet, usePageSheetClose} from '../../design/PageSheet';
 import {ThemeControl} from '../../design/ThemeControl';
-import {themeChoiceLabel, useStyles, useTheme} from '../../design/theme';
+import {
+  themeChoiceLabel,
+  usePalette,
+  useStyles,
+  useTheme,
+} from '../../design/theme';
 import {
   font,
   radius,
@@ -48,6 +64,8 @@ import {Avatar} from '../conversation/Avatar';
 import {formatRealtimeDiagnostics} from '../../realtime/diagnostics';
 import {COPY_RECEIPT_MS, copyText} from '../conversation/copy';
 import {currentAppVersionLabel} from './appVersion';
+import {usePauseNotifications, useSetPresence} from './selfStatus';
+import {StatusPage} from './StatusPage';
 
 // =============================================================================
 // 내 프로필 시트 — 대화 목록 머리의 아바타가 여는 곳 (#2702).
@@ -78,8 +96,24 @@ import {currentAppVersionLabel} from './appVersion';
 //
 // 상태 알약은 웹 `ProfileCard` 와 같은 식으로 코어가 답한다:
 // `effectivePresence(선언, 연결됨)`. 선언이 자리 비움·방해 금지면 그것이 답이고,
-// 아니면 이 앱의 실시간 연결이 답이다. 상태를 **바꾸는** 문은 여기 없다 — 폰에는
-// 그 쓰기 경로가 아직 없고, 누를 수 없는 것을 누를 것처럼 그리지 않는다.
+// 아니면 이 앱의 실시간 연결이 답이다.
+//
+// ## 상태와 알림을 여기서 바로 바꾼다 (#2848)
+//
+// 성재 요청(2026-09-27): 「모바일에서 알림이나 상태변경같은거만 일단 프로필에서
+// 바로 할 수 있게」. 「상태」 묶음이 온라인·자리 비움·방해 금지 세 줄(웹
+// `PresenceControl` 과 같은 코어 순서·낱말)과 상태 글 한 줄(`StatusPage`)을
+// 갖고, 「알림」 묶음에 알림 일시 중지 스위치가 선다. 쓰기는 `selfStatus.ts` 가
+// 서버의 기존 두 계약으로만 한다.
+//
+// **방해 금지와 알림 일시 중지는 서버에서 다른 필드다.** 방해 금지(선언 상태)는
+// 남에게 보이는 표시이고 푸시를 막지 않는다. 푸시를 멈추는 것은 알림 일시
+// 중지(`notification_rule.dnd`)다. 둘을 묶을지는 제품 결정이라 여기서 몰래 묶지
+// 않고, 방해 금지 줄의 설명이 그 차이를 말한다.
+//
+// 일시 중지의 시간(30분·1시간·내일까지)은 없다. 서버에 만료가 없어서, 폰이 타이머로
+// 흉내 내면 앱이 잠든 동안 일시 중지가 풀리지 않는다 — 켜 둔 사람은 「1시간」
+// 뒤에도 푸시를 못 받는다. 만료는 서버 계약이 생긴 뒤에 싣는다.
 //
 // ## 연결된 기기
 //
@@ -87,15 +121,23 @@ import {currentAppVersionLabel} from './appVersion';
 // 가진 쪽이 아니다. 없는 항목을 자리만 그려 두지 않는다.
 // =============================================================================
 
-type Page = 'profile' | 'theme';
+type Page = 'profile' | 'theme' | 'status';
+
+const PAGE_TITLE: Record<Page, string> = {
+  profile: '내 프로필',
+  theme: '테마',
+  status: CUSTOM_STATUS_DIALOG_TITLE,
+};
 
 export function ProfileSheet({
+  workspaceId,
   member,
   directory,
   connected,
   onSignOut,
   onClose,
 }: {
+  workspaceId: string;
   member: Member;
   directory: Directory;
   /** 실시간 연결이 지금 붙어 있는가. 상태 알약의 `auto` 가 이것으로 풀린다. */
@@ -110,6 +152,7 @@ export function ProfileSheet({
   return (
     <PageSheet onClose={onClose} accessibilityLabel="내 프로필" testID="profile-sheet">
       <SheetBody
+        workspaceId={workspaceId}
         member={member}
         directory={directory}
         connected={connected}
@@ -121,12 +164,14 @@ export function ProfileSheet({
 }
 
 function SheetBody({
+  workspaceId,
   member,
   directory,
   connected,
   onSignOut,
   onClose,
 }: {
+  workspaceId: string;
   member: Member;
   directory: Directory;
   connected: boolean;
@@ -148,7 +193,7 @@ function SheetBody({
     <View style={styles.root}>
       <View style={styles.nav}>
         <View style={styles.navSide}>
-          {page === 'theme' ? (
+          {page !== 'profile' ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="프로필"
@@ -175,7 +220,7 @@ function SheetBody({
           numberOfLines={1}
           maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
         >
-          {page === 'theme' ? '테마' : '내 프로필'}
+          {PAGE_TITLE[page]}
         </Text>
         <View style={[styles.navSide, styles.navSideEnd]}>
           <Pressable
@@ -206,12 +251,22 @@ function SheetBody({
       >
         {page === 'theme' ? (
           <ThemePage />
+        ) : page === 'status' ? (
+          <StatusPage
+            workspaceId={workspaceId}
+            selfId={member.id}
+            self={memberFor(directory, member.id) ?? undefined}
+            nowMs={Date.now()}
+            onDone={() => setPage('profile')}
+          />
         ) : (
           <ProfilePage
+            workspaceId={workspaceId}
             member={member}
             directory={directory}
             connected={connected}
             onOpenTheme={() => setPage('theme')}
+            onOpenStatus={() => setPage('status')}
             onSignOut={onSignOut}
             onRevealEnd={revealEnd}
           />
@@ -234,24 +289,31 @@ function ThemePage(): React.JSX.Element {
 }
 
 function ProfilePage({
+  workspaceId,
   member,
   directory,
   connected,
   onOpenTheme,
+  onOpenStatus,
   onSignOut,
   onRevealEnd,
 }: {
+  workspaceId: string;
   member: Member;
   directory: Directory;
   connected: boolean;
   onOpenTheme: () => void;
+  onOpenStatus: () => void;
   onSignOut: () => void;
   /** 확인 블록이 열리면 시트를 끝까지 내린다 — 두 버튼이 접힌 곳 아래에 서지 않게. */
   onRevealEnd: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const palette = usePalette();
   const {choice} = useTheme();
   const push = usePushPermission();
+  const setPresence = useSetPresence(workspaceId, member.id);
+  const pause = usePauseNotifications(workspaceId);
   const prompt = usePushPrompt();
   const now = useNow();
   const [confirming, setConfirming] = useState(false);
@@ -290,6 +352,20 @@ function ProfilePage({
   const customLine = custom
     ? [custom.emoji, custom.text].filter(Boolean).join(' ')
     : null;
+  // 시안 `.a-status .fx` — 「집중 모드 · 18:00까지」. 만료가 있을 때만 붙인다.
+  const customPill =
+    customLine && self?.statusExpiresAtMs !== undefined
+      ? `${customLine} · ${statusExpiryShortLabel(self.statusExpiresAtMs, now)}`
+      : customLine;
+  const declared: PresenceStatus | null = self
+    ? setPresence.isPending && setPresence.variables
+      ? setPresence.variables.status
+      : (self.presenceStatus ?? 'auto')
+    : null;
+  const choosePresence = (status: PresenceStatus) => {
+    if (setPresence.isPending || status === declared) return;
+    setPresence.mutate({status});
+  };
   const server = getServerBase();
 
   return (
@@ -319,28 +395,99 @@ function ProfilePage({
             @{member.handle}
           </Text>
         </View>
-        {presence ? (
-          <View
-            accessible
-            accessibilityLabel={`내 상태: ${effectivePresenceLabel(presence)}`}
-            style={[styles.pill, pillTone(styles, presence)]}
-            testID="self-profile-presence"
-          >
-            <View style={[styles.pillDot, dotTone(styles, presence)]} />
-            <Text style={[styles.pillLabel, pillLabelTone(styles, presence)]}>
-              {effectivePresenceLabel(presence)}
-            </Text>
+        {presence || customPill ? (
+          <View style={styles.pills}>
+            {presence ? (
+              <View
+                accessible
+                accessibilityLabel={`내 상태: ${effectivePresenceLabel(presence)}`}
+                style={[styles.pill, pillTone(styles, presence)]}
+                testID="self-profile-presence"
+              >
+                <View style={[styles.pillDot, dotTone(styles, presence)]} />
+                <Text style={[styles.pillLabel, pillLabelTone(styles, presence)]}>
+                  {effectivePresenceLabel(presence)}
+                </Text>
+              </View>
+            ) : null}
+            {customPill ? (
+              <View style={[styles.pill, styles.pillCustom]}>
+                <Sentence
+                  style={styles.customStatus}
+                  testID="self-profile-custom-status"
+                >
+                  {customPill}
+                </Sentence>
+              </View>
+            ) : null}
           </View>
         ) : null}
-        {customLine ? (
-          <Sentence
-            style={styles.customStatus}
-            testID="self-profile-custom-status"
-          >
-            {customLine}
-          </Sentence>
-        ) : null}
       </View>
+
+      {declared ? (
+        <GroupSection label={PRESENCE_MENU_LABEL}>
+          <View accessibilityRole="radiogroup" accessibilityLabel={PRESENCE_MENU_LABEL}>
+            {PRESENCE_OPTIONS.map((status, index) => {
+              const selected = status === declared;
+              const label = declaredStatusLabel(status);
+              const detail =
+                status === 'dnd'
+                  ? '다른 사람에게 보이는 표시입니다. 푸시는 「알림 일시 중지」가 멈춥니다.'
+                  : undefined;
+              return (
+                <GroupRow
+                  key={status}
+                  title={label}
+                  detail={detail}
+                  tone={selected ? 'accent' : 'default'}
+                  separated={index > 0}
+                  onPress={() => choosePresence(status)}
+                  disabled={setPresence.isPending && !selected}
+                  accessibilityRole="radio"
+                  accessibilityState={{selected}}
+                  accessibilityLabel={label}
+                  accessibilityHint={detail}
+                  leading={
+                    <View
+                      style={[styles.optionDot, optionDotTone(styles, status)]}
+                      importantForAccessibility="no"
+                    />
+                  }
+                  trailing={
+                    <Text
+                      style={[styles.check, !selected && styles.checkHidden]}
+                      importantForAccessibility="no"
+                      testID={selected ? `presence-${status}-check` : undefined}
+                    >
+                      ✓
+                    </Text>
+                  }
+                  testID={`presence-option-${status}`}
+                />
+              );
+            })}
+          </View>
+          <GroupRow
+            title="상태 글"
+            value={customLine ?? '설정'}
+            chevron
+            separated
+            onPress={onOpenStatus}
+            accessibilityLabel={`상태 글, ${customLine ?? '없음'}`}
+            accessibilityHint="이모지와 짧은 글, 지울 시간을 고릅니다."
+            testID="profile-status-row"
+          />
+          {setPresence.isError ? (
+            <Sentence
+              style={styles.rowFailure}
+              accessibilityLiveRegion="polite"
+              testID="presence-failure"
+            >
+              상태를 바꾸지 못했습니다. 다시 시도하세요.
+            </Sentence>
+          ) : null}
+        </GroupSection>
+      ) : null}
 
       <GroupSection label="보기">
         <GroupRow
@@ -381,6 +528,56 @@ function ProfilePage({
             accessibilityHint="iOS 설정의 이 앱 화면을 엽니다."
             testID="profile-push-settings"
           />
+        ) : null}
+        <GroupRow
+          title="알림 일시 중지"
+          detail={
+            pause.loadFailed
+              ? '알림 설정을 불러오지 못했습니다.'
+              : pause.paused
+                ? '직접 끌 때까지 이 워크스페이스의 푸시가 오지 않습니다.'
+                : '켜면 이 워크스페이스의 모든 푸시가 멈춥니다.'
+          }
+          separated
+          onPress={() => pause.setPaused(!pause.paused)}
+          disabled={!pause.ready || pause.pending}
+          accessibilityRole="switch"
+          accessibilityState={{
+            checked: pause.paused,
+            disabled: !pause.ready || pause.pending,
+          }}
+          accessibilityLabel="알림 일시 중지"
+          trailing={
+            <Switch
+              value={pause.paused}
+              onValueChange={next => pause.setPaused(next)}
+              disabled={!pause.ready || pause.pending}
+              trackColor={{false: palette.border, true: palette.ok}}
+              ios_backgroundColor={palette.border}
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              testID="profile-pause-switch"
+            />
+          }
+          testID="profile-pause-row"
+        />
+        {pause.loadFailed ? (
+          <GroupRow
+            title="다시 불러오기"
+            tone="accent"
+            separated
+            onPress={pause.retryLoad}
+            testID="profile-pause-retry"
+          />
+        ) : null}
+        {pause.failed ? (
+          <Sentence
+            style={styles.rowFailure}
+            accessibilityLiveRegion="polite"
+            testID="pause-failure"
+          >
+            알림 설정을 바꾸지 못했습니다. 다시 시도하세요.
+          </Sentence>
         ) : null}
       </GroupSection>
 
@@ -480,6 +677,17 @@ function pillLabelTone(styles: Styles, presence: EffectivePresence) {
   }
 }
 
+function optionDotTone(styles: Styles, status: PresenceStatus) {
+  switch (status) {
+    case 'auto':
+      return styles.dotOk;
+    case 'away':
+      return styles.dotWarn;
+    case 'dnd':
+      return styles.dotDanger;
+  }
+}
+
 function dotTone(styles: Styles, presence: EffectivePresence) {
   switch (presence) {
     case 'online':
@@ -548,6 +756,14 @@ const buildStyles = (color: Palette) =>
       textAlign: 'center',
     },
     handle: {fontSize: font.label, color: color.textMuted},
+    // 시안 `.a-status{display:flex;gap:6px}` — 두 알약이 한 줄에, 넘치면 접힌다.
+    // 6 은 폰 간격 격자 밖이라 가장 가까운 `space.sm`(8)에 붙인다.
+    pills: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'center',
+      gap: space.sm,
+    },
     pill: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -562,6 +778,28 @@ const buildStyles = (color: Palette) =>
     pillWarn: {backgroundColor: color.warnSurface},
     pillDanger: {backgroundColor: color.dangerSurface},
     pillMuted: {backgroundColor: color.surface},
+    // 시안 `.a-status .fx{background:surface;color:ink2;box-shadow:sh1}`.
+    pillCustom: {
+      backgroundColor: color.surface,
+      boxShadow: color.elevationRest,
+      flexShrink: 1,
+    },
+    optionDot: {width: space.sm, height: space.sm, borderRadius: radius.pill},
+    check: {
+      fontSize: font.body,
+      fontWeight: '700',
+      color: color.accentText,
+      minWidth: space.lg,
+      textAlign: 'center',
+    },
+    checkHidden: {opacity: 0},
+    rowFailure: {
+      fontSize: font.label,
+      color: color.dangerText,
+      lineHeight: 18,
+      paddingHorizontal: space.lg,
+      paddingBottom: space.md,
+    },
     pillDot: {width: space.sm, height: space.sm, borderRadius: radius.pill},
     dotOk: {backgroundColor: color.ok},
     dotWarn: {backgroundColor: color.warn},
@@ -574,6 +812,7 @@ const buildStyles = (color: Palette) =>
     pillLabelMuted: {color: color.textMuted},
     customStatus: {
       fontSize: font.label,
+      fontWeight: '600',
       color: color.textMuted,
       textAlign: 'center',
     },
