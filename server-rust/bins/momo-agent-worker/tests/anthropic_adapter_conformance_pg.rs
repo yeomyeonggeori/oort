@@ -331,12 +331,10 @@ fn worker_config() -> WorkerConfig {
 async fn build_worker(config: WorkerConfig) -> AgentWorker {
     // #2852: the mock provider is a loopback listener, which the egress guard
     // only admits under the operator's ADR-0004 증보 opt-in.
-    let egress = momo_settings::EgressPolicy {
-        allow_local: true,
-        ..Default::default()
-    };
-    let provider =
-        http_provider(config.request_timeout, egress).expect("build the shipped provider pair");
+    let mut config = config;
+    config.egress.allow_local = true;
+    let provider = http_provider(config.request_timeout, config.egress.clone())
+        .expect("build the shipped provider pair");
     AgentWorker::new(momo_worker_pool().await, provider, config)
 }
 

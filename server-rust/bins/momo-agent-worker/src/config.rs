@@ -99,6 +99,12 @@ pub struct WorkerConfig {
     /// deployment elsewhere sets the key. Clamped to a real offset range so a
     /// fat-fingered value cannot move the agent's calendar by weeks.
     pub utc_offset_minutes: i32,
+    /// #2852: the egress policy every outbound provider call (the turn AND the
+    /// OAuth token refresh) is judged by: `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK`
+    /// and `AGENT_PROVIDER_LOCAL_HOSTS`, plus `HERMES_BASE_URL`'s host **only
+    /// when the operator actually set it**. The built-in `localhost` default is
+    /// not an operator decision and must not open loopback (review M-1).
+    pub egress: momo_settings::EgressPolicy,
     /// `AGENT_REPORT_PROTOCOL_ENABLED` — whether every agent turn is told the
     /// completion-report protocol (#1454, #1466). **Default on.**
     ///
@@ -157,6 +163,21 @@ fn env_number<T: std::str::FromStr>(key: &'static str, fallback: T) -> Result<T,
     }
 }
 
+/// Build the worker's egress policy. `hermes_base_url_set` is whether the
+/// operator wrote `HERMES_BASE_URL` — the only case its host is trusted.
+pub fn egress_policy(
+    provider: &ProviderConfig,
+    hermes_base_url_set: bool,
+    from_env: impl Fn(bool) -> momo_settings::EgressPolicy,
+) -> momo_settings::EgressPolicy {
+    let policy = from_env(provider.allow_local_loopback);
+    if hermes_base_url_set {
+        policy.with_operator_base_url(&provider.base_url)
+    } else {
+        policy
+    }
+}
+
 impl WorkerConfig {
     pub fn from_env() -> Result<WorkerConfig, ConfigError> {
         let database_url = env("WORKER_DATABASE_URL")
@@ -165,6 +186,12 @@ impl WorkerConfig {
             .ok_or(ConfigError::MissingDatabaseUrl)?;
         let poll_ms: u64 = env_number("WORKER_POLL_INTERVAL_MS", 300u64)?;
         let timeout_ms: u64 = env_number("PROVIDER_REQUEST_TIMEOUT_MS", 120_000u64)?;
+        let provider = ProviderConfig::from_env(env);
+        let egress = egress_policy(
+            &provider,
+            env("HERMES_BASE_URL").is_some(),
+            momo_settings::EgressPolicy::from_env,
+        );
 
         Ok(WorkerConfig {
             database_url,
@@ -173,7 +200,8 @@ impl WorkerConfig {
             claim_batch_size: env_number("WORKER_CLAIM_BATCH", 8i64)?.max(1),
             lease_seconds: env_number("WORKER_LEASE_SECONDS", DEFAULT_WORKER_LEASE_SECONDS)?.max(1),
             max_attempts: env_number("WORKER_MAX_ATTEMPTS", 8i32)?,
-            provider: ProviderConfig::from_env(env),
+            provider,
+            egress,
             // An all-whitespace key is no key: treating it as one would make the
             // decrypt fail in a way that reads as "wrong key" instead of "unset".
             provider_link_master_key: env("PROVIDER_LINK_MASTER_KEY"),
@@ -219,6 +247,7 @@ impl WorkerConfig {
             gateway_enabled: false,
             context_max_messages: momo_agent::mention::CONTEXT_WINDOW_DEFAULT,
             utc_offset_minutes: 540,
+            egress: momo_settings::EgressPolicy::default(),
             report_protocol_enabled: true,
         }
     }
@@ -302,6 +331,27 @@ fn choose_log_filter(rust_log: Option<&str>, log_level: Option<&str>) -> String 
 
 #[cfg(test)]
 mod tests {
+
+    /// Review M-1: the built-in `http://localhost:8088/v1` default must not
+    /// become a connect-time exemption; an operator-written value does.
+    #[test]
+    fn only_an_operator_written_hermes_base_url_is_trusted_for_egress() {
+        let default = ProviderConfig::from_env(|_| None);
+        let policy = egress_policy(&default, false, |flag| momo_settings::EgressPolicy {
+            allow_local: flag,
+            ..Default::default()
+        });
+        assert!(policy.operator_hosts.is_empty(), "{policy:?}");
+        assert!(policy
+            .check_resolved("localhost", &["127.0.0.1".parse().unwrap()])
+            .is_err());
+
+        let written = ProviderConfig::from_env(|key| {
+            (key == "HERMES_BASE_URL").then(|| "http://mock-hermes:8088/v1".to_string())
+        });
+        let policy = egress_policy(&written, true, |_| Default::default());
+        assert_eq!(policy.operator_hosts, vec!["mock-hermes".to_string()]);
+    }
     use super::*;
 
     #[test]
