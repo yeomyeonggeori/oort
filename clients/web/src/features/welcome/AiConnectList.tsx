@@ -1,27 +1,18 @@
-import { useState } from "react";
 import type { LocalHarnessId } from "@momo/core/features/hostedAgents/detect";
 import {
   AI_CONNECT_ROW_COPY,
   API_KEY_PILL_LABEL,
-  COPIED_LABEL,
-  COPY_ACTION_LABEL,
   HARNESS_INSTALL_URL,
   HARNESS_LABEL,
-  HARNESS_LOGIN_COMMAND,
   HARNESS_PILL_LABEL,
-  LOGIN_ACTION_LABEL,
-  LOGIN_OPENED_STATUS,
-  TERMINAL_OPEN_FAILED,
   isSubscriptionRow,
-  loginCommandAria,
   subscriptionRowSelectable,
   type AiConnectRowId,
   type HarnessPill,
 } from "@momo/core/features/onboarding/aiConnect";
-import { cn } from "@/design/lib/cn";
-import { useClipboardCopy } from "@/design/hooks/useClipboardCopy";
+import { LOGIN_ROW_HINT, loginActionLabel } from "@momo/core/features/onboarding/harnessLogin";
 import { Button } from "@/design/ui/button";
-import { openExternalUrl, openTerminalApp } from "@/lib/tauri";
+import { openExternalUrl } from "@/lib/tauri";
 
 // Reading this as: onboarding (AI 연결 목록) for internal team users on
 // web+Tauri, density 6/10, motion 1/10 (no row motion; the kometto carries it).
@@ -32,15 +23,16 @@ import { openExternalUrl, openTerminalApp } from "@/lib/tauri";
  * 때만 고를 수 있고(`준비됨`), 로그인이 필요하면 그 줄 아래 명령 한 줄이 선다.
  *
  * 알약은 한 단어 하나의 행동이다(Buzz). 설치 필요 → 공식 설치 안내, 다시 확인
- * → 다시 묻기. 로그인 필요의 행동은 알약이 아니라 아래 줄의 「터미널에서
- * 로그인」이다. 「Claude로 로그인」 버튼은 없다(ADR-0193 D2).
+ * → 다시 묻기. 로그인 필요의 행동은 알약이 아니라 아래 줄의 「Claude Code로
+ * 로그인」「Codex로 로그인」이다(로그인 모달, #2816). 「Claude로 로그인」처럼
+ * 제공자 이름으로 된 버튼은 없다(ADR-0193 D2 개정).
  */
 export function AiConnectList({
   rows,
   selected,
   onSelect,
   pill,
-  onLoginStart,
+  onLoginOpen,
   onRecheck,
   grokPill,
   locked,
@@ -51,7 +43,8 @@ export function AiConnectList({
   selected: AiConnectRowId | null;
   onSelect: (id: AiConnectRowId) => void;
   pill: (id: LocalHarnessId) => HarnessPill;
-  onLoginStart: (id: LocalHarnessId) => void;
+  /** 로그인 모달을 연다(#2816). */
+  onLoginOpen: (id: LocalHarnessId) => void;
   onRecheck: (id: LocalHarnessId) => void;
   /** 그록봇 줄 알약. 데스크탑에서 감지되지 않았을 때만 「설치 안 됨」. */
   grokPill: string | null;
@@ -59,8 +52,8 @@ export function AiConnectList({
   locked: boolean;
   /**
    * 셸이 한 번이라도 답했는가. 답하기 전의 「확인 중…」은 아직 모르는 상태라
-   * 로그인 명령 줄을 세우지 않는다(design-review H1). 답한 뒤의 「확인 중…」은
-   * 「터미널에서 로그인」 뒤 재확인이다.
+   * 로그인 줄을 세우지 않는다(design-review H1). 답한 뒤의 「확인 중…」은
+   * 로그인 뒤 재확인이다.
    */
   probed: boolean;
   describedBy?: string;
@@ -139,7 +132,7 @@ export function AiConnectList({
               ) : null}
             </div>
             {needsLogin && isSubscriptionRow(id) && (
-              <LoginCommandRow id={id} onLoginStart={onLoginStart} />
+              <LoginRow id={id} onLoginOpen={onLoginOpen} />
             )}
           </div>
         );
@@ -208,69 +201,34 @@ function HarnessPillControl({
 }
 
 /**
- * 로그인이 필요한 줄 아래의 명령 한 줄(시안 `.term`). 「터미널에서 로그인」은
- * 명령을 복사하고 OS 터미널을 앞으로 가져온 뒤 2초 재확인을 켠다. oort는 CLI를
- * 실행하지 않는다(셸 `open_terminal_app`은 인자가 없다).
+ * 로그인이 필요한 줄 아래의 한 줄: 짧은 안내 + [Claude Code로 로그인]. 누르면
+ * 로그인 모달(#2816)이 열리고, 앱이 숨은 PTY에서 공식 CLI 로그인을 돌린다.
+ * 평문 버튼이다: 로고·브랜드 색·「Sign in with …」 모양이 없다(ADR-0193 D2 개정).
  */
-function LoginCommandRow({
+function LoginRow({
   id,
-  onLoginStart,
+  onLoginOpen,
 }: {
   id: LocalHarnessId;
-  onLoginStart: (id: LocalHarnessId) => void;
+  onLoginOpen: (id: LocalHarnessId) => void;
 }) {
-  const command = HARNESS_LOGIN_COMMAND[id];
-  const { copied, copy } = useClipboardCopy(command);
-  const [status, setStatus] = useState<string | null>(null);
-
-  const handleLogin = async () => {
-    const didCopy = await copy();
-    const opened = await openTerminalApp();
-    setStatus(opened && didCopy ? LOGIN_OPENED_STATUS : TERMINAL_OPEN_FAILED);
-    onLoginStart(id);
-  };
-
+  const hintId = `ai-connect-login-hint-${id}`;
   return (
-    <div className="flex min-w-0 flex-col gap-1">
-      <div
-        className="ai-connect-term"
-        role="group"
-        aria-label={loginCommandAria(id)}
-        data-testid={`ai-connect-login-${id}`}
-      >
-        <code className="min-w-0 flex-1 truncate" data-testid={`ai-connect-login-command-${id}`}>
-          <span aria-hidden="true">$ </span>
-          {command}
-        </code>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="ai-connect-term-action ai-connect-secondary"
-          onClick={() => void handleLogin()}
-          data-testid={`ai-connect-login-open-${id}`}
-        >
-          {LOGIN_ACTION_LABEL}
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="ai-connect-term-action"
-          aria-label={`${loginCommandAria(id)} ${copied ? COPIED_LABEL : COPY_ACTION_LABEL}`}
-          onClick={() => void copy()}
-          data-testid={`ai-connect-login-copy-${id}`}
-        >
-          {copied ? COPIED_LABEL : COPY_ACTION_LABEL}
-        </Button>
-      </div>
-      <p
-        role="status"
-        className={cn("break-keep text-meta text-ink-muted", status === null && "sr-only")}
-        data-testid={`ai-connect-login-status-${id}`}
-      >
-        {status ?? ""}
+    <div className="ai-connect-login" data-testid={`ai-connect-login-${id}`}>
+      <p id={hintId} className="min-w-0 flex-1 break-keep text-meta text-ink-muted">
+        {LOGIN_ROW_HINT}
       </p>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="ai-connect-term-action ai-connect-secondary"
+        aria-describedby={hintId}
+        onClick={() => onLoginOpen(id)}
+        data-testid={`ai-connect-login-open-${id}`}
+      >
+        {loginActionLabel(id)}
+      </Button>
     </div>
   );
 }
