@@ -25,8 +25,10 @@
 //    see. cwd is `$HOME`, not the GUI's `/`.
 // 3. **Exit code only.** stdin, stdout and stderr are all `Stdio::null()`.
 //    `claude auth status` prints JSON that can name the account; none of it
-//    is read. 0 = the CLI says it is logged in, non-zero = needs login, could
-//    not start or did not finish within `STATUS_TIMEOUT` = unknown. Known
+//    is read. 0 = the CLI says it is logged in; the CLI ran and exited
+//    non-zero = needs login; could not start, did not run (126/127, e.g. no
+//    `node` for an npm install), killed by a signal or did not finish within
+//    `STATUS_TIMEOUT` = unknown. Known
 //    loss (ADR-0190 D3-a): a broken CLI config also exits non-zero and so
 //    shows as "needs login"; opening the CLI shows the real error.
 // 4. **No credential files.** This crate never opens a harness's config
@@ -92,12 +94,20 @@ pub struct LocalHarnessProbe {
     pub auth: HarnessAuth,
 }
 
+/// Exit codes that mean "the program did not run", not "the CLI answered":
+/// 126 = found but not executable, 127 = not found — what `env` returns when
+/// a `#!/usr/bin/env node` script cannot find `node`.
+pub const DID_NOT_RUN_CODES: &[i32] = &[126, 127];
+
 /// Exit status → login state. `None` = did not start or did not finish.
+///
+/// ADR-0190 D3-a's "non-zero = needs login" is read as "the CLI ran and
+/// answered non-zero" (#2813 integration decision): a program that never ran
+/// (126/127) or was ended by a signal gave no answer, so it is `Unknown`.
 pub fn auth_from_exit(status: Option<ExitStatus>) -> HarnessAuth {
-    match status {
-        Some(status) if status.success() => HarnessAuth::LoggedIn,
-        // A signal (no code) is not an answer from the CLI.
-        Some(status) if status.code().is_some() => HarnessAuth::NeedsLogin,
+    match status.map(|status| (status.success(), status.code())) {
+        Some((true, _)) => HarnessAuth::LoggedIn,
+        Some((false, Some(code))) if !DID_NOT_RUN_CODES.contains(&code) => HarnessAuth::NeedsLogin,
         _ => HarnessAuth::Unknown,
     }
 }
@@ -475,9 +485,11 @@ mod tests {
             // fake bin folder, hence the absolute path.
             bin.script("codex", "exec /bin/sleep 30");
             let started = Instant::now();
-            let probes = probe_all(&bin.path(), None, Duration::from_millis(300));
+            // 2 s: long enough that a loaded machine still sees `exit 1`
+            // finish, far below the sleeper's 30 s.
+            let probes = probe_all(&bin.path(), None, Duration::from_secs(2));
             assert!(
-                started.elapsed() < Duration::from_secs(5),
+                started.elapsed() < Duration::from_secs(10),
                 "timeout not enforced"
             );
             assert_eq!(
@@ -495,6 +507,26 @@ mod tests {
                     },
                 ]
             );
+        }
+
+        #[test]
+        fn a_cli_that_did_not_run_is_unknown_not_needs_login() {
+            let bin = Bin::new("didnotrun");
+            // What `env` does when the interpreter is missing, and when it is
+            // not executable.
+            bin.script("claude", "exit 127");
+            bin.script("codex", "exit 126");
+            let probes = probe_all(&bin.path(), None, Duration::from_secs(10));
+            assert!(
+                probes
+                    .iter()
+                    .all(|p| p.installed && p.auth == HarnessAuth::Unknown),
+                "{probes:?}"
+            );
+            // Control: an ordinary non-zero is still the CLI's answer.
+            bin.script("claude", "exit 2");
+            let probes = probe_all(&bin.path(), None, Duration::from_secs(10));
+            assert_eq!(probes[0].auth, HarnessAuth::NeedsLogin);
         }
 
         #[test]
