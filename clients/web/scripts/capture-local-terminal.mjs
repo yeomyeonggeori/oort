@@ -474,9 +474,11 @@ async function main() {
   try {
     const browser = await chromium.launch();
     try {
-      await scenes(browser, preview.origin);
-      await palette(browser, preview.origin);
-      await interactions(browser, preview.origin);
+      // LANE_ONLY=palette: 팔레트 확인만(사보타주 재실행용).
+      const only = process.env.LANE_ONLY;
+      if (!only || only === "scenes") await scenes(browser, preview.origin);
+      if (!only || only === "palette") await palette(browser, preview.origin);
+      if (!only || only === "interactions") await interactions(browser, preview.origin);
     } finally {
       await browser.close();
     }
