@@ -30,6 +30,27 @@ describe("notificationRulesFromWire", () => {
     expect(notificationRulesFromWire(null)).toEqual(DEFAULT_NOTIFICATION_RULES);
   });
 
+  it("carries dndUntilMs only while the pause is on (ADR-0124 증보 2)", () => {
+    expect(
+      notificationRulesFromWire({
+        dnd: true,
+        dndUntilMs: 1_800_000_000_000,
+        mentionOverridesMute: false,
+      })
+    ).toEqual({
+      dnd: true,
+      dndUntilMs: 1_800_000_000_000,
+      mentionOverridesMute: false,
+    });
+    // An older server, an open-ended pause, or a pause that is off: no key.
+    expect(
+      notificationRulesFromWire({ dnd: true, dndUntilMs: null })
+    ).toEqual({ dnd: true, mentionOverridesMute: false });
+    expect(
+      notificationRulesFromWire({ dnd: false, dndUntilMs: 5 })
+    ).toEqual(DEFAULT_NOTIFICATION_RULES);
+  });
+
   it("ignores a non-boolean switch rather than coercing it", () => {
     expect(
       notificationRulesFromWire({ dnd: "yes", mentionOverridesMute: 1 })
