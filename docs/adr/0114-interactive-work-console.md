@@ -1,6 +1,7 @@
 # ADR-0114: Interactive Work Console — 에이전트가 조종하는 앱 내 터미널 (Warp/Conductor형)
 
 - Status: **Accepted** (2026-07-19, 성재 — v2 권고안 D1~D8 전체 승인 "ㄱㄱ". 파생 MOMO-483부터 순차 발급, Host Fabric은 ADR-0125로)
+- 개정: 2026-09-26 **ADR-0190이 D1·D6을 Tauri(ADR-0133) 기준으로 다시 결정했다.** 사람이 쓰는 로컬 PTY는 데스크탑 앱 프로세스가 열고 원장 밖에 둔다. SwiftTerm·Swift 세션 매니저 서술은 역사 기록이다. D2~D5·D7·D8은 에이전트 작업 레인(ADR-0188)에 남는다
 - 관련: ADR-0102(실행 경로 — interactive 반쪽), ADR-0111(BYOA — 실행 호스트 모델의 원형), ADR-0004·MOMO-234(provider credential 비유입 하드 경계), MOMO-375(Control+backtick 표면 승계), docs/planning/SUPERAPP_ENGINE_GAP_2026-07-19.md
 - 참고 지형: **Warp**(에이전트가 명령 실행, 사람이 관찰·개입), **Conductor**(다중 Claude Code 세션 병렬 관리), Orca. 공통: 터미널은 에이전트의 작업 공간이고 사람은 감독자다.
 
