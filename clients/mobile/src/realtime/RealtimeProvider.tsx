@@ -100,21 +100,17 @@ export function RealtimeProvider({
     if (url === '') return;
     // `connecting` means two things to centrifuge-js and only one thing to a
     // reader. Before the first `connected` it is the opening handshake, and
-    // "연결 중" is honest. After it, it is the reconnect loop the client sits in
-    // for as long as the network is gone — `disconnected` is emitted only when
-    // the SERVER closes the session deliberately. Reporting both as "연결 중" is
-    // why a real 40s drop showed no offline state at all on web (measured
-    // there); once we have been connected, not being connected is being
-    // disconnected.
-    let everConnected = false;
+    // "연결 중" is honest. After it, it is the reconnect loop — and a real 40s
+    // drop reported as "연결 중" showed no offline state at all on web
+    // (measured there), so after the first connection a gap is a
+    // disconnection. But not INSTANTLY: a phone reconnects all the time, mostly
+    // in under two seconds, and reporting each one flashed 「연결이 끊겼습니다」
+    // at the owner mid-reconnect (#2751). The transport now hands over the
+    // status to SHOW, with gaps shorter than `DISPLAY_GRACE_MS` absorbed — see
+    // `./connectionDisplay.ts`.
     const transport = createRealtimeTransport({
       url,
-      onStatus: next => {
-        if (next === 'connected') everConnected = true;
-        setStatus(
-          next === 'connecting' && everConnected ? 'disconnected' : next,
-        );
-      },
+      onStatus: setStatus,
       onPolicy: state => setSubscriptionsWanted(socketWanted(state)),
     });
     setRail(createChannelRail(transport.client));
