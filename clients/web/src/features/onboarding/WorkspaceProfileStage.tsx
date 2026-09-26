@@ -58,6 +58,7 @@ import {
   S1_PRIMARY_RETRY,
   S1_REENTRY,
   S1_SKIP_LABEL,
+  S1_STALE_LINE,
   S1_STALE_MESSAGE_ID,
   S1_TITLE,
   S1_TROUBLE_LINE,
@@ -333,12 +334,15 @@ export function WorkspaceProfileStage({
     onSkip?.();
   };
 
-  const guideState: GuideState = offline || formError ? "trouble" : "awaiting";
+  const guideState: GuideState =
+    offline || formError || staleName ? "trouble" : "awaiting";
   const guideLine = offline
     ? S1_OFFLINE_LINE
-    : formError
-      ? S1_TROUBLE_LINE
-      : S1_TITLE;
+    : staleName
+      ? S1_STALE_LINE
+      : formError
+        ? S1_TROUBLE_LINE
+        : S1_TITLE;
   const previewName = workspaceDraft.trim();
   const previewDisplay = displayName.trim();
   const previewHandle = normalizeHandle(handle);
@@ -536,7 +540,7 @@ export function WorkspaceProfileStage({
       >
         <p className="text-meta font-bold text-ink-muted">사이드바 미리보기</p>
         <div className="flex min-w-0 items-center gap-2 font-bold text-ink">
-          <span className="onboarding-preview-ws">
+          <span className="onboarding-preview-ws" data-empty={previewName ? undefined : ""}>
             {initialOf(previewName)}
           </span>
           <span
@@ -547,7 +551,7 @@ export function WorkspaceProfileStage({
           </span>
         </div>
         <div className="flex min-w-0 items-center gap-2">
-          <span className="onboarding-preview-me">{initialOf(previewDisplay)}</span>
+          <span className="onboarding-preview-me" data-empty={previewDisplay ? undefined : ""}>{initialOf(previewDisplay)}</span>
           <span className="flex min-w-0 flex-col">
             <b
               className={cn(

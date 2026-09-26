@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -484,5 +486,16 @@ describe("onboarding S2 코메토와 발급 카드 (#2811 D3)", () => {
     expect(
       host.querySelector('[data-testid="onboarding-s2-title"]')?.textContent
     ).toBe(S2_TROUBLE_LINE);
+  });
+
+  it("건너뛰기는 둘레 재진입 문장보다 한 단 크다 (시안 .btn.ghost, review High)", () => {
+    const css = readFileSync(join(process.cwd(), "src/design/tokens.css"), "utf8");
+    const rule = (selector: string) => {
+      const start = css.indexOf(`${selector} {`);
+      expect(start, selector).toBeGreaterThan(0);
+      return css.slice(start, css.indexOf("}", start));
+    };
+    expect(rule(".onboarding-reentry")).toContain("font-size: var(--text-meta)");
+    expect(rule(".onboarding-skip")).toContain("font-size: var(--text-body)");
   });
 });

@@ -3550,6 +3550,13 @@
   font-size: var(--text-body);
 }
 
+/* 빈 입력이면 타일은 채움 없이 점선 자리만(검은 빈 사각이 깨진 아바타로 읽힌다). */
+.onboarding-preview-ws[data-empty],
+.onboarding-preview-me[data-empty] {
+  border: 1px dashed var(--line-strong);
+  background-color: transparent;
+}
+
 .onboarding-preview-me {
   inline-size: 28px;
   block-size: 28px;
@@ -3568,6 +3575,8 @@
 }
 
 /* 시안 `.btn.ghost`를 문장 안에 인라인으로(display:inline-flex;height:auto;padding:0).
+ * 시안처럼 둘레 문장(12.5)보다 한 단 크다(15/500 → 사다리 text-body 14/500). 행동이
+ * 캡션에 묻히지 않게 하는 크기 대비다(design-review High, #2811).
  * 폰(600 미만)에서는 손가락 44를 받는 제 줄로 올라서고 가운뎃점은 숨는다. */
 .onboarding-skip {
   display: inline-flex;
@@ -3576,7 +3585,8 @@
   min-inline-size: 0;
   padding: 0;
   color: var(--ink-muted);
-  font-size: inherit;
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
   font-weight: 500;
   vertical-align: baseline;
 

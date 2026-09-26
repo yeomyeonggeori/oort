@@ -3,6 +3,8 @@ export const S1_TITLE = "이 서버의 첫 주인이 됐어요.";
 export const S1_DETAIL = "우리 팀 이름과 내 이름부터 정해요.";
 /** 이름 저장이 실패했을 때(당황). 배너의 합니다체 문장이 사정을 말한다. */
 export const S1_TROUBLE_LINE = "이름을 아직 저장하지 못했어요.";
+/** 다른 곳에서 이름이 먼저 바뀌었을 때(409). 배너가 두 선택지를 말한다. */
+export const S1_STALE_LINE = "그사이 누가 이름을 바꿨어요. 어느 쪽으로 할까요?";
 export const S1_OFFLINE_LINE = "연결이 끊겨서 잠깐 기다려요.";
 export const S1_PRIMARY_LABEL = "이름 저장";
 export const S1_PRIMARY_BUSY = "저장 중";

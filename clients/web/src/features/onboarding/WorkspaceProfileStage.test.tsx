@@ -31,6 +31,7 @@ import {
   S1_PRIMARY_RETRY,
   S1_REENTRY,
   S1_SKIP_LABEL,
+  S1_STALE_LINE,
   S1_STALE_MESSAGE_ID,
   S1_DETAIL,
   S1_TITLE,
@@ -424,6 +425,13 @@ describe("onboarding S1 우리 팀 이름 (#2332, 겉 #2811)", () => {
         .querySelector('[data-testid="onboarding-s1-workspace-name"]')
         ?.getAttribute("aria-describedby")
     ).toContain(S1_STALE_MESSAGE_ID);
+    // 표정과 문장이 함께 바뀐다(ADR-0193 D11, #2811 review M).
+    expect(
+      host.querySelector('[data-testid="kometto-guide"]')?.getAttribute("data-expression")
+    ).toBe("flustered");
+    expect(host.querySelector('[data-testid="onboarding-s1-title"]')?.textContent).toBe(
+      S1_STALE_LINE
+    );
     expect(changeMyProfile).not.toHaveBeenCalled();
     expect(host.querySelector('[data-testid="onboarding-s2"]')).toBeNull();
     click("onboarding-s1-keep-theirs");
