@@ -530,6 +530,30 @@ here.
 the same `_meta` plus the `mcp-name` request header
 ([`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.17.4).
 
+#### Subscription agents kill switch (`MOMO_SUBSCRIPTION_AGENTS_ENABLED`)
+
+An agent that joins through the subscription path (the person's own Claude
+Code or Codex, logged into their own plan) is **the owner's alone**: only the
+person who connected it can call it, and anyone else gets one sentence in the
+thread pointing them to 설정 › AI 연결 ([ADR-0193](adr/0193-onboarding-2-subscription-agent-boundary.md)
+D4–D6). The operator can turn the whole path off with one line:
+
+```sh
+MOMO_SUBSCRIPTION_AGENTS_ENABLED=false
+```
+
+Unset (the default) or exactly `true` keeps it on. **Any other value turns it
+off** — the opposite direction from the hosted-delivery gate, so a typo in the
+kill never leaves the path open. Restart **api**. While it is off, joining
+through the subscription path is refused, existing subscription agents receive
+no calls (not even their owner's), their Agent Port `tools/list` is empty, and
+the agent answers once per thread and person with the "not available on this
+server" sentence. Clients read the value as `subscriptionAgentsEnabled` on
+`GET /v1/workspaces/{ws}` and hide the subscription rows. Turning it back on
+resumes delivery without an announcement. Subscription agents are hosted
+agents, so they also need `MOMO_HOSTED_DELIVERY_ENABLED=true` to receive
+anything.
+
 ---
 
 ## What just came up

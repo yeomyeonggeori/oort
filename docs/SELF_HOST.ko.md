@@ -484,6 +484,28 @@ env 는 백필하지 않는다. `--platform railway`(별칭 `--railway`)는 이 
 `_meta` 에다 `mcp-name` 요청 헤더가 필요하다
 ([`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.17.4).
 
+#### 구독 에이전트 킬 스위치 (`MOMO_SUBSCRIPTION_AGENTS_ENABLED`)
+
+구독 경로(자기 맥의 Claude Code·Codex를 자기 요금제로 로그인해 붙인 것)로
+합류한 에이전트는 **소유자 한 사람의 것**이다. 연결한 사람만 부를 수 있고,
+다른 사람이 부르면 에이전트가 그 스레드에 설정 › AI 연결을 안내하는 문장을
+한 번 남긴다([ADR-0193](adr/0193-onboarding-2-subscription-agent-boundary.md)
+D4–D6). 운영자는 한 줄로 이 경로 전체를 끈다.
+
+```sh
+MOMO_SUBSCRIPTION_AGENTS_ENABLED=false
+```
+
+값이 없거나(기본) 정확히 `true`이면 켜져 있다. **그 밖의 값은 모두 끔**이다.
+hosted delivery 게이트와 방향이 반대라서, 끄려다 오타를 내도 경로가 열린 채로
+남지 않는다. **api**를 재시작한다. 꺼져 있는 동안 구독 경로 합류는 거부되고,
+기존 구독 에이전트에게는 소유자의 호출도 전달되지 않으며, 그 에이전트의 Agent
+Port `tools/list`는 비고, 에이전트가 「지금은 이 서버에서 구독 에이전트를 쓸 수
+없어요」 문장을 스레드·사람마다 한 번 남긴다. 클라는 `GET /v1/workspaces/{ws}`의
+`subscriptionAgentsEnabled`로 값을 읽고 구독 줄을 숨긴다. 다시 켜면 알림 없이
+전달이 재개된다. 구독 에이전트는 hosted 에이전트이므로 무엇이든 받으려면
+`MOMO_HOSTED_DELIVERY_ENABLED=true`도 필요하다.
+
 ---
 
 ## 방금 무엇이 떴나

@@ -616,6 +616,7 @@ pub async fn send(
     // beside the instance-global provider mode precisely so the two stay
     // visibly independent knobs rather than one.
     let hosted_delivery_enabled = state.agent_port.config.hosted_delivery_enabled;
+    let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
     let context_max_messages = state.mentions.context_max_messages;
     // ADR-0158 D2 — the refinement block becomes props here, *before* the
     // transaction, because it is a pure rewrite of an already-validated value.
@@ -730,6 +731,7 @@ pub async fn send(
                     attachment_ids: &attachment_ids,
                     via_token_id,
                     opens_stream,
+                    subscription_agents_disabled: !subscription_agents_enabled,
                 },
             )
             .await?
@@ -758,6 +760,7 @@ pub async fn send(
                         channel_id,
                         message_id: sent.message.id,
                         message_seq: sent.message.seq,
+                        root_id: sent.message.root_id,
                         author_member_id: principal.member_id,
                         author_is_agent,
                         body: &mention_body,
@@ -765,6 +768,7 @@ pub async fn send(
                         via_token_id,
                         gateway_enabled,
                         hosted_delivery_enabled,
+                        subscription_agents_enabled,
                         context_max_messages,
                         routing: requested_routing.as_ref(),
                     },

@@ -151,6 +151,10 @@
         "PUSH_RELAY_URL": "http://push-relay.railway.internal:28195/v1/push",
         "PUSH_RELAY_SERVER_ID": "oort-team",
         "RELAY_SIGNING_KEY_B64": "<sealed: base64 of the Ed25519 PKCS#8 private key PEM from scripts/push_relay_keygen.sh>",
+        "MOMO_HUDDLE_SWEEP_DATABASE_URL": "${{shared.MOMO_APP_DATABASE_URL}}",
+        "MOMO_LIVEKIT_API_KEY": "<operator: the api's MOMO_LIVEKIT_API_KEY (#2759); delete all three MOMO_LIVEKIT_* here while huddles are not deployed>",
+        "MOMO_LIVEKIT_API_SECRET": "<sealed: the api's MOMO_LIVEKIT_API_SECRET (#2759)>",
+        "MOMO_LIVEKIT_URL": "<operator: the api's MOMO_LIVEKIT_URL (#2759)>",
         "LOG_LEVEL": "${{shared.LOG_LEVEL}}"
       }
     },

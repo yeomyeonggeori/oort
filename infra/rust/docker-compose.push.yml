@@ -143,6 +143,19 @@ services:
       # The Ed25519 PRIVATE key — this server's identity, not an APNs
       # credential. Enabled-without-a-key is a boot refusal (config.rs).
       MOMO_PUSH_RELAY_PRIVATE_KEY_PATH: /run/secrets/relay-signing-key.pem
+      # #2758 / ADR-0122 증보 D-H4 — the huddle ghost sweep. Runs only with all
+      # three MOMO_LIVEKIT_* (the api's values) AND the RLS-bound momo_app URL
+      # its writes go through; empty keeps it off. Without the `huddle`
+      # profile these stay empty. With it, the base file's huddle-notifier
+      # sweeps too; two sweepers are safe (the second settlement is a race).
+      MOMO_LIVEKIT_API_KEY: ${MOMO_LIVEKIT_API_KEY:-}
+      MOMO_LIVEKIT_API_SECRET: ${MOMO_LIVEKIT_API_SECRET:-}
+      MOMO_LIVEKIT_URL: ${MOMO_LIVEKIT_URL:-}
+      # The sweep's own route to the `huddle` profile's LiveKit on the private
+      # network (clients get MOMO_LIVEKIT_URL). Unused while MOMO_LIVEKIT_* are
+      # empty.
+      MOMO_HUDDLE_SWEEP_LIVEKIT_URL: http://livekit:7880
+      MOMO_HUDDLE_SWEEP_DATABASE_URL: ${MOMO_APP_DATABASE_URL:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - type: bind

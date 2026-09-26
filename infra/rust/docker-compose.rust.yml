@@ -8,7 +8,7 @@
 # minimum set the Rust binaries can actually serve today:
 #
 #   postgres · centrifugo · runtime-roles · migrate · api · relay · agent-worker
-#   webhook-sender · livekit(profile: huddle)
+#   webhook-sender · livekit + huddle-notifier(profile: huddle)
 #
 # ## Overlays (#1228) — this file is the base, not the whole deployment
 #
@@ -284,6 +284,10 @@ services:
       # keeps this off for stacks that never open hosted delivery (#1781 class:
       # do not make an unused flag required).
       MOMO_HOSTED_DELIVERY_ENABLED: ${MOMO_HOSTED_DELIVERY_ENABLED:-}
+      # ADR-0193 D6 (#2815): subscription-agent kill switch. Blank/unset or
+      # `true` = on (the default); any other value = off. `:-` so existing
+      # stacks keep the default without a new required key.
+      MOMO_SUBSCRIPTION_AGENTS_ENABLED: ${MOMO_SUBSCRIPTION_AGENTS_ENABLED:-}
       # ADR-0110: the ONLY authority for the realtime address handed to clients.
       # No default — a wrong guess silently points every client at nothing.
       MOMO_CENTRIFUGO_WS_URL: ${MOMO_CENTRIFUGO_WS_URL:?set MOMO_CENTRIFUGO_WS_URL}
@@ -525,6 +529,45 @@ services:
       - private
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  # #2758 / ADR-0122 증보 D-H4 — the huddle ghost sweep, with the huddle
+  # profile. A crashed client leaves its huddle_participant row open; this
+  # notifier asks LiveKit (on the private network) who is really in each room
+  # and settles the rest. Reads run as the BYPASSRLS momo_notifier role; every
+  # write goes through the RLS-bound momo_app URL (the sweep refuses anything
+  # else). Push and T3 stay off here: the push overlay owns that notifier.
+  # `:-` rather than `:?` so an inactive profile never makes ordinary compose
+  # commands require these; the binary names a missing DB URL at boot.
+  huddle-notifier:
+    image: *rust-image
+    command: ["notifier"]
+    profiles: ["huddle"]
+    mem_limit: ${MOMO_HUDDLE_NOTIFIER_MEM_LIMIT:-256m}
+    labels: *momo-janitor-labels
+    restart: unless-stopped
+    environment:
+      MOMO_ENV: ${MOMO_ENV:-staging}
+      NOTIFIER_DATABASE_URL: ${NOTIFIER_DATABASE_URL:-}
+      MOMO_HUDDLE_SWEEP_DATABASE_URL: ${MOMO_APP_DATABASE_URL:-}
+      MOMO_LIVEKIT_API_KEY: ${MOMO_LIVEKIT_API_KEY:-}
+      MOMO_LIVEKIT_API_SECRET: ${MOMO_LIVEKIT_API_SECRET:-}
+      MOMO_LIVEKIT_URL: ${MOMO_LIVEKIT_URL:-}
+      # The api hands clients MOMO_LIVEKIT_URL (a loopback/public ws URL); the
+      # sweep reaches the same server by its service name.
+      MOMO_HUDDLE_SWEEP_LIVEKIT_URL: http://livekit:7880
+      MOMO_HUDDLE_SWEEP_INTERVAL_MS: ${MOMO_HUDDLE_SWEEP_INTERVAL_MS:-30000}
+      MOMO_T3_ENABLED: "0"
+      MOMO_PUSH_NOTIFIER_ENABLED: "0"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      livekit:
+        condition: service_healthy
+    networks:
+      - private
 
 networks:
   private:

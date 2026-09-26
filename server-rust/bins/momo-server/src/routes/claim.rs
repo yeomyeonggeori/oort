@@ -87,6 +87,7 @@ pub async fn claim(
     };
     let gateway_enabled = state.agent_gateway.enabled();
     let hosted_delivery_enabled = state.agent_port.config.hosted_delivery_enabled;
+    let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
 
     let mutation = with_tenant_tx(&state.pool, workspace_id, {
         let token = token.clone();
@@ -124,6 +125,7 @@ pub async fn claim(
                             outcome.member_id,
                             gateway_enabled,
                             hosted_delivery_enabled,
+                            subscription_agents_enabled,
                             None,
                         )
                         .await?;

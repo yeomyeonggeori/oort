@@ -150,6 +150,7 @@ pub mod provisioning;
 pub mod routing;
 pub mod run;
 pub mod status;
+pub mod subscription;
 pub mod tools;
 pub mod usage;
 pub mod welcome;
@@ -247,6 +248,16 @@ pub use status::{
     opening_agent_status_payload, progress_agent_status_payload, terminal_agent_status_payload,
     terminal_phase, AgentPhase, AgentRunAddress, AGENT_PARTIAL_EVENT_TYPE, AGENT_STATUS_EVENT_TYPE,
     AGENT_STATUS_EVENT_VERSION,
+};
+pub use subscription::{
+    agent_is_owner_only_in_tx, load_invocation_scopes_in_tx, lock_and_find_recent_notice_in_tx,
+    mark_agent_owner_only_in_tx, notice_root, notice_thread_key, owner_only_gate,
+    subscription_notice_body, subscription_notice_key, subscription_notice_props, OwnerOnlyScope,
+    SubscriptionHarness, SubscriptionNoticeKind, INVOCATION_SCOPE_OWNER_ONLY,
+    INVOCATION_SCOPE_WORKSPACE, SKIP_OWNER_ONLY_NON_OWNER, SKIP_SUBSCRIPTION_AGENTS_DISABLED,
+    SUBSCRIPTION_AGENT_ONLINE_WINDOW_SECONDS, SUBSCRIPTION_NOTICE_AUDIT_SCHEMA,
+    SUBSCRIPTION_NOTICE_POSTED_ACTION, SUBSCRIPTION_NOTICE_SOURCE,
+    SUBSCRIPTION_NOTICE_THROTTLED_ACTION, SUBSCRIPTION_NOTICE_THROTTLE_SECONDS,
 };
 pub use usage::{
     budget_state, chain_usage_in_tx, record_run_usage_in_tx, usage_summary_in_tx, validated_window,

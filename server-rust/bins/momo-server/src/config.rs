@@ -442,6 +442,27 @@ pub struct AgentPortConfig {
     /// Enabling hosted delivery in production is now an operator's explicit act,
     /// backed by the disconnect lifecycle that makes it revocable.
     pub hosted_delivery_enabled: bool,
+    /// ADR-0193 D6 (#2815) — **the subscription-agent kill switch: on by
+    /// default, off on any value but an exact `true`.**
+    ///
+    /// `MOMO_SUBSCRIPTION_AGENTS_ENABLED`. Off means: joining through the
+    /// subscription path (`invocationScope: owner_only`) is refused, no call —
+    /// not even the owner's — is delivered to an existing `owner_only` agent
+    /// (mention/DM routing, hosted inbox fan-out, the Agent Port tool view,
+    /// the welcome speaker), and the agent answers once with the D6 sentence.
+    /// Turning it back on resumes delivery with no announcement.
+    ///
+    /// It is a server setting rather than a workspace setting on purpose: the
+    /// reason to flip it is a change in a provider's consumer terms, which is
+    /// an operator's decision for the whole instance. A workspace setting would
+    /// let a workspace admin reopen what the operator closed. Clients read the
+    /// effective value as `WorkspaceDto.subscriptionAgentsEnabled`.
+    ///
+    /// The parse leans toward *off* (the reverse of the hosted-delivery gate's
+    /// direction, same exact-`true` spelling): unset and `true` keep it on,
+    /// every other value — `false`, `0`, `off`, a typo — turns it off, so a
+    /// misspelled kill never leaves the path open.
+    pub subscription_agents_enabled: bool,
     /// ADR-0162 증보 1 / HAP-E7 — the MCP OAuth 2.1 authorization server.
     ///
     /// **Disabled by default, and disabled is not "degraded".** With this off
@@ -656,6 +677,7 @@ impl Default for AgentPortConfig {
             per_agent_limit: 480,
             per_ip_limit: 1200,
             hosted_delivery_enabled: false,
+            subscription_agents_enabled: true,
             oauth: AgentPortOauthConfig::default(),
         }
     }
@@ -677,6 +699,21 @@ fn hosted_delivery_from_env() -> bool {
 /// rather than a sentence.
 fn hosted_delivery_gate_open(value: Option<&str>) -> bool {
     value.is_some_and(|value| value.trim() == "true")
+}
+
+/// ADR-0193 D6 (#2815) — read the subscription-agent kill switch.
+fn subscription_agents_from_env() -> bool {
+    subscription_agents_switch_on(env("MOMO_SUBSCRIPTION_AGENTS_ENABLED").as_deref())
+}
+
+/// Unset = on (the shipped default); an exact `true` = on; **anything else =
+/// off**. Blank counts as unset because an env file that declares the key with
+/// no value has not decided anything.
+fn subscription_agents_switch_on(value: Option<&str>) -> bool {
+    match value.map(str::trim) {
+        None | Some("") => true,
+        Some(value) => value == "true",
+    }
 }
 
 /// ADR-0171 D6 — same spelling as the hosted-delivery gate: lowercase `true`
@@ -715,6 +752,7 @@ impl AgentPortConfig {
             )?,
             per_ip_limit: env_number("MOMO_AGENT_PORT_RATE_LIMIT_PER_IP", defaults.per_ip_limit)?,
             hosted_delivery_enabled: hosted_delivery_from_env(),
+            subscription_agents_enabled: subscription_agents_from_env(),
             oauth: AgentPortOauthConfig::from_env()?,
         })
     }
@@ -2062,6 +2100,33 @@ mod tests {
             Some("truex"),
         ] {
             assert!(!hosted_delivery_gate_open(closed), "{closed:?}");
+        }
+    }
+
+    /// ADR-0193 D6 (#2815). On by default; only unset/blank or an exact `true`
+    /// keep it on, so a typo in the kill value still kills.
+    #[test]
+    fn the_subscription_kill_switch_is_on_by_default_and_any_other_value_turns_it_off() {
+        assert!(
+            AgentPortConfig::default().subscription_agents_enabled,
+            "the shipped default is on"
+        );
+        for on in [None, Some(""), Some("  "), Some("true"), Some(" true\n")] {
+            assert!(subscription_agents_switch_on(on), "{on:?}");
+        }
+        for off in [
+            Some("false"),
+            Some("False"),
+            Some("FALSE"),
+            Some("0"),
+            Some("off"),
+            Some("no"),
+            Some("True"),
+            Some("1"),
+            Some("ture"),
+            Some("fasle"),
+        ] {
+            assert!(!subscription_agents_switch_on(off), "{off:?}");
         }
     }
 

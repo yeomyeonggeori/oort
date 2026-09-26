@@ -111,6 +111,26 @@ impl HostedCaller {
 /// a connect-only credential gets: an empty `tools/list` and an unknown-tool
 /// answer for every call.
 pub(crate) async fn tool_view_for(state: &AppState, caller: HostedCaller) -> ToolView {
+    // ADR-0193 D6 (#2815) — with the operator's switch off, a subscription
+    // (`owner_only`) agent's runtime may call nothing: no inbox read, no job
+    // claim, no post. This is the one door through which a job queued before
+    // the switch was flipped could still be delivered, so it is closed here
+    // rather than per tool. Turning the switch back on restores the view on the
+    // next request; nothing else has to be undone.
+    if !state.agent_port.config.subscription_agents_enabled {
+        match owner_only_caller(&state.pool, caller).await {
+            Ok(false) => {}
+            Ok(true) => return ToolView::empty(),
+            Err(error) => {
+                tracing::error!(
+                    error = %error,
+                    route = "/v1/mcp/agent-port",
+                    "Agent Port subscription scope resolution failed"
+                );
+                return ToolView::empty();
+            }
+        }
+    }
     match hosted_identity(&state.pool, caller).await {
         Ok(Some(identity)) => ToolView::intersect(
             &identity.approved_scopes,
@@ -131,6 +151,16 @@ pub(crate) async fn tool_view_for(state: &AppState, caller: HostedCaller) -> Too
             ToolView::empty()
         }
     }
+}
+
+async fn owner_only_caller(pool: &PgPool, caller: HostedCaller) -> Result<bool, DbError> {
+    momo_db::with_tenant_tx(pool, caller.workspace_id, move |conn| {
+        Box::pin(async move {
+            momo_agent::agent_is_owner_only_in_tx(conn, caller.workspace_id, caller.agent_member_id)
+                .await
+        })
+    })
+    .await
 }
 
 async fn hosted_identity(
@@ -443,6 +473,7 @@ async fn message_post(
     let mention_body = body.clone();
     let gateway_enabled = state.agent_gateway.enabled();
     let hosted_delivery_enabled = state.agent_port.config.hosted_delivery_enabled;
+    let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
     let context_max_messages = state.mentions.context_max_messages;
 
     let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
@@ -500,6 +531,7 @@ async fn message_post(
                     attachment_ids: &[],
                     via_token_id: Some(caller.token_id),
                     opens_stream: false,
+                    subscription_agents_disabled: !subscription_agents_enabled,
                 },
             )
             .await?;
@@ -520,6 +552,7 @@ async fn message_post(
                         channel_id,
                         message_id: sent.message.id,
                         message_seq: sent.message.seq,
+                        root_id: sent.message.root_id,
                         author_member_id: caller.agent_member_id,
                         author_is_agent: true,
                         body: &mention_body,
@@ -527,6 +560,7 @@ async fn message_post(
                         via_token_id: Some(caller.token_id),
                         gateway_enabled,
                         hosted_delivery_enabled,
+                        subscription_agents_enabled,
                         context_max_messages,
                         routing: None,
                     },
@@ -892,6 +926,7 @@ async fn run_complete(
     let body = optional_str(args, "body", 8_000)?.map(str::to_string);
     let (usage, usage_detail) = usage_from_arguments(args)?;
     let secret = state.agent_port.envelope_secret().to_string();
+    let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
 
     let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
         Box::pin(async move {
@@ -922,6 +957,7 @@ async fn run_complete(
                     usage_detail,
                     actor_member_id: Some(caller.agent_member_id),
                     via_token_id: Some(caller.token_id),
+                    subscription_agents_enabled,
                 },
             )
             .await?;

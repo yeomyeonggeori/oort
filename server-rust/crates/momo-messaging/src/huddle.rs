@@ -89,10 +89,14 @@ impl From<sqlx::Error> for HuddleError {
     }
 }
 
-type HuddleFuture<'a, T> =
+pub(crate) type HuddleFuture<'a, T> =
     std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, HuddleError>> + Send + 'a>>;
 
-async fn tenant_tx<T, F>(pool: &PgPool, workspace_id: Uuid, body: F) -> Result<T, HuddleError>
+pub(crate) async fn tenant_tx<T, F>(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    body: F,
+) -> Result<T, HuddleError>
 where
     T: Send,
     F: for<'c> FnOnce(&'c mut PgConnection) -> HuddleFuture<'c, T> + Send,
@@ -282,36 +286,8 @@ pub async fn leave_huddle(
                 return Err(HuddleError::MemberNotPresent);
             }
 
-            let participant_ids = active_participant_ids(conn, huddle_id).await?;
-            let ended = participant_ids.is_empty();
-            if ended {
-                sqlx::query(
-                    "UPDATE huddle SET ended_at = now() WHERE id = $1 AND ended_at IS NULL",
-                )
-                .bind(huddle_id)
-                .execute(&mut *conn)
-                .await?;
-                enqueue_transcription_if_recording_ended(
-                    conn,
-                    workspace_id,
-                    huddle_id,
-                    scope.channel_id,
-                )
-                .await?;
-            }
-            emit_huddle_event(
-                conn,
-                workspace_id,
-                scope.channel_id,
-                huddle_id,
-                if ended {
-                    "huddle_ended"
-                } else {
-                    "huddle_participants_changed"
-                },
-                &participant_ids,
-            )
-            .await?;
+            let ended =
+                settle_departures_in_tx(conn, workspace_id, scope.channel_id, huddle_id).await?;
             write_huddle_audit(
                 conn,
                 workspace_id,
@@ -422,7 +398,46 @@ async fn lock_huddle_for_member(
     })
 }
 
-async fn active_participant_ids(
+/// The end path every departure takes, after its `left_at` rows are written.
+///
+/// Shared by a person's leave ([`leave_huddle`]) and the ghost sweep
+/// ([`crate::huddle_sweep`], #2758 / ADR-0122 증보 D-H4), so a huddle whose last
+/// participant crashed ends exactly the way one whose last participant pressed
+/// 나가기 does: `ended_at`, the recording stop + transcription job, and one
+/// `huddle_ended` (or `huddle_participants_changed`) outbox row — all in the
+/// caller's tenant transaction. Returns whether the huddle ended.
+pub(crate) async fn settle_departures_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    huddle_id: Uuid,
+) -> Result<bool, HuddleError> {
+    let participant_ids = active_participant_ids(conn, huddle_id).await?;
+    let ended = participant_ids.is_empty();
+    if ended {
+        sqlx::query("UPDATE huddle SET ended_at = now() WHERE id = $1 AND ended_at IS NULL")
+            .bind(huddle_id)
+            .execute(&mut *conn)
+            .await?;
+        enqueue_transcription_if_recording_ended(conn, workspace_id, huddle_id, channel_id).await?;
+    }
+    emit_huddle_event(
+        conn,
+        workspace_id,
+        channel_id,
+        huddle_id,
+        if ended {
+            "huddle_ended"
+        } else {
+            "huddle_participants_changed"
+        },
+        &participant_ids,
+    )
+    .await?;
+    Ok(ended)
+}
+
+pub(crate) async fn active_participant_ids(
     conn: &mut PgConnection,
     huddle_id: Uuid,
 ) -> Result<Vec<Uuid>, HuddleError> {

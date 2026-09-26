@@ -151,6 +151,7 @@ pub async fn create(
     let via_token_id = audit_via_token_id(&principal);
     let gateway_enabled = state.agent_gateway.enabled();
     let hosted_delivery_enabled = state.agent_port.config.hosted_delivery_enabled;
+    let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
     let input = NewAgentMember {
         display_name,
         handle,
@@ -246,6 +247,7 @@ pub async fn create(
                         Some(agent.id),
                         gateway_enabled,
                         hosted_delivery_enabled,
+                        subscription_agents_enabled,
                     )
                     .await?;
 
