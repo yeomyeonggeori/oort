@@ -1,17 +1,29 @@
-import {readFileSync} from 'node:fs';
-import {join} from 'node:path';
-
-import {contrast as coreContrast} from '@momo/core/design/color';
+import {
+  contrast as coreContrast,
+  normalizeHex,
+  oklabDistance,
+} from '@momo/core/design/color';
 import {
   COLOR_ROLES,
+  GLASS_FALLBACK_OPACITY,
   THEMES as CORE_THEMES,
+  VESSEL_MIN_CONTRAST,
+  VESSEL_MIN_DISTANCE,
   contrastPairs,
 } from '@momo/core/design/themes';
 
-import {DS2_COMBOS, ds2Roles, THEMES} from '../src/design/ds2Tokens';
+import {
+  DEFAULT_THEME_ID,
+  DS2_COMBOS,
+  ds2Roles,
+  THEMES,
+} from '../src/design/ds2Tokens';
 import {
   darkPalette,
+  DS2_ROLE_MAP,
   lightPalette,
+  paletteFrom,
+  rgbaToHex8,
   type Palette,
 } from '../src/design/tokens';
 
@@ -25,9 +37,9 @@ import {
 //
 //   그 화면들이 지키던 관계가 **라이트에서도 성립하는가.**
 //
-// 라이트 값은 발명이 아니라 웹 `tokens.css` 의 번역이지만(`tokens.ts` 머리 주석),
-// 웹에 짝이 없는 역할이 열 개 넘게 있고 그 값들은 다크가 지키던 관계를 라이트에서
-// 다시 푼 답이다. 답을 손으로 골랐으면 자로 재야 한다.
+// 두 팔레트의 값은 core 새벽하늘 표에서 오지만(`tokens.ts` 머리 주석, ADR-0189 D5),
+// core 에 짝이 없는 역할이 일곱 있고 그 값들은 관계로 계산한 답이다. 답을 계산했으면
+// 그 계산이 지키려던 관계를 자로 재야 한다.
 //
 // ## 왜 「둘 다」 인가 — 한 벌만 재면 늦게 안다
 //
@@ -139,6 +151,10 @@ const BODY_INK: ReadonlyArray<readonly [keyof Palette, keyof Palette]> = [
   ['accentText', 'surface'],
   ['onAccent', 'accent'],
   ['onAccent', 'accentPressed'],
+  // 잉크 채움 위의 글자 (ADR-0189 D1 — FAB·보내기·주 버튼).
+  ['onPrimary', 'primary'],
+  ['text', 'sheet'],
+  ['textMuted', 'sheet'],
   ['onWarn', 'warn'],
   // 파괴 채움 위의 글자 (#1210 D2). 이 줄이 없던 동안 「거부 확정」의 라벨은
   // `onAccent` 였고, 다크에서 그것은 **어두운** 잉크(#17161a)를 어두운 테두리
@@ -186,24 +202,24 @@ describe.each(SCHEMES)('%s 팔레트', (_name, palette) => {
     }
   });
 
-  it('surface 는 bg 에서 **멀어지는 쪽**으로 한 단이고, 그 단이 팔레트에서 가장 조용하다', () => {
-    // 다크에서는 밝아지고 라이트에서는 …도 밝아진다: 종이(#fffefb)가 바탕
-    // (#f7f6f3)보다 밝은 것이 여명 팔레트의 라이트 항이고, 웹의
-    // `--surface-raised`/`--surface` 가 정확히 그 관계다.
+  it('surface 는 바닥에서 **멀어지는 쪽**으로 한 단이고, 색 채움은 표면 위에서 보인다', () => {
+    // 고도의 방향: 카드(`surface`)는 바닥의 가운데 정지점(`bg`)보다 밝다 — 두
+    // 스킴 모두. 새벽하늘 다크에서 그 단은 1.045 로 작다. 다크 카드는 그림자
+    // 하이라이트(ADR-0189 표 「유리·스크림·그림자」)로 떠 있고, 대비로 뜨지 않는다.
     expect(luminance(palette.surface)).toBeGreaterThan(luminance(palette.bg));
 
-    // 여기 있던 문장은 「1.1 을 넘으면 다른 표면이 된다」였고, 그 1.1 은 폰이 자기
-    // 다크(1.084)와 라이트(1.072)를 보고 그은 선이었다. #1164 가 두 표면을 웹 항으로
-    // 정렬하자 다크가 **1.1001** 이 됐다 — 0.0001 초과다. 낡은 값에 단정을 맞추는
-    // 대신(문턱을 1.11 로 밀거나 값을 웹에서 떼어 놓는 것) 이 단정이 실제로 지키던
-    // 것을 적는다: 고도는 이 팔레트가 가진 **가장 조용한 구분**이고, 색을 가진 어떤
-    // 채움도 그보다는 진해야 한다. 색이 고도보다 조용하면 색이 하는 말이 그림자가
-    // 하는 말보다 작아진다.
+    // 여명 판의 문장은 「고도는 팔레트의 **가장 조용한 구분**이고, 색 채움은 바닥
+    // 위에서 그보다 진해야 한다」였다. ADR-0189 D1·D2 가 그 전제를 바꿨다: 바닥은
+    // 이제 그라데이션 판이고 칩·상태 상자는 바닥이 아니라 **표면** 위에 선다. 새벽
+    // 라이트의 soft 채움은 바닥 가운데 정지점 위에서 1.00~1.02 라 옛 단정을 그대로
+    // 두면 서지도 않는 자리를 재며 빨개진다. 그래서 채움은 자기가 서는 면(`surface`
+    // )에서 core 가 그릇에 거는 두 자(대비 1.05, OKLab 0.02)로 잰다.
     //
-    // 숫자가 아니라 순위라서 두 스킴이 같은 문장을 진다 — 그리고 문턱이 아니므로
-    // 웹이 두 표면을 다시 고르는 날에도 이 단정은 여전히 옳은 것을 잰다.
-    // 실측: 다크 1.1001 < 1.1641(warnSurface) · 라이트 1.0716 < 1.0801(okSurface).
-    const band = contrast(palette.surface, palette.bg);
+    // `sheet` 는 재지 않는다 — 재 보면 새벽 라이트 `warn-soft`(#FFEDD4)가 `sheet`
+    // (#F4F2EF) 위 대비 1.026 · OKLab 0.035 로 첫 자에 못 미친다. 이 값은 core 표의
+    // 두 값이고 core 채움 쌍은 soft 를 시트 위에서 재지 않는다. 폰에서 상태 칩이
+    // 시트 위에 서는 자리(프로필·설정 시트)의 재도색은 DS2-5(#2717)라 거기로 넘긴다
+    // (PR #2714 REMAINING).
     for (const fill of [
       'accentSurface',
       'agentSurface',
@@ -211,10 +227,14 @@ describe.each(SCHEMES)('%s 팔레트', (_name, palette) => {
       'dangerSurface',
       'okSurface',
     ] as const) {
-      expect([fill, band < contrast(palette[fill], palette.bg)]).toEqual([
-        fill,
-        true,
-      ]);
+      for (const host of ['surface'] as const) {
+        expect([
+          fill,
+          host,
+          contrast(palette[fill], palette[host]) >= VESSEL_MIN_CONTRAST &&
+            oklabDistance(palette[fill], palette[host]) >= VESSEL_MIN_DISTANCE,
+        ]).toEqual([fill, host, true]);
+      }
     }
   });
 
@@ -236,22 +256,30 @@ describe.each(SCHEMES)('%s 팔레트', (_name, palette) => {
     }
   });
 
-  it('순백도 순흑도 없다 — 종이의 흰색은 #fffefb 다', () => {
-    // 웹 팔레트가 처음부터 갖고 있던 규율(`tokens.css` 머리 주석: *"no pure
-    // #000000 / #ffffff anywhere"*).
+  it('순백도 순흑도 없다 — 종이의 흰색은 #fffefc 다', () => {
+    // 웹 팔레트가 처음부터 갖고 있던 규율(*"no pure #000000 / #ffffff anywhere"*).
+    // 알파를 떼고 **색 부분**을 잰다.
     //
-    // 면제 목록이 하나 줄었다 (#1164). 스크림이 여기 있었던 이유는 다크의 값이
-    // 실제로 순흑이었기 때문이다(`#000000aa`) — 8자리라 6자리 비교를 그냥 통과했고,
-    // 그래서 면제는 그 사실을 **가리고** 있었다. 웹 `--scrim` 다크 항은 순흑이 아니라
-    // `rgb(9 8 11 / .62)` 이고, 정렬 뒤에는 스크림도 이 규칙 안에서 산다. 알파를
-    // 떼고 **색 부분**을 재는 것이 그 차이를 잡는 자다.
-    //
-    // `shadow` 만 남는다: 그림자는 색이 아니라 아래 **방향**이고, 두 스킴이 같은 값을
-    // 드는 유일한 역할인 것과 같은 이유다(아래 단정).
+    // 면제는 **알파 층** 셋과 그림자다. 그림자는 색이 아니라 아래 방향이다. 알파
+    // 층은 스스로 색으로 서지 않고 밑의 면과 섞여서만 보인다:
+    //   scrim      core 다크 `rgba(0,0,0,.55)` (ADR-0189 표 「유리·스크림·그림자」).
+    //              여명 판은 이것을 순흑이 아닌 값으로 옮겨 면제를 걷었었다 — 그
+    //              값은 폰이 고른 것이 아니라 웹 항이었고, 지금의 원천은 core 다.
+    //   glassLine  시안 A `--glassLine` (라이트 흰 70%, 다크 흰 7%). 유리 가장자리의
+    //              반사광이라 흰색이 정의다.
+    const ALPHA_LAYERS = new Set(['shadow', 'scrim', 'glassLine']);
     for (const [role, value] of Object.entries(palette)) {
-      if (role === 'shadow') continue;
+      if (ALPHA_LAYERS.has(role)) continue;
       expect([role, value.slice(0, 7)]).not.toEqual([role, '#ffffff']);
       expect([role, value.slice(0, 7)]).not.toEqual([role, '#000000']);
+    }
+    // 면제된 셋은 실제로 알파를 든다 — 불투명으로 바뀌면 면제가 거짓이 된다.
+    for (const role of ['scrim', 'glassLine'] as const) {
+      expect([role, palette[role].length, palette[role].slice(7) === 'ff']).toEqual([
+        role,
+        9,
+        false,
+      ]);
     }
   });
 });
@@ -287,153 +315,84 @@ describe('두 팔레트가 같은 역할표를 든다', () => {
 });
 
 // =============================================================================
-// #1155 · #1164 — 두 팔레트가 웹 정본과 **바이트로** 같다
+// DS2-2 (#2714) — 두 팔레트가 core 새벽하늘과 **값 단위로** 같다
 //
-// 웹은 두 스킴을 `light-dark()` 한 줄에 적으므로 두 항이 갈라질 자리가 없다. 폰은
-// 두 상수로 나눠 들기 때문에 그 자리가 있고, 실제로 세 번 갈라졌다 —
+// 이 자리에는 「#1155·#1164 — 두 팔레트가 웹 정본과 값 단위로 같다」가 있었다. 웹
+// `tokens.css`를 읽어 폰의 두 팔레트와 바이트로 맞추던 블록이고, 폰이 두 상수로
+// 나눠 들던 동안 `light-dark()` 한 줄의 대역이었다(그 사이 세 번 갈라졌다 — U2,
+// #1155, #1164).
 //
-//   U2(#1153)   라이트를 웹 라이트 항으로 열여섯 역할 정렬. 다크는 손대지 않음.
-//   #1155       다크 accent 가족만. 그때까지 다크 accent 는 선존재 파랑(#3b6fd4).
-//   #1164       다크 나머지(표면·잉크·에이전트·warn·danger·ok·스크림).
+// ADR-0189 D5·D6이 원천을 core 한 곳으로 옮겼다. 폰도 웹도 core를 대조하고, 폰이
+// 웹 CSS를 읽을 이유가 사라졌다(웹 `tokens.css`는 DS2-1 #2713이 바꾸는 중이라,
+// 남겨 두면 어느 쪽이 먼저 들어오든 옳은 값을 두고 빨개진다). 그래서 출처가 바뀐다:
+// 기대값은 여전히 여기 베껴 적지 않고, `DS2_ROLE_MAP`이 말하는 core 역할을
+// `ds2Roles`에서 **읽어서** 맞춘다.
 //
-// 이 스위트가 없는 `light-dark()` 의 대역이다: 웹 `tokens.css` 를 **읽어서** 폰의 두
-// 팔레트와 맞춘다. 기대값을 여기 베껴 적으면 웹이 움직인 날 폰만 조용히 뒤처지므로,
-// 출처는 언제나 그 파일이다.
-//
-// **ADR-0189 D6 — 이 대조는 이행 중이다.** 원천은 이제 core(`@momo/core/design/
-// themes`)이고, 폰과 웹이 모두 core를 대조한다. 대조 범위는 공유층(색 역할·모션·
-// 층 이름)으로 줄고, 반경·타입은 값을 대조하지 않는다. 이 블록이 재는 것은 아직
-// 화면을 그리는 ADR-0174 값(웹 `tokens.css`와 폰 `tokens.ts`)이고, 폰 팔레트가
-// core 표로 옮겨 가는 DS2-2(#2714)에서 이 블록의 출처가 core로 바뀐다. 그 전에
-// 출처를 core로 돌리면 폰은 아직 DS1 값을 들고 있으므로 옳은 이유로 빨개진다.
-// core를 읽는 경로와 그 표의 대비는 파일 끝 「DS2 공유층」 블록이 지금 잰다.
-//
-// 범위가 자랐다. #1155 때 이 자리에는 *"범위는 accent 가족뿐이다 — 전부를 재면 이
-// 스위트는 「무엇이 정렬됐는가」가 아니라 「무엇이 아직 안 됐는가」를 말하게 된다"* 가
-// 적혀 있었고, 그 문장은 그때 참이었다. 지금은 짝이 있는 역할이 전부 정렬됐으므로
-// 그 문장이 거짓이 됐고, 표는 「무엇이 정렬됐는가」를 그대로 말한다.
+// 관계 단정(색상각·방향·채도 위계·파괴 채움)은 남는다. 여명 값에서 새벽하늘 값으로
+// 옮기면서 ADR-0189가 **관계 자체를** 바꾼 곳이 셋 있고, 각 단정 주석에 그 ADR
+// 줄을 적었다: 바닥이 그라데이션 판이 되어 칩이 바닥이 아니라 표면 위에 서는 것,
+// 주 행동이 신호색이 아니라 잉크가 된 것, 상태 soft 채움이 폰의 파생이 아니라 core
+// 표의 값이 된 것.
 // =============================================================================
 
-describe('#1155·#1164 — 두 팔레트가 웹 정본과 값 단위로 같다', () => {
-  const CSS = readFileSync(
-    join(__dirname, '../../web/src/design/tokens.css'),
-    'utf8',
-  );
+describe('DS2-2 — 두 팔레트가 core 새벽하늘과 값 단위로 같다 (ADR-0189 D5)', () => {
+  const MAPPED = Object.entries(DS2_ROLE_MAP) as ReadonlyArray<
+    readonly [keyof typeof DS2_ROLE_MAP, string]
+  >;
 
-  /** `--name: light-dark(#aaa, #bbb);` 에서 두 항을 꺼낸다. */
-  function lightDark(name: string): {light: string; dark: string} {
-    const found = new RegExp(
-      `--${name}:\\s*light-dark\\(\\s*(#[0-9a-f]{6})\\s*,\\s*(#[0-9a-f]{6})\\s*\\)`,
-    ).exec(CSS);
-    if (!found) throw new Error(`--${name} 를 웹 tokens.css 에서 못 찾았다`);
-    return {light: found[1], dark: found[2]};
-  }
-
-  /**
-   * 같은 일을 `rgb(r g b / a)` 두 항에 대해 — 그리고 폰의 표기(`#rrggbbaa`)로 옮긴다.
-   *
-   * 스크림만 이 경로를 쓴다. 웹이 스크림을 알파와 함께 쓰는 유일한 토큰이고, RN 의
-   * 스타일 값은 `rgb(… / …)` 를 모른다. 변환이 여기 있는 이유는 **폰이 옮긴 것을 다시
-   * 옮겨 대조**해야 하기 때문이다 — 기대값을 손으로 적으면 대조가 아니라 복사가 된다.
-   */
-  function lightDarkRgb(name: string): {light: string; dark: string} {
-    const term = String.raw`rgb\(\s*(\d+)\s+(\d+)\s+(\d+)\s*\/\s*([\d.]+)\s*\)`;
-    const found = new RegExp(
-      `--${name}:\\s*light-dark\\(\\s*${term}\\s*,\\s*${term}\\s*\\)`,
-    ).exec(CSS);
-    if (!found) throw new Error(`--${name} 를 웹 tokens.css 에서 못 찾았다`);
-    const hex = (o: number) =>
-      '#' +
-      [1, 2, 3]
-        .map(i => Number(found[o + i]).toString(16).padStart(2, '0'))
-        .join('') +
-      Math.round(Number(found[o + 4]) * 255)
-        .toString(16)
-        .padStart(2, '0');
-    return {light: hex(0), dark: hex(4)};
-  }
-
-  /**
-   * 웹에 짝이 있는 역할 전부. 대응은 `tokens.ts` 머리 주석의 표 그대로다.
-   *
-   * 웹에만 있고 폰에 짝이 **없는** 토큰은 다섯이다:
-   *
-   *   `--surface-sidebar`  폰에는 사이드바 표면이 따로 없다.
-   *   `--muted-soft`       칩의 그릇 — 톤 없는 옅은 채움 (#1515).
-   *   `--ok-soft` `--warn-soft` `--danger-soft`
-   *                        측정을 나르는 칩의 톤별 그릇 (#1516).
-   *
-   * 뒤의 넷이 **아직 짝이 없는 것은 판정이지 누락이 아니다.** 폰에도 같은 격의 칩이
-   * 있고(`features/work/WorkSessionParts.tsx` 의 `WorkStatusBadge` — 같은
-   * `WorkSessionStatus` 키를 쓰고, 자기 주석이 「역할 정본은 웹/코어 표이고 폰은 그
-   * 표를 따른다」라고 적는다), 그 칩은 아직 톤 채움 + 1px 테두리다. 웹은 #1516 에서
-   * 그 모양을 **컨트롤 문법**으로 판정해 걷어냈다.
-   *
-   * 그런데 폰의 `okSurface`/`warnSurface`/`dangerSurface` 는 새 웹 토큰과 다크에서
-   * OKLab 거리 0.0337/0.0450/0.0421 이다 — 웹이 그릇 가족에 건 자(0.02)로 재면 **서로
-   * 다른 재료**라, 여기에 짝을 적는 것은 정렬이 아니라 값의 신설이다. 바로 위
-   * `--danger-fill` 문단이 같은 갈림에서 「신설이라 밖이다」로 판정했다가 그 판정이
-   * 가드의 구멍을 문서화하는 데 쓰인 전례를 적어 두었으므로, 이 넷은 같은 길을 밟지
-   * 않는다 — **후속 goal 이 발급돼 있다: #1600**(폰 칩 그릇 정렬, 웹 #1515·#1516 의
-   * 폰 판). 「후속 후보」라고 적힌 주석은 큐가 아니다. 번호가 붙어야 큐다.
-   * 지금 이 표에 없다는 사실 자체는 아래 「짝을 못 찾으면 조용히 통과하지 않는다」가
-   * 계속 지킨다 — 이 목록에 적힌 것만 재고, 적히지 않은 것은 재지 않는다고 말한다.
-   *
-   * `--danger-fill`/`--on-danger-fill` 이 여기 있었다 (#1210 D2). 제외의 근거는
-   * *"역할을 새로 만드는 것은 정렬이 아니라 신설이라 #1164 밖이다"* 였고 그 판정은
-   * 그때 옳았다. 다만 그 뒤로 이 주석이 실제로 한 일은 **가드가 자기 구멍을
-   * 문서화하고 통과하는 것**이었다: 잴 토큰이 없으니 폰의 파괴 채움에 대해 아무
-   * 단정도 설 수 없었고, 그동안 「거부 확정」은 `dangerBorder` 를 바탕으로 쓰며
-   * 다크에서 1.64:1 로 출하됐다(감사 2026-08-09 §B-4 ②). 신설이 끝났으므로 제외도
-   * 끝난다.
-   */
-  const PAIRS: ReadonlyArray<readonly [keyof Palette, string]> = [
-    ['bg', 'surface'],
-    ['surface', 'surface-raised'],
-    ['surfacePressed', 'surface-hover'],
-    ['border', 'line'],
-    ['text', 'ink'],
-    ['textMuted', 'ink-muted'],
-    ['textFaint', 'line-strong'],
-    ['accent', 'accent'],
-    ['accentSurface', 'accent-soft'],
-    ['onAccent', 'on-accent'],
-    ['agent', 'agent'],
-    ['agentSurface', 'agent-soft'],
-    ['warn', 'warn'],
-    ['danger', 'danger'],
-    ['dangerFill', 'danger-fill'],
-    ['onDangerFill', 'on-danger-fill'],
-    ['ok', 'ok'],
-  ];
-
-  it.each(PAIRS)('%s 가 웹 --%s 의 두 항과 같다', (role, cssVar) => {
-    const web = lightDark(cssVar);
-    expect([role, darkPalette[role]]).toEqual([role, web.dark]);
-    expect([role, lightPalette[role]]).toEqual([role, web.light]);
+  it.each(MAPPED)('%s 가 core --%s 의 두 항과 같다', (role, coreRole) => {
+    const light = ds2Roles(DEFAULT_THEME_ID, 'light')[coreRole];
+    const dark = ds2Roles(DEFAULT_THEME_ID, 'dark')[coreRole];
+    expect([role, darkPalette[role]]).toEqual([role, normalizeHex(dark)]);
+    expect([role, lightPalette[role]]).toEqual([role, normalizeHex(light)]);
   });
 
-  it('scrim 이 웹 --scrim 의 두 항과 같다 (알파까지)', () => {
-    const web = lightDarkRgb('scrim');
-    expect(darkPalette.scrim).toBe(web.dark);
-    expect(lightPalette.scrim).toBe(web.light);
+  it('기본 테마는 새벽하늘이다', () => {
+    expect(DEFAULT_THEME_ID).toBe('dawnsky');
+  });
+
+  it('스크림과 유리가 core rgba 의 두 항과 같다 (알파까지)', () => {
+    for (const mode of ['light', 'dark'] as const) {
+      const palette = mode === 'light' ? lightPalette : darkPalette;
+      const roles = ds2Roles(DEFAULT_THEME_ID, mode);
+      expect([mode, palette.scrim]).toEqual([mode, rgbaToHex8(roles.scrim)]);
+      expect([mode, palette.glass]).toEqual([mode, rgbaToHex8(roles.glass)]);
+    }
+  });
+
+  it('유리 대체값은 surface 94% 다 (ADR-0189 D7)', () => {
+    for (const palette of [lightPalette, darkPalette]) {
+      expect(palette.glassFallback.slice(0, 7)).toBe(palette.surface);
+      expect(parseInt(palette.glassFallback.slice(7, 9), 16) / 255).toBeCloseTo(
+        GLASS_FALLBACK_OPACITY,
+        2,
+      );
+    }
   });
 
   it('짝을 못 찾으면 조용히 통과하지 않는다', () => {
-    // 실패 모드를 닫는다. 웹이 변수를 개명하거나 서식을 바꾸면 위 표는 **없는 값과
-    // 같다**로 통과할 수 없고 여기서 시끄럽게 터진다.
-    expect(() => lightDark('surface-that-does-not-exist')).toThrow(
-      /웹 tokens.css 에서 못 찾았다/,
-    );
-    expect(() => lightDarkRgb('accent')).toThrow(/못 찾았다/);
+    // 대응표의 모든 core 역할이 여섯 조합 전부에 실제로 있다 — 테마를 고르는
+    // DS2-7이 같은 함수로 다른 테마의 팔레트를 만든다.
+    for (const [theme, mode] of DS2_COMBOS) {
+      const roles = ds2Roles(theme, mode);
+      for (const [, coreRole] of MAPPED) {
+        expect([theme, mode, coreRole, typeof roles[coreRole]]).toEqual([
+          theme,
+          mode,
+          coreRole,
+          'string',
+        ]);
+      }
+      expect(() => paletteFrom(theme, mode)).not.toThrow();
+    }
+    expect(() => rgbaToHex8('#fffefc')).toThrow(/rgba/);
   });
 
   it.each(SCHEMES)(
-    '%s — 웹에 짝이 없는 둘은 accent 의 색상각 위에 있다',
+    '%s — core 에 짝이 없는 둘은 accent 의 색상각 위에 있다',
     (_name, palette) => {
       // 「발명 금지」를 기계가 진다. `accentPressed`(눌린 채움)와 `accentText`(잉크)
-      // 는 웹에 대응 토큰이 없어서 관계로 풀린 값이고, 그 관계의 첫 조건이 **같은
-      // 색**이다 — 색상각이 벌어지면 그것은 한 단이 아니라 다른 색이다.
+      // 는 같은 색의 한 단이어야 한다 — 색상각이 벌어지면 그것은 다른 색이다.
       for (const role of ['accentPressed', 'accentText'] as const) {
         expect(hueGap(palette[role], palette.accent)).toBeLessThan(3);
       }
@@ -443,9 +402,6 @@ describe('#1155·#1164 — 두 팔레트가 웹 정본과 값 단위로 같다',
   it.each(SCHEMES)(
     '%s — 눌린 채움은 어둡고, 잉크는 배경에서 한 단 더 멀다',
     (_name, palette) => {
-      // 두 걸음의 **방향**은 스킴이 정하지 않는다. 눌린 채움은 어느 스킴에서든
-      // 채움보다 어둡고(누르면 가라앉는다), 잉크는 어느 스킴에서든 배경에서 채움
-      // 보다 멀다(글자는 채움보다 오래 읽힌다).
       expect(luminance(palette.accentPressed)).toBeLessThan(
         luminance(palette.accent),
       );
@@ -456,8 +412,6 @@ describe('#1155·#1164 — 두 팔레트가 웹 정본과 값 단위로 같다',
   );
 
   it('호박 채움 위의 글자는 다크에서만 어두운 쪽이다', () => {
-    // #1155 가 실제로 뒤집은 것 하나. 다크의 accent 채움이 밝아졌으므로 그 위의
-    // 글자는 반대쪽으로 간다. 값이 아니라 관계로 적어야 팔레트가 또 움직여도 산다.
     expect(luminance(darkPalette.onAccent)).toBeLessThan(
       luminance(darkPalette.accent),
     );
@@ -467,34 +421,25 @@ describe('#1155·#1164 — 두 팔레트가 웹 정본과 값 단위로 같다',
   });
 
   // ---------------------------------------------------------------------------
-  // 상태 3가족의 파생 — tone 이 웹으로 옮겨갈 때 가족이 따라갔는가 (#1164)
+  // 폰의 파생 — core 에 짝이 없는 상태 역할이 자기 tone 의 계열 안에 남는가
   //
-  // `warn`·`danger`·`ok` 는 웹 항으로 옮겨졌지만 그 셋의 채움·테두리·잉크 여덟은 웹에
-  // 짝이 없다. 그래서 이 여덟은 tone 이 돈 각도만큼(warn +7.21° · danger +10.42° ·
-  // ok −10.10°) 같이 돌고, 걸음(앵커 대비 L 차)과 채도는 그대로 뒀다. 값이 아니라 그
-  // **관계**를 여기서 잰다 — 두 스킴에서 같은 자로.
+  // 여명 판에서 이 표는 soft 채움(`*Surface`)까지 들었다. 그 값들이 폰의 파생이었기
+  // 때문이다. 새벽하늘에서 soft 채움은 core 표의 값(`*-soft`)이고, 그 대비는 core
+  // `themes.test.ts`의 채움 쌍이 잰다. 여기 남는 것은 **폰이 계산한** 넷뿐이다 —
+  // 그리고 새벽 라이트 `danger-soft`(#FFE9E5)는 `danger`(#BE2C4F)와 색상각이
+  // 17.4° 떨어져 있어서, 옛 표에 넣으면 core 의 결정을 폰의 자로 뒤집게 된다.
   // ---------------------------------------------------------------------------
 
-  const FAMILY: ReadonlyArray<readonly [keyof Palette, keyof Palette]> = [
-    ['warnSurface', 'warn'],
+  const DERIVED: ReadonlyArray<readonly [keyof Palette, keyof Palette]> = [
     ['warnBorder', 'warn'],
-    ['dangerSurface', 'danger'],
     ['dangerBorder', 'danger'],
     ['dangerText', 'danger'],
-    ['okSurface', 'ok'],
     ['okBorder', 'ok'],
   ];
 
   it.each(SCHEMES)('%s — 파생은 자기 tone 의 계열 안에 남는다', (_name, palette) => {
-    // 문턱 15° 는 웹이 `--danger-fill` 에 이미 쓰고 있는 값이다(*"위험 계열 hue 차
-    // <= 15도"*) — 같은 위험을 말하는 두 값이 같은 계열로 읽히는 한계각이고, 여기서
-    // 새로 고른 숫자가 아니다. 실측 최대: 다크 13.63°(dangerSurface) · 라이트
-    // 12.65°(warnSurface).
-    //
-    // `onWarn` 은 이 표에 없다. 라이트의 `onWarn` 은 종이색(#fffefb, 채도 0.004)이라
-    // 색상각이 뜻을 잃는다 — 무채색의 각을 재는 것은 아무것도 재지 않는 것이다.
-    // 그 값이 지는 계약은 색이 아니라 대비이고, 위 `BODY_INK` 가 잰다.
-    for (const [child, tone] of FAMILY) {
+    // 문턱 15° 는 웹이 `--danger-fill` 에 쓰던 「같은 위험 계열」의 한계각이다.
+    for (const [child, tone] of DERIVED) {
       expect([child, hueGap(palette[child], palette[tone]) < 15]).toEqual([
         child,
         true,
@@ -503,16 +448,23 @@ describe('#1155·#1164 — 두 팔레트가 웹 정본과 값 단위로 같다',
   });
 
   it.each(SCHEMES)(
-    '%s — 상태 채움은 고도보다 진하고, 그 테두리는 채움보다 진하다',
+    '%s — 상태 채움은 자기가 서는 표면에서 보이고, 그 테두리는 채움보다 진하다',
     (_name, palette) => {
-      // 세 가족이 같은 두 단을 갖는다: 채움은 **배경을 물들이는** 정도이고(고도 한
-      // 단보다는 진해야 색이 그림자보다 큰 말을 한다), 테두리는 그 채움을 **끝내는**
-      // 선이라 채움보다 진하다. 두 단이 뒤집히면 상자가 안팎을 잃는다.
-      const band = contrast(palette.surface, palette.bg);
+      // 관계가 바뀐 첫째 자리 (ADR-0189 D1·D2). 여명의 `bg`는 카드 밑의 평면이었고,
+      // 칩은 그 평면을 물들였다. 새벽하늘의 `bg`는 그라데이션 **바닥**의 가운데
+      // 정지점이고, 칩·상태 상자는 바닥이 아니라 그 위에 뜬 **표면**(`surface`)에
+      // 선다. 라이트 바닥 위에서 soft 채움은 1.00~1.02 로 거의 사라지지만 그 자리에
+      // 칩이 서지 않는다. 그래서 자는 표면이고, 문턱은 core 가 그릇에 거는 두 자
+      // (대비 1.05, OKLab 0.02)다.
       for (const tone of ['warn', 'danger', 'ok'] as const) {
-        const fill = contrast(palette[`${tone}Surface`], palette.bg);
-        const edge = contrast(palette[`${tone}Border`], palette.bg);
-        expect([tone, band < fill, fill < edge]).toEqual([tone, true, true]);
+        const fill = palette[`${tone}Surface`];
+        const edge = palette[`${tone}Border`];
+        expect([
+          tone,
+          contrast(fill, palette.surface) >= VESSEL_MIN_CONTRAST,
+          oklabDistance(fill, palette.surface) >= VESSEL_MIN_DISTANCE,
+          contrast(fill, palette.surface) < contrast(edge, palette.surface),
+        ]).toEqual([tone, true, true, true]);
       }
     },
   );
@@ -520,40 +472,16 @@ describe('#1155·#1164 — 두 팔레트가 웹 정본과 값 단위로 같다',
   it.each(SCHEMES)(
     '%s — 위험 순서의 자는 대비가 아니라 채도다',
     (_name, palette) => {
-      // 웹 `--danger` 주석이 적어 둔 규율 그대로다: 한 표면에 두 톤이 나란히 서면 더
-      // 위험한 쪽이 먼저 눈에 들어와야 하고, 둘 다 AA 를 한참 넘기므로 그 순서를
-      // 가르는 것은 대비가 아니라 채도(OKLab C)다.
-      //
-      // 폰이 이것을 지고 있지 **않았다**는 것이 #1164 가 찾은 것 하나다: 옛 다크는
-      // danger C 0.1305 · warn C 0.1295 로 순서가 1.008 배 차이의 우연이었다. 웹
-      // 다크 항은 같은 자리에서 0.1661 · 0.1407(1.18배)이고, 라이트는 처음부터
-      // 0.1783 · 0.1079 였다.
       const c = (role: keyof Palette) => chroma(palette[role]);
       expect(c('danger')).toBeGreaterThan(c('warn'));
       expect(c('warn')).toBeGreaterThan(c('textMuted'));
     },
   );
 
-  // ---------------------------------------------------------------------------
-  // 파괴 **채움** 의 두 단정 (#1210 D2)
-  //
-  // 값은 웹 항이고 위 PAIRS 가 바이트로 대조한다. 여기서 지는 것은 그 값이 **폰의
-  // 표면 위에서** 지켜야 하는 관계다 — 웹은 자기 표면 목록에서 같은 것을 잰다.
-  //
-  // 이 두 단정이 없던 동안 무엇이 통과했는지가 이 자리의 근거다: 「거부 확정」은
-  // `dangerBorder` 를 채움으로 쓰고 카드 위 다크 1.64:1 로 출하됐고, 그 옆 「승인
-  // 확정」은 같은 카드 위 8.12:1 이었다. 산술 가드는 그 내내 전부 초록이었다 —
-  // 잴 토큰이 없었기 때문이다.
-  // ---------------------------------------------------------------------------
-
   it.each(SCHEMES)(
     '%s — 파괴 채움은 자기가 서는 표면에서 3:1 을 넘는다',
     (_name, palette) => {
-      // 비텍스트 대비(WCAG 1.4.11). 이 버튼은 채움으로만 자기를 말하므로(테두리가
-      // 없다) 그 채움이 3:1 을 못 넘으면 화면에서 버튼이 아니라 자국이 된다.
-      // 실측 (bg/surface): 다크 6.42/5.83 · 라이트 7.02/7.52. 옛 값
-      // (`dangerBorder`)은 다크 1.80/1.64 · 라이트 1.76/1.89 로 넷 다 미달이었다.
-      for (const surface of ['bg', 'surface'] as const) {
+      for (const surface of ['bg', 'surface', 'sheet', 'canvasTop', 'canvasBottom'] as const) {
         expect([
           surface,
           contrast(palette.dangerFill, palette[surface]) >= 3,
@@ -563,19 +491,24 @@ describe('#1155·#1164 — 두 팔레트가 웹 정본과 값 단위로 같다',
   );
 
   it.each(SCHEMES)(
-    '%s — 파괴 채움은 보이되 주 액션을 이기지 않는다',
+    '%s — 파괴 채움은 보이되 주 행동을 이기지 않는다',
     (_name, palette) => {
-      // 웹 `--danger-fill` 주석이 적어 둔 순서 그대로다. 자는 대비가 아니라 채도다:
-      // 두 채움 다 3:1 을 한참 넘으므로 「어느 쪽이 먼저 눈에 들어오는가」를 가르는
-      // 것은 콜로풀니스이고, 파괴 보조가 주 액션을 이기면 화면이 사람에게 되돌릴 수
-      // 없는 쪽을 먼저 권하게 된다(MOMO-642 R1 H-2 가 웹에서 고친 것).
+      // 관계가 바뀐 둘째 자리 (ADR-0189 D1·D6). 여명에서 주 행동은 호박 `accent`
+      // 채움이었고, 그래서 「파괴가 주 행동을 이기지 않는다」를 채도 비(≥1.15)로
+      // 쟀다. 새벽하늘의 주 행동은 **잉크**(`primary`)다 — 채도가 0 이라 채도 비는
+      // 뜻을 잃는다(실측: 새벽 신호 C 0.161/0.174 가 위험 0.182 보다 작아 옛 단정은
+      // 0.88/0.96 으로 빨개진다. 신호는 이제 주 행동이 아니다).
       //
-      // 문턱 1.15 는 웹이 이미 쓰는 값이다 — 여기서 새로 고른 숫자가 아니다.
-      // 실측 비: 다크 1.18배(0.1336 대 0.1130) · 라이트 1.20배(0.1360 대 0.1133).
-      expect(chroma(palette.accent) / chroma(palette.dangerFill)).toBeGreaterThanOrEqual(1.15);
-
-      // 그리고 여전히 **위험 계열**이다. 조용해지느라 색을 잃으면 그것은 파괴가
-      // 아니라 또 하나의 회색 버튼이다. 문턱 15° 도 웹의 값.
+      // 무채색 잉크와 유채색 위험 채움 사이의 위계는 **대비**가 가른다: 두 채움이
+      // 같은 표면에 나란히 서면 잉크가 더 멀리서 보여야 한다.
+      for (const surface of ['surface', 'sheet'] as const) {
+        expect([
+          surface,
+          contrast(palette.primary, palette[surface]) >
+            contrast(palette.dangerFill, palette[surface]),
+        ]).toEqual([surface, true]);
+      }
+      // 그리고 여전히 **위험 계열**이다. 문턱 15° 도 웹의 값.
       expect(hueGap(palette.dangerFill, palette.danger)).toBeLessThan(15);
     },
   );

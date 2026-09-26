@@ -57,9 +57,20 @@ is file-existence evidence, not a legal-sufficiency declaration.
 **Not in the current bundle** (out of this goal / other trees):
 
 - `clients/desktop/src-tauri` Cargo graph (Tauri shell, not the GHCR app image)
-- `clients/mobile` npm graph
+- `clients/mobile` npm graph (license-gated in full by
+  `scripts/check_npm_licenses.mjs --root clients/mobile`; not bundled)
 - `clients/web-legacy` (not the SPA the Rust image copies)
 - in-app “Open Source Licenses” UI (#35)
+
+### Phone client direct additions
+
+Direct phone dependencies or copied assets that an ADR or design issue introduced. The
+full transitive graph is still only license-gated, not bundled.
+
+| Component | Version | License | Where | Introduced by |
+|---|---|---|---|---|
+| expo-blur | 57.0.3 | MIT | `clients/mobile` (npm + CocoaPods `ExpoBlur`) | ADR-0189 D6, #2714 (tab bar glass) |
+| Lucide icon paths `home`·`inbox`·`search`·`plus` | via design mockup A | ISC | `clients/mobile/src/design/icons/*.png` (rasterized) | #2714 (shell icons; same set the web uses as `lucide-react`) |
 
 ## Historical (frozen snapshots)
 

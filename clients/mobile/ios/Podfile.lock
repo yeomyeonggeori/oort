@@ -31,6 +31,8 @@ PODS:
     - Yoga
   - ExpoAsset (57.0.8):
     - ExpoModulesCore
+  - ExpoBlur (57.0.3):
+    - ExpoModulesCore
   - ExpoCamera (57.0.4):
     - ExpoModulesCore
   - ExpoCameraBarcodeScanning (57.0.4):
@@ -2111,6 +2113,7 @@ DEPENDENCIES:
   - EXConstants (from `../node_modules/expo-constants/ios`)
   - Expo (from `../node_modules/expo`)
   - ExpoAsset (from `../node_modules/expo/node_modules/expo-asset/ios`)
+  - ExpoBlur (from `../node_modules/expo-blur/ios`)
   - ExpoCamera (from `../node_modules/expo-camera/ios`)
   - ExpoCameraBarcodeScanning (from `../node_modules/expo-camera/ios`)
   - ExpoClipboard (from `../node_modules/expo-clipboard/ios`)
@@ -2225,6 +2228,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo"
   ExpoAsset:
     :path: "../node_modules/expo/node_modules/expo-asset/ios"
+  ExpoBlur:
+    :path: "../node_modules/expo-blur/ios"
   ExpoCamera:
     :path: "../node_modules/expo-camera/ios"
   ExpoCameraBarcodeScanning:
@@ -2428,6 +2433,7 @@ SPEC CHECKSUMS:
   EXConstants: 5efe6122eecac2d970aa50a2a502ecc6ce4b7564
   Expo: cba780b47e8661e90c9fe8e1a92a81cef5773290
   ExpoAsset: a76534cf7b762978861dd31708308496c676166f
+  ExpoBlur: 975b78b65b3c8f475c44bd8f8b53948146b1ff9b
   ExpoCamera: 00a098da25adbc6013f051b5db47279cb10a716c
   ExpoCameraBarcodeScanning: 14c72e1f522eb69f7a672d757eb294c096756faa
   ExpoClipboard: 95055b11758f339b61d4d8064dd799df1cf03b7f

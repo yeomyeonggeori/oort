@@ -1185,7 +1185,7 @@ describe('한 번의 탭은 한 번 착지한다', () => {
     await waitFor(() =>
       expect(screen.queryByTestId('conversation-title')).toBeNull(),
     );
-    expect(screen.getByTestId('tab-channels').props.accessibilityState).toEqual({
+    expect(screen.getByTestId('tab-home').props.accessibilityState).toEqual({
       selected: true,
     });
   });
