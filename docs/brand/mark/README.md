@@ -199,6 +199,10 @@ regular는 24–32px에서 틈이 절반 넘게 메워진다. 그래서 32px 이
   - S0 배지는 원 밖이 투명하고 가운데가 불투명하다.
 - **maskable 안전 원:** 원본에서 얼굴 창과 두 눈을 flood fill로 찾고, maskable 배치로 옮긴 가장 먼 픽셀을 잰다. 얼굴 창 0.405 이하, 눈 0.38 이하다.
 - **icns 32px 이하 세 칸이 C2-04 small 타일이다.**
+- **Dock 산출물이 `app-icon.png`에서 나왔다(#2752 리뷰 M-1).** icns의 64px 이상 칸 다섯 개와 `icons/64x64·128x128·128x128@2x·icon.png`를 `app-icon.png`를 같은 크기로 줄인 것과 비교한다. RGBA 평균 차 8 이하다(실측 0.00–3.78, 이전 K6 산출물이면 약 44).
+  - `cargo tauri icon`을 다시 돌리지 않아 이전 그림이 남으면 여기서 실패한다.
+  - `icons/ios/*`, `icons/android/*`, `Square*Logo.png`, `icon.ico`는 크기도 보지 않는다. 번들 대상(`app`·`dmg`)이 아니다.
+- **검사 밖:** 폰 홈 44px 배지(`clients/mobile/src/design/brand/kometto-badge*.png`, K6)는 어떤 검사에도 걸려 있지 않다(#2715 후속).
 
 ### 작은 크기: 32px 미만(macOS 판 64px 미만)은 C2-04 small
 

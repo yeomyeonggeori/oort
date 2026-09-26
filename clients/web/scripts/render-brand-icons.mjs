@@ -37,6 +37,7 @@
 //   - macOS 판: 모서리 밖 투명, 판 안 불투명. S0 배지: 원 밖 투명, 가운데 불투명
 //   - maskable: I4의 얼굴 창(림 안 잉크)과 두 눈이 지름 80% 안전 원 안(원본 픽셀에서 잰다)
 //   - icns 32px 이하 세 칸이 C2-04 small 타일이다
+//   - Dock 산출물(icns 64px 이상 칸, icons/64·128·256·512 PNG)이 app-icon.png에서 나왔다
 //   - C2-04: 단색판·파비콘 대비 3:1, small·파비콘 16/24/32px 틈(#2650)
 // =============================================================================
 
@@ -485,6 +486,64 @@ async function checkIcnsSmallSlots(page) {
   }
 }
 
+/**
+ * Dock에 실제로 나가는 파일(icns 64px 이상 칸, icons/*.png)이 app-icon.png에서 나왔는지.
+ * `cargo tauri icon`을 다시 돌리지 않아 이전 그림이 남으면 여기서 잡힌다(#2752 리뷰 M-1).
+ * RGBA 평균 차(0–255)가 TAURI_DERIVED_MAX 이하여야 한다. 실측은 0.00(1024)–3.78(64, Tauri와
+ * 크로미움 리샘플 차)이고, 이전 K6 산출물이면 약 44다.
+ */
+const TAURI_DERIVED_MAX = 8;
+const ICNS_LARGE_SLOTS = ["icon_32x32@2x.png", "icon_128x128.png", "icon_256x256.png", "icon_512x512.png", "icon_512x512@2x.png"];
+const TAURI_PNGS = ["64x64.png", "128x128.png", "128x128@2x.png", "icon.png"];
+
+async function checkTauriDerived(page) {
+  const icns = resolve(TAURI_DIR, "icons/icon.icns");
+  const work = mkdtempSync(join(tmpdir(), "oort-icns-"));
+  const set = join(work, "icon.iconset");
+  const out = [];
+  try {
+    execFileSync("iconutil", ["-c", "iconset", icns, "-o", set]);
+    const targets = [
+      ...ICNS_LARGE_SLOTS.map((n) => [`icon.icns ${n}`, readFileSync(join(set, n))]),
+      ...TAURI_PNGS.map((n) => [`icons/${n}`, readFileSync(resolve(TAURI_DIR, "icons", n))]),
+    ];
+    const master = readFileSync(resolve(TAURI_DIR, "app-icon.png")).toString("base64");
+    for (const [name, buf] of targets) {
+      const px = buf.readUInt32BE(16);
+      const mean = await page.evaluate(
+        async ({ slot, master, px }) => {
+          const load = (b64) =>
+            new Promise((ok) => {
+              const img = new Image();
+              img.onload = () => ok(img);
+              img.src = "data:image/png;base64," + b64;
+            });
+          const draw = (img) => {
+            const c = document.createElement("canvas");
+            c.width = c.height = px;
+            const ctx = c.getContext("2d");
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = "high";
+            ctx.drawImage(img, 0, 0, px, px);
+            return ctx.getImageData(0, 0, px, px).data;
+          };
+          const [a, m] = [draw(await load(slot)), draw(await load(master))];
+          let s = 0;
+          for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - m[i]);
+          return s / a.length;
+        },
+        { slot: buf.toString("base64"), master, px }
+      );
+      if (!(mean <= TAURI_DERIVED_MAX))
+        fail(`${name}: app-icon.png에서 나오지 않았다 (평균 차 ${mean.toFixed(2)} > ${TAURI_DERIVED_MAX}). cargo tauri icon을 다시 돌렸나`);
+      out.push([name, px, mean]);
+    }
+    return out;
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
 // ---- main ------------------------------------------------------------------
 
 const CHARACTER_OUTPUTS = [
@@ -563,6 +622,7 @@ async function main() {
     const icns = readFileSync(resolve(TAURI_DIR, "icons/icon.icns"));
     if (icns.toString("latin1", 0, 4) !== "icns") fail("icons/icon.icns: icns 헤더가 아니다");
     const icnsSlots = await checkIcnsSmallSlots(page);
+    const tauriDerived = await checkTauriDerived(page);
 
     const contrasts = MARK_PAIRS.map(([name, a, b]) => {
       const ratio = contrast(a, b);
@@ -586,6 +646,8 @@ async function main() {
       console.log(`${path}  [${kind}]  평균 차 ${d.mean.toFixed(2)}  16 초과 ${(d.over * 100).toFixed(2)}%`);
     for (const [name, d] of Object.entries(icnsSlots))
       console.log(`icon.icns ${name} 평균 차: 파비콘 ${d.favicon.toFixed(1)} / I4 ${d.character.toFixed(1)}`);
+    console.log(`\n== Dock 산출물 ← app-icon.png (RGBA 평균 차 ≤ ${TAURI_DERIVED_MAX})`);
+    for (const [name, px, mean] of tauriDerived) console.log(`${name}  ${px}px  평균 차 ${mean.toFixed(2)}`);
     console.log("\n== C2-04 대비 (WCAG 1.4.11, 3:1 이상)");
     for (const [name, pair, ratio] of contrasts) console.log(`${name}  ${pair}  ${ratio}:1`);
     console.log("\n== C2-04 틈 가운데 잉크 비율 (0=바탕, 1=잉크)");
