@@ -19,6 +19,7 @@ import {
   focusCycle,
   focusDirection,
   focusIndex,
+  fitLayoutToSize,
   focusPane,
   nudgeSplit,
   paneIds,
@@ -101,6 +102,10 @@ const STORAGE_COPY =
   "이 기기에 배치를 저장하지 못했습니다. 지금 배치는 쓸 수 있지만, 다시 열면 칸 하나로 돌아갑니다.";
 
 const IDLE_HINT = "⌘D 오른쪽으로 분할 · ⌘⇧D 아래로 분할 · ⌘⌥화살표 칸 이동 · ⌘] 다음 칸 · ⌘⇧↵ 최대화";
+
+function crampedHint(index: number, hidden: number): string {
+  return `자리가 좁아 ${index}번 칸만 보입니다. 칸 ${hidden}개는 가려져 있습니다. 도크를 키우거나 칸을 닫으세요.`;
+}
 
 function maximizedHint(index: number, hidden: number): string {
   return `${index}번 칸 최대화, 칸 ${hidden}개가 가려져 있습니다 · ⌘⇧↵ 되돌리기`;
@@ -263,16 +268,21 @@ export function WorkbenchGrid({
     if (pane && !pane.contains(document.activeElement)) pane.focus({ preventScroll: true });
   }, [layout.focused, layout.maximized]);
 
+  // 그리는 배치: 저장된 배치를 지금 크기에 맞춘 것(칸 최소 크기 보장). 저장된
+  // 배치는 바꾸지 않는다. 너무 작으면 포커스 칸만 보인다(#2774 R5).
+  const { layout: shown, cramped } = fitLayoutToSize(layout, size);
   const ids = paneIds(layout.root);
   const single = layout.root.kind === "pane";
-  const message = notice ?? hostNotice ?? (storage === "unavailable" ? STORAGE_COPY : null);
+  const crampedCopy = cramped ? crampedHint(ids.indexOf(shown.focused) + 1, ids.length - 1) : null;
+  const message =
+    notice ?? hostNotice ?? crampedCopy ?? (storage === "unavailable" ? STORAGE_COPY : null);
   const hint =
     layout.maximized !== null
       ? maximizedHint(ids.indexOf(layout.maximized) + 1, ids.length - 1)
       : IDLE_HINT;
 
   const ctx: RenderContext = {
-    layout,
+    layout: shown,
     ids,
     size,
     platform,
@@ -300,10 +310,11 @@ export function WorkbenchGrid({
       <div
         ref={areaRef}
         data-testid="workbench-area"
-        data-maximized={layout.maximized ?? undefined}
+        data-maximized={shown.maximized ?? undefined}
+        data-cramped={cramped ? "" : undefined}
         className="relative isolate flex min-h-0 min-w-0 flex-1"
       >
-        <NodeView node={layout.root} ctx={ctx} />
+        <NodeView node={shown.root} ctx={ctx} />
       </div>
       {/* 알림(거부·저장 실패)만 live 영역에 둔다. 단축키 안내는 알림이 사라질
           때마다 다시 읽히지 않게 밖에 둔다. */}

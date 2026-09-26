@@ -23,7 +23,7 @@ import { openDock, resetDockStateForTest, toggleDockFullscreen, useDockState } f
 // 디자인 검수가 라이트·다크에서 도크를 보는 자리다. 실제 PTY는 데스크탑 debug
 // 앱에서 확인한다(PR 본문).
 //
-// `?scene=one|four|full|exited|failed|exited-four|failed-four|exited-harness-four|storage-fail|settings-web|settings-desktop`
+// `?scene=one|four|full|exited|failed|exited-four|failed-four|exited-harness-four|storage-fail|stack3|stack3-exited|settings-web|settings-desktop`
 
 const ENC = new TextEncoder();
 
@@ -79,6 +79,13 @@ const memory = {
   keys: () => [...memoryMap.keys()],
 };
 
+/** 전체 화면에서 아래로 두 번 나눈 배치(½·¼·¼). */
+function stack3Layout(): WorkbenchLayout {
+  let l = splitPane(defaultWorkbenchLayout(), "p1", "column", SIZE).layout;
+  l = splitPane(l, "p2", "column", SIZE).layout;
+  return l;
+}
+
 function fourLayout(): WorkbenchLayout {
   let l = splitPane(defaultWorkbenchLayout(), "p1", "row", SIZE).layout;
   l = splitPane(l, "p1", "column", SIZE).layout;
@@ -92,7 +99,13 @@ export function LocalTerminalHarness() {
   const sessions = useMemo(
     () =>
       createLocalSessions({
-        pty: demoPty(scene.startsWith("exited") ? "exited" : scene.startsWith("failed") ? "failed" : "live"),
+        pty: demoPty(
+          scene.startsWith("exited") || scene.endsWith("-exited")
+            ? "exited"
+            : scene.startsWith("failed")
+              ? "failed"
+              : "live"
+        ),
         loadMirror: loadBrowserMirror,
         // 보통 장면은 메모리 저장소(저장 성공). `storage-fail`만 저장소 없음.
         storage: () => (scene === "storage-fail" ? null : memory),
@@ -109,7 +122,11 @@ export function LocalTerminalHarness() {
 
   useMemo(() => {
     try {
-      const layout = scene === "four" || scene === "full" || scene.endsWith("-four") ? fourLayout() : defaultWorkbenchLayout();
+      const layout = scene.startsWith("stack3")
+        ? stack3Layout()
+        : scene === "four" || scene === "full" || scene.endsWith("-four")
+          ? fourLayout()
+          : defaultWorkbenchLayout();
       window.localStorage.setItem(workbenchLayoutEntry(DOCK_SESSION_KEY), serializeWorkbenchLayout(layout));
     } catch {
       /* 저장소 없는 캡처 */

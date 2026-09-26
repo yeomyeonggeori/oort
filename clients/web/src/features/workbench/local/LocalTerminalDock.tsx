@@ -53,7 +53,7 @@ import { detectLocalHarnesses, type PtyProgram } from "@/lib/tauri";
 import { WorkbenchGrid, type WorkbenchPaneInfo } from "../WorkbenchGrid";
 import { useWorkbenchLayout } from "../useWorkbenchLayout";
 import { DOCK_SESSION_KEY, localSessions, type LocalSessions } from "./localSessions";
-import { HARNESS_LABEL, LocalTerminalPane, localPaneTitle } from "./LocalTerminalPane";
+import { HARNESS_LABEL, LocalTerminalPane, localPaneTitle, runningPaneNotice } from "./LocalTerminalPane";
 import {
   closeDock,
   openDock,
@@ -409,7 +409,7 @@ export function LocalTerminalDock({
           renderPane={(pane) => <LocalTerminalPane pane={pane} platform={platform} sessions={sessions} />}
           onRequestClose={requestClose}
           onCloseLastPane={onCloseLastPane}
-          notice={notice}
+          notice={notice ?? runningPaneNotice(sessionMap, ids)}
         />
       </div>
       <Dialog open={confirm !== null} onOpenChange={(open) => !open && setConfirm(null)}>

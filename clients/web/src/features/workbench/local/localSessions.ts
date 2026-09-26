@@ -452,6 +452,8 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
         s.attachQueue = null;
         terminal.write(s.serialize(5_000));
         for (const chunk of queued) terminal.write(chunk);
+        // 직렬화는 커서 숨김(?25l)을 담지 않는다. 끝났거나 못 연 칸은 다시 숨긴다.
+        if (s.view.phase === "exited" || s.view.phase === "failed") terminal.write(HIDE_CURSOR);
       });
       return () => {
         if (s.visible === terminal) {

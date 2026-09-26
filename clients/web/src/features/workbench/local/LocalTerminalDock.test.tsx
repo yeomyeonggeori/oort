@@ -13,6 +13,7 @@ import { dockSnapshot, resetDockStateForTest } from "./dockState";
 
 vi.mock("./LocalTerminalPane", () => ({
   localPaneTitle: () => "로컬 · 셸",
+  runningPaneNotice: () => null,
   LocalTerminalPane: ({ pane, sessions }: { pane: WorkbenchPaneInfo; sessions: LocalSessions }) => {
     useEffect(() => {
       void sessions.ensure(pane.id, 80, 24);
@@ -200,5 +201,21 @@ describe("터미널 입력이 먼저", () => {
     await vi.waitFor(() =>
       expect(q("workbench-notice")?.textContent).toBe("나를 기다리는 칸이 없습니다.")
     );
+  });
+});
+
+describe("도는 칸 알림은 격자 상태 줄로 (R5 B-1)", () => {
+  it("입력 거부가 저장 실패보다 먼저, 칸 번호와 함께", async () => {
+    const { runningPaneNotice } = await vi.importActual<typeof import("./LocalTerminalPane")>("./LocalTerminalPane");
+    const base = { program: { kind: "shell" as const }, title: null, exit: null, error: null, restored: false };
+    const views = new Map([
+      ["p1", { ...base, paneId: "p1", phase: "running" as const, inputNotice: null, storageFailed: true }],
+      ["p2", { ...base, paneId: "p2", phase: "running" as const, inputNotice: "보내지 못했습니다.", storageFailed: false }],
+      ["p3", { ...base, paneId: "p3", phase: "exited" as const, inputNotice: "x", storageFailed: true }],
+    ]);
+    expect(runningPaneNotice(views, ["p1", "p2", "p3"])).toBe("2번 칸: 보내지 못했습니다.");
+    views.delete("p2");
+    expect(runningPaneNotice(views, ["p1", "p3"])).toMatch(/^1번 칸의 화면을 저장하지 못했습니다/);
+    expect(runningPaneNotice(new Map(), [])).toBeNull();
   });
 });

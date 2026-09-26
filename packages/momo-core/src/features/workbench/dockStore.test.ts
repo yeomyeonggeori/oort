@@ -3,7 +3,6 @@ import { defaultWorkbenchLayout, splitPane } from "./layoutTree";
 import {
   DOCK_CHROME_PX,
   dockMinPx,
-  stackedRows,
   DOCK_MIN_PX,
   DOCK_RATIO_HIGH,
   DOCK_RATIO_LOW,
@@ -53,14 +52,16 @@ describe("도크 최소 높이는 칸 최소 높이를 지킨다", () => {
     const one = defaultWorkbenchLayout();
     expect(dockMinPx(one.root)).toBe(Math.max(DOCK_MIN_PX, 120 + DOCK_CHROME_PX));
     const two = splitPane(one, "p1", "column", size).layout;
-    expect(stackedRows(two.root)).toBe(2);
     expect(dockMinPx(two.root)).toBe(2 * 120 + 8 + DOCK_CHROME_PX);
   });
   it("2×2는 세로 두 칸, 옆 분할은 높이를 더하지 않는다", () => {
     let l = splitPane(defaultWorkbenchLayout(), "p1", "row", size).layout;
-    expect(stackedRows(l.root)).toBe(1);
+    expect(dockMinPx(l.root)).toBe(Math.max(DOCK_MIN_PX, 120 + DOCK_CHROME_PX));
     l = splitPane(l, "p1", "column", size).layout;
     l = splitPane(l, "p2", "column", size).layout;
-    expect(stackedRows(l.root)).toBe(2);
+    expect(dockMinPx(l.root)).toBe(2 * 120 + 8 + DOCK_CHROME_PX);
+    // 한쪽만 세 줄(½·¼·¼)이면 세 줄 몫.
+    l = splitPane(l, "p3", "column", size).layout;
+    expect(dockMinPx(l.root)).toBe(3 * 120 + 2 * 8 + DOCK_CHROME_PX);
   });
 });

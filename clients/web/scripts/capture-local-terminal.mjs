@@ -210,10 +210,11 @@ async function interactions(browser, origin) {
     const context3 = await browser.newContext({ viewport: { width, height }, colorScheme: "light", reducedMotion: "reduce" });
     const p3 = await context3.newPage();
     await p3.goto(`${origin}/#/design/local-terminal?scene=${scene}`);
-    await p3.getByTestId("local-terminal-restart").first().waitFor();
+    await p3.locator('[data-testid="local-terminal-restart"]:visible').first().waitFor();
     const r = await p3.evaluate(() => {
       const out = [];
       for (const pane of document.querySelectorAll('[data-testid="workbench-pane"]')) {
+        if (getComputedStyle(pane).visibility === "hidden") continue; // 좁을 때 가려진 칸
         const pr = pane.getBoundingClientRect();
         const status = pane.querySelector('[data-testid="local-terminal-status"]');
         const p = status?.querySelector('[role="status"]');
@@ -235,7 +236,9 @@ async function interactions(browser, origin) {
     });
     const ok = r.length > 0 && r.every((x) => x.inside && x.buttonInside && !x.textClipped && x.textLines <= 2);
     const panesOk = await p3.evaluate(() =>
-      Array.from(document.querySelectorAll('[data-testid="workbench-pane"]')).every((e) => e.getBoundingClientRect().height >= 119.5)
+      Array.from(document.querySelectorAll('[data-testid="workbench-pane"]'))
+        .filter((e) => getComputedStyle(e).visibility !== "hidden")
+        .every((e) => e.getBoundingClientRect().height >= 119.5)
     );
     check(`${scene}@${width}x${height}: 상태 줄이 칸 안, 단추 보임, 문장 두 줄 이하`, ok, r[0]);
     check(`${scene}@${width}x${height}: 칸이 최소 높이 120을 지킨다`, panesOk);
@@ -243,19 +246,65 @@ async function interactions(browser, origin) {
     report.scenes.push(`light-${scene}-${width}x${height}`);
     await context3.close();
   }
-  // R4 M2: 도는 칸의 알림(저장 실패)은 겹쳐 뜨고 터미널 높이를 바꾸지 않는다.
+  // R4 M2 / R5 B-1: 도는 칸의 알림(저장 실패)은 칸 안에 뜨지 않는다(캐럿 줄을
+  // 가리지 않는다). 격자 상태 줄에 칸 번호와 함께 뜨고, 터미널 높이는 그대로다.
   {
     const c6 = await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: "light", reducedMotion: "reduce" });
     const p6 = await c6.newPage();
     await p6.goto(`${origin}/#/design/local-terminal?scene=storage-fail`);
     await p6.getByTestId("local-terminal-dock").waitFor();
     const h0 = await p6.evaluate(() => Math.round(document.querySelector('[data-testid="local-terminal"]').getBoundingClientRect().height));
-    await p6.getByTestId("local-terminal-status").filter({ hasText: "저장하지 못했습니다" }).waitFor();
-    const h1 = await p6.evaluate(() => Math.round(document.querySelector('[data-testid="local-terminal"]').getBoundingClientRect().height));
-    check("도는 칸의 저장 실패 알림이 터미널 높이를 바꾸지 않는다", h0 === h1, { h0, h1 });
+    await p6.getByTestId("workbench-notice").filter({ hasText: "저장하지 못했습니다" }).waitFor();
+    const r6 = await p6.evaluate(() => ({
+      h1: Math.round(document.querySelector('[data-testid="local-terminal"]').getBoundingClientRect().height),
+      inPane: Array.from(document.querySelectorAll('[data-testid="local-terminal-status"]')).filter((e) => e.getBoundingClientRect().height > 0).length,
+      text: document.querySelector('[data-testid="workbench-notice"]')?.textContent,
+    }));
+    check("도는 칸의 저장 실패는 칸 밖(격자 상태 줄)에 뜨고 터미널 높이가 그대로다", r6.inPane === 0 && r6.h1 === h0 && /^1번 칸/.test(r6.text ?? ""), { h0, ...r6 });
     await p6.screenshot({ path: resolve(OUT_DIR, "light-storage-fail.png") });
     report.scenes.push("light-storage-fail");
     await c6.close();
+  }
+  // R5 B-2 / H-1: 중첩 분할(½·¼·¼)도 칸이 최소 높이를 지키고, 도크가 창을 넘지
+  // 않는다. 자리가 모자라면 포커스 칸 하나만 온전히 보인다.
+  for (const [scene, width, height] of [
+    ["stack3", 1280, 800],
+    ["stack3-exited", 520, 800],
+    ["stack3", 720, 480],
+    ["stack3-exited", 720, 480],
+  ]) {
+    const c7 = await browser.newContext({ viewport: { width, height }, colorScheme: "light", reducedMotion: "reduce" });
+    const p7 = await c7.newPage();
+    await p7.goto(`${origin}/#/design/local-terminal?scene=${scene}`);
+    await p7.getByTestId("local-terminal-dock").waitFor();
+    await p7.waitForTimeout(400);
+    const r7 = await p7.evaluate(() => {
+      const dock = document.querySelector('[data-testid="local-terminal-dock"]').getBoundingClientRect();
+      const visible = Array.from(document.querySelectorAll('[data-testid="workbench-pane"]')).filter(
+        (e) => getComputedStyle(e).visibility !== "hidden"
+      );
+      const heights = visible.map((e) => Math.round(e.getBoundingClientRect().height));
+      const statusOk = visible.every((pane) => {
+        const st = pane.querySelector('[data-testid="local-terminal-status"]');
+        if (!st || st.getBoundingClientRect().height === 0) return true;
+        return st.getBoundingClientRect().bottom <= pane.getBoundingClientRect().bottom + 0.5;
+      });
+      const cramped = document.querySelector('[data-testid="workbench-area"]')?.hasAttribute("data-cramped");
+      const channel = document.querySelector("h1")?.getBoundingClientRect();
+      return {
+        dockBottom: Math.round(dock.bottom),
+        vh: window.innerHeight,
+        heights,
+        statusOk,
+        cramped,
+        channelVisibleTop: channel ? Math.round(dock.top - channel.top) : null,
+      };
+    });
+    const ok = r7.dockBottom <= r7.vh && r7.heights.every((h) => h >= 119.5) && r7.statusOk;
+    check(`${scene}@${width}x${height}: 칸 ≥120, 도크가 창 안, 상태 줄이 칸 안`, ok, r7);
+    await p7.screenshot({ path: resolve(OUT_DIR, `light-${scene}-${width}x${height}.png`) });
+    report.scenes.push(`light-${scene}-${width}x${height}`);
+    await c7.close();
   }
   // R3 H: 터미널에서 ⌘J로 연 칸 목록을 Esc로 닫으면 캐럿이 터미널로 돌아간다.
   {
