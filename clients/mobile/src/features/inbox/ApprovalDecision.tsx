@@ -98,7 +98,14 @@ export function ApprovalDecision({
   approveConfirm = null,
   forbiddenCopy = null,
   lead = DEFAULT_DECISION_LEAD,
+  shape = 'box',
 }: {
+  /**
+   * 버튼 모양. `pill` 은 대화 안 에이전트 카드의 행동 줄(DS2-4, 시안 A `.a-pill`:
+   * 주 = 잉크, 보조 = surface2, 반경 알약)이다. 인박스·잠금화면은 `box` 그대로다.
+   * 결정의 두 단(묻기 → 확정)과 문장·testID·낭독 라벨은 모양과 무관하게 같다.
+   */
+  shape?: 'box' | 'pill';
   approvalId: string;
   /**
    * 서버가 **명시적으로** 되돌릴 수 있다고 말했는가 (2R B1).
@@ -193,6 +200,7 @@ export function ApprovalDecision({
   lead?: string | null;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const pill = shape === 'pill';
   const {workspaceId} = useSession();
   const [armed, setArmed] = useState<Armed>(initialArmed);
   const [busy, setBusy] = useState(false);
@@ -316,7 +324,7 @@ export function ApprovalDecision({
 
   if (armed === null) {
     return (
-      <View style={styles.bar} testID={`${testIDPrefix}-actions`}>
+      <View style={[styles.bar, pill && styles.pillBar]} testID={`${testIDPrefix}-actions`}>
         {lead !== null ? <Sentence style={styles.lead}>{lead}</Sentence> : null}
         {execution !== null ? (
           <SpawnHostChoice
@@ -338,6 +346,8 @@ export function ApprovalDecision({
             style={({pressed}) => [
               styles.button,
               styles.buttonQuiet,
+              pill && styles.pillButton,
+              pill && styles.pillQuiet,
               pressed && styles.pressed,
             ]}
             testID={`${testIDPrefix}-reject`}>
@@ -356,6 +366,8 @@ export function ApprovalDecision({
             style={({pressed}) => [
               styles.button,
               styles.buttonQuiet,
+              pill && styles.pillButton,
+              pill && styles.pillQuiet,
               !hostGate.canApprove && styles.buttonInert,
               pressed && hostGate.canApprove && styles.pressed,
             ]}
@@ -390,7 +402,7 @@ export function ApprovalDecision({
         );
 
   return (
-    <View style={styles.bar} testID={`${testIDPrefix}-confirm`}>
+    <View style={[styles.bar, pill && styles.pillBar]} testID={`${testIDPrefix}-confirm`}>
       <Sentence style={styles.consequence}>{consequence}</Sentence>
       {/* 픽커는 확정 화면에서도 자리를 지킨다. 사라지면 사람은 자기가 무엇을 고른
           채 확정하는지 볼 수 없고, 확인이 판단의 근거 옆에 있어야 한다는 이 파일의
@@ -415,6 +427,8 @@ export function ApprovalDecision({
           style={({pressed}) => [
             styles.button,
             styles.buttonQuiet,
+            pill && styles.pillButton,
+            pill && styles.pillQuiet,
             busy && styles.buttonInert,
             pressed && !busy && styles.pressed,
           ]}
@@ -430,16 +444,19 @@ export function ApprovalDecision({
           style={({pressed}) => [
             styles.button,
             armed === 'approve' ? styles.buttonCommit : styles.buttonReject,
+            pill && styles.pillButton,
+            pill && armed === 'approve' && styles.pillCommit,
             busy && styles.buttonInert,
             pressed && !busy && styles.pressed,
           ]}
           testID={`${testIDPrefix}-commit`}>
           <Text
-            style={
+            style={[
               armed === 'approve'
                 ? styles.buttonCommitLabel
-                : styles.buttonRejectLabel
-            }>
+                : styles.buttonRejectLabel,
+              pill && armed === 'approve' && styles.pillCommitLabel,
+            ]}>
             {busy ? '보내는 중' : armed === 'approve' ? '승인 확정' : '거부 확정'}
           </Text>
         </Pressable>
@@ -523,6 +540,15 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // 0.1336): 보이되 주 액션을 이기지 않는다.
   buttonReject: {backgroundColor: color.dangerFill},
   buttonInert: {opacity: 0.6},
+  /** 시안 `.a-pill{border-radius:19px}` — 높이는 엄지 바닥 44 를 지킨다. */
+  pillButton: {borderRadius: radius.pill},
+  /** 카드 안에서는 카드 패딩이 아래를 진다 — 인박스용 아래 여백을 겹치지 않는다(검수 L-2). */
+  pillBar: {paddingBottom: 0},
+  /** `.a-pill.sec{background:var(--surface2);color:var(--ink)}`. */
+  pillQuiet: {borderWidth: 0, backgroundColor: color.surfaceMuted},
+  /** `.a-pill.pri{background:var(--primary);color:var(--onPrimary)}`. */
+  pillCommit: {backgroundColor: color.primary},
+  pillCommitLabel: {color: color.onPrimary},
   buttonQuietLabel: {fontSize: font.label, fontWeight: '600', color: color.text},
   buttonCommitLabel: {fontSize: font.label, fontWeight: '600', color: color.onAccent},
   // 두 확정 버튼의 채움이 갈라졌으므로 그 위의 글자도 갈라진다. `onAccent` 하나가

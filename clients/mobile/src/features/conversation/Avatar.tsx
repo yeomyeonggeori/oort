@@ -84,7 +84,14 @@ export function Avatar({
   directory,
   memberId,
   size = AVATAR_SIZE,
+  ground = 'surface',
 }: {
+  /**
+   * 사람 얼굴 원이 앉는 바닥. 대화 화면(DS2-4)의 바닥은 시안 `.a-conv` 대로 거의
+   * `surface` 라, surface 원은 바닥에 녹아 이니셜만 떠 보인다. 거기서는 `muted`
+   * (surface2 + 선)로 원이 선다. 다른 표면은 기본값 그대로다.
+   */
+  ground?: 'surface' | 'muted';
   directory: Directory;
   memberId: string;
   /**
@@ -134,6 +141,7 @@ export function Avatar({
         !carriesColor && styles.unknown,
         carriesColor && identity.kind === 'agent' && styles.agent,
         carriesColor && identity.kind === 'human' && styles.human,
+        carriesColor && identity.kind === 'human' && ground === 'muted' && styles.humanMuted,
         sized,
       ]}
       testID={`avatar-${identity.kind}`}>
@@ -191,6 +199,11 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    */
   roundedSquare: {borderRadius: radius.md},
   human: {backgroundColor: color.surface},
+  humanMuted: {
+    backgroundColor: color.surfaceMuted,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.border,
+  },
   agent: {backgroundColor: color.agentSurface},
   /**
    * 모르는 작성자. 사람 쪽 **모양은 빌리되 정체 색은 안 쓴다** — 색까지 주면

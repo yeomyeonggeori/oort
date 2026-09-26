@@ -6,6 +6,7 @@ import {
   AVATAR_SIZE,
 } from '@momo/core/features/workspace/avatar';
 import {cleanup, render, within} from '@testing-library/react-native';
+import {CONV} from '../src/features/conversation/convDesign';
 import React from 'react';
 
 import {color} from '../src/design/tokens';
@@ -312,7 +313,8 @@ describe('왼쪽 칸이 모든 행에서 같다', () => {
     // 연달아 쓴 다섯 줄의 왼쪽 끝이 두 x 에 서고, 아바타는 묶음의 표지가 아니라
     // 첫 줄만의 장식이 된다.
     expect(messageReserve(true)).toBe(messageReserve(false));
-    expect(messageReserve(true)).toBe(16 + AVATAR_SIZE + 8);
+    // 시안 `.a-m{gap:10px}` + owner 표 「아바타 40」 (DS2-4).
+    expect(messageReserve(true)).toBe(16 + CONV.avatar + CONV.avatarGap);
   });
 
   it('낙관적 메아리도 같은 칸을 진다 (감사 M-12 의 왼쪽 판)', () => {
