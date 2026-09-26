@@ -59,7 +59,7 @@ const PALETTE_BANNER = [
   ANSI_NAMES.map((n, i) => `\u001b[4${i}m ${n.padEnd(7)}\u001b[0m`).join(" "),
   "\u001b[2m흐림(SGR 2) 글자: Last login: Sat Sep 26 20:02:58 on ttys004\u001b[0m",
   "",
-  "\u001b[40m\u001b[34m ~/momo \u001b[0m ── \u001b[40m\u001b[32m ✔ \u001b[32msystem \u001b[90m00:22:16 \u001b[0m",
+  "\u001b[40m\u001b[34m ~/momo \u001b[0m ── \u001b[40m\u001b[32m ✔ system \u001b[90m00:22:16 \u001b[0m",
   "\u001b[32m❯\u001b[0m git status",
   "On branch \u001b[36mfix/2849-desktop-ansi\u001b[0m",
   "Changes not staged: \u001b[31mmodified: tokens.css\u001b[0m  \u001b[32mnew file: terminalTheme.ts\u001b[0m",
