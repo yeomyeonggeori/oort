@@ -28,6 +28,14 @@
 	     webview an address it is then forbidden to dial. NSAllowsLocalNetworking
 	     exempts private/link-local ranges and .local hosts only; public domains
 	     still require HTTPS, so the shipping TLS path is unchanged. -->
+	<!-- Huddle microphone (#2761, ADR-0122 D-H3). The sentence macOS shows in the
+	     microphone permission prompt. Without it WebKit does not expose
+	     navigator.mediaDevices to the page at all (measured on a signed build,
+	     #2761), so the huddle cannot even ask. The hardened runtime also needs
+	     com.apple.security.device.audio-input, which lives in Entitlements.plist
+	     (tauri.conf.json > bundle > macOS > entitlements). -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>말하려면 마이크가 필요합니다. oort는 허들에 참가한 동안에만 마이크를 씁니다.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
