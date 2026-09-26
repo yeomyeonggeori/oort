@@ -153,14 +153,6 @@ async function waitFor(check: () => boolean, label: string): Promise<void> {
   }
 }
 
-function pressKey(el: Element, key: string): void {
-  act(() => {
-    el.dispatchEvent(
-      new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })
-    );
-  });
-}
-
 function mountStage(): HTMLElement {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -246,15 +238,17 @@ describe("M-G 실제 위저드 발급 응답이 dd 한 칸이다", () => {
     const debug = vi.spyOn(console, "debug").mockImplementation(() => undefined);
     mountStage();
     await waitFor(
-      () => document.querySelector("#first-agent-harness-claude-code") !== null,
-      "cards"
+      () => document.querySelector("#ai-connect-grok") !== null,
+      "rows"
     );
-    const radio = document.querySelector<HTMLInputElement>(
-      "#first-agent-harness-claude-code"
-    );
-    if (!radio) throw new Error("card");
-    radio.focus();
-    pressKey(radio, "Enter");
+    const radio = document.querySelector<HTMLInputElement>("#ai-connect-grok");
+    if (!radio) throw new Error("row");
+    act(() => radio.click());
+    act(() => {
+      document
+        .querySelector<HTMLButtonElement>('[data-testid="first-agent-continue"]')
+        ?.click();
+    });
     await waitFor(
       () => document.querySelector('[data-testid="hosted-pairing-card"]') !== null,
       "wizard pairing"

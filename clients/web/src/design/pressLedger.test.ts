@@ -1277,10 +1277,9 @@ const RESIDUE: readonly (readonly [string, number])[] = [
   ["clients/web/src/features/timeline/MessageBody.tsx", 1],
   ["clients/web/src/features/timeline/MessageRow.tsx", 1],
   ["clients/web/src/features/timeline/PendingRow.tsx", 1],
-  ["clients/web/src/features/welcome/WelcomeKickoffStage.tsx", 1],
 ];
 
-const CEILING = 11;
+const CEILING = 10;
 
 function countedByFile(sites: PressSite[]): [string, number][] {
   const counted = new Map<string, number>();

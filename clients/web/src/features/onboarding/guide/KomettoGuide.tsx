@@ -31,6 +31,7 @@ export function KomettoGuide({
   className,
   lineRef,
   lineTestId = "kometto-guide-line",
+  lineId,
   children,
 }: {
   expression: KomettoExpression;
@@ -42,6 +43,8 @@ export function KomettoGuide({
   className?: string;
   lineRef?: Ref<HTMLHeadingElement>;
   lineTestId?: string;
+  /** 문장의 `id`. 화면 영역이 `aria-labelledby`로 이 문장을 이름으로 삼을 때(#2814). */
+  lineId?: string;
   /** 말풍선 안 문장 뒤에 붙는 것(예: 서버 칩). 거의 쓰지 않는다. */
   children?: ReactNode;
 }) {
@@ -62,6 +65,7 @@ export function KomettoGuide({
       >
         <Line
           ref={lineRef as Ref<HTMLHeadingElement & HTMLParagraphElement>}
+          id={lineId}
           tabIndex={lineRef ? -1 : undefined}
           className={cn(
             "break-keep text-title font-semibold text-ink",

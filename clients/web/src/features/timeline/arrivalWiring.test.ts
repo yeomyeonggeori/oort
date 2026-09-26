@@ -115,12 +115,11 @@ describe("arrival wiring — mutations of the seam go red", () => {
     expect(timeline).toContain("onEntranceConsumed(item.message.id)");
   });
 
-  it("ChatShell holds Timeline isPlayEntrance through the welcome stage; ThreadPanel keeps the unwrapped store fn", () => {
-    expect(shell).toContain("const pinArrivalGrant = timeline.pinArrivalGrant");
-    expect(shell).toContain("pinArrivalGrant(welcome.holdEntranceId)");
-    expect(jsxBindingCount(shell, "Timeline", "isPlayEntrance", "isPlayEntrance")).toBe(
-      1
-    );
+  it("ChatShell hands Timeline and ThreadPanel the store fn (the welcome band no longer holds the opener, #2817)", () => {
+    expect(shell).not.toMatch(/holdEntranceId|pinArrivalGrant|welcomePlayEntrance/);
+    expect(
+      jsxBindingCount(shell, "Timeline", "isPlayEntrance", "timeline.isPlayEntrance")
+    ).toBe(1);
     expect(
       jsxBindingCount(shell, "ThreadPanel", "isPlayEntrance", "timeline.isPlayEntrance")
     ).toBe(1);
@@ -178,7 +177,10 @@ describe("arrival wiring — mutations of the seam go red", () => {
   });
 
   it("useTimeline REST 기본 meta 는 rest/rest 이고 리플레이는 live 로 안 바꾼다", () => {
-    expect(identifierCallCount(hook, "capArrivalSetKeeping")).toBe(3);
+    // Two grant caps (leftover sweep, live batch) + the consumed ledger. The
+    // pinned variant left with the welcome hold (#2817).
+    expect(identifierCallCount(hook, "capArrivalSet")).toBe(3);
+    expect(identifierCallCount(hook, "capArrivalSetKeeping")).toBe(0);
   });
 
   it("Timeline leftover sweep 는 배치 전 at-bottom 을 쓴다", () => {

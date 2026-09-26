@@ -8,21 +8,25 @@ import {
   WELCOME_BACKSTOP_MS,
   WELCOME_PROMPT_LIMIT_SENTENCE,
   WELCOME_SHOWN_STORAGE_PREFIX,
-  WELCOME_STAGE_COPY,
-  WELCOME_KICKOFF_SHAPES,
+  WELCOME_BAND_EXPRESSION,
+  WELCOME_BAND_SLEEPY_COPY,
   countActiveAgents,
+  decideWelcomeBand,
   decideWelcomeMount,
   hasAgentAuthoredMessage,
   isDefaultWelcomeChannel,
   isWelcomeDecisionPending,
   messagesBelongToChannel,
   readShownMarker,
+  welcomeBandSpeaker,
+  welcomeBandWorkingCopy,
   welcomePromptTooLong,
   welcomeShownKey,
   writeShownMarker,
 } from "./welcomeKickoff";
 import { AGENTS_NAV } from "@/features/sidebar/workspaceNav";
-import { CLOUD_BODIES } from "@/features/auth/cloudBodies";
+import type { RosterMember } from "@momo/core/lib/api";
+import { GUIDE_STATE_TABLE } from "@momo/core/features/onboarding/guide";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const OTHER_WS = "00000000-0000-7000-8000-000000000002";
@@ -300,8 +304,11 @@ describe("copy and constants", () => {
     expect(WELCOME_BACKSTOP_MS).toBe(120_000);
   });
 
-  it("stage sentence", () => {
-    expect(WELCOME_STAGE_COPY).toBe("팀이 준비하고 있어요");
+  it("band sentences (issue #2817 / #2814 착수 전 확인 결과)", () => {
+    expect(welcomeBandWorkingCopy("hermes")).toBe("hermes가 인사하러 오고 있어요.");
+    expect(welcomeBandWorkingCopy("김인턴")).toBe("김인턴이 인사하러 오고 있어요.");
+    expect(welcomeBandWorkingCopy(null)).toBe("에이전트가 인사하러 오고 있어요.");
+    expect(WELCOME_BAND_SLEEPY_COPY).toBe("터미널에서 Claude Code를 열어 두면 인사해요.");
   });
 
   it("backstop sentence has no failure wording and names the agents nav", () => {
@@ -315,14 +322,25 @@ describe("copy and constants", () => {
     expect(WELCOME_BACKSTOP_COPY.split(AGENTS_NAV.label).length - 1).toBe(1);
   });
 
-  it("constellation is a unique-kind slice of CLOUD_BODIES", () => {
-    expect(WELCOME_KICKOFF_SHAPES.length).toBeGreaterThanOrEqual(3);
-    expect(WELCOME_KICKOFF_SHAPES.length).toBeLessThanOrEqual(5);
-    const kinds = WELCOME_KICKOFF_SHAPES.map((body) => body.kind);
-    expect(new Set(kinds).size).toBe(WELCOME_KICKOFF_SHAPES.length);
-    for (const shape of WELCOME_KICKOFF_SHAPES) {
-      expect(CLOUD_BODIES).toContainEqual(shape);
+  it("band state → expression is a row of the ADR-0193 D11 table (no seventh mapping)", () => {
+    const rows = new Map(GUIDE_STATE_TABLE.map((row) => [row.expression, row.state]));
+    for (const expression of Object.values(WELCOME_BAND_EXPRESSION)) {
+      expect(rows.has(expression), expression).toBe(true);
     }
+    expect(WELCOME_BAND_EXPRESSION.working).toBe("working");
+    expect(WELCOME_BAND_EXPRESSION.sleepy).toBe("sleepy");
+    expect(WELCOME_BAND_EXPRESSION.joy).toBe("happy");
+  });
+
+  it("decideWelcomeBand: phase × sleepy", () => {
+    expect(decideWelcomeBand({ phase: "hidden", sleepy: false })).toBeNull();
+    expect(decideWelcomeBand({ phase: "hidden", sleepy: true })).toBeNull();
+    expect(decideWelcomeBand({ phase: "stage", sleepy: false })).toBe("working");
+    expect(decideWelcomeBand({ phase: "stage", sleepy: true })).toBe("sleepy");
+    expect(decideWelcomeBand({ phase: "backstop", sleepy: false })).toBe("backstop");
+    expect(decideWelcomeBand({ phase: "backstop", sleepy: true })).toBe("sleepy");
+    expect(decideWelcomeBand({ phase: "exiting", sleepy: false })).toBe("joy");
+    expect(decideWelcomeBand({ phase: "exiting", sleepy: true })).toBe("joy");
   });
 
   it("2001 characters is a sentence rejection", () => {
@@ -331,5 +349,86 @@ describe("copy and constants", () => {
       WELCOME_PROMPT_LIMIT_SENTENCE
     );
     expect(WELCOME_PROMPT_LIMIT_SENTENCE).toBe("2000자까지 쓸 수 있습니다.");
+  });
+});
+
+function agent(over: Partial<RosterMember>): RosterMember {
+  return {
+    id: "00000000-0000-7000-8000-000000000201",
+    workspaceId: WS,
+    kind: "agent",
+    status: "active",
+    displayName: "hermes",
+    handle: "hermes",
+    channelCount: 1,
+    channelIds: [],
+    capabilities: [],
+    createdAtMs: 1,
+    updatedAtMs: 1,
+    ...over,
+  };
+}
+
+describe("welcomeBandSpeaker (who the band waits for)", () => {
+  it("one awake active agent → its name, not sleepy", () => {
+    expect(welcomeBandSpeaker([agent({ paused: false })], MEMBER)).toEqual({
+      name: "hermes",
+      sleepy: false,
+    });
+  });
+
+  it("paused unknown (older server) reads as awake", () => {
+    expect(welcomeBandSpeaker([agent({})], MEMBER)).toEqual({ name: "hermes", sleepy: false });
+  });
+
+  it("two awake agents → no single name", () => {
+    expect(
+      welcomeBandSpeaker(
+        [agent({ paused: false }), agent({ id: "x", displayName: "김인턴", paused: false })],
+        MEMBER
+      )
+    ).toEqual({ name: null, sleepy: false });
+  });
+
+  it("every active agent paused and one is mine → sleepy, named after mine", () => {
+    expect(
+      welcomeBandSpeaker(
+        [
+          agent({ displayName: "곽성재의 Claude", paused: true, ownerHumanId: MEMBER.toUpperCase() }),
+          agent({ id: "y", displayName: "팀봇", paused: true, ownerHumanId: OTHER_MEMBER }),
+        ],
+        MEMBER
+      )
+    ).toEqual({ name: "곽성재의 Claude", sleepy: true });
+  });
+
+  it("an awake agent beats my paused one (someone can already speak)", () => {
+    expect(
+      welcomeBandSpeaker(
+        [
+          agent({ displayName: "곽성재의 Claude", paused: true, ownerHumanId: MEMBER }),
+          agent({ id: "z", displayName: "김인턴", paused: false }),
+        ],
+        MEMBER
+      )
+    ).toEqual({ name: "김인턴", sleepy: false });
+  });
+
+  it("paused agents that are not mine → not sleepy (no Claude Code sentence for a team bot)", () => {
+    expect(
+      welcomeBandSpeaker([agent({ paused: true, ownerHumanId: OTHER_MEMBER })], MEMBER)
+    ).toEqual({ name: null, sleepy: false });
+  });
+
+  it("invited / suspended agents and humans are not speakers", () => {
+    expect(
+      welcomeBandSpeaker(
+        [
+          agent({ status: "invited", paused: false }),
+          agent({ id: "h", kind: "human", displayName: "사람" }),
+        ],
+        MEMBER
+      )
+    ).toEqual({ name: null, sleepy: false });
   });
 });

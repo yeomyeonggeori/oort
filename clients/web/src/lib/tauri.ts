@@ -323,6 +323,24 @@ export const desktopPty = {
   },
 };
 
+// ---- OS terminal (#2814) ------------------------------------------------------
+
+/**
+ * Bring Terminal.app forward (ADR-0193 D2 Phase 1). Takes no arguments: the
+ * page copies the command to the clipboard itself, and the shell runs no CLI
+ * for the person. Resolves false in a browser tab or when the launch failed,
+ * so the caller can say "copy it and open the terminal yourself".
+ */
+export async function openTerminalApp(): Promise<boolean> {
+  if (!IS_TAURI) return false;
+  try {
+    await invoke<void>("open_terminal_app");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ---- native notifications ---------------------------------------------------
 
 /** Same vocabulary as the browser Notification API, minus the prompt variants. */

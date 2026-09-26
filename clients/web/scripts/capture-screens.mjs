@@ -9345,21 +9345,49 @@ async function captureMarkUnreadScenes(browser, scheme) {
   return shots;
 }
 
-// UX-R2b welcome kickoff (#2002). Scenes only — startGuardedPreview is untouched.
-// Arrival is driven through the product store path (`oort.capture.message.new`
-// → useTimeline applyBatch), not a stage prop.
+// UX-R2b welcome kickoff (#2002) → #2817 first-conversation Kometto band.
+// Scenes only — startGuardedPreview is untouched. Arrival is driven through
+// the product store path (`oort.capture.message.new` → useTimeline
+// applyBatch), not a stage prop. The band lives above the composer, so there
+// is no timeline row to scroll to. Two desktop window sizes: the Tauri default
+// (1100×760) and a near-minimum window (720×560; minWidth 720).
+const WELCOME_BAND_VIEWPORTS = [
+  { width: 1100, height: 760, suffix: "" },
+  { width: 720, height: 560, suffix: "-720" },
+];
+
+/** A fresh workspace: me + the agent I just joined (mockup D5 「성재의 Claude」). */
+function welcomeRoster({ paused }) {
+  const me = ROSTER.find((member) => member.id === ME);
+  const agent = ROSTER.find((member) => member.id === HERMES);
+  return [
+    me,
+    {
+      ...agent,
+      displayName: "곽성재의 Claude",
+      handle: "seongjae-claude",
+      ownerHumanId: ME,
+      paused,
+    },
+  ];
+}
+
 async function captureWelcomeKickoffScenes(browser, scheme) {
   beginScene("welcome-arrived");
   const shots = [];
 
   async function openWelcome(reducedMotion, options = {}) {
+    const viewport = options.viewport ?? VIEWPORT;
     const context = await browser.newContext({
-      viewport: VIEWPORT,
+      viewport: { width: viewport.width, height: viewport.height },
       deviceScaleFactor: 2,
       colorScheme: scheme,
       reducedMotion,
     });
     await installMocks(context);
+    await context.route("**/v1/workspaces/*/roster", (route) =>
+      json(route, { members: welcomeRoster({ paused: Boolean(options.paused) }) })
+    );
     await context.route("**/v1/workspaces/*/channels/*/messages*", (route) => {
       const url = new URL(route.request().url());
       if (url.pathname.includes("/replies")) return route.fallback();
@@ -9386,6 +9414,12 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
           "oort.freshSignup.v1",
           JSON.stringify({ workspaceId, memberId })
         );
+        // recordFreshSignupFirstRun also marks the 「폰에서도」 card pending
+        // (#2818): the band hands the same slot over to it.
+        localStorage.setItem(
+          `oort.phoneLinkCard.v1:${workspaceId.toLowerCase()}`,
+          "pending"
+        );
       },
       { workspaceId: WORKSPACE_ID, memberId: ME }
     );
@@ -9402,20 +9436,10 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
     return { context, page };
   }
 
-  async function waitForWelcomeStage(page) {
-    const empty = page.getByTestId("timeline-empty");
+  async function waitForWelcomeBand(page, state) {
+    const band = page.getByTestId("welcome-kickoff-stage");
     try {
-      await empty.waitFor({ state: "visible", timeout: 15_000 });
-    } catch (err) {
-      // Empty intro is optional: a nonempty #general still mounts the stage.
-      // Timeout is the only miss we accept; anything else is a real fail.
-      const name = err instanceof Error ? err.name : "";
-      const message = err instanceof Error ? err.message : String(err);
-      if (name !== "TimeoutError" && !message.includes("Timeout")) throw err;
-    }
-    const stage = page.getByTestId("welcome-kickoff-stage");
-    try {
-      await stage.waitFor({ state: "attached", timeout: 10_000 });
+      await band.waitFor({ state: "visible", timeout: 15_000 });
     } catch (err) {
       const dump = await page.evaluate(() => ({
         hash: location.hash,
@@ -9423,50 +9447,21 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
         shown: Object.keys(localStorage).filter((k) =>
           k.includes("welcomeKickoff")
         ),
-        introEmpty: Boolean(document.querySelector('[data-testid="timeline-empty"]')),
-        introStarted: Boolean(
-          document.querySelector('[data-testid="message-channel-intro"]')
-        ),
         messages: document.querySelectorAll('[data-testid="timeline-message"]').length,
-        copy: document.body.innerText.includes("팀이 준비하고 있어요"),
       }));
       const cause = err instanceof Error ? err.message : String(err);
       throw new Error(`welcome-kickoff-stage missing ${JSON.stringify(dump)} (${cause})`);
     }
-    try {
-      await scrollTimelineRowIntoView(page, "welcome-kickoff-stage", "welcome-kickoff");
-    } catch (err) {
-      if (!String(err).includes("자리가 멎지 않았다")) throw err;
-      await page.waitForTimeout(200);
-      await scrollTimelineRowIntoView(page, "welcome-kickoff-stage", "welcome-kickoff");
-    }
-    await stage.waitFor({ state: "visible" });
+    await page.waitForFunction(
+      (want) =>
+        document
+          .querySelector('[data-testid="welcome-kickoff-stage"]')
+          ?.getAttribute("data-state") === want,
+      state
+    );
   }
 
-  {
-    const { context, page } = await openWelcome("no-preference");
-    await waitForWelcomeStage(page);
-    await waitForAnimations(page);
-    const path = beginSceneFromShotPath(`${OUT_DIR}/welcome-stage-${scheme}.png`);
-    await page.screenshot({ path });
-    shots.push(path);
-    await context.close();
-  }
-
-  {
-    const { context, page } = await openWelcome("reduce");
-    await waitForWelcomeStage(page);
-    await waitForAnimations(page);
-    const path = beginSceneFromShotPath(`${OUT_DIR}/welcome-stage-reduce-${scheme}.png`);
-    await page.screenshot({ path });
-    shots.push(path);
-    await context.close();
-  }
-
-  {
-    const { context, page } = await openWelcome("no-preference");
-    await waitForWelcomeStage(page);
-    await waitForAnimations(page);
+  async function deliverOpener(page) {
     await page.evaluate(
       ({ channelId, agentId }) => {
         window.dispatchEvent(
@@ -9479,7 +9474,7 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
               hlcCount: 0,
               authorMemberId: agentId,
               type: "text",
-              body: "시작할까요? 이 워크스페이스에서 같이 일해요.",
+              body: "안녕하세요 @곽성재님, 저는 이 맥의 Claude Code로 돌아가는 성재님의 에이전트예요. 여기서 부르면 바로 일을 받아요. 오늘 무엇부터 같이 할까요?",
               state: "sent",
               createdAtMs: 1_704_067_200_000,
             },
@@ -9488,17 +9483,56 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
       },
       { channelId: GENERAL_ID, agentId: HERMES }
     );
-    await page.getByTestId("timeline-message").waitFor({ state: "visible" });
-    await page.waitForFunction(
-      () =>
-        [...document.querySelectorAll('[data-testid="timeline-message"]')].some(
-          (node) => node.classList.contains("enter-conversation")
-        )
-    );
-    await waitForAnimations(page);
-    const path = beginSceneFromShotPath(`${OUT_DIR}/welcome-arrived-${scheme}.png`);
+  }
+
+  async function shoot(page, name) {
+    const vp = page.viewportSize() ?? VIEWPORT;
+    await page.mouse.move(vp.width + 80, vp.height + 80);
+    const path = beginSceneFromShotPath(`${OUT_DIR}/${name}-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
+  }
+
+  for (const viewport of WELCOME_BAND_VIEWPORTS) {
+    {
+      const { context, page } = await openWelcome("no-preference", { viewport });
+      await waitForWelcomeBand(page, "working");
+      await waitForAnimations(page);
+      await shoot(page, `welcome-band-working${viewport.suffix}`);
+      await context.close();
+    }
+    {
+      const { context, page } = await openWelcome("no-preference", {
+        viewport,
+        paused: true,
+      });
+      await waitForWelcomeBand(page, "sleepy");
+      await waitForAnimations(page);
+      await shoot(page, `welcome-band-sleepy${viewport.suffix}`);
+      await context.close();
+    }
+    {
+      // Joy is a 1.2s hold before the band folds; shoot inside it, after the
+      // 120ms crossfade and the 360ms wag.
+      const { context, page } = await openWelcome("reduce", { viewport });
+      await waitForWelcomeBand(page, "working");
+      await deliverOpener(page);
+      await waitForWelcomeBand(page, "joy");
+      await page.getByTestId("timeline-message").waitFor({ state: "visible" });
+      await shoot(page, `welcome-band-joy${viewport.suffix}`);
+      await context.close();
+    }
+  }
+
+  {
+    const { context, page } = await openWelcome("no-preference");
+    await waitForWelcomeBand(page, "working");
+    await deliverOpener(page);
+    await waitForWelcomeBand(page, "joy");
+    await page.getByTestId("welcome-kickoff-stage").waitFor({ state: "detached" });
+    await page.getByTestId("phone-link-card").waitFor({ state: "visible" });
+    await waitForAnimations(page);
+    await shoot(page, "welcome-arrived");
     await context.close();
   }
 
@@ -9508,16 +9542,12 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
     });
     beginScene("welcome-backstop");
     try {
-      await waitForWelcomeStage(page);
+      await waitForWelcomeBand(page, "working");
       await page.clock.fastForward(120_000);
       await page.getByTestId("welcome-kickoff-backstop").waitFor({ state: "visible" });
       await page.clock.resume();
       await waitForAnimations(page);
-      const vp = page.viewportSize() ?? VIEWPORT;
-      await page.mouse.move(vp.width + 80, vp.height + 80);
-      const path = beginSceneFromShotPath(`${OUT_DIR}/welcome-backstop-${scheme}.png`);
-      await page.screenshot({ path });
-      shots.push(path);
+      await shoot(page, "welcome-band-backstop");
       await context.close();
     } finally {
       setActiveCaptureScene("default");
@@ -12210,67 +12240,51 @@ async function waitUntilTokenPaint(page, selector, cssVar) {
 }
 
 /**
- * UX-R2c (#2216). Login-after first-agent poses. Design-mode `?firstAgent=`
- * only; not part of the default `all` profile. Nine shot names: eight URL
- * poses plus `done-handoff` from the same `done` page after the hand-off click.
+ * D4 AI 연결 (#2814, 이전 UX-R2c #2216). Design-mode `?firstAgent=` only; not
+ * part of the default `all` profile. Poses cover the list (pill states, kill
+ * switch off, web), the subscription join's three states + cap, the grok
+ * wizard's one-time value, skipped, and the legacy loading/offline/error rows.
+ * Each pose shoots 1280 and 390 in the scheme given.
  */
 async function captureFirstAgentScenes(browser, scheme) {
   beginScene("first-agent");
   const shots = [];
   const readyByPose = {
-    cards: "first-agent-cards",
+    cards: "ai-connect-list",
+    "sub-probing": "ai-connect-list",
+    "sub-ready": "ai-connect-list",
+    "sub-install": "ai-connect-list",
+    "sub-polling": "ai-connect-list",
+    "sub-recheck": "ai-connect-list",
+    "server-off": "first-agent-server-off",
+    web: "first-agent-desktop-only",
+    "sub-connect": "first-agent-connect-command",
+    "sub-waiting": "first-agent-detecting",
+    "sub-cap": "first-agent-cap-exceeded",
+    "sub-joined": "first-agent-mention",
     "one-time": "hosted-pairing-card",
     detecting: "first-agent-detecting",
     "cap-exceeded": "first-agent-cap-exceeded",
     done: "first-agent-mention",
+    skipped: "first-agent-skipped",
     loading: "first-agent-loading",
     offline: "first-agent-offline",
     error: "first-agent-error",
   };
   const tapTargetsByPose = {
-    cards: [
+    "sub-ready": [
+      ["first-agent-continue", "주 행동"],
       ["first-agent-skip", "지금은 건너뛰기"],
-      ["first-agent-continue", "계속"],
-      ["first-agent-reentry", "재진입"],
+      ["ai-connect-login-open-codex", "터미널에서 로그인"],
     ],
-    "one-time": [
-      ["first-agent-skip", "지금은 건너뛰기"],
-      ["first-agent-reentry", "재진입"],
-    ],
-    detecting: [
-      ["first-agent-skip", "지금은 건너뛰기"],
-      ["first-agent-reentry", "재진입"],
-    ],
-    "cap-exceeded": [
-      ["first-agent-skip", "지금은 건너뛰기"],
+    "sub-connect": [["first-agent-skip", "지금은 건너뛰기"]],
+    "sub-cap": [
       ["first-agent-recheck", "다시 확인"],
-      ["first-agent-reentry", "재진입"],
-    ],
-    done: [
       ["first-agent-skip", "지금은 건너뛰기"],
-      ["first-agent-mention-action", "첫 멘션"],
-      ["first-agent-reentry", "재진입"],
     ],
-    loading: [
-      ["first-agent-skip", "지금은 건너뛰기"],
-      ["first-agent-reentry", "재진입"],
-    ],
-    offline: [
-      ["first-agent-skip", "지금은 건너뛰기"],
-      ["first-agent-reentry", "재진입"],
-    ],
-    error: [
-      ["first-agent-skip", "지금은 건너뛰기"],
-      ["first-agent-reentry", "재진입"],
-    ],
+    "sub-joined": [["first-agent-mention-action", "계속"]],
+    skipped: [["first-agent-skipped-continue", "계속"]],
   };
-
-  const FIRST_AGENT_FIT_NAME = "김인턴데이터플랫폼온콜대기열용자명";
-  if (FIRST_AGENT_FIT_NAME.length !== 17) {
-    throw new Error(
-      `first-agent fit-name fixture is ${FIRST_AGENT_FIT_NAME.length} chars`
-    );
-  }
 
   async function shoot(pose, viewport, suffix) {
     const context = await browser.newContext({
@@ -12280,17 +12294,6 @@ async function captureFirstAgentScenes(browser, scheme) {
       reducedMotion: "reduce",
     });
     await installMocks(context);
-    if (pose === "done") {
-      await context.route("**/v1/workspaces/*/roster", (route) =>
-        json(route, {
-          members: ROSTER.map((member) =>
-            member.id === "019f9a01-0000-7000-8000-000000000404"
-              ? { ...member, displayName: FIRST_AGENT_FIT_NAME }
-              : member
-          ),
-        })
-      );
-    }
     const page = await context.newPage();
     await page.goto(ORIGIN, { waitUntil: "networkidle" });
     await signIn(page);
@@ -12298,368 +12301,52 @@ async function captureFirstAgentScenes(browser, scheme) {
       window.location.hash = `/?firstAgent=${nextPose}`;
     }, pose);
     await page.getByTestId("first-agent-stage").waitFor({ state: "visible" });
-    await page.getByTestId(readyByPose[pose]).waitFor({ state: "visible" });
+    await page.getByTestId(readyByPose[pose]).first().waitFor({ state: "visible" });
     await page.mouse.move(viewport.width + 80, viewport.height + 80);
     await waitForAnimations(page);
-    if (pose === "offline" || pose === "error") {
-      const opacity = await page.evaluate(() => {
-        const input = document.querySelector(
-          "#first-agent-harness-claude-code"
-        );
-        return input ? getComputedStyle(input).opacity : "";
-      });
-      if (opacity !== "0.5") {
-        throw new Error(
-          `first-agent ${pose} ${scheme} ${viewport.width}: locked input opacity ${opacity}`
-        );
-      }
-    }
-    if (pose === "cards") {
-      const hovered = await page.evaluate(() => {
-        const hover = getComputedStyle(document.documentElement)
-          .getPropertyValue("--surface-hover")
-          .trim();
-        return [...document.querySelectorAll("[data-choice-id]")].flatMap((el) => {
-          const bg = getComputedStyle(el).backgroundColor;
-          if (bg === "rgba(0, 0, 0, 0)" || bg === "transparent") return [];
-          const probe = document.createElement("div");
-          probe.style.backgroundColor = hover || "var(--surface-hover)";
-          document.body.append(probe);
-          const target = getComputedStyle(probe).backgroundColor;
-          probe.remove();
-          if (bg === target) return [el.getAttribute("data-choice-id")];
-          return [];
-        });
-      });
-      if (hovered.length > 0) {
-        throw new Error(
-          `first-agent cards ${scheme} ${viewport.width}: hover fill on ${hovered.join(", ")}`
-        );
-      }
-    }
     await assertNoHorizontalOverflow(
       page,
       `first-agent ${pose} ${scheme} ${viewport.width}`
     );
-    if (pose === "done") {
-      await page.waitForFunction((expected) => {
-        const el = document.querySelector(
-          '[data-testid="first-agent-mention-name"]'
-        );
-        return el?.textContent === expected;
-      }, FIRST_AGENT_FIT_NAME);
-      const mentionTruncates = await page.evaluate(() =>
-        [...document.querySelectorAll(
-          '[data-testid="first-agent-mention"] .truncate'
-        )].map((el) => ({
-          overflow: el.scrollWidth > el.clientWidth + 1,
-          width: Math.round(el.getBoundingClientRect().width),
-        }))
-      );
-      if (mentionTruncates.length === 0) {
-        throw new Error(
-          `first-agent done ${scheme} ${viewport.width}: 멘션 이름에 truncate 가 없다`
-        );
-      }
-      for (const row of mentionTruncates) {
-        if (row.width <= 0) {
-          throw new Error(
-            `first-agent done ${scheme} ${viewport.width}: truncate 폭이 0이다 (${JSON.stringify(mentionTruncates)})`
-          );
-        }
-        if (row.overflow !== false) {
-          throw new Error(
-            `first-agent done ${scheme} ${viewport.width}: truncate overflow 가 false 가 아니다 (${JSON.stringify(mentionTruncates)})`
-          );
-        }
-      }
-      const fitName = await page.evaluate(() => {
-        const name = document.querySelector(
-          '[data-testid="first-agent-mention-name"]'
-        );
-        const handle = document.querySelector(
-          '[data-testid="first-agent-mention-handle"]'
-        );
-        if (!(name instanceof HTMLElement) || !(handle instanceof HTMLElement)) {
-          return { missing: true };
-        }
-        return {
-          missing: false,
-          text: name.textContent,
-          title: name.getAttribute("title"),
-          overflow: name.scrollWidth > name.clientWidth,
-          handleTitle: handle.getAttribute("title"),
-          handleOverflow: handle.scrollWidth > handle.clientWidth,
-        };
-      });
-      if (fitName.missing) {
-        throw new Error(
-          `first-agent done ${scheme} ${viewport.width}: mention name missing`
-        );
-      }
-      if (fitName.text !== FIRST_AGENT_FIT_NAME) {
-        throw new Error(
-          `first-agent done ${scheme} ${viewport.width}: name ${JSON.stringify(fitName.text)}`
-        );
-      }
-      if (fitName.overflow !== false || fitName.title != null) {
-        throw new Error(
-          `first-agent done ${scheme} ${viewport.width}: 17자 이름에 title 이 있다 (${JSON.stringify(fitName)})`
-        );
-      }
-      if (fitName.handleOverflow !== false || fitName.handleTitle != null) {
-        throw new Error(
-          `first-agent done ${scheme} ${viewport.width}: 핸들 title ${JSON.stringify(fitName)}`
-        );
-      }
+    const heading = await page.evaluate(
+      () => document.querySelector("#first-agent-heading")?.textContent ?? ""
+    );
+    if (heading.trim() === "") {
+      throw new Error(`first-agent ${pose} ${scheme} ${viewport.width}: 코메토 문장이 없다`);
     }
-    if (viewport.width === 390) {
-      const crumb = await page.evaluate(() => {
-        const el = document.querySelector('[data-testid="first-agent-reentry"]');
-        if (!el) return null;
-        const r = el.getBoundingClientRect();
-        return {
-          whiteSpace: getComputedStyle(el).whiteSpace,
-          right: r.right,
-        };
-      });
-      if (crumb && crumb.whiteSpace !== "nowrap") {
-        throw new Error(
-          `first-agent ${pose} ${scheme} 390: 재진입 경로가 nowrap 이 아니다 (${crumb.whiteSpace})`
-        );
-      }
-      if (crumb && crumb.right > 390 + 1) {
-        throw new Error(
-          `first-agent ${pose} ${scheme} 390: 재진입 경로가 화면을 넘긴다 (${crumb.right}px)`
-        );
-      }
+    const loginButtons = await page.evaluate(() =>
+      [...document.querySelectorAll("button, a")]
+        .map((el) => `${el.textContent ?? ""} ${el.getAttribute("aria-label") ?? ""}`)
+        .filter((text) => /(Claude|ChatGPT|OpenAI|Anthropic|Codex)\s*(로|으로)\s*로그인/.test(text))
+    );
+    if (loginButtons.length > 0) {
+      throw new Error(
+        `first-agent ${pose} ${scheme}: provider 로그인 버튼 ${JSON.stringify(loginButtons)}`
+      );
+    }
+    if (viewport.width === 390 && tapTargetsByPose[pose]) {
       await assertTapTargets(
         page,
         `first-agent ${pose} ${scheme} 390`,
         tapTargetsByPose[pose]
       );
     }
-    if (pose === "done") {
-      const payoff = await page.evaluate(() => {
-        const heading = document.querySelector("#first-agent-heading");
-        return {
-          heading: heading?.textContent ?? "",
-          hasComposer: Boolean(document.querySelector("#composer-input")),
-          hasMention: Boolean(
-            document.querySelector('[data-testid="first-agent-mention"]')
-          ),
-        };
-      });
-      if (
-        !payoff.heading.includes("첫 에이전트 연결") ||
-        payoff.hasComposer ||
-        !payoff.hasMention
-      ) {
-        throw new Error(
-          `first-agent done ${scheme} ${viewport.width}: done 이 보상 화면이 아니다 (${JSON.stringify(payoff)})`
-        );
-      }
-    }
-    if (pose === "loading") {
-      const widths = await page.evaluate(() => {
-        const stage = document.querySelector('[data-testid="first-agent-stage"]');
-        const stageW = stage ? stage.getBoundingClientRect().width : 0;
-        const bars = [...document.querySelectorAll('[data-testid="skeleton-row"]')].map(
-          (el) => el.getBoundingClientRect().width
-        );
-        return { stageW, bars };
-      });
-      if (widths.bars.length === 0 || widths.bars.some((width) => width <= 0)) {
-        throw new Error(
-          `first-agent loading ${scheme} ${viewport.width}: 로딩 막대 폭이 0이다 (${widths.bars.join(", ")})`
-        );
-      }
-      if (widths.bars.some((width) => width < widths.stageW - 1)) {
-        throw new Error(
-          `first-agent loading ${scheme} ${viewport.width}: 로딩 막대가 목록 폭이 아니다 stage=${widths.stageW} bars=${widths.bars.join(", ")}`
-        );
-      }
-    }
     const path = beginSceneFromShotPath(
       `${OUT_DIR}/first-agent-${pose}${suffix}-${scheme}.png`
     );
-    await page.screenshot({ path });
+    await page.screenshot({ path, fullPage: true });
     shots.push(path);
-    if (pose === "done") {
-      beginScene("first-agent");
-      await sceneClick(page, page.getByTestId("first-agent-mention-action"));
-      await page.locator("#composer-input").waitFor({ state: "visible" });
-      const seeded = await page.evaluate(() => {
-        const el = document.querySelector("#composer-input");
-        const value =
-          el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement
-            ? el.value
-            : (el?.textContent ?? "");
-        return value;
-      });
-      if (!String(seeded).includes("@kim-intern ")) {
-        throw new Error(
-          `first-agent done ${scheme} ${viewport.width}: 컴포저 초안이 없다 (${JSON.stringify(seeded)})`
-        );
-      }
-      await page.mouse.move(viewport.width + 80, viewport.height + 80);
-      await waitForAnimations(page);
-      await assertHoverToolbarCount(
-        page,
-        `first-agent done-handoff ${scheme} ${viewport.width}`,
-        0
-      );
-      const hoverBits = await page.evaluate(() => ({
-        messageToolbar:
-          document.querySelector('[data-testid="message-hover-toolbar"]') !==
-          null,
-        straddle:
-          document.querySelector(
-            ".hover-toolbar-straddle, .hover-toolbar-straddle-below"
-          ) !== null,
-      }));
-      if (hoverBits.messageToolbar || hoverBits.straddle) {
-        throw new Error(
-          `first-agent done-handoff ${scheme} ${viewport.width}: hover toolbar in shot (${JSON.stringify(hoverBits)})`
-        );
-      }
-      const handoff = beginSceneFromShotPath(
-        `${OUT_DIR}/first-agent-done-handoff${suffix}-${scheme}.png`
-      );
-      await page.screenshot({ path: handoff });
-      shots.push(handoff);
-    }
     await context.close();
   }
 
-  for (const pose of [
-    "cards",
-    "one-time",
-    "detecting",
-    "cap-exceeded",
-    "done",
-    "loading",
-    "offline",
-    "error",
-  ]) {
+  const poses = (process.env.FIRST_AGENT_POSES || Object.keys(readyByPose).join(","))
+    .split(",")
+    .map((pose) => pose.trim())
+    .filter(Boolean);
+  for (const pose of poses) {
+    if (!(pose in readyByPose)) throw new Error(`unknown first-agent pose ${pose}`);
     await shoot(pose, VIEWPORT, "");
     await shoot(pose, MOBILE_VIEWPORT, "-390");
-  }
-
-  const FIRST_AGENT_LONG_NAME =
-    "김인턴-데이터플랫폼-온콜 Agent Runtime Operations Assistant 김인턴-온콜대기열용자";
-  if (FIRST_AGENT_LONG_NAME.length < 60) {
-    throw new Error(
-      `first-agent long-name fixture is ${FIRST_AGENT_LONG_NAME.length} chars`
-    );
-  }
-  {
-    const viewport = MOBILE_VIEWPORT;
-    const context = await browser.newContext({
-      viewport,
-      deviceScaleFactor: 2,
-      colorScheme: scheme,
-      reducedMotion: "reduce",
-    });
-    await installMocks(context);
-    await context.route("**/v1/workspaces/*/roster", (route) =>
-      json(route, {
-        members: ROSTER.map((member) =>
-          member.id === "019f9a01-0000-7000-8000-000000000404"
-            ? { ...member, displayName: FIRST_AGENT_LONG_NAME }
-            : member
-        ),
-      })
-    );
-    const page = await context.newPage();
-    await page.goto(ORIGIN, { waitUntil: "networkidle" });
-    await signIn(page);
-    await page.evaluate(() => {
-      window.location.hash = "/?firstAgent=done";
-    });
-    await page.getByTestId("first-agent-stage").waitFor({ state: "visible" });
-    await page.getByTestId("first-agent-mention-name").waitFor({
-      state: "visible",
-    });
-    await page.waitForFunction((expected) => {
-      const el = document.querySelector(
-        '[data-testid="first-agent-mention-name"]'
-      );
-      return (
-        el?.textContent === expected && el.getAttribute("title") === expected
-      );
-    }, FIRST_AGENT_LONG_NAME);
-    await page.mouse.move(viewport.width + 80, viewport.height + 80);
-    await waitForAnimations(page);
-    const probe = await page.evaluate(() => {
-      const name = document.querySelector(
-        '[data-testid="first-agent-mention-name"]'
-      );
-      const handle = document.querySelector(
-        '[data-testid="first-agent-mention-handle"]'
-      );
-      if (!(name instanceof HTMLElement) || !(handle instanceof HTMLElement)) {
-        return { missing: true };
-      }
-      const nameRect = name.getBoundingClientRect();
-      const handleRect = handle.getBoundingClientRect();
-      return {
-        missing: false,
-        title: name.getAttribute("title"),
-        overflow: name.scrollWidth > name.clientWidth,
-        nameRight: nameRect.right,
-        handleRight: handleRect.right,
-        handleText: handle.textContent,
-        handleTitle: handle.getAttribute("title"),
-        handleOverflow: handle.scrollWidth > handle.clientWidth,
-      };
-    });
-    if (probe.missing) {
-      throw new Error(
-        `first-agent long-name ${scheme} 390: mention name missing`
-      );
-    }
-    if (probe.nameRight > viewport.width + 1) {
-      throw new Error(
-        `first-agent long-name ${scheme} 390: name right ${probe.nameRight}`
-      );
-    }
-    if (probe.handleRight > viewport.width + 1) {
-      throw new Error(
-        `first-agent long-name ${scheme} 390: handle right ${probe.handleRight}`
-      );
-    }
-    if (probe.overflow !== true) {
-      throw new Error(
-        `first-agent long-name ${scheme} 390: ellipsis did not fire (${JSON.stringify(probe)})`
-      );
-    }
-    if (probe.title !== FIRST_AGENT_LONG_NAME) {
-      throw new Error(
-        `first-agent long-name ${scheme} 390: title ${JSON.stringify(probe.title)}`
-      );
-    }
-    if (!String(probe.handleText).includes("@kim-intern")) {
-      throw new Error(
-        `first-agent long-name ${scheme} 390: handle ${JSON.stringify(probe.handleText)}`
-      );
-    }
-    if (probe.handleOverflow === true && probe.handleTitle !== probe.handleText) {
-      throw new Error(
-        `first-agent long-name ${scheme} 390: handle truncated without title (${JSON.stringify(probe)})`
-      );
-    }
-    if (probe.handleOverflow !== true && probe.handleTitle != null) {
-      throw new Error(
-        `first-agent long-name ${scheme} 390: handle title without overflow (${JSON.stringify(probe)})`
-      );
-    }
-    const path = beginSceneFromShotPath(
-      `${OUT_DIR}/first-agent-done-longname-390-${scheme}.png`
-    );
-    await page.screenshot({ path });
-    shots.push(path);
-    await context.close();
   }
   return shots;
 }
@@ -14424,6 +14111,11 @@ async function main() {
             }))
           );
         }
+      } else if (profile === "welcome") {
+        for (const scheme of ["light", "dark"]) {
+          assertThisPreview();
+          all.push(...(await captureWelcomeKickoffScenes(browser, scheme)));
+        }
       } else if (profile === "first-agent") {
         for (const scheme of ["light", "dark"]) {
           assertThisPreview();
@@ -14479,6 +14171,7 @@ async function main() {
         profile !== "accent" &&
         profile !== "gallery" &&
         profile !== "agents" &&
+        profile !== "welcome" &&
         profile !== "first-agent"
       ) {
         for (const scheme of ["light", "dark"]) {
