@@ -5,11 +5,11 @@ import {
   useState,
   useSyncExternalStore,
   type FormEvent,
-  type ReactNode,
 } from "react";
 import { ArrowLeft, FlaskConical } from "lucide-react";
 import { usePrefersReducedMotion } from "@/design/hooks/usePrefersReducedMotion";
 import {
+  ApiError,
   changeMyDisplayName,
   joinWithInvite,
   login,
@@ -27,7 +27,6 @@ import {
   TEST_PREFILL_ACTIVE,
 } from "@/lib/env";
 import {
-  SERVER_URL_PLACEHOLDER,
   getServerBase,
   normalizeServerUrl,
   requiresServerUrl,
@@ -35,13 +34,6 @@ import {
 } from "@/lib/serverBase";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-} from "@/design/ui/card";
-import { OortMark } from "@/design/brand/OortMark";
 import { InlineBanner } from "@/features/common/States";
 import { RuntimeBadge } from "@/app/RuntimeBadge";
 import {
@@ -50,10 +42,6 @@ import {
 } from "@/features/welcome/freshSignupFirstRun";
 import { titlebarDragProps } from "@/app/sidebarPane";
 import { UpdateNotice } from "@/features/updates/UpdateNotice";
-import { DiscoveredServerList } from "./DiscoveredServerList";
-import { useDiscoveredServers, type DiscoveredServer } from "./discovery";
-import { LandingStep } from "./LandingStep";
-import { OnboardingSlideTransition } from "./OnboardingSlideTransition";
 import { onboardingDots } from "@momo/core/features/onboarding/guide";
 import { KomettoGuide } from "@/features/onboarding/guide/KomettoGuide";
 import { OnboardingDots } from "@/features/onboarding/guide/OnboardingDots";
@@ -63,11 +51,11 @@ import {
   OnboardingColumn,
   OnboardingFrame,
 } from "@/features/onboarding/guide/OnboardingFrame";
+import { useDiscovery } from "./discovery";
+import { OnboardingSlideTransition } from "./OnboardingSlideTransition";
 import {
-  gatewayPrefillFocus,
   initialOnboarding,
   transitionFor,
-  type OnboardingPath,
   type OnboardingStep,
   type OnboardingTransitionDirection,
   type OnboardingTransitionEffect,
@@ -76,11 +64,8 @@ import { readRecentServers, rememberRecentServer } from "./recentServers";
 import { useJoinPrefill } from "./useJoinPrefill";
 import {
   joinFailureCopy,
-  prefillFocus,
   signInFailureCopy,
   type ConnectFailure,
-  type ConnectField,
-  type ConnectMode,
 } from "@momo/core/features/auth/connectModel";
 import {
   displayNameFieldError,
@@ -90,16 +75,23 @@ import {
   holdSessionRestore,
   releaseSessionRestore,
 } from "./onboardingSessionHold";
-
-type ShellFocus =
-  | ConnectField
-  | "next"
-  | "choose-server"
-  | "choose-invite"
-  | "profile-name";
+import { classifyEntry } from "./entryInput";
+import { claimHandoff, navigateTo } from "./claimHandoff";
+import { connectGuide } from "./connectGuide";
+import { OnboardingFieldBlock, ServerChip } from "./connectParts";
+import { settleAfterJoin } from "./joinFollowUp";
+import { WelcomeStep } from "./WelcomeStep";
 
 // Reading this as: onboarding for internal team users on web+Tauri,
-// density 5/10, motion 4/10 (S0 landing only; S1/S2 stay the connect form).
+// density 5/10, motion 2/10.
+//
+// 로그인 전 온보딩 2.0 (ADR-0193 D7·D10·D11).
+//   D0 welcome  (#2808) 한 칸이 팀 주소·초대 링크·claim 링크를 가른다
+//   D1 sign-in  (#2809) 서버 칩 + 이메일 + 비밀번호. 필수 입력 화면 1
+//   D1′ join    (#2810) 링크가 채운 서버·코드 + 이메일 + 새 비밀번호 + 표시 이름
+// 옛 S0·S1(gateway)·S2(account)·S3(profile) 네 화면을 이 셋으로 합쳤다.
+
+type Focus = "entry" | "email" | "password" | "profile-name" | "submit";
 
 function subscribeOnline(onChange: () => void): () => void {
   window.addEventListener("online", onChange);
@@ -114,13 +106,8 @@ function readOnline(): boolean {
   return typeof navigator === "undefined" ? true : navigator.onLine;
 }
 
-function readInitialOnboarding(): {
-  step: OnboardingStep;
-  path: OnboardingPath | null;
-} {
-  if (typeof window === "undefined") {
-    return { step: "landing", path: null };
-  }
+function readInitialStep(): OnboardingStep {
+  if (typeof window === "undefined") return "welcome";
   const prefill = parseJoinFromPageUrl(window.location.href);
   return initialOnboarding({
     hasStoredServer: getServerBase() !== null,
@@ -128,24 +115,11 @@ function readInitialOnboarding(): {
   });
 }
 
-const WORKSPACE_ID_PLACEHOLDER = "00000000-0000-0000-0000-000000000000";
-
-function FieldLabel({
-  children,
-  optional = false,
-}: {
-  children: ReactNode;
-  optional?: boolean;
-}) {
-  return (
-    <span className="flex items-baseline gap-2">
-      <span className="text-ink-muted">{children}</span>
-      <span className="text-meta text-ink-muted">
-        {optional ? "선택" : "필수"}
-      </span>
-    </span>
-  );
+function pageHost(): string {
+  return typeof window === "undefined" ? "" : window.location.host;
 }
+
+const WORKSPACE_ID_PLACEHOLDER = "00000000-0000-0000-0000-000000000000";
 
 export function ConnectPage({
   onLoggedIn,
@@ -154,50 +128,51 @@ export function ConnectPage({
 }) {
   const requiresServer = requiresServerUrl();
   const reducedMotion = usePrefersReducedMotion();
-  const started = useRef(readInitialOnboarding());
-  const [step, setStep] = useState<OnboardingStep>(started.current.step);
-  const [path, setPath] = useState<OnboardingPath | null>(started.current.path);
+  const initialStep = useRef<OnboardingStep | null>(null);
+  if (initialStep.current === null) initialStep.current = readInitialStep();
+  const [step, setStep] = useState<OnboardingStep>(initialStep.current);
   const [direction, setDirection] =
     useState<OnboardingTransitionDirection>("forward");
   const [effect, setEffect] = useState<OnboardingTransitionEffect>("none");
   const [recent, setRecent] = useState(readRecentServers);
 
+  // 이 화면이 향하는 서버. "" = 이 페이지를 낸 서버(웹 같은 출처).
   const [serverUrl, setServerUrl] = useState(
     () => getServerBase() ?? API_BASE_DEFAULT
   );
+  const [entry, setEntry] = useState("");
+  const [entryError, setEntryError] = useState<string | null>(null);
+  // 서버 없이 코드만 받은 데스크탑: D0에서 서버를 마저 묻는다.
+  const [pendingCode, setPendingCode] = useState<string | null>(null);
   const [email, setEmail] = useState(DEV_EMAIL);
   const [password, setPassword] = useState(DEV_PASSWORD);
   const [workspace, setWorkspace] = useState(CONFIGURED_WORKSPACE);
   const [workspaceOpen, setWorkspaceOpen] = useState(CONFIGURED_WORKSPACE !== "");
   const [inviteCode, setInviteCode] = useState("");
-  const [mode, setMode] = useState<ConnectMode>(
-    started.current.path === "invite" ? "join" : "signIn"
-  );
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<ConnectFailure | null>(null);
-  const [serverError, setServerError] = useState<string | null>(null);
-  const [pendingFocus, setPendingFocus] = useState<ShellFocus | null>(null);
-  const [pendingJoin, setPendingJoin] = useState<JoinResponse | null>(null);
+  const [fieldError, setFieldError] = useState<{
+    field: "email" | "password";
+    message: string;
+  } | null>(null);
+  const [pendingFocus, setPendingFocus] = useState<Focus | null>(null);
+  // 가입은 됐고 표시 이름 저장만 실패한 상태(fail-forward). 계정이 생겼으므로
+  // 이 화면은 더 이상 가입 폼이 아니다: 뒤로가 없고 이메일·비밀번호는 잠긴다.
+  const [joined, setJoined] = useState<JoinResponse | null>(null);
   const [profileName, setProfileName] = useState("");
   const [profileBusy, setProfileBusy] = useState(false);
   const [profileFailed, setProfileFailed] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
   const online = useSyncExternalStore(subscribeOnline, readOnline, () => true);
-  const discovered = useDiscoveredServers();
+  const discovery = useDiscovery();
   const prefill = useJoinPrefill();
 
-  const serverRef = useRef<HTMLInputElement>(null);
+  const entryRef = useRef<HTMLInputElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
-  const codeRef = useRef<HTMLInputElement>(null);
-  const nextRef = useRef<HTMLButtonElement>(null);
-  const chooseServerRef = useRef<HTMLButtonElement>(null);
-  const chooseInviteRef = useRef<HTMLButtonElement>(null);
   const profileNameRef = useRef<HTMLInputElement>(null);
+  const submitRef = useRef<HTMLButtonElement>(null);
   const profileBusyRef = useRef(false);
-
-  const typed = useRef({ serverUrl, email, password });
-  typed.current = { serverUrl, email, password };
   const stepRef = useRef(step);
   stepRef.current = step;
 
@@ -207,208 +182,221 @@ export function ConnectPage({
     };
   }, []);
 
-  const focusLater = useCallback((field: ShellFocus) => {
+  const focusLater = useCallback((field: Focus) => {
     setPendingFocus(field);
   }, []);
 
   const goTo = useCallback(
-    (next: OnboardingStep, nextPath?: OnboardingPath) => {
-      const move = transitionFor(step, next, reducedMotion);
+    (next: OnboardingStep) => {
+      const move = transitionFor(stepRef.current, next, reducedMotion);
       setDirection(move.direction);
       setEffect(move.effect);
       setStep(next);
-      if (nextPath) setPath(nextPath);
     },
-    [reducedMotion, step]
+    [reducedMotion]
   );
 
   useEffect(() => {
     if (!pendingFocus) return;
     const node = {
-      server: serverRef.current,
+      entry: entryRef.current,
       email: emailRef.current,
       password: passwordRef.current,
-      code: codeRef.current,
-      next: nextRef.current,
-      "choose-server": chooseServerRef.current,
-      "choose-invite": chooseInviteRef.current,
       "profile-name": profileNameRef.current,
+      submit: submitRef.current,
     }[pendingFocus];
-    // Stay pending until the step that owns the node has mounted. Clearing
-    // on a miss is what made the old single-form prefillFocus a silent no-op
-    // on S1 (email/password refs are not in the tree).
+    // 그 칸을 가진 화면이 마운트될 때까지 기다린다.
     if (!node) return;
     node.focus();
     setPendingFocus(null);
   }, [pendingFocus, step]);
 
+  // 첫 그림의 커서: D0은 입력 칸, D1은 이메일(채워져 있으면 비밀번호), D1′은 이메일.
   useEffect(() => {
-    if (!prefill) return;
-    if (prefill.serverUrl !== "") {
-      setServerUrl(prefill.serverUrl);
-      setServerError(null);
-    }
-    const openedByInvite = prefill.inviteCode !== "";
-    if (openedByInvite) {
-      setInviteCode(prefill.inviteCode);
-      setMode("join");
-      setPath("invite");
-      // Replay mask-reveal only when this link actually leaves S0. A cold
-      // start that already opened on S1 must not animate a step that did
-      // not change.
-      if (stepRef.current === "landing") {
-        const move = transitionFor("landing", "gateway", reducedMotion);
-        setDirection(move.direction);
-        setEffect(move.effect);
-        setStep("gateway");
-      }
-    }
-    setFailure(null);
-    const serverUrlNow = prefill.serverUrl || typed.current.serverUrl;
-    const landsOnGateway = openedByInvite || stepRef.current === "gateway";
-    if (landsOnGateway) {
-      focusLater(
-        gatewayPrefillFocus({
-          serverUrl: serverUrlNow,
-          inviteCode: prefill.inviteCode,
-          requiresServer,
-          joinPath: openedByInvite,
-        })
-      );
-    } else {
-      focusLater(
-        prefillFocus({
-          serverUrl: serverUrlNow,
-          email: typed.current.email,
-          password: typed.current.password,
-          requiresServer,
-        })
-      );
-    }
-  }, [prefill, requiresServer, focusLater, reducedMotion]);
+    const first = initialStep.current;
+    if (first === "welcome") focusLater("entry");
+    else if (first === "sign-in") {
+      focusLater(DEV_EMAIL.trim() === "" ? "email" : "password");
+    } else focusLater("email");
+  }, [focusLater]);
 
-  function selectDiscovered(server: DiscoveredServer) {
-    setServerUrl(server.base);
-    setServerError(null);
-    setFailure(null);
-    focusLater(email.trim() === "" ? "email" : "password");
-  }
-
-  function commitServer(): boolean {
-    const raw = serverUrl.trim();
-    if (raw === "") {
-      if (requiresServer) {
-        setServerError("서버 주소를 입력하세요.");
-        focusLater("server");
-        return false;
-      }
+  /** 서버를 이 기기의 선택으로 굳힌다. "" = 같은 출처(웹). */
+  const commitServer = useCallback((base: string) => {
+    if (base === "") {
       setServerBase(null);
-      return true;
+      setServerUrl("");
+      return;
     }
-    const checked = normalizeServerUrl(raw);
-    if (!checked.ok) {
-      setServerError(checked.message);
-      focusLater("server");
-      return false;
-    }
+    const checked = normalizeServerUrl(base);
+    if (!checked.ok) return;
     setServerBase(checked.base);
     setServerUrl(checked.base);
     rememberRecentServer(checked.base);
     setRecent(readRecentServers());
-    return true;
-  }
+  }, []);
 
-  async function attempt() {
-    setFailure(null);
-    setServerError(null);
-    if (!commitServer()) return;
-    setBusy(true);
-    try {
-      if (mode === "join") {
-        holdSessionRestore();
-        const session = await joinWithInvite(inviteCode, email, password);
-        if (session.createdMember) {
-          // Written at join success, before S3. sessionStorage survives a
-          // same-tab reload, so a reload at S3 keeps the UX-R2b kickoff marker.
-          // The four markers are one helper shared with ClaimPage (#2301).
-          recordFreshSignupFirstRun(session);
-          setPendingJoin(session);
-          setProfileName(session.member.displayName);
-          setProfileFailed(false);
-          setProfileError(null);
-          goTo("profile");
-          focusLater("profile-name");
-          return;
-        }
-        // An existing member re-joining still gets the two pending stages.
-        recordFirstRunPending(session.member.workspaceId);
-        onLoggedIn(session);
-        releaseSessionRestore();
+  const enterSignIn = useCallback(
+    (base: string) => {
+      commitServer(base);
+      setFailure(null);
+      setEntryError(null);
+      setPendingCode(null);
+      goTo("sign-in");
+      focusLater(email.trim() === "" ? "email" : "password");
+    },
+    [commitServer, email, focusLater, goTo]
+  );
+
+  const enterJoin = useCallback(
+    (base: string, code: string) => {
+      commitServer(base);
+      setInviteCode(code);
+      setFailure(null);
+      setEntryError(null);
+      setPendingCode(null);
+      goTo("join");
+      focusLater("email");
+    },
+    [commitServer, focusLater, goTo]
+  );
+
+  // 딥링크(데스크탑 `oort://join`, 브라우저 `?code=`)가 이 화면을 연 뒤에도 새
+  // 링크가 오면 다시 적용한다. 링크는 D0을 건너뛴다(ADR-0193 D7).
+  useEffect(() => {
+    if (!prefill) return;
+    if (prefill.inviteCode !== "") {
+      const base = prefill.serverUrl || getServerBase() || "";
+      if (base === "" && requiresServer) {
+        setPendingCode(prefill.inviteCode);
+        goTo("welcome");
+        focusLater("entry");
         return;
       }
+      enterJoin(base, prefill.inviteCode);
+      return;
+    }
+    if (prefill.serverUrl !== "") enterSignIn(prefill.serverUrl);
+    // enterJoin/enterSignIn은 email을 읽는다. 새 링크가 올 때만 다시 돈다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill]);
+
+  function onWelcomeSubmit() {
+    setEntryError(null);
+    const decision = classifyEntry(entry);
+    switch (decision.kind) {
+      case "empty":
+        if (!requiresServer) {
+          // 웹: 빈 칸은 「이 페이지의 서버」다(옛 S1의 「비워 두면 …」 그대로).
+          if (pendingCode) enterJoin("", pendingCode);
+          else enterSignIn("");
+          return;
+        }
+        setEntryError("팀 주소나 초대 링크를 넣으세요. 예: https://team.example.com");
+        focusLater("entry");
+        return;
+      case "server":
+        if (pendingCode) enterJoin(decision.base, pendingCode);
+        else enterSignIn(decision.base);
+        return;
+      case "invite": {
+        const base = decision.serverUrl || getServerBase() || "";
+        if (base === "" && requiresServer) {
+          setPendingCode(decision.inviteCode);
+          setEntry("");
+          focusLater("entry");
+          return;
+        }
+        enterJoin(base, decision.inviteCode);
+        return;
+      }
+      case "claim": {
+        const move = claimHandoff({
+          origin: decision.origin,
+          token: decision.token,
+          pageOrigin: window.location.origin,
+          isTauri: IS_TAURI,
+        });
+        if (move.serverBase !== undefined) setServerBase(move.serverBase);
+        navigateTo(move.href);
+        return;
+      }
+      case "invalid":
+        setEntryError(decision.message);
+        focusLater("entry");
+        return;
+    }
+  }
+
+  /**
+   * D0로 돌아간다. 링크로 연 D1′에서 뒤로를 누르면 초대 코드를 들고 간다: D0이
+   * 「초대 코드를 받았어요. 어느 팀 서버인가요?」로 이어받고 [계속]은 다시 D1′이다.
+   * 코드 판정 오류의 [링크 다시 넣기]는 코드를 버린다(그 코드는 쓸 수 없다).
+   */
+  function backToWelcome(options: { keepInvite?: boolean } = {}) {
+    setFailure(null);
+    setFieldError(null);
+    setPendingCode(options.keepInvite && step === "join" && inviteCode !== "" ? inviteCode : null);
+    setEntry(serverUrl);
+    goTo("welcome");
+    focusLater("entry");
+  }
+
+  async function signIn() {
+    setFailure(null);
+    setFieldError(null);
+    // 빈 칸은 서버에 묻기 전에 그 칸에서 말한다.
+    if (email.trim() === "") {
+      setFieldError({ field: "email", message: "이메일을 넣으세요." });
+      focusLater("email");
+      return;
+    }
+    if (password === "") {
+      setFieldError({ field: "password", message: "비밀번호를 넣으세요." });
+      focusLater("password");
+      return;
+    }
+    setBusy(true);
+    try {
       const session = await login(email, password, workspace);
       onLoggedIn(session);
     } catch (err) {
-      if (mode === "join") releaseSessionRestore();
-      const next = mode === "join" ? joinFailureCopy(err) : signInFailureCopy(err);
-      setFailure(next);
-      if (next.onGateway) {
-        goTo("gateway");
-        focusLater("code");
-      } else if (next.suggestSignIn) {
-        setMode("signIn");
+      const copy = signInFailureCopy(err);
+      if (err instanceof ApiError && err.status === 401) {
+        // 이메일·비밀번호 판정은 문제 자리(비밀번호 칸)에서 다음 행동과 함께 말한다.
+        setFieldError({
+          field: "password",
+          message: `${copy.message} 비밀번호를 다시 넣고 들어가기를 누르세요.`,
+        });
+      } else {
+        setFailure(copy);
       }
+      // 비밀번호는 실패 뒤에 남기지 않는다(#2809). 다시 넣고 들어간다.
+      setPassword("");
+      focusLater("password");
     } finally {
       setBusy(false);
     }
   }
 
-  function onGatewaySubmit(e: FormEvent) {
-    e.preventDefault();
-    setFailure(null);
-    if (!commitServer()) return;
-    if (path === "invite" && inviteCode.trim() === "") {
-      focusLater("code");
-      return;
-    }
-    goTo("account");
-    focusLater("email");
-  }
-
-  function onAccountSubmit(e: FormEvent) {
-    e.preventDefault();
-    void attempt();
-  }
-
-  function finishProfile(join: JoinResponse, member: Member) {
+  function finishJoin(join: JoinResponse, member: Member) {
     onLoggedIn({ ...join, member });
     releaseSessionRestore();
   }
 
-  function handleProfileSkip(join: JoinResponse) {
-    finishProfile(join, join.member);
-  }
-
   async function patchProfileName(join: JoinResponse) {
     if (profileBusyRef.current) return;
-    if (displayNameFieldError(profileName) !== null) return;
     profileBusyRef.current = true;
     setProfileBusy(true);
     setProfileError(null);
     try {
-      const member = await changeMyDisplayName(
-        join.member.workspaceId,
-        profileName
-      );
-      finishProfile(join, member);
+      const member = await changeMyDisplayName(join.member.workspaceId, profileName);
+      finishJoin(join, member);
     } catch (err) {
       setProfileFailed(true);
       setProfileError(
         `${displayNameSaveMessage(err)} 설정 › 프로필에서 언제든 바꿀 수 있어요.`
       );
-      // InlineBanner is role="alert" (States.tsx:276), not a focus target.
-      // The name field is; landing there keeps Enter-driven keyboard users
-      // on the card instead of <body> (whose first Tab stop was 건너뛰기).
+      // 배너는 role="alert"이고 포커스 자리가 아니다. 이름 칸이 포커스 자리다.
       focusLater("profile-name");
     } finally {
       profileBusyRef.current = false;
@@ -416,112 +404,90 @@ export function ConnectPage({
     }
   }
 
-  function handleProfileSave(join: JoinResponse) {
-    if (profileFailed) {
-      finishProfile(join, join.member);
+  function wantsNamePatch(join: JoinResponse): boolean {
+    const name = profileName.trim();
+    return name !== "" && name !== join.member.displayName.trim();
+  }
+
+  async function join() {
+    setFailure(null);
+    setBusy(true);
+    holdSessionRestore();
+    let session: JoinResponse;
+    try {
+      session = await joinWithInvite(inviteCode, email, password);
+    } catch (err) {
+      releaseSessionRestore();
+      const next = joinFailureCopy(err);
+      setFailure(next);
+      setBusy(false);
+      if (next.suggestSignIn) {
+        goTo("sign-in");
+        focusLater("password");
+      }
       return;
     }
-    void patchProfileName(join);
+    if (session.createdMember) {
+      // 가입 성공 순간에 쓴다. 이름 저장보다 먼저, 한 번(#2301).
+      recordFreshSignupFirstRun(session);
+    } else {
+      // 이미 있던 멤버의 재가입도 첫 실행 두 표지를 받는다.
+      recordFirstRunPending(session.member.workspaceId);
+    }
+    // 활성 에이전트가 있으면 AI 연결을 건너뛴다(#2810, ADR-0185 c1).
+    await settleAfterJoin(session.member.workspaceId);
+    setBusy(false);
+    if (session.createdMember && wantsNamePatch(session)) {
+      setJoined(session);
+      await patchProfileName(session);
+      return;
+    }
+    finishJoin(session, session.member);
   }
 
-  function handleProfileRetry(join: JoinResponse) {
-    setProfileFailed(false);
-    void patchProfileName(join);
-  }
-
-  function onProfileSubmit(e: FormEvent, join: JoinResponse) {
+  function onSignInSubmit(e: FormEvent) {
     e.preventDefault();
-    handleProfileSave(join);
+    if (busy) return;
+    void signIn();
   }
 
-  const serverHint = requiresServer
-    ? "데스크톱 앱은 접속할 서버 주소가 필요합니다."
-    : "비워 두면 이 페이지를 제공한 주소로 연결합니다.";
-  const submitLabel =
-    mode === "join"
-      ? busy
-        ? "참여 중…"
-        : "초대 코드로 참여"
-      : busy
-        ? "로그인 중…"
-        : "로그인";
-  const joinPath = path === "invite" || mode === "join";
-  // 진행 점 (ADR-0193 D10, #2807). 지금의 gateway · account · profile은 2.0 흐름의
-  // 한 화면(D1 로그인 / D1′ 초대 수락)을 나눠 그린 것이라 셋 다 그 점 하나에 선다.
-  // 숫자 카운터(2/4 · 3/4 · 4/4)는 이 점으로 바뀌었다. 화면 합치기는 OB2-3·4 몫이다.
-  const dots = joinPath
-    ? onboardingDots("invite", "join")
-    : onboardingDots("login", "sign-in");
-  const profileFieldError = displayNameFieldError(profileName);
-
-  function serverField() {
-    return (
-      <div className="flex flex-col gap-1">
-        <label htmlFor="connect-server" className="text-body">
-          <FieldLabel optional>서버 주소</FieldLabel>
-        </label>
-        <Input
-          id="connect-server"
-          ref={serverRef}
-          className={ONBOARDING_FIELD_CLASS}
-          type="text"
-          inputMode="url"
-          autoComplete="url"
-          spellCheck={false}
-          placeholder={SERVER_URL_PLACEHOLDER}
-          value={serverUrl}
-          onChange={(e) => {
-            setServerUrl(e.target.value);
-            setServerError(null);
-          }}
-          aria-invalid={serverError !== null || undefined}
-          aria-describedby={
-            serverError ? "connect-server-error" : "connect-server-hint"
-          }
-          data-testid="login-server"
-        />
-        {serverError ? (
-          <p
-            id="connect-server-error"
-            role="alert"
-            className="text-meta text-danger"
-            data-testid="login-server-error"
-          >
-            {serverError}
-          </p>
-        ) : (
-          <p
-            id="connect-server-hint"
-            className="text-meta text-ink-muted"
-            data-testid="connect-server-hint"
-          >
-            {serverHint}
-          </p>
-        )}
-        {recent.length > 0 && (
-          <div className="flex flex-wrap gap-2 pt-2" data-testid="connect-recent-servers">
-            {recent.map((base) => (
-              <button
-                key={base}
-                type="button"
-                className="tap-target inline-flex items-center rounded-sm bg-muted-soft px-2 py-1 text-meta text-ink press hover:bg-surface-hover focus-visible:focus-ring"
-                data-testid="connect-recent-server"
-                onClick={() => {
-                  setServerUrl(base);
-                  setServerError(null);
-                  setFailure(null);
-                }}
-              >
-                {base.replace(/^https?:\/\//, "")}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    );
+  function onJoinSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (busy || profileBusy) return;
+    if (joined) {
+      if (profileFailed || !wantsNamePatch(joined)) {
+        finishJoin(joined, joined.member);
+        return;
+      }
+      void patchProfileName(joined);
+      return;
+    }
+    void join();
   }
 
-  const cardChrome = (
+  const profileFieldError =
+    profileName.trim() === "" ? null : displayNameFieldError(profileName);
+
+  const guide = connectGuide(
+    step,
+    {
+      offline: !online,
+      // 409 「이미 가입한 초대」로 D1에 넘어온 것은 실패가 아니라 안내다.
+      failed:
+        (failure !== null && !(step === "sign-in" && failure.suggestSignIn)) ||
+        (step === "sign-in" && fieldError !== null) ||
+        profileError !== null ||
+        (step === "welcome" && entryError !== null),
+      busy: busy || profileBusy,
+    },
+    {
+      pendingInviteCode: pendingCode !== null,
+      nameSaveFailed: joined !== null && profileError !== null,
+      savingName: joined !== null && profileBusy,
+    }
+  );
+
+  const notices = (
     <>
       <UpdateNotice />
       {TEST_PREFILL_ACTIVE && (
@@ -546,227 +512,191 @@ export function ConnectPage({
     </>
   );
 
-  const cardShared = (
-    <>
-      {cardChrome}
-      {discovered.length > 0 && (
-        <DiscoveredServerList
-          servers={discovered}
-          onSelect={selectDiscovered}
-        />
-      )}
-    </>
-  );
-
-  const failureBanner =
-    failure === null ? null : (
+  function failureBanner() {
+    if (failure === null) return null;
+    // 코드 판정(404/409/410/403)은 이 화면에 코드 칸이 없다. 다음 행동은 D0에서
+    // 새 링크를 붙여 넣는 것이다.
+    const relink = failure.onGateway === true;
+    // 로그인 실패는 비밀번호를 비웠으므로 같은 입력으로 다시 보낼 것이 없다.
+    const retry = step === "join" && failure.retryable && !busy;
+    return (
       <InlineBanner
         tone="error"
         message={failure.message}
-        actionLabel={failure.retryable && !busy ? "다시 시도" : undefined}
-        onAction={
-          failure.retryable && !busy ? () => void attempt() : undefined
-        }
+        actionLabel={relink ? "링크 다시 넣기" : retry ? "다시 시도" : undefined}
+        onAction={relink ? () => backToWelcome() : retry ? () => void join() : undefined}
         testId="login-error"
       />
     );
+  }
 
-  // 온보딩 2.0 틀 위의 gateway (#2807 OB2-1). 카드와 C2-04 락업 대신 코메토 머리와
-  // 말풍선이 이 화면의 질문을 말한다. 문구의 최종본과 로그인 한 화면 합치기는
-  // OB2-3(#2809)·OB2-4(#2810) 몫이다.
-  const gatewayCard = (
-    <OnboardingColumn testId="onboarding-gateway">
-      <KomettoGuide
-        as="h1"
-        expression="idle"
-        line={joinPath ? "초대받은 팀으로 가 볼까요?" : "어느 팀 서버로 들어갈까요?"}
-        detail={
-          joinPath
-            ? "서버 주소와 초대 코드를 넣어 주세요."
-            : "주소를 넣으면 다음에 이메일을 물어요."
-        }
-      />
-      {cardShared}
-      <form onSubmit={onGatewaySubmit} className="flex flex-col gap-4">
-        {serverField()}
-        {joinPath && (
-          <label className="flex flex-col gap-1 text-body">
-            <FieldLabel>초대 코드</FieldLabel>
+  const footer = (
+    <div className="flex justify-end">
+      <RuntimeBadge />
+    </div>
+  );
+
+  const chipBase = serverUrl === "" ? `https://${pageHost()}` : serverUrl;
+
+  const signInScreen = (
+    <OnboardingColumn testId="onboarding-sign-in">
+      <div data-onboarding-screen="sign-in" className="contents">
+        <KomettoGuide as="h1" expression={guide.expression} line={guide.line} detail={guide.detail} />
+        <ServerChip base={chipBase} onChange={() => backToWelcome()} changeDisabled={busy} />
+        {notices}
+        <form onSubmit={onSignInSubmit} className="flex flex-col gap-4" noValidate>
+          <OnboardingFieldBlock
+            id="connect-email"
+            label="이메일"
+            error={fieldError?.field === "email" ? fieldError.message : null}
+            errorId="connect-email-error"
+            errorTestId="login-email-error"
+          >
             <Input
-              ref={codeRef}
+              id="connect-email"
+              ref={emailRef}
               className={ONBOARDING_FIELD_CLASS}
-              value={inviteCode}
-              onChange={(e) => setInviteCode(e.target.value)}
-              autoComplete="off"
-              spellCheck={false}
+              type="email"
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                if (fieldError?.field === "email") setFieldError(null);
+              }}
+              autoComplete="username"
               required
-              data-testid="login-invite-code"
+              aria-invalid={fieldError?.field === "email" || undefined}
+              aria-describedby={fieldError?.field === "email" ? "connect-email-error" : undefined}
+              data-testid="login-email"
             />
-          </label>
-        )}
-        {failure?.onGateway && failureBanner}
-        <Button
-          ref={nextRef}
-          type="submit"
-          className={ONBOARDING_ACTION_CLASS}
-          data-testid="onboarding-next"
-        >
-          다음
-        </Button>
-      </form>
-      <div className="flex justify-end">
-        <RuntimeBadge />
+          </OnboardingFieldBlock>
+          <OnboardingFieldBlock
+            id="connect-password"
+            label="비밀번호"
+            error={fieldError?.field === "password" ? fieldError.message : null}
+            errorId="connect-password-error"
+            errorTestId="login-password-error"
+          >
+            <Input
+              id="connect-password"
+              ref={passwordRef}
+              className={ONBOARDING_FIELD_CLASS}
+              type="password"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                if (fieldError?.field === "password") setFieldError(null);
+              }}
+              autoComplete="current-password"
+              required
+              aria-invalid={fieldError?.field === "password" || undefined}
+              aria-describedby={fieldError?.field === "password" ? "connect-password-error" : undefined}
+              data-testid="login-password"
+            />
+          </OnboardingFieldBlock>
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => setWorkspaceOpen((open) => !open)}
+              aria-expanded={workspaceOpen}
+              aria-controls="connect-workspace-field"
+              className="tap-target press self-start rounded-sm text-meta text-ink-muted underline underline-offset-4 hover:text-ink focus-visible:focus-ring"
+              data-testid="login-workspace-toggle"
+            >
+              다른 워크스페이스로 로그인
+            </button>
+            {workspaceOpen && (
+              <div id="connect-workspace-field">
+                <OnboardingFieldBlock
+                  id="connect-workspace"
+                  label="워크스페이스 ID"
+                  optional
+                  hint="비워 두면 기본 워크스페이스로 연결합니다."
+                  hintId="connect-workspace-hint"
+                >
+                  <Input
+                    id="connect-workspace"
+                    className={ONBOARDING_FIELD_CLASS}
+                    value={workspace}
+                    onChange={(e) => setWorkspace(e.target.value)}
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder={WORKSPACE_ID_PLACEHOLDER}
+                    aria-describedby="connect-workspace-hint"
+                    data-testid="login-workspace"
+                  />
+                </OnboardingFieldBlock>
+              </div>
+            )}
+          </div>
+          {failureBanner()}
+          <Button
+            ref={submitRef}
+            type="submit"
+            className={ONBOARDING_ACTION_CLASS}
+            disabled={!online}
+            aria-busy={busy || undefined}
+            title={online ? undefined : "오프라인 상태에서는 연결할 수 없습니다."}
+            data-testid="login-submit"
+          >
+            {busy ? "들어가는 중…" : "들어가기"}
+          </Button>
+        </form>
+        {footer}
       </div>
     </OnboardingColumn>
   );
 
-  const accountCard = (
-    <Card className="mx-auto w-full max-w-sm" data-testid="onboarding-account">
-      <CardHeader>
-        <h1 className="brand-lockup flex items-center gap-2 font-semibold leading-none tracking-tight">
-          <OortMark className="size-6 shrink-0 text-signal-text" />
-          <span className="text-title">oort</span>
-        </h1>
-        <CardDescription>
-          {mode === "join"
-            ? "초대 코드로 워크스페이스에 참여합니다."
-            : "가입할 때 쓴 이메일로 로그인합니다."}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        {cardShared}
-        <form onSubmit={onAccountSubmit} className="flex flex-col gap-6">
-          <div className="flex flex-col gap-3">
-            <label className="flex flex-col gap-1 text-body">
-              <FieldLabel>이메일</FieldLabel>
-              <Input
-                ref={emailRef}
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoComplete="username"
-                required
-                aria-describedby="connect-email-hint"
-                data-testid="login-email"
-              />
-              <span
-                id="connect-email-hint"
-                className="text-meta text-ink-muted"
-                data-testid="login-email-hint"
-              >
-                워크스페이스에 초대받은 주소
-              </span>
-            </label>
-            <label className="flex flex-col gap-1 text-body">
-              <FieldLabel>비밀번호</FieldLabel>
-              <Input
-                ref={passwordRef}
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete={
-                  mode === "join" ? "new-password" : "current-password"
-                }
-                required
-                aria-describedby="connect-password-hint"
-                data-testid="login-password"
-              />
-              <span
-                id="connect-password-hint"
-                className="text-meta text-ink-muted"
-                data-testid="login-password-hint"
-              >
-                {mode === "join"
-                  ? "이 워크스페이스에서 쓸 비밀번호를 새로 정합니다"
-                  : "가입할 때 정한 비밀번호"}
-              </span>
-            </label>
-            {mode === "signIn" && (
-              <div className="flex flex-col gap-2">
-                <button
-                  type="button"
-                  onClick={() => setWorkspaceOpen((open) => !open)}
-                  aria-expanded={workspaceOpen}
-                  aria-controls="connect-workspace-field"
-                  className="self-start rounded-sm text-meta text-ink-muted underline underline-offset-4 hover:text-ink focus-visible:focus-ring"
-                  data-testid="login-workspace-toggle"
-                >
-                  다른 워크스페이스로 로그인
-                </button>
-                {workspaceOpen && (
-                  <div
-                    id="connect-workspace-field"
-                    className="flex flex-col gap-1"
-                  >
-                    <label htmlFor="connect-workspace" className="text-body">
-                      <FieldLabel optional>워크스페이스 ID</FieldLabel>
-                    </label>
-                    <Input
-                      id="connect-workspace"
-                      value={workspace}
-                      onChange={(e) => setWorkspace(e.target.value)}
-                      autoComplete="off"
-                      spellCheck={false}
-                      placeholder={WORKSPACE_ID_PLACEHOLDER}
-                      aria-describedby="connect-workspace-hint"
-                      data-testid="login-workspace"
-                    />
-                    <p
-                      id="connect-workspace-hint"
-                      className="text-meta text-ink-muted"
-                      data-testid="login-workspace-hint"
-                    >
-                      비워 두면 기본 워크스페이스로 연결합니다.
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-          <div className="flex flex-col gap-3">
-            {failure && !failure.onGateway && failureBanner}
-            <Button
-              type="submit"
-              disabled={busy || !online}
-              title={
-                online ? undefined : "오프라인 상태에서는 연결할 수 없습니다."
-              }
-              data-testid="login-submit"
-            >
-              {submitLabel}
-            </Button>
-          </div>
-        </form>
-        <div className="flex justify-end border-t border-line pt-4">
-          <RuntimeBadge />
-        </div>
-      </CardContent>
-    </Card>
-  );
+  const joinSubmitLabel = joined
+    ? profileFailed
+      ? "계속"
+      : profileBusy
+        ? "저장 중…"
+        : "팀에 들어가기"
+    : busy
+      ? "들어가는 중…"
+      : "팀에 들어가기";
 
-  // Design Read: onboarding for internal team users on web+Tauri,
-  // density 5/10, motion 4/10 (S0 only; S1–S3 stay the connect form).
-  // Capture walks this card (`onboarding-profile`). No e2e lane submits a
-  // join today (`advanceToAccount` defaults to path: "server"), so none
-  // walk S3; a join e2e lane is a gap (NOTES).
-  function renderProfile(join: JoinResponse) {
-    return (
-    <Card className="mx-auto w-full max-w-sm" data-testid="onboarding-profile">
-      <CardHeader>
-        <h1 className="brand-lockup flex items-center gap-2 font-semibold leading-none tracking-tight">
-          <OortMark className="size-6 shrink-0 text-signal-text" />
-          <span className="text-title">oort</span>
-        </h1>
-        <CardDescription>
-          워크스페이스에서 다른 멤버에게 보이는 이름입니다.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        {cardChrome}
-        <form
-          onSubmit={(e) => onProfileSubmit(e, join)}
-          className="flex flex-col gap-6"
-        >
+  const joinScreen = (
+    <OnboardingColumn testId="onboarding-join">
+      <div data-onboarding-screen="join" className="contents">
+        <KomettoGuide as="h1" expression={guide.expression} line={guide.line} detail={guide.detail} />
+        <ServerChip base={chipBase} />
+        {notices}
+        <form onSubmit={onJoinSubmit} className="flex flex-col gap-4" noValidate>
+          <OnboardingFieldBlock id="connect-email" label="이메일">
+            <Input
+              id="connect-email"
+              ref={emailRef}
+              className={ONBOARDING_FIELD_CLASS}
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="username"
+              readOnly={joined !== null}
+              required
+              data-testid="login-email"
+            />
+          </OnboardingFieldBlock>
+          <OnboardingFieldBlock
+            id="connect-password"
+            label="비밀번호"
+            hint="이 워크스페이스에서 쓸 비밀번호를 새로 정합니다."
+            hintId="connect-password-hint"
+          >
+            <Input
+              id="connect-password"
+              ref={passwordRef}
+              className={ONBOARDING_FIELD_CLASS}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+              readOnly={joined !== null}
+              required
+              aria-describedby="connect-password-hint"
+              data-testid="login-password"
+            />
+          </OnboardingFieldBlock>
           {profileError ? (
             <InlineBanner
               tone="error"
@@ -774,15 +704,28 @@ export function ConnectPage({
               messageId="onboarding-profile-banner-text"
               testId="onboarding-profile-banner"
               actionLabel="다시 시도"
-              onAction={() => void handleProfileRetry(join)}
+              onAction={() => {
+                if (!joined) return;
+                setProfileFailed(false);
+                void patchProfileName(joined);
+              }}
               actionBusy={profileBusy}
             />
           ) : null}
-          <label htmlFor="onboarding-profile-name" className="flex flex-col gap-1 text-body">
-            <FieldLabel optional>표시 이름</FieldLabel>
+          <OnboardingFieldBlock
+            id="onboarding-profile-name"
+            label="팀에서 보일 이름"
+            optional
+            hint={profileError ? undefined : "나중에 설정 › 프로필에서 바꿀 수 있습니다."}
+            hintId="onboarding-profile-name-hint"
+            error={profileFieldError}
+            errorId="onboarding-profile-name-error"
+            errorTestId="onboarding-profile-name-error"
+          >
             <Input
-              ref={profileNameRef}
               id="onboarding-profile-name"
+              ref={profileNameRef}
+              className={ONBOARDING_FIELD_CLASS}
               name="displayName"
               value={profileName}
               autoComplete="nickname"
@@ -808,112 +751,82 @@ export function ConnectPage({
                 }
               }}
             />
-            {profileFieldError ? (
-              <p
-                id="onboarding-profile-name-error"
-                role="alert"
-                className="text-meta text-danger"
-                data-testid="onboarding-profile-name-error"
+          </OnboardingFieldBlock>
+          {failureBanner()}
+          <Button
+            ref={submitRef}
+            type="submit"
+            className={ONBOARDING_ACTION_CLASS}
+            // 진행 중은 aria-busy + 「…중」 문장이다. 흐리게 막지 않는다(States.tsx).
+            disabled={
+              joined && profileFailed
+                ? false
+                : !online || profileFieldError !== null
+            }
+            aria-busy={busy || profileBusy || undefined}
+            title={online ? undefined : "오프라인 상태에서는 연결할 수 없습니다."}
+            data-testid="login-submit"
+          >
+            {joinSubmitLabel}
+          </Button>
+          {joined === null && (
+            <p className="break-keep text-center text-meta text-ink-muted" data-testid="join-sign-in-instead">
+              이미 이 서버 계정이 있나요?{" "}
+              <button
+                type="button"
+                className="tap-target press rounded-sm font-semibold text-signal-text underline underline-offset-4 focus-visible:focus-ring"
+                onClick={() => {
+                  setFailure(null);
+                  goTo("sign-in");
+                  focusLater(email.trim() === "" ? "email" : "password");
+                }}
+                data-testid="join-sign-in-link"
               >
-                {profileFieldError}
-              </p>
-            ) : profileError ? null : (
-              <span
-                id="onboarding-profile-name-hint"
-                className="text-meta text-ink-muted"
-              >
-                나중에 설정에서 언제든 바꿀 수 있습니다
-              </span>
-            )}
-          </label>
-          <div className="flex flex-col gap-3">
-            <Button
-              type="submit"
-              // Pending = aria-busy + "저장 중…", still focusable. States.tsx:245-249:
-              // never disabled and never dimmed while the action is running.
-              disabled={
-                profileFailed ? false : !online || profileFieldError !== null
-              }
-              title={
-                online || profileFailed
-                  ? undefined
-                  : "오프라인 상태에서는 연결할 수 없습니다."
-              }
-              aria-busy={profileBusy || undefined}
-              data-testid="onboarding-profile-submit"
-            >
-              {profileFailed
-                ? "계속"
-                : profileBusy
-                  ? "저장 중…"
-                  : "표시 이름 저장"}
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={profileBusy}
-              onClick={() => handleProfileSkip(join)}
-              data-testid="onboarding-profile-skip"
-            >
-              지금은 건너뛰기
-            </Button>
-          </div>
+                로그인
+              </button>
+            </p>
+          )}
         </form>
-        <div className="flex justify-end border-t border-line pt-4">
-          <RuntimeBadge />
-        </div>
-      </CardContent>
-    </Card>
-    );
-  }
-
-  const slide = (
-    <OnboardingSlideTransition
-      transitionKey={`${step}-${path ?? "none"}`}
-      direction={direction}
-      effect={effect}
-      containerClassName={step === "landing" ? "min-h-full" : undefined}
-      className={
-        step === "landing" ? "min-h-full w-full" : "flex w-full justify-center"
-      }
-    >
-      {step === "landing" ? (
-        <LandingStep
-          serverChoiceRef={chooseServerRef}
-          inviteChoiceRef={chooseInviteRef}
-          onChooseServer={() => {
-            setMode("signIn");
-            goTo("gateway", "server");
-            focusLater("server");
-          }}
-          onChooseInvite={() => {
-            setMode("join");
-            goTo("gateway", "invite");
-            focusLater("code");
-          }}
-        />
-      ) : step === "gateway" ? (
-        gatewayCard
-      ) : step === "profile" && pendingJoin ? (
-        renderProfile(pendingJoin)
-      ) : (
-        accountCard
-      )}
-    </OnboardingSlideTransition>
+        {footer}
+      </div>
+    </OnboardingColumn>
   );
 
-  if (step === "landing") {
-    return slide;
-  }
+  const welcomeScreen = (
+    <WelcomeStep
+      guide={guide}
+      entry={entry}
+      onEntryChange={(value) => {
+        setEntry(value);
+        setEntryError(null);
+      }}
+      entryError={entryError}
+      onSubmit={onWelcomeSubmit}
+      entryRef={entryRef}
+      discovery={discovery}
+      recent={recent}
+      onPickServer={(base) => {
+        if (pendingCode) enterJoin(base, pendingCode);
+        else enterSignIn(base);
+      }}
+      sameOriginHint={!requiresServer}
+      notices={notices}
+      footer={footer}
+    />
+  );
+
+  const dots =
+    step === "sign-in"
+      ? onboardingDots("login", "sign-in")
+      : step === "join"
+        ? onboardingDots("invite", "join")
+        : null;
+  const showBack = step !== "welcome" && joined === null;
 
   return (
-    // overflow-x-clip (#2616): S1·S2·S3 사이의 line-slide가 카드를 오른쪽
-    // 48px에서 들여오는 650ms 동안 앱 스크롤러(main.tsx)에 24px 가로 넘침이
-    // 생겼다(WebKit iPhone 실측). 폰에서는 그 사이 화면이 옆으로 끌린다. clip은
-    // 스크롤 상자를 만들지 않고 넘친 몫만 자른다(`OnboardingFrame`이 진다).
-    //
-    // 바닥은 온보딩 2.0 틀이다(#2807): 새벽하늘 canvas 위, 선 없는 56 머리 줄에
-    // 뒤로 · 진행 점. 바닥이 슬라이드 밖에 있어 전환 동안 움직이지 않는다.
+    // overflow-x-clip (#2616)는 `OnboardingFrame`이 진다. 바닥은 새벽하늘 canvas,
+    // 선 없는 56 머리 줄에 뒤로 · 진행 점(#2807). 바닥이 슬라이드 밖이라 전환 동안
+    // 움직이지 않는다. D0은 점이 없고, 머리 줄은 창 드래그 자리로만 남는다.
     <OnboardingFrame
       top={
         <header
@@ -921,27 +834,13 @@ export function ConnectPage({
           data-testid="onboarding-step-chrome"
           {...titlebarDragProps(IS_TAURI)}
         >
-          {/*
-            S3 has no 뒤로: the account exists now, and going back to S2 would
-            re-submit a join. The progress dots stay.
-          */}
-          {step !== "profile" ? (
+          {showBack ? (
             <Button
               type="button"
               variant="ghost"
               data-testid="onboarding-back"
               onPointerDown={(event) => event.stopPropagation()}
-              onClick={() => {
-                if (step === "account") {
-                  goTo("gateway");
-                  focusLater(path === "invite" ? "code" : "server");
-                } else {
-                  goTo("landing");
-                  focusLater(
-                    path === "invite" ? "choose-invite" : "choose-server"
-                  );
-                }
-              }}
+              onClick={() => backToWelcome({ keepInvite: true })}
             >
               <ArrowLeft aria-hidden="true" />
               뒤로
@@ -954,7 +853,18 @@ export function ConnectPage({
         </header>
       }
     >
-      {slide}
+      <OnboardingSlideTransition
+        transitionKey={step}
+        direction={direction}
+        effect={effect}
+        className="flex w-full justify-center"
+      >
+        {step === "welcome"
+          ? welcomeScreen
+          : step === "sign-in"
+            ? signInScreen
+            : joinScreen}
+      </OnboardingSlideTransition>
     </OnboardingFrame>
   );
 }

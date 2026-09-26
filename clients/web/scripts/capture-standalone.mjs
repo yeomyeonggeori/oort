@@ -286,7 +286,7 @@ async function runWorkerChecks(browser) {
   // 오프라인: 셸은 뜨고, 데이터는 없다.
   await context.setOffline(true);
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.getByTestId("onboarding-landing").waitFor({ state: "visible", timeout: 15_000 });
+  await page.getByTestId("onboarding-welcome").waitFor({ state: "visible", timeout: 15_000 });
   const apiOffline = await page.evaluate(async () => {
     try {
       const res = await fetch("/v1/workspaces/x/channels");

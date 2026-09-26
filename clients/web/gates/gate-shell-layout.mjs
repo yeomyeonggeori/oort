@@ -1736,7 +1736,7 @@ async function measureSidebarDrawerIndependence(browser) {
   await page.reload({ waitUntil: "networkidle" });
   await waitForPageCondition(
     page,
-    'document.querySelector(\'[data-testid="channel-list"]\') || document.querySelector(\'[data-testid="onboarding-landing"]\') || document.querySelector(\'[data-testid="onboarding-gateway"]\') || document.querySelector(\'[data-testid="onboarding-account"]\')'
+    'document.querySelector(\'[data-testid="channel-list"]\') || document.querySelector(\'[data-testid="onboarding-welcome"]\') || document.querySelector(\'[data-testid="onboarding-sign-in"]\') || document.querySelector(\'[data-testid="onboarding-join"]\')'
   );
   if (await page.getByTestId("channel-list").isVisible().catch(() => false)) {
     await page.getByTestId("channel-list").waitFor({ state: "visible" });
@@ -1828,17 +1828,18 @@ async function measureConnect(browser) {
   await installMocks(context);
   const page = await context.newPage();
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
-  const landingChoice = page.getByTestId("onboarding-choose-server");
+  // D0(#2808)의 행동은 [계속] 하나다. 짧은 창에서도 스크롤해 닿아야 한다.
+  const landingChoice = page.getByTestId("connect-entry-submit");
   await landingChoice.waitFor({ state: "visible" });
   await landingChoice.scrollIntoViewIfNeeded();
   await page.waitForTimeout(150);
   const landingReach = await page.evaluate(`(() => {
-    const r = document.querySelector('[data-testid="onboarding-choose-server"]').getBoundingClientRect();
+    const r = document.querySelector('[data-testid="connect-entry-submit"]').getBoundingClientRect();
     return { top: Math.round(r.top), bottom: Math.round(r.bottom),
              viewportHeight: window.innerHeight,
              reached: r.top >= 0 && r.bottom <= window.innerHeight };
   })()`);
-  check("연결 화면 짧은 창에서 S0 선택 도달", landingReach.reached === true, JSON.stringify(landingReach));
+  check("연결 화면 짧은 창에서 D0 계속 도달", landingReach.reached === true, JSON.stringify(landingReach));
   await page.screenshot({ path: `${OUT_DIR}/connect-landing-short-window.png` });
   await advanceToAccount(page);
   const submit = page.getByTestId("login-submit");
