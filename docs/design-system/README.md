@@ -199,6 +199,8 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 | `rounded-2xl` | 20 | 카드 · 다이얼로그 · 팝오버 |
 | `rounded-full` | pill | 버튼 · 원형 아이콘 버튼 · 수 배지 |
 
+**온보딩 2.0 예외 (ADR-0193 D11, #2807).** 온보딩 틀(`clients/web/src/features/onboarding/guide/`, `tokens.css` 「온보딩 2.0 공통 틀」 블록)은 owner가 고른 시안을 따라 입력 그릇과 행동 버튼을 높이 44, 반경 10(`--radius-md`)으로 그리고, 보조 행동은 채움 알약이 아니라 `--line-strong` 1px 테두리(`.onboarding-action[data-variant="secondary"]`)다. 주 행동은 여전히 잉크 채움이고 입력 그릇만 `--surface`다. 이 예외는 온보딩 틀 안에서만 유효하다. 제품 셸의 버튼은 §2.2의 채움 알약(`rounded-full`) 규칙을 그대로 따르고, 이 클래스를 온보딩 밖에서 빌려 쓰지 않는다. 같은 틀의 진행 점은 시안의 `--muted-soft` 대신 남은 칸에 `--line-strong`을 써서 바닥 세 정지점 위 비텍스트 3:1을 지킨다(core `ONBOARDING_DOT_ROLES`, `guide.test.ts`).
+
 폰은 `10·14·20·26·30·pill`이다([테마 토큰 표](themes-2.0.md) §5). `designSystem.test.ts`가 웹 사다리의 값·순서와 프리미티브가 자기 자리에 서는지를 잰다. 옛 `sm/md/lg` 세 값은 같은 값이라 기존 소비처의 기하는 움직이지 않았다.
 
 ### 2.5 타이포
