@@ -1,30 +1,25 @@
 // =============================================================================
-// 코메토 플랫 표정 6종을 합성하고 검사한다 (#2806, ADR-0193 D9·D11).
+// 코메토 플랫 표정 6종을 합성하고, 투명 컷 에셋을 떠내고, 검사한다 (#2806, ADR-0193 D9·D11).
 // render-brand-icons.mjs가 부른다. 규격은 docs/brand/kometto/faces/expressions.md.
 //
-// owner가 고른 K6 플랫 두 장(K6-flat-dark·K6-flat-light)을 **그대로** 바탕으로 쓰고,
-// 검은 얼굴 창 안의 눈만 바꾼다. 눈 모양은 codex CLI 이미지 생성(gpt-image)이 K6-flat-dark를
-// 편집해 만든 래스터에서 가져온다. 생성물은 창 밖이 원본과 미세하게 어긋나므로(실측 평균 차
-// 2.9, 16 초과 1.6%) 창 밖은 버리고 얼굴 창 부분만 잘라 `faces/src/kometto-{id}-gen.png`로
-// 커밋한다. 그 크롭이 표정의 원본이다.
+// owner가 고른 K6 플랫(K6-flat-dark)을 **그대로** 바탕으로 쓰고, 검은 얼굴 창 안의 눈만
+// 바꾼다. 눈 모양은 codex CLI 이미지 생성(gpt-image)이 K6-flat-dark를 편집해 만든 래스터에서
+// 가져온다. 생성물은 창 밖이 원본과 미세하게 어긋나므로(실측 평균 차 2.9, 16 초과 1.6%) 얼굴
+// 창 부분만 잘라 `faces/src/kometto-{id}-gen.png`로 커밋한다. 그 크롭이 표정의 원본이다.
 //
-// 합성(테마마다):
-//   1. K6 원본에서 얼굴 창을 찾는다. 씨앗 픽셀에서 어두운 픽셀(R+G+B < 150)을 flood fill,
-//      그 안의 구멍(원래 눈)을 채우고, 창 가장자리를 ERODE px 깎는다(= 합성 마스크).
-//   2. 생성 크롭의 밝기로 눈 층(0–1)을 잰다. 라이트는 두 원본의 대기 눈 쌍 상자를 잇는
-//      사상으로 다크 좌표의 눈 층을 옮겨 온다(쌍선형).
-//   3. 마스크 안은 「원본 창의 검정 ↔ 원본 눈의 크림」을 눈 층으로 섞는다. 마스크 밖은
-//      원본 픽셀 그대로다. 색은 원본에서 재므로 눈은 원본과 같은 무광 크림 단색이다.
-//   대기(idle)는 원본 그대로다(바이트가 같다).
+// 1. 합성(메모리 안, 파일로 쓰지 않는다): K6 원본에서 얼굴 창을 찾는다(씨앗 flood fill, 구멍
+//    채우기, 가장자리 ERODE px 깎기). 그 마스크 안만 생성 크롭의 밝기로 원본 창 검정 ↔ 원본
+//    눈 크림을 섞는다. 마스크 밖은 원본 픽셀 그대로다. 대기(idle)는 원본 그대로다.
+// 2. 투명 컷(M2, planner 판정 2026-09-26 (c)): 합성물에서 배지 원판과 바깥 바탕을 걷어 내고,
+//    몸이 원에서 잘린 자리는 부드럽게 사라지게 한다(cutInPage 머리말). 웹 576px, 폰 600px.
 //
 // 검사(하나라도 어기면 실패):
-//   - sha256: K6-flat-light, 생성 크롭 다섯 장이 고정값과 같다
-//   - 합성물: 마스크 밖이 K6 원본과 픽셀까지 같다(다른 픽셀 0개)
-//   - 합성물: 마스크 안이 생성 크롭에서 다시 합성한 것과 같다(평균 차 ≤ 0.5)
-//   - 표정: 대기가 아닌 표정은 창 안이 대기와 충분히 다르고, 같은 테마의 표정끼리도 다르다
-//   - 사상: 다크 대기 눈을 라이트로 옮긴 것이 K6-flat-light의 실제 눈과 맞는다(파생 임계)
-//   - 웹 에셋: 576 RGBA·sRGB, 합성물에서 떠낸 것(평균 차 ≤ 0.5, 16 초과 ≤ 0.1%), 배지 밖 투명·가운데 불투명,
-//     다크 대기 = 기존 S0 배지(kometto-badge.png)
+//   - sha256: K6-flat-dark와 생성 크롭 다섯 장이 고정값과 같다
+//   - 합성: 마스크 밖이 K6 원본과 픽셀까지 같다. 대기가 아닌 표정은 창 안이 대기와 1% 이상,
+//     서로 0.5% 이상 다르다
+//   - 에셋: 크기·RGBA·sRGB. 합성물에서 다시 떠낸 것과 같다(평균 차 ≤ 0.5, 16 초과 ≤ 0.1%,
+//     알파 어긋남 ≤ 0.2%). 모서리·원판 자리 투명, 얼굴 불투명
+//   - 대기 웹 에셋의 불투명 픽셀이 S0 배지(kometto-badge.png)와 같은 그림이다
 // =============================================================================
 
 import { createHash } from "node:crypto";
@@ -56,38 +51,27 @@ const DERIVED = { meanMax: 3, overMax: 0.02 };
  */
 const WEB_DERIVED = { meanMax: 0.5, overMax: 0.001 };
 export const WEB_SIZE = 576;
+export const PHONE_SIZE = 600;
 
-export function faceThemes(repoRoot) {
-  const k = (n) => resolve(repoRoot, "docs/brand/kometto", n);
+export function faceSource(repoRoot) {
   return {
-    dark: {
-      source: k("K6-flat-dark.png"),
-      seed: [500, 560],
-      /** 대기 눈 쌍의 상자(끝 픽셀 +1). 라이트 사상의 기준점. */
-      eyes: { x0: 342, x1: 651, y0: 641, y1: 743 },
-      /** 웹 에셋의 배지 원. S0 배지(render-brand-icons.mjs SOURCE_BADGE)와 같다. */
-      badge: { cx: 626.5, cy: 625.5, r: 530.5 },
-      /** 원 밖은 투명(S0 배지와 같은 방식). */
-      cut: "circle",
-    },
-    light: {
-      source: k("K6-flat-light.png"),
-      seed: [500, 520],
-      eyes: { x0: 323, x1: 647, y0: 631, y1: 741 },
-      /** 크림 원(x 92–1155, y 97–1145)과 원 밖으로 나온 혜성 꼬리까지 담는 틀. */
-      badge: { cx: 623.5, cy: 621, r: 533 },
-      /** 원이 정원이 아니고 꼬리가 원 밖으로 나온다. 바깥 흰 바탕과 다른 픽셀을 남긴다. */
-      cut: "background",
-    },
+    source: resolve(repoRoot, "docs/brand/kometto/K6-flat-dark.png"),
+    seed: [500, 560],
+    /** 대기 눈 쌍의 상자(끝 픽셀 +1). composeInPage의 좌표 사상 기준(다크 → 다크, 항등). */
+    eyes: { x0: 342, x1: 651, y0: 641, y1: 743 },
+    /** 에셋 틀 = 배지 원. S0 배지(render-brand-icons.mjs SOURCE_BADGE)와 같다. */
+    badge: { cx: 626.5, cy: 625.5, r: 530.5 },
+    /** 원판 색을 재는 자리(원본 좌표). */
+    disc: [140, 626],
   };
 }
 
-export const LIGHT_SOURCE_SHA256 = "7d5ad24bad1bab92214d62f267509aedbe87ebd6620c08f390a899f7b6123f90";
-
 /**
  * 생성 크롭의 sha256. owner가 후보를 바꾸면 크롭과 이 값을 함께 바꾼다
- * (docs/brand/kometto/faces/expressions.md 「선택 기록」).
+ * (docs/brand/kometto/faces/expressions.md 「후보와 선택 기록」).
  */
+export const K6_DARK_SHA256 = "f0a75497fc609277ce5515ef96455f8f6d83d236dfa581290611b00ca08bab58";
+
 export const GEN_SHA256 = {
   thinking: "ec4ed976aea0bf9889e8f45b1f79b73561f1d6bc765825eeed79a7467292dac6", // thinking-a
   happy: "5d2ded60ce1a2d0e22fe6ba086ea3118661fa180e259530c2ec1515a02c42ed6", // happy-a
@@ -96,14 +80,14 @@ export const GEN_SHA256 = {
   sleepy: "f6ed53796dbfd4cca6bcfbb674168775bd4a1b8993a5b563487e6158fdcc2924", // sleepy-a
 };
 
-export function facePaths(repoRoot, webRoot) {
-  const faces = resolve(repoRoot, "docs/brand/kometto/faces");
-  return {
-    gen: (id) => resolve(faces, "src", `kometto-${id}-gen.png`),
-    composite: (id, theme) => resolve(faces, `kometto-${id}-${theme}.png`),
-    web: (id, theme) => resolve(webRoot, "src/assets/brand/kometto-faces", `${id}-${theme}.png`),
-  };
+/** 에셋 두 벌: 웹 576(히어로 192×3x, 데스크탑 280@2x=560), 폰 600(히어로 200pt@3x). */
+export function faceTargets(repoRoot, webRoot) {
+  return [
+    { name: "web", size: WEB_SIZE, path: (id) => resolve(webRoot, "src/assets/brand/kometto-faces", `${id}.png`) },
+    { name: "phone", size: PHONE_SIZE, path: (id) => resolve(repoRoot, "clients/mobile/src/design/brand/kometto-faces", `${id}.png`) },
+  ];
 }
+export const genPath = (repoRoot, id) => resolve(repoRoot, "docs/brand/kometto/faces/src", `kometto-${id}-gen.png`);
 
 const b64 = (p) => readFileSync(p).toString("base64");
 const sha = (p) => createHash("sha256").update(readFileSync(p)).digest("hex");
@@ -284,9 +268,24 @@ export async function composeInPage({ src, gen, theme, dark, crop, erode, luma, 
   return { size: [C.width, C.height], outsideDiff, recomposeMean: insideSum / insideN, changed: changed / insideN, distinct };
 }
 
-// ---- 웹 에셋(576 RGBA) --------------------------------------------------------
+// ---- 투명 컷 (M2) ---------------------------------------------------------------
+//
+// 배지 원판과 바깥 바탕을 걷어 내고 캐릭터만 남긴다(#2806 M2, planner 판정 2026-09-26 (c)).
+// 새로 그리지 않는다. 합성물을 틀(badge)에 맞춰 줄인 뒤:
+//   1. 키잉: 네 모서리에서 flood fill. 「바깥 바탕 ↔ 원판색」 선분까지 거리 ≤ KEY_T인
+//      픽셀이 배경이다(두 색 사이 안티앨리어싱도 함께 걷힌다).
+//   2. 가장자리 2px 띠만 투영 매팅: 가장 가까운 배경 픽셀 색을 바탕, 가장 가까운 안쪽
+//      캐릭터 픽셀 색을 전경으로 보고 알파를 매긴 뒤 바탕색을 걷어 낸다(흰 테·남색 테 방지).
+//   3. 원호 자름 페이드: 몸이 배지 원에서 잘린 자리(캐릭터가 원판이 아니라 바깥 바탕과
+//      맞닿고 그 자리가 배지 원 반지름 ±CUT_R_TOL 안)에서 안쪽으로 FADE_FRAC×크기 동안
+//      알파를 smoothstep으로 0까지 내린다. 거리는 자름 경계 픽셀에서 잰 챔퍼 거리다.
+//      잘린 단면이 딱딱한 원호로 보이지 않고 몸이 아래로 사라지게 한다.
 
-export async function webInPage({ src, badge, cut, size, mode, cmp }) {
+export const KEY_T = 10;
+export const FADE_FRAC = 0.1;
+const CUT_R_TOL = 0.035;
+
+export async function cutInPage({ src, badge, disc, size, mode, cmp, keyT, fadeFrac, cutTol }) {
   const load = (data) =>
     new Promise((ok, no) => {
       const img = new Image();
@@ -296,120 +295,186 @@ export async function webInPage({ src, badge, cut, size, mode, cmp }) {
     });
   const img = await load(src);
   const k = size / (2 * badge.r);
-  const ox = -(badge.cx - badge.r) * k;
-  const oy = -(badge.cy - badge.r) * k;
   const c = document.createElement("canvas");
   c.width = c.height = size;
   const ctx = c.getContext("2d");
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(img, ox, oy, img.naturalWidth * k, img.naturalHeight * k);
+  ctx.drawImage(img, -(badge.cx - badge.r) * k, -(badge.cy - badge.r) * k, img.naturalWidth * k, img.naturalHeight * k);
   const D = ctx.getImageData(0, 0, size, size);
   const d = D.data;
-  // 바깥 바탕색: 원본 모서리.
-  const s0 = document.createElement("canvas");
-  s0.width = s0.height = 8;
-  const sctx = s0.getContext("2d");
-  sctx.drawImage(img, 0, 0, 8, 8, 0, 0, 8, 8);
-  const bg = sctx.getImageData(4, 4, 1, 1).data;
-  const alpha = new Float32Array(size * size);
-  if (cut === "circle") {
-    for (let y = 0; y < size; y++)
-      for (let x = 0; x < size; x++) {
-        const r = Math.hypot(x + 0.5 - size / 2, y + 0.5 - size / 2);
-        alpha[y * size + x] = Math.min(1, Math.max(0, size / 2 - r)); // 1px 안티앨리어싱
-      }
-  } else {
-    // background: 원이 정원이 아니고 꼬리가 원 밖으로 나온다(K6-flat-light).
-    //   1. 네 모서리에서 바탕과 거의 같은 픽셀(최대 채널 차 ≤ 6)을 flood fill → 바탕(알파 0)
-    //   2. 바탕에 닿지 않는 픽셀은 전부 불투명(원 안의 색 경계는 건드리지 않는다)
-    //   3. 바탕에서 2px 안의 가장자리 띠만 투영 매팅: 띠 밖의 가장 가까운 전경 픽셀을 전경색으로
-    //      보고 (픽셀 - 바탕)을 (전경 - 바탕)에 투영한 비율. 선 위에 없으면(잔차 > 12) 바탕과의 차
-    const diffAt = (i) => Math.max(Math.abs(d[i] - bg[0]), Math.abs(d[i + 1] - bg[1]), Math.abs(d[i + 2] - bg[2]));
-    const isBg = new Uint8Array(size * size);
-    const stack = [0, size - 1, (size - 1) * size, size * size - 1];
-    while (stack.length) {
-      const p = stack.pop();
-      if (isBg[p] || diffAt(p * 4) > 6) continue;
-      isBg[p] = 1;
+  const N = size * size;
+
+  // 바탕·원판 색(원본 픽셀 중앙값).
+  const full = document.createElement("canvas");
+  full.width = img.naturalWidth;
+  full.height = img.naturalHeight;
+  const fctx = full.getContext("2d");
+  fctx.drawImage(img, 0, 0);
+  const sample = (x0, y0) => {
+    const q = fctx.getImageData(x0 - 4, y0 - 4, 9, 9).data;
+    const ch = [[], [], []];
+    for (let i = 0; i < q.length; i += 4) for (let cc = 0; cc < 3; cc++) ch[cc].push(q[i + cc]);
+    return ch.map((v) => v.sort((a, b) => a - b)[v.length >> 1]);
+  };
+  const bg = sample(8, 8);
+  const dc = sample(disc[0], disc[1]);
+
+  // 1. 키잉.
+  const seg = [dc[0] - bg[0], dc[1] - bg[1], dc[2] - bg[2]];
+  const segLen2 = seg[0] ** 2 + seg[1] ** 2 + seg[2] ** 2;
+  const toKey = (i) => {
+    const v = [d[i] - bg[0], d[i + 1] - bg[1], d[i + 2] - bg[2]];
+    const t = Math.min(1, Math.max(0, (v[0] * seg[0] + v[1] * seg[1] + v[2] * seg[2]) / segLen2));
+    return Math.hypot(v[0] - t * seg[0], v[1] - t * seg[1], v[2] - t * seg[2]);
+  };
+  const key = new Uint8Array(N);
+  {
+    const st = [0, size - 1, N - size, N - 1];
+    while (st.length) {
+      const p = st.pop();
+      if (key[p] || toKey(p * 4) > keyT) continue;
+      key[p] = 1;
       const x = p % size;
-      if (x > 0) stack.push(p - 1);
-      if (x < size - 1) stack.push(p + 1);
-      if (p >= size) stack.push(p - size);
-      if (p < size * (size - 1)) stack.push(p + size);
+      if (x > 0) st.push(p - 1);
+      if (x < size - 1) st.push(p + 1);
+      if (p >= size) st.push(p - size);
+      if (p < N - size) st.push(p + size);
     }
-    const near = (x, y, rad) => {
-      for (let dy = -rad; dy <= rad; dy++)
-        for (let dx = -rad; dx <= rad; dx++) {
-          const nx = x + dx;
-          const ny = y + dy;
-          if (nx >= 0 && ny >= 0 && nx < size && ny < size && isBg[ny * size + nx]) return true;
-        }
-      return false;
-    };
-    const band = new Uint8Array(size * size);
-    for (let y = 0; y < size; y++)
-      for (let x = 0; x < size; x++) {
-        const p = y * size + x;
-        if (isBg[p]) continue;
-        if (near(x, y, 2)) band[p] = 1;
-        else alpha[p] = 1;
-      }
-    for (let y = 0; y < size; y++)
-      for (let x = 0; x < size; x++) {
-        const p = y * size + x;
-        if (!band[p]) continue;
-        const i = p * 4;
-        const simple = Math.min(1, Math.max(0, (diffAt(i) - 3) / 19));
-        let j = -1;
-        let best = Infinity;
-        for (let dy = -4; dy <= 4; dy++)
-          for (let dx = -4; dx <= 4; dx++) {
-            const nx = x + dx;
-            const ny = y + dy;
-            if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
-            const q = ny * size + nx;
-            if (isBg[q] || band[q]) continue;
-            const dd = dx * dx + dy * dy;
-            if (dd < best) {
-              best = dd;
-              j = q * 4;
-            }
-          }
-        if (j < 0) {
-          alpha[p] = simple;
-          continue;
-        }
-        let num = 0;
-        let den = 0;
-        for (let c = 0; c < 3; c++) {
-          const f = d[j + c] - bg[c];
-          num += (d[i + c] - bg[c]) * f;
-          den += f * f;
-        }
-        if (den < 100) {
-          alpha[p] = simple;
-          continue;
-        }
-        const t = Math.min(1, Math.max(0, num / den));
-        let res = 0;
-        for (let c = 0; c < 3; c++) res += (d[i + c] - bg[c] - t * (d[j + c] - bg[c])) ** 2;
-        alpha[p] = Math.sqrt(res) > 12 ? simple : t;
-      }
   }
-  if (mode === "render") {
-    for (let p = 0; p < size * size; p++) {
+  const near = (x, y, rad, arr) => {
+    for (let dy = -rad; dy <= rad; dy++)
+      for (let dx = -rad; dx <= rad; dx++) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx >= 0 && ny >= 0 && nx < size && ny < size && arr[ny * size + nx]) return true;
+      }
+    return false;
+  };
+  const alpha = new Float32Array(N);
+  const band = new Uint8Array(N);
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      const p = y * size + x;
+      if (key[p]) continue;
+      if (near(x, y, 2, key)) band[p] = 1;
+      else alpha[p] = 1;
+    }
+
+  // 2. 가장자리 매팅.
+  const nearest = (x, y, test) => {
+    let best = Infinity;
+    let j = -1;
+    for (let dy = -4; dy <= 4; dy++)
+      for (let dx = -4; dx <= 4; dx++) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+        const q = ny * size + nx;
+        if (!test(q)) continue;
+        const dd = dx * dx + dy * dy;
+        if (dd < best) {
+          best = dd;
+          j = q * 4;
+        }
+      }
+    return j;
+  };
+  const localBg = new Float32Array(N * 3);
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      const p = y * size + x;
+      if (!band[p]) continue;
       const i = p * 4;
-      const a = alpha[p];
-      // 반투명 가장자리는 바탕색을 걷어 낸다(흰 테·검은 테 방지).
-      if (cut === "background" && a > 0 && a < 1)
-        for (let c = 0; c < 3; c++) d[i + c] = Math.min(255, Math.max(0, Math.round((d[i + c] - bg[c] * (1 - a)) / a)));
-      d[i + 3] = Math.round(a * 255);
+      const b = nearest(x, y, (q) => key[q]);
+      const f = nearest(x, y, (q) => !key[q] && !band[q]);
+      const B = b < 0 ? bg : [d[b], d[b + 1], d[b + 2]];
+      localBg.set(B, p * 3);
+      if (f < 0) {
+        alpha[p] = 0.5;
+        continue;
+      }
+      let num = 0;
+      let den = 0;
+      for (let cc = 0; cc < 3; cc++) {
+        const fv = d[f + cc] - B[cc];
+        num += (d[i + cc] - B[cc]) * fv;
+        den += fv * fv;
+      }
+      alpha[p] = den < 100 ? 1 : Math.min(1, Math.max(0, num / den));
     }
-    ctx.putImageData(D, 0, 0);
-    return { png: c.toDataURL("image/png").split(",")[1] };
+
+  // 3. 원호 자름 페이드. 자름 경계 = 캐릭터와 맞닿은 배경 픽셀 중, 바깥 바탕색에 가깝고
+  //    (원판이 아니고) 배지 원 반지름 근처인 것.
+  const R = size / 2;
+  const isOuter = (i) => Math.hypot(d[i] - bg[0], d[i + 1] - bg[1], d[i + 2] - bg[2]) < Math.hypot(d[i] - dc[0], d[i + 1] - dc[1], d[i + 2] - dc[2]);
+  const INF = 1e9;
+  const dist = new Float32Array(N).fill(INF);
+  let cutPx = 0;
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      const p = y * size + x;
+      if (!key[p] || !isOuter(p * 4)) continue;
+      const r = Math.hypot(x + 0.5 - R, y + 0.5 - R);
+      if (Math.abs(r - R) > cutTol * size) continue;
+      let touches = false;
+      for (const q of [p - 1, p + 1, p - size, p + size]) if (q >= 0 && q < N && !key[q]) touches = true;
+      if (touches) {
+        dist[p] = 0;
+        cutPx++;
+      }
+    }
+  // 챔퍼 거리(3-4 근사, /3).
+  const A = 1;
+  const Bd = Math.SQRT2;
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      const p = y * size + x;
+      let v = dist[p];
+      if (x > 0) v = Math.min(v, dist[p - 1] + A);
+      if (y > 0) {
+        v = Math.min(v, dist[p - size] + A);
+        if (x > 0) v = Math.min(v, dist[p - size - 1] + Bd);
+        if (x < size - 1) v = Math.min(v, dist[p - size + 1] + Bd);
+      }
+      dist[p] = v;
+    }
+  for (let y = size - 1; y >= 0; y--)
+    for (let x = size - 1; x >= 0; x--) {
+      const p = y * size + x;
+      let v = dist[p];
+      if (x < size - 1) v = Math.min(v, dist[p + 1] + A);
+      if (y < size - 1) {
+        v = Math.min(v, dist[p + size] + A);
+        if (x < size - 1) v = Math.min(v, dist[p + size + 1] + Bd);
+        if (x > 0) v = Math.min(v, dist[p + size - 1] + Bd);
+      }
+      dist[p] = v;
+    }
+  const F = fadeFrac * size;
+  for (let p = 0; p < N; p++) {
+    if (alpha[p] === 0 || dist[p] >= F) continue;
+    const t = dist[p] / F;
+    alpha[p] *= t * t * (3 - 2 * t);
   }
-  // check: 커밋된 에셋을 같은 방식으로 떠낸 것과 비교(알파가 있는 자리만).
+
+  // 색: 반투명 가장자리 띠는 바탕색을 걷어 낸다. 페이드 구간은 색을 그대로 둔다.
+  for (let p = 0; p < N; p++) {
+    const i = p * 4;
+    if (band[p] && alpha[p] > 0 && alpha[p] < 1) {
+      for (let cc = 0; cc < 3; cc++) {
+        const B = localBg[p * 3 + cc];
+        d[i + cc] = Math.min(255, Math.max(0, Math.round((d[i + cc] - B * (1 - alpha[p])) / alpha[p])));
+      }
+    }
+  }
+  const out = new Uint8ClampedArray(d);
+  for (let p = 0; p < N; p++) out[p * 4 + 3] = Math.round(alpha[p] * 255);
+  if (mode === "render") {
+    ctx.putImageData(new ImageData(out, size, size), 0, 0);
+    return { png: c.toDataURL("image/png").split(",")[1], cutPx, keyed: key.reduce((n, v) => n + v, 0) };
+  }
+  // check: 커밋된 에셋과 같은 방식으로 떠낸 것을 비교(RGBA, 알파 가중).
   const got = await load(cmp.self);
   const g = document.createElement("canvas");
   g.width = g.height = size;
@@ -420,23 +485,25 @@ export async function webInPage({ src, badge, cut, size, mode, cmp }) {
   let n = 0;
   let over = 0;
   let alphaOff = 0;
-  for (let p = 0; p < size * size; p++) {
+  for (let p = 0; p < N; p++) {
     const i = p * 4;
-    if (Math.abs(q[i + 3] - Math.round(alpha[p] * 255)) > 8) alphaOff++;
-    if (q[i + 3] < 250 || alpha[p] < 0.99) continue;
-    const m = Math.max(Math.abs(q[i] - d[i]), Math.abs(q[i + 1] - d[i + 1]), Math.abs(q[i + 2] - d[i + 2]));
-    sum += (Math.abs(q[i] - d[i]) + Math.abs(q[i + 1] - d[i + 1]) + Math.abs(q[i + 2] - d[i + 2])) / 3;
+    if (Math.abs(q[i + 3] - out[i + 3]) > 8) alphaOff++;
+    if (q[i + 3] < 250 || out[i + 3] < 250) continue;
+    const m = Math.max(Math.abs(q[i] - out[i]), Math.abs(q[i + 1] - out[i + 1]), Math.abs(q[i + 2] - out[i + 2]));
+    sum += (Math.abs(q[i] - out[i]) + Math.abs(q[i + 1] - out[i + 1]) + Math.abs(q[i + 2] - out[i + 2])) / 3;
     if (m > 16) over++;
     n++;
   }
-  const A = (x, y) => q[(y * size + x) * 4 + 3];
+  const at = (x, y) => q[(y * size + x) * 4 + 3];
   return {
     size: got.naturalWidth,
     mean: sum / n,
     over: over / n,
-    alphaOff: alphaOff / (size * size),
-    corner: A(3, 3),
-    center: A(size >> 1, size >> 1),
+    alphaOff: alphaOff / N,
+    corner: at(3, 3),
+    discPx: at(Math.round(disc[0] * k - (badge.cx - badge.r) * k), Math.round(disc[1] * k - (badge.cy - badge.r) * k)),
+    face: at(Math.round(size * 0.35), Math.round(size * 0.5)),
+    cutPx,
   };
 }
 
@@ -471,156 +538,101 @@ async function pngDiff({ a, b }) {
 
 // ---- 공개 함수 ----------------------------------------------------------------
 
+async function composite(page, repoRoot, id) {
+  const S = faceSource(repoRoot);
+  if (id === "idle") return b64(S.source);
+  const r = await page.evaluate(composeInPage, {
+    src: b64(S.source),
+    gen: b64(genPath(repoRoot, id)),
+    theme: S,
+    dark: S,
+    crop: GEN_CROP,
+    erode: ERODE,
+    luma: EYE_LUMA,
+    mode: "compose",
+  });
+  return r.png;
+}
+
+const cutArgs = (S, size) => ({ badge: S.badge, disc: S.disc, size, keyT: KEY_T, fadeFrac: FADE_FRAC, cutTol: CUT_R_TOL });
+
 export async function renderFaces(page, { repoRoot, webRoot, withSrgb, log }) {
-  const T = faceThemes(repoRoot);
-  const P = facePaths(repoRoot, webRoot);
-  for (const [name, theme] of Object.entries(T)) {
-    for (const id of FACE_IDS) {
-      const out = P.composite(id, name);
+  const S = faceSource(repoRoot);
+  for (const id of FACE_IDS) {
+    const comp = await composite(page, repoRoot, id);
+    for (const t of faceTargets(repoRoot, webRoot)) {
+      const out = t.path(id);
       mkdirSync(dirname(out), { recursive: true });
-      if (id === "idle") {
-        writeFileSync(out, readFileSync(theme.source)); // 대기 = 원본 바이트
-      } else {
-        const r = await page.evaluate(composeInPage, {
-          src: b64(theme.source),
-          gen: b64(P.gen(id)),
-          theme,
-          dark: T.dark,
-          crop: GEN_CROP,
-          erode: ERODE,
-          luma: EYE_LUMA,
-          mode: "compose",
-        });
-        writeFileSync(out, withSrgb(Buffer.from(r.png, "base64")));
-      }
+      const r = await page.evaluate(cutInPage, { src: comp, ...cutArgs(S, t.size), mode: "render" });
+      writeFileSync(out, withSrgb(Buffer.from(r.png, "base64")));
       log(`wrote ${out}`);
-      const web = P.web(id, name);
-      mkdirSync(dirname(web), { recursive: true });
-      const w = await page.evaluate(webInPage, {
-        src: b64(out),
-        badge: theme.badge,
-        cut: theme.cut,
-        size: WEB_SIZE,
-        mode: "render",
-      });
-      writeFileSync(web, withSrgb(Buffer.from(w.png, "base64")));
-      log(`wrote ${web}`);
     }
   }
 }
 
 /** 검사. fail(msg)로 어긴 것을 모으고, 보고용 표를 돌려준다. */
 export async function checkFaces(page, { repoRoot, webRoot, fail, rel, s0Badge }) {
-  const T = faceThemes(repoRoot);
-  const P = facePaths(repoRoot, webRoot);
-  const report = { shas: [], composites: [], mapping: null, web: [] };
+  const S = faceSource(repoRoot);
+  const report = { shas: [], composites: [], assets: [] };
 
-  const lightSha = sha(T.light.source);
-  if (lightSha !== LIGHT_SOURCE_SHA256)
-    fail(`${rel(T.light.source)}: sha256 ${lightSha} ≠ 고정값 ${LIGHT_SOURCE_SHA256} (owner 레퍼런스가 아니다)`);
-  report.shas.push([rel(T.light.source), lightSha]);
+  const k6 = sha(S.source);
+  if (k6 !== K6_DARK_SHA256) fail(`${rel(S.source)}: sha256 ${k6} ≠ 고정값 ${K6_DARK_SHA256} (owner 레퍼런스가 아니다)`);
+  report.shas.push([rel(S.source), k6]);
   for (const id of FACE_IDS.filter((i) => i !== "idle")) {
-    const got = sha(P.gen(id));
-    if (got !== GEN_SHA256[id]) fail(`${rel(P.gen(id))}: sha256 ${got} ≠ 고정값 ${GEN_SHA256[id] || "(없음)"}`);
-    report.shas.push([rel(P.gen(id)), got]);
+    const got = sha(genPath(repoRoot, id));
+    if (got !== GEN_SHA256[id]) fail(`${rel(genPath(repoRoot, id))}: sha256 ${got} ≠ 고정값 ${GEN_SHA256[id]}`);
+    report.shas.push([rel(genPath(repoRoot, id)), got]);
   }
 
-  for (const [name, theme] of Object.entries(T)) {
-    for (const id of FACE_IDS) {
-      const path = P.composite(id, name);
-      if (id === "idle") {
-        const same = sha(path) === sha(theme.source);
-        if (!same) fail(`${rel(path)}: 대기는 ${rel(theme.source)}와 바이트가 같아야 한다`);
-        report.composites.push([rel(path), { idleSame: same }]);
-        continue;
-      }
-      const others = Object.fromEntries(
-        FACE_IDS.filter((o) => o !== id).map((o) => [o, b64(P.composite(o, name))])
-      );
-      const r = await page.evaluate(composeInPage, {
-        src: b64(theme.source),
-        gen: b64(P.gen(id)),
-        theme,
-        dark: T.dark,
-        crop: GEN_CROP,
-        erode: ERODE,
-        luma: EYE_LUMA,
-        mode: "check",
-        cmp: { self: b64(path), others },
-      });
-      if (r.size[0] !== 1254 || r.size[1] !== 1254) fail(`${rel(path)}: ${r.size.join("x")}, 기대 1254x1254`);
-      if (r.outsideDiff !== 0) fail(`${rel(path)}: 얼굴 창 밖이 K6 원본과 다르다 (${r.outsideDiff}px)`);
-      if (!(r.recomposeMean <= FACE.recomposeMeanMax))
-        fail(`${rel(path)}: 생성 크롭에서 합성한 것과 다르다 (창 안 평균 차 ${r.recomposeMean.toFixed(2)})`);
-      if (!(r.changed >= FACE.changedMin))
-        fail(`${rel(path)}: 대기와 거의 같다 (창 안 변화 ${(r.changed * 100).toFixed(2)}%)`);
-      for (const [o, frac] of Object.entries(r.distinct))
-        if (!(frac >= FACE.distinctMin)) fail(`${rel(path)}: ${o}와 구분되지 않는다 (${(frac * 100).toFixed(2)}%)`);
-      report.composites.push([rel(path), r]);
-    }
+  const comps = {};
+  for (const id of FACE_IDS) comps[id] = await composite(page, repoRoot, id);
+  for (const id of FACE_IDS.filter((i) => i !== "idle")) {
+    const others = Object.fromEntries(FACE_IDS.filter((o) => o !== id).map((o) => [o, comps[o]]));
+    const r = await page.evaluate(composeInPage, {
+      src: b64(S.source),
+      gen: b64(genPath(repoRoot, id)),
+      theme: S,
+      dark: S,
+      crop: GEN_CROP,
+      erode: ERODE,
+      luma: EYE_LUMA,
+      mode: "check",
+      cmp: { self: comps[id], others },
+    });
+    if (r.outsideDiff !== 0) fail(`합성 ${id}: 얼굴 창 밖이 K6 원본과 다르다 (${r.outsideDiff}px)`);
+    if (!(r.changed >= FACE.changedMin)) fail(`합성 ${id}: 대기와 거의 같다 (창 안 변화 ${(r.changed * 100).toFixed(2)}%)`);
+    for (const [o, frac] of Object.entries(r.distinct))
+      if (!(frac >= FACE.distinctMin)) fail(`합성 ${id}: ${o}와 구분되지 않는다 (${(frac * 100).toFixed(2)}%)`);
+    report.composites.push([id, r]);
   }
 
-  // 사상 검사: 다크 대기 눈(원본 창을 크롭)을 라이트로 옮겨 K6-flat-light와 비교.
-  const idleCrop = await page.evaluate(
-    async ({ src, crop }) => {
-      const img = await new Promise((ok) => {
-        const i = new Image();
-        i.onload = () => ok(i);
-        i.src = "data:image/png;base64," + src;
-      });
-      const c = document.createElement("canvas");
-      c.width = crop.w;
-      c.height = crop.h;
-      c.getContext("2d").drawImage(img, -crop.x, -crop.y);
-      return c.toDataURL("image/png").split(",")[1];
-    },
-    { src: b64(T.dark.source), crop: GEN_CROP }
-  );
-  const mapped = await page.evaluate(composeInPage, {
-    src: b64(T.light.source),
-    gen: idleCrop,
-    theme: T.light,
-    dark: T.dark,
-    crop: GEN_CROP,
-    erode: ERODE,
-    luma: EYE_LUMA,
-    mode: "check",
-    cmp: { self: b64(T.light.source), others: {} },
-  });
-  report.mapping = mapped;
-  if (!(mapped.recomposeMean <= DERIVED.meanMax))
-    fail(`사상: 다크 대기 눈을 라이트로 옮긴 것이 K6-flat-light 눈과 맞지 않는다 (평균 차 ${mapped.recomposeMean.toFixed(2)})`);
-
-  for (const [name, theme] of Object.entries(T)) {
+  for (const t of faceTargets(repoRoot, webRoot)) {
     for (const id of FACE_IDS) {
-      const web = P.web(id, name);
-      const png = readFileSync(web);
-      const r = await page.evaluate(webInPage, {
-        src: b64(P.composite(id, name)),
-        badge: theme.badge,
-        cut: theme.cut,
-        size: WEB_SIZE,
+      const path = t.path(id);
+      const png = readFileSync(path);
+      const r = await page.evaluate(cutInPage, {
+        src: comps[id],
+        ...cutArgs(S, t.size),
         mode: "check",
         cmp: { self: png.toString("base64") },
       });
-      const colorType = png[25];
-      const hasSrgb = png.includes(Buffer.from("sRGB"));
-      if (r.size !== WEB_SIZE) fail(`${rel(web)}: 폭 ${r.size}, 기대 ${WEB_SIZE}`);
-      if (colorType !== 6) fail(`${rel(web)}: RGBA가 아니다(색 유형 ${colorType})`);
-      if (!hasSrgb) fail(`${rel(web)}: sRGB 청크가 없다`);
+      if (r.size !== t.size) fail(`${rel(path)}: 폭 ${r.size}, 기대 ${t.size}`);
+      if (png[25] !== 6) fail(`${rel(path)}: RGBA가 아니다(색 유형 ${png[25]})`);
+      if (!png.includes(Buffer.from("sRGB"))) fail(`${rel(path)}: sRGB 청크가 없다`);
       if (!(r.mean <= WEB_DERIVED.meanMax && r.over <= WEB_DERIVED.overMax && r.alphaOff <= 0.002))
         fail(
-          `${rel(web)}: 합성물에서 파생되지 않았다 (평균 차 ${r.mean.toFixed(2)}, 16 초과 ${(r.over * 100).toFixed(2)}%, 알파 어긋남 ${(r.alphaOff * 100).toFixed(2)}%)`
+          `${rel(path)}: 합성물에서 떠낸 것과 다르다 (평균 차 ${r.mean.toFixed(2)}, 16 초과 ${(r.over * 100).toFixed(2)}%, 알파 어긋남 ${(r.alphaOff * 100).toFixed(2)}%)`
         );
-      if (r.corner !== 0 || r.center !== 255) fail(`${rel(web)}: 배지 밖이 투명하지 않거나 가운데가 비었다 ${JSON.stringify(r)}`);
-      report.web.push([rel(web), r]);
+      if (r.corner !== 0 || r.discPx !== 0 || r.face !== 255)
+        fail(`${rel(path)}: 모서리·원판이 투명하지 않거나 얼굴이 비었다 (모서리 ${r.corner}, 원판 ${r.discPx}, 얼굴 ${r.face})`);
+      report.assets.push([rel(path), r]);
     }
   }
 
-  // 다크 대기 = S0 배지(리샘플러만 다르다: S0는 CSS 스크린샷, 표정은 canvas).
-  report.idleVsS0 = await page.evaluate(pngDiff, { a: b64(P.web("idle", "dark")), b: b64(s0Badge) });
+  // 대기 웹 에셋의 불투명 픽셀 = S0 배지의 같은 자리(캐릭터가 같은 그림인가).
+  report.idleVsS0 = await page.evaluate(pngDiff, { a: b64(faceTargets(repoRoot, webRoot)[0].path("idle")), b: b64(s0Badge) });
   if (!(report.idleVsS0.mean <= DERIVED.meanMax && report.idleVsS0.over <= DERIVED.overMax))
-    fail(`${rel(P.web("idle", "dark"))}: S0 배지(kometto-badge.png)와 다르다 ${JSON.stringify(report.idleVsS0)}`);
+    fail(`대기 웹 에셋이 S0 배지(kometto-badge.png)와 다른 그림이다 ${JSON.stringify(report.idleVsS0)}`);
 
   return report;
 }

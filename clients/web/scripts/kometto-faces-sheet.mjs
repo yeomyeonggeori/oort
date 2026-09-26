@@ -9,7 +9,7 @@
 //          hero.png                                                   히어로 280(데스크탑)·200(폰)
 //   node scripts/kometto-faces-sheet.mjs --candidates <dir>
 //     -> <dir>/*.png(생성 원본 1254, 이름 {id}-dark-{a|b}.png)를 파이프라인과 같은
-//        합성으로 얹어 후보 비교 시트 candidates.png를 같은 폴더에 쓴다
+//        합성·투명 컷으로 떠서 후보 비교 시트 candidates.png를 같은 폴더에 쓴다
 //
 // 바닥은 새벽하늘 canvas 3정지점(docs/design-system/themes-2.0.md, 데스크탑 가운데 42%).
 // 24px은 금지 크기다(32px 미만 사용 금지, docs/brand/mark/README.md). 금지 예시로만 보인다.
@@ -19,13 +19,13 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { ERODE, EYE_LUMA, FACE_IDS, GEN_CROP, WEB_SIZE, composeInPage, facePaths, faceThemes, webInPage } from "./kometto-faces.mjs";
+import { ERODE, EYE_LUMA, FACE_IDS, FADE_FRAC, GEN_CROP, KEY_T, WEB_SIZE, composeInPage, cutInPage, faceSource, faceTargets } from "./kometto-faces.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = resolve(WEB_ROOT, "..", "..");
 const OUT = resolve(REPO_ROOT, "docs/brand/kometto/faces/sheets");
-const P = facePaths(REPO_ROOT, WEB_ROOT);
-const T = faceThemes(REPO_ROOT);
+const WEB = faceTargets(REPO_ROOT, WEB_ROOT)[0];
+const SRC = faceSource(REPO_ROOT);
 
 const NAMES = { idle: "대기", thinking: "생각", happy: "기쁨", flustered: "당황", working: "작업 중", sleepy: "졸림" };
 const SIZES = [24, 48, 72, 96, 144];
@@ -39,7 +39,7 @@ const CANVAS = {
   },
 };
 const uri = (buf) => "data:image/png;base64," + Buffer.from(buf).toString("base64");
-const asset = (id, theme) => uri(readFileSync(P.web(id, theme)));
+const asset = (id) => uri(readFileSync(WEB.path(id)));
 
 const page0 = (bg, ink, body) => `<!doctype html><html><head><meta charset="utf-8"><style>
   *{box-sizing:border-box} html,body{margin:0}
@@ -66,38 +66,31 @@ async function shoot(page, html, path) {
 
 function sizesSheet(bgKey) {
   const c = CANVAS[bgKey];
-  const themes = bgKey === "transparent" ? ["light", "dark"] : [bgKey];
   const head = `<tr><th></th>${SIZES.map((s) => `<th>${s}px${s < 32 ? " · 금지" : ""}</th>`).join("")}</tr>`;
-  const rows = themes
-    .flatMap((th) =>
-      FACE_IDS.map(
-        (id) =>
-          `<tr><th class="row">${NAMES[id]} <span style="opacity:.6">${id}${themes.length > 1 ? " · " + th : ""}</span></th>${SIZES.map(
-            (s) => `<td><img class="${s < 32 ? "ban" : ""}" src="${asset(id, th)}" width="${s}" height="${s}" alt=""></td>`
-          ).join("")}</tr>`
-      )
-    )
-    .join("");
+  const rows = FACE_IDS.map(
+    (id) =>
+      `<tr><th class="row">${NAMES[id]} <span style="opacity:.6">${id}</span></th>${SIZES.map(
+        (s) => `<td><img class="${s < 32 ? "ban" : ""}" src="${asset(id)}" width="${s}" height="${s}" alt=""></td>`
+      ).join("")}</tr>`
+  ).join("");
   const title =
-    bgKey === "transparent"
-      ? "투명 — 배지 밖 알파(체커보드 위)"
-      : `새벽하늘 canvas ${bgKey === "light" ? "라이트" : "다크"} — ${bgKey} 에셋`;
+    bgKey === "transparent" ? "투명(체커보드 위)" : `새벽하늘 canvas ${bgKey === "light" ? "라이트" : "다크"}`;
   return page0(
     c.bg,
     c.ink,
-    `<h1>코메토 표정 6종 · ${title}</h1><p>웹 에셋 576px(1x 원본 픽셀)을 CSS 크기로 줄였다. 빨간 점선 = 32px 미만 금지 크기(비교용).</p><table>${head}${rows}</table>`
+    `<h1>코메토 표정 6종 · ${title}</h1><p>웹 에셋 576px 한 벌(테마 공용)을 CSS 크기로 줄였다. 빨간 점선 = 32px 미만 금지 크기(비교용).</p><table>${head}${rows}</table>`
   );
 }
 
 function heroSheet() {
-  const cell = (theme, id, px) =>
-    `<td><img src="${asset(id, theme)}" width="${px}" height="${px}" alt=""><div class="cap">${NAMES[id]} · ${px}px</div></td>`;
+  const cell = (id, px) =>
+    `<td><img src="${asset(id)}" width="${px}" height="${px}" alt=""><div class="cap">${NAMES[id]} · ${px}px</div></td>`;
   const block = (theme) => {
     const c = CANVAS[theme];
     return `<div style="background:${c.bg};color:${c.ink};padding:24px;border-radius:12px;margin-bottom:16px">
       <h1>히어로 · ${theme === "light" ? "라이트" : "다크"}</h1><p>데스크탑 280px(첫 줄), 폰 200px(둘째 줄) — ADR-0193 D11</p>
-      <table><tr>${FACE_IDS.map((id) => cell(theme, id, 280)).join("")}</tr>
-      <tr>${FACE_IDS.map((id) => cell(theme, id, 200)).join("")}</tr></table></div>`;
+      <table><tr>${FACE_IDS.map((id) => cell(id, 280)).join("")}</tr>
+      <tr>${FACE_IDS.map((id) => cell(id, 200)).join("")}</tr></table></div>`;
   };
   return page0("#ffffff", "#1B1D21", block("light") + block("dark"));
 }
@@ -126,18 +119,27 @@ async function candidatesSheet(page, dir) {
       },
       { src: b64(path), c: GEN_CROP }
     );
-  const render = async (gen, theme) => {
+  const render = async (gen) => {
     const comp = await page.evaluate(composeInPage, {
-      src: b64(T[theme].source),
+      src: b64(SRC.source),
       gen,
-      theme: T[theme],
-      dark: T.dark,
+      theme: SRC,
+      dark: SRC,
       crop: GEN_CROP,
       erode: ERODE,
       luma: EYE_LUMA,
       mode: "compose",
     });
-    const w = await page.evaluate(webInPage, { src: comp.png, badge: T[theme].badge, cut: T[theme].cut, size: WEB_SIZE, mode: "render" });
+    const w = await page.evaluate(cutInPage, {
+      src: comp.png,
+      badge: SRC.badge,
+      disc: SRC.disc,
+      size: WEB_SIZE,
+      keyT: KEY_T,
+      fadeFrac: FADE_FRAC,
+      cutTol: 0.035,
+      mode: "render",
+    });
     return "data:image/png;base64," + w.png;
   };
   const rows = [];
@@ -145,7 +147,8 @@ async function candidatesSheet(page, dir) {
     const cells = [];
     for (const [v, path] of byId[id]) {
       const gen = await crop(path);
-      const [d, l] = [await render(gen, "dark"), await render(gen, "light")];
+      const d = await render(gen);
+      const l = d;
       cells.push(`<td><div style="display:flex;gap:10px;align-items:center;justify-content:center">
         <div style="background:${CANVAS.dark.bg};padding:10px;border-radius:10px"><img src="${d}" width="144" height="144"><img src="${d}" width="72" height="72" style="margin-top:8px"></div>
         <div style="background:${CANVAS.light.bg};padding:10px;border-radius:10px"><img src="${l}" width="144" height="144"><img src="${l}" width="72" height="72" style="margin-top:8px"></div>
@@ -156,7 +159,7 @@ async function candidatesSheet(page, dir) {
   const html = page0(
     "#ffffff",
     "#1B1D21",
-    `<h1>코메토 표정 후보 비교</h1><p>후보마다 파이프라인과 같은 합성(얼굴 창 밖 = K6 원본). 왼쪽 다크, 오른쪽 라이트. 144px·72px.</p><table>${rows.join("")}</table>`
+    `<h1>코메토 표정 후보 비교</h1><p>후보마다 파이프라인과 같은 합성·투명 컷(얼굴 창 밖 = K6 원본). 같은 에셋을 왼쪽 다크, 오른쪽 라이트 바닥에. 144px·72px.</p><table>${rows.join("")}</table>`
   );
   await shoot(page, html, resolve(dir, "candidates.png"));
 }

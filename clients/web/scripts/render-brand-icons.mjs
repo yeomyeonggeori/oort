@@ -41,8 +41,8 @@
 //   - icns 32px 이하 세 칸이 C2-04 small 타일이다
 //   - Dock 산출물(icns 64px 이상 칸, icons/64·128·256·512 PNG)이 app-icon.png에서 나왔다
 //   - C2-04: 단색판·파비콘 대비 3:1, small·파비콘 16/24/32px 틈(#2650)
-//   - 코메토 표정 6종(#2806): K6-flat-light·생성 크롭 sha256, 얼굴 창 밖 = K6 원본,
-//     창 안 = 생성 크롭에서 합성, 표정끼리 구분, 웹 에셋 파생(kometto-faces.mjs 머리말)
+//   - 코메토 표정 6종(#2806): 생성 크롭 sha256, 얼굴 창 밖 = K6 원본, 표정끼리 구분,
+//     투명 컷 에셋(웹 576·폰 600)이 합성에서 파생(kometto-faces.mjs 머리말)
 // =============================================================================
 
 import { createHash } from "node:crypto";
@@ -563,17 +563,16 @@ const CHARACTER_OUTPUTS = [
 
 function printFaces(r) {
   console.log("\n== 코메토 표정 (#2806)");
-  for (const [path, s] of r.shas) console.log(`레퍼런스 ${path}  sha256 ${s.slice(0, 16)}…`);
-  for (const [path, c] of r.composites)
+  for (const [path, s] of r.shas) console.log(`원본 ${path}  sha256 ${s.slice(0, 16)}…`);
+  for (const [id, c] of r.composites)
     console.log(
-      c.idleSame !== undefined
-        ? `${path}  대기 = K6 원본 바이트 ${c.idleSame ? "o" : "x"}`
-        : `${path}  창 밖 다른 픽셀 ${c.outsideDiff}  재합성 평균 차 ${c.recomposeMean.toFixed(2)}  대기 대비 변화 ${(c.changed * 100).toFixed(1)}%  최소 구분 ${(Math.min(...Object.values(c.distinct)) * 100).toFixed(1)}%`
+      `합성 ${id}  창 밖 다른 픽셀 ${c.outsideDiff}  대기 대비 변화 ${(c.changed * 100).toFixed(1)}%  최소 구분 ${(Math.min(...Object.values(c.distinct)) * 100).toFixed(1)}%`
     );
-  console.log(`사상(다크 대기 눈 → K6-flat-light): 창 안 평균 차 ${r.mapping.recomposeMean.toFixed(2)} (≤ 3)`);
-  for (const [path, w] of r.web)
-    console.log(`${path}  평균 차 ${w.mean.toFixed(2)}  16 초과 ${(w.over * 100).toFixed(2)}%  알파 어긋남 ${(w.alphaOff * 100).toFixed(2)}%  모서리/가운데 알파 ${w.corner}/${w.center}`);
-  console.log(`idle-dark ↔ kometto-badge.png 평균 차 ${r.idleVsS0.mean.toFixed(2)}  16 초과 ${(r.idleVsS0.over * 100).toFixed(2)}%`);
+  for (const [path, w] of r.assets)
+    console.log(
+      `${path}  ${w.size}px  평균 차 ${w.mean.toFixed(2)}  16 초과 ${(w.over * 100).toFixed(2)}%  알파 어긋남 ${(w.alphaOff * 100).toFixed(2)}%  알파 모서리/원판/얼굴 ${w.corner}/${w.discPx}/${w.face}  자름 경계 ${w.cutPx}px`
+    );
+  console.log(`대기 웹 에셋 ↔ kometto-badge.png(불투명 자리) 평균 차 ${r.idleVsS0.mean.toFixed(2)}  16 초과 ${(r.idleVsS0.over * 100).toFixed(2)}%`);
 }
 
 async function main() {
@@ -593,7 +592,7 @@ async function main() {
       console.error("\nFAIL\n- " + failures.join("\n- "));
       process.exit(1);
     }
-    console.log(`\nOK (표정 ${FACE_IDS.length}종 × 2 테마)`);
+    console.log(`\nOK (표정 ${FACE_IDS.length}종 × 웹·폰)`);
     return;
   }
   try {
