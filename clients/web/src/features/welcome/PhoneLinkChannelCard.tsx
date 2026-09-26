@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/design/ui/button";
-import { KomettoMark } from "@/design/brand/KomettoMark";
+import { KomettoFace } from "@/features/onboarding/guide/KomettoFace";
 import { cn } from "@/design/lib/cn";
 import { DeviceLinkCard } from "@/features/settings/DeviceLinkCard";
 import {
@@ -29,25 +29,18 @@ import { PHONE_LINK_CARD_COPY, PHONE_LINK_SETTINGS_HREF } from "./phoneLinkCard"
 
 type Face = "idle" | "sleepy" | "happy";
 
-// -----------------------------------------------------------------------------
-// 임시 코메토 (교체 지점). #2807(OB2-1)의 `KomettoFace`와 #2806(OB2-0)의 표정
-// 자산이 머지되면 이 함수 대신 `<KomettoFace expression={face} />`를 쓴다.
-// 그때까지는 여섯 표정 모두 K6 플랫 배지 한 장이다(#2807 임시본과 같은 규칙).
-// 표정 id는 `data-expression`으로 남겨 시험과 캡처가 상태를 잰다. 그림은
-// 장식이고 상태는 옆 문장이 말한다(ADR-0193 D11).
-// -----------------------------------------------------------------------------
+// 코메토는 킥오프 띠(#2817)와 같은 `KomettoFace`다: 한 자리에서 같은 그림이
+// 표정만 바꾼다(ADR-0193 D11). 바깥 상자가 `data-expression`을 남겨 시험과
+// 캡처가 상태를 잰다. 그림은 장식이고 상태는 옆 문장이 말한다.
 function BandKometto({ face, small = false }: { face: Face; small?: boolean }) {
   return (
     <span
-      className={cn(
-        "shrink-0",
-        small ? "size-8" : "size-kometto-band"
-      )}
+      className="flex shrink-0"
       data-testid="phone-link-card-kometto"
       data-expression={face}
       aria-hidden="true"
     >
-      <KomettoMark className="size-full" />
+      <KomettoFace expression={face} size={small ? "band-small" : "band"} />
     </span>
   );
 }

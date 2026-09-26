@@ -3458,6 +3458,12 @@
   block-size: var(--spacing-kometto-band);
 }
 
+/* 폰 카드 접힌 줄(#2818). 32px 미만은 쓰지 않는다(docs/brand/mark 「작은 크기」). */
+.kometto-face[data-size="band-small"] {
+  inline-size: var(--spacing-8);
+  block-size: var(--spacing-8);
+}
+
 /* 두 겹(떠나는 표정·오는 표정)이 같은 상자에 겹친다. 머리가 움직이지 않는다. */
 .kometto-face-layer {
   position: absolute;
