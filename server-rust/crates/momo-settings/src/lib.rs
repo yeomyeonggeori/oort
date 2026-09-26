@@ -56,12 +56,14 @@
 
 pub mod chain;
 pub mod crypto;
+pub mod egress;
 pub mod engine;
 pub mod invite;
 pub mod join;
 pub mod link;
 pub mod membership_lifecycle;
 pub mod oauth;
+pub mod presets;
 pub mod provider;
 pub mod quota;
 pub mod tier;
@@ -75,6 +77,7 @@ pub use chain::{
     RATE_LIMITED_REASON, UNREACHABLE_REASON,
 };
 pub use crypto::{masked_tail, open_bearer, seal_bearer, CryptoError, SEALED_BOX_VERSION};
+pub use egress::{is_non_public_ip, EgressDenied, EgressPolicy};
 pub use engine::{
     read_work_host_engine, upsert_work_host_engine, validated_engine, StoredWorkHostEngine,
     ALLOWED_ENGINES, DEFAULT_ENGINE,
@@ -106,9 +109,11 @@ pub use membership_lifecycle::{
     StatusChangeApplied, StatusTransition,
 };
 pub use oauth::{
-    LinkCredential, OpenAiOAuthCredential, ATTRIBUTION_NOTICE_KO, ATTRIBUTION_PERSONAL,
-    DEFAULT_OPENAI_TOKEN_ENDPOINT, OAUTH_OPENAI_KIND, USAGE_SCOPE_INTERNAL_ONLY,
+    LinkCredential, OpenAiOAuthCredential, ANTHROPIC_KEY_KIND, ATTRIBUTION_NOTICE_KO,
+    ATTRIBUTION_PERSONAL, DEFAULT_OPENAI_TOKEN_ENDPOINT, OAUTH_OPENAI_KIND,
+    USAGE_SCOPE_INTERNAL_ONLY,
 };
+pub use presets::{ProviderFormat, ProviderPreset, PROVIDER_PRESETS};
 pub use provider::{
     is_unsafe_secret, redacted_endpoint_label, requires_strict_external_provider,
     validated_base_url, BaseUrlInvalid, ProviderConfig, ProviderMode,

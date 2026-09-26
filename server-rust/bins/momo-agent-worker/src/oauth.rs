@@ -39,8 +39,12 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
+use momo_settings::EgressPolicy;
 use serde::Deserialize;
 use serde_json::json;
+
+use crate::egress::EgressGuard;
+use crate::provider::ProviderError;
 
 /// How far ahead of expiry a token counts as expired.
 ///
@@ -96,6 +100,10 @@ pub enum RefreshError {
     /// The link has no grant to refresh with — a half-written OAuth link.
     #[error("provider link carries no refresh token")]
     MissingGrant,
+    /// #2852 / #2894: the token endpoint is (or resolves to) an address the
+    /// egress policy refuses. A verdict, never retried.
+    #[error("token endpoint egress refused: {0}")]
+    EgressDenied(String),
 }
 
 impl RefreshError {
@@ -108,7 +116,8 @@ impl RefreshError {
             RefreshError::HttpStatus(status) => (500..600).contains(status),
             RefreshError::Rejected(_)
             | RefreshError::InvalidResponse(_)
-            | RefreshError::MissingGrant => false,
+            | RefreshError::MissingGrant
+            | RefreshError::EgressDenied(_) => false,
         }
     }
 }
@@ -145,24 +154,36 @@ pub trait TokenRefresher: Send + Sync {
 // ---------------------------------------------------------------------------
 
 /// `POST {token_endpoint}` with an RFC 6749 §6 refresh grant.
+///
+/// #2894: the token endpoint is operator-typed text (`oauth.tokenEndpoint`),
+/// and the request carries the refresh grant, so it gets the same egress guard
+/// as the provider call — guarded resolver, no redirects, no proxy — plus the
+/// literal/pre-DNS precheck.
 pub struct HttpTokenRefresher {
-    client: reqwest::Client,
+    /// `None` when the guarded client could not be built. There is deliberately
+    /// no unguarded fallback: a refresh that cannot be guarded fails.
+    client: Option<reqwest::Client>,
+    guard: EgressGuard,
 }
 
 impl HttpTokenRefresher {
-    pub fn new(request_timeout: Duration) -> HttpTokenRefresher {
-        // A client that will not build is a TLS/runtime misconfiguration, not a
-        // per-call error. Degrading to the default client keeps the worker
-        // draining (every other job still works) and the refresh then fails with
-        // an ordinary transport error the operator can read.
-        let client = reqwest::Client::builder()
-            .timeout(request_timeout)
-            .build()
-            .unwrap_or_else(|error| {
-                tracing::warn!(error = %error, "oauth refresh client build failed; using defaults");
-                reqwest::Client::new()
-            });
-        HttpTokenRefresher { client }
+    /// `policy` should be the worker's egress policy **without** the env
+    /// provider host — that trust is for `HERMES_BASE_URL`, not for a token
+    /// endpoint.
+    pub fn new(request_timeout: Duration, mut policy: EgressPolicy) -> HttpTokenRefresher {
+        policy.operator_hosts.clear();
+        let guard = EgressGuard::system(policy);
+        HttpTokenRefresher::with_guard(request_timeout, guard)
+    }
+
+    pub fn with_guard(request_timeout: Duration, guard: EgressGuard) -> HttpTokenRefresher {
+        let client = guard
+            .client(reqwest::Client::builder().timeout(request_timeout))
+            .map_err(|error| {
+                tracing::warn!(error = %error, "oauth refresh client build failed; refreshes will fail");
+            })
+            .ok();
+        HttpTokenRefresher { client, guard }
     }
 }
 
@@ -185,8 +206,19 @@ impl TokenRefresher for HttpTokenRefresher {
             body["client_id"] = json!(client_id);
         }
 
-        let response = self
-            .client
+        self.guard
+            .precheck(token_endpoint)
+            .await
+            .map_err(|error| match error {
+                ProviderError::Unreachable(message) => RefreshError::Unreachable(message),
+                other => RefreshError::EgressDenied(other.to_string()),
+            })?;
+        let Some(client) = self.client.as_ref() else {
+            return Err(RefreshError::Unreachable(
+                "the guarded token-endpoint client could not be built".into(),
+            ));
+        };
+        let response = client
             .post(token_endpoint)
             .json(&body)
             .send()
@@ -323,6 +355,149 @@ impl TokenRefresher for MockTokenRefresher {
 
 #[cfg(test)]
 mod tests {
+
+    // -----------------------------------------------------------------------
+    // #2894 — the token endpoint is behind the same egress guard
+    // -----------------------------------------------------------------------
+
+    use crate::egress::tests::ScriptedLookup;
+    use crate::egress::HostLookup;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// A loopback HTTP server that counts connections and answers every one
+    /// with `response` verbatim.
+    async fn counting_server(response: String) -> (u16, Arc<AtomicUsize>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let counter = hits.clone();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                counter.fetch_add(1, Ordering::SeqCst);
+                let response = response.clone();
+                tokio::spawn(async move {
+                    let mut buffer = [0u8; 8192];
+                    let _ = socket.read(&mut buffer).await;
+                    let _ = socket.write_all(response.as_bytes()).await;
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+        (port, hits)
+    }
+
+    fn json_response(status: &str, body: &str) -> String {
+        format!(
+            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    fn refresher(policy: EgressPolicy, lookup: Arc<dyn HostLookup>) -> HttpTokenRefresher {
+        HttpTokenRefresher::with_guard(Duration::from_secs(5), EgressGuard::new(policy, lookup))
+    }
+
+    const INTERNAL: &str = r#"{"error":"internal","error_description":"INTERNAL-SECRET-FROM-127"}"#;
+
+    /// RED proof (#2894): a private literal and a name resolving to a private
+    /// address never receive the refresh grant.
+    #[tokio::test]
+    async fn the_token_endpoint_never_reaches_a_private_address() {
+        let (port, hits) = counting_server(json_response("400 Bad Request", INTERNAL)).await;
+        for endpoint in [
+            format!("http://127.0.0.1:{port}/oauth/token"),
+            format!("http://[::ffff:127.0.0.1]:{port}/oauth/token"),
+            format!("http://auth.attacker.example:{port}/oauth/token"),
+        ] {
+            let result = refresher(
+                EgressPolicy::default(),
+                ScriptedLookup::new(&[&["127.0.0.1"]]),
+            )
+            .refresh(&endpoint, None, "rt-grant")
+            .await;
+            assert!(
+                matches!(result, Err(RefreshError::EgressDenied(_))),
+                "{endpoint}: {result:?}"
+            );
+            assert!(!result.unwrap_err().is_retryable());
+        }
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            0,
+            "the grant reached the internal service"
+        );
+    }
+
+    /// The review's PoC: a permitted front answers 307 to an internal address.
+    /// The redirect is not followed and nothing internal comes back.
+    #[tokio::test]
+    async fn a_307_from_the_token_endpoint_is_not_followed() {
+        let (internal_port, internal_hits) =
+            counting_server(json_response("400 Bad Request", INTERNAL)).await;
+        let redirect = format!(
+            "HTTP/1.1 307 Temporary Redirect\r\nlocation: http://127.0.0.1:{internal_port}/oauth/token\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+        );
+        let (front_port, front_hits) = counting_server(redirect).await;
+        let policy = EgressPolicy {
+            allow_local: true,
+            local_hosts: vec!["auth.front.internal".into()],
+            operator_hosts: Vec::new(),
+        };
+        let result = refresher(policy, ScriptedLookup::new(&[&["127.0.0.1"]]))
+            .refresh(
+                &format!("http://auth.front.internal:{front_port}/oauth/token"),
+                None,
+                "rt-grant",
+            )
+            .await;
+        assert_eq!(result, Err(RefreshError::HttpStatus(307)));
+        assert_eq!(front_hits.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            internal_hits.load(Ordering::SeqCst),
+            0,
+            "the redirect was followed"
+        );
+    }
+
+    /// The operator's opt-in still reaches a listed token endpoint.
+    #[tokio::test]
+    async fn a_listed_token_endpoint_under_the_flag_still_refreshes() {
+        let (port, hits) = counting_server(json_response(
+            "200 OK",
+            r#"{"access_token":"at-new","expires_in":60}"#,
+        ))
+        .await;
+        let policy = EgressPolicy {
+            allow_local: true,
+            local_hosts: vec!["auth.internal".into()],
+            operator_hosts: Vec::new(),
+        };
+        let tokens = refresher(policy, ScriptedLookup::new(&[&["127.0.0.1"]]))
+            .refresh(
+                &format!("http://auth.internal:{port}/oauth/token"),
+                None,
+                "rt-grant",
+            )
+            .await
+            .expect("listed endpoint refreshes");
+        assert_eq!(tokens.access_token, "at-new");
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    /// The env provider host is not a token-endpoint exemption.
+    #[tokio::test]
+    async fn the_env_provider_host_does_not_open_the_token_endpoint() {
+        let policy = EgressPolicy::default().with_operator_base_url("http://127.0.0.1:8088/v1");
+        let result = HttpTokenRefresher::new(Duration::from_secs(5), policy)
+            .refresh("http://127.0.0.1:9/oauth/token", None, "rt-grant")
+            .await;
+        assert!(
+            matches!(result, Err(RefreshError::EgressDenied(_))),
+            "{result:?}"
+        );
+    }
     use super::*;
 
     #[test]
@@ -428,7 +603,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_link_without_a_grant_never_reaches_the_network() {
-        let refresher = HttpTokenRefresher::new(Duration::from_millis(1));
+        let refresher = HttpTokenRefresher::new(Duration::from_millis(1), EgressPolicy::default());
         assert_eq!(
             refresher
                 .refresh("http://127.0.0.1:1/oauth/token", None, "   ")

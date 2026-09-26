@@ -58,8 +58,8 @@ use momo_settings::{
     redacted_endpoint_label, replace_chain, requires_strict_external_provider, resolve_link,
     seal_bearer, upsert_link, validated_base_url, CascadeHop, CascadeSource, ChainEntryInput,
     DecryptedChainEntry, DecryptedProviderLink, LinkCredential, OpenAiOAuthCredential,
-    ProviderMode, ProviderSource, ResolvedProvider, StoredChainEntry, StoredProviderLink,
-    ATTRIBUTION_NOTICE_KO, MAX_CHAIN_ENTRIES,
+    ProviderFormat, ProviderMode, ProviderSource, ResolvedProvider, StoredChainEntry,
+    StoredProviderLink, ATTRIBUTION_NOTICE_KO, MAX_CHAIN_ENTRIES, PROVIDER_PRESETS,
 };
 
 use crate::dto::{
@@ -175,6 +175,12 @@ fn link_response(
             .flatten(),
         diagnostics,
         credential_kind: credential.map(|credential| credential.kind_label().to_string()),
+        format: credential.and_then(|credential| match credential {
+            LinkCredential::Bearer(_) => Some(ProviderFormat::Openai.as_str()),
+            LinkCredential::AnthropicKey(_) => Some(ProviderFormat::Anthropic.as_str()),
+            LinkCredential::OpenAiOAuth(_) => None,
+        }),
+        presets: &PROVIDER_PRESETS,
         credential_meta: oauth.map(|oauth| ProviderLinkCredentialMeta {
             attribution: oauth.attribution.clone(),
             usage_scope: oauth.usage_scope.clone(),
@@ -191,12 +197,18 @@ fn link_response(
 /// Requiring exactly one is not pedantry — a body carrying both leaves the
 /// operator's intent genuinely ambiguous, and picking a winner silently would
 /// store the credential they did not mean to store.
-fn requested_credential(request: &PutProviderLinkRequest) -> Result<LinkCredential, ApiError> {
+fn requested_credential(
+    request: &PutProviderLinkRequest,
+    environment: &str,
+    allow_local_loopback: bool,
+) -> Result<LinkCredential, ApiError> {
     let bearer = request
         .bearer
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
+    let format = ProviderFormat::from_label(request.format.as_deref())
+        .ok_or_else(|| ApiError::bad_request("format must be one of openai, anthropic"))?;
     match (bearer, request.oauth.as_ref()) {
         (Some(_), Some(_)) => Err(ApiError::bad_request(
             "send either bearer or oauth, not both — a link carries one credential",
@@ -204,13 +216,28 @@ fn requested_credential(request: &PutProviderLinkRequest) -> Result<LinkCredenti
         (None, None) => Err(ApiError::bad_request(
             "bearer must not be empty (or send an oauth grant instead)",
         )),
-        (Some(bearer), None) => Ok(LinkCredential::Bearer(bearer.to_string())),
-        (None, Some(oauth)) => Ok(oauth_credential(oauth)?),
+        // Review N4: a "bearer" that is itself a sealed-envelope document
+        // would be re-read as another credential kind on decrypt.
+        (Some(bearer), None) if LinkCredential::parse(bearer).kind_label() != "bearer" => Err(
+            ApiError::bad_request("bearer must be an API key, not a credential envelope"),
+        ),
+        (Some(bearer), None) => Ok(match format {
+            ProviderFormat::Openai => LinkCredential::Bearer(bearer.to_string()),
+            ProviderFormat::Anthropic => LinkCredential::AnthropicKey(bearer.to_string()),
+        }),
+        (None, Some(_)) if format == ProviderFormat::Anthropic => Err(ApiError::bad_request(
+            "format anthropic takes an API key in bearer, not an oauth grant",
+        )),
+        (None, Some(oauth)) => Ok(oauth_credential(oauth, environment, allow_local_loopback)?),
     }
 }
 
 /// Build the sealed OAuth credential from a request body.
-fn oauth_credential(request: &PutProviderOAuthRequest) -> Result<LinkCredential, ApiError> {
+fn oauth_credential(
+    request: &PutProviderOAuthRequest,
+    environment: &str,
+    allow_local_loopback: bool,
+) -> Result<LinkCredential, ApiError> {
     let refresh_token = request.refresh_token.trim();
     if refresh_token.is_empty() {
         return Err(ApiError::bad_request(
@@ -230,7 +257,16 @@ fn oauth_credential(request: &PutProviderOAuthRequest) -> Result<LinkCredential,
     credential.account_id = optional(&request.account_id);
     credential.account_label = optional(&request.account_label);
     credential.client_id = optional(&request.client_id);
-    credential.token_endpoint = optional(&request.token_endpoint);
+    // #2894: the token endpoint receives the refresh grant, so it passes the
+    // same write gate as the base URL (https, no userinfo/query/fragment, no
+    // private/loopback/metadata literal unless opted in) and is stored in its
+    // normalised form. The worker's egress guard re-checks it at connect time.
+    credential.token_endpoint = optional(&request.token_endpoint)
+        .map(|raw| {
+            validated_base_url(&raw, environment, allow_local_loopback)
+                .map_err(|error| ApiError::bad_request(format!("oauth.tokenEndpoint: {error}")))
+        })
+        .transpose()?;
     Ok(LinkCredential::OpenAiOAuth(Box::new(credential)))
 }
 
@@ -389,7 +425,11 @@ pub async fn put(
         state.settings.env_provider.allow_local_loopback,
     )
     .map_err(|error| ApiError::bad_request(error.to_string()))?;
-    let credential = requested_credential(&request)?;
+    let credential = requested_credential(
+        &request,
+        &state.settings.environment,
+        state.settings.env_provider.allow_local_loopback,
+    )?;
     let mode = resolved_mode(request.mode.as_deref())?;
     let credential_kind = credential.kind_label();
     let ciphertext = seal_bearer(&credential.to_sealed_plaintext(), &key)
@@ -804,6 +844,81 @@ fn validated_chain_entries(
 
 #[cfg(test)]
 mod tests {
+
+    /// Review N4: an envelope-shaped bearer is refused instead of being
+    /// re-read as another credential kind on decrypt.
+    #[test]
+    fn an_envelope_shaped_bearer_is_refused() {
+        let request = |bearer: &str, format: Option<&str>| crate::dto::PutProviderLinkRequest {
+            base_url: "https://api.example.com/v1".into(),
+            bearer: Some(bearer.into()),
+            mode: None,
+            oauth: None,
+            format: format.map(str::to_string),
+        };
+        for format in [None, Some("anthropic")] {
+            for bearer in [
+                r#"{"kind":"anthropic-key","api_key":"sk-ant-x"}"#,
+                r#"{"kind":"oauth-openai","refresh_token":"rt"}"#,
+            ] {
+                let error = requested_credential(&request(bearer, format), "production", false)
+                    .expect_err(bearer);
+                assert_eq!(error.status, StatusCode::BAD_REQUEST);
+            }
+        }
+        // An ordinary key (even `{`-leading garbage that is no envelope) is fine.
+        assert_eq!(
+            requested_credential(&request("sk-live-abc", None), "production", false)
+                .unwrap()
+                .kind_label(),
+            "bearer"
+        );
+    }
+
+    /// #2894: `oauth.tokenEndpoint` passes the base-URL write gate.
+    #[test]
+    fn the_oauth_token_endpoint_passes_the_base_url_gate() {
+        let grant = |endpoint: &str| crate::dto::PutProviderOAuthRequest {
+            refresh_token: "rt-grant".into(),
+            access_token: None,
+            expires_at_ms: None,
+            account_id: None,
+            account_label: None,
+            client_id: None,
+            token_endpoint: Some(endpoint.into()),
+        };
+        for refused in [
+            "http://169.254.169.254/latest/meta-data/iam/",
+            "https://169.254.169.254/oauth/token",
+            "https://[::ffff:10.0.0.1]/oauth/token",
+            "https://auth.localhost/oauth/token",
+            "http://auth.example.com/oauth/token",
+            "https://user:pw@auth.example.com/oauth/token",
+        ] {
+            let error = oauth_credential(&grant(refused), "production", false).expect_err(refused);
+            assert_eq!(error.status, StatusCode::BAD_REQUEST, "{refused}");
+        }
+        let ok = oauth_credential(
+            &grant("HTTPS://Auth.OpenAI.com/oauth/token"),
+            "production",
+            false,
+        )
+        .expect("public https");
+        assert_eq!(
+            ok.as_openai_oauth().unwrap().token_endpoint.as_deref(),
+            Some("https://auth.openai.com/oauth/token"),
+            "stored normalised"
+        );
+        // Absent stays absent (the worker's default endpoint applies).
+        let mut none = grant("x");
+        none.token_endpoint = None;
+        assert!(oauth_credential(&none, "production", false)
+            .unwrap()
+            .as_openai_oauth()
+            .unwrap()
+            .token_endpoint
+            .is_none());
+    }
     use super::*;
     use crate::dto::PutProviderChainEntry;
 

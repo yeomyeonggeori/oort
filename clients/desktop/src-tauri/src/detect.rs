@@ -19,8 +19,11 @@
 // not live in this module (ADR-0190 D3-a, #2813): `harness_status.rs` runs
 // `claude auth status` and `codex login status` by absolute path, with fixed
 // arguments, output discarded, and reports the exit code as one of three
-// values. Running any other program — a login command, an installer, another
-// app's debug interface — is still not representable, here or there. The
+// values. The official sign-in commands (ADR-0190 D3-f, #2816) are the
+// other: `pty.rs` `LOGIN_COMMANDS`, three fixed rows the person starts from
+// the sign-in dialog, run in a terminal the person can open and never read by
+// the app. Running any other program — an installer, another app's debug
+// interface — is still not representable, here or there. The
 // harness ids (`claude`, `codex`) sit next to `grok` in momo-core `detect.ts`
 // under `LOCAL_HARNESS_IDS`.
 
