@@ -594,6 +594,8 @@ export function GroupRow({
       {leading ?? null}
       <View style={styles.groupRowText}>
         <Text
+          // 큰 글씨에서 「18:00까\n지」처럼 어절 가운데서 끊기지 않게.
+          lineBreakStrategyIOS="hangul-word"
           style={[
             styles.groupRowTitle,
             tone === 'danger' && styles.groupRowTitleDanger,
