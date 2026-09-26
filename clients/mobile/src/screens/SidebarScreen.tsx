@@ -24,6 +24,7 @@ import {
   BAR_CONTROL_MAX_SCALE,
   EmptyState,
   ErrorState,
+  Sentence,
   FailureBanner,
   LoadingState,
   NoticeBlock,
@@ -692,7 +693,10 @@ function SectionHead({
           accessibilityRole="button"
           accessibilityLabel={`${section.label} 섹션 메뉴`}
           onPress={onMenu}
-          hitSlop={slopTo(HOME_ICON_SIZE.more)}
+          // 두 글리프 사이가 14 라 대칭 여유(12+12)는 가운데 10pt 를 둘이 함께 갖는다
+          // (리뷰 M3). 바깥쪽으로 더 주고 안쪽은 틈의 절반(7)에서 멈춘다 — 두 상자 모두
+          // 44 이고 겹치지 않는다.
+          hitSlop={CTL_SLOP_MORE}
           style={({pressed}) => pressed && styles.pressedGlyph}
           testID={`home-section-menu-${section.key}`}>
           <Image
@@ -706,7 +710,7 @@ function SectionHead({
           accessibilityState={{expanded: !collapsed}}
           accessibilityHint={collapsed ? '펼칩니다.' : '접습니다. 안 읽은 대화는 남습니다.'}
           onPress={onToggle}
-          hitSlop={slopTo(HOME_ICON_SIZE.down)}
+          hitSlop={CTL_SLOP_DOWN}
           style={({pressed}) => pressed && styles.pressedGlyph}
           testID={`home-section-toggle-${section.key}`}>
           <Image
@@ -928,25 +932,31 @@ export function WorkingCard({
             </Text>
           </View>
         </View>
-        <Text
+        {/* 문장이라 어절에서 끊는다(`Sentence`, 리뷰 H1 — 「…상태입 / 니다」). 큰
+            글씨에서 한 줄이 두 줄로 잘려 할 일이 사라지지 않게 넷까지 연다(M4). */}
+        <Sentence
           style={[styles.cardLine, !card.live && styles.cardLineStale]}
-          numberOfLines={2}
+          numberOfLines={4}
           testID="home-working-line">
           {card.place ? <Text style={styles.cardPlace}>{card.place}</Text> : null}
           {card.place && card.headline ? ' · ' : null}
           {card.headline ?? (card.place ? null : '대화')}
           {card.others > 0 ? ` · 그 밖에 ${card.others}건` : null}
-        </Text>
+        </Sentence>
         {card.live ? null : (
-          <Text style={styles.cardStale} testID="home-working-stale">
+          <Sentence style={styles.cardStale} testID="home-working-stale">
             {TURN_STALE_SENTENCE}
-          </Text>
+          </Sentence>
         )}
         <View style={styles.prog} testID={`home-working-steps-${card.step}`}>
           {([1, 2, 3] as const).map(step => (
             <View
               key={step}
-              style={[styles.progStep, step <= card.step && styles.progStepOn]}
+              style={[
+                styles.progStep,
+                !card.live && styles.progStepStale,
+                step <= card.step && (card.live ? styles.progStepOn : styles.progStepOnStale),
+              ]}
             />
           ))}
         </View>
@@ -981,7 +991,8 @@ function IdleAgentsRow({
       testID="home-agents-idle">
       <AgentSquare size={HOME.rowFace} corner={HOME.rowAgentCorner} glyph={HOME.rowAgentGlyph} />
       <View style={styles.idleText}>
-        <Text style={styles.rowTitle} numberOfLines={1}>
+        {/* 동사가 잘리면 문이 무엇인지 사라진다(AX, 리뷰 M4) — 두 줄까지 감는다. */}
+        <Text style={styles.rowTitle} numberOfLines={2}>
           에이전트 부르기
         </Text>
         {/* 보조 줄은 이름 **아래**에 선다. 오른쪽 끝에 두면 큰 글씨에서 이름이
@@ -1108,6 +1119,22 @@ export const HOME = {
   dividerBottom: 10,
 } as const;
 
+/** 섹션 머리 두 컨트롤의 누르는 상자: 각각 44×44, 서로 겹치지 않는다. */
+const CTL_INNER = HOME.ctlGap / 2;
+const CTL_VERTICAL = slopTo(HOME_ICON_SIZE.more);
+export const CTL_SLOP_MORE = {
+  top: CTL_VERTICAL,
+  bottom: CTL_VERTICAL,
+  left: TOUCH_TARGET - HOME_ICON_SIZE.more - CTL_INNER,
+  right: CTL_INNER,
+};
+export const CTL_SLOP_DOWN = {
+  top: CTL_VERTICAL,
+  bottom: CTL_VERTICAL,
+  left: CTL_INNER,
+  right: TOUCH_TARGET - HOME_ICON_SIZE.down - CTL_INNER,
+};
+
 /** `#rrggbb` 에 알파 두 자리를 붙인다. 시안의 `color-mix(… N%, transparent)`. */
 function alpha(hex: string, fraction: number): string {
   return `${hex.slice(0, 7)}${Math.round(fraction * 255)
@@ -1197,7 +1224,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   divider: {
     height: 1,
     backgroundColor: alpha(color.text, 0.1),
-    marginTop: HOME.dividerTop,
+    // 시안의 `.a-sec` 아래 14 와 `.a-div` 위 6 은 CSS 에서 겹쳐 14 가 된다(마진 상쇄).
+    // 위의 섹션 틈이 이미 14 이므로 여기서 더하지 않는다(리뷰 M2).
+    marginTop: Math.max(0, HOME.dividerTop - HOME.secBelow),
     marginHorizontal: HOME.dividerX,
     marginBottom: HOME.dividerBottom,
   },
@@ -1312,6 +1341,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     backgroundColor: alpha(color.agent, 0.22),
   },
   progStepOn: {backgroundColor: color.agent},
+  // 끊긴 레일 위의 단계는 확인된 사실이 아니다 — 점·낱말과 함께 색을 벗는다(리뷰 L1).
+  progStepStale: {backgroundColor: color.border},
+  progStepOnStale: {backgroundColor: color.textFaint},
 
   // ---- 빈 카드 자리 · 이름 찾기 --------------------------------------------
   idleRow: {marginBottom: HOME.secBelow},

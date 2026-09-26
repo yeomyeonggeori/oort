@@ -33,8 +33,11 @@ import {
 import type {SidebarRow, SidebarSection} from '../src/features/sidebar/rows';
 import {
   AGENT_LIST_ACTION,
+  CTL_SLOP_DOWN,
+  CTL_SLOP_MORE,
   FILTER_ACTION,
   HOME,
+  WorkingCard,
 } from '../src/screens/SidebarScreen';
 import AppShell from '../src/shell/AppShell';
 import {NON_SECRET_KEYS} from '../src/storage/kv';
@@ -680,5 +683,58 @@ describe.each([
       expect(contrast(p.icon, stop)).toBeGreaterThanOrEqual(3);
       expect(contrast(p.text, stop)).toBeGreaterThanOrEqual(4.5);
     }
+  });
+});
+
+// ---- 6. 검수 R1 수리 ---------------------------------------------------------------
+
+describe('검수 R1', () => {
+  it('H1: 카드의 문장은 어절에서 끊는다 (한 줄 · 끊김 이유)', async () => {
+    await mountHome();
+    act(() => markAgentWorking(signal()));
+    await waitFor(() => expect(screen.getByTestId('home-working-line')).toBeTruthy());
+    expect(screen.getByTestId('home-working-line').props.lineBreakStrategyIOS).toBe(
+      'hangul-word',
+    );
+  });
+
+  it('H1·L1: 끊긴 레일의 이유 줄도 어절에서 끊고, 진행 칸도 색을 벗는다', () => {
+    const model = card(keyed(signal()), false);
+    if (model === null) throw new Error('card');
+    render(<WorkingCard card={model} onPress={() => {}} />);
+    expect(screen.getByTestId('home-working-stale').props.lineBreakStrategyIOS).toBe(
+      'hangul-word',
+    );
+    const steps = screen.getByTestId('home-working-steps-2').children as unknown as {
+      props: {style: unknown};
+    }[];
+    const fills = steps.map(step => flat(step.props.style).backgroundColor);
+    for (const palette of [lightPalette, darkPalette]) {
+      expect(fills).not.toContain(palette.agent);
+    }
+  });
+
+  it('M2: 구분선 위 틈은 시안의 마진 상쇄대로 14 하나다', async () => {
+    await mountHome();
+    expect(flat(screen.getByTestId('home-divider').props.style).marginTop).toBe(0);
+  });
+
+  it('M3: 배송되는 두 컨트롤이 그 상자를 쓴다', async () => {
+    await mountHome();
+    expect(screen.getByTestId('home-section-menu-channels').props.hitSlop).toEqual(
+      CTL_SLOP_MORE,
+    );
+    expect(screen.getByTestId('home-section-toggle-channels').props.hitSlop).toEqual(
+      CTL_SLOP_DOWN,
+    );
+  });
+
+  it('M3: ⋯ 와 셰브론의 누르는 상자는 각각 44 이고 겹치지 않는다', () => {
+    const width = (slop: typeof CTL_SLOP_MORE, glyph: number) => slop.left + glyph + slop.right;
+    expect(width(CTL_SLOP_MORE, 20)).toBe(44);
+    expect(width(CTL_SLOP_DOWN, 20)).toBe(44);
+    expect(CTL_SLOP_MORE.top + 20 + CTL_SLOP_MORE.bottom).toBe(44);
+    // 두 글리프 사이 틈(14)을 둘이 나눠 갖는다 — 합이 틈을 넘지 않는다.
+    expect(CTL_SLOP_MORE.right + CTL_SLOP_DOWN.left).toBeLessThanOrEqual(HOME.ctlGap);
   });
 });
