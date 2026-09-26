@@ -87,6 +87,11 @@ export const NON_SECRET_KEYS = {
    * 고르면 된다) 늦게 오면 안 되는 값이라, 서버도 키체인도 아닌 여기에 산다.
    */
   themeChoice: 'momo.mobile.theme.v1',
+  /**
+   * 홈에서 접어 둔 섹션 (DS2-3 #2715). 워크스페이스 id → 접힌 섹션 키 목록의 JSON.
+   * 화면 배치에 대한 사람의 선택일 뿐이고, 잃으면 섹션이 다시 펼쳐져 있을 뿐이다.
+   */
+  homeCollapsedSections: 'momo.mobile.home.collapsed.v1',
 } as const;
 
 export type NonSecretKey = (typeof NON_SECRET_KEYS)[keyof typeof NON_SECRET_KEYS];

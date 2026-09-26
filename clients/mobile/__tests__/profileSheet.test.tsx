@@ -177,8 +177,10 @@ describe('대화 목록 발치가 비었다 (#2702)', () => {
     const avatar = screen.getByTestId('profile-avatar');
     expect(avatar.props.accessibilityRole).toBe('button');
     expect(avatar.props.accessibilityLabel).toContain('곽성재');
-    // 검색의 문은 그대로 머리에 있다 — 머리의 두 행동이 한 줄에 선다.
-    expect(screen.getByTestId('open-message-search')).toBeTruthy();
+    // DS2-3(#2715): 머리는 시안 A 그대로 로고·큰 제목·아바타 셋이다. 메시지 검색의
+    // 문은 떠 있는 탭바의 검색 탭이다.
+    expect(screen.getByTestId('home-title')).toBeTruthy();
+    expect(screen.getByTestId('tab-search')).toBeTruthy();
   });
 });
 

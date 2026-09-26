@@ -140,6 +140,10 @@ export function Shell({
     (initialQuery?: string) => dispatch({type: 'openSearch', initialQuery}),
     [],
   );
+  const onOpenAgentList = useCallback(
+    () => dispatch({type: 'openAgentList'}),
+    [],
+  );
   const onOpenAgent = useCallback(
     (agent: OpenAgent) => dispatch({type: 'openAgent', agent}),
     [],
@@ -196,6 +200,7 @@ export function Shell({
               openChannelId={nav.conversation?.channelId ?? null}
               onOpenConversation={onOpenConversation}
               onOpenSearch={onOpenSearch}
+              onOpenAgentList={onOpenAgentList}
               notificationNotice={tapRouting.notice}
               onDismissNotificationNotice={tapRouting.dismissNotice}
             />
@@ -358,7 +363,7 @@ export function Shell({
       {composeOpen ? (
         <NewMessageSheet
           workConsole={workConsole}
-          onOpenAgentList={() => dispatch({type: 'openAgentList'})}
+          onOpenAgentList={onOpenAgentList}
           onOpenWorkList={() => dispatch({type: 'openWorkList'})}
           onOpenConversation={onOpenConversation}
           onClose={() => setComposeOpen(false)}

@@ -481,7 +481,8 @@ describe('데스크탑에서 마크한 채널이 폰에서도 안 읽음으로 �
     await settle();
     const row = screen.getByTestId(`sidebar-row-channel:${CH}`);
     expect(row.props.accessibilityLabel).toBe('채널 general, 안 읽은 메시지 8개');
-    expect(within(row).getByLabelText('안 읽은 메시지 8개')).toBeTruthy();
+    // 배지는 스스로 라벨을 들지 않는다(행이 한 접근성 원소다, DS2-3). 보이는 수가 8이다.
+    expect(within(row).getByTestId('home-badge-unread')).toHaveTextContent('8');
   });
 
   it('대화의 구분선이 마크 자리(seq 3 위)에 「새 메시지 8개」로 선다', async () => {
