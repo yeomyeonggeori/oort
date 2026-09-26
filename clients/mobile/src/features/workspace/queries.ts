@@ -55,6 +55,25 @@ export function useRoleLabels(workspaceId: string): RoleLabels {
   return query.data?.roleLabels ?? {};
 }
 
+/**
+ * 워크스페이스 이름·아바타 경로 (DS2-3 홈 머리). `useRoleLabels` 와 **같은 키, 같은
+ * 조회**다 — 한 요청을 두 자리가 나눠 읽는다. 웹 레일이 같은 GET 을 같은 이유로 읽는다.
+ */
+export function useWorkspaceIdentity(workspaceId: string) {
+  const query = useQuery({
+    queryKey: workspaceKeys.identity(workspaceId),
+    queryFn: () => fetchWorkspace(workspaceId),
+    retry: false,
+  });
+  return {
+    name: query.data?.name,
+    avatarUrl: query.data?.avatarUrl,
+    isPending: query.isPending,
+    isError: query.isError,
+    refetch: query.refetch,
+  };
+}
+
 export function useDirectory(workspaceId: string) {
   const query = useQuery({
     queryKey: workspaceKeys.roster(workspaceId),

@@ -3130,6 +3130,20 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // 시뮬레이터는 누를 수 없으므로(하네스 머리 주석). 캡션을 달지 않는다: 시안과
     // 나란히 놓는 사진이라 화면 위에 글자가 한 줄이라도 더 서면 대조가 흐려진다.
     case 'shell-home':
+    case 'shell-home-idle':
+    case 'shell-home-approval':
+    case 'shell-home-loading':
+    case 'shell-home-empty':
+    case 'shell-home-error':
+      // DS2-3 (#2715): 홈 — 작업 중 카드(살아 있는 레일), 빈 카드 자리, 승인 대기,
+      // 그리고 목록의 세 상태. 씨앗은 `seedShell` 이 표면 이름으로 고른다.
+      return (
+        <RealtimeContext.Provider value={CONNECTED_RAIL}>
+          <Shell />
+        </RealtimeContext.Provider>
+      );
+    // 레일이 끊긴 홈: 카드가 색을 벗고 이유를 말한다.
+    case 'shell-home-offline':
       return <Shell />;
     case 'shell-inbox':
       return <Shell initialNav={{...INITIAL_NAV, tab: 'inbox'}} />;
@@ -3528,11 +3542,23 @@ function seedMarkUnread(): void {
 // 시안 A 홈의 목록을 흉내 낸다(채널 다섯, 에이전트 하나, 사람 둘). 인박스 점은 멘션
 // 합(2)이다. 홈 내용의 모양은 DS2-3(#2715)의 몫이라 여기서는 지금의 사이드바가
 // 그린다 — 이 판이 보여 주려는 것은 바닥·탭바·FAB·페이지 시트다.
-const SHELL_ROSTER = [
-  ...ROSTER.map(member => ({...member, workspaceId: ADE_WS})),
+/** 시안 A `#a-home` 의 DM 섹션 사람들 — 김여명 · 박세은 · 이동하. */
+const SHELL_HUMANS = [
+  {id: '00000000-0000-7000-8000-0000000a0e01', displayName: '김여명', handle: 'yeomyeong'},
+  {id: '00000000-0000-7000-8000-0000000a0e02', displayName: '박세은', handle: 'seeun'},
+  {id: '00000000-0000-7000-8000-0000000a0e03', displayName: '이동하', handle: 'dongha'},
 ];
 
-function seedShell(): void {
+const SHELL_ROSTER = [
+  ...ROSTER.map(member => ({...member, workspaceId: ADE_WS})),
+  ...SHELL_HUMANS.map(human => ({
+    ...(ROSTER.find(m => m.kind === 'human') ?? ROSTER[0]),
+    ...human,
+    workspaceId: ADE_WS,
+  })),
+];
+
+function seedShell(surface: string): void {
   // 셸은 명시적으로 켜진 질의(인박스·에이전트 레일)도 세운다. 서버가 없는 하네스에서
   // 그 요청이 실패하면 세션 만료로 읽혀 캐시가 통째로 지워지고(`useSession` 의
   // 로그아웃 경로), 씨앗이 사라진 빈 목록이 찍힌다. 하네스는 데이터를 받지 않으므로
@@ -3542,6 +3568,42 @@ function seedShell(): void {
   void globalThis.fetch;
   void globalThis.Headers;
   globalThis.fetch = (() => new Promise<Response>(() => {})) as typeof fetch;
+  // ADE 판의 턴이 이 판에 새지 않게 비우고, 홈 판이 고른 것만 넣는다.
+  resetAgentWorking();
+  harnessClient.setQueryData(['settings', 'workspace', ADE_WS], {
+    id: ADE_WS,
+    slug: 'yeomyeong',
+    name: '여명거리',
+    updatedAtMs: 0,
+  });
+
+  // ADE 판의 씨앗(모듈 몸통에서 먼저 뿌려진다)을 지운다 — 목록의 세 상태는 빈 캐시에서
+  // 시작해야 그 상태다.
+  harnessClient.removeQueries({queryKey: ['channels', ADE_WS]});
+  harnessClient.removeQueries({queryKey: ['roster', ADE_WS]});
+  harnessClient.removeQueries({queryKey: ['read-state', ADE_WS]});
+
+  if (surface === 'shell-home-loading') {
+    // 첫 답을 기다리는 목록: 질의를 켜 두고 요청은 끝나지 않는다.
+    harnessClient.setQueryDefaults(['channels', ADE_WS], {enabled: true, staleTime: 0});
+    harnessClient.setQueryDefaults(['roster', ADE_WS], {enabled: true, staleTime: 0});
+    return;
+  }
+  if (surface === 'shell-home-error') {
+    // 연결 실패: 폰의 fetch 가 전송 오류로 끝난다. 코어가 그것을 자기 문장으로 바꾼다.
+    globalThis.fetch = (() =>
+      Promise.reject(new TypeError('Network request failed'))) as typeof fetch;
+    harnessClient.setQueryDefaults(['channels', ADE_WS], {enabled: true, staleTime: 0});
+    harnessClient.setQueryData(['roster', ADE_WS], SHELL_ROSTER);
+    return;
+  }
+  if (surface === 'shell-home-empty') {
+    harnessClient.setQueryData(['roster', ADE_WS], SHELL_ROSTER.slice(0, 1));
+    harnessClient.setQueryData(['channels', ADE_WS], []);
+    harnessClient.setQueryData(['read-state', ADE_WS], []);
+    return;
+  }
+
   harnessClient.setQueryData(['roster', ADE_WS], SHELL_ROSTER);
   const channel = (id: string, name: string, kind: 'public' | 'private') => ({
     id,
@@ -3550,12 +3612,21 @@ function seedShell(): void {
     name,
     muted: false,
   });
+  const dm = (id: string, peer: string) => ({
+    id,
+    workspaceId: ADE_WS,
+    kind: 'dm' as const,
+    muted: false,
+    memberIds: [SELF, peer],
+  });
   harnessClient.setQueryData(['channels', ADE_WS], [
     channel('ch-agent-lab', 'agent-lab', 'public'),
     channel('ch-general', 'general', 'public'),
     channel('ch-design', 'design-2.0', 'private'),
     channel('ch-release', '릴리스', 'public'),
     channel('ch-oncall', '운영-온콜', 'private'),
+    dm('dm-agent', AGENT),
+    ...SHELL_HUMANS.map(human => dm(`dm-${human.handle}`, human.id)),
   ]);
   const read = (channelId: string, unreadCount: number, mentionCount: number) => ({
     channelId,
@@ -3571,7 +3642,22 @@ function seedShell(): void {
     read('ch-design', 0, 0),
     read('ch-release', 0, 0),
     read('ch-oncall', 0, 0),
+    read('dm-agent', 1, 0),
   ]);
+
+  if (surface === 'shell-home-idle') return;
+  // 시안의 카드: 김인턴이 #agent-lab 에서 PR 초안을 쓰는 중.
+  const nowMs = Date.now();
+  markAgentWorking({
+    memberId: AGENT,
+    channelId: 'ch-agent-lab',
+    state: surface === 'shell-home-approval' ? 'awaiting_approval' : 'working',
+    source: 'run',
+    startedAtMs: nowMs - 95_000,
+    headlines: ['푸시 중복 수정 PR 초안 작성 중'],
+    // TTL(90초)은 마지막 활동에서 잰다. 찍는 동안 살아 있게 조금 앞에 둔다.
+    lastActivityAtMs: nowMs + 60_000,
+  });
 }
 
 function seedWorkConsole(): void {
@@ -3754,5 +3840,5 @@ if (
   LAUNCHED.kind === 'surface' &&
   LAUNCHED.name.startsWith('shell-')
 ) {
-  seedShell();
+  seedShell(LAUNCHED.name);
 }
