@@ -72,6 +72,17 @@ full transitive graph is still only license-gated, not bundled.
 | expo-blur | 57.0.3 | MIT | `clients/mobile` (npm + CocoaPods `ExpoBlur`) | ADR-0189 D6, #2714 (tab bar glass) |
 | Lucide icon paths `home`·`inbox`·`search`·`plus` | via design mockup A | ISC | `clients/mobile/src/design/icons/*.png` (rasterized) | #2714 (shell icons; same set the web uses as `lucide-react`) |
 
+### Desktop client direct additions
+
+Direct desktop (Tauri shell) dependencies an ADR introduced. The full
+`clients/desktop/src-tauri` Cargo graph is license-gated by
+`scripts/check_cargo_licenses.sh`, not bundled.
+
+| Component | Version | License | Where | Introduced by |
+|---|---|---|---|---|
+| portable-pty | 0.9.0 | MIT | `clients/desktop/src-tauri` (local terminal PTY) | ADR-0190 D1, #2772 |
+| libc | 0.2 | MIT OR Apache-2.0 | `clients/desktop/src-tauri` (process-group signals for PTY sessions) | ADR-0190 D1, #2772 |
+
 ## Historical (frozen snapshots)
 
 The sections below are **not regenerated**. They record what earlier trees
