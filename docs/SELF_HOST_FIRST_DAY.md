@@ -265,9 +265,11 @@ if none is live yet (`routes/welcome.rs`
 rail; native stay on the worker rail. An undeliverable hosted speaker does
 not consume the opener marker.
 
-Then **폰에서도 쓰기** (`PhoneLinkFirstRun.tsx`). Lead: 「같은 계정으로
-폰을 붙이려면 지금 QR을 만들 수 있습니다. 나중에 설정 기기에서도 열 수
-있습니다。」 outline **앱으로 들어가기**.
+Phone linking is not a full-screen step (ADR-0193 D7). A card sits above the
+composer in the first-conversation channel **#general**
+(`PhoneLinkChannelCard.tsx`): 「폰에서도 쓰려면 QR을 찍어요.」 **QR 만들기** /
+**나중에**. 나중에 leaves one line, 「설정 › 기기에서 언제든 연결할 수
+있어요.」, and the fold is stored on that device.
 
 Settings after you are in: profile-card row **설정**, tooltip 「설정
 (⌘,)」 (`ProfileCard.tsx:175-189`). Shell title **설정**
@@ -743,7 +745,7 @@ document that is not on the screen is a defect.
 | Workspace | `…/WorkspaceSection.tsx`, `clients/web/src/features/workspace/AddWorkspaceDialog.tsx` |
 | Profile door | `…/ProfileSection.tsx`, `…/profile/shared/HandleField.tsx` |
 | Members and invites | `…/InviteSection.tsx`, `IssuedInviteCard.tsx`, `packages/momo-core/src/features/settings/model.ts` |
-| First-run | `…/welcome/firstRunGate.ts`, `firstAgent.ts`, `FirstAgentStage.tsx`, `PhoneLinkFirstRun.tsx` |
+| First-run | `…/welcome/firstRunGate.ts`, `firstAgent.ts`, `FirstAgentStage.tsx`, `PhoneLinkChannelCard.tsx` |
 | Welcome enqueue | `server-rust/bins/momo-server/src/routes/welcome.rs` |
 | AI link | `…/AiLinkSection.tsx` |
 | Agent hub | `clients/web/src/features/agentHub/AgentHubRoute.tsx`, `CreateAgentDialog.tsx`, `AgentChannelsSection.tsx` |
