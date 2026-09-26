@@ -508,6 +508,35 @@ describe.each([
 });
 
 describe('치수가 시안에서 온다', () => {
+  it('메시지 얼굴은 40 이다 — owner 표 「아바타 40」(시안 36 보다 표가 이긴다)', () => {
+    render(
+      <MessageRow
+        message={
+          {
+            id: 'm-1',
+            channelId: 'ch',
+            seq: 1,
+            hlcTs: 1,
+            hlcCount: 0,
+            authorMemberId: HUMAN,
+            type: 'text',
+            body: '여명님!',
+            state: 'sent',
+            createdAtMs: 1_760_000_000_000,
+          } as Message
+        }
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={1_760_000_000_000}
+      />,
+    );
+    const face = flatten(
+      screen.getByTestId('avatar-human', {includeHiddenElements: true}).props.style,
+    );
+    expect([face.width, face.height, face.borderRadius]).toEqual([40, 40, 20]);
+  });
+
   it('컴포저 반경이 DS2 사다리의 컴포저 단과 같다', () => {
     const {ds2Radius} = jest.requireActual('../src/design/tokens');
     expect(CONV.composerRadius).toBe(ds2Radius.composer);
