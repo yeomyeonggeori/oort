@@ -2,7 +2,7 @@
 //! #2915).
 //!
 //! The authority is the SQL function `hosted_connection_channel_ids`
-//! (migration 090): the selector's `hosted_channel_approved`, the inbox, the
+//! (migration 091): the selector's `hosted_channel_approved`, the inbox, the
 //! gateway claim and the Agent Port identity all read it. This module only
 //! **names** the outcome the selector already reached, for two readers:
 //!
@@ -236,7 +236,7 @@ pub fn hosted_dm_approval_state(
 
 /// Every 1:1 DM (B1) the agent is in with an active human, oldest first.
 ///
-/// The same shape as `hosted_connection_channel_ids` (migration 090): kind
+/// The same shape as `hosted_connection_channel_ids` (migration 091): kind
 /// `dm`, not archived, exactly two active members.
 pub async fn list_hosted_agent_dms_in_tx(
     conn: &mut PgConnection,
