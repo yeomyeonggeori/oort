@@ -685,6 +685,8 @@ mod tests {
             hosted_channel_approved: false,
             is_channel_member: true,
             owner_only: None,
+            owner_member_id: None,
+            owner_display_name: None,
         };
         let block = A2aBlock::Depth {
             source_depth: 3,

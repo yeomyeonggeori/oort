@@ -94,8 +94,8 @@ use momo_agent::{
     MENTION_JOB_METHOD_WORKER,
 };
 use momo_agent::{
-    hosted_skip_notice_body, hosted_skip_notice_key, hosted_skip_notice_props,
-    lock_and_find_recent_server_notice_in_tx, HostedSkipReason, RecentNotice,
+    hosted_skip_notice_body_with_owner, hosted_skip_notice_key, hosted_skip_notice_props,
+    lock_and_find_recent_server_notice_in_tx, unapproved_dm_reason, HostedSkipReason, RecentNotice,
     HOSTED_SKIP_NOTICE_AUDIT_SCHEMA, HOSTED_SKIP_NOTICE_KIND, HOSTED_SKIP_NOTICE_POSTED_ACTION,
     HOSTED_SKIP_NOTICE_SOURCE, HOSTED_SKIP_NOTICE_THROTTLED_ACTION,
     HOSTED_SKIP_NOTICE_THROTTLE_SECONDS,
@@ -200,11 +200,14 @@ pub(crate) async fn route_agent_mentions_in_tx(
     // can never be approved for hosted delivery, so "approve this room" would
     // be a false sentence there).
     let mut in_dm = false;
+    // ADR-0162 증보 2 B1 — only a DM of exactly two can be opened by the owner.
+    let mut one_to_one_dm = false;
     let dm_target = if send.author_is_agent {
         None
     } else {
         let audience = load_dm_audience_in_tx(&mut *conn, send.channel_id).await?;
         in_dm = audience.is_dm;
+        one_to_one_dm = audience.is_dm && audience.participants.len() == 2;
         match resolve_dm_addressing(&audience, send.author_member_id, send.author_is_agent) {
             DmAddressing::Addressed(agent_member_id) => Some(agent_member_id),
             // Every other verdict is an ordinary "no": a group channel, a human↔
@@ -389,15 +392,23 @@ pub(crate) async fn route_agent_mentions_in_tx(
                     HostedSkipReason::ChannelUnapproved.as_str(),
                 )
                 .await?;
-                // A DM is never approvable (`confirm_hosted_connection_in_tx`
-                // takes `kind <> 'dm'` only), so it gets the sentence that is
-                // true there and no door to a screen that would refuse it.
+                // A DM is not a channel an admin approves at confirm
+                // (`kind <> 'dm'`). ADR-0162 증보 2: the owner's own 1:1 DM is
+                // already open (never reaches here), a 1:1 DM with anyone else
+                // waits for the owner, and a group DM never opens — each gets
+                // the sentence that is true there and no door to a screen the
+                // reader cannot use.
                 hosted_skip_notice(
                     &mut *conn,
                     &send,
                     agent,
                     if in_dm {
-                        HostedSkipReason::DirectMessageNotApprovable
+                        unapproved_dm_reason(
+                            one_to_one_dm,
+                            agent.owner_member_id,
+                            agent.owner_only.is_some(),
+                            send.author_member_id,
+                        )
                     } else {
                         HostedSkipReason::ChannelUnapproved
                     },
@@ -896,7 +907,11 @@ async fn hosted_skip_notice(
             channel_id: send.channel_id,
             author_member_id: agent.member_id,
             message_type: MessageType::System,
-            body: Some(hosted_skip_notice_body(reason, &agent.display_name)),
+            body: Some(hosted_skip_notice_body_with_owner(
+                reason,
+                &agent.display_name,
+                agent.owner_display_name.as_deref(),
+            )),
             props: hosted_skip_notice_props(
                 reason,
                 agent.member_id,
@@ -1017,6 +1032,8 @@ mod tests {
             hosted_channel_approved: false,
             is_channel_member: true,
             owner_only: None,
+            owner_member_id: None,
+            owner_display_name: None,
         }
     }
 

@@ -432,19 +432,26 @@ mod tests {
     /// `subscription_harness`, a shape CHECK, and a trigger that makes
     /// `owner_only` final. `agent` stays under its existing FORCE RLS policy; no
     /// table or policy is added. schema_v0.sql is not modified.
+    ///
+    /// 090 is #2915's hosted 1:1 DM approval (ADR-0162 증보 2):
+    /// `hosted_agent_connection.approved_dm_channel_ids` and the SECURITY
+    /// INVOKER function `hosted_connection_channel_ids`, the one definition of
+    /// "the rooms this connection covers". The table stays under its existing
+    /// FORCE RLS policy; no table or policy is added. schema_v0.sql is not
+    /// modified.
     #[test]
-    fn discovers_contiguous_migrations_001_to_089() {
+    fn discovers_contiguous_migrations_001_to_090() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            89,
-            "expected 89 migrations under {}",
+            90,
+            "expected 90 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 89);
+        assert_eq!(migrations.last().unwrap().version, 90);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

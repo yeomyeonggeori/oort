@@ -136,6 +136,12 @@ pub struct MentionCandidate {
     /// — a subscription agent only its owner may call. `None` for every other
     /// agent, which is every agent that existed before migration 089.
     pub owner_only: Option<crate::subscription::OwnerOnlyScope>,
+    /// `agent.owner_human_id` for every agent, not only `owner_only` ones.
+    /// ADR-0162 증보 2: whose 1:1 DM opens on its own, and whose approval a
+    /// DM with anyone else waits for.
+    pub owner_member_id: Option<Uuid>,
+    /// That owner's display name, for the line that says who to ask.
+    pub owner_display_name: Option<String>,
 }
 
 /// Read every active agent of the workspace, with its channel membership and
@@ -186,7 +192,7 @@ pub async fn load_mention_candidates_in_tx(
                     AND t.hosted_connection_id = hc.id \
                     AND t.actor_member_id = hc.agent_member_id \
                     AND t.audience = '/v1/mcp/agent-port' \
-                    AND $2 = ANY(hc.approved_channel_ids)) AS hosted_channel_approved, \
+                    AND $2 = ANY(hosted_connection_channel_ids(hc.workspace_id, hc.id))) AS hosted_channel_approved, \
                 EXISTS ( \
                   SELECT 1 FROM membership ms \
                    WHERE ms.channel_id = $2 \
@@ -293,6 +299,8 @@ pub async fn load_mention_candidates_in_tx(
                 .map_err(DbError::from)?,
             is_channel_member: row.try_get("is_channel_member").map_err(DbError::from)?,
             owner_only: owner_only_scope(row)?,
+            owner_member_id: row.try_get("owner_human_id").map_err(DbError::from)?,
+            owner_display_name: row.try_get("owner_display_name").map_err(DbError::from)?,
         });
     }
     Ok(candidates)
@@ -873,6 +881,8 @@ mod tests {
             hosted_channel_approved: false,
             is_channel_member: true,
             owner_only: None,
+            owner_member_id: None,
+            owner_display_name: None,
         }
     }
 

@@ -1969,6 +1969,96 @@ paths:
         "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "404": {description: Gate closed, doorbell missing, or unknown path}
 
+  /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/dm-approvals:
+    get:
+      tags: [agents]
+      operationId: listHostedAgentDmApprovals
+      summary: The hosted agent's 1:1 DMs and whether each is delivered (ADR-0162 증보 2).
+      description: >
+        Every 1:1 DM between the agent and an active human. The owner's own DM
+        is `owner` (always delivered, never stored); others are `approved` or
+        `unapproved`; a subscription (`owner_only`) agent's other DMs are
+        `not_approvable`. Readable by the agent's owner and workspace admins;
+        `canEdit` is true only for the owner on a live connection.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: connectionId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The DM list.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/HostedDmApprovalsResponse"}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Not the agent's owner or a workspace admin, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Connection not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/dm-approvals/{channelId}:
+    put:
+      tags: [agents]
+      operationId: approveHostedAgentDm
+      summary: The agent's owner opens one 1:1 DM for hosted delivery (ADR-0162 증보 2 B3).
+      description: Idempotent (`changed` false on a repeat). Audited as `hosted_agent.dm_approval.granted`.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: connectionId, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/ChannelId"
+      responses:
+        "200":
+          description: The DM row as it now stands.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/HostedDmApprovalWriteResponse"}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Only the agent's owner decides, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Connection not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Subscription agent (owner's DM only), the owner's own DM (always open), or a connection that is not live, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "422": {description: Not a 1:1 DM between this agent and an active human, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+    delete:
+      tags: [agents]
+      operationId: revokeHostedAgentDm
+      summary: The agent's owner closes one 1:1 DM again.
+      description: Idempotent. Audited as `hosted_agent.dm_approval.revoked`. A stored approval can be withdrawn even after the DM stopped being 1:1.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: connectionId, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/ChannelId"
+      responses:
+        "200":
+          description: The DM row as it now stands.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/HostedDmApprovalWriteResponse"}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Only the agent's owner decides, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Connection not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: The connection is not live, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "422": {description: Not a 1:1 DM between this agent and an active human, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/agent-dm-delivery:
+    get:
+      tags: [agents]
+      operationId: getAgentDmDelivery
+      summary: Whether a message in this 1:1 agent DM would reach the agent now (#2891).
+      description: >
+        Computed from the same candidate row the mention selector decides on.
+        `state` is null unless the caller is a human member of a 1:1 DM with
+        exactly one agent, so a non-member learns nothing about the room.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      responses:
+        "200":
+          description: The delivery state.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/AgentDmDeliveryResponse"}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
   /v1/workspaces/{workspaceId}/agents/{agentId}/credentials:
     post:
       tags: [agents]
@@ -9483,6 +9573,49 @@ components:
         registeredAtMs: {type: integer, format: int64}
         lastFiredAtMs: {type: integer, format: int64}
         lastStatus: {type: string}
+
+    HostedDmApprovalRow:
+      type: object
+      additionalProperties: false
+      required: [channelId, counterpartMemberId, state]
+      properties:
+        channelId: {type: string, format: uuid}
+        counterpartMemberId: {type: string, format: uuid}
+        state: {type: string, enum: [owner, approved, unapproved, not_approvable]}
+
+    HostedDmApprovalsResponse:
+      type: object
+      additionalProperties: false
+      required: [connectionId, agentMemberId, ownerMemberId, canEdit, ownerOnly, dms]
+      properties:
+        connectionId: {type: string, format: uuid}
+        agentMemberId: {type: string, format: uuid}
+        ownerMemberId: {type: string, format: uuid, nullable: true}
+        canEdit: {type: boolean}
+        ownerOnly: {type: boolean}
+        dms: {type: array, items: {$ref: "#/components/schemas/HostedDmApprovalRow"}}
+
+    HostedDmApprovalWriteResponse:
+      type: object
+      additionalProperties: false
+      required: [connectionId, dm, changed]
+      properties:
+        connectionId: {type: string, format: uuid}
+        dm: {$ref: "#/components/schemas/HostedDmApprovalRow"}
+        changed: {type: boolean}
+
+    AgentDmDeliveryResponse:
+      type: object
+      additionalProperties: false
+      required: [channelId, agentMemberId, ownerMemberId, state]
+      properties:
+        channelId: {type: string, format: uuid}
+        agentMemberId: {type: string, format: uuid, nullable: true}
+        ownerMemberId: {type: string, format: uuid, nullable: true}
+        state:
+          type: string
+          nullable: true
+          enum: [not_hosted, open, awaiting_owner, owner_only, not_approvable, connection_unavailable, delivery_disabled, subscription_disabled, null]
 
     CreateHostedAgentConnectionRequest:
       type: object
