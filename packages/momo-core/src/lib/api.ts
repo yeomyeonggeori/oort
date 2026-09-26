@@ -144,6 +144,12 @@ export interface RosterMember {
    */
   presenceStatus?: PresenceStatus;
   /**
+   * ADR-0124 증보 2: when a running DND ends (epoch ms). Present only while
+   * `presenceStatus` is `dnd` with an expiry ahead; past it, treat the member
+   * as `auto` (the server sends no event at expiry).
+   */
+  dndUntilMs?: number;
+  /**
    * Custom status (ADR-0176), human only. Orthogonal to `presenceStatus`.
    * ABSENT means there is nothing to show (unset, expired on the server, or
    * an older projection). Consumers go through `visibleCustomStatus`.
@@ -196,6 +202,13 @@ function sanitizeRosterMember(value: unknown): unknown {
   }
   if ("statusText" in row && typeof row.statusText !== "string") {
     const { statusText: _bad, ...rest } = row;
+    row = rest;
+  }
+  if (
+    "dndUntilMs" in row &&
+    (typeof row.dndUntilMs !== "number" || !Number.isFinite(row.dndUntilMs))
+  ) {
+    const { dndUntilMs: _bad, ...rest } = row;
     row = rest;
   }
   if (

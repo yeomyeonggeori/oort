@@ -503,6 +503,11 @@ pub struct RosterMember {
     /// declared status from here without a re-fetch (ADR-0160 D2), and computes
     /// the effective dot as `f(this, availability)` at the render edge.
     pub presence_status: Option<PresenceStatus>,
+    /// ADR-0124 증보 2: the running DND expiry (epoch ms), human only. `Some`
+    /// only while `presence_status` is a DND whose expiry is still ahead, so a
+    /// co-member's client can drop the dot at that moment without a re-fetch
+    /// (no sweeper, no broadcast fires at expiry).
+    pub dnd_until_ms: Option<i64>,
     /// ADR-0176 custom status, human only, expire-filtered on read. `None` when
     /// the member is an agent, the fields are unset, or `status_expires_at` has
     /// been reached (lazy delete — the columns may still be set).
@@ -544,6 +549,7 @@ fn decode_roster_member(row: &sqlx::postgres::PgRow) -> Result<RosterMember, sql
         ),
         status_emoji: row.try_get("status_emoji")?,
         status_text: row.try_get("status_text")?,
+        dnd_until_ms: row.try_get("dnd_until_ms")?,
         status_expires_at_ms: row.try_get("status_expires_at_ms")?,
         created_at_ms: row.try_get("created_at_ms")?,
         updated_at_ms: row.try_get("updated_at_ms")?,
@@ -627,6 +633,11 @@ pub async fn list_workspace_roster(
                       AND m.presence_dnd_until IS NOT NULL \
                       AND m.presence_dnd_until <= now() THEN 'auto' \
                      ELSE m.presence_status::text END AS presence_status, \
+                CASE WHEN m.kind = 'human' \
+                      AND m.presence_status = 'dnd' \
+                      AND m.presence_dnd_until > now() \
+                     THEN floor(extract(epoch from m.presence_dnd_until) * 1000)::bigint \
+                END AS dnd_until_ms, \
                 CASE WHEN m.kind = 'human' \
                       AND (m.status_expires_at IS NULL OR m.status_expires_at > now()) \
                       AND (m.status_emoji IS NOT NULL OR m.status_text IS NOT NULL) \

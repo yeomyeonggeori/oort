@@ -1004,6 +1004,18 @@ async fn an_expired_dnd_reads_as_auto_everywhere() {
         CustomStatusPatch::default(),
     )
     .await;
+    // While running, the roster carries the expiry so co-members can drop the
+    // dot on time — no event fires at expiry.
+    let running = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(
+            async move { list_workspace_roster(conn, workspace, human, false, None, 200).await },
+        )
+    })
+    .await
+    .expect("roster while running");
+    let running = running.iter().find(|m| m.id == human).expect("on roster");
+    assert_eq!(running.presence_status, Some(PresenceStatus::Dnd));
+    assert_eq!(running.dnd_until_ms, Some(until.timestamp_millis()));
     let wait =
         (until - Utc::now()).to_std().unwrap_or_default() + std::time::Duration::from_millis(500);
     tokio::time::sleep(wait).await;
@@ -1032,6 +1044,7 @@ async fn an_expired_dnd_reads_as_auto_everywhere() {
         Some(PresenceStatus::Auto),
         "the roster applies the same expiry"
     );
+    assert_eq!(row.dnd_until_ms, None, "a lapsed DND carries no expiry");
     assert_eq!(
         rule(&app, workspace, human).await,
         OFF,

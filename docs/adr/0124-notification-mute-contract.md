@@ -103,6 +103,8 @@ MOMO-477 단일 goal: `018_notification_pref` migration((workspace, member, chan
 - migration `090_notification_rule_dnd_until`: `notification_rule.dnd_until`, `presence_prev_dnd`, `presence_prev_dnd_until`, `member.presence_dnd_until`과 모양 CHECK. 새 테이블은 없다. 두 테이블 모두 기존 RLS FORCE 정책 아래 있다.
 - `GET/PUT /v1/workspaces/{ws}/notification-rules`: 요청에 `dndUntilMs`(선택)를 더한다. 생략하면 진행 중인 기한을 유지하고, `null`이면 기한 없음, 값은 미래여야 한다(아니면 400). `dnd=false`면 기한을 지운다. 응답에 `dndUntilMs`(진행 중일 때만 값, 아니면 null)를 더하고 `dnd`는 유효 값이다. audit 페이로드에 `dnd_until_ms`를 더한다.
 - `PUT /v1/workspaces/{ws}/presence`: 요청에 `dndUntilMs`(선택, `status=dnd`에서만 값 허용, 미래여야 함)를 더한다. 응답과 `type: presence` 브로드캐스트(`dnd_until_ms`)에 진행 중인 기한을 싣는다. 기한이 지난 방해 금지는 `auto`로 답한다.
+- 로스터 행에 `dndUntilMs`(진행 중일 때만)를 싣는다. 만료 시각에는 이벤트가 없으므로 동료 클라이언트가 이 값으로 표시를 내린다.
+- audit: `PUT notification-rules`는 기존대로 `notification_rule.updated`를 남긴다. presence 쓰기 안의 묶음은 presence의 무감사 관례(ADR-0176, 과감사 금지)를 따라 audit 행을 남기지 않는다.
 - 클라이언트 문구: 방해 금지 설명에 「알림도 함께 멈춰요」. 시간 선택 UI(30분, 1시간, 내일까지, 직접)는 uxui 후속 이슈다.
 
 ### Consequences (증보 2)

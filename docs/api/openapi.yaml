@@ -8929,6 +8929,14 @@ components:
             offline otherwise); `away`/`dnd` are the two manual overrides.
             Absent for agents (presence is human-only, their liveness is
             agent_run) and absent from a server too old to carry the column.
+            ADR-0124 증보 2: an expired DND is projected as `auto`.
+        dndUntilMs:
+          type: integer
+          format: int64
+          description: >
+            ADR-0124 증보 2. Running DND expiry (epoch ms), present only while
+            `presenceStatus` is `dnd` with an expiry ahead. No event fires at
+            expiry; past it the client treats the member as `auto`.
         statusEmoji:
           type: string
           description: >

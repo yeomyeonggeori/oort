@@ -2163,6 +2163,9 @@ pub struct RosterMemberDto {
     /// edge; the wire never carries the effective value, only this durable intent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub presence_status: Option<String>,
+    /// ADR-0124 증보 2: running DND expiry (epoch ms), omitted otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dnd_until_ms: Option<i64>,
     /// ADR-0176 custom status, human only, omitted when unset/expired/agent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_emoji: Option<String>,
