@@ -13,7 +13,9 @@
 //! 1. [`active_huddles_for_sweep`] — one cross-tenant **read** on the pool, the
 //!    only way a sweep can learn which tenants have work.
 //! 2. [`settle_swept_departures`] — every **write** inside a per-workspace
-//!    tenant transaction (`SET LOCAL app.workspace_id`), and through the same
+//!    tenant transaction (`SET LOCAL app.workspace_id`) on a pool whose role
+//!    RLS actually binds (the NOBYPASSRLS `momo_app` role — checked by
+//!    [`ensure_rls_enforced`], never assumed), and through the same
 //!    end path a person's leave takes
 //!    ([`crate::huddle::settle_departures_in_tx`]): `left_at`, `ended_at`, the
 //!    recording stop, and the `huddle_ended` outbox row commit together or not
@@ -62,6 +64,46 @@ pub struct SweepSettlement {
     /// The huddle had already ended, or every targeted row had already changed
     /// (a leave or a re-join won the race). Nothing was written.
     pub raced: bool,
+}
+
+/// Why the sweep refused to run or a settlement failed.
+#[derive(Debug, thiserror::Error)]
+pub enum SweepError {
+    #[error(transparent)]
+    Huddle(#[from] HuddleError),
+    /// The write pool's role would ignore RLS. The sweep adds no RLS-bypassing
+    /// write path (ADR-0122 증보 D-H4, AGENTS.md exception list unchanged), so
+    /// it refuses to settle anything through such a pool.
+    #[error(
+        "huddle sweep write pool connects as {role}, which bypasses RLS; point \
+         MOMO_HUDDLE_SWEEP_DATABASE_URL at the NOBYPASSRLS momo_app role"
+    )]
+    WritePoolBypassesRls { role: String },
+}
+
+impl From<sqlx::Error> for SweepError {
+    fn from(error: sqlx::Error) -> Self {
+        SweepError::Huddle(HuddleError::from(error))
+    }
+}
+
+/// Refuse a write pool whose role is a superuser or BYPASSRLS.
+///
+/// Settlement writes (`left_at`, `ended_at`, the outbox row, the audit row) must
+/// be filtered by the tenant policies exactly like a request's, so the GUC set
+/// by the tenant transaction is binding rather than decorative.
+pub async fn ensure_rls_enforced(pool: &PgPool) -> Result<(), SweepError> {
+    let row = sqlx::query(
+        "SELECT current_user::text AS role, (rolsuper OR rolbypassrls) AS bypasses \
+           FROM pg_roles WHERE rolname = current_user",
+    )
+    .fetch_one(pool)
+    .await?;
+    let role: String = row.try_get("role")?;
+    if row.try_get::<bool, _>("bypasses")? {
+        return Err(SweepError::WritePoolBypassesRls { role });
+    }
+    Ok(())
 }
 
 /// Every active huddle with its open participant rows, oldest first.

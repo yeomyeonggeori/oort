@@ -25,7 +25,9 @@
 //! * `MOMO_LIVEKIT_API_KEY` / `MOMO_LIVEKIT_API_SECRET` / `MOMO_LIVEKIT_URL` —
 //!   the API's own LiveKit variables, all three or none (#2758). With none, the
 //!   huddle ghost sweep does not run. `MOMO_HUDDLE_SWEEP_INTERVAL_MS` (30000,
-//!   floored at 1000) sets its cadence.
+//!   floored at 1000) sets its cadence. `MOMO_HUDDLE_SWEEP_DATABASE_URL` is the
+//!   RLS-bound `momo_app` connection its writes use; without it the sweep does
+//!   not run either.
 //!
 //! No `.env` reading and no baked-in credential: a missing DB URL is a boot
 //! error, not a silent dev default.
@@ -123,6 +125,11 @@ pub struct NotifierConfig {
     /// same all-or-nothing `MOMO_LIVEKIT_*` rule the API applies — and then the
     /// sweep does not run at all.
     pub huddle_sweep: Option<HuddleSweepConfig>,
+    /// `MOMO_HUDDLE_SWEEP_DATABASE_URL` — the RLS-bound (`momo_app`) connection
+    /// every huddle sweep settlement is written through. Never logged. Without
+    /// it the sweep does not run even when LiveKit is configured: the notifier's
+    /// own BYPASSRLS pool is never used for huddle writes.
+    pub huddle_sweep_database_url: Option<String>,
 }
 
 fn env(key: &str) -> Option<String> {
@@ -174,6 +181,7 @@ impl NotifierConfig {
                 env("MOMO_LIVEKIT_URL").as_deref(),
                 Duration::from_millis(huddle_sweep_ms.max(1_000)),
             ),
+            huddle_sweep_database_url: env("MOMO_HUDDLE_SWEEP_DATABASE_URL"),
         })
     }
 
@@ -191,6 +199,7 @@ impl NotifierConfig {
             t3_enabled: true,
             push: PushConfig::for_target(),
             huddle_sweep: None,
+            huddle_sweep_database_url: None,
         }
     }
 }

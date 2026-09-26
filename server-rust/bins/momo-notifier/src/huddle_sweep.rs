@@ -23,16 +23,28 @@
 //!    [`momo_messaging::huddle_sweep::settle_swept_departures`], one tenant
 //!    transaction per huddle, the same end path a person's leave takes.
 //!
+//! ## Two pools, and why
+//!
+//! The candidate read in step 1 runs on the notifier's own pool (the existing
+//! BYPASSRLS `momo_notifier` role — a read, and the only way to see every
+//! tenant, exactly as the approval sweep does). **No write goes through it.**
+//! Settlements run on a second pool, `MOMO_HUDDLE_SWEEP_DATABASE_URL`, whose
+//! role must be RLS-bound (`momo_app`); [`HuddleSweeper::sweep_once`] checks
+//! that before its first settlement and refuses to run otherwise. So the sweep
+//! adds no RLS-bypassing write path: each settlement is a tenant transaction
+//! with `SET LOCAL app.workspace_id` that the policies actually filter.
+//!
 //! ## What must never happen
 //!
 //! * **An unreachable LiveKit is not an empty room.** A transport error, a
 //!   timeout, a non-2xx or an unparseable body changes nothing — not the rows
 //!   and not the miss counts — and logs a warning. Only a successful
 //!   `ListParticipants` answer is evidence.
-//! * **A participant who has not connected yet is not a ghost.** `join_huddle`
-//!   commits the row before the client reaches LiveKit, so rows younger than
-//!   [`JOIN_GRACE`] are not counted; a huddle nobody has joined gets the same
-//!   grace from `started_at`.
+//! * **A huddle that is just starting is not a ghost.** The server never
+//!   creates the LiveKit room; the first participant's connection does. A
+//!   huddle younger than [`START_GRACE`] (by `started_at`) is not judged at
+//!   all, and a participant row younger than [`JOIN_GRACE`] is not counted —
+//!   `join_huddle` commits the row before the client reaches LiveKit.
 //!
 //! LiveKit v1.13.3 answers `ListParticipants` for a room that does not exist
 //! with `200 {"participants":[]}` (measured against the pinned
@@ -50,14 +62,17 @@ use chrono::Utc;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use momo_db::PgPool;
 use momo_messaging::huddle_sweep::{
-    active_huddles_for_sweep, settle_swept_departures, SweepHuddle, SweptParticipant,
+    active_huddles_for_sweep, ensure_rls_enforced, settle_swept_departures, SweepError,
+    SweepHuddle, SweptParticipant,
 };
-use momo_messaging::HuddleError;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Rows (and never-joined huddles) younger than this are not judged: the client
-/// may still be connecting to LiveKit.
+/// Huddles younger than this (by `started_at`) are not judged at all: the
+/// LiveKit room does not exist until the first participant connects.
+pub const START_GRACE: Duration = Duration::from_secs(120);
+/// Participant rows younger than this are not counted: the client may still be
+/// connecting to LiveKit.
 pub const JOIN_GRACE: Duration = Duration::from_secs(60);
 /// Consecutive absent observations before a participant is closed.
 pub const MISSES_TO_SETTLE: u8 = 2;
@@ -243,6 +258,9 @@ impl LiveKitRoomClient {
 pub struct HuddleSweepStats {
     /// Active huddles LiveKit was asked about.
     pub huddles_checked: usize,
+    /// Active huddles skipped because they started less than [`START_GRACE`]
+    /// ago.
+    pub too_young: usize,
     /// Huddles skipped because LiveKit could not be observed.
     pub livekit_unreachable: usize,
     /// Absent participants seen once, waiting for a second observation.
@@ -275,6 +293,7 @@ impl MissKey {
 pub struct HuddleSweeper {
     client: LiveKitRoomClient,
     misses: HashMap<MissKey, u8>,
+    write_pool_checked: bool,
 }
 
 impl HuddleSweeper {
@@ -282,6 +301,7 @@ impl HuddleSweeper {
         HuddleSweeper {
             client: LiveKitRoomClient::new(config),
             misses: HashMap::new(),
+            write_pool_checked: false,
         }
     }
 
@@ -293,14 +313,34 @@ impl HuddleSweeper {
         *count >= MISSES_TO_SETTLE
     }
 
-    /// One tick. Errors only when the cross-tenant read itself fails.
-    pub async fn sweep_once(&mut self, pool: &PgPool) -> Result<HuddleSweepStats, HuddleError> {
-        let huddles = active_huddles_for_sweep(pool, HUDDLE_BATCH).await?;
+    /// One tick. `read_pool` finds the candidates (cross-tenant read);
+    /// `write_pool` must be RLS-bound and carries every settlement.
+    ///
+    /// Errors when the write pool bypasses RLS (checked once, before anything
+    /// is read or written) or when the candidate read itself fails.
+    pub async fn sweep_once(
+        &mut self,
+        read_pool: &PgPool,
+        write_pool: &PgPool,
+    ) -> Result<HuddleSweepStats, SweepError> {
+        if !self.write_pool_checked {
+            ensure_rls_enforced(write_pool).await?;
+            self.write_pool_checked = true;
+        }
+        let huddles = active_huddles_for_sweep(read_pool, HUDDLE_BATCH).await?;
         let mut stats = HuddleSweepStats::default();
         let mut seen: HashSet<MissKey> = HashSet::new();
         let mut unobserved: HashSet<Uuid> = HashSet::new();
+        let start_grace =
+            chrono::Duration::from_std(START_GRACE).unwrap_or(chrono::Duration::zero());
+        let now = Utc::now();
 
         for huddle in huddles {
+            if huddle.started_at > now - start_grace {
+                // Too young to judge; its counts (if any) are not carried.
+                stats.too_young += 1;
+                continue;
+            }
             stats.huddles_checked += 1;
             let present = match self.client.list_participants(huddle.huddle_id).await {
                 Ok(present) => present,
@@ -317,7 +357,7 @@ impl HuddleSweeper {
                     continue;
                 }
             };
-            self.judge_and_settle(pool, &huddle, &present, &mut seen, &mut stats)
+            self.judge_and_settle(write_pool, &huddle, &present, &mut seen, &mut stats)
                 .await;
         }
 
@@ -352,13 +392,13 @@ impl HuddleSweeper {
         let mut end_if_empty = false;
 
         if huddle.participants.is_empty() {
-            if huddle.started_at <= now - grace {
-                let key = MissKey::EmptyHuddle(huddle.huddle_id);
-                if self.miss(key, seen) {
-                    end_if_empty = true;
-                } else {
-                    stats.first_misses += 1;
-                }
+            // Past START_GRACE (checked by the caller) and nobody's row is
+            // open: the room is empty or gone. Two looks, like a participant.
+            let key = MissKey::EmptyHuddle(huddle.huddle_id);
+            if self.miss(key, seen) {
+                end_if_empty = true;
+            } else {
+                stats.first_misses += 1;
             }
         } else {
             for participant in &huddle.participants {

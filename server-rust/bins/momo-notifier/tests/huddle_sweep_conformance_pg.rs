@@ -1,6 +1,9 @@
 //! DB-backed conformance for the huddle ghost sweep (#2758 / ADR-0122 증보
 //! D-H4).
 //!
+//! Pools mirror production: the candidate read runs as `momo_notifier`
+//! (BYPASSRLS, read only), every settlement as `momo_app` (RLS-bound).
+//!
 //! A real PG (every migration + `bootstrap_roles.sql`) and a mock LiveKit
 //! RoomService on a loopback port. The mock verifies the HS256 RoomService
 //! token the sweep signs (issuer, `roomAdmin`, room scope) and answers
@@ -19,6 +22,8 @@
 //! | `a_present_participant_is_never_closed` | stop consulting the LiveKit answer |
 //! | `unreachable_livekit_changes_nothing` | read an error/503/dead port as an empty room |
 //! | `a_participant_still_connecting_is_not_a_ghost` | drop the join grace |
+//! | `a_just_started_huddle_is_not_judged` | drop the `started_at` grace (the room does not exist until the first connection) |
+//! | `a_write_pool_that_bypasses_rls_is_refused` | drop the RLS-bound write-pool check, or write through the BYPASSRLS notifier pool |
 //! | `a_never_joined_huddle_ends_after_two_empty_sweeps` | drop the empty-huddle branch |
 //! | `a_rejoin_after_the_observation_survives_the_settlement` | key `left_at` on `(huddle_id, member_id)` without `joined_at` |
 
@@ -377,6 +382,27 @@ async fn age_huddle(su: &PgPool, huddle_id: Uuid) {
     .expect("age participants");
 }
 
+/// Age only the huddle row, leaving participant rows fresh.
+async fn age_huddle_only(su: &PgPool, huddle_id: Uuid) {
+    sqlx::query("UPDATE huddle SET started_at = started_at - interval '10 minutes' WHERE id = $1")
+        .bind(huddle_id)
+        .execute(su)
+        .await
+        .expect("age huddle");
+}
+
+/// Age only the participant rows, leaving the huddle just started.
+async fn age_participants_only(su: &PgPool, huddle_id: Uuid) {
+    sqlx::query(
+        "UPDATE huddle_participant SET joined_at = joined_at - interval '5 minutes' \
+          WHERE huddle_id = $1",
+    )
+    .bind(huddle_id)
+    .execute(su)
+    .await
+    .expect("age participants");
+}
+
 async fn huddle_ended(su: &PgPool, huddle_id: Uuid) -> bool {
     sqlx::query_scalar("SELECT ended_at IS NOT NULL FROM huddle WHERE id = $1")
         .bind(huddle_id)
@@ -447,13 +473,13 @@ async fn crashed_participant_ends_the_huddle_after_two_sweeps_and_frees_the_chan
 
     let mut sweeper = sweeper_for(&url);
 
-    let first = sweeper.sweep_once(&notifier).await.expect("sweep 1");
+    let first = sweeper.sweep_once(&notifier, &app).await.expect("sweep 1");
     assert_eq!(first.participants_marked_left, 0, "one miss is not enough");
     assert_eq!(first.first_misses, 1);
     assert_eq!(open_members(&su, huddle_id).await, vec![crashed]);
     assert!(!huddle_ended(&su, huddle_id).await);
 
-    let second = sweeper.sweep_once(&notifier).await.expect("sweep 2");
+    let second = sweeper.sweep_once(&notifier, &app).await.expect("sweep 2");
     assert_eq!(second.participants_marked_left, 1);
     assert_eq!(second.huddles_ended, 1);
     assert!(open_members(&su, huddle_id).await.is_empty());
@@ -479,7 +505,7 @@ async fn crashed_participant_ends_the_huddle_after_two_sweeps_and_frees_the_chan
     assert_ne!(restarted.huddle.id, huddle_id);
 
     // A third sweep has nothing left to do for the old huddle.
-    let third = sweeper.sweep_once(&notifier).await.expect("sweep 3");
+    let third = sweeper.sweep_once(&notifier, &app).await.expect("sweep 3");
     assert_eq!(third.participants_marked_left, 0);
     assert_eq!(huddle_events(&su, huddle_id, "huddle_ended").await, 1);
 
@@ -511,7 +537,7 @@ async fn a_present_participant_is_never_closed() {
 
     let mut sweeper = sweeper_for(&url);
     for _ in 0..3 {
-        sweeper.sweep_once(&notifier).await.expect("sweep");
+        sweeper.sweep_once(&notifier, &app).await.expect("sweep");
     }
 
     assert_eq!(
@@ -556,7 +582,7 @@ async fn unreachable_livekit_changes_nothing() {
     // (a) LiveKit answers 503 for this room (not staged).
     let mut sweeper = sweeper_for(&url);
     for _ in 0..3 {
-        let stats = sweeper.sweep_once(&notifier).await.expect("sweep");
+        let stats = sweeper.sweep_once(&notifier, &app).await.expect("sweep");
         assert!(stats.livekit_unreachable >= 1);
         assert_eq!(stats.participants_marked_left, 0);
     }
@@ -569,7 +595,7 @@ async fn unreachable_livekit_changes_nothing() {
     };
     let mut deaf = sweeper_for(&dead);
     for _ in 0..3 {
-        let stats = deaf.sweep_once(&notifier).await.expect("sweep");
+        let stats = deaf.sweep_once(&notifier, &app).await.expect("sweep");
         assert!(stats.livekit_unreachable >= 1);
         assert_eq!(stats.participants_marked_left, 0);
     }
@@ -581,10 +607,10 @@ async fn unreachable_livekit_changes_nothing() {
 
     // (c) An outage between two misses does not turn one miss into two.
     stage_room(&mock, huddle_id, &[]);
-    let first = sweeper.sweep_once(&notifier).await.expect("miss 1");
+    let first = sweeper.sweep_once(&notifier, &app).await.expect("miss 1");
     assert_eq!(first.first_misses, 1);
     unstage_room(&mock, huddle_id);
-    let outage = sweeper.sweep_once(&notifier).await.expect("outage");
+    let outage = sweeper.sweep_once(&notifier, &app).await.expect("outage");
     assert_eq!(outage.participants_marked_left, 0);
     assert_eq!(open_members(&su, huddle_id).await, vec![member]);
 
@@ -606,13 +632,15 @@ async fn a_participant_still_connecting_is_not_a_ghost() {
     let (mock, url) = spawn_mock_livekit().await;
     let tenant = seed_tenant(&su, 1).await;
     let member = tenant.members[0];
-    // Joined just now (not aged): the client may still be reaching LiveKit.
+    // The huddle is old enough to judge, but this row was written just now:
+    // the client may still be reaching LiveKit.
     let huddle_id = open_huddle(&app, &tenant, &[member]).await;
+    age_huddle_only(&su, huddle_id).await;
     stage_room(&mock, huddle_id, &[]);
 
     let mut sweeper = sweeper_for(&url);
     for _ in 0..3 {
-        let stats = sweeper.sweep_once(&notifier).await.expect("sweep");
+        let stats = sweeper.sweep_once(&notifier, &app).await.expect("sweep");
         assert_eq!(stats.participants_marked_left, 0);
     }
     assert_eq!(open_members(&su, huddle_id).await, vec![member]);
@@ -642,12 +670,12 @@ async fn a_never_joined_huddle_ends_after_two_empty_sweeps() {
     stage_room(&mock, huddle_id, &[]);
 
     let mut sweeper = sweeper_for(&url);
-    sweeper.sweep_once(&notifier).await.expect("sweep 1");
+    sweeper.sweep_once(&notifier, &app).await.expect("sweep 1");
     assert!(
         !huddle_ended(&su, huddle_id).await,
         "one empty look is not enough"
     );
-    let second = sweeper.sweep_once(&notifier).await.expect("sweep 2");
+    let second = sweeper.sweep_once(&notifier, &app).await.expect("sweep 2");
     assert_eq!(second.huddles_ended, 1);
     assert!(huddle_ended(&su, huddle_id).await);
     assert_eq!(huddle_events(&su, huddle_id, "huddle_ended").await, 1);
@@ -666,6 +694,122 @@ async fn a_never_joined_huddle_ends_after_two_empty_sweeps() {
         .execute(&su)
         .await
         .unwrap();
+    unstage_room(&mock, huddle_id);
+}
+
+/// The LiveKit room does not exist until the first participant connects, so a
+/// huddle that has just started looks exactly like a ghost. It is not judged
+/// until `started_at` is past the start grace — even with an old-looking row.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL (pgvector/pg18 superuser) + bootstrap roles"]
+async fn a_just_started_huddle_is_not_judged() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let (su, app, notifier) = (
+        superuser_pool().await,
+        momo_app_pool().await,
+        momo_notifier_pool().await,
+    );
+    let (mock, url) = spawn_mock_livekit().await;
+    let tenant = seed_tenant(&su, 1).await;
+    let member = tenant.members[0];
+    let huddle_id = open_huddle(&app, &tenant, &[member]).await;
+    age_participants_only(&su, huddle_id).await;
+    stage_room(&mock, huddle_id, &[]);
+
+    let mut sweeper = sweeper_for(&url);
+    for _ in 0..3 {
+        let stats = sweeper.sweep_once(&notifier, &app).await.expect("sweep");
+        assert!(stats.too_young >= 1, "the fresh huddle is skipped");
+        assert_eq!(stats.participants_marked_left, 0);
+    }
+    assert_eq!(open_members(&su, huddle_id).await, vec![member]);
+    assert!(!huddle_ended(&su, huddle_id).await);
+
+    // A never-joined huddle inside the grace is spared the same way.
+    let tenant2 = seed_tenant(&su, 1).await;
+    let empty_id = open_huddle(&app, &tenant2, &[]).await;
+    stage_room(&mock, empty_id, &[]);
+    for _ in 0..3 {
+        sweeper.sweep_once(&notifier, &app).await.expect("sweep");
+    }
+    assert!(!huddle_ended(&su, empty_id).await);
+
+    leave_huddle(&app, tenant.workspace_id, huddle_id, actor(member))
+        .await
+        .expect("leave");
+    sqlx::query("UPDATE huddle SET ended_at = now() WHERE id = $1")
+        .bind(empty_id)
+        .execute(&su)
+        .await
+        .unwrap();
+    unstage_room(&mock, huddle_id);
+    unstage_room(&mock, empty_id);
+}
+
+/// The sweep adds no RLS-bypassing write path: a write pool whose role is
+/// BYPASSRLS (the notifier's own) is refused before anything is written, and
+/// the `momo_app` pool it does write through is filtered by the tenant GUC.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL (pgvector/pg18 superuser) + bootstrap roles"]
+async fn a_write_pool_that_bypasses_rls_is_refused() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let (su, app, notifier) = (
+        superuser_pool().await,
+        momo_app_pool().await,
+        momo_notifier_pool().await,
+    );
+    let (mock, url) = spawn_mock_livekit().await;
+    let tenant = seed_tenant(&su, 1).await;
+    let member = tenant.members[0];
+    let huddle_id = open_huddle(&app, &tenant, &[member]).await;
+    age_huddle(&su, huddle_id).await;
+    stage_room(&mock, huddle_id, &[]);
+
+    let mut sweeper = sweeper_for(&url);
+    for _ in 0..2 {
+        let error = sweeper
+            .sweep_once(&notifier, &notifier)
+            .await
+            .expect_err("a BYPASSRLS write pool must be refused");
+        assert!(
+            error.to_string().contains("momo_notifier"),
+            "the refusal names the role: {error}"
+        );
+    }
+    assert_eq!(open_members(&su, huddle_id).await, vec![member]);
+    assert!(!huddle_ended(&su, huddle_id).await);
+    assert_eq!(sweep_audits(&su, huddle_id).await, 0);
+
+    // The RLS-bound pool really is bound: under another tenant's GUC the
+    // huddle is invisible, so the settlement is a no-op race.
+    let joined_at = sqlx::query_scalar(
+        "SELECT joined_at FROM huddle_participant WHERE huddle_id = $1 AND left_at IS NULL",
+    )
+    .bind(huddle_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let foreign = seed_tenant(&su, 1).await;
+    let settlement = settle_swept_departures(
+        &app,
+        foreign.workspace_id,
+        huddle_id,
+        vec![SweptParticipant {
+            member_id: member,
+            joined_at,
+        }],
+        true,
+    )
+    .await
+    .expect("settle under a foreign GUC");
+    assert!(settlement.raced, "RLS hides another tenant's huddle");
+    assert_eq!(open_members(&su, huddle_id).await, vec![member]);
+
+    leave_huddle(&app, tenant.workspace_id, huddle_id, actor(member))
+        .await
+        .expect("leave");
     unstage_room(&mock, huddle_id);
 }
 
@@ -788,13 +932,13 @@ async fn real_livekit_observes_an_empty_room_and_the_ghost_is_settled() {
         )
         .expect("complete LiveKit config"),
     );
-    let first = sweeper.sweep_once(&notifier).await.expect("sweep 1");
+    let first = sweeper.sweep_once(&notifier, &app).await.expect("sweep 1");
     assert_eq!(
         first.livekit_unreachable, 0,
         "real LiveKit accepted the call"
     );
     assert_eq!(first.first_misses, 1);
-    let second = sweeper.sweep_once(&notifier).await.expect("sweep 2");
+    let second = sweeper.sweep_once(&notifier, &app).await.expect("sweep 2");
     assert_eq!(second.livekit_unreachable, 0);
     assert_eq!(second.participants_marked_left, 1);
     assert!(huddle_ended(&su, huddle_id).await);
@@ -813,7 +957,10 @@ async fn real_livekit_observes_an_empty_room_and_the_ghost_is_settled() {
         .unwrap(),
     );
     for _ in 0..2 {
-        let stats = forged.sweep_once(&notifier).await.expect("forged sweep");
+        let stats = forged
+            .sweep_once(&notifier, &app)
+            .await
+            .expect("forged sweep");
         assert_eq!(stats.livekit_unreachable, 1, "401 is not an empty room");
     }
     assert_eq!(open_members(&su, huddle_id).await, vec![tenant.members[0]]);

@@ -24,7 +24,8 @@
 //! 5. **huddle ghost sweep** (#2758, ADR-0122 증보 D-H4) — a huddle participant
 //!    whose client died is closed once LiveKit has not had them for two ticks,
 //!    and the huddle ends the way a last leave ends it. Runs only when LiveKit
-//!    is configured. One iteration is [`huddle_sweep::HuddleSweeper::sweep_once`].
+//!    is configured; its writes go through a separate RLS-bound pool, never
+//!    this process's BYPASSRLS one. One iteration is [`huddle_sweep::HuddleSweeper::sweep_once`].
 //!
 //! The drain holds **no APNs key and contains no APNs code**: a self-hosted
 //! server cannot have one, so it hands an id-only dispatch to the relay that
@@ -723,24 +724,56 @@ impl Notifier {
         // a LiveKit that is timing out must not delay approvals or windows.
         // Without LiveKit configured there are no huddles to reconcile (the API
         // answers 503 to every huddle route), so the loop is not spawned at all.
-        let huddle_sweep_task = match self.config.huddle_sweep.clone() {
-            None => {
+        let huddle_sweep_task = match (
+            self.config.huddle_sweep.clone(),
+            self.config.huddle_sweep_database_url.as_deref(),
+        ) {
+            (None, _) => {
                 tracing::info!("huddle sweep disabled (LiveKit not configured)");
                 None
             }
-            Some(config) => {
-                let pool = self.pool.clone();
-                Some(tokio::spawn(async move {
-                    let mut ticker = tokio::time::interval(config.interval);
-                    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                    let mut sweeper = huddle_sweep::HuddleSweeper::new(config);
-                    loop {
-                        ticker.tick().await;
-                        if let Err(error) = sweeper.sweep_once(&pool).await {
-                            tracing::error!(error = %error, "huddle sweep iteration failed");
-                        }
+            (Some(_), None) => {
+                // Say so loudly: huddles work, but a crashed participant will
+                // hold its huddle open until someone sets this.
+                tracing::warn!(
+                    "huddle sweep disabled: LiveKit is configured but \
+                     MOMO_HUDDLE_SWEEP_DATABASE_URL (the RLS-bound momo_app \
+                     connection) is not set; ghost participants will not be cleared"
+                );
+                None
+            }
+            (Some(config), Some(url)) => {
+                match momo_db::sqlx::postgres::PgPoolOptions::new()
+                    .max_connections(2)
+                    .connect_lazy(url)
+                {
+                    Err(error) => {
+                        tracing::error!(
+                            error = %error,
+                            "huddle sweep disabled: MOMO_HUDDLE_SWEEP_DATABASE_URL does not parse"
+                        );
+                        None
                     }
-                }))
+                    Ok(write_pool) => {
+                        let read_pool = self.pool.clone();
+                        Some(tokio::spawn(async move {
+                            let mut ticker = tokio::time::interval(config.interval);
+                            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                            let mut sweeper = huddle_sweep::HuddleSweeper::new(config);
+                            loop {
+                                ticker.tick().await;
+                                if let Err(error) =
+                                    sweeper.sweep_once(&read_pool, &write_pool).await
+                                {
+                                    tracing::error!(
+                                        error = %error,
+                                        "huddle sweep iteration failed"
+                                    );
+                                }
+                            }
+                        }))
+                    }
+                }
             }
         };
 
