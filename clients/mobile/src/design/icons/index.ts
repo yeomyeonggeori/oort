@@ -32,3 +32,32 @@ export const SHELL_ICON_SIZE: Readonly<Record<ShellIconName, number>> = {
   /** 시안 `.a-cbtn` 안의 `.ic`(20). */
   x: 20,
 };
+
+// ---- 홈 아이콘 여섯 (DS2-3 #2715) --------------------------------------------
+// 같은 시안의 `#hash`·`#lock`·`#dms`·`#more`·`#down`·`#bot`, 같은 레시피(선 1.8,
+// viewBox 24). 크기는 시안이 그 아이콘을 쓰는 자리의 `.ic.s*`다.
+
+export const HOME_ICONS = {
+  hash: require('./hash.png') as ImageSourcePropType,
+  lock: require('./lock.png') as ImageSourcePropType,
+  dms: require('./dms.png') as ImageSourcePropType,
+  more: require('./more.png') as ImageSourcePropType,
+  down: require('./down.png') as ImageSourcePropType,
+  bot: require('./bot.png') as ImageSourcePropType,
+} as const;
+
+export type HomeIconName = keyof typeof HOME_ICONS;
+
+/**
+ * 시안 `.a-sec-h .ic.s22`·`.a-row .ic.s22`(행·머리 22), `.ctl .ic`(20),
+ * `.a-now .a-ag .ic.s18`(카드 18). 행 안 에이전트 사각의 글리프는 `.ic.s16`이라
+ * 그 자리는 18 래스터를 16으로 줄여 그린다(`HOME.rowAgentGlyph`).
+ */
+export const HOME_ICON_SIZE: Readonly<Record<HomeIconName, number>> = {
+  hash: 22,
+  lock: 22,
+  dms: 22,
+  more: 20,
+  down: 20,
+  bot: 18,
+};
