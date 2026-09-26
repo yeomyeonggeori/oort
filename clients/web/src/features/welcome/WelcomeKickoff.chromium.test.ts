@@ -5,17 +5,18 @@ import { fileURLToPath } from "node:url";
 import { compile } from "tailwindcss";
 import { describe, expect, it } from "vitest";
 import {
+  ENTER_CONVERSATION_ANIMATION_NAME,
   ENTER_CONVERSATION_CLASS,
+  WELCOME_KICKOFF_EXIT_ANIMATION_NAME,
   WELCOME_KICKOFF_EXIT_CLASS,
-  WELCOME_KICKOFF_MARK_CLASS,
 } from "@/design/motion";
-import { WELCOME_KICKOFF_SHAPES } from "./welcomeKickoff";
+import { WELCOME_BAND_JOY_HOLD_MS } from "./welcomeKickoff";
 
 /**
- * Chromium half of UX-R2b. Node environment (not jsdom) so esbuild's
+ * Chromium half of UX-R2b / #2817. Node environment (not jsdom) so esbuild's
  * TextEncoder invariant holds. The product path is the harness: real Timeline
- * + useTimeline + useWelcomeKickoff. jsdom covers the same wiring with
- * dispatched animationend.
+ * + useTimeline + useWelcomeKickoff, the kickoff band, and the phone card in
+ * the same slot. jsdom covers the same wiring with dispatched animationend.
  */
 
 const require_ = createRequire(import.meta.url);
@@ -104,6 +105,7 @@ async function launchWelcomeHarness(opts: {
         "https://example.test/welcome-kickoff-harness.js"
       ),
     },
+    loader: { ".png": "dataurl" },
     logLevel: "silent",
   });
   const js = bundled.outputFiles[0]?.text;
@@ -126,12 +128,12 @@ async function launchWelcomeHarness(opts: {
   });
   const candidates = [
     WELCOME_KICKOFF_EXIT_CLASS,
-    WELCOME_KICKOFF_MARK_CLASS,
     ENTER_CONVERSATION_CLASS,
-    "welcome-kickoff-body",
     "h-full",
     "relative",
     ...quotedClassTokens(readFileSync(join(HERE, "WelcomeKickoffStage.tsx"), "utf8")),
+    ...quotedClassTokens(readFileSync(join(HERE, "PhoneLinkChannelCard.tsx"), "utf8")),
+    ...quotedClassTokens(readFileSync(HARNESS, "utf8")),
     ...quotedClassTokens(readFileSync(join(HERE, "../timeline/Timeline.tsx"), "utf8")),
     ...quotedClassTokens(
       readFileSync(join(HERE, "../timeline/ChannelIntroBlock.tsx"), "utf8")
@@ -278,67 +280,29 @@ describe("welcome kickoff Chromium harness", () => {
   );
 
   it.skipIf(!chromiumAvailable)(
-    "product path: opener arrival starts at or after stage exit end",
+    "product path: opener arrival starts at once beside the joy band; the band collapses after; the phone card only after that",
     async () => {
       const handle = await launchWelcomeHarness();
       try {
-        await handle.page.evaluate(() => window.__welcomeKickoff.onSubscribed());
-        await handle.page
-          .locator("[data-testid='welcome-kickoff-stage']")
-          .waitFor({ state: "attached", timeout: 4000 });
-        const measured = await handle.page.evaluate(async () => {
-          return await new Promise<{
-            exitEndedMs: number;
-            arrivalStartMs: number;
-            deltaMs: number;
-            arrivalDuringExit: boolean;
-          }>((resolve, reject) => {
-            const timeout = window.setTimeout(
-              () => reject(new Error("product exit→arrival did not complete")),
-              4000
-            );
-            let exitEndedMs = 0;
-            let exitRunning = false;
-            document.addEventListener(
-              "animationstart",
-              (event) => {
-                if (event.animationName === "motion-fade-out") exitRunning = true;
-              },
-              true
-            );
-            document.addEventListener(
-              "animationend",
-              (event) => {
-                if (event.animationName !== "motion-fade-out") return;
-                exitEndedMs = performance.now();
-                exitRunning = false;
-              },
-              true
-            );
-            document.addEventListener(
-              "animationstart",
-              (event) => {
-                if (event.animationName !== "motion-enter-conversation") return;
-                const arrivalStartMs = performance.now();
-                window.clearTimeout(timeout);
-                resolve({
-                  exitEndedMs,
-                  arrivalStartMs,
-                  deltaMs: arrivalStartMs - exitEndedMs,
-                  arrivalDuringExit: exitRunning,
-                });
-              },
-              true
-            );
-            window.__welcomeKickoff.deliverOpener();
-          });
-        });
+        const measured = await measureOpenerPath(handle.page);
         console.info(
-          `welcome kickoff product exit→arrival exitEndedMs=${measured.exitEndedMs.toFixed(1)} arrivalStartMs=${measured.arrivalStartMs.toFixed(1)} deltaMs=${measured.deltaMs.toFixed(1)} arrivalDuringExit=${measured.arrivalDuringExit}`
+          `welcome band product path ${JSON.stringify(measured)}`
         );
-        expect(measured.exitEndedMs).toBeGreaterThan(0);
-        expect(measured.arrivalDuringExit).toBe(false);
-        expect(measured.deltaMs).toBeGreaterThanOrEqual(0);
+        // (a) the row does not wait for the band (it is outside the list)
+        expect(measured.arrivalStartMs).toBeGreaterThan(0);
+        expect(measured.arrivalStartMs - measured.deliverMs).toBeLessThan(250);
+        // (b) the band shows joy around the same frame
+        expect(measured.joyMs).toBeGreaterThan(0);
+        expect(Math.abs(measured.joyMs - measured.arrivalStartMs)).toBeLessThan(100);
+        // (c) the collapse ends after the arrival started, and after the joy hold
+        expect(measured.collapseEndMs).toBeGreaterThan(measured.arrivalStartMs);
+        expect(measured.collapseEndMs - measured.joyMs).toBeGreaterThanOrEqual(
+          WELCOME_BAND_JOY_HOLD_MS
+        );
+        // (d) one slot: the phone card never shares the DOM with the band
+        expect(measured.overlapSeen).toBe(false);
+        expect(measured.phoneBeforeOpener).toBe(false);
+        expect(measured.phoneMs).toBeGreaterThanOrEqual(measured.collapseEndMs);
       } finally {
         await handle.browser.close();
       }
@@ -347,139 +311,191 @@ describe("welcome kickoff Chromium harness", () => {
   );
 
   it.skipIf(!chromiumAvailable)(
-    "product path N=5: exit→arrival deltaMs min/median/max",
+    "product path N=5: deliver→arrival and deliver→collapse-end deltas",
     async () => {
-      const deltas: number[] = [];
+      const arrivals: number[] = [];
+      const collapses: number[] = [];
       for (let sample = 0; sample < 5; sample += 1) {
         const handle = await launchWelcomeHarness();
         try {
-          await handle.page.evaluate(() => window.__welcomeKickoff.onSubscribed());
-          await handle.page
-            .locator("[data-testid='welcome-kickoff-stage']")
-            .waitFor({ state: "attached", timeout: 4000 });
-          const measured = await handle.page.evaluate(async () => {
-            return await new Promise<{
-              exitEndedMs: number;
-              arrivalStartMs: number;
-              deltaMs: number;
-              arrivalDuringExit: boolean;
-            }>((resolve, reject) => {
-              const timeout = window.setTimeout(
-                () => reject(new Error("product exit→arrival did not complete")),
-                4000
-              );
-              let exitEndedMs = 0;
-              let exitRunning = false;
-              document.addEventListener(
-                "animationstart",
-                (event) => {
-                  if (event.animationName === "motion-fade-out") exitRunning = true;
-                },
-                true
-              );
-              document.addEventListener(
-                "animationend",
-                (event) => {
-                  if (event.animationName !== "motion-fade-out") return;
-                  exitEndedMs = performance.now();
-                  exitRunning = false;
-                },
-                true
-              );
-              document.addEventListener(
-                "animationstart",
-                (event) => {
-                  if (event.animationName !== "motion-enter-conversation") return;
-                  const arrivalStartMs = performance.now();
-                  window.clearTimeout(timeout);
-                  resolve({
-                    exitEndedMs,
-                    arrivalStartMs,
-                    deltaMs: arrivalStartMs - exitEndedMs,
-                    arrivalDuringExit: exitRunning,
-                  });
-                },
-                true
-              );
-              window.__welcomeKickoff.deliverOpener();
-            });
-          });
-          expect(measured.exitEndedMs).toBeGreaterThan(0);
-          expect(measured.arrivalDuringExit).toBe(false);
-          deltas.push(measured.deltaMs);
+          const measured = await measureOpenerPath(handle.page);
+          expect(measured.overlapSeen).toBe(false);
+          expect(measured.collapseEndMs).toBeGreaterThan(measured.arrivalStartMs);
+          arrivals.push(measured.arrivalStartMs - measured.deliverMs);
+          collapses.push(measured.collapseEndMs - measured.deliverMs);
         } finally {
           await handle.browser.close();
         }
       }
-      const sorted = [...deltas].sort((a, b) => a - b);
-      const min = sorted[0] ?? 0;
-      const max = sorted[sorted.length - 1] ?? 0;
-      const median = sorted[2] ?? 0;
+      const fmt = (xs: number[]) => {
+        const sorted = [...xs].sort((a, b) => a - b);
+        return `min=${sorted[0]?.toFixed(1)} median=${sorted[2]?.toFixed(1)} max=${sorted[4]?.toFixed(1)}`;
+      };
       console.info(
-        `welcome kickoff product exit→arrival N=5 deltaMs min=${min.toFixed(1)} median=${median.toFixed(1)} max=${max.toFixed(1)} samples=${deltas.map((n) => n.toFixed(1)).join(",")}`
+        `welcome band N=5 deliver→arrival ${fmt(arrivals)} deliver→collapseEnd ${fmt(collapses)}`
       );
-      expect(deltas).toHaveLength(5);
+      expect(arrivals).toHaveLength(5);
+      expect(Math.max(...arrivals)).toBeLessThan(250);
     },
     120_000
   );
 
   it.skipIf(!chromiumAvailable)(
-    "welcome marks render CLOUD_BODIES size and reduced pose equals end rotate",
+    "reduced motion: joy face swap only, no collapse animation; band leaves after the hold, then the phone card",
     async () => {
-      const animated = await launchWelcomeHarness();
+      const handle = await launchWelcomeHarness({ reducedMotion: true });
       try {
-        await animated.page.evaluate(() => window.__welcomeKickoff.onSubscribed());
-        await animated.page
+        await handle.page.evaluate(() => window.__welcomeKickoff.onSubscribed());
+        await handle.page
           .locator("[data-testid='welcome-kickoff-stage']")
           .waitFor({ state: "attached", timeout: 4000 });
-        const boxes = await animated.page.evaluate(() =>
-          [...document.querySelectorAll(".welcome-kickoff-body")].map((el) => {
-            const style = getComputedStyle(el);
-            return {
-              body: el.getAttribute("data-onboarding-body"),
-              width: Number.parseFloat(style.width),
-              height: Number.parseFloat(style.height),
-            };
-          })
+        const measured = await handle.page.evaluate(
+          async ({ collapseName }) =>
+            await new Promise<{
+              collapseStarted: boolean;
+              joyFace: string | null;
+              bandGoneMs: number;
+              deliverMs: number;
+              phoneMs: number;
+              overlapSeen: boolean;
+            }>((resolve, reject) => {
+              const timeout = window.setTimeout(
+                () => reject(new Error("reduced band did not leave")),
+                5000
+              );
+              let collapseStarted = false;
+              let joyFace: string | null = null;
+              let bandGoneMs = 0;
+              let overlapSeen = false;
+              document.addEventListener(
+                "animationstart",
+                (event) => {
+                  if (event.animationName === collapseName) collapseStarted = true;
+                },
+                true
+              );
+              const deliverMs = performance.now();
+              const watch = new MutationObserver(() => {
+                const band = document.querySelector("[data-testid='welcome-kickoff-stage']");
+                const phone = document.querySelector("[data-testid='phone-link-card']");
+                if (band && phone) overlapSeen = true;
+                if (band?.getAttribute("data-state") === "joy" && joyFace === null) {
+                  joyFace =
+                    band
+                      .querySelector("[data-testid='kometto-face']")
+                      ?.getAttribute("data-expression") ?? null;
+                }
+                if (!band && bandGoneMs === 0) bandGoneMs = performance.now();
+                if (phone) {
+                  watch.disconnect();
+                  window.clearTimeout(timeout);
+                  resolve({
+                    collapseStarted,
+                    joyFace,
+                    bandGoneMs,
+                    deliverMs,
+                    phoneMs: performance.now(),
+                    overlapSeen,
+                  });
+                }
+              });
+              watch.observe(document.body, {
+                subtree: true,
+                childList: true,
+                attributes: true,
+              });
+              window.__welcomeKickoff.deliverOpener();
+            }),
+          { collapseName: WELCOME_KICKOFF_EXIT_ANIMATION_NAME }
         );
-        expect(boxes.length).toBe(WELCOME_KICKOFF_SHAPES.length);
-        for (const [index, shape] of WELCOME_KICKOFF_SHAPES.entries()) {
-          expect(boxes[index]?.body).toBe(String(shape.index));
-          expect(boxes[index]?.width).toBe(shape.size);
-          expect(boxes[index]?.height).toBe(shape.size);
-        }
-      } finally {
-        await animated.browser.close();
-      }
-
-      const reduced = await launchWelcomeHarness({ reducedMotion: true });
-      try {
-        await reduced.page.evaluate(() => window.__welcomeKickoff.onSubscribed());
-        await reduced.page
-          .locator("[data-testid='welcome-kickoff-stage']")
-          .waitFor({ state: "attached", timeout: 4000 });
-        const poses = await reduced.page.evaluate(() =>
-          [...document.querySelectorAll(".welcome-kickoff-body")].map((el) => ({
-            body: el.getAttribute("data-onboarding-body"),
-            transform: getComputedStyle(el).transform,
-            stagger: el.getAttribute("data-stagger-index"),
-          }))
+        console.info(`welcome band reduced ${JSON.stringify(measured)}`);
+        expect(measured.joyFace).toBe("happy");
+        expect(measured.collapseStarted).toBe(false);
+        expect(measured.bandGoneMs - measured.deliverMs).toBeGreaterThanOrEqual(
+          WELCOME_BAND_JOY_HOLD_MS - 20
         );
-        expect(poses.every((row) => row.stagger === null)).toBe(true);
-        for (const [index, shape] of WELCOME_KICKOFF_SHAPES.entries()) {
-          const transform = poses[index]?.transform ?? "none";
-          expect(transform, `body ${shape.index} reduced transform`).not.toBe("none");
-          const nums = transform.match(/-?\d+\.?\d*(?:e[+-]?\d+)?/gi);
-          expect(nums && nums.length >= 4).toBe(true);
-          const a = Number(nums?.[0]);
-          const b = Number(nums?.[1]);
-          const deg = (Math.atan2(b, a) * 180) / Math.PI;
-          expect(Math.abs(deg - shape.rotate)).toBeLessThan(0.6);
-        }
+        expect(measured.overlapSeen).toBe(false);
+        expect(measured.phoneMs).toBeGreaterThanOrEqual(measured.bandGoneMs);
       } finally {
-        await reduced.browser.close();
+        await handle.browser.close();
       }
     },
-    60_000
+    40_000
   );
 });
+
+type OpenerPath = {
+  deliverMs: number;
+  arrivalStartMs: number;
+  joyMs: number;
+  collapseEndMs: number;
+  phoneMs: number;
+  overlapSeen: boolean;
+  phoneBeforeOpener: boolean;
+};
+
+async function measureOpenerPath(
+  page: import("playwright").Page
+): Promise<OpenerPath> {
+  await page.evaluate(() => window.__welcomeKickoff.onSubscribed());
+  await page
+    .locator("[data-testid='welcome-kickoff-stage']")
+    .waitFor({ state: "attached", timeout: 4000 });
+  return await page.evaluate(
+    async ({ collapseName, arrivalName }) =>
+      await new Promise<OpenerPath>((resolve, reject) => {
+        const timeout = window.setTimeout(
+          () => reject(new Error("opener path did not complete")),
+          6000
+        );
+        const phoneBeforeOpener = Boolean(
+          document.querySelector("[data-testid='phone-link-card']")
+        );
+        let arrivalStartMs = 0;
+        let joyMs = 0;
+        let collapseEndMs = 0;
+        let overlapSeen = false;
+        document.addEventListener(
+          "animationstart",
+          (event) => {
+            if (event.animationName === arrivalName && arrivalStartMs === 0) {
+              arrivalStartMs = performance.now();
+            }
+          },
+          true
+        );
+        document.addEventListener(
+          "animationend",
+          (event) => {
+            if (event.animationName === collapseName) collapseEndMs = performance.now();
+          },
+          true
+        );
+        const deliverMs = performance.now();
+        const watch = new MutationObserver(() => {
+          const band = document.querySelector("[data-testid='welcome-kickoff-stage']");
+          const phone = document.querySelector("[data-testid='phone-link-card']");
+          if (band && phone) overlapSeen = true;
+          if (joyMs === 0 && band?.getAttribute("data-state") === "joy") {
+            joyMs = performance.now();
+          }
+          if (phone) {
+            watch.disconnect();
+            window.clearTimeout(timeout);
+            resolve({
+              deliverMs,
+              arrivalStartMs,
+              joyMs,
+              collapseEndMs,
+              phoneMs: performance.now(),
+              overlapSeen,
+              phoneBeforeOpener,
+            });
+          }
+        });
+        watch.observe(document.body, { subtree: true, childList: true, attributes: true });
+        window.__welcomeKickoff.deliverOpener();
+      }),
+    { collapseName: WELCOME_KICKOFF_EXIT_ANIMATION_NAME, arrivalName: ENTER_CONVERSATION_ANIMATION_NAME }
+  );
+}

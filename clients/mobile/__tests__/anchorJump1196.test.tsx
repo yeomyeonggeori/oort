@@ -9,6 +9,7 @@ import {
   waitFor,
 } from '@testing-library/react-native';
 import React from 'react';
+import {ActionSheetIOS} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -17,6 +18,23 @@ import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+
+/**
+ * 고정 목록의 문은 머리 ⋮ 메뉴 안이다 (DS2-4 #2716). 메뉴는 ActionSheetIOS 라 시험에서는
+ * 그 호출을 붙잡아 고정 목록 항목(「고정 N개」·「고정한 메시지」)을 고른다 — 항목 이름으로 찾으므로 메뉴 순서가
+ * 바뀌어도 시험이 다른 항목을 누르지 않는다.
+ */
+function openPinList(): void {
+  const spy = jest
+    .spyOn(ActionSheetIOS, 'showActionSheetWithOptions')
+    .mockImplementation((options, callback) => {
+      const index = options.options.findIndex(label => label.startsWith('고정'));
+      expect(index).toBeGreaterThanOrEqual(0);
+      callback(index);
+    });
+  fireEvent.press(screen.getByTestId('conversation-menu'));
+  spy.mockRestore();
+}
 
 // =============================================================================
 // 폰의 점프 앵커 둘 (#1196) — 검색 진입은 **착지**하고, 고정은 **자기 낱말**로 말한다
@@ -391,7 +409,7 @@ describe('#1209 High — 네 갈래 전부 두 발이다', () => {
     installFetch({pins: [PINNED_WIRE], olderPage: [HIT_MESSAGE]});
     await openConversation();
 
-    fireEvent.press(screen.getByTestId('open-pin-list'));
+    openPinList();
     await waitFor(() => expect(screen.getByTestId('pin-list')).toBeTruthy());
     fireEvent.press(screen.getAllByTestId('pin-list-item')[0]);
 
@@ -466,7 +484,7 @@ describe('#1196 — 고정 목록 점프는 자기 낱말로 말한다', () => {
     installFetch({pins: [PINNED_WIRE]});
     await openConversation();
 
-    fireEvent.press(screen.getByTestId('open-pin-list'));
+    openPinList();
     await waitFor(() => expect(screen.getByTestId('pin-list')).toBeTruthy());
     fireEvent.press(screen.getAllByTestId('pin-list-item')[0]);
 

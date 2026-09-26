@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 
-import { act, createElement, type ReactElement } from "react";
+import {
+  act,
+  createElement,
+  forwardRef,
+  useImperativeHandle,
+  type ReactElement,
+  type Ref,
+} from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -14,6 +21,11 @@ import { ShellNavProvider } from "@/app/shellNav";
 import { Sidebar } from "@/features/sidebar/Sidebar";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { SettingsRoute } from "@/features/settings/SettingsRoute";
+import { ChatShell } from "@/features/chat/ChatShell";
+import {
+  dockSnapshot,
+  resetDockStateForTest,
+} from "@/features/workbench/local/dockState";
 
 // =============================================================================
 // #2166 work-surface hide: count real entry points in the rendered tree.
@@ -22,7 +34,118 @@ import { SettingsRoute } from "@/features/settings/SettingsRoute";
 // `isSurfaceProvided`. A constant-table assertion would stay green if a row
 // were added and never wired; counting sidebar / ⌘K / settings nodes is the
 // thing that can go red.
+//
+// #2753: the channel header terminal dock (`open-terminal-dock`) is a work
+// entry point too. It observes host-side work sessions, so on a server with no
+// host it was a dead end that ignored this flag. ChatShell is mounted next to
+// the sidebar so the header button is counted with the rest.
 // =============================================================================
+
+// ChatShell's heavy children are stubbed the same way ChatShell.skel.test.tsx
+// does: this file counts the header button, not the timeline or the dock body.
+vi.mock("react-virtuoso", () => ({
+  Virtuoso: forwardRef(function MockVirtuoso(
+    props: {
+      data: { kind: string; key: string }[];
+      itemContent: (
+        index: number,
+        item: { kind: string; key: string }
+      ) => ReactElement;
+    },
+    ref: Ref<{ scrollToIndex: (opts: unknown) => void }>
+  ) {
+    useImperativeHandle(ref, () => ({
+      scrollToIndex: () => undefined,
+    }));
+    return createElement(
+      "div",
+      { "data-testid": "timeline-virtuoso" },
+      props.data.map((item, index) =>
+        createElement("div", { key: item.key }, props.itemContent(index, item))
+      )
+    );
+  }),
+}));
+
+vi.mock("@/features/timeline/useTimeline", async () => {
+  const { idleTimelineMock } = await import("@/features/timeline/idleTimelineMock");
+  return { useTimeline: () => idleTimelineMock() };
+});
+
+vi.mock("@/features/chat/useTyping", () => ({
+  useTypingReceive: () => undefined,
+}));
+
+vi.mock("@/features/directory/memberProfileContext", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/features/directory/memberProfileContext")
+  >()),
+  useOpenMemberProfile: () => () => undefined,
+}));
+
+vi.mock("@/features/channels/useAddChannelMember", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/features/channels/useAddChannelMember")
+  >()),
+  useOpenAddChannelMember: () => () => undefined,
+}));
+
+vi.mock("@/features/agents/workLogStore", () => ({
+  useWorkPanelTarget: () => null,
+}));
+
+vi.mock("@/app/SidebarDrawerToggle", () => ({
+  SidebarDrawerToggle: () => null,
+}));
+
+vi.mock("@/features/chat/Composer", () => ({
+  Composer: () => null,
+}));
+
+vi.mock("@/features/hostedAgents/FirstMentionOnboarding", () => ({
+  FirstMentionOnboarding: () => null,
+}));
+
+vi.mock("@/features/huddles/HuddleHeaderControl", () => ({
+  HuddleHeaderState: ({
+    children,
+  }: {
+    children: (huddle: null) => ReactElement;
+  }) => children(null),
+  HuddleHeaderControl: () => null,
+  HuddleHeaderBanner: () => null,
+}));
+
+vi.mock("@/features/timeline/PinListMenu", () => ({
+  PinListMenu: () => null,
+}));
+
+vi.mock("@/features/chat/ChannelHeaderMenu", () => ({
+  ChannelHeaderMenu: () => null,
+}));
+
+vi.mock("@/features/timeline/LongPressHint", () => ({
+  LongPressHint: () => null,
+}));
+
+vi.mock("@/features/work/WorkPanel", () => ({
+  WorkPanel: () => null,
+}));
+
+vi.mock("@/features/work/TerminalDock", () => ({
+  TerminalDock: () => createElement("div", { "data-testid": "observer-dock-stub" }),
+}));
+
+// #2774: 데스크탑 셸이면 헤더 터미널 버튼이 로컬 도크를 연다.
+const shell = { desktop: false };
+vi.mock("@/lib/tauri", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tauri")>()),
+  isDesktop: () => shell.desktop,
+}));
+
+vi.mock("@/features/timeline/ThreadPanel", () => ({
+  ThreadPanel: () => null,
+}));
 
 const workFlag = { provided: false };
 
@@ -153,6 +276,7 @@ const ENTRY_TEST_IDS = [
   "switcher-work-console",
   "switcher-workstreams",
   "settings-nav-code",
+  "open-terminal-dock",
 ] as const;
 
 const engine: Channel = {
@@ -309,7 +433,8 @@ async function mount(): Promise<HTMLElement> {
               open: true,
               onOpenChange: () => undefined,
             }),
-            createElement(SettingsRoute)
+            createElement(SettingsRoute),
+            createElement(ChatShell)
           )
         )
       )
@@ -322,6 +447,11 @@ async function mount(): Promise<HTMLElement> {
   await vi.waitFor(() => {
     expect(host.querySelector('[data-testid="nav-directory"]')).not.toBeNull();
     expect(host.querySelector('[data-testid="settings-route"]')).not.toBeNull();
+    // The header group renders whether or not the dock button is in it, so
+    // waiting on it cannot mask a missing button.
+    expect(
+      host.querySelector('[data-testid="channel-header-controls"]')
+    ).not.toBeNull();
   });
   return host;
 }
@@ -356,6 +486,8 @@ beforeAll(() => {
 
 beforeEach(() => {
   workFlag.provided = false;
+  shell.desktop = false;
+  resetDockStateForTest();
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: false,
     media: query,
@@ -387,14 +519,14 @@ describe("work 표면 진입점 (#2166)", () => {
     ]);
   });
 
-  it("provided:false 이면 사이드바·QuickSwitcher·설정 진입점이 0이다", async () => {
+  it("provided:false 이면 사이드바·QuickSwitcher·설정·채널 헤더 도크 진입점이 0이다", async () => {
     workFlag.provided = false;
     const host = await mount();
     expect(host.querySelector('[data-testid="settings-route"]')).not.toBeNull();
     expect(countWorkEntries()).toBe(0);
   });
 
-  it("provided:true 이면 같은 다섯 진입점이 복귀한다", async () => {
+  it("provided:true 이면 같은 여섯 진입점이 복귀한다", async () => {
     workFlag.provided = true;
     const host = await mount();
     expect(host.querySelector('[data-testid="settings-route"]')).not.toBeNull();
@@ -410,7 +542,52 @@ describe("work 표면 진입점 (#2166)", () => {
       "switcher-work-console": 1,
       "switcher-workstreams": 1,
       "settings-nav-code": 1,
+      "open-terminal-dock": 1,
     });
-    expect(countWorkEntries()).toBe(5);
+    expect(countWorkEntries()).toBe(6);
+  });
+});
+
+describe("로컬 터미널 진입점 (#2774)", () => {
+  it("브라우저(데스크탑 아님)이고 작업 표면이 없으면 헤더에 터미널 버튼이 없다", async () => {
+    shell.desktop = false;
+    workFlag.provided = false;
+    const host = await mount();
+    expect(host.querySelectorAll('[data-testid="open-terminal-dock"]').length).toBe(0);
+  });
+
+  it("데스크탑이면 작업 표면이 없어도 버튼이 서고, 누르면 로컬 도크를 연다(관전 도크가 아니다)", async () => {
+    shell.desktop = true;
+    workFlag.provided = false;
+    const host = await mount();
+    const button = host.querySelector<HTMLButtonElement>('[data-testid="open-terminal-dock"]');
+    expect(button).not.toBeNull();
+    expect(button?.getAttribute("aria-keyshortcuts")).toBe("Control+`");
+    act(() => button?.click());
+    expect(dockSnapshot().open).toBe(true);
+    expect(button?.getAttribute("aria-pressed")).toBe("true");
+    expect(host.querySelector('[data-testid="observer-dock-stub"]')).toBeNull();
+  });
+
+  it("데스크탑에서는 작업 표면이 있어도 헤더가 관전 도크를 열지 않는다(로컬 도크가 대체)", async () => {
+    shell.desktop = true;
+    workFlag.provided = true;
+    const host = await mount();
+    act(() =>
+      host.querySelector<HTMLButtonElement>('[data-testid="open-terminal-dock"]')?.click()
+    );
+    expect(dockSnapshot().open).toBe(true);
+    expect(host.querySelector('[data-testid="observer-dock-stub"]')).toBeNull();
+  });
+
+  it("브라우저에서 작업 표면이 있으면 지금까지대로 관전 도크를 연다", async () => {
+    shell.desktop = false;
+    workFlag.provided = true;
+    const host = await mount();
+    act(() =>
+      host.querySelector<HTMLButtonElement>('[data-testid="open-terminal-dock"]')?.click()
+    );
+    expect(dockSnapshot().open).toBe(false);
+    expect(host.querySelector('[data-testid="observer-dock-stub"]')).not.toBeNull();
   });
 });

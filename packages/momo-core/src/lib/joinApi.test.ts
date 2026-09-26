@@ -99,3 +99,37 @@ describe("joinWithInvite createdMember", () => {
     ).rejects.toBeInstanceOf(WireShapeError);
   });
 });
+
+describe("joinWithInvite displayName (ADR-0193 D7 초대 1화면, #2819)", () => {
+  function captureBody(): { bodies: Array<Record<string, unknown>> } {
+    const bodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(JSON.stringify({ ...LOGIN_WIRE, createdMember: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      })
+    );
+    return { bodies };
+  }
+
+  it("sends the name the person typed, trimmed", async () => {
+    installHost();
+    const { bodies } = captureBody();
+    await joinWithInvite("Ab3-_x", "seongjae@dawn.example", "new-pass", "  지민 ");
+    expect(bodies[0]?.displayName).toBe("지민");
+    // The handle still comes from the email: the name is not an identifier.
+    expect(bodies[0]?.handle).toBe("seongjae");
+  });
+
+  it("falls back to the email derivation when the name is blank or absent", async () => {
+    installHost();
+    const { bodies } = captureBody();
+    await joinWithInvite("Ab3-_x", "jimin.kim@dawn.example", "new-pass", "   ");
+    await joinWithInvite("Ab3-_x", "jimin.kim@dawn.example", "new-pass");
+    expect(bodies.map((b) => b.displayName)).toEqual(["Jimin Kim", "Jimin Kim"]);
+  });
+});

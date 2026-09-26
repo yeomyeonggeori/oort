@@ -917,14 +917,19 @@ function browserTimeZone(): string | undefined {
 
 /**
  * Redeem an invite code and land in the workspace it belongs to. The person
- * supplies only an email and a password: display name and handle are derived
- * from the email exactly as the mac chooser derives them, so the same person
- * joining from either client gets the same identity.
+ * supplies an email and a password: the handle is derived from the email
+ * exactly as the mac chooser derives it, so the same person joining from either
+ * client gets the same identity.
+ *
+ * `displayName` is the name the invite screen asks for (「팀에서 보일 이름」,
+ * ADR-0193 D7 초대 1화면). Blank or absent falls back to the email derivation,
+ * because the server rejects an empty `displayName`.
  */
 export async function joinWithInvite(
   code: string,
   email: string,
-  password: string
+  password: string,
+  displayName?: string
 ): Promise<JoinResponse> {
   // Normalised rather than merely trimmed, and the derivations read the same
   // value: the row this creates will hold `lower(btrim(...))`, so deriving the
@@ -938,7 +943,10 @@ export async function joinWithInvite(
       body: JSON.stringify({
         code: code.trim(),
         email: normalizedEmail,
-        displayName: displayNameFromEmail(normalizedEmail),
+        displayName:
+          displayName !== undefined && displayName.trim() !== ""
+            ? displayName.trim()
+            : displayNameFromEmail(normalizedEmail),
         handle: handleFromEmail(normalizedEmail),
         password,
         timeZone: browserTimeZone(),

@@ -10,11 +10,6 @@ import {
 } from "@/lib/realtime";
 import { startUpdateWatch } from "@/features/updates/store";
 import { ConnectPage } from "@/features/auth/ConnectPage";
-import { PhoneLinkFirstRun } from "@/features/auth/PhoneLinkFirstRun";
-import {
-  dismissPhoneLinkFirstRun,
-  phoneLinkFirstRunIsPending,
-} from "@/features/auth/phoneLinkFirstRunStore";
 import { ClaimPage } from "@/features/auth/ClaimPage";
 import { isClaimPath } from "@/features/auth/claimPath";
 import { OwnerOnboarding } from "@/features/onboarding/OwnerOnboarding";
@@ -62,17 +57,53 @@ const DesignGalleryPage = DESIGN_GALLERY_ENABLED
   ? lazy(() => import("@/design/Gallery").then((mod) => ({ default: mod.Gallery })))
   : null;
 
+// 작업 공간 격자 하네스(#2773). 갤러리와 같은 문(design 모드)으로만 열린다.
+const WorkbenchHarnessPage = DESIGN_GALLERY_ENABLED
+  ? lazy(() =>
+      import("@/features/workbench/WorkbenchHarness").then((mod) => ({
+        default: mod.WorkbenchHarness,
+      }))
+    )
+  : null;
+
+// 로컬 터미널 도크 하네스(#2774). 같은 문(design 모드)으로만 열린다.
+const LocalTerminalHarnessPage = DESIGN_GALLERY_ENABLED
+  ? lazy(() =>
+      import("@/features/workbench/local/LocalTerminalHarness").then((mod) => ({
+        default: mod.LocalTerminalHarness,
+      }))
+    )
+  : null;
+
 function DesignGalleryRoute() {
-  if (!DesignGalleryPage) return null;
+  if (!DesignGalleryPage || !WorkbenchHarnessPage || !LocalTerminalHarnessPage) return null;
   return (
-    <Route
-      path="design"
-      element={
-        <Suspense fallback={<Skeleton ready={false} rows={4} className="p-6" />}>
-          <DesignGalleryPage />
-        </Suspense>
-      }
-    />
+    <>
+      <Route
+        path="design"
+        element={
+          <Suspense fallback={<Skeleton ready={false} rows={4} className="p-6" />}>
+            <DesignGalleryPage />
+          </Suspense>
+        }
+      />
+      <Route
+        path="design/workbench"
+        element={
+          <Suspense fallback={<Skeleton ready={false} rows={4} className="p-6" />}>
+            <WorkbenchHarnessPage />
+          </Suspense>
+        }
+      />
+      <Route
+        path="design/local-terminal"
+        element={
+          <Suspense fallback={<Skeleton ready={false} rows={4} className="p-6" />}>
+            <LocalTerminalHarnessPage />
+          </Suspense>
+        }
+      />
+    </>
   );
 }
 
@@ -133,7 +164,6 @@ export function App() {
   const firstRun = session
     ? decideFirstRunForSession({
         workspaceId: session.member.workspaceId,
-        phonePending: phoneLinkFirstRunIsPending(),
       })
     : null;
 
@@ -203,7 +233,8 @@ export function App() {
   }
 
   // ADR-0181 kickoff lives in the welcome channel, so a fresh signup holds the
-  // app open first. Then first-agent (#2216), then phone (ADR-0180 D7).
+  // app open first. Then first-agent (#2216). The phone link is not a stage:
+  // it is a card in the first-conversation channel (#2818, ADR-0193 D7).
   const bumpFirstRun = () => setFirstRunTick((n) => n + 1);
 
   if (ownerOnboardingShouldMount()) {
@@ -227,17 +258,6 @@ export function App() {
       >
         <FirstAgentStage onContinue={bumpFirstRun} />
       </FirstRunSession>
-    );
-  }
-
-  if (firstRun === "phone-link") {
-    return (
-      <PhoneLinkFirstRun
-        onEnterApp={() => {
-          dismissPhoneLinkFirstRun();
-          bumpFirstRun();
-        }}
-      />
     );
   }
 

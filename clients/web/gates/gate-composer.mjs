@@ -992,7 +992,23 @@ async function exerciseTimeline(browser) {
   const unreadRule = await unread
     .locator("[data-divider-rule]")
     .evaluate((node) => getComputedStyle(node).backgroundColor);
+  // 날짜 구분선은 목록의 **첫 행**이다. 타임라인은 가상 리스트라(gate:shell이
+  // 1k 행 가상화를 잰다) 창 + overscan 밖의 행은 DOM에 없다. 이 판의 행이 그
+  // 높이를 넘은 뒤로(#2741 실측: scrollTop 802 = 바닥, 첫 행 index 미마운트)
+  // 바닥에 선 채로는 구분선이 존재하지 않으므로, 맨 위로 올려 **마운트시킨 뒤**
+  // 잰다. 존재 요구는 그대로다: 구분선이 사라지면 아래 waitFor 가 멈춘다.
+  // 더 이전 페이지(`before=`)는 이 판의 픽스처가 빈 목록으로 답하므로 행이 늘지
+  // 않는다. 잰 뒤에는 바닥으로 돌아간다 — 7의 복구 표지는 최신 쪽에 선다.
+  const scroller = page.locator('[data-testid="timeline-virtuoso"]');
+  await scroller.evaluate((node) => {
+    node.scrollTop = 0;
+  });
+  await day.waitFor({ timeout: 10_000 });
   const dayLabel = await colorOf(day);
+  await scroller.evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+  await wait(300);
   const agentInk = await page
     .locator(".text-agent")
     .first()
@@ -1265,6 +1281,14 @@ async function exerciseEmptyFirstAction(browser) {
       fill: getComputedStyle(node).backgroundColor,
       borderWidth: Number.parseFloat(getComputedStyle(node).borderTopWidth),
       borderStyle: getComputedStyle(node).borderTopStyle,
+      // 버튼 뒤에 실제로 칠해진 면: 투명하지 않은 첫 조상의 배경.
+      backdrop: (() => {
+        for (let el = node.parentElement; el; el = el.parentElement) {
+          const bg = getComputedStyle(el).backgroundColor;
+          if (bg !== "transparent" && !/,\s*0\)$/.test(bg)) return bg;
+        }
+        return null;
+      })(),
     }))
   );
   console.log(
@@ -1303,8 +1327,14 @@ async function exerciseEmptyFirstAction(browser) {
   }
 
   // 위계는 값이 아니라 **관계**다 (디자인 시스템 §3). 주 액션의 채움은 이 창이
-  // 이미 accent 채움을 주는 컨트롤 — 컴포저의 보내기 — 과 같아야 하고, 보조는 그
-  // 채움을 입지 않은 채 자기 윤곽으로 선다.
+  // 이미 주 채움을 주는 컨트롤 — 컴포저의 보내기 — 과 같아야 하고, 보조는 그
+  // 채움을 입지 않은 채 **자기 채움**으로 선다.
+  //
+  // #2741: 보조는 전에 「자기 윤곽」으로 섰다. ADR-0189 D6(Accepted, DS2-1 #2738)이
+  // 그 규칙을 바꿨다 — 버튼의 기본은 채움 알약이고 `--line-strong` 테두리는 텍스트
+  // 입력 그릇에만 남는다(button.tsx `outline` = `secondary` = surface-muted 채움).
+  // 그래서 이 판은 「윤곽이 있는가」 대신 「채움이 뒤의 면과 갈리는가」를 잰다.
+  // 지키려는 것은 같다: 채움도 윤곽도 없으면 그것은 물러선 것이 아니라 사라진 것이다.
   const sendFill = await page
     .getByTestId("composer-send")
     .evaluate((node) => getComputedStyle(node).backgroundColor);
@@ -1319,10 +1349,24 @@ async function exerciseEmptyFirstAction(browser) {
         "「둘 중 아무거나」라고 말하는 것이고, 그것은 첫 행동을 묻는 사람에게 답이 아니다"
     );
   }
-  if (second.borderStyle === "none" || !(second.borderWidth >= 1)) {
+  const transparentFill =
+    second.fill === "transparent" || /,\s*0\)$/.test(second.fill);
+  console.log(
+    `[empty] 보조 채움 ${second.fill} · 뒤 면 ${second.backdrop} · ` +
+      `테두리 ${second.borderStyle} ${second.borderWidth}px`
+  );
+  if (transparentFill || second.fill === second.backdrop) {
     throw new Error(
-      `보조 액션에 윤곽이 없다(${second.borderStyle} ${second.borderWidth}px): ` +
-        "채움도 윤곽도 없으면 그것은 물러선 것이 아니라 사라진 것이다"
+      `보조 액션에 자기 채움이 없다(채움 ${second.fill} · 뒤 면 ${second.backdrop}): ` +
+        "채움도 윤곽도 없으면 그것은 물러선 것이 아니라 사라진 것이다 (ADR-0189 D6: " +
+        "버튼은 채움 알약)"
+    );
+  }
+  if (second.borderStyle !== "none" && second.borderWidth >= 1) {
+    throw new Error(
+      `보조 액션이 테두리(${second.borderStyle} ${second.borderWidth}px)를 들고 있다: ` +
+        "ADR-0189 D6에서 테두리는 텍스트 입력 그릇의 문법이다. 버튼에 두르면 " +
+        "입력칸처럼 읽힌다"
     );
   }
 

@@ -34,7 +34,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
-import { openWorkPanelViaConsole } from "./work-openers.mjs";
+import { openWorkPanelByAddress } from "./work-openers.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 import {
   buildExactSourceBeforePreview,
@@ -726,8 +726,21 @@ async function assertDesktopSidebarFocusMode(page, size) {
   // Open and widen FIRST, then mark both the panel root and a stable child.
   // A remount can reproduce text and geometry but cannot reproduce these
   // runtime-only markers, so their survival proves the same subtree remained.
-  // TC-1 (#1758): 헤더는 도크다. WorkPanel 은 작업 콘솔 경유.
-  await openWorkPanelViaConsole(page, { allowHashFallback: true });
+  // TC-1 (#1758): 헤더는 도크다. WorkPanel 의 제품 입구는 사이드바 「작업 콘솔」인데,
+  // 이 게이트가 빌드하는 프로덕션 번들은 그 입구를 접는다(#2166 — 셀프호스트는
+  // workd/T3 를 싣지 않는다). 그래서 #2741 부터 (1) 입구가 **접혀 있음**을 단정하고
+  // (2) 제품이 여전히 받는 주소 `?work-panel=1` 로 같은 패널을 연다. 전에는 입구를
+  // 누르고 빈 콘솔에서 해시로 넘어갔으므로 이 레인이 재는 것(셸 두 번째 트랙의
+  // 폭·정체성)은 그대로다. 게이트 모드(`work-console-gate`)로 입구를 되살리지 않는
+  // 이유: 이 게이트의 목 서버는 작업 세션 경로를 답하지 않고, 입구 행이 하나 더
+  // 선 사이드바는 배포되는 셸이 아니다.
+  const consoleEntries = await page.getByTestId("nav-work-console").count();
+  check(
+    `${size.name} 프로덕션 빌드는 작업 콘솔 입구를 접는다 (#2166)`,
+    consoleEntries === 0,
+    JSON.stringify({ consoleEntries })
+  );
+  await openWorkPanelByAddress(page, GENERAL_ID);
   const workPanel = page.getByTestId("work-panel");
   await workPanel.waitFor({ state: "visible" });
   if (size.width >= 900) {
@@ -1437,7 +1450,6 @@ async function measureSize(browser, size) {
     ["/settings?section=account", "설정 계정", "settings-account"],
     ["/settings?section=members", "설정 멤버와 초대", "settings-members"],
     ["/settings?section=ai", "설정 AI 연결", "settings-ai"],
-    ["/settings?section=code", "설정 코드 실행 호스트", "settings-code"],
     ["/settings?section=workspace", "설정 워크스페이스", "settings-workspace"],
     ["/settings?section=usage", "설정 사용량", "settings-usage"],
     ["/settings?section=webhooks", "설정 웹훅", "settings-webhooks"],
@@ -1447,21 +1459,43 @@ async function measureSize(browser, size) {
     await assertShellHeld(page, `${size.name} ${label}`, `${size.name}-${shot}`);
   }
 
+  // 코드 실행 호스트(`section=code`)는 `work` 표면을 서버가 실었을 때만 선다
+  // (#2166 · #2540 `reachableSettingsSections`). 이 게이트가 빌드하는 프로덕션
+  // 번들에서는 목록에 없고, `?section=code` 는 조용히 프로필로 접힌다. #2741 전의
+  // 이 판은 그 주소를 「코드 실행 호스트」라는 이름으로 재고 있었는데, 실제로 잰
+  // 것은 프로필이었다(셸 유지 검사는 통과, 바닥 도달 검사는 `missing`). 이제는
+  // 접혀 있다는 사실 자체를 단정한다: 설정 목록에 행이 없고, 그 주소로 가도 호스트
+  // 섹션이 서지 않는다. 표면이 실리는 날 이 단정이 먼저 빨개지고, 그때 이 섹션을
+  // 셸 유지·바닥 도달 목록에 되돌린다(WORK_HOSTS 픽스처는 그날을 위해 남긴다).
+  await go(page, "/settings?section=code");
+  const codeFold = await page.evaluate(`(() => ({
+    settingsSurface: document.querySelector(".app-shell")?.hasAttribute("data-settings-surface") === true,
+    navRow: Boolean(document.querySelector('[data-testid="settings-nav-code"]')),
+    hostSection: Boolean(document.querySelector('[data-testid="work-tier-save-workspace"], [data-testid="work-hosts-refresh"]')),
+  }))()`);
+  check(
+    `${size.name} 프로덕션 빌드는 설정 코드 실행 호스트를 접는다 (#2166)`,
+    codeFold.settingsSurface === true &&
+      codeFold.navRow === false &&
+      codeFold.hostSection === false,
+    JSON.stringify(codeFold)
+  );
+
   await assertPluginScopeConsent(page, size);
 
   // Clipping without scrolling would be the worse bug: the settings body pane
   // must still reach its last control, and doing so must not move the shell.
-  // Four sections are asked, because they overflow for different reasons: 멤버와
-  // 초대 by row count, 코드 실행 호스트 (MOMO-617) by carrying three blocks, and
-  // 웹훅·이벤트 구독 (#1202) for the two reasons written beside them below.
+  // Three sections are asked, because they overflow for different reasons: 멤버와
+  // 초대 by row count, and 웹훅·이벤트 구독 (#1202) for the two reasons written
+  // beside them below.
   //
-  // The code section's last control is the workspace-scope SAVE button, not the
-  // target select above it: since R2 both policy scopes commit explicitly, and
-  // a fold check that stops one control short is a fold check that passes while
-  // the button nobody can reach is the one that writes the ledger.
+  // 코드 실행 호스트 (MOMO-617) used to be the fourth: it overflows by carrying
+  // three blocks, and its last control is the workspace-scope SAVE button
+  // (`work-tier-save-workspace`), not the target select above it. The production
+  // build folds that section (#2166, asserted above), so it cannot be reached
+  // here; put it back with that selector when the `work` surface ships.
   for (const [hash, label, shot, selector] of [
     ["/settings?section=members", "멤버와 초대", "settings-bottom", "invite-create"],
-    ["/settings?section=code", "코드 실행 호스트", "settings-code-bottom", "work-tier-save-workspace"],
     // 웹훅(#1202)이 셋째인 이유는 또 다른 방식으로 넘치기 때문이다: 목록 위에
     // 발급 카드가 끼어들 수 있고, 그 아래로 폼 전체와 참고 자료 disclosure 가
     // 이어진다.
@@ -1702,7 +1736,7 @@ async function measureSidebarDrawerIndependence(browser) {
   await page.reload({ waitUntil: "networkidle" });
   await waitForPageCondition(
     page,
-    'document.querySelector(\'[data-testid="channel-list"]\') || document.querySelector(\'[data-testid="onboarding-landing"]\') || document.querySelector(\'[data-testid="onboarding-gateway"]\') || document.querySelector(\'[data-testid="onboarding-account"]\')'
+    'document.querySelector(\'[data-testid="channel-list"]\') || document.querySelector(\'[data-testid="onboarding-welcome"]\') || document.querySelector(\'[data-testid="onboarding-sign-in"]\') || document.querySelector(\'[data-testid="onboarding-join"]\')'
   );
   if (await page.getByTestId("channel-list").isVisible().catch(() => false)) {
     await page.getByTestId("channel-list").waitFor({ state: "visible" });
@@ -1794,17 +1828,18 @@ async function measureConnect(browser) {
   await installMocks(context);
   const page = await context.newPage();
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
-  const landingChoice = page.getByTestId("onboarding-choose-server");
+  // D0(#2808)의 행동은 [계속] 하나다. 짧은 창에서도 스크롤해 닿아야 한다.
+  const landingChoice = page.getByTestId("connect-entry-submit");
   await landingChoice.waitFor({ state: "visible" });
   await landingChoice.scrollIntoViewIfNeeded();
   await page.waitForTimeout(150);
   const landingReach = await page.evaluate(`(() => {
-    const r = document.querySelector('[data-testid="onboarding-choose-server"]').getBoundingClientRect();
+    const r = document.querySelector('[data-testid="connect-entry-submit"]').getBoundingClientRect();
     return { top: Math.round(r.top), bottom: Math.round(r.bottom),
              viewportHeight: window.innerHeight,
              reached: r.top >= 0 && r.bottom <= window.innerHeight };
   })()`);
-  check("연결 화면 짧은 창에서 S0 선택 도달", landingReach.reached === true, JSON.stringify(landingReach));
+  check("연결 화면 짧은 창에서 D0 계속 도달", landingReach.reached === true, JSON.stringify(landingReach));
   await page.screenshot({ path: `${OUT_DIR}/connect-landing-short-window.png` });
   await advanceToAccount(page);
   const submit = page.getByTestId("login-submit");

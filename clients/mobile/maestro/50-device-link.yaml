@@ -7,7 +7,7 @@ name: 50-device-link
 #
 # DEVICE_LINK is a full `oort://link?server=…&token=…` URL. The scanner is
 # bypassed on purpose: a simulator has no QR to point at. Production paths are
-# ConnectScreen 「QR로 연결」(expo-camera) and the OS camera app opening the same
+# ConnectScreen M0 「QR 찍기」(expo-camera) and the OS camera app opening the same
 # URL (ADR-0180 D2). This flow injects the deep link after Metro is attached.
 #
 # Debug Metro limitation (same as 00-login): a COLD openLink relaunches without
@@ -26,12 +26,11 @@ name: 50-device-link
 
 - extendedWaitUntil:
     visible:
-      id: "server-url-input"
+      id: "qr-connect-button"
     timeout: 180000
 
-- assertVisible: "oort에 연결"
-- assertVisible:
-    id: "qr-connect-button"
+# M0 환영 (#2819): the QR is the lead of the first screen.
+- assertVisible: "데스크탑의 QR을 찍어 연결해요."
 
 # Scanner bypass: inject the voucher URL. Do not type the token into a field.
 - openLink: ${DEVICE_LINK}

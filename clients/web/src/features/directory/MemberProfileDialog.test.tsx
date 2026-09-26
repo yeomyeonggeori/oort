@@ -152,6 +152,7 @@ function workspace(labels: RoleLabels): WorkspaceIdentity {
     roleLabels: labels,
     welcomeAgentMemberId: null,
     welcomePrompt: "",
+    subscriptionAgentsEnabled: false,
   };
 }
 

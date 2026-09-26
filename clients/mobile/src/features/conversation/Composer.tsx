@@ -16,6 +16,7 @@ import {attachParticle, type RecipientKind} from '@momo/core/lib/koreanParticle'
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -28,8 +29,11 @@ import {
   type TextInputSelectionChangeEventData,
   type TextLayoutEventData,
 } from 'react-native';
-import {font, line, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, line, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {usePalette, useStyles} from '../../design/theme';
+import {GlassSurface} from '../../design/glass';
+import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
+import {CONV} from './convDesign';
 import {clearDraft, readDraft, saveDraft} from './drafts';
 import {
   applyMention,
@@ -257,9 +261,17 @@ const INPUT_PAD_Y = space.sm;
  * 입력창 좌우 패딩 한쪽. 위와 짝이고, 이름을 갖는 이유가 하나 더 있다 — 절 예산의
  * 프로브가 **글이 놓이는 가로**를 이 값으로 도출한다(#1479).
  */
-const INPUT_PAD_X = space.md;
+//
+// 알약 컴포저(DS2-4)에서 12 → 8. 입력창이 이제 따로 선 상자가 아니라 알약 안의
+// 글자 자리라, 글이 + 원 바로 옆에서 시작한다(Buzz 실측: 알약 가장자리에서
+// ≈49pt, 이 값으로 4 + 34 + 8 + 1 = 47).
+const INPUT_PAD_X = space.sm;
 
-/** 입력창 테두리 두께. 위와 같은 이유로 이름을 갖는다. */
+/**
+ * 입력창 테두리 두께. 위와 같은 이유로 이름을 갖는다. 알약 안에서는 **투명**이다
+ * (DS2-4) — 두께를 남기는 이유는 상한 산수(`INPUT_CHROME`)와 줄 상자 정렬을 옛
+ * 판과 같게 두기 위해서이고, 선이 보이면 알약 안에 상자가 하나 더 선다.
+ */
 const INPUT_BORDER = 1;
 
 /**
@@ -530,7 +542,11 @@ export function composerColumnBudget(
  * 상수로 이름을 갖는 이유는 `INPUT_CHROME` 과 같다: 산수와 실제 스타일이 같은 값을
  * 읽어야 하고, 사본을 두면 사본이 거짓말한다(디자인 시스템 §5.5).
  */
-const DOCK_CHROME = space.sm * 2;
+const DOCK_CHROME = CONV.composerPad * 2 + space.sm;
+
+/** 알약 안 두 원(34·38)을 엄지 44 로 만드는 여유 — 도출한다(감사 M-14). */
+const ATTACH_SLOP = slopTo(CONV.composerTool);
+const SEND_SLOP = slopTo(CONV.composerSend);
 
 /** 시트가 담는 후보 수. 위 절이 이 넷을 고른 이유를 든다. */
 const MENTION_MAX_ROWS = 4;
@@ -1302,6 +1318,13 @@ export function Composer({
         </View>
       )}
 
+      {/* 떠 있는 알약 하나 (DS2-4 #2716, owner 표 + 시안 A `.a-comp`): 안쪽 왼쪽 +
+          원 · 입력 · 오른쪽 잉크 ↑ 원. 옛 판은 네모 [+] · 두 줄 상자 · 글자 버튼
+          「보내기」가 따로 놀았다. 알약 밖 도크는 투명이라 바닥이 비친다. */}
+      <GlassSurface
+        radius={CONV.composerRadius}
+        style={styles.pill}
+        testID="composer-pill">
       <View style={styles.bar}>
         {stableAttachmentTarget === null ? null : (
           <Pressable
@@ -1317,6 +1340,7 @@ export function Composer({
             }
             accessibilityState={{disabled: !canAttach}}
             disabled={!canAttach}
+            hitSlop={ATTACH_SLOP}
             onPress={() => setAttachmentPickerOpen(true)}
             style={({pressed}) => [
               styles.attach,
@@ -1324,13 +1348,13 @@ export function Composer({
               pressed && canAttach && styles.pressed,
             ]}
             testID="composer-attach">
-            <Text
+            <Image
+              source={CONV_ICONS.plus}
               style={[
-                styles.attachLabel,
-                !canAttach && styles.attachLabelDisabled,
-              ]}>
-              ＋
-            </Text>
+                styles.attachGlyph,
+                {tintColor: canAttach ? palette.text : palette.textFaint},
+              ]}
+            />
           </Pressable>
         )}
         <TextInput
@@ -1349,7 +1373,9 @@ export function Composer({
           // 답한다 — 그 분업과 그것이 구하지 못하는 띠는 이 파일의 「절 예산」
           // 머리말에 있다.
           placeholder={shownPlaceholder}
-          placeholderTextColor={palette.textFaint}
+          // 자리 글자가 이제 「@로 부르기」를 알리는 유일한 문장이다 — 시안의 @ 도구
+          // 버튼을 뺐으므로(DS2-4 검수 M-4). `textFaint` 는 알약 위 3.6~3.8:1 이었다.
+          placeholderTextColor={palette.textMuted}
           accessibilityLabel={placeholder ?? composerFieldLabel(channelLabel, recipient)}
           multiline
           // 이 상자에서 한국어가 **낱말 가운데서** 끊기지 않는다 (#1422 폰 몫).
@@ -1420,6 +1446,7 @@ export function Composer({
           }
           accessibilityState={{disabled: !canSend}}
           disabled={!canSend}
+          hitSlop={SEND_SLOP}
           onPress={submit}
           style={({pressed}) => [
             styles.send,
@@ -1427,11 +1454,18 @@ export function Composer({
             pressed && canSend && styles.sendPressed,
           ]}
           testID="composer-send">
-          <Text style={[styles.sendLabel, !canSend && styles.sendLabelDisabled]}>
-            {sendLabel}
-          </Text>
+          {/* 시안 `.a-send` — 잉크 원 안의 ↑. 이름(「보내기」·「답글 보내기」)은
+              보이는 글자에서 낭독 라벨로만 옮겼다 — owner 표 「오른쪽 원형 ↑」. */}
+          <Image
+            source={CONV_ICONS.up}
+            style={[
+              styles.sendGlyph,
+              {tintColor: canSend ? palette.onPrimary : palette.textFaint},
+            ]}
+          />
         </Pressable>
       </View>
+      </GlassSurface>
       <AttachmentPickerSheet
         visible={attachmentPickerOpen}
         onClose={() => setAttachmentPickerOpen(false)}
@@ -1444,31 +1478,44 @@ export function Composer({
 }
 
 const buildStyles = (color: Palette) => StyleSheet.create({
-  root: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: color.border,
-    backgroundColor: color.bg,
+  /**
+   * 도크. 선도 바닥색도 없다 — 알약이 바닥 위에 뜬다(시안 `.a-comp`). 위 여백과
+   * 알약 안 위아래 여백의 합이 `DOCK_CHROME` 이다(시트 상한 산수가 읽는 그 수).
+   */
+  root: {paddingTop: space.sm},
+  /**
+   * 시안 `.a-comp{left:12px;right:12px;border-radius:26px;border:1px solid
+   * var(--glassLine);box-shadow:var(--sh2)}`. 유리와 틴트는 `GlassSurface` 가 진다.
+   */
+  pill: {
+    marginHorizontal: CONV.composerInset,
+    borderRadius: CONV.composerRadius,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.glassLine,
+    boxShadow: color.elevationFloat,
   },
   bar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: space.sm,
-    paddingHorizontal: SAFE_GUTTER,
-    paddingVertical: space.sm,
+    padding: CONV.composerPad,
   },
+  /**
+   * 시안 `.tools button{width:34px;height:34px;border-radius:50%}` — 안쪽 왼쪽 +
+   * 원. 44 는 `hitSlop` 이 진다. 한 줄 입력창(44) 가운데에 앉는다.
+   */
   attach: {
-    width: TOUCH_TARGET,
-    height: TOUCH_TARGET,
-    borderRadius: radius.md,
+    width: CONV.composerTool,
+    height: CONV.composerTool,
+    marginBottom: (TOUCH_TARGET - CONV.composerTool) / 2,
+    borderRadius: CONV.composerTool / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: color.border,
     backgroundColor: color.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.border,
   },
-  attachDisabled: {backgroundColor: color.bg},
-  attachLabel: {fontSize: font.title, color: color.text},
-  attachLabelDisabled: {color: color.textFaint},
+  attachDisabled: {backgroundColor: color.surfaceMuted},
+  attachGlyph: {width: CONV_ICON_SIZE.plus, height: CONV_ICON_SIZE.plus},
   input: {
     flex: 1,
     // 한 줄일 때도 엄지가 닿는 크기. 도출된 한 줄 상자(22 + 8·8 + 1·1 = 40)보다
@@ -1484,10 +1531,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     paddingHorizontal: INPUT_PAD_X,
     paddingTop: INPUT_PAD_Y,
     paddingBottom: INPUT_PAD_Y,
-    borderRadius: radius.md,
     borderWidth: INPUT_BORDER,
-    borderColor: color.border,
-    backgroundColor: color.surface,
+    borderColor: 'transparent',
     // 16 is where iOS stops zooming a focused field; anything smaller makes the
     // whole screen lurch the first time someone taps to type.
     fontSize: font.body,
@@ -1501,15 +1546,20 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     // 배수를 곱해야 같은 줄 수를 뜻한다. 그것이 #1443 이 고친 자리다.
     lineHeight: line.body,
   },
+  /**
+   * 시안 `.a-send{width:38px;height:38px;background:var(--primary)}` — 잉크 ↑ 원.
+   * 한 줄 입력창(44) 가운데에 앉고, 글이 자라면 마지막 줄 옆에 남는다.
+   */
   send: {
-    minHeight: TOUCH_TARGET,
-    minWidth: 64,
-    paddingHorizontal: space.md,
-    borderRadius: radius.md,
+    width: CONV.composerSend,
+    height: CONV.composerSend,
+    marginBottom: (TOUCH_TARGET - CONV.composerSend) / 2,
+    borderRadius: CONV.composerSend / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: color.accent,
+    backgroundColor: color.primary,
   },
+  sendGlyph: {width: CONV_ICON_SIZE.up, height: CONV_ICON_SIZE.up},
   /**
    * 프로브가 서는 자리 (#1479). **절대 배치**라 이 컴포넌트의 세로를 한 픽셀도
    * 안 밀고, 투명이라 안 보이며, `pointerEvents="none"` 이라 안 잡힌다. 높이를
@@ -1523,10 +1573,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 여기 없다.
    */
   probe: {fontSize: font.body, lineHeight: line.body},
-  sendDisabled: {backgroundColor: color.border},
-  sendPressed: {backgroundColor: color.accentPressed},
-  sendLabel: {color: color.onAccent, fontSize: font.label, fontWeight: '700'},
-  sendLabelDisabled: {color: color.textFaint},
+  /** 비었을 때. Buzz 의 흐린 원 — 잉크를 벗는다. */
+  sendDisabled: {backgroundColor: color.surfaceMuted},
+  sendPressed: {opacity: 0.8},
   /**
    * 후보 시트 (#1480). **`maxHeight` 는 여기 없다** — 글자 배수와 창 높이가
    * 정하므로 컴포넌트가 `mentionSheetMaxHeight` 로 계산해 붙인다(입력창이 같은

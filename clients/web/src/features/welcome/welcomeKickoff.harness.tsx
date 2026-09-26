@@ -1,4 +1,10 @@
-import { createElement, useEffect, useState, type ReactElement } from "react";
+import {
+  createElement,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+  type ReactElement,
+} from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -11,20 +17,25 @@ import { useTimeline } from "@/features/timeline/useTimeline";
 import type { RealtimeHandle } from "@/lib/realtime";
 import { markFreshSignup } from "./freshSignup";
 import {
-  useWelcomeKickoff,
-  welcomePlayEntrance,
-} from "./useWelcomeKickoff";
+  holdKickoffForFreshSignup,
+  peekKickoffSettled,
+  subscribeFirstRun,
+} from "./firstRunGate";
+import { shouldMountPhoneLinkCard } from "./phoneLinkCard";
+import { PhoneLinkChannelCard } from "./PhoneLinkChannelCard";
+import { markPhoneLinkCardPending } from "./phoneLinkCardStore";
+import { useWelcomeKickoff } from "./useWelcomeKickoff";
+import { WelcomeKickoffStage } from "./WelcomeKickoffStage";
 
 /**
- * UX-R2b Chromium probe. Not a product route. Mounts the shipped Timeline +
- * useTimeline + useWelcomeKickoff chain so exit→arrival timestamps come off
- * the product wiring, not a test that adds `enter-conversation` itself.
+ * UX-R2b / #2817 Chromium probe. Not a product route. Mounts the shipped
+ * Timeline + useTimeline + useWelcomeKickoff chain, and below it the same
+ * composition ChatShell has above the composer: the kickoff band, then the
+ * 「폰에서도」 card (#2818) behind `shouldMountPhoneLinkCard`. Timestamps come
+ * off the product wiring, not a test that adds classes itself.
  *
- * ChatShell wires arrival through `welcomePlayEntrance` (ChatShell.tsx next
- * to the Timeline `isPlayEntrance` binding). This harness mounts Timeline
- * directly — it cannot import ChatShell (Session + channel queries + shell
- * chrome). The shared helper is the same function ChatShell calls. A
- * ChatShell-only drop of that call is guarded by arrivalWiring.test.ts (S6b).
+ * It cannot import ChatShell (Session + channel queries + shell chrome); the
+ * ChatShell binding is guarded by arrivalWiring.test.ts.
  */
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -204,25 +215,45 @@ function WelcomeTimeline(): ReactElement {
     directory,
     realtime,
   });
-  const pinArrivalGrant = timeline.pinArrivalGrant;
-  useEffect(() => {
-    pinArrivalGrant(welcome.holdEntranceId);
-  }, [pinArrivalGrant, welcome.holdEntranceId]);
-  return createElement(Timeline, {
-    messages: timeline.state.messages,
-    directory,
-    status: timeline.status === "error" ? "error" : "ready",
-    reachedStart: true,
-    channelKind: "public",
-    channelName: "general",
-    isPlayEntrance: (id: string) =>
-      welcomePlayEntrance(welcome.holdEntranceId, id, timeline.isPlayEntrance),
-    onEntranceConsumed: timeline.consumeEntrance,
-    welcomePhase: welcome.phase,
-    welcomeReducedMotion: welcome.reducedMotion,
-    welcomeHoldWriteAction: welcome.holdWriteAction,
-    onWelcomeExitComplete: welcome.onExitComplete,
+  const kickoffSettled = useSyncExternalStore(
+    subscribeFirstRun,
+    peekKickoffSettled,
+    peekKickoffSettled
+  );
+  const phoneCard = shouldMountPhoneLinkCard({
+    channel: { kind: "public", name: "general" },
+    kickoffPhase: welcome.phase,
+    kickoffSettled,
   });
+  return createElement(
+    "div",
+    { className: "flex h-full flex-col" },
+    createElement(
+      "div",
+      { className: "relative min-h-0 flex-1" },
+      createElement(Timeline, {
+        messages: timeline.state.messages,
+        directory,
+        status: timeline.status === "error" ? "error" : "ready",
+        reachedStart: true,
+        channelKind: "public",
+        channelName: "general",
+        isPlayEntrance: timeline.isPlayEntrance,
+        onEntranceConsumed: timeline.consumeEntrance,
+        welcomePhase: welcome.phase,
+        welcomeHoldWriteAction: welcome.holdWriteAction,
+      })
+    ),
+    welcome.phase === "hidden"
+      ? null
+      : createElement(WelcomeKickoffStage, {
+          phase: welcome.phase,
+          reducedMotion: welcome.reducedMotion,
+          speaker: welcome.speaker,
+          onExitComplete: welcome.onExitComplete,
+        }),
+    phoneCard ? createElement(PhoneLinkChannelCard, { workspaceId: WS }) : null
+  );
 }
 
 function wrap(node: ReactElement): ReactElement {
@@ -244,7 +275,10 @@ function wrap(node: ReactElement): ReactElement {
   );
 }
 
+// recordFreshSignupFirstRun's order: pending card, fresh marker, kickoff hold.
+markPhoneLinkCardPending(WS);
 markFreshSignup({ workspaceId: WS, memberId: ME });
+holdKickoffForFreshSignup();
 
 const root = document.getElementById("root");
 if (!root) throw new Error("welcome kickoff harness missing #root");

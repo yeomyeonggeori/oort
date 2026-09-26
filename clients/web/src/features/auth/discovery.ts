@@ -78,12 +78,24 @@ export function discoveredServers(
  */
 export const DISCOVERY_BROWSE_MS = 4_000;
 
+export interface DiscoveryState {
+  servers: DiscoveredServer[];
+  /** mDNS가 이 런타임에 있나. 브라우저 탭에는 없다. */
+  available: boolean;
+  /** 셸이 아직 찾는 중인가(첫 `DISCOVERY_BROWSE_MS`). */
+  searching: boolean;
+}
+
 /**
- * Servers seen on this LAN, or an empty list (browser, no shell support,
- * nothing found, permission denied — all the same silence).
+ * Servers seen on this LAN, plus whether the scan is still running.
+ *
+ * D0(#2808)은 발견 목록이 비었을 때 무엇을 하면 되는지 말한다. 그 문장은 셸이
+ * 실제로 찾아본 뒤에만 선다: 찾는 동안「없어요」를 말하면 1초 뒤 줄이 나타날 때
+ * 거짓말이 되고, 브라우저에서는 찾아보지도 않았다.
  */
-export function useDiscoveredServers(): DiscoveredServer[] {
+export function useDiscovery(): DiscoveryState {
   const [servers, setServers] = useState<DiscoveredServer[]>([]);
+  const [searching, setSearching] = useState(IS_TAURI);
 
   useEffect(() => {
     if (!IS_TAURI) return;
@@ -93,6 +105,9 @@ export function useDiscoveredServers(): DiscoveredServer[] {
     // first event replaces the empty list and each later one replaces the last.
     let cancelled = false;
     let unlisten: (() => void) | null = null;
+    const settle = window.setTimeout(() => {
+      if (!cancelled) setSearching(false);
+    }, DISCOVERY_BROWSE_MS);
 
     onDiscovery(({ servers: found }) => {
       if (!cancelled) setServers(discoveredServers(found));
@@ -112,10 +127,11 @@ export function useDiscoveredServers(): DiscoveredServer[] {
 
     return () => {
       cancelled = true;
+      window.clearTimeout(settle);
       unlisten?.();
       void stopDiscovery();
     };
   }, []);
 
-  return servers;
+  return { servers, available: IS_TAURI, searching };
 }

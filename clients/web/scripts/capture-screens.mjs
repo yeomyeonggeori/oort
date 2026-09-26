@@ -445,25 +445,24 @@ const LOGIN_TAP_TARGETS = [
   ["onboarding-back", "뒤로"],
   ["login-email", "이메일 입력"],
   ["login-password", "비밀번호 입력"],
-  ["login-submit", "로그인 버튼"],
+  ["login-submit", "들어가기 버튼"],
 ];
 
-const LANDING_TAP_TARGETS = [
-  ["onboarding-choose-server", "우리 팀 서버로 접속"],
-  ["onboarding-choose-invite", "초대 링크로 참여"],
+// D0 환영 (#2808): 한 칸 + [계속] + 작은 링크 하나.
+const WELCOME_TAP_TARGETS = [
+  ["connect-entry", "팀 주소나 초대 링크 입력"],
+  ["connect-entry-submit", "계속"],
+  ["connect-self-host-toggle", "처음 설치했어요"],
+  ["connect-recent-server-go", "최근 서버 여기로", "optional"],
 ];
 
-const GATEWAY_TAP_TARGETS = [
+// D1′ 초대 수락 (#2810): 이메일 · 새 비밀번호 · 표시 이름 + 주 행동 한 화면.
+const JOIN_TAP_TARGETS = [
   ["onboarding-back", "뒤로"],
-  ["login-server", "서버 주소 입력"],
-  ["onboarding-next", "다음"],
-  ["connect-recent-server", "최근 접속", "optional"],
-];
-
-const PROFILE_TAP_TARGETS = [
+  ["login-email", "이메일 입력"],
+  ["login-password", "비밀번호 입력"],
   ["onboarding-profile-name", "표시 이름 입력"],
-  ["onboarding-profile-submit", "표시 이름 저장"],
-  ["onboarding-profile-skip", "지금은 건너뛰기"],
+  ["login-submit", "팀에 들어가기"],
 ];
 
 // ADR-0134 계약 픽스처. 단위 테스트(routingModel.test.ts)와 라우팅 캡처가 이미
@@ -2405,52 +2404,6 @@ async function assertOnboardingCardCentered(page, where, testId) {
   );
 }
 
-async function assertCloudMissesTarget(page, where, testId, label) {
-  const proof = await page.evaluate(`(() => {
-    const target = document.querySelector('[data-testid="${testId}"]');
-    if (!target) return { missing: true, hits: [] };
-    const b = target.getBoundingClientRect();
-    const hits = [];
-    for (const el of document.querySelectorAll("[data-onboarding-body]")) {
-      const r = el.getBoundingClientRect();
-      const overlap = !(
-        r.right < b.left ||
-        r.left > b.right ||
-        r.bottom < b.top ||
-        r.top > b.bottom
-      );
-      if (overlap) {
-        hits.push({
-          body: el.getAttribute("data-onboarding-body"),
-          left: Math.round(r.left),
-          top: Math.round(r.top),
-          right: Math.round(r.right),
-          bottom: Math.round(r.bottom),
-        });
-      }
-    }
-    return { missing: false, hits };
-  })()`);
-  if (proof.missing) {
-    throw new Error(`S0 ${label} ${where}: ${testId} 없음`);
-  }
-  if (proof.hits.length !== 0) {
-    throw new Error(
-      `S0 ${label} ${where}: hits=${proof.hits.length} ` + JSON.stringify(proof)
-    );
-  }
-  console.log(`  S0 ${label} ${where}: hits 0`);
-}
-
-async function assertCloudMissesCta(page, where) {
-  await assertCloudMissesTarget(page, where, "onboarding-choose-invite", "CTA invite");
-  await assertCloudMissesTarget(page, where, "onboarding-choose-server", "CTA server");
-}
-
-async function assertCloudMissesLockup(page, where) {
-  await assertCloudMissesTarget(page, where, "onboarding-lockup", "lockup");
-}
-
 async function signIn(page) {
   // 위의 refresh 스텁이 세션을 **살려 두게** 되면서 되살아난 전제 하나: 이 컨텍스트의
   // 페이지 14장이 localStorage 를 공유하므로, 두 번째 페이지부터는 이미 로그인된
@@ -2469,42 +2422,36 @@ async function signIn(page) {
 }
 
 /**
- * S0 → S1 → S2. Capture photographs S0 (new surface) plus the split connect
- * cards. Tap-target lists are mobile-only; desktop still asserts overflow.
+ * D0 → D1 (ADR-0193 D7, #2808·#2809). D0은 빈 칸 [계속]이 「이 페이지의 서버」다.
+ * 탭 대상 목록은 폰 폭에서만, 가로 넘침은 모든 폭에서 잰다.
  */
 async function assertOnboardingIgnoresAccent(page, where) {
-  const readLanding = () =>
+  const read = () =>
     page.evaluate(() => {
-      const landing = document.querySelector('[data-testid="onboarding-landing"]');
-      const cta = document.querySelector('[data-testid="onboarding-choose-server"]');
-      if (!landing || !cta) return null;
-      const landingStyle = getComputedStyle(landing);
-      const ctaStyle = getComputedStyle(cta);
+      const frame = document.querySelector('[data-testid="onboarding-frame"]');
+      const cta = document.querySelector('[data-testid="connect-entry-submit"]');
+      if (!frame || !cta) return null;
       return {
-        space: landingStyle.backgroundColor,
-        ink: landingStyle.color,
-        onboardingAccent: landingStyle.getPropertyValue("--onboarding-accent").trim(),
-        ctaBg: ctaStyle.backgroundColor,
+        canvas: getComputedStyle(frame).backgroundImage,
+        ink: getComputedStyle(frame).color,
+        ctaBg: getComputedStyle(cta).backgroundColor,
       };
     });
-  const before = await readLanding();
-  if (!before?.onboardingAccent) {
-    throw new Error(`S0 격리 ${where}: 랜딩 토큰을 읽지 못했다`);
-  }
+  const before = await read();
+  if (!before) throw new Error(`D0 격리 ${where}: 바닥·행동을 읽지 못했다`);
   const other = accentCatalogIds().find((id) => id !== "dawn") ?? "seongun";
   await page.evaluate((id) => {
     document.documentElement.setAttribute("data-accent", id);
   }, other);
-  const after = await readLanding();
+  const after = await read();
   if (
     !after ||
-    after.space !== before.space ||
+    after.canvas !== before.canvas ||
     after.ink !== before.ink ||
-    after.onboardingAccent !== before.onboardingAccent ||
     after.ctaBg !== before.ctaBg
   ) {
     throw new Error(
-      `S0 격리 ${where}: data-accent=${other} 가 랜딩을 바꿨다 ` +
+      `D0 격리 ${where}: data-accent=${other} 가 바닥이나 주 행동을 바꿨다 ` +
         `${JSON.stringify({ before, after })}`
     );
   }
@@ -2513,171 +2460,132 @@ async function assertOnboardingIgnoresAccent(page, where) {
   });
 }
 
+async function readStepChrome(page) {
+  return page.evaluate(`(() => {
+    const row = document.querySelector('[data-testid="onboarding-step-chrome"]');
+    const back = document.querySelector('[data-testid="onboarding-back"]');
+    const dots = document.querySelector('[data-testid="onboarding-dots"]');
+    return {
+      hasBack: Boolean(back),
+      rowHasBack: Boolean(row && back && row.contains(back)),
+      rowHasDots: Boolean(row && dots && row.contains(dots)),
+      dotsLabel: document.querySelector('[data-testid="onboarding-dots-label"]')?.textContent ?? null,
+      underline: back ? getComputedStyle(back).textDecorationLine : null,
+      backLabel: back?.textContent?.replace(/\\s+/g, " ").trim() ?? null,
+      counter: /\\d\\/\\d/.test(document.body.textContent ?? ""),
+    };
+  })()`);
+}
+
 async function walkOnboardingToAccount(page, where, { tapTargets = false, shoot } = {}) {
-  await page.getByTestId("onboarding-landing").waitFor({ state: "visible" });
+  await page.getByTestId("onboarding-welcome").waitFor({ state: "visible" });
   await assertOnboardingIgnoresAccent(page, where);
-  const scatter = await page.locator("[data-onboarding-body]").count();
-  if (scatter !== 30) {
-    throw new Error(`S0 산포 ${where}: ${scatter}개체 (기대 30)`);
-  }
-  await assertCloudMissesCta(page, where);
-  await assertCloudMissesLockup(page, where);
   const wordmark = await page.getByTestId("onboarding-wordmark").textContent();
   if (wordmark?.trim() !== "oort") {
-    throw new Error(`S0 워드마크 ${where}: ${JSON.stringify(wordmark)}`);
+    throw new Error(`D0 워드마크 ${where}: ${JSON.stringify(wordmark)}`);
   }
   const tagline = await page.getByTestId("onboarding-tagline").textContent();
   if (tagline?.trim() !== "사람과 에이전트가 같은 자리에서 일하는 메신저.") {
-    throw new Error(`S0 카피 ${where}: ${JSON.stringify(tagline)}`);
+    throw new Error(`D0 카피 ${where}: ${JSON.stringify(tagline)}`);
   }
-  const lockupMetrics = await page.evaluate(`(() => {
-    const mark = document.querySelector('[data-testid="onboarding-mark"]');
-    const word = document.querySelector('[data-testid="onboarding-wordmark"]');
-    const copy = document.querySelector('[data-testid="onboarding-tagline"]');
-    const markBox = mark.getBoundingClientRect();
-    const copyBox = copy.getBoundingClientRect();
-    const wordSize = parseFloat(getComputedStyle(word).fontSize);
-    const copySize = parseFloat(getComputedStyle(copy).fontSize);
-    const copyLh = parseFloat(getComputedStyle(copy).lineHeight);
+  const d0 = await page.evaluate(`(() => {
+    const face = document.querySelector('[data-testid="kometto-face"]');
+    const box = face?.getBoundingClientRect();
     return {
-      mark: Math.round(markBox.height),
-      wordFont: Math.round(wordSize * 10) / 10,
-      copyFont: Math.round(copySize * 10) / 10,
-      copyHeight: Math.round(copyBox.height),
-      copyLh: Math.round(copyLh * 10) / 10,
-      copyWidth: Math.round(copyBox.width),
+      face: box ? Math.round(box.width) : null,
+      dots: Boolean(document.querySelector('[data-testid="onboarding-dots"]')),
+      back: Boolean(document.querySelector('[data-testid="onboarding-back"]')),
+      focus: document.activeElement?.getAttribute("data-testid") ?? null,
+      line: document.querySelector('[data-testid="kometto-guide-line"]')?.textContent ?? null,
+      wide: window.innerWidth >= 900,
     };
   })()`);
-  const wordRatio = lockupMetrics.wordFont / lockupMetrics.mark;
-  if (wordRatio < 0.24 || wordRatio > 0.36) {
-    throw new Error(
-      `S0 워드마크 위계 ${where}: ${lockupMetrics.wordFont}px / mark ${lockupMetrics.mark}px = ${wordRatio.toFixed(3)} (기대 1/4–1/3)`
-    );
+  const faceWant = d0.wide ? 280 : 200;
+  if (d0.face !== faceWant) {
+    throw new Error(`D0 히어로 ${where}: ${d0.face}px (기대 ${faceWant})`);
   }
-  if (lockupMetrics.wordFont <= lockupMetrics.copyFont + 4) {
-    throw new Error(
-      `S0 워드마크가 카피와 같은 단 ${where}: word ${lockupMetrics.wordFont}px copy ${lockupMetrics.copyFont}px`
-    );
+  if (d0.dots || d0.back) {
+    throw new Error(`D0 크롬 ${where}: 점·뒤로가 없어야 한다 ${JSON.stringify(d0)}`);
   }
-  if (lockupMetrics.copyHeight > lockupMetrics.copyLh + 1) {
-    throw new Error(
-      `S0 카피 2줄 ${where}: h=${lockupMetrics.copyHeight} lh=${lockupMetrics.copyLh} w=${lockupMetrics.copyWidth}`
-    );
+  if (d0.focus !== "connect-entry") {
+    throw new Error(`D0 포커스 ${where}: ${d0.focus}`);
   }
-  console.log(
-    `  S0 lockup ${where}: mark ${lockupMetrics.mark}px · wordmark ${lockupMetrics.wordFont}px · copy ${lockupMetrics.copyFont}px ${lockupMetrics.copyWidth}×${lockupMetrics.copyHeight}`
-  );
-  await page.getByTestId("onboarding-choose-server").focus();
-  const landingFocus = await page.evaluate(
-    `document.activeElement?.getAttribute("data-testid")`
-  );
-  if (landingFocus !== "onboarding-choose-server") {
-    throw new Error(`S0 포커스 ${where}: ${landingFocus}`);
+  if (d0.line !== "안녕하세요, 저는 코메토예요. 어디로 갈까요?") {
+    throw new Error(`D0 말풍선 ${where}: ${JSON.stringify(d0.line)}`);
   }
-  const fill = await page.evaluate(`(() => {
-    const el = document.querySelector('[data-testid="onboarding-landing"]');
-    const r = el.getBoundingClientRect();
-    return {
-      top: Math.round(r.top),
-      bottom: Math.round(r.bottom),
-      viewport: window.innerHeight,
-    };
-  })()`);
-  if (fill.bottom < fill.viewport - 1) {
-    throw new Error(
-      `S0 높이 ${where}: 랜딩 아랫변 ${fill.bottom}px / 뷰포트 ${fill.viewport}px (top ${fill.top})`
-    );
-  }
-  await assertNoHorizontalOverflow(page, `landing ${where}`);
+  await assertNoHorizontalOverflow(page, `welcome ${where}`);
   if (tapTargets) {
-    await assertTapTargets(page, `landing ${where}`, LANDING_TAP_TARGETS);
+    await assertTapTargets(page, `welcome ${where}`, WELCOME_TAP_TARGETS);
   }
-  if (shoot) await shoot("onboarding-landing");
+  if (shoot) await shoot("onboarding-welcome");
 
-  await sceneClick(page, page.getByTestId("onboarding-choose-server"));
-  await page.getByTestId("onboarding-gateway").waitFor({ state: "visible" });
-  const chrome = await page.evaluate(`(() => {
-    const row = document.querySelector('[data-testid="onboarding-step-chrome"]');
-    const back = document.querySelector('[data-testid="onboarding-back"]');
-    const progress = document.querySelector('[data-testid="onboarding-progress"]');
-    return {
-      row: Boolean(row && back && progress && row.contains(back) && row.contains(progress)),
-      underline: back ? getComputedStyle(back).textDecorationLine : null,
-      backLabel: back?.textContent?.replace(/\\s+/g, " ").trim() ?? null,
-    };
-  })()`);
-  if (!chrome.row) {
-    throw new Error(`S1 크롬 ${where}: 뒤로/카운터가 한 줄이 아님 ${JSON.stringify(chrome)}`);
+  // 문제 상태: 읽을 수 없는 입력 → 당황 코메토 + 합니다체 오류.
+  await page.getByTestId("connect-entry").fill("우리 팀 서버");
+  await sceneClick(page, page.getByTestId("connect-entry-submit"));
+  await page.getByTestId("connect-entry-error").waitFor({ state: "visible" });
+  if (shoot) await shoot("onboarding-welcome-error");
+  await page.getByTestId("connect-entry").fill("");
+
+  await sceneClick(page, page.getByTestId("connect-entry-submit"));
+  await page.getByTestId("onboarding-sign-in").waitFor({ state: "visible" });
+  await page.getByTestId("login-submit").waitFor({ state: "visible" });
+  const chrome = await readStepChrome(page);
+  if (!chrome.rowHasBack || !chrome.rowHasDots) {
+    throw new Error(`D1 크롬 ${where}: 뒤로·점이 한 줄이 아님 ${JSON.stringify(chrome)}`);
+  }
+  if (chrome.dotsLabel !== "1단계 중 1단계" || chrome.counter) {
+    throw new Error(`D1 진행 ${where}: ${JSON.stringify(chrome)}`);
   }
   if (chrome.underline && chrome.underline !== "none") {
-    throw new Error(`S1 크롬 ${where}: 뒤로가 밑줄 ${chrome.underline}`);
+    throw new Error(`D1 크롬 ${where}: 뒤로가 밑줄 ${chrome.underline}`);
   }
   if (chrome.backLabel !== "뒤로") {
-    throw new Error(`S1 크롬 ${where}: 뒤로 레이블 ${JSON.stringify(chrome.backLabel)}`);
+    throw new Error(`D1 크롬 ${where}: 뒤로 레이블 ${JSON.stringify(chrome.backLabel)}`);
   }
-  await assertNoHorizontalOverflow(page, `gateway ${where}`);
-  await assertOnboardingCardCentered(page, `gateway ${where}`, "onboarding-gateway");
-  if (tapTargets) {
-    await assertTapTargets(page, `gateway ${where}`, GATEWAY_TAP_TARGETS);
-  }
-  if (shoot) await shoot("onboarding-gateway");
-
-  await sceneClick(page, page.getByTestId("onboarding-next"));
-  await page.getByTestId("onboarding-account").waitFor({ state: "visible" });
-  await page.getByTestId("login-submit").waitFor({ state: "visible" });
-  await assertOnboardingCardCentered(page, `account ${where}`, "onboarding-account");
+  await assertNoHorizontalOverflow(page, `sign-in ${where}`);
+  await assertOnboardingCardCentered(page, `sign-in ${where}`, "onboarding-sign-in");
+  if (shoot) await shoot("onboarding-sign-in");
 }
 
-async function shootOnboardingProfile(page, where, { tapTargets = false, shoot } = {}) {
-  await page.getByTestId("onboarding-landing").waitFor({ state: "visible" });
-  await sceneClick(page, page.getByTestId("onboarding-choose-invite"));
-  await page.getByTestId("onboarding-gateway").waitFor({ state: "visible" });
-  await page.getByTestId("login-invite-code").fill("momo-alpha-2026");
-  await sceneClick(page, page.getByTestId("onboarding-next"));
-  await page.getByTestId("onboarding-account").waitFor({ state: "visible" });
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
-  await page.getByTestId("login-password").fill("capture-only-not-a-credential");
-  await sceneClick(page, page.getByTestId("login-submit"));
-  await page.getByTestId("onboarding-profile").waitFor({ state: "visible" });
-  const chrome = await page.evaluate(`(() => {
-    const row = document.querySelector('[data-testid="onboarding-step-chrome"]');
-    const back = document.querySelector('[data-testid="onboarding-back"]');
-    const progress = document.querySelector('[data-testid="onboarding-progress"]');
-    return {
-      hasBack: Boolean(back),
-      progress: progress?.textContent ?? null,
-      rowHasProgress: Boolean(row && progress && row.contains(progress)),
-    };
-  })()`);
-  if (chrome.hasBack) {
-    throw new Error(`S3 크롬 ${where}: 뒤로가 있다`);
+async function shootOnboardingJoin(page, where, { tapTargets = false, shoot } = {}) {
+  const deepLink = `oort://join?server=${encodeURIComponent(ORIGIN)}&code=momo-alpha-2026`;
+  await page.goto(`${ORIGIN}/?join=${encodeURIComponent(deepLink)}`, {
+    waitUntil: "networkidle",
+  });
+  await page.getByTestId("onboarding-join").waitFor({ state: "visible" });
+  const chrome = await readStepChrome(page);
+  if (!chrome.hasBack || chrome.dotsLabel !== "2단계 중 1단계" || chrome.counter) {
+    throw new Error(`D1′ 크롬 ${where}: ${JSON.stringify(chrome)}`);
   }
-  if (chrome.progress !== "4/4" || !chrome.rowHasProgress) {
-    throw new Error(`S3 크롬 ${where}: ${JSON.stringify(chrome)}`);
+  const fields = await page.$$eval("input", (nodes) => nodes.length);
+  if (fields !== 3) {
+    throw new Error(`D1′ 칸 ${where}: ${fields}개 (기대 3: 이메일·비밀번호·표시 이름)`);
   }
-  await assertOnboardingCardCentered(page, `profile ${where}`, "onboarding-profile");
-  await assertNoHorizontalOverflow(page, `profile ${where}`);
+  await assertOnboardingCardCentered(page, `join ${where}`, "onboarding-join");
+  await assertNoHorizontalOverflow(page, `join ${where}`);
   if (tapTargets) {
-    await assertTapTargets(page, `profile ${where}`, PROFILE_TAP_TARGETS);
+    await assertTapTargets(page, `join ${where}`, JOIN_TAP_TARGETS);
   }
-  if (shoot) await shoot("onboarding-profile");
+  if (shoot) await shoot("onboarding-join");
   await page.getByTestId("onboarding-profile-name").fill("가".repeat(101));
   await page.getByTestId("onboarding-profile-name-error").waitFor({
     state: "visible",
   });
-  if (shoot) await shoot("onboarding-profile-field-error");
+  if (shoot) await shoot("onboarding-join-field-error");
   await page.route("**/v1/workspaces/*/members/me", (route) => {
     if (route.request().method() === "PATCH") {
       return json(route, { error: { message: "engine boom" } }, 500);
     }
     return route.fallback();
   });
-  await page.getByTestId("onboarding-profile-name").fill("성재");
-  await sceneClick(page, page.getByTestId("onboarding-profile-submit"));
+  await page.getByTestId("login-email").fill("jiwoo@dawn.example");
+  await page.getByTestId("login-password").fill("capture-only-not-a-credential");
+  await page.getByTestId("onboarding-profile-name").fill("박지우");
+  await sceneClick(page, page.getByTestId("login-submit"));
   await page.getByTestId("onboarding-profile-banner").waitFor({
     state: "visible",
   });
-  if (shoot) await shoot("onboarding-profile-banner");
+  if (shoot) await shoot("onboarding-join-name-failed");
 }
 
 function isPresencePut(request) {
@@ -6638,7 +6546,7 @@ async function captureMobile(browser, scheme) {
   };
 
   // 1. 연결 화면. 셸 밖의 유일한 표면이고, 폰에서 문서가 스크롤해도 되는 자리다.
-  //    BZ-6a: 첫 페인트는 S0. S1/S2를 찍은 뒤 기존 login 프레임은 계정 스텝이다.
+  //    첫 페인트는 D0(#2808). D0·D1을 찍은 뒤 login 프레임은 D1이다.
   const page = await context.newPage();
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
   await walkOnboardingToAccount(page, `login ${scheme}`, {
@@ -6652,13 +6560,12 @@ async function captureMobile(browser, scheme) {
   await assertTapTargets(page, `login ${scheme}`, LOGIN_TAP_TARGETS);
   await shoot(page, "login");
 
-  const profilePage = await context.newPage();
-  await profilePage.goto(ORIGIN, { waitUntil: "networkidle" });
-  await shootOnboardingProfile(profilePage, `profile ${scheme}`, {
+  const joinPage = await context.newPage();
+  await shootOnboardingJoin(joinPage, `join ${scheme}`, {
     tapTargets: true,
-    shoot: (name) => shoot(profilePage, name),
+    shoot: (name) => shoot(joinPage, name),
   });
-  await profilePage.close();
+  await joinPage.close();
 
   // 2. 채널. 사이드바는 열이 아니라 닫힌 서랍이므로 타임라인이 390px 전부를
   //    받고, 컴포저는 안전 영역 위에 도크된다.
@@ -7119,8 +7026,7 @@ async function captureScheme(browser, scheme) {
   await installMocks(context);
   const shots = [];
 
-  // 1. login surface: BZ-6a S0 landing, then S1 gateway, then S2 account
-  //    (Card / Input / Button / runtime badge tokens).
+  // 1. login surface: D0 환영, then D1 로그인 한 화면 (ADR-0193 D7).
   const login = await context.newPage();
   await login.goto(ORIGIN, { waitUntil: "networkidle" });
   await walkOnboardingToAccount(login, scheme, {
@@ -7154,33 +7060,18 @@ async function captureScheme(browser, scheme) {
   shots.push(workspaceShot);
   await sceneClick(login, login.getByTestId("login-workspace-toggle"));
 
-  // 1b. connect surface, invite path (MOMO-604): the browser fallback for a
-  //     oort://join link fills server and code, so only email/password remain.
-  //     The LAN discovery card has no web equivalent (no mDNS in a page), so it
-  //     is reviewed in the desktop shell, not here.
+  // 1b. D1′ 초대 수락 (#2810): 링크가 서버·코드를 채우고, 이메일·새 비밀번호·
+  //     표시 이름을 한 화면에서 받는다. LAN 발견 줄은 웹에 없다(페이지에 mDNS가
+  //     없다). 그것은 데스크탑 셸에서 본다.
   const invite = await context.newPage();
-  const deepLink = `oort://join?server=${encodeURIComponent(
-    ORIGIN
-  )}&code=momo-alpha-2026`;
-  await invite.goto(`${ORIGIN}/?join=${encodeURIComponent(deepLink)}`, {
-    waitUntil: "networkidle",
-  });
-  await invite.getByTestId("login-invite-code").waitFor({ state: "visible" });
-  const inviteShot = beginSceneFromShotPath(`${OUT_DIR}/connect-invite-${scheme}.png`);
-  await invite.screenshot({ path: inviteShot });
-  shots.push(inviteShot);
-
-  // S3 (UX-R2a). A join that created the member; sign-in on `login` is unchanged.
-  const profile = await context.newPage();
-  await profile.goto(ORIGIN, { waitUntil: "networkidle" });
-  await shootOnboardingProfile(profile, scheme, {
+  await shootOnboardingJoin(invite, scheme, {
     shoot: async (name) => {
       const path = beginSceneFromShotPath(`${OUT_DIR}/${name}-${scheme}.png`);
-      await profile.screenshot({ path });
+      await invite.screenshot({ path });
       shots.push(path);
     },
   });
-  await profile.close();
+  await invite.close();
 
   // 2. chat shell, live path: sidebar + timeline + composer + rail status
   await signIn(login);
@@ -8956,23 +8847,9 @@ async function captureScheme(browser, scheme) {
   await shootDevices(devicesLoopback, "loopback");
   await devicesLoopback.close();
 
-  resetDeviceLinkHarness();
-  const firstRun = await context.newPage();
-  await firstRun.goto(ORIGIN, { waitUntil: "networkidle" });
-  await signIn(firstRun);
-  await firstRun.evaluate(() => {
-    sessionStorage.setItem("momo.web.phoneLinkFirstRun.v1", "pending");
-  });
-  await firstRun.reload({ waitUntil: "networkidle" });
-  await firstRun.getByTestId("onboarding-phone-link").waitFor({
-    state: "visible",
-  });
-  await firstRun.waitForTimeout(250);
-  const firstRunShot = beginSceneFromShotPath(`${OUT_DIR}/onboarding-phone-link-${scheme}.png`);
-  await firstRun.screenshot({ path: firstRunShot });
-  shots.push(firstRunShot);
-  await sceneClick(firstRun, firstRun.getByTestId("onboarding-enter-app"));
-  await firstRun.close();
+  // 로그인 뒤 「폰에서도 쓰기」 전체 화면(onboarding-phone-link)은 #2818
+  // (ADR-0193 D7)에서 첫 대화 채널 카드가 됐다. 그 캡처는
+  // scripts/capture-phone-link-card.mjs 가 찍는다.
 
   // 4. dense timeline via the stress path (no realtime rail, 40 rows)
   const stress = await context.newPage();
@@ -9468,21 +9345,49 @@ async function captureMarkUnreadScenes(browser, scheme) {
   return shots;
 }
 
-// UX-R2b welcome kickoff (#2002). Scenes only — startGuardedPreview is untouched.
-// Arrival is driven through the product store path (`oort.capture.message.new`
-// → useTimeline applyBatch), not a stage prop.
+// UX-R2b welcome kickoff (#2002) → #2817 first-conversation Kometto band.
+// Scenes only — startGuardedPreview is untouched. Arrival is driven through
+// the product store path (`oort.capture.message.new` → useTimeline
+// applyBatch), not a stage prop. The band lives above the composer, so there
+// is no timeline row to scroll to. Two desktop window sizes: the Tauri default
+// (1100×760) and a near-minimum window (720×560; minWidth 720).
+const WELCOME_BAND_VIEWPORTS = [
+  { width: 1100, height: 760, suffix: "" },
+  { width: 720, height: 560, suffix: "-720" },
+];
+
+/** A fresh workspace: me + the agent I just joined (mockup D5 「성재의 Claude」). */
+function welcomeRoster({ paused }) {
+  const me = ROSTER.find((member) => member.id === ME);
+  const agent = ROSTER.find((member) => member.id === HERMES);
+  return [
+    me,
+    {
+      ...agent,
+      displayName: "곽성재의 Claude",
+      handle: "seongjae-claude",
+      ownerHumanId: ME,
+      paused,
+    },
+  ];
+}
+
 async function captureWelcomeKickoffScenes(browser, scheme) {
   beginScene("welcome-arrived");
   const shots = [];
 
   async function openWelcome(reducedMotion, options = {}) {
+    const viewport = options.viewport ?? VIEWPORT;
     const context = await browser.newContext({
-      viewport: VIEWPORT,
+      viewport: { width: viewport.width, height: viewport.height },
       deviceScaleFactor: 2,
       colorScheme: scheme,
       reducedMotion,
     });
     await installMocks(context);
+    await context.route("**/v1/workspaces/*/roster", (route) =>
+      json(route, { members: welcomeRoster({ paused: Boolean(options.paused) }) })
+    );
     await context.route("**/v1/workspaces/*/channels/*/messages*", (route) => {
       const url = new URL(route.request().url());
       if (url.pathname.includes("/replies")) return route.fallback();
@@ -9509,6 +9414,12 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
           "oort.freshSignup.v1",
           JSON.stringify({ workspaceId, memberId })
         );
+        // recordFreshSignupFirstRun also marks the 「폰에서도」 card pending
+        // (#2818): the band hands the same slot over to it.
+        localStorage.setItem(
+          `oort.phoneLinkCard.v1:${workspaceId.toLowerCase()}`,
+          "pending"
+        );
       },
       { workspaceId: WORKSPACE_ID, memberId: ME }
     );
@@ -9525,20 +9436,10 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
     return { context, page };
   }
 
-  async function waitForWelcomeStage(page) {
-    const empty = page.getByTestId("timeline-empty");
+  async function waitForWelcomeBand(page, state) {
+    const band = page.getByTestId("welcome-kickoff-stage");
     try {
-      await empty.waitFor({ state: "visible", timeout: 15_000 });
-    } catch (err) {
-      // Empty intro is optional: a nonempty #general still mounts the stage.
-      // Timeout is the only miss we accept; anything else is a real fail.
-      const name = err instanceof Error ? err.name : "";
-      const message = err instanceof Error ? err.message : String(err);
-      if (name !== "TimeoutError" && !message.includes("Timeout")) throw err;
-    }
-    const stage = page.getByTestId("welcome-kickoff-stage");
-    try {
-      await stage.waitFor({ state: "attached", timeout: 10_000 });
+      await band.waitFor({ state: "visible", timeout: 15_000 });
     } catch (err) {
       const dump = await page.evaluate(() => ({
         hash: location.hash,
@@ -9546,50 +9447,21 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
         shown: Object.keys(localStorage).filter((k) =>
           k.includes("welcomeKickoff")
         ),
-        introEmpty: Boolean(document.querySelector('[data-testid="timeline-empty"]')),
-        introStarted: Boolean(
-          document.querySelector('[data-testid="message-channel-intro"]')
-        ),
         messages: document.querySelectorAll('[data-testid="timeline-message"]').length,
-        copy: document.body.innerText.includes("팀이 준비하고 있어요"),
       }));
       const cause = err instanceof Error ? err.message : String(err);
       throw new Error(`welcome-kickoff-stage missing ${JSON.stringify(dump)} (${cause})`);
     }
-    try {
-      await scrollTimelineRowIntoView(page, "welcome-kickoff-stage", "welcome-kickoff");
-    } catch (err) {
-      if (!String(err).includes("자리가 멎지 않았다")) throw err;
-      await page.waitForTimeout(200);
-      await scrollTimelineRowIntoView(page, "welcome-kickoff-stage", "welcome-kickoff");
-    }
-    await stage.waitFor({ state: "visible" });
+    await page.waitForFunction(
+      (want) =>
+        document
+          .querySelector('[data-testid="welcome-kickoff-stage"]')
+          ?.getAttribute("data-state") === want,
+      state
+    );
   }
 
-  {
-    const { context, page } = await openWelcome("no-preference");
-    await waitForWelcomeStage(page);
-    await waitForAnimations(page);
-    const path = beginSceneFromShotPath(`${OUT_DIR}/welcome-stage-${scheme}.png`);
-    await page.screenshot({ path });
-    shots.push(path);
-    await context.close();
-  }
-
-  {
-    const { context, page } = await openWelcome("reduce");
-    await waitForWelcomeStage(page);
-    await waitForAnimations(page);
-    const path = beginSceneFromShotPath(`${OUT_DIR}/welcome-stage-reduce-${scheme}.png`);
-    await page.screenshot({ path });
-    shots.push(path);
-    await context.close();
-  }
-
-  {
-    const { context, page } = await openWelcome("no-preference");
-    await waitForWelcomeStage(page);
-    await waitForAnimations(page);
+  async function deliverOpener(page) {
     await page.evaluate(
       ({ channelId, agentId }) => {
         window.dispatchEvent(
@@ -9602,7 +9474,7 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
               hlcCount: 0,
               authorMemberId: agentId,
               type: "text",
-              body: "시작할까요? 이 워크스페이스에서 같이 일해요.",
+              body: "안녕하세요 @곽성재님, 저는 이 맥의 Claude Code로 돌아가는 성재님의 에이전트예요. 여기서 부르면 바로 일을 받아요. 오늘 무엇부터 같이 할까요?",
               state: "sent",
               createdAtMs: 1_704_067_200_000,
             },
@@ -9611,17 +9483,56 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
       },
       { channelId: GENERAL_ID, agentId: HERMES }
     );
-    await page.getByTestId("timeline-message").waitFor({ state: "visible" });
-    await page.waitForFunction(
-      () =>
-        [...document.querySelectorAll('[data-testid="timeline-message"]')].some(
-          (node) => node.classList.contains("enter-conversation")
-        )
-    );
-    await waitForAnimations(page);
-    const path = beginSceneFromShotPath(`${OUT_DIR}/welcome-arrived-${scheme}.png`);
+  }
+
+  async function shoot(page, name) {
+    const vp = page.viewportSize() ?? VIEWPORT;
+    await page.mouse.move(vp.width + 80, vp.height + 80);
+    const path = beginSceneFromShotPath(`${OUT_DIR}/${name}-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
+  }
+
+  for (const viewport of WELCOME_BAND_VIEWPORTS) {
+    {
+      const { context, page } = await openWelcome("no-preference", { viewport });
+      await waitForWelcomeBand(page, "working");
+      await waitForAnimations(page);
+      await shoot(page, `welcome-band-working${viewport.suffix}`);
+      await context.close();
+    }
+    {
+      const { context, page } = await openWelcome("no-preference", {
+        viewport,
+        paused: true,
+      });
+      await waitForWelcomeBand(page, "sleepy");
+      await waitForAnimations(page);
+      await shoot(page, `welcome-band-sleepy${viewport.suffix}`);
+      await context.close();
+    }
+    {
+      // Joy is a 1.2s hold before the band folds; shoot inside it, after the
+      // 120ms crossfade and the 360ms wag.
+      const { context, page } = await openWelcome("reduce", { viewport });
+      await waitForWelcomeBand(page, "working");
+      await deliverOpener(page);
+      await waitForWelcomeBand(page, "joy");
+      await page.getByTestId("timeline-message").waitFor({ state: "visible" });
+      await shoot(page, `welcome-band-joy${viewport.suffix}`);
+      await context.close();
+    }
+  }
+
+  {
+    const { context, page } = await openWelcome("no-preference");
+    await waitForWelcomeBand(page, "working");
+    await deliverOpener(page);
+    await waitForWelcomeBand(page, "joy");
+    await page.getByTestId("welcome-kickoff-stage").waitFor({ state: "detached" });
+    await page.getByTestId("phone-link-card").waitFor({ state: "visible" });
+    await waitForAnimations(page);
+    await shoot(page, "welcome-arrived");
     await context.close();
   }
 
@@ -9631,16 +9542,12 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
     });
     beginScene("welcome-backstop");
     try {
-      await waitForWelcomeStage(page);
+      await waitForWelcomeBand(page, "working");
       await page.clock.fastForward(120_000);
       await page.getByTestId("welcome-kickoff-backstop").waitFor({ state: "visible" });
       await page.clock.resume();
       await waitForAnimations(page);
-      const vp = page.viewportSize() ?? VIEWPORT;
-      await page.mouse.move(vp.width + 80, vp.height + 80);
-      const path = beginSceneFromShotPath(`${OUT_DIR}/welcome-backstop-${scheme}.png`);
-      await page.screenshot({ path });
-      shots.push(path);
+      await shoot(page, "welcome-band-backstop");
       await context.close();
     } finally {
       setActiveCaptureScene("default");
@@ -12333,67 +12240,51 @@ async function waitUntilTokenPaint(page, selector, cssVar) {
 }
 
 /**
- * UX-R2c (#2216). Login-after first-agent poses. Design-mode `?firstAgent=`
- * only; not part of the default `all` profile. Nine shot names: eight URL
- * poses plus `done-handoff` from the same `done` page after the hand-off click.
+ * D4 AI 연결 (#2814, 이전 UX-R2c #2216). Design-mode `?firstAgent=` only; not
+ * part of the default `all` profile. Poses cover the list (pill states, kill
+ * switch off, web), the subscription join's three states + cap, the grok
+ * wizard's one-time value, skipped, and the legacy loading/offline/error rows.
+ * Each pose shoots 1280 and 390 in the scheme given.
  */
 async function captureFirstAgentScenes(browser, scheme) {
   beginScene("first-agent");
   const shots = [];
   const readyByPose = {
-    cards: "first-agent-cards",
+    cards: "ai-connect-list",
+    "sub-probing": "ai-connect-list",
+    "sub-ready": "ai-connect-list",
+    "sub-install": "ai-connect-list",
+    "sub-polling": "ai-connect-list",
+    "sub-recheck": "ai-connect-list",
+    "server-off": "first-agent-server-off",
+    web: "first-agent-desktop-only",
+    "sub-connect": "first-agent-connect-command",
+    "sub-waiting": "first-agent-detecting",
+    "sub-cap": "first-agent-cap-exceeded",
+    "sub-joined": "first-agent-mention",
     "one-time": "hosted-pairing-card",
     detecting: "first-agent-detecting",
     "cap-exceeded": "first-agent-cap-exceeded",
     done: "first-agent-mention",
+    skipped: "first-agent-skipped",
     loading: "first-agent-loading",
     offline: "first-agent-offline",
     error: "first-agent-error",
   };
   const tapTargetsByPose = {
-    cards: [
+    "sub-ready": [
+      ["first-agent-continue", "주 행동"],
       ["first-agent-skip", "지금은 건너뛰기"],
-      ["first-agent-continue", "계속"],
-      ["first-agent-reentry", "재진입"],
+      ["ai-connect-login-open-codex", "터미널에서 로그인"],
     ],
-    "one-time": [
-      ["first-agent-skip", "지금은 건너뛰기"],
-      ["first-agent-reentry", "재진입"],
-    ],
-    detecting: [
-      ["first-agent-skip", "지금은 건너뛰기"],
-      ["first-agent-reentry", "재진입"],
-    ],
-    "cap-exceeded": [
-      ["first-agent-skip", "지금은 건너뛰기"],
+    "sub-connect": [["first-agent-skip", "지금은 건너뛰기"]],
+    "sub-cap": [
       ["first-agent-recheck", "다시 확인"],
-      ["first-agent-reentry", "재진입"],
-    ],
-    done: [
       ["first-agent-skip", "지금은 건너뛰기"],
-      ["first-agent-mention-action", "첫 멘션"],
-      ["first-agent-reentry", "재진입"],
     ],
-    loading: [
-      ["first-agent-skip", "지금은 건너뛰기"],
-      ["first-agent-reentry", "재진입"],
-    ],
-    offline: [
-      ["first-agent-skip", "지금은 건너뛰기"],
-      ["first-agent-reentry", "재진입"],
-    ],
-    error: [
-      ["first-agent-skip", "지금은 건너뛰기"],
-      ["first-agent-reentry", "재진입"],
-    ],
+    "sub-joined": [["first-agent-mention-action", "계속"]],
+    skipped: [["first-agent-skipped-continue", "계속"]],
   };
-
-  const FIRST_AGENT_FIT_NAME = "김인턴데이터플랫폼온콜대기열용자명";
-  if (FIRST_AGENT_FIT_NAME.length !== 17) {
-    throw new Error(
-      `first-agent fit-name fixture is ${FIRST_AGENT_FIT_NAME.length} chars`
-    );
-  }
 
   async function shoot(pose, viewport, suffix) {
     const context = await browser.newContext({
@@ -12403,17 +12294,6 @@ async function captureFirstAgentScenes(browser, scheme) {
       reducedMotion: "reduce",
     });
     await installMocks(context);
-    if (pose === "done") {
-      await context.route("**/v1/workspaces/*/roster", (route) =>
-        json(route, {
-          members: ROSTER.map((member) =>
-            member.id === "019f9a01-0000-7000-8000-000000000404"
-              ? { ...member, displayName: FIRST_AGENT_FIT_NAME }
-              : member
-          ),
-        })
-      );
-    }
     const page = await context.newPage();
     await page.goto(ORIGIN, { waitUntil: "networkidle" });
     await signIn(page);
@@ -12421,368 +12301,52 @@ async function captureFirstAgentScenes(browser, scheme) {
       window.location.hash = `/?firstAgent=${nextPose}`;
     }, pose);
     await page.getByTestId("first-agent-stage").waitFor({ state: "visible" });
-    await page.getByTestId(readyByPose[pose]).waitFor({ state: "visible" });
+    await page.getByTestId(readyByPose[pose]).first().waitFor({ state: "visible" });
     await page.mouse.move(viewport.width + 80, viewport.height + 80);
     await waitForAnimations(page);
-    if (pose === "offline" || pose === "error") {
-      const opacity = await page.evaluate(() => {
-        const input = document.querySelector(
-          "#first-agent-harness-claude-code"
-        );
-        return input ? getComputedStyle(input).opacity : "";
-      });
-      if (opacity !== "0.5") {
-        throw new Error(
-          `first-agent ${pose} ${scheme} ${viewport.width}: locked input opacity ${opacity}`
-        );
-      }
-    }
-    if (pose === "cards") {
-      const hovered = await page.evaluate(() => {
-        const hover = getComputedStyle(document.documentElement)
-          .getPropertyValue("--surface-hover")
-          .trim();
-        return [...document.querySelectorAll("[data-choice-id]")].flatMap((el) => {
-          const bg = getComputedStyle(el).backgroundColor;
-          if (bg === "rgba(0, 0, 0, 0)" || bg === "transparent") return [];
-          const probe = document.createElement("div");
-          probe.style.backgroundColor = hover || "var(--surface-hover)";
-          document.body.append(probe);
-          const target = getComputedStyle(probe).backgroundColor;
-          probe.remove();
-          if (bg === target) return [el.getAttribute("data-choice-id")];
-          return [];
-        });
-      });
-      if (hovered.length > 0) {
-        throw new Error(
-          `first-agent cards ${scheme} ${viewport.width}: hover fill on ${hovered.join(", ")}`
-        );
-      }
-    }
     await assertNoHorizontalOverflow(
       page,
       `first-agent ${pose} ${scheme} ${viewport.width}`
     );
-    if (pose === "done") {
-      await page.waitForFunction((expected) => {
-        const el = document.querySelector(
-          '[data-testid="first-agent-mention-name"]'
-        );
-        return el?.textContent === expected;
-      }, FIRST_AGENT_FIT_NAME);
-      const mentionTruncates = await page.evaluate(() =>
-        [...document.querySelectorAll(
-          '[data-testid="first-agent-mention"] .truncate'
-        )].map((el) => ({
-          overflow: el.scrollWidth > el.clientWidth + 1,
-          width: Math.round(el.getBoundingClientRect().width),
-        }))
-      );
-      if (mentionTruncates.length === 0) {
-        throw new Error(
-          `first-agent done ${scheme} ${viewport.width}: 멘션 이름에 truncate 가 없다`
-        );
-      }
-      for (const row of mentionTruncates) {
-        if (row.width <= 0) {
-          throw new Error(
-            `first-agent done ${scheme} ${viewport.width}: truncate 폭이 0이다 (${JSON.stringify(mentionTruncates)})`
-          );
-        }
-        if (row.overflow !== false) {
-          throw new Error(
-            `first-agent done ${scheme} ${viewport.width}: truncate overflow 가 false 가 아니다 (${JSON.stringify(mentionTruncates)})`
-          );
-        }
-      }
-      const fitName = await page.evaluate(() => {
-        const name = document.querySelector(
-          '[data-testid="first-agent-mention-name"]'
-        );
-        const handle = document.querySelector(
-          '[data-testid="first-agent-mention-handle"]'
-        );
-        if (!(name instanceof HTMLElement) || !(handle instanceof HTMLElement)) {
-          return { missing: true };
-        }
-        return {
-          missing: false,
-          text: name.textContent,
-          title: name.getAttribute("title"),
-          overflow: name.scrollWidth > name.clientWidth,
-          handleTitle: handle.getAttribute("title"),
-          handleOverflow: handle.scrollWidth > handle.clientWidth,
-        };
-      });
-      if (fitName.missing) {
-        throw new Error(
-          `first-agent done ${scheme} ${viewport.width}: mention name missing`
-        );
-      }
-      if (fitName.text !== FIRST_AGENT_FIT_NAME) {
-        throw new Error(
-          `first-agent done ${scheme} ${viewport.width}: name ${JSON.stringify(fitName.text)}`
-        );
-      }
-      if (fitName.overflow !== false || fitName.title != null) {
-        throw new Error(
-          `first-agent done ${scheme} ${viewport.width}: 17자 이름에 title 이 있다 (${JSON.stringify(fitName)})`
-        );
-      }
-      if (fitName.handleOverflow !== false || fitName.handleTitle != null) {
-        throw new Error(
-          `first-agent done ${scheme} ${viewport.width}: 핸들 title ${JSON.stringify(fitName)}`
-        );
-      }
+    const heading = await page.evaluate(
+      () => document.querySelector("#first-agent-heading")?.textContent ?? ""
+    );
+    if (heading.trim() === "") {
+      throw new Error(`first-agent ${pose} ${scheme} ${viewport.width}: 코메토 문장이 없다`);
     }
-    if (viewport.width === 390) {
-      const crumb = await page.evaluate(() => {
-        const el = document.querySelector('[data-testid="first-agent-reentry"]');
-        if (!el) return null;
-        const r = el.getBoundingClientRect();
-        return {
-          whiteSpace: getComputedStyle(el).whiteSpace,
-          right: r.right,
-        };
-      });
-      if (crumb && crumb.whiteSpace !== "nowrap") {
-        throw new Error(
-          `first-agent ${pose} ${scheme} 390: 재진입 경로가 nowrap 이 아니다 (${crumb.whiteSpace})`
-        );
-      }
-      if (crumb && crumb.right > 390 + 1) {
-        throw new Error(
-          `first-agent ${pose} ${scheme} 390: 재진입 경로가 화면을 넘긴다 (${crumb.right}px)`
-        );
-      }
+    const loginButtons = await page.evaluate(() =>
+      [...document.querySelectorAll("button, a")]
+        .map((el) => `${el.textContent ?? ""} ${el.getAttribute("aria-label") ?? ""}`)
+        .filter((text) => /(Claude|ChatGPT|OpenAI|Anthropic|Codex)\s*(로|으로)\s*로그인/.test(text))
+    );
+    if (loginButtons.length > 0) {
+      throw new Error(
+        `first-agent ${pose} ${scheme}: provider 로그인 버튼 ${JSON.stringify(loginButtons)}`
+      );
+    }
+    if (viewport.width === 390 && tapTargetsByPose[pose]) {
       await assertTapTargets(
         page,
         `first-agent ${pose} ${scheme} 390`,
         tapTargetsByPose[pose]
       );
     }
-    if (pose === "done") {
-      const payoff = await page.evaluate(() => {
-        const heading = document.querySelector("#first-agent-heading");
-        return {
-          heading: heading?.textContent ?? "",
-          hasComposer: Boolean(document.querySelector("#composer-input")),
-          hasMention: Boolean(
-            document.querySelector('[data-testid="first-agent-mention"]')
-          ),
-        };
-      });
-      if (
-        !payoff.heading.includes("첫 에이전트 연결") ||
-        payoff.hasComposer ||
-        !payoff.hasMention
-      ) {
-        throw new Error(
-          `first-agent done ${scheme} ${viewport.width}: done 이 보상 화면이 아니다 (${JSON.stringify(payoff)})`
-        );
-      }
-    }
-    if (pose === "loading") {
-      const widths = await page.evaluate(() => {
-        const stage = document.querySelector('[data-testid="first-agent-stage"]');
-        const stageW = stage ? stage.getBoundingClientRect().width : 0;
-        const bars = [...document.querySelectorAll('[data-testid="skeleton-row"]')].map(
-          (el) => el.getBoundingClientRect().width
-        );
-        return { stageW, bars };
-      });
-      if (widths.bars.length === 0 || widths.bars.some((width) => width <= 0)) {
-        throw new Error(
-          `first-agent loading ${scheme} ${viewport.width}: 로딩 막대 폭이 0이다 (${widths.bars.join(", ")})`
-        );
-      }
-      if (widths.bars.some((width) => width < widths.stageW - 1)) {
-        throw new Error(
-          `first-agent loading ${scheme} ${viewport.width}: 로딩 막대가 목록 폭이 아니다 stage=${widths.stageW} bars=${widths.bars.join(", ")}`
-        );
-      }
-    }
     const path = beginSceneFromShotPath(
       `${OUT_DIR}/first-agent-${pose}${suffix}-${scheme}.png`
     );
-    await page.screenshot({ path });
+    await page.screenshot({ path, fullPage: true });
     shots.push(path);
-    if (pose === "done") {
-      beginScene("first-agent");
-      await sceneClick(page, page.getByTestId("first-agent-mention-action"));
-      await page.locator("#composer-input").waitFor({ state: "visible" });
-      const seeded = await page.evaluate(() => {
-        const el = document.querySelector("#composer-input");
-        const value =
-          el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement
-            ? el.value
-            : (el?.textContent ?? "");
-        return value;
-      });
-      if (!String(seeded).includes("@kim-intern ")) {
-        throw new Error(
-          `first-agent done ${scheme} ${viewport.width}: 컴포저 초안이 없다 (${JSON.stringify(seeded)})`
-        );
-      }
-      await page.mouse.move(viewport.width + 80, viewport.height + 80);
-      await waitForAnimations(page);
-      await assertHoverToolbarCount(
-        page,
-        `first-agent done-handoff ${scheme} ${viewport.width}`,
-        0
-      );
-      const hoverBits = await page.evaluate(() => ({
-        messageToolbar:
-          document.querySelector('[data-testid="message-hover-toolbar"]') !==
-          null,
-        straddle:
-          document.querySelector(
-            ".hover-toolbar-straddle, .hover-toolbar-straddle-below"
-          ) !== null,
-      }));
-      if (hoverBits.messageToolbar || hoverBits.straddle) {
-        throw new Error(
-          `first-agent done-handoff ${scheme} ${viewport.width}: hover toolbar in shot (${JSON.stringify(hoverBits)})`
-        );
-      }
-      const handoff = beginSceneFromShotPath(
-        `${OUT_DIR}/first-agent-done-handoff${suffix}-${scheme}.png`
-      );
-      await page.screenshot({ path: handoff });
-      shots.push(handoff);
-    }
     await context.close();
   }
 
-  for (const pose of [
-    "cards",
-    "one-time",
-    "detecting",
-    "cap-exceeded",
-    "done",
-    "loading",
-    "offline",
-    "error",
-  ]) {
+  const poses = (process.env.FIRST_AGENT_POSES || Object.keys(readyByPose).join(","))
+    .split(",")
+    .map((pose) => pose.trim())
+    .filter(Boolean);
+  for (const pose of poses) {
+    if (!(pose in readyByPose)) throw new Error(`unknown first-agent pose ${pose}`);
     await shoot(pose, VIEWPORT, "");
     await shoot(pose, MOBILE_VIEWPORT, "-390");
-  }
-
-  const FIRST_AGENT_LONG_NAME =
-    "김인턴-데이터플랫폼-온콜 Agent Runtime Operations Assistant 김인턴-온콜대기열용자";
-  if (FIRST_AGENT_LONG_NAME.length < 60) {
-    throw new Error(
-      `first-agent long-name fixture is ${FIRST_AGENT_LONG_NAME.length} chars`
-    );
-  }
-  {
-    const viewport = MOBILE_VIEWPORT;
-    const context = await browser.newContext({
-      viewport,
-      deviceScaleFactor: 2,
-      colorScheme: scheme,
-      reducedMotion: "reduce",
-    });
-    await installMocks(context);
-    await context.route("**/v1/workspaces/*/roster", (route) =>
-      json(route, {
-        members: ROSTER.map((member) =>
-          member.id === "019f9a01-0000-7000-8000-000000000404"
-            ? { ...member, displayName: FIRST_AGENT_LONG_NAME }
-            : member
-        ),
-      })
-    );
-    const page = await context.newPage();
-    await page.goto(ORIGIN, { waitUntil: "networkidle" });
-    await signIn(page);
-    await page.evaluate(() => {
-      window.location.hash = "/?firstAgent=done";
-    });
-    await page.getByTestId("first-agent-stage").waitFor({ state: "visible" });
-    await page.getByTestId("first-agent-mention-name").waitFor({
-      state: "visible",
-    });
-    await page.waitForFunction((expected) => {
-      const el = document.querySelector(
-        '[data-testid="first-agent-mention-name"]'
-      );
-      return (
-        el?.textContent === expected && el.getAttribute("title") === expected
-      );
-    }, FIRST_AGENT_LONG_NAME);
-    await page.mouse.move(viewport.width + 80, viewport.height + 80);
-    await waitForAnimations(page);
-    const probe = await page.evaluate(() => {
-      const name = document.querySelector(
-        '[data-testid="first-agent-mention-name"]'
-      );
-      const handle = document.querySelector(
-        '[data-testid="first-agent-mention-handle"]'
-      );
-      if (!(name instanceof HTMLElement) || !(handle instanceof HTMLElement)) {
-        return { missing: true };
-      }
-      const nameRect = name.getBoundingClientRect();
-      const handleRect = handle.getBoundingClientRect();
-      return {
-        missing: false,
-        title: name.getAttribute("title"),
-        overflow: name.scrollWidth > name.clientWidth,
-        nameRight: nameRect.right,
-        handleRight: handleRect.right,
-        handleText: handle.textContent,
-        handleTitle: handle.getAttribute("title"),
-        handleOverflow: handle.scrollWidth > handle.clientWidth,
-      };
-    });
-    if (probe.missing) {
-      throw new Error(
-        `first-agent long-name ${scheme} 390: mention name missing`
-      );
-    }
-    if (probe.nameRight > viewport.width + 1) {
-      throw new Error(
-        `first-agent long-name ${scheme} 390: name right ${probe.nameRight}`
-      );
-    }
-    if (probe.handleRight > viewport.width + 1) {
-      throw new Error(
-        `first-agent long-name ${scheme} 390: handle right ${probe.handleRight}`
-      );
-    }
-    if (probe.overflow !== true) {
-      throw new Error(
-        `first-agent long-name ${scheme} 390: ellipsis did not fire (${JSON.stringify(probe)})`
-      );
-    }
-    if (probe.title !== FIRST_AGENT_LONG_NAME) {
-      throw new Error(
-        `first-agent long-name ${scheme} 390: title ${JSON.stringify(probe.title)}`
-      );
-    }
-    if (!String(probe.handleText).includes("@kim-intern")) {
-      throw new Error(
-        `first-agent long-name ${scheme} 390: handle ${JSON.stringify(probe.handleText)}`
-      );
-    }
-    if (probe.handleOverflow === true && probe.handleTitle !== probe.handleText) {
-      throw new Error(
-        `first-agent long-name ${scheme} 390: handle truncated without title (${JSON.stringify(probe)})`
-      );
-    }
-    if (probe.handleOverflow !== true && probe.handleTitle != null) {
-      throw new Error(
-        `first-agent long-name ${scheme} 390: handle title without overflow (${JSON.stringify(probe)})`
-      );
-    }
-    const path = beginSceneFromShotPath(
-      `${OUT_DIR}/first-agent-done-longname-390-${scheme}.png`
-    );
-    await page.screenshot({ path });
-    shots.push(path);
-    await context.close();
   }
   return shots;
 }
@@ -14547,6 +14111,11 @@ async function main() {
             }))
           );
         }
+      } else if (profile === "welcome") {
+        for (const scheme of ["light", "dark"]) {
+          assertThisPreview();
+          all.push(...(await captureWelcomeKickoffScenes(browser, scheme)));
+        }
       } else if (profile === "first-agent") {
         for (const scheme of ["light", "dark"]) {
           assertThisPreview();
@@ -14602,6 +14171,7 @@ async function main() {
         profile !== "accent" &&
         profile !== "gallery" &&
         profile !== "agents" &&
+        profile !== "welcome" &&
         profile !== "first-agent"
       ) {
         for (const scheme of ["light", "dark"]) {

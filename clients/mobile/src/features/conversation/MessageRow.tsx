@@ -53,7 +53,6 @@ import {isTruncated, omittedFileCount} from '@momo/core/features/timeline/artifa
 import type {ArtifactPresentation} from '@momo/core/features/timeline/artifacts';
 import {attachmentMetaLine} from '@momo/core/features/attachments/model';
 import {deletedFoldLabel} from '@momo/core/features/timeline/deletedFold';
-import {AVATAR_SIZE} from '@momo/core/features/workspace/avatar';
 import {canQuoteMessage} from '@momo/core/features/timeline/quote';
 import type {QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {
@@ -81,20 +80,26 @@ import type {ReactionChip} from '@momo/core/features/timeline/reactions';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
+  ActivityIndicator,
+  Image,
   Keyboard,
   Pressable,
   StyleSheet,
   Text,
   View,
+  type StyleProp,
+  type TextStyle,
 } from 'react-native';
 import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
-import {useStyles} from '../../design/theme';
+import {usePalette, useStyles} from '../../design/theme';
+import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
 import {COPY_RECEIPT_MS, copyText} from './copy';
 import {MessageBody, bodyAffordances, openLink} from './MessageBody';
 import {MessageActionSheet} from './MessageActionSheet';
 import {MessageEditorSheet} from './MessageEditorSheet';
 import {appNote} from './appVoice';
 import {Avatar} from './Avatar';
+import {CONV} from './convDesign';
 import {
   deadlinePassed,
   gateFor,
@@ -110,7 +115,7 @@ import {
   DEFAULT_DECISION_LEAD,
 } from '../inbox/ApprovalDecision';
 import {LinkOnce} from './LinkOnce';
-import {Sentence} from '../../design/atoms';
+import {BAR_CONTROL_MAX_SCALE, Sentence} from '../../design/atoms';
 import {AttachmentList} from '../attachments/AttachmentList';
 import {
   approvalCardNote,
@@ -187,13 +192,22 @@ import {useLongPress} from './useLongPress';
 const UNKNOWN_MEMBER = '알 수 없는 멤버';
 
 /**
- * 연속 행 오른쪽 시각 칸 (감사 H-3).
+ * 시각이 서는 두 자리 (감사 H-3 → DS2-4 #2716).
  *
- * `09:01` 다섯 글자가 `font.meta` 로 들어가는 폭. 고정 폭에 오른쪽 정렬이라
- * 시각들이 한 줄에 서고, 그래서 눈이 그 칸을 **읽지 않기로** 정할 수 있다 —
- * 매 줄 다른 자리에 있으면 매번 다시 봐야 한다.
+ * H-3 은 모든 행의 시각을 **오른쪽 한 칸**에 세웠다(34pt 예약). DS2-4 에서 owner
+ * 피드백 표가 그것을 바꿨다: 「아바타 40, 이름 굵게 + 시간 회색 **한 줄**」(Buzz).
+ * 그래서 이제
+ *
+ *   * **묶음 머리**: 이름 바로 뒤, 같은 줄(`Author` 의 `time`). 시안 `.a-m .who time`.
+ *   * **연속 행**: 왼쪽 아바타 칸 안(`rowTime`). 그 칸은 머리 행에만 얼굴이 서고
+ *     연속 행에서는 비어 있다 — 비어 있는 칸에 시각을 세우면 세로도 가로도 새로
+ *     쓰지 않는다.
+ *
+ * 오른쪽 예약(42pt)이 사라져 본문이 Buzz 처럼 오른쪽 여백까지 간다. H-3 의 요구
+ * 「모든 행이 자기 시각을 말한다」는 그대로다 — 자리가 둘이 됐을 뿐, 연속 행의 시각이
+ * 늘 같은 x(아바타 칸)에 선다는 성질도 그대로다.
  */
-const TIME_COLUMN = 34;
+const TIME_GUTTER = CONV.avatar;
 
 /**
  * 반응 칩의 레이아웃 변. 두 축 모두 이 값이고, 두 축 모두 슬롭이 44 로 채운다.
@@ -239,12 +253,29 @@ const META_HIT_SLOP = {
 } as const;
 
 /** 작성자 머리줄(`line.head`)을 44pt로 만드는 슬롭. meta 줄과 높이가 다르다. */
-const AUTHOR_SLOP = slopTo(line.head);
+const AUTHOR_SLOP = slopTo(CONV.whoLine);
 const AUTHOR_HIT_SLOP = {
   top: AUTHOR_SLOP,
   bottom: AUTHOR_SLOP,
   left: AUTHOR_SLOP,
   right: AUTHOR_SLOP,
+} as const;
+
+/**
+ * `#rrggbb` 에 알파 두 자리를 붙인다. 팔레트 값은 전부 여섯 자리 hex 이고, 이미
+ * 알파가 있는 값(여덟 자리)은 그대로 둔다 — 겹친 투명도를 지어내지 않는다.
+ */
+function withAlpha(hex: string, alpha: string): string {
+  return /^#[0-9a-f]{6}$/i.test(hex) ? `${hex}${alpha}` : hex;
+}
+
+/** 40 얼굴을 44 로 만드는 슬롭 — 도출한다(감사 M-14). */
+const AVATAR_SLOP = slopTo(CONV.avatar);
+const AVATAR_HIT_SLOP = {
+  top: AVATAR_SLOP,
+  bottom: AVATAR_SLOP,
+  left: AVATAR_SLOP,
+  right: AVATAR_SLOP,
 } as const;
 
 /** hh:mm, 24-hour, local. The row's own clock is never used for ordering. */
@@ -276,7 +307,10 @@ function relativeLabel(atMs: number, nowMs: number): string {
 function DividerLabel({
   segments,
   tone = 'quiet',
+  strong = false,
 }: {
+  /** 날짜 알약 글자 — 시안 `.a-day span{font-weight:600}`. */
+  strong?: boolean;
   segments: readonly DividerSegment[];
   /**
    * 코어가 정한 **역할** (design-review U4-4 D-2). 옛 이름은 `'warn'` 이라 폰
@@ -289,8 +323,12 @@ function DividerLabel({
   const styles = useStyles(buildStyles);
   return (
     <Text
+      // 날짜 알약은 도형이다 — 최대 글씨에서 끝없이 자라면 떠 있는 알약이 창 위쪽
+      // 줄들을 덮는다(AX 캡처). 바의 컨트롤과 같은 1.6 배에서 멈춘다.
+      maxFontSizeMultiplier={strong ? BAR_CONTROL_MAX_SCALE : undefined}
       style={[
         styles.dividerLabel,
+        strong && styles.dividerLabelStrong,
         tone === 'boundary' && styles.dividerLabelBoundary,
       ]}>
       {segments.map((segment, index) =>
@@ -337,13 +375,54 @@ export function DayDivider({
     <View
       accessibilityRole="text"
       accessibilityLabel={dayDividerLabel(atMs, nowMs)}
-      style={[styles.divider, styles.dividerDay]}
+      style={[styles.dayRow, styles.dividerDay]}
       testID="day-divider">
-      <DividerLabel
-        segments={dayDividerSegments(atMs, nowMs)}
-        tone={DIVIDER_TONE.day}
-      />
-      <View style={styles.dividerLine} />
+      {/* 시안 A `.a-day` — 가운데 유리 알약(DS2-4 #2716). 위 「앞 라벨 + rule 하나」
+          (`DIVIDER_LABEL_SIDE`)는 **맨 글자** 라벨이 글자 수만큼 좌우로 움직이는
+          문제의 답이었다. 알약은 자기 폭을 가진 도형이라 가운데에 서도 그 문제가
+          없다 — 날짜가 바뀌는 자리는 늘 화면 가운데의 같은 모양이다. 안 읽음·복구
+          표지는 여전히 앞 라벨 + rule 이다(웹과 같은 문법). */}
+      <View style={styles.dayPill}>
+        <DividerLabel
+          segments={dayDividerSegments(atMs, nowMs)}
+          tone={DIVIDER_TONE.day}
+          strong
+        />
+      </View>
+    </View>
+  );
+}
+
+/**
+ * 떠 있는 날짜 알약 — 목록 위쪽에 머무는 `.a-day` (DS2-4, owner 표 「떠 있는 날짜
+ * 알약(스크롤 중 상단 고정)」). 어느 날인지는 `Timeline` 의 `floatingDayFor` 가 정한다.
+ *
+ * 보조기술에는 숨긴다: 목록 안 날짜 구분선이 이미 같은 날을 절대 날짜로 말하고,
+ * 스크롤할 때마다 바뀌는 떠 있는 표지를 로터에 두면 같은 사실이 두 번, 움직이는
+ * 자리에서 읽힌다. 누를 것도 아니다(`pointerEvents="none"`) — 행을 가리지 않는다.
+ */
+export function FloatingDayPill({
+  atMs,
+  nowMs,
+}: {
+  atMs: number;
+  nowMs: number;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <View
+      pointerEvents="none"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={styles.dayFloat}
+      testID="floating-day">
+      <View style={styles.dayPillFloat}>
+        <DividerLabel
+          segments={dayDividerSegments(atMs, nowMs)}
+          tone={DIVIDER_TONE.day}
+          strong
+        />
+      </View>
     </View>
   );
 }
@@ -454,6 +533,7 @@ export function RecoveryDivider({
 function Author({
   directory,
   memberId,
+  time,
   onOpenProfile,
   onLongPress,
   delayLongPress,
@@ -461,6 +541,11 @@ function Author({
 }: {
   directory: Directory;
   memberId: string;
+  /**
+   * 이름 뒤 같은 줄의 시각 (DS2-4 — owner 표 「이름 굵게 + 시간 회색 한 줄」).
+   * 서버 시계가 없는 행(보내는 중)은 주지 않는다 — 지어내지 않는다(#1083).
+   */
+  time?: string;
   onOpenProfile?: () => void;
   onLongPress?: () => void;
   delayLongPress?: number;
@@ -496,10 +581,18 @@ function Author({
           {`${owner.displayName}님이 관리`}
         </Text>
       ) : null}
-      {/* 시각은 여기 있었다. 행이 **오른쪽 한 칸**으로 가져갔다 (감사 H-3):
-          연속 행에 시각을 세우고 나니 같은 정보가 두 자리에 있었고(머리 행은
-          이름 옆, 연속 행은 오른쪽 끝), 그러면 눈이 매 줄 어느 쪽을 볼지 다시
-          정해야 한다. 한 칸에 모으면 그 칸을 **안 보기로** 정할 수 있다. */}
+      {/* 시각이 여기로 돌아왔다 (DS2-4, owner 표). H-3 은 오른쪽 한 칸이었다 —
+          위 `TIME_GUTTER` 머리말. 보조기술에는 숨긴다: 행 라벨이 이미 말한다. */}
+      {time !== undefined ? (
+        <Text
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          style={styles.authorTime}
+          numberOfLines={1}
+          testID="row-time">
+          {time}
+        </Text>
+      ) : null}
     </>
   );
   if (!onOpenProfile) return <View style={styles.authorRow}>{content}</View>;
@@ -655,6 +748,130 @@ function ReplyMarker({
 
 // ---- agent + artifact cards -------------------------------------------------
 
+/**
+ * 에이전트 답 카드의 틀 — 시안 A `.a-card` (DS2-4 #2716).
+ *
+ *   background: linear-gradient(surface, surface) padding-box,
+ *               linear-gradient(140deg, agent 55%, accent 35% 70%, line) border-box;
+ *   border: 1.5px solid transparent; border-radius: 20px; box-shadow: sh1
+ *
+ * RN 에는 `padding-box`/`border-box` 로 가르는 배경이 없어서 **두 겹**으로 옮긴다:
+ * 바깥 겹이 그라데이션을 칠하고 1.5 만큼 안쪽을 비우면, 안쪽 겹(surface)이 그 위를
+ * 덮어 테두리만 남는다. 그라데이션은 ShellChrome 이 이미 쓰는
+ * `experimental_backgroundImage` 다 — 새 의존이 없다.
+ *
+ * 흰 카드 + 사람 쪽 신호색으로 번지는 가장자리가 「에이전트가 쓴 것」의 표지다. 사람
+ * 메시지는 카드가 아니다(시안 `.a-m p`).
+ */
+function AgentCardFrame({
+  testID,
+  children,
+}: {
+  testID: string;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <View style={styles.cardFrame} testID={testID}>
+      <View style={styles.card}>{children}</View>
+    </View>
+  );
+}
+
+/** 단계의 네 상태 — 완료·진행·실패, 그리고 결과가 없는(건너뜀·모름) 칸. */
+export type StepState = 'ok' | 'run' | 'fail' | 'idle';
+
+/** 에이전트 턴 상태 → 단계 표지. 멈춤·취소는 실패가 아니다(ADR-0132). */
+export function stepStateForTurn(status: string): StepState {
+  if (status === 'done') return 'ok';
+  if (status === 'error') return 'fail';
+  if (status === 'queued' || status === 'thinking' || status === 'streaming') return 'run';
+  return 'idle';
+}
+
+/** 완료 리포트 게이트 결과 → 단계 표지. 안 돌린 것을 붉게 칠하지 않는다(ADR-0132). */
+export function stepStateForCheck(outcome: CompletionCheckOutcome): StepState {
+  if (outcome === 'pass') return 'ok';
+  if (outcome === 'fail') return 'fail';
+  if (outcome === 'pending') return 'run';
+  return 'idle';
+}
+
+/**
+ * 단계 한 줄의 표지 — 시안 `.a-step .st{width:20px;height:20px;border-radius:50%}`.
+ * 완료 = ok-soft 원 + ✓(`.st.ok`), 진행 = 에이전트색 돌기(`.st.run .spin`),
+ * 실패 = danger-soft 원 + ✕, 결과 없음 = 선 원. 모양이 색과 **함께** 상태를 나른다.
+ */
+function StepMark({state}: {state: StepState}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const palette = usePalette();
+  if (state === 'run') {
+    return (
+      <View style={styles.stepMark} testID="step-mark-run">
+        <ActivityIndicator size="small" color={palette.agent} style={styles.stepSpin} />
+      </View>
+    );
+  }
+  return (
+    <View
+      style={[
+        styles.stepMark,
+        state === 'ok' && styles.stepMarkOk,
+        state === 'fail' && styles.stepMarkFail,
+        state === 'idle' && styles.stepMarkIdle,
+      ]}
+      testID={`step-mark-${state}`}>
+      {state === 'idle' ? null : (
+        <Image
+          source={state === 'ok' ? CONV_ICONS.check : CONV_ICONS.cross}
+          style={[
+            styles.stepGlyph,
+            {tintColor: state === 'ok' ? palette.ok : palette.danger},
+          ]}
+        />
+      )}
+    </View>
+  );
+}
+
+/** 시안 `.a-step` — 표지 · 이름 · 오른쪽 메타. 진행 중인 줄은 굵고 에이전트색이다. */
+function StepRow({
+  state,
+  label,
+  meta,
+  metaStyle,
+  metaAccessibilityLabel,
+  testID,
+}: {
+  state: StepState;
+  label: string;
+  meta?: string;
+  metaStyle?: StyleProp<TextStyle>;
+  metaAccessibilityLabel?: string;
+  testID?: string;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <View style={styles.step} testID={testID ?? `step-${state}`}>
+      <StepMark state={state} />
+      <Text
+        style={[styles.stepLabel, state === 'run' && styles.stepLabelRun]}
+        lineBreakStrategyIOS="hangul-word"
+        numberOfLines={2}>
+        {label}
+      </Text>
+      {meta !== undefined ? (
+        <Text
+          style={[styles.stepMeta, metaStyle]}
+          numberOfLines={1}
+          accessibilityLabel={metaAccessibilityLabel}>
+          {meta}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 function StatusChip({label, tone}: {label: string; tone: 'ok' | 'warn' | 'danger' | 'muted'}) {
   const styles = useStyles(buildStyles);
   return (
@@ -772,7 +989,7 @@ function LoginHandoffCardView({
   const settled = card.phase !== 'waiting';
   const underControl = card.control !== null && card.control.endedAtMs === null;
   return (
-    <View style={styles.card} testID="agent-card">
+    <AgentCardFrame testID="agent-card">
       <View style={styles.cardHead}>
         <Text style={styles.cardTitle} numberOfLines={2}>
           {card.title}
@@ -850,7 +1067,7 @@ function LoginHandoffCardView({
           {LOGIN_HANDOFF_ELSEWHERE_COPY}
         </Text>
       ) : null}
-    </View>
+    </AgentCardFrame>
   );
 }
 
@@ -891,7 +1108,7 @@ function CompletionReportCardView({
     omittedParts.push(`게이트 ${card.omitted.checks}개 더`);
   const omitted = omittedParts.join(' · ');
   return (
-    <View style={styles.card} testID="agent-card">
+    <AgentCardFrame testID="agent-card">
       <View style={styles.cardHead}>
         <Text style={styles.cardTitle} numberOfLines={2}>
           {card.title}
@@ -938,29 +1155,27 @@ function CompletionReportCardView({
           style={styles.gateGroup}
           testID="completion-gate-row">
           <Text style={styles.gateSurface}>{row.surface}</Text>
-          <View style={styles.detailRows}>
-            {/* 겹친 라벨의 실패가 통과 아래로 밀리지 않게 코어가 순서를 준다 —
-                웹 셀이 겹친 칸을 최악 톤 먼저로 쌓는 것과 같다(폰 패리티). */}
+          {/* 시안 `.a-steps` — 게이트 하나가 단계 한 줄이다(DS2-4). 표지가 결과를
+              모양과 색으로 함께 말하고(완료 ✓ · 진행 돌기 · 실패 ✕ · 건너뜀 빈 원),
+              오른쪽 `.mt` 가 세부 또는 결과 낱말이다. 겹친 라벨의 실패가 통과 아래로
+              밀리지 않게 코어가 순서를 준다(폰 패리티). */}
+          <View style={styles.steps}>
             {completionRowChecks(row).map((check, index) => (
-              <View key={index} style={styles.detailRow}>
-                <Text style={styles.detailLabel}>{check.label}</Text>
-                {/* 세부가 있으면 그것이, 없으면 결과 낱말이 선다. 색은 결과가 진다.
-                    세부가 낱말을 대신할 때는 보조기술을 위해 결과 낱말을 함께 읽힌다
-                    (L3) — 「896 통과」만 소리로는 통과인지 실패인지 모른다. */}
-                <Text
-                  style={[
-                    styles.detailValue,
-                    toneStyle[COMPLETION_CHECK_TONE[check.outcome]],
-                  ]}
-                  numberOfLines={2}
-                  accessibilityLabel={
-                    check.detail !== undefined
-                      ? `${check.detail} ${COMPLETION_CHECK_OUTCOME_LABEL[check.outcome]}`
-                      : undefined
-                  }>
-                  {check.detail ?? COMPLETION_CHECK_OUTCOME_LABEL[check.outcome]}
-                </Text>
-              </View>
+              // 세부가 있으면 그것이, 없으면 결과 낱말이 선다. 색은 결과가 진다.
+              // 세부가 낱말을 대신할 때는 보조기술을 위해 결과 낱말을 함께 읽힌다
+              // (L3) — 「896 통과」만 소리로는 통과인지 실패인지 모른다.
+              <StepRow
+                key={index}
+                state={stepStateForCheck(check.outcome)}
+                label={check.label}
+                meta={check.detail ?? COMPLETION_CHECK_OUTCOME_LABEL[check.outcome]}
+                metaStyle={toneStyle[COMPLETION_CHECK_TONE[check.outcome]]}
+                metaAccessibilityLabel={
+                  check.detail !== undefined
+                    ? `${check.detail} ${COMPLETION_CHECK_OUTCOME_LABEL[check.outcome]}`
+                    : undefined
+                }
+              />
             ))}
           </View>
         </View>
@@ -976,7 +1191,7 @@ function CompletionReportCardView({
           {omitted}
         </Text>
       ) : null}
-    </View>
+    </AgentCardFrame>
   );
 }
 
@@ -1105,7 +1320,7 @@ function ActionResultCardView({
       : null;
   const elsewhere = actionResultElsewhereCopy(card);
   return (
-    <View style={styles.card} testID="agent-card">
+    <AgentCardFrame testID="agent-card">
       <View style={styles.cardHead}>
         <Text style={styles.cardTitle} numberOfLines={2}>
           {card.title}
@@ -1163,7 +1378,7 @@ function ActionResultCardView({
           {elsewhere}
         </Sentence>
       ) : null}
-    </View>
+    </AgentCardFrame>
   );
 }
 
@@ -1326,7 +1541,7 @@ function AgentCard({
       approvalsProvided,
     });
     return (
-      <View style={styles.card} testID="agent-card">
+      <AgentCardFrame testID="agent-card">
         <View style={styles.cardHead}>
           <Text style={styles.cardTitle} numberOfLines={2}>
             {card.title}
@@ -1428,10 +1643,12 @@ function AgentCard({
               onApprovalSettled?.(approval.approvalId, outcome)
             }
             testIDPrefix={`card-approval-${approval.approvalId}`}
+            // 시안 `.a-acts` 알약 행동(주 = 잉크, 보조 = surface2).
+            shape="pill"
           />
         ) : null}
         </ApprovalFooter>
-      </View>
+      </AgentCardFrame>
     );
   }
 
@@ -1467,14 +1684,39 @@ function AgentCard({
   }
 
   const cost = card.kind === 'turn' ? card.cost : null;
+  // 도구 카드의 단계 줄이 이미 말한 값(도구 이름·대상)은 아래 줄에서 다시 세우지
+  // 않는다(DS2-4 검수 M-6). 단계 줄에 없는 값만 남는다 — 버리는 것이 아니라 중복을
+  // 걷는다. 턴 카드는 그대로다.
+  // 비교는 **같음**이다(부분 문자열이 아니다 — 검수 R2 L-8): 짧은 값이 단계 문장에
+  // 우연히 들어 있다고 다른 정보의 줄을 지우지 않는다.
+  const frame = card.kind === 'tool' ? card.frame : null;
+  const detailRows =
+    frame === null
+      ? card.detail.rows
+      : card.detail.rows.filter(
+          row => row.value !== frame.object && `${row.value} 실행` !== frame.verb,
+        );
   return (
-    <View style={styles.card} testID="agent-card">
-      <View style={styles.cardHead}>
-        <Text style={styles.cardTitle} numberOfLines={2}>
-          {card.kind === 'tool' ? frameSentence(card.frame) : card.title}
-        </Text>
-        <StatusChip label={TURN_STATUS_LABEL[card.status]} tone={toneForTurn(card.status)} />
-      </View>
+    <AgentCardFrame testID="agent-card">
+      {card.kind === 'tool' ? (
+        // 도구 실행은 에이전트 일의 **한 단계**다 — 시안 `.a-steps` 한 줄로 선다:
+        // 표지(완료·진행·실패) · 무엇을 했나 · 상태 낱말(`.mt`). 한 턴의 여러 도구를
+        // 한 카드로 모으는 것은 타임라인 묶음의 일이라 이 PR 밖이다(남은 일).
+        <View style={styles.steps} testID="agent-card-steps">
+          <StepRow
+            state={stepStateForTurn(card.status)}
+            label={frameSentence(card.frame)}
+            meta={TURN_STATUS_LABEL[card.status]}
+          />
+        </View>
+      ) : (
+        <View style={styles.cardHead}>
+          <Text style={styles.cardTitle} numberOfLines={2}>
+            {card.title}
+          </Text>
+          <StatusChip label={TURN_STATUS_LABEL[card.status]} tone={toneForTurn(card.status)} />
+        </View>
+      )}
       {card.errorNote ? (
         <Text style={[styles.cardNote, styles.cardNoteDanger]}>{card.errorNote}</Text>
       ) : null}
@@ -1507,9 +1749,9 @@ function AgentCard({
             .join(' · ')}
         </Text>
       ) : null}
-      {card.detail.rows.length > 0 ? (
+      {detailRows.length > 0 || card.detail.withheld > 0 ? (
         <View style={styles.detailRows}>
-          {card.detail.rows.map(row => (
+          {detailRows.map(row => (
             <View key={row.label} style={styles.detailRow}>
               <Text style={styles.detailLabel}>{row.label}</Text>
               <Text style={styles.detailValue} numberOfLines={3}>
@@ -1524,7 +1766,7 @@ function AgentCard({
           ) : null}
         </View>
       ) : null}
-    </View>
+    </AgentCardFrame>
   );
 }
 
@@ -2299,10 +2541,9 @@ function MessageRowInner({
         disabled={actions === undefined}
         style={({pressed}) => [
           styles.rowInner,
-          // 두 칸의 예약은 **여기 한 곳**이다 (design-review M-1) — 아래
-          // `rowTimeReserve` 주석이 왜 자식이 아니라 그릇인지 든다. 아바타 칸은
-          // 그 규율의 거울이고, 같은 이유로 같은 자리에 있다.
-          styles.rowTimeReserve,
+          // 칸의 예약은 **여기 한 곳**이다 (design-review M-1) — 아래
+          // `rowAvatarReserve` 주석이 왜 자식이 아니라 그릇인지 든다. DS2-4 에서
+          // 오른쪽 시각 칸이 사라지고 아바타 칸 하나가 남았다(`TIME_GUTTER`).
           styles.rowAvatarReserve,
           pressed && actions !== undefined && styles.rowPressed,
         ]}
@@ -2316,7 +2557,7 @@ function MessageRowInner({
                 accessibilityRole="button"
                 accessibilityLabel={`${authorLabel} 프로필 보기`}
                 delayLongPress={longPress.delayLongPress}
-                hitSlop={CHIP_HIT_SLOP}
+                hitSlop={AVATAR_HIT_SLOP}
                 onLongPress={longPress.onLongPress}
                 onPress={event => {
                   event?.stopPropagation();
@@ -2325,10 +2566,20 @@ function MessageRowInner({
                 }}
                 style={({pressed}) => [pressed && styles.pressed]}
                 testID="profile-avatar-target">
-                <Avatar directory={directory} memberId={message.authorMemberId} />
+                <Avatar
+                  directory={directory}
+                  memberId={message.authorMemberId}
+                  size={CONV.avatar}
+                  ground="muted"
+                />
               </Pressable>
             ) : (
-              <Avatar directory={directory} memberId={message.authorMemberId} />
+              <Avatar
+                directory={directory}
+                memberId={message.authorMemberId}
+                size={CONV.avatar}
+                ground="muted"
+              />
             )}
           </View>
         ) : null}
@@ -2336,6 +2587,7 @@ function MessageRowInner({
           <Author
             directory={directory}
             memberId={message.authorMemberId}
+            time={timeLabel(message.createdAtMs)}
             onOpenProfile={
               actions?.onOpenProfile
                 ? () => actions.onOpenProfile?.(message.authorMemberId)
@@ -2599,9 +2851,10 @@ function MessageRowInner({
           //
           // ## 세로를 한 픽셀도 안 쓴다
           //
-          // 줄을 하나 더 세우면 5연발에 80pt 가 사라진다. 대신 행의 첫 줄
-          // 오른쪽 끝에 절대 위치로 앉히고, 그릇이 그만큼 오른쪽을 비워 둔다
-          // (`rowTimeReserve`). 겹치지 않으면서 세로 비용이 0 이다.
+          // 줄을 하나 더 세우면 5연발에 80pt 가 사라진다. 묶음 머리에서는 이름
+          // 뒤 같은 줄에(`Author` 의 `time`), 연속 행에서는 **비어 있는 아바타
+          // 칸**에 절대 위치로 앉힌다(DS2-4, `TIME_GUTTER` 머리말). 그 칸은
+          // 그릇이 이미 비워 둔 자리라 겹치지 않고, 세로 비용이 0 이다.
           //
           // ## 흐름 자식 **뒤**에 그린다 (design-review M-1)
           //
@@ -2616,15 +2869,17 @@ function MessageRowInner({
           // 로터가 같은 사실을 두 번 읽는다 — 「행 하나 = 원소 하나」를 다른
           // 방식으로 깨는 것이다.
           // ===================================================================
-          <Text
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-            // 어느 줄 옆에 서는지에 따라 줄 상자를 고른다 (u44 리뷰 M-2 —
-            // `styles.rowTime` 주석에 실측과 이유가 있다).
-            style={[styles.rowTime, startsGroup && styles.rowTimeGroupHead]}
-            testID="row-time">
-            {timeLabel(message.createdAtMs)}
-          </Text>
+          startsGroup ? null : (
+            <Text
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              style={styles.rowTime}
+              testID="row-time">
+              {timeLabel(message.createdAtMs)}
+            </Text>
+          )
         }
       </Pressable>
 
@@ -3027,7 +3282,7 @@ export function WorkingRow({
       testID={`working-row-${memberId}`}>
       <View style={[styles.rowInner, styles.rowAvatarReserve]}>
         <View style={styles.rowAvatar}>
-          <Avatar directory={directory} memberId={memberId} />
+          <Avatar directory={directory} memberId={memberId} size={CONV.avatar} ground="muted" />
         </View>
         <View style={styles.authorRow}>
           <Text
@@ -3112,7 +3367,7 @@ export function PendingRow({
       <View style={[styles.rowInner, styles.rowAvatarReserve]}>
         {startsGroup ? (
           <View style={styles.rowAvatar}>
-            <Avatar directory={directory} memberId={pending.authorMemberId} />
+            <Avatar directory={directory} memberId={pending.authorMemberId} size={CONV.avatar} ground="muted" />
           </View>
         ) : null}
         {startsGroup ? (
@@ -3185,39 +3440,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     gap: 2,
   },
   /**
-   * 시각 칸의 예약. **그릇이 진다** (design-review M-1).
-   *
-   * ## 자식에게 걸었던 것이 왜 구멍이었나
-   *
-   * 시각은 모든 행에 절대 위치로 앉는데, 오른쪽을 비워 두는 자리는 둘뿐이었다:
-   * 작성자 줄과 — 연속 행일 때만 — 본문. 그래서 행의 **첫 흐름 자식**이 답글
-   * 표식·인용·묘비·아티팩트 카드·승인 카드일 때는 예약이 없었고, 리뷰가 그
-   * 겹침을 저장소의 캡처에서 읽어 냈다(`...문서에⁷젝³`).
-   *
-   * 그 구멍은 오타가 아니라 **자리의 문제**였다: 예약을 자식에 걸면 자식 종류가
-   * 늘 때마다 같은 구멍이 다시 생기고, 그때마다 아무도 알아채지 못한다. 그래서
-   * 예약을 그릇으로 올린다 — 이 그릇에 무엇이 들어오든, 앞으로 무엇이 더
-   * 들어오든, 오른쪽 34pt 는 시각의 것이다.
-   *
-   * ## 값
-   *
-   * `SAFE_GUTTER`(그릇 자신의 좌우 여백) + `TIME_COLUMN` + `space.sm`. 시각은
-   * 화면 오른쪽에서 `SAFE_GUTTER` 만큼 떨어져 서므로(`rowTime.right`), 내용의
-   * 오른쪽 끝과 시각의 왼쪽 끝 사이에 정확히 `space.sm` 이 남는다.
-   *
-   * ## 값이 사는 비용
-   *
-   * 그룹 **머리** 행의 본문도 이제 42pt 좁아진다 — 전에는 작성자 줄만 비켜 주고
-   * 본문은 끝까지 갔다. 그 대신 한 묶음 안 모든 행의 본문 오른쪽 끝이 같은 x 에
-   * 서고, 시각이 그제야 **칸**이 된다. 「눈이 그 칸을 안 읽기로 정할 수 있다」는
-   * 이 배치의 주장은 다른 것이 그 칸에 들어오지 않을 때만 참이다.
-   *
-   * `WorkingRow` 는 이 스타일을 안 쓴다 — 그 행에는 시각이 없고, 없는 것을 위해
-   * 자리를 비우면 그것은 예약이 아니라 그냥 여백이다.
-   */
-  rowTimeReserve: {paddingRight: SAFE_GUTTER + TIME_COLUMN + space.sm},
-  /**
-   * 아바타 칸의 예약 — 시각 칸의 **거울** (감사 H-11 / goal U4-6M).
+   * 아바타 칸의 예약 (감사 H-11 / goal U4-6M). DS2-4 부터 연속 행의 시각도 이 칸에 선다.
    *
    * ## 왜 예약인가 (아바타는 머리 행에만 있는데)
    *
@@ -3226,14 +3449,15 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 묶음 전체의 본문이 한 줄에 서고, 그제야 아바타가 그 묶음 전부를 가리키는
    * 표지가 된다 — 훑는 눈이 사는 것이 정확히 그것이다.
    *
-   * 그래서 위 `rowTimeReserve` 와 같은 규율이다: 예약은 자식이 아니라 **그릇**이
+   * 규율: 예약은 자식이 아니라 **그릇**이
    * 지고(design-review M-1), 아바타 자신은 절대 배치라 세로 비용이 0 이다.
    *
    * ## 값
    *
-   * `SAFE_GUTTER`(그릇 자신의 여백) + `AVATAR_SIZE` + `space.sm`. 아바타는 화면
-   * 왼쪽에서 `SAFE_GUTTER` 만큼 떨어져 서므로(`rowAvatar.left`), 아바타의 오른쪽
-   * 끝과 내용의 왼쪽 끝 사이에 정확히 `space.sm` 이 남는다.
+   * `SAFE_GUTTER`(그릇 자신의 여백) + `CONV.avatar`(40, owner 표) + `CONV.avatarGap`
+   * (10, 시안 `.a-m{gap:10px}`). 아바타는 화면 왼쪽에서 `SAFE_GUTTER` 만큼 떨어져
+   * 서므로(`rowAvatar.left`), 아바타의 오른쪽 끝과 내용의 왼쪽 끝 사이에 정확히
+   * `avatarGap` 이 남는다.
    *
    * ## 값이 사는 비용
    *
@@ -3242,7 +3466,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 넣으면 감사 M-3 이 이미 「5조각 과적재」로 센 줄에 여섯 번째가 붙고, 32pt 가
    * 13pt 글자 옆 흐름에 들어가 머리 행이 한 줄만큼 자란다(묶음마다 반복된다).
    */
-  rowAvatarReserve: {paddingLeft: SAFE_GUTTER + AVATAR_SIZE + space.sm},
+  rowAvatarReserve: {paddingLeft: SAFE_GUTTER + CONV.avatar + CONV.avatarGap},
   /**
    * 아바타가 앉는 자리. 규칙은 `rowTime` 과 하나도 다르지 않다 — **이 메시지의
    * 맨 위 왼쪽**이고, 그 y 는 그릇의 위쪽 패딩과 **같은 곳**에서 온다.
@@ -3253,61 +3477,31 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     top: ROW_SPACE.withinGroup / 2,
   },
   /**
-   * 행의 시각 (H-3). 행의 첫 줄 오른쪽 끝.
+   * 연속 행의 시각 (H-3 → DS2-4). **비어 있는 아바타 칸** 안, 행의 첫 줄 옆.
    *
-   * `position: 'absolute'` 인 이유는 세로 비용을 0 으로 두기 위해서다 — 흐름에
-   * 넣으면 줄이 하나 늘고, 5연발에서 그것은 80pt 다. 겹침을 막는 것은
-   * `rowTimeReserve` 이고, 가림을 막는 것은 렌더 순서다(위 JSX 주석).
+   * `position: 'absolute'` 인 이유는 세로 비용을 0 으로 두기 위해서다. 겹침을 막는
+   * 것은 `rowAvatarReserve`(그 칸은 원래 비워 둔 자리)이고, 가림을 막는 것은 렌더
+   * 순서다(위 JSX 주석).
    *
-   * ## 기준선 (u44 리뷰 M-2)
+   * y 는 그릇의 위쪽 패딩과 **같은 곳**에서 온다(u44 리뷰 M-2: 두 숫자가 따로
+   * 적혀 있으면 그 차이가 어긋남이 된다). 연속 행의 첫 줄은 본문이므로 줄 상자도
+   * 본문(`line.body`)이다. 묶음 머리의 시각은 여기가 아니라 이름 줄(`authorTime`).
    *
-   * 리뷰 실측: 그룹 머리에서 `06:59` 가 `곽성재` 보다 **2~3pt 아래**에 앉는다.
-   * 두 가지가 겹쳐 있었다.
-   *
-   * 1. `top: space.xs`(4)가 **그릇의 패딩과 다른 숫자**였다. RN(Yoga)에서 절대
-   *    배치 자식의 오프셋은 부모의 패딩을 건너뛰므로(리뷰가 잰 우측 끝
-   *    386 = 402 − `SAFE_GUTTER` 가 그 증거다), 첫 줄의 y 는 `rowInner` 의
-   *    `paddingTop` 이고 시각의 y 는 4 였다. 두 값이 우연히 가까웠을 뿐 같은
-   *    사실에서 나온 적이 없다. 이제 둘 다 `ROW_SPACE.withinGroup / 2` 를 든다.
-   * 2. `lineHeight: 22` 는 **본문 줄 상자**의 값인데 그룹 머리의 첫 줄은
-   *    작성자 줄(13pt)이다. iOS 는 `lineHeight` 가 붙은 글자를 줄 상자 가운데에
-   *    놓으므로, 15.5pt 짜리 줄 옆에 22pt 짜리 상자를 세우면 그 차이의 절반이
-   *    그대로 어긋남이 된다.
-   *
-   * 그래서 시각은 자기가 어느 줄 옆에 서는지에 따라 **상자를 고른다**:
-   * 연속 행이면 본문 상자(`line.body`), 그룹 머리면 머리줄 상자(`line.head` —
-   * `authorName` 이 같은 이름을 든다). 폰에는 컨테이너를 건너뛰는 baseline
-   * 정렬이 없으므로 「선언된 같은 상자를 같은 y 에서 시작한다」가 여기서 쓸 수
-   * 있는 가장 강한 규율이다.
-   *
-   * **실측** (iPhone 17 Pro · `measure/captures/u44-group.png` · pt=px/3):
-   * 그룹 머리의 광학 어긋남 **+2.67pt → +0.33pt**. 남는 0.33pt 는 13pt 와 12pt
-   * 글자의 상승부 차이라 상자 값을 어떻게 잡아도 그대로다 — 다섯 값을 세워
-   * 확인했고, 그 실험은 `line.head` 의 주석에 있다.
-   *
-   * 첫 흐름 자식이 카드·인용·묘비인 행은 근사다 — 그 경우 예약(`rowTimeReserve`)이
-   * 겹침을 막고 있고, 정렬은 그 다음 문제다. 모른다고 적어 둔다.
+   * 칸 폭(40)을 넘는 큰 글씨에서는 줄바꿈 대신 줄어든다(`adjustsFontSizeToFit`) —
+   * 「04:5 / 9」로 접히던 #2617 의 결함을 이 칸에서 되풀이하지 않는다.
    */
   rowTime: {
     position: 'absolute',
-    right: SAFE_GUTTER,
-    // 규칙 하나: **이 메시지의 맨 위 오른쪽**. 그 y 는 그릇의 위쪽 패딩이고,
-    // 값은 그 패딩과 **같은 곳**에서 온다(`rowInner.paddingVertical`).
-    // (`rowStartsGroup` 의 여백은 바깥 `row` 에 있으므로 여기 안 들어온다.)
+    left: SAFE_GUTTER,
     top: ROW_SPACE.withinGroup / 2,
-    width: TIME_COLUMN,
-    textAlign: 'right',
+    width: TIME_GUTTER,
+    textAlign: 'center',
     fontSize: font.meta,
     // 시각은 뜻을 나르는 글자다 — `textFaint` 는 배경 대비 3.562:1 로 본문
-    // AA(4.5)를 못 지난다(U4-2 M-6 실측). 그룹 머리의 시각도 같은 이유로
-    // 함께 옮겼다: 한 화면에서 같은 종류의 글자가 두 밝기면, 덜 중요한 쪽이
-    // 더 밝아지는 일이 생긴다.
+    // AA(4.5)를 못 지난다(U4-2 M-6 실측).
     color: color.textMuted,
-    // 연속 행의 첫 줄은 본문이다.
     lineHeight: line.body,
   },
-  /** 그룹 머리의 첫 줄은 **작성자 줄**이므로 상자도 그쪽을 든다 (M-2). */
-  rowTimeGroupHead: {lineHeight: line.head},
   // Feedback that the row is interactive at all. On a phone this is one of the
   // few honest signals that a gesture exists, and it costs no vertical space.
   rowPressed: {backgroundColor: rowPressedBackground(color)},
@@ -3376,24 +3570,42 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   rowLanded: {backgroundColor: color.warnSurface},
   // 그룹 사이는 `ROW_SPACE.betweenGroups`. 안쪽이 이미 절반씩 물고 있으므로
   // 차이만 더한다 — 6+6=12(안), 6+6+6=18(사이).
-  rowStartsGroup: {marginTop: ROW_SPACE.betweenGroups - ROW_SPACE.withinGroup},
+  /**
+   * 작성자가 바뀌는 자리의 틈. 시안 `.a-m{margin-bottom:16px}` — 두 행의 안쪽 패딩
+   * 합(`withinGroup` 12)에 이만큼을 더해 16 이 된다. 코어 `betweenGroups`(18)보다
+   * 2 좁다: 아바타가 40 으로 커져 묶음 경계가 얼굴로 먼저 읽힌다.
+   */
+  rowStartsGroup: {marginTop: CONV.groupGap - ROW_SPACE.withinGroup},
   // 시각 칸의 여백은 여기 없다 — 그릇(`rowTimeReserve`)이 진다. 이 줄에만
   // 걸어 두었던 것이 M-1 이 말한 구멍의 절반이었다: 예약이 자식에 붙어 있으면
   // **그 자식이 없는 행**은 예약도 없다.
   authorRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    gap: space.xs,
+    columnGap: CONV.whoGap,
     flexWrap: 'wrap',
   },
   // 줄 상자를 **선언한다**: 행 시각이 이 줄 옆에 서므로(`rowTimeGroupHead`),
   // 이 값이 암묵적인 서체 자연값이면 그 정렬은 아무도 적어 둘 수 없는 값에
   // 기대게 된다 (u44 리뷰 M-2).
+  /**
+   * 시안 `.a-m .who{font-size:15px;font-weight:700;letter-spacing:-.01em;line-height:1.3}`.
+   * 이름과 시각이 **같은 선언된 줄 상자**(`CONV.whoLine`)를 든다 — 폰에는 컨테이너를
+   * 건너뛰는 baseline 정렬이 없어서 그것이 한 줄로 읽히는 근거다(u44 M-2).
+   */
   authorName: {
-    fontSize: font.label,
-    lineHeight: line.head,
+    fontSize: CONV.whoSize,
+    lineHeight: CONV.whoLine,
+    letterSpacing: CONV.whoTracking,
     fontWeight: '700',
     color: color.text,
+  },
+  /** 시안 `.a-m .who time{font-size:12px;font-weight:500;color:var(--ink2)}`. */
+  authorTime: {
+    fontSize: font.meta,
+    lineHeight: CONV.whoLine,
+    fontWeight: '500',
+    color: color.textMuted,
   },
   authorNameAgent: {color: color.agent},
   authorHandle: {fontSize: font.meta, color: color.textFaint},
@@ -3525,42 +3737,136 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   dividerLineBoundary: {backgroundColor: color.warn},
   // `textFaint` 는 배경 대비 3.562:1 로 본문 AA 미달이다(U4-2 M-6 실측).
   dividerLabel: {fontSize: font.meta, color: color.textMuted},
+  dividerLabelStrong: {fontWeight: '600'},
+  /** 날짜 줄 — 알약을 가운데에 세운다. 위아래 여백은 코어 `DIVIDER_SPACE.day`. */
+  dayRow: {alignItems: 'center', paddingHorizontal: SAFE_GUTTER},
+  /**
+   * 시안 `.a-day span{background:var(--glass);border:1px solid var(--glassLine);
+   * border-radius:999px;padding:3px 11px}`. 목록 안 알약은 흐림 없이 틴트만 —
+   * 바닥이 이미 평평해 흐릴 것이 없다. 선은 `line` 이다: 라이트의 `glassLine`(흰 70%)은
+   * 흰 바닥 위에서 사라져 알약이 맨 글자로 보였다(실데이터 캡처).
+   */
+  dayPill: {
+    paddingVertical: CONV.dayPadY,
+    paddingHorizontal: CONV.dayPadX,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: color.border,
+    backgroundColor: color.glass,
+  },
+  /** 떠 있는 알약의 자리 — 목록 틀 위쪽 가운데. */
+  dayFloat: {
+    position: 'absolute',
+    top: CONV.dayFloatTop,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  /**
+   * 떠 있는 알약 — **불투명** surface 위에 선과 sh1 (DS2-4 검수 B-1). 시안은 유리지만,
+   * 12pt 글자가 얇은 유리 위에 서면 밑의 16pt 본문 획과 섞여 둘 다 읽히지 않았다
+   * (실데이터 캡처). Buzz 의 알약도 불투명에 가까운 흰 바탕이다.
+   */
+  dayPillFloat: {
+    backgroundColor: color.surface,
+    paddingVertical: CONV.dayPadY,
+    paddingHorizontal: CONV.dayPadX,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: color.glassLine,
+    boxShadow: color.elevationRest,
+  },
   /** 숫자만 자릿폭 고정 — 조사·단위가 함께 받으면 음절 사이가 벌어진다. */
   dividerFigure: {fontVariant: ['tabular-nums']},
   dividerLabelBoundary: {color: color.warn, fontWeight: '600'},
 
-  chipRow: {flexDirection: 'row', flexWrap: 'wrap', gap: space.xs, paddingTop: space.xs},
+  /**
+   * 반응 알약 — 시안 `.a-react span{font-size:12.5px;font-weight:600;border-radius:999px;
+   * padding:3px 9px;background:var(--surface2);color:var(--ink2);border:1px solid var(--line)}`,
+   * 내 반응 `.me{background:var(--accentSoft);color:var(--accentText);border-color:transparent}`.
+   * 높이 바닥 32(`CHIP_SIZE`)는 그대로다 — 시안의 25 로 줄이면 슬롭이 한 변 10 이 되어
+   * 이웃 칩과 누르는 상자가 겹친다(PR 「시안과의 차이」).
+   */
+  chipRow: {flexDirection: 'row', flexWrap: 'wrap', gap: CONV.reactGap, paddingTop: space.xs},
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    // 32 in layout, 44 to a thumb via `hitSlop`. See the note on `Chips`.
-    // **두 축 모두** — `minWidth` 가 M-14 가 센 가로 미보증을 닫는다.
     minHeight: CHIP_SIZE,
     minWidth: CHIP_SIZE,
     gap: 4,
-    paddingHorizontal: space.sm,
+    paddingHorizontal: CONV.reactPadX,
     paddingVertical: 3,
     borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: color.border,
-    backgroundColor: color.surface,
+    backgroundColor: color.surfaceMuted,
   },
-  chipMine: {borderColor: color.accent, backgroundColor: color.accentSurface},
+  chipMine: {borderColor: 'transparent', backgroundColor: color.accentSurface},
   chipPressed: {backgroundColor: color.surfacePressed},
   chipEmoji: {fontSize: font.label},
-  chipCount: {fontSize: font.meta, color: color.textMuted, fontWeight: '600'},
+  chipCount: {fontSize: CONV.reactText, color: color.textMuted, fontWeight: '600'},
   chipCountMine: {color: color.accentText},
 
+  /**
+   * `.a-card` 의 바깥 겹 — 그라데이션 테두리와 sh1 (`AgentCardFrame` 머리말).
+   * `color-mix(in srgb, agent 55%, transparent)` → 알파 0x8C, accent 35% → 0x59.
+   */
+  cardFrame: {
+    marginTop: space.sm,
+    padding: CONV.cardBorder,
+    borderRadius: CONV.cardRadius,
+    experimental_backgroundImage: `linear-gradient(140deg, ${withAlpha(color.agent, '8C')} 0%, ${withAlpha(
+      color.accent,
+      '59',
+    )} 70%, ${color.border} 100%)`,
+    boxShadow: color.elevationRest,
+  },
+  /** `.a-card{padding:14px;background:var(--surface)}` — 안쪽 겹. */
   card: {
-    marginTop: space.xs,
-    padding: space.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: color.border,
+    padding: CONV.cardPad,
+    borderRadius: CONV.cardRadius - CONV.cardBorder,
     backgroundColor: color.surface,
     gap: space.xs,
   },
+  /** `.a-steps{margin:12px 0;display:flex;flex-direction:column;gap:9px;padding:11px 12px;background:var(--surface2);border-radius:14px}`. */
+  steps: {
+    marginVertical: CONV.stepsGapY - space.xs,
+    gap: CONV.stepsGap,
+    paddingVertical: CONV.stepsPadY,
+    paddingHorizontal: CONV.stepsPadX,
+    borderRadius: CONV.stepsRadius,
+    backgroundColor: color.surfaceMuted,
+  },
+  /** `.a-step{display:flex;align-items:center;gap:9px;font-size:13.5px}`. */
+  step: {flexDirection: 'row', alignItems: 'center', gap: CONV.stepsGap},
+  stepLabel: {flexShrink: 1, fontSize: CONV.stepText, color: color.text},
+  /** `.a-step.run{font-weight:600;color:var(--agent)}`. */
+  stepLabelRun: {fontWeight: '600', color: color.agent},
+  /** `.a-step .mt{margin-left:auto;font-size:12px;color:var(--ink2)}`. */
+  // 오른쪽 메타는 짧은 낱말(상태·세부)이라 줄지 않는다 — 줄면 「생각 / 중」처럼 음절이
+  // 갈린다(실데이터 캡처). 긴 세부는 폭 상한 안에서 말줄임한다.
+  stepMeta: {
+    marginLeft: 'auto',
+    flexShrink: 0,
+    maxWidth: '40%',
+    fontSize: font.meta,
+    color: color.textMuted,
+    textAlign: 'right',
+  },
+  stepMark: {
+    width: CONV.stepMark,
+    height: CONV.stepMark,
+    borderRadius: CONV.stepMark / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** `.a-step .st.ok{background:var(--okSoft);color:var(--ok)}`. */
+  stepMarkOk: {backgroundColor: color.okSurface},
+  stepMarkFail: {backgroundColor: color.dangerSurface},
+  stepMarkIdle: {borderWidth: 1.5, borderColor: color.textFaint},
+  stepGlyph: {width: CONV_ICON_SIZE.check, height: CONV_ICON_SIZE.check},
+  stepSpin: {transform: [{scale: 0.8}]},
   cardHead: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -3568,7 +3874,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     gap: space.sm,
   },
   cardTitle: {flex: 1, fontSize: font.label, fontWeight: '700', color: color.text},
-  cardBody: {fontSize: font.label, color: color.text, lineHeight: 19},
+  /** `.a-card .sum{font-size:15px;line-height:1.5}`. */
+  cardBody: {fontSize: CONV.cardSum, color: color.text, lineHeight: CONV.cardSumLine},
   cardNote: {fontSize: font.meta, color: color.textMuted, lineHeight: line.meta},
   cardNoteDanger: {color: color.danger},
   cardMeta: {fontSize: font.meta, color: color.textFaint},

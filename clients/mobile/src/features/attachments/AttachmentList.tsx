@@ -24,7 +24,9 @@ import {
   TOUCH_TARGET,
   type Palette,
 } from '../../design/tokens';
-import { useStyles } from '../../design/theme';
+import { usePalette, useStyles } from '../../design/theme';
+import { CONV_ICONS, CONV_ICON_SIZE } from '../../design/icons';
+import { CONV } from '../conversation/convDesign';
 import { useSession } from '../../session/useSession';
 import { downloadAttachmentFile, useAttachmentPreview } from './content';
 
@@ -158,6 +160,7 @@ function AttachmentItem({
   gesture?: AttachmentGesture;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const palette = usePalette();
   const inline = showsInlinePreview(attachment);
   const [download, setDownload] = useState<DownloadState>({ status: 'idle' });
 
@@ -216,9 +219,14 @@ function AttachmentItem({
         />
       ) : (
         <View style={styles.fileIcon} testID="attachment-card-icon">
-          <Text style={styles.fileIconText}>
-            {isImageMime(attachment.mime) ? '▧' : '▤'}
-          </Text>
+          {isImageMime(attachment.mime) ? (
+            <Text style={styles.fileIconText}>▧</Text>
+          ) : (
+            <Image
+              source={CONV_ICONS.file}
+              style={[styles.fileGlyph, { tintColor: palette.textMuted }]}
+            />
+          )}
         </View>
       )}
       <View style={styles.metaRow}>
@@ -282,14 +290,23 @@ const buildStyles = (color: Palette) =>
       minHeight: TOUCH_TARGET,
       borderRadius: radius.md,
     },
+    /**
+     * 파일 카드 — 시안 A `.a-file{display:flex;gap:11px;background:var(--surface);
+     * border-radius:16px;padding:10px 12px;box-shadow:var(--sh1);border:1px solid
+     * var(--line);max-width:250px}` (DS2-4 #2716).
+     */
     fileCard: {
+      maxWidth: CONV.fileMaxWidth,
       flexDirection: 'row',
       alignItems: 'center',
-      gap: space.sm,
-      padding: space.sm,
+      gap: CONV.fileGap,
+      paddingVertical: CONV.filePadY,
+      paddingHorizontal: CONV.filePadX,
+      borderRadius: CONV.fileRadius,
       borderWidth: 1,
       borderColor: color.border,
       backgroundColor: color.surface,
+      boxShadow: color.elevationRest,
     },
     pressed: { backgroundColor: color.surfacePressed },
     previewFrame: {
@@ -311,14 +328,16 @@ const buildStyles = (color: Palette) =>
       color: color.textMuted,
       textAlign: 'center',
     },
+    /** 시안 `.a-file .tile{width:38px;height:38px;border-radius:11px;background:var(--surface2)}`. */
     fileIcon: {
-      width: TOUCH_TARGET,
-      height: TOUCH_TARGET,
+      width: CONV.fileTile,
+      height: CONV.fileTile,
       alignItems: 'center',
       justifyContent: 'center',
-      borderRadius: radius.sm,
-      backgroundColor: color.surfacePressed,
+      borderRadius: CONV.fileTileRadius,
+      backgroundColor: color.surfaceMuted,
     },
+    fileGlyph: { width: CONV_ICON_SIZE.file, height: CONV_ICON_SIZE.file },
     fileIconText: { fontSize: font.title, color: color.textMuted },
     metaRow: {
       flex: 1,
@@ -364,8 +383,10 @@ const buildStyles = (color: Palette) =>
       lineHeight: line.meta,
       color: color.danger,
     },
+    // 카드 전체가 누르는 자리라 이 표지는 따로 눌리지 않는다 — 44 상자가 아니라
+    // 글리프 폭이면 된다(시안 250 폭 안에서 이름에 자리를 준다).
     downloadMark: {
-      width: TOUCH_TARGET,
+      width: space.xl,
       height: TOUCH_TARGET,
       alignItems: 'center',
       justifyContent: 'center',

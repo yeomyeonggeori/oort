@@ -85,6 +85,65 @@ export function hostedAgentDetected(probe: HostedAgentProbe): boolean {
   return probe.bundlePresent || probe.processRunning;
 }
 
+// -----------------------------------------------------------------------------
+// 로컬 하네스 감지 (#2813, ADR-0190 D3-a·D3-b, ADR-0193 D3)
+//
+// 데스크탑 셸이 이 맥에서 `claude`·`codex`를 PATH로 찾고, 찾으면 CLI 스스로의
+// 상태 명령(`claude auth status`, `codex login status`)을 **종료 코드만** 보고
+// 세 값으로 줄여 넘긴다. 경로·출력·계정은 넘어오지 않는다. 셸 허용목록은
+// `clients/desktop/src-tauri/src/harness_status.rs`의 `STATUS_COMMANDS`이고
+// id 는 아래와 같은 리터럴이다 — 양쪽 시험이 각자 자기 리터럴을 고정한다.
+// 알려진 손실: CLI 설정 오류도 0 아닌 종료라 「로그인 필요」로 보인다.
+// -----------------------------------------------------------------------------
+
+/** 셸이 상태 명령을 돌리는 하네스. 셸 `STATUS_COMMANDS`의 id 와 같은 순서. */
+export const LOCAL_HARNESS_IDS = ["claude", "codex"] as const;
+
+export type LocalHarnessId = (typeof LOCAL_HARNESS_IDS)[number];
+
+/**
+ * CLI 가 스스로 알린 로그인 상태. `logged_in` = 종료 코드 0,
+ * `needs_login` = 0 아님, `unknown` = 미설치·실행 실패·시간 초과.
+ */
+export type LocalHarnessAuth = "logged_in" | "needs_login" | "unknown";
+
+/** 셸 `detect_local_harnesses` 한 줄. */
+export interface LocalHarnessProbe {
+  id: LocalHarnessId;
+  installed: boolean;
+  auth: LocalHarnessAuth;
+}
+
+const LOCAL_HARNESS_AUTH: readonly LocalHarnessAuth[] = [
+  "logged_in",
+  "needs_login",
+  "unknown",
+];
+
+/**
+ * 셸 응답(또는 브라우저의 빈 응답)을 허용목록 순서의 두 줄로 고친다.
+ * 모르는 id·필드는 버리고, 모르는 auth 는 `unknown`, 미설치면 auth 도
+ * `unknown`이다. 없는 줄은 미설치로 채운다.
+ */
+export function normalizeLocalHarnessProbes(raw: unknown): LocalHarnessProbe[] {
+  const rows = Array.isArray(raw) ? raw : [];
+  return LOCAL_HARNESS_IDS.map((id) => {
+    const row = rows.find(
+      (candidate): candidate is Record<string, unknown> =>
+        typeof candidate === "object" &&
+        candidate !== null &&
+        (candidate as Record<string, unknown>).id === id
+    );
+    const installed = row?.installed === true;
+    const auth =
+      installed &&
+      LOCAL_HARNESS_AUTH.includes(row?.auth as LocalHarnessAuth)
+        ? (row?.auth as LocalHarnessAuth)
+        : "unknown";
+    return { id, installed, auth };
+  });
+}
+
 export type HostedInviteKind = "invite" | "recover";
 
 export interface HostedInvitePlan {

@@ -83,7 +83,7 @@ describe("claim page first-run markers (#2301)", () => {
       expect(src, name).not.toMatch(/\bmarkFreshSignup\(/);
       expect(src, name).not.toMatch(/\bholdKickoffForFreshSignup\(/);
       expect(src, name).not.toMatch(/\bmarkFirstAgentPending\(/);
-      expect(src, name).not.toMatch(/\bmarkPhoneLinkFirstRunPending\(/);
+      expect(src, name).not.toMatch(/\bmarkPhoneLinkCardPending\(/);
     }
   });
 });

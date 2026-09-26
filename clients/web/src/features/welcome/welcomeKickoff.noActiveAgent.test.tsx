@@ -5,8 +5,8 @@
 import {
   act,
   createElement,
+  Fragment,
   forwardRef,
-  useEffect,
   useImperativeHandle,
   useLayoutEffect,
   useState,
@@ -29,9 +29,8 @@ import {
 import { Timeline } from "@/features/timeline/Timeline";
 import { useTimeline } from "@/features/timeline/useTimeline";
 import type { RealtimeHandle } from "@/lib/realtime";
-import { phoneLinkFirstRunIsPending } from "@/features/auth/phoneLinkFirstRunStore";
 import { FirstAgentStage } from "./FirstAgentStage";
-import { FIRST_AGENT_TITLE } from "./firstAgent";
+import { AI_CONNECT_QUESTION } from "@momo/core/features/onboarding/aiConnect";
 import { WelcomeKickoffStage } from "./WelcomeKickoffStage";
 import {
   clearAllFirstAgentMarkers,
@@ -45,8 +44,8 @@ import {
   subscribeFirstRun,
   type FirstRunSurface,
 } from "./firstRunGate";
-import { useWelcomeKickoff, welcomePlayEntrance } from "./useWelcomeKickoff";
-import { welcomeShownKey } from "./welcomeKickoff";
+import { useWelcomeKickoff } from "./useWelcomeKickoff";
+import { WELCOME_BAND_JOY_HOLD_MS, welcomeShownKey } from "./welcomeKickoff";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const CH = "00000000-0000-7000-8000-000000000201";
@@ -241,7 +240,6 @@ function agentMember(): RosterMember {
 function decide(): FirstRunSurface {
   return decideFirstRunForSession({
     workspaceId: WS,
-    phonePending: phoneLinkFirstRunIsPending(),
   });
 }
 
@@ -293,25 +291,31 @@ function WelcomeTimeline(props: {
     directory: props.directory,
     realtime,
   });
-  const pinArrivalGrant = timeline.pinArrivalGrant;
-  useEffect(() => {
-    pinArrivalGrant(welcome.holdEntranceId);
-  }, [pinArrivalGrant, welcome.holdEntranceId]);
-  return createElement(Timeline, {
-    messages: timeline.state.messages,
-    directory: props.directory,
-    status: timeline.status === "error" ? "error" : "ready",
-    reachedStart: true,
-    channelKind: "public",
-    channelName: "general",
-    isPlayEntrance: (id: string) =>
-      welcomePlayEntrance(welcome.holdEntranceId, id, timeline.isPlayEntrance),
-    onEntranceConsumed: timeline.consumeEntrance,
-    welcomePhase: welcome.phase,
-    welcomeReducedMotion: welcome.reducedMotion,
-    welcomeHoldWriteAction: welcome.holdWriteAction,
-    onWelcomeExitComplete: welcome.onExitComplete,
-  });
+  // ChatShell's composition: the list, then the band above the composer (#2817).
+  return createElement(
+    Fragment,
+    null,
+    createElement(Timeline, {
+      messages: timeline.state.messages,
+      directory: props.directory,
+      status: timeline.status === "error" ? "error" : "ready",
+      reachedStart: true,
+      channelKind: "public",
+      channelName: "general",
+      isPlayEntrance: timeline.isPlayEntrance,
+      onEntranceConsumed: timeline.consumeEntrance,
+      welcomePhase: welcome.phase,
+      welcomeHoldWriteAction: welcome.holdWriteAction,
+    }),
+    welcome.phase === "hidden"
+      ? null
+      : createElement(WelcomeKickoffStage, {
+          phase: welcome.phase,
+          reducedMotion: welcome.reducedMotion,
+          speaker: welcome.speaker,
+          onExitComplete: welcome.onExitComplete,
+        })
+  );
 }
 
 function AfterClaimSurface(props: {
@@ -513,7 +517,7 @@ describe("no-active-agent hold (#2335)", () => {
     await settle();
 
     expect(root.querySelector("[data-testid='first-agent-stage']")).not.toBeNull();
-    expect(root.textContent).toContain(FIRST_AGENT_TITLE);
+    expect(root.textContent).toContain(AI_CONNECT_QUESTION);
     expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
     expect(root.querySelectorAll("[data-testid='welcome-kickoff-backstop']")).toHaveLength(
       0
@@ -552,6 +556,10 @@ describe("no-active-agent hold (#2335)", () => {
     });
     await settle();
     const stage = root.querySelector("[data-testid='welcome-kickoff-stage']");
+    expect(stage?.getAttribute("data-state")).toBe("joy");
+    await act(async () => {
+      vi.advanceTimersByTime(WELCOME_BAND_JOY_HOLD_MS);
+    });
     expect(stage?.classList.contains(WELCOME_KICKOFF_EXIT_CLASS)).toBe(true);
     act(() => {
       const event = new Event("animationend", { bubbles: true });
@@ -580,6 +588,7 @@ describe("no-active-agent hold (#2335)", () => {
       return createElement(WelcomeKickoffStage, {
         phase,
         reducedMotion: true,
+        speaker: { name: "hermes", sleepy: false },
         onExitComplete: () => undefined,
       });
     }
