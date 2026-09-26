@@ -1,7 +1,11 @@
-/* 홍염 — solar prominence. Deep wine, far from Dawn amber and the rose nebula. */
-:root[data-accent="hongyeom"],
+/* 홍염 — ADR-0174 액센트 id의 DS2 이행 바인딩 (ADR-0189 D3, DS2-1 #2713).
+ * 신호 프리셋 `hongyeom`의 새벽하늘 값(core `resolvePreset`).
+ * 값은 생성본 palettes/dawnsky.css와 같고 catalog.contrast.test.ts가 core와 대조한다.
+ * 새벽하늘 전용이다: DS2-7이 data-accent를 data-signal로 옮기면 이 파일은 걷힌다. */
+:root[data-palette="dawnsky"][data-accent="hongyeom"],
 [data-accent-swatch="hongyeom"] {
-  --accent: light-dark(#66002c, #fe5a94);
-  --accent-soft: light-dark(#f4e0e6, #34202a);
-  --on-accent: light-dark(#fffefb, #17161a);
+  --signal: light-dark(#66002c, #fe5a94);
+  --on-signal: light-dark(#fffefc, #16171b);
+  --signal-text: light-dark(#66002c, #ff6599);
+  --signal-soft: light-dark(#ecdadc, #452c39);
 }

@@ -257,7 +257,7 @@ export function AppShell({
         replaceSessionMember,
       }}
     >
-      {/* app-shell is the named two-pane grid from tokens.css (sidebar 240px,
+      {/* app-shell is the named two-pane grid from tokens.css (sidebar --w-sidebar,
        * viewport height), so the shell needs no arbitrary grid-cols value. The
        * switcher is a portalled dialog and deliberately sits outside that grid.
        *
@@ -325,7 +325,9 @@ export function AppShell({
              * 바깥을 눌러 닫는 것이 이 앱에서 유일하게 마우스로만 가능한 행동이
              * 되면 안 되기 때문이다. Presence 호스트는 Sidebar 가 같은 순서로
              * 그린다. */}
-            <main ref={mainRef} className="flex min-h-0 min-w-0 flex-col">
+            {/* `app-pane`(DS2-6 #2718): 본문은 창 바닥 위에 떠 있는 판 하나다(시안
+             * A `.a-main`, 인셋 8 · 반경 18 · rest). 폰 폭에서는 판이 창 자체다. */}
+            <main ref={mainRef} className="app-pane flex min-h-0 min-w-0 flex-col">
               {/* 실시간이 죽었다는 사실은 채널만의 사실이 아니다 (goal B8 B2):
                * 인박스도 활동도 갱신이 멈추고, 조용한 하루와 구별되지 않는다.
                * 그래서 이 줄은 라우트 위, 셸 안에 한 벌만 있다. */}

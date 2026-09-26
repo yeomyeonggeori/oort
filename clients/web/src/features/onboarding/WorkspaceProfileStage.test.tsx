@@ -393,13 +393,13 @@ describe("onboarding S1 내 워크스페이스·내 이름 (#2332)", () => {
       S1_KEEP_MINE
     );
     const filled = [...host.querySelectorAll("button")].filter((button) =>
-      button.className.includes("bg-accent")
+      button.className.includes("bg-primary")
     );
     expect(filled).toHaveLength(1);
     expect(filled[0]?.textContent).toBe(S1_KEEP_MINE);
     expect(host.querySelector('[data-testid="onboarding-s1-submit"]')).toBeNull();
     expect(host.querySelector('[data-testid="onboarding-s1-keep-theirs"]')?.className).not.toContain(
-      "bg-accent"
+      "bg-primary"
     );
     expect(
       (host.querySelector(

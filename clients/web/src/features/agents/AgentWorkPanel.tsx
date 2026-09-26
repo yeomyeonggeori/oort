@@ -158,7 +158,7 @@ export function AgentWorkPanel() {
       // `shrink-0`은 `work-panel-pane`이 flex 기준선을 갖게 되면서 빠졌다
       // (#1413). 320px은 원하는 폭이고, 라우트 상자가 자기 바닥에 닿으면 모자란
       // 폭은 이 패널이 낸다 — 근거는 tokens.css `--spacing-chat-min`.
-      className="work-panel-pane flex h-full flex-col border-l border-line bg-surface"
+      className="work-panel-pane flex h-full flex-col border-l border-line bg-pane"
     >
       <PanelHeader
         name={name}

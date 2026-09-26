@@ -53,8 +53,8 @@ import {
 const SEGMENT_CLASS = {
   plain: "text-ink-muted",
   count: "text-ink",
-  blocked: "text-accent",
-  blockedCount: "text-accent",
+  blocked: "text-signal-text",
+  blockedCount: "text-signal-text",
 } as const;
 
 export function AdeSummaryLine() {

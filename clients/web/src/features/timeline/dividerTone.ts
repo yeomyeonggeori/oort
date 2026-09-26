@@ -24,7 +24,7 @@ import type { DividerTone } from "@momo/core/features/timeline/divider";
 /** 이 톤이 실제로 쓰는 CSS 변수 이름. 테스트가 `tokens.css`에서 이 이름을 찾는다. */
 export const DIVIDER_TONE_TOKEN: Record<DividerTone, string> = {
   quiet: "--ink-muted",
-  boundary: "--accent",
+  boundary: "--signal-text",
 };
 
 /**
@@ -49,5 +49,5 @@ export const DIVIDER_TONE_CLASS: Record<
   // 경계: 라벨과 rule이 **같은 색**이다. 한 경계는 한 색이고, 그것이 코어
   // 명세의 `paintsRule`이 말하는 것이다. 굵기는 색과 함께 간다 — 색만으로
   // 앞으로 나오게 하면 색각 이상이 있는 사람에게 이 줄은 그냥 회색 줄이다.
-  boundary: { label: "font-medium text-accent", rule: "bg-accent" },
+  boundary: { label: "font-medium text-signal-text", rule: "bg-signal-text" },
 };

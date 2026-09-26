@@ -53,10 +53,15 @@ import {queryFailureDetail} from './SidebarScreen';
 export default function WorkConsoleScreen({
   active,
   onOpenSession,
+  onBack,
 }: {
-  /** False while this visited tab is hidden; disables its two work-ledger reads. */
+  /** False while this visited layer is hidden; disables its two work-ledger reads. */
   active: boolean;
   onOpenSession: (sessionId: string) => void;
+  /**
+   * FAB 시트가 여는 층이 된 뒤의 나가는 길 (ADR-0189 D1). 탭이던 때는 없었다.
+   */
+  onBack?: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {workspaceId, member} = useSession();
@@ -135,6 +140,8 @@ export default function WorkConsoleScreen({
       <ScreenHeader
         title="작업 콘솔"
         subtitle="참여 중인 대화 · 최근 작업 최대 200개"
+        onBack={onBack}
+        backLabel="작업 콘솔 닫기"
         titleTestID="work-title"
       />
       <WorkFilterBar

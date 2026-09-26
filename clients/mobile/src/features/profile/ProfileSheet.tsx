@@ -12,17 +12,13 @@ import {
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   Linking,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import {
-  SafeAreaProvider,
-  useSafeAreaInsets,
-} from 'react-native-safe-area-context';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {
   BAR_CONTROL_MAX_SCALE,
@@ -30,6 +26,7 @@ import {
   GroupSection,
   Sentence,
 } from '../../design/atoms';
+import {PageSheet, usePageSheetClose} from '../../design/PageSheet';
 import {ThemeControl} from '../../design/ThemeControl';
 import {themeChoiceLabel, useStyles, useTheme} from '../../design/theme';
 import {
@@ -64,10 +61,12 @@ import {currentAppVersionLabel} from './appVersion';
 //
 // ## 모양
 //
-// iOS 의 `pageSheet` 이다: 아래에서 올라와 목록을 뒤로 밀고, 끌어내리면 닫힌다.
-// 그 끌어내림을 RN 은 `onRequestClose` 로 알리고, 알리지 않는 판이 있어도
-// 닫힌 뒤의 `onDismiss` 가 한 번 더 받는다 — 둘 중 하나만 받으면, 시트는 네이티브에서
-// 내려갔는데 부모의 「열림」이 참으로 남아 아바타를 다시 눌러도 안 열린다.
+// 셸의 페이지 시트다(`design/PageSheet.tsx`, 시안 `.a-sheet`): 아래에서 올라와
+// 스크림이 목록을 덮고, 손잡이를 끌어내리거나 스크림을 누르면 닫힌다. 처음 판은 iOS
+// `pageSheet` 였고(#2702), DS2-2(#2714)가 시안의 모양(위 58, 반경 30)으로 옮겼다.
+// 닫힘은 어느 길로 오든 부모의 「열림」을 내린다 — 모달의 `onRequestClose`·
+// `onDismiss` 도 같은 `onClose` 로 잇는다. 하나라도 빠지면 시트는 사라졌는데 부모의
+// 「열림」이 참으로 남아 아바타를 다시 눌러도 안 열린다.
 //
 // 테마는 「테마 ›」 줄이 시트 **안에서** 여는 한 장이다. 시트 위에 시트를 겹치지
 // 않는다 — 돌아오는 길이 둘이 되면 어느 쪽이 닫히는지 사람이 알 수 없다.
@@ -101,25 +100,20 @@ export function ProfileSheet({
   onSignOut: () => void;
   onClose: () => void;
 }): React.JSX.Element {
+  // 셸의 페이지 시트(시안 `.a-sheet`: 위 58, 반경 30, `sheet` 바탕, 스크림, 손잡이)
+  // 안에 선다 (ADR-0189 D1, DS2-2 #2714). 이 시트는 한때 iOS `pageSheet` 였다 —
+  // 모양은 시스템이 정했고, 시안이 정한 58·30 이 아니었다. 내용은 그대로다(재도색은
+  // DS2-5 #2717).
   return (
-    <Modal
-      visible
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={onClose}
-      onDismiss={onClose}
-      testID="profile-sheet"
-    >
-      <SafeAreaProvider>
-        <SheetBody
-          member={member}
-          directory={directory}
-          connected={connected}
-          onSignOut={onSignOut}
-          onClose={onClose}
-        />
-      </SafeAreaProvider>
-    </Modal>
+    <PageSheet onClose={onClose} accessibilityLabel="내 프로필" testID="profile-sheet">
+      <SheetBody
+        member={member}
+        directory={directory}
+        connected={connected}
+        onSignOut={onSignOut}
+        onClose={onClose}
+      />
+    </PageSheet>
   );
 }
 
@@ -138,6 +132,8 @@ function SheetBody({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
+  // 「닫기」도 스크림·끌기와 같이 미끄러져 나간다.
+  const slideClose = usePageSheetClose() ?? onClose;
   const [page, setPage] = useState<Page>('profile');
   const scrollRef = useRef<ScrollView>(null);
   const revealEnd = useCallback(
@@ -182,7 +178,7 @@ function SheetBody({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="내 프로필 닫기"
-            onPress={onClose}
+            onPress={slideClose}
             style={({pressed}) => [styles.navButton, pressed && styles.pressed]}
             testID="profile-close"
           >
@@ -463,7 +459,8 @@ function dotTone(styles: Styles, presence: EffectivePresence) {
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    root: {flex: 1, backgroundColor: color.bg},
+    // 바탕은 시트가 칠한다(`sheet`). 여기서 칠하면 반경 30 의 모서리를 네모로 덮는다.
+    root: {flex: 1},
     nav: {
       flexDirection: 'row',
       alignItems: 'center',

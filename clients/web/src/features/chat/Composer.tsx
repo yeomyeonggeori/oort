@@ -770,7 +770,10 @@ export function Composer({
       onDrop={drop.onDrop}
       data-dragging={drop.dragging ? "" : undefined}
       className={cn(
-        "safe-area-bottom shrink-0 border-t border-line",
+        // 떠 있는 컴포저 (DS2-6, 시안 A `.a-dcomp`): 넓은 창에서는 판 아래 좌우 24 ·
+        // 아래 18 인셋 위에 흰 카드(`composer-card`)로 뜬다. 폰에서는 예전처럼
+        // 위 경계선 하나로 셸의 마지막 줄이다(`composer-dock`).
+        "composer-dock safe-area-bottom shrink-0",
         // 강조는 배경 한 겹이다. 점선 테두리와 가운데 정렬된 큼직한 안내는
         // 랜딩 페이지의 문법이고, 이 자리에서 필요한 것은 "여기 놓으면 된다"를
         // 말하는 최소한이다.
@@ -866,7 +869,10 @@ export function Composer({
           onRetry={autocomplete.retryCatalog}
         />
         <div
-          className="rounded-md border border-line-strong bg-surface-raised focus-visible-within:focus-ring"
+          // 입력 그릇이 곧 떠 있는 카드다. 폰에서는 3:1 경계(--line-strong)의
+          // 그릇이고, 넓은 창에서는 반경 20 · float 그림자 · 1px 선 고리다(시안).
+          // 고대비에서는 고리가 다시 --line-strong이 된다(tokens.css).
+          className="composer-card focus-visible-within:focus-ring"
           data-testid="composer-frame"
           onClick={(event) => {
             // 버튼과 그 자식(svg/path)은 자기 액션을 가진다. 나머지 그릇 면적은 한

@@ -69,23 +69,38 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 | # | 파일 | 정의하는 것 | 누구를 따르나 |
 |---|---|---|---|
-| 1 | `clients/web/src/design/tokens.css` | 색 · 간격(리듬 + 이름 축) · 반경 · 텍스트 롤 · 셸 기하 · 터치 타깃 | **아무도 안 따름 = 정본** (의미 토큰) |
-| 1b | `clients/web/src/design/themes/` | `--accent` / `--accent-soft` / `--on-accent` 바인딩 (라이트·다크 쌍) | ①의 의미 토큰을 **재바인딩**. 컴포넌트는 여기 hex를 읽지 않는다 (ADR-0174 D1) |
+| 0 | `packages/momo-core/src/design/themes.ts` | 색 역할 값 (테마 × 모드 × 역할), 표 밖 역할 계산 | **색의 정본** (ADR-0189 D5). 값과 실측은 [테마 토큰 표](themes-2.0.md) |
+| 1 | `clients/web/src/design/tokens.css` | 색 역할의 웹 얼굴(:root = 새벽하늘, core와 한 칸씩 대조) · 이행 별칭 · 간격(리듬 + 이름 축) · 반경 사다리 · 그림자 · 텍스트 롤 · 셸 기하 · 터치 타깃 | 색은 ⓪을 따른다. 나머지 축은 **정본** |
+| 1a | `clients/web/src/design/themes/palettes/` | 테마 팔레트 `:root[data-palette]` (생성본) | ⓪에서 생성. 손으로 고치지 않는다(드리프트 시험) |
+| 1b | `clients/web/src/design/themes/*.css` | ADR-0174 액센트 id → 신호 네 값(`--signal`·`--on-signal`·`--signal-text`·`--signal-soft`) 바인딩 | ⓪의 `resolvePreset` 값. DS2-7이 `data-signal`로 옮기며 걷는다 |
 | 2 | `clients/mobile/src/design/tokens.ts` | 색(×2스킴) · space · radius · font · line · TOUCH_TARGET | ①을 번역 |
 | 3 | `packages/momo-core/src/features/timeline/divider.ts` | `ROW_SPACE` — 타임라인 행 간 거리 | 없음(이 축의 정본). 웹·폰이 각자 소비 |
 | 4 | ~~`clients/macOS/Sources/MomoMac/Theme.swift`~~ | (삭제됨 — PR #1253) | 정본 토큰 파일은 위 1~3의 셋뿐이다 |
 
 ### 2.2 색 — 유일하게 완전히 흐르는 축
 
-**여명(Dawn) 팔레트.** 웹이 두 스킴을 `light-dark()` 한 줄에 적으므로 두 항이 갈라질 자리가 없다. 폰은 두 상수로 나눠 들고, `clients/mobile/__tests__/paletteContrast.test.ts`가 웹 `tokens.css`를 `readFileSync`로 읽어 **바이트 단위로** 대조한다(짝 15쌍 + 스크림).
+**새벽하늘(Dawn Sky) 팔레트** (ADR-0189, DS2-1 #2713). 값의 정본은 core이고, 웹은 `tokens.css` `:root`(새벽하늘)와 생성본 `themes/palettes/<id>.css`(`:root[data-palette]`)로 그 값을 싣는다. 두 스킴은 `light-dark()` 한 줄이다. 부트 스크립트가 `data-palette="dawnsky"`를 찍는다(테마 선택은 DS2-7). 폰의 옛 바이트 대조(`paletteContrast.test.ts` 「두 팔레트가 웹 정본과 값 단위로 같다」)는 DS2-2가 출처를 core로 옮긴다(ADR-0189 D6).
 
-컴포넌트는 의미 토큰(`--accent` · `--surface` · `--ink` …)만 소비한다. 사용자가 고르는 액센트는 `src/design/themes/`의 바인딩 층이 `:root[data-accent]`로 `--accent` / `--accent-soft` / `--on-accent`만 재정의한다(ADR-0174 D1). 기본 바인딩은 항상 새벽(호박)이고 목록의 첫 값이다. 온보딩 S0과 브랜드 락업(`.brand-lockup`)은 이 재정의의 영향권 밖이다(D4). 후보 세트는 구현 시안이며 성재 확인 전에 정본이 아니다.
+**주 행동과 신호는 갈라져 있다** (ADR-0189 D6):
+
+| 역할 | 토큰 | 쓰는 자리 |
+|---|---|---|
+| 주 행동 | `--primary` · `--on-primary` (잉크, 다크에서 밝은 잉크) | 주 버튼 · 보내기 · FAB · 나를 부른 수 배지(시안 `.a-badge.at`). 커스텀 색이 바꾸지 않는다 |
+| 신호 | `--signal` · `--on-signal` (호박) | 안 읽음 수 · 경계 · 커서 · 포커스 링 · 나를 부른 멘션 채움. 비텍스트라 3:1 |
+| 신호 글자 | `--signal-text` · `--signal-soft` | 멘션 글자와 그 옅은 채움 · 안 읽음 경계 라벨. 텍스트라 4.5:1 |
+| 이행 별칭 | `--accent*` → `--signal*`, `--surface-raised` → `--surface`, `--surface-sidebar` → `--sheet` | 옛 이름의 소비처. `text-accent`는 없앴다(글자는 `--signal-text`). DS2-7이 `data-accent`와 함께 걷는다 |
+
+면은 `--surface`(카드·떠 있는 판·컴포저) · `--surface-muted`(보조 채움) · `--sheet`(시트·사이드바) · `--pane`(본문 판, 라이트 = `--surface`, 다크 = `--canvas-mid`) · 바닥 `--canvas-top/mid/bottom`이다. 바닥 그라데이션은 `canvas-gradient` 유틸 하나로만 그린다.
+
+컴포넌트는 의미 토큰만 소비한다. ADR-0174 액센트 id는 `src/design/themes/*.css`가 `:root[data-palette="dawnsky"][data-accent]`로 **신호 네 값**만 다시 묶는다(값은 core `resolvePreset`). 주 버튼은 어떤 바인딩도 칠하지 않는다. 온보딩 S0과 브랜드 락업(`.brand-lockup`)은 이 재정의의 영향권 밖이다(ADR-0174 D4).
 
 규율 (출처: `tokens.css` 머리 주석 · `tokens.contrast.test.ts` · `themes/catalog.contrast.test.ts` · `paletteContrast.test.ts`):
 
-- **순흑·순백 없음.** 종이의 흰색은 `#fffefb`.
+- **순흑·순백 없음.** 종이의 흰색은 `#fffefc`. 반투명 층(스크림·유리 가장자리)은 칠이 아니라 그늘이라 예외다.
 - **인디고/네온 보라 금지.** 에이전트는 새벽 남색(`--agent`)이고, `tokens.css`가 *"never neon AI purple"*이라고 적는다.
-- **`--line`은 나누고, `--line-strong`은 컨트롤을 그린다(3:1).** `tokens.css:33`. 라이트 `--line`은 `#e4e0d8`(#1866, `--surface` 위 1.22:1). 라이트 `--line-strong`은 `--surface-hover` 위 **3.03:1**이라 한 단계(RGB +1 → 2.99)도 못 옅힌다 — 버튼·입력·컴포저 그릇의 경계는 이 토큰이 지고, 3:1을 깨는 완화는 금지.
+- **`--line`은 나누고, `--line-strong`은 텍스트 입력 그릇을 그린다(3:1).** ADR-0189 D6: **버튼은 채움 알약이다**(`Button` 다섯 변형 모두 테두리가 없다 — 주 = 잉크 채움, 보조·outline = `--surface-muted` 채움, 파괴 = `--danger-fill`, ghost = 채움 없음). outline 테두리는 `Input`·`Select`·컴포저처럼 **값을 받는 그릇에만** 남는다. `--line-strong`은 입력이 설 수 있는 모든 면(표면·보조 면·시트·바닥 정지점·선택 행)에서 3:1을 넘도록 core가 골랐고, 3:1을 깨는 완화는 금지.
+- **유리는 `glass` 유틸 하나로만.** 반투명 `--glass` + 흐림 22·채도 1.4. 투명도 줄이기·고대비·`backdrop-filter` 미지원에서는 불투명(`--surface`, 미지원은 94%)으로 물러난다(ADR-0189 D7). 실제 렌더 대비는 캡처로만 잰다(`runtime-unverified`).
+- **카드는 테두리 없이 뜬다.** `Card` = 반경 20 · `--surface` · rest 그림자 · 안 여백 14. 고대비에서만 `card-edge`가 `--line-strong` 1px를 두른다.
 - **텍스트 입력 그릇은 포인터 포커스에서 보더 색을 바꾸지 않는다** (#1866, buzz 동형). 컴포저(채널·스레드)와 관전 터미널 그릇은 `focus-visible-within:focus-ring`: Tab 모달리티와 자식 `:focus-visible`에서만 기존 인셋 링. 안쪽 textarea(컴포저 입력, xterm `.xterm-helper-textarea`)는 클릭에도 `:focus-visible`이 매치되므로 `:focus-within`만으로는 갈리지 않는다. Input/Select/outline 버튼은 프리미티브의 `focus-visible:focus-ring`이 그대로 진다.
 - **위험 순서의 자는 대비가 아니라 채도(OKLab C)다** — `danger > warn > ink-muted`. AA를 한참 넘긴 두 톤은 대비 축에서 구분되지 않는다.
 - **스크림은 색이 아니라 방향이다** — 어느 스킴에서든 뒤를 어둡게 한다.
@@ -173,14 +188,18 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 ### 2.4 반경
 
-세 단계뿐이다. 웹 `--radius-sm 6`(버튼·칩·입력) / `--radius-md 10`(카드·목록) / `--radius-lg 14`(다이얼로그·시트).
+**플랫폼층 사다리다** (ADR-0189 D6, DS2-1 #2713). 이름만 폰과 공유하고 값은 대조하지 않는다. 테마는 반경을 바꾸지 않는다.
 
-| 이름 | 웹 | 폰 | 관계 |
-|---|---|---|---|
-| `sm` | 6 | 6 | **짝 — 바이트로 같다** |
-| `md` | 10 | 8 | **분기.** 근거가 어디에도 없다(감사 §B-1). 값을 맞추는 것은 결정이고 아직 안 내려졌다 — 그때까지 `designSystem.test.ts`가 ①분기가 이 하나뿐이라는 것과 ②그 차이가 리듬 한 단(4px)보다 작다는 것을 잰다 |
-| `lg` | 14 | — | 폰의 시트는 RN 화면 전환이 그린다 |
-| `pill` | — | 999 | 칩·배지. 웹은 같은 자리를 `rounded-sm`로 그린다 |
+| 웹 이름 | 값 | 자리 |
+|---|---|---|
+| `rounded-sm` | 6 | 코드 칩 · 멘션 칩 |
+| `rounded-md` | 10 | 배지 · 태그 · 메뉴 항목 |
+| `rounded-lg` | 14 | 행 선택 · 입력 그릇(`Input`·`Select`) · 메뉴 판 |
+| `rounded-xl` | 18 | 본문 판(셸, DS2-6) |
+| `rounded-2xl` | 20 | 카드 · 다이얼로그 · 팝오버 |
+| `rounded-full` | pill | 버튼 · 원형 아이콘 버튼 · 수 배지 |
+
+폰은 `10·14·20·26·30·pill`이다([테마 토큰 표](themes-2.0.md) §5). `designSystem.test.ts`가 웹 사다리의 값·순서와 프리미티브가 자기 자리에 서는지를 잰다. 옛 `sm/md/lg` 세 값은 같은 값이라 기존 소비처의 기하는 움직이지 않았다.
 
 ### 2.5 타이포
 
@@ -209,6 +228,8 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 |---|---|---|
 | `--elevation-rest` | `shadow-sm` | 카드. Tailwind v4 `--shadow-sm` |
 | `--elevation-float` | `shadow-lg` | 떠 있는 표면(팝오버·팔레트·드로어). Tailwind v4 `--shadow-lg` + `backdrop-blur` 5px 스크림 |
+
+레시피는 DS2-1(#2713)부터 시안 A의 `--sh1`(rest)·`--sh2`(float)다. 다크는 그림자 대신 안쪽 하이라이트 1px로 층을 나눈다. `light-dark()`는 색에만 쓸 수 있어 두 스킴의 층을 한 목록에 두고 다른 스킴의 층을 투명으로 지운다(`tokens.css` `--shadow-sm`·`--shadow-lg`). 테마는 그림자를 바꾸지 않는다(ADR-0189 D2).
 
 **겹침 층은 고도의 다른 축이다** (#2044 · #2075 · #1919). 그림자가 「떴다」를 말하면, 히트 테스트는 층이 말한다. D6 스크림(`scrim-blur` 5px)은 시각이고, 아래 세 이름이 클릭이 어디에 닿는지를 잠근다. 숫자는 `tokens.css` `--layer-*` 한 곳뿐이고, 표면은 `layer-content-float` / `layer-overlay-scrim` / `layer-overlay-surface` 만 적는다. `z-10`·`z-50` 손기입은 이 축에서 금지.
 
@@ -318,7 +339,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 
 | 파일 | 존치 사유 |
 |---|---|
-| `clients/web/src/design/brand/OortMark.tsx` | Lucide에 없는 제품 브랜드 마크. 앱 안에서 `currentColor`를 상속한다. |
+| `clients/web/src/design/brand/OortMark.tsx` | Lucide에 없는 제품 브랜드 마크(C2-04 Bubble). 앱 안에서 `currentColor`를 상속한다. 기하 정본과 치수는 [`docs/brand/mark`](../brand/mark/README.md)다. |
 | `clients/web/src/features/auth/OortCloudMarks.tsx` | S0 오르트 구름 산포(혜성·소행성·4촉 별) 라인아트. Lucide에 없는 도메인 글리프이고 기능 아이콘으로 재사용하지 않는다. |
 | `clients/web/src/features/settings/DeviceLinkCard.tsx` | 기기 연결 딥링크를 담는 스캔용 QR 행렬. Lucide `QrCode`는 16px 아이콘이라 페이로드를 인코드하지 못한다 (#1989). |
 | `clients/web/public/oort-mark.svg` | CSS가 닿지 않는 문서·배포·링크 미리보기용 정적 브랜드 자산. |
@@ -339,7 +360,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 한 푸터·한 행에 컨트롤이 나란히 서면, 되돌릴 수 없는 것이 가장 크게 보여야 한다.
 
 1. **채도 순서**: `danger` > `warn` > `ink-muted`. 대비가 아니라 OKLab 채도로 잰다.
-2. **채움 순서**: 주 액션 채움(`--accent`) > 파괴 채움(`--danger-fill`). 파괴는 무겁되 **기본 경로가 아니다.**
+2. **채움 순서**: 주 액션 채움(`--primary`, 잉크) > 파괴 채움(`--danger-fill`). ADR-0189 D6 이후 주 채움은 무채색 잉크라 순서는 채도가 아니라 **명도 대비**가 진다(주 채움이 선 면에서 가장 큰 대비). 파괴 채움은 잉크 옆의 유일한 색이라 「다른 종류의 행동」으로 읽힌다. 파괴는 무겁되 **기본 경로가 아니다.**
 3. **윤곽 순서**: 파괴 컨트롤의 윤곽(`--danger`)은 비파괴 컨트롤의 윤곽(`--line-strong`)보다 진하다.
 4. **컨트롤 경계는 3:1이다**(WCAG 1.4.11). 채움이 3:1로 컨트롤을 식별시키면 경계는 면제된다 — 그런데 그 면제를 주장하려면 채움을 실제로 재야 한다.
 
@@ -360,7 +381,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | 규칙 | 웹 | 폰 |
 |---|---|---|
 | 채도 순서 (danger>warn>muted) | `tokens.contrast.test.ts` ✅ | `paletteContrast.test.ts` ✅ |
-| 채움 순서 (accent>danger-fill) | `tokens.contrast.test.ts` ✅ | ❌ — **폰에 파괴 채움 토큰이 없다**(#1210) |
+| 채움 순서 (primary>danger-fill, DS2-1부터 명도) | `tokens.contrast.test.ts` ✅ | ❌ — **폰에 파괴 채움 토큰이 없다**(#1210) |
 | 윤곽 순서 (danger>line-strong) | `tokens.contrast.test.ts` ✅ (#1211) | ❌ — #1210이 토큰을 놓은 뒤 같은 자리에 |
 | `--line`이 3:1을 못 넘는다(규칙의 전제) | `tokens.contrast.test.ts` ✅ (#1211) | `paletteContrast.test.ts` ✅ |
 | **어느 컴포넌트가 어느 쪽을 쓰는가** | `designSystem.test.ts` ✅ (#1211, 프리미티브 층) | ❌ 체계적으로는 없다 — 표면 하나에 대한 단정은 있다(`adeControlSurface.test.tsx:939`) |
@@ -370,12 +391,13 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 
 그런데 그 판정이 의미 질문인 이유는 **한 번도 이름을 안 붙였기 때문이다.** 어느 파일이 컨트롤 프리미티브인지를 한 자리에 적으면 남는 것은 문법 질문이 된다:
 
-- **컨트롤 프리미티브** (경계가 어포던스를 진다): `button.tsx` · `input.tsx` · `select.tsx`
-- **컨테이너 프리미티브** (경계는 나누는 선이다): `card.tsx` · `dialog.tsx` · `dropdown-menu.tsx`
+- **컨트롤 프리미티브** (경계가 어포던스를 진다): `input.tsx` · `select.tsx`
+- **채움 프리미티브** (채움이 어포던스를 진다, ADR-0189 D6): `button.tsx`
+- **컨테이너 프리미티브** (경계는 나누는 선이다): `card.tsx` · `dialog.tsx` · `dropdown-menu.tsx` · `context-menu.tsx` · `popover.tsx`
 
 `designSystem.test.ts`가 ①이 분류표가 `src/design/ui`의 모든 파일을 덮는지(새 프리미티브는 반드시 한쪽에 든다) ②컨트롤 프리미티브가 나누는 선을 경계로 쓰지 않는지를 잰다.
 
-> 남은 위반 하나 — `button.tsx`의 `secondary` 변형. `--surface` 위에서 경계 `--line`이 라이트 1.32 · 다크 1.43이고 채움(`--surface-raised`)도 라이트 1.07 · 다크 1.10이라 면제에도 걸리지 않는다. 바로 옆 `outline` 변형은 같은 모양의 버튼인데 `--line-strong`(3.59 / 3.56)을 든다. 수리는 **#1210**.
+> 프리미티브 층의 약한 경계 잔량은 0이다. 다만 **고쳐진 것이 아니라 규칙이 바뀐 것이다**(ADR-0189 D6): 버튼은 채움 알약이라 경계가 면제되고, 보조 채움(`--surface-muted`)은 `--surface` 위 1.118 · 시트 위 1.009로 **채움 대비를 재지 않는다** — 시안 A `.a-pill.sec`와 같은 쌍이고, 글자 라벨이 컨트롤을 식별시킨다(WCAG 1.4.11). 시트·회색 띠 위 보조 알약은 시안의 시트 위 문법(`--surface` + rest 그림자)으로 선다(사이드바 빈 상태·PWA 띠, DS2-1). 입력 그릇이 아닌 수제 컨트롤에 `border-line-strong`이 약 35곳 남아 있다(새 메시지 알약·떠 있는 툴바·워크스페이스 레일 [+]·반응 칩 등). 셸·표면 이관(DS2-6 #2718)에서 채움 문법으로 옮긴다.
 
 ### 3.4 겹침 층 — 떠 있는 본문 < 스크림 < 표면
 
@@ -537,11 +559,11 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 
 | # | 결정 | 지금 상태 |
 |---|---|---|
-| 1 | 반경 `md` 10 vs 8을 맞출 것인가, "플랫폼별로 다름 + 사유"를 정식 개념으로 둘 것인가 | 분기가 세어지고 상한이 걸려 있다(§2.4) |
+| 1 | 반경 `md` 10 vs 8을 맞출 것인가, "플랫폼별로 다름 + 사유"를 정식 개념으로 둘 것인가 | **닫힘** [ADR-0189](../adr/0189-design-system-2-dawn-sky-multi-theme.md) D6: 플랫폼층 사다리. §2.4 개정과 시험 이관(`designSystem.test.ts` 반경 축)은 DS2-1(#2713)이 했다 |
 | 2 | 모션 토큰을 신설할 것인가 | **결정됨** ADR-0179. UX-R0(#1958)이 사다리·눌림·강제 기제를 랜딩. 표면 이관은 UX-R1a~e |
 | 3 | 렌더 스윕(컨트롤 경계·터치 크기 전수)을 넣을 것인가 | 기법은 이미 레포에 있다(`gate-shell-layout.mjs`가 계산 스타일 파싱 + 휘도 계산) |
 | 4 | `@axe-core/playwright`로 렌더 텍스트 대비(1.4.3)를 잴 것인가 | MPL-2.0 — permissive-only 정책에 명시 필요. **1.4.11은 커버 안 되므로 우리 시험 유지 필수** |
 | 5 | 한국어 텍스트 검사를 만들 것인가 | 선례 없음. **우리가 선례가 될 자리** |
 | 6 | 폰 taste 스킬 방언 · design-review 계약 재조준 | ADR-0159 D4 — Swift 삭제 배치에 흡수 |
 | 7 | `light-dark()`의 실제 브라우저 하한선 | Tauri macOS는 WKWebView(OS 버전에 묶임). **미확인** |
-| 8 | 액센트 후보 세트 확정 | ADR-0174 D2. BZ-5a가 시안을 산출하고, 성재 확인 후 머지 |
+| 8 | 액센트 후보 세트 확정 | **결정됨** [ADR-0189](../adr/0189-design-system-2-dawn-sky-multi-theme.md) D2·D3: 테마 3종(새벽하늘·흑연·노을띠) × 모드, 신호 프리셋 4종과 커스텀 hex. 값은 [테마 토큰 표](themes-2.0.md)에 있다 |

@@ -84,7 +84,8 @@ describe("상태 트리거는 이웃과 같은 크기로 눌린다 (H2)", () => 
     // 이것이 H2의 함정이다: 버튼만 44px로 키우면 버튼 모서리에 앵커된 배지가
     // 24px 아바타에서 떨어져 허공에 뜬다. 앵커는 아바타 span 이어야 한다.
     expect(presenceControl).toContain(
-      '"relative flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface-hover'
+      // DS2-6: 아바타 면은 흰 면 + rest(바닥에 녹지 않게). 앵커(relative size-6)는 그대로.
+      '"band-surface relative flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface'
     );
     expect(presenceControl).toContain("absolute bottom-0 right-0 size-2");
   });

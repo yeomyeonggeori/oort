@@ -49,41 +49,48 @@ import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces
 import type {NotificationLanding} from '../push/tapArrival';
 
 /**
- * The v0 tabs.
+ * 탭은 셋이다 — 홈·인박스·검색 (ADR-0189 D1, DS2-2 #2714).
  *
- * Four: 대화·인박스·에이전트 plus a workspace-wide 작업 console. The fourth
- * tab adds one nullable detail layer, not an independent navigation stack.
+ * 이 자리에는 네 탭(대화·인박스·에이전트·작업)이 있었다. 디자인 시스템 2.0의 폰
+ * 구조는 떠 있는 알약 탭바에 셋을 두고, 오른쪽에 따로 떨어진 잉크 FAB을 둔다.
+ * 사라진 두 탭의 목적지는 없어지지 않는다(수용기준 「기능 손실 0」):
  *
- * D5 named three axes and the third one had no surface at all:
- * 대화 and 인박스 covered 대화·승인, and 관전 — what the agents are actually
- * DOING — was reachable only on the desktop. A messenger where the agent can
- * only be talked to is a chat with a bot in it, which is the shape ADR-0101
- * refused; 「에이전트」 is where that is undone (진단 2026-08-03 A안).
+ *   에이전트  FAB 시트의 「에이전트 부르기」가 여는 층(`agentList`). ADR-0189 D1은
+ *             이것을 홈 맨 위 「작업 중」 카드와 DM 섹션으로 흡수하라고 했고, 그
+ *             홈은 DS2-3(#2715)이 그린다. 그때까지 문은 FAB에 있다.
+ *   작업      FAB 시트의 「작업 콘솔」이 여는 층(`workList`). 서버가 그 표면을
+ *             내줄 때만 문이 선다 — 탭일 때와 같은 조건이다.
  *
- * This list is the only place the set is written down. `TabBar` maps over it and
- * `tabLabel` names it, so a fourth tab is one line here and nowhere else.
+ * 검색은 층에서 **탭**이 되었다. 층이던 때의 이유(「검색은 머무는 곳이 아니라
+ * 가는 길」)는 이 ADR이 뒤집은 판단이다: 시안 A는 검색을 탭바의 세 자리 중 하나로
+ * 두고, 결과에서 연 대화의 뒤로가기는 여전히 결과 목록(= 검색 탭)으로 온다 — 층일
+ * 때 지키려던 그 성질이 탭에서는 구조로 성립한다.
+ *
+ * 이 목록이 그 셋을 적는 유일한 곳이다. 탭바가 이것을 돌고 `tabLabel`이 이름을
+ * 붙인다.
  */
-export type Tab = 'channels' | 'inbox' | 'agents' | 'work';
+export type Tab = 'home' | 'inbox' | 'search';
 
-export const TABS: readonly Tab[] = ['channels', 'inbox', 'agents', 'work'];
+export const TABS: readonly Tab[] = ['home', 'inbox', 'search'];
 
+/** 셋 모두 언제나 보인다. 서버 표면에 따라 숨는 탭은 더 없다(작업은 FAB 시트로). */
 export function visibleTabs(): readonly Tab[] {
-  return TABS.filter(
-    tab => tab !== 'work' || isSurfaceProvided('workConsole'),
-  );
+  return TABS;
 }
 
 const TAB_LABELS: Readonly<Record<Tab, string>> = {
-  channels: '대화',
+  home: '홈',
   inbox: '인박스',
-  // 세 글자. 「에이전트」는 이 제품이 그것을 부르는 이름이고(사이드바 섹션
-  // 라벨과 같다), 줄여 부르면 두 화면이 같은 것을 다르게 부르게 된다.
-  agents: '에이전트',
-  work: '작업',
+  search: '검색',
 };
 
 export function tabLabel(tab: Tab): string {
   return TAB_LABELS[tab];
+}
+
+/** 작업 콘솔의 문을 세울지. 탭이던 때와 같은 조건이다. */
+export function workConsoleAvailable(): boolean {
+  return isSurfaceProvided('workConsole');
 }
 
 /**
@@ -167,46 +174,55 @@ export interface NavState {
   /** Pushed over the whole shell, or null when the tabs are visible. */
   conversation: OpenConversation | null;
   /**
-   * 메시지 검색, over the tabs and UNDER a conversation.
+   * 검색 **탭**에 건넬 첫 검색어 (ADR-0189 D1로 검색이 탭이 된 뒤).
    *
-   * Not a tab: search is a way of REACHING a destination rather than a place to
-   * be. It stays open behind the conversation it opened, so 뒤로 from a result
-   * lands back on the result list — going all the way out to the channel list
-   * would throw away the query they typed.
-   *
-   * `initialQuery` carries what was already typed. The sidebar's filter searches
-   * channels and people by NAME; when that finds nothing, the words are usually
-   * a thing someone SAID. Handing them over means the person types once.
+   * 사이드바 필터가 이름으로 아무것도 못 찾으면, 그 낱말은 대개 누군가 **한 말**
+   * 이다. 그 말을 검색 탭에 넘겨 사람이 두 번 치지 않게 한다. `seq`는 넘길 때마다
+   * 오른다: 검색 화면은 자기 입력을 들고 있으므로, 같은 탭에 새 검색어를 넘기려면
+   * 그 화면을 새로 세워야 하고 셸이 이 값을 키로 쓴다.
    */
-  search: {initialQuery: string} | null;
+  searchSeed: {initialQuery: string; seq: number} | null;
   /**
-   * 한 에이전트, over the tabs and UNDER a conversation — the same layer as
-   * search, and for the same reason: opening the DM with an agent from its own
-   * screen must come BACK to that screen, not to the list two steps out.
+   * 에이전트 목록 — FAB 시트의 「에이전트 부르기」가 여는 층.
    *
-   * It is not a tab either, even though it is reached from one: 「에이전트」 is
-   * the place, and this is one row of it opened up.
+   * 탭이던 것이 층이 되었다(ADR-0189 D1). 한 에이전트(`agent`)와 호스티드 연결
+   * (`hosted`)은 이 목록 **위**에 뜨고, 뒤로가기는 그 둘을 벗긴 뒤 이 목록을 닫는다.
+   */
+  agentList: boolean;
+  /**
+   * 한 에이전트, over the tabs and UNDER a conversation: opening the DM with an
+   * agent from its own screen must come BACK to that screen, not to the list two
+   * steps out.
    */
   agent: OpenAgent | null;
-  /** 작업 탭의 목록 위, 그리고 그 상세가 여는 대화 아래. */
+  /** 작업 콘솔 — FAB 시트가 여는 층(탭이던 것, ADR-0189 D1). */
+  workList: boolean;
+  /** 작업 콘솔 위, 그리고 그 상세가 여는 대화 아래. */
   workSession: OpenWorkSession | null;
   /**
-   * 호스티드 연결 관전 — 에이전트 탭 위에 뜨는 목록/상세 (goal HAP-UX3).
+   * 호스티드 연결 관전 — 에이전트 목록 위에 뜨는 목록/상세 (goal HAP-UX3).
    *
-   * search·agent·workSession 과 **배타적**이다: 하나가 열리면 나머지는 닫힌다.
-   * 에이전트 탭에서 갈라져 나오는 두 갈래(한 에이전트로 들어가기 · 호스티드 연결
-   * 목록 보기)가 서로를 덮지 않게 하는 규칙이다.
+   * agent·workSession 과 **배타적**이다: 하나가 열리면 나머지는 닫힌다. 에이전트
+   * 목록에서 갈라져 나오는 두 갈래(한 에이전트로 들어가기 · 호스티드 연결 목록
+   * 보기)가 서로를 덮지 않게 하는 규칙이다.
    */
   hosted: HostedNav;
 }
 
-export const INITIAL_NAV: NavState = {
-  tab: 'channels',
+/** 탭 위에 아무 층도 없는 상태. 탭 전환과 알림 입구가 이것으로 시작한다. */
+const NO_LAYERS = {
   conversation: null,
-  search: null,
+  agentList: false,
   agent: null,
+  workList: false,
   workSession: null,
   hosted: null,
+} as const;
+
+export const INITIAL_NAV: NavState = {
+  tab: 'home',
+  searchSeed: null,
+  ...NO_LAYERS,
 };
 
 export type NavAction =
@@ -214,12 +230,25 @@ export type NavAction =
   | {type: 'openConversation'; conversation: OpenConversation}
   | {type: 'openFromNotification'; conversation: OpenConversation}
   | {type: 'openSearch'; initialQuery?: string}
+  | {type: 'openAgentList'}
   | {type: 'openAgent'; agent: OpenAgent}
+  | {type: 'openWorkList'}
   | {type: 'openWorkSession'; workSession: OpenWorkSession}
   | {type: 'openHostedList'}
   | {type: 'openHostedConnection'; connection: OpenHostedConnection}
   | {type: 'back'}
   | {type: 'reset'};
+
+function hasLayers(state: NavState): boolean {
+  return (
+    state.conversation !== null ||
+    state.agentList ||
+    state.agent !== null ||
+    state.workList ||
+    state.workSession !== null ||
+    state.hosted !== null
+  );
+}
 
 export function navReducer(state: NavState, action: NavAction): NavState {
   switch (action.type) {
@@ -227,49 +256,48 @@ export function navReducer(state: NavState, action: NavAction): NavState {
       // Re-tapping the current tab is not a state change. Returning `state`
       // itself (rather than an equal object) keeps React from re-rendering the
       // whole shell on every stray tap.
-      if (
-        state.tab === action.tab &&
-        state.conversation === null &&
-        state.search === null &&
-        state.agent === null &&
-        state.workSession === null &&
-        state.hosted === null
-      ) {
-        return state;
-      }
-      // A tab tap also closes a conversation. It cannot normally be reached
-      // while one is open (the tab bar is behind it), but a deep link or a
+      if (state.tab === action.tab && !hasLayers(state)) return state;
+      // A tab tap also closes every layer. It cannot normally be reached while
+      // one is open (the tab bar is behind it), but a deep link or a
       // notification will be able to, and landing on a tab with a conversation
       // still stacked over it would look like the tap did nothing.
-      return {
-        tab: action.tab,
-        conversation: null,
-        search: null,
-        agent: null,
-        workSession: null,
-        hosted: null,
-      };
+      return {...state, tab: action.tab, ...NO_LAYERS};
     case 'openConversation':
       return {...state, conversation: action.conversation};
     case 'openFromNotification':
-      // 알림은 **새 입구**다 (#2569). 그 순간 무엇이 열려 있었든 — 검색, 한
-      // 에이전트, 작업 상세, 다른 대화 — 사람은 그곳에서 이 대화로 온 것이 아니라
-      // 잠금 화면이나 배너에서 왔다. 그 층들 위에 대화를 얹으면 뒤로가기가
-      // 사람이 지나온 적 없는 화면으로 떨어진다. 그래서 대화 탭 위의 대화 하나로
-      // 연다: 뒤로 한 번이면 대화 목록이다.
-      return {
-        tab: 'channels',
-        conversation: action.conversation,
-        search: null,
-        agent: null,
-        workSession: null,
-        hosted: null,
-      };
-    case 'openSearch':
+      // 알림은 **새 입구**다 (#2569). 그 순간 무엇이 열려 있었든 — 한 에이전트,
+      // 작업 상세, 다른 대화 — 사람은 그곳에서 이 대화로 온 것이 아니라 잠금
+      // 화면이나 배너에서 왔다. 그 층들 위에 대화를 얹으면 뒤로가기가 사람이 지나온
+      // 적 없는 화면으로 떨어진다. 그래서 홈 탭 위의 대화 하나로 연다: 뒤로 한 번이면
+      // 대화 목록이다.
       return {
         ...state,
-        search: {initialQuery: action.initialQuery ?? ''},
+        tab: 'home',
+        ...NO_LAYERS,
+        conversation: action.conversation,
+      };
+    case 'openSearch':
+      // 검색은 탭이다(ADR-0189 D1). 넘길 말이 있으면 씨앗을 새로 세운다 — 없으면
+      // 검색 탭이 들고 있던 입력을 그대로 둔다(탭을 오가도 검색어가 남는다).
+      return {
+        ...state,
+        tab: 'search',
+        ...NO_LAYERS,
+        searchSeed:
+          action.initialQuery === undefined
+            ? state.searchSeed
+            : {
+                initialQuery: action.initialQuery,
+                seq: (state.searchSeed?.seq ?? 0) + 1,
+              },
+      };
+    case 'openAgentList':
+      // FAB 시트에서 연다. 에이전트 목록에서 갈라지는 층들은 새로 시작한다.
+      return {
+        ...state,
+        agentList: true,
         agent: null,
+        workList: false,
         workSession: null,
         hosted: null,
       };
@@ -280,25 +308,31 @@ export function navReducer(state: NavState, action: NavAction): NavState {
         // 아래에 그려지는 기존 층이므로, 열린 대화를 함께 걷지 않으면 새 화면이
         // 뒤에 생겨 탭의 결과가 보이지 않는다.
         conversation: null,
-        search: null,
         agent: action.agent,
+        workSession: null,
+        hosted: null,
+      };
+    case 'openWorkList':
+      return {
+        ...state,
+        agentList: false,
+        agent: null,
+        workList: true,
         workSession: null,
         hosted: null,
       };
     case 'openWorkSession':
       return {
         ...state,
-        search: null,
         agent: null,
         workSession: action.workSession,
         hosted: null,
       };
     case 'openHostedList':
-      // The list is a sibling of 「one agent」 reached from the same tab, so it
-      // closes the same three layers those close among themselves.
+      // The list is a sibling of 「one agent」 reached from the same list, so it
+      // closes the same layers those close among themselves.
       return {
         ...state,
-        search: null,
         agent: null,
         workSession: null,
         hosted: {kind: 'list'},
@@ -316,9 +350,10 @@ export function navReducer(state: NavState, action: NavAction): NavState {
       // the same one-step-at-a-time the 작업 detail gets over its list.
       if (state.hosted?.kind === 'detail') return {...state, hosted: {kind: 'list'}};
       if (state.hosted?.kind === 'list') return {...state, hosted: null};
-      if (state.search !== null) return {...state, search: null};
       if (state.agent !== null) return {...state, agent: null};
       if (state.workSession !== null) return {...state, workSession: null};
+      if (state.agentList) return {...state, agentList: false};
+      if (state.workList) return {...state, workList: false};
       return state;
     case 'reset':
       // Sign-out. The next person to sign in must not land in the previous

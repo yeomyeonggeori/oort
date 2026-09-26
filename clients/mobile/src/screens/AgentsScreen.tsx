@@ -86,6 +86,7 @@ import {queryFailureDetail} from './SidebarScreen';
 export default function AgentsScreen({
   onOpenAgent,
   onOpenHostedList,
+  onBack,
 }: {
   onOpenAgent: (agent: {
     memberId: string;
@@ -98,6 +99,11 @@ export default function AgentsScreen({
    * agent」로 들인 것도 결국 에이전트다.
    */
   onOpenHostedList: () => void;
+  /**
+   * FAB 시트의 「에이전트 부르기」가 여는 층이 된 뒤의 나가는 길 (ADR-0189 D1).
+   * 탭이던 때는 없었다.
+   */
+  onBack?: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {workspaceId} = useSession();
@@ -176,6 +182,8 @@ export default function AgentsScreen({
       <ScreenHeader
         title="에이전트"
         subtitle="이 워크스페이스에서 일하는 에이전트"
+        onBack={onBack}
+        backLabel="에이전트 목록 닫기"
         titleTestID="agents-title"
         right={
           <Pressable

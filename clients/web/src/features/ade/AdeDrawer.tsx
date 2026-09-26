@@ -93,7 +93,7 @@ const STATE_CHIP_CLASS: Readonly<Record<AdeState, string>> = {
   working: "bg-muted-soft text-warn",
   // 대기만 accent 를 입는다. 이 화면에서 사람을 부르는 유일한 상태이고, 같은
   // 규칙을 작업 세션 패널이 「호스트 연결 끊김」에 이미 쓴다.
-  blocked: "bg-muted-soft text-accent",
+  blocked: "bg-muted-soft text-signal-text",
   idle: "bg-muted-soft text-ink-muted",
 };
 
@@ -250,7 +250,7 @@ function AdeCard({
               data-testid="ade-card-handoff"
               className={cn(
                 "shrink-0 text-timestamp",
-                item.handoff === "takeover" ? "text-accent" : "text-ink-muted"
+                item.handoff === "takeover" ? "text-signal-text" : "text-ink-muted"
               )}
             >
               {handoff.button}
@@ -441,7 +441,7 @@ export function AdeDrawer() {
       tabIndex={-1}
       aria-label="작업 목록"
       data-testid="ade-drawer"
-      className="ade-drawer flex flex-col border-e border-line bg-surface"
+      className="ade-drawer flex flex-col border-e border-line bg-pane"
       data-overlay-layer="surface"
     >
       <header className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-4 py-2">

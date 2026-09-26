@@ -11,6 +11,7 @@
     "typecheck": "tsc -b --noEmit && tsc --noEmit -p tsconfig.measure.json",
     "lint": "eslint .",
     "test": "vitest run",
+    "gen:palettes": "vite-node scripts/gen-palettes.ts",
     "smoke": "node e2e/smoke.mjs",
     "smoke:connect": "node e2e/connect.mjs",
     "gate:inject": "node gates/inject.mjs",
@@ -56,7 +57,8 @@
     "capture:devices": "npm run build && node scripts/capture-devices.mjs",
     "capture:actions": "npm run build && node scripts/capture-actions.mjs",
     "capture:phone-onboarding": "npm run build:design && node scripts/capture-phone-onboarding.mjs",
-    "icons:pwa": "node scripts/render-pwa-icons.mjs",
+    "icons:mark": "node scripts/brand-mark.mjs",
+    "icons:brand": "node scripts/brand-mark.mjs && node scripts/render-brand-icons.mjs",
     "extract:emoji": "node scripts/extract-emoji-catalog.mjs",
     "build:ade-gate": "vite build --mode ade-gate --outDir artifacts/dist-ade-gate"
   },
@@ -102,6 +104,7 @@
     "typescript": "^5.6.3",
     "typescript-eslint": "^8.65.0",
     "vite": "^6.0.0",
+    "vite-node": "^2.1.9",
     "vitest": "^2.1.0"
   }
 }

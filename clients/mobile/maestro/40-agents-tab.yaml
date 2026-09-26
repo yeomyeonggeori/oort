@@ -22,7 +22,7 @@ name: 40-agents-tab
 # Detour through #general before touching the tab bar, and it is not wasted
 # motion: the LogBox banner (subflows/dismiss-dev-logbox.yaml) sits on the same
 # band of screen as the tab bar, so a tab tap made while it is up is swallowed
-# and the flow carries on against the wrong screen — `tapOn: tab-agents`
+# and the flow carries on against the wrong screen — `tapOn: tab-agents` (then a tab)
 # reported COMPLETED here while the app never left 대화.
 #
 # It has to be dismissed from a CONVERSATION rather than from this screen,
@@ -51,10 +51,13 @@ name: 40-agents-tab
 # before tapping would time out on a healthy app.
 - extendedWaitUntil:
     visible:
-      id: "tab-agents"
+      id: "shell-fab"
     timeout: 30000
+# 에이전트·작업은 탭이 아니라 FAB 시트의 문이다 (ADR-0189 D1, #2714).
 - tapOn:
-    id: "tab-agents"
+    id: "shell-fab"
+- tapOn:
+    id: "new-message-agents"
 - extendedWaitUntil:
     visible:
       id: "agents-list"
@@ -103,8 +106,9 @@ name: 40-agents-tab
 # and the phone has to render that line.
 - tapOn:
     id: "header-back"
+# 에이전트 상세 → 에이전트 목록 층 → 홈. 탭바는 층 뒤에 있어 누를 수 없다.
 - tapOn:
-    id: "tab-channels"
+    id: "header-back"
 - tapOn:
     id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
 - extendedWaitUntil:
@@ -134,8 +138,11 @@ name: 40-agents-tab
 # Wake it back up — see the header.
 - tapOn:
     id: "header-back"
+# 에이전트·작업은 탭이 아니라 FAB 시트의 문이다 (ADR-0189 D1, #2714).
 - tapOn:
-    id: "tab-agents"
+    id: "shell-fab"
+- tapOn:
+    id: "new-message-agents"
 - extendedWaitUntil:
     visible:
       id: "agent-row-${AGENT_MEMBER_ID}"

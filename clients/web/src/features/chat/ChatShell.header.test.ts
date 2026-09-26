@@ -103,8 +103,9 @@ describe("BZ-2 right control group rearranges existing actions", () => {
     expect(window).not.toMatch(/shrink-0/);
   });
 
-  it("draws huddle icon buttons with the outline icon primitive", () => {
-    expect(HUDDLE_CODE).toMatch(/variant="outline"/);
+  it("draws huddle icon buttons like the other header controls (ghost .a-ibtn, DS2-1)", () => {
+    expect(HUDDLE_CODE).toMatch(/variant="ghost"/);
+    expect(HUDDLE_CODE).toMatch(/rounded-md/);
     expect(HUDDLE_CODE).toMatch(/size="icon"/);
     expect(HUDDLE_CODE).toMatch(/size-4 spinner-busy/);
   });

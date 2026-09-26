@@ -5,6 +5,8 @@
 - 발의: Fable (BZ-5 #1868 선행 — 성재 2026-08-29 지시 "buzz 세팅 경험 이식, 색·테마 전반 개선")
 - 관련: docs/design-system/README.md(정본) · momo-design-taste-web(게이트) · buzz(Apache-2.0) Appearance · #1868 · #1873(멤버 아바타·소개 ADR 후보 동반 상정)
 
+> **증보 2026-09-25 — [ADR-0189](0189-design-system-2-dawn-sky-multi-theme.md)가 D2의 액센트 목록과 3단 밀도를 대체한다.** 액센트는 테마 3종 × 모드, 신호 프리셋 4종(seongun·hongyeom·hyeseong·gamram), 커스텀 hex로 바뀐다. 밀도는 2단이다. 저장값 이행 규칙은 ADR-0189 D3에 있다. D1·D3·D4는 유지한다. D5의 게이트(`ai_gradient`·`pure_bw`는 사전 검증된 테마 바인딩 밖에서 금지)도 유지한다. ADR-0189의 바닥 그라데이션은 이 허용 목록을 거쳐서만 그린다(ADR-0189 D6).
+
 ## 배경
 성재 검수(2026-08-29): buzz Appearance의 커스터마이제이션(컬러 모드·테마 스타일·액센트 팔레트·글래스·폰트 크기·밀도·링크 프리뷰·스레드 레이아웃 + 라이브 프리뷰)이 제품 경험의 핵심 차별이라는 판정. 현 정본은 **Dawn 팔레트 단일 고정**(tokens.css가 유일 색 출처, 액센트=호박 고정)이고 taste 게이트가 raw color·ai_gradient·pure_bw를 기계 차단한다. 커스터마이제이션 도입은 "팔레트 단일 고정" 경계의 변경이므로 ADR 없이 머지 불가.
 

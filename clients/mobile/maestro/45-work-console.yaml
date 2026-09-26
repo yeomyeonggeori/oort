@@ -19,8 +19,11 @@ name: 45-work-console
 - tapOn:
     id: "header-back"
 
+# 에이전트·작업은 탭이 아니라 FAB 시트의 문이다 (ADR-0189 D1, #2714).
 - tapOn:
-    id: "tab-work"
+    id: "shell-fab"
+- tapOn:
+    id: "new-message-work"
 - extendedWaitUntil:
     visible:
       id: "work-list"

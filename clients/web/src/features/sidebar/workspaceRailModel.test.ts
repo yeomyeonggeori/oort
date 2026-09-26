@@ -89,7 +89,7 @@ describe("레일 묶음 (M-4)", () => {
     expect(add).toBeLessThan(navClose);
     expect(railSource).not.toContain("sidebar-expand");
     expect(railSource).toContain(
-      "border border-line-strong text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+      "rounded-md bg-surface-hover text-ink-muted press hover:bg-surface-pressed focus-visible:focus-ring"
     );
   });
 });

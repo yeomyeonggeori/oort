@@ -54,15 +54,15 @@ import { cn } from "@/design/lib/cn";
 function effectiveBadgeClass(effective: EffectivePresence): string {
   switch (effective) {
     case "online":
-      return "bg-ok border-surface-sidebar";
+      return "bg-ok border-surface";
     case "away":
-      return "bg-warn border-surface-sidebar";
+      return "bg-warn border-surface";
     case "dnd":
-      return "bg-danger border-surface-sidebar";
+      return "bg-danger border-surface";
     case "offline":
       // No fill, a muted outline: reads as "offline", distinct from a filled dot
       // and from nothing at all.
-      return "bg-surface-sidebar border-line-strong";
+      return "bg-surface border-line-strong";
   }
 }
 
@@ -90,7 +90,10 @@ export function PresenceBadge({
     <span
       data-testid="presence-control"
       data-effective={effective}
-      className="relative flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface-hover text-meta font-semibold"
+      // DS2-6: 사이드바가 바닥(그라데이션) 위에 녹은 뒤로 옅은 채움은 밝은 두
+      // 테마에서 바닥과 같은 색이 됐다. 흰 면 + rest로 어느 바닥 위에서도 선다.
+      // 띠(노을띠) 위에서도 흰 면이라 원래 글자 역할을 쓴다.
+      className="band-surface relative flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface text-meta font-semibold text-ink shadow-sm"
       aria-hidden="true"
     >
       {selfName.slice(0, 1)}
