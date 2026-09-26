@@ -271,6 +271,8 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(plus).toHaveProp('accessibilityRole', 'button');
     expect(plus).toHaveProp('accessibilityLabel', PLUS_LABEL);
     expect(plus.props.accessibilityState).toEqual({expanded: false});
+    // 힌트는 행을 읊지 않는다 — 행은 역할·서버 표면에 따라 달라진다(review M2).
+    expect(plus).toHaveProp('accessibilityHint', '만들기 메뉴를 엽니다.');
     // 조상 사슬을 거슬러 올라가며 tablist 를 찾는다: 탭은 그 안에, + 는 그 밖에.
     type Node = {props: {accessibilityRole?: string}; parent: Node | null};
     const insideTablist = (node: Node | null): boolean => {
@@ -401,7 +403,12 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(screen.getByTestId('new-channel-sheet')).toBeTruthy();
     // 규칙은 처음부터 칸 밑에 선다(웹과 같은 자리).
     expect(screen.getByTestId('new-channel-name-rule')).toHaveTextContent(
-      /영문 소문자, 숫자, 하이픈, 밑줄로 80자 이내/,
+      '영문, 숫자, 하이픈, 밑줄로 80자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장됩니다.',
+    );
+    // VoiceOver 는 같은 규칙을 힌트로 듣는다.
+    expect(screen.getByTestId('new-channel-name')).toHaveProp(
+      'accessibilityHint',
+      '영문, 숫자, 하이픈, 밑줄로 80자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장됩니다.',
     );
     // 빈 이름으로는 만들 수 없다.
     expect(screen.getByTestId('new-channel-create').props.accessibilityState).toMatchObject(

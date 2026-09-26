@@ -112,7 +112,7 @@ function SheetBody({
     failure?.field === 'name' ? failure.message : issueMessage;
   // 규칙은 처음부터 칸 밑에 선다 — 웹 다이얼로그와 같은 자리, 같은 문장 가족이다
   // (design-review M4). 어기면 같은 자리가 그 이유로 바뀐다.
-  const nameRule = `영문 소문자, 숫자, 하이픈, 밑줄로 ${CHANNEL_NAME_MAX}자 이내.`;
+  const nameRule = `영문, 숫자, 하이픈, 밑줄로 ${CHANNEL_NAME_MAX}자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장됩니다.`;
 
   const submit = async () => {
     setTouched(true);
@@ -205,7 +205,8 @@ function SheetBody({
           returnKeyType="done"
           editable={!pending}
           accessibilityLabel="채널 이름"
-          accessibilityHint={nameMessage ?? undefined}
+          // VoiceOver 도 같은 줄을 듣는다: 평소엔 규칙, 어기면 그 이유.
+          accessibilityHint={nameMessage ?? nameRule}
           testID="new-channel-name"
         />
       </View>
