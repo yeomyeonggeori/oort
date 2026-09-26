@@ -30,7 +30,7 @@ function member(id: string, name: string, handle: string): RosterMember {
     channelCount: 1,
     channelIds: [CH],
     capabilities: [],
-  };
+  } as unknown as RosterMember;
 }
 
 const directory = makeDirectory([
