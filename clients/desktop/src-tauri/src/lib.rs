@@ -48,6 +48,9 @@ mod pty;
 // file drops (#2671). Tests only.
 #[cfg(test)]
 mod shell_contract;
+// AI 연결 Phase 1 (#2814): brings Terminal.app forward. No arguments.
+#[cfg(desktop)]
+mod terminal_app;
 #[cfg(desktop)]
 mod updater;
 
@@ -101,6 +104,7 @@ pub fn run() {
             pdf_viewer::open_pdf_attachment,
             detect::detect_hosted_agents,
             harness_status::detect_local_harnesses,
+            terminal_app::open_terminal_app,
             app_version,
             updater::updater_check,
             updater::updater_install,

@@ -78,6 +78,7 @@ const workspace: WorkspaceIdentity = {
   roleLabels: {},
   welcomeAgentMemberId: null,
   welcomePrompt: "",
+  subscriptionAgentsEnabled: false,
 };
 
 const member: Member = {

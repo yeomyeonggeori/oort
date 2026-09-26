@@ -42,6 +42,8 @@ const APP_COMMANDS: &[&str] = &[
     "detect_hosted_agents",
     // Local harness detection (#2813): no arguments, exit codes only.
     "detect_local_harnesses",
+    // AI 연결 Phase 1 (#2814): bring Terminal.app forward. No arguments.
+    "open_terminal_app",
     "app_version",
     "updater_check",
     "updater_install",
