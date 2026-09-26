@@ -4,7 +4,9 @@ import {
   useState,
   type FormEvent,
   type KeyboardEvent,
+  type Ref,
 } from "react";
+import { expressionForState, type GuideState } from "@momo/core/features/onboarding/guide";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   changeMyProfile,
@@ -37,12 +39,18 @@ import {
 import { StaleWorkspaceNameConflict } from "@/features/workspace/shared/StaleWorkspaceNameConflict";
 import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
 import { defaultWorkspaceName } from "./fallbackHandle";
+import { KomettoGuide } from "./guide/KomettoGuide";
+import {
+  ONBOARDING_ACTION_CLASS,
+  ONBOARDING_FIELD_CLASS,
+} from "./guide/OnboardingFrame";
 import { hasOwnerOnboardingSettingsDoor } from "./ownerOnboardingStore";
 import {
+  S1_DETAIL,
   S1_DISPLAY_ERROR_ID,
   S1_FAILURE,
   S1_HANDLE_ERROR_ID,
-  S1_LEAD,
+  S1_OFFLINE_LINE,
   S1_OFFLINE_NOTE_ID,
   S1_OFFLINE_REASON,
   S1_PRIMARY_BUSY,
@@ -51,12 +59,22 @@ import {
   S1_REENTRY,
   S1_SKIP_LABEL,
   S1_STALE_MESSAGE_ID,
+  S1_TITLE,
+  S1_TROUBLE_LINE,
   S1_WORKSPACE_ERROR_ID,
 } from "./s1Copy";
 import { clearS1Draft, readS1Draft, resolveS1Seeds, writeS1Draft } from "./s1Draft";
 
-// Reading this as: onboarding S1 (내 워크스페이스·내 이름) for internal team
-// users on web+Tauri, density 6/10, motion 2/10.
+// Reading this as: onboarding S1 (우리 팀 이름, 온보딩 2.0 D2) for internal
+// team users on web+Tauri, density 5/10, motion 2/10.
+//
+// 카드 대신 바닥 위 질문(ADR-0193 D11). 코메토가 질문을 말하고, 필드·저장·
+// 건너뛰기 규칙은 ADR-0185 D-A 그대로다(건너뛰기는 저장 실패 뒤에만).
+
+/** 미리보기 타일의 첫 글자. 한글·이모지도 한 글자로 센다. */
+function initialOf(value: string): string {
+  return Array.from(value.trim())[0] ?? "";
+}
 
 export function WorkspaceProfileStage({
   workspaceId,
@@ -68,6 +86,7 @@ export function WorkspaceProfileStage({
   replaceSessionMember,
   onComplete,
   onSkip,
+  headingRef,
 }: {
   workspaceId: string;
   memberHandle: string;
@@ -78,6 +97,8 @@ export function WorkspaceProfileStage({
   replaceSessionMember: (member: Member) => void;
   onComplete: () => void;
   onSkip?: () => void;
+  /** 단계 착지 포커스(OwnerOnboarding). 코메토의 문장이 받는다. */
+  headingRef?: Ref<HTMLHeadingElement>;
 }) {
   const offline = useBrowserOffline();
   const queryClient = useQueryClient();
@@ -312,57 +333,70 @@ export function WorkspaceProfileStage({
     onSkip?.();
   };
 
+  const guideState: GuideState = offline || formError ? "trouble" : "awaiting";
+  const guideLine = offline
+    ? S1_OFFLINE_LINE
+    : formError
+      ? S1_TROUBLE_LINE
+      : S1_TITLE;
+  const previewName = workspaceDraft.trim();
+  const previewDisplay = displayName.trim();
+  const previewHandle = normalizeHandle(handle);
+
+  // 시안 D2: 왼쪽 질문 열 + 오른쪽 250 「사이드바 미리보기」. 좁은 창(768 미만)에서는
+  // 미리보기가 물러나고 질문 열만 남는다(tokens.css `.onboarding-wide`).
   return (
-    <form
-      className="flex flex-col gap-4"
-      data-testid="onboarding-s1"
-      aria-busy={busy || undefined}
-      onSubmit={onSubmit}
-      onKeyDown={handleFormKeyDown}
-    >
-      <div className="flex break-keep flex-col gap-1">
-        {S1_LEAD.map((line) => (
-          <p key={line} className="break-keep text-body text-ink-muted">
-            {line}
-          </p>
-        ))}
-      </div>
-
-      {offline && (
-        <InlineBanner
-          tone="neutral"
-          message={S1_OFFLINE_REASON}
-          messageId={S1_OFFLINE_NOTE_ID}
-          testId="onboarding-s1-offline"
+    <div className="onboarding-wide" data-testid="onboarding-s1-layout">
+      <form
+        className="flex min-w-0 flex-col gap-4"
+        data-testid="onboarding-s1"
+        aria-busy={busy || undefined}
+        onSubmit={onSubmit}
+        onKeyDown={handleFormKeyDown}
+      >
+        <KomettoGuide
+          as="h1"
+          expression={expressionForState(guideState)}
+          line={guideLine}
+          detail={guideState === "awaiting" ? S1_DETAIL : undefined}
+          lineRef={headingRef}
+          lineTestId="onboarding-s1-title"
         />
-      )}
 
-      {staleName && (
-        <StaleWorkspaceNameConflict
-          otherName={staleName}
-          onKeepTheirs={handleKeepTheirs}
-          onKeepMine={handleKeepMine}
-          messageId={S1_STALE_MESSAGE_ID}
-          testIdPrefix="onboarding-s1"
-          bannerRef={bannerRef}
-        />
-      )}
-
-      {formError && (
-        <div
-          ref={bannerRef}
-          tabIndex={-1}
-          className="focus-visible:focus-ring"
-        >
+        {offline && (
           <InlineBanner
-            tone="error"
-            message={formError}
-            testId="onboarding-s1-error"
+            tone="neutral"
+            message={S1_OFFLINE_REASON}
+            messageId={S1_OFFLINE_NOTE_ID}
+            testId="onboarding-s1-offline"
           />
-        </div>
-      )}
+        )}
 
-      <div className="flex flex-col gap-3">
+        {staleName && (
+          <StaleWorkspaceNameConflict
+            otherName={staleName}
+            onKeepTheirs={handleKeepTheirs}
+            onKeepMine={handleKeepMine}
+            messageId={S1_STALE_MESSAGE_ID}
+            testIdPrefix="onboarding-s1"
+            bannerRef={bannerRef}
+          />
+        )}
+
+        {formError && (
+          <div
+            ref={bannerRef}
+            tabIndex={-1}
+            className="focus-visible:focus-ring"
+          >
+            <InlineBanner
+              tone="error"
+              message={formError}
+              testId="onboarding-s1-error"
+            />
+          </div>
+        )}
+
         <label
           htmlFor="onboarding-s1-workspace-name"
           className="flex flex-col gap-1 text-body"
@@ -372,6 +406,7 @@ export function WorkspaceProfileStage({
             ref={workspaceInputRef}
             id="onboarding-s1-workspace-name"
             name="workspaceName"
+            className={ONBOARDING_FIELD_CLASS}
             value={workspaceDraft}
             autoComplete="organization"
             disabled={offline}
@@ -404,90 +439,131 @@ export function WorkspaceProfileStage({
           ) : null}
         </label>
 
-        <label
-          htmlFor="onboarding-s1-display-name"
-          className="flex flex-col gap-1 text-body"
-        >
-          <span className="text-ink-muted">표시 이름</span>
-          <Input
-            ref={displayInputRef}
-            id="onboarding-s1-display-name"
-            name="displayName"
-            value={displayName}
-            autoComplete="nickname"
-            disabled={offline}
-            aria-invalid={displayError ? true : undefined}
-            aria-describedby={
-              displayError ? S1_DISPLAY_ERROR_ID : undefined
-            }
-            data-testid="onboarding-s1-display-name"
-            onChange={(event) => {
-              setDisplayName(event.currentTarget.value);
-              setDisplayError(null);
+        <div className="onboarding-pair">
+          <label
+            htmlFor="onboarding-s1-display-name"
+            className="flex min-w-0 flex-col gap-1 text-body"
+          >
+            <span className="text-ink-muted">표시 이름</span>
+            <Input
+              ref={displayInputRef}
+              id="onboarding-s1-display-name"
+              name="displayName"
+              className={ONBOARDING_FIELD_CLASS}
+              value={displayName}
+              autoComplete="nickname"
+              disabled={offline}
+              aria-invalid={displayError ? true : undefined}
+              aria-describedby={
+                displayError ? S1_DISPLAY_ERROR_ID : undefined
+              }
+              data-testid="onboarding-s1-display-name"
+              onChange={(event) => {
+                setDisplayName(event.currentTarget.value);
+                setDisplayError(null);
+                profileSavedRef.current = false;
+              }}
+            />
+            {displayError ? (
+              <p
+                id={S1_DISPLAY_ERROR_ID}
+                role="alert"
+                className="text-meta text-danger"
+                data-testid="onboarding-s1-display-error"
+              >
+                {displayError}
+              </p>
+            ) : null}
+          </label>
+
+          <HandleField
+            id="onboarding-s1-handle"
+            value={handle}
+            onChange={(value) => {
+              setHandle(value);
+              setHandleError(null);
               profileSavedRef.current = false;
             }}
+            error={handleError}
+            errorId={S1_HANDLE_ERROR_ID}
+            testId="onboarding-s1-handle"
+            errorTestId="onboarding-s1-handle-error"
+            previewTestId="onboarding-s1-handle-preview"
+            offline={offline}
+            inputRef={handleInputRef}
+            inputClassName={ONBOARDING_FIELD_CLASS}
           />
-          {displayError ? (
-            <p
-              id={S1_DISPLAY_ERROR_ID}
-              role="alert"
-              className="text-meta text-danger"
-              data-testid="onboarding-s1-display-error"
-            >
-              {displayError}
-            </p>
-          ) : null}
-        </label>
+        </div>
 
-        <HandleField
-          id="onboarding-s1-handle"
-          value={handle}
-          onChange={(value) => {
-            setHandle(value);
-            setHandleError(null);
-            profileSavedRef.current = false;
-          }}
-          error={handleError}
-          errorId={S1_HANDLE_ERROR_ID}
-          testId="onboarding-s1-handle"
-          errorTestId="onboarding-s1-handle-error"
-          previewTestId="onboarding-s1-handle-preview"
-          offline={offline}
-          inputRef={handleInputRef}
-        />
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
         {staleName ? null : (
           <Button
             type="submit"
             aria-disabled={offline || undefined}
             aria-busy={busy || undefined}
             aria-describedby={offline ? S1_OFFLINE_NOTE_ID : undefined}
-            className={cn(offline && "opacity-50")}
+            className={cn(ONBOARDING_ACTION_CLASS, offline && "opacity-50")}
             data-testid="onboarding-s1-submit"
           >
             {busy ? S1_PRIMARY_BUSY : formError ? S1_PRIMARY_RETRY : S1_PRIMARY_LABEL}
           </Button>
         )}
-        {formError && onSkip ? (
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={handleSkip}
-            data-testid="onboarding-s1-skip"
-          >
-            {S1_SKIP_LABEL}
-          </Button>
-        ) : null}
-      </div>
 
-      <p
-        className="break-keep text-meta text-ink-muted"
-        data-testid="onboarding-s1-reentry"
+        <p className="onboarding-reentry" data-testid="onboarding-s1-reentry">
+          {formError && onSkip ? (
+            <>
+              <Button
+                type="button"
+                variant="ghost"
+                className="onboarding-skip"
+                onClick={handleSkip}
+                data-testid="onboarding-s1-skip"
+              >
+                {S1_SKIP_LABEL}
+              </Button>
+              <span className="onboarding-reentry-sep" aria-hidden="true"> · </span>
+            </>
+          ) : null}
+          {S1_REENTRY}
+        </p>
+      </form>
+
+      {/* 입력이 어디에 보이는지 보여 주는 그림이다. 글자는 왼쪽 칸이 이미 말하므로
+          보조기술에는 숨긴다. */}
+      <div
+        className="onboarding-preview glass"
+        aria-hidden="true"
+        data-testid="onboarding-s1-preview"
       >
-        {S1_REENTRY}
-      </p>
-    </form>
+        <p className="text-meta font-bold text-ink-muted">사이드바 미리보기</p>
+        <div className="flex min-w-0 items-center gap-2 font-bold text-ink">
+          <span className="onboarding-preview-ws">
+            {initialOf(previewName)}
+          </span>
+          <span
+            className={cn("truncate", !previewName && "font-normal text-ink-muted")}
+            data-testid="onboarding-s1-preview-workspace"
+          >
+            {previewName || "워크스페이스 이름"}
+          </span>
+        </div>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="onboarding-preview-me">{initialOf(previewDisplay)}</span>
+          <span className="flex min-w-0 flex-col">
+            <b
+              className={cn(
+                "truncate text-body",
+                previewDisplay ? "text-ink" : "font-normal text-ink-muted"
+              )}
+              data-testid="onboarding-s1-preview-name"
+            >
+              {previewDisplay || "표시 이름"}
+            </b>
+            <span className="truncate font-mono text-meta text-ink-muted">
+              @{previewHandle || "핸들"}
+            </span>
+          </span>
+        </div>
+      </div>
+    </div>
   );
 }

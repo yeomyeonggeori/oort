@@ -32,6 +32,7 @@ import {
   S1_REENTRY,
   S1_SKIP_LABEL,
   S1_STALE_MESSAGE_ID,
+  S1_DETAIL,
   S1_TITLE,
 } from "./s1Copy";
 
@@ -242,15 +243,19 @@ function mountOwner() {
   );
 }
 
-describe("onboarding S1 내 워크스페이스·내 이름 (#2332)", () => {
-  it("renders 1/2 and has no skip until a non-field failure", async () => {
+describe("onboarding S1 우리 팀 이름 (#2332, 겉 #2811)", () => {
+  it("renders dot 2 of 4 and has no skip until a non-field failure", async () => {
     const host = mountOwner();
     await vi.waitFor(() => {
       expect(host.querySelector('[data-testid="onboarding-s1"]')).not.toBeNull();
     });
-    expect(host.querySelector('[data-testid="onboarding-progress"]')?.textContent).toBe(
-      "1/2"
-    );
+    expect(
+      host.querySelector('[data-testid="onboarding-dots"]')?.getAttribute("data-current")
+    ).toBe("2");
+    expect(
+      host.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
+    ).toBe("4단계 중 2단계");
+    expect(host.querySelector('[data-testid="onboarding-progress"]')).toBeNull();
     expect(host.querySelector('[data-testid="onboarding-s1-title"]')?.textContent).toBe(
       S1_TITLE
     );
@@ -298,9 +303,13 @@ describe("onboarding S1 내 워크스페이스·내 이름 (#2332)", () => {
       handle: "seongjae",
       displayName: "성재",
     });
-    expect(host.querySelector('[data-testid="onboarding-progress"]')?.textContent).toBe(
-      "2/2"
-    );
+    expect(
+      host.querySelector('[data-testid="onboarding-dots"]')?.getAttribute("data-current")
+    ).toBe("3");
+    expect(
+      host.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
+    ).toBe("4단계 중 3단계");
+    expect(host.querySelector('[data-testid="onboarding-progress"]')).toBeNull();
     expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe(
       JSON.stringify({ invite: true })
     );
@@ -562,20 +571,47 @@ describe("onboarding S1 내 워크스페이스·내 이름 (#2332)", () => {
     });
   });
 
-  it("matches S2 card chrome classes", () => {
+  it("stands on the onboarding 2.0 frame: no card, 코메토 h1 heading (#2811)", () => {
     const host = mountOwner();
-    const card = host.querySelector(".max-w-sm");
-    expect(card).not.toBeNull();
-    expect(card?.className).toMatch(/\bmax-w-sm\b/);
+    expect(host.querySelector('[data-testid="onboarding-frame"]')).not.toBeNull();
+    expect(host.querySelector(".max-w-sm")).toBeNull();
+    expect(host.querySelector(".brand-lockup")).toBeNull();
     const heading = host.querySelector('[data-testid="onboarding-s1-title"]');
+    expect(heading?.tagName).toBe("H1");
+    expect(heading?.textContent).toBe(S1_TITLE);
     expect(heading?.className).toContain("text-title");
     expect(heading?.className).toContain("font-semibold");
     expect(heading?.className).toContain("text-ink");
     expect(heading?.className).toContain("focus-visible:focus-ring");
-    const lead = host.querySelector('[data-testid="onboarding-s1"] p');
-    expect(lead?.className).toContain("break-keep");
-    expect(lead?.className).toContain("text-body");
-    expect(lead?.className).toContain("text-ink-muted");
+    expect(
+      host.querySelector('[data-testid="kometto-guide"]')?.getAttribute("data-expression")
+    ).toBe("idle");
+    expect(host.querySelector('[data-testid="kometto-guide-detail"]')?.textContent).toBe(
+      S1_DETAIL
+    );
+    for (const id of [
+      "onboarding-s1-workspace-name",
+      "onboarding-s1-display-name",
+      "onboarding-s1-handle",
+    ]) {
+      expect(host.querySelector(`[data-testid="${id}"]`)?.className, id).toContain(
+        "onboarding-field"
+      );
+    }
+    expect(
+      host.querySelector('[data-testid="onboarding-s1-submit"]')?.className
+    ).toContain("onboarding-action");
+  });
+
+  it("previews the typed names in the sidebar sample, hidden from assistive tech", async () => {
+    const host = mountOwner();
+    const preview = host.querySelector('[data-testid="onboarding-s1-preview"]');
+    expect(preview?.getAttribute("aria-hidden")).toBe("true");
+    fill("onboarding-s1-display-name", "지민");
+    expect(
+      host.querySelector('[data-testid="onboarding-s1-preview-name"]')?.textContent
+    ).toBe("지민");
+    expect(preview?.textContent).toContain("지");
   });
 
   it("starts the seed workspace name and seed handle empty", () => {

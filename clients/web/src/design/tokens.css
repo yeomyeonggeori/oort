@@ -621,6 +621,14 @@
   --spacing-onboarding-dot: 6px;
   --spacing-onboarding-dot-bar: 26px;
 
+  /* 온보딩 2.0 D2 「우리 팀 이름」의 두 칸 배치 (#2811 OB2-5). 시안 D2 값 그대로:
+   *   wide 720       `.col` 질문 열 + 미리보기를 합친 폭(max-width:720px)
+   *   aside 250      오른쪽 「사이드바 미리보기」 칸(grid 1fr 250px)
+   *   aside-gap 28   두 칸 사이(gap:28px). 리듬 24·32 사이의 시안 값이다 */
+  --spacing-onboarding-wide: 720px;
+  --spacing-onboarding-aside: 250px;
+  --spacing-onboarding-aside-gap: 28px;
+
   /* --- radius: the web platform ladder (ADR-0189 D6) ---------------------
    * 6 · 10 · 14 · 18 · 20 · pill. 이름만 폰과 공유하고 값은 대조하지 않는다
    * (폰은 10·14·20·26·30·pill). pill은 Tailwind 정적 유틸 `rounded-full`이다.
@@ -3476,6 +3484,122 @@
 .onboarding-action[data-variant="secondary"] {
   border: 1px solid var(--line-strong);
   background-color: transparent;
+}
+
+/* --- claim 뒤 S1·S2 (#2811 OB2-5, 시안 D2·brief D3) ---------------------- */
+
+/* 시안 D2: 질문 열(1fr) + 미리보기(250), 간격 28, 가운데 정렬. 768 미만에서는
+ * 미리보기가 물러나고 질문 열이 440으로 돌아간다(시안 폰 화면에는 미리보기가 없다). */
+.onboarding-wide {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--spacing-onboarding-aside);
+  gap: var(--spacing-onboarding-aside-gap);
+  align-items: center;
+  inline-size: 100%;
+  max-inline-size: var(--spacing-onboarding-wide);
+
+  @media (width < 768px) {
+    grid-template-columns: minmax(0, 1fr);
+    max-inline-size: var(--spacing-onboarding-col);
+  }
+}
+
+/* 시안 D2 표시 이름 · 핸들 두 칸(1fr 1fr, 간격 12). 좁은 폭에서는 한 칸씩. */
+.onboarding-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-3);
+  align-items: start;
+
+  @media (width < 600px) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 시안 D2 오른쪽 유리 칸: 반경 16, 안쪽 14, --sh1. 유리 자체는 `glass` 유틸. */
+.onboarding-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  padding: 14px;
+  border-radius: 16px;
+  box-shadow: var(--elevation-rest);
+
+  @media (width < 768px) {
+    display: none;
+  }
+}
+
+/* 워크스페이스 타일(시안 30, 반경 9, 잉크 채움)과 사람 아바타(28 원). 사람 색은
+ * 시안의 손 그라데이션 대신 `Avatar`의 사람 표기(--surface-hover)다. */
+.onboarding-preview-ws,
+.onboarding-preview-me {
+  display: grid;
+  flex: none;
+  place-items: center;
+  font-size: var(--text-meta);
+  font-weight: 700;
+}
+
+.onboarding-preview-ws {
+  inline-size: 30px;
+  block-size: 30px;
+  border-radius: 9px;
+  background-color: var(--primary);
+  color: var(--on-primary);
+  font-size: var(--text-body);
+}
+
+.onboarding-preview-me {
+  inline-size: 28px;
+  block-size: 28px;
+  border-radius: 50%;
+  background-color: var(--surface-hover);
+  color: var(--ink);
+}
+
+/* 시안 `.reentry`: 가운데 작은 글씨. 건너뛰기 행동이 이 줄 맨 앞에 붙는다. */
+.onboarding-reentry {
+  color: var(--ink-muted);
+  font-size: var(--text-meta);
+  line-height: var(--text-meta--line-height);
+  text-align: center;
+  word-break: keep-all;
+}
+
+/* 시안 `.btn.ghost`를 문장 안에 인라인으로(display:inline-flex;height:auto;padding:0).
+ * 폰(600 미만)에서는 손가락 44를 받는 제 줄로 올라서고 가운뎃점은 숨는다. */
+.onboarding-skip {
+  display: inline-flex;
+  block-size: auto;
+  min-block-size: 0;
+  min-inline-size: 0;
+  padding: 0;
+  color: var(--ink-muted);
+  font-size: inherit;
+  font-weight: 500;
+  vertical-align: baseline;
+
+  &:hover {
+    background-color: transparent;
+    color: var(--ink);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  @media (width < 600px) {
+    display: flex;
+    min-block-size: var(--tap-target);
+    min-inline-size: var(--tap-target);
+    margin-inline: auto;
+    padding-inline: var(--spacing-3);
+  }
+}
+
+.onboarding-reentry-sep {
+  @media (width < 600px) {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

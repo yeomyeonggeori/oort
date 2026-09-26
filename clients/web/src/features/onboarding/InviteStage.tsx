@@ -1,3 +1,5 @@
+import type { Ref } from "react";
+import { expressionForState, type GuideState } from "@momo/core/features/onboarding/guide";
 import { useBrowserOffline } from "@/features/common/useOffline";
 import { InlineBanner } from "@/features/common/States";
 import { Button } from "@/design/ui/button";
@@ -10,23 +12,45 @@ import {
   OWNER_INVITE_ROLE,
   OWNER_INVITE_TTL_MS,
 } from "@/features/auth/onboardingFlow";
+import { KomettoGuide } from "./guide/KomettoGuide";
+import { ONBOARDING_ACTION_CLASS } from "./guide/OnboardingFrame";
 import {
+  S2_CODE_NOTE,
   S2_CONTINUE_LABEL,
+  S2_DETAIL,
   S2_ISSUE_ERROR_ID,
-  S2_LEAD,
+  S2_ISSUED_DETAIL,
+  S2_ISSUED_LINE,
+  S2_OFFLINE_LINE,
   S2_OFFLINE_NOTE_ID,
   S2_OFFLINE_REASON,
   S2_PRIMARY_BUSY,
   S2_PRIMARY_LABEL,
   S2_SKIP_LABEL,
   S2_SKIP_SENTENCE,
+  S2_TITLE,
+  S2_TROUBLE_LINE,
 } from "./s2Copy";
 
-// Reading this as: onboarding S2 (팀원 초대) for internal team users on
-// web+Tauri, density 6/10, motion 2/10.
+// Reading this as: onboarding S2 (팀원 초대, 온보딩 2.0 D3) for internal team
+// users on web+Tauri, density 5/10, motion 2/10.
+//
+// 코메토가 이 화면의 질문을 말한다(ADR-0193 D11). 발급 전 대기, 발급 뒤 기쁨,
+// 발급 실패·오프라인은 당황. 표정이 바뀔 때 문장도 함께 바뀐다.
 
 function handleSkipClick(onSkip: () => void): void {
   onSkip();
+}
+
+function s2Guide(state: GuideState): { line: string; detail?: string } {
+  switch (state) {
+    case "success":
+      return { line: S2_ISSUED_LINE, detail: S2_ISSUED_DETAIL };
+    case "trouble":
+      return { line: S2_TROUBLE_LINE };
+    default:
+      return { line: S2_TITLE, detail: S2_DETAIL };
+  }
 }
 
 export function InviteStage({
@@ -34,11 +58,14 @@ export function InviteStage({
   workspaceName = "oort",
   onSkip,
   onContinue,
+  headingRef,
 }: {
   workspaceId: string;
   workspaceName?: string;
   onSkip: () => void;
   onContinue: () => void;
+  /** 단계 착지 포커스(OwnerOnboarding). 코메토의 문장이 받는다. */
+  headingRef?: Ref<HTMLHeadingElement>;
 }) {
   const offline = useBrowserOffline();
   const { issued, issuedRef, create } = useIssueInvite(workspaceId);
@@ -54,16 +81,26 @@ export function InviteStage({
   };
 
   const primaryLabel = create.isPending ? S2_PRIMARY_BUSY : S2_PRIMARY_LABEL;
+  const state: GuideState = issued
+    ? "success"
+    : issueError || offline
+      ? "trouble"
+      : "awaiting";
+  const guide =
+    state === "trouble" && offline && !issueError
+      ? { line: S2_OFFLINE_LINE }
+      : s2Guide(state);
 
   return (
     <div className="flex flex-col gap-4" data-testid="onboarding-s2">
-      <div className="flex break-keep flex-col gap-1">
-        {S2_LEAD.map((line) => (
-          <p key={line} className="break-keep text-body text-ink-muted">
-            {line}
-          </p>
-        ))}
-      </div>
+      <KomettoGuide
+        as="h1"
+        expression={expressionForState(state)}
+        line={guide.line}
+        detail={guide.detail}
+        lineRef={headingRef}
+        lineTestId="onboarding-s2-title"
+      />
 
       {offline && (
         <InlineBanner
@@ -93,47 +130,48 @@ export function InviteStage({
           workspaceName={workspaceName}
           issuedRef={issuedRef}
           copyMode="single"
+          footnote={S2_CODE_NOTE}
         />
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        {issued ? (
-          <Button
-            type="button"
-            onClick={onContinue}
-            data-testid="onboarding-s2-continue"
-          >
-            {S2_CONTINUE_LABEL}
-          </Button>
-        ) : (
+      {issued ? (
+        <Button
+          type="button"
+          className={ONBOARDING_ACTION_CLASS}
+          onClick={onContinue}
+          data-testid="onboarding-s2-continue"
+        >
+          {S2_CONTINUE_LABEL}
+        </Button>
+      ) : (
+        <Button
+          type="button"
+          aria-disabled={offline || undefined}
+          aria-busy={create.isPending || undefined}
+          aria-describedby={offline ? S2_OFFLINE_NOTE_ID : undefined}
+          className={cn(ONBOARDING_ACTION_CLASS, offline && "opacity-50")}
+          onClick={handleIssue}
+          data-testid="onboarding-s2-issue"
+        >
+          {primaryLabel}
+        </Button>
+      )}
+
+      <p className="onboarding-reentry" data-testid="onboarding-s2-reentry">
+        {issued ? null : (
           <>
             <Button
               type="button"
-              aria-disabled={offline || undefined}
-              aria-busy={create.isPending || undefined}
-              aria-describedby={offline ? S2_OFFLINE_NOTE_ID : undefined}
-              className={cn(offline && "opacity-50")}
-              onClick={handleIssue}
-              data-testid="onboarding-s2-issue"
-            >
-              {primaryLabel}
-            </Button>
-            <Button
-              type="button"
               variant="ghost"
+              className="onboarding-skip"
               onClick={() => handleSkipClick(onSkip)}
               data-testid="onboarding-s2-skip"
             >
               {S2_SKIP_LABEL}
             </Button>
+            <span className="onboarding-reentry-sep" aria-hidden="true"> · </span>
           </>
         )}
-      </div>
-
-      <p
-        className="break-keep text-meta text-ink-muted"
-        data-testid="onboarding-s2-reentry"
-      >
         {S2_SKIP_SENTENCE}
       </p>
     </div>
