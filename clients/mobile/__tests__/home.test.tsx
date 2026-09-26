@@ -124,7 +124,7 @@ function jsonResponse(status: number, body: unknown): Response {
 interface Routes {
   roster?: unknown[];
   channels?: unknown[];
-  workspace?: () => Response;
+  workspace?: () => Response | Promise<Response>;
 }
 
 function installFetch(routes: Routes = {}): jest.Mock {
@@ -425,6 +425,17 @@ describe('홈 — 머리', () => {
       expect(screen.getByTestId('home-title')).toHaveTextContent('워크스페이스'),
     );
     expect(screen.getByTestId('home-title')).not.toHaveTextContent(/곽성재/);
+  });
+
+  it('이름을 기다리는 동안에도 사람 이름으로 채우지 않는다 — 빈 제목, 빈 로고 원', async () => {
+    await mountHome({workspace: () => new Promise<Response>(() => {})});
+    expect(screen.getByTestId('home-title')).toHaveTextContent('');
+    expect(screen.getByTestId('home-title').props.accessibilityLabel).toBe(
+      '워크스페이스 불러오는 중',
+    );
+    expect(
+      screen.getByTestId('home-logo-pending', {includeHiddenElements: true}),
+    ).toBeTruthy();
   });
 });
 
