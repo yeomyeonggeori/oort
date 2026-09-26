@@ -19,6 +19,7 @@ import '../src/boot/coreHost';
 
 import {CONFIRM_GUARD_MS} from '../src/features/inbox/ApprovalDecision';
 import {resetAgentWorking} from '../src/features/agents/workingSignal';
+import {DISPLAY_GRACE_MS} from '../src/realtime/connectionDisplay';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
@@ -475,6 +476,8 @@ describe('중단을 권하지 않는 자리', () => {
     await act(async () => {
       await new Promise(resolve => setTimeout(resolve, 15));
       client().__emit('disconnected', {});
+      // 표시 유예(#2751)보다 긴 끊김이어야 「끊김」이다. 짧은 재연결은 알리지 않는다.
+      await new Promise(resolve => setTimeout(resolve, DISPLAY_GRACE_MS + 50));
     });
 
     // 마지막으로 확인된 상태를 보고 있는 것이고, 그 실행은 이미 끝났을 수 있다.
