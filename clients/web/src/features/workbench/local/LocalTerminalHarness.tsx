@@ -23,7 +23,7 @@ import { openDock, resetDockStateForTest, toggleDockFullscreen, useDockState } f
 // 디자인 검수가 라이트·다크에서 도크를 보는 자리다. 실제 PTY는 데스크탑 debug
 // 앱에서 확인한다(PR 본문).
 //
-// `?scene=one|four|full|exited|failed|exited-four|failed-four|exited-harness-four|settings-web|settings-desktop`
+// `?scene=one|four|full|exited|failed|exited-four|failed-four|exited-harness-four|storage-fail|settings-web|settings-desktop`
 
 const ENC = new TextEncoder();
 
@@ -71,6 +71,14 @@ function demoPty(mode: "live" | "exited" | "failed" = "live"): PtyPort {
 
 const SIZE = { width: 1600, height: 1000 };
 
+const memoryMap = new Map<string, string>();
+const memory = {
+  getItem: (k: string) => memoryMap.get(k) ?? null,
+  setItem: (k: string, v: string) => void memoryMap.set(k, v),
+  removeItem: (k: string) => void memoryMap.delete(k),
+  keys: () => [...memoryMap.keys()],
+};
+
 function fourLayout(): WorkbenchLayout {
   let l = splitPane(defaultWorkbenchLayout(), "p1", "row", SIZE).layout;
   l = splitPane(l, "p1", "column", SIZE).layout;
@@ -86,7 +94,8 @@ export function LocalTerminalHarness() {
       createLocalSessions({
         pty: demoPty(scene.startsWith("exited") ? "exited" : scene.startsWith("failed") ? "failed" : "live"),
         loadMirror: loadBrowserMirror,
-        storage: () => null,
+        // 보통 장면은 메모리 저장소(저장 성공). `storage-fail`만 저장소 없음.
+        storage: () => (scene === "storage-fail" ? null : memory),
       }),
     [scene]
   );

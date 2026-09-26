@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { defaultWorkbenchLayout, splitPane } from "./layoutTree";
 import {
+  DOCK_CHROME_PX,
+  dockMinPx,
+  stackedRows,
   DOCK_MIN_PX,
   DOCK_RATIO_HIGH,
   DOCK_RATIO_LOW,
@@ -40,5 +44,23 @@ describe("도크 높이", () => {
     for (const raw of [null, "", "{", "[]", '{"v":2,"ratio":0.5}', '{"v":1,"ratio":1}', '{"v":1,"ratio":"0.5"}']) {
       expect(parseDockPrefs(raw)).toBeNull();
     }
+  });
+});
+
+describe("도크 최소 높이는 칸 최소 높이를 지킨다", () => {
+  const size = { width: 2000, height: 2000 };
+  it("칸 하나는 기본 바닥, 위아래 둘은 칸 둘 + 틈 + 머리", () => {
+    const one = defaultWorkbenchLayout();
+    expect(dockMinPx(one.root)).toBe(Math.max(DOCK_MIN_PX, 120 + DOCK_CHROME_PX));
+    const two = splitPane(one, "p1", "column", size).layout;
+    expect(stackedRows(two.root)).toBe(2);
+    expect(dockMinPx(two.root)).toBe(2 * 120 + 8 + DOCK_CHROME_PX);
+  });
+  it("2×2는 세로 두 칸, 옆 분할은 높이를 더하지 않는다", () => {
+    let l = splitPane(defaultWorkbenchLayout(), "p1", "row", size).layout;
+    expect(stackedRows(l.root)).toBe(1);
+    l = splitPane(l, "p1", "column", size).layout;
+    l = splitPane(l, "p2", "column", size).layout;
+    expect(stackedRows(l.root)).toBe(2);
   });
 });

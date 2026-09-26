@@ -102,6 +102,9 @@ const MAX_ROWS = 500;
 
 const TEXT_ENCODER = new TextEncoder();
 
+const HIDE_CURSOR = "\u001b[?25l";
+const SHOW_CURSOR = "\u001b[?25h";
+
 /** 복원 구분선. 흐린 글씨(SGR 2)로 전의 화면과 새 셸을 가른다. */
 export const RESTORE_SEPARATOR =
   "\r\n\u001b[2m──── 앱을 다시 열어 새 셸을 시작했습니다. 이 줄 위는 이전 실행의 화면입니다. ────\u001b[0m\r\n";
@@ -297,7 +300,8 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
     s.batcher?.dispose();
     s.batcher = null;
     s.ptyId = null;
-    const line = exitLine(exit);
+    // 커서를 숨긴다: 끝난 칸에 캐럿이 있으면 아직 입력을 받는 것처럼 보인다.
+    const line = exitLine(exit) + HIDE_CURSOR;
     s.mirror.write(line);
     if (s.attachQueue !== null) s.attachQueue.push(TEXT_ENCODER.encode(line));
     else s.visible?.write(line);
@@ -305,8 +309,15 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
     schedulePersist(s);
   };
 
+  const writeBoth = (s: Session, text: string) => {
+    s.mirror.write(text);
+    if (s.attachQueue !== null) s.attachQueue.push(TEXT_ENCODER.encode(text));
+    else s.visible?.write(text);
+  };
+
   const spawnInto = async (s: Session) => {
     const generation = ++s.generation;
+    if (generation > 1) writeBoth(s, SHOW_CURSOR);
     update(s, { phase: "starting", exit: null, error: null, inputNotice: null });
     try {
       const id = await deps.pty.spawn(
@@ -337,6 +348,7 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
       update(s, { phase: "running" });
     } catch (error) {
       if (s.disposed || s.generation !== generation) return;
+      writeBoth(s, HIDE_CURSOR);
       update(s, {
         phase: "failed",
         error: error instanceof Error ? error.message : String(error),

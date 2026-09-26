@@ -196,13 +196,18 @@ async function interactions(browser, origin) {
 
   // R2 B1 / R3 B1: 좁은 칸(최소 240px 근처)에서도 상태 줄이 칸 안에 있고, 단추가
   // 보이며, 문장이 잘리지 않는다. 가장 긴 단추 문구(하네스)로 잰다.
-  for (const [scene, width] of [
-    ["failed-four", 900],
-    ["exited-four", 640],
-    ["failed-four", 520],
-    ["exited-harness-four", 520],
+  // R4 B1: 데스크탑 최소 창(720×480)과 낮은 창에서도 칸이 최소 높이를 지켜 상태
+  // 줄이 칸 안에 든다(도크 최소 높이 = 배치의 칸 줄 수 × 칸 최소 높이).
+  for (const [scene, width, height] of [
+    ["failed-four", 900, 800],
+    ["exited-four", 640, 800],
+    ["failed-four", 520, 800],
+    ["exited-harness-four", 520, 800],
+    ["failed-four", 720, 480],
+    ["exited-harness-four", 720, 480],
+    ["exited-harness-four", 520, 700],
   ]) {
-    const context3 = await browser.newContext({ viewport: { width, height: 800 }, colorScheme: "light", reducedMotion: "reduce" });
+    const context3 = await browser.newContext({ viewport: { width, height }, colorScheme: "light", reducedMotion: "reduce" });
     const p3 = await context3.newPage();
     await p3.goto(`${origin}/#/design/local-terminal?scene=${scene}`);
     await p3.getByTestId("local-terminal-restart").first().waitFor();
@@ -220,6 +225,7 @@ async function interactions(browser, origin) {
           paneW: Math.round(pr.width),
           inside: sr.bottom <= pr.bottom + 0.5 && sr.left >= pr.left - 0.5 && sr.right <= pr.right + 0.5,
           buttonInside: !br || (br.right <= pr.right + 0.5 && br.bottom <= pr.bottom + 0.5 && br.width > 0),
+          overflowPx: Math.max(0, Math.round((br?.bottom ?? sr.bottom) - pr.bottom)),
           textClipped: p.scrollWidth > p.clientWidth + 1,
           textLines: Math.round(p.getBoundingClientRect().height / parseFloat(getComputedStyle(p).lineHeight)),
           terminalH: Math.round(pane.querySelector('[data-testid="local-terminal"]')?.getBoundingClientRect().height ?? 0),
@@ -228,10 +234,28 @@ async function interactions(browser, origin) {
       return out;
     });
     const ok = r.length > 0 && r.every((x) => x.inside && x.buttonInside && !x.textClipped && x.textLines <= 2);
-    check(`${scene}@${width}: 상태 줄이 칸 안, 단추 보임, 문장 두 줄 이하`, ok, r[0]);
-    await p3.screenshot({ path: resolve(OUT_DIR, `light-${scene}-${width}.png`) });
-    report.scenes.push(`light-${scene}-${width}`);
+    const panesOk = await p3.evaluate(() =>
+      Array.from(document.querySelectorAll('[data-testid="workbench-pane"]')).every((e) => e.getBoundingClientRect().height >= 119.5)
+    );
+    check(`${scene}@${width}x${height}: 상태 줄이 칸 안, 단추 보임, 문장 두 줄 이하`, ok, r[0]);
+    check(`${scene}@${width}x${height}: 칸이 최소 높이 120을 지킨다`, panesOk);
+    await p3.screenshot({ path: resolve(OUT_DIR, `light-${scene}-${width}x${height}.png`) });
+    report.scenes.push(`light-${scene}-${width}x${height}`);
     await context3.close();
+  }
+  // R4 M2: 도는 칸의 알림(저장 실패)은 겹쳐 뜨고 터미널 높이를 바꾸지 않는다.
+  {
+    const c6 = await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: "light", reducedMotion: "reduce" });
+    const p6 = await c6.newPage();
+    await p6.goto(`${origin}/#/design/local-terminal?scene=storage-fail`);
+    await p6.getByTestId("local-terminal-dock").waitFor();
+    const h0 = await p6.evaluate(() => Math.round(document.querySelector('[data-testid="local-terminal"]').getBoundingClientRect().height));
+    await p6.getByTestId("local-terminal-status").filter({ hasText: "저장하지 못했습니다" }).waitFor();
+    const h1 = await p6.evaluate(() => Math.round(document.querySelector('[data-testid="local-terminal"]').getBoundingClientRect().height));
+    check("도는 칸의 저장 실패 알림이 터미널 높이를 바꾸지 않는다", h0 === h1, { h0, h1 });
+    await p6.screenshot({ path: resolve(OUT_DIR, "light-storage-fail.png") });
+    report.scenes.push("light-storage-fail");
+    await c6.close();
   }
   // R3 H: 터미널에서 ⌘J로 연 칸 목록을 Esc로 닫으면 캐럿이 터미널로 돌아간다.
   {

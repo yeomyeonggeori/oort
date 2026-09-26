@@ -213,7 +213,7 @@ export function LocalTerminalPane({
   const phase = view?.phase ?? "starting";
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-surface" data-testid="local-terminal-pane">
+    <div className="relative flex min-h-0 flex-1 flex-col bg-surface" data-testid="local-terminal-pane">
       {/* 틀과 마운트는 두 상자다. FitAddon은 부모의 계산 높이를 테두리 상자로
           읽어서, 마운트에 안쪽 여백이 있으면 한 줄을 더 제안한다(ObserverTerminal
           머리말의 실측). 여백은 바깥 틀이 진다. */}
@@ -263,13 +263,21 @@ function PaneFooter({
   } else if (view.inputNotice) {
     message = view.inputNotice;
   } else if (view.storageFailed) {
-    message = "이 칸의 화면을 이 기기에 저장하지 못했습니다.";
+    message = "이 칸의 화면을 저장하지 못했습니다. 앱을 다시 열면 이 화면은 사라집니다.";
   }
+  // 도는 칸의 알림(입력 거부·저장 실패)은 터미널 위에 겹쳐 띄운다: 자리를
+  // 차지하면 뜨고 질 때마다 PTY 크기가 바뀌어 TUI가 다시 그려진다. 끝났거나
+  // 못 연 칸은 PTY가 없으므로 자리를 차지해 마지막 줄(종료 줄)을 가리지 않는다.
+  const overlay = view?.phase === "running";
   return (
     // 상태 줄은 칸 폭(창 폭이 아니다)으로 모양을 정한다. 좁으면(20rem 미만)
     // 문장 한 줄, 단추 한 줄로 쌓고, 넓으면 한 줄에 둔다(design-review R3 B1).
     <div
-      className={cn("@container shrink-0 border-t border-line", message ? "block" : "hidden")}
+      className={cn(
+        "@container shrink-0 border-t border-line bg-surface",
+        overlay && "absolute inset-x-0 bottom-0",
+        message ? "block" : "hidden"
+      )}
       data-testid="local-terminal-status"
     >
       <div className="flex flex-col items-start gap-1 px-3 py-1 text-meta text-ink @xs:flex-row @xs:items-center @xs:gap-2">

@@ -12,6 +12,8 @@
 // 문자열을 만든다. 모르는 값은 `null`로 읽고 호스트는 기본값을 쓴다.
 // =============================================================================
 
+import { WORKBENCH_GUTTER, WORKBENCH_MIN_PANE, type LayoutNode } from "./layoutTree";
+
 /** 저장소 항목 이름. 접미사가 `_KEY`가 아닌 이유는 layoutStore.ts와 같다. */
 export const DOCK_ENTRY = "momo.web.workbench.dock.v1";
 
@@ -24,6 +26,30 @@ export const DOCK_DEFAULT_RATIO = DOCK_RATIO_LOW;
 export const DOCK_MIN_PX = 160;
 /** 도크 위에 남기는 화면 바닥. 채널 머리와 컴포저 한 줄이 보이는 높이. */
 export const DOCK_ROUTE_FLOOR_PX = 160;
+
+/**
+ * 도크에서 칸 영역이 아닌 부분의 높이: 위 경계 8 + 머리 32 + 격자 틈 8 + 격자
+ * 상태 줄 28 + 아래 여백 4 = 80, 여유 8. 웹 토큰(`--spacing-control*`)과 같은 값이다.
+ */
+export const DOCK_CHROME_PX = 88;
+
+/** 배치를 세로로 몇 칸이 쌓이는가(가로 분할은 최대, 세로 분할은 합). */
+export function stackedRows(node: LayoutNode): number {
+  if (node.kind === "pane") return 1;
+  const a = stackedRows(node.first);
+  const b = stackedRows(node.second);
+  return node.axis === "column" ? a + b : Math.max(a, b);
+}
+
+/**
+ * 이 배치의 칸이 모두 최소 높이(`WORKBENCH_MIN_PANE.height`)를 지키려면 도크가
+ * 가져야 하는 높이. 창이나 도크를 줄여도 칸이 이보다 낮아지지 않게 호스트가
+ * 도크의 최소 높이로 건다(칸 머리·상태 줄이 가려지지 않는다).
+ */
+export function dockMinPx(root: LayoutNode): number {
+  const rows = stackedRows(root);
+  return Math.max(DOCK_MIN_PX, rows * WORKBENCH_MIN_PANE.height + (rows - 1) * WORKBENCH_GUTTER + DOCK_CHROME_PX);
+}
 
 export interface DockPrefs {
   v: 1;

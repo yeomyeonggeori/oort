@@ -45,7 +45,9 @@
 .local-dock {
   display: flex;
   flex-direction: column;
-  min-height: 160px;
+  /* 배치가 요구하는 높이(core dockMinPx: 칸 줄 수 × 칸 최소 높이 + 머리). 최대
+   * 높이보다 크면 최소가 이긴다: 창이 낮으면 위 화면이 줄고 칸은 가려지지 않는다. */
+  min-height: var(--dock-min, 160px);
   max-height: calc(100% - 160px);
   flex: 0 0 calc(var(--dock-ratio, 0.4) * 100%);
 }

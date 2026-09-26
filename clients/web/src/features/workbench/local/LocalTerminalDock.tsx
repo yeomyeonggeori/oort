@@ -44,6 +44,7 @@ import {
   type KeyPlatform,
 } from "@momo/core/features/workbench/keymap";
 import {
+  dockMinPx,
   dockRatioFromPointer,
   toggleDockRatio,
 } from "@momo/core/features/workbench/dockStore";
@@ -231,9 +232,11 @@ export function LocalTerminalDock({
     return () => cancelAnimationFrame(frame);
   }, [dock.open, dock.fullscreen]);
 
+  const minPx = dockMinPx(layout.root);
   useLayoutEffect(() => {
     rootRef.current?.style.setProperty("--dock-ratio", String(dock.ratio));
-  }, [dock.ratio, dock.open]);
+    rootRef.current?.style.setProperty("--dock-min", `${minPx}px`);
+  }, [dock.ratio, dock.open, minPx]);
 
   const requestClose = useCallback(
     (paneId: PaneId, close: () => void) => {
