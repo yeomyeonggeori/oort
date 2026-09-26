@@ -8,8 +8,8 @@ import {
 } from '@testing-library/react-native';
 import React from 'react';
 
-import { AVATAR_SIZE } from '@momo/core/features/workspace/avatar';
-import { line, slopTo, TOUCH_TARGET } from '../src/design/tokens';
+import { CONV } from '../src/features/conversation/convDesign';
+import { slopTo, TOUCH_TARGET } from '../src/design/tokens';
 import {
   MessageRow,
   type MessageRowActions,
@@ -211,9 +211,10 @@ describe('메시지 작성자 탭과 롱프레스', () => {
 
     const avatarSlop = avatar.props.hitSlop.top;
     const authorSlop = author.props.hitSlop.top;
-    expect(AVATAR_SIZE + avatarSlop * 2).toBeGreaterThanOrEqual(TOUCH_TARGET);
-    expect(line.head + authorSlop * 2).toBeGreaterThanOrEqual(TOUCH_TARGET);
-    expect(avatarSlop).toBe(slopTo(AVATAR_SIZE));
+    // 대화의 얼굴은 40 이다(DS2-4, owner 표). 슬롭은 그 크기에서 도출된다.
+    expect(CONV.avatar + avatarSlop * 2).toBeGreaterThanOrEqual(TOUCH_TARGET);
+    expect(CONV.whoLine + authorSlop * 2).toBeGreaterThanOrEqual(TOUCH_TARGET);
+    expect(avatarSlop).toBe(slopTo(CONV.avatar));
   });
 
   it('작성자명을 길게 누르면 프로필 탭이 아니라 기존 메시지 액션시트가 열린다', () => {

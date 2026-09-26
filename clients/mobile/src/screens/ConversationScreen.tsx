@@ -8,7 +8,6 @@ import {
   quoteDraftStillValid,
   type QuoteDraft,
 } from '@momo/core/features/timeline/quote';
-import type {RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 import {
   typingLabel,
   typingSegments,
@@ -31,15 +30,14 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
   AppState,
-  Pressable,
   StyleSheet,
   Text,
   View,
   type AppStateStatus,
   type TextInput,
 } from 'react-native';
-import {NoticeBlock, Screen, ScreenHeader} from '../design/atoms';
-import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
+import {NoticeBlock, Screen} from '../design/atoms';
+import {font, lightPalette, SAFE_GUTTER, space, type Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
 import {AdeControlPanel} from '../features/ade/AdeControlPanel';
 import {AdeSummaryLine} from '../features/ade/AdeSummaryLine';
@@ -86,6 +84,10 @@ import {
 } from '../features/conversation/typingSignals';
 import {useTypingSender} from '../features/conversation/useTypingSender';
 import {ConversationLayout} from '../features/conversation/ConversationLayout';
+import {
+  ConversationHeader,
+  type ConversationHeaderMenuItem,
+} from '../features/conversation/ConversationHeader';
 import {
   LongPressHint,
   useLongPressHint,
@@ -193,20 +195,30 @@ const NO_RECEIPTS: ReadonlyMap<string, ApprovalReceipt> = new Map();
 // =============================================================================
 
 /**
- * 헤더 부제 — 소켓이 무슨 상태인지 (2R M3).
+ * 머리 부제 — 방이 **무엇인지** (시안 A `.a-hd .ttl span` 「6명 · 김인턴 참여 중」).
  *
- * 「연결 중…」 하나로 두 상태를 덮고 있었다. `RealtimeProvider`는 이미 "한 번
- * 연결된 뒤의 connecting은 disconnected다"라고 판정해서 내려보내는데(웹에서
- * 실측한 40초 단절이 아무 오프라인 표시도 못 냈던 그 결함의 수리) 이 부제만
- * 그 판정을 버리고 둘을 같은 낙관으로 말했다. 그러면 같은 화면 안에서 헤더는
- * 「연결 중…」이라 하고 바로 아래 활동 줄은 「연결이 끊겨 갱신이 멈췄습니다」라고
- * 하는, 서로 모순되는 두 문장이 동시에 서 있게 된다.
- *
- * 연결됐을 때는 아무 말도 하지 않는다 — 정상은 문장을 쓰지 않는다.
+ * 연결 상태는 여기 없다(DS2-4, owner 표: 연결 문제는 부제가 아니라 배너). 모르는
+ * 것은 말하지 않는다: 멤버 목록이 안 왔으면 수를 짓지 않고, 사람 DM 에는 접속
+ * 정보가 없으므로 부제가 없다.
  */
-function railSubtitle(status: RealtimeStatus): string | undefined {
-  if (status === 'connected') return undefined;
-  return status === 'connecting' ? '연결 중…' : '연결이 끊겼습니다';
+export function conversationSubtitle(
+  channel: {kind: string; memberIds?: string[]} | null,
+  peer: {kind: string} | null,
+  directory: Parameters<typeof memberFor>[0],
+): string | undefined {
+  if (channel === null) return undefined;
+  if (channel.kind === 'dm') return peer?.kind === 'agent' ? '에이전트' : undefined;
+  const ids = channel.memberIds;
+  if (!ids || ids.length === 0) return undefined;
+  const agents = ids
+    .map(id => memberFor(directory, id))
+    .filter(found => found?.kind === 'agent');
+  const count = `${ids.length}명`;
+  if (agents.length === 0) return count;
+  const first = agents[0]!.displayName;
+  return agents.length === 1
+    ? `${count} · ${first} 참여 중`
+    : `${count} · ${first} 외 에이전트 ${agents.length - 1}명 참여 중`;
 }
 
 /**
@@ -758,6 +770,14 @@ export default function ConversationScreen({
   // 그리고 **셀 자격이 있을 때만** 센다 (#1146 M2): 목록을 못 불러온 채로
   // 「고정 3개」라고 적으면, 목록 안에서 고친 거짓말이 헤더로 옮겨 갈 뿐이다.
   const pinLabel = pinListHeaderLabel(pinCount, timeline.pinsStatus);
+  const headerMenu = useMemo<ConversationHeaderMenuItem[]>(
+    () => [{label: pinLabel, run: openPins}],
+    [pinLabel, openPins],
+  );
+  const headerSubtitle = useMemo(
+    () => conversationSubtitle(channel, peer, directory),
+    [channel, peer, directory],
+  );
 
   // ---- 걸어 둔 인용 (ADR-0148) ----------------------------------------------
   //
@@ -1476,32 +1496,20 @@ export default function ConversationScreen({
   }, [awaitingJump, awaitingArrived]);
 
   return (
-    <Screen>
-      <ScreenHeader
+    <Screen style={styles.screen}>
+      {/* 시안 A `.a-hd` + owner 표(DS2-4 #2716). 고정 목록의 문(이슈 #1112)은 머리
+          오른쪽 글자 링크에서 ⋮ 메뉴로 옮겼다 — 고정이 하나도 없어도 메뉴 항목은
+          남는다(처음 고정하는 사람이 목록이 어디 있는지 배울 자리, 그때 열리는
+          화면이 빈 상태로 그것을 말한다). 연결 상태는 부제가 아니라 머리 밑 띠다. */}
+      <ConversationHeader
         title={title}
-        subtitle={railSubtitle(railStatus)}
+        subtitle={headerSubtitle}
+        kind={channel?.kind}
+        peerId={peer?.id ?? null}
+        directory={directory}
         onBack={onBack}
-        titleTestID="conversation-title"
-        // 이슈 #1112 — 고정 목록으로 가는 문. 헤더의 오른쪽 슬롯은 이 화면에서
-        // 비어 있었고, 사이드바의 검색 진입 액션(`SearchEntryAction`)이 쓰는 그
-        // 자리다. 고정이 하나도 없어도 남는다: 처음 고정하는 사람이 목록이 어디
-        // 있는지 배울 자리가 필요하고, 그때 열리는 화면이 빈 상태로 그것을 말한다.
-        //
-        // 그 액션을 **이름이 아니라 컴포넌트로** 가리킨다 (이슈 #1170 N2): 이 줄은
-        // 한 번 이미 낡았다. 「메시지 찾기」라고 적혀 있었고 그 이름은 #1146 N4 에서
-        // 사라졌는데, 산문은 아무것도 컴파일하지 않으므로 조용히 남아 있었다.
-        right={
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={pinLabel}
-            onPress={openPins}
-            style={({pressed}) => [styles.headerAction, pressed && styles.pressed]}
-            testID="open-pin-list">
-            <Text style={styles.headerActionLabel}>
-              {pinLabel}
-            </Text>
-          </Pressable>
-        }
+        menu={headerMenu}
+        railStatus={railStatus}
       />
       {/* 워크스페이스 전역 집계 한 줄. 살아 있는 작업이 없으면 **아무것도 그리지
           않는다** — 빈 띠도 남기지 않는 것이 이 줄의 계약이고, 그래서 이 자리는
@@ -1769,22 +1777,17 @@ export default function ConversationScreen({
 
 const buildStyles = (color: Palette) => StyleSheet.create({
   notice: {padding: space.md},
-  // 사이드바의 검색 진입 액션(`SearchEntryAction`)과 같은 모양이다 (이슈 #1112):
-  // 헤더의 오른쪽 액션은 이 앱에서 이미 이렇게 생겼고, 두 번째 모양을 만들 이유가
-  // 없다. 그 컨트롤을 보이는 낱말로 부르지 않는 이유는 위 `right=` 주석과 같다.
-  headerAction: {
-    minHeight: TOUCH_TARGET,
-    justifyContent: 'center',
-    paddingHorizontal: space.sm,
-    marginRight: -space.sm,
-    borderRadius: radius.sm,
+  /**
+   * 시안 A `.a-conv{background:linear-gradient(180deg,var(--bgTop) 0,var(--surface) 210px)}`
+   * (다크는 `var(--bgMid) 220px`). 머리 유리가 비치는 바닥이다. 210/844 ≈ 25%.
+   * `Screen` 의 위 안전 영역 여백은 머리가 자기 유리 안에서 진다.
+   */
+  screen: {
+    paddingTop: 0,
+    experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasTop} 0%, ${
+      color === lightPalette ? color.surface : color.bg
+    } 25%)`,
   },
-  headerActionLabel: {
-    fontSize: font.label,
-    color: color.accentText,
-    fontWeight: '600',
-  },
-  pressed: {backgroundColor: color.surfacePressed},
   /**
    * 중단의 결과 한 줄. 활동 줄과 입력창 사이, 방금 누른 버튼 바로 아래다 —
    * 토스트가 아니라 제자리 문장인 이유는 그것이 판단의 근거 옆이기 때문이다.

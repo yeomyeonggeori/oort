@@ -43,6 +43,7 @@ import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {usePalette, useStyles} from '../../design/theme';
 import {
   DayDivider,
+  FloatingDayPill,
   MessageRow,
   PendingRow,
   RecoveryDivider,
@@ -478,6 +479,50 @@ function firstMessageIdAfter(
  * 소멸」). `FlatList` 는 이 객체가 도중에 바뀌는 것도 허락하지 않으므로 상수다.
  */
 const PILL_VIEWABILITY = {itemVisiblePercentThreshold: 0} as const;
+
+/**
+ * 떠 있는 날짜 알약이 가리킬 날 (DS2-4 #2716, owner 표 「떠 있는 날짜 알약」).
+ *
+ * 창의 **맨 위 행**이 속한 날 — 그 행에서 위로 가장 가까운 날짜 구분선이다. 그
+ * 구분선이 이미 창 안에 보이면 `null`: 같은 날이 목록 안 알약과 떠 있는 알약으로
+ * 두 번 서지 않는다(Buzz 도 목록 안 날짜가 올라가 사라진 뒤에야 위에 뜬다).
+ *
+ * 필 판정과 같은 규율로 **키**로 센다(`relationFromKeys` 머리말) — 옛 페이지가 위에
+ * 붙어 첨자가 밀려도 보이는 행 집합은 그대로다.
+ */
+export function floatingDayFor(
+  items: readonly FoldedTimelineItem[],
+  viewableKeys: readonly string[],
+): {key: string; atMs: number} | null {
+  if (viewableKeys.length === 0) return null;
+  const visible = new Set(viewableKeys);
+  const top = items.findIndex(item => visible.has(item.key));
+  if (top < 0) return null;
+  for (let index = top; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item.kind === 'day') {
+      return visible.has(item.key) ? null : {key: item.key, atMs: item.atMs};
+    }
+  }
+  return null;
+}
+
+/**
+ * 떠 있는 날짜 알약이 손을 뗀 뒤 머무는 시간, ms (DS2-4 검수 B-1).
+ *
+ * owner 표의 사양은 「스크롤 **중** 상단 고정」이다. 첫 판은 맨 위 구분선이 창 밖이면
+ * 쉬는 화면에서도 늘 떠 있어서, 창 맨 위 줄의 글자를 영구히 덮었다. 이제 알약은
+ * 손가락이 목록을 잡는 순간 서고, 관성까지 멈춘 뒤 이만큼 머물다 물러난다 — 방금
+ * 어디까지 왔는지 읽을 틈이다.
+ */
+export const DAY_PILL_LINGER_MS = 1200;
+
+function sameFloatingDay(
+  a: {key: string} | null,
+  b: {key: string} | null,
+): boolean {
+  return a === b || (a !== null && b !== null && a.key === b.key);
+}
 
 /**
  * 목록이 보인다고 한 **키**들로 구분선의 자리를 판정한다.
@@ -1083,6 +1128,31 @@ function TimelineInner({
   const [relationState, setRelationState] =
     useState<DividerViewportRelation | null>(null);
   const [unreadLatched, setUnreadLatched] = useState(false);
+  /** 떠 있는 날짜 알약이 지금 서는가 — 스크롤 중(과 멈춘 뒤 잠깐)만 참이다. */
+  const [dayPillLive, setDayPillLive] = useState(false);
+  const dayPillTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdDayPill = useCallback(() => {
+    if (dayPillTimerRef.current !== null) clearTimeout(dayPillTimerRef.current);
+    dayPillTimerRef.current = null;
+    setDayPillLive(true);
+  }, []);
+  const releaseDayPill = useCallback(() => {
+    if (dayPillTimerRef.current !== null) clearTimeout(dayPillTimerRef.current);
+    dayPillTimerRef.current = setTimeout(() => {
+      dayPillTimerRef.current = null;
+      setDayPillLive(false);
+    }, DAY_PILL_LINGER_MS);
+  }, []);
+  useEffect(
+    () => () => {
+      if (dayPillTimerRef.current !== null) clearTimeout(dayPillTimerRef.current);
+    },
+    [],
+  );
+  /** 떠 있는 날짜 알약의 날(`floatingDayFor`). 같은 날이면 상태를 바꾸지 않는다. */
+  const [floatingDay, setFloatingDay] = useState<{key: string; atMs: number} | null>(
+    null,
+  );
   /** 지금 가장 새 확정 메시지. 바닥을 떠나는 순간 기준선이 된다. */
   const newestSeqRef = useRef<number | null>(null);
   newestSeqRef.current =
@@ -1293,6 +1363,8 @@ function TimelineInner({
     ({viewableItems}: {viewableItems: ViewToken<FoldedTimelineItem>[]}) => {
       viewableKeysRef.current = viewableItems.map(token => token.key);
       setRelationState(relationFromKeys(itemsRef.current, viewableKeysRef.current));
+      const day = floatingDayFor(itemsRef.current, viewableKeysRef.current);
+      setFloatingDay(current => (sameFloatingDay(current, day) ? current : day));
       armLatchIfDividerSeen();
     },
   ).current;
@@ -1302,6 +1374,8 @@ function TimelineInner({
   useEffect(() => {
     if (!jumpPills) return;
     setRelationState(relationFromKeys(items, viewableKeysRef.current));
+    const day = floatingDayFor(items, viewableKeysRef.current);
+    setFloatingDay(current => (sameFloatingDay(current, day) ? current : day));
   }, [jumpPills, items]);
 
   const unreadJumpCount = countUnreadJump(unreadCount);
@@ -2089,18 +2163,23 @@ function TimelineInner({
     // is the likeliest prelude to them scrolling UP into history, which is the
     // one thing that must never move under them.
     setChasingTail(false);
+    // 떠 있는 날짜 알약은 손가락이 목록을 잡는 순간 선다(DS2-4 B-1).
+    holdDayPill();
   }, [
     cancelConvergence,
     cancelFocus,
     cancelJumpTravel,
     settleEntry,
     onReaderTookList,
+    holdDayPill,
   ]);
 
   /** 손가락이 떨어졌다 — 그 뒤의 따라가기 활강은 다시 제 핀을 건다 (#2686). */
   const onScrollEndDrag = useCallback(() => {
     fingerOnListRef.current = false;
-  }, []);
+    // 관성이 이어지면 `onMomentumScrollBegin` 이 다시 붙잡는다.
+    releaseDayPill();
+  }, [releaseDayPill]);
 
   // ===========================================================================
   // ## 따라가기 활강도 이 목록이 낸 이동이다 (#2686, 실측)
@@ -2725,6 +2804,9 @@ function TimelineInner({
       onScroll={onScroll}
       onScrollBeginDrag={onScrollBeginDrag}
       onScrollEndDrag={onScrollEndDrag}
+      // 떠 있는 날짜 알약만 관성을 본다(DS2-4 B-1) — 따라가기 판정은 여기 없다.
+      onMomentumScrollBegin={jumpPills ? holdDayPill : undefined}
+      onMomentumScrollEnd={jumpPills ? releaseDayPill : undefined}
       scrollEventThrottle={16}
       onContentSizeChange={onContentSizeChange}
       onLayout={onLayout}
@@ -2781,6 +2863,11 @@ function TimelineInner({
     // 픽셀도 바뀌지 않는다 — `measure/` 의 앵커 이동 두 줄이 그것을 잰다.
     <View style={styles.pillFrame}>
       {list}
+      {/* 떠 있는 날짜 알약(DS2-4). 위 필(「안 읽은 곳으로」)과 같은 자리라, 그 필이
+          서 있는 동안은 물러난다 — 할 일이 있는 필이 날짜보다 앞선다. */}
+      {dayPillLive && floatingDay !== null && !showJumpUnread ? (
+        <FloatingDayPill atMs={floatingDay.atMs} nowMs={nowMs} />
+      ) : null}
       {showJumpUnread ? (
         <JumpPillDock side="top">
           <JumpPill
