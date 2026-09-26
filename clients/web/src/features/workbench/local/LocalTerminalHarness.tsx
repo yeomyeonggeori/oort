@@ -23,7 +23,7 @@ import { openDock, resetDockStateForTest, toggleDockFullscreen, useDockState } f
 // 디자인 검수가 라이트·다크에서 도크를 보는 자리다. 실제 PTY는 데스크탑 debug
 // 앱에서 확인한다(PR 본문).
 //
-// `?scene=one|four|full|settings-web|settings-desktop`
+// `?scene=one|four|full|exited|failed|settings-web|settings-desktop`
 
 const ENC = new TextEncoder();
 
@@ -41,7 +41,7 @@ const BANNER = [
 ].join("\r\n");
 
 /** 브라우저용 흉내 PTY. 입력을 그대로 되울리고, Enter에 새 프롬프트를 낸다. */
-function demoPty(): PtyPort {
+function demoPty(mode: "live" | "exited" | "failed" = "live"): PtyPort {
   const outputs = new Map<number, (b: ArrayBuffer) => void>();
   let next = 1;
   const emit = (id: number, text: string) => {
@@ -49,10 +49,14 @@ function demoPty(): PtyPort {
     outputs.get(id)?.(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
   };
   return {
-    spawn: async (_request, onOutput) => {
+    spawn: async (_request, onOutput, onExit) => {
+      if (mode === "failed") throw new Error("refused: folder is outside the home directory");
       const id = next++;
       outputs.set(id, onOutput);
-      setTimeout(() => emit(id, BANNER), 0);
+      setTimeout(() => {
+        emit(id, BANNER);
+        if (mode === "exited") onExit({ id, code: 0, signal: null });
+      }, 0);
       return id;
     },
     write: async (id, bytes) => {
@@ -78,8 +82,13 @@ export function LocalTerminalHarness() {
   const [params] = useSearchParams();
   const scene = params.get("scene") ?? "one";
   const sessions = useMemo(
-    () => createLocalSessions({ pty: demoPty(), loadMirror: loadBrowserMirror, storage: () => null }),
-    []
+    () =>
+      createLocalSessions({
+        pty: demoPty(scene === "exited" ? "exited" : scene === "failed" ? "failed" : "live"),
+        loadMirror: loadBrowserMirror,
+        storage: () => null,
+      }),
+    [scene]
   );
   const dock = useDockState();
 
@@ -94,7 +103,7 @@ export function LocalTerminalHarness() {
 
   useEffect(() => {
     resetDockStateForTest();
-    if (scene === "one" || scene === "four") openDock();
+    if (scene === "one" || scene === "four" || scene === "exited" || scene === "failed") openDock();
     if (scene === "full") toggleDockFullscreen();
   }, [scene]);
 

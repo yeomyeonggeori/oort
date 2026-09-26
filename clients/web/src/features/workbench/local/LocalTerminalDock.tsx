@@ -52,7 +52,7 @@ import { detectLocalHarnesses, type PtyProgram } from "@/lib/tauri";
 import { WorkbenchGrid, type WorkbenchPaneInfo } from "../WorkbenchGrid";
 import { useWorkbenchLayout } from "../useWorkbenchLayout";
 import { DOCK_SESSION_KEY, localSessions, type LocalSessions } from "./localSessions";
-import { LocalTerminalPane, localPaneTitle } from "./LocalTerminalPane";
+import { HARNESS_LABEL, LocalTerminalPane, localPaneTitle } from "./LocalTerminalPane";
 import {
   closeDock,
   openDock,
@@ -83,7 +83,6 @@ function detectPlatform(): KeyPlatform {
   return keyPlatformOf(navigator.platform || navigator.userAgent);
 }
 
-const HARNESS_LABEL: Record<string, string> = { claude: "Claude Code", codex: "Codex" };
 
 const NO_WAITING = "나를 기다리는 칸이 없습니다.";
 const SPLIT_REFUSED = "칸이 좁아 새 세션을 열 수 없습니다. 칸을 닫거나 도크를 키우세요.";
@@ -267,14 +266,20 @@ export function LocalTerminalDock({
       )}
     >
       {dock.fullscreen ? null : <DockEdge ratio={dock.ratio} rootRef={rootRef} />}
-      <header className="flex h-control shrink-0 items-center gap-1 px-2">
+      <header className="@container flex h-control shrink-0 items-center gap-1 px-2">
         <SquareTerminal aria-hidden className="size-4 shrink-0 text-icon" />
         <h2 className="min-w-0 truncate pl-1 text-meta font-medium text-ink">로컬 터미널</h2>
-        <p className="hidden min-w-0 truncate text-meta text-ink-muted md:block">이 Mac에서만 돌고 서버에 기록하지 않습니다.</p>
+        {/* 설명은 도크 폭(창 폭이 아니다)이 넉넉할 때만. 알림이 뜨면 자리를 비켜 준다. */}
+        {notice ? null : (
+          <p className="hidden min-w-0 truncate text-meta text-ink-muted @2xl:block">
+            이 기기에서만 돌고 서버에 기록하지 않습니다.
+          </p>
+        )}
         <p
           role="status"
           aria-live="polite"
           className={cn("min-w-0 flex-1 truncate px-2 text-meta text-ink", !notice && "sr-only")}
+          title={notice ?? undefined}
           data-testid="local-terminal-dock-notice"
         >
           {notice ?? ""}
@@ -334,7 +339,7 @@ export function LocalTerminalDock({
           </DropdownMenuContent>
         </DropdownMenu>
         <DockIconButton
-          label={dock.fullscreen ? "전체 화면 끄기" : "전체 화면 작업 공간"}
+          label={dock.fullscreen ? "전체 화면 끄기" : "전체 화면 켜기"}
           keycap="⌃⇧`"
           aria="Control+Shift+`"
           pressed={dock.fullscreen}
@@ -387,7 +392,6 @@ export function LocalTerminalDock({
                 type="button"
                 variant="destructive"
                 size="sm"
-                autoFocus
                 data-testid="local-terminal-close-confirm-ok"
                 onClick={() => {
                   const run = confirm.close;

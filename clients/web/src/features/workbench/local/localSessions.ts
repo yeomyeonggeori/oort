@@ -104,7 +104,7 @@ const TEXT_ENCODER = new TextEncoder();
 
 /** 복원 구분선. 흐린 글씨(SGR 2)로 전의 화면과 새 셸을 가른다. */
 export const RESTORE_SEPARATOR =
-  "\r\n\u001b[2m──── 앱을 다시 열어 새 셸을 시작했습니다. 위는 전의 화면입니다. ────\u001b[0m\r\n";
+  "\r\n\u001b[2m──── 앱을 다시 열어 새 셸을 시작했습니다. 이 줄 위는 이전 실행의 화면입니다. ────\u001b[0m\r\n";
 
 export function exitLine(exit: PtyExit): string {
   const why =

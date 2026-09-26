@@ -8,7 +8,7 @@
 // 실제 PTY·한글 입력·재시작 복원은 데스크탑 debug 앱에서 잰다(PR 본문).
 //
 // 장면(라이트·다크, 1280×800): one(칸 하나) · four(4분할) · full(⌃⇧` 전체 화면) ·
-// confirm(⌘W 닫기 확인) · settings-desktop · settings-web
+// confirm(⌘W 닫기 확인) · exited · failed · settings-desktop · settings-web
 //
 // 재는 것:
 //   - 도크·칸 수, 가로 넘침 0, 흉내 셸 출력이 xterm에 그려졌는지(한글 포함)
@@ -72,6 +72,26 @@ async function scenes(browser, origin) {
       const panes = await page.getByTestId("workbench-pane").count();
       check(`${scheme}/${scene}: 칸 수`, panes === (scene === "one" ? 1 : 4), { panes });
       check(`${scheme}/${scene}: 가로 넘침 0`, (await overflowX(page)) <= 0);
+      if (scene === "four") {
+        // H3: 포커스 없는 칸은 커서를 그리지 않는다(신호색은 한 곳). xterm은 한 번도
+        // 포커스를 받지 않은 칸의 커서를 그리지 않으므로, 네 칸을 한 번씩 눌러 둔다.
+        const terms = page.getByTestId("local-terminal");
+        for (let i = 0; i < 4; i++) await terms.nth(i).click();
+        await page.waitForTimeout(200);
+        const outlines = await page.locator(".xterm-cursor-outline").count();
+        check(`${scheme}/four: 포커스 없는 칸의 윤곽 커서 0`, outlines === 0, { outlines });
+        // H2: 도크 머리 → Tab이 칸 머리 단추에 머문다(셸로 끌려가지 않는다).
+        await page.getByTestId("local-terminal-dock-close").focus();
+        await page.keyboard.press("Tab");
+        const where = await page.evaluate(() => {
+          const a = document.activeElement;
+          return { tag: a?.tagName, label: a?.getAttribute("aria-label"), xterm: a?.classList.contains("xterm-helper-textarea") };
+        });
+        check(`${scheme}/four: Tab이 칸 머리 단추에 머문다`, where.tag === "BUTTON" && !where.xterm, where);
+        await page.keyboard.press("Tab");
+        const next = await page.evaluate(() => document.activeElement?.tagName);
+        check(`${scheme}/four: 다음 Tab도 단추다`, next === "BUTTON", { next });
+      }
       if (scene === "full") {
         const hidden = await page.evaluate(
           () => document.querySelector('[data-testid="local-terminal-dock"]')?.getBoundingClientRect().top ?? -1
@@ -84,8 +104,20 @@ async function scenes(browser, origin) {
         await page.locator(".xterm-helper-textarea").first().focus();
         await page.keyboard.press("Meta+KeyW");
         await page.getByTestId("local-terminal-close-confirm").waitFor();
+        const focusedDestroy = await page.evaluate(
+          () => document.activeElement?.getAttribute("data-testid") === "local-terminal-close-confirm-ok"
+        );
+        check(`${scheme}/confirm: 파괴 단추가 기본 포커스가 아니다`, !focusedDestroy);
         await shot(page, `${scheme}-confirm`);
       }
+      await context.close();
+    }
+    for (const scene of ["exited", "failed"]) {
+      const { context, page } = await open(browser, origin, scheme, scene);
+      await page.getByTestId("local-terminal-restart").waitFor();
+      const status = await page.getByTestId("local-terminal-status").textContent();
+      check(`${scheme}/${scene}: 칸 상태 줄이 무슨 일과 다음 행동을 말한다`, /끝났습니다|열지 못했습니다/.test(status ?? ""), { status });
+      await shot(page, `${scheme}-${scene}`);
       await context.close();
     }
     for (const scene of ["settings-desktop", "settings-web"]) {

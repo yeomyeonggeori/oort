@@ -46,6 +46,13 @@ function readTheme(surface: HTMLElement, selection: HTMLElement, cursor: HTMLEle
   };
 }
 
+/** 캐럿이 이미 이 칸(머리 포함) 안에 있는가. */
+function paneOwnsFocus(mount: HTMLElement): boolean {
+  const section = mount.closest("[data-pane-id]");
+  const active = typeof document === "undefined" ? null : document.activeElement;
+  return section !== null && active !== null && section !== active && section.contains(active);
+}
+
 const EMPTY_VIEW: ReadonlyMap<string, LocalSessionView> = new Map();
 
 export function useLocalSessionView(
@@ -60,9 +67,21 @@ export function useLocalSessionView(
   return map.get(paneId) ?? null;
 }
 
+/** 하네스 표시 이름. 새 세션 메뉴·칸 제목·다시 시작 단추가 같은 이름을 쓴다. */
+export const HARNESS_LABEL: Readonly<Record<string, string>> = {
+  claude: "Claude Code",
+  codex: "Codex",
+  grok: "Grok",
+};
+
+function programLabel(view: LocalSessionView | null): string {
+  if (view?.program.kind !== "harness") return "셸";
+  return HARNESS_LABEL[view.program.id] ?? view.program.id;
+}
+
 /** 칸 머리 제목. `로컬`로 시작해 에이전트 칸과 문구로 구분한다(ADR-0190 D7). */
 export function localPaneTitle(view: LocalSessionView | null): string {
-  const program = view?.program.kind === "harness" ? view.program.id : "셸";
+  const program = programLabel(view);
   const title = view?.title;
   return title ? `로컬 · ${program} · ${title}` : `로컬 · ${program}`;
 }
@@ -108,6 +127,9 @@ export function LocalTerminalPane({
         fontSize: Number.parseFloat(style.fontSize) || 12,
         scrollback: 5_000,
         cursorBlink: false,
+        // 신호색은 「키가 여기로 간다」 한 곳에만(칸 링 + 그 칸의 커서). 포커스
+        // 없는 칸은 커서를 그리지 않는다(관전 터미널과 같은 선택).
+        cursorInactiveStyle: "none",
         macOptionIsMeta: false,
         allowProposedApi: true,
         theme: readTheme(mount, selection, cursor),
@@ -156,7 +178,7 @@ export function LocalTerminalPane({
       };
       media.addEventListener("change", applyTheme);
       const unsubscribeTheme = subscribeTheme(applyTheme);
-      if (pane.focused) terminal.focus();
+      if (pane.focused && !paneOwnsFocus(mount)) terminal.focus();
 
       cleanup = () => {
         observer.disconnect();
@@ -179,9 +201,13 @@ export function LocalTerminalPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pane.id, sessions]);
 
-  // 격자의 포커스 칸이 이 칸이 되면 키가 터미널로 가게 한다.
+  // 격자의 포커스 칸이 이 칸이 되면 키가 터미널로 가게 한다. 단 캐럿이 이미
+  // 이 칸 안(머리 단추 등)에 있으면 그대로 둔다: Tab으로 머리 단추에 온
+  // 사람의 캐럿을 셸로 끌어가면 다음 Tab이 셸에 먹힌다(design-review H2).
   useEffect(() => {
-    if (pane.focused) terminalRef.current?.focus();
+    const mount = mountRef.current;
+    if (!pane.focused || !mount || paneOwnsFocus(mount)) return;
+    terminalRef.current?.focus();
   }, [pane.focused]);
 
   const phase = view?.phase ?? "starting";
@@ -219,17 +245,20 @@ function PaneFooter({
   onRestart: () => void;
 }) {
   let message: string | null = null;
+  let detail: string | null = null;
   let action: string | null = null;
   if (runtimeFailed) {
     message = "터미널 화면을 불러오지 못했습니다. 앱을 다시 여세요.";
   } else if (view === null || view.phase === "starting") {
     message = null;
   } else if (view.phase === "failed") {
-    message = `터미널을 열지 못했습니다. ${view.error ?? ""}`.trim();
+    // 셸의 거부 사유는 영어 원문이라 화면 문장에 섞지 않고 풀이에만 둔다.
+    message = "터미널을 열지 못했습니다. 다시 열어 보고, 되풀이되면 앱을 다시 여세요.";
+    detail = view.error;
     action = "다시 열기";
   } else if (view.phase === "exited") {
     message = "프로세스가 끝났습니다. 이 칸에서 다시 시작할 수 있습니다.";
-    action = view.program.kind === "harness" ? `${view.program.id} 다시 시작` : "새 셸 시작";
+    action = view.program.kind === "harness" ? `${programLabel(view)} 다시 시작` : "새 셸 시작";
   } else if (view.inputNotice) {
     message = view.inputNotice;
   } else if (view.storageFailed) {
@@ -243,7 +272,7 @@ function PaneFooter({
       )}
       data-testid="local-terminal-status"
     >
-      <p role="status" aria-live="polite" className="min-w-0 flex-1 truncate" title={message ?? undefined}>
+      <p role="status" aria-live="polite" className="min-w-0 flex-1 truncate" title={detail ? `${message ?? ""} (${detail})` : (message ?? undefined)}>
         {message ?? ""}
       </p>
       {action ? (

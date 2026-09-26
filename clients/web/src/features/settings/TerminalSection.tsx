@@ -67,13 +67,16 @@ export function TerminalSection({
               </th>
               <td className="py-2">
                 <span className="flex flex-wrap gap-1">
-                  {binding.keycaps.map((cap) => (
-                    <kbd
-                      key={cap}
-                      className="rounded-sm border border-line bg-surface-muted px-1 font-mono text-meta text-ink"
-                    >
-                      {keycapLabel(platform, cap)}
-                    </kbd>
+                  {binding.keycaps.map((cap, i) => (
+                    <span key={cap} className="flex items-center gap-1">
+                      {/* 번호 이동은 ⌃1부터 ⌃9까지의 범위다(두 키가 아니다). */}
+                      {binding.id === "focus-index" && i > 0 ? (
+                        <span aria-hidden className="text-meta text-ink-muted">…</span>
+                      ) : null}
+                      <kbd className="rounded-sm border border-line bg-surface-muted px-1 font-mono text-meta text-ink">
+                        {keycapLabel(platform, cap)}
+                      </kbd>
+                    </span>
                   ))}
                 </span>
               </td>
