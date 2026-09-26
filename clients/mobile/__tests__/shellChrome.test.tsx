@@ -311,9 +311,10 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     installFetch();
     await renderReady();
     openMenu();
-    expect(screen.getByTestId('shell-plus').props.accessibilityState).toEqual({
-      expanded: true,
-    });
+    expect(
+      screen.getByTestId('shell-plus', {includeHiddenElements: true}).props
+        .accessibilityState,
+    ).toEqual({expanded: true});
     fireEvent.press(screen.getByTestId('plus-menu-agents'));
     // 메뉴가 곧바로 목록을 연다 — 가운데 시트가 없다.
     expect(screen.queryByTestId('plus-menu')).toBeNull();
@@ -398,6 +399,10 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     await waitFor(() => expect(screen.getByTestId('plus-menu-channel')).toBeTruthy());
     fireEvent.press(screen.getByTestId('plus-menu-channel'));
     expect(screen.getByTestId('new-channel-sheet')).toBeTruthy();
+    // 규칙은 처음부터 칸 밑에 선다(웹과 같은 자리).
+    expect(screen.getByTestId('new-channel-name-rule')).toHaveTextContent(
+      /영문 소문자, 숫자, 하이픈, 밑줄로 80자 이내/,
+    );
     // 빈 이름으로는 만들 수 없다.
     expect(screen.getByTestId('new-channel-create').props.accessibilityState).toMatchObject(
       {disabled: true},
@@ -460,30 +465,44 @@ describe('+ 메뉴는 가벼운 팝오버다 (#2750)', () => {
     });
   });
 
-  it('+ 를 다시 누르면 닫힌다', async () => {
-    installFetch();
-    await renderReady();
-    openMenu();
-    fireEvent.press(screen.getByTestId('shell-plus'));
-    expect(screen.queryByTestId('plus-menu')).toBeNull();
-  });
-
   it('VoiceOver escape 로 닫히고, 메뉴는 모달이며 스크림은 보조기술에서 숨는다', async () => {
     installFetch();
     await renderReady();
     openMenu();
-    const menu = screen.getByTestId('plus-menu');
-    expect(menu).toHaveProp('accessibilityViewIsModal', true);
+    // 모달은 레이어 뿌리에 있다: iOS 는 그 뷰의 **형제**(탭바·+·목록)를 무시한다.
+    const layer = screen.getByTestId('plus-menu-layer');
+    expect(layer).toHaveProp('accessibilityViewIsModal', true);
+    // 메뉴가 열린 동안 탭바·+·목록은 보조기술에서 가려진다(VoiceOver 가 메뉴에 갇힌다).
+    for (const id of ['shell-plus', 'tab-home', 'sidebar-list']) {
+      expect([id, screen.queryByTestId(id)]).toEqual([id, null]);
+    }
+    expect(screen.getByTestId('plus-menu-dm')).toBeTruthy();
     expect(screen.queryByTestId('plus-menu-scrim')).toBeNull();
-    act(() => menu.props.onAccessibilityEscape());
+    act(() => layer.props.onAccessibilityEscape());
     expect(screen.queryByTestId('plus-menu')).toBeNull();
   });
 
-  it('탭을 고르면 닫힌다', async () => {
+  // 실기기에서 메뉴가 열린 동안의 손가락은 스크림에 먼저 닿는다(위 시험). 이 시험은
+  // 탭 선택 핸들러 자체가 메뉴를 접는지를 잰다 — 코드로 탭이 바뀌는 길(알림 등)의 몫.
+  it('탭 선택 핸들러는 메뉴를 접는다', async () => {
     installFetch();
     await renderReady();
     openMenu();
     fireEvent.press(screen.getByTestId('tab-inbox', {includeHiddenElements: true}));
+    expect(screen.queryByTestId('plus-menu')).toBeNull();
+  });
+
+  it('메뉴가 열린 채 다른 길로 층이 서면 메뉴가 접힌다 — 층을 닫아도 다시 뜨지 않는다', async () => {
+    installFetch();
+    await renderReady();
+    openMenu();
+    // 알림 탭 같은 다른 길을 흉내 낸다: 스크림을 거치지 않고 대화 층을 연다.
+    fireEvent.press(
+      screen.getByTestId('sidebar-row-channel:ch-general', {includeHiddenElements: true}),
+    );
+    await waitFor(() => expect(screen.getByTestId('conversation-pane')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('header-back'));
+    await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
     expect(screen.queryByTestId('plus-menu')).toBeNull();
   });
 

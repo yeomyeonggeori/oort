@@ -36,8 +36,9 @@ import {PLUS_LABEL, SHELL} from './ShellChrome';
 // ## 닫힘
 //
 // 바깥(투명 스크림)을 누르면, 행을 고르면, VoiceOver escape(두 손가락 Z)로 닫힌다.
-// 스크림은 보조기술에서 숨는다 — 메뉴 그릇이 `accessibilityViewIsModal` 이라
-// VoiceOver 는 메뉴 안에 머물고 escape 로 나간다(`PageSheet` 와 같은 규칙).
+// 스크림은 보조기술에서 숨는다. `accessibilityViewIsModal` 은 **레이어 뿌리**에
+// 둔다 — iOS 는 그 뷰의 형제를 무시하므로, 뿌리에 있어야 형제인 탭바·+·목록이
+// 가려지고 VoiceOver 가 메뉴 안에 머문다(design-review M1). escape 로 나간다.
 // =============================================================================
 
 export interface PlusMenuItem {
@@ -86,7 +87,11 @@ export function PlusMenu({
   }, [appear, reduceMotion]);
 
   return (
-    <View style={StyleSheet.absoluteFill} testID="plus-menu-layer">
+    <View
+      accessibilityViewIsModal
+      onAccessibilityEscape={onClose}
+      style={StyleSheet.absoluteFill}
+      testID="plus-menu-layer">
       <Pressable
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
@@ -95,9 +100,7 @@ export function PlusMenu({
         testID="plus-menu-scrim"
       />
       <Animated.View
-        accessibilityViewIsModal
         accessibilityLabel={PLUS_LABEL}
-        onAccessibilityEscape={onClose}
         style={[
           styles.menu,
           {

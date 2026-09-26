@@ -1,7 +1,14 @@
 import type {Member} from '@momo/core/lib/api';
 import {canCreateChannelNow} from '@momo/core/features/channels/model';
 import {memberFor} from '@momo/core/features/workspace/directory';
-import React, {useCallback, useMemo, useReducer, useRef, useState} from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from 'react';
 import {StyleSheet, View} from 'react-native';
 import type {Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
@@ -242,6 +249,11 @@ export function Shell({
     nav.workList ||
     nav.workSession !== null ||
     nav.hosted !== null;
+  // 메뉴가 열린 채 다른 길(알림 탭 등)로 층이 서면 메뉴를 **접는다**. 숨기기만 하면
+  // 층이 닫힐 때 아무도 부르지 않은 메뉴가 다시 뜬다(design-review L1).
+  useEffect(() => {
+    if (covered) setCreate(open => (open === 'menu' ? null : open));
+  }, [covered]);
 
   return (
     <Canvas>

@@ -1,6 +1,7 @@
 import {createChannel, type Channel} from '@momo/core/lib/api';
 import {
   channelNameIssue,
+  CHANNEL_NAME_MAX,
   channelNameIssueMessage,
   createChannelFailure,
   normalizeChannelName,
@@ -109,6 +110,9 @@ function SheetBody({
     issue && (touched || name !== '') ? channelNameIssueMessage(issue) : null;
   const nameMessage =
     failure?.field === 'name' ? failure.message : issueMessage;
+  // 규칙은 처음부터 칸 밑에 선다 — 웹 다이얼로그와 같은 자리, 같은 문장 가족이다
+  // (design-review M4). 어기면 같은 자리가 그 이유로 바뀐다.
+  const nameRule = `영문 소문자, 숫자, 하이픈, 밑줄로 ${CHANNEL_NAME_MAX}자 이내.`;
 
   const submit = async () => {
     setTouched(true);
@@ -212,7 +216,11 @@ function SheetBody({
           testID="new-channel-name-issue">
           {nameMessage}
         </Text>
-      ) : null}
+      ) : (
+        <Text style={styles.rule} testID="new-channel-name-rule">
+          {nameRule}
+        </Text>
+      )}
 
       <View style={styles.kind}>
         <GroupSection label="공개 범위" testID="new-channel-kind">
@@ -280,6 +288,12 @@ const buildStyles = (color: Palette) =>
       minHeight: TOUCH_TARGET,
       fontSize: font.body,
       color: color.text,
+    },
+    rule: {
+      marginTop: space.sm,
+      marginHorizontal: SAFE_GUTTER,
+      fontSize: font.label,
+      color: color.textMuted,
     },
     issue: {
       marginTop: space.sm,

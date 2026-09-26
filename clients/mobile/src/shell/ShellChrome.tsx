@@ -280,7 +280,9 @@ function PlusButton({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={PLUS_LABEL}
-      accessibilityHint="새 DM, 새 채널, 에이전트 부르기 메뉴를 엽니다."
+      // 행은 역할·서버 표면에 따라 달라진다(새 채널·작업 콘솔). 힌트가 목록을 읊으면
+      // 없는 행을 안내하게 되므로 무엇이 열리는지만 말한다(design-review M2).
+      accessibilityHint="만들기 메뉴를 엽니다."
       accessibilityState={{expanded: open}}
       onPress={onPress}
       style={({pressed}) => [
