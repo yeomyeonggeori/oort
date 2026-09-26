@@ -1,0 +1,137 @@
+import { useQuery } from "@tanstack/react-query";
+import { fetchWorkspace } from "@momo/core/features/settings/api";
+import {
+  AI_CONNECT_DESKTOP_ONLY_NOTE,
+  AI_CONNECT_SERVER_OFF_NOTE,
+  SUBSCRIPTION_ENTRY_ACTION,
+  SUBSCRIPTION_ENTRY_DETAIL,
+  SUBSCRIPTION_ENTRY_TITLE,
+  subscriptionSurface,
+  type SubscriptionSurface,
+} from "@momo/core/features/onboarding/aiConnect";
+import { useSession } from "@/app/session";
+import { Button } from "@/design/ui/button";
+import { IS_TAURI, SUBSCRIPTION_AGENTS_BUILD_FLAG } from "@/lib/env";
+import { canCreateAgentNow } from "@/features/agentHub/createModel";
+import {
+  memberFor,
+  useDirectory,
+  workspaceIdentityKey,
+} from "@/features/workspace/useWorkspace";
+import { openAiConnectReentry, type AiConnectReentryFrom } from "./aiConnectReentry";
+
+// =============================================================================
+// 구독 줄 재진입 입구 (#2870, RCA 1-b·1-c).
+//
+// 설정 › AI 연결 맨 위와 에이전트 화면 머리에 선다. 누르면 온보딩의 AI 연결
+// 화면을 재진입 모드로 다시 연다(FirstAgentStage `mode="reentry"`).
+//
+// 누구에게 서는가: 구독 합류는 호스티드 연결을 만든다. 서버는 그 요청에
+// 워크스페이스 owner·admin을 요구한다(hosted_agent_connections.rs
+// `require_admin`). 그래서 입구도 에이전트 만들기와 같은 판정(`canCreateAgentNow`)
+// 뒤에 있다. provider 연결 운영자 판정(PLATFORM_ADMIN_EMAILS)과는 별개라, 설정
+// › AI 연결이 운영자 안내로 막혀도 이 블록은 선다.
+//
+// 무엇을 그리는가: 온보딩과 같은 세 게이트(`subscriptionSurface`).
+// - rows: 행동 버튼
+// - desktop-only·server-off: 이유 한 줄(버튼 없음. 눌러서 갈 화면에 구독 줄이 없다)
+// - hidden(빌드가 구독 표면을 걷음): 아무것도 그리지 않는다
+// =============================================================================
+
+/**
+ * design 모드 캡처 전용: `?aiEntry=rows|desktop-only|server-off`. 브라우저 캡처는
+ * Tauri 셸이 아니라 `rows`를 셸 없이 세울 수 없다. 제품 빌드에서는 늘 null이다.
+ */
+function readEntrySurfaceOverride(): SubscriptionSurface | null {
+  if (import.meta.env.MODE !== "design") return null;
+  const hash = window.location.hash;
+  const query = hash.includes("?") ? hash.slice(hash.indexOf("?")) : window.location.search;
+  const raw = new URLSearchParams(query).get("aiEntry");
+  return raw === "rows" || raw === "desktop-only" || raw === "server-off" ? raw : null;
+}
+
+/** 입구가 그릴 것. 명부·서버 값이 오기 전에는 아무것도 그리지 않는다(깜빡임 방지). */
+export function useSubscriptionEntrySurface(): SubscriptionSurface | null {
+  const { workspaceId, session } = useSession();
+  const override = readEntrySurfaceOverride();
+  const directory = useDirectory(workspaceId);
+  const workspace = useQuery({
+    queryKey: workspaceIdentityKey(workspaceId),
+    queryFn: () => fetchWorkspace(workspaceId),
+    retry: false,
+    enabled: override === null && SUBSCRIPTION_AGENTS_BUILD_FLAG,
+  });
+  const mayJoin = canCreateAgentNow(
+    !directory.isPending,
+    session.member.kind,
+    memberFor(directory.directory, session.member.id)?.role
+  );
+  if (!mayJoin) return null;
+  if (override !== null) return override;
+  if (!SUBSCRIPTION_AGENTS_BUILD_FLAG) return null;
+  if (IS_TAURI && !workspace.isSuccess) return null;
+  const surface = subscriptionSurface({
+    isDesktop: IS_TAURI,
+    buildFlag: SUBSCRIPTION_AGENTS_BUILD_FLAG,
+    serverEnabled: workspace.data ? workspace.data.subscriptionAgentsEnabled : null,
+  });
+  return surface === "hidden" ? null : surface;
+}
+
+/** 설정 › AI 연결 맨 위 블록. */
+export function SubscriptionAgentEntryCard({ from }: { from: AiConnectReentryFrom }) {
+  const surface = useSubscriptionEntrySurface();
+  if (surface === null) return null;
+  const reason =
+    surface === "desktop-only"
+      ? AI_CONNECT_DESKTOP_ONLY_NOTE
+      : surface === "server-off"
+        ? AI_CONNECT_SERVER_OFF_NOTE
+        : SUBSCRIPTION_ENTRY_DETAIL;
+  return (
+    <section
+      className="flex min-w-0 flex-col gap-3 rounded-md border border-line bg-surface-raised p-4 sm:flex-row sm:items-center"
+      aria-labelledby="subscription-entry-title"
+      data-testid="subscription-entry"
+      data-surface={surface}
+    >
+      <div className="flex min-w-0 flex-1 flex-col gap-px break-keep">
+        <h3 id="subscription-entry-title" className="text-body font-medium text-ink">
+          {SUBSCRIPTION_ENTRY_TITLE}
+        </h3>
+        <p className="text-meta text-ink-muted" data-testid="subscription-entry-detail">
+          {reason}
+        </p>
+      </div>
+      {surface === "rows" && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="tap-target shrink-0 self-start sm:self-center"
+          onClick={() => openAiConnectReentry(from)}
+          data-testid="subscription-entry-open"
+        >
+          {SUBSCRIPTION_ENTRY_ACTION}
+        </Button>
+      )}
+    </section>
+  );
+}
+
+/** 에이전트 화면 머리 버튼. 구독 줄이 설 때만 선다(이유 문장은 설정이 진다). */
+export function SubscriptionAgentEntryButton({ from }: { from: AiConnectReentryFrom }) {
+  const surface = useSubscriptionEntrySurface();
+  if (surface !== "rows") return null;
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={() => openAiConnectReentry(from)}
+      data-testid="agent-hub-subscription-entry"
+    >
+      {SUBSCRIPTION_ENTRY_ACTION}
+    </Button>
+  );
+}

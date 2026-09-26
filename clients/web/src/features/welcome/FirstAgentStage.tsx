@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { CircleAlert } from "lucide-react";
+import { ArrowLeft, CircleAlert } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, uuidEq } from "@momo/core/lib/api";
 import {
@@ -16,7 +16,9 @@ import type {
   LocalHarnessProbe,
 } from "@momo/core/features/hostedAgents/detect";
 import {
+  AI_CONNECT_BACK_LABEL,
   AI_CONNECT_BOUNDARY_NOTE,
+  AI_CONNECT_CLOSE_LABEL,
   AI_CONNECT_CONTINUE_LABEL,
   AI_CONNECT_DESKTOP_ONLY_NOTE,
   AI_CONNECT_LIST_ERROR_LINE,
@@ -112,6 +114,11 @@ import { isDefaultWelcomeChannel } from "./welcomeKickoff";
 import { AiConnectList } from "./AiConnectList";
 import { SubscriptionConnectBlock } from "./SubscriptionConnectBlock";
 import { useLocalHarnessWatch } from "./useLocalHarnessWatch";
+import {
+  AI_CONNECT_SETTINGS_HASH,
+  aiConnectReturnHash,
+  type AiConnectReentryFrom,
+} from "./aiConnectReentry";
 import {
   DETECT_INITIAL_MS,
   FIRST_AGENT_AI_HREF,
@@ -256,9 +263,19 @@ interface SubscriptionJoin {
 
 export function FirstAgentStage({
   onContinue,
+  mode = "onboarding",
+  reentryFrom = "agents",
 }: {
   onContinue: () => void;
+  /**
+   * `reentry`(#2870): 설정 › AI 연결·에이전트 화면에서 다시 연 같은 화면.
+   * 자동 통과를 하지 않고(연결이 이미 있어도 목록이 선다), first-run 표지와
+   * 이어갈 해시를 쓰지 않고, 진행 점 대신 [뒤로]를 두고, 건너뛰기 대신 닫는다.
+   */
+  mode?: "onboarding" | "reentry";
+  reentryFrom?: AiConnectReentryFrom;
 }) {
+  const reentry = mode === "reentry";
   const { workspaceId, session } = useSession();
   const queryClient = useQueryClient();
   const offline = useOffline();
@@ -350,7 +367,7 @@ export function FirstAgentStage({
   // 표지를 찍는 곳이 그 둘이다). 명부가 오기 전에는 점을 그리지 않는다(2→4 깜빡임).
   const self = memberFor(directory, session.member.id);
   const dots =
-    self == null
+    reentry || self == null
       ? null
       : onboardingDots(self.role === "owner" ? "claim" : "invite", "ai-connect");
 
@@ -388,6 +405,9 @@ export function FirstAgentStage({
       return;
     }
     setListError(null);
+    // 재진입은 자동 통과하지 않는다: 연결이 이미 있는 사람이 구독 줄로 돌아오려고
+    // 연 화면이다(RCA 1-b). 통과시키면 이 화면은 다시 열 수 없는 화면이 된다.
+    if (reentry) return;
     if (shouldAutoPass(list.data ?? [], providerLink.data?.configured === true)) {
       autoPassedRef.current = true;
       writeFirstAgentMarker(workspaceId, "done");
@@ -402,6 +422,7 @@ export function FirstAgentStage({
     providerLink.data,
     workspaceId,
     onContinue,
+    reentry,
   ]);
 
   // 감지 폴링: 구독 ①(connect)에서도 돈다. 사람이 명령을 이미 쳤을 수 있다.
@@ -449,16 +470,31 @@ export function FirstAgentStage({
   }, [step, connectionId, workspaceId, pose, detectStartedAtMs, refreshRoster]);
 
   const finish = (kind: "skipped" | "done") => {
-    writeFirstAgentMarker(workspaceId, kind);
+    if (!reentry) writeFirstAgentMarker(workspaceId, kind);
+    onContinue();
+  };
+
+  /** 재진입을 닫고 `hash`로 간다. first-run 표지는 건드리지 않는다. */
+  const closeReentry = (hash: string) => {
+    setWizardOpen(false);
+    window.location.hash = hash;
     onContinue();
   };
 
   const handleSkip = () => {
+    if (reentry) {
+      closeReentry(aiConnectReturnHash(reentryFrom));
+      return;
+    }
     setWizardOpen(false);
     setStep("skipped");
   };
 
   const handleOpenAi = () => {
+    if (reentry) {
+      closeReentry(AI_CONNECT_SETTINGS_HASH);
+      return;
+    }
     const hash = `#${FIRST_AGENT_AI_HREF}`;
     window.location.hash = hash;
     setFirstAgentResumeHash(hash);
@@ -616,7 +652,7 @@ export function FirstAgentStage({
       seedComposerText(workspaceId, welcomeChannelId, firstMentionDraft(agent.handle));
     }
     const href = `#${channelHref(welcomeChannelId)}`;
-    setFirstAgentResumeHash(href);
+    if (!reentry) setFirstAgentResumeHash(href);
     markFirstAgentFocusTarget();
     window.location.hash = href;
     finish("done");
@@ -633,6 +669,7 @@ export function FirstAgentStage({
       : rosterMember;
 
   const autoPassing =
+    !reentry &&
     pose === null &&
     !list.isPending &&
     !providerLink.isPending &&
@@ -706,7 +743,9 @@ export function FirstAgentStage({
     }
   })();
 
-  const reentry = (
+  // 「나중에 설정 › AI 연결에서…」는 온보딩의 약속이다. 그 자리에서 다시 연
+  // 화면에는 필요 없다.
+  const reentryLine = reentry ? null : (
     <p className="onboarding-reentry" data-testid="first-agent-reentry-line">
       {AI_CONNECT_REENTRY}
     </p>
@@ -720,7 +759,7 @@ export function FirstAgentStage({
       onClick={handleSkip}
       data-testid="first-agent-skip"
     >
-      {AI_CONNECT_SKIP_LABEL}
+      {reentry ? AI_CONNECT_CLOSE_LABEL : AI_CONNECT_SKIP_LABEL}
     </Button>
   );
 
@@ -756,7 +795,7 @@ export function FirstAgentStage({
             onDone={() => undefined}
             testId="hosted-pairing-card"
           />
-          {reentry}
+          {reentryLine}
         </div>
       );
     }
@@ -851,7 +890,7 @@ export function FirstAgentStage({
             )}
             {skipButton}
           </div>
-          {reentry}
+          {reentryLine}
         </div>
       );
     }
@@ -892,7 +931,7 @@ export function FirstAgentStage({
                 to={FIRST_AGENT_REENTRY_HREF}
                 className="tap-target press inline-flex items-center whitespace-nowrap rounded-sm text-meta text-ink-muted underline underline-offset-2 hover:text-ink focus-visible:focus-ring"
                 onClick={() => {
-                  setFirstAgentResumeHash(`#${FIRST_AGENT_REENTRY_HREF}`);
+                  if (!reentry) setFirstAgentResumeHash(`#${FIRST_AGENT_REENTRY_HREF}`);
                   finish("skipped");
                 }}
                 data-testid="first-agent-reentry"
@@ -1004,7 +1043,7 @@ export function FirstAgentStage({
             </div>
           </>
         )}
-        {reentry}
+        {reentryLine}
       </div>
     );
   })();
@@ -1017,7 +1056,20 @@ export function FirstAgentStage({
           data-testid="onboarding-step-chrome"
           {...titlebarDragProps(IS_TAURI)}
         >
-          <span />
+          {reentry ? (
+            <Button
+              type="button"
+              variant="ghost"
+              data-testid="ai-connect-reentry-back"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => closeReentry(aiConnectReturnHash(reentryFrom))}
+            >
+              <ArrowLeft aria-hidden="true" />
+              {AI_CONNECT_BACK_LABEL}
+            </Button>
+          ) : (
+            <span />
+          )}
           <OnboardingDots dots={dots} />
           <span aria-hidden="true" />
         </header>
