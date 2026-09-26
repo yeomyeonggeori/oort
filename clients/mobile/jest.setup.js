@@ -469,6 +469,9 @@ jest.mock('centrifuge', () => {
     connect() {
       this.connectCount += 1;
       if (this.state === 'connected') return;
+      // centrifuge-js ignores connect() while it is already connecting (in a
+      // reconnect backoff). Mirrored so #2751's `resume` is tested against it.
+      if (this.state === 'connecting') return;
       this.state = 'connected';
       this.__emit('connecting', {});
       this.__emit('connected', {});
@@ -477,6 +480,10 @@ jest.mock('centrifuge', () => {
       this.disconnectCount += 1;
       this.state = 'disconnected';
       this.__emit('disconnected', {});
+    }
+    setToken(token) {
+      this.token = token;
+      this.setTokenCalls = [...(this.setTokenCalls ?? []), token];
     }
     newSubscription(channel, options) {
       const sub = new FakeSubscription(channel, options);

@@ -45,7 +45,6 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
-import { openTerminalDock } from "./work-openers.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -248,11 +247,21 @@ async function main() {
       await page.waitForSelector("nav[aria-label='워크스페이스 탐색']");
 
       // This is the smallest real shell route that loads the lazy xterm chunk:
-      // header dock -> selected session ObserverTerminal -> observer start.
-      // Channel-scoped entry is the dock now (#1758); a fixture-only style tag
-      // would prove the browser, not the application dependency that needs the
-      // exception.
-      await openTerminalDock(page);
+      // `?work=` deep link -> WorkPanel ObserverTerminal -> observer start.
+      // A fixture-only style tag would prove the browser, not the application
+      // dependency that needs the exception.
+      //
+      // #2753: this gate runs on the production dist, where the header dock
+      // now sits behind isSurfaceProvided("work") and is not drawn. The `?work=`
+      // link (timeline session cards, workstream run history) is not
+      // surface-gated and mounts the same ObserverTerminal, so the xterm chunk
+      // is still exercised under the shipped CSP.
+      await page.evaluate(
+        ({ channel, session }) => {
+          location.hash = `/c/${channel}?work=${session}`;
+        },
+        { channel: channelId, session: workSessionId }
+      );
       await page.getByTestId("work-observer-start").click();
       await page.locator(".xterm").waitFor({ state: "attached", timeout: 15_000 });
       await page.waitForTimeout(300);

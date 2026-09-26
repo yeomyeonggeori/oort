@@ -8,10 +8,13 @@ import {
   policyStart,
   policyStep,
   policyStop,
+  type AppVisibility,
   type RealtimeAction,
   type RealtimePolicyState,
   type RealtimeSignal,
 } from './backgroundPolicy';
+import {createConnectionDisplay} from './connectionDisplay';
+import {recordRealtimeDiagnostic} from './diagnostics';
 
 // =============================================================================
 // The realtime TRANSPORT for iOS (ADR-0137 D4). Wiring only, by the terms of
@@ -84,6 +87,10 @@ export interface RealtimeTransportOptions {
    * websocket is.
    */
   url: string;
+  /**
+   * The status to SHOW, not the raw socket state: reconnects shorter than
+   * `DISPLAY_GRACE_MS` are absorbed (see `./connectionDisplay.ts`, #2751).
+   */
   onStatus?: (status: RealtimeStatus) => void;
   /**
    * Called after every policy transition, with the state that resulted (goal
@@ -111,13 +118,46 @@ export interface RealtimeTransportOptions {
 
 type Timer = ReturnType<typeof setTimeout>;
 
+/**
+ * When a cached connection token is too old to present again.
+ *
+ * The server mints it for 300 s (`connection_token_ttl_seconds`,
+ * `server-rust/.../routes/realtime.rs`). Reconnecting with an expired one costs
+ * a guaranteed round-trip to be told so (`109 token expired`, then centrifuge-js
+ * fetches a new one and tries again) — seen in the RCA trace at 03:18:55 as a
+ * 0.4-second socket in front of every return from a long absence. 30 s of margin
+ * covers clock skew and the handshake itself.
+ */
+export const REALTIME_TOKEN_STALE_MS = 270_000;
+
 export function createRealtimeTransport(
   options: RealtimeTransportOptions,
 ): RealtimeTransport {
-  const {url, onStatus, onPolicy, getToken = fetchRealtimeToken} = options;
+  const {
+    url,
+    onStatus,
+    onPolicy,
+    getToken: fetchToken = fetchRealtimeToken,
+    now = Date.now,
+  } = options;
 
   let client: Centrifuge | null = null;
   let graceTimer: Timer | null = null;
+  /** When the cached token was minted (by our clock), null before the first. */
+  let tokenAt: number | null = null;
+  /** When the current connection reached `connected`, null while it is not. */
+  let connectedAt: number | null = null;
+  const display = createConnectionDisplay(status => onStatus?.(status));
+
+  // Every token centrifuge-js presents comes through here — the first connect,
+  // a 109 retry and the scheduled refresh alike — so this one stamp is always
+  // the age of the token it is holding.
+  const getToken = async (): Promise<string> => {
+    const token = await fetchToken();
+    tokenAt = now();
+    recordRealtimeDiagnostic({at: Date.now(), kind: 'token'});
+    return token;
+  };
   // Not-background, rather than exactly-active. `policyStep` decides foreground
   // that way for every transition after this one ("iOS `inactive` is NOT
   // background" — see backgroundPolicy.ts), and the opening reading has to use
@@ -146,10 +186,75 @@ export function createRealtimeTransport(
       minReconnectDelay: 500,
       maxReconnectDelay: 20_000,
     });
-    next.on('connecting', () => onStatus?.('connecting'));
-    next.on('connected', () => onStatus?.('connected'));
-    next.on('disconnected', () => onStatus?.('disconnected'));
+    next.on('connecting', ctx => leave('connecting', ctx));
+    next.on('connected', () => {
+      connectedAt = now();
+      recordRealtimeDiagnostic({at: Date.now(), kind: 'connected'});
+      display.push({kind: 'raw', status: 'connected'});
+    });
+    next.on('disconnected', ctx => leave('disconnected', ctx));
+    next.on('error', ctx => {
+      // Type and code only. The message of a `connectToken` error is whatever
+      // the HTTP layer threw, and may carry a URL or a response body.
+      recordRealtimeDiagnostic({
+        at: Date.now(),
+        kind: 'error',
+        code: ctx?.error?.code,
+        detail: ctx?.type,
+      });
+    });
     return next;
+  }
+
+  /**
+   * Any departure from `connected` — the reconnect loop (`connecting`) and a
+   * deliberate close (`disconnected`, e.g. `force-reconnect`) alike. Both used
+   * to reach the screen instantly; both now go through the display grace.
+   */
+  function leave(
+    status: 'connecting' | 'disconnected',
+    ctx: {code?: number; reason?: string} | undefined,
+  ): void {
+    const lifetimeMs = connectedAt === null ? undefined : now() - connectedAt;
+    connectedAt = null;
+    recordRealtimeDiagnostic({
+      at: Date.now(),
+      kind: status,
+      code: ctx?.code,
+      detail: ctx?.reason,
+      lifetimeMs,
+    });
+    display.push({kind: 'raw', status});
+  }
+
+  /**
+   * The person is back. Make a socket happen now, with a token that will be
+   * accepted, without touching one that survived.
+   */
+  function resume(): void {
+    const current = ensureClient();
+    const socketState = String(current.state);
+    if (socketState === 'connected') return;
+    // Stale token first: a reconnect would present it and be refused (109).
+    // Emptying it makes centrifuge-js call `getToken` before opening.
+    if (tokenAt !== null && now() - tokenAt >= REALTIME_TOKEN_STALE_MS) {
+      current.setToken('');
+      tokenAt = null;
+      recordRealtimeDiagnostic({
+        at: Date.now(),
+        kind: 'policy',
+        detail: 'token-cleared',
+      });
+    }
+    display.push({kind: 'resume'});
+    if (socketState === 'connecting' && !attemptInFlight(current)) {
+      // `connect()` is a no-op while connecting, and the client may be sitting
+      // in a backoff of up to 20 s. Closing and opening again resets it. An
+      // attempt already in flight (token fetch, handshake) is left to finish:
+      // cutting it would only start the same attempt over (review M2).
+      current.disconnect();
+    }
+    current.connect();
   }
 
   function ensureClient(): Centrifuge {
@@ -159,6 +264,7 @@ export function createRealtimeTransport(
 
   function apply(actions: RealtimeAction[]): void {
     for (const action of actions) {
+      recordRealtimeDiagnostic({at: Date.now(), kind: 'policy', detail: action.kind});
       switch (action.kind) {
         case 'connect':
           ensureClient().connect();
@@ -170,6 +276,17 @@ export function createRealtimeTransport(
           if (graceTimer !== null) {
             clearTimeout(graceTimer);
           }
+          // RCA 2026-09-26 H1 asked whether a grace timer that fell due while
+          // iOS held the app suspended can run before the AppState `active`
+          // event on wake and close a socket the person is about to look at.
+          // It can, and nothing here can tell: RN updates
+          // `AppState.currentState` inside the same native event dispatch
+          // that calls this file's listener, so re-reading it from the timer
+          // still says `background`. Not guarded, deliberately — a timer that
+          // ran late after a real suspension most often finds a socket that
+          // is dead anyway, and the reconnect that follows is right. What the
+          // person used to SEE (「연결이 끊겼습니다」 for the second it took)
+          // is what the display grace now absorbs (#2751).
           graceTimer = setTimeout(() => {
             graceTimer = null;
             dispatch({kind: 'grace-elapsed'});
@@ -180,6 +297,9 @@ export function createRealtimeTransport(
             clearTimeout(graceTimer);
             graceTimer = null;
           }
+          break;
+        case 'resume':
+          resume();
           break;
         case 'force-reconnect':
           // Disconnect and connect on the SAME client rather than rebuilding:
@@ -205,14 +325,20 @@ export function createRealtimeTransport(
   const appStateSub = AppState.addEventListener(
     'change',
     (status: AppStateStatus) => {
-      dispatch({
-        kind: 'visibility',
-        status: status === 'background' ? 'background' : status === 'inactive' ? 'inactive' : 'active',
-      });
+      recordRealtimeDiagnostic({at: Date.now(), kind: 'app-state', detail: String(status)});
+      dispatch({kind: 'visibility', status: toVisibility(status)});
     },
   );
 
   const netInfoUnsub = NetInfo.addEventListener(netState => {
+    const type = netState.type ?? null;
+    if (type !== state.networkType) {
+      recordRealtimeDiagnostic({
+        at: Date.now(),
+        kind: 'network',
+        detail: `${state.networkType ?? '?'}->${type ?? '?'}${netState.isConnected === false ? ' offline' : ''}`,
+      });
+    }
     dispatch({
       kind: 'network',
       networkType: netState.type ?? null,
@@ -239,9 +365,38 @@ export function createRealtimeTransport(
       }
       appStateSub.remove();
       netInfoUnsub();
+      // Disconnect BEFORE disposing the display: the disconnect emits a raw
+      // `disconnected`, which would otherwise arm a fresh grace timer on a
+      // display nobody will ever dispose again (review of #2755, M1).
       client?.disconnect();
       client = null;
+      display.dispose();
     },
     policy: () => state,
   };
+}
+
+function toVisibility(status: AppStateStatus): AppVisibility {
+  return status === 'background'
+    ? 'background'
+    : status === 'inactive'
+      ? 'inactive'
+      : 'active';
+}
+
+/**
+ * Is centrifuge-js in the middle of a connection attempt, as opposed to waiting
+ * out a reconnect backoff?
+ *
+ * The public API cannot tell: both are `state === 'connecting'`. The private
+ * `_reconnecting` flag (5.7: set when an attempt starts in `_startReconnecting`,
+ * cleared when it fails, before the next backoff is scheduled, and on every
+ * state change) is exactly that distinction. It is read defensively — if a
+ * future version drops it, this answers `false` and `resume` falls back to
+ * cutting the backoff, which is the pre-review behaviour. The flag's meaning is
+ * pinned against the real library in `centrifugeChurnRepro.test.ts`, so an
+ * upgrade that changes it fails there.
+ */
+export function attemptInFlight(client: Centrifuge): boolean {
+  return (client as unknown as {_reconnecting?: unknown})._reconnecting === true;
 }
