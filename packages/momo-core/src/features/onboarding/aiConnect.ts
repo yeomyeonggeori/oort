@@ -15,8 +15,10 @@ import type { SubscriptionHarnessWire } from "../hostedAgents/model";
 // 웹이 한다. 규율:
 //
 // - 「Claude로 로그인」「ChatGPT로 로그인」을 만들 문장이 여기 없다(D2). 로그인은
-//   공식 CLI가 터미널에서 끝낸다. 로그인이 필요한 줄의 행동은 「터미널에서 로그인」
-//   하나이고, 그것은 CLI 명령 한 줄을 복사하고 OS 터미널을 여는 것이다.
+//   공식 CLI가 끝낸다. 로그인이 필요한 줄의 행동은 「Claude Code로 로그인」
+//   「Codex로 로그인」 하나이고, 앱 모달이 숨은 PTY에서 공식 로그인 명령을 돌린다
+//   (#2816, `harnessLogin.ts`). PTY가 없으면 CLI 명령 한 줄을 복사하고 OS 터미널을
+//   여는 Phase 1로 물러난다.
 // - 알약은 CLI가 **스스로 알린** 종료 코드의 번역이다(ADR-0190 D3-a). oort는
 //   토큰·자격 파일을 읽지 않는다.
 // - 구독 줄은 세 게이트가 모두 열릴 때만 선다: 데스크탑 셸 · 빌드 플래그 · 서버
@@ -84,8 +86,8 @@ export function aiConnectRows(surface: SubscriptionSurface): readonly AiConnectR
 
 /**
  * 구독 줄의 상태 알약 다섯(이슈 #2814 계약, Buzz SetupStep 문법).
- * 한 알약이 한 행동이다: 설치 필요 → 설치 안내 열기, 로그인 필요 → 터미널에서
- * 로그인, 다시 확인 → 다시 묻기. 확인 중·준비됨은 행동이 없다.
+ * 한 알약이 한 행동이다: 설치 필요 → 설치 안내 열기, 로그인 필요 → 줄 아래의
+ * 로그인 버튼, 다시 확인 → 다시 묻기. 확인 중·준비됨은 행동이 없다.
  */
 export type HarnessPill = "install" | "login" | "checking" | "ready" | "recheck";
 
@@ -102,7 +104,7 @@ export const HARNESS_PILL_LABEL: Record<HarnessPill, string> = {
  *
  * - 아직 한 번도 못 물었으면(`probe === null`) 확인 중.
  * - 미설치 → 설치 필요. 로그인됨 → 준비됨.
- * - 「터미널에서 로그인」 뒤 2초 재확인이 도는 동안 → 확인 중.
+ * - Phase 1(터미널 복사) 뒤 2초 재확인이 도는 동안 → 확인 중.
  * - 그 창(120초)이 끝났으면 → 다시 확인.
  * - 설치돼 있는데 CLI가 답하지 않음(`unknown`: 시간 초과 등) → 다시 확인.
  */
@@ -138,12 +140,12 @@ export function loginPollNext(elapsedMs: number): number | "stop" {
 }
 
 /**
- * 「터미널에서 로그인」이 복사하는 명령. 공식 CLI의 로그인 입구 그대로다
- * (`claude`는 첫 실행에서 로그인을 연다, `codex login`). oort가 로그인을
- * 대신하지 않는다.
+ * PTY가 없을 때(Phase 1 폴백) 복사해 OS 터미널에서 칠 명령. 앱 모달이 숨은
+ * PTY에서 돌리는 로그인 명령(셸 `LOGIN_COMMANDS`, ADR-0190 D3-f)과 같은 입구다.
+ * oort가 로그인을 대신하지 않는다.
  */
 export const HARNESS_LOGIN_COMMAND: Record<LocalHarnessId, string> = {
-  claude: "claude",
+  claude: "claude auth login --claudeai",
   codex: "codex login",
 };
 
@@ -298,7 +300,6 @@ export const AI_CONNECT_DESKTOP_ONLY_NOTE =
 export const AI_CONNECT_SERVER_OFF_NOTE =
   "이 서버는 지금 구독 에이전트를 받지 않아요. 팀 에이전트는 API 키로 붙여요.";
 
-export const LOGIN_ACTION_LABEL = "터미널에서 로그인";
 export const COPY_ACTION_LABEL = "복사";
 export const COPIED_LABEL = "복사됨";
 export const OPEN_TERMINAL_LABEL = "터미널에서 열기";

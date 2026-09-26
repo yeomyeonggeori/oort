@@ -1,11 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchWorkspace } from "@momo/core/features/settings/api";
 import {
-  AI_CONNECT_DESKTOP_ONLY_NOTE,
-  AI_CONNECT_SERVER_OFF_NOTE,
   SUBSCRIPTION_ENTRY_ACTION,
-  SUBSCRIPTION_ENTRY_DETAIL,
-  SUBSCRIPTION_ENTRY_TITLE,
   subscriptionSurface,
   type SubscriptionSurface,
 } from "@momo/core/features/onboarding/aiConnect";
@@ -23,7 +19,8 @@ import { openAiConnectReentry, type AiConnectReentryFrom } from "./aiConnectReen
 // =============================================================================
 // 구독 줄 재진입 입구 (#2870, RCA 1-b·1-c).
 //
-// 설정 › AI 연결 맨 위와 에이전트 화면 머리에 선다. 누르면 온보딩의 AI 연결
+// 설정 › AI 연결의 「내 계정」 절(#2877, `AiMyAccountsSection`)과 에이전트 화면
+// 머리에 선다. 누르면 온보딩의 AI 연결
 // 화면을 재진입 모드로 다시 연다(FirstAgentStage `mode="reentry"`).
 //
 // 누구에게 서는가: 구독 합류는 호스티드 연결을 만든다. 서버는 그 요청에
@@ -50,8 +47,18 @@ function readEntrySurfaceOverride(): SubscriptionSurface | null {
   return raw === "rows" || raw === "desktop-only" || raw === "server-off" ? raw : null;
 }
 
-/** 입구가 그릴 것. 명부·서버 값이 오기 전에는 아무것도 그리지 않는다(깜빡임 방지). */
-function useSubscriptionEntrySurface(): SubscriptionSurface | null {
+/**
+ * 입구의 상태. 설정 › AI 연결의 「내 계정」 절(#2877)은 로딩·권한 없음·빌드가
+ * 걷음을 서로 다르게 그려야 해서 넷을 가른다.
+ *
+ * - `pending`: 명부나 서버 값이 아직 오지 않았다(깜빡임 방지로 행동을 세우지 않는다)
+ * - `denied`: 합류 권한이 없거나 명부를 읽지 못했다(#2893)
+ * - `hidden`: 빌드가 구독 표면을 걷었다
+ * - 그 밖: 온보딩과 같은 세 게이트(`subscriptionSurface`)
+ */
+export type SubscriptionEntryState = "pending" | "denied" | "hidden" | SubscriptionSurface;
+
+export function useSubscriptionEntryState(): SubscriptionEntryState {
   const { workspaceId, session } = useSession();
   const override = readEntrySurfaceOverride();
   const directory = useDirectory(workspaceId);
@@ -61,69 +68,30 @@ function useSubscriptionEntrySurface(): SubscriptionSurface | null {
     retry: false,
     enabled: override === null && SUBSCRIPTION_AGENTS_BUILD_FLAG,
   });
+  if (directory.isPending) return "pending";
+  // 명부 조회가 실패하면 내 역할을 모른다. `canCreateAgent`는 역할이 없을 때
+  // 문을 열어 두므로(명부 밖 사람 가정), 실패를 「정착」으로 넘기면 일반 멤버에게도
+  // 입구가 서고 누르면 서버가 403으로 막는다(#2893). 실패는 정착이 아니다.
   const mayJoin = canCreateAgentNow(
-    !directory.isPending,
+    !directory.isError,
     session.member.kind,
     memberFor(directory.directory, session.member.id)?.role
   );
-  if (!mayJoin) return null;
+  if (!mayJoin) return "denied";
   if (override !== null) return override;
-  if (!SUBSCRIPTION_AGENTS_BUILD_FLAG) return null;
+  if (!SUBSCRIPTION_AGENTS_BUILD_FLAG) return "hidden";
   // 서버 값을 못 읽으면 온보딩과 같이 server-off로 읽는다(버튼 없이 이유 한 줄).
-  if (IS_TAURI && workspace.isPending) return null;
-  const surface = subscriptionSurface({
+  if (IS_TAURI && workspace.isPending) return "pending";
+  return subscriptionSurface({
     isDesktop: IS_TAURI,
     buildFlag: SUBSCRIPTION_AGENTS_BUILD_FLAG,
     serverEnabled: workspace.data ? workspace.data.subscriptionAgentsEnabled : null,
   });
-  return surface === "hidden" ? null : surface;
-}
-
-/** 설정 › AI 연결 맨 위 블록. */
-export function SubscriptionAgentEntryCard({ from }: { from: AiConnectReentryFrom }) {
-  const surface = useSubscriptionEntrySurface();
-  if (surface === null) return null;
-  const reason =
-    surface === "desktop-only"
-      ? AI_CONNECT_DESKTOP_ONLY_NOTE
-      : surface === "server-off"
-        ? AI_CONNECT_SERVER_OFF_NOTE
-        : SUBSCRIPTION_ENTRY_DETAIL;
-  return (
-    <section
-      className="flex min-w-0 flex-col gap-3 rounded-md border border-line bg-surface-raised p-4 sm:flex-row sm:items-center"
-      aria-labelledby="subscription-entry-title"
-      data-testid="subscription-entry"
-      data-surface={surface}
-    >
-      <div className="flex min-w-0 flex-1 flex-col gap-px break-keep">
-        <h3 id="subscription-entry-title" className="text-body font-medium text-ink">
-          {SUBSCRIPTION_ENTRY_TITLE}
-        </h3>
-        <p className="text-meta text-ink-muted" data-testid="subscription-entry-detail">
-          {reason}
-        </p>
-      </div>
-      {surface === "rows" && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="tap-target shrink-0 self-start sm:self-center"
-          onClick={() => openAiConnectReentry(from)}
-          data-testid="subscription-entry-open"
-        >
-          {SUBSCRIPTION_ENTRY_ACTION}
-        </Button>
-      )}
-    </section>
-  );
 }
 
 /** 에이전트 화면 머리 버튼. 구독 줄이 설 때만 선다(이유 문장은 설정이 진다). */
 export function SubscriptionAgentEntryButton({ from }: { from: AiConnectReentryFrom }) {
-  const surface = useSubscriptionEntrySurface();
-  if (surface !== "rows") return null;
+  if (useSubscriptionEntryState() !== "rows") return null;
   return (
     <Button
       type="button"
