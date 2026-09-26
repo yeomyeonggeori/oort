@@ -1398,7 +1398,10 @@
   --icon: var(--on-band-muted, var(--icon-base));
   --agent: var(--on-band, var(--agent-base));
   --agent-soft: var(--band-fill, var(--agent-soft-base));
-  --warn: var(--on-band, var(--warn-base));
+  /* warn과 danger는 띠 위에서 서로 다른 on-band 단계다: 연결 막대(연결 중 =
+   * warn, 끊김 = danger)가 색 하나로 상태를 말하므로 둘이 같은 흰색이 되면
+   * 가를 수 없다(검수 R2 M). */
+  --warn: var(--on-band-muted, var(--warn-base));
   --danger: var(--on-band, var(--danger-base));
   --line: var(--band-line, var(--line-base));
   --primary: var(--on-band, var(--primary-base));

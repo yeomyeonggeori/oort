@@ -145,6 +145,10 @@ describe("띠 위 규칙 (노을띠 `band`, themes-2.0 §3)", () => {
       expect([role, allowed.has(found![1])]).toEqual([role, true]);
     }
     expect(scope).toMatch(/color: var\(--ink\);/);
+    // 연결 막대의 두 상태(warn · danger)는 띠 위에서도 서로 다른 역할이다.
+    const warn = /--warn: var\(--([a-z-]+),/.exec(scope)?.[1];
+    const danger = /--danger: var\(--([a-z-]+),/.exec(scope)?.[1];
+    expect(warn).not.toBe(danger);
   });
 
   it("띠 위의 채움은 on-band를 섞고, 띠가 없으면 원래 채움이다", () => {
