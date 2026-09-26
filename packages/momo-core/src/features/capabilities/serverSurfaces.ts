@@ -308,6 +308,13 @@ const GATE_FIXTURE_SURFACES: Record<string, readonly SurfaceId[]> = {
   "work-console-gate": ["workConsole", "work"],
   "agent-hub-gate": ["agentMemory", "agentRunHistory"],
   "ade-gate": ["ade"],
+  // #2753: 채널 헤더 터미널 도크가 `work` 판정 뒤로 접혔다. 아래 두 픽스처는
+  // work-sessions·work-hosts 를 실제로 답하고 도크를 연다
+  // (gates/gate-my-sessions.mjs, scripts/capture-screens.mjs).
+  // my-sessions-gate 는 사이드바 「작업 콘솔」로 WorkPanel 도 연다. #2166 이후
+  // 그 진입점이 접혀 이 게이트가 선언 없이 멈춰 있었다.
+  "my-sessions-gate": ["workConsole", "work"],
+  design: ["work"],
 };
 
 function gateProvided(id: SurfaceId): boolean {
