@@ -11,6 +11,34 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-09-26
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.10>. Tag target: `main=824b909e`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. One database migration since 0.1.9: `089_agent_invocation_scope.sql` adds `agent.invocation_scope` (default `workspace`, so every existing agent keeps its behaviour) and `agent.subscription_harness`, their CHECK constraints, and a trigger that refuses to reopen an owner-only agent. It is forward-only; rolling the images back to 0.1.9 leaves the added columns in place.
+
+### Added
+- Server: an agent that joins through a personal subscription (Claude Code or Codex on the owner's Mac) answers only its owner. The server enforces it on every delivery path; anyone else, or the owner while their Mac is offline, gets one short notice from the agent. `MOMO_SUBSCRIPTION_AGENTS_ENABLED=false` turns the subscription path off (unset means on). (#2830, ADR-0193)
+- Huddles: the notifier sweeps ghost participants by comparing each active huddle with the LiveKit room. It runs only when LiveKit is configured and `MOMO_HUDDLE_SWEEP_DATABASE_URL` points at the RLS-bound app role. (#2802)
+- Web and desktop: onboarding 2.0 — the Kometto guide and progress dots, one welcome step, sign-in and invite acceptance on one screen each, the claim screen on the new frame, 「Whose AI should think?」 AI connection, and a first-conversation band with the phone-link card in the channel instead of a full-screen step. (#2828, #2831, #2832, #2835, #2836, #2829)
+- Web and desktop: design system 2.0 — dawn-sky tokens from one core source with a contrast test over every combination, filled pills, round icons, cards and glass, and the desktop shell's gradient floor with a floating content pane. (#2735, #2738, #2740)
+- Desktop: a local terminal — split-grid layout per session, xterm panes over a Tauri PTY, the ⌃` dock and a shortcut table; local harness detection for `claude` and `codex`. (#2801, #2824, #2838, #2827)
+- Phone: the design system 2.0 shell, home and conversation screens, with a centred pill tab bar and a light + menu. (#2739, #2742, #2800, #2825)
+
+### Changed
+- Brand: the C2-04 Bubble mark is the canonical SVG on web, desktop and phone (#2731), and the app icon is the I4 front close-up of Kometto on iOS, macOS Dock and the web app. (#2733, #2797)
+- Phone: the welcome screen is split from the sign-in form, and the notification permission is asked only after a one-button explanation. (#2833)
+
+### Fixed
+- Huddles: a connected huddle is no longer cut off when its join token's lifetime ends. (#2798)
+- Web: the header menu's Escape handling no longer races, and the shell, channel-header and composer gates run again. (#2746)
+- Web: the terminal dock folds away where the work surface does not apply, with surface-neutral copy and an explained empty state. (#2795)
+- Desktop: huddles ask for the microphone in the signed DMG (usage description and audio-input entitlement). (#2804)
+- Phone: realtime waits a grace period before showing "reconnecting", reconnects at once on foreground, and replaces an expired token before connecting. (#2755)
+
+### Not in this release
+- The server image carries the owner-only invocation (api and migration 089), the huddle ghost sweep (notifier) and the web bundle (onboarding 2.0, design system 2.0, terminal dock). The phone entries ship in iOS builds and the desktop shell (PTY, harness detection, microphone entitlement) in desktop builds, not in the image.
+- LiveKit on the team instance (#2759): huddles still do not run on `oort-team`, so the ghost sweep stays off there.
+- runtime-unverified: owner-only invocation against a real subscription agent on a team instance, the ghost sweep against a live LiveKit room, TestFlight install.
+
 ## [0.1.9] - 2026-09-26
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.9>. Tag target: `main=eb09f568`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. One database migration since 0.1.8: `088_push_session_lineage.sql` adds two nullable columns and one partial index, and invalidates every live push registration made before it (a phone that is still signed in registers again on its next launch). It is forward-only; rolling the images back to 0.1.8 leaves the added columns in place.
