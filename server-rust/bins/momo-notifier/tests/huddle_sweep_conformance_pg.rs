@@ -26,6 +26,7 @@
 //! | `a_write_pool_that_bypasses_rls_is_refused` | drop the RLS-bound write-pool check, or write through the BYPASSRLS notifier pool |
 //! | `a_never_joined_huddle_ends_after_two_empty_sweeps` | drop the empty-huddle branch |
 //! | `a_rejoin_after_the_observation_survives_the_settlement` | key `left_at` on `(huddle_id, member_id)` without `joined_at` |
+//! | `real_livekit_observes_an_empty_room_and_the_ghost_is_settled` | change the RoomService token or Twirp call shape (real `livekit-server`; skipped without `LIVEKIT_TEST_*`) |
 
 use std::collections::HashMap;
 use std::path::PathBuf;
