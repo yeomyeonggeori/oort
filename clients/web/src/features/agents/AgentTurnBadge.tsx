@@ -28,6 +28,9 @@ export function AgentTurnBadge({
       className={cn(
         "shrink-0 rounded-sm px-1 text-timestamp",
         !live && "text-ink-muted",
+        // 띠(노을띠) 사이드바 안에서는 agent·agent-soft가 on-band와 띠 채움으로
+        // 다시 묶인다(tokens.css 띠 범위, DS2-6). 띠 위에 옅은 파랑 그릇을 세우지
+        // 않는다(themes-2.0 §3).
         live && state === "working" && "bg-agent-soft text-agent",
         live &&
           state === "awaiting_approval" &&

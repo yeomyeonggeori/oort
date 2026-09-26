@@ -1702,7 +1702,11 @@ export function Probe() {
     const activeClass = constString(SIDEBAR_ROW_SRC, "activeClass");
     expect(rowClass).not.toMatch(/(?:^|\s)press(?:\s|$)/);
     expect(inactiveClass).toMatch(/active:bg-surface-pressed/);
-    expect(activeClass).toMatch(/bg-accent-soft/);
+    // DS2-6 (#2718) · owner 결정 2026-09-26: 선택 행은 흰 면 + rest 그림자로
+    // 뜨고(`sidebar-row-selected`), 호박색(signal-soft = accent-soft)으로 칠하지
+    // 않는다. 호박색은 안 읽음·멘션 신호의 몫이다.
+    expect(activeClass).toMatch(/\bsidebar-row-selected\b/);
+    expect(activeClass).not.toMatch(/\b(?:bg-accent-soft|bg-signal-soft|bg-signal)\b/);
     expect(activeClass).toMatch(/active:bg-surface-pressed/);
     expect(activeClass).not.toMatch(/hover:bg-surface-hover/);
     const css = await buildCss(

@@ -590,9 +590,15 @@ async function installMocks(context) {
 }
 
 /** Resting y of the sidebar nav in a shell that has not been pushed anywhere.
- *  Search header (p-2 + control-sm + hairline) sits at 45. The titlebar
- *  (`h-control-lg`, border-box) adds 40 (#1864). */
-const NAV_RESTING_TOP = 85;
+ *  DS2-6 (#2718, 시안 A `.a-side`): 상단 줄 40(#1864) + 목록 열 위 여백 4 +
+ *  워크스페이스 머리(4 + 로고 34 + 10 = 48) + 검색 입구(36 + 아래 10 = 46) = 138. */
+const NAV_RESTING_TOP = 138;
+
+/** 사이드바 전체 폭 = 레일 56 + 목록 열 268 (tokens.css `--w-sidebar`, DS2-6). */
+const SIDEBAR_WIDTH = 324;
+/** 접으면 본문 판이 얻는 폭. 펼친 판은 왼쪽 인셋이 0(사이드바가 여백)이고, 접힌
+ *  판은 창 왼쪽에서 인셋 8을 둔다(tokens.css `app-shell`). 그래서 324 − 8. */
+const PANE_GAIN_ON_COLLAPSE = SIDEBAR_WIDTH - 8;
 /** Settings replaces the titlebar, so the section list rests at y=0. */
 const SETTINGS_NAV_RESTING_TOP = 0;
 const SETTINGS_NAV_PHONE_CAP = 308;
@@ -673,7 +679,7 @@ async function go(page, hash) {
 /**
  * #1864 desktop fold. The assertion is geometry + focus, not only the
  * presence of a button: the sidebar track goes to 0, the route gains the
- * full 240px, the titlebar toggle stays in place, and every focus target
+ * sidebar width (less the pane's collapsed left inset), the titlebar toggle stays in place, and every focus target
  * inside the folded tree must leave the keyboard path (`inert`) and, after
  * the fold settles, leave paint (`hidden` / display:none). Clip+rect alone
  * is not the contract: a clipped inert node still has client rects.
@@ -705,9 +711,9 @@ async function assertDesktopSidebarFocusMode(page, size) {
     };
   })()`);
   check(
-    `${size.name} 접기 전 240px 사이드바와 상단 줄 토글`,
+    `${size.name} 접기 전 ${SIDEBAR_WIDTH}px 사이드바와 상단 줄 토글`,
     before.collapsed === false &&
-      before.sidebarWidth === 240 &&
+      before.sidebarWidth === SIDEBAR_WIDTH &&
       before.titlebarHoldsToggle === true &&
       before.buttonName === "탐색 패널 접기" &&
       before.buttonTitle === "탐색 패널 접기" &&
@@ -810,10 +816,10 @@ async function assertDesktopSidebarFocusMode(page, size) {
     };
   })()`);
   check(
-    `${size.name} 접으면 사이드바가 0이고 본문이 정확히 240px 넓어진다`,
+    `${size.name} 접으면 사이드바가 0이고 본문이 정확히 ${PANE_GAIN_ON_COLLAPSE}px 넓어진다`,
     collapsed.collapsed === true &&
       collapsed.sidebarWidth === 0 &&
-      collapsed.mainWidth - before.mainWidth === 240 &&
+      collapsed.mainWidth - before.mainWidth === PANE_GAIN_ON_COLLAPSE &&
       collapsed.titlebarHoldsToggle === true &&
       collapsed.sidebarInert === true &&
       collapsed.visibleTreeFocusTargets === 0 &&
@@ -828,14 +834,14 @@ async function assertDesktopSidebarFocusMode(page, size) {
 
   const workCollapsed = await workSnapshot();
   check(
-    `${size.name} 접는 동안 같은 WorkPanel subtree와 wide 상태가 240px를 이어받는다`,
+    `${size.name} 접는 동안 같은 WorkPanel subtree와 wide 상태가 ${PANE_GAIN_ON_COLLAPSE}px를 이어받는다`,
     workCollapsed.missing !== true &&
       workCollapsed.marker === workMarker &&
       workCollapsed.subtreeMarker === workMarker &&
       workCollapsed.panelWide === workBefore.panelWide &&
       workCollapsed.widePressed === workBefore.widePressed &&
-      workCollapsed.panelWidth - workBefore.panelWidth === 240 &&
-      workCollapsed.routeWidth - workBefore.routeWidth === 240 &&
+      workCollapsed.panelWidth - workBefore.panelWidth === PANE_GAIN_ON_COLLAPSE &&
+      workCollapsed.routeWidth - workBefore.routeWidth === PANE_GAIN_ON_COLLAPSE &&
       workCollapsed.panelWidth === workCollapsed.routeWidth &&
       workCollapsed.sameEdges === true,
     JSON.stringify({ workBefore, workCollapsed })
@@ -859,10 +865,10 @@ async function assertDesktopSidebarFocusMode(page, size) {
     };
   })()`);
   check(
-    `${size.name} 다시 열면 240px 셸과 상단 토글 포커스가 복구된다`,
+    `${size.name} 다시 열면 ${SIDEBAR_WIDTH}px 셸과 상단 토글 포커스가 복구된다`,
     reopened.collapsed === false &&
-      reopened.sidebarWidth === 240 &&
-      collapsed.mainWidth - reopened.mainWidth === 240 &&
+      reopened.sidebarWidth === SIDEBAR_WIDTH &&
+      collapsed.mainWidth - reopened.mainWidth === PANE_GAIN_ON_COLLAPSE &&
       reopened.sidebarInert === false &&
       reopened.focus === "sidebar-toggle",
     JSON.stringify(reopened)
@@ -1712,7 +1718,7 @@ async function measureSidebarDrawerIndependence(browser) {
   check(
     "새 셸 마운트에는 접힘 상태가 저장되지 않는다",
     remounted.collapsed === false &&
-      remounted.sidebarWidth === 240 &&
+      remounted.sidebarWidth === SIDEBAR_WIDTH &&
       remounted.sidebarInert === false &&
       remounted.toggleName === "탐색 패널 접기",
     JSON.stringify(remounted)
