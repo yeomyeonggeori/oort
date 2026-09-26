@@ -290,7 +290,11 @@ describe("RED PROOF ③ 잠금은 흐림과 가드를 함께 진다", () => {
   for (const site of SITES) {
     it(`${site.file} · ${site.testId}`, () => {
       const { tag } = control(site.file, site.testId);
-      expect(tag).toContain(`className={cn(${site.lock} && "opacity-50")}`);
+      // 흐림은 잠금 조건 하나에 묶인다. 앞에 고정 클래스(탭 타깃·판 위 표면)가
+      // 붙는 것은 허용한다(#2877 곁판의 sheet 문법). 조건이 바뀌면 여전히 실패한다.
+      expect(tag).toMatch(
+        new RegExp(`className=\\{cn\\((?:"[^"]*", )?${site.lock} && "opacity-50"\\)\\}`)
+      );
       // aria-disabled 는 클릭을 막지 않는다. 가드가 없으면 회색으로 칠한 살아
       // 있는 버튼이고, 두 번째 Enter 가 두 번째 쓰기를 낸다.
       expect(FILES[site.file]).toContain(site.guard);

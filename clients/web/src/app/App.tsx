@@ -43,7 +43,7 @@ import { isOauthConsentPath } from "@/features/hostedAgents/oauthConsentPath";
 import type { LoginResponse, Member } from "@momo/core/lib/api";
 import { FirstAgentStage } from "@/features/welcome/FirstAgentStage";
 import { readFirstAgentCapturePoseFromLocation } from "@/features/welcome/firstAgent";
-import { readAiConnectReentry } from "@/features/welcome/aiConnectReentry";
+import { AiConnectReentryRoute } from "@/features/welcome/AiConnectReentryRoute";
 import { takeFirstAgentResumeHash } from "@/features/welcome/firstAgentStore";
 import {
   decideFirstRunForSession,
@@ -257,20 +257,15 @@ export function App() {
     );
   }
 
-  // 설정 › AI 연결·에이전트 화면에서 다시 연 AI 연결(#2870, RCA 1-b). 온보딩과
-  // 같은 화면·같은 자리이고, 모드만 재진입이다(자동 통과·표지 없음).
-  const aiConnectReentry = readAiConnectReentry(window.location.hash);
-  if (capturePose !== null || firstRun === "first-agent" || aiConnectReentry !== null) {
+  // 설정 › AI 연결·에이전트 화면에서 다시 연 AI 연결(#2870)은 여기서 갈라지지
+  // 않는다. 셸 안의 라우트(`ai-connect`)라 셸이 내려가지 않는다(#2893).
+  if (capturePose !== null || firstRun === "first-agent") {
     return (
       <FirstRunSession
         session={session}
         replaceSessionMember={replaceSessionMember}
       >
-        <FirstAgentStage
-          onContinue={bumpFirstRun}
-          mode={aiConnectReentry !== null ? "reentry" : "onboarding"}
-          reentryFrom={aiConnectReentry?.from}
-        />
+        <FirstAgentStage onContinue={bumpFirstRun} mode="onboarding" />
       </FirstRunSession>
     );
   }
@@ -381,6 +376,9 @@ export function App() {
             }
           />
           <Route path="settings" element={<SettingsRoute />} />
+          {/* AI 연결 재진입(#2870). 셸 안의 라우트라 열고 닫아도 셸이 다시
+              마운트되지 않는다(#2893). 화면은 전면 층으로 포털된다. */}
+          <Route path="ai-connect" element={<AiConnectReentryRoute />} />
           {DesignGalleryRoute()}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

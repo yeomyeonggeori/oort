@@ -9,12 +9,11 @@ import { ApiError, fetchRoster, type RosterMember } from "@momo/core/lib/api";
 import { fetchProviderLink, fetchWorkspace } from "@momo/core/features/settings/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { AiLinkSection } from "@/features/settings/AiLinkSection";
-import {
-  SubscriptionAgentEntryButton,
-  SubscriptionAgentEntryCard,
-} from "./SubscriptionAgentEntry";
+import { AiMyAccountsSection } from "@/features/settings/AiMyAccountsSection";
+import { SubscriptionAgentEntryButton } from "./SubscriptionAgentEntry";
 
 // #2870: 설정 › AI 연결과 에이전트 화면의 구독 줄 입구.
+// #2877: 설정 쪽 입구는 「내 계정 · 이 맥」 절의 빈 줄 행동([구독 추가])이 되었다.
 
 const envSlot = vi.hoisted(() => ({ tauri: true, flag: true }));
 
@@ -148,7 +147,7 @@ afterEach(() => {
 
 describe("설정 › AI 연결 입구 (#2870)", () => {
   it("owner + 데스크탑 + 서버 켬: 버튼이 재진입 주소를 연다", async () => {
-    mount(createElement(SubscriptionAgentEntryCard, { from: "settings" }));
+    mount(createElement(AiMyAccountsSection));
     await rtlWaitFor(() => {
       if (!q("subscription-entry-open")) throw new Error("entry");
     });
@@ -162,35 +161,56 @@ describe("설정 › AI 연결 입구 (#2870)", () => {
     // 운영자 안내(403 분기)가 선 **뒤에** 입구를 잰다. 로딩 분기에서 한 번 보인
     // 입구로 통과하지 않게.
     await rtlWaitFor(() => {
-      if (!host?.textContent?.includes("provider 연결은 이 서버의 운영자만 바꿀 수 있습니다.")) {
-        throw new Error("operator notice");
-      }
+      if (!q("operator-notice")) throw new Error("operator notice");
     });
+    expect(q("operator-notice")?.textContent).toContain("운영자만");
     await settle();
     expect(q("subscription-entry-open")).not.toBeNull();
   });
 
-  it("일반 멤버에게는 서지 않는다(서버가 합류를 owner·admin 에게만 연다)", async () => {
+  it("일반 멤버에게는 행동이 서지 않는다(서버가 합류를 owner·admin 에게만 연다)", async () => {
     vi.mocked(fetchRoster).mockResolvedValue([me("member")]);
-    mount(createElement(SubscriptionAgentEntryCard, { from: "settings" }));
+    mount(createElement(AiMyAccountsSection));
     await settle();
-    expect(q("subscription-entry")).toBeNull();
+    expect(q("subscription-entry")?.getAttribute("data-surface")).toBe("denied");
+    expect(q("subscription-entry-open")).toBeNull();
+  });
+
+  it("명부 조회가 실패하면 입구를 세우지 않는다(#2893: 역할을 모르면 합류 권한도 모른다)", async () => {
+    vi.mocked(fetchRoster).mockRejectedValue(new ApiError(500, "roster down"));
+    mount(createElement(AiMyAccountsSection));
+    await settle();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(q("subscription-entry")?.getAttribute("data-surface")).toBe("denied");
+    expect(q("subscription-entry-open")).toBeNull();
+  });
+
+  it("명부 조회가 실패하면 에이전트 화면 머리 버튼도 없다(#2893)", async () => {
+    vi.mocked(fetchRoster).mockRejectedValue(new ApiError(500, "roster down"));
+    mount(createElement(SubscriptionAgentEntryButton, { from: "agents" }));
+    await settle();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(q("agent-hub-subscription-entry")).toBeNull();
   });
 
   it("데스크탑 앱이 아니면 버튼 대신 이유 한 줄", async () => {
     envSlot.tauri = false;
-    mount(createElement(SubscriptionAgentEntryCard, { from: "settings" }));
+    mount(createElement(AiMyAccountsSection));
     await rtlWaitFor(() => {
       if (!q("subscription-entry")) throw new Error("entry");
     });
     expect(q("subscription-entry")?.getAttribute("data-surface")).toBe("desktop-only");
     expect(q("subscription-entry-open")).toBeNull();
-    expect(q("subscription-entry-detail")?.textContent).toContain("데스크탑 앱에서");
+    expect(q("subscription-entry-detail")?.textContent).toContain("데스크탑 앱에서만");
   });
 
   it("서버 킬 스위치가 꺼지면 버튼 대신 이유 한 줄", async () => {
     vi.mocked(fetchWorkspace).mockResolvedValue(workspace(false));
-    mount(createElement(SubscriptionAgentEntryCard, { from: "settings" }));
+    mount(createElement(AiMyAccountsSection));
     await rtlWaitFor(() => {
       if (!q("subscription-entry")) throw new Error("entry");
     });
@@ -200,7 +220,7 @@ describe("설정 › AI 연결 입구 (#2870)", () => {
 
   it("서버 값을 못 읽으면 server-off 한 줄로 떨어진다", async () => {
     vi.mocked(fetchWorkspace).mockRejectedValue(new Error("down"));
-    mount(createElement(SubscriptionAgentEntryCard, { from: "settings" }));
+    mount(createElement(AiMyAccountsSection));
     await rtlWaitFor(() => {
       if (!q("subscription-entry")) throw new Error("entry");
     });
@@ -208,11 +228,13 @@ describe("설정 › AI 연결 입구 (#2870)", () => {
     expect(q("subscription-entry-open")).toBeNull();
   });
 
-  it("빌드가 구독 표면을 걷으면 아무것도 그리지 않는다", async () => {
+  it("빌드가 구독 표면을 걷으면 행동도 이유도 없이 빈 줄만 선다", async () => {
     envSlot.flag = false;
-    mount(createElement(SubscriptionAgentEntryCard, { from: "settings" }));
+    mount(createElement(AiMyAccountsSection));
     await settle();
-    expect(q("subscription-entry")).toBeNull();
+    expect(q("subscription-entry")?.getAttribute("data-surface")).toBe("hidden");
+    expect(q("subscription-entry-open")).toBeNull();
+    expect(q("subscription-entry-detail")).toBeNull();
   });
 });
 
