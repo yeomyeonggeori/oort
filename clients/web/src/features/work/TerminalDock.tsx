@@ -14,6 +14,7 @@ import { useOffline } from "@/features/common/useOffline";
 import { useWorkHosts, useWorkSessions } from "./useWorkSessions";
 import { ObserverTerminal, TerminalShortNotice } from "./ObserverTerminal";
 import { useSession } from "@/app/session";
+import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 
 function readPx(name: string): number {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name);
@@ -54,6 +55,12 @@ function viewportHeightPx(): number {
 //     둘은 XOR. 채널 스코프 관전은 도크, 전역 목록·원장은 작업 콘솔/WorkPanel.
 //   * 새 세션 POST 는 웹 클라에 없다. + 버튼을 그리지 않는다.
 //   * 원격(팀원) 터미널 조작은 TC-2. 여기 입력창 없음.
+//   * #2753: 이 도크는 #2166 작업 표면 판정(`isSurfaceProvided("work")`)
+//     뒤에서만 마운트된다(ChatShell). 문구는 표면 중립이다: 데스크탑 앱도 같은
+//     트리를 그리므로 「웹에서」라고 말하지 않는다. 빈 상태는 이 자리가 무엇을
+//     하는 곳인지(호스트에서 도는 에이전트 세션의 관전)를 말한다.
+//     로컬 워크벤치(M1, agent-workspace-2.0 §3.10)가 들어오면 빈 상태의 CTA와
+//     헤더 진입점은 「로컬 터미널 열기」로 대체된다.
 //
 // 탭 위젯은 FilterTabs를 쓰지 않는다: 그 컨트롤은 닫힌 필터 어휘(인박스·작업
 // 흐름)용이고, 세션 탭은 원장이 주는 열린 집합이다. 키보드 계약(로빙
@@ -78,6 +85,9 @@ export function TerminalDock({
 }) {
   const { workspaceId } = useSession();
   const navigate = useNavigate();
+  // 「작업 콘솔 보기」는 `/work` 로 간다. 그 라우트는 `workConsole` 판정 뒤에만
+  // 있으므로(App.tsx), 같은 판정 없이 버튼을 세우면 빈 화면으로 보내는 CTA가 된다.
+  const workConsoleProvided = isSurfaceProvided("workConsole");
   const offline = useOffline();
   const sessionsQuery = useWorkSessions(workspaceId);
   const hostsQuery = useWorkHosts(workspaceId);
@@ -350,19 +360,21 @@ export function TerminalDock({
         ) : sessions.length === 0 ? (
           <EmptyInvite
             headline="이 채널에 관전할 작업 세션이 없습니다."
-            detail="에이전트가 이 채널에서 세션을 시작하면 이 자리에 나타납니다. 웹에서 세션을 새로 만들 수는 없습니다."
+            detail="에이전트가 코드 실행 호스트에서 돌리는 작업 세션의 터미널 출력을 지켜보는 곳입니다. 에이전트가 이 채널에서 세션을 시작하면 여기에 나타납니다."
             className="py-4"
             testId="terminal-dock-empty"
             actions={
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => navigate("/work")}
-                data-testid="terminal-dock-console"
-              >
-                작업 콘솔 보기
-              </Button>
+              workConsoleProvided ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate("/work")}
+                  data-testid="terminal-dock-console"
+                >
+                  작업 콘솔 보기
+                </Button>
+              ) : undefined
             }
           />
         ) : selected === null ? null : (
