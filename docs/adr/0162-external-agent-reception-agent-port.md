@@ -2,6 +2,7 @@
 
 - Status: **Accepted** (2026-08-12 · 성재가 제품 방향과 D1~D8의 벤더 중립 기술 경계를 승인)
 - 증보: **증보 1 — OAuth lifecycle (2026-08-15, HAP-E7 #1368) · Accepted (성재 승인 2026-08-15).** Accept는 D4/D6의 OAuth 경계를 승인한 것이지 flag 개방이 아니다 — 구현은 여전히 feature flag로 완전히 닫혀 있고(metadata 미광고·모든 route 404) static bearer 경로는 byte 동일하며, flag를 여는 것은 #1369 랜딩과 runtime proof 폐곡선 뒤의 별도 운영 결정이다.
+- 증보: **증보 2 — hosted 1:1 DM 승인 (2026-09-27, #2915) · Accepted (성재 결재 「권장대로」 2026-09-27).** 소유자↔자기 에이전트 1:1 DM은 자동 승인, 다른 멤버↔에이전트 1:1 DM은 에이전트 소유자가 DM 단위로 승인한다. 파일 끝 「증보 2」 절.
 - 관련: ADR-0100(결정 거버넌스), ADR-0101(에이전트 신원·bearer), ADR-0102(worker/gateway 실행 경로), ADR-0130(외부 에이전트 fabric·ACP), ADR-0145(Rust/Axum), ADR-0150(대화 반출 경계)
 - 리서치: `docs/planning/research/2026-08-12-grok-bot-integration-feasibility.md`, `docs/planning/research/2026-08-12-grok-bot-reverse-teammate-direction.md`, `docs/planning/research/2026-08-12-external-agent-reception-audit.md`
 - 제품 문장: **Bring your hosted agent.** Grok Bot은 첫 setup preset이자 실증 클라이언트이며, 코어 계약은 벤더 중립이다.
@@ -285,3 +286,55 @@ pairing_pending ──human owner/admin consent (authorization code 발급)─�
 3. pairing/connection schema와 agent credential lifecycle API의 정확한 route
 4. disconnect 시 active lease 처리의 사용자 표시와 최대 회수 시간
 5. 공개 런칭 전 자동화 에이전트 접속·외부 provider artifact에 관한 약관/법무 문구 검토(법률 자문 아님)
+
+## 증보 2 — hosted 1:1 DM 승인 (Accepted · 성재 결재 「권장대로」 2026-09-27 · #2915)
+
+> HAP-E3 confirm과 증보 1 A1은 사람이 **이름 붙인 채널 집합**(`approved_channel_ids`)만 승인하고, 두 validator가 `kind <> 'dm'`만 받는다. 그래서 hosted 에이전트와의 1:1 DM은 어떤 설정으로도 전달되지 않았다(PR #2889 / #2871이 발견, 사이드바 「Claude Code」 DM이 조용함). 이 증보는 DM을 여는 규칙과 그 권한 주체를 봉인한다.
+
+### 결재 인용
+
+이슈 #2915 「결정 — 성재 2026-09-27 「권장대로」」 절 그대로:
+
+> PR #2889(#2871) 발견: hosted 에이전트 승인은 채널 단위만 있어 1:1 DM은 절대 전달되지 않는다(사이드바 「Claude Code」 DM이 조용함).
+> - 에이전트 소유자와 그 에이전트의 1:1 DM은 **자동 승인**(ADR-0193 소유자 전용 원칙과 정합).
+> - 다른 멤버 ↔ 그 에이전트 DM은 **에이전트 소유자가 DM 단위로 승인**해야 열린다(기본 닫힘). 승인 UI는 설정 › 에이전트 자격의 채널 승인 목록에 DM 줄로.
+> - 구독 에이전트(owner_only)는 소유자 DM만 허용, 타인 DM 승인 불가(서버 거부).
+> - 보안 경계 변경 → hosted 전달·채널 승인 ADR 증보 Accepted(결재 인용)가 머지 조건.
+
+### B1. 1:1 DM의 정의와 소유자
+
+- 1:1 DM은 `channel.kind = 'dm'`, `archived_at IS NULL`이고 **활성 멤버(`membership.left_at IS NULL`)가 정확히 둘**(그 에이전트와 사람 한 명)인 방이다. 셋 이상의 그룹 DM은 이 증보의 대상이 아니며 계속 전달되지 않는다.
+- 소유자는 `agent.owner_human_id`(schema_v0)다. hosted 연결 생성은 만든 사람을 소유자로 적는다. 소유자가 없으면(NULL) 자동 승인도 DM 승인도 없다(fail-closed).
+
+### B2. 소유자 DM은 자동 승인이며 저장하지 않는다
+
+- 소유자와 그 에이전트의 1:1 DM은 연결이 active인 동안 승인된 방으로 친다. 저장된 값이 아니라 **매 판정마다 현재 방 모양과 소유자로 계산**한다. DM이 confirm 뒤에 생겨도, 재연결로 connection 행이 새로 생겨도 그대로 열린다. 멤버가 바뀌어 1:1이 아니게 되면 그 순간 닫힌다.
+- 구독 에이전트(`invocation_scope = 'owner_only'`, ADR-0193 D4)도 소유자 DM은 이 규칙으로 열린다.
+
+### B3. 다른 멤버와의 DM은 소유자가 DM 단위로 연다
+
+- 기본은 닫힘이다. 에이전트 소유자만 그 DM을 승인하거나 철회한다. 워크스페이스 관리자라도 소유자가 아니면 바꾸지 못하고, 목록은 읽을 수 있다.
+- 저장은 connection 단위(`hosted_agent_connection.approved_dm_channel_ids`, 신규 migration)다. `approved_channel_ids`와 같은 수명이다: 재-pairing reset에서 비워지고, 해제 뒤 새 connection은 빈 목록으로 시작한다. 승인은 채널 승인과 권한 주체가 달라서(관리자의 confirm이 아니라 소유자의 수시 결정) 같은 배열에 섞지 않는다.
+- 저장된 승인도 판정 때마다 B1 모양을 다시 확인한다. 승인 뒤 방에 사람이 늘면 닫힌다.
+- 서버가 거부하는 것: 구독 에이전트의 타인 DM 승인(B4), 1:1 DM이 아닌 방, 그 에이전트가 없는 방, 소유자 DM(이미 자동이라 저장 대상이 아님), 해제 중·해제된·만료된 connection.
+- 승인·철회는 감사 행을 남긴다.
+
+### B4. 구독 에이전트는 소유자 DM만
+
+- `owner_only` 에이전트는 타인 DM 승인을 서버가 거부한다. 판정에서도 `approved_dm_channel_ids`를 보지 않는다. 비소유자의 호출은 ADR-0193 D4 안내를 그대로 받는다.
+
+### B5. 한 술어, 모든 강제 지점
+
+- 「이 connection이 이 방을 덮는가」는 SQL 함수 하나(`hosted_connection_channel_ids`, SECURITY INVOKER라 RLS가 그대로 적용)로 정의한다: `approved_channel_ids` ∪ B2 소유자 DM ∪ B3 승인 DM.
+- mention selector, hosted inbox fan-out·read, gateway claim SQL(권위), Agent Port 도구 identity가 모두 이 함수를 쓴다. selector와 claim이 갈라지면 DM이 `pending` job으로 멈춰 다시 조용해지므로 하나로 묶는다. 웰컴 킥오프(ADR-0181 D3)는 채널 대상이라 바꾸지 않는다.
+
+### B6. 보이는 안내
+
+- 비소유자의 1:1 DM이 아직 승인되지 않았으면 #2871 서버 안내 줄의 사유는 `hosted_dm_owner_approval_required`이고, 문구는 소유자 이름을 들어 「소유자 승인이 필요」하다고 말한다. 이 줄은 DM 안의 비소유자에게만 보이므로 설정 문(`notice_action`)을 달지 않는다. 이름은 두 개 모두 `inert_display_name`을 거친다.
+- 그룹 DM과 소유자 없는 에이전트는 기존 사유 `hosted_dm_not_approvable`을 쓰되, 문구에서 「1:1 대화는 전달되지 않는다」는 이제 거짓이므로 고친다.
+- DM 컴포저 힌트(#2891)는 서버가 알려 주는 이 DM의 전달 상태를 따른다. 「멘션 없이 바로 말하면 …가 답합니다」는 전달이 열린 DM에서만 쓴다.
+
+### B7. 이 증보가 열지 않는 것
+
+- 그룹 DM, 채널 승인 권한 주체(여전히 관리자의 confirm), 웰컴 킥오프 대상, 운영 인스턴스 설정.
+- 실제 Claude Code MCP 합류 왕복은 runtime-unverified로 남는다.
