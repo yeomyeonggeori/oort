@@ -70,16 +70,24 @@ export type KomettoGuideSize = 'head' | 'hero';
 export function KomettoFace({
   expression,
   size = 'head',
+  side: sideOverride,
+  badge = false,
 }: {
   expression: KomettoExpression;
   size?: KomettoGuideSize;
+  /** 크기 값을 바꿔 쓸 때(다크 M0 히어로 176, 시안 `.phone.T.dark .hero-k`). */
+  side?: number;
+  /** 시안 `.badge-k{border-radius:50%;box-shadow:var(--sh2)}` (다크 히어로의 원형 배지). */
+  badge?: boolean;
 }): React.JSX.Element {
+  const badgeStyle = useStyles(buildStyles).badge;
   const reduceMotion = useReduceMotion();
   const [shown, setShown] = useState(expression);
   const [leaving, setLeaving] = useState<KomettoExpression | null>(null);
   const fade = useRef(new Animated.Value(1)).current;
   const wag = useRef(new Animated.Value(0)).current;
-  const side = size === 'hero' ? ONBOARDING.hero : ONBOARDING.head;
+  const side =
+    sideOverride ?? (size === 'hero' ? ONBOARDING.hero : ONBOARDING.head);
 
   if (shown !== expression) {
     setShown(expression);
@@ -132,6 +140,7 @@ export function KomettoFace({
       style={[
         faceStyles.box,
         {width: side, height: side},
+        badge ? [badgeStyle, {borderRadius: side / 2}] : null,
         wagging ? {transform: [{rotate}]} : null,
       ]}>
       {leaving !== null ? (
@@ -180,6 +189,10 @@ export function KomettoGuide({
   size = 'head',
   header = false,
   style,
+  between,
+  faceSide,
+  faceBadge,
+  bubbleStyle,
 }: {
   expression: KomettoExpression;
   line: string;
@@ -188,6 +201,11 @@ export function KomettoGuide({
   /** 이 문장이 화면의 질문(제목)인가. */
   header?: boolean;
   style?: StyleProp<ViewStyle>;
+  /** 히어로에서 얼굴과 말풍선 사이에 서는 것(폰 M0의 워드마크·태그라인). */
+  between?: React.ReactNode;
+  faceSide?: number;
+  faceBadge?: boolean;
+  bubbleStyle?: StyleProp<ViewStyle>;
 }): React.JSX.Element {
   const text = assertGuideLine(line);
   const styles = useStyles(buildStyles);
@@ -206,18 +224,30 @@ export function KomettoGuide({
     <View
       style={[hero ? styles.guideHero : styles.guide, style]}
       testID="kometto-guide">
-      <KomettoFace expression={expression} size={size} />
+      <KomettoFace
+        expression={expression}
+        size={size}
+        side={faceSide}
+        badge={faceBadge}
+      />
+      {between}
       <View
-        style={[styles.bubble, hero && styles.bubbleHero]}
+        style={[styles.bubble, hero && styles.bubbleHero, bubbleStyle]}
         testID="kometto-guide-bubble"
         accessible
         accessibilityRole={header ? 'header' : 'text'}
         accessibilityLabel={spoken}>
-        <Text style={[styles.line, hero && styles.center]} testID="kometto-guide-line">
+        <Text
+          style={[styles.line, hero && styles.center]}
+          lineBreakStrategyIOS="hangul-word"
+          testID="kometto-guide-line">
           {text}
         </Text>
         {detail ? (
-          <Text style={[styles.detail, hero && styles.center]} testID="kometto-guide-detail">
+          <Text
+            style={[styles.detail, hero && styles.center]}
+            lineBreakStrategyIOS="hangul-word"
+            testID="kometto-guide-detail">
             {detail}
           </Text>
         ) : null}
@@ -309,6 +339,7 @@ const buildStyles = (color: Palette) =>
     bubbleHero: {
       borderBottomLeftRadius: ONBOARDING.bubbleRadius,
     },
+    badge: {boxShadow: color.elevationFloat},
     line: {
       color: color.text,
       fontSize: ds2Type.body,

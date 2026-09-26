@@ -24,6 +24,7 @@ import {
   type OpenHostedConnection,
   type Tab,
 } from '../nav/state';
+import {NotificationPrimerGate} from '../features/onboarding/NotificationPrimer';
 import PushProvider from '../push/PushProvider';
 import {useNotificationTapRouting} from '../push/useNotificationTapRouting';
 import {RealtimeProvider} from '../realtime/RealtimeProvider';
@@ -96,6 +97,8 @@ export default function AppShell({member}: {member: Member}): React.JSX.Element 
       <PushProvider>
         <RealtimeProvider>
           <Shell />
+          {/* M3 알림 미리 안내(#2820). 권한이 아직 안 물어졌을 때만 셸 위에 선다. */}
+          <NotificationPrimerGate />
         </RealtimeProvider>
       </PushProvider>
     </SessionProvider>

@@ -12,8 +12,29 @@ name: ensure-signed-in
 - runFlow: dismiss-system-alerts.yaml
 - extendedWaitUntil:
     visible:
-      id: "server-url-input|sidebar-list"
+      id: "qr-connect-button|server-url-input|notify-primer-continue|sidebar-list"
     timeout: 180000
+# M3 left over from a sign-in that never tapped 「계속」 (#2820).
+- runFlow:
+    when:
+      visible:
+        id: "notify-primer-continue"
+    commands:
+      - runFlow: pass-notify-primer.yaml
+      - runFlow: dismiss-system-alerts.yaml
+# M0 환영 (#2819): the address form is behind 「주소로 로그인」. A session that
+# EXPIRED opens straight on the form, so this is conditional.
+- runFlow:
+    when:
+      visible:
+        id: "qr-connect-button"
+    commands:
+      - tapOn:
+          id: "welcome-address"
+      - extendedWaitUntil:
+          visible:
+            id: "server-url-input"
+          timeout: 10000
 - runFlow:
     when:
       visible:
@@ -53,6 +74,8 @@ name: ensure-signed-in
       # With the keyboard up — see the note at the same step in 00-login.yaml.
       - tapOn:
           id: "submit-button"
+      - runFlow: dismiss-system-alerts.yaml
+      - runFlow: pass-notify-primer.yaml
       # A successful sign-in raises the keychain prompt and then the push
       # permission prompt, seconds apart, and either one blocks the hierarchy
       # underneath it — the assertion below then fails against a screen that
