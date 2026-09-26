@@ -76,6 +76,26 @@ describe("한글 입력 다리 (WKWebView insertReplacementText)", () => {
     expect(xtermSaw).toEqual(["insertCompositionText"]);
   });
 
+  it("xterm이 키에서 이미 보낸 글자(빈칸)는 insertText로 한 번 더 보내지 않는다", () => {
+    const { textarea, sent, xtermSaw } = setup();
+    // WKWebView 실측 순서: keydown 32 → (xterm이 " " 보냄) → insertText " "
+    textarea.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: " ", keyCode: 32 }));
+    textarea.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: " " }));
+    expect(sent).toEqual([]);
+    // xterm의 처리기에는 그대로 간다(xterm이 keydown을 본 insertText를 스스로 버린다).
+    expect(xtermSaw).toEqual(["insertText"]);
+    // 다음 입력기 글자(keydown보다 먼저 오는 insertText)는 보낸다.
+    textarea.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: "ㅇ" }));
+    expect(sent).toEqual(["ㅇ"]);
+  });
+
+  it("쌍자음의 ⇧(수식 키만의 keydown)는 다음 입력기 글자를 막지 않는다", () => {
+    const { textarea, sent } = setup();
+    textarea.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Shift", keyCode: 16 }));
+    textarea.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: "ㄲ" }));
+    expect(sent).toEqual(["ㄲ"]);
+  });
+
   it("떼면 더 받지 않는다", () => {
     const { textarea, sent, detach } = setup();
     detach();

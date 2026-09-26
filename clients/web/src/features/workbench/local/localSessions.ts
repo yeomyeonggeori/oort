@@ -178,7 +178,8 @@ function browserStorage(): ScrollbackStorage | null {
   }
 }
 
-async function loadBrowserMirror(): Promise<MirrorFactory> {
+/** 앱이 쓰는 미러: `@xterm/headless` + serialize(런타임 청크에서 받는다). */
+export async function loadBrowserMirror(): Promise<MirrorFactory> {
   const runtime = await import("./localTerminalRuntime");
   return {
     create(cols, rows) {

@@ -180,11 +180,11 @@ describe("신호색 링은 격자가 실제로 포커스를 가질 때만", () =
     expect(screen.getByTestId("workbench-status").textContent).toContain("칸 3개가 가려져 있습니다");
   });
 
-  it("칸 닫기 버튼은 ⌘W를 약속하지 않는다(브라우저·셸 메뉴가 먼저 가져간다)", () => {
+  it("칸 닫기 버튼은 ⌘W를 알린다(#2774 debug 앱 실측: 창이 아니라 격자가 받는다)", () => {
     render(<Controlled initial={four()} />);
     const close = screen.getAllByRole("button", { name: "칸 닫기" })[0]!;
-    expect(close.hasAttribute("aria-keyshortcuts")).toBe(false);
-    expect(close.getAttribute("title")).toBe("칸 닫기");
+    expect(close.getAttribute("aria-keyshortcuts")).toBe("Meta+W");
+    expect(close.getAttribute("title")).toBe("칸 닫기 (⌘W)");
   });
 });
 

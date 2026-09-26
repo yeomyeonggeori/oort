@@ -32,6 +32,8 @@
 
 const DEL = "\u007f";
 
+const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock", "Fn"]);
+
 /** 바뀌기 전 값과 뒤 값에서 지울 글자 수와 넣을 글자. 글자는 코드 포인트로 센다. */
 export function replacementDiff(before: string, after: string): { erase: number; insert: string } {
   const a = Array.from(before.normalize("NFC"));
@@ -64,6 +66,22 @@ export function attachHangulInput(
   send: (data: string) => void
 ): () => void {
   let before: string | null = null;
+  /**
+   * 마지막 input 뒤에 xterm이 스스로 처리하는 키(229가 아닌 keydown)가 있었나.
+   * 그렇다면 뒤따르는 insertText는 xterm이 이미 보낸 글자다(빈칸이 대표적이다:
+   * keydown 32에서 xterm이 보내고, WKWebView와 Chromium은 insertText " "를 또
+   * 쏜다). 입력기 글자는 keydown 229이거나, WKWebView처럼 keydown보다 먼저 온다.
+   */
+  let xtermHandledKey = false;
+
+  const onKeyDown = (event: Event) => {
+    if (event.target !== textarea) return;
+    const e = event as KeyboardEvent;
+    // 수식 키만 눌린 keydown은 글자를 만들지 않는다. 쌍자음(⇧+ㄱ)의 ⇧가 다음
+    // 입력기 글자를 「xterm이 보낸 것」으로 오인하게 하면 안 된다.
+    if (MODIFIER_KEYS.has(e.key)) return;
+    xtermHandledKey = !isImeProcessedKey(e) && !e.isComposing;
+  };
 
   const onBeforeInput = (event: Event) => {
     if (event.target !== textarea) return;
@@ -78,11 +96,16 @@ export function attachHangulInput(
     const e = event as InputEvent;
     if (e.inputType === "insertText") {
       before = null;
+      const handled = xtermHandledKey;
+      xtermHandledKey = false;
+      // xterm이 키에서 이미 보냈다. xterm의 input 처리기도 같은 판단으로 버린다.
+      if (handled) return;
       if (typeof e.data === "string" && e.data !== "") send(e.data);
       event.stopPropagation();
       return;
     }
     if (e.inputType === "insertReplacementText") {
+      xtermHandledKey = false;
       const prior = before ?? "";
       before = null;
       const payload = replacementPayload(prior, textarea.value);
@@ -91,9 +114,11 @@ export function attachHangulInput(
     }
   };
 
+  host.addEventListener("keydown", onKeyDown, true);
   host.addEventListener("beforeinput", onBeforeInput, true);
   host.addEventListener("input", onInput, true);
   return () => {
+    host.removeEventListener("keydown", onKeyDown, true);
     host.removeEventListener("beforeinput", onBeforeInput, true);
     host.removeEventListener("input", onInput, true);
   };

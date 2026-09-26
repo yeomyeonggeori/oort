@@ -567,6 +567,7 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
         <PaneButton
           label="칸 닫기"
           platform={platform}
+          keycap="⌘W"
           disabled={ctx.single}
           onClick={() => ctx.onClose(id)}
         >
@@ -593,9 +594,10 @@ function PaneButton({
   label: string;
   platform: KeyPlatform;
   /**
-   * macOS 표기. 다른 플랫폼은 Ctrl로 바꿔 보인다. 칸 닫기(⌘W)는 적지 않는다:
-   * 브라우저와 Tauri 기본 메뉴가 ⌘W를 먼저 가져가서, 그 키가 칸을 닫는다고
-   * 약속할 수 없다(#2774가 셸 메뉴를 정리할 때 붙인다).
+   * macOS 표기. 다른 플랫폼은 Ctrl로 바꿔 보인다. 칸 닫기(⌘W)는 #2774 debug
+   * 앱(번들, WKWebView)에서 실측했다: 창이 닫히지 않고 격자가 받아 칸 닫기
+   * 확인을 띄운다. 격자는 데스크탑 도크에만 붙으므로(브라우저 탭에는 도크가
+   * 없다) 브라우저의 ⌘W 예약과 부딪히지 않는다.
    */
   keycap?: string;
   disabled?: boolean;

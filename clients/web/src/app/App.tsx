@@ -66,8 +66,17 @@ const WorkbenchHarnessPage = DESIGN_GALLERY_ENABLED
     )
   : null;
 
+// 로컬 터미널 도크 하네스(#2774). 같은 문(design 모드)으로만 열린다.
+const LocalTerminalHarnessPage = DESIGN_GALLERY_ENABLED
+  ? lazy(() =>
+      import("@/features/workbench/local/LocalTerminalHarness").then((mod) => ({
+        default: mod.LocalTerminalHarness,
+      }))
+    )
+  : null;
+
 function DesignGalleryRoute() {
-  if (!DesignGalleryPage || !WorkbenchHarnessPage) return null;
+  if (!DesignGalleryPage || !WorkbenchHarnessPage || !LocalTerminalHarnessPage) return null;
   return (
     <>
       <Route
@@ -83,6 +92,14 @@ function DesignGalleryRoute() {
         element={
           <Suspense fallback={<Skeleton ready={false} rows={4} className="p-6" />}>
             <WorkbenchHarnessPage />
+          </Suspense>
+        }
+      />
+      <Route
+        path="design/local-terminal"
+        element={
+          <Suspense fallback={<Skeleton ready={false} rows={4} className="p-6" />}>
+            <LocalTerminalHarnessPage />
           </Suspense>
         }
       />
