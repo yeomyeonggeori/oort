@@ -8956,23 +8956,9 @@ async function captureScheme(browser, scheme) {
   await shootDevices(devicesLoopback, "loopback");
   await devicesLoopback.close();
 
-  resetDeviceLinkHarness();
-  const firstRun = await context.newPage();
-  await firstRun.goto(ORIGIN, { waitUntil: "networkidle" });
-  await signIn(firstRun);
-  await firstRun.evaluate(() => {
-    sessionStorage.setItem("momo.web.phoneLinkFirstRun.v1", "pending");
-  });
-  await firstRun.reload({ waitUntil: "networkidle" });
-  await firstRun.getByTestId("onboarding-phone-link").waitFor({
-    state: "visible",
-  });
-  await firstRun.waitForTimeout(250);
-  const firstRunShot = beginSceneFromShotPath(`${OUT_DIR}/onboarding-phone-link-${scheme}.png`);
-  await firstRun.screenshot({ path: firstRunShot });
-  shots.push(firstRunShot);
-  await sceneClick(firstRun, firstRun.getByTestId("onboarding-enter-app"));
-  await firstRun.close();
+  // 로그인 뒤 「폰에서도 쓰기」 전체 화면(onboarding-phone-link)은 #2818
+  // (ADR-0193 D7)에서 첫 대화 채널 카드가 됐다. 그 캡처는
+  // scripts/capture-phone-link-card.mjs 가 찍는다.
 
   // 4. dense timeline via the stress path (no realtime rail, 40 rows)
   const stress = await context.newPage();

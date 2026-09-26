@@ -10,7 +10,10 @@ import { applyLogin, clearSession } from "@/lib/session";
 import { useRestoredSession } from "@/app/session";
 import { clearRecentServers } from "./recentServers";
 import { ConnectPage } from "./ConnectPage";
-import { PHONE_LINK_FIRST_RUN_KEY } from "./phoneLinkFirstRunStore";
+import {
+  clearPhoneLinkCardForTests,
+  readPhoneLinkCard,
+} from "@/features/welcome/phoneLinkCardStore";
 import { firstAgentIsPending } from "@/features/welcome/firstAgentStore";
 import { releaseSessionRestore, holdSessionRestore, sessionRestoreHeld } from "./onboardingSessionHold";
 
@@ -99,7 +102,7 @@ beforeEach(() => {
   clearSession();
   setServerBase(null);
   clearRecentServers();
-  sessionStorage.removeItem(PHONE_LINK_FIRST_RUN_KEY);
+  clearPhoneLinkCardForTests(session.member.workspaceId);
   sessionStorage.removeItem(FRESH_SIGNUP_SLOT);
   window.history.replaceState(null, "", "/");
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -322,11 +325,8 @@ describe("BZ-6a onboarding shell", () => {
     });
     expect(onLoggedIn).not.toHaveBeenCalled();
     expect(document.querySelector('[data-testid="onboarding-profile"]')).not.toBeNull();
-    expect(sessionStorage.getItem(PHONE_LINK_FIRST_RUN_KEY)).toBe("pending");
+    expect(readPhoneLinkCard(session.member.workspaceId)).toBe("pending");
     expect(firstAgentIsPending(session.member.workspaceId)).toBe(true);
-    expect(
-      document.querySelector('[data-testid="onboarding-phone-link"]')
-    ).toBeNull();
     expect(login).not.toHaveBeenCalled();
   });
 

@@ -84,6 +84,8 @@ export const NAMED_MEASURES = [
   "field",
   "icon-button",
   "card",
+  "kometto-band",
+  "band-action",
 ] as const;
 
 /** Overlay stacking names (#2044). One spelling only: the `layer-*` class.

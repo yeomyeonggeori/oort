@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Hash, Lock, MessageSquare, SquareTerminal } from "lucide-react";
 import {
@@ -95,6 +102,12 @@ import { cn } from "@/design/lib/cn";
 import { FirstMentionOnboarding } from "@/features/hostedAgents/FirstMentionOnboarding";
 import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
 import { useWelcomeKickoff, welcomePlayEntrance } from "@/features/welcome/useWelcomeKickoff";
+import { PhoneLinkChannelCard } from "@/features/welcome/PhoneLinkChannelCard";
+import { shouldMountPhoneLinkCard } from "@/features/welcome/phoneLinkCard";
+import {
+  peekKickoffSettled,
+  subscribeFirstRun,
+} from "@/features/welcome/firstRunGate";
 
 // =============================================================================
 // Channel surface (R-1 §3): header, offline banner, timeline, composer, thread
@@ -229,6 +242,19 @@ export function ChatShell() {
     directory,
     realtime: stressCount > 0 ? null : realtime,
   });
+  const kickoffSettled = useSyncExternalStore(
+    subscribeFirstRun,
+    peekKickoffSettled,
+    peekKickoffSettled
+  );
+  const phoneLinkCardMounted =
+    stressCount === 0 &&
+    channelId !== null &&
+    shouldMountPhoneLinkCard({
+      channel,
+      kickoffPhase: welcome.phase,
+      kickoffSettled,
+    });
   const isPlayEntrance = useCallback(
     (id: string) =>
       welcomePlayEntrance(welcome.holdEntranceId, id, timeline.isPlayEntrance),
@@ -1312,6 +1338,14 @@ export function ChatShell() {
 
         {/* 폰에는 액션이 있다는 것을 말해 주는 것이 화면에 하나도 없었다
             (R2 H4). 손가락 기기에서만, 한 번만, 컴포저 바로 위에서. */}
+        {/* 「폰에서도」 카드 (#2818, ADR-0193 D7): 첫 대화 채널에서만, 킥오프가
+            끝난 뒤, 타임라인 아래(오프너를 가리지 않는다) 컴포저 바로 위. */}
+        {phoneLinkCardMounted && (
+          <PhoneLinkChannelCard
+            workspaceId={workspaceId}
+            onDismissed={focusComposer}
+          />
+        )}
         {stressCount === 0 && channelId !== null && <LongPressHint />}
         {stressCount === 0 && channelId !== null && (
           <Composer
