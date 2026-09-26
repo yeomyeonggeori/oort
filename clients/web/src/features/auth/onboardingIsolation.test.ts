@@ -40,7 +40,8 @@ describe("onboarding S0 and brand lockup stay outside custom accent", () => {
     expect(tokens).toMatch(
       /\.onboarding-landing,\s*\n\s*\.brand-lockup\s*\{/
     );
-    expect(claim).toContain("brand-lockup");
+    // claim(D1″)도 온보딩 2.0 틀로 옮겨 락업이 없다(#2811). 코메토가 질문을 말한다.
+    expect(claim).not.toMatch(/<OortMark\b/);
   });
 
   // DS2-1(#2713): 신호의 글자 역할은 --signal-text 이고 `text-accent` 는 걷혔다.
@@ -61,11 +62,11 @@ describe("onboarding S0 and brand lockup stay outside custom accent", () => {
         });
       }
     }
-    // Claim and post-claim S2 (#2811 moves those). The login and invite
-    // screens moved onto the onboarding 2.0 frame (#2808·#2809·#2810) and say
-    // their question through KomettoGuide, not a lockup. A third site without
-    // `.brand-lockup` nearby is leftover below.
-    expect(hits, "OortMark signal-text sites").toHaveLength(2);
+    // None left. The login and invite screens (#2808·#2809·#2810) and claim +
+    // post-claim S1·S2 (#2811) moved onto the onboarding 2.0 frame and say
+    // their question through KomettoGuide, not a lockup. A new signal-coloured
+    // OortMark must come back with `.brand-lockup` nearby and raise this count.
+    expect(hits, "OortMark signal-text sites").toHaveLength(0);
     const leftover = hits.filter((hit) => !hit.near.includes("brand-lockup"));
     expect(leftover, leftover.map((hit) => hit.file).join(", ")).toEqual([]);
   });

@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -18,7 +20,14 @@ import {
   clearOwnerOnboardingPending,
   markOwnerOnboardingStage,
 } from "./ownerOnboardingStore";
-import { S2_PRIMARY_LABEL, S2_REENTRY } from "./s2Copy";
+import {
+  S2_CODE_NOTE,
+  S2_ISSUED_LINE,
+  S2_PRIMARY_LABEL,
+  S2_REENTRY,
+  S2_TITLE,
+  S2_TROUBLE_LINE,
+} from "./s2Copy";
 
 const createInvite = vi.hoisted(() => vi.fn());
 const fetchWorkspace = vi.hoisted(() => vi.fn());
@@ -198,7 +207,7 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
     expect(onSkip).not.toHaveBeenCalled();
   });
 
-  it("카운터는 표에서 온 2/2 이다", () => {
+  it("점은 claim 경로 넷 중 셋째다(ADR-0185 증보 §5-2)", () => {
     const host = mount(
       createElement(OwnerOnboarding, {
         session,
@@ -206,9 +215,14 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
         onFinished: vi.fn(),
       })
     );
-    const counter = host.querySelector('[data-testid="onboarding-progress"]');
-    expect(counter, "progress").not.toBeNull();
-    expect(counter?.textContent).toBe("2/2");
+    expect(host.querySelector('[data-testid="onboarding-progress"]')).toBeNull();
+    const dots = host.querySelector('[data-testid="onboarding-dots"]');
+    expect(dots, "dots").not.toBeNull();
+    expect(dots?.getAttribute("data-total")).toBe("4");
+    expect(dots?.getAttribute("data-current")).toBe("3");
+    expect(
+      host.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
+    ).toBe("4단계 중 3단계");
   });
 
   it("탈출구 문장이 재진입 위치를 말한다", () => {
@@ -415,5 +429,73 @@ describe("S2 naming parity with 설정 › 멤버와 초대 (#2356 M-9)", () => 
     expect(host.querySelector('[data-testid="invite-copy-card"]')?.textContent).toBe(
       INVITE_COPY_CARD_LABEL
     );
+  });
+});
+
+describe("onboarding S2 코메토와 발급 카드 (#2811 D3)", () => {
+  it("코메토: 발급 전 대기, 발급 뒤 기쁨과 문장이 함께 바뀐다 (#2811 D3)", async () => {
+    const host = mount(
+      createElement(InviteStage, {
+        workspaceId: WS,
+        onSkip: vi.fn(),
+        onContinue: vi.fn(),
+      })
+    );
+    const guide = () => host.querySelector('[data-testid="kometto-guide"]');
+    const line = () =>
+      host.querySelector('[data-testid="onboarding-s2-title"]')?.textContent;
+    expect(guide()?.getAttribute("data-expression")).toBe("idle");
+    expect(line()).toBe(S2_TITLE);
+    // 「해시만 보관」 문장은 발급 전 화면에 없다. 발급 카드 안으로 내려갔다.
+    expect(host.textContent).not.toContain("해시만 보관");
+    await act(async () => {
+      click("onboarding-s2-issue");
+    });
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="invite-issued"]')).not.toBeNull();
+    });
+    expect(guide()?.getAttribute("data-expression")).toBe("happy");
+    expect(line()).toBe(S2_ISSUED_LINE);
+    const card = host.querySelector('[data-testid="invite-issued"]');
+    const note = card?.querySelector('[data-testid="invite-issued-footnote"]');
+    expect(note?.textContent).toBe(S2_CODE_NOTE);
+    expect(note?.className).toContain("text-meta");
+    // 발급 뒤에는 「나중에」가 없고 재진입 문장은 남는다.
+    expect(host.querySelector('[data-testid="onboarding-s2-skip"]')).toBeNull();
+    expect(host.textContent).toContain(S2_REENTRY);
+  });
+
+  it("코메토: 발급 실패는 당황, 문장이 사정을 말한다 (#2811 D11)", async () => {
+    createInvite.mockRejectedValue(new ApiError(503, "HTTP 503"));
+    const host = mount(
+      createElement(InviteStage, {
+        workspaceId: WS,
+        onSkip: vi.fn(),
+        onContinue: vi.fn(),
+      })
+    );
+    await act(async () => {
+      click("onboarding-s2-issue");
+    });
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="onboarding-s2-error"]')).not.toBeNull();
+    });
+    expect(
+      host.querySelector('[data-testid="kometto-guide"]')?.getAttribute("data-expression")
+    ).toBe("flustered");
+    expect(
+      host.querySelector('[data-testid="onboarding-s2-title"]')?.textContent
+    ).toBe(S2_TROUBLE_LINE);
+  });
+
+  it("건너뛰기는 둘레 재진입 문장보다 한 단 크다 (시안 .btn.ghost, review High)", () => {
+    const css = readFileSync(join(process.cwd(), "src/design/tokens.css"), "utf8");
+    const rule = (selector: string) => {
+      const start = css.indexOf(`${selector} {`);
+      expect(start, selector).toBeGreaterThan(0);
+      return css.slice(start, css.indexOf("}", start));
+    };
+    expect(rule(".onboarding-reentry")).toContain("font-size: var(--text-meta)");
+    expect(rule(".onboarding-skip")).toContain("font-size: var(--text-body)");
   });
 });
