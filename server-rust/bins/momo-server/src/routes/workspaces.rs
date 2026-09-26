@@ -58,7 +58,7 @@ use crate::AppState;
 /// Human-only, stated once. An agent's name for a workspace is not this path.
 const HUMANS_RENAME_WORKSPACES: &str = "only a human member can rename a workspace";
 
-fn workspace_dto(workspace: &WorkspaceIdentity) -> WorkspaceDto {
+fn workspace_dto(workspace: &WorkspaceIdentity, subscription_agents_enabled: bool) -> WorkspaceDto {
     WorkspaceDto {
         id: workspace.id.to_string(),
         slug: workspace.slug.clone(),
@@ -79,6 +79,7 @@ fn workspace_dto(workspace: &WorkspaceIdentity) -> WorkspaceDto {
             .welcome_prompt
             .clone()
             .unwrap_or_else(|| momo_agent::DEFAULT_WELCOME_PROMPT.to_string()),
+        subscription_agents_enabled,
     }
 }
 
@@ -107,7 +108,10 @@ pub async fn get(
 
     let workspace = settle_db("workspaces.get", outcome)?;
     Ok(Json(WorkspaceResponse {
-        workspace: workspace_dto(&workspace),
+        workspace: workspace_dto(
+            &workspace,
+            state.agent_port.config.subscription_agents_enabled,
+        ),
     }))
 }
 
@@ -191,7 +195,10 @@ pub async fn rename(
 
     let workspace = settle_db("workspaces.rename", outcome)?;
     Ok(Json(WorkspaceResponse {
-        workspace: workspace_dto(&workspace),
+        workspace: workspace_dto(
+            &workspace,
+            state.agent_port.config.subscription_agents_enabled,
+        ),
     }))
 }
 
@@ -403,16 +410,19 @@ mod tests {
     #[test]
     fn the_response_keeps_its_envelope_and_its_concurrency_token() {
         let json = serde_json::to_value(WorkspaceResponse {
-            workspace: workspace_dto(&WorkspaceIdentity {
-                id: Uuid::from_u128(1),
-                slug: "momo".into(),
-                name: "모모".into(),
-                updated_at_ms: 1_700_000_000_123,
-                avatar_media_id: None,
-                role_labels: serde_json::json!({}),
-                welcome_agent_member_id: None,
-                welcome_prompt: None,
-            }),
+            workspace: workspace_dto(
+                &WorkspaceIdentity {
+                    id: Uuid::from_u128(1),
+                    slug: "momo".into(),
+                    name: "모모".into(),
+                    updated_at_ms: 1_700_000_000_123,
+                    avatar_media_id: None,
+                    role_labels: serde_json::json!({}),
+                    welcome_agent_member_id: None,
+                    welcome_prompt: None,
+                },
+                false,
+            ),
         })
         .expect("serialize");
         assert!(json.get("workspace").is_some(), "{json}");
@@ -434,22 +444,28 @@ mod tests {
             json["workspace"].get("settings").is_none(),
             "identity must not grow a settings bag: {json}"
         );
+        // ADR-0193 D6 (#2815): the operator's switch is served, never omitted,
+        // so a client can tell "off" from "an older server".
+        assert_eq!(json["workspace"]["subscriptionAgentsEnabled"], false);
     }
 
     /// A set avatar surfaces as a versioned content path — the `?v={media}` is
     /// what makes the cached bytes immutable and busts on replacement (D5).
     #[test]
     fn a_set_avatar_is_a_versioned_content_path() {
-        let dto = workspace_dto(&WorkspaceIdentity {
-            id: Uuid::from_u128(1),
-            slug: "momo".into(),
-            name: "모모".into(),
-            updated_at_ms: 1_700_000_000_123,
-            avatar_media_id: Some(Uuid::from_u128(42)),
-            role_labels: serde_json::json!({"owner": "마스터"}),
-            welcome_agent_member_id: None,
-            welcome_prompt: None,
-        });
+        let dto = workspace_dto(
+            &WorkspaceIdentity {
+                id: Uuid::from_u128(1),
+                slug: "momo".into(),
+                name: "모모".into(),
+                updated_at_ms: 1_700_000_000_123,
+                avatar_media_id: Some(Uuid::from_u128(42)),
+                role_labels: serde_json::json!({"owner": "마스터"}),
+                welcome_agent_member_id: None,
+                welcome_prompt: None,
+            },
+            true,
+        );
         let url = dto.avatar_url.expect("avatar url present");
         assert!(url.starts_with("/v1/workspaces/"), "{url}");
         assert!(url.contains("/avatar/content?v="), "{url}");

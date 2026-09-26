@@ -132,6 +132,10 @@ pub struct MentionCandidate {
     /// A mention of an agent that is not in the channel is a **no-op**, not an
     /// error (Swift :1464-1478) — fail closed, audited, no run.
     pub is_channel_member: bool,
+    /// ADR-0193 D4 (#2815): `Some` when `agent.invocation_scope = 'owner_only'`
+    /// — a subscription agent only its owner may call. `None` for every other
+    /// agent, which is every agent that existed before migration 089.
+    pub owner_only: Option<crate::subscription::OwnerOnlyScope>,
 }
 
 /// Read every active agent of the workspace, with its channel membership and
@@ -194,7 +198,28 @@ pub async fn load_mention_candidates_in_tx(
                    WHERE acr.workspace_id = m.workspace_id \
                      AND acr.agent_member_id = m.id \
                      AND acr.status = 'confirmed' \
-                ) AS is_external_runtime \
+                ) AS is_external_runtime, \
+                a.invocation_scope, a.subscription_harness, a.owner_human_id, \
+                (SELECT o.display_name FROM member o \
+                  WHERE o.workspace_id = m.workspace_id AND o.id = a.owner_human_id) \
+                  AS owner_display_name, \
+                COALESCE((SELECT t.last_used_at > now() - make_interval(secs => $3) \
+                   FROM hosted_agent_connection hc \
+                   JOIN token t ON t.workspace_id = hc.workspace_id \
+                                AND t.id = hc.active_token_id \
+                  WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id \
+                    AND hc.status = 'active' AND hc.proved_at IS NOT NULL \
+                    AND t.kind = 'agent_bearer' \
+                    AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
+                    AND t.revoked_at IS NULL \
+                    AND (t.expires_at IS NULL OR t.expires_at > now()) \
+                    AND t.hosted_connection_id = hc.id \
+                    AND t.actor_member_id = hc.agent_member_id \
+                    AND t.audience = '/v1/mcp/agent-port' \
+                  ORDER BY hc.id LIMIT 1), false) AS hosted_recently_seen, \
+                EXISTS (SELECT 1 FROM hosted_agent_connection hc \
+                  WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id \
+                    AND hc.status IN ('pairing_pending','detected')) AS hosted_reconnectable \
            FROM member m \
            JOIN agent a ON a.member_id = m.id AND a.workspace_id = m.workspace_id \
            JOIN workspace w ON w.id = m.workspace_id \
@@ -208,6 +233,7 @@ pub async fn load_mention_candidates_in_tx(
     )
     .bind(workspace_id)
     .bind(channel_id)
+    .bind(crate::subscription::SUBSCRIPTION_AGENT_ONLINE_WINDOW_SECONDS as f64)
     .fetch_all(&mut *conn)
     .await?;
 
@@ -266,9 +292,38 @@ pub async fn load_mention_candidates_in_tx(
                 .try_get("hosted_channel_approved")
                 .map_err(DbError::from)?,
             is_channel_member: row.try_get("is_channel_member").map_err(DbError::from)?,
+            owner_only: owner_only_scope(row)?,
         });
     }
     Ok(candidates)
+}
+
+/// The candidate's `owner_only` facts, or `None` for a workspace agent.
+///
+/// Migration 089's CHECK guarantees an `owner_only` row carries both an owner
+/// and a harness; a row that somehow did not would be read as `owner_only`
+/// with the owner unknown — which refuses everyone, the fail-closed side.
+fn owner_only_scope(
+    row: &sqlx::postgres::PgRow,
+) -> Result<Option<crate::subscription::OwnerOnlyScope>, DbError> {
+    let scope: String = row.try_get("invocation_scope").map_err(DbError::from)?;
+    if scope != crate::subscription::INVOCATION_SCOPE_OWNER_ONLY {
+        return Ok(None);
+    }
+    let owner: Option<Uuid> = row.try_get("owner_human_id").map_err(DbError::from)?;
+    let harness: Option<String> = row.try_get("subscription_harness").map_err(DbError::from)?;
+    let owner_display_name: Option<String> =
+        row.try_get("owner_display_name").map_err(DbError::from)?;
+    Ok(Some(crate::subscription::OwnerOnlyScope {
+        owner_member_id: owner.unwrap_or_else(Uuid::nil),
+        owner_display_name: owner_display_name.unwrap_or_default(),
+        harness: harness
+            .as_deref()
+            .and_then(crate::subscription::SubscriptionHarness::parse)
+            .unwrap_or(crate::subscription::SubscriptionHarness::ClaudeCode),
+        recently_seen: row.try_get("hosted_recently_seen").map_err(DbError::from)?,
+        reconnectable: row.try_get("hosted_reconnectable").map_err(DbError::from)?,
+    }))
 }
 
 /// Swift `MessageRoutes.effectiveSystemPrompt` (:1681-1702).
@@ -817,6 +872,7 @@ mod tests {
             hosted_active_connection_id: None,
             hosted_channel_approved: false,
             is_channel_member: true,
+            owner_only: None,
         }
     }
 

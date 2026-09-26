@@ -483,6 +483,7 @@ pub async fn complete(
         usage_detail,
         actor_member_id,
         via_token_id,
+        subscription_agents_enabled: state.agent_port.config.subscription_agents_enabled,
     };
 
     let outcome = settle_db(
@@ -525,6 +526,9 @@ pub(crate) struct GatewayCompleteInput {
     pub usage_detail: Option<Value>,
     pub actor_member_id: Option<Uuid>,
     pub via_token_id: Option<Uuid>,
+    /// ADR-0193 D6 (#2815) — `AgentPortConfig::subscription_agents_enabled`,
+    /// for the hosted-inbox fan-out of the answer this completion writes.
+    pub subscription_agents_enabled: bool,
 }
 
 /// **The** gateway completion transaction — four writes, one transaction, two
@@ -551,6 +555,7 @@ pub(crate) async fn complete_gateway_run_in_tx(
         usage_detail,
         actor_member_id,
         via_token_id,
+        subscription_agents_enabled,
     } = input;
     let body_text = timeline_body(body.as_deref(), succeeded, safe_error.as_deref());
     let Some(run) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await? else {
@@ -657,6 +662,7 @@ pub(crate) async fn complete_gateway_run_in_tx(
         run.channel_id,
         message.message.id,
         run.agent_member_id,
+        subscription_agents_enabled,
     )
     .await?;
 
