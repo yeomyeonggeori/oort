@@ -454,6 +454,23 @@ describe('에이전트 카드 — 단계 표지(완료·진행·실패)는 있�
     expect(screen.getByText(/github\.search 실행/)).toBeTruthy();
   });
 
+  it('짧은 값이 단계 문장에 우연히 들어 있어도 다른 줄을 지우지 않는다 (R2 L-8)', () => {
+    render(
+      <MessageRow
+        message={{
+          ...toolMessage('succeeded'),
+          props: {tool_name: 'github.search', label: 'push 중복', status: 'succeeded', decision_reason: 'push'},
+        } as Message}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={1_760_000_000_000}
+      />,
+    );
+    // 「push」는 단계 문장 「… push 중복」의 부분이지만 대상과 같지 않다 — 남는다.
+    expect(screen.getByText('push')).toBeTruthy();
+  });
+
   it('카드 틀은 1.5 그라데이션 테두리 + r20 (시안 `.a-card`)', () => {
     render(
       <MessageRow

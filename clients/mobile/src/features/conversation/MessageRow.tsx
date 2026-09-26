@@ -1687,11 +1687,15 @@ function AgentCard({
   // 도구 카드의 단계 줄이 이미 말한 값(도구 이름·대상)은 아래 줄에서 다시 세우지
   // 않는다(DS2-4 검수 M-6). 단계 줄에 없는 값만 남는다 — 버리는 것이 아니라 중복을
   // 걷는다. 턴 카드는 그대로다.
-  const stepLine = card.kind === 'tool' ? frameSentence(card.frame) : null;
+  // 비교는 **같음**이다(부분 문자열이 아니다 — 검수 R2 L-8): 짧은 값이 단계 문장에
+  // 우연히 들어 있다고 다른 정보의 줄을 지우지 않는다.
+  const frame = card.kind === 'tool' ? card.frame : null;
   const detailRows =
-    stepLine === null
+    frame === null
       ? card.detail.rows
-      : card.detail.rows.filter(row => !stepLine.includes(row.value));
+      : card.detail.rows.filter(
+          row => row.value !== frame.object && `${row.value} 실행` !== frame.verb,
+        );
   return (
     <AgentCardFrame testID="agent-card">
       {card.kind === 'tool' ? (
