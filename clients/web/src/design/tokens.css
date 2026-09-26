@@ -349,6 +349,13 @@
   --spacing-icon-button: 34px;
   --spacing-card: 14px;
 
+  /* 첫 대화 채널의 코메토 띠 (#2818, ADR-0193 D7). 값은 온보딩 2.0 시안 D5
+   * `.kband`에서 그대로 옮겼다: 코메토 52, 띠 버튼 높이 34. 온보딩 머리(72)·
+   * 히어로(280)와 다른 자리라 따로 이름을 준다. 34는 --spacing-icon-button과
+   * 값만 같고 뜻이 다르다(아이콘 원형 버튼이 아니라 글자 버튼의 높이). */
+  --spacing-kometto-band: 52px;
+  --spacing-band-action: 34px;
+
   /* 인박스 리마인더 행의 ⋯ 그릇 (#1888 B-2).
    *
    * 그릇은 tap-target(44, 600px 미만) + p-px×2 + border 1px×2 = 48. 행은
@@ -1736,6 +1743,36 @@
  * 1px 선 고리 · 흰 면. 시안은 타임라인 위에 절대 위치로 얹지만 여기서는 흐름
  * 안에 선다(PR 차이 표: 높이가 트레이·라우팅 줄·줄바꿈으로 바뀌고, 타임라인의
  * 바닥 고정과 「최신으로」가 그 높이를 알아야 한다). 폰 폭에서는 예전 그릇이다. */
+/* 첫 대화 채널의 코메토 띠 (#2818). 좌우는 컴포저 카드와 같은 선에 선다:
+ * 폰 16, 600 이상 24(composer-dock의 form 인셋). 컴포저와의 틈은 시안 D5
+ * `.composer` 위 12다(600 이상은 form 위 8 + 여기 4). */
+@utility kometto-band {
+  margin-inline: var(--spacing-4);
+  margin-block-end: var(--spacing-2);
+
+  @media (width >= 600px) {
+    margin-inline: var(--spacing-6);
+    margin-block-end: var(--spacing-1);
+  }
+}
+
+/* 띠 안에서 열린 기기 연결 카드는 600 이상에서 문장과 같은 선(코메토 52 +
+ * 틈 12)에 선다. 폰 폭에서는 QR 칸을 줄이지 않으려고 들여쓰지 않는다. */
+@utility kometto-band-body {
+  @media (width >= 600px) {
+    padding-inline-start: calc(var(--spacing-kometto-band) + var(--spacing-3));
+  }
+}
+
+/* 폰 폭에서는 띠의 버튼 묶음이 문장 아래 줄로 내려간다. 문장을 두세 줄로
+ * 쪼개지 않기 위해서다. 들여쓰기는 코메토 52 + 틈 12로 문장과 같은 선이다. */
+@utility kometto-band-actions {
+  @media (width < 600px) {
+    flex-basis: 100%;
+    padding-inline-start: calc(var(--spacing-kometto-band) + var(--spacing-3));
+  }
+}
+
 @utility composer-dock {
   border-block-start: 1px solid var(--line);
 
@@ -3622,6 +3659,146 @@
   .kometto-face-layer[data-phase="leaving"] {
     display: none;
   }
+}
+
+/* =============================================================================
+ * 로그인 전 온보딩 2.0 화면 (ADR-0193 D7·D11, #2808 D0 · #2809 D1 · #2810 D1′).
+ *
+ * 값은 시안 `claudedocs/onboarding-2.0/mockups.html`의 CSS를 옮겼다.
+ *   D0     `.d0`       1fr 440 두 칸, 간격 64, 최대 1000. 좁으면 한 칸으로 쌓는다
+ *   히어로 `.hero-k`   280(D11 데스크탑). 좁은 창은 200(D11 폰 크기)
+ *   워드   `.wordmark` 40 / 800 / -0.045em
+ *   칸     `.field`    라벨 13/600 잉크 흐림, 간격 6
+ *   칩     `.chip`     28 알약, surface-muted, 간격 6
+ *   줄     `.svr`      glass, 12 10 12 12 → 반경은 사다리의 lg 14, 초록 점 8
+ *   구분   `.divider`  선 1 · 글 12.5 → text-meta
+ * 글자 크기는 닫힌 사다리를 쓴다(시안 13·12.5 → text-meta 12, PR 「시안과의 차이」).
+ * ========================================================================== */
+
+.onboarding-welcome {
+  display: grid;
+  grid-template-columns: 1fr var(--spacing-onboarding-col);
+  gap: 64px;
+  align-items: center;
+  inline-size: 100%;
+  max-inline-size: 1000px;
+  padding-block-end: var(--spacing-4);
+}
+
+.onboarding-welcome-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-3);
+  text-align: center;
+}
+
+.onboarding-welcome-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-inline-size: 0;
+}
+
+.onboarding-welcome-wordmark {
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  line-height: 1;
+  color: var(--ink);
+}
+
+@media (max-width: 899px) {
+  .onboarding-welcome {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--spacing-6);
+    max-inline-size: var(--spacing-onboarding-col);
+  }
+
+  .onboarding-welcome .kometto-face[data-size="hero"] {
+    inline-size: 200px;
+    block-size: 200px;
+  }
+}
+
+.onboarding-field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.onboarding-field-label {
+  font-size: var(--text-meta);
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.onboarding-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  min-block-size: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background-color: var(--surface-muted);
+  color: var(--ink-muted);
+  font-size: var(--text-meta);
+}
+
+.onboarding-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink-muted);
+  font-size: var(--text-meta);
+}
+
+.onboarding-divider::before,
+.onboarding-divider::after {
+  content: "";
+  flex: 1;
+  block-size: 1px;
+  background-color: var(--line);
+}
+
+/* 유리는 `glass` 유틸이 진다(web taste §2). 여기는 줄의 기하만. */
+.onboarding-server-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  padding: 10px var(--spacing-3);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elevation-rest);
+}
+
+.onboarding-server-dot {
+  flex: none;
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background-color: var(--ok);
+}
+
+/* 줄 안의 [여기로]: 시안 `.btn.sec` 34 높이, 테두리. 온보딩 틀의 보조 행동 문법이다.
+ * 레이어 밖 규칙이 유틸의 hover를 이기므로 hover도 여기서 준다. */
+.onboarding-action-sm {
+  flex: none;
+  min-block-size: 34px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-strong);
+  background-color: transparent;
+}
+
+.onboarding-action-sm:hover {
+  background-color: var(--surface-hover);
+}
+
+/* 가입 뒤(이름 저장 실패) 잠긴 이메일·비밀번호 칸은 잠긴 것으로 보인다. */
+.onboarding-field:read-only {
+  background-color: var(--surface-muted);
+  color: var(--ink-muted);
 }
 
 @layer base {

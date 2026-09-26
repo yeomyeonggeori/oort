@@ -6,10 +6,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import type { LoginResponse } from "@momo/core/lib/api";
 import { applyLogin, clearSession } from "@/lib/session";
 import {
-  dismissPhoneLinkFirstRun,
-  markPhoneLinkFirstRunPending,
-  PHONE_LINK_FIRST_RUN_KEY,
-} from "@/features/auth/phoneLinkFirstRunStore";
+  clearPhoneLinkCardForTests,
+  markPhoneLinkCardPending,
+  readPhoneLinkCard,
+} from "@/features/welcome/phoneLinkCardStore";
 
 const restoreSession = vi.hoisted(() => vi.fn());
 
@@ -63,6 +63,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   sessionStorage.clear();
+  clearPhoneLinkCardForTests(session.member.workspaceId);
   clearSession();
   restoreSession.mockReset();
   restoreSession.mockResolvedValue(session);
@@ -86,6 +87,7 @@ afterEach(() => {
   mountedHost?.remove();
   mountedHost = null;
   sessionStorage.clear();
+  clearPhoneLinkCardForTests(session.member.workspaceId);
   clearSession();
   vi.unstubAllGlobals();
 });
@@ -107,58 +109,21 @@ async function mountApp(): Promise<HTMLElement> {
   return host;
 }
 
-function filledAccentButtons(root: ParentNode): HTMLButtonElement[] {
-  return [...root.querySelectorAll("button")].filter((button) => {
-    const cls = button.className;
-    return /\bbg-accent\b/.test(cls) && /\btext-on-accent\b/.test(cls);
-  });
-}
-
-describe("App post-login phone-link first-run (B2)", () => {
-  it("renders the first-run card after join with the session store applied", async () => {
+// =============================================================================
+// #2818 (ADR-0193 D7): 폰 연결은 로그인 뒤 전체 화면 단계가 아니다.
+// 예전 App 은 phone pending 이면 `PhoneLinkFirstRun`(onboarding-phone-link)을
+// 세워 셸을 막았다. 이제는 셸이 곧장 서고, pending 은 첫 대화 채널 카드가
+// 읽도록 저장소에 그대로 남는다.
+// =============================================================================
+describe("App: 폰 연결은 게이트 단계가 아니다 (#2818)", () => {
+  it("폰 카드가 pending 이어도 로그인 뒤 셸이 곧장 선다", async () => {
     applyLogin(session);
-    markPhoneLinkFirstRunPending();
-    const host = await mountApp();
-    const card = host.querySelector('[data-testid="onboarding-phone-link"]');
-    expect(card).not.toBeNull();
-    expect(card?.textContent).toContain("폰에서도 쓰기");
-    expect(host.querySelector('[data-testid="onboarding-step-chrome"]')).not.toBeNull();
-    expect(card?.className).toMatch(/\bmax-w-sm\b/);
-    expect(card?.className).not.toMatch(/max-w-2xl/);
-    expect(host.querySelector('[data-testid="onboarding-progress"]')).toBeNull();
-    expect(filledAccentButtons(card as ParentNode).length).toBeLessThanOrEqual(1);
-  });
-
-  it("does not bring the card back after dismiss and remount", async () => {
-    applyLogin(session);
-    markPhoneLinkFirstRunPending();
-    const host = await mountApp();
-    expect(host.querySelector('[data-testid="onboarding-phone-link"]')).not.toBeNull();
-
-    await act(async () => {
-      host.querySelector<HTMLButtonElement>(
-        '[data-testid="onboarding-enter-app"]'
-      )?.click();
-    });
-    expect(host.querySelector('[data-testid="onboarding-phone-link"]')).toBeNull();
-    expect(sessionStorage.getItem(PHONE_LINK_FIRST_RUN_KEY)).toBe("done");
-
-    act(() => mountedRoot?.unmount());
-    mountedRoot = null;
-    mountedHost?.remove();
-    mountedHost = null;
-
-    applyLogin(session);
-    const remounted = await mountApp();
-    expect(remounted.querySelector('[data-testid="onboarding-phone-link"]')).toBeNull();
-    expect(remounted.querySelector('[data-testid="channel-list"]')).not.toBeNull();
-  });
-
-  it("skips the card on a login restore that was never marked pending", async () => {
-    applyLogin(session);
-    dismissPhoneLinkFirstRun();
+    markPhoneLinkCardPending(session.member.workspaceId);
     const host = await mountApp();
     expect(host.querySelector('[data-testid="onboarding-phone-link"]')).toBeNull();
+    expect(host.querySelector('[data-testid="onboarding-step-chrome"]')).toBeNull();
     expect(host.querySelector('[data-testid="channel-list"]')).not.toBeNull();
+    // 셸이 섰다고 카드 상태를 지우지 않는다. 카드는 채널이 그린다.
+    expect(readPhoneLinkCard(session.member.workspaceId)).toBe("pending");
   });
 });

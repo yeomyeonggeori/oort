@@ -445,25 +445,24 @@ const LOGIN_TAP_TARGETS = [
   ["onboarding-back", "뒤로"],
   ["login-email", "이메일 입력"],
   ["login-password", "비밀번호 입력"],
-  ["login-submit", "로그인 버튼"],
+  ["login-submit", "들어가기 버튼"],
 ];
 
-const LANDING_TAP_TARGETS = [
-  ["onboarding-choose-server", "우리 팀 서버로 접속"],
-  ["onboarding-choose-invite", "초대 링크로 참여"],
+// D0 환영 (#2808): 한 칸 + [계속] + 작은 링크 하나.
+const WELCOME_TAP_TARGETS = [
+  ["connect-entry", "팀 주소나 초대 링크 입력"],
+  ["connect-entry-submit", "계속"],
+  ["connect-self-host-toggle", "처음 설치했어요"],
+  ["connect-recent-server-go", "최근 서버 여기로", "optional"],
 ];
 
-const GATEWAY_TAP_TARGETS = [
+// D1′ 초대 수락 (#2810): 이메일 · 새 비밀번호 · 표시 이름 + 주 행동 한 화면.
+const JOIN_TAP_TARGETS = [
   ["onboarding-back", "뒤로"],
-  ["login-server", "서버 주소 입력"],
-  ["onboarding-next", "다음"],
-  ["connect-recent-server", "최근 접속", "optional"],
-];
-
-const PROFILE_TAP_TARGETS = [
+  ["login-email", "이메일 입력"],
+  ["login-password", "비밀번호 입력"],
   ["onboarding-profile-name", "표시 이름 입력"],
-  ["onboarding-profile-submit", "표시 이름 저장"],
-  ["onboarding-profile-skip", "지금은 건너뛰기"],
+  ["login-submit", "팀에 들어가기"],
 ];
 
 // ADR-0134 계약 픽스처. 단위 테스트(routingModel.test.ts)와 라우팅 캡처가 이미
@@ -2405,52 +2404,6 @@ async function assertOnboardingCardCentered(page, where, testId) {
   );
 }
 
-async function assertCloudMissesTarget(page, where, testId, label) {
-  const proof = await page.evaluate(`(() => {
-    const target = document.querySelector('[data-testid="${testId}"]');
-    if (!target) return { missing: true, hits: [] };
-    const b = target.getBoundingClientRect();
-    const hits = [];
-    for (const el of document.querySelectorAll("[data-onboarding-body]")) {
-      const r = el.getBoundingClientRect();
-      const overlap = !(
-        r.right < b.left ||
-        r.left > b.right ||
-        r.bottom < b.top ||
-        r.top > b.bottom
-      );
-      if (overlap) {
-        hits.push({
-          body: el.getAttribute("data-onboarding-body"),
-          left: Math.round(r.left),
-          top: Math.round(r.top),
-          right: Math.round(r.right),
-          bottom: Math.round(r.bottom),
-        });
-      }
-    }
-    return { missing: false, hits };
-  })()`);
-  if (proof.missing) {
-    throw new Error(`S0 ${label} ${where}: ${testId} 없음`);
-  }
-  if (proof.hits.length !== 0) {
-    throw new Error(
-      `S0 ${label} ${where}: hits=${proof.hits.length} ` + JSON.stringify(proof)
-    );
-  }
-  console.log(`  S0 ${label} ${where}: hits 0`);
-}
-
-async function assertCloudMissesCta(page, where) {
-  await assertCloudMissesTarget(page, where, "onboarding-choose-invite", "CTA invite");
-  await assertCloudMissesTarget(page, where, "onboarding-choose-server", "CTA server");
-}
-
-async function assertCloudMissesLockup(page, where) {
-  await assertCloudMissesTarget(page, where, "onboarding-lockup", "lockup");
-}
-
 async function signIn(page) {
   // 위의 refresh 스텁이 세션을 **살려 두게** 되면서 되살아난 전제 하나: 이 컨텍스트의
   // 페이지 14장이 localStorage 를 공유하므로, 두 번째 페이지부터는 이미 로그인된
@@ -2469,42 +2422,36 @@ async function signIn(page) {
 }
 
 /**
- * S0 → S1 → S2. Capture photographs S0 (new surface) plus the split connect
- * cards. Tap-target lists are mobile-only; desktop still asserts overflow.
+ * D0 → D1 (ADR-0193 D7, #2808·#2809). D0은 빈 칸 [계속]이 「이 페이지의 서버」다.
+ * 탭 대상 목록은 폰 폭에서만, 가로 넘침은 모든 폭에서 잰다.
  */
 async function assertOnboardingIgnoresAccent(page, where) {
-  const readLanding = () =>
+  const read = () =>
     page.evaluate(() => {
-      const landing = document.querySelector('[data-testid="onboarding-landing"]');
-      const cta = document.querySelector('[data-testid="onboarding-choose-server"]');
-      if (!landing || !cta) return null;
-      const landingStyle = getComputedStyle(landing);
-      const ctaStyle = getComputedStyle(cta);
+      const frame = document.querySelector('[data-testid="onboarding-frame"]');
+      const cta = document.querySelector('[data-testid="connect-entry-submit"]');
+      if (!frame || !cta) return null;
       return {
-        space: landingStyle.backgroundColor,
-        ink: landingStyle.color,
-        onboardingAccent: landingStyle.getPropertyValue("--onboarding-accent").trim(),
-        ctaBg: ctaStyle.backgroundColor,
+        canvas: getComputedStyle(frame).backgroundImage,
+        ink: getComputedStyle(frame).color,
+        ctaBg: getComputedStyle(cta).backgroundColor,
       };
     });
-  const before = await readLanding();
-  if (!before?.onboardingAccent) {
-    throw new Error(`S0 격리 ${where}: 랜딩 토큰을 읽지 못했다`);
-  }
+  const before = await read();
+  if (!before) throw new Error(`D0 격리 ${where}: 바닥·행동을 읽지 못했다`);
   const other = accentCatalogIds().find((id) => id !== "dawn") ?? "seongun";
   await page.evaluate((id) => {
     document.documentElement.setAttribute("data-accent", id);
   }, other);
-  const after = await readLanding();
+  const after = await read();
   if (
     !after ||
-    after.space !== before.space ||
+    after.canvas !== before.canvas ||
     after.ink !== before.ink ||
-    after.onboardingAccent !== before.onboardingAccent ||
     after.ctaBg !== before.ctaBg
   ) {
     throw new Error(
-      `S0 격리 ${where}: data-accent=${other} 가 랜딩을 바꿨다 ` +
+      `D0 격리 ${where}: data-accent=${other} 가 바닥이나 주 행동을 바꿨다 ` +
         `${JSON.stringify({ before, after })}`
     );
   }
@@ -2513,171 +2460,132 @@ async function assertOnboardingIgnoresAccent(page, where) {
   });
 }
 
+async function readStepChrome(page) {
+  return page.evaluate(`(() => {
+    const row = document.querySelector('[data-testid="onboarding-step-chrome"]');
+    const back = document.querySelector('[data-testid="onboarding-back"]');
+    const dots = document.querySelector('[data-testid="onboarding-dots"]');
+    return {
+      hasBack: Boolean(back),
+      rowHasBack: Boolean(row && back && row.contains(back)),
+      rowHasDots: Boolean(row && dots && row.contains(dots)),
+      dotsLabel: document.querySelector('[data-testid="onboarding-dots-label"]')?.textContent ?? null,
+      underline: back ? getComputedStyle(back).textDecorationLine : null,
+      backLabel: back?.textContent?.replace(/\\s+/g, " ").trim() ?? null,
+      counter: /\\d\\/\\d/.test(document.body.textContent ?? ""),
+    };
+  })()`);
+}
+
 async function walkOnboardingToAccount(page, where, { tapTargets = false, shoot } = {}) {
-  await page.getByTestId("onboarding-landing").waitFor({ state: "visible" });
+  await page.getByTestId("onboarding-welcome").waitFor({ state: "visible" });
   await assertOnboardingIgnoresAccent(page, where);
-  const scatter = await page.locator("[data-onboarding-body]").count();
-  if (scatter !== 30) {
-    throw new Error(`S0 산포 ${where}: ${scatter}개체 (기대 30)`);
-  }
-  await assertCloudMissesCta(page, where);
-  await assertCloudMissesLockup(page, where);
   const wordmark = await page.getByTestId("onboarding-wordmark").textContent();
   if (wordmark?.trim() !== "oort") {
-    throw new Error(`S0 워드마크 ${where}: ${JSON.stringify(wordmark)}`);
+    throw new Error(`D0 워드마크 ${where}: ${JSON.stringify(wordmark)}`);
   }
   const tagline = await page.getByTestId("onboarding-tagline").textContent();
   if (tagline?.trim() !== "사람과 에이전트가 같은 자리에서 일하는 메신저.") {
-    throw new Error(`S0 카피 ${where}: ${JSON.stringify(tagline)}`);
+    throw new Error(`D0 카피 ${where}: ${JSON.stringify(tagline)}`);
   }
-  const lockupMetrics = await page.evaluate(`(() => {
-    const mark = document.querySelector('[data-testid="onboarding-mark"]');
-    const word = document.querySelector('[data-testid="onboarding-wordmark"]');
-    const copy = document.querySelector('[data-testid="onboarding-tagline"]');
-    const markBox = mark.getBoundingClientRect();
-    const copyBox = copy.getBoundingClientRect();
-    const wordSize = parseFloat(getComputedStyle(word).fontSize);
-    const copySize = parseFloat(getComputedStyle(copy).fontSize);
-    const copyLh = parseFloat(getComputedStyle(copy).lineHeight);
+  const d0 = await page.evaluate(`(() => {
+    const face = document.querySelector('[data-testid="kometto-face"]');
+    const box = face?.getBoundingClientRect();
     return {
-      mark: Math.round(markBox.height),
-      wordFont: Math.round(wordSize * 10) / 10,
-      copyFont: Math.round(copySize * 10) / 10,
-      copyHeight: Math.round(copyBox.height),
-      copyLh: Math.round(copyLh * 10) / 10,
-      copyWidth: Math.round(copyBox.width),
+      face: box ? Math.round(box.width) : null,
+      dots: Boolean(document.querySelector('[data-testid="onboarding-dots"]')),
+      back: Boolean(document.querySelector('[data-testid="onboarding-back"]')),
+      focus: document.activeElement?.getAttribute("data-testid") ?? null,
+      line: document.querySelector('[data-testid="kometto-guide-line"]')?.textContent ?? null,
+      wide: window.innerWidth >= 900,
     };
   })()`);
-  const wordRatio = lockupMetrics.wordFont / lockupMetrics.mark;
-  if (wordRatio < 0.24 || wordRatio > 0.36) {
-    throw new Error(
-      `S0 워드마크 위계 ${where}: ${lockupMetrics.wordFont}px / mark ${lockupMetrics.mark}px = ${wordRatio.toFixed(3)} (기대 1/4–1/3)`
-    );
+  const faceWant = d0.wide ? 280 : 200;
+  if (d0.face !== faceWant) {
+    throw new Error(`D0 히어로 ${where}: ${d0.face}px (기대 ${faceWant})`);
   }
-  if (lockupMetrics.wordFont <= lockupMetrics.copyFont + 4) {
-    throw new Error(
-      `S0 워드마크가 카피와 같은 단 ${where}: word ${lockupMetrics.wordFont}px copy ${lockupMetrics.copyFont}px`
-    );
+  if (d0.dots || d0.back) {
+    throw new Error(`D0 크롬 ${where}: 점·뒤로가 없어야 한다 ${JSON.stringify(d0)}`);
   }
-  if (lockupMetrics.copyHeight > lockupMetrics.copyLh + 1) {
-    throw new Error(
-      `S0 카피 2줄 ${where}: h=${lockupMetrics.copyHeight} lh=${lockupMetrics.copyLh} w=${lockupMetrics.copyWidth}`
-    );
+  if (d0.focus !== "connect-entry") {
+    throw new Error(`D0 포커스 ${where}: ${d0.focus}`);
   }
-  console.log(
-    `  S0 lockup ${where}: mark ${lockupMetrics.mark}px · wordmark ${lockupMetrics.wordFont}px · copy ${lockupMetrics.copyFont}px ${lockupMetrics.copyWidth}×${lockupMetrics.copyHeight}`
-  );
-  await page.getByTestId("onboarding-choose-server").focus();
-  const landingFocus = await page.evaluate(
-    `document.activeElement?.getAttribute("data-testid")`
-  );
-  if (landingFocus !== "onboarding-choose-server") {
-    throw new Error(`S0 포커스 ${where}: ${landingFocus}`);
+  if (d0.line !== "안녕하세요, 저는 코메토예요. 어디로 갈까요?") {
+    throw new Error(`D0 말풍선 ${where}: ${JSON.stringify(d0.line)}`);
   }
-  const fill = await page.evaluate(`(() => {
-    const el = document.querySelector('[data-testid="onboarding-landing"]');
-    const r = el.getBoundingClientRect();
-    return {
-      top: Math.round(r.top),
-      bottom: Math.round(r.bottom),
-      viewport: window.innerHeight,
-    };
-  })()`);
-  if (fill.bottom < fill.viewport - 1) {
-    throw new Error(
-      `S0 높이 ${where}: 랜딩 아랫변 ${fill.bottom}px / 뷰포트 ${fill.viewport}px (top ${fill.top})`
-    );
-  }
-  await assertNoHorizontalOverflow(page, `landing ${where}`);
+  await assertNoHorizontalOverflow(page, `welcome ${where}`);
   if (tapTargets) {
-    await assertTapTargets(page, `landing ${where}`, LANDING_TAP_TARGETS);
+    await assertTapTargets(page, `welcome ${where}`, WELCOME_TAP_TARGETS);
   }
-  if (shoot) await shoot("onboarding-landing");
+  if (shoot) await shoot("onboarding-welcome");
 
-  await sceneClick(page, page.getByTestId("onboarding-choose-server"));
-  await page.getByTestId("onboarding-gateway").waitFor({ state: "visible" });
-  const chrome = await page.evaluate(`(() => {
-    const row = document.querySelector('[data-testid="onboarding-step-chrome"]');
-    const back = document.querySelector('[data-testid="onboarding-back"]');
-    const progress = document.querySelector('[data-testid="onboarding-progress"]');
-    return {
-      row: Boolean(row && back && progress && row.contains(back) && row.contains(progress)),
-      underline: back ? getComputedStyle(back).textDecorationLine : null,
-      backLabel: back?.textContent?.replace(/\\s+/g, " ").trim() ?? null,
-    };
-  })()`);
-  if (!chrome.row) {
-    throw new Error(`S1 크롬 ${where}: 뒤로/카운터가 한 줄이 아님 ${JSON.stringify(chrome)}`);
+  // 문제 상태: 읽을 수 없는 입력 → 당황 코메토 + 합니다체 오류.
+  await page.getByTestId("connect-entry").fill("우리 팀 서버");
+  await sceneClick(page, page.getByTestId("connect-entry-submit"));
+  await page.getByTestId("connect-entry-error").waitFor({ state: "visible" });
+  if (shoot) await shoot("onboarding-welcome-error");
+  await page.getByTestId("connect-entry").fill("");
+
+  await sceneClick(page, page.getByTestId("connect-entry-submit"));
+  await page.getByTestId("onboarding-sign-in").waitFor({ state: "visible" });
+  await page.getByTestId("login-submit").waitFor({ state: "visible" });
+  const chrome = await readStepChrome(page);
+  if (!chrome.rowHasBack || !chrome.rowHasDots) {
+    throw new Error(`D1 크롬 ${where}: 뒤로·점이 한 줄이 아님 ${JSON.stringify(chrome)}`);
+  }
+  if (chrome.dotsLabel !== "1단계 중 1단계" || chrome.counter) {
+    throw new Error(`D1 진행 ${where}: ${JSON.stringify(chrome)}`);
   }
   if (chrome.underline && chrome.underline !== "none") {
-    throw new Error(`S1 크롬 ${where}: 뒤로가 밑줄 ${chrome.underline}`);
+    throw new Error(`D1 크롬 ${where}: 뒤로가 밑줄 ${chrome.underline}`);
   }
   if (chrome.backLabel !== "뒤로") {
-    throw new Error(`S1 크롬 ${where}: 뒤로 레이블 ${JSON.stringify(chrome.backLabel)}`);
+    throw new Error(`D1 크롬 ${where}: 뒤로 레이블 ${JSON.stringify(chrome.backLabel)}`);
   }
-  await assertNoHorizontalOverflow(page, `gateway ${where}`);
-  await assertOnboardingCardCentered(page, `gateway ${where}`, "onboarding-gateway");
-  if (tapTargets) {
-    await assertTapTargets(page, `gateway ${where}`, GATEWAY_TAP_TARGETS);
-  }
-  if (shoot) await shoot("onboarding-gateway");
-
-  await sceneClick(page, page.getByTestId("onboarding-next"));
-  await page.getByTestId("onboarding-account").waitFor({ state: "visible" });
-  await page.getByTestId("login-submit").waitFor({ state: "visible" });
-  await assertOnboardingCardCentered(page, `account ${where}`, "onboarding-account");
+  await assertNoHorizontalOverflow(page, `sign-in ${where}`);
+  await assertOnboardingCardCentered(page, `sign-in ${where}`, "onboarding-sign-in");
+  if (shoot) await shoot("onboarding-sign-in");
 }
 
-async function shootOnboardingProfile(page, where, { tapTargets = false, shoot } = {}) {
-  await page.getByTestId("onboarding-landing").waitFor({ state: "visible" });
-  await sceneClick(page, page.getByTestId("onboarding-choose-invite"));
-  await page.getByTestId("onboarding-gateway").waitFor({ state: "visible" });
-  await page.getByTestId("login-invite-code").fill("momo-alpha-2026");
-  await sceneClick(page, page.getByTestId("onboarding-next"));
-  await page.getByTestId("onboarding-account").waitFor({ state: "visible" });
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
-  await page.getByTestId("login-password").fill("capture-only-not-a-credential");
-  await sceneClick(page, page.getByTestId("login-submit"));
-  await page.getByTestId("onboarding-profile").waitFor({ state: "visible" });
-  const chrome = await page.evaluate(`(() => {
-    const row = document.querySelector('[data-testid="onboarding-step-chrome"]');
-    const back = document.querySelector('[data-testid="onboarding-back"]');
-    const progress = document.querySelector('[data-testid="onboarding-progress"]');
-    return {
-      hasBack: Boolean(back),
-      progress: progress?.textContent ?? null,
-      rowHasProgress: Boolean(row && progress && row.contains(progress)),
-    };
-  })()`);
-  if (chrome.hasBack) {
-    throw new Error(`S3 크롬 ${where}: 뒤로가 있다`);
+async function shootOnboardingJoin(page, where, { tapTargets = false, shoot } = {}) {
+  const deepLink = `oort://join?server=${encodeURIComponent(ORIGIN)}&code=momo-alpha-2026`;
+  await page.goto(`${ORIGIN}/?join=${encodeURIComponent(deepLink)}`, {
+    waitUntil: "networkidle",
+  });
+  await page.getByTestId("onboarding-join").waitFor({ state: "visible" });
+  const chrome = await readStepChrome(page);
+  if (!chrome.hasBack || chrome.dotsLabel !== "2단계 중 1단계" || chrome.counter) {
+    throw new Error(`D1′ 크롬 ${where}: ${JSON.stringify(chrome)}`);
   }
-  if (chrome.progress !== "4/4" || !chrome.rowHasProgress) {
-    throw new Error(`S3 크롬 ${where}: ${JSON.stringify(chrome)}`);
+  const fields = await page.$$eval("input", (nodes) => nodes.length);
+  if (fields !== 3) {
+    throw new Error(`D1′ 칸 ${where}: ${fields}개 (기대 3: 이메일·비밀번호·표시 이름)`);
   }
-  await assertOnboardingCardCentered(page, `profile ${where}`, "onboarding-profile");
-  await assertNoHorizontalOverflow(page, `profile ${where}`);
+  await assertOnboardingCardCentered(page, `join ${where}`, "onboarding-join");
+  await assertNoHorizontalOverflow(page, `join ${where}`);
   if (tapTargets) {
-    await assertTapTargets(page, `profile ${where}`, PROFILE_TAP_TARGETS);
+    await assertTapTargets(page, `join ${where}`, JOIN_TAP_TARGETS);
   }
-  if (shoot) await shoot("onboarding-profile");
+  if (shoot) await shoot("onboarding-join");
   await page.getByTestId("onboarding-profile-name").fill("가".repeat(101));
   await page.getByTestId("onboarding-profile-name-error").waitFor({
     state: "visible",
   });
-  if (shoot) await shoot("onboarding-profile-field-error");
+  if (shoot) await shoot("onboarding-join-field-error");
   await page.route("**/v1/workspaces/*/members/me", (route) => {
     if (route.request().method() === "PATCH") {
       return json(route, { error: { message: "engine boom" } }, 500);
     }
     return route.fallback();
   });
-  await page.getByTestId("onboarding-profile-name").fill("성재");
-  await sceneClick(page, page.getByTestId("onboarding-profile-submit"));
+  await page.getByTestId("login-email").fill("jiwoo@dawn.example");
+  await page.getByTestId("login-password").fill("capture-only-not-a-credential");
+  await page.getByTestId("onboarding-profile-name").fill("박지우");
+  await sceneClick(page, page.getByTestId("login-submit"));
   await page.getByTestId("onboarding-profile-banner").waitFor({
     state: "visible",
   });
-  if (shoot) await shoot("onboarding-profile-banner");
+  if (shoot) await shoot("onboarding-join-name-failed");
 }
 
 function isPresencePut(request) {
@@ -6638,7 +6546,7 @@ async function captureMobile(browser, scheme) {
   };
 
   // 1. 연결 화면. 셸 밖의 유일한 표면이고, 폰에서 문서가 스크롤해도 되는 자리다.
-  //    BZ-6a: 첫 페인트는 S0. S1/S2를 찍은 뒤 기존 login 프레임은 계정 스텝이다.
+  //    첫 페인트는 D0(#2808). D0·D1을 찍은 뒤 login 프레임은 D1이다.
   const page = await context.newPage();
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
   await walkOnboardingToAccount(page, `login ${scheme}`, {
@@ -6652,13 +6560,12 @@ async function captureMobile(browser, scheme) {
   await assertTapTargets(page, `login ${scheme}`, LOGIN_TAP_TARGETS);
   await shoot(page, "login");
 
-  const profilePage = await context.newPage();
-  await profilePage.goto(ORIGIN, { waitUntil: "networkidle" });
-  await shootOnboardingProfile(profilePage, `profile ${scheme}`, {
+  const joinPage = await context.newPage();
+  await shootOnboardingJoin(joinPage, `join ${scheme}`, {
     tapTargets: true,
-    shoot: (name) => shoot(profilePage, name),
+    shoot: (name) => shoot(joinPage, name),
   });
-  await profilePage.close();
+  await joinPage.close();
 
   // 2. 채널. 사이드바는 열이 아니라 닫힌 서랍이므로 타임라인이 390px 전부를
   //    받고, 컴포저는 안전 영역 위에 도크된다.
@@ -7119,8 +7026,7 @@ async function captureScheme(browser, scheme) {
   await installMocks(context);
   const shots = [];
 
-  // 1. login surface: BZ-6a S0 landing, then S1 gateway, then S2 account
-  //    (Card / Input / Button / runtime badge tokens).
+  // 1. login surface: D0 환영, then D1 로그인 한 화면 (ADR-0193 D7).
   const login = await context.newPage();
   await login.goto(ORIGIN, { waitUntil: "networkidle" });
   await walkOnboardingToAccount(login, scheme, {
@@ -7154,33 +7060,18 @@ async function captureScheme(browser, scheme) {
   shots.push(workspaceShot);
   await sceneClick(login, login.getByTestId("login-workspace-toggle"));
 
-  // 1b. connect surface, invite path (MOMO-604): the browser fallback for a
-  //     oort://join link fills server and code, so only email/password remain.
-  //     The LAN discovery card has no web equivalent (no mDNS in a page), so it
-  //     is reviewed in the desktop shell, not here.
+  // 1b. D1′ 초대 수락 (#2810): 링크가 서버·코드를 채우고, 이메일·새 비밀번호·
+  //     표시 이름을 한 화면에서 받는다. LAN 발견 줄은 웹에 없다(페이지에 mDNS가
+  //     없다). 그것은 데스크탑 셸에서 본다.
   const invite = await context.newPage();
-  const deepLink = `oort://join?server=${encodeURIComponent(
-    ORIGIN
-  )}&code=momo-alpha-2026`;
-  await invite.goto(`${ORIGIN}/?join=${encodeURIComponent(deepLink)}`, {
-    waitUntil: "networkidle",
-  });
-  await invite.getByTestId("login-invite-code").waitFor({ state: "visible" });
-  const inviteShot = beginSceneFromShotPath(`${OUT_DIR}/connect-invite-${scheme}.png`);
-  await invite.screenshot({ path: inviteShot });
-  shots.push(inviteShot);
-
-  // S3 (UX-R2a). A join that created the member; sign-in on `login` is unchanged.
-  const profile = await context.newPage();
-  await profile.goto(ORIGIN, { waitUntil: "networkidle" });
-  await shootOnboardingProfile(profile, scheme, {
+  await shootOnboardingJoin(invite, scheme, {
     shoot: async (name) => {
       const path = beginSceneFromShotPath(`${OUT_DIR}/${name}-${scheme}.png`);
-      await profile.screenshot({ path });
+      await invite.screenshot({ path });
       shots.push(path);
     },
   });
-  await profile.close();
+  await invite.close();
 
   // 2. chat shell, live path: sidebar + timeline + composer + rail status
   await signIn(login);
@@ -8956,23 +8847,9 @@ async function captureScheme(browser, scheme) {
   await shootDevices(devicesLoopback, "loopback");
   await devicesLoopback.close();
 
-  resetDeviceLinkHarness();
-  const firstRun = await context.newPage();
-  await firstRun.goto(ORIGIN, { waitUntil: "networkidle" });
-  await signIn(firstRun);
-  await firstRun.evaluate(() => {
-    sessionStorage.setItem("momo.web.phoneLinkFirstRun.v1", "pending");
-  });
-  await firstRun.reload({ waitUntil: "networkidle" });
-  await firstRun.getByTestId("onboarding-phone-link").waitFor({
-    state: "visible",
-  });
-  await firstRun.waitForTimeout(250);
-  const firstRunShot = beginSceneFromShotPath(`${OUT_DIR}/onboarding-phone-link-${scheme}.png`);
-  await firstRun.screenshot({ path: firstRunShot });
-  shots.push(firstRunShot);
-  await sceneClick(firstRun, firstRun.getByTestId("onboarding-enter-app"));
-  await firstRun.close();
+  // 로그인 뒤 「폰에서도 쓰기」 전체 화면(onboarding-phone-link)은 #2818
+  // (ADR-0193 D7)에서 첫 대화 채널 카드가 됐다. 그 캡처는
+  // scripts/capture-phone-link-card.mjs 가 찍는다.
 
   // 4. dense timeline via the stress path (no realtime rail, 40 rows)
   const stress = await context.newPage();
