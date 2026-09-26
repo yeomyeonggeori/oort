@@ -76,7 +76,11 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function mount(onDismissed?: () => void, strict = false): HTMLElement {
+function mount(
+  onDismissed?: () => void,
+  strict = false,
+  offline = false
+): HTMLElement {
   if (!host) {
     host = document.createElement("div");
     document.body.append(host);
@@ -84,6 +88,7 @@ function mount(onDismissed?: () => void, strict = false): HTMLElement {
   }
   const card = createElement(PhoneLinkChannelCard, {
     workspaceId: WS,
+    offline,
     ...(onDismissed ? { onDismissed } : {}),
   });
   act(() => {
@@ -283,6 +288,59 @@ describe("PhoneLinkChannelCard", () => {
     expect(readPhoneLinkCard(WS)).toBe("pending");
   });
 
+  it("[QR 만들기]를 누르면 포커스가 body가 아니라 QR 영역으로 간다", async () => {
+    markPhoneLinkCardPending(WS);
+    mount();
+    q("phone-link-card-create")?.focus();
+    click("phone-link-card-create");
+    await flush();
+    expect(document.activeElement).toBe(q("phone-link-card-body"));
+  });
+
+  it("첫 발급이 도는 동안 카드 안에 두 번째 「QR 만들기」가 뜨지 않는다", async () => {
+    markPhoneLinkCardPending(WS);
+    let resolve: (value: unknown) => void = () => undefined;
+    issueDeviceLink.mockReturnValue(new Promise((r) => (resolve = r)));
+    mount();
+    click("phone-link-card-create");
+    await flush();
+    expect(issueDeviceLink).toHaveBeenCalledTimes(1);
+    expect(q("device-link-create")).toBeNull();
+    resolve(deviceLinkFixtureIssue({ expiresAt: NOW + 120_000, sas: null }));
+    await flush();
+    expect(q("device-link-qr")).not.toBeNull();
+  });
+
+  it("발급이 실패하면 카드 안에서 다시 만들 수 있다", async () => {
+    markPhoneLinkCardPending(WS);
+    issueDeviceLink.mockRejectedValue(new Error("boom"));
+    mount();
+    click("phone-link-card-create");
+    await flush();
+    expect(q("device-link-banner")).not.toBeNull();
+    expect(q("device-link-create")).not.toBeNull();
+  });
+
+  it("오프라인이면 발급하지 않고 사유를 말하며, 다시 연결되면 한 번 발급한다", async () => {
+    markPhoneLinkCardPending(WS);
+    mount(undefined, false, true);
+    click("phone-link-card-create");
+    await flush();
+    expect(issueDeviceLink).not.toHaveBeenCalled();
+    expect(q("device-link-offline")).not.toBeNull();
+    mount(undefined, false, false);
+    await flush();
+    expect(issueDeviceLink).toHaveBeenCalledTimes(1);
+  });
+
+  it("띠 바닥은 신호색이 아니다(ADR-0193 D11: 오렌지는 진행 점과 포커스만)", () => {
+    markPhoneLinkCardPending(WS);
+    mount();
+    const cls = q("phone-link-card")?.className ?? "";
+    expect(cls).toContain("bg-surface-muted");
+    expect(cls).not.toMatch(/\bbg-(signal|accent)/);
+  });
+
   it("살아 있는 연결이 있으면 [QR 만들기]가 새로 발급하지 않고 복원한다", async () => {
     markPhoneLinkCardPending(WS);
     writeDeviceLinkLive({
@@ -314,6 +372,8 @@ describe("PhoneLinkChannelCard", () => {
       q("phone-link-card-kometto")?.getAttribute("data-expression")
     ).toBe("happy");
     expect(readPhoneLinkCard(WS)).toBe("dismissed");
+    // 누른 컨트롤이 사라진 자리 대신 [닫기]로 포커스가 온다.
+    expect(document.activeElement).toBe(q("phone-link-card-close"));
     click("phone-link-card-close");
     expect(q("phone-link-card")).toBeNull();
   });

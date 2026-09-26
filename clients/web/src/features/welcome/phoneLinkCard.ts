@@ -11,7 +11,7 @@ export const PHONE_LINK_CARD_COPY = {
   detail: "설정 › 기기에서도 언제든 열 수 있어요.",
   create: "QR 만들기",
   later: "나중에",
-  openTitle: "폰 카메라로 QR을 찍어요.",
+  openTitle: "폰에서 oort를 열고 이 QR을 찍어요.",
   linkedTitle: "폰이 연결됐어요.",
   linkedDetail: "설정 › 기기에서 볼 수 있어요.",
   close: "닫기",

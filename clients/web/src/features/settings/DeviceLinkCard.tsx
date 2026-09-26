@@ -193,12 +193,15 @@ export function DeviceLinkCard({
 
   useEffect(() => {
     if (!autoCreate || autoCreatedRef.current) return;
+    // 오프라인이면 발급을 미룬다(카드는 오프라인 사유를 말한다). 다시 연결되면
+    // 이 effect가 다시 돌아 한 번 발급한다.
+    if (offline) return;
     autoCreatedRef.current = true;
     if (readDeviceLinkLive()) return;
     void create();
-    // 마운트 한 번. create는 매 렌더 새 함수라 의존에 넣으면 다시 발급한다.
+    // create는 매 렌더 새 함수라 의존에 넣으면 다시 발급한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [offline]);
 
   useEffect(() => {
     if (phase !== "pending" || !issued) return;
@@ -445,9 +448,10 @@ export function DeviceLinkCard({
         </div>
       )}
 
-      {/* 채널 카드 안에서는 살아 있는 QR 옆에 두 번째 「QR 만들기」를 두지 않는다.
-          만료·발급 실패(idle)일 때만 다시 만들기가 선다(#2818). */}
-      {(!embedded || filledCreate(phase)) && (
+      {/* 채널 카드 안: 띠의 [QR 만들기]가 이미 발급을 걸었다. 첫 발급이 도는 동안
+          (phase가 아직 idle) 두 번째 버튼을 띄우지 않는다. 만료와 발급 실패
+          (banner)에서만 다시 만들기가 선다. */}
+      {(!embedded || phase === "expired" || (phase === "idle" && !busy && banner !== null)) && (
         <Button
           type="button"
           size="default"

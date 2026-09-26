@@ -1343,6 +1343,7 @@ export function ChatShell() {
         {phoneLinkCardMounted && (
           <PhoneLinkChannelCard
             workspaceId={workspaceId}
+            offline={offline}
             onDismissed={focusComposer}
           />
         )}

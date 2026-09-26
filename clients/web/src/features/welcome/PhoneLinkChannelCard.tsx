@@ -23,7 +23,8 @@ import { PHONE_LINK_CARD_COPY, PHONE_LINK_SETTINGS_HREF } from "./phoneLinkCard"
 // `.kband`(코메토 52 · 띠 반경 14 · 안쪽 8/14/8/8 · 틈 12 · 버튼 34)다.
 //
 // 지속 카드(ADR-0182 ③): 사용자가 치울 때까지 남는다. 시간으로 사라지지 않는다.
-// 도착은 문장 칸의 role="status"로 한 번 읽힌다.
+// 문장 칸은 role="status"다: 대기 → 열림 → 연결됨의 문장 바뀜이 읽힌다. 처음
+// 나타날 때의 낭독은 스크린리더마다 다르다(삽입된 라이브 영역은 흔히 조용하다).
 // =============================================================================
 
 type Face = "idle" | "sleepy" | "happy";
@@ -51,13 +52,16 @@ function BandKometto({ face, small = false }: { face: Face; small?: boolean }) {
   );
 }
 
-const bandActionClass = "h-band-action rounded-md px-3 text-body font-semibold";
+const bandActionClass = "h-band-action px-3 text-body font-semibold";
 
 export function PhoneLinkChannelCard({
   workspaceId,
   onDismissed,
+  offline = false,
 }: {
   workspaceId: string;
+  /** 연결이 끊기면 기기 연결 카드가 발급 대신 오프라인 사유를 말한다. */
+  offline?: boolean;
   /** 마지막 [닫기] 뒤 포커스를 돌려줄 자리(컴포저). */
   onDismissed?: () => void;
 }) {
@@ -71,10 +75,22 @@ export function PhoneLinkChannelCard({
   const settingsLinkRef = useRef<HTMLAnchorElement | null>(null);
   // [나중에]를 누른 버튼이 사라지므로, 포커스를 접힌 줄의 「설정 › 기기」로 옮긴다.
   const focusSettingsRef = useRef(false);
+  // [QR 만들기]·연결 성공도 누른 컨트롤을 치운다. 포커스가 body로 떨어지지 않게
+  // 다음 자리를 정한다: 열리면 QR 영역, 연결되면 [닫기](design-review H2).
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+  const focusNextRef = useRef<"body" | "close" | null>(null);
   useEffect(() => {
-    if (!focusSettingsRef.current || !settingsLinkRef.current) return;
-    focusSettingsRef.current = false;
-    settingsLinkRef.current.focus();
+    if (focusSettingsRef.current && settingsLinkRef.current) {
+      focusSettingsRef.current = false;
+      settingsLinkRef.current.focus();
+    }
+    const next = focusNextRef.current;
+    const target = next === "body" ? bodyRef.current : next === "close" ? closeRef.current : null;
+    if (target) {
+      focusNextRef.current = null;
+      target.focus();
+    }
   });
 
   // 연결 성공은 저장소에 곧바로 dismissed로 쓴다(다시 서지 않는다). 이번 화면
@@ -130,13 +146,16 @@ export function PhoneLinkChannelCard({
     : open
       ? PHONE_LINK_CARD_COPY.openTitle
       : PHONE_LINK_CARD_COPY.title;
+  // 열린 동안에는 재진입 안내를 빼고 QR 카드의 문장에 자리를 준다(design-review M6).
   const detail = linked
     ? PHONE_LINK_CARD_COPY.linkedDetail
-    : PHONE_LINK_CARD_COPY.detail;
+    : open
+      ? null
+      : PHONE_LINK_CARD_COPY.detail;
 
   return (
     <section
-      className="kometto-band flex flex-col gap-3 rounded-lg bg-signal-soft py-2 pl-2 pr-card"
+      className="kometto-band flex flex-col gap-3 rounded-lg bg-surface-muted py-2 pl-2 pr-card"
       aria-label="폰 연결"
       data-testid="phone-link-card"
       data-state={linked ? "linked" : open ? "open" : "idle"}
@@ -145,11 +164,12 @@ export function PhoneLinkChannelCard({
         <BandKometto face={face} />
         <div role="status" className="min-w-0 flex-1 break-keep">
           <p className="text-body font-semibold text-ink">{title}</p>
-          <p className="text-meta text-ink-muted">{detail}</p>
+          {detail && <p className="text-meta text-ink-muted">{detail}</p>}
         </div>
         <div className="kometto-band-actions flex shrink-0 items-center gap-2">
           {linked ? (
             <Button
+              ref={closeRef}
               type="button"
               variant="ghost"
               className={cn(bandActionClass, "text-ink-muted")}
@@ -163,9 +183,11 @@ export function PhoneLinkChannelCard({
               {!open && (
                 <Button
                   type="button"
-                  variant="ghost"
-                  className={cn(bandActionClass, "border border-line-strong text-ink")}
-                  onClick={() => setOpen(true)}
+                  className={bandActionClass}
+                  onClick={() => {
+                    focusNextRef.current = "body";
+                    setOpen(true);
+                  }}
                   data-testid="phone-link-card-create"
                 >
                   {PHONE_LINK_CARD_COPY.create}
@@ -185,11 +207,19 @@ export function PhoneLinkChannelCard({
         </div>
       </div>
       {open && !linked && (
-        <div className="kometto-band-body flex min-w-0 flex-col items-start">
+        <div
+          ref={bodyRef}
+          tabIndex={-1}
+          aria-label="폰 연결 QR"
+          className="kometto-band-body flex min-w-0 flex-col items-start rounded-lg focus-visible:focus-ring"
+          data-testid="phone-link-card-body"
+        >
           <DeviceLinkCard
             autoCreate
             embedded
+            offline={offline}
             onLinked={() => {
+              focusNextRef.current = "close";
               setLinked(true);
               setOpen(false);
               dismissPhoneLinkCard(workspaceId);
