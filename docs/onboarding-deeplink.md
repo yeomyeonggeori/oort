@@ -80,3 +80,17 @@ oort://link?server=<percent-encoded base URL>&token=<base64url>
 - 소비: 폰이 `POST /v1/auth/device-link/redeem` (공개, per-IP 레이트리밋). 공개 오리진 모드에서는 4자리 SAS 를 발급자 확인 후에야 세션이 활성화된다(D4).
 - 목록: `GET /v1/auth/devices` — 이 멤버의 활성 연결 기기. `current` 는 호출 세션. 토큰 원문 없음.
 - 해제: `DELETE /v1/auth/devices/{id}` — 해당 기기의 access+refresh 폐기, 204. 현재 세션은 400 `cannot_revoke_current`(로그아웃 경로). 남의 id 는 404.
+
+## `oort://work` — 작업 링크 (ADR-0194)
+
+온보딩 딥링크는 아니지만 같은 스킴 체계에 있으므로 형식만 여기 적는다. 가시성·카드·API의 정본은 ADR-0194다.
+
+```
+oort://work/<session_id>[?ws=<workspace_id>]
+oort://work?view=team&channel=<id>&member=<id>&status=<파생 상태>[&ws=<workspace_id>]
+```
+
+- `session_id`는 `work_session.id`(uuid). 공유된 세션에만 링크가 있다.
+- 스킴 규칙은 `join`·`link`와 같다: 발급은 `oort://`만, 소비는 `oort://`와 `momo://` 둘 다.
+- 웹 폴백은 `https://<공개 오리진>/work/<session_id>`와 `/work?view=team&…`.
+- 딥링크는 화면을 열기만 한다. 세션 생성·공유 켜기·컨트롤 생성은 표현할 수 없다.
