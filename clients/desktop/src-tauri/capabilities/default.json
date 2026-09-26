@@ -1,11 +1,31 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: core:default, plus start_dragging for the web bundle's data-tauri-drag-region top bars (#2671), plus the read-only permission probe the notification plugin's page script sends at every launch (#2676). Banners go out through app commands, which need no entry here.",
-  "windows": ["main"],
+  "description": "Main window: core:default, plus start_dragging for the web bundle's data-tauri-drag-region top bars (#2671), plus the read-only permission probe the notification plugin's page script sends at every launch (#2676), plus one grant per app command. The build declares an app ACL manifest (build.rs, #2772), so an app command without a grant here is refused. The PTY commands are not here: they live in pty.json.",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
-    "notification:allow-is-permission-granted"
+    "notification:allow-is-permission-granted",
+    "allow-deep-link-take-pending",
+    "allow-discovery-start",
+    "allow-discovery-stop",
+    "allow-notification-permission",
+    "allow-notification-request-permission",
+    "allow-notification-show",
+    "allow-keychain-available",
+    "allow-keychain-load-refresh-token",
+    "allow-keychain-store-refresh-token",
+    "allow-keychain-clear-refresh-token",
+    "allow-open-external-url",
+    "allow-open-pdf-attachment",
+    "allow-detect-hosted-agents",
+    "allow-detect-local-harnesses",
+    "allow-app-version",
+    "allow-updater-check",
+    "allow-updater-install",
+    "allow-updater-relaunch"
   ]
 }

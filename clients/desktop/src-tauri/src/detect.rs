@@ -14,6 +14,15 @@
 // Driving the other app, or probing its debug ports, is not representable
 // here. Adding either would have to pass a source test that forbids those
 // strings.
+//
+// The one exception to "never drive another app" is two lines, and they do
+// not live in this module (ADR-0190 D3-a, #2813): `harness_status.rs` runs
+// `claude auth status` and `codex login status` by absolute path, with fixed
+// arguments, output discarded, and reports the exit code as one of three
+// values. Running any other program — a login command, an installer, another
+// app's debug interface — is still not representable, here or there. The
+// harness ids (`claude`, `codex`) sit next to `grok` in momo-core `detect.ts`
+// under `LOCAL_HARNESS_IDS`.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
