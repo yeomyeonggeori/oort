@@ -244,6 +244,7 @@ function PaneFooter({
   runtimeFailed: boolean;
   onRestart: () => void;
 }) {
+  // 문장은 짧게: 240px 칸(최소 폭)에서도 두 줄 안에 든다. 다음 행동은 단추가 말한다.
   let message: string | null = null;
   let detail: string | null = null;
   let action: string | null = null;
@@ -252,42 +253,48 @@ function PaneFooter({
   } else if (view === null || view.phase === "starting") {
     message = null;
   } else if (view.phase === "failed") {
+    message = "터미널을 열지 못했습니다.";
     // 셸의 거부 사유는 영어 원문이라 화면 문장에 섞지 않고 풀이에만 둔다.
-    message = "터미널을 열지 못했습니다. 다시 열어 보고, 되풀이되면 앱을 다시 여세요.";
     detail = view.error;
     action = "다시 열기";
   } else if (view.phase === "exited") {
-    message = "프로세스가 끝났습니다. 이 칸에서 다시 시작할 수 있습니다.";
+    message = "프로세스가 끝났습니다.";
     action = view.program.kind === "harness" ? `${programLabel(view)} 다시 시작` : "새 셸 시작";
   } else if (view.inputNotice) {
     message = view.inputNotice;
   } else if (view.storageFailed) {
-    message = "이 기기에 화면을 저장하지 못했습니다. 앱을 다시 열면 이 칸의 전 화면은 보이지 않습니다.";
+    message = "이 칸의 화면을 이 기기에 저장하지 못했습니다.";
   }
   return (
+    // 상태 줄은 칸 폭(창 폭이 아니다)으로 모양을 정한다. 좁으면(20rem 미만)
+    // 문장 한 줄, 단추 한 줄로 쌓고, 넓으면 한 줄에 둔다(design-review R3 B1).
     <div
-      className={cn(
-        // 상태 문장은 자르지 않는다: 무슨 일과 다음 행동이 240px 칸에서도 다 읽혀야
-        // 한다(design-review R2 B1). 좁으면 줄을 바꾸고 단추는 아랫줄로 간다.
-        "flex min-h-control-sm shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-line px-3 py-1 text-meta",
-        message ? "text-ink" : "hidden"
-      )}
+      className={cn("@container shrink-0 border-t border-line", message ? "block" : "hidden")}
       data-testid="local-terminal-status"
     >
-      <p
-        role="status"
-        aria-live="polite"
-        className="min-w-0 flex-1 basis-40 break-keep"
-        title={detail ? `${message ?? ""} (${detail})` : undefined}
-      >
-        {message ?? ""}
-      </p>
-      {action ? (
-        <Button type="button" variant="ghost" size="sm" onClick={onRestart} data-testid="local-terminal-restart">
-          <RotateCcw aria-hidden className="size-4" />
-          {action}
-        </Button>
-      ) : null}
+      <div className="flex flex-col items-start gap-1 px-3 py-1 text-meta text-ink @xs:flex-row @xs:items-center @xs:gap-2">
+        <p
+          role="status"
+          aria-live="polite"
+          className="w-full min-w-0 break-keep @xs:w-auto @xs:flex-1"
+          title={detail ? `${message ?? ""} (${detail})` : undefined}
+        >
+          {message ?? ""}
+        </p>
+        {action ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onRestart}
+            className="shrink-0"
+            data-testid="local-terminal-restart"
+          >
+            <RotateCcw aria-hidden className="size-4" />
+            {action}
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -119,8 +119,8 @@ export function exitLine(exit: PtyExit): string {
 export function busyNotice(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
   return text.startsWith("busy")
-    ? "터미널이 입력을 읽지 않아 방금 입력을 보내지 못했습니다. 실행 중인 프로그램이 입력을 받을 때 다시 입력하세요."
-    : "입력을 터미널에 보내지 못했습니다. 칸을 닫고 새 세션을 여세요.";
+    ? "프로그램이 입력을 읽지 않아 보내지 못했습니다. 잠시 뒤 다시 입력하세요."
+    : "입력을 보내지 못했습니다. 칸을 닫고 새로 여세요.";
 }
 
 function clampCols(cols: number): number {

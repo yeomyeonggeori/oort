@@ -23,7 +23,7 @@ import { openDock, resetDockStateForTest, toggleDockFullscreen, useDockState } f
 // 디자인 검수가 라이트·다크에서 도크를 보는 자리다. 실제 PTY는 데스크탑 debug
 // 앱에서 확인한다(PR 본문).
 //
-// `?scene=one|four|full|exited|failed|exited-four|failed-four|settings-web|settings-desktop`
+// `?scene=one|four|full|exited|failed|exited-four|failed-four|exited-harness-four|settings-web|settings-desktop`
 
 const ENC = new TextEncoder();
 
@@ -91,6 +91,12 @@ export function LocalTerminalHarness() {
     [scene]
   );
   const dock = useDockState();
+  // `-harness` 장면: 칸들이 하네스(Claude Code)를 띄운 것으로 둔다. 상태 줄의 가장
+  // 긴 단추 문구(「Claude Code 다시 시작」)를 좁은 칸에서 재기 위해서다.
+  useMemo(() => {
+    if (!scene.includes("-harness")) return;
+    for (const id of ["p1", "p2", "p3", "p4"]) sessions.setPendingProgram(id, { kind: "harness", id: "claude" });
+  }, [scene, sessions]);
 
   useMemo(() => {
     try {

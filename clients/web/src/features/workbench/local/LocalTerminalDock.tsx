@@ -107,6 +107,8 @@ export function LocalTerminalDock({
   const rootRef = useRef<HTMLElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /** 메뉴가 닫힐 때 캐럿을 포커스 칸 터미널로 보낼지(골랐거나 키로 열었다). */
+  const pickedRef = useRef(false);
   const [jumpOpen, setJumpOpen] = useState(false);
   const [harnesses, setHarnesses] = useState<LocalHarnessProbe[]>([]);
   const [confirm, setConfirm] = useState<{ paneId: PaneId; close: () => void } | null>(null);
@@ -172,6 +174,9 @@ export function LocalTerminalDock({
           return newSession({ kind: "shell" });
         case "jump-palette":
           if (!dock.open) openDock();
+          // 키로 연 목록은 닫힐 때(골랐든 Esc든) 터미널로 돌아간다. 사람은 목록
+          // 단추를 만진 적이 없다(design-review R3 H).
+          pickedRef.current = true;
           setJumpOpen(true);
           return;
         case "next-waiting":
@@ -254,7 +259,6 @@ export function LocalTerminalDock({
    * 가지 않는다(design-review R2 H1). 고른 경우에만 그 복귀를 막고 포커스 칸으로
    * 보낸다. Esc로 그냥 닫으면 트리거로 돌아간다.
    */
-  const pickedRef = useRef(false);
   const onMenuCloseAutoFocus = (event: Event) => {
     if (!pickedRef.current) return;
     pickedRef.current = false;
@@ -292,12 +296,10 @@ export function LocalTerminalDock({
       <header className="@container flex h-control shrink-0 items-center gap-1 px-2">
         <SquareTerminal aria-hidden className="size-4 shrink-0 text-icon" />
         <h2 className="min-w-0 truncate pl-1 text-meta font-medium text-ink">로컬 터미널</h2>
-        {/* 설명은 도크 폭(창 폭이 아니다)이 넉넉할 때만. 알림이 뜨면 자리를 비켜 준다. */}
-        {notice ? null : (
-          <p className="hidden min-w-0 truncate text-meta text-ink-muted @2xl:block">
-            이 기기에서만 돌고 서버에 기록하지 않습니다.
-          </p>
-        )}
+        {/* 설명은 도크 폭(창 폭이 아니다)이 넉넉할 때만. */}
+        <p className="hidden min-w-0 truncate text-meta text-ink-muted @2xl:block">
+          이 기기에서만 돌고 서버에 기록하지 않습니다.
+        </p>
         <span className="flex-1" />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -389,16 +391,6 @@ export function LocalTerminalDock({
           <X />
         </DockIconButton>
       </header>
-      {/* 도크 알림은 머리 줄 밖 제 줄에 둔다: 최소 창 폭(도크 약 400px)에서도
-          다음 행동까지 다 읽히게 줄을 바꾼다(design-review R2 M1). */}
-      <p
-        role="status"
-        aria-live="polite"
-        className={cn("break-keep px-3 pb-1 text-meta text-ink", !notice && "sr-only")}
-        data-testid="local-terminal-dock-notice"
-      >
-        {notice ?? ""}
-      </p>
       <div ref={bodyRef} className="flex min-h-0 flex-1 flex-col px-2 pb-1">
         <WorkbenchGrid
           className="flex-1"
@@ -414,6 +406,7 @@ export function LocalTerminalDock({
           renderPane={(pane) => <LocalTerminalPane pane={pane} platform={platform} sessions={sessions} />}
           onRequestClose={requestClose}
           onCloseLastPane={onCloseLastPane}
+          notice={notice}
         />
       </div>
       <Dialog open={confirm !== null} onOpenChange={(open) => !open && setConfirm(null)}>

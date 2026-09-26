@@ -80,6 +80,12 @@ export interface WorkbenchGridProps {
    * `close()`가 `onCloseLastPane`으로 간다.
    */
   onRequestClose?: (paneId: PaneId, close: () => void) => void;
+  /**
+   * 호스트의 알림 한 줄(#2774 도크: 새 세션 거부, 「나를 기다림」 없음). 격자의
+   * 상태 줄 자리에 뜬다. 상태 줄은 늘 있으므로 알림이 떠도 칸 높이가 바뀌지
+   * 않는다(PTY 크기 변경 없음). 격자 자신의 거부 문구가 먼저다.
+   */
+  notice?: string | null;
   label?: string;
   className?: string;
 }
@@ -159,6 +165,7 @@ export function WorkbenchGrid({
   size: sizeOverride,
   onCloseLastPane,
   onRequestClose,
+  notice: hostNotice = null,
   label = "작업 공간 격자",
   className,
 }: WorkbenchGridProps) {
@@ -258,7 +265,7 @@ export function WorkbenchGrid({
 
   const ids = paneIds(layout.root);
   const single = layout.root.kind === "pane";
-  const message = notice ?? (storage === "unavailable" ? STORAGE_COPY : null);
+  const message = notice ?? hostNotice ?? (storage === "unavailable" ? STORAGE_COPY : null);
   const hint =
     layout.maximized !== null
       ? maximizedHint(ids.indexOf(layout.maximized) + 1, ids.length - 1)
@@ -308,7 +315,13 @@ export function WorkbenchGrid({
         )}
       >
         {message ? <Info aria-hidden className="size-4 shrink-0 text-icon" /> : null}
-        <p role="status" aria-live="polite" className={cn("min-w-0 truncate", !message && "sr-only")}>
+        {/* 알림 문장은 자르지 않는다: 다음 행동까지 읽혀야 한다. 좁으면 줄을 바꾼다. */}
+        <p
+          role="status"
+          aria-live="polite"
+          data-testid="workbench-notice"
+          className={cn("min-w-0 break-keep py-1", !message && "sr-only")}
+        >
           {message ?? ""}
         </p>
         {message ? null : <p className="min-w-0 truncate">{modLabel(platform, hint)}</p>}

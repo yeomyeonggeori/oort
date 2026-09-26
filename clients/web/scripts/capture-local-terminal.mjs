@@ -194,22 +194,64 @@ async function interactions(browser, origin) {
     await c2.close();
   }
 
-  // R2 B1·M1: 좁은 칸·최소 창 폭에서도 상태 문장과 알림이 잘리지 않는다.
-  for (const [scene, width] of [["failed-four", 900], ["exited-four", 900], ["failed-four", 640], ["exited-four", 640]]) {
-    const context3 = await browser.newContext({ viewport: { width, height: 700 }, colorScheme: "light", reducedMotion: "reduce" });
+  // R2 B1 / R3 B1: 좁은 칸(최소 240px 근처)에서도 상태 줄이 칸 안에 있고, 단추가
+  // 보이며, 문장이 잘리지 않는다. 가장 긴 단추 문구(하네스)로 잰다.
+  for (const [scene, width] of [
+    ["failed-four", 900],
+    ["exited-four", 640],
+    ["failed-four", 520],
+    ["exited-harness-four", 520],
+  ]) {
+    const context3 = await browser.newContext({ viewport: { width, height: 800 }, colorScheme: "light", reducedMotion: "reduce" });
     const p3 = await context3.newPage();
     await p3.goto(`${origin}/#/design/local-terminal?scene=${scene}`);
     await p3.getByTestId("local-terminal-restart").first().waitFor();
-    const clipped = await p3.evaluate(() =>
-      Array.from(document.querySelectorAll('[data-testid="local-terminal-status"] [role="status"]')).filter(
-        (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1
-      ).length
-    );
-    const paneW = await p3.evaluate(() => document.querySelector('[data-testid="workbench-pane"]')?.getBoundingClientRect().width);
-    check(`${scene}@${width}: 칸 상태 문장이 잘리지 않는다`, clipped === 0, { clipped, paneW });
+    const r = await p3.evaluate(() => {
+      const out = [];
+      for (const pane of document.querySelectorAll('[data-testid="workbench-pane"]')) {
+        const pr = pane.getBoundingClientRect();
+        const status = pane.querySelector('[data-testid="local-terminal-status"]');
+        const p = status?.querySelector('[role="status"]');
+        const btn = status?.querySelector('[data-testid="local-terminal-restart"]');
+        if (!status || !p) continue;
+        const sr = status.getBoundingClientRect();
+        const br = btn?.getBoundingClientRect();
+        out.push({
+          paneW: Math.round(pr.width),
+          inside: sr.bottom <= pr.bottom + 0.5 && sr.left >= pr.left - 0.5 && sr.right <= pr.right + 0.5,
+          buttonInside: !br || (br.right <= pr.right + 0.5 && br.bottom <= pr.bottom + 0.5 && br.width > 0),
+          textClipped: p.scrollWidth > p.clientWidth + 1,
+          textLines: Math.round(p.getBoundingClientRect().height / parseFloat(getComputedStyle(p).lineHeight)),
+          terminalH: Math.round(pane.querySelector('[data-testid="local-terminal"]')?.getBoundingClientRect().height ?? 0),
+        });
+      }
+      return out;
+    });
+    const ok = r.length > 0 && r.every((x) => x.inside && x.buttonInside && !x.textClipped && x.textLines <= 2);
+    check(`${scene}@${width}: 상태 줄이 칸 안, 단추 보임, 문장 두 줄 이하`, ok, r[0]);
     await p3.screenshot({ path: resolve(OUT_DIR, `light-${scene}-${width}.png`) });
     report.scenes.push(`light-${scene}-${width}`);
     await context3.close();
+  }
+  // R3 H: 터미널에서 ⌘J로 연 칸 목록을 Esc로 닫으면 캐럿이 터미널로 돌아간다.
+  {
+    const { context: c5, page: p5 } = await open(browser, origin, "light", "four");
+    await p5.getByTestId("local-terminal-dock").waitFor();
+    await waitOutput(p5);
+    await p5.getByTestId("local-terminal").nth(2).click();
+    await p5.keyboard.press("Meta+KeyJ");
+    await p5.getByTestId("local-terminal-jump-list").waitFor();
+    await p5.keyboard.press("Escape");
+    await p5.waitForTimeout(300);
+    const where = await p5.evaluate(() => document.activeElement?.classList.contains("xterm-helper-textarea") ?? false);
+    check("⌘J → Esc 뒤 캐럿이 터미널에 있다", where);
+    // R3 M: ⌃⇧J 알림이 떠도 칸 높이(= PTY 크기)가 바뀌지 않는다.
+    const before = await p5.evaluate(() => Array.from(document.querySelectorAll('[data-testid="local-terminal"]')).map((e) => Math.round(e.getBoundingClientRect().height)));
+    await p5.keyboard.press("Control+Shift+KeyJ");
+    await p5.getByTestId("workbench-notice").filter({ hasText: "기다리는" }).waitFor();
+    const after = await p5.evaluate(() => Array.from(document.querySelectorAll('[data-testid="local-terminal"]')).map((e) => Math.round(e.getBoundingClientRect().height)));
+    check("⌃⇧J 알림이 칸 높이를 바꾸지 않는다", JSON.stringify(before) === JSON.stringify(after), { before, after });
+    await c5.close();
   }
   {
     const context4 = await browser.newContext({ viewport: { width: 420, height: 700 }, colorScheme: "light", reducedMotion: "reduce" });
@@ -217,9 +259,9 @@ async function interactions(browser, origin) {
     await p4.goto(`${origin}/#/design/local-terminal?scene=four`);
     await p4.getByTestId("local-terminal-dock").waitFor();
     await p4.keyboard.press("Control+Shift+KeyN");
-    await p4.getByTestId("local-terminal-dock-notice").filter({ hasText: "칸이 좁아" }).waitFor();
+    await p4.getByTestId("workbench-notice").filter({ hasText: "칸이 좁아" }).waitFor();
     const n = await p4.evaluate(() => {
-      const el = document.querySelector('[data-testid="local-terminal-dock-notice"]');
+      const el = document.querySelector('[data-testid="workbench-notice"]');
       return { clipped: el.scrollWidth > el.clientWidth + 1, text: el.textContent };
     });
     check("420 폭: 도크 알림이 다음 행동까지 보인다", !n.clipped && n.text.includes("키우세요"), n);

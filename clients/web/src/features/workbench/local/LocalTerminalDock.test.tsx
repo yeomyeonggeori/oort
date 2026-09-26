@@ -198,7 +198,7 @@ describe("터미널 입력이 먼저", () => {
     const { input } = await openWithPane();
     key(input, { code: "KeyJ", key: "J", ctrlKey: true, shiftKey: true });
     await vi.waitFor(() =>
-      expect(q("local-terminal-dock-notice")?.textContent).toBe("나를 기다리는 칸이 없습니다.")
+      expect(q("workbench-notice")?.textContent).toBe("나를 기다리는 칸이 없습니다.")
     );
   });
 });

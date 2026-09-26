@@ -163,9 +163,9 @@ export type DockCommand =
  * | 동작 | 키 | `code` |
  * |---|---|---|
  * | 도크 열고 닫기 | ⌃` | Backquote |
- * | 전체 화면 작업 공간 | ⌃⇧` | Backquote |
+ * | 전체 화면 켜고 끄기 | ⌃⇧` | Backquote |
  * | 새 세션 | ⌃⇧N (도크 포커스 중이면 ⌘T도) | KeyN, KeyT |
- * | 세션 점프 팔레트 | ⌘J | KeyJ |
+ * | 칸 목록 열기 | ⌘J | KeyJ |
  * | 다음 「나를 기다림」 | ⌃⇧J | KeyJ |
  *
  * ⌃`는 `key`가 아니라 `code`로 판정한다. 한글 2벌식에서 같은 자판은 「₩」를
