@@ -34,3 +34,26 @@
   position: absolute;
   inset: 0;
 }
+
+/* =============================================================================
+ * 로컬 터미널 도크 (#2774). 높이는 본문 판에 대한 비율이고 런타임 값이라
+ * `--dock-ratio`로 건다(격자 몫과 같은 이유). 바닥 두 개는 core dockStore의
+ * DOCK_MIN_PX·DOCK_ROUTE_FLOOR_PX와 같은 값이다. 저장된 비율이 창보다 커도
+ * 여기서 한 번 더 잘린다.
+ * ========================================================================== */
+
+.local-dock {
+  display: flex;
+  flex-direction: column;
+  /* 배치가 요구하는 높이(core dockMinPx)까지 키우되, 채널 바닥 160px은 남긴다.
+   * 그래도 모자라면 격자가 포커스 칸 하나만 보인다(fitLayoutToSize cramped).
+   * 도크는 판을 넘지 않는다. 바닥 두 값은 core DOCK_MIN_PX·DOCK_ROUTE_FLOOR_PX다. */
+  min-height: max(160px, min(var(--dock-min, 160px), calc(100% - 160px)));
+  max-height: calc(100% - 160px);
+  flex: 0 0 calc(var(--dock-ratio, 0.4) * 100%);
+}
+
+.local-dock[data-fullscreen] {
+  max-height: none;
+  flex: 1 1 0px;
+}

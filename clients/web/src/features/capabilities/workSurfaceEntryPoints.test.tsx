@@ -22,6 +22,10 @@ import { Sidebar } from "@/features/sidebar/Sidebar";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { SettingsRoute } from "@/features/settings/SettingsRoute";
 import { ChatShell } from "@/features/chat/ChatShell";
+import {
+  dockSnapshot,
+  resetDockStateForTest,
+} from "@/features/workbench/local/dockState";
 
 // =============================================================================
 // #2166 work-surface hide: count real entry points in the rendered tree.
@@ -129,7 +133,14 @@ vi.mock("@/features/work/WorkPanel", () => ({
 }));
 
 vi.mock("@/features/work/TerminalDock", () => ({
-  TerminalDock: () => null,
+  TerminalDock: () => createElement("div", { "data-testid": "observer-dock-stub" }),
+}));
+
+// #2774: 데스크탑 셸이면 헤더 터미널 버튼이 로컬 도크를 연다.
+const shell = { desktop: false };
+vi.mock("@/lib/tauri", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tauri")>()),
+  isDesktop: () => shell.desktop,
 }));
 
 vi.mock("@/features/timeline/ThreadPanel", () => ({
@@ -475,6 +486,8 @@ beforeAll(() => {
 
 beforeEach(() => {
   workFlag.provided = false;
+  shell.desktop = false;
+  resetDockStateForTest();
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: false,
     media: query,
@@ -532,5 +545,49 @@ describe("work 표면 진입점 (#2166)", () => {
       "open-terminal-dock": 1,
     });
     expect(countWorkEntries()).toBe(6);
+  });
+});
+
+describe("로컬 터미널 진입점 (#2774)", () => {
+  it("브라우저(데스크탑 아님)이고 작업 표면이 없으면 헤더에 터미널 버튼이 없다", async () => {
+    shell.desktop = false;
+    workFlag.provided = false;
+    const host = await mount();
+    expect(host.querySelectorAll('[data-testid="open-terminal-dock"]').length).toBe(0);
+  });
+
+  it("데스크탑이면 작업 표면이 없어도 버튼이 서고, 누르면 로컬 도크를 연다(관전 도크가 아니다)", async () => {
+    shell.desktop = true;
+    workFlag.provided = false;
+    const host = await mount();
+    const button = host.querySelector<HTMLButtonElement>('[data-testid="open-terminal-dock"]');
+    expect(button).not.toBeNull();
+    expect(button?.getAttribute("aria-keyshortcuts")).toBe("Control+`");
+    act(() => button?.click());
+    expect(dockSnapshot().open).toBe(true);
+    expect(button?.getAttribute("aria-pressed")).toBe("true");
+    expect(host.querySelector('[data-testid="observer-dock-stub"]')).toBeNull();
+  });
+
+  it("데스크탑에서는 작업 표면이 있어도 헤더가 관전 도크를 열지 않는다(로컬 도크가 대체)", async () => {
+    shell.desktop = true;
+    workFlag.provided = true;
+    const host = await mount();
+    act(() =>
+      host.querySelector<HTMLButtonElement>('[data-testid="open-terminal-dock"]')?.click()
+    );
+    expect(dockSnapshot().open).toBe(true);
+    expect(host.querySelector('[data-testid="observer-dock-stub"]')).toBeNull();
+  });
+
+  it("브라우저에서 작업 표면이 있으면 지금까지대로 관전 도크를 연다", async () => {
+    shell.desktop = false;
+    workFlag.provided = true;
+    const host = await mount();
+    act(() =>
+      host.querySelector<HTMLButtonElement>('[data-testid="open-terminal-dock"]')?.click()
+    );
+    expect(dockSnapshot().open).toBe(false);
+    expect(host.querySelector('[data-testid="observer-dock-stub"]')).not.toBeNull();
   });
 });

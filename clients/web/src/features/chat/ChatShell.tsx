@@ -66,6 +66,8 @@ import { ThreadPanel } from "@/features/timeline/ThreadPanel";
 import { LongPressHint } from "@/features/timeline/LongPressHint";
 import { WorkPanel } from "@/features/work/WorkPanel";
 import { TerminalDock } from "@/features/work/TerminalDock";
+import { toggleDock, useDockState } from "@/features/workbench/local/dockState";
+import { isDesktop } from "@/lib/tauri";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { useWorkPanelTarget } from "@/features/agents/workLogStore";
 import type { WorkScope } from "@momo/core/features/work/workSessionModel";
@@ -406,9 +408,16 @@ export function ChatShell() {
   //     내보내는 호스트가 없는 서버(셀프호스트 기본)에서 헤더 버튼만 살아
   //     있으면 막다른 길이다. 로컬 워크벤치(M1, agent-workspace-2.0 §3.10)가
   //     들어오면 이 진입점은 그 로컬 터미널 진입점으로 대체된다.
-  const terminalDockProvided = isSurfaceProvided("work");
+  //   * #2774: 데스크탑 셸에서는 이 버튼이 로컬 터미널 도크(⌃`)를 연다. 관전
+  //     도크의 헤더 진입점은 거기서 로컬 도크로 대체된다(관전은 작업 패널에
+  //     남는다). 브라우저에는 로컬 PTY가 없으므로 지금까지대로 관전 도크다.
+  const localTerminal = isDesktop();
+  const localDock = useDockState();
+  const terminalDockProvided = !localTerminal && isSurfaceProvided("work");
+  const terminalButtonShown = localTerminal || terminalDockProvided;
   const [workOpen, setWorkOpen] = useState(false);
   const [dockOpen, setDockOpen] = useState(false);
+  const terminalPressed = localTerminal ? localDock.open : dockOpen;
   const terminalToggleRef = useRef<HTMLButtonElement>(null);
   useEffect(() => setDockOpen(false), [channelId]);
   const [workScope, setWorkScope] = useState<WorkScope>("channel");
@@ -1061,22 +1070,27 @@ export function ChatShell() {
                 채널 컨텍스트의 관전 진입은 도크가 승계한다. 이 testid 를
                 `open-work-panel` 로 남기면 게이트가 도크를 패널로 착각한다.
                 #2753: 작업 표면이 없는 서버에서는 버튼 자체를 내놓지 않는다. */}
-            {stressCount === 0 && terminalDockProvided && (
+            {stressCount === 0 && terminalButtonShown && (
               <button
                 ref={terminalToggleRef}
                 type="button"
-                onClick={() => {
+                onClick={(event) => {
+                  if (localTerminal) {
+                    toggleDock(event.currentTarget);
+                    return;
+                  }
                   setWorkOpen(false);
                   setDockOpen((open) => !open);
                 }}
-                aria-pressed={dockOpen}
-                {...(dockOpen
+                aria-pressed={terminalPressed}
+                {...(dockOpen && !localTerminal
                   ? { "aria-controls": "channel-terminal-dock" }
                   : {})}
                 aria-label="터미널"
-                title="터미널"
+                aria-keyshortcuts={localTerminal ? "Control+`" : undefined}
+                title={localTerminal ? "터미널 (⌃`)" : "터미널"}
                 data-testid="open-terminal-dock"
-                className={channelHeaderControlClass({ pressed: dockOpen })}
+                className={channelHeaderControlClass({ pressed: terminalPressed })}
               >
                 <SquareTerminal aria-hidden="true" className="size-4" />
               </button>

@@ -510,3 +510,54 @@ export function focusDirection(
   if (best === null) return refuse(layout, "edge");
   return ok(withFocus(layout, best.id));
 }
+
+// ---- 보이는 크기에 맞추기 (#2774) ------------------------------------------------
+
+/**
+ * 격자를 그릴 때 쓰는 배치. 저장된 배치를 바꾸지 않고, 지금 크기에서 칸이 최소
+ * 크기 아래로 내려가지 않게 한다.
+ *
+ * - 분할마다 위에서부터 비율을 양쪽 최소 크기 안으로 자른다. 도크나 창이 줄어도
+ *   중첩 분할(½·¼·¼)의 작은 칸이 먼저 짜부라지지 않는다. 크기가 다시 커지면
+ *   저장된 비율로 돌아간다.
+ * - 격자 전체가 배치의 최소 크기보다 작으면(`cramped`) 비율로는 풀 수 없다.
+ *   그때는 포커스 칸만 보이게 최대화한 것처럼 그린다. 칸이 잘려 머리나 상태
+ *   줄이 가려지는 대신, 한 칸이 온전히 보이고 나머지는 DOM에 남는다.
+ * - 크기를 모르면(0) 그대로 둔다.
+ */
+export function fitLayoutToSize(
+  layout: WorkbenchLayout,
+  size: Size,
+  metrics: LayoutMetrics = DEFAULT_METRICS
+): { layout: WorkbenchLayout; cramped: boolean } {
+  if (!(size.width > 0 && size.height > 0) || layout.root.kind === "pane") {
+    return { layout, cramped: false };
+  }
+  const need = minimumSize(layout.root, metrics);
+  if (size.width < need.width || size.height < need.height) {
+    if (layout.maximized !== null) return { layout, cramped: true };
+    return { layout: { ...layout, maximized: layout.focused }, cramped: true };
+  }
+  let changed = false;
+  const fit = (node: LayoutNode, box: Size): LayoutNode => {
+    if (node.kind === "pane") return node;
+    const available = axisLength(box, node.axis) - metrics.gutter;
+    let ratio = node.ratio;
+    if (available > 0) {
+      const lo = axisLength(minimumSize(node.first, metrics), node.axis) / available;
+      const hi = 1 - axisLength(minimumSize(node.second, metrics), node.axis) / available;
+      if (lo <= hi) ratio = Math.min(hi, Math.max(lo, ratio));
+    }
+    const firstLen = Math.max(0, available) * ratio;
+    const secondLen = Math.max(0, available) - firstLen;
+    const firstBox = node.axis === "row" ? { width: firstLen, height: box.height } : { width: box.width, height: firstLen };
+    const secondBox = node.axis === "row" ? { width: secondLen, height: box.height } : { width: box.width, height: secondLen };
+    const first = fit(node.first, firstBox);
+    const second = fit(node.second, secondBox);
+    if (ratio === node.ratio && first === node.first && second === node.second) return node;
+    changed = true;
+    return { ...node, ratio, first, second };
+  };
+  const root = fit(layout.root, size);
+  return { layout: changed ? { ...layout, root } : layout, cramped: false };
+}
