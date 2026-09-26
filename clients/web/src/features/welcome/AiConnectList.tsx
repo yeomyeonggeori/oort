@@ -89,7 +89,7 @@ export function AiConnectList({
               data-testid="ai-connect-row"
               data-row-id={id}
             >
-              <label htmlFor={inputId} className="ai-connect-opt-label">
+              <label htmlFor={inputId} className="ai-connect-opt-label press">
                 <input
                   type="radio"
                   id={inputId}
@@ -158,7 +158,7 @@ function HarnessPillControl({
       <button
         type="button"
         id={pillId}
-        className="ai-connect-pill ai-connect-pill-action focus-visible:focus-ring"
+        className="ai-connect-pill ai-connect-pill-action press focus-visible:focus-ring"
         data-tone="mute"
         aria-label={`${HARNESS_LABEL[id]} ${label}, 설치 안내 열기`}
         onClick={() => void openExternalUrl(HARNESS_INSTALL_URL[id])}
@@ -174,7 +174,7 @@ function HarnessPillControl({
       <button
         type="button"
         id={pillId}
-        className="ai-connect-pill ai-connect-pill-action focus-visible:focus-ring"
+        className="ai-connect-pill ai-connect-pill-action press focus-visible:focus-ring"
         data-tone="sig"
         aria-label={`${HARNESS_LABEL[id]} ${label}`}
         onClick={() => onRecheck(id)}

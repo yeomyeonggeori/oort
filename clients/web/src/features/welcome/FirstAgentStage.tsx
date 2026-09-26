@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { CircleAlert } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, uuidEq } from "@momo/core/lib/api";
 import {
@@ -1020,18 +1021,5 @@ export function FirstAgentStage({
 }
 
 function NoteIcon() {
-  return (
-    <svg
-      className="ai-connect-note-icon"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-    >
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 8v5M12 16.5v.01" />
-    </svg>
-  );
+  return <CircleAlert className="ai-connect-note-icon" aria-hidden="true" strokeWidth={2} />;
 }
