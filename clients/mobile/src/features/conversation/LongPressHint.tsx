@@ -1,7 +1,8 @@
-import React, {useCallback, useState} from 'react';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
-import {font, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
-import {useStyles} from '../../design/theme';
+import React, {useCallback, useEffect, useState} from 'react';
+import {Image, Pressable, StyleSheet, Text, View} from 'react-native';
+import {ds2Radius, font, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
+import {usePalette, useStyles} from '../../design/theme';
 import {NON_SECRET_KEYS, nonSecretStore} from '../../storage/kv';
 
 // =============================================================================
@@ -47,6 +48,29 @@ export function rememberLongPressLearned(): void {
   }
 }
 
+/**
+ * 코치마크가 스스로 물러나기까지의 시간, ms. 문장 하나(열두 어절 남짓)를 두 번
+ * 읽을 만큼이다.
+ */
+export const LONG_PRESS_HINT_MS = 6000;
+
+// =============================================================================
+// **상주하던 줄에서 첫 1회 코치마크로** (DS2-4 #2716, owner 피드백 표).
+//
+// 옛 판은 이 문장을 컴포저 위 한 줄로 **세워 두었다** — 길게 누르기를 한 번 쓰거나
+// 「닫기」를 누를 때까지. owner 캡처에서 그 줄은 매일 여는 대화의 컴포저 위에 붙어
+// 있었고(「메시지를 길게 누르면 답글·반응·고치기」 + 「닫기」), Buzz 에는 그런 줄이
+// 없다. 그래서:
+//
+//   * **한 번만 뜬다.** 뜨는 순간 배운 것으로 적는다 — 다음 방문에는 없다.
+//   * **스스로 물러난다**(`LONG_PRESS_HINT_MS`). 누르면 바로 닫힌다.
+//   * **목록을 밀지 않는다.** 컴포저 위에 떠 있는 알약이라(절대 배치) 나타나고
+//     사라질 때 대화가 움직이지 않는다.
+//
+// 가르치는 내용과 판정(`useLongPressHint`)은 그대로다 — 바뀐 것은 머무는 시간과
+// 자리뿐이다. 그 밖의 신호(반응 칩, 「답글 N개」, 눌린 행의 배경)도 그대로다.
+// =============================================================================
+
 export function LongPressHint({
   visible,
   onDismiss,
@@ -55,18 +79,26 @@ export function LongPressHint({
   onDismiss: () => void;
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
+  const palette = usePalette();
+  useEffect(() => {
+    if (!visible) return;
+    const timer = setTimeout(onDismiss, LONG_PRESS_HINT_MS);
+    return () => clearTimeout(timer);
+  }, [visible, onDismiss]);
   if (!visible) return null;
   return (
-    <View style={styles.root} testID="long-press-hint">
-      <Text style={styles.text}>{HINT}</Text>
+    <View style={styles.anchor} pointerEvents="box-none" testID="long-press-hint">
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="안내 닫기"
-        hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}
+        accessibilityLabel={`${HINT}. 안내 닫기`}
         onPress={onDismiss}
-        style={({pressed}) => [styles.dismiss, pressed && styles.pressed]}
+        style={({pressed}) => [styles.coach, pressed && styles.pressed]}
         testID="long-press-hint-dismiss">
-        <Text style={styles.dismissLabel}>닫기</Text>
+        <Text style={styles.text}>{HINT}</Text>
+        <Image
+          source={CONV_ICONS.cross}
+          style={[styles.close, {tintColor: palette.onPrimary}]}
+        />
       </Pressable>
     </View>
   );
@@ -79,6 +111,12 @@ export function useLongPressHint(): {
   markUsed: () => void;
 } {
   const [visible, setVisible] = useState(() => !longPressLearned());
+
+  // 뜨는 순간 배운 것으로 적는다 — 코치마크는 **첫 1회**다(위 절). 이 방문 동안은
+  // 타이머나 손이 닫을 때까지 서 있고, 다음 방문에는 없다.
+  useEffect(() => {
+    if (visible) rememberLongPressLearned();
+  }, [visible]);
 
   const dismiss = useCallback(() => {
     setVisible(false);
@@ -96,16 +134,28 @@ export function useLongPressHint(): {
 }
 
 const buildStyles = (color: Palette) => StyleSheet.create({
-  root: {
+  /** 도크 위에 뜨는 자리. 도크의 세로를 한 픽셀도 밀지 않는다. */
+  anchor: {
+    position: 'absolute',
+    left: SAFE_GUTTER,
+    right: SAFE_GUTTER,
+    bottom: '100%',
+    alignItems: 'center',
+    paddingBottom: space.sm,
+    zIndex: 2,
+  },
+  /** 잉크 알약 — 시안 `.a-pill.pri` 의 색. 떠 있는 것이 무엇인지 한눈에 다르다. */
+  coach: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
-    paddingHorizontal: SAFE_GUTTER,
-    paddingVertical: space.xs,
-    minHeight: TOUCH_TARGET - space.md,
+    minHeight: TOUCH_TARGET,
+    paddingHorizontal: space.lg,
+    borderRadius: ds2Radius.pill,
+    backgroundColor: color.primary,
+    boxShadow: color.elevationFloat,
   },
-  text: {flex: 1, fontSize: font.meta, color: color.textFaint},
-  dismiss: {justifyContent: 'center'},
-  dismissLabel: {fontSize: font.meta, color: color.textMuted, fontWeight: '600'},
-  pressed: {opacity: 0.6},
+  text: {flexShrink: 1, fontSize: font.label, color: color.onPrimary, fontWeight: '600'},
+  close: {width: CONV_ICON_SIZE.cross, height: CONV_ICON_SIZE.cross},
+  pressed: {opacity: 0.8},
 });

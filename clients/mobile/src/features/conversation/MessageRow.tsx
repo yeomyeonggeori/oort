@@ -53,7 +53,6 @@ import {isTruncated, omittedFileCount} from '@momo/core/features/timeline/artifa
 import type {ArtifactPresentation} from '@momo/core/features/timeline/artifacts';
 import {attachmentMetaLine} from '@momo/core/features/attachments/model';
 import {deletedFoldLabel} from '@momo/core/features/timeline/deletedFold';
-import {AVATAR_SIZE} from '@momo/core/features/workspace/avatar';
 import {canQuoteMessage} from '@momo/core/features/timeline/quote';
 import type {QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {
@@ -95,6 +94,7 @@ import {MessageActionSheet} from './MessageActionSheet';
 import {MessageEditorSheet} from './MessageEditorSheet';
 import {appNote} from './appVoice';
 import {Avatar} from './Avatar';
+import {CONV} from './convDesign';
 import {
   deadlinePassed,
   gateFor,
@@ -187,13 +187,22 @@ import {useLongPress} from './useLongPress';
 const UNKNOWN_MEMBER = '알 수 없는 멤버';
 
 /**
- * 연속 행 오른쪽 시각 칸 (감사 H-3).
+ * 시각이 서는 두 자리 (감사 H-3 → DS2-4 #2716).
  *
- * `09:01` 다섯 글자가 `font.meta` 로 들어가는 폭. 고정 폭에 오른쪽 정렬이라
- * 시각들이 한 줄에 서고, 그래서 눈이 그 칸을 **읽지 않기로** 정할 수 있다 —
- * 매 줄 다른 자리에 있으면 매번 다시 봐야 한다.
+ * H-3 은 모든 행의 시각을 **오른쪽 한 칸**에 세웠다(34pt 예약). DS2-4 에서 owner
+ * 피드백 표가 그것을 바꿨다: 「아바타 40, 이름 굵게 + 시간 회색 **한 줄**」(Buzz).
+ * 그래서 이제
+ *
+ *   * **묶음 머리**: 이름 바로 뒤, 같은 줄(`Author` 의 `time`). 시안 `.a-m .who time`.
+ *   * **연속 행**: 왼쪽 아바타 칸 안(`rowTime`). 그 칸은 머리 행에만 얼굴이 서고
+ *     연속 행에서는 비어 있다 — 비어 있는 칸에 시각을 세우면 세로도 가로도 새로
+ *     쓰지 않는다.
+ *
+ * 오른쪽 예약(42pt)이 사라져 본문이 Buzz 처럼 오른쪽 여백까지 간다. H-3 의 요구
+ * 「모든 행이 자기 시각을 말한다」는 그대로다 — 자리가 둘이 됐을 뿐, 연속 행의 시각이
+ * 늘 같은 x(아바타 칸)에 선다는 성질도 그대로다.
  */
-const TIME_COLUMN = 34;
+const TIME_GUTTER = CONV.avatar;
 
 /**
  * 반응 칩의 레이아웃 변. 두 축 모두 이 값이고, 두 축 모두 슬롭이 44 로 채운다.
@@ -239,12 +248,21 @@ const META_HIT_SLOP = {
 } as const;
 
 /** 작성자 머리줄(`line.head`)을 44pt로 만드는 슬롭. meta 줄과 높이가 다르다. */
-const AUTHOR_SLOP = slopTo(line.head);
+const AUTHOR_SLOP = slopTo(CONV.whoLine);
 const AUTHOR_HIT_SLOP = {
   top: AUTHOR_SLOP,
   bottom: AUTHOR_SLOP,
   left: AUTHOR_SLOP,
   right: AUTHOR_SLOP,
+} as const;
+
+/** 40 얼굴을 44 로 만드는 슬롭 — 도출한다(감사 M-14). */
+const AVATAR_SLOP = slopTo(CONV.avatar);
+const AVATAR_HIT_SLOP = {
+  top: AVATAR_SLOP,
+  bottom: AVATAR_SLOP,
+  left: AVATAR_SLOP,
+  right: AVATAR_SLOP,
 } as const;
 
 /** hh:mm, 24-hour, local. The row's own clock is never used for ordering. */
@@ -454,6 +472,7 @@ export function RecoveryDivider({
 function Author({
   directory,
   memberId,
+  time,
   onOpenProfile,
   onLongPress,
   delayLongPress,
@@ -461,6 +480,11 @@ function Author({
 }: {
   directory: Directory;
   memberId: string;
+  /**
+   * 이름 뒤 같은 줄의 시각 (DS2-4 — owner 표 「이름 굵게 + 시간 회색 한 줄」).
+   * 서버 시계가 없는 행(보내는 중)은 주지 않는다 — 지어내지 않는다(#1083).
+   */
+  time?: string;
   onOpenProfile?: () => void;
   onLongPress?: () => void;
   delayLongPress?: number;
@@ -496,10 +520,18 @@ function Author({
           {`${owner.displayName}님이 관리`}
         </Text>
       ) : null}
-      {/* 시각은 여기 있었다. 행이 **오른쪽 한 칸**으로 가져갔다 (감사 H-3):
-          연속 행에 시각을 세우고 나니 같은 정보가 두 자리에 있었고(머리 행은
-          이름 옆, 연속 행은 오른쪽 끝), 그러면 눈이 매 줄 어느 쪽을 볼지 다시
-          정해야 한다. 한 칸에 모으면 그 칸을 **안 보기로** 정할 수 있다. */}
+      {/* 시각이 여기로 돌아왔다 (DS2-4, owner 표). H-3 은 오른쪽 한 칸이었다 —
+          위 `TIME_GUTTER` 머리말. 보조기술에는 숨긴다: 행 라벨이 이미 말한다. */}
+      {time !== undefined ? (
+        <Text
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          style={styles.authorTime}
+          numberOfLines={1}
+          testID="row-time">
+          {time}
+        </Text>
+      ) : null}
     </>
   );
   if (!onOpenProfile) return <View style={styles.authorRow}>{content}</View>;
@@ -2299,10 +2331,9 @@ function MessageRowInner({
         disabled={actions === undefined}
         style={({pressed}) => [
           styles.rowInner,
-          // 두 칸의 예약은 **여기 한 곳**이다 (design-review M-1) — 아래
-          // `rowTimeReserve` 주석이 왜 자식이 아니라 그릇인지 든다. 아바타 칸은
-          // 그 규율의 거울이고, 같은 이유로 같은 자리에 있다.
-          styles.rowTimeReserve,
+          // 칸의 예약은 **여기 한 곳**이다 (design-review M-1) — 아래
+          // `rowAvatarReserve` 주석이 왜 자식이 아니라 그릇인지 든다. DS2-4 에서
+          // 오른쪽 시각 칸이 사라지고 아바타 칸 하나가 남았다(`TIME_GUTTER`).
           styles.rowAvatarReserve,
           pressed && actions !== undefined && styles.rowPressed,
         ]}
@@ -2316,7 +2347,7 @@ function MessageRowInner({
                 accessibilityRole="button"
                 accessibilityLabel={`${authorLabel} 프로필 보기`}
                 delayLongPress={longPress.delayLongPress}
-                hitSlop={CHIP_HIT_SLOP}
+                hitSlop={AVATAR_HIT_SLOP}
                 onLongPress={longPress.onLongPress}
                 onPress={event => {
                   event?.stopPropagation();
@@ -2325,10 +2356,18 @@ function MessageRowInner({
                 }}
                 style={({pressed}) => [pressed && styles.pressed]}
                 testID="profile-avatar-target">
-                <Avatar directory={directory} memberId={message.authorMemberId} />
+                <Avatar
+                  directory={directory}
+                  memberId={message.authorMemberId}
+                  size={CONV.avatar}
+                />
               </Pressable>
             ) : (
-              <Avatar directory={directory} memberId={message.authorMemberId} />
+              <Avatar
+                directory={directory}
+                memberId={message.authorMemberId}
+                size={CONV.avatar}
+              />
             )}
           </View>
         ) : null}
@@ -2336,6 +2375,7 @@ function MessageRowInner({
           <Author
             directory={directory}
             memberId={message.authorMemberId}
+            time={timeLabel(message.createdAtMs)}
             onOpenProfile={
               actions?.onOpenProfile
                 ? () => actions.onOpenProfile?.(message.authorMemberId)
@@ -2599,9 +2639,10 @@ function MessageRowInner({
           //
           // ## 세로를 한 픽셀도 안 쓴다
           //
-          // 줄을 하나 더 세우면 5연발에 80pt 가 사라진다. 대신 행의 첫 줄
-          // 오른쪽 끝에 절대 위치로 앉히고, 그릇이 그만큼 오른쪽을 비워 둔다
-          // (`rowTimeReserve`). 겹치지 않으면서 세로 비용이 0 이다.
+          // 줄을 하나 더 세우면 5연발에 80pt 가 사라진다. 묶음 머리에서는 이름
+          // 뒤 같은 줄에(`Author` 의 `time`), 연속 행에서는 **비어 있는 아바타
+          // 칸**에 절대 위치로 앉힌다(DS2-4, `TIME_GUTTER` 머리말). 그 칸은
+          // 그릇이 이미 비워 둔 자리라 겹치지 않고, 세로 비용이 0 이다.
           //
           // ## 흐름 자식 **뒤**에 그린다 (design-review M-1)
           //
@@ -2616,15 +2657,17 @@ function MessageRowInner({
           // 로터가 같은 사실을 두 번 읽는다 — 「행 하나 = 원소 하나」를 다른
           // 방식으로 깨는 것이다.
           // ===================================================================
-          <Text
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-            // 어느 줄 옆에 서는지에 따라 줄 상자를 고른다 (u44 리뷰 M-2 —
-            // `styles.rowTime` 주석에 실측과 이유가 있다).
-            style={[styles.rowTime, startsGroup && styles.rowTimeGroupHead]}
-            testID="row-time">
-            {timeLabel(message.createdAtMs)}
-          </Text>
+          startsGroup ? null : (
+            <Text
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              style={styles.rowTime}
+              testID="row-time">
+              {timeLabel(message.createdAtMs)}
+            </Text>
+          )
         }
       </Pressable>
 
@@ -3027,7 +3070,7 @@ export function WorkingRow({
       testID={`working-row-${memberId}`}>
       <View style={[styles.rowInner, styles.rowAvatarReserve]}>
         <View style={styles.rowAvatar}>
-          <Avatar directory={directory} memberId={memberId} />
+          <Avatar directory={directory} memberId={memberId} size={CONV.avatar} />
         </View>
         <View style={styles.authorRow}>
           <Text
@@ -3112,7 +3155,7 @@ export function PendingRow({
       <View style={[styles.rowInner, styles.rowAvatarReserve]}>
         {startsGroup ? (
           <View style={styles.rowAvatar}>
-            <Avatar directory={directory} memberId={pending.authorMemberId} />
+            <Avatar directory={directory} memberId={pending.authorMemberId} size={CONV.avatar} />
           </View>
         ) : null}
         {startsGroup ? (
@@ -3185,39 +3228,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     gap: 2,
   },
   /**
-   * 시각 칸의 예약. **그릇이 진다** (design-review M-1).
-   *
-   * ## 자식에게 걸었던 것이 왜 구멍이었나
-   *
-   * 시각은 모든 행에 절대 위치로 앉는데, 오른쪽을 비워 두는 자리는 둘뿐이었다:
-   * 작성자 줄과 — 연속 행일 때만 — 본문. 그래서 행의 **첫 흐름 자식**이 답글
-   * 표식·인용·묘비·아티팩트 카드·승인 카드일 때는 예약이 없었고, 리뷰가 그
-   * 겹침을 저장소의 캡처에서 읽어 냈다(`...문서에⁷젝³`).
-   *
-   * 그 구멍은 오타가 아니라 **자리의 문제**였다: 예약을 자식에 걸면 자식 종류가
-   * 늘 때마다 같은 구멍이 다시 생기고, 그때마다 아무도 알아채지 못한다. 그래서
-   * 예약을 그릇으로 올린다 — 이 그릇에 무엇이 들어오든, 앞으로 무엇이 더
-   * 들어오든, 오른쪽 34pt 는 시각의 것이다.
-   *
-   * ## 값
-   *
-   * `SAFE_GUTTER`(그릇 자신의 좌우 여백) + `TIME_COLUMN` + `space.sm`. 시각은
-   * 화면 오른쪽에서 `SAFE_GUTTER` 만큼 떨어져 서므로(`rowTime.right`), 내용의
-   * 오른쪽 끝과 시각의 왼쪽 끝 사이에 정확히 `space.sm` 이 남는다.
-   *
-   * ## 값이 사는 비용
-   *
-   * 그룹 **머리** 행의 본문도 이제 42pt 좁아진다 — 전에는 작성자 줄만 비켜 주고
-   * 본문은 끝까지 갔다. 그 대신 한 묶음 안 모든 행의 본문 오른쪽 끝이 같은 x 에
-   * 서고, 시각이 그제야 **칸**이 된다. 「눈이 그 칸을 안 읽기로 정할 수 있다」는
-   * 이 배치의 주장은 다른 것이 그 칸에 들어오지 않을 때만 참이다.
-   *
-   * `WorkingRow` 는 이 스타일을 안 쓴다 — 그 행에는 시각이 없고, 없는 것을 위해
-   * 자리를 비우면 그것은 예약이 아니라 그냥 여백이다.
-   */
-  rowTimeReserve: {paddingRight: SAFE_GUTTER + TIME_COLUMN + space.sm},
-  /**
-   * 아바타 칸의 예약 — 시각 칸의 **거울** (감사 H-11 / goal U4-6M).
+   * 아바타 칸의 예약 (감사 H-11 / goal U4-6M). DS2-4 부터 연속 행의 시각도 이 칸에 선다.
    *
    * ## 왜 예약인가 (아바타는 머리 행에만 있는데)
    *
@@ -3226,14 +3237,15 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 묶음 전체의 본문이 한 줄에 서고, 그제야 아바타가 그 묶음 전부를 가리키는
    * 표지가 된다 — 훑는 눈이 사는 것이 정확히 그것이다.
    *
-   * 그래서 위 `rowTimeReserve` 와 같은 규율이다: 예약은 자식이 아니라 **그릇**이
+   * 규율: 예약은 자식이 아니라 **그릇**이
    * 지고(design-review M-1), 아바타 자신은 절대 배치라 세로 비용이 0 이다.
    *
    * ## 값
    *
-   * `SAFE_GUTTER`(그릇 자신의 여백) + `AVATAR_SIZE` + `space.sm`. 아바타는 화면
-   * 왼쪽에서 `SAFE_GUTTER` 만큼 떨어져 서므로(`rowAvatar.left`), 아바타의 오른쪽
-   * 끝과 내용의 왼쪽 끝 사이에 정확히 `space.sm` 이 남는다.
+   * `SAFE_GUTTER`(그릇 자신의 여백) + `CONV.avatar`(40, owner 표) + `CONV.avatarGap`
+   * (10, 시안 `.a-m{gap:10px}`). 아바타는 화면 왼쪽에서 `SAFE_GUTTER` 만큼 떨어져
+   * 서므로(`rowAvatar.left`), 아바타의 오른쪽 끝과 내용의 왼쪽 끝 사이에 정확히
+   * `avatarGap` 이 남는다.
    *
    * ## 값이 사는 비용
    *
@@ -3242,7 +3254,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 넣으면 감사 M-3 이 이미 「5조각 과적재」로 센 줄에 여섯 번째가 붙고, 32pt 가
    * 13pt 글자 옆 흐름에 들어가 머리 행이 한 줄만큼 자란다(묶음마다 반복된다).
    */
-  rowAvatarReserve: {paddingLeft: SAFE_GUTTER + AVATAR_SIZE + space.sm},
+  rowAvatarReserve: {paddingLeft: SAFE_GUTTER + CONV.avatar + CONV.avatarGap},
   /**
    * 아바타가 앉는 자리. 규칙은 `rowTime` 과 하나도 다르지 않다 — **이 메시지의
    * 맨 위 왼쪽**이고, 그 y 는 그릇의 위쪽 패딩과 **같은 곳**에서 온다.
@@ -3253,61 +3265,31 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     top: ROW_SPACE.withinGroup / 2,
   },
   /**
-   * 행의 시각 (H-3). 행의 첫 줄 오른쪽 끝.
+   * 연속 행의 시각 (H-3 → DS2-4). **비어 있는 아바타 칸** 안, 행의 첫 줄 옆.
    *
-   * `position: 'absolute'` 인 이유는 세로 비용을 0 으로 두기 위해서다 — 흐름에
-   * 넣으면 줄이 하나 늘고, 5연발에서 그것은 80pt 다. 겹침을 막는 것은
-   * `rowTimeReserve` 이고, 가림을 막는 것은 렌더 순서다(위 JSX 주석).
+   * `position: 'absolute'` 인 이유는 세로 비용을 0 으로 두기 위해서다. 겹침을 막는
+   * 것은 `rowAvatarReserve`(그 칸은 원래 비워 둔 자리)이고, 가림을 막는 것은 렌더
+   * 순서다(위 JSX 주석).
    *
-   * ## 기준선 (u44 리뷰 M-2)
+   * y 는 그릇의 위쪽 패딩과 **같은 곳**에서 온다(u44 리뷰 M-2: 두 숫자가 따로
+   * 적혀 있으면 그 차이가 어긋남이 된다). 연속 행의 첫 줄은 본문이므로 줄 상자도
+   * 본문(`line.body`)이다. 묶음 머리의 시각은 여기가 아니라 이름 줄(`authorTime`).
    *
-   * 리뷰 실측: 그룹 머리에서 `06:59` 가 `곽성재` 보다 **2~3pt 아래**에 앉는다.
-   * 두 가지가 겹쳐 있었다.
-   *
-   * 1. `top: space.xs`(4)가 **그릇의 패딩과 다른 숫자**였다. RN(Yoga)에서 절대
-   *    배치 자식의 오프셋은 부모의 패딩을 건너뛰므로(리뷰가 잰 우측 끝
-   *    386 = 402 − `SAFE_GUTTER` 가 그 증거다), 첫 줄의 y 는 `rowInner` 의
-   *    `paddingTop` 이고 시각의 y 는 4 였다. 두 값이 우연히 가까웠을 뿐 같은
-   *    사실에서 나온 적이 없다. 이제 둘 다 `ROW_SPACE.withinGroup / 2` 를 든다.
-   * 2. `lineHeight: 22` 는 **본문 줄 상자**의 값인데 그룹 머리의 첫 줄은
-   *    작성자 줄(13pt)이다. iOS 는 `lineHeight` 가 붙은 글자를 줄 상자 가운데에
-   *    놓으므로, 15.5pt 짜리 줄 옆에 22pt 짜리 상자를 세우면 그 차이의 절반이
-   *    그대로 어긋남이 된다.
-   *
-   * 그래서 시각은 자기가 어느 줄 옆에 서는지에 따라 **상자를 고른다**:
-   * 연속 행이면 본문 상자(`line.body`), 그룹 머리면 머리줄 상자(`line.head` —
-   * `authorName` 이 같은 이름을 든다). 폰에는 컨테이너를 건너뛰는 baseline
-   * 정렬이 없으므로 「선언된 같은 상자를 같은 y 에서 시작한다」가 여기서 쓸 수
-   * 있는 가장 강한 규율이다.
-   *
-   * **실측** (iPhone 17 Pro · `measure/captures/u44-group.png` · pt=px/3):
-   * 그룹 머리의 광학 어긋남 **+2.67pt → +0.33pt**. 남는 0.33pt 는 13pt 와 12pt
-   * 글자의 상승부 차이라 상자 값을 어떻게 잡아도 그대로다 — 다섯 값을 세워
-   * 확인했고, 그 실험은 `line.head` 의 주석에 있다.
-   *
-   * 첫 흐름 자식이 카드·인용·묘비인 행은 근사다 — 그 경우 예약(`rowTimeReserve`)이
-   * 겹침을 막고 있고, 정렬은 그 다음 문제다. 모른다고 적어 둔다.
+   * 칸 폭(40)을 넘는 큰 글씨에서는 줄바꿈 대신 줄어든다(`adjustsFontSizeToFit`) —
+   * 「04:5 / 9」로 접히던 #2617 의 결함을 이 칸에서 되풀이하지 않는다.
    */
   rowTime: {
     position: 'absolute',
-    right: SAFE_GUTTER,
-    // 규칙 하나: **이 메시지의 맨 위 오른쪽**. 그 y 는 그릇의 위쪽 패딩이고,
-    // 값은 그 패딩과 **같은 곳**에서 온다(`rowInner.paddingVertical`).
-    // (`rowStartsGroup` 의 여백은 바깥 `row` 에 있으므로 여기 안 들어온다.)
+    left: SAFE_GUTTER,
     top: ROW_SPACE.withinGroup / 2,
-    width: TIME_COLUMN,
-    textAlign: 'right',
+    width: TIME_GUTTER,
+    textAlign: 'center',
     fontSize: font.meta,
     // 시각은 뜻을 나르는 글자다 — `textFaint` 는 배경 대비 3.562:1 로 본문
-    // AA(4.5)를 못 지난다(U4-2 M-6 실측). 그룹 머리의 시각도 같은 이유로
-    // 함께 옮겼다: 한 화면에서 같은 종류의 글자가 두 밝기면, 덜 중요한 쪽이
-    // 더 밝아지는 일이 생긴다.
+    // AA(4.5)를 못 지난다(U4-2 M-6 실측).
     color: color.textMuted,
-    // 연속 행의 첫 줄은 본문이다.
     lineHeight: line.body,
   },
-  /** 그룹 머리의 첫 줄은 **작성자 줄**이므로 상자도 그쪽을 든다 (M-2). */
-  rowTimeGroupHead: {lineHeight: line.head},
   // Feedback that the row is interactive at all. On a phone this is one of the
   // few honest signals that a gesture exists, and it costs no vertical space.
   rowPressed: {backgroundColor: rowPressedBackground(color)},
@@ -3376,24 +3358,42 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   rowLanded: {backgroundColor: color.warnSurface},
   // 그룹 사이는 `ROW_SPACE.betweenGroups`. 안쪽이 이미 절반씩 물고 있으므로
   // 차이만 더한다 — 6+6=12(안), 6+6+6=18(사이).
-  rowStartsGroup: {marginTop: ROW_SPACE.betweenGroups - ROW_SPACE.withinGroup},
+  /**
+   * 작성자가 바뀌는 자리의 틈. 시안 `.a-m{margin-bottom:16px}` — 두 행의 안쪽 패딩
+   * 합(`withinGroup` 12)에 이만큼을 더해 16 이 된다. 코어 `betweenGroups`(18)보다
+   * 2 좁다: 아바타가 40 으로 커져 묶음 경계가 얼굴로 먼저 읽힌다.
+   */
+  rowStartsGroup: {marginTop: CONV.groupGap - ROW_SPACE.withinGroup},
   // 시각 칸의 여백은 여기 없다 — 그릇(`rowTimeReserve`)이 진다. 이 줄에만
   // 걸어 두었던 것이 M-1 이 말한 구멍의 절반이었다: 예약이 자식에 붙어 있으면
   // **그 자식이 없는 행**은 예약도 없다.
   authorRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    gap: space.xs,
+    columnGap: CONV.whoGap,
     flexWrap: 'wrap',
   },
   // 줄 상자를 **선언한다**: 행 시각이 이 줄 옆에 서므로(`rowTimeGroupHead`),
   // 이 값이 암묵적인 서체 자연값이면 그 정렬은 아무도 적어 둘 수 없는 값에
   // 기대게 된다 (u44 리뷰 M-2).
+  /**
+   * 시안 `.a-m .who{font-size:15px;font-weight:700;letter-spacing:-.01em;line-height:1.3}`.
+   * 이름과 시각이 **같은 선언된 줄 상자**(`CONV.whoLine`)를 든다 — 폰에는 컨테이너를
+   * 건너뛰는 baseline 정렬이 없어서 그것이 한 줄로 읽히는 근거다(u44 M-2).
+   */
   authorName: {
-    fontSize: font.label,
-    lineHeight: line.head,
+    fontSize: CONV.whoSize,
+    lineHeight: CONV.whoLine,
+    letterSpacing: CONV.whoTracking,
     fontWeight: '700',
     color: color.text,
+  },
+  /** 시안 `.a-m .who time{font-size:12px;font-weight:500;color:var(--ink2)}`. */
+  authorTime: {
+    fontSize: font.meta,
+    lineHeight: CONV.whoLine,
+    fontWeight: '500',
+    color: color.textMuted,
   },
   authorNameAgent: {color: color.agent},
   authorHandle: {fontSize: font.meta, color: color.textFaint},
@@ -3529,27 +3529,32 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   dividerFigure: {fontVariant: ['tabular-nums']},
   dividerLabelBoundary: {color: color.warn, fontWeight: '600'},
 
-  chipRow: {flexDirection: 'row', flexWrap: 'wrap', gap: space.xs, paddingTop: space.xs},
+  /**
+   * 반응 알약 — 시안 `.a-react span{font-size:12.5px;font-weight:600;border-radius:999px;
+   * padding:3px 9px;background:var(--surface2);color:var(--ink2);border:1px solid var(--line)}`,
+   * 내 반응 `.me{background:var(--accentSoft);color:var(--accentText);border-color:transparent}`.
+   * 높이 바닥 32(`CHIP_SIZE`)는 그대로다 — 시안의 25 로 줄이면 슬롭이 한 변 10 이 되어
+   * 이웃 칩과 누르는 상자가 겹친다(PR 「시안과의 차이」).
+   */
+  chipRow: {flexDirection: 'row', flexWrap: 'wrap', gap: CONV.reactGap, paddingTop: space.xs},
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    // 32 in layout, 44 to a thumb via `hitSlop`. See the note on `Chips`.
-    // **두 축 모두** — `minWidth` 가 M-14 가 센 가로 미보증을 닫는다.
     minHeight: CHIP_SIZE,
     minWidth: CHIP_SIZE,
     gap: 4,
-    paddingHorizontal: space.sm,
+    paddingHorizontal: CONV.reactPadX,
     paddingVertical: 3,
     borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: color.border,
-    backgroundColor: color.surface,
+    backgroundColor: color.surfaceMuted,
   },
-  chipMine: {borderColor: color.accent, backgroundColor: color.accentSurface},
+  chipMine: {borderColor: 'transparent', backgroundColor: color.accentSurface},
   chipPressed: {backgroundColor: color.surfacePressed},
   chipEmoji: {fontSize: font.label},
-  chipCount: {fontSize: font.meta, color: color.textMuted, fontWeight: '600'},
+  chipCount: {fontSize: CONV.reactText, color: color.textMuted, fontWeight: '600'},
   chipCountMine: {color: color.accentText},
 
   card: {

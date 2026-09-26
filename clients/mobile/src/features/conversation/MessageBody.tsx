@@ -568,9 +568,22 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     backgroundColor: color.surfacePressed,
   },
   link: {color: color.accentText, textDecorationLine: 'underline'},
-  mention: {color: color.accentText},
-  mentionSelf: {
+  /**
+   * 멘션 칩 — 시안 `.a-mention{color:var(--accentText);background:var(--accentSoft);
+   * border-radius:6px;padding:0 4px;font-weight:600}` (DS2-4, 이슈 Goal 「멘션 칩
+   * signal-soft」). 옛 판은 남의 멘션을 글자색만, 내 멘션만 채움으로 그렸다.
+   *
+   * 반경과 좌우 4 는 **없다**: 폰의 글 안 조각(중첩 `Text`)은 배경은 칠하지만
+   * 모서리·여백을 받지 않는다(PR 「시안과의 차이」). 내 멘션은 한 단 진한 채움과
+   * 굵기로 여전히 갈린다 — 「나를 불렀다」는 남의 멘션과 같은 옷이면 안 된다.
+   */
+  mention: {
+    color: color.accentText,
     backgroundColor: color.accentSurface,
+    fontWeight: '600',
+  },
+  mentionSelf: {
+    backgroundColor: color.accentSurfaceStrong,
     fontWeight: '700',
   },
   // N-1: `#0b0d11` 은 토큰이 아니었고 **앱 배경보다 더 어두웠다**. 웹은 반대

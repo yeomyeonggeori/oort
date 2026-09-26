@@ -172,7 +172,7 @@ describe('BL-1 — 산문이 코드 상자가 되지 않는다', () => {
 });
 
 describe.each(SCHEMES)('%s — 본문 멘션 렌더', (scheme, palette) => {
-  it('활성 멤버만 accent로 그리고 미매칭 핸들은 원문으로 둔다', () => {
+  it('활성 멤버만 멘션 칩(signal-soft)으로 그리고 미매칭 핸들은 원문으로 둔다', () => {
     const view = render(
       <FixedScheme scheme={scheme}>
         <MessageBody
@@ -187,13 +187,14 @@ describe.each(SCHEMES)('%s — 본문 멘션 렌더', (scheme, palette) => {
       screen.getByTestId('message-mention').props.style,
     );
     expect(mention.color).toBe(palette.accentText);
-    expect(mention.backgroundColor).toBeUndefined();
+    // DS2-4: 시안 `.a-mention` — 모든 멘션이 칩이다.
+    expect(mention.backgroundColor).toBe(palette.accentSurface);
     expect(view.queryByTestId('message-self-mention')).toBeNull();
     expect(JSON.stringify(view.toJSON())).toContain('@missing');
     expect(JSON.stringify(view.toJSON())).toContain('@gone');
   });
 
-  it('내 멘션은 accentSurface 채움과 추가 굵기를 얻는다', () => {
+  it('내 멘션은 한 단 진한 채움과 추가 굵기로 남의 멘션과 갈린다', () => {
     render(
       <FixedScheme scheme={scheme}>
         <MessageBody
@@ -208,7 +209,8 @@ describe.each(SCHEMES)('%s — 본문 멘션 렌더', (scheme, palette) => {
     const style = StyleSheet.flatten(self.props.style);
     expect(self.props.children).toBe('@Seongjae');
     expect(style.color).toBe(palette.accentText);
-    expect(style.backgroundColor).toBe(palette.accentSurface);
+    expect(style.backgroundColor).toBe(palette.accentSurfaceStrong);
+    expect(style.backgroundColor).not.toBe(palette.accentSurface);
     expect(style.fontWeight).toBe('700');
     expect(screen.getByTestId('message-mention')).toBeTruthy();
   });

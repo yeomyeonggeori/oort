@@ -577,13 +577,12 @@ describe('터치 타깃 — 44 는 손으로 적는 값이 아니라 도출되�
    * 가로 미보증). `MessageRow.tsx` 는 그 뒤로 `slopTo(CHIP_SIZE)`·`slopTo(line.meta)`
    * 로 도출하고, 그래서 이 목록에 없다.
    *
-   * 목록의 다섯은 아직 손으로 적는다. 감사 §B-4 ③ 의 문장 그대로 **규칙이 아니라
+   * 목록의 넷은 아직 손으로 적는다(LongPressHint 는 DS2-4 에서 코치마크가 되며 빠졌다). 감사 §B-4 ③ 의 문장 그대로 **규칙이 아니라
    * 작성자 기억에 맡겨져 있는** 자리이고, 여기서 하는 일은 그 수를 세어 두는 것이다.
    */
   const REMAINING: Readonly<Record<string, number>> = {
     'design/atoms.tsx': 1,
     'features/agents/StopTurnControl.tsx': 1,
-    'features/conversation/LongPressHint.tsx': 1,
     'features/conversation/MessageBody.tsx': 1,
     'features/conversation/Quote.tsx': 1,
   };

@@ -8,7 +8,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
 
-import {color, line, SAFE_GUTTER, space} from '../src/design/tokens';
+import {color, font, line, SAFE_GUTTER, space} from '../src/design/tokens';
+import {CONV} from '../src/features/conversation/convDesign';
 import {MessageBody} from '../src/features/conversation/MessageBody';
 import {
   DayDivider,
@@ -737,7 +738,11 @@ describe('#1112 — 고정 표면이 하네스에 선다', () => {
 // 선택지는 「항상」 아니면 「전혀」뿐이고, 「전혀」가 고장난 쪽이었다.
 // =============================================================================
 
-describe('#1083 H-3 — 모든 행이 자기 시각을 말한다', () => {
+describe('#1083 H-3 → DS2-4 — 모든 행이 자기 시각을 말한다', () => {
+  // DS2-4(#2716)에서 자리가 바뀌었다: owner 피드백 표 「이름 굵게 + 시간 회색 한 줄」.
+  // 묶음 머리는 이름 뒤 같은 줄, 연속 행은 비어 있는 아바타 칸. 오른쪽 34pt 예약은
+  // 사라졌다(`MessageRow` 의 `TIME_GUTTER` 머리말). H-3 의 요구 — 모든 행이 눈으로
+  // 자기 시각을 말한다 — 는 그대로 지킨다.
   /** 시각은 접근성에서 숨겨져 있으므로 기본 쿼리가 건너뛴다 — 그것이 설계다. */
   const HIDDEN = {includeHiddenElements: true} as const;
 
@@ -757,127 +762,77 @@ describe('#1083 H-3 — 모든 행이 자기 시각을 말한다', () => {
     expect(rowAt(false).getByTestId('row-time', HIDDEN)).toBeTruthy();
   });
 
-  it('시각이 **한 칸**에 있다 — 머리 행과 연속 행이 같은 자리다', () => {
-    // 두 자리에 있으면 눈이 매 줄 어느 쪽을 볼지 다시 정해야 한다. 한 칸이면
-    // 그 칸을 **안 보기로** 정할 수 있다.
-    //
-    // ## 이 단정이 「칸」으로 좁아진 이유 (u44 리뷰 M-2)
-    //
-    // 첫 판은 두 스타일 객체가 **통째로** 같기를 요구했다. 그 요구는 칸이 하는
-    // 일보다 넓다: 칸을 만드는 것은 x·폭·정렬·잉크이고, `lineHeight` 는 칸이
-    // 아니라 **그 글자가 어느 줄 옆에 앉는가**를 정한다. 그리고 그 줄이 두
-    // 경우에 다르다 — 그룹 머리의 첫 줄은 작성자 줄(13pt)이고 연속 행의 첫
-    // 줄은 본문(16pt)이다. 하나로 묶어 두었더니 시각이 작성자 이름보다 2~3pt
-    // 아래에 앉았고(리뷰 실측), 그것이 M-2 다.
-    //
-    // 그래서 칸의 정체성은 아래 네 값이 지고, 줄 상자는 **다르기를** 요구한다.
-    const head = flatten(rowAt(true).getByTestId('row-time', HIDDEN).props.style);
-    const cont = flatten(rowAt(false).getByTestId('row-time', HIDDEN).props.style);
-    for (const key of ['right', 'width', 'textAlign', 'color', 'fontSize', 'top']) {
-      expect([key, head[key]]).toEqual([key, cont[key]]);
-    }
-    expect(head.position).toBe('absolute');
-    expect(head.textAlign).toBe('right');
-  });
-
-  it('M-2 — 시각의 줄 상자가 자기 옆에 선 줄을 따라간다', () => {
-    const head = flatten(rowAt(true).getByTestId('row-time', HIDDEN).props.style);
-    const cont = flatten(rowAt(false).getByTestId('row-time', HIDDEN).props.style);
-    // 그룹 머리 = 머리줄, 연속 행 = 본문 줄. 둘 다 **스케일 위의 이름**이고,
-    // 리뷰가 잡아낸 스케일 밖 숫자(22 를 손으로 적어 둔 것)는 이제 없다.
-    expect(head.lineHeight).toBe(line.head);
-    expect(cont.lineHeight).toBe(line.body);
-    // 그리고 작성자 이름이 **같은 이름의 상자**를 든다 — 두 조각이 한 줄로
-    // 읽히는 근거가 그것이다(폰에는 컨테이너를 건너뛰는 baseline 정렬이 없다).
-    const author = flatten(rowAt(true).getByText('김인턴').props.style);
-    expect(author.lineHeight).toBe(head.lineHeight);
-  });
-
-  it('M-2 — 시각의 y 가 그릇의 위쪽 패딩과 **같은 곳에서** 온다', () => {
-    // 절대 배치 자식은 부모의 패딩을 건너뛰므로, 첫 줄의 y 는 `paddingTop` 이고
-    // 시각의 y 는 `top` 이다. 두 숫자가 따로 적혀 있으면(4 대 6) 그 차이가 그대로
-    // 어긋남이 된다 — 그것이 M-2 의 절반이었다.
+  it('묶음 머리의 시각은 이름과 **한 줄**이다 — 같은 선언된 줄 상자를 든다', () => {
     const view = rowAt(true);
-    const inner = flatten(view.getByTestId('message-press').props.style);
-    const time = flatten(view.getByTestId('row-time', HIDDEN).props.style);
-    expect(Number(time.top)).toBe(Number(inner.paddingVertical));
+    const time = view.getByTestId('row-time', HIDDEN);
+    // 작성자 줄 안이다(절대 배치가 아니라 흐름). 머리 행에는 시각이 **하나**다.
+    expect(view.getAllByTestId('row-time', HIDDEN)).toHaveLength(1);
+    const timeStyle = flatten(time.props.style);
+    expect(timeStyle.position).toBeUndefined();
+    const author = flatten(view.getByText('김인턴').props.style);
+    expect(author.lineHeight).toBe(CONV.whoLine);
+    expect(timeStyle.lineHeight).toBe(author.lineHeight);
+    // 시안 `.a-m .who` 15/700 · `time` 12/500.
+    expect(author.fontSize).toBe(CONV.whoSize);
+    expect(author.fontWeight).toBe('700');
+    expect(timeStyle.fontSize).toBe(font.meta);
   });
 
-  it('세로를 한 픽셀도 안 쓴다 — 줄을 세우면 5연발에 80pt 가 사라진다', () => {
-    expect(
-      flatten(rowAt(false).getByTestId('row-time', HIDDEN).props.style).position,
-    ).toBe('absolute');
-  });
-
-  it('본문이 시각 밑으로 흘러들지 않는다', () => {
-    // 이 단정은 예전에 `continuationBody`(본문에 걸린 여백)를 소스에서 찾았다.
-    // 그 여백이 **본문에만** 있었다는 것이 M-1 이 말한 구멍이므로, 이제
-    // 그려진 값으로 그릇을 본다 — 아래 M-1 절이 나머지 첫 자식들을 센다.
+  it('연속 행의 시각은 비어 있는 아바타 칸 안이다 — 세로도 가로도 새로 쓰지 않는다', () => {
     const view = rowAt(false);
     const inner = flatten(view.getByTestId('message-press').props.style);
     const time = flatten(view.getByTestId('row-time', HIDDEN).props.style);
-    expect(Number(inner.paddingRight)).toBe(
-      SAFE_GUTTER + Number(time.width) + space.sm,
+    expect(time.position).toBe('absolute');
+    expect(time.left).toBe(SAFE_GUTTER);
+    // 칸의 오른쪽 끝이 본문 시작보다 안쪽이다 — 겹치지 않는다.
+    expect(Number(time.left) + Number(time.width)).toBeLessThanOrEqual(
+      Number(inner.paddingLeft),
     );
-    expect(codeOnly(SRC('MessageRow.tsx'))).not.toContain('continuationBody');
+    // y 는 그릇의 위쪽 패딩과 같은 곳에서 온다(u44 M-2), 줄 상자는 본문 줄.
+    expect(Number(time.top)).toBe(Number(inner.paddingVertical));
+    expect(time.lineHeight).toBe(line.body);
+  });
+
+  it('오른쪽 시각 예약이 없다 — 본문이 오른쪽 여백까지 간다 (Buzz)', () => {
+    for (const head of [true, false]) {
+      const inner = flatten(rowAt(head).getByTestId('message-press').props.style);
+      expect(inner.paddingRight ?? inner.paddingHorizontal).toBe(SAFE_GUTTER);
+    }
+    expect(codeOnly(SRC('MessageRow.tsx'))).not.toContain('rowTimeReserve');
   });
 
   it('보조기술이 같은 시각을 두 번 읽지 않는다', () => {
-    const view = rowAt(false);
-    const time = view.getByTestId('row-time', HIDDEN);
-    // 기본 쿼리로는 안 찾힌다 — 그것 자체가 「로터가 안 만난다」의 뜻이다.
-    expect(view.queryByTestId('row-time')).toBeNull();
-    expect(time.props.accessibilityElementsHidden).toBe(true);
-    expect(time.props.importantForAccessibility).toBe('no-hide-descendants');
-    // 그래도 라벨에는 있다 — 눈에서 뺀 것이 아니라 눈에 **더한** 것이다.
-    expect(
-      String(view.getByTestId('message-row').props.accessibilityLabel),
-    ).toMatch(/\d\d:\d\d/);
+    for (const head of [true, false]) {
+      const view = rowAt(head);
+      const time = view.getByTestId('row-time', HIDDEN);
+      expect(view.queryByTestId('row-time')).toBeNull();
+      expect(time.props.accessibilityElementsHidden).toBe(true);
+      expect(time.props.importantForAccessibility).toBe('no-hide-descendants');
+      expect(
+        String(view.getByTestId('message-row').props.accessibilityLabel),
+      ).toMatch(/\d\d:\d\d/);
+      view.unmount();
+    }
   });
 
-  it('시각이 본문 AA 를 지난다 — 뜻을 나르는 글자다', () => {
-    const style = flatten(rowAt(false).getByTestId('row-time', HIDDEN).props.style);
-    expect(style.color).toBe(color.textMuted);
-    expect(contrast(String(style.color), color.bg)).toBeGreaterThanOrEqual(4.5);
+  it('시각이 본문 AA 를 지난다 — 뜻을 나르는 글자다 (두 자리 모두)', () => {
+    for (const head of [true, false]) {
+      const style = flatten(rowAt(head).getByTestId('row-time', HIDDEN).props.style);
+      expect(style.color).toBe(color.textMuted);
+      expect(contrast(String(style.color), color.bg)).toBeGreaterThanOrEqual(4.5);
+    }
   });
 
-  it('그룹 머리의 시각도 같은 밝기다 — 덜 중요한 쪽이 더 밝지 않게', () => {
-    const source = codeOnly(SRC('MessageRow.tsx'));
-    expect(source).not.toMatch(/time: \{fontSize: font\.meta, color: color\.textFaint\}/);
+  it('칸보다 넓은 큰 글씨에서 접히지 않고 줄어든다 (#2617 를 되풀이하지 않는다)', () => {
+    const time = rowAt(false).getByTestId('row-time', HIDDEN);
+    expect(time.props.numberOfLines).toBe(1);
+    expect(time.props.adjustsFontSizeToFit).toBe(true);
   });
-});
 
-// =============================================================================
-// #1092 M-1 — 시각 칸을 예약하는 것은 「행의 첫 줄」이다
-//
-// 예약이 **자식**(작성자 줄과, 연속 행일 때의 본문)에 걸려 있었다. 그래서 행의 첫
-// 흐름 자식이 답글 표식·인용·묘비·아티팩트 카드·승인 카드일 때는 예약이 없었고,
-// 리뷰는 저장소가 커밋한 캡처에서 그 겹침을 읽어 냈다(`...문서에⁷젝³`).
-//
-// 그 구멍의 성질이 요점이다: **자식 종류가 늘 때마다 같은 구멍이 다시 생긴다.**
-// 그래서 이 절은 「이 여섯 경우가 맞다」를 세지 않고 **그릇 하나가 진다**를 센다 —
-// 앞으로 무엇이 더 들어와도 같은 여백 밑으로 들어오게.
-// =============================================================================
-
-describe('#1092 M-1 — 예약은 자식이 아니라 그릇이 진다', () => {
-  const HIDDEN = {includeHiddenElements: true} as const;
-
-  /** 이 행에서 **첫 흐름 자식**이 무엇인가로 갈리는 경우들. */
-  const LEADS: {name: string; props: Partial<React.ComponentProps<typeof MessageRow>>}[] = [
-    {name: '본문', props: {message: message({body: '재시작하면 seq 는 이어집니다'})}},
-    {
-      name: '답글 표식',
-      props: {
-        message: message({rootId: 'root-1'} as never),
-        replyParent: message({id: 'root-1', body: '원본'}),
-      },
-    },
-    {name: '인용', props: {quote: readyBlock()}},
-    {name: '묘비', props: {message: message({state: 'deleted'})}},
-    {
-      name: '승인 카드',
-      props: {
-        message: message({
+  it('카드가 연속 행 시각을 덮지 않는다 — 시각이 흐름 자식보다 **뒤에** 칠해진다', () => {
+    const view = render(
+      <MessageRow
+        message={message({
           type: 'approval_request',
           body: '툴 호출 승인',
           props: {
@@ -885,121 +840,22 @@ describe('#1092 M-1 — 예약은 자식이 아니라 그릇이 진다', () => {
             title: 'github.search_issues 실행 허가',
             approval_status: 'pending',
           },
-        } as never),
-      },
-    },
-    {
-      name: '아티팩트 카드',
-      props: {
-        message: message({
-          type: 'artifact',
-          body: '',
-          props: {
-            artifact_kind: 'pr',
-            title: 'PR #12',
-            url: 'https://github.com/example/repo/pull/12',
-          },
-        } as never),
-      },
-    },
-    {name: '내용 없는 메시지', props: {message: message({body: ''})}},
-  ];
-
-  function renderLead(
-    props: Partial<React.ComponentProps<typeof MessageRow>>,
-  ) {
-    return render(
-      <MessageRow
-        message={message()}
+        } as never)}
         startsGroup={false}
         directory={DIRECTORY}
         chips={[]}
         nowMs={BASE_MS}
-        {...props}
       />,
     );
-  }
-
-  it.each(LEADS)('첫 자식이 $name 이어도 시각 칸이 비어 있다', ({props}) => {
-    const view = renderLead(props);
-    const inner = flatten(view.getByTestId('message-press').props.style);
-    const time = flatten(view.getByTestId('row-time', HIDDEN).props.style);
-    // 시각은 화면 오른쪽에서 `right` 만큼 떨어져 서고 폭이 `width` 다. 흐름
-    // 자식의 오른쪽 끝은 그보다 최소 `space.sm` 더 안쪽이어야 한다 — 그렇지
-    // 않으면 그 자식이 시각 밑으로 흘러든다.
-    expect(Number(inner.paddingRight)).toBeGreaterThanOrEqual(
-      Number(time.right) + Number(time.width) + space.sm,
-    );
-  });
-
-  it('예약이 `startsGroup` 에 따라 달라지지 않는다 — 시각은 두 경우 다 선다', () => {
-    // 예전 예약은 연속 행에만 있었다(`startsGroup ? undefined : ...`). 시각은
-    // 두 경우 다 서므로 예약도 두 경우 다 서야 한다.
-    const head = flatten(
-      renderLead({startsGroup: true}).getByTestId('message-press').props.style,
-    );
-    const cont = flatten(
-      renderLead({startsGroup: false}).getByTestId('message-press').props.style,
-    );
-    expect(head.paddingRight).toBe(cont.paddingRight);
-  });
-
-  it('예약이 소스에서 한 곳뿐이다 — 자식마다 걸면 다음 자식이 또 빠진다', () => {
-    const code = codeOnly(SRC('MessageRow.tsx'));
-    const reservations = code.match(/TIME_COLUMN \+ space\.sm/g) ?? [];
-    expect(reservations).toHaveLength(1);
-    expect(code).toMatch(
-      /rowTimeReserve: \{paddingRight: SAFE_GUTTER \+ TIME_COLUMN \+ space\.sm\}/,
-    );
-  });
-
-  it('카드가 시각을 덮지 않는다 — 시각이 흐름 자식보다 **뒤에** 칠해진다', () => {
-    // RN 에는 z-index 기본값이 없다: 형제는 쓰인 순서대로 칠해진다. 불투명한
-    // `styles.card` 배경을 든 카드가 시각보다 뒤에 있으면 시각이 조용히
-    // 사라진다 — 자리를 비워도 칠이 덮으면 같은 결함이다.
-    const code = codeOnly(SRC('MessageRow.tsx'));
-    expect(code.indexOf('testID="row-time"')).toBeGreaterThan(
-      code.indexOf('<AgentCard'),
-    );
-    expect(code.indexOf('testID="row-time"')).toBeGreaterThan(
-      code.indexOf('<ArtifactCard'),
-    );
-    // 그리고 런타임에서도 마지막 형제다 — 소스 순서만 보면 조건부 분기가
-    // 순서를 뒤집는 날을 못 잡는다.
-    const view = renderLead(LEADS[4].props);
     const kids = view
       .getByTestId('message-press')
       .children.filter((kid: unknown) => {
-        // `Pressable` 이 스스로 덧붙이는 개발용 오버레이. 우리가 쓴 자식이 아니다.
         if (typeof kid === 'string') return true;
         const type = (kid as {type?: {name?: string}}).type;
         return type?.name !== 'PressabilityDebugView';
       });
     const last = kids[kids.length - 1];
-    expect(typeof last === 'string' ? last : last.props.testID).toBe(
-      'row-time',
-    );
-  });
-
-  it('상태 칩이 시각 칸 밖에 선다 — 카드가 예약 안으로 들어왔다', () => {
-    // 승인 카드의 「승인 대기」 칩은 카드 오른쪽 위, 정확히 시각의 칸 자리에
-    // 있다. 카드가 그릇의 예약을 함께 받으면 칩도 그 왼쪽으로 물러난다.
-    const view = renderLead(LEADS[4].props);
-    expect(view.getByTestId('agent-card')).toBeTruthy();
-    const inner = flatten(view.getByTestId('message-press').props.style);
-    const time = flatten(view.getByTestId('row-time', HIDDEN).props.style);
-    expect(Number(inner.paddingRight)).toBeGreaterThanOrEqual(
-      Number(time.right) + Number(time.width) + space.sm,
-    );
-  });
-
-  it('시각이 없는 행은 자리를 비우지 않는다 — 없는 것을 위한 예약은 여백일 뿐', () => {
-    // `WorkingRow` 에는 시각이 없다. 예약을 `rowInner` 자체에 넣었다면 이 행도
-    // 42pt 를 잃었을 것이다.
-    const code = codeOnly(SRC('MessageRow.tsx'));
-    expect(code).not.toMatch(
-      /rowInner: \{[^}]*paddingRight: SAFE_GUTTER \+ TIME_COLUMN/s,
-    );
+    expect(typeof last === 'string' ? last : last.props.testID).toBe('row-time');
   });
 });
 
@@ -1072,7 +928,8 @@ describe('#1083 H-7(폰) — 그룹 안에서 메시지 경계가 보인다', ()
   });
 
   it('그룹 사이 여백이 그룹 안 여백보다 크다 — 아니면 경계가 뒤집힌다', () => {
-    expect(ROW_SPACE.betweenGroups).toBeGreaterThan(ROW_SPACE.withinGroup);
+    // DS2-4: 사이 = 시안 `.a-m{margin-bottom:16px}`(`CONV.groupGap`).
+    expect(CONV.groupGap).toBeGreaterThan(ROW_SPACE.withinGroup);
     const head = render(
       <MessageRow
         message={message()}
@@ -1083,10 +940,8 @@ describe('#1083 H-7(폰) — 그룹 안에서 메시지 경계가 보인다', ()
       />,
     );
     const outer = flatten(head.getByTestId('message-row').props.style);
-    // 안쪽이 절반씩 물고 있으므로 차이만 더한다: 6+6=12(안), 6+6+6=18(사이).
-    expect(
-      Number(outer.marginTop) + ROW_SPACE.withinGroup,
-    ).toBe(ROW_SPACE.betweenGroups);
+    // 안쪽이 절반씩 물고 있으므로 차이만 더한다: 6+6=12(안), 6+6+4=16(사이).
+    expect(Number(outer.marginTop) + ROW_SPACE.withinGroup).toBe(CONV.groupGap);
   });
 });
 
