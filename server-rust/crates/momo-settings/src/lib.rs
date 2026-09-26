@@ -56,6 +56,7 @@
 
 pub mod chain;
 pub mod crypto;
+pub mod egress;
 pub mod engine;
 pub mod invite;
 pub mod join;
@@ -75,6 +76,7 @@ pub use chain::{
     RATE_LIMITED_REASON, UNREACHABLE_REASON,
 };
 pub use crypto::{masked_tail, open_bearer, seal_bearer, CryptoError, SEALED_BOX_VERSION};
+pub use egress::{is_non_public_ip, EgressDenied, EgressPolicy};
 pub use engine::{
     read_work_host_engine, upsert_work_host_engine, validated_engine, StoredWorkHostEngine,
     ALLOWED_ENGINES, DEFAULT_ENGINE,

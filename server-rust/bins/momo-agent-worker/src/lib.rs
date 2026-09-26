@@ -76,6 +76,7 @@ pub mod a2a;
 pub mod completion_report;
 pub mod config;
 pub mod context;
+pub mod egress;
 pub mod oauth;
 pub mod partial;
 pub mod payload;
@@ -398,7 +399,12 @@ impl AgentWorker {
         // Both wires, routed by the sealed envelope kind (B5.4b). A binary that
         // built only one adapter would answer every OAuth turn with a 404 from
         // the wrong path, which reads as "the model is missing".
-        let provider = http_provider(config.request_timeout)?;
+        // #2852: the provider call may only reach addresses the egress policy
+        // accepts. The env transport's own host is operator configuration and
+        // stays reachable (compose's `mock-hermes`, a host gateway).
+        let egress = momo_settings::EgressPolicy::from_env(config.provider.allow_local_loopback)
+            .with_operator_base_url(&config.provider.base_url);
+        let provider = http_provider(config.request_timeout, egress)?;
         let refresher = Arc::new(HttpTokenRefresher::new(config.request_timeout));
         Ok(AgentWorker::with_refresher(
             pool, provider, refresher, config,

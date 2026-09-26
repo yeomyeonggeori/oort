@@ -91,7 +91,9 @@ use momo_settings::{CascadeDecision, LinkCredential};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::egress::EgressGuard;
 use crate::responses::OpenAiResponsesProvider;
+use momo_settings::EgressPolicy;
 
 /// One OpenAI-compatible chat message.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -336,6 +338,10 @@ pub enum ProviderError {
     /// HTTP 200 with `{"error": {"message": …}}`.
     #[error("provider returned an error envelope: {0}")]
     ErrorEnvelope(String),
+    /// #2852: the provider host is (or resolves to) an address the egress
+    /// policy refuses. A verdict, not an outage — never retried.
+    #[error("provider egress refused: {0}")]
+    EgressDenied(String),
 }
 
 impl ProviderError {
@@ -352,7 +358,9 @@ impl ProviderError {
             ProviderError::HttpStatus(status, _) => {
                 matches!(classify_status(Some(*status)), CascadeDecision::FallOver(_))
             }
-            ProviderError::InvalidResponse(_) | ProviderError::ErrorEnvelope(_) => false,
+            ProviderError::InvalidResponse(_)
+            | ProviderError::ErrorEnvelope(_)
+            | ProviderError::EgressDenied(_) => false,
         }
     }
 }
@@ -564,6 +572,9 @@ async fn post(
 pub struct WireRoutedProvider {
     chat_completions: Arc<dyn ChatProvider>,
     responses: Arc<dyn ChatProvider>,
+    /// #2852: the pre-request half of the egress guard. `None` only for
+    /// injected in-process providers, which open no socket.
+    guard: Option<EgressGuard>,
 }
 
 impl WireRoutedProvider {
@@ -574,18 +585,30 @@ impl WireRoutedProvider {
         WireRoutedProvider {
             chat_completions,
             responses,
+            guard: None,
         }
     }
 
-    /// The shipped pair, on one shared HTTP client.
-    pub fn http(request_timeout: Duration) -> Result<WireRoutedProvider, reqwest::Error> {
-        let client = reqwest::Client::builder()
-            .timeout(request_timeout)
-            .build()?;
-        Ok(WireRoutedProvider::new(
+    /// The shipped pair, on one shared HTTP client whose DNS resolver is the
+    /// #2852 egress guard (see [`crate::egress`]).
+    pub fn http_guarded(
+        request_timeout: Duration,
+        guard: EgressGuard,
+    ) -> Result<WireRoutedProvider, reqwest::Error> {
+        let client = guard.client(reqwest::Client::builder().timeout(request_timeout))?;
+        let mut provider = WireRoutedProvider::new(
             Arc::new(OpenAiCompatProvider::from_client(client.clone())),
             Arc::new(OpenAiResponsesProvider::from_client(client)),
-        ))
+        );
+        provider.guard = Some(guard);
+        Ok(provider)
+    }
+
+    async fn precheck(&self, endpoint: &ProviderEndpoint) -> Result<(), ProviderError> {
+        match &self.guard {
+            Some(guard) => guard.precheck(&endpoint.url()).await,
+            None => Ok(()),
+        }
     }
 }
 
@@ -596,6 +619,7 @@ impl ChatProvider for WireRoutedProvider {
         endpoint: &ProviderEndpoint,
         request: &ChatRequest,
     ) -> Result<ChatCompletion, ProviderError> {
+        self.precheck(endpoint).await?;
         match endpoint.wire {
             ProviderWire::ChatCompletions => {
                 self.chat_completions.complete(endpoint, request).await
@@ -614,6 +638,7 @@ impl ChatProvider for WireRoutedProvider {
         request: &ChatRequest,
         sink: &dyn DeltaSink,
     ) -> Result<ChatCompletion, ProviderError> {
+        self.precheck(endpoint).await?;
         match endpoint.wire {
             // `/chat/completions` is sent with `stream=false` here, so there is
             // nothing to report slice by slice.
@@ -632,8 +657,18 @@ impl ChatProvider for WireRoutedProvider {
 /// The provider `main.rs` runs and the conformance suites inject, so a test and
 /// production route identically. A test that built only one adapter would prove
 /// nothing about which one a real turn picks.
-pub fn http_provider(request_timeout: Duration) -> Result<Arc<dyn ChatProvider>, reqwest::Error> {
-    Ok(Arc::new(WireRoutedProvider::http(request_timeout)?))
+///
+/// `policy` is the #2852 egress policy: the worker builds it from
+/// `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK` / `AGENT_PROVIDER_LOCAL_HOSTS` plus the
+/// operator's own `HERMES_BASE_URL` host.
+pub fn http_provider(
+    request_timeout: Duration,
+    policy: EgressPolicy,
+) -> Result<Arc<dyn ChatProvider>, reqwest::Error> {
+    Ok(Arc::new(WireRoutedProvider::http_guarded(
+        request_timeout,
+        EgressGuard::system(policy),
+    )?))
 }
 
 /// Decode one non-streamed completion body. Split out from the HTTP call so the
