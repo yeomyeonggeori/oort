@@ -247,9 +247,11 @@ export function createRealtimeTransport(
       });
     }
     display.push({kind: 'resume'});
-    if (socketState === 'connecting') {
+    if (socketState === 'connecting' && !attemptInFlight(current)) {
       // `connect()` is a no-op while connecting, and the client may be sitting
-      // in a backoff of up to 20 s. Closing and opening again resets it.
+      // in a backoff of up to 20 s. Closing and opening again resets it. An
+      // attempt already in flight (token fetch, handshake) is left to finish:
+      // cutting it would only start the same attempt over (review M2).
       current.disconnect();
     }
     current.connect();
@@ -361,11 +363,14 @@ export function createRealtimeTransport(
         clearTimeout(graceTimer);
         graceTimer = null;
       }
-      display.dispose();
       appStateSub.remove();
       netInfoUnsub();
+      // Disconnect BEFORE disposing the display: the disconnect emits a raw
+      // `disconnected`, which would otherwise arm a fresh grace timer on a
+      // display nobody will ever dispose again (review of #2755, M1).
       client?.disconnect();
       client = null;
+      display.dispose();
     },
     policy: () => state,
   };
@@ -377,4 +382,21 @@ function toVisibility(status: AppStateStatus): AppVisibility {
     : status === 'inactive'
       ? 'inactive'
       : 'active';
+}
+
+/**
+ * Is centrifuge-js in the middle of a connection attempt, as opposed to waiting
+ * out a reconnect backoff?
+ *
+ * The public API cannot tell: both are `state === 'connecting'`. The private
+ * `_reconnecting` flag (5.7: set when an attempt starts in `_startReconnecting`,
+ * cleared when it fails, before the next backoff is scheduled, and on every
+ * state change) is exactly that distinction. It is read defensively — if a
+ * future version drops it, this answers `false` and `resume` falls back to
+ * cutting the backoff, which is the pre-review behaviour. The flag's meaning is
+ * pinned against the real library in `centrifugeChurnRepro.test.ts`, so an
+ * upgrade that changes it fails there.
+ */
+export function attemptInFlight(client: Centrifuge): boolean {
+  return (client as unknown as {_reconnecting?: unknown})._reconnecting === true;
 }

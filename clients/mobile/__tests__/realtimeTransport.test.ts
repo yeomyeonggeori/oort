@@ -1,4 +1,6 @@
 import type {RealtimeStatus} from '@momo/core/lib/realtimeEvents';
+import {readFileSync} from 'fs';
+import {resolve} from 'path';
 import NetInfo from '@react-native-community/netinfo';
 import {BACKGROUND_GRACE_MS} from '../src/realtime/backgroundPolicy';
 import {
@@ -43,6 +45,7 @@ jest.mock('react-native', () => ({
 
 type FakeClient = {
   state: string;
+  _reconnecting?: boolean;
   connectCount: number;
   disconnectCount: number;
   setTokenCalls?: string[];
@@ -130,8 +133,10 @@ describe('foreground return', () => {
   it('cuts a reconnect backoff short (connect() alone is a no-op while connecting)', () => {
     const client = start();
     emitAppState('background');
-    // The radio died while away; centrifuge-js is in its backoff.
+    // The radio died while away; centrifuge-js is in its backoff (no attempt
+    // in flight).
     client.state = 'connecting';
+    client._reconnecting = false;
     client.__emit('connecting', {code: 1, reason: 'transport closed'});
     const disconnectsBefore = client.disconnectCount;
     const connectsBefore = client.connectCount;
@@ -139,6 +144,18 @@ describe('foreground return', () => {
     expect(client.disconnectCount).toBe(disconnectsBefore + 1);
     expect(client.connectCount).toBe(connectsBefore + 1);
     expect(client.state).toBe('connected');
+  });
+
+  it('leaves an attempt already in flight to finish (review M2)', () => {
+    const client = start();
+    emitAppState('background');
+    client.state = 'connecting';
+    client.__emit('connecting', {code: 1, reason: 'transport closed'});
+    // Token fetch / handshake under way.
+    client._reconnecting = true;
+    const disconnectsBefore = client.disconnectCount;
+    emitAppState('active');
+    expect(client.disconnectCount).toBe(disconnectsBefore);
   });
 
   it('leaves a socket that survived the absence alone', () => {
@@ -178,6 +195,39 @@ describe('foreground return', () => {
     advance(BACKGROUND_GRACE_MS);
     emitAppState('active');
     expect(client.setTokenCalls ?? []).toEqual([]);
+  });
+});
+
+describe('dispose (review M1)', () => {
+  it('reports nothing after dispose — the closing disconnect must not arm a grace', () => {
+    start();
+    const t = transport as RealtimeTransport;
+    transport = null;
+    t.dispose();
+    const after = statuses.length;
+    advance(8_000);
+    expect(statuses.length).toBe(after);
+  });
+});
+
+describe('the stale-token threshold (review Low)', () => {
+  it('is below the server default connection-token TTL', () => {
+    // Read from the server source so the two cannot drift apart silently.
+    // The server lets an operator override it (CENT_CONNECTION_TOKEN_TTL_SECONDS,
+    // clamped 60–1800 s); the default is what this client is tuned to.
+    const rust = readFileSync(
+      resolve(__dirname, '../../../server-rust/crates/momo-auth/src/realtime.rs'),
+      'utf8',
+    );
+    const m = rust.match(/CONNECTION_TOKEN_TTL_SECONDS:\s*i64\s*=\s*([0-9*\s]+);/);
+    expect(m).not.toBeNull();
+    const ttlSeconds = (m as RegExpMatchArray)[1]
+      .split('*')
+      .map(part => Number(part.trim()))
+      .reduce((a, b) => a * b, 1);
+    expect(ttlSeconds).toBe(300);
+    expect(REALTIME_TOKEN_STALE_MS).toBeLessThan(ttlSeconds * 1000);
+    expect(REALTIME_TOKEN_STALE_MS).toBeGreaterThan(0);
   });
 });
 

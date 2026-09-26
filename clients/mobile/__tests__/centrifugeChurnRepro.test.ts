@@ -25,6 +25,8 @@
 // trigger of the observed pair.
 // =============================================================================
 
+import {attemptInFlight} from '../src/realtime/centrifugeTransport';
+
 type Handler = ((ev?: unknown) => void) | null;
 
 interface ServerOptions {
@@ -214,5 +216,44 @@ describe('centrifuge-js 5.7 timers against a serial subscribe proxy', () => {
     expect(codes[0]).toBe(2);
     expect(lifetimesMs[0]).toBeGreaterThanOrEqual(35_000);
     expect(lifetimesMs[0]).toBeLessThan(35_100);
+  });
+});
+
+describe('the private flag `resume` relies on (review M2)', () => {
+  it('`_reconnecting` is true during an attempt and false while waiting out a backoff', async () => {
+    const {MockWebSocket} = mockCentrifugo({
+      subscribeLatencyMs: 10,
+      pingSeconds: 25,
+      sendPings: true,
+    });
+    let release: ((token: string) => void) | null = null;
+    let calls = 0;
+    const client = new Centrifuge('ws://mock/connection/websocket', {
+      websocket: MockWebSocket,
+      minReconnectDelay: 5_000,
+      maxReconnectDelay: 20_000,
+      getToken: () => {
+        calls += 1;
+        if (calls === 1) return Promise.reject(new Error('offline'));
+        return new Promise<string>(r => {
+          release = r;
+        });
+      },
+    });
+    client.on('error', () => {});
+    client.connect();
+    // First token fetch fails → backoff scheduled, nothing in flight.
+    await jest.advanceTimersByTimeAsync(10);
+    expect(client.state).toBe('connecting');
+    expect(attemptInFlight(client)).toBe(false);
+    // Backoff elapses → second attempt starts and waits on the token.
+    await jest.advanceTimersByTimeAsync(10_000);
+    expect(calls).toBe(2);
+    expect(client.state).toBe('connecting');
+    expect(attemptInFlight(client)).toBe(true);
+    (release as unknown as (t: string) => void)('token');
+    await jest.advanceTimersByTimeAsync(100);
+    expect(client.state).toBe('connected');
+    client.disconnect();
   });
 });
