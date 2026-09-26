@@ -562,8 +562,15 @@ async fn post(
     request_builder = match endpoint.wire {
         // #2872: Anthropic authenticates with `x-api-key`; no Authorization
         // header is sent, so the key reaches exactly one header.
+        // Review N5: marked sensitive like `bearer_auth` does, so a future
+        // `Debug` of the request never prints it.
         ProviderWire::AnthropicMessages => request_builder
-            .header("x-api-key", &endpoint.bearer)
+            .header("x-api-key", {
+                let mut value = reqwest::header::HeaderValue::from_str(&endpoint.bearer)
+                    .unwrap_or_else(|_| reqwest::header::HeaderValue::from_static(""));
+                value.set_sensitive(true);
+                value
+            })
             .header("anthropic-version", crate::anthropic::ANTHROPIC_VERSION),
         ProviderWire::ChatCompletions | ProviderWire::Responses => {
             request_builder.bearer_auth(&endpoint.bearer)

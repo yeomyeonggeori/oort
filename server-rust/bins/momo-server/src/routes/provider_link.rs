@@ -216,6 +216,11 @@ fn requested_credential(
         (None, None) => Err(ApiError::bad_request(
             "bearer must not be empty (or send an oauth grant instead)",
         )),
+        // Review N4: a "bearer" that is itself a sealed-envelope document
+        // would be re-read as another credential kind on decrypt.
+        (Some(bearer), None) if LinkCredential::parse(bearer).kind_label() != "bearer" => Err(
+            ApiError::bad_request("bearer must be an API key, not a credential envelope"),
+        ),
         (Some(bearer), None) => Ok(match format {
             ProviderFormat::Openai => LinkCredential::Bearer(bearer.to_string()),
             ProviderFormat::Anthropic => LinkCredential::AnthropicKey(bearer.to_string()),
@@ -839,6 +844,36 @@ fn validated_chain_entries(
 
 #[cfg(test)]
 mod tests {
+
+    /// Review N4: an envelope-shaped bearer is refused instead of being
+    /// re-read as another credential kind on decrypt.
+    #[test]
+    fn an_envelope_shaped_bearer_is_refused() {
+        let request = |bearer: &str, format: Option<&str>| crate::dto::PutProviderLinkRequest {
+            base_url: "https://api.example.com/v1".into(),
+            bearer: Some(bearer.into()),
+            mode: None,
+            oauth: None,
+            format: format.map(str::to_string),
+        };
+        for format in [None, Some("anthropic")] {
+            for bearer in [
+                r#"{"kind":"anthropic-key","api_key":"sk-ant-x"}"#,
+                r#"{"kind":"oauth-openai","refresh_token":"rt"}"#,
+            ] {
+                let error = requested_credential(&request(bearer, format), "production", false)
+                    .expect_err(bearer);
+                assert_eq!(error.status, StatusCode::BAD_REQUEST);
+            }
+        }
+        // An ordinary key (even `{`-leading garbage that is no envelope) is fine.
+        assert_eq!(
+            requested_credential(&request("sk-live-abc", None), "production", false)
+                .unwrap()
+                .kind_label(),
+            "bearer"
+        );
+    }
 
     /// #2894: `oauth.tokenEndpoint` passes the base-URL write gate.
     #[test]

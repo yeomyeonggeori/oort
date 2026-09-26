@@ -83,6 +83,7 @@ pub mod partial;
 pub mod payload;
 pub mod provider;
 pub mod responses;
+pub mod sse;
 pub mod stream;
 pub mod tool_exec;
 

@@ -274,11 +274,14 @@ impl LinkCredential {
                 Err(_) => LinkCredential::Bearer(trimmed.to_string()),
             },
             Some(ANTHROPIC_KEY_KIND) => {
+                // Review N4: a damaged Anthropic envelope fails CLOSED — an
+                // empty key (not usable, so the worker never calls with it),
+                // never the envelope JSON re-read as a Bearer for another wire.
                 match serde_json::from_str::<AnthropicKeyEnvelope>(trimmed) {
-                    Ok(envelope) if !envelope.api_key.trim().is_empty() => {
+                    Ok(envelope) => {
                         LinkCredential::AnthropicKey(envelope.api_key.trim().to_string())
                     }
-                    _ => LinkCredential::Bearer(trimmed.to_string()),
+                    Err(_) => LinkCredential::AnthropicKey(String::new()),
                 }
             }
             _ => LinkCredential::Bearer(trimmed.to_string()),
@@ -470,11 +473,18 @@ mod tests {
         ] {
             assert!(!value.contains("SECRETVALUE"), "{value}");
         }
-        // An empty key inside the envelope is not an Anthropic link.
-        assert_eq!(
-            LinkCredential::parse(r#"{"kind":"anthropic-key","api_key":"  "}"#).kind_label(),
-            "bearer"
-        );
+        // Review N4: a damaged envelope fails closed — still the Anthropic
+        // kind, and not present, so nothing is ever sent with it.
+        for damaged in [
+            r#"{"kind":"anthropic-key","api_key":"  "}"#,
+            r#"{"kind":"anthropic-key"}"#,
+            r#"{"kind":"anthropic-key","api_key":7}"#,
+        ] {
+            let credential = LinkCredential::parse(damaged);
+            assert_eq!(credential.kind_label(), "anthropic-key", "{damaged}");
+            assert!(!credential.is_present(), "{damaged}");
+            assert_eq!(credential.presentable_bearer(), "");
+        }
     }
 
     /// A `{`-leading plaintext that is not this envelope must stay a bearer.

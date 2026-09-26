@@ -232,6 +232,9 @@ impl MessageStream {
     }
 
     pub fn push_to(&mut self, chunk: &[u8], sink: &dyn DeltaSink) {
+        if self.outcome.is_some() {
+            return;
+        }
         if let Some(raw) = self.non_sse.as_mut() {
             if raw.len() + chunk.len() > NON_SSE_FALLBACK_LIMIT {
                 self.non_sse = None;
@@ -239,12 +242,19 @@ impl MessageStream {
                 raw.extend_from_slice(chunk);
             }
         }
-        self.buffer.extend_from_slice(chunk);
-        while let Some(index) = self.buffer.iter().position(|byte| *byte == b'\n') {
-            let line: Vec<u8> = self.buffer.drain(..=index).collect();
-            let line = line.strip_suffix(b"\n").unwrap_or(&line);
-            let line = line.strip_suffix(b"\r").unwrap_or(line);
-            self.line(&String::from_utf8_lossy(line), sink);
+        // Review M-2: scan only the new bytes, and bound the pending line.
+        let lines = match crate::sse::take_lines(&mut self.buffer, chunk) {
+            Ok(lines) => lines,
+            Err(error) => {
+                self.outcome = Some(Err(error));
+                return;
+            }
+        };
+        for line in lines {
+            self.line(&String::from_utf8_lossy(&line), sink);
+            if self.outcome.is_some() {
+                return;
+            }
         }
     }
 
@@ -288,6 +298,13 @@ impl MessageStream {
             self.flush(sink);
         } else if line.starts_with(':') {
         } else if let Some(value) = field(line, "data") {
+            if self.data.len() + value.len() + 1 > crate::sse::MAX_EVENT_BYTES {
+                self.outcome = Some(Err(crate::sse::over_limit(
+                    "SSE event",
+                    crate::sse::MAX_EVENT_BYTES,
+                )));
+                return;
+            }
             if !self.data.is_empty() {
                 self.data.push('\n');
             }
@@ -318,6 +335,14 @@ impl MessageStream {
             .unwrap_or_default()
             .to_string();
         let index = event.get("index").and_then(Value::as_u64).unwrap_or(0);
+        if index > crate::sse::MAX_BLOCK_INDEX {
+            // Review M-2: an attacker-chosen index must not grow the map.
+            self.outcome = Some(Err(ProviderError::InvalidResponse(format!(
+                "content block index {index} exceeds {}",
+                crate::sse::MAX_BLOCK_INDEX
+            ))));
+            return;
+        }
 
         match kind.as_str() {
             "message_start" => {
@@ -337,6 +362,13 @@ impl MessageStream {
                     block.tool_input_start = start.get("input").cloned();
                 } else if let Some(text) = start.get("text").and_then(Value::as_str) {
                     if !text.is_empty() {
+                        if self.text.len() + text.len() > crate::sse::MAX_TEXT_BYTES {
+                            self.outcome = Some(Err(crate::sse::over_limit(
+                                "answer text",
+                                crate::sse::MAX_TEXT_BYTES,
+                            )));
+                            return;
+                        }
                         self.text.push_str(text);
                         sink.text_delta(text);
                     }
@@ -347,6 +379,13 @@ impl MessageStream {
                 match delta.get("type").and_then(Value::as_str) {
                     Some("text_delta") => {
                         if let Some(text) = delta.get("text").and_then(Value::as_str) {
+                            if self.text.len() + text.len() > crate::sse::MAX_TEXT_BYTES {
+                                self.outcome = Some(Err(crate::sse::over_limit(
+                                    "answer text",
+                                    crate::sse::MAX_TEXT_BYTES,
+                                )));
+                                return;
+                            }
                             self.text.push_str(text);
                             self.deltas += 1;
                             sink.text_delta(text);
@@ -354,11 +393,15 @@ impl MessageStream {
                     }
                     Some("input_json_delta") => {
                         if let Some(partial) = delta.get("partial_json").and_then(Value::as_str) {
-                            self.blocks
-                                .entry(index)
-                                .or_default()
-                                .tool_input
-                                .push_str(partial);
+                            let input = &mut self.blocks.entry(index).or_default().tool_input;
+                            if input.len() + partial.len() > crate::sse::MAX_TOOL_INPUT_BYTES {
+                                self.outcome = Some(Err(crate::sse::over_limit(
+                                    "tool input",
+                                    crate::sse::MAX_TOOL_INPUT_BYTES,
+                                )));
+                                return;
+                            }
+                            input.push_str(partial);
                         }
                     }
                     // thinking / signature / citations: not part of the answer.
@@ -752,6 +795,87 @@ mod tests {
         let error = drive_chunked(&invalid, 64, &DiscardDeltas).expect_err("invalid");
         assert!(matches!(error, ProviderError::ErrorEnvelope(ref m) if m.contains("bad model")));
         assert!(!error.is_retryable());
+    }
+
+    /// Review M-2: every accumulator has a ceiling, and crossing one ends the
+    /// stream at once with a non-retryable error.
+    #[test]
+    fn hostile_streams_hit_a_ceiling_instead_of_growing() {
+        fn fed_until_terminal(chunks: impl Iterator<Item = Vec<u8>>) -> (MessageStream, usize) {
+            let mut stream = MessageStream::new();
+            let mut fed = 0;
+            for chunk in chunks {
+                fed += chunk.len();
+                stream.push(&chunk);
+                if stream.is_terminal() {
+                    break;
+                }
+            }
+            (stream, fed)
+        }
+        let assert_refused = |stream: MessageStream, what: &str| {
+            let error = stream.finish().expect_err(what);
+            assert!(
+                matches!(error, ProviderError::InvalidResponse(ref m) if m.contains("limit") || m.contains("index")),
+                "{what}: {error:?}"
+            );
+            assert!(!error.is_retryable(), "{what}");
+        };
+
+        // 1. 64 MiB with no newline.
+        let started = std::time::Instant::now();
+        let (stream, fed) = fed_until_terminal(std::iter::repeat_n(vec![b'x'; 64 * 1024], 1024));
+        assert!(stream.is_terminal(), "no newline ceiling");
+        assert!(fed <= crate::sse::MAX_LINE_BYTES + 64 * 1024);
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+        assert_refused(stream, "newline-free flood");
+
+        // 2. `data:` lines that never close an event.
+        let line = format!("data: {}\n", "y".repeat(512 * 1024));
+        let (stream, _) = fed_until_terminal(std::iter::repeat_n(line.into_bytes(), 64));
+        assert_refused(stream, "unterminated event");
+
+        // 3. A content block index chosen by the provider.
+        let raw = sse(
+            "content_block_start",
+            json!({"type":"content_block_start","index":1_000_000,"content_block":{"type":"text","text":""}}),
+        );
+        let (stream, _) = fed_until_terminal(std::iter::once(raw.into_bytes()));
+        assert_refused(stream, "block index");
+
+        // 4. Tool arguments that never end.
+        let mut chunks = vec![sse(
+            "content_block_start",
+            json!({"type":"content_block_start","index":0,
+            "content_block":{"type":"tool_use","id":"t","name":"n","input":{}}}),
+        )
+        .into_bytes()];
+        let piece = "z".repeat(256 * 1024);
+        for _ in 0..8 {
+            chunks.push(
+                sse(
+                    "content_block_delta",
+                    json!({"type":"content_block_delta","index":0,
+                "delta":{"type":"input_json_delta","partial_json":piece}}),
+                )
+                .into_bytes(),
+            );
+        }
+        let (stream, _) = fed_until_terminal(chunks.into_iter());
+        assert_refused(stream, "tool input");
+
+        // 5. Answer text past the ceiling.
+        let piece = "가".repeat(300 * 1024);
+        let chunks = (0..8).map(|_| {
+            sse(
+                "content_block_delta",
+                json!({"type":"content_block_delta","index":0,
+                "delta":{"type":"text_delta","text":piece}}),
+            )
+            .into_bytes()
+        });
+        let (stream, _) = fed_until_terminal(chunks);
+        assert_refused(stream, "answer text");
     }
 
     #[test]
