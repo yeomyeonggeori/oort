@@ -37,9 +37,13 @@
 //! ## What must never happen
 //!
 //! * **An unreachable LiveKit is not an empty room.** A transport error, a
-//!   timeout, a non-2xx or an unparseable body changes nothing — not the rows
-//!   and not the miss counts — and logs a warning. Only a successful
-//!   `ListParticipants` answer is evidence.
+//!   timeout, a non-2xx or an unparseable body changes no row and logs a
+//!   warning. It also **breaks the run**: the huddle's miss counts start from
+//!   zero, so miss → error → miss is not two consecutive misses (D-H4). Only a
+//!   successful `ListParticipants` answer is evidence.
+//! * **A crash → re-join is not a ghost.** `join_huddle` reuses the open row,
+//!   so the settlement also skips a row whose member has a `huddle.joined`
+//!   audit entry from shortly before the first miss onward.
 //! * **A huddle that is just starting is not a ghost.** The server never
 //!   creates the LiveKit room; the first participant's connection does. A
 //!   huddle younger than [`START_GRACE`] (by `started_at`) is not judged at
@@ -58,12 +62,13 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
+use chrono::DateTime;
 use chrono::Utc;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use momo_db::PgPool;
 use momo_messaging::huddle_sweep::{
     active_huddles_for_sweep, ensure_rls_enforced, settle_swept_departures, SweepError,
-    SweepHuddle, SweptParticipant,
+    SweepHuddle, SweptDeparture, SweptParticipant,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -73,7 +78,7 @@ use uuid::Uuid;
 pub const START_GRACE: Duration = Duration::from_secs(120);
 /// Participant rows younger than this are not counted: the client may still be
 /// connecting to LiveKit.
-pub const JOIN_GRACE: Duration = Duration::from_secs(60);
+pub const JOIN_GRACE: Duration = Duration::from_secs(120);
 /// Consecutive absent observations before a participant is closed.
 pub const MISSES_TO_SETTLE: u8 = 2;
 /// Active huddles examined per tick.
@@ -281,18 +286,11 @@ enum MissKey {
     EmptyHuddle(Uuid),
 }
 
-impl MissKey {
-    fn huddle_id(&self) -> Uuid {
-        match self {
-            MissKey::Participant(huddle_id, _) | MissKey::EmptyHuddle(huddle_id) => *huddle_id,
-        }
-    }
-}
-
 /// The sweep and the miss counts it carries from tick to tick.
 pub struct HuddleSweeper {
     client: LiveKitRoomClient,
-    misses: HashMap<MissKey, u8>,
+    /// Consecutive misses and when the first of them was observed.
+    misses: HashMap<MissKey, (u8, DateTime<Utc>)>,
     write_pool_checked: bool,
 }
 
@@ -305,12 +303,18 @@ impl HuddleSweeper {
         }
     }
 
-    /// Bump a miss count and say whether it has reached the settlement bar.
-    fn miss(&mut self, key: MissKey, seen: &mut HashSet<MissKey>) -> bool {
+    /// Bump a miss count. Returns the first miss's observation time once the
+    /// count has reached the settlement bar.
+    fn miss(
+        &mut self,
+        key: MissKey,
+        now: DateTime<Utc>,
+        seen: &mut HashSet<MissKey>,
+    ) -> Option<DateTime<Utc>> {
         seen.insert(key);
-        let count = self.misses.entry(key).or_insert(0);
-        *count = count.saturating_add(1);
-        *count >= MISSES_TO_SETTLE
+        let entry = self.misses.entry(key).or_insert((0, now));
+        entry.0 = entry.0.saturating_add(1);
+        (entry.0 >= MISSES_TO_SETTLE).then_some(entry.1)
     }
 
     /// One tick. `read_pool` finds the candidates (cross-tenant read);
@@ -328,9 +332,14 @@ impl HuddleSweeper {
             self.write_pool_checked = true;
         }
         let huddles = active_huddles_for_sweep(read_pool, HUDDLE_BATCH).await?;
+        if huddles.len() as i64 >= HUDDLE_BATCH {
+            tracing::warn!(
+                batch = HUDDLE_BATCH,
+                "huddle sweep read a full batch; newer active huddles are not judged this tick"
+            );
+        }
         let mut stats = HuddleSweepStats::default();
         let mut seen: HashSet<MissKey> = HashSet::new();
-        let mut unobserved: HashSet<Uuid> = HashSet::new();
         let start_grace =
             chrono::Duration::from_std(START_GRACE).unwrap_or(chrono::Duration::zero());
         let now = Utc::now();
@@ -345,9 +354,10 @@ impl HuddleSweeper {
             let present = match self.client.list_participants(huddle.huddle_id).await {
                 Ok(present) => present,
                 Err(error) => {
-                    // Never read "could not ask" as "nobody is there".
+                    // Never read "could not ask" as "nobody is there" — and an
+                    // unobserved tick breaks the run (ADR-0122 증보 D-H4): its
+                    // counts are dropped below because nothing re-marks them.
                     stats.livekit_unreachable += 1;
-                    unobserved.insert(huddle.huddle_id);
                     tracing::warn!(
                         huddle_id = %huddle.huddle_id,
                         workspace_id = %huddle.workspace_id,
@@ -361,10 +371,10 @@ impl HuddleSweeper {
                 .await;
         }
 
-        // Forget counts for rows that are gone (left, settled, huddle ended) —
-        // but keep them for huddles this tick could not observe.
-        self.misses
-            .retain(|key, _| seen.contains(key) || unobserved.contains(&key.huddle_id()));
+        // Only a miss observed in this tick carries forward: present rows,
+        // rows that are gone, too-young huddles and huddles LiveKit could not
+        // be asked about all start from zero next time.
+        self.misses.retain(|key, _| seen.contains(key));
 
         if stats.participants_marked_left > 0 || stats.huddles_ended > 0 {
             tracing::info!(
@@ -395,7 +405,7 @@ impl HuddleSweeper {
             // Past START_GRACE (checked by the caller) and nobody's row is
             // open: the room is empty or gone. Two looks, like a participant.
             let key = MissKey::EmptyHuddle(huddle.huddle_id);
-            if self.miss(key, seen) {
+            if self.miss(key, now, seen).is_some() {
                 end_if_empty = true;
             } else {
                 stats.first_misses += 1;
@@ -410,8 +420,13 @@ impl HuddleSweeper {
                 if participant.joined_at > now - grace {
                     continue;
                 }
-                if self.miss(key, seen) {
-                    departures.push(*participant);
+                if let Some(first_miss_at) = self.miss(key, now, seen) {
+                    // A join by this member from shortly before the first miss
+                    // onwards means they are back (or reconnecting).
+                    departures.push(SweptDeparture {
+                        participant: *participant,
+                        rejoin_cutoff: first_miss_at - grace,
+                    });
                 } else {
                     stats.first_misses += 1;
                 }
@@ -440,8 +455,10 @@ impl HuddleSweeper {
                     stats.raced += 1;
                 }
                 for departure in &departures {
-                    self.misses
-                        .remove(&MissKey::Participant(huddle.huddle_id, *departure));
+                    self.misses.remove(&MissKey::Participant(
+                        huddle.huddle_id,
+                        departure.participant,
+                    ));
                 }
                 self.misses.remove(&MissKey::EmptyHuddle(huddle.huddle_id));
             }

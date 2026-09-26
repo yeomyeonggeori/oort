@@ -44,6 +44,20 @@ pub struct SweptParticipant {
     pub joined_at: DateTime<Utc>,
 }
 
+/// A participant the sweep has judged gone, with the moment from which a
+/// `join_huddle` call by that member proves them back.
+///
+/// `join_huddle` reuses an open row (`ON CONFLICT … DO NOTHING`), so a client
+/// that crashed and re-joined keeps the same `(member_id, joined_at)` the sweep
+/// has been counting. The re-join still writes a `huddle.joined` audit row in
+/// its own transaction; a settlement that finds one at or after `rejoin_cutoff`
+/// leaves the row open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SweptDeparture {
+    pub participant: SweptParticipant,
+    pub rejoin_cutoff: DateTime<Utc>,
+}
+
 /// One active huddle and its open participant rows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SweepHuddle {
@@ -167,14 +181,16 @@ pub async fn active_huddles_for_sweep(
 ///   `leave_huddle` take, so the sweep and a person serialize;
 /// * an already-ended huddle is a race, not an error;
 /// * each `left_at` is keyed on the full identity `(huddle_id, member_id,
-///   joined_at)`, so a re-join after the observation survives;
+///   joined_at)`, so a leave → re-join (a new row) survives;
+/// * a crash → re-join reuses the open row, so a `huddle.joined` audit row by
+///   that member at or after [`SweptDeparture::rejoin_cutoff`] keeps it open;
 /// * the end is re-derived inside the transaction from the rows as they are
 ///   now, never from the observation.
 pub async fn settle_swept_departures(
     pool: &PgPool,
     workspace_id: Uuid,
     huddle_id: Uuid,
-    departures: Vec<SweptParticipant>,
+    departures: Vec<SweptDeparture>,
     end_if_empty: bool,
 ) -> Result<SweepSettlement, HuddleError> {
     tenant_tx(pool, workspace_id, move |conn| {
@@ -189,7 +205,7 @@ async fn settle_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     huddle_id: Uuid,
-    departures: &[SweptParticipant],
+    departures: &[SweptDeparture],
     end_if_empty: bool,
 ) -> Result<SweepSettlement, HuddleError> {
     let raced = SweepSettlement {
@@ -215,14 +231,22 @@ async fn settle_in_tx(
     let mut marked_left = Vec::new();
     for departure in departures {
         let closed: Option<Uuid> = sqlx::query_scalar(
-            "UPDATE huddle_participant SET left_at = now() \
-              WHERE huddle_id = $1 AND member_id = $2 AND joined_at = $3 \
-                AND left_at IS NULL \
-              RETURNING member_id",
+            "UPDATE huddle_participant hp SET left_at = now() \
+              WHERE hp.huddle_id = $1 AND hp.member_id = $2 AND hp.joined_at = $3 \
+                AND hp.left_at IS NULL \
+                AND NOT EXISTS ( \
+                  SELECT 1 FROM audit_log a \
+                   WHERE a.workspace_id = hp.workspace_id \
+                     AND a.action = 'huddle.joined' \
+                     AND a.target_type = 'huddle' AND a.target_id = hp.huddle_id \
+                     AND a.actor_member_id = hp.member_id \
+                     AND a.created_at >= $4) \
+              RETURNING hp.member_id",
         )
         .bind(huddle_id)
-        .bind(departure.member_id)
-        .bind(departure.joined_at)
+        .bind(departure.participant.member_id)
+        .bind(departure.participant.joined_at)
+        .bind(departure.rejoin_cutoff)
         .fetch_optional(&mut *conn)
         .await?;
         if let Some(member_id) = closed {

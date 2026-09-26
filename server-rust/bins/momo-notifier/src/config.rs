@@ -27,7 +27,8 @@
 //!   huddle ghost sweep does not run. `MOMO_HUDDLE_SWEEP_INTERVAL_MS` (30000,
 //!   floored at 1000) sets its cadence. `MOMO_HUDDLE_SWEEP_DATABASE_URL` is the
 //!   RLS-bound `momo_app` connection its writes use; without it the sweep does
-//!   not run either.
+//!   not run either. `MOMO_HUDDLE_SWEEP_LIVEKIT_URL` optionally overrides the
+//!   URL the sweep itself uses to reach LiveKit (default `MOMO_LIVEKIT_URL`).
 //!
 //! No `.env` reading and no baked-in credential: a missing DB URL is a boot
 //! error, not a silent dev default.
@@ -178,7 +179,12 @@ impl NotifierConfig {
             huddle_sweep: HuddleSweepConfig::parse(
                 env("MOMO_LIVEKIT_API_KEY").as_deref(),
                 env("MOMO_LIVEKIT_API_SECRET").as_deref(),
-                env("MOMO_LIVEKIT_URL").as_deref(),
+                // The server's own route to LiveKit may differ from the one
+                // clients use (compose: `http://livekit:7880` on the private
+                // network vs a loopback/public ws URL). Default: the same.
+                env("MOMO_HUDDLE_SWEEP_LIVEKIT_URL")
+                    .or_else(|| env("MOMO_LIVEKIT_URL"))
+                    .as_deref(),
                 Duration::from_millis(huddle_sweep_ms.max(1_000)),
             ),
             huddle_sweep_database_url: env("MOMO_HUDDLE_SWEEP_DATABASE_URL"),

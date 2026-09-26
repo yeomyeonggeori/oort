@@ -20,10 +20,11 @@
 //! |---|---|
 //! | `crashed_participant_ends_the_huddle_after_two_sweeps_and_frees_the_channel` | remove the sweep's settlement call, settle on the first miss, or end outside the shared end path (no `huddle_ended` outbox) |
 //! | `a_present_participant_is_never_closed` | stop consulting the LiveKit answer |
-//! | `unreachable_livekit_changes_nothing` | read an error/503/dead port as an empty room |
-//! | `a_participant_still_connecting_is_not_a_ghost` | drop the join grace |
+//! | `unreachable_livekit_changes_nothing` | read an error/503/dead port as an empty room, or keep miss counts across an error tick |
+//! | `a_participant_still_connecting_is_not_a_ghost` | drop the join grace or shorten it below 90 s |
 //! | `a_just_started_huddle_is_not_judged` | drop the `started_at` grace (the room does not exist until the first connection) |
-//! | `a_write_pool_that_bypasses_rls_is_refused` | drop the RLS-bound write-pool check, or write through the BYPASSRLS notifier pool |
+//! | `a_write_pool_that_bypasses_rls_is_refused` | drop the RLS-bound write-pool check, or run the no-predicate probe on the BYPASSRLS notifier pool |
+//! | `a_crash_then_rejoin_on_the_same_row_is_not_closed` | drop the `huddle.joined` re-join check from the settlement |
 //! | `a_never_joined_huddle_ends_after_two_empty_sweeps` | drop the empty-huddle branch |
 //! | `a_rejoin_after_the_observation_survives_the_settlement` | key `left_at` on `(huddle_id, member_id)` without `joined_at` |
 //! | `real_livekit_observes_an_empty_room_and_the_ghost_is_settled` | change the RoomService token or Twirp call shape (real `livekit-server`; skipped without `LIVEKIT_TEST_*`) |
@@ -41,7 +42,7 @@ use axum::{Json, Router};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::PgPool;
-use momo_messaging::huddle_sweep::{settle_swept_departures, SweptParticipant};
+use momo_messaging::huddle_sweep::{settle_swept_departures, SweptDeparture, SweptParticipant};
 use momo_messaging::{join_huddle, leave_huddle, start_huddle, HuddleActor};
 use momo_notifier::huddle_sweep::{HuddleSweepConfig, HuddleSweeper};
 use serde_json::{json, Value};
@@ -381,6 +382,35 @@ async fn age_huddle(su: &PgPool, huddle_id: Uuid) {
     .execute(su)
     .await
     .expect("age participants");
+    age_join_audits(su, huddle_id, "5 minutes").await;
+}
+
+/// Move the `huddle.joined` audit rows back with the participant rows they
+/// describe: the sweep reads them to recognise a crash → re-join.
+async fn age_join_audits(su: &PgPool, huddle_id: Uuid, by: &str) {
+    sqlx::query(
+        "UPDATE audit_log SET created_at = created_at - $2::interval \
+          WHERE action = 'huddle.joined' AND target_type = 'huddle' AND target_id = $1",
+    )
+    .bind(huddle_id)
+    .bind(by)
+    .execute(su)
+    .await
+    .expect("age join audits");
+}
+
+/// Age the participant rows (and their join audits) by `by`.
+async fn age_participants_by(su: &PgPool, huddle_id: Uuid, by: &str) {
+    sqlx::query(
+        "UPDATE huddle_participant SET joined_at = joined_at - $2::interval \
+          WHERE huddle_id = $1",
+    )
+    .bind(huddle_id)
+    .bind(by)
+    .execute(su)
+    .await
+    .expect("age participants");
+    age_join_audits(su, huddle_id, by).await;
 }
 
 /// Age only the huddle row, leaving participant rows fresh.
@@ -394,14 +424,37 @@ async fn age_huddle_only(su: &PgPool, huddle_id: Uuid) {
 
 /// Age only the participant rows, leaving the huddle just started.
 async fn age_participants_only(su: &PgPool, huddle_id: Uuid) {
-    sqlx::query(
-        "UPDATE huddle_participant SET joined_at = joined_at - interval '5 minutes' \
-          WHERE huddle_id = $1",
+    age_participants_by(su, huddle_id, "5 minutes").await;
+}
+
+/// Run the settlement's `left_at` UPDATE — without any workspace predicate —
+/// under `guc_workspace` on `pool`, count the rows it reached, roll back.
+async fn rls_probe(
+    pool: &PgPool,
+    guc_workspace: Uuid,
+    huddle_id: Uuid,
+    member_id: Uuid,
+    joined_at: chrono::DateTime<chrono::Utc>,
+) -> u64 {
+    let mut tx = pool.begin().await.expect("begin probe");
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(guc_workspace.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("set GUC");
+    let reached = sqlx::query(
+        "UPDATE huddle_participant SET left_at = now() \
+          WHERE huddle_id = $1 AND member_id = $2 AND joined_at = $3 AND left_at IS NULL",
     )
     .bind(huddle_id)
-    .execute(su)
+    .bind(member_id)
+    .bind(joined_at)
+    .execute(&mut *tx)
     .await
-    .expect("age participants");
+    .expect("probe update")
+    .rows_affected();
+    tx.rollback().await.expect("rollback probe");
+    reached
 }
 
 async fn huddle_ended(su: &PgPool, huddle_id: Uuid) -> bool {
@@ -614,6 +667,23 @@ async fn unreachable_livekit_changes_nothing() {
     let outage = sweeper.sweep_once(&notifier, &app).await.expect("outage");
     assert_eq!(outage.participants_marked_left, 0);
     assert_eq!(open_members(&su, huddle_id).await, vec![member]);
+    // …and the error broke the run: the next miss is a first miss again.
+    stage_room(&mock, huddle_id, &[]);
+    let after = sweeper
+        .sweep_once(&notifier, &app)
+        .await
+        .expect("miss after outage");
+    assert_eq!(
+        after.participants_marked_left, 0,
+        "miss → error → miss is not two consecutive misses"
+    );
+    assert_eq!(after.first_misses, 1);
+    assert_eq!(open_members(&su, huddle_id).await, vec![member]);
+    // Two genuinely consecutive misses still settle.
+    let settled = sweeper.sweep_once(&notifier, &app).await.expect("miss 2");
+    assert_eq!(settled.participants_marked_left, 1);
+    assert!(huddle_ended(&su, huddle_id).await);
+    unstage_room(&mock, huddle_id);
 
     leave_huddle(&app, tenant.workspace_id, huddle_id, actor(member))
         .await
@@ -633,10 +703,12 @@ async fn a_participant_still_connecting_is_not_a_ghost() {
     let (mock, url) = spawn_mock_livekit().await;
     let tenant = seed_tenant(&su, 1).await;
     let member = tenant.members[0];
-    // The huddle is old enough to judge, but this row was written just now:
-    // the client may still be reaching LiveKit.
+    // The huddle is old enough to judge, but this row is 90 s old: inside the
+    // 2-minute join grace (ADR-0122 증보 D-H4), the client may still be
+    // reaching LiveKit. A 60 s grace would call it a ghost.
     let huddle_id = open_huddle(&app, &tenant, &[member]).await;
     age_huddle_only(&su, huddle_id).await;
+    age_participants_by(&su, huddle_id, "90 seconds").await;
     stage_room(&mock, huddle_id, &[]);
 
     let mut sweeper = sweeper_for(&url);
@@ -783,9 +855,11 @@ async fn a_write_pool_that_bypasses_rls_is_refused() {
     assert!(!huddle_ended(&su, huddle_id).await);
     assert_eq!(sweep_audits(&su, huddle_id).await, 0);
 
-    // The RLS-bound pool really is bound: under another tenant's GUC the
-    // huddle is invisible, so the settlement is a no-op race.
-    let joined_at = sqlx::query_scalar(
+    // The RLS-bound pool really is bound. The probe is the settlement's own
+    // UPDATE with NO workspace predicate, so only the policy can hide the row:
+    // under another tenant's GUC it closes nothing, under the owner's GUC it
+    // closes the row (the control), and both are rolled back.
+    let joined_at: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
         "SELECT joined_at FROM huddle_participant WHERE huddle_id = $1 AND left_at IS NULL",
     )
     .bind(huddle_id)
@@ -793,20 +867,80 @@ async fn a_write_pool_that_bypasses_rls_is_refused() {
     .await
     .unwrap();
     let foreign = seed_tenant(&su, 1).await;
-    let settlement = settle_swept_departures(
+    assert_eq!(
+        rls_probe(&app, foreign.workspace_id, huddle_id, member, joined_at).await,
+        0,
+        "momo_app under a foreign GUC cannot see the row"
+    );
+    assert_eq!(
+        rls_probe(&app, tenant.workspace_id, huddle_id, member, joined_at).await,
+        1,
+        "control: under the owner's GUC the same statement reaches it"
+    );
+    assert_eq!(open_members(&su, huddle_id).await, vec![member]);
+
+    leave_huddle(&app, tenant.workspace_id, huddle_id, actor(member))
+        .await
+        .expect("leave");
+    unstage_room(&mock, huddle_id);
+}
+
+/// The common ghost path: the app crashed and the person re-opened it and
+/// joined again. `join_huddle` reuses the still-open row, so `(member_id,
+/// joined_at)` is unchanged; the settlement must see the re-join and keep the
+/// row open instead of closing a person who is just reconnecting.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL (pgvector/pg18 superuser) + bootstrap roles"]
+async fn a_crash_then_rejoin_on_the_same_row_is_not_closed() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let (su, app, notifier) = (
+        superuser_pool().await,
+        momo_app_pool().await,
+        momo_notifier_pool().await,
+    );
+    let (mock, url) = spawn_mock_livekit().await;
+    let tenant = seed_tenant(&su, 1).await;
+    let member = tenant.members[0];
+    let huddle_id = open_huddle(&app, &tenant, &[member]).await;
+    age_huddle(&su, huddle_id).await;
+    stage_room(&mock, huddle_id, &[]);
+    let rows_before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM huddle_participant WHERE huddle_id = $1")
+            .bind(huddle_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+
+    let mut sweeper = sweeper_for(&url);
+    let first = sweeper.sweep_once(&notifier, &app).await.expect("miss 1");
+    assert_eq!(first.first_misses, 1);
+
+    // Crash → re-open → join again, before the second look. Same open row.
+    join_huddle(
         &app,
-        foreign.workspace_id,
+        tenant.workspace_id,
         huddle_id,
-        vec![SweptParticipant {
-            member_id: member,
-            joined_at,
-        }],
-        true,
+        actor(member),
+        |_, _, _| Ok(()),
     )
     .await
-    .expect("settle under a foreign GUC");
-    assert!(settlement.raced, "RLS hides another tenant's huddle");
+    .expect("re-join");
+    let rows_after: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM huddle_participant WHERE huddle_id = $1")
+            .bind(huddle_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(rows_before, rows_after, "the re-join reused the open row");
+
+    let second = sweeper.sweep_once(&notifier, &app).await.expect("miss 2");
+    assert_eq!(
+        second.participants_marked_left, 0,
+        "the re-joined person is not closed"
+    );
     assert_eq!(open_members(&su, huddle_id).await, vec![member]);
+    assert!(!huddle_ended(&su, huddle_id).await);
 
     leave_huddle(&app, tenant.workspace_id, huddle_id, actor(member))
         .await
@@ -822,11 +956,7 @@ async fn a_write_pool_that_bypasses_rls_is_refused() {
 async fn a_rejoin_after_the_observation_survives_the_settlement() {
     let _guard = test_lock().await;
     ensure_schema_and_roles();
-    let (su, app, notifier) = (
-        superuser_pool().await,
-        momo_app_pool().await,
-        momo_notifier_pool().await,
-    );
+    let (su, app) = (superuser_pool().await, momo_app_pool().await);
     let tenant = seed_tenant(&su, 2).await;
     let (member, other) = (tenant.members[0], tenant.members[1]);
     let huddle_id = open_huddle(&app, &tenant, &[member, other]).await;
@@ -860,11 +990,16 @@ async fn a_rejoin_after_the_observation_survives_the_settlement() {
     .await
     .unwrap();
 
+    // A cutoff in the future turns the re-join audit check off, so this test
+    // pins the `joined_at` key alone.
     let settlement = settle_swept_departures(
-        &notifier,
+        &app,
         tenant.workspace_id,
         huddle_id,
-        vec![stale],
+        vec![SweptDeparture {
+            participant: stale,
+            rejoin_cutoff: chrono::Utc::now() + chrono::Duration::hours(1),
+        }],
         false,
     )
     .await
