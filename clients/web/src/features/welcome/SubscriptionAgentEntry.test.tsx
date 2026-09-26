@@ -198,6 +198,16 @@ describe("설정 › AI 연결 입구 (#2870)", () => {
     expect(q("subscription-entry-open")).toBeNull();
   });
 
+  it("서버 값을 못 읽으면 server-off 한 줄로 떨어진다", async () => {
+    vi.mocked(fetchWorkspace).mockRejectedValue(new Error("down"));
+    mount(createElement(SubscriptionAgentEntryCard, { from: "settings" }));
+    await rtlWaitFor(() => {
+      if (!q("subscription-entry")) throw new Error("entry");
+    });
+    expect(q("subscription-entry")?.getAttribute("data-surface")).toBe("server-off");
+    expect(q("subscription-entry-open")).toBeNull();
+  });
+
   it("빌드가 구독 표면을 걷으면 아무것도 그리지 않는다", async () => {
     envSlot.flag = false;
     mount(createElement(SubscriptionAgentEntryCard, { from: "settings" }));

@@ -51,7 +51,7 @@ function readEntrySurfaceOverride(): SubscriptionSurface | null {
 }
 
 /** 입구가 그릴 것. 명부·서버 값이 오기 전에는 아무것도 그리지 않는다(깜빡임 방지). */
-export function useSubscriptionEntrySurface(): SubscriptionSurface | null {
+function useSubscriptionEntrySurface(): SubscriptionSurface | null {
   const { workspaceId, session } = useSession();
   const override = readEntrySurfaceOverride();
   const directory = useDirectory(workspaceId);
@@ -69,7 +69,8 @@ export function useSubscriptionEntrySurface(): SubscriptionSurface | null {
   if (!mayJoin) return null;
   if (override !== null) return override;
   if (!SUBSCRIPTION_AGENTS_BUILD_FLAG) return null;
-  if (IS_TAURI && !workspace.isSuccess) return null;
+  // 서버 값을 못 읽으면 온보딩과 같이 server-off로 읽는다(버튼 없이 이유 한 줄).
+  if (IS_TAURI && workspace.isPending) return null;
   const surface = subscriptionSurface({
     isDesktop: IS_TAURI,
     buildFlag: SUBSCRIPTION_AGENTS_BUILD_FLAG,
@@ -128,6 +129,7 @@ export function SubscriptionAgentEntryButton({ from }: { from: AiConnectReentryF
       type="button"
       variant="outline"
       size="sm"
+      className="tap-target"
       onClick={() => openAiConnectReentry(from)}
       data-testid="agent-hub-subscription-entry"
     >

@@ -454,7 +454,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
   if (query.isPending) {
     return (
       <SectionShell title="AI 연결" lines={lines}>
-      {subscriptionEntry}
+        {subscriptionEntry}
         <Skeleton ready={false} rows={4} />
       </SectionShell>
     );
@@ -463,7 +463,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
   if (query.isError) {
     return (
       <SectionShell title="AI 연결" lines={lines}>
-      {subscriptionEntry}
+        {subscriptionEntry}
         {isOperatorDenied(query.error) ? (
           <OperatorNotice
             who="provider 연결은 이 서버의 운영자만 바꿀 수 있습니다."

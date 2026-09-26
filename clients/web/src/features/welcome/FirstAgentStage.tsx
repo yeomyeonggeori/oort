@@ -1062,7 +1062,14 @@ export function FirstAgentStage({
               variant="ghost"
               data-testid="ai-connect-reentry-back"
               onPointerDown={(event) => event.stopPropagation()}
-              onClick={() => closeReentry(aiConnectReturnHash(reentryFrom))}
+              onClick={() => {
+                // 합류 중간 단계에서는 한 단계(목록)로, 목록에서는 출발지로 (design-review M1).
+                if (step !== "cards" && step !== "skipped") {
+                  handleBackToList();
+                  return;
+                }
+                closeReentry(aiConnectReturnHash(reentryFrom));
+              }}
             >
               <ArrowLeft aria-hidden="true" />
               {AI_CONNECT_BACK_LABEL}

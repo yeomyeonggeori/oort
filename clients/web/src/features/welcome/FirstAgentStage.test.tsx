@@ -1138,6 +1138,17 @@ describe("재진입 (#2870, RCA 1-b): 설정·에이전트 화면에서 다시 �
     expect(continued).toBe(1);
   });
 
+  it("합류 중간 단계의 [뒤로]는 화면을 닫지 않고 목록으로 돌아간다", async () => {
+    subscriptionOn();
+    const host = mountStage({ mode: "reentry" });
+    await waitFor(() => rowIds(host).includes("claude"), "rows");
+    pick(host, "claude");
+    await waitFor(() => q(host, "first-agent-connect") !== null, "connect");
+    click(q(host, "ai-connect-reentry-back"));
+    await waitFor(() => rowIds(host).length > 0, "back to rows");
+    expect(continued).toBe(0);
+  });
+
   it("구독 합류는 온보딩과 같은 요청(owner_only + claude_code)을 보낸다", async () => {
     subscriptionOn();
     const host = mountStage({ mode: "reentry" });
