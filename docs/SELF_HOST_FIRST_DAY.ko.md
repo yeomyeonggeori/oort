@@ -250,9 +250,10 @@ connection `active`) 서버는 오너 오프너가 아직 없을 때 enqueue한�
 게이트웨이 레일, 네이티브는 워커 레일. 배달 불가 hosted 스피커는 오프너
 마커를 소비하지 않는다.
 
-그다음 **폰에서도 쓰기**(`PhoneLinkFirstRun.tsx`). 리드: 「같은 계정으로
-폰을 붙이려면 지금 QR을 만들 수 있습니다. 나중에 설정 기기에서도 열 수
-있습니다。」 outline **앱으로 들어가기**.
+폰 연결은 전체 화면 단계가 아니다(ADR-0193 D7). 첫 대화 채널 **#general**의
+컴포저 위에 카드가 선다(`PhoneLinkChannelCard.tsx`): 「폰에서도 쓰려면 QR을
+찍어요.」 **QR 만들기** / **나중에**. 나중에를 누르면 「설정 › 기기에서 언제든
+연결할 수 있어요.」 한 줄만 남고, 접힘은 그 기기에 저장된다.
 
 들어간 뒤 설정: 프로필 카드 행 **설정**, 툴팁 「설정 (⌘,)」
 (`ProfileCard.tsx:175-189`). 셸 제목 **설정**(`SettingsRoute.tsx:172`).
@@ -710,7 +711,7 @@ agent-worker`(문서 승계: [`SELF_HOST.md`](SELF_HOST.md) 「막히면」).
 | 워크스페이스 | `…/WorkspaceSection.tsx`, `clients/web/src/features/workspace/AddWorkspaceDialog.tsx` |
 | 프로필 문 | `…/ProfileSection.tsx`, `…/profile/shared/HandleField.tsx` |
 | 멤버와 초대 | `…/InviteSection.tsx`, `IssuedInviteCard.tsx`, `packages/momo-core/src/features/settings/model.ts` |
-| first-run | `…/welcome/firstRunGate.ts`, `firstAgent.ts`, `FirstAgentStage.tsx`, `PhoneLinkFirstRun.tsx` |
+| first-run | `…/welcome/firstRunGate.ts`, `firstAgent.ts`, `FirstAgentStage.tsx`, `PhoneLinkChannelCard.tsx` |
 | 웰컴 enqueue | `server-rust/bins/momo-server/src/routes/welcome.rs` |
 | AI 연결 | `…/AiLinkSection.tsx` |
 | 에이전트 허브 | `clients/web/src/features/agentHub/AgentHubRoute.tsx`, `CreateAgentDialog.tsx`, `AgentChannelsSection.tsx` |

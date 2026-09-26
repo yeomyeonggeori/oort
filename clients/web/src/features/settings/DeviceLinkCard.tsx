@@ -106,10 +106,21 @@ function filledCreate(phase: Phase): boolean {
 export function DeviceLinkCard({
   offline = false,
   onLinked,
+  autoCreate = false,
+  embedded = false,
 }: {
   offline?: boolean;
   /** Settings list re-fetches GET /v1/auth/devices. The list is the persistent card. */
   onLinked?: () => void;
+  /**
+   * 첫 대화 채널 카드(#2818)의 [QR 만들기]가 이 카드를 연다. 거기서 한 번 더
+   * 「QR 만들기」를 누르게 하지 않으려고 마운트 때 한 번 발급한다. 살아 있는
+   * 연결(`readDeviceLinkLive`)이 있으면 발급하지 않고 복원을 따른다. 발급·확인·
+   * TTL 호출은 그대로다(ADR-0180 계약 불변).
+   */
+  autoCreate?: boolean;
+  /** 채널 카드 안: 머리 「폰 연결」은 카드 문장이 이미 말하므로 뺀다. */
+  embedded?: boolean;
 }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [issued, setIssued] = useState<DeviceLinkIssue | null>(null);
@@ -122,6 +133,10 @@ export function DeviceLinkCard({
   const liveIdRef = useRef<string | null>(null);
   const onLinkedRef = useRef(onLinked);
   onLinkedRef.current = onLinked;
+  // StrictMode가 effect를 두 번 부르는 개발 빌드에서도 발급은 한 번이다.
+  const autoCreatedRef = useRef(false);
+  const embeddedRef = useRef(embedded);
+  embeddedRef.current = embedded;
 
   function markLinked(nextDevice?: DeviceLinkDevice): void {
     writeDeviceLinkLive(null);
@@ -166,17 +181,34 @@ export function DeviceLinkCard({
           );
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (cancelled) return;
         if (Date.now() >= live.expiresAt) {
           writeDeviceLinkLive(null);
           setPhase("expired");
+        } else if (embeddedRef.current) {
+          // 채널 카드 안에는 자기 「QR 만들기」가 없다. 복원이 실패한 채 idle로
+          // 두면 「만들고 있습니다」가 끝없이 거짓이 된다. 사유를 말하고 다시
+          // 만들기를 세운다(#2818 design-review R3 M3-1).
+          setBanner(failureCopy(error));
         }
       });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!autoCreate || autoCreatedRef.current) return;
+    // 오프라인이면 발급을 미룬다(카드는 오프라인 사유를 말한다). 다시 연결되면
+    // 이 effect가 다시 돌아 한 번 발급한다.
+    if (offline) return;
+    autoCreatedRef.current = true;
+    if (readDeviceLinkLive()) return;
+    void create();
+    // create는 매 렌더 새 함수라 의존에 넣으면 다시 발급한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offline]);
 
   useEffect(() => {
     if (phase !== "pending" || !issued) return;
@@ -315,17 +347,24 @@ export function DeviceLinkCard({
           ? "이 코드는 만료됐습니다. 다시 만들면 새 QR이 나옵니다."
           : phase === "pending"
             ? "이 QR은 지금 살아 있습니다. 폰 카메라로 찍으세요."
-            : "이 계정을 폰에서도 쓰려면 QR을 만드세요.";
+            : embedded && !banner
+              ? // 띠의 [QR 만들기]가 이미 발급을 걸었다. 여기서 버튼을 약속하지 않는다.
+                offline
+                ? "다시 연결되면 QR을 만듭니다."
+                : "QR을 만들고 있습니다."
+              : "이 계정을 폰에서도 쓰려면 QR을 만드세요.";
 
   return (
     <div
       className="flex min-w-0 flex-col items-start gap-3 rounded-md border border-line bg-surface-raised p-4 shadow-sm"
       data-testid="device-link-card"
     >
-      <div className="flex items-center gap-2">
-        <Smartphone className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
-        <h3 className="text-body font-semibold text-ink">폰 연결</h3>
-      </div>
+      {!embedded && (
+        <div className="flex items-center gap-2">
+          <Smartphone className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
+          <h3 className="text-body font-semibold text-ink">폰 연결</h3>
+        </div>
+      )}
       <p
         className="break-keep text-body text-ink-muted"
         data-testid={
@@ -421,19 +460,24 @@ export function DeviceLinkCard({
         </div>
       )}
 
-      <Button
-        type="button"
-        size="default"
-        variant={filledCreate(phase) ? "default" : "outline"}
-        className={offline ? "self-start opacity-50" : "self-start"}
-        onClick={() => void create()}
-        aria-busy={busy || undefined}
-        aria-disabled={offline || undefined}
-        aria-describedby={offline ? OFFLINE_REASON_ID : undefined}
-        data-testid="device-link-create"
-      >
-        {createLabel}
-      </Button>
+      {/* 채널 카드 안: 띠의 [QR 만들기]가 이미 발급을 걸었다. 첫 발급이 도는 동안
+          (phase가 아직 idle) 두 번째 버튼을 띄우지 않는다. 만료와 발급 실패
+          (banner)에서만 다시 만들기가 선다. */}
+      {(!embedded || phase === "expired" || (phase === "idle" && !busy && banner !== null)) && (
+        <Button
+          type="button"
+          size="default"
+          variant={filledCreate(phase) ? "default" : "outline"}
+          className={offline ? "self-start opacity-50" : "self-start"}
+          onClick={() => void create()}
+          aria-busy={busy || undefined}
+          aria-disabled={offline || undefined}
+          aria-describedby={offline ? OFFLINE_REASON_ID : undefined}
+          data-testid="device-link-create"
+        >
+          {createLabel}
+        </Button>
+      )}
     </div>
   );
 }

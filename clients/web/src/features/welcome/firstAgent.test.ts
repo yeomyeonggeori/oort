@@ -86,12 +86,8 @@ describe("첫 에이전트 카드 4종", () => {
 });
 
 describe("로그인 뒤 first-run 순서", () => {
-  it("렌더 계약은 킥오프 → 첫 에이전트 → 폰 연결이다", () => {
-    expect(FIRST_AGENT_STAGE_ORDER).toEqual([
-      "kickoff",
-      "first-agent",
-      "phone-link",
-    ]);
+  it("렌더 계약은 킥오프 → 첫 에이전트다(폰 연결은 첫 대화 채널 카드, #2818)", () => {
+    expect(FIRST_AGENT_STAGE_ORDER).toEqual(["kickoff", "first-agent"]);
   });
 });
 
