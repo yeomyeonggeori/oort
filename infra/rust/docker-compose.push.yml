@@ -151,7 +151,10 @@ services:
       MOMO_LIVEKIT_API_KEY: ${MOMO_LIVEKIT_API_KEY:-}
       MOMO_LIVEKIT_API_SECRET: ${MOMO_LIVEKIT_API_SECRET:-}
       MOMO_LIVEKIT_URL: ${MOMO_LIVEKIT_URL:-}
-      MOMO_HUDDLE_SWEEP_LIVEKIT_URL: ${MOMO_HUDDLE_SWEEP_LIVEKIT_URL:-}
+      # The sweep's own route to the `huddle` profile's LiveKit on the private
+      # network (clients get MOMO_LIVEKIT_URL). Unused while MOMO_LIVEKIT_* are
+      # empty.
+      MOMO_HUDDLE_SWEEP_LIVEKIT_URL: http://livekit:7880
       MOMO_HUDDLE_SWEEP_DATABASE_URL: ${MOMO_APP_DATABASE_URL:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
