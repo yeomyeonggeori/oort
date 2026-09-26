@@ -29,7 +29,6 @@ import {
 import { Timeline } from "@/features/timeline/Timeline";
 import { useTimeline } from "@/features/timeline/useTimeline";
 import type { RealtimeHandle } from "@/lib/realtime";
-import { phoneLinkFirstRunIsPending } from "@/features/auth/phoneLinkFirstRunStore";
 import { FirstAgentStage } from "./FirstAgentStage";
 import { FIRST_AGENT_TITLE } from "./firstAgent";
 import { WelcomeKickoffStage } from "./WelcomeKickoffStage";
@@ -241,7 +240,6 @@ function agentMember(): RosterMember {
 function decide(): FirstRunSurface {
   return decideFirstRunForSession({
     workspaceId: WS,
-    phonePending: phoneLinkFirstRunIsPending(),
   });
 }
 

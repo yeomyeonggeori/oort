@@ -469,29 +469,28 @@ async function newPhonePage(browser, scheme) {
 
 async function login(page, origin) {
   await page.goto(origin, { waitUntil: "networkidle" });
-  await page.getByTestId("onboarding-choose-server").click();
-  await page.getByTestId("onboarding-next").click();
+  // D0(#2808): 빈 칸 [계속]은 이 페이지의 서버다.
+  await page.getByTestId("connect-entry-submit").click();
   await page.getByTestId("login-email").fill("seongjae@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
-  await page.waitForFunction(() => !document.querySelector('[data-testid="onboarding-account"]'));
+  await page.waitForFunction(() => !document.querySelector('[data-testid="onboarding-sign-in"]'));
 }
 
 async function flowLogin(browser, origin, scheme) {
   const { context, page } = await newPhonePage(browser, scheme);
   await page.goto(origin, { waitUntil: "networkidle" });
-  await measureScene(page, scheme, { name: "login-landing", ready: "onboarding-landing" });
-  let transition = await watchTransition(page, () => page.getByTestId("onboarding-choose-server").click());
   await measureScene(page, scheme, {
-    name: "login-gateway",
-    ready: "onboarding-gateway",
-    transition,
-    keyboard: { focus: "login-server", primary: "onboarding-next" },
+    name: "login-welcome",
+    ready: "onboarding-welcome",
+    keyboard: { focus: "connect-entry", primary: "connect-entry-submit" },
   });
-  transition = await watchTransition(page, () => page.getByTestId("onboarding-next").click());
+  const transition = await watchTransition(page, () =>
+    page.getByTestId("connect-entry-submit").click()
+  );
   await measureScene(page, scheme, {
-    name: "login-account",
-    ready: "onboarding-account",
+    name: "login-sign-in",
+    ready: "onboarding-sign-in",
     transition,
     keyboard: {
       focus: "login-password",
@@ -505,33 +504,18 @@ async function flowLogin(browser, origin, scheme) {
 async function flowJoin(browser, origin, scheme) {
   const { context, page } = await newPhonePage(browser, scheme);
   await page.goto(`${origin}/join?code=${INVITE_CODE}`, { waitUntil: "networkidle" });
+  // D1′(#2810): 링크가 코드를 채우고 이메일·새 비밀번호·표시 이름이 한 화면이다.
   await measureScene(page, scheme, {
-    name: "join-gateway",
-    ready: "onboarding-gateway",
-    keyboard: { focus: "login-invite-code", primary: "onboarding-next" },
-  });
-  let transition = await watchTransition(page, () => page.getByTestId("onboarding-next").click());
-  await measureScene(page, scheme, {
-    name: "join-account",
-    ready: "onboarding-account",
-    transition,
-    keyboard: {
-      focus: "login-password",
-      primary: "login-submit",
-      fill: { "login-email": "jiwoo@dawn.example", "login-password": "capture-only-not-a-credential" },
-    },
-  });
-  await page.getByTestId("login-email").fill("jiwoo@dawn.example");
-  await page.getByTestId("login-password").fill("capture-only-not-a-credential");
-  transition = await watchTransition(page, () => page.getByTestId("login-submit").click());
-  await measureScene(page, scheme, {
-    name: "join-profile",
-    ready: "onboarding-profile",
-    transition,
+    name: "join",
+    ready: "onboarding-join",
     keyboard: {
       focus: "onboarding-profile-name",
-      primary: "onboarding-profile-submit",
-      fill: { "onboarding-profile-name": "박지우" },
+      primary: "login-submit",
+      fill: {
+        "login-email": "jiwoo@dawn.example",
+        "login-password": "capture-only-not-a-credential",
+        "onboarding-profile-name": "박지우",
+      },
     },
   });
   await context.close();
@@ -598,14 +582,8 @@ async function flowFirstAgent(browser, origin, scheme) {
   }
 }
 
-async function flowPhoneLink(browser, origin, scheme) {
-  const { context, page } = await newPhonePage(browser, scheme);
-  await login(page, origin);
-  await page.evaluate(() => sessionStorage.setItem("momo.web.phoneLinkFirstRun.v1", "pending"));
-  await page.reload({ waitUntil: "networkidle" });
-  await measureScene(page, scheme, { name: "phone-link", ready: "onboarding-phone-link" });
-  await context.close();
-}
+// 로그인 뒤 「폰에서도 쓰기」 전체 화면은 #2818(ADR-0193 D7)에서 첫 대화 채널
+// 카드가 됐다. 폭 390 캡처는 scripts/capture-phone-link-card.mjs가 찍는다.
 
 async function main() {
   if (!PROFILE) throw new Error(`Playwright device profile missing: ${PROFILE_NAME}`);
@@ -631,7 +609,6 @@ async function main() {
         await flowJoin(browser, preview.origin, scheme);
         await flowClaim(browser, preview.origin, scheme);
         await flowFirstAgent(browser, preview.origin, scheme);
-        await flowPhoneLink(browser, preview.origin, scheme);
       }
     } finally {
       await browser.close();

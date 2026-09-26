@@ -55,6 +55,7 @@
     "capture:standalone": "npm run build && node scripts/capture-standalone.mjs",
     "capture:w4b": "npm run build && node scripts/capture-w4b.mjs",
     "capture:devices": "npm run build && node scripts/capture-devices.mjs",
+    "capture:phone-link-card": "npm run build && node scripts/capture-phone-link-card.mjs",
     "capture:actions": "npm run build && node scripts/capture-actions.mjs",
     "capture:phone-onboarding": "npm run build:design && node scripts/capture-phone-onboarding.mjs",
     "capture:workbench": "npm run build:design && node scripts/capture-workbench.mjs",

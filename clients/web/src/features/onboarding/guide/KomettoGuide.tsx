@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import {
   assertGuideLine,
   type KomettoExpression,
@@ -19,6 +19,8 @@ import { KomettoFace, type KomettoGuideSize } from "./KomettoFace";
  *   이미 있는 문장은 읽는 순서대로 한 번 읽히고, 같은 화면에서 문장이 바뀌면
  *   (감지 중 → 감지 성공) 바뀐 문장 전체가 한 번 알려진다. 코메토 그림은 장식이다.
  * - `as`: 화면의 질문이면 `h1`로 둔다(카드 제목 자리를 이 문장이 맡는다).
+ * - `lineRef`: 단계가 바뀔 때 포커스가 내려앉을 자리(#2811 claim 뒤 S1·S2). 주면
+ *   문장이 `tabIndex={-1}`과 포커스 링을 얻는다.
  */
 export function KomettoGuide({
   expression,
@@ -27,6 +29,8 @@ export function KomettoGuide({
   size = "head",
   as: Line = "p",
   className,
+  lineRef,
+  lineTestId = "kometto-guide-line",
   children,
 }: {
   expression: KomettoExpression;
@@ -36,6 +40,8 @@ export function KomettoGuide({
   size?: KomettoGuideSize;
   as?: "p" | "h1" | "h2";
   className?: string;
+  lineRef?: Ref<HTMLHeadingElement>;
+  lineTestId?: string;
   /** 말풍선 안 문장 뒤에 붙는 것(예: 서버 칩). 거의 쓰지 않는다. */
   children?: ReactNode;
 }) {
@@ -55,8 +61,13 @@ export function KomettoGuide({
         data-testid="kometto-guide-bubble"
       >
         <Line
-          className="break-keep text-title font-semibold text-ink"
-          data-testid="kometto-guide-line"
+          ref={lineRef as Ref<HTMLHeadingElement & HTMLParagraphElement>}
+          tabIndex={lineRef ? -1 : undefined}
+          className={cn(
+            "break-keep text-title font-semibold text-ink",
+            lineRef && "rounded-sm focus-visible:focus-ring"
+          )}
+          data-testid={lineTestId}
         >
           {text}
         </Line>

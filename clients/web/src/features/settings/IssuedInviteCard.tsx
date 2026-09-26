@@ -22,11 +22,14 @@ export function IssuedInviteCard({
   workspaceName,
   issuedRef,
   copyMode = "full",
+  footnote,
 }: {
   issued: CreatedInvite;
   workspaceName: string;
   issuedRef: RefObject<HTMLDivElement>;
   copyMode?: "full" | "single";
+  /** 카드 맨 아래 작은 글씨 한 줄. 온보딩 S2만 준다(#2811 「해시만 보관」). */
+  footnote?: string;
 }) {
   const serverBaseUrl = resolveServerBaseUrl();
   const card: InviteCardInput = {
@@ -99,6 +102,14 @@ export function IssuedInviteCard({
         받는 사람은 앱을 설치한 뒤 딥링크를 열면 서버 주소와 코드가 채워진
         상태로 참여 화면에 도착합니다.
       </p>
+      {footnote ? (
+        <p
+          className="break-keep text-meta text-ink-muted"
+          data-testid="invite-issued-footnote"
+        >
+          {footnote}
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -85,12 +85,17 @@ export const NAMED_MEASURES = [
   "onboarding-control",
   "onboarding-dot",
   "onboarding-dot-bar",
+  "onboarding-wide",
+  "onboarding-aside",
+  "onboarding-aside-gap",
   "overflow-bowl",
   "pill",
   "pill-inline",
   "field",
   "icon-button",
   "card",
+  "kometto-band",
+  "band-action",
 ] as const;
 
 /** Overlay stacking names (#2044). One spelling only: the `layer-*` class.
