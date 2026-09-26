@@ -77,12 +77,17 @@ export function ChannelHeaderMenu({
   // 메뉴가 넘겨 준 항목. 다이얼로그는 메뉴가 **다 내려간 뒤**에 연다 (#2741).
   //
   // 전에는 같은 손에서 `setOpen(false)`와 `setTopicOpen(true)`를 함께 불렀다.
-  // 그러면 닫히는 메뉴가 퇴장 모션 동안 DOM에 남아 자기 Esc 층을 쥔 채 다이얼로그
-  // 위에 겹친다. 그 창에서 누른 Esc는 이미 닫힌 메뉴가 먹고(preventDefault),
-  // 다이얼로그는 열린 채 남는다 — gate:channel-header가 부하에서 절반꼴로 잡던
-  // 멈춤이 이것이다(메뉴 `data-state=closed` 잔존 4/4 실패, 부재 4/4 통과).
-  // 메뉴의 닫힘 포커스 콜백은 콘텐츠가 실제로 언마운트될 때 불리므로, 거기서
-  // 다이얼로그를 열면 두 층이 겹치는 순간이 구조적으로 없다.
+  // 닫힌 메뉴 콘텐츠는 Presence가 언마운트할 때까지(비동기, 모션 0ms인
+  // reduced-motion에서도) DOM에 남아 자기 Esc 층을 쥐고 있고, 그 층이 다이얼로그
+  // 위에서 Esc를 가로채(preventDefault) 다이얼로그가 열린 채 남았다 —
+  // gate:channel-header의 멈춤(메뉴 `data-state=closed` 잔존 4/4 실패, 부재 4/4
+  // 통과). 원인은 모션 길이가 아니라 언마운트 전까지 남는 층이다. 메뉴의 닫힘
+  // 포커스 콜백은 콘텐츠가 실제로 언마운트될 때 불리므로, 거기서 다이얼로그를
+  // 열면 두 층이 겹치는 순간이 없다.
+  //
+  // 남는 것: 선택 직후 언마운트 전에 누른 Esc는 여전히 (닫히는) 메뉴 층이 받고,
+  // 다이얼로그는 그 뒤에 열린다. 최종 상태(다이얼로그가 열려 있음)는 수리 전과
+  // 같다 — 이 수리가 없애는 것은 「열린 다이얼로그에서 Esc가 먹히는」 경우다.
   const pendingHandOffRef = useRef<ChannelActionKey | null>(null);
   const [open, setOpen] = useState(false);
   const [topicOpen, setTopicOpen] = useState(false);
@@ -104,6 +109,10 @@ export function ChannelHeaderMenu({
         open={open}
         onOpenChange={(next) => {
           setOpen(next);
+          // 다시 열었으면 앞 선택은 끝났다. 앞 콘텐츠가 내려가기 전에 다시 열면
+          // 그 콘텐츠는 언마운트되지 않으므로, 열쇠를 남겨 두면 이번 메뉴를
+          // 선택 없이 닫을 때 앞 다이얼로그가 뒤늦게 열린다 (#2741 R1 M1).
+          if (next) pendingHandOffRef.current = null;
           // 닫히면 이전 실패는 다음 열기까지 따라오지 않는다.
           if (!next) actions.clearError();
         }}
