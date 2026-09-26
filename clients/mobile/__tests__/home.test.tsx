@@ -1,4 +1,5 @@
 import type {Channel, Member} from '@momo/core/lib/api';
+import {contrast} from '@momo/core/design/color';
 import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
 import {TURN_STALE_SENTENCE} from '@momo/core/features/agents/turnCopy';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
@@ -613,5 +614,60 @@ describe('홈 — 「작업 중」 카드', () => {
     act(() => markAgentWorking(signal()));
     await waitFor(() => expect(screen.getByTestId('home-working-card')).toBeTruthy());
     expect(screen.queryByTestId('home-live-dot-pulse')).toBeNull();
+  });
+});
+
+// ---- 5. 새로 생긴 글자·바탕 쌍의 대비 (새벽하늘 라이트·다크) -----------------------
+
+
+/** `#rrggbbaa` 를 불투명 바탕 위에 합성한다. */
+function composite(top: string, base: string): string {
+  const hex = (h: string, i: number) => parseInt(h.slice(1 + i * 2, 3 + i * 2), 16);
+  const alpha = top.length === 9 ? hex(top, 3) / 255 : 1;
+  const out = [0, 1, 2].map(i =>
+    Math.round(hex(top, i) * alpha + hex(base, i) * (1 - alpha))
+      .toString(16)
+      .padStart(2, '0'),
+  );
+  return `#${out.join('')}`;
+}
+
+describe.each([
+  ['light', lightPalette],
+  ['dark', darkPalette],
+] as const)('홈 대비 — %s', (_mode, p) => {
+  // 카드는 유리다: 바닥 세 정지점 위에 합성한 셋, 블러가 없을 때의 94% 셋, 불투명 하나.
+  const stops = [p.canvasTop, p.bg, p.canvasBottom];
+  const cardGrounds = [
+    ...stops.map(stop => composite(p.glass, stop)),
+    ...stops.map(stop => composite(p.glassFallback, stop)),
+    p.surface,
+  ];
+
+  it('카드 안의 글자(이름·한 줄·작업 중·승인 대기)가 모든 유리 바탕에서 4.5 이상', () => {
+    for (const ground of cardGrounds) {
+      for (const ink of [p.text, p.textMuted, p.agent, p.accentText]) {
+        expect(contrast(ink, ground)).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it('켜진 진행 칸이 유리 위에서 비텍스트 3:1', () => {
+    for (const ground of cardGrounds) {
+      expect(contrast(p.agent, ground)).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it('배지 두 벌과 에이전트 태그의 글자가 4.5 이상', () => {
+    expect(contrast(p.onPrimary, p.primary)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(p.onAccent, p.accent)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(p.agent, p.agentSurface)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('행·섹션 머리의 글자 없는 아이콘이 바닥 세 정지점에서 3:1', () => {
+    for (const stop of stops) {
+      expect(contrast(p.icon, stop)).toBeGreaterThanOrEqual(3);
+      expect(contrast(p.text, stop)).toBeGreaterThanOrEqual(4.5);
+    }
   });
 });
