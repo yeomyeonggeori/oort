@@ -26,6 +26,12 @@
 //!   exception). `mention_overrides_mute` lets a `reason='mention'` candidate
 //!   through a channel this member muted, and only a mention: it modifies the
 //!   018 mute, it does not undo it for DMs or approvals.
+//! * **Pause expiry (ADR-0124 증보 2)** — `notification_rule.dnd_until`. A pause
+//!   suppresses only while `dnd_until IS NULL OR dnd_until > now()`, compared
+//!   HERE at judgment time. There is no sweeper: an expired pause row simply
+//!   stops matching. Declared DND reaches this SQL only through that same
+//!   column — the presence write sets the pause in its own transaction
+//!   (「묶어」), so judgment still reads one ledger and never `member`.
 //!
 //! Reason precedence per member is `approval_request > mention > dm`, expressed
 //! by the `CASE` arm order below. Suppression precedence across the two ledgers
@@ -149,7 +155,10 @@ pub async fn judge_targets(
              ON a.workspace_id = $1 \
             AND a.request_message_id = $2 \
           WHERE r.reason IS NOT NULL \
-            AND COALESCE(nr.dnd, false) = false \
+            AND NOT ( \
+              COALESCE(nr.dnd, false) \
+              AND (nr.dnd_until IS NULL OR nr.dnd_until > now()) \
+            ) \
             AND ( \
               np.member_id IS NULL \
               OR (np.muted_until IS NOT NULL AND np.muted_until <= now()) \

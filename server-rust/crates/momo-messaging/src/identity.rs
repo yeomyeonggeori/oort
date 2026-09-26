@@ -622,7 +622,11 @@ pub async fn list_workspace_roster(
                 a.max_concurrent_runs, \
                 a.max_run_steps, \
                 CASE WHEN m.kind = 'agent' THEN COALESCE(ap.paused, false) END AS paused, \
-                CASE WHEN m.kind = 'human' THEN m.presence_status::text END AS presence_status, \
+                CASE WHEN m.kind <> 'human' THEN NULL \
+                     WHEN m.presence_status = 'dnd' \
+                      AND m.presence_dnd_until IS NOT NULL \
+                      AND m.presence_dnd_until <= now() THEN 'auto' \
+                     ELSE m.presence_status::text END AS presence_status, \
                 CASE WHEN m.kind = 'human' \
                       AND (m.status_expires_at IS NULL OR m.status_expires_at > now()) \
                       AND (m.status_emoji IS NOT NULL OR m.status_text IS NOT NULL) \

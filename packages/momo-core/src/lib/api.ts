@@ -1313,6 +1313,8 @@ function parsePresenceSnapshot(
   const emoji = str(source, "statusEmoji");
   const text = str(source, "statusText");
   const expires = num(source, "statusExpiresAtMs");
+  const dndUntil = num(source, "dndUntilMs");
+  if (status === "dnd" && dndUntil !== undefined) snapshot.dndUntilMs = dndUntil;
   if (emoji !== undefined && emoji.trim() !== "") snapshot.statusEmoji = emoji;
   if (text !== undefined && text.trim() !== "") snapshot.statusText = text;
   if (expires !== undefined) snapshot.statusExpiresAtMs = expires;

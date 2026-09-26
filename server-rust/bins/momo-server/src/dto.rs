@@ -1953,6 +1953,11 @@ pub struct UpdateNotificationRulesRequest {
     pub dnd: bool,
     /// Let a mention through a channel this member muted (ADR-0124 D3).
     pub mention_overrides_mute: bool,
+    /// ADR-0124 증보 2: pause expiry, epoch ms. Omitted = keep a still-running
+    /// expiry, `null` = no expiry, value = until then (must be in the future).
+    /// Ignored (cleared) when `dnd` is false.
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub dnd_until_ms: OptionalPatch<i64>,
 }
 
 /// `GET/PUT …/notification-rules` response (ADR-0124 증보 1) — the effective rule,
@@ -1961,7 +1966,10 @@ pub struct UpdateNotificationRulesRequest {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NotificationRulesResponse {
+    /// Effective: `false` once a timed pause has expired.
     pub dnd: bool,
+    /// ADR-0124 증보 2: epoch ms while a timed pause is running, else `null`.
+    pub dnd_until_ms: Option<i64>,
     pub mention_overrides_mute: bool,
 }
 
@@ -2550,6 +2558,12 @@ pub struct SetPresenceRequest {
     pub status_text: OptionalPatch<String>,
     #[serde(default, deserialize_with = "deserialize_optional_patch")]
     pub status_expires_at_ms: OptionalPatch<i64>,
+    /// ADR-0124 증보 2: DND expiry, epoch ms, only with `status: "dnd"`.
+    /// Omitted = keep a still-running expiry, `null` = no expiry, value = until
+    /// then (must be in the future). The server also pauses notifications until
+    /// the same moment and restores the previous pause when DND ends.
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub dnd_until_ms: OptionalPatch<i64>,
 }
 
 /// `GET`/`PUT /v1/workspaces/{ws}/presence` response — the caller's own durable
@@ -2561,7 +2575,11 @@ pub struct SetPresenceRequest {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresenceStatusResponse {
+    /// Effective: an expired DND answers `auto`.
     pub status: String,
+    /// ADR-0124 증보 2: present only while a timed DND is running.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dnd_until_ms: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_emoji: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
