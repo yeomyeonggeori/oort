@@ -19,10 +19,18 @@ const FRESH_SIGNUP_SLOT = "oort.freshSignup.v1";
 const login = vi.hoisted(() => vi.fn());
 const joinWithInvite = vi.hoisted(() => vi.fn());
 const changeMyDisplayName = vi.hoisted(() => vi.fn());
+const fetchRoster = vi.hoisted(() => vi.fn());
+const navigateTo = vi.hoisted(() => vi.fn());
 const restoreSession = vi.hoisted(() => vi.fn());
 const releaseSessionRestoreMock = vi.hoisted(() => vi.fn());
-const discoveredServersMock = vi.hoisted(() =>
-  vi.fn((): { base: string; displayHost: string }[] => [])
+const discoveryMock = vi.hoisted(() =>
+  vi.fn(
+    (): {
+      servers: { base: string; displayHost: string }[];
+      available: boolean;
+      searching: boolean;
+    } => ({ servers: [], available: false, searching: false })
+  )
 );
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
@@ -34,6 +42,7 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
       joinWithInvite(...args) as Promise<JoinResponse>,
     changeMyDisplayName: (...args: unknown[]) =>
       changeMyDisplayName(...args) as Promise<Member>,
+    fetchRoster: (...args: unknown[]) => fetchRoster(...args) as Promise<unknown[]>,
     restoreSession: () => restoreSession() as Promise<LoginResponse | null>,
   };
 });
@@ -53,8 +62,13 @@ vi.mock("./discovery", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./discovery")>();
   return {
     ...actual,
-    useDiscoveredServers: () => discoveredServersMock(),
+    useDiscovery: () => discoveryMock(),
   };
+});
+
+vi.mock("./claimHandoff", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./claimHandoff")>();
+  return { ...actual, navigateTo: (href: string) => navigateTo(href) };
 });
 
 const reactActEnvironment = globalThis as typeof globalThis & {
@@ -63,8 +77,8 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
-let rafCalls = 0;
 let reducedMotion = false;
+let online = true;
 
 const session: LoginResponse = {
   accessToken: "access",
@@ -84,16 +98,19 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-  rafCalls = 0;
   reducedMotion = false;
   login.mockReset();
   joinWithInvite.mockReset();
   changeMyDisplayName.mockReset();
+  fetchRoster.mockReset();
+  fetchRoster.mockResolvedValue([]);
+  navigateTo.mockReset();
+  online = true;
   restoreSession.mockReset();
   login.mockResolvedValue(session);
   joinWithInvite.mockResolvedValue({ ...session, createdMember: true });
   restoreSession.mockResolvedValue(session);
-  discoveredServersMock.mockReturnValue([]);
+  discoveryMock.mockReturnValue({ servers: [], available: false, searching: false });
   releaseSessionRestore();
   releaseSessionRestoreMock.mockClear();
   clearSession();
@@ -111,11 +128,12 @@ beforeEach(() => {
     removeListener: () => undefined,
     dispatchEvent: () => false,
   }));
-  vi.stubGlobal("requestAnimationFrame", () => {
-    rafCalls += 1;
-    return 1;
-  });
+  vi.stubGlobal("requestAnimationFrame", () => 1);
   vi.stubGlobal("cancelAnimationFrame", () => undefined);
+  Object.defineProperty(window.navigator, "onLine", {
+    configurable: true,
+    get: () => online,
+  });
 });
 
 afterEach(() => {
@@ -184,262 +202,396 @@ function fill(testId: string, value: string) {
   });
 }
 
-describe("BZ-6a onboarding shell", () => {
-  it("renders the S0 mark, scatter field and two choices", () => {
-    mount();
-    expect(document.querySelector('[data-testid="onboarding-landing"]')).not.toBeNull();
-    expect(document.querySelector('[data-testid="onboarding-mark"]')).not.toBeNull();
-    expect(
-      document.querySelector('[data-testid="onboarding-wordmark"]')?.textContent
-    ).toBe("oort");
-    expect(
-      document.querySelector('[data-testid="onboarding-tagline"]')?.textContent
-    ).toBe("사람과 에이전트가 같은 자리에서 일하는 메신저.");
-    expect(
-      document.querySelectorAll("[data-onboarding-body]")
-    ).toHaveLength(30);
-    expect(document.querySelector('[data-testid="onboarding-choose-server"]')).not.toBeNull();
-    expect(document.querySelector('[data-testid="onboarding-choose-invite"]')).not.toBeNull();
-    expect(document.querySelector('[data-testid="onboarding-progress"]')).toBeNull();
-  });
+const CODE = "Ab3-_xYz0123456789abcdefghij01";
+const INVITE_LINK = `oort://join?server=https%3A%2F%2Fteam.example.com&code=${CODE}`;
+const CLAIM_TOKEN = "A".repeat(20) + "b-_" + "9".repeat(20);
 
-  it("does not start the wander loop when reduced motion is on", () => {
-    reducedMotion = true;
-    mount();
-    expect(rafCalls).toBe(0);
-  });
+function q(testId: string): HTMLElement | null {
+  return document.querySelector(`[data-testid="${testId}"]`);
+}
 
-  it("starts the wander loop when motion is allowed", () => {
-    mount();
-    expect(rafCalls).toBeGreaterThan(0);
-  });
+function focused(): string | null {
+  return document.activeElement?.getAttribute("data-testid") ?? null;
+}
 
-  it("branches from the two choices into S1 then S2 with back and progress", () => {
-    mount();
-    click("onboarding-choose-server");
-    expect(document.querySelector('[data-testid="onboarding-gateway"]')).not.toBeNull();
-    const chrome = document.querySelector('[data-testid="onboarding-step-chrome"]');
-    const back = document.querySelector('[data-testid="onboarding-back"]');
-    const dots = document.querySelector('[data-testid="onboarding-dots"]');
-    expect(chrome).not.toBeNull();
-    expect(chrome?.contains(back)).toBe(true);
-    expect(chrome?.contains(dots)).toBe(true);
-    expect(back?.textContent).toContain("뒤로");
-    expect(back?.querySelector("svg")).not.toBeNull();
-    expect(back?.className).not.toMatch(/underline/);
-    // 숫자 카운터 대신 진행 점 (ADR-0193 D10, #2807). 로그인 경로는 한 칸이다.
-    expect(document.querySelector('[data-testid="onboarding-progress"]')).toBeNull();
-    expect(dots?.getAttribute("data-total")).toBe("1");
-    expect(
-      document.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
-    ).toBe("1단계 중 1단계");
-    // gateway는 온보딩 2.0 틀 위에 선다: 코메토가 이 화면의 질문을 h1으로 말한다.
-    expect(document.querySelector('[data-testid="onboarding-frame"]')).not.toBeNull();
-    const guideLine = document.querySelector('[data-testid="kometto-guide-line"]');
-    expect(guideLine?.tagName).toBe("H1");
-    expect(guideLine?.textContent).toBe("어느 팀 서버로 들어갈까요?");
-    expect(document.querySelector('[data-testid="login-server"]')).not.toBeNull();
-    expect(document.querySelector('[data-testid="login-invite-code"]')).toBeNull();
-    expect(document.activeElement?.getAttribute("data-testid")).toBe("login-server");
-    click("onboarding-next");
-    expect(document.querySelector('[data-testid="onboarding-account"]')).not.toBeNull();
-    expect(
-      document.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
-    ).toBe("1단계 중 1단계");
-    expect(document.querySelector('[data-testid="login-email"]')).not.toBeNull();
-    expect(document.activeElement?.getAttribute("data-testid")).toBe("login-email");
-    click("onboarding-back");
-    expect(document.querySelector('[data-testid="onboarding-gateway"]')).not.toBeNull();
-    expect(document.activeElement?.getAttribute("data-testid")).toBe("login-server");
-    click("onboarding-back");
-    expect(document.querySelector('[data-testid="onboarding-landing"]')).not.toBeNull();
-    expect(document.activeElement?.getAttribute("data-testid")).toBe(
-      "onboarding-choose-server"
-    );
-    click("onboarding-choose-invite");
-    expect(document.querySelector('[data-testid="login-invite-code"]')).not.toBeNull();
-    expect(document.activeElement?.getAttribute("data-testid")).toBe(
-      "login-invite-code"
-    );
-  });
+function guideLine(): string | undefined {
+  return q("kometto-guide-line")?.textContent ?? undefined;
+}
 
-  it("skips S0 when a server is already stored", () => {
-    setServerBase("https://team.example.com");
-    mount();
-    expect(document.querySelector('[data-testid="onboarding-landing"]')).toBeNull();
-    expect(document.querySelector('[data-testid="onboarding-gateway"]')).not.toBeNull();
-    expect(
-      (document.querySelector('[data-testid="login-server"]') as HTMLInputElement).value
-    ).toBe("https://team.example.com");
-  });
+/** 말풍선을 든 안내자(D1·D1′) 또는 D0 말풍선의 표정. */
+function guideExpression(): string | null {
+  return (
+    q("kometto-guide")?.getAttribute("data-expression") ??
+    q("kometto-guide-bubble")?.getAttribute("data-expression") ??
+    null
+  );
+}
 
-  it("keeps a /join?code= prefill on the invite path", () => {
-    window.history.replaceState(null, "", "/?code=Ab3-_x");
-    mount();
-    expect(document.querySelector('[data-testid="onboarding-landing"]')).toBeNull();
-    const code = document.querySelector(
-      '[data-testid="login-invite-code"]'
-    ) as HTMLInputElement | null;
-    expect(code).not.toBeNull();
-    expect(code?.value).toBe("Ab3-_x");
-    expect(
-      document
-        .querySelector("[data-onboarding-effect]")
-        ?.getAttribute("data-onboarding-effect")
-    ).toBe("none");
-    expect(document.activeElement?.getAttribute("data-testid")).toBe(
-      "onboarding-next"
-    );
-  });
+function submitEntry(value: string) {
+  fill("connect-entry", value);
+  click("connect-entry-submit");
+}
 
-  it("still signs in through the stepped form", async () => {
-    setServerBase("https://team.example.com");
-    const onLoggedIn = vi.fn();
-    mount(onLoggedIn);
-    click("onboarding-next");
-    fill("login-email", "seongjae@dawn.example");
-    fill("login-password", "correct-horse");
-    await act(async () => {
-      click("login-submit");
-    });
-    await vi.waitFor(() => {
-      expect(login).toHaveBeenCalledWith(
-        "seongjae@dawn.example",
-        "correct-horse",
-        ""
-      );
-    });
-    expect(onLoggedIn).toHaveBeenCalledWith(session);
-    expect(joinWithInvite).not.toHaveBeenCalled();
-  });
-
-  it("still joins through the stepped form with the prefilled code", async () => {
-    window.history.replaceState(null, "", "/?code=Ab3-_x");
-    const onLoggedIn = vi.fn();
-    mount(onLoggedIn);
-    click("onboarding-next");
-    fill("login-email", "seongjae@dawn.example");
-    fill("login-password", "new-pass");
-    await act(async () => {
-      click("login-submit");
-    });
-    await vi.waitFor(() => {
-      expect(joinWithInvite).toHaveBeenCalledWith(
-        "Ab3-_x",
-        "seongjae@dawn.example",
-        "new-pass"
-      );
-    });
-    expect(onLoggedIn).not.toHaveBeenCalled();
-    expect(document.querySelector('[data-testid="onboarding-profile"]')).not.toBeNull();
-    expect(sessionStorage.getItem(PHONE_LINK_FIRST_RUN_KEY)).toBe("pending");
-    expect(firstAgentIsPending(session.member.workspaceId)).toBe(true);
-    expect(
-      document.querySelector('[data-testid="onboarding-phone-link"]')
-    ).toBeNull();
-    expect(login).not.toHaveBeenCalled();
-  });
-
-  it("returns a code-status join failure to S1 with the banner on the code field", async () => {
-    window.history.replaceState(null, "", "/?code=Ab3-_x");
-    joinWithInvite.mockRejectedValue(new ApiError(404, "invite not found"));
-    mount();
-    click("onboarding-next");
-    fill("login-email", "seongjae@dawn.example");
-    fill("login-password", "new-pass");
-    await act(async () => {
-      click("login-submit");
-    });
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-gateway"]')).not.toBeNull();
-    });
-    expect(document.querySelector('[data-testid="onboarding-account"]')).toBeNull();
-    expect(document.querySelector('[data-testid="login-invite-code"]')).not.toBeNull();
-    expect(document.querySelector('[data-testid="login-error"]')?.textContent).toContain(
-      "유효하지 않은 초대 코드"
-    );
-    expect(document.activeElement?.getAttribute("data-testid")).toBe(
-      "login-invite-code"
-    );
-  });
-
-  it("keeps a transport join failure on S2", async () => {
-    window.history.replaceState(null, "", "/?code=Ab3-_x");
-    joinWithInvite.mockRejectedValue(new NetworkError("unreachable", 15_000));
-    mount();
-    click("onboarding-next");
-    fill("login-email", "seongjae@dawn.example");
-    fill("login-password", "new-pass");
-    await act(async () => {
-      click("login-submit");
-    });
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="login-error"]')).not.toBeNull();
-    });
-    expect(document.querySelector('[data-testid="onboarding-account"]')).not.toBeNull();
-    expect(document.querySelector('[data-testid="onboarding-gateway"]')).toBeNull();
-    expect(document.querySelector('[data-testid="login-error"]')?.textContent).toContain(
-      "서버에 닿지 못했습니다"
-    );
-  });
-
-  it("says S2 is about signing in, not picking a server", () => {
-    mount();
-    click("onboarding-choose-server");
-    click("onboarding-next");
-    expect(document.querySelector('[data-testid="onboarding-account"]')?.textContent).toContain(
-      "가입할 때 쓴 이메일로 로그인합니다."
-    );
-  });
-});
-
-async function submitJoinFromPrefill() {
-  window.history.replaceState(null, "", "/?code=Ab3-_x");
-  const onLoggedIn = vi.fn();
-  mount(onLoggedIn);
-  click("onboarding-next");
-  fill("login-email", "seongjae@dawn.example");
-  fill("login-password", "new-pass");
+async function submitForm() {
   await act(async () => {
     click("login-submit");
   });
-  return onLoggedIn;
 }
 
-describe("BZ-6b onboarding profile step", () => {
-  it("does not open S3 after sign-in and calls onLoggedIn immediately", async () => {
+/**
+ * 필수 입력 화면 세기 (#2809·#2810 시험). 온보딩 화면(`data-onboarding-screen`) 중
+ * 사람이 채우는 칸(`input`)이 있는 화면을, 마운트부터 앱으로 들어갈 때까지 센다.
+ */
+function watchInputScreens(): { seen: string[]; stop: () => void } {
+  const seen: string[] = [];
+  const record = () => {
+    for (const node of document.querySelectorAll("[data-onboarding-screen]")) {
+      const id = node.getAttribute("data-onboarding-screen") ?? "";
+      const fields = node.querySelectorAll("input:not([type=hidden])").length;
+      if (fields > 0 && seen[seen.length - 1] !== id) seen.push(id);
+    }
+  };
+  const observer = new MutationObserver(record);
+  observer.observe(document.body, { childList: true, subtree: true });
+  record();
+  return { seen, stop: () => observer.disconnect() };
+}
+
+describe("D0 환영 (#2808 OB2-2)", () => {
+  it("asks one question over the hero, with no dots and no 뒤로", () => {
+    mount();
+    expect(q("onboarding-welcome")).not.toBeNull();
+    expect(q("onboarding-frame")).not.toBeNull();
+    expect(q("onboarding-dots")).toBeNull();
+    expect(q("onboarding-back")).toBeNull();
+    expect(q("kometto-face")?.getAttribute("data-size")).toBe("hero");
+    const line = q("kometto-guide-line");
+    expect(line?.tagName).toBe("H1");
+    expect(line?.textContent).toBe("안녕하세요, 저는 코메토예요. 어디로 갈까요?");
+    expect(guideExpression()).toBe("idle");
+    expect((q("connect-entry") as HTMLInputElement).placeholder).toBe(
+      "https://team.example.com 또는 초대 링크"
+    );
+    expect(focused()).toBe("connect-entry");
+    // 옛 S0 두 갈래는 사라졌다.
+    expect(q("onboarding-choose-server")).toBeNull();
+    expect(q("onboarding-choose-invite")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/\d\/\d/);
+  });
+
+  it("sends a team address to D1 with the server chip and one dot", () => {
+    mount();
+    submitEntry("  Team.Example.com:28000/ ");
+    expect(q("onboarding-sign-in")).not.toBeNull();
+    expect(q("connect-server-chip-host")?.textContent).toBe("team.example.com:28000");
+    expect(q("onboarding-dots")?.getAttribute("data-total")).toBe("1");
+    expect(q("onboarding-dots-label")?.textContent).toBe("1단계 중 1단계");
+    expect(focused()).toBe("login-email");
+    expect(localStorage.getItem("momo.web.server.v1")).toBe("https://team.example.com:28000");
+  });
+
+  it("sends an invite link to D1′ with server and code filled and no field for either", () => {
+    mount();
+    submitEntry(`초대 링크입니다\n${INVITE_LINK}\n`);
+    expect(q("onboarding-join")).not.toBeNull();
+    expect(q("connect-server-chip-host")?.textContent).toBe("team.example.com");
+    expect(q("onboarding-dots")?.getAttribute("data-total")).toBe("2");
+    expect(q("onboarding-dots")?.getAttribute("data-current")).toBe("1");
+    const values = [...document.querySelectorAll("input")].map((i) => i.value);
+    expect(values).not.toContain(CODE);
+    expect(values).not.toContain("https://team.example.com");
+    expect(focused()).toBe("login-email");
+  });
+
+  it("hands a claim link to the claim screen (#2811 path) without keeping the token", () => {
+    mount();
+    submitEntry(`${window.location.origin}/claim/${CLAIM_TOKEN}`);
+    expect(navigateTo).toHaveBeenCalledTimes(1);
+    expect(navigateTo).toHaveBeenCalledWith(`/claim/${CLAIM_TOKEN}`);
+    expect(JSON.stringify(localStorage)).not.toContain(CLAIM_TOKEN);
+    expect(JSON.stringify(sessionStorage)).not.toContain(CLAIM_TOKEN);
+  });
+
+  it("opens another server's claim page on that server", () => {
+    mount();
+    submitEntry(`https://other.example.com/claim/${CLAIM_TOKEN}`);
+    expect(navigateTo).toHaveBeenCalledWith(`https://other.example.com/claim/${CLAIM_TOKEN}`);
+  });
+
+  it("answers anything else with 당황 코메토 and a 합니다체 error that says what to do", () => {
+    mount();
+    submitEntry("hello");
+    expect(q("onboarding-welcome")).not.toBeNull();
+    expect(guideExpression()).toBe("flustered");
+    expect(guideLine()).toBe("그 주소로는 길을 못 찾았어요.");
+    const error = q("connect-entry-error");
+    expect(error?.getAttribute("role")).toBe("alert");
+    expect(error?.textContent).toMatch(/붙여 넣으세요/);
+    expect(q("connect-entry")?.getAttribute("aria-invalid")).toBe("true");
+    expect(q("connect-entry")?.getAttribute("aria-describedby")).toBe("connect-entry-error");
+    fill("connect-entry", "team.example.com");
+    expect(q("connect-entry-error")).toBeNull();
+    expect(guideExpression()).toBe("idle");
+    expect(guideLine()).toBe("안녕하세요, 저는 코메토예요. 어디로 갈까요?");
+  });
+
+  it("reads an empty box as this page's server on the web (old S1 same-origin rule)", () => {
+    mount();
+    click("connect-entry-submit");
+    expect(q("onboarding-sign-in")).not.toBeNull();
+    expect(q("connect-server-chip-host")?.textContent).toBe(window.location.host);
+    expect(localStorage.getItem("momo.web.server.v1")).toBeNull();
+  });
+
+  it("skips D0 when a server is stored", () => {
+    setServerBase("https://team.example.com");
+    mount();
+    expect(q("onboarding-welcome")).toBeNull();
+    expect(q("onboarding-sign-in")).not.toBeNull();
+    expect(q("connect-server-chip-host")?.textContent).toBe("team.example.com");
+  });
+
+  it("skips D0 when an invite link opened the page", () => {
+    window.history.replaceState(null, "", `/?code=${CODE}`);
+    mount();
+    expect(q("onboarding-welcome")).toBeNull();
+    expect(q("onboarding-join")).not.toBeNull();
+    expect(
+      document.querySelector("[data-onboarding-effect]")?.getAttribute("data-onboarding-effect")
+    ).toBe("none");
+    // 초대 코드는 주소창에서 걷힌다(bearer secret).
+    expect(window.location.href).not.toContain(CODE);
+  });
+
+  it("offers servers found on this network and goes to D1 on 여기로", () => {
+    discoveryMock.mockReturnValue({
+      servers: [{ base: "http://192.168.0.7:28000", displayHost: "momo-mini.local:28000" }],
+      available: true,
+      searching: false,
+    });
+    mount();
+    expect(q("connect-discovery")?.textContent).toContain("이 네트워크에서 찾은 서버");
+    expect(q("connect-discovery-item")?.textContent).toContain("momo-mini.local:28000");
+    click("connect-discovery-item-go");
+    expect(q("onboarding-sign-in")).not.toBeNull();
+    expect(q("connect-server-chip-host")?.textContent).toBe("192.168.0.7:28000");
+  });
+
+  it("says what to do when discovery found nothing, and says nothing before it has looked", () => {
+    discoveryMock.mockReturnValue({ servers: [], available: true, searching: true });
+    mount();
+    expect(q("connect-discovery-empty")?.textContent).toBe(
+      "이 네트워크에서 팀 서버를 찾고 있어요."
+    );
+    act(() => mountedRoot?.unmount());
+    mountedRoot = null;
+    discoveryMock.mockReturnValue({ servers: [], available: true, searching: false });
+    mount();
+    expect(q("connect-discovery-empty")?.textContent).toBe(
+      "이 네트워크에서는 찾은 서버가 없어요. 팀 주소를 받았다면 위 칸에 붙여 넣어요."
+    );
+  });
+
+  it("does not claim to have searched in a browser tab", () => {
+    mount();
+    expect(q("connect-discovery")).toBeNull();
+  });
+
+  it("lists recent servers and goes to D1 on 여기로", () => {
+    localStorage.setItem(
+      "momo.web.server.history.v1",
+      JSON.stringify(["https://team.example.com"])
+    );
+    mount();
+    expect(q("connect-recent-servers")?.textContent).toContain("최근에 들어간 서버");
+    click("connect-recent-server-go");
+    expect(q("connect-server-chip-host")?.textContent).toBe("team.example.com");
+  });
+
+  it("shows the self-host note with the claim section of the first-day doc", () => {
+    mount();
+    expect(q("connect-self-host")).toBeNull();
+    click("connect-self-host-toggle");
+    expect(q("connect-self-host-toggle")?.getAttribute("aria-expanded")).toBe("true");
+    expect(q("connect-self-host")?.textContent).toContain("claim 링크");
+    expect(q("connect-self-host-doc")?.getAttribute("href")).toContain(
+      "docs/SELF_HOST_FIRST_DAY.ko.md#"
+    );
+  });
+
+  it("goes back from D1 to D0 with the server in the box", () => {
+    mount();
+    submitEntry("team.example.com");
+    click("onboarding-back");
+    expect(q("onboarding-welcome")).not.toBeNull();
+    expect((q("connect-entry") as HTMLInputElement).value).toBe("https://team.example.com");
+    expect(focused()).toBe("connect-entry");
+    submitEntry("team.example.com");
+    click("connect-server-change");
+    expect(q("onboarding-welcome")).not.toBeNull();
+  });
+});
+
+describe("D1 로그인 한 화면 (#2809 OB2-3)", () => {
+  it("needs exactly one input screen when the server is stored", async () => {
+    setServerBase("https://team.example.com");
+    const watch = watchInputScreens();
+    const onLoggedIn = vi.fn();
+    mount(onLoggedIn);
+    fill("login-email", "seongjae@dawn.example");
+    fill("login-password", "correct-horse");
+    await submitForm();
+    await vi.waitFor(() => expect(onLoggedIn).toHaveBeenCalledWith(session));
+    watch.stop();
+    expect(watch.seen).toEqual(["sign-in"]);
+    expect(watch.seen).toHaveLength(1);
+  });
+
+  it("asks with 코메토 72 and the server chip, then signs in", async () => {
     setServerBase("https://team.example.com");
     const onLoggedIn = vi.fn();
     mount(onLoggedIn);
-    click("onboarding-next");
+    expect(q("kometto-guide")?.getAttribute("data-size")).toBe("head");
+    expect(guideLine()).toBe("다시 왔군요. 이메일로 들어가요.");
+    expect(guideExpression()).toBe("idle");
+    expect(q("login-submit")?.textContent).toBe("들어가기");
     fill("login-email", "seongjae@dawn.example");
     fill("login-password", "correct-horse");
-    await act(async () => {
-      click("login-submit");
-    });
+    await submitForm();
     await vi.waitFor(() => {
-      expect(onLoggedIn).toHaveBeenCalledTimes(1);
+      expect(login).toHaveBeenCalledWith("seongjae@dawn.example", "correct-horse", "");
     });
     expect(onLoggedIn).toHaveBeenCalledWith(session);
-    expect(document.querySelector('[data-testid="onboarding-profile"]')).toBeNull();
     expect(joinWithInvite).not.toHaveBeenCalled();
-    expect(changeMyDisplayName).not.toHaveBeenCalled();
     expect(sessionStorage.getItem(FRESH_SIGNUP_SLOT)).toBeNull();
   });
 
-  it("does not open S3 when join reports createdMember false", async () => {
-    joinWithInvite.mockResolvedValue({ ...session, createdMember: false });
-    const onLoggedIn = await submitJoinFromPrefill();
-    await vi.waitFor(() => {
-      expect(onLoggedIn).toHaveBeenCalledTimes(1);
+  it("thinks while it checks", async () => {
+    setServerBase("https://team.example.com");
+    let resolve: (value: LoginResponse) => void = () => undefined;
+    login.mockImplementation(() => new Promise<LoginResponse>((r) => (resolve = r)));
+    mount();
+    fill("login-email", "seongjae@dawn.example");
+    fill("login-password", "correct-horse");
+    await submitForm();
+    expect(guideExpression()).toBe("thinking");
+    expect(guideLine()).toBe("들어갈 수 있는지 확인하고 있어요.");
+    expect(q("login-submit")?.getAttribute("aria-busy")).toBe("true");
+    await act(async () => resolve(session));
+  });
+
+  it("on a rejected sign-in: 당황, the error in place, and the password gone", async () => {
+    setServerBase("https://team.example.com");
+    login.mockRejectedValue(new ApiError(401, "invalid credentials"));
+    const onLoggedIn = vi.fn();
+    mount(onLoggedIn);
+    fill("login-email", "seongjae@dawn.example");
+    fill("login-password", "wrong-horse");
+    await submitForm();
+    await vi.waitFor(() => expect(q("login-error")).not.toBeNull());
+    expect(guideExpression()).toBe("flustered");
+    expect(guideLine()).toBe("들어가지 못했어요.");
+    expect((q("login-password") as HTMLInputElement).value).toBe("");
+    expect(focused()).toBe("login-password");
+    expect(q("login-error")?.getAttribute("role")).toBe("alert");
+    expect(q("login-error")?.textContent).not.toContain("다시 시도");
+    expect(onLoggedIn).not.toHaveBeenCalled();
+  });
+
+  it("on a server that does not answer: 당황 and the password gone too", async () => {
+    setServerBase("https://team.example.com");
+    login.mockRejectedValue(new NetworkError("unreachable", 15_000));
+    mount();
+    fill("login-email", "seongjae@dawn.example");
+    fill("login-password", "correct-horse");
+    await submitForm();
+    await vi.waitFor(() => expect(q("login-error")).not.toBeNull());
+    expect(guideExpression()).toBe("flustered");
+    expect((q("login-password") as HTMLInputElement).value).toBe("");
+  });
+
+  it("offline: 당황 with its own sentence, the banner, and a held submit", () => {
+    setServerBase("https://team.example.com");
+    mount();
+    expect(guideExpression()).toBe("idle");
+    act(() => {
+      online = false;
+      window.dispatchEvent(new Event("offline"));
     });
-    expect(onLoggedIn).toHaveBeenCalledWith({ ...session, createdMember: false });
-    expect(document.querySelector('[data-testid="onboarding-profile"]')).toBeNull();
-    expect(changeMyDisplayName).not.toHaveBeenCalled();
-    expect(sessionStorage.getItem(FRESH_SIGNUP_SLOT)).toBeNull();
+    expect(guideExpression()).toBe("flustered");
+    expect(guideLine()).toBe("지금은 인터넷에 닿지 않아요.");
+    expect(q("connect-offline")).not.toBeNull();
+    expect((q("login-submit") as HTMLButtonElement).disabled).toBe(true);
+    act(() => {
+      online = true;
+      window.dispatchEvent(new Event("online"));
+    });
+    expect(guideExpression()).toBe("idle");
+    expect(guideLine()).toBe("다시 왔군요. 이메일로 들어가요.");
   });
 
-  it("writes the fresh-signup marker at join success, before any S3 interaction, and only once", async () => {
+  it("keeps the workspace-ID escape hatch", () => {
+    setServerBase("https://team.example.com");
+    mount();
+    click("login-workspace-toggle");
+    expect(q("login-workspace")).not.toBeNull();
+  });
+});
+
+async function joinFromLink(options: { name?: string } = {}) {
+  window.history.replaceState(null, "", `/?code=${CODE}`);
+  const onLoggedIn = vi.fn();
+  mount(onLoggedIn);
+  fill("login-email", "seongjae@dawn.example");
+  fill("login-password", "new-pass");
+  if (options.name !== undefined) fill("onboarding-profile-name", options.name);
+  await submitForm();
+  return onLoggedIn;
+}
+
+describe("D1′ 초대 수락 한 화면 (#2810 OB2-4)", () => {
+  it("needs exactly one input screen when a link opened it", async () => {
+    const watch = watchInputScreens();
+    const onLoggedIn = await joinFromLink({ name: "성재" });
+    changeMyDisplayName.mockResolvedValue({ ...session.member, displayName: "성재" });
+    await vi.waitFor(() => expect(onLoggedIn).toHaveBeenCalledTimes(1));
+    watch.stop();
+    expect(watch.seen).toEqual(["join"]);
+  });
+
+  it("greets with 기쁨 코메토 and asks email, new password and name on one screen", () => {
+    window.history.replaceState(null, "", `/?code=${CODE}`);
+    mount();
+    expect(guideExpression()).toBe("happy");
+    expect(guideLine()).toBe("초대를 받았어요.");
+    expect(q("kometto-guide-detail")?.textContent).toBe("세 칸만 채우면 바로 들어가요.");
+    expect(q("login-email")).not.toBeNull();
+    expect(q("login-password")?.getAttribute("autocomplete")).toBe("new-password");
+    expect(q("onboarding-profile-name")).not.toBeNull();
+    expect(document.querySelector('label[for="onboarding-profile-name"]')?.textContent).toContain(
+      "선택"
+    );
+    expect(q("login-submit")?.textContent).toBe("팀에 들어가기");
+    expect(q("join-sign-in-link")).not.toBeNull();
+  });
+
+  it("joins, saves the name, and lands with the renamed member", async () => {
+    changeMyDisplayName.mockResolvedValue({ ...session.member, displayName: "성재" });
+    const onLoggedIn = await joinFromLink({ name: "성재" });
+    await vi.waitFor(() => expect(onLoggedIn).toHaveBeenCalledTimes(1));
+    expect(joinWithInvite).toHaveBeenCalledWith(CODE, "seongjae@dawn.example", "new-pass");
+    expect(changeMyDisplayName).toHaveBeenCalledWith(session.member.workspaceId, "성재");
+    expect(onLoggedIn.mock.calls[0]?.[0].member.displayName).toBe("성재");
+  });
+
+  it("joins without a PATCH when the name is left empty", async () => {
+    const onLoggedIn = await joinFromLink();
+    await vi.waitFor(() => expect(onLoggedIn).toHaveBeenCalledTimes(1));
+    expect(changeMyDisplayName).not.toHaveBeenCalled();
+    expect(onLoggedIn).toHaveBeenCalledWith({ ...session, createdMember: true });
+  });
+
+  it("writes the fresh-signup marker at join success, once, before the name is saved", async () => {
     const writes: string[] = [];
     const orig = Storage.prototype.setItem;
     const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
@@ -450,437 +602,188 @@ describe("BZ-6b onboarding profile step", () => {
       if (key === FRESH_SIGNUP_SLOT) writes.push(value);
       return orig.call(this, key, value);
     });
+    let patchedAfter = -1;
+    changeMyDisplayName.mockImplementation(async () => {
+      patchedAfter = writes.length;
+      return { ...session.member, displayName: "성재" };
+    });
     try {
-      const onLoggedIn = await submitJoinFromPrefill();
-      await vi.waitFor(() => {
-        expect(document.querySelector('[data-testid="onboarding-profile"]')).not.toBeNull();
-      });
-      expect(onLoggedIn).not.toHaveBeenCalled();
+      const onLoggedIn = await joinFromLink({ name: "성재" });
+      await vi.waitFor(() => expect(onLoggedIn).toHaveBeenCalledTimes(1));
       expect(writes).toHaveLength(1);
+      expect(patchedAfter).toBe(1);
       expect(JSON.parse(writes[0] ?? "null")).toEqual({
         workspaceId: session.member.workspaceId,
         memberId: session.member.id,
       });
-      await act(async () => {
-        click("onboarding-profile-skip");
-      });
-      await vi.waitFor(() => {
-        expect(onLoggedIn).toHaveBeenCalledTimes(1);
-      });
-      expect(writes).toHaveLength(1);
     } finally {
       spy.mockRestore();
     }
   });
 
-  it("opens S3 after a join that created the member, with no 뒤로 and the join dot", async () => {
-    const onLoggedIn = await submitJoinFromPrefill();
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile"]')).not.toBeNull();
-    });
-    expect(onLoggedIn).not.toHaveBeenCalled();
-    // 초대 경로는 가입 → AI 연결 두 점이고, S3는 아직 가입 화면(D1′)이다.
-    expect(
-      document.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
-    ).toBe("2단계 중 1단계");
-    expect(document.querySelector('[data-testid="onboarding-back"]')).toBeNull();
-    const name = document.querySelector(
-      '[data-testid="onboarding-profile-name"]'
-    ) as HTMLInputElement | null;
-    expect(name?.value).toBe("곽성재");
-  });
-
-  it("labels the display-name field as 선택, never 필수", async () => {
-    await submitJoinFromPrefill();
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile"]')).not.toBeNull();
-    });
-    const card = document.querySelector('[data-testid="onboarding-profile"]');
-    expect(card?.textContent).toContain("선택");
-    expect(card?.textContent).not.toContain("필수");
-  });
-
-  it("does not render the discovered-servers picker on S3", async () => {
-    discoveredServersMock.mockReturnValue([
-      { base: "https://lan.example", displayHost: "Mac.local:28000" },
+  it("goes straight to the first conversation when the team already has an active agent", async () => {
+    fetchRoster.mockResolvedValue([
+      { id: "a1", workspaceId: session.member.workspaceId, kind: "agent", status: "active", displayName: "김인턴", handle: "intern", channelCount: 1, channelIds: [], capabilities: [] },
     ]);
-    window.history.replaceState(null, "", "/?code=Ab3-_x");
-    mount();
-    expect(document.querySelector('[data-testid="connect-discovery"]')).not.toBeNull();
-    click("onboarding-next");
-    fill("login-email", "seongjae@dawn.example");
-    fill("login-password", "new-pass");
-    await act(async () => {
-      click("login-submit");
-    });
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile"]')).not.toBeNull();
-    });
-    expect(document.querySelector('[data-testid="connect-discovery"]')).toBeNull();
-    expect(document.querySelector('[data-testid="connect-discovery-item"]')).toBeNull();
+    const onLoggedIn = await joinFromLink();
+    await vi.waitFor(() => expect(onLoggedIn).toHaveBeenCalledTimes(1));
+    expect(fetchRoster).toHaveBeenCalledWith(session.member.workspaceId);
+    expect(firstAgentIsPending(session.member.workspaceId)).toBe(false);
+    expect(sessionStorage.getItem(PHONE_LINK_FIRST_RUN_KEY)).toBe("pending");
   });
 
-  it("wires the helper sentence as a description of the name field", async () => {
-    await submitJoinFromPrefill();
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-name"]')).not.toBeNull();
-    });
-    const input = document.querySelector('[data-testid="onboarding-profile-name"]');
-    const hint = document.getElementById("onboarding-profile-name-hint");
-    const label = document.querySelector('label[for="onboarding-profile-name"]');
-    expect(hint).not.toBeNull();
-    expect(hint?.textContent).toContain("나중에 설정에서 언제든 바꿀 수 있습니다");
-    expect(input?.getAttribute("aria-describedby")).toContain("onboarding-profile-name-hint");
-    expect(label).not.toBeNull();
+  it("keeps AI 연결 when the team has no active agent, or when the directory did not answer", async () => {
+    fetchRoster.mockResolvedValue([
+      { id: "a1", workspaceId: session.member.workspaceId, kind: "agent", status: "suspended", displayName: "김인턴", handle: "intern", channelCount: 1, channelIds: [], capabilities: [] },
+    ]);
+    const onLoggedIn = await joinFromLink();
+    await vi.waitFor(() => expect(onLoggedIn).toHaveBeenCalledTimes(1));
+    expect(firstAgentIsPending(session.member.workspaceId)).toBe(true);
+
+    act(() => mountedRoot?.unmount());
+    mountedRoot = null;
+    sessionStorage.clear();
+    fetchRoster.mockRejectedValue(new NetworkError("unreachable", 15_000));
+    const again = await joinFromLink();
+    await vi.waitFor(() => expect(again).toHaveBeenCalledTimes(1));
+    expect(firstAgentIsPending(session.member.workspaceId)).toBe(true);
   });
 
-  it("skip lands without PATCHing; the marker was already written at join", async () => {
-    const onLoggedIn = await submitJoinFromPrefill();
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-skip"]')).not.toBeNull();
-    });
-    await act(async () => {
-      click("onboarding-profile-skip");
-    });
-    await vi.waitFor(() => {
-      expect(onLoggedIn).toHaveBeenCalledTimes(1);
-    });
+  it("lands an existing member (createdMember false) without renaming", async () => {
+    joinWithInvite.mockResolvedValue({ ...session, createdMember: false });
+    const onLoggedIn = await joinFromLink({ name: "다른 이름" });
+    await vi.waitFor(() => expect(onLoggedIn).toHaveBeenCalledTimes(1));
     expect(changeMyDisplayName).not.toHaveBeenCalled();
-    expect(onLoggedIn).toHaveBeenCalledWith({ ...session, createdMember: true });
-    expect(JSON.parse(sessionStorage.getItem(FRESH_SIGNUP_SLOT) ?? "null")).toEqual({
-      workspaceId: session.member.workspaceId,
-      memberId: session.member.id,
-    });
+    expect(sessionStorage.getItem(FRESH_SIGNUP_SLOT)).toBeNull();
   });
 
-  it("rejects 101 characters in a sentence, disables save, and does not PATCH", async () => {
-    await submitJoinFromPrefill();
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-name"]')).not.toBeNull();
-    });
-    fill("onboarding-profile-name", "가".repeat(101));
-    const message = document.querySelector(
-      '[data-testid="onboarding-profile-name-error"]'
-    )?.textContent;
-    expect(message).toBe("표시 이름은 100자까지 쓸 수 있습니다.");
-    expect(message).not.toMatch(/100자 초과/);
-    const submit = document.querySelector(
-      '[data-testid="onboarding-profile-submit"]'
-    ) as HTMLButtonElement;
-    expect(submit.disabled).toBe(true);
-    await act(async () => {
-      click("onboarding-profile-submit");
-    });
-    expect(changeMyDisplayName).not.toHaveBeenCalled();
-  });
-
-  it("rejects empty and whitespace names client-side and never PATCHes an empty displayName", async () => {
-    await submitJoinFromPrefill();
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-name"]')).not.toBeNull();
-    });
-    fill("onboarding-profile-name", "");
-    expect(
-      document.querySelector('[data-testid="onboarding-profile-name-error"]')
-        ?.textContent
-    ).toBe("표시 이름을 비울 수 없습니다. 한 글자 이상 적으세요.");
-    const submit = document.querySelector(
-      '[data-testid="onboarding-profile-submit"]'
-    ) as HTMLButtonElement;
-    expect(submit.disabled).toBe(true);
-    await act(async () => {
-      click("onboarding-profile-submit");
-    });
-    expect(changeMyDisplayName).not.toHaveBeenCalled();
-    expect(changeMyDisplayName.mock.calls.map((args) => args[1])).not.toContain("");
-
-    fill("onboarding-profile-name", "   ");
-    expect(
-      document.querySelector('[data-testid="onboarding-profile-name-error"]')
-        ?.textContent
-    ).toBe("표시 이름을 비울 수 없습니다. 한 글자 이상 적으세요.");
-    expect(submit.disabled).toBe(true);
-    await act(async () => {
-      click("onboarding-profile-submit");
-    });
-    expect(changeMyDisplayName).not.toHaveBeenCalled();
-    expect(changeMyDisplayName.mock.calls.map((args) => args[1])).not.toEqual(
-      expect.arrayContaining(["", "   "])
-    );
-  });
-
-  it("accepts a 100-character name and PATCHes that body", async () => {
-    const name = "가".repeat(100);
-    const renamed = { ...session.member, displayName: name };
-    changeMyDisplayName.mockResolvedValue(renamed);
-    await submitJoinFromPrefill();
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-name"]')).not.toBeNull();
-    });
-    fill("onboarding-profile-name", name);
-    expect(document.querySelector('[data-testid="onboarding-profile-name-error"]')).toBeNull();
-    const submit = document.querySelector(
-      '[data-testid="onboarding-profile-submit"]'
-    ) as HTMLButtonElement;
-    expect(submit.disabled).toBe(false);
-    await act(async () => {
-      click("onboarding-profile-submit");
-    });
-    await vi.waitFor(() => {
-      expect(changeMyDisplayName).toHaveBeenCalledTimes(1);
-    });
-    expect(changeMyDisplayName).toHaveBeenCalledWith(session.member.workspaceId, name);
-    expect(changeMyDisplayName.mock.calls[0]?.[1]).toHaveLength(100);
-  });
-
-  it("shows a fail-forward banner on PATCH failure and 계속 lands with the original member", async () => {
+  it("does not block the join on a name-save failure, and says where to change it", async () => {
     changeMyDisplayName.mockRejectedValue(new ApiError(500, "engine boom"));
-    const onLoggedIn = await submitJoinFromPrefill();
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-submit"]')).not.toBeNull();
-    });
-    fill("onboarding-profile-name", "성재");
-    await act(async () => {
-      click("onboarding-profile-submit");
-    });
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-banner"]')).not.toBeNull();
-    });
-    const banner = document.querySelector('[data-testid="onboarding-profile-banner"]')
-      ?.textContent;
-    expect(banner).toContain("요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요.");
-    expect(banner).toContain("설정 › 프로필에서 언제든 바꿀 수 있어요.");
-    expect(banner).not.toContain("나중에 설정에서 언제든 바꿀 수 있습니다");
-    expect(banner).not.toContain("engine boom");
+    const onLoggedIn = await joinFromLink({ name: "성재" });
+    await vi.waitFor(() => expect(q("onboarding-profile-banner")).not.toBeNull());
+    expect(q("onboarding-profile-banner")?.textContent).toContain(
+      "설정 › 프로필에서 언제든 바꿀 수 있어요"
+    );
+    expect(guideExpression()).toBe("flustered");
     expect(onLoggedIn).not.toHaveBeenCalled();
-    const retry = document.querySelector(
-      '[data-testid="onboarding-profile-banner"] button'
-    );
-    expect(retry?.textContent).toContain("다시 시도");
-    const submit = document.querySelector(
-      '[data-testid="onboarding-profile-submit"]'
-    ) as HTMLButtonElement;
-    expect(submit.textContent).toContain("계속");
-    await act(async () => {
-      click("onboarding-profile-submit");
-    });
-    await vi.waitFor(() => {
-      expect(onLoggedIn).toHaveBeenCalledTimes(1);
-    });
+    expect(q("onboarding-back")).toBeNull();
+    expect(q("join-sign-in-link")).toBeNull();
+    expect((q("login-email") as HTMLInputElement).readOnly).toBe(true);
+    expect(q("login-submit")?.textContent).toBe("계속");
+    expect(focused()).toBe("onboarding-profile-name");
+    await submitForm();
     expect(onLoggedIn).toHaveBeenCalledWith({ ...session, createdMember: true });
-    expect(changeMyDisplayName).toHaveBeenCalledTimes(1);
-    expect(changeMyDisplayName).toHaveBeenCalledWith(session.member.workspaceId, "성재");
   });
 
-  it("editing after a PATCH failure re-arms save so the primary PATCHes the new name", async () => {
+  it("re-arms the save when the name is edited after a failure", async () => {
     changeMyDisplayName.mockRejectedValueOnce(new ApiError(500, "engine boom"));
-    const renamed = { ...session.member, displayName: "두번째이름" };
-    changeMyDisplayName.mockResolvedValueOnce(renamed);
-    const onLoggedIn = await submitJoinFromPrefill();
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-submit"]')).not.toBeNull();
-    });
-    fill("onboarding-profile-name", "성재");
-    await act(async () => {
-      click("onboarding-profile-submit");
-    });
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-banner"]')).not.toBeNull();
-    });
-    fill("onboarding-profile-name", "두번째이름");
-    const submit = document.querySelector(
-      '[data-testid="onboarding-profile-submit"]'
-    ) as HTMLButtonElement;
-    expect(submit.textContent).toContain("저장");
-    expect(submit.textContent).not.toContain("계속");
-    await act(async () => {
-      click("onboarding-profile-submit");
-    });
-    await vi.waitFor(() => {
-      expect(changeMyDisplayName).toHaveBeenCalledTimes(2);
-    });
-    expect(changeMyDisplayName.mock.calls[1]?.[1]).toBe("두번째이름");
-    await vi.waitFor(() => {
-      expect(onLoggedIn).toHaveBeenCalledTimes(1);
-    });
-    expect(onLoggedIn).toHaveBeenCalledWith({
-      ...session,
-      createdMember: true,
-      member: renamed,
-    });
+    const onLoggedIn = await joinFromLink({ name: "성재" });
+    await vi.waitFor(() => expect(q("onboarding-profile-banner")).not.toBeNull());
+    changeMyDisplayName.mockResolvedValue({ ...session.member, displayName: "곽성재2" });
+    fill("onboarding-profile-name", "곽성재2");
+    expect(q("onboarding-profile-banner")).toBeNull();
+    expect(q("login-submit")?.textContent).toBe("팀에 들어가기");
+    await submitForm();
+    await vi.waitFor(() => expect(onLoggedIn).toHaveBeenCalledTimes(1));
+    expect(changeMyDisplayName).toHaveBeenLastCalledWith(session.member.workspaceId, "곽성재2");
+    expect(joinWithInvite).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps keyboard focus on the name field after a failed Enter save, not body", async () => {
-    let rejectPatch: ((error: unknown) => void) | undefined;
-    changeMyDisplayName.mockImplementation(
-      () =>
-        new Promise<Member>((_, reject) => {
-          rejectPatch = reject;
-        })
-    );
-    await submitJoinFromPrefill();
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-submit"]')).not.toBeNull();
-    });
-    fill("onboarding-profile-name", "성재");
-    const submit = document.querySelector(
-      '[data-testid="onboarding-profile-submit"]'
-    ) as HTMLButtonElement;
-    const name = document.querySelector(
-      '[data-testid="onboarding-profile-name"]'
-    ) as HTMLInputElement;
-    act(() => {
-      submit.focus();
-    });
-    expect(document.activeElement).toBe(submit);
-    await act(async () => {
-      submit.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })
-      );
-      submit.form?.requestSubmit();
-    });
-    await vi.waitFor(() => {
-      expect(changeMyDisplayName).toHaveBeenCalledTimes(1);
-    });
-    expect(submit.getAttribute("aria-busy")).toBe("true");
-    expect(submit.disabled).toBe(false);
-    await act(async () => {
-      rejectPatch?.(new ApiError(500, "engine boom"));
-    });
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-banner"]')).not.toBeNull();
-    });
-    expect(document.activeElement).not.toBe(document.body);
-    expect(document.activeElement).toBe(name);
-    expect(document.activeElement?.getAttribute("data-testid")).not.toBe(
-      "onboarding-profile-skip"
-    );
-  });
-
-  it("다시 시도 after a PATCH failure re-sends the current draft", async () => {
+  it("다시 시도 re-sends the current name", async () => {
     changeMyDisplayName.mockRejectedValueOnce(new ApiError(500, "engine boom"));
-    const renamed = { ...session.member, displayName: "성재" };
-    changeMyDisplayName.mockResolvedValueOnce(renamed);
-    const onLoggedIn = await submitJoinFromPrefill();
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-submit"]')).not.toBeNull();
-    });
-    fill("onboarding-profile-name", "성재");
-    await act(async () => {
-      click("onboarding-profile-submit");
-    });
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-banner"] button')).not.toBeNull();
-    });
-    await act(async () => {
-      (
-        document.querySelector(
-          '[data-testid="onboarding-profile-banner"] button'
-        ) as HTMLButtonElement
-      ).click();
-    });
-    await vi.waitFor(() => {
-      expect(changeMyDisplayName).toHaveBeenCalledTimes(2);
-    });
-    expect(changeMyDisplayName.mock.calls.map((args) => args[1])).toEqual([
-      "성재",
-      "성재",
-    ]);
-    await vi.waitFor(() => {
-      expect(onLoggedIn).toHaveBeenCalledTimes(1);
-    });
-    expect(onLoggedIn).toHaveBeenCalledWith({
-      ...session,
-      createdMember: true,
-      member: renamed,
-    });
-  });
-
-  it("save success lands with the renamed member", async () => {
-    const renamed = { ...session.member, displayName: "성재" };
-    changeMyDisplayName.mockResolvedValue(renamed);
-    const onLoggedIn = await submitJoinFromPrefill();
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-submit"]')).not.toBeNull();
-    });
-    fill("onboarding-profile-name", "성재");
-    await act(async () => {
-      click("onboarding-profile-submit");
-    });
-    await vi.waitFor(() => {
-      expect(onLoggedIn).toHaveBeenCalledTimes(1);
-    });
-    expect(onLoggedIn).toHaveBeenCalledWith({
-      ...session,
-      createdMember: true,
-      member: renamed,
-    });
-    expect(JSON.parse(sessionStorage.getItem(FRESH_SIGNUP_SLOT) ?? "null")).toEqual({
-      workspaceId: session.member.workspaceId,
-      memberId: session.member.id,
-    });
-  });
-
-  it("releases the restore hold once on skip", async () => {
-    await submitJoinFromPrefill();
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-skip"]')).not.toBeNull();
-    });
-    expect(sessionRestoreHeld()).toBe(true);
-    releaseSessionRestoreMock.mockClear();
-    await act(async () => {
-      click("onboarding-profile-skip");
-    });
-    expect(releaseSessionRestoreMock).toHaveBeenCalledTimes(1);
-    expect(sessionRestoreHeld()).toBe(false);
-  });
-
-  it("releases the restore hold once on save", async () => {
+    const onLoggedIn = await joinFromLink({ name: "성재" });
+    await vi.waitFor(() => expect(q("onboarding-profile-banner")).not.toBeNull());
     changeMyDisplayName.mockResolvedValue({ ...session.member, displayName: "성재" });
-    await submitJoinFromPrefill();
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-submit"]')).not.toBeNull();
-    });
-    fill("onboarding-profile-name", "성재");
-    expect(sessionRestoreHeld()).toBe(true);
-    releaseSessionRestoreMock.mockClear();
-    await act(async () => {
-      click("onboarding-profile-submit");
-    });
-    await vi.waitFor(() => {
-      expect(releaseSessionRestoreMock).toHaveBeenCalledTimes(1);
-    });
-    expect(sessionRestoreHeld()).toBe(false);
+    const retry = q("onboarding-profile-banner")?.querySelector("button") as HTMLButtonElement;
+    await act(async () => retry.click());
+    await vi.waitFor(() => expect(onLoggedIn).toHaveBeenCalledTimes(1));
+    expect(changeMyDisplayName).toHaveBeenCalledTimes(2);
   });
 
-  it("releases the restore hold once on fail-forward 계속", async () => {
-    changeMyDisplayName.mockRejectedValue(new ApiError(500, "engine boom"));
-    await submitJoinFromPrefill();
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-submit"]')).not.toBeNull();
-    });
-    fill("onboarding-profile-name", "성재");
-    await act(async () => {
-      click("onboarding-profile-submit");
-    });
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-banner"]')).not.toBeNull();
-    });
-    expect(sessionRestoreHeld()).toBe(true);
+  it("rejects a 101-character name before joining", async () => {
+    window.history.replaceState(null, "", `/?code=${CODE}`);
+    mount();
+    fill("onboarding-profile-name", "가".repeat(101));
+    expect(q("onboarding-profile-name-error")?.textContent).toBe(
+      "표시 이름은 100자까지 쓸 수 있습니다."
+    );
+    expect((q("login-submit") as HTMLButtonElement).disabled).toBe(true);
+    expect(joinWithInvite).not.toHaveBeenCalled();
+  });
+
+  it("puts a code verdict in place, with 당황 and a way back to paste a new link", async () => {
+    joinWithInvite.mockRejectedValue(new ApiError(404, "invite not found"));
+    await joinFromLink();
+    await vi.waitFor(() => expect(q("login-error")).not.toBeNull());
+    expect(q("onboarding-join")).not.toBeNull();
+    expect(guideExpression()).toBe("flustered");
+    expect(guideLine()).toBe("초대로 들어가지 못했어요.");
+    expect(q("login-error")?.textContent).toContain("유효하지 않은 초대 코드");
+    const relink = q("login-error")?.querySelector("button") as HTMLButtonElement;
+    expect(relink.textContent).toBe("링크 다시 넣기");
+    act(() => relink.click());
+    expect(q("onboarding-welcome")).not.toBeNull();
+    expect(focused()).toBe("connect-entry");
+  });
+
+  it("sends an already-redeemed invite to D1 on the same server", async () => {
+    joinWithInvite.mockRejectedValue(new ApiError(409, "invite already redeemed by this email"));
+    await joinFromLink();
+    await vi.waitFor(() => expect(q("onboarding-sign-in")).not.toBeNull());
+    expect(q("login-error")?.textContent).toContain("로그인하세요");
+  });
+
+  it("keeps a transport failure on D1′ with a retry", async () => {
+    joinWithInvite.mockRejectedValue(new NetworkError("unreachable", 15_000));
+    await joinFromLink();
+    await vi.waitFor(() => expect(q("login-error")).not.toBeNull());
+    expect(q("onboarding-join")).not.toBeNull();
+    expect(q("login-error")?.textContent).toContain("다시 시도");
+    expect((q("login-password") as HTMLInputElement).value).toBe("new-pass");
+  });
+
+  it("offers 로그인 for someone who already has an account here", () => {
+    window.history.replaceState(null, "", `/?code=${CODE}`);
+    mount();
+    click("join-sign-in-link");
+    expect(q("onboarding-sign-in")).not.toBeNull();
+    expect(q("onboarding-dots-label")?.textContent).toBe("1단계 중 1단계");
+  });
+});
+
+describe("join session hold (BZ-6b, kept through the merge)", () => {
+  it("releases the hold once when the join lands without a name", async () => {
     releaseSessionRestoreMock.mockClear();
-    await act(async () => {
-      click("onboarding-profile-submit");
-    });
+    const onLoggedIn = await joinFromLink();
+    await vi.waitFor(() => expect(onLoggedIn).toHaveBeenCalledTimes(1));
     expect(releaseSessionRestoreMock).toHaveBeenCalledTimes(1);
     expect(sessionRestoreHeld()).toBe(false);
   });
 
-  it("releases the restore hold once on unmount during S3", async () => {
-    await submitJoinFromPrefill();
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile"]')).not.toBeNull();
-    });
+  it("releases the hold once when the name is saved", async () => {
+    changeMyDisplayName.mockResolvedValue({ ...session.member, displayName: "성재" });
+    releaseSessionRestoreMock.mockClear();
+    const onLoggedIn = await joinFromLink({ name: "성재" });
+    await vi.waitFor(() => expect(onLoggedIn).toHaveBeenCalledTimes(1));
+    expect(releaseSessionRestoreMock).toHaveBeenCalledTimes(1);
+    expect(sessionRestoreHeld()).toBe(false);
+  });
+
+  it("holds through a name-save failure and releases once on 계속", async () => {
+    changeMyDisplayName.mockRejectedValue(new ApiError(500, "engine boom"));
+    await joinFromLink({ name: "성재" });
+    await vi.waitFor(() => expect(q("onboarding-profile-banner")).not.toBeNull());
     expect(sessionRestoreHeld()).toBe(true);
+    releaseSessionRestoreMock.mockClear();
+    await submitForm();
+    expect(releaseSessionRestoreMock).toHaveBeenCalledTimes(1);
+    expect(sessionRestoreHeld()).toBe(false);
+  });
+
+  it("releases the hold once on unmount mid-flow", async () => {
+    changeMyDisplayName.mockRejectedValue(new ApiError(500, "engine boom"));
+    await joinFromLink({ name: "성재" });
+    await vi.waitFor(() => expect(q("onboarding-profile-banner")).not.toBeNull());
     releaseSessionRestoreMock.mockClear();
     act(() => {
       mountedRoot?.unmount();
@@ -890,25 +793,29 @@ describe("BZ-6b onboarding profile step", () => {
     expect(sessionRestoreHeld()).toBe(false);
   });
 
-  it("keeps S3 on screen after join applyLogin instead of restoring the shell", async () => {
+  it("releases the hold on a failed join", async () => {
+    joinWithInvite.mockRejectedValue(new ApiError(404, "invite not found"));
+    await joinFromLink();
+    await vi.waitFor(() => expect(q("login-error")).not.toBeNull());
+    expect(sessionRestoreHeld()).toBe(false);
+  });
+
+  it("keeps D1′ on screen after join applyLogin instead of restoring the shell", async () => {
     joinWithInvite.mockImplementation(async () => {
       applyLogin(session);
       return { ...session, createdMember: true };
     });
+    changeMyDisplayName.mockRejectedValue(new ApiError(500, "engine boom"));
+    window.history.replaceState(null, "", `/?code=${CODE}`);
     mountGate();
-    click("onboarding-choose-invite");
-    fill("login-invite-code", "Ab3-_x");
-    click("onboarding-next");
     fill("login-email", "seongjae@dawn.example");
     fill("login-password", "new-pass");
-    await act(async () => {
-      click("login-submit");
-    });
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile"]')).not.toBeNull();
-    });
-    expect(document.querySelector('[data-testid="session-restoring"]')).toBeNull();
-    expect(document.querySelector('[data-testid="signed-in-shell"]')).toBeNull();
+    fill("onboarding-profile-name", "성재");
+    await submitForm();
+    await vi.waitFor(() => expect(q("onboarding-profile-banner")).not.toBeNull());
+    expect(q("onboarding-join")).not.toBeNull();
+    expect(q("session-restoring")).toBeNull();
+    expect(q("signed-in-shell")).toBeNull();
     expect(restoreSession).not.toHaveBeenCalled();
   });
 
@@ -933,7 +840,6 @@ describe("BZ-6b onboarding profile step", () => {
       await Promise.resolve();
     });
     expect(restoreSession).not.toHaveBeenCalled();
-    expect(document.querySelector('[data-testid="session-restoring"]')).toBeNull();
+    expect(q("session-restoring")).toBeNull();
   });
 });
-

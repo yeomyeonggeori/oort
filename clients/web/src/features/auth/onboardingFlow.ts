@@ -1,5 +1,14 @@
-export type OnboardingStep = "landing" | "gateway" | "account" | "profile";
-export type OnboardingPath = "server" | "invite";
+/**
+ * 로그인 전 온보딩 화면 (ADR-0193 D7, #2808·#2809·#2810).
+ *
+ *   welcome  D0  「어디로 갈까요?」 한 칸 + 발견·최근 서버 줄. 점 없음
+ *   sign-in  D1  서버 칩 + 이메일 + 비밀번호. 필수 입력 화면 1
+ *   join     D1′ 링크가 채운 서버·코드 + 이메일 + 새 비밀번호 + 표시 이름. 1
+ *
+ * 옛 S0(landing)·S1(gateway)·S2(account)·S3(profile) 네 화면이 이 셋이 됐다.
+ * claim(D1″)은 실경로 `/claim/<token>`이라 여기 없다(#2811).
+ */
+export type OnboardingStep = "welcome" | "sign-in" | "join";
 export type OnboardingTransitionDirection = "forward" | "backward";
 export type OnboardingTransitionEffect =
   | "fade"
@@ -9,31 +18,22 @@ export type OnboardingTransitionEffect =
   | "none";
 
 const STEP_ORDER: Record<OnboardingStep, number> = {
-  landing: 0,
-  gateway: 1,
-  account: 2,
-  profile: 3,
+  welcome: 0,
+  "sign-in": 1,
+  join: 1,
 };
 
 /**
- * First paint. A stored server or an invite prefill means the person already
- * chose a path, so S0 stays off. Invite wins when both are present: the link
- * is why they opened the client.
+ * 첫 그림. 링크로 열렸거나 저장된 서버가 있으면 D0을 건너뛴다(ADR-0193 D7).
+ * 둘 다면 초대가 이긴다: 그 링크가 이 창을 연 이유다.
  */
 export function initialOnboarding(input: {
   hasStoredServer: boolean;
   hasInvitePrefill: boolean;
-}): { step: OnboardingStep; path: OnboardingPath | null } {
-  if (input.hasInvitePrefill) return { step: "gateway", path: "invite" };
-  if (input.hasStoredServer) return { step: "gateway", path: "server" };
-  return { step: "landing", path: null };
-}
-
-export function progressLabel(step: OnboardingStep): string | null {
-  if (step === "gateway") return "2/4";
-  if (step === "account") return "3/4";
-  if (step === "profile") return "4/4";
-  return null;
+}): OnboardingStep {
+  if (input.hasInvitePrefill) return "join";
+  if (input.hasStoredServer) return "sign-in";
+  return "welcome";
 }
 
 /**
@@ -102,22 +102,6 @@ export const OWNER_INVITE_TTL_MS = 86_400_000;
 export const OWNER_INVITE_MAX_USES = 1;
 export const OWNER_INVITE_ROLE = "member";
 
-/**
- * Where S1 should land the cursor after a deep link (or any prefill that
- * opened the gateway). Email/password live on S2, so the old single-form
- * `prefillFocus` returning those fields is a silent no-op here.
- */
-export function gatewayPrefillFocus(form: {
-  serverUrl: string;
-  inviteCode: string;
-  requiresServer: boolean;
-  joinPath: boolean;
-}): "server" | "code" | "next" {
-  if (form.requiresServer && form.serverUrl.trim() === "") return "server";
-  if (form.joinPath && form.inviteCode.trim() === "") return "code";
-  return "next";
-}
-
 export function transitionFor(
   from: OnboardingStep,
   to: OnboardingStep,
@@ -131,10 +115,9 @@ export function transitionFor(
   }
   const direction: OnboardingTransitionDirection =
     STEP_ORDER[to] >= STEP_ORDER[from] ? "forward" : "backward";
-  const crossingLanding =
-    (from === "landing" && to === "gateway") ||
-    (from === "gateway" && to === "landing");
-  if (crossingLanding) {
+  // D0에서 다음 화면으로, 또는 돌아올 때는 mask-reveal(D11). D1 ↔ D1′은 line-slide.
+  const crossingWelcome = from === "welcome" || to === "welcome";
+  if (crossingWelcome) {
     return {
       effect: direction === "forward" ? "mask-reveal-down" : "mask-reveal-up",
       direction,
