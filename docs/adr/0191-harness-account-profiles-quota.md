@@ -28,7 +28,12 @@
 ### D1. 계정 프로필 = 하네스별 설정 폴더 하나, 호스트 로컬
 - 앱이 `~/Library/Application Support/oort/profiles/<harness>/<label>/`을 만든다. Claude는 `CLAUDE_CONFIG_DIR`, Codex는 `CODEX_HOME`으로 그 폴더를 가리켜 띄운다. Grok은 해당 CLI의 방식을 스파이크로 정한다.
 - 첫 사용 때 그 칸 안에서 공식 CLI의 `login`을 실행한다. 로그인은 사용자 손에서 끝나는 PTY 흐름이다.
-- 원격 호스트(workd)에서도 같은 모양이다. 프로필 폴더는 그 호스트 안에 있다.
+- **A 레인(workd) 프로필은 로컬 L 프로필과 다른 폴더다.** L 프로필 폴더에는 사용자 층 설정(hooks·`permissions.allow`·MCP)이 생기므로 A 레인에 넘기지 않는다. A 레인 프로필은 host state 폴더 아래(`<state>/profiles/<harness>/<label>/`, 0700)에 두고, 소유자가 그 폴더로 한 번 로그인한다. 폰·서버는 host가 발급한 불투명 프로필 id만 보낸다. 경로는 서버에 싣지 않는다.
+- **ADR-0188 §8.1을 이렇게 완화한다(조항별, 나머지는 그대로):**
+  - 조건 1(host 전용 `CODEX_HOME` 하나, 고정 경로): 「프로필마다 고정 경로 하나」로 넓힌다. 각 `CODEX_HOME`은 조건 1의 나머지(0700, `auth.json`과 host가 매번 다시 쓰는 `config.toml`만, `AGENTS.md`·`rules/`·`hooks.json`·`prompts/`가 있으면 거부, 허용 폴더 안이면 거부, 자격 복사 금지)를 **각각** 만족한다. Codex 프로세스 `HOME`(F5 빈 폴더)은 프로필과 무관하게 하나 그대로다.
+  - 조건 8(env 허용목록): Claude에 `CLAUDE_CONFIG_DIR` 하나를 더한다. 값은 host env에서 상속하지 않고 **host가 고른 프로필 폴더 경로로만 설정**한다. 그 폴더는 자격(키체인 항목 또는 자격 파일)과 host가 spawn마다 다시 쓰는 `settings.json`(hooks 없음, `permissions.allow` 없음, MCP 없음, §8.3 sandbox 설정 포함)만 가진다. 그 밖의 파일·폴더(`settings.local.json`, `CLAUDE.md`, `agents/`, `commands/`, `skills/`, `plugins/`, `hooks/` 등)가 있으면 spawn을 거부한다.
+  - 조건 2·F5와 §8.2·§8.3은 바뀌지 않는다.
+  - **red proof(#2781·#2777 계열 구현, 없으면 머지하지 않는다):** host env의 `CLAUDE_CONFIG_DIR`이 에이전트에 넘어가지 않음 / 프로필 폴더에 hooks가 든 `settings.json`이나 허용 밖 파일이 있으면 spawn 거부 / 프로필 `CODEX_HOME`에 `AGENTS.md`가 있으면 거부 / state 폴더 밖 또는 허용 폴더 안 프로필 경로 거부.
 - 서버에는 프로필 **라벨**(예: 「개인(Max)」)과 쿼터 숫자만 간다.
 
 ### D2. 약관 선 — 공식 바이너리, 토큰을 읽지 않는다, 풀링하지 않는다
