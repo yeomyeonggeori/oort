@@ -50,6 +50,13 @@ export type RealtimeSignal =
 export type RealtimeAction =
   /** Open the socket (no-op if the transport already has one). */
   | {kind: 'connect'}
+  /** The person is looking at the app again: make sure a socket is coming NOW.
+   *  Unlike `connect`, this must also cut short a reconnect backoff that is
+   *  already under way — centrifuge-js ignores `connect()` while it is
+   *  `connecting`, so a return during a 20-second backoff would otherwise wait
+   *  out the rest of it (#2751). A socket that is already connected is left
+   *  alone: tearing down a healthy socket on every glance is its own churn. */
+  | {kind: 'resume'}
   /** Close it. Only ever reached by a grace timer that ran to completion. */
   | {kind: 'disconnect'}
   /** Arm the grace timer. */
@@ -149,11 +156,12 @@ export function policyStep(
           // The whole point of the grace period: back within 15s, socket kept,
           // no reconnect and no replay.
           actions.push({kind: 'cancel-grace'});
-        } else {
-          // The grace elapsed while away and the socket was dropped, so coming
-          // back has to rebuild it.
-          actions.push({kind: 'connect'});
         }
+        // Either the grace elapsed while away and the socket was dropped, or it
+        // was kept but may have died with the radio while the app was away and
+        // is now sitting in a backoff. `resume` rebuilds the first and cuts the
+        // second short; a socket that survived is left untouched (#2751).
+        actions.push({kind: 'resume'});
         return {state: {...next, gracePending: false}, actions};
       }
 

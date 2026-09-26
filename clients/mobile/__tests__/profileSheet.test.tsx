@@ -311,6 +311,25 @@ describe('프로필 시트', () => {
     // `jest.setup.js` 의 expo-application 목이 답하는 값.
     expect(screen.getByTestId('profile-version')).toHaveTextContent('oort 9.8.7 (65)');
   });
+
+  it('버전 줄을 길게 누르면 실시간 연결 기록이 복사된다 — 식별 정보 없이 (#2751)', async () => {
+    const clipboard = jest.requireMock('expo-clipboard') as {
+      __box: {value: string | null};
+    };
+    clipboard.__box.value = null;
+    await openSheet();
+    await act(async () => {
+      fireEvent(screen.getByTestId('profile-version'), 'longPress');
+    });
+    const copied = clipboard.__box.value ?? '';
+    expect(copied.split('\n')[0]).toBe('oort 9.8.7 (65)');
+    // 셸이 이미 소켓을 열었다: 그 기록이 실려 있다.
+    expect(copied).toMatch(/ connected/);
+    expect(copied).not.toMatch(/api\.example\.com|wss?:\/\//);
+    expect(screen.getByTestId('profile-version')).toHaveTextContent(
+      '연결 기록을 복사했습니다',
+    );
+  });
 });
 
 describe('버전 줄', () => {
