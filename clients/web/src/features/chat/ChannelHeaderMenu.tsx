@@ -14,7 +14,10 @@ import {
   ChannelLeaveConfirmDialog,
   useChannelActions,
 } from "./channelActions";
-import { channelActionMenuLabel } from "./channelActionModel";
+import {
+  channelActionMenuLabel,
+  type ChannelActionKey,
+} from "./channelActionModel";
 
 // =============================================================================
 // 채널 헤더 ⋮ 메뉴 (검수 피드백 #3 · #1865). 트리거는 헤더 우측 라운드 버튼
@@ -44,7 +47,8 @@ import { channelActionMenuLabel } from "./channelActionModel";
 // DELETE · 확인 다이얼로그)은 `channelActions.tsx`가
 // 갖는다. 같은 일을 하는 두 번째 표면(사이드바 행 우클릭)이 생겼기 때문이고,
 // 두 표면이 실행을 각자 들면 다음 수리는 한쪽에만 들어간다. 이 파일에 남는 것은
-// **헤더가 헤더인 부분**뿐이다: ⋮ 트리거, 주제 다이얼로그로 넘기는 손, 그리고
+// **헤더가 헤더인 부분**뿐이다: ⋮ 트리거, 주제 다이얼로그로 넘기는 손(메뉴가
+// 다 내려간 뒤에 연다, #2741), 그리고
 // 다이얼로그로 넘어가는 동안의 포커스 복귀 억제(#1865 H-3).
 //
 // 헤더의 항목이 늘지 않은 것도 판정이다. 「읽음 처리」는 지금 읽고 있는 채널에
@@ -70,7 +74,16 @@ export function ChannelHeaderMenu({
   selfRole: MembershipRole | undefined;
 }) {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const handingOffRef = useRef(false);
+  // 메뉴가 넘겨 준 항목. 다이얼로그는 메뉴가 **다 내려간 뒤**에 연다 (#2741).
+  //
+  // 전에는 같은 손에서 `setOpen(false)`와 `setTopicOpen(true)`를 함께 불렀다.
+  // 그러면 닫히는 메뉴가 퇴장 모션 동안 DOM에 남아 자기 Esc 층을 쥔 채 다이얼로그
+  // 위에 겹친다. 그 창에서 누른 Esc는 이미 닫힌 메뉴가 먹고(preventDefault),
+  // 다이얼로그는 열린 채 남는다 — gate:channel-header가 부하에서 절반꼴로 잡던
+  // 멈춤이 이것이다(메뉴 `data-state=closed` 잔존 4/4 실패, 부재 4/4 통과).
+  // 메뉴의 닫힘 포커스 콜백은 콘텐츠가 실제로 언마운트될 때 불리므로, 거기서
+  // 다이얼로그를 열면 두 층이 겹치는 순간이 구조적으로 없다.
+  const pendingHandOffRef = useRef<ChannelActionKey | null>(null);
   const [open, setOpen] = useState(false);
   const [topicOpen, setTopicOpen] = useState(false);
   const topic = normalizeChannelTopic(channel.topic ?? "");
@@ -111,12 +124,14 @@ export function ChannelHeaderMenu({
           align="end"
           data-testid="channel-title-menu-content"
           onCloseAutoFocus={(event) => {
+            const pending = pendingHandOffRef.current;
+            if (pending === null) return;
+            pendingHandOffRef.current = null;
             // 주제/나가기 다이얼로그로 넘기는 동안 트리거로 되돌리면, 닫힘
             // 복귀가 다이얼로그 auto-focus와 같은 틱에서 싸운다 (#1865 H-3).
-            if (handingOffRef.current) {
-              event.preventDefault();
-              handingOffRef.current = false;
-            }
+            event.preventDefault();
+            if (pending === "topic") setTopicOpen(true);
+            if (pending === "leave") actions.leave.open();
           }}
         >
           <ChannelActionMenuItems
@@ -124,10 +139,8 @@ export function ChannelHeaderMenu({
             prefix="channel"
             actions={actions}
             onHandOff={(key) => {
-              handingOffRef.current = true;
+              pendingHandOffRef.current = key;
               setOpen(false);
-              if (key === "topic") setTopicOpen(true);
-              if (key === "leave") actions.leave.open();
             }}
           />
         </DropdownMenuContent>

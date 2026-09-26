@@ -46,3 +46,19 @@ export async function openWorkPanelViaConsole(page, { allowHashFallback = false 
   }
   await page.getByTestId("work-panel").waitFor();
 }
+
+/**
+ * 우측 WorkPanel. 주소(`/c/:id?work-panel=1`) 경유 — 작업 콘솔 입구를 거치지 않는다.
+ *
+ * #2741: 셀프호스트 기본 빌드(프로덕션)는 작업 콘솔 입구를 접는다(#2166,
+ * `isSurfaceProvided("workConsole")`). 패널 자체와 주소 열쇠는 남아 있다
+ * (ChatShell `work-panel` 효과). 셸의 기하·정체성을 재는 게이트(gate:shell)는
+ * 배포되는 빌드를 재야 하므로 게이트 모드로 입구를 되살리지 않고, 제품이 아직
+ * 받는 이 주소로 패널을 연다. 입구가 접혀 있다는 사실은 호출자가 따로 단정한다.
+ */
+export async function openWorkPanelByAddress(page, channelId) {
+  await page.evaluate((id) => {
+    window.location.hash = `#/c/${id}?work-panel=1`;
+  }, channelId);
+  await page.getByTestId("work-panel").waitFor();
+}
