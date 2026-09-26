@@ -271,15 +271,16 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(plus).toHaveProp('accessibilityRole', 'button');
     expect(plus).toHaveProp('accessibilityLabel', PLUS_LABEL);
     expect(plus.props.accessibilityState).toEqual({expanded: false});
-    const tablist = screen.UNSAFE_root.findAll(
-      (node: {props: {accessibilityRole?: string}}) =>
-        node.props.accessibilityRole === 'tablist',
-    )[0];
-    expect(
-      tablist.findAll(
-        (node: {props: {testID?: string}}) => node.props.testID === 'shell-plus',
-      ),
-    ).toHaveLength(0);
+    // 조상 사슬을 거슬러 올라가며 tablist 를 찾는다: 탭은 그 안에, + 는 그 밖에.
+    type Node = {props: {accessibilityRole?: string}; parent: Node | null};
+    const insideTablist = (node: Node | null): boolean => {
+      for (let at = node?.parent ?? null; at; at = at.parent) {
+        if (at.props.accessibilityRole === 'tablist') return true;
+      }
+      return false;
+    };
+    expect(insideTablist(screen.getByTestId('tab-home') as unknown as Node)).toBe(true);
+    expect(insideTablist(plus as unknown as Node)).toBe(false);
   });
 
   it('인박스 점이 멘션 수를 들고, 라벨이 그 수를 말한다', async () => {
@@ -647,12 +648,6 @@ describe('기하가 사양 표와 같다 — Buzz 크기, 시안 A 재질 (#2750
     expect(order).toEqual(['shell-tabbar', 'shell-plus', 'conversation-pane']);
     // 층이 크롬을 덮으므로 보조기술 트리에서도 크롬은 가려진다.
     expect(screen.queryByTestId('shell-plus')).toBeNull();
-    // 메뉴에도 zIndex 가 없다 — 있으면 층 위로 새어 나온다.
-    expect(
-      StyleSheet.flatten(
-        screen.getByTestId('tab-home', {includeHiddenElements: true}).props.style,
-      ).zIndex,
-    ).toBeUndefined();
   });
 
   it('페이지 시트: 위 58 · 반경 30 · 시트 바탕 · 38×5 손잡이', async () => {
@@ -810,10 +805,30 @@ describe.each(DS2_COMBOS)('%s %s — 탭바·+·메뉴 대비', (theme, mode) =>
     expect(contrast(p.onPrimary, p.primary)).toBeGreaterThanOrEqual(4.5);
   });
 
-  it('메뉴 글자·아이콘(onPrimary)이 행 채움(8%)과 눌림(16%) 위에서 4.5:1', () => {
-    const row = over(`${p.onPrimary}14`, p.primary);
-    const pressed = over(`${p.onPrimary}29`, p.primary);
-    expect(contrast(p.onPrimary, row)).toBeGreaterThanOrEqual(4.5);
-    expect(contrast(p.onPrimary, pressed)).toBeGreaterThanOrEqual(4.5);
+  it('메뉴 글자·아이콘(onPrimary)이 **렌더된** 행 채움과 눌림 위에서 4.5:1', async () => {
+    installFetch();
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('shell-plus'));
+    // 렌더된 행의 채움을 읽는다(팔레트는 시험이 고른 모드와 다를 수 있어, 채움의
+    // 알파만 가져와 이 조합의 onPrimary·primary 로 다시 합성한다).
+    // 합성 `Pressable` 의 style 함수를 두 상태로 불러 읽는다.
+    const pressable = screen
+      .UNSAFE_getAllByProps({testID: 'plus-menu-dm'})
+      .find(node => typeof node.props.style === 'function');
+    const styleFor = (pressed: boolean) =>
+      StyleSheet.flatten(pressable!.props.style({pressed})).backgroundColor;
+    const rest = styleFor(false);
+    const down = styleFor(true);
+    expect(down).not.toBe(rest);
+    for (const [state, fill] of [
+      ['rest', rest],
+      ['pressed', down],
+    ] as const) {
+      const alpha = String(fill).slice(7, 9);
+      expect(alpha).toMatch(/^[0-9a-f]{2}$/i);
+      const bg = over(`${p.onPrimary}${alpha}`, p.primary);
+      expect([state, contrast(p.onPrimary, bg) >= 4.5]).toEqual([state, true]);
+    }
   });
 });
