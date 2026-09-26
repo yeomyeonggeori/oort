@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import {
   ATTACHMENT_TRAY_MAX_HEIGHT,
+  ds2Radius,
   font,
   line,
   radius,
@@ -191,56 +192,29 @@ describe('간격 축이 웹 정본과 같은 표 위에 있다', () => {
 // -----------------------------------------------------------------------------
 
 describe('반경 축', () => {
-  it('sm 이 웹 --radius-sm 과 같다 — 버튼·칩·입력의 모서리', () => {
-    expect(radius.sm).toBe(WEB_RADIUS.sm);
-  });
+  // ADR-0189 D6(확정 항목 7): 폰·웹 반경의 **값 대조는 폐기**한다. 반경은 플랫폼층의
+  // 일이고, 두 클라는 이름만 공유한다(폰 `10·14·20·26·30·pill`, 웹 `6·10·14·18·20·
+  // pill`). 여기 있던 단정들 — 「sm 이 웹 --radius-sm 과 같다」「값이 다른 단계가 md
+  // 하나뿐」「짝 없는 단계가 양쪽에 하나씩」 — 은 웹 `tokens.css` 를 읽어 값을 맞췄고,
+  // 웹 DS2-1(#2713)이 `--radius-xl` 을 더하자 옳은 이유로 빨개졌다. 대조는 걷고 폰
+  // 안의 **관계**만 남긴다(D6 「반경과 타입은 값을 대조하지 않고 관계만 단정한다」).
 
-  it('이름이 겹치면서 값이 다른 단계가 **md 하나뿐**이다', () => {
-    // 감사가 이 분기를 「근거 없는 분기」로 분류했다: 반경과 타입 스케일은 대개
-    // "플랫폼이 다르니 다르다"로 방어되는데(폰 본문 16pt 는 iOS 입력창 줌 문턱이라는
-    // 근거가 `tokens.ts` 에 적혀 있다), md 10 대 8 에는 그런 근거가 어디에도 없다.
-    //
-    // 값을 맞추는 것은 **결정**이고 이 티켓의 자리가 아니다(그건 성재와 두 클라의
-    // 카드가 나란히 선 화면을 함께 봐야 하는 일이다). 여기서 하는 일은 그 분기를
-    // 산문에서 꺼내 **세는 것**이다: 지금은 하나이고, 둘이 되면 빨갛다.
-    const shared = Object.keys(radius).filter(key => key in WEB_RADIUS);
-    const divergent = shared.filter(
-      key =>
-        radius[key as keyof typeof radius] !==
-        WEB_RADIUS[key as keyof typeof WEB_RADIUS],
-    );
-    expect(divergent).toEqual(['md']);
-  });
-
-  it('그 분기가 리듬 한 단보다 작다 — 두 클라의 카드가 다른 종류로 읽히지 않는다', () => {
-    // 상한의 출처도 정본이다: 이 레포의 가장 작은 리듬 단계(4px)다. 그보다 벌어지면
-    // 그것은 「같은 카드의 두 판본」이 아니라 서로 다른 모서리 문법이다. 실측 차 2px.
-    const smallestStep = Math.min(
-      ...Object.entries(WEB_RHYTHM)
-        .filter(([name]) => name !== 'px' && name !== '0')
-        .map(([, px]) => px),
-    );
-    expect(Math.abs(WEB_RADIUS.md - radius.md)).toBeLessThan(smallestStep);
-  });
-
-  it('짝 없는 단계가 양쪽에 하나씩이고, 둘 다 이유가 있다', () => {
-    //   웹 lg(14)  다이얼로그·시트의 모서리. 폰의 시트는 RN 화면 전환이 그리므로
-    //              이 앱에 「다이얼로그 상자」라는 자리가 아직 없다.
-    //   폰 pill(999)  칩·배지의 완전 둥근 모서리. 웹은 같은 자리를 `rounded-sm` 로
-    //              그린다 — 즉 이것은 폰이 **더 가진** 어휘이고, 웹으로 옮길지는
-    //              결정이지 정렬이 아니다.
-    const webOnly = Object.keys(WEB_RADIUS)
-      .filter(key => !(key in radius))
-      .sort();
-    const phoneOnly = Object.keys(radius)
-      .filter(key => !(key in WEB_RADIUS))
-      .sort();
-    expect([webOnly, phoneOnly]).toEqual([['lg'], ['pill']]);
-  });
-
-  it('폰 세 단계가 커지는 순서다', () => {
+  it('여명 3단이 커지는 순서다', () => {
     expect(radius.sm).toBeLessThan(radius.md);
     expect(radius.md).toBeLessThan(radius.pill);
+  });
+
+  it('DS2 폰 사다리가 배지 < 행 < 카드 < 컴포저 < 시트 < 알약 으로 오른다', () => {
+    const ladder = [
+      ds2Radius.badge,
+      ds2Radius.row,
+      ds2Radius.card,
+      ds2Radius.composer,
+      ds2Radius.sheet,
+      ds2Radius.pill,
+    ];
+    expect([...ladder].sort((x, y) => x - y)).toEqual(ladder);
+    expect(new Set(ladder).size).toBe(ladder.length);
   });
 });
 
