@@ -291,11 +291,10 @@ export function FirstAgentStage({
   const [joinPending, setJoinPending] = useState(false);
   const [serverRefused, setServerRefused] = useState(false);
   const autoPassedRef = useRef(false);
-  const lastJoinRef = useRef<{
-    harness: LocalHarnessId;
-    connectionId: string;
-    agentDisplayName: string;
-  } | null>(null);
+  // CLI마다 이 화면에서 만든 연결. 다른 CLI를 거쳐 돌아와도 새 에이전트를 만들지 않는다.
+  const lastJoinRef = useRef<
+    Partial<Record<LocalHarnessId, { connectionId: string; agentDisplayName: string }>>
+  >({});
   const headingRef = useRef<HTMLHeadingElement>(null);
   const prevStepRef = useRef(step);
 
@@ -474,8 +473,8 @@ export function FirstAgentStage({
     setStep("connect");
     // 같은 CLI를 다시 고르면 새 에이전트를 만들지 않고 그 연결의 값만 다시 받는다
     // ([다른 AI 고르기] 뒤 두 번째 「성재의 Claude」가 생기지 않게, design-review M4).
-    const previous = lastJoinRef.current;
-    if (previous && previous.harness === id) {
+    const previous = lastJoinRef.current[id];
+    if (previous) {
       setJoin({ harness: id, agentDisplayName: previous.agentDisplayName, plan: null });
       const endpointAgain = agentPortEndpoint(absoluteApiBase());
       try {
@@ -521,8 +520,7 @@ export function FirstAgentStage({
         plan: subscriptionConnectPlan(id, endpoint, revealed.pairingCredential),
       });
       setConnectionId(revealed.connection.id);
-      lastJoinRef.current = {
-        harness: id,
+      lastJoinRef.current[id] = {
         connectionId: revealed.connection.id,
         agentDisplayName: identity.displayName,
       };

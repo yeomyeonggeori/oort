@@ -763,7 +763,8 @@ describe("구독 합류: 연결 명령 → 감지 대기 → 합류 (같은 화�
       "failure sentence"
     );
     expect(q(host, "first-agent-connect-status")?.getAttribute("role")).toBe("status");
-    expect(document.activeElement?.id).not.toBe("first-agent-heading");
+    // 누른 버튼이 같은 자리에 남아 포커스를 쥔다(body 로 떨어지지 않는다).
+    expect(document.activeElement).toBe(q(host, "first-agent-connect-open"));
   });
 
   it("[다른 AI 고르기] 뒤 같은 CLI를 다시 고르면 새 에이전트 대신 값만 다시 받는다", async () => {

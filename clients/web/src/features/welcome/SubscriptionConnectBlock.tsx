@@ -106,20 +106,6 @@ function CommandLine({
           {command}
         </code>
         <div className="ai-connect-command-actions">
-          {/* 구독 합류는 데스크탑에서만 열린다(구독 줄 게이트). 셸이 없으면
-              openTerminalApp 이 false 를 돌려 「직접 여세요」 문장이 선다. */}
-          {!openAsPrimary && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="ai-connect-secondary"
-              onClick={() => void handleOpen()}
-              data-testid="first-agent-connect-open"
-            >
-              {OPEN_TERMINAL_LABEL}
-            </Button>
-          )}
           <Button
             type="button"
             variant="ghost"
@@ -132,16 +118,19 @@ function CommandLine({
           </Button>
         </div>
       </div>
-      {openAsPrimary && (
-        <Button
-          type="button"
-          className={ONBOARDING_ACTION_CLASS}
-          onClick={() => void handleOpen()}
-          data-testid="first-agent-connect-open"
-        >
-          {OPEN_TERMINAL_LABEL}
-        </Button>
-      )}
+      {/* 한 버튼이 같은 자리에 남고 모양만 바뀐다: ①에서는 잉크 주 행동, ②·상한에서는
+          테두리 보조. 누른 버튼이 사라져 포커스가 body로 떨어지지 않는다(R2 M1).
+          구독 합류는 데스크탑에서만 열린다. 셸이 없으면 「직접 여세요」 문장이 선다. */}
+      <Button
+        type="button"
+        variant={openAsPrimary ? "default" : "outline"}
+        size={openAsPrimary ? "default" : "sm"}
+        className={openAsPrimary ? ONBOARDING_ACTION_CLASS : "ai-connect-secondary self-start"}
+        onClick={() => void handleOpen()}
+        data-testid="first-agent-connect-open"
+      >
+        {OPEN_TERMINAL_LABEL}
+      </Button>
       <p
         role="status"
         className={cn("break-keep text-meta text-ink-muted", status === null && "sr-only")}
