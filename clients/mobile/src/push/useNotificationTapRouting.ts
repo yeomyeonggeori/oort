@@ -107,7 +107,7 @@ export function useNotificationTapRouting(
   const fail = useCallback(
     (sentence: string) => {
       setNotice(sentence);
-      dispatch({type: 'selectTab', tab: 'channels'});
+      dispatch({type: 'selectTab', tab: 'home'});
       // 이 문장은 사람이 누른 곳과 다른 화면에 선다. 화면을 보지 않는 사람에게는
       // 알림을 눌렀는데 아무 일도 없었던 것과 같으므로 소리로도 말한다.
       AccessibilityInfo.announceForAccessibility(sentence);
@@ -191,9 +191,9 @@ export function useNotificationTapRouting(
       // 탭은 들고 있는다.
       if (!pending.failureSaid) {
         pending.failureSaid = true;
-        dispatch({type: 'selectTab', tab: 'channels'});
+        dispatch({type: 'selectTab', tab: 'home'});
         // 방금의 자리 옮김은 사람의 선택이 아니다. 그것을 기준점으로 삼는다.
-        pending.nav = {tab: 'channels', conversation: null};
+        pending.nav = {tab: 'home', conversation: null};
         AccessibilityInfo.announceForAccessibility(CHANNEL_LIST_FAILED);
       }
       return;

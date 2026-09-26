@@ -40,6 +40,7 @@ import {
 import {useChannels, useDirectory, useReadStates} from '../features/workspace/queries';
 import {Avatar} from '../features/conversation/Avatar';
 import {ProfileSheet} from '../features/profile/ProfileSheet';
+import {useTabBarClearance} from '../shell/ShellChrome';
 import {useRealtime} from '../realtime/RealtimeProvider';
 import {useSession} from '../session/useSession';
 
@@ -224,6 +225,8 @@ export default function SidebarScreen({
   const {member, workspaceId, signOut} = useSession();
   const realtime = useRealtime();
   const [profileOpen, setProfileOpen] = useState(false);
+  // 셸 안의 탭이면 바닥 위에 투명하게 서고, 목록 끝을 탭바만큼 비운다(ADR-0189 D1).
+  const clearance = useTabBarClearance();
   const channelsQuery = useChannels(workspaceId);
   const directoryQuery = useDirectory(workspaceId);
   const readStates = useReadStates(workspaceId);
@@ -319,7 +322,7 @@ export default function SidebarScreen({
   const listError = channelsQuery.error ?? directoryQuery.error;
 
   return (
-    <Screen>
+    <Screen onCanvas={clearance > 0}>
       <ScreenHeader
         title="대화"
         right={
@@ -447,7 +450,7 @@ export default function SidebarScreen({
           stickySectionHeadersEnabled={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[styles.listContent, {paddingBottom: space.lg + clearance}]}
           refreshControl={refreshControl}
           testID="sidebar-list"
         />

@@ -200,8 +200,11 @@ describe('프로필 시트', () => {
   it('닫기로 닫힌다', async () => {
     await openSheet();
     fireEvent.press(screen.getByTestId('profile-close'));
-    expect(screen.queryByTestId('profile-sheet')).toBeNull();
-  });
+    // 셸의 페이지 시트(#2714)는 닫기에서도 미끄러져 나간 뒤 사라진다.
+    await waitFor(() => expect(screen.queryByTestId('profile-sheet')).toBeNull(), {
+      timeout: 8000,
+    });
+  }, 15000);
 
   it('시트를 끌어내려 닫으면(onRequestClose/onDismiss) 아바타가 다시 연다', async () => {
     // pageSheet 의 끌어내림은 네이티브가 닫고 RN 이 알린다. 알림이 부모의 「열림」을

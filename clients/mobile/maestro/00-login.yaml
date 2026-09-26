@@ -126,10 +126,10 @@ name: 00-login
 - assertVisible:
     id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
 - assertVisible:
-    id: "tab-channels"
+    id: "tab-home"
 - assertVisible:
     id: "tab-inbox"
 - assertVisible:
-    id: "tab-agents"
+    id: "shell-fab"
 - assertNotVisible:
     id: "server-url-input"
