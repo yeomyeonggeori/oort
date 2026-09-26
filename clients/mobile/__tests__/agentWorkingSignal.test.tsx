@@ -31,6 +31,7 @@ import {
   ZOMBIE_CLEAR_MS,
 } from '../src/features/agents/workingSignal';
 import {color} from '../src/design/tokens';
+import {DISPLAY_GRACE_MS} from '../src/realtime/connectionDisplay';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
@@ -327,18 +328,21 @@ async function replay(publications: unknown[], delayMs: number): Promise<void> {
 }
 
 /**
- * Cut the socket the way a real drop does.
+ * Cut the socket the way a real drop does — one that outlives the display
+ * grace (#2751). A shorter gap is a reconnect and is deliberately not shown.
  *
  * `RealtimeProvider` has already seen `connected` by now, so its own rule ("once
- * we have been connected, not being connected is being disconnected") turns this
- * into `disconnected`. The background POLICY is untouched — the app is still in
- * front and still wants a socket — so the agent rail stays subscribed and the
- * store keeps what it was told. That separation is the point of the two flags.
+ * we have been connected, a gap longer than the grace is a disconnection")
+ * turns this into `disconnected`. The background POLICY is untouched — the app
+ * is still in front and still wants a socket — so the agent rail stays
+ * subscribed and the store keeps what it was told. That separation is the
+ * point of the two flags.
  */
 async function cutSocket(): Promise<void> {
   await act(async () => {
     await new Promise(resolve => setTimeout(resolve, 15));
     client().__emit('disconnected', {});
+    await new Promise(resolve => setTimeout(resolve, DISPLAY_GRACE_MS + 50));
   });
 }
 

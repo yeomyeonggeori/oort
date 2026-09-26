@@ -4,6 +4,8 @@
 // 우측 WorkPanel = 사이드바 「작업 콘솔」 (`nav-work-console` →
 // `open-work-panel` → `?work-panel=1`). 헤더 testid 를 `open-work-panel` 로
 // 남기면 게이트가 도크를 패널로 착각한다.
+// #2753: 도크는 isSurfaceProvided("work") 뒤에 있다. 이 헬퍼는 그 표면을
+// 선언한 빌드 모드(serverSurfaces GATE_FIXTURE_SURFACES)에서만 부른다.
 
 /** 채널 하단 터미널 도크. 채널 스코프 관전 진입. */
 export async function openTerminalDock(page) {
