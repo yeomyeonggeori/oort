@@ -27,6 +27,7 @@ describe("settingsNav", () => {
       "notifications",
       "terminal",
       "updates",
+      "ai",
     ]);
     expect(
       SETTINGS_SECTIONS.filter((item) => item.group === "워크스페이스").map(
@@ -38,7 +39,6 @@ describe("settingsNav", () => {
         (item) => item.label
       )
     ).toEqual([
-      "AI 연결",
       "에이전트 자격",
       "코드 실행 호스트",
       "사용량",
@@ -61,10 +61,10 @@ describe("settingsNav", () => {
       "notifications",
       "terminal",
       "updates",
+      "ai",
     ]);
     expect(idsIn("워크스페이스")).toEqual(["workspace", "plugins", "members"]);
     expect(idsIn("연결")).toEqual([
-      "ai",
       "agents",
       "code",
       "usage",

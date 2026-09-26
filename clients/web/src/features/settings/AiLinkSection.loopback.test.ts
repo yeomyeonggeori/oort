@@ -232,6 +232,16 @@ describe("AI 연결 loopback 안내 (#2204)", () => {
     vi.mocked(fetchProviderChain).mockRejectedValue(new ApiError(404, "not found"));
     vi.mocked(testProviderLink).mockResolvedValue(LOOPBACK_PROBE);
     const host = mountSection();
+    // #2877: 확인은 줄의 곁판 안에 산다. 줄의 ⋯ 로 곁판을 연다.
+    await waitFor(
+      () => host.querySelector('[data-testid="ai-link-row-more"]') !== null,
+      "row"
+    );
+    act(() => {
+      (
+        host.querySelector('[data-testid="ai-link-row-more"]') as HTMLButtonElement
+      ).click();
+    });
     await waitFor(
       () => host.querySelector('[data-testid="ai-link-check"]') !== null,
       "check"

@@ -2263,6 +2263,72 @@
   }
 }
 
+/* 설정 › AI 연결 (#2877). 기하는 시안 claudedocs/ai-accounts/mockups.html §1·§6의
+ * CSS 값 그대로다: 곁판 340, 줄 = 로고 36 · 이름 1fr · 상태 108 · 사용량 150 · ⋯ 28,
+ * 간격 12. 임의 `grid-cols-[…]` 금지 규칙 때문에 이름을 붙여 여기 둔다.
+ *
+ * 폭 판정은 뷰포트가 아니라 그릇이다. 곁판이 열리면 목록 열이 340 + 24 만큼
+ * 좁아지므로 같은 창에서도 줄 모양이 바뀌어야 한다.
+ * - 판(`ai-board`): 860 이상에서만 곁판이 옆에 선다. 그 아래는 목록 밑에 쌓인다.
+ * - 목록 열(`ai-pane`): 520 이상이면 한 줄 5칸, 아래면 로고·이름·⋯ 위에 상태와
+ *   사용량이 이름 칸 아래로 내려간다(390 폭 폰 창에서 이름이 0으로 눌리지 않게). */
+@utility ai-board-host {
+  container-type: inline-size;
+  min-inline-size: 0;
+}
+@utility ai-board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--spacing-6);
+  align-items: start;
+
+  @container (width >= 860px) {
+    &[data-aside-open] {
+      grid-template-columns: minmax(0, 1fr) 340px;
+    }
+  }
+}
+@utility ai-pane {
+  container-type: inline-size;
+  min-inline-size: 0;
+}
+@utility ai-acct-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 28px;
+  grid-template-areas:
+    "logo name more"
+    ". state state"
+    ". use use";
+  column-gap: var(--spacing-3);
+  row-gap: var(--spacing-1);
+  align-items: center;
+
+  @container (width >= 520px) {
+    grid-template-columns: 36px minmax(0, 1fr) 108px 150px 28px;
+    grid-template-areas: "logo name state use more";
+    row-gap: 0;
+  }
+}
+.ai-acct-row > [data-slot="logo"] { grid-area: logo; }
+.ai-acct-row > [data-slot="name"] { grid-area: name; }
+.ai-acct-row > [data-slot="state"] { grid-area: state; }
+.ai-acct-row > [data-slot="use"] { grid-area: use; }
+.ai-acct-row > [data-slot="more"] { grid-area: more; }
+/* 로고 칸 36 / 곁판 머리 44 (시안 `.lg`, `.ah .lg`). */
+@utility ai-logo {
+  inline-size: 36px;
+  block-size: 36px;
+}
+@utility ai-logo-lg {
+  inline-size: 44px;
+  block-size: 44px;
+}
+/* ⋯ 28 (시안 `.more`). */
+@utility ai-more {
+  inline-size: 28px;
+  block-size: 28px;
+}
+
 /* 폰 카메라가 다크 스킴 화면을 뒤집힌 QR로 읽지 못하게, 이 그릇만 light-dark()
  * 를 낮의 항으로 고정한다. 값은 토큰이고 hex 는 여기 없다.
  * 내용 상자가 모듈 수 × `--spacing-qr-module`. padding 은 content-box 라

@@ -200,7 +200,10 @@ export function SettingsRoute() {
         />
       ) : null}
 
-      {offline && (
+      {/* AI 연결은 자기 오프라인 배너를 든다(#2877, 시안 §6): 두 절이 서로 다르게
+          끊기므로(팀 연결은 서버, 내 계정은 이 맥) 이 일반 문장이 겹쳐 서면 한
+          순간에 배너가 둘이 된다. */}
+      {offline && section !== "ai" && (
         <InlineBanner
           tone="neutral"
           message="연결이 끊겼습니다. 저장은 다시 연결된 뒤에 할 수 있습니다."
