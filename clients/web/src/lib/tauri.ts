@@ -8,7 +8,7 @@
 // permission, no keychain) when there is no shell underneath.
 //
 // The Rust half lives in `clients/desktop/src-tauri/src/{deeplink,discovery,
-// notification,keychain,updater,detect,opener,pdf_viewer}.rs` and the
+// notification,keychain,updater,detect,harness_status,opener,pdf_viewer}.rs` and the
 // command/event contract is documented in `clients/desktop/README.md`. Keep
 // the three in sync — a renamed command fails at runtime, not at compile time.
 //
@@ -19,6 +19,7 @@
 
 import { IS_TAURI } from "./env";
 import type { HostedAgentProbe as HostedAgentProbeWire } from "@momo/core/features/hostedAgents/detect";
+import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
 
 /** True when the native commands below can actually do something. */
 export function isDesktop(): boolean {
@@ -228,6 +229,29 @@ export async function detectHostedAgents(): Promise<HostedAgentProbe[]> {
     return await invoke<HostedAgentProbe[]>("detect_hosted_agents");
   } catch {
     return [];
+  }
+}
+
+// ---- local harness detection (#2813) ---------------------------------------
+
+/**
+ * `claude`·`codex` on this Mac and what each CLI says about its login, as
+ * three values (ADR-0190 D3-a). The shell runs only `claude auth status` and
+ * `codex login status`, reads the exit code only, and takes no arguments from
+ * here. A browser tab and a failed call both read as "not installed".
+ */
+export async function detectLocalHarnesses(): Promise<LocalHarnessProbe[]> {
+  // Loaded on call, like `@tauri-apps/api`, so the boot chunk does not grow.
+  const { normalizeLocalHarnessProbes } = await import(
+    "@momo/core/features/hostedAgents/detect"
+  );
+  if (!IS_TAURI) return normalizeLocalHarnessProbes([]);
+  try {
+    return normalizeLocalHarnessProbes(
+      await invoke<unknown>("detect_local_harnesses")
+    );
+  } catch {
+    return normalizeLocalHarnessProbes([]);
   }
 }
 

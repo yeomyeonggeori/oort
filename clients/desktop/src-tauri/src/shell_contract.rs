@@ -703,6 +703,20 @@ fn crate_sources() -> Vec<(String, String)> {
 }
 
 /// An identifier that names the PTY module or anything it exports.
+/// Every API that registers script to run in a webview at page load (tauri
+/// 2.11 webview/window builders and plugin builder, wry 0.55). Such script
+/// runs with the bundled (local) origin, so it would pass the PTY capability
+/// just like `eval` (#2824 re-review Medium).
+const INIT_SCRIPT_APIS: &[&str] = &[
+    "initialization_script",
+    "initialization_script_for_all_frames",
+    "append_invoke_initialization_script",
+    "with_initialization_script",
+    "with_initialization_script_for_main_only",
+    "js_init_script",
+    "js_init_script_on_all_frames",
+];
+
 fn is_pty_ident(token: &str) -> bool {
     token == "pty"
         || token.starts_with("pty_")
@@ -791,6 +805,7 @@ fn nothing_but_the_command_table_reaches_the_pty() {
                     "with_webview",
                 ]
                 .contains(t)
+                    || INIT_SCRIPT_APIS.contains(t)
             })
             .collect();
         assert!(injected.is_empty(), "{name} injects script: {injected:?}");
@@ -856,7 +871,7 @@ fn nothing_but_the_command_table_reaches_the_pty() {
     ];
     let used: Vec<&str> = idents(&pty)
         .into_iter()
-        .filter(|t| banned.contains(t))
+        .filter(|t| banned.contains(t) || INIT_SCRIPT_APIS.contains(t))
         .collect();
     assert!(used.is_empty(), "pty.rs uses {used:?}");
 

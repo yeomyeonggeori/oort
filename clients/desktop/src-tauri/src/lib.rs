@@ -8,6 +8,7 @@
 //   keychain      refresh token at rest           -> commands
 //   updater       self-replace the app bundle     -> commands + progress event
 //   detect        local hosted-agent signatures   -> command (T-5; passive only)
+//   harnesses     claude/codex installed + login  -> command (#2813; exit code only)
 //
 // Everything above is exposed to the web bundle as plain app commands and two
 // events; the contract is documented in `clients/desktop/README.md` and consumed
@@ -19,6 +20,14 @@ mod deeplink;
 #[cfg(desktop)]
 mod detect;
 mod discovery;
+// Where harness CLIs live on this Mac (ADR-0190 D3), shared by every caller
+// that resolves `claude`/`codex` to an absolute path.
+#[cfg(desktop)]
+mod harness_path;
+// `claude auth status` / `codex login status`, exit code only (#2813,
+// ADR-0190 D3-a). The only harness commands the shell runs on its own.
+#[cfg(desktop)]
+mod harness_status;
 mod keychain;
 mod notification;
 // Handing a URL to the platform browser needs a platform browser, and the
@@ -91,6 +100,7 @@ pub fn run() {
             opener::open_external_url,
             pdf_viewer::open_pdf_attachment,
             detect::detect_hosted_agents,
+            harness_status::detect_local_harnesses,
             app_version,
             updater::updater_check,
             updater::updater_install,

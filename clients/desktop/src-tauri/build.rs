@@ -40,6 +40,8 @@ const APP_COMMANDS: &[&str] = &[
     "open_external_url",
     "open_pdf_attachment",
     "detect_hosted_agents",
+    // Local harness detection (#2813): no arguments, exit codes only.
+    "detect_local_harnesses",
     "app_version",
     "updater_check",
     "updater_install",

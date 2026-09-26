@@ -22,6 +22,7 @@
     "allow-open-external-url",
     "allow-open-pdf-attachment",
     "allow-detect-hosted-agents",
+    "allow-detect-local-harnesses",
     "allow-app-version",
     "allow-updater-check",
     "allow-updater-install",
