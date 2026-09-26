@@ -1704,7 +1704,9 @@ paths:
         `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`. That flag is valid in
         `MOMO_ENV=staging` (self-host default) as well as `local`
         (ADR-0004 증보, 2026-09-08). Loopback HTTP still needs an explicit
-        port. `https://` is allowed regardless of the flag.
+        port. `https://` is allowed regardless of the flag, except an
+        authority that is a private, loopback, link-local, or metadata address
+        literal, which needs the same local-host opt-in (#2852).
       security:
         - bearerAuth: []
       parameters:
@@ -9154,6 +9156,10 @@ components:
             `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`. The flag is valid in
             strict environments including `MOMO_ENV=staging` (self-host
             default). Loopback HTTP still needs an explicit port.
+            An HTTPS authority that is a private, loopback, link-local, or
+            metadata address literal (IPv4, IPv6, or IPv4-mapped) is refused
+            unless it is an opted-in local host; a name that resolves to such
+            an address is refused by the agent-worker at connect time (#2852).
             `https://` is allowed regardless of the flag.
             `True`/`1`/`yes` are not this flag — it is exactly `1`.
         systemPrompt:

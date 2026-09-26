@@ -292,3 +292,57 @@ opaque bearer뿐이다. Codex/OpenAI OAuth·원본 API 키는 유입하지 않�
 - (+) 유출 토큰의 피해 상한이 revoke 외에 예산으로도 생긴다.
 - (−) 관리 키가 1~2개 늘고(정본 키 수 계약 갱신), 이행 복사 상태(두 값 동일)는 회전할 때까지 doctor warn이 남는다.
 - (−) fail-closed 전환은 env를 손으로 관리하는 설치에서 기동 실패 문장을 한 번 만나게 한다 — 문장은 다음 행동(백필 명령)을 포함해야 한다.
+
+---
+
+## 증보 5 — provider egress SSRF 경계 + 프리셋 카탈로그 (2026-09-27, RCA 후속 1·2)
+
+- Status: **Accepted** — 성재 결재 2026-09-27 「전부 권장대로」(RCA 후속 1·2 진행: Anthropic 키 지원·SSRF 수리 포함, 이슈 #2872·#2852).
+- 기안: Opus 5.5 worker(#2895). 구현: PR #2875(#2852), PR #2888(#2872).
+- 발단: 2026-09-08 증보 D3의 「`https://`는 플래그 무관 허용」 때문에, GUI/REST로 받은 provider base URL이 `https://169.254.169.254/…` 같은 메타데이터·사설·루프백 주소를 가리켜도 저장과 호출이 모두 통과했다(SSRF). 공개 이름이 사설 주소로 풀리는 경우(DNS rebinding 포함)도 막지 못했다. 이 증보는 그 문장을 좁힌다.
+
+### D1. 「https는 플래그 무관 허용」을 좁힌다
+2026-09-08 증보 D3의 마지막 문장을 이렇게 바꾼다: **`https://`는 대상이 공개 주소일 때만 플래그 없이 허용한다.** 비공개 주소로 향하는 `https://`는 `http://`와 같은 운영자 opt-in(D4)이 있어야 한다. `http://` 규칙(`PlaintextRemote`, `LoopbackNotAllowed`, `LoopbackPortMissing`)은 바뀌지 않는다.
+
+비공개 판정의 정본은 `momo-settings` egress 모듈이다.
+- v4: 0/8, 10/8, 127/8, 100.64/10, 169.254/16, 172.16/12, 192.0.0/24, 192.168/16, 198.18/15, TEST-NET 3종, 224/4 이상.
+- v6: `::`, `::1`, fc00::/7(fd00:ec2::254 포함), fe80::/10, fec0::/10, ff00::/8, 2001:db8::/32, Teredo, 100::/64.
+- v4를 담은 v6(mapped, compatible, 64:ff9b::/96, 2002::/16)는 담긴 v4로 판정한다.
+- 이름 `localhost`와 `*.localhost`(RFC 6761)는 조회 없이 비공개로 본다.
+
+### D2. 두 지점에서 검사한다
+- **저장 시점**(`momo-settings::validated_base_url`, `PUT /v1/provider/link`·`…/chain`·에이전트 생성의 `baseUrl`): 권한부가 비공개 리터럴이거나 `*.localhost`면 `400 baseUrl must not target a private, loopback, link-local, or metadata address`. 이름은 저장 시점에 풀지 않는다(풀어도 연결 시점 결과를 보장하지 못한다).
+- **연결 시점**(agent-worker provider HTTP 클라이언트): DNS resolver(`GuardedResolver`)가 이름을 풀고, **응답 중 하나라도 비공개면 이름 전체를 거부**한다. 통과하면 검사한 주소만 connector에 넘긴다. 검사와 연결 사이에 두 번째 조회가 없으므로 DNS rebinding이 끼어들 수 없다. 리터럴은 resolver를 거치지 않으므로 사전 검사로 막는다. 거부는 `ProviderError::EgressDenied`이고 재시도하지 않는다.
+- 이미 저장된 행도 연결 시점 검사를 받는다. 사설 `https` 호스트를 가리키던 기존 `provider_link` 행은 배포 뒤 opt-in(D4) 없이는 거부된다.
+
+### D3. redirect와 프록시
+- 가드 클라이언트는 **redirect를 따르지 않는다**(`Policy::none`). 공개 주소가 사설 주소로 넘기는 경로를 닫는다.
+- 가드 클라이언트는 **시스템 프록시를 쓰지 않는다**(`no_proxy()`). 프록시가 대상 이름을 대신 풀면 resolver 검사가 무력해지기 때문이다. **동작 변경**: egress 프록시를 거쳐야만 밖으로 나갈 수 있는 배포는 provider 호출이 끊긴다. 그런 배포가 필요해지면 프록시 경유 경로에 같은 검사를 거는 별도 결정으로 연다.
+
+### D4. 예외는 운영자 설정뿐이다
+- **운영자 opt-in**: `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`이면서 호스트가 물리 루프백이거나 `AGENT_PROVIDER_LOCAL_HOSTS`에 정확히 일치할 때만 비공개 주소를 허용한다(2026-09-08 증보 D2·D3의 정확 일치 규칙 승계, 와일드카드·suffix 금지). 두 지점 모두 같은 판정을 쓴다. 공개 오리진 경고(같은 증보 D4, doctor `env.local_provider` major)도 그대로다.
+- **`HERMES_BASE_URL`**: env transport의 호스트는 운영자가 프로세스 환경에 직접 쓴 값이라 플래그와 같은 신뢰로 보고 검사에서 뺀다(compose `mock-hermes` 등). GUI/REST로 들어온 URL에는 이 예외가 없다.
+- 사용자 입력 URL에는 다른 예외를 두지 않는다.
+
+### D5. 프리셋 카탈로그 (증보 1 「예약」 해제)
+증보 1이 예약으로 남긴 「provider 카탈로그(여러 provider 프리셋)」를 이 목록으로 연다. 프리셋은 base URL과 wire 형식의 기본값일 뿐이고, 자격 경계(본문 §Rules, 증보 1 D1, 증보 2 D1)는 그대로다. 사용자는 **자기 API 키**(BYOK, ADR-0147 증보 2026-09-26)를 넣는다.
+
+| id | 라벨 | baseUrl | format |
+|---|---|---|---|
+| `openai` | OpenAI | `https://api.openai.com/v1` | `openai` (chat/completions) |
+| `anthropic` | Anthropic | `https://api.anthropic.com/v1` | `anthropic` (Messages, ADR-0147 증보 2026-09-27) |
+| `xai` | xAI | `https://api.x.ai/v1` | `openai` |
+| `openrouter` | OpenRouter | `https://openrouter.ai/api/v1` | `openai` |
+
+- 프리셋 호스트도 D2의 두 지점 검사를 똑같이 받는다. 프리셋이라고 가드를 건너뛰지 않는다.
+- 목록을 늘리거나 줄이는 것은 이 표를 고치는 증보로 한다. OpenAI 호환 wire를 쓰는 provider는 프리셋 없이도 사용자가 base URL을 직접 넣어 쓸 수 있다.
+
+### D6. 같은 부류의 남은 구멍
+ADR-0147 OAuth 링크의 `oauth.tokenEndpoint`는 URL 게이트 없이 저장되고, worker의 토큰 갱신 클라이언트는 가드가 없어 redirect를 따르고 프록시를 쓴다. refresh token을 사설 주소로 POST할 수 있는 동형 SSRF다. 이 증보의 D2·D3을 같은 방식으로 씌우는 수리는 **#2894로 분리**했다.
+
+### Consequences
+- (+) 사용자 입력 base URL로 메타데이터·사설망에 닿는 경로가 저장·연결 두 지점과 redirect에서 닫힌다. rebinding에도 버틴다.
+- (+) 프리셋이 BYOK 입력의 기본 경로가 되고(OpenRouter 포함), 같은 가드를 탄다.
+- (−) 셀프호스트에서 사설 대역 `https` LLM을 쓰던 설치는 플래그와 호스트 등록이 필요해진다(배포 노트에 싣는다).
+- (−) 프록시 전용 egress 배포는 provider 호출이 끊긴다(D3).
+- 실제 외부 DNS·실제 provider 호출은 runtime-unverified다(PR #2875·#2888 기준).
