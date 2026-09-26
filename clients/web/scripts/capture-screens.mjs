@@ -12352,6 +12352,73 @@ async function captureFirstAgentScenes(browser, scheme) {
 }
 
 /**
+ * AI 연결 재진입 (#2870). `CAPTURE_PROFILE=ai-reentry`로만 돈다.
+ *
+ * - 입구 두 곳: 설정 › AI 연결 맨 위 블록, 에이전트 화면 머리 버튼. 브라우저
+ *   캡처는 Tauri 셸이 아니라 design 전용 `?aiEntry=` 로 표면을 세운다.
+ * - 재진입 화면: `#/ai-connect?from=…&firstAgent=<pose>` (온보딩과 같은 화면,
+ *   진행 점 대신 [뒤로], 건너뛰기 대신 [닫기]).
+ * 각 프레임은 1280과 390 두 폭이다.
+ */
+async function captureAiReentryScenes(browser, scheme) {
+  beginScene("ai-reentry");
+  const shots = [];
+  const frames = [
+    { name: "settings-rows", hash: "/settings?section=ai&aiEntry=rows", ready: "subscription-entry-open" },
+    { name: "settings-web", hash: "/settings?section=ai&aiEntry=desktop-only", ready: "subscription-entry" },
+    { name: "settings-server-off", hash: "/settings?section=ai&aiEntry=server-off", ready: "subscription-entry" },
+    { name: "hub-rows", hash: "/agents?aiEntry=rows", ready: "agent-hub-subscription-entry" },
+    { name: "stage-sub-ready", hash: "/ai-connect?from=settings&firstAgent=sub-ready", ready: "ai-connect-reentry-back" },
+    { name: "stage-server-off", hash: "/ai-connect?from=agents&firstAgent=server-off", ready: "first-agent-server-off" },
+    { name: "stage-sub-connect", hash: "/ai-connect?from=agents&firstAgent=sub-connect", ready: "first-agent-connect-command" },
+  ];
+  const tapTargets = {
+    "stage-sub-ready": [
+      ["ai-connect-reentry-back", "뒤로"],
+      ["first-agent-skip", "닫기"],
+      ["first-agent-continue", "주 행동"],
+    ],
+    "settings-rows": [["subscription-entry-open", "내 구독 에이전트 붙이기"]],
+  };
+  for (const frame of frames) {
+    for (const [viewport, suffix] of [
+      [VIEWPORT, ""],
+      [MOBILE_VIEWPORT, "-390"],
+    ]) {
+      const context = await browser.newContext({
+        viewport,
+        deviceScaleFactor: 2,
+        colorScheme: scheme,
+        reducedMotion: "reduce",
+      });
+      await installMocks(context);
+      const page = await context.newPage();
+      await page.goto(ORIGIN, { waitUntil: "networkidle" });
+      await signIn(page);
+      await page.evaluate((hash) => {
+        window.location.hash = hash;
+      }, frame.hash);
+      await page.getByTestId(frame.ready).first().waitFor({ state: "visible" });
+      await page.mouse.move(viewport.width + 80, viewport.height + 80);
+      await waitForAnimations(page);
+      await assertNoHorizontalOverflow(page, `ai-reentry ${frame.name} ${scheme} ${viewport.width}`);
+      if (frame.name.startsWith("stage-")) {
+        const dots = await page.getByTestId("onboarding-dots").count();
+        if (dots !== 0) throw new Error(`ai-reentry ${frame.name}: 재진입에 진행 점이 있다`);
+      }
+      if (viewport.width === 390 && tapTargets[frame.name]) {
+        await assertTapTargets(page, `ai-reentry ${frame.name} ${scheme} 390`, tapTargets[frame.name]);
+      }
+      const path = beginSceneFromShotPath(`${OUT_DIR}/ai-reentry-${frame.name}${suffix}-${scheme}.png`);
+      await page.screenshot({ path, fullPage: true });
+      shots.push(path);
+      await context.close();
+    }
+  }
+  return shots;
+}
+
+/**
  * Hash navigation and `data-accent` both start 150ms color transitions.
  * Dawn is a no-op accent change, so `--accent` probes would pass on the
  * first tick while the selected row is still mid-transition. Finite
@@ -14115,6 +14182,11 @@ async function main() {
         for (const scheme of ["light", "dark"]) {
           assertThisPreview();
           all.push(...(await captureWelcomeKickoffScenes(browser, scheme)));
+        }
+      } else if (profile === "ai-reentry") {
+        for (const scheme of ["light", "dark"]) {
+          assertThisPreview();
+          all.push(...(await captureAiReentryScenes(browser, scheme)));
         }
       } else if (profile === "first-agent") {
         for (const scheme of ["light", "dark"]) {
