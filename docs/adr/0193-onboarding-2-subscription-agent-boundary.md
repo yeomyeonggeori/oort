@@ -201,6 +201,8 @@
 - 판단: 예외가 허용하는 것은 **최종 사용자가 수정 없는 바이너리에 자기 구독으로 로그인하는 것**이다. 앱이 자기 기능(앱 명령)을 풀려고 `claude -p`를 프로그램으로 띄우면, 문서가 Agent SDK와 같은 루프라고 적은 모양이 되고, 그 경우 「제3자 제품에 claude.ai 로그인이나 rate limit을 제공하지 않는다」에 걸린다. 사용자 본인의 기기·본인 결과라는 점은 완화 사유지만, 문서가 그 구분을 두지 않으므로 보수적으로 읽는다. 그래서 ADR-0190 D3-e의 로컬 실행기는 Claude 구독으로 열지 않는다. Anthropic의 사전 승인(“Unless previously approved”)을 받거나 문서가 바뀌면 새 증보로 다시 연다.
 - 이 판단은 사람이 로컬 칸에서 직접 `claude`를 쓰는 것(ADR-0190 D2)과 로그인 자체(D3-f)를 막지 않는다. 둘 다 「최종 사용자가 수정 없는 바이너리에 자기 구독으로 로그인해 쓰는」 예외 안이다. 로그인은 “sign-in to a Claude account must complete through Anthropic's own flow”를 따른다. 공식 CLI가 claude.ai 로그인 화면을 열고, oort는 URL·코드·토큰을 보지 않는다.
 
+- **A 레인과의 구분(worker 해석).** workd가 소유자의 구독 프로필로 `claude`를 띄우는 A 레인(ADR-0188·0191 D1, 이 ADR D1·D2)은 이 판단과 다르게 본다. A 레인은 **사용자가 자기 코딩 작업을 원격에서 시키고 결과도 자기 것**이다(Claude Code Remote Control과 같은 모양, 소유자만 부름 D4). 앱 명령 실행기는 **oort 제품 기능이 모델을 백엔드로 쓰는 것**이다. 이 구분은 worker의 해석이고 Anthropic 문서의 문장이 아니다. 더 엄격하게 읽으면 A 레인의 구독 사용도 같은 조항에 닿을 수 있다. 이 위험은 이 증보가 풀지 않고 기록만 한다. 확실히 하려면 Anthropic에 사전 승인·해석을 묻는다(문서의 “contact sales” 경로).
+
 **2. 버튼 문구 「Claude Code로 로그인」 — 조건부로 쓸 수 있다고 판단한다.**
 - 원문(legal-and-compliance, 「Using the Claude Code name and logo」): “You can accurately say, in plain text, that your product has Claude Code preinstalled or that it runs Claude Code. But you can't use the Claude Code or Anthropic names or logos as part of your own product, feature, or company name, in your own logo, or in a way that suggests Anthropic built, endorses, or is partnered with your product.”
 - 원문(Agent SDK overview, 「Branding guidelines」, Not permitted): “"Claude Code" or "Claude Code Agent"” / “Your product should maintain its own branding and not appear to be Claude Code or any Anthropic product.”
