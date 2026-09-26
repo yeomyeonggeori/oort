@@ -511,6 +511,15 @@ afterEach(() => {
 const TRAVEL_MS = 383;
 
 /**
+ * M0 → M-b (#2819 OB2-13). The form is one tap behind the welcome screen; the
+ * form itself (rows, KAV, the one scroll view) is the one these tables measured.
+ */
+function renderSignInForm(): void {
+  render(<ConnectScreen />);
+  fireEvent.press(screen.getByTestId('welcome-address'));
+}
+
+/**
  * 서버 주소가 적힌 채(저장된 주소로 돌아온 사람, 힌트가 서 있다) 세 칸을 차례로 연다 —
  * 저장소의 `00-login` 과 같은 순서, 기기에서 잰 키보드 이벤트 그대로:
  *
@@ -523,7 +532,7 @@ const TRAVEL_MS = 383;
  * 그대로다 — 글자는 칸의 높이를 바꾸지 않는다.
  */
 async function walk(geometry: Geometry, credentials = false) {
-  render(<ConnectScreen />);
+  renderSignInForm();
   fireEvent.changeText(screen.getByTestId('server-url-input'), 'http://127.0.0.1:18586');
   if (credentials) {
     fireEvent.changeText(screen.getByTestId('email-input'), 'capture@oort.invalid');
@@ -672,7 +681,7 @@ describe('연결 화면 — 포커스한 칸과 주 버튼이 키보드 위에 �
   });
 
   it('주소를 적는 동안 힌트가 서며 아래 행이 내려가도, 로그인 버튼은 키보드 위에 남는다', async () => {
-    render(<ConnectScreen />);
+    renderSignInForm();
     const native = new KeyboardDouble(LARGE_EMPTY);
     await native.mount();
     await focus('server-url-input');
@@ -692,7 +701,7 @@ describe('연결 화면 — 포커스한 칸과 주 버튼이 키보드 위에 �
   });
 
   it('키보드 이벤트가 없어도(하드웨어 키보드) 포커스를 옮기면 그 칸이 창에 든다 — AX5', async () => {
-    render(<ConnectScreen />);
+    renderSignInForm();
     fireEvent.changeText(screen.getByTestId('server-url-input'), 'http://127.0.0.1:18586');
     const native = new KeyboardDouble(AX5);
     await native.mount();

@@ -298,20 +298,26 @@ async function renderPendingSas(sas = '4821'): Promise<void> {
 }
 
 describe('R2 B-1 SAS wait has an exit and a bounded poll', () => {
-  it('shows 「QR 다시 찍기」 and pressing it opens the scanner', async () => {
+  // M2 (#2819): the wait's exits are 「번호가 달라요」 and 「취소」, both back to
+  // M0 with the voucher dropped. From M0 the QR is one tap and the address path
+  // one more; the expiry banner below still reopens the scanner directly.
+  it('「번호가 달라요」 drops the voucher and returns to M0, where QR opens the scanner', async () => {
     await renderPendingSas();
-    expect(screen.getByText('QR 다시 찍기')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('device-link-sas-rescan'));
-    await waitFor(() => expect(screen.getByTestId('qr-scanner-sheet')).toBeTruthy());
+    expect(screen.getByText('번호가 달라요')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('device-link-sas-mismatch'));
     expect(screen.queryByTestId('device-link-sas')).toBeNull();
+    expect(screen.queryByTestId('qr-scanner-sheet')).toBeNull();
+    fireEvent.press(screen.getByTestId('qr-connect-button'));
+    await waitFor(() => expect(screen.getByTestId('qr-scanner-sheet')).toBeTruthy());
   });
 
-  it('sends 「주소로 연결」 to the form, not the scanner', async () => {
+  it('「취소」 returns to M0, not the scanner; the address form is one tap from there', async () => {
     await renderPendingSas();
-    fireEvent.press(screen.getByTestId('device-link-address-fallback'));
+    fireEvent.press(screen.getByTestId('device-link-sas-cancel'));
     expect(screen.queryByTestId('qr-scanner-sheet')).toBeNull();
-    expect(screen.getByTestId('server-url-input')).toBeTruthy();
     expect(screen.queryByTestId('device-link-sas')).toBeNull();
+    fireEvent.press(screen.getByTestId('welcome-address'));
+    expect(screen.getByTestId('server-url-input')).toBeTruthy();
   });
 
   it('opens the scanner from the SAS expiry banner retry', async () => {
@@ -378,16 +384,24 @@ describe('R2 B-1 SAS wait has an exit and a bounded poll', () => {
         await Promise.resolve();
       });
       expect(screen.getByTestId('device-link-sas')).toBeTruthy();
+      const probes = () =>
+        fetchMock.mock.calls.filter(call => String(call[0]).includes('/v1/workspaces/'))
+          .length;
       const before = jest.getTimerCount();
       await act(async () => {
         jest.advanceTimersByTime(120_000);
       });
       expect(screen.getByText(DEVICE_LINK_EXPIRED_COPY)).toBeTruthy();
       const afterExpiry = jest.getTimerCount();
+      const probesAtExpiry = probes();
       await act(async () => {
         jest.advanceTimersByTime(10_000);
       });
-      expect(jest.getTimerCount()).toBe(afterExpiry);
+      // The poll is what must stop: no probe after the TTL. The timer count may
+      // only fall (#2819: Kometto's 120ms crossfade to 「당황」 and the stopped
+      // spinner loop finish in this window); a rescheduled poll would hold it up.
+      expect(probes()).toBe(probesAtExpiry);
+      expect(jest.getTimerCount()).toBeLessThanOrEqual(afterExpiry);
       expect(afterExpiry).toBeLessThanOrEqual(before);
     } finally {
       jest.useRealTimers();
@@ -448,17 +462,27 @@ describe('R2 M-2 permission is decided before the Modal', () => {
     fireEvent.press(screen.getByTestId('qr-connect-button'));
     await waitFor(() => expect(screen.getByTestId('qr-permission-denied')).toBeTruthy());
     expect(screen.queryByTestId('qr-scanner-sheet')).toBeNull();
-    expect(screen.getByTestId('server-url-input').props.autoFocus).toBeFalsy();
+    // M1 거부 (#2819): Kometto is flustered and says where to go instead; the
+    // lead button is now the address path, not a QR that cannot open.
+    expect(screen.getByTestId('qr-permission-denied')).toHaveTextContent(
+      '카메라를 쓸 수 없어 QR을 찍지 못해요.',
+      {exact: false},
+    );
+    expect(screen.queryByTestId('qr-connect-button')).toBeNull();
     expect(screen.getByTestId('qr-permission-fallback')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('qr-permission-settings'));
+    expect(openSettings).toHaveBeenCalledTimes(1);
 
     const focus = focusTextInput as jest.Mock;
     focus.mockClear();
     fireEvent.press(screen.getByTestId('qr-permission-fallback'));
-    expect(openSettings).toHaveBeenCalledTimes(0);
-    expect(focus).toHaveBeenCalled();
-
-    fireEvent.press(screen.getByTestId('qr-permission-settings'));
     expect(openSettings).toHaveBeenCalledTimes(1);
+    // The form opens and the cursor lands on the address, in-app.
+    expect(screen.getByTestId('server-url-input')).toBeTruthy();
+    expect(focus).toHaveBeenCalledWith(
+      expect.objectContaining({props: expect.objectContaining({testID: 'server-url-input'})}),
+    );
   });
 });
 
@@ -540,6 +564,8 @@ describe('R2 M-7 server base is not kept on a failed redeem', () => {
         call => String(call[0]) === `${SERVER_B}/v1/auth/device-link/redeem`,
       ),
     ).toBe(true);
+    // The failure is said on M0 (#2819); the address form behind it still holds A.
+    fireEvent.press(screen.getByTestId('welcome-address'));
     expect(screen.getByTestId('server-url-input').props.value).toBe(STORED_SERVER_A);
     expect(mmkvStore.get('momo.mobile.server.v1')).toBe(STORED_SERVER_A);
   });

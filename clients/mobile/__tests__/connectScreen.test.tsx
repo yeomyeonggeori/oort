@@ -81,9 +81,18 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
+/**
+ * M0 → M-b (#2819 OB2-13). The sign-in form is one tap behind the welcome
+ * screen now; everything these tests say about the form is unchanged.
+ */
+function renderSignInForm(): void {
+  render(<ConnectScreen />);
+  fireEvent.press(screen.getByTestId('welcome-address'));
+}
+
 describe('the address field renders the core’s answer', () => {
   it('reads a bare host as https, exactly as every other client does', () => {
-    render(<ConnectScreen />);
+    renderSignInForm();
     fireEvent.changeText(screen.getByTestId('server-url-input'), 'momo.example.com');
     // `normalizeServerUrl` chose https over http — the safer guess, because a
     // plaintext guess would silently downgrade a TLS server.
@@ -93,7 +102,7 @@ describe('the address field renders the core’s answer', () => {
   });
 
   it('keeps a LAN address on its own scheme and port', () => {
-    render(<ConnectScreen />);
+    renderSignInForm();
     fireEvent.changeText(
       screen.getByTestId('server-url-input'),
       'http://macbook.local:28000',
@@ -104,7 +113,7 @@ describe('the address field renders the core’s answer', () => {
   });
 
   it('shows the core’s own rejection copy rather than a local paraphrase', () => {
-    render(<ConnectScreen />);
+    renderSignInForm();
     fireEvent.changeText(screen.getByTestId('server-url-input'), 'ws://momo.example.com');
     expect(screen.getByTestId('server-url-hint')).toHaveTextContent(
       '주소는 http:// 또는 https:// 로 시작해야 합니다.',
@@ -114,7 +123,7 @@ describe('the address field renders the core’s answer', () => {
 
 describe('input state is synchronous (spike #837 gate 1, case D)', () => {
   it('reflects a keystroke with nothing awaited', () => {
-    render(<ConnectScreen />);
+    renderSignInForm();
     const input = screen.getByTestId('server-url-input');
 
     // No `await`, no `waitFor`. If the value ever has to travel through a store
@@ -124,7 +133,7 @@ describe('input state is synchronous (spike #837 gate 1, case D)', () => {
   });
 
   it('carries a composed Korean string through unchanged', () => {
-    render(<ConnectScreen />);
+    renderSignInForm();
     const email = screen.getByTestId('email-input');
     // The IME delivers composed text; the screen must not transform it. The
     // spike's failing case turned 안녕하세요 into ㅇㅏㄴㄴㅕㅇㅎㅏㅅㅔㅇㅛ.
@@ -133,7 +142,7 @@ describe('input state is synchronous (spike #837 gate 1, case D)', () => {
   });
 
   it('holds every intermediate value of a jamo-by-jamo sequence', () => {
-    render(<ConnectScreen />);
+    renderSignInForm();
     const email = screen.getByTestId('email-input');
     for (const step of ['ㅇ', '아', '안', '안ㄴ', '안녀', '안녕']) {
       fireEvent.changeText(email, step);
@@ -145,7 +154,7 @@ describe('input state is synchronous (spike #837 gate 1, case D)', () => {
     // The composer is the next batch's, but a code pasted from a Korean IME
     // keyboard travels the same path and deserves the same rule.
     render(<ConnectScreen />);
-    fireEvent.press(screen.getByTestId('mode-toggle'));
+    fireEvent.press(screen.getByTestId('welcome-invite'));
     const code = screen.getByTestId('invite-code-input');
     fireEvent.changeText(code, '초대-CODE-1');
     expect(code.props.value).toBe('초대-CODE-1');
@@ -164,7 +173,7 @@ describe('the login round trip, mocked', () => {
 
   it('signs in and stores the refresh token in the keychain', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, LOGIN_BODY));
-    render(<ConnectScreen />);
+    renderSignInForm();
     fillForm();
     fireEvent.press(screen.getByTestId('submit-button'));
 
@@ -185,7 +194,7 @@ describe('the login round trip, mocked', () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(401, {error: {message: 'invalid credentials'}}),
     );
-    render(<ConnectScreen />);
+    renderSignInForm();
     fillForm();
     fireEvent.press(screen.getByTestId('submit-button'));
 
@@ -200,7 +209,7 @@ describe('the login round trip, mocked', () => {
 
   it('offers no retry for a wrong password, because pressing again cannot help', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(401, {error: {message: 'nope'}}));
-    render(<ConnectScreen />);
+    renderSignInForm();
     fillForm();
     fireEvent.press(screen.getByTestId('submit-button'));
 
@@ -210,7 +219,7 @@ describe('the login round trip, mocked', () => {
 
   it('says nothing answered when nothing answered, and offers a retry', async () => {
     fetchMock.mockRejectedValueOnce(new TypeError('Network request failed'));
-    render(<ConnectScreen />);
+    renderSignInForm();
     fillForm();
     fireEvent.press(screen.getByTestId('submit-button'));
 
@@ -226,7 +235,7 @@ describe('the login round trip, mocked', () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(403, {error: {message: 'member is suspended'}}),
     );
-    render(<ConnectScreen />);
+    renderSignInForm();
     fillForm();
     fireEvent.press(screen.getByTestId('submit-button'));
 
@@ -237,7 +246,7 @@ describe('the login round trip, mocked', () => {
   });
 
   it('will not submit without a usable address', () => {
-    render(<ConnectScreen />);
+    renderSignInForm();
     fireEvent.changeText(screen.getByTestId('email-input'), 'seongjae@example.com');
     fireEvent.changeText(screen.getByTestId('password-input'), 'pw');
     fireEvent.press(screen.getByTestId('submit-button'));
@@ -259,7 +268,7 @@ describe('the login round trip, mocked', () => {
         release = resolve;
       }),
     );
-    render(<ConnectScreen />);
+    renderSignInForm();
     fillForm();
     fireEvent.press(screen.getByTestId('submit-button'));
 
@@ -277,7 +286,9 @@ describe('the login round trip, mocked', () => {
 
 describe('joining with an invite code', () => {
   function fillJoinForm() {
-    fireEvent.press(screen.getByTestId('mode-toggle'));
+    // M0 → M-a (#2819): 「초대 링크로 참여」 without a link opens the invite form
+    // with its address and code fields.
+    fireEvent.press(screen.getByTestId('welcome-invite'));
     fireEvent.changeText(
       screen.getByTestId('server-url-input'),
       'https://api.example.com',
@@ -328,7 +339,7 @@ describe('joining with an invite code', () => {
 
   it('will not submit without a code', () => {
     render(<ConnectScreen />);
-    fireEvent.press(screen.getByTestId('mode-toggle'));
+    fireEvent.press(screen.getByTestId('welcome-invite'));
     fireEvent.changeText(
       screen.getByTestId('server-url-input'),
       'https://api.example.com',
@@ -372,22 +383,35 @@ describe('joining with an invite code', () => {
 });
 
 describe('an invite deep link', () => {
-  it('fills the server and the code, and opens the invite form', async () => {
+  // A link skips M0 and lands on M-a (#2819, ADR-0193 D7). The address and the
+  // code the link carried are shown as one chip, as on desktop D1′; they are
+  // still what the join request sends.
+  it('fills the server and the code, skips the welcome, and shows them as a chip', async () => {
     jest
       .spyOn(Linking, 'getInitialURL')
       .mockResolvedValue(
         'oort://join?server=https%3A%2F%2Fapi.example.com&code=INVITE-9',
       );
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, LOGIN_BODY));
     render(<ConnectScreen />);
 
-    await waitFor(() => expect(screen.getByTestId('invite-code-input')).toBeTruthy());
-    expect(screen.getByTestId('invite-code-input').props.value).toBe('INVITE-9');
-    expect(screen.getByTestId('server-url-input').props.value).toBe(
-      'https://api.example.com',
+    await waitFor(() => expect(screen.getByTestId('invite-link-chip')).toBeTruthy());
+    expect(screen.getByTestId('invite-link-chip')).toHaveTextContent('api.example.com');
+    expect(screen.queryByTestId('connect-welcome')).toBeNull();
+    expect(screen.queryByTestId('invite-code-input')).toBeNull();
+    expect(screen.queryByTestId('server-url-input')).toBeNull();
+
+    fireEvent.changeText(screen.getByTestId('email-input'), 'new.person@example.com');
+    fireEvent.changeText(screen.getByTestId('password-input'), 'pw');
+    fireEvent.changeText(screen.getByTestId('display-name-input'), '지민');
+    fireEvent.press(screen.getByTestId('submit-button'));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls[0][0]).toBe('https://api.example.com/v1/join'),
     );
-    expect(screen.getByTestId('server-url-hint')).toHaveTextContent(
-      '요청 주소: https://api.example.com/v1/…',
-    );
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.code).toBe('INVITE-9');
+    expect(body.displayName).toBe('지민');
+    await keychainSettled();
   });
 
   it('overrides a server address this device merely REMEMBERED', async () => {
@@ -405,8 +429,8 @@ describe('an invite deep link', () => {
     render(<ConnectScreen />);
 
     await waitFor(() =>
-      expect(screen.getByTestId('server-url-input').props.value).toBe(
-        'https://new.example.com',
+      expect(screen.getByTestId('invite-link-chip')).toHaveTextContent(
+        'new.example.com',
       ),
     );
   });
@@ -418,7 +442,7 @@ describe('an invite deep link', () => {
         resolveLink = resolve;
       }) as Promise<string | null>,
     );
-    render(<ConnectScreen />);
+    renderSignInForm();
 
     fireEvent.changeText(
       screen.getByTestId('server-url-input'),
@@ -427,6 +451,9 @@ describe('an invite deep link', () => {
     resolveLink('oort://join?server=https%3A%2F%2Flink.example.com&code=INVITE-9');
 
     await waitFor(() => expect(screen.getByTestId('invite-code-input')).toBeTruthy());
+    // Not a chip: the address is the person's, so it stays a field they can see.
+    expect(screen.queryByTestId('invite-link-chip')).toBeNull();
+    expect(screen.getByTestId('invite-code-input').props.value).toBe('INVITE-9');
     expect(screen.getByTestId('server-url-input').props.value).toBe(
       'https://mine.example.com',
     );
@@ -435,8 +462,8 @@ describe('an invite deep link', () => {
   it('is ignored when it is not a join link', async () => {
     jest.spyOn(Linking, 'getInitialURL').mockResolvedValue('oort://settings?x=1');
     render(<ConnectScreen />);
-    await waitFor(() => expect(screen.getByTestId('submit-button')).toBeTruthy());
-    // Still the sign-in form: a stray link must not switch the screen's job.
+    await waitFor(() => expect(screen.getByTestId('welcome-address')).toBeTruthy());
+    // Still the welcome: a stray link must not switch the screen's job.
     expect(screen.queryByTestId('invite-code-input')).toBeNull();
   });
 });

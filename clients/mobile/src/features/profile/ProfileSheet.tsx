@@ -42,6 +42,7 @@ import {
   pushPermissionDetail,
   usePushPermission,
 } from '../../push/permissionStatus';
+import {usePushPrompt} from '../../push/PushProvider';
 import {getServerBase} from '../../storage/serverBase';
 import {Avatar} from '../conversation/Avatar';
 import {formatRealtimeDiagnostics} from '../../realtime/diagnostics';
@@ -251,6 +252,7 @@ function ProfilePage({
   const styles = useStyles(buildStyles);
   const {choice} = useTheme();
   const push = usePushPermission();
+  const prompt = usePushPrompt();
   const now = useNow();
   const [confirming, setConfirming] = useState(false);
   const [diagCopied, setDiagCopied] = useState(false);
@@ -358,6 +360,17 @@ function ProfilePage({
           detail={pushPermissionDetail(push)}
           testID="profile-push-row"
         />
+        {push === 'undetermined' ? (
+          <GroupRow
+            title="알림 켜기"
+            tone="accent"
+            chevron
+            separated
+            onPress={() => void prompt.ask()}
+            accessibilityHint="iOS 알림 허용 창을 엽니다."
+            testID="profile-push-ask"
+          />
+        ) : null}
         {push === 'denied' ? (
           <GroupRow
             title="설정에서 알림 켜기"

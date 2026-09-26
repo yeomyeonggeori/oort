@@ -15,11 +15,8 @@ import {
   type ConnectMode,
 } from '@momo/core/features/auth/connectModel';
 import {
-  DEVICE_LINK_ADDRESS_FALLBACK_LABEL,
   DEVICE_LINK_EXPIRED_COPY,
-  DEVICE_LINK_PERMISSION_COPY,
   DEVICE_LINK_POLL_MS,
-  DEVICE_LINK_QR_LABEL,
   DEVICE_LINK_RETRY_LABEL,
   DEVICE_LINK_SAS_WAIT_COPY,
   DEVICE_LINK_SETTINGS_LABEL,
@@ -31,6 +28,7 @@ import {
 } from '@momo/core/features/auth/deviceLinkModel';
 import type {DeviceLinkPrefill} from '@momo/core/features/auth/deepLink';
 import {useCameraPermissions} from 'expo-camera';
+import {displayNameFromEmail} from '@momo/core/lib/api';
 import NetInfo from '@react-native-community/netinfo';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
@@ -49,16 +47,9 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
-import {
-  FailureBanner,
-  NoticeBlock,
-  OutlineButton,
-  PrimaryButton,
-  Screen,
-  Sentence,
-} from '../design/atoms';
-import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
-import {usePalette, useStyles} from '../design/theme';
+import {FailureBanner, NoticeBlock, Sentence} from '../design/atoms';
+import {font, space, TOUCH_TARGET, type Palette} from '../design/tokens';
+import {usePalette, useStyles, useTheme} from '../design/theme';
 import {
   arrivalFromDeviceLinkUrl,
   useDeviceLinkArrival,
@@ -67,10 +58,41 @@ import {useJoinPrefill} from '../deeplink/joinLink';
 import {deviceLinkDevice} from '../features/deviceLink/deviceIdentity';
 import {focusTextInput} from '../features/deviceLink/focusTextInput';
 import {QrScannerSheet} from '../features/deviceLink/QrScannerSheet';
+import {KomettoGuide, OnboardingCanvas} from '../features/onboarding/KomettoGuide';
+import {
+  OnboardingButton,
+  OnboardingGhostButton,
+  OnboardingLink,
+  OnboardingLinkRow,
+  OnboardingPhoneScreen,
+  OnboardingSpinner,
+  OnboardingTopBar,
+  PHONE_OB,
+  QrGlyph,
+} from '../features/onboarding/OnboardingControls';
+import {
+  ADDRESS_LOGIN_LABEL,
+  CAMERA_DENIED_DETAIL,
+  CAMERA_DENIED_LINE,
+  LINK_FAILED_LINE,
+  noteConnectRoute,
+  OFFLINE_LINE,
+  phoneOnboardingDots,
+  SAS_CANCEL_LABEL,
+  SAS_DETAIL,
+  SAS_LINE,
+  SAS_MISMATCH_LABEL,
+  SIGN_IN_LINE,
+  WELCOME_DETAIL,
+  WELCOME_LINE,
+  WELCOME_QR_LABEL,
+  WELCOME_TAGLINE,
+} from '../features/onboarding/phoneFlow';
 import {formRevealOffset, type RevealSpan} from '../lib/formReveal';
 import {useReduceMotionRef} from '../lib/useReduceMotion';
 import {isOnlineFromNetInfo} from '../query/queryClient';
 import {SESSION_EXPIRED_NOTICE} from '../session/authGate';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {
   normalizeServerUrl,
   SERVER_URL_PLACEHOLDER,
@@ -83,6 +105,32 @@ import {
 // The one screen a signed-out person sees. Three jobs behind one form: signing
 // in, redeeming an invite (`oort://join?server=…&code=…`), and consuming a
 // device-link voucher (`oort://link?server=…&token=…`, ADR-0180 D7).
+//
+// ## One flow, split into screens (#2819 OB2-13, ADR-0193 D7·D11, ADR-0185 §6)
+//
+// The form used to be one sheet: QR + address + code + email + password. It is
+// now the same flow cut into the screens of the onboarding 2.0 mockup. Nothing
+// new is asked, and every path below is one this file already had:
+//
+//   M0  welcome     QR is the lead. Small links under it: 초대 링크로 참여 ·
+//                   주소로 로그인. A camera refusal turns Kometto flustered and
+//                   points at the address path (M1 거부).
+//   M1  scanner     `QrScannerSheet`, unchanged (camera is the lead, one read).
+//   M2  SAS         Kometto thinking + the four digits; 취소 and 번호가 달라요 drop
+//                   the voucher and return to M0. Poll, TTL 120s and the expiry
+//                   banner are untouched.
+//   M-b sign in     the old form in signIn mode (address + email + password).
+//   M-a join        the old form in join mode, plus 「팀에서 보일 이름」. When an
+//                   invite link filled the address AND the code, both show as one
+//                   chip instead of two fields (desktop D1′ says the same).
+//
+// A `oort://join` link skips M0 (ADR-0193 D7). A device-link voucher skips it
+// too (it lands on M2 or straight in the app). A session that expired opens on
+// M-b: the stored address and the notice are what that person needs.
+//
+// M3 (알림 미리 안내, #2820) is not here: it stands after the session does, over
+// the shell (`NotificationPrimer`). This file only tells it which route led
+// there (`noteConnectRoute`), so its progress dots continue this row.
 //
 // ## Everything that decides is in the core
 //
@@ -159,6 +207,9 @@ import {
 // rotation failed.
 // =============================================================================
 
+/** The form's rows: the core's four fields and the invite screen's name. */
+type FormRow = ConnectField | 'name';
+
 interface Phase {
   busy: boolean;
   failure: ConnectFailure | null;
@@ -177,6 +228,12 @@ export default function ConnectScreen({
   const deviceLinkArrival = useDeviceLinkArrival();
 
   const [mode, setMode] = useState<ConnectMode>('signIn');
+  // M0 or the form (#2819). The SAS wait (M2) is drawn over both by `sasWait`.
+  const [step, setStep] = useState<'welcome' | 'form'>(() =>
+    sessionExpired ? 'form' : 'welcome',
+  );
+  // An invite link filled the address and the code: they show as one chip.
+  const [linkFilled, setLinkFilled] = useState(false);
   // Synchronous local state. See the note above before changing any of these.
   // The address is seeded from the device's stored choice: someone who signed
   // out an hour ago should not have to retype the server they self-host.
@@ -188,6 +245,7 @@ export default function ConnectScreen({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [inviteCode, setInviteCode] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [phase, setPhase] = useState<Phase>(IDLE);
   const [online, setOnline] = useState(true);
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -203,7 +261,10 @@ export default function ConnectScreen({
   const consumedLink = useRef<string | null>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
-  const fields = useRef<Partial<Record<ConnectField, TextInput | null>>>({});
+  const fields = useRef<Partial<Record<FormRow, TextInput | null>>>({});
+  // A focus asked for before the form is on screen (a link arriving on M0, the
+  // camera-refusal fallback). Taken by the effect below once the field exists.
+  const pendingFocus = useRef<FormRow | null>(null);
 
   // ---- the keyboard's room (#2678, header) --------------------------------
   // Refs, not state: these change on every scroll frame and every keyboard
@@ -215,9 +276,9 @@ export default function ConnectScreen({
     viewport: number;
     offset: number;
     /** Each field's row and the primary button, in content coordinates. */
-    rows: Partial<Record<ConnectField | 'action', RevealSpan>>;
+    rows: Partial<Record<FormRow | 'action', RevealSpan>>;
   }>({viewport: 0, offset: 0, rows: {}});
-  const focusedRef = useRef<ConnectField | null>(null);
+  const focusedRef = useRef<FormRow | null>(null);
 
   const reveal = useCallback(() => {
     const focused = focusedRef.current;
@@ -238,7 +299,7 @@ export default function ConnectScreen({
 
   /** Row `onLayout`s, one stable function per row. A row that moves re-reveals. */
   const rowLayout = useMemo(() => {
-    const note = (key: ConnectField | 'action') => (event: LayoutChangeEvent) => {
+    const note = (key: FormRow | 'action') => (event: LayoutChangeEvent) => {
       const {y, height} = event.nativeEvent.layout;
       room.current.rows[key] = {top: y, bottom: y + height};
       reveal();
@@ -248,6 +309,7 @@ export default function ConnectScreen({
       code: note('code'),
       email: note('email'),
       password: note('password'),
+      name: note('name'),
       action: note('action'),
     };
   }, [reveal]);
@@ -268,14 +330,14 @@ export default function ConnectScreen({
   );
 
   const focused = useCallback(
-    (field: ConnectField) => {
+    (field: FormRow) => {
       focusedRef.current = field;
       reveal();
     },
     [reveal],
   );
 
-  const blurred = useCallback((field: ConnectField) => {
+  const blurred = useCallback((field: FormRow) => {
     if (focusedRef.current === field) focusedRef.current = null;
   }, []);
 
@@ -329,7 +391,12 @@ export default function ConnectScreen({
       setInviteCode(prefill.inviteCode);
       // An invite link is an instruction about which form this is.
       setMode('join');
+      // The chip stands only for what the LINK decided. An address the person
+      // typed over it stays a field they can see and fix.
+      setLinkFilled(prefill.serverUrl !== '' && nextServer === prefill.serverUrl);
     }
+    // A link skips M0 (ADR-0193 D7).
+    setStep('form');
     setPhase(IDLE);
     // Where the cursor goes is the core's decision, not this screen's: land on
     // the first thing still missing rather than at the top of a half-filled form.
@@ -339,8 +406,15 @@ export default function ConnectScreen({
       password,
       requiresServer: requiresServerUrl(),
     });
-    focusTextInput(fields.current[target]);
+    pendingFocus.current = target;
   }, [prefill, prefillApplied, serverTyped, serverUrl, email, password]);
+
+  useEffect(() => {
+    if (step !== 'form' || pendingFocus.current === null) return;
+    const target = pendingFocus.current;
+    pendingFocus.current = null;
+    focusTextInput(fields.current[target]);
+  });
 
   // Derived during render from the core, never stored. There is no second copy
   // of this answer to fall out of step with the field.
@@ -367,9 +441,17 @@ export default function ConnectScreen({
     // Stored BEFORE the request: the core reads the base through the host port
     // when it builds the URL — `login()` has no server argument, by design.
     setServerBase(checked.base);
+    // Which row of progress dots M3 continues (#2820). Said before the request:
+    // success unmounts this screen from inside `applyLogin`.
+    noteConnectRoute(joining ? 'join' : 'signIn');
     try {
       if (joining) {
-        await joinWithInvite(inviteCode.trim(), email.trim(), password);
+        await joinWithInvite(
+          inviteCode.trim(),
+          email.trim(),
+          password,
+          displayName,
+        );
       } else {
         await login(email.trim(), password);
       }
@@ -384,7 +466,7 @@ export default function ConnectScreen({
       // the form follows it instead of leaving the person to find the toggle.
       if (failure.suggestSignIn) setMode('signIn');
     }
-  }, [email, inviteCode, joining, password, serverUrl]);
+  }, [displayName, email, inviteCode, joining, password, serverUrl]);
 
   // A failure is also SAID, once, when it arrives (#2678 R1) — the web banner is
   // `role="alert"`. On the phone that is `announceForAccessibility`, as in the
@@ -396,20 +478,53 @@ export default function ConnectScreen({
     if (phase.failure) AccessibilityInfo.announceForAccessibility(phase.failure.message);
   }, [phase.failure]);
 
+  /** Rows that leave with the join form report nothing as they go. */
+  const forgetJoinRows = useCallback(() => {
+    // A stale row here would be revealed where nothing is.
+    delete room.current.rows.code;
+    delete room.current.rows.name;
+    if (focusedRef.current === 'code' || focusedRef.current === 'name') {
+      focusedRef.current = null;
+    }
+  }, []);
+
+  /** M-a → M-b (「이미 이 서버 계정이 있나요? 로그인」). */
   const toggleMode = useCallback(() => {
     setMode(current => (current === 'join' ? 'signIn' : 'join'));
     setPhase(IDLE);
-    // The invite code row goes away with the join form and reports nothing as it
-    // leaves; a stale row here would be revealed where nothing is.
-    delete room.current.rows.code;
-    if (focusedRef.current === 'code') focusedRef.current = null;
+    forgetJoinRows();
+  }, [forgetJoinRows]);
+
+  /** M0 → M-b / M-a. */
+  const openForm = useCallback(
+    (next: ConnectMode, focus?: FormRow) => {
+      setMode(next);
+      setPhase(IDLE);
+      setLinkFailure(null);
+      if (next === 'signIn') forgetJoinRows();
+      if (focus) pendingFocus.current = focus;
+      setStep('form');
+    },
+    [forgetJoinRows],
+  );
+
+  /** The form → M0. What was typed stays: coming back should not cost it. */
+  const backToWelcome = useCallback(() => {
+    Keyboard.dismiss();
+    setPhase(IDLE);
+    setLinkFilled(false);
+    focusedRef.current = null;
+    room.current = {viewport: 0, offset: 0, rows: {}};
+    setStep('welcome');
   }, []);
 
-  const leaveSasToForm = useCallback(() => {
+  /** M2 → M0 (취소 · 번호가 달라요): the voucher is dropped, nothing is kept. */
+  const leaveSas = useCallback(() => {
     consumedLink.current = null;
     setLinkFailure(null);
     setSasWait(null);
     setScannerOpen(false);
+    setStep('welcome');
   }, []);
 
   const openScanner = useCallback(async () => {
@@ -428,15 +543,16 @@ export default function ConnectScreen({
   }, [cameraPermission, requestCameraPermission]);
 
   const retryQr = useCallback(() => {
-    leaveSasToForm();
+    leaveSas();
     void openScanner();
-  }, [leaveSasToForm, openScanner]);
+  }, [leaveSas, openScanner]);
 
   const redeemPrefill = useCallback(
     async (link: DeviceLinkPrefill) => {
       setScannerOpen(false);
       setLinkFailure(null);
       setPermissionDenied(false);
+      noteConnectRoute('qr');
       const previousBase = getServerBase();
       const previousField = serverUrl;
       setServerBase(link.serverUrl);
@@ -575,307 +691,563 @@ export default function ConnectScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see sasPollKey
   }, [sasPollKey, online]);
 
+  const {scheme} = useTheme();
+  const insets = useSafeAreaInsets();
+  const scanner = scannerOpen ? (
+    <QrScannerSheet onClose={() => setScannerOpen(false)} onScan={onScan} />
+  ) : null;
+
+  // ---- M2 확인 번호 -----------------------------------------------------------
   if (sasWait) {
     const sasFailure = sasWait.expired
       ? DEVICE_LINK_EXPIRED_COPY
       : sasWait.unreachable
         ? DEVICE_LINK_UNREACHABLE_COPY
         : null;
+    const host = hostOf(serverUrl);
     return (
-      <Screen>
-        <ScrollView
-          style={styles.flex}
-          contentContainerStyle={styles.sas}
-          keyboardShouldPersistTaps="handled"
-          testID="device-link-sas">
-          <Sentence style={styles.title}>기기 연결</Sentence>
-          <Text
-            style={styles.sasDigits}
-            accessibilityLabel={`확인 번호 ${sasWait.sas.split('').join(', ')}`}
-            testID="device-link-sas-digits">
-            {sasWait.sas}
-          </Text>
-          {!online ? (
-            <NoticeBlock
-              headline="오프라인입니다."
-              detail="네트워크가 연결되면 다시 시도하세요."
-              testID="connect-offline"
+      <OnboardingPhoneScreen
+        testID="device-link-sas"
+        mainStyle={styles.mainWide}
+        top={
+          <OnboardingTopBar
+            left={
+              <OnboardingGhostButton
+                label={SAS_CANCEL_LABEL}
+                onPress={leaveSas}
+                accessibilityHint="이 연결을 그만두고 첫 화면으로 돌아갑니다."
+                testID="device-link-sas-cancel"
+              />
+            }
+            dots={phoneOnboardingDots('qr', 'sas')}
+          />
+        }
+        bottom={
+          <>
+            {sasFailure ? null : (
+              <View style={styles.sys} testID="device-link-sas-wait">
+                <OnboardingSpinner color={palette.textMuted} />
+                <Sentence style={styles.sysText}>{DEVICE_LINK_SAS_WAIT_COPY}</Sentence>
+              </View>
+            )}
+            <OnboardingButton
+              kind="secondary"
+              label={SAS_MISMATCH_LABEL}
+              onPress={leaveSas}
+              accessibilityHint="이 연결 코드를 버리고 첫 화면으로 돌아갑니다."
+              testID="device-link-sas-mismatch"
             />
-          ) : null}
-          {sasFailure ? (
-            <FailureBanner
-              message={sasFailure}
-              retryLabel={DEVICE_LINK_RETRY_LABEL}
-              onRetry={retryQr}
-              testID="device-link-failure"
-            />
-          ) : (
-            <Sentence style={styles.subtitle}>{DEVICE_LINK_SAS_WAIT_COPY}</Sentence>
-          )}
-          {sasFailure ? null : (
-            <OutlineButton
-              label={DEVICE_LINK_RETRY_LABEL}
-              onPress={retryQr}
-              testID="device-link-sas-rescan"
-            />
-          )}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={DEVICE_LINK_ADDRESS_FALLBACK_LABEL}
-            onPress={leaveSasToForm}
-            style={({pressed}) => [styles.toggle, pressed && styles.togglePressed]}
-            testID="device-link-address-fallback">
-            <Text style={styles.toggleLabel}>{DEVICE_LINK_ADDRESS_FALLBACK_LABEL}</Text>
-          </Pressable>
-        </ScrollView>
-      </Screen>
+          </>
+        }>
+        {scanner}
+        <KomettoGuide
+          expression={sasFailure || !online ? 'flustered' : 'thinking'}
+          line={SAS_LINE}
+          detail={SAS_DETAIL}
+          header
+        />
+        <View
+          style={styles.sasRow}
+          accessible
+          accessibilityRole="text"
+          accessibilityLabel={`확인 번호 ${sasWait.sas.split('').join(', ')}`}
+          testID="device-link-sas-digits">
+          {sasWait.sas.split('').map((digit, index) => (
+            <View key={index} style={styles.sasTile}>
+              <Text style={styles.sasDigit} maxFontSizeMultiplier={SAS_MAX_SCALE}>
+                {digit}
+              </Text>
+            </View>
+          ))}
+        </View>
+        {host ? (
+          <View style={styles.chipRow}>
+            <View style={styles.chip} testID="device-link-sas-server">
+              <Text style={styles.chipText} numberOfLines={1}>
+                {host}
+              </Text>
+            </View>
+          </View>
+        ) : null}
+        {!online ? (
+          <NoticeBlock
+            headline="오프라인입니다."
+            detail="네트워크가 연결되면 다시 시도하세요."
+            testID="connect-offline"
+          />
+        ) : null}
+        {sasFailure ? (
+          <FailureBanner
+            message={sasFailure}
+            retryLabel={DEVICE_LINK_RETRY_LABEL}
+            onRetry={retryQr}
+            testID="device-link-failure"
+          />
+        ) : null}
+      </OnboardingPhoneScreen>
     );
   }
 
-  return (
-    <Screen>
-      {scannerOpen ? (
-        <QrScannerSheet onClose={() => setScannerOpen(false)} onScan={onScan} />
-      ) : null}
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView
-          ref={scrollRef}
-          style={styles.flex}
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-          onLayout={onFormLayout}
-          onScroll={onFormScroll}
-          scrollEventThrottle={16}
-          testID="connect-form">
-          <Sentence style={styles.title}>
-            {joining ? '워크스페이스에 참여' : 'oort에 연결'}
-          </Sentence>
-          <Sentence style={styles.subtitle}>
-            {joining
-              ? '초대 코드로 워크스페이스에 참여합니다.'
-              : 'QR을 찍거나 서버 주소를 입력하세요.'}
-          </Sentence>
-
-          <OutlineButton
-            label={DEVICE_LINK_QR_LABEL}
-            onPress={() => void openScanner()}
-            testID="qr-connect-button"
+  // ---- M0 환영 -----------------------------------------------------------------
+  if (step === 'welcome') {
+    const dark = scheme === 'dark';
+    // 한 번에 한 상태. 거부 > 연결 실패 > 오프라인 > 기다림 (D11 표정-상태 1:1).
+    const guide = permissionDenied
+      ? {expression: 'flustered' as const, line: CAMERA_DENIED_LINE, detail: CAMERA_DENIED_DETAIL}
+      : linkFailure
+        ? {expression: 'flustered' as const, line: LINK_FAILED_LINE, detail: undefined}
+        : !online
+          ? {expression: 'flustered' as const, line: OFFLINE_LINE, detail: '네트워크가 연결되면 QR을 찍어요.'}
+          : {expression: 'idle' as const, line: WELCOME_LINE, detail: WELCOME_DETAIL};
+    const guideTestID = permissionDenied
+      ? 'qr-permission-denied'
+      : !linkFailure && !online
+        ? 'connect-offline'
+        : 'welcome-guide';
+    return (
+      <OnboardingPhoneScreen
+        testID="connect-welcome"
+        mainStyle={styles.welcomeMain}
+        decoration={dark ? <Stars /> : null}
+        bottom={
+          <>
+            {permissionDenied ? (
+              <OnboardingButton
+                label={ADDRESS_LOGIN_LABEL}
+                onPress={() => openForm('signIn', 'server')}
+                testID="qr-permission-fallback"
+              />
+            ) : (
+              <OnboardingButton
+                label={WELCOME_QR_LABEL}
+                icon={<QrGlyph color={palette.onPrimary} />}
+                onPress={() => void openScanner()}
+                accessibilityHint="카메라로 데스크탑의 QR을 찍습니다."
+                testID="qr-connect-button"
+              />
+            )}
+            <OnboardingLinkRow>
+              {permissionDenied ? (
+                <OnboardingLink
+                  label={DEVICE_LINK_SETTINGS_LABEL}
+                  onPress={() => void Linking.openSettings()}
+                  accessibilityHint="iOS 설정의 이 앱 화면을 엽니다."
+                  testID="qr-permission-settings"
+                />
+              ) : null}
+              <OnboardingLink
+                label={INVITE_LINK_LABEL}
+                onPress={() => openForm('join')}
+                testID="welcome-invite"
+              />
+              {permissionDenied ? null : (
+                <OnboardingLink
+                  label={ADDRESS_LOGIN_LABEL}
+                  onPress={() => openForm('signIn')}
+                  testID="welcome-address"
+                />
+              )}
+            </OnboardingLinkRow>
+          </>
+        }>
+        {scanner}
+        <View testID={guideTestID}>
+          <KomettoGuide
+            size="hero"
+            expression={guide.expression}
+            line={guide.line}
+            detail={guide.detail}
+            header
+            faceSide={dark ? WELCOME_DARK_HERO : undefined}
+            faceBadge={dark}
+            style={styles.welcomeGuide}
+            bubbleStyle={styles.welcomeBubble}
+            between={
+              <>
+                <Text
+                  style={[styles.wordmark, dark && styles.wordmarkAfterBadge]}
+                  accessibilityRole="header">
+                  oort
+                </Text>
+                <Sentence style={styles.tagline}>{WELCOME_TAGLINE}</Sentence>
+              </>
+            }
           />
+        </View>
+        {linkFailure ? (
+          <FailureBanner
+            message={linkFailure.message}
+            retryLabel={DEVICE_LINK_RETRY_LABEL}
+            onRetry={retryQr}
+            testID="device-link-failure"
+          />
+        ) : null}
+      </OnboardingPhoneScreen>
+    );
+  }
 
-          {permissionDenied ? (
-            <NoticeBlock
-              headline={DEVICE_LINK_PERMISSION_COPY}
-              testID="qr-permission-denied"
-            />
-          ) : null}
-          {permissionDenied ? (
-            <OutlineButton
-              label={DEVICE_LINK_ADDRESS_FALLBACK_LABEL}
-              onPress={() => {
-                focusTextInput(fields.current.server);
-              }}
-              testID="qr-permission-fallback"
-            />
-          ) : null}
-          {permissionDenied ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={DEVICE_LINK_SETTINGS_LABEL}
-              onPress={() => void Linking.openSettings()}
-              style={({pressed}) => [styles.toggle, pressed && styles.togglePressed]}
-              testID="qr-permission-settings">
-              <Text style={styles.toggleLabel}>{DEVICE_LINK_SETTINGS_LABEL}</Text>
-            </Pressable>
-          ) : null}
-
-          {linkFailure ? (
-            <FailureBanner
-              message={linkFailure.message}
-              retryLabel={DEVICE_LINK_RETRY_LABEL}
-              onRetry={retryQr}
-              testID="device-link-failure"
-            />
-          ) : null}
-
-          {sessionExpired ? (
-            <NoticeBlock headline={SESSION_EXPIRED_NOTICE} testID="session-expired" />
-          ) : null}
-
-          {!online ? (
-            <NoticeBlock
-              headline="오프라인입니다."
-              detail="네트워크가 연결되면 다시 시도하세요."
-              testID="connect-offline"
-            />
-          ) : null}
-
-          <Field
-            label="서버 주소"
-            hint="워크스페이스에 초대받은 주소"
-            onLayout={rowLayout.server}>
-            <TextInput
-              ref={node => {
-                fields.current.server = node;
-              }}
-              style={styles.input}
-              value={serverUrl}
-              onChangeText={next => {
-                setServerTyped(true);
-                setServerUrl(next);
-              }}
-              placeholder={SERVER_URL_PLACEHOLDER}
-              placeholderTextColor={palette.textFaint}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-              accessibilityLabel="서버 주소"
-              returnKeyType="next"
-              // The keyboard's 다음 key moves to the next field, as it does in
-              // every other iOS form. Without this it dismisses the keyboard and
-              // the person has to reach back up and tap.
-              onSubmitEditing={() =>
-                (joining ? fields.current.code : fields.current.email)?.focus()
+  // ---- M-b 로그인 · M-a 초대 ----------------------------------------------------
+  const route = joining ? 'join' : 'signIn';
+  const derivedName = email.trim() === '' ? '' : displayNameFromEmail(email.trim().toLowerCase());
+  return (
+    <OnboardingCanvas>
+      {scanner}
+      <View style={[styles.flex, {paddingTop: insets.top}]}>
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <ScrollView
+            ref={scrollRef}
+            style={styles.flex}
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            onLayout={onFormLayout}
+            onScroll={onFormScroll}
+            scrollEventThrottle={16}
+            testID="connect-form">
+            <OnboardingTopBar
+              left={
+                <OnboardingGhostButton
+                  label="뒤로"
+                  onPress={backToWelcome}
+                  accessibilityHint="QR 연결이 있는 첫 화면으로 돌아갑니다."
+                  testID="connect-back"
+                />
               }
-              onFocus={() => focused('server')}
-              onBlur={() => blurred('server')}
-              testID="server-url-input"
+              dots={phoneOnboardingDots(route, joining ? 'join' : 'sign-in')}
             />
-          </Field>
 
-          {/* The core's answer, rendered verbatim. */}
-          {check !== null ? (
-            <Text
-              style={check.ok ? styles.hintOk : styles.hintBad}
-              testID="server-url-hint">
-              {check.ok ? `요청 주소: ${check.base}/v1/…` : check.message}
-            </Text>
-          ) : null}
+            <KomettoGuide
+              expression={
+                phase.failure || !online ? 'flustered' : joining ? 'happy' : 'idle'
+              }
+              line={joining ? JOIN_LINE : SIGN_IN_LINE}
+              detail={joining && linkFilled ? JOIN_DETAIL : undefined}
+              header
+            />
 
-          {joining ? (
-            <Field label="초대 코드" onLayout={rowLayout.code}>
+            {linkFailure ? (
+              <FailureBanner
+                message={linkFailure.message}
+                retryLabel={DEVICE_LINK_RETRY_LABEL}
+                onRetry={retryQr}
+                testID="device-link-failure"
+              />
+            ) : null}
+
+            {sessionExpired ? (
+              <NoticeBlock headline={SESSION_EXPIRED_NOTICE} testID="session-expired" />
+            ) : null}
+
+            {!online ? (
+              <NoticeBlock
+                headline="오프라인입니다."
+                detail="네트워크가 연결되면 다시 시도하세요."
+                testID="connect-offline"
+              />
+            ) : null}
+
+            {joining && linkFilled ? (
+              <View style={styles.chipStart}>
+                <View style={styles.chip} testID="invite-link-chip">
+                  <Text style={styles.chipText} numberOfLines={1}>
+                    {hostOf(serverUrl) ?? serverUrl}
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              <Field
+                label="서버 주소"
+                hint="워크스페이스에 초대받은 주소"
+                onLayout={rowLayout.server}>
+                <TextInput
+                  ref={node => {
+                    fields.current.server = node;
+                  }}
+                  style={styles.input}
+                  value={serverUrl}
+                  onChangeText={next => {
+                    setServerTyped(true);
+                    setServerUrl(next);
+                  }}
+                  placeholder={SERVER_URL_PLACEHOLDER}
+                  placeholderTextColor={palette.textMuted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                  accessibilityLabel="서버 주소"
+                  returnKeyType="next"
+                  // The keyboard's 다음 key moves to the next field, as it does in
+                  // every other iOS form. Without this it dismisses the keyboard and
+                  // the person has to reach back up and tap.
+                  onSubmitEditing={() =>
+                    (joining ? fields.current.code : fields.current.email)?.focus()
+                  }
+                  onFocus={() => focused('server')}
+                  onBlur={() => blurred('server')}
+                  testID="server-url-input"
+                />
+              </Field>
+            )}
+
+            {/* The core's answer, rendered verbatim. */}
+            {check !== null && !(joining && linkFilled) ? (
+              <Text
+                style={check.ok ? styles.hintOk : styles.hintBad}
+                testID="server-url-hint">
+                {check.ok ? `요청 주소: ${check.base}/v1/…` : check.message}
+              </Text>
+            ) : null}
+
+            {joining && !linkFilled ? (
+              <Field label={INVITE_CODE_LABEL} onLayout={rowLayout.code}>
+                <TextInput
+                  ref={node => {
+                    fields.current.code = node;
+                  }}
+                  style={styles.input}
+                  value={inviteCode}
+                  onChangeText={setInviteCode}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="off"
+                  accessibilityLabel={INVITE_CODE_LABEL}
+                  returnKeyType="next"
+                  onSubmitEditing={() => fields.current.email?.focus()}
+                  onFocus={() => focused('code')}
+                  onBlur={() => blurred('code')}
+                  testID="invite-code-input"
+                />
+              </Field>
+            ) : null}
+
+            <Field label="이메일" onLayout={rowLayout.email}>
               <TextInput
                 ref={node => {
-                  fields.current.code = node;
+                  fields.current.email = node;
                 }}
                 style={styles.input}
-                value={inviteCode}
-                onChangeText={setInviteCode}
+                value={email}
+                onChangeText={setEmail}
                 autoCapitalize="none"
                 autoCorrect={false}
-                autoComplete="off"
-                accessibilityLabel="초대 코드"
+                keyboardType="email-address"
+                textContentType="emailAddress"
+                accessibilityLabel="이메일"
                 returnKeyType="next"
-                onSubmitEditing={() => fields.current.email?.focus()}
-                onFocus={() => focused('code')}
-                onBlur={() => blurred('code')}
-                testID="invite-code-input"
+                onSubmitEditing={() => fields.current.password?.focus()}
+                onFocus={() => focused('email')}
+                onBlur={() => blurred('email')}
+                testID="email-input"
               />
             </Field>
-          ) : null}
 
-          <Field label="이메일" onLayout={rowLayout.email}>
-            <TextInput
-              ref={node => {
-                fields.current.email = node;
-              }}
-              style={styles.input}
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-              textContentType="emailAddress"
-              accessibilityLabel="이메일"
-              returnKeyType="next"
-              onSubmitEditing={() => fields.current.password?.focus()}
-              onFocus={() => focused('email')}
-              onBlur={() => blurred('email')}
-              testID="email-input"
-            />
-          </Field>
-
-          <Field
-            label="비밀번호"
-            hint={
-              joining
-                ? '이 워크스페이스에서 쓸 비밀번호를 새로 정합니다'
-                : undefined
-            }
-            onLayout={rowLayout.password}>
-            <TextInput
-              ref={node => {
-                fields.current.password = node;
-              }}
-              style={styles.input}
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              autoCapitalize="none"
-              accessibilityLabel="비밀번호"
-              returnKeyType="go"
-              onSubmitEditing={() => {
-                if (canSubmit) void onSubmit();
-              }}
-              onFocus={() => focused('password')}
-              onBlur={() => blurred('password')}
-              testID="password-input"
-            />
-          </Field>
-
-          {/* ABOVE the button, as on the web (`ConnectPage` puts the failure over
-              its submit), and that is the #2678 R1 fix, not taste. The button
-              is pressed with the keyboard up, and the row after it is the
-              keyboard's top edge: rendered below, this sentence arrived behind
-              the keyboard (iPhone 13 mini: banner 468–514, keyboard 468). Here it
-              sits between the focused field and the button — inside the block
-              the reveal keeps above the keyboard — and its arrival pushes the
-              button's row down, which is itself a reveal trigger. A direct child
-              of the content, like every row: the button's `onLayout` reports
-              content coordinates only because its parent is the content. */}
-          {phase.failure ? (
-            <FailureBanner
-              message={phase.failure.message}
-              // A retry is offered only where pressing again with the same input
-              // could work — nothing answered, or the server faulted. A wrong
-              // password or a spent invite needs the input to change first, and
-              // a retry button there is an invitation to press it forever.
-              onRetry={
-                phase.failure.retryable && canSubmit
-                  ? () => void onSubmit()
+            <Field
+              label="비밀번호"
+              hint={
+                joining
+                  ? '이 워크스페이스에서 쓸 비밀번호를 새로 정합니다.'
                   : undefined
               }
-              testID="failure"
-            />
-          ) : null}
+              onLayout={rowLayout.password}>
+              <TextInput
+                ref={node => {
+                  fields.current.password = node;
+                }}
+                style={styles.input}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                autoCapitalize="none"
+                accessibilityLabel="비밀번호"
+                returnKeyType={joining ? 'next' : 'go'}
+                onSubmitEditing={() => {
+                  if (joining) {
+                    fields.current.name?.focus();
+                    return;
+                  }
+                  if (canSubmit) void onSubmit();
+                }}
+                onFocus={() => focused('password')}
+                onBlur={() => blurred('password')}
+                testID="password-input"
+              />
+            </Field>
 
-          {/* A plain wrapper, only to report where the button is (#2678). One
-              child in the content's gap chain, as the button alone was. */}
-          <View onLayout={rowLayout.action}>
-            <PrimaryButton
-              label={joining ? '초대 코드로 참여' : '로그인'}
-              busyLabel={joining ? '참여 중' : '로그인 중'}
-              busy={phase.busy}
-              disabled={!canSubmit}
-              onPress={() => void onSubmit()}
-              testID="submit-button"
-            />
-          </View>
+            {joining ? (
+              <Field
+                label="팀에서 보일 이름"
+                hint="비워 두면 이메일 앞부분을 이름으로 씁니다."
+                onLayout={rowLayout.name}>
+                <TextInput
+                  ref={node => {
+                    fields.current.name = node;
+                  }}
+                  style={styles.input}
+                  value={displayName}
+                  onChangeText={setDisplayName}
+                  placeholder={derivedName}
+                  placeholderTextColor={palette.textMuted}
+                  autoCorrect={false}
+                  textContentType="name"
+                  accessibilityLabel="팀에서 보일 이름"
+                  returnKeyType="go"
+                  onSubmitEditing={() => {
+                    if (canSubmit) void onSubmit();
+                  }}
+                  onFocus={() => focused('name')}
+                  onBlur={() => blurred('name')}
+                  testID="display-name-input"
+                />
+              </Field>
+            ) : null}
 
-          <Pressable
-            accessibilityRole="button"
-            onPress={toggleMode}
-            style={({pressed}) => [styles.toggle, pressed && styles.togglePressed]}
-            testID="mode-toggle">
-            <Text style={styles.toggleLabel}>
-              {joining ? '로그인으로 전환' : '초대 코드로 참여'}
-            </Text>
-          </Pressable>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </Screen>
+            {/* ABOVE the button, as on the web (`ConnectPage` puts the failure over
+                its submit), and that is the #2678 R1 fix, not taste. The button
+                is pressed with the keyboard up, and the row after it is the
+                keyboard's top edge: rendered below, this sentence arrived behind
+                the keyboard (iPhone 13 mini: banner 468–514, keyboard 468). Here it
+                sits between the focused field and the button — inside the block
+                the reveal keeps above the keyboard — and its arrival pushes the
+                button's row down, which is itself a reveal trigger. A direct child
+                of the content, like every row: the button's `onLayout` reports
+                content coordinates only because its parent is the content. */}
+            {phase.failure ? (
+              <FailureBanner
+                message={phase.failure.message}
+                // A retry is offered only where pressing again with the same input
+                // could work — nothing answered, or the server faulted. A wrong
+                // password or a spent invite needs the input to change first, and
+                // a retry button there is an invitation to press it forever.
+                onRetry={
+                  phase.failure.retryable && canSubmit
+                    ? () => void onSubmit()
+                    : undefined
+                }
+                testID="failure"
+              />
+            ) : null}
+
+            {/* A plain wrapper, only to report where the button is (#2678). One
+                child in the content's gap chain, as the button alone was. */}
+            <View onLayout={rowLayout.action}>
+              <OnboardingButton
+                label={joining ? JOIN_SUBMIT_LABEL : '로그인'}
+                busyLabel={joining ? '참여 중' : '로그인 중'}
+                busy={phase.busy}
+                disabled={!canSubmit}
+                onPress={() => void onSubmit()}
+                testID="submit-button"
+              />
+            </View>
+
+            {joining ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="이미 이 서버 계정이 있나요? 로그인"
+                onPress={toggleMode}
+                style={({pressed}) => [styles.reentry, pressed && styles.reentryPressed]}
+                testID="mode-toggle">
+                <Text style={styles.reentryText}>
+                  이미 이 서버 계정이 있나요? <Text style={styles.reentryLink}>로그인</Text>
+                </Text>
+              </Pressable>
+            ) : null}
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </View>
+    </OnboardingCanvas>
+  );
+}
+
+// ---- 이 화면의 문장 (「초대」는 이 파일에만 산다, #1584) ------------------------
+const INVITE_LINK_LABEL = '초대 링크로 참여';
+const INVITE_CODE_LABEL = '초대 코드';
+const JOIN_LINE = '초대받은 팀에 들어가요.';
+const JOIN_DETAIL = '세 칸만 채우면 바로 들어가요.';
+const JOIN_SUBMIT_LABEL = '팀에 들어가기';
+
+/** 다크 M0 히어로(시안 `.phone.T.dark .hero-k{width:176px;margin-bottom:10px}`). */
+const WELCOME_DARK_HERO = 176;
+/** SAS 숫자는 이미 크다(40). 큰 글씨에서 네 칸이 375 폭을 넘지 않게 멈춘다. */
+const SAS_MAX_SCALE = 1.35;
+
+/** 시안 M0·M2 값. */
+const WELCOME = {
+  /** `.wordmark{font-size:36px;font-weight:800;letter-spacing:-.045em;line-height:1}` */
+  wordmark: 36,
+  wordmarkTracking: -1.62,
+  /** 다크 `margin-bottom:10px` (배지 아래) */
+  badgeGap: 10,
+  /** `.tagline{font-size:15px}` */
+  tagline: 15,
+  /** `.bubble{margin-top:10px}` (M0 인라인) */
+  bubbleTop: 10,
+} as const;
+const SAS = {
+  /** `.sas{gap:10px}` · `.sas i{width:62px;height:78px;border-radius:14px;font:600 40px/1 mono}` */
+  tileGap: 10,
+  width: 62,
+  height: 78,
+  radius: 14,
+  digit: 40,
+  /** `.chip{height:28px;padding:0 10px;font-size:13px;gap:6px}` */
+  chip: 28,
+  chipPadH: 10,
+  chipFont: 13,
+} as const;
+
+/** 주소의 호스트(칩). 읽을 수 없으면 null. */
+function hostOf(url: string): string | null {
+  const checked = url.trim() === '' ? null : normalizeServerUrl(url);
+  if (!checked || !checked.ok) return null;
+  try {
+    return new URL(checked.base).host;
+  } catch {
+    return null;
+  }
+}
+
+/** 다크 M0의 옅은 별(시안 `.stars`). 장식이다. */
+const STAR_POINTS: ReadonlyArray<{x: string; y: string; size: number; tint: string}> = [
+  {x: '12%', y: '18%', size: 1, tint: 'rgba(255,255,255,0.55)'},
+  {x: '72%', y: '12%', size: 1, tint: 'rgba(255,255,255,0.45)'},
+  {x: '86%', y: '34%', size: 1.5, tint: 'rgba(255,220,190,0.6)'},
+  {x: '28%', y: '44%', size: 1, tint: 'rgba(255,255,255,0.35)'},
+  {x: '55%', y: '26%', size: 1, tint: 'rgba(255,255,255,0.4)'},
+  {x: '8%', y: '70%', size: 1, tint: 'rgba(255,255,255,0.3)'},
+  {x: '92%', y: '76%', size: 1.5, tint: 'rgba(255,255,255,0.35)'},
+];
+
+const starStyles = StyleSheet.create({star: {position: 'absolute'}});
+
+function Stars(): React.JSX.Element {
+  return (
+    <View
+      pointerEvents="none"
+      accessible={false}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={StyleSheet.absoluteFill}
+      testID="welcome-stars">
+      {STAR_POINTS.map((star, index) => (
+        <View
+          key={index}
+          style={[
+            starStyles.star,
+            {
+              left: star.x as `${number}%`,
+              top: star.y as `${number}%`,
+              width: star.size,
+              height: star.size,
+              borderRadius: star.size / 2,
+              backgroundColor: star.tint,
+            },
+          ]}
+        />
+      ))}
+    </View>
   );
 }
 
@@ -904,47 +1276,92 @@ function Field({
 const buildStyles = (color: Palette) => StyleSheet.create({
   flex: {flex: 1},
   content: {
-    paddingHorizontal: SAFE_GUTTER,
-    paddingTop: space.xl,
+    paddingHorizontal: PHONE_OB.gutter,
     paddingBottom: space.xl * 2,
-    gap: space.lg,
+    gap: PHONE_OB.formGap,
   },
-  title: {fontSize: font.title, fontWeight: '600', color: color.text},
-  subtitle: {fontSize: font.label, color: color.textMuted, lineHeight: 20},
-  field: {gap: space.xs + 2},
-  label: {fontSize: font.label, color: color.textMuted},
-  fieldHint: {fontSize: font.meta, color: color.textFaint},
+  // `.field{gap:6px}` · `label{13px/600 ink2}` · `.hint{12.5px ink2}` (D1′ 시안)
+  field: {gap: PHONE_OB.fieldGap},
+  label: {fontSize: PHONE_OB.labelFont, fontWeight: '600', color: color.textMuted},
+  fieldHint: {fontSize: PHONE_OB.hintFont, color: color.textMuted},
   input: {
-    minHeight: TOUCH_TARGET,
+    minHeight: PHONE_OB.input,
     borderWidth: 1,
-    borderColor: color.border,
-    borderRadius: radius.md,
-    paddingHorizontal: space.md,
-    paddingVertical: space.md,
-    // 16 or larger, so iOS does not zoom the page when the field takes focus.
+    // `.input{border:1px solid var(--lineStrong)}` — 입력 그릇의 테두리는 컨트롤이라 3:1.
+    borderColor: color.textFaint,
+    borderRadius: PHONE_OB.inputRadius,
+    paddingHorizontal: PHONE_OB.inputPadH,
+    paddingVertical: space.sm,
     fontSize: font.body,
     color: color.text,
+    // 입력 그릇만 surface(D11).
     backgroundColor: color.surface,
   },
   hintOk: {fontSize: font.meta, color: color.accentText},
   hintBad: {fontSize: font.meta, color: color.danger},
-  toggle: {
+  reentry: {
     minHeight: TOUCH_TARGET,
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: radius.md,
   },
-  togglePressed: {backgroundColor: color.surfacePressed},
-  toggleLabel: {color: color.accentText, fontSize: font.label, fontWeight: '600'},
-  sas: {
-    flex: 1,
-    paddingHorizontal: SAFE_GUTTER,
-    paddingTop: space.xl,
-    gap: space.lg,
-  },
-  sasDigits: {
-    fontSize: font.display,
+  reentryPressed: {opacity: 0.6},
+  // `.reentry{font-size:12.5px;color:ink2;text-align:center}` · `.link{signal-text 600 underline}`
+  reentryText: {fontSize: PHONE_OB.hintFont, color: color.textMuted, textAlign: 'center'},
+  reentryLink: {
+    color: color.accentText,
     fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
+  welcomeMain: {alignItems: 'stretch', gap: PHONE_OB.heroGap},
+  welcomeGuide: {alignSelf: 'stretch'},
+  welcomeBubble: {marginTop: WELCOME.bubbleTop, alignSelf: 'stretch'},
+  wordmark: {
+    fontSize: WELCOME.wordmark,
+    fontWeight: '800',
+    letterSpacing: WELCOME.wordmarkTracking,
+    color: color.text,
+    textAlign: 'center',
+  },
+  wordmarkAfterBadge: {marginTop: WELCOME.badgeGap},
+  tagline: {fontSize: WELCOME.tagline, color: color.textMuted, textAlign: 'center'},
+  mainWide: {gap: PHONE_OB.mainGapWide},
+  sasRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: SAS.tileGap,
+  },
+  sasTile: {
+    minWidth: SAS.width,
+    minHeight: SAS.height,
+    borderRadius: SAS.radius,
+    backgroundColor: color.surface,
+    boxShadow: color.elevationRest,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sasDigit: {
+    fontSize: SAS.digit,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     color: color.text,
   },
+  chipRow: {flexDirection: 'row', justifyContent: 'center'},
+  chipStart: {flexDirection: 'row'},
+  chip: {
+    minHeight: SAS.chip,
+    paddingHorizontal: SAS.chipPadH,
+    borderRadius: SAS.chip / 2,
+    backgroundColor: color.surfaceMuted,
+    justifyContent: 'center',
+    maxWidth: '100%',
+  },
+  chipText: {fontSize: SAS.chipFont, color: color.text, fontWeight: '600'},
+  sys: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.sm,
+  },
+  sysText: {fontSize: PHONE_OB.sysFont, color: color.textMuted, flexShrink: 1},
 });

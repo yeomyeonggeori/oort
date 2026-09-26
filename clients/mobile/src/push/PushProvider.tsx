@@ -3,6 +3,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -19,7 +20,13 @@ import {getAccessToken, subscribeSession} from '../storage/secureSession';
 import {absoluteApiBase} from '../storage/serverBase';
 import {registerPushCategories} from './categories';
 import {apnsEnvironment, keychainAccessGroup} from './native';
-import {ensurePushPermission, fetchApnsToken, handlePushResponse} from './notifications';
+import {
+  askPushPermission,
+  fetchApnsToken,
+  handlePushResponse,
+  readPushGate,
+  type PushGate,
+} from './notifications';
 import {clearPushFetchSession, publishPushFetchSession} from './pushFetchSession';
 import {useAppIconBadge} from './appBadge';
 import {registerWithRetry} from './registration';
@@ -59,6 +66,25 @@ export interface PushArrival {
 const PushArrivalContext = createContext<PushArrival | null>(null);
 
 /**
+ * M3 알림 미리 안내가 읽는 자리 (#2820, ADR-0193 D8).
+ *
+ * `gate`가 `ask`일 때만 M3이 선다. `ask()`는 사람이 누른 버튼(M3 [계속],
+ * 설정 › 알림)만 부른다. 프로바이더 밖(측정 하네스)에서는 늘 `settled`다.
+ */
+export interface PushPrompt {
+  gate: PushGate | 'checking';
+  ask: () => Promise<void>;
+}
+
+const SETTLED_PROMPT: PushPrompt = {gate: 'settled', ask: async () => {}};
+
+const PushPromptContext = createContext<PushPrompt>(SETTLED_PROMPT);
+
+export function usePushPrompt(): PushPrompt {
+  return useContext(PushPromptContext);
+}
+
+/**
  * 셸이 읽는 자리. 이 프로바이더 밖에서는 언제나 null 이다 — 측정 하네스처럼
  * 알림이 없는 트리에서 부르면 아무 일도 일어나지 않는 것이 맞다.
  */
@@ -80,7 +106,17 @@ export default function PushProvider({
   const usedForegroundRetry = useRef(false);
   const apnsToken = useRef<string | null>(null);
 
-  // ---- 1. Categories, permission, token, registration ---------------------
+  // ---- 1. Categories and the standing permission --------------------------
+  //
+  // ## This provider never ASKS (#2820, ADR-0193 D8)
+  //
+  // It used to call `requestPermissionsAsync` as soon as the session stood, so
+  // the one iOS notification prompt the app ever gets appeared with no word of
+  // what it was for. Now it only READS the standing answer. The prompt is raised
+  // by a person's tap (M3's [계속], or the profile sheet's 알림 row) through
+  // `ask` below, and registration follows whenever the answer is `granted`.
+  const [gate, setGate] = useState<PushGate | 'checking'>('checking');
+
   useEffect(() => {
     let cancelled = false;
 
@@ -95,11 +131,58 @@ export default function PushProvider({
         console.warn(`${LOG} category registration failed`, cause);
       }
       if (cancelled) return;
+      const standing = await readPushGate();
+      if (cancelled) return;
+      console.log(`${LOG} permission=${standing}`);
+      setGate(standing);
+    })().catch(cause => {
+      console.error(`${LOG} permission read failed`, cause);
+      // Unknown is not a reason to hold M3 over the app.
+      if (!cancelled) setGate('settled');
+    });
 
-      const permission = await ensurePushPermission();
-      console.log(`${LOG} permission=${permission}`);
-      if (permission !== 'granted' || cancelled) return;
+    // Someone who turned notifications on in iOS Settings and came back should
+    // be registered without signing out and in again.
+    const subscription = AppState.addEventListener('change', next => {
+      if (next !== 'active') return;
+      readPushGate()
+        .then(standing => {
+          if (cancelled) return;
+          // Never re-open M3 on a foreground: `ask` is only what the first read
+          // saw. A later read can move toward an answer, not back to a question.
+          setGate(current =>
+            standing === 'ask' && current !== 'ask' ? current : standing,
+          );
+        })
+        .catch(() => {});
+    });
 
+    return () => {
+      cancelled = true;
+      subscription.remove();
+    };
+  }, [workspaceId]);
+
+  const ask = useCallback(async () => {
+    try {
+      const answer = await askPushPermission();
+      console.log(`${LOG} permission asked -> ${answer}`);
+      setGate(answer);
+    } catch (cause) {
+      console.error(`${LOG} permission request failed`, cause);
+      setGate('settled');
+    }
+  }, []);
+
+  const prompt = useMemo<PushPrompt>(() => ({gate, ask}), [gate, ask]);
+
+  // ---- 1b. Token and registration, once the answer is `granted` ------------
+  const granted = gate === 'granted';
+  useEffect(() => {
+    if (!granted) return;
+    let cancelled = false;
+
+    (async () => {
       const env = apnsEnvironment();
       if (!env) {
         // Deliberately fatal for registration rather than guessed. See
@@ -134,7 +217,7 @@ export default function PushProvider({
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, [workspaceId, granted]);
 
   // ---- 2. Keep the extension's session fresh ------------------------------
   useEffect(() => {
@@ -282,8 +365,10 @@ export default function PushProvider({
   useAppIconBadge(workspaceId);
 
   return (
-    <PushArrivalContext.Provider value={arrival}>
-      {children}
-    </PushArrivalContext.Provider>
+    <PushPromptContext.Provider value={prompt}>
+      <PushArrivalContext.Provider value={arrival}>
+        {children}
+      </PushArrivalContext.Provider>
+    </PushPromptContext.Provider>
   );
 }

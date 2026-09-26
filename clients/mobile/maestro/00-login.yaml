@@ -44,11 +44,18 @@ name: 00-login
 # not seconds.
 - extendedWaitUntil:
     visible:
-      id: "server-url-input"
+      id: "qr-connect-button"
     timeout: 180000
 
-- assertVisible: "oort에 연결"
-- assertVisible: "QR을 찍거나 서버 주소를 입력하세요."
+# M0 환영 (#2819): QR is the lead; the address form is one tap behind
+# 「주소로 로그인」. Asserting the question pins the new first screen.
+- assertVisible: "데스크탑의 QR을 찍어 연결해요."
+- tapOn:
+    id: "welcome-address"
+- extendedWaitUntil:
+    visible:
+      id: "server-url-input"
+    timeout: 10000
 
 # The server address is TYPED rather than deep-linked. `oort://join?server=…`
 # is the supported prefill and it parses correctly, but it cannot be used here —
@@ -102,9 +109,15 @@ name: 00-login
 - tapOn:
     id: "submit-button"
 
+# M3 알림 미리 안내 (#2820) stands first on a fresh permission state; its
+# 「계속」 is what raises the push prompt now. The keychain prompt can arrive
+# first, so it is dismissed before M3 is looked for.
+- runFlow: subflows/dismiss-system-alerts.yaml
+- runFlow: subflows/pass-notify-primer.yaml
+
 # A successful sign-in is what raises the system alerts, and it raises TWO, one
 # after the other — the keychain's "암호를 저장하겠습니까?" as the form submits, then
-# the app's push permission prompt once it reaches a signed-in state. They are
+# the app's push permission prompt once M3's 「계속」 is tapped. They are
 # seconds apart, so a single dismissal races the second one and the flow then
 # fails on an assertion about a screen that is fully rendered underneath a
 # dialog. Dismissing on a short loop covers the whole window without pinning a
