@@ -4,6 +4,10 @@ import { useSession } from "@/app/session";
 import {
   DEFAULT_NOTIFICATION_RULES,
   fetchNotificationRules,
+  MENTION_OVERRIDES_MUTE_DESCRIPTION,
+  NOTIFICATION_PAUSE_DESCRIPTION,
+  NOTIFICATION_PAUSE_LABEL,
+  NOTIFICATION_RULES_SERVER_NOTE,
   putNotificationRules,
   type NotificationRules,
 } from "@momo/core/features/settings/notificationRules";
@@ -35,7 +39,7 @@ import { SectionShell, SettingsToggleRow, Subsection } from "./SettingsFields";
 // =============================================================================
 
 const LINES = [
-  "방해 금지와 멘션 예외는 서버에 하나만 있습니다. 기기를 바꿔도 같은 규칙이 적용됩니다.",
+  NOTIFICATION_RULES_SERVER_NOTE,
   "데스크톱 알림을 종류별로 끄는 선택은 이 기기에만 저장됩니다.",
 ];
 
@@ -110,8 +114,8 @@ export function NotificationRulesSection({ offline }: { offline: boolean }) {
           >
             <SettingsToggleRow
               testId="notification-rules-dnd"
-              name="방해 금지"
-              description="켜면 이 워크스페이스의 모든 알림을 받지 않습니다. 멘션과 승인 요청도 포함됩니다. 읽지 않은 표시는 그대로 쌓입니다."
+              name={NOTIFICATION_PAUSE_LABEL}
+              description={NOTIFICATION_PAUSE_DESCRIPTION}
               checked={current.dnd}
               disabled={disabled}
               describedBy={offline ? offlineReasonId : undefined}
@@ -120,7 +124,7 @@ export function NotificationRulesSection({ offline }: { offline: boolean }) {
             <SettingsToggleRow
               testId="notification-rules-mention"
               name="알림을 끈 채널에서도 멘션은 받기"
-              description="채널 알림을 꺼도 나를 멘션한 알림은 옵니다. 방해 금지가 켜져 있으면 멘션도 오지 않습니다."
+              description={MENTION_OVERRIDES_MUTE_DESCRIPTION}
               checked={current.mentionOverridesMute}
               disabled={disabled}
               describedBy={offline ? offlineReasonId : undefined}

@@ -322,8 +322,12 @@ describe('알림 일시 중지 (#2848)', () => {
     const sheet = await openSheet();
     const row = within(sheet).getByTestId('profile-pause-row');
     expect(row.props.accessibilityState).toMatchObject({disabled: true});
+    // 서버 값을 모르는 동안 「꺼짐」 스위치를 그리지 않는다(리뷰 M-1).
+    expect(
+      within(sheet).queryByTestId('profile-pause-switch', {includeHiddenElements: true}),
+    ).toBeNull();
+    expect(row).toHaveTextContent(/확인하는 중/);
     fireEvent.press(row);
-    fireEvent(within(sheet).getByTestId('profile-pause-switch', {includeHiddenElements: true}), 'valueChange', true);
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(rulesPuts()).toHaveLength(0);
   });

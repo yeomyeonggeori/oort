@@ -1,11 +1,20 @@
 import {
   declaredStatusLabel,
   effectivePresenceLabel,
+  PRESENCE_DND_HINT,
   PRESENCE_MENU_LABEL,
   PRESENCE_OPTIONS,
+  PRESENCE_WRITE_FAILED,
 } from '@momo/core/features/presence/model';
 import {
+  NOTIFICATION_PAUSE_DESCRIPTION,
+  NOTIFICATION_PAUSE_LABEL,
+  NOTIFICATION_PAUSE_LOAD_FAILED,
+  NOTIFICATION_PAUSE_SAVE_FAILED,
+} from '@momo/core/features/settings/notificationRules';
+import {
   CUSTOM_STATUS_DIALOG_TITLE,
+  CUSTOM_STATUS_MENU_LABEL,
   statusExpiryShortLabel,
   visibleCustomStatus,
 } from '@momo/core/features/presence/customStatus';
@@ -21,6 +30,7 @@ import {
 } from '@momo/core/lib/api';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
+  ActivityIndicator,
   Linking,
   Pressable,
   ScrollView,
@@ -248,6 +258,9 @@ function SheetBody({
 
       <ScrollView
         ref={scrollRef}
+        // 상태 글을 쓰다가 프리셋·지우기를 누르면 첫 탭이 키보드만 닫고 버려졌다
+        // (#2848 리뷰 M-3).
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={[
           styles.content,
           {paddingBottom: Math.max(insets.bottom, space.lg) + space.lg},
@@ -367,6 +380,14 @@ function ProfilePage({
       ? setPresence.variables.status
       : (self.presenceStatus ?? 'auto')
     : null;
+  const pauseLocked = !pause.ready || pause.pending;
+  const pauseDetail = pause.loadFailed
+    ? NOTIFICATION_PAUSE_LOAD_FAILED
+    : !pause.ready
+      ? '알림 설정을 확인하는 중입니다.'
+      : pause.paused
+        ? '직접 끌 때까지 이 워크스페이스의 알림을 받지 않습니다.'
+        : NOTIFICATION_PAUSE_DESCRIPTION;
   const choosePresence = (status: PresenceStatus) => {
     if (setPresence.isPending || status === declared) return;
     setPresence.mutate({status});
@@ -437,7 +458,7 @@ function ProfilePage({
               const label = declaredStatusLabel(status);
               const detail =
                 status === 'dnd'
-                  ? '다른 사람에게 보이는 표시입니다. 푸시는 「알림 일시 중지」가 멈춥니다.'
+                  ? PRESENCE_DND_HINT
                   : undefined;
               return (
                 <GroupRow
@@ -473,12 +494,12 @@ function ProfilePage({
             })}
           </View>
           <GroupRow
-            title="상태 글"
-            value={customLine ?? '설정'}
+            title={CUSTOM_STATUS_MENU_LABEL}
+            value={customLine ?? '없음'}
             chevron
             separated
             onPress={onOpenStatus}
-            accessibilityLabel={`상태 글, ${customLine ?? '없음'}`}
+            accessibilityLabel={`${CUSTOM_STATUS_MENU_LABEL}, ${customLine ?? '없음'}`}
             accessibilityHint="이모지와 짧은 글, 지울 시간을 고릅니다."
             testID="profile-status-row"
           />
@@ -488,7 +509,7 @@ function ProfilePage({
               accessibilityLiveRegion="polite"
               testID="presence-failure"
             >
-              상태를 바꾸지 못했습니다. 다시 시도하세요.
+              {PRESENCE_WRITE_FAILED}
             </Sentence>
           ) : null}
         </GroupSection>
@@ -535,34 +556,40 @@ function ProfilePage({
           />
         ) : null}
         <GroupRow
-          title="알림 일시 중지"
-          detail={
-            pause.loadFailed
-              ? '알림 설정을 불러오지 못했습니다.'
-              : pause.paused
-                ? '직접 끌 때까지 이 워크스페이스의 푸시가 오지 않습니다.'
-                : '켜면 이 워크스페이스의 모든 푸시가 멈춥니다.'
-          }
+          title={NOTIFICATION_PAUSE_LABEL}
+          detail={pauseDetail}
           separated
+          // 줄 전체를 흐리지 않는다 — 읽기 실패 문장까지 흐려지면 「읽지 말라」가
+          // 된다(#2848 리뷰 M-1). 잠김은 스위치 자신과 접근성 상태가 말한다.
           onPress={() => pause.setPaused(!pause.paused)}
-          disabled={!pause.ready || pause.pending}
           accessibilityRole="switch"
           accessibilityState={{
             checked: pause.paused,
-            disabled: !pause.ready || pause.pending,
+            disabled: pauseLocked,
           }}
-          accessibilityLabel="알림 일시 중지"
+          accessibilityLabel={NOTIFICATION_PAUSE_LABEL}
+          accessibilityHint={pauseDetail}
           trailing={
-            <Switch
-              value={pause.paused}
-              onValueChange={next => pause.setPaused(next)}
-              disabled={!pause.ready || pause.pending}
-              trackColor={{false: palette.border, true: palette.ok}}
-              ios_backgroundColor={palette.border}
-              accessibilityElementsHidden
-              importantForAccessibility="no-hide-descendants"
-              testID="profile-pause-switch"
-            />
+            pause.ready ? (
+              <Switch
+                value={pause.paused}
+                onValueChange={next => pause.setPaused(next)}
+                disabled={pauseLocked}
+                trackColor={{false: palette.border, true: palette.ok}}
+                ios_backgroundColor={palette.border}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+                testID="profile-pause-switch"
+              />
+            ) : pause.loadFailed ? null : (
+              // 서버 값을 모르는 동안 「꺼짐」을 그리지 않는다 — 켜 둔 사람에게 거짓이다.
+              <ActivityIndicator
+                color={palette.textMuted}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+                testID="profile-pause-loading"
+              />
+            )
           }
           testID="profile-pause-row"
         />
@@ -581,7 +608,7 @@ function ProfilePage({
             accessibilityLiveRegion="polite"
             testID="pause-failure"
           >
-            알림 설정을 바꾸지 못했습니다. 다시 시도하세요.
+            {NOTIFICATION_PAUSE_SAVE_FAILED}
           </Sentence>
         ) : null}
       </GroupSection>

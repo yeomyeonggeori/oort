@@ -121,7 +121,8 @@ export function StatusPage({
           <TextInput
             value={emoji}
             onChangeText={setEmoji}
-            placeholder="🙂"
+            // 이모지를 자리표시자로 두면 제 색으로 그려져 「골라 둔 값」처럼 보인다(리뷰 M-2).
+            placeholder="＋"
             placeholderTextColor={palette.textMuted}
             accessibilityLabel="상태 이모지"
             accessibilityHint="키보드의 이모지 판에서 고릅니다."
