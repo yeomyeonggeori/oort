@@ -1,6 +1,7 @@
 # ADR-0124: 알림 음소거 계약 — 채널 단위 mute의 서버 판정
 
 - Status: **Accepted** (2026-07-18, 성재 — D1~D3 권고안 승인 "ㄱㄱ". MOMO-477 발급, track/engine)
+- 증보 2: 2026-09-27 **Accepted** — 알림 일시 중지 만료와 방해 금지 묶음(#2850). 파일 끝 「증보 2」 절
 - 관련: ADR-0120(푸시 — 판정은 notifier 한 곳), ux-bible P8(알림 예산)·P9(판정 로직 서버 단일화), ENGINE_HANDOFF B-4, ADR-0109(unread — 배지는 별개 데이터)
 - 발단: 설정 UI·서버 계약 양측 부재(2026-07-18 갭 감사 B-4). dogfood에서 채널이 늘며 알림 통제 수요.
 
@@ -68,3 +69,47 @@ MOMO-477 단일 goal: `018_notification_pref` migration((workspace, member, chan
 - (+) D3가 예약한 멘션 예외 스위치를 계약대로(조건 한 조각) 실현.
 - (−) 판정 SQL에 LEFT JOIN 1개·WHERE 조건 2개 가산. 새 REST 2개·마이그레이션 1개.
 - 후속(여전히 보류): 키워드 알림, DND 스케줄/조용한 시간, 채널별 DND, 멘션 예외의 채널 단위 세분화.
+
+---
+
+## 증보 2 (2026-09-27, **Accepted**) — 알림 일시 중지 만료와 방해 금지 묶음
+
+- Status: **Accepted** (2026-09-27 성재 결재). 결재 인용: #2850 결정 요청 「방해 금지와 알림 일시 중지를 묶을지」에 성재가 「묶어」라고 답했다(2026-09-27 이슈 코멘트).
+- 기안: Opus 5.5 worker(#2850, track/engine)
+- 관련: #2848(폰 프로필 시트, 기한 없는 켜기·끄기만 싣는다), ADR-0160(선언 상태 ③), ADR-0176(사용자 지정 상태의 lazy 만료)
+- 발단: owner 요청은 알림 일시 중지를 30분, 1시간, 내일까지, 직접 지정으로 거는 것이다. 증보 1의 `dnd`는 기한이 없고, D4는 스케줄을 v0 밖에 두었다. 클라이언트 타이머로 흉내 내면 앱이 백그라운드인 동안 서버 값이 풀리지 않아 「1시간」을 고른 사람이 그 뒤에도 푸시를 못 받는다.
+
+### 왜 증보인가 (경계 변경)
+
+공개 API 두 개(`notification-rules`, `presence`)와 DB 계약(090)이 바뀐다. 선언 상태(남에게 보이는 표시)가 알림 판정 입력에 처음 영향을 준다. 판정 지점은 여전히 하나다(momo-push `judge_targets`). 판정 SQL은 `member`를 읽지 않고 `notification_rule`만 읽는다.
+
+### D7. 만료 — 서버 판정, lazy
+
+- `notification_rule.dnd_until timestamptz NULL`을 둔다. NULL이면 기한이 없다. 018 `muted_until`과 같은 패턴이다.
+- 판정은 `dnd AND (dnd_until IS NULL OR dnd_until > now())`일 때만 억제한다. **푸시 판정 시점에 만료를 비교한다.** 스윕 작업은 없다. 지난 행은 그대로 남지만 억제하지 않는다.
+- 읽기(`GET notification-rules`)도 유효 값을 준다. 기한이 지나면 `dnd=false`, `dndUntilMs=null`이다.
+
+### D8. 방해 금지 ↔ 알림 일시 중지 묶음 (「묶어」)
+
+- **한 곳, 한 트랜잭션.** `PUT /presence`의 트랜잭션(`set_declared_presence_in_tx`) 안에서 member 갱신, 알림 일시 중지 갱신, presence 브로드캐스트 outbox를 함께 쓴다. 클라이언트가 두 번 쓰지 않는다.
+- **켜기.** 방해 금지를 새로 고르거나 기한을 다시 고르면 알림 일시 중지를 켠다. 켜기 전 값(`dnd`, `dnd_until`)을 `presence_prev_dnd`/`presence_prev_dnd_until`에 **처음 한 번만** 기억한다. 다시 기억하면 묶어서 켠 값을 기억하게 되어, 방해 금지를 풀어도 알림이 계속 멈춘다.
+- **기한.** 방해 금지 기한(`member.presence_dnd_until`)과 같은 기한을 알림 일시 중지에 건다. 원래 알림 일시 중지가 켜져 있었으면 둘 중 늦은 기한을 쓴다(원래 기한이 없었으면 기한 없음 유지). 원래 꺼져 있었으면 두 값이 같은 시각에 함께 풀린다.
+- **풀기.** 선언 상태가 방해 금지가 아니게 되면 기억한 값으로 되돌리고 기억을 지운다. 원래 켜져 있었으면 켜진 채로(원래 기한 그대로) 남는다.
+- **만료.** 방해 금지 기한이 지나면 선언 상태 읽기(본인 GET, 로스터)는 `auto`로 투영된다(ADR-0176과 같은 lazy). 알림 일시 중지도 같은 시각에 판정에서 풀린다. 다음 presence 쓰기가 기억을 정리한다.
+- **직접 편집이 묶음을 끊는다.** `PUT notification-rules`가 알림 일시 중지(`dnd`/`dnd_until`)를 바꾸면 기억을 지운다. 방해 금지를 풀 때 사람이 직접 고른 값을 덮지 않는다. 멘션 예외만 바꾸는 PUT은 묶음을 유지한다. 방해 금지 중 사용자 지정 상태만 고치는 presence 쓰기는 묶음을 다시 켜지 않는다.
+
+### D9. 저장·API
+
+- migration `090_notification_rule_dnd_until`: `notification_rule.dnd_until`, `presence_prev_dnd`, `presence_prev_dnd_until`, `member.presence_dnd_until`과 모양 CHECK. 새 테이블은 없다. 두 테이블 모두 기존 RLS FORCE 정책 아래 있다.
+- `GET/PUT /v1/workspaces/{ws}/notification-rules`: 요청에 `dndUntilMs`(선택)를 더한다. 생략하면 진행 중인 기한을 유지하고, `null`이면 기한 없음, 값은 미래여야 한다(아니면 400). `dnd=false`면 기한을 지운다. 응답에 `dndUntilMs`(진행 중일 때만 값, 아니면 null)를 더하고 `dnd`는 유효 값이다. audit 페이로드에 `dnd_until_ms`를 더한다.
+- `PUT /v1/workspaces/{ws}/presence`: 요청에 `dndUntilMs`(선택, `status=dnd`에서만 값 허용, 미래여야 함)를 더한다. 응답과 `type: presence` 브로드캐스트(`dnd_until_ms`)에 진행 중인 기한을 싣는다. 기한이 지난 방해 금지는 `auto`로 답한다.
+- 클라이언트 문구: 방해 금지 설명에 「알림도 함께 멈춰요」. 시간 선택 UI(30분, 1시간, 내일까지, 직접)는 uxui 후속 이슈다.
+
+### Consequences (증보 2)
+
+- (+) 기한 있는 일시 중지가 서버에서 풀린다. 앱이 백그라운드여도 정확하다.
+- (+) 판정 한 곳, 본문 미판독, unread 무영향을 그대로 지킨다. 판정 SQL은 조건 한 조각이 늘었다.
+- (−) 선언 상태 쓰기가 `notification_rule` 행을 만들거나 바꾼다. 방해 금지를 한 번이라도 고른 사람은 행이 생긴다(판정 의미는 행 부재와 같다).
+- (−) 묶음 기억 컬럼 두 개. 규칙은 이 절과 `momo_messaging::notification_rule`에 있다.
+- 후속: 반복 스케줄(조용한 시간), 채널별 기한 음소거 UI.
+
