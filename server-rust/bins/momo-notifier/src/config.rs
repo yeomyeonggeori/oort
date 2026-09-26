@@ -22,10 +22,17 @@
 //!   (`CloudProviderSettings.swift:74`). T3 is unreleased and default-off: when
 //!   it is off the reconciler does not even poll for candidates.
 //!
+//! * `MOMO_LIVEKIT_API_KEY` / `MOMO_LIVEKIT_API_SECRET` / `MOMO_LIVEKIT_URL` —
+//!   the API's own LiveKit variables, all three or none (#2758). With none, the
+//!   huddle ghost sweep does not run. `MOMO_HUDDLE_SWEEP_INTERVAL_MS` (30000,
+//!   floored at 1000) sets its cadence.
+//!
 //! No `.env` reading and no baked-in credential: a missing DB URL is a boot
 //! error, not a silent dev default.
 
 use std::time::Duration;
+
+use crate::huddle_sweep::HuddleSweepConfig;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -112,6 +119,10 @@ pub struct NotifierConfig {
     pub t3_enabled: bool,
     /// ADR-0120 push-candidate drain.
     pub push: PushConfig,
+    /// #2758 huddle ghost sweep. `None` when LiveKit is not configured — the
+    /// same all-or-nothing `MOMO_LIVEKIT_*` rule the API applies — and then the
+    /// sweep does not run at all.
+    pub huddle_sweep: Option<HuddleSweepConfig>,
 }
 
 fn env(key: &str) -> Option<String> {
@@ -140,6 +151,10 @@ impl NotifierConfig {
         let reconcile_ms: u64 = env_number("MOMO_NOTIFIER_RECONCILE_INTERVAL_MS", poll_ms)?;
         let sweep_ms: u64 = env_number("MOMO_NOTIFIER_SWEEP_INTERVAL_MS", poll_ms)?;
         let lease_ms: u64 = env_number("MOMO_NOTIFIER_LEASE_RENEWAL_INTERVAL_MS", 30_000u64)?;
+        // ADR-0122 증보 D-H4: default 30 s, floored at 1 s — each tick is one
+        // LiveKit call per active huddle, so it must never inherit the 300 ms
+        // poll cadence.
+        let huddle_sweep_ms: u64 = env_number("MOMO_HUDDLE_SWEEP_INTERVAL_MS", 30_000u64)?;
 
         Ok(NotifierConfig {
             database_url,
@@ -153,6 +168,12 @@ impl NotifierConfig {
             host_offline_grace_seconds: env_number("MOMO_HOST_OFFLINE_GRACE_S", 90i64)?.max(1),
             t3_enabled: env("MOMO_T3_ENABLED").as_deref() == Some("1"),
             push: PushConfig::from_env(poll_ms)?,
+            huddle_sweep: HuddleSweepConfig::parse(
+                env("MOMO_LIVEKIT_API_KEY").as_deref(),
+                env("MOMO_LIVEKIT_API_SECRET").as_deref(),
+                env("MOMO_LIVEKIT_URL").as_deref(),
+                Duration::from_millis(huddle_sweep_ms.max(1_000)),
+            ),
         })
     }
 
@@ -169,6 +190,7 @@ impl NotifierConfig {
             host_offline_grace_seconds: 90,
             t3_enabled: true,
             push: PushConfig::for_target(),
+            huddle_sweep: None,
         }
     }
 }
