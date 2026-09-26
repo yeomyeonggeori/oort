@@ -11,6 +11,26 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-09-26
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.9>. Tag target: `main=eb09f568`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. One database migration since 0.1.8: `088_push_session_lineage.sql` adds two nullable columns and one partial index, and invalidates every live push registration made before it (a phone that is still signed in registers again on its next launch). It is forward-only; rolling the images back to 0.1.8 leaves the added columns in place.
+
+### Added
+- Web and desktop: attachments show an image thumbnail in the send tray before sending, images in the timeline open in a lightbox, and a PDF opens in a new window on web and in the default app on desktop. (#2710)
+- Phone: the top avatar opens a profile sheet with theme, notifications and sign-out; the block at the bottom of the screen is gone. (#2722)
+
+### Fixed
+- Push: signing out or revoking a session invalidates that device's push registration, so a signed-out phone no longer receives the next person's alerts or badge count. The server ties each registration to its sign-in session (migration 088). (#2685)
+- Phone: signing out deletes this phone's push registration and cannot race a token refresh. (#2692)
+- Desktop: the window's traffic-light buttons and the panel collapse button sit on the same line. (#2708)
+- Phone: on the connect screen the focused field and the sign-in button stay above the keyboard. (#2694)
+- Phone: following a conversation settles at the end even after a long new row or rows not yet measured. (#2697)
+
+### Not in this release
+- The server image carries the push-registration lineage (api and migration 088) and the web bundle's attachment previews and desktop title-bar alignment. The phone entries ship in iOS builds and the desktop shell in desktop builds, not in the image.
+- The C2-04 brand mark (#2731) and design system 2.0 (ADR-0189, #2721) landed after the build commit and ship in a later release.
+- runtime-unverified: real-device push after sign-out and re-registration on the next phone launch, TestFlight install.
+
 ## [0.1.8] - 2026-09-25
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.8>. Tag target: `main=088da65b`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. No database migration since 0.1.7: upgrading swaps the images only.
