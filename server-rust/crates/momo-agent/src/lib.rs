@@ -144,6 +144,7 @@ pub mod approval;
 pub mod dm;
 pub mod effort;
 pub mod error;
+pub mod hosted_notice;
 pub mod korean;
 pub mod mention;
 pub mod provisioning;
@@ -207,6 +208,12 @@ pub use effort::{
     MAX_EFFORT_LENGTH,
 };
 pub use error::AgentError;
+pub use hosted_notice::{
+    hosted_skip_notice_body, hosted_skip_notice_key, hosted_skip_notice_props, HostedSkipReason,
+    HOSTED_DELIVERY_GUIDE_URL, HOSTED_SKIP_ACTION_HREF, HOSTED_SKIP_NOTICE_AUDIT_SCHEMA,
+    HOSTED_SKIP_NOTICE_KIND, HOSTED_SKIP_NOTICE_POSTED_ACTION, HOSTED_SKIP_NOTICE_SOURCE,
+    HOSTED_SKIP_NOTICE_THROTTLED_ACTION, HOSTED_SKIP_NOTICE_THROTTLE_SECONDS,
+};
 pub use korean::{attach_particle, has_final_consonant, particle_for, ParticlePair};
 pub use mention::{
     allowed_agent_models, context_window_size, effective_system_prompt,
@@ -251,10 +258,11 @@ pub use status::{
 };
 pub use subscription::{
     agent_is_owner_only_in_tx, load_invocation_scopes_in_tx, lock_and_find_recent_notice_in_tx,
-    mark_agent_owner_only_in_tx, notice_root, notice_thread_key, owner_only_gate,
-    subscription_notice_body, subscription_notice_key, subscription_notice_props, OwnerOnlyScope,
-    SubscriptionHarness, SubscriptionNoticeKind, INVOCATION_SCOPE_OWNER_ONLY,
-    INVOCATION_SCOPE_WORKSPACE, SKIP_OWNER_ONLY_NON_OWNER, SKIP_SUBSCRIPTION_AGENTS_DISABLED,
+    lock_and_find_recent_server_notice_in_tx, mark_agent_owner_only_in_tx, notice_root,
+    notice_thread_key, owner_only_gate, subscription_notice_body, subscription_notice_key,
+    subscription_notice_props, OwnerOnlyScope, RecentNotice, SubscriptionHarness,
+    SubscriptionNoticeKind, INVOCATION_SCOPE_OWNER_ONLY, INVOCATION_SCOPE_WORKSPACE,
+    SKIP_OWNER_ONLY_NON_OWNER, SKIP_SUBSCRIPTION_AGENTS_DISABLED,
     SUBSCRIPTION_AGENT_ONLINE_WINDOW_SECONDS, SUBSCRIPTION_NOTICE_AUDIT_SCHEMA,
     SUBSCRIPTION_NOTICE_POSTED_ACTION, SUBSCRIPTION_NOTICE_SOURCE,
     SUBSCRIPTION_NOTICE_THROTTLED_ACTION, SUBSCRIPTION_NOTICE_THROTTLE_SECONDS,
