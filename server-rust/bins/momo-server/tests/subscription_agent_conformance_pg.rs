@@ -720,6 +720,11 @@ async fn non_owner_calls_are_not_delivered_and_answered_once() {
         before,
         "a non-owner's thread reply is not delivered to the owner_only runtime"
     );
+    assert_eq!(
+        notices(&su, &f).await.len(),
+        2,
+        "a reply without a mention gets no notice (planner 판정 2026-09-26)"
+    );
 
     // ① a mention inside that thread → a notice in THAT thread.
     send(
@@ -739,6 +744,40 @@ async fn non_owner_calls_are_not_delivered_and_answered_once() {
         Some(root),
         "answered in the thread it was said in"
     );
+    assert_eq!(jobs(&su, &f).await, 0);
+
+    // ② the throttle is per person: a second non-owner calling in the same
+    // thread inside the window still hears the sentence once.
+    let (second, second_jwt) = insert_human(&su, f.workspace, "다른동료", "member").await;
+    join(&su, f.workspace, f.channel, second).await;
+    send(
+        &client,
+        &base,
+        &f,
+        &second_jwt,
+        f.channel,
+        &mention,
+        Some(root),
+    )
+    .await;
+    let posted = notices(&su, &f).await;
+    assert_eq!(
+        posted.len(),
+        4,
+        "each person gets their own notice: {posted:?}"
+    );
+    assert_eq!(posted[3].3, second.to_string());
+    send(
+        &client,
+        &base,
+        &f,
+        &second_jwt,
+        f.channel,
+        &mention,
+        Some(root),
+    )
+    .await;
+    assert_eq!(notices(&su, &f).await.len(), 4, "…once per window each");
     assert_eq!(jobs(&su, &f).await, 0);
 
     // ① the 1:1 DM rule (no @handle at all).
