@@ -64,13 +64,23 @@ export const IS_TAURI =
   ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
 
 /**
- * AI 연결의 구독 줄(#2814 OB2-8) 빌드 플래그. BUILD-TIME, 기본 꺼짐.
+ * AI 연결의 구독 줄(#2814 OB2-8) 빌드 플래그. BUILD-TIME, **기본 켬**(#2870).
  *
- * #2815 OB2-9(서버 소유자 전용 호출)가 팀 인스턴스에 서기 전에는 팀 배포 빌드에
- * 구독 줄을 노출하지 않는다(이슈 계약). `VITE_MOMO_SUBSCRIPTION_AGENTS=1`로 켠
- * 빌드만 구독 줄을 그리고, 그때도 서버 킬 스위치(`subscriptionAgentsEnabled`)가
- * 참이어야 한다. design 모드(캡처)는 포즈가 켠다.
+ * 서버 킬 스위치 `MOMO_SUBSCRIPTION_AGENTS_ENABLED`(config.rs
+ * `subscription_agents_switch_on`)와 같은 읽기다: 없음·빈값은 켬, 켬 값(`1`,
+ * `true`)은 켬, **그 밖의 값은 모두 끔**(`0`, `false`, 오타). 오타가 끄는 스위치를
+ * 무르지 않게 끄는 쪽으로 기운다. 서버 쪽 소유자 전용 호출(#2815)이 이미 섰으므로
+ * 빌드는 기본으로 구독 줄을 그리고, 그때도 서버 값(`subscriptionAgentsEnabled`)이
+ * 참이어야 줄이 선다. 이 플래그는 서버와 무관하게 한 빌드에서 구독 표면을 통째로
+ * 걷는 스위치로 남는다(`VITE_MOMO_SUBSCRIPTION_AGENTS=0`). design 모드(캡처)는
+ * 포즈가 켠다.
  */
-export const SUBSCRIPTION_AGENTS_BUILD_FLAG =
-  env.VITE_MOMO_SUBSCRIPTION_AGENTS === "1";
+export function subscriptionAgentsBuildFlagOn(raw: string | undefined): boolean {
+  const value = raw?.trim() ?? "";
+  if (value === "") return true;
+  return value === "1" || value === "true";
+}
 
+export const SUBSCRIPTION_AGENTS_BUILD_FLAG = subscriptionAgentsBuildFlagOn(
+  env.VITE_MOMO_SUBSCRIPTION_AGENTS
+);
