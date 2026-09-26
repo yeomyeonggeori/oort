@@ -1145,6 +1145,9 @@ const PROVIDER_LINK = {
   keyConfigured: true,
   updatedAtMs: FIXTURE_NOW - 6 * 3_600_000,
   diagnostics: [],
+  // 서버가 실제로 싣는 필드(provider_link.rs credential_kind). 빠지면 곁판 「등록
+  // 방식」이 「서버 환경값」으로 찍혀 저장된 키의 사진이 거짓이 된다(#2877 리뷰 M2).
+  credentialKind: "bearer",
 };
 
 const PROVIDER_CHAIN = {

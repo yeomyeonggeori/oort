@@ -443,11 +443,13 @@ function TeamBoard({ offline }: { offline: boolean }) {
       ) : link && !hasRow ? (
         <AiLineRow testId="ai-link-empty" last>
           <span>아직 팀 연결이 없어요. 팀 에이전트가 대답하려면 API 키가 하나 필요해요.</span>
+          {/* 둘째 줄은 지금 팀 에이전트가 무엇으로 대답하는지 한 가지만 말한다
+              (design-review #2877 3차 M1: 「서버 환경값 사용 중」이 무언가 쓰이는
+              것처럼 읽혔다). 어휘는 가용성 줄과 같은 「모의 응답」이다. */}
           <span className="text-meta text-ink-muted">
-            {`지금은 ${providerSourceLabel(link.source)}이며, 모드는 ${choiceLabel(
-              PROVIDER_MODES,
-              link.mode
-            )}입니다.`}
+            {link.availability === "mock"
+              ? "지금 팀 에이전트는 모의 응답으로만 대답해요."
+              : "지금 팀 에이전트는 대답하지 못해요."}
           </span>
         </AiLineRow>
       ) : link ? (
@@ -717,7 +719,7 @@ function TeamBoard({ offline }: { offline: boolean }) {
                     ? "이 내부용 연결을 지웁니다. 같은 방식으로는 다시 만들 수 없어요."
                     : "저장된 주소와 자격증명을 지웁니다. 팀 에이전트가 이 연결로 대답하지 못하게 됩니다."
                 }
-                confirmLabel="해제"
+                confirmLabel="연결 해제"
                 disabled={offline || (busy && !unlinking)}
                 describedBy={lockReason(unlinking)}
                 busy={unlinking}
