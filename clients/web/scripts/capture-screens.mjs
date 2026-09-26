@@ -12950,6 +12950,126 @@ const ACCENT_CAPTURE_ARGS = [
   "--disable-gpu",
 ];
 
+/**
+ * DS2-6 데스크탑 셸 (#2718). 시안 A `#a-desk`와 나란히 놓을 판: 창 바닥 ·
+ * 떠 있는 판 · 사이드바(작업 중 카드 포함) · 떠 있는 컴포저. 세 테마(새벽하늘 ·
+ * 흑연 · 노을띠)에 두 창 크기, 큰 글씨, 접힘, 390 서랍.
+ *
+ *   CAPTURE_PROFILE=shell OUT_DIR=... npm run capture:design
+ *
+ * `?agentwork=live`가 작업 중 카드와 채널 행 알약을 채운다(디자인 빌드에만 있는
+ * 캡처 문, 사이드바가 픽스처라고 경고 줄로 말한다).
+ */
+const SHELL_PALETTES = ["dawnsky", "graphite", "noeul"];
+const SHELL_WINDOWS = [
+  { width: 1200, height: 760, tag: "1200x760" },
+  { width: 1440, height: 900, tag: "1440x900" },
+];
+
+async function captureShellScenes(_sharedBrowser, scheme) {
+  beginScene("shell-ds2");
+  let win0 = SHELL_WINDOWS[0];
+  const browser = wrapBrowserShotGuard(
+    await chromium.launch({ args: ACCENT_CAPTURE_ARGS })
+  );
+  const shots = [];
+  const settle = async (page) => {
+    await waitForAnimations(page);
+    await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(resolve));
+        })
+    );
+  };
+  const shoot = async (page, name) => {
+    // 포인터를 창 모서리(상단 줄의 빈 자리)로: 행 위에 남은 호버가 판을 칠하지 않게.
+    await page.mouse.move(win0.width - 4, 4);
+    await settle(page);
+    const path = beginSceneFromShotPath(`${OUT_DIR}/${name}.png`);
+    await page.screenshot({ path });
+    shots.push(path);
+  };
+  try {
+    for (const win of SHELL_WINDOWS) {
+      win0 = win;
+      const context = await browser.newContext({
+        viewport: { width: win.width, height: win.height },
+        deviceScaleFactor: 2,
+        colorScheme: scheme,
+        reducedMotion: "reduce",
+      });
+      await installMocks(context);
+      const page = await context.newPage();
+      await page.goto(`${ORIGIN}/?agentwork=live`, { waitUntil: "networkidle" });
+      await signIn(page);
+      await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+      await page.getByTestId("sidebar-now-card").waitFor({ state: "visible" });
+      // 선택 행이 보이도록 채널 주소로 연다(기본 경로는 첫 채널을 열지만 행의
+      // NavLink는 주소가 /c/<id>일 때만 선택이다).
+      await page.evaluate(`location.hash = "/c/${GENERAL_ID}"`);
+      await page
+        .locator('[data-testid="channel-item"][aria-current="page"]')
+        .waitFor({ state: "visible" });
+      await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+      await page.evaluate(() => document.fonts.ready);
+      const palettes = win.tag === "1200x760" ? SHELL_PALETTES : ["dawnsky"];
+      for (const palette of palettes) {
+        await page.evaluate((id) => {
+          document.documentElement.setAttribute("data-palette", id);
+        }, palette);
+        await shoot(page, `shell-${palette}-${scheme}-${win.tag}`);
+      }
+      await page.evaluate(() => {
+        document.documentElement.setAttribute("data-palette", "dawnsky");
+      });
+      if (win.tag === "1200x760") {
+        // 큰 글씨: 루트 글자 20px(브라우저 설정의 「큰 글꼴」과 같은 길).
+        const big = await page.addStyleTag({ content: "html { font-size: 20px; }" });
+        await shoot(page, `shell-dawnsky-${scheme}-${win.tag}-large`);
+        await big.evaluate((node) => node.remove());
+        // 접힘: 판이 상단 줄 아래로 내려가고 토글은 제자리다.
+        await sceneClick(page, page.getByTestId("sidebar-toggle"));
+        await page.waitForTimeout(400);
+        await shoot(page, `shell-dawnsky-${scheme}-${win.tag}-collapsed`);
+        await sceneClick(page, page.getByTestId("sidebar-toggle"));
+        await page.waitForTimeout(400);
+      }
+      await page.close();
+      await context.close();
+    }
+    // 390 서랍 (B6): 셸이 폰 폭에서 예전 문법을 지키는지.
+    const phone = await browser.newContext({
+      viewport: MOBILE_VIEWPORT,
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+      hasTouch: true,
+    });
+    win0 = MOBILE_VIEWPORT;
+    await installMocks(phone);
+    const page = await phone.newPage();
+    await page.goto(`${ORIGIN}/?agentwork=live`, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+    await shoot(page, `shell-dawnsky-${scheme}-390`);
+    await sceneClick(page, page.getByTestId("open-sidebar-drawer"));
+    await page.getByTestId("sidebar-scrim").waitFor({ state: "visible" });
+    await shoot(page, `shell-dawnsky-${scheme}-390-drawer`);
+    for (const palette of ["noeul"]) {
+      await page.evaluate((id) => {
+        document.documentElement.setAttribute("data-palette", id);
+      }, palette);
+      await shoot(page, `shell-${palette}-${scheme}-390-drawer`);
+    }
+    await page.close();
+    await phone.close();
+    return shots;
+  } finally {
+    await browser.close();
+  }
+}
+
 async function captureAccentCandidates(_sharedBrowser, scheme) {
   beginScene("accent-preview");
   const ids = accentCatalogIds();
@@ -12993,7 +13113,7 @@ async function captureAccentCandidates(_sharedBrowser, scheme) {
     // so two capture:design runs stay byte-identical without hiding chrome.
     await page.addStyleTag({
       content: `svg { shape-rendering: crispEdges; }
-[data-testid="workspace-current"] .bg-accent,
+[data-testid="workspace-current"] .rail-marker,
 [data-testid="channel-item"][aria-current="page"] {
   transform: translateZ(0);
 }`,
@@ -13009,10 +13129,11 @@ async function captureAccentCandidates(_sharedBrowser, scheme) {
       // DS2-1: 주 버튼은 잉크(--primary)이고 액센트가 바꾸지 않는다. 칠이 끝났는지만 본다.
       await waitUntilTokenPaint(page, '[data-testid="timeline-empty-primary"]', "--primary");
       await waitUntilTokenPaint(page, '[data-testid="mention-badge"]', "--primary");
+      // DS2-6 (#2718): 선택 행은 흰 면(--surface)이다. 호박색이 아니다.
       await waitUntilTokenPaint(
         page,
         '[data-testid="channel-item"][aria-current="page"]',
-        "--accent-soft"
+        "--surface"
       );
       await waitForAnimations(page);
       await page.evaluate(
@@ -14370,6 +14491,11 @@ async function main() {
         for (const scheme of ["light", "dark"]) {
           assertThisPreview();
           all.push(...(await captureAccentCandidates(browser, scheme)));
+        }
+      } else if (profile === "shell") {
+        for (const scheme of ["light", "dark"]) {
+          assertThisPreview();
+          all.push(...(await captureShellScenes(browser, scheme)));
         }
       } else if (profile === "agents") {
         for (const scheme of ["light", "dark"]) {

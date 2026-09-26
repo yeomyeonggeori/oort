@@ -46,7 +46,9 @@ export function WorkspaceRail({
     <div
       hidden={hidden}
       data-testid="workspace-rail"
-      className="flex h-full w-rail shrink-0 flex-col items-center gap-2 border-r border-line bg-surface-sidebar py-2"
+      // DS2-6 (#2718): 레일은 창 바닥 위에 녹는다(시안 A에는 레일이 없다, ADR-0161
+      // 표면이라 남긴다). 바탕도 경계선도 없다.
+      className="flex h-full w-rail shrink-0 flex-col items-center gap-2 py-2"
     >
       <nav
         aria-label="워크스페이스"
@@ -69,7 +71,10 @@ export function WorkspaceRail({
       <span
         aria-current="true"
         aria-busy={tile.loading || undefined}
-        className="relative isolate flex size-rail-tile items-center justify-center rounded-md bg-accent-soft text-title font-semibold text-ink"
+        // 현재 타일은 흰 면 + rest 그림자로 뜬다(DS2-6, 사이드바 선택 행과 같은
+        // 문법 — owner 결정 2026-09-26: 선택을 호박색으로 칠하지 않는다). 띠
+        // 위에서도 흰 면이라 원래 글자 역할을 쓴다.
+        className="band-surface relative isolate flex size-rail-tile items-center justify-center rounded-md bg-surface text-title font-semibold text-ink shadow-sm"
         title={tile.label}
         aria-label={tile.label}
         data-testid="workspace-current"
@@ -88,7 +93,7 @@ export function WorkspaceRail({
             않는다 — R-1 §1 현재 WS 액센트 바. z 순서는 아바타 위. */}
         <span
           aria-hidden="true"
-          className="absolute -left-1 z-10 h-rail-marker w-marker rounded-sm bg-accent"
+          className="rail-marker absolute -left-1 z-10 h-rail-marker w-marker rounded-sm"
         />
         {avatarDataUrl ? (
           // 아바타가 있으면 이미지가 타일을 채운다(object-cover). 모서리는 이미지
@@ -120,7 +125,9 @@ export function WorkspaceRail({
         aria-label="워크스페이스 추가"
         title="워크스페이스 추가"
         data-testid="add-workspace"
-        className="flex size-rail-tile items-center justify-center rounded-md border border-line-strong text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+        // DS2-6: 손으로 그린 3:1 테두리 대신 채움 문법(ADR-0189 D6 「버튼은 채움,
+        // 테두리는 입력 그릇에만」). 쉴 때는 옅은 채움, 호버에서 한 단 짙다.
+        className="flex size-rail-tile items-center justify-center rounded-md bg-surface-hover text-ink-muted press hover:bg-surface-pressed focus-visible:focus-ring"
       >
         <Plus className="size-6" aria-hidden="true" />
       </button>

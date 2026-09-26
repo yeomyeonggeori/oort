@@ -22,17 +22,20 @@ import type {
 // Flat rows with a hover background, not one rounded "web card" per list item
 // (design-taste-web §8). Everything interactive is a real link/button with a
 // visible focus ring.
-// `tap-target`은 폰에서만 이 행을 44px로 세운다 (goal B6). 데스크탑의 30px 행은
-// 포인터에 맞춘 밀도이고, 손가락으로는 옆 채널이 함께 눌린다. 넓은 창에서는 이
+// `tap-target`은 폰에서만 이 행을 44px로 세운다 (goal B6). 넓은 창에서는 이
 // 유틸리티가 아무 규칙도 갖지 않으므로 목록 밀도는 그대로다.
+//
+// 기하는 `sidebar-row`(tokens.css, 시안 A `.a-srow`: 34 · 반경 10 · 아이콘 18)가
+// 진다. 선택 행은 흰 면 + rest 그림자로 뜬다(`sidebar-row-selected`). 호박색
+// (`signal-soft`)으로 칠하지 않는다: 호박색은 안 읽음·멘션 신호에만 쓴다
+// (owner 결정 2026-09-26, #2738 검수 M4). 선택 행은 띠(노을띠) 위에서도 흰 면이라
+// 원래 글자 역할을 되찾는다(`band-surface`).
 const rowClass =
-  "tap-target flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-body " +
-  "focus-visible:focus-ring";
+  "tap-target sidebar-row flex w-full items-center text-left focus-visible:focus-ring";
 
-const inactiveClass =
-  "text-ink hover:bg-surface-hover active:bg-surface-pressed";
+const inactiveClass = "hover:bg-surface-hover active:bg-surface-pressed";
 const activeClass =
-  "bg-accent-soft text-ink active:bg-surface-pressed";
+  "band-surface sidebar-row-selected text-ink active:bg-surface-pressed";
 
 export interface SidebarRowProps {
   to: string;
@@ -95,18 +98,18 @@ export function SidebarRow({
       data-testid={testId}
       {...dataAttrs}
       {...dragProps}
+      data-unread={hasUnread ? "" : undefined}
       className={({ isActive }) =>
         cn(rowClass, isActive ? activeClass : inactiveClass)
       }
     >
-      <span className="shrink-0 opacity-70" aria-hidden="true">
+      <span data-row-icon="" aria-hidden="true">
         {icon}
       </span>
       <span className="flex min-w-0 flex-1 items-baseline gap-1">
         <span
           className={cn(
             "min-w-0 truncate",
-            hasUnread && "font-semibold",
             agent && "text-agent"
           )}
         >
@@ -124,7 +127,7 @@ export function SidebarRow({
       {trailing}
       {hasMention ? (
         <span
-          className="shrink-0 rounded-full bg-primary px-1 text-timestamp font-bold text-on-primary"
+          className="sidebar-badge bg-primary text-on-primary"
           data-numeric
           data-testid="mention-badge"
         >
@@ -132,7 +135,7 @@ export function SidebarRow({
         </span>
       ) : hasUnread ? (
         <span
-          className="shrink-0 rounded-full bg-signal px-1 text-timestamp font-bold text-on-signal"
+          className="sidebar-badge bg-signal text-on-signal"
           data-numeric
           data-testid="unread-count"
         >
@@ -264,7 +267,7 @@ export function SidebarSection({
       // 진다 - 그것이 이 클래스에서 토큰 이름을 읽어 두 바닥·두 스킴에서 3:1 을
       // 잰다. 표식 자체는 드래그가 살아 있는 동안에만 DOM 에 있다.
       className={cn(
-        "flex flex-col gap-1 rounded-sm px-2 py-2",
+        "flex flex-col rounded-md",
         "data-[drop-target]:bg-surface-hover data-[drop-target]:outline data-[drop-target]:outline-2 data-[drop-target]:outline-dashed data-[drop-target]:-outline-offset-2 data-[drop-target]:outline-accent"
       )}
       data-testid={`sidebar-section-${sectionId}`}
@@ -273,7 +276,7 @@ export function SidebarSection({
     >
       <div
         className={cn(
-          "flex min-h-control-sm items-center gap-1 px-2",
+          "sidebar-section-head flex min-h-control-sm items-center gap-1",
           // 손잡이가 있으면 커서가 그렇게 말한다. 없는 섹션(기본·별표·DM)의
           // 머리글은 예전 그대로다.
           headerDragProps && "cursor-grab"
@@ -293,7 +296,7 @@ export function SidebarSection({
             aria-controls={collapsed ? undefined : listId}
             title={`${title} 섹션 ${collapsed ? "펼치기" : "접기"}`}
             data-testid={`section-collapse-${sectionId}`}
-            className="flex h-control-sm w-full min-w-0 items-center gap-1 rounded-sm text-left text-meta font-medium text-ink-muted hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
+            className="sidebar-section-label w-full min-w-0 rounded-md text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
           >
             <Chevron className="size-4 shrink-0" aria-hidden="true" />
             <span className="min-w-0 truncate">{title}</span>
@@ -301,7 +304,7 @@ export function SidebarSection({
         </h2>
         {collapsed && hasMention ? (
           <span
-            className="shrink-0 rounded-full bg-primary px-1 text-timestamp font-bold text-on-primary"
+            className="sidebar-badge bg-primary text-on-primary"
             data-numeric
             data-testid={`section-unread-${sectionId}`}
           >
@@ -319,7 +322,7 @@ export function SidebarSection({
         {showActions ? action : null}
       </div>
       {collapsed ? null : wrapList ? (
-        <ul id={listId} className="flex flex-col">
+        <ul id={listId} className="sidebar-stack">
           {children}
         </ul>
       ) : (

@@ -147,8 +147,16 @@ describe("컴포저 카피가 한 벌이다 (#1384)", () => {
     // 재는 것은 낱말이 아니라 **옷**이다: 좁은 폭에서 접히고, 12px 흐린 산문이며,
     // 테두리를 두르지 않는다(테두리는 이 시스템에서 컨트롤의 것이다).
     const sidebar = codeOf("../sidebar/Sidebar.tsx");
-    expect(sidebar).toContain(
-      '<span className="wide-only text-meta text-ink-muted">⌘K</span>'
+    // DS2-6 (#2718): 시안 A `.a-search kbd`의 옷이다 — 좁은 폭에서 접히고
+    // (`wide-only`), 흐린 글자에 옅은 채움 칩이며, 테두리는 여전히 없다.
+    expect(sidebar).toContain('<kbd className="wide-only sidebar-kbd">⌘K</kbd>');
+    const tokens = readFileSync(
+      new URL("../../design/tokens.css", import.meta.url),
+      "utf8"
     );
+    const kbd = tokens.slice(tokens.indexOf("@utility sidebar-kbd {"));
+    const block = kbd.slice(0, kbd.indexOf("\n}"));
+    expect(block).toContain("color: var(--ink-muted);");
+    expect(block).not.toMatch(/\bborder(?!-radius)[a-z-]*:/);
   });
 });

@@ -77,7 +77,9 @@ describe("UX-HT 계약 (소스)", () => {
     // 끌리는 손잡이라 커서 하나가 조건부로 붙는다. 재는 것은 그대로 **바닥선**
     // 이므로, 문자열 한 벌 대신 그 낱말을 찾는다.
     expect(sectionSource).toContain(
-      '"flex min-h-control-sm items-center gap-1 px-2"'
+      // DS2-6 (#2718): 머리의 좌우 여백은 라벨(`sidebar-section-label`, 시안
+      // `.a-slabel` 좌우 10)이 진다. 바닥선(min-h-control-sm)은 그대로다.
+      '"sidebar-section-head flex min-h-control-sm items-center gap-1"'
     );
     expect(sectionSource).not.toMatch(
       /"flex h-control-sm items-center gap-1 px-2"/

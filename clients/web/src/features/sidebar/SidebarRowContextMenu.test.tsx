@@ -378,7 +378,8 @@ describe("사이드바 행 우클릭 (BT-1 / #1929)", () => {
     expect(cls).not.toContain("=>");
     expect(cls).not.toContain("isActive");
     expect(cls.split(/\s+/)).toContain("flex");
-    expect(cls.split(/\s+/)).toContain("px-2");
+    // DS2-6 (#2718): 행 기하(34 · 좌우 10 · 반경 10)는 `sidebar-row`가 진다.
+    expect(cls.split(/\s+/)).toContain("sidebar-row");
     // 감싸지 않은 행과 글자 단위로 같은 목록이어야 한다.
     expect(cls).toBe(plainRowClass());
   });

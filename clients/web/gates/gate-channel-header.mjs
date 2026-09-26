@@ -382,7 +382,9 @@ async function exercise(browser) {
 
   // ---- 1. 헤더는 1줄이고, 토픽 전체는 ⋮ 메뉴에서 읽힌다 ----------------------
   const headerBox = await page.getByTestId("channel-header").boundingBox();
-  if (!headerBox || headerBox.height > 52) {
+  // DS2-6 (#2718): 넓은 창의 머리는 시안 A `.a-mhd`의 60 한 줄이다. 두 줄로
+  // 접히면(토픽이 제목 아래로 내려가면) 60을 넘는다.
+  if (!headerBox || headerBox.height > 61) {
     throw new Error(
       `the channel header must be a single row, height ${headerBox?.height}`
     );

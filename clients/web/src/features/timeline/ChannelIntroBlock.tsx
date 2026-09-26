@@ -32,7 +32,9 @@ function IntroIcon({
     <span
       aria-hidden="true"
       data-testid="message-channel-intro-icon"
-      className="flex size-8 items-center justify-center rounded-md border border-line bg-surface-raised text-ink-muted"
+      // DS2-6: 손으로 그린 테두리 칸 대신 판 위에 뜬 흰 칸(rest). 판(다크
+      // canvas-mid)보다 밝은 --surface라 테두리 없이 선다(시안 A 카드 문법).
+      className="flex size-8 items-center justify-center rounded-md bg-surface text-ink shadow-sm"
     >
       <Icon className="size-4" />
     </span>
@@ -64,7 +66,8 @@ export function ChannelIntroBlock({
 
   return (
     <div
-      className="flex w-full flex-col items-start gap-3 px-4 py-6"
+      // 좌우 24는 떠 있는 판의 머리(`channel-head`)·컴포저 카드와 같은 선이다.
+      className="flex w-full flex-col items-start gap-3 px-6 py-6"
       data-testid={empty ? "timeline-empty" : "message-channel-intro"}
       data-channel-intro=""
       data-empty-kind={intro.surface}
