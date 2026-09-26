@@ -15,6 +15,7 @@ import { MessageBody } from "./MessageBody";
 // 살릴 본문이 있는지의 판정은 코어가 갖는다 — 폰이 같은 답을 소비한다 (#1478).
 import { hasRenderableBody } from "@momo/core/features/timeline/bodySlot";
 import { CascadeNotice } from "./CascadeNotice";
+import { NoticeActionLink } from "./NoticeActionLink";
 import { turnRecordRunId } from "@momo/core/features/timeline/cascadeModel";
 import { rowPresentation } from "@momo/core/features/timeline/rowModel";
 import { streamStopMark } from "@momo/core/features/timeline/streamStop";
@@ -916,6 +917,8 @@ export function MessageRow({
             // 자리이고, 거기서 웹은 글자 없는 문단을 하나 세우고 폰은 세우지 않았다.
             null
           ))}
+        {/* 서버 안내 줄의 문 (#2871): 본문 문장이 말한 곳으로 바로 간다. */}
+        {!deleted && <NoticeActionLink message={message} />}
         {/* 첨부는 본문 **바로 아래**다 (ADR-0151 D2). 카드·아티팩트보다 앞인
             이유는 순서가 안쪽에서 바깥쪽이기 때문이다: 파일은 작성자가 이 메시지에
             직접 붙인 것이고, 그 아래 카드들은 그 메시지에 **대해** 서버가 말하는
