@@ -57,8 +57,8 @@ export const HARNESS_BRAIN: Record<LocalHarnessId, string> = {
  * - `desktop-only`: 웹(데스크탑 아님). 구독 줄 대신 「데스크탑 앱에서…」 한 줄.
  * - `server-off`: 서버 킬 스위치가 꺼졌거나 서버가 그 값을 모른다. 구독 줄을
  *   숨기고 API 키 줄이 맨 위, 이유 한 줄.
- * - `hidden`: 빌드 플래그가 꺼진 빌드(팀 배포). #2815 랜딩 전 노출 금지. 아무
- *   말도 하지 않는다 — 아직 없는 기능을 광고하지 않는다.
+ * - `hidden`: 빌드 플래그로 구독 표면을 걷은 빌드(`VITE_MOMO_SUBSCRIPTION_AGENTS=0`,
+ *   기본은 켬 #2870). 아무 말도 하지 않는다: 이 빌드에 없는 기능을 광고하지 않는다.
  */
 export type SubscriptionSurface = "rows" | "desktop-only" | "server-off" | "hidden";
 
@@ -274,7 +274,7 @@ export const AI_CONNECT_ROW_COPY: Record<AiConnectRowId, AiConnectRowCopy> = {
   },
   "api-key": {
     title: "API 키 · 팀 에이전트",
-    detail: "Anthropic·OpenAI 키 · 팀 누구나 부를 수 있어요",
+    detail: "OpenAI 호환 API 키 · 팀 누구나 부를 수 있어요",
     mark: "키",
   },
   grok: {
@@ -293,7 +293,7 @@ export const AI_CONNECT_BOUNDARY_NOTE =
   "상태는 CLI가 스스로 알려 준 값이에요. oort는 로그인 정보를 읽거나 옮기지 않아요. 구독으로 도는 에이전트는 나만 부를 수 있고, 팀 모두가 부를 에이전트는 API 키로 붙여요.";
 
 export const AI_CONNECT_DESKTOP_ONLY_NOTE =
-  "데스크탑 앱에서 이 맥의 Claude Code를 붙일 수 있어요.";
+  "데스크탑 앱에서 이 맥의 Claude Code·Codex를 붙일 수 있어요.";
 
 export const AI_CONNECT_SERVER_OFF_NOTE =
   "이 서버는 지금 구독 에이전트를 받지 않아요. 팀 에이전트는 API 키로 붙여요.";
@@ -331,6 +331,20 @@ export const AI_CONNECT_SKIP_LABEL = "지금은 건너뛰기";
 export const AI_CONNECT_REENTRY = "나중에 설정 › AI 연결에서 이어갈 수 있습니다.";
 export const AI_CONNECT_SKIPPED_LINE = "설정 › AI 연결에서 언제든 이어서 할 수 있어요.";
 export const AI_CONNECT_CONTINUE_LABEL = "계속";
+
+// ---- 재진입 (#2870, RCA 1-b·1-c) -------------------------------------------
+//
+// 설정 › AI 연결과 에이전트 화면에서 같은 화면을 다시 연다. 온보딩의 [지금은
+// 건너뛰기]는 재진입에서 [닫기]가 되고, 진행 점 자리에 [뒤로]가 선다.
+
+export const AI_CONNECT_BACK_LABEL = "뒤로";
+export const AI_CONNECT_CLOSE_LABEL = "닫기";
+
+/** 설정 › AI 연결 맨 위 블록의 제목·설명·행동. 해요체(ADR-0193 D11 구독 문구). */
+export const SUBSCRIPTION_ENTRY_TITLE = "내 구독 에이전트";
+export const SUBSCRIPTION_ENTRY_DETAIL =
+  "이 맥의 Claude Code·Codex 로그인으로 생각하는 개인 에이전트예요. 나만 부를 수 있어요.";
+export const SUBSCRIPTION_ENTRY_ACTION = "내 구독 에이전트 붙이기";
 
 // ---- 합류 세 상태 (같은 화면) -------------------------------------------------
 

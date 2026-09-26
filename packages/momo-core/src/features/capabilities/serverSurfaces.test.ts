@@ -3,8 +3,11 @@ import { ApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
 import {
   ABSENT_STATUSES,
+  HOST_GATED_SURFACE_IDS,
   allServerSurfaces,
+  hasOnlineWorkHost,
   isSurfaceProvided,
+  surfaceProvidedWithHosts,
   serverSaysAbsent,
   serverSurface,
 } from "./serverSurfaces";
@@ -102,5 +105,45 @@ describe("표면 판정표", () => {
     for (const surface of allServerSurfaces()) {
       expect(serverSurface(surface.id)).toBe(surface);
     }
+  });
+});
+
+describe("작업 표면 런타임 판정 (#2780)", () => {
+  const online = { online: true };
+  const offline = { online: false };
+  const revoked = { online: true, revokedAtMs: 1_800_000_000_000 };
+
+  it("온라인이고 해지되지 않은 호스트가 하나라도 있으면 참이다", () => {
+    expect(hasOnlineWorkHost([offline, online])).toBe(true);
+    expect(hasOnlineWorkHost([{ online: true, revokedAtMs: null }])).toBe(true);
+  });
+
+  it("호스트가 없거나, 전부 오프라인이거나, 해지됐거나, 아직 모르면 거짓이다", () => {
+    expect(hasOnlineWorkHost([])).toBe(false);
+    expect(hasOnlineWorkHost([offline, offline])).toBe(false);
+    expect(hasOnlineWorkHost([revoked])).toBe(false);
+    expect(hasOnlineWorkHost(undefined)).toBe(false);
+    expect(hasOnlineWorkHost(null)).toBe(false);
+  });
+
+  it("런타임으로 펼치는 표면은 작업 콘솔·코드 실행 호스트·관제 셋이다", () => {
+    expect([...HOST_GATED_SURFACE_IDS]).toEqual(["workConsole", "work", "ade"]);
+  });
+
+  it("셋은 온라인 호스트가 있을 때만 펼친다", () => {
+    for (const id of HOST_GATED_SURFACE_IDS) {
+      expect(surfaceProvidedWithHosts(id, false, false)).toBe(false);
+      expect(surfaceProvidedWithHosts(id, false, true)).toBe(true);
+    }
+  });
+
+  it("작업 흐름은 호스트가 있어도 펼치지 않는다(서버에 라우트가 없다)", () => {
+    expect(surfaceProvidedWithHosts("workstreams", false, true)).toBe(false);
+    expect(surfaceProvidedWithHosts("plugins", false, true)).toBe(false);
+  });
+
+  it("정적으로 제공되는 표면은 호스트와 무관하게 참이다", () => {
+    expect(surfaceProvidedWithHosts("messageSearch", true, false)).toBe(true);
+    expect(surfaceProvidedWithHosts("work", true, false)).toBe(true);
   });
 });

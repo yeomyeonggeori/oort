@@ -103,3 +103,14 @@ export const PRESENCE_MENU_LABEL = "내 상태";
 export function presenceTriggerLabel(effective: EffectivePresence): string {
   return `${PRESENCE_MENU_LABEL}: ${effectivePresenceLabel(effective)} (변경하려면 누르세요)`;
 }
+
+/**
+ * 「방해 금지」 선언 상태의 설명 (#2848). 이 상태는 남에게 보이는 표시이고 푸시를
+ * 막지 않는다 — 푸시는 알림 규칙의 「알림 일시 중지」가 막는다. 두 낱말의 경계를
+ * 한 곳에서 말한다(`features/settings/notificationRules.ts` 의 낱말 주석).
+ */
+export const PRESENCE_DND_HINT =
+  "다른 사람에게 보이는 표시입니다. 알림은 「알림 일시 중지」가 멈춥니다.";
+
+/** 선언 상태 쓰기가 실패했을 때 (웹 `PresenceControl` 과 같은 문장). */
+export const PRESENCE_WRITE_FAILED = "상태를 바꾸지 못했습니다. 다시 시도하세요.";
