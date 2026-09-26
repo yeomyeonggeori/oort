@@ -6,6 +6,7 @@ import { subscribeTheme } from "@/design/theme";
 import { isTerminalAppKey, type KeyPlatform } from "@momo/core/features/workbench/keymap";
 import type { WorkbenchPaneInfo } from "../WorkbenchGrid";
 import { localSessions, type LocalSessions, type LocalSessionView } from "./localSessions";
+import { attachHangulInput, isImeProcessedKey } from "./hangulInput";
 import type { ITheme, Terminal } from "./localTerminalRuntime";
 
 // Reading this as: 작업 공간 격자의 로컬 터미널 칸 for internal team users on
@@ -20,6 +21,9 @@ import type { ITheme, Terminal } from "./localTerminalRuntime";
 // 도크 뿌리(LocalTerminalDock)가 전파를 끊어 앱의 다른 단축키(⌘K, ⌥↑ 등)가
 // 보지 못하게 한다. Esc도 터미널 것이다(vim). 칸을 떠나는 길은 ⌃`(도크 닫기,
 // 연 곳으로 캐럿 복귀)와 ⌘]·⌘[(다음·이전 칸)이다.
+//
+// 한글: WKWebView는 조합 중인 글자를 「바꿔 넣기」 input 사건으로 보내고 xterm은
+// 그것을 버린다. hangulInput.ts가 그 사건을 받아 DEL과 새 글자로 보낸다.
 //
 // 색은 관전 터미널(ObserverTerminal)과 같은 방식으로 DOM에서 읽는다. 토큰을
 // 다시 적지 않는다.
@@ -109,7 +113,7 @@ export function LocalTerminalPane({
         theme: readTheme(mount, selection, cursor),
       });
       terminal.attachCustomKeyEventHandler(
-        (event) => !isTerminalAppKey(event, platformRef.current)
+        (event) => !isImeProcessedKey(event) && !isTerminalAppKey(event, platformRef.current)
       );
       const fit = new runtime.FitAddon();
       terminal.loadAddon(fit);
@@ -131,6 +135,10 @@ export function LocalTerminalPane({
         return;
       }
       const detach = sessions.attach(pane.id, terminal);
+      const helper = mount.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea");
+      const detachHangul = helper
+        ? attachHangulInput(mount, helper, (text) => sessions.input(pane.id, text))
+        : () => undefined;
       const data = terminal.onData((text) => sessions.input(pane.id, text));
       const binary = terminal.onBinary((raw) => {
         const bytes = new Uint8Array(raw.length);
@@ -158,6 +166,7 @@ export function LocalTerminalPane({
         binary.dispose();
         resized.dispose();
         detach();
+        detachHangul();
         terminal.dispose();
         terminalRef.current = null;
       };
