@@ -191,24 +191,34 @@ fn tauri_resolves_the_notification_probe_and_nothing_that_posts() {
         .is_none());
 }
 
-/// Why the banners never needed a notification grant: they are app commands
-/// (`notification_show` and friends), and app commands are gated only once
-/// the build declares an app ACL manifest. If one is ever added, those
-/// commands need explicit grants too — this test is where that shows up.
+/// The build declares an app ACL manifest (#2772), so app commands are gated
+/// like plugin commands: the banners (`notification_show` and friends) run
+/// because `default.json` grants them, not because nothing checks. The
+/// notification permission granted above still maps to the probe only.
 #[test]
-fn app_commands_are_not_gated_by_the_capability() {
+fn app_commands_are_gated_by_the_capability() {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/gen/schemas/acl-manifests.json"
     );
     let acl: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let keys: Vec<&String> = acl.as_object().expect("acl manifests").keys().collect();
-    assert!(!keys.iter().any(|k| *k == "__app-acl__"), "keys = {keys:?}");
-    // The permission granted above maps to the probe command and nothing else.
+    assert!(keys.iter().any(|k| *k == "__app-acl__"), "keys = {keys:?}");
     assert_eq!(
         acl["notification"]["permissions"]["allow-is-permission-granted"]["commands"]["allow"],
         serde_json::json!(["is_permission_granted"])
     );
+    let mut context = crate::context();
+    let authority = context.runtime_authority_mut();
+    let local = tauri::ipc::Origin::Local;
+    assert!(authority
+        .resolve_access("notification_show", "main", "main", &local)
+        .is_some());
+    // Control: a command no capability grants is refused, which is only true
+    // once the app manifest exists.
+    assert!(authority
+        .resolve_access("not_a_command", "main", "main", &local)
+        .is_none());
 }
 
 /// The traffic lights and the sidebar toggle share one centre line (#2700).
@@ -286,4 +296,298 @@ fn the_shipped_csp_lets_the_ipc_protocol_through() {
     // Control: opening the IPC transport did not open an embed or worker path.
     assert_eq!(csp_directive(csp, "frame-src"), ["'none'"]);
     assert_eq!(csp_directive(csp, "object-src"), ["'none'"]);
+}
+
+/// The shipped CSP runs only the bundle's own scripts: no remote script, no
+/// inline script, no eval — the webview that holds the PTY commands never
+/// executes code a server sent (#2772, #2794 review M4).
+#[test]
+fn the_shipped_csp_runs_only_bundled_scripts() {
+    let conf: Value = serde_json::from_str(CONF).unwrap();
+    let csp = conf["app"]["security"]["csp"]
+        .as_str()
+        .expect("app.security.csp");
+    assert_eq!(csp_directive(csp, "default-src"), ["'self'"]);
+    assert_eq!(csp_directive(csp, "script-src"), ["'self'"]);
+    assert_eq!(csp_directive(csp, "frame-src"), ["'none'"]);
+    assert_eq!(csp_directive(csp, "worker-src"), ["'none'"]);
+    // `dangerousDisableAssetCspModification` or a null CSP would undo the above.
+    assert!(conf["app"]["security"]
+        .get("dangerousDisableAssetCspModification")
+        .is_none());
+}
+
+// ---------------------------------------------------------------------------
+// Local terminal lane (ADR-0190 D1, #2772)
+// ---------------------------------------------------------------------------
+
+const PTY_CAPABILITY: &str = include_str!("../capabilities/pty.json");
+const BUILD_RS: &str = include_str!("../build.rs");
+const LIB_RS: &str = include_str!("lib.rs");
+const PTY_COMMANDS: [&str; 4] = ["pty_spawn", "pty_write", "pty_resize", "pty_kill"];
+
+/// Commands inside one `generate_handler![...]` block, `module::` stripped.
+fn handler_blocks(src: &str) -> Vec<Vec<String>> {
+    src.split("generate_handler![")
+        .skip(1)
+        .map(|rest| {
+            rest[..rest.find(']').expect("handler block end")]
+                .split(',')
+                .map(|c| c.trim().rsplit("::").next().unwrap().to_string())
+                .filter(|c| !c.is_empty())
+                .collect()
+        })
+        .collect()
+}
+
+fn quoted_list(src: &str, start: &str) -> Vec<String> {
+    let rest = &src[src.find(start).expect(start)..];
+    let body = &rest[..rest.find("];").expect("list end")];
+    body.lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with('"'))
+        .map(|l| l.trim_end_matches(',').trim_matches('"').to_string())
+        .collect()
+}
+
+fn all_capabilities() -> Vec<(String, Value)> {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/capabilities");
+    let mut out: Vec<(String, Value)> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "json" || x == "toml"))
+        .map(|p| {
+            let text = std::fs::read_to_string(&p).unwrap();
+            let name = p.file_name().unwrap().to_string_lossy().into_owned();
+            let value = serde_json::from_str(&text).unwrap_or_else(|e| panic!("{name}: {e}"));
+            (name, value)
+        })
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// Every registered command is in the app manifest and granted to the main
+/// window. With the manifest on, a command missing from either list is
+/// refused at runtime, which a user sees as a dead button.
+#[test]
+fn every_registered_command_is_declared_and_granted() {
+    let manifest = quoted_list(BUILD_RS, "const APP_COMMANDS");
+    let blocks = handler_blocks(LIB_RS);
+    assert_eq!(blocks.len(), 2, "desktop and mobile handler tables");
+    let mut context = crate::context();
+    let authority = context.runtime_authority_mut();
+    let local = tauri::ipc::Origin::Local;
+    for command in blocks.iter().flatten() {
+        assert!(
+            manifest.contains(command),
+            "{command} not in build.rs APP_COMMANDS"
+        );
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &local)
+                .is_some(),
+            "{command} is not granted to the main window"
+        );
+    }
+    for command in &manifest {
+        assert!(
+            blocks.iter().flatten().any(|c| c == command),
+            "{command} is declared but not registered"
+        );
+    }
+    // The PTY commands are desktop-only: the mobile table does not carry them.
+    let desktop = blocks
+        .iter()
+        .find(|b| b.contains(&"updater_check".to_string()))
+        .unwrap();
+    let mobile = blocks
+        .iter()
+        .find(|b| !b.contains(&"updater_check".to_string()))
+        .unwrap();
+    for command in PTY_COMMANDS {
+        assert!(desktop.iter().any(|c| c == command), "{command}");
+        assert!(!mobile.iter().any(|c| c == command), "{command}");
+    }
+}
+
+/// Tauri's resolver: the PTY commands answer the main window's bundled
+/// origin, and nobody else — not a remote page loaded into the same window,
+/// not another window, not another webview.
+#[test]
+fn tauri_grants_the_pty_commands_to_the_local_main_window_only() {
+    let mut context = crate::context();
+    let authority = context.runtime_authority_mut();
+    let local = tauri::ipc::Origin::Local;
+    // A hostile page, the team server's own origin (what a navigation to a
+    // server-sent link would load), and a plain http origin.
+    let remotes = [
+        "https://evil.example/",
+        "https://oort-team.up.railway.app/",
+        "http://127.0.0.1:8080/",
+    ];
+    for command in PTY_COMMANDS {
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &local)
+                .is_some(),
+            "{command} local main"
+        );
+        for url in remotes {
+            let remote = tauri::ipc::Origin::Remote {
+                url: url.parse().unwrap(),
+            };
+            assert!(
+                authority
+                    .resolve_access(command, "main", "main", &remote)
+                    .is_none(),
+                "{command} from {url}"
+            );
+        }
+        assert!(authority
+            .resolve_access(command, "other", "other", &local)
+            .is_none());
+        assert!(authority
+            .resolve_access(command, "main", "embedded", &local)
+            .is_none());
+    }
+}
+
+/// The capability files themselves: only `pty.json` grants a PTY command, it
+/// names the main window only, and no capability opens anything to remote
+/// URLs. Widening any of these is RED here before it is a hole.
+#[test]
+fn only_the_local_terminal_capability_grants_pty_and_none_is_remote() {
+    let caps = all_capabilities();
+    let names: Vec<&str> = caps.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(
+        names,
+        ["default.json", "pty.json"],
+        "new capability file: review it here"
+    );
+    for (name, cap) in &caps {
+        assert!(cap.get("remote").is_none(), "{name} has a remote entry");
+        assert_ne!(cap.get("local"), Some(&Value::Bool(false)), "{name}");
+        let pty: Vec<&str> = permission_ids(cap)
+            .into_iter()
+            .filter(|p| p.contains("pty"))
+            .collect();
+        if name == "pty.json" {
+            assert_eq!(
+                pty,
+                [
+                    "allow-pty-spawn",
+                    "allow-pty-write",
+                    "allow-pty-resize",
+                    "allow-pty-kill"
+                ]
+            );
+        } else {
+            assert!(pty.is_empty(), "{name} grants {pty:?}");
+        }
+    }
+    let pty: Value = serde_json::from_str(PTY_CAPABILITY).unwrap();
+    // The main window's own webview, not "any webview in the main window".
+    assert_eq!(pty["webviews"], serde_json::json!(["main"]));
+    assert!(
+        pty.get("windows").is_none(),
+        "a window grant covers child webviews"
+    );
+    assert_eq!(
+        permission_ids(&pty).len(),
+        4,
+        "pty.json grants only the PTY"
+    );
+}
+
+/// ADR-0190 D1: nothing but the webview's own command calls opens, writes,
+/// resizes or kills a PTY. The only files that may name the module are
+/// `pty.rs` and `lib.rs`, and in `lib.rs` only as the handler entries, the
+/// managed state and the exit cleanup. A deep-link handler, a discovery
+/// result, an event listener or a server message that reached the PTY would
+/// have to add a reference somewhere else — RED here.
+#[test]
+fn nothing_but_the_command_table_reaches_the_pty() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src");
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "rs"))
+        .collect();
+    files.sort();
+    let mentions = |src: &str| -> Vec<String> {
+        src.lines()
+            .map(str::trim)
+            .filter(|l| !l.starts_with("//"))
+            .filter(|l| {
+                l.contains("pty::")
+                    || l.contains("PtyState")
+                    || l.contains("PtyManager")
+                    || l.contains("portable_pty")
+                    || l.contains("mod pty")
+            })
+            .map(str::to_string)
+            .collect()
+    };
+    for path in &files {
+        let name = path.file_name().unwrap().to_string_lossy();
+        let src = std::fs::read_to_string(path).unwrap();
+        match name.as_ref() {
+            "pty.rs" | "shell_contract.rs" => {}
+            "lib.rs" => {
+                let allowed = [
+                    "mod pty;",
+                    "pty::pty_spawn,",
+                    "pty::pty_write,",
+                    "pty::pty_resize,",
+                    "pty::pty_kill,",
+                    ".manage(pty::PtyState::default())",
+                    "if let Some(state) = _app.try_state::<pty::PtyState>() {",
+                ];
+                for line in mentions(&src) {
+                    assert!(allowed.contains(&line.as_str()), "lib.rs: {line}");
+                }
+            }
+            _ => assert!(
+                mentions(&src).is_empty(),
+                "{name} reaches the PTY: {:?}",
+                mentions(&src)
+            ),
+        }
+    }
+    // The module itself listens to nothing and talks to no network: its only
+    // inputs are the four commands.
+    let pty = std::fs::read_to_string(format!("{dir}/pty.rs")).unwrap();
+    let code: String = pty[..pty.find("#[cfg(test)]\nmod tests").unwrap_or(pty.len())]
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for banned in [
+        ".listen(",
+        ".listen_any(",
+        ".once(",
+        "on_open_url",
+        "deeplink",
+        "discovery",
+        "TcpStream",
+        "UdpSocket",
+        "reqwest",
+        "emit(",
+    ] {
+        assert!(!code.contains(banned), "pty.rs contains {banned}");
+    }
+    // App exit ends every session (the acceptance's "앱 종료 시 자식 정리").
+    let exit_arm = LIB_RS
+        .find("if let tauri::RunEvent::Exit = _event {")
+        .expect("lib.rs handles RunEvent::Exit");
+    assert!(
+        LIB_RS[exit_arm..]
+            .lines()
+            .take(5)
+            .any(|l| l.trim() == "state.0.kill_all();"),
+        "RunEvent::Exit must kill every PTY session"
+    );
+    // Exactly four commands leave the module.
+    assert_eq!(code.matches("#[tauri::command]").count(), 4);
 }

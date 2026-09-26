@@ -48,14 +48,19 @@ src-tauri/
   src/detect.rs       # passive local hosted-agent signatures (T-5)
   src/keychain.rs     # refresh token in the OS credential store
   src/updater.rs      # check / install / relaunch over the minisign manifest
+  src/pty.rs          # local terminal lane: PTY spawn/write/resize/kill (#2772)
   src/shell_contract.rs # tests: what capabilities/ + tauri.conf.json owe the web
                       # bundle's drag regions and file drops (#2671) and the
                       # notification plugin's boot probe (#2676)
   capabilities/       # core:default + core:window:allow-start-dragging for the
                       # web's data-tauri-drag-region top bars (#2671) +
                       # notification:allow-is-permission-granted for the
-                      # notification plugin's page script (#2676); app
-                      # commands need no permission entry
+                      # notification plugin's page script (#2676) + one
+                      # allow-<command> per app command. build.rs declares an
+                      # app ACL manifest (#2772), so an app command without a
+                      # grant is refused.
+                      # pty.json: the four pty_* commands, main webview,
+                      # local origin only, no remote URLs (ADR-0190 D1)
   icons/              # generated via `cargo tauri icon app-icon.png`
 ```
 
@@ -111,6 +116,10 @@ interface HostedAgentProbe {
 | `updater_check` | — | `AvailableUpdate \| null` \| error | `null` = already newest. **Rejects** on a failed check; see below. |
 | `updater_install` | — | `void` \| error | Downloads, verifies minisign, swaps the bundle. Does not restart. |
 | `updater_relaunch` | — | never returns | Restarts into the installed build. |
+| `pty_spawn` | `{ request: { program: {kind:"shell"} \| {kind:"harness", id:"claude"\|"codex"\|"grok"}, cwd?: string, cols, rows }, onOutput: Channel<ArrayBuffer>, onExit: Channel<PtyExit> }` | `number` (session id) \| error | Local terminal lane (ADR-0190 D1·D2, #2772). `shell` = `$SHELL -l` (must be in /etc/shells); `harness` = that CLI resolved on this machine's login PATH. No path or argv from the webview (unknown fields are refused). `cwd` must be a directory inside home (default home). `cols` 2–1000, `rows` 1–500, at most 32 sessions. The environment drops `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `OPENAI_API_KEY` (ADR-0191 D2), sets `TERM=xterm-256color`, and `LANG=en_US.UTF-8` only when no locale is set. Output bytes arrive raw on `onOutput`; `onExit` fires once with `{ id, code: number\|null, signal: string\|null }`. Granted only by `capabilities/pty.json`. Desktop only. |
+| `pty_write` | raw bytes (invoke body) + header `x-oort-pty-id` | `void` \| error | Keystrokes/pastes, ≤ 1 MiB per call. Rejects a JSON body. Needs the `ipc:` transport (same CSP note as `open_pdf_attachment`). |
+| `pty_resize` | `{ id, cols, rows }` | `void` \| error | Same bounds as spawn. |
+| `pty_kill` | `{ id }` | `void` \| error | SIGHUP to the session's process group, SIGKILL after 0.5 s. The exit arrives on `onExit`. App exit (`RunEvent::Exit`) does this for every session. |
 
 ```ts
 interface AvailableUpdate {
