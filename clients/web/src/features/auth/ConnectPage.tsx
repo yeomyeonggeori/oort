@@ -445,7 +445,10 @@ export function ConnectPage({
         (step === "welcome" && entryError !== null),
       busy: busy || profileBusy,
     },
-    { pendingInviteCode: pendingCode !== null }
+    {
+      pendingInviteCode: pendingCode !== null,
+      nameSaveFailed: joined !== null && profileError !== null,
+    }
   );
 
   const notices = (

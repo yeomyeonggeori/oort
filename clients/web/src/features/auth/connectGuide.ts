@@ -69,12 +69,21 @@ const LINES: Record<OnboardingStep, Partial<Record<GuideState, Copy>> & { awaiti
 export function connectGuide(
   step: OnboardingStep,
   condition: ConnectCondition,
-  options: { workspaceName?: string; pendingInviteCode?: boolean } = {}
+  options: {
+    workspaceName?: string;
+    pendingInviteCode?: boolean;
+    /** 가입은 됐고 표시 이름 저장만 실패했다(fail-forward). */
+    nameSaveFailed?: boolean;
+  } = {}
 ): ConnectGuide {
   const state = connectGuideState(step, condition);
   const expression = expressionForState(state);
   if (condition.offline) {
     return { state, expression, line: OFFLINE_LINE };
+  }
+  if (step === "join" && options.nameSaveFailed && state === "trouble") {
+    // 가입 실패로 읽히면 안 된다: 계정은 이미 있다.
+    return { state, expression, line: "팀에는 들어왔는데 이름을 저장하지 못했어요." };
   }
   if (step === "welcome" && options.pendingInviteCode && state === "awaiting") {
     return { state, expression, line: "초대 코드를 받았어요. 어느 팀 서버인가요?" };

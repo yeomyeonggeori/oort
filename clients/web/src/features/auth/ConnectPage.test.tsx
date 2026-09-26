@@ -665,6 +665,7 @@ describe("D1′ 초대 수락 한 화면 (#2810 OB2-4)", () => {
       "설정 › 프로필에서 언제든 바꿀 수 있어요"
     );
     expect(guideExpression()).toBe("flustered");
+    expect(guideLine()).toBe("팀에는 들어왔는데 이름을 저장하지 못했어요.");
     expect(onLoggedIn).not.toHaveBeenCalled();
     expect(q("onboarding-back")).toBeNull();
     expect(q("join-sign-in-link")).toBeNull();
