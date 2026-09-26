@@ -5,6 +5,8 @@
 //   npm run icons:brand           -> brand-mark.mjs로 C2-04 SVG를 다시 쓴 뒤 이 파일
 //   node scripts/render-brand-icons.mjs --check-only
 //                                 -> 다시 뜨지 않고 커밋된 래스터만 검사
+//   node scripts/render-brand-icons.mjs --faces-only [--check-only]
+//                                 -> 코메토 표정 6종(#2806, kometto-faces.mjs)만 합성·검사
 //
 // 앱 아이콘과 온보딩 S0 히어로는 owner가 고른 **코메토 레퍼런스 래스터를 그대로**
 // 크롭·리사이즈한다(#2732 R2, owner 2026-09-26: 「레퍼런스 선택한걸 왜 그대로 안쓰고
@@ -39,6 +41,8 @@
 //   - icns 32px 이하 세 칸이 C2-04 small 타일이다
 //   - Dock 산출물(icns 64px 이상 칸, icons/64·128·256·512 PNG)이 app-icon.png에서 나왔다
 //   - C2-04: 단색판·파비콘 대비 3:1, small·파비콘 16/24/32px 틈(#2650)
+//   - 코메토 표정 6종(#2806): K6-flat-light·생성 크롭 sha256, 얼굴 창 밖 = K6 원본,
+//     창 안 = 생성 크롭에서 합성, 표정끼리 구분, 웹 에셋 파생(kometto-faces.mjs 머리말)
 // =============================================================================
 
 import { createHash } from "node:crypto";
@@ -50,6 +54,7 @@ import { fileURLToPath } from "node:url";
 import { crc32 } from "node:zlib";
 import { chromium } from "playwright";
 import { COLORS, PARAMS, buildMark } from "./brand-mark.mjs";
+import { FACE_IDS, checkFaces, renderFaces } from "./kometto-faces.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = resolve(WEB_ROOT, "..", "..");
@@ -556,10 +561,41 @@ const CHARACTER_OUTPUTS = [
   [S0_BADGE, "badge", S0_SIZE, { rgb: false }],
 ];
 
+function printFaces(r) {
+  console.log("\n== 코메토 표정 (#2806)");
+  for (const [path, s] of r.shas) console.log(`레퍼런스 ${path}  sha256 ${s.slice(0, 16)}…`);
+  for (const [path, c] of r.composites)
+    console.log(
+      c.idleSame !== undefined
+        ? `${path}  대기 = K6 원본 바이트 ${c.idleSame ? "o" : "x"}`
+        : `${path}  창 밖 다른 픽셀 ${c.outsideDiff}  재합성 평균 차 ${c.recomposeMean.toFixed(2)}  대기 대비 변화 ${(c.changed * 100).toFixed(1)}%  최소 구분 ${(Math.min(...Object.values(c.distinct)) * 100).toFixed(1)}%`
+    );
+  console.log(`사상(다크 대기 눈 → K6-flat-light): 창 안 평균 차 ${r.mapping.recomposeMean.toFixed(2)} (≤ 3)`);
+  for (const [path, w] of r.web)
+    console.log(`${path}  평균 차 ${w.mean.toFixed(2)}  16 초과 ${(w.over * 100).toFixed(2)}%  알파 어긋남 ${(w.alphaOff * 100).toFixed(2)}%  모서리/가운데 알파 ${w.corner}/${w.center}`);
+  console.log(`idle-dark ↔ kometto-badge.png 평균 차 ${r.idleVsS0.mean.toFixed(2)}  16 초과 ${(r.idleVsS0.over * 100).toFixed(2)}%`);
+}
+
 async function main() {
   const checkOnly = process.argv.includes("--check-only");
+  const facesOnly = process.argv.includes("--faces-only");
   const browser = await chromium.launch();
   const page = await browser.newPage({ deviceScaleFactor: 1 });
+  const faceOpts = { repoRoot: REPO_ROOT, webRoot: WEB_ROOT, withSrgb, fail, rel, s0Badge: S0_BADGE, log: (m) => console.log(m.replace(REPO_ROOT + "/", "")) };
+  if (facesOnly) {
+    try {
+      if (!checkOnly) await renderFaces(page, faceOpts);
+      printFaces(await checkFaces(page, faceOpts));
+    } finally {
+      await browser.close();
+    }
+    if (failures.length) {
+      console.error("\nFAIL\n- " + failures.join("\n- "));
+      process.exit(1);
+    }
+    console.log(`\nOK (표정 ${FACE_IDS.length}종 × 2 테마)`);
+    return;
+  }
   try {
     const shas = [
       [ICON_SOURCE, ICON_SOURCE_SHA256],
@@ -581,6 +617,7 @@ async function main() {
       execFileSync("cargo", ["tauri", "icon", "app-icon.png"], { cwd: TAURI_DIR, stdio: "inherit" });
       await patchIcnsSmallSlots(page);
     }
+    if (!checkOnly) await renderFaces(page, faceOpts);
 
     // ---- 검사 ----
     const results = [];
@@ -655,6 +692,7 @@ async function main() {
       console.log(
         `${size}px  small 틈 ${g.small.gap.toFixed(2)} / 링 ${g.small.ring.toFixed(2)}   favicon 틈 ${g.favicon.gap.toFixed(2)} / 링 ${g.favicon.ring.toFixed(2)}`
       );
+    printFaces(await checkFaces(page, faceOpts));
     console.log(
       `\n== maskable 안전 원 (캔버스 폭 비율)  얼굴 창 ${win.reach.toFixed(3)} (≤ 0.4)  눈 ${eyes.map((e) => e.reach.toFixed(3)).join(" / ")} (≤ ${SAFE_RADIUS})`
     );
