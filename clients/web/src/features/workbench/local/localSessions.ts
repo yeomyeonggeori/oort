@@ -214,6 +214,11 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
   /** 칸이 처음 시작할 때 띄울 프로그램. 새 세션 메뉴가 분할 전에 적는다. */
   const pendingPrograms = new Map<string, PtyProgram>();
   const starting = new Map<string, Promise<void>>();
+  /**
+   * 시작 중(미러 청크를 읽는 중)에 닫힌 칸. `ensure`가 청크를 받은 뒤 이 표시를
+   * 보고 띄우지 않는다. 없으면 닫힌 칸의 프로세스가 주인 없이 뜬다(#2902 M1).
+   */
+  const closedWhileStarting = new Set<string>();
 
   const emit = () => {
     const next = new Map<string, LocalSessionView>();
@@ -386,7 +391,9 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
       const run = (async () => {
         const program = pendingPrograms.get(paneId) ?? { kind: "shell" as const };
         pendingPrograms.delete(paneId);
-        const { mirror, serialize } = (await factory()).create(clampCols(cols), clampRows(rows));
+        const made = await factory();
+        if (closedWhileStarting.delete(paneId)) return;
+        const { mirror, serialize } = made.create(clampCols(cols), clampRows(rows));
         const s: Session = {
           view: {
             paneId,
@@ -500,7 +507,10 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
     close(paneId: string): void {
       pendingPrograms.delete(paneId);
       const s = sessions.get(paneId);
-      if (!s) return;
+      if (!s) {
+        if (starting.has(paneId)) closedWhileStarting.add(paneId);
+        return;
+      }
       s.disposed = true;
       if (s.persistTimer !== null) clearTimeout(s.persistTimer);
       s.batcher?.dispose();

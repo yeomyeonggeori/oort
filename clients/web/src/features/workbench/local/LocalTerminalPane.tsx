@@ -172,10 +172,19 @@ export function LocalTerminalPane({
   pane,
   platform,
   sessions = localSessions(),
+  label,
+  restartable = true,
 }: {
   pane: WorkbenchPaneInfo;
   platform: KeyPlatform;
   sessions?: LocalSessions;
+  /** 터미널의 접근성 이름. 없으면 격자 칸 이름(「N번 칸 로컬 터미널」). */
+  label?: string;
+  /**
+   * 끝난 칸에 「다시 시작」을 두는가. 로그인 모달(#2816)은 끄고 자기 [다시 시도]로
+   * 흐름을 다시 연다(모달 밖에서 로그인 명령이 다시 뜨지 않게).
+   */
+  restartable?: boolean;
 }) {
   const view = useLocalSessionView(pane.id, sessions);
   const mountRef = useRef<HTMLDivElement>(null);
@@ -324,8 +333,10 @@ export function LocalTerminalPane({
         <div
           ref={mountRef}
           role="group"
-          aria-label={`${pane.index}번 칸 로컬 터미널`}
-          aria-description="입력은 이 터미널로 갑니다. ⌃` 도크 닫기, ⌘] 다음 칸."
+          aria-label={label ?? `${pane.index}번 칸 로컬 터미널`}
+          aria-description={
+            label === undefined ? "입력은 이 터미널로 갑니다. ⌃` 도크 닫기, ⌘] 다음 칸." : undefined
+          }
           data-testid="local-terminal"
           data-phase={phase}
           className="min-h-0 flex-1 overflow-hidden bg-term-bg font-mono text-meta text-term-fg"
@@ -339,7 +350,11 @@ export function LocalTerminalPane({
           ))}
         </div>
       </div>
-      <PaneFooter view={view} runtimeFailed={runtimeFailed} onRestart={() => void sessions.restart(pane.id)} />
+      <PaneFooter
+        view={view}
+        runtimeFailed={runtimeFailed}
+        onRestart={restartable ? () => void sessions.restart(pane.id) : null}
+      />
     </div>
   );
 }
@@ -351,7 +366,7 @@ function PaneFooter({
 }: {
   view: LocalSessionView | null;
   runtimeFailed: boolean;
-  onRestart: () => void;
+  onRestart: (() => void) | null;
 }) {
   // 문장은 짧게: 240px 칸(최소 폭)에서도 두 줄 안에 든다. 다음 행동은 단추가 말한다.
   let message: string | null = null;
@@ -388,7 +403,7 @@ function PaneFooter({
         >
           {message ?? ""}
         </p>
-        {action ? (
+        {action && onRestart ? (
           <Button
             type="button"
             variant="ghost"
