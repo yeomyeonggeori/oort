@@ -10,6 +10,7 @@ import {
   DIVIDER_TONE_CLASS,
   DIVIDER_TONE_TOKEN,
 } from "./dividerTone";
+import { parseLightDarkTokens } from "../../design/tokens.contrast.test";
 
 // =============================================================================
 // 안읽음 경계의 색이 **우연이 아니라 계약**인가 (design-review U4-4 D-2)
@@ -30,19 +31,16 @@ const css = readFileSync(
 
 /** 토큰 한 줄의 light-dark() 두 값을 [light, dark] 로. */
 function tokenValues(name: string): [string, string] {
-  const match = css.match(
-    new RegExp(
-      `${name}:\\s*light-dark\\(\\s*(#[0-9a-f]{6})\\s*,\\s*(#[0-9a-f]{6})\\s*\\)`,
-      "i"
-    )
-  );
-  if (match === null) {
+  // DS2-1(#2713): 옛 이름(`--accent`·`--surface-raised`)은 이제 `var(--…)` 별칭이다.
+  // 별칭을 따라가 화면이 칠하는 값을 읽는다(`parseLightDarkTokens`, 한 자).
+  const pair = parseLightDarkTokens(css)[name.replace(/^--/, "")];
+  if (pair === undefined) {
     throw new Error(
       `${name}이 tokens.css에 light-dark() 한 쌍으로 없다. 토큰을 옮겼다면 이 ` +
         "다리(dividerTone.ts)도 함께 옮길 것: 갈라지는 순간이 정확히 D-2다"
     );
   }
-  return [match[1].toLowerCase(), match[2].toLowerCase()];
+  return [pair[0].toLowerCase(), pair[1].toLowerCase()];
 }
 
 const SCHEMES = ["라이트", "다크"] as const;
@@ -94,8 +92,10 @@ describe("경계를 그리는 색은 무엇이 아닌가", () => {
   it("경계는 라벨과 rule을 같은 토큰으로 칠한다", () => {
     expect(DIVIDER_TONE_SPEC.boundary.paintsRule).toBe(true);
     const { label, rule } = DIVIDER_TONE_CLASS.boundary;
-    expect(label).toContain("text-accent");
-    expect(rule).toContain("bg-accent");
+    // DS2-1: 신호의 글자 역할(--signal-text)이 라벨과 rule 을 함께 칠한다. rule 은 1px
+    // 비텍스트라 --signal 도 되지만, 한 경계는 한 색이라는 규칙이 이긴다.
+    expect(label).toContain("text-signal-text");
+    expect(rule).toContain("bg-signal-text");
   });
 
   /**
@@ -111,6 +111,7 @@ describe("경계를 그리는 색은 무엇이 아닌가", () => {
     expect(DIVIDER_TONE_SPEC.quiet.paintsRule).toBe(false);
     expect(DIVIDER_TONE_CLASS.quiet.rule).toContain("bg-line");
     expect(DIVIDER_TONE_CLASS.quiet.rule).not.toContain("accent");
+    expect(DIVIDER_TONE_CLASS.quiet.rule).not.toContain("signal");
   });
 });
 

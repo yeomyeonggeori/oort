@@ -673,6 +673,37 @@ export function Timeline({
     if (seq !== null) scheduleFocusRowStationBySeq(seq);
   }, []);
 
+  // 창의 높이가 줄어도 바닥은 바닥이다 (DS2-6 #2718). 사이드바를 접으면 떠
+  // 있는 판이 상단 줄 아래로 내려가 32px 낮아지고, 창을 줄여도 같다. 스크롤러는
+  // scrollTop을 지키므로 바닥에 있던 사람의 마지막 줄이 컴포저 뒤로 잘린다.
+  // 판정은 **줄기 전의** 위치로 한다: 스크롤 이벤트마다 적어 둔 값이다. 가상
+  // 목록의 atBottom은 같은 프레임의 크기 변화로 이미 거짓이 되었을 수 있다.
+  useEffect(() => {
+    if (!scrollerEl || typeof ResizeObserver === "undefined") return;
+    const nearBottom = () =>
+      scrollerEl.scrollHeight - scrollerEl.scrollTop - scrollerEl.clientHeight <=
+      AT_BOTTOM_SLACK_PX;
+    let wasAtBottom = nearBottom();
+    let lastHeight = scrollerEl.clientHeight;
+    const onScroll = () => {
+      wasAtBottom = nearBottom();
+    };
+    const observer = new ResizeObserver(() => {
+      const height = scrollerEl.clientHeight;
+      if (height < lastHeight && wasAtBottom) {
+        scrollerEl.scrollTop = scrollerEl.scrollHeight;
+      }
+      lastHeight = height;
+      wasAtBottom = nearBottom();
+    });
+    scrollerEl.addEventListener("scroll", onScroll, { passive: true });
+    observer.observe(scrollerEl);
+    return () => {
+      scrollerEl.removeEventListener("scroll", onScroll);
+      observer.disconnect();
+    };
+  }, [scrollerEl]);
+
   const onScrollerRef = useCallback((node: HTMLElement | Window | null) => {
     setScrollerEl(node instanceof HTMLElement ? node : null);
   }, []);

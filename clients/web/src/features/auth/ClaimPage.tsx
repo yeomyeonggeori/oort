@@ -150,7 +150,7 @@ export function ClaimPage({
       <Card className="w-full max-w-sm">
         <CardHeader>
           <h1 className="brand-lockup flex items-center gap-2 font-semibold leading-none tracking-tight">
-            <OortMark className="size-6 shrink-0 text-accent" />
+            <OortMark className="size-6 shrink-0 text-signal-text" />
             <span className="text-title">oort</span>
           </h1>
           <CardDescription>

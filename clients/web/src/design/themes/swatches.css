@@ -1,5 +1,5 @@
 /* Accent swatch chrome (ADR-0174 D2). Color comes from [data-accent-swatch]
- * rebinding --accent / --on-accent on the control itself; no inline style. */
+ * rebinding the signal four (ADR-0189 D3) on the control itself; no inline style. */
 .accent-swatch {
   min-block-size: var(--tap-target);
   min-inline-size: var(--tap-target);
@@ -8,7 +8,7 @@
 .accent-swatch-chip {
   width: var(--spacing-6);
   height: var(--spacing-6);
-  background-color: var(--accent);
+  background-color: var(--signal);
 }
 
 .accent-swatch:has(:checked) {

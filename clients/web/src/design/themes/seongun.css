@@ -1,7 +1,11 @@
-/* 성운 — dusty rose. Far from slate-blue identity and the indigo band. */
-:root[data-accent="seongun"],
+/* 성운 — ADR-0174 액센트 id의 DS2 이행 바인딩 (ADR-0189 D3, DS2-1 #2713).
+ * 신호 프리셋 `seongun`의 새벽하늘 값(core `resolvePreset`).
+ * 값은 생성본 palettes/dawnsky.css와 같고 catalog.contrast.test.ts가 core와 대조한다.
+ * 새벽하늘 전용이다: DS2-7이 data-accent를 data-signal로 옮기면 이 파일은 걷힌다. */
+:root[data-palette="dawnsky"][data-accent="seongun"],
 [data-accent-swatch="seongun"] {
-  --accent: light-dark(#9c447c, #f890bc);
-  --accent-soft: light-dark(#f2e6ea, #34262f);
-  --on-accent: light-dark(#fffefb, #17161a);
+  --signal: light-dark(#9c447c, #f890bc);
+  --on-signal: light-dark(#fffefc, #16171b);
+  --signal-text: light-dark(#9c447c, #f890bc);
+  --signal-soft: light-dark(#f3e3e9, #423340);
 }

@@ -34,11 +34,16 @@ export const CHANNEL_LIST_FAILED = '채널을 불러오지 못했습니다.';
 //
 // What IS decided here, and is therefore this file's to defend:
 //
-//   1. **the 에이전트 section.** Agents are members (ADR-0004, invariant 5), so
-//      they are already in the roster; what the phone adds is a way to reach one
-//      that does not require a DM to exist first. Agents that already have a DM
-//      are left out — they are one row up under 다이렉트 메시지, and listing them
-//      twice would make the same conversation look like two.
+//   1. **agents in the DM section** (DS2-3 #2715, ADR-0189 D1). Agents are
+//      members (ADR-0004, invariant 5), so they are already in the roster; what
+//      the phone adds is a way to reach one that does not require a DM to exist
+//      first. The separate 에이전트 section is gone — ADR-0189 folds the agent
+//      tab into the home's 「작업 중」 card and DM section — so an agent with no
+//      DM yet is a DM row that opens one on tap. Agents that already have a DM
+//      are that DM's row and are not listed twice, which would make the same
+//      conversation look like two. Agent rows come first in the section (시안 A
+//      `#a-home`): a partition by kind, not a recency claim, so the "no sort"
+//      rule below is intact.
 //   2. **open-channel unread suppression.** The row you are currently reading
 //      shows no badge, even before the server's projection catches up. Same rule
 //      as the web sidebar (`sidebarUnreadCounts`). It is the ONLY place this
@@ -83,6 +88,12 @@ export interface SidebarRow {
   title: string;
   /** "@handle", present only when the title alone names two different members. */
   handle: string | null;
+  /**
+   * The member whose face this row wears: a DM's peer, or the agent itself.
+   * `null` for a channel, and for a DM whose peer the roster cannot name (the
+   * row then draws no face rather than a guessed one).
+   */
+  avatarMemberId: string | null;
   isAgent: boolean;
   isPrivate: boolean;
   muted: boolean;
@@ -110,7 +121,7 @@ export interface SidebarRow {
  * this batch where per-keystroke cost is measured rather than assumed.
  */
 export interface SidebarSection {
-  key: 'channels' | 'dms' | 'agents';
+  key: 'channels' | 'dms';
   label: string;
   data: SidebarRow[];
 }
@@ -196,6 +207,7 @@ function channelRow(
     targetId: channel.id,
     title: label.text,
     handle: label.handle,
+    avatarMemberId: peer?.id ?? null,
     isAgent: label.isAgent,
     isPrivate: channel.kind === 'private',
     muted: channel.muted,
@@ -216,6 +228,7 @@ function agentRow(member: RosterMember, directory: Directory): SidebarRow {
     // rows would otherwise be twins — the same rule `channelLabelParts` applies
     // to a DM, reached through the core's own ambiguity index.
     handle: isAmbiguousName(directory, member) ? `@${member.handle}` : null,
+    avatarMemberId: member.id,
     isAgent: true,
     isPrivate: false,
     muted: false,
@@ -262,13 +275,20 @@ export function buildSidebarSections(input: SidebarInput): SidebarSection[] {
     .map(member => agentRow(member, input.directory))
     .filter(row => matches(row, needle));
 
+  // 에이전트가 앞이다 (시안 A `#a-home` DM 섹션). 안에서는 각자 받은 순서 그대로 —
+  // 이 정렬은 종류로 가르는 것이지 최근성을 주장하지 않는다.
+  const dmSection = [
+    ...dms.filter(row => row.isAgent),
+    ...agents,
+    ...dms.filter(row => !row.isAgent),
+  ];
+
   // An empty section is dropped rather than rendered with a header and nothing
   // under it. A heading over a void reads as "something failed to load here",
   // which is a different and untrue statement from "you have no DMs".
   return [
     {key: 'channels' as const, label: '채널', data: channels},
-    {key: 'dms' as const, label: '다이렉트 메시지', data: dms},
-    {key: 'agents' as const, label: '에이전트', data: agents},
+    {key: 'dms' as const, label: 'DM', data: dmSection},
   ].filter(section => section.data.length > 0);
 }
 

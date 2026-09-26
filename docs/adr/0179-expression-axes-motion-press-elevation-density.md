@@ -4,6 +4,8 @@
 - 발제: `docs/planning/research/2026-09-02-launch-rediagnosis-two-pillars-brief.md` §2 근원 R1·R2·R6 / 편성 `docs/planning/2026-09-02-launch-program-plan.md` D-1·UX-R0·DS-0
 - 관련: ADR-0159(오르트 구름 디자인 시스템 — §2.6 "모션은 전면 토큰 축이 없다") · ADR-0174(외양 커스터마이제이션 — 밀도·폰트는 BZ-5b) · ADR-0172(아이콘) · ADR-0137 D5(폰 v0) · buzz `desktop/src/shared/styles/globals/motion.css`(Apache-2.0)
 
+> **증보 2026-09-25 — [ADR-0189](0189-design-system-2-dawn-sky-multi-theme.md) D4가 D7의 밀도 3단을 2단(`comfortable`·`compact`)으로 바꾼다.** 루트 속성 방식과 글자 크기 축은 유지한다. D10⑤(폰이 웹 `tokens.css`의 모션·밀도 값을 파생·대조)는 ADR-0189 D5로 바뀐다. 원천은 core이고, 웹과 폰이 모두 core를 대조한다. 밀도 2단은 ADR-0189 확정 항목 4다(성재 확인 2026-09-25).
+
 ## 맥락
 
 `clients/web` 71K줄에 duration·easing 토큰이 없다(실측: `--duration-sidebar` 200ms 1호뿐, 그 밖의 값은 160ms 서랍·120ms 업로드 막대·150ms 색 전이가 손으로 적혀 있음). 다이얼로그·팝오버·드로어·스레드 패널·리스트 삽입에 enter/exit가 없고, `hover:` 129곳 대 `active:` 5곳으로 눌림 피드백이 사실상 부재하며, 고도는 Tailwind 기본 `shadow-sm/lg` 2단을 테스트로 잠근 상태다. 폰은 2026-07-28 갭 감사의 `instant 0/fast 120/standard 180/slow 240` 권고가 미채택이라 백지다.

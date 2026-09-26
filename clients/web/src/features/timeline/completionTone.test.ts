@@ -12,6 +12,7 @@ import {
   COMPLETION_TONE_SOFT_TOKEN,
   COMPLETION_TONE_TOKEN,
 } from "./completionTone";
+import { parseLightDarkTokens } from "../../design/tokens.contrast.test";
 
 // =============================================================================
 // 완료 리포트 게이트 톤의 옷이 **우연이 아니라 계약**인가 (UXC-A · design-review Medium).
@@ -33,19 +34,16 @@ const statusChip = readFileSync(new URL("./StatusChip.tsx", import.meta.url), "u
 
 /** 토큰 한 줄의 light-dark() 두 값을 [light, dark] 로. */
 function tokenValues(name: string): [string, string] {
-  const match = css.match(
-    new RegExp(
-      `${name}:\\s*light-dark\\(\\s*(#[0-9a-f]{6})\\s*,\\s*(#[0-9a-f]{6})\\s*\\)`,
-      "i"
-    )
-  );
-  if (match === null) {
+  // DS2-1(#2713): 옛 이름(`--accent`·`--surface-raised`)은 이제 `var(--…)` 별칭이다.
+  // 별칭을 따라가 화면이 칠하는 값을 읽는다(`parseLightDarkTokens`, 한 자).
+  const pair = parseLightDarkTokens(css)[name.replace(/^--/, "")];
+  if (pair === undefined) {
     throw new Error(
       `${name} 이 tokens.css 에 light-dark() 한 쌍으로 없다. 토큰을 옮겼다면 이 ` +
         "다리(completionTone.ts)도 함께 옮길 것"
     );
   }
-  return [match[1].toLowerCase(), match[2].toLowerCase()];
+  return [pair[0].toLowerCase(), pair[1].toLowerCase()];
 }
 
 const SCHEMES = ["라이트", "다크"] as const;

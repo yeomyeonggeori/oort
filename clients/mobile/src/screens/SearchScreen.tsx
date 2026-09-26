@@ -35,6 +35,7 @@ import {
   type MessageSearch,
 } from '../features/search/useMessageSearch';
 import {useChannels, useDirectory} from '../features/workspace/queries';
+import {useTabBarClearance} from '../shell/ShellChrome';
 import {useSession} from '../session/useSession';
 
 // =============================================================================
@@ -96,10 +97,16 @@ export default function SearchScreen({
     title: string,
     anchor: {messageId: string; seq: number},
   ) => void;
-  onBack: () => void;
+  /**
+   * 층으로 열렸을 때만 있다. ADR-0189 D1로 검색이 **탭**이 된 뒤 셸은 이것을 넘기지
+   * 않는다 — 탭에는 돌아갈 곳이 없고, 탭바가 나가는 길이다.
+   */
+  onBack?: () => void;
 }): React.JSX.Element {
   const {workspaceId, member} = useSession();
   const search = useMessageSearch(workspaceId, initialQuery);
+  // 셸 안의 탭이면 바닥 위에 투명하게 서고, 목록 끝을 탭바만큼 비운다(ADR-0189 D1).
+  const clearance = useTabBarClearance();
   const {directory} = useDirectory(workspaceId);
   const {groups} = useChannels(workspaceId);
 
@@ -134,7 +141,7 @@ export default function SearchScreen({
   );
 
   return (
-    <Screen>
+    <Screen onCanvas={clearance > 0}>
       {/* 도착한 화면이 자기 이름을 말한다 — 그리고 그 말은 이 문을 여는
           컨트롤들과 **같은 한 줄**에서 온다 (이슈 #1146 N4). */}
       <ScreenHeader
@@ -172,6 +179,7 @@ export function SearchBody({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const clearance = useTabBarClearance();
   const body = useMemo(() => {
     switch (search.phase) {
       case 'idle':
@@ -213,6 +221,7 @@ export function SearchBody({
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="interactive"
             showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{paddingBottom: clearance}}
             ListFooterComponent={
               search.hasMore ? (
                 <Pressable
@@ -232,7 +241,7 @@ export function SearchBody({
           />
         );
     }
-  }, [search, renderItem, styles]);
+  }, [search, renderItem, styles, clearance]);
 
   return (
     <>

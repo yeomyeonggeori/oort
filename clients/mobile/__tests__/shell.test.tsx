@@ -6,6 +6,8 @@ import React from 'react';
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
+import {ActionSheetIOS} from 'react-native';
+import {FILTER_ACTION} from '../src/screens/SidebarScreen';
 import AppShell from '../src/shell/AppShell';
 import {
   __resetSessionStore,
@@ -228,6 +230,20 @@ afterEach(() => {
   queryClient = null;
 });
 
+/**
+ * 이름 찾기 칸은 섹션 머리 ⋯ 의 「이름으로 찾기」가 연다(DS2-3). iOS 액션 시트는
+ * 네이티브라 여기서는 그 항목을 고른 것으로 답한다 — 고르는 낱말은 화면의 상수다.
+ */
+function openNameFilter(): void {
+  const spy = jest
+    .spyOn(ActionSheetIOS, 'showActionSheetWithOptions')
+    .mockImplementation((options, callback) =>
+      callback(options.options.indexOf(FILTER_ACTION)),
+    );
+  fireEvent.press(screen.getByTestId('home-section-menu-channels'));
+  spy.mockRestore();
+}
+
 describe('the 대화 list, end to end', () => {
   it('lists channels and DMs, naming the DM through the roster', async () => {
     installFetch();
@@ -257,10 +273,10 @@ describe('the 대화 list, end to end', () => {
     installFetch();
     renderShell();
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
-    // Both counts render, and the accessible name spells them out rather than
-    // leaving two bare numbers beside a channel name.
+    // 멘션이 있으면 잉크 `@N` 배지 하나(시안 A `.a-badge.at`), 안 읽은 수는 굵은
+    // 이름과 낭독 라벨이 진다 — 라벨은 두 수를 모두 말로 풀어 쓴다.
     expect(screen.getByTestId('sidebar-row-channel:ch-general')).toHaveTextContent(
-      /general13/,
+      /general@1/,
     );
     expect(screen.getByLabelText('채널 general, 멘션 1개, 안 읽은 메시지 3개')).toBeTruthy();
   });
@@ -277,6 +293,7 @@ describe('the 대화 list, end to end', () => {
     renderShell();
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
 
+    openNameFilter();
     const search = screen.getByTestId('sidebar-search');
     // Nothing awaited between the keystroke and the assertion: the same property
     // the iOS IME needs (spike #837 gate 1 case D).
@@ -290,6 +307,7 @@ describe('the 대화 list, end to end', () => {
     installFetch();
     renderShell();
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+    openNameFilter();
     fireEvent.changeText(screen.getByTestId('sidebar-search'), 'zzzz');
     expect(screen.getByTestId('channels-no-match')).toBeTruthy();
   });

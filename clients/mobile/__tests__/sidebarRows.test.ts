@@ -112,15 +112,18 @@ function section(sections: SidebarSection[], key: string) {
 describe('the two 김인턴 stay distinguishable', () => {
   it('carries the handle on BOTH rows, because neither name identifies one member', () => {
     const dms = section(buildSidebarSections(input()), 'dms');
+    // 에이전트가 앞이다(시안 A DM 섹션, DS2-3): 에이전트 김인턴의 DM · DM 없는 헤르메스 ·
+    // 사람 김인턴의 DM.
     expect(dms?.data.map(row => [row.title, row.handle])).toEqual([
-      ['김인턴', '@intern-kim'],
       ['김인턴', '@kim-intern'],
+      ['헤르메스', null],
+      ['김인턴', '@intern-kim'],
     ]);
   });
 
   it('marks the agent one as an agent', () => {
     const dms = section(buildSidebarSections(input()), 'dms');
-    expect(dms?.data.map(row => row.isAgent)).toEqual([false, true]);
+    expect(dms?.data.map(row => row.isAgent)).toEqual([true, true, false]);
   });
 
   it('leaves the handle off a name only one member carries', () => {
@@ -132,7 +135,7 @@ describe('the two 김인턴 stay distinguishable', () => {
         groups: {channels: [GENERAL], dms: []},
       }),
     );
-    expect(section(sections, 'agents')?.data[0]).toMatchObject({
+    expect(section(sections, 'dms')?.data[0]).toMatchObject({
       title: '헤르메스',
       handle: null,
     });
@@ -140,9 +143,10 @@ describe('the two 김인턴 stay distinguishable', () => {
 });
 
 describe('sections', () => {
-  it('splits channels, DMs and agents', () => {
+  it('splits channels and DMs — the agents live in the DM section (ADR-0189 D1)', () => {
     const sections = buildSidebarSections(input());
-    expect(sections.map(s => s.key)).toEqual(['channels', 'dms', 'agents']);
+    expect(sections.map(s => s.key)).toEqual(['channels', 'dms']);
+    expect(section(sections, 'dms')?.label).toBe('DM');
     expect(section(sections, 'channels')?.data.map(r => r.title)).toEqual([
       'general',
       'release',
@@ -179,12 +183,26 @@ describe('sections', () => {
   });
 });
 
-describe('the 에이전트 section', () => {
-  it('lists only agents that are not already reachable as a DM', () => {
+describe('agents in the DM section', () => {
+  it('lists an agent once — as its DM when one exists, as a member row otherwise', () => {
     const sections = buildSidebarSections(input());
-    // 김인턴 the agent already has a DM one section up. Listing it again would
+    // 김인턴 the agent already has a DM. Listing it again as a member row would
     // make one conversation look like two.
-    expect(section(sections, 'agents')?.data.map(r => r.title)).toEqual(['헤르메스']);
+    const agentRows = section(sections, 'dms')?.data.filter(r => r.isAgent);
+    expect(agentRows?.map(r => [r.kind, r.title])).toEqual([
+      ['dm', '김인턴'],
+      ['agent', '헤르메스'],
+    ]);
+  });
+
+  it('wears the peer (or the agent itself) as the row face', () => {
+    const dms = section(buildSidebarSections(input()), 'dms');
+    expect(dms?.data.map(r => r.avatarMemberId)).toEqual([
+      AGENT_KIM.id,
+      HERMES.id,
+      HUMAN_KIM.id,
+    ]);
+    expect(section(buildSidebarSections(input()), 'channels')?.data[0]?.avatarMemberId).toBeNull();
   });
 
   it('answers "already has a DM" through the core, not by handle matching', () => {
@@ -197,7 +215,8 @@ describe('the 에이전트 section', () => {
 
   it('targets a MEMBER id, because the DM channel may not exist yet', () => {
     const sections = buildSidebarSections(input());
-    expect(section(sections, 'agents')?.data[0]?.targetId).toBe(HERMES.id);
+    const hermes = section(sections, 'dms')?.data.find(r => r.kind === 'agent');
+    expect(hermes?.targetId).toBe(HERMES.id);
   });
 });
 

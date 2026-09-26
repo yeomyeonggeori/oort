@@ -48,6 +48,7 @@ import {
   useNeedsAction,
   type Feed,
 } from '../features/inbox/useInbox';
+import {useTabBarClearance} from '../shell/ShellChrome';
 import {useSession} from '../session/useSession';
 
 // =============================================================================
@@ -153,6 +154,8 @@ export default function InboxScreen({
   active?: boolean;
   onOpenConversation: (channelId: string, title: string) => void;
 }): React.JSX.Element {
+  // 셸 안의 탭이면 바닥 위에 투명하게 서고, 목록 끝을 탭바만큼 비운다(ADR-0189 D1).
+  const clearance = useTabBarClearance();
   const styles = useStyles(buildStyles);
   const {member} = useSession();
 
@@ -331,7 +334,7 @@ export default function InboxScreen({
   );
 
   return (
-    <Screen>
+    <Screen onCanvas={clearance > 0}>
       <ScreenHeader title="인박스" />
 
       {availableFilters.length > 1 ? (
@@ -444,7 +447,7 @@ export default function InboxScreen({
               decision={renderDecision(item)}
             />
           )}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[styles.listContent, {paddingBottom: space.lg + clearance}]}
           refreshControl={refreshControl}
           testID="inbox-list"
         />

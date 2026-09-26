@@ -579,3 +579,16 @@ jest.mock('react-native/Libraries/Utilities/useColorScheme', () => {
   };
   return {__esModule: true, default: useColorScheme};
 });
+
+// ---- expo-blur ----------------------------------------------------------------
+// The glass under the floating tab bar (ADR-0189 D1). Jest has no native blur,
+// and `blurSupported()` answers false here, so the shell normally takes the 94%
+// fallback. A test that forces the blur branch (`resetBlurSupportForTests(true)`)
+// gets a plain View that still carries its props, so the intensity and tint the
+// shell asked for can be read off the render tree.
+jest.mock('expo-blur', () => {
+  const React = require('react');
+  const {View} = require('react-native');
+  const BlurView = props => React.createElement(View, {...props, testID: 'blur-view'});
+  return {BlurView};
+});

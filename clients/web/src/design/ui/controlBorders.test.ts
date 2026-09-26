@@ -42,10 +42,12 @@ const UI_DIR = dirname(fileURLToPath(import.meta.url));
  * `container` 내용을 담는 것. 경계는 안팎을 **나누는** 선이고, 그 안의 컨트롤이
  *            각자 자기 경계를 진다. `--line` 이 옳은 자리다.
  */
-const ROLE: Record<string, "control" | "container"> = {
-  // 다섯 변형 전부가 눌리는 것이다. 경계를 가진 둘(secondary·outline)이 이 규칙의
-  // 대상이고, 채움을 가진 둘(default·destructive)은 채움이 어포던스를 진다.
-  "button.tsx": "control",
+const ROLE: Record<string, "control" | "filled" | "container"> = {
+  // `filled`  누르는 것이되 **경계가 아니라 채움**이 어포던스를 진다 (ADR-0189 D6,
+  //           DS2-1). 새벽하늘의 버튼은 다섯 변형 모두 채움 알약이거나(default·
+  //           destructive·secondary·outline) 채움 없는 ghost 다. 경계를 들이면
+  //           「outline 테두리는 텍스트 입력 그릇에만」이 깨진다 — 아래 단정이 잰다.
+  "button.tsx": "filled",
   // 값을 받는 상자. 비어 있을 때 경계 말고는 자기가 있다고 말할 것이 없다.
   "input.tsx": "control",
   // 같음. 닫힌 상태의 `<select>` 는 경계와 글자뿐이다.
@@ -98,11 +100,29 @@ describe("#1210 D1 — 프리미티브의 테두리 토큰", () => {
 
   it("경계를 가진 컨트롤은 실제로 --line-strong 을 든다", () => {
     // 위 단정은 「없음」을 잰다. 이것은 「있음」을 잰다 — 누가 테두리를 통째로
-    // 지워서 초록을 얻는 길을 닫는다.
-    const bordered = ["button.tsx", "input.tsx", "select.tsx"];
+    // 지워서 초록을 얻는 길을 닫는다. ADR-0189 D6 이후 경계를 진 컨트롤은 텍스트
+    // 입력 그릇 둘뿐이다.
+    const bordered = primitives().filter((file) => ROLE[file] === "control");
+    expect(bordered).toEqual(["input.tsx", "select.tsx"]);
     for (const file of bordered) {
       const source = readFileSync(`${UI_DIR}/${file}`, "utf8");
       expect(source, `${file}`).toContain("border-line-strong");
+    }
+  });
+
+  it("채움 컨트롤은 경계를 들지 않는다 — outline 테두리는 입력 그릇에만 (ADR-0189 D6)", () => {
+    for (const file of primitives()) {
+      if (ROLE[file] !== "filled") continue;
+      const code = readFileSync(`${UI_DIR}/${file}`, "utf8")
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith("//"))
+        .join("\n");
+      expect(code, file).not.toMatch(/(?<![\w-])border(?:-[a-z-]+)?(?=[\s"])/);
+    }
+    // 채움이 실제로 있다 — 테두리와 채움을 함께 지워 초록을 얻는 길을 닫는다.
+    const button = readFileSync(`${UI_DIR}/button.tsx`, "utf8");
+    for (const fill of ["bg-primary", "bg-danger-fill", "bg-surface-muted"]) {
+      expect(button, fill).toContain(fill);
     }
   });
 });

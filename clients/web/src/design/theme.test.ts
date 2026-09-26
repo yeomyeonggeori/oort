@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   ACCENT_ATTRIBUTE,
+  ACTIVE_PALETTE_ID,
   APPEARANCE_STORAGE_KEY,
+  PALETTE_ATTRIBUTE,
   applyAccent,
   applyTheme,
   migrateAppearance,
@@ -238,6 +240,17 @@ describe("the pre-paint boot script mirrors this module", () => {
     expect(BOOT).toContain(`"${THEME_ATTRIBUTE}"`);
     expect(BOOT).toContain(`"${SYSTEM_COLOR_ATTRIBUTE}"`);
     expect(BOOT).toContain(`"${ACCENT_ATTRIBUTE}"`);
+    expect(BOOT).toContain(`"${PALETTE_ATTRIBUTE}"`);
+  });
+
+  it("stamps the same palette id, before the scheme early-return (ADR-0189 D3)", () => {
+    // 팔레트는 스킴과 무관하게 늘 찍힌다. 「시스템」 선택의 조기 반환보다 뒤에
+    // 있으면 시스템을 따르는 사람만 팔레트 없는 화면을 받는다.
+    expect(BOOT).toContain(`"${ACTIVE_PALETTE_ID}"`);
+    const stamp = BOOT.indexOf("setAttribute(PALETTE_ATTR");
+    const early = BOOT.search(/scheme\s*!==\s*"light"/);
+    expect(stamp).toBeGreaterThan(0);
+    expect(stamp).toBeLessThan(early);
   });
 
   it("treats only light and dark as scheme pins", () => {

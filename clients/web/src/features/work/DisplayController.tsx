@@ -800,7 +800,7 @@ export function DisplayController({
             className={cn(
               CHIP_CLASS,
               capturing
-                ? "bg-accent-soft text-accent"
+                ? "bg-accent-soft text-signal-text"
                 : "bg-surface-hover text-warn"
             )}
             data-testid="work-control-grade"

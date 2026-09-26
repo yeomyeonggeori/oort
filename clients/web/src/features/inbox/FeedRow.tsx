@@ -19,7 +19,7 @@ import type { FeedItem, FeedTone, OutcomeTone } from "@momo/core/features/inbox/
 
 const TONE_CLASS: Record<FeedTone, string> = {
   warn: "text-warn",
-  accent: "text-accent",
+  accent: "text-signal-text",
   agent: "text-agent",
   muted: "text-ink-muted",
 };

@@ -56,7 +56,7 @@ export const SESSION_STATUS_CLASS: Readonly<Record<WorkSessionStatusKey, string>
   running: "bg-muted-soft text-warn",
   idle: "bg-muted-soft text-ink-muted",
   unavailable: "bg-muted-soft text-ink-muted",
-  orphaned: "bg-muted-soft text-accent",
+  orphaned: "bg-muted-soft text-signal-text",
   done: "bg-muted-soft text-ink-muted",
   unknown: "bg-muted-soft text-ink-muted",
 };
@@ -74,7 +74,7 @@ export const SESSION_STATUS_CLASS: Readonly<Record<WorkSessionStatusKey, string>
  */
 export const ROW_STATE_CLASS: Readonly<Record<WorkRowState, string>> = {
   running: "bg-muted-soft text-warn",
-  pending: "bg-muted-soft text-accent",
+  pending: "bg-muted-soft text-signal-text",
   done: "bg-muted-soft text-ink-muted",
   error: "bg-muted-soft text-danger",
 };

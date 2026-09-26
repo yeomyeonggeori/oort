@@ -21,6 +21,7 @@
     "centrifuge": "^5.7.0",
     "expo": "^57.0.9",
     "expo-application": "~57.0.2",
+    "expo-blur": "~57.0.2",
     "expo-camera": "~57.0.4",
     "expo-clipboard": "^57.0.1",
     "expo-device": "~57.0.1",

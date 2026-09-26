@@ -18,7 +18,8 @@ import { cn } from "@/design/lib/cn";
 // that is the trade, and it is the right one here. UX-R1a cannot consume
 // POPOVER_MOTION / data-state enter-exit on an OS picker (계획 이탈).
 //
-// The box itself is `input.tsx` to the pixel: same height, same 1px
+// The box itself is `input.tsx` to the pixel (ADR-0189: h-field 36, radius lg
+// 14): same height, same 1px
 // `--line-strong` border, same `px-3`, same transparent fill. They are siblings
 // in the same forms, and a select that paints itself `bg-surface` reads as one
 // step darker inside a `bg-surface-raised` dialog while the input beside it does
@@ -35,7 +36,7 @@ export const Select = React.forwardRef<
       // 44px 입력 옆에 32px 선택이 서면 두 칸이 같은 줄에서 높이가 어긋나고,
       // 손가락은 둘 중 하나만 맞힌다 — 위 주석이 말하는 "둘 다 같은 방식으로
       // 앉는다"는 색만의 이야기가 아니다.
-      "tap-target h-control w-full min-w-0 rounded-sm border border-line-strong bg-transparent px-3 text-body text-ink transition-colors focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50",
+      "tap-target h-field w-full min-w-0 rounded-lg border border-line-strong bg-transparent px-3 text-body text-ink transition-colors focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50",
       className
     )}
     {...props}

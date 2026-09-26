@@ -336,7 +336,7 @@ export function AttachmentTray({
 
   return (
     <div
-      className="flex flex-col gap-1 border-b border-line px-3 py-2"
+      className="attachment-tray flex flex-col gap-1"
       data-testid="attachment-tray"
     >
       {/* 보조기술이 듣는 한 줄 (design-review H-3).
