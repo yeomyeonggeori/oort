@@ -31,8 +31,9 @@
 //    shows as "needs login"; opening the CLI shows the real error.
 // 4. **No credential files.** This crate never opens a harness's config
 //    folder, its token file, the keychain entries of other apps, or reads an
-//    environment variable's value to decide login. `shell_contract.rs` pins
-//    the absence of those path strings across the whole shell source.
+//    environment variable's value to decide login. The `shell_source` tests
+//    below pin the absence of those path strings across the whole shell
+//    source.
 //
 // A timed-out child is killed (the direct child only) and reaped.
 
@@ -306,6 +307,87 @@ mod tests {
             serde_json::to_string(&probes).unwrap()
         );
         assert_eq!(probes.len(), 2);
+    }
+
+    // Whole-shell source pins (ADR-0190 D3-b). Kept here rather than in
+    // `shell_contract.rs` so the local terminal lane (#2772), which also
+    // appends there, merges without a conflict.
+    mod shell_source {
+        /// Every production source file of the shell: `src/*.rs` minus the
+        /// test-only `shell_contract.rs`, each cut at its unit-test module
+        /// (`#[cfg(test)]` + `mod tests`; `lib.rs` also carries
+        /// `#[cfg(test)] mod shell_contract;` mid-file). Read from disk so a
+        /// module added later is covered without editing this list.
+        fn production_sources() -> Vec<(String, String)> {
+            let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src");
+            let mut out = Vec::new();
+            for entry in std::fs::read_dir(dir).expect("src dir") {
+                let path = entry.expect("src entry").path();
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                if !name.ends_with(".rs") || name == "shell_contract.rs" {
+                    continue;
+                }
+                let src = std::fs::read_to_string(&path).expect("read source");
+                let production = src
+                    .split("#[cfg(test)]\nmod tests")
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+                out.push((name, production));
+            }
+            assert!(out.iter().any(|(name, _)| name == "harness_status.rs"));
+            out
+        }
+
+        /// ② The shell never names a harness's credential store: its config folder,
+        /// its token file, or a credentials file.
+        #[test]
+        fn the_shell_source_names_no_harness_credential_file() {
+            let needles = [
+                format!("{}{}", ".claude", "/"),
+                format!("{}{}", "auth", ".json"),
+                format!("{}{}", "creden", "tials"),
+            ];
+            for (name, src) in production_sources() {
+                for needle in &needles {
+                    assert!(
+                        !src.contains(needle.as_str()),
+                        "{name} mentions {needle} (ADR-0190 D3-b)"
+                    );
+                }
+            }
+        }
+
+        /// The status probe is reachable from the webview command only: no deep link,
+        /// discovery result, notification or other module calls into it, and the
+        /// command takes no parameters the webview could fill.
+        #[test]
+        fn only_the_command_table_reaches_the_harness_status_probe() {
+            for (name, src) in production_sources() {
+                if name == "harness_status.rs" {
+                    continue;
+                }
+                let calls = src.matches("harness_status::").count();
+                let allowed = if name == "lib.rs" { 1 } else { 0 };
+                assert_eq!(calls, allowed, "{name} calls into harness_status {calls}x");
+                for needle in [
+                    "detect_local_harnesses",
+                    "probe_all",
+                    "probe_one",
+                    "STATUS_COMMANDS",
+                ] {
+                    let hits = src.matches(needle).count();
+                    let allowed =
+                        usize::from(name == "lib.rs" && needle == "detect_local_harnesses");
+                    assert_eq!(hits, allowed, "{name} mentions {needle}");
+                }
+            }
+            let status = include_str!("harness_status.rs");
+            assert!(
+                status.contains("pub async fn detect_local_harnesses() -> Vec<LocalHarnessProbe>")
+            );
+            assert!(include_str!("lib.rs").contains("harness_status::detect_local_harnesses,"));
+        }
     }
 
     #[cfg(unix)]
