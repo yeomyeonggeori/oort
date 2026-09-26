@@ -4,12 +4,13 @@ import React from 'react';
 import {AccessibilityInfo, StyleSheet} from 'react-native';
 import {
   KOMETTO_EXPRESSIONS,
+  ONBOARDING_DOT_ROLES,
   onboardingDots,
   type KomettoExpression,
 } from '@momo/core/features/onboarding/guide';
 
 import {FixedScheme, type ColorScheme} from '../src/design/theme';
-import {lightPalette, darkPalette} from '../src/design/tokens';
+import {DS2_ROLE_MAP, lightPalette, darkPalette} from '../src/design/tokens';
 import {KOMETTO_EXPRESSION_ASSETS} from '../src/features/onboarding/komettoExpressions';
 import {
   KomettoGuide,
@@ -147,7 +148,7 @@ describe('OnboardingDots (폰)', () => {
   it.each([
     ['light', lightPalette],
     ['dark', darkPalette],
-  ] as const)('bar signal, done ink-muted, rest muted-soft, hidden sentence (%s)', (scheme, palette) => {
+  ] as const)('bar signal, done ink-muted, rest line-strong, hidden sentence (%s)', (scheme, palette) => {
     render(wrap(<OnboardingDots dots={onboardingDots('claim', 'workspace-profile')} />, scheme));
     const row = screen.getByTestId('onboarding-dots');
     expect(row.props.accessibilityLabel).toBe('4단계 중 2단계');
@@ -157,7 +158,11 @@ describe('OnboardingDots (폰)', () => {
     expect([done.width, done.backgroundColor]).toEqual([6, palette.textMuted]);
     const todo = screen.getAllByTestId('onboarding-dot-todo');
     expect(todo).toHaveLength(2);
-    expect(StyleSheet.flatten(todo[0].props.style).backgroundColor).toBe(palette.mutedSoft);
+    expect(StyleSheet.flatten(todo[0].props.style).backgroundColor).toBe(palette.textFaint);
+    // 세 색이 core 표(ONBOARDING_DOT_ROLES)의 역할과 같다: accent=signal, textMuted=ink-muted, textFaint=line-strong.
+    expect(DS2_ROLE_MAP.accent).toBe(ONBOARDING_DOT_ROLES.current);
+    expect(DS2_ROLE_MAP.textMuted).toBe(ONBOARDING_DOT_ROLES.done);
+    expect(DS2_ROLE_MAP.textFaint).toBe(ONBOARDING_DOT_ROLES.todo);
   });
 });
 

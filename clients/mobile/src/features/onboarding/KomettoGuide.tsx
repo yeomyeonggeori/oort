@@ -330,7 +330,9 @@ const buildStyles = (color: Palette) =>
       width: ONBOARDING.dot,
       height: ONBOARDING.dot,
       borderRadius: ONBOARDING.dot / 2,
-      backgroundColor: color.mutedSoft,
+      // 남은 칸 = core `line-strong`(폰 `textFaint`). 시안의 mutedSoft는 바닥 위 약 1.1:1이라
+      // 비텍스트 3:1(WCAG 1.4.11)을 못 넘는다. 표는 core `ONBOARDING_DOT_ROLES`(#2807 M3).
+      backgroundColor: color.textFaint,
     },
     dotDone: {backgroundColor: color.textMuted},
     dotCurrent: {width: ONBOARDING.dotBar, backgroundColor: color.accent},

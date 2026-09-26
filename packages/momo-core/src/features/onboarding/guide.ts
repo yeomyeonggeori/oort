@@ -130,6 +130,19 @@ export function onboardingDotScreens(
 
 export type OnboardingDotState = "done" | "current" | "todo";
 
+/**
+ * 점 상태 → core 색 역할. 세 역할 모두 바닥 세 정지점 위에서 비텍스트 3:1을
+ * 넘는다(WCAG 1.4.11, 모든 테마 × 라이트·다크, `guide.test.ts`가 잰다).
+ * 남은 칸은 시안의 `--mutedSoft`(바닥 위 약 1.1:1) 대신 `line-strong`이다:
+ * 남은 단계 수라는 정보를 이 점이 전하므로 접근성 규칙이 시안보다 앞선다
+ * (#2807 planner 판정, PR #2828 「시안과의 차이」).
+ */
+export const ONBOARDING_DOT_ROLES: Readonly<Record<OnboardingDotState, string>> = {
+  done: "ink-muted",
+  current: "signal",
+  todo: "line-strong",
+};
+
 export type OnboardingDots = {
   readonly total: number;
   /** 1부터 센다. */

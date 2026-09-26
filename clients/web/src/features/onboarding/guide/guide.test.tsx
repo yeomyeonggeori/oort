@@ -7,6 +7,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   KOMETTO_EXPRESSIONS,
+  ONBOARDING_DOT_ROLES,
   onboardingDots,
   type KomettoExpression,
 } from "@momo/core/features/onboarding/guide";
@@ -165,6 +166,25 @@ describe("OnboardingDots", () => {
     const label = q("onboarding-dots-label");
     expect(label?.textContent).toBe("4단계 중 2단계");
     expect(label?.className).toContain("sr-only");
+  });
+});
+
+describe("진행 점 색은 core 표를 따른다 (#2807 M3)", () => {
+  it("paints each dot state with the core role that clears 3:1 on the canvas", () => {
+    const css = readFileSync(join(process.cwd(), "src/design/tokens.css"), "utf8");
+    const rule = (selector: string) => {
+      const at = css.indexOf(`${selector} {`);
+      expect(at, selector).toBeGreaterThan(-1);
+      return css.slice(at, css.indexOf("}", at));
+    };
+    expect(rule(".onboarding-dot")).toContain(`var(--${ONBOARDING_DOT_ROLES.todo})`);
+    expect(rule('.onboarding-dot[data-state="done"]')).toContain(
+      `var(--${ONBOARDING_DOT_ROLES.done})`
+    );
+    expect(rule('.onboarding-dot[data-state="current"]')).toContain(
+      `var(--${ONBOARDING_DOT_ROLES.current})`
+    );
+    expect(css).not.toMatch(/\.onboarding-dot[^{]*\{[^}]*--muted-soft/);
   });
 });
 

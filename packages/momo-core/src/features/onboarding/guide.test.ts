@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { contrast } from "../../design/color";
+import { CANVAS_STOPS, MODES, THEME_IDS, THEMES } from "../../design/themes";
 import {
+  ONBOARDING_DOT_ROLES,
   GUIDE_STATE_TABLE,
   GUIDE_STATES,
   KOMETTO_EXPRESSIONS,
@@ -115,4 +118,33 @@ describe("진행 점 흐름 모델 (ADR-0193 D10)", () => {
       "current",
     ]);
   });
+});
+
+describe("진행 점 색은 바닥 위에서 비텍스트 3:1 (WCAG 1.4.11, #2807 M3)", () => {
+  it("maps todo to line-strong, not the mockup muted-soft", () => {
+    expect(ONBOARDING_DOT_ROLES).toEqual({
+      done: "ink-muted",
+      current: "signal",
+      todo: "line-strong",
+    });
+  });
+
+  for (const theme of THEME_IDS) {
+    for (const mode of MODES) {
+      it(`${theme}/${mode}: every dot role clears 3:1 on all three canvas stops`, () => {
+        const t = THEMES[theme][mode];
+        const roles: Record<string, string> = { ...t.color, ...t.derived };
+        const failures: string[] = [];
+        for (const [state, role] of Object.entries(ONBOARDING_DOT_ROLES)) {
+          const fg = roles[role];
+          expect(fg, role).toBeTruthy();
+          CANVAS_STOPS.forEach((stop, i) => {
+            const ratio = contrast(fg, t.canvas[i]);
+            if (ratio < 3) failures.push(`${state}(${role}) on ${stop}: ${ratio.toFixed(2)}`);
+          });
+        }
+        expect(failures).toEqual([]);
+      });
+    }
+  }
 });

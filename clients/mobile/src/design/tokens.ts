@@ -272,11 +272,6 @@ export interface Palette {
   canvasBottom: string;
   /** 표면 한 단 아래의 조용한 채움(core `surface-muted`). */
   surfaceMuted: string;
-  /**
-   * 톤 없는 칩 그릇·남은 진행 점(core `muted-soft`). 온보딩 2.0 진행 점의 「남은 칸」
-   * 이 처음 쓴다(#2807, 시안 `.dots i{background:var(--mutedSoft)}`).
-   */
-  mutedSoft: string;
   /** 페이지 시트의 바탕(core `sheet`). */
   sheet: string;
   /** 글자 없는 아이콘(core `icon`). 비텍스트 3:1. */
@@ -319,7 +314,6 @@ export const DS2_ROLE_MAP = {
   canvasBottom: 'canvas-bottom',
   surface: 'surface',
   surfaceMuted: 'surface-muted',
-  mutedSoft: 'muted-soft',
   surfacePressed: 'surface-pressed',
   sheet: 'sheet',
   border: 'line',
