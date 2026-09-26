@@ -121,6 +121,26 @@ describe("BZ-2 right control group rearranges existing actions", () => {
 
   it("restores dialog focus in the close commit, not a tick later", () => {
     expect(CONTROLS_CODE).toMatch(/useRestoreFocusOnClose/);
-    expect(MENU_CODE).toMatch(/handingOffRef/);
+    expect(MENU_CODE).toMatch(/pendingHandOffRef/);
+  });
+
+  // #2741: 메뉴를 닫는 손과 다이얼로그를 여는 손이 같으면, 퇴장 모션 동안 남은
+  // 메뉴 층이 Esc를 먹어 다이얼로그가 닫히지 않는다. 다이얼로그는 메뉴 콘텐츠가
+  // 언마운트될 때 불리는 onCloseAutoFocus 에서만 연다. jsdom 은 Presence 를 즉시
+  // 내리므로 경합 자체는 gate:channel-header 가 실브라우저에서 잰다.
+  it("opens the handed-off dialog only after the menu has unmounted (#2741)", () => {
+    // 자르는 기준이 사라지면 아래 not.toMatch 가 빈 조각 위에서 초록이 된다.
+    expect(MENU_CODE).toContain("onHandOff={");
+    expect(MENU_CODE).toContain("onCloseAutoFocus={");
+    const handOff = MENU_CODE.slice(MENU_CODE.indexOf("onHandOff={"));
+    const handOffBody = handOff.slice(0, handOff.indexOf("/>"));
+    expect(handOffBody).not.toMatch(/setTopicOpen\(true\)/);
+    expect(handOffBody).not.toMatch(/leave\.open\(\)/);
+    const onClose = MENU_CODE.slice(
+      MENU_CODE.indexOf("onCloseAutoFocus={"),
+      MENU_CODE.indexOf("<ChannelActionMenuItems")
+    );
+    expect(onClose).toMatch(/setTopicOpen\(true\)/);
+    expect(onClose).toMatch(/actions\.leave\.open\(\)/);
   });
 });
