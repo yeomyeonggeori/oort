@@ -9,6 +9,9 @@ import { clearPhoneLinkCardForTests } from "@/features/welcome/phoneLinkCardStor
 import { readFirstAgentMarker } from "@/features/welcome/firstAgentStore";
 
 const restoreSession = vi.hoisted(() => vi.fn());
+// 셸이 몇 번 마운트되었는가(#2893). 재진입을 열고 닫는 동안 셸이 내려가면 실시간
+// 연결이 두 번 끊기고 도크·서랍 상태가 사라진다.
+const shellMounts = vi.hoisted(() => ({ count: 0 }));
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
@@ -23,10 +26,15 @@ vi.mock("@/features/chat/ChatShell", () => ({
 }));
 
 vi.mock("@/app/AppShell", async () => {
-  const { createElement: h } = await import("react");
+  const { createElement: h, useEffect } = await import("react");
   const { Outlet } = await import("react-router-dom");
   return {
-    AppShell: () => h("div", { "data-testid": "app-shell" }, h(Outlet)),
+    AppShell: () => {
+      useEffect(() => {
+        shellMounts.count += 1;
+      }, []);
+      return h("div", { "data-testid": "app-shell" }, h(Outlet));
+    },
   };
 });
 
@@ -92,6 +100,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  shellMounts.count = 0;
   sessionStorage.clear();
   clearPhoneLinkCardForTests(session.member.workspaceId);
   clearSession();
@@ -148,10 +157,12 @@ describe("App: AI 연결 재진입 (#2870)", { timeout: 20_000 }, () => {
     applyLogin(session);
     window.history.replaceState(null, "", "/#/ai-connect?from=settings");
     const host = await mountApp();
-    const stage = host.querySelector('[data-testid="first-agent-stage"]');
+    const stage = document.querySelector('[data-testid="first-agent-stage"]');
     expect(stage?.getAttribute("data-mode")).toBe("reentry");
     expect(stage?.getAttribute("data-from")).toBe("settings");
     expect(host.querySelector('[data-testid="channel-list"]')).toBeNull();
+    // 셸 안의 라우트다(#2893): 셸은 서 있고, 화면은 그 위의 전면 층이다.
+    expect(host.querySelector('[data-testid="app-shell"]')).not.toBeNull();
     expect(readFirstAgentMarker(session.member.workspaceId)).toBeNull();
   });
 
@@ -160,13 +171,13 @@ describe("App: AI 연결 재진입 (#2870)", { timeout: 20_000 }, () => {
     window.history.replaceState(null, "", "/#/ai-connect?from=agents");
     const host = await mountApp();
     await act(async () => {
-      host.querySelector<HTMLElement>('[data-testid="stage-close"]')?.click();
+      document.querySelector<HTMLElement>('[data-testid="stage-close"]')?.click();
       await Promise.resolve();
     });
     await vi.waitFor(() => {
       expect(host.querySelector('[data-testid="app-shell"]')).not.toBeNull();
+      expect(document.querySelector('[data-testid="first-agent-stage"]')).toBeNull();
     });
-    expect(host.querySelector('[data-testid="first-agent-stage"]')).toBeNull();
     await act(async () => {
       window.location.hash = "#/ai-connect?from=agents";
       window.dispatchEvent(new HashChangeEvent("hashchange"));
@@ -174,16 +185,47 @@ describe("App: AI 연결 재진입 (#2870)", { timeout: 20_000 }, () => {
     });
     await vi.waitFor(() => {
       expect(
-        host.querySelector('[data-testid="first-agent-stage"]')?.getAttribute("data-mode")
+        document.querySelector('[data-testid="first-agent-stage"]')?.getAttribute("data-mode")
       ).toBe("reentry");
     });
+  });
+
+  it("셸에서 열고 닫는 동안 셸이 다시 마운트되지 않는다(#2893)", async () => {
+    applyLogin(session);
+    window.history.replaceState(null, "", "/#/");
+    const host = await mountApp();
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="channel-list"]')).not.toBeNull();
+    });
+    expect(shellMounts.count).toBe(1);
+    await act(async () => {
+      window.location.hash = "#/ai-connect?from=settings";
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(
+        document.querySelector('[data-testid="first-agent-stage"]')?.getAttribute("data-mode")
+      ).toBe("reentry");
+    });
+    expect(host.querySelector('[data-testid="app-shell"]')).not.toBeNull();
+    await act(async () => {
+      document.querySelector<HTMLElement>('[data-testid="stage-close"]')?.click();
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="first-agent-stage"]')).toBeNull();
+      expect(host.querySelector('[data-testid="channel-list"]')).not.toBeNull();
+    });
+    expect(shellMounts.count).toBe(1);
   });
 
   it("다른 주소는 셸이다", async () => {
     applyLogin(session);
     window.history.replaceState(null, "", "/#/");
     const host = await mountApp();
-    expect(host.querySelector('[data-testid="first-agent-stage"]')).toBeNull();
+    expect(document.querySelector('[data-testid="first-agent-stage"]')).toBeNull();
     expect(host.querySelector('[data-testid="app-shell"]')).not.toBeNull();
   });
 });

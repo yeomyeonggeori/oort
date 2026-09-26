@@ -16,6 +16,8 @@ import {
 } from "@/app/shellNav";
 import { restoreDialogOpenerFocus } from "@/design/ui/dialog";
 import { restoreSettingsOpener } from "@/features/settings/settingsFocus";
+import { AI_CONNECT_REENTRY_PATH } from "@/features/welcome/aiConnectReentry";
+import { useInertRefWhile } from "@/app/inert";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { queryClient } from "@/app/queryClient";
 import { resetRouteQueries } from "@/app/retryScope";
@@ -110,6 +112,10 @@ export function AppShell({
     asDrawer: isMobile,
     setCollapsed: setSidebarPaneCollapsed,
   });
+  // AI 연결 재진입(#2893)은 셸 안의 라우트지만 화면은 셸 전체를 덮는 전면 층이다
+  // (body 포털). 덮인 셸은 탭 순서와 접근성 트리에서 빠진다. 언마운트하지 않는
+  // 것이 요점이다: 실시간 연결·도크·서랍이 그대로 산다.
+  useInertRefWhile(sidebarPaint.shellRef, routePath === AI_CONNECT_REENTRY_PATH);
   const previousMobileRef = useRef(isMobile);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerOpenerRef = useRef<HTMLElement | null>(null);
@@ -165,7 +171,14 @@ export function AppShell({
   // 고르면(서랍은 라우트만 덮으므로 사이드바는 살아 있다) 방금 고른 그 채널이
   // 서랍 뒤에 가려진 채 열린다 — 위 서랍이 고치려던 그 결함 그대로다. 한 셸에
   // 서랍이 둘인데 규칙이 둘이면 사람은 어느 쪽도 못 배운다.
+  //
+  // AI 연결 재진입(#2893)은 예외다. 그 층은 표면을 옮기는 것이 아니라 잠시 덮는
+  // 것이고, 닫으면 떠난 자리로 돌아온다. 들고 나는 두 번 모두 서랍을 그대로 둔다.
+  const previousRoutePath = useRef(routePath);
   useEffect(() => {
+    const previous = previousRoutePath.current;
+    previousRoutePath.current = routePath;
+    if (previous === AI_CONNECT_REENTRY_PATH || routePath === AI_CONNECT_REENTRY_PATH) return;
     setDrawerOpen(false);
     closeAdeDrawer();
   }, [routePath]);
