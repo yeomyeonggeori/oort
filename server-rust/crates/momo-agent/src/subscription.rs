@@ -259,8 +259,54 @@ pub async fn lock_and_find_recent_notice_in_tx(
         recipient_member_id,
         kind,
     );
+    lock_and_find_recent_server_notice_in_tx(
+        conn,
+        RecentNotice {
+            key: &key,
+            workspace_id,
+            channel_id,
+            author_member_id: agent_member_id,
+            source: SUBSCRIPTION_NOTICE_SOURCE,
+            kind_prop: "subscription_notice",
+            kind: kind.as_str(),
+            recipient_member_id,
+            thread_key,
+            window_seconds: SUBSCRIPTION_NOTICE_THROTTLE_SECONDS,
+        },
+    )
+    .await
+}
+
+/// One throttle question: was a server-composed notice with this
+/// `(source, props[kind_prop] = kind, recipient, thread)` posted by this author
+/// inside the window? Shared by ADR-0193's notices and #2871's hosted skip
+/// lines so both answer "same thread, same person, same sentence" identically.
+#[derive(Debug, Clone, Copy)]
+pub struct RecentNotice<'a> {
+    /// The advisory-lock key. Must name every field the lookup filters on.
+    pub key: &'a str,
+    pub workspace_id: Uuid,
+    pub channel_id: Uuid,
+    pub author_member_id: Uuid,
+    pub source: &'a str,
+    pub kind_prop: &'a str,
+    pub kind: &'a str,
+    pub recipient_member_id: Uuid,
+    pub thread_key: Uuid,
+    pub window_seconds: i64,
+}
+
+/// Take the advisory lock on `notice.key`, then look the notice up.
+///
+/// The lock serializes two concurrent calls on the same key inside their
+/// transactions, so the lookup and the write that follows it are one decision:
+/// the second caller waits, then sees the first caller's row.
+pub async fn lock_and_find_recent_server_notice_in_tx(
+    conn: &mut PgConnection,
+    notice: RecentNotice<'_>,
+) -> Result<bool, DbError> {
     sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1::text))")
-        .bind(&key)
+        .bind(notice.key)
         .execute(&mut *conn)
         .await?;
     let found: bool = sqlx::query_scalar(
@@ -270,20 +316,21 @@ pub async fn lock_and_find_recent_notice_in_tx(
                AND channel_id = $2 \
                AND author_member_id = $3 \
                AND props->>'source' = $4 \
-               AND props->>'subscription_notice' = $5 \
-               AND props->>'notice_for_member_id' = $6 \
-               AND props->>'notice_thread_key' = $7 \
-               AND created_at > now() - make_interval(secs => $8) \
+               AND props->>($5::text) = $6 \
+               AND props->>'notice_for_member_id' = $7 \
+               AND props->>'notice_thread_key' = $8 \
+               AND created_at > now() - make_interval(secs => $9) \
          )",
     )
-    .bind(workspace_id)
-    .bind(channel_id)
-    .bind(agent_member_id)
-    .bind(SUBSCRIPTION_NOTICE_SOURCE)
-    .bind(kind.as_str())
-    .bind(recipient_member_id.to_string())
-    .bind(thread_key.to_string())
-    .bind(SUBSCRIPTION_NOTICE_THROTTLE_SECONDS as f64)
+    .bind(notice.workspace_id)
+    .bind(notice.channel_id)
+    .bind(notice.author_member_id)
+    .bind(notice.source)
+    .bind(notice.kind_prop)
+    .bind(notice.kind)
+    .bind(notice.recipient_member_id.to_string())
+    .bind(notice.thread_key.to_string())
+    .bind(notice.window_seconds as f64)
     .fetch_one(&mut *conn)
     .await?;
     Ok(found)

@@ -958,3 +958,139 @@ async fn a_foreign_tenants_settings_rows_are_zero_under_the_callers_guc() {
         .await
         .expect("clear the instance-global row this test wrote");
 }
+
+// ---------------------------------------------------------------------------
+// #2872 — an Anthropic console key: sealed under its own kind, never echoed
+// ---------------------------------------------------------------------------
+
+const TEST_ANTHROPIC_KEY: &str = "sk-ant-api03-conformance-LEAKCANARY-77aa";
+
+/// `format: "anthropic"` stores the key as the `anthropic-key` envelope (which
+/// is what selects the Messages wire in the worker), the response says so, the
+/// presets ride along, and the key appears in no response body, error body,
+/// audit row, or plaintext column.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn an_anthropic_key_link_is_kind_tagged_and_never_echoed() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "anthropic").await;
+    let base = start_server(app_pool, &fixture.email).await;
+    let http = reqwest::Client::new();
+    sqlx::query("DELETE FROM provider_link")
+        .execute(&su)
+        .await
+        .expect("clear provider_link");
+
+    let token = login(&http, &base, &fixture).await;
+    let auth = |request: reqwest::RequestBuilder| request.bearer_auth(&token);
+    let mut seen = String::new();
+
+    // Refusals first: each carries the key, none may echo it.
+    for (body, needle) in [
+        (
+            json!({"baseUrl": "https://api.anthropic.com/v1", "bearer": TEST_ANTHROPIC_KEY, "format": "gemini"}),
+            "format must be one of",
+        ),
+        (
+            json!({"baseUrl": "https://api.anthropic.com/v1", "format": "anthropic",
+                   "oauth": {"refreshToken": TEST_ANTHROPIC_KEY}}),
+            "format anthropic takes an API key",
+        ),
+        (
+            json!({"baseUrl": "https://169.254.169.254/v1", "bearer": TEST_ANTHROPIC_KEY, "format": "anthropic"}),
+            "private",
+        ),
+    ] {
+        let response = auth(http.put(format!("{base}/v1/provider/link")))
+            .json(&body)
+            .send()
+            .await
+            .expect("refused write");
+        assert_eq!(response.status().as_u16(), 400, "{body}");
+        let text = response.text().await.expect("error body");
+        assert!(text.contains(needle), "{text}");
+        seen.push_str(&text);
+    }
+
+    let stored: Value = auth(http.put(format!("{base}/v1/provider/link")))
+        .json(&json!({
+            "baseUrl": "https://api.anthropic.com/v1",
+            "bearer": TEST_ANTHROPIC_KEY,
+            "format": "anthropic",
+        }))
+        .send()
+        .await
+        .expect("anthropic write")
+        .json()
+        .await
+        .expect("anthropic write body");
+    assert_eq!(stored["credentialKind"], "anthropic-key", "{stored}");
+    assert_eq!(stored["format"], "anthropic", "{stored}");
+    assert_eq!(stored["bearerConfigured"], json!(true));
+    assert_eq!(stored["bearerLast4"], "77aa");
+    let preset_ids: Vec<&str> = stored["presets"]
+        .as_array()
+        .expect("presets")
+        .iter()
+        .map(|preset| preset["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(preset_ids, ["openai", "anthropic", "xai", "openrouter"]);
+    assert_eq!(stored["presets"][1]["format"], "anthropic");
+    seen.push_str(&stored.to_string());
+
+    let read_back = auth(http.get(format!("{base}/v1/provider/link")))
+        .send()
+        .await
+        .expect("re-read")
+        .text()
+        .await
+        .expect("re-read body");
+    assert!(
+        read_back.contains("\"credentialKind\":\"anthropic-key\""),
+        "{read_back}"
+    );
+    seen.push_str(&read_back);
+
+    // The sealed column opens to the Anthropic kind (not a bearer).
+    let row = momo_settings::read_link(&mut su.acquire().await.expect("acquire"))
+        .await
+        .expect("read link")
+        .expect("row");
+    let opened = momo_settings::decrypt_link(&row, TEST_PROVIDER_MASTER_KEY).expect("opens");
+    assert_eq!(
+        opened.credential,
+        momo_settings::LinkCredential::AnthropicKey(TEST_ANTHROPIC_KEY.to_string())
+    );
+    assert!(!String::from_utf8_lossy(&row.bearer_ciphertext).contains("LEAKCANARY"));
+
+    let audits: Vec<String> = sqlx::query_scalar(
+        "SELECT action || ' ' || COALESCE(detail::text, '') FROM audit_log WHERE workspace_id = $1",
+    )
+    .bind(fixture.workspace)
+    .fetch_all(&su)
+    .await
+    .expect("audit rows");
+    assert!(
+        audits.iter().any(|row| row.contains("anthropic-key")),
+        "the audit names the kind: {audits:?}"
+    );
+    seen.push_str(&audits.join("\n"));
+    let plain: Vec<String> =
+        sqlx::query_scalar("SELECT base_url || ' ' || mode FROM provider_link")
+            .fetch_all(&su)
+            .await
+            .expect("plaintext columns");
+    seen.push_str(&plain.join("\n"));
+
+    assert!(
+        !seen.contains("LEAKCANARY"),
+        "the Anthropic key reached a response, error, audit row or plaintext column"
+    );
+
+    sqlx::query("DELETE FROM provider_link")
+        .execute(&su)
+        .await
+        .expect("clear provider_link");
+}

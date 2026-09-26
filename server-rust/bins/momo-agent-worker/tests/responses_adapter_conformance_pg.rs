@@ -390,7 +390,13 @@ fn worker_config() -> WorkerConfig {
 /// and the real **routed** provider, so the envelope-kind mapping is part of what
 /// is under test rather than something the harness decided.
 async fn build_worker(config: WorkerConfig) -> AgentWorker {
-    let provider = http_provider(config.request_timeout).expect("build the shipped provider pair");
+    // #2852/#2894: the mock provider AND the mock token endpoint are loopback
+    // listeners, which the egress guard only admits under the operator's
+    // ADR-0004 증보 opt-in — for both the turn and the refresh.
+    let mut config = config;
+    config.egress.allow_local = true;
+    let provider = http_provider(config.request_timeout, config.egress.clone())
+        .expect("build the shipped provider pair");
     AgentWorker::new(momo_worker_pool().await, provider, config)
 }
 
