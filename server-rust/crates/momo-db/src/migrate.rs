@@ -432,19 +432,26 @@ mod tests {
     /// `subscription_harness`, a shape CHECK, and a trigger that makes
     /// `owner_only` final. `agent` stays under its existing FORCE RLS policy; no
     /// table or policy is added. schema_v0.sql is not modified.
+    ///
+    /// 090 is #2850's notification pause expiry and DND bundle (ADR-0124 증보
+    /// 2): `notification_rule` gains `dnd_until` and the bundle memory
+    /// (`presence_prev_dnd`, `presence_prev_dnd_until`), `member` gains
+    /// `presence_dnd_until`, each with a shape CHECK. Both tables stay under
+    /// their existing FORCE RLS policy; no table or policy is added.
+    /// schema_v0.sql is not modified.
     #[test]
-    fn discovers_contiguous_migrations_001_to_089() {
+    fn discovers_contiguous_migrations_001_to_090() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            89,
-            "expected 89 migrations under {}",
+            90,
+            "expected 90 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 89);
+        assert_eq!(migrations.last().unwrap().version, 90);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

@@ -138,10 +138,11 @@ pub use message::{
     HISTORY_LIMIT_MAX, REPLIES_LIMIT_DEFAULT, REPLIES_LIMIT_MAX,
 };
 pub use notification_rule::{
-    get_notification_rule_in_tx, set_notification_rule_in_tx, NotificationRule,
+    get_notification_rule_in_tx, pause_in_force, set_notification_rule_in_tx, NotificationRule,
+    NotificationRuleUpdate,
 };
 pub use presence::{
-    build_presence_payload, declared_presence_for, decode_optional_presence,
+    build_presence_payload, declared_presence_for, decode_optional_presence, effective_presence,
     normalize_status_emoji, normalize_status_text, presence_status_for,
     set_declared_presence_in_tx, set_presence_status_in_tx, status_expires_at_from_ms,
     CustomStatus, CustomStatusInvalid, CustomStatusPatch, DeclaredPresence, PresenceStatus,

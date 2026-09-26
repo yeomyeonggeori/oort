@@ -26,6 +26,15 @@ describe("presenceWriteBody (omit vs null)", () => {
     );
   });
 
+  it("sends dndUntilMs only when chosen (ADR-0124 증보 2)", () => {
+    expect(
+      JSON.stringify(presenceWriteBody({ status: "dnd", dndUntilMs: 42 }))
+    ).toBe('{"status":"dnd","dndUntilMs":42}');
+    expect(
+      JSON.stringify(presenceWriteBody({ status: "dnd", dndUntilMs: null }))
+    ).toBe('{"status":"dnd","dndUntilMs":null}');
+  });
+
   it("emits JSON null for a present clear, not a dropped key", () => {
     expect(
       JSON.stringify(

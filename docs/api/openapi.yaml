@@ -1130,6 +1130,11 @@ paths:
         All three null clears the custom status. Broadcasts on the existing
         `type: presence` `ch:` rail. No audit row (personal intent; the
         original presence PUT was unaudited).
+        ADR-0124 증보 2: `dndUntilMs` (only with `status: dnd`) gives DND an
+        expiry. Choosing DND also pauses notifications in the same transaction
+        (until the same moment, or longer if a pause was already on); leaving
+        DND restores the pause that was there before. Clients never write
+        `notification-rules` alongside. An expired DND reads as `auto`.
       security:
         - bearerAuth: []
       parameters:
@@ -1148,7 +1153,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/PresenceStatusResponse"
         "400":
-          description: Invalid status, overlong text/emoji, or unrepresentable expiry.
+          description: >
+            Invalid status, overlong text/emoji, unrepresentable expiry, a
+            `dndUntilMs` that is not in the future, or `dndUntilMs` on a
+            status other than `dnd`.
           content:
             application/json:
               schema:
@@ -2507,6 +2515,8 @@ paths:
         the request). No stored row answers as both switches off. `dnd` suppresses
         every push for this member across the workspace; `mentionOverridesMute`
         lets a mention through a channel this member muted in 018.
+        ADR-0124 증보 2: `dnd` is effective (false once `dndUntilMs` has
+        passed); `dndUntilMs` is non-null only while a timed pause is running.
       security:
         - bearerAuth: []
       parameters:
@@ -2538,6 +2548,11 @@ paths:
         (pause-everything means everything); `mentionOverridesMute` only affects
         `reason=mention`, so a muted channel still stays silent for DMs and
         approval requests. Unread/read-state is untouched.
+        ADR-0124 증보 2: optional `dndUntilMs` — omitted keeps a still-running
+        expiry, null is open-ended, a value must be in the future. The
+        notifier compares it at judgment time (no sweeper). A PUT that changes
+        the pause detaches it from declared DND, so ending DND will not
+        overwrite it.
       security:
         - bearerAuth: []
       parameters:
@@ -2556,7 +2571,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/NotificationRulesResponse"
         "400":
-          description: Invalid or unknown request field.
+          description: Invalid or unknown request field, or a `dndUntilMs` not in the future.
           content:
             application/json:
               schema:
@@ -8914,6 +8929,14 @@ components:
             offline otherwise); `away`/`dnd` are the two manual overrides.
             Absent for agents (presence is human-only, their liveness is
             agent_run) and absent from a server too old to carry the column.
+            ADR-0124 증보 2: an expired DND is projected as `auto`.
+        dndUntilMs:
+          type: integer
+          format: int64
+          description: >
+            ADR-0124 증보 2. Running DND expiry (epoch ms), present only while
+            `presenceStatus` is `dnd` with an expiry ahead. No event fires at
+            expiry; past it the client treats the member as `auto`.
         statusEmoji:
           type: string
           description: >
@@ -8981,6 +9004,15 @@ components:
           description: >
             ADR-0176 optional expiry. Omitted = leave stored value. JSON null =
             clear. A reached stamp is accepted on write and ignored on read.
+        dndUntilMs:
+          type: integer
+          format: int64
+          nullable: true
+          description: >
+            ADR-0124 증보 2. DND expiry (epoch ms), only with `status: dnd`.
+            Omitted = keep a still-running expiry while DND stays on. JSON null
+            = open-ended. A value must be in the future. Notifications are
+            paused until the same moment.
 
     PresenceStatusResponse:
       type: object
@@ -8989,6 +9021,11 @@ components:
         status:
           type: string
           enum: [auto, away, dnd]
+          description: Effective — an expired DND answers `auto`.
+        dndUntilMs:
+          type: integer
+          format: int64
+          description: ADR-0124 증보 2. Present only while a timed DND is running.
         statusEmoji:
           type: string
         statusText:
@@ -10002,13 +10039,27 @@ components:
         mentionOverridesMute:
           type: boolean
           description: Let a mention through a channel this member muted (018).
+        dndUntilMs:
+          type: integer
+          format: int64
+          nullable: true
+          description: >
+            ADR-0124 증보 2. Pause expiry (epoch ms). Omitted = keep a
+            still-running expiry; null = open-ended; a value must be in the
+            future. Cleared when `dnd` is false.
 
     NotificationRulesResponse:
       type: object
-      required: [dnd, mentionOverridesMute]
+      required: [dnd, dndUntilMs, mentionOverridesMute]
       properties:
         dnd:
           type: boolean
+          description: Effective — false once a timed pause has expired.
+        dndUntilMs:
+          type: integer
+          format: int64
+          nullable: true
+          description: ADR-0124 증보 2. Epoch ms while a timed pause is running, else null.
         mentionOverridesMute:
           type: boolean
 

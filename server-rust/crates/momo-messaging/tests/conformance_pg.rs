@@ -625,6 +625,7 @@ async fn notification_rule_upserts_and_isolates_by_tenant() {
                 member_a,
                 NotificationRule {
                     dnd: true,
+                    dnd_until: None,
                     mention_overrides_mute: true,
                 },
             )
@@ -641,6 +642,7 @@ async fn notification_rule_upserts_and_isolates_by_tenant() {
                 member_a,
                 NotificationRule {
                     dnd: false,
+                    dnd_until: None,
                     mention_overrides_mute: true,
                 },
             )
@@ -654,6 +656,7 @@ async fn notification_rule_upserts_and_isolates_by_tenant() {
         after,
         NotificationRule {
             dnd: false,
+            dnd_until: None,
             mention_overrides_mute: true
         },
         "the second write replaces the row rather than inserting a duplicate"

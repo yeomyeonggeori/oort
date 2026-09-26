@@ -57,10 +57,19 @@ export interface PresenceWrite {
   statusEmoji?: string | null;
   statusText?: string | null;
   statusExpiresAtMs?: number | null;
+  /**
+   * ADR-0124 증보 2: DND expiry (epoch ms), only with `status: "dnd"`.
+   * Omitted keeps a running expiry; `null` is open-ended. The server pauses
+   * notifications until the same moment — never PUT notification-rules
+   * alongside.
+   */
+  dndUntilMs?: number | null;
 }
 
 export interface PresenceSnapshot {
   status: PresenceStatus;
+  /** ADR-0124 증보 2: present only while a timed DND is running. */
+  dndUntilMs?: number;
   statusEmoji?: string;
   statusText?: string;
   statusExpiresAtMs?: number;
@@ -117,6 +126,9 @@ export function presenceWriteBody(write: PresenceWrite): Record<string, unknown>
   }
   if (write.statusExpiresAtMs !== undefined) {
     body.statusExpiresAtMs = write.statusExpiresAtMs;
+  }
+  if (write.dndUntilMs !== undefined) {
+    body.dndUntilMs = write.dndUntilMs;
   }
   return body;
 }
