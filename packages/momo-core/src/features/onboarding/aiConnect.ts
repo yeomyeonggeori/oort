@@ -145,7 +145,7 @@ export function loginPollNext(elapsedMs: number): number | "stop" {
  * oort가 로그인을 대신하지 않는다.
  */
 export const HARNESS_LOGIN_COMMAND: Record<LocalHarnessId, string> = {
-  claude: "claude auth login",
+  claude: "claude auth login --claudeai",
   codex: "codex login",
 };
 

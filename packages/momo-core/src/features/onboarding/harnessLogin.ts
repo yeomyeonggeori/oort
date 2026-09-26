@@ -119,11 +119,11 @@ export function loginFailedDetail(harness: LocalHarnessId, reason: HarnessLoginF
   const cli = HARNESS_LABEL[harness];
   switch (reason) {
     case "timeout":
-      return "5분 동안 브라우저에서 돌아오지 않아 멈췄어요. 다시 시도해 주세요.";
+      return "5분 동안 브라우저에서 돌아오지 않아 멈췄어요.";
     case "spawn":
       return "명령을 복사해 터미널에서 직접 로그인해 주세요.";
     default:
-      return `${attachParticle(cli, "subject")} 아직 로그인되지 않았다고 알려 왔어요. 다시 시도해 주세요.`;
+      return `${attachParticle(cli, "subject")} 아직 로그인되지 않았다고 알려 왔어요.`;
   }
 }
 

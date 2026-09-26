@@ -158,7 +158,7 @@ describe("「Claude로 로그인」 버튼을 만들 문장이 없다 (ADR-0193 
   });
 
   it("the Phase 1 fallback copies the same official sign-in entry the dialog runs", () => {
-    expect(HARNESS_LOGIN_COMMAND).toEqual({ claude: "claude auth login", codex: "codex login" });
+    expect(HARNESS_LOGIN_COMMAND).toEqual({ claude: "claude auth login --claudeai", codex: "codex login" });
   });
 
   it("the boundary note says oort does not read the login", () => {

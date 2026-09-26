@@ -159,6 +159,13 @@ function LoginDialogBody({
   const lineId = useId();
   const [terminalOpen, setTerminalOpen] = useState(method === "device");
   const connectedRef = useRef(false);
+  // 상태마다 키보드의 첫 자리(design-review M1): 기다림 = 취소, 실패 = 다시 시도
+  // (없으면 닫기), 연결됨 = 완료. 접힘 링크가 Enter를 먼저 받지 않게 한다.
+  const primaryRef = useRef<HTMLButtonElement>(null);
+  const focusPrimary = () => primaryRef.current?.focus();
+  useEffect(() => {
+    focusPrimary();
+  }, [status.phase]);
 
   // 연결됨: 부른 쪽에 한 번 알리고, 잠깐 보여 준 뒤 닫는다.
   useEffect(() => {
@@ -194,6 +201,20 @@ function LoginDialogBody({
       data-testid="harness-login-dialog"
       data-phase={status.phase}
       onEscapeKeyDown={() => onClose()}
+      onOpenAutoFocus={(event) => {
+        event.preventDefault();
+        focusPrimary();
+      }}
+      onCloseAutoFocus={(event) => {
+        // 연결된 뒤에는 모달을 연 단추가 사라진다(줄이 준비됨이 된다). 캐럿을
+        // 그 줄의 라디오로 옮긴다(design-review M2).
+        if (!connectedRef.current) return;
+        const radio = document.getElementById(`ai-connect-${harness}`);
+        if (radio) {
+          event.preventDefault();
+          radio.focus();
+        }
+      }}
     >
       <DialogTitle className="sr-only">{loginDialogTitle(harness)}</DialogTitle>
       <KomettoGuide
@@ -204,48 +225,51 @@ function LoginDialogBody({
         lineTestId="harness-login-line"
       />
 
-      {showCode && <CodeField onSubmit={(code) => controller?.submitCode(code)} />}
+      {/* 보조 링크 한 묶음(design-review L4). */}
+      <div className="flex min-w-0 flex-col gap-2">
+        {showCode && <CodeField onSubmit={(code) => controller?.submitCode(code)} />}
 
-      {spawnFailed && (
-        <FallbackRow
-          harness={harness}
-          onStarted={() => {
-            onFallbackStarted(harness);
-            onClose();
-          }}
-        />
-      )}
+        {spawnFailed && (
+          <FallbackRow
+            harness={harness}
+            onStarted={() => {
+              onFallbackStarted(harness);
+              onClose();
+            }}
+          />
+        )}
 
-      {canShowTerminal && (
-        <div className="flex min-w-0 flex-col gap-2">
-          <button
-            type="button"
-            className="harness-login-disclosure press focus-visible:focus-ring"
-            aria-expanded={terminalOpen}
-            aria-controls={`${lineId}-terminal`}
-            onClick={() => setTerminalOpen((open) => !open)}
-            data-testid="harness-login-terminal-toggle"
-          >
-            {terminalOpen ? LOGIN_TERMINAL_HIDE_LABEL : LOGIN_TERMINAL_SHOW_LABEL}
-          </button>
-          {terminalOpen && controller !== null && (
-            <div
-              id={`${lineId}-terminal`}
-              className="harness-login-terminal"
-              data-testid="harness-login-terminal"
+        {canShowTerminal && (
+          <div className="flex min-w-0 flex-col gap-2">
+            <button
+              type="button"
+              className="harness-login-disclosure press focus-visible:focus-ring"
+              aria-expanded={terminalOpen}
+              aria-controls={terminalOpen ? `${lineId}-terminal` : undefined}
+              onClick={() => setTerminalOpen((open) => !open)}
+              data-testid="harness-login-terminal-toggle"
             >
-              <LocalTerminalPane
-                key={live.paneId}
-                pane={{ id: live.paneId, index: 1, focused: true, maximized: false }}
-                platform={keyPlatformOf(navigator.platform || navigator.userAgent)}
-                sessions={controller.sessions}
-                label={`${loginDialogTitle(harness)} 터미널`}
-                restartable={false}
-              />
-            </div>
-          )}
-        </div>
-      )}
+              {terminalOpen ? LOGIN_TERMINAL_HIDE_LABEL : LOGIN_TERMINAL_SHOW_LABEL}
+            </button>
+            {terminalOpen && controller !== null && (
+              <div
+                id={`${lineId}-terminal`}
+                className="harness-login-terminal"
+                data-testid="harness-login-terminal"
+              >
+                <LocalTerminalPane
+                  key={live.paneId}
+                  pane={{ id: live.paneId, index: 1, focused: true, maximized: false }}
+                  platform={keyPlatformOf(navigator.platform || navigator.userAgent)}
+                  sessions={controller.sessions}
+                  label={`${loginDialogTitle(harness)} 터미널`}
+                  restartable={false}
+                />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
         {deviceAvailable && (
@@ -260,29 +284,38 @@ function LoginDialogBody({
           </Button>
         )}
         {status.phase === "connected" ? (
-          <Button type="button" onClick={onClose} data-testid="harness-login-done">
+          <Button ref={primaryRef} type="button" onClick={onClose} data-testid="harness-login-done">
             {LOGIN_DONE_LABEL}
           </Button>
         ) : status.phase === "failed" ? (
           <>
             <Button
+              ref={spawnFailed ? primaryRef : undefined}
               type="button"
               variant="outline"
+              className="ai-connect-secondary"
               onClick={onClose}
               data-testid="harness-login-close"
             >
               {LOGIN_CLOSE_LABEL}
             </Button>
             {!spawnFailed && (
-              <Button type="button" onClick={() => retry()} data-testid="harness-login-retry">
+              <Button
+                ref={primaryRef}
+                type="button"
+                onClick={() => retry()}
+                data-testid="harness-login-retry"
+              >
                 {LOGIN_RETRY_LABEL}
               </Button>
             )}
           </>
         ) : (
           <Button
+            ref={primaryRef}
             type="button"
             variant="outline"
+            className="ai-connect-secondary"
             onClick={onClose}
             data-testid="harness-login-cancel"
           >
@@ -346,7 +379,6 @@ function CodeField({
       <button
         type="button"
         className="harness-login-disclosure press focus-visible:focus-ring"
-        aria-expanded={false}
         onClick={() => setOpen(true)}
         data-testid="harness-login-code-toggle"
       >

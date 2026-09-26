@@ -236,4 +236,52 @@ describe("HarnessLoginDialog", () => {
     expect(cli.spawns).toEqual([]);
     expect(dq("harness-login-line")?.textContent).toBe("로그인이 끝나지 않았어요.");
   });
+
+  it("키보드 첫 자리: 기다림 = 취소, 실패 = 다시 시도, 연결됨 = 완료 (접힘 링크가 아니다)", async () => {
+    cli.probes = [{ id: "claude", installed: true, auth: "needs_login" }];
+    mount("claude");
+    await flush();
+    expect(document.activeElement).toBe(dq("harness-login-cancel"));
+    act(() => cli.exit?.({ id: 7, code: 0, signal: null }));
+    await flush();
+    expect(document.activeElement).toBe(dq("harness-login-retry"));
+    cli.probes = [{ id: "claude", installed: true, auth: "logged_in" }];
+    click(dq("harness-login-retry"));
+    await flush();
+    act(() => cli.exit?.({ id: 7, code: 0, signal: null }));
+    await flush();
+    expect(document.activeElement).toBe(dq("harness-login-done"));
+  });
+
+  it("연결된 뒤 닫히면 캐럿이 그 줄의 라디오로 간다(연 단추는 사라졌다)", async () => {
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.id = "ai-connect-claude";
+    document.body.append(radio);
+    cli.probes = [{ id: "claude", installed: true, auth: "logged_in" }];
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    const render = (open: boolean) =>
+      act(() => {
+        root!.render(
+          <HarnessLoginDialog
+            harness={open ? "claude" : null}
+            onClose={() => render(false)}
+            onConnected={() => undefined}
+            onFallbackStarted={() => undefined}
+          />
+        );
+      });
+    render(true);
+    await flush();
+    act(() => cli.exit?.({ id: 7, code: 0, signal: null }));
+    await flush();
+    click(dq("harness-login-done"));
+    await flush();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(document.activeElement).toBe(radio);
+  });
 });
