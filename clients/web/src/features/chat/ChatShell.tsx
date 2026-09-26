@@ -70,6 +70,7 @@ import {
 } from "@momo/core/features/timeline/stress";
 import { Composer } from "@/features/chat/Composer";
 import { canCreateChannelNow } from "@momo/core/features/channels/model";
+import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
 import { useOpenAddChannelMember } from "@/features/channels/useAddChannelMember";
 import {
@@ -378,6 +379,12 @@ export function ChatShell() {
   //     사이드바 「작업 콘솔」(`/work`) 의 `open-work-panel` → `?work-panel=1`.
   //   * 도크와 WorkPanel 은 XOR — 같은 세션의 ObserverTerminal 이중 마운트 금지.
   //     도크는 채팅 열 안, 컴포저 위에 앉고 컴포저를 덮지 않는다.
+  //   * #2753: 도크는 사이드바 「작업 콘솔」·설정 「코드 실행 호스트」와 같은
+  //     #2166 판정(`isSurfaceProvided("work")`) 뒤에 선다. 관전할 바이트를
+  //     내보내는 호스트가 없는 서버(셀프호스트 기본)에서 헤더 버튼만 살아
+  //     있으면 막다른 길이다. 로컬 워크벤치(M1, agent-workspace-2.0 §3.10)가
+  //     들어오면 이 진입점은 그 로컬 터미널 진입점으로 대체된다.
+  const terminalDockProvided = isSurfaceProvided("work");
   const [workOpen, setWorkOpen] = useState(false);
   const [dockOpen, setDockOpen] = useState(false);
   const terminalToggleRef = useRef<HTMLButtonElement>(null);
@@ -1030,8 +1037,9 @@ export function ChatShell() {
           >
             {/* TC-1 (#1758): 헤더 SquareTerminal 은 하단 터미널 도크만 연다.
                 채널 컨텍스트의 관전 진입은 도크가 승계한다. 이 testid 를
-                `open-work-panel` 로 남기면 게이트가 도크를 패널로 착각한다. */}
-            {stressCount === 0 && (
+                `open-work-panel` 로 남기면 게이트가 도크를 패널로 착각한다.
+                #2753: 작업 표면이 없는 서버에서는 버튼 자체를 내놓지 않는다. */}
+            {stressCount === 0 && terminalDockProvided && (
               <button
                 ref={terminalToggleRef}
                 type="button"
@@ -1298,7 +1306,7 @@ export function ChatShell() {
           )}
         </div>
 
-        {dockOpen && stressCount === 0 && (
+        {dockOpen && stressCount === 0 && terminalDockProvided && (
           <TerminalDock channelId={channelId} onClose={closeDock} />
         )}
 

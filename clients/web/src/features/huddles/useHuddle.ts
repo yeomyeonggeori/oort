@@ -61,7 +61,18 @@ export interface HuddleController {
 
 interface JoinedSession {
   huddleId: string;
-  expiresAtMs: number;
+}
+
+/**
+ * The join token was already past its expiry before audio dialled LiveKit.
+ * Only this pre-connect case ends in the "expired" copy: once connected,
+ * LiveKit validates `exp` at connection time only and pushes refreshed tokens
+ * over the signal channel, which livekit-client keeps for resume and full
+ * reconnects. A local timer on `expiresAtMs` therefore must not end a live
+ * call (#2757 — it cut every huddle at the 600s TTL).
+ */
+class HuddleTokenExpiredBeforeConnectError extends Error {
+  override name = "HuddleTokenExpiredBeforeConnectError";
 }
 
 /**
@@ -92,7 +103,6 @@ export function useHuddle(
   const joinAttemptHuddleRef = useRef<string | null>(null);
   const joinedRef = useRef<JoinedSession | null>(null);
   const audioRef = useRef<HuddleAudioSession | null>(null);
-  const expiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
 
   const refresh = useCallback(() => {
@@ -116,13 +126,6 @@ export function useHuddle(
       });
   }, [workspaceId, channelId]);
 
-  const clearExpiry = useCallback(() => {
-    if (expiryTimerRef.current !== null) {
-      clearTimeout(expiryTimerRef.current);
-      expiryTimerRef.current = null;
-    }
-  }, []);
-
   const disconnectAudio = useCallback(async () => {
     const audio = audioRef.current;
     audioRef.current = null;
@@ -135,7 +138,6 @@ export function useHuddle(
       const joined = joinedRef.current;
       joinedRef.current = null;
       setJoinedVersion((value) => value + 1);
-      clearExpiry();
       setMuted(false);
       setMicrophoneGainPercent(100);
       await disconnectAudio();
@@ -166,7 +168,7 @@ export function useHuddle(
         }
       }
     },
-    [clearExpiry, disconnectAudio, refresh, workspaceId]
+    [disconnectAudio, refresh, workspaceId]
   );
 
   const leaveForReason = useCallback(
@@ -175,16 +177,6 @@ export function useHuddle(
       if (mountedRef.current) setNotice(huddleErrorCopy(kind));
     },
     [leaveCurrent]
-  );
-
-  const scheduleExpiry = useCallback(
-    (expiresAtMs: number) => {
-      clearExpiry();
-      expiryTimerRef.current = setTimeout(() => {
-        void leaveForReason("expired");
-      }, Math.max(0, expiresAtMs - Date.now()));
-    },
-    [clearExpiry, leaveForReason]
   );
 
   const handleRealtime = useCallback(
@@ -212,7 +204,6 @@ export function useHuddle(
         if (endedJoined) {
           joinedRef.current = null;
           setJoinedVersion((value) => value + 1);
-          clearExpiry();
           setMuted(false);
           setMicrophoneGainPercent(100);
           void disconnectAudio();
@@ -224,7 +215,7 @@ export function useHuddle(
       }
       refresh();
     },
-    [channelId, clearExpiry, disconnectAudio, refresh]
+    [channelId, disconnectAudio, refresh]
   );
 
   useEffect(() => {
@@ -253,12 +244,11 @@ export function useHuddle(
     return () => {
       activationRef.current += 1;
       requestIdRef.current += 1;
-      clearExpiry();
       // Route/channel teardown must release both planes. React cannot await an
       // effect cleanup, so both operations are deliberately started here.
       void leaveCurrent(false);
     };
-  }, [channelId, workspaceId, clearExpiry, leaveCurrent]);
+  }, [channelId, workspaceId, leaveCurrent]);
 
   useEffect(() => {
     if (!realtime) return;
@@ -274,7 +264,6 @@ export function useHuddle(
       const joined = joinedRef.current;
       if (!joined) return;
       joinedRef.current = null;
-      clearExpiry();
       void disconnectAudio();
       leaveHuddleOnPageExit(workspaceId, joined.huddleId);
     };
@@ -284,7 +273,7 @@ export function useHuddle(
       window.removeEventListener("pagehide", onPageExit);
       window.removeEventListener("beforeunload", onPageExit);
     };
-  }, [clearExpiry, disconnectAudio, workspaceId]);
+  }, [disconnectAudio, workspaceId]);
 
   useEffect(
     () => () => {
@@ -316,16 +305,20 @@ export function useHuddle(
         runtimePromise,
         joinedPromise,
       ]);
-      joinedForRollback = {
-        huddleId: joined.huddle.id,
-        expiresAtMs: joined.expiresAtMs,
-      };
+      joinedForRollback = { huddleId: joined.huddle.id };
       if (
         !mountedRef.current ||
         activationRef.current !== activation
       ) {
         void leaveHuddle(workspaceId, joined.huddle.id);
         return;
+      }
+      // The only point where token expiry is the client's concern. After
+      // connect, disconnects surface through onDisconnected instead.
+      if (joined.expiresAtMs <= Date.now()) {
+        throw new HuddleTokenExpiredBeforeConnectError(
+          "huddle join token expired before connect"
+        );
       }
       connectedAudio = await runtime.connectHuddleAudio({
         livekitUrl: joined.livekitUrl,
@@ -351,7 +344,6 @@ export function useHuddle(
       setMicrophoneGainPercent(100);
       setMicrophoneDeviceId(readHuddleMicDeviceId() ?? "");
       dispatch({ type: "huddle-updated", huddle: joined.huddle });
-      scheduleExpiry(joined.expiresAtMs);
     } catch (error) {
       if (connectedAudio) await connectedAudio.disconnect();
       if (joinedForRollback) {
@@ -372,7 +364,10 @@ export function useHuddle(
           refresh();
         }
       }
-      const kind = huddleErrorKind(error);
+      const kind =
+        error instanceof HuddleTokenExpiredBeforeConnectError
+          ? "expired"
+          : huddleErrorKind(error);
       if (kind === "unconfigured") {
         const requestId = ++requestIdRef.current;
         dispatch({ type: "load-started", requestId });
@@ -401,7 +396,6 @@ export function useHuddle(
     channelId,
     leaveForReason,
     refresh,
-    scheduleExpiry,
   ]);
 
   const leave = useCallback(async () => {

@@ -130,6 +130,6 @@ name: 00-login
 - assertVisible:
     id: "tab-inbox"
 - assertVisible:
-    id: "shell-fab"
+    id: "shell-plus"
 - assertNotVisible:
     id: "server-url-input"
