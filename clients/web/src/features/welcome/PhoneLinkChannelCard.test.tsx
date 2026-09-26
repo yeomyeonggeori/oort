@@ -368,6 +368,33 @@ describe("PhoneLinkChannelCard", () => {
     }
   });
 
+  it("발급이 도는 동안 띠 안 문장은 「QR을 만들고 있습니다.」다", async () => {
+    markPhoneLinkCardPending(WS);
+    issueDeviceLink.mockReturnValue(new Promise(() => undefined));
+    mount();
+    click("phone-link-card-create");
+    await flush();
+    const body = q("phone-link-card-body")?.textContent ?? "";
+    expect(body).toContain("QR을 만들고 있습니다.");
+    expect(body).not.toContain("QR을 만드세요");
+  });
+
+  it("살아 있는 연결의 복원이 실패하면 사유와 다시 만들기가 선다(R3 M3-1)", async () => {
+    markPhoneLinkCardPending(WS);
+    writeDeviceLinkLive({
+      id: "019f9b10-0000-7000-8000-000000000d01",
+      expiresAt: Date.now() + 60_000,
+      deepLink: "oort://link?server=x&token=y",
+    });
+    getDeviceLink.mockRejectedValue(new Error("boom"));
+    mount();
+    click("phone-link-card-create");
+    await flush();
+    expect(issueDeviceLink).not.toHaveBeenCalled();
+    expect(q("device-link-banner")).not.toBeNull();
+    expect(q("device-link-create")).not.toBeNull();
+  });
+
   it("띠 안 기기 연결 카드는 없는 버튼을 약속하지 않는다(발급 중·오프라인)", async () => {
     markPhoneLinkCardPending(WS);
     mount(undefined, false, true);

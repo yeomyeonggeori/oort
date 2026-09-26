@@ -135,6 +135,8 @@ export function DeviceLinkCard({
   onLinkedRef.current = onLinked;
   // StrictMode가 effect를 두 번 부르는 개발 빌드에서도 발급은 한 번이다.
   const autoCreatedRef = useRef(false);
+  const embeddedRef = useRef(embedded);
+  embeddedRef.current = embedded;
 
   function markLinked(nextDevice?: DeviceLinkDevice): void {
     writeDeviceLinkLive(null);
@@ -179,11 +181,16 @@ export function DeviceLinkCard({
           );
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (cancelled) return;
         if (Date.now() >= live.expiresAt) {
           writeDeviceLinkLive(null);
           setPhase("expired");
+        } else if (embeddedRef.current) {
+          // 채널 카드 안에는 자기 「QR 만들기」가 없다. 복원이 실패한 채 idle로
+          // 두면 「만들고 있습니다」가 끝없이 거짓이 된다. 사유를 말하고 다시
+          // 만들기를 세운다(#2818 design-review R3 M3-1).
+          setBanner(failureCopy(error));
         }
       });
     return () => {
