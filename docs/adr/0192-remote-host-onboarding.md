@@ -4,7 +4,7 @@
 - Date: 2026-09-26
 - Deciders: 성재
 - 결재 인용: 작업 공간 2.0 제안서 §4 Q1~Q11에 성재가 「전부 권장대로 가자」고 답했다. 이 ADR은 Q6, Q8, Q9, Q10, Q11을 적는다.
-- 기안: Opus 5.5 worker(#2754)
+- 기안: Opus 5.5 worker(#2754). O4(D2 초안화)는 PR #2794 검수 뒤 planner가 위임 범위 안에서 판정했다.
 - 근거 자료: 제안서 `claudedocs/agent-workspace-2.0/brief.md` §2.4(공식 원격 기능), §2.5(Railway), §3.7(원격 터미널 세팅 네 경로), §3.9(커넥터). gitignore 대상이라 로컬에만 있다.
 - 증보: ADR-0125(호스트 등록 경로. 0125 머리에 역방향 줄), ADR-0188 D6·§8.1(설정 묶음 예외. 0188 D6과 §8.5에 역방향 줄)
 - 관계: ADR-0171(봉인·write-only URL 모양), ADR-0180(QR 기기 연결), ADR-0113·0147(커넥터 커스터디), ADR-0157(샌드박스 네트워크), ADR-0191(계정 프로필)
@@ -45,28 +45,40 @@
 원격 호스트에 작업 세팅을 옮기는 「설정 묶음」을 연다. 조건은 아래 전부다.
 - **소유자가 데스크탑에서 명시적으로 고른 항목만** 들어간다.
 - 각 항목은 **해시로 고정**한다. 호스트는 해시가 다르면 적용하지 않는다.
-- **hooks와 allow 규칙은 제외**한다. 권한 다리를 우회하는 길이기 때문이다.
+- **hooks와 allow 규칙이 든 항목은 거부**한다. 권한 다리를 우회하는 길이기 때문이다.
 - 묶음으로 들어간 **MCP 서버의 도구 호출도 ACP 권한 다리를 거친다.**
 - **시크릿은 묶음에 넣지 않는다.** MCP의 OAuth는 그 호스트 안에서 연결 카드로 한다(0125 D9).
 - 묶음은 선언형 파일(`oort-host-profile.json`)이다. 대상은 skills, 플러그인 마켓플레이스 항목, MCP 서버, CLAUDE.md·AGENTS.md, dotfiles 저장소다.
 - 이 조건 밖의 프로젝트 hooks·MCP·allow 규칙은 0188 D6대로 계속 읽지 않는다.
+- 이 절이 푸는 0188·0191 조건은 0188 §8.5에 모아 적었다.
 
 **해시 고정의 신뢰 근거.** 묶음 목록(항목별 종류·경로·내용 해시)은 **소유자 기기 키로 서명**한다(0188 R2의 기기 키 서명, ADR-0146 개정과 같은 키). host는 소유자의 등록 기기 공개키로 서명을 검증하고, 서버가 전달한 내용의 해시가 목록과 같을 때만 적용한다. 서버는 목록과 내용을 함께 바꿀 수 없다. 그래서 M4 설정 묶음은 R2 기기 키 서명 뒤에만 연다.
 
-**적용 위치.** host는 검증한 항목을 host 소유 폴더(`<state>/bundle/<목록 해시>/`, 읽기 전용)에 풀고, spawn마다 트리 해시를 다시 확인한다. 목록에 없는 파일이 생기면 spawn을 거부한다.
+**적용 위치(정본 하나, 하네스 폴더에는 링크).**
+- 정본은 `<state>/bundle/<목록 해시>/`(host 소유, 읽기 전용) 한 곳이다. 파일을 하네스 폴더로 복사하지 않는다.
+- 하네스 폴더에는 host가 **심볼릭 링크**만 건다.
+  - Claude 프로필: `skills/<이름>`, `CLAUDE.md`, 플러그인 폴더(Claude Code에 로컬 플러그인 폴더로 지정)
+  - Codex: 빈 `HOME`의 `.agents/skills/<이름>`, `CODEX_HOME/AGENTS.md`
+- MCP 항목은 파일이 아니다. host가 spawn마다 다시 쓰는 설정(Claude `settings.json`, Codex `config.toml` `mcp_servers`)에 서명 목록의 값 그대로 적는다.
+- **spawn마다의 해시 검사가 링크 대상 전체를 덮는다.**
+  - 정본 폴더 트리 해시가 서명 목록과 같아야 한다.
+  - 하네스 폴더의 링크는 목록에 있는 것뿐이어야 한다. 각 링크는 정본 폴더 안을 가리켜야 하고, 링크를 따라간 대상도 그 해시에 포함돼야 한다.
+  - 설정에 적힌 MCP 항목은 목록 값과 같아야 한다.
+  - 하나라도 어긋나면(목록 밖 파일, 정본 밖을 가리키는 링크, 해시 불일치) spawn을 거부한다.
 
 **항목별 규칙과 ADR-0188 §8.1 완화(기계적 판정, 벗겨 내지 않고 거부한다).** 벗겨 내면 내용이 서명된 해시와 달라지므로, 들어 있으면 **그 항목을 거부**하고 묶음 적용을 멈춘다.
 
 | 항목 | 거부 조건 | §8.1에서 완화하는 것 |
 |---|---|---|
-| skills | `SKILL.md` frontmatter에 `allowed-tools`(권한 부여)가 있음. 실행 파일은 두어도 되지만 실행은 권한 다리를 거친다 | F5: Codex 빈 `HOME`의 `.agents/skills`와 Claude 프로필 `skills/`에 **host가 넣은 묶음 스킬만** 허용한다. host가 넣지 않았거나 해시가 다른 파일이 있으면 지금처럼 거부한다 |
-| 플러그인 | `hooks/` 폴더, `hooks.json`, `plugin.json`의 `hooks` 키, 설정 파일의 `permissions` 키 중 하나라도 있음 | Claude에만 적용한다. Codex 조건 2의 `plugins` feature 끄기는 그대로다 |
+| skills | `SKILL.md` frontmatter에 `allowed-tools`(권한 부여)나 `hooks` 키가 있음. 실행 파일은 두어도 되지만 실행은 권한 다리를 거친다 | F5: Codex 빈 `HOME`의 `.agents/skills`와 Claude 프로필 `skills/`에 **host가 넣은 묶음 스킬만** 허용한다. host가 넣지 않았거나 해시가 다른 파일이 있으면 지금처럼 거부한다 |
+| 플러그인 | `hooks/` 폴더, `hooks.json`, `plugin.json`의 `hooks` 키, 설정 파일의 `permissions` 키, **딸린 MCP(`.mcp.json` 또는 manifest `mcpServers`)**, **`agents/`·`commands/` 폴더** 중 하나라도 있음. MCP는 MCP 항목으로 따로 넣는다 | Claude에만 적용한다. Codex 조건 2의 `plugins` feature 끄기는 그대로다 |
 | MCP 서버 | 항목의 `env`·`headers`에 리터럴 값이 있음(이름만 허용). `permissions.allow`에 `mcp__…` 규칙이 딸려 옴 | 0188 D6 「MCP 서버를 읽지 않는다」를 묶음 항목에 한해 연다. host가 다시 쓰는 설정(Claude `settings.json`, Codex `config.toml` `mcp_servers`)에만 들어간다. 도구 호출은 권한 다리를 거친다 |
 | CLAUDE.md·AGENTS.md | 없음(지시문일 뿐, 권한 효과 없음). 프롬프트 주입 면은 0188 RR-3과 같다 | 조건 1: host가 넣은 서명된 `AGENTS.md` 한 개만 `CODEX_HOME`에 허용한다. `rules/`·`hooks.json`·`prompts/`는 지금처럼 거부한다 |
 | dotfiles 저장소 | `.claude/`·`.codex/`·`.agents/` 아래 파일, 셸 시작 파일(`.zshrc` 등)의 `export`, git 설정의 `core.hooksPath`·`core.fsmonitor`, 시크릿 패턴이 있음 | 완화 없음. dotfiles는 설치 때 소유자 HOME에만 적용하고, 세션에는 §8.1 조건 1·8·F5와 `ZDOTDIR`이 그대로 걸린다 |
 
+- **잔여 위험:** stdio MCP 서버 프로세스의 **기동**은 권한 다리와 0188 §8.3 Bash sandbox 밖에서 host 권한으로 돈다. 도구 호출만 권한 다리를 거친다. 소유자가 서명해 고른 항목이라 받아들이고, 이름을 붙여 둔다(0188 RR 목록과 같은 취지).
 - **시크릿 검사:** 데스크탑이 묶음을 만들 때 시크릿 패턴 검사를 하고, host가 적용 전에 다시 한다. 하나라도 걸리면 거부한다.
-- **red proof(#2787, 없으면 머지하지 않는다):** 서명 불일치 거부 / 내용 해시 불일치 거부 / 목록 밖 파일이 생긴 뒤 spawn 거부 / hooks 든 플러그인 거부 / `allowed-tools` 스킬 거부 / `permissions.allow` 딸린 항목 거부 / 리터럴 env 든 MCP 항목 거부 / `.claude/` 든 dotfiles 거부 / 시크릿 패턴 거부 / 묶음 MCP 도구 호출이 권한 다리에 도착. 각 거부 분기를 지우면 시험이 실패해야 한다.
+- **red proof(#2787, 없으면 머지하지 않는다):** 서명 불일치 거부 / 내용 해시 불일치 거부 / 목록 밖 파일이 생긴 뒤 spawn 거부 / hooks 든 플러그인 거부 / MCP·`agents/`·`commands/` 든 플러그인 거부 / `allowed-tools`·`hooks` frontmatter 스킬 거부 / 정본 밖을 가리키는 링크 거부 / `permissions.allow` 딸린 항목 거부 / 리터럴 env 든 MCP 항목 거부 / `.claude/` 든 dotfiles 거부 / 시크릿 패턴 거부 / 묶음 MCP 도구 호출이 권한 다리에 도착. 각 거부 분기를 지우면 시험이 실패해야 한다.
 - 0188 §8.1 본문에 이 절을 가리키는 증보 줄을 달았다.
 
 ### D4. Claude 공식 원격 위임은 옵션이고, 원장 비대칭을 받아들이고 표시한다 (Q6)

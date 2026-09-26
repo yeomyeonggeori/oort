@@ -6,7 +6,7 @@
 - 결재 인용: 작업 공간 2.0 제안서 §4 Q1~Q11에 성재가 「전부 권장대로 가자」고 답했다. 이 ADR은 Q5를 적는다.
 - 기안: Opus 5.5 worker(#2754)
 - 근거 자료: 제안서 `claudedocs/agent-workspace-2.0/brief.md` §2.3(계정 스왑 관행과 약관), §3.5(계정 스왑). gitignore 대상이라 로컬에만 있다.
-- 증보: ADR-0135(같은 날 한 줄 증보). 0135의 개념(순서 있는 체인, 한도류만 넘김, 전환 기록, 숫자만 유입)은 같고, 저장 위치가 다르다.
+- 증보: ADR-0188 §8.1(D1이 조건 1·8을 완화한다. 0188 §8.5에 역방향 줄), ADR-0135(같은 날 한 줄 증보). 0135의 개념(순서 있는 체인, 한도류만 넘김, 전환 기록, 숫자만 유입)은 같고, 저장 위치가 다르다.
 - 관계: ADR-0004(provider 자격 비유입), ADR-0113 D1, ADR-0125 D4·D8·D11, ADR-0188 D6(workd env 허용목록, #2630), ADR-0190(로컬 레인)
 
 ## Context
@@ -32,6 +32,7 @@
 - **ADR-0188 §8.1을 이렇게 완화한다(조항별, 나머지는 그대로):**
   - 조건 1(host 전용 `CODEX_HOME` 하나, 고정 경로): 「프로필마다 고정 경로 하나」로 넓힌다. 각 `CODEX_HOME`은 조건 1의 나머지(0700, `auth.json`과 host가 매번 다시 쓰는 `config.toml`만, `AGENTS.md`·`rules/`·`hooks.json`·`prompts/`가 있으면 거부, 허용 폴더 안이면 거부, 자격 복사 금지)를 **각각** 만족한다. Codex 프로세스 `HOME`(F5 빈 폴더)은 프로필과 무관하게 하나 그대로다.
   - 조건 8(env 허용목록): Claude에 `CLAUDE_CONFIG_DIR` 하나를 더한다. 값은 host env에서 상속하지 않고 **host가 고른 프로필 폴더 경로로만 설정**한다. 그 폴더는 자격(키체인 항목 또는 자격 파일)과 host가 spawn마다 다시 쓰는 `settings.json`(hooks 없음, `permissions.allow` 없음, MCP 없음, §8.3 sandbox 설정 포함)만 가진다. 그 밖의 파일·폴더(`settings.local.json`, `CLAUDE.md`, `agents/`, `commands/`, `skills/`, `plugins/`, `hooks/` 등)가 있으면 spawn을 거부한다.
+    - **단, ADR-0192 D3의 서명된 묶음 항목은 이 폴더 내용 제한의 예외다.** host가 넣은 링크(skills·`CLAUDE.md`·플러그인)와 host가 `settings.json`에 쓴 묶음 MCP 항목은 허용하며, 그 절의 거부 규칙과 해시 검사를 따른다. host가 넣지 않은 것은 여전히 거부한다.
   - 조건 2·F5와 §8.2·§8.3은 바뀌지 않는다.
   - **red proof(#2781·#2777 계열 구현, 없으면 머지하지 않는다):** host env의 `CLAUDE_CONFIG_DIR`이 에이전트에 넘어가지 않음 / 프로필 폴더에 hooks가 든 `settings.json`이나 허용 밖 파일이 있으면 spawn 거부 / 프로필 `CODEX_HOME`에 `AGENTS.md`가 있으면 거부 / state 폴더 밖 또는 허용 폴더 안 프로필 경로 거부.
 - 서버에는 프로필 **라벨**(예: 「개인(Max)」)과 쿼터 숫자만 간다.
