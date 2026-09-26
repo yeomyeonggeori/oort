@@ -196,10 +196,15 @@ pub(crate) async fn route_agent_mentions_in_tx(
     // B13 / QA H7 — the 1:1 DM rule. Skipped entirely for an agent-authored
     // send: `resolve_dm_addressing` would answer `AuthorIsNotHuman` anyway, and
     // not asking is one fewer query on the A2A path.
+    // Whether this room is a DM at all — the hosted skip line needs it (a DM
+    // can never be approved for hosted delivery, so "approve this room" would
+    // be a false sentence there).
+    let mut in_dm = false;
     let dm_target = if send.author_is_agent {
         None
     } else {
         let audience = load_dm_audience_in_tx(&mut *conn, send.channel_id).await?;
+        in_dm = audience.is_dm;
         match resolve_dm_addressing(&audience, send.author_member_id, send.author_is_agent) {
             DmAddressing::Addressed(agent_member_id) => Some(agent_member_id),
             // Every other verdict is an ordinary "no": a group channel, a human↔
@@ -384,11 +389,18 @@ pub(crate) async fn route_agent_mentions_in_tx(
                     HostedSkipReason::ChannelUnapproved.as_str(),
                 )
                 .await?;
+                // A DM is never approvable (`confirm_hosted_connection_in_tx`
+                // takes `kind <> 'dm'` only), so it gets the sentence that is
+                // true there and no door to a screen that would refuse it.
                 hosted_skip_notice(
                     &mut *conn,
                     &send,
                     agent,
-                    HostedSkipReason::ChannelUnapproved,
+                    if in_dm {
+                        HostedSkipReason::DirectMessageNotApprovable
+                    } else {
+                        HostedSkipReason::ChannelUnapproved
+                    },
                 )
                 .await?;
                 continue;

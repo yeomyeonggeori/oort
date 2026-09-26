@@ -1487,7 +1487,8 @@ async fn an_inactive_hosted_agent_fails_closed_and_never_falls_back_to_managed()
         fixture.hosted_agent,
         fixture.human,
         "hosted_connection_unavailable",
-        "의 연결이 끊겨 있어서 답하지 못했어요. 설정 › 에이전트 자격에서 다시 연결해 주세요.",
+        "의 연결이 끊겨 있어서 답하지 못했어요. \
+         워크스페이스 관리자가 설정 › 연결 › 에이전트 자격에서 다시 연결할 수 있어요.",
     );
     assert_eq!(
         notices[0]["props"]["notice_action"]["href"],
@@ -1726,6 +1727,100 @@ async fn the_closed_production_gate_routes_a_hosted_agent_nowhere() {
     assert!(!list_tools(&client, &base, &fixture.hosted_bearer)
         .await
         .is_empty());
+}
+
+/// #2871 H-1 — a 1:1 DM can never be approved for hosted delivery
+/// (`confirm_hosted_connection_in_tx` takes `kind <> 'dm'` only), so the
+/// line there must not ask anyone to approve it, and must not open a door to a
+/// screen that refuses DMs. The audit still records the gate that refused it.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_dm_with_a_hosted_agent_says_dms_are_not_delivered_without_a_door() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    let dm = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO channel (id, workspace_id, kind, name, topic, dm_key, created_by) \
+         VALUES ($1, $2, 'dm', NULL, NULL, $3, $4)",
+    )
+    .bind(dm)
+    .bind(fixture.workspace)
+    .bind(dm.to_string())
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .expect("seed dm");
+    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
+        .bind(dm)
+        .bind(fixture.workspace)
+        .execute(&su)
+        .await
+        .expect("seed dm seq");
+    for member in [fixture.human, fixture.hosted_agent] {
+        sqlx::query(
+            "INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)",
+        )
+        .bind(fixture.workspace)
+        .bind(dm)
+        .bind(member)
+        .execute(&su)
+        .await
+        .expect("seed dm membership");
+    }
+
+    // No handle: the 1:1 DM rule addresses the agent by itself.
+    let sent: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{dm}/messages",
+            fixture.workspace
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"clientMsgId": Uuid::new_v4(), "body": "배포 결과 정리해줄래요?"}))
+        .send()
+        .await
+        .expect("dm send")
+        .json()
+        .await
+        .expect("dm body");
+    assert!(sent["id"].is_string(), "{sent}");
+
+    let reason: String = sqlx::query_scalar(
+        "SELECT detail->>'reason' FROM audit_log WHERE workspace_id=$1 \
+           AND action='agent.mention.skipped' ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        reason, "hosted_channel_unapproved",
+        "the gate that refused it"
+    );
+
+    let notices = hosted_notices(&su, fixture.workspace, dm).await;
+    assert_eq!(notices.len(), 1, "one visible line: {notices:?}");
+    assert_notice(
+        &notices[0],
+        fixture.hosted_agent,
+        fixture.human,
+        "hosted_dm_not_approvable",
+        "에게 전달되지 않아요. 외부 에이전트는 승인된 채널에서 불러 주세요.",
+    );
+    let body = notices[0]["body"].as_str().unwrap();
+    assert!(
+        !body.contains("승인해"),
+        "never asks to approve a DM: {body}"
+    );
+    assert!(
+        notices[0]["props"].get("notice_action").is_none(),
+        "no door to a screen that refuses DMs"
+    );
+    assert_notice_broadcast(&su, fixture.workspace, &notices[0]).await;
 }
 
 /// #2871 — the hosted skip lines in one channel, oldest first.
@@ -2018,7 +2113,8 @@ async fn an_unapproved_channel_never_reaches_the_hosted_job_path() {
         fixture.hosted_agent,
         fixture.human,
         "hosted_channel_unapproved",
-        "이 대화에서 답하도록 승인되지 않았어요. 설정 › 에이전트 자격에서 이 대화를 승인해 주세요.",
+        "에게 승인되지 않아서 전달하지 못했어요. \
+         워크스페이스 관리자가 설정 › 연결 › 에이전트 자격에서 이 채널을 승인할 수 있어요.",
     );
     assert_eq!(
         notices[0]["props"]["notice_action"],

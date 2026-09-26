@@ -7,7 +7,7 @@
 //! |---|---|
 //! | `hosted_delivery_not_enabled` | this server does not deliver to hosted runtimes at all (`MOMO_HOSTED_DELIVERY_ENABLED` closed) |
 //! | `hosted_connection_unavailable` | the agent has no active connection |
-//! | `hosted_channel_unapproved` | the connection was never approved for this conversation |
+//! | `hosted_channel_unapproved` | the connection was never approved for this channel; in a 1:1 DM it never can be (`kind <> 'dm'`), so the line there says so instead (`hosted_dm_not_approvable`) |
 //!
 //! Until #2871 each of these ended in an audit row and nothing else, so from
 //! the timeline "the agent ignored me" and "the server never asked it" looked
@@ -32,8 +32,6 @@
 
 use serde_json::{json, Value};
 use uuid::Uuid;
-
-use crate::korean::{attach_particle, ParticlePair};
 
 /// `message.props.source` of every hosted skip line.
 pub const HOSTED_SKIP_NOTICE_SOURCE: &str = "server.hosted_agent.notice.v1";
@@ -62,16 +60,22 @@ pub enum HostedSkipReason {
     DeliveryNotEnabled,
     ConnectionUnavailable,
     ChannelUnapproved,
+    /// `hosted_channel_unapproved` said inside a 1:1 DM. Approval takes
+    /// channels only, so "approve this room" would be false there.
+    DirectMessageNotApprovable,
 }
 
 impl HostedSkipReason {
-    /// The wire string — identical to the `agent.mention.skipped` audit reason,
-    /// so one word answers "what happened to this @mention" in both places.
+    /// The wire string. Identical to the `agent.mention.skipped` audit reason,
+    /// except the DM case, which the audit records as
+    /// `hosted_channel_unapproved` (the gate that refused it) and the line
+    /// names by what the reader can do about it.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::DeliveryNotEnabled => "hosted_delivery_not_enabled",
             Self::ConnectionUnavailable => "hosted_connection_unavailable",
             Self::ChannelUnapproved => "hosted_channel_unapproved",
+            Self::DirectMessageNotApprovable => "hosted_dm_not_approvable",
         }
     }
 
@@ -79,7 +83,7 @@ impl HostedSkipReason {
     /// setting outside the app, so its path is the guide link in the body.
     pub fn action(self) -> Option<(&'static str, &'static str)> {
         match self {
-            Self::DeliveryNotEnabled => None,
+            Self::DeliveryNotEnabled | Self::DirectMessageNotApprovable => None,
             Self::ConnectionUnavailable | Self::ChannelUnapproved => {
                 Some((HOSTED_SKIP_ACTION_LABEL, HOSTED_SKIP_ACTION_HREF))
             }
@@ -88,20 +92,28 @@ impl HostedSkipReason {
 }
 
 /// The sentence (해요체, with the way out).
+///
+/// The line is visible to everyone in the room, and only a workspace owner or
+/// admin can open 에이전트 자격, so the two fixable reasons say who can fix
+/// it rather than telling every reader to. The agent's name is never followed
+/// by a topic/subject particle: 「에게」 and 「의」 do not change with the
+/// final consonant, so a Latin name reads cleanly without the 「은(는)」 hedge.
 pub fn hosted_skip_notice_body(reason: HostedSkipReason, agent_display_name: &str) -> String {
     match reason {
         HostedSkipReason::DeliveryNotEnabled => format!(
-            // 「에게」 does not change with the final consonant.
             "{agent_display_name}에게 메시지를 전달하지 못했어요. 이 서버에서 외부 에이전트 전달이 꺼져 있어요. \
              서버 관리자에게 [켜는 방법]({HOSTED_DELIVERY_GUIDE_URL})을 전해 주세요."
         ),
         HostedSkipReason::ConnectionUnavailable => format!(
-            // 「의」 does not change with the final consonant either.
-            "{agent_display_name}의 연결이 끊겨 있어서 답하지 못했어요. 설정 › 에이전트 자격에서 다시 연결해 주세요."
+            "{agent_display_name}의 연결이 끊겨 있어서 답하지 못했어요. \
+             워크스페이스 관리자가 설정 › 연결 › 에이전트 자격에서 다시 연결할 수 있어요."
         ),
         HostedSkipReason::ChannelUnapproved => format!(
-            "{} 이 대화에서 답하도록 승인되지 않았어요. 설정 › 에이전트 자격에서 이 대화를 승인해 주세요.",
-            attach_particle(agent_display_name, ParticlePair::Topic)
+            "이 채널은 아직 {agent_display_name}에게 승인되지 않아서 전달하지 못했어요. \
+             워크스페이스 관리자가 설정 › 연결 › 에이전트 자격에서 이 채널을 승인할 수 있어요."
+        ),
+        HostedSkipReason::DirectMessageNotApprovable => format!(
+            "1:1 대화는 {agent_display_name}에게 전달되지 않아요. 외부 에이전트는 승인된 채널에서 불러 주세요."
         ),
     }
 }
@@ -162,12 +174,29 @@ mod tests {
         );
         assert_eq!(
             hosted_skip_notice_body(HostedSkipReason::ConnectionUnavailable, "Claude Code"),
-            "Claude Code의 연결이 끊겨 있어서 답하지 못했어요. 설정 › 에이전트 자격에서 다시 연결해 주세요."
+            "Claude Code의 연결이 끊겨 있어서 답하지 못했어요. \
+             워크스페이스 관리자가 설정 › 연결 › 에이전트 자격에서 다시 연결할 수 있어요."
         );
         assert_eq!(
-            hosted_skip_notice_body(HostedSkipReason::ChannelUnapproved, "김인턴"),
-            "김인턴은 이 대화에서 답하도록 승인되지 않았어요. 설정 › 에이전트 자격에서 이 대화를 승인해 주세요."
+            hosted_skip_notice_body(HostedSkipReason::ChannelUnapproved, "hermes"),
+            "이 채널은 아직 hermes에게 승인되지 않아서 전달하지 못했어요. \
+             워크스페이스 관리자가 설정 › 연결 › 에이전트 자격에서 이 채널을 승인할 수 있어요."
         );
+        assert_eq!(
+            hosted_skip_notice_body(HostedSkipReason::DirectMessageNotApprovable, "Claude Code"),
+            "1:1 대화는 Claude Code에게 전달되지 않아요. 외부 에이전트는 승인된 채널에서 불러 주세요."
+        );
+        for reason in [
+            HostedSkipReason::DeliveryNotEnabled,
+            HostedSkipReason::ConnectionUnavailable,
+            HostedSkipReason::ChannelUnapproved,
+            HostedSkipReason::DirectMessageNotApprovable,
+        ] {
+            assert!(
+                !hosted_skip_notice_body(reason, "hermes").contains("(는)"),
+                "no particle hedge after a Latin name"
+            );
+        }
     }
 
     #[test]
@@ -194,6 +223,17 @@ mod tests {
             Uuid::from_u128(4),
         );
         assert!(gate.get("notice_action").is_none());
+        let dm = hosted_skip_notice_props(
+            HostedSkipReason::DirectMessageNotApprovable,
+            Uuid::from_u128(1),
+            Uuid::from_u128(2),
+            Uuid::from_u128(3),
+            Uuid::from_u128(4),
+        );
+        assert!(
+            dm.get("notice_action").is_none(),
+            "no door to a screen that refuses DMs"
+        );
     }
 
     #[test]
@@ -203,6 +243,7 @@ mod tests {
             HostedSkipReason::DeliveryNotEnabled,
             HostedSkipReason::ConnectionUnavailable,
             HostedSkipReason::ChannelUnapproved,
+            HostedSkipReason::DirectMessageNotApprovable,
         ]
         .into_iter()
         .map(|reason| hosted_skip_notice_key(a, a, a, a, reason))
@@ -210,6 +251,6 @@ mod tests {
         let mut unique = keys.clone();
         unique.sort();
         unique.dedup();
-        assert_eq!(unique.len(), 3);
+        assert_eq!(unique.len(), 4);
     }
 }
