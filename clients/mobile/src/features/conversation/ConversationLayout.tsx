@@ -130,8 +130,11 @@ export function ConversationLayout({
   );
 }
 
-const buildStyles = (color: Palette) => StyleSheet.create({
-  clip: {flex: 1, overflow: 'hidden', backgroundColor: color.bg},
-  root: {flex: 1, backgroundColor: color.bg},
+// 바닥색이 없다 (DS2-4 #2716). 대화 화면의 바닥은 시안 A `.a-conv` 그라데이션이고
+// 그것은 이 층 **밑의** 화면이 칠한다 — 여기서 `bg` 를 다시 깔면 알약 컴포저 둘레와
+// 목록 위쪽이 그라데이션 대신 평평한 판이 된다. 스레드 판은 자기 판이 바닥을 진다.
+const buildStyles = (_color: Palette) => StyleSheet.create({
+  clip: {flex: 1, overflow: 'hidden'},
+  root: {flex: 1},
   list: {flex: 1},
 });

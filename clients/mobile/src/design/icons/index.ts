@@ -61,3 +61,39 @@ export const HOME_ICON_SIZE: Readonly<Record<HomeIconName, number>> = {
   down: 20,
   bot: 18,
 };
+
+// ---- 대화 아이콘 일곱 (DS2-4 #2716) ------------------------------------------
+// 같은 레시피(선 1.8, viewBox 24, 1·2·3배). `left`·`up`·`check`·`file`·`plus`·`x`는
+// 시안 `<symbol>`이고, `kebab`(세로 점 셋)은 시안에 없어 Lucide `ellipsis-vertical`
+// 이다 — owner 피드백 표의 Buzz 머리 오른쪽 「⋮」. 이름이 셸의 `plus`·`x`와 겹치는
+// 둘은 크기가 달라(20·14) 따로 굽는다.
+//
+// 허들 헤드폰은 **굽지 않았다**. 폰에는 허들이 없다(`realtime/channelRail.ts`가
+// 허들 레일을 받지 않는다). 자리는 `ConversationHeader`의 `huddle` prop이 지고,
+// 기능이 생기는 날 이 표에 한 줄이 는다.
+
+export const CONV_ICONS = {
+  left: require('./left.png') as ImageSourcePropType,
+  kebab: require('./kebab.png') as ImageSourcePropType,
+  plus: require('./plus20.png') as ImageSourcePropType,
+  up: require('./up.png') as ImageSourcePropType,
+  check: require('./check.png') as ImageSourcePropType,
+  cross: require('./cross.png') as ImageSourcePropType,
+  file: require('./file.png') as ImageSourcePropType,
+} as const;
+
+export type ConvIconName = keyof typeof CONV_ICONS;
+
+/**
+ * 시안 `.a-cbtn .ic.s22`(뒤로 22), `.ic`(⋮·+ 20), `.a-send .ic.s18`(↑ 18),
+ * `.a-step .ic.s14`(단계 표지 14), `.a-file .ic.s18`(파일 타일 18).
+ */
+export const CONV_ICON_SIZE: Readonly<Record<ConvIconName, number>> = {
+  left: 22,
+  kebab: 20,
+  plus: 20,
+  up: 18,
+  check: 14,
+  cross: 14,
+  file: 18,
+};
