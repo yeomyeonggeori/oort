@@ -14,6 +14,9 @@
 //   - 도크·칸 수, 가로 넘침 0, 흉내 셸 출력이 xterm에 그려졌는지(한글 포함)
 //   - ⌃`(code Backquote, key ₩)로 닫고 다시 연다
 //   - 터미널 안 입력이 PTY로 가서 되울린다
+//   - 칸 색 테마(#2849): 앱 라이트·다크 × 칸 어둡게·앱 따르기·밝게 여섯 조합에서
+//     칸 틀 바탕과 xterm이 그린 ANSI 빨강이 tokens.css `--term-*`의 그 스킴 값이다.
+//     설정의 색 고르기를 누르면 열린 칸이 바로 바뀐다(한 박자 늦은 색이 아니다).
 // =============================================================================
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -128,6 +131,86 @@ async function scenes(browser, origin) {
       await context.close();
     }
   }
+}
+
+// tokens.css `--term-bg` / `--term-ansi-red` / `--term-fg`의 두 값(밝게, 어둡게). 값을 바꾸면
+// 여기도 바꾼다. 시험(tokens.contrast.test.ts)이 대비를, 이 레인이 화면에 그 값이
+// 실제로 칠해지는지를 잰다.
+const TERM_EXPECT = {
+  light: { bg: "rgb(255, 254, 252)", red: "rgb(184, 35, 31)", fg: "rgb(31, 33, 39)" },
+  dark: { bg: "rgb(20, 22, 27)", red: "rgb(242, 99, 95)", fg: "rgb(227, 228, 232)" },
+};
+const PALETTE_VIEWPORT = { width: 1280, height: 1000 };
+
+async function paintedTerminal(page) {
+  return page.evaluate(() => {
+    const frame = document.querySelector('[data-testid="local-terminal-frame"]');
+    const rows = document.querySelector(".xterm-rows");
+    // 첫 ANSI 줄의 두 번째 조각(「red」)이 빨강이다.
+    const red = Array.from(rows?.querySelectorAll("span") ?? []).find((el) => el.textContent?.replace(/\u00a0/g, " ").trim() === "red");
+    const plain = Array.from(rows?.querySelectorAll("div") ?? []).find((el) => el.textContent?.includes("git status"));
+    const header = document.querySelector('[data-testid="workbench-pane"]');
+    return {
+      scheme: frame?.getAttribute("data-term-scheme") ?? null,
+      frameBg: frame ? getComputedStyle(frame).backgroundColor : null,
+      red: red ? getComputedStyle(red).color : null,
+      // 기본 전경: 색 없는 줄(「❯ git status」의 줄)을 xterm이 칠한 색.
+      fg: plain ? getComputedStyle(plain).color : null,
+      paneBg: header ? getComputedStyle(header).backgroundColor : null,
+    };
+  });
+}
+
+async function palette(browser, origin) {
+  for (const app of ["light", "dark"]) {
+    for (const term of ["dark", "app", "light"]) {
+      const context = await browser.newContext({ viewport: PALETTE_VIEWPORT, colorScheme: app, reducedMotion: "reduce" });
+      const page = await context.newPage();
+      await page.goto(`${origin}/#/design/local-terminal?scene=palette&term=${term}`);
+      await page.getByTestId("local-terminal-dock").waitFor();
+      await waitOutput(page);
+      const want = TERM_EXPECT[term === "app" ? app : term];
+      const got = await paintedTerminal(page);
+      check(
+        `palette app=${app} term=${term}: 칸 바탕·ANSI 빨강이 ${term === "app" ? app : term} 스킴 값`,
+        got.frameBg === want.bg && got.red === want.red && got.fg === want.fg,
+        got
+      );
+      await shot(page, `palette-app-${app}-term-${term}`);
+      await context.close();
+    }
+  }
+  // 고른 적이 없으면(새 기기) 앱이 라이트여도 칸은 어둡다.
+  {
+    const context = await browser.newContext({ viewport: PALETTE_VIEWPORT, colorScheme: "light", reducedMotion: "reduce" });
+    const page = await context.newPage();
+    await page.goto(`${origin}/#/design/local-terminal?scene=palette`);
+    await page.getByTestId("local-terminal-dock").waitFor();
+    await waitOutput(page);
+    const got = await paintedTerminal(page);
+    check("palette 기본값: 앱 라이트에서 고른 적 없는 칸은 어둡다", got.frameBg === TERM_EXPECT.dark.bg && got.red === TERM_EXPECT.dark.red, got);
+    await context.close();
+  }
+  // 설정에서 바꾸면 열린 칸이 바로 따라온다. 스킴을 커밋하기 전에 탐침을 읽으면
+  // 한 박자 늦은 색이 칠해진다(그 결함을 잡는 확인).
+  const context = await browser.newContext({ viewport: PALETTE_VIEWPORT, colorScheme: "light", reducedMotion: "reduce" });
+  const page = await context.newPage();
+  await page.goto(`${origin}/#/design/local-terminal?scene=palette&term=dark`);
+  await page.getByTestId("local-terminal-dock").waitFor();
+  await waitOutput(page);
+  const steps = [];
+  for (const [label, want] of [
+    ["밝게", TERM_EXPECT.light],
+    ["어둡게 (기본)", TERM_EXPECT.dark],
+    ["앱 테마 따르기", TERM_EXPECT.light],
+  ]) {
+    await page.getByTestId("terminal-theme-choice").getByText(label, { exact: true }).click();
+    await page.waitForTimeout(150);
+    const got = await paintedTerminal(page);
+    steps.push({ label, ...got });
+    check(`palette live: 「${label}」을 누르면 열린 칸이 바로 바뀐다`, got.frameBg === want.bg && got.red === want.red, got);
+  }
+  await context.close();
 }
 
 async function interactions(browser, origin) {
@@ -392,6 +475,7 @@ async function main() {
     const browser = await chromium.launch();
     try {
       await scenes(browser, preview.origin);
+      await palette(browser, preview.origin);
       await interactions(browser, preview.origin);
     } finally {
       await browser.close();
