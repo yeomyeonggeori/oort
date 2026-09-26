@@ -1390,4 +1390,119 @@ mod tests {
             json!({"model": "hermes-fast", "effort": "low"})
         );
     }
+
+    /// #2882 (brief §4.5-1, ADR-0193 D4): a job is the only thing a runtime
+    /// ever receives about a turn, so it is where a personal credential would
+    /// have to ride to reach one. The payload is built from the candidate, and
+    /// the candidate of a subscription agent carries its owner, harness and
+    /// hosted connection — none of which may cross into the job.
+    ///
+    /// An explicit key allow-list rather than a deny-list: a new key has to be
+    /// added here on purpose, and whoever adds `subscription_harness` or a
+    /// profile path finds this test in the way.
+    #[test]
+    fn a_job_payload_carries_no_personal_profile_fact_of_a_subscription_agent() {
+        const ALLOWED_KEYS: &[&str] = &[
+            "run_id",
+            "workspace_id",
+            "channel_id",
+            "agent_member_id",
+            "author_member_id",
+            "trigger_message_id",
+            "trigger_message_seq",
+            "model",
+            "prompt",
+            "recent_messages",
+            "tools",
+            "enabled_tools",
+            "source_attribution",
+            "max_output_tokens",
+            "step_count",
+            "depth",
+            "consecutive_auto",
+            "delivery",
+            "created_from",
+            "created_at_ms",
+            "system_prompt",
+            "effort",
+        ];
+        let owner = Uuid::from_u128(0xA11CE);
+        let connection = Uuid::from_u128(0xC0FFEE);
+        let owner_name = "OWNER-DISPLAY-SENTINEL-2882";
+        let subscription = MentionCandidate {
+            effort_pref: Some("low".into()),
+            enabled_tools: vec!["channel.read".into()],
+            hosted_delivery_disabled: true,
+            hosted_active_connection_id: Some(connection),
+            hosted_channel_approved: true,
+            owner_only: Some(crate::subscription::OwnerOnlyScope {
+                owner_member_id: owner,
+                owner_display_name: owner_name.into(),
+                harness: crate::subscription::SubscriptionHarness::ClaudeCode,
+                recently_seen: true,
+                reconnectable: true,
+            }),
+            ..candidate()
+        };
+        let routing = MentionRouting {
+            model: "hermes-agent".into(),
+            effort: Some("low".into()),
+            ignored_model_pref: None,
+            ignored_effort_pref: None,
+        };
+        let payload = mention_job_payload(
+            &trigger(),
+            &subscription,
+            &routing,
+            Uuid::from_u128(9),
+            &[json!({"body": "hi"})],
+            0,
+            MENTION_JOB_METHOD_GATEWAY,
+        );
+        let keys: Vec<&str> = payload
+            .as_object()
+            .expect("the payload is an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        // Every optional key is present here, so a vacuous object cannot pass.
+        assert_eq!(keys.len(), ALLOWED_KEYS.len(), "keys: {keys:?}");
+        for key in &keys {
+            assert!(
+                ALLOWED_KEYS.contains(key),
+                "`{key}` is not an allowed job key: a job must not carry the \
+                 subscription agent's owner, harness, connection or profile"
+            );
+        }
+        let wire = payload.to_string();
+        let wake = mention_job_broadcast_payload(
+            Uuid::from_u128(1),
+            subscription.member_id,
+            7,
+            Uuid::from_u128(9),
+            &payload,
+            1,
+        )
+        .to_string();
+        for text in [&wire, &wake] {
+            for forbidden in [
+                "claude_code",
+                "owner_only",
+                "subscription_harness",
+                "invocation_scope",
+                "CLAUDE_CONFIG_DIR",
+                "CODEX_HOME",
+                owner_name,
+                &owner.to_string(),
+                &owner.to_string().to_uppercase(),
+                &connection.to_string(),
+                &connection.to_string().to_uppercase(),
+            ] {
+                assert!(
+                    !text.contains(forbidden),
+                    "`{forbidden}` reached the job a runtime receives: {text}"
+                );
+            }
+        }
+    }
 }
