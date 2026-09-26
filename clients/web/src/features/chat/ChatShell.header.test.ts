@@ -129,6 +129,9 @@ describe("BZ-2 right control group rearranges existing actions", () => {
   // 언마운트될 때 불리는 onCloseAutoFocus 에서만 연다. jsdom 은 Presence 를 즉시
   // 내리므로 경합 자체는 gate:channel-header 가 실브라우저에서 잰다.
   it("opens the handed-off dialog only after the menu has unmounted (#2741)", () => {
+    // 자르는 기준이 사라지면 아래 not.toMatch 가 빈 조각 위에서 초록이 된다.
+    expect(MENU_CODE).toContain("onHandOff={");
+    expect(MENU_CODE).toContain("onCloseAutoFocus={");
     const handOff = MENU_CODE.slice(MENU_CODE.indexOf("onHandOff={"));
     const handOffBody = handOff.slice(0, handOff.indexOf("/>"));
     expect(handOffBody).not.toMatch(/setTopicOpen\(true\)/);
