@@ -10,11 +10,6 @@ import {
 } from "@/lib/realtime";
 import { startUpdateWatch } from "@/features/updates/store";
 import { ConnectPage } from "@/features/auth/ConnectPage";
-import { PhoneLinkFirstRun } from "@/features/auth/PhoneLinkFirstRun";
-import {
-  dismissPhoneLinkFirstRun,
-  phoneLinkFirstRunIsPending,
-} from "@/features/auth/phoneLinkFirstRunStore";
 import { ClaimPage } from "@/features/auth/ClaimPage";
 import { isClaimPath } from "@/features/auth/claimPath";
 import { OwnerOnboarding } from "@/features/onboarding/OwnerOnboarding";
@@ -152,7 +147,6 @@ export function App() {
   const firstRun = session
     ? decideFirstRunForSession({
         workspaceId: session.member.workspaceId,
-        phonePending: phoneLinkFirstRunIsPending(),
       })
     : null;
 
@@ -222,7 +216,8 @@ export function App() {
   }
 
   // ADR-0181 kickoff lives in the welcome channel, so a fresh signup holds the
-  // app open first. Then first-agent (#2216), then phone (ADR-0180 D7).
+  // app open first. Then first-agent (#2216). The phone link is not a stage:
+  // it is a card in the first-conversation channel (#2818, ADR-0193 D7).
   const bumpFirstRun = () => setFirstRunTick((n) => n + 1);
 
   if (ownerOnboardingShouldMount()) {
@@ -246,17 +241,6 @@ export function App() {
       >
         <FirstAgentStage onContinue={bumpFirstRun} />
       </FirstRunSession>
-    );
-  }
-
-  if (firstRun === "phone-link") {
-    return (
-      <PhoneLinkFirstRun
-        onEnterApp={() => {
-          dismissPhoneLinkFirstRun();
-          bumpFirstRun();
-        }}
-      />
     );
   }
 

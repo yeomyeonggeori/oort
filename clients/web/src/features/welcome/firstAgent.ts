@@ -17,11 +17,13 @@ import {
 // 감지 판정은 서버 status 만 본다. 클라가 「연결됨」을 먼저 말하지 않는다.
 // =============================================================================
 
-/** 로그인 뒤 first-run 순서. 킥오프는 웰컴 채널, 이 스테이지, 폰 연결. */
+/**
+ * 로그인 뒤 first-run 순서. 킥오프는 웰컴 채널, 그 다음 이 스테이지. 폰 연결은
+ * 게이트 단계가 아니라 첫 대화 채널 카드다(#2818, ADR-0193 D7).
+ */
 export const FIRST_AGENT_STAGE_ORDER = [
   "kickoff",
   "first-agent",
-  "phone-link",
 ] as const;
 
 export type FirstAgentStageId = (typeof FIRST_AGENT_STAGE_ORDER)[number];

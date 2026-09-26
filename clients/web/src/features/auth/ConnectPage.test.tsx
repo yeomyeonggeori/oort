@@ -10,7 +10,10 @@ import { applyLogin, clearSession } from "@/lib/session";
 import { useRestoredSession } from "@/app/session";
 import { clearRecentServers } from "./recentServers";
 import { ConnectPage } from "./ConnectPage";
-import { PHONE_LINK_FIRST_RUN_KEY } from "./phoneLinkFirstRunStore";
+import {
+  clearPhoneLinkCardForTests,
+  readPhoneLinkCard,
+} from "@/features/welcome/phoneLinkCardStore";
 import { firstAgentIsPending } from "@/features/welcome/firstAgentStore";
 import { releaseSessionRestore, holdSessionRestore, sessionRestoreHeld } from "./onboardingSessionHold";
 
@@ -99,7 +102,7 @@ beforeEach(() => {
   clearSession();
   setServerBase(null);
   clearRecentServers();
-  sessionStorage.removeItem(PHONE_LINK_FIRST_RUN_KEY);
+  clearPhoneLinkCardForTests(session.member.workspaceId);
   sessionStorage.removeItem(FRESH_SIGNUP_SLOT);
   window.history.replaceState(null, "", "/");
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -220,22 +223,32 @@ describe("BZ-6a onboarding shell", () => {
     expect(document.querySelector('[data-testid="onboarding-gateway"]')).not.toBeNull();
     const chrome = document.querySelector('[data-testid="onboarding-step-chrome"]');
     const back = document.querySelector('[data-testid="onboarding-back"]');
-    const progress = document.querySelector('[data-testid="onboarding-progress"]');
+    const dots = document.querySelector('[data-testid="onboarding-dots"]');
     expect(chrome).not.toBeNull();
     expect(chrome?.contains(back)).toBe(true);
-    expect(chrome?.contains(progress)).toBe(true);
+    expect(chrome?.contains(dots)).toBe(true);
     expect(back?.textContent).toContain("뒤로");
     expect(back?.querySelector("svg")).not.toBeNull();
     expect(back?.className).not.toMatch(/underline/);
-    expect(progress?.textContent).toBe("2/4");
+    // 숫자 카운터 대신 진행 점 (ADR-0193 D10, #2807). 로그인 경로는 한 칸이다.
+    expect(document.querySelector('[data-testid="onboarding-progress"]')).toBeNull();
+    expect(dots?.getAttribute("data-total")).toBe("1");
+    expect(
+      document.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
+    ).toBe("1단계 중 1단계");
+    // gateway는 온보딩 2.0 틀 위에 선다: 코메토가 이 화면의 질문을 h1으로 말한다.
+    expect(document.querySelector('[data-testid="onboarding-frame"]')).not.toBeNull();
+    const guideLine = document.querySelector('[data-testid="kometto-guide-line"]');
+    expect(guideLine?.tagName).toBe("H1");
+    expect(guideLine?.textContent).toBe("어느 팀 서버로 들어갈까요?");
     expect(document.querySelector('[data-testid="login-server"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="login-invite-code"]')).toBeNull();
     expect(document.activeElement?.getAttribute("data-testid")).toBe("login-server");
     click("onboarding-next");
     expect(document.querySelector('[data-testid="onboarding-account"]')).not.toBeNull();
-    expect(document.querySelector('[data-testid="onboarding-progress"]')?.textContent).toBe(
-      "3/4"
-    );
+    expect(
+      document.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
+    ).toBe("1단계 중 1단계");
     expect(document.querySelector('[data-testid="login-email"]')).not.toBeNull();
     expect(document.activeElement?.getAttribute("data-testid")).toBe("login-email");
     click("onboarding-back");
@@ -322,11 +335,8 @@ describe("BZ-6a onboarding shell", () => {
     });
     expect(onLoggedIn).not.toHaveBeenCalled();
     expect(document.querySelector('[data-testid="onboarding-profile"]')).not.toBeNull();
-    expect(sessionStorage.getItem(PHONE_LINK_FIRST_RUN_KEY)).toBe("pending");
+    expect(readPhoneLinkCard(session.member.workspaceId)).toBe("pending");
     expect(firstAgentIsPending(session.member.workspaceId)).toBe(true);
-    expect(
-      document.querySelector('[data-testid="onboarding-phone-link"]')
-    ).toBeNull();
     expect(login).not.toHaveBeenCalled();
   });
 
@@ -463,15 +473,16 @@ describe("BZ-6b onboarding profile step", () => {
     }
   });
 
-  it("opens S3 after a join that created the member, with no 뒤로 and counter 4/4", async () => {
+  it("opens S3 after a join that created the member, with no 뒤로 and the join dot", async () => {
     const onLoggedIn = await submitJoinFromPrefill();
     await vi.waitFor(() => {
       expect(document.querySelector('[data-testid="onboarding-profile"]')).not.toBeNull();
     });
     expect(onLoggedIn).not.toHaveBeenCalled();
-    expect(document.querySelector('[data-testid="onboarding-progress"]')?.textContent).toBe(
-      "4/4"
-    );
+    // 초대 경로는 가입 → AI 연결 두 점이고, S3는 아직 가입 화면(D1′)이다.
+    expect(
+      document.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
+    ).toBe("2단계 중 1단계");
     expect(document.querySelector('[data-testid="onboarding-back"]')).toBeNull();
     const name = document.querySelector(
       '[data-testid="onboarding-profile-name"]'

@@ -8,9 +8,9 @@ import { ApiError, type LoginResponse, type Member } from "@momo/core/lib/api";
 import type { WorkspaceIdentity } from "@momo/core/features/settings/api";
 import { ClaimPage } from "./ClaimPage";
 import {
-  dismissPhoneLinkFirstRun,
-  phoneLinkFirstRunIsPending,
-} from "./phoneLinkFirstRunStore";
+  clearPhoneLinkCardForTests,
+  readPhoneLinkCard,
+} from "@/features/welcome/phoneLinkCardStore";
 import {
   clearAllFirstAgentMarkers,
   firstAgentIsPending,
@@ -33,8 +33,10 @@ import {
 //   holdKickoffForFreshSignup 누락    → 1칸 "kickoff-hold" 가 "first-agent"
 //   markFreshSignup 누락              → 1칸 "kickoff-hold" 가 "first-agent"
 //                                       (fresh 마커 부재는 settled 로 읽힌다)
-//   markFirstAgentPending 누락        → 2칸 "first-agent" 가 "phone-link"
-//   markPhoneLinkFirstRunPending 누락 → 3칸 "phone-link" 가 "app"
+//   markFirstAgentPending 누락        → 2칸 "first-agent" 가 "app"
+//   markPhoneLinkCardPending 누락     → 폰 카드 저장소가 "pending" 이 아니다
+//                                       (폰은 게이트 칸이 아니라 첫 대화 채널
+//                                       카드다, #2818 ADR-0193 D7)
 // =============================================================================
 
 const claimOwnerPassword = vi.hoisted(() => vi.fn());
@@ -94,6 +96,7 @@ beforeAll(() => {
 
 function resetFirstRunState() {
   sessionStorage.clear();
+  clearPhoneLinkCardForTests(session.member.workspaceId);
   clearAllFirstAgentMarkers();
   clearFreshSignup();
   resetKickoffHoldForTests();
@@ -157,7 +160,6 @@ afterEach(() => {
 function decide(): FirstRunSurface {
   return decideFirstRunForSession({
     workspaceId: session.member.workspaceId,
-    phonePending: phoneLinkFirstRunIsPending(),
   });
 }
 
@@ -215,7 +217,7 @@ async function submitClaim(
 }
 
 describe("claim → first-run 사다리 (#2301)", () => {
-  it("claim 성공 뒤 게이트가 kickoff-hold → first-agent → phone-link → app 순으로 연다", async () => {
+  it("claim 성공 뒤 게이트가 kickoff-hold → first-agent → app 순으로 열고, 폰 카드는 pending 으로 남는다", async () => {
     // 전제: 마커가 없는 세션은 곧장 앱. 아래 단정이 헛돌지 않게 먼저 잰다.
     expect(decide()).toBe("app");
 
@@ -287,13 +289,10 @@ describe("claim → first-run 사다리 (#2301)", () => {
     expect(firstAgentIsPending(session.member.workspaceId)).toBe(true);
     expect(decide()).toBe("first-agent");
 
-    // 3칸: 폰 연결 (ADR-0180 D7).
+    // 3칸: 앱. 폰 연결은 게이트 칸이 아니다 — 첫 대화 채널 카드가 저장소의
+    // pending 을 읽는다(#2818, ADR-0193 D7).
     writeFirstAgentMarker(session.member.workspaceId, "done");
-    expect(phoneLinkFirstRunIsPending()).toBe(true);
-    expect(decide()).toBe("phone-link");
-
-    // 4칸: 앱.
-    dismissPhoneLinkFirstRun();
+    expect(readPhoneLinkCard(session.member.workspaceId)).toBe("pending");
     expect(decide()).toBe("app");
   });
 
@@ -307,7 +306,7 @@ describe("claim → first-run 사다리 (#2301)", () => {
     expect(onLoggedIn).not.toHaveBeenCalled();
     expect(peekFreshSignup()).toBeNull();
     expect(firstAgentIsPending(session.member.workspaceId)).toBe(false);
-    expect(phoneLinkFirstRunIsPending()).toBe(false);
+    expect(readPhoneLinkCard(session.member.workspaceId)).toBeNull();
     expect(sessionStorage.getItem("oort.onboarding.v1")).toBeNull();
     expect(decide()).toBe("app");
   });

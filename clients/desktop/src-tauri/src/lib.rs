@@ -39,6 +39,11 @@ mod opener;
 // platform" shape as `opener`, for bytes the webview cannot show itself.
 #[cfg(desktop)]
 mod pdf_viewer;
+// Local terminal lane (ADR-0190 D1·D2, #2772): the app process opens the PTY,
+// the webview draws it. Reachable only through the five `pty_*` commands,
+// which only `capabilities/pty.json` grants.
+#[cfg(desktop)]
+mod pty;
 // What the capability and window config owe the web bundle's drag regions and
 // file drops (#2671). Tests only.
 #[cfg(test)]
@@ -80,6 +85,7 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updater::UpdaterState::default())
+        .manage(pty::PtyState::default())
         .invoke_handler(tauri::generate_handler![
             deeplink::deep_link_take_pending,
             discovery::discovery_start,
@@ -99,6 +105,11 @@ pub fn run() {
             updater::updater_check,
             updater::updater_install,
             updater::updater_relaunch,
+            pty::pty_spawn,
+            pty::pty_write,
+            pty::pty_resize,
+            pty::pty_kill,
+            pty::pty_ack,
         ]);
 
     #[cfg(not(desktop))]
@@ -115,6 +126,17 @@ pub fn run() {
         keychain::keychain_clear_refresh_token,
         app_version,
     ]);
+
+    // A (re)loaded main page cannot reach the sessions the previous page
+    // opened (their channels died with it), so they end here (#2824 M3).
+    #[cfg(desktop)]
+    let builder = builder.on_page_load(|webview, payload| {
+        if webview.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started {
+            if let Some(state) = webview.try_state::<pty::PtyState>() {
+                state.0.kill_all();
+            }
+        }
+    });
 
     builder
         .manage(deeplink::DeepLinkState::default())
@@ -162,6 +184,17 @@ pub fn run() {
 
             Ok(())
         })
-        .run(context())
-        .expect("error while running momo desktop shell");
+        .build(context())
+        .expect("error while building momo desktop shell")
+        .run(|_app, _event| {
+            // Closing the app ends every local terminal's process group
+            // (#2772). `Exit` rather than `ExitRequested`: the latter can be
+            // vetoed, the former is the last event before the process ends.
+            #[cfg(desktop)]
+            if let tauri::RunEvent::Exit = _event {
+                if let Some(state) = _app.try_state::<pty::PtyState>() {
+                    state.0.kill_all();
+                }
+            }
+        });
 }
