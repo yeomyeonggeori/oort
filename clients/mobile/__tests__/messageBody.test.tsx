@@ -194,7 +194,7 @@ describe.each(SCHEMES)('%s — 본문 멘션 렌더', (scheme, palette) => {
     expect(JSON.stringify(view.toJSON())).toContain('@gone');
   });
 
-  it('내 멘션은 한 단 진한 채움과 추가 굵기로 남의 멘션과 갈린다', () => {
+  it('내 멘션은 신호색 채움과 추가 굵기로 남의 멘션과 갈린다', () => {
     render(
       <FixedScheme scheme={scheme}>
         <MessageBody
@@ -208,8 +208,8 @@ describe.each(SCHEMES)('%s — 본문 멘션 렌더', (scheme, palette) => {
     const self = screen.getByTestId('message-self-mention');
     const style = StyleSheet.flatten(self.props.style);
     expect(self.props.children).toBe('@Seongjae');
-    expect(style.color).toBe(palette.accentText);
-    expect(style.backgroundColor).toBe(palette.accentSurfaceStrong);
+    expect(style.color).toBe(palette.onAccent);
+    expect(style.backgroundColor).toBe(palette.accent);
     expect(style.backgroundColor).not.toBe(palette.accentSurface);
     expect(style.fontWeight).toBe('700');
     expect(screen.getByTestId('message-mention')).toBeTruthy();

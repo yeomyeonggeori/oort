@@ -574,8 +574,10 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * signal-soft」). 옛 판은 남의 멘션을 글자색만, 내 멘션만 채움으로 그렸다.
    *
    * 반경과 좌우 4 는 **없다**: 폰의 글 안 조각(중첩 `Text`)은 배경은 칠하지만
-   * 모서리·여백을 받지 않는다(PR 「시안과의 차이」). 내 멘션은 한 단 진한 채움과
-   * 굵기로 여전히 갈린다 — 「나를 불렀다」는 남의 멘션과 같은 옷이면 안 된다.
+   * 모서리·여백을 받지 않는다(PR 「시안과의 차이」). 내 멘션은 신호색 채움 +
+   * on-signal 글자 + 굵기로 여전히 갈린다 — 「나를 불렀다」는 남의 멘션과 같은 옷이면
+   * 안 된다. 한 단 진한 soft 채움(accentSurfaceStrong)은 라이트에서 3.8:1 이라
+   * 본문 AA 를 못 지나 버렸다(`conversationDs2.test.tsx` 대비 절).
    */
   mention: {
     color: color.accentText,
@@ -583,7 +585,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     fontWeight: '600',
   },
   mentionSelf: {
-    backgroundColor: color.accentSurfaceStrong,
+    color: color.onAccent,
+    backgroundColor: color.accent,
     fontWeight: '700',
   },
   // N-1: `#0b0d11` 은 토큰이 아니었고 **앱 배경보다 더 어두웠다**. 웹은 반대
