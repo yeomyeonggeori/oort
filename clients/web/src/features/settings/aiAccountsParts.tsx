@@ -208,7 +208,7 @@ export const AiAccountRow = forwardRef<
         aria-expanded={selected}
         aria-controls={selected ? asideId : undefined}
         onClick={onOpen}
-        className="ai-more tap-target grid place-items-center rounded-md text-icon hover:bg-surface-hover focus-visible:focus-ring"
+        className="ai-more tap-target press grid place-items-center rounded-md text-icon hover:bg-surface-hover focus-visible:focus-ring"
         data-testid={testId ? `${testId}-more` : undefined}
       >
         <MoreHorizontal className="size-4" aria-hidden="true" />
@@ -262,7 +262,7 @@ export function AiAside({
           type="button"
           onClick={onClose}
           aria-label="곁판 닫기"
-          className="tap-target grid size-icon-button shrink-0 place-items-center rounded-md text-icon hover:bg-surface-hover focus-visible:focus-ring"
+          className="tap-target press grid size-icon-button shrink-0 place-items-center rounded-md text-icon hover:bg-surface-hover focus-visible:focus-ring"
           data-testid={testId ? `${testId}-close` : undefined}
         >
           <X className="size-4" aria-hidden="true" />
