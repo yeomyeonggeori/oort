@@ -62,9 +62,11 @@ describe("onboarding S0 and brand lockup stay outside custom accent", () => {
         });
       }
     }
-    // Gateway, account, profile (S3), claim, and post-claim S2. A sixth site
-    // without `.brand-lockup` nearby is leftover below.
-    expect(hits, "OortMark signal-text sites").toHaveLength(5);
+    // Account, profile (S3), claim, and post-claim S2. The gateway moved onto
+    // the onboarding 2.0 frame (#2807) and says its question through
+    // KomettoGuide, not a lockup. A fifth site without `.brand-lockup` nearby
+    // is leftover below.
+    expect(hits, "OortMark signal-text sites").toHaveLength(4);
     const leftover = hits.filter((hit) => !hit.near.includes("brand-lockup"));
     expect(leftover, leftover.map((hit) => hit.file).join(", ")).toEqual([]);
   });

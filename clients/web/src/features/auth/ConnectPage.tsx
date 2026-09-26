@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { ArrowLeft, FlaskConical } from "lucide-react";
+import { usePrefersReducedMotion } from "@/design/hooks/usePrefersReducedMotion";
 import {
   changeMyDisplayName,
   joinWithInvite,
@@ -53,10 +54,18 @@ import { DiscoveredServerList } from "./DiscoveredServerList";
 import { useDiscoveredServers, type DiscoveredServer } from "./discovery";
 import { LandingStep } from "./LandingStep";
 import { OnboardingSlideTransition } from "./OnboardingSlideTransition";
+import { onboardingDots } from "@momo/core/features/onboarding/guide";
+import { KomettoGuide } from "@/features/onboarding/guide/KomettoGuide";
+import { OnboardingDots } from "@/features/onboarding/guide/OnboardingDots";
+import {
+  ONBOARDING_ACTION_CLASS,
+  ONBOARDING_FIELD_CLASS,
+  OnboardingColumn,
+  OnboardingFrame,
+} from "@/features/onboarding/guide/OnboardingFrame";
 import {
   gatewayPrefillFocus,
   initialOnboarding,
-  progressLabel,
   transitionFor,
   type OnboardingPath,
   type OnboardingStep,
@@ -103,18 +112,6 @@ function subscribeOnline(onChange: () => void): () => void {
 
 function readOnline(): boolean {
   return typeof navigator === "undefined" ? true : navigator.onLine;
-}
-
-function usePrefersReducedMotion(): boolean {
-  return useSyncExternalStore(
-    (onStoreChange) => {
-      const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-      mq.addEventListener("change", onStoreChange);
-      return () => mq.removeEventListener("change", onStoreChange);
-    },
-    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-    () => false
-  );
 }
 
 function readInitialOnboarding(): {
@@ -448,8 +445,13 @@ export function ConnectPage({
       : busy
         ? "로그인 중…"
         : "로그인";
-  const progress = progressLabel(step);
   const joinPath = path === "invite" || mode === "join";
+  // 진행 점 (ADR-0193 D10, #2807). 지금의 gateway · account · profile은 2.0 흐름의
+  // 한 화면(D1 로그인 / D1′ 초대 수락)을 나눠 그린 것이라 셋 다 그 점 하나에 선다.
+  // 숫자 카운터(2/4 · 3/4 · 4/4)는 이 점으로 바뀌었다. 화면 합치기는 OB2-3·4 몫이다.
+  const dots = joinPath
+    ? onboardingDots("invite", "join")
+    : onboardingDots("login", "sign-in");
   const profileFieldError = displayNameFieldError(profileName);
 
   function serverField() {
@@ -461,6 +463,7 @@ export function ConnectPage({
         <Input
           id="connect-server"
           ref={serverRef}
+          className={ONBOARDING_FIELD_CLASS}
           type="text"
           inputMode="url"
           autoComplete="url"
@@ -568,47 +571,53 @@ export function ConnectPage({
       />
     );
 
+  // 온보딩 2.0 틀 위의 gateway (#2807 OB2-1). 카드와 C2-04 락업 대신 코메토 머리와
+  // 말풍선이 이 화면의 질문을 말한다. 문구의 최종본과 로그인 한 화면 합치기는
+  // OB2-3(#2809)·OB2-4(#2810) 몫이다.
   const gatewayCard = (
-    <Card className="mx-auto w-full max-w-sm" data-testid="onboarding-gateway">
-      <CardHeader>
-        <h1 className="brand-lockup flex items-center gap-2 font-semibold leading-none tracking-tight">
-          <OortMark className="size-6 shrink-0 text-signal-text" />
-          <span className="text-title">oort</span>
-        </h1>
-        <CardDescription>
-          {joinPath
-            ? "초대 코드로 워크스페이스에 참여합니다."
-            : "서버를 고른 뒤 로그인합니다."}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        {cardShared}
-        <form onSubmit={onGatewaySubmit} className="flex flex-col gap-6">
-          {serverField()}
-          {joinPath && (
-            <label className="flex flex-col gap-1 text-body">
-              <FieldLabel>초대 코드</FieldLabel>
-              <Input
-                ref={codeRef}
-                value={inviteCode}
-                onChange={(e) => setInviteCode(e.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-                required
-                data-testid="login-invite-code"
-              />
-            </label>
-          )}
-          {failure?.onGateway && failureBanner}
-          <Button ref={nextRef} type="submit" data-testid="onboarding-next">
-            다음
-          </Button>
-        </form>
-        <div className="flex justify-end border-t border-line pt-4">
-          <RuntimeBadge />
-        </div>
-      </CardContent>
-    </Card>
+    <OnboardingColumn testId="onboarding-gateway">
+      <KomettoGuide
+        as="h1"
+        expression="idle"
+        line={joinPath ? "초대받은 팀으로 가 볼까요?" : "어느 팀 서버로 들어갈까요?"}
+        detail={
+          joinPath
+            ? "서버 주소와 초대 코드를 넣어 주세요."
+            : "주소를 넣으면 다음에 이메일을 물어요."
+        }
+      />
+      {cardShared}
+      <form onSubmit={onGatewaySubmit} className="flex flex-col gap-4">
+        {serverField()}
+        {joinPath && (
+          <label className="flex flex-col gap-1 text-body">
+            <FieldLabel>초대 코드</FieldLabel>
+            <Input
+              ref={codeRef}
+              className={ONBOARDING_FIELD_CLASS}
+              value={inviteCode}
+              onChange={(e) => setInviteCode(e.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+              required
+              data-testid="login-invite-code"
+            />
+          </label>
+        )}
+        {failure?.onGateway && failureBanner}
+        <Button
+          ref={nextRef}
+          type="submit"
+          className={ONBOARDING_ACTION_CLASS}
+          data-testid="onboarding-next"
+        >
+          다음
+        </Button>
+      </form>
+      <div className="flex justify-end">
+        <RuntimeBadge />
+      </div>
+    </OnboardingColumn>
   );
 
   const accountCard = (
@@ -901,52 +910,51 @@ export function ConnectPage({
     // overflow-x-clip (#2616): S1·S2·S3 사이의 line-slide가 카드를 오른쪽
     // 48px에서 들여오는 650ms 동안 앱 스크롤러(main.tsx)에 24px 가로 넘침이
     // 생겼다(WebKit iPhone 실측). 폰에서는 그 사이 화면이 옆으로 끌린다. clip은
-    // 스크롤 상자를 만들지 않고 넘친 몫만 자른다. FirstAgentStage와 같은 자리다.
-    <div className="flex min-h-full flex-col overflow-x-clip bg-pane">
-      <header
-        className="onboarding-step-chrome"
-        data-testid="onboarding-step-chrome"
-        {...titlebarDragProps(IS_TAURI)}
-      >
-        {/*
-          S3 has no 뒤로: the account exists now, and going back to S2 would
-          re-submit a join. The 4/4 counter stays.
-        */}
-        {step !== "profile" ? (
-          <Button
-            type="button"
-            variant="ghost"
-            data-testid="onboarding-back"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => {
-              if (step === "account") {
-                goTo("gateway");
-                focusLater(path === "invite" ? "code" : "server");
-              } else {
-                goTo("landing");
-                focusLater(
-                  path === "invite" ? "choose-invite" : "choose-server"
-                );
-              }
-            }}
-          >
-            <ArrowLeft aria-hidden="true" />
-            뒤로
-          </Button>
-        ) : (
-          <span />
-        )}
-        {progress && (
-          <p
-            className="text-meta text-ink-muted"
-            data-testid="onboarding-progress"
-            data-numeric
-          >
-            {progress}
-          </p>
-        )}
-      </header>
-      <div className="flex flex-1 items-center justify-center p-6">{slide}</div>
-    </div>
+    // 스크롤 상자를 만들지 않고 넘친 몫만 자른다(`OnboardingFrame`이 진다).
+    //
+    // 바닥은 온보딩 2.0 틀이다(#2807): 새벽하늘 canvas 위, 선 없는 56 머리 줄에
+    // 뒤로 · 진행 점. 바닥이 슬라이드 밖에 있어 전환 동안 움직이지 않는다.
+    <OnboardingFrame
+      top={
+        <header
+          className="onboarding-step-chrome"
+          data-testid="onboarding-step-chrome"
+          {...titlebarDragProps(IS_TAURI)}
+        >
+          {/*
+            S3 has no 뒤로: the account exists now, and going back to S2 would
+            re-submit a join. The progress dots stay.
+          */}
+          {step !== "profile" ? (
+            <Button
+              type="button"
+              variant="ghost"
+              data-testid="onboarding-back"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => {
+                if (step === "account") {
+                  goTo("gateway");
+                  focusLater(path === "invite" ? "code" : "server");
+                } else {
+                  goTo("landing");
+                  focusLater(
+                    path === "invite" ? "choose-invite" : "choose-server"
+                  );
+                }
+              }}
+            >
+              <ArrowLeft aria-hidden="true" />
+              뒤로
+            </Button>
+          ) : (
+            <span />
+          )}
+          <OnboardingDots dots={dots} />
+          <span aria-hidden="true" />
+        </header>
+      }
+    >
+      {slide}
+    </OnboardingFrame>
   );
 }
