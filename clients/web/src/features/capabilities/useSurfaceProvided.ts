@@ -24,7 +24,7 @@ import { useWorkHosts } from "@/features/work/useWorkSessions";
 /** 호스트가 켜지고 꺼지는 것을 다시 보는 주기. heartbeat 창(90초)보다 짧다. */
 export const WORK_HOST_PRESENCE_POLL_MS = 60_000;
 
-export type WorkHostPresence = "unknown" | "present" | "absent";
+export type WorkHostPresence = "unknown" | "present" | "absent" | "error";
 
 function needsHostProbe(): boolean {
   return HOST_GATED_SURFACE_IDS.some((id) => !isSurfaceProvided(id));
@@ -34,8 +34,10 @@ function needsHostProbe(): boolean {
  * 이 워크스페이스에 온라인 호스트가 있는가. 첫 답이 오기 전에는 `unknown`이다.
  *
  * 조회가 실패하면 마지막으로 받은 목록을 그대로 쓴다(React Query가 `data`를
- * 지우지 않는다). 한 번도 받지 못했으면 `absent`로 접는다: 그 자리에 진입점을
- * 세우면 누른 뒤에야 빈 화면을 만난다.
+ * 지우지 않는다). 한 번도 받지 못했으면 `error`다. 진입점(사이드바·⌘K·도크)은
+ * `present`가 아니면 모두 접는다: 모르는 채 문을 세우면 누른 뒤에야 빈 화면을
+ * 만난다. 그러나 `error`는 「호스트가 없다」가 아니다. 라우트는 그 둘을 다른
+ * 문장으로 말한다(`SurfaceRoute`).
  */
 export function useWorkHostPresence(): WorkHostPresence {
   const { workspaceId } = useSession();
@@ -45,7 +47,7 @@ export function useWorkHostPresence(): WorkHostPresence {
   if (query.data !== undefined) {
     return hasOnlineWorkHost(query.data) ? "present" : "absent";
   }
-  return query.isError ? "absent" : "unknown";
+  return query.isError ? "error" : "unknown";
 }
 
 /** 표면 판정 함수. 목록을 걸러야 하는 쪽(팔레트·설정 목차)이 쓴다. */
