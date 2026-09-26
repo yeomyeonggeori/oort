@@ -63,6 +63,9 @@ import { SidebarRowContextMenu } from "./SidebarRowContextMenu";
 import { openChannelId } from "./openChannel";
 import { roveSidebarRows } from "./sidebarRoving";
 import { WorkspaceRail } from "./WorkspaceRail";
+import { SidebarNowCard } from "./SidebarNowCard";
+import { workspaceRailTile } from "./workspaceRailModel";
+import { KomettoMark } from "@/design/brand/KomettoMark";
 import { ProfileCard } from "./ProfileCard";
 import { sectionUnreadTotals, sidebarSectionListId } from "./sidebarSectionModel";
 import {
@@ -206,6 +209,15 @@ export function Sidebar({
     queryFn: () => fetchWorkspace(workspaceId),
     retry: false,
   });
+
+  const wsTile = workspaceRailTile(
+    {
+      name: workspaceQuery.data?.name,
+      isPending: workspaceQuery.isPending,
+      isError: workspaceQuery.isError,
+    },
+    workspaceId
+  );
 
   const selfMember = memberFor(directoryQuery.directory, session.member.id);
   const selfName = selfMember?.displayName ?? session.member.displayName;
@@ -554,32 +566,22 @@ export function Sidebar({
           hidden={treeHidden}
           data-sidebar-channel-pane
           data-testid="sidebar-channel-pane"
-          className="flex h-full w-full min-w-0 flex-col border-r border-line bg-surface-sidebar"
+          className="sidebar-list flex h-full w-full min-w-0 flex-col"
         >
-          <div className="flex items-center gap-2 border-b border-line p-2">
-            {/* 데스크톱 접기 토글은 타이틀바에 한 자리만 산다 (#1864). 여기 두면
-                접는 순간 입구가 사라진다. */}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="tap-target glass min-w-0 flex-1 justify-between rounded-lg text-ink-muted shadow-sm"
-              onClick={onOpenQuickSwitcher}
-              data-testid="open-quick-switcher"
+          {/* 워크스페이스 머리 (DS2-6, 시안 A `.a-ws`). 로고 자리는 코메토 배지다
+              (#2732, docs/brand). 이름은 레일 타일과 같은 쿼리에서 온다: 도착하기
+              전에는 아무 글자도 세우지 않는다(#4a-1, workspaceRailModel). */}
+          <div className="sidebar-ws" data-testid="sidebar-workspace-header">
+            <span className="sidebar-ws-logo">
+              <KomettoMark className="size-full object-cover" />
+            </span>
+            <span
+              className="sidebar-ws-name"
+              aria-busy={wsTile.loading || undefined}
+              data-testid="sidebar-workspace-name"
             >
-              <span className="flex items-center gap-2">
-                <Search className="size-4" />
-                검색과 이동
-              </span>
-              {/* 폰에는 ⌘ 키가 없다 (goal B6). 누를 수 없는 단축키를 컨트롤에
-                  적어 두면 그만큼의 폭을 쓰면서 아무것도 알려주지 않는다.
-
-                  #1384: 이 앱의 키 힌트 표기는 한 벌이고(코어 `composerCopy.ts`
-                  의 「키보드 힌트의 표기법」) 이 자리가 이미 그 표기다 —
-                  `wide-only` · `text-meta` · `text-ink-muted` · 테두리 없는 산문.
-                  동사가 없는 이유는 이 조각을 담은 버튼의 이름이 곧 동사라서다
-                  ("검색과 이동"). 힌트 줄에서는 `<키>로 <동사>`로 적는다. */}
-              <span className="wide-only text-meta text-ink-muted">⌘K</span>
-            </Button>
+              {wsTile.loading ? null : wsTile.label}
+            </span>
             {/* 폰에서만 서는 닫기 (goal B6). 넓은 창에서 사이드바는 닫히는 것이
                 아니라 그냥 거기 있으므로, 이 버튼은 그때 아무 일도 하지 않는다. */}
             <button
@@ -589,15 +591,40 @@ export function Sidebar({
               aria-label="채널 목록 닫기"
               title="채널 목록 닫기"
               data-testid="close-sidebar-drawer"
-              className="mobile-only tap-target flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+              className="mobile-only tap-target flex size-control shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
             >
               <X className="size-4" aria-hidden="true" />
+            </button>
+          </div>
+          <div className="flex items-center">
+            {/* 데스크톱 접기 토글은 타이틀바에 한 자리만 산다 (#1864). 여기 두면
+                접는 순간 입구가 사라진다.
+
+                검색 입구는 시안 A `.a-search`다: 36 · 반경 12 · 유리 + rest.
+                유리는 흰 면이라 띠(노을띠) 위에서도 원래 글자 역할을 쓴다. */}
+            <button
+              type="button"
+              className="tap-target glass band-surface sidebar-search min-w-0 flex-1 text-left press focus-visible:focus-ring"
+              onClick={onOpenQuickSwitcher}
+              data-testid="open-quick-switcher"
+            >
+              <Search className="size-4 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 truncate">검색과 이동</span>
+              {/* 폰에는 ⌘ 키가 없다 (goal B6). 누를 수 없는 단축키를 컨트롤에
+                  적어 두면 그만큼의 폭을 쓰면서 아무것도 알려주지 않는다.
+
+                  #1384: 이 앱의 키 힌트 표기는 한 벌이고(코어 `composerCopy.ts`
+                  의 「키보드 힌트의 표기법」) 이 자리가 이미 그 표기다 —
+                  `wide-only` · `text-meta` · `text-ink-muted` · 테두리 없는 산문.
+                  동사가 없는 이유는 이 조각을 담은 버튼의 이름이 곧 동사라서다
+                  ("검색과 이동"). 힌트 줄에서는 `<키>로 <동사>`로 적는다. */}
+              <kbd className="wide-only sidebar-kbd">⌘K</kbd>
             </button>
           </div>
 
           {fixtureMode !== null && (
             <p
-              className="border-b border-line px-2 py-1 text-meta text-warn"
+              className="px-2 py-1 text-meta text-warn"
               data-testid="agent-fixture-notice"
             >
               {fixtureMode === "live"
@@ -624,7 +651,7 @@ export function Sidebar({
             data-testid="channel-list"
           >
             <nav aria-label="워크스페이스 탐색">
-              <ul className="flex flex-col px-2 py-2">
+              <ul className="sidebar-stack">
                 <SidebarRow to="/inbox" icon={<Inbox className="size-4" />} label="인박스" testId="nav-inbox" />
                 <DraftsNavItem />
                 <SidebarRow to="/activity" icon={<Activity className="size-4" />} label="활동" testId="nav-activity" />
@@ -682,6 +709,19 @@ export function Sidebar({
                   <SidebarRow to="/workstreams" icon={<Milestone className="size-4" />} label={serverSurface("workstreams").label} testId="nav-workstreams" />
                 )}
               </ul>
+
+              {/* 작업 중 카드 (DS2-6, 시안 A `.a-side .a-now`). 열린 턴이 없으면
+                  아무것도 그리지 않는다 — 빈 카드는 「조용하다」를 말하는 대신
+                  자리만 차지한다. 채널 행의 알약과 같은 가게(`turnSignals`)를
+                  읽으므로 둘이 다르게 말할 수 없다. */}
+              <SidebarNowCard
+                signals={turnSignals}
+                nowMs={nowMs}
+                live={railLive}
+                directory={directoryQuery.directory}
+                channels={[...channels, ...dms]}
+                selfMemberId={session.member.id}
+              />
 
               {/* 배치에 대해 사이드바가 하는 말은 **한 번에 하나**다.
  
@@ -894,7 +934,7 @@ export function Sidebar({
                               // 시트 위 알약(--surface + rest 그림자)으로 선다.
                               variant="ghost"
                               size="sm"
-                              className="bg-surface shadow-sm"
+                              className="band-surface bg-surface shadow-sm"
                               onClick={() => openCreateChannel()}
                               data-testid="sidebar-create-channel"
                             >
@@ -907,7 +947,7 @@ export function Sidebar({
                     )}
                   <ul
                     id={sidebarSectionListId(baseChannelSection.id)}
-                    className="flex flex-col"
+                    className="sidebar-stack"
                   >
                     {baseChannelSection.channels.map((channel) => rowFor(channel))}
                   </ul>
@@ -990,7 +1030,7 @@ export function Sidebar({
                   <Skeleton ready={!channelsQuery.isLoading} rows={2}>
                     <ul
                       id={sidebarSectionListId(section.id)}
-                      className="flex flex-col"
+                      className="sidebar-stack"
                     >
                       {/* 빈 섹션은 만든 직후의 정상 상태다. 한 줄이 없으면 방금 만든
                           섹션이 고장난 것처럼 보인다. 낱말은 **표면마다 다르다**(H-1):
@@ -1077,7 +1117,7 @@ export function Sidebar({
               UX-D4 (#1756) made the whole row the profile-card trigger: status
               radios, the rail's 워크스페이스 추가, and settings live in that
               card. The collapse control lives on the titlebar (#1864). */}
-          <div className="safe-area-bottom flex items-center gap-2 border-t border-line p-2">
+          <div className="safe-area-bottom flex items-center gap-2 pt-2">
             <ProfileCard
               workspaceId={workspaceId}
               selfMemberId={session.member.id}

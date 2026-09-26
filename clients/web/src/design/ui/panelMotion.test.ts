@@ -397,6 +397,9 @@ describe.skipIf(!chromiumAvailable)(
         format: "iife",
         platform: "browser",
         jsx: "automatic",
+        // 사이드바 머리의 코메토 배지(DS2-6)가 래스터 자산이다. 하네스는 화면이
+        // 아니라 움직임을 재므로 data URL로 싣는다(Vite의 에셋 경로와 같은 역할).
+        loader: { ".png": "dataurl" },
         alias: { "@": SRC, "@momo/core": CORE_SRC },
         define: {
           "import.meta.env": JSON.stringify({

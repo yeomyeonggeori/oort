@@ -380,9 +380,14 @@ function pick(token: string, index: 0 | 1): string {
  * 실제 바닥이어야 한다 (design-review #1937 R3 N-2).
  */
 const ROW_MENU_MARKER_SURFACES = [
-  "surface-sidebar",
+  // DS2-6 (#2718): 사이드바는 바탕이 없고 창 바닥(그라데이션 세 정지점) 위에
+  // 선다. 지금 열린 채널의 행은 흰 면(`sidebar-row-selected` = --surface)이다
+  // (owner 결정 2026-09-26: 선택을 호박색으로 칠하지 않는다).
+  "canvas-top",
+  "canvas-mid",
+  "canvas-bottom",
   "surface-hover",
-  "accent-soft",
+  "surface",
 ] as const;
 
 const ROW_MENU_TRIGGER_SOURCE = readFileSync(
@@ -468,7 +473,13 @@ describe("행 메뉴 열림 표식", () => {
  * 자체(`--surface-sidebar`)다. 위 「행 메뉴 열림 표식」과 같은 규율로, 색 이름은
  * 여기 적지 않고 **출하되는 클래스에서 읽어** 잰다.
  */
-const DROP_TARGET_SURFACES = ["surface-sidebar", "surface-hover"] as const;
+const DROP_TARGET_SURFACES = [
+  // DS2-6 (#2718): 열 자체의 바탕은 이제 창 바닥의 세 정지점이다.
+  "canvas-top",
+  "canvas-mid",
+  "canvas-bottom",
+  "surface-hover",
+] as const;
 
 const SECTION_SOURCE = readFileSync(
   new URL("../features/sidebar/SidebarRow.tsx", import.meta.url),

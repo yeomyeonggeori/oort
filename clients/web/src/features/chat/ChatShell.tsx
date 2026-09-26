@@ -919,17 +919,18 @@ export function ChatShell() {
 
   const renderChannelHeader = (huddle: HuddleController | null) => (
     <>
-      {/* 1줄 헤더 (#1865). py-row(6)×2 + size-control(32) + 하단 경계 1px = 45,
-          사이드바 검색 줄(p-2 + control-sm + hairline)과 하단 경계를 맞춘다. */}
+      {/* 1줄 헤더 (#1865). 넓은 창에서는 떠 있는 판의 머리(DS2-6, 시안 A
+          `.a-mhd`: 높이 60 · 좌 24 우 18 · 제목 17/800 · 토픽 13.5)다. 폰에서는
+          py-row(6)×2 + size-control(32) + 하단 경계 1px = 45 그대로다. */}
       <header
         data-testid="channel-header"
-        className="flex min-w-0 items-center gap-3 border-b border-line px-4 py-row"
+        className="channel-head flex min-w-0 items-center py-row"
       >
         <div className="flex min-w-0 items-center gap-2">
           {/* 폰에서 채널 목록으로 돌아가는 길 (goal B6). 사이드바가 열이 아니라
               서랍이므로, 목록은 이 컨트롤로만 다시 열린다. */}
           <SidebarDrawerToggle />
-          <span aria-hidden="true" className="shrink-0 text-ink-muted">
+          <span aria-hidden="true" className="shrink-0 text-ink" data-head-icon="">
             {channel?.kind === "dm" ? (
               <MessageSquare className="size-4" />
             ) : channel?.kind === "private" ? (
@@ -946,12 +947,12 @@ export function ChatShell() {
           {stressCount === 0 && channel && channel.kind !== "dm" ? (
             <h1
               tabIndex={-1}
-              className="min-w-0 truncate text-body font-semibold text-ink outline-none focus-visible:focus-ring"
+              className="channel-head-title min-w-0 truncate text-ink outline-none focus-visible:focus-ring"
             >
               {labelParts?.text ?? label}
             </h1>
           ) : stressCount === 0 && channel?.kind === "dm" && peer ? (
-            <h1 className="flex min-w-0 items-center text-body font-semibold">
+            <h1 className="channel-head-title flex min-w-0 items-center">
               <button
                 type="button"
                 data-testid="dm-profile-trigger"
@@ -970,7 +971,7 @@ export function ChatShell() {
           ) : (
             <h1
               className={cn(
-                "min-w-0 truncate text-body font-semibold",
+                "channel-head-title min-w-0 truncate",
                 labelParts?.isAgent && stressCount === 0 && "text-agent"
               )}
             >
@@ -992,6 +993,26 @@ export function ChatShell() {
           </span>
         </div>
         <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+          {/* 토픽 한 줄 (시안 A `.a-mhd .tp`). 읽기 전용 글자이고 컨트롤이 아니다:
+              토픽을 읽고 고치는 문은 여전히 ⋮ 메뉴 하나다(BZ-2). 넓은 창에서만
+              선다 — 폰 헤더 한 줄은 제목이 먼저다(`wide-only`).
+
+              오른쪽 무리 **안의 첫 자리**인 이유: 왼쪽 무리에 두면 긴 토픽이 그
+              무리의 기본 폭을 부풀려 오른쪽 컨트롤이 창 밖으로 밀린다(실측,
+              gate:channel-header). 여기서는 기본 폭 0으로 남는 자리만 받아
+              먼저 잘린다. */}
+          {stressCount === 0 &&
+            channel &&
+            channel.kind !== "dm" &&
+            channel.topic?.trim() && (
+              <span
+                className="channel-head-topic wide-only flex-1"
+                data-testid="channel-header-topic"
+                title={channel.topic.trim()}
+              >
+                {channel.topic.trim()}
+              </span>
+            )}
           {timeline.resume.resubscribeCount > 0 && (
             <span
               className="text-timestamp text-ink-muted"
@@ -1176,7 +1197,9 @@ export function ChatShell() {
         )}
 
         <div
-          className="flex-1 overflow-hidden timeline-strip"
+          // `timeline-inset`(DS2-6): 넓은 창에서 좌우 8을 더해 메시지 행(px-4)이
+          // 판의 머리·컴포저와 같은 24 선에 선다(시안 A `.a-mbody` 좌우 24).
+          className="timeline-inset flex-1 overflow-hidden timeline-strip"
           data-testid="chat-timeline"
         >
           {hasChannel ? (
