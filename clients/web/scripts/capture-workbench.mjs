@@ -134,6 +134,22 @@ async function scenes(browser, origin) {
 }
 
 async function interactions(browser, origin) {
+  // 링은 격자가 실제 포커스를 가질 때만(design-review H1).
+  {
+    const { context, page } = await open(browser, origin, "light", "?preset=two");
+    const ringOf = () =>
+      page.evaluate(() => getComputedStyle(document.querySelector("[data-focused]")).outlineStyle);
+    const idle = await ringOf();
+    check("로드 직후(포커스가 격자 밖) 활성 칸에 신호색 링 없음", idle === "none", { idle });
+    await page.locator('[data-pane-id="p2"]').click({ position: { x: 40, y: 80 } });
+    const active = await ringOf();
+    check("칸을 누른 뒤(격자에 포커스) 링이 보인다", active === "solid", { active });
+    await page.getByLabel("세션 고르기").focus();
+    const away = await ringOf();
+    check("포커스가 세션 선택으로 가면 링이 사라진다", away === "none", { away });
+    await context.close();
+  }
+
   // 프리셋 없음: 진짜 localStorage.
   const { context, page } = await open(browser, origin, "light", "");
   await page.locator('[data-pane-id="p1"]').click({ position: { x: 40, y: 80 } });

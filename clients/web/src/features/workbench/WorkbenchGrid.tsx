@@ -88,7 +88,11 @@ const REFUSAL_COPY: Partial<Record<LayoutRefusal, string>> = {
 const STORAGE_COPY =
   "이 기기에 배치를 저장하지 못했습니다. 지금 배치는 쓸 수 있지만, 다시 열면 칸 하나로 돌아갑니다.";
 
-const IDLE_HINT = "⌘D 오른쪽으로 분할 · ⌘⇧D 아래로 분할 · ⌘⌥화살표 칸 이동 · ⌘⇧↵ 최대화";
+const IDLE_HINT = "⌘D 오른쪽으로 분할 · ⌘⇧D 아래로 분할 · ⌘⌥화살표 칸 이동 · ⌘] 다음 칸 · ⌘⇧↵ 최대화";
+
+function maximizedHint(index: number, hidden: number): string {
+  return `${index}번 칸 최대화, 칸 ${hidden}개가 가려져 있습니다 · ⌘⇧↵ 되돌리기`;
+}
 
 function detectPlatform(): KeyPlatform {
   if (typeof navigator === "undefined") return "other";
@@ -107,7 +111,12 @@ function ariaKeys(platform: KeyPlatform, mac: string): string {
 }
 
 function modLabel(platform: KeyPlatform, mac: string): string {
-  return platform === "mac" ? mac : mac.replace(/⌘/g, "Ctrl+").replace(/⇧/g, "Shift+").replace(/⌥/g, "Alt+");
+  if (platform === "mac") return mac;
+  return mac
+    .replace(/⌘/g, "Ctrl+")
+    .replace(/⇧/g, "Shift+")
+    .replace(/⌥/g, "Alt+")
+    .replace(/↵/g, "Enter");
 }
 
 /** 격자 영역의 실제 크기. ResizeObserver가 없는 환경(jsdom)에서는 0×0. */
@@ -229,6 +238,10 @@ export function WorkbenchGrid({
   const ids = paneIds(layout.root);
   const single = layout.root.kind === "pane";
   const message = notice ?? (storage === "unavailable" ? STORAGE_COPY : null);
+  const hint =
+    layout.maximized !== null
+      ? maximizedHint(ids.indexOf(layout.maximized) + 1, ids.length - 1)
+      : IDLE_HINT;
 
   const ctx: RenderContext = {
     layout,
@@ -261,7 +274,7 @@ export function WorkbenchGrid({
       aria-label={label}
       data-testid="workbench-grid"
       onKeyDown={onKeyDown}
-      className={cn("flex h-full min-h-0 flex-col gap-2", className)}
+      className={cn("group/wb flex h-full min-h-0 flex-col gap-2", className)}
     >
       <div
         ref={areaRef}
@@ -271,9 +284,9 @@ export function WorkbenchGrid({
       >
         <NodeView node={layout.root} ctx={ctx} />
       </div>
-      <p
-        role="status"
-        aria-live="polite"
+      {/* 알림(거부·저장 실패)만 live 영역에 둔다. 단축키 안내는 알림이 사라질
+          때마다 다시 읽히지 않게 밖에 둔다. */}
+      <div
         data-testid="workbench-status"
         className={cn(
           "flex min-h-control-sm items-center gap-2 px-2 text-meta",
@@ -281,8 +294,11 @@ export function WorkbenchGrid({
         )}
       >
         {message ? <Info aria-hidden className="size-4 shrink-0 text-icon" /> : null}
-        <span className="min-w-0 truncate">{message ?? modLabel(platform, IDLE_HINT)}</span>
-      </p>
+        <p role="status" aria-live="polite" className={cn("min-w-0 truncate", !message && "sr-only")}>
+          {message ?? ""}
+        </p>
+        {message ? null : <p className="min-w-0 truncate">{modLabel(platform, hint)}</p>}
+      </div>
     </div>
   );
 }
@@ -473,14 +489,16 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
       }}
       className={cn(
         "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-surface",
-        focused ? "border-line-strong focus-ring" : "border-line",
+        // 신호색 링은 「키가 여기로 간다」는 뜻이다. 격자가 실제로 포커스를 가질
+        // 때만 그린다. 아니면 활성 칸은 진한 테두리와 머리 채움으로만 조용히 표시한다.
+        focused ? "border-line-strong group-focus-within/wb:focus-ring" : "border-line",
         maximized && "wb-maximized",
         covered && "invisible"
       )}
     >
       <header
         className={cn(
-          "flex h-control shrink-0 items-center gap-2 border-b border-line pl-3 pr-1",
+          "@container flex h-control shrink-0 items-center gap-2 border-b border-line pl-3 pr-1",
           focused ? "bg-surface" : "bg-surface-muted"
         )}
       >
@@ -494,6 +512,7 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
           {index}
         </span>
         <span
+          title={title}
           className={cn(
             "min-w-0 flex-1 truncate text-meta",
             focused ? "font-medium text-ink" : "text-ink-muted"
@@ -505,6 +524,7 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
           label="오른쪽으로 분할"
           platform={platform}
           keycap="⌘D"
+          narrowHidden
           disabled={!canRight}
           onClick={() => ctx.onSplit(id, "row")}
         >
@@ -514,6 +534,7 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
           label="아래로 분할"
           platform={platform}
           keycap="⌘⇧D"
+          narrowHidden
           disabled={!canDown}
           onClick={() => ctx.onSplit(id, "column")}
         >
@@ -532,7 +553,6 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
         <PaneButton
           label="칸 닫기"
           platform={platform}
-          keycap="⌘W"
           disabled={ctx.single}
           onClick={() => ctx.onClose(id)}
         >
@@ -552,28 +572,40 @@ function PaneButton({
   keycap,
   disabled,
   pressed,
+  narrowHidden,
   onClick,
   children,
 }: {
   label: string;
   platform: KeyPlatform;
-  /** macOS 표기. 다른 플랫폼은 Ctrl로 바꿔 보인다. */
-  keycap: string;
+  /**
+   * macOS 표기. 다른 플랫폼은 Ctrl로 바꿔 보인다. 칸 닫기(⌘W)는 적지 않는다:
+   * 브라우저와 Tauri 기본 메뉴가 ⌘W를 먼저 가져가서, 그 키가 칸을 닫는다고
+   * 약속할 수 없다(#2774가 셸 메뉴를 정리할 때 붙인다).
+   */
+  keycap?: string;
   disabled?: boolean;
+  /** 좁은 칸(머리 폭 20rem 미만)에서는 숨겨 제목 자리를 남긴다. 키는 그대로 된다. */
+  narrowHidden?: boolean;
   pressed?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
   return (
+    // 꺼진 버튼도 누를 수 있게 둔다(aria-disabled). 누르면 연산이 거부 이유를
+    // 상태 줄에 말한다. `disabled`는 포인터를 막아 툴팁도 이유도 보이지 않는다.
     <button
       type="button"
       aria-label={label}
-      aria-keyshortcuts={ariaKeys(platform, keycap)}
+      aria-keyshortcuts={keycap ? ariaKeys(platform, keycap) : undefined}
       aria-pressed={pressed}
-      title={`${label} (${modLabel(platform, keycap)})`}
-      disabled={disabled}
+      aria-disabled={disabled || undefined}
+      title={keycap ? `${label} (${modLabel(platform, keycap)})` : label}
       onClick={onClick}
-      className="inline-flex size-control-sm shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4"
+      className={cn(
+        "inline-flex size-control-sm shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-ink-muted [&_svg]:size-4",
+        narrowHidden && "hidden @xs:inline-flex"
+      )}
     >
       {children}
     </button>

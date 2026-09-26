@@ -120,12 +120,16 @@ describe("최소 칸 크기 아래로는 분할을 거부한다", () => {
     fireEvent.keyDown(grid(), { key: "d", code: "KeyD", metaKey: true });
     expect(panes()).toHaveLength(1);
     expect(screen.getByTestId("workbench-status").textContent).toContain("칸이 좁아 더 나눌 수 없습니다");
-    expect((screen.getByRole("button", { name: "오른쪽으로 분할" }) as HTMLButtonElement).disabled).toBe(true);
+    const button = screen.getByRole("button", { name: "오른쪽으로 분할" });
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    // 꺼진 버튼을 눌러도 나뉘지 않고, 까닭을 말한다(포인터 사용자에게도).
+    fireEvent.click(button);
+    expect(panes()).toHaveLength(1);
   });
 
   it("딱 맞으면 나뉜다", () => {
     render(<Controlled size={{ width: exact, height: 600 }} />);
-    expect((screen.getByRole("button", { name: "오른쪽으로 분할" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByRole("button", { name: "오른쪽으로 분할" }).hasAttribute("aria-disabled")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "오른쪽으로 분할" }));
     expect(panes()).toHaveLength(2);
   });
@@ -157,6 +161,30 @@ describe("최대화: 다른 칸은 트리에 남는다", () => {
     fireEvent.keyDown(grid(), { key: "Enter", code: "Enter", metaKey: true, shiftKey: true });
     expect(panes()[0]!.hasAttribute("data-maximized")).toBe(false);
     expect(screen.getByTestId("workbench-status").textContent).toContain("칸이 하나라");
+  });
+});
+
+describe("신호색 링은 격자가 실제로 포커스를 가질 때만", () => {
+  it("활성 칸의 링은 group-focus-within에 묶여 있다(항상 켜진 focus-ring이 아니다)", () => {
+    render(<Controlled initial={four()} />);
+    const active = panes().find((p) => p.hasAttribute("data-focused"))!;
+    const classes = active.className.split(/\s+/);
+    expect(classes).toContain("group-focus-within/wb:focus-ring");
+    expect(classes).not.toContain("focus-ring");
+    expect(grid().className.split(/\s+/)).toContain("group/wb");
+  });
+
+  it("최대화 중에는 가려진 칸 수와 되돌리는 키를 말한다", () => {
+    render(<Controlled initial={four()} />);
+    fireEvent.keyDown(grid(), { key: "Enter", code: "Enter", metaKey: true, shiftKey: true });
+    expect(screen.getByTestId("workbench-status").textContent).toContain("칸 3개가 가려져 있습니다");
+  });
+
+  it("칸 닫기 버튼은 ⌘W를 약속하지 않는다(브라우저·셸 메뉴가 먼저 가져간다)", () => {
+    render(<Controlled initial={four()} />);
+    const close = screen.getAllByRole("button", { name: "칸 닫기" })[0]!;
+    expect(close.hasAttribute("aria-keyshortcuts")).toBe(false);
+    expect(close.getAttribute("title")).toBe("칸 닫기");
   });
 });
 

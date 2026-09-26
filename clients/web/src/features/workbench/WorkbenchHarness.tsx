@@ -37,7 +37,7 @@ const PANE_FIXTURES = [
   { title: "claude · 개인(Max) · ~/momo", body: "로그인 401 재현 로그를 읽고 refresh 토큰 경로를 고치는 칸입니다." },
   { title: "codex · 회사 · ~/momo", body: "onboarding 문구 diff 검토 칸입니다. 줄 12개, 파일 3개." },
   { title: "zsh · ~/momo/.worktrees/fix-login", body: "$ cargo test -p momo-workd 결과를 보는 셸 칸입니다." },
-  { title: "grok · 개인 · ~/momo/clients/web", body: "Playwright 캡처 스크립트를 돌리는 칸입니다." },
+  { title: "zsh · ~/momo/clients/web", body: "Playwright 캡처 스크립트를 돌리는 칸입니다." },
 ];
 
 const PRESET_SIZE = { width: 1600, height: 1000 };
@@ -67,12 +67,18 @@ function presetLayout(name: string | null): WorkbenchLayout | null {
   }
 }
 
+/** 칸 id(p1, p2, …)로 픽스처를 고른다. 번호(트리 순서)로 고르면 분할 뒤 기존 칸의 제목이 바뀐다. */
+function fixtureOf(pane: WorkbenchPaneInfo) {
+  const serial = Number(/^p(\d+)$/.exec(pane.id)?.[1] ?? pane.index);
+  return PANE_FIXTURES[(serial - 1) % PANE_FIXTURES.length]!;
+}
+
 function paneTitle(pane: WorkbenchPaneInfo): string {
-  return PANE_FIXTURES[(pane.index - 1) % PANE_FIXTURES.length]!.title;
+  return fixtureOf(pane).title;
 }
 
 function PanePlaceholder({ pane }: { pane: WorkbenchPaneInfo }) {
-  const fixture = PANE_FIXTURES[(pane.index - 1) % PANE_FIXTURES.length]!;
+  const fixture = fixtureOf(pane);
   return (
     <div className="flex flex-1 flex-col gap-2 bg-pane p-4">
       <p className="text-body text-ink">{fixture.body}</p>
