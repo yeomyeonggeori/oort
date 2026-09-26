@@ -219,20 +219,50 @@ function TeamBoard({ offline }: { offline: boolean }) {
 
   const moreRef = useRef<HTMLButtonElement>(null);
   const addRef = useRef<HTMLButtonElement>(null);
+  const editRef = useRef<HTMLButtonElement>(null);
   const asideHeadingRef = useRef<HTMLHeadingElement>(null);
   const wasOpen = useRef(false);
+  const wasEditing = useRef(false);
+  // 해제가 끝나면 줄이 사라진다. 초점은 새로 고친 목록이 도착한 뒤에 선
+  // 자리(「API 키 추가」, 환경값 줄이 남으면 그 ⋯)로 간다.
+  const [focusAfterUnlink, setFocusAfterUnlink] = useState(false);
 
   // 곁판이 열리면 초점은 곁판 제목으로, 닫히면 연 자리(⋯ 또는 「API 키 추가」)로.
-  // 좁은 폭에서는 곁판이 목록 아래에 쌓이므로 제목까지 스크롤도 함께 한다.
+  // 좁은 폭에서는 곁판이 연 절 바로 밑에 쌓이므로 제목까지 스크롤도 함께 한다.
+  // 편집을 열면 첫 칸으로, 닫으면(취소·저장) 「키 바꾸기」로 돌아온다. 어느
+  // 전환에서도 초점이 <body> 로 떨어지지 않는다(design-review #2877 H-2).
   useEffect(() => {
-    if (asideOpen && !wasOpen.current) {
+    const opened = asideOpen && !wasOpen.current;
+    const closed = !asideOpen && wasOpen.current;
+    const startedEditing = editing && !wasEditing.current;
+    const stoppedEditing = !editing && wasEditing.current;
+    wasOpen.current = asideOpen;
+    wasEditing.current = editing;
+    if (startedEditing) {
+      document.getElementById("provider-base-url")?.focus({ preventScroll: true });
+      if (opened) asideHeadingRef.current?.scrollIntoView?.({ block: "nearest" });
+      return;
+    }
+    if (opened) {
       asideHeadingRef.current?.focus({ preventScroll: true });
       asideHeadingRef.current?.scrollIntoView?.({ block: "nearest" });
-    } else if (!asideOpen && wasOpen.current) {
-      (moreRef.current ?? addRef.current)?.focus({ preventScroll: true });
+      return;
     }
-    wasOpen.current = asideOpen;
-  }, [asideOpen]);
+    if (closed) {
+      if (focusAfterUnlink) return;
+      (moreRef.current ?? addRef.current)?.focus({ preventScroll: true });
+      return;
+    }
+    if (stoppedEditing && asideOpen) {
+      (editRef.current ?? asideHeadingRef.current)?.focus({ preventScroll: true });
+    }
+  }, [asideOpen, editing, focusAfterUnlink]);
+
+  useEffect(() => {
+    if (!focusAfterUnlink || query.isFetching) return;
+    (addRef.current ?? moreRef.current)?.focus({ preventScroll: true });
+    setFocusAfterUnlink(false);
+  }, [focusAfterUnlink, query.isFetching, query.data]);
 
   const invalidate = () =>
     client.invalidateQueries({ queryKey: ["settings", "provider-link"] });
@@ -250,6 +280,7 @@ function TeamBoard({ offline }: { offline: boolean }) {
     mutationFn: deleteProviderLink,
     onSuccess: () => {
       setProbe(null);
+      setFocusAfterUnlink(true);
       setAsideOpen(false);
       void invalidate();
     },
@@ -291,9 +322,10 @@ function TeamBoard({ offline }: { offline: boolean }) {
     setAsideOpen(false);
   }
 
-  // Esc 는 곁판을 닫는다(설정 전체가 아니라). 키를 적는 중에는 층을 세우지
-  // 않는다: 반사적 Esc 가 입력을 날리지 않게(SettingsRoute 3R M5 와 같은 이유).
-  useEscapeLayer(asideOpen && !editing, closeAside);
+  // Esc 는 곁판을 닫는다(설정 전체가 아니라). 키를 적는 중에는 층이 Esc 를
+  // 받고 아무것도 하지 않는다: 층을 내리면 Esc 가 설정 라우트까지 떨어져 적던
+  // 키와 함께 설정이 닫힌다(design-review #2877 H-1). 폼은 [취소]로만 닫힌다.
+  useEscapeLayer(asideOpen, editing ? () => undefined : closeAside);
 
   function startEditing(link: ProviderLink) {
     // Prefill only from a stored link. The environment fallback is a mock
@@ -410,7 +442,7 @@ function TeamBoard({ offline }: { offline: boolean }) {
             <>
               {rowName}
               {!legacy && (
-                <span className="ms-1 text-meta text-signal-text" aria-label="기본">
+                <span role="img" className="ms-1 text-meta text-signal-text" aria-label="기본">
                   ★
                 </span>
               )}
@@ -456,7 +488,6 @@ function TeamBoard({ offline }: { offline: boolean }) {
             closeForm();
             setAsideOpen(true);
           }}
-          dim={legacy}
           testId="ai-link-row"
         />
       ) : null}
@@ -502,9 +533,11 @@ function TeamBoard({ offline }: { offline: boolean }) {
       data-aside-open={asideOpen && link && (hasRow || editing) ? "" : undefined}
       data-testid="ai-board"
     >
-      <div className="ai-pane flex min-w-0 flex-col gap-6">
+      <div className="ai-pane flex min-w-0 flex-col gap-6" data-area="top">
         <AiMyAccountsSection />
         {teamSection}
+      </div>
+      <div className="ai-pane flex min-w-0 flex-col gap-6" data-area="bottom">
         <AiSection labelledBy={DEFAULTS_HEADING_ID} testId="ai-defaults">
           <AiSectionHead
             id={DEFAULTS_HEADING_ID}
@@ -521,11 +554,12 @@ function TeamBoard({ offline }: { offline: boolean }) {
       </div>
 
       {asideOpen && link && (hasRow || editing) && (
+        <div data-area="aside" className="min-w-0">
         <AiAside
           id={TEAM_ASIDE_ID}
           label={`${link.endpointLabel} 상세`}
           mark={markFor(link.endpointLabel)}
-          title={editing ? (configured ? "키 바꾸기" : "API 키 추가") : rowName}
+          title={rowName}
           subtitle={legacy ? "내부용 연결 · 이 서버" : "API 키 · 이 서버 · 팀 에이전트가 씀"}
           onClose={closeAside}
           headingRef={asideHeadingRef}
@@ -535,8 +569,12 @@ function TeamBoard({ offline }: { offline: boolean }) {
             <form
               className="flex min-w-0 flex-col gap-3"
               onSubmit={submit}
+              aria-labelledby="ai-link-form-title"
               data-testid="ai-link-form"
             >
+              <h4 id="ai-link-form-title" className="text-body font-bold text-ink">
+                {configured ? "키 바꾸기" : "API 키 추가"}
+              </h4>
               {configured && (
                 <p className="break-keep text-meta text-ink-muted" data-testid="ai-link-card-tense">
                   저장하면 지금 연결을 대체합니다. 키는 다시 보여 주지 않으니 새로 넣으세요.
@@ -648,6 +686,7 @@ function TeamBoard({ offline }: { offline: boolean }) {
                       if (offline) return;
                       startEditing(link);
                     }}
+                    ref={editRef}
                     data-testid="ai-link-edit"
                   >
                     {configured ? "키 바꾸기" : "API 키 추가"}
@@ -655,7 +694,9 @@ function TeamBoard({ offline }: { offline: boolean }) {
                 </div>
               )}
               {configured && (
+                <div className="self-start">
                 <ConfirmButton
+                triggerClassName="tap-target bg-surface text-danger shadow-sm"
                 label={legacy ? "연결 끊기" : "연결 해제"}
                 question={
                   legacy
@@ -671,6 +712,7 @@ function TeamBoard({ offline }: { offline: boolean }) {
                 onConfirm={() => unlink.mutate()}
                 testId="ai-link-unlink"
               />
+                </div>
               )}
             </div>
           )}
@@ -718,6 +760,7 @@ function TeamBoard({ offline }: { offline: boolean }) {
             <ProbeAnswer probe={probe} link={link} chainPending={chainPending} />
           )}
         </AiAside>
+        </div>
       )}
     </div>
   );

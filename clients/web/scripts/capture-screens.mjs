@@ -12410,10 +12410,13 @@ async function captureAiAccountsScenes(browser, scheme) {
     { name: "edit", entry: "rows", open: "ai-link-row-more", then: "ai-link-edit", ready: "ai-link-form" },
   ];
   for (const frame of frames) {
-    for (const [viewport, suffix] of [
+    // 900: 곁판이 옆에 서지 못하고 연 절 밑에 쌓이는 데스크탑 창 폭.
+    const widths = [
       [VIEWPORT, ""],
       [MOBILE_VIEWPORT, "-390"],
-    ]) {
+    ];
+    if (frame.open) widths.push([{ width: 900, height: 800 }, "-900"]);
+    for (const [viewport, suffix] of widths) {
       const context = await browser.newContext({
         viewport,
         deviceScaleFactor: 2,

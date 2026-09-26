@@ -7,10 +7,12 @@ import { waitFor as rtlWaitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, fetchRoster, type RosterMember } from "@momo/core/lib/api";
 import {
+  deleteProviderLink,
   fetchProviderChain,
   fetchProviderLink,
   fetchWorkspace,
 } from "@momo/core/features/settings/api";
+import { escapeIsClaimed } from "@/design/ui/escapeLayer";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { AiLinkSection } from "./AiLinkSection";
 
@@ -48,6 +50,7 @@ vi.mock("@momo/core/features/settings/api", async (importOriginal) => {
     fetchProviderLink: vi.fn(),
     fetchProviderChain: vi.fn(),
     fetchWorkspace: vi.fn(),
+    deleteProviderLink: vi.fn(),
   };
 });
 
@@ -259,6 +262,64 @@ describe("예비 provider 순서는 운영자에게 접혀 남는다 (#2877)", (
     mount();
     await until("operator-notice");
     expect(q("ai-team-chain-toggle")).toBeNull();
+  });
+});
+
+describe("곁판의 키보드 길 (design-review #2877 H-1·H-2)", () => {
+  function esc() {
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+  }
+
+  it("편집 중 Esc 는 층이 받아 아무것도 하지 않는다(설정 라우트로 떨어지지 않는다)", async () => {
+    mount();
+    await until("ai-link-row");
+    act(() => (q("ai-link-row-more") as HTMLButtonElement).click());
+    act(() => (q("ai-link-edit") as HTMLButtonElement).click());
+    (q("ai-link-save") as HTMLButtonElement).focus();
+    expect(escapeIsClaimed()).toBe(true);
+    esc();
+    expect(q("ai-link-form")).not.toBeNull();
+    expect(q("ai-team-aside")).not.toBeNull();
+  });
+
+  it("편집이 아닐 때 Esc 는 곁판만 닫고 ⋯ 로 돌아온다", async () => {
+    mount();
+    await until("ai-link-row");
+    const more = q("ai-link-row-more") as HTMLButtonElement;
+    act(() => more.click());
+    esc();
+    expect(q("ai-team-aside")).toBeNull();
+    expect(document.activeElement).toBe(more);
+  });
+
+  it("키 바꾸기 → 첫 칸, 취소 → 「키 바꾸기」 로 초점이 간다", async () => {
+    mount();
+    await until("ai-link-row");
+    act(() => (q("ai-link-row-more") as HTMLButtonElement).click());
+    act(() => (q("ai-link-edit") as HTMLButtonElement).click());
+    expect(document.activeElement?.id).toBe("provider-base-url");
+    const cancel = Array.from(q("ai-link-form")?.querySelectorAll("button") ?? []).find(
+      (b) => b.textContent === "취소"
+    ) as HTMLButtonElement;
+    act(() => cancel.click());
+    expect(q("ai-link-form")).toBeNull();
+    expect(document.activeElement).toBe(q("ai-link-edit"));
+  });
+
+  it("해제가 끝나면 초점은 새 목록의 「API 키 추가」로 간다", async () => {
+    vi.mocked(deleteProviderLink).mockResolvedValue(undefined as never);
+    mount();
+    await until("ai-link-row");
+    act(() => (q("ai-link-row-more") as HTMLButtonElement).click());
+    vi.mocked(fetchProviderLink).mockResolvedValue(EMPTY_LINK);
+    act(() => (q("ai-link-unlink") as HTMLButtonElement).click());
+    act(() => (q("ai-link-unlink-confirm") as HTMLButtonElement).click());
+    await until("ai-team-add");
+    await rtlWaitFor(() => {
+      if (document.activeElement !== q("ai-team-add")) throw new Error("focus");
+    });
   });
 });
 

@@ -163,11 +163,10 @@ export const AiAccountRow = forwardRef<
     selected: boolean;
     asideId: string;
     onOpen: () => void;
-    dim?: boolean;
     testId?: string;
   }
 >(function AiAccountRow(
-  { mark, name, detail, state, use, moreLabel, selected, asideId, onOpen, dim = false, testId },
+  { mark, name, detail, state, use, moreLabel, selected, asideId, onOpen, testId },
   moreRef
 ) {
   return (
@@ -175,8 +174,7 @@ export const AiAccountRow = forwardRef<
     <div
       className={cn(
         "ai-acct-row cursor-pointer px-2 py-3",
-        selected ? "rounded-md bg-surface-hover" : "border-b border-line hover:bg-surface-hover",
-        dim && "opacity-60"
+        selected ? "rounded-md bg-surface-hover" : "border-b border-line hover:bg-surface-hover"
       )}
       data-testid={testId}
       data-selected={selected ? "" : undefined}
@@ -252,7 +250,7 @@ export function AiAside({
           <h3
             ref={headingRef}
             tabIndex={-1}
-            className="truncate text-title font-bold text-ink focus-visible:focus-ring"
+            className="break-keep text-title font-bold text-ink focus-visible:focus-ring"
           >
             {title}
           </h3>

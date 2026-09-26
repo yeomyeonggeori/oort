@@ -2269,7 +2269,8 @@
  *
  * 폭 판정은 뷰포트가 아니라 그릇이다. 곁판이 열리면 목록 열이 340 + 24 만큼
  * 좁아지므로 같은 창에서도 줄 모양이 바뀌어야 한다.
- * - 판(`ai-board`): 860 이상에서만 곁판이 옆에 선다. 그 아래는 목록 밑에 쌓인다.
+ * - 판(`ai-board`): 720 이상에서만 곁판이 옆에 선다. 그 아래는 곁판을 연 팀
+ *   연결 절 바로 밑에 쌓인다(페이지 맨 아래가 아니라 연 줄 옆).
  * - 목록 열(`ai-pane`): 520 이상이면 한 줄 5칸, 아래면 로고·이름·⋯ 위에 상태와
  *   사용량이 이름 칸 아래로 내려간다(390 폭 폰 창에서 이름이 0으로 눌리지 않게). */
 @utility ai-board-host {
@@ -2279,15 +2280,27 @@
 @utility ai-board {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--spacing-6);
+  grid-template-areas:
+    "top"
+    "aside"
+    "bottom";
+  column-gap: var(--spacing-6);
+  row-gap: var(--spacing-6);
   align-items: start;
 
-  @container (width >= 860px) {
+  @container (width >= 720px) {
     &[data-aside-open] {
       grid-template-columns: minmax(0, 1fr) 340px;
+      grid-template-areas:
+        "top aside"
+        "bottom aside";
+      grid-template-rows: auto 1fr;
     }
   }
 }
+.ai-board > [data-area="top"] { grid-area: top; }
+.ai-board > [data-area="aside"] { grid-area: aside; }
+.ai-board > [data-area="bottom"] { grid-area: bottom; }
 @utility ai-pane {
   container-type: inline-size;
   min-inline-size: 0;
