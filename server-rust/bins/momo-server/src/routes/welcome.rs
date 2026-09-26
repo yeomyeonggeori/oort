@@ -28,6 +28,7 @@ pub(crate) async fn enqueue_welcome_kickoff_in_tx(
     member_id: Uuid,
     gateway_enabled: bool,
     hosted_delivery_enabled: bool,
+    subscription_agents_enabled: bool,
     prefer_agent_member_id: Option<Uuid>,
 ) -> Result<(), DbError> {
     lock_welcome_opener_in_tx(&mut *conn, workspace_id, member_id).await?;
@@ -39,6 +40,8 @@ pub(crate) async fn enqueue_welcome_kickoff_in_tx(
         workspace_id,
         hosted_delivery_enabled,
         prefer_agent_member_id,
+        member_id,
+        subscription_agents_enabled,
     )
     .await?
     else {
@@ -71,6 +74,7 @@ pub(crate) async fn enqueue_owner_welcome_kickoff_in_tx(
     speaker_agent_member_id: Option<Uuid>,
     gateway_enabled: bool,
     hosted_delivery_enabled: bool,
+    subscription_agents_enabled: bool,
 ) -> Result<i32, DbError> {
     let Some(owner_id) = resolve_welcome_owner_in_tx(&mut *conn, workspace_id).await? else {
         return Ok(0);
@@ -91,6 +95,7 @@ pub(crate) async fn enqueue_owner_welcome_kickoff_in_tx(
         owner_id,
         gateway_enabled,
         hosted_delivery_enabled,
+        subscription_agents_enabled,
         speaker_agent_member_id,
     )
     .await?;

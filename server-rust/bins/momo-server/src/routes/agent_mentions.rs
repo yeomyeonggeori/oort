@@ -93,10 +93,17 @@ use momo_agent::{
     MentionTrigger, NewAgentRun, RequestedRouting, RunTrigger, MENTION_JOB_METHOD_GATEWAY,
     MENTION_JOB_METHOD_WORKER,
 };
+use momo_agent::{
+    lock_and_find_recent_notice_in_tx, notice_root, notice_thread_key, owner_only_gate,
+    subscription_notice_body, subscription_notice_props, SubscriptionNoticeKind,
+    SKIP_OWNER_ONLY_NON_OWNER, SKIP_SUBSCRIPTION_AGENTS_DISABLED, SUBSCRIPTION_NOTICE_AUDIT_SCHEMA,
+    SUBSCRIPTION_NOTICE_POSTED_ACTION, SUBSCRIPTION_NOTICE_THROTTLED_ACTION,
+};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{DbError, PgConnection};
 use momo_messaging::{
-    agent_context_window_in_tx, contains_mention, send_message_in_tx, MessageType, NewMessage,
+    agent_context_window_in_tx, contains_mention, send_message_in_tx, send_thread_notice_in_tx,
+    MessageType, NewMessage,
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -118,6 +125,9 @@ pub(crate) struct MentionSend<'a> {
     pub channel_id: Uuid,
     pub message_id: Uuid,
     pub message_seq: i64,
+    /// The trigger's thread root, `None` for a top-level message. Where an
+    /// ADR-0193 notice is posted and what its throttle calls "the same thread".
+    pub root_id: Option<Uuid>,
     pub author_member_id: Uuid,
     /// `true` when the send came in on an agent bearer — the A2A branch.
     pub author_is_agent: bool,
@@ -133,6 +143,9 @@ pub(crate) struct MentionSend<'a> {
     /// Closed means a hosted agent is skipped exactly as HAP-E3 skipped it —
     /// never routed to a managed provider instead.
     pub hosted_delivery_enabled: bool,
+    /// ADR-0193 D6 (#2815) — `AgentPortConfig::subscription_agents_enabled`,
+    /// the operator's kill switch for `owner_only` (subscription) agents.
+    pub subscription_agents_enabled: bool,
     pub context_max_messages: i64,
     /// ADR-0134 D1's per-request tier, already shape-validated by the route
     /// before the transaction opened. `None` = the caller chose nothing and the
@@ -240,6 +253,34 @@ pub(crate) async fn route_agent_mentions_in_tx(
             continue;
         }
         // ---------------------------------------------------------------
+        // ADR-0193 D4·D6 (#2815) — a subscription agent is its owner's alone.
+        //
+        // Before every hosted-delivery question, on purpose: whether this
+        // instance delivers to hosted runtimes at all, and whether this
+        // agent's connection is live, are facts about delivery — and a
+        // non-owner's call is refused whatever they are. The D4 sentence is
+        // not a delivery either (no job, no inbox row, no model call), so it
+        // is posted even while `MOMO_HOSTED_DELIVERY_ENABLED` is closed.
+        //
+        // A mention, the 1:1 DM rule and a mention inside a thread all reach
+        // this one branch; a plain thread reply reaches the hosted runtime only
+        // through the inbox fan-out, which applies the same rule
+        // (`momo_messaging::hosted_inbox_recipients_in_tx`).
+        // ---------------------------------------------------------------
+        if let Some(kind) = owner_only_gate(
+            agent.owner_only.as_ref(),
+            send.author_member_id,
+            send.subscription_agents_enabled,
+        ) {
+            let reason = match kind {
+                SubscriptionNoticeKind::NonOwner => SKIP_OWNER_ONLY_NON_OWNER,
+                _ => SKIP_SUBSCRIPTION_AGENTS_DISABLED,
+            };
+            skip(&mut *conn, &send, &trigger, agent, *addressing, reason).await?;
+            subscription_notice(&mut *conn, &send, agent, kind).await?;
+            continue;
+        }
+        // ---------------------------------------------------------------
         // ADR-0162 HAP-E5 — the per-agent delivery selector.
         //
         // Delivery is a property of the AGENT, not of the instance: one
@@ -278,6 +319,24 @@ pub(crate) async fn route_agent_mentions_in_tx(
                     "hosted_connection_unavailable",
                 )
                 .await?;
+                // ADR-0193 D5 — the owner called and there is no live
+                // connection. The existing contract stands (no job, no new
+                // queue), so only the sentence that promises the future is
+                // true — and only while a relaunch can still finish the
+                // pairing. An expired or disconnected connection gets nothing.
+                if agent
+                    .owner_only
+                    .as_ref()
+                    .is_some_and(|scope| scope.reconnectable)
+                {
+                    subscription_notice(
+                        &mut *conn,
+                        &send,
+                        agent,
+                        SubscriptionNoticeKind::OfflineNotQueued,
+                    )
+                    .await?;
+                }
                 continue;
             };
             // The human confirmed this connection for a NAMED set of channels
@@ -463,6 +522,25 @@ pub(crate) async fn route_agent_mentions_in_tx(
         )
         .await?;
 
+        // ADR-0193 D5 — the owner's call is queued on a live connection whose
+        // CLI has not reached the Agent Port lately. The job above stays
+        // pending (gateway jobs do not expire) and the next `oort_jobs_claim`
+        // takes it, so 「이어서 답할게요」 is the true sentence.
+        if hosted
+            && agent
+                .owner_only
+                .as_ref()
+                .is_some_and(|scope| !scope.recently_seen)
+        {
+            subscription_notice(
+                &mut *conn,
+                &send,
+                agent,
+                SubscriptionNoticeKind::OfflineQueued,
+            )
+            .await?;
+        }
+
         if let Some(ignored) = routing.ignored_model_pref.as_deref() {
             // ADR-0131 D2: an ignored inherited preference is only ever visible
             // as audit — never as a client error, and never silently.
@@ -606,6 +684,103 @@ async fn skip(
     Ok(())
 }
 
+/// Post one ADR-0193 sentence in the agent's name, at most once per thread,
+/// person, sentence and ten minutes.
+///
+/// The static-copy path of ADR-0181 D5 (`provider_required`): the server writes
+/// a text message **authored by the agent member** through the single write
+/// path — `channel_seq` bump, `message` INSERT, broadcast outbox INSERT, the
+/// same transaction as the call that caused it. No run, no job, no model call,
+/// so the owner's subscription is never spent on it; that is also why it works
+/// for a hosted agent whose runtime is not there to speak. It is a `text`
+/// message, not a `system` line: the sentence is the agent's, and a server
+/// line dressed in the agent's name is the bot wrapping ADR-0181 refused.
+///
+/// `client_msg_id` is the trigger's id, so a replayed send cannot stack a
+/// second copy even before the throttle is asked (`message_client_idem_uniq` is
+/// per channel **and author**, so two agents never collide on it).
+async fn subscription_notice(
+    conn: &mut PgConnection,
+    send: &MentionSend<'_>,
+    agent: &MentionCandidate,
+    kind: SubscriptionNoticeKind,
+) -> Result<(), DbError> {
+    let Some(scope) = agent.owner_only.as_ref() else {
+        return Ok(());
+    };
+    let thread_key = notice_thread_key(send.channel_id, send.root_id);
+    let recent = lock_and_find_recent_notice_in_tx(
+        &mut *conn,
+        send.workspace_id,
+        agent.member_id,
+        send.channel_id,
+        thread_key,
+        send.author_member_id,
+        kind,
+    )
+    .await?;
+    let detail = serde_json::json!({
+        "notice": kind.as_str(),
+        "channel_id": send.channel_id,
+        "trigger_message_id": send.message_id,
+        "thread_key": thread_key,
+    });
+    if recent {
+        write_audit(
+            &mut *conn,
+            &AuditEntry::new(send.workspace_id, SUBSCRIPTION_NOTICE_THROTTLED_ACTION)
+                .by(send.author_member_id)
+                .about(agent.member_id)
+                .target("message", send.message_id)
+                .via_token(send.via_token_id)
+                .with_schema(SUBSCRIPTION_NOTICE_AUDIT_SCHEMA, detail),
+        )
+        .await?;
+        return Ok(());
+    }
+    let sent = send_thread_notice_in_tx(
+        &mut *conn,
+        send.workspace_id,
+        NewMessage {
+            channel_id: send.channel_id,
+            author_member_id: agent.member_id,
+            message_type: MessageType::Text,
+            body: Some(subscription_notice_body(kind, scope)),
+            props: subscription_notice_props(
+                kind,
+                send.author_member_id,
+                thread_key,
+                send.message_id,
+            ),
+            root_id: Some(notice_root(send.message_id, send.root_id)),
+            reply_to_id: None,
+            client_msg_id: Some(send.message_id),
+            run_id: None,
+            hlc_ts: None,
+            hlc_count: None,
+        },
+    )
+    .await?;
+    let mut detail = detail;
+    if let Some(object) = detail.as_object_mut() {
+        object.insert(
+            "notice_message_id".into(),
+            serde_json::json!(sent.message.id),
+        );
+    }
+    write_audit(
+        &mut *conn,
+        &AuditEntry::new(send.workspace_id, SUBSCRIPTION_NOTICE_POSTED_ACTION)
+            .by(send.author_member_id)
+            .about(agent.member_id)
+            .target("message", send.message_id)
+            .via_token(send.via_token_id)
+            .with_schema(SUBSCRIPTION_NOTICE_AUDIT_SCHEMA, detail),
+    )
+    .await?;
+    Ok(())
+}
+
 /// A paused agent answers **visibly** — Swift `insertPausedMentionSystemLine`
 /// (:1594-1658): a system line in the channel plus an audit row.
 ///
@@ -688,6 +863,7 @@ mod tests {
             hosted_active_connection_id: None,
             hosted_channel_approved: false,
             is_channel_member: true,
+            owner_only: None,
         }
     }
 

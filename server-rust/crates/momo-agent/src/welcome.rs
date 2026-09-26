@@ -201,11 +201,19 @@ pub async fn ensure_agent_in_general_in_tx(
 /// `prefer_agent_member_id`, else first deliverable agent in that channel).
 /// Hosted agents that cannot be delivered (gate closed, not active, or
 /// `#general` unapproved) are skipped so they never consume the opener marker.
+///
+/// ADR-0193 D4 (#2815): an `owner_only` (subscription) agent speaks the opener
+/// only to its own owner, and to nobody while the operator's kill switch is
+/// off. A welcome is a turn run on the speaker's brain for `welcomed_member_id`,
+/// so choosing someone else's subscription agent here would spend that
+/// person's plan on a teammate — the exact sharing D4 refuses.
 pub async fn resolve_welcome_target_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     hosted_delivery_enabled: bool,
     prefer_agent_member_id: Option<Uuid>,
+    welcomed_member_id: Uuid,
+    subscription_agents_enabled: bool,
 ) -> Result<Option<WelcomeTarget>, DbError> {
     let settings: Value = sqlx::query_scalar("SELECT settings FROM workspace WHERE id = $1")
         .bind(workspace_id)
@@ -234,6 +242,8 @@ pub async fn resolve_welcome_target_in_tx(
         channel_id,
         specified,
         hosted_delivery_enabled,
+        welcomed_member_id,
+        subscription_agents_enabled,
     )
     .await?;
     let Some(agent) = agent else {
@@ -283,6 +293,8 @@ async fn load_welcome_agent_in_tx(
     channel_id: Uuid,
     specified: Option<Uuid>,
     hosted_delivery_enabled: bool,
+    welcomed_member_id: Uuid,
+    subscription_agents_enabled: bool,
 ) -> Result<Option<WelcomeAgent>, DbError> {
     let rows = sqlx::query(
         "SELECT m.id, a.model, a.system_prompt, a.max_run_steps, a.tool_schema, a.config, \
@@ -336,11 +348,15 @@ async fn load_welcome_agent_in_tx(
                      AND ms.left_at IS NULL \
                 ) \
             AND ($3::uuid IS NULL OR m.id = $3) \
+            AND (a.invocation_scope <> 'owner_only' \
+                 OR ($5 AND a.owner_human_id = $4)) \
           ORDER BY m.created_at ASC, m.id ASC",
     )
     .bind(workspace_id)
     .bind(channel_id)
     .bind(specified)
+    .bind(welcomed_member_id)
+    .bind(subscription_agents_enabled)
     .fetch_all(&mut *conn)
     .await?;
     for row in rows {

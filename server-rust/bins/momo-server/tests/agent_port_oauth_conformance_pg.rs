@@ -182,6 +182,7 @@ async fn start_server(pool: PgPool, oauth_enabled: bool) -> String {
         per_agent_limit: 0,
         per_ip_limit: 0,
         hosted_delivery_enabled: false,
+        subscription_agents_enabled: true,
         oauth: if oauth_enabled {
             oauth_config()
         } else {

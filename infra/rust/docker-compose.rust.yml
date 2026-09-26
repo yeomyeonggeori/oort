@@ -284,6 +284,10 @@ services:
       # keeps this off for stacks that never open hosted delivery (#1781 class:
       # do not make an unused flag required).
       MOMO_HOSTED_DELIVERY_ENABLED: ${MOMO_HOSTED_DELIVERY_ENABLED:-}
+      # ADR-0193 D6 (#2815): subscription-agent kill switch. Blank/unset or
+      # `true` = on (the default); any other value = off. `:-` so existing
+      # stacks keep the default without a new required key.
+      MOMO_SUBSCRIPTION_AGENTS_ENABLED: ${MOMO_SUBSCRIPTION_AGENTS_ENABLED:-}
       # ADR-0110: the ONLY authority for the realtime address handed to clients.
       # No default — a wrong guess silently points every client at nothing.
       MOMO_CENTRIFUGO_WS_URL: ${MOMO_CENTRIFUGO_WS_URL:?set MOMO_CENTRIFUGO_WS_URL}
