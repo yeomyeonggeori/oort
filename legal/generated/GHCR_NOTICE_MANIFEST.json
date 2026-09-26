@@ -1,20 +1,20 @@
 {
   "counts": {
     "cargo": 297,
-    "npm": 467,
+    "npm": 469,
     "unique_blobs": 381
   },
   "format": "ghcr-notice-bundle/v1",
   "generator": "scripts/generate_ghcr_notice_bundle.py",
   "image_files": {
-    "GHCR_THIRD_PARTY_NOTICES.txt": "80f09224a57833b297ab8621cef8168356cca163eb106d4dff5dc9020b5c0000",
+    "GHCR_THIRD_PARTY_NOTICES.txt": "93f9b98ddf650703b375f2c9228d21f9aac0eb82ca326fb9441acede0aab5579",
     "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
     "NOTICE": "615ad5e316c1c8ff3b90e317a880af9eca84b9396a9a94422ce52a2a50ef8036",
     "THIRD_PARTY_NOTICES.md": "ca504fceca9321842cc55272bbc2ff6f02a67447f6750f491482803e25d37613"
   },
   "inputs": {
-    "clarify_sha256": "82ccac6d0af1fb9029a27b19e0ac8b3708e5be2eb6909ce22e6a4128ab6a19d4",
-    "clients_web_package_lock_sha256": "7f3477beb4a4382da2a14a58222120c0129177da70e371df19012d20c2ee7d96",
+    "clarify_sha256": "fcb9ac157804777c306cebdcc24f804992a74fcf87c27d42dbc5d9370a7ed8e6",
+    "clients_web_package_lock_sha256": "3fe4cf55556ea18354f1024dfe564626553ceacb9310b290404e9e2af5ee736a",
     "server_rust_cargo_lock_sha256": "a477d1d553fb62f6fbb08a013651e52b03d383021491a37881c697ecf3fbf0ec",
     "spdx_texts_sha256": {
       "0BSD.txt": "3662a9adfe6feddb077f96dfad3cb30408540a2a3eae5a656b7ff4375e622be0",
@@ -29,8 +29,8 @@
     }
   },
   "outputs": {
-    "bundle_sha256": "80f09224a57833b297ab8621cef8168356cca163eb106d4dff5dc9020b5c0000",
-    "sha256_manifest_sha256": "d99b340cf3a3c2b3038dfc7ac63eefd8e42b02e3e7c32c582a04f818549bcc3a"
+    "bundle_sha256": "93f9b98ddf650703b375f2c9228d21f9aac0eb82ca326fb9441acede0aab5579",
+    "sha256_manifest_sha256": "193a8c75d36f3665b37d096672573b0ef866df6155bcdfb749246e6567d9d535"
   },
   "packages": [
     {
@@ -9781,6 +9781,38 @@
       "source": "package-tree",
       "spdx": "MIT",
       "version": "0.11.0"
+    },
+    {
+      "copyright": "copyright not stated in license file",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "SPDX-MIT.txt",
+          "sha256": "f9c4c77baa3828004ee54b8a4f2db2e88ed44a6237a493965bf551fac0fcb62d",
+          "source": "clarify"
+        }
+      ],
+      "name": "@xterm/addon-serialize",
+      "repository": "",
+      "source": "clarify",
+      "spdx": "MIT",
+      "version": "0.14.0"
+    },
+    {
+      "copyright": "copyright not stated in license file",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "SPDX-MIT.txt",
+          "sha256": "f9c4c77baa3828004ee54b8a4f2db2e88ed44a6237a493965bf551fac0fcb62d",
+          "source": "clarify"
+        }
+      ],
+      "name": "@xterm/headless",
+      "repository": "",
+      "source": "clarify",
+      "spdx": "MIT",
+      "version": "6.0.0"
     },
     {
       "copyright": "Copyright (c) 2017-2019, The xterm.js authors (https://github.com/xtermjs/xterm.js); Copyright (c) 2014-2016, SourceLair Private Company (https://www.sourcelair.com); Copyright (c) 2012-2013, Christopher Jeffrey (https://github.com/chjj/)",

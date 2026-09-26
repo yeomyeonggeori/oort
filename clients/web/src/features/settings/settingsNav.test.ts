@@ -25,6 +25,7 @@ describe("settingsNav", () => {
       "appearance",
       "link-previews",
       "notifications",
+      "terminal",
       "updates",
     ]);
     expect(
@@ -58,6 +59,7 @@ describe("settingsNav", () => {
       "appearance",
       "link-previews",
       "notifications",
+      "terminal",
       "updates",
     ]);
     expect(idsIn("워크스페이스")).toEqual(["workspace", "plugins", "members"]);

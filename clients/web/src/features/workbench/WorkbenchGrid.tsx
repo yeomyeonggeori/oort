@@ -74,6 +74,12 @@ export interface WorkbenchGridProps {
   size?: Size;
   /** 마지막 칸에서 닫기를 누르면 부른다. 없으면 거부 문구를 보인다. */
   onCloseLastPane?: () => void;
+  /**
+   * 칸을 닫기 전에 묻는다(#2774: 실행 중인 로컬 칸은 확인). 있으면 격자는
+   * 닫지 않고 이것을 부르고, 호스트가 `close()`를 부를 때 닫는다. 마지막 칸이면
+   * `close()`가 `onCloseLastPane`으로 간다.
+   */
+  onRequestClose?: (paneId: PaneId, close: () => void) => void;
   label?: string;
   className?: string;
 }
@@ -152,6 +158,7 @@ export function WorkbenchGrid({
   platform: platformProp,
   size: sizeOverride,
   onCloseLastPane,
+  onRequestClose,
   label = "작업 공간 격자",
   className,
 }: WorkbenchGridProps) {
@@ -179,6 +186,26 @@ export function WorkbenchGrid({
     [onLayoutChange]
   );
 
+  const closeNow = useCallback(
+    (id: PaneId) => {
+      const result = closePane(layoutRef.current, id);
+      if (!result.ok && result.reason === "last-pane" && onCloseLastPane) {
+        onCloseLastPane();
+        return;
+      }
+      apply(result);
+    },
+    [apply, onCloseLastPane]
+  );
+
+  const requestClose = useCallback(
+    (id: PaneId) => {
+      if (onRequestClose) onRequestClose(id, () => closeNow(id));
+      else closeNow(id);
+    },
+    [closeNow, onRequestClose]
+  );
+
   const run = useCallback(
     (command: WorkbenchCommand) => {
       const current = layoutRef.current;
@@ -186,14 +213,8 @@ export function WorkbenchGrid({
       switch (command.type) {
         case "split":
           return apply(splitPane(current, current.focused, command.axis, s));
-        case "close": {
-          const result = closePane(current, current.focused);
-          if (!result.ok && result.reason === "last-pane" && onCloseLastPane) {
-            onCloseLastPane();
-            return;
-          }
-          return apply(result);
-        }
+        case "close":
+          return requestClose(current.focused);
         case "toggle-maximize":
           return apply(toggleMaximize(current));
         case "focus-cycle":
@@ -204,7 +225,7 @@ export function WorkbenchGrid({
           return apply(focusDirection(current, command.direction, s), false);
       }
     },
-    [apply, onCloseLastPane]
+    [apply, requestClose]
   );
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -253,14 +274,7 @@ export function WorkbenchGrid({
     paneTitle,
     onFocusPane: (id) => apply(focusPane(layoutRef.current, id), false),
     onSplit: (id, axis) => apply(splitPane(layoutRef.current, id, axis, sizeRef.current)),
-    onClose: (id) => {
-      const result = closePane(layoutRef.current, id);
-      if (!result.ok && result.reason === "last-pane" && onCloseLastPane) {
-        onCloseLastPane();
-        return;
-      }
-      apply(result);
-    },
+    onClose: requestClose,
     onMaximize: (id) => apply(toggleMaximize(layoutRef.current, id)),
     onResize: (splitId, ratio) => apply(resizeSplit(layoutRef.current, splitId, ratio, sizeRef.current), false),
     onNudge: (splitId, delta) => apply(nudgeSplit(layoutRef.current, splitId, delta, sizeRef.current), false),

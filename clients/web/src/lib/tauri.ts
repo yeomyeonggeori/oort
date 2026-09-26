@@ -8,7 +8,7 @@
 // permission, no keychain) when there is no shell underneath.
 //
 // The Rust half lives in `clients/desktop/src-tauri/src/{deeplink,discovery,
-// notification,keychain,updater,detect,harness_status,opener,pdf_viewer}.rs` and the
+// notification,keychain,updater,detect,harness_status,opener,pdf_viewer,pty}.rs` and the
 // command/event contract is documented in `clients/desktop/README.md`. Keep
 // the three in sync — a renamed command fails at runtime, not at compile time.
 //
@@ -254,6 +254,74 @@ export async function detectLocalHarnesses(): Promise<LocalHarnessProbe[]> {
     return normalizeLocalHarnessProbes([]);
   }
 }
+
+// ---- local terminal lane (#2772 shell, #2774 panes) ---------------------------
+
+/**
+ * What a pane asks the shell to run. Never a path or an argv: `shell` is the
+ * login shell, `harness` one id the shell resolves on this Mac (ADR-0190 D1·D3).
+ */
+export type PtyProgram = { kind: "shell" } | { kind: "harness"; id: "claude" | "codex" | "grok" };
+
+export interface PtyExit {
+  id: number;
+  code: number | null;
+  signal: string | null;
+}
+
+export interface PtySpawnRequest {
+  program: PtyProgram;
+  cols: number;
+  rows: number;
+}
+
+/**
+ * The five `pty_*` commands, desktop only (README 「pty_spawn」 줄). Output
+ * arrives raw on `onOutput` and must be acknowledged with `ack` (batched, see
+ * `@momo/core/features/workbench/ptyFlow`). A browser tab has no PTY: every
+ * method rejects there, and the dock that calls them is never mounted.
+ */
+export const desktopPty = {
+  async spawn(
+    request: PtySpawnRequest,
+    onOutput: (bytes: ArrayBuffer) => void,
+    onExit: (exit: PtyExit) => void
+  ): Promise<number> {
+    if (!IS_TAURI) throw new Error("local terminal unavailable");
+    const { invoke: call, Channel } = await core();
+    const output = new Channel<ArrayBuffer>();
+    output.onmessage = onOutput;
+    const exit = new Channel<PtyExit>();
+    exit.onmessage = onExit;
+    return call<number>("pty_spawn", { request, onOutput: output, onExit: exit });
+  },
+
+  /**
+   * One raw body of at most 1 MiB. Calls reach the child in the order they
+   * were made, so a caller does not await one before the next. Rejects with a
+   * message starting `busy` when the child is not reading its input.
+   */
+  async write(id: number, bytes: Uint8Array): Promise<void> {
+    if (!IS_TAURI) throw new Error("local terminal unavailable");
+    const { invoke: call } = await core();
+    await call<void>("pty_write", bytes, { headers: { "x-oort-pty-id": String(id) } });
+  },
+
+  async resize(id: number, cols: number, rows: number): Promise<void> {
+    if (!IS_TAURI) throw new Error("local terminal unavailable");
+    await invoke<void>("pty_resize", { id, cols, rows });
+  },
+
+  async kill(id: number): Promise<void> {
+    if (!IS_TAURI) throw new Error("local terminal unavailable");
+    await invoke<void>("pty_kill", { id });
+  },
+
+  async ack(id: number, bytes: number): Promise<void> {
+    if (!IS_TAURI) throw new Error("local terminal unavailable");
+    await invoke<void>("pty_ack", { id, bytes });
+  },
+};
 
 // ---- native notifications ---------------------------------------------------
 

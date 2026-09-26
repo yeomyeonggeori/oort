@@ -45,6 +45,10 @@ import {
   useAdeDrawerOpen,
 } from "@/features/ade/adeDrawerStore";
 import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
+import { isDesktop } from "@/lib/tauri";
+import { cn } from "@/design/lib/cn";
+import { LocalTerminalDock } from "@/features/workbench/local/LocalTerminalDock";
+import { useDockState } from "@/features/workbench/local/dockState";
 
 // =============================================================================
 // Signed-in shell: owns the single realtime rail for the session and renders
@@ -80,6 +84,10 @@ export function AppShell({
   // The pure-scroll gate (?stress=N) renders synthetic rows and must not open
   // a socket, otherwise the frame profile measures the network too.
   const stress = new URLSearchParams(location.search).has("stress");
+  // 로컬 터미널 도크(#2774). 스트레스 측정은 합성 행만 재므로 붙이지 않는다.
+  const localTerminal = isDesktop() && !stress;
+  const localDock = useDockState();
+  const localDockFullscreen = localTerminal && localDock.open && localDock.fullscreen;
   // The design capture seam (?agentwork=live|offline) seeds fixed agent turns
   // instead of watching for real ones, so the sidebar pill and the composer
   // activity line are reviewable in artifacts/design (SKILL §11). The rail is
@@ -349,7 +357,14 @@ export function AppShell({
               {/* `relative`는 폰 폭에서 작업 패널이 라우트를 덮을 때 필요한
                * 앵커다(tokens.css `work-panel-pane`). 채팅 표면은 자기 안에 같은
                * 앵커를 이미 갖고 있으므로 스레드·작업 세션 패널의 자리는 그대로다. */}
-              <div className="relative flex min-h-0 min-w-0 flex-1">
+              {/* 로컬 터미널 전체 화면(⌃⇧`, #2774)은 도크를 판 전체로 키운다. 라우트
+               * 상자는 지우지 않고 숨긴다: 컴포저 초안과 스크롤 자리가 남는다. */}
+              <div
+                className={cn(
+                  "relative flex min-h-0 min-w-0 flex-1",
+                  localDockFullscreen && "hidden"
+                )}
+              >
                 {/* `tabIndex={-1}`은 탭 순서에 자리를 만들지 않는다. 층이 닫힐 때
                  * 캐럿이 돌아갈 컨트롤이 사라져 있으면(관제 요약 줄은 작업이 0이
                  * 되면 DOM에서 빠진다) 그 층이 여기로 캐럿을 놓는다 — <body>로
@@ -387,6 +402,9 @@ export function AppShell({
                   !isSettingsSurface &&
                   isSurfaceProvided("ade") && <AdeDrawer />}
               </div>
+              {/* 로컬 터미널 도크(#2774, ADR-0190 D1): 데스크탑 셸에서만. 브라우저
+               * 탭에는 로컬 PTY가 없으므로 도크도, ⌃` 키도 없다. */}
+              {localTerminal && <LocalTerminalDock />}
             </main>
           </div>
           {/* Global keyboard paths that must work from any route (R-1 §2). */}

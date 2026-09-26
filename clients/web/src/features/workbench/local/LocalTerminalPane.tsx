@@ -1,0 +1,248 @@
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { RotateCcw } from "lucide-react";
+import { cn } from "@/design/lib/cn";
+import { Button } from "@/design/ui/button";
+import { subscribeTheme } from "@/design/theme";
+import { isTerminalAppKey, type KeyPlatform } from "@momo/core/features/workbench/keymap";
+import type { WorkbenchPaneInfo } from "../WorkbenchGrid";
+import { localSessions, type LocalSessions, type LocalSessionView } from "./localSessions";
+import type { ITheme, Terminal } from "./localTerminalRuntime";
+
+// Reading this as: 작업 공간 격자의 로컬 터미널 칸 for internal team users on
+// Tauri desktop, density 7/10, motion 0/10.
+//
+// 보이는 xterm만 여기 산다. PTY와 미러는 세션 관리자(localSessions.ts)가 든다.
+// 이 칸이 사라져도(도크 닫기, 최대화 전환) 세션은 계속되고, 다시 붙으면 미러가
+// 받아 둔 화면부터 그린다.
+//
+// 키: 터미널 입력이 먼저다(ADR-0190 D5). D5 표의 앱 키(`isTerminalAppKey`)만
+// xterm에 주지 않고 위로 흘려 격자와 도크가 받는다. 나머지 키는 xterm이 받고,
+// 도크 뿌리(LocalTerminalDock)가 전파를 끊어 앱의 다른 단축키(⌘K, ⌥↑ 등)가
+// 보지 못하게 한다. Esc도 터미널 것이다(vim). 칸을 떠나는 길은 ⌃`(도크 닫기,
+// 연 곳으로 캐럿 복귀)와 ⌘]·⌘[(다음·이전 칸)이다.
+//
+// 색은 관전 터미널(ObserverTerminal)과 같은 방식으로 DOM에서 읽는다. 토큰을
+// 다시 적지 않는다.
+
+type TerminalTheme = Pick<
+  ITheme,
+  "background" | "foreground" | "cursor" | "cursorAccent" | "selectionBackground"
+>;
+
+function readTheme(surface: HTMLElement, selection: HTMLElement, cursor: HTMLElement): TerminalTheme {
+  const surfaceStyle = getComputedStyle(surface);
+  return {
+    background: surfaceStyle.backgroundColor,
+    foreground: surfaceStyle.color,
+    // 입력을 받는 터미널이므로 커서가 보여야 한다. 신호색(한 표면 하나의 신호)이
+    // 곧 캐럿 색이다(design-taste-web §2 「caret」).
+    cursor: getComputedStyle(cursor).backgroundColor,
+    cursorAccent: surfaceStyle.backgroundColor,
+    selectionBackground: getComputedStyle(selection).backgroundColor,
+  };
+}
+
+const EMPTY_VIEW: ReadonlyMap<string, LocalSessionView> = new Map();
+
+export function useLocalSessionView(
+  paneId: string,
+  sessions: LocalSessions = localSessions()
+): LocalSessionView | null {
+  const map = useSyncExternalStore(
+    sessions.subscribe,
+    sessions.getSnapshot,
+    () => EMPTY_VIEW
+  );
+  return map.get(paneId) ?? null;
+}
+
+/** 칸 머리 제목. `로컬`로 시작해 에이전트 칸과 문구로 구분한다(ADR-0190 D7). */
+export function localPaneTitle(view: LocalSessionView | null): string {
+  const program = view?.program.kind === "harness" ? view.program.id : "셸";
+  const title = view?.title;
+  return title ? `로컬 · ${program} · ${title}` : `로컬 · ${program}`;
+}
+
+export function LocalTerminalPane({
+  pane,
+  platform,
+  sessions = localSessions(),
+}: {
+  pane: WorkbenchPaneInfo;
+  platform: KeyPlatform;
+  sessions?: LocalSessions;
+}) {
+  const view = useLocalSessionView(pane.id, sessions);
+  const mountRef = useRef<HTMLDivElement>(null);
+  const selectionProbeRef = useRef<HTMLSpanElement>(null);
+  const cursorProbeRef = useRef<HTMLSpanElement>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const [runtimeFailed, setRuntimeFailed] = useState(false);
+  const platformRef = useRef(platform);
+  platformRef.current = platform;
+
+  // 보이는 xterm 하나를 만들고 세션에 붙인다. 칸이 사라지면 떼고 버린다
+  // (세션은 남는다).
+  useEffect(() => {
+    let cancelled = false;
+    let cleanup: (() => void) | null = null;
+    void (async () => {
+      let runtime: typeof import("./localTerminalRuntime");
+      try {
+        runtime = await import("./localTerminalRuntime");
+      } catch {
+        if (!cancelled) setRuntimeFailed(true);
+        return;
+      }
+      const mount = mountRef.current;
+      const selection = selectionProbeRef.current;
+      const cursor = cursorProbeRef.current;
+      if (cancelled || !mount || !selection || !cursor) return;
+      const style = getComputedStyle(mount);
+      const terminal = new runtime.Terminal({
+        fontFamily: style.fontFamily,
+        fontSize: Number.parseFloat(style.fontSize) || 12,
+        scrollback: 5_000,
+        cursorBlink: false,
+        macOptionIsMeta: false,
+        allowProposedApi: true,
+        theme: readTheme(mount, selection, cursor),
+      });
+      terminal.attachCustomKeyEventHandler(
+        (event) => !isTerminalAppKey(event, platformRef.current)
+      );
+      const fit = new runtime.FitAddon();
+      terminal.loadAddon(fit);
+      terminal.open(mount);
+      mount.querySelector(".xterm-viewport")?.setAttribute("data-scroll-x", "");
+      terminalRef.current = terminal;
+
+      const refit = () => {
+        try {
+          fit.fit();
+        } catch {
+          /* 배치 중인 칸. 다음 크기 변화가 다시 맞춘다 */
+        }
+      };
+      refit();
+      await sessions.ensure(pane.id, terminal.cols, terminal.rows);
+      if (cancelled) {
+        terminal.dispose();
+        return;
+      }
+      const detach = sessions.attach(pane.id, terminal);
+      const data = terminal.onData((text) => sessions.input(pane.id, text));
+      const binary = terminal.onBinary((raw) => {
+        const bytes = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i) & 0xff;
+        sessions.input(pane.id, bytes);
+      });
+      const resized = terminal.onResize(({ cols, rows }) => sessions.resize(pane.id, cols, rows));
+      sessions.resize(pane.id, terminal.cols, terminal.rows);
+
+      const observer = new ResizeObserver(refit);
+      observer.observe(mount);
+      const media = window.matchMedia("(prefers-color-scheme: dark)");
+      const applyTheme = () => {
+        terminal.options.theme = readTheme(mount, selection, cursor);
+      };
+      media.addEventListener("change", applyTheme);
+      const unsubscribeTheme = subscribeTheme(applyTheme);
+      if (pane.focused) terminal.focus();
+
+      cleanup = () => {
+        observer.disconnect();
+        media.removeEventListener("change", applyTheme);
+        unsubscribeTheme();
+        data.dispose();
+        binary.dispose();
+        resized.dispose();
+        detach();
+        terminal.dispose();
+        terminalRef.current = null;
+      };
+    })();
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
+    // 칸 id가 같으면 같은 xterm을 쓴다. 포커스는 아래 효과가 따로 맞춘다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pane.id, sessions]);
+
+  // 격자의 포커스 칸이 이 칸이 되면 키가 터미널로 가게 한다.
+  useEffect(() => {
+    if (pane.focused) terminalRef.current?.focus();
+  }, [pane.focused]);
+
+  const phase = view?.phase ?? "starting";
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col bg-surface" data-testid="local-terminal-pane">
+      {/* 틀과 마운트는 두 상자다. FitAddon은 부모의 계산 높이를 테두리 상자로
+          읽어서, 마운트에 안쪽 여백이 있으면 한 줄을 더 제안한다(ObserverTerminal
+          머리말의 실측). 여백은 바깥 틀이 진다. */}
+      <div className="flex min-h-0 flex-1 flex-col px-2 pt-2">
+        <div
+          ref={mountRef}
+          role="group"
+          aria-label={`${pane.index}번 칸 로컬 터미널`}
+          aria-description="입력은 이 터미널로 갑니다. ⌃` 도크 닫기, ⌘] 다음 칸."
+          data-testid="local-terminal"
+          data-phase={phase}
+          className="min-h-0 flex-1 overflow-hidden bg-surface font-mono text-meta text-ink"
+        />
+      </div>
+      <span ref={selectionProbeRef} aria-hidden="true" className="hidden bg-accent-soft" />
+      <span ref={cursorProbeRef} aria-hidden="true" className="hidden bg-signal" />
+      <PaneFooter view={view} runtimeFailed={runtimeFailed} onRestart={() => void sessions.restart(pane.id)} />
+    </div>
+  );
+}
+
+function PaneFooter({
+  view,
+  runtimeFailed,
+  onRestart,
+}: {
+  view: LocalSessionView | null;
+  runtimeFailed: boolean;
+  onRestart: () => void;
+}) {
+  let message: string | null = null;
+  let action: string | null = null;
+  if (runtimeFailed) {
+    message = "터미널 화면을 불러오지 못했습니다. 앱을 다시 여세요.";
+  } else if (view === null || view.phase === "starting") {
+    message = null;
+  } else if (view.phase === "failed") {
+    message = `터미널을 열지 못했습니다. ${view.error ?? ""}`.trim();
+    action = "다시 열기";
+  } else if (view.phase === "exited") {
+    message = "프로세스가 끝났습니다. 이 칸에서 다시 시작할 수 있습니다.";
+    action = view.program.kind === "harness" ? `${view.program.id} 다시 시작` : "새 셸 시작";
+  } else if (view.inputNotice) {
+    message = view.inputNotice;
+  } else if (view.storageFailed) {
+    message = "이 기기에 화면을 저장하지 못했습니다. 앱을 다시 열면 이 칸의 전 화면은 보이지 않습니다.";
+  }
+  return (
+    <div
+      className={cn(
+        "flex min-h-control-sm shrink-0 items-center gap-2 border-t border-line px-3 text-meta",
+        message ? "text-ink" : "hidden"
+      )}
+      data-testid="local-terminal-status"
+    >
+      <p role="status" aria-live="polite" className="min-w-0 flex-1 truncate" title={message ?? undefined}>
+        {message ?? ""}
+      </p>
+      {action ? (
+        <Button type="button" variant="ghost" size="sm" onClick={onRestart} data-testid="local-terminal-restart">
+          <RotateCcw aria-hidden className="size-4" />
+          {action}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
