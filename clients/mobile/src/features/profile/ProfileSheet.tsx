@@ -188,6 +188,11 @@ function SheetBody({
     () => scrollRef.current?.scrollToEnd({animated: true}),
     [],
   );
+  // 장이 바뀌면 맨 위에서 시작한다 — 프로필을 내려 둔 채 「상태 글 ›」을 누르면 새
+  // 장의 입력 칸이 머리 밑에 숨어 있었다(#2848 캡처).
+  useEffect(() => {
+    scrollRef.current?.scrollTo({y: 0, animated: false});
+  }, [page]);
 
   return (
     <View style={styles.root}>
@@ -784,7 +789,14 @@ const buildStyles = (color: Palette) =>
       boxShadow: color.elevationRest,
       flexShrink: 1,
     },
-    optionDot: {width: space.sm, height: space.sm, borderRadius: radius.pill},
+    // 설명 줄이 붙은 줄(방해 금지)에서도 점이 제목 첫 줄 옆에 서게 위로 붙인다.
+    optionDot: {
+      width: space.sm,
+      height: space.sm,
+      borderRadius: radius.pill,
+      alignSelf: 'flex-start',
+      marginTop: space.sm,
+    },
     check: {
       fontSize: font.body,
       fontWeight: '700',
