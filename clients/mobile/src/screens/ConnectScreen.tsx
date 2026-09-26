@@ -279,6 +279,9 @@ export default function ConnectScreen({
     rows: Partial<Record<FormRow | 'action', RevealSpan>>;
   }>({viewport: 0, offset: 0, rows: {}});
   const focusedRef = useRef<FormRow | null>(null);
+  // The same answer as state, for the focus ring only (시안 `.input.focus`).
+  // Focus is a tap, not a keystroke: re-rendering here does not touch the IME.
+  const [focusRow, setFocusRow] = useState<FormRow | null>(null);
 
   const reveal = useCallback(() => {
     const focused = focusedRef.current;
@@ -332,6 +335,7 @@ export default function ConnectScreen({
   const focused = useCallback(
     (field: FormRow) => {
       focusedRef.current = field;
+      setFocusRow(field);
       reveal();
     },
     [reveal],
@@ -339,6 +343,7 @@ export default function ConnectScreen({
 
   const blurred = useCallback((field: FormRow) => {
     if (focusedRef.current === field) focusedRef.current = null;
+    setFocusRow(current => (current === field ? null : current));
   }, []);
 
   // Two moments the keyboard gives, and the device showed each one failing alone.
@@ -514,6 +519,7 @@ export default function ConnectScreen({
     setPhase(IDLE);
     setLinkFilled(false);
     focusedRef.current = null;
+    setFocusRow(null);
     room.current = {viewport: 0, offset: 0, rows: {}};
     setStep('welcome');
   }, []);
@@ -965,7 +971,7 @@ export default function ConnectScreen({
                   ref={node => {
                     fields.current.server = node;
                   }}
-                  style={styles.input}
+                  style={[styles.input, focusRow === 'server' && styles.inputFocus]}
                   value={serverUrl}
                   onChangeText={next => {
                     setServerTyped(true);
@@ -1006,7 +1012,7 @@ export default function ConnectScreen({
                   ref={node => {
                     fields.current.code = node;
                   }}
-                  style={styles.input}
+                  style={[styles.input, focusRow === 'code' && styles.inputFocus]}
                   value={inviteCode}
                   onChangeText={setInviteCode}
                   autoCapitalize="none"
@@ -1027,7 +1033,7 @@ export default function ConnectScreen({
                 ref={node => {
                   fields.current.email = node;
                 }}
-                style={styles.input}
+                style={[styles.input, focusRow === 'email' && styles.inputFocus]}
                 value={email}
                 onChangeText={setEmail}
                 autoCapitalize="none"
@@ -1055,7 +1061,7 @@ export default function ConnectScreen({
                 ref={node => {
                   fields.current.password = node;
                 }}
-                style={styles.input}
+                style={[styles.input, focusRow === 'password' && styles.inputFocus]}
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry
@@ -1084,7 +1090,7 @@ export default function ConnectScreen({
                   ref={node => {
                     fields.current.name = node;
                   }}
-                  style={styles.input}
+                  style={[styles.input, focusRow === 'name' && styles.inputFocus]}
                   value={displayName}
                   onChangeText={setDisplayName}
                   placeholder={derivedName}
@@ -1297,7 +1303,10 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     // 입력 그릇만 surface(D11).
     backgroundColor: color.surface,
   },
-  hintOk: {fontSize: font.meta, color: color.accentText},
+  // 신호색은 진행 점과 포커스뿐(D11): 확인된 주소의 메아리는 흐린 잉크다.
+  // `.input.focus{box-shadow:0 0 0 2px var(--surface),0 0 0 4px var(--signal)}`
+  inputFocus: {boxShadow: `0 0 0 2px ${color.surface}, 0 0 0 4px ${color.accent}`},
+  hintOk: {fontSize: font.meta, color: color.textMuted},
   hintBad: {fontSize: font.meta, color: color.danger},
   reentry: {
     minHeight: TOUCH_TARGET,
@@ -1314,7 +1323,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   welcomeMain: {alignItems: 'stretch', gap: PHONE_OB.heroGap},
   welcomeGuide: {alignSelf: 'stretch'},
-  welcomeBubble: {marginTop: WELCOME.bubbleTop, alignSelf: 'stretch'},
+  // 시안 `.p-main{align-items:center}`: 말풍선은 글자만큼이다.
+  welcomeBubble: {marginTop: WELCOME.bubbleTop, alignSelf: 'center'},
   wordmark: {
     fontSize: WELCOME.wordmark,
     fontWeight: '800',

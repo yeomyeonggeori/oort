@@ -237,11 +237,17 @@ export function KomettoGuide({
         accessible
         accessibilityRole={header ? 'header' : 'text'}
         accessibilityLabel={spoken}>
-        <Text style={[styles.line, hero && styles.center]} testID="kometto-guide-line">
+        <Text
+          style={[styles.line, hero && styles.center]}
+          lineBreakStrategyIOS="hangul-word"
+          testID="kometto-guide-line">
           {text}
         </Text>
         {detail ? (
-          <Text style={[styles.detail, hero && styles.center]} testID="kometto-guide-detail">
+          <Text
+            style={[styles.detail, hero && styles.center]}
+            lineBreakStrategyIOS="hangul-word"
+            testID="kometto-guide-detail">
             {detail}
           </Text>
         ) : null}

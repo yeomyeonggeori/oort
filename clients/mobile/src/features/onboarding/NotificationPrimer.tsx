@@ -94,10 +94,13 @@ export function NotificationPrimer({
             <Text style={styles.notifTitle}>{NOTIFY_SAMPLE_TITLE}</Text>
             <Text style={styles.notifTime}>{NOTIFY_SAMPLE_TIME}</Text>
           </View>
-          <Text style={styles.notifBody}>{NOTIFY_SAMPLE_BODY}</Text>
+          <Text style={styles.notifBody} lineBreakStrategyIOS="hangul-word">{NOTIFY_SAMPLE_BODY}</Text>
         </View>
       </View>
-      <Text style={styles.hint} testID="notify-primer-detail">
+      <Text
+        style={styles.hint}
+        lineBreakStrategyIOS="hangul-word"
+        testID="notify-primer-detail">
         {NOTIFY_DETAIL}
       </Text>
     </OnboardingPhoneScreen>

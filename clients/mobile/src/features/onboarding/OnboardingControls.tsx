@@ -205,6 +205,7 @@ export function OnboardingButton({
         style={[
           styles.buttonLabel,
           primary ? styles.onPrimary : styles.onSecondary,
+          inert && !busy && styles.labelInert,
         ]}
         numberOfLines={2}
       >
@@ -452,6 +453,8 @@ const buildStyles = (color: Palette) =>
       flexShrink: 1,
     },
     onPrimary: {color: color.onPrimary},
+    // 옅은 칸 위 흰 글자는 사라진다(390 캡처). 못 누르는 버튼도 라벨은 읽혀야 한다.
+    labelInert: {color: color.textMuted},
     onSecondary: {color: color.text},
     ghost: {
       minHeight: TOUCH_TARGET,
