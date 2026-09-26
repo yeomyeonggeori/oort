@@ -108,6 +108,8 @@ The local terminal pane (#2849) has its own palette, `--term-*`, because xterm p
 | `--term-ansi-*` (16) | see tokens.css | text colors ≥ 4.5:1, `bright-black` (dim) ≥ 3:1; background-role colors (dark `black`, light `white`/`bright-white`) only need to differ from bg and carry fg at 4.5:1 |
 | cursor | `--signal` read inside the frame | ≥ 3:1 on `--term-bg` for every theme's signal |
 
+One deliberate divergence from VS Code: in the light scheme VS Code turns ANSI `white` into a dark gray text color (`#555555`). Here `white`/`bright-white` stay light, mirroring dark's `black`, so a program that paints them as segment backgrounds keeps its shape. The cost is that text printed in ANSI white on the light scheme is near-invisible; the light choice is opt-in and its settings copy warns that dark-assuming prompts read worse.
+
 `--scrim` is the one token that is not opaque, and the only one whose two
 schemes are not the same color at different lightness. It exists because a
 scrim is a **direction**, not a color: it must darken whatever it covers so the
