@@ -53,7 +53,6 @@ import {
   AiAccountRow,
   AiAside,
   AiCard,
-  AiFoot,
   AiLineRow,
   AiOfflineBanner,
   AiPill,
@@ -226,6 +225,9 @@ function TeamBoard({ offline }: { offline: boolean }) {
   // 해제가 끝나면 줄이 사라진다. 초점은 새로 고친 목록이 도착한 뒤에 선
   // 자리(「API 키 추가」, 환경값 줄이 남으면 그 ⋯)로 간다.
   const [focusAfterUnlink, setFocusAfterUnlink] = useState(false);
+  // 비어 있던 서버에 키를 저장하면 줄이 새로 서고 곁판이 상세로 다시 뜬다.
+  // 초점은 그 곁판 제목으로 간다(design-review #2877 2차 High).
+  const [focusHeadingAfterSave, setFocusHeadingAfterSave] = useState(false);
 
   // 곁판이 열리면 초점은 곁판 제목으로, 닫히면 연 자리(⋯ 또는 「API 키 추가」)로.
   // 좁은 폭에서는 곁판이 연 절 바로 밑에 쌓이므로 제목까지 스크롤도 함께 한다.
@@ -270,7 +272,8 @@ function TeamBoard({ offline }: { offline: boolean }) {
   const save = useMutation({
     mutationFn: (input: ProviderLinkInput) => putProviderLink(input),
     onSuccess: () => {
-      closeForm();
+      if (!hasRow) setFocusHeadingAfterSave(true);
+      closeForm(true);
       setProbe(null);
       void invalidate();
     },
@@ -311,10 +314,16 @@ function TeamBoard({ offline }: { offline: boolean }) {
     return busy && !mine ? LINK_BUSY_NOTE_ID : undefined;
   }
 
-  function closeForm() {
+  /**
+   * 폼을 닫는다. 줄이 없는 서버(「API 키 추가」)에서는 폼이 곧 곁판의 전부라
+   * 곁판도 함께 닫힌 것으로 둔다: 그래야 초점이 「API 키 추가」로 돌아오고 Esc
+   * 층도 내려간다. 저장 성공은 예외다(`keepAside`): 곧 줄이 서고 곁판이 상세로 뜬다.
+   */
+  function closeForm(keepAside = false) {
     setEditing(false);
     setBearer("");
     setFieldError({});
+    if (!keepAside && !hasRow) setAsideOpen(false);
   }
 
   function closeAside() {
@@ -322,10 +331,6 @@ function TeamBoard({ offline }: { offline: boolean }) {
     setAsideOpen(false);
   }
 
-  // Esc 는 곁판을 닫는다(설정 전체가 아니라). 키를 적는 중에는 층이 Esc 를
-  // 받고 아무것도 하지 않는다: 층을 내리면 Esc 가 설정 라우트까지 떨어져 적던
-  // 키와 함께 설정이 닫힌다(design-review #2877 H-1). 폼은 [취소]로만 닫힌다.
-  useEscapeLayer(asideOpen, editing ? () => undefined : closeAside);
 
   function startEditing(link: ProviderLink) {
     // Prefill only from a stored link. The environment fallback is a mock
@@ -372,6 +377,18 @@ function TeamBoard({ offline }: { offline: boolean }) {
   const hasRow = link
     ? configured || (link.keyConfigured && link.availability !== "mock")
     : false;
+  const asideVisible = asideOpen && link !== undefined && (hasRow || editing);
+
+  // Esc 는 곁판 층의 것이다(설정 전체가 아니라). 편집 중이면 [취소]와 같고, 아니면
+  // 곁판을 닫는다. 층을 내리면 Esc 가 설정 라우트까지 떨어져 적던 키와 함께 설정이
+  // 닫힌다(design-review #2877 H-1). 보이는 곁판이 없으면 층도 없다.
+  useEscapeLayer(asideVisible, editing ? () => closeForm() : closeAside);
+
+  useEffect(() => {
+    if (!focusHeadingAfterSave || !asideHeadingRef.current) return;
+    asideHeadingRef.current.focus({ preventScroll: true });
+    setFocusHeadingAfterSave(false);
+  }, [focusHeadingAfterSave, asideVisible, query.data]);
   const legacy = link ? credentialKind(link) === OAUTH_CREDENTIAL_KIND : false;
   const operator = query.isSuccess;
 
@@ -409,12 +426,11 @@ function TeamBoard({ offline }: { offline: boolean }) {
         isOperatorDenied(query.error) ? (
           <div data-testid="operator-notice" role="status">
             <AiLineRow last>
-              <span>팀 연결은 이 서버의 운영자만 보고 바꿀 수 있어요.</span>
+              <span>
+                팀 연결은 이 서버의 운영자만 보고 바꿀 수 있어요. 필요하면 이 서버를 운영하는
+                사람에게 요청하세요.
+              </span>
             </AiLineRow>
-            <AiFoot>
-              키를 추가하거나 바꾸는 것은 운영자만 할 수 있어요. 필요하면 이 서버를 운영하는
-              사람에게 요청하세요.
-            </AiFoot>
           </div>
         ) : (
           <InlineBanner
@@ -438,15 +454,13 @@ function TeamBoard({ offline }: { offline: boolean }) {
         <AiAccountRow
           ref={moreRef}
           mark={markFor(link.endpointLabel)}
-          name={
-            <>
-              {rowName}
-              {!legacy && (
-                <span role="img" className="ms-1 text-meta text-signal-text" aria-label="기본">
-                  ★
-                </span>
-              )}
-            </>
+          name={rowName}
+          badge={
+            !legacy && configured ? (
+              <span role="img" className="shrink-0 text-meta text-signal-text" aria-label="기본">
+                ★
+              </span>
+            ) : undefined
           }
           detail={
             legacy ? (
@@ -530,7 +544,7 @@ function TeamBoard({ offline }: { offline: boolean }) {
   return (
     <div
       className="ai-board"
-      data-aside-open={asideOpen && link && (hasRow || editing) ? "" : undefined}
+      data-aside-open={asideVisible ? "" : undefined}
       data-testid="ai-board"
     >
       <div className="ai-pane flex min-w-0 flex-col gap-6" data-area="top">
@@ -553,7 +567,7 @@ function TeamBoard({ offline }: { offline: boolean }) {
         </AiSection>
       </div>
 
-      {asideOpen && link && (hasRow || editing) && (
+      {asideVisible && link && (
         <div data-area="aside" className="min-w-0">
         <AiAside
           id={TEAM_ASIDE_ID}
@@ -645,7 +659,7 @@ function TeamBoard({ offline }: { offline: boolean }) {
                 >
                   {saving ? "저장 중" : configured ? "키 바꿔 저장" : "연결 저장"}
                 </Button>
-                <Button type="button" variant="ghost" size="sm" className="tap-target" onClick={closeForm}>
+                <Button type="button" variant="ghost" size="sm" className="tap-target" onClick={() => closeForm()}>
                   취소
                 </Button>
               </div>
@@ -697,13 +711,13 @@ function TeamBoard({ offline }: { offline: boolean }) {
                 <div className="self-start">
                 <ConfirmButton
                 triggerClassName="tap-target bg-surface text-danger shadow-sm"
-                label={legacy ? "연결 끊기" : "연결 해제"}
+                label="연결 해제"
                 question={
                   legacy
                     ? "이 내부용 연결을 지웁니다. 같은 방식으로는 다시 만들 수 없어요."
                     : "저장된 주소와 자격증명을 지웁니다. 팀 에이전트가 이 연결로 대답하지 못하게 됩니다."
                 }
-                confirmLabel={legacy ? "끊기" : "해제"}
+                confirmLabel="해제"
                 disabled={offline || (busy && !unlinking)}
                 describedBy={lockReason(unlinking)}
                 busy={unlinking}

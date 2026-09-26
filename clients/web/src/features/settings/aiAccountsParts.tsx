@@ -156,6 +156,8 @@ export const AiAccountRow = forwardRef<
   {
     mark: string;
     name: ReactNode;
+    /** 이름 옆 표지(기본 ★). 이름이 말줄임으로 잘려도 사라지지 않게 칸 밖에 선다. */
+    badge?: ReactNode;
     detail: ReactNode;
     state: ReactNode;
     use: ReactNode;
@@ -166,7 +168,7 @@ export const AiAccountRow = forwardRef<
     testId?: string;
   }
 >(function AiAccountRow(
-  { mark, name, detail, state, use, moreLabel, selected, asideId, onOpen, testId },
+  { mark, name, badge, detail, state, use, moreLabel, selected, asideId, onOpen, testId },
   moreRef
 ) {
   return (
@@ -189,6 +191,7 @@ export const AiAccountRow = forwardRef<
       <div data-slot="name" className="flex min-w-0 flex-col">
         <span className="flex min-w-0 items-center gap-1 text-body font-semibold text-ink">
           <span className="truncate">{name}</span>
+          {badge}
         </span>
         <span className="truncate text-meta text-ink-muted">{detail}</span>
       </div>

@@ -12404,6 +12404,9 @@ async function captureAiAccountsScenes(browser, scheme) {
     { name: "list", entry: "rows", ready: "ai-link-row" },
     { name: "empty", entry: "rows", link: mockLink, ready: "ai-link-empty" },
     { name: "operator", entry: "rows", link: "403", ready: "operator-notice" },
+    { name: "error", entry: "rows", link: "500", ready: "ai-link-error" },
+    // 불러오는 중: 팀 연결 GET 이 답하지 않는 동안의 줄 높이 막대.
+    { name: "loading", entry: "rows", link: "hang", ready: "ai-team" },
     { name: "offline", entry: "rows", offline: true, ready: "ai-offline-banner" },
     { name: "browser", entry: "desktop-only", ready: "subscription-entry" },
     { name: "legacy-aside", entry: "rows", link: legacyLink, open: "ai-link-row-more", ready: "ai-team-aside" },
@@ -12424,7 +12427,13 @@ async function captureAiAccountsScenes(browser, scheme) {
         reducedMotion: "reduce",
       });
       await installMocks(context);
-      if (frame.link === "403") {
+      if (frame.link === "hang") {
+        await context.route("**/v1/provider/link", () => new Promise(() => undefined));
+      } else if (frame.link === "500") {
+        await context.route("**/v1/provider/link", (route) =>
+          json(route, { error: { message: "provider 연결을 읽지 못했습니다." } }, 500)
+        );
+      } else if (frame.link === "403") {
         await context.route("**/v1/provider/link", (route) =>
           json(route, { error: { message: "operator required" } }, 403)
         );
@@ -12432,7 +12441,7 @@ async function captureAiAccountsScenes(browser, scheme) {
         await context.route("**/v1/provider/link", (route) => json(route, frame.link));
       }
       const page = await context.newPage();
-      await page.goto(ORIGIN, { waitUntil: "networkidle" });
+      await page.goto(ORIGIN, { waitUntil: frame.link === "hang" ? "load" : "networkidle" });
       await signIn(page);
       await page.evaluate((hash) => {
         window.location.hash = hash;

@@ -11,6 +11,7 @@ import {
   fetchProviderChain,
   fetchProviderLink,
   fetchWorkspace,
+  putProviderLink,
 } from "@momo/core/features/settings/api";
 import { escapeIsClaimed } from "@/design/ui/escapeLayer";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
@@ -51,6 +52,7 @@ vi.mock("@momo/core/features/settings/api", async (importOriginal) => {
     fetchProviderChain: vi.fn(),
     fetchWorkspace: vi.fn(),
     deleteProviderLink: vi.fn(),
+    putProviderLink: vi.fn(),
   };
 });
 
@@ -272,7 +274,7 @@ describe("곁판의 키보드 길 (design-review #2877 H-1·H-2)", () => {
     });
   }
 
-  it("편집 중 Esc 는 층이 받아 아무것도 하지 않는다(설정 라우트로 떨어지지 않는다)", async () => {
+  it("편집 중 Esc 는 [취소]와 같다: 폼만 닫히고 곁판·설정은 남고 초점은 「키 바꾸기」", async () => {
     mount();
     await until("ai-link-row");
     act(() => (q("ai-link-row-more") as HTMLButtonElement).click());
@@ -280,8 +282,48 @@ describe("곁판의 키보드 길 (design-review #2877 H-1·H-2)", () => {
     (q("ai-link-save") as HTMLButtonElement).focus();
     expect(escapeIsClaimed()).toBe(true);
     esc();
-    expect(q("ai-link-form")).not.toBeNull();
+    expect(q("ai-link-form")).toBeNull();
     expect(q("ai-team-aside")).not.toBeNull();
+    expect(document.activeElement).toBe(q("ai-link-edit"));
+  });
+
+  it("비어 있는 서버: 「API 키 추가」 폼을 취소하면 초점은 「API 키 추가」, Esc 층도 내려간다", async () => {
+    vi.mocked(fetchProviderLink).mockResolvedValue(EMPTY_LINK);
+    mount();
+    const add = await until("ai-team-add");
+    act(() => add.click());
+    expect(document.activeElement?.id).toBe("provider-base-url");
+    const cancel = Array.from(q("ai-link-form")?.querySelectorAll("button") ?? []).find(
+      (b) => b.textContent === "취소"
+    ) as HTMLButtonElement;
+    act(() => cancel.click());
+    expect(q("ai-team-aside")).toBeNull();
+    expect(document.activeElement).toBe(q("ai-team-add"));
+    expect(escapeIsClaimed()).toBe(false);
+  });
+
+  it("비어 있는 서버: 저장이 끝나면 새 줄의 곁판 제목으로 초점이 간다", async () => {
+    vi.mocked(fetchProviderLink).mockResolvedValue(EMPTY_LINK);
+    vi.mocked(putProviderLink).mockResolvedValue(KEY_LINK as never);
+    mount();
+    const add = await until("ai-team-add");
+    act(() => add.click());
+    const url = host?.querySelector("#provider-base-url") as HTMLInputElement;
+    const key = host?.querySelector("#provider-bearer") as HTMLInputElement;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    act(() => {
+      setValue.call(url, "https://api.openai.com/v1");
+      url.dispatchEvent(new Event("input", { bubbles: true }));
+      setValue.call(key, "sk-test-a4f2");
+      key.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    vi.mocked(fetchProviderLink).mockResolvedValue(KEY_LINK);
+    act(() => (q("ai-link-save") as HTMLButtonElement).click());
+    await until("ai-link-row");
+    await rtlWaitFor(() => {
+      const heading = q("ai-team-aside")?.querySelector("h3");
+      if (!heading || document.activeElement !== heading) throw new Error("focus");
+    });
   });
 
   it("편집이 아닐 때 Esc 는 곁판만 닫고 ⋯ 로 돌아온다", async () => {
@@ -332,7 +374,7 @@ describe("auth.json 붙여넣기 제거 (#2877, 제안서 Q3)", () => {
     expect(row.textContent).toContain("새로 만들 수 없음");
     expect(row.textContent).toContain("읽기 전용");
     act(() => (q("ai-link-row-more") as HTMLButtonElement).click());
-    expect(q("ai-link-unlink")?.textContent).toContain("연결 끊기");
+    expect(q("ai-link-unlink")?.textContent).toContain("연결 해제");
     expect(q("ai-link-edit")).toBeNull();
     expect(q("ai-link-check")).toBeNull();
     expect(q("ai-link-form")).toBeNull();
