@@ -119,7 +119,6 @@ function crampedHint(index: number, hidden: number, help: string | undefined): s
   return `자리가 좁아 ${index}번 칸만 보입니다(칸 ${hidden}개 가려짐). ${ways}`;
 }
 
-const CRAMPED_MAXIMIZE_COPY = "자리가 좁아 이미 한 칸만 보입니다. 다른 칸은 ⌘]로 넘어갑니다.";
 
 function maximizedHint(index: number, hidden: number): string {
   return `${index}번 칸 최대화, 칸 ${hidden}개가 가려져 있습니다 · ⌘⇧↵ 되돌리기`;
@@ -145,6 +144,7 @@ function modLabel(platform: KeyPlatform, mac: string): string {
   if (platform === "mac") return mac;
   return mac
     .replace(/⌘/g, "Ctrl+")
+    .replace(/⌃/g, "Ctrl+")
     .replace(/⇧/g, "Shift+")
     .replace(/⌥/g, "Alt+")
     .replace(/↵/g, "Enter");
@@ -245,11 +245,9 @@ export function WorkbenchGrid({
         case "close":
           return requestClose(current.focused);
         case "toggle-maximize":
-          // 자리가 좁아 이미 한 칸만 보인다. 저장 배치의 최대화를 몰래 뒤집지 않는다.
-          if (crampedRef.current) {
-            setNotice(CRAMPED_MAXIMIZE_COPY);
-            return;
-          }
+          // 자리가 좁아 이미 한 칸만 보인다. 최대화를 몰래 켜지 않는다(끄기는 된다).
+          // 이유는 상태 줄의 좁은 자리 안내가 늘 말하고 있으므로 따로 남기지 않는다.
+          if (crampedRef.current && current.maximized === null) return;
           return apply(toggleMaximize(current));
         case "focus-cycle":
           return apply(focusCycle(current, command.delta), false);
@@ -325,10 +323,7 @@ export function WorkbenchGrid({
     onSplit: (id, axis) => apply(splitPane(layoutRef.current, id, axis, sizeRef.current)),
     onClose: requestClose,
     onMaximize: (id) => {
-      if (cramped) {
-        setNotice(CRAMPED_MAXIMIZE_COPY);
-        return;
-      }
+      if (cramped && layoutRef.current.maximized === null) return;
       apply(toggleMaximize(layoutRef.current, id));
     },
     onResize: (splitId, ratio) => apply(resizeSplit(layoutRef.current, splitId, ratio, sizeRef.current), false),
@@ -625,7 +620,8 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
           label={userMaximized ? "최대화 끄기" : "칸 최대화"}
           platform={platform}
           keycap="⌘⇧↵"
-          disabled={ctx.single || ctx.cramped}
+          disabled={ctx.single || (ctx.cramped && !userMaximized)}
+          disabledReason={ctx.cramped && !userMaximized ? "자리가 좁아 지금은 한 칸만 보입니다" : undefined}
           pressed={userMaximized}
           onClick={() => ctx.onMaximize(id)}
         >
@@ -653,6 +649,7 @@ function PaneButton({
   platform,
   keycap,
   disabled,
+  disabledReason,
   pressed,
   narrowHidden,
   onClick,
@@ -668,6 +665,8 @@ function PaneButton({
    */
   keycap?: string;
   disabled?: boolean;
+  /** 꺼진 이유. 툴팁에 붙는다. */
+  disabledReason?: string;
   /** 좁은 칸(머리 폭 20rem 미만)에서는 숨겨 제목 자리를 남긴다. 키는 그대로 된다. */
   narrowHidden?: boolean;
   pressed?: boolean;
@@ -683,7 +682,10 @@ function PaneButton({
       aria-keyshortcuts={keycap ? ariaKeys(platform, keycap) : undefined}
       aria-pressed={pressed}
       aria-disabled={disabled || undefined}
-      title={keycap ? `${label} (${modLabel(platform, keycap)})` : label}
+      title={
+        (keycap ? `${label} (${modLabel(platform, keycap)})` : label) +
+        (disabledReason ? `: ${disabledReason}` : "")
+      }
       onClick={onClick}
       className={cn(
         "inline-flex size-control-sm shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-ink-muted [&_svg]:size-4",

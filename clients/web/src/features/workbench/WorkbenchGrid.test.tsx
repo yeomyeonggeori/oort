@@ -368,3 +368,38 @@ describe("하네스", () => {
     expect(panes().some((p) => p.hasAttribute("data-maximized"))).toBe(maximized);
   });
 });
+
+describe("좁은 자리(cramped, #2774 R6·R7)", () => {
+  const SMALL: Size = { width: 900, height: 200 };
+
+  it("배치 최소보다 작으면 포커스 칸만 보이고 이유와 되는 길을 말한다", () => {
+    render(<Controlled initial={four()} size={SMALL} />);
+    const area = screen.getByTestId("workbench-area");
+    expect(area.hasAttribute("data-cramped")).toBe(true);
+    const visible = panes().filter((p) => !p.className.includes("invisible"));
+    expect(visible).toHaveLength(1);
+    expect(screen.getByTestId("workbench-notice").textContent).toContain("⌘] 다음 칸");
+  });
+
+  it("최대화 단추는 눌림을 거짓으로 말하지 않고, 눌러도 저장 배치를 바꾸지 않는다", () => {
+    let last: WorkbenchLayout | null = null;
+    render(<Controlled initial={four()} size={SMALL} onChange={(l) => (last = l)} />);
+    const btn = screen.getAllByRole("button", { name: "칸 최대화" }).find((b) => b.getAttribute("aria-disabled") === "true")!;
+    expect(btn.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(btn);
+    fireEvent.keyDown(grid(), { key: "Enter", code: "Enter", metaKey: true, shiftKey: true });
+    expect(last).toBeNull();
+    // 알림이 남아 좁은 자리 안내를 밀어내지 않는다.
+    expect(screen.getByTestId("workbench-notice").textContent).toContain("⌘] 다음 칸");
+  });
+
+  it("사람이 최대화한 칸은 좁은 자리에서도 최대화를 끌 수 있다", () => {
+    let last: WorkbenchLayout | null = null;
+    const maxed = { ...four(), maximized: "p3" };
+    render(<Controlled initial={maxed} size={SMALL} onChange={(l) => (last = l)} />);
+    const off = screen.getByRole("button", { name: "최대화 끄기" });
+    expect(off.getAttribute("aria-disabled")).toBeNull();
+    fireEvent.click(off);
+    expect(last!.maximized).toBeNull();
+  });
+});
