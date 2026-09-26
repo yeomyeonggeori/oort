@@ -92,12 +92,12 @@ describe("oort 마크는 한 기하에서 나온다", () => {
   });
 });
 
-// ---- 코메토 레퍼런스 (#2732 R2) ------------------------------------------------
+// ---- 코메토 레퍼런스 (#2732 R2, #2752) -----------------------------------------
 //
-// 앱 아이콘과 S0 히어로는 owner가 고른 레퍼런스 래스터를 그대로 쓴다. 픽셀이
-// 레퍼런스에서 파생됐는지는 scripts/render-brand-icons.mjs가 크로미움으로 잰다.
-// 여기서는 그 검사가 기대는 전제를 본다: 원본이 owner 파일 그대로이고, 검사가
-// 같은 해시를 고정하고, 앱 안 히어로가 그 파생 래스터를 가리킨다.
+// 앱 아이콘(I4 전면 클로즈업)과 S0 히어로(K6 배지)는 owner가 고른 레퍼런스 래스터를
+// 그대로 쓴다. 픽셀이 레퍼런스에서 파생됐는지는 scripts/render-brand-icons.mjs가
+// 크로미움으로 잰다. 여기서는 그 검사가 기대는 전제를 본다: 원본이 owner 파일
+// 그대로이고, 검사가 같은 해시를 고정하고, 앱 안 히어로가 그 파생 래스터를 가리킨다.
 
 const pngHeader = (path: string) => {
   const png = readFileSync(path);
@@ -105,13 +105,26 @@ const pngHeader = (path: string) => {
 };
 
 describe("코메토 앱 아이콘·S0 히어로는 owner 레퍼런스에서 나온다", () => {
-  const source = join(REPO_ROOT, "docs/brand/kometto/K6-flat-dark.png");
   const renderer = read(join(WEB_ROOT, "scripts/render-brand-icons.mjs"));
+  const sources = [
+    // 앱 아이콘(#2752): 원형 배지 없이 정방형을 꽉 채운 I4 클로즈업
+    ["ICON_SOURCE_SHA256", "docs/brand/kometto/I4-closeup-ink.png"],
+    // S0 히어로(#2732): K6 배지 원
+    ["BADGE_SOURCE_SHA256", "docs/brand/kometto/K6-flat-dark.png"],
+  ] as const;
 
-  it("원본은 1254 정사각 불투명이고, 렌더 검사가 그 해시를 고정한다", () => {
+  it.each(sources)("원본은 1254 정사각 불투명이고, 렌더 검사가 그 해시를 고정한다 (%s)", (name, file) => {
+    const source = join(REPO_ROOT, file);
     const sha = createHash("sha256").update(readFileSync(source)).digest("hex");
-    expect(renderer).toContain(`SOURCE_SHA256 = "${sha}"`);
+    expect(renderer).toContain(`export const ${name} = "${sha}"`);
     expect(pngHeader(source)).toEqual({ w: 1254, h: 1254, colorType: 2 });
+  });
+
+  it("앱 아이콘 원본은 I4다 (K6로 되돌리면 실패)", () => {
+    expect(renderer).toMatch(/export const ICON_SOURCE = resolve\(REPO_ROOT, "docs\/brand\/kometto\/I4-closeup-ink\.png"\)/);
+    // owner가 고른 파일의 해시 그 자체. 검사 쪽 고정값만 바꿔 우회하지 못하게 여기에도 둔다.
+    const sha = createHash("sha256").update(readFileSync(join(REPO_ROOT, "docs/brand/kometto/I4-closeup-ink.png"))).digest("hex");
+    expect(sha).toBe("d53a929d5f04bc013f20e0c436d08b8555caf82cc1f9a947bc7ea6f2494f9947");
   });
 
   it("S0 히어로는 레퍼런스에서 오려 낸 래스터를 쓴다(다시 그린 SVG가 아니다)", () => {
