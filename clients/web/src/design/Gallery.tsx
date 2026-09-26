@@ -75,6 +75,7 @@ import { ReactionChips } from "@/features/timeline/ReactionChips";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import type { Message, RosterMember } from "@momo/core/lib/api";
 import type { ReactionChip } from "@momo/core/features/timeline/reactions";
+import { OnboardingGuideGallery } from "@/features/onboarding/guide/OnboardingGuideGallery";
 import "./gallery-preview.css";
 
 // Reading this as: design gallery (diagnostic surface) for internal team users
@@ -771,6 +772,8 @@ function GalleryBody() {
           </Export>
         )}
       </StateRow>
+
+      <OnboardingGuideGallery />
 
       <section
         data-testid="ds2-primitives"

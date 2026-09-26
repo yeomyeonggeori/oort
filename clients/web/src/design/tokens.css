@@ -605,6 +605,22 @@
    * width of this one sentence, not a column. */
   --spacing-onboarding-copy: 360px;
 
+  /* 온보딩 2.0 공통 틀 (ADR-0193 D11, #2807 OB2-1). 값은 시안
+   * `claudedocs/onboarding-2.0/mockups.html`의 CSS를 그대로 옮겼다.
+   *   guide-head 72   `.guide .k` 코메토 머리. 모든 온보딩 화면 머리의 크기
+   *   guide-hero 280  첫 화면·완료·첫 대화의 히어로(D11 데스크탑 280)
+   *   top 56          `.ob-top` 진행 점 줄의 높이(창 타이틀바 아래)
+   *   col 440         `.col` 질문 한 개의 열 폭(입력 그릇 + 행동)
+   *   control 44      `.input`·`.btn` 높이. 폼 1급 버튼의 폰 44pt와 같다
+   *   dot 6 / dot-bar 26  `.dots i`와 `.dots i.on` 점과 현재 칸 막대 */
+  --spacing-onboarding-guide-head: 72px;
+  --spacing-onboarding-guide-hero: 280px;
+  --spacing-onboarding-top: 56px;
+  --spacing-onboarding-col: 440px;
+  --spacing-onboarding-control: 44px;
+  --spacing-onboarding-dot: 6px;
+  --spacing-onboarding-dot-bar: 26px;
+
   /* --- radius: the web platform ladder (ADR-0189 D6) ---------------------
    * 6 · 10 · 14 · 18 · 20 · pill. 이름만 폰과 공유하고 값은 대조하지 않는다
    * (폰은 10·14·20·26·30·pill). pill은 Tailwind 정적 유틸 `rounded-full`이다.
@@ -3236,6 +3252,241 @@
 
   .onboarding-mark img {
     transform: none;
+  }
+}
+
+/* =============================================================================
+ * 온보딩 2.0 공통 틀 (ADR-0193 D10·D11, #2807 OB2-1).
+ *
+ * 값은 시안 `claudedocs/onboarding-2.0/mockups.html`(owner 공유본
+ * https://claude.ai/artifact/6FQJ6LbTEXNN1j4uYE5nGz)의 CSS를 그대로 옮겼다.
+ *   바닥    `.canvas`   180°, 가운데 정지점 42% (셸의 `canvas-gradient`는 160°)
+ *   별      `.stars`    다크에서만. 라이트에서는 투명이다
+ *   열      `.ob-top` 56 · `.ob-body` 0 24 40 · `.col` 440, 간격 16
+ *   안내자  `.guide`    72 머리 + 말풍선, 아래 정렬, 간격 12
+ *   말풍선  `.bubble`   --surface, 18 18 18 6, 12 16, rest 그림자
+ *   점      `.dots`     6 점, 현재 26 막대 신호색, 지난 칸 잉크 흐림, 간격 6.
+ *                       남은 칸만 --line-strong(시안 --mutedSoft는 3:1 미달)
+ *   그릇    `.input`    44, 반경 10, --surface, --line-strong 테두리
+ *   행동    `.btn`      44, 반경 10. 주 = 잉크 채움, 보조 = --line-strong 테두리
+ *
+ * 모션(D11): 표정 바꿈은 제자리 크로스페이드 --motion-instant(120),
+ * 기쁨 진입 때 꼬리 흔들기 한 번 = instant × 3(360). 사다리 밖 숫자를 손으로
+ * 적지 않는다(ADR-0179 D10). reduced-motion이면 둘 다 없다.
+ * ========================================================================== */
+
+@utility onboarding-canvas {
+  background-color: var(--canvas-mid);
+  background-image: linear-gradient(
+    180deg,
+    var(--canvas-top) 0%,
+    var(--canvas-mid) 42%,
+    var(--canvas-bottom) 100%
+  );
+
+  @media (prefers-contrast: more) {
+    background-image: none;
+  }
+}
+
+/* 시안 `.stars`: 다크 바닥의 옅은 별 일곱. 라이트에서는 색이 투명이라 안 보인다.
+ * 점 위치는 시안 그대로다. 장식이고 움직이지 않는다. */
+.onboarding-canvas-stars {
+  --onboarding-star-a: light-dark(transparent, rgba(255,255,255,.55));
+  --onboarding-star-b: light-dark(transparent, rgba(255,255,255,.45));
+  --onboarding-star-c: light-dark(transparent, rgba(255,220,190,.6));
+  --onboarding-star-d: light-dark(transparent, rgba(255,255,255,.35));
+  --onboarding-star-e: light-dark(transparent, rgba(255,255,255,.4));
+  --onboarding-star-f: light-dark(transparent, rgba(255,255,255,.3));
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1px 1px at 12% 18%, var(--onboarding-star-a) 50%, transparent 51%),
+    radial-gradient(1px 1px at 72% 12%, var(--onboarding-star-b) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 86% 34%, var(--onboarding-star-c) 50%, transparent 51%),
+    radial-gradient(1px 1px at 28% 44%, var(--onboarding-star-d) 50%, transparent 51%),
+    radial-gradient(1px 1px at 55% 26%, var(--onboarding-star-e) 50%, transparent 51%),
+    radial-gradient(1px 1px at 8% 70%, var(--onboarding-star-f) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 92% 76%, var(--onboarding-star-d) 50%, transparent 51%);
+
+  @media (prefers-contrast: more) {
+    display: none;
+  }
+}
+
+/* 틀 위의 스텝 크롬: 바닥이 비치는 56 줄, 선 없음. 뒤로 · 점(가운데) · 끝 칸.
+ * 트래픽라이트 인셋·드래그 계약은 `onboarding-step-chrome` 유틸 그대로다. */
+.onboarding-frame > .onboarding-step-chrome {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  min-block-size: var(--spacing-onboarding-top);
+  border-block-end: 0;
+  background-color: transparent;
+}
+
+.onboarding-frame > .onboarding-step-chrome > :first-child {
+  justify-self: start;
+}
+
+.onboarding-frame > .onboarding-step-chrome > :last-child {
+  justify-self: end;
+}
+
+.onboarding-frame-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--spacing-6) 40px;
+}
+
+.onboarding-frame-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
+  inline-size: 100%;
+  max-inline-size: var(--spacing-onboarding-col);
+}
+
+/* --- KomettoGuide ------------------------------------------------------ */
+
+.kometto-guide {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--spacing-3);
+}
+
+/* 히어로는 코메토가 위, 말풍선이 아래(시안 폰 M0). 꼬리 없는 둥근 풍선이다. */
+.kometto-guide[data-size="hero"] {
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.kometto-face {
+  position: relative;
+  flex: none;
+  inline-size: var(--spacing-onboarding-guide-head);
+  block-size: var(--spacing-onboarding-guide-head);
+}
+
+.kometto-face[data-size="hero"] {
+  inline-size: var(--spacing-onboarding-guide-hero);
+  block-size: var(--spacing-onboarding-guide-hero);
+}
+
+/* 두 겹(떠나는 표정·오는 표정)이 같은 상자에 겹친다. 머리가 움직이지 않는다. */
+.kometto-face-layer {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: contain;
+}
+
+.kometto-face-layer[data-phase="entering"] {
+  animation: onboarding-fade-in var(--motion-instant) linear backwards;
+}
+
+.kometto-face-layer[data-phase="leaving"] {
+  animation: motion-fade-out var(--motion-instant) linear both;
+}
+
+/* 꼬리 흔들기. 표정 에셋이 한 장짜리 래스터라 꼬리만 떼어 돌릴 수 없어서, 꼬리가
+ * 있는 아래쪽을 축으로 몸 전체를 작게 흔든다(PR 「시안과의 차이」). */
+.kometto-face[data-wag="true"] {
+  transform-origin: 50% 85%;
+  animation: kometto-wag calc(var(--motion-instant) * 3) var(--motion-ease-standard) 1;
+}
+
+.kometto-guide-bubble {
+  position: relative;
+  min-inline-size: 0;
+  padding: var(--spacing-3) var(--spacing-4);
+  border-radius: var(--radius-xl) var(--radius-xl) var(--radius-xl) var(--spacing-onboarding-dot);
+  background-color: var(--surface);
+  box-shadow: var(--elevation-rest);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
+.kometto-guide[data-size="hero"] .kometto-guide-bubble {
+  border-radius: var(--radius-xl);
+}
+
+@keyframes kometto-wag {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-6deg);
+  }
+  60% {
+    transform: rotate(5deg);
+  }
+}
+
+/* --- 진행 점 ------------------------------------------------------------- */
+
+.onboarding-dots {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-onboarding-dot);
+}
+
+/* 남은 칸은 시안의 --muted-soft(바닥 위 약 1.1:1)가 아니라 --line-strong이다.
+ * 점 세 상태 모두 바닥 세 정지점 위에서 비텍스트 3:1을 넘는다(WCAG 1.4.11,
+ * core ONBOARDING_DOT_ROLES + guide.test.ts, #2807 planner 판정). */
+.onboarding-dot {
+  display: block;
+  inline-size: var(--spacing-onboarding-dot);
+  block-size: var(--spacing-onboarding-dot);
+  border-radius: calc(var(--spacing-onboarding-dot) / 2);
+  background-color: var(--line-strong);
+}
+
+.onboarding-dot[data-state="done"] {
+  background-color: var(--ink-muted);
+}
+
+.onboarding-dot[data-state="current"] {
+  inline-size: var(--spacing-onboarding-dot-bar);
+  background-color: var(--signal);
+}
+
+/* --- 입력 그릇과 행동 (틀의 문법) --------------------------------------- */
+
+.onboarding-field {
+  min-block-size: var(--spacing-onboarding-control);
+  border-radius: var(--radius-md);
+  background-color: var(--surface);
+  font-size: var(--text-title);
+}
+
+.onboarding-action {
+  min-block-size: var(--spacing-onboarding-control);
+  border-radius: var(--radius-md);
+}
+
+.onboarding-action[data-variant="secondary"] {
+  border: 1px solid var(--line-strong);
+  background-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kometto-face,
+  .kometto-face-layer {
+    animation: none;
+    transform: none;
+  }
+
+  .kometto-face-layer[data-phase="leaving"] {
+    display: none;
   }
 }
 
