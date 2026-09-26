@@ -58,8 +58,8 @@ use momo_settings::{
     redacted_endpoint_label, replace_chain, requires_strict_external_provider, resolve_link,
     seal_bearer, upsert_link, validated_base_url, CascadeHop, CascadeSource, ChainEntryInput,
     DecryptedChainEntry, DecryptedProviderLink, LinkCredential, OpenAiOAuthCredential,
-    ProviderMode, ProviderSource, ResolvedProvider, StoredChainEntry, StoredProviderLink,
-    ATTRIBUTION_NOTICE_KO, MAX_CHAIN_ENTRIES,
+    ProviderFormat, ProviderMode, ProviderSource, ResolvedProvider, StoredChainEntry,
+    StoredProviderLink, ATTRIBUTION_NOTICE_KO, MAX_CHAIN_ENTRIES, PROVIDER_PRESETS,
 };
 
 use crate::dto::{
@@ -175,6 +175,12 @@ fn link_response(
             .flatten(),
         diagnostics,
         credential_kind: credential.map(|credential| credential.kind_label().to_string()),
+        format: credential.and_then(|credential| match credential {
+            LinkCredential::Bearer(_) => Some(ProviderFormat::Openai.as_str()),
+            LinkCredential::AnthropicKey(_) => Some(ProviderFormat::Anthropic.as_str()),
+            LinkCredential::OpenAiOAuth(_) => None,
+        }),
+        presets: &PROVIDER_PRESETS,
         credential_meta: oauth.map(|oauth| ProviderLinkCredentialMeta {
             attribution: oauth.attribution.clone(),
             usage_scope: oauth.usage_scope.clone(),
@@ -201,6 +207,8 @@ fn requested_credential(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
+    let format = ProviderFormat::from_label(request.format.as_deref())
+        .ok_or_else(|| ApiError::bad_request("format must be one of openai, anthropic"))?;
     match (bearer, request.oauth.as_ref()) {
         (Some(_), Some(_)) => Err(ApiError::bad_request(
             "send either bearer or oauth, not both — a link carries one credential",
@@ -208,7 +216,18 @@ fn requested_credential(
         (None, None) => Err(ApiError::bad_request(
             "bearer must not be empty (or send an oauth grant instead)",
         )),
-        (Some(bearer), None) => Ok(LinkCredential::Bearer(bearer.to_string())),
+        // Review N4: a "bearer" that is itself a sealed-envelope document
+        // would be re-read as another credential kind on decrypt.
+        (Some(bearer), None) if LinkCredential::parse(bearer).kind_label() != "bearer" => Err(
+            ApiError::bad_request("bearer must be an API key, not a credential envelope"),
+        ),
+        (Some(bearer), None) => Ok(match format {
+            ProviderFormat::Openai => LinkCredential::Bearer(bearer.to_string()),
+            ProviderFormat::Anthropic => LinkCredential::AnthropicKey(bearer.to_string()),
+        }),
+        (None, Some(_)) if format == ProviderFormat::Anthropic => Err(ApiError::bad_request(
+            "format anthropic takes an API key in bearer, not an oauth grant",
+        )),
         (None, Some(oauth)) => Ok(oauth_credential(oauth, environment, allow_local_loopback)?),
     }
 }
@@ -825,6 +844,36 @@ fn validated_chain_entries(
 
 #[cfg(test)]
 mod tests {
+
+    /// Review N4: an envelope-shaped bearer is refused instead of being
+    /// re-read as another credential kind on decrypt.
+    #[test]
+    fn an_envelope_shaped_bearer_is_refused() {
+        let request = |bearer: &str, format: Option<&str>| crate::dto::PutProviderLinkRequest {
+            base_url: "https://api.example.com/v1".into(),
+            bearer: Some(bearer.into()),
+            mode: None,
+            oauth: None,
+            format: format.map(str::to_string),
+        };
+        for format in [None, Some("anthropic")] {
+            for bearer in [
+                r#"{"kind":"anthropic-key","api_key":"sk-ant-x"}"#,
+                r#"{"kind":"oauth-openai","refresh_token":"rt"}"#,
+            ] {
+                let error = requested_credential(&request(bearer, format), "production", false)
+                    .expect_err(bearer);
+                assert_eq!(error.status, StatusCode::BAD_REQUEST);
+            }
+        }
+        // An ordinary key (even `{`-leading garbage that is no envelope) is fine.
+        assert_eq!(
+            requested_credential(&request("sk-live-abc", None), "production", false)
+                .unwrap()
+                .kind_label(),
+            "bearer"
+        );
+    }
 
     /// #2894: `oauth.tokenEndpoint` passes the base-URL write gate.
     #[test]

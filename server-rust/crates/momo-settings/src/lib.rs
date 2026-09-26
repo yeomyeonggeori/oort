@@ -63,6 +63,7 @@ pub mod join;
 pub mod link;
 pub mod membership_lifecycle;
 pub mod oauth;
+pub mod presets;
 pub mod provider;
 pub mod quota;
 pub mod tier;
@@ -108,9 +109,11 @@ pub use membership_lifecycle::{
     StatusChangeApplied, StatusTransition,
 };
 pub use oauth::{
-    LinkCredential, OpenAiOAuthCredential, ATTRIBUTION_NOTICE_KO, ATTRIBUTION_PERSONAL,
-    DEFAULT_OPENAI_TOKEN_ENDPOINT, OAUTH_OPENAI_KIND, USAGE_SCOPE_INTERNAL_ONLY,
+    LinkCredential, OpenAiOAuthCredential, ANTHROPIC_KEY_KIND, ATTRIBUTION_NOTICE_KO,
+    ATTRIBUTION_PERSONAL, DEFAULT_OPENAI_TOKEN_ENDPOINT, OAUTH_OPENAI_KIND,
+    USAGE_SCOPE_INTERNAL_ONLY,
 };
+pub use presets::{ProviderFormat, ProviderPreset, PROVIDER_PRESETS};
 pub use provider::{
     is_unsafe_secret, redacted_endpoint_label, requires_strict_external_provider,
     validated_base_url, BaseUrlInvalid, ProviderConfig, ProviderMode,

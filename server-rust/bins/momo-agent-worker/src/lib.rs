@@ -73,6 +73,7 @@
 //! deviation list with what it costs.
 
 pub mod a2a;
+pub mod anthropic;
 pub mod completion_report;
 pub mod config;
 pub mod context;
@@ -82,6 +83,7 @@ pub mod partial;
 pub mod payload;
 pub mod provider;
 pub mod responses;
+pub mod sse;
 pub mod stream;
 pub mod tool_exec;
 
