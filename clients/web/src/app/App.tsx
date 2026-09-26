@@ -33,6 +33,7 @@ import { WorkstreamDetailRoute } from "@/features/workstreams/WorkstreamDetailRo
 import { SearchRoute } from "@/features/search/SearchRoute";
 import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 import { SurfaceUnavailableRoute } from "@/features/capabilities/SurfaceUnavailable";
+import { SurfaceRoute } from "@/features/capabilities/SurfaceGate";
 import { forgetQuota } from "@momo/core/features/settings/quotaModel";
 import { forgetUsage } from "@momo/core/features/settings/usageModel";
 import { resetAdeDrawer } from "@/features/ade/adeDrawerStore";
@@ -42,6 +43,7 @@ import { isOauthConsentPath } from "@/features/hostedAgents/oauthConsentPath";
 import type { LoginResponse, Member } from "@momo/core/lib/api";
 import { FirstAgentStage } from "@/features/welcome/FirstAgentStage";
 import { readFirstAgentCapturePoseFromLocation } from "@/features/welcome/firstAgent";
+import { readAiConnectReentry } from "@/features/welcome/aiConnectReentry";
 import { takeFirstAgentResumeHash } from "@/features/welcome/firstAgentStore";
 import {
   decideFirstRunForSession,
@@ -170,7 +172,12 @@ export function App() {
   useEffect(() => {
     const onHash = () => setFirstRunTick((n) => n + 1);
     window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
+    // 뒤로 가기로 재진입 주소(#/ai-connect)에 돌아오는 경우도 받는다(#2870).
+    window.addEventListener("popstate", onHash);
+    return () => {
+      window.removeEventListener("hashchange", onHash);
+      window.removeEventListener("popstate", onHash);
+    };
   }, []);
 
   // Above the signed-in/anonymous split on purpose (MOMO-606): someone stuck on
@@ -250,13 +257,20 @@ export function App() {
     );
   }
 
-  if (capturePose !== null || firstRun === "first-agent") {
+  // 설정 › AI 연결·에이전트 화면에서 다시 연 AI 연결(#2870, RCA 1-b). 온보딩과
+  // 같은 화면·같은 자리이고, 모드만 재진입이다(자동 통과·표지 없음).
+  const aiConnectReentry = readAiConnectReentry(window.location.hash);
+  if (capturePose !== null || firstRun === "first-agent" || aiConnectReentry !== null) {
     return (
       <FirstRunSession
         session={session}
         replaceSessionMember={replaceSessionMember}
       >
-        <FirstAgentStage onContinue={bumpFirstRun} />
+        <FirstAgentStage
+          onContinue={bumpFirstRun}
+          mode={aiConnectReentry !== null ? "reentry" : "onboarding"}
+          reentryFrom={aiConnectReentry?.from}
+        />
       </FirstRunSession>
     );
   }
@@ -320,11 +334,10 @@ export function App() {
           <Route
             path="work"
             element={
-              isSurfaceProvided("workConsole") ? (
+              // #2780: 정적 표가 아니라 온라인 호스트 유무로 연다.
+              <SurfaceRoute surface="workConsole">
                 <WorkConsoleRoute />
-              ) : (
-                <SurfaceUnavailableRoute surface="workConsole" />
-              )
+              </SurfaceRoute>
             }
           />
           {/* 메시지 검색 (goal B12 H5). 서버가 이미 싣고 있는 경로 위에 선다. */}

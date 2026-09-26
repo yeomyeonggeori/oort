@@ -9,6 +9,7 @@ import {
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { useSession } from "@/app/session";
+import { useSurfaceProvidedPredicate } from "@/features/capabilities/useSurfaceProvided";
 import { queryClient } from "@/app/queryClient";
 import { resetSettingsQueries } from "@/app/retryScope";
 import { titlebarDragProps } from "@/app/sidebarPane";
@@ -61,13 +62,38 @@ export function SettingsRoute() {
   // 걸러진 목록의 정본은 `settingsNav` 다 (R2 M-R2-1). 이 화면이 자기 필터를
   // 들고 있는 동안, 그 목록으로 문을 세울지 정하는 쪽(결과 카드·팔레트)은
   // 원표를 읽고 있었고 그래서 `updates`·`code` 에 문이 섰다.
-  const sections = useMemo(() => reachableSettingsSections(), []);
+  const surfaceProvided = useSurfaceProvidedPredicate();
+  const sections = useMemo(
+    () => reachableSettingsSections(surfaceProvided),
+    [surfaceProvided]
+  );
   const requested = params.get("section");
   const [section, setSection] = useState<SettingsSectionId>(() =>
     sections.some((item) => item.id === requested)
       ? (requested as SettingsSectionId)
       : DEFAULT_SETTINGS_SECTION
   );
+  // #2780: 「코드 실행 호스트」는 호스트 목록이 도착한 뒤에야 목차에 선다. 그 전에
+  // `?section=code`로 들어온 사람을 기본 섹션에 둔 채 놓아 두지 않고, 목차가
+  // 그 섹션을 받는 순간 한 번 옮긴다. 이미 다른 섹션을 고른 사람은 건드리지 않는다.
+  // 반대로 호스트가 사라져 지금 섹션이 목차에서 빠지면 기본 섹션으로 접는다.
+  useEffect(() => {
+    const reachable = sections.some((item) => item.id === section);
+    if (!reachable) {
+      setSection(DEFAULT_SETTINGS_SECTION);
+      return;
+    }
+    if (
+      section === DEFAULT_SETTINGS_SECTION &&
+      requested !== null &&
+      requested !== section &&
+      sections.some((item) => item.id === requested)
+    ) {
+      setSection(requested as SettingsSectionId);
+    }
+    // `section`을 의존에 넣으면 사용자가 기본 섹션으로 돌아간 순간 다시 끌려간다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sections, requested]);
   const navRefs = useRef<
     Partial<Record<SettingsSectionId, HTMLButtonElement | null>>
   >({});

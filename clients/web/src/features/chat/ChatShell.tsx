@@ -79,7 +79,7 @@ import {
 } from "@momo/core/features/timeline/stress";
 import { Composer } from "@/features/chat/Composer";
 import { canCreateChannelNow } from "@momo/core/features/channels/model";
-import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
+import { useSurfaceProvided } from "@/features/capabilities/useSurfaceProvided";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
 import { useOpenAddChannelMember } from "@/features/channels/useAddChannelMember";
 import {
@@ -413,7 +413,10 @@ export function ChatShell() {
   //     남는다). 브라우저에는 로컬 PTY가 없으므로 지금까지대로 관전 도크다.
   const localTerminal = isDesktop();
   const localDock = useDockState();
-  const terminalDockProvided = !localTerminal && isSurfaceProvided("work");
+  //   * #2780: 그 판정은 정적 표가 아니라 「이 워크스페이스에 온라인 호스트가
+  //     있는가」다(useSurfaceProvided). 데스크탑 로컬 도크는 이 판정 밖이다.
+  const workProvided = useSurfaceProvided("work");
+  const terminalDockProvided = !localTerminal && workProvided;
   const terminalButtonShown = localTerminal || terminalDockProvided;
   const [workOpen, setWorkOpen] = useState(false);
   const [dockOpen, setDockOpen] = useState(false);
