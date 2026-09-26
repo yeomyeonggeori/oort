@@ -696,6 +696,9 @@ mod tests {
             "https://[fd00:ec2::254]/v1",
             "https://[::]/v1",
             "https://metadata.localhost/v1",
+            "https://2130706433/v1",
+            "https://0xa9.0xfe.0xa9.0xfe/latest",
+            "https://[::ffff:0:a9fe:a9fe]/v1",
         ] {
             for flag in [false, true] {
                 assert_eq!(

@@ -50,6 +50,7 @@ fn is_non_public_v4(address: &Ipv4Addr) -> bool {
         || (a == 172 && (16..=31).contains(&b))   // 172.16/12 private
         || (a == 192 && b == 0 && c == 0)         // 192.0.0/24 IETF protocol (incl. 192.0.0.192 OCI metadata)
         || (a == 192 && b == 0 && c == 2)         // TEST-NET-1
+        || (a == 192 && b == 88 && c == 99)       // 6to4 relay anycast
         || (a == 192 && b == 168)                 // 192.168/16 private
         || (a == 198 && (b == 18 || b == 19))     // 198.18/15 benchmarking
         || (a == 198 && b == 51 && c == 100)      // TEST-NET-2
@@ -68,6 +69,10 @@ fn is_non_public_v6(address: &Ipv6Addr) -> bool {
     }
     // ::ffff:a.b.c.d (mapped) — decide as the IPv4 address it is.
     if segments[..5] == [0, 0, 0, 0, 0] && segments[5] == 0xffff {
+        return is_non_public_v4(&embedded_v4(12));
+    }
+    // ::ffff:0:a.b.c.d (IPv4-translated, RFC 2765/SIIT) — same.
+    if segments[..4] == [0, 0, 0, 0] && segments[4] == 0xffff && segments[5] == 0 {
         return is_non_public_v4(&embedded_v4(12));
     }
     // ::a.b.c.d (deprecated IPv4-compatible) — same.
@@ -90,6 +95,10 @@ fn is_non_public_v6(address: &Ipv6Addr) -> bool {
     if segments[0] == 0x2001 && segments[1] == 0 {
         return true;
     }
+    // 2001:20::/28 ORCHIDv2 — not routable.
+    if segments[0] == 0x2001 && (segments[1] & 0xfff0) == 0x0020 {
+        return true;
+    }
     // 2001:db8::/32 documentation.
     if segments[0] == 0x2001 && segments[1] == 0x0db8 {
         return true;
@@ -102,6 +111,53 @@ fn is_non_public_v6(address: &Ipv6Addr) -> bool {
         || (segments[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
         || (segments[0] & 0xffc0) == 0xfec0 // fec0::/10 site-local (deprecated)
         || (segments[0] & 0xff00) == 0xff00 // ff00::/8 multicast
+}
+
+/// The WHATWG / `inet_aton` IPv4 spellings a URL parser normalises but
+/// `Ipv4Addr::from_str` refuses: `2130706433`, `0x7f.1`, `0177.0.0.1`, `127.1`.
+/// Review N3 — without this the write gate stored them and only the worker's
+/// precheck (after URL normalisation) refused them.
+fn parse_loose_ipv4(host: &str) -> Option<Ipv4Addr> {
+    let host = host.trim_end_matches('.');
+    if host.is_empty()
+        || !host
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() || c == '.' || c == 'x' || c == 'X')
+    {
+        return None;
+    }
+    let parts: Vec<&str> = host.split('.').collect();
+    if parts.len() > 4 {
+        return None;
+    }
+    let mut numbers = Vec::with_capacity(parts.len());
+    for part in &parts {
+        let value = if let Some(hex) = part.strip_prefix("0x").or_else(|| part.strip_prefix("0X")) {
+            if hex.is_empty() {
+                0
+            } else {
+                u64::from_str_radix(hex, 16).ok()?
+            }
+        } else if part.len() > 1 && part.starts_with('0') {
+            u64::from_str_radix(&part[1..], 8).ok()?
+        } else {
+            part.parse::<u64>().ok()?
+        };
+        numbers.push(value);
+    }
+    let (last, head) = numbers.split_last()?;
+    if head.iter().any(|value| *value > 255) {
+        return None;
+    }
+    let tail_bits = 8 * (4 - head.len() as u32);
+    if *last >= 1u64 << tail_bits {
+        return None;
+    }
+    let mut value: u64 = 0;
+    for (index, part) in head.iter().enumerate() {
+        value |= part << (24 - 8 * index as u32);
+    }
+    Some(Ipv4Addr::from((value | last) as u32))
 }
 
 /// A host *name* that is loopback by definition (RFC 6761), refused before DNS.
@@ -183,8 +239,12 @@ impl EgressPolicy {
         if is_localhost_name(bare) {
             return Err(EgressDenied::NonPublicAddress);
         }
-        match bare.parse::<IpAddr>() {
-            Ok(address) if is_non_public_ip(&address) => Err(EgressDenied::NonPublicAddress),
+        let address = bare
+            .parse::<IpAddr>()
+            .ok()
+            .or_else(|| parse_loose_ipv4(bare).map(IpAddr::V4));
+        match address {
+            Some(address) if is_non_public_ip(&address) => Err(EgressDenied::NonPublicAddress),
             _ => Ok(()),
         }
     }
@@ -225,6 +285,10 @@ mod tests {
             "2002:a9fe:a9fe::1",
             "2001:0:4136:e378::1",
             "2001:db8::1",
+            "::ffff:0:7f00:1",
+            "::ffff:0:a9fe:a9fe",
+            "2001:20::1",
+            "192.88.99.1",
             "fc00::1",
             "fd00:ec2::254",
             "fe80::1",
@@ -311,6 +375,20 @@ mod tests {
         assert!(policy.check_host("foo.localhost").is_err());
         assert!(policy.check_host("localhost.").is_err());
         assert!(policy.check_host("api.example.com").is_ok());
+        // Review N3: the non-canonical IPv4 spellings a URL parser normalises.
+        for loose in [
+            "2130706433",
+            "0x7f.1",
+            "0177.0.0.1",
+            "127.1",
+            "0xa9.0xfe.0xa9.0xfe",
+            "0xa9fea9fe",
+        ] {
+            assert!(policy.check_host(loose).is_err(), "{loose}");
+        }
+        for name in ["cafe.be", "deadbeef.example", "1password.com", "8.8.8.8"] {
+            assert!(policy.check_host(name).is_ok(), "{name}");
+        }
         assert!(policy.check_host("93.184.216.34").is_ok());
     }
 }
