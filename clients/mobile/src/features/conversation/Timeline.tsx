@@ -43,6 +43,7 @@ import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {usePalette, useStyles} from '../../design/theme';
 import {
   DayDivider,
+  FloatingDayPill,
   MessageRow,
   PendingRow,
   RecoveryDivider,
@@ -478,6 +479,40 @@ function firstMessageIdAfter(
  * 소멸」). `FlatList` 는 이 객체가 도중에 바뀌는 것도 허락하지 않으므로 상수다.
  */
 const PILL_VIEWABILITY = {itemVisiblePercentThreshold: 0} as const;
+
+/**
+ * 떠 있는 날짜 알약이 가리킬 날 (DS2-4 #2716, owner 표 「떠 있는 날짜 알약」).
+ *
+ * 창의 **맨 위 행**이 속한 날 — 그 행에서 위로 가장 가까운 날짜 구분선이다. 그
+ * 구분선이 이미 창 안에 보이면 `null`: 같은 날이 목록 안 알약과 떠 있는 알약으로
+ * 두 번 서지 않는다(Buzz 도 목록 안 날짜가 올라가 사라진 뒤에야 위에 뜬다).
+ *
+ * 필 판정과 같은 규율로 **키**로 센다(`relationFromKeys` 머리말) — 옛 페이지가 위에
+ * 붙어 첨자가 밀려도 보이는 행 집합은 그대로다.
+ */
+export function floatingDayFor(
+  items: readonly FoldedTimelineItem[],
+  viewableKeys: readonly string[],
+): {key: string; atMs: number} | null {
+  if (viewableKeys.length === 0) return null;
+  const visible = new Set(viewableKeys);
+  const top = items.findIndex(item => visible.has(item.key));
+  if (top < 0) return null;
+  for (let index = top; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item.kind === 'day') {
+      return visible.has(item.key) ? null : {key: item.key, atMs: item.atMs};
+    }
+  }
+  return null;
+}
+
+function sameFloatingDay(
+  a: {key: string} | null,
+  b: {key: string} | null,
+): boolean {
+  return a === b || (a !== null && b !== null && a.key === b.key);
+}
 
 /**
  * 목록이 보인다고 한 **키**들로 구분선의 자리를 판정한다.
@@ -1083,6 +1118,10 @@ function TimelineInner({
   const [relationState, setRelationState] =
     useState<DividerViewportRelation | null>(null);
   const [unreadLatched, setUnreadLatched] = useState(false);
+  /** 떠 있는 날짜 알약의 날(`floatingDayFor`). 같은 날이면 상태를 바꾸지 않는다. */
+  const [floatingDay, setFloatingDay] = useState<{key: string; atMs: number} | null>(
+    null,
+  );
   /** 지금 가장 새 확정 메시지. 바닥을 떠나는 순간 기준선이 된다. */
   const newestSeqRef = useRef<number | null>(null);
   newestSeqRef.current =
@@ -1293,6 +1332,8 @@ function TimelineInner({
     ({viewableItems}: {viewableItems: ViewToken<FoldedTimelineItem>[]}) => {
       viewableKeysRef.current = viewableItems.map(token => token.key);
       setRelationState(relationFromKeys(itemsRef.current, viewableKeysRef.current));
+      const day = floatingDayFor(itemsRef.current, viewableKeysRef.current);
+      setFloatingDay(current => (sameFloatingDay(current, day) ? current : day));
       armLatchIfDividerSeen();
     },
   ).current;
@@ -1302,6 +1343,8 @@ function TimelineInner({
   useEffect(() => {
     if (!jumpPills) return;
     setRelationState(relationFromKeys(items, viewableKeysRef.current));
+    const day = floatingDayFor(items, viewableKeysRef.current);
+    setFloatingDay(current => (sameFloatingDay(current, day) ? current : day));
   }, [jumpPills, items]);
 
   const unreadJumpCount = countUnreadJump(unreadCount);
@@ -2781,6 +2824,11 @@ function TimelineInner({
     // 픽셀도 바뀌지 않는다 — `measure/` 의 앵커 이동 두 줄이 그것을 잰다.
     <View style={styles.pillFrame}>
       {list}
+      {/* 떠 있는 날짜 알약(DS2-4). 위 필(「안 읽은 곳으로」)과 같은 자리라, 그 필이
+          서 있는 동안은 물러난다 — 할 일이 있는 필이 날짜보다 앞선다. */}
+      {floatingDay !== null && !showJumpUnread ? (
+        <FloatingDayPill atMs={floatingDay.atMs} nowMs={nowMs} />
+      ) : null}
       {showJumpUnread ? (
         <JumpPillDock side="top">
           <JumpPill

@@ -1127,9 +1127,12 @@ describe('D-2 — 구분선의 색이 코어가 정한 역할을 만족한다', 
     // 라벨과 rule 이 **같은** 색이다. 둘이 다르면 한 경계가 두 색이 된다.
     expect(boundaryRule).toBe(boundaryLabel);
 
+    // 날짜는 DS2-4 부터 rule 이 아니라 가운데 유리 알약이다(시안 A `.a-day`). 조용한
+    // 표지라는 역할은 그대로라 경계색을 빌리지 않는다 — 알약의 면은 유리 틴트다.
     const day = render(<DayDivider atMs={BASE_MS} nowMs={BASE_MS} />);
-    expect(ruleStyle(day, 'day-divider').backgroundColor).toBe(color.border);
-    expect(ruleStyle(day, 'day-divider').backgroundColor).not.toBe(boundaryRule);
+    const pill = ruleStyle(day, 'day-divider').backgroundColor;
+    expect(pill).toBe(color.glass);
+    expect(pill).not.toBe(boundaryRule);
   });
 
   it('boundary 가 quiet · agent · danger 와 다르다 (mustDifferFrom)', () => {

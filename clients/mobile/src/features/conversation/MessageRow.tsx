@@ -92,6 +92,7 @@ import {
 } from 'react-native';
 import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {usePalette, useStyles} from '../../design/theme';
+import {GlassSurface} from '../../design/glass';
 import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
 import {COPY_RECEIPT_MS, copyText} from './copy';
 import {MessageBody, bodyAffordances, openLink} from './MessageBody';
@@ -307,7 +308,10 @@ function relativeLabel(atMs: number, nowMs: number): string {
 function DividerLabel({
   segments,
   tone = 'quiet',
+  strong = false,
 }: {
+  /** 날짜 알약 글자 — 시안 `.a-day span{font-weight:600}`. */
+  strong?: boolean;
   segments: readonly DividerSegment[];
   /**
    * 코어가 정한 **역할** (design-review U4-4 D-2). 옛 이름은 `'warn'` 이라 폰
@@ -322,6 +326,7 @@ function DividerLabel({
     <Text
       style={[
         styles.dividerLabel,
+        strong && styles.dividerLabelStrong,
         tone === 'boundary' && styles.dividerLabelBoundary,
       ]}>
       {segments.map((segment, index) =>
@@ -368,13 +373,54 @@ export function DayDivider({
     <View
       accessibilityRole="text"
       accessibilityLabel={dayDividerLabel(atMs, nowMs)}
-      style={[styles.divider, styles.dividerDay]}
+      style={[styles.dayRow, styles.dividerDay]}
       testID="day-divider">
-      <DividerLabel
-        segments={dayDividerSegments(atMs, nowMs)}
-        tone={DIVIDER_TONE.day}
-      />
-      <View style={styles.dividerLine} />
+      {/* 시안 A `.a-day` — 가운데 유리 알약(DS2-4 #2716). 위 「앞 라벨 + rule 하나」
+          (`DIVIDER_LABEL_SIDE`)는 **맨 글자** 라벨이 글자 수만큼 좌우로 움직이는
+          문제의 답이었다. 알약은 자기 폭을 가진 도형이라 가운데에 서도 그 문제가
+          없다 — 날짜가 바뀌는 자리는 늘 화면 가운데의 같은 모양이다. 안 읽음·복구
+          표지는 여전히 앞 라벨 + rule 이다(웹과 같은 문법). */}
+      <View style={styles.dayPill}>
+        <DividerLabel
+          segments={dayDividerSegments(atMs, nowMs)}
+          tone={DIVIDER_TONE.day}
+          strong
+        />
+      </View>
+    </View>
+  );
+}
+
+/**
+ * 떠 있는 날짜 알약 — 목록 위쪽에 머무는 `.a-day` (DS2-4, owner 표 「떠 있는 날짜
+ * 알약(스크롤 중 상단 고정)」). 어느 날인지는 `Timeline` 의 `floatingDayFor` 가 정한다.
+ *
+ * 보조기술에는 숨긴다: 목록 안 날짜 구분선이 이미 같은 날을 절대 날짜로 말하고,
+ * 스크롤할 때마다 바뀌는 떠 있는 표지를 로터에 두면 같은 사실이 두 번, 움직이는
+ * 자리에서 읽힌다. 누를 것도 아니다(`pointerEvents="none"`) — 행을 가리지 않는다.
+ */
+export function FloatingDayPill({
+  atMs,
+  nowMs,
+}: {
+  atMs: number;
+  nowMs: number;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <View
+      pointerEvents="none"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={styles.dayFloat}
+      testID="floating-day">
+      <GlassSurface radius={radius.pill} style={styles.dayPillFloat}>
+        <DividerLabel
+          segments={dayDividerSegments(atMs, nowMs)}
+          tone={DIVIDER_TONE.day}
+          strong
+        />
+      </GlassSurface>
     </View>
   );
 }
@@ -3674,6 +3720,39 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   dividerLineBoundary: {backgroundColor: color.warn},
   // `textFaint` 는 배경 대비 3.562:1 로 본문 AA 미달이다(U4-2 M-6 실측).
   dividerLabel: {fontSize: font.meta, color: color.textMuted},
+  dividerLabelStrong: {fontWeight: '600'},
+  /** 날짜 줄 — 알약을 가운데에 세운다. 위아래 여백은 코어 `DIVIDER_SPACE.day`. */
+  dayRow: {alignItems: 'center', paddingHorizontal: SAFE_GUTTER},
+  /**
+   * 시안 `.a-day span{background:var(--glass);border:1px solid var(--glassLine);
+   * border-radius:999px;padding:3px 11px}`. 목록 안 알약은 흐림 없이 틴트만 —
+   * 바닥이 이미 평평해 흐릴 것이 없다.
+   */
+  dayPill: {
+    paddingVertical: CONV.dayPadY,
+    paddingHorizontal: CONV.dayPadX,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: color.glassLine,
+    backgroundColor: color.glass,
+  },
+  /** 떠 있는 알약의 자리 — 목록 틀 위쪽 가운데. */
+  dayFloat: {
+    position: 'absolute',
+    top: CONV.dayFloatTop,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  /** 떠 있는 알약 — 흐림 + 틴트(`GlassSurface`) 위에 선과 sh1. */
+  dayPillFloat: {
+    paddingVertical: CONV.dayPadY,
+    paddingHorizontal: CONV.dayPadX,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: color.glassLine,
+    boxShadow: color.elevationRest,
+  },
   /** 숫자만 자릿폭 고정 — 조사·단위가 함께 받으면 음절 사이가 벌어진다. */
   dividerFigure: {fontVariant: ['tabular-nums']},
   dividerLabelBoundary: {color: color.warn, fontWeight: '600'},
