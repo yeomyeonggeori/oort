@@ -2,9 +2,9 @@
 // module shared by every caller that has to turn a harness name into an
 // absolute path (ADR-0190 D3: the local PATH is the source of truth).
 //
-// Callers today: `harness_status.rs` (#2813). The local terminal lane (#2772)
-// resolves the same names for its panes and should call `search_path` and
-// `find_on_path` here instead of keeping its own copy.
+// Callers: `harness_status.rs` (#2813, login status) and `pty.rs` (#2772,
+// harness panes). Both use the same search path, `find_on_path` and
+// `STRIPPED_ENV`, so a status pill and the pane it opens see the same CLI.
 //
 // **Why not ask the login shell for its PATH.** A Finder-launched app gets
 // launchd's narrow PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), so the inherited
@@ -57,15 +57,40 @@ pub const NODE_VERSION_DIRS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Account variables removed from every harness child's environment (ADR-0191
-/// D2), so a key the app happened to inherit does not decide which account a
-/// harness runs as — or reports as logged in. Removing a variable does not
-/// read its value.
-pub const ACCOUNT_ENV: &[&str] = &[
+/// Variables removed from every harness child's environment — a local
+/// terminal pane (#2772) and the login-status probe (#2813) alike. Removing a
+/// variable does not read its value. ADR-0191 D2 names the first four ("같은
+/// 변수" — the list is open); the rest are the same kind of thing, added on
+/// the #2824 security review: other providers' keys, endpoint and backend
+/// switches that silently change which account or bill a harness uses,
+/// nested-session markers, and the updater signing key a developer may have
+/// exported. Profile folders (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) are #2777's
+/// call.
+pub const STRIPPED_ENV: &[&str] = &[
+    // ADR-0191 D2
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "CLAUDE_CODE_OAUTH_TOKEN",
     "OPENAI_API_KEY",
+    // other harnesses' API keys
+    "XAI_API_KEY",
+    "GROK_API_KEY",
+    "CODEX_API_KEY",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    // account / endpoint / backend switches
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_VERTEX_PROJECT_ID",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "OPENAI_BASE_URL",
+    "OPENAI_ORG_ID",
+    "OPENAI_PROJECT",
+    // a harness launched from inside another one
+    "CLAUDECODE",
+    "CLAUDE_CODE_ENTRYPOINT",
+    // dev builds: the updater signing key
+    "TAURI_SIGNING_PRIVATE_KEY",
+    "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
 ];
 
 /// The search PATH: the inherited one first (it is what the user chose when
@@ -130,7 +155,12 @@ pub fn current_search_path() -> OsString {
 /// First executable file named `name` on `path`. `name` must be a bare file
 /// name — a caller cannot smuggle a path through it.
 pub fn find_on_path(name: &str, path: &OsString) -> Option<PathBuf> {
-    if name.is_empty() || name.contains('/') || name.contains('\\') || name == "." || name == ".." {
+    if name.is_empty()
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains("..")
+        || name == "."
+    {
         return None;
     }
     std::env::split_paths(path)

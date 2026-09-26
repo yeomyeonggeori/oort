@@ -19,9 +19,9 @@
 //    `harness_path::find_on_path` and run by that absolute path, directly
 //    (never through `sh -c`). The child's PATH is the same search path, so an
 //    npm-installed CLI whose first line is `#!/usr/bin/env node` finds `node`
-//    even when the app was launched from Finder. The account variables
-//    ADR-0191 D2 names are removed from the child's environment (their values
-//    are never read), so the answer matches what a local terminal pane would
+//    even when the app was launched from Finder. The variables in
+//    `harness_path::STRIPPED_ENV` (ADR-0191 D2 and the #2824 review) are
+//    removed from the child's environment (their values are never read), so the answer matches what a local terminal pane would
 //    see. cwd is `$HOME`, not the GUI's `/`.
 // 3. **Exit code only.** stdin, stdout and stderr are all `Stdio::null()`.
 //    `claude auth status` prints JSON that can name the account; none of it
@@ -129,7 +129,7 @@ fn run_status(
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .env("PATH", search_path);
-    for key in harness_path::ACCOUNT_ENV {
+    for key in harness_path::STRIPPED_ENV {
         cmd.env_remove(key);
     }
     if let Some(home) = home {
@@ -555,7 +555,7 @@ mod tests {
         fn account_variables_do_not_reach_the_child() {
             let bin = Bin::new("env");
             // Exits 0 only when none of the account variables is set.
-            let check = harness_path::ACCOUNT_ENV
+            let check = harness_path::STRIPPED_ENV
                 .iter()
                 .map(|key| format!("[ -z \"${{{key}+x}}\" ]"))
                 .collect::<Vec<_>>()
@@ -564,7 +564,7 @@ mod tests {
             bin.script("codex", &check);
             // The child would inherit these from this test process unless
             // `run_status` removes them. Dummy values, removed again below.
-            for key in harness_path::ACCOUNT_ENV {
+            for key in harness_path::STRIPPED_ENV {
                 std::env::set_var(key, "dummy-for-test");
             }
             let status = run_status(
@@ -574,7 +574,7 @@ mod tests {
                 None,
                 Duration::from_secs(10),
             );
-            for key in harness_path::ACCOUNT_ENV {
+            for key in harness_path::STRIPPED_ENV {
                 std::env::remove_var(key);
             }
             assert_eq!(auth_from_exit(status), HarnessAuth::LoggedIn);

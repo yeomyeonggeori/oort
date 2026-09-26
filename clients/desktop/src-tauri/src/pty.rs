@@ -9,8 +9,8 @@
 //
 // Tauri runs a sync command on the thread that received the IPC request —
 // on macOS the main (event loop) thread — and an async one on a worker pool,
-// one task per call. So: everything that can block (spawn, the login-PATH
-// probe) is async and never on the main thread (#2824 review H1); `pty_write`
+// one task per call. So: everything that can block (openpty/fork) is async
+// and never on the main thread (#2824 review H1); `pty_write`
 // is sync, because input order is the order calls run in and only the main
 // thread runs them in arrival order (#2824 R2) — it only enqueues.
 //
@@ -25,7 +25,8 @@
 // 2. **What may run.** The webview names a program kind, never a path or an
 //    argv: `shell` is the user's login shell (`$SHELL`, which must be listed
 //    in /etc/shells) with `-l`; `harness` is one id from `HARNESSES`, resolved
-//    to an absolute path HERE from the login PATH. No extra arguments pass
+//    to an absolute path HERE with `harness_path` (inherited PATH + fixed
+//    install folders; no login shell is run to ask for its PATH, #2813). No extra arguments pass
 //    through — in particular no permission-bypass flag (ADR-0190 D2).
 // 3. **Where.** `cwd` must canonicalize to a directory inside the user's home.
 //    Validation happens before the command builder sees the path: portable-pty
@@ -47,9 +48,10 @@ use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc, Condvar, Mutex, OnceLock};
+use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::Duration;
 
+use crate::harness_path;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 
@@ -57,39 +59,9 @@ use serde::{Deserialize, Serialize};
 /// source of truth, this list only bounds what may be asked for).
 pub const HARNESSES: &[&str] = &["claude", "codex", "grok"];
 
-/// Variables removed from every PTY's environment. ADR-0191 D2 names the
-/// first four ("같은 변수" — the list is open); the rest are the same kind of
-/// thing, added on the #2824 security review: other providers' keys, endpoint
-/// and backend switches that silently change which account or bill a harness
-/// uses, nested-session markers, and the updater signing key a developer may
-/// have exported. Profile folders (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) are
-/// #2777's call.
-pub const STRIPPED_ENV: &[&str] = &[
-    // ADR-0191 D2
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "OPENAI_API_KEY",
-    // other harness credentials
-    "XAI_API_KEY",
-    "GROK_API_KEY",
-    "CODEX_API_KEY",
-    "AWS_BEARER_TOKEN_BEDROCK",
-    // account / endpoint / backend switches
-    "ANTHROPIC_BASE_URL",
-    "ANTHROPIC_VERTEX_PROJECT_ID",
-    "CLAUDE_CODE_USE_BEDROCK",
-    "CLAUDE_CODE_USE_VERTEX",
-    "OPENAI_BASE_URL",
-    "OPENAI_ORG_ID",
-    "OPENAI_PROJECT",
-    // a harness launched from inside another one
-    "CLAUDECODE",
-    "CLAUDE_CODE_ENTRYPOINT",
-    // dev builds: the updater signing key
-    "TAURI_SIGNING_PRIVATE_KEY",
-    "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
-];
+/// Variables removed from every PTY's environment: the shared list in
+/// `harness_path`, which the login-status probe (#2813) strips too.
+pub use crate::harness_path::STRIPPED_ENV;
 
 pub const MAX_SESSIONS: usize = 32;
 pub const MAX_COLS: u16 = 1000;
@@ -150,7 +122,7 @@ pub struct HostFacts {
     pub shell: Option<PathBuf>,
     /// Lines of /etc/shells.
     pub allowed_shells: Vec<PathBuf>,
-    /// The PATH a harness runs with (login PATH + well-known bins).
+    /// The PATH a harness runs with (`harness_path::search_path`).
     pub path: OsString,
 }
 
@@ -184,7 +156,7 @@ pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan,
             if !HARNESSES.contains(&id.as_str()) {
                 return Err(format!("refused: unknown harness {id:?}"));
             }
-            let program = find_on_path(id, &host.path)
+            let program = harness_path::find_on_path(id, &host.path)
                 .ok_or_else(|| format!("refused: {id} is not installed on this machine"))?;
             Ok(SpawnPlan {
                 program,
@@ -238,31 +210,6 @@ pub fn check_shell(host: &HostFacts) -> Result<PathBuf, String> {
     Ok(shell.clone())
 }
 
-fn find_on_path(name: &str, path: &OsString) -> Option<PathBuf> {
-    // `dir.join("/bin/sh")` would replace `dir`; the allowlist already stops
-    // such an id, this stops it a second time.
-    if name.is_empty() || name.contains('/') || name.contains("..") {
-        return None;
-    }
-    std::env::split_paths(path)
-        .filter(|dir| dir.is_absolute())
-        .map(|dir| dir.join(name))
-        .find(|candidate| is_executable(candidate))
-}
-
-#[cfg(unix)]
-fn is_executable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    path.metadata()
-        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
-}
-
-#[cfg(not(unix))]
-fn is_executable(path: &Path) -> bool {
-    path.is_file()
-}
-
 /// The command the PTY runs: the plan's program and argv, the environment
 /// policy applied on top of `base` (the app's own environment in production).
 pub fn build_command(
@@ -295,8 +242,8 @@ pub fn build_command(
 }
 
 impl HostFacts {
-    /// This machine, as `program` needs it. The login shell is run (for its
-    /// PATH) only for a harness, and only after it passed `/etc/shells`.
+    /// This machine, as `program` needs it. Runs nothing: a harness's PATH
+    /// is the shared search path (inherited PATH + install folders, #2813).
     pub fn current(program: &Program) -> Result<Self, String> {
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
@@ -318,77 +265,11 @@ impl HostFacts {
             path: OsString::new(),
         };
         if matches!(program, Program::Harness { .. }) {
-            let probe = facts.shell_to_probe();
-            facts.path = harness_path(&facts.home, probe.as_deref());
+            facts.path =
+                harness_path::search_path(Some(&facts.home), std::env::var_os("PATH").as_ref());
         }
         Ok(facts)
     }
-
-    /// The shell the login-PATH probe may run: only one `/etc/shells` lists
-    /// (#2824 review L1 — never execute `$SHELL` before checking it).
-    fn shell_to_probe(&self) -> Option<PathBuf> {
-        check_shell(self).ok()
-    }
-}
-
-/// PATH for harness spawns: what the login shell reports, then the app's own,
-/// then the usual install folders. Interim until local detection (#2775).
-fn harness_path(home: &Path, shell: Option<&Path>) -> OsString {
-    static LOGIN_PATH: OnceLock<Option<OsString>> = OnceLock::new();
-    let login = LOGIN_PATH
-        .get_or_init(|| shell.and_then(probe_login_path))
-        .clone();
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    for source in [login, std::env::var_os("PATH")].into_iter().flatten() {
-        dirs.extend(std::env::split_paths(&source));
-    }
-    for extra in [".local/bin", ".bun/bin", ".npm-global/bin"] {
-        dirs.push(home.join(extra));
-    }
-    dirs.push("/opt/homebrew/bin".into());
-    dirs.push("/usr/local/bin".into());
-    let mut seen = Vec::new();
-    dirs.retain(|d| {
-        d.is_absolute() && !seen.contains(d) && {
-            seen.push(d.clone());
-            true
-        }
-    });
-    std::env::join_paths(dirs).unwrap_or_default()
-}
-
-/// Ask the login shell for its PATH, bounded by a timeout.
-fn probe_login_path(shell: &Path) -> Option<OsString> {
-    use std::process::{Command, Stdio};
-    const MARK: &str = "__OORT_PATH__";
-    let mut command = Command::new(shell);
-    command.args(["-l", "-c", &format!("printf '{MARK}%s{MARK}' \"$PATH\"")]);
-    // Its own group, so a timeout takes whatever the rc files started too
-    // (a grandchild holding stdout would otherwise keep the reader alive).
-    #[cfg(unix)]
-    std::os::unix::process::CommandExt::process_group(&mut command, 0);
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let mut stdout = child.stdout.take()?;
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let mut out = String::new();
-        let _ = stdout.read_to_string(&mut out);
-        let _ = tx.send(out);
-    });
-    let out = rx.recv_timeout(Duration::from_secs(3));
-    #[cfg(unix)]
-    signal_group(child.id() as i32, SIG_KILL);
-    let _ = child.kill();
-    let _ = child.wait();
-    let out = out.ok()?;
-    let start = out.find(MARK)? + MARK.len();
-    let end = start + out[start..].find(MARK)?;
-    Some(OsString::from(&out[start..end]))
 }
 
 // ---------------------------------------------------------------------------
@@ -752,15 +633,6 @@ fn signal_session(sid: i32, signal: i32) {
     }
 }
 
-#[cfg(unix)]
-fn signal_group(pgid: i32, signal: i32) {
-    if pgid > 0 {
-        unsafe {
-            libc::killpg(pgid, signal);
-        }
-    }
-}
-
 /// Live pids in session `sid`.
 #[cfg(target_os = "macos")]
 fn session_members(sid: i32) -> Vec<i32> {
@@ -839,8 +711,8 @@ pub async fn pty_spawn(
     on_exit: Channel<PtyExit>,
 ) -> Result<u32, String> {
     let manager = state.0.clone();
-    // The login-PATH probe and openpty/fork block; keep them off the async
-    // workers as well as off the main thread.
+    // openpty/fork block; keep them off the async workers as well as off the
+    // main thread.
     tauri::async_runtime::spawn_blocking(move || {
         let host = HostFacts::current(&request.program)?;
         let plan = plan_spawn(&request, &host)?;
@@ -1014,15 +886,24 @@ mod tests {
     }
 
     #[test]
-    fn the_path_probe_only_runs_a_listed_shell() {
-        let mut h = host(OsString::new());
-        assert_eq!(h.shell_to_probe(), Some(PathBuf::from("/bin/zsh")));
-        for shell in ["/tmp/evil-sh", "zsh"] {
-            h.shell = Some(shell.into());
-            assert_eq!(h.shell_to_probe(), None, "{shell}");
+    fn a_harness_path_is_the_shared_search_path_and_runs_nothing() {
+        // No login-shell probe any more (#2813): building the PATH executes
+        // nothing, so a hostile `$SHELL` has nothing to be run by.
+        let production = include_str!("pty.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap();
+        for needle in ["std::process::Command", "Command::new(", "\"-c\""] {
+            assert!(!production.contains(needle), "pty.rs has {needle}");
         }
-        h.shell = None;
-        assert_eq!(h.shell_to_probe(), None);
+        let facts = HostFacts::current(&Program::Harness {
+            id: "claude".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            facts.path,
+            crate::harness_path::search_path(Some(&facts.home), std::env::var_os("PATH").as_ref())
+        );
     }
 
     // --- folder --------------------------------------------------------------
@@ -1573,9 +1454,9 @@ mod tests {
         assert_eq!(HARNESSES, ["claude", "codex", "grok"]);
         let bin = fake_bin().into_os_string();
         for name in ["/bin/sh", "../claude", "a/claude", "", ".."] {
-            assert!(find_on_path(name, &bin).is_none(), "{name:?}");
+            assert!(harness_path::find_on_path(name, &bin).is_none(), "{name:?}");
         }
-        assert!(find_on_path("claude", &bin).is_some());
+        assert!(harness_path::find_on_path("claude", &bin).is_some());
     }
 
     #[test]
