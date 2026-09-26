@@ -7,7 +7,6 @@ import {
 export const S2_TITLE = "함께할 팀원을 불러요.";
 export const S2_DETAIL = "초대 링크를 만들어 건네면 돼요.";
 export const S2_ISSUED_LINE = "초대 링크가 준비됐어요.";
-export const S2_ISSUED_DETAIL = "지금 복사해서 팀원에게 건네요.";
 export const S2_TROUBLE_LINE = "초대 링크를 만들지 못했어요.";
 export const S2_OFFLINE_LINE = "연결이 끊겨서 잠깐 기다려요.";
 /** 발급 카드 안의 작은 글씨(brief D3: 「해시만 보관」 문장은 카드 안으로 내린다). */

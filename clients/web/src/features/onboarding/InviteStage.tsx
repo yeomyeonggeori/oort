@@ -19,7 +19,6 @@ import {
   S2_CONTINUE_LABEL,
   S2_DETAIL,
   S2_ISSUE_ERROR_ID,
-  S2_ISSUED_DETAIL,
   S2_ISSUED_LINE,
   S2_OFFLINE_LINE,
   S2_OFFLINE_NOTE_ID,
@@ -45,7 +44,8 @@ function handleSkipClick(onSkip: () => void): void {
 function s2Guide(state: GuideState): { line: string; detail?: string } {
   switch (state) {
     case "success":
-      return { line: S2_ISSUED_LINE, detail: S2_ISSUED_DETAIL };
+      // 「지금 전달하세요」는 발급 카드가 이미 말한다. 코메토는 한 문장만(#2811 review).
+      return { line: S2_ISSUED_LINE };
     case "trouble":
       return { line: S2_TROUBLE_LINE };
     default:
