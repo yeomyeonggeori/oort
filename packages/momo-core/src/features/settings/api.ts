@@ -455,6 +455,13 @@ export interface WorkspaceIdentity {
    * Effective welcome prompt. Empty string when the server omitted it.
    */
   welcomePrompt: string;
+  /**
+   * ADR-0193 D6 (#2815, openapi `WorkspaceDto.subscriptionAgentsEnabled`). 서버
+   * 킬 스위치. **부재는 false다**: 이 필드를 모르는 서버는 `owner_only`를 기록하지
+   * 못하므로, 그 서버에 구독 경로로 합류시키면 팀 전체가 부르는 구독 에이전트가
+   * 생긴다(D4 위반). 그래서 참으로 명시된 경우만 켬이다.
+   */
+  subscriptionAgentsEnabled: boolean;
 }
 
 export function createWorkspace(
@@ -481,6 +488,7 @@ export async function fetchWorkspace(
     roleLabels?: unknown;
     welcomeAgentMemberId?: unknown;
     welcomePrompt?: unknown;
+    subscriptionAgentsEnabled?: unknown;
   };
   return {
     ...workspace,
@@ -488,6 +496,7 @@ export async function fetchWorkspace(
     welcomeAgentMemberId:
       typeof raw.welcomeAgentMemberId === "string" ? raw.welcomeAgentMemberId : null,
     welcomePrompt: typeof raw.welcomePrompt === "string" ? raw.welcomePrompt : "",
+    subscriptionAgentsEnabled: raw.subscriptionAgentsEnabled === true,
   };
 }
 
@@ -512,6 +521,7 @@ export async function renameWorkspace(
     roleLabels?: unknown;
     welcomeAgentMemberId?: unknown;
     welcomePrompt?: unknown;
+    subscriptionAgentsEnabled?: unknown;
   };
   return {
     ...workspace,
@@ -519,6 +529,7 @@ export async function renameWorkspace(
     welcomeAgentMemberId:
       typeof raw.welcomeAgentMemberId === "string" ? raw.welcomeAgentMemberId : null,
     welcomePrompt: typeof raw.welcomePrompt === "string" ? raw.welcomePrompt : "",
+    subscriptionAgentsEnabled: raw.subscriptionAgentsEnabled === true,
   };
 }
 

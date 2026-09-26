@@ -8,48 +8,47 @@ import { HashRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { waitFor as rtlWaitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RosterMember } from "@momo/core/lib/api";
+import { ApiError, type RosterMember } from "@momo/core/lib/api";
 import { fetchRoster, listChannels } from "@momo/core/lib/api";
 import { firstMentionDraft } from "@momo/core/features/hostedAgents/firstMention";
-import { HOSTED_PRESETS } from "@momo/core/features/hostedAgents/presets";
-import { fetchProviderLink } from "@momo/core/features/settings/api";
+import { fetchProviderLink, fetchWorkspace } from "@momo/core/features/settings/api";
 import {
+  createHostedConnection,
   getHostedConnection,
   listHostedConnections,
 } from "@momo/core/features/hostedAgents/api";
+import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
+import {
+  AI_CONNECT_BOUNDARY_NOTE,
+  AI_CONNECT_DESKTOP_ONLY_NOTE,
+  AI_CONNECT_QUESTION,
+  AI_CONNECT_SERVER_OFF_NOTE,
+  AI_CONNECT_SKIPPED_LINE,
+  JOIN_CAP_LINE,
+  JOIN_OFF_LINE,
+  LOGIN_ACTION_LABEL,
+  LOGIN_POLL_WINDOW_MS,
+} from "@momo/core/features/onboarding/aiConnect";
 import { clearAllDrafts, draftKey, readDraft } from "@/features/chat/draftStore";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { detectLocalHarnesses, openTerminalApp } from "@/lib/tauri";
 import {
   DETECT_CAP_MS,
-  FIRST_AGENT_CAP_COPY,
-  FIRST_AGENT_CARDS,
   FIRST_AGENT_CHANNEL_PENDING,
-  FIRST_AGENT_CHOICE_LEGEND,
-  FIRST_AGENT_CLAUDE_DETAIL,
-  FIRST_AGENT_CODEX_DETAIL,
   FIRST_AGENT_CONNECTED_CLAIM,
-  FIRST_AGENT_DETAIL_FORBIDDEN,
-  FIRST_AGENT_LEAD_CAP,
-  FIRST_AGENT_LEAD_CARDS,
-  FIRST_AGENT_LEAD_DETECTING,
-  FIRST_AGENT_MENTION_ACTION,
-  FIRST_AGENT_OPENAI_DETAIL,
-  FIRST_AGENT_RECHECK_LABEL,
   FIRST_AGENT_RECHECKING,
   FIRST_AGENT_RETRY_LABEL,
   FIRST_AGENT_CAPTURE_POSES,
-  FIRST_AGENT_REENTRY_HREF,
-  FIRST_AGENT_SKIP_LABEL,
 } from "./firstAgent";
 import {
   applyFirstAgentFocus,
   clearAllFirstAgentMarkers,
   readFirstAgentMarker,
-  takeFirstAgentResumeHash,
 } from "./firstAgentStore";
 import { FirstAgentStage } from "./FirstAgentStage";
 
 const poseSlot = vi.hoisted(() => ({ current: null as string | null }));
+const envSlot = vi.hoisted(() => ({ tauri: false, flag: false }));
 
 vi.mock("./firstAgent", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./firstAgent")>();
@@ -57,6 +56,31 @@ vi.mock("./firstAgent", async (importOriginal) => {
     ...actual,
     readFirstAgentCapturePoseFromLocation: () =>
       actual.parseFirstAgentCapturePose(poseSlot.current),
+  };
+});
+
+vi.mock("@/lib/env", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/env")>();
+  return {
+    ...actual,
+    get IS_TAURI() {
+      return envSlot.tauri;
+    },
+    get SUBSCRIPTION_AGENTS_BUILD_FLAG() {
+      return envSlot.flag;
+    },
+  };
+});
+
+vi.mock("@/lib/tauri", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/tauri")>();
+  return {
+    ...actual,
+    isDesktop: () => envSlot.tauri,
+    detectLocalHarnesses: vi.fn(),
+    detectHostedAgents: vi.fn(async () => []),
+    openTerminalApp: vi.fn(async () => true),
+    openExternalUrl: vi.fn(async () => true),
   };
 });
 
@@ -129,6 +153,9 @@ const unconfiguredLink = {
   diagnostics: [] as string[],
 };
 
+const CLAUDE_READY: LocalHarnessProbe = { id: "claude", installed: true, auth: "logged_in" };
+const CODEX_LOGIN: LocalHarnessProbe = { id: "codex", installed: true, auth: "needs_login" };
+
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
   return {
@@ -144,6 +171,7 @@ vi.mock("@momo/core/features/settings/api", async (importOriginal) => {
   return {
     ...actual,
     fetchProviderLink: vi.fn(),
+    fetchWorkspace: vi.fn(),
   };
 });
 
@@ -201,6 +229,19 @@ function wireConnection(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function workspaceIdentity(subscriptionAgentsEnabled: boolean) {
+  return {
+    id: WS,
+    slug: "team",
+    name: "우리 팀",
+    updatedAtMs: 1,
+    roleLabels: {},
+    welcomeAgentMemberId: null,
+    welcomePrompt: "",
+    subscriptionAgentsEnabled,
+  };
+}
+
 function sessionValue(): SessionContextValue {
   return {
     session: {
@@ -228,16 +269,6 @@ function countNeedle(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
 }
 
-function describedText(host: HTMLElement, choiceId: string): string {
-  const input = host.querySelector(`#first-agent-harness-${choiceId}`);
-  const ids = (input?.getAttribute("aria-describedby") ?? "")
-    .split(/\s+/)
-    .filter(Boolean);
-  return ids
-    .map((id) => host.querySelector(`#${id}`)?.textContent ?? "")
-    .join(" ");
-}
-
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
 };
@@ -246,6 +277,7 @@ let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
 let queryClient: QueryClient | null = null;
 let continued = 0;
+let clipboard: string[] = [];
 
 function source(): string {
   return readFileSync(
@@ -285,21 +317,29 @@ async function waitFor(check: () => boolean, label: string): Promise<void> {
   }
 }
 
-function pressKey(el: Element, key: string): void {
+function q<T extends Element = HTMLElement>(host: ParentNode, testId: string): T | null {
+  return host.querySelector<T>(`[data-testid="${testId}"]`);
+}
+
+function click(el: Element | null): void {
+  if (!el) throw new Error("missing element");
   act(() => {
-    el.dispatchEvent(
-      new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })
-    );
+    (el as HTMLElement).click();
   });
 }
 
-function commitCard(host: HTMLElement, id: string): void {
-  const radio = host.querySelector<HTMLInputElement>(
-    `#first-agent-harness-${id}`
+/** 줄을 고르고 주 행동을 누른다(시안: 라디오 선택 → 「…를 내 에이전트로」). */
+function pick(host: HTMLElement, id: string): void {
+  const radio = host.querySelector<HTMLInputElement>(`#ai-connect-${id}`);
+  if (!radio) throw new Error(`missing row ${id}`);
+  click(radio);
+  click(q(host, "first-agent-continue"));
+}
+
+function rowIds(host: HTMLElement): string[] {
+  return [...host.querySelectorAll('[data-testid="ai-connect-row"]')].map(
+    (node) => node.getAttribute("data-row-id") ?? ""
   );
-  if (!radio) throw new Error(`missing card ${id}`);
-  radio.focus();
-  pressKey(radio, "Enter");
 }
 
 function mountStage(): HTMLElement {
@@ -331,6 +371,14 @@ function mountStage(): HTMLElement {
   return host;
 }
 
+/** 데스크탑 + 빌드 플래그 + 서버 켬: 구독 줄이 서는 조건. */
+function subscriptionOn(probes: LocalHarnessProbe[] = [CLAUDE_READY, CODEX_LOGIN]): void {
+  envSlot.tauri = true;
+  envSlot.flag = true;
+  vi.mocked(fetchWorkspace).mockResolvedValue(workspaceIdentity(true));
+  vi.mocked(detectLocalHarnesses).mockResolvedValue(probes);
+}
+
 beforeAll(() => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -353,11 +401,30 @@ beforeAll(() => {
 beforeEach(() => {
   poseSlot.current = null;
   offlineSlot.current = false;
+  envSlot.tauri = false;
+  envSlot.flag = false;
   continued = 0;
+  clipboard = [];
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: {
+      writeText: vi.fn(async (text: string) => {
+        clipboard.push(text);
+      }),
+    },
+  });
   window.history.replaceState(null, "", "/");
   vi.mocked(fetchRoster).mockReset();
   vi.mocked(listChannels).mockReset();
   vi.mocked(fetchProviderLink).mockReset();
+  vi.mocked(fetchWorkspace).mockReset();
+  vi.mocked(fetchWorkspace).mockResolvedValue(workspaceIdentity(false));
+  vi.mocked(detectLocalHarnesses).mockReset();
+  vi.mocked(detectLocalHarnesses).mockResolvedValue([
+    { id: "claude", installed: false, auth: "unknown" },
+    { id: "codex", installed: false, auth: "unknown" },
+  ]);
+  vi.mocked(openTerminalApp).mockClear();
   let rosterCalls = 0;
   vi.mocked(fetchRoster).mockImplementation(async () => {
     rosterCalls += 1;
@@ -376,10 +443,19 @@ beforeEach(() => {
   clearAllFirstAgentMarkers();
   vi.mocked(listHostedConnections).mockReset();
   vi.mocked(getHostedConnection).mockReset();
+  vi.mocked(createHostedConnection).mockReset();
   vi.mocked(listHostedConnections).mockResolvedValue({ connections: [] });
   vi.mocked(getHostedConnection).mockResolvedValue({
     connection: wireConnection(),
     cleanupArtifacts: [],
+  });
+  vi.mocked(createHostedConnection).mockResolvedValue({
+    connection: wireConnection({
+      invocationScope: "owner_only",
+      subscriptionHarness: "claude_code",
+    }),
+    pairingCredential: PRODUCT_SECRET,
+    pairingExpiresAtMs: Date.now() + 600_000,
   });
 });
 
@@ -396,36 +472,229 @@ afterEach(() => {
   clearAllDrafts();
 });
 
-describe("M-2 캡처 detected 는 done 만", () => {
-  it("cards 포즈는 멘션을 심지 않는다", async () => {
-    poseSlot.current = "cards";
+// ---- 목록 --------------------------------------------------------------------
+
+describe("구독 줄 노출 (ADR-0193 D6, #2814)", () => {
+  it("빌드 플래그가 꺼진 빌드는 구독 줄도, 그 이유도 그리지 않는다", async () => {
+    envSlot.tauri = true;
+    vi.mocked(fetchWorkspace).mockResolvedValue(workspaceIdentity(true));
     const host = mountStage();
-    await waitFor(
-      () => host.querySelector("[data-choice-id]") !== null,
-      "cards"
-    );
-    expect(host.querySelector('[data-testid="first-agent-mention"]')).toBeNull();
-    expect(source()).toContain(
-      "firstAgentCaptureDetected(pose)"
-    );
+    await waitFor(() => rowIds(host).length > 0, "rows");
+    expect(rowIds(host)).toEqual(["api-key", "grok"]);
+    expect(q(host, "first-agent-server-off")).toBeNull();
+    expect(q(host, "first-agent-desktop-only")).toBeNull();
+    expect(vi.mocked(detectLocalHarnesses)).not.toHaveBeenCalled();
+    expect(q(host, "first-agent-heading")?.textContent).toBe(AI_CONNECT_QUESTION);
+  });
+
+  it("데스크탑 + 플래그 + 서버 켬이면 구독 두 줄이 맨 위다", async () => {
+    subscriptionOn();
+    const host = mountStage();
+    await waitFor(() => rowIds(host).length === 4, "four rows");
+    expect(rowIds(host)).toEqual(["claude", "codex", "api-key", "grok"]);
+    expect(host.textContent).toContain(AI_CONNECT_BOUNDARY_NOTE);
+  });
+
+  it("서버 킬 스위치가 꺼지면 구독 줄을 숨기고 API 키 줄이 맨 위, 이유 한 줄", async () => {
+    subscriptionOn();
+    vi.mocked(fetchWorkspace).mockResolvedValue(workspaceIdentity(false));
+    const host = mountStage();
+    await waitFor(() => q(host, "first-agent-server-off") !== null, "server-off");
+    expect(rowIds(host)).toEqual(["api-key", "grok"]);
+    expect(q(host, "first-agent-server-off")?.textContent).toBe(AI_CONNECT_SERVER_OFF_NOTE);
+    expect(host.querySelector("#ai-connect-claude")).toBeNull();
+  });
+
+  it("그 값을 모르는 서버(#2815 이전)도 꺼짐으로 읽는다", async () => {
+    subscriptionOn();
+    const { subscriptionAgentsEnabled: _omit, ...legacy } = workspaceIdentity(true);
+    vi.mocked(fetchWorkspace).mockResolvedValue(legacy as never);
+    const host = mountStage();
+    await waitFor(() => rowIds(host).length > 0, "rows");
+    await flush();
+    expect(rowIds(host)).toEqual(["api-key", "grok"]);
+  });
+
+  it("웹에서는 구독 줄 대신 데스크탑 안내 한 줄", async () => {
+    envSlot.flag = true;
+    vi.mocked(fetchWorkspace).mockResolvedValue(workspaceIdentity(true));
+    const host = mountStage();
+    await waitFor(() => q(host, "first-agent-desktop-only") !== null, "desktop-only");
+    expect(q(host, "first-agent-desktop-only")?.textContent).toBe(AI_CONNECT_DESKTOP_ONLY_NOTE);
+    expect(rowIds(host)).toEqual(["api-key", "grok"]);
+    expect(vi.mocked(detectLocalHarnesses)).not.toHaveBeenCalled();
   });
 });
 
-describe("H-K 긴 이름은 패널 안에서 자른다", () => {
-  const FIRST_AGENT_LONG_NAME =
-    "김인턴-데이터플랫폼-온콜 Agent Runtime Operations Assistant 김인턴-온콜대기열용자";
+describe("알약과 선택", () => {
+  it("준비됨 줄은 미리 골라지고, 로그인 필요 줄은 고를 수 없다", async () => {
+    subscriptionOn();
+    const host = mountStage();
+    await waitFor(
+      () => q(host, "ai-connect-pill-claude")?.getAttribute("data-pill") === "ready",
+      "claude ready"
+    );
+    expect(q(host, "ai-connect-pill-claude")?.textContent).toBe("준비됨");
+    expect(q(host, "ai-connect-pill-codex")?.textContent).toBe("로그인 필요");
+    expect(host.querySelector<HTMLInputElement>("#ai-connect-claude")?.checked).toBe(true);
+    expect(host.querySelector<HTMLInputElement>("#ai-connect-codex")?.disabled).toBe(true);
+    expect(q(host, "first-agent-continue")?.textContent).toBe("Claude Code를 내 에이전트로");
+    expect(q(host, "first-agent-heading")?.textContent).toBe("이 맥에서 Claude Code를 찾았어요.");
+    expect(q(host, "kometto-guide")?.getAttribute("data-expression")).toBe("happy");
+  });
 
-  it("60자 이름은 말줄임 클래스와 핸들이 있고 title 은 측정에 맡긴다", async () => {
-    expect(FIRST_AGENT_LONG_NAME.length).toBeGreaterThanOrEqual(60);
-    const longAgent: RosterMember = {
-      ...agent,
-      displayName: FIRST_AGENT_LONG_NAME,
-    };
-    let rosterCalls = 0;
-    vi.mocked(fetchRoster).mockImplementation(async () => {
-      rosterCalls += 1;
-      return rosterCalls === 1 ? [human] : [human, longAgent];
+  it("설치 안 된 CLI는 설치 필요 알약이고 줄은 잠긴다", async () => {
+    subscriptionOn([
+      { id: "claude", installed: false, auth: "unknown" },
+      { id: "codex", installed: false, auth: "unknown" },
+    ]);
+    const host = mountStage();
+    await waitFor(
+      () => q(host, "ai-connect-pill-claude")?.getAttribute("data-pill") === "install",
+      "install"
+    );
+    expect(q(host, "ai-connect-pill-claude")?.textContent).toBe("설치 필요");
+    expect(host.querySelector<HTMLInputElement>("#ai-connect-claude")?.disabled).toBe(true);
+    expect(q(host, "first-agent-heading")?.textContent).toBe(AI_CONNECT_QUESTION);
+  });
+
+  it("감지가 끝나기 전에는 확인 중… 이고 코메토는 생각한다", async () => {
+    subscriptionOn();
+    vi.mocked(detectLocalHarnesses).mockImplementation(() => new Promise(() => undefined));
+    const host = mountStage();
+    await waitFor(() => q(host, "ai-connect-pill-claude") !== null, "pill");
+    expect(q(host, "ai-connect-pill-claude")?.textContent).toBe("확인 중…");
+    expect(q(host, "kometto-guide")?.getAttribute("data-expression")).toBe("thinking");
+  });
+});
+
+describe("「Claude로 로그인」 버튼이 없다 (ADR-0193 D2)", () => {
+  it("로그인 필요 줄의 행동은 「터미널에서 로그인」과 복사뿐이다", async () => {
+    subscriptionOn();
+    const host = mountStage();
+    await waitFor(() => q(host, "ai-connect-login-codex") !== null, "login row");
+    const labels = [...host.querySelectorAll("button, a")].map(
+      (node) => `${node.textContent ?? ""} ${node.getAttribute("aria-label") ?? ""}`
+    );
+    const offenders = labels.filter((text) =>
+      /(Claude|ChatGPT|OpenAI|Anthropic|Codex)\s*(로|으로)\s*로그인/.test(text)
+    );
+    expect(offenders).toEqual([]);
+    expect(q(host, "ai-connect-login-open-codex")?.textContent).toBe(LOGIN_ACTION_LABEL);
+    expect(q(host, "ai-connect-login-command-codex")?.textContent).toBe("$ codex login");
+    expect(q(host, "ai-connect-login-claude")).toBeNull();
+  });
+});
+
+describe("터미널에서 로그인 → 2초 재확인 → 120초 뒤 다시 확인", () => {
+  it("명령을 복사하고 터미널을 연 뒤, 로그인됨이 오면 준비됨이 된다", async () => {
+    subscriptionOn();
+    const host = mountStage();
+    await waitFor(() => q(host, "ai-connect-login-open-codex") !== null, "login row");
+    vi.useFakeTimers();
+    const calls = vi.mocked(detectLocalHarnesses).mock.calls.length;
+    vi.mocked(detectLocalHarnesses).mockResolvedValue([CLAUDE_READY, CODEX_LOGIN]);
+    click(q(host, "ai-connect-login-open-codex"));
+    await flush();
+    await flush();
+    expect(clipboard).toContain("codex login");
+    expect(vi.mocked(openTerminalApp)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(openTerminalApp).mock.calls[0]).toEqual([]);
+    await waitFor(
+      () => vi.mocked(detectLocalHarnesses).mock.calls.length > calls,
+      "first recheck"
+    );
+    expect(q(host, "ai-connect-pill-codex")?.textContent).toBe("확인 중…");
+    const afterFirst = vi.mocked(detectLocalHarnesses).mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
     });
+    expect(vi.mocked(detectLocalHarnesses).mock.calls.length).toBe(afterFirst + 1);
+    vi.mocked(detectLocalHarnesses).mockResolvedValue([
+      CLAUDE_READY,
+      { id: "codex", installed: true, auth: "logged_in" },
+    ]);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    await waitFor(
+      () => q(host, "ai-connect-pill-codex")?.getAttribute("data-pill") === "ready",
+      "codex ready"
+    );
+    const settled = vi.mocked(detectLocalHarnesses).mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(vi.mocked(detectLocalHarnesses).mock.calls.length).toBe(settled);
+  });
+
+  it("120초 동안 로그인이 없으면 재확인을 멈추고 다시 확인 알약이 된다", async () => {
+    subscriptionOn();
+    const host = mountStage();
+    await waitFor(() => q(host, "ai-connect-login-open-codex") !== null, "login row");
+    vi.useFakeTimers();
+    vi.setSystemTime(5_000_000);
+    click(q(host, "ai-connect-login-open-codex"));
+    await flush();
+    await flush();
+    await act(async () => {
+      vi.setSystemTime(5_000_000 + LOGIN_POLL_WINDOW_MS);
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    await waitFor(
+      () => q(host, "ai-connect-pill-codex")?.getAttribute("data-pill") === "recheck",
+      "recheck pill"
+    );
+    expect(q(host, "ai-connect-pill-codex")?.textContent).toBe("다시 확인");
+    expect(q(host, "ai-connect-pill-codex")?.tagName).toBe("BUTTON");
+    const stopped = vi.mocked(detectLocalHarnesses).mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    expect(vi.mocked(detectLocalHarnesses).mock.calls.length).toBe(stopped);
+    click(q(host, "ai-connect-pill-codex"));
+    await flush();
+    expect(vi.mocked(detectLocalHarnesses).mock.calls.length).toBe(stopped + 1);
+  });
+});
+
+// ---- 구독 합류 세 상태 ------------------------------------------------------
+
+describe("구독 합류: 연결 명령 → 감지 대기 → 합류 (같은 화면)", () => {
+  it("합류 요청은 owner_only + claude_code 를 싣고 이름은 「{나}의 Claude」다", async () => {
+    subscriptionOn();
+    const host = mountStage();
+    await waitFor(
+      () => host.querySelector<HTMLInputElement>("#ai-connect-claude")?.checked === true,
+      "preselected"
+    );
+    click(q(host, "first-agent-continue"));
+    await waitFor(() => q(host, "first-agent-connect-command") !== null, "command");
+    expect(vi.mocked(createHostedConnection)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(createHostedConnection).mock.calls[0]).toEqual([
+      WS,
+      {
+        displayName: "곽성재의 Claude",
+        handle: "seongjae-claude",
+        authMode: "static_bearer",
+        invocationScope: "owner_only",
+        subscriptionHarness: "claude_code",
+      },
+    ]);
+    const command = q(host, "first-agent-connect-command-text")?.textContent ?? "";
+    expect(command).toContain("claude mcp add --scope user --transport http oort");
+    expect(command).toContain("/v1/mcp/agent-port");
+    expect(command).toContain(`Authorization: Bearer ${PRODUCT_SECRET}`);
+    expect(countNeedle(document.body.textContent ?? "", PRODUCT_SECRET)).toBe(1);
+    expect(q(host, "first-agent-heading")?.textContent).toBe(
+      "터미널에서 이 명령을 한 번 실행해 주세요."
+    );
+    expect(q(host, "kometto-guide")?.getAttribute("data-expression")).toBe("idle");
+    expect(q(host, "first-agent-stage")?.getAttribute("data-step")).toBe("connect");
+  });
+
+  it("터미널에서 열기 → 복사 + 인자 없는 터미널 열기 → 감지 대기(생각) → 합류(기쁨)", async () => {
+    subscriptionOn();
     let status = "pairing_pending";
     vi.mocked(getHostedConnection).mockImplementation(async () => ({
       connection: wireConnection({ status }),
@@ -433,590 +702,139 @@ describe("H-K 긴 이름은 패널 안에서 자른다", () => {
     }));
     const host = mountStage();
     await waitFor(
-      () => host.querySelector("[data-choice-id='claude-code']") !== null,
-      "cards"
+      () => host.querySelector<HTMLInputElement>("#ai-connect-claude")?.checked === true,
+      "preselected"
     );
+    click(q(host, "first-agent-continue"));
+    await waitFor(() => q(host, "first-agent-connect-open") !== null, "open button");
     vi.useFakeTimers();
     vi.setSystemTime(1_000_000);
-    commitCard(host, "claude-code");
-    await waitFor(
-      () => document.querySelector('[data-testid="hosted-pairing-card"]') !== null,
-      "wizard"
+    click(q(host, "first-agent-connect-open"));
+    await flush();
+    await flush();
+    expect(clipboard.some((text) => text.includes(PRODUCT_SECRET))).toBe(true);
+    expect(vi.mocked(openTerminalApp).mock.calls).toEqual([[]]);
+    await waitFor(() => q(host, "first-agent-detecting") !== null, "waiting");
+    expect(q(host, "first-agent-heading")?.textContent).toBe(
+      "Claude Code가 oort에 들어오기를 기다리고 있어요."
     );
-    act(() => {
-      document
-        .querySelector<HTMLButtonElement>('[data-testid="hosted-secret-done"]')
-        ?.click();
-    });
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
-      "detecting"
-    );
-    await waitFor(
-      () => vi.mocked(fetchRoster).mock.calls.length >= 2,
-      "roster refresh"
-    );
+    expect(q(host, "kometto-guide")?.getAttribute("data-expression")).toBe("thinking");
+    expect(host.textContent).not.toContain(FIRST_AGENT_CONNECTED_CLAIM);
     status = "detected";
     await act(async () => {
-      vi.setSystemTime(1_000_000 + DETECT_CAP_MS - 1);
-      await vi.advanceTimersByTimeAsync(2_000);
+      vi.setSystemTime(1_000_000 + 10_000);
+      await vi.advanceTimersByTimeAsync(4_000);
     });
-    await waitFor(
-      () =>
-        host.querySelector('[data-testid="first-agent-mention-name"]')
-          ?.textContent === FIRST_AGENT_LONG_NAME,
-      "mention name"
-    );
-    const mention = host.querySelector('[data-testid="first-agent-mention"]');
-    const column = host.querySelector('[data-testid="first-agent-mention-column"]');
-    const name = host.querySelector<HTMLElement>(
-      '[data-testid="first-agent-mention-name"]'
-    );
-    const handle = host.querySelector('[data-testid="first-agent-mention-handle"]');
-    expect(mention).toBeTruthy();
-    expect(mention?.className.split(/\s+/)).toContain("w-full");
-    expect(mention?.className.split(/\s+/)).toContain("min-w-0");
-    expect(column).toBeTruthy();
-    expect(column?.className.split(/\s+/)).toContain("min-w-0");
-    expect(name).toBeTruthy();
-    expect(name?.className.split(/\s+/)).toContain("truncate");
-    expect(name?.className.split(/\s+/)).toContain("min-w-0");
-    expect(name?.getAttribute("title")).toBeNull();
-    expect(handle).toBeTruthy();
-    expect(handle?.className.split(/\s+/)).toContain("truncate");
-    expect(handle?.className.split(/\s+/)).toContain("min-w-0");
-    expect(handle?.textContent).toContain("@intern");
-    expect(source()).toContain('from "@/features/hostedAgents/TruncatingName"');
-    expect(source()).toMatch(
-      /<TruncatingName\b[^>]*testId="first-agent-mention-name"/
-    );
-    expect(source()).toMatch(
-      /<TruncatingName\b[^>]*testId="first-agent-mention-handle"/
-    );
-    expect(source()).not.toContain("FIRST_AGENT_MENTION_TITLE_CHARS");
-    expect(source()).not.toMatch(/name\.length\s*>/);
-  });
-});
-
-describe("소스 규율", () => {
-  it("waitFor 는 Testing Library 5s 이고 80회 flush 가 아니다", () => {
-    const text = readFileSync(
-      resolve(process.cwd(), "src/features/welcome/FirstAgentStage.test.tsx"),
-      "utf8"
-    );
-    expect(text).toContain('from "@testing-library/react"');
-    expect(text).toContain("timeout: 5000");
-    expect(text).not.toMatch(/for \(let i = 0; i < 80/);
+    await waitFor(() => q(host, "first-agent-mention") !== null, "joined");
+    expect(q(host, "first-agent-heading")?.textContent).toBe("곽성재의 Claude가 들어왔어요.");
+    expect(q(host, "kometto-guide")?.getAttribute("data-expression")).toBe("happy");
+    expect(q(host, "first-agent-mention-action")?.textContent).toBe("계속");
   });
 
-  it("위저드·1회용 카드·첫 멘션 조각·ChoiceList 를 복제하지 않는다", () => {
-    const text = source();
-    expect(text).toContain("HostedAgentWizard");
-    expect(text).toContain('entry="settings"');
-    expect(text).toContain("OneTimeSecretCard");
-    expect(text).toContain("firstMentionDraft");
-    expect(text).toContain("previewHintedAgent");
-    expect(text).toContain("FIRST_MENTION_AGENT_BADGE");
-    expect(text).toContain("elapsedLabel");
-    expect(text).toContain("ChoiceList");
-    expect(text).toContain('lockMode="aria"');
-    expect(text).toContain("TruncatingName");
-    expect(text).toContain("rosterQueryKey");
-    expect(text).toContain("OnboardingSlideTransition");
-    expect(text).not.toContain("FirstMentionOnboarding");
-    expect(text).not.toContain("focusComposer");
-    expect(text).not.toMatch(/function OneTimeSecretCard/);
-    expect(text).not.toMatch(/function HostedAgentWizard/);
-    expect(text).not.toContain(PRODUCT_SECRET);
-  });
-});
-
-describe("카드 4 · 건너뛰기", () => {
-  it("카드가 넷이고 나중에 건너뛰기가 상시 있다", async () => {
+  it("5분 상한이면 당황 + 다시 확인", async () => {
+    subscriptionOn();
     const host = mountStage();
     await waitFor(
-      () => host.querySelectorAll("[data-choice-id]").length === 4,
-      "cards"
-    );
-    const ids = [...host.querySelectorAll("[data-choice-id]")].map((node) =>
-      node.getAttribute("data-choice-id")
-    );
-    expect(ids).toEqual(FIRST_AGENT_CARDS.map((card) => card.id));
-    expect(host.querySelectorAll("fieldset").length).toBe(1);
-    expect(host.querySelector("legend")?.textContent).toBe(FIRST_AGENT_CHOICE_LEGEND);
-    expect(host.querySelector('[data-testid="first-agent-provider-choice"]')).toBeNull();
-    expect(host.querySelector('[data-testid="first-agent-skip"]')?.textContent).toBe(
-      "지금은 건너뛰기"
-    );
-    expect(host.textContent).toContain("Grok Bot");
-    expect(host.textContent).toContain(FIRST_AGENT_LEAD_CARDS);
-    const genericDetail =
-      HOSTED_PRESETS.find((preset) => preset.id === "generic")?.detail ?? "";
-    expect(genericDetail).not.toBe("");
-    expect(countNeedle(host.textContent ?? "", genericDetail)).toBe(0);
-    expect(host.textContent).toContain(FIRST_AGENT_OPENAI_DETAIL);
-    expect(
-      countNeedle(host.textContent ?? "", FIRST_AGENT_OPENAI_DETAIL)
-    ).toBe(1);
-    expect(host.querySelector("#first-agent-harness-hint")).toBeNull();
-    const claudeDetail = host.querySelector("#first-agent-harness-claude-code-detail");
-    const codexDetail = host.querySelector("#first-agent-harness-codex-detail");
-    const openaiDetail = host.querySelector(
-      "#first-agent-harness-openai-compat-detail"
-    );
-    expect(claudeDetail).toBeTruthy();
-    expect(claudeDetail?.textContent).toBe(FIRST_AGENT_CLAUDE_DETAIL);
-    expect(codexDetail).toBeTruthy();
-    expect(codexDetail?.textContent).toBe(FIRST_AGENT_CODEX_DETAIL);
-    expect(claudeDetail?.textContent).not.toBe(codexDetail?.textContent);
-    expect(
-      host.querySelector("#first-agent-harness-claude-code")?.getAttribute("aria-describedby")
-    ).toContain("claude-code-detail");
-    expect(openaiDetail).toBeTruthy();
-    expect(openaiDetail?.textContent).toBe(FIRST_AGENT_OPENAI_DETAIL);
-    expect(describedText(host, "openai-compat")).not.toContain(genericDetail);
-    expect(describedText(host, "claude-code")).toContain(FIRST_AGENT_CLAUDE_DETAIL);
-    expect(describedText(host, "codex")).toContain(FIRST_AGENT_CODEX_DETAIL);
-    expect(describedText(host, "grok")).not.toContain(genericDetail);
-    const renderedDetails: string[] = [];
-    for (const id of ["claude-code", "codex", "grok", "openai-compat"] as const) {
-      const detail = host.querySelector(`#first-agent-harness-${id}-detail`);
-      expect(detail).toBeTruthy();
-      const text = detail?.textContent ?? "";
-      expect(text, id).not.toBe("");
-      for (const needle of FIRST_AGENT_DETAIL_FORBIDDEN) {
-        expect(text, `${id} ${needle}`).not.toContain(needle);
-      }
-      renderedDetails.push(text);
-    }
-    expect(new Set(renderedDetails).size).toBe(renderedDetails.length);
-    expect(host.querySelector('[data-testid="first-agent-stage"]')?.className).toMatch(
-      /\bmax-w-sm\b/
-    );
-  });
-
-  it("건너뛰기는 마커를 남기고 이어간다", async () => {
-    const host = mountStage();
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-skip"]') !== null,
-      "skip"
-    );
-    act(() => {
-      host.querySelector<HTMLButtonElement>('[data-testid="first-agent-skip"]')?.click();
-    });
-    expect(readFirstAgentMarker(WS)).toBe("skipped");
-    expect(continued).toBe(1);
-    act(() => {
-      host.querySelector<HTMLButtonElement>('[data-testid="first-agent-skip"]')?.click();
-    });
-    expect(readFirstAgentMarker(WS)).toBe("skipped");
-    expect(continued).toBe(2);
-  });
-});
-
-describe("#2616 건너뛰기는 머리 줄에, 다시 붙이는 길은 본문에", () => {
-  // 375px 폰에서 건너뛰기가 카드 네 장 뒤(단계 맨 아래)에 있어서 스크롤해야
-  // 보였다. 머리 줄은 어느 자세에서도 첫 줄이다. 기하(첫 화면 안인가)는
-  // scripts/capture-phone-onboarding.mjs 가 WebKit iPhone 프로필에서 잰다.
-  it.each(FIRST_AGENT_CAPTURE_POSES)(
-    "%s 자세: 건너뛰기 하나가 머리 줄 오른쪽 끝에 있고 단계 본문보다 앞선다",
-    async (pose) => {
-      poseSlot.current = pose;
-      const host = mountStage();
-      await waitFor(
-        () => host.querySelector('[data-testid="first-agent-stage"]') !== null,
-        pose
-      );
-      const skips = host.querySelectorAll('[data-testid="first-agent-skip"]');
-      expect(skips.length).toBe(1);
-      const skip = skips[0] as HTMLElement;
-      expect(skip.tagName).toBe("BUTTON");
-      expect(skip.textContent).toBe(FIRST_AGENT_SKIP_LABEL);
-      const header = host.querySelector('[data-testid="onboarding-step-chrome"]');
-      expect(header?.tagName).toBe("HEADER");
-      expect(header?.contains(skip)).toBe(true);
-      expect(header?.lastElementChild).toBe(skip);
-      const stage = host.querySelector('[data-testid="first-agent-stage"]');
-      expect(stage?.contains(skip)).toBe(false);
-      expect(
-        skip.compareDocumentPosition(stage!) & Node.DOCUMENT_POSITION_FOLLOWING
-      ).toBeTruthy();
-      if (pose !== "done") {
-        const reentry = host.querySelectorAll('[data-testid="first-agent-reentry"]');
-        expect(reentry.length).toBe(1);
-        expect(stage?.contains(reentry[0]!)).toBe(true);
-        expect(reentry[0]?.getAttribute("href")).toBe(`#${FIRST_AGENT_REENTRY_HREF}`);
-      }
-    }
-  );
-
-  it("머리 줄 건너뛰기는 finish('skipped') 흐름을 탄다", async () => {
-    takeFirstAgentResumeHash(); // 앞 시험이 남긴 재개 해시를 비운다(마커 정리는 이 칸을 안 지운다).
-    poseSlot.current = "detecting";
-    const host = mountStage();
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-skip"]') !== null,
-      "skip"
-    );
-    act(() => {
-      host.querySelector<HTMLButtonElement>('[data-testid="first-agent-skip"]')?.click();
-    });
-    expect(readFirstAgentMarker(WS)).toBe("skipped");
-    expect(continued).toBe(1);
-    expect(takeFirstAgentResumeHash()).toBeNull();
-  });
-
-  it("다시 붙이는 길은 설정 › 에이전트 자격으로 이어지고 skipped 를 남긴다", async () => {
-    takeFirstAgentResumeHash();
-    const host = mountStage();
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-reentry"]') !== null,
-      "reentry"
-    );
-    act(() => {
-      host.querySelector<HTMLAnchorElement>('[data-testid="first-agent-reentry"]')?.click();
-    });
-    expect(readFirstAgentMarker(WS)).toBe("skipped");
-    expect(continued).toBe(1);
-    expect(takeFirstAgentResumeHash()).toBe(`#${FIRST_AGENT_REENTRY_HREF}`);
-  });
-});
-
-describe("B-1 화살표는 선택만", () => {
-  it("ArrowDown 세 번은 카드에 머물고 마커를 쓰지 않는다", async () => {
-    const host = mountStage();
-    await waitFor(
-      () => host.querySelector("#first-agent-harness-claude-code") !== null,
-      "cards"
-    );
-    const first = host.querySelector<HTMLInputElement>(
-      "#first-agent-harness-claude-code"
-    );
-    if (!first) throw new Error("first card");
-    first.focus();
-    pressKey(document.activeElement ?? first, "ArrowDown");
-    pressKey(document.activeElement ?? first, "ArrowDown");
-    pressKey(document.activeElement ?? first, "ArrowDown");
-    expect(host.querySelector('[data-testid="first-agent-stage"]')?.getAttribute("data-step")).toBe(
-      "cards"
-    );
-    expect(readFirstAgentMarker(WS)).toBeNull();
-    expect(document.activeElement?.id).toBe("first-agent-harness-openai-compat");
-    expect(continued).toBe(0);
-  });
-});
-
-describe("B-2 감지 멘션은 보이는 문장과 핸드오프", () => {
-  it("detected 경로에 이름·승인 대기·채널 액션이 있다", async () => {
-    let status = "pairing_pending";
-    vi.mocked(getHostedConnection).mockImplementation(async () => ({
-      connection: wireConnection({ status }),
-      cleanupArtifacts: [],
-    }));
-    const host = mountStage();
-    await waitFor(
-      () => host.querySelector("[data-choice-id='claude-code']") !== null,
-      "cards"
+      () => host.querySelector<HTMLInputElement>("#ai-connect-claude")?.checked === true,
+      "preselected"
     );
     vi.useFakeTimers();
     vi.setSystemTime(1_000_000);
-    commitCard(host, "claude-code");
-    await waitFor(
-      () => document.querySelector('[data-testid="hosted-pairing-card"]') !== null,
-      "wizard"
-    );
-    act(() => {
-      document
-        .querySelector<HTMLButtonElement>('[data-testid="hosted-secret-done"]')
-        ?.click();
-    });
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
-      "detecting"
-    );
-    expect(host.textContent).toContain(FIRST_AGENT_LEAD_DETECTING);
-    expect(host.textContent).not.toContain(FIRST_AGENT_LEAD_CARDS);
-    status = "detected";
-    await act(async () => {
-      vi.setSystemTime(1_000_000 + DETECT_CAP_MS - 1);
-      await vi.advanceTimersByTimeAsync(2_000);
-    });
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-mention"]') !== null,
-      "mention"
-    );
-    expect(host.textContent).toContain("김인턴");
-    expect(
-      host.querySelector('[data-testid="first-agent-mention-name"]')
-    ).toBeTruthy();
-    expect(
-      host.querySelector('[data-testid="first-agent-mention-name"]')?.getAttribute("title")
-    ).toBeNull();
-    expect(host.textContent).toContain(FIRST_AGENT_CHANNEL_PENDING);
-    expect(host.textContent).toContain(FIRST_AGENT_MENTION_ACTION);
-    expect(
-      host.querySelector('[data-testid="first-agent-mention-action"]')?.getAttribute("data-href")
-    ).toBe(`#/c/${GENERAL_ID}`);
-    expect(host.querySelector("#composer-input")).toBeNull();
-    expect(host.querySelector('[data-testid="first-agent-continue"]')).toBeNull();
-  });
-});
-
-describe("H-2 상한은 다시 확인이 주 액션", () => {
-  it("상한 스텝에 다시 확인이 있고 계속은 없다", async () => {
-    vi.mocked(getHostedConnection).mockResolvedValue({
-      connection: wireConnection({ status: "pairing_pending" }),
-      cleanupArtifacts: [],
-    });
-    const host = mountStage();
-    await waitFor(
-      () => host.querySelector("[data-choice-id='codex']") !== null,
-      "cards"
-    );
-    vi.useFakeTimers();
-    vi.setSystemTime(1_000_000);
-    commitCard(host, "codex");
-    await waitFor(
-      () => document.querySelector('[data-testid="hosted-secret-done"]') !== null,
-      "wizard"
-    );
-    act(() => {
-      document
-        .querySelector<HTMLButtonElement>('[data-testid="hosted-secret-done"]')
-        ?.click();
-    });
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
-      "detecting"
-    );
+    click(q(host, "first-agent-continue"));
+    await waitFor(() => q(host, "first-agent-connect-copy") !== null, "copy");
+    click(q(host, "first-agent-connect-copy"));
+    await waitFor(() => q(host, "first-agent-detecting") !== null, "waiting");
     await act(async () => {
       vi.setSystemTime(1_000_000 + DETECT_CAP_MS);
       await vi.advanceTimersByTimeAsync(2_000);
     });
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-cap-exceeded"]') !== null,
-      "cap"
-    );
-    expect(host.textContent).toContain(FIRST_AGENT_CAP_COPY);
-    expect(host.textContent).toContain(FIRST_AGENT_RECHECK_LABEL);
-    expect(host.querySelector('[data-testid="first-agent-recheck"]')).not.toBeNull();
-    expect(host.querySelector('[data-testid="first-agent-continue"]')).toBeNull();
-    expect(host.textContent).not.toContain(FIRST_AGENT_CONNECTED_CLAIM);
+    await waitFor(() => q(host, "first-agent-cap-exceeded") !== null, "cap");
+    expect(q(host, "first-agent-heading")?.textContent).toBe(JOIN_CAP_LINE);
+    expect(q(host, "kometto-guide")?.getAttribute("data-expression")).toBe("flustered");
+    expect(q(host, "first-agent-recheck")?.textContent).toBe("다시 확인");
   });
-});
 
-describe("H-4 오프라인은 라디오를 탭 순서에 둔다", () => {
-  it("fieldset 은 native disabled 가 아니고 사유를 가리킨다", async () => {
-    offlineSlot.current = true;
+  it("서버가 409(킬 스위치)로 거절하면 구독 줄을 걷고 API 키 줄이 맨 위다", async () => {
+    subscriptionOn();
+    vi.mocked(createHostedConnection).mockRejectedValue(
+      new ApiError(409, "subscription agents are disabled on this server")
+    );
     const host = mountStage();
     await waitFor(
-      () => host.querySelector('[data-testid="first-agent-choice"]') !== null,
-      "choice"
+      () => host.querySelector<HTMLInputElement>("#ai-connect-claude")?.checked === true,
+      "preselected"
     );
-    const fieldset = host.querySelector("fieldset");
-    const radio = host.querySelector<HTMLInputElement>("#first-agent-harness-claude-code");
-    expect(fieldset?.hasAttribute("disabled")).toBe(false);
-    expect(fieldset?.getAttribute("aria-disabled")).toBe("true");
-    expect(fieldset?.getAttribute("aria-describedby") ?? "").toContain(
-      "first-agent-offline-reason"
-    );
-    expect(radio?.disabled).toBe(false);
-    expect(radio?.getAttribute("aria-disabled")).toBe("true");
-    expect(radio?.getAttribute("aria-describedby") ?? "").toContain(
-      "first-agent-offline-reason"
-    );
-    const row = host.querySelector<HTMLElement>("[data-choice-id='claude-code']");
-    expect(row?.className).toMatch(/cursor-default/);
-    expect(row?.className).not.toMatch(/hover:bg-surface-hover/);
-    expect(row?.className.split(/\s+/)).not.toContain("opacity-50");
-    const input = host.querySelector<HTMLInputElement>("#first-agent-harness-claude-code");
-    const label = host.querySelector("#first-agent-harness-claude-code")
-      ?.nextElementSibling?.firstElementChild;
-    const detail = host.querySelector("#first-agent-harness-grok-detail");
-    expect(input?.className.split(/\s+/)).toContain("opacity-50");
-    expect(input?.getAttribute("aria-disabled")).toBe("true");
-    expect(label?.className.split(/\s+/)).toContain("text-ink-muted");
-    expect(label?.className.split(/\s+/)).not.toContain("opacity-50");
-    expect(detail).not.toBeNull();
-    expect(detail?.className.split(/\s+/)).not.toContain("opacity-50");
-    const before = row ? getComputedStyle(row).backgroundColor : "";
-    act(() => {
-      row?.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
-      row?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-    });
-    expect(row ? getComputedStyle(row).backgroundColor : "").toBe(before);
-    const cont = host.querySelector('[data-testid="first-agent-continue"]');
-    expect(cont?.getAttribute("aria-disabled")).toBe("true");
-    expect(cont?.className.split(/\s+/)).toContain("opacity-50");
-    expect(cont?.className.split(/\s+/)).toContain("pointer-events-none");
+    click(q(host, "first-agent-continue"));
+    await waitFor(() => q(host, "first-agent-server-off") !== null, "off");
+    expect(rowIds(host)).toEqual(["api-key", "grok"]);
+    expect(q(host, "first-agent-heading")?.textContent).toBe(JOIN_OFF_LINE);
+    expect(q(host, "kometto-guide")?.getAttribute("data-expression")).toBe("flustered");
+    expect(host.textContent).not.toContain("subscription agents are disabled");
   });
-});
 
-describe("M-1 목록 오류는 다시 시도이고 카드는 잠긴다", () => {
-  it("오류 배너에 다시 시도가 있고 카드는 aria-disabled 다", async () => {
-    vi.mocked(listHostedConnections).mockRejectedValue(new Error("boom"));
+  it("핸들 409 는 다음 핸들로 한 번 다시 요청한다", async () => {
+    subscriptionOn();
+    vi.mocked(createHostedConnection)
+      .mockRejectedValueOnce(new ApiError(409, "agent handle already exists"))
+      .mockResolvedValueOnce({
+        connection: wireConnection(),
+        pairingCredential: PRODUCT_SECRET,
+        pairingExpiresAtMs: Date.now() + 600_000,
+      });
     const host = mountStage();
     await waitFor(
-      () => host.querySelector('[data-testid="first-agent-error"]') !== null,
-      "error"
+      () => host.querySelector<HTMLInputElement>("#ai-connect-claude")?.checked === true,
+      "preselected"
     );
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-choice"]') !== null,
-      "choice"
-    );
-    expect(host.querySelector('[data-testid="first-agent-error"]')?.textContent).toContain(
-      FIRST_AGENT_RETRY_LABEL
-    );
-    expect(host.querySelector("fieldset")?.getAttribute("aria-disabled")).toBe("true");
-    expect(host.querySelector("[data-choice-id]")).not.toBeNull();
+    click(q(host, "first-agent-continue"));
+    await waitFor(() => q(host, "first-agent-connect-command") !== null, "command");
+    const handles = vi
+      .mocked(createHostedConnection)
+      .mock.calls.map((call) => (call[1] as { handle: string }).handle);
+    expect(handles).toEqual(["seongjae-claude", "seongjae-claude-2"]);
   });
 });
 
-describe("M-5 OpenAI 호환은 보류 마커", () => {
+// ---- 팀 에이전트·그록봇 -----------------------------------------------------
+
+describe("API 키 줄은 설정 › AI 연결로 (보류 마커)", () => {
   it("설정으로 넘기기 전에 deferred 를 쓰고 done 은 쓰지 않는다", async () => {
     const host = mountStage();
-    await waitFor(
-      () => host.querySelector("#first-agent-harness-openai-compat") !== null,
-      "cards"
-    );
-    commitCard(host, "openai-compat");
+    await waitFor(() => host.querySelector("#ai-connect-api-key") !== null, "rows");
+    pick(host, "api-key");
     await flush();
     expect(window.location.hash).toContain("/settings?section=ai");
     expect(readFirstAgentMarker(WS)).toBe("deferred");
     expect(continued).toBe(1);
+    expect(vi.mocked(createHostedConnection)).not.toHaveBeenCalled();
   });
 });
 
-describe("M-6 pairing_pending 은 자동 통과가 아니다", () => {
-  it("자격만 발급된 연결은 카드를 그대로 둔다", async () => {
-    vi.mocked(listHostedConnections).mockResolvedValue({
-      connections: [wireConnection({ status: "pairing_pending" })],
-    });
-    const host = mountStage();
-    await waitFor(
-      () => host.querySelector("[data-choice-id]") !== null,
-      "cards"
-    );
-    expect(continued).toBe(0);
-    expect(readFirstAgentMarker(WS)).toBeNull();
-  });
-});
+async function grokToDetecting(host: HTMLElement): Promise<void> {
+  await waitFor(() => host.querySelector("#ai-connect-grok") !== null, "rows");
+  pick(host, "grok");
+  await waitFor(
+    () => document.querySelector('[data-testid="hosted-secret-done"]') !== null,
+    "wizard"
+  );
+  expect(q(document, "hosted-pairing-saved")?.getAttribute("data-preset")).toBe("grok");
+  click(document.querySelector('[data-testid="hosted-secret-done"]'));
+  await waitFor(() => q(host, "first-agent-detecting") !== null, "detecting");
+}
 
-describe("자동 통과", () => {
-  it("연결이 하나 있으면 카드를 그리지 않고 완료 마커를 남긴다", async () => {
-    vi.mocked(listHostedConnections).mockResolvedValue({
-      connections: [wireConnection({ status: "detected" })],
-    });
-    const host = mountStage();
-    await waitFor(() => continued === 1, "auto-pass");
-    expect(readFirstAgentMarker(WS)).toBe("done");
-    expect(host.querySelector("[data-choice-id]")).toBeNull();
-  });
-});
-
-describe("N-4 live region 은 컨트롤을 감싸지 않는다", () => {
-  it("감지 status 안에 나중에 가 없고 스테이지는 heading 을 가리킨다", async () => {
-    vi.mocked(getHostedConnection).mockResolvedValue({
-      connection: wireConnection({ status: "pairing_pending" }),
-      cleanupArtifacts: [],
-    });
-    const host = mountStage();
-    await waitFor(
-      () => host.querySelector("[data-choice-id='grok']") !== null,
-      "cards"
-    );
-    commitCard(host, "grok");
-    await waitFor(
-      () => document.querySelector('[data-testid="hosted-secret-done"]') !== null,
-      "wizard"
-    );
-    act(() => {
-      document
-        .querySelector<HTMLButtonElement>('[data-testid="hosted-secret-done"]')
-        ?.click();
-    });
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
-      "detecting"
-    );
-    const status = host.querySelector(
-      '[data-testid="first-agent-detecting"] [role="status"]'
-    );
-    expect(status?.querySelector('[data-testid="first-agent-skip"]')).toBeNull();
-    expect(host.querySelector('[data-testid="first-agent-skip"]')).not.toBeNull();
-    expect(
-      host.querySelector('[data-testid="first-agent-stage"]')?.getAttribute("aria-labelledby")
-    ).toBe("first-agent-heading");
-    expect(
-      host.querySelector('[data-testid="first-agent-stage"]')?.getAttribute("role")
-    ).toBe("region");
-  });
-});
-
-describe("사보타주 ① 1회용 값은 한 번만 (M-7)", () => {
-  it("위저드 응답의 비밀 원소 텍스트가 한 번이다", async () => {
-    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
-    const debug = vi.spyOn(console, "debug").mockImplementation(() => undefined);
-    const host = mountStage();
-    await waitFor(
-      () => host.querySelector("[data-choice-id='claude-code']") !== null,
-      "cards"
-    );
-    commitCard(host, "claude-code");
-    await waitFor(
-      () => document.querySelector('[data-testid="hosted-pairing-card"]') !== null,
-      "one-time"
-    );
-    const secretEls = [...document.querySelectorAll("dd")].filter(
-      (node) => node.textContent === PRODUCT_SECRET
-    );
-    expect(secretEls).toHaveLength(1);
-    expect(countNeedle(document.body.textContent ?? "", PRODUCT_SECRET)).toBe(1);
-    expect(source()).not.toContain(PRODUCT_SECRET);
-    const joined = [log, warn, error, info, debug]
-      .flatMap((spy) => spy.mock.calls)
-      .map((args) => args.map(String).join(" "))
-      .join("\n");
-    expect(joined).not.toContain(PRODUCT_SECRET);
-    log.mockRestore();
-    warn.mockRestore();
-    error.mockRestore();
-    info.mockRestore();
-    debug.mockRestore();
-  });
-});
-
-describe("B-A 발급 뒤 명부가 비면 멘션이 비지 않는다", () => {
-  it("발급 전 명부에 에이전트가 없어도 detected 뒤 이름과 핸드오프가 선다", async () => {
+describe("그록봇 줄은 기존 위저드로 (팀 에이전트, owner_only 아님)", () => {
+  it("위저드 뒤 감지 대기 → 감지되면 이름과 채널 승인 대기와 [계속]", async () => {
     let status = "pairing_pending";
     vi.mocked(getHostedConnection).mockImplementation(async () => ({
       connection: wireConnection({ status }),
       cleanupArtifacts: [],
     }));
     const host = mountStage();
-    await waitFor(
-      () => host.querySelector("[data-choice-id='claude-code']") !== null,
-      "cards"
-    );
-    expect(vi.mocked(fetchRoster).mock.calls.length).toBe(1);
     vi.useFakeTimers();
     vi.setSystemTime(1_000_000);
-    commitCard(host, "claude-code");
-    await waitFor(
-      () => document.querySelector('[data-testid="hosted-secret-done"]') !== null,
-      "wizard"
-    );
-    act(() => {
-      document
-        .querySelector<HTMLButtonElement>('[data-testid="hosted-secret-done"]')
-        ?.click();
-    });
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
-      "detecting"
+    await grokToDetecting(host);
+    expect(q(host, "first-agent-heading")?.textContent).toBe(
+      "그록봇이 oort에 들어오기를 기다리고 있어요."
     );
     await waitFor(() => vi.mocked(fetchRoster).mock.calls.length >= 2, "roster refresh");
     status = "detected";
@@ -1024,57 +842,52 @@ describe("B-A 발급 뒤 명부가 비면 멘션이 비지 않는다", () => {
       vi.setSystemTime(1_000_000 + DETECT_CAP_MS - 1);
       await vi.advanceTimersByTimeAsync(2_000);
     });
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-mention"]') !== null,
-      "mention"
+    await waitFor(() => q(host, "first-agent-mention") !== null, "mention");
+    expect(q(host, "first-agent-mention-name")?.textContent).toBe("김인턴");
+    expect(q(host, "first-agent-heading")?.textContent).toBe("김인턴이 들어왔어요.");
+    expect(host.textContent).toContain(FIRST_AGENT_CHANNEL_PENDING);
+    expect(q(host, "first-agent-mention-action")?.getAttribute("data-href")).toBe(
+      `#/c/${GENERAL_ID}`
     );
-    expect(host.textContent).toContain("김인턴");
-    expect(host.querySelector('[data-testid="first-agent-mention-action"]')).not.toBeNull();
-    expect(host.textContent).not.toContain("첫 멘션은 채널에서 이어갈 수 있습니다.");
-    expect(countNeedle(host.textContent ?? "", "설정 › 연결 › 에이전트 자격")).toBe(1);
+    expect(vi.mocked(createHostedConnection)).not.toHaveBeenCalled();
   });
-});
 
-describe("H-A 다시 확인은 요청과 상태를 남긴다", () => {
-  it("다시 확인을 누르면 get 이 하나 늘고 다시 확인 중이 선다", async () => {
+  it("위저드 응답의 비밀은 DOM 에 한 번, 콘솔에 0번", async () => {
+    const spies = (["log", "warn", "error", "info", "debug"] as const).map((level) =>
+      vi.spyOn(console, level).mockImplementation(() => undefined)
+    );
+    const host = mountStage();
+    await waitFor(() => host.querySelector("#ai-connect-grok") !== null, "rows");
+    pick(host, "grok");
+    await waitFor(
+      () => document.querySelector('[data-testid="hosted-pairing-card"]') !== null,
+      "one-time"
+    );
+    expect(countNeedle(document.body.textContent ?? "", PRODUCT_SECRET)).toBe(1);
+    expect(source()).not.toContain(PRODUCT_SECRET);
+    const joined = spies
+      .flatMap((spy) => spy.mock.calls)
+      .map((args) => args.map(String).join(" "))
+      .join("\n");
+    expect(joined).not.toContain(PRODUCT_SECRET);
+    for (const spy of spies) spy.mockRestore();
+  });
+
+  it("상한 뒤 다시 확인: get 이 하나 늘고 다시 확인 중, 그 뒤 폴링이 이어진다", async () => {
     vi.mocked(getHostedConnection).mockResolvedValue({
       connection: wireConnection({ status: "pairing_pending" }),
       cleanupArtifacts: [],
     });
     const host = mountStage();
-    await waitFor(
-      () => host.querySelector("[data-choice-id='codex']") !== null,
-      "cards"
-    );
     vi.useFakeTimers();
     vi.setSystemTime(1_000_000);
-    commitCard(host, "codex");
-    await waitFor(
-      () => document.querySelector('[data-testid="hosted-secret-done"]') !== null,
-      "wizard"
-    );
-    act(() => {
-      document
-        .querySelector<HTMLButtonElement>('[data-testid="hosted-secret-done"]')
-        ?.click();
-    });
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
-      "detecting"
-    );
+    await grokToDetecting(host);
     await act(async () => {
       vi.setSystemTime(1_000_000 + DETECT_CAP_MS);
       await vi.advanceTimersByTimeAsync(2_000);
     });
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-cap-exceeded"]') !== null,
-      "cap"
-    );
-    expect(host.textContent).toContain(FIRST_AGENT_LEAD_CAP);
-    expect(host.textContent).toContain(FIRST_AGENT_CAP_COPY);
-    expect(FIRST_AGENT_LEAD_CAP).not.toBe(FIRST_AGENT_CAP_COPY);
-    const status = host.querySelector('[data-testid="first-agent-recheck-status"]');
-    expect(status).not.toBeNull();
+    await waitFor(() => q(host, "first-agent-cap-exceeded") !== null, "cap");
+    const status = q(host, "first-agent-recheck-status");
     expect(status?.getAttribute("role")).toBe("status");
     expect(status?.textContent).toBe("");
     const before = vi.mocked(getHostedConnection).mock.calls.length;
@@ -1084,207 +897,34 @@ describe("H-A 다시 확인은 요청과 상태를 남긴다", () => {
     }) => void) | undefined;
     vi.mocked(getHostedConnection).mockImplementation(
       () =>
-        new Promise((resolve) => {
-          settle = resolve;
+        new Promise((resolveFn) => {
+          settle = resolveFn;
         })
     );
-    act(() => {
-      host.querySelector<HTMLButtonElement>('[data-testid="first-agent-recheck"]')
-        ?.click();
-    });
+    click(q(host, "first-agent-recheck"));
     await waitFor(
-      () =>
-        host.querySelector('[data-testid="first-agent-recheck-status"]')
-          ?.textContent === FIRST_AGENT_RECHECKING,
+      () => q(host, "first-agent-recheck-status")?.textContent === FIRST_AGENT_RECHECKING,
       "rechecking"
     );
-    expect(host.textContent).toContain(FIRST_AGENT_RECHECKING);
     expect(vi.mocked(getHostedConnection).mock.calls.length).toBe(before + 1);
-    expect(countNeedle(host.textContent ?? "", FIRST_AGENT_LEAD_CAP)).toBe(1);
     vi.mocked(getHostedConnection).mockResolvedValue({
       connection: wireConnection({ status: "pairing_pending" }),
       cleanupArtifacts: [],
     });
     await act(async () => {
-      settle?.({
-        connection: wireConnection({ status: "pairing_pending" }),
-        cleanupArtifacts: [],
-      });
+      settle?.({ connection: wireConnection({ status: "pairing_pending" }), cleanupArtifacts: [] });
       await Promise.resolve();
     });
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
-      "recheck resumes detecting"
-    );
-    expect(host.querySelector('[data-testid="first-agent-stage"]')?.getAttribute("data-step")).toBe(
-      "detecting"
-    );
-    expect(host.textContent).not.toContain("다음 확인");
-  });
-});
-
-describe("H-H 다시 확인 뒤 폴링이 이어진다", () => {
-  it("다시 확인 뒤 30초면 getHostedConnection 이 더 불린다", async () => {
-    vi.mocked(getHostedConnection).mockResolvedValue({
-      connection: wireConnection({ status: "pairing_pending" }),
-      cleanupArtifacts: [],
-    });
-    const host = mountStage();
-    await waitFor(
-      () => host.querySelector("[data-choice-id='codex']") !== null,
-      "cards"
-    );
-    vi.useFakeTimers();
-    vi.setSystemTime(1_000_000);
-    commitCard(host, "codex");
-    await waitFor(
-      () => document.querySelector('[data-testid="hosted-secret-done"]') !== null,
-      "wizard"
-    );
-    act(() => {
-      document
-        .querySelector<HTMLButtonElement>('[data-testid="hosted-secret-done"]')
-        ?.click();
-    });
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
-      "detecting"
-    );
-    await act(async () => {
-      vi.setSystemTime(1_000_000 + DETECT_CAP_MS);
-      await vi.advanceTimersByTimeAsync(2_000);
-    });
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-cap-exceeded"]') !== null,
-      "cap"
-    );
-    let settle: ((value: {
-      connection: Record<string, unknown>;
-      cleanupArtifacts: unknown[];
-    }) => void) | undefined;
-    vi.mocked(getHostedConnection).mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          settle = resolve;
-        })
-    );
-    act(() => {
-      host.querySelector<HTMLButtonElement>('[data-testid="first-agent-recheck"]')
-        ?.click();
-    });
-    await waitFor(
-      () =>
-        host.querySelector('[data-testid="first-agent-recheck-status"]')
-          ?.textContent === FIRST_AGENT_RECHECKING,
-      "rechecking"
-    );
-    vi.mocked(getHostedConnection).mockResolvedValue({
-      connection: wireConnection({ status: "pairing_pending" }),
-      cleanupArtifacts: [],
-    });
-    await act(async () => {
-      settle?.({
-        connection: wireConnection({ status: "pairing_pending" }),
-        cleanupArtifacts: [],
-      });
-      await Promise.resolve();
-    });
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
-      "detecting after recheck"
-    );
+    await waitFor(() => q(host, "first-agent-detecting") !== null, "detecting again");
     await flush();
     const afterSettle = vi.mocked(getHostedConnection).mock.calls.length;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
-    expect(vi.mocked(getHostedConnection).mock.calls.length).toBeGreaterThan(
-      afterSettle
-    );
-  });
-});
-
-describe("H-C 로딩 막대 호스트는 폭을 갖는다", () => {
-  it("막대 레이어가 아니라 감싼 쪽이 w-full 이다", async () => {
-    poseSlot.current = "loading";
-    const host = mountStage();
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-loading"]') !== null,
-      "loading"
-    );
-    const skel = host.querySelector('[data-testid="skeleton"]');
-    expect(skel?.parentElement?.className).toMatch(/\bw-full\b/);
-    expect(skel?.parentElement?.className).toMatch(/\bmin-w-0\b/);
-    expect(host.querySelector('[data-skel="bars"]')?.className).not.toMatch(
-      /\bw-full\b/
-    );
-    expect(host.querySelectorAll('[data-testid="skeleton-row"]').length).toBe(3);
-  });
-});
-
-describe("H-E 감지 화면은 연결됨을 그리지 않는다", () => {
-  it("pairing_pending 감지 스텝 textContent 에 연결됨이 없다", async () => {
-    poseSlot.current = "detecting";
-    const host = mountStage();
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
-      "detecting"
-    );
-    expect(host.textContent).not.toContain(FIRST_AGENT_CONNECTED_CLAIM);
-    expect(host.textContent).not.toContain("\u{c5f0}\u{acb0}\u{b428}");
-  });
-});
-
-describe("M-D provider 연결도 자동 통과다", () => {
-  it("configured 이면 호스티드 감지 없이 완료한다", async () => {
-    vi.mocked(fetchProviderLink).mockResolvedValue({
-      ...unconfiguredLink,
-      configured: true,
-      source: "database",
-    });
-    const host = mountStage();
-    await waitFor(() => continued === 1, "provider auto-pass");
-    expect(readFirstAgentMarker(WS)).toBe("done");
-    expect(host.querySelector("[data-choice-id]")).toBeNull();
-  });
-});
-
-describe("B-C 잠긴 계속은 보이는 반쪽을 쌍으로 둔다", () => {
-  function assertLockedContinue(host: HTMLElement) {
-    const cont = host.querySelector<HTMLButtonElement>(
-      '[data-testid="first-agent-continue"]'
-    );
-    expect(cont).not.toBeNull();
-    expect(cont?.getAttribute("aria-disabled")).toBe("true");
-    expect(cont?.className.split(/\s+/)).toContain("opacity-50");
-    expect(cont?.className.split(/\s+/)).toContain("pointer-events-none");
-    expect(cont?.className.split(/\s+/)).toContain(
-      "aria-disabled:active:transform-none"
-    );
-  }
-
-  it("선택이 없으면 aria-disabled 와 opacity-50 과 눌림 없음이다", async () => {
-    const host = mountStage();
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-continue"]') !== null,
-      "continue"
-    );
-    assertLockedContinue(host);
+    expect(vi.mocked(getHostedConnection).mock.calls.length).toBeGreaterThan(afterSettle);
   });
 
-  it("오프라인에서도 같은 잠금이다", async () => {
-    offlineSlot.current = true;
-    const host = mountStage();
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-continue"]') !== null,
-      "offline continue"
-    );
-    assertLockedContinue(host);
-  });
-});
-
-describe("H-F 첫 멘션 쓰기는 초안을 심고 컴포저에 초점을 둔다", () => {
-  it("클릭 뒤 localStorage 초안이 @handle 이고 컴포저가 초점이다", async () => {
+  it("[계속]은 초안 @handle 을 심고 컴포저에 초점을 둔다", async () => {
     let status = "pairing_pending";
     vi.mocked(getHostedConnection).mockImplementation(async () => ({
       connection: wireConnection({ status }),
@@ -1294,52 +934,174 @@ describe("H-F 첫 멘션 쓰기는 초안을 심고 컴포저에 초점을 둔�
     composer.id = "composer-input";
     document.body.append(composer);
     const host = mountStage();
-    await waitFor(
-      () => host.querySelector("[data-choice-id='claude-code']") !== null,
-      "cards"
-    );
     vi.useFakeTimers();
     vi.setSystemTime(1_000_000);
-    commitCard(host, "claude-code");
-    await waitFor(
-      () => document.querySelector('[data-testid="hosted-secret-done"]') !== null,
-      "wizard"
-    );
-    act(() => {
-      document
-        .querySelector<HTMLButtonElement>('[data-testid="hosted-secret-done"]')
-        ?.click();
-    });
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
-      "detecting"
-    );
+    await grokToDetecting(host);
     await waitFor(() => vi.mocked(fetchRoster).mock.calls.length >= 2, "roster refresh");
     status = "detected";
     await act(async () => {
       vi.setSystemTime(1_000_000 + DETECT_CAP_MS - 1);
       await vi.advanceTimersByTimeAsync(2_000);
     });
-    await waitFor(
-      () => host.querySelector('[data-testid="first-agent-mention-action"]') !== null,
-      "mention"
-    );
-    const reentry = host.querySelector('[data-testid="first-agent-reentry"]');
-    expect(reentry?.className.split(/\s+/)).toContain("tap-target");
-    expect(reentry?.className.split(/\s+/)).toContain("h-control");
+    await waitFor(() => q(host, "first-agent-mention-action") !== null, "mention");
+    expect(q(host, "first-agent-reentry")?.className.split(/\s+/)).toContain("tap-target");
     expect(readDraft(WS, GENERAL_ID)).toBe("");
-    act(() => {
-      host
-        .querySelector<HTMLButtonElement>('[data-testid="first-agent-mention-action"]')
-        ?.click();
-    });
+    click(q(host, "first-agent-mention-action"));
     const expected = firstMentionDraft(agent.handle);
     expect(readDraft(WS, GENERAL_ID)).toBe(expected);
-    expect(localStorage.getItem(draftKey(WS, GENERAL_ID)) ?? "").toContain(
-      expected
-    );
+    expect(localStorage.getItem(draftKey(WS, GENERAL_ID)) ?? "").toContain(expected);
+    expect(readFirstAgentMarker(WS)).toBe("done");
     applyFirstAgentFocus();
     expect(document.activeElement).toBe(composer);
+    composer.remove();
   });
 });
 
+// ---- 건너뛰기·자동 통과·오프라인 --------------------------------------------
+
+describe("[지금은 건너뛰기] → 코메토 졸림 + 재진입 위치", () => {
+  it("졸림 한 화면을 보이고 [계속]에서 skipped 를 남긴다", async () => {
+    const host = mountStage();
+    await waitFor(() => q(host, "first-agent-skip") !== null, "skip");
+    expect(q(host, "first-agent-skip")?.textContent).toBe("지금은 건너뛰기");
+    click(q(host, "first-agent-skip"));
+    await waitFor(() => q(host, "first-agent-skipped") !== null, "skipped");
+    expect(q(host, "first-agent-heading")?.textContent).toBe(AI_CONNECT_SKIPPED_LINE);
+    expect(q(host, "kometto-guide")?.getAttribute("data-expression")).toBe("sleepy");
+    expect(readFirstAgentMarker(WS)).toBeNull();
+    expect(continued).toBe(0);
+    click(q(host, "first-agent-skipped-continue"));
+    expect(readFirstAgentMarker(WS)).toBe("skipped");
+    expect(continued).toBe(1);
+  });
+
+  it("재진입 문장이 목록 아래에 있다", async () => {
+    const host = mountStage();
+    await waitFor(() => q(host, "first-agent-reentry-line") !== null, "reentry");
+    expect(q(host, "first-agent-reentry-line")?.textContent).toContain("설정 › AI 연결");
+  });
+});
+
+describe("자동 통과", () => {
+  it("연결이 하나 있으면 목록을 그리지 않고 완료 마커를 남긴다", async () => {
+    vi.mocked(listHostedConnections).mockResolvedValue({
+      connections: [wireConnection({ status: "detected" })],
+    });
+    const host = mountStage();
+    await waitFor(() => continued === 1, "auto-pass");
+    expect(readFirstAgentMarker(WS)).toBe("done");
+    expect(q(host, "ai-connect-row")).toBeNull();
+  });
+
+  it("pairing_pending 은 자동 통과가 아니다", async () => {
+    vi.mocked(listHostedConnections).mockResolvedValue({
+      connections: [wireConnection({ status: "pairing_pending" })],
+    });
+    const host = mountStage();
+    await waitFor(() => rowIds(host).length > 0, "rows");
+    expect(continued).toBe(0);
+  });
+
+  it("provider 가 붙어 있어도 자동 통과다", async () => {
+    vi.mocked(fetchProviderLink).mockResolvedValue({
+      ...unconfiguredLink,
+      configured: true,
+      source: "database",
+    });
+    mountStage();
+    await waitFor(() => continued === 1, "provider auto-pass");
+    expect(readFirstAgentMarker(WS)).toBe("done");
+  });
+});
+
+describe("오프라인·목록 오류는 줄을 잠그고 주 행동을 잠근다", () => {
+  function assertLockedContinue(host: HTMLElement) {
+    const cont = q(host, "first-agent-continue");
+    expect(cont?.getAttribute("aria-disabled")).toBe("true");
+    expect(cont?.className.split(/\s+/)).toContain("opacity-50");
+    expect(cont?.className.split(/\s+/)).toContain("pointer-events-none");
+  }
+
+  it("선택이 없으면 잠긴다", async () => {
+    const host = mountStage();
+    await waitFor(() => q(host, "first-agent-continue") !== null, "continue");
+    assertLockedContinue(host);
+  });
+
+  it("오프라인이면 사유가 목록을 설명하고 줄은 고를 수 없다", async () => {
+    offlineSlot.current = true;
+    const host = mountStage();
+    await waitFor(() => q(host, "ai-connect-list") !== null, "list");
+    assertLockedContinue(host);
+    expect(q(host, "ai-connect-list")?.getAttribute("aria-describedby")).toBe(
+      "first-agent-offline-reason"
+    );
+    expect(host.querySelector<HTMLInputElement>("#ai-connect-api-key")?.disabled).toBe(true);
+  });
+
+  it("목록 오류는 다시 시도 배너와 당황 표정이다", async () => {
+    vi.mocked(listHostedConnections).mockRejectedValue(new Error("boom"));
+    const host = mountStage();
+    await waitFor(() => q(host, "first-agent-error") !== null, "error");
+    expect(q(host, "first-agent-error")?.textContent).toContain(FIRST_AGENT_RETRY_LABEL);
+    expect(q(host, "kometto-guide")?.getAttribute("data-expression")).toBe("flustered");
+  });
+});
+
+describe("틀 (ADR-0193 D10·D11)", () => {
+  it("새벽하늘 바닥 위 코메토 머리 + 진행 점(claim 경로 4단계 중 4단계)", async () => {
+    const host = mountStage();
+    await waitFor(
+      () => q(host, "onboarding-dots-label")?.textContent === "4단계 중 4단계",
+      "dots"
+    );
+    expect(q(host, "onboarding-frame")).not.toBeNull();
+    expect(q(host, "kometto-face")?.getAttribute("data-size")).toBe("head");
+    expect(q(host, "onboarding-dots-label")?.textContent).toBe("4단계 중 4단계");
+    expect(q(host, "first-agent-stage")?.getAttribute("aria-labelledby")).toBe(
+      "first-agent-heading"
+    );
+    expect(q(host, "first-agent-heading")?.tagName).toBe("H1");
+    expect(host.querySelector("#first-agent-heading")).toBe(q(host, "first-agent-heading"));
+  });
+
+  it("모든 캡처 자세가 한 문장과 함께 선다", async () => {
+    for (const pose of FIRST_AGENT_CAPTURE_POSES) {
+      poseSlot.current = pose;
+      const host = mountStage();
+      await waitFor(() => q(host, "first-agent-stage") !== null, pose);
+      expect((q(host, "first-agent-heading")?.textContent ?? "").length, pose).toBeGreaterThan(0);
+      act(() => mountedRoot?.unmount());
+      mountedRoot = null;
+      host.remove();
+    }
+  });
+});
+
+describe("소스 규율", () => {
+  it("위저드·1회용 카드·첫 멘션 조각을 복제하지 않고 틀을 쓴다", () => {
+    const text = source();
+    expect(text).toContain("HostedAgentWizard");
+    expect(text).toContain('entry="settings"');
+    expect(text).toContain("OneTimeSecretCard");
+    expect(text).toContain("firstMentionDraft");
+    expect(text).toContain("previewHintedAgent");
+    expect(text).toContain("KomettoGuide");
+    expect(text).toContain("OnboardingFrame");
+    expect(text).toContain("OnboardingSlideTransition");
+    expect(text).not.toMatch(/function OneTimeSecretCard/);
+    expect(text).not.toMatch(/function HostedAgentWizard/);
+    expect(text).not.toContain(PRODUCT_SECRET);
+  });
+
+  it("연결 값을 저장소·로그로 보내지 않는다", () => {
+    for (const file of [
+      "src/features/welcome/FirstAgentStage.tsx",
+      "src/features/welcome/SubscriptionConnectBlock.tsx",
+      "src/features/welcome/AiConnectList.tsx",
+    ]) {
+      const text = readFileSync(resolve(process.cwd(), file), "utf8");
+      expect(text, file).not.toMatch(/localStorage|sessionStorage|console\./);
+    }
+  });
+});

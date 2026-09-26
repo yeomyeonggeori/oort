@@ -34,6 +34,7 @@ const WORKSPACE: WorkspaceIdentity = {
   roleLabels: {},
   welcomeAgentMemberId: null,
   welcomePrompt: "",
+  subscriptionAgentsEnabled: false,
 };
 
 describe("renameWorkspace", () => {
@@ -102,5 +103,39 @@ describe("fetchWorkspace", () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
       `https://oort.test/v1/workspaces/${WS}`
     );
+  });
+});
+
+describe("fetchWorkspace · subscriptionAgentsEnabled (ADR-0193 D6, #2814)", () => {
+  async function fetchWith(extra: Record<string, unknown>) {
+    installHost();
+    const { subscriptionAgentsEnabled: _omit, ...rest } = WORKSPACE;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ workspace: { ...rest, ...extra } }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          })
+      )
+    );
+    return fetchWorkspace(WS);
+  }
+
+  it("is true only when the server says true", async () => {
+    await expect(fetchWith({ subscriptionAgentsEnabled: true })).resolves.toMatchObject({
+      subscriptionAgentsEnabled: true,
+    });
+  });
+
+  it("reads an absent field (a server before #2815) as off", async () => {
+    await expect(fetchWith({})).resolves.toMatchObject({ subscriptionAgentsEnabled: false });
+  });
+
+  it("reads a non-boolean as off", async () => {
+    await expect(fetchWith({ subscriptionAgentsEnabled: "true" })).resolves.toMatchObject({
+      subscriptionAgentsEnabled: false,
+    });
   });
 });
