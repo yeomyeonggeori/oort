@@ -80,14 +80,19 @@ import type {ReactionChip} from '@momo/core/features/timeline/reactions';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
+  ActivityIndicator,
+  Image,
   Keyboard,
   Pressable,
   StyleSheet,
   Text,
   View,
+  type StyleProp,
+  type TextStyle,
 } from 'react-native';
 import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
-import {useStyles} from '../../design/theme';
+import {usePalette, useStyles} from '../../design/theme';
+import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
 import {COPY_RECEIPT_MS, copyText} from './copy';
 import {MessageBody, bodyAffordances, openLink} from './MessageBody';
 import {MessageActionSheet} from './MessageActionSheet';
@@ -255,6 +260,14 @@ const AUTHOR_HIT_SLOP = {
   left: AUTHOR_SLOP,
   right: AUTHOR_SLOP,
 } as const;
+
+/**
+ * `#rrggbb` 에 알파 두 자리를 붙인다. 팔레트 값은 전부 여섯 자리 hex 이고, 이미
+ * 알파가 있는 값(여덟 자리)은 그대로 둔다 — 겹친 투명도를 지어내지 않는다.
+ */
+function withAlpha(hex: string, alpha: string): string {
+  return /^#[0-9a-f]{6}$/i.test(hex) ? `${hex}${alpha}` : hex;
+}
 
 /** 40 얼굴을 44 로 만드는 슬롭 — 도출한다(감사 M-14). */
 const AVATAR_SLOP = slopTo(CONV.avatar);
@@ -687,6 +700,129 @@ function ReplyMarker({
 
 // ---- agent + artifact cards -------------------------------------------------
 
+/**
+ * 에이전트 답 카드의 틀 — 시안 A `.a-card` (DS2-4 #2716).
+ *
+ *   background: linear-gradient(surface, surface) padding-box,
+ *               linear-gradient(140deg, agent 55%, accent 35% 70%, line) border-box;
+ *   border: 1.5px solid transparent; border-radius: 20px; box-shadow: sh1
+ *
+ * RN 에는 `padding-box`/`border-box` 로 가르는 배경이 없어서 **두 겹**으로 옮긴다:
+ * 바깥 겹이 그라데이션을 칠하고 1.5 만큼 안쪽을 비우면, 안쪽 겹(surface)이 그 위를
+ * 덮어 테두리만 남는다. 그라데이션은 ShellChrome 이 이미 쓰는
+ * `experimental_backgroundImage` 다 — 새 의존이 없다.
+ *
+ * 흰 카드 + 사람 쪽 신호색으로 번지는 가장자리가 「에이전트가 쓴 것」의 표지다. 사람
+ * 메시지는 카드가 아니다(시안 `.a-m p`).
+ */
+function AgentCardFrame({
+  testID,
+  children,
+}: {
+  testID: string;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <View style={styles.cardFrame} testID={testID}>
+      <View style={styles.card}>{children}</View>
+    </View>
+  );
+}
+
+/** 단계의 네 상태 — 완료·진행·실패, 그리고 결과가 없는(건너뜀·모름) 칸. */
+export type StepState = 'ok' | 'run' | 'fail' | 'idle';
+
+/** 에이전트 턴 상태 → 단계 표지. 멈춤·취소는 실패가 아니다(ADR-0132). */
+export function stepStateForTurn(status: string): StepState {
+  if (status === 'done') return 'ok';
+  if (status === 'error') return 'fail';
+  if (status === 'queued' || status === 'thinking' || status === 'streaming') return 'run';
+  return 'idle';
+}
+
+/** 완료 리포트 게이트 결과 → 단계 표지. 안 돌린 것을 붉게 칠하지 않는다(ADR-0132). */
+export function stepStateForCheck(outcome: CompletionCheckOutcome): StepState {
+  if (outcome === 'pass') return 'ok';
+  if (outcome === 'fail') return 'fail';
+  if (outcome === 'pending') return 'run';
+  return 'idle';
+}
+
+/**
+ * 단계 한 줄의 표지 — 시안 `.a-step .st{width:20px;height:20px;border-radius:50%}`.
+ * 완료 = ok-soft 원 + ✓(`.st.ok`), 진행 = 에이전트색 돌기(`.st.run .spin`),
+ * 실패 = danger-soft 원 + ✕, 결과 없음 = 선 원. 모양이 색과 **함께** 상태를 나른다.
+ */
+function StepMark({state}: {state: StepState}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const palette = usePalette();
+  if (state === 'run') {
+    return (
+      <View style={styles.stepMark} testID="step-mark-run">
+        <ActivityIndicator size="small" color={palette.agent} style={styles.stepSpin} />
+      </View>
+    );
+  }
+  return (
+    <View
+      style={[
+        styles.stepMark,
+        state === 'ok' && styles.stepMarkOk,
+        state === 'fail' && styles.stepMarkFail,
+        state === 'idle' && styles.stepMarkIdle,
+      ]}
+      testID={`step-mark-${state}`}>
+      {state === 'idle' ? null : (
+        <Image
+          source={state === 'ok' ? CONV_ICONS.check : CONV_ICONS.cross}
+          style={[
+            styles.stepGlyph,
+            {tintColor: state === 'ok' ? palette.ok : palette.danger},
+          ]}
+        />
+      )}
+    </View>
+  );
+}
+
+/** 시안 `.a-step` — 표지 · 이름 · 오른쪽 메타. 진행 중인 줄은 굵고 에이전트색이다. */
+function StepRow({
+  state,
+  label,
+  meta,
+  metaStyle,
+  metaAccessibilityLabel,
+  testID,
+}: {
+  state: StepState;
+  label: string;
+  meta?: string;
+  metaStyle?: StyleProp<TextStyle>;
+  metaAccessibilityLabel?: string;
+  testID?: string;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <View style={styles.step} testID={testID ?? `step-${state}`}>
+      <StepMark state={state} />
+      <Text
+        style={[styles.stepLabel, state === 'run' && styles.stepLabelRun]}
+        numberOfLines={2}>
+        {label}
+      </Text>
+      {meta !== undefined ? (
+        <Text
+          style={[styles.stepMeta, metaStyle]}
+          numberOfLines={2}
+          accessibilityLabel={metaAccessibilityLabel}>
+          {meta}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 function StatusChip({label, tone}: {label: string; tone: 'ok' | 'warn' | 'danger' | 'muted'}) {
   const styles = useStyles(buildStyles);
   return (
@@ -804,7 +940,7 @@ function LoginHandoffCardView({
   const settled = card.phase !== 'waiting';
   const underControl = card.control !== null && card.control.endedAtMs === null;
   return (
-    <View style={styles.card} testID="agent-card">
+    <AgentCardFrame testID="agent-card">
       <View style={styles.cardHead}>
         <Text style={styles.cardTitle} numberOfLines={2}>
           {card.title}
@@ -882,7 +1018,7 @@ function LoginHandoffCardView({
           {LOGIN_HANDOFF_ELSEWHERE_COPY}
         </Text>
       ) : null}
-    </View>
+    </AgentCardFrame>
   );
 }
 
@@ -923,7 +1059,7 @@ function CompletionReportCardView({
     omittedParts.push(`게이트 ${card.omitted.checks}개 더`);
   const omitted = omittedParts.join(' · ');
   return (
-    <View style={styles.card} testID="agent-card">
+    <AgentCardFrame testID="agent-card">
       <View style={styles.cardHead}>
         <Text style={styles.cardTitle} numberOfLines={2}>
           {card.title}
@@ -970,29 +1106,27 @@ function CompletionReportCardView({
           style={styles.gateGroup}
           testID="completion-gate-row">
           <Text style={styles.gateSurface}>{row.surface}</Text>
-          <View style={styles.detailRows}>
-            {/* 겹친 라벨의 실패가 통과 아래로 밀리지 않게 코어가 순서를 준다 —
-                웹 셀이 겹친 칸을 최악 톤 먼저로 쌓는 것과 같다(폰 패리티). */}
+          {/* 시안 `.a-steps` — 게이트 하나가 단계 한 줄이다(DS2-4). 표지가 결과를
+              모양과 색으로 함께 말하고(완료 ✓ · 진행 돌기 · 실패 ✕ · 건너뜀 빈 원),
+              오른쪽 `.mt` 가 세부 또는 결과 낱말이다. 겹친 라벨의 실패가 통과 아래로
+              밀리지 않게 코어가 순서를 준다(폰 패리티). */}
+          <View style={styles.steps}>
             {completionRowChecks(row).map((check, index) => (
-              <View key={index} style={styles.detailRow}>
-                <Text style={styles.detailLabel}>{check.label}</Text>
-                {/* 세부가 있으면 그것이, 없으면 결과 낱말이 선다. 색은 결과가 진다.
-                    세부가 낱말을 대신할 때는 보조기술을 위해 결과 낱말을 함께 읽힌다
-                    (L3) — 「896 통과」만 소리로는 통과인지 실패인지 모른다. */}
-                <Text
-                  style={[
-                    styles.detailValue,
-                    toneStyle[COMPLETION_CHECK_TONE[check.outcome]],
-                  ]}
-                  numberOfLines={2}
-                  accessibilityLabel={
-                    check.detail !== undefined
-                      ? `${check.detail} ${COMPLETION_CHECK_OUTCOME_LABEL[check.outcome]}`
-                      : undefined
-                  }>
-                  {check.detail ?? COMPLETION_CHECK_OUTCOME_LABEL[check.outcome]}
-                </Text>
-              </View>
+              // 세부가 있으면 그것이, 없으면 결과 낱말이 선다. 색은 결과가 진다.
+              // 세부가 낱말을 대신할 때는 보조기술을 위해 결과 낱말을 함께 읽힌다
+              // (L3) — 「896 통과」만 소리로는 통과인지 실패인지 모른다.
+              <StepRow
+                key={index}
+                state={stepStateForCheck(check.outcome)}
+                label={check.label}
+                meta={check.detail ?? COMPLETION_CHECK_OUTCOME_LABEL[check.outcome]}
+                metaStyle={toneStyle[COMPLETION_CHECK_TONE[check.outcome]]}
+                metaAccessibilityLabel={
+                  check.detail !== undefined
+                    ? `${check.detail} ${COMPLETION_CHECK_OUTCOME_LABEL[check.outcome]}`
+                    : undefined
+                }
+              />
             ))}
           </View>
         </View>
@@ -1008,7 +1142,7 @@ function CompletionReportCardView({
           {omitted}
         </Text>
       ) : null}
-    </View>
+    </AgentCardFrame>
   );
 }
 
@@ -1137,7 +1271,7 @@ function ActionResultCardView({
       : null;
   const elsewhere = actionResultElsewhereCopy(card);
   return (
-    <View style={styles.card} testID="agent-card">
+    <AgentCardFrame testID="agent-card">
       <View style={styles.cardHead}>
         <Text style={styles.cardTitle} numberOfLines={2}>
           {card.title}
@@ -1195,7 +1329,7 @@ function ActionResultCardView({
           {elsewhere}
         </Sentence>
       ) : null}
-    </View>
+    </AgentCardFrame>
   );
 }
 
@@ -1358,7 +1492,7 @@ function AgentCard({
       approvalsProvided,
     });
     return (
-      <View style={styles.card} testID="agent-card">
+      <AgentCardFrame testID="agent-card">
         <View style={styles.cardHead}>
           <Text style={styles.cardTitle} numberOfLines={2}>
             {card.title}
@@ -1460,10 +1594,12 @@ function AgentCard({
               onApprovalSettled?.(approval.approvalId, outcome)
             }
             testIDPrefix={`card-approval-${approval.approvalId}`}
+            // 시안 `.a-acts` 알약 행동(주 = 잉크, 보조 = surface2).
+            shape="pill"
           />
         ) : null}
         </ApprovalFooter>
-      </View>
+      </AgentCardFrame>
     );
   }
 
@@ -1500,13 +1636,26 @@ function AgentCard({
 
   const cost = card.kind === 'turn' ? card.cost : null;
   return (
-    <View style={styles.card} testID="agent-card">
-      <View style={styles.cardHead}>
-        <Text style={styles.cardTitle} numberOfLines={2}>
-          {card.kind === 'tool' ? frameSentence(card.frame) : card.title}
-        </Text>
-        <StatusChip label={TURN_STATUS_LABEL[card.status]} tone={toneForTurn(card.status)} />
-      </View>
+    <AgentCardFrame testID="agent-card">
+      {card.kind === 'tool' ? (
+        // 도구 실행은 에이전트 일의 **한 단계**다 — 시안 `.a-steps` 한 줄로 선다:
+        // 표지(완료·진행·실패) · 무엇을 했나 · 상태 낱말(`.mt`). 한 턴의 여러 도구를
+        // 한 카드로 모으는 것은 타임라인 묶음의 일이라 이 PR 밖이다(남은 일).
+        <View style={styles.steps} testID="agent-card-steps">
+          <StepRow
+            state={stepStateForTurn(card.status)}
+            label={frameSentence(card.frame)}
+            meta={TURN_STATUS_LABEL[card.status]}
+          />
+        </View>
+      ) : (
+        <View style={styles.cardHead}>
+          <Text style={styles.cardTitle} numberOfLines={2}>
+            {card.title}
+          </Text>
+          <StatusChip label={TURN_STATUS_LABEL[card.status]} tone={toneForTurn(card.status)} />
+        </View>
+      )}
       {card.errorNote ? (
         <Text style={[styles.cardNote, styles.cardNoteDanger]}>{card.errorNote}</Text>
       ) : null}
@@ -1556,7 +1705,7 @@ function AgentCard({
           ) : null}
         </View>
       ) : null}
-    </View>
+    </AgentCardFrame>
   );
 }
 
@@ -3557,15 +3706,56 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   chipCount: {fontSize: CONV.reactText, color: color.textMuted, fontWeight: '600'},
   chipCountMine: {color: color.accentText},
 
+  /**
+   * `.a-card` 의 바깥 겹 — 그라데이션 테두리와 sh1 (`AgentCardFrame` 머리말).
+   * `color-mix(in srgb, agent 55%, transparent)` → 알파 0x8C, accent 35% → 0x59.
+   */
+  cardFrame: {
+    marginTop: space.sm,
+    padding: CONV.cardBorder,
+    borderRadius: CONV.cardRadius,
+    experimental_backgroundImage: `linear-gradient(140deg, ${withAlpha(color.agent, '8C')} 0%, ${withAlpha(
+      color.accent,
+      '59',
+    )} 70%, ${color.border} 100%)`,
+    boxShadow: color.elevationRest,
+  },
+  /** `.a-card{padding:14px;background:var(--surface)}` — 안쪽 겹. */
   card: {
-    marginTop: space.xs,
-    padding: space.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: color.border,
+    padding: CONV.cardPad,
+    borderRadius: CONV.cardRadius - CONV.cardBorder,
     backgroundColor: color.surface,
     gap: space.xs,
   },
+  /** `.a-steps{margin:12px 0;display:flex;flex-direction:column;gap:9px;padding:11px 12px;background:var(--surface2);border-radius:14px}`. */
+  steps: {
+    marginVertical: CONV.stepsGapY - space.xs,
+    gap: CONV.stepsGap,
+    paddingVertical: CONV.stepsPadY,
+    paddingHorizontal: CONV.stepsPadX,
+    borderRadius: CONV.stepsRadius,
+    backgroundColor: color.surfaceMuted,
+  },
+  /** `.a-step{display:flex;align-items:center;gap:9px;font-size:13.5px}`. */
+  step: {flexDirection: 'row', alignItems: 'center', gap: CONV.stepsGap},
+  stepLabel: {flexShrink: 1, fontSize: CONV.stepText, color: color.text},
+  /** `.a-step.run{font-weight:600;color:var(--agent)}`. */
+  stepLabelRun: {fontWeight: '600', color: color.agent},
+  /** `.a-step .mt{margin-left:auto;font-size:12px;color:var(--ink2)}`. */
+  stepMeta: {marginLeft: 'auto', flexShrink: 1, fontSize: font.meta, color: color.textMuted, textAlign: 'right'},
+  stepMark: {
+    width: CONV.stepMark,
+    height: CONV.stepMark,
+    borderRadius: CONV.stepMark / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** `.a-step .st.ok{background:var(--okSoft);color:var(--ok)}`. */
+  stepMarkOk: {backgroundColor: color.okSurface},
+  stepMarkFail: {backgroundColor: color.dangerSurface},
+  stepMarkIdle: {borderWidth: 1.5, borderColor: color.textFaint},
+  stepGlyph: {width: CONV_ICON_SIZE.check, height: CONV_ICON_SIZE.check},
+  stepSpin: {transform: [{scale: 0.8}]},
   cardHead: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -3573,7 +3763,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     gap: space.sm,
   },
   cardTitle: {flex: 1, fontSize: font.label, fontWeight: '700', color: color.text},
-  cardBody: {fontSize: font.label, color: color.text, lineHeight: 19},
+  /** `.a-card .sum{font-size:15px;line-height:1.5}`. */
+  cardBody: {fontSize: CONV.cardSum, color: color.text, lineHeight: CONV.cardSumLine},
   cardNote: {fontSize: font.meta, color: color.textMuted, lineHeight: line.meta},
   cardNoteDanger: {color: color.danger},
   cardMeta: {fontSize: font.meta, color: color.textFaint},

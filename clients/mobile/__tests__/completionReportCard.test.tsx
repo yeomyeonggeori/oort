@@ -8,6 +8,10 @@ import {
   WORKED_ELAPSED_LABEL,
 } from '@momo/core/features/timeline/completionReportCard';
 import type {Message} from '@momo/core/lib/api';
+import {makeDirectory} from '@momo/core/features/workspace/directory';
+import {render} from '@testing-library/react-native';
+import React from 'react';
+import {MessageRow} from '../src/features/conversation/MessageRow';
 
 // =============================================================================
 // 작업 완료 리포트 카드의 **폰 계약** (UXC-A).
@@ -139,12 +143,51 @@ describe('폰이 코어의 낱말과 색을 다시 짓지 않는다', () => {
   it('세부가 결과 낱말을 대신할 때 결과 낱말을 보조기술에 함께 읽힌다 (L3)', () => {
     // 「896 통과」만 화면에 서면 소리로는 통과인지 실패인지 모른다 — 웹의 sr-only
     // 짝이다. 세부가 있을 때 accessibilityLabel 로 결과 낱말을 붙인다.
-    const view = MESSAGE_ROW_CODE.slice(
-      MESSAGE_ROW_CODE.indexOf('function CompletionReportCardView('),
-      MESSAGE_ROW_CODE.indexOf('function AgentCard('),
+    //
+    // DS2-4 에서 게이트 칸이 단계 줄(`StepRow`)이 되며 소스 문자열 단정을 **그려진
+    // 트리** 단정으로 바꿨다 — 칸을 다시 짜도 이 약속이 따라오는지 본다.
+    const view = render(
+      <MessageRow
+        message={reportMessage()}
+        startsGroup
+        directory={makeDirectory([])}
+        chips={[]}
+        nowMs={1_760_000_000_000}
+      />,
     );
-    expect(view).toContain('accessibilityLabel');
-    expect(view).toContain('COMPLETION_CHECK_OUTCOME_LABEL[check.outcome]');
+    const detail = view.getByText('896 통과');
+    expect(detail.props.accessibilityLabel).toBe('896 통과 통과');
+    // 그리고 그 줄은 완료 표지를 든다(모양이 색과 함께 결과를 나른다).
+    expect(view.getByTestId('step-mark-ok')).toBeTruthy();
+  });
+
+  it('단계 표지가 게이트 결과를 따른다 — 실패 ✕ · 진행 돌기 · 건너뜀 빈 원 (DS2-4)', () => {
+    const view = render(
+      <MessageRow
+        message={reportMessage({
+          gates: [
+            {
+              surface: '폰',
+              checks: [
+                {label: '빌드', outcome: 'pass'},
+                {label: '시험', outcome: 'fail'},
+                {label: '캡처', outcome: 'pending'},
+                {label: '실기기', outcome: 'skip'},
+              ],
+            },
+          ],
+        })}
+        startsGroup
+        directory={makeDirectory([])}
+        chips={[]}
+        nowMs={1_760_000_000_000}
+      />,
+    );
+    expect(view.getAllByTestId('step-mark-ok')).toHaveLength(1);
+    expect(view.getAllByTestId('step-mark-fail')).toHaveLength(1);
+    expect(view.getAllByTestId('step-mark-run')).toHaveLength(1);
+    // 건너뜀은 실패가 아니다(ADR-0132) — 빈 원이지 ✕ 가 아니다.
+    expect(view.getAllByTestId('step-mark-idle')).toHaveLength(1);
   });
 
   it('상한에 걸려 안 그린 것을 「N개 더」로 정직 표기한다 (M3)', () => {

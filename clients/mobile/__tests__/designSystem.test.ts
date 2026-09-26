@@ -495,7 +495,6 @@ describe('타이포 스윕 — 스케일 밖 글자와 줄 상자가 늘지 않�
     'design/atoms.tsx': 3,
     'features/conversation/MessageActionSheet.tsx': 2,
     'features/conversation/MessageEditorSheet.tsx': 2,
-    'features/conversation/MessageRow.tsx': 1,
     'features/conversation/TypingBar.tsx': 1,
     'screens/AgentDetailScreen.tsx': 2,
     'screens/ConnectScreen.tsx': 1,
