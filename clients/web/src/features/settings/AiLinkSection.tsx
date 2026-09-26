@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
+import { ChevronRight, Plus } from "lucide-react";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { cn } from "@/design/lib/cn";
@@ -142,6 +142,12 @@ function availabilityLabel(availability: string): string {
   return known[availability] ?? availability;
 }
 
+/** 줄의 날짜(시안 「9월 27일」). 전체 시각은 곁판의 「마지막 저장」이 든다. */
+function shortDate(ms: number): string {
+  const date = new Date(ms);
+  return `${date.getMonth() + 1}월 ${date.getDate()}일`;
+}
+
 /** 로고 칸 글자: 주소 이름의 첫 글자. 회사 로고 자산은 쓰지 않는다. */
 function markFor(label: string): string {
   const first = label.trim().charAt(0);
@@ -209,6 +215,7 @@ function TeamBoard({ offline }: { offline: boolean }) {
   // is numbered by the SAVED order. When the two disagree the table says so
   // rather than letting one screen carry two meanings of "3차".
   const [chainPending, setChainPending] = useState(false);
+  const [chainOpen, setChainOpen] = useState(false);
 
   const moreRef = useRef<HTMLButtonElement>(null);
   const addRef = useRef<HTMLButtonElement>(null);
@@ -327,11 +334,17 @@ function TeamBoard({ offline }: { offline: boolean }) {
 
   const link = query.data;
   const configured = link?.configured === true;
+  // 줄이 서는 연결: 이 서버에 저장된 것, 또는 서버 환경값이 실제 provider 를
+  // 가리키는 것. 환경값 연결을 「비어 있음」으로 그리면 거짓이다(팀 에이전트는
+  // 그것으로 대답하고 있다). 모의 모드만 비어 있음이다.
+  const hasRow = link
+    ? configured || (link.keyConfigured && link.availability !== "mock")
+    : false;
   const legacy = link ? credentialKind(link) === OAUTH_CREDENTIAL_KIND : false;
   const operator = query.isSuccess;
 
   const teamAction =
-    operator && link && !configured ? (
+    operator && link && !hasRow ? (
       <Button
         ref={addRef}
         type="button"
@@ -379,7 +392,7 @@ function TeamBoard({ offline }: { offline: boolean }) {
             testId="ai-link-error"
           />
         )
-      ) : link && !configured ? (
+      ) : link && !hasRow ? (
         <AiLineRow testId="ai-link-empty" last>
           <span>아직 팀 연결이 없어요. 팀 에이전트가 대답하려면 API 키가 하나 필요해요.</span>
           <span className="text-meta text-ink-muted">
@@ -408,6 +421,11 @@ function TeamBoard({ offline }: { offline: boolean }) {
               <>
                 <AiSource>내부용</AiSource>새로 만들 수 없음
               </>
+            ) : !configured ? (
+              <>
+                <AiSource>API 키</AiSource>
+                {providerSourceLabel(link.source)}
+              </>
             ) : (
               <>
                 <AiSource>API 키</AiSource>
@@ -417,7 +435,7 @@ function TeamBoard({ offline }: { offline: boolean }) {
                 {offline
                   ? " · 마지막으로 받은 값"
                   : link.updatedAtMs
-                    ? ` · ${formatMoment(link.updatedAtMs)}`
+                    ? ` · ${shortDate(link.updatedAtMs)}`
                     : ` · ${providerSourceLabel(link.source)}`}
               </>
             )
@@ -446,12 +464,33 @@ function TeamBoard({ offline }: { offline: boolean }) {
           exists, exactly as save/unlink do for the singleton. Same clear. 대체
           순서는 운영자 도구라 운영자에게만 선다(403 은 위 안내가 말한다). */}
       {operator && (
-        <div className="pt-4">
-          <AiLinkChain
-            offline={offline}
-            onSaved={() => setProbe(null)}
-            onPendingChange={setChainPending}
-          />
+        <div className="flex min-w-0 flex-col gap-3 pt-3">
+          {/* 대체 순서(ADR-0135 D1)는 지금 서버가 받는 운영자 도구라 남긴다. 시안의
+              줄 목록 사이에 편집기를 펼쳐 두면 페이지가 그것으로 가득 차므로 접어
+              둔다(#2880 이 여러 키를 줄로 올리면 이 자리가 그 줄들이 된다). */}
+          <button
+            type="button"
+            aria-expanded={chainOpen}
+            aria-controls="ai-team-chain"
+            onClick={() => setChainOpen((open) => !open)}
+            className="tap-target press inline-flex w-max items-center gap-2 rounded-md px-2 py-1 text-meta font-semibold text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
+            data-testid="ai-team-chain-toggle"
+          >
+            <ChevronRight
+              className={cn("size-4 shrink-0 transition-transform", chainOpen && "rotate-90")}
+              aria-hidden="true"
+            />
+            예비 provider와 시도 순서
+          </button>
+          {chainOpen && (
+            <div id="ai-team-chain" className="min-w-0">
+              <AiLinkChain
+                offline={offline}
+                onSaved={() => setProbe(null)}
+                onPendingChange={setChainPending}
+              />
+            </div>
+          )}
         </div>
       )}
     </AiSection>
@@ -460,7 +499,7 @@ function TeamBoard({ offline }: { offline: boolean }) {
   return (
     <div
       className="ai-board"
-      data-aside-open={asideOpen && link ? "" : undefined}
+      data-aside-open={asideOpen && link && (hasRow || editing) ? "" : undefined}
       data-testid="ai-board"
     >
       <div className="ai-pane flex min-w-0 flex-col gap-6">
@@ -481,7 +520,7 @@ function TeamBoard({ offline }: { offline: boolean }) {
         </AiSection>
       </div>
 
-      {asideOpen && link && (
+      {asideOpen && link && (hasRow || editing) && (
         <AiAside
           id={TEAM_ASIDE_ID}
           label={`${link.endpointLabel} 상세`}
@@ -611,11 +650,12 @@ function TeamBoard({ offline }: { offline: boolean }) {
                     }}
                     data-testid="ai-link-edit"
                   >
-                    키 바꾸기
+                    {configured ? "키 바꾸기" : "API 키 추가"}
                   </Button>
                 </div>
               )}
-              <ConfirmButton
+              {configured && (
+                <ConfirmButton
                 label={legacy ? "연결 끊기" : "연결 해제"}
                 question={
                   legacy
@@ -631,6 +671,7 @@ function TeamBoard({ offline }: { offline: boolean }) {
                 onConfirm={() => unlink.mutate()}
                 testId="ai-link-unlink"
               />
+              )}
             </div>
           )}
 

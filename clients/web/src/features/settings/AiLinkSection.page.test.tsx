@@ -243,6 +243,25 @@ describe("틀: 두 절과 순서 (#2877 시안 §1)", () => {
   });
 });
 
+describe("예비 provider 순서는 운영자에게 접혀 남는다 (#2877)", () => {
+  it("접힘을 열면 기존 순서 편집기가 선다", async () => {
+    mount();
+    const toggle = await until("ai-team-chain-toggle");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(host?.querySelector("#ai-team-chain")).toBeNull();
+    act(() => toggle.click());
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(host?.querySelector("#ai-team-chain")).not.toBeNull();
+  });
+
+  it("운영자가 아니면 접힘도 없다", async () => {
+    vi.mocked(fetchProviderLink).mockRejectedValue(new ApiError(403, "operator required"));
+    mount();
+    await until("operator-notice");
+    expect(q("ai-team-chain-toggle")).toBeNull();
+  });
+});
+
 describe("auth.json 붙여넣기 제거 (#2877, 제안서 Q3)", () => {
   it("기존 OAuth 링크는 「내부용 · 새로 만들 수 없음」 읽기 전용 줄이고 끊기만 있다", async () => {
     vi.mocked(fetchProviderLink).mockResolvedValue(OAUTH_LINK);

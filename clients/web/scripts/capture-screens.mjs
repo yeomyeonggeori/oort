@@ -8447,6 +8447,8 @@ async function captureScheme(browser, scheme) {
   await aiLink.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(aiLink);
   await aiLink.evaluate('location.hash = "/settings?section=ai"');
+  // #2877: 예비 provider 편집기는 팀 연결 절 아래 접힘 안에 있다.
+  await sceneClick(aiLink, aiLink.getByTestId("ai-team-chain-toggle"));
   await aiLink.getByTestId("chain-list").waitFor({ state: "visible" });
   const aiLinkShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-chain-${scheme}.png`);
   await aiLink.screenshot({ path: aiLinkShot });
@@ -8462,6 +8464,8 @@ async function captureScheme(browser, scheme) {
 
   // …and the probe table, which is the one surface carrying all four
   //     dispositions and therefore all four status tones in one frame.
+  // #2877: 확인은 팀 연결 줄의 곁판 안에 산다.
+  await sceneClick(aiLink, aiLink.getByTestId("ai-link-row-more"));
   await sceneClick(aiLink, aiLink.getByRole("button", { name: "연결 확인" }));
   await aiLink.getByTestId("chain-probe").waitFor({ state: "visible" });
   const aiProbeShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-probe-${scheme}.png`);
@@ -8501,6 +8505,8 @@ async function captureScheme(browser, scheme) {
   await aiPartial.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(aiPartial);
   await aiPartial.evaluate('location.hash = "/settings?section=ai"');
+  // #2877: 예비 provider 편집기는 팀 연결 절 아래 접힘 안에 있다.
+  await sceneClick(aiPartial, aiPartial.getByTestId("ai-team-chain-toggle"));
   await aiPartial.getByTestId("chain-partial").waitFor({ state: "visible" });
   await aiPartial.getByTestId("chain-partial").scrollIntoViewIfNeeded();
   await aiPartial.waitForTimeout(200);
@@ -8522,6 +8528,8 @@ async function captureScheme(browser, scheme) {
   await aiLegacy.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(aiLegacy);
   await aiLegacy.evaluate('location.hash = "/settings?section=ai"');
+  // #2877: 예비 provider 편집기는 팀 연결 절 아래 접힘 안에 있다.
+  await sceneClick(aiLegacy, aiLegacy.getByTestId("ai-team-chain-toggle"));
   await aiLegacy.getByTestId("chain-unavailable").waitFor({ state: "visible" });
   const aiLegacyShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-no-chain-${scheme}.png`);
   await aiLegacy.screenshot({ path: aiLegacyShot });
@@ -8586,9 +8594,12 @@ async function captureScheme(browser, scheme) {
   await aiMock.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(aiMock);
   await aiMock.evaluate('location.hash = "/settings?section=ai"');
+  // #2877: 예비 provider 편집기는 팀 연결 절 아래 접힘 안에 있다.
+  await sceneClick(aiMock, aiMock.getByTestId("ai-team-chain-toggle"));
   await aiMock.getByTestId("chain-list").waitFor({ state: "visible" });
-  await sceneClick(aiMock, aiMock.getByRole("button", { name: "연결 확인" }));
-  await aiMock.getByTestId("chain-probe").waitFor({ state: "visible" });
+  // #2877: 모의 모드는 팀 연결이 「비어 있음」인 상태다(한 줄 + [API 키 추가]).
+  // 확인할 외부 provider 가 없으므로 곁판도 확인 버튼도 없다.
+  await aiMock.getByTestId("ai-link-empty").waitFor({ state: "visible" });
   const aiMockShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-mock-mode-${scheme}.png`);
   await aiMock.screenshot({ path: aiMockShot });
   shots.push(aiMockShot);
@@ -11570,12 +11581,14 @@ async function captureAgentCredentialsScenes(browser, scheme) {
       );
     },
     async (page) => {
+      // #2877: 확인은 팀 연결 줄의 곁판 안에 산다.
+      await sceneClick(page, page.getByTestId("ai-link-row-more"));
       await sceneClick(page, page.getByTestId("ai-link-check"));
       await page.getByTestId("ai-link-loopback-hint").waitFor({
         state: "visible",
       });
     },
-    { hash: "/settings?section=ai", ready: "ai-link-check" }
+    { hash: "/settings?section=ai", ready: "ai-link-row-more" }
   );
 
   function assertSweepGateThrows() {
@@ -12347,6 +12360,117 @@ async function captureFirstAgentScenes(browser, scheme) {
     if (!(pose in readyByPose)) throw new Error(`unknown first-agent pose ${pose}`);
     await shoot(pose, VIEWPORT, "");
     await shoot(pose, MOBILE_VIEWPORT, "-390");
+  }
+  return shots;
+}
+
+/**
+ * 설정 › AI 연결 틀 (#2877). `CAPTURE_PROFILE=ai-accounts`로만 돈다.
+ *
+ * 시안 claudedocs/ai-accounts/mockups.html §1(목록과 곁판)·§6(네 상태)을 같은
+ * 이름의 프레임으로 찍는다. 브라우저 캡처라 「내 계정」 절의 데스크탑 표면은
+ * design 전용 `?aiEntry=rows`로 세운다(브라우저 탭 프레임은 `desktop-only`).
+ * 각 프레임은 1280과 390 두 폭이다.
+ */
+async function captureAiAccountsScenes(browser, scheme) {
+  beginScene("ai-accounts");
+  const shots = [];
+  const legacyLink = {
+    ...PROVIDER_LINK,
+    baseUrl: "https://chatgpt.com/backend-api/codex",
+    endpointLabel: "ChatGPT",
+    credentialKind: "oauth-openai",
+    credentialMeta: {
+      accountLabel: "곽성재 개인",
+      accessTokenPresent: true,
+      accessTokenExpiresAtMs: FIXTURE_NOW + 3_600_000,
+      notice: "개인 ChatGPT 구독으로 동작하는 내부용 연결입니다.",
+    },
+  };
+  const mockLink = {
+    schema: "momo.provider_link.v0",
+    configured: false,
+    source: "environment",
+    mode: "local-mock",
+    baseUrl: "http://127.0.0.1:8081/v1",
+    endpointLabel: "로컬 모의 응답",
+    bearerConfigured: false,
+    availability: "mock",
+    keyConfigured: false,
+    diagnostics: [],
+  };
+  const frames = [
+    { name: "list-aside", entry: "rows", open: "ai-link-row-more", ready: "ai-team-aside" },
+    { name: "list", entry: "rows", ready: "ai-link-row" },
+    { name: "empty", entry: "rows", link: mockLink, ready: "ai-link-empty" },
+    { name: "operator", entry: "rows", link: "403", ready: "operator-notice" },
+    { name: "offline", entry: "rows", offline: true, ready: "ai-offline-banner" },
+    { name: "browser", entry: "desktop-only", ready: "subscription-entry" },
+    { name: "legacy-aside", entry: "rows", link: legacyLink, open: "ai-link-row-more", ready: "ai-team-aside" },
+    { name: "edit", entry: "rows", open: "ai-link-row-more", then: "ai-link-edit", ready: "ai-link-form" },
+  ];
+  for (const frame of frames) {
+    for (const [viewport, suffix] of [
+      [VIEWPORT, ""],
+      [MOBILE_VIEWPORT, "-390"],
+    ]) {
+      const context = await browser.newContext({
+        viewport,
+        deviceScaleFactor: 2,
+        colorScheme: scheme,
+        reducedMotion: "reduce",
+      });
+      await installMocks(context);
+      if (frame.link === "403") {
+        await context.route("**/v1/provider/link", (route) =>
+          json(route, { error: { message: "operator required" } }, 403)
+        );
+      } else if (frame.link) {
+        await context.route("**/v1/provider/link", (route) => json(route, frame.link));
+      }
+      const page = await context.newPage();
+      await page.goto(ORIGIN, { waitUntil: "networkidle" });
+      await signIn(page);
+      await page.evaluate((hash) => {
+        window.location.hash = hash;
+      }, `/settings?section=ai&aiEntry=${frame.entry}`);
+      await page.getByTestId("ai-page").waitFor({ state: "visible" });
+      if (frame.offline) {
+        await page.getByTestId("ai-link-row").waitFor({ state: "visible" });
+        await page.evaluate(() => {
+          Object.defineProperty(navigator, "onLine", { configurable: true, get: () => false });
+          window.dispatchEvent(new Event("offline"));
+        });
+      }
+      if (frame.open) {
+        await sceneClick(page, page.getByTestId(frame.open));
+      }
+      if (frame.then) {
+        await sceneClick(page, page.getByTestId(frame.then));
+      }
+      await page.getByTestId(frame.ready).first().waitFor({ state: "visible" });
+      await page.mouse.move(viewport.width + 80, viewport.height + 80);
+      await waitForAnimations(page);
+      await assertNoHorizontalOverflow(page, `ai-accounts ${frame.name} ${scheme} ${viewport.width}`);
+      if (frame.offline) {
+        const banners = await page.getByTestId("settings-offline-banner").count();
+        if (banners !== 0) throw new Error("ai-accounts offline: 설정 일반 배너와 페이지 배너가 겹쳤다");
+      }
+      const path = beginSceneFromShotPath(`${OUT_DIR}/ai-accounts-${frame.name}${suffix}-${scheme}.png`);
+      // 설정 본문은 자기 스크롤 판이라 fullPage 로는 아래가 잘린다. 판 높이만큼 창을
+      // 늘려 한 장에 담는다.
+      const height = await page.evaluate(() => {
+        const pane = document.querySelector("[data-settings-scroll-viewport]");
+        return pane ? Math.ceil(pane.scrollHeight + pane.getBoundingClientRect().top + 24) : 0;
+      });
+      if (height > viewport.height) {
+        await page.setViewportSize({ width: viewport.width, height });
+        await waitForAnimations(page);
+      }
+      await page.screenshot({ path });
+      shots.push(path);
+      await context.close();
+    }
   }
   return shots;
 }
@@ -14182,6 +14306,11 @@ async function main() {
         for (const scheme of ["light", "dark"]) {
           assertThisPreview();
           all.push(...(await captureWelcomeKickoffScenes(browser, scheme)));
+        }
+      } else if (profile === "ai-accounts") {
+        for (const scheme of ["light", "dark"]) {
+          assertThisPreview();
+          all.push(...(await captureAiAccountsScenes(browser, scheme)));
         }
       } else if (profile === "ai-reentry") {
         for (const scheme of ["light", "dark"]) {
