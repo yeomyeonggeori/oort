@@ -53,6 +53,7 @@ pub mod dm;
 pub mod error;
 pub mod hosted_inbox;
 pub mod huddle;
+pub mod huddle_sweep;
 pub mod identity;
 pub mod interaction;
 pub mod member_rename;

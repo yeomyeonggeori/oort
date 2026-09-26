@@ -49,6 +49,11 @@ async-trait.workspace = true
 base64.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
+# #2758 (ADR-0122 증보 D-H4): the huddle ghost sweep signs a short-lived
+# RoomService token (HS256, the same crate momo-server signs room grants with)
+# and reads LiveKit's `ListParticipants` answer. Server → LiveKit HTTPS only.
+jsonwebtoken.workspace = true
+serde.workspace = true
 
 [dev-dependencies]
 # Conformance harness (tests/*_pg.rs, all #[ignore]): the real migrations +
