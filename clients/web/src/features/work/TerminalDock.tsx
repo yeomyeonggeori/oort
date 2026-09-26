@@ -360,7 +360,7 @@ export function TerminalDock({
         ) : sessions.length === 0 ? (
           <EmptyInvite
             headline="이 채널에 관전할 작업 세션이 없습니다."
-            detail="에이전트가 코드 실행 호스트에서 돌리는 작업 세션의 터미널 출력을 지켜보는 곳입니다. 에이전트가 이 채널에서 세션을 시작하면 여기에 나타납니다."
+            detail="에이전트가 코드 실행 호스트에서 돌리는 작업 세션의 터미널 출력을 관전하는 곳입니다. 에이전트가 이 채널에서 세션을 시작하면 여기에 나타납니다."
             className="py-4"
             testId="terminal-dock-empty"
             actions={
