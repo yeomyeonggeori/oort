@@ -385,6 +385,10 @@ base64 < ~/.momo-secrets/railway-relay-key/server-ed25519-private.pem | tr -d '\
 | notifier | `PUSH_RELAY_URL` | `http://push-relay.railway.internal:28195/v1/push` |
 | notifier | `PUSH_RELAY_SERVER_ID` | `oort-team` — must be the key in `MOMO_RELAY_SERVERS`, or every dispatch is 401 |
 | notifier | `MOMO_PUSH_NOTIFIER_ENABLED` | `1` |
+| notifier | `MOMO_HUDDLE_SWEEP_DATABASE_URL` | `${{shared.MOMO_APP_DATABASE_URL}}` — the huddle ghost sweep (#2758, ADR-0122 증보 D-H4) writes only through this RLS-bound `momo_app` connection; its own `NOTIFIER_DATABASE_URL` (BYPASSRLS) only reads. The sweep refuses a BYPASSRLS URL here |
+| notifier | `MOMO_LIVEKIT_API_KEY` | the api's value (#2759). All three `MOMO_LIVEKIT_*` or none: without them the sweep does not run (and huddles are not configured on the api either) |
+| notifier | `MOMO_LIVEKIT_API_SECRET` | sealed: the api's value (#2759) |
+| notifier | `MOMO_LIVEKIT_URL` | the api's value (#2759). The sweep calls LiveKit RoomService there (server → LiveKit HTTPS only) |
 
 Check in the Apple Developer portal that the APNs key's environment scope
 includes Production.
