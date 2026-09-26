@@ -6,8 +6,8 @@ const connectPageSource = readFileSync(
   fileURLToPath(new URL("./ConnectPage.tsx", import.meta.url)),
   "utf8"
 );
-const landingStepSource = readFileSync(
-  fileURLToPath(new URL("./LandingStep.tsx", import.meta.url)),
+const welcomeStepSource = readFileSync(
+  fileURLToPath(new URL("./WelcomeStep.tsx", import.meta.url)),
   "utf8"
 );
 const tokensCss = readFileSync(
@@ -38,25 +38,30 @@ describe("S1/S2 step chrome contract (#1882)", () => {
   });
 });
 
-describe("S0 lockup hierarchy (#1882 H-1/M-1)", () => {
-  it("does not borrow text-title or pane-sm for the hero lockup", () => {
-    expect(landingStepSource).not.toMatch(
-      /onboarding-wordmark[^"'`]*text-title/
+describe("D0 hero lockup (#2808, 시안 D0)", () => {
+  it("stacks 코메토 hero, wordmark and one-line intro on the left", () => {
+    expect(welcomeStepSource).toMatch(/<KomettoFace[^>]*size="hero"/);
+    expect(welcomeStepSource).toContain("onboarding-welcome-wordmark");
+    expect(welcomeStepSource).toContain(
+      "사람과 에이전트가 같은 자리에서 일하는 메신저."
     );
-    expect(landingStepSource).not.toMatch(
-      /onboarding-tagline[^"'`]*max-w-pane-sm/
+    // 위계는 크기가 진다: 워드마크는 닫힌 글자 사다리를 빌리지 않는다.
+    expect(welcomeStepSource).not.toMatch(
+      /onboarding-welcome-wordmark[^"'`]*text-(?:title|display)/
     );
-    expect(landingStepSource).toContain("max-w-onboarding-copy");
   });
 
-  it("names an onboarding wordmark size off the closed text scale", () => {
-    expect(tokensCss).toMatch(/--font-onboarding-wordmark:/);
-    expect(tokensCss).toMatch(/--spacing-onboarding-copy:\s*360px;/);
-    const word = tokensCss.match(/\.onboarding-wordmark \{[\s\S]*?\n\}/)?.[0];
-    expect(word).toBeTruthy();
-    expect(word).toContain("var(--font-onboarding-wordmark)");
-    expect(word).toContain("4vw");
-    expect(tokensCss).not.toMatch(/--text-onboarding-wordmark:/);
+  it("takes the mockup grid and wordmark values", () => {
+    const grid = tokensCss.match(/\.onboarding-welcome \{[\s\S]*?\n\}/)?.[0];
+    expect(grid).toContain(
+      "grid-template-columns: 1fr var(--spacing-onboarding-col)"
+    );
+    expect(grid).toContain("gap: 64px");
+    expect(grid).toContain("max-inline-size: 1000px");
+    const word = tokensCss.match(
+      /\.onboarding-welcome-wordmark \{[\s\S]*?\n\}/
+    )?.[0];
+    expect(word).toContain("font-size: 40px");
+    expect(word).toContain("font-weight: 800");
   });
 });
-
