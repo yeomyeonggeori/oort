@@ -13038,6 +13038,38 @@ async function captureShellScenes(_sharedBrowser, scheme) {
       await page.close();
       await context.close();
     }
+    // 노을띠 띠 위의 빈 목록·오류 (DS2-6 R1 H-2·H-3): 흰 면 자식(채널 만들기)과
+    // 오류 배너가 띠 위 규칙을 지키는지. 이 두 페이지에서만 채널 목록을 바꾼다.
+    for (const variant of ["empty", "error"]) {
+      const context = await browser.newContext({
+        viewport: { width: 1200, height: 760 },
+        deviceScaleFactor: 2,
+        colorScheme: scheme,
+        reducedMotion: "reduce",
+      });
+      await installMocks(context);
+      await context.route("**/v1/workspaces/*/channels", (route) =>
+        route.request().method() === "POST"
+          ? route.fallback()
+          : variant === "empty"
+            ? json(route, { channels: [] })
+            : route.fulfill({ status: 500, body: "" })
+      );
+      const page = await context.newPage();
+      await page.goto(ORIGIN, { waitUntil: "networkidle" });
+      await signIn(page);
+      await page
+        .getByTestId(variant === "empty" ? "sidebar-create-channel" : "channels-error")
+        .waitFor({ state: "visible" });
+      await page.evaluate(() => {
+        document.documentElement.setAttribute("data-palette", "noeul");
+      });
+      win0 = { width: 1200, height: 760 };
+      await shoot(page, `shell-noeul-${scheme}-sidebar-${variant}`);
+      await page.close();
+      await context.close();
+    }
+
     // 390 서랍 (B6): 셸이 폰 폭에서 예전 문법을 지키는지.
     const phone = await browser.newContext({
       viewport: MOBILE_VIEWPORT,

@@ -57,8 +57,9 @@ export function WorkspaceRail({
       {/* 현재 워크스페이스 (R-1 §1). Discord's grammar: the active tile wears the
           long left accent bar AND the lit (selected) surface, so it cannot be
           mistaken for a tile that merely happens to be under the cursor. The
-          [+] below hovers to `surface-hover`; this one rests on `accent-soft`,
-          the same "selected" surface a chosen 채널 만들기 range uses, and it
+          [+] below rests on a quiet fill; this one is lifted on the white
+          surface with the rest shadow, the same "selected" grammar as the
+          sidebar row (DS2-6, owner 2026-09-26: never amber), and it
           carries `aria-current` so a screen reader knows which one is current
           without seeing the bar. */}
       {/* `isolate` (#2485 R1 B-2): the marker below carries `z-10` so it stands

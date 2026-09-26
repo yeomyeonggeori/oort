@@ -66,8 +66,9 @@ export function ChannelIntroBlock({
 
   return (
     <div
-      // 좌우 24는 떠 있는 판의 머리(`channel-head`)·컴포저 카드와 같은 선이다.
-      className="flex w-full flex-col items-start gap-3 px-6 py-6"
+      // 좌우 16은 메시지 행과 같은 선이다. 넓은 창에서는 타임라인 띠가 8을 더해
+      // 판의 머리·컴포저와 같은 24 선에 선다(`timeline-inset`, DS2-6).
+      className="flex w-full flex-col items-start gap-3 px-4 py-6"
       data-testid={empty ? "timeline-empty" : "message-channel-intro"}
       data-channel-intro=""
       data-empty-kind={intro.surface}

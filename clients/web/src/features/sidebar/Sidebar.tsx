@@ -934,7 +934,7 @@ export function Sidebar({
                               // 시트 위 알약(--surface + rest 그림자)으로 선다.
                               variant="ghost"
                               size="sm"
-                              className="bg-surface shadow-sm"
+                              className="band-surface bg-surface shadow-sm"
                               onClick={() => openCreateChannel()}
                               data-testid="sidebar-create-channel"
                             >

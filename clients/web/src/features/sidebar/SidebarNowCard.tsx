@@ -111,7 +111,7 @@ export function SidebarNowCard({
         <span className="sidebar-now-agent">
           <Bot />
         </span>
-        <span className="sidebar-now-name min-w-0 truncate text-agent">
+        <span className="sidebar-now-name min-w-0 truncate text-ink">
           {name.name}
         </span>
         <span

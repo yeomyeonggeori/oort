@@ -1197,7 +1197,9 @@ export function ChatShell() {
         )}
 
         <div
-          className="flex-1 overflow-hidden timeline-strip"
+          // `timeline-inset`(DS2-6): 넓은 창에서 좌우 8을 더해 메시지 행(px-4)이
+          // 판의 머리·컴포저와 같은 24 선에 선다(시안 A `.a-mbody` 좌우 24).
+          className="timeline-inset flex-1 overflow-hidden timeline-strip"
           data-testid="chat-timeline"
         >
           {hasChannel ? (

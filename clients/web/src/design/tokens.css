@@ -1373,6 +1373,8 @@
   --ink-muted-base: var(--ink-muted);
   --icon-base: var(--icon);
   --agent-base: var(--agent);
+  --agent-soft-base: var(--agent-soft);
+  --danger-base: var(--danger);
   --warn-base: var(--warn);
   --line-base: var(--line);
   --primary-base: var(--primary);
@@ -1395,7 +1397,9 @@
   --ink-muted: var(--on-band-muted, var(--ink-muted-base));
   --icon: var(--on-band-muted, var(--icon-base));
   --agent: var(--on-band, var(--agent-base));
+  --agent-soft: var(--band-fill, var(--agent-soft-base));
   --warn: var(--on-band, var(--warn-base));
+  --danger: var(--on-band, var(--danger-base));
   --line: var(--band-line, var(--line-base));
   --primary: var(--on-band, var(--primary-base));
   --on-primary: var(--band, var(--on-primary-base));
@@ -1410,7 +1414,28 @@
   --ink-muted: var(--ink-muted-base);
   --icon: var(--icon-base);
   --agent: var(--agent-base);
+  --agent-soft: var(--agent-soft-base);
   --warn: var(--warn-base);
+  --danger: var(--danger-base);
+  --line: var(--line-base);
+  --primary: var(--primary-base);
+  --on-primary: var(--on-primary-base);
+  --surface-hover: var(--surface-hover-base);
+  --surface-pressed: var(--surface-pressed-base);
+}
+
+/* 흰 면 채움을 가진 자식은 클래스로 알 수 있다: 사이드바 안에서 그 채움을 든
+ * 요소는 `band-surface`를 잊어도 원래 글자 역할을 되찾는다(DS2-6 R1 H-3 — 빈
+ * 목록의 「채널 만들기」, 배너의 「다시 시도」 알약). 띠 없는 테마에서는 되찾을
+ * 것이 원래 값이라 아무 일도 하지 않는다. */
+.sidebar-drawer :is(.bg-surface, .bg-surface-muted, .bg-surface-raised) {
+  --ink: var(--ink-base);
+  --ink-muted: var(--ink-muted-base);
+  --icon: var(--icon-base);
+  --agent: var(--agent-base);
+  --agent-soft: var(--agent-soft-base);
+  --warn: var(--warn-base);
+  --danger: var(--danger-base);
   --line: var(--line-base);
   --primary: var(--primary-base);
   --on-primary: var(--on-primary-base);
@@ -1560,7 +1585,7 @@
 
 /* 섹션 머리 (시안 `.a-slabel`): 12.5/700 ink-muted, 셰브론 14, 위 여백 14. */
 @utility sidebar-section-head {
-  padding-block-start: 10px;
+  padding-block-start: 14px;
 }
 @utility sidebar-section-label {
   display: flex;
@@ -1649,6 +1674,15 @@
     }
   }
 }
+/* 판 안의 한 선 (시안 `.a-mbody { padding: 18px 24px 0 }`). 메시지 행·날짜
+ * 구분선·채널 소개는 자기 좌우 16(px-4)을 갖고 스레드 패널(320)과 함께 쓰이므로,
+ * 채널 타임라인 띠가 넓은 창에서만 8을 더해 머리(24)·컴포저(24)와 한 선을 만든다. */
+@utility timeline-inset {
+  @media (width >= 600px) {
+    padding-inline: var(--spacing-2);
+  }
+}
+
 @utility channel-head-title {
   font-size: var(--text-body);
   line-height: var(--text-body--line-height);

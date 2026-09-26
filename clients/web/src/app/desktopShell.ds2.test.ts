@@ -139,7 +139,7 @@ describe("띠 위 규칙 (노을띠 `band`, themes-2.0 §3)", () => {
 
   it("사이드바 범위의 글자 역할은 전부 띠 위에 설 수 있는 역할로 다시 묶인다", () => {
     // 띠가 없으면 뒤 값(루트에서 받아 둔 원래 역할)으로 떨어진다.
-    for (const role of ["ink", "ink-muted", "icon", "agent", "warn", "primary"]) {
+    for (const role of ["ink", "ink-muted", "icon", "agent", "warn", "danger", "primary"]) {
       const found = new RegExp(`--${role}: var\\(--([a-z-]+), var\\(--${role}-base\\)\\);`).exec(scope);
       expect(found, `--${role}`).not.toBeNull();
       expect([role, allowed.has(found![1])]).toEqual([role, true]);
@@ -163,6 +163,14 @@ describe("띠 위 규칙 (노을띠 `band`, themes-2.0 §3)", () => {
       .map((m) => m[1])
       .sort();
     expect(restored).toEqual(remapped);
+  });
+
+  it("흰 면 채움 클래스를 든 사이드바 자식은 band-surface 없이도 같은 역할을 되찾는다", () => {
+    const fills = rule(".sidebar-drawer :is(.bg-surface, .bg-surface-muted, .bg-surface-raised) {");
+    const body = (text: string) =>
+      [...text.matchAll(/--([a-z-]+): var\(--\1-base\);/g)].map((m) => m[1]).sort();
+    expect(body(fills)).toEqual(body(utility("band-surface")));
+    expect(body(fills).length).toBeGreaterThan(0);
   });
 });
 
