@@ -15,7 +15,8 @@
 //   3. huddle_ended removes the badge even when an older active GET resolves
 //      afterwards (the intentionally inverted response timing);
 //   4. at 760x480 joined controls have a finite width, leaving the channel title
-//      measurable and the terminal-dock toggle inside the viewport;
+//      measurable and the terminal-dock toggle (when this build provides the
+//      `work` surface, #2753) inside the viewport;
 //   5. at 390x844 (live + joined) the right group stays inside the viewport,
 //      does not paint over the drawer toggle or channel hash, and the title
 //      still has a measurable width. Joined Live chip and mic picker yield
@@ -385,7 +386,10 @@ async function assertJoinedHeaderFits(page, { width, height, requireDrawer }) {
       groupRight: group?.right ?? Number.POSITIVE_INFINITY,
       liveRight: live?.right ?? Number.POSITIVE_INFINITY,
       menuRight: menu?.right ?? Number.POSITIVE_INFINITY,
-      workToggleRight: workToggle?.right ?? Number.POSITIVE_INFINITY,
+      // #2753: the dock toggle sits behind isSurfaceProvided("work"), which
+      // huddle-gate does not declare (its fixture serves no work sessions).
+      // Absent is a legal header, so it is measured only when it is drawn.
+      workToggleRight: workToggle ? workToggle.right : null,
       hashRight: hash?.right ?? 0,
       toggleRight: toggle?.right ?? 0,
       overlapsToggle: overlap(group, toggle),
@@ -406,7 +410,7 @@ async function assertJoinedHeaderFits(page, { width, height, requireDrawer }) {
       `control group escaped viewport at ${width}: ${JSON.stringify(geometry)}`
     );
   }
-  if (geometry.workToggleRight > width + 0.5) {
+  if (geometry.workToggleRight !== null && geometry.workToggleRight > width + 0.5) {
     throw new Error(
       `terminal-dock toggle escaped viewport at ${width}: ${JSON.stringify(geometry)}`
     );

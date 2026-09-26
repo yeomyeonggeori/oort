@@ -97,3 +97,19 @@ export const CONV_ICON_SIZE: Readonly<Record<ConvIconName, number>> = {
   cross: 14,
   file: 18,
 };
+
+// ---- + 메뉴 아이콘 넷 (DS2-2b #2750) -----------------------------------------
+// 같은 시안의 `#dms`·`#hash`·`#bot`·`#activity`, 같은 레시피(선 1.8, viewBox 24),
+// 22pt(Buzz 메뉴 아이콘 실측 ≈21). `dms`·`hash` 는 홈의 22 래스터를 그대로 쓰고,
+// `bot` 은 홈의 18 래스터를 늘리면 흐려지므로 22 로 따로 굽는다(`bot22`).
+
+export const MENU_ICONS = {
+  dm: require('./dms.png') as ImageSourcePropType,
+  channel: require('./hash.png') as ImageSourcePropType,
+  agent: require('./bot22.png') as ImageSourcePropType,
+  work: require('./activity.png') as ImageSourcePropType,
+} as const;
+
+export type MenuIconName = keyof typeof MENU_ICONS;
+
+export const MENU_ICON_SIZE = 22;

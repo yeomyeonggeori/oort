@@ -62,17 +62,36 @@ const DesignGalleryPage = DESIGN_GALLERY_ENABLED
   ? lazy(() => import("@/design/Gallery").then((mod) => ({ default: mod.Gallery })))
   : null;
 
+// 작업 공간 격자 하네스(#2773). 갤러리와 같은 문(design 모드)으로만 열린다.
+const WorkbenchHarnessPage = DESIGN_GALLERY_ENABLED
+  ? lazy(() =>
+      import("@/features/workbench/WorkbenchHarness").then((mod) => ({
+        default: mod.WorkbenchHarness,
+      }))
+    )
+  : null;
+
 function DesignGalleryRoute() {
-  if (!DesignGalleryPage) return null;
+  if (!DesignGalleryPage || !WorkbenchHarnessPage) return null;
   return (
-    <Route
-      path="design"
-      element={
-        <Suspense fallback={<Skeleton ready={false} rows={4} className="p-6" />}>
-          <DesignGalleryPage />
-        </Suspense>
-      }
-    />
+    <>
+      <Route
+        path="design"
+        element={
+          <Suspense fallback={<Skeleton ready={false} rows={4} className="p-6" />}>
+            <DesignGalleryPage />
+          </Suspense>
+        }
+      />
+      <Route
+        path="design/workbench"
+        element={
+          <Suspense fallback={<Skeleton ready={false} rows={4} className="p-6" />}>
+            <WorkbenchHarnessPage />
+          </Suspense>
+        }
+      />
+    </>
   );
 }
 

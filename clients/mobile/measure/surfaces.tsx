@@ -3149,8 +3149,14 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       return <Shell initialNav={{...INITIAL_NAV, tab: 'inbox'}} />;
     case 'shell-search':
       return <Shell initialNav={{...INITIAL_NAV, tab: 'search'}} />;
-    case 'shell-fab-sheet':
-      return <Shell initialComposeOpen />;
+    // DS2-2b (#2750): + 메뉴와 그 뒤의 두 시트. 배치 비교안 (a)(알약 안 네 번째
+    // 칸)는 비교 캡처 뒤 걷었다 — PR #2750 「배치 비교」.
+    case 'shell-plus-menu':
+      return <Shell initialCreate="menu" />;
+    case 'shell-new-dm':
+      return <Shell initialCreate="dm" />;
+    case 'shell-new-channel':
+      return <Shell initialCreate="channel" />;
     // 검수 R1 B1: 층이 열리면 크롬이 그 **밑**에 있어야 한다. 대화 층을 연 판.
     case 'shell-conversation':
       return (
