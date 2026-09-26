@@ -619,6 +619,7 @@ export default function SidebarScreen({
 
       {profileOpen ? (
         <ProfileSheet
+          workspaceId={workspaceId}
           member={member}
           directory={directoryQuery.directory}
           connected={realtime.status === 'connected'}

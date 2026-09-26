@@ -217,3 +217,66 @@ export function customStatusFailureMessage(): string {
 export function customStatusClearFailureMessage(): string {
   return "상태를 지우지 못했습니다. 다시 시도하세요.";
 }
+
+// ---- 폰 프로필 시트의 상태 글 편집 (#2848) -----------------------------------
+//
+// 웹 `SetStatusDialog` 의 저장 규칙을 순수 함수로 꺼낸 것이다. 폰은 날짜·시각
+// 입력 컨트롤이 없어(새 의존 없이) 「시각 고르기」를 싣지 않는 대신, 저장된
+// 만료가 있으면 그것을 **그대로 두는** 선택지 `keep` 을 둔다 — 글만 고친 사람의
+// 만료가 저장 한 번에 「지우지 않음」으로 바뀌면 안 된다.
+
+/** 폰에서 고를 수 있는 지우기 선택. `keep` 은 저장된 만료를 건드리지 않는다. */
+export type PhoneStatusExpiryChoice =
+  | Exclude<StatusExpiryChoice, "custom">
+  | "keep";
+
+export interface CustomStatusDraft {
+  emoji: string;
+  text: string;
+  expiry: PhoneStatusExpiryChoice;
+}
+
+/**
+ * 편집 초안을 PUT 한 번의 쓰기로 바꾼다.
+ *
+ * - 이모지와 글이 모두 비면 지우기(세 키 모두 JSON null)다.
+ * - `keep` 은 `statusExpiresAtMs` 키를 **빼서** 서버의 저장값을 둔다.
+ * - `none` 은 null(만료 없음)이다. 선언 상태는 받은 그대로 다시 싣는다 —
+ *   PUT 은 `status` 를 요구하고, 글을 고치는 일이 온라인·방해 금지를 바꾸면 안 된다.
+ */
+export function customStatusDraftWrite(
+  draft: CustomStatusDraft,
+  declared: PresenceStatus,
+  nowMs: number
+): PresenceWrite {
+  const emoji = clampStatusEmoji(draft.emoji);
+  const text = clampStatusText(draft.text);
+  if (emoji === "" && text === "") return clearCustomStatusWrite(declared);
+  const write: PresenceWrite = {
+    status: declared,
+    statusEmoji: emoji === "" ? null : emoji,
+    statusText: text === "" ? null : text,
+  };
+  if (draft.expiry === "none") {
+    write.statusExpiresAtMs = null;
+  } else if (draft.expiry !== "keep") {
+    write.statusExpiresAtMs = statusExpiryAtMs(draft.expiry, nowMs);
+  }
+  return write;
+}
+
+/**
+ * 만료 시각의 짧은 이름 — 「18:00까지」, 날이 다르면 「9월 28일 18:00까지」.
+ * 시안 A 프로필 시트의 두 번째 알약(`집중 모드 · 18:00까지`)이 쓰는 꼴이다.
+ */
+export function statusExpiryShortLabel(atMs: number, nowMs: number): string {
+  const at = new Date(atMs);
+  const now = new Date(nowMs);
+  const clock = localTimeInputValue(atMs);
+  const sameDay =
+    at.getFullYear() === now.getFullYear() &&
+    at.getMonth() === now.getMonth() &&
+    at.getDate() === now.getDate();
+  if (sameDay) return `${clock}까지`;
+  return `${at.getMonth() + 1}월 ${at.getDate()}일 ${clock}까지`;
+}

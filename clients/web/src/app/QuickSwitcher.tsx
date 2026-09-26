@@ -52,6 +52,7 @@ import {
 import { useAddWorkspaceOpen } from "@/features/workspace/useAddWorkspace";
 import { useDraftsPanel } from "@/features/drafts/useDraftsPanel";
 import { InlineBanner } from "@/features/common/States";
+import { useSurfaceProvidedPredicate } from "@/features/capabilities/useSurfaceProvided";
 import {
   isSurfaceProvided,
   serverSurface,
@@ -590,6 +591,8 @@ export function QuickSwitcher({
   }, [open, onOpenChange, navigate, formDialogOpen, location.pathname]);
 
   const searchProvided = isSurfaceProvided("messageSearch");
+  // #2780: 작업 콘솔 줄은 온라인 호스트가 있을 때만 선다(정적 표가 아니다).
+  const surfaceProvided = useSurfaceProvidedPredicate();
   // 팔레트에 친 말. 메시지 검색으로 넘길 때 그대로 들고 간다.
   const [typed, setTyped] = useState("");
 
@@ -645,12 +648,12 @@ export function QuickSwitcher({
         visibleCommands({
           showDrafts,
           canCreateChannel: canCreate,
-          isSurfaceProvided,
+          isSurfaceProvided: surfaceProvided,
           agents: commandAgents,
         }),
         usage
       ),
-    [showDrafts, canCreate, commandAgents, usage]
+    [showDrafts, canCreate, commandAgents, usage, surfaceProvided]
   );
 
   const commandContext: CommandContext = {

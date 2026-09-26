@@ -5,6 +5,8 @@ import {
   CUSTOM_STATUS_PRESETS,
   CUSTOM_STATUS_TEXT_MAX,
   customExpiryAtMs,
+  customStatusDraftWrite,
+  statusExpiryShortLabel,
   customStatusAccessibleText,
   presenceWriteBody,
   statusExpiryAtMs,
@@ -193,5 +195,74 @@ describe("customExpiryAtMs", () => {
     expect(customExpiryAtMs("2026-13-01", "18:30")).toBeNull();
     expect(customExpiryAtMs("2026-08-30", "24:00")).toBeNull();
     expect(customExpiryAtMs("", "09:00")).toBeNull();
+  });
+});
+
+describe("customStatusDraftWrite (#2848 폰 상태 글)", () => {
+  it("clears all three keys when emoji and text are both blank", () => {
+    expect(
+      customStatusDraftWrite({ emoji: " ", text: "  ", expiry: "1h" }, "dnd", NOW)
+    ).toEqual(clearCustomStatusWrite("dnd"));
+  });
+
+  it("keeps the declared status the caller passed in", () => {
+    const write = customStatusDraftWrite(
+      { emoji: "📅", text: "회의 중", expiry: "none" },
+      "away",
+      NOW
+    );
+    expect(write).toEqual({
+      status: "away",
+      statusEmoji: "📅",
+      statusText: "회의 중",
+      statusExpiresAtMs: null,
+    });
+  });
+
+  it("stamps 30m/1h/today from the injected now", () => {
+    expect(
+      customStatusDraftWrite({ emoji: "", text: "a", expiry: "30m" }, "auto", NOW)
+        .statusExpiresAtMs
+    ).toBe(NOW + 30 * 60_000);
+    expect(
+      customStatusDraftWrite({ emoji: "", text: "a", expiry: "today" }, "auto", NOW)
+        .statusExpiresAtMs
+    ).toBe(statusExpiryAtMs("today", NOW));
+  });
+
+  it("omits the expiry key on keep, so the stored stamp survives a text edit", () => {
+    const write = customStatusDraftWrite(
+      { emoji: "🏠", text: "재택", expiry: "keep" },
+      "auto",
+      NOW
+    );
+    expect("statusExpiresAtMs" in write).toBe(false);
+    expect(JSON.stringify(presenceWriteBody(write))).toBe(
+      '{"status":"auto","statusEmoji":"🏠","statusText":"재택"}'
+    );
+  });
+
+  it("sends an emoji-only status with text null", () => {
+    const write = customStatusDraftWrite(
+      { emoji: "🌴", text: "", expiry: "none" },
+      "auto",
+      NOW
+    );
+    expect(write.statusText).toBeNull();
+    expect(write.statusEmoji).toBe("🌴");
+  });
+});
+
+describe("statusExpiryShortLabel", () => {
+  it("names only the clock on the same local day", () => {
+    const now = new Date(2026, 8, 27, 9, 0).getTime();
+    const at = new Date(2026, 8, 27, 18, 0).getTime();
+    expect(statusExpiryShortLabel(at, now)).toBe("18:00까지");
+  });
+
+  it("names the date when the expiry is another day", () => {
+    const now = new Date(2026, 8, 27, 9, 0).getTime();
+    const at = new Date(2026, 8, 28, 8, 5).getTime();
+    expect(statusExpiryShortLabel(at, now)).toBe("9월 28일 08:05까지");
   });
 });

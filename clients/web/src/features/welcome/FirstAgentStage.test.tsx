@@ -343,7 +343,9 @@ function rowIds(host: HTMLElement): string[] {
   );
 }
 
-function mountStage(): HTMLElement {
+function mountStage(
+  props: { mode?: "onboarding" | "reentry"; reentryFrom?: "agents" | "settings" } = {}
+): HTMLElement {
   queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false, staleTime: 30_000, refetchOnWindowFocus: false },
@@ -360,6 +362,7 @@ function mountStage(): HTMLElement {
       SessionProvider,
       { value: sessionValue() },
       createElement(HashRouter, null, createElement(FirstAgentStage, {
+        ...props,
         onContinue: () => {
           continued += 1;
         },
@@ -1073,6 +1076,89 @@ describe("자동 통과", () => {
     mountStage();
     await waitFor(() => continued === 1, "provider auto-pass");
     expect(readFirstAgentMarker(WS)).toBe("done");
+  });
+});
+
+describe("재진입 (#2870, RCA 1-b): 설정·에이전트 화면에서 다시 연 같은 화면", () => {
+  it("연결이 이미 있어도 자동 통과하지 않고 목록이 서며, 표지를 쓰지 않는다", async () => {
+    vi.mocked(listHostedConnections).mockResolvedValue({
+      connections: [wireConnection({ status: "active" })],
+    });
+    vi.mocked(fetchProviderLink).mockResolvedValue({
+      ...unconfiguredLink,
+      configured: true,
+      source: "database",
+    });
+    subscriptionOn();
+    const host = mountStage({ mode: "reentry" });
+    await waitFor(() => rowIds(host).length > 0, "rows");
+    await flush();
+    expect(continued).toBe(0);
+    expect(rowIds(host).slice(0, 2)).toEqual(["claude", "codex"]);
+    expect(readFirstAgentMarker(WS)).toBeNull();
+    expect(q(host, "first-agent-loading")).toBeNull();
+  });
+
+  it("진행 점 대신 [뒤로], 건너뛰기 대신 [닫기], 재진입 문장은 없다", async () => {
+    const host = mountStage({ mode: "reentry" });
+    await waitFor(() => rowIds(host).length > 0, "rows");
+    expect(q(host, "ai-connect-reentry-back")?.textContent).toContain("뒤로");
+    expect(q(host, "onboarding-dots")).toBeNull();
+    expect(q(host, "first-agent-skip")?.textContent).toBe("닫기");
+    expect(q(host, "first-agent-reentry-line")).toBeNull();
+  });
+
+  it("[닫기]는 졸림 화면 없이 출발지로 돌아가고 skipped 를 남기지 않는다", async () => {
+    const host = mountStage({ mode: "reentry", reentryFrom: "settings" });
+    await waitFor(() => rowIds(host).length > 0, "rows");
+    click(q(host, "first-agent-skip"));
+    await flush();
+    expect(q(host, "first-agent-skipped")).toBeNull();
+    expect(window.location.hash).toBe("#/settings?section=ai");
+    expect(continued).toBe(1);
+    expect(readFirstAgentMarker(WS)).toBeNull();
+  });
+
+  it("[뒤로]는 에이전트 화면으로 돌아간다", async () => {
+    const host = mountStage({ mode: "reentry", reentryFrom: "agents" });
+    await waitFor(() => rowIds(host).length > 0, "rows");
+    click(q(host, "ai-connect-reentry-back"));
+    await flush();
+    expect(window.location.hash).toBe("#/agents");
+    expect(continued).toBe(1);
+  });
+
+  it("API 키 줄은 설정 › AI 연결로 가고 deferred 를 쓰지 않는다", async () => {
+    const host = mountStage({ mode: "reentry", reentryFrom: "agents" });
+    await waitFor(() => host.querySelector("#ai-connect-api-key") !== null, "rows");
+    pick(host, "api-key");
+    await flush();
+    expect(window.location.hash).toBe("#/settings?section=ai");
+    expect(readFirstAgentMarker(WS)).toBeNull();
+    expect(continued).toBe(1);
+  });
+
+  it("합류 중간 단계의 [뒤로]는 화면을 닫지 않고 목록으로 돌아간다", async () => {
+    subscriptionOn();
+    const host = mountStage({ mode: "reentry" });
+    await waitFor(() => rowIds(host).includes("claude"), "rows");
+    pick(host, "claude");
+    await waitFor(() => q(host, "first-agent-connect") !== null, "connect");
+    click(q(host, "ai-connect-reentry-back"));
+    await waitFor(() => rowIds(host).length > 0, "back to rows");
+    expect(continued).toBe(0);
+  });
+
+  it("구독 합류는 온보딩과 같은 요청(owner_only + claude_code)을 보낸다", async () => {
+    subscriptionOn();
+    const host = mountStage({ mode: "reentry" });
+    await waitFor(() => rowIds(host).includes("claude"), "rows");
+    pick(host, "claude");
+    await waitFor(() => vi.mocked(createHostedConnection).mock.calls.length === 1, "create");
+    expect(vi.mocked(createHostedConnection).mock.calls[0]?.[1]).toMatchObject({
+      invocationScope: "owner_only",
+      subscriptionHarness: "claude_code",
+    });
   });
 });
 

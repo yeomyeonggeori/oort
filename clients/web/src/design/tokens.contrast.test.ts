@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   CANVAS_STOPS,
@@ -1146,4 +1146,130 @@ describe("신호 글자는 --signal-text 다", () => {
     expect(files.length).toBeGreaterThan(100);
     expect(hits).toEqual([]);
   });
+});
+
+// ---------------------------------------------------------------------------
+// 로컬 터미널 칸 팔레트 (#2849). tokens.css의 `--term-*` 쌍을 읽어 두 스킴에서
+// 잰다. 칸 틀이 `data-term-scheme`으로 스킴을 고정하므로 [0]=밝게, [1]=어둡게다.
+// 기준은 이슈의 결정: 기본 전경·바탕 4.5:1, 흐린 색 3:1. 글자로 쓰는 ANSI 색은
+// 전부 4.5:1이다. 바탕 역할 색(어둡게의 black, 밝게의 white·bright-white)만
+// 글자 기준 밖이고, 바탕과 구분되는지만 본다.
+// ---------------------------------------------------------------------------
+
+const TERM_ANSI = [
+  "black",
+  "red",
+  "green",
+  "yellow",
+  "blue",
+  "magenta",
+  "cyan",
+  "white",
+  "bright-black",
+  "bright-red",
+  "bright-green",
+  "bright-yellow",
+  "bright-blue",
+  "bright-magenta",
+  "bright-cyan",
+  "bright-white",
+] as const;
+
+const TERM_SCHEMES = [
+  { name: "밝게", index: 0, backgroundRole: ["white", "bright-white"] },
+  { name: "어둡게", index: 1, backgroundRole: ["black"] },
+] as const;
+
+const DIM = "bright-black";
+
+/** 이 시험 파일의 자리. catalog 시험이 이 파일을 다시 불러도 같은 폴더를 본다. */
+const THIS_DIR = new URL(".", import.meta.url);
+
+function termPair(name: string): [string, string] {
+  const pair = TOKENS[`term-${name}`];
+  if (!pair) throw new Error(`--term-${name} missing from tokens.css or not a light-dark(#hex, #hex) pair`);
+  return pair;
+}
+
+describe("local terminal palette (#2849)", () => {
+  it("declares every xterm color as a light-dark pair", () => {
+    for (const name of ["bg", "fg", "selection", "selection-inactive", ...TERM_ANSI.map((a) => `ansi-${a}`)]) {
+      expect(termPair(name), name).toHaveLength(2);
+    }
+  });
+
+  it("dark is actually dark and light is actually light", () => {
+    const [lightBg, darkBg] = termPair("bg");
+    expect(luminance(darkBg), `dark bg ${darkBg}`).toBeLessThan(0.02);
+    expect(luminance(lightBg), `light bg ${lightBg}`).toBeGreaterThan(0.9);
+  });
+
+  for (const scheme of TERM_SCHEMES) {
+    describe(scheme.name, () => {
+      const bg = termPair("bg")[scheme.index];
+      const fg = termPair("fg")[scheme.index];
+
+      it("default foreground on background ≥ 4.5:1", () => {
+        expect(contrast(fg, bg)).toBeGreaterThanOrEqual(4.5);
+      });
+
+      it("every ANSI color used as text ≥ 4.5:1, the dim color ≥ 3:1", () => {
+        const failures: string[] = [];
+        for (const ansi of TERM_ANSI) {
+          if ((scheme.backgroundRole as readonly string[]).includes(ansi)) continue;
+          const color = termPair(`ansi-${ansi}`)[scheme.index];
+          const floor = ansi === DIM ? 3 : 4.5;
+          const ratio = contrast(color, bg);
+          if (ratio < floor) failures.push(`ansi-${ansi} ${color} on ${bg} = ${ratio.toFixed(2)} < ${floor}`);
+        }
+        expect(failures).toEqual([]);
+      });
+
+      it("background-role ANSI colors stay distinguishable from the background", () => {
+        for (const ansi of scheme.backgroundRole) {
+          const color = termPair(`ansi-${ansi}`)[scheme.index];
+          expect(deltaE(color, bg), `ansi-${ansi} ${color} vs bg ${bg}`).toBeGreaterThan(0.02);
+          // 그 위에 기본 전경을 올려도 읽혀야 한다(powerline 조각 글자).
+          expect(contrast(fg, color), `fg on ansi-${ansi}`).toBeGreaterThanOrEqual(4.5);
+        }
+      });
+
+      it("selection is visible and keeps the foreground readable", () => {
+        for (const name of ["selection", "selection-inactive"]) {
+          const sel = termPair(name)[scheme.index];
+          expect(sel, name).not.toBe(bg);
+          expect(contrast(fg, sel), `fg on ${name}`).toBeGreaterThanOrEqual(4.5);
+        }
+        expect(contrast(termPair("selection")[scheme.index], bg)).toBeGreaterThan(
+          contrast(termPair("selection-inactive")[scheme.index], bg)
+        );
+      });
+
+      it("the cursor (--signal of every theme) is ≥ 3:1 on the background", () => {
+        // 커서는 칸 틀 안의 `bg-signal` 탐침에서 읽는다. 액센트·팔레트 테마가
+        // 신호색을 바꾸므로 그것들 모두를 잰다.
+        const sources = [
+          css,
+          ...["./themes/", "./themes/palettes/"].flatMap((dir) => {
+            const url = new URL(dir, THIS_DIR);
+            return readdirSync(url)
+              .filter((n) => n.endsWith(".css"))
+              .map((n) => readFileSync(new URL(n, url), "utf8"));
+          }),
+        ];
+        const signals = new Set<string>();
+        for (const source of sources) {
+          for (const m of source.matchAll(/--signal:\s*light-dark\(\s*(#[0-9a-f]{6})\s*,\s*(#[0-9a-f]{6})\s*\)/gi)) {
+            signals.add(m[scheme.index + 1].toLowerCase());
+          }
+        }
+        expect(signals.size).toBeGreaterThan(3);
+        const failures = [...signals]
+          .map((s) => [s, contrast(s, bg)] as const)
+          .filter(([, ratio]) => ratio < 3)
+          .map(([s, ratio]) => `${s} on ${bg} = ${ratio.toFixed(2)}`);
+        expect(failures).toEqual([]);
+      });
+    });
+  }
 });
