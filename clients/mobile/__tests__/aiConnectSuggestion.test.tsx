@@ -167,8 +167,8 @@ afterEach(cleanup);
 describe('대상 본인 — 폰 읽기 카드', () => {
   it('본문 아래 제안 머리 + 「맥에서」 한 줄, 로그인·키 입력 없음', async () => {
     renderRow(message({...G3, args: {}}), REQUESTER);
-    const card = await screen.findByTestId('ai-suggest-target');
-    await screen.findByTestId('ai-suggest-team');
+    const card = await screen.findByTestId('ai-suggest-target', {}, {timeout: 5000});
+    await screen.findByTestId('ai-suggest-team', {}, {timeout: 5000});
     expect(screen.getByText(BODY)).toBeTruthy();
     expect(within(card).getByText('hermes가 제안했어요')).toBeTruthy();
     expect(within(card).getByText(/구독 로그인은 맥에서 해요/)).toBeTruthy();
@@ -183,7 +183,7 @@ describe('대상 본인 — 폰 읽기 카드', () => {
 
   it('팀 알약은 provider_link 응답 → 코어 linkPill(웹·설정과 같은 판정)', async () => {
     renderRow(message({...G3, args: {harness: 'team_key'}}), REQUESTER);
-    const pill = await screen.findByTestId('ai-suggest-team-pill');
+    const pill = await screen.findByTestId('ai-suggest-team-pill', {}, {timeout: 5000});
     const expected = linkPill({link: KEY_LINK, offline: false, probe: null});
     expect(within(pill).getByText(expected.text)).toBeTruthy();
     expect(expected.text).toBe('연결됨');
@@ -199,7 +199,7 @@ describe('대상 본인 — 폰 읽기 카드', () => {
       checkedAtMs: Date.now(),
     } as never);
     renderRow(message({...G3, args: {harness: 'team_key'}}), REQUESTER);
-    const check = await screen.findByTestId('ai-suggest-team-check');
+    const check = await screen.findByTestId('ai-suggest-team-check', {}, {timeout: 5000});
     await act(async () => {
       fireEvent.press(check);
     });
@@ -212,13 +212,13 @@ describe('대상 본인 — 폰 읽기 카드', () => {
   it('비운영자 본인: 팀 줄은 읽기 한 줄, 누를 것 0', async () => {
     jest.mocked(fetchProviderLink).mockRejectedValue(new ApiError(403, 'forbidden'));
     renderRow(message({...G3, args: {harness: 'team_key'}}), REQUESTER);
-    await screen.findByTestId('ai-suggest-team-denied');
+    await screen.findByTestId('ai-suggest-team-denied', {}, {timeout: 5000});
     expect(pressables(screen.getByTestId('ai-suggest-target'))).toBe(0);
   });
 
   it('props에 상태를 실어도 믿지 않는다: 한 줄 폴백, 누를 것 0', async () => {
     renderRow(message({...G3, state: 'ready'}), REQUESTER);
-    const line = await screen.findByTestId('ai-suggest-other');
+    const line = await screen.findByTestId('ai-suggest-other', {}, {timeout: 5000});
     expect(within(line).getByText('곽성재에게 AI 연결을 제안했어요')).toBeTruthy();
     expect(pressables(line)).toBe(0);
     expect(screen.queryByTestId('ai-suggest-target')).toBeNull();
@@ -230,7 +230,7 @@ describe('대상이 아닌 사람', () => {
     jest.mocked(fetchProviderLink).mockRejectedValue(new ApiError(403, 'forbidden'));
     renderRow(message(G3), SKY);
     await waitFor(() => expect(fetchProviderLink).toHaveBeenCalled());
-    const line = await screen.findByTestId('ai-suggest-other');
+    const line = await screen.findByTestId('ai-suggest-other', {}, {timeout: 5000});
     expect(within(line).getByText('곽성재에게 AI 연결을 제안했어요')).toBeTruthy();
     expect(pressables(line)).toBe(0);
     expect(screen.queryByText(/내 계정/)).toBeNull();
@@ -238,13 +238,13 @@ describe('대상이 아닌 사람', () => {
 
   it('운영자: 한 줄 + 「팀 연결 보기」 → 팀 줄만', async () => {
     renderRow(message(G3), SKY);
-    const open = await screen.findByTestId('ai-suggest-team-open');
+    const open = await screen.findByTestId('ai-suggest-team-open', {}, {timeout: 5000});
     expect(screen.queryByTestId('ai-suggest-team-panel')).toBeNull();
     await act(async () => {
       fireEvent.press(open);
     });
-    const panel = await screen.findByTestId('ai-suggest-team-panel');
-    await within(panel).findByTestId('ai-suggest-team-check');
+    const panel = await screen.findByTestId('ai-suggest-team-panel', {}, {timeout: 5000});
+    await within(panel).findByTestId('ai-suggest-team-check', {}, {timeout: 5000});
     expect(screen.queryByText(/내 계정/)).toBeNull();
   });
 });

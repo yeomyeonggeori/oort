@@ -977,7 +977,12 @@ export function MessageRow({
         {/* 제안 카드는 에이전트의 텍스트 답 **아래**다(시안 ③ `.cwrap.prop`): 답이
             말하고 카드가 그 말을 행동으로 옮긴다. 보는 사람별 분기는 안에서 한다. */}
         {!deleted && suggestion && (
-          <AiConnectSuggestion card={suggestion} viewerMemberId={actions?.myMemberId} />
+          <AiConnectSuggestion
+            card={suggestion}
+            viewerMemberId={actions?.myMemberId}
+            directory={directory}
+            channelId={message.channelId}
+          />
         )}
         {/* Provider cascade (ADR-0135 D1). Outside the card/artifact branch on
             purpose: whichever of the two took the slot, a turn served by the

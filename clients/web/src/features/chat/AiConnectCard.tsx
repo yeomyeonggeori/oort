@@ -49,13 +49,20 @@ import {
 } from "@/features/settings/aiMyAccountsModel";
 import { useSubscriptionEntryState } from "@/features/welcome/SubscriptionAgentEntry";
 import { useOffline } from "@/features/common/useOffline";
+import { useSession } from "@/app/session";
+import { seedComposerText } from "@/features/chat/draftStore";
+import type { Directory } from "@momo/core/features/workspace/directory";
 import {
+  COMMAND_SUGGEST_ASK_BUSY,
+  COMMAND_SUGGEST_ASK_NONE,
+  COMMAND_SUGGEST_ASK_OPERATOR,
   COMMAND_SUGGEST_ONLY_ME,
   COMMAND_SUGGEST_TEAM_CLOSE,
   COMMAND_SUGGEST_TEAM_OPEN,
   commandSuggestHead,
   commandSuggestOneLine,
   commandSuggestViewer,
+  operatorMentionDraft,
   type CommandSuggestCard,
 } from "@momo/core/features/timeline/commandSuggest";
 import { useLocalHarnessWatch } from "@/features/welcome/useLocalHarnessWatch";
@@ -427,9 +434,15 @@ const OPERATOR_STALE_MS = 60_000;
 export function AiConnectSuggestion({
   card,
   viewerMemberId,
+  directory,
+  channelId,
 }: {
   card: CommandSuggestCard;
   viewerMemberId: string | undefined;
+  /** 「운영자에게 부탁하기」가 멘션할 운영자를 찾는 멤버 목록. */
+  directory: Directory;
+  /** 그 멘션을 채울 컴포저의 채널(이 메시지의 채널). */
+  channelId: string;
 }) {
   const isTarget = commandSuggestViewer(card, viewerMemberId, false) === "target";
   const operatorQuery = useQuery({
@@ -437,10 +450,15 @@ export function AiConnectSuggestion({
     queryFn: fetchProviderLink,
     retry: false,
     staleTime: OPERATOR_STALE_MS,
+    // 403(비운영자)은 데이터가 없는 채로 남는다. virtuoso가 행을 다시 세울 때마다
+    // 다시 묻지 않게 한다(design-review #2948 M: `routing/capability.ts`와 같은 규율).
+    retryOnMount: false,
     enabled: card.shape === "ok" && !isTarget,
   });
   const viewer = commandSuggestViewer(card, viewerMemberId, operatorQuery.isSuccess);
-  if (viewer === "target") return <SuggestedCard card={card} />;
+  if (viewer === "target") {
+    return <SuggestedCard card={card} directory={directory} channelId={channelId} viewerMemberId={viewerMemberId} />;
+  }
   return <SuggestionLine card={card} operator={viewer === "operator"} />;
 }
 
@@ -462,9 +480,11 @@ function SuggestionLine({ card, operator }: { card: CommandSuggestCard; operator
           <button
             type="button"
             aria-expanded={open}
-            aria-controls={panelId}
+            aria-controls={open ? panelId : undefined}
             onClick={() => setOpen((value) => !value)}
-            className="tap-target press shrink-0 rounded-md px-1 text-meta font-semibold text-agent hover:underline focus-visible:focus-ring"
+            // 눌리는 면은 좁은 폭에서 44(`tap-target`), 보이는 줄은 시안 `.oneline` 높이
+            // 그대로: 넓힌 만큼 음의 세로 여백으로 돌려준다(design-review #2948 M).
+            className="tap-target press -my-3 shrink-0 rounded-md px-1 text-meta font-semibold text-agent hover:underline focus-visible:focus-ring"
             data-testid="ai-suggest-team-open"
           >
             {open ? COMMAND_SUGGEST_TEAM_CLOSE : COMMAND_SUGGEST_TEAM_OPEN}
@@ -492,8 +512,29 @@ function SuggestionLine({ card, operator }: { card: CommandSuggestCard; operator
 }
 
 /** 대상 본인의 조작 카드. 로컬 카드와 같은 절, 머리만 제안 머리. */
-function SuggestedCard({ card }: { card: CommandSuggestCard }) {
+function SuggestedCard({
+  card,
+  directory,
+  channelId,
+  viewerMemberId,
+}: {
+  card: CommandSuggestCard;
+  directory: Directory;
+  channelId: string;
+  viewerMemberId: string | undefined;
+}) {
   const navigate = useNavigate();
+  const { workspaceId } = useSession();
+  // 「운영자에게 부탁하기」: 컴포저에 운영자 멘션만 채운다. 보내는 것은 사람이다.
+  // 쓰던 글은 덮지 않는다(`seedComposerText`는 빈 입력창에만 심는다).
+  const askOperator = (): string | null => {
+    const draft = operatorMentionDraft(directory, viewerMemberId);
+    if (draft === null) return COMMAND_SUGGEST_ASK_NONE;
+    if (!seedComposerText(workspaceId, channelId, draft)) return COMMAND_SUGGEST_ASK_BUSY;
+    const input = document.getElementById("composer-input");
+    if (input instanceof HTMLTextAreaElement) input.focus();
+    return null;
+  };
   const headingId = useId();
   const offline = useOffline();
   const escapeFormRef = useRef<(() => boolean) | null>(null);
@@ -521,22 +562,26 @@ function SuggestedCard({ card }: { card: CommandSuggestCard }) {
         }
       }}
     >
-      <div className="flex min-w-0 items-center gap-2 border-b border-line px-3 py-2">
+      {/* 좁은 폭에서는 칩과 「설정에서 열기」가 다음 줄로 내려간다: 제안한 에이전트의
+          이름이 잘리지 않는 것이 먼저다(design-review #2948 B1). */}
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-line px-3 py-2">
         <span
           aria-hidden="true"
-          className="grid size-5 shrink-0 place-items-center rounded-sm bg-agent-soft text-timestamp font-bold text-agent"
+          className="grid size-6 shrink-0 place-items-center rounded-sm bg-agent-soft text-timestamp font-bold text-agent"
         >
           {initial}
         </span>
-        <h3 id={headingId} className="min-w-0 shrink truncate text-meta font-semibold text-agent">
+        <h3 id={headingId} className="min-w-0 break-keep text-meta font-semibold text-agent">
           {commandSuggestHead(card)}
         </h3>
-        <span
-          className="inline-flex min-w-0 shrink items-center gap-1 truncate rounded-full bg-muted-soft px-2 py-px text-timestamp font-semibold text-ink-muted"
-          data-testid="ai-suggest-only-me"
-        >
-          <Eye className="size-3 shrink-0" aria-hidden="true" />
-          {COMMAND_SUGGEST_ONLY_ME}
+        <span className="ai-card-chipline flex">
+          <span
+            className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-muted-soft px-2 py-px text-timestamp font-semibold text-ink-muted"
+            data-testid="ai-suggest-only-me"
+          >
+            <Eye className="size-3 shrink-0" aria-hidden="true" />
+            {COMMAND_SUGGEST_ONLY_ME}
+          </span>
         </span>
         <span className="flex-1" />
         <button
@@ -551,7 +596,14 @@ function SuggestedCard({ card }: { card: CommandSuggestCard }) {
         </button>
       </div>
       {showMine && <MineSection only={focus === "claude" || focus === "codex" ? focus : null} />}
-      {showTeam && <TeamSection offline={offline} autoOpenForm={false} escapeFormRef={escapeFormRef} />}
+      {showTeam && (
+        <TeamSection
+          offline={offline}
+          autoOpenForm={false}
+          escapeFormRef={escapeFormRef}
+          onAskOperator={askOperator}
+        />
+      )}
     </section>
   );
 }
@@ -770,10 +822,16 @@ function TeamSection({
   offline,
   autoOpenForm,
   escapeFormRef,
+  onAskOperator,
 }: {
   offline: boolean;
   autoOpenForm: boolean;
   escapeFormRef: React.MutableRefObject<(() => boolean) | null>;
+  /**
+   * 비운영자의 다음 행동(#2948, G4 「운영자에게 부탁하기」). 있으면 거절 줄 밑에
+   * 버튼이 선다. 결과 문장을 돌려주면(채우지 못함) 그 줄에 보인다.
+   */
+  onAskOperator?: () => string | null;
 }) {
   const headId = useId();
   const client = useQueryClient();
@@ -781,6 +839,7 @@ function TeamSection({
   const [editing, setEditing] = useState(false);
   const [probe, setProbe] = useState<ProviderLinkTest | null>(null);
   const [justSaved, setJustSaved] = useState(false);
+  const [askNote, setAskNote] = useState<string | null>(null);
   const autoOpened = useRef(false);
   const actionRef = useRef<HTMLButtonElement>(null);
 
@@ -908,6 +967,29 @@ function TeamSection({
         <span>{TEAM_DENIED_LINE}</span>
       </p>
     );
+    if (onAskOperator) {
+      body = (
+        <div className="flex min-w-0 flex-col pb-1">
+          {body}
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setAskNote(onAskOperator())}
+              data-testid="ai-connect-card-ask-operator"
+            >
+              {COMMAND_SUGGEST_ASK_OPERATOR}
+            </Button>
+            {askNote && (
+              <span role="status" className="min-w-0 break-keep text-meta text-ink-muted" data-testid="ai-connect-card-ask-note">
+                {askNote}
+              </span>
+            )}
+          </div>
+        </div>
+      );
+    }
   } else if (query.isError) {
     body = (
       <div className="flex min-w-0 flex-wrap items-center gap-2 py-2" role="alert" data-testid="ai-connect-card-team-error">

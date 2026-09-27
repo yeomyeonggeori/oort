@@ -27,6 +27,7 @@ import { OpenMemberProfileContext } from "@/features/directory/memberProfileCont
 import { detectLocalHarnesses } from "@/lib/tauri";
 import { MemoryRouter } from "react-router-dom";
 import { AiConnectCard } from "@/features/chat/AiConnectCard";
+import { readDraft, writeDraft } from "@/features/chat/draftStore";
 import { MessageRow, type MessageRowActions } from "./MessageRow";
 
 const envSlot = vi.hoisted(() => ({ tauri: true, flag: true }));
@@ -119,7 +120,7 @@ function person(id: string, kind: "human" | "agent", displayName: string, handle
 
 const directory = makeDirectory([
   person(REQUESTER, "human", "곽성재", "seongjae"),
-  person(SKY, "human", "김하늘", "sky"),
+  { ...person(SKY, "human", "김하늘", "sky"), role: "owner" },
   person(AGENT, "agent", "hermes", "hermes"),
 ]);
 
@@ -408,5 +409,38 @@ describe("본문 폴백 — 카드를 세울 근거가 없다", () => {
     await until(host, "ai-suggest");
     expect(host.querySelector("img[src='x']")).toBeNull();
     expect(host.textContent).not.toContain("onerror");
+  });
+});
+
+describe("비운영자 대상 — 「운영자에게 부탁하기」(G4 · 시안 ③ 이도윤)", () => {
+  const TEAM = { ...G3, args: { harness: "team_key", scope: "team" } };
+
+  it("거절 줄 밑의 버튼이 컴포저에 운영자 멘션만 채운다(보내지 않는다)", async () => {
+    localStorage.clear();
+    vi.mocked(fetchProviderLink).mockRejectedValue(new ApiError(403, "forbidden"));
+    const host = mountRow(suggestion(TEAM), REQUESTER);
+    const ask = await until(host, "ai-connect-card-ask-operator");
+    expect(q(host, "ai-connect-card-team-denied")).not.toBeNull();
+    expect(ask.textContent).toBe("운영자에게 부탁하기");
+    act(() => ask.click());
+    expect(readDraft(WS, CH)).toBe("@sky ");
+    expect(q(host, "ai-connect-card-ask-note")).toBeNull();
+  });
+
+  it("쓰던 글은 덮지 않고 그 자리에서 말한다", async () => {
+    localStorage.clear();
+    writeDraft(WS, CH, "쓰던 글");
+    vi.mocked(fetchProviderLink).mockRejectedValue(new ApiError(403, "forbidden"));
+    const host = mountRow(suggestion(TEAM), REQUESTER);
+    const ask = await until(host, "ai-connect-card-ask-operator");
+    act(() => ask.click());
+    expect(readDraft(WS, CH)).toBe("쓰던 글");
+    expect(q(host, "ai-connect-card-ask-note")?.textContent).toContain("쓰던 글이 있어");
+  });
+
+  it("운영자 본인에게는 부탁 버튼이 없다", async () => {
+    const host = mountRow(suggestion(TEAM), REQUESTER);
+    await until(host, "ai-connect-card-team");
+    expect(q(host, "ai-connect-card-ask-operator")).toBeNull();
   });
 });

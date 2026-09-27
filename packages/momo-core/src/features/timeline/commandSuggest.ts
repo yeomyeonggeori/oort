@@ -240,3 +240,35 @@ export const COMMAND_SUGGEST_PHONE_MINE =
 
 /** 폰 카드의 발(키 입력은 폰에서 받지 않는다, Q5). */
 export const COMMAND_SUGGEST_PHONE_FOOT = "키 입력은 맥·웹에서 해요";
+
+/** 비운영자에게 남는 다음 행동(G4 · brief §4.4). */
+export const COMMAND_SUGGEST_ASK_OPERATOR = "운영자에게 부탁하기";
+/** 쓰던 글이 있어 멘션을 채우지 않았을 때. */
+export const COMMAND_SUGGEST_ASK_BUSY =
+  "쓰던 글이 있어 채우지 않았어요. 운영자를 직접 멘션해 주세요.";
+/** 멤버 목록에 운영자가 없을 때. */
+export const COMMAND_SUGGEST_ASK_NONE = "이 워크스페이스에서 운영자를 찾지 못했어요.";
+
+/**
+ * 「운영자에게 부탁하기」가 컴포저에 채울 멘션(보내는 것은 사람이다).
+ *
+ * 운영자는 워크스페이스 역할 owner·admin인 활성 사람 멤버다. 서버 운영자 판정에는
+ * `PLATFORM_ADMIN_EMAILS`도 들지만 그 목록은 클라이언트가 모른다 — 역할로 알 수 있는
+ * 사람만 부른다. 나는 빼고, 없으면 null.
+ */
+export function operatorMentionDraft(
+  directory: Directory,
+  selfMemberId: string | undefined
+): string | null {
+  const self = selfMemberId?.toLowerCase();
+  const handles = directory.members
+    .filter(
+      (member) =>
+        member.kind === "human" &&
+        member.status === "active" &&
+        (member.role === "owner" || member.role === "admin") &&
+        member.id.toLowerCase() !== self
+    )
+    .map((member) => `@${member.handle}`);
+  return handles.length === 0 ? null : `${handles.join(" ")} `;
+}

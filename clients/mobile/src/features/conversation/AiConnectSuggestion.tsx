@@ -82,7 +82,7 @@ export function AiConnectSuggestion({
     viewerMemberId,
     operatorQuery.isSuccess,
   );
-  if (viewer !== ('__' as string)) {
+  if (viewer === 'target') {
     return <SuggestedCard card={card} offline={offline} />;
   }
   return (
@@ -162,7 +162,7 @@ function SuggestedCard({
         </View>
         <Text
           style={styles.headText}
-          numberOfLines={1}
+          numberOfLines={2}
           accessibilityRole="header">
           {commandSuggestHead(card)}
         </Text>
@@ -365,7 +365,7 @@ function SecondaryButton({
       onPress={disabled ? undefined : onPress}
       accessibilityRole="button"
       accessibilityState={{disabled, busy: label === '확인 중'}}
-      hitSlop={slopTo(BUTTON_HEIGHT)}
+      hitSlop={slopTo(AI_SUGGEST.buttonHeight)}
       testID={testID}
       style={({pressed}) => [
         styles.button,
@@ -377,12 +377,50 @@ function SecondaryButton({
   );
 }
 
-/** 시안 `.btn{height:30px}`. 눌리는 면은 `slopTo`가 44까지 넓힌다. */
-const BUTTON_HEIGHT = 30;
-/** 시안 `.lg` 30 · `.ag` 20 · `.oneline` 반경 10. */
-const LOGO = 30;
-const AGENT_MARK = 20;
-const ONELINE_RADIUS = 10;
+/**
+ * 이 카드의 치수 — 시안 `claudedocs/chat-genui-connect/mockups.html` ③·폰 값 그대로.
+ * 값마다 시안 CSS 원문을 옆에 적는다(`convDesign.ts`의 `CONV`와 같은 규율: 스타일시트에
+ * 숫자를 흩지 않고 한 자리에서 출처를 읽게 한다).
+ */
+const AI_SUGGEST = {
+  /** `.btn{height:30px}`. 눌리는 면은 `slopTo`가 44까지 넓힌다. */
+  buttonHeight: 30,
+  /** `.lg{width:30px;height:30px;border-radius:9px}`. */
+  logo: 30,
+  logoRadius: 9,
+  /** 폰 `.ag{width:20px;height:20px;font-size:10px;border-radius:28%}`. */
+  agentMark: 20,
+  agentMarkText: 10,
+  agentMarkRadius: 5.6,
+  /** `.chd{padding:10px 14px}`. */
+  headPadY: 10,
+  /** `.csec{padding:6px 14px 4px}` · `.csh{padding:6px 0 4px}`. */
+  sectionPadTop: 6,
+  /** `.pnote .ic{margin-top:1px}`. */
+  noteIconNudge: 1,
+  /** `.row{gap:10px}`. */
+  lineGap: 10,
+  /** `.nm b{gap:6px}`. */
+  titleGap: 6,
+  /** `.nm b{font-size:13.5px}`. */
+  titleSize: 13.5,
+  /** `.nm .mono{font-size:11.5px}`. */
+  monoSize: 11.5,
+  /** `.src{font:600 10.5px/1;padding:3px 6px;border-radius:5px}`. */
+  srcSize: 10.5,
+  srcPadX: 6,
+  srcPadY: 3,
+  srcRadius: 5,
+  /** `.pill{font:600 11px/1;padding:5px 8px}`. */
+  pillSize: 11,
+  pillPadY: 5,
+  /** `.oneline{padding:7px 10px;border-radius:10px}`. */
+  onelinePadY: 7,
+  onelinePadX: 10,
+  onelineRadius: 10,
+  /** `.csh .lock .ic{width:12px}` — 발의 자물쇠. */
+  footIcon: 12,
+} as const;
 
 function build(color: Palette) {
   return StyleSheet.create({
@@ -401,46 +439,46 @@ function build(color: Palette) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: space.sm,
-      paddingVertical: 10,
+      paddingVertical: AI_SUGGEST.headPadY,
       paddingHorizontal: CONV.cardPad,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: color.border,
     },
     agentMark: {
-      width: AGENT_MARK,
-      height: AGENT_MARK,
-      borderRadius: space.xs + 1.6,
+      width: AI_SUGGEST.agentMark,
+      height: AI_SUGGEST.agentMark,
+      borderRadius: AI_SUGGEST.agentMarkRadius,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: color.agentSurface,
     },
-    agentMarkText: {fontSize: 10, fontWeight: '700', color: color.agent},
+    agentMarkText: {fontSize: AI_SUGGEST.agentMarkText, fontWeight: '700', color: color.agent},
     /** 시안 `.chd .by{font-size:12.5px;color:var(--agent);font-weight:600}`. */
     headText: {flexShrink: 1, fontSize: font.meta, fontWeight: '600', color: color.agent},
     /** 시안 `.csec{padding:6px 14px 4px}`. */
-    section: {paddingHorizontal: CONV.cardPad, paddingTop: 6, paddingBottom: space.xs},
+    section: {paddingHorizontal: CONV.cardPad, paddingTop: AI_SUGGEST.sectionPadTop, paddingBottom: space.xs},
     /** 시안 `.csh{font-size:12px;font-weight:700;color:var(--ink2);padding:6px 0 4px}`. */
     sectionHead: {
       fontSize: font.meta,
       fontWeight: '700',
       color: color.textMuted,
-      paddingTop: 6,
+      paddingTop: AI_SUGGEST.sectionPadTop,
       paddingBottom: space.xs,
     },
     /** 시안 `.pnote{gap:8px;padding:8px 0 4px;font-size:12px}`. */
     note: {flexDirection: 'row', alignItems: 'flex-start', gap: space.sm, paddingTop: space.sm, paddingBottom: space.xs},
-    noteIcon: {marginTop: 1},
+    noteIcon: {marginTop: AI_SUGGEST.noteIconNudge},
     noteText: {flexShrink: 1, fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
     icon: {width: AI_CONNECT_ICON_SIZE, height: AI_CONNECT_ICON_SIZE},
     ok: {color: color.ok},
     bad: {color: color.danger},
     /** 시안 `.row{padding:8px 0}`. */
     row: {paddingVertical: space.sm, gap: space.xs},
-    rowTop: {flexDirection: 'row', alignItems: 'center', gap: 10},
+    rowTop: {flexDirection: 'row', alignItems: 'center', gap: AI_SUGGEST.lineGap},
     logo: {
-      width: LOGO,
-      height: LOGO,
-      borderRadius: 9,
+      width: AI_SUGGEST.logo,
+      height: AI_SUGGEST.logo,
+      borderRadius: AI_SUGGEST.logoRadius,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: color.surfaceMuted,
@@ -449,21 +487,26 @@ function build(color: Palette) {
     },
     logoText: {fontSize: font.meta, fontWeight: '800', color: color.text},
     rowName: {flex: 1, minWidth: 0},
-    rowTitleLine: {flexDirection: 'row', alignItems: 'center', gap: 6},
-    rowTitle: {flexShrink: 1, fontSize: 13.5, fontWeight: '600', color: color.text},
+    rowTitleLine: {flexDirection: 'row', alignItems: 'center', gap: AI_SUGGEST.titleGap},
+    rowTitle: {flexShrink: 1, fontSize: AI_SUGGEST.titleSize, fontWeight: '600', color: color.text},
     rowSub: {fontSize: font.meta, color: color.textMuted},
-    mono: {fontFamily: 'Menlo', fontSize: 11.5},
-    src: {paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5, backgroundColor: color.surfaceMuted},
-    srcText: {fontSize: 10.5, fontWeight: '600', color: color.textMuted},
-    rowActions: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.sm, paddingLeft: LOGO + 10},
+    mono: {fontFamily: 'Menlo', fontSize: AI_SUGGEST.monoSize},
+    src: {
+      paddingHorizontal: AI_SUGGEST.srcPadX,
+      paddingVertical: AI_SUGGEST.srcPadY,
+      borderRadius: AI_SUGGEST.srcRadius,
+      backgroundColor: color.surfaceMuted,
+    },
+    srcText: {fontSize: AI_SUGGEST.srcSize, fontWeight: '600', color: color.textMuted},
+    rowActions: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.sm, paddingLeft: AI_SUGGEST.logo + AI_SUGGEST.lineGap},
     /** 시안 `.pill{font:600 11px/1;padding:5px 8px;border-radius:999px}`. */
-    pill: {paddingHorizontal: space.sm, paddingVertical: 5, borderRadius: radius.pill},
+    pill: {paddingHorizontal: space.sm, paddingVertical: AI_SUGGEST.pillPadY, borderRadius: radius.pill},
     pill_ok: {backgroundColor: color.okSurface},
     pill_warn: {backgroundColor: color.warnSurface},
     pill_danger: {backgroundColor: color.dangerSurface},
     pill_mute: {backgroundColor: color.surfaceMuted},
     pill_run: {backgroundColor: color.agentSurface},
-    pillText: {fontSize: 11, fontWeight: '600'},
+    pillText: {fontSize: AI_SUGGEST.pillSize, fontWeight: '600'},
     pillText_ok: {color: color.ok},
     pillText_warn: {color: color.warn},
     pillText_danger: {color: color.danger},
@@ -471,7 +514,7 @@ function build(color: Palette) {
     pillText_run: {color: color.agent},
     /** 시안 `.btn.sec{height:30px;padding:0 12px;border-radius:999px;border}`. */
     button: {
-      height: BUTTON_HEIGHT,
+      height: AI_SUGGEST.buttonHeight,
       paddingHorizontal: space.md,
       borderRadius: radius.pill,
       borderWidth: StyleSheet.hairlineWidth,
@@ -494,16 +537,16 @@ function build(color: Palette) {
       borderTopColor: color.border,
       backgroundColor: color.sheet,
     },
-    footIcon: {width: 12, height: 12},
+    footIcon: {width: AI_SUGGEST.footIcon, height: AI_SUGGEST.footIcon},
     footText: {flexShrink: 1, fontSize: font.meta, color: color.textMuted},
     /** 시안 `.oneline{gap:8px;padding:7px 10px;border-radius:10px;background:var(--sheet);font-size:12.5px}`. */
     oneline: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: space.sm,
-      paddingVertical: 7,
-      paddingHorizontal: 10,
-      borderRadius: ONELINE_RADIUS,
+      paddingVertical: AI_SUGGEST.onelinePadY,
+      paddingHorizontal: AI_SUGGEST.onelinePadX,
+      borderRadius: AI_SUGGEST.onelineRadius,
       backgroundColor: color.sheet,
       minHeight: TOUCH_TARGET - space.md,
     },

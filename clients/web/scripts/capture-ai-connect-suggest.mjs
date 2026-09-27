@@ -54,7 +54,7 @@ function member(over) {
 
 const roster = [
   member({ id: memberId, kind: "human", role: "owner", displayName: "곽성재", handle: "seongjae" }),
-  member({ id: peerId, kind: "human", displayName: "김하늘", handle: "haneul" }),
+  member({ id: peerId, kind: "human", role: "admin", displayName: "김하늘", handle: "haneul" }),
   member({
     id: agentId,
     kind: "agent",
@@ -79,10 +79,13 @@ function row(over) {
   return { channelId: channelA, hlcCount: 0, type: "text", state: "sent", ...over, hlcTs: over.createdAtMs };
 }
 
+let suggestArgs = { harness: "claude", scope: "mine" };
 const SUGGEST = {
   v: 1,
   command_id: "ai.connect",
-  args: { harness: "claude", scope: "mine" },
+  get args() {
+    return suggestArgs;
+  },
   for_member_id: memberId,
   label: "Claude 구독 연결",
 };
@@ -225,20 +228,6 @@ const KEY_LINK = {
   bearerLast4: "7c1e", availability: "live", keyConfigured: true, updatedAtMs: Date.now() - 3 * 86_400_000,
   diagnostics: [], credentialKind: "anthropic-key", presets: PRESETS,
 };
-const EMPTY_LINK = {
-  schema: "momo.provider_link.v0", configured: false, source: "environment", mode: "local-mock",
-  baseUrl: "http://mock", endpointLabel: "mock", bearerConfigured: false, availability: "mock",
-  keyConfigured: false, diagnostics: [], presets: PRESETS,
-};
-/** 프리셋에 없는 지금 주소(사내 게이트웨이, review #2961 M4). */
-const PROXY_LINK = {
-  ...KEY_LINK,
-  baseUrl: "https://llm-gateway.yeomyeong-internal.example/v1",
-  endpointLabel: "llm-gateway.yeomyeong-internal.example",
-  credentialKind: "bearer",
-  format: "openai",
-};
-const FAKE_KEY = "capture-only-not-a-key-000000000000";
 const probe = (ok, reason) => ({
   schema: "momo.provider_link.test.v0", ok, reason, source: "database", mode: "external-hermes",
   endpointLabel: "Anthropic", checkedAtMs: Date.now(),
@@ -259,8 +248,9 @@ function teamRoute({ link = KEY_LINK, test = probe(true), testHold = null, denie
 
 const outDir = resolve(webRoot, "captures/2948");
 
-async function scene(browser, { width, scheme, name, query, team, as, act }) {
+async function scene(browser, { width, scheme, name, query, team, as, act, args }) {
   viewer = as;
+  suggestArgs = args ?? { harness: "claude", scope: "mine" };
   const height = width === 390 ? 844 : 800;
   const context = await browser.newContext({
     viewport: { width, height },
@@ -319,6 +309,21 @@ function scenes() {
         await page.getByTestId("ai-connect-card-team").waitFor();
       },
     },
+    {
+      // 비운영자 요청자 + 팀 키 제안(시안 ③ 이도윤 자리): 거절 줄 + 「운영자에게 부탁하기」를
+      // 누르면 컴포저에 운영자 멘션만 찬다(보내지 않는다).
+      name: "requester-denied",
+      as: SUNG,
+      query: "aiEntry=rows&aiProbe=claude-ready",
+      args: { harness: "team_key", scope: "team" },
+      team: () => teamRoute({ denied: true }),
+      expect: { viewer: "target" },
+      act: async (page) => {
+        await page.getByTestId("ai-connect-card-ask-operator").click();
+        const value = await page.getByTestId("composer-input").inputValue();
+        if (value !== "@haneul ") throw new Error(`컴포저에 운영자 멘션이 차지 않았다: ${JSON.stringify(value)}`);
+      },
+    },
     { name: "operator-line", as: SKY, query: "", team: () => teamRoute(), expect: { viewer: "operator", controls: 1 } },
   ];
 }
@@ -336,7 +341,7 @@ async function main() {
         for (const scheme of ["light", "dark"]) {
           for (const s of scenes()) {
             if (only && !only.includes(s.name)) continue;
-            const r = await scene(browser, { width, scheme, name: s.name, query: s.query, team: s.team(), as: s.as, act: s.act });
+            const r = await scene(browser, { width, scheme, name: s.name, query: s.query, team: s.team(), as: s.as, act: s.act, args: s.args });
             const bad =
               r.viewerAttr !== s.expect.viewer ||
               (s.expect.controls !== undefined && r.controls !== s.expect.controls) ||
