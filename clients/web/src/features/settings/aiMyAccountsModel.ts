@@ -82,10 +82,13 @@ export function readProfilesFixture(): {
     profiles: [
       { harness: "claude", label: "개인" },
       { harness: "claude", label: "회사" },
+      // 32자 한도 가까운 한글+라틴 라벨: 좁은 폭에서 줄이 잘리지 않는지 본다.
+      { harness: "codex", label: "회사 메인 Pro 계정 (팀 공용 아님, 개인 결제)" },
     ],
     status: {
       "claude/개인": { id: "claude", installed: true, auth: "logged_in" },
       "claude/회사": { id: "claude", installed: true, auth: "needs_login" },
+      "codex/회사 메인 Pro 계정 (팀 공용 아님, 개인 결제)": { id: "codex", installed: true, auth: "logged_in" },
     },
   };
 }

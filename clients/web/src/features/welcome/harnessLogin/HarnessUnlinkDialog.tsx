@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type
 import {
   UNLINK_BUSY_LABEL,
   UNLINK_DONE_STATUS,
+  UNLINK_REMOVING_DETAIL,
   UNLINK_REMOVING_LINE,
   UNLINK_SIGNING_OUT_LINE,
   destructiveActionLabel,
@@ -60,15 +61,20 @@ export function HarnessUnlinkDialog({
   onClose: () => void;
   /** 기본 로그인 줄의 「목록에서 빼기」. 이 기기 설정만 바꾼다. */
   onRemoveFromList: (row: Pick<MyAccountRow, "harness">) => void;
-  /** 해제가 끝났거나(폴더 삭제) 폴더 상태가 바뀌었을 수 있다: 목록을 다시 묻는다. */
-  onUnlinked: () => void;
+  /**
+   * 해제가 끝났거나(`done` = 폴더 삭제) 폴더 상태가 바뀌었을 수 있다: 목록을 다시
+   * 묻는다.
+   */
+  onUnlinked: (done: boolean) => void;
   fixture?: HarnessUnlinkFixture | null;
 }) {
+  // 셸이 폴더를 정리하는 동안에는 창을 닫지 않는다(멈출 수 없는 일이다).
+  const [locked, setLocked] = useState(false);
   return (
     <Dialog
       open={row !== null}
       onOpenChange={(open) => {
-        if (!open) onClose();
+        if (!open && !locked) onClose();
       }}
     >
       {row !== null && (
@@ -76,6 +82,12 @@ export function HarnessUnlinkDialog({
           role="alertdialog"
           opener={opener.current}
           className="gap-3 p-4"
+          onEscapeKeyDown={(event) => {
+            if (locked) event.preventDefault();
+          }}
+          onInteractOutside={(event) => {
+            if (locked) event.preventDefault();
+          }}
           data-testid="my-account-unlink-dialog"
         >
           {row.profile === null ? (
@@ -93,6 +105,7 @@ export function HarnessUnlinkDialog({
               profile={{ harness: row.harness, label: row.profile }}
               onClose={onClose}
               onUnlinked={onUnlinked}
+              onLockChange={setLocked}
               fixture={fixture ?? null}
             />
           )}
@@ -123,9 +136,9 @@ function RemoveFromListBody({
         <Button type="button" variant="ghost" size="sm" className="tap-target" onClick={onCancel} data-testid="my-account-unlink-cancel">
           {LOGIN_CANCEL_LABEL}
         </Button>
+        {/* 되돌릴 수 있는 이 기기 숨김이라 파괴 빨강이 아니다(「다시 보이기」가 있다). */}
         <Button
           type="button"
-          variant="destructive"
           size="sm"
           className="tap-target"
           onClick={onConfirm}
@@ -148,11 +161,13 @@ function UnlinkProfileBody({
   profile,
   onClose,
   onUnlinked,
+  onLockChange,
   fixture,
 }: {
   profile: HarnessProfileRef;
   onClose: () => void;
-  onUnlinked: () => void;
+  onUnlinked: (done: boolean) => void;
+  onLockChange: (locked: boolean) => void;
   fixture: HarnessUnlinkFixture | null;
 }) {
   const controller: UnlinkController | null = useMemo(
@@ -195,11 +210,16 @@ function UnlinkProfileBody({
     const key = status.phase === "failed" ? `failed:${status.reason}:${live.paneId}` : "done";
     if (reported.current === key) return;
     reported.current = key;
-    onUnlinked();
+    onUnlinked(status.phase === "done");
     if (status.phase === "done") onClose();
   }, [fixture, status, live.paneId, onUnlinked, onClose]);
 
   const busy = status.phase === "signing-out" || status.phase === "removing";
+  const removing = status.phase === "removing";
+  useEffect(() => {
+    onLockChange(removing);
+    return () => onLockChange(false);
+  }, [removing, onLockChange]);
   const failed = status.phase === "failed";
   const canShowTerminal =
     (busy || (failed && status.reason !== "spawn")) && (controller === null || live.paneId !== "");
@@ -211,7 +231,7 @@ function UnlinkProfileBody({
     body = unlinkSigningOutDetail(profile.harness);
   } else if (status.phase === "removing") {
     heading = UNLINK_REMOVING_LINE;
-    body = unlinkSigningOutDetail(profile.harness);
+    body = UNLINK_REMOVING_DETAIL;
   } else if (status.phase === "failed") {
     heading = unlinkFailedLine(status.reason);
     body = unlinkFailedDetail(profile.harness, status.reason);
@@ -292,11 +312,18 @@ function UnlinkProfileBody({
           </>
         ) : failed ? (
           <>
-            <Button type="button" variant="ghost" size="sm" className="tap-target" onClick={onClose} data-testid="my-account-unlink-close">
+            <Button
+              ref={primaryRef}
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="tap-target"
+              onClick={onClose}
+              data-testid="my-account-unlink-close"
+            >
               {LOGIN_CLOSE_LABEL}
             </Button>
             <Button
-              ref={primaryRef}
               type="button"
               variant="destructive"
               size="sm"
@@ -309,18 +336,23 @@ function UnlinkProfileBody({
           </>
         ) : (
           <>
+            {/* 로그아웃 중의 취소는 공식 CLI를 멈추고 폴더를 남긴다. 폴더 정리는 셸이
+                이미 하고 있어 멈출 수 없으므로 그 단계에는 취소가 없다. */}
+            {status.phase === "signing-out" && (
+              <Button
+                ref={primaryRef}
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="tap-target"
+                onClick={onClose}
+                data-testid="my-account-unlink-cancel"
+              >
+                {LOGIN_CANCEL_LABEL}
+              </Button>
+            )}
             <Button
-              ref={primaryRef}
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="tap-target"
-              onClick={onClose}
-              data-testid="my-account-unlink-cancel"
-            >
-              {LOGIN_CANCEL_LABEL}
-            </Button>
-            <Button
+              ref={removing ? primaryRef : undefined}
               type="button"
               variant="destructive"
               size="sm"

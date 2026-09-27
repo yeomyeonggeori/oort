@@ -1229,10 +1229,14 @@ mod tests {
             "CODEX_API_KEY",
             "ANTHROPIC_BASE_URL",
             "CLAUDECODE",
+            // #2878 security review H-1: keychain/profile redirects.
+            "CLAUDE_SECURESTORAGE_CONFIG_DIR",
+            "ANTHROPIC_CONFIG_DIR",
+            "ANTHROPIC_PROFILE",
         ] {
             assert!(STRIPPED_ENV.contains(&key), "{key}");
         }
-        assert_eq!(STRIPPED_ENV.len(), 19);
+        assert_eq!(STRIPPED_ENV.len(), 22);
     }
 
     #[test]

@@ -313,6 +313,7 @@ describe("기본 로그인 줄: 목록에서만 뺀다 (Q2)", () => {
     expect(localStorage.getItem(HIDDEN_DEFAULTS_STORAGE_KEY)).toBe(
       '["claude"]',
     );
+    await waitFor(() => expect(document.activeElement).toBe(q("subscription-entry-open")));
     // 로그아웃도, 폴더 삭제도, PTY도 없다.
     expect(tauri.desktopPty.spawn).not.toHaveBeenCalled();
     expect(tauri.harnessProfileRemove).not.toHaveBeenCalled();
@@ -384,6 +385,7 @@ describe("프로필 줄: #2816 모달과 해제 (ADR-0190 D3-f)", () => {
     );
     await waitFor(() => expect(q("my-account-unlink-dialog")).toBeNull());
     await waitFor(() => expect(q("my-account-claude/회사")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(q("subscription-entry-open")));
   });
 
   it("로그아웃 실패: 폴더를 지우지 않고, 정직한 문장과 「터미널로 보기」를 준다", async () => {

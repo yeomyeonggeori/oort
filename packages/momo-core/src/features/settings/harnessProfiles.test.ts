@@ -22,10 +22,13 @@ describe("라벨 (셸 check_label과 같은 규칙)", () => {
     for (const ok of ["개인", "회사", "work-2", "Team (Max)", "가".repeat(PROFILE_LABEL_MAX)]) {
       expect(profileLabelProblem(ok), ok).toBeNull();
     }
-    for (const bad of ["", "  ", ".", "..", ".hidden", "a/b", "../x", "/tmp/x", "a\\b", "a:b", " 개인", "개인 ", "a\nb", "가".repeat(PROFILE_LABEL_MAX + 1)]) {
+    for (const bad of ["", "  ", ".", "..", ".hidden", "a/b", "../x", "/tmp/x", "a\\b", "a:b", "a\nb", "회\u200b사", "\u202elabel", "가".repeat(PROFILE_LABEL_MAX + 1)]) {
       expect(profileLabelProblem(bad), JSON.stringify(bad)).not.toBeNull();
     }
     expect(profileLabelProblem("회사", ["회사"])).toBe("이 이름의 계정이 이미 있어요.");
+    // 앞뒤 빈칸은 막지 않고 보낼 때 뺀다(design-review M-5).
+    expect(profileLabelProblem(" 개인 ")).toBeNull();
+    expect(profileLabelProblem("회사 ", ["회사"])).toBe("이 이름의 계정이 이미 있어요.");
   });
 
   it("목록 정규화는 모양이 틀리거나 하네스가 모르는 줄을 버린다", () => {

@@ -43,7 +43,10 @@ import { Input } from "@/design/ui/input";
 import { KomettoGuide } from "@/features/onboarding/guide/KomettoGuide";
 import { loadBrowserMirror } from "@/features/workbench/local/localSessions";
 import { LocalTerminalPane } from "@/features/workbench/local/LocalTerminalPane";
-import { PROFILE_LOGIN_SPAWN_DETAIL } from "@momo/core/features/settings/harnessProfiles";
+import {
+  PROFILE_LOGIN_SPAWN_DETAIL,
+  profileLoginLine,
+} from "@momo/core/features/settings/harnessProfiles";
 import {
   desktopPty,
   detectLocalHarnesses,
@@ -266,6 +269,12 @@ function LoginDialogBody({
         lineId={lineId}
         lineTestId="harness-login-line"
       />
+      {/* 어느 계정 폴더에 로그인하는지(프로필이 둘 이상이면 헷갈린다). */}
+      {profile !== null && (
+        <p className="break-keep text-meta text-ink-muted [overflow-wrap:anywhere]" data-testid="harness-login-profile">
+          {profileLoginLine(harness, profile)}
+        </p>
+      )}
 
       {/* 보조 링크 한 묶음(design-review L4). */}
       <div className="flex min-w-0 flex-col gap-2">

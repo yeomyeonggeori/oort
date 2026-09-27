@@ -154,8 +154,24 @@ export function createUnlinkController(profile: HarnessProfileRef, deps: UnlinkC
     /** 확인 창의 「연결 해제」. 확인 전·실패 뒤(다시 시도)에만 돈다. */
     confirm(): void {
       if (disposed) return;
-      const phase = state.status.phase;
+      const current = state.status;
+      const phase = current.phase;
       if (phase !== "confirm" && phase !== "failed") return;
+      // 로그아웃은 이미 됐고 폴더 정리만 실패했다: 로그아웃을 다시 돌리지 않고
+      // 정리만 다시 묻는다(셸이 여전히 상태를 확인한 뒤에만 지운다).
+      if (current.phase === "failed" && current.reason === "remove-failed") {
+        const mine = ++attempt;
+        set({ status: { phase: "removing" } });
+        void deps.remove(profile).then(
+          (outcome) => {
+            if (!disposed && attempt === mine) set({ status: unlinkAfterRemove(outcome) });
+          },
+          () => {
+            if (!disposed && attempt === mine) set({ status: { phase: "failed", reason: "remove-failed" } });
+          }
+        );
+        return;
+      }
       const previous = state.paneId;
       start();
       if (previous !== "") sessions.close(previous);

@@ -256,6 +256,23 @@ function MyAccountRows({ onAddApiKey }: { onAddApiKey?: () => void }) {
     void client.invalidateQueries({ queryKey: PROFILES_KEY });
   }, [client]);
 
+  // 해제·목록에서 빼기가 끝나면 그 줄(과 연 ⋯)이 사라진다. 초점이 <body>로 떨어지지
+  // 않게 줄 목록이 바뀐 뒤 「구독 추가」로 옮긴다(design-review #2878 H-1).
+  const [refocusAfterRemoval, setRefocusAfterRemoval] = useState(false);
+  const rowsKey =
+    harness.probes === null
+      ? ""
+      : myAccountRows({ probes: harness.probes, profiles, hiddenDefaults: hidden })
+          .map((row) => row.key)
+          .join("|");
+  useEffect(() => {
+    if (!refocusAfterRemoval || unlink !== null) return;
+    const opener = unlinkOpener.current;
+    if (opener && opener.isConnected) return;
+    setRefocusAfterRemoval(false);
+    addRef.current?.focus();
+  }, [refocusAfterRemoval, unlink, rowsKey]);
+
   if (harness.probes === null) {
     return <Skeleton ready={false} rows={1} className="py-3" />;
   }
@@ -454,8 +471,13 @@ function MyAccountRows({ onAddApiKey }: { onAddApiKey?: () => void }) {
       <HarnessUnlinkDialog
         row={unlink}
         opener={unlinkOpener}
-        onClose={() => setUnlink(null)}
+        onClose={() => {
+          setUnlink(null);
+          // 진행 중에 닫혀도 폴더 상태가 바뀌었을 수 있다: 목록을 다시 묻는다.
+          refreshProfiles();
+        }}
         onRemoveFromList={(row) => {
+          setRefocusAfterRemoval(true);
           const next = [
             ...hidden.filter((id) => id !== row.harness),
             row.harness,
@@ -463,7 +485,10 @@ function MyAccountRows({ onAddApiKey }: { onAddApiKey?: () => void }) {
           writeHiddenDefaults(next);
           setHidden(next);
         }}
-        onUnlinked={refreshProfiles}
+        onUnlinked={(done) => {
+          if (done) setRefocusAfterRemoval(true);
+          refreshProfiles();
+        }}
         fixture={unlinkFixture ? { status: unlinkFixture } : null}
       />
     </>
@@ -477,6 +502,7 @@ const AddButton = forwardRef<HTMLButtonElement, { onClick: () => void }>(
         ref={ref}
         type="button"
         size="sm"
+      variant="outline"
         className="tap-target"
         onClick={onClick}
         data-testid="subscription-entry-open"
@@ -521,7 +547,7 @@ function MyAccountRowView({
       <div className="flex min-w-0 flex-1 basis-full items-center gap-3 sm:basis-0">
         <AiLogo mark={AI_CONNECT_ROW_COPY[row.harness].mark} />
         <div className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-body font-semibold text-ink">
+          <span className="break-keep text-body font-semibold text-ink [overflow-wrap:anywhere]">
             {title}
           </span>
           <span className="truncate text-meta text-ink-muted">
@@ -540,7 +566,7 @@ function MyAccountRowView({
           <Button
             type="button"
             size="sm"
-            variant={row.profile === null ? "outline" : "default"}
+            // 로그인 필요 줄의 회복 행동은 한 무게(시안 §3 `.btn pri`). 「구독 추가」는 윤곽 보조다.
             className="tap-target shrink-0"
             aria-label={`${title} ${row.profile === null ? "로그인" : RELOGIN_LABEL}`}
             onClick={onLogin}
@@ -571,7 +597,7 @@ function MyAccountRowView({
               </DropdownMenuItem>
             )}
             <DropdownMenuItem
-              tone="danger"
+              tone={row.profile === null ? undefined : "danger"}
               onSelect={() => onDestructive(moreRef.current)}
               data-testid={`${testId}-menu-destructive`}
             >

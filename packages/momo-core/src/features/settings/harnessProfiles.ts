@@ -37,20 +37,27 @@ export const PROFILE_LABEL_MAX = 32;
  * 입력 칸 안내일 뿐이다(판정의 정본은 셸).
  */
 export function profileLabelProblem(raw: string, taken: readonly string[] = []): string | null {
-  const label = raw.normalize("NFC");
-  if (label.trim() === "") return "라벨을 적어 주세요.";
+  // 앞뒤 빈칸은 보낼 때 뺀다(`normalizeProfileLabel`): 판정도 뺀 값으로 한다.
+  const label = normalizeProfileLabel(raw);
+  if (label === "") return "라벨을 적어 주세요.";
   if ([...label].length > PROFILE_LABEL_MAX) return `라벨은 ${PROFILE_LABEL_MAX}자까지예요.`;
-  if (label.trim() !== label) return "앞뒤 빈칸은 뺄게요.";
   if (label.startsWith(".")) return "라벨은 점(.)으로 시작할 수 없어요.";
   // eslint-disable-next-line no-control-regex
-  if (/[/\\:\u0000-\u001f\u007f]/.test(label)) return "라벨에 / \\ : 는 쓸 수 없어요.";
+  if (/[/\\:\u0000-\u001f\u007f]/.test(label)) return "라벨에는 / \\ : 기호를 쓸 수 없어요.";
+  // 보이지 않거나 글자 순서를 뒤집는 문자(셸 `is_invisible`와 같은 목록).
+  if (/[\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb]/.test(label)) {
+    return "라벨에 보이지 않는 문자가 있어요.";
+  }
   if (taken.includes(label)) return "이 이름의 계정이 이미 있어요.";
   return null;
 }
 
-/** 입력 칸 값 → 셸로 보낼 라벨. NFC로 한 번 고정해 로그인·로그아웃이 같은 글자를 쓴다. */
+/**
+ * 입력 칸 값 → 셸로 보낼 라벨. 앞뒤 빈칸을 빼고 NFC로 한 번 고정해 로그인·로그아웃이
+ * 같은 글자를 쓴다(셸은 앞뒤 빈칸을 거부한다).
+ */
 export function normalizeProfileLabel(raw: string): string {
-  return raw.normalize("NFC");
+  return raw.normalize("NFC").trim();
 }
 
 function isHarness(value: unknown): value is LocalHarnessId {
@@ -233,9 +240,10 @@ export function unlinkAfterRemove(outcome: ProfileRemoveOutcome): UnlinkPhase {
 
 export const UNLINK_SIGNING_OUT_LINE = "로그아웃하고 있어요.";
 export function unlinkSigningOutDetail(harness: LocalHarnessId): string {
-  return `${attachParticle(HARNESS_CLI_NAME[harness], "subject")} 이 계정 폴더에서 로그아웃하고 있어요. oort는 로그인 정보를 보지 않아요.`;
+  return `${attachParticle(HARNESS_CLI_NAME[harness], "subject")} 이 계정 폴더의 로그인을 지우고 있어요. oort는 로그인 정보를 보지 않아요.`;
 }
 export const UNLINK_REMOVING_LINE = "로그아웃을 확인하고 폴더를 정리하고 있어요.";
+export const UNLINK_REMOVING_DETAIL = "공식 CLI가 로그아웃됐다고 알려 오면 이 계정 폴더만 지워요.";
 
 export function unlinkFailedLine(reason: UnlinkFailure): string {
   switch (reason) {
@@ -261,7 +269,7 @@ export function unlinkFailedDetail(harness: LocalHarnessId, reason: UnlinkFailur
     case "logout-failed":
       return `${attachParticle(cli, "subject")} 로그아웃을 마치지 못했다고 알려 왔어요. 계정 폴더는 그대로 두었어요.`;
     case "still-signed-in":
-      return `${attachParticle(cli, "subject")} 아직 로그인됨이라고 알려 와서 계정 폴더를 지우지 않았어요.`;
+      return `${attachParticle(cli, "subject")} 아직 로그인돼 있다고 알려 와서 계정 폴더를 지우지 않았어요.`;
     case "unknown":
       return `${attachParticle(cli, "subject")} 상태에 답하지 않아 계정 폴더를 지우지 않았어요. 잠시 뒤 다시 시도해 주세요.`;
     case "spawn":
@@ -269,7 +277,7 @@ export function unlinkFailedDetail(harness: LocalHarnessId, reason: UnlinkFailur
     case "timeout":
       return "1분 안에 끝나지 않아 멈췄어요. 계정 폴더는 그대로 두었어요.";
     case "remove-failed":
-      return "목록에는 「로그인 필요」로 남아요. 다시 해제하면 폴더를 지웁니다.";
+      return "목록에는 「로그인 필요」로 남아요. 다시 시도하면 로그아웃은 건너뛰고 폴더만 지웁니다.";
   }
 }
 
@@ -318,3 +326,8 @@ export function rowNeedsLogin(auth: LocalHarnessAuth | undefined, installed: boo
  */
 export const PROFILE_LOGIN_SPAWN_DETAIL =
   "이 계정 폴더로는 앱 안에서만 로그인할 수 있어요. 앱을 다시 연 뒤 시도해 주세요.";
+
+/** 로그인 모달이 어느 계정 폴더에 로그인하는지(design-review #2878 M-6). */
+export function profileLoginLine(harness: LocalHarnessId, profile: string): string {
+  return `${myAccountRowTitle({ harness, profile })} 계정에 로그인합니다. 이 계정의 브라우저 로그인을 쓰세요.`;
+}

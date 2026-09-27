@@ -32,7 +32,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::harness_status::{self, HarnessAuth};
+use std::process::ExitStatus;
+
+use crate::harness_status;
 
 /// Harnesses that take a profile folder, and the variable that points the
 /// official CLI at it (ADR-0191 D1). Grok has no profile yet (Q7).
@@ -136,11 +138,29 @@ pub fn check_label(label: &str) -> Result<(), String> {
     }
     if label
         .chars()
-        .any(|c| c == '/' || c == '\\' || c == ':' || c.is_control())
+        .any(|c| c == '/' || c == '\\' || c == ':' || c.is_control() || is_invisible(c))
     {
-        return Err("refused: label has a separator or control character".into());
+        return Err("refused: label has a separator, control or invisible character".into());
     }
     Ok(())
+}
+
+/// Format characters that draw nothing or reorder text (Unicode Cf, the ones a
+/// label could carry): two labels that look the same must not be two folders
+/// (#2878 security review L-4).
+fn is_invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{061C}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206F}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}'
+    )
 }
 
 /// The one mapping (harness, label) → folder, and the variable to set. Pure:
@@ -185,9 +205,35 @@ pub fn check_on_disk(home: &Path, dir: &Path) -> Result<(), String> {
             return Err("refused: a step of the profile folder is not a directory".into());
         }
     }
+    // The folder's own name on disk must be byte-for-byte the requested one.
+    // APFS matches names case- and normalization-insensitively, so `WORK`
+    // reaches the folder `Work` — but the CLI would get the string `.../WORK`
+    // and hash it to a different keychain item (#2878 security review M-1).
+    let (parent, name) = (
+        dir.parent()
+            .ok_or_else(|| "refused: not a profile folder".to_string())?,
+        dir.file_name()
+            .ok_or_else(|| "refused: not a profile folder".to_string())?,
+    );
+    let exact = std::fs::read_dir(parent)
+        .map_err(|_| "refused: profile folder does not exist".to_string())?
+        .filter_map(Result::ok)
+        .any(|entry| entry.file_name() == name);
+    if !exact {
+        return Err("refused: the profile folder's name on disk differs from the label".into());
+    }
     let canonical = dir
         .canonicalize()
         .map_err(|_| "refused: profile folder does not resolve".to_string())?;
+    check_resolved(home, &root, &canonical)
+}
+
+/// The resolved folder (symlinks, firmlinks and all followed by the OS) is
+/// strictly under the resolved profile root, and is not — does not contain,
+/// is not inside — a CLI's default folder. Behind the
+/// no-symlink walk this only fires for links the walk cannot see (a firmlink
+/// or bind mount), so its tests drive it directly with such a resolved path.
+fn check_resolved(home: &Path, root: &Path, canonical: &Path) -> Result<(), String> {
     let canonical_root = root
         .canonicalize()
         .map_err(|_| "refused: profile root does not resolve".to_string())?;
@@ -197,14 +243,14 @@ pub fn check_on_disk(home: &Path, dir: &Path) -> Result<(), String> {
     let home = home
         .canonicalize()
         .map_err(|_| "refused: home does not resolve".to_string())?;
-    if canonical == home || home.starts_with(&canonical) {
-        return Err("refused: profile folder is the home directory".into());
-    }
+    // No separate "is the home directory" check: the root lives inside home,
+    // so a folder strictly under the resolved root can neither be home nor
+    // contain it (a guard that could never fail was removed, #2878 review L-1).
     for name in DEFAULT_FOLDERS {
         if let Ok(default) = home.join(name).canonicalize() {
             if canonical == default
                 || canonical.starts_with(&default)
-                || default.starts_with(&canonical)
+                || default.starts_with(canonical)
             {
                 return Err("refused: that is a CLI's default folder".into());
             }
@@ -230,8 +276,29 @@ pub fn existing_profile(
 pub fn create_profile(home: &Path, harness: &str, label: &str) -> Result<(), String> {
     let (dir, _) = profile_dir(home, harness, label)?;
     let parent = dir.parent().expect("profile folder has a parent");
-    create_private_dir_all(parent)?;
-    // Every step above the new folder must already be ours and real.
+    // The system part (`Library/Application Support`) may be made as a whole;
+    // from `oort` down each step is made one at a time and checked before the
+    // next, so nothing is ever created through a symlink (#2878 review L-2).
+    let system = ROOT_SEGMENTS[..SYSTEM_SEGMENTS]
+        .iter()
+        .fold(home.to_path_buf(), |path, segment| path.join(segment));
+    create_private_dir_all(&system)?;
+    let tail = parent
+        .strip_prefix(&system)
+        .map_err(|_| "refused: not under the profile root".to_string())?;
+    let mut step = system;
+    for segment in tail.components() {
+        step = step.join(segment.as_os_str());
+        match std::fs::symlink_metadata(&step) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => create_private_dir(&step)?,
+            Err(e) => return Err(format!("refused: {e}")),
+            Ok(_) => {}
+        }
+        let meta = std::fs::symlink_metadata(&step).map_err(|e| format!("refused: {e}"))?;
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            return Err("refused: a step of the profile root is not a real directory".into());
+        }
+    }
     check_steps_above(home, parent)?;
     match std::fs::symlink_metadata(&dir) {
         Ok(_) => return Err("refused: that label already exists".into()),
@@ -334,19 +401,35 @@ pub enum RemoveOutcome {
     Unknown,
 }
 
+/// The one exit code the status commands give for "not signed in", measured
+/// on `claude` 2.1.283 (`auth status`) and `codex-cli` 0.156.1 (`login
+/// status`) against an empty profile folder. Deletion demands exactly this:
+/// any other non-zero (a crash, a broken config, a changed subcommand) is
+/// "unknown" and keeps the folder (#2878 security review M-2). The status
+/// pill keeps its looser reading (`auth_from_exit` in the status module).
+pub const SIGNED_OUT_EXIT_CODE: i32 = 1;
+
+/// Status exit → what removal may do.
+pub fn removal_gate(status: Option<ExitStatus>) -> Option<RemoveOutcome> {
+    match status.map(|s| (s.success(), s.code())) {
+        Some((true, _)) => Some(RemoveOutcome::StillSignedIn),
+        Some((false, Some(SIGNED_OUT_EXIT_CODE))) => None,
+        _ => Some(RemoveOutcome::Unknown),
+    }
+}
+
 /// Delete a profile folder the official CLI has signed out of. `status` is
-/// the D3-a status command run with the folder's variable (injected by tests).
+/// the D3-a status command run with the folder's variable, as a raw exit
+/// status (injected by tests).
 pub fn remove_profile(
     home: &Path,
     harness: &str,
     label: &str,
-    status: impl FnOnce(&str, &str, &Path) -> HarnessAuth,
+    status: impl FnOnce(&str, &str, &Path) -> Option<ExitStatus>,
 ) -> Result<RemoveOutcome, String> {
     let (dir, env) = existing_profile(home, harness, label)?;
-    match status(harness, env, &dir) {
-        HarnessAuth::NeedsLogin => {}
-        HarnessAuth::LoggedIn => return Ok(RemoveOutcome::StillSignedIn),
-        HarnessAuth::Unknown => return Ok(RemoveOutcome::Unknown),
+    if let Some(kept) = removal_gate(status(harness, env, &dir)) {
+        return Ok(kept);
     }
     // Re-check right before deleting: the status command ran for seconds.
     check_on_disk(home, &dir)?;
@@ -401,9 +484,9 @@ pub async fn harness_profile_remove(profile: ProfileRef) -> Result<RemoveOutcome
             &profile.harness,
             &profile.label,
             |harness, env, dir| {
-                harness_status::probe_profile(harness, env, dir, &home)
-                    .map(|probe| probe.auth)
-                    .unwrap_or(HarnessAuth::Unknown)
+                harness_status::profile_exit_status(harness, env, dir, &home)
+                    .ok()
+                    .flatten()
             },
         )
     })
@@ -448,8 +531,13 @@ mod tests {
         }
     }
 
-    fn signed_out(_: &str, _: &str, _: &Path) -> HarnessAuth {
-        HarnessAuth::NeedsLogin
+    fn exit(code: i32) -> Option<ExitStatus> {
+        use std::os::unix::process::ExitStatusExt;
+        Some(ExitStatus::from_raw(code << 8))
+    }
+
+    fn signed_out(_: &str, _: &str, _: &Path) -> Option<ExitStatus> {
+        exit(SIGNED_OUT_EXIT_CODE)
     }
 
     #[test]
@@ -578,12 +666,12 @@ mod tests {
         create_profile(&home.0, "claude", "개인").unwrap();
         let dir = home.root().join("claude/개인");
         assert_eq!(
-            remove_profile(&home.0, "claude", "개인", |_, _, _| HarnessAuth::LoggedIn).unwrap(),
+            remove_profile(&home.0, "claude", "개인", |_, _, _| exit(0)).unwrap(),
             RemoveOutcome::StillSignedIn
         );
         assert!(dir.is_dir());
         assert_eq!(
-            remove_profile(&home.0, "claude", "개인", |_, _, _| HarnessAuth::Unknown).unwrap(),
+            remove_profile(&home.0, "claude", "개인", |_, _, _| None).unwrap(),
             RemoveOutcome::Unknown
         );
         assert!(dir.is_dir());
@@ -597,7 +685,7 @@ mod tests {
         let mut seen = None;
         remove_profile(&home.0, "codex", "회사", |harness, env, dir| {
             seen = Some((harness.to_string(), env.to_string(), dir.to_path_buf()));
-            HarnessAuth::LoggedIn
+            exit(0)
         })
         .unwrap();
         assert_eq!(
@@ -625,7 +713,7 @@ mod tests {
         let mut ran = false;
         let err = remove_profile(&home.0, "claude", "evil", |_, _, _| {
             ran = true;
-            HarnessAuth::NeedsLogin
+            exit(SIGNED_OUT_EXIT_CODE)
         })
         .unwrap_err();
         assert!(err.contains("symlink"), "{err}");
@@ -676,6 +764,179 @@ mod tests {
         // A path that names the root but walks out of it.
         let out = home.root().join("claude/../../../../..");
         assert!(check_on_disk(&home.0, &out).is_err());
+    }
+
+    /// What a firmlink or bind mount would do: the walk sees real directories,
+    /// but the folder resolves somewhere else. The resolved-path check refuses
+    /// the root itself, anything outside it, and a CLI's default folder even
+    /// when that folder were mounted under the root.
+    #[test]
+    fn a_folder_that_resolves_elsewhere_is_refused() {
+        let home = Home::new("resolved");
+        create_profile(&home.0, "claude", "개인").unwrap();
+        let root = home.root();
+        let inside = root.join("claude/개인").canonicalize().unwrap();
+        assert!(check_resolved(&home.0, &root, &inside).is_ok());
+        let outside = home.0.join("elsewhere");
+        std::fs::create_dir_all(&outside).unwrap();
+        for resolved in [
+            outside.canonicalize().unwrap(),
+            root.canonicalize().unwrap(),
+            home.0.clone(),
+        ] {
+            assert!(
+                check_resolved(&home.0, &root, &resolved).is_err(),
+                "{resolved:?}"
+            );
+        }
+        // A CLI's default folder, and one "mounted" under the root: the
+        // default folder check alone refuses both.
+        for name in DEFAULT_FOLDERS {
+            let default = home.0.join(name);
+            std::fs::create_dir_all(&default).unwrap();
+            let default = default.canonicalize().unwrap();
+            assert!(check_resolved(&home.0, &root, &default).is_err(), "{name}");
+        }
+        let fake_root = home.0.join(DEFAULT_FOLDERS[0]).join("profiles");
+        std::fs::create_dir_all(fake_root.join("claude/x")).unwrap();
+        let mounted = fake_root.join("claude/x").canonicalize().unwrap();
+        assert!(check_resolved(&home.0, &fake_root, &mounted)
+            .unwrap_err()
+            .contains("default folder"));
+    }
+
+    /// Only the measured "signed out" code deletes; any other non-zero keeps
+    /// the folder (#2878 security review M-2).
+    #[test]
+    fn only_the_signed_out_code_opens_the_removal_gate() {
+        assert_eq!(removal_gate(exit(SIGNED_OUT_EXIT_CODE)), None);
+        assert_eq!(removal_gate(exit(0)), Some(RemoveOutcome::StillSignedIn));
+        for code in [2, 3, 9, 126, 127, 255] {
+            assert_eq!(
+                removal_gate(exit(code)),
+                Some(RemoveOutcome::Unknown),
+                "{code}"
+            );
+        }
+        assert_eq!(removal_gate(None), Some(RemoveOutcome::Unknown));
+        {
+            use std::os::unix::process::ExitStatusExt;
+            // Killed by a signal: no code.
+            assert_eq!(
+                removal_gate(Some(ExitStatus::from_raw(9))),
+                Some(RemoveOutcome::Unknown)
+            );
+        }
+        let home = Home::new("gate");
+        create_profile(&home.0, "claude", "개인").unwrap();
+        assert_eq!(
+            remove_profile(&home.0, "claude", "개인", |_, _, _| exit(2)).unwrap(),
+            RemoveOutcome::Unknown
+        );
+        assert!(home.root().join("claude/개인").is_dir());
+    }
+
+    /// A label that reaches the folder only through the file system's
+    /// case/normalization folding is refused: the CLI would get a different
+    /// string than the one it signed in with (#2878 security review M-1).
+    #[test]
+    fn a_label_must_match_the_folder_name_byte_for_byte() {
+        let home = Home::new("exact");
+        create_profile(&home.0, "claude", "Work").unwrap();
+        create_profile(&home.0, "claude", "회사").unwrap();
+        let nfd = "회사".chars().collect::<String>(); // stays NFC; build NFD below
+        assert_eq!(nfd, "회사");
+        // Decomposed 「회사」: ㅎ ㅚ ㅅ ㅏ as conjoining jamo.
+        let decomposed = "\u{1112}\u{116C}\u{1109}\u{1161}";
+        for variant in ["WORK", "work", decomposed] {
+            let mut ran = false;
+            let result = remove_profile(&home.0, "claude", variant, |_, _, _| {
+                ran = true;
+                exit(SIGNED_OUT_EXIT_CODE)
+            });
+            assert!(result.is_err(), "{variant:?}: {result:?}");
+            assert!(!ran, "{variant:?}: status ran");
+            assert!(
+                existing_profile(&home.0, "claude", variant).is_err(),
+                "{variant:?}"
+            );
+        }
+        assert!(home.root().join("claude/Work").is_dir());
+        assert!(existing_profile(&home.0, "claude", "Work").is_ok());
+        assert!(existing_profile(&home.0, "claude", "회사").is_ok());
+    }
+
+    /// The folder is checked again after the status command: if it turned into
+    /// a symlink meanwhile, nothing is deleted through it.
+    #[test]
+    fn the_folder_is_checked_again_right_before_deleting() {
+        let home = Home::new("recheck");
+        let default = home.0.join(DEFAULT_FOLDERS[1]);
+        std::fs::create_dir_all(&default).unwrap();
+        std::fs::write(default.join("keep"), b"x").unwrap();
+        create_profile(&home.0, "codex", "개인").unwrap();
+        let dir = home.root().join("codex/개인");
+        let err = remove_profile(&home.0, "codex", "개인", |_, _, d| {
+            std::fs::remove_dir_all(d).unwrap();
+            symlink(&default, d).unwrap();
+            exit(SIGNED_OUT_EXIT_CODE)
+        })
+        .unwrap_err();
+        assert!(err.contains("symlink"), "{err}");
+        assert!(std::fs::symlink_metadata(&dir)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(default.join("keep").is_file());
+    }
+
+    /// `check_on_disk` takes a profile folder only: two steps under the root,
+    /// never the harness folder or something inside a profile.
+    #[test]
+    fn only_a_profile_folder_passes_the_disk_check() {
+        let home = Home::new("depth");
+        create_profile(&home.0, "claude", "개인").unwrap();
+        let inner = home.root().join("claude/개인/projects");
+        std::fs::create_dir_all(&inner).unwrap();
+        assert!(check_on_disk(&home.0, &home.root().join("claude/개인")).is_ok());
+        for path in [home.root().join("claude"), inner] {
+            assert_eq!(
+                check_on_disk(&home.0, &path).unwrap_err(),
+                "refused: not a profile folder",
+                "{path:?}"
+            );
+        }
+    }
+
+    /// Nothing is created through a symlinked `oort` folder.
+    #[test]
+    fn create_makes_nothing_through_a_symlink() {
+        let home = Home::new("create-link");
+        let real = home.0.join("real-oort");
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::create_dir_all(home.0.join("Library/Application Support")).unwrap();
+        symlink(&real, home.0.join("Library/Application Support/oort")).unwrap();
+        assert!(create_profile(&home.0, "claude", "개인")
+            .unwrap_err()
+            .contains("not a real directory"));
+        assert_eq!(
+            std::fs::read_dir(&real).unwrap().count(),
+            0,
+            "created through the link"
+        );
+    }
+
+    #[test]
+    fn a_label_has_no_invisible_character() {
+        for bad in [
+            "회\u{200B}사",
+            "\u{202E}lanosrep",
+            "a\u{FEFF}",
+            "a\u{2066}b",
+            "soft\u{00AD}hy",
+        ] {
+            assert!(check_label(bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
@@ -730,7 +991,8 @@ mod tests {
             "log::",
             "tracing::",
             "Command::new(",
-            "security",
+            "\"security\"",
+            "delete-generic-password",
         ] {
             assert!(!src.contains(needle), "harness_profile.rs uses {needle}");
         }

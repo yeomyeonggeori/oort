@@ -173,6 +173,23 @@ describe("unlinkController (가짜 CLI)", () => {
     unlink.dispose();
   });
 
+  it("정리만 실패했으면 다시 시도는 로그아웃을 건너뛰고 셸 정리만 다시 묻는다", async () => {
+    const cli = fakeCli(new Error("could not remove: busy"));
+    const unlink = createUnlinkController(PROFILE, cli.deps);
+    unlink.confirm();
+    await flush();
+    cli.exit(0);
+    await flush();
+    expect(unlink.getState().status).toEqual({ phase: "failed", reason: "remove-failed" });
+    cli.remove.mockResolvedValueOnce("removed");
+    unlink.confirm();
+    await flush();
+    expect(cli.spawns).toHaveLength(1);
+    expect(cli.remove).toHaveBeenCalledTimes(2);
+    expect(unlink.getState().status).toEqual({ phase: "done" });
+    unlink.dispose();
+  });
+
   it("시간 초과: PTY를 끝내고 실패로 둔다. 뒤늦은 종료 0도 폴더를 지우지 않는다", async () => {
     vi.useFakeTimers();
     const cli = fakeCli("removed");
