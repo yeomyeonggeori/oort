@@ -26,15 +26,44 @@ vi.mock("./LocalTerminalPane", () => ({
   },
 }));
 
+// 세션 목록의 git 읽기(#2855 `readWorkbenchGit`). PTY 1은 주 worktree, 2는 연결된
+// worktree다. 목록이 부른 명령을 모두 적는다.
+const gitCalls: string[] = [];
+const GIT_WORKTREES = {
+  kind: "worktrees",
+  worktrees: [
+    { folder: "momo", branch: "main", detached: false, locked: false, prunable: false },
+    { folder: "2774-xterm", branch: "feat/2774-xterm", detached: false, locked: false, prunable: false },
+  ],
+};
 vi.mock("@/lib/tauri", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/tauri")>()),
   detectLocalHarnesses: async () => [],
+  readWorkbenchGit: async (command: string, ptyId: number) => {
+    gitCalls.push(`${command}:${ptyId}`);
+    const folder = ptyId === 1 ? "momo" : "2774-xterm";
+    switch (command) {
+      case "g1":
+        return { outcome: "ok", value: { kind: "repo", name: folder } };
+      case "g2":
+        return { outcome: "ok", value: { kind: "branch", name: ptyId === 1 ? "main" : "feat/2774-xterm" } };
+      case "g3":
+        return { outcome: "ok", value: GIT_WORKTREES };
+      case "g7":
+        return ptyId === 1
+          ? { outcome: "noUpstream" }
+          : { outcome: "ok", value: { kind: "diff", files: [], totals: { files: 3, added: 128, deleted: 40, binary: 0 } } };
+      default:
+        return { outcome: "unknown" };
+    }
+  },
 }));
 
 const { LocalTerminalDock } = await import("./LocalTerminalDock");
 
 function fakeSessions() {
   const kills: number[] = [];
+  const signals = new Map<number, (s: unknown) => void>();
   const mirror = (): MirrorTerminal => ({
     cols: 80,
     rows: 24,
@@ -46,7 +75,10 @@ function fakeSessions() {
   let id = 1;
   const sessions = createLocalSessions({
     pty: {
-      spawn: async () => id++,
+      spawn: async (_r, _o, _e, onSignal) => {
+        signals.set(id, onSignal ?? (() => undefined));
+        return id++;
+      },
       write: async () => undefined,
       resize: async () => undefined,
       kill: async (n) => void kills.push(n),
@@ -55,7 +87,9 @@ function fakeSessions() {
     loadMirror: async () => ({ create: () => ({ mirror: mirror(), serialize: () => "" }) }),
     storage: () => null,
   });
-  return { sessions, kills };
+  /** 하네스 hook 신호(#2776)를 PTY `ptyId`의 칸에 보낸다. */
+  const signal = (ptyId: number, value: unknown) => act(() => signals.get(ptyId)?.(value));
+  return { sessions, kills, signal };
 }
 
 const reactAct = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
@@ -214,7 +248,9 @@ describe("「내 작업」 탭 (#2854)", () => {
     expect(q("local-terminal-dock")).toBeNull();
     expect(q("local-terminal-fullscreen")).toBeNull();
     expect(q("local-terminal-dock-close")).toBeNull();
-    expect(q("local-terminal-new")).not.toBeNull();
+    // 세션 목록(#2856)이 펴져 있으면 「새 세션」은 목록 바닥에 있다(시안 ① `.newbtn`).
+    expect(q("session-list-new")).not.toBeNull();
+    expect(q("local-terminal-new")).toBeNull();
   });
 
   it("⌃`·⌃⇧`는 탭에서 도크를 열지 않는다(같은 칸이 두 번 붙지 않는다). 키는 터미널에 새지 않는다", async () => {
@@ -247,7 +283,7 @@ describe("「내 작업」 탭 (#2854)", () => {
 describe("도는 칸 알림은 격자 상태 줄로 (R5 B-1)", () => {
   it("입력 거부가 저장 실패보다 먼저, 칸 번호와 함께", async () => {
     const { runningPaneNotice } = await vi.importActual<typeof import("./LocalTerminalPane")>("./LocalTerminalPane");
-    const base = { program: { kind: "shell" as const }, title: null, exit: null, error: null, restored: false };
+    const base = { program: { kind: "shell" as const }, title: null, signal: null, exit: null, error: null, restored: false };
     const views = new Map([
       ["p1", { ...base, paneId: "p1", phase: "running" as const, inputNotice: null, storageFailed: true }],
       ["p2", { ...base, paneId: "p2", phase: "running" as const, inputNotice: "보내지 못했습니다.", storageFailed: false }],
@@ -258,4 +294,145 @@ describe("도는 칸 알림은 격자 상태 줄로 (R5 B-1)", () => {
     expect(runningPaneNotice(views, ["p1", "p3"])).toMatch(/^1번 칸의 화면을 저장하지 못했습니다/);
     expect(runningPaneNotice(new Map(), [])).toBeNull();
   });
+});
+
+// 두 칸(p1 | p2) 배치를 미리 둔다. jsdom에는 크기가 없어 ⌘D 분할이 거부된다.
+function seedTwoPanes() {
+  window.localStorage.setItem(
+    "momo.web.workbench.layout.v1:dock",
+    JSON.stringify({
+      v: 1,
+      root: {
+        kind: "split",
+        id: "s1",
+        axis: "row",
+        ratio: 0.5,
+        first: { kind: "pane", id: "p1" },
+        second: { kind: "pane", id: "p2" },
+      },
+      focused: "p1",
+      maximized: null,
+      seq: 3,
+    })
+  );
+}
+
+function rows() {
+  return [...document.querySelectorAll<HTMLElement>("[data-testid='session-list-row']")];
+}
+
+describe("세션 목록 (#2856)", () => {
+  beforeEach(() => {
+    gitCalls.length = 0;
+  });
+
+  async function mountTwo() {
+    seedTwoPanes();
+    const { sessions, signal } = fakeSessions();
+    await mount(sessions, "tab");
+    await vi.waitFor(() => expect(q("fake-xterm-p2")).not.toBeNull());
+    await vi.waitFor(() => expect(rows()).toHaveLength(2));
+    await vi.waitFor(() => expect(q("session-list")?.textContent).toContain("feat/2774-xterm"));
+    return { sessions, signal };
+  }
+
+  it("저장소 하나 → 머리 없음, worktree마다 세션 하나 → 평탄화, diff는 G7만. git 읽기는 G1·G2·G3·G7뿐", async () => {
+    await mountTwo();
+    expect(q("session-list-group")).toBeNull();
+    expect(document.querySelectorAll("[data-testid='session-list-worktree']")).toHaveLength(0);
+    const [first, second] = rows();
+    expect(first!.textContent).toContain("main");
+    expect(first!.textContent).toContain("기본");
+    expect(second!.textContent).toContain("feat/2774-xterm");
+    expect(second!.textContent).toContain("+128");
+    expect(second!.textContent).toContain("−40");
+    // 기준점이 없는 주 worktree에는 숫자가 없다.
+    expect(first!.textContent).not.toMatch(/[+−]\d/);
+    expect(q("session-list-repo")?.textContent).toContain("momo");
+    expect(q("session-list-repo")?.textContent).toContain("2 worktree · 2 세션");
+    expect(new Set(gitCalls.map((c) => c.split(":")[0]))).toEqual(new Set(["g1", "g2", "g3", "g7"]));
+  });
+
+  it("⌘J는 목록의 지금 칸 행으로, ↓와 ⌃2는 칸 2로 간다", async () => {
+    await mountTwo();
+    key(document.body, { code: "KeyJ", key: "j", metaKey: true });
+    await vi.waitFor(() => expect(document.activeElement?.getAttribute("data-session-pane")).toBe("p1"));
+    key(document.activeElement!, { code: "ArrowDown", key: "ArrowDown" });
+    expect(document.activeElement?.getAttribute("data-session-pane")).toBe("p2");
+    key(document.activeElement!, { code: "Digit2", key: "2", ctrlKey: true });
+    await vi.waitFor(() => expect(document.activeElement).toBe(q("fake-xterm-p2")));
+    expect(rows()[1]!.getAttribute("aria-current")).toBe("true");
+    expect(rows()[0]!.hasAttribute("aria-current")).toBe(false);
+  });
+
+  it("행을 누르면 그 칸으로, 두 번 누르면 최대화", async () => {
+    await mountTwo();
+    act(() => rows()[1]!.click());
+    await vi.waitFor(() => expect(document.activeElement).toBe(q("fake-xterm-p2")));
+    act(() => {
+      rows()[1]!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    });
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-pane-id='p2']")?.hasAttribute("data-maximized")).toBe(true)
+    );
+  });
+
+  it("필터 「나를 기다림」은 한 줄 + 「전부 보기」, 묶기 선택은 기억한다", async () => {
+    await mountTwo();
+    act(() => q("session-list-filter-waiting")!.click());
+    expect(q("session-list-empty")?.textContent).toContain("나를 기다리는 세션이 없습니다.");
+    expect(q("session-list-filter-waiting")?.getAttribute("aria-pressed")).toBe("true");
+    act(() => q("session-list-show-all")!.click());
+    expect(rows()).toHaveLength(2);
+    expect(JSON.parse(window.localStorage.getItem("momo.web.workbench.sessionList.v1") ?? "{}")).toMatchObject({
+      filter: "all",
+    });
+  });
+
+  it("목록을 접으면 머리 줄에 펴기와 「새 세션」, ⌘J는 다시 펴고 행으로 간다", async () => {
+    await mountTwo();
+    act(() => q("session-list-collapse")!.click());
+    expect(q("session-list")).toBeNull();
+    expect(q("session-list-expand")).not.toBeNull();
+    expect(q("local-terminal-new")).not.toBeNull();
+    // 「내 작업」에서 ⌘J는 목록으로 간다. ⌘J를 내건 칸 목록 단추는 도크에만 있다(design-review H2).
+    expect(q("local-terminal-jump")).toBeNull();
+    expect(document.querySelectorAll("[aria-keyshortcuts='Meta+J']")).toHaveLength(1);
+    // 접기는 기억하고, 펴기는 이번 실행에만 기억한다(M3).
+    expect(window.localStorage.getItem("momo.web.workbench.sessionList.open.v1")).toBe("closed");
+    key(document.body, { code: "KeyJ", key: "j", metaKey: true });
+    await vi.waitFor(() => expect(q("session-list")).not.toBeNull());
+    await vi.waitFor(() => expect(document.activeElement?.getAttribute("data-session-row")).toBe(""));
+    expect(window.localStorage.getItem("momo.web.workbench.sessionList.open.v1")).toBeNull();
+  });
+
+
+  it("hook 신호가 칸 머리·테두리·바닥 띠·목록을 바꾸고, ⌃⇧J가 기다리는 칸으로 간다 (#2776)", async () => {
+    const { signal } = await mountTwo();
+    const pane = (id: string) => document.querySelector<HTMLElement>(`[data-pane-id="${id}"]`)!;
+    expect(pane("p2").hasAttribute("data-waiting")).toBe(false);
+    signal(2, "waiting-permission");
+    await vi.waitFor(() => expect(pane("p2").hasAttribute("data-waiting")).toBe(true));
+    expect(pane("p2").getAttribute("aria-label")).toContain("나를 기다림");
+    expect(pane("p2").querySelector("[data-testid='workbench-pane-waiting']")?.textContent).toContain(
+      "실행 허락을 기다려요"
+    );
+    expect(pane("p2").querySelector("[data-testid='status-mark']")?.getAttribute("data-status")).toBe("waiting");
+    expect(pane("p1").querySelector("[data-testid='status-mark']")?.getAttribute("data-status")).toBe("running");
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid='session-list-row'][data-status='waiting']")).not.toBeNull()
+    );
+
+    act(() => pane("p1").focus());
+    key(document.body, { code: "KeyJ", key: "J", ctrlKey: true, shiftKey: true });
+    await vi.waitFor(() => expect(pane("p2").hasAttribute("data-focused")).toBe(true));
+
+    signal(2, "turn-done");
+    await vi.waitFor(() => expect(pane("p2").hasAttribute("data-waiting")).toBe(false));
+    expect(pane("p2").querySelector("[data-testid='status-mark']")?.getAttribute("data-status")).toBe("done");
+    // 이제 기다리는 칸이 없다.
+    key(document.body, { code: "KeyJ", key: "J", ctrlKey: true, shiftKey: true });
+    await vi.waitFor(() => expect(q("workbench-notice")?.textContent).toBe("나를 기다리는 칸이 없습니다."));
+  });
+
 });

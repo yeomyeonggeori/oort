@@ -86,6 +86,17 @@ export function workTabFits(input: WorkTabWidthInput): boolean {
   return workTabPaneWidth(input) >= WORKBENCH_MIN_PANE.width;
 }
 
+/**
+ * 세션 목록(268)을 편 채로 이 배치가 칸 최소 폭을 지키는가(#2856). `minGridWidth`는
+ * 배치의 최소 폭(`minimumSize(layout.root).width`)이다. 못 지키면 목록을 스스로
+ * 접는다(사람이 직접 편 목록은 접지 않는다). 1440 창 4×2(984)는 지키고, 1280 창
+ * 4×2는 못 지킨다(924).
+ */
+export function sessionListFits(windowWidth: number, minGridWidth: number): boolean {
+  const grid = windowWidth - WORK_TAB_RAIL_PX - WORK_TAB_SESSION_LIST_PX - 2 * WORK_TAB_GRID_PAD_PX;
+  return grid >= minGridWidth;
+}
+
 /** 사이드바 두 줄과 화면 제목. 줄 이름과 도착한 화면의 제목이 같은 말이다(#1146 N4). */
 export const WORK_NAV = {
   mine: "내 작업",

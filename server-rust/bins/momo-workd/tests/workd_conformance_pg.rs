@@ -619,17 +619,28 @@ impl Workd {
         lines[lines.len().saturating_sub(40)..].join("\n")
     }
 
-    /// `momo-workd register` with the owner's token in the environment.
+    /// `momo-workd register --token-stdin`, the way the desktop app hands the
+    /// owner's token over (#2778): one stdin line, not the environment.
     async fn register(&self, token: &str) -> Value {
-        let output = tokio::process::Command::new(WORKD)
-            .args(["register", "--config"])
+        use tokio::io::AsyncWriteExt as _;
+        let mut child = tokio::process::Command::new(WORKD)
+            .args(["register", "--token-stdin", "--config"])
             .arg(&self.config)
             .arg("--dev-key-file")
             .arg(&self.key)
-            .env("MOMO_WORKD_REGISTER_TOKEN", token)
-            .output()
-            .await
+            .env_remove("MOMO_WORKD_REGISTER_TOKEN")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
             .expect("run momo-workd register");
+        let mut stdin = child.stdin.take().expect("stdin");
+        stdin
+            .write_all(format!("{token}\n").as_bytes())
+            .await
+            .unwrap();
+        drop(stdin);
+        let output = child.wait_with_output().await.expect("momo-workd register");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(output.status.success(), "register failed: {stderr}");
         assert!(

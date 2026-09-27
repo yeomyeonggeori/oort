@@ -505,6 +505,96 @@ fn tauri_grants_the_git_read_to_the_local_main_webview_only() {
     assert!(!mobile.iter().any(|c| c == command));
 }
 
+const WORK_HOST_COMMANDS: [&str; 5] = [
+    "work_host_status",
+    "work_host_register",
+    "work_host_start",
+    "work_host_stop",
+    "work_host_forget",
+];
+const WORK_HOST_PERMISSIONS: [&str; 5] = [
+    "allow-work-host-status",
+    "allow-work-host-register",
+    "allow-work-host-start",
+    "allow-work-host-stop",
+    "allow-work-host-forget",
+];
+
+/// Tauri's resolver: the work host commands (ADR-0188 D2, #2778) answer the
+/// main webview's bundled origin only. A page loaded from the network — the
+/// team server's own origin included — must never register this Mac as a
+/// host or read its registration.
+#[test]
+fn tauri_grants_the_work_host_commands_to_the_local_main_webview_only() {
+    let mut context = crate::context();
+    let authority = context.runtime_authority_mut();
+    let local = tauri::ipc::Origin::Local;
+    for command in WORK_HOST_COMMANDS {
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &local)
+                .is_some(),
+            "{command} local main"
+        );
+        for url in [
+            "https://evil.example/",
+            "https://oort-team.up.railway.app/",
+            "http://127.0.0.1:8080/",
+        ] {
+            let remote = tauri::ipc::Origin::Remote {
+                url: url.parse().unwrap(),
+            };
+            assert!(
+                authority
+                    .resolve_access(command, "main", "main", &remote)
+                    .is_none(),
+                "{command} from {url}"
+            );
+        }
+        assert!(authority
+            .resolve_access(command, "other", "other", &local)
+            .is_none());
+        assert!(authority
+            .resolve_access(command, "main", "embedded", &local)
+            .is_none());
+    }
+    let blocks = handler_blocks(LIB_RS);
+    let desktop = blocks
+        .iter()
+        .find(|b| b.contains(&"updater_check".to_string()))
+        .unwrap();
+    let mobile = blocks
+        .iter()
+        .find(|b| !b.contains(&"updater_check".to_string()))
+        .unwrap();
+    for command in WORK_HOST_COMMANDS {
+        assert!(desktop.iter().any(|c| c == command), "{command}");
+        assert!(!mobile.iter().any(|c| c == command), "{command}");
+    }
+}
+
+/// `tauri.conf.json` bundles the sidecar under the name `work_host.rs` looks
+/// for, and `cargo tauri build` builds the real one first.
+#[test]
+fn the_bundle_carries_the_workd_sidecar() {
+    let conf: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+    assert_eq!(
+        conf["bundle"]["externalBin"],
+        serde_json::json!(["binaries/momo-workd"])
+    );
+    assert_eq!(crate::work_host::SIDECAR_NAME, "momo-workd");
+    let before = conf["build"]["beforeBuildCommand"].as_str().unwrap();
+    assert!(
+        before.starts_with("sh ../../scripts/desktop/build_workd_sidecar.sh && "),
+        "{before}"
+    );
+    assert!(std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../scripts/desktop/build_workd_sidecar.sh"
+    ))
+    .is_file());
+}
+
 /// The capability files themselves: only `pty.json` grants a PTY command, it
 /// names the main window only, and no capability opens anything to remote
 /// URLs. Widening any of these is RED here before it is a hole.
@@ -514,7 +604,12 @@ fn only_the_local_terminal_capability_grants_pty_and_none_is_remote() {
     let names: Vec<&str> = caps.iter().map(|(n, _)| n.as_str()).collect();
     assert_eq!(
         names,
-        ["default.json", "git-read.json", "pty.json"],
+        [
+            "default.json",
+            "git-read.json",
+            "pty.json",
+            "work-host.json"
+        ],
         "new capability file: review it here"
     );
     for (name, cap) in &caps {
@@ -542,6 +637,26 @@ fn only_the_local_terminal_capability_grants_pty_and_none_is_remote() {
             );
         } else {
             assert!(git.is_empty(), "{name} grants {git:?}");
+        }
+        let host: Vec<&str> = permission_ids(cap)
+            .into_iter()
+            .filter(|p| p.contains("work-host"))
+            .collect();
+        if name == "work-host.json" {
+            assert_eq!(host, WORK_HOST_PERMISSIONS);
+            assert_eq!(
+                permission_ids(cap).len(),
+                5,
+                "work-host.json grants five commands"
+            );
+            assert_eq!(cap["webviews"], serde_json::json!(["main"]));
+            assert_eq!(cap["platforms"], serde_json::json!(["macOS"]));
+            assert!(
+                cap.get("windows").is_none(),
+                "a window grant covers child webviews"
+            );
+        } else {
+            assert!(host.is_empty(), "{name} grants {host:?}");
         }
         if name == "pty.json" {
             assert_eq!(
@@ -824,6 +939,16 @@ fn nothing_but_the_command_table_reaches_the_pty() {
         ".manage(pty::PtyState::default())",
         "if let Some(state) = _app.try_state::<pty::PtyState>() {",
         "if let Some(state) = webview.try_state::<pty::PtyState>() {",
+        // The pane-signal listener (#2776) gets the session table to hand a
+        // hook's signal to its pane; `pane_signal.rs` below pins what it does.
+        "let manager = app.state::<pty::PtyState>().0.clone();",
+    ];
+    // The pane-signal listener (#2776) may name the session table and call
+    // exactly one method on it: `deliver_signal`.
+    const PANE_SIGNAL_ALLOWED: &[&str] = &[
+        "use crate::pty::PtyManager;",
+        "fn serve_one(stream: UnixStream, manager: &PtyManager) {",
+        "pub fn serve(listener: UnixListener, manager: Arc<PtyManager>) {",
     ];
     const GIT_READ_ALLOWED: &[&str] = &["state: tauri::State<'_, crate::pty::PtyState>,"];
     let sources = crate_sources();
@@ -850,6 +975,25 @@ fn nothing_but_the_command_table_reaches_the_pty() {
                     "git_read.rs uses the session table beyond folder_of"
                 );
                 assert!(code.contains("state.0.folder_of(request.pane_id)"));
+            }
+            "pane_signal.rs" => {
+                for line in code.lines() {
+                    if idents(line).into_iter().any(is_pty_ident) {
+                        assert!(
+                            PANE_SIGNAL_ALLOWED.contains(&line.trim()),
+                            "pane_signal.rs reaches the PTY: {}",
+                            line.trim()
+                        );
+                    }
+                }
+                let calls: Vec<&str> = code
+                    .match_indices("manager.")
+                    .map(|(at, _)| code[at..].split('(').next().unwrap_or(""))
+                    .collect();
+                assert!(
+                    calls.iter().all(|c| *c == "manager.deliver_signal"),
+                    "pane_signal.rs uses the session table beyond deliver_signal: {calls:?}"
+                );
             }
             "lib.rs" => {
                 for line in code.lines() {
@@ -1003,6 +1147,55 @@ fn nothing_but_the_command_table_reaches_the_pty() {
         assert!(!enqueue.contains(banned), "PtyManager::write uses {banned}");
     }
     assert_eq!(commands, PTY_COMMANDS, "pty.rs commands");
+}
+
+/// ADR-0190 D4-b 「긁지 않는다」 (#2776): a pane's status comes from what the
+/// harness says about itself, never from what it printed.
+///
+/// * The signal path (`pane_signal.rs`) names no output identifier and reads
+///   no PTY.
+/// * In `pty.rs`, the only caller of `PtySink::signal` is `deliver_signal`
+///   (the socket's path), and the output reader `read_loop` never calls it.
+#[test]
+fn pane_status_never_reads_terminal_output() {
+    let sources = crate_sources();
+    let signal_src = &sources
+        .iter()
+        .find(|(n, _)| n == "pane_signal.rs")
+        .expect("pane_signal.rs")
+        .1;
+    let signal_code = code_only(
+        &signal_src[..signal_src
+            .find("#[cfg(test)]\nmod tests")
+            .unwrap_or(signal_src.len())],
+    );
+    for banned in [
+        "output",
+        "read_loop",
+        "try_clone_reader",
+        "MasterPty",
+        "scrollback",
+    ] {
+        assert!(
+            !idents(&signal_code).contains(&banned),
+            "pane_signal.rs names {banned}"
+        );
+    }
+
+    let pty_src = &sources.iter().find(|(n, _)| n == "pty.rs").unwrap().1;
+    let pty = code_only(
+        &pty_src[..pty_src
+            .find("#[cfg(test)]\nmod tests")
+            .unwrap_or(pty_src.len())],
+    );
+    let read_loop = &pty[pty.find("fn read_loop(").expect("read_loop")..];
+    let read_loop = &read_loop[..read_loop.find("\n}").unwrap()];
+    assert!(!read_loop.contains("signal"), "read_loop makes a signal");
+    let deliver = &pty[pty.find("pub fn deliver_signal(").expect("deliver_signal")..];
+    let deliver = &deliver[..deliver.find("\n    }").unwrap()];
+    let callers = pty.matches("sink.signal(").count();
+    assert_eq!(callers, 1, "one caller of PtySink::signal");
+    assert!(deliver.contains("sink.signal(signal)"));
 }
 
 #[test]
