@@ -33,6 +33,12 @@
 //    `FILTER_CHECK_ARGS` (a config read, same prefix) and run only if every
 //    configured filter is one of `FILTER_ALLOWED` (git-lfs, verbatim);
 //    otherwise the answer is unknown(filter) (ADR-0190 D3-c 증보).
+//    G5 never verifies signatures (`--no-show-signature` and
+//    `log.showSignature=false`), G6/G8 never recurse into submodules
+//    (`--ignore-submodules=all`), and a partial clone never fetches
+//    (`GIT_NO_LAZY_FETCH=1`). ADR-0190 D3-c keeps the full table of config
+//    keys that can start a program and what stops each; re-measure it when
+//    git is upgraded.
 // 4. **Parsed here, fields only.** stdin and stderr are null, stdout is piped
 //    into a buffer of at most `MAX_STDOUT` bytes and parsed in this file. The
 //    webview gets the fields the ADR table lists — never stdout itself, a
@@ -64,6 +70,8 @@ pub const GIT_PREFIX: &[&str] = &[
     "core.pager=cat",
     "-c",
     "color.ui=false",
+    "-c",
+    "log.showSignature=false",
 ];
 
 /// Set on every git child after every inherited `GIT_*` is removed.
@@ -71,6 +79,10 @@ pub const GIT_ENV: &[(&str, &str)] = &[
     ("GIT_TERMINAL_PROMPT", "0"),
     ("GIT_OPTIONAL_LOCKS", "0"),
     ("GIT_PAGER", "cat"),
+    // A partial clone would fetch a missing object from its promisor remote
+    // — the network, and with it transport settings (ssh command, ext::
+    // helpers). Refuse instead (git 2.45+; older git ignores it).
+    ("GIT_NO_LAZY_FETCH", "1"),
 ];
 
 /// Inherited variables starting with this are removed before `GIT_ENV` is
@@ -136,6 +148,7 @@ pub const GIT_COMMANDS: &[GitCommand] = &[
         args: &[
             "log",
             "--no-color",
+            "--no-show-signature",
             "--format=%h%x00%ct%x00%(trailers:key=Co-Authored-By,valueonly,separator=%x2C)",
             "-n",
             "50",
@@ -149,6 +162,7 @@ pub const GIT_COMMANDS: &[GitCommand] = &[
             "--numstat",
             "--no-ext-diff",
             "--no-textconv",
+            "--ignore-submodules=all",
             "-z",
             "HEAD",
         ],
@@ -166,7 +180,13 @@ pub const GIT_COMMANDS: &[GitCommand] = &[
     },
     GitCommand {
         read: GitRead::G8,
-        args: &["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
+        args: &[
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=normal",
+            "--ignore-submodules=all",
+        ],
     },
 ];
 
@@ -355,6 +375,10 @@ fn run_git(git: &Path, folder: &Path, args: &[&str], timeout: Duration) -> Optio
     for (key, value) in GIT_ENV {
         cmd.env(key, value);
     }
+    // Its own process group, so a timeout ends whatever git started too
+    // (a filter, a helper) — not just git.
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
     let mut child = cmd.spawn().ok()?;
     let mut stdout = child.stdout.take()?;
     // Drain on a thread so a full pipe cannot stall the child while this one
@@ -394,7 +418,7 @@ fn run_git(git: &Path, folder: &Path, args: &[&str], timeout: Duration) -> Optio
         }
     };
     let Some(status) = status else {
-        let _ = child.kill();
+        kill_group(&mut child);
         let _ = child.wait();
         return None;
     };
@@ -411,6 +435,21 @@ fn run_git(git: &Path, folder: &Path, args: &[&str], timeout: Duration) -> Optio
         code: status.code(),
         stdout,
     })
+}
+
+/// SIGKILL to the child's whole process group (it leads one, see
+/// `process_group(0)`), then to the child itself as a fallback.
+fn kill_group(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    if let Ok(pid) = i32::try_from(child.id()) {
+        if pid > 0 {
+            // SAFETY: plain syscall on a pid this process spawned.
+            unsafe {
+                libc::kill(-pid, libc::SIGKILL);
+            }
+        }
+    }
+    let _ = child.kill();
 }
 
 /// Before G6/G8: is every configured clean/process filter one of
@@ -478,8 +517,19 @@ pub fn parse(read: GitRead, out: &[u8]) -> Option<GitValue> {
     }
 }
 
+/// Invisible format characters that can reorder or hide what a name or a
+/// path shows (bidi overrides and isolates, zero-width marks, BOM).
+fn is_hidden_format(c: char) -> bool {
+    matches!(c,
+        '\u{061C}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}'
+        | '\u{2060}'..='\u{2069}' | '\u{FEFF}')
+}
+
 fn cap(text: &str, max: usize) -> String {
-    text.chars().filter(|c| !c.is_control()).take(max).collect()
+    text.chars()
+        .filter(|c| !c.is_control() && !is_hidden_format(*c))
+        .take(max)
+        .collect()
 }
 
 /// Last element of an absolute path, capped; never a separator.
@@ -748,6 +798,7 @@ mod tests {
                     vec![
                         "log",
                         "--no-color",
+                        "--no-show-signature",
                         "--format=%h%x00%ct%x00%(trailers:key=Co-Authored-By,valueonly,separator=%x2C)",
                         "-n",
                         "50",
@@ -756,7 +807,15 @@ mod tests {
                 ),
                 (
                     GitRead::G6,
-                    vec!["diff", "--numstat", "--no-ext-diff", "--no-textconv", "-z", "HEAD"]
+                    vec![
+                        "diff",
+                        "--numstat",
+                        "--no-ext-diff",
+                        "--no-textconv",
+                        "--ignore-submodules=all",
+                        "-z",
+                        "HEAD"
+                    ]
                 ),
                 (
                     GitRead::G7,
@@ -771,7 +830,13 @@ mod tests {
                 ),
                 (
                     GitRead::G8,
-                    vec!["status", "--porcelain=v1", "-z", "--untracked-files=normal"]
+                    vec![
+                        "status",
+                        "--porcelain=v1",
+                        "-z",
+                        "--untracked-files=normal",
+                        "--ignore-submodules=all"
+                    ]
                 ),
             ]
         );
@@ -785,7 +850,9 @@ mod tests {
                 "-c",
                 "core.pager=cat",
                 "-c",
-                "color.ui=false"
+                "color.ui=false",
+                "-c",
+                "log.showSignature=false"
             ]
         );
         assert_eq!(
@@ -793,7 +860,8 @@ mod tests {
             [
                 ("GIT_TERMINAL_PROMPT", "0"),
                 ("GIT_OPTIONAL_LOCKS", "0"),
-                ("GIT_PAGER", "cat")
+                ("GIT_PAGER", "cat"),
+                ("GIT_NO_LAZY_FETCH", "1")
             ]
         );
         // The request enum has exactly the eight numbers.
@@ -984,6 +1052,31 @@ mod tests {
         assert_eq!(parse(GitRead::G1, b"relative/path\n"), None);
         assert_eq!(parse(GitRead::G1, b"/a\n/b\n"), None);
         assert_eq!(parse(GitRead::G1, b"/\n"), None);
+    }
+
+    /// Bidi overrides, isolates and zero-width marks are dropped from names
+    /// and paths, so a name cannot display as something else.
+    #[test]
+    fn names_and_paths_lose_hidden_format_characters() {
+        assert_eq!(
+            parse(GitRead::G2, "main\u{202E}txt.exe\u{200B}\n".as_bytes()),
+            Some(GitValue::Branch {
+                name: Some("maintxt.exe".into())
+            })
+        );
+        let Some(GitValue::Diff { files, .. }) = parse(
+            GitRead::G6,
+            "1\t0\tsrc/\u{2066}a\u{2069}.rs\u{FEFF}\0".as_bytes(),
+        ) else {
+            panic!()
+        };
+        assert_eq!(files[0].path, "src/a.rs");
+        assert_eq!(
+            parse(GitRead::G1, "/Users/me/re\u{202D}po\n".as_bytes()),
+            Some(GitValue::Repo {
+                name: "repo".into()
+            })
+        );
     }
 
     #[test]
@@ -1270,13 +1363,15 @@ not a record: SECRET SUBJECT\n\
         /// A fake git receives exactly prefix + row, for every row.
         #[test]
         fn the_fixed_argv_is_what_git_receives() {
+            // The fakes below find the subcommand at ${11}: after the prefix.
+            assert_eq!(GIT_PREFIX.len(), 10);
             let dir = Scratch::new("argv");
             let log = dir.0.join("argv.log");
             let git = dir.script(
                 "git",
                 &format!(
                     "for a in \"$@\"; do printf '%s\\n' \"$a\"; done >> '{}'\n\
-                     [ \"$9\" = config ] && exit 1\nprintf '/x/repo\\n'",
+                     [ \"${{11}}\" = config ] && exit 1\nprintf '/x/repo\\n'",
                     log.display()
                 ),
             );
@@ -1308,7 +1403,7 @@ not a record: SECRET SUBJECT\n\
                 "git",
                 &format!(
                     "echo '{SUBJECT} {TOKEN}' >&2\n\
-                     case \"$9\" in\n\
+                     case \"${{11}}\" in\n\
                      rev-parse) printf '/x/repo\\n{SUBJECT}\\n' ;;\n\
                      rev-list) printf '1\\t2\\t{SUBJECT}\\n' ;;\n\
                      log) printf 'abc1234\\0%s\\0Ann <{TOKEN}@x>\\0{SUBJECT}\\n{SUBJECT}\\n{TOKEN}\\n' 1790000000 ;;\n\
@@ -1410,7 +1505,7 @@ not a record: SECRET SUBJECT\n\
                  [ -z \"${GIT_EXTERNAL_DIFF+x}\" ] && [ -z \"${GIT_CONFIG_PARAMETERS+x}\" ] && \
                  [ -z \"${GIT_INDEX_FILE+x}\" ] && \
                  [ \"$GIT_TERMINAL_PROMPT\" = 0 ] && [ \"$GIT_OPTIONAL_LOCKS\" = 0 ] && \
-                 [ \"$GIT_PAGER\" = cat ] && printf '/x/repo\\n'",
+                 [ \"$GIT_PAGER\" = cat ] && [ \"$GIT_NO_LAZY_FETCH\" = 1 ] && printf '/x/repo\\n'",
             );
             let set = [
                 "GIT_DIR",
@@ -1541,6 +1636,22 @@ not a record: SECRET SUBJECT\n\
                 ("pager.status", pwn("pager-status")),
                 ("gpg.program", pwn("gpg")),
                 ("trailer.pwn.cmd", pwn("trailer")),
+                // Keys that only interactive, merge, gc or network paths
+                // read: pinned here so a git upgrade that changes that
+                // shows up as a marker.
+                ("core.editor", pwn("editor")),
+                ("sequence.editor", pwn("sequence-editor")),
+                ("core.askPass", pwn("askpass")),
+                ("credential.helper", pwn("credential")),
+                ("core.sshCommand", pwn("ssh-command")),
+                ("core.alternateRefsCommand", pwn("alternate-refs")),
+                ("merge.pwn.driver", pwn("merge-driver")),
+                ("gpg.ssh.program", pwn("gpg-ssh")),
+                ("gpg.x509.program", pwn("gpg-x509")),
+                (
+                    "remote.origin.url",
+                    PathBuf::from("ext::".to_string() + &pwn("ext").display().to_string()),
+                ),
             ];
             for (key, program) in &cfg {
                 sh(
@@ -1563,6 +1674,24 @@ not a record: SECRET SUBJECT\n\
                 );
             }
             sh(&repo, &format!("'{g}' config log.showSignature true"));
+            sh(&repo, &format!("'{g}' config protocol.ext.allow always"));
+            sh(&repo, &format!("'{g}' config gc.auto 1"));
+            sh(&repo, &format!("'{g}' config diff.submodule diff"));
+            sh(&repo, &format!("'{g}' config status.submoduleSummary true"));
+            // An included file is read like the config itself.
+            let inc = dir.0.join("included.cfg");
+            std::fs::write(
+                &inc,
+                format!(
+                    "[core]\n\tfsmonitor = {}\n",
+                    pwn("include-fsmonitor").display()
+                ),
+            )
+            .unwrap();
+            sh(
+                &repo,
+                &format!("'{g}' config include.path '{}'", inc.display()),
+            );
             sh(
                 &repo,
                 &format!("'{g}' config core.hooksPath '{}'", hooks.display()),
@@ -1679,9 +1808,226 @@ not a record: SECRET SUBJECT\n\
                 .unwrap()
                 .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
                 .collect();
-            assert!(fired.iter().any(|f| f == "fsmonitor"), "{fired:?}");
+            assert!(fired.iter().any(|f| f == "include-fsmonitor"), "{fired:?}");
             // The driver's own command outranks `diff.external`.
             assert!(fired.iter().any(|f| f == "diff-command"), "{fired:?}");
+        }
+
+        fn markers(dir: &Path) -> Vec<String> {
+            std::fs::read_dir(dir)
+                .map(|entries| {
+                    entries
+                        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+
+        fn run_all(git: &Path, repo: &Path) -> Vec<GitReadResult> {
+            GIT_COMMANDS
+                .iter()
+                .map(|row| read(git, repo, row.read, T))
+                .collect()
+        }
+
+        fn plain(git: &Path, repo: &Path, args: &[&str]) {
+            let _ = clean(Command::new(git))
+                .args(args)
+                .current_dir(repo)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+
+        /// Review H1: a submodule's own config names a clean filter. The
+        /// top-level filter check does not see it; G6/G8 must not recurse
+        /// into the submodule (`--ignore-submodules=all`). Control: plain
+        /// status/diff in the same repository does run it.
+        #[test]
+        fn a_submodule_filter_does_not_run() {
+            let Some(git) = real_git() else {
+                eprintln!("skip: no working git on this machine");
+                return;
+            };
+            let _serial = REAL_GIT.lock().unwrap_or_else(|e| e.into_inner());
+            let dir = Scratch::new("submodule");
+            let marks = dir.0.join("marks");
+            std::fs::create_dir_all(&marks).unwrap();
+            let sub_src = dir.0.join("subsrc");
+            let repo = dir.0.join("repo");
+            std::fs::create_dir_all(&sub_src).unwrap();
+            std::fs::create_dir_all(&repo).unwrap();
+            let g = git.display();
+            let id = "'-c' 'user.email=t@example.com' '-c' 'user.name=t'";
+            sh(
+                &sub_src,
+                &format!(
+                    "'{g}' init -q -b main . && printf 'a.txt filter=pwn\\n' > .gitattributes && \
+                     printf 'one\\n' > a.txt && '{g}' add . && '{g}' {id} commit -q -m sub"
+                ),
+            );
+            sh(
+                &repo,
+                &format!(
+                    "'{g}' init -q -b main . && printf 'x\\n' > top.txt && '{g}' add . && \
+                     '{g}' -c protocol.file.allow=always submodule --quiet add '{}' sub && \
+                     '{g}' {id} commit -q -m top && '{g}' branch -q up && \
+                     '{g}' branch -q --set-upstream-to=up && \
+                     '{g}' config diff.submodule diff && '{g}' config status.submoduleSummary true && \
+                     '{g}' -C sub config filter.pwn.clean 'touch {m}/sub-clean; cat' && \
+                     printf 'two\\n' > sub/a.txt && touch -t 200001010000 sub/a.txt",
+                    sub_src.display(),
+                    m = marks.display()
+                ),
+            );
+            let results = run_all(&git, &repo);
+            assert!(markers(&marks).is_empty(), "ran: {:?}", markers(&marks));
+            // The top level has no filter, so G6/G8 do run.
+            assert!(
+                matches!(results[5], GitReadResult::Ok { .. }),
+                "{:?}",
+                results[5]
+            );
+            assert!(
+                matches!(results[7], GitReadResult::Ok { .. }),
+                "{:?}",
+                results[7]
+            );
+            plain(&git, &repo, &["status", "--porcelain=v1"]);
+            plain(&git, &repo, &["diff", "--numstat", "HEAD"]);
+            assert!(
+                !markers(&marks).is_empty(),
+                "control: plain git should reach the submodule filter"
+            );
+        }
+
+        /// Review H2: `log.showSignature` + a signed commit runs the
+        /// signature program even with a custom format. G5 pins
+        /// `--no-show-signature` and the prefix sets the key false.
+        #[test]
+        fn a_signed_commit_runs_no_signature_program() {
+            let Some(git) = real_git() else {
+                eprintln!("skip: no working git on this machine");
+                return;
+            };
+            let _serial = REAL_GIT.lock().unwrap_or_else(|e| e.into_inner());
+            let dir = Scratch::new("signed");
+            let marks = dir.0.join("marks");
+            std::fs::create_dir_all(&marks).unwrap();
+            let repo = dir.0.join("repo");
+            std::fs::create_dir_all(&repo).unwrap();
+            let m = marks.display();
+            let gpg = dir.script("pwn-gpg", &format!("touch '{m}/gpg'\nexit 1"));
+            let g = git.display();
+            sh(
+                &repo,
+                &format!(
+                    "'{g}' init -q -b main . && printf 'one\\n' > a.txt && '{g}' add . && \
+                     '{g}' -c user.email=t@example.com -c user.name=t commit -q -m base && \
+                     '{g}' branch -q up && '{g}' branch -q --set-upstream-to=up && \
+                     tree=$('{g}' write-tree) && parent=$('{g}' rev-parse HEAD) && \
+                     printf 'tree %s\\nparent %s\\nauthor t <t@example.com> 1790000000 +0000\\ncommitter t <t@example.com> 1790000000 +0000\\ngpgsig -----BEGIN PGP SIGNATURE-----\\n \\n iQEzBAABCAAdFiEE\\n -----END PGP SIGNATURE-----\\n\\n{SUBJECT}\\n' \"$tree\" \"$parent\" > ../c.txt && \
+                     sha=$('{g}' hash-object -t commit -w ../c.txt) && '{g}' update-ref refs/heads/main \"$sha\" && \
+                     '{g}' config log.showSignature true && '{g}' config gpg.program '{}'",
+                    gpg.display()
+                ),
+            );
+            let g5 = read(&git, &repo, GitRead::G5, T);
+            assert!(markers(&marks).is_empty(), "ran: {:?}", markers(&marks));
+            let GitReadResult::Ok {
+                value: GitValue::Commits { commits },
+            } = &g5
+            else {
+                panic!("{g5:?}");
+            };
+            assert_eq!(commits.len(), 1);
+            assert!(!serde_json::to_string(&g5).unwrap().contains("SECRET"));
+            for row in GIT_COMMANDS {
+                let _ = read(&git, &repo, row.read, T);
+            }
+            assert!(markers(&marks).is_empty(), "ran: {:?}", markers(&marks));
+            plain(&git, &repo, &["log", "-n", "1", "--format=%h"]);
+            assert_eq!(markers(&marks), ["gpg"], "control: plain log verifies");
+        }
+
+        /// A partial clone missing blobs: G6/G7 would fetch them from the
+        /// promisor remote. The remote here is an `ext::` helper that
+        /// leaves a marker; `GIT_NO_LAZY_FETCH=1` keeps every read local.
+        #[test]
+        fn a_partial_clone_never_fetches() {
+            let Some(git) = real_git() else {
+                eprintln!("skip: no working git on this machine");
+                return;
+            };
+            let _serial = REAL_GIT.lock().unwrap_or_else(|e| e.into_inner());
+            let dir = Scratch::new("partial");
+            let marks = dir.0.join("marks");
+            std::fs::create_dir_all(&marks).unwrap();
+            let src = dir.0.join("src");
+            std::fs::create_dir_all(&src).unwrap();
+            let m = marks.display();
+            let ext = dir.script("pwn-ext", &format!("touch '{m}/fetch'\nexit 1"));
+            let g = git.display();
+            sh(
+                &src,
+                &format!(
+                    "'{g}' init -q -b main . && '{g}' config uploadpack.allowFilter true && \
+                     printf 'one\\n' > a.txt && '{g}' add . && \
+                     '{g}' -c user.email=t@example.com -c user.name=t commit -q -m one && \
+                     printf 'two\\n' >> a.txt && \
+                     '{g}' -c user.email=t@example.com -c user.name=t commit -qam two"
+                ),
+            );
+            sh(
+                &dir.0,
+                &format!(
+                    "'{g}' clone -q --no-checkout --filter=blob:none 'file://{}' repo && \
+                     cd repo && '{g}' branch -q up HEAD~1 && '{g}' branch -q --set-upstream-to=up && \
+                     '{g}' config protocol.ext.allow always && \
+                     '{g}' config remote.origin.url 'ext::{}'",
+                    src.display(),
+                    ext.display()
+                ),
+            );
+            let repo = dir.0.join("repo");
+            let results = run_all(&git, &repo);
+            assert!(
+                markers(&marks).is_empty(),
+                "fetched: {:?} {results:?}",
+                markers(&marks)
+            );
+            plain(&git, &repo, &["diff", "--numstat", "@{upstream}...HEAD"]);
+            assert_eq!(markers(&marks), ["fetch"], "control: plain diff fetches");
+        }
+
+        /// A timeout ends git's children too, not just git.
+        #[test]
+        fn a_timeout_ends_the_whole_process_group() {
+            let dir = Scratch::new("group");
+            let pidfile = dir.0.join("grandchild.pid");
+            let git = dir.script(
+                "git",
+                &format!(
+                    "/bin/sleep 30 &\necho $! > '{}'\nexec /bin/sleep 30",
+                    pidfile.display()
+                ),
+            );
+            assert_eq!(
+                read(&git, &dir.0, GitRead::G1, Duration::from_millis(500)),
+                GitReadResult::UNKNOWN
+            );
+            let pid: i32 = std::fs::read_to_string(&pidfile)
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            // SAFETY: signal 0 only checks existence.
+            while unsafe { libc::kill(pid, 0) } == 0 {
+                assert!(Instant::now() < deadline, "grandchild {pid} survived");
+                std::thread::sleep(Duration::from_millis(20));
+            }
         }
 
         /// A repository with a clean filter on a stat-dirty file. Returns
