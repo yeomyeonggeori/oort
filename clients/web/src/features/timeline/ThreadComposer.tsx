@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { THREAD_COMPOSER_SEED_EVENT, type ThreadComposerSeed } from "@/features/chat/draftStore";
 import { AtSign, SendHorizontal, Smile } from "lucide-react";
 import { sendThreadReply, type Channel } from "@momo/core/lib/api";
 import {
@@ -133,6 +134,26 @@ export function ThreadComposer({
   // 트레이는 **이 스레드의 것**이다. 채널 컴포저와 열쇠가 다르므로, 스레드에 붙인
   // 파일이 패널을 닫는 순간 채널 입력창에 나타나는 일이 없다.
   const trayKey = surfaceKey(workspaceId, channelId, rootId);
+
+  // 이 스레드 안의 제안 카드가 「운영자에게 부탁하기」로 멘션을 심는다(#2948).
+  // 쓰던 답은 덮지 않는다(채널 컴포저의 `seedComposerText`와 같은 규칙).
+  const draftRef = useRef(draft);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+  useEffect(() => {
+    const onSeed = (event: Event) => {
+      const detail = (event as CustomEvent<ThreadComposerSeed>).detail;
+      if (!detail || detail.rootId.toLowerCase() !== rootId.toLowerCase()) return;
+      detail.result.mounted = true;
+      if (draftRef.current.trim() !== "") return;
+      detail.result.accepted = true;
+      setDraft(detail.text);
+      ref.current?.focus();
+    };
+    window.addEventListener(THREAD_COMPOSER_SEED_EVENT, onSeed);
+    return () => window.removeEventListener(THREAD_COMPOSER_SEED_EVENT, onSeed);
+  }, [rootId]);
   const tray = useAttachmentSurface(trayKey);
   const attachTarget = useMemo(
     () => ({ workspaceId, channelId }),

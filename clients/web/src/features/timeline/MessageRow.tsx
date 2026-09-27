@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   threadRollup,
   type Message,
@@ -117,6 +117,8 @@ import { useReminderMutations } from "@/features/reminders/useReminders";
 import { useMarkUnread } from "./useMarkUnread";
 import { useTimelineLive } from "./timelineLiveContext";
 import { useConversationEntrance } from "./conversationEntrance";
+import { commandSuggestCard } from "@momo/core/features/timeline/commandSuggest";
+import { CommandSuggestSlot, ThreadSurfaceRoot } from "./commandSuggestSlot";
 
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same
@@ -477,6 +479,14 @@ export function MessageRow({
     [message]
   );
   const idleNotice = useMemo(() => workSessionIdleNotice(message), [message]);
+  // 에이전트가 제안한 연결 카드(#2948 GC-7, ADR-0186 G4). 본문은 그대로 두고 그
+  // 아래에 선다. 모르는 모양은 null(본문만)이다.
+  const SuggestionCard = useContext(CommandSuggestSlot);
+  const threadSurfaceRoot = useContext(ThreadSurfaceRoot);
+  const suggestion = useMemo(
+    () => (SuggestionCard ? commandSuggestCard(message, directory) : null),
+    [SuggestionCard, message, directory]
+  );
   // ADR-0148. 인용은 **받은 것으로** 그린다: 서버가 페이지에 동봉한 `replyTo`가
   // 있으면 그것, 없으면(라이브 프레임) 이미 로드된 같은 채널의 행. 어느 쪽도
   // 재조회가 아니고, 이 행에 fetch 씨앗이 아예 없다.
@@ -965,6 +975,17 @@ export function MessageRow({
                 : {})}
             />
           )
+        )}
+        {/* 제안 카드는 에이전트의 텍스트 답 **아래**다(시안 ③ `.cwrap.prop`): 답이
+            말하고 카드가 그 말을 행동으로 옮긴다. 보는 사람별 분기는 안에서 한다. */}
+        {!deleted && suggestion && SuggestionCard && (
+          <SuggestionCard
+            card={suggestion}
+            viewerMemberId={actions?.myMemberId}
+            directory={directory}
+            channelId={message.channelId}
+            rootId={message.rootId ?? threadSurfaceRoot ?? undefined}
+          />
         )}
         {/* Provider cascade (ADR-0135 D1). Outside the card/artifact branch on
             purpose: whichever of the two took the slot, a turn served by the

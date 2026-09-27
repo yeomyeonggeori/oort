@@ -5,13 +5,15 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { waitFor as rtlWaitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, fetchRoster, type RosterMember } from "@momo/core/lib/api";
+import { ApiError, fetchRoster, listChannels, type RosterMember } from "@momo/core/lib/api";
+import { listHostedConnections } from "@momo/core/features/hostedAgents/api";
 import {
   deleteProviderLink,
   fetchProviderChain,
   fetchProviderLink,
   fetchWorkspace,
   putProviderLink,
+  testProviderLink,
 } from "@momo/core/features/settings/api";
 import { escapeIsClaimed } from "@/design/ui/escapeLayer";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
@@ -40,7 +42,12 @@ vi.mock("@/lib/env", async (importOriginal) => {
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
-  return { ...actual, fetchRoster: vi.fn() };
+  return { ...actual, fetchRoster: vi.fn(), listChannels: vi.fn() };
+});
+
+vi.mock("@momo/core/features/hostedAgents/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@momo/core/features/hostedAgents/api")>();
+  return { ...actual, listHostedConnections: vi.fn() };
 });
 
 vi.mock("@momo/core/features/settings/api", async (importOriginal) => {
@@ -53,6 +60,7 @@ vi.mock("@momo/core/features/settings/api", async (importOriginal) => {
     fetchWorkspace: vi.fn(),
     deleteProviderLink: vi.fn(),
     putProviderLink: vi.fn(),
+    testProviderLink: vi.fn(),
   };
 });
 
@@ -138,25 +146,39 @@ const act_ = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: bool
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 
+let client: QueryClient | null = null;
+
+function tree(offline: boolean) {
+  return createElement(
+    QueryClientProvider,
+    { client: client as QueryClient },
+    createElement(
+      SessionProvider,
+      { value: session(offline ? "disconnected" : "connected") },
+      createElement(AiLinkSection, { offline, workspaceId: WS })
+    )
+  );
+}
+
+/** 같은 캐시로 오프라인 여부만 바꿔 다시 그린다(창이 열린 채 끊기는 경우). */
+function setOffline(offline: boolean) {
+  act(() => root?.render(tree(offline)));
+}
+
 function mount(offline = false): HTMLElement {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
   act(() => {
-    root?.render(
-      createElement(
-        QueryClientProvider,
-        { client },
-        createElement(
-          SessionProvider,
-          { value: session(offline ? "disconnected" : "connected") },
-          createElement(AiLinkSection, { offline })
-        )
-      )
-    );
+    root?.render(tree(offline));
   });
   return host;
+}
+
+/** 문서 전체에서 찾는다: 확인 창은 body 로 포털된다. */
+function dq(testId: string): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
 }
 
 function q(testId: string): HTMLElement | null {
@@ -179,6 +201,8 @@ beforeEach(() => {
   envSlot.tauri = true;
   envSlot.flag = true;
   vi.mocked(fetchRoster).mockReset();
+  vi.mocked(putProviderLink).mockReset();
+  vi.mocked(deleteProviderLink).mockReset();
   vi.mocked(fetchRoster).mockResolvedValue([me("owner")]);
   vi.mocked(fetchWorkspace).mockReset();
   vi.mocked(fetchWorkspace).mockResolvedValue({
@@ -195,6 +219,20 @@ beforeEach(() => {
   vi.mocked(fetchProviderLink).mockResolvedValue(KEY_LINK);
   vi.mocked(fetchProviderChain).mockReset();
   vi.mocked(fetchProviderChain).mockRejectedValue(new ApiError(404, "not found"));
+  vi.mocked(listChannels).mockReset();
+  vi.mocked(listChannels).mockResolvedValue([]);
+  vi.mocked(listHostedConnections).mockReset();
+  vi.mocked(listHostedConnections).mockResolvedValue({ connections: [] });
+  vi.mocked(testProviderLink).mockReset();
+  vi.mocked(testProviderLink).mockResolvedValue({
+    schema: "momo.provider_link.test.v0",
+    ok: false,
+    reason: "probe_not_run",
+    source: "database",
+    mode: "external-hermes",
+    endpointLabel: "OpenAI",
+    checkedAtMs: Date.now(),
+  });
 });
 
 afterEach(() => {
@@ -234,17 +272,19 @@ describe("틀: 두 절과 순서 (#2877 시안 §1)", () => {
     expect(document.activeElement).toBe(more);
   });
 
-  it("키 연결의 곁판에는 확인·키 바꾸기·해제가 있고, 키 바꾸기는 키 한 벌 폼이다", async () => {
+  it("키 연결의 곁판에는 확인·키 바꾸기·끊기가 있고, 키 바꾸기는 채팅 카드와 같은 키 폼이다", async () => {
     mount();
     await until("ai-link-row");
     act(() => (q("ai-link-row-more") as HTMLButtonElement).click());
     expect(q("ai-link-check")).not.toBeNull();
-    expect(q("ai-link-unlink")).not.toBeNull();
+    // 문구는 「연결 끊기」(#2878: 팀 API 키 줄).
+    expect(q("ai-link-unlink")?.textContent).toBe("연결 끊기");
     act(() => (q("ai-link-edit") as HTMLButtonElement).click());
-    expect(q("ai-link-form")).not.toBeNull();
-    expect(host?.querySelector("#provider-bearer")?.getAttribute("type")).toBe("password");
+    expect(q("ai-link-key-form")).not.toBeNull();
+    expect(q("ai-link-key-input")?.getAttribute("type")).toBe("password");
+    expect(q("ai-link-key-input")?.getAttribute("autocomplete")).toBe("new-password");
     expect(host?.querySelector("textarea")).toBeNull();
-    expect(q("ai-link-form")?.textContent).not.toContain("auth.json");
+    expect(q("ai-link-key-form")?.textContent).not.toContain("auth.json");
   });
 });
 
@@ -279,10 +319,10 @@ describe("곁판의 키보드 길 (design-review #2877 H-1·H-2)", () => {
     await until("ai-link-row");
     act(() => (q("ai-link-row-more") as HTMLButtonElement).click());
     act(() => (q("ai-link-edit") as HTMLButtonElement).click());
-    (q("ai-link-save") as HTMLButtonElement).focus();
+    (q("ai-link-key-save") as HTMLButtonElement).focus();
     expect(escapeIsClaimed()).toBe(true);
     esc();
-    expect(q("ai-link-form")).toBeNull();
+    expect(q("ai-link-key-form")).toBeNull();
     expect(q("ai-team-aside")).not.toBeNull();
     expect(document.activeElement).toBe(q("ai-link-edit"));
   });
@@ -292,8 +332,9 @@ describe("곁판의 키보드 길 (design-review #2877 H-1·H-2)", () => {
     mount();
     const add = await until("ai-team-add");
     act(() => add.click());
-    expect(document.activeElement?.id).toBe("provider-base-url");
-    const cancel = Array.from(q("ai-link-form")?.querySelectorAll("button") ?? []).find(
+    // 프리셋을 주지 않는 서버: 설정 폼은 「직접 주소」로 열리고 주소 칸이 첫 칸이다.
+    expect(document.activeElement).toBe(q("ai-link-custom-url"));
+    const cancel = Array.from(q("ai-link-key-form")?.querySelectorAll("button") ?? []).find(
       (b) => b.textContent === "취소"
     ) as HTMLButtonElement;
     act(() => cancel.click());
@@ -308,8 +349,8 @@ describe("곁판의 키보드 길 (design-review #2877 H-1·H-2)", () => {
     mount();
     const add = await until("ai-team-add");
     act(() => add.click());
-    const url = host?.querySelector("#provider-base-url") as HTMLInputElement;
-    const key = host?.querySelector("#provider-bearer") as HTMLInputElement;
+    const url = q("ai-link-custom-url") as HTMLInputElement;
+    const key = q("ai-link-key-input") as HTMLInputElement;
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
     act(() => {
       setValue.call(url, "https://api.openai.com/v1");
@@ -318,7 +359,7 @@ describe("곁판의 키보드 길 (design-review #2877 H-1·H-2)", () => {
       key.dispatchEvent(new Event("input", { bubbles: true }));
     });
     vi.mocked(fetchProviderLink).mockResolvedValue(KEY_LINK);
-    act(() => (q("ai-link-save") as HTMLButtonElement).click());
+    act(() => (q("ai-link-key-save") as HTMLButtonElement).click());
     await until("ai-link-row");
     await rtlWaitFor(() => {
       const heading = q("ai-team-aside")?.querySelector("h3");
@@ -341,23 +382,27 @@ describe("곁판의 키보드 길 (design-review #2877 H-1·H-2)", () => {
     await until("ai-link-row");
     act(() => (q("ai-link-row-more") as HTMLButtonElement).click());
     act(() => (q("ai-link-edit") as HTMLButtonElement).click());
-    expect(document.activeElement?.id).toBe("provider-base-url");
-    const cancel = Array.from(q("ai-link-form")?.querySelectorAll("button") ?? []).find(
+    // 저장된 주소가 있으면 「지금 주소」로 열리고 키 칸이 첫 칸이다.
+    expect(document.activeElement).toBe(q("ai-link-key-input"));
+    const cancel = Array.from(q("ai-link-key-form")?.querySelectorAll("button") ?? []).find(
       (b) => b.textContent === "취소"
     ) as HTMLButtonElement;
     act(() => cancel.click());
-    expect(q("ai-link-form")).toBeNull();
+    expect(q("ai-link-key-form")).toBeNull();
     expect(document.activeElement).toBe(q("ai-link-edit"));
   });
 
-  it("해제가 끝나면 초점은 새 목록의 「API 키 추가」로 간다", async () => {
+  it("끊기가 끝나면 초점은 새 목록의 「API 키 추가」로 간다", async () => {
     vi.mocked(deleteProviderLink).mockResolvedValue(undefined as never);
     mount();
     await until("ai-link-row");
     act(() => (q("ai-link-row-more") as HTMLButtonElement).click());
     vi.mocked(fetchProviderLink).mockResolvedValue(EMPTY_LINK);
     act(() => (q("ai-link-unlink") as HTMLButtonElement).click());
-    act(() => (q("ai-link-unlink-confirm") as HTMLButtonElement).click());
+    await rtlWaitFor(() => {
+      if (dq("ai-link-unlink-confirm")?.getAttribute("aria-disabled") !== null) throw new Error("loading");
+    });
+    act(() => (dq("ai-link-unlink-confirm") as HTMLButtonElement).click());
     await until("ai-team-add");
     await rtlWaitFor(() => {
       if (document.activeElement !== q("ai-team-add")) throw new Error("focus");
@@ -374,10 +419,10 @@ describe("auth.json 붙여넣기 제거 (#2877, 제안서 Q3)", () => {
     expect(row.textContent).toContain("새로 만들 수 없음");
     expect(row.textContent).toContain("읽기 전용");
     act(() => (q("ai-link-row-more") as HTMLButtonElement).click());
-    expect(q("ai-link-unlink")?.textContent).toContain("연결 해제");
+    expect(q("ai-link-unlink")?.textContent).toBe("연결 끊기");
     expect(q("ai-link-edit")).toBeNull();
     expect(q("ai-link-check")).toBeNull();
-    expect(q("ai-link-form")).toBeNull();
+    expect(q("ai-link-key-form")).toBeNull();
     expect(q("ai-team-add")).toBeNull();
   });
 
@@ -386,7 +431,7 @@ describe("auth.json 붙여넣기 제거 (#2877, 제안서 Q3)", () => {
     mount();
     await until("ai-link-empty");
     act(() => (q("ai-team-add") as HTMLButtonElement).click());
-    expect(q("ai-link-form")).not.toBeNull();
+    expect(q("ai-link-key-form")).not.toBeNull();
     expect(host?.querySelector("textarea")).toBeNull();
     expect(host?.querySelector('input[name="provider-method"]')).toBeNull();
     expect(host?.textContent).not.toContain("ChatGPT 계정 (OAuth)");
@@ -442,5 +487,162 @@ describe("네 상태 (#2877 시안 §6)", () => {
     expect(entry.getAttribute("data-surface")).toBe("desktop-only");
     expect(entry.textContent).toContain("데스크탑 앱에서만");
     expect(q("subscription-entry-open")).toBeNull();
+  });
+});
+
+describe("팀 연결 AA-7 (#2880 시안 §3·§4 2b)", () => {
+  const agent = (id: string, displayName: string, channelIds: string[], paused?: boolean): RosterMember => ({
+    ...me("member"),
+    id,
+    kind: "agent",
+    displayName,
+    handle: displayName,
+    role: undefined,
+    channelIds,
+    channelCount: channelIds.length,
+    paused,
+  });
+  const setValue = (input: HTMLInputElement, value: string) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    act(() => {
+      setter.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  };
+
+  async function openUnlink() {
+    mount();
+    await until("ai-link-row");
+    act(() => (q("ai-link-row-more") as HTMLButtonElement).click());
+    act(() => (q("ai-link-unlink") as HTMLButtonElement).click());
+    await rtlWaitFor(() => {
+      if (!dq("ai-link-unlink-impact")) throw new Error("loading");
+    });
+    return dq("ai-link-unlink-dialog") as HTMLElement;
+  }
+
+  it("끊기 확인 창은 이 키로 대답하는 팀 에이전트를 이름으로 보이고, 호스티드 에이전트는 빼고, 이름은 누를 수 없다", async () => {
+    vi.mocked(fetchRoster).mockResolvedValue([
+      me("owner"),
+      agent("a-1", "hermes", ["c-1"]),
+      agent("a-2", "김인턴", ["c-2"], true),
+      agent("a-3", "내 Claude", ["c-1"]),
+    ]);
+    vi.mocked(listChannels).mockResolvedValue([
+      { id: "c-1", name: "리서치", kind: "public" },
+      { id: "c-2", name: "전체", kind: "public" },
+    ] as never);
+    vi.mocked(listHostedConnections).mockResolvedValue({
+      connections: [
+        {
+          id: "hc-1",
+          agentMemberId: "a-3",
+          status: "active",
+          authMode: "bearer",
+          audience: "x",
+          approvedChannelIds: [],
+          approvedScopes: [],
+          createdAtMs: 1,
+          updatedAtMs: 1,
+        },
+      ],
+    });
+    const dialog = await openUnlink();
+    expect(dialog.getAttribute("role")).toBe("alertdialog");
+    expect(dialog.textContent).toContain("OpenAI · 팀 기본 연결을 끊을까요?");
+    expect(dq("ai-link-unlink-body")?.textContent).toBe(
+      "이 키를 쓰는 팀 에이전트 2개가 대답할 수 없게 됩니다. 저장된 키는 서버에서 지워지고 다시 볼 수 없어요."
+    );
+    const names = Array.from(document.querySelectorAll('[data-testid="ai-link-unlink-agent"]')).map((li) => li.textContent);
+    expect(names).toEqual(["@김인턴 (전체 채널 · 일시정지)", "@hermes (리서치 채널)"]);
+    expect(dialog.textContent).not.toContain("내 Claude");
+    // inert: 이름 줄에 누를 것이 없다.
+    for (const li of document.querySelectorAll('[data-testid="ai-link-unlink-agent"]')) {
+      expect(li.querySelector("a, button, [tabindex]")).toBeNull();
+    }
+    expect(dq("ai-link-unlink-no-switch")?.textContent).toContain("예비 provider로 조용히 넘어가지 않아요.");
+    expect(dq("ai-link-unlink-confirm")?.textContent).toBe("연결 끊기");
+  });
+
+  it("호스티드 목록을 못 읽으면 숫자를 말하지 않고 그 사실을 말한다", async () => {
+    vi.mocked(fetchRoster).mockResolvedValue([me("owner"), agent("a-1", "hermes", [])]);
+    vi.mocked(listHostedConnections).mockRejectedValue(new ApiError(403, "forbidden"));
+    await openUnlink();
+    expect(dq("ai-link-unlink-body")?.textContent).not.toMatch(/\d/);
+    expect(dq("ai-link-unlink-unknown")?.textContent).toContain("목록을 불러오지 못했어요");
+    expect(dq("ai-link-unlink-confirm")?.getAttribute("aria-disabled")).toBeNull();
+  });
+
+  it("창이 열린 채 연결이 끊기면 「연결 끊기」가 잠기고 까닭을 든다(design-review #2880 B1)", async () => {
+    vi.mocked(deleteProviderLink).mockResolvedValue(undefined as never);
+    await openUnlink();
+    setOffline(true);
+    const confirm = dq("ai-link-unlink-confirm") as HTMLButtonElement;
+    expect(confirm.getAttribute("aria-disabled")).toBe("true");
+    const reason = dq("ai-link-unlink-offline");
+    expect(reason?.textContent).toContain("연결이 끊겨");
+    expect(confirm.getAttribute("aria-describedby")).toBe(reason?.id);
+    act(() => confirm.click());
+    expect(deleteProviderLink).not.toHaveBeenCalled();
+  });
+
+  it("목록을 읽는 동안에는 끊지 못한다(누가 멈추는지 보기 전)", async () => {
+    vi.mocked(listHostedConnections).mockReturnValue(new Promise(() => undefined));
+    vi.mocked(deleteProviderLink).mockResolvedValue(undefined as never);
+    mount();
+    await until("ai-link-row");
+    act(() => (q("ai-link-row-more") as HTMLButtonElement).click());
+    act(() => (q("ai-link-unlink") as HTMLButtonElement).click());
+    const confirm = dq("ai-link-unlink-confirm") as HTMLButtonElement;
+    expect(confirm.getAttribute("aria-disabled")).toBe("true");
+    act(() => confirm.click());
+    expect(deleteProviderLink).not.toHaveBeenCalled();
+  });
+
+  it("프리셋 칩으로 넣으면 그 주소·와이어로 저장하고 곧바로 확인한다. 지금 서버의 결과는 「확인 전」", async () => {
+    vi.mocked(fetchProviderLink).mockResolvedValue({
+      ...EMPTY_LINK,
+      presets: [
+        { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", format: "openai" },
+        { id: "anthropic", label: "Anthropic (Claude)", baseUrl: "https://api.anthropic.com/v1", format: "anthropic" },
+      ],
+    } as never);
+    vi.mocked(putProviderLink).mockResolvedValue(KEY_LINK as never);
+    mount();
+    act(() => (q("ai-team-add") as HTMLButtonElement | null)?.click());
+    const add = await until("ai-team-add");
+    act(() => add.click());
+    act(() => (q("ai-link-preset-anthropic") as HTMLInputElement).click());
+    setValue(q("ai-link-key-input") as HTMLInputElement, "sk-ant-9c1e");
+    vi.mocked(fetchProviderLink).mockResolvedValue(KEY_LINK);
+    act(() => (q("ai-link-key-save") as HTMLButtonElement).click());
+    await rtlWaitFor(() => expect(putProviderLink).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(putProviderLink).mock.calls[0][0]).toEqual({
+      baseUrl: "https://api.anthropic.com/v1",
+      bearer: "sk-ant-9c1e",
+      mode: "external-hermes",
+      format: "anthropic",
+    });
+    await rtlWaitFor(() => expect(testProviderLink).toHaveBeenCalledTimes(1));
+    const result = await until("ai-link-probe");
+    expect(result.textContent).toContain("확인 전");
+    expect(q("ai-link-probe-text")?.textContent).toBe("이 서버는 아직 키를 직접 확인하지 않아요. 키는 저장됐어요.");
+    expect(result.textContent).not.toContain("거절");
+    // 쓰기 전용: 저장한 키가 화면 어디에도 없다.
+    expect(host?.innerHTML).not.toContain("sk-ant-9c1e");
+    expect(document.body.innerHTML).not.toContain("sk-ant-9c1e");
+  });
+
+  it("「직접 주소」는 주소를 검사하고, 틀리면 저장하지 않는다", async () => {
+    vi.mocked(fetchProviderLink).mockResolvedValue(EMPTY_LINK);
+    mount();
+    act(() => (q("ai-team-add") as HTMLButtonElement | null)?.click());
+    const add = await until("ai-team-add");
+    act(() => add.click());
+    setValue(q("ai-link-custom-url") as HTMLInputElement, "api.example.com");
+    setValue(q("ai-link-key-input") as HTMLInputElement, "sk-x");
+    act(() => (q("ai-link-key-save") as HTMLButtonElement).click());
+    expect(putProviderLink).not.toHaveBeenCalled();
+    expect(q("ai-link-key-form")?.textContent).toContain("http:// 또는 https://");
   });
 });

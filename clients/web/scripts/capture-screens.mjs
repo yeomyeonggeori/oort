@@ -12455,7 +12455,7 @@ async function captureAiAccountsScenes(browser, scheme) {
     { name: "offline", entry: "rows", offline: true, ready: "ai-offline-banner" },
     { name: "browser", entry: "desktop-only", ready: "subscription-entry" },
     { name: "legacy-aside", entry: "rows", link: legacyLink, open: "ai-link-row-more", ready: "ai-team-aside" },
-    { name: "edit", entry: "rows", open: "ai-link-row-more", then: "ai-link-edit", ready: "ai-link-form" },
+    { name: "edit", entry: "rows", open: "ai-link-row-more", then: "ai-link-edit", ready: "ai-link-key-form" },
   ];
   for (const frame of frames) {
     // 900: 곁판이 옆에 서지 못하고 연 절 밑에 쌓이는 데스크탑 창 폭.

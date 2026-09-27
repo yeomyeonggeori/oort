@@ -271,6 +271,33 @@ export function seedComposerText(
   return true;
 }
 
+/**
+ * 스레드 컴포저에 심는 사건 (#2948 GC-7 「운영자에게 부탁하기」).
+ *
+ * 스레드 초안은 저장소가 아니라 `ThreadComposer`의 지역 상태라, 심기는 마운트된
+ * 입력창이 직접 받는다. 사건은 동기로 돈다: 받은 입력창이 `result`에 답을 적고,
+ * 부른 쪽이 곧바로 읽는다. 받는 입력창이 없으면 `mounted=false`다.
+ */
+export const THREAD_COMPOSER_SEED_EVENT = "momo:thread-composer-seed";
+
+export interface ThreadComposerSeed {
+  rootId: string;
+  text: string;
+  result: { mounted: boolean; accepted: boolean };
+}
+
+/** 그 스레드의 입력창이 열려 있고 비어 있으면 심는다. 결과를 돌려준다. */
+export function seedThreadComposerText(
+  rootId: string,
+  text: string
+): ThreadComposerSeed["result"] {
+  const detail: ThreadComposerSeed = { rootId, text, result: { mounted: false, accepted: false } };
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(THREAD_COMPOSER_SEED_EVENT, { detail }));
+  }
+  return detail.result;
+}
+
 /** 로그아웃. 이 기기에 남은 초안을 전부 지운다. */
 export function clearAllDrafts(): void {
   for (const key of draftKeys()) writeRaw(key, null);
