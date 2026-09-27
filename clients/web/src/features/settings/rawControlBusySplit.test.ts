@@ -293,9 +293,14 @@ describe("RED PROOF ③ 잠금은 흐림과 가드를 함께 진다", () => {
       const { tag } = control(site.file, site.testId);
       // 흐림은 잠금 조건 하나에 묶인다. 앞에 고정 클래스(탭 타깃·판 위 표면)가
       // 붙는 것은 허용한다(#2877 곁판의 sheet 문법). 조건이 바뀌면 여전히 실패한다.
-      expect(tag).toMatch(
-        new RegExp(`className=\\{cn\\((?:"[^"]*", )?${site.lock} && "opacity-50"\\)\\}`)
+      const split = tag.match(
+        new RegExp(`className=\\{cn\\((?:"([^"]*)", )?${site.lock} && "opacity-50"\\)\\}`)
       );
+      expect(split).not.toBeNull();
+      // 고정 클래스는 늘 붙는다. 거기에 흐림 계열(opacity-*, 변형 접두 포함)이 들어가면
+      // 잠기지 않은 버튼도 늘 흐리다 — 위 정규식만으로는 못 잡던 빈틈(#2923, review-2909).
+      const fixed = split?.[1] ?? "";
+      expect(fixed.split(/\s+/).filter((cls) => /(^|:)opacity-/.test(cls))).toEqual([]);
       // aria-disabled 는 클릭을 막지 않는다. 가드가 없으면 회색으로 칠한 살아
       // 있는 버튼이고, 두 번째 Enter 가 두 번째 쓰기를 낸다.
       expect(FILES[site.file]).toContain(site.guard);

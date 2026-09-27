@@ -1,0 +1,560 @@
+import {ApiError} from '@momo/core/lib/api';
+import type {ProviderLink, ProviderLinkTest} from '@momo/core/features/settings/api';
+import {linkPill} from '@momo/core/features/settings/aiLinkPill';
+import {makeDirectory} from '@momo/core/features/workspace/directory';
+import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react-native';
+import fs from 'fs';
+import path from 'path';
+import React from 'react';
+import {
+  AccessibilityInfo,
+  Keyboard,
+  type KeyboardEvent,
+  StyleSheet,
+  TextInput,
+} from 'react-native';
+
+import {
+  AI_CONNECT_CARD_COPY,
+  AiConnectCard,
+} from '../src/features/aiConnect/AiConnectCard';
+import {
+  Composer,
+  PHONE_SECRET_KEY_BLOCK_COPY,
+} from '../src/features/conversation/Composer';
+import {
+  channelDraftKey,
+  readDraft,
+} from '../src/features/conversation/drafts';
+import {__setNonSecretStore} from '../src/storage/kv';
+
+// =============================================================================
+// #2945 GC-4 — 폰 `/연결` 카드: 읽기 + 운영자 연결 확인. 로그인·키 입력은 맥.
+//
+// 세 가지를 잰다.
+//   1. 카드의 알약은 코어 `linkPill`이 말한 그대로다(같은 입력 → 같은 알약).
+//      판정을 카드 파일에 복사하면 import 그래프 시험이 실패한다.
+//   2. 폰 카드에는 키 입력 칸이 없고, 운영자에게만 「연결 확인」이 있다(Q5).
+//   3. 컴포저: `/`는 명령 목록을 열고, 명령은 보내지 않고, 키 모양은 막는다.
+// =============================================================================
+
+const mockFetch = jest.fn<Promise<ProviderLink>, []>();
+const mockTest = jest.fn<Promise<ProviderLinkTest>, []>();
+
+jest.mock('@momo/core/features/settings/api', () => {
+  const actual = jest.requireActual('@momo/core/features/settings/api');
+  return {
+    ...actual,
+    fetchProviderLink: () => mockFetch(),
+    testProviderLink: () => mockTest(),
+  };
+});
+
+const LINK: ProviderLink = {
+  schema: 'momo.provider_link.v0',
+  configured: true,
+  source: 'database',
+  mode: 'anthropic',
+  baseUrl: 'https://api.anthropic.com',
+  endpointLabel: 'Anthropic',
+  bearerConfigured: true,
+  bearerLast4: '7c1e',
+  availability: 'external',
+  keyConfigured: true,
+  updatedAtMs: Date.UTC(2026, 8, 20),
+  diagnostics: [],
+};
+
+const PROBE_OK: ProviderLinkTest = {
+  schema: 'momo.provider_link.test.v0',
+  ok: true,
+  source: 'database',
+  mode: 'anthropic',
+  endpointLabel: 'Anthropic',
+  checkedAtMs: Date.now(),
+};
+
+const PROBE_FAIL: ProviderLinkTest = {
+  ...PROBE_OK,
+  ok: false,
+  reason: 'provider_auth_failed',
+};
+
+function memoryStore() {
+  const map = new Map<string, string>();
+  return {
+    getString: (key: string) => map.get(key),
+    set: (key: string, value: string) => void map.set(key, String(value)),
+    remove: (key: string) => map.delete(key),
+  };
+}
+
+function withClient(node: React.ReactElement) {
+  const client = new QueryClient({
+    // gcTime 무한: 캐시 수거 타이머가 jest 프로세스를 붙잡지 않게.
+    defaultOptions: {
+      queries: {retry: false, gcTime: Infinity},
+      mutations: {retry: false, gcTime: Infinity},
+    },
+  });
+  return <QueryClientProvider client={client}>{node}</QueryClientProvider>;
+}
+
+function card(props: Partial<React.ComponentProps<typeof AiConnectCard>> = {}) {
+  return render(
+    withClient(
+      <AiConnectCard line={null} offline={false} onClose={() => {}} {...props} />,
+    ),
+  );
+}
+
+beforeEach(() => {
+  mockFetch.mockReset();
+  mockTest.mockReset();
+  __setNonSecretStore(memoryStore());
+});
+
+afterEach(() => {
+  cleanup();
+  __setNonSecretStore(null);
+});
+
+const pillText = () =>
+  screen.getByTestId('ai-connect-card-team-pill').props.accessibilityLabel as string;
+
+// -----------------------------------------------------------------------------
+describe('카드 — 판정은 코어, 행동은 연결 확인 하나', () => {
+  it('머리는 「AI 연결 · 나에게만」이고 내 계정 절은 맥으로 보낸다', async () => {
+    mockFetch.mockResolvedValue(LINK);
+    card();
+    expect(screen.getByText(AI_CONNECT_CARD_COPY.title)).toBeTruthy();
+    expect(screen.getByTestId('ai-connect-card-only-me')).toBeTruthy();
+    expect(screen.getByText(AI_CONNECT_CARD_COPY.mineLine)).toBeTruthy();
+    expect(screen.getByText(AI_CONNECT_CARD_COPY.foot)).toBeTruthy();
+    await screen.findByTestId('ai-connect-card-team');
+  });
+
+  it('운영자: 알약은 코어 linkPill 그대로이고 「연결 확인」이 결과를 제자리에 남긴다', async () => {
+    mockFetch.mockResolvedValue(LINK);
+    mockTest.mockResolvedValue(PROBE_OK);
+    card();
+    await screen.findByTestId('ai-connect-card-team');
+    const before = linkPill({link: LINK, offline: false, probe: null});
+    expect(pillText()).toBe(`상태 ${before.text}`);
+    expect(screen.getByTestId('ai-connect-card-team-sub').props.children).toContain('••••7c1e');
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('ai-connect-card-team-check'));
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('ai-connect-card-team-result')).toBeTruthy(),
+    );
+    const after = linkPill({link: LINK, offline: false, probe: PROBE_OK});
+    expect(pillText()).toBe(`상태 ${after.text}`);
+    expect(mockTest).toHaveBeenCalledTimes(1);
+  });
+
+  it('확인 실패: 사유 + 「키는 맥·웹에서」 — 폰에는 키 바꾸기가 없다', async () => {
+    mockFetch.mockResolvedValue(LINK);
+    mockTest.mockResolvedValue(PROBE_FAIL);
+    const announce = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => {});
+    card();
+    await screen.findByTestId('ai-connect-card-team');
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('ai-connect-card-team-check'));
+    });
+    const result = await screen.findByTestId('ai-connect-card-team-result');
+    expect(String(result.props.children)).toContain('provider가 키를 거절했어요.');
+    expect(String(result.props.children)).toContain(AI_CONNECT_CARD_COPY.changeOnMac);
+    expect(pillText()).toBe(
+      `상태 ${linkPill({link: LINK, offline: false, probe: PROBE_FAIL}).text}`,
+    );
+    expect(screen.queryByText('키 바꾸기')).toBeNull();
+    expect(screen.queryByText('키 넣기')).toBeNull();
+    // 다시 확인할 길은 남는다.
+    expect(screen.getByTestId('ai-connect-card-team-check')).toBeTruthy();
+    // 결과는 iOS 에서도 소리로 알린다(R4-H1).
+    expect(announce).toHaveBeenLastCalledWith(String(result.props.children));
+    announce.mockRestore();
+    // 마스킹 꼬리는 두 줄까지(좁은 폭에서 날짜가 잘리지 않게, R4-B1).
+    expect(screen.getByTestId('ai-connect-card-team-sub').props.numberOfLines).toBe(2);
+  });
+
+  it('비운영자(403): 줄 대신 한 문장, 버튼 0', async () => {
+    mockFetch.mockRejectedValue(new ApiError(403, 'forbidden'));
+    card();
+    expect(await screen.findByTestId('ai-connect-card-team-denied')).toBeTruthy();
+    expect(screen.getByText(AI_CONNECT_CARD_COPY.teamDenied)).toBeTruthy();
+    expect(screen.queryByTestId('ai-connect-card-team-check')).toBeNull();
+  });
+
+  it('키가 없다: 「아직 없어요」 줄, 폰은 키를 받지 않으므로 버튼 0', async () => {
+    mockFetch.mockResolvedValue({
+      ...LINK,
+      configured: false,
+      keyConfigured: false,
+      bearerConfigured: false,
+      bearerLast4: undefined,
+      availability: 'mock',
+    });
+    card();
+    await screen.findByTestId('ai-connect-card-team');
+    expect(screen.getByText(AI_CONNECT_CARD_COPY.teamEmptySub)).toBeTruthy();
+    expect(screen.queryByTestId('ai-connect-card-team-check')).toBeNull();
+  });
+
+  it('오프라인: 「확인할 수 없음」, 확인 버튼은 잠기고 요청을 내지 않는다', async () => {
+    mockFetch.mockResolvedValue(LINK);
+    card({offline: true});
+    await screen.findByTestId('ai-connect-card-team');
+    expect(pillText()).toBe('상태 확인할 수 없음');
+    expect(screen.getByTestId('ai-connect-card-offline')).toBeTruthy();
+    const button = screen.getByTestId('ai-connect-card-team-check');
+    expect(button.props.accessibilityState).toMatchObject({disabled: true});
+    fireEvent.press(button);
+    expect(mockTest).not.toHaveBeenCalled();
+  });
+
+  it('`/연결 팀키`는 팀 절만, `/연결 claude`는 내 계정 절만 연다', async () => {
+    mockFetch.mockResolvedValue(LINK);
+    const first = card({line: 'team'});
+    expect(screen.queryByTestId('ai-connect-card-mine')).toBeNull();
+    expect(screen.getByTestId('ai-connect-card-team-section')).toBeTruthy();
+    await screen.findByTestId('ai-connect-card-team');
+    first.unmount();
+    card({line: 'claude'});
+    expect(screen.getByTestId('ai-connect-card-mine')).toBeTruthy();
+    expect(screen.queryByTestId('ai-connect-card-team-section')).toBeNull();
+  });
+
+  it('카드 어디에도 입력 칸이 없다(Q5) — 비밀값이 머물 자리가 없다', async () => {
+    mockFetch.mockResolvedValue(LINK);
+    card();
+    await screen.findByTestId('ai-connect-card-team');
+    expect(screen.UNSAFE_queryAllByType(TextInput)).toHaveLength(0);
+  });
+
+  it('자판이 올라와 있으면 몸을 접고 머리(닫기)만 남긴다', async () => {
+    mockFetch.mockResolvedValue(LINK);
+    const spy = jest.spyOn(Keyboard, 'isVisible').mockReturnValue(true);
+    try {
+      card();
+      expect(screen.getByTestId('ai-connect-card-folded')).toBeTruthy();
+      expect(screen.getByTestId('ai-connect-card-close')).toBeTruthy();
+      // 몸은 내리지 않고 숨긴다(절의 상태를 지킨다).
+      const scroll = screen.getByTestId('ai-connect-card-scroll', {
+        includeHiddenElements: true,
+      });
+      expect(StyleSheet.flatten(scroll.props.style)).toMatchObject({display: 'none'});
+      // 접힌 줄은 누를 수 있다 — 자판을 내린다(큰 글씨에서 끌 자리가 없다).
+      const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
+      fireEvent.press(screen.getByTestId('ai-connect-card-folded'));
+      expect(dismiss).toHaveBeenCalledTimes(1);
+      dismiss.mockRestore();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('자판을 올렸다 내려도 「연결 확인」 결과가 남고 팀 연결을 다시 부르지 않는다', async () => {
+    mockFetch.mockResolvedValue(LINK);
+    mockTest.mockResolvedValue(PROBE_OK);
+    const handlers = new Map<string, (event: KeyboardEvent) => void>();
+    const listen = jest
+      .spyOn(Keyboard, 'addListener')
+      .mockImplementation((name, handler) => {
+        handlers.set(name, handler);
+        return {remove: () => {}} as ReturnType<typeof Keyboard.addListener>;
+      });
+    const shown = {endCoordinates: {height: 300}} as KeyboardEvent;
+    try {
+      card();
+      await screen.findByTestId('ai-connect-card-team');
+      await act(async () => {
+        fireEvent.press(screen.getByTestId('ai-connect-card-team-check'));
+      });
+      await screen.findByTestId('ai-connect-card-team-result');
+      act(() => handlers.get('keyboardDidShow')?.(shown));
+      expect(screen.getByTestId('ai-connect-card-folded')).toBeTruthy();
+      act(() => handlers.get('keyboardDidHide')?.(shown));
+      expect(screen.queryByTestId('ai-connect-card-folded')).toBeNull();
+      expect(screen.getByTestId('ai-connect-card-team-result')).toBeTruthy();
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    } finally {
+      listen.mockRestore();
+    }
+  });
+
+  it('키 붙여넣기 안내가 선 동안은 카드를 통째로 숨기되 절의 상태는 지킨다 (R3-B1)', async () => {
+    mockFetch.mockResolvedValue(LINK);
+    mockTest.mockResolvedValue(PROBE_OK);
+    const client = new QueryClient({
+      defaultOptions: {queries: {retry: false, gcTime: Infinity}},
+    });
+    const at = (foldForKey: boolean) => (
+      <QueryClientProvider client={client}>
+        <AiConnectCard line={null} offline={false} onClose={() => {}} foldForKey={foldForKey} />
+      </QueryClientProvider>
+    );
+    const view = render(at(false));
+    await screen.findByTestId('ai-connect-card-team');
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('ai-connect-card-team-check'));
+    });
+    await screen.findByTestId('ai-connect-card-team-result');
+    view.rerender(at(true));
+    const wrap = screen.getByTestId('ai-connect-card-wrap', {includeHiddenElements: true});
+    expect(StyleSheet.flatten(wrap.props.style)).toMatchObject({display: 'none'});
+    expect(screen.queryByTestId('ai-connect-card-close')).toBeNull();
+    view.rerender(at(false));
+    expect(screen.getByTestId('ai-connect-card-team-result')).toBeTruthy();
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('머리·접힌 줄은 글자 배수 상한(1.3)을 둔다 — 큰 글씨 SE 에서 한 줄 (R5-H1)', async () => {
+    mockFetch.mockResolvedValue(LINK);
+    const spy = jest.spyOn(Keyboard, 'isVisible').mockReturnValue(true);
+    try {
+      card();
+      for (const text of [
+        AI_CONNECT_CARD_COPY.title,
+        AI_CONNECT_CARD_COPY.onlyMe,
+        AI_CONNECT_CARD_COPY.folded,
+      ]) {
+        expect(screen.getByText(text).props.maxFontSizeMultiplier).toBe(1.3);
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('닫기는 부른 쪽에 알린다', async () => {
+    mockFetch.mockResolvedValue(LINK);
+    const onClose = jest.fn();
+    card({onClose});
+    fireEvent.press(screen.getByTestId('ai-connect-card-close'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    await screen.findByTestId('ai-connect-card-team');
+  });
+});
+
+// -----------------------------------------------------------------------------
+describe('import 그래프 — 알약 판정을 카드에 복사하지 않는다', () => {
+  const source = fs.readFileSync(
+    path.resolve(__dirname, '../src/features/aiConnect/AiConnectCard.tsx'),
+    'utf8',
+  );
+
+  it('linkPill 은 코어 aiLinkPill 에서만 온다', () => {
+    expect(source).toMatch(
+      /import\s*\{[^}]*\blinkPill\b[^}]*\}\s*from\s*'@momo\/core\/features\/settings\/aiLinkPill'/,
+    );
+    expect(source).not.toMatch(/function\s+linkPill\b/);
+    expect(source).not.toMatch(/const\s+linkPill\b/);
+  });
+
+  it('알약 낱말을 손으로 적지 않는다', () => {
+    for (const word of ['연결됨', '확인 실패', '자격증명 없음', '모의 응답', '연결 안 됨', '확인할 수 없음']) {
+      expect(source).not.toContain(`'${word}'`);
+      expect(source).not.toContain(`"${word}"`);
+    }
+  });
+
+  // GC-7 제안 카드(#2948)와 합침: 팀 줄 판정은 폰에 한 벌만 있다.
+  it('제안 카드는 팀 절을 이 카드에서 가져오고 제 것을 두지 않는다', () => {
+    const suggestion = fs.readFileSync(
+      path.resolve(__dirname, '../src/features/conversation/AiConnectSuggestion.tsx'),
+      'utf8',
+    )
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+    expect(suggestion).toMatch(
+      /import\s*\{[^}]*\bAiConnectTeamSection\b[^}]*\}\s*from\s*'\.\.\/aiConnect\/AiConnectCard'/,
+    );
+    for (const own of [/\blinkPill\b/, /\btestProviderLink\b/, /function\s+(TeamSection|Pill|SecondaryButton)\b/]) {
+      expect(suggestion).not.toMatch(own);
+    }
+  });
+});
+
+// -----------------------------------------------------------------------------
+describe('컴포저 — `/` 명령과 키 붙여넣기 차단', () => {
+  const EMPTY = makeDirectory([]);
+  const KEY = 'sk-ant-api03-Zx9Qw7Er5Ty3Ui1Op0As8Df6Gh4Jk2Lz';
+  const CH = channelDraftKey('ch-ai');
+
+  function composer(props: Partial<React.ComponentProps<typeof Composer>> = {}) {
+    return render(
+      <Composer
+        recipient="place"
+        channelLabel="에이전트-실험"
+        directory={EMPTY}
+        draftKey={CH}
+        onSend={() => {}}
+        {...props}
+      />,
+    );
+  }
+
+  it('`/연`이 명령 목록을 열고, 고르면 명령이 실행되며 보내지 않는다', () => {
+    const onSend = jest.fn();
+    const onSlashCommand = jest.fn();
+    composer({onSend, onSlashCommand});
+    fireEvent.changeText(screen.getByTestId('composer-input'), '/연');
+    const rows = screen.getAllByTestId('slash-option');
+    expect(rows.length).toBeGreaterThan(0);
+    expect(screen.getByText('명령')).toBeTruthy();
+    fireEvent.press(rows[0]);
+    expect(onSlashCommand).toHaveBeenCalledTimes(1);
+    expect(onSlashCommand.mock.calls[0][0].id).toBe('ai.connect');
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByTestId('composer-input').props.value).toBe('');
+    expect(readDraft(CH)).toBe('');
+  });
+
+  it('폰 목록에는 구독 줄 인자(claude·codex)가 서지 않는다 — 폰 카드에 그 줄이 없다', () => {
+    composer({onSlashCommand: jest.fn()});
+    fireEvent.changeText(screen.getByTestId('composer-input'), '/연');
+    const labels = screen
+      .getAllByTestId('slash-option')
+      .map(row => String(row.props.accessibilityLabel));
+    expect(labels.some(label => label.startsWith('/연결 팀키'))).toBe(true);
+    expect(labels.some(label => /claude|codex/.test(label))).toBe(false);
+  });
+
+  it('목록이 열린 채 보내면 첫 줄을 고른다 — 반쯤 친 `/연`이 평문으로 나가지 않는다', () => {
+    const onSend = jest.fn();
+    const onSlashCommand = jest.fn();
+    composer({onSend, onSlashCommand});
+    fireEvent.changeText(screen.getByTestId('composer-input'), '/연');
+    fireEvent.press(screen.getByTestId('composer-send'));
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onSlashCommand).toHaveBeenCalledWith(
+      expect.objectContaining({id: 'ai.connect'}),
+      {},
+    );
+  });
+
+  it('`/연결 팀키`를 그대로 보내도 메시지가 되지 않고 팀 줄 의도가 실린다', () => {
+    const onSend = jest.fn();
+    const onSlashCommand = jest.fn();
+    composer({onSend, onSlashCommand});
+    fireEvent.changeText(screen.getByTestId('composer-input'), '/연결 팀키');
+    fireEvent.press(screen.getByTestId('composer-send'));
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onSlashCommand).toHaveBeenCalledWith(
+      expect.objectContaining({id: 'ai.connect'}),
+      {line: 'team'},
+    );
+  });
+
+  it('오프라인에서도 명령은 누를 수 있다 — 네트워크를 타지 않는다', () => {
+    const onSlashCommand = jest.fn();
+    composer({onSlashCommand, offline: true});
+    fireEvent.changeText(screen.getByTestId('composer-input'), '/connect');
+    fireEvent.press(screen.getByTestId('composer-send'));
+    expect(onSlashCommand).toHaveBeenCalledTimes(1);
+  });
+
+  it('모르는 `/무엇`은 평문으로 보낸다', () => {
+    const onSend = jest.fn();
+    const onSlashCommand = jest.fn();
+    composer({onSend, onSlashCommand});
+    fireEvent.changeText(screen.getByTestId('composer-input'), '/usr/local 경로 확인');
+    expect(screen.queryByTestId('slash-list')).toBeNull();
+    fireEvent.press(screen.getByTestId('composer-send'));
+    expect(onSend).toHaveBeenCalledWith('/usr/local 경로 확인');
+    expect(onSlashCommand).not.toHaveBeenCalled();
+  });
+
+  it('스레드(onSlashCommand 없음)에서는 `/연결`도 평문이다', () => {
+    const onSend = jest.fn();
+    composer({onSend});
+    fireEvent.changeText(screen.getByTestId('composer-input'), '/연결');
+    expect(screen.queryByTestId('slash-list')).toBeNull();
+    fireEvent.press(screen.getByTestId('composer-send'));
+    expect(onSend).toHaveBeenCalledWith('/연결');
+  });
+
+  it('키 모양이 든 글은 보내지 않고, 이유를 말하고, 글은 남기고, 초안에는 적지 않는다', () => {
+    const onSend = jest.fn();
+    composer({onSend, onSlashCommand: jest.fn()});
+    const body = `팀 키 이거 쓰세요 ${KEY}`;
+    fireEvent.changeText(screen.getByTestId('composer-input'), body);
+    fireEvent.press(screen.getByTestId('composer-send'));
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByTestId('composer-key-blocked')).toBeTruthy();
+    expect(
+      screen.getByText(
+        `${PHONE_SECRET_KEY_BLOCK_COPY.lead} ${PHONE_SECRET_KEY_BLOCK_COPY.tail}`,
+      ),
+    ).toBeTruthy();
+    expect(screen.getByTestId('composer-input').props.value).toBe(body);
+    expect(readDraft(CH)).toBe('');
+    // 키를 빼면 문장이 물러나고 보낼 수 있다.
+    fireEvent.changeText(screen.getByTestId('composer-input'), '팀 키 이거 쓰세요');
+    expect(screen.queryByTestId('composer-key-blocked')).toBeNull();
+    fireEvent.press(screen.getByTestId('composer-send'));
+    expect(onSend).toHaveBeenCalledWith('팀 키 이거 쓰세요');
+  });
+
+  it('막으면 자판을 내리고 알리며, 입력창을 다시 누르면 안내를 거둔다 (R3-B1)', () => {
+    const onKeyBlockedChange = jest.fn();
+    const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
+    const announce = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => {});
+    try {
+      composer({onKeyBlockedChange});
+      fireEvent.changeText(screen.getByTestId('composer-input'), KEY);
+      fireEvent.press(screen.getByTestId('composer-send'));
+      expect(dismiss).toHaveBeenCalledTimes(1);
+      expect(onKeyBlockedChange).toHaveBeenLastCalledWith(true);
+      fireEvent(screen.getByTestId('composer-input'), 'focus');
+      expect(screen.queryByTestId('composer-key-blocked')).toBeNull();
+      expect(onKeyBlockedChange).toHaveBeenLastCalledWith(false);
+      expect(onKeyBlockedChange).toHaveBeenCalledTimes(2);
+      // 키가 남아 있으면 다음 전송이 다시 막는다.
+      fireEvent.press(screen.getByTestId('composer-send'));
+      expect(screen.getByTestId('composer-key-blocked')).toBeTruthy();
+      // iOS 에는 live region 이 없다 — 막을 때마다, 안내가 이미 서 있어도 소리로
+      // 알린다(R4-H1).
+      const said = `${PHONE_SECRET_KEY_BLOCK_COPY.lead} ${PHONE_SECRET_KEY_BLOCK_COPY.tail}`;
+      const count = () => announce.mock.calls.filter(([text]) => text === said).length;
+      const before = count();
+      expect(before).toBeGreaterThanOrEqual(2);
+      fireEvent.press(screen.getByTestId('composer-send'));
+      expect(count()).toBeGreaterThan(before);
+    } finally {
+      dismiss.mockRestore();
+      announce.mockRestore();
+    }
+  });
+
+  it('스레드 컴포저도 키를 막는다', () => {
+    const onSend = jest.fn();
+    composer({onSend});
+    fireEvent.changeText(screen.getByTestId('composer-input'), KEY);
+    fireEvent.press(screen.getByTestId('composer-send'));
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByTestId('composer-key-blocked')).toBeTruthy();
+  });
+
+  it('키가 아닌 `sk-` 낱말은 막지 않는다(오탐 없음)', () => {
+    const onSend = jest.fn();
+    composer({onSend});
+    fireEvent.changeText(screen.getByTestId('composer-input'), 'sk-learn 버전 올려 주세요');
+    fireEvent.press(screen.getByTestId('composer-send'));
+    expect(onSend).toHaveBeenCalledWith('sk-learn 버전 올려 주세요');
+  });
+});

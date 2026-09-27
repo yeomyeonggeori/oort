@@ -358,6 +358,14 @@ export function providerSourceLabel(source: string): string {
 }
 
 /**
+ * `provider_egress_denied` (#2960) in the settings panel's 합니다체: the server's
+ * egress guard refused a private, loopback or metadata address before dialling.
+ * Only the operator's opt-in (ADR-0004 증보 2026-09-08) changes that.
+ */
+export const PROVIDER_EGRESS_DENIED_HINT =
+  "사설·루프백·메타데이터 주소라 서버가 부르지 않았습니다. 같은 망의 provider를 쓰려면 서버 운영자가 AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1을 켜고 그 호스트를 AGENT_PROVIDER_LOCAL_HOSTS에 넣어야 합니다.";
+
+/**
  * POST /v1/provider/link/test returns a machine label. Turn it into what
  * happened plus the next step, never an apology.
  */
@@ -374,8 +382,26 @@ export function providerTestMessage(test: {
       return "저장된 키가 없습니다. 키를 입력해 저장한 뒤 다시 확인하세요.";
     case "provider_unreachable":
       return `${test.endpointLabel} 에 연결하지 못했습니다. 주소를 확인하고, 이 서버에서 그 주소로 나갈 수 있는지 확인하세요.`;
-    default:
+    // #2960: the server now dials, so these are real answers, not the default.
+    case "provider_auth_failed":
+      return "provider가 저장된 키를 받아들이지 않았습니다. 키가 맞는지, 만료되지 않았는지 확인한 뒤 새 키를 저장하세요.";
+    case "provider_rate_limited":
+      return "provider의 요청 한도에 걸렸습니다. 잠시 뒤 다시 확인하세요.";
+    case "provider_egress_denied":
+      return PROVIDER_EGRESS_DENIED_HINT;
+    case "provider_invalid_response":
+      return `${test.endpointLabel} 의 응답이 provider API 모양이 아닙니다. API 주소(예: …/v1)인지 확인하세요.`;
+    case "hop_disabled":
+      return "꺼 둔 연결이라 확인하지 않았습니다.";
+    case "probe_not_run":
+      // Legacy oauth-openai head: the worker refreshes that token, so the server
+      // does not dial it. Not a failure of the key.
+      return "이 연결은 서버가 직접 확인하지 않습니다.";
+    default: {
+      const status = /^provider_status_(\d{3})$/.exec(test.reason ?? "");
+      if (status) return `provider가 ${status[1]} 응답을 줬습니다. 주소와 키를 확인하세요.`;
       return `연결을 확인하지 못했습니다. 서버가 보고한 사유: ${test.reason ?? "알 수 없음"}`;
+    }
   }
 }
 
