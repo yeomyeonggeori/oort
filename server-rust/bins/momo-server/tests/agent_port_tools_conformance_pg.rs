@@ -4882,3 +4882,209 @@ async fn a_subscription_agents_owner_dm_opens_and_nothing_else_can() {
         .await
         .is_empty());
 }
+
+/// Security review H1 (#2918) — ADR-0162 증보 2 B6.
+///
+/// The owner creates a hosted connection; before it is active, a workspace
+/// admin who is NOT the owner re-pairs it, detects it with their own runtime
+/// and confirms it. That connection must carry no DM: not the owner's own
+/// (history via `oort_conversation_read`, new turns via the claim), and not
+/// the DMs the owner had opened (cleared in the confirm transaction).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_connection_a_non_owner_confirmed_carries_no_dm() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+    let (_admin, admin_jwt) = seed_human_2915(&su, &fixture, "admin", "관리자").await;
+    let (member, member_jwt) = seed_human_2915(&su, &fixture, "member", "민지").await;
+
+    // The owner (`fixture.human`) creates the connection: the agent is theirs.
+    let created: Value = client
+        .post(format!("{base}/v1/workspaces/{ws}/hosted-agent-connections"))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"displayName": "Claude Code", "handle": format!("cc-{}", &Uuid::new_v4().simple().to_string()[..8]), "authMode": "static_bearer"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let connection: Uuid = created["connection"]["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let agent: Uuid = created["connection"]["agentMemberId"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let owner_dm = seed_dm_2915(&su, ws, fixture.human, &[fixture.human, agent]).await;
+    let member_dm = seed_dm_2915(&su, ws, member, &[member, agent]).await;
+    // The owner already said something private in their DM.
+    say_2915(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        ws,
+        owner_dm,
+        "비공개 메모: 연봉 협상 초안",
+    )
+    .await;
+
+    // The admin re-pairs it and detects it with their own runtime.
+    let regenerated: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{ws}/hosted-agent-connections/{connection}/pairing-challenge/regenerate"
+        ))
+        .bearer_auth(&admin_jwt)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let pairing = regenerated["pairingCredential"]
+        .as_str()
+        .expect("pairing")
+        .to_string();
+    list_tools(&client, &base, &pairing).await;
+
+    // While it is detected (not yet confirmed) the owner opens the member's DM.
+    let url = format!(
+        "{base}/v1/workspaces/{ws}/hosted-agent-connections/{connection}/dm-approvals/{member_dm}"
+    );
+    let status = client
+        .put(&url)
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap()
+        .status();
+    assert_eq!(
+        status.as_u16(),
+        200,
+        "an unconfirmed connection still takes the owner's decision"
+    );
+
+    // The admin confirms (no channels at all) and proves.
+    let confirmed: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{ws}/hosted-agent-connections/{connection}/confirm"
+        ))
+        .bearer_auth(&admin_jwt)
+        .json(&json!({
+            "agentMemberId": agent.to_string(),
+            "audience": AUDIENCE,
+            "approvedChannelIds": [],
+            "approvedScopes": ["agent:port:connect","agent:inbox:read","messages:read",
+                               "messages:write","agent:jobs:read","agent:runs:callback"],
+            "authMode": "static_bearer",
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let bearer = confirmed["credential"]
+        .as_str()
+        .expect("credential")
+        .to_string();
+    list_tools(&client, &base, &bearer).await;
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM hosted_agent_connection WHERE id=$1")
+            .bind(connection)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(status, "active");
+
+    // The owner's approval did not survive a non-owner's confirm.
+    let stored: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT approved_dm_channel_ids FROM hosted_agent_connection WHERE id=$1",
+    )
+    .bind(connection)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(stored.is_empty(), "cleared in the confirm tx: {stored:?}");
+    let covered = covered_2915(&app, ws, ws, connection).await;
+    assert!(
+        !covered.contains(&owner_dm) && !covered.contains(&member_dm),
+        "{covered:?}"
+    );
+
+    // History: the admin's runtime cannot read the owner's DM.
+    let (status, refused) = call(
+        &client,
+        &base,
+        &bearer,
+        "oort_conversation_read",
+        json!({"channelId": owner_dm, "limit": 10}),
+    )
+    .await;
+    assert_ne!(
+        status, 200,
+        "owner DM history must not be readable: {refused}"
+    );
+    // New turns: nothing is created or claimable in either DM.
+    say_2915(
+        &client,
+        &base,
+        &fixture.human_jwt,
+        ws,
+        owner_dm,
+        "오늘 일정?",
+    )
+    .await;
+    say_2915(&client, &base, &member_jwt, ws, member_dm, "안녕하세요").await;
+    assert_eq!(dm_jobs_2915(&su, ws, agent, owner_dm).await, 0);
+    assert_eq!(dm_jobs_2915(&su, ws, agent, member_dm).await, 0);
+    assert!(claim_channels_2915(&client, &base, &bearer)
+        .await
+        .is_empty());
+    // And the member is not told to ask the owner (the owner cannot open it).
+    let last = hosted_notices(&su, ws, member_dm).await;
+    assert_eq!(
+        last.last().unwrap()["props"]["reason"],
+        "hosted_dm_not_approvable",
+        "{last:?}"
+    );
+
+    // The owner sees why, and cannot re-open it on this connection.
+    let list: Value = client
+        .get(format!(
+            "{base}/v1/workspaces/{ws}/hosted-agent-connections/{connection}/dm-approvals"
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(list["confirmedByNonOwner"], true, "{list}");
+    assert_eq!(list["canEdit"], false);
+    assert!(
+        list["dms"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["state"] == "not_approvable"),
+        "{list}"
+    );
+    let status = client
+        .put(&url)
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .unwrap()
+        .status();
+    assert_eq!(status.as_u16(), 409);
+}

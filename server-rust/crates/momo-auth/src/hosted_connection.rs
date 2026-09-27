@@ -674,6 +674,10 @@ pub async fn confirm_hosted_connection_in_tx(
          ), updated AS ( \
            UPDATE hosted_agent_connection SET confirmed_by = $3, confirmed_at = now(), \
              approved_channel_ids = $7, approved_scopes = $8, \
+             approved_dm_channel_ids = CASE WHEN EXISTS ( \
+               SELECT 1 FROM agent a WHERE a.workspace_id = $1 AND a.member_id = $4 \
+                  AND a.owner_human_id = $3) \
+               THEN approved_dm_channel_ids ELSE '{{}}'::uuid[] END, \
              active_token_id = (SELECT id FROM inserted), updated_at = now() \
             WHERE id IN (SELECT id FROM locked) AND EXISTS (SELECT 1 FROM inserted) \
            RETURNING * \

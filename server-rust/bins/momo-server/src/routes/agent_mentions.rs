@@ -405,7 +405,11 @@ pub(crate) async fn route_agent_mentions_in_tx(
                     if in_dm {
                         unapproved_dm_reason(
                             one_to_one_dm,
-                            agent.owner_member_id,
+                            // 증보 2 B6: a connection a non-owner confirmed
+                            // carries no DM, so there is no owner to ask.
+                            agent
+                                .owner_member_id
+                                .filter(|_| agent.hosted_confirmed_by_owner),
                             agent.owner_only.is_some(),
                             send.author_member_id,
                         )
@@ -1034,6 +1038,7 @@ mod tests {
             owner_only: None,
             owner_member_id: None,
             owner_display_name: None,
+            hosted_confirmed_by_owner: false,
         }
     }
 

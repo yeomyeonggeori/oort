@@ -43,7 +43,7 @@
 //!
 //! ## DND expiry and the notification-pause bundle (ADR-0124 증보 2, #2850)
 //!
-//! `member.presence_dnd_until` (migration 091) gives declared DND an expiry.
+//! `member.presence_dnd_until` (migration 090) gives declared DND an expiry.
 //! Like the custom-status expiry it is lazy: a `dnd` whose expiry has passed
 //! reads as `auto` everywhere it is read ([`effective_presence`]), and no job
 //! flips the column.

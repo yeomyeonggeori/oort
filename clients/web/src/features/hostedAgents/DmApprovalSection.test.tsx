@@ -154,6 +154,22 @@ describe("DmApprovalSection", () => {
     expect(rows()[1].textContent).toContain("열림");
   });
 
+  it("says a non-owner's confirm closed every DM, not that only the owner may edit", async () => {
+    vi.mocked(getHostedDmApprovals).mockResolvedValue({
+      ...wire(false, "not_approvable"),
+      confirmedByNonOwner: true,
+      dms: [
+        { channelId: "dm-owner", counterpartMemberId: OWNER, state: "not_approvable" },
+        { channelId: "dm-member", counterpartMemberId: MEMBER, state: "not_approvable" },
+      ],
+    });
+    await render();
+    expect(
+      host.querySelector('[data-testid="hosted-dm-approval-readonly"]')?.textContent
+    ).toContain("소유자가 아닌 멤버가 이 연결을 확인해서");
+    expect(host.textContent).not.toContain("항상 열림");
+  });
+
   it("says why a write was refused, next to the row", async () => {
     vi.mocked(getHostedDmApprovals).mockResolvedValue(wire(true));
     const { ApiError } = await import("@momo/core/lib/api");

@@ -142,6 +142,10 @@ pub struct MentionCandidate {
     pub owner_member_id: Option<Uuid>,
     /// That owner's display name, for the line that says who to ask.
     pub owner_display_name: Option<String>,
+    /// The live connection was confirmed (static) or consented (OAuth) by the
+    /// owner. ADR-0162 증보 2 B6: only then does it carry any DM, so only then
+    /// is "ask the owner to approve this DM" a true sentence.
+    pub hosted_confirmed_by_owner: bool,
 }
 
 /// Read every active agent of the workspace, with its channel membership and
@@ -225,7 +229,11 @@ pub async fn load_mention_candidates_in_tx(
                   ORDER BY hc.id LIMIT 1), false) AS hosted_recently_seen, \
                 EXISTS (SELECT 1 FROM hosted_agent_connection hc \
                   WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id \
-                    AND hc.status IN ('pairing_pending','detected')) AS hosted_reconnectable \
+                    AND hc.status IN ('pairing_pending','detected')) AS hosted_reconnectable, \
+                EXISTS (SELECT 1 FROM hosted_agent_connection hc \
+                  WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id \
+                    AND hc.status = 'active' \
+                    AND hc.confirmed_by = a.owner_human_id) AS hosted_confirmed_by_owner \
            FROM member m \
            JOIN agent a ON a.member_id = m.id AND a.workspace_id = m.workspace_id \
            JOIN workspace w ON w.id = m.workspace_id \
@@ -301,6 +309,9 @@ pub async fn load_mention_candidates_in_tx(
             owner_only: owner_only_scope(row)?,
             owner_member_id: row.try_get("owner_human_id").map_err(DbError::from)?,
             owner_display_name: row.try_get("owner_display_name").map_err(DbError::from)?,
+            hosted_confirmed_by_owner: row
+                .try_get("hosted_confirmed_by_owner")
+                .map_err(DbError::from)?,
         });
     }
     Ok(candidates)
@@ -883,6 +894,7 @@ mod tests {
             owner_only: None,
             owner_member_id: None,
             owner_display_name: None,
+            hosted_confirmed_by_owner: false,
         }
     }
 

@@ -334,6 +334,10 @@ pairing_pending ──human owner/admin consent (authorization code 발급)─�
 - 그룹 DM과 소유자 없는 에이전트는 기존 사유 `hosted_dm_not_approvable`을 쓰되, 문구에서 「1:1 대화는 전달되지 않는다」는 이제 거짓이므로 고친다.
 - DM 컴포저 힌트(#2891)는 서버가 알려 주는 이 DM의 전달 상태를 따른다. 「멘션 없이 바로 말하면 …가 답합니다」는 전달이 열린 DM에서만 쓴다.
 
+### B6-1. DM은 소유자가 확인한 connection에만 실린다 (보안 검수 H1, #2918, planner 결정 2026-09-27)
+
+- B2·B3의 DM(소유자 DM·승인 DM)은 그 connection을 confirm(static)하거나 consent(OAuth)한 사람(`confirmed_by`)이 에이전트 소유자이고 소유자가 활성일 때만 덮인다. 비소유자 관리자가 재-pairing·confirm·consent한 connection에는 DM이 0개다(채널 승인은 그대로). 비소유자의 confirm·consent는 같은 tx에서 그 connection의 타인 DM 승인을 비우고, 그 connection에서 소유자는 DM을 다시 열 수 없다(409). 소유자가 다시 연결하면 열린다.
+
 ### B7. 이 증보가 열지 않는 것
 
 - 그룹 DM, 채널 승인 권한 주체(여전히 관리자의 confirm), 웰컴 킥오프 대상, 운영 인스턴스 설정.

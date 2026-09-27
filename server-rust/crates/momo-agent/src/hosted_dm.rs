@@ -115,7 +115,9 @@ pub fn hosted_dm_delivery(
     }
     match unapproved_dm_reason(
         one_to_one,
-        agent.owner_member_id,
+        agent
+            .owner_member_id
+            .filter(|_| agent.hosted_confirmed_by_owner),
         agent.owner_only.is_some(),
         caller_member_id,
     ) {
@@ -137,12 +139,21 @@ pub struct HostedDmConnection {
     pub owner_member_id: Option<Uuid>,
     pub owner_only: bool,
     pub approved_dm_channel_ids: Vec<Uuid>,
+    /// Who confirmed (static) or consented (OAuth) this connection; `None`
+    /// before that. ADR-0162 증보 2 B6: DMs ride only on an owner's confirm.
+    pub confirmed_by: Option<Uuid>,
 }
 
 impl HostedDmConnection {
     /// Approvals are edited only while the connection can still deliver or is
     /// on its way there. A connection being torn down or gone keeps its list
     /// frozen (and a new connection starts empty).
+    /// Confirmed by someone other than the owner: this connection carries no
+    /// DM at all (B6), so the list is read-only and every row is closed.
+    pub fn confirmed_by_non_owner(&self) -> bool {
+        self.confirmed_by.is_some() && self.confirmed_by != self.owner_member_id
+    }
+
     pub fn is_live(&self) -> bool {
         matches!(
             self.status.as_str(),
@@ -162,7 +173,7 @@ pub async fn load_hosted_dm_connection_in_tx(
     let sql = format!(
         "SELECT hc.id, hc.agent_member_id, hc.status, a.owner_human_id, \
                 (a.invocation_scope = 'owner_only') AS owner_only, \
-                hc.approved_dm_channel_ids \
+                hc.approved_dm_channel_ids, hc.confirmed_by \
            FROM hosted_agent_connection hc \
            JOIN agent a ON a.workspace_id = hc.workspace_id AND a.member_id = hc.agent_member_id \
           WHERE hc.workspace_id = $1 AND hc.id = $2{}",
@@ -183,6 +194,7 @@ pub async fn load_hosted_dm_connection_in_tx(
         owner_member_id: row.try_get("owner_human_id")?,
         owner_only: row.try_get("owner_only")?,
         approved_dm_channel_ids: row.try_get("approved_dm_channel_ids")?,
+        confirmed_by: row.try_get("confirmed_by")?,
     }))
 }
 
@@ -223,7 +235,9 @@ pub fn hosted_dm_approval_state(
     channel_id: Uuid,
     counterpart_member_id: Uuid,
 ) -> HostedDmApprovalState {
-    if connection.owner_member_id == Some(counterpart_member_id) {
+    if connection.confirmed_by_non_owner() {
+        HostedDmApprovalState::NotApprovable
+    } else if connection.owner_member_id == Some(counterpart_member_id) {
         HostedDmApprovalState::Owner
     } else if connection.owner_only || connection.owner_member_id.is_none() {
         HostedDmApprovalState::NotApprovable
@@ -293,6 +307,9 @@ pub enum HostedDmApprovalError {
     NotOneToOneDm,
     /// The owner's own DM is open by rule; there is nothing to store.
     OwnerDm,
+    /// Someone other than the owner confirmed this connection; it carries no
+    /// DM until the owner pairs it again (B6).
+    ConfirmedByNonOwner,
 }
 
 /// Open (`approve = true`) or close one DM for the connection. Returns the
@@ -317,6 +334,9 @@ pub async fn set_hosted_dm_approval_in_tx(
     if connection.owner_only && approve {
         return Ok(Err(HostedDmApprovalError::OwnerOnly));
     }
+    if connection.confirmed_by_non_owner() && approve {
+        return Ok(Err(HostedDmApprovalError::ConfirmedByNonOwner));
+    }
     if !connection.is_live() {
         return Ok(Err(HostedDmApprovalError::NotLive));
     }
@@ -327,10 +347,22 @@ pub async fn set_hosted_dm_approval_in_tx(
         if !approve && connection.approved_dm_channel_ids.contains(&channel_id) {
             let changed =
                 remove_dm_approval(&mut *conn, workspace_id, connection_id, channel_id).await?;
+            // The audit row should still say whose DM this was: the earliest
+            // human who joined it (review N4). Nil only if nobody is found.
+            let counterpart: Option<Uuid> = sqlx::query_scalar(
+                "SELECT ms.member_id FROM membership ms \
+                   JOIN member m ON m.workspace_id = ms.workspace_id AND m.id = ms.member_id \
+                  WHERE ms.workspace_id = $1 AND ms.channel_id = $2 AND m.kind = 'human' \
+                  ORDER BY ms.joined_at, ms.member_id LIMIT 1",
+            )
+            .bind(workspace_id)
+            .bind(channel_id)
+            .fetch_optional(&mut *conn)
+            .await?;
             return Ok(Ok((
                 HostedDmRow {
                     channel_id,
-                    counterpart_member_id: Uuid::nil(),
+                    counterpart_member_id: counterpart.unwrap_or_else(Uuid::nil),
                     state: HostedDmApprovalState::Unapproved,
                 },
                 changed,
@@ -440,6 +472,7 @@ mod tests {
             owner_member_id: Some(OWNER),
             owner_only: false,
             approved_dm_channel_ids: vec![],
+            confirmed_by: Some(OWNER),
         };
         assert_eq!(
             hosted_dm_approval_state(&connection, channel, OWNER),

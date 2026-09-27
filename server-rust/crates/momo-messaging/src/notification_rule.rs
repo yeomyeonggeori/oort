@@ -18,7 +18,7 @@
 //!
 //! ## 증보 2 (#2850): expiry and the DND bundle
 //!
-//! `dnd_until` (migration 091) gives the pause an expiry. It is compared at the
+//! `dnd_until` (migration 090) gives the pause an expiry. It is compared at the
 //! point of use — the push judgment SQL and [`get_notification_rule_in_tx`] —
 //! never by a sweeper: an expired pause reads as "off" and delivers.
 //!

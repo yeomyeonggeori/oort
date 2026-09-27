@@ -2022,7 +2022,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {description: Only the agent's owner decides, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "404": {description: Connection not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
-        "409": {description: Subscription agent (owner's DM only), the owner's own DM (always open), or a connection that is not live, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: "Subscription agent (owner's DM only), the owner's own DM (always open), a connection confirmed by a non-owner, or a connection that is not live", content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "422": {description: Not a 1:1 DM between this agent and an active human, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
     delete:
       tags: [agents]
@@ -9623,13 +9623,14 @@ components:
     HostedDmApprovalsResponse:
       type: object
       additionalProperties: false
-      required: [connectionId, agentMemberId, ownerMemberId, canEdit, ownerOnly, dms]
+      required: [connectionId, agentMemberId, ownerMemberId, canEdit, ownerOnly, confirmedByNonOwner, dms]
       properties:
         connectionId: {type: string, format: uuid}
         agentMemberId: {type: string, format: uuid}
         ownerMemberId: {type: string, format: uuid, nullable: true}
         canEdit: {type: boolean}
         ownerOnly: {type: boolean}
+        confirmedByNonOwner: {type: boolean, description: "ADR-0162 증보 2 B6-1: someone other than the owner confirmed/consented this connection, so it carries no DM and every row is not_approvable."}
         dms: {type: array, items: {$ref: "#/components/schemas/HostedDmApprovalRow"}}
 
     HostedDmApprovalWriteResponse:

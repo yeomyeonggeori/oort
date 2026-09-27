@@ -39,6 +39,8 @@ export interface HostedDmApprovals {
   /** 내가 소유자이고 연결이 살아 있다. */
   canEdit: boolean;
   ownerOnly: boolean;
+  /** 소유자가 아닌 사람이 이 연결을 확인했다. 이 연결로는 어떤 DM도 가지 않는다(증보 2 B6). */
+  confirmedByNonOwner: boolean;
   dms: HostedDmApprovalRow[];
 }
 
@@ -79,6 +81,7 @@ export function parseHostedDmApprovals(value: unknown): HostedDmApprovals | null
     ownerMemberId: str(value.ownerMemberId),
     canEdit: value.canEdit === true,
     ownerOnly: value.ownerOnly === true,
+    confirmedByNonOwner: value.confirmedByNonOwner === true,
     dms,
   };
 }
@@ -130,6 +133,9 @@ export function dmApprovalOpenQuestion(memberName: string): string {
 export function dmApprovalCloseQuestion(memberName: string): string {
   return `${memberName}님과의 대화를 닫을까요? 이후 메시지는 에이전트에게 가지 않습니다.`;
 }
+
+export const DM_APPROVAL_CONFIRMED_BY_NON_OWNER_NOTE =
+  "소유자가 아닌 멤버가 이 연결을 확인해서 1:1 대화는 모두 닫혀 있습니다. 소유자가 다시 연결하면 열 수 있습니다.";
 
 /** 읽기 전용일 때 목록 위에 한 번 선다. */
 export function dmApprovalReadOnlyNote(ownerName: string | null): string {

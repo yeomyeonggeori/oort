@@ -22,6 +22,7 @@ import {
   DM_APPROVAL_BUSY_LABEL,
   DM_APPROVAL_CLOSE_CONFIRM,
   DM_APPROVAL_CLOSE_LABEL,
+  DM_APPROVAL_CONFIRMED_BY_NON_OWNER_NOTE,
   DM_APPROVAL_EMPTY_DETAIL,
   DM_APPROVAL_EMPTY_HEADLINE,
   DM_APPROVAL_HEADLINE,
@@ -155,7 +156,9 @@ export function DmApprovalSection({
             className="break-keep text-meta text-ink-muted"
             data-testid="hosted-dm-approval-readonly"
           >
-            {dmApprovalReadOnlyNote(ownerName)}
+            {data.confirmedByNonOwner
+              ? DM_APPROVAL_CONFIRMED_BY_NON_OWNER_NOTE
+              : dmApprovalReadOnlyNote(ownerName)}
           </p>
         )}
         {data?.canEdit && offline && (

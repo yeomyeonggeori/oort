@@ -55,6 +55,9 @@ pub struct HostedDmApprovalsResponse {
     /// The caller is the owner and the connection is live.
     pub can_edit: bool,
     pub owner_only: bool,
+    /// ADR-0162 증보 2 B6: someone other than the owner confirmed this
+    /// connection, so it carries no DM until the owner pairs it again.
+    pub confirmed_by_non_owner: bool,
     pub dms: Vec<HostedDmApprovalRowDto>,
 }
 
@@ -109,6 +112,10 @@ fn approval_error(error: HostedDmApprovalError) -> ApiError {
             StatusCode::UNPROCESSABLE_ENTITY,
             "channel is not a 1:1 DM between this agent and a member",
         ),
+        HostedDmApprovalError::ConfirmedByNonOwner => ApiError::new(
+            StatusCode::CONFLICT,
+            "this connection was confirmed by someone other than the owner and carries no DM",
+        ),
         HostedDmApprovalError::OwnerDm => {
             ApiError::new(StatusCode::CONFLICT, "the owner's DM is always open")
         }
@@ -146,8 +153,9 @@ pub async fn list(
                 connection_id: connection.connection_id.to_string(),
                 agent_member_id: connection.agent_member_id.to_string(),
                 owner_member_id: connection.owner_member_id.map(|id| id.to_string()),
-                can_edit: is_owner && connection.is_live(),
+                can_edit: is_owner && connection.is_live() && !connection.confirmed_by_non_owner(),
                 owner_only: connection.owner_only,
+                confirmed_by_non_owner: connection.confirmed_by_non_owner(),
                 dms: dms.iter().map(row_dto).collect(),
             }))
         })
