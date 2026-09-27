@@ -59,21 +59,42 @@ async fn migration_runner_applies_all_66_and_matches_schema() {
     let pool = superuser_pool().await;
     let mut conn = pool.acquire().await.expect("acquire");
 
-    // discovery = exactly the versioned files, contiguous
+    // discovery = exactly the versioned files, contiguous. #2903: the count is
+    // the directory's own, never a pinned number that the next migration
+    // turns red; what is pinned is that discovery drops no file and skips no
+    // version.
     let migs = discover_migrations(&default_migrations_dir()).expect("discover");
-    assert_eq!(migs.len(), 90, "expected 90 migrations, got {}", migs.len());
+    let sql_files = std::fs::read_dir(default_migrations_dir())
+        .expect("read the migrations dir")
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "sql"))
+        .count();
+    assert!(!migs.is_empty(), "discovery found no migration");
+    assert_eq!(
+        migs.len(),
+        sql_files,
+        "discovery must see every .sql file in the migrations dir"
+    );
+    for (index, migration) in migs.iter().enumerate() {
+        assert_eq!(
+            migration.version,
+            index as i64 + 1,
+            "migrations must be contiguous from 001; {} is out of place",
+            migration.name
+        );
+    }
 
     // THE runner — applies 001..061 in place via psql (incl. pgvector 028 and
     // the seed migrations' `\if` meta-commands). An ordering/role dependency or
     // a psql-rejected file would surface here as a real finding. Product default
     // seed mode (no legacy agent fixtures).
     let report = run_migrations(&database_url(), &default_migrations_dir(), SeedMode::None)
-        .expect("all 90 migrations apply on a fresh pgvector/pg18 DB");
+        .expect("every migration applies on a fresh pgvector/pg18 DB");
     assert_eq!(
         report.total(),
-        90,
-        "the runner must consider all 90 files (applying them, or SKIPping the \
-         ones a previous run already recorded)"
+        migs.len(),
+        "the runner must consider every discovered file (applying it, or \
+         SKIPping the ones a previous run already recorded)"
     );
 
     // outbox table + full enum (emit.rs OutboxKind must be a subset of these)
@@ -131,7 +152,8 @@ async fn migration_runner_applies_all_66_and_matches_schema() {
     );
 
     println!(
-        "conformance: 65 migrations applied; outbox_kind={labels:?}; FORCE-RLS tables={forced}"
+        "conformance: {} migrations applied; outbox_kind={labels:?}; FORCE-RLS tables={forced}",
+        migs.len()
     );
 }
 

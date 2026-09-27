@@ -20,6 +20,7 @@
 //! | `owner_only_can_never_be_reopened` | D4 「소유자는 바꿀 수 없다」 | migration 089 trigger |
 //! | `the_welcome_opener_never_spends_someone_elses_subscription` | welcome speaker | `load_welcome_agent_in_tx` predicate |
 //! | `the_subscription_join_records_owner_only_and_refuses_bad_shapes` | create path | `requested_owner_only` / `mark_agent_owner_only_in_tx` |
+//! | `an_owner_call_to_a_subscription_agent_with_no_connection_row_is_never_a_worker_job` (#2924) | the owner's mention, work request and welcome of a row-less subscription agent → 0 jobs, the 「연결 안 됨」 line | `OR a.invocation_scope = 'owner_only'` in the three hosted predicates (`mention.rs`, `run.rs`, `welcome.rs`) |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -1499,4 +1500,115 @@ async fn the_subscription_join_records_owner_only_and_refuses_bad_shapes() {
         .unwrap();
     assert_eq!(team["connection"]["invocationScope"], "workspace");
     assert!(team["connection"].get("subscriptionHarness").is_none());
+}
+
+// ---------------------------------------------------------------------------
+// #2924 — no connection row: the owner's call is still never a team-key job
+// ---------------------------------------------------------------------------
+
+/// review-2922 M1, probe P2. A subscription agent whose
+/// `hosted_agent_connection` row is gone (operator repair, a future delete
+/// path) is still a subscription agent: the owner's own mention, work request
+/// and welcome must end in the #2871 「연결 안 됨」 line (or a refusal), never
+/// in a `delivery = worker` job the team worker would run on the team key.
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (2815-*)"]
+async fn an_owner_call_to_a_subscription_agent_with_no_connection_row_is_never_a_worker_job() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let f = seed(&su).await;
+    // The row goes (073 allows a direct DELETE while it has no inbox events;
+    // its Agent Port token cascades with it).
+    sqlx::query("DELETE FROM hosted_agent_connection WHERE workspace_id=$1")
+        .bind(f.workspace)
+        .execute(&su)
+        .await
+        .expect("drop the connection row");
+
+    // Gateway mode, so the work request below reaches the agent checks at all
+    // (worker mode refuses it upstream); review-2922 P2 measured the mention
+    // bypass in both modes.
+    let base = start_server(momo_app_pool().await, true).await;
+    let client = reqwest::Client::new();
+
+    send(
+        &client,
+        &base,
+        &f,
+        &f.owner_jwt,
+        f.channel,
+        &format!("@{} 부탁해", f.agent_handle),
+        None,
+    )
+    .await;
+    assert_eq!(
+        jobs(&su, &f).await,
+        0,
+        "the owner's mention of a row-less subscription agent became a job"
+    );
+    assert_eq!(
+        last_skip_reason(&su, &f).await,
+        "hosted_connection_unavailable"
+    );
+    let lines: Vec<(String, String)> = sqlx::query_as(
+        "SELECT body, props->>'notice_for_member_id' FROM message \
+          WHERE workspace_id=$1 AND author_member_id=$2 \
+            AND props->>'source'='server.hosted_agent.notice.v1' ORDER BY seq",
+    )
+    .bind(f.workspace)
+    .bind(f.agent)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(lines.len(), 1, "one 「연결 안 됨」 line: {lines:?}");
+    assert!(lines[0].0.contains("연결이 끊겨"), "{}", lines[0].0);
+    assert_eq!(lines[0].1, f.owner.to_string());
+
+    // The owner's work request: refused before any run exists, by the hosted
+    // refusal itself (not an unrelated upstream gate).
+    let response = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/agent-runs",
+            f.workspace, f.channel
+        ))
+        .bearer_auth(&f.owner_jwt)
+        .json(&json!({
+            "agent_member_id": f.agent,
+            "client_run_id": Uuid::new_v4(),
+            "input": {"type": "work", "title": "t", "brief": "b"},
+        }))
+        .send()
+        .await
+        .expect("agent-runs");
+    let status = response.status().as_u16();
+    let body = response.text().await.unwrap_or_default();
+    assert_eq!(status, 409, "the owner's work request: {body}");
+    assert!(
+        body.contains("hosted agent delivery is not enabled"),
+        "refused by the hosted boundary: {body}"
+    );
+    assert_eq!(jobs(&su, &f).await, 0, "the work request became a job");
+
+    // The owner's welcome: a hosted agent that cannot be delivered to is not
+    // a speaker, so no welcome job is ever written for it.
+    let app = momo_app_pool().await;
+    let (workspace, owner) = (f.workspace, f.owner);
+    let target = momo_db::with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            momo_agent::resolve_welcome_target_in_tx(conn, workspace, true, None, owner, true).await
+        })
+    })
+    .await
+    .unwrap()
+    .map(|target| target.agent_member_id);
+    assert_eq!(target, None, "the owner is welcomed on a team-key turn");
+    let agent_runs: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(f.workspace)
+    .bind(f.agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(agent_runs, 0, "no run was ever created for it");
 }

@@ -160,6 +160,16 @@ export interface Command {
   /** 에이전트별 명령만 갖는다. 줄의 `data-member-id`가 된다. */
   readonly memberId?: string;
   /**
+   * 에이전트가 이 명령을 **카드로 제안할 수 있는가** (ADR-0186 증보 G2).
+   *
+   * 참인 명령만 `momo.command_suggest` 카드가 될 수 있다. 서버 허용목록
+   * (`momo_agent::card_suggest::SUGGESTABLE_COMMANDS`)과 같은 집합이어야 하고,
+   * 두 언어가 만나는 자리는 OpenAPI `SuggestableCommandId`다 — 웹
+   * `app/commandRegistry.test.ts`가 이 표와 그 enum을 잰다. `kind: "client"`
+   * 명령에만 붙는다(서버 상태를 바꾸지 않는 명령만 제안 카드가 된다).
+   */
+  readonly agentSuggestable?: true;
+  /**
    * 컴포저 맨 앞 `/`로 부르는 이름(#2942 GC-1). `client` 명령만 가질 수 있다.
    * 없으면 슬래시 목록에 서지 않는다.
    */
@@ -369,6 +379,9 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
     keywords: ["연결", "connect", "ai", "구독", "api 키", "claude", "codex"],
     icon: "ai-connect",
     testId: "switcher-ai-connect",
+    // ADR-0186 증보 G2 — 에이전트가 이 카드를 제안할 수 있다(서버 허용목록
+    // `SUGGESTABLE_COMMANDS`와 OpenAPI `SuggestableCommandId`에 같은 id).
+    agentSuggestable: true,
     available: always,
     metaFor: (env) =>
       env.canOpenLocalCard("ai.connect") ? "이 채널 · 나에게만" : "설정에서 열려요",
@@ -473,6 +486,18 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
 export const KNOWN_COMMAND_IDS: readonly string[] = STATIC_COMMANDS.map(
   (command) => command.id
 );
+
+/**
+ * 에이전트가 카드로 제안할 수 있는 고정 명령 (ADR-0186 증보 G2), 바닥 순서로.
+ *
+ * 멤버마다 생기는 명령은 여기 오지 않는다 — 제안은 서버 허용목록과 같은
+ * 집합이어야 하고, 그 목록은 고정 id만 담는다. `kind`를 함께 내는 것은
+ * 「`client` 명령만 제안 카드가 된다」를 시험이 잴 수 있게 하기 위해서다.
+ */
+export const AGENT_SUGGESTABLE_COMMANDS: readonly Pick<Command, "id" | "kind">[] =
+  STATIC_COMMANDS.filter((command) => command.agentSuggestable === true).map(
+    ({ id, kind }) => ({ id, kind })
+  );
 
 /** 에이전트 라우팅 명령의 id. 한 에이전트에 하나다. */
 export function agentRoutingCommandId(memberId: string): string {

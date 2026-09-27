@@ -579,12 +579,23 @@ async fn instance_at_087(db: &ScratchDb) -> (PgPool, Fixture) {
     (su, fixture)
 }
 
-/// The deploy: `migrate` applies 088 (and only 088), then the new API starts.
+/// The deploy: `migrate` brings an 087 instance to the current tree — 088
+/// first, and whatever later migrations exist after it — then the new API
+/// starts. #2903: the assertion is about 088 being what this upgrade applied
+/// first, never about how many files come after it, so the next migration does
+/// not turn it red.
 async fn upgrade_to_088(db: &ScratchDb, su: PgPool, fixture: Fixture) -> World {
+    let applied = db.migrate_all();
     assert_eq!(
-        db.migrate_all(),
-        vec!["088_push_session_lineage.sql".to_string()],
-        "the upgrade applies 088 and nothing else"
+        applied.first().map(String::as_str),
+        Some("088_push_session_lineage.sql"),
+        "the upgrade applies 088 first: {applied:?}"
+    );
+    assert!(
+        applied
+            .iter()
+            .all(|name| name.as_str() >= "088_push_session_lineage.sql"),
+        "the upgrade re-applied nothing at or before 087: {applied:?}"
     );
     apply_bootstrap_roles(&db.url);
     World::open(&db.url, su, fixture).await
