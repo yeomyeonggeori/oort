@@ -187,7 +187,7 @@ const act_ = globalThis as typeof globalThis & {
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 
-function mount() {
+function mount(props: { onAddApiKey?: () => void } = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -202,7 +202,7 @@ function mount() {
         createElement(
           SessionProvider,
           { value: session },
-          createElement(AiMyAccountsSection),
+          createElement(AiMyAccountsSection, props),
         ),
       ),
     );
@@ -516,6 +516,40 @@ describe("구독 추가: 폴더 → 모달(그 프로필) → 취소면 폴더 �
     }
     expect(window.location.hash).toBe("#/ai-connect?from=settings");
     expect(q("add-subscription-dialog")).toBeNull();
+  });
+});
+
+describe("추가 창의 「API 키 · 팀이 함께」 (시안 §4 1)", () => {
+  it("운영자가 아니면(키 폼 없음) 잠겨 있고, 구독이 기본 선택이다", async () => {
+    mount();
+    {
+      const el = await until("subscription-entry-open");
+      await act(async () => el.click());
+    }
+    await until("add-subscription-dialog");
+    expect(q("add-kind-subscription")?.getAttribute("aria-checked")).toBe("true");
+    expect(q("add-kind-api-key")?.getAttribute("aria-disabled")).toBe("true");
+    await act(async () => q("add-kind-api-key")!.click());
+    expect(q("add-kind-api-key")?.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("운영자면 「다음」이 팀 연결의 같은 키 폼을 연다(폴더도 PTY도 없다)", async () => {
+    const onAddApiKey = vi.fn();
+    mount({ onAddApiKey });
+    {
+      const el = await until("subscription-entry-open");
+      await act(async () => el.click());
+    }
+    const apiKey = await until("add-kind-api-key");
+    expect(apiKey.getAttribute("aria-disabled")).toBeNull();
+    await act(async () => apiKey.click());
+    expect(q("add-subscription-label")).toBeNull();
+    expect(q("add-subscription-submit")?.textContent).toBe("다음");
+    await act(async () => q("add-subscription-submit")!.click());
+    expect(onAddApiKey).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(q("add-subscription-dialog")).toBeNull());
+    expect(tauri.harnessProfileCreate).not.toHaveBeenCalled();
+    expect(tauri.desktopPty.spawn).not.toHaveBeenCalled();
   });
 });
 

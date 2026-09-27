@@ -1,7 +1,10 @@
 import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal } from "lucide-react";
-import type { LocalHarnessId, LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
+import type {
+  LocalHarnessId,
+  LocalHarnessProbe,
+} from "@momo/core/features/hostedAgents/detect";
 import {
   AI_CONNECT_ROW_COPY,
   AI_CONNECT_SERVER_OFF_NOTE,
@@ -35,13 +38,27 @@ import {
   harnessProfileRemove,
   harnessProfileStatus,
 } from "@/lib/tauri";
-import { AI_CONNECT_REENTRY_PATH, openAiConnectReentry } from "@/features/welcome/aiConnectReentry";
+import {
+  AI_CONNECT_REENTRY_PATH,
+  openAiConnectReentry,
+} from "@/features/welcome/aiConnectReentry";
 import { HarnessLoginDialog } from "@/features/welcome/harnessLogin/HarnessLoginDialog";
 import { HarnessUnlinkDialog } from "@/features/welcome/harnessLogin/HarnessUnlinkDialog";
 import { useSubscriptionEntryState } from "@/features/welcome/SubscriptionAgentEntry";
 import { useLocalHarnessWatch } from "@/features/welcome/useLocalHarnessWatch";
-import { AddSubscriptionDialog, type AddSubscriptionDraft } from "./AddSubscriptionDialog";
-import { AiFoot, AiLineRow, AiLogo, AiPill, AiSection, AiSectionHead, AiSource } from "./aiAccountsParts";
+import {
+  AddSubscriptionDialog,
+  type AddSubscriptionDraft,
+} from "./AddSubscriptionDialog";
+import {
+  AiFoot,
+  AiLineRow,
+  AiLogo,
+  AiPill,
+  AiSection,
+  AiSectionHead,
+  AiSource,
+} from "./aiAccountsParts";
 import {
   MY_ACCOUNTS_BROWSER_LINE,
   MY_ACCOUNTS_DENIED_DETAIL,
@@ -50,6 +67,7 @@ import {
   myAccountsBrowserTab,
   readHiddenDefaults,
   readProbeFixture,
+  readDesignParam,
   readProfilesFixture,
   readUnlinkFixture,
   writeHiddenDefaults,
@@ -84,32 +102,49 @@ const OWN_ACCOUNT_FOOT =
 
 const PROFILES_KEY = ["local", "harness-profiles"] as const;
 
-export function AiMyAccountsSection() {
+export function AiMyAccountsSection({
+  onAddApiKey,
+}: {
+  /** 운영자면 팀 연결 절의 키 폼을 연다. 없으면 추가 창의 API 키 선택이 잠긴다. */
+  onAddApiKey?: () => void;
+}) {
   const state = useSubscriptionEntryState();
   const browserTab = myAccountsBrowserTab(state, IS_TAURI);
   useReentryFocusReturn();
 
   return (
     <AiSection labelledBy={MY_ACCOUNTS_HEADING_ID} testId="ai-my-accounts">
-      <AiSectionHead id={MY_ACCOUNTS_HEADING_ID} title="내 계정" scope="이 맥" />
+      <AiSectionHead
+        id={MY_ACCOUNTS_HEADING_ID}
+        title="내 계정"
+        scope="이 맥"
+      />
       {state === "pending" && !browserTab ? (
         <Skeleton ready={false} rows={1} className="py-3" />
       ) : browserTab ? (
         <AiLineRow testId="subscription-entry" surface="desktop-only" last>
-          <span data-testid="subscription-entry-detail">{MY_ACCOUNTS_BROWSER_LINE}</span>
+          <span data-testid="subscription-entry-detail">
+            {MY_ACCOUNTS_BROWSER_LINE}
+          </span>
         </AiLineRow>
       ) : state === "rows" ? (
-        <MyAccountRows />
+        <MyAccountRows onAddApiKey={onAddApiKey} />
       ) : (
         <AiLineRow testId="subscription-entry" surface={state} last>
           <span>{MY_ACCOUNTS_EMPTY_LINE}</span>
           {state === "server-off" && (
-            <span className="text-meta text-ink-muted" data-testid="subscription-entry-detail">
+            <span
+              className="text-meta text-ink-muted"
+              data-testid="subscription-entry-detail"
+            >
               {AI_CONNECT_SERVER_OFF_NOTE}
             </span>
           )}
           {state === "denied" && (
-            <span className="text-meta text-ink-muted" data-testid="subscription-entry-detail">
+            <span
+              className="text-meta text-ink-muted"
+              data-testid="subscription-entry-detail"
+            >
               {MY_ACCOUNTS_DENIED_DETAIL}
             </span>
           )}
@@ -129,14 +164,18 @@ function useReentryFocusReturn() {
     const onHash = () => {
       const was = last;
       last = window.location.hash;
-      if (!was.startsWith(`#${AI_CONNECT_REENTRY_PATH}`) || last.startsWith(`#${AI_CONNECT_REENTRY_PATH}`)) {
+      if (
+        !was.startsWith(`#${AI_CONNECT_REENTRY_PATH}`) ||
+        last.startsWith(`#${AI_CONNECT_REENTRY_PATH}`)
+      ) {
         return;
       }
       // 셸의 inert가 풀린 다음 프레임에 옮긴다.
       window.requestAnimationFrame(() => {
         const target =
-          document.querySelector<HTMLElement>("[data-testid='subscription-entry-open']") ??
-          document.getElementById(MY_ACCOUNTS_HEADING_ID);
+          document.querySelector<HTMLElement>(
+            "[data-testid='subscription-entry-open']",
+          ) ?? document.getElementById(MY_ACCOUNTS_HEADING_ID);
         target?.focus({ preventScroll: false });
       });
     };
@@ -156,11 +195,16 @@ function profileKey(profile: HarnessProfileRef): string {
   return `${profile.harness}/${profile.label}`;
 }
 
-function MyAccountRows() {
+function MyAccountRows({ onAddApiKey }: { onAddApiKey?: () => void }) {
   const client = useQueryClient();
   const probeFixture = readProbeFixture();
   const profilesFixture = readProfilesFixture();
   const unlinkFixture = readUnlinkFixture();
+  // design 캡처: `?aiLogin=waiting` 이면 로그인 모달을 PTY 없이 그 상태로 그린다.
+  const loginFixture =
+    readDesignParam("aiLogin") === "waiting"
+      ? { status: { phase: "waiting" as const } }
+      : null;
   const harness = useLocalHarnessWatch({
     enabled: true,
     fixture: probeFixture ? { probes: probeFixture } : null,
@@ -181,19 +225,29 @@ function MyAccountRows() {
     })),
   });
   const statusOf = (profile: HarnessProfileRef): LocalHarnessProbe | null => {
-    if (profilesFixture) return profilesFixture.status[profileKey(profile)] ?? null;
-    const at = profiles.findIndex((row) => profileKey(row) === profileKey(profile));
+    if (profilesFixture)
+      return profilesFixture.status[profileKey(profile)] ?? null;
+    const at = profiles.findIndex(
+      (row) => profileKey(row) === profileKey(profile),
+    );
     return at === -1 ? null : (statusQueries[at]?.data ?? null);
   };
 
   const [hidden, setHidden] = useState<LocalHarnessId[]>(readHiddenDefaults);
   const [login, setLogin] = useState<LoginTarget | null>(null);
   const loginConnected = useRef(false);
-  const [adding, setAdding] = useState<{ draft: AddSubscriptionDraft | null } | null>(null);
+  const [adding, setAdding] = useState<{
+    draft: AddSubscriptionDraft | null;
+  } | null>(null);
   const [addBusy, setAddBusy] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
-  const [unlink, setUnlink] = useState<Pick<MyAccountRow, "harness" | "profile"> | null>(
-    unlinkFixture && profilesFixture ? { harness: "claude", profile: "회사" } : null
+  const [unlink, setUnlink] = useState<Pick<
+    MyAccountRow,
+    "harness" | "profile"
+  > | null>(
+    unlinkFixture && profilesFixture
+      ? { harness: "claude", profile: "회사" }
+      : null,
   );
   const addRef = useRef<HTMLButtonElement>(null);
   const unlinkOpener = useRef<HTMLElement | null>(null);
@@ -205,8 +259,14 @@ function MyAccountRows() {
   if (harness.probes === null) {
     return <Skeleton ready={false} rows={1} className="py-3" />;
   }
-  const installed = harness.probes.filter((probe) => probe.installed).map((probe) => probe.id);
-  const rows = myAccountRows({ probes: harness.probes, profiles, hiddenDefaults: hidden });
+  const installed = harness.probes
+    .filter((probe) => probe.installed)
+    .map((probe) => probe.id);
+  const rows = myAccountRows({
+    probes: harness.probes,
+    profiles,
+    hiddenDefaults: hidden,
+  });
   const hiddenInstalled = hidden.filter((id) => installed.includes(id));
   const takenLabels = {
     claude: profiles.filter((p) => p.harness === "claude").map((p) => p.label),
@@ -226,17 +286,24 @@ function MyAccountRows() {
   const submitAdd = (draft: AddSubscriptionDraft) => {
     setAddBusy(true);
     setAddError(null);
-    void harnessProfileCreate({ harness: draft.harness, label: draft.label }).then(
+    void harnessProfileCreate({
+      harness: draft.harness,
+      label: draft.label,
+    }).then(
       () => {
         setAddBusy(false);
         setAdding(null);
         loginConnected.current = false;
-        setLogin({ harness: draft.harness, profile: draft.label, fresh: draft });
+        setLogin({
+          harness: draft.harness,
+          profile: draft.label,
+          fresh: draft,
+        });
       },
       (error: unknown) => {
         setAddBusy(false);
         setAddError(addSubscriptionCreateFailed(String(error)));
-      }
+      },
     );
   };
 
@@ -258,7 +325,9 @@ function MyAccountRows() {
   };
 
   const moreId = (row: Pick<MyAccountRow, "harness" | "profile">) =>
-    row.profile === null ? `my-account-${row.harness}-more` : `my-account-${row.harness}/${row.profile}-more`;
+    row.profile === null
+      ? `my-account-${row.harness}-more`
+      : `my-account-${row.harness}/${row.profile}-more`;
 
   return (
     <>
@@ -269,7 +338,10 @@ function MyAccountRows() {
           action={<AddButton ref={addRef} onClick={openAdd} />}
         >
           <span>{MY_ACCOUNTS_EMPTY_LINE}</span>
-          <span className="text-meta text-ink-muted" data-testid="subscription-entry-detail">
+          <span
+            className="text-meta text-ink-muted"
+            data-testid="subscription-entry-detail"
+          >
             {MY_ACCOUNTS_EMPTY_DETAIL}
           </span>
         </AiLineRow>
@@ -295,7 +367,11 @@ function MyAccountRows() {
                   moreTestId={moreId(row)}
                   onLogin={() => {
                     loginConnected.current = false;
-                    setLogin({ harness: row.harness, profile: row.profile, fresh: null });
+                    setLogin({
+                      harness: row.harness,
+                      profile: row.profile,
+                      fresh: null,
+                    });
                   }}
                   onDestructive={(opener) => {
                     unlinkOpener.current = opener;
@@ -311,7 +387,10 @@ function MyAccountRows() {
             action={<AddButton ref={addRef} onClick={openAdd} />}
             last
           >
-            <span className="text-meta text-ink-muted" data-testid="subscription-entry-detail">
+            <span
+              className="text-meta text-ink-muted"
+              data-testid="subscription-entry-detail"
+            >
               같은 CLI의 다른 계정도 이 맥에서 붙일 수 있어요.
             </span>
           </AiLineRow>
@@ -342,6 +421,14 @@ function MyAccountRows() {
         error={addError}
         onCancel={() => setAdding(null)}
         onSubmit={submitAdd}
+        onAddApiKey={
+          onAddApiKey
+            ? () => {
+                setAdding(null);
+                onAddApiKey();
+              }
+            : undefined
+        }
       />
 
       <HarnessLoginDialog
@@ -354,8 +441,13 @@ function MyAccountRows() {
           refreshProfiles();
         }}
         onFallbackStarted={(id) => harness.recheck(id)}
+        fixture={loginFixture}
         focusAfterConnected={() =>
-          login ? document.querySelector<HTMLElement>(`[data-testid="${moreId(login)}"]`) : null
+          login
+            ? document.querySelector<HTMLElement>(
+                `[data-testid="${moreId(login)}"]`,
+              )
+            : null
         }
       />
 
@@ -364,7 +456,10 @@ function MyAccountRows() {
         opener={unlinkOpener}
         onClose={() => setUnlink(null)}
         onRemoveFromList={(row) => {
-          const next = [...hidden.filter((id) => id !== row.harness), row.harness];
+          const next = [
+            ...hidden.filter((id) => id !== row.harness),
+            row.harness,
+          ];
           writeHiddenDefaults(next);
           setHidden(next);
         }}
@@ -375,23 +470,22 @@ function MyAccountRows() {
   );
 }
 
-const AddButton = forwardRef<HTMLButtonElement, { onClick: () => void }>(function AddButton(
-  { onClick },
-  ref
-) {
-  return (
-    <Button
-      ref={ref}
-      type="button"
-      size="sm"
-      className="tap-target"
-      onClick={onClick}
-      data-testid="subscription-entry-open"
-    >
-      구독 추가
-    </Button>
-  );
-});
+const AddButton = forwardRef<HTMLButtonElement, { onClick: () => void }>(
+  function AddButton({ onClick }, ref) {
+    return (
+      <Button
+        ref={ref}
+        type="button"
+        size="sm"
+        className="tap-target"
+        onClick={onClick}
+        data-testid="subscription-entry-open"
+      >
+        구독 추가
+      </Button>
+    );
+  },
+);
 
 function MyAccountRowView({
   row,
@@ -410,68 +504,82 @@ function MyAccountRowView({
   const view = harnessPillView(pill);
   const title = myAccountRowTitle(row);
   const moreRef = useRef<HTMLButtonElement>(null);
-  const testId = row.profile === null ? `my-account-${row.harness}` : `my-account-${row.harness}/${row.profile}`;
+  const testId =
+    row.profile === null
+      ? `my-account-${row.harness}`
+      : `my-account-${row.harness}/${row.profile}`;
   const needsLogin = pill === "login" || pill === "recheck";
   return (
+    // 좁은 폭에서는 이름 줄이 한 줄을 다 쓰고 상태·행동이 그 밑 오른쪽으로 내려간다
+    // (라벨이 「Claud…」로 잘리지 않게).
     <li
-      className="flex min-w-0 items-center gap-3 border-b border-line px-2 py-3"
+      className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-2 py-3"
       data-testid={testId}
       data-pill={pill}
       data-kind={row.kind}
     >
-      <AiLogo mark={AI_CONNECT_ROW_COPY[row.harness].mark} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-body font-semibold text-ink">{title}</span>
-        <span className="truncate text-meta text-ink-muted">
-          <AiSource>구독</AiSource>
-          {myAccountRowDetail(row)}
-        </span>
+      <div className="flex min-w-0 flex-1 basis-full items-center gap-3 sm:basis-0">
+        <AiLogo mark={AI_CONNECT_ROW_COPY[row.harness].mark} />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-body font-semibold text-ink">
+            {title}
+          </span>
+          <span className="truncate text-meta text-ink-muted">
+            <AiSource>구독</AiSource>
+            {myAccountRowDetail(row)}
+          </span>
+        </div>
       </div>
-      <span className="shrink-0" data-testid={`${testId}-state`}>
-        <AiPill tone={view.tone}>{view.text}</AiPill>
-      </span>
-      {/* 로그인이 필요한 줄은 알약만으로 끝나지 않는다: 같은 줄(같은 프로필)로 로그인
+      <div className="ms-auto flex shrink-0 items-center gap-3">
+        <span className="shrink-0" data-testid={`${testId}-state`}>
+          <AiPill tone={view.tone}>{view.text}</AiPill>
+        </span>
+        {/* 로그인이 필요한 줄은 알약만으로 끝나지 않는다: 같은 줄(같은 프로필)로 로그인
           모달을 바로 연다(시안 §3 「재연동 연결 지점」). */}
-      {needsLogin && (
-        <Button
-          type="button"
-          size="sm"
-          variant={row.profile === null ? "outline" : "default"}
-          className="tap-target shrink-0"
-          aria-label={`${title} ${row.profile === null ? "로그인" : RELOGIN_LABEL}`}
-          onClick={onLogin}
-          data-testid={`${testId}-login`}
-        >
-          {row.profile === null ? "로그인" : RELOGIN_LABEL}
-        </Button>
-      )}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            ref={moreRef}
+        {needsLogin && (
+          <Button
             type="button"
-            aria-label={`${title} 더 보기`}
-            className="ai-more tap-target press grid shrink-0 place-items-center rounded-md text-icon hover:bg-surface-hover focus-visible:focus-ring"
-            data-testid={moreTestId}
+            size="sm"
+            variant={row.profile === null ? "outline" : "default"}
+            className="tap-target shrink-0"
+            aria-label={`${title} ${row.profile === null ? "로그인" : RELOGIN_LABEL}`}
+            onClick={onLogin}
+            data-testid={`${testId}-login`}
           >
-            <MoreHorizontal className="size-4" aria-hidden="true" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" data-testid={`${testId}-menu`}>
-          {row.profile !== null && (
-            <DropdownMenuItem onSelect={onLogin} data-testid={`${testId}-menu-relogin`}>
-              {RELOGIN_LABEL}
+            {row.profile === null ? "로그인" : RELOGIN_LABEL}
+          </Button>
+        )}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              ref={moreRef}
+              type="button"
+              aria-label={`${title} 더 보기`}
+              className="ai-more tap-target press grid shrink-0 place-items-center rounded-md text-icon hover:bg-surface-hover focus-visible:focus-ring"
+              data-testid={moreTestId}
+            >
+              <MoreHorizontal className="size-4" aria-hidden="true" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" data-testid={`${testId}-menu`}>
+            {row.profile !== null && (
+              <DropdownMenuItem
+                onSelect={onLogin}
+                data-testid={`${testId}-menu-relogin`}
+              >
+                {RELOGIN_LABEL}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem
+              tone="danger"
+              onSelect={() => onDestructive(moreRef.current)}
+              data-testid={`${testId}-menu-destructive`}
+            >
+              {destructiveActionLabel(row)}
             </DropdownMenuItem>
-          )}
-          <DropdownMenuItem
-            tone="danger"
-            onSelect={() => onDestructive(moreRef.current)}
-            data-testid={`${testId}-menu-destructive`}
-          >
-            {destructiveActionLabel(row)}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </li>
   );
 }

@@ -167,7 +167,7 @@ export const HARNESS_BIN_NAME: Record<LocalHarnessId, string> = {
 };
 
 export const UNLINK_CONFIRM_LABEL = "연결 해제";
-export const UNLINK_BUSY_LABEL = "해제하는 중";
+export const UNLINK_BUSY_LABEL = "해제 중";
 export const REMOVE_FROM_LIST_LABEL = "목록에서 빼기";
 export const RELOGIN_LABEL = "다시 로그인";
 
@@ -277,9 +277,14 @@ export const UNLINK_DONE_STATUS = "연결을 해제했어요.";
 
 // ---- 구독 추가(시안 §4 1) ----------------------------------------------------------------
 
-export const ADD_SUBSCRIPTION_TITLE = "구독 추가";
+export const ADD_ACCOUNT_TITLE = "어떤 계정을 추가할까요?";
+export const ADD_KIND_SUBSCRIPTION = "구독 · 이 맥의 공식 CLI";
 export const ADD_SUBSCRIPTION_LEAD =
   "Claude Pro·Max, ChatGPT Plus·Pro. 브라우저에서 각 회사의 공식 CLI로 로그인합니다. 나만 씁니다.";
+export const ADD_KIND_API_KEY = "API 키 · 팀이 함께";
+export const ADD_API_KEY_LEAD =
+  "OpenAI, Anthropic, xAI, OpenRouter. 서버에 봉인해 팀 에이전트가 씁니다. 운영자만 추가할 수 있습니다.";
+export const ADD_API_KEY_NEXT = "다음";
 export const ADD_SUBSCRIPTION_CLI_LABEL = "어느 CLI인가요?";
 export const ADD_SUBSCRIPTION_LABEL_LABEL = "라벨";
 export const ADD_SUBSCRIPTION_LABEL_HINT =
