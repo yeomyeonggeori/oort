@@ -113,3 +113,14 @@ export const MENU_ICONS = {
 export type MenuIconName = keyof typeof MENU_ICONS;
 
 export const MENU_ICON_SIZE = 22;
+
+// ---- AI 연결 제안 아이콘 둘 (#2948 GC-7) --------------------------------------
+// 시안 `claudedocs/chat-genui-connect/mockups.html`의 `#i-plug`(한 줄 머리)·
+// `#i-laptop`(「맥에서 해요」 줄), 같은 레시피(선 1.8, viewBox 24, 1·2·3배), 14pt
+// (시안 `.oneline .ic`·`.pnote .ic` 14px).
+export const AI_CONNECT_ICONS = {
+  plug: require('./plug.png') as ImageSourcePropType,
+  laptop: require('./laptop.png') as ImageSourcePropType,
+} as const;
+
+export const AI_CONNECT_ICON_SIZE = 14;

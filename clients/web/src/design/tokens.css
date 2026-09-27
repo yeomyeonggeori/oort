@@ -2501,6 +2501,17 @@
     display: none;
   }
 }
+/* 제안 카드 머리의 「나에게만 조작돼요」 칩 (#2948 GC-7). 좁은 그릇(460 아래)에서는
+ * 머리 줄 끝의 둘째 줄로 내려가 에이전트 이름 밑에 선다: 이름이 잘리지 않고, 「설정에서
+ * 열기」가 혼자 한 줄을 차지하지 않는다(design-review #2948 B1). 들여쓰기는 머리 표식
+ * 24 + 간격 8. */
+@utility ai-card-chipline {
+  @container (width < 460px) {
+    order: 1;
+    flex-basis: 100%;
+    padding-inline-start: calc(var(--spacing-6) + var(--spacing-2));
+  }
+}
 @utility ai-logo-sm {
   inline-size: 30px;
   block-size: 30px;

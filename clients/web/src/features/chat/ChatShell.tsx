@@ -107,7 +107,8 @@ import { useWelcomeKickoff } from "@/features/welcome/useWelcomeKickoff";
 import { WelcomeKickoffStage } from "@/features/welcome/WelcomeKickoffStage";
 import { PhoneLinkChannelCard } from "@/features/welcome/PhoneLinkChannelCard";
 import type { AiConnectLine } from "@momo/core/features/commands/registry";
-import { AiConnectCard } from "./AiConnectCard";
+import { AiConnectCard, AiConnectSuggestion } from "./AiConnectCard";
+import { CommandSuggestSlot } from "@/features/timeline/commandSuggestSlot";
 import { registerLocalCardHost } from "./localCards";
 import { shouldMountPhoneLinkCard } from "@/features/welcome/phoneLinkCard";
 import {
@@ -1209,6 +1210,8 @@ export function ChatShell() {
       workspaceId={workspaceId}
       channelId={stressCount > 0 ? null : channelId}
     >
+    {/* 에이전트 제안 카드(#2948 GC-7)는 채널 표면에서만 선다: 타임라인과 스레드 둘 다. */}
+    <CommandSuggestSlot.Provider value={AiConnectSuggestion}>
     {/* `relative` is the anchor the 작업 세션 pane needs on a narrow window,
         where it stops being a column beside the channel and becomes a drawer
         over it (tokens.css `work-pane`). */}
@@ -1501,6 +1504,7 @@ export function ChatShell() {
         />
       )}
     </div>
+    </CommandSuggestSlot.Provider>
     </CascadeProvider>
   );
 }
