@@ -1012,6 +1012,53 @@
 }
 
 /* =============================================================================
+ * 포인터 모달리티에서는 링이 서지 않는다 (#2938 ②, 성재 0.1.12 실사용).
+ *
+ * `:focus-visible` 은 「키보드로 왔는가」를 다 가르지 못한다. 두 엔진(Chromium·
+ * WebKit, 데스크탑 셸은 WKWebView)은 포커스가 있는 채로 **아무 키**나 눌리면 그
+ * 요소를 :focus-visible 로 친다. 제품 빌드 실측(scripts/capture-focus-ring.mjs):
+ *   - 마우스로 쓰던 사람이 Esc 로 설정을 닫으면 캐럿 복귀 대상(프로필 카드)에 링
+ *   - 마우스로 누른 절 버튼에 포커스가 있는 채로 ⌘·Shift 를 누르면 그 버튼에 링
+ * 그래서 모달리티 스탬프(focusModality.ts: 캐럿을 옮기는 키만 keyboard)가
+ * pointer 인 동안에는 컨트롤의 링을 걷는다. Tab·화살표로 움직이는 순간 스탬프가
+ * keyboard 가 되고 링은 그대로 선다(접근성 회귀 없음).
+ *
+ * **레이어 밖**이어야 한다: 링을 그리는 `focus-visible:focus-ring` 은 utilities
+ * 레이어라 레이어 안의 규칙은 특정도·순서와 무관하게 그것을 이기지 못한다.
+ * 글 입력 칸은 예외다: 클릭으로 들어가도 링이 캐럿 자리를 알린다(브라우저도 글
+ * 입력 칸은 늘 :focus-visible 로 친다). 그 칸을 감싼 그릇 링은 이미 keyboard 에서만
+ * 선다(`focus-visible-within`, #1866).
+ * ========================================================================== */
+:root[data-focus-modality="pointer"]
+  :focus-visible:not(
+    textarea,
+    [contenteditable]:not([contenteditable="false"]),
+    input:not([type="checkbox"], [type="radio"], [type="button"], [type="submit"], [type="reset"], [type="range"], [type="color"], [type="file"], [type="image"]),
+    [data-focus-ring="always"]
+  ) {
+  outline: none;
+}
+/* 자식·형제의 :focus-visible 로 링을 그리는 그릇(`has-[:focus-visible]:focus-ring`,
+ * `peer-focus-visible:focus-ring` — 세그먼트 라디오 등)도 같은 규칙이다. */
+:root[data-focus-modality="pointer"]
+  :is(.peer:focus-visible ~ *, :has(:focus-visible)):not([data-focus-ring="always"]) {
+  outline: none;
+}
+/* `data-focus-ring="always"`: 캐럿이 있는 곳이 곧 **키가 가는 곳**이라 어떻게
+ * 잡았든 보여야 하는 표면(원격 조작 화면, DisplayController design-review H-2). */
+
+/* 캐럿 착지점(`tabindex="-1"`: 라우트 상자·설정 제목·곁판 제목 등)은 탭 순서에
+ * 없다. 포커스 복귀·진입 포커스가 캐럿을 여기 놓으면 UA 기본 링(outline: auto)이
+ * 판 전체를 둘렀다(WebKit 은 마우스로 누른 버튼 대신 가장 가까운 이 조상에 포커스를
+ * 주고, 뒤이은 키 누름이 그것을 :focus-visible 로 만든다 — 실측). base 레이어라
+ * 링을 **명시한** 착지점(`focus-visible:focus-ring`, utilities)은 그대로 이긴다. */
+@layer base {
+  [tabindex="-1"]:focus {
+    outline: none;
+  }
+}
+
+/* =============================================================================
  * 유리 재료 (ADR-0189 D1·D7, DS2-1 #2713). 시안 A `.a-search`·`.a-comp`·`.a-tab`.
  *
  * 반투명 면 + 뒤 흐림. 반투명이라 대비 표로 잴 수 없고(themes-2.0 §2), 그래서
