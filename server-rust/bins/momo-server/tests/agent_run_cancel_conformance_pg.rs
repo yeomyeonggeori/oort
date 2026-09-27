@@ -521,7 +521,7 @@ async fn drain_once() -> momo_agent_worker::DrainStats {
     let worker = AgentWorker::new(
         pool,
         Arc::new(MockChatProvider::echo()),
-        WorkerConfig::for_target(database_url()),
+        WorkerConfig::for_target(database_url()).with_env_bearer("sk-conformance-team-key"),
     );
     worker.drain_once().await.expect("drain")
 }

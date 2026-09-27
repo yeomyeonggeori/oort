@@ -34,8 +34,16 @@
 //! | test | revert that makes it red |
 //! |---|---|
 //! | `the_team_resolver_names_no_personal_runtime_fact` | any read of `token` / `hosted_agent_connection` / owner / harness / profile path inside the team resolution path |
-//! | `an_empty_team_link_answers_on_the_team_env_only_and_never_reaches_the_subscription_agent` | put a personal credential into the empty-link branch of `resolve_transport`; drop the owner predicate from the inbox fan-out (it is written twice — `hosted_inbox_recipients_in_tx` and `append_message_reference_in_tx` — and only removing both reaches the inbox); drop the hosted skip in the worker's A2A routing |
+//! | `an_empty_team_link_answers_on_the_team_env_only_and_never_reaches_the_subscription_agent` | put a personal credential into the empty-link branch of `resolve_transport`; drop the owner predicate from the inbox fan-out (it is written twice — `hosted_inbox_recipients_in_tx` and `append_message_reference_in_tx` — and only removing both reaches the inbox); drop all three A2A refusals of a subscription agent (see below) |
 //! | `with_no_team_key_the_turn_cannot_answer_and_borrows_nothing` | call the model when `provider_is_configured` is false, or resolve a non-team credential for it |
+//! | `a_subscription_agent_with_no_connection_is_still_never_delegated_to` (#2897) | drop the explicit `owner_only` check in the worker's A2A routing (the reason word changes to the policy's `a2a_owner_only_target`); drop it **and** `evaluate_a2a_spawn`'s `target_owner_only` refusal (the team worker runs the subscription agent on the team key) |
+//! | `with_no_team_key_a_mention_turn_calls_no_model_and_says_why` (#2897) | call the model on an ordinary turn when `provider_is_configured` is false; drop the #2871 throttle on the `provider_required` line |
+//!
+//! Since #2897 the A2A refusal of a subscription agent has three independent
+//! layers — the explicit scope check in the routing, the policy's own read of
+//! `agent.invocation_scope`, and the hosted skip — so removing any one of them
+//! leaves `an_empty_team_link_answers_on_the_team_env_only_and_never_reaches_the_subscription_agent`
+//! GREEN; only removing all three turns it red.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -265,6 +273,14 @@ struct Tenant {
 }
 
 async fn seed(su: &PgPool) -> Tenant {
+    seed_with(su, true).await
+}
+
+/// `with_connection = false` leaves the subscription agent `owner_only` but with
+/// no `hosted_agent_connection` row at all (migration 089 permits it) — the
+/// state in which the hosted skip has nothing to see and only an explicit
+/// `invocation_scope` check can refuse a delegation (#2897).
+async fn seed_with(su: &PgPool, with_connection: bool) -> Tenant {
     let t = Tenant {
         workspace_id: Uuid::new_v4(),
         owner_id: Uuid::new_v4(),
@@ -391,6 +407,9 @@ async fn seed(su: &PgPool) -> Tenant {
         .execute(su)
         .await
         .expect("membership");
+    }
+    if !with_connection {
+        return t;
     }
     // A live, proved connection approved for this channel, with inbox AND job
     // scopes — everything the owner's CLI would need to be handed work.
@@ -775,6 +794,157 @@ async fn with_no_team_key_the_turn_cannot_answer_and_borrows_nothing() {
         messages_by(&su, &t, t.team_agent_id).await,
         vec![momo_agent::PROVIDER_REQUIRED_BODY.to_string()],
         "the team agent says it cannot answer — it does not answer by other means"
+    );
+    assert_eq!(
+        subscription_reach(&su, &t).await,
+        baseline,
+        "the owner's subscription agent was used as a fallback speaker"
+    );
+}
+
+/// Every `agent.mention.skipped` reason recorded against the subscription agent.
+async fn skip_reasons(su: &PgPool, t: &Tenant) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT COALESCE(detail->>'reason', '') FROM audit_log WHERE workspace_id = $1 \
+            AND action = 'agent.mention.skipped' AND subject_member_id = $2 ORDER BY id",
+    )
+    .bind(t.workspace_id)
+    .bind(t.subscription_agent_id)
+    .fetch_all(su)
+    .await
+    .unwrap()
+}
+
+/// #2897-1: the hosted skip is not the only thing between a team turn and the
+/// owner's subscription agent. With **no** hosted connection row there is
+/// nothing for the hosted skip to see, and the explicit `invocation_scope`
+/// check must refuse on its own — under the human path's own reason word.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a_subscription_agent_with_no_connection_is_still_never_delegated_to() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let t = seed_with(&su, false).await;
+    let baseline = subscription_reach(&su, &t).await;
+
+    let provider = Arc::new(MockChatProvider::scripted([(
+        "정리해 줘",
+        format!("@{SUBSCRIBER} 이거 네 구독으로 이어서 해 줘"),
+    )]));
+    let worker = AgentWorker::new(
+        momo_worker_pool().await,
+        provider.clone() as Arc<dyn ChatProvider>,
+        worker_config(Some(TEAM_ENV_BEARER)),
+    );
+    send(
+        &su,
+        &t,
+        t.teammate_id,
+        &format!("@{TEAM} 회의록 정리해 줘"),
+        true,
+    )
+    .await;
+    let stats = drain(&worker).await;
+    assert_eq!(stats.answered, 1, "the team agent answered once: {stats:?}");
+    assert_eq!(stats.delegated, 0, "nothing was delegated: {stats:?}");
+    assert_eq!(provider.calls().len(), 1, "one team turn, one model call");
+    assert_eq!(
+        subscription_reach(&su, &t).await,
+        baseline,
+        "a team turn reached the owner's subscription agent"
+    );
+    assert_eq!(
+        skip_reasons(&su, &t).await,
+        vec![momo_agent::SKIP_OWNER_ONLY_NON_OWNER.to_string()],
+        "the explicit owner-only check refused it, not a later gate"
+    );
+}
+
+/// #2897-2: with no team key, an ordinary mention turn — not only the welcome
+/// — reaches no model at all. The caller sees why in the #2871 shape (a system
+/// line in the agent's name with the way out), and a second call inside the
+/// window is held back rather than stacked.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn with_no_team_key_a_mention_turn_calls_no_model_and_says_why() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su).await;
+    send(&su, &t, t.owner_id, "안녕", false).await;
+    let baseline = subscription_reach(&su, &t).await;
+    assert_eq!(baseline.inbox_events, 1, "live fixture");
+
+    let provider = Arc::new(MockChatProvider::echo());
+    let worker = AgentWorker::new(
+        momo_worker_pool().await,
+        provider.clone() as Arc<dyn ChatProvider>,
+        worker_config(None),
+    );
+    for body in ["회의록 정리해 줘", "다시 부탁해"] {
+        send(&su, &t, t.teammate_id, &format!("@{TEAM} {body}"), true).await;
+        drain(&worker).await;
+    }
+
+    assert!(
+        provider.calls().is_empty(),
+        "an empty team chain must not reach any model (ADR-0135 D1): {:?}",
+        provider
+            .calls()
+            .iter()
+            .map(|call| call.base_url.clone())
+            .collect::<Vec<_>>()
+    );
+    let lines: Vec<(String, String, serde_json::Value)> = sqlx::query_as(
+        "SELECT type::text, COALESCE(body, ''), props FROM message \
+          WHERE workspace_id = $1 AND channel_id = $2 AND author_member_id = $3 ORDER BY seq",
+    )
+    .bind(t.workspace_id)
+    .bind(t.channel_id)
+    .bind(t.team_agent_id)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        lines.len(),
+        1,
+        "one line, the second call throttled: {lines:?}"
+    );
+    let (kind, body, props) = &lines[0];
+    assert_eq!(
+        kind, "system",
+        "a server fact about the agent, not its voice"
+    );
+    assert!(body.contains(TEAM) && body.contains("AI 연결"), "{body}");
+    assert_eq!(props["source"], momo_agent::HOSTED_SKIP_NOTICE_SOURCE);
+    assert_eq!(props["reason"], "provider_required");
+    assert_eq!(
+        props["notice_for_member_id"],
+        json!(t.teammate_id.to_string())
+    );
+    assert_eq!(props["notice_action"]["href"], "/settings?section=ai");
+    let throttled: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id = $1 AND action = $2",
+    )
+    .bind(t.workspace_id)
+    .bind(momo_agent::HOSTED_SKIP_NOTICE_THROTTLED_ACTION)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(throttled, 1, "the held-back line leaves an audit row");
+    let failed: Vec<String> = sqlx::query_scalar(
+        "SELECT status::text FROM agent_run WHERE workspace_id = $1 AND agent_member_id = $2",
+    )
+    .bind(t.workspace_id)
+    .bind(t.team_agent_id)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        failed,
+        vec!["failed", "failed"],
+        "both runs closed, none left running"
     );
     assert_eq!(
         subscription_reach(&su, &t).await,

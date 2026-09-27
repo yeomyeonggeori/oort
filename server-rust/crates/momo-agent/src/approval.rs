@@ -1361,6 +1361,88 @@ mod tests {
         assert_eq!(payload["prompt"], "clean up");
     }
 
+    /// #2897 (brief §4.5): the job an approval resumes is handed to a runtime,
+    /// so it names the run and the call — never a person's runtime facts. An
+    /// allowlist, not a denylist: a new key has to be argued for here.
+    #[test]
+    fn a_resume_payload_carries_only_allowlisted_keys() {
+        const ALLOWED_KEYS: &[&str] = &[
+            "run_id",
+            "workspace_id",
+            "channel_id",
+            "agent_member_id",
+            "model",
+            "prompt",
+            "resume_from_approval_id",
+            "approved_tool_call",
+            "approved_by",
+            "approved_host_id",
+            "policy_evidence",
+            "approval_decision",
+            "step_count",
+            "max_steps",
+            "depth",
+        ];
+        const ALLOWED_CALL_KEYS: &[&str] = &["call_id", "name", "arguments"];
+        let approval = LockedApproval {
+            id: Uuid::from_u128(1),
+            workspace_id: Uuid::from_u128(2),
+            run_id: Uuid::from_u128(3),
+            channel_id: Uuid::from_u128(4),
+            requested_by: Uuid::from_u128(5),
+            request_message_id: Some(Uuid::from_u128(6)),
+            action_type: "tool_call".into(),
+            payload: json!({"tool_call": {
+                "call_id": "c1", "name": "work.session.end",
+                "arguments_json": {"x": 1}, "tool_grant": {"g": true}}}),
+            status: "pending".into(),
+            expires_at: None,
+            agent_model: "gpt-4".into(),
+            run_input: json!({"prompt": "clean up"}),
+            step_count: 1,
+            max_steps: 12,
+            depth: 0,
+        };
+        let payload = resume_job_payload(
+            Uuid::from_u128(2),
+            &approval,
+            Uuid::from_u128(9),
+            &json!({"status": "approved"}),
+            Some(Uuid::from_u128(10)),
+        );
+        let object = payload.as_object().expect("object");
+        // Anti-vacuity: every key is present, so an emptied builder fails.
+        assert_eq!(
+            object.len(),
+            ALLOWED_KEYS.len(),
+            "keys: {:?}",
+            object.keys()
+        );
+        for key in object.keys() {
+            assert!(
+                ALLOWED_KEYS.contains(&key.as_str()),
+                "`{key}` is not an allowed resume job key"
+            );
+        }
+        let call = payload["approved_tool_call"].as_object().expect("call");
+        assert_eq!(call.len(), ALLOWED_CALL_KEYS.len(), "{call:?}");
+        for key in call.keys() {
+            assert!(ALLOWED_CALL_KEYS.contains(&key.as_str()), "`{key}`");
+        }
+        let wire = payload.to_string();
+        for forbidden in [
+            "owner_human_id",
+            "owner_only",
+            "invocation_scope",
+            "subscription_harness",
+            "hosted_connection",
+            "CLAUDE_CONFIG_DIR",
+            "CODEX_HOME",
+        ] {
+            assert!(!wire.contains(forbidden), "`{forbidden}` in {wire}");
+        }
+    }
+
     /// The G3 budget has to survive the pause, or an approved tool call would
     /// resume with a fresh step allowance and the step cap would stop bounding
     /// the loop.
