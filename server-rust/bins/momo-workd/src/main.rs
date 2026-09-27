@@ -33,8 +33,17 @@ async fn main() {
             config,
             dev_key_file,
             force,
+            token_stdin,
         } => {
-            let token = std::env::var(cli::REGISTER_TOKEN_ENV).ok();
+            let token = if token_stdin {
+                let mut line = String::new();
+                std::io::stdin()
+                    .read_line(&mut line)
+                    .ok()
+                    .map(|_| line.trim().to_string())
+            } else {
+                std::env::var(cli::REGISTER_TOKEN_ENV).ok()
+            };
             cli::register(config, dev_key_file, force, token)
                 .await
                 .map(|state| {
@@ -48,10 +57,16 @@ async fn main() {
                     );
                 })
         }
+        Invocation::Forget {
+            config,
+            dev_key_file,
+        } => cli::forget(config, dev_key_file).await,
         Invocation::Run {
             config,
             dev_key_file,
-        } => cli::run(config, dev_key_file).await,
+            control_socket,
+            dev_unsigned_peer,
+        } => cli::run(config, dev_key_file, control_socket, dev_unsigned_peer).await,
     };
     if let Err(error) = result {
         eprintln!("momo-workd: {error}");

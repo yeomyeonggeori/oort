@@ -61,6 +61,7 @@
     "capture:workbench": "npm run build:design && node scripts/capture-workbench.mjs",
     "capture:local-terminal": "npm run build:design && node scripts/capture-local-terminal.mjs",
     "capture:work-tab": "npm run build && node scripts/capture-work-tab.mjs",
+    "capture:this-mac": "npm run build && node scripts/capture-this-mac.mjs",
     "icons:mark": "node scripts/brand-mark.mjs",
     "icons:brand": "node scripts/brand-mark.mjs && node scripts/render-brand-icons.mjs",
     "extract:emoji": "node scripts/extract-emoji-catalog.mjs",

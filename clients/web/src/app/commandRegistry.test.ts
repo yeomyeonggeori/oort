@@ -25,6 +25,7 @@ const EVERYTHING = {
   canCreateChannel: true,
   isSurfaceProvided: () => true,
   agents: [{ id: "agent-1", displayName: "김인턴", handle: "intern" }],
+  canOpenLocalCard: () => false,
 };
 
 const switcherSource = readFileSync("src/app/QuickSwitcher.tsx", "utf8");
