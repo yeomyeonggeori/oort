@@ -4,6 +4,7 @@ import { Bot } from "lucide-react";
 import { Button } from "@/design/ui/button";
 import { Skeleton } from "@/features/common/States";
 import { useSession } from "@/app/session";
+import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
 import { useSurfaceProvided } from "@/features/capabilities/useSurfaceProvided";
 import {
   fetchSessionEvents,
@@ -116,6 +117,7 @@ export function useAgentPaneSource(): AgentPaneSource {
   const all = useMemo(() => sessionsQuery.data ?? [], [sessionsQuery.data]);
   const hosts = hostsQuery.data;
   const viewer = auth.member.id;
+  const { directory } = useDirectory(workspaceId);
 
   const boundIds = useMemo(() => [...new Set(Object.values(bindings))], [bindings]);
   const bound = useMemo(
@@ -131,7 +133,10 @@ export function useAgentPaneSource(): AgentPaneSource {
   });
 
   const models = useMemo(() => {
-    const out = new Map<string, { model: AgentPaneModel | null; loading: boolean; error: boolean; refetch: () => void }>();
+    const out = new Map<
+      string,
+      { model: AgentPaneModel | null; ownerId: string; loading: boolean; error: boolean; refetch: () => void }
+    >();
     bound.forEach((s: WorkSession, i) => {
       const q = threads[i];
       const page = q?.data;
@@ -150,6 +155,7 @@ export function useAgentPaneSource(): AgentPaneSource {
           : null;
       out.set(s.id.toLowerCase(), {
         model,
+        ownerId: s.memberId,
         loading: q?.isPending ?? true,
         error: q?.isError ?? false,
         refetch: () => void q?.refetch(),
@@ -192,7 +198,12 @@ export function useAgentPaneSource(): AgentPaneSource {
               연결이 끊겨 새 진행을 받지 못하고 있어요. 받은 데까지 보여요.
             </p>
           ) : null}
-          <AgentProgressView model={entry.model} ownerName={auth.member.displayName} actions={NO_AGENT_ROUTES} />
+          <AgentProgressView
+            model={entry.model}
+            // 세션 소유자의 이름(보는 사람이 아니다). 모르면 「소유자」로 말한다.
+            ownerName={entry.ownerId ? memberFor(directory, entry.ownerId)?.displayName ?? null : null}
+            actions={NO_AGENT_ROUTES}
+          />
         </>
       );
     },

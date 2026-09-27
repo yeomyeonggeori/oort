@@ -398,6 +398,12 @@ export function agentPaneModel(input: AgentPaneInput): AgentPaneModel {
       ? { ...pending, preview: null, allow: null, reject: null, hiddenOptions: 0 }
       : pending;
   const status = agentSessionStatus(session, permission !== null, viewerIsOwner);
+  // 소유자가 아닌 사람에게 권한 요청은 「나를 기다림」이 아니지만, 「실행 중」이라고만
+  // 말하면 본문(「누구의 확인을 기다려요」)과 어긋난다. 글만 바꾼다.
+  const statusLabel =
+    permission !== null && !viewerIsOwner && status === "running"
+      ? "소유자 확인 기다림"
+      : AGENT_STATUS_LABEL[status];
 
   const feed: AgentFeedItem[] = folded.rows.map((row) => {
     if (row.kind === "tool") {
@@ -431,7 +437,7 @@ export function agentPaneModel(input: AgentPaneInput): AgentPaneModel {
     harness: sanitizeDisplayText(session.tool, 64).text,
     hostName: input.hostName ? sanitizeDisplayText(input.hostName, 64).text : null,
     status,
-    statusLabel: AGENT_STATUS_LABEL[status],
+    statusLabel,
     plan: folded.plan.map((item) => ({ ...item, content: sanitizeDisplayText(item.content, 500).text })),
     planDone: folded.plan.filter((item) => item.status === "completed").length,
     feed,

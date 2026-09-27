@@ -3,19 +3,49 @@
  *   .steps / .step   → .agent-steps / .agent-step   (18px 표지 · 글 · 끝)
  *   .sysl            → .agent-row                    (16px 표지 · 글 · 시각)
  *   .pwaitc          → .agent-perm                   (신호 옅은 바탕, 반경 10)
- * 색은 토큰만, 간격은 4·8·12·16 사다리만.
+ * 색은 토큰만, 간격은 4·8·12·16 사다리와 이름 있는 토큰(--spacing-control-sm 28 행 높이,
+ * --session-mark 표지)만 쓴다.
  */
 
+/*
+ * 칸 높이에 따라 줄인다(design-review R1 B1). 칸은 격자가 준 크기를 갖는 상자라
+ * size 컨테이너로 둔다. Tailwind `@md:` 같은 폭 질의도 이 컨테이너를 본다.
+ */
+.agent-pane {
+  container-type: size;
+}
+
+/* 진행 줄은 칸이 낮아도 두 줄은 남긴다. */
+.agent-scroll {
+  min-block-size: calc(var(--spacing-control-sm) * 2);
+}
+
+.agent-plan-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: 0 var(--spacing-1);
+  border-radius: var(--radius-sm);
+  color: var(--ink-muted);
+}
+
+.agent-plan-toggle:hover {
+  background-color: var(--surface-hover);
+  color: var(--ink);
+}
+
 .agent-steps {
-  gap: 2px;
+  gap: 0;
+  max-block-size: calc(var(--spacing-control-sm) * 4 + var(--spacing-4));
+  overflow-y: auto;
 }
 
 .agent-step {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-columns: var(--spacing-4) minmax(0, 1fr);
   gap: var(--spacing-2);
   align-items: center;
-  min-height: 26px;
+  min-height: var(--spacing-control-sm);
   font-size: var(--text-meta);
   line-height: var(--text-meta--line-height);
 }
@@ -35,15 +65,15 @@
 .agent-card,
 .agent-row:not(.agent-row-button) {
   content-visibility: auto;
-  contain-intrinsic-size: auto 28px;
+  contain-intrinsic-size: auto var(--spacing-control-sm);
 }
 
 .agent-row {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
+  grid-template-columns: var(--spacing-4) minmax(0, 1fr) auto;
   gap: var(--spacing-2);
   align-items: center;
-  min-height: 28px;
+  min-height: var(--spacing-control-sm);
   padding: var(--spacing-1) var(--spacing-4);
   font-size: var(--text-meta);
   line-height: var(--text-meta--line-height);
@@ -92,19 +122,26 @@
 .agent-raw {
   display: grid;
   gap: var(--spacing-1);
-  margin: 0 var(--spacing-4) var(--spacing-2) 40px;
+  /* 표지 칸(16) + 사이(8) + 줄 여백(16): 글 첫 글자와 줄을 맞춘다. */
+  margin: 0 var(--spacing-4) var(--spacing-2) calc(var(--spacing-4) * 2 + var(--spacing-2));
   padding: var(--spacing-2) var(--spacing-3);
   border-radius: var(--radius-md);
   background-color: var(--sheet);
   color: var(--ink);
 }
 
+/*
+ * 권한 카드는 진행 흐름의 끝에서 스크롤 바닥에 붙는다. 바탕을 칸 색으로 한 겹 두어
+ * 뒤로 흐르는 줄이 비치지 않게 한다.
+ */
 .agent-perm {
+  position: sticky;
+  bottom: 0;
   display: grid;
-  flex: none;
   gap: var(--spacing-2);
-  margin: 0 var(--spacing-3) var(--spacing-2);
+  margin: 0 var(--spacing-3);
   padding: var(--spacing-2) var(--spacing-3);
+  box-shadow: 0 var(--spacing-2) 0 0 var(--surface);
   border-radius: var(--radius-md);
   background-color: var(--signal-soft);
 }
@@ -130,6 +167,44 @@
   line-height: var(--text-meta--line-height);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  max-block-size: calc(var(--text-meta--line-height) * 3 + var(--spacing-2));
+  /* 패딩 밖에서 온전한 세 줄(design-review R1 H1: 네 번째 줄이 반만 보이던 것). */
+  box-sizing: content-box;
+  max-block-size: calc(var(--text-meta--line-height) * 3);
   overflow-y: auto;
+}
+
+/* 계획 목록이 펼쳐져 있으면 「지금:」 줄은 목록이 대신한다. */
+.agent-current[data-plan-open] {
+  display: none;
+}
+
+/*
+ * 낮은 칸(격자 반 높이 등): 진행 줄이 권한 카드 뒤로 사라지지 않게(design-review R1 B1)
+ * 계획 목록은 「지금:」 한 줄로 접고, 미리보기는 두 줄, 답장 칸의 도움말은 숨긴다.
+ * 전체는 칸 최대화(⌘⇧↵)에서 본다.
+ */
+@container (height < 420px) {
+  .agent-steps {
+    display: none;
+  }
+
+  .agent-current[data-plan-open] {
+    display: block;
+  }
+
+  .agent-plan-toggle {
+    pointer-events: none;
+  }
+
+  .agent-plan-toggle svg {
+    display: none;
+  }
+
+  .agent-perm-code {
+    max-block-size: calc(var(--text-meta--line-height) * 2);
+  }
+
+  .agent-reply-hint {
+    display: none;
+  }
 }

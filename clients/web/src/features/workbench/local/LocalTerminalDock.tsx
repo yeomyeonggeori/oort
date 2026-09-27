@@ -465,6 +465,8 @@ export function LocalTerminalDock({
                 line: summary.waitingLine ?? "권한 확인을 기다려요",
                 keycap: pane.focused ? "⌃⇧J" : pane.index <= 9 ? `⌃${pane.index}` : null,
                 mark: <StatusMark status="waiting" />,
+                // 칸 안 권한 카드가 같은 질문을 이미 한다(design-review R1 M1).
+                inline: true,
               }
             : null,
       };

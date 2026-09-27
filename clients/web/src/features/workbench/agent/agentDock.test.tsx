@@ -157,12 +157,14 @@ describe("A panes in the grid (#2779)", () => {
     expect(kills).toEqual([]);
   });
 
-  it("a waiting A pane gets the waiting strip, and ⌃⇧J goes there", async () => {
+  it("a waiting A pane gets the waiting border (the card asks, so no strip), and ⌃⇧J goes there", async () => {
     const { sessions } = fakeSessions();
     const { source } = fakeSource({ title: "문구", harness: "claude", status: "waiting", waitingLine: "파일을 고쳐도 될까요?" });
     await mount(sessions, source);
     expect(pane("p2").hasAttribute("data-waiting")).toBe(true);
-    expect(pane("p2").querySelector("[data-testid='workbench-pane-waiting']")?.textContent).toContain("파일을 고쳐도 될까요?");
+    expect(pane("p2").getAttribute("aria-label")).toContain("나를 기다림");
+    // 칸 안 권한 카드가 같은 질문을 하므로 바닥 띠는 그리지 않는다(design-review R1 M1).
+    expect(pane("p2").querySelector("[data-testid='workbench-pane-waiting']")).toBeNull();
     act(() => {
       document.body.dispatchEvent(
         new KeyboardEvent("keydown", { bubbles: true, cancelable: true, code: "KeyJ", key: "J", ctrlKey: true, shiftKey: true })

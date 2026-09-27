@@ -70,7 +70,16 @@ export interface PaneStatusView {
    * 「나를 기다림」: 칸에 신호색 테두리를 두르고 바닥 띠를 그린다(시안 ① `.pane.wait`
    * · `.pwait`). null이면 기다리지 않는다.
    */
-  waiting: { line: string; keycap: string | null; mark: ReactNode } | null;
+  waiting: {
+    line: string;
+    keycap: string | null;
+    mark: ReactNode;
+    /**
+     * 칸 안에 이미 기다리는 것을 그리는 칸(A 칸 권한 카드, #2779)은 바닥 띠를 그리지
+     * 않는다. 테두리는 그대로다(격자에서 기다리는 칸을 찾는 표지).
+     */
+    inline?: boolean;
+  } | null;
 }
 
 /**
@@ -702,7 +711,7 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
       <div className="flex min-h-0 flex-1 flex-col">
         {ctx.renderPane ? ctx.renderPane(info) : <EmptyPane />}
       </div>
-      {waiting ? (
+      {waiting && !waiting.inline ? (
         // 시안 ① `.pwait`: 칸 바닥의 띠. 무엇을 기다리는지와 그리로 가는 키.
         <p
           data-testid="workbench-pane-waiting"

@@ -72,12 +72,49 @@ async function scenes(browser, origin) {
       check(`${scheme}/tab: 기다림 칸 테두리·바닥 띠`, waiting === 1, { waiting });
       await shot(page, `agent-tab-1280-${scheme}`);
 
+      // 칸 높이(B1): 진행 줄이 두 줄 이상 보이고, 권한 버튼이 칸 안에 있다.
+      const fit = await page.evaluate(() => {
+        const pane = document.querySelector('[data-pane-id="p2"]').getBoundingClientRect();
+        const scroll = document.querySelector('[data-pane-id="p2"] .agent-scroll').getBoundingClientRect();
+        const card = document.querySelector('[data-pane-id="p2"] [data-testid="agent-permission"]').getBoundingClientRect();
+        const btns = [...document.querySelectorAll('[data-pane-id="p2"] [data-testid="agent-permission"] button')].map((b) => b.getBoundingClientRect());
+        return {
+          scrollH: Math.round(scroll.height),
+          feedVisible: Math.round(card.top - scroll.top),
+          inside: btns.every((b) => b.top >= pane.top && b.bottom <= pane.bottom),
+          heights: btns.map((b) => Math.round(b.height)),
+        };
+      });
+      check(`${scheme}/tab: 기다림 칸 카드 위로 진행 줄 56px 이상 보임, 권한 버튼 칸 안`, fit.feedVisible >= 56 && fit.inside, fit);
+      check(`${scheme}/tab: 두 권한 버튼 높이 같음`, new Set(fit.heights).size === 1, fit);
+      const strip = await page.$$eval('[data-pane-id="p2"] [data-testid="workbench-pane-waiting"]', (e) => e.length);
+      check(`${scheme}/tab: A 칸은 바닥 띠 대신 카드`, strip === 0, { strip });
+
+      // 거부 무장(지시 입력 칸)이 반 높이 칸에서 넘치지 않는다.
+      await page.getByTestId("agent-permission-reject").click();
+      await page.getByTestId("agent-permission-instruction").waitFor();
+      const rejectFit = await page.evaluate(() => {
+        const pane = document.querySelector('[data-pane-id="p2"]').getBoundingClientRect();
+        const commit = document.querySelector('[data-testid="agent-permission-commit"]').getBoundingClientRect();
+        const reply = document.querySelector('[data-pane-id="p2"] [data-testid="agent-pane-reply"]').getBoundingClientRect();
+        return { commitInside: commit.bottom <= pane.bottom && commit.top >= pane.top, replyInside: reply.bottom <= pane.bottom + 1 };
+      });
+      check(`${scheme}/tab: 거부 무장 때 확정 버튼·답장 칸이 칸 안`, rejectFit.commitInside && rejectFit.replyInside, rejectFit);
+      await shot(page, `agent-tab-1280-${scheme}-reject-armed`);
+      await page.keyboard.press("Escape");
+
       // 원문 펼치기 + 허락 무장(두 번째 누름 전).
       await page.locator('[data-pane-id="p3"] [data-testid="agent-tool-card"] button').nth(2).click();
       await page.getByTestId("agent-tool-raw").waitFor();
       await page.getByTestId("agent-permission-allow").click();
       await page.getByTestId("agent-permission-confirm").waitFor();
       await shot(page, `agent-tab-1280-${scheme}-armed-raw`);
+      await context.close();
+    }
+    {
+      const { context, page } = await open(browser, origin, scheme, "agent-tab", { width: 900, height: 700 });
+      check(`${scheme}/900: 가로 넘침 0`, (await overflowX(page)) <= 0);
+      await shot(page, `agent-tab-900-${scheme}`);
       await context.close();
     }
     {

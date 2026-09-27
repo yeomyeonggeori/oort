@@ -133,6 +133,19 @@ describe("permission card", () => {
     });
   });
 
+  it("Esc disarms and the caret goes back to the button that armed", () => {
+    const decide = vi.fn(async () => undefined);
+    render(model([tool("bash", "npm install"), ask([ONCE, REJECT])]), { decide, reply: null });
+    click(q('[data-testid="agent-permission-reject"]'));
+    const box = q('[data-testid="agent-permission-instruction"]')!;
+    act(() => {
+      box.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    expect(q('[data-testid="agent-permission-confirm"]')).toBeNull();
+    expect(document.activeElement).toBe(q('[data-testid="agent-permission-reject"]'));
+    expect(decide).not.toHaveBeenCalled();
+  });
+
   it("reject carries the instruction as the next input", async () => {
     const decide = vi.fn(async () => undefined);
     render(model([tool("bash", "npm install"), ask([ONCE, REJECT])]), { decide, reply: null });

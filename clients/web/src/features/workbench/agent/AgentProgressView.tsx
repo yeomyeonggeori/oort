@@ -125,9 +125,12 @@ export function AgentProgressView({
     if (el && stickRef.current) el.scrollTop = el.scrollHeight;
   }, [model.feed.length]);
 
+  const [planOpen, setPlanOpen] = useState(true);
+  const planId = useId();
+
   return (
     <div
-      className={cn("agent-pane @container flex min-h-0 min-w-0 flex-1 flex-col bg-surface text-ink", className)}
+      className={cn("agent-pane flex min-h-0 min-w-0 flex-1 flex-col bg-surface text-ink", className)}
       data-testid="agent-pane"
       data-status={model.status}
     >
@@ -136,26 +139,45 @@ export function AgentProgressView({
         <p className="flex min-w-0 flex-wrap items-center gap-x-2 text-meta text-ink-muted" data-testid="agent-pane-meta">
           <span className="sr-only" data-testid="agent-pane-goal">{model.goal}</span>
           <span className="truncate">{[model.hostName, model.harness].filter(Boolean).join(" · ")}</span>
-          <StatusMark status={model.status} withLabel />
+          <span className="flex items-center gap-1" data-testid="agent-pane-status">
+            <StatusMark status={model.status} />
+            <span className="font-semibold">{model.statusLabel}</span>
+          </span>
           {model.plan.length > 0 ? (
-            <span data-numeric>{`${model.planDone}/${model.plan.length} 단계`}</span>
+            <button
+              type="button"
+              className="agent-plan-toggle press focus-visible:focus-ring"
+              aria-expanded={planOpen}
+              aria-controls={planId}
+              onClick={() => setPlanOpen((v) => !v)}
+              data-testid="agent-pane-plan-toggle"
+            >
+              <span data-numeric>{`계획 ${model.planDone}/${model.plan.length} 단계`}</span>
+              <ChevronRight aria-hidden className={cn("size-3", planOpen && "rotate-90")} />
+            </button>
           ) : null}
         </p>
         {currentStep ? (
-          <p className="min-w-0 truncate text-meta text-ink" title={currentStep} data-testid="agent-pane-current-step">
+          <p
+            className="agent-current min-w-0 truncate text-meta text-ink"
+            title={currentStep}
+            data-plan-open={planOpen ? "" : undefined}
+            data-testid="agent-pane-current-step"
+          >
             {`지금: ${currentStep}`}
           </p>
         ) : null}
       </div>
+      {/* 계획은 진행이 흘러도 밀려나지 않게 머리 아래에 붙인다(design-review R1 M4). */}
+      {model.plan.length > 0 && planOpen ? <PlanSteps id={planId} plan={model.plan} /> : null}
 
       <div
-        className="min-h-0 flex-1 overflow-y-auto"
+        className="agent-scroll min-h-0 flex-1 overflow-y-auto"
         onScroll={(event) => {
           const el = event.currentTarget;
           stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
         }}
       >
-        {model.plan.length > 0 ? <PlanSteps plan={model.plan} /> : null}
         {model.feed.length === 0 ? (
           <p className="px-4 py-3 text-meta text-ink-muted" data-testid="agent-pane-empty">
             에이전트가 첫 단계를 보고하면 여기에 한 줄씩 쌓여요.
@@ -183,19 +205,22 @@ export function AgentProgressView({
             {`알아보지 못한 진행 ${model.skipped}개는 건너뛰었어요.`}
           </p>
         ) : null}
+        {/*
+          권한 카드는 진행 흐름의 끝에 두고 스크롤 바닥에 붙인다(sticky). 칸이 낮아도
+          진행 줄이 0이 되지 않고(design-review R1 B1), 카드가 칸보다 길면 버튼이 있는
+          아래쪽이 보이는 채로 위가 스크롤된다.
+        */}
+        {model.permission ? (
+          <PermissionCard
+            key={model.permission.requestEventId}
+            sessionId={model.sessionId}
+            permission={model.permission}
+            viewerIsOwner={model.viewerIsOwner}
+            ownerName={ownerName}
+            decide={actions.decide}
+          />
+        ) : null}
       </div>
-
-      {/* 권한 카드는 진행이 흘러도 밀려나지 않게 답장 칸 바로 위에 붙인다. */}
-      {model.permission ? (
-        <PermissionCard
-          key={model.permission.requestEventId}
-          sessionId={model.sessionId}
-          permission={model.permission}
-          viewerIsOwner={model.viewerIsOwner}
-          ownerName={ownerName}
-          decide={actions.decide}
-        />
-      ) : null}
 
       {model.viewerIsOwner ? (
         <ReplyBox sessionId={model.sessionId} reply={actions.reply} ended={model.status === "done" || model.status === "stopped"} />
@@ -208,9 +233,21 @@ export function AgentProgressView({
   );
 }
 
-function PlanSteps({ plan }: { plan: AgentPaneModel["plan"] }) {
+function PlanSteps({ id, plan }: { id: string; plan: AgentPaneModel["plan"] }) {
+  const listRef = useRef<HTMLOListElement>(null);
+  const current = plan.findIndex((s) => s.status !== "completed");
+  // 계획 칸이 낮아 몇 줄만 보일 때 지금 단계가 보이게 한다(칸 밖은 움직이지 않는다).
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    const row = current >= 0 ? (list?.children[current] as HTMLElement | undefined) : undefined;
+    if (!list || !row) return;
+    const top = row.offsetTop - list.offsetTop;
+    if (top + row.offsetHeight > list.scrollTop + list.clientHeight || top < list.scrollTop) {
+      list.scrollTop = Math.max(0, top - row.offsetHeight);
+    }
+  }, [current, plan.length]);
   return (
-    <ol aria-label="계획" className="agent-steps flex flex-col border-b border-line px-4 py-2" data-testid="agent-pane-plan">
+    <ol ref={listRef} id={id} aria-label="계획" className="agent-steps flex shrink-0 flex-col border-b border-line px-4 py-2" data-testid="agent-pane-plan">
       {plan.map((step, i) => {
         const status: SessionStatus =
           step.status === "completed" ? "done" : step.status === "in_progress" ? "running" : "idle";
@@ -296,7 +333,19 @@ const FeedRow = memo(function FeedRow({
   );
 });
 
+const SEND_KEY =
+  typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+    ? "⌘↵"
+    : "Ctrl+↵";
+
 type Armed = "allow" | "reject" | null;
+
+/** 미리보기 칸이 한 번에 보이는 줄 수(agentPane.css `.agent-perm-code`와 같다). */
+const PREVIEW_LINES = 3;
+
+function previewLines(text: string): number {
+  return text.split("\n").length;
+}
 
 function PermissionCard({
   sessionId,
@@ -317,6 +366,17 @@ function PermissionCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const unavailableId = useId();
+  const allowRef = useRef<HTMLButtonElement>(null);
+  const rejectRef = useRef<HTMLButtonElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+  /** 무장을 풀면 캐럿을 누른 버튼으로 돌려준다(design-review R1 M3). */
+  const returnTo = useRef<Armed>(null);
+  useEffect(() => {
+    if (armed !== null || returnTo.current === null) return;
+    const target = returnTo.current === "allow" ? allowRef.current : rejectRef.current;
+    returnTo.current = null;
+    (target && !target.disabled ? target : sectionRef.current)?.focus({ preventScroll: true });
+  }, [armed]);
   const ask = permission.tool ? permission.tool.headline : PERMISSION_ASK.other;
 
   if (!viewerIsOwner) {
@@ -333,6 +393,10 @@ function PermissionCard({
     );
   }
 
+  const disarm = () => {
+    returnTo.current = armed;
+    setArmed(null);
+  };
   const arm = (next: Armed) => {
     armedAt.current = Date.now();
     setError(null);
@@ -353,7 +417,7 @@ function PermissionCard({
         kind,
         ...(kind === "reject_once" && instruction.trim() !== "" ? { instruction: instruction.trim() } : {}),
       });
-      setArmed(null);
+      disarm();
     } catch {
       setError("결정을 보내지 못했어요. 호스트가 요청을 거둬들였을 수 있어요. 잠시 뒤 다시 누르세요.");
     } finally {
@@ -369,7 +433,21 @@ function PermissionCard({
   const describedBy = unavailable ? unavailableId : undefined;
 
   return (
-    <section className="agent-perm" aria-label="권한 요청" data-testid="agent-permission" data-armed={armed ?? undefined}>
+    <section
+      ref={sectionRef}
+      tabIndex={-1}
+      className="agent-perm focus-visible:focus-ring"
+      aria-label="권한 요청"
+      data-testid="agent-permission"
+      data-armed={armed ?? undefined}
+      onKeyDown={(event) => {
+        // 무장한 행은 제자리 확인이라 대화상자의 Esc를 공짜로 받지 못한다. 여기서 푼다.
+        if (event.key !== "Escape" || armed === null || busy) return;
+        event.preventDefault();
+        event.stopPropagation();
+        disarm();
+      }}
+    >
       <p className="agent-perm-l1">
         <StatusMark status="waiting" srLabel />
         {ask}
@@ -384,10 +462,16 @@ function PermissionCard({
           {permission.preview.text}
         </pre>
       ) : null}
+      {permission.preview && previewLines(permission.preview.text) > PREVIEW_LINES ? (
+        <p className="text-timestamp text-ink-muted" data-testid="agent-permission-more">
+          {`전체 ${previewLines(permission.preview.text)}줄 · 미리보기 칸을 스크롤해서 끝까지 보세요`}
+        </p>
+      ) : null}
 
       {armed === null ? (
         <div className="flex flex-wrap items-center gap-2">
           <Button
+            ref={allowRef}
             type="button"
             size="sm"
             disabled={unavailable || !allowable || busy}
@@ -398,6 +482,7 @@ function PermissionCard({
             이번 한 번 허락
           </Button>
           <Button
+            ref={rejectRef}
             type="button"
             size="sm"
             variant="secondary"
@@ -413,7 +498,7 @@ function PermissionCard({
       ) : armed === "allow" ? (
         <div className="flex flex-wrap items-center gap-2" data-testid="agent-permission-confirm">
           <span className="text-meta font-medium">이번 한 번만 허락할까요?</span>
-          <Button type="button" size="sm" variant="ghost" onClick={() => setArmed(null)}>
+          <Button type="button" size="sm" variant="ghost" onClick={disarm}>
             취소
           </Button>
           <Button
@@ -443,7 +528,7 @@ function PermissionCard({
             />
           </label>
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" size="sm" variant="ghost" onClick={() => setArmed(null)}>
+            <Button type="button" size="sm" variant="ghost" onClick={disarm}>
               취소
             </Button>
             <Button
@@ -555,8 +640,8 @@ function ReplyBox({
           다음 차례로 보내기
         </Button>
       </div>
-      <p id={hintId} className="min-w-0 text-timestamp text-ink-muted" data-testid="agent-pane-reply-hint">
-        {unavailable ? REPLY_UNAVAILABLE : note ?? "기본은 다음 차례 예약이에요 · ⌘↵"}
+      <p id={hintId} className="agent-reply-hint min-w-0 text-timestamp text-ink-muted" data-testid="agent-pane-reply-hint">
+        {unavailable ? REPLY_UNAVAILABLE : note ?? `기본은 다음 차례 예약이에요 · ${SEND_KEY}`}
       </p>
     </form>
   );
