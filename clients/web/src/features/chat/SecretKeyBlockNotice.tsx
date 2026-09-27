@@ -13,9 +13,12 @@ export function SecretKeyBlockNotice({
   id,
   testId,
   cardAvailable,
+  surface = "channel",
 }: {
   id: string;
   testId: string;
+  /** 스레드 입력창은 `/` 명령을 받지 않는다. 명령 대신 자리를 말한다. */
+  surface?: "channel" | "thread";
   /** `/연결 팀키`가 지금 카드를 여는가, 설정으로 가는가(design-review M-2). */
   cardAvailable: boolean;
 }) {
@@ -23,15 +26,21 @@ export function SecretKeyBlockNotice({
     <p
       id={id}
       role="alert"
-      className="mb-2 flex items-start gap-2 rounded-md bg-warn-soft px-3 py-2 text-meta font-medium text-warn"
+      className="mb-2 flex items-start gap-2 break-keep rounded-md bg-warn-soft px-3 py-2 text-meta font-medium text-warn"
       data-testid={testId}
     >
       <CircleAlert className="mt-px size-4 shrink-0" aria-hidden="true" />
-      <span>
-        {SECRET_KEY_BLOCK_COPY.lead}{" "}
-        <b className="font-semibold">{SECRET_KEY_BLOCK_COPY.command}</b>
-        {cardAvailable ? SECRET_KEY_BLOCK_COPY.tail : SECRET_KEY_BLOCK_COPY.tailFallback}
-      </span>
+      {surface === "thread" ? (
+        <span>
+          {SECRET_KEY_BLOCK_COPY.lead} {SECRET_KEY_BLOCK_COPY.thread}
+        </span>
+      ) : (
+        <span>
+          {SECRET_KEY_BLOCK_COPY.lead}{" "}
+          <b className="font-semibold">{SECRET_KEY_BLOCK_COPY.command}</b>
+          {cardAvailable ? SECRET_KEY_BLOCK_COPY.tail : SECRET_KEY_BLOCK_COPY.tailFallback}
+        </span>
+      )}
     </p>
   );
 }

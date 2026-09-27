@@ -699,16 +699,28 @@ export function QuickSwitcher({
     ) : null;
 
   /**
-   * 친 말의 낱말이 전부 어떤 명령의 이름·별칭에 들어 있는가 (#2943 H-2).
-   * cmdk의 퍼지 점수를 흉내 내지 않는다 — 그룹의 **자리**만 정하는 판정이라
-   * 부분 문자열 포함이면 충분하고, 틀려도 줄이 사라지지는 않는다.
+   * 「명령」을 검색 두 줄 앞에 세우는가 (#2943 design-review R1 H-2 · R2 H-1).
+   *
+   * 좁게 판정한다. 대상은 **`client` 명령**(지금은 `ai.connect`)뿐이고, 재료는
+   * 사람이 보는 이름(제목)과 슬래시 이름·별칭뿐이다. id·uuid·meta·keywords는
+   * 보지 않는다 — 앞 판은 `commandSearchValue`를 부분 문자열로 재서 `gen`(id의
+   * `agent.routing`)·`0`(uuid)·`채널`이 ↵를 명령으로 가로챘다. 친 낱말마다
+   * 이름 낱말의 **앞머리**여야 하고, 두 글자 미만의 질의는 세우지 않는다.
+   * 그 밖의 모든 말에서 ↵는 예전처럼 메시지 검색이다(R1 B-2).
    */
   const commandsFirst = useMemo(() => {
-    const words = typed.trim().toLowerCase().split(/\s+/).filter((w) => w !== "");
-    if (words.length === 0) return false;
+    const query = typed.trim().toLowerCase();
+    if (query.length < 2) return false;
+    const words = query.split(/\s+/);
     return commands.some((command) => {
-      const hay = commandSearchValue(command).toLowerCase();
-      return words.every((word) => hay.includes(word));
+      if (command.kind !== "client") return false;
+      const names = [
+        ...command.title.toLowerCase().split(/\s+/),
+        ...(command.slash
+          ? [command.slash.name, ...command.slash.aliases].map((name) => name.toLowerCase())
+          : []),
+      ];
+      return words.every((word) => names.some((name) => name.startsWith(word)));
     });
   }, [typed, commands]);
 

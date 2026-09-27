@@ -558,18 +558,23 @@ describe("AI 연결 카드 열기 (#2943 GC-2)", () => {
     expect(search).toBeGreaterThan(ai);
   });
 
-  it("명령과 안 맞는 말이면 검색 줄이 예전처럼 맨 앞이다", async () => {
-    await mount({ path: `/c/${CH}` });
-    const input = document.querySelector<HTMLInputElement>("[cmdk-input]")!;
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-    await act(async () => {
-      setter.call(input, "배포 로그 어제");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
+  // R2 H-1: id·uuid·일반어가 ↵를 가로채지 않는다. 에이전트가 있어야 `gen`
+  // (id `agent.routing`)·`0`(uuid)·`intern`(핸들)이 실제로 걸리는 판이다.
+  for (const query of ["배포 로그 어제", "gen", "0", "intern", "채널", "설정", "a"]) {
+    it(`명령 이름이 아닌 말(${query})이면 검색 줄이 예전처럼 맨 앞이다`, async () => {
+      world.agents = [agent()];
+      await mount({ path: `/c/${CH}` });
+      const input = document.querySelector<HTMLInputElement>("[cmdk-input]")!;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      await act(async () => {
+        setter.call(input, query);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await settle();
+      const first = document.querySelector<HTMLElement>("[cmdk-item]");
+      expect(first?.dataset.testid).toBe("switcher-message-search");
     });
-    await settle();
-    const first = document.querySelector<HTMLElement>("[cmdk-item]");
-    expect(first?.dataset.testid).toBe("switcher-message-search");
-  });
+  }
 
   it("채널 밖에서는 다른 채널의 자리를 쓰지 않고 설정으로 간다", async () => {
     const host = vi.fn(() => true);

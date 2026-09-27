@@ -225,6 +225,7 @@ export function ThreadComposer({
             id="thread-composer-secret-block"
             testId="thread-composer-secret-block"
             cardAvailable={hasLocalCardHost(channelId)}
+            surface="thread"
           />
         )}
         <div className="relative">

@@ -313,6 +313,15 @@ async function exercise(browser) {
   if (selected !== "switcher-ai-connect") fail(`「ai 연결」의 첫 강조가 카드 열기가 아니다: ${selected}`);
   if ((await page.getByTestId("switcher-message-search").count()) !== 1)
     fail("명령이 앞에 서며 메시지 검색 줄이 사라졌다(R1 B-2)");
+  // 부정 질의: id 조각(`gen`)은 명령을 앞세우지 않는다(review R2 H-1).
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.type("gen");
+  await wait(300);
+  const selectedGen = await page.locator('[cmdk-item][aria-selected="true"]').getAttribute("data-testid");
+  if (selectedGen !== "switcher-message-search") fail(`「gen」의 첫 강조가 메시지 검색이 아니다: ${selectedGen}`);
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.type("ai 연결");
+  await wait(300);
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => window.location.hash.startsWith("#/settings"), undefined, { timeout: 5_000 });
   if ((await hash(page)) !== "#/settings?section=ai") fail("⌘K 줄이 설정 › AI 연결로 가지 않았다");
