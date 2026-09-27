@@ -192,7 +192,7 @@ async function installDesktop(page, layout, signals = null) {
               window.__captureSignal[title ?? ""] = (value) => cb?.({ index: 0, message: value });
               const exit = callbacks.get(args.onExit.id);
               window.__captureExit ??= {};
-              window.__captureExit[title ?? ""] = () => exit?.({ index: 0, message: { id, code: 0, signal: null } });
+              window.__captureExit[title ?? ""] = (code) => exit?.({ index: 0, message: { id, code, signal: null } });
             }
             return id;
           }
@@ -236,7 +236,8 @@ async function signIn(page, origin) {
 
 // 시안 ①의 상태(#2776): 칸 3·5 나를 기다림, 나머지 실행 중(hook 「작업 중」), PTY 6 끝남(종료 0).
 // 키는 칸 id다. `exit-0`은 신호가 아니라 그 칸의 프로세스를 코드 0으로 끝낸다.
-const MOCK_SIGNALS = { p3: "waiting-permission", p5: "waiting-permission", p6: "exit-0", "*": "working" };
+// p8은 시안(실행 중)과 달리 코드 1로 끝내 「멈춤(×)」 표지를 증거로 남긴다(design-review M2).
+const MOCK_SIGNALS = { p3: "waiting-permission", p5: "waiting-permission", p6: "exit-0", p8: "exit-1", "*": "working" };
 
 async function open(browser, origin, { viewport, scheme, desktop, signals = null }) {
   const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce" });
@@ -424,12 +425,21 @@ async function paneStatus(browser, origin, scheme, viewport) {
       const label = el.getAttribute("aria-label") ?? "";
       const key = Object.keys(window.__captureSignal).filter((t) => t && label.includes(t)).sort((a, b) => b.length - a.length)[0] ?? "";
       const value = signals[id] ?? signals["*"];
-      if (value === "exit-0") window.__captureExit[key]?.();
+      if (value.startsWith("exit-")) window.__captureExit[key]?.(Number(value.slice(5)));
       else window.__captureSignal[key]?.(value);
     }
   }, MOCK_SIGNALS);
-  await page.waitForSelector("[data-pane-id='p5'][data-waiting]", { timeout: 15_000 });
-  await page.waitForSelector("[data-pane-id] [data-testid='status-mark'][data-status='done']", { timeout: 15_000 });
+  await page.waitForSelector("[data-pane-id='p5'][data-waiting]", { timeout: 15_000, state: "attached" });
+  await page.waitForSelector("[data-pane-id='p8'] [data-testid='status-mark'][data-status='stopped']", { timeout: 15_000, state: "attached" });
+  if (viewport.width < 1280) {
+    // 좁은 창: 격자가 활성 칸 하나로 접힌다(#2774 fitLayout). 그 모양만 찍는다.
+    await page.waitForTimeout(300);
+    check(`${tag} 가로 넘침 0`, (await overflowX(page)) === 0);
+    await page.getByTestId("my-work-tab").screenshot({ path: resolve(OUT_DIR, `pane-status-${tag}.png`) });
+    report.scenes.push(`pane-status-${tag}`);
+    await context.close();
+    return;
+  }
   await page.waitForTimeout(300);
   const marks = await page.evaluate(() =>
     Object.fromEntries(
@@ -440,7 +450,7 @@ async function paneStatus(browser, origin, scheme, viewport) {
     )
   );
   const count = (st) => Object.values(marks).filter((m) => m === st).length;
-  check(`${tag} 칸 상태 표지(기다림 2 = 칸 3·5, 끝남 1, 실행 중 5)`, marks.p3 === "waiting" && marks.p5 === "waiting" && count("waiting") === 2 && count("done") === 1 && count("running") === 5, marks);
+  check(`${tag} 칸 상태 표지(기다림 3·5, 끝남 6, 멈춤 8, 실행 중 4)`, marks.p3 === "waiting" && marks.p5 === "waiting" && marks.p6 === "done" && marks.p8 === "stopped" && count("running") === 4, marks);
   const donePane = Object.keys(marks).find((k) => marks[k] === "done");
   const strips = await page.locator("[data-testid='workbench-pane-waiting']").allTextContents();
   check(`${tag} 바닥 띠 둘(칸 3 ⌃⇧J, 칸 5 ⌃5)`, strips.length === 2 && strips[0].endsWith("⌃⇧J") && strips[1].endsWith("⌃5"), { strips });
@@ -464,10 +474,13 @@ async function paneStatus(browser, origin, scheme, viewport) {
   await page.getByTestId("inbox-route").waitFor();
   await page.getByTestId("inbox-local-panes").waitFor({ timeout: 5_000 });
   const inboxRows = await page.locator("[data-testid='inbox-local-pane']").evaluateAll((els) => els.map((e) => e.getAttribute("data-status") + ":" + e.textContent));
-  check(`${tag} 인박스 「이 기기의 칸」`, inboxRows.length >= 1 && inboxRows.some((r) => r.startsWith("done:")), { inboxRows });
+  // 칸 5는 봤지만 아직 기다리므로 남는다(design-review M3). 끝난 칸 6도 있다.
+  check(`${tag} 인박스 「이 기기의 칸」: 기다림과 끝남`, inboxRows.some((r) => r.startsWith("waiting:")) && inboxRows.some((r) => r.startsWith("done:")), { inboxRows });
+  const empty = await page.getByTestId("inbox-empty").textContent().catch(() => null);
+  check(`${tag} 결정 대기 빈 문구가 기다리는 칸과 모순되지 않는다`, empty === null || !empty.includes("결정할 일이 없습니다"), { empty });
   check(`${tag} 인박스 가로 넘침 0`, (await overflowX(page)) === 0);
   await shot(page, `inbox-local-panes-${tag}`);
-  await page.locator("[data-testid='inbox-local-pane']").first().click();
+  await page.locator("[data-testid='inbox-local-pane'][data-status='done']").first().click();
   await page.getByTestId("my-work-tab").waitFor();
   await page.waitForSelector(`[data-pane-id='${donePane}'][data-focused]`, { timeout: 5_000 });
   check(`${tag} 인박스 줄 → 그 칸`, true);
@@ -541,6 +554,7 @@ async function main() {
       if (only === "pane-status") {
         await paneStatus(browser, preview.origin, scheme, { width: 1440, height: 900 });
         await paneStatus(browser, preview.origin, scheme, { width: 1280, height: 800 });
+        await paneStatus(browser, preview.origin, scheme, { width: 900, height: 700 });
         continue;
       }
       await paneStatus(browser, preview.origin, scheme, { width: 1440, height: 900 });

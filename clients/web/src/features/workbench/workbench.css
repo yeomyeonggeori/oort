@@ -61,20 +61,10 @@
 /* =============================================================================
  * 「나를 기다림」 칸 (#2776, 시안 ① `.pane.wait`·`.pwait`). 신호색 테두리 1.5px:
  * 테두리 1px + 바깥 0.5px 그림자. 포커스 링(2px 안쪽 윤곽)과 겹쳐도 둘 다 보인다.
- * 바닥 띠의 마름모는 상태 표지(`.sl-st[data-status="waiting"]`)와 같은 모양이다.
+ * 바닥 띠의 마름모는 상태 표지(`StatusMark`) 그대로다.
  * ========================================================================== */
 
 .wb-waiting {
   border-color: var(--signal);
   box-shadow: 0 0 0 0.5px var(--signal);
-}
-
-.wb-wait-mark {
-  display: block;
-  flex: none;
-  inline-size: var(--session-mark);
-  block-size: var(--session-mark);
-  border-radius: 2px;
-  background-color: var(--signal);
-  transform: rotate(45deg);
 }

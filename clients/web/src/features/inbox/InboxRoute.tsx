@@ -29,6 +29,7 @@ import {
 } from "@/features/reminders/inboxTab";
 import { FeedList } from "./FeedRow";
 import { LocalPaneInbox } from "./LocalPaneInbox";
+import { useLocalPaneAttention } from "@/features/workbench/local/paneAttention";
 import { isDesktop } from "@/lib/tauri";
 import {
   ApprovalActions,
@@ -107,6 +108,16 @@ const EMPTY_COPY: Record<InboxFilter, { headline: string; detail: string }> = {
 };
 
 /**
+ * 결정 대기가 비었는데 이 기기의 칸이 회원님을 기다릴 때(#2776, design-review H1).
+ * 「결정할 일이 없습니다」는 위의 「나를 기다림」 줄과 모순이다. 비어 있는 것은
+ * 서버 원장의 승인뿐이라고 좁혀 말한다.
+ */
+const EMPTY_WITH_LOCAL_WAITING = {
+  headline: "에이전트 승인 요청은 없습니다.",
+  detail: "위의 「이 기기의 칸」이 회원님을 기다립니다. 누르면 그 칸으로 갑니다.",
+};
+
+/**
  * 결정 대기 한 행의 승인/거부 (goal B5.3b D-5).
  *
  * 이 목록은 `GET …/approvals?status=pending`을 이미 읽고 있었지만, 결정하려면
@@ -169,9 +180,12 @@ function FeedPanel({
   onMarkRead,
   renderActions,
   listRef,
+  localWaiting = 0,
 }: {
   filter: InboxFilter;
   feed: Feed;
+  /** 이 기기에서 「나를 기다림」인 칸 수(#2776). 결정 대기의 빈 문구를 좁힌다. */
+  localWaiting?: number;
   onMarkRead?: (item: FeedItem) => void;
   renderActions?: (item: FeedItem) => ReactNode;
   listRef?: React.RefObject<HTMLUListElement>;
@@ -203,7 +217,8 @@ function FeedPanel({
       />
     );
   }
-  const copy = EMPTY_COPY[filter];
+  const copy =
+    filter === "needs-action" && localWaiting > 0 ? EMPTY_WITH_LOCAL_WAITING : EMPTY_COPY[filter];
   return (
     <Skeleton ready={state !== "loading"} rows={3} className="p-4">
       {state === "loading" ? null : state === "empty" ? (
@@ -227,6 +242,7 @@ function FeedPanel({
 
 export function InboxRoute() {
   const { session } = useSession();
+  const localWaiting = useLocalPaneAttention().filter((e) => e.status === "waiting").length;
   const [params, setParams] = useSearchParams();
   // 이 서버가 답할 수 있는 탭만 (goal B12). 승인 원장이 없는 서버에서는 결정
   // 대기와 에이전트가 사라지고 멘션 하나만 남는다.
@@ -398,7 +414,9 @@ export function InboxRoute() {
             // 당신이 해야 할 일이 몇 개인가"를 말하는 자리이고, 결정할 수 없는
             // 행이 그 수에 들어가면 사람은 인박스를 열고 셀 것을 찾지 못한다.
             counts={{
-              "needs-action": decidableCount(needsAction.items),
+              // 이 기기의 칸이 회원님을 기다리는 수도 센다(#2776): 배지는 「지금 해야
+              // 할 일의 수」다.
+              "needs-action": decidableCount(needsAction.items) + localWaiting,
               mentions: mentionCount,
               reminders: reminderDueCount,
             }}
@@ -473,6 +491,7 @@ export function InboxRoute() {
           <FeedPanel
             filter={filter}
             feed={feed}
+            localWaiting={localWaiting}
             onMarkRead={filter === "mentions" ? onMarkRead : undefined}
             // 결정 컨트롤은 결정 대기 탭에만. 에이전트 탭의 승인 행은 이미 끝난
             // 결정의 기록이고, 멘션 행은 승인이 아니다.

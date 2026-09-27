@@ -59,14 +59,21 @@ describe("paneAttention", () => {
     expect(notify).toHaveBeenCalledTimes(1);
   });
 
-  it("칸을 보거나, 상태가 풀리거나, 칸을 닫으면 인박스에서 내린다", () => {
+  it("본 「끝남」, 상태가 바뀐 칸, 닫은 칸은 내리고, 본 「나를 기다림」은 답할 때까지 남긴다", () => {
     const { store, pane } = setup();
     store.observe([pane("p1", "running"), pane("p2", "running"), pane("p3", "running")], null);
     store.observe([pane("p1", "waiting"), pane("p2", "done"), pane("p3", "waiting")], null);
     expect(store.entries()).toHaveLength(3);
+    // p1(기다림)을 본다: 남는다. p2는 다시 실행 중: 내린다.
     store.observe([pane("p1", "waiting"), pane("p2", "running"), pane("p3", "waiting")], "p1");
-    expect(store.entries().map((e) => e.paneId)).toEqual(["p3"]);
-    store.observe([pane("p1", "waiting")], "p1");
+    expect(store.entries().map((e) => e.paneId)).toEqual(["p1", "p3"]);
+    // p1이 답을 받아 실행 중, p3 칸을 닫는다.
+    store.observe([pane("p1", "running")], "p1");
+    expect(store.entries()).toEqual([]);
+    // 본 「끝남」은 내린다.
+    store.observe([pane("p1", "done")], null);
+    expect(store.entries().map((e) => e.status)).toEqual(["done"]);
+    store.observe([pane("p1", "done")], "p1");
     expect(store.entries()).toEqual([]);
   });
 

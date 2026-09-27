@@ -70,7 +70,7 @@ export interface PaneStatusView {
    * 「나를 기다림」: 칸에 신호색 테두리를 두르고 바닥 띠를 그린다(시안 ① `.pane.wait`
    * · `.pwait`). null이면 기다리지 않는다.
    */
-  waiting: { line: string; keycap: string | null } | null;
+  waiting: { line: string; keycap: string | null; mark: ReactNode } | null;
 }
 
 export interface WorkbenchGridProps {
@@ -620,7 +620,12 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
         >
           {title}
         </span>
-        {status ? <span className="wb-pane-status flex shrink-0 items-center">{status.mark}</span> : null}
+        {/* 상태 글자는 칸의 접근 이름에 이미 있다. 표지는 모양만(design-review N3). */}
+        {status ? (
+          <span aria-hidden className="flex shrink-0 items-center">
+            {status.mark}
+          </span>
+        ) : null}
         <PaneButton
           label="오른쪽으로 분할"
           platform={platform}
@@ -671,7 +676,9 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
           data-testid="workbench-pane-waiting"
           className="flex shrink-0 items-center gap-2 bg-signal-soft px-2 py-1 text-meta font-semibold text-signal-text"
         >
-          <span aria-hidden className="wb-wait-mark" />
+          <span aria-hidden className="flex shrink-0 items-center">
+            {waiting.mark}
+          </span>
           <span className="min-w-0 flex-1 truncate">{waiting.line}</span>
           {waiting.keycap ? (
             <kbd className="shrink-0 font-mono text-timestamp font-medium">{modLabel(platform, waiting.keycap)}</kbd>

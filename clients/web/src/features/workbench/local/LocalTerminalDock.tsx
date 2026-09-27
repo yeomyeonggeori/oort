@@ -386,10 +386,11 @@ export function LocalTerminalDock({
             line: waitingLine(view.signal) ?? "입력을 기다려요",
             // 시안 ①: 활성 칸은 다음 기다림으로 가는 키, 나머지는 그 칸으로 가는 키.
             keycap: pane.focused ? "⌃⇧J" : pane.index <= 9 ? `⌃${pane.index}` : null,
+            mark: <StatusMark status="waiting" />,
           }
         : null;
     return {
-      mark: <StatusMark status={status} srLabel />,
+      mark: <StatusMark status={status} />,
       label: SESSION_STATUS_LABEL[status],
       waiting,
     };

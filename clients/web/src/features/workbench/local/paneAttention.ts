@@ -82,7 +82,7 @@ export function createPaneAttention(deps: PaneAttentionDeps) {
 
     /**
      * 지금 칸 판정 전부와 사람이 보고 있는 칸. 새로 기다림·끝남이 된 칸만 알린다.
-     * 판정에서 빠진 칸(닫은 칸)과 더는 기다림·끝남이 아닌 칸은 인박스에서 내린다.
+     * 판정에서 빠진 칸(닫은 칸), 상태가 바뀐 칸, 본 「끝남」 칸은 인박스에서 내린다.
      */
     observe(panes: readonly PaneObservation[], viewing: string | null): void {
       const next = new Map(panes.map((p) => [p.paneId, p.status] as const));
@@ -92,7 +92,10 @@ export function createPaneAttention(deps: PaneAttentionDeps) {
       let changed = false;
       let kept = entries.filter((e) => {
         const p = byId.get(e.paneId);
-        const keep = p !== undefined && p.status === e.status && e.paneId !== viewing;
+        // 「끝남」은 한 번 보면 내린다(알림이 할 일을 다 했다). 「나를 기다림」은 이어지는
+        // 상태라 답해서 상태가 바뀔 때까지 남긴다(design-review M3).
+        const keep =
+          p !== undefined && p.status === e.status && !(e.status === "done" && e.paneId === viewing);
         if (!keep) changed = true;
         return keep;
       });
