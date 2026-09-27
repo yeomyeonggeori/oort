@@ -32,6 +32,7 @@ import { useChannels, useDirectory } from "@/features/workspace/useWorkspace";
 // =============================================================================
 
 const LOADING_REASON_ID = "ai-unlink-loading";
+const OFFLINE_REASON_ID = "ai-unlink-offline";
 
 export function TeamUnlinkDialog({
   open,
@@ -41,6 +42,7 @@ export function TeamUnlinkDialog({
   rowName,
   legacy,
   busy,
+  offline,
   error,
   onConfirm,
 }: {
@@ -51,6 +53,8 @@ export function TeamUnlinkDialog({
   rowName: string;
   legacy: boolean;
   busy: boolean;
+  /** 연결이 끊겼는가. 창이 열린 채로 끊기면 끊기 버튼이 잠기고 까닭을 든다. */
+  offline: boolean;
   error: string | null;
   onConfirm: () => void;
 }) {
@@ -68,6 +72,7 @@ export function TeamUnlinkDialog({
             rowName={rowName}
             legacy={legacy}
             busy={busy}
+            offline={offline}
             error={error}
             onCancel={() => onOpenChange(false)}
             onConfirm={onConfirm}
@@ -83,6 +88,7 @@ function UnlinkBody({
   rowName,
   legacy,
   busy,
+  offline,
   error,
   onCancel,
   onConfirm,
@@ -91,6 +97,7 @@ function UnlinkBody({
   rowName: string;
   legacy: boolean;
   busy: boolean;
+  offline: boolean;
   error: string | null;
   onCancel: () => void;
   onConfirm: () => void;
@@ -109,12 +116,13 @@ function UnlinkBody({
       });
   // 목록을 읽는 동안에는 끊기를 잠근다: 누가 멈추는지 보기 전에 끊지 않게. 읽기에
   // 실패하면 잠그지 않는다(끊기는 운영자의 결정이고, 창이 그 사실을 말한다).
-  const locked = loading || busy;
+  const locked = loading || busy || offline;
+  const lockedReason = offline ? OFFLINE_REASON_ID : loading ? LOADING_REASON_ID : undefined;
 
   return (
     <>
-      <DialogTitle className="text-title font-bold">{teamUnlinkTitle(rowName)}</DialogTitle>
-      <DialogDescription className="break-keep text-body text-ink-muted" data-testid="ai-link-unlink-body">
+      <DialogTitle className="shrink-0 break-words text-title font-bold [overflow-wrap:anywhere]">{teamUnlinkTitle(rowName)}</DialogTitle>
+      <DialogDescription className="shrink-0 break-keep text-body text-ink-muted" data-testid="ai-link-unlink-body">
         {loading ? "이 키를 쓰는 팀 에이전트를 찾고 있어요." : teamUnlinkBody(affected)}
       </DialogDescription>
       {legacy && (
@@ -125,8 +133,10 @@ function UnlinkBody({
       {loading ? (
         <Skeleton ready={false} rows={2} className="py-1" />
       ) : (
+        // 에이전트가 많으면 목록만 스크롤한다: 판은 창 높이에 묶여 있고(dialog.tsx),
+        // 버튼 줄이 화면 밖으로 밀려나면 안 된다(design-review #2880 H2).
         <ul
-          className="flex min-w-0 list-disc flex-col gap-1 pl-4 text-body text-ink"
+          className="flex min-h-0 min-w-0 list-disc flex-col gap-1 overflow-y-auto pl-4 text-body text-ink"
           data-testid="ai-link-unlink-impact"
         >
           {affected === null ? (
@@ -157,12 +167,17 @@ function UnlinkBody({
           {error}
         </p>
       )}
-      {loading && (
+      {offline && (
+        <p id={OFFLINE_REASON_ID} className="shrink-0 break-keep text-meta text-ink-muted" data-testid="ai-link-unlink-offline">
+          연결이 끊겨 지금은 끊을 수 없어요. 다시 연결되면 이어서 할 수 있어요.
+        </p>
+      )}
+      {loading && !offline && (
         <p id={LOADING_REASON_ID} className="sr-only">
           영향 받는 에이전트를 불러오는 중이라 아직 끊을 수 없어요.
         </p>
       )}
-      <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" size="sm" className="tap-target" onClick={onCancel} data-testid="ai-link-unlink-cancel">
           취소
         </Button>
@@ -170,10 +185,10 @@ function UnlinkBody({
           type="button"
           variant="destructive"
           size="sm"
-          className={cn("tap-target", loading && !busy && "opacity-50 hover:opacity-50")}
+          className={cn("tap-target", (loading || offline) && !busy && "opacity-50 hover:opacity-50")}
           aria-disabled={locked || undefined}
           aria-busy={busy || undefined}
-          aria-describedby={loading ? LOADING_REASON_ID : undefined}
+          aria-describedby={lockedReason}
           onClick={() => {
             if (locked) return;
             onConfirm();

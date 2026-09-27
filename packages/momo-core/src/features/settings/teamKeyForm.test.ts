@@ -58,7 +58,7 @@ describe("teamCheckReason (#2944)", () => {
   it("아는 사유는 해요체 사람 말, 모르는 사유는 이름 그대로", () => {
     expect(teamCheckReason("provider_auth_failed")).toBe("provider가 키를 거절했어요.");
     expect(teamCheckReason("provider_status_429")).toBe("provider가 429 응답을 줬어요.");
-    expect(teamCheckReason("probe_not_run")).toBe("확인이 끝나지 않았어요.");
+    expect(teamCheckReason("probe_not_run")).toBe("이 서버는 아직 키를 직접 확인하지 않아요.");
     expect(teamCheckReason(undefined)).toBe("연결을 확인하지 못했어요.");
     expect(teamCheckReason("weird_x")).toBe("연결을 확인하지 못했어요(서버 사유: weird_x).");
   });
@@ -79,7 +79,7 @@ describe("teamCheckResult · teamProbeDetail (#2880)", () => {
 
   it("지금 서버(probe_not_run)는 실패가 아니라 「확인 전」이고 키를 거절했다고 말하지 않는다", () => {
     const result = teamCheckResult({ probe: probe({ ok: false, reason: "probe_not_run" }), justSaved: true, nowMs: now });
-    expect(result).toEqual({ tone: "bad", headline: "확인 전", text: "확인이 끝나지 않았어요. 키는 저장됐어요." });
+    expect(result).toEqual({ tone: "mute", headline: "확인 전", text: "이 서버는 아직 키를 직접 확인하지 않아요. 키는 저장됐어요." });
     expect(result.text).not.toContain("거절");
   });
 

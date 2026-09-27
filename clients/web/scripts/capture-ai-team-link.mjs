@@ -85,6 +85,9 @@ function row(over) {
   return { channelId: channelA, hlcCount: 0, type: "text", state: "sent", ...over, hlcTs: over.createdAtMs };
 }
 
+/** 장면마다 바꾸는 대역 상태(장면은 차례로 돈다). */
+const sceneState = { extraAgents: [], hostedDenied: false };
+
 const messages = [
   row({
     id: "0199dddd-0000-7000-8000-000000000001",
@@ -166,10 +169,12 @@ async function installRoutes(context, posted, team) {
       });
     if (path === "/v1/auth/refresh")
       return json(route, { accessToken: session.accessToken, refreshToken: session.refreshToken });
-    if (path.endsWith("/roster")) return json(route, { members: roster });
+    if (path.endsWith("/roster")) return json(route, { members: [...roster, ...sceneState.extraAgents] });
     // 팀 연결은 운영자만(#2944 카드의 팀 절). 이 게이트는 입구만 잰다.
     if (path.startsWith("/v1/provider/link")) return team(route, request, path);
     if (path.endsWith("/channels")) return json(route, { channels });
+    if (path.endsWith("/hosted-agent-connections") && sceneState.hostedDenied)
+      return json(route, { error: { code: "forbidden", message: "owner or admin required" } }, 403);
     if (path.endsWith("/hosted-agent-connections"))
       return json(route, {
         connections: [
@@ -230,14 +235,6 @@ const EMPTY_LINK = {
   baseUrl: "http://mock", endpointLabel: "mock", bearerConfigured: false, availability: "mock",
   keyConfigured: false, diagnostics: [], presets: PRESETS,
 };
-/** 프리셋에 없는 지금 주소(사내 게이트웨이, review #2961 M4). */
-const PROXY_LINK = {
-  ...KEY_LINK,
-  baseUrl: "https://llm-gateway.yeomyeong-internal.example/v1",
-  endpointLabel: "llm-gateway.yeomyeong-internal.example",
-  credentialKind: "bearer",
-  format: "openai",
-};
 const FAKE_KEY = "capture-only-not-a-key-000000000000";
 const probe = (ok, reason) => ({
   schema: "momo.provider_link.test.v0", ok, reason, source: "database", mode: "external-hermes",
@@ -277,7 +274,10 @@ const PROBE_2960 = {
 
 const outDir = resolve(webRoot, "captures/2880");
 
-async function scene(browser, { width, scheme, name, team, run }) {
+async function scene(browser, { width, scheme, name, team, run, setup }) {
+  sceneState.extraAgents = [];
+  sceneState.hostedDenied = false;
+  setup?.();
   const height = width === 390 ? 844 : 820;
   const context = await browser.newContext({
     viewport: { width, height },
@@ -345,6 +345,54 @@ async function openAside(page) {
 
 const SCENES = [
   {
+    name: "check-fail",
+    team: () => teamRoute({ test: probe(false, "provider_auth_failed") }),
+    run: async (page) => {
+      await openAside(page);
+      await page.getByTestId("ai-link-check").click();
+      await page.getByTestId("ai-link-probe").waitFor();
+      if ((await page.getByTestId("ai-link-probe").getAttribute("data-tone")) !== "bad") throw new Error("거절이 실패색이 아니다");
+    },
+  },
+  {
+    // 에이전트가 많으면 목록만 스크롤하고 버튼 줄은 창 안에 남는다(design-review #2880 H2).
+    name: "unlink-many",
+    setup: () => {
+      sceneState.extraAgents = Array.from({ length: 14 }, (_, i) =>
+        member({
+          id: `00000000-0000-7000-8000-0000000003${String(i).padStart(2, "0")}`,
+          kind: "agent",
+          displayName: `리서치 봇 ${i + 1}`,
+          handle: `bot${i + 1}`,
+          channelIds: [channelA, channelB],
+        })
+      );
+    },
+    team: () => teamRoute(),
+    run: async (page) => {
+      await openAside(page);
+      await page.getByTestId("ai-link-unlink").click();
+      await page.getByTestId("ai-link-unlink-impact").waitFor();
+      const box = await page.getByTestId("ai-link-unlink-confirm").boundingBox();
+      const vp = page.viewportSize();
+      if (!box || !vp || box.y + box.height > vp.height) throw new Error("끊기 버튼이 창 밖으로 밀려났다");
+      return "dialog";
+    },
+  },
+  {
+    name: "unlink-unknown",
+    setup: () => {
+      sceneState.hostedDenied = true;
+    },
+    team: () => teamRoute(),
+    run: async (page) => {
+      await openAside(page);
+      await page.getByTestId("ai-link-unlink").click();
+      await page.getByTestId("ai-link-unlink-unknown").waitFor();
+      return "dialog";
+    },
+  },
+  {
     name: "add-preset",
     team: () => teamRoute({ link: EMPTY_LINK }),
     run: async (page) => {
@@ -411,7 +459,7 @@ async function main() {
         for (const scheme of ["light", "dark"]) {
           for (const s of SCENES) {
             if (only && !only.includes(s.name)) continue;
-            const result = await scene(browser, { width, scheme, name: s.name, team: s.team(), run: s.run });
+            const result = await scene(browser, { width, scheme, name: s.name, team: s.team(), run: s.run, setup: s.setup });
             console.log(`[shot] ${result.name}-${width}-${scheme}: ${result.text.slice(0, 110)}`);
           }
         }

@@ -444,7 +444,11 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
             pill && (
               <>
                 <AiPill tone={pill.tone}>{pill.text}</AiPill>
-                {probe && !offline && <span>{formatMoment(probe.checkedAtMs)} 확인</span>}
+                {/* 서버가 부르지 않은 확인에는 시각을 달지 않는다: 확인한 적이 없다
+                    (design-review #2880 M1). */}
+                {probe && !offline && probe.reason !== PROBE_NOT_RUN && (
+                  <span>{formatMoment(probe.checkedAtMs)} 확인</span>
+                )}
               </>
             )
           }
@@ -532,7 +536,7 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
           title={hasRow ? rowName : "팀 API 키 추가"}
           subtitle={
             !hasRow
-              ? "운영자만 · 서버에 봉인해 팀 에이전트가 씀"
+              ? "운영자만 · 서버에 봉인해요"
               : legacy
                 ? "내부용 연결 · 이 서버"
                 : "API 키 · 이 서버 · 팀 에이전트가 씀"
@@ -559,7 +563,7 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
                 currentFailed={failed}
                 onCancel={() => closeForm()}
                 onSaved={onSaved}
-                allowCustomAddress
+                surface="settings"
                 saveErrorHint={loopbackHint}
                 testIdPrefix="ai-link"
               />
@@ -589,7 +593,7 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
                       }}
                       data-testid="ai-link-check"
                     >
-                      {checking ? "확인 중" : probe ? "다시 확인" : "연결 확인"}
+                      {checking ? "확인 중" : probe && probe.reason !== PROBE_NOT_RUN ? "다시 확인" : "연결 확인"}
                     </Button>
                     <Button
                       type="button"
@@ -684,6 +688,7 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
               rowName={rowName}
               legacy={legacy}
               busy={unlinking}
+              offline={offline}
               error={unlink.isError ? errorMessage(unlink.error) : null}
               onConfirm={() => {
                 if (unlinking || offline) return;
@@ -800,6 +805,18 @@ function TeamLinkDetail({
   );
 }
 
+/** 결과 칸의 색 갈래. 채팅 카드 결과 줄(`RESULT_TONE`)과 같은 뜻: ok 초록, bad 빨강, mute 무채. */
+const PROBE_BOX_TONE: Record<"ok" | "bad" | "mute", string> = {
+  ok: "border-ok/40 bg-ok-soft",
+  bad: "border-danger/40 bg-danger-soft",
+  mute: "border-line bg-surface",
+};
+const PROBE_HEAD_TONE: Record<"ok" | "bad" | "mute", string> = {
+  ok: "text-ok",
+  bad: "text-danger",
+  mute: "text-ink",
+};
+
 /**
  * 확인 결과. 첫 칸(팀 기본 키)의 결과는 시안 §4 2b `.check` 칸 하나로, 문장은 채팅
  * 연결 카드와 같은 코어 `teamCheckResult`다. 예비 provider가 있는 서버(ADR-0135 D1
@@ -834,13 +851,13 @@ function ProbeAnswer({
       <div
         className={cn(
           "flex min-w-0 flex-col gap-1 rounded-lg border px-3 py-2",
-          line.tone === "ok" ? "border-ok/40 bg-ok-soft" : "border-line bg-surface"
+          PROBE_BOX_TONE[line.tone]
         )}
         role="status"
         data-testid="ai-link-probe"
         data-tone={line.tone}
       >
-        <b className={cn("text-meta font-bold", line.tone === "ok" ? "text-ok" : "text-ink")}>
+        <b className={cn("text-meta font-bold", PROBE_HEAD_TONE[line.tone])}>
           {line.headline}
         </b>
         <span className="break-keep text-meta text-ink-muted" data-testid="ai-link-probe-text">

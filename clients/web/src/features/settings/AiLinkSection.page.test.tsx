@@ -146,23 +146,32 @@ const act_ = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: bool
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 
+let client: QueryClient | null = null;
+
+function tree(offline: boolean) {
+  return createElement(
+    QueryClientProvider,
+    { client: client as QueryClient },
+    createElement(
+      SessionProvider,
+      { value: session(offline ? "disconnected" : "connected") },
+      createElement(AiLinkSection, { offline, workspaceId: WS })
+    )
+  );
+}
+
+/** 같은 캐시로 오프라인 여부만 바꿔 다시 그린다(창이 열린 채 끊기는 경우). */
+function setOffline(offline: boolean) {
+  act(() => root?.render(tree(offline)));
+}
+
 function mount(offline = false): HTMLElement {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
   act(() => {
-    root?.render(
-      createElement(
-        QueryClientProvider,
-        { client },
-        createElement(
-          SessionProvider,
-          { value: session(offline ? "disconnected" : "connected") },
-          createElement(AiLinkSection, { offline, workspaceId: WS })
-        )
-      )
-    );
+    root?.render(tree(offline));
   });
   return host;
 }
@@ -564,6 +573,19 @@ describe("팀 연결 AA-7 (#2880 시안 §3·§4 2b)", () => {
     expect(dq("ai-link-unlink-confirm")?.getAttribute("aria-disabled")).toBeNull();
   });
 
+  it("창이 열린 채 연결이 끊기면 「연결 끊기」가 잠기고 까닭을 든다(design-review #2880 B1)", async () => {
+    vi.mocked(deleteProviderLink).mockResolvedValue(undefined as never);
+    await openUnlink();
+    setOffline(true);
+    const confirm = dq("ai-link-unlink-confirm") as HTMLButtonElement;
+    expect(confirm.getAttribute("aria-disabled")).toBe("true");
+    const reason = dq("ai-link-unlink-offline");
+    expect(reason?.textContent).toContain("연결이 끊겨");
+    expect(confirm.getAttribute("aria-describedby")).toBe(reason?.id);
+    act(() => confirm.click());
+    expect(deleteProviderLink).not.toHaveBeenCalled();
+  });
+
   it("목록을 읽는 동안에는 끊지 못한다(누가 멈추는지 보기 전)", async () => {
     vi.mocked(listHostedConnections).mockReturnValue(new Promise(() => undefined));
     vi.mocked(deleteProviderLink).mockResolvedValue(undefined as never);
@@ -604,7 +626,7 @@ describe("팀 연결 AA-7 (#2880 시안 §3·§4 2b)", () => {
     await rtlWaitFor(() => expect(testProviderLink).toHaveBeenCalledTimes(1));
     const result = await until("ai-link-probe");
     expect(result.textContent).toContain("확인 전");
-    expect(q("ai-link-probe-text")?.textContent).toBe("확인이 끝나지 않았어요. 키는 저장됐어요.");
+    expect(q("ai-link-probe-text")?.textContent).toBe("이 서버는 아직 키를 직접 확인하지 않아요. 키는 저장됐어요.");
     expect(result.textContent).not.toContain("거절");
     // 쓰기 전용: 저장한 키가 화면 어디에도 없다.
     expect(host?.innerHTML).not.toContain("sk-ant-9c1e");

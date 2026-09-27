@@ -70,7 +70,9 @@ export function teamCheckReason(reason: string | undefined): string {
     case "not_external_provider":
       return "모의 모드라 실제 provider를 부르지 않아요.";
     case "probe_not_run":
-      return "확인이 끝나지 않았어요.";
+      // 서버가 실제 provider를 부르지 않았다(#2960 전). 「끝나지 않았다」고 하면
+      // 다시 누르면 끝날 것처럼 읽힌다(design-review #2880 M1).
+      return "이 서버는 아직 키를 직접 확인하지 않아요.";
     case undefined:
     case "":
       return "연결을 확인하지 못했어요.";
@@ -163,7 +165,8 @@ export function teamCheckSince(ms: number, nowMs: number): string {
 }
 
 export interface TeamCheckResult {
-  readonly tone: "ok" | "bad";
+  /** `mute`는 확인이 돌지 않은 것(`probe_not_run`): 실패색으로 칠하지 않는다. */
+  readonly tone: "ok" | "bad" | "mute";
   /** 곁판 결과 칸의 굵은 머리(시안 §4 2b `.check b`). */
   readonly headline: string;
   /** 두 표면이 똑같이 그리는 문장. */
@@ -173,7 +176,7 @@ export interface TeamCheckResult {
 /**
  * 확인 결과 한 줄. `justSaved`는 「저장하고 확인」 직후인가: 그때 실패하면 저장한
  * 키가 남아 있다는 사실을 함께 말한다(저장 전 판정 경로가 서버에 없다).
- * `probe_not_run`(#2960 전 서버)은 실패로 칠하지만 문장은 「확인이 끝나지 않았어요」다:
+ * `probe_not_run`(#2960 전 서버)은 `mute`(「확인 전」)이고, 문장은 서버가 확인하지 않는다는 사실이다:
  * 키가 거절됐다고 말하지 않는다.
  */
 export function teamCheckResult(input: {
@@ -193,7 +196,7 @@ export function teamCheckResult(input: {
   const why = teamCheckReason(probe.reason);
   const notRun = probe.reason === "probe_not_run";
   return {
-    tone: "bad",
+    tone: notRun ? "mute" : "bad",
     headline: notRun ? "확인 전" : "확인 실패",
     text: !justSaved
       ? why

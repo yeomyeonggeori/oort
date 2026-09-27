@@ -428,14 +428,6 @@ describe("같은 입력 → 같은 알약: 설정 × 카드 (#2941·#2944)", () 
 });
 
 describe("같은 폼 · 같은 결과 문장: 설정 × 카드 (#2880)", () => {
-  const setValue = (input: HTMLInputElement, value: string) => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-    act(() => {
-      setter.call(input, value);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-  };
-
   /** 폼의 시험 id 꼬리(머리를 뗀 것). 두 표면이 같은 컴포넌트면 같은 꼬리 집합이다. */
   function formShape(form: HTMLElement, prefix: string): string[] {
     return Array.from(form.querySelectorAll<HTMLElement>("[data-testid]"))
@@ -475,38 +467,35 @@ describe("같은 폼 · 같은 결과 문장: 설정 × 카드 (#2880)", () => {
     expect(q(card, "ai-connect-card-preset-custom")).toBeNull();
   });
 
-  it("지금 서버(probe_not_run): 저장하고 확인 → 두 표면이 같은 「확인 전」과 같은 문장", async () => {
-    vi.mocked(fetchProviderLink).mockResolvedValue({ ...KEY_LINK, configured: false, keyConfigured: false, source: "environment", availability: "mock" } as ProviderLink);
-    vi.mocked(putProviderLink).mockResolvedValue(KEY_LINK);
-    vi.mocked(testProviderLink).mockResolvedValue(probe(false, "probe_not_run"));
+  /** 두 표면에서 같은 확인 응답으로 「연결 확인」을 누르고 결과 줄(문장·색)을 돌려준다. */
+  async function checkBoth(result: ProviderLinkTest) {
+    vi.mocked(testProviderLink).mockResolvedValue(result);
     const settings = mountEl(createElement(AiLinkSection, { offline: false, workspaceId: WS }));
-    const card = mountCard({ line: "team" });
-    const add = await until(settings, "ai-team-add");
-    act(() => add.click());
-    setValue(q(settings, "ai-link-key-input") as HTMLInputElement, "sk-settings-1111");
-    vi.mocked(fetchProviderLink).mockResolvedValue(KEY_LINK);
-    act(() => (q(settings, "ai-link-key-save") as HTMLButtonElement).click());
-    const settingsText = await until(settings, "ai-link-probe-text");
-    expect(settingsText.textContent).toBe("확인이 끝나지 않았어요. 키는 저장됐어요.");
-    expect(q(settings, "ai-link-probe")?.textContent).toContain("확인 전");
+    const card = mountCard();
+    await until(settings, "ai-link-row");
+    act(() => (q(settings, "ai-link-row-more") as HTMLButtonElement).click());
+    act(() => (q(settings, "ai-link-check") as HTMLButtonElement).click());
+    const cardCheck = await until(card, "ai-connect-card-team-check");
+    act(() => cardCheck.click());
+    const s = await until(settings, "ai-link-probe");
+    const c = await until(card, "ai-connect-card-team-result");
+    return {
+      settings: { text: q(settings, "ai-link-probe-text")?.textContent, tone: s.getAttribute("data-tone") },
+      card: { text: c.textContent, tone: c.getAttribute("data-tone") },
+      settingsPill: pillOf((await until(settings, "ai-link-row")).querySelector("[data-slot='state']") as HTMLElement),
+      cardPill: pillOf(q(card, "ai-connect-card-team")),
+    };
+  }
 
-    // 카드: 같은 확인 응답을 저장 직후 받는다.
-    act(() => (q(card, "ai-connect-card-team-key") as HTMLButtonElement | null)?.click());
-    const cardForm = q(card, "ai-connect-card-key-form");
-    if (cardForm) {
-      setValue(q(card, "ai-connect-card-key-input") as HTMLInputElement, "sk-card-2222");
-      act(() => (q(card, "ai-connect-card-key-save") as HTMLButtonElement).click());
-      if (q(card, "ai-connect-card-key-replace")) act(() => (q(card, "ai-connect-card-key-save") as HTMLButtonElement).click());
-    } else {
-      act(() => (q(card, "ai-connect-card-team-check") as HTMLButtonElement).click());
-    }
-    const cardResult = await until(card, "ai-connect-card-team-result");
-    await waitFor(() => expect(cardResult.textContent).toBe(settingsText.textContent));
-    const settingsRow = await until(settings, "ai-link-row");
-    expect(pillOf(q(card, "ai-connect-card-team"))).toEqual({ tone: "mute", text: "확인 전" });
-    expect(pillOf(settingsRow.querySelector("[data-slot='state']") as HTMLElement)).toEqual(
-      pillOf(q(card, "ai-connect-card-team"))
-    );
+  it.each([
+    ["지금 서버(probe_not_run)", probe(false, "probe_not_run"), "mute", "이 서버는 아직 키를 직접 확인하지 않아요.", "확인 전"],
+    ["거절(401)", probe(false, "provider_auth_failed"), "bad", "provider가 키를 거절했어요.", "확인 실패"],
+  ])("%s: 두 표면이 같은 문장·같은 색·같은 알약", async (_name, result, tone, text, pill) => {
+    const both = await checkBoth(result);
+    expect(both.settings).toEqual({ text, tone });
+    expect(both.card).toEqual(both.settings);
+    expect(both.cardPill.text).toBe(pill);
+    expect(both.settingsPill).toEqual(both.cardPill);
   });
 
   it("#2960 모양의 확인(모델 수·요청 한도): 두 표면이 같은 문장", async () => {
@@ -537,6 +526,8 @@ describe("같은 폼 · 같은 결과 문장: 설정 × 카드 (#2880)", () => {
     const cardResult = await until(card, "ai-connect-card-team-result");
     expect(settingsText.textContent).toBe("응답을 확인했어요 · 방금 · 쓸 수 있는 모델 6개 · 요청 한도 50");
     expect(cardResult.textContent).toBe(settingsText.textContent);
+    expect(cardResult.getAttribute("data-tone")).toBe("ok");
+    expect(q(settings, "ai-link-probe")?.getAttribute("data-tone")).toBe("ok");
     expect(q(settings, "ai-link-probe")?.textContent).toContain("키 확인됨");
   });
 });

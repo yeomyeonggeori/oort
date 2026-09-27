@@ -61,7 +61,7 @@ export function TeamKeyForm({
   currentFailed,
   onCancel,
   onSaved,
-  allowCustomAddress = false,
+  surface = "card",
   saveErrorHint,
   testIdPrefix = "ai-connect-card",
 }: {
@@ -75,15 +75,20 @@ export function TeamKeyForm({
   onCancel: () => void;
   onSaved: () => void;
   /**
-   * 「직접 주소」 칩(시안 §4 2b)을 세우는가. 설정 곁판만 켠다: 채팅 카드는 주소를
-   * 받지 않고 설정으로 보낸다(#2944 GC-3).
+   * 어느 표면의 폼인가. 동작(칩·password 칸·잠금·대체 확인·저장)은 한 벌이고, 겉만
+   * 각 시안을 따른다.
+   * - `card`: 채팅 카드(chat-genui-connect 시안). 고른 칩은 채움, 칸 이름은 숨김.
+   * - `settings`: 설정 곁판(ai-accounts 시안 §4 2b). 「provider」「API 키」 이름이 보이고,
+   *   고른 칩은 테두리, 「직접 주소」 칩이 선다. 채팅 카드는 주소를 받지 않고 설정으로
+   *   보낸다(#2944 GC-3).
    */
-  allowCustomAddress?: boolean;
+  surface?: "card" | "settings";
   /** 저장 오류 밑에 덧붙일 안내(설정의 loopback 안내). 없으면 서버 문장만. */
   saveErrorHint?: (error: unknown, baseUrl: string) => string | null;
   /** 시험 id 머리. 두 표면이 같은 폼을 서로 다른 이름으로 찾는다. */
   testIdPrefix?: string;
 }) {
+  const allowCustomAddress = surface === "settings";
   const presets = teamKeyPresets(link);
   const initial = initialPresetId(presets, link);
   // 프리셋이 없는 서버에서 주소를 받을 수 있는 표면이면 처음부터 직접 주소다.
@@ -195,8 +200,14 @@ export function TeamKeyForm({
     save.mutate(target);
   }
 
-  const chipClass =
-    "tap-target inline-flex h-control-sm min-w-0 max-w-full cursor-pointer items-center rounded-full border border-line px-3 text-meta font-semibold text-ink-muted peer-checked:border-primary peer-checked:bg-primary peer-checked:text-on-primary peer-focus-visible:focus-ring";
+  const chipClass = cn(
+    "tap-target inline-flex h-control-sm min-w-0 max-w-full cursor-pointer items-center rounded-full border border-line px-3 text-meta font-semibold text-ink-muted peer-focus-visible:focus-ring",
+    // 설정 시안의 고른 칩은 테두리(주 행동 「저장하고 확인」만 잉크 채움), 카드 시안은 채움.
+    surface === "settings"
+      ? "peer-checked:border-ink peer-checked:bg-surface peer-checked:text-ink"
+      : "peer-checked:border-primary peer-checked:bg-primary peer-checked:text-on-primary"
+  );
+  const fieldLabel = surface === "settings" ? "text-meta font-semibold text-ink" : "sr-only";
   const showChips = presets.length > 0 || allowCustomAddress;
   const saveHint = save.isError && saveErrorHint ? saveErrorHint(save.error, target?.baseUrl ?? "") : null;
 
@@ -214,7 +225,9 @@ export function TeamKeyForm({
     >
       {showChips ? (
         <fieldset className="flex min-w-0 flex-wrap gap-2">
-          <legend className="sr-only">API 제공자</legend>
+          <legend className={cn(fieldLabel, surface === "settings" && "mb-1 w-full")}>
+            {surface === "settings" ? "provider" : "API 제공자"}
+          </legend>
           {hasCurrentChip && (
             <label className="press relative inline-flex min-w-0 max-w-full" title={link.endpointLabel}>
               <input
@@ -302,7 +315,7 @@ export function TeamKeyForm({
           </p>
         </div>
       )}
-      <label htmlFor={inputId} className={custom ? "text-meta font-semibold text-ink" : "sr-only"}>
+      <label htmlFor={inputId} className={fieldLabel}>
         API 키
       </label>
       <Input
