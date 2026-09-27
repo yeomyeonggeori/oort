@@ -43,7 +43,9 @@ team_of() {
 verify_bundle() {
   app="$1"; require_signed="$2"
   sidecar="$app/Contents/MacOS/momo-workd"
-  main="$app/Contents/MacOS/oort"
+  exe="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist" 2>/dev/null || true)"
+  [ -n "$exe" ] || die "bundle Info.plist has no CFBundleExecutable"
+  main="$app/Contents/MacOS/$exe"
   [ -d "$app" ] || die "no bundle at $app"
   [ -f "$sidecar" ] || die "bundle has no Contents/MacOS/momo-workd"
   [ -x "$sidecar" ] || die "Contents/MacOS/momo-workd is not executable"
@@ -95,7 +97,7 @@ case "${1:-}" in
 PLAN
     if [ -d "$app" ]; then
       echo "[dry-run] current bundle:"
-      verify_bundle "$app" 0 || true
+      ( verify_bundle "$app" 0 ) || true
     fi
     exit 0
     ;;
