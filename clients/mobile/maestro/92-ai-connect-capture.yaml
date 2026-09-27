@@ -1,0 +1,96 @@
+appId: app.momo.ios
+name: 92-ai-connect-capture
+---
+# 92-ai-connect-capture — AI 연결 카드의 **사람이 만드는** 상태 셋 (#2945).
+#
+# `-momoMeasure AI-CONNECT-CARD` 표면 위에서 친다(90번과 같은 방식, `launchApp` 없음):
+#   1. 입력창을 누르면 자판이 오르고 카드 몸이 접힌다(머리·닫기만 남는다).
+#   2. 키 모양 글을 보내면 전송이 막히고 입력창 위에 이유가 선다. 자판이 내려가고
+#      안내가 선 동안 카드는 숨는다(R3-B1). 입력창을 누르고 키를 지운다.
+#   3. 자판을 내리고 「연결 확인」을 누른다. 하네스에는 서버가 없으므로 결과 줄은
+#      오류 갈래다(실패 제자리 표시의 사진).
+#   4. 카드 몸을 올려 큰 글씨에서 버튼까지 보이게 한다.
+#
+#   xcrun simctl launch booted app.momo.ios --args \
+#     -momoMeasure AI-CONNECT-CARD -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro test clients/mobile/maestro/92-ai-connect-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: "ai-connect-card"
+    timeout: 60000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- tapOn:
+    id: "composer-input"
+- runFlow:
+    when:
+      visible: "지금 안 함"
+    commands:
+      - tapOn: "지금 안 함"
+- tapOn:
+    id: "composer-input"
+- extendedWaitUntil:
+    visible:
+      id: "ai-connect-card-folded"
+    timeout: 10000
+- takeScreenshot: ai-connect-folded
+- inputText: "sk-ant-api03-Zx9Qw7Er5Ty3Ui1Op0As8Df6Gh4Jk2Lz"
+- tapOn:
+    id: "composer-send"
+- extendedWaitUntil:
+    visible:
+      id: "composer-key-blocked"
+    timeout: 10000
+- takeScreenshot: ai-connect-key-blocked
+# 막으면 자판이 내려가고 안내가 선 동안 카드는 숨는다(R3-B1).
+- extendedWaitUntil:
+    notVisible:
+      id: "ai-connect-card"
+    timeout: 10000
+- takeScreenshot: ai-connect-key-hidden-card
+# 고치러 입력창을 누르면 안내를 거두고, 키를 지운 뒤 접힌 줄로 자판을 내린다.
+- tapOn:
+    id: "composer-input"
+- eraseText: 80
+- runFlow:
+    when:
+      visible:
+        id: "ai-connect-card-folded"
+    commands:
+      - tapOn:
+          id: "ai-connect-card-folded"
+- runFlow:
+    when:
+      notVisible:
+        id: "ai-connect-card-body"
+    commands:
+      - hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "ai-connect-card-body"
+    timeout: 10000
+# 카드 몸은 제 ScrollView 안에서 움직인다. maestro 의 「보임」은 ScrollView 의
+# 잘림을 모르므로(잘린 버튼 좌표를 누르면 아래 입력창이 눌려 자판이 오른다) 몸을
+# 직접 끌어 올린다.
+- repeat:
+    times: 3
+    commands:
+      - swipe:
+          from:
+            id: "ai-connect-card-scroll"
+          direction: UP
+- tapOn:
+    id: "ai-connect-card-team-check"
+# 결과 줄은 몸 스크롤의 아래에 설 수 있다(큰 글씨 SE 의 몸 창은 좁다) — 먼저 끌어
+# 올리고 기다린다.
+- repeat:
+    times: 3
+    commands:
+      - swipe:
+          from:
+            id: "ai-connect-card-scroll"
+          direction: UP
+- extendedWaitUntil:
+    visible:
+      id: "ai-connect-card-team-result"
+    timeout: 30000
+- takeScreenshot: ai-connect-check-result

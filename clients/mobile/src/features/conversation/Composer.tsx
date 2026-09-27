@@ -13,10 +13,23 @@ import {
   type ComposerPlaceholderClause,
 } from '@momo/core/features/chat/composerCopy';
 import {attachParticle, type RecipientKind} from '@momo/core/lib/koreanParticle';
+import {
+  containsSecretKey,
+  SECRET_KEY_BLOCK_COPY,
+} from '@momo/core/features/chat/secretKey';
+import type {Command, LocalCardArgs} from '@momo/core/features/commands/registry';
+import {
+  parseSlashCommand,
+  slashCandidates,
+  slashCommandById,
+  type SlashCandidate,
+} from '@momo/core/features/commands/slash';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
+  AccessibilityInfo,
   Image,
+  Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -29,10 +42,12 @@ import {
   type TextInputSelectionChangeEventData,
   type TextLayoutEventData,
 } from 'react-native';
-import {font, line, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {usePalette, useStyles} from '../../design/theme';
 import {GlassSurface} from '../../design/glass';
-import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
+import {CONV_ICONS, CONV_ICON_SIZE, HOME_ICONS} from '../../design/icons';
+import {CARD_ICONS} from '../../design/icons/cardIcons';
+import {isPhoneSlashRow} from '../aiConnect/AiConnectCard';
 import {CONV} from './convDesign';
 import {clearDraft, readDraft, saveDraft} from './drafts';
 import {
@@ -579,6 +594,35 @@ const MENTION_AGENT_KIND = '에이전트';
  * 상자는 거기에 동적 타입 배수가 곱해진 것이므로(`RCTAttributedTextUtils`), 큰
  * 글자에서는 그 값이 44 를 넘고 그때부터 행이 그것이다.
  */
+/**
+ * 슬래시 목록 한 행의 높이 (design-review #2945 H3). 두 줄(이름 `line.label` +
+ * 설명 `line.meta`)과 위아래 여백이 글자 배수를 따라 자라고, 엄지의 바닥은 44다.
+ */
+export function slashRowHeight(fontScale: number): number {
+  return Math.max(
+    TOUCH_TARGET,
+    Math.ceil((line.label + line.meta) * fontScale) + space.xs * 2,
+  );
+}
+
+/** 슬래시 목록 머리(「명령」)의 높이. 행 예산 밖에 선다. */
+export function slashHeadHeight(fontScale: number): number {
+  return Math.ceil(line.meta * fontScale) + space.sm + space.xs;
+}
+
+/**
+ * 슬래시 목록이 스크롤하는 칸의 상한 — **온전한 행 단위**다. 멘션 시트와 같은
+ * 열 예산에서 머리를 먼저 빼고, 남은 자리를 행 높이로 내림한다(반 행은 이름의
+ * 이마만 보여 준다 — 멘션 시트 상한의 그 규칙). 바닥은 두 행.
+ */
+export function slashListMaxHeight(fontScale: number, windowHeight: number): number {
+  const row = slashRowHeight(fontScale);
+  const byColumn =
+    mentionSheetMaxHeight(fontScale, windowHeight) - slashHeadHeight(fontScale);
+  const rows = Math.max(MENTION_MIN_ROWS, Math.min(MENTION_MAX_ROWS, Math.floor(byColumn / row)));
+  return rows * row;
+}
+
 export function mentionRowHeight(fontScale: number): number {
   return Math.max(TOUCH_TARGET, line.head * fontScale);
 }
@@ -768,6 +812,26 @@ export interface ComposerSendOptions {
   attachments: MessageAttachment[];
 }
 
+/**
+ * 키를 붙여 넣어 전송을 막았을 때 입력창 위에 서는 문장 (#2945 GC-4).
+ *
+ * 머리는 코어 `SECRET_KEY_BLOCK_COPY.lead` 그대로다. 끝 문장은 폰 고유다: 코어의
+ * 끝 문장은 「카드의 입력 칸을 쓰라」인데 폰 카드에는 입력 칸이 없다(Q5). 없는
+ * 칸을 권하지 않고, 키를 넣는 자리(맥·웹)를 말한다.
+ */
+export const PHONE_SECRET_KEY_BLOCK_COPY = {
+  lead: SECRET_KEY_BLOCK_COPY.lead,
+  tail: '키는 맥이나 웹의 AI 연결 칸에 넣어요. 저장만 되고 다시 보이지 않아요.',
+} as const;
+
+/** 슬래시 목록의 머리(시안 `.menu .mh`). */
+export const SLASH_LIST_HEAD = '명령';
+/** 첫 줄의 낭독 힌트 — 보내기가 이 줄을 고른다. */
+const SLASH_DEFAULT_HINT = '보내기를 누르면 이 명령을 실행해요';
+/** 시안 `.mi .mic` 28pt 상자와 그 안 글리프. */
+const SLASH_ICON_BOX = 28;
+const SLASH_GLYPH = 16;
+
 export function Composer({
   channelLabel,
   recipient,
@@ -784,6 +848,8 @@ export function Composer({
   placeholder,
   sendLabel = '보내기',
   inputRef: externalInputRef,
+  onSlashCommand,
+  onKeyBlockedChange,
 }: {
   channelLabel: string;
   /**
@@ -868,6 +934,20 @@ export function Composer({
    * tapped by a script, so a harness that needed one could not run at all).
    */
   inputRef?: React.MutableRefObject<TextInput | null>;
+  /**
+   * 맨 앞 `/` 명령을 받는다 (#2945 GC-4). 있으면 `/`가 명령 목록을 열고, 알려진
+   * 명령으로만 된 본문은 **보내지 않고** 이것을 부른다. 없으면(스레드) `/`는
+   * 평문이다 — 웹 스레드 컴포저와 같다.
+   *
+   * 키 붙여넣기 차단은 이 prop과 무관하게 모든 컴포저에서 선다.
+   */
+  onSlashCommand?: (command: Command, args: LocalCardArgs) => void;
+  /**
+   * 키 붙여넣기 차단 안내가 서고 거둘 때 알린다 (design-review #2945 R3-B1). 대화
+   * 화면은 안내가 선 동안 AI 연결 카드를 접는다 — 큰 글씨 SE 에서 안내·입력창·
+   * 카드가 한 화면을 넘어 카드 머리가 밀려 나가지 않게.
+   */
+  onKeyBlockedChange?: (blocked: boolean) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
@@ -904,6 +984,20 @@ export function Composer({
   // 티켓(시트의 **상한**)의 것이 아니다.
   const [caret, setCaret] = useState(0);
   const [mentionOpen, setMentionOpen] = useState(true);
+  // 슬래시 목록을 닫은 뒤(골랐거나 보냈다) 같은 글자에서 다시 열리지 않게 한다.
+  // 다음 키스트로크가 다시 연다 — 멘션과 같은 규율이다.
+  const [slashOpen, setSlashOpen] = useState(true);
+  // 키 모양을 보고 전송을 막았다. 다음 키스트로크가 지운다.
+  const [keyBlocked, setKeyBlockedState] = useState(false);
+  const keyBlockedRef = useRef(false);
+  const onKeyBlockedChangeRef = useRef(onKeyBlockedChange);
+  onKeyBlockedChangeRef.current = onKeyBlockedChange;
+  const setKeyBlocked = useCallback((next: boolean) => {
+    if (keyBlockedRef.current === next) return;
+    keyBlockedRef.current = next;
+    setKeyBlockedState(next);
+    onKeyBlockedChangeRef.current?.(next);
+  }, []);
   const [attachmentPickerOpen, setAttachmentPickerOpen] = useState(false);
   const ownInputRef = useRef<TextInput | null>(null);
   const inputRef = externalInputRef ?? ownInputRef;
@@ -995,7 +1089,32 @@ export function Composer({
   // one commit after the keystroke that opened it, which is the same lateness
   // this file bans for `value` — and the candidate list riding one keystroke
   // behind is how a person accepts the wrong member.
-  const query = mentionOpen ? mentionQueryAt(text, caret) : null;
+  // `/`는 **메시지 맨 앞**에서만 연다(brief §3.1). 캐럿이 아니라 글 전체를 보는
+  // 이유: 앵커가 0번 글자 하나뿐이라 캐럿이 어디 있든 답이 같고, 초안을 복원한
+  // 콜드 스타트에서 캐럿이 0에 머무는 iOS 사정(위 `caret` 주석)을 타지 않는다.
+  const slashQuery =
+    onSlashCommand !== undefined &&
+    slashOpen &&
+    text.startsWith('/') &&
+    !text.includes('\n')
+      ? text.slice(1)
+      : null;
+  const slashRows = useMemo(
+    () =>
+      slashQuery === null
+        ? []
+        : slashCandidates(slashQuery, undefined, undefined, {
+            cardAvailable: true,
+          }).filter(isPhoneSlashRow),
+    [slashQuery],
+  );
+  const showSlash = slashRows.length > 0;
+  // 글리프와 그 상자는 글자를 따라 자란다(design-review #2945 H2), 2배에서 멈춘다.
+  const glyphScale = Math.min(Math.max(fontScale, 1), 2);
+  const slashBox = Math.round(SLASH_ICON_BOX * glyphScale);
+  const slashGlyph = Math.round(SLASH_GLYPH * glyphScale);
+
+  const query = mentionOpen && !showSlash ? mentionQueryAt(text, caret) : null;
   const candidates = useMemo(
     () => (query ? matchMembers(directory.members, query.text) : []),
     [query, directory.members],
@@ -1019,6 +1138,8 @@ export function Composer({
     currentTextRef.current = next;
     setText(next);
     setMentionOpen(true);
+    setSlashOpen(true);
+    setKeyBlocked(false);
     // LAST, and on a separate rail. Everything above is the value; this is a
     // signal about the person, and it must never be able to reorder itself in
     // front of the write (see the header's 「작성 중」 note).
@@ -1031,7 +1152,11 @@ export function Composer({
       saveDraft(draftKeyRef.current, next);
     }
     onTypingRef.current?.();
-  }, []);
+  }, [setKeyBlocked]);
+
+  // 안내를 읽은 뒤 고치러 돌아왔다 — 자판이 다시 오르면 안내가 한 화면을 넘는다
+  // (R3-B1). 안내는 alert 로 이미 읽혔고, 키가 남아 있으면 다음 전송이 다시 막는다.
+  const onInputFocus = useCallback(() => setKeyBlocked(false), [setKeyBlocked]);
 
   const onSelectionChange = useCallback(
     (event: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
@@ -1065,9 +1190,73 @@ export function Composer({
     [query, text, caret],
   );
 
+  /** 명령을 실행하고 입력창을 비운다. 명령은 메시지가 아니라 초안에도 안 남는다. */
+  const runCommand = useCallback(
+    (command: Command, args: LocalCardArgs) => {
+      currentTextRef.current = '';
+      setText('');
+      setCaret(0);
+      setSlashOpen(false);
+      setMentionOpen(false);
+      setKeyBlocked(false);
+      if (draftKeyRef.current !== undefined) {
+        clearDraft(draftKeyRef.current);
+      }
+      onSlashCommand?.(command, args);
+    },
+    [onSlashCommand, setKeyBlocked],
+  );
+
+  const acceptSlash = useCallback(
+    (row: SlashCandidate) => {
+      const command = slashCommandById(row.commandId);
+      if (command === null) return;
+      runCommand(command, row.args);
+    },
+    [runCommand],
+  );
+
+  const hasAttachmentDrafts = attachmentSurface.drafts.length > 0;
+  // 본문 전체가 알려진 명령 하나인가. 목록을 닫고 ↑를 눌러도 `/연결`은 메시지가
+  // 되지 않는다(slash.ts `parseSlashCommand` 머리말).
+  const parsedCommand = useMemo(
+    () =>
+      onSlashCommand === undefined || hasAttachmentDrafts
+        ? null
+        : parseSlashCommand(text),
+    [onSlashCommand, hasAttachmentDrafts, text],
+  );
+
   const submit = useCallback(() => {
     const body = text.trim();
     const hasAttachments = attachmentSurface.drafts.length > 0;
+    if (parsedCommand !== null) {
+      runCommand(parsedCommand.command, parsedCommand.args);
+      return;
+    }
+    // 키는 채팅에 실리지 않는다(brief §3.4·§5). 글은 **지우지 않는다**: 사람이
+    // 키를 빼고 나머지를 보낼 수 있어야 한다. 초안 저장소에는 이미 없다 —
+    // `drafts.ts` `saveDraft`가 키 모양이 든 글을 적지 않는다.
+    if (containsSecretKey(body)) {
+      setKeyBlocked(true);
+      // iOS 에는 live region 이 없다(design-review #2945 R4-H1). 막을 때마다 — 이미
+      // 안내가 서 있어도 — 소리로 알린다. 웹은 안내를 새로 붙여 다시 읽힌다.
+      AccessibilityInfo.announceForAccessibility(
+        `${PHONE_SECRET_KEY_BLOCK_COPY.lead} ${PHONE_SECRET_KEY_BLOCK_COPY.tail}`,
+      );
+      // 자판을 내린다(design-review #2945 R3-B1): 큰 글씨 SE 에서 자판 + 세 줄
+      // 입력창 + 안내가 한 화면을 넘어 안내의 첫 문장이 잘린다. 읽을 자리를 먼저
+      // 준다. 고치러 입력창을 누르면 안내는 거둔다(아래 `onInputFocus`).
+      Keyboard.dismiss();
+      return;
+    }
+    // 목록이 열린 채 ↑를 누르면 강조된 첫 줄을 고른다 — 웹 ↵와 같다(design-review
+    // #2945 M3). 「/연」 같은 반쯤 친 명령이 평문으로 채널에 나가지 않는다. 키 판정
+    // **뒤**다(R2-L1): 명령 앞머리 뒤에 붙은 키도 이유를 말하고 멈춘다.
+    if (showSlash) {
+      acceptSlash(slashRows[0]);
+      return;
+    }
     if (
       offline === true ||
       attachmentBlock !== null ||
@@ -1098,20 +1287,31 @@ export function Composer({
     }
     onSend(body, {attachments: sent.attachments});
   }, [
+    setKeyBlocked,
     text,
     onSend,
     offline,
     attachmentBlock,
     attachmentKey,
     attachmentSurface.drafts.length,
+    parsedCommand,
+    runCommand,
+    showSlash,
+    slashRows,
+    acceptSlash,
   ]);
 
   // 보낼 수 있는가 — 두 조건이고 둘은 다른 종류다. 하나는 「보낼 것이 있는가」,
   // 하나는 「지금 나갈 수 있는가」다.
+  //
+  // 명령은 네트워크를 타지 않으므로(이 화면에 카드를 여는 일이다) 오프라인에서도
+  // 누를 수 있다.
   const canSend =
-    offline !== true &&
-    attachmentBlock === null &&
-    (text.trim() !== '' || attachmentSurface.drafts.length > 0);
+    parsedCommand !== null ||
+    showSlash ||
+    (offline !== true &&
+      attachmentBlock === null &&
+      (text.trim() !== '' || attachmentSurface.drafts.length > 0));
   const canAttach =
     stableAttachmentTarget !== null &&
     offline !== true &&
@@ -1173,6 +1373,54 @@ export function Composer({
 
   return (
     <View style={styles.root}>
+      {showSlash ? (
+        <View style={styles.mentions} testID="slash-list">
+          <Text style={styles.slashHead} accessibilityRole="header">
+            {SLASH_LIST_HEAD}
+          </Text>
+          <ScrollView
+            style={{maxHeight: slashListMaxHeight(fontScale, windowHeight)}}
+            keyboardShouldPersistTaps="always"
+            showsVerticalScrollIndicator>
+            {slashRows.map((row, index) => (
+              <Pressable
+                key={row.id}
+                accessibilityRole="button"
+                accessibilityLabel={`${row.label} ${row.hint}`}
+                onPress={() => acceptSlash(row)}
+                accessibilityHint={index === 0 ? SLASH_DEFAULT_HINT : undefined}
+                style={({pressed}) => [
+                  styles.slashRow,
+                  {minHeight: slashRowHeight(fontScale)},
+                  // 첫 줄이 기본값이다(시안 `.mi.on`) — 보내기가 이 줄을 고른다.
+                  index === 0 && styles.slashRowOn,
+                  pressed && styles.pressed,
+                ]}
+                testID="slash-option">
+                <View style={[styles.slashIcon, {width: slashBox, height: slashBox}]}>
+                  <Image
+                    source={
+                      row.icon === 'credentials' ? HOME_ICONS.lock : CARD_ICONS.plug
+                    }
+                    style={{width: slashGlyph, height: slashGlyph, tintColor: palette.icon}}
+                  />
+                </View>
+                <View style={styles.slashText}>
+                  <Text style={styles.slashLabel} numberOfLines={1}>
+                    <Text style={styles.slashMatched}>
+                      {row.label.slice(0, row.matched)}
+                    </Text>
+                    {row.label.slice(row.matched)}
+                  </Text>
+                  <Text style={styles.slashHint} numberOfLines={1}>
+                    {row.hint}
+                  </Text>
+                </View>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
       {showMentions ? (
         <View
           style={[styles.mentions, {maxHeight: mentionsMaxHeight}]}
@@ -1273,6 +1521,18 @@ export function Composer({
             'subject',
           )} 답합니다.`}
         </Text>
+      ) : null}
+
+      {keyBlocked ? (
+        <View
+          style={styles.keyBlock}
+          accessibilityLiveRegion="assertive"
+          accessibilityRole="alert"
+          testID="composer-key-blocked">
+          <Text style={styles.keyBlockText} lineBreakStrategyIOS="hangul-word">
+            {`${PHONE_SECRET_KEY_BLOCK_COPY.lead} ${PHONE_SECRET_KEY_BLOCK_COPY.tail}`}
+          </Text>
+        </View>
       ) : null}
 
       {offline ? (
@@ -1376,6 +1636,7 @@ export function Composer({
           value={text}
           onChangeText={onChangeText}
           onSelectionChange={onSelectionChange}
+          onFocus={onInputFocus}
           // 문장은 코어가 든다 (#1384). 이 두 줄은 웹 `chat/Composer.tsx` 와
           // **같은 문자열을 각자 짓고** 있었다: 값이 같아서 안 보였을 뿐,
           // 한쪽을 고치는 날 갈라진다. 오프라인 문장이 이미 걸어 둔 길이다.
@@ -1771,4 +2032,54 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     color: color.text,
   },
   pressed: {backgroundColor: color.surfacePressed},
+  // ---- 슬래시 목록 (#2945, 시안 `.menu`·`.mi`) ------------------------------
+  slashHead: {
+    paddingHorizontal: SAFE_GUTTER,
+    paddingTop: space.sm,
+    paddingBottom: space.xs,
+    fontSize: font.meta,
+    fontWeight: '700',
+    color: color.textMuted,
+  },
+  slashRow: {
+    minHeight: TOUCH_TARGET,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    paddingHorizontal: SAFE_GUTTER,
+    paddingVertical: space.xs,
+  },
+  slashRowOn: {backgroundColor: color.surfacePressed},
+  slashIcon: {
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: color.surfaceMuted,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.border,
+  },
+  slashText: {flex: 1, minWidth: 0},
+  slashLabel: {fontSize: font.label, lineHeight: line.label, fontWeight: '600', color: color.text},
+  slashMatched: {color: color.accentText},
+  slashHint: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
+  // ---- 키 붙여넣기 차단 (#2945, 시안 `.inlinewarn`) ------------------------
+  // 앰버다: 이 팔레트의 `warn`은 「사람이 할 일이 남아 있다 · 여기를 보라」이고,
+  // 여기서 사람이 할 일(키를 빼고 보내기)이 실제로 남아 있다. 위 `offline`이
+  // 앰버를 뺀 이유(아무도 부르지 않는 차단)와 반대 경우다.
+  keyBlock: {
+    marginHorizontal: SAFE_GUTTER,
+    marginTop: space.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: color.warnBorder,
+    backgroundColor: color.warnSurface,
+  },
+  keyBlockText: {
+    fontSize: font.meta,
+    lineHeight: line.meta,
+    fontWeight: '500',
+    color: color.text,
+  },
 });
