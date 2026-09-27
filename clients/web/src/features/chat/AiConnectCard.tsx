@@ -48,6 +48,16 @@ import {
   readProbeFixture,
 } from "@/features/settings/aiMyAccountsModel";
 import { useSubscriptionEntryState } from "@/features/welcome/SubscriptionAgentEntry";
+import { useOffline } from "@/features/common/useOffline";
+import {
+  COMMAND_SUGGEST_ONLY_ME,
+  COMMAND_SUGGEST_TEAM_CLOSE,
+  COMMAND_SUGGEST_TEAM_OPEN,
+  commandSuggestHead,
+  commandSuggestOneLine,
+  commandSuggestViewer,
+  type CommandSuggestCard,
+} from "@momo/core/features/timeline/commandSuggest";
 import { useLocalHarnessWatch } from "@/features/welcome/useLocalHarnessWatch";
 import {
   HarnessLoginDialog,
@@ -386,6 +396,159 @@ export function AiConnectCard({
           />
         )}
       </div>
+    </section>
+  );
+}
+
+// ---- 에이전트가 제안한 카드 (#2948 GC-7, ADR-0186 증보 G3·G4, 시안 ③) ------------
+//
+// 에이전트 메시지 props `momo.command_suggest(ai.connect)`를 보는 사람별로 그린다.
+// 몸은 위 로컬 카드와 **같은 절**(`MineSection`·`TeamSection`)이고 머리만 다르다:
+// 「{에이전트}가 제안했어요 · 나에게만 조작돼요」. 점선이 아니라 실선이다 — 이
+// 카드는 로컬 도구 창이 아니라 실제 메시지에 붙은 것이다(시안 `.ccard` vs `.local`).
+//
+// props는 의도만 싣는다(G3). 이 컴포넌트는 props에서 상태를 읽지 않는다: 알약은
+// 설정과 같은 훅(구독 감지)·같은 쿼리(`TEAM_QUERY_KEY`)가 준다. 그래서 로그인하면
+// props 패치 없이 이 자리에서 바뀐다.
+//
+// 타임라인 행이다: 마운트해도 초점을 가져가거나 스크롤하지 않는다(virtuoso가 행을
+// 다시 세울 때마다 컴포저 초점을 빼앗게 된다). × 도 없다 — 메시지는 닫는 것이 아니다.
+
+/** 운영자 판정 한 번의 신선도. 제안 행이 여러 개 떠도 한 요청을 나눠 읽는다. */
+const OPERATOR_STALE_MS = 60_000;
+
+/**
+ * 제안 카드 자리. `viewerMemberId`가 없으면(읽기 전용 표면) 누구도 대상이 아니다.
+ *
+ * 운영자는 **기존 provider_link 응답**으로 안다(200 운영자, 403 아님 — G4). 같은
+ * 쿼리 키라 설정·로컬 카드와 한 캐시를 나눈다. 대상 본인에게는 묻지 않는다: 본인
+ * 카드는 팀 절이 스스로 같은 쿼리를 읽는다.
+ */
+export function AiConnectSuggestion({
+  card,
+  viewerMemberId,
+}: {
+  card: CommandSuggestCard;
+  viewerMemberId: string | undefined;
+}) {
+  const isTarget = commandSuggestViewer(card, viewerMemberId, false) === "target";
+  const operatorQuery = useQuery({
+    queryKey: TEAM_QUERY_KEY,
+    queryFn: fetchProviderLink,
+    retry: false,
+    staleTime: OPERATOR_STALE_MS,
+    enabled: card.shape === "ok" && !isTarget,
+  });
+  const viewer = commandSuggestViewer(card, viewerMemberId, operatorQuery.isSuccess);
+  if (viewer === "target") return <SuggestedCard card={card} />;
+  return <SuggestionLine card={card} operator={viewer === "operator"} />;
+}
+
+/** 남에게 보이는 한 줄(시안 `.oneline`). 운영자면 「팀 연결 보기」가 팀 줄만 편다. */
+function SuggestionLine({ card, operator }: { card: CommandSuggestCard; operator: boolean }) {
+  const [open, setOpen] = useState(false);
+  const offline = useOffline();
+  const panelId = useId();
+  const escapeFormRef = useRef<(() => boolean) | null>(null);
+  return (
+    <div className="ai-card mt-2 flex min-w-0 flex-col gap-2" data-testid="ai-suggest" data-viewer={operator ? "operator" : "other"}>
+      <p
+        className="flex min-w-0 items-center gap-2 rounded-lg bg-sheet px-3 py-2 text-meta text-ink-muted"
+        data-testid="ai-suggest-line"
+      >
+        <Plug className="size-4 shrink-0 text-icon" aria-hidden="true" />
+        <span className="min-w-0 flex-1 break-keep">{commandSuggestOneLine(card)}</span>
+        {operator && (
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-controls={panelId}
+            onClick={() => setOpen((value) => !value)}
+            className="tap-target press shrink-0 rounded-md px-1 text-meta font-semibold text-agent hover:underline focus-visible:focus-ring"
+            data-testid="ai-suggest-team-open"
+          >
+            {open ? COMMAND_SUGGEST_TEAM_CLOSE : COMMAND_SUGGEST_TEAM_OPEN}
+          </button>
+        )}
+      </p>
+      {operator && open && (
+        <div
+          id={panelId}
+          className="min-w-0 overflow-hidden rounded-2xl border border-line bg-surface shadow-sm"
+          data-testid="ai-suggest-team-panel"
+          onKeyDown={(event) => {
+            if (event.key !== "Escape" || event.defaultPrevented) return;
+            if (escapeFormRef.current?.()) {
+              event.preventDefault();
+              event.stopPropagation();
+            }
+          }}
+        >
+          <TeamSection offline={offline} autoOpenForm={false} escapeFormRef={escapeFormRef} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 대상 본인의 조작 카드. 로컬 카드와 같은 절, 머리만 제안 머리. */
+function SuggestedCard({ card }: { card: CommandSuggestCard }) {
+  const navigate = useNavigate();
+  const headingId = useId();
+  const offline = useOffline();
+  const escapeFormRef = useRef<(() => boolean) | null>(null);
+  const focus = card.focus;
+  const showMine = focus === null || focus === "mine" || focus === "claude" || focus === "codex";
+  const showTeam = focus === null || focus === "team";
+  const initial = [...card.agentName.trim()][0]?.toUpperCase() ?? "";
+
+  return (
+    <section
+      aria-labelledby={headingId}
+      className="ai-card mt-2 min-w-0 overflow-hidden rounded-2xl border border-line bg-surface shadow-sm"
+      data-testid="ai-suggest"
+      data-viewer="target"
+      data-focus={focus ?? "all"}
+      onKeyDown={(event) => {
+        // 키 칸이 열려 있을 때만 Esc를 가져간다(폼 닫기). 그 밖의 Esc는 타임라인 것이다.
+        if (event.key !== "Escape" || event.defaultPrevented) return;
+        if (escapeFormRef.current?.()) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+    >
+      <div className="flex min-w-0 items-center gap-2 border-b border-line px-3 py-2">
+        <span
+          aria-hidden="true"
+          className="grid size-5 shrink-0 place-items-center rounded-sm bg-agent-soft text-timestamp font-bold text-agent"
+        >
+          {initial}
+        </span>
+        <h3 id={headingId} className="min-w-0 shrink truncate text-meta font-semibold text-agent">
+          {commandSuggestHead(card)}
+        </h3>
+        <span
+          className="inline-flex min-w-0 shrink items-center gap-1 truncate rounded-full bg-muted-soft px-2 py-px text-timestamp font-semibold text-ink-muted"
+          data-testid="ai-suggest-only-me"
+        >
+          <Eye className="size-3 shrink-0" aria-hidden="true" />
+          {COMMAND_SUGGEST_ONLY_ME}
+        </span>
+        <span className="flex-1" />
+        <button
+          type="button"
+          onClick={() => navigate(AI_CONNECT_SETTINGS_PATH)}
+          aria-label="설정에서 열기"
+          className="tap-target press inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-meta text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
+          data-testid="ai-suggest-settings"
+        >
+          <ExternalLink className="size-3 shrink-0" aria-hidden="true" />
+          <span className="ai-card-wide">설정에서 열기</span>
+        </button>
+      </div>
+      {showMine && <MineSection only={focus === "claude" || focus === "codex" ? focus : null} />}
+      {showTeam && <TeamSection offline={offline} autoOpenForm={false} escapeFormRef={escapeFormRef} />}
     </section>
   );
 }
