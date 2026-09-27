@@ -2829,23 +2829,33 @@ export function Surface({name}: {name: string}): React.JSX.Element {
               ? '폰 로컬 카드 — 운영자 (#2945)'
               : '폰 로컬 카드 — 비운영자 (#2945)'
           }>
-          <View style={styles.aiConnectFill}>
-            <MessageRow
-              message={AI_CONNECT_ASK}
-              startsGroup
-              directory={DIRECTORY}
-              chips={CHIPS}
-              nowMs={NOW}
-            />
-          </View>
-          <AiConnectCard line={null} offline={false} onClose={() => {}} />
-          <Composer
-            recipient="place"
-            channelLabel="에이전트-실험"
-            directory={DIRECTORY}
-            draftKey="measure:ai-connect-card"
-            onSend={() => {}}
-            onSlashCommand={() => {}}
+          {/* 앱과 같은 `ConversationLayout` — 자판이 오르면 카드와 입력창이 함께
+              들린다(자판 위 접힘 캡처, maestro 92). */}
+          <ConversationLayout
+            list={
+              <View style={styles.aiConnectFill}>
+                <MessageRow
+                  message={AI_CONNECT_ASK}
+                  startsGroup
+                  directory={DIRECTORY}
+                  chips={CHIPS}
+                  nowMs={NOW}
+                />
+              </View>
+            }
+            composer={
+              <>
+                <AiConnectCard line={null} offline={false} onClose={() => {}} />
+                <Composer
+                  recipient="place"
+                  channelLabel="에이전트-실험"
+                  directory={DIRECTORY}
+                  draftKey="measure:ai-connect-card"
+                  onSend={() => {}}
+                  onSlashCommand={() => {}}
+                />
+              </>
+            }
           />
         </Frame>
       );
