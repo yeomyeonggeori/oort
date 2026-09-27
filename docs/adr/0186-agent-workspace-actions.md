@@ -213,6 +213,7 @@ v1의 모든 워크스페이스 행동은 `approval`이다. 「관리자 위임�
   - **받지 않는 인자**: `label`·`forMemberId`·`channelId`·`props`. 이 키들이 오면 `InvalidArguments`(unknown key 거절)다. 에이전트가 제목 문구·대상·자리를 정할 길을 인자 표면에서 없앤다.
 - **server worker(agent-worker)**: worker `CATALOG`(`momo-agent/src/tools.rs`)에 **`card_suggest { commandId, args, body }`**를 더한다. 채널·스레드는 그 run의 트리거 메시지 자리, 멱등 키는 `(run_id, tool_call_id)`에서 결정적으로 만든다. 검증·props 조립·label 파생은 hosted와 **같은 함수**(`momo-agent`에 둔다)를 부른다.
   - worker 도구의 승인 기본값(`requires_approval`, ADR-0114 D5)은 이 도구에 한해 **요구하지 않음**이다. 서버 상태를 바꾸지 않고(D3 risk `none`) 사람이 누를 때만 그 사람의 기기·권한으로 동작하므로, 제안 자체를 승인 카드로 막으면 「승인해야 카드를 볼 수 있는 카드」가 된다. 이 예외는 `card_suggest` 이름 하나에 묶고 grants로 넓히지 않는다.
+  - **ADR-0114 D5 예외, planner 결정 2026-09-27**(#2952 검수): 서버 상태를 바꾸지 않고, 에이전트의 일반 메시지 게시와 같은 위험 등급이라 수용.
 - 두 종류를 **같은 배치에서** 연다(GC-6). 한쪽만 열면 「어떤 에이전트는 카드를 주고 어떤 에이전트는 설정 경로만 말한다」가 된다.
 - **쓰기 경로**: 기존 `agent_tenant_tx`(`SET LOCAL app.workspace_id`) 안에서 `send_message_in_tx`(channel_seq 증가 + message INSERT + outbox INSERT 단일 tx). 승인 행 0, run park 0(run 상태를 바꾸지 않는다), props 패치 0, **새 outbox 생산자 0**, 새 테이블·컬럼 0. D7은 그대로다.
 - **에이전트는 실행하지 않는다.** 이 도구는 PTY·provider_link 라우트·설정 API 어느 것도 부르지 않는다. 로그인·키 저장·연결 확인은 사람이 카드를 누를 때 그 사람의 클라이언트가 기존 경로로 한다.
@@ -220,14 +221,15 @@ v1의 모든 워크스페이스 행동은 `approval`이다. 「관리자 위임�
 ### G2. 허용 command_id — 서버 허용목록 + 레지스트리 `agentSuggestable` 드리프트 가드
 - 서버 정본: `momo-agent`에 `SUGGESTABLE_COMMANDS: &[SuggestableCommand]`(id · args 스키마 · label 파생표)를 둔다. **v1 = `ai.connect` 하나.** 허용목록 밖 `commandId`는 `InvalidArguments`.
 - `ai.connect`의 `args`:
-  - `harness` ∈ `claude | codex | grok | team_key`, `scope` ∈ `mine | team`. 둘 다 선택이고, 둘 다 없으면 카드 전체(두 절)를 연다.
-  - 짝 규칙: `team_key` ⇔ `team`, `claude | codex | grok` ⇔ `mine`. 한쪽만 주면 서버가 짝을 채우고, 어긋나면 `InvalidArguments`.
+  - `harness` ∈ `claude | codex | team_key`, `scope` ∈ `mine | team`. 둘 다 선택이고, 둘 다 없으면 카드 전체(두 절)를 연다.
+  - `grok`은 v1 enum에 **없다**(ADR-0193 증보·AI 계정 Q7에서 Grok은 「준비 중」, planner 결정 2026-09-27). Grok 구독 줄이 열릴 때 이 ADR의 새 증보로 enum·label 파생표에 함께 추가한다. 그 전에 `harness:"grok"`은 `InvalidArguments`.
+  - 짝 규칙: `team_key` ⇔ `team`, `claude | codex` ⇔ `mine`. 한쪽만 주면 서버가 짝을 채우고, 어긋나면 `InvalidArguments`.
   - 그 밖의 키(예: `apiKey`, `token`, `email`)는 전부 `InvalidArguments`. 값에 자유 문자열이 들어갈 칸이 없다.
 - TS 쪽: `packages/momo-core/src/features/commands/registry.ts`의 `Command`에 선택 필드 **`agentSuggestable?: true`**를 새로 둔다(지금은 없다). `ai.connect`(kind `client`, GC-2)가 첫 항목이다. `agentSuggestable`은 kind `client` 명령에만 허용한다.
 - **드리프트 가드**(D1 「세 소비자」 방식의 확장): momo-mcp는 momo-agent에 의존할 수 없으므로(`actions.rs` 머리 주석) 도구 스키마의 enum은 두 번 쓰인다. 시험이 넷을 한 번에 잰다.
   1. Rust `SUGGESTABLE_COMMANDS` id 집합 = `oort_card_suggest` 스키마 `commandId` enum = worker `card_suggest` 스키마 enum(Rust 시험, `the_action_ids_are_one_list_in_three_places`와 같은 자리·같은 모양).
   2. = `docs/api/openapi.yaml`의 새 enum `SuggestableCommandId`(기존 OpenAPI rust 샘플러).
-  3. = TS 레지스트리의 `agentSuggestable: true` id 집합(코어 시험이 openapi.yaml의 enum을 읽어 비교). Rust는 TS를 읽지 못하므로 OpenAPI가 두 언어의 접점이다.
+  3. = TS 레지스트리의 `agentSuggestable: true` id 집합(코어 시험이 openapi.yaml의 enum을 읽어 비교). Rust는 TS를 읽지 못하므로 OpenAPI가 두 언어의 접점이다. 이 openapi.yaml 경유 방식은 planner가 수용했다(2026-09-27). 기존 D1 가드는 Rust 쪽 세 곳만 재므로 선례가 없고, **GC-6(#2947)에서 실제 구현 가능 여부를 확인**한다. 안 되면 GC-6 PR에 대안과 함께 적는다.
 - 앞으로 `appearance.*`(AX-5 #2511)는 같은 길을 쓴다. 명령을 늘리는 것은 네 곳을 함께 고치는 일이고, 한 곳만 고치면 시험이 실패한다.
 
 ### G3. props — 의도만, 서버가 만든다
@@ -240,7 +242,7 @@ v1의 모든 워크스페이스 행동은 `approval`이다. 「관리자 위임�
 ```
 - 필드는 정확히 `v, command_id, args, for_member_id, label` 다섯이다. 서버가 조립하고 에이전트 입력을 그대로 복사하지 않는다(`args`도 G2 검증을 지난 정규화 값).
 - **`for_member_id`는 서버가 run에서 채운다.** run의 `trigger_message_id`(`agent_run`) → 그 메시지의 작성자. 작성자가 `member.kind='human'`이 아니거나(에이전트끼리의 위임 등) 트리거 메시지가 없으면 도구 실패 `no_human_requester`, 메시지 0건. 에이전트는 이 값을 인자로 줄 수 없다(G1). 구독 에이전트(`owner_only`, ADR-0193 D4)는 소유자의 호출만 전달받으므로 대상은 늘 소유자다. 이 규칙과 충돌이 없다.
-- **`label`은 서버가 `(command_id, args)`에서 파생**한다. 파생표는 `SUGGESTABLE_COMMANDS` 옆에 둔다. v1 `ai.connect`: `claude`→「Claude 구독 연결」, `codex`→「Codex 구독 연결」, `grok`→「Grok 연결」, `team_key`→「팀 API 키 연결」, 인자 없음→「AI 연결」. 상한 40자. 에이전트가 쓴 문자열이 카드 제목이 되는 길은 없다(피싱 문구 차단).
+- **`label`은 서버가 `(command_id, args)`에서 파생**한다. 파생표는 `SUGGESTABLE_COMMANDS` 옆에 둔다. v1 `ai.connect`: `claude`→「Claude 구독 연결」, `codex`→「Codex 구독 연결」, `team_key`→「팀 API 키 연결」, 인자 없음→「AI 연결」. 상한 40자. 에이전트가 쓴 문자열이 카드 제목이 되는 길은 없다(피싱 문구 차단).
 - **props에 없는 것(불변식)**: 연결 상태·결과·키 꼬리·마지막 확인 시각·이메일·표시 이름·기기 이름·프로필 경로. 카드는 보는 사람의 클라이언트가 **자기 설정 스토어**(설정 › AI 연결과 같은 훅·같은 판정 함수)에서 살아 있는 상태를 읽어 그린다. 그래서 「제자리 갱신」은 props 패치가 아니라 로컬 상태 변화이고, 서버 쓰기는 제안 메시지 1건뿐이다.
 - 한 줄 문구의 이름(「곽성재에게 …」)은 클라이언트가 `for_member_id`를 멤버 목록에서 찾아 그린다. props에 이름을 싣지 않는다.
 
