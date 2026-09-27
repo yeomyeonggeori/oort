@@ -3004,6 +3004,62 @@ pub struct ProviderChainProbeDto {
     pub reason: Option<String>,
     /// `ok` | `fall_over` | `propagate` | `skipped`.
     pub disposition: String,
+    /// #2960: present exactly when this hop was dialled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub probe: Option<ProviderProbeDetailDto>,
+}
+
+/// What one live probe saw (#2960). Every number is one the provider stated —
+/// a list length, a rate-limit header, OpenRouter's key record — and nothing
+/// here is text the provider sent.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderProbeDetailDto {
+    /// `ok` | `rejected` | `unreachable` | `rate_limited` | `unknown`.
+    pub outcome: &'static str,
+    /// `models` (`GET {base}/models`) | `key` (OpenRouter `GET {base}/key`).
+    pub method: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_status: Option<u16>,
+    pub latency_ms: u64,
+    /// Omitted when the list was paginated (a first page is not a count).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limit: Option<ProviderRateLimitDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_after_seconds: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub credit: Option<ProviderKeyCreditDto>,
+    pub probed_at_ms: i64,
+    /// True when this is the link's last report reused inside the throttle
+    /// window rather than a new call.
+    pub cached: bool,
+}
+
+/// Rate-limit headers, as numbers, with the header family they came from.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderRateLimitDto {
+    /// `x-ratelimit` | `anthropic-ratelimit`.
+    pub source: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requests_limit: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requests_remaining: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens_limit: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens_remaining: Option<u64>,
+}
+
+/// OpenRouter `GET /key` → `data.limit` / `limit_remaining` / `usage` (credits).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderKeyCreditDto {
+    pub limit: Option<f64>,
+    pub limit_remaining: Option<f64>,
+    pub usage: Option<f64>,
 }
 
 /// `POST /v1/provider/link/test` response (Swift `ProviderLinkTestResponse`

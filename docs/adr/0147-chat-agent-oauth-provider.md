@@ -5,6 +5,7 @@
 - 증보: 2026-09-26 온보딩 2.0(ADR-0193 Q2) — 구독 OAuth 서버 금고를 확장하지 않는다. 팀 에이전트는 API 키가 기본이다. 파일 끝 「증보 2026-09-26 — 온보딩 2.0」 절
 - 증보: 2026-09-27 Anthropic Messages wire(#2872) — 세 번째 wire와 봉인 박스 `anthropic-key` kind, `format` 필드, 오류의 키 제거 규칙. 파일 끝 「증보 2026-09-27 — Anthropic Messages wire」 절
 - 증보: 2026-09-27 AI 계정(#2876) — 설정 화면에서도 `auth.json` 붙여넣기로 새 링크를 만들 수 없다. 「증보 2026-09-26」 절 끝 한 줄
+- 증보: 2026-09-27 연결 확인(#2960) — `POST /v1/provider/link/test`가 봉인 크레이트를 거쳐 provider에 읽기 전용 GET 한 번을 보낸다. 결정 4의 「momo-server HTTP 0」을 좁힌다. 파일 끝 「증보 2026-09-27 — 연결 확인」 절
 - 발단: 티키타카 smoke의 provider 선택에서 성재가 API 키 대신 ChatGPT 구독 OAuth(Codex CLI 방식)를 지정.
 
 ## 결정
@@ -77,3 +78,16 @@
 - (+) Claude를 팀 에이전트로 BYOK 연결할 수 있다. 봉인 계약과 egress 가드를 그대로 재사용하므로 새 보안 표면이 작다.
 - (+) 오류 경로의 키 제거가 wire 공통 규칙이 된다.
 - (−) wire가 셋이 되어 변환 유지 부담이 는다. 실제 api.anthropic.com 왕복과 구조화 `tool_result` 짝짓기는 runtime-unverified다(PR #2888 「알려진 한계」).
+
+---
+
+## 증보 2026-09-27 — 연결 확인: api가 provider에 확인 호출 한 번을 보낸다
+
+- Status: **Accepted** — 성재 결재 2026-09-27 「전부 권장대로」(AI 계정 Q5: 사용량은 공식 출처만, BYOK는 확인 호출 헤더, admin 키 금지). 이슈 #2960.
+- 기안·구현: Opus 5.5 worker(#2960).
+- **결정.** 운영자가 「연결 확인」을 누를 때만, `momo-server`가 켜져 있고 외부이고 쓸 수 있는 hop마다 **읽기 전용 GET 한 번**을 보낸다. 봉투 kind로 헤더를 고른다: bearer는 `GET {base}/models` + `Authorization: Bearer`, `anthropic-key`는 `GET {base}/models` + `x-api-key`·`anthropic-version`. `openrouter.ai`는 `/models`가 인증 없이 열려 있어 틀린 키도 성공으로 보이므로 `GET {base}/key`를 부른다(Q5가 이름 붙인 잔액 출처). completion은 보내지 않는다. 링크에 모델 id가 없어 「1토큰」 호출은 모델을 지어내야 하기 때문이다. 레거시 `oauth-openai` 머리 hop은 부르지 않고 `probe_not_run`으로 남긴다(토큰 갱신은 worker 몫이고 새로 만들 수 없는 kind다).
+- **결정 4를 좁힌다.** `momo-server`는 여전히 `reqwest`를 링크하지 않는다. 호출은 봉인 크레이트 `momo-provider-probe`만 한다. API는 `ProviderProbe::probe(&ProbeTarget)` 하나다(ADR-0149 `momo-ephemeral`, ADR-0170 `momo-unfurl`과 같은 모양). 모든 호출은 ADR-0004 증보 5의 egress 가드를 거친다: 같은 `EgressPolicy`, 연결 시점 resolver, redirect 없음, 프록시 없음. 정책 입력은 worker·쓰기 게이트와 같다. strict 환경(`MOMO_ENV=staging` 등)에서도 ADR-0004 증보(2026-09-08)대로 운영자 opt-in이 유효하다. 사전 DNS 조회도 hop당 시간 상한(10초) 안에 있고, 넘으면 `unreachable`이다.
+- **ADR-0135 D2-B와 충돌하지 않는다.** D2-B가 기각한 것은 새 자격이 서버로 들어오는 조회다. 이 호출은 이미 서버 봉인 금고에 있는 키(ADR-0004 증보 1)를 쓰고, 새 자격을 받지 않는다. 구독 잔여량은 계속 D2 경로(숫자 ingest)다. 이 확인 호출은 그 호출 자체의 응답 헤더에 있는 숫자만 보여 준다.
+- **결과.** hop마다 다섯 분류(`ok`·`rejected`(401·403)·`unreachable`(DNS·연결·시간 초과·egress 거부)·`rate_limited`(429)·`unknown`(그 밖의 상태, 문서와 다른 2xx 본문))와 기존 reason 어휘(`provider_auth_failed`·`provider_unreachable`·`provider_rate_limited`·`provider_status_NNN`, 새로 `provider_egress_denied`·`provider_invalid_response`)를 낸다. 숫자는 provider가 밝힌 것만 싣는다: 모델 목록 길이(페이지가 나뉘면 싣지 않음), `x-ratelimit-*`·`anthropic-ratelimit-*`·`retry-after` 헤더, OpenRouter `/key`의 `limit`·`limit_remaining`·`usage`. 응답 본문·헤더 문자열·전송 오류 문자열은 크레이트 밖으로 나가지 않는다. 그래서 provider가 오류에 키를 되돌려 보내도 응답·로그·audit에 실리지 않는다.
+- **빈도 제한.** 운영자 멤버십(member, 워크스페이스별)마다 1분에 6회(넘으면 429 + `Retry-After`). 링크(위치·base URL·키 digest)마다 20초 안의 재확인은 직전 결과를 `cached: true`로 돌려주고 다시 부르지 않는다. 키나 URL을 바꾸면 새 링크다. 웹 패널은 버튼을 누를 때만 부른다(`AiLinkSection.tsx` `check.mutate()`).
+- **검증 한계.** OpenAI·Anthropic·xAI·OpenRouter 모양 mock으로만 시험했다. 실제 provider 왕복은 runtime-unverified다.
