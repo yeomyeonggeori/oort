@@ -2505,6 +2505,11 @@
   inline-size: 30px;
   block-size: 30px;
 }
+/* 팀 키 칸(review #2961 M3): password 칸이 아니어도 글자를 가린다. 비밀번호
+ * 관리자의 「저장?」 판단에서 빠지게 text 칸 + 가림. 지원 판정은 컴포넌트가 한다. */
+@utility key-mask {
+  -webkit-text-security: disc;
+}
 /* ⋯ 28 (시안 `.more`). */
 @utility ai-more {
   inline-size: 28px;

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Check, ExternalLink, Eye, KeyRound, Lock, Plug, RefreshCw, X } from "lucide-react";
@@ -86,6 +86,26 @@ const OFFLINE_NOTE = "연결이 끊겨 지금은 팀 연결을 확인하거나 �
 const TEAM_DENIED_LINE = "팀 키는 운영자만 바꾸고 확인할 수 있어요.";
 const TEAM_EMPTY_SUB = "아직 없어요. 팀 에이전트가 대답하려면 키가 필요해요";
 const OPERATOR_FOOT = "운영자만 보이는 입력이에요. 키는 서버 금고에 봉인되고 쓰기 전용이에요.";
+/**
+ * 팀 키 칸을 password 칸 없이 가릴 수 있는가(review #2961 M3). WebKit(Tauri
+ * WKWebView·Safari)과 Chromium은 `-webkit-text-security`를 지원한다. 지원하지 않는
+ * 엔진에서는 password 칸으로 되돌린다: 키가 평문으로 보이는 것보다 낫다.
+ */
+const MASK_WITHOUT_PASSWORD_FIELD =
+  typeof CSS !== "undefined" && typeof CSS.supports === "function" && CSS.supports("-webkit-text-security", "disc");
+
+function trimSlash(url: string): string {
+  return url.replace(/\/+$/, "");
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
 const KEY_HINT = "저장하면 다시 보이지 않아요. 마스킹 꼬리만 남아요. 이 칸의 값은 채팅·초안에 남지 않아요.";
 const GROK_SUB = "공식 CLI 상태 확인 방법을 확인하는 중이에요";
 
@@ -771,6 +791,8 @@ function TeamSection({
             editing ? (
               <TeamKeyForm
                 link={link}
+                offline={offline}
+                offlineNoteId={`${headId}-offline`}
                 currentFailed={failed}
                 onCancel={() => setEditing(false)}
                 onSaved={onSaved}
@@ -815,15 +837,31 @@ function TeamSection({
  *
  * 키는 **비제어** 칸의 DOM 값이다. React 상태에도, 뮤테이션 변수에도 싣지 않는다:
  * `useMutation`은 마지막 변수를 캐시에 들고 있으므로 변수에 키를 넣으면 저장 뒤에도
- * 메모리에 남는다. 저장을 누르는 순간 칸을 비우고, 값은 요청 한 번에만 쓰인다.
+ * 메모리에 남는다. 저장을 누르는 순간 칸을 비우고 PUT 한 번에 넘긴다.
+ *
+ * 오프라인(review #2961 H1): react-query v5 뮤테이션의 기본 `networkMode: "online"`은
+ * 끊긴 동안 fn을 부르지 않고 멈춰 두었다가 다시 이어지면 조용히 보낸다. 그러면 키가
+ * 클로저에 남고, 카드를 닫은 뒤에 팀 키가 바뀐다. 그래서 ① 끊겼으면 저장 전에
+ * 막고(설정 `saveLocked`와 같은 규칙), ② `networkMode: "always"`로 누른 순간 한 번만
+ * 시도하며(실패는 제자리 오류 줄), ③ 폼이 사라지면 멈춘 저장과 붙잡은 값을 버린다.
+ *
+ * 비밀번호 관리자(review #2961 M3): 이 칸은 로그인 비밀번호가 아니다. 가림 글꼴을
+ * 지원하는 엔진(WebKit·Chromium)에서는 text 칸 + 가림으로 두어 「비밀번호 저장?」
+ * 판단에서 뺀다. 지원하지 않으면 password 칸으로 되돌린다(평문 노출보다 낫다).
  */
 function TeamKeyForm({
   link,
+  offline,
+  offlineNoteId,
   currentFailed,
   onCancel,
   onSaved,
 }: {
   link: ProviderLink;
+  /** 연결이 끊겼는가. 끊겼으면 저장을 누르기 전에 막는다(review #2961 H1). */
+  offline: boolean;
+  /** 끊긴 사유 문장의 id(저장 버튼의 aria-describedby). */
+  offlineNoteId: string;
   /** 지금 키가 방금 확인에 실패했는가(대체 경고의 문장이 달라진다). */
   currentFailed: boolean;
   onCancel: () => void;
@@ -846,13 +884,23 @@ function TeamKeyForm({
   }, []);
 
   const preset = presets.find((row) => row.id === presetId) ?? null;
+  // 프리셋이 아닌 지금 주소(사내 프록시 등)는 「지금 주소」 칩으로 고른다. 조용히 첫
+  // 프리셋으로 옮기지 않는다(review #2961 M4). 와이어는 저장된 format(N1).
   const target: { baseUrl: string; format: ProviderFormat } | null = preset
     ? { baseUrl: preset.baseUrl, format: preset.format }
     : link.configured
-      ? { baseUrl: link.baseUrl, format: "openai" }
+      ? { baseUrl: link.baseUrl, format: link.format ?? "openai" }
       : null;
+  const movesAddress =
+    link.configured && target !== null && trimSlash(target.baseUrl) !== trimSlash(link.baseUrl);
+  const hasCurrentChip = link.configured && initialPresetId(presets, link) === null;
 
+  const client = useQueryClient();
+  const mutationKey = useMemo(() => ["ai-connect-card", "team-key-save", inputId], [inputId]);
   const save = useMutation({
+    mutationKey,
+    // 누른 순간 한 번만 시도한다: 끊긴 동안 멈춰 두었다가 나중에 보내지 않는다.
+    networkMode: "always",
     mutationFn: (input: { baseUrl: string; format: ProviderFormat }) => {
       const bearer = secretRef.current;
       secretRef.current = "";
@@ -861,9 +909,23 @@ function TeamKeyForm({
     onSuccess: onSaved,
   });
 
+  // 폼이 사라지면(취소·Esc·카드 닫기·채널 이동) 붙잡은 값과 멈춘 저장을 버린다.
+  useEffect(
+    () => () => {
+      secretRef.current = "";
+      const cache = client.getMutationCache();
+      for (const mutation of cache.findAll({ mutationKey, exact: true })) {
+        if (mutation.state.isPaused) cache.remove(mutation);
+      }
+    },
+    [client, mutationKey]
+  );
+
+  const locked = offline || target === null || save.isPending;
+
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (save.isPending || target === null) return;
+    if (offline || save.isPending || target === null) return;
     const field = inputRef.current;
     const value = field?.value.trim() ?? "";
     if (value === "") {
@@ -883,10 +945,36 @@ function TeamKeyForm({
   }
 
   return (
-    <form className="flex min-w-0 flex-col gap-2 pb-1 pt-1" onSubmit={submit} data-testid="ai-connect-card-key-form" aria-label="팀 API 키 넣기">
+    <form
+      className="flex min-w-0 flex-col gap-2 pb-1 pt-1"
+      onSubmit={submit}
+      autoComplete="off"
+      data-form-type="other"
+      data-testid="ai-connect-card-key-form"
+      aria-label="팀 API 키 넣기"
+    >
       {presets.length > 0 ? (
         <fieldset className="flex min-w-0 flex-wrap gap-2">
-          <legend className="sr-only">provider</legend>
+          <legend className="sr-only">API 제공자</legend>
+          {hasCurrentChip && (
+            <label className="press relative inline-flex">
+              <input
+                type="radio"
+                name={`${inputId}-preset`}
+                value=""
+                checked={presetId === null}
+                onChange={() => {
+                  setPresetId(null);
+                  setConfirmReplace(false);
+                }}
+                className="peer sr-only"
+                data-testid="ai-connect-card-preset-current"
+              />
+              <span className="tap-target inline-flex h-control-sm cursor-pointer items-center rounded-full border border-line px-3 text-meta font-semibold text-ink-muted peer-checked:border-primary peer-checked:bg-primary peer-checked:text-on-primary peer-focus-visible:focus-ring">
+                지금 주소 · {link.endpointLabel}
+              </span>
+            </label>
+          )}
           {presets.map((row) => (
             <label key={row.id} className="press relative inline-flex">
               <input
@@ -920,12 +1008,18 @@ function TeamKeyForm({
       <Input
         id={inputId}
         ref={inputRef}
-        type="password"
+        type={MASK_WITHOUT_PASSWORD_FIELD ? "text" : "password"}
         name="team-api-key"
         autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
         spellCheck={false}
+        data-1p-ignore=""
+        data-lpignore="true"
+        data-bwignore=""
+        data-form-type="other"
         placeholder="키를 붙여 넣으세요"
-        className="font-mono"
+        className={cn("font-mono", MASK_WITHOUT_PASSWORD_FIELD && "key-mask")}
         aria-describedby={fieldError ? `${errorId} ${hintId}` : hintId}
         aria-invalid={fieldError ? true : undefined}
         onInput={() => setConfirmReplace(false)}
@@ -941,12 +1035,13 @@ function TeamKeyForm({
       </p>
       {save.isError && (
         <p className="break-keep text-meta text-danger" role="alert" data-testid="ai-connect-card-save-error">
-          {errorMessage(save.error)}
+          {errorMessage(save.error)} 키는 칸에서 지웠으니 다시 붙여 넣어 주세요.
         </p>
       )}
       {confirmReplace && (
         <p className="break-keep text-meta text-warn" role="alert" data-testid="ai-connect-card-key-replace">
-          지금 팀 기본 키({maskedBearer(link.bearerLast4)})를 이 키로 바꿔요. 팀 에이전트는 바로 새 키로 대답해요.
+          지금 팀 기본 키({maskedBearer(link.bearerLast4)})를 이 키로 바꿔요.
+          {movesAddress && target ? ` 주소도 ${hostOf(target.baseUrl)}(으)로 바뀌어요.` : ""} 팀 에이전트는 바로 새 키로 대답해요.
           {currentFailed
             ? " 지금 키는 방금 확인에 실패했어요. 새 키도 저장한 뒤에 확인해요."
             : " 저장한 뒤에 확인하니, 틀린 키면 팀 에이전트가 멈춰요."}
@@ -957,8 +1052,9 @@ function TeamKeyForm({
           type="submit"
           size="sm"
           aria-busy={save.isPending || undefined}
-          aria-disabled={target === null || save.isPending || undefined}
-          className={cn((target === null || save.isPending) && "opacity-50")}
+          aria-disabled={locked || undefined}
+          aria-describedby={offline ? offlineNoteId : undefined}
+          className={cn(locked && "opacity-50")}
           data-testid="ai-connect-card-key-save"
         >
           {save.isPending ? "저장 중" : confirmReplace ? "바꿔 저장하고 확인" : "저장하고 확인"}

@@ -2,7 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, fetchRoster, type RosterMember } from "@momo/core/lib/api";
@@ -16,6 +16,7 @@ import {
   type ProviderLinkTest,
 } from "@momo/core/features/settings/api";
 import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
+import { linkPill } from "@momo/core/features/settings/aiLinkPill";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { detectLocalHarnesses } from "@/lib/tauri";
 import { AiLinkSection } from "@/features/settings/AiLinkSection";
@@ -191,12 +192,7 @@ let roots: Root[] = [];
 let hosts: HTMLElement[] = [];
 let client: QueryClient;
 
-function mountEl(element: ReturnType<typeof createElement>): HTMLElement {
-  const host = document.createElement("div");
-  document.body.append(host);
-  const root = createRoot(host);
-  hosts.push(host);
-  roots.push(root);
+function renderInto(root: Root, element: ReturnType<typeof createElement>) {
   act(() => {
     root.render(
       createElement(
@@ -210,6 +206,15 @@ function mountEl(element: ReturnType<typeof createElement>): HTMLElement {
       )
     );
   });
+}
+
+function mountEl(element: ReturnType<typeof createElement>): HTMLElement {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  hosts.push(host);
+  roots.push(root);
+  renderInto(root, element);
   return host;
 }
 
@@ -270,6 +275,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  onlineManager.setOnline(true);
   for (const root of roots) act(() => root.unmount());
   for (const host of hosts) host.remove();
   roots = [];
@@ -349,6 +355,8 @@ describe("같은 입력 → 같은 알약: 설정 × 카드 (#2941·#2944)", () 
     ["저장된 키", KEY_LINK],
     ["모의", { ...KEY_LINK, availability: "mock" } as ProviderLink],
     ["자격증명 없음", { ...KEY_LINK, keyConfigured: false } as ProviderLink],
+    // 내부용(legacy OAuth) 연결은 두 표면 모두 「읽기 전용」(review #2961 M2).
+    ["내부용", { ...KEY_LINK, credentialKind: "oauth-openai" } as ProviderLink],
   ];
   it.each(links)("팀 줄: %s", async (_name, link) => {
     vi.mocked(fetchProviderLink).mockResolvedValue(link);
@@ -357,6 +365,42 @@ describe("같은 입력 → 같은 알약: 설정 × 카드 (#2941·#2944)", () 
     const settingsRow = await until(settings, "ai-link-row");
     const cardRow = await until(card, "ai-connect-card-team");
     expect(pillOf(cardRow)).toEqual(pillOf(settingsRow.querySelector("[data-slot='state']") as HTMLElement));
+  });
+
+  it("팀 줄: 내부용 연결은 두 표면 모두 정확히 「읽기 전용」", async () => {
+    vi.mocked(fetchProviderLink).mockResolvedValue({ ...KEY_LINK, credentialKind: "oauth-openai" } as ProviderLink);
+    const settings = mountEl(createElement(AiLinkSection, { offline: false }));
+    const card = mountCard();
+    const settingsRow = await until(settings, "ai-link-row");
+    const cardRow = await until(card, "ai-connect-card-team");
+    expect(pillOf(cardRow)).toEqual({ tone: "mute", text: "읽기 전용" });
+    expect(pillOf(settingsRow.querySelector("[data-slot='state']") as HTMLElement)).toEqual(pillOf(cardRow));
+  });
+
+  it("팀 줄: 빈 서버(설정은 줄 없이 「API 키 추가」)는 카드가 코어 판정 그대로", async () => {
+    vi.mocked(fetchProviderLink).mockResolvedValue(EMPTY_LINK);
+    const card = mountCard();
+    const cardRow = await until(card, "ai-connect-card-team");
+    expect(pillOf(cardRow)).toEqual(linkPill({ link: EMPTY_LINK, offline: false, probe: null, checking: false }));
+  });
+
+  it("팀 줄: 같은 test 응답(실패)에 두 표면이 같은 알약", async () => {
+    vi.mocked(testProviderLink).mockResolvedValue(probe(false, "provider_auth_failed"));
+    const settings = mountEl(createElement(AiLinkSection, { offline: false }));
+    const card = mountCard();
+    await until(settings, "ai-link-row");
+    act(() => (q(settings, "ai-link-row-more") as HTMLButtonElement).click());
+    const settingsCheck = await until(settings, "ai-link-check");
+    const cardCheck = await until(card, "ai-connect-card-team-check");
+    act(() => settingsCheck.click());
+    act(() => cardCheck.click());
+    await waitFor(() => expect(pillOf(q(card, "ai-connect-card-team"))).toEqual({ tone: "bad", text: "확인 실패" }));
+    const settingsRow = await until(settings, "ai-link-row");
+    await waitFor(() =>
+      expect(pillOf(settingsRow.querySelector("[data-slot='state']") as HTMLElement)).toEqual(
+        pillOf(q(card, "ai-connect-card-team"))
+      )
+    );
   });
 
   it("팀 줄: 오프라인이면 둘 다 「확인할 수 없음」", async () => {
@@ -428,6 +472,11 @@ describe("흐름 ② 팀 키 (운영자) · 비밀값", () => {
     const input = (await until(host, "ai-connect-card-key-input")) as HTMLInputElement;
     expect(input.type).toBe("password");
     expect(input.autocomplete).toBe("off");
+    // 비밀번호 관리자가 이 칸을 로그인 비밀번호로 잡지 않게(review #2961 M3).
+    for (const attr of ["data-1p-ignore", "data-lpignore", "data-bwignore", "data-form-type"]) {
+      expect(input.hasAttribute(attr)).toBe(true);
+    }
+    expect(q(host, "ai-connect-card-key-form")?.getAttribute("autocomplete")).toBe("off");
     act(() => (q(host, "ai-connect-card-preset-anthropic") as HTMLInputElement).click());
 
     let resolvePut: (link: ProviderLink) => void = () => undefined;
@@ -498,6 +547,71 @@ describe("흐름 ② 팀 키 (운영자) · 비밀값", () => {
   });
 });
 
+describe("오프라인 저장 (review #2961 H1)", () => {
+  const SECRET = ["sk", "-test-", "Off1ine7Paused3Key9Zq"].join("");
+
+  function cardEl(offline: boolean) {
+    return createElement(AiConnectCard, { line: "team", focusNonce: 1, offline, onClose: () => undefined });
+  }
+
+  it("폼을 연 채 끊기면 저장은 잠기고, 닫은 뒤 다시 이어져도 요청은 0회", async () => {
+    vi.mocked(fetchProviderLink).mockResolvedValue(EMPTY_LINK);
+    vi.mocked(putProviderLink).mockResolvedValue(KEY_LINK);
+    vi.mocked(testProviderLink).mockResolvedValue(probe(true));
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    hosts.push(host);
+    renderInto(root, cardEl(false));
+    const input = (await until(host, "ai-connect-card-key-input")) as HTMLInputElement;
+
+    // 연결이 끊긴다: 소켓(useOffline)과 react-query onlineManager 둘 다.
+    act(() => onlineManager.setOnline(false));
+    renderInto(root, cardEl(true));
+    const save = q(host, "ai-connect-card-key-save") as HTMLButtonElement;
+    expect(save.getAttribute("aria-disabled")).toBe("true");
+    expect(document.getElementById(save.getAttribute("aria-describedby")?.split(" ")[0] ?? "")?.textContent).toContain(
+      "연결이 끊겨"
+    );
+    input.value = SECRET;
+    await act(async () => save.click());
+    expect(putProviderLink).not.toHaveBeenCalled();
+    expect(client.getMutationCache().getAll().filter((m) => m.state.isPaused)).toHaveLength(0);
+
+    // 카드를 닫고(×·Esc·채널 이동) 다시 이어진다.
+    act(() => root.unmount());
+    await act(async () => {
+      onlineManager.setOnline(true);
+      await client.resumePausedMutations();
+    });
+    expect(putProviderLink).not.toHaveBeenCalled();
+  });
+
+  it("소켓은 붙어 있고 브라우저만 오프라인이어도 저장을 대기열에 두지 않는다", async () => {
+    vi.mocked(fetchProviderLink).mockResolvedValue(EMPTY_LINK);
+    vi.mocked(putProviderLink).mockRejectedValue(new TypeError("Failed to fetch"));
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    hosts.push(host);
+    renderInto(root, cardEl(false));
+    const input = (await until(host, "ai-connect-card-key-input")) as HTMLInputElement;
+    act(() => onlineManager.setOnline(false));
+    input.value = SECRET;
+    await act(async () => (q(host, "ai-connect-card-key-save") as HTMLButtonElement).click());
+    // 바로 한 번 시도하고(실패는 제자리 오류 줄), 멈춰 둔 뮤테이션은 없다.
+    expect(putProviderLink).toHaveBeenCalledTimes(1);
+    expect(client.getMutationCache().getAll().filter((m) => m.state.isPaused)).toHaveLength(0);
+    await until(host, "ai-connect-card-save-error");
+    act(() => root.unmount());
+    await act(async () => {
+      onlineManager.setOnline(true);
+      await client.resumePausedMutations();
+    });
+    expect(putProviderLink).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("이미 쓰는 키를 바꿀 때 (design-review #2944 H1)", () => {
   it("버튼 이름이 순서를 말하고, 대체 전에 한 번 묻는다. 묻는 동안 저장은 없다", async () => {
     vi.mocked(testProviderLink).mockResolvedValue(probe(false, "provider_auth_failed"));
@@ -526,6 +640,56 @@ describe("이미 쓰는 키를 바꿀 때 (design-review #2944 H1)", () => {
     await act(async () => save.click());
     expect(putProviderLink).toHaveBeenCalledTimes(1);
     expect(input.value).toBe("");
+  });
+});
+
+describe("프리셋에 없는 지금 주소 (review #2961 M4)", () => {
+  const CORP = {
+    ...KEY_LINK,
+    baseUrl: "https://llm.corp.example/v1",
+    endpointLabel: "사내 프록시",
+    format: "anthropic",
+  } as ProviderLink;
+
+  it("키 바꾸기는 지금 주소를 고른 채 열리고, 그 주소·와이어로 저장한다", async () => {
+    vi.mocked(fetchProviderLink).mockResolvedValue(CORP);
+    vi.mocked(testProviderLink).mockResolvedValue(probe(false, "provider_auth_failed"));
+    const host = mountCard();
+    const check = await until(host, "ai-connect-card-team-check");
+    act(() => check.click());
+    const swap = await until(host, "ai-connect-card-team-key");
+    act(() => swap.click());
+    const input = (await until(host, "ai-connect-card-key-input")) as HTMLInputElement;
+    const current = q(host, "ai-connect-card-preset-current") as HTMLInputElement;
+    expect(current.checked).toBe(true);
+    expect(current.closest("label")?.textContent).toContain("사내 프록시");
+    expect((q(host, "ai-connect-card-preset-openai") as HTMLInputElement).checked).toBe(false);
+    input.value = "corp-key-0000000000000000";
+    const save = q(host, "ai-connect-card-key-save") as HTMLButtonElement;
+    await act(async () => save.click());
+    expect(q(host, "ai-connect-card-key-replace")?.textContent).not.toContain("주소도");
+    vi.mocked(putProviderLink).mockResolvedValue(CORP);
+    await act(async () => save.click());
+    expect(vi.mocked(putProviderLink).mock.calls[0]?.[0]).toMatchObject({
+      baseUrl: "https://llm.corp.example/v1",
+      format: "anthropic",
+    });
+  });
+
+  it("다른 프리셋을 고르면 대체 확인이 주소가 바뀐다고 말한다", async () => {
+    vi.mocked(fetchProviderLink).mockResolvedValue(CORP);
+    vi.mocked(testProviderLink).mockResolvedValue(probe(false, "provider_auth_failed"));
+    const host = mountCard();
+    const check = await until(host, "ai-connect-card-team-check");
+    act(() => check.click());
+    const swap = await until(host, "ai-connect-card-team-key");
+    act(() => swap.click());
+    const input = (await until(host, "ai-connect-card-key-input")) as HTMLInputElement;
+    act(() => (q(host, "ai-connect-card-preset-openai") as HTMLInputElement).click());
+    input.value = "openai-key-000000000000000";
+    await act(async () => (q(host, "ai-connect-card-key-save") as HTMLButtonElement).click());
+    expect(putProviderLink).not.toHaveBeenCalled();
+    expect(q(host, "ai-connect-card-key-replace")?.textContent).toContain("주소도 api.openai.com(으)로 바뀌어요");
   });
 });
 

@@ -37,8 +37,10 @@ export function teamKeyPresets(link: ProviderLink | undefined): TeamKeyPreset[] 
 }
 
 /**
- * 폼을 열 때 고를 프리셋: 저장된 주소와 같은 프리셋, 없으면 첫 프리셋, 프리셋이
- * 없으면 null(저장된 주소를 쓴다).
+ * 폼을 열 때 고를 프리셋: 저장된 주소와 같은 프리셋. 저장된 주소가 있는데 프리셋에
+ * 없으면(사내 프록시 등) null = 「지금 주소」를 그대로 쓴다: 키만 바꾸려던 운영자의
+ * 주소를 조용히 첫 프리셋으로 옮기지 않는다(review #2961 M4). 저장된 주소가 없으면
+ * 첫 프리셋, 프리셋이 없으면 null.
  */
 export function initialPresetId(
   presets: readonly TeamKeyPreset[],
@@ -46,8 +48,9 @@ export function initialPresetId(
 ): string | null {
   if (presets.length === 0) return null;
   const saved = link?.configured ? link.baseUrl.replace(/\/+$/, "") : null;
-  const match = saved ? presets.find((preset) => preset.baseUrl.replace(/\/+$/, "") === saved) : undefined;
-  return (match ?? presets[0]).id;
+  if (saved === null) return presets[0].id;
+  const match = presets.find((preset) => preset.baseUrl.replace(/\/+$/, "") === saved);
+  return match ? match.id : null;
 }
 
 /**

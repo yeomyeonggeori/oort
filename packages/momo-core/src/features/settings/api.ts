@@ -77,6 +77,8 @@ export interface ProviderLink {
   bearerLast4?: string;
   availability: string;
   keyConfigured: boolean;
+  /** 저장된 키 연결의 와이어(서버 GET이 준다, #2872). OAuth·환경값이면 없다. */
+  format?: ProviderFormat;
   updatedAtMs?: number;
   updatedBy?: string;
   diagnostics: string[];

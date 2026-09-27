@@ -49,6 +49,8 @@ describe("teamKeyPresets (#2944)", () => {
     expect(initialPresetId(presets, base)).toBe("openai");
     expect(initialPresetId(presets, { ...base, configured: true, baseUrl: "https://api.x.ai/v1/" })).toBe("xai");
     expect(initialPresetId([], base)).toBeNull();
+    // 프리셋에 없는 저장된 주소(사내 프록시)는 첫 프리셋으로 옮기지 않는다(review #2961 M4).
+    expect(initialPresetId(presets, { ...base, configured: true, baseUrl: "https://llm.corp.example/v1" })).toBeNull();
   });
 });
 
