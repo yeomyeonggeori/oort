@@ -154,11 +154,18 @@ async function scenes(browser, origin) {
           allowDisabled: card.querySelector('[data-testid="agent-permission-allow"]').disabled,
           rejectDisabled: card.querySelector('[data-testid="agent-permission-reject"]').disabled,
           line: card.querySelector('[data-testid="agent-permission-unavailable"]')?.textContent ?? null,
+          lineInside: (() => {
+            const el = card.querySelector('[data-testid="agent-permission-unavailable"]');
+            if (!el) return false;
+            const r = el.getBoundingClientRect();
+            const c = card.getBoundingClientRect();
+            return r.top >= c.top && r.bottom <= c.bottom && el.scrollWidth <= el.clientWidth + 1;
+          })(),
         };
       });
       check(
         `${scheme}/900: 낮은 칸은 결정 버튼 꺼짐 + 칸 키우기 안내, 질문 줄·진행 줄 보임`,
-        cramped.allowDisabled && cramped.rejectDisabled && (cramped.line ?? "").includes("칸을 키우면") &&
+        cramped.allowDisabled && cramped.rejectDisabled && (cramped.line ?? "").includes("칸을 키우면") && cramped.lineInside &&
           fit900.feedVisible >= 56 && fit900.headVisible && fit900.buttonsVisible,
         { ...cramped, ...fit900 }
       );

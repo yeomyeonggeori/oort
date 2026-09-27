@@ -68,7 +68,7 @@ export interface AgentPaneActions {
 }
 
 export const DECIDE_UNAVAILABLE = "이 서버는 아직 칸에서 한 권한 결정을 받지 않아요. 결정 경로가 열리면 여기서 허락할 수 있어요.";
-export const CRAMPED_LINE = "칸이 낮아 요청을 다 보일 수 없어요. 칸을 키우면(⌘⇧↵) 결정할 수 있어요.";
+export const CRAMPED_LINE = "칸을 키우면(⌘⇧↵) 결정할 수 있어요.";
 
 /**
  * 칸 높이가 이보다 낮으면 권한 카드가 질문·미리보기·결정 칸을 함께 보일 수 없다
@@ -496,6 +496,12 @@ function PermissionCard({
         <StatusMark status="waiting" srLabel />
         {ask}
       </p>
+      {/* 낮은 칸: 이유를 질문 바로 밑에 한 줄로(버튼 뒤에 두면 잘린다, design-review R4). */}
+      {cramped && !unavailable ? (
+        <p id={unavailableId} className="truncate text-meta text-ink-muted" data-testid="agent-permission-unavailable">
+          {CRAMPED_LINE}
+        </p>
+      ) : null}
       {permission.preview ? (
         <pre
           tabIndex={0}
@@ -539,7 +545,7 @@ function PermissionCard({
           >
             거부하고 지시
           </Button>
-          <span className="text-timestamp text-ink-muted">나에게만 보이는 버튼이에요</span>
+          {cramped ? null : <span className="text-timestamp text-ink-muted">나에게만 보이는 버튼이에요</span>}
         </div>
       ) : armed === "allow" ? (
         <div className="agent-perm-sticky-bottom flex flex-wrap items-center gap-2" data-testid="agent-permission-confirm">
@@ -599,9 +605,9 @@ function PermissionCard({
       {permission.allow === null && !blocked ? (
         <p className="text-meta text-ink-muted">이번 한 번 허락할 선택지가 없어요. 거부하거나 호스트에서 결정하세요.</p>
       ) : null}
-      {blocked ? (
+      {unavailable ? (
         <p id={unavailableId} className="text-meta text-ink-muted" data-testid="agent-permission-unavailable">
-          {unavailable ? DECIDE_UNAVAILABLE : CRAMPED_LINE}
+          {DECIDE_UNAVAILABLE}
         </p>
       ) : null}
       {error ? (
