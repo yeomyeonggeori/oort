@@ -100,6 +100,8 @@ import {MessageEditorSheet} from './MessageEditorSheet';
 import {appNote} from './appVoice';
 import {Avatar} from './Avatar';
 import {CONV} from './convDesign';
+import {AiConnectSuggestion} from './AiConnectSuggestion';
+import {commandSuggestCard} from '@momo/core/features/timeline/commandSuggest';
 import {
   deadlinePassed,
   gateFor,
@@ -2134,6 +2136,10 @@ function MessageRowInner({
     [registerRowNode, messageId],
   );
   const presentation = useMemo(() => rowPresentation(message), [message]);
+  const suggestion = useMemo(
+    () => commandSuggestCard(message, directory),
+    [message, directory],
+  );
   // 1회 링크 (#2513). 행은 접근성 요소 **하나**라(아래 `accessible`) 카드 안의
   // 복사 버튼에 VoiceOver 가 닿지 못한다 — 코드 상자의 복사가 로터로 나온 것과
   // 같은 이유로 여기서 로터에 세운다. 값은 영수증 표(화면의 메모리)에서만 읽고,
@@ -2705,6 +2711,15 @@ function MessageRowInner({
                 approvalsProvided={approvalsProvided}
                 nowMs={nowMs}
                 onApprovalSettled={onApprovalSettled}
+              />
+            ) : null}
+
+            {/* 에이전트가 제안한 연결 카드(#2948 GC-7). 본문 아래, 보는 사람별로. */}
+            {suggestion ? (
+              <AiConnectSuggestion
+                card={suggestion}
+                viewerMemberId={actions?.myMemberId}
+                offline={approvalOffline === true}
               />
             ) : null}
 

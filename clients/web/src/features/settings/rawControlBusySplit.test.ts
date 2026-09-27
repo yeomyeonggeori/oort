@@ -151,16 +151,17 @@ const SITES = [
     guard: "if (toggleLocked || toggling) return;",
   },
   {
+    // #2880: 저장은 채팅 카드와 같은 `TeamKeyForm` 으로 옮겨 갔고, 이 자리의 날
+    // 컨트롤은 「연결 끊기」다(ConfirmButton 이 아니라 확인 창을 여는 버튼). 진행은
+    // 확인 창의 버튼이 「끊는 중」으로 지고, 여기 버튼은 잠금만 진다.
     file: "AiLinkSection.tsx",
-    testId: "ai-link-save",
-    lock: "saveLocked",
-    lockVia: "const saveLocked = offline || (busy && !saving);",
-    busy: "saving",
-    words: ["저장 중"],
+    testId: "ai-link-unlink",
+    lock: "unlinkLocked",
+    lockVia: "const unlinkLocked = offline || (busy && !unlinking);",
+    busy: null,
+    words: [],
     rendersVia: null,
-    // 이 자리의 가드는 버튼이 아니라 폼이 진다: 주소 칸에서 누른 Enter(암묵적
-    // 제출)도 같은 쓰기를 내므로, `onClick` 에 두면 그 길이 열린 채 남는다.
-    guard: "if (saveLocked || saving) return;",
+    guard: "if (unlinkLocked) return;",
   },
   {
     file: "AiLinkSection.tsx",
@@ -692,20 +693,20 @@ describe("#1559 RED PROOF ④ 잠긴 컨트롤이 사유를 든다", () => {
     const file = FILES["AiLinkSection.tsx"];
     expect(file).toContain("if (offline) return LINK_OFFLINE_NOTE_ID;");
     expect(file).toContain("return busy && !mine ? LINK_BUSY_NOTE_ID : undefined;");
-    expect(control("AiLinkSection.tsx", "ai-link-save").tag).toContain(
-      "aria-describedby={lockReason(saving)}"
-    );
     expect(control("AiLinkSection.tsx", "ai-link-check").tag).toContain(
       "aria-describedby={lockReason(checking)}"
     );
-    expect(confirmCall("AiLinkSection.tsx", "ai-link-unlink")).toContain(
-      "describedBy={lockReason(unlinking)}"
+    expect(control("AiLinkSection.tsx", "ai-link-unlink").tag).toContain(
+      "aria-describedby={lockReason(unlinking)}"
     );
-    // 두 문장은 수정 폼 **밖**에 산다: 저장은 폼 안, 확인·해제는 폼이 닫힌
-    // 자리에 있어 어느 한쪽에 두면 다른 쪽이 없는 id 를 가리킨다.
-    const formEnd = file.indexOf("</form>");
-    expect(file.indexOf("id={LINK_OFFLINE_NOTE_ID}")).toBeGreaterThan(formEnd);
-    expect(file.indexOf("id={LINK_BUSY_NOTE_ID}")).toBeGreaterThan(formEnd);
+    // 두 문장은 수정 폼 **밖**에 산다(#2880: 폼은 `TeamKeyForm`, 저장 버튼은 끊긴
+    // 사유를 `offlineNoteId` 로 받는다). 폼 자리 뒤에 서야 폼이 열려 있을 때도 그
+    // id 가 화면에 있다.
+    const formAt = file.indexOf("<TeamKeyForm");
+    expect(formAt).toBeGreaterThan(0);
+    expect(file).toContain("offlineNoteId={LINK_OFFLINE_NOTE_ID}");
+    expect(file.indexOf("id={LINK_OFFLINE_NOTE_ID}")).toBeGreaterThan(formAt);
+    expect(file.indexOf("id={LINK_BUSY_NOTE_ID}")).toBeGreaterThan(formAt);
   });
 });
 
