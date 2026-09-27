@@ -214,6 +214,7 @@ v1의 모든 워크스페이스 행동은 `approval`이다. 「관리자 위임�
 - **server worker(agent-worker)**: worker `CATALOG`(`momo-agent/src/tools.rs`)에 **`card_suggest { commandId, args, body }`**를 더한다. 채널·스레드는 그 run의 트리거 메시지 자리, 멱등 키는 `(run_id, tool_call_id)`에서 결정적으로 만든다. 검증·props 조립·label 파생은 hosted와 **같은 함수**(`momo-agent`에 둔다)를 부른다.
   - worker 도구의 승인 기본값(`requires_approval`, ADR-0114 D5)은 이 도구에 한해 **요구하지 않음**이다. 서버 상태를 바꾸지 않고(D3 risk `none`) 사람이 누를 때만 그 사람의 기기·권한으로 동작하므로, 제안 자체를 승인 카드로 막으면 「승인해야 카드를 볼 수 있는 카드」가 된다. 이 예외는 `card_suggest` 이름 하나에 묶고 grants로 넓히지 않는다.
   - **ADR-0114 D5 예외, planner 결정 2026-09-27**(#2952 검수): 서버 상태를 바꾸지 않고, 에이전트의 일반 메시지 게시와 같은 위험 등급이라 수용.
+  - **기본 프로필, planner 결정 2026-09-27**(GC-8 #2949): 이름 면제의 대가로 이 도구는 프로필 `enabled_tools`에 켜져 있을 때만 실행된다(#2959 M3). 새 에이전트는 켜진 채로 시작한다. `POST …/agents`가 `enabledTools`를 생략하면(프로필 객체가 없어도) 프로필 행을 `["card_suggest"]`로 쓴다. 명시 목록(`[]` 포함)은 그대로 저장되므로 운영자가 허브에서 끌 수 있다. 프로필 PUT의 생략은 `[]`이고 기본값을 다시 넣지 않는다. 읽을 때 기본값을 넣지 않고 쓸 때 행에 적는다. 허브가 보여 주는 목록이 실제로 실행되는 목록이어야 하기 때문이다. 이미 있는 에이전트에는 소급하지 않는다. worker는 이 도구가 켜져 있을 때만 「연결 요청이면 카드 제안」 system 턴(`CARD_SUGGEST_DIRECTIVE`)을 싣는다.
 - 두 종류를 **같은 배치에서** 연다(GC-6). 한쪽만 열면 「어떤 에이전트는 카드를 주고 어떤 에이전트는 설정 경로만 말한다」가 된다.
 - **쓰기 경로**: 기존 `agent_tenant_tx`(`SET LOCAL app.workspace_id`) 안에서 `send_message_in_tx`(channel_seq 증가 + message INSERT + outbox INSERT 단일 tx). 승인 행 0, run park 0(run 상태를 바꾸지 않는다), props 패치 0, **새 outbox 생산자 0**, 새 테이블·컬럼 0. D7은 그대로다.
 - **에이전트는 실행하지 않는다.** 이 도구는 PTY·provider_link 라우트·설정 API 어느 것도 부르지 않는다. 로그인·키 저장·연결 확인은 사람이 카드를 누를 때 그 사람의 클라이언트가 기존 경로로 한다.

@@ -9330,7 +9330,7 @@ components:
           items: {type: string, minLength: 1, maxLength: 200}
           description: >-
             Omitted on agent create, the profile starts with ["card_suggest"]
-            (ADR-0186 증보 G1, GC-8 #2949); a create with no profile object at
+            (ADR-0186 증보 G1 기본 프로필, planner 결정 2026-09-27, GC-8 #2949); a create with no profile object at
             all writes a profile carrying that default too. Omitted on a
             profile PUT, it means []. An explicit list, [] included, is stored
             as given, which is how an operator turns card_suggest off.
