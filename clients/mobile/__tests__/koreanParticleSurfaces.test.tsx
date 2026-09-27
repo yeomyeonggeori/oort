@@ -163,3 +163,47 @@ describe('모바일 소스 어디에도 미룬 조사가 없다', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+describe('#2891 DM 힌트는 서버의 전달 상태를 따른다', () => {
+  const agent = member({
+    id: 'eeeeeeee-1111-4111-8111-eeeeeeeeeeee',
+    kind: 'agent',
+    displayName: 'Claude Code',
+    handle: 'claude-code',
+  });
+  const directory = makeDirectory([
+    member({id: SELF, displayName: '곽성재', handle: 'seongjae'}),
+    agent,
+  ]);
+
+  it('서버가 준 문장을 그대로 쓰고 「바로 말하면」을 약속하지 않는다', () => {
+    render(
+      <Composer
+        recipient="place"
+        directory={directory}
+        channelLabel={agent.displayName}
+        dmAgent={agent}
+        dmHint="곽성재님이 이 대화를 열어야 Claude Code가 답합니다."
+        onSend={() => {}}
+      />,
+    );
+    expect(
+      screen.getByText('곽성재님이 이 대화를 열어야 Claude Code가 답합니다.'),
+    ).toBeTruthy();
+    expect(screen.queryByText(/바로 말하면/)).toBeNull();
+  });
+
+  it('답을 기다리는 동안(null)은 아무 문장도 없다', () => {
+    render(
+      <Composer
+        recipient="place"
+        directory={directory}
+        channelLabel={agent.displayName}
+        dmAgent={agent}
+        dmHint={null}
+        onSend={() => {}}
+      />,
+    );
+    expect(screen.queryByText(/답합니다/)).toBeNull();
+  });
+});

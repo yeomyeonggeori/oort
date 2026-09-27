@@ -33,6 +33,7 @@ pub mod event_subscriptions;
 pub mod health;
 pub mod hosted_agent_connections;
 pub mod hosted_agent_doorbell;
+pub mod hosted_dm_approvals;
 /// ADR-0122 / HD-1 — voice huddle lifecycle and LiveKit room grants.
 pub mod huddles;
 pub mod invites;

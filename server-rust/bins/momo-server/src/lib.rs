@@ -1096,6 +1096,21 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/hosted-agent-connections/{connection}/cleanup-artifacts/{artifact}/acknowledge",
             post(routes::hosted_agent_connections::acknowledge_cleanup_artifact),
         )
+        // ADR-0162 증보 2 (#2915) — the owner's per-DM approval list, and
+        // what a DM member's next message would do (the composer hint).
+        .route(
+            "/v1/workspaces/{ws}/hosted-agent-connections/{connection}/dm-approvals",
+            get(routes::hosted_dm_approvals::list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/hosted-agent-connections/{connection}/dm-approvals/{channel}",
+            put(routes::hosted_dm_approvals::approve)
+                .delete(routes::hosted_dm_approvals::revoke),
+        )
+        .route(
+            "/v1/workspaces/{ws}/channels/{channel}/agent-dm-delivery",
+            get(routes::hosted_dm_approvals::dm_delivery),
+        )
         // ADR-0171 — doorbell register/unregister. Mounted unconditionally so
         // the router shape does not leak the gate; handlers answer empty 404
         // when MOMO_DOORBELL_ENABLED is not the exact word `true`.

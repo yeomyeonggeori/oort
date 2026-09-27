@@ -453,7 +453,12 @@ pub async fn approve_hosted_oauth_request_in_tx(
         "UPDATE hosted_agent_connection \
             SET status = 'detected', detected_at = now(), detected_by = agent_member_id, \
                 confirmed_by = $3, confirmed_at = now(), approved_channel_ids = $4, \
-                approved_scopes = $5, updated_at = now() \
+                approved_scopes = $5, updated_at = now(), \
+                approved_dm_channel_ids = CASE WHEN EXISTS ( \
+                  SELECT 1 FROM agent a WHERE a.workspace_id = $1 \
+                     AND a.member_id = hosted_agent_connection.agent_member_id \
+                     AND a.owner_human_id = $3) \
+                  THEN approved_dm_channel_ids ELSE '{}'::uuid[] END \
           WHERE workspace_id = $1 AND id = $2 AND status = 'pairing_pending' \
             AND auth_mode = 'oauth'",
     )
