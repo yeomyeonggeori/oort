@@ -54,34 +54,102 @@ export function initialPresetId(
 }
 
 /**
+ * 한 사유의 사람 말: 무슨 일이 있었는지(`fact`)와 그다음 할 일(`action`). 해결할
+ * 행동이 없는 사유(확인 전·모의 모드처럼 고칠 것이 없는 것)는 `action`이 null이다.
+ * 사유 어휘는 OpenAPI `ProviderLinkTestResponse.reason`(#2960)이 정본이다.
+ */
+export interface TeamCheckReasonCopy {
+  readonly fact: string;
+  readonly action: string | null;
+}
+
+/** 「30초 뒤」·「2분 뒤」. provider가 밝힌 Retry-After만 쓴다. */
+function retryWhen(seconds: number): string {
+  return seconds < 90 ? `${seconds}초 뒤` : `${Math.ceil(seconds / 60)}분 뒤`;
+}
+
+/**
  * 카드의 결과 줄 문장(해요체, brief §6). 서버 사유는 기계 낱말이다: 아는 것만
  * 사람 말로 옮기고, 모르는 것은 사유 이름을 그대로 둔다(지어내지 않는다).
+ * `retryAfterSeconds`는 한도에 걸린 확인에서 provider가 밝힌 기다릴 시간이다.
  */
-export function teamCheckReason(reason: string | undefined): string {
+export function teamCheckReasonCopy(
+  reason: string | undefined,
+  hints: { retryAfterSeconds?: number } = {}
+): TeamCheckReasonCopy {
   switch (reason) {
     case "provider_auth_failed":
-      return "provider가 키를 거절했어요.";
+      return {
+        fact: "provider가 키를 거절했어요.",
+        action: "키가 맞는지, 만료되지 않았는지 확인하고 새 키를 넣어 주세요.",
+      };
     case "provider_unreachable":
-      return "주소에 닿지 못했어요.";
+      return {
+        fact: "주소에 닿지 못했어요.",
+        action: "주소가 맞는지, 이 서버에서 그 주소로 나갈 수 있는지 확인해 주세요.",
+      };
     case "provider_rate_limited":
-      return "요청 한도에 걸렸어요.";
+      return {
+        fact: "요청 한도에 걸렸어요.",
+        action:
+          hints.retryAfterSeconds !== undefined
+            ? `${retryWhen(hints.retryAfterSeconds)}에 다시 확인해 주세요.`
+            : "잠시 뒤에 다시 확인해 주세요.",
+      };
+    case "provider_egress_denied":
+      // #2960: 서버의 egress 가드가 부르기 전에 막았다. 키는 판정되지 않았다.
+      return {
+        fact: "사설·루프백·메타데이터 주소라 서버가 부르지 않았어요.",
+        action:
+          "같은 망의 provider를 쓰려면 서버 운영자가 AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1을 켜고 그 호스트를 AGENT_PROVIDER_LOCAL_HOSTS에 넣어야 해요.",
+      };
+    case "provider_invalid_response":
+      // #2960: 2xx였지만 모델 목록 모양이 아니다(웹페이지·다른 서비스 주소).
+      return {
+        fact: "주소가 provider API가 아닌 것 같아요.",
+        action: "API 주소(예: …/v1)가 맞는지 확인해 주세요.",
+      };
     case "provider_not_configured":
-      return "주소나 키가 비어 있어요.";
+      return { fact: "주소나 키가 비어 있어요.", action: "키를 넣고 다시 확인해 주세요." };
     case "not_external_provider":
-      return "모의 모드라 실제 provider를 부르지 않아요.";
+      return {
+        fact: "모의 모드라 실제 provider를 부르지 않아요.",
+        action: "실제 provider를 쓰려면 설정에서 모드를 외부 provider로 바꿔 주세요.",
+      };
+    case "hop_disabled":
+      return { fact: "꺼 둔 연결이라 확인하지 않았어요.", action: null };
     case "probe_not_run":
-      // 서버가 실제 provider를 부르지 않았다(#2960 전). 「끝나지 않았다」고 하면
-      // 다시 누르면 끝날 것처럼 읽힌다(design-review #2880 M1).
-      return "이 서버는 아직 키를 직접 확인하지 않아요.";
+      // 서버가 실제 provider를 부르지 않았다(#2960 전 서버, 또는 #2960 뒤에도
+      // 레거시 oauth-openai 머리 연결). 「끝나지 않았다」고 하면 다시 누르면 끝날
+      // 것처럼 읽힌다(design-review #2880 M1).
+      return { fact: "이 서버는 아직 키를 직접 확인하지 않아요.", action: null };
     case undefined:
     case "":
-      return "연결을 확인하지 못했어요.";
+      return { fact: "연결을 확인하지 못했어요.", action: null };
     default: {
       const status = /^provider_status_(\d{3})$/.exec(reason);
-      if (status) return `provider가 ${status[1]} 응답을 줬어요.`;
-      return `연결을 확인하지 못했어요(서버 사유: ${reason}).`;
+      if (status) {
+        const code = Number(status[1]);
+        const action =
+          code === 404
+            ? "API 주소(예: …/v1)가 맞는지 확인해 주세요."
+            : code >= 500
+              ? "provider 쪽 문제일 수 있어요. 잠시 뒤에 다시 확인해 주세요."
+              : null;
+        return { fact: `provider가 ${status[1]} 응답을 줬어요.`, action };
+      }
+      return { fact: `연결을 확인하지 못했어요(서버 사유: ${reason}).`, action: null };
     }
   }
+}
+
+/** 사유 한 줄(사실 + 할 일). 폰 제안 카드가 그대로 쓴다. */
+export function teamCheckReason(
+  reason: string | undefined,
+  hints: { retryAfterSeconds?: number } = {}
+): string {
+  const copy = teamCheckReasonCopy(reason, hints);
+  return copy.action ? `${copy.fact} ${copy.action}` : copy.fact;
 }
 
 // =============================================================================
@@ -92,16 +160,31 @@ export function teamCheckReason(reason: string | undefined): string {
 /**
  * 확인 호출이 키에서 직접 읽은 숫자(#2960 `entries[].probe`). 서버가 실제 호출을
  * 하지 않으면(`probe_not_run`) 없다. 있는 숫자만 싣고 지어내지 않는다(제안서 Q5).
+ * 한도 헤더에는 기간이 실려 오지 않는다: 「분당」이라고 붙이지 않는다.
  */
 export interface TeamProbeDetail {
   readonly modelCount?: number;
   readonly requestsLimit?: number;
   readonly requestsRemaining?: number;
+  readonly tokensLimit?: number;
+  readonly tokensRemaining?: number;
+  readonly retryAfterSeconds?: number;
+  /** OpenRouter 크레딧. `creditLimit: null`은 provider가 밝힌 「한도 없음」이다. */
+  readonly creditLimit?: number | null;
   readonly creditRemaining?: number;
+  readonly creditUsage?: number;
+  /** 서버가 20초 안의 직전 결과를 다시 준 것. */
+  readonly cached?: boolean;
 }
 
 function finiteNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function objectOf(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 /** 첫 칸(팀 기본 키)의 확인 세부. 모르는 모양이면 null(한 줄 문장으로 물러선다). */
@@ -109,48 +192,73 @@ export function teamProbeDetail(probe: ProviderLinkTest | null | undefined): Tea
   if (!probe) return null;
   const entries = (probe as unknown as Record<string, unknown>).entries;
   if (!Array.isArray(entries)) return null;
-  const head = entries.find(
-    (row) => row !== null && typeof row === "object" && (row as Record<string, unknown>).position === 0
-  ) as Record<string, unknown> | undefined;
-  const raw = head?.probe;
-  if (raw === null || typeof raw !== "object") return null;
-  const detail = raw as Record<string, unknown>;
-  const rate = (detail.rateLimit ?? null) as Record<string, unknown> | null;
-  const credit = (detail.credit ?? null) as Record<string, unknown> | null;
+  const head = entries.find((row) => objectOf(row)?.position === 0) as Record<string, unknown> | undefined;
+  const detail = objectOf(head?.probe);
+  if (detail === null) return null;
+  const rate = objectOf(detail.rateLimit);
+  const credit = objectOf(detail.credit);
   const out: {
-    modelCount?: number;
-    requestsLimit?: number;
-    requestsRemaining?: number;
-    creditRemaining?: number;
+    -readonly [K in keyof TeamProbeDetail]: TeamProbeDetail[K];
   } = {};
-  const models = finiteNumber(detail.modelCount);
-  if (models !== undefined) out.modelCount = models;
-  if (rate && typeof rate === "object") {
-    const limit = finiteNumber(rate.requestsLimit);
-    const remaining = finiteNumber(rate.requestsRemaining);
-    if (limit !== undefined) out.requestsLimit = limit;
-    if (remaining !== undefined) out.requestsRemaining = remaining;
+  const put = <K extends keyof TeamProbeDetail>(key: K, value: TeamProbeDetail[K] | undefined) => {
+    if (value !== undefined) out[key] = value;
+  };
+  put("modelCount", finiteNumber(detail.modelCount));
+  put("retryAfterSeconds", finiteNumber(detail.retryAfterSeconds));
+  if (rate) {
+    put("requestsLimit", finiteNumber(rate.requestsLimit));
+    put("requestsRemaining", finiteNumber(rate.requestsRemaining));
+    put("tokensLimit", finiteNumber(rate.tokensLimit));
+    put("tokensRemaining", finiteNumber(rate.tokensRemaining));
   }
-  if (credit && typeof credit === "object") {
-    const left = finiteNumber(credit.limitRemaining);
-    if (left !== undefined) out.creditRemaining = left;
+  if (credit) {
+    // `limit`은 null이 뜻이 있다(한도 없음). 키가 없거나 숫자가 아니면 싣지 않는다.
+    if (credit.limit === null) out.creditLimit = null;
+    else put("creditLimit", finiteNumber(credit.limit));
+    put("creditRemaining", finiteNumber(credit.limitRemaining));
+    put("creditUsage", finiteNumber(credit.usage));
   }
+  if (detail.cached === true) out.cached = true;
   return Object.keys(out).length > 0 ? out : null;
 }
 
-/** 「쓸 수 있는 모델 6개 · 요청 한도 50 · 잔액 12.5」. 없는 칸은 빠진다. */
+function count(value: number): string {
+  return Math.round(value).toLocaleString("ko-KR");
+}
+
+function credits(value: number): string {
+  return value.toLocaleString("ko-KR", { maximumFractionDigits: 2 });
+}
+
+/** 「쓸 수 있는 모델 6개 · 요청 한도 50 중 49 남음 · 남은 크레딧 12.5」. 없는 칸은 빠진다. */
 export function teamProbeDetailText(detail: TeamProbeDetail | null): string | null {
   if (!detail) return null;
   const parts: string[] = [];
-  if (detail.modelCount !== undefined) parts.push(`쓸 수 있는 모델 ${detail.modelCount}개`);
+  if (detail.modelCount !== undefined) parts.push(`쓸 수 있는 모델 ${count(detail.modelCount)}개`);
   if (detail.requestsLimit !== undefined) {
     parts.push(
       detail.requestsRemaining !== undefined
-        ? `요청 한도 ${detail.requestsLimit} 중 ${detail.requestsRemaining} 남음`
-        : `요청 한도 ${detail.requestsLimit}`
+        ? `요청 한도 ${count(detail.requestsLimit)} 중 ${count(detail.requestsRemaining)} 남음`
+        : `요청 한도 ${count(detail.requestsLimit)}`
     );
   }
-  if (detail.creditRemaining !== undefined) parts.push(`남은 잔액 ${detail.creditRemaining}`);
+  if (detail.tokensLimit !== undefined) {
+    parts.push(
+      detail.tokensRemaining !== undefined
+        ? `토큰 한도 ${count(detail.tokensLimit)} 중 ${count(detail.tokensRemaining)} 남음`
+        : `토큰 한도 ${count(detail.tokensLimit)}`
+    );
+  }
+  if (detail.creditRemaining !== undefined) {
+    parts.push(
+      typeof detail.creditLimit === "number"
+        ? `남은 크레딧 ${credits(detail.creditRemaining)} / ${credits(detail.creditLimit)}`
+        : `남은 크레딧 ${credits(detail.creditRemaining)}`
+    );
+  } else if (detail.creditLimit === null) {
+    parts.push("크레딧 한도 없음");
+  }
+  if (detail.creditUsage !== undefined) parts.push(`쓴 크레딧 ${credits(detail.creditUsage)}`);
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
@@ -171,13 +279,19 @@ export interface TeamCheckResult {
   readonly headline: string;
   /** 두 표면이 똑같이 그리는 문장. */
   readonly text: string;
+  /**
+   * provider가 밝힌 숫자 한 줄(모델 수·한도·크레딧). 성공한 확인에만 있고, 숫자가
+   * 하나도 없으면 null이다. 두 표면은 null이면 그 줄을 그리지 않는다.
+   */
+  readonly detail: string | null;
 }
 
 /**
  * 확인 결과 한 줄. `justSaved`는 「저장하고 확인」 직후인가: 그때 실패하면 저장한
- * 키가 남아 있다는 사실을 함께 말한다(저장 전 판정 경로가 서버에 없다).
- * `probe_not_run`(#2960 전 서버)은 `mute`(「확인 전」)이고, 문장은 서버가 확인하지 않는다는 사실이다:
- * 키가 거절됐다고 말하지 않는다.
+ * 키가 남아 있다는 사실을 함께 말한다(저장 전 판정 경로가 서버에 없다). 할 일은
+ * 사유마다 다르다(키·주소·서버 설정): 사유 문장이 정하고 여기서 덧붙이지 않는다.
+ * `probe_not_run`(#2960 전 서버·레거시 oauth 연결)은 `mute`(「확인 전」)이고, 문장은
+ * 서버가 확인하지 않는다는 사실이다: 키가 거절됐다고 말하지 않는다.
  */
 export function teamCheckResult(input: {
   probe: ProviderLinkTest;
@@ -185,23 +299,23 @@ export function teamCheckResult(input: {
   nowMs: number;
 }): TeamCheckResult {
   const { probe, justSaved, nowMs } = input;
+  const numbers = teamProbeDetail(probe);
   if (probe.ok) {
-    const detail = teamProbeDetailText(teamProbeDetail(probe));
+    const when = numbers?.cached ? "방금 확인한 결과" : teamCheckSince(probe.checkedAtMs, nowMs);
     return {
       tone: "ok",
       headline: "키 확인됨",
-      text: `응답을 확인했어요 · ${teamCheckSince(probe.checkedAtMs, nowMs)}${detail ? ` · ${detail}` : ""}`,
+      text: `응답을 확인했어요 · ${when}`,
+      detail: teamProbeDetailText(numbers),
     };
   }
-  const why = teamCheckReason(probe.reason);
+  const copy = teamCheckReasonCopy(probe.reason, { retryAfterSeconds: numbers?.retryAfterSeconds });
   const notRun = probe.reason === "probe_not_run";
+  const saved = !justSaved ? "" : notRun ? " 키는 저장됐어요." : " 저장한 키는 그대로 남아 있어요.";
   return {
     tone: notRun ? "mute" : "bad",
     headline: notRun ? "확인 전" : "확인 실패",
-    text: !justSaved
-      ? why
-      : notRun
-        ? `${why} 키는 저장됐어요.`
-        : `${why} 저장한 키는 그대로 남아 있어요. 키를 바꾸려면 새로 넣으세요.`,
+    text: `${copy.fact}${saved}${copy.action ? ` ${copy.action}` : ""}`,
+    detail: null,
   };
 }

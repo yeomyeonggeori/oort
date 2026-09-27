@@ -145,6 +145,8 @@ const RESULT_TONE: Record<ResultTone, string> = {
 interface RowResult {
   tone: ResultTone;
   text: string;
+  /** provider가 밝힌 숫자 한 줄(#2975). 없으면 그리지 않는다. */
+  detail?: string | null;
 }
 
 /** 시안 `.row`: 로고 · 이름(출처 알약) · 상태 알약 · 행동 하나, 그 밑에 결과 줄. */
@@ -226,7 +228,14 @@ function CardRow({
           {(result.tone === "warn" || result.tone === "bad") && (
             <AlertTriangle className="mt-px size-3 shrink-0" aria-hidden="true" />
           )}
-          <span className="min-w-0">{result.text}</span>
+          <span className="flex min-w-0 flex-col">
+            <span>{result.text}</span>
+            {result.detail && (
+              <span className="tabular-nums text-ink" data-testid={`${testId}-result-detail`}>
+                {result.detail}
+              </span>
+            )}
+          </span>
         </p>
       )}
       {form && <div data-slot="form">{form}</div>}
@@ -895,7 +904,7 @@ function TeamSection({
   } else if (!offline && probe && !check.isPending) {
     // 문장은 코어 한 곳(#2880): 설정 곁판과 같은 확인에 같은 말.
     const line = teamCheckResult({ probe, justSaved, nowMs: Date.now() });
-    result = { tone: line.tone, text: line.text };
+    result = { tone: line.tone, text: line.text, detail: line.detail };
   }
 
   // 서버가 부르지 않은 확인(`probe_not_run`)은 실패가 아니다: 「키 바꾸기」로 몰지 않는다(#2880).

@@ -863,6 +863,11 @@ function ProbeAnswer({
         <span className="break-keep text-meta text-ink-muted" data-testid="ai-link-probe-text">
           {line.text}
         </span>
+        {line.detail !== null && (
+          <span className="break-keep text-meta tabular-nums text-ink" data-testid="ai-link-probe-detail">
+            {line.detail}
+          </span>
+        )}
       </div>
       {probeEntries.length > 1 && (
         <ChainProbeResult

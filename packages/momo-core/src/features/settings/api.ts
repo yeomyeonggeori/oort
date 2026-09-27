@@ -104,6 +104,44 @@ export interface ProviderChainProbe {
   reason?: string;
   /** `ok` | `fall_over` | `propagate` | `skipped`. */
   disposition: string;
+  /**
+   * What the dial actually saw (#2960, OpenAPI `ProviderProbeDetail`). Present
+   * only when the hop was dialled; a server built before #2960 never sends it.
+   * Every number is one the provider stated. Read through
+   * `teamKeyForm.teamProbeDetail`, which drops any field of the wrong type.
+   */
+  probe?: ProviderProbeDetail;
+}
+
+/** `ProviderRateLimit`: the provider's own rate-limit headers. No window is carried. */
+export interface ProviderRateLimit {
+  source: "x-ratelimit" | "anthropic-ratelimit";
+  requestsLimit?: number;
+  requestsRemaining?: number;
+  tokensLimit?: number;
+  tokensRemaining?: number;
+}
+
+/** `ProviderKeyCredit`: OpenRouter `GET /key` (credits). `limit: null` = no cap. */
+export interface ProviderKeyCredit {
+  limit: number | null;
+  limitRemaining: number | null;
+  usage: number | null;
+}
+
+/** `ProviderProbeDetail` (#2960). */
+export interface ProviderProbeDetail {
+  outcome: "ok" | "rejected" | "unreachable" | "rate_limited" | "unknown";
+  method: "models" | "key";
+  httpStatus?: number;
+  latencyMs: number;
+  modelCount?: number;
+  rateLimit?: ProviderRateLimit;
+  retryAfterSeconds?: number;
+  credit?: ProviderKeyCredit;
+  probedAtMs: number;
+  /** The link's last report reused inside the server's 20 s window. */
+  cached: boolean;
 }
 
 /**
