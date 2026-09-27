@@ -241,7 +241,7 @@ function teamRoute({ link = KEY_LINK, test = probe(true), testHold = null, denie
   };
 }
 
-const outDir = resolve(webRoot, "captures/2944");
+const outDir = resolve(webRoot, process.env.CAPTURE_OUT || "captures/2944");
 
 async function scene(browser, { width, scheme, name, query, team, act }) {
   const height = width === 390 ? 844 : 800;
@@ -350,6 +350,46 @@ function scenes() {
       name: "checked",
       query: "aiEntry=rows&aiProbe=claude-ready",
       team: () => teamRoute({ test: probe(true) }),
+      act: {
+        run: async (page) => {
+          await page.getByTestId("ai-connect-card-team-check").click();
+          await page.getByTestId("ai-connect-card-team-result").waitFor();
+        },
+      },
+    },
+    // #2975: provider가 밝힌 숫자 줄과 #2960 새 사유. OpenAPI 모양 대역(#2972 전).
+    {
+      name: "checked-numbers",
+      query: "aiEntry=rows&aiProbe=claude-ready",
+      team: () =>
+        teamRoute({
+          test: {
+            ...probe(true),
+            cascadeOk: true,
+            entries: [
+              {
+                position: 0, source: "provider_link", mode: "external-hermes", endpointLabel: "Anthropic",
+                enabled: true, ok: true, disposition: "ok",
+                probe: {
+                  outcome: "ok", method: "models", httpStatus: 200, latencyMs: 180, probedAtMs: Date.now(),
+                  cached: false, modelCount: 6,
+                  rateLimit: { source: "anthropic-ratelimit", requestsLimit: 50, requestsRemaining: 49 },
+                },
+              },
+            ],
+          },
+        }),
+      act: {
+        run: async (page) => {
+          await page.getByTestId("ai-connect-card-team-check").click();
+          await page.getByTestId("ai-connect-card-team-result-detail").waitFor();
+        },
+      },
+    },
+    {
+      name: "fail-egress",
+      query: "aiEntry=rows&aiProbe=claude-ready",
+      team: () => teamRoute({ test: probe(false, "provider_egress_denied") }),
       act: {
         run: async (page) => {
           await page.getByTestId("ai-connect-card-team-check").click();
