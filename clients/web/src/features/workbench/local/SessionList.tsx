@@ -546,11 +546,24 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
   );
 });
 
-function StatusMark({ status, withLabel = false }: { status: SessionStatus; withLabel?: boolean }) {
+/**
+ * 상태 표지(시안 `.st`): 모양 + 글자. 칸 머리(#2776)도 같은 표지를 쓴다.
+ * `srLabel`이면 글자를 읽기 도구에만 남긴다(칸 머리는 시안처럼 모양만 보인다).
+ */
+export function StatusMark({
+  status,
+  withLabel = false,
+  srLabel = false,
+}: {
+  status: SessionStatus;
+  withLabel?: boolean;
+  srLabel?: boolean;
+}) {
   return (
-    <span className="sl-st" data-status={status}>
+    <span className="sl-st" data-status={status} data-testid="status-mark">
       <i aria-hidden />
       {withLabel ? SESSION_STATUS_LABEL[status] : null}
+      {srLabel ? <span className="sr-only">{SESSION_STATUS_LABEL[status]}</span> : null}
     </span>
   );
 }

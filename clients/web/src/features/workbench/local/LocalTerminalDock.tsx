@@ -55,11 +55,15 @@ import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect"
 import { detectLocalHarnesses, type PtyProgram } from "@/lib/tauri";
 import { WORK_NAV } from "@momo/core/features/workbench/workTab";
 import {
-  statusFromPhase,
   PANE_GIT_UNKNOWN,
+  SESSION_STATUS_LABEL,
   type SessionListInput,
 } from "@momo/core/features/workbench/sessionList";
-import { SessionList, type SessionListHandle } from "./SessionList";
+import { nextWaitingPane, waitingLine } from "@momo/core/features/workbench/paneStatus";
+import { SessionList, StatusMark, type SessionListHandle } from "./SessionList";
+import { paneAttention, paneStatusOf } from "./paneAttention";
+import type { PaneStatusView } from "../WorkbenchGrid";
+import type { LocalSessionView } from "./localSessions";
 import { usePaneGit } from "./usePaneGit";
 import { useSessionListOpen } from "./sessionListOpen";
 import { WorkbenchGrid, type WorkbenchPaneInfo } from "../WorkbenchGrid";
@@ -98,6 +102,12 @@ function detectPlatform(): KeyPlatform {
 
 
 const NO_WAITING = "나를 기다리는 칸이 없습니다.";
+
+/** 알림·인박스에 쓰는 칸 이름: 작업 이름(OSC 제목), 없으면 프로그램 이름. */
+function paneName(view: LocalSessionView): string {
+  if (view.title) return view.title;
+  return view.program.kind === "harness" ? HARNESS_LABEL[view.program.id] ?? view.program.id : "셸";
+}
 const SPLIT_REFUSED = "칸이 좁아 새 세션을 열 수 없습니다. 칸을 닫거나 도크를 키우세요.";
 
 /** 칸 머리에서 xterm으로 가지 않은 키: 터미널 안 사건인가. */
@@ -139,6 +149,9 @@ export function LocalTerminalDock({
   const [harnesses, setHarnesses] = useState<LocalHarnessProbe[]>([]);
   const [confirm, setConfirm] = useState<{ paneId: PaneId; close: () => void } | null>(null);
   const sessionMap = useSyncSessions(sessions);
+  const sessionMapRef = useRef(sessionMap);
+  sessionMapRef.current = sessionMap;
+  const attention = paneAttention();
   const listRef = useRef<SessionListHandle>(null);
   const list = useSessionListOpen(minimumSize(layout.root).width);
   const listOpenRef = useRef(list.open);
@@ -225,14 +238,31 @@ export function LocalTerminalDock({
           pickedRef.current = true;
           setJumpOpen(true);
           return;
-        case "next-waiting":
-          // 「나를 기다림」 상태는 상태 점(#2776)이 채운다. 그 전에는 기다리는
-          // 칸이 없다는 사실만 말한다.
-          if (active) setNotice(NO_WAITING);
+        case "next-waiting": {
+          // 격자 순서로 지금 칸 다음의 「나를 기다림」 칸(#2776). 도크가 닫혀 있으면 연다.
+          const current = layoutRef.current;
+          const target = nextWaitingPane(
+            paneIds(current.root),
+            (id) => paneStatusOf(sessionMapRef.current.get(id)),
+            current.focused
+          );
+          if (target === null) {
+            if (active) setNotice(NO_WAITING);
+            return;
+          }
+          if (!tab && !dock.open) openDock();
+          const result = focusPane(current, target);
+          if (result.ok) {
+            setNotice(null);
+            layoutRef.current = result.layout;
+            setLayout(result.layout);
+          }
+          focusFocusedPane();
           return;
+        }
       }
     },
-    [active, dock.open, newSession, tab, openListAndFocus]
+    [active, dock.open, newSession, tab, openListAndFocus, setLayout]
   );
 
   // 전역 키: 창의 캡처 단계. 컴포저에서든 터미널 안에서든 먼저 본다.
@@ -329,9 +359,42 @@ export function LocalTerminalDock({
     });
   };
 
+  // 「나를 기다림」·「끝남」을 인박스와 OS 알림으로(#2776). 도크가 닫혀 있어도
+  // 판정은 돈다(칸의 프로세스는 계속 돈다). 사람이 보는 칸은 격자가 보일 때의 활성 칸이다.
+  useEffect(() => {
+    const order = paneIds(layout.root);
+    attention.observe(
+      order.flatMap((id, i) => {
+        const view = sessionMap.get(id);
+        const status = paneStatusOf(view);
+        return view && status ? [{ paneId: id, index: i + 1, name: paneName(view), status, signal: view.signal }] : [];
+      }),
+      active ? layout.focused : null
+    );
+  }, [attention, sessionMap, layout, active]);
+
   if (!active) return null;
 
   const ids = paneIds(layout.root);
+  const statusView = (pane: WorkbenchPaneInfo): PaneStatusView | null => {
+    const view = sessionMap.get(pane.id);
+    const status = paneStatusOf(view);
+    if (!view || !status) return null;
+    const waiting =
+      status === "waiting"
+        ? {
+            line: waitingLine(view.signal) ?? "입력을 기다려요",
+            // 시안 ①: 활성 칸은 다음 기다림으로 가는 키, 나머지는 그 칸으로 가는 키.
+            keycap: pane.focused ? "⌃⇧J" : pane.index <= 9 ? `⌃${pane.index}` : null,
+            mark: <StatusMark status="waiting" />,
+          }
+        : null;
+    return {
+      mark: <StatusMark status={status} />,
+      label: SESSION_STATUS_LABEL[status],
+      waiting,
+    };
+  };
   const titleOf = (pane: WorkbenchPaneInfo) => localPaneTitle(sessionMap.get(pane.id) ?? null);
   const confirmView = confirm ? sessionMap.get(confirm.paneId) ?? null : null;
   const confirmIndex = confirm ? ids.indexOf(confirm.paneId) + 1 : 0;
@@ -466,6 +529,7 @@ export function LocalTerminalDock({
       storage={storage}
       platform={platform}
       paneTitle={titleOf}
+      paneStatus={statusView}
       renderPane={(pane) => <LocalTerminalPane pane={pane} platform={platform} sessions={sessions} />}
       onRequestClose={requestClose}
       onCloseLastPane={onCloseLastPane}
@@ -488,7 +552,7 @@ export function LocalTerminalDock({
           index: i + 1,
           title: view.title ?? programName,
           harness,
-          status: statusFromPhase(view.phase, view.exit?.code ?? null, view.exit?.signal ?? null),
+          status: paneStatusOf(view) ?? "idle",
           // L 세션 공유(ADR-0190 D4-b)는 이 기기에 아직 상태가 없다.
           shared: false,
           // 읽기 전이면 「확인 중」(null). 시작 중이거나 PTY가 있는 칸은 곧 읽는다. PTY 없이

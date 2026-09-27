@@ -55,6 +55,7 @@ use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use crate::harness_path;
+use crate::pane_signal::{self, PaneSignal};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 
@@ -184,6 +185,10 @@ pub struct SpawnPlan {
     /// PATH to set for the child; `None` keeps the inherited one (a login
     /// shell rebuilds its own).
     pub path: Option<OsString>,
+    /// Wire the harness's status hooks to this pane (#2776): the three
+    /// `OORT_PANE_*` variables and `pane_signal::harness_hook_args`. Harness
+    /// panes only; a shell or a sign-in has nothing to report.
+    pub hooks: bool,
 }
 
 pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan, String> {
@@ -198,6 +203,7 @@ pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan,
                 cwd,
                 size,
                 path: None,
+                hooks: false,
             })
         }
         Program::Login { id, method } => {
@@ -216,6 +222,7 @@ pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan,
                 cwd,
                 size,
                 path: Some(host.path.clone()),
+                hooks: false,
             })
         }
         Program::Harness { id } => {
@@ -230,6 +237,7 @@ pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan,
                 cwd,
                 size,
                 path: Some(host.path.clone()),
+                hooks: true,
             })
         }
     }
@@ -356,6 +364,9 @@ pub struct PtyExit {
 pub trait PtySink: Send + Sync + 'static {
     fn output(&self, bytes: Vec<u8>);
     fn exit(&self, exit: PtyExit);
+    /// A harness hook's status signal for this session (#2776,
+    /// `pane_signal.rs`). Never derived from output.
+    fn signal(&self, _signal: PaneSignal) {}
 }
 
 /// Output credit: bytes handed to the sink and not yet acknowledged.
@@ -404,6 +415,10 @@ struct Session {
     /// local git reads (ADR-0190 D3-c, #2855) run here and nowhere else: the
     /// webview names a pane, never a folder.
     folder: PathBuf,
+    /// Where this session's hook signals go (#2776), and the token a hook
+    /// line must carry to reach it. Empty token = no hooks wired.
+    sink: Arc<dyn PtySink>,
+    token: String,
 }
 
 #[derive(Default)]
@@ -413,6 +428,9 @@ pub struct PtyManager {
     /// concurrent spawns cannot both pass the cap.
     live: Arc<AtomicUsize>,
     next_id: AtomicU32,
+    /// The pane-signal socket, once it is listening (#2776). Harness panes
+    /// spawned before that (or if binding failed) simply get no hooks.
+    hook_socket: std::sync::OnceLock<PathBuf>,
 }
 
 impl PtyManager {
@@ -437,6 +455,18 @@ impl PtyManager {
         cmd: CommandBuilder,
         sink: Arc<dyn PtySink>,
     ) -> Result<u32, String> {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut cmd = cmd;
+        let token = match (plan.hooks, self.hook_socket.get()) {
+            (true, Some(sock)) => {
+                let token = pane_signal::new_token().map_err(|e| format!("token: {e}"))?;
+                cmd.env(pane_signal::ENV_SOCK, sock);
+                cmd.env(pane_signal::ENV_PANE, id.to_string());
+                cmd.env(pane_signal::ENV_TOKEN, &token);
+                token
+            }
+            _ => String::new(),
+        };
         let pair = native_pty_system()
             .openpty(pty_size(plan.size))
             .map_err(|e| format!("openpty: {e}"))?;
@@ -457,7 +487,6 @@ impl PtyManager {
             .take_writer()
             .map_err(|e| format!("writer: {e}"))?;
 
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
         let (input, keystrokes) = mpsc::channel::<Vec<u8>>();
         let queued = Arc::new(AtomicUsize::new(0));
         let flow = Arc::new(Flow::default());
@@ -486,6 +515,8 @@ impl PtyManager {
                 flow: flow.clone(),
                 pid,
                 folder: plan.cwd.clone(),
+                sink: sink.clone(),
+                token,
             },
         );
 
@@ -549,6 +580,30 @@ impl PtyManager {
             .ok()?
             .get(&id)
             .map(|s| s.folder.clone())
+    }
+
+    /// Start handing harness panes the hook environment (#2776).
+    pub fn set_hook_socket(&self, path: PathBuf) {
+        let _ = self.hook_socket.set(path);
+    }
+
+    pub fn hook_socket(&self) -> Option<&Path> {
+        self.hook_socket.get().map(PathBuf::as_path)
+    }
+
+    /// A hook line reached the socket: hand its signal to session `id` if the
+    /// token is the one that session was spawned with. Anything else is
+    /// dropped without a word — the hook client exits 0 either way.
+    pub fn deliver_signal(&self, id: u32, token: &str, signal: PaneSignal) -> bool {
+        let sink = {
+            let sessions = self.sessions.lock().unwrap();
+            match sessions.get(&id) {
+                Some(s) if !s.token.is_empty() && tokens_match(&s.token, token) => s.sink.clone(),
+                _ => return false,
+            }
+        };
+        sink.signal(signal);
+        true
     }
 
     /// The webview drew `bytes` more of this session's output.
@@ -657,6 +712,15 @@ fn read_loop(
         }
     }
     let _ = drained.send(());
+}
+
+/// Compare without stopping at the first different byte.
+fn tokens_match(a: &str, b: &str) -> bool {
+    a.len() == b.len()
+        && a.bytes()
+            .zip(b.bytes())
+            .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+            == 0
 }
 
 fn pty_size((cols, rows): (u16, u16)) -> PtySize {
@@ -768,6 +832,7 @@ pub struct PtyState(pub Arc<PtyManager>);
 struct ChannelSink {
     output: Channel<InvokeResponseBody>,
     exit: Channel<PtyExit>,
+    signal: Channel<PaneSignal>,
 }
 
 impl PtySink for ChannelSink {
@@ -778,6 +843,9 @@ impl PtySink for ChannelSink {
     }
     fn exit(&self, exit: PtyExit) {
         let _ = self.exit.send(exit);
+    }
+    fn signal(&self, signal: PaneSignal) {
+        let _ = self.signal.send(signal);
     }
 }
 
@@ -790,6 +858,7 @@ pub async fn pty_spawn(
     request: SpawnRequest,
     on_output: Channel<InvokeResponseBody>,
     on_exit: Channel<PtyExit>,
+    on_signal: Channel<PaneSignal>,
 ) -> Result<u32, String> {
     let manager = state.0.clone();
     // openpty/fork block; keep them off the async workers as well as off the
@@ -797,10 +866,23 @@ pub async fn pty_spawn(
     tauri::async_runtime::spawn_blocking(move || {
         let host = HostFacts::current(&request.program)?;
         let plan = plan_spawn(&request, &host)?;
-        let cmd = build_command(&plan, std::env::vars_os());
+        let mut cmd = build_command(&plan, std::env::vars_os());
+        // The hook wiring is the only argv a harness gets, and it is fixed
+        // here: this binary's own path and a closed event list (#2776).
+        if let (Program::Harness { id }, true) = (&request.program, plan.hooks) {
+            if manager.hook_socket().is_some() {
+                if let Some(args) = std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| pane_signal::harness_hook_args(id, &exe))
+                {
+                    cmd.args(&args);
+                }
+            }
+        }
         let sink = Arc::new(ChannelSink {
             output: on_output,
             exit: on_exit,
+            signal: on_signal,
         });
         manager.spawn(&plan, cmd, sink)
     })
@@ -1112,6 +1194,7 @@ mod tests {
     struct Recorder {
         bytes: Mutex<Vec<u8>>,
         exit: Mutex<Option<PtyExit>>,
+        signals: Mutex<Vec<PaneSignal>>,
     }
 
     impl PtySink for Recorder {
@@ -1120,6 +1203,9 @@ mod tests {
         }
         fn exit(&self, exit: PtyExit) {
             *self.exit.lock().unwrap() = Some(exit);
+        }
+        fn signal(&self, signal: PaneSignal) {
+            self.signals.lock().unwrap().push(signal);
         }
     }
 
@@ -1212,6 +1298,7 @@ mod tests {
             cwd: home(),
             size: (80, 24),
             path: None,
+            hooks: false,
         };
         let cmd = build_command(
             &plan,
@@ -1243,6 +1330,7 @@ mod tests {
             cwd: home(),
             size: (80, 24),
             path: None,
+            hooks: false,
         };
         let manager = PtyManager::default();
         let sink = Arc::new(Recorder::default());
@@ -1279,6 +1367,7 @@ mod tests {
             cwd: home(),
             size: (80, 24),
             path: None,
+            hooks: false,
         };
         let manager = PtyManager::default();
         let sink = Arc::new(Recorder::default());
@@ -1316,6 +1405,7 @@ mod tests {
             cwd: home(),
             size: (80, 24),
             path: None,
+            hooks: false,
         }
     }
 
@@ -1328,6 +1418,7 @@ mod tests {
             cwd: home(),
             size: (80, 24),
             path: None,
+            hooks: false,
         }
     }
 
@@ -1830,5 +1921,73 @@ mod tests {
         let exit = sink.wait_exit(SLOW);
         assert_ne!(exit.code, Some(0), "{exit:?}");
         std::fs::remove_dir_all(bin).ok();
+    }
+
+    // --- pane signals (#2776) -------------------------------------------------
+
+    /// A harness pane gets the socket, its id and a token; a hook line with
+    /// that token reaches this pane's sink, and a line with another token, or
+    /// one aimed at a shell pane, reaches nothing. Output that looks like a
+    /// permission prompt is not a signal (ADR-0190 D4-b).
+    #[test]
+    fn a_hook_line_reaches_its_own_pane_and_output_never_does() {
+        let dir = std::env::temp_dir().join(format!("oort-pty-sig-{}", std::process::id()));
+        let sock = dir.join("hook.sock");
+        let listener = pane_signal::bind(&sock).unwrap();
+        let manager = Arc::new(PtyManager::default());
+        manager.set_hook_socket(sock.clone());
+        pane_signal::serve(listener, manager.clone());
+
+        // The pane prints a fake permission prompt (output), then sends one
+        // good line and one line carrying a wrong token, both via nc -U.
+        let script = r#"echo 'Notification permission_prompt: Allow Bash? sk-ant-XXXX'
+line() { printf '{"pane":%s,"token":"%s","source":"claude","event":"%s","detail":"permission_prompt"}\n' "$OORT_PANE_ID" "$1" "$2" | /usr/bin/nc -U "$OORT_PANE_HOOK_SOCK"; }
+line "$OORT_PANE_TOKEN" Notification
+line "not-the-token" Stop
+echo "id=$OORT_PANE_ID tlen=${#OORT_PANE_TOKEN} done"
+"#;
+        let mut plan = sh(script);
+        plan.hooks = true;
+        let sink = Arc::new(Recorder::default());
+        let id = manager
+            .spawn(&plan, build_command(&plan, path_env()), sink.clone())
+            .unwrap();
+        sink.wait_exit(SLOW);
+        let text = sink.text();
+        assert!(text.contains(&format!("id={id} tlen=32 done")), "{text:?}");
+        let start = Instant::now();
+        while sink.signals.lock().unwrap().is_empty() && start.elapsed() < SLOW {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(
+            *sink.signals.lock().unwrap(),
+            [PaneSignal::WaitingPermission],
+            "only the line with this pane's token"
+        );
+
+        // A shell pane gets no hook environment at all.
+        let plan = sh(r#"echo "sock=[${OORT_PANE_HOOK_SOCK}] tok=[${OORT_PANE_TOKEN}]""#);
+        let shell_sink = Arc::new(Recorder::default());
+        manager
+            .spawn(&plan, build_command(&plan, path_env()), shell_sink.clone())
+            .unwrap();
+        shell_sink.wait_exit(SLOW);
+        assert!(
+            shell_sink.text().contains("sock=[] tok=[]"),
+            "{:?}",
+            shell_sink.text()
+        );
+        pane_signal::remove(&sock);
+    }
+
+    #[test]
+    fn a_signal_for_a_closed_or_unknown_pane_goes_nowhere() {
+        let manager = PtyManager::default();
+        assert!(!manager.deliver_signal(1, "", PaneSignal::TurnDone));
+        assert!(!manager.deliver_signal(99, "abc", PaneSignal::TurnDone));
+        assert!(tokens_match("abc", "abc"));
+        assert!(!tokens_match("abc", "abd"));
+        assert!(!tokens_match("abc", "abcd"));
     }
 }

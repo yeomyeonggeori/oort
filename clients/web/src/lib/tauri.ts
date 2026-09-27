@@ -296,7 +296,14 @@ export const desktopPty = {
   async spawn(
     request: PtySpawnRequest,
     onOutput: (bytes: ArrayBuffer) => void,
-    onExit: (exit: PtyExit) => void
+    onExit: (exit: PtyExit) => void,
+    /**
+     * A harness hook's status signal for this session (#2776,
+     * `pane_signal.rs`): one of `PaneSignal` in `@momo/core` workbench
+     * `paneStatus`. Unknown values arrive as-is; the caller filters them.
+     * Never derived from output.
+     */
+    onSignal: (signal: unknown) => void = () => undefined
   ): Promise<number> {
     if (!IS_TAURI) throw new Error("local terminal unavailable");
     const { invoke: call, Channel } = await core();
@@ -304,7 +311,9 @@ export const desktopPty = {
     output.onmessage = onOutput;
     const exit = new Channel<PtyExit>();
     exit.onmessage = onExit;
-    return call<number>("pty_spawn", { request, onOutput: output, onExit: exit });
+    const signal = new Channel<unknown>();
+    signal.onmessage = onSignal;
+    return call<number>("pty_spawn", { request, onOutput: output, onExit: exit, onSignal: signal });
   },
 
   /**

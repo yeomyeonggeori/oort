@@ -63,6 +63,7 @@ const { LocalTerminalDock } = await import("./LocalTerminalDock");
 
 function fakeSessions() {
   const kills: number[] = [];
+  const signals = new Map<number, (s: unknown) => void>();
   const mirror = (): MirrorTerminal => ({
     cols: 80,
     rows: 24,
@@ -74,7 +75,10 @@ function fakeSessions() {
   let id = 1;
   const sessions = createLocalSessions({
     pty: {
-      spawn: async () => id++,
+      spawn: async (_r, _o, _e, onSignal) => {
+        signals.set(id, onSignal ?? (() => undefined));
+        return id++;
+      },
       write: async () => undefined,
       resize: async () => undefined,
       kill: async (n) => void kills.push(n),
@@ -83,7 +87,9 @@ function fakeSessions() {
     loadMirror: async () => ({ create: () => ({ mirror: mirror(), serialize: () => "" }) }),
     storage: () => null,
   });
-  return { sessions, kills };
+  /** 하네스 hook 신호(#2776)를 PTY `ptyId`의 칸에 보낸다. */
+  const signal = (ptyId: number, value: unknown) => act(() => signals.get(ptyId)?.(value));
+  return { sessions, kills, signal };
 }
 
 const reactAct = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
@@ -277,7 +283,7 @@ describe("「내 작업」 탭 (#2854)", () => {
 describe("도는 칸 알림은 격자 상태 줄로 (R5 B-1)", () => {
   it("입력 거부가 저장 실패보다 먼저, 칸 번호와 함께", async () => {
     const { runningPaneNotice } = await vi.importActual<typeof import("./LocalTerminalPane")>("./LocalTerminalPane");
-    const base = { program: { kind: "shell" as const }, title: null, exit: null, error: null, restored: false };
+    const base = { program: { kind: "shell" as const }, title: null, signal: null, exit: null, error: null, restored: false };
     const views = new Map([
       ["p1", { ...base, paneId: "p1", phase: "running" as const, inputNotice: null, storageFailed: true }],
       ["p2", { ...base, paneId: "p2", phase: "running" as const, inputNotice: "보내지 못했습니다.", storageFailed: false }],
@@ -322,12 +328,12 @@ describe("세션 목록 (#2856)", () => {
 
   async function mountTwo() {
     seedTwoPanes();
-    const { sessions } = fakeSessions();
+    const { sessions, signal } = fakeSessions();
     await mount(sessions, "tab");
     await vi.waitFor(() => expect(q("fake-xterm-p2")).not.toBeNull());
     await vi.waitFor(() => expect(rows()).toHaveLength(2));
     await vi.waitFor(() => expect(q("session-list")?.textContent).toContain("feat/2774-xterm"));
-    return { sessions };
+    return { sessions, signal };
   }
 
   it("저장소 하나 → 머리 없음, worktree마다 세션 하나 → 평탄화, diff는 G7만. git 읽기는 G1·G2·G3·G7뿐", async () => {
@@ -398,6 +404,35 @@ describe("세션 목록 (#2856)", () => {
     await vi.waitFor(() => expect(q("session-list")).not.toBeNull());
     await vi.waitFor(() => expect(document.activeElement?.getAttribute("data-session-row")).toBe(""));
     expect(window.localStorage.getItem("momo.web.workbench.sessionList.open.v1")).toBeNull();
+  });
+
+
+  it("hook 신호가 칸 머리·테두리·바닥 띠·목록을 바꾸고, ⌃⇧J가 기다리는 칸으로 간다 (#2776)", async () => {
+    const { signal } = await mountTwo();
+    const pane = (id: string) => document.querySelector<HTMLElement>(`[data-pane-id="${id}"]`)!;
+    expect(pane("p2").hasAttribute("data-waiting")).toBe(false);
+    signal(2, "waiting-permission");
+    await vi.waitFor(() => expect(pane("p2").hasAttribute("data-waiting")).toBe(true));
+    expect(pane("p2").getAttribute("aria-label")).toContain("나를 기다림");
+    expect(pane("p2").querySelector("[data-testid='workbench-pane-waiting']")?.textContent).toContain(
+      "실행 허락을 기다려요"
+    );
+    expect(pane("p2").querySelector("[data-testid='status-mark']")?.getAttribute("data-status")).toBe("waiting");
+    expect(pane("p1").querySelector("[data-testid='status-mark']")?.getAttribute("data-status")).toBe("running");
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid='session-list-row'][data-status='waiting']")).not.toBeNull()
+    );
+
+    act(() => pane("p1").focus());
+    key(document.body, { code: "KeyJ", key: "J", ctrlKey: true, shiftKey: true });
+    await vi.waitFor(() => expect(pane("p2").hasAttribute("data-focused")).toBe(true));
+
+    signal(2, "turn-done");
+    await vi.waitFor(() => expect(pane("p2").hasAttribute("data-waiting")).toBe(false));
+    expect(pane("p2").querySelector("[data-testid='status-mark']")?.getAttribute("data-status")).toBe("done");
+    // 이제 기다리는 칸이 없다.
+    key(document.body, { code: "KeyJ", key: "J", ctrlKey: true, shiftKey: true });
+    await vi.waitFor(() => expect(q("workbench-notice")?.textContent).toBe("나를 기다리는 칸이 없습니다."));
   });
 
 });
