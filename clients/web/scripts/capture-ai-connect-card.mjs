@@ -8,6 +8,9 @@
 // CLI가 없어 design 전용 `?aiEntry=rows&aiProbe=…&aiCard=…`로 구독 줄의 자세를
 // 세우고(제품 빌드는 늘 무시한다), 팀 연결은 네트워크 대역으로 흐름을 실제로 민다.
 // 라이트·다크 × 1280·390 → captures/2944/*.png
+//
+// 모든 장면에서 접근성 트리(CDP Accessibility.getFullAXTree)에 가짜 키 글자가 이름·값
+// 으로 나오면 실패한다(design-review #2961 H1: 키 칸은 password여야 한다).
 // =============================================================================
 
 import { existsSync, mkdirSync } from "node:fs";
@@ -211,6 +214,15 @@ const EMPTY_LINK = {
   baseUrl: "http://mock", endpointLabel: "mock", bearerConfigured: false, availability: "mock",
   keyConfigured: false, diagnostics: [], presets: PRESETS,
 };
+/** 프리셋에 없는 지금 주소(사내 게이트웨이, review #2961 M4). */
+const PROXY_LINK = {
+  ...KEY_LINK,
+  baseUrl: "https://llm-gateway.yeomyeong-internal.example/v1",
+  endpointLabel: "llm-gateway.yeomyeong-internal.example",
+  credentialKind: "bearer",
+  format: "openai",
+};
+const FAKE_KEY = "capture-only-not-a-key-000000000000";
 const probe = (ok, reason) => ({
   schema: "momo.provider_link.test.v0", ok, reason, source: "database", mode: "external-hermes",
   endpointLabel: "Anthropic", checkedAtMs: Date.now(),
@@ -263,14 +275,39 @@ async function scene(browser, { width, scheme, name, query, team, act }) {
     throw error;
   });
   await wait(400);
-  if (act?.run) await act.run(page);
-  await page.mouse.move(0, 0);
+  // 접근성 트리를 먼저 잰다: 새 CDP 세션은 Playwright의 오프라인 흉내를 풀어 버린다.
+  if (act?.run) await act.run(page, () => assertNoKeyInAxTree(context, page, name));
+  if (!act?.checksAx) await assertNoKeyInAxTree(context, page, name);
+  // 오프라인 장면은 잠긴 저장 버튼 위의 포인터(흐린 상태)를 그대로 찍는다.
+  if (!act?.keepPointer) await page.mouse.move(0, 0);
   await wait(300);
   const path = resolve(outDir, `${name}-${width}-${scheme}.png`);
   await page.screenshot({ path });
   const text = (await page.getByTestId("ai-connect-card").textContent()) ?? "";
   await context.close();
   return { name, width, scheme, path, text };
+}
+
+/** 접근성 트리에 가짜 키가 이름·값으로 나오면 실패한다(스크린리더·접근성 권한 앱이 읽는 면). */
+async function assertNoKeyInAxTree(context, page, name) {
+  const cdp = await context.newCDPSession(page);
+  const { nodes } = await cdp.send("Accessibility.getFullAXTree");
+  await cdp.detach();
+  const leaks = nodes.filter((node) =>
+    [node.name?.value, node.value?.value, node.description?.value].some(
+      (text) => typeof text === "string" && text.includes(FAKE_KEY.slice(0, 16))
+    )
+  );
+  if (leaks.length > 0) {
+    throw new Error(`[${name}] 접근성 트리에 키가 평문으로 있다: ${JSON.stringify(leaks.map((n) => n.role?.value))}`);
+  }
+}
+
+/** 실패한 지금 키 → 「키 바꾸기」로 폼을 연다. */
+async function openReplaceForm(page) {
+  await page.getByTestId("ai-connect-card-team-check").click();
+  await page.getByTestId("ai-connect-card-team-key").click();
+  await page.getByTestId("ai-connect-card-key-form").waitFor();
 }
 
 function scenes() {
@@ -291,8 +328,9 @@ function scenes() {
           await page.getByTestId("ai-connect-card-key-form").getByText("Anthropic (Claude)").click();
           if (!(await page.getByTestId("ai-connect-card-preset-anthropic").isChecked()))
             throw new Error("프리셋 칩을 눌러도 고르지 못했다");
-          // 캡처에는 가짜 키의 마스킹 점만 찍힌다(칸이 password다).
-          await page.getByTestId("ai-connect-card-key-input").fill("capture-only-not-a-key-000000000000");
+          // 캡처에는 가짜 키의 마스킹 점만 찍힌다(칸이 password라 접근성 트리에도
+          // 값이 없다. assertNoKeyInAxTree가 모든 장면에서 잰다).
+          await page.getByTestId("ai-connect-card-key-input").fill(FAKE_KEY);
         },
       },
     },
@@ -339,9 +377,64 @@ function scenes() {
         run: async (page) => {
           await page.getByTestId("ai-connect-card-team-check").click();
           await page.getByTestId("ai-connect-card-team-key").click();
-          await page.getByTestId("ai-connect-card-key-input").fill("capture-only-not-a-key-000000000000");
+          await page.getByTestId("ai-connect-card-key-input").fill(FAKE_KEY);
           await page.getByTestId("ai-connect-card-key-save").click();
           await page.getByTestId("ai-connect-card-key-replace").waitFor();
+        },
+      },
+    },
+    {
+      // 프리셋에 없는 지금 주소는 「지금 주소」 칩을 고른 채 열린다(review #2961 M4·N2).
+      name: "current-chip",
+      query: "aiEntry=rows&aiProbe=claude-ready",
+      team: () => teamRoute({ link: PROXY_LINK, test: probe(false, "provider_auth_failed") }),
+      act: {
+        slash: "/연결 팀키",
+        run: async (page) => {
+          await openReplaceForm(page);
+          if (!(await page.getByTestId("ai-connect-card-preset-current").isChecked()))
+            throw new Error("「지금 주소」 칩이 골라져 있지 않다");
+        },
+      },
+    },
+    {
+      // 다른 프리셋을 고르면 대체 확인이 주소가 바뀐다고 말한다(N1: 「OpenRouter 주소로」).
+      name: "current-move-confirm",
+      query: "aiEntry=rows&aiProbe=claude-ready",
+      team: () => teamRoute({ link: PROXY_LINK, test: probe(false, "provider_auth_failed") }),
+      act: {
+        slash: "/연결 팀키",
+        run: async (page) => {
+          await openReplaceForm(page);
+          await page.getByTestId("ai-connect-card-key-form").getByText("OpenRouter").click();
+          await page.getByTestId("ai-connect-card-key-input").fill(FAKE_KEY);
+          await page.getByTestId("ai-connect-card-key-save").click();
+          const confirm = page.getByTestId("ai-connect-card-key-replace");
+          await confirm.waitFor();
+          if (!((await confirm.textContent()) ?? "").includes("OpenRouter 주소로"))
+            throw new Error("대체 확인이 주소 변경을 말하지 않는다");
+        },
+      },
+    },
+    {
+      // 끊기면 저장은 잠기고 사유가 붙는다. 눌러도 요청은 없다(review #2961 H1).
+      name: "offline-lock",
+      query: "aiEntry=rows&aiProbe=login",
+      team: () => teamRoute({ link: EMPTY_LINK }),
+      act: {
+        slash: "/연결 팀키",
+        keepPointer: true,
+        checksAx: true,
+        run: async (page, checkAx) => {
+          await page.getByTestId("ai-connect-card-key-form").waitFor();
+          await page.getByTestId("ai-connect-card-key-input").fill(FAKE_KEY);
+          await checkAx();
+          await page.context().setOffline(true);
+          await page.getByTestId("ai-connect-card-offline").waitFor();
+          const save = page.getByTestId("ai-connect-card-key-save");
+          if ((await save.getAttribute("aria-disabled")) !== "true") throw new Error("오프라인인데 저장이 잠기지 않았다");
+          await save.click({ force: true });
+          await wait(300);
         },
       },
     },

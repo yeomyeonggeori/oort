@@ -470,8 +470,9 @@ describe("흐름 ② 팀 키 (운영자) · 비밀값", () => {
     expect(pillOf(row)).toEqual({ tone: "mute", text: "연결 안 됨" });
     act(() => q(host, "ai-connect-card-team-key")?.click());
     const input = (await until(host, "ai-connect-card-key-input")) as HTMLInputElement;
+    // password 칸이어야 접근성 트리에 값이 평문으로 나가지 않는다(design-review #2961 H1).
     expect(input.type).toBe("password");
-    expect(input.autocomplete).toBe("off");
+    expect(input.getAttribute("autocomplete")).toBe("new-password");
     // 비밀번호 관리자가 이 칸을 로그인 비밀번호로 잡지 않게(review #2961 M3).
     for (const attr of ["data-1p-ignore", "data-lpignore", "data-bwignore", "data-form-type"]) {
       expect(input.hasAttribute(attr)).toBe(true);
@@ -663,6 +664,8 @@ describe("프리셋에 없는 지금 주소 (review #2961 M4)", () => {
     const current = q(host, "ai-connect-card-preset-current") as HTMLInputElement;
     expect(current.checked).toBe(true);
     expect(current.closest("label")?.textContent).toContain("사내 프록시");
+    // 긴 주소는 칩 한 줄에서 말줄임, 전체는 title로(design-review #2961 N2).
+    expect(current.closest("label")?.getAttribute("title")).toBe("사내 프록시");
     expect((q(host, "ai-connect-card-preset-openai") as HTMLInputElement).checked).toBe(false);
     input.value = "corp-key-0000000000000000";
     const save = q(host, "ai-connect-card-key-save") as HTMLButtonElement;
@@ -689,7 +692,7 @@ describe("프리셋에 없는 지금 주소 (review #2961 M4)", () => {
     input.value = "openai-key-000000000000000";
     await act(async () => (q(host, "ai-connect-card-key-save") as HTMLButtonElement).click());
     expect(putProviderLink).not.toHaveBeenCalled();
-    expect(q(host, "ai-connect-card-key-replace")?.textContent).toContain("주소도 api.openai.com(으)로 바뀌어요");
+    expect(q(host, "ai-connect-card-key-replace")?.textContent).toContain("주소도 OpenAI 주소로 바뀌어요");
   });
 });
 

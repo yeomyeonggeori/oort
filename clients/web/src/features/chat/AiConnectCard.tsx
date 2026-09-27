@@ -86,24 +86,12 @@ const OFFLINE_NOTE = "연결이 끊겨 지금은 팀 연결을 확인하거나 �
 const TEAM_DENIED_LINE = "팀 키는 운영자만 바꾸고 확인할 수 있어요.";
 const TEAM_EMPTY_SUB = "아직 없어요. 팀 에이전트가 대답하려면 키가 필요해요";
 const OPERATOR_FOOT = "운영자만 보이는 입력이에요. 키는 서버 금고에 봉인되고 쓰기 전용이에요.";
-/**
- * 팀 키 칸을 password 칸 없이 가릴 수 있는가(review #2961 M3). WebKit(Tauri
- * WKWebView·Safari)과 Chromium은 `-webkit-text-security`를 지원한다. 지원하지 않는
- * 엔진에서는 password 칸으로 되돌린다: 키가 평문으로 보이는 것보다 낫다.
- */
-const MASK_WITHOUT_PASSWORD_FIELD =
-  typeof CSS !== "undefined" && typeof CSS.supports === "function" && CSS.supports("-webkit-text-security", "disc");
+
+/** 잠긴 버튼: 흐림이 포인터를 올려도 풀리지 않는다(variant의 hover:opacity-90을 덮는다). */
+const LOCKED = "opacity-50 hover:opacity-50";
 
 function trimSlash(url: string): string {
   return url.replace(/\/+$/, "");
-}
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
 }
 
 const KEY_HINT = "저장하면 다시 보이지 않아요. 마스킹 꼬리만 남아요. 이 칸의 값은 채팅·초안에 남지 않아요.";
@@ -549,7 +537,7 @@ function HarnessRows({ only }: { only: LocalHarnessId | null }) {
                 aria-busy={checking || undefined}
                 aria-disabled={checking || undefined}
                 aria-label={checking ? `${label} 확인 중` : `${label} 연결 확인`}
-                className={cn(checking && "opacity-50")}
+                className={cn(checking && LOCKED)}
                 onClick={() => {
                   if (!checking) check(id);
                 }}
@@ -704,7 +692,7 @@ function TeamSection({
       size: "sm" as const,
       "aria-disabled": lockedByOffline || undefined,
       "aria-describedby": lockedByOffline ? `${headId}-offline` : undefined,
-      className: cn(lockedByOffline && "opacity-50"),
+      className: cn(lockedByOffline && LOCKED),
     };
     if (!hasRow || failed) {
       action = (
@@ -726,7 +714,7 @@ function TeamSection({
           {...common}
           aria-busy={checking || undefined}
           aria-disabled={lockedByOffline || checking || undefined}
-          className={cn((lockedByOffline || checking) && "opacity-50")}
+          className={cn((lockedByOffline || checking) && LOCKED)}
           onClick={() => {
             if (lockedByOffline || checking) return;
             setJustSaved(false);
@@ -845,9 +833,9 @@ function TeamSection({
  * 막고(설정 `saveLocked`와 같은 규칙), ② `networkMode: "always"`로 누른 순간 한 번만
  * 시도하며(실패는 제자리 오류 줄), ③ 폼이 사라지면 멈춘 저장과 붙잡은 값을 버린다.
  *
- * 비밀번호 관리자(review #2961 M3): 이 칸은 로그인 비밀번호가 아니다. 가림 글꼴을
- * 지원하는 엔진(WebKit·Chromium)에서는 text 칸 + 가림으로 두어 「비밀번호 저장?」
- * 판단에서 뺀다. 지원하지 않으면 password 칸으로 되돌린다(평문 노출보다 낫다).
+ * 비밀번호 관리자(review #2961 M3): 칸은 password 그대로다. text + 가림 글꼴은
+ * 접근성 트리에 값을 평문으로 내보내므로 쓰지 않는다(design-review #2961 H1).
+ * 저장 제안은 `autocomplete="new-password"`와 관리자별 무시 속성으로 막는다.
  */
 function TeamKeyForm({
   link,
@@ -957,7 +945,7 @@ function TeamKeyForm({
         <fieldset className="flex min-w-0 flex-wrap gap-2">
           <legend className="sr-only">API 제공자</legend>
           {hasCurrentChip && (
-            <label className="press relative inline-flex">
+            <label className="press relative inline-flex min-w-0 max-w-full" title={link.endpointLabel}>
               <input
                 type="radio"
                 name={`${inputId}-preset`}
@@ -970,8 +958,8 @@ function TeamKeyForm({
                 className="peer sr-only"
                 data-testid="ai-connect-card-preset-current"
               />
-              <span className="tap-target inline-flex h-control-sm cursor-pointer items-center rounded-full border border-line px-3 text-meta font-semibold text-ink-muted peer-checked:border-primary peer-checked:bg-primary peer-checked:text-on-primary peer-focus-visible:focus-ring">
-                지금 주소 · {link.endpointLabel}
+              <span className="tap-target inline-flex h-control-sm min-w-0 max-w-full cursor-pointer items-center rounded-full border border-line px-3 text-meta font-semibold text-ink-muted peer-checked:border-primary peer-checked:bg-primary peer-checked:text-on-primary peer-focus-visible:focus-ring">
+                <span className="truncate">지금 주소 · {link.endpointLabel}</span>
               </span>
             </label>
           )}
@@ -1008,9 +996,9 @@ function TeamKeyForm({
       <Input
         id={inputId}
         ref={inputRef}
-        type={MASK_WITHOUT_PASSWORD_FIELD ? "text" : "password"}
+        type="password"
         name="team-api-key"
-        autoComplete="off"
+        autoComplete="new-password"
         autoCorrect="off"
         autoCapitalize="off"
         spellCheck={false}
@@ -1019,7 +1007,7 @@ function TeamKeyForm({
         data-bwignore=""
         data-form-type="other"
         placeholder="키를 붙여 넣으세요"
-        className={cn("font-mono", MASK_WITHOUT_PASSWORD_FIELD && "key-mask")}
+        className="font-mono"
         aria-describedby={fieldError ? `${errorId} ${hintId}` : hintId}
         aria-invalid={fieldError ? true : undefined}
         onInput={() => setConfirmReplace(false)}
@@ -1041,7 +1029,7 @@ function TeamKeyForm({
       {confirmReplace && (
         <p className="break-keep text-meta text-warn" role="alert" data-testid="ai-connect-card-key-replace">
           지금 팀 기본 키({maskedBearer(link.bearerLast4)})를 이 키로 바꿔요.
-          {movesAddress && target ? ` 주소도 ${hostOf(target.baseUrl)}(으)로 바뀌어요.` : ""} 팀 에이전트는 바로 새 키로 대답해요.
+          {movesAddress && preset ? ` 주소도 ${preset.label} 주소로 바뀌어요.` : ""} 팀 에이전트는 바로 새 키로 대답해요.
           {currentFailed
             ? " 지금 키는 방금 확인에 실패했어요. 새 키도 저장한 뒤에 확인해요."
             : " 저장한 뒤에 확인하니, 틀린 키면 팀 에이전트가 멈춰요."}
@@ -1054,7 +1042,7 @@ function TeamKeyForm({
           aria-busy={save.isPending || undefined}
           aria-disabled={locked || undefined}
           aria-describedby={offline ? offlineNoteId : undefined}
-          className={cn(locked && "opacity-50")}
+          className={cn(locked && LOCKED)}
           data-testid="ai-connect-card-key-save"
         >
           {save.isPending ? "저장 중" : confirmReplace ? "바꿔 저장하고 확인" : "저장하고 확인"}

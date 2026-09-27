@@ -41,9 +41,10 @@ export function AiPill({ tone, children }: { tone: AiPillTone; children: ReactNo
 }
 
 /** 시안 `.src`: 출처 알약(구독 / API 키 / 내부용). */
+/** 출처 배지(「API 키」·「구독」). 좁은 줄에서 글자 단위로 세로로 깨지지 않게 줄지 않고 한 줄로 선다(design-review #2961 H2). */
 export function AiSource({ children }: { children: ReactNode }) {
   return (
-    <span className="me-1 inline-flex rounded-sm bg-muted-soft px-1 py-px text-timestamp font-semibold text-ink-muted">
+    <span className="me-1 inline-flex shrink-0 whitespace-nowrap rounded-sm bg-muted-soft px-1 py-px text-timestamp font-semibold text-ink-muted">
       {children}
     </span>
   );
