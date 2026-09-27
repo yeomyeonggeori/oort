@@ -1400,9 +1400,12 @@ impl std::fmt::Debug for SettingsConfig {
 
 /// #2960: the egress policy the 「연결 확인」 probe dials under — the same inputs
 /// the agent-worker's provider client reads (`bins/momo-agent-worker/src/config.rs`
-/// `egress_policy`), so the probe reaches exactly what a real turn would. One
-/// narrowing: in a strict environment the loopback opt-in stops applying, as it
-/// does on the write gate (`momo_settings::validated_base_url`).
+/// `egress_policy`), so the probe reaches exactly what a real turn would. There
+/// is deliberately **no** strict-environment narrowing: ADR-0004 증보
+/// (2026-09-08) keeps the operator flag valid under `MOMO_ENV=staging` (the
+/// self-host default), the write gate (`momo_settings::validated_base_url`)
+/// ignores the environment for the same reason, and the worker dials such a
+/// host — so refusing it here would report a false failure (review #2972 M2).
 /// `hermes_base_url_set` is whether the operator wrote `HERMES_BASE_URL`; only
 /// then is its host trusted.
 pub fn provider_probe_policy(
@@ -1410,9 +1413,7 @@ pub fn provider_probe_policy(
     hermes_base_url_set: bool,
     from_env: impl Fn(bool) -> momo_settings::EgressPolicy,
 ) -> momo_settings::EgressPolicy {
-    let allow_local = settings.env_provider.allow_local_loopback
-        && !momo_settings::requires_strict_external_provider(&settings.environment);
-    let policy = from_env(allow_local);
+    let policy = from_env(settings.env_provider.allow_local_loopback);
     if hermes_base_url_set {
         policy.with_operator_base_url(&settings.env_provider.base_url)
     } else {
@@ -2970,34 +2971,44 @@ mod tests {
         );
     }
 
-    /// #2960: the probe's egress policy mirrors the worker's and narrows the
-    /// loopback opt-in in a strict environment.
+    /// #2960 / review M2: the probe's egress policy mirrors the worker's and
+    /// the write gate's — the operator opt-in holds in a strict environment
+    /// (ADR-0004 증보 2026-09-08), and without the opt-in the address is refused.
     #[test]
-    fn the_probe_policy_mirrors_the_worker_and_is_strict_in_production() {
+    fn the_probe_policy_mirrors_the_worker_including_strict_environments() {
+        use std::net::IpAddr;
         let fake_env = |allow_local: bool| momo_settings::EgressPolicy {
             allow_local,
             local_hosts: vec!["llm.internal".into()],
             operator_hosts: Vec::new(),
         };
-        let mut settings = SettingsConfig::default();
-        settings.env_provider.allow_local_loopback = true;
+        let internal: [IpAddr; 1] = ["10.0.0.5".parse().unwrap()];
+        let mut settings = SettingsConfig {
+            environment: "staging".into(),
+            ..Default::default()
+        };
         settings.env_provider.base_url = "http://mock-hermes:8088/v1".into();
 
-        let local = provider_probe_policy(&settings, false, fake_env);
-        assert!(local.allow_local);
+        settings.env_provider.allow_local_loopback = true;
+        let opted_in = provider_probe_policy(&settings, false, fake_env);
         assert!(
-            local.operator_hosts.is_empty(),
+            opted_in.check_resolved("llm.internal", &internal).is_ok(),
+            "staging + opt-in: the listed host is checked, not refused"
+        );
+        assert!(
+            opted_in.operator_hosts.is_empty(),
             "HERMES_BASE_URL unset: no trust"
         );
-
         let with_env = provider_probe_policy(&settings, true, fake_env);
         assert_eq!(with_env.operator_hosts, vec!["mock-hermes".to_string()]);
 
-        settings.environment = "production".into();
-        let strict = provider_probe_policy(&settings, false, fake_env);
+        settings.env_provider.allow_local_loopback = false;
+        let not_opted_in = provider_probe_policy(&settings, false, fake_env);
         assert!(
-            !strict.allow_local,
-            "the loopback opt-in stops applying in prod"
+            not_opted_in
+                .check_resolved("llm.internal", &internal)
+                .is_err(),
+            "staging without the opt-in: refused"
         );
     }
 }

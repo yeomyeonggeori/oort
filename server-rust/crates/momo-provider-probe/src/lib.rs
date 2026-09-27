@@ -34,7 +34,7 @@
 //! private, loopback, link-local or metadata address is refused before connect
 //! and reported as `provider_egress_denied`.
 
-pub mod guard;
+mod guard;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -44,7 +44,8 @@ use async_trait::async_trait;
 use momo_settings::{EgressDenied, EgressPolicy, RATE_LIMITED_REASON, UNREACHABLE_REASON};
 use sha2::{Digest, Sha256};
 
-pub use guard::{EgressGuard, HostLookup, SystemLookup};
+use guard::EgressGuard;
+pub use guard::{HostLookup, SystemLookup};
 
 /// 401/403 — the provider refused the stored key. Already in the panel's
 /// vocabulary (`chainModel.ts:probeReasonCopy`).
@@ -228,6 +229,9 @@ pub struct GuardedProviderProbe {
     /// unguarded fallback: a probe that cannot be guarded reports unreachable.
     client: Option<reqwest::Client>,
     guard: EgressGuard,
+    /// The per-hop bound. It covers the pre-request DNS lookup as well as the
+    /// request itself (review M1): `getaddrinfo` has no deadline of its own.
+    timeout: Duration,
 }
 
 impl GuardedProviderProbe {
@@ -257,7 +261,11 @@ impl GuardedProviderProbe {
                 );
             })
             .ok();
-        GuardedProviderProbe { client, guard }
+        GuardedProviderProbe {
+            client,
+            guard,
+            timeout,
+        }
     }
 }
 
@@ -265,7 +273,9 @@ impl GuardedProviderProbe {
 fn plan(base_url: &str) -> Option<(ProbeMethod, String, String)> {
     let parsed = reqwest::Url::parse(base_url.trim()).ok()?;
     let host = parsed.host_str()?.to_ascii_lowercase();
-    let method = if host == "openrouter.ai" {
+    // A trailing dot is the same host (review nit 1): `openrouter.ai.` must not
+    // fall back to the public `/models`.
+    let method = if host.trim_end_matches('.') == "openrouter.ai" {
         ProbeMethod::Key
     } else {
         ProbeMethod::Models
@@ -288,8 +298,13 @@ impl ProviderProbe for GuardedProviderProbe {
                 UNREACHABLE_REASON,
             );
         };
-        if let Err(denied) = self.guard.precheck(&host).await {
-            return denied_report(method, denied);
+        match tokio::time::timeout(self.timeout, self.guard.precheck(&host)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(denied)) => return denied_report(method, denied),
+            // A lookup that outlives the hop's budget is an unanswered hop.
+            Err(_) => {
+                return ProbeReport::failed(method, ProbeOutcome::Unreachable, UNREACHABLE_REASON)
+            }
         }
         let Some(client) = self.client.as_ref() else {
             return ProbeReport::failed(method, ProbeOutcome::Unreachable, UNREACHABLE_REASON);
@@ -336,7 +351,17 @@ impl ProviderProbe for GuardedProviderProbe {
 
         match status {
             200..=299 => {
-                let body = read_capped(&mut response).await;
+                let body = match read_capped(&mut response).await {
+                    BodyRead::Complete(bytes) => Some(bytes),
+                    BodyRead::TooLarge => None,
+                    // Timeout or reset mid-body (review nit 3): the provider
+                    // stopped answering, which is availability, not shape.
+                    BodyRead::Failed => {
+                        report.outcome = ProbeOutcome::Unreachable;
+                        report.reason = Some(UNREACHABLE_REASON.to_string());
+                        return report;
+                    }
+                };
                 let parsed = body
                     .as_deref()
                     .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(bytes).ok());
@@ -381,18 +406,24 @@ fn denied_report(method: ProbeMethod, denied: EgressDenied) -> ProbeReport {
     }
 }
 
-async fn read_capped(response: &mut reqwest::Response) -> Option<Vec<u8>> {
+enum BodyRead {
+    Complete(Vec<u8>),
+    TooLarge,
+    Failed,
+}
+
+async fn read_capped(response: &mut reqwest::Response) -> BodyRead {
     let mut body = Vec::new();
     loop {
         match response.chunk().await {
             Ok(Some(chunk)) => {
                 if body.len() + chunk.len() > MAX_BODY_BYTES {
-                    return None;
+                    return BodyRead::TooLarge;
                 }
                 body.extend_from_slice(&chunk);
             }
-            Ok(None) => return Some(body),
-            Err(_) => return None,
+            Ok(None) => return BodyRead::Complete(body),
+            Err(_) => return BodyRead::Failed,
         }
     }
 }

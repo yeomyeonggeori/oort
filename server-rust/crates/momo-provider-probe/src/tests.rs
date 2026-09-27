@@ -547,3 +547,99 @@ fn the_cache_serves_inside_its_ttl_only() {
     expired.put("k".into(), 42, report);
     assert_eq!(expired.get("k"), None);
 }
+
+// ---------------------------------------------------------------------------
+// review follow-ups (#2972): time bounds and the OpenRouter trailing dot
+// ---------------------------------------------------------------------------
+
+/// A resolver that takes `delay` to answer.
+struct SlowLookup {
+    delay: Duration,
+}
+
+impl HostLookup for SlowLookup {
+    fn lookup(
+        &self,
+        _host: String,
+    ) -> Pin<Box<dyn Future<Output = std::io::Result<Vec<IpAddr>>> + Send>> {
+        let delay = self.delay;
+        Box::pin(async move {
+            tokio::time::sleep(delay).await;
+            Ok(vec!["93.184.216.34".parse().unwrap()])
+        })
+    }
+}
+
+/// Review M1: the pre-request lookup is inside the hop's budget. Before the
+/// fix this took the full 6 s of the lookup.
+#[tokio::test]
+async fn a_slow_dns_lookup_is_bounded_by_the_probe_timeout() {
+    let probe = GuardedProviderProbe::with_lookup(
+        EgressPolicy::default(),
+        Arc::new(SlowLookup {
+            delay: Duration::from_secs(6),
+        }),
+        Duration::from_millis(500),
+    );
+    let started = Instant::now();
+    let report = probe
+        .probe(&target(
+            "https://slow-dns.example/v1".into(),
+            ProbeCredential::Bearer(GOOD.into()),
+        ))
+        .await;
+    let elapsed = started.elapsed();
+    assert!(elapsed < Duration::from_secs(2), "took {elapsed:?}");
+    assert_eq!(report.outcome, ProbeOutcome::Unreachable);
+    assert_eq!(report.reason.as_deref(), Some(UNREACHABLE_REASON));
+}
+
+/// Review nit 3: a body that stalls past the timeout is unreachable
+/// (fall_over), not an invalid shape.
+#[tokio::test]
+async fn a_stalled_body_is_unreachable() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        if let Ok((mut socket, _)) = listener.accept().await {
+            let mut buffer = [0u8; 4096];
+            let _ = socket.read(&mut buffer).await;
+            let _ = socket
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 100\r\n\r\n{\"data\":")
+                .await;
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    });
+    let probe = GuardedProviderProbe::with_lookup(
+        EgressPolicy {
+            allow_local: true,
+            local_hosts: Vec::new(),
+            operator_hosts: Vec::new(),
+        },
+        ScriptedLookup::new(&[&["127.0.0.1"]]),
+        Duration::from_millis(500),
+    );
+    let report = probe
+        .probe(&target(
+            format!("http://127.0.0.1:{port}/v1"),
+            ProbeCredential::Bearer(GOOD.into()),
+        ))
+        .await;
+    assert_eq!(report.outcome, ProbeOutcome::Unreachable, "{report:?}");
+    assert_eq!(report.reason.as_deref(), Some(UNREACHABLE_REASON));
+}
+
+/// Review nit 1: `openrouter.ai.` is OpenRouter, so it is checked on `/key`.
+#[tokio::test]
+async fn openrouter_with_a_trailing_dot_is_still_checked_on_key() {
+    let (port, _) = mock().await;
+    let report = opted_in(&["openrouter.ai"])
+        .probe(&target(
+            format!("http://openrouter.ai.:{port}/api/v1"),
+            ProbeCredential::Bearer(BAD.into()),
+        ))
+        .await;
+    assert_eq!(report.method, ProbeMethod::Key, "{report:?}");
+    assert_eq!(report.outcome, ProbeOutcome::Rejected, "{report:?}");
+}
