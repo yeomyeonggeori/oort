@@ -2,19 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Plus } from "lucide-react";
 import { Button } from "@/design/ui/button";
-import { Input } from "@/design/ui/input";
 import { cn } from "@/design/lib/cn";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { InlineBanner, Skeleton } from "@/features/common/States";
 import {
   deleteProviderLink,
   fetchProviderLink,
-  putProviderLink,
   testProviderLink,
   type ProviderLink,
-  type ProviderLinkInput,
   type ProviderLinkTest,
 } from "@momo/core/features/settings/api";
+import { teamCheckResult } from "@momo/core/features/settings/teamKeyForm";
 import {
   choiceLabel,
   errorMessage,
@@ -31,13 +29,7 @@ import {
   parseProbeEntries,
 } from "@momo/core/features/settings/chainModel";
 import { arrayField } from "@momo/core/lib/wire";
-import {
-  ChoiceRadios,
-  ConfirmButton,
-  Field,
-  KeyValueRows,
-  type KeyValue,
-} from "./SettingsFields";
+import { KeyValueRows, type KeyValue } from "./SettingsFields";
 import { AiLinkChain, ChainProbeResult } from "./AiLinkChain";
 import {
   accessTokenStatus,
@@ -45,8 +37,6 @@ import {
   credentialKindLabel,
   credentialMeta,
   formatMoment,
-  type LinkFormField,
-  validateBaseUrl,
 } from "./oauthGrant";
 import {
   AiAccountRow,
@@ -62,8 +52,11 @@ import {
 import {
   isLegacyTeamLink,
   linkPill,
+  PROBE_NOT_RUN,
   type AiPillView,
 } from "@momo/core/features/settings/aiLinkPill";
+import { TeamKeyForm } from "./TeamKeyForm";
+import { TeamUnlinkDialog } from "./TeamUnlinkDialog";
 import { AiMyAccountsSection } from "./AiMyAccountsSection";
 
 // =============================================================================
@@ -78,9 +71,11 @@ import { AiMyAccountsSection } from "./AiMyAccountsSection";
 //
 // 팀 연결 줄은 R-1 §5의 인스턴스 전역 provider 연결 하나다(GET/PUT/DELETE +
 // 확인). ADR-0004 때문에 자격증명은 쓰기 전용이다: 있는지와 마스킹 꼬리만 보이고
-// 「키 보기」는 없다. 프리셋으로 여러 키를 더하는 흐름은 #2880이 이 자리에 올린다.
-// 그 전까지 「API 키 추가」·「키 바꾸기」는 지금 서버가 받는 한 벌 PUT 폼을
-// 곁판에 연다.
+// 「키 보기」는 없다. 「API 키 추가」·「키 바꾸기」는 채팅 연결 카드와 **같은**
+// `TeamKeyForm`(프리셋 칩 + 직접 주소 + password 칸)을 곁판에 연다(#2880 AA-7).
+// 서버에 저장 전 판정 경로가 없어서(test 라우트는 저장된 연결만 부른다) 저장한 뒤
+// 곧바로 확인하고, 결과 칸은 코어 `teamCheckResult` 문장을 그린다. 「연결 끊기」
+// (#2878 문구)는 확인 창에 이 키로 대답하는 팀 에이전트를 이름으로 보인다.
 //
 // ChatGPT `auth.json` 붙여넣기(ADR-0147)는 새로 만들 수 없다(제안서 Q3, ADR-0147
 // 증보). 이미 그렇게 저장된 연결은 「내부용 · 새로 만들 수 없음」 읽기 전용 줄로
@@ -156,7 +151,7 @@ function markFor(label: string): string {
   return first === "" ? "?" : first.toUpperCase();
 }
 
-export function AiLinkSection({ offline }: { offline: boolean }) {
+export function AiLinkSection({ offline, workspaceId }: { offline: boolean; workspaceId: string }) {
   return (
     <div className="ai-board-host flex min-w-0 flex-col gap-6" data-testid="ai-page">
       <div className="flex break-keep flex-col gap-1">
@@ -168,7 +163,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
         </p>
       </div>
       {offline && <AiOfflineBanner />}
-      <TeamBoard offline={offline} />
+      <TeamBoard offline={offline} workspaceId={workspaceId} />
     </div>
   );
 }
@@ -177,7 +172,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
  * 목록 열 + 곁판. 곁판을 여는 것은 팀 연결 줄뿐이라(내 계정 줄은 #2777 전까지
  * 비어 있다) 판의 상태를 이 한 곳이 든다.
  */
-function TeamBoard({ offline }: { offline: boolean }) {
+function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: string }) {
   const client = useQueryClient();
   const query = useQuery({
     queryKey: ["settings", "provider-link"],
@@ -187,13 +182,10 @@ function TeamBoard({ offline }: { offline: boolean }) {
 
   const [asideOpen, setAsideOpen] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [baseUrl, setBaseUrl] = useState("");
-  const [bearer, setBearer] = useState("");
-  const [mode, setMode] = useState("external-hermes");
-  const [fieldError, setFieldError] = useState<
-    Partial<Record<LinkFormField, string>>
-  >({});
   const [probe, setProbe] = useState<ProviderLinkTest | null>(null);
+  // 「저장하고 확인」 직후의 확인인가: 실패 문장이 저장한 키가 남아 있다고 덧붙인다.
+  const [justSaved, setJustSaved] = useState(false);
+  const [unlinkOpen, setUnlinkOpen] = useState(false);
   // The chain block below owns its own draft, and the probe table in the aside
   // is numbered by the SAVED order. When the two disagree the table says so
   // rather than letting one screen carry two meanings of "3차".
@@ -203,6 +195,7 @@ function TeamBoard({ offline }: { offline: boolean }) {
   const moreRef = useRef<HTMLButtonElement>(null);
   const addRef = useRef<HTMLButtonElement>(null);
   const editRef = useRef<HTMLButtonElement>(null);
+  const unlinkRef = useRef<HTMLButtonElement>(null);
   const asideHeadingRef = useRef<HTMLHeadingElement>(null);
   const wasOpen = useRef(false);
   const wasEditing = useRef(false);
@@ -225,7 +218,7 @@ function TeamBoard({ offline }: { offline: boolean }) {
     wasOpen.current = asideOpen;
     wasEditing.current = editing;
     if (startedEditing) {
-      document.getElementById("provider-base-url")?.focus({ preventScroll: true });
+      // 첫 칸 초점은 폼(`TeamKeyForm`)이 마운트하며 스스로 준다.
       if (opened) asideHeadingRef.current?.scrollIntoView?.({ block: "nearest" });
       return;
     }
@@ -253,20 +246,11 @@ function TeamBoard({ offline }: { offline: boolean }) {
   const invalidate = () =>
     client.invalidateQueries({ queryKey: ["settings", "provider-link"] });
 
-  const save = useMutation({
-    mutationFn: (input: ProviderLinkInput) => putProviderLink(input),
-    onSuccess: () => {
-      if (!hasRow) setFocusHeadingAfterSave(true);
-      closeForm(true);
-      setProbe(null);
-      void invalidate();
-    },
-  });
-
   const unlink = useMutation({
     mutationFn: deleteProviderLink,
     onSuccess: () => {
       setProbe(null);
+      setUnlinkOpen(false);
       setFocusAfterUnlink(true);
       setAsideOpen(false);
       void invalidate();
@@ -278,15 +262,28 @@ function TeamBoard({ offline }: { offline: boolean }) {
     onSuccess: setProbe,
   });
 
-  const busy = save.isPending || unlink.isPending || check.isPending;
-  // 진행은 잠금이 아니다 (#1403 리뷰 H-1 / #1486 문법). `busy` 는 이 패널의 세
-  // 쓰기를 묶은 이름이라 「연결 해제」에 그대로 넘기면 해제를 누른 그 버튼이
-  // 자기가 켠 busy 로 자신을 잠근다. 잠금으로 남는 것은 다른 두 쓰기다 (#1541).
+  /**
+   * 저장이 끝났다(폼은 `TeamKeyForm`, 채팅 카드와 같은 것). 폼을 닫고 곧바로 확인을
+   * 돈다: 서버에 저장 전 판정 경로가 없으므로 「저장하고 확인」이 이 순서다.
+   */
+  function onSaved() {
+    if (!hasRow) setFocusHeadingAfterSave(true);
+    closeForm(true);
+    setProbe(null);
+    setJustSaved(true);
+    void invalidate();
+    check.mutate();
+  }
+
+  const busy = unlink.isPending || check.isPending;
+  // 진행은 잠금이 아니다 (#1403 리뷰 H-1 / #1486 문법). `busy` 는 이 패널의 두
+  // 쓰기를 묶은 이름이라 「연결 끊기」에 그대로 넘기면 끊기를 누른 그 버튼이
+  // 자기가 켠 busy 로 자신을 잠근다. 잠금으로 남는 것은 다른 쓰기다 (#1541).
+  // 저장은 폼(`TeamKeyForm`) 안의 일이고 폼이 열린 동안 확인·끊기는 화면에 없다.
   const unlinking = unlink.isPending;
-  const saving = save.isPending;
   const checking = check.isPending;
-  const saveLocked = offline || (busy && !saving);
   const checkLocked = offline || (busy && !checking);
+  const unlinkLocked = offline || (busy && !unlinking);
 
   /**
    * 잠긴 컨트롤이 가리키는 사유 (#1542 규율 · design-review #1557 M · #1559).
@@ -305,8 +302,6 @@ function TeamBoard({ offline }: { offline: boolean }) {
    */
   function closeForm(keepAside = false) {
     setEditing(false);
-    setBearer("");
-    setFieldError({});
     if (!keepAside && !hasRow) setAsideOpen(false);
   }
 
@@ -316,41 +311,11 @@ function TeamBoard({ offline }: { offline: boolean }) {
   }
 
 
-  function startEditing(link: ProviderLink) {
-    // Prefill only from a stored link. The environment fallback is a mock
-    // address, and offering it as the starting value for a real provider would
-    // be a suggestion, not a default.
-    setBaseUrl(link.configured ? link.baseUrl : "");
-    setMode(link.configured ? link.mode : "external-hermes");
-    setBearer("");
-    setFieldError({});
+  function startEditing() {
+    // 폼은 저장된 주소를 「지금 주소」 칩이나 같은 프리셋으로 연다(코어
+    // `initialPresetId`). 환경값의 모의 주소는 시작값으로 내밀지 않는다.
     setEditing(true);
     setAsideOpen(true);
-  }
-
-  function submitKey() {
-    const addressError = validateBaseUrl(baseUrl);
-    if (addressError) {
-      setFieldError({ [addressError.field]: addressError.message });
-      return;
-    }
-    if (!bearer.trim()) {
-      setFieldError({
-        bearer: "키를 입력하세요. 저장된 키는 다시 내려오지 않으므로 매번 새로 입력합니다.",
-      });
-      return;
-    }
-    setFieldError({});
-    save.mutate({ baseUrl: baseUrl.trim(), bearer, mode });
-  }
-
-  function submit(event: React.FormEvent) {
-    event.preventDefault();
-    // 잠금이 `aria-disabled` 라 클릭도 Enter 도 막지 않는다. 막는 일은 핸들러가
-    // 지고, 폼의 `onSubmit` 인 이유는 주소 칸의 Enter(암묵적 제출)도 같은 쓰기를
-    // 내기 때문이다.
-    if (saveLocked || saving) return;
-    submitKey();
   }
 
   const link = query.data;
@@ -384,7 +349,7 @@ function TeamBoard({ offline }: { offline: boolean }) {
         variant="outline"
         size="sm"
         className="tap-target"
-        onClick={() => startEditing(link)}
+        onClick={() => startEditing()}
         data-testid="ai-team-add"
       >
         <Plus aria-hidden="true" />
@@ -394,6 +359,8 @@ function TeamBoard({ offline }: { offline: boolean }) {
 
   // 판정은 코어 한 곳(#2941): 채팅 연결 카드와 같은 입력이면 같은 알약이다.
   const pill = link ? linkPill({ link, offline, probe, checking: check.isPending }) : null;
+  // 방금 확인에서 키가 실패했는가. 서버가 부르지 않은 확인(`probe_not_run`)은 실패가 아니다.
+  const failed = probe !== null && !probe.ok && probe.reason !== PROBE_NOT_RUN;
   const rowName = link ? (configured ? `${link.endpointLabel} · 팀 기본` : link.endpointLabel) : "";
 
   const teamSection = (
@@ -567,159 +534,98 @@ function TeamBoard({ offline }: { offline: boolean }) {
           testId="ai-team-aside"
         >
           {editing ? (
-            <form
-              className="flex min-w-0 flex-col gap-3"
-              onSubmit={submit}
-              aria-labelledby="ai-link-form-title"
-              data-testid="ai-link-form"
-            >
+            <section className="flex min-w-0 flex-col gap-3" aria-labelledby="ai-link-form-title">
               <h4 id="ai-link-form-title" className="text-body font-bold text-ink">
                 {configured ? "키 바꾸기" : "API 키 추가"}
               </h4>
-              {configured && (
-                <p className="break-keep text-meta text-ink-muted" data-testid="ai-link-card-tense">
-                  저장하면 지금 연결을 대체합니다. 키는 다시 보여 주지 않으니 새로 넣으세요.
-                </p>
-              )}
-              <Field
-                label="provider 주소"
-                htmlFor="provider-base-url"
-                hint="OpenAI 호환 주소. 예: https://api.example.com/v1"
-                error={fieldError.baseUrl}
-              >
-                <Input
-                  id="provider-base-url"
-                  name="baseUrl"
-                  value={baseUrl}
-                  autoComplete="off"
-                  onChange={(e) => setBaseUrl(e.target.value)}
-                />
-              </Field>
-              <Field
-                label="API 키"
-                htmlFor="provider-bearer"
-                hint="저장하면 서버에 봉인됩니다. 다시 볼 수 없고 바꾸기만 할 수 있어요."
-                error={fieldError.bearer}
-              >
-                <Input
-                  id="provider-bearer"
-                  name="bearer"
-                  type="password"
-                  value={bearer}
-                  autoComplete="off"
-                  onChange={(e) => setBearer(e.target.value)}
-                />
-              </Field>
-              <ChoiceRadios
-                name="provider-mode"
-                legend="모드"
-                choices={PROVIDER_MODES}
-                value={mode}
-                onChange={setMode}
+              {/* 채팅 연결 카드와 같은 폼(#2880): 프리셋 칩·password 칸·오프라인
+                  잠금·대체 전 한 번 묻기가 두 표면에서 한 벌이다. 설정만 「직접 주소」를
+                  세운다. */}
+              <TeamKeyForm
+                link={link}
+                offline={offline}
+                offlineNoteId={LINK_OFFLINE_NOTE_ID}
+                currentFailed={failed}
+                onCancel={() => closeForm()}
+                onSaved={onSaved}
+                allowCustomAddress
+                saveErrorHint={loopbackHint}
+                testIdPrefix="ai-link"
               />
-
-              {save.isError &&
-                (loopbackHint(save.error, baseUrl) ? (
-                  <LoopbackRefusalBanner
-                    error={save.error}
-                    url={baseUrl}
-                    serverSentence={errorMessage(save.error)}
-                  />
-                ) : (
-                  <p className="text-meta text-danger" role="alert">
-                    {errorMessage(save.error)}
-                  </p>
-                ))}
-
-              <div className="flex flex-wrap items-center gap-2">
-                {/* 진행은 `aria-busy` 와 바뀐 낱말이 지고 흐리지 않는다. 잠금은
-                    `aria-disabled` + 흐림 + 가드가 지고 tab order 를 떠나지 않는다
-                    (#1486 회전 · #1541). */}
-                <Button
-                  type="submit"
-                  size="sm"
-                  aria-disabled={saveLocked || undefined}
-                  aria-busy={saving || undefined}
-                  aria-describedby={lockReason(saving)}
-                  className={cn("tap-target", saveLocked && "opacity-50")}
-                  data-testid="ai-link-save"
-                >
-                  {saving ? "저장 중" : configured ? "키 바꿔 저장" : "연결 저장"}
-                </Button>
-                <Button type="button" variant="ghost" size="sm" className="tap-target" onClick={() => closeForm()}>
-                  취소
-                </Button>
-              </div>
-            </form>
+            </section>
           ) : (
             <TeamLinkDetail link={link} legacy={legacy} pill={pill} probe={probe} />
           )}
 
           {!editing && (
             <div className="flex min-w-0 flex-col gap-2" data-testid="ai-team-aside-actions">
-              {!legacy && (
-                <div className="flex flex-wrap items-center gap-2">
-                  {/* 낱말꼴은 「명사 + 중」: 확인은 한자어 동작명사다 (#1501). */}
+              <div className="flex flex-wrap items-center gap-2">
+                {!legacy && (
+                  <>
+                    {/* 낱말꼴은 「명사 + 중」: 확인은 한자어 동작명사다 (#1501). */}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-disabled={checkLocked || undefined}
+                      aria-busy={checking || undefined}
+                      aria-describedby={lockReason(checking)}
+                      className={cn("tap-target bg-surface shadow-sm", checkLocked && "opacity-50")}
+                      onClick={() => {
+                        if (checkLocked || checking) return;
+                        setJustSaved(false);
+                        check.mutate();
+                      }}
+                      data-testid="ai-link-check"
+                    >
+                      {checking ? "확인 중" : probe ? "다시 확인" : "연결 확인"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-disabled={offline || undefined}
+                      aria-describedby={offline ? LINK_OFFLINE_NOTE_ID : undefined}
+                      className={cn("tap-target bg-surface shadow-sm", offline && "opacity-50")}
+                      onClick={() => {
+                        if (offline) return;
+                        startEditing();
+                      }}
+                      ref={editRef}
+                      data-testid="ai-link-edit"
+                    >
+                      {configured ? "키 바꾸기" : "API 키 추가"}
+                    </Button>
+                  </>
+                )}
+                {configured && (
+                  // 문구는 「연결 끊기」(#2878 결정: 구독 줄은 「연결 해제」, 팀 API 키 줄은
+                  // 「연결 끊기」). 누르면 영향 받는 에이전트를 먼저 보이는 확인 창이 뜬다.
                   <Button
+                    ref={unlinkRef}
                     type="button"
                     variant="ghost"
                     size="sm"
-                    aria-disabled={checkLocked || undefined}
-                    aria-busy={checking || undefined}
-                    aria-describedby={lockReason(checking)}
-                    className={cn("tap-target bg-surface shadow-sm", checkLocked && "opacity-50")}
+                    aria-disabled={unlinkLocked || undefined}
+                    aria-describedby={lockReason(unlinking)}
+                    aria-haspopup="dialog"
+                    className={cn("tap-target bg-surface text-danger shadow-sm", unlinkLocked && "opacity-50")}
                     onClick={() => {
-                      if (checkLocked || checking) return;
-                      check.mutate();
+                      if (unlinkLocked) return;
+                      unlink.reset();
+                      setUnlinkOpen(true);
                     }}
-                    data-testid="ai-link-check"
+                    data-testid="ai-link-unlink"
                   >
-                    {checking ? "확인 중" : "연결 확인"}
+                    연결 끊기
                   </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-disabled={offline || undefined}
-                    aria-describedby={offline ? LINK_OFFLINE_NOTE_ID : undefined}
-                    className={cn("tap-target bg-surface shadow-sm", offline && "opacity-50")}
-                    onClick={() => {
-                      if (offline) return;
-                      startEditing(link);
-                    }}
-                    ref={editRef}
-                    data-testid="ai-link-edit"
-                  >
-                    {configured ? "키 바꾸기" : "API 키 추가"}
-                  </Button>
-                </div>
-              )}
-              {configured && (
-                <div className="self-start">
-                <ConfirmButton
-                triggerClassName="tap-target bg-surface text-danger shadow-sm"
-                label="연결 해제"
-                question={
-                  legacy
-                    ? "이 내부용 연결을 지웁니다. 같은 방식으로는 다시 만들 수 없어요."
-                    : "저장된 주소와 자격증명을 지웁니다. 팀 에이전트가 이 연결로 대답하지 못하게 됩니다."
-                }
-                confirmLabel="연결 해제"
-                disabled={offline || (busy && !unlinking)}
-                describedBy={lockReason(unlinking)}
-                busy={unlinking}
-                // 한자어 동작명사(해제)가 있는 자리라 「명사 + 중」이다 (#1501).
-                busyLabel="해제 중"
-                onConfirm={() => unlink.mutate()}
-                testId="ai-link-unlink"
-              />
-                </div>
-              )}
+                )}
+              </div>
             </div>
           )}
 
           {/* 두 사유는 수정 폼과 그 폼이 닫힌 자리 **양쪽 밖**에 산다: 저장은 폼 안,
-              확인과 해제는 폼이 닫힌 자리에 있어 어느 한쪽에 두면 다른 쪽의
+              확인과 끊기는 폼이 닫힌 자리에 있어 어느 한쪽에 두면 다른 쪽의
               `aria-describedby` 가 화면에 없는 id 를 가리키게 된다. */}
           {offline && (
             <p
@@ -740,7 +646,7 @@ function TeamBoard({ offline }: { offline: boolean }) {
             </p>
           )}
 
-          {check.isError &&
+          {!editing && !offline && check.isError &&
             (loopbackHint(check.error, link.baseUrl) ? (
               <LoopbackRefusalBanner
                 error={check.error}
@@ -752,13 +658,27 @@ function TeamBoard({ offline }: { offline: boolean }) {
                 {errorMessage(check.error)}
               </p>
             ))}
-          {unlink.isError && (
-            <p className="text-meta text-danger" role="alert">
-              {errorMessage(unlink.error)}
-            </p>
+          {!editing && !offline && probe && !checking && (
+            <ProbeAnswer probe={probe} link={link} chainPending={chainPending} justSaved={justSaved} />
           )}
-          {!editing && probe && (
-            <ProbeAnswer probe={probe} link={link} chainPending={chainPending} />
+          {configured && (
+            <TeamUnlinkDialog
+              open={unlinkOpen}
+              onOpenChange={(open) => {
+                if (!open && unlinking) return;
+                setUnlinkOpen(open);
+              }}
+              opener={unlinkRef}
+              workspaceId={workspaceId}
+              rowName={rowName}
+              legacy={legacy}
+              busy={unlinking}
+              error={unlink.isError ? errorMessage(unlink.error) : null}
+              onConfirm={() => {
+                if (unlinking || offline) return;
+                unlink.mutate();
+              }}
+            />
           )}
         </AiAside>
         </div>
@@ -870,32 +790,24 @@ function TeamLinkDetail({
 }
 
 /**
- * One probe, two shapes. A server that carries the ADR-0135 D1 chain answers
- * `entries[]`, and then the per-hop table IS the result. A server built before
- * the chain landed answers the MOMO-572 body, and that sentence stays.
+ * 확인 결과. 첫 칸(팀 기본 키)의 결과는 시안 §4 2b `.check` 칸 하나로, 문장은 채팅
+ * 연결 카드와 같은 코어 `teamCheckResult`다. 예비 provider가 있는 서버(ADR-0135 D1
+ * `entries[]`가 둘 이상)면 칸마다의 표가 그 밑에 선다.
  */
 function ProbeAnswer({
   probe,
   link,
   chainPending,
+  justSaved,
 }: {
   probe: ProviderLinkTest;
   link: ProviderLink;
   chainPending: boolean;
+  justSaved: boolean;
 }) {
   // Parsed rather than trusted: `entries` is an ADR-0135 D1 addition, so an
   // unreadable answer degrades to the single-hop sentence (see chainModel).
   const probeEntries = parseProbeEntries(arrayField(probe, "entries"));
-  if (probeEntries.length > 0) {
-    return (
-      <ChainProbeResult
-        cascadeOk={probe.cascadeOk === true}
-        entries={probeEntries}
-        checkedAtMs={probe.checkedAtMs}
-        chainPending={chainPending}
-      />
-    );
-  }
   if (loopbackHint(probe.reason ?? "", link.baseUrl)) {
     return (
       <LoopbackRefusalBanner
@@ -905,13 +817,33 @@ function ProbeAnswer({
       />
     );
   }
+  const line = teamCheckResult({ probe, justSaved, nowMs: Date.now() });
   return (
-    <p
-      className={probe.ok ? "text-meta text-ok" : "text-meta text-warn"}
-      role="status"
-      data-testid="ai-link-probe"
-    >
-      {providerTestMessage(probe)}
-    </p>
+    <>
+      <div
+        className={cn(
+          "flex min-w-0 flex-col gap-1 rounded-lg border px-3 py-2",
+          line.tone === "ok" ? "border-ok/40 bg-ok-soft" : "border-line bg-surface"
+        )}
+        role="status"
+        data-testid="ai-link-probe"
+        data-tone={line.tone}
+      >
+        <b className={cn("text-meta font-bold", line.tone === "ok" ? "text-ok" : "text-ink")}>
+          {line.headline}
+        </b>
+        <span className="break-keep text-meta text-ink-muted" data-testid="ai-link-probe-text">
+          {line.text}
+        </span>
+      </div>
+      {probeEntries.length > 1 && (
+        <ChainProbeResult
+          cascadeOk={probe.cascadeOk === true}
+          entries={probeEntries}
+          checkedAtMs={probe.checkedAtMs}
+          chainPending={chainPending}
+        />
+      )}
+    </>
   );
 }

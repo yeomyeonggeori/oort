@@ -360,7 +360,7 @@ describe("같은 입력 → 같은 알약: 설정 × 카드 (#2941·#2944)", () 
   ];
   it.each(links)("팀 줄: %s", async (_name, link) => {
     vi.mocked(fetchProviderLink).mockResolvedValue(link);
-    const settings = mountEl(createElement(AiLinkSection, { offline: false }));
+    const settings = mountEl(createElement(AiLinkSection, { offline: false, workspaceId: "ws-1" }));
     const card = mountCard();
     const settingsRow = await until(settings, "ai-link-row");
     const cardRow = await until(card, "ai-connect-card-team");
@@ -369,7 +369,7 @@ describe("같은 입력 → 같은 알약: 설정 × 카드 (#2941·#2944)", () 
 
   it("팀 줄: 내부용 연결은 두 표면 모두 정확히 「읽기 전용」", async () => {
     vi.mocked(fetchProviderLink).mockResolvedValue({ ...KEY_LINK, credentialKind: "oauth-openai" } as ProviderLink);
-    const settings = mountEl(createElement(AiLinkSection, { offline: false }));
+    const settings = mountEl(createElement(AiLinkSection, { offline: false, workspaceId: "ws-1" }));
     const card = mountCard();
     const settingsRow = await until(settings, "ai-link-row");
     const cardRow = await until(card, "ai-connect-card-team");
@@ -386,7 +386,7 @@ describe("같은 입력 → 같은 알약: 설정 × 카드 (#2941·#2944)", () 
 
   it("팀 줄: 같은 test 응답(실패)에 두 표면이 같은 알약", async () => {
     vi.mocked(testProviderLink).mockResolvedValue(probe(false, "provider_auth_failed"));
-    const settings = mountEl(createElement(AiLinkSection, { offline: false }));
+    const settings = mountEl(createElement(AiLinkSection, { offline: false, workspaceId: "ws-1" }));
     const card = mountCard();
     await until(settings, "ai-link-row");
     act(() => (q(settings, "ai-link-row-more") as HTMLButtonElement).click());
@@ -404,7 +404,7 @@ describe("같은 입력 → 같은 알약: 설정 × 카드 (#2941·#2944)", () 
   });
 
   it("팀 줄: 오프라인이면 둘 다 「확인할 수 없음」", async () => {
-    const settings = mountEl(createElement(AiLinkSection, { offline: true }));
+    const settings = mountEl(createElement(AiLinkSection, { offline: true, workspaceId: "ws-1" }));
     const card = mountCard({ offline: true });
     const settingsRow = await until(settings, "ai-link-row");
     const cardRow = await until(card, "ai-connect-card-team");
@@ -414,7 +414,7 @@ describe("같은 입력 → 같은 알약: 설정 × 카드 (#2941·#2944)", () 
 
   it("구독 줄: 같은 CLI 감지에 같은 알약", async () => {
     vi.mocked(detectLocalHarnesses).mockResolvedValue(READY);
-    const settings = mountEl(createElement(AiLinkSection, { offline: false }));
+    const settings = mountEl(createElement(AiLinkSection, { offline: false, workspaceId: "ws-1" }));
     const card = mountCard();
     for (const id of ["claude", "codex"] as const) {
       const settingsPill = await until(settings, `my-account-${id}-state`);
@@ -424,6 +424,120 @@ describe("같은 입력 → 같은 알약: 설정 × 카드 (#2941·#2944)", () 
     }
     expect(pillOf(q(card, "ai-connect-card-claude"))).toEqual({ tone: "ok", text: "준비됨" });
     expect(pillOf(q(card, "ai-connect-card-codex"))).toEqual({ tone: "warn", text: "로그인 필요" });
+  });
+});
+
+describe("같은 폼 · 같은 결과 문장: 설정 × 카드 (#2880)", () => {
+  const setValue = (input: HTMLInputElement, value: string) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    act(() => {
+      setter.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  };
+
+  /** 폼의 시험 id 꼬리(머리를 뗀 것). 두 표면이 같은 컴포넌트면 같은 꼬리 집합이다. */
+  function formShape(form: HTMLElement, prefix: string): string[] {
+    return Array.from(form.querySelectorAll<HTMLElement>("[data-testid]"))
+      .map((el) => el.getAttribute("data-testid") ?? "")
+      .map((id) => id.slice(prefix.length + 1))
+      .filter((tail) => tail !== "preset-custom" && tail !== "custom-url")
+      .sort();
+  }
+
+  function keyAttrs(input: HTMLElement | null) {
+    return ["type", "autocomplete", "data-1p-ignore", "data-lpignore", "data-bwignore", "spellcheck"].map((name) =>
+      input?.getAttribute(name)
+    );
+  }
+
+  it("키 폼은 한 컴포넌트다: 칩·password 칸 속성·버튼이 같다(설정만 「직접 주소」를 더 세운다)", async () => {
+    vi.mocked(fetchProviderLink).mockResolvedValue(EMPTY_LINK);
+    const settings = mountEl(createElement(AiLinkSection, { offline: false, workspaceId: WS }));
+    const card = mountCard({ line: "team" });
+    act(() => (q(settings, "ai-team-add") as HTMLButtonElement | null)?.click());
+    const add = await until(settings, "ai-team-add");
+    act(() => add.click());
+    const settingsForm = await until(settings, "ai-link-key-form");
+    await until(card, "ai-connect-card-team");
+    if (!q(card, "ai-connect-card-key-form")) {
+      act(() => (q(card, "ai-connect-card-team-key") as HTMLButtonElement).click());
+    }
+    const cardForm = await until(card, "ai-connect-card-key-form");
+    expect(formShape(settingsForm, "ai-link")).toEqual(formShape(cardForm, "ai-connect-card"));
+    expect(keyAttrs(q(settings, "ai-link-key-input"))).toEqual(keyAttrs(q(card, "ai-connect-card-key-input")));
+    expect(keyAttrs(q(settings, "ai-link-key-input"))[0]).toBe("password");
+    expect(keyAttrs(q(settings, "ai-link-key-input"))[1]).toBe("new-password");
+    const chips = (form: HTMLElement) =>
+      Array.from(form.querySelectorAll("fieldset label")).map((label) => label.textContent?.trim());
+    expect(chips(settingsForm)).toEqual([...chips(cardForm), "직접 주소"]);
+    expect(chips(cardForm)).toEqual(["OpenAI", "Anthropic (Claude)"]);
+    expect(q(card, "ai-connect-card-preset-custom")).toBeNull();
+  });
+
+  it("지금 서버(probe_not_run): 저장하고 확인 → 두 표면이 같은 「확인 전」과 같은 문장", async () => {
+    vi.mocked(fetchProviderLink).mockResolvedValue({ ...KEY_LINK, configured: false, keyConfigured: false, source: "environment", availability: "mock" } as ProviderLink);
+    vi.mocked(putProviderLink).mockResolvedValue(KEY_LINK);
+    vi.mocked(testProviderLink).mockResolvedValue(probe(false, "probe_not_run"));
+    const settings = mountEl(createElement(AiLinkSection, { offline: false, workspaceId: WS }));
+    const card = mountCard({ line: "team" });
+    const add = await until(settings, "ai-team-add");
+    act(() => add.click());
+    setValue(q(settings, "ai-link-key-input") as HTMLInputElement, "sk-settings-1111");
+    vi.mocked(fetchProviderLink).mockResolvedValue(KEY_LINK);
+    act(() => (q(settings, "ai-link-key-save") as HTMLButtonElement).click());
+    const settingsText = await until(settings, "ai-link-probe-text");
+    expect(settingsText.textContent).toBe("확인이 끝나지 않았어요. 키는 저장됐어요.");
+    expect(q(settings, "ai-link-probe")?.textContent).toContain("확인 전");
+
+    // 카드: 같은 확인 응답을 저장 직후 받는다.
+    act(() => (q(card, "ai-connect-card-team-key") as HTMLButtonElement | null)?.click());
+    const cardForm = q(card, "ai-connect-card-key-form");
+    if (cardForm) {
+      setValue(q(card, "ai-connect-card-key-input") as HTMLInputElement, "sk-card-2222");
+      act(() => (q(card, "ai-connect-card-key-save") as HTMLButtonElement).click());
+      if (q(card, "ai-connect-card-key-replace")) act(() => (q(card, "ai-connect-card-key-save") as HTMLButtonElement).click());
+    } else {
+      act(() => (q(card, "ai-connect-card-team-check") as HTMLButtonElement).click());
+    }
+    const cardResult = await until(card, "ai-connect-card-team-result");
+    await waitFor(() => expect(cardResult.textContent).toBe(settingsText.textContent));
+    const settingsRow = await until(settings, "ai-link-row");
+    expect(pillOf(q(card, "ai-connect-card-team"))).toEqual({ tone: "mute", text: "확인 전" });
+    expect(pillOf(settingsRow.querySelector("[data-slot='state']") as HTMLElement)).toEqual(
+      pillOf(q(card, "ai-connect-card-team"))
+    );
+  });
+
+  it("#2960 모양의 확인(모델 수·요청 한도): 두 표면이 같은 문장", async () => {
+    vi.mocked(testProviderLink).mockResolvedValue({
+      ...probe(true),
+      checkedAtMs: Date.now(),
+      entries: [
+        {
+          position: 0,
+          source: "database",
+          mode: "external-hermes",
+          endpointLabel: "OpenAI",
+          enabled: true,
+          ok: true,
+          disposition: "ok",
+          probe: { outcome: "ok", method: "models", modelCount: 6, rateLimit: { source: "x-ratelimit", requestsLimit: 50 } },
+        },
+      ],
+    } as unknown as ProviderLinkTest);
+    const settings = mountEl(createElement(AiLinkSection, { offline: false, workspaceId: WS }));
+    const card = mountCard();
+    await until(settings, "ai-link-row");
+    act(() => (q(settings, "ai-link-row-more") as HTMLButtonElement).click());
+    act(() => (q(settings, "ai-link-check") as HTMLButtonElement).click());
+    const cardCheck = await until(card, "ai-connect-card-team-check");
+    act(() => cardCheck.click());
+    const settingsText = await until(settings, "ai-link-probe-text");
+    const cardResult = await until(card, "ai-connect-card-team-result");
+    expect(settingsText.textContent).toBe("응답을 확인했어요 · 방금 · 쓸 수 있는 모델 6개 · 요청 한도 50");
+    expect(cardResult.textContent).toBe(settingsText.textContent);
+    expect(q(settings, "ai-link-probe")?.textContent).toContain("키 확인됨");
   });
 });
 

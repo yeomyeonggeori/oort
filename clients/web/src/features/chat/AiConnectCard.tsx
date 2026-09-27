@@ -22,6 +22,7 @@ import {
   harnessPillView,
   isLegacyTeamLink,
   linkPill,
+  PROBE_NOT_RUN,
 } from "@momo/core/features/settings/aiLinkPill";
 import { errorMessage, isOperatorDenied, maskedBearer } from "@momo/core/features/settings/model";
 import { teamCheckClock, teamCheckResult, teamCheckSince } from "@momo/core/features/settings/teamKeyForm";
@@ -653,7 +654,8 @@ function TeamSection({
     result = { tone: line.tone, text: line.text };
   }
 
-  const failed = probe !== null && !probe.ok;
+  // 서버가 부르지 않은 확인(`probe_not_run`)은 실패가 아니다: 「키 바꾸기」로 몰지 않는다(#2880).
+  const failed = probe !== null && !probe.ok && probe.reason !== PROBE_NOT_RUN;
   let action: ReactNode = null;
   if (operator && link && !legacy && !editing) {
     const lockedByOffline = offline;
