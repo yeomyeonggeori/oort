@@ -30,6 +30,7 @@ import { AiConnectCard, AiConnectSuggestion } from "@/features/chat/AiConnectCar
 import { CommandSuggestSlot } from "./commandSuggestSlot";
 import { readDraft, writeDraft } from "@/features/chat/draftStore";
 import { MessageRow, type MessageRowActions } from "./MessageRow";
+import { ThreadComposer } from "./ThreadComposer";
 
 const envSlot = vi.hoisted(() => ({ tauri: true, flag: true }));
 
@@ -457,5 +458,50 @@ describe("카드 자리가 없는 표면", () => {
     await act(async () => undefined);
     expect(q(host, "ai-suggest")).toBeNull();
     expect(host.textContent).toContain(BODY);
+  });
+});
+
+describe("스레드 답글로 온 제안 — 부탁은 그 스레드 입력창에(design-review #2948 B)", () => {
+  const TEAM = { ...G3, args: { harness: "team_key", scope: "team" } };
+  const ROOT = "0199eeee-0000-7000-8000-000000000400";
+  const reply = () => ({ ...suggestion(TEAM), rootId: ROOT });
+
+  it("열린 스레드 입력창에 멘션을 심고, 채널 초안은 건드리지 않는다", async () => {
+    localStorage.clear();
+    vi.mocked(fetchProviderLink).mockRejectedValue(new ApiError(403, "forbidden"));
+    const host = mount(
+      createElement(
+        CommandSuggestSlot.Provider,
+        { value: AiConnectSuggestion },
+        createElement("div", null,
+          rowElement(reply(), REQUESTER),
+          createElement(ThreadComposer, {
+            workspaceId: WS,
+            channelId: CH,
+            rootId: ROOT,
+            directory,
+            channels: [],
+            onSent: () => undefined,
+          })
+        )
+      ),
+      REQUESTER
+    );
+    const ask = await until(host, "ai-connect-card-ask-operator");
+    act(() => ask.click());
+    const box = host.querySelector("textarea") as HTMLTextAreaElement;
+    expect(box.value).toBe("@sky ");
+    expect(readDraft(WS, CH)).toBe("");
+    expect(q(host, "ai-connect-card-ask-note")).toBeNull();
+  });
+
+  it("스레드 입력창이 없으면 조용히 끝나지 않고 그 자리에서 말한다", async () => {
+    localStorage.clear();
+    vi.mocked(fetchProviderLink).mockRejectedValue(new ApiError(403, "forbidden"));
+    const host = mountRow(reply(), REQUESTER);
+    const ask = await until(host, "ai-connect-card-ask-operator");
+    act(() => ask.click());
+    expect(readDraft(WS, CH)).toBe("");
+    expect(q(host, "ai-connect-card-ask-note")?.textContent).toBe("스레드를 열고 운영자를 멘션해 주세요.");
   });
 });

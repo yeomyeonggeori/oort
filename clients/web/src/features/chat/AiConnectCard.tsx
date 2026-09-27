@@ -50,12 +50,13 @@ import {
 import { useSubscriptionEntryState } from "@/features/welcome/SubscriptionAgentEntry";
 import { useOffline } from "@/features/common/useOffline";
 import { useSession } from "@/app/session";
-import { seedComposerText } from "@/features/chat/draftStore";
+import { seedComposerText, seedThreadComposerText } from "@/features/chat/draftStore";
 import type { Directory } from "@momo/core/features/workspace/directory";
 import {
   COMMAND_SUGGEST_ASK_BUSY,
   COMMAND_SUGGEST_ASK_NONE,
   COMMAND_SUGGEST_ASK_OPERATOR,
+  COMMAND_SUGGEST_ASK_THREAD,
   COMMAND_SUGGEST_ONLY_ME,
   COMMAND_SUGGEST_TEAM_CLOSE,
   COMMAND_SUGGEST_TEAM_OPEN,
@@ -436,6 +437,7 @@ export function AiConnectSuggestion({
   viewerMemberId,
   directory,
   channelId,
+  rootId,
 }: {
   card: CommandSuggestCard;
   viewerMemberId: string | undefined;
@@ -443,6 +445,8 @@ export function AiConnectSuggestion({
   directory: Directory;
   /** 그 멘션을 채울 컴포저의 채널(이 메시지의 채널). */
   channelId: string;
+  /** 스레드 답글이면 그 뿌리: 멘션은 채널이 아니라 그 스레드 입력창에 심는다. */
+  rootId?: string | undefined;
 }) {
   const isTarget = commandSuggestViewer(card, viewerMemberId, false) === "target";
   const operatorQuery = useQuery({
@@ -457,7 +461,13 @@ export function AiConnectSuggestion({
   });
   const viewer = commandSuggestViewer(card, viewerMemberId, operatorQuery.isSuccess);
   if (viewer === "target") {
-    return <SuggestedCard card={card} directory={directory} channelId={channelId} viewerMemberId={viewerMemberId} />;
+    return <SuggestedCard
+        card={card}
+        directory={directory}
+        channelId={channelId}
+        rootId={rootId}
+        viewerMemberId={viewerMemberId}
+      />;
   }
   return <SuggestionLine card={card} operator={viewer === "operator"} />;
 }
@@ -516,11 +526,13 @@ function SuggestedCard({
   card,
   directory,
   channelId,
+  rootId,
   viewerMemberId,
 }: {
   card: CommandSuggestCard;
   directory: Directory;
   channelId: string;
+  rootId: string | undefined;
   viewerMemberId: string | undefined;
 }) {
   const navigate = useNavigate();
@@ -530,6 +542,13 @@ function SuggestedCard({
   const askOperator = (): string | null => {
     const draft = operatorMentionDraft(directory, viewerMemberId);
     if (draft === null) return COMMAND_SUGGEST_ASK_NONE;
+    // 스레드 안의 제안은 그 스레드 입력창에(design-review #2948 B). 채널 입력창은
+    // 좁은 폭에서 서랍 뒤에 `inert`로 가려져 있어, 거기 심으면 아무 일도 안 난 것처럼 보인다.
+    if (rootId) {
+      const seeded = seedThreadComposerText(rootId, draft);
+      if (!seeded.mounted) return COMMAND_SUGGEST_ASK_THREAD;
+      return seeded.accepted ? null : COMMAND_SUGGEST_ASK_BUSY;
+    }
     if (!seedComposerText(workspaceId, channelId, draft)) return COMMAND_SUGGEST_ASK_BUSY;
     const input = document.getElementById("composer-input");
     if (input instanceof HTMLTextAreaElement) input.focus();

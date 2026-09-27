@@ -246,6 +246,8 @@ export const COMMAND_SUGGEST_ASK_OPERATOR = "운영자에게 부탁하기";
 /** 쓰던 글이 있어 멘션을 채우지 않았을 때. */
 export const COMMAND_SUGGEST_ASK_BUSY =
   "쓰던 글이 있어 채우지 않았어요. 운영자를 직접 멘션해 주세요.";
+/** 스레드 답글의 제안인데 그 스레드 입력창이 열려 있지 않을 때. */
+export const COMMAND_SUGGEST_ASK_THREAD = "스레드를 열고 운영자를 멘션해 주세요.";
 /** 멤버 목록에 운영자가 없을 때. */
 export const COMMAND_SUGGEST_ASK_NONE = "이 워크스페이스에서 운영자를 찾지 못했어요.";
 

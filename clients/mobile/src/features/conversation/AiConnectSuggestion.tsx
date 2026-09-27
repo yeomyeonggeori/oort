@@ -75,6 +75,8 @@ export function AiConnectSuggestion({
     queryFn: fetchProviderLink,
     retry: false,
     staleTime: OPERATOR_STALE_MS,
+    // 403(비운영자)은 데이터 없이 남는다. 목록이 행을 다시 세울 때마다 다시 묻지 않는다(웹과 같다).
+    retryOnMount: false,
     enabled: card.shape === 'ok' && !isTarget,
   });
   const viewer = commandSuggestViewer(

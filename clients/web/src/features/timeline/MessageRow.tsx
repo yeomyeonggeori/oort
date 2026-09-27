@@ -983,6 +983,7 @@ export function MessageRow({
             viewerMemberId={actions?.myMemberId}
             directory={directory}
             channelId={message.channelId}
+            rootId={message.rootId}
           />
         )}
         {/* Provider cascade (ADR-0135 D1). Outside the card/artifact branch on

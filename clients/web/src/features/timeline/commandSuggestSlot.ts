@@ -17,6 +17,8 @@ export interface CommandSuggestSlotProps {
   viewerMemberId: string | undefined;
   directory: Directory;
   channelId: string;
+  /** 스레드 답글로 온 제안이면 그 스레드의 뿌리. 부탁 멘션은 그 스레드 입력창에 심는다. */
+  rootId: string | undefined;
 }
 
 export const CommandSuggestSlot = createContext<ComponentType<CommandSuggestSlotProps> | null>(null);

@@ -115,6 +115,20 @@ const messages = [
   }),
 ];
 
+/** 스레드 장면(design-review #2948 B): 제안이 요청 메시지의 스레드 답글로 온다. */
+let threadMode = false;
+const THREAD_ROOT = "0199dddd-0000-7000-8000-000000000002";
+function channelMessages() {
+  if (!threadMode) return messages;
+  return [
+    messages[0],
+    { ...messages[1], thread: { reply_count: 1, last_reply_seq: 12, last_reply_at: messages[2].createdAtMs } },
+  ];
+}
+function threadReplies() {
+  return [{ ...messages[2], rootId: THREAD_ROOT }];
+}
+
 function json(route, body, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
@@ -191,6 +205,7 @@ async function installRoutes(context, posted, team) {
     if (path.endsWith("/read-state")) return json(route, { read_states: [] });
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     if (path.endsWith("/work-sessions")) return json(route, { sessions: [] });
+    if (path.endsWith("/replies")) return json(route, { messages: threadMode ? threadReplies() : [] });
     if (path.endsWith("/messages")) {
       if (request.method() === "POST") {
         const body = JSON.parse(request.postData() ?? "{}");
@@ -201,7 +216,7 @@ async function installRoutes(context, posted, team) {
         );
       }
       if (url.searchParams.has("after") || url.searchParams.has("before")) return json(route, { messages: [] });
-      return json(route, { messages });
+      return json(route, { messages: channelMessages() });
     }
     return json(route, {});
   });
@@ -248,8 +263,9 @@ function teamRoute({ link = KEY_LINK, test = probe(true), testHold = null, denie
 
 const outDir = resolve(webRoot, "captures/2948");
 
-async function scene(browser, { width, scheme, name, query, team, as, act, args }) {
+async function scene(browser, { width, scheme, name, query, team, as, act, args, thread }) {
   viewer = as;
+  threadMode = Boolean(thread);
   suggestArgs = args ?? { harness: "claude", scope: "mine" };
   const height = width === 390 ? 844 : 800;
   const context = await browser.newContext({
@@ -269,6 +285,10 @@ async function scene(browser, { width, scheme, name, query, team, as, act, args 
     [channelA, query]
   );
   await page.getByTestId("composer-input").waitFor({ timeout: 15_000 });
+  if (thread) {
+    await page.getByTestId("thread-anchor").first().click();
+    await page.getByTestId("thread-panel").waitFor();
+  }
   const slot = page.getByTestId("ai-suggest");
   await slot.waitFor({ timeout: 10_000 }).catch(async (error) => {
     await page.screenshot({ path: resolve(outDir, `DEBUG-${name}.png`) });
@@ -324,6 +344,24 @@ function scenes() {
         if (value !== "@haneul ") throw new Error(`컴포저에 운영자 멘션이 차지 않았다: ${JSON.stringify(value)}`);
       },
     },
+    {
+      // 스레드 답글로 온 제안: 부탁 멘션은 채널이 아니라 그 스레드 입력창에 찬다.
+      name: "thread-denied",
+      thread: true,
+      as: SUNG,
+      query: "aiEntry=rows&aiProbe=claude-ready",
+      args: { harness: "team_key", scope: "team" },
+      team: () => teamRoute({ denied: true }),
+      expect: { viewer: "target" },
+      act: async (page) => {
+        await page.getByTestId("thread-panel").getByTestId("ai-connect-card-ask-operator").click();
+        const box = page.getByTestId("thread-composer").locator("textarea");
+        const value = await box.inputValue();
+        if (value !== "@haneul ") throw new Error(`스레드 입력창에 멘션이 차지 않았다: ${JSON.stringify(value)}`);
+        const channel = await page.getByTestId("composer-input").inputValue();
+        if (channel !== "") throw new Error(`채널 입력창이 채워졌다: ${JSON.stringify(channel)}`);
+      },
+    },
     { name: "operator-line", as: SKY, query: "", team: () => teamRoute(), expect: { viewer: "operator", controls: 1 } },
   ];
 }
@@ -341,7 +379,7 @@ async function main() {
         for (const scheme of ["light", "dark"]) {
           for (const s of scenes()) {
             if (only && !only.includes(s.name)) continue;
-            const r = await scene(browser, { width, scheme, name: s.name, query: s.query, team: s.team(), as: s.as, act: s.act, args: s.args });
+            const r = await scene(browser, { width, scheme, name: s.name, query: s.query, team: s.team(), as: s.as, act: s.act, args: s.args, thread: s.thread });
             const bad =
               r.viewerAttr !== s.expect.viewer ||
               (s.expect.controls !== undefined && r.controls !== s.expect.controls) ||
