@@ -106,6 +106,9 @@ import { useOpenMemberProfile } from "@/features/directory/memberProfileContext"
 import { useWelcomeKickoff } from "@/features/welcome/useWelcomeKickoff";
 import { WelcomeKickoffStage } from "@/features/welcome/WelcomeKickoffStage";
 import { PhoneLinkChannelCard } from "@/features/welcome/PhoneLinkChannelCard";
+import type { AiConnectLine } from "@momo/core/features/commands/registry";
+import { AiConnectCard } from "./AiConnectCard";
+import { registerLocalCardHost } from "./localCards";
 import { shouldMountPhoneLinkCard } from "@/features/welcome/phoneLinkCard";
 import {
   peekKickoffSettled,
@@ -898,6 +901,43 @@ export function ChatShell() {
     applyFirstAgentFocus();
   }, [channelId]);
 
+  // 로컬 연결 카드의 자리 (#2944 GC-3, brief §3.2 · Q1). `/연결`·⌘K가
+  // `openLocalCardIn(채널)`로 부탁하면 이 채널의 타임라인 꼬리에 카드가 선다.
+  // 채널당 한 장이고, 다시 부르면 새 카드를 쌓지 않고 초점만 옮긴다(nonce).
+  // 이 기기 메모리에만 있다: 채널을 옮기면 버리고, 새로고침이면 없다.
+  const [localCard, setLocalCard] = useState<{
+    channelId: string;
+    line: AiConnectLine | null;
+    nonce: number;
+  } | null>(null);
+  // nonce는 이 화면에서 줄곧 는다(닫고 다시 열어도 새 값): 초점 판정의 열쇠다.
+  const cardNonce = useRef(0);
+  useEffect(() => {
+    setLocalCard(null);
+    if (channelId === null || stressCount > 0) return;
+    return registerLocalCardHost(channelId, (card, args) => {
+      if (card !== "ai.connect") return false;
+      setLocalCard(() => ({
+        channelId,
+        line: args.line ?? null,
+        nonce: ++cardNonce.current,
+      }));
+      return true;
+    });
+  }, [channelId, stressCount]);
+  // 카드가 다시 마운트돼도(타임라인 epoch) 같은 nonce로 초점을 두 번 옮기지 않는다.
+  const focusedCardNonce = useRef(0);
+  const claimCardFocus = useCallback((nonce: number) => {
+    if (focusedCardNonce.current === nonce) return false;
+    focusedCardNonce.current = nonce;
+    return true;
+  }, []);
+  const closeLocalCard = useCallback(() => {
+    setLocalCard(null);
+    focusComposer();
+  }, [focusComposer]);
+  const openCard = localCard !== null && localCard.channelId === channelId ? localCard : null;
+
   // Re-send a row the SERVER stored as `failed`. That message is durable and
   // will not change, so this is a genuinely new send with a fresh idempotency
   // key, not a retry of the old one: it goes through the same send path as the
@@ -1251,6 +1291,18 @@ export function ChatShell() {
         >
           {hasChannel ? (
             <Timeline
+              tail={
+                openCard ? (
+                  <AiConnectCard
+                    key={openCard.channelId}
+                    line={openCard.line}
+                    focusNonce={openCard.nonce}
+                    offline={offline}
+                    onClose={closeLocalCard}
+                    claimFocus={claimCardFocus}
+                  />
+                ) : null
+              }
               messages={messages}
               directory={directory}
               status={stressCount > 0 ? "ready" : timeline.status}
