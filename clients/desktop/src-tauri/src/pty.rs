@@ -55,6 +55,7 @@ use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use crate::harness_path;
+use crate::harness_profile;
 use crate::pane_signal::{self, PaneSignal};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
@@ -104,7 +105,19 @@ pub enum Program {
     /// One of `HARNESSES`, resolved on this machine.
     Harness { id: String },
     /// The official CLI's sign-in command: one row of `LOGIN_COMMANDS`.
-    Login { id: String, method: LoginMethod },
+    /// `profile` is a label (#2878): the shell turns it into the profile
+    /// folder (`harness_profile::existing_profile`). Absent = the CLI's own
+    /// default location on this Mac.
+    Login {
+        id: String,
+        method: LoginMethod,
+        #[serde(default)]
+        profile: Option<String>,
+    },
+    /// The official CLI's sign-out: one row of `harness_profile::LOGOUT_COMMANDS`
+    /// (ADR-0190 D3-f A2·A5). Always a profile folder — there is no sign-out
+    /// of this Mac's default sign-in here.
+    Logout { id: String, profile: String },
 }
 
 /// How the CLI finishes its sign-in. `Browser` = the CLI opens the system
@@ -189,6 +202,9 @@ pub struct SpawnPlan {
     /// `OORT_PANE_*` variables and `pane_signal::harness_hook_args`. Harness
     /// panes only; a shell or a sign-in has nothing to report.
     pub hooks: bool,
+    /// A profile folder's variable (#2878): `CLAUDE_CONFIG_DIR` or
+    /// `CODEX_HOME` → the folder `harness_profile` decided and checked.
+    pub profile: Option<(&'static str, PathBuf)>,
 }
 
 pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan, String> {
@@ -204,9 +220,14 @@ pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan,
                 size,
                 path: None,
                 hooks: false,
+                profile: None,
             })
         }
-        Program::Login { id, method } => {
+        Program::Login {
+            id,
+            method,
+            profile,
+        } => {
             if request.cwd.is_some() {
                 return Err("refused: a sign-in runs in the home folder".into());
             }
@@ -214,6 +235,10 @@ pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan,
                 .iter()
                 .find(|row| row.id == id.as_str() && row.method == *method)
                 .ok_or_else(|| format!("refused: no {method:?} sign-in for {id:?}"))?;
+            let profile = match profile {
+                Some(label) => Some(profile_env(host, row.id, label)?),
+                None => None,
+            };
             let program = harness_path::find_on_path(row.id, &host.path)
                 .ok_or_else(|| format!("refused: {id} is not installed on this machine"))?;
             Ok(SpawnPlan {
@@ -223,6 +248,28 @@ pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan,
                 size,
                 path: Some(host.path.clone()),
                 hooks: false,
+                profile,
+            })
+        }
+        Program::Logout { id, profile } => {
+            if request.cwd.is_some() {
+                return Err("refused: a sign-out runs in the home folder".into());
+            }
+            let row = harness_profile::LOGOUT_COMMANDS
+                .iter()
+                .find(|row| row.id == id.as_str())
+                .ok_or_else(|| format!("refused: no sign-out for {id:?}"))?;
+            let profile = profile_env(host, row.id, profile)?;
+            let program = harness_path::find_on_path(row.id, &host.path)
+                .ok_or_else(|| format!("refused: {id} is not installed on this machine"))?;
+            Ok(SpawnPlan {
+                program,
+                args: row.args.to_vec(),
+                cwd,
+                size,
+                path: Some(host.path.clone()),
+                hooks: false,
+                profile: Some(profile),
             })
         }
         Program::Harness { id } => {
@@ -238,9 +285,18 @@ pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan,
                 size,
                 path: Some(host.path.clone()),
                 hooks: true,
+                profile: None,
             })
         }
     }
+}
+
+/// A profile label → its checked folder and variable. The folder must exist
+/// and pass `harness_profile::check_on_disk` (no symlink, under the root, not
+/// a CLI's default folder).
+fn profile_env(host: &HostFacts, id: &str, label: &str) -> Result<(&'static str, PathBuf), String> {
+    let (dir, env) = harness_profile::existing_profile(&host.home, id, label)?;
+    Ok((env, dir))
 }
 
 pub fn check_size(cols: u16, rows: u16) -> Result<(u16, u16), String> {
@@ -312,6 +368,9 @@ pub fn build_command(
     if let Some(path) = &plan.path {
         cmd.env("PATH", path);
     }
+    if let Some((key, dir)) = &plan.profile {
+        cmd.env(key, dir);
+    }
     cmd
 }
 
@@ -319,11 +378,9 @@ impl HostFacts {
     /// This machine, as `program` needs it. Runs nothing: a harness's PATH
     /// is the shared search path (inherited PATH + install folders, #2813).
     pub fn current(program: &Program) -> Result<Self, String> {
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .ok_or_else(|| "refused: HOME unset".to_string())?
-            .canonicalize()
-            .map_err(|e| format!("refused: home: {e}"))?;
+        // The same home `harness_profile` uses, so a profile folder is the
+        // same string here and in the status probe.
+        let home = harness_profile::current_home()?;
         let shell = std::env::var_os("SHELL").map(PathBuf::from);
         let allowed_shells = std::fs::read_to_string("/etc/shells")
             .unwrap_or_default()
@@ -338,7 +395,10 @@ impl HostFacts {
             allowed_shells,
             path: OsString::new(),
         };
-        if matches!(program, Program::Harness { .. } | Program::Login { .. }) {
+        if matches!(
+            program,
+            Program::Harness { .. } | Program::Login { .. } | Program::Logout { .. }
+        ) {
             facts.path =
                 harness_path::search_path(Some(&facts.home), std::env::var_os("PATH").as_ref());
         }
@@ -1299,6 +1359,7 @@ mod tests {
             size: (80, 24),
             path: None,
             hooks: false,
+            profile: None,
         };
         let cmd = build_command(
             &plan,
@@ -1331,6 +1392,7 @@ mod tests {
             size: (80, 24),
             path: None,
             hooks: false,
+            profile: None,
         };
         let manager = PtyManager::default();
         let sink = Arc::new(Recorder::default());
@@ -1368,6 +1430,7 @@ mod tests {
             size: (80, 24),
             path: None,
             hooks: false,
+            profile: None,
         };
         let manager = PtyManager::default();
         let sink = Arc::new(Recorder::default());
@@ -1406,6 +1469,7 @@ mod tests {
             size: (80, 24),
             path: None,
             hooks: false,
+            profile: None,
         }
     }
 
@@ -1419,6 +1483,7 @@ mod tests {
             size: (80, 24),
             path: None,
             hooks: false,
+            profile: None,
         }
     }
 
@@ -1682,6 +1747,7 @@ mod tests {
             program: Program::Login {
                 id: id.into(),
                 method,
+                profile: None,
             },
             cwd: None,
             cols: 80,
@@ -1737,7 +1803,6 @@ mod tests {
         for extra in [
             r#"{"program":{"kind":"login","id":"claude","method":"browser","args":["--console"]},"cols":80,"rows":24}"#,
             r#"{"program":{"kind":"login","id":"claude","method":"browser","env":{"CLAUDE_CONFIG_DIR":"/tmp"}},"cols":80,"rows":24}"#,
-            r#"{"program":{"kind":"login","id":"claude","method":"browser","profile":"/tmp/x"},"cols":80,"rows":24}"#,
             r#"{"program":{"kind":"login","id":"claude","method":"console"},"cols":80,"rows":24}"#,
             r#"{"program":{"kind":"login","id":"claude"},"cols":80,"rows":24}"#,
         ] {
@@ -1920,6 +1985,209 @@ mod tests {
         manager.kill(id).unwrap();
         let exit = sink.wait_exit(SLOW);
         assert_ne!(exit.code, Some(0), "{exit:?}");
+        std::fs::remove_dir_all(bin).ok();
+    }
+
+    // --- profiles: sign-in and sign-out (#2878, ADR-0190 D3-f A1·A2·A3·A5) ---
+
+    /// A throwaway home holding one profile per harness, and a host whose
+    /// PATH is `bin`. Never the real home.
+    fn profile_host(tag: &str, bin: &Path) -> HostFacts {
+        let home = std::env::temp_dir().join(format!("oort-2878-pty-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let home = home.canonicalize().unwrap();
+        harness_profile::create_profile(&home, "claude", "회사").unwrap();
+        harness_profile::create_profile(&home, "codex", "개인").unwrap();
+        HostFacts {
+            home,
+            shell: Some("/bin/zsh".into()),
+            allowed_shells: vec!["/bin/zsh".into()],
+            path: bin.as_os_str().to_owned(),
+        }
+    }
+
+    fn logout_request(id: &str, profile: &str) -> SpawnRequest {
+        SpawnRequest {
+            program: Program::Logout {
+                id: id.into(),
+                profile: profile.into(),
+            },
+            cwd: None,
+            cols: 80,
+            rows: 24,
+        }
+    }
+
+    fn profile_login_request(id: &str, method: LoginMethod, profile: &str) -> SpawnRequest {
+        SpawnRequest {
+            program: Program::Login {
+                id: id.into(),
+                method,
+                profile: Some(profile.into()),
+            },
+            cwd: None,
+            cols: 80,
+            rows: 24,
+        }
+    }
+
+    /// ADR-0190 D3-g: the sign-in and sign-out lists are separate. A row that
+    /// moved from one to the other, or a sign-out that crept into the
+    /// sign-in list, fails here.
+    #[test]
+    fn the_sign_out_list_is_not_the_sign_in_list() {
+        assert_eq!(harness_profile::LOGOUT_COMMANDS.len(), 2);
+        for row in harness_profile::LOGOUT_COMMANDS {
+            assert!(HARNESSES.contains(&row.id));
+            assert!(!LOGIN_COMMANDS.iter().any(|login| login.args == row.args));
+        }
+        for row in LOGIN_COMMANDS {
+            assert!(!row.args.iter().any(|a| a.ends_with("logout")));
+        }
+    }
+
+    #[test]
+    fn the_sign_out_request_names_a_harness_and_a_profile_label_only() {
+        let ok: SpawnRequest = serde_json::from_str(
+            r#"{"program":{"kind":"logout","id":"claude","profile":"회사"},"cols":80,"rows":24}"#,
+        )
+        .unwrap();
+        assert_eq!(ok.program, logout_request("claude", "회사").program);
+        let ok: SpawnRequest = serde_json::from_str(
+            r#"{"program":{"kind":"login","id":"codex","method":"browser","profile":"개인"},"cols":80,"rows":24}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            ok.program,
+            profile_login_request("codex", LoginMethod::Browser, "개인").program
+        );
+        for bad in [
+            // No sign-out of the default location: the profile is required.
+            r#"{"program":{"kind":"logout","id":"claude"},"cols":80,"rows":24}"#,
+            r#"{"program":{"kind":"logout","id":"claude","profile":null},"cols":80,"rows":24}"#,
+            r#"{"program":{"kind":"logout","id":"claude","profile":"a","path":"/tmp"},"cols":80,"rows":24}"#,
+            r#"{"program":{"kind":"logout","id":"claude","profile":"a","args":["--all"]},"cols":80,"rows":24}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<SpawnRequest>(bad).is_err(),
+                "accepted {bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_profile_sign_in_and_sign_out_get_the_same_folder_variable() {
+        let bin = login_bin("profile-plan");
+        let host = profile_host("plan", &bin);
+        let claude_dir = harness_profile::profile_root(&host.home).join("claude/회사");
+        let codex_dir = harness_profile::profile_root(&host.home).join("codex/개인");
+
+        let login = plan_spawn(
+            &profile_login_request("claude", LoginMethod::Browser, "회사"),
+            &host,
+        )
+        .unwrap();
+        let logout = plan_spawn(&logout_request("claude", "회사"), &host).unwrap();
+        assert_eq!(login.args, ["auth", "login", "--claudeai"]);
+        assert_eq!(logout.args, ["auth", "logout"]);
+        assert_eq!(logout.program, bin.join("claude"));
+        assert_eq!(
+            login.profile,
+            Some(("CLAUDE_CONFIG_DIR", claude_dir.clone()))
+        );
+        // Byte-identical: Claude Code names its keychain item after this string.
+        assert_eq!(login.profile, logout.profile);
+
+        let logout = plan_spawn(&logout_request("codex", "개인"), &host).unwrap();
+        assert_eq!(logout.args, ["logout"]);
+        assert_eq!(logout.profile, Some(("CODEX_HOME", codex_dir.clone())));
+
+        // The variable reaches the child, over whatever the app inherited.
+        let env = env_of(&build_command(
+            &logout,
+            base(&[("PATH", "/usr/bin"), ("CODEX_HOME", "/somewhere/else")]),
+        ));
+        assert_eq!(
+            env.get("CODEX_HOME").map(String::as_str),
+            Some(codex_dir.to_str().unwrap())
+        );
+        // A plain sign-in sets none.
+        let plain = plan_spawn(&login_request("claude", LoginMethod::Browser), &host).unwrap();
+        assert_eq!(plain.profile, None);
+        std::fs::remove_dir_all(&host.home).ok();
+        std::fs::remove_dir_all(bin).ok();
+    }
+
+    #[test]
+    fn a_sign_out_refuses_anything_but_an_existing_checked_profile() {
+        let bin = login_bin("profile-refuse");
+        let host = profile_host("refuse", &bin);
+        // A stand-in for the CLI's default folder inside the throwaway home,
+        // and a profile entry that is a symlink to it.
+        let default = host.home.join(".claude");
+        std::fs::create_dir_all(&default).unwrap();
+        std::os::unix::fs::symlink(
+            &default,
+            harness_profile::profile_root(&host.home).join("claude/evil"),
+        )
+        .unwrap();
+        for (id, profile) in [
+            ("claude", ""),
+            ("claude", ".."),
+            ("claude", "../../../../../.claude"),
+            ("claude", "/tmp/x"),
+            ("claude", "없는 계정"),
+            ("claude", "evil"),
+            ("grok", "회사"),
+            ("sh", "회사"),
+        ] {
+            let err = plan_spawn(&logout_request(id, profile), &host).unwrap_err();
+            assert!(err.starts_with("refused"), "{id} {profile:?}: {err}");
+            let err = plan_spawn(
+                &profile_login_request(id, LoginMethod::Browser, profile),
+                &host,
+            )
+            .unwrap_err();
+            assert!(err.starts_with("refused"), "login {id} {profile:?}: {err}");
+        }
+        let mut with_cwd = logout_request("claude", "회사");
+        with_cwd.cwd = Some(host.home.to_string_lossy().into_owned());
+        assert!(plan_spawn(&with_cwd, &host)
+            .unwrap_err()
+            .starts_with("refused"));
+        assert!(default.is_dir());
+        std::fs::remove_dir_all(&host.home).ok();
+        std::fs::remove_dir_all(bin).ok();
+    }
+
+    /// A fake CLI checks its argv and the folder variable, then signs out.
+    #[test]
+    fn a_fake_sign_out_runs_with_its_fixed_argv_in_that_folder() {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = std::env::temp_dir().join(format!("oort-2878-logout-bin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&bin);
+        std::fs::create_dir_all(&bin).unwrap();
+        let host = profile_host("run", &bin);
+        let dir = harness_profile::profile_root(&host.home).join("claude/회사");
+        let claude = format!(
+            "#!/bin/sh\n\
+             [ \"$#\" = 2 ] && [ \"$1\" = auth ] && [ \"$2\" = logout ] || exit 9\n\
+             [ \"$CLAUDE_CONFIG_DIR\" = '{}' ] || exit 8\n\
+             echo 'Successfully logged out'\n",
+            dir.display()
+        );
+        std::fs::write(bin.join("claude"), claude).unwrap();
+        std::fs::set_permissions(bin.join("claude"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+        let manager = PtyManager::default();
+        let plan = plan_spawn(&logout_request("claude", "회사"), &host).unwrap();
+        let sink = Arc::new(Recorder::default());
+        manager
+            .spawn(&plan, build_command(&plan, path_env()), sink.clone())
+            .unwrap();
+        assert_eq!(sink.wait_exit(SLOW).code, Some(0), "{:?}", sink.text());
+        std::fs::remove_dir_all(&host.home).ok();
         std::fs::remove_dir_all(bin).ok();
     }
 

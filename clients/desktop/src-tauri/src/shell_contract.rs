@@ -573,6 +573,71 @@ fn tauri_grants_the_work_host_commands_to_the_local_main_webview_only() {
     }
 }
 
+const HARNESS_PROFILE_COMMANDS: [&str; 4] = [
+    "harness_profile_list",
+    "harness_profile_create",
+    "harness_profile_status",
+    "harness_profile_remove",
+];
+const HARNESS_PROFILE_PERMISSIONS: [&str; 4] = [
+    "allow-harness-profile-list",
+    "allow-harness-profile-create",
+    "allow-harness-profile-status",
+    "allow-harness-profile-remove",
+];
+
+/// Tauri's resolver: the profile commands (#2878) answer the main webview's
+/// bundled origin only. A page from the network — the team server's origin
+/// included — must never create, probe or remove a profile folder.
+#[test]
+fn tauri_grants_the_profile_commands_to_the_local_main_webview_only() {
+    let mut context = crate::context();
+    let authority = context.runtime_authority_mut();
+    let local = tauri::ipc::Origin::Local;
+    for command in HARNESS_PROFILE_COMMANDS {
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &local)
+                .is_some(),
+            "{command} local main"
+        );
+        for url in [
+            "https://evil.example/",
+            "https://oort-team.up.railway.app/",
+            "http://127.0.0.1:8080/",
+        ] {
+            let remote = tauri::ipc::Origin::Remote {
+                url: url.parse().unwrap(),
+            };
+            assert!(
+                authority
+                    .resolve_access(command, "main", "main", &remote)
+                    .is_none(),
+                "{command} from {url}"
+            );
+        }
+        assert!(authority
+            .resolve_access(command, "other", "other", &local)
+            .is_none());
+        assert!(authority
+            .resolve_access(command, "main", "embedded", &local)
+            .is_none());
+    }
+    let blocks = handler_blocks(LIB_RS);
+    let desktop = blocks
+        .iter()
+        .find(|b| b.contains(&"updater_check".to_string()))
+        .unwrap();
+    let mobile = blocks
+        .iter()
+        .find(|b| !b.contains(&"updater_check".to_string()))
+        .unwrap();
+    for command in HARNESS_PROFILE_COMMANDS {
+        assert!(desktop.iter().any(|c| c == command), "{command}");
+        assert!(!mobile.iter().any(|c| c == command), "{command}");
+    }
+}
+
 /// `tauri.conf.json` bundles the sidecar under the name `work_host.rs` looks
 /// for, and `cargo tauri build` builds the real one first.
 #[test]
@@ -607,6 +672,7 @@ fn only_the_local_terminal_capability_grants_pty_and_none_is_remote() {
         [
             "default.json",
             "git-read.json",
+            "harness-profile.json",
             "pty.json",
             "work-host.json"
         ],
@@ -637,6 +703,25 @@ fn only_the_local_terminal_capability_grants_pty_and_none_is_remote() {
             );
         } else {
             assert!(git.is_empty(), "{name} grants {git:?}");
+        }
+        let profile: Vec<&str> = permission_ids(cap)
+            .into_iter()
+            .filter(|p| p.contains("harness-profile"))
+            .collect();
+        if name == "harness-profile.json" {
+            assert_eq!(profile, HARNESS_PROFILE_PERMISSIONS);
+            assert_eq!(
+                permission_ids(cap).len(),
+                4,
+                "harness-profile.json grants four commands"
+            );
+            assert_eq!(cap["webviews"], serde_json::json!(["main"]));
+            assert!(
+                cap.get("windows").is_none(),
+                "a window grant covers child webviews"
+            );
+        } else {
+            assert!(profile.is_empty(), "{name} grants {profile:?}");
         }
         let host: Vec<&str> = permission_ids(cap)
             .into_iter()

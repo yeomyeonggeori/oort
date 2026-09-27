@@ -118,6 +118,7 @@ fn run_status(
     command: &StatusCommand,
     search_path: &std::ffi::OsString,
     home: Option<&Path>,
+    profile: Option<(&str, &Path)>,
     timeout: Duration,
 ) -> Option<ExitStatus> {
     if !program.is_absolute() {
@@ -131,6 +132,11 @@ fn run_status(
         .env("PATH", search_path);
     for key in harness_path::STRIPPED_ENV {
         cmd.env_remove(key);
+    }
+    // A profile (#2878): the CLI's own variable pointing at the checked
+    // folder `harness_profile` decided. Without one, the inherited value.
+    if let Some((key, dir)) = profile {
+        cmd.env(key, dir);
     }
     if let Some(home) = home {
         cmd.current_dir(home);
@@ -158,6 +164,16 @@ pub fn probe_one(
     home: Option<&Path>,
     timeout: Duration,
 ) -> LocalHarnessProbe {
+    probe_with(command, search_path, home, None, timeout)
+}
+
+fn probe_with(
+    command: &'static StatusCommand,
+    search_path: &std::ffi::OsString,
+    home: Option<&Path>,
+    profile: Option<(&str, &Path)>,
+    timeout: Duration,
+) -> LocalHarnessProbe {
     match harness_path::find_on_path(command.program, search_path) {
         None => LocalHarnessProbe {
             id: command.id,
@@ -167,7 +183,14 @@ pub fn probe_one(
         Some(program) => LocalHarnessProbe {
             id: command.id,
             installed: true,
-            auth: auth_from_exit(run_status(&program, command, search_path, home, timeout)),
+            auth: auth_from_exit(run_status(
+                &program,
+                command,
+                search_path,
+                home,
+                profile,
+                timeout,
+            )),
         },
     }
 }
@@ -204,6 +227,28 @@ fn probe_live() -> Vec<LocalHarnessProbe> {
         home.as_deref(),
         STATUS_TIMEOUT,
     )
+}
+
+/// The same status command against one profile folder (#2878, ADR-0190 D3-f
+/// 「완료 판정은 D3-a 상태 명령이다」). `harness_profile` resolves and checks the
+/// folder; this only runs the allowlisted row with that folder's variable.
+pub fn probe_profile(
+    harness: &str,
+    env: &str,
+    dir: &Path,
+    home: &Path,
+) -> Result<LocalHarnessProbe, String> {
+    let command = STATUS_COMMANDS
+        .iter()
+        .find(|row| row.id == harness)
+        .ok_or_else(|| format!("refused: no status command for {harness:?}"))?;
+    Ok(probe_with(
+        command,
+        &harness_path::current_search_path(),
+        Some(home),
+        Some((env, dir)),
+        STATUS_TIMEOUT,
+    ))
 }
 
 /// Best-effort; never an error. Takes no arguments on purpose: the webview
@@ -378,8 +423,17 @@ mod tests {
                     continue;
                 }
                 let calls = src.matches("harness_status::").count();
-                let allowed = if name == "lib.rs" { 1 } else { 0 };
+                // lib.rs: the command. harness_profile.rs (#2878): the import
+                // and the D3-a probe of one checked profile folder.
+                let allowed = match name.as_str() {
+                    "lib.rs" => 1,
+                    "harness_profile.rs" => 4,
+                    _ => 0,
+                };
                 assert_eq!(calls, allowed, "{name} calls into harness_status {calls}x");
+                if name == "harness_profile.rs" {
+                    assert_eq!(src.matches("harness_status::probe_profile(").count(), 2);
+                }
                 for needle in [
                     "detect_local_harnesses",
                     "probe_all",
@@ -572,12 +626,55 @@ mod tests {
                 &STATUS_COMMANDS[0],
                 &bin.path(),
                 None,
+                None,
                 Duration::from_secs(10),
             );
             for key in harness_path::STRIPPED_ENV {
                 std::env::remove_var(key);
             }
             assert_eq!(auth_from_exit(status), HarnessAuth::LoggedIn);
+        }
+
+        // #2878: a profile probe hands the CLI exactly its own variable and
+        // the folder, and the plain probe hands it none.
+        #[test]
+        fn a_profile_probe_points_the_cli_at_that_folder_only() {
+            let bin = Bin::new("profile");
+            let dir = bin.0.join("prof 회사");
+            std::fs::create_dir_all(&dir).unwrap();
+            bin.script(
+                "claude",
+                &format!(
+                    "[ \"$CLAUDE_CONFIG_DIR\" = '{}' ] && [ -z \"${{CODEX_HOME+x}}\" ] || exit 1",
+                    dir.display()
+                ),
+            );
+            bin.script(
+                "codex",
+                &format!(
+                    "[ \"$CODEX_HOME\" = '{}' ] && [ -z \"${{CLAUDE_CONFIG_DIR+x}}\" ] || exit 1",
+                    dir.display()
+                ),
+            );
+            for (row, env) in [(0, "CLAUDE_CONFIG_DIR"), (1, "CODEX_HOME")] {
+                let probe = probe_with(
+                    &STATUS_COMMANDS[row],
+                    &bin.path(),
+                    None,
+                    Some((env, &dir)),
+                    Duration::from_secs(10),
+                );
+                assert_eq!(probe.auth, HarnessAuth::LoggedIn, "{env}");
+                // Without the profile the same CLI answers "not signed in".
+                let plain = probe_one(
+                    &STATUS_COMMANDS[row],
+                    &bin.path(),
+                    None,
+                    Duration::from_secs(10),
+                );
+                assert_eq!(plain.auth, HarnessAuth::NeedsLogin, "{env} plain");
+            }
+            assert!(probe_profile("grok", "X", &dir, &bin.0).is_err());
         }
     }
 }

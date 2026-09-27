@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "harness-profile",
+  "description": "Account profile folders (ADR-0191 D1, ADR-0190 D3-f, #2878): list, create, status and the guarded removal of `~/Library/Application Support/oort/profiles/<harness>/<label>/`. The webview names a harness and a label only; the shell decides and checks the folder, and removes one only after the official CLI reports it signed out. For the main window's own webview (label `main`) on the bundled (local) origin only, scoped by webview like pty.json. No `remote` entry: a page from the network must never create or remove a profile.",
+  "webviews": [
+    "main"
+  ],
+  "platforms": [
+    "macOS",
+    "windows",
+    "linux"
+  ],
+  "permissions": [
+    "allow-harness-profile-list",
+    "allow-harness-profile-create",
+    "allow-harness-profile-status",
+    "allow-harness-profile-remove"
+  ]
+}
