@@ -17,8 +17,10 @@ rust-version.workspace = true
 # value other than parsed numbers, or an error string.
 [dependencies]
 # `EgressPolicy` is the single authority for which addresses a provider URL may
-# reach (ADR-0004 증보 5 D1). This crate only adapts it to reqwest's resolver.
+# reach (ADR-0004 증보 5 D1). The reqwest adapter for it is momo-egress (#2976).
 momo-settings = { path = "../momo-settings" }
+# #2976: the resolver/precheck/client plumbing is shared with the agent-worker.
+momo-egress = { path = "../momo-egress" }
 
 async-trait.workspace = true
 reqwest.workspace = true

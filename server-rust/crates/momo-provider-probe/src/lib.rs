@@ -29,12 +29,12 @@
 //!
 //! ## What guards the socket
 //!
-//! [`guard`] — the #2852 egress policy on every resolved address, no redirects,
-//! no proxy. A name that resolves (now, or on the connect-time lookup) to a
+//! [`momo_egress::EgressGuard`] — the #2852 egress policy on every resolved
+//! address, no redirects, no proxy, and a deadline on every DNS lookup. It is
+//! the same plumbing the agent-worker's provider client uses (#2976), so the
+//! probe and a real turn cannot disagree about which hosts are reachable. A name that resolves (now, or on the connect-time lookup) to a
 //! private, loopback, link-local or metadata address is refused before connect
 //! and reported as `provider_egress_denied`.
-
-mod guard;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -44,8 +44,8 @@ use async_trait::async_trait;
 use momo_settings::{EgressDenied, EgressPolicy, RATE_LIMITED_REASON, UNREACHABLE_REASON};
 use sha2::{Digest, Sha256};
 
-use guard::EgressGuard;
-pub use guard::{HostLookup, SystemLookup};
+use momo_egress::EgressGuard;
+pub use momo_egress::{HostLookup, SystemLookup};
 
 /// 401/403 — the provider refused the stored key. Already in the panel's
 /// vocabulary (`chainModel.ts:probeReasonCopy`).
@@ -231,6 +231,8 @@ pub struct GuardedProviderProbe {
     guard: EgressGuard,
     /// The per-hop bound. It covers the pre-request DNS lookup as well as the
     /// request itself (review M1): `getaddrinfo` has no deadline of its own.
+    /// The guard carries the same value as its lookup deadline; the wrap in
+    /// `probe` is kept as the hop-level bound around the whole precheck.
     timeout: Duration,
 }
 
@@ -248,7 +250,7 @@ impl GuardedProviderProbe {
         lookup: Arc<dyn HostLookup>,
         timeout: Duration,
     ) -> GuardedProviderProbe {
-        let guard = EgressGuard::new(policy, lookup);
+        let guard = EgressGuard::new(policy, lookup, timeout);
         let client = guard
             .client(
                 reqwest::Client::builder()
@@ -298,7 +300,7 @@ impl ProviderProbe for GuardedProviderProbe {
                 UNREACHABLE_REASON,
             );
         };
-        match tokio::time::timeout(self.timeout, self.guard.precheck(&host)).await {
+        match tokio::time::timeout(self.timeout, self.guard.precheck_host(&host)).await {
             Ok(Ok(())) => {}
             Ok(Err(denied)) => return denied_report(method, denied),
             // A lookup that outlives the hop's budget is an unanswered hop.
@@ -324,7 +326,7 @@ impl ProviderProbe for GuardedProviderProbe {
             Err(error) => {
                 // The error's Display is never used: it would carry the URL, and
                 // a probe result carries only labels.
-                return match guard::denied_in_chain(&error) {
+                return match momo_egress::denied_in_chain(&error) {
                     Some(denied) => denied_report(method, denied),
                     None => {
                         ProbeReport::failed(method, ProbeOutcome::Unreachable, UNREACHABLE_REASON)

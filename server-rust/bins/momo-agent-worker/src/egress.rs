@@ -1,164 +1,41 @@
-//! Provider egress guard (#2852): the provider call may only connect to an
-//! address [`momo_settings::EgressPolicy`] accepts.
+//! Provider egress guard (#2852): the provider call — and the OAuth token
+//! refresh (#2894) — may only connect to an address
+//! [`momo_settings::EgressPolicy`] accepts.
 //!
-//! ## Where the check sits, and why there
+//! The plumbing (guarded DNS resolver, literal precheck, lookup deadline, no
+//! redirect, no proxy) lives in [`momo_egress`] and is shared with
+//! `momo-provider-probe` (#2976); see that crate's docs for why the check sits
+//! in the resolver. This module only adapts it to the worker's vocabulary:
+//! a URL instead of a host, and [`ProviderError`] instead of
+//! [`momo_settings::EgressDenied`].
 //!
-//! `provider_link.base_url` is typed by an instance operator through the GUI,
-//! so it is input, not configuration. The write gate refuses private address
-//! *literals*, but a name is only a promise: `llm.example.com` can resolve to
-//! `169.254.169.254` today, or to a public address at save time and to
-//! `127.0.0.1` a second later (DNS rebinding).
-//!
-//! So the authoritative check is [`GuardedResolver`], installed as the HTTP
-//! client's DNS resolver. reqwest asks it for the addresses of the host it is
-//! about to connect to; it resolves, refuses the whole name if **any** answer is
-//! non-public, and otherwise returns exactly the addresses it checked. The
-//! connector dials only those — there is no second lookup between check and
-//! connect for a rebinding resolver to win.
-//!
-//! Two things a resolver cannot see are closed around it:
-//!
-//! * **Address literals** never reach a resolver (the connector parses them),
-//!   so [`EgressGuard::precheck`] decides them before the request is built.
-//! * **Redirects and proxies.** The guarded client follows no redirect (a
-//!   `307` to `http://169.254.169.254/` would otherwise be dialled as a literal)
-//!   and ignores `HTTP(S)_PROXY` (a proxy resolves the target itself, out of
-//!   our sight).
-//!
-//! The precheck also resolves a name once, so a refused host fails the turn
-//! with [`ProviderError::EgressDenied`] — non-retryable — instead of surfacing
-//! as a transport error the cascade would retry.
+//! The precheck resolves a name once, so a refused host fails the turn with
+//! [`ProviderError::EgressDenied`] — non-retryable — instead of surfacing as a
+//! transport error the cascade would retry. An unresolvable name, or one whose
+//! lookup outlives the guard's deadline (the call's `request_timeout`), is
+//! [`ProviderError::Unreachable`]: availability, retryable, as it always was.
 
-use std::future::Future;
-use std::net::{IpAddr, SocketAddr};
-use std::pin::Pin;
-use std::sync::Arc;
-
-use momo_settings::{EgressDenied, EgressPolicy};
-use reqwest::dns::{Addrs, Name, Resolve, Resolving};
+pub use momo_egress::{EgressGuard, HostLookup, SystemLookup};
+use momo_settings::EgressDenied;
 
 use crate::provider::ProviderError;
 
-/// A DNS lookup, as a seam: production uses the system resolver, tests use a
-/// table that can answer differently on each call (the rebinding scenario).
-pub trait HostLookup: Send + Sync {
-    fn lookup(
-        &self,
-        host: String,
-    ) -> Pin<Box<dyn Future<Output = std::io::Result<Vec<IpAddr>>> + Send>>;
-}
-
-/// `getaddrinfo` via tokio.
-pub struct SystemLookup;
-
-impl HostLookup for SystemLookup {
-    fn lookup(
-        &self,
-        host: String,
-    ) -> Pin<Box<dyn Future<Output = std::io::Result<Vec<IpAddr>>> + Send>> {
-        Box::pin(async move {
-            let addresses = tokio::net::lookup_host((host.as_str(), 0)).await?;
-            Ok(addresses.map(|address| address.ip()).collect())
+/// The pre-request half of the guard for a full URL. The connect-time
+/// resolver re-checks regardless, so passing here grants nothing.
+pub async fn precheck_url(guard: &EgressGuard, url: &str) -> Result<(), ProviderError> {
+    let host = reqwest::Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_string))
+        .ok_or_else(|| ProviderError::EgressDenied("provider URL has no host".into()))?;
+    guard
+        .precheck_host(&host)
+        .await
+        .map_err(|denied| match denied {
+            // An unresolvable name is an availability problem, not a
+            // policy verdict: keep it retryable, as it always was.
+            EgressDenied::NoAddress => ProviderError::Unreachable(denied.to_string()),
+            EgressDenied::NonPublicAddress => ProviderError::EgressDenied(denied.to_string()),
         })
-    }
-}
-
-/// The policy plus the lookup it judges.
-#[derive(Clone)]
-pub struct EgressGuard {
-    policy: Arc<EgressPolicy>,
-    lookup: Arc<dyn HostLookup>,
-}
-
-impl EgressGuard {
-    pub fn new(policy: EgressPolicy, lookup: Arc<dyn HostLookup>) -> EgressGuard {
-        EgressGuard {
-            policy: Arc::new(policy),
-            lookup,
-        }
-    }
-
-    pub fn system(policy: EgressPolicy) -> EgressGuard {
-        EgressGuard::new(policy, Arc::new(SystemLookup))
-    }
-
-    /// Resolve `host` and return the vetted addresses, or the refusal.
-    async fn resolve_vetted(&self, host: &str) -> Result<Vec<IpAddr>, EgressDenied> {
-        self.policy.check_host(host)?;
-        let addresses = self
-            .lookup
-            .lookup(host.to_string())
-            .await
-            .map_err(|_| EgressDenied::NoAddress)?;
-        self.policy.check_resolved(host, &addresses)?;
-        Ok(addresses)
-    }
-
-    /// The pre-request half: literals (which no resolver sees) and one early
-    /// resolution for a clean, non-retryable failure. The connect-time
-    /// resolver re-checks regardless, so passing here grants nothing.
-    pub async fn precheck(&self, url: &str) -> Result<(), ProviderError> {
-        let host = reqwest::Url::parse(url)
-            .ok()
-            .and_then(|parsed| parsed.host_str().map(str::to_string))
-            .ok_or_else(|| ProviderError::EgressDenied("provider URL has no host".into()))?;
-        let bare = host.trim_matches(|c| c == '[' || c == ']');
-        if bare.parse::<IpAddr>().is_ok() {
-            return self
-                .policy
-                .check_host(bare)
-                .map_err(|denied| ProviderError::EgressDenied(denied.to_string()));
-        }
-        self.resolve_vetted(bare)
-            .await
-            .map(|_| ())
-            .map_err(|denied| match denied {
-                // An unresolvable name is an availability problem, not a
-                // policy verdict: keep it retryable, as it always was.
-                EgressDenied::NoAddress => ProviderError::Unreachable(denied.to_string()),
-                EgressDenied::NonPublicAddress => ProviderError::EgressDenied(denied.to_string()),
-            })
-    }
-
-    /// The HTTP client every provider call uses: guarded resolver, no
-    /// redirects, no proxy.
-    pub fn client(
-        &self,
-        builder: reqwest::ClientBuilder,
-    ) -> Result<reqwest::Client, reqwest::Error> {
-        builder
-            .dns_resolver(Arc::new(GuardedResolver {
-                guard: self.clone(),
-            }))
-            .redirect(reqwest::redirect::Policy::none())
-            .no_proxy()
-            .build()
-    }
-}
-
-/// The connect-time gate (see the module docs).
-struct GuardedResolver {
-    guard: EgressGuard,
-}
-
-impl Resolve for GuardedResolver {
-    fn resolve(&self, name: Name) -> Resolving {
-        let guard = self.guard.clone();
-        Box::pin(async move {
-            let addresses = guard
-                .resolve_vetted(name.as_str())
-                .await
-                .map_err(|denied| Box::new(denied) as Box<dyn std::error::Error + Send + Sync>)?;
-            let addrs: Addrs = Box::new(
-                addresses
-                    .into_iter()
-                    .map(|ip| SocketAddr::new(ip, 0))
-                    .collect::<Vec<_>>()
-                    .into_iter(),
-            );
-            Ok(addrs)
-        })
-    }
 }
 
 #[cfg(test)]
@@ -167,7 +44,12 @@ pub(crate) mod tests {
     use crate::provider::{
         ChatMessage, ChatProvider, ChatRequest, ProviderEndpoint, ProviderWire, WireRoutedProvider,
     };
+    use momo_settings::EgressPolicy;
+    use std::future::Future;
+    use std::net::IpAddr;
+    use std::pin::Pin;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
     use std::time::Duration;
 
     /// Answers each lookup from a script; the last entry repeats.
@@ -270,7 +152,8 @@ pub(crate) mod tests {
     }
 
     fn provider(policy: EgressPolicy, lookup: Arc<dyn HostLookup>) -> WireRoutedProvider {
-        WireRoutedProvider::http_guarded(Duration::from_secs(5), EgressGuard::new(policy, lookup))
+        let timeout = Duration::from_secs(5);
+        WireRoutedProvider::http_guarded(timeout, EgressGuard::new(policy, lookup, timeout))
             .expect("client")
     }
 
@@ -400,5 +283,98 @@ pub(crate) mod tests {
             "{result:?}"
         );
         assert_eq!(hits.load(Ordering::SeqCst), 0);
+    }
+
+    /// A resolver that takes `delay` to answer, with a public address.
+    pub(crate) struct SlowLookup {
+        pub(crate) delay: Duration,
+    }
+
+    impl HostLookup for SlowLookup {
+        fn lookup(
+            &self,
+            _host: String,
+        ) -> Pin<Box<dyn Future<Output = std::io::Result<Vec<IpAddr>>> + Send>> {
+            let delay = self.delay;
+            Box::pin(async move {
+                tokio::time::sleep(delay).await;
+                Ok(vec!["93.184.216.34".parse().expect("ip")])
+            })
+        }
+    }
+
+    /// #2976 (review-2972 M1, worker side): the precheck lookup is inside the
+    /// call's budget. Before the shared guard this waited the full 6 s.
+    #[tokio::test]
+    async fn a_slow_dns_lookup_is_bounded_by_the_request_timeout() {
+        let timeout = Duration::from_millis(300);
+        let provider = WireRoutedProvider::http_guarded(
+            timeout,
+            EgressGuard::new(
+                EgressPolicy::default(),
+                Arc::new(SlowLookup {
+                    delay: Duration::from_secs(6),
+                }),
+                timeout,
+            ),
+        )
+        .expect("client");
+        let started = std::time::Instant::now();
+        let result = provider
+            .complete(&endpoint("https://slow-dns.example/v1".into()), &request())
+            .await;
+        let elapsed = started.elapsed();
+        assert!(elapsed < Duration::from_secs(2), "took {elapsed:?}");
+        assert!(
+            matches!(&result, Err(ProviderError::Unreachable(_))),
+            "{result:?}"
+        );
+        assert!(
+            result.as_ref().unwrap_err().is_retryable(),
+            "a slow resolver is availability, not policy"
+        );
+    }
+
+    /// The review-2972 PoC's address-notation variants, pointed at a live
+    /// loopback service. The lookup answers a PUBLIC address, so a variant the
+    /// precheck mistook for a name (while the connector parsed it as a literal)
+    /// would pass the precheck and be dialled — a hit is the regression.
+    fn notation_variants(port: u16) -> Vec<String> {
+        vec![
+            format!("http://front.test@127.0.0.1:{port}/v1"),
+            format!("http://front.test:x@0x7f000001:{port}/v1"),
+            format!("http://2130706433:{port}/v1"),
+            format!("HTTP://0177.0.0.1:{port}/v1"),
+            format!("http://%31%32%37.0.0.1:{port}/v1"),
+            format!("http://127.0.0.1.:{port}/v1"),
+            format!("http:\\\\127.0.0.1:{port}/v1"),
+            format!("http://\u{2460}\u{2461}\u{2466}.0.0.1:{port}/v1"),
+            format!("http://[::ffff:0:7f00:1]:{port}/v1"),
+            format!("http://[::ffff:7f00:1]:{port}/v1"),
+            format!("http://0.0.0.0:{port}/v1"),
+            format!("http://[::]:{port}/v1"),
+        ]
+    }
+
+    #[tokio::test]
+    async fn address_notation_variants_are_refused_and_never_dialled() {
+        let (port, hits) = internal_service().await;
+        for base in notation_variants(port) {
+            let result = provider(
+                EgressPolicy::default(),
+                ScriptedLookup::new(&[&["93.184.216.34"]]),
+            )
+            .complete(&endpoint(base.clone()), &request())
+            .await;
+            assert!(
+                matches!(result, Err(ProviderError::EgressDenied(_))),
+                "{base}: {result:?}"
+            );
+        }
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            0,
+            "a notation variant was dialled"
+        );
     }
 }

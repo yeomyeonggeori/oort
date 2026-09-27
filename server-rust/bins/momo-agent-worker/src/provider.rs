@@ -662,7 +662,7 @@ impl WireRoutedProvider {
 
     async fn precheck(&self, endpoint: &ProviderEndpoint) -> Result<(), ProviderError> {
         match &self.guard {
-            Some(guard) => guard.precheck(&endpoint.url()).await,
+            Some(guard) => crate::egress::precheck_url(guard, &endpoint.url()).await,
             None => Ok(()),
         }
     }
@@ -731,7 +731,10 @@ pub fn http_provider(
 ) -> Result<Arc<dyn ChatProvider>, reqwest::Error> {
     Ok(Arc::new(WireRoutedProvider::http_guarded(
         request_timeout,
-        EgressGuard::system(policy),
+        // The lookup deadline is the call's own budget: the connect-time
+        // lookup was already inside reqwest's total timeout, and the precheck
+        // lookup (unbounded before #2976) now is too.
+        EgressGuard::system(policy, request_timeout),
     )?))
 }
 
