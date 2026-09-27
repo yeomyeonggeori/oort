@@ -14,7 +14,7 @@ import {
 import fs from 'fs';
 import path from 'path';
 import React from 'react';
-import {TextInput} from 'react-native';
+import {Keyboard, TextInput} from 'react-native';
 
 import {
   AI_CONNECT_CARD_COPY,
@@ -230,6 +230,19 @@ describe('카드 — 판정은 코어, 행동은 연결 확인 하나', () => {
     expect(screen.UNSAFE_queryAllByType(TextInput)).toHaveLength(0);
   });
 
+  it('자판이 올라와 있으면 몸을 접고 머리(닫기)만 남긴다', async () => {
+    mockFetch.mockResolvedValue(LINK);
+    const spy = jest.spyOn(Keyboard, 'isVisible').mockReturnValue(true);
+    try {
+      card();
+      expect(screen.getByTestId('ai-connect-card-folded')).toBeTruthy();
+      expect(screen.getByTestId('ai-connect-card-close')).toBeTruthy();
+      expect(screen.queryByTestId('ai-connect-card-body')).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('닫기는 부른 쪽에 알린다', async () => {
     mockFetch.mockResolvedValue(LINK);
     const onClose = jest.fn();
@@ -296,6 +309,29 @@ describe('컴포저 — `/` 명령과 키 붙여넣기 차단', () => {
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.getByTestId('composer-input').props.value).toBe('');
     expect(readDraft(CH)).toBe('');
+  });
+
+  it('폰 목록에는 구독 줄 인자(claude·codex)가 서지 않는다 — 폰 카드에 그 줄이 없다', () => {
+    composer({onSlashCommand: jest.fn()});
+    fireEvent.changeText(screen.getByTestId('composer-input'), '/연');
+    const labels = screen
+      .getAllByTestId('slash-option')
+      .map(row => String(row.props.accessibilityLabel));
+    expect(labels.some(label => label.startsWith('/연결 팀키'))).toBe(true);
+    expect(labels.some(label => /claude|codex/.test(label))).toBe(false);
+  });
+
+  it('목록이 열린 채 보내면 첫 줄을 고른다 — 반쯤 친 `/연`이 평문으로 나가지 않는다', () => {
+    const onSend = jest.fn();
+    const onSlashCommand = jest.fn();
+    composer({onSend, onSlashCommand});
+    fireEvent.changeText(screen.getByTestId('composer-input'), '/연');
+    fireEvent.press(screen.getByTestId('composer-send'));
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onSlashCommand).toHaveBeenCalledWith(
+      expect.objectContaining({id: 'ai.connect'}),
+      {},
+    );
   });
 
   it('`/연결 팀키`를 그대로 보내도 메시지가 되지 않고 팀 줄 의도가 실린다', () => {

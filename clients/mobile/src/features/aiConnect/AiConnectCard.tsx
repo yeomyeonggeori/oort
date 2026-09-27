@@ -31,6 +31,7 @@ import {
 } from 'react-native';
 
 import {Sentence} from '../../design/atoms';
+import {useKeyboardShown} from '../../lib/useKeyboardShown';
 import {CARD_ICONS} from '../../design/icons/cardIcons';
 import {HOME_ICONS, SHELL_ICONS} from '../../design/icons';
 import {usePalette, useStyles} from '../../design/theme';
@@ -97,6 +98,9 @@ export const AI_CONNECT_CARD_COPY = {
   teamEmptyName: '팀 API 키',
   teamEmptySub: '아직 없어요. 팀 에이전트가 대답하려면 키가 필요해요',
   teamEnvSub: '서버 환경값',
+  teamDefault: '팀 기본',
+  /** 자판이 올라와 몸을 접었을 때 머리에 붙는 말(design-review #2945 H1). */
+  folded: '입력을 마치면 펼쳐져요',
   source: 'API 키',
   legacySource: '내부용',
   check: '연결 확인',
@@ -108,6 +112,17 @@ export const AI_CONNECT_CARD_COPY = {
   lastReceived: '마지막으로 받은 값',
   foot: '키 입력은 맥·웹에서 해요',
 } as const;
+
+/**
+ * 폰 슬래시 목록에 세울 줄인가 (design-review #2945 M1).
+ *
+ * `/연결 claude`·`/연결 codex`는 웹에서 그 구독 줄만 펼치지만, 폰의 「내 계정」 절은
+ * 한 줄(맥에서)뿐이라 두 줄이 같은 카드를 열면서 「Claude 구독 줄만 펼쳐」를
+ * 약속한다. 목록에서만 뺀다 — 직접 친 `/연결 claude`는 여전히 명령이다.
+ */
+export function isPhoneSlashRow(row: {args: {line?: AiConnectLine}}): boolean {
+  return row.args.line !== 'claude' && row.args.line !== 'codex';
+}
 
 type ResultTone = 'ok' | 'bad';
 
@@ -135,6 +150,13 @@ function markFor(label: string): string {
   return first === '' ? '?' : first.toUpperCase();
 }
 
+/** 글자 배수를 따라 자라는 글리프·상자 크기 (design-review #2945 H2). */
+function useScaled(): (size: number) => number {
+  const {fontScale} = useWindowDimensions();
+  const scale = Math.min(Math.max(fontScale, 1), GLYPH_SCALE_CAP);
+  return (size: number) => Math.round(size * scale);
+}
+
 // ---- 셸 ----------------------------------------------------------------------
 
 /**
@@ -158,17 +180,27 @@ export function AiConnectCardShell({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {height} = useWindowDimensions();
+  // 자판이 올라오면 몸을 접고 머리만 남긴다 (design-review #2945 H1). iOS 의 창
+  // 높이는 자판에 줄지 않으므로 높이 상한만으로는 375×667 에서 대화가 0pt 가 되고,
+  // 큰 글씨에서는 머리(닫기)가 화면 밖으로 밀린다. 머리는 언제나 한 줄이다.
+  const keyboardUp = useKeyboardShown(true);
   return (
     <View
       style={[styles.card, variant === 'local' && styles.cardLocal]}
       testID={testID}>
       {header}
-      <ScrollView
-        style={{maxHeight: Math.round(height * 0.45)}}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator>
-        {children}
-      </ScrollView>
+      {keyboardUp ? (
+        <Text style={styles.folded} testID="ai-connect-card-folded">
+          {AI_CONNECT_CARD_COPY.folded}
+        </Text>
+      ) : (
+        <ScrollView
+          style={{maxHeight: Math.round(height * CARD_BODY_WINDOW_SHARE)}}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator>
+          {children}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -186,11 +218,13 @@ export function AiConnectCard({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const scaled = useScaled();
+  const glyph = (size: number) => ({width: scaled(size), height: scaled(size)});
   const header = (
     <View style={styles.head}>
       <Image
         source={CARD_ICONS.plug}
-        style={[styles.icon16, {tintColor: palette.icon}]}
+        style={[glyph(16), {tintColor: palette.icon}]}
         accessibilityIgnoresInvertColors
       />
       <Text style={styles.headTitle} accessibilityRole="header">
@@ -199,7 +233,7 @@ export function AiConnectCard({
       <View style={styles.onlyChip} testID="ai-connect-card-only-me">
         <Image
           source={CARD_ICONS.eye}
-          style={[styles.icon13, {tintColor: palette.textMuted}]}
+          style={[glyph(13), {tintColor: palette.textMuted}]}
           accessibilityIgnoresInvertColors
         />
         <Text style={styles.onlyText} numberOfLines={1}>
@@ -211,12 +245,16 @@ export function AiConnectCard({
         accessibilityRole="button"
         accessibilityLabel={AI_CONNECT_CARD_COPY.close}
         onPress={onClose}
-        hitSlop={slopTo(CLOSE_BOX)}
-        style={({pressed}) => [styles.close, pressed && styles.pressed]}
+        hitSlop={slopTo(scaled(CLOSE_BOX))}
+        style={({pressed}) => [
+          styles.close,
+          {width: scaled(CLOSE_BOX), height: scaled(CLOSE_BOX)},
+          pressed && styles.pressed,
+        ]}
         testID="ai-connect-card-close">
         <Image
           source={SHELL_ICONS.x}
-          style={[styles.icon16, {tintColor: palette.textMuted}]}
+          style={[glyph(16), {tintColor: palette.textMuted}]}
           accessibilityIgnoresInvertColors
         />
       </Pressable>
@@ -249,6 +287,8 @@ export function AiConnectCardBody({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const scaled = useScaled();
+  const glyph = (size: number) => ({width: scaled(size), height: scaled(size)});
   const showMine = line === null || line === 'claude' || line === 'codex';
   const showTeam = line === null || line === 'team';
   return (
@@ -259,10 +299,10 @@ export function AiConnectCardBody({
             {AI_CONNECT_CARD_COPY.mineHead}
           </Text>
           <View style={styles.note}>
-            <View style={styles.noteIconBox}>
+            <View style={[styles.noteIconBox, {height: scaled(lineHeight.meta)}]}>
               <Image
                 source={CARD_ICONS.laptop}
-                style={[styles.icon14, {tintColor: palette.icon}]}
+                style={[glyph(14), {tintColor: palette.icon}]}
                 accessibilityIgnoresInvertColors
               />
             </View>
@@ -276,7 +316,7 @@ export function AiConnectCardBody({
       <View style={styles.foot}>
         <Image
           source={HOME_ICONS.lock}
-          style={[styles.icon13, {tintColor: palette.icon}]}
+          style={[glyph(13), {tintColor: palette.icon}]}
           accessibilityIgnoresInvertColors
         />
         <Sentence style={styles.footText}>{AI_CONNECT_CARD_COPY.foot}</Sentence>
@@ -362,12 +402,14 @@ function TeamSection({offline}: {offline: boolean}): React.JSX.Element {
 function DeniedLine(): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const scaled = useScaled();
+  const glyph = (size: number) => ({width: scaled(size), height: scaled(size)});
   return (
     <View style={styles.note} testID="ai-connect-card-team-denied">
-      <View style={styles.noteIconBox}>
+      <View style={[styles.noteIconBox, {height: scaled(lineHeight.meta)}]}>
         <Image
           source={HOME_ICONS.lock}
-          style={[styles.icon13, {tintColor: palette.icon}]}
+          style={[glyph(13), {tintColor: palette.icon}]}
           accessibilityIgnoresInvertColors
         />
       </View>
@@ -397,6 +439,7 @@ function TeamRow({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const scaled = useScaled();
   const legacy = isLegacyTeamLink(link);
   const hasRow =
     link.configured || (link.keyConfigured && link.availability !== 'mock');
@@ -419,7 +462,7 @@ function TeamRow({
 
   const name = hasRow
     ? link.configured
-      ? `${link.endpointLabel} · 팀 기본`
+      ? `${link.endpointLabel} · ${AI_CONNECT_CARD_COPY.teamDefault}`
       : link.endpointLabel
     : AI_CONNECT_CARD_COPY.teamEmptyName;
   let sub: string;
@@ -443,7 +486,8 @@ function TeamRow({
   return (
     <View style={styles.row} testID="ai-connect-card-team">
       <View style={styles.rowMain}>
-        <View style={styles.mark}>
+        <View
+          style={[styles.mark, {width: scaled(MARK_SIZE), height: scaled(MARK_SIZE)}]}>
           <Text style={styles.markText}>{hasRow ? markFor(link.endpointLabel) : '?'}</Text>
         </View>
         <View style={styles.rowText}>
@@ -467,7 +511,7 @@ function TeamRow({
         <Pill view={pill} />
       </View>
       {canCheck ? (
-        <View style={styles.rowAction}>
+        <View style={[styles.rowAction, {paddingLeft: scaled(MARK_SIZE) + space.sm}]}>
           <SecondaryButton
             label={checking ? AI_CONNECT_CARD_COPY.checking : AI_CONNECT_CARD_COPY.check}
             icon={checking ? null : CARD_ICONS.refresh}
@@ -482,7 +526,10 @@ function TeamRow({
         <Sentence
           style={[
             styles.result,
-            {color: result.tone === 'ok' ? palette.ok : palette.danger},
+            {
+              paddingLeft: scaled(MARK_SIZE) + space.sm,
+              color: result.tone === 'ok' ? palette.ok : palette.danger,
+            },
           ]}
           accessibilityLiveRegion="polite"
           testID="ai-connect-card-team-result">
@@ -526,7 +573,8 @@ function pillColors(palette: Palette, tone: AiPillTone): {bg: string; fg: string
     case 'warn':
       return {bg: palette.warnSurface, fg: palette.warn};
     case 'bad':
-      return {bg: palette.dangerSurface, fg: palette.danger};
+      // 상자 안 글자는 `dangerText`(paletteContrast 의 `dangerText on dangerSurface`).
+      return {bg: palette.dangerSurface, fg: palette.dangerText};
     case 'run':
       return {bg: palette.agentSurface, fg: palette.agent};
     case 'mute':
@@ -551,13 +599,15 @@ function SecondaryButton({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const scaled = useScaled();
+  const glyph = (size: number) => ({width: scaled(size), height: scaled(size)});
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{disabled, busy}}
       onPress={disabled ? undefined : onPress}
-      hitSlop={slopTo(BUTTON_HEIGHT)}
+      hitSlop={slopTo(scaled(BUTTON_HEIGHT))}
       style={({pressed}) => [
         styles.button,
         disabled && styles.buttonLocked,
@@ -567,7 +617,7 @@ function SecondaryButton({
       {icon ? (
         <Image
           source={icon}
-          style={[styles.icon14, {tintColor: palette.text}]}
+          style={[glyph(14), {tintColor: palette.text}]}
           accessibilityIgnoresInvertColors
         />
       ) : null}
@@ -582,10 +632,19 @@ function SecondaryButton({
 
 /** 시안 `.btn` 높이. 44pt 는 슬롭이 채운다(`slopTo`). */
 const BUTTON_HEIGHT = 30;
+/**
+ * 카드 몸이 창에서 가져갈 수 있는 몫(자판이 내려가 있을 때만 몸이 선다). 나머지
+ * 반은 대화·머리·입력창의 것이다.
+ */
+const CARD_BODY_WINDOW_SHARE = 0.45;
+/** 글리프가 글자를 따라 커지는 상한. 아이콘이 글자보다 커지지 않게. */
+const GLYPH_SCALE_CAP = 2;
 /** 닫기 글리프 상자. */
 const CLOSE_BOX = 24;
 /** 알약 앞 점(시안 `.pill i{width:6px}`). */
 const PILL_DOT = 6;
+/** 알약 안 도는 표시의 상자. */
+const PILL_SPIN = 12;
 /** 줄 머리의 로고 칸(시안 `.pbody .row{grid-template-columns:28px …}`). */
 const MARK_SIZE = 28;
 
@@ -633,8 +692,6 @@ function buildStyles(color: Palette) {
     },
     flex: {flex: 1},
     close: {
-      width: CLOSE_BOX,
-      height: CLOSE_BOX,
       alignItems: 'center',
       justifyContent: 'center',
       borderRadius: ds2Radius.pill,
@@ -660,8 +717,6 @@ function buildStyles(color: Palette) {
     row: {paddingVertical: space.sm, gap: space.sm},
     rowMain: {flexDirection: 'row', alignItems: 'center', gap: space.sm},
     mark: {
-      width: MARK_SIZE,
-      height: MARK_SIZE,
       borderRadius: radius.md,
       alignItems: 'center',
       justifyContent: 'center',
@@ -693,8 +748,8 @@ function buildStyles(color: Palette) {
     sub: {fontSize: ds2Type.caption, lineHeight: lineHeight.meta, color: color.textMuted},
     subMono: {fontFamily: 'Menlo', fontSize: font.meta},
     // 시안 `.pbody .row .btn{grid-column:2/-1}` — 버튼과 결과 줄은 이름 칸 아래에서 시작한다.
-    rowAction: {paddingLeft: MARK_SIZE + space.sm, flexDirection: 'row'},
-    result: {paddingLeft: MARK_SIZE + space.sm, fontSize: ds2Type.caption, lineHeight: lineHeight.meta},
+    rowAction: {flexDirection: 'row'},
+    result: {fontSize: ds2Type.caption, lineHeight: lineHeight.meta},
     pill: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -705,10 +760,14 @@ function buildStyles(color: Palette) {
       flexShrink: 0,
     },
     pillDot: {width: PILL_DOT, height: PILL_DOT, borderRadius: radius.pill},
-    pillSpin: {width: PILL_DOT, height: PILL_DOT, transform: [{scale: 0.6}]},
+    // `small` 인디케이터(≈20pt)를 0.6배로 그린 12pt 가 상자와 같다 — 상자가 그리는
+    // 크기보다 작으면 옆 글자를 덮는다(design-review #2945 M6).
+    pillSpin: {width: PILL_SPIN, height: PILL_SPIN, transform: [{scale: 0.6}]},
     pillText: {fontSize: font.meta, lineHeight: lineHeight.head, fontWeight: '600'},
+    // 높이가 아니라 **바닥**이다(design-review #2945 H2): 큰 글씨에서 라벨이 자란다.
     button: {
-      height: BUTTON_HEIGHT,
+      minHeight: BUTTON_HEIGHT,
+      paddingVertical: space.xs,
       paddingHorizontal: space.md,
       borderRadius: ds2Radius.pill,
       borderWidth: StyleSheet.hairlineWidth * 2,
@@ -731,8 +790,12 @@ function buildStyles(color: Palette) {
       backgroundColor: color.sheet,
     },
     footText: {flex: 1, fontSize: ds2Type.caption, lineHeight: lineHeight.meta, color: color.textMuted},
-    icon13: {width: 13, height: 13},
-    icon14: {width: 14, height: 14},
-    icon16: {width: 16, height: 16},
+    folded: {
+      paddingVertical: space.sm,
+      paddingHorizontal: space.md,
+      fontSize: ds2Type.caption,
+      lineHeight: lineHeight.meta,
+      color: color.textMuted,
+    },
   });
 }
