@@ -74,6 +74,37 @@ pub const AI_CONNECT_HARNESSES: [&str; 3] = ["claude", "codex", "team_key"];
 /// `ai.connect` `args.scope` (G2).
 pub const AI_CONNECT_SCOPES: [&str; 2] = ["mine", "team"];
 
+/// The worker's system-prompt rule for a connection request (GC-8, #2949).
+///
+/// The tool description tells a model *what* `card_suggest` does; this block
+/// tells it *when* to reach for it instead of doing the thing it would
+/// otherwise try — walking the person through settings, or asking for a key.
+/// It rides as its own `system` turn **only when the profile offered the
+/// tool** ([`card_suggest_directive`]): telling a model to call a tool it was
+/// not given spends a turn on a refusal (`tools::exempt_tool_not_enabled`).
+///
+/// The hosted twin of this rule is prose in `docs/SELF_HOST_AGENT.md`
+/// (§3.3.16c, §3.3.17.4), because a hosted runtime's instructions are written
+/// by its operator, not assembled here.
+pub const CARD_SUGGEST_DIRECTIVE: &str = "Connection requests: when a person asks you \
+to connect an AI, to sign in to an AI subscription (Claude, Codex) or to connect a \
+team API key, do not try to do it yourself and do not walk them through settings. \
+Call the `card_suggest` tool with `commandId` `ai.connect` \
+(set `args.harness` to `claude`, `codex` or `team_key` only if they named one) and \
+put a one-sentence answer in `body`. Their own app draws the card and they connect \
+on their own device. Never ask for a key, token, password or login code in chat.";
+
+/// [`CARD_SUGGEST_DIRECTIVE`] when `enabled` (the profile's resolved tool list)
+/// offers `card_suggest`, otherwise `None`. Matching is `tools::normalize`,
+/// the executor's rule, so the block and the tool can never disagree.
+pub fn card_suggest_directive(enabled: &[crate::tools::ToolDefinition]) -> Option<&'static str> {
+    let wanted = crate::tools::normalize(crate::tools::CARD_SUGGEST);
+    enabled
+        .iter()
+        .any(|definition| crate::tools::normalize(definition.name) == wanted)
+        .then_some(CARD_SUGGEST_DIRECTIVE)
+}
+
 /// The keys an agent may send to either door, besides the door's own plumbing
 /// (`handle`/`clientMsgId`/`rootId` on the hosted one).
 pub const SUGGESTION_ARGUMENT_KEYS: [&str; 3] = ["commandId", "args", "body"];
@@ -745,5 +776,83 @@ mod tests {
             schema["properties"]["scope"]["enum"],
             json!(AI_CONNECT_SCOPES)
         );
+    }
+
+    /// GC-8 (#2949): the connection-request rule rides with the tool and only
+    /// with it. Offered without the tool, it would send the model to a refusal;
+    /// withheld while the tool is on, the tool is a name the model has no
+    /// reason to reach for when a person says 「연결해 줘」.
+    #[test]
+    fn the_directive_rides_only_with_the_tool_it_names() {
+        use crate::tools::{enabled_tool_definitions, CARD_SUGGEST, CATALOG};
+        let on = enabled_tool_definitions(&[CARD_SUGGEST.to_string()]);
+        assert_eq!(card_suggest_directive(&on), Some(CARD_SUGGEST_DIRECTIVE));
+        // The executor's spelling rule, not a byte compare.
+        let shouted = enabled_tool_definitions(&["Card-Suggest".to_string()]);
+        assert_eq!(
+            card_suggest_directive(&shouted),
+            Some(CARD_SUGGEST_DIRECTIVE)
+        );
+        // Every other catalog tool, switched on together, still carries no rule.
+        let others: Vec<String> = CATALOG
+            .iter()
+            .filter(|name| **name != CARD_SUGGEST)
+            .map(|name| name.to_string())
+            .collect();
+        assert!(!others.is_empty());
+        let other = enabled_tool_definitions(&others);
+        assert_eq!(other.len(), others.len());
+        assert_eq!(card_suggest_directive(&other), None);
+        assert_eq!(card_suggest_directive(&[]), None);
+    }
+
+    /// The directive names the tool and the command the server actually
+    /// accepts, and says the two things the model must not do. A rename on
+    /// either side fails here instead of teaching the model a dead name.
+    #[test]
+    fn the_directive_names_the_live_tool_and_command() {
+        assert!(CARD_SUGGEST_DIRECTIVE.contains(&format!("`{}`", crate::tools::CARD_SUGGEST)));
+        assert!(CARD_SUGGEST_DIRECTIVE.contains(&format!("`{COMMAND_AI_CONNECT}`")));
+        assert!(suggestable_command(COMMAND_AI_CONNECT).is_some());
+        for harness in AI_CONNECT_HARNESSES {
+            assert!(
+                CARD_SUGGEST_DIRECTIVE.contains(&format!("`{harness}`")),
+                "{harness}"
+            );
+        }
+        assert!(CARD_SUGGEST_DIRECTIVE.contains("do not try to do it yourself"));
+        assert!(CARD_SUGGEST_DIRECTIVE.contains("Never ask for a key, token, password"));
+    }
+
+    /// GC-8 (#2949): the golden vector both tracks read. What this crate
+    /// assembles for each case is byte-for-byte the committed props, so a
+    /// change on the server side fails here before a client renders it wrong.
+    #[test]
+    fn the_props_match_the_shared_golden_vector() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../docs/api/command-suggest-ai-connect.golden.json"
+        );
+        let golden: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("read golden"))
+                .expect("golden is JSON");
+        let requester = Uuid::parse_str(
+            golden["for_member_id_placeholder"]
+                .as_str()
+                .expect("placeholder"),
+        )
+        .expect("placeholder uuid");
+        let cases = golden["cases"].as_array().expect("cases");
+        assert_eq!(cases.len(), 4, "one case per label row");
+        for case in cases {
+            let validated =
+                validate_suggestion(&case["arguments"], &[]).expect("golden arguments are legal");
+            assert_eq!(
+                command_suggest_props(&validated, requester),
+                case["props"],
+                "{}",
+                case["name"]
+            );
+        }
     }
 }

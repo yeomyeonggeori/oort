@@ -53,7 +53,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use momo_agent::{
-    agent_owner_in_tx, allowed_agent_models, create_agent_identity_in_tx,
+    agent_owner_in_tx, allowed_agent_models, create_agent_identity_in_tx, default_enabled_tools,
     load_agent_model_policy_in_tx, load_agent_profile_in_tx, normalized_model,
     normalized_system_prompt, set_agent_paused_in_tx, upsert_agent_profile_in_tx,
     validate_agent_profile, validated_config, AgentCreation, AgentProfile, AgentProfileSpec,
@@ -100,15 +100,33 @@ fn profile_dto(profile: &AgentProfile) -> AgentProfileDto {
     }
 }
 
-fn validated_profile(input: &AgentProfileInput) -> Result<AgentProfileSpec, ApiError> {
+/// Validate a profile body. `omitted_tools` is what an absent `enabledTools`
+/// means at this call site: the create default, or `[]` on a PUT (GC-8).
+fn validated_profile(
+    input: &AgentProfileInput,
+    omitted_tools: &[String],
+) -> Result<AgentProfileSpec, ApiError> {
     validate_agent_profile(
         &input.instructions,
         input.model_pref.as_deref(),
         input.effort_pref.as_deref(),
-        &input.enabled_tools,
+        input.enabled_tools.as_deref().unwrap_or(omitted_tools),
         input.triggers.as_ref(),
     )
     .map_err(spec_error)
+}
+
+/// The profile a create writes (GC-8, #2949): the body's own, with an omitted
+/// `enabledTools` read as [`default_enabled_tools`], or — when the body has no
+/// profile at all — an empty-instruction profile carrying only that default.
+/// Every agent a create makes therefore has a row the hub can show and an
+/// operator can switch off.
+fn create_profile(input: Option<&AgentProfileInput>) -> Result<AgentProfileSpec, ApiError> {
+    let defaults = default_enabled_tools();
+    match input {
+        Some(input) => validated_profile(input, &defaults),
+        None => validate_agent_profile("", None, None, &defaults, None).map_err(spec_error),
+    }
 }
 
 /// `POST /v1/workspaces/{ws}/agents`.
@@ -140,11 +158,7 @@ pub async fn create(
     let system_prompt =
         normalized_system_prompt(request.system_prompt.as_deref()).map_err(spec_error)?;
     let config = validated_config(request.config.as_ref()).map_err(spec_error)?;
-    let profile = request
-        .profile
-        .as_ref()
-        .map(validated_profile)
-        .transpose()?;
+    let profile = Some(create_profile(request.profile.as_ref())?);
 
     let actor_member_id = principal.member_id;
     let owner_human_id = request.owner_human_id.unwrap_or(actor_member_id);
@@ -395,7 +409,7 @@ pub async fn put_profile(
     require_human(&principal, "human agent owner or workspace admin required")?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let agent_member_id = path_uuid(&agent, "invalid agent id")?;
-    let spec = validated_profile(&request)?;
+    let spec = validated_profile(&request, &[])?;
     let actor_member_id = principal.member_id;
     let via_token_id = audit_via_token_id(&principal);
 
@@ -751,10 +765,10 @@ mod tests {
             instructions: "be terse".into(),
             model_pref: Some("hermes-fast".into()),
             effort_pref: Some("max".into()),
-            enabled_tools: vec![],
+            enabled_tools: Some(vec![]),
             triggers: None,
         };
-        let error = validated_profile(&unusable).expect_err("hermes-fast cannot do max");
+        let error = validated_profile(&unusable, &[]).expect_err("hermes-fast cannot do max");
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert_eq!(
             error.message,
@@ -770,11 +784,45 @@ mod tests {
             instructions: "be terse".into(),
             model_pref: None,
             effort_pref: None,
-            enabled_tools: vec![],
+            enabled_tools: Some(vec![]),
             triggers: None,
         };
-        let spec = validated_profile(&input).expect("valid");
+        let spec = validated_profile(&input, &[]).expect("valid");
         assert_eq!(spec.triggers, json!({"mention": true}));
         assert_eq!(spec.instructions, "be terse");
+    }
+
+    /// GC-8 (#2949): a created agent starts with `card_suggest` on unless its
+    /// creator said otherwise, and an explicit list — `[]` included — is the
+    /// operator's switch. A PUT that omits the key does **not** re-apply the
+    /// default, so an operator's 「끔」 survives an instructions-only edit.
+    #[test]
+    fn a_created_profile_defaults_card_suggest_on_and_an_explicit_list_turns_it_off() {
+        let card = vec![momo_agent::tools::CARD_SUGGEST.to_string()];
+        // No profile in the body: a row is still written, carrying the default.
+        let bare = create_profile(None).expect("default profile");
+        assert_eq!(bare.enabled_tools, card);
+        assert_eq!(bare.instructions, "");
+        assert_eq!(bare.triggers, json!({"mention": true}));
+        // The web form's shape: instructions only.
+        let form: AgentProfileInput =
+            serde_json::from_value(json!({"instructions": "be terse"})).expect("form body");
+        assert_eq!(
+            create_profile(Some(&form)).expect("form").enabled_tools,
+            card
+        );
+        // The operator's switch.
+        let off: AgentProfileInput =
+            serde_json::from_value(json!({"instructions": "x", "enabledTools": []}))
+                .expect("off body");
+        assert!(create_profile(Some(&off))
+            .expect("off")
+            .enabled_tools
+            .is_empty());
+        // A PUT that omits the key means `[]`, not the default.
+        assert!(validated_profile(&form, &[])
+            .expect("put")
+            .enabled_tools
+            .is_empty());
     }
 }
