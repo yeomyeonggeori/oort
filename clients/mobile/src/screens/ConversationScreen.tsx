@@ -118,6 +118,7 @@ import {
 } from '../push/tapArrival';
 import {useRealtime} from '../realtime/RealtimeProvider';
 import {useSession} from '../session/useSession';
+import {useDmDeliveryHint} from '../features/conversation/useDmDeliveryHint';
 
 /** 비어 있는 영수증 표. 첫 값이자 채널이 바뀔 때 돌아가는 자리다. */
 const NO_RECEIPTS: ReadonlyMap<string, ApprovalReceipt> = new Map();
@@ -366,6 +367,8 @@ export default function ConversationScreen({
     () => (channel ? dmAutoReplyAgent(channel, directory, member.id) : null),
     [channel, directory, member.id],
   );
+  // #2891 — the DM hint follows the server's delivery state for this DM.
+  const dmHint = useDmDeliveryHint({workspaceId, channelId, directory, dmAgent});
 
   // ---- 이 채널에서 지금 열려 있는 턴 (goal RN-T2) ---------------------------
   // The 1Hz clock is mounted for THIS channel's turns, not the workspace's.
@@ -1673,6 +1676,7 @@ export default function ConversationScreen({
               recipient={peer ? 'person' : 'place'}
               directory={directory}
               dmAgent={dmAgent}
+              dmHint={dmHint}
               // 승인 컨트롤과 **같은 신호**다. 전송도 REST POST 이므로 레일이
               // 재연결 중이라는 사실은 「보낼 수 있는가」에 답하지 않는다 —
               // 옛 배선(`railStatus === 'disconnected'`)이 답한다고 주장했을

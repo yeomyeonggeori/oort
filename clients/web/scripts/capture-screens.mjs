@@ -2377,6 +2377,34 @@ async function installMocks(context) {
     }
     return json(route, { dnd: false, mentionOverridesMute: true });
   });
+  // #2915 / #2891 — hosted DM delivery. The DM hint follows the server's
+  // answer; the fixture DM is a managed agent's, so the old sentence is true.
+  await context.route("**/v1/workspaces/*/channels/*/agent-dm-delivery", (route) =>
+    json(route, {
+      channelId: route.request().url().split("/channels/")[1]?.split("/")[0] ?? "",
+      agentMemberId: HERMES,
+      ownerMemberId: ME,
+      state: "not_hosted",
+    })
+  );
+  // The connection tab's 1:1 대화 box: the owner's own DM and one closed DM.
+  await context.route("**/v1/workspaces/*/hosted-agent-connections/*/dm-approvals", (route) =>
+    json(route, {
+      connectionId: route.request().url().split("/hosted-agent-connections/")[1]?.split("/")[0] ?? "",
+      agentMemberId: "019f9a01-0000-7000-8000-000000000404",
+      ownerMemberId: ME,
+      canEdit: true,
+      ownerOnly: false,
+      dms: [
+        { channelId: "019f9a01-0000-7000-8000-0000000007d1", counterpartMemberId: ME, state: "owner" },
+        {
+          channelId: "019f9a01-0000-7000-8000-0000000007d2",
+          counterpartMemberId: "019f9a01-0000-7000-8000-000000000401",
+          state: "unapproved",
+        },
+      ],
+    })
+  );
 }
 
 async function assertOnboardingCardCentered(page, where, testId) {

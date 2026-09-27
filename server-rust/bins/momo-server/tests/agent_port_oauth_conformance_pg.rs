@@ -2225,3 +2225,128 @@ async fn set_tenant(pool: &PgPool, workspace: Uuid) -> sqlx::pool::PoolConnectio
         .expect("bind the tenant GUC");
     conn
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0162 증보 2 B6 / security review H1 (#2918) — the OAuth arm of
+// "DMs ride only on the owner's consent".
+// ---------------------------------------------------------------------------
+
+async fn seed_dm_b6(pool: &PgPool, workspace: Uuid, members: &[Uuid]) -> Uuid {
+    let dm = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO channel (id, workspace_id, kind, name, topic, dm_key, created_by) \
+         VALUES ($1, $2, 'dm', NULL, NULL, $3, $4)",
+    )
+    .bind(dm)
+    .bind(workspace)
+    .bind(dm.to_string())
+    .bind(members[0])
+    .execute(pool)
+    .await
+    .expect("seed dm");
+    for member in members {
+        sqlx::query("INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)")
+            .bind(workspace)
+            .bind(dm)
+            .bind(member)
+            .execute(pool)
+            .await
+            .expect("seed dm membership");
+    }
+    dm
+}
+
+/// Consent by `jwt` with the owner's member DM already opened; returns
+/// (stored DM approvals after consent, rooms the connection covers, owner DM, member DM).
+async fn consent_with_open_dm(
+    pool: &PgPool,
+    client: &reqwest::Client,
+    base: &str,
+    fixture: &Fixture,
+    consenter: impl FnOnce() -> String,
+) -> (Vec<Uuid>, Vec<Uuid>, Uuid, Uuid) {
+    let (member, _) = seed_human(pool, fixture.workspace, "member", "Minji").await;
+    let owner_dm = seed_dm_b6(
+        pool,
+        fixture.workspace,
+        &[fixture.owner, fixture.oauth_agent],
+    )
+    .await;
+    let member_dm = seed_dm_b6(pool, fixture.workspace, &[member, fixture.oauth_agent]).await;
+    // The owner opened the member's DM while the connection was pending.
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_dm_channel_ids=ARRAY[$2]::uuid[] WHERE id=$1",
+    )
+    .bind(fixture.oauth_connection)
+    .bind(member_dm)
+    .execute(pool)
+    .await
+    .unwrap();
+    let (_, location) = authorize(client, base, &[]).await;
+    let envelope = request_envelope(&location);
+    let jwt = consenter();
+    let (status, decision) = decide(
+        client,
+        base,
+        fixture,
+        &jwt,
+        "approve",
+        json!({
+            "request": envelope,
+            "connectionId": fixture.oauth_connection,
+            "approvedScopes": ["agent:port:connect", "messages:read"],
+            "approvedChannelIds": [fixture.channel],
+        }),
+    )
+    .await;
+    assert_eq!(status, 200, "{decision}");
+    let stored: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT approved_dm_channel_ids FROM hosted_agent_connection WHERE id=$1",
+    )
+    .bind(fixture.oauth_connection)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let covered: Vec<Uuid> = sqlx::query_scalar("SELECT hosted_connection_channel_ids($1, $2)")
+        .bind(fixture.workspace)
+        .bind(fixture.oauth_connection)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    (stored, covered, owner_dm, member_dm)
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_non_owner_consent_carries_no_dm_and_clears_the_owners_dm_approvals() {
+    ensure_schema_and_roles();
+    let pool = superuser_pool().await;
+    let base = start_server(momo_app_pool().await, true).await;
+    let client = client();
+
+    // An admin who is not the agent's owner consents.
+    let fixture = seed(&pool).await;
+    let (_, admin_jwt) = seed_human(&pool, fixture.workspace, "admin", "Admin").await;
+    let (stored, covered, owner_dm, member_dm) =
+        consent_with_open_dm(&pool, &client, &base, &fixture, || admin_jwt).await;
+    assert!(stored.is_empty(), "cleared in the consent tx: {stored:?}");
+    assert!(
+        covered.contains(&fixture.channel),
+        "channel approval unchanged: {covered:?}"
+    );
+    assert!(
+        !covered.contains(&owner_dm) && !covered.contains(&member_dm),
+        "no DM on a non-owner's consent: {covered:?}"
+    );
+
+    // Control: the owner's own consent keeps the approval and carries both DMs.
+    let fixture = seed(&pool).await;
+    let owner_jwt = fixture.owner_jwt.clone();
+    let (stored, covered, owner_dm, member_dm) =
+        consent_with_open_dm(&pool, &client, &base, &fixture, || owner_jwt).await;
+    assert_eq!(stored, vec![member_dm]);
+    assert!(
+        covered.contains(&owner_dm) && covered.contains(&member_dm),
+        "{covered:?}"
+    );
+}

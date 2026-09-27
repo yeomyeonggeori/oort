@@ -72,6 +72,7 @@ import {
   type HostedAgentConnection,
 } from "@momo/core/features/hostedAgents/model";
 import { CleanupArtifactRow } from "./CleanupArtifactRow";
+import { DmApprovalSection } from "./DmApprovalSection";
 import { DoorbellSection } from "./DoorbellSection";
 import { hostedListQuery } from "./hostedCredentialScope";
 import {
@@ -398,6 +399,20 @@ export function HostedConnectionSection({
                 connectionId={connectionId}
                 connection={detail.data?.connection ?? null}
                 loading={detail.isPending}
+                offline={offline}
+                writesLocked={busy}
+              />
+            )}
+
+          {/* ADR-0162 증보 2 (#2915): 소유자가 한 DM씩 여는 목록. */}
+          {connection.status !== "cleanup_pending" &&
+            connection.status !== "disconnected" &&
+            connection.status !== "expired" && (
+              <DmApprovalSection
+                workspaceId={workspaceId}
+                connectionId={connectionId}
+                agentLabel={agentLabel}
+                directory={directory}
                 offline={offline}
                 writesLocked={busy}
               />

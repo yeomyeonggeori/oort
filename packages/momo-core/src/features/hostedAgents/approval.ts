@@ -30,7 +30,7 @@ import type { HostedGate } from "./wizard";
 // ## 규율 2 — 자격 없는 줄은 숨기지 않고 **사유와 함께 세운다**
 //
 // features/timeline/spawnHostChoice.ts 가 호스트 목록에서 이미 정한 규율을 그대로
-// 잇는다. 회색으로 처리된 "1:1 대화 (승인 대상 아님)" 가 "왜 내 DM 이 목록에
+// 잇는다. 회색으로 처리된 "1:1 대화 (여기서 고르지 않음, ADR-0162 증보 2)" 가 "왜 내 DM 이 목록에
 // 없지"의 정직한 답이고, 빈 목록은 아니다.
 //
 // ## 규율 3 — 고를 수 없는 것은 **보내지 않는다** (fail-closed)
@@ -201,7 +201,7 @@ export function isApprovableChannel(channel: ApprovalChannelInput): boolean {
 
 function channelDetail(channel: ApprovalChannelInput): string {
   if (channel.kind === "dm") {
-    return "1:1 대화는 승인 대상이 아닙니다. 에이전트는 채널에서만 부릅니다.";
+    return "1:1 대화는 여기서 고르지 않습니다. 연결한 뒤 에이전트 자격의 1:1 대화 목록에서 소유자가 엽니다.";
   }
   if (channel.archivedAtMs !== undefined) {
     return "보관된 채널입니다. 다시 열면 승인할 수 있습니다.";

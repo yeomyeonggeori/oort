@@ -287,7 +287,7 @@ async fn claim_gateway_jobs(
                      AND t.audience = '/v1/mcp/agent-port' \
                      AND 'agent:jobs:read' = ANY(t.scopes) \
                      AND EXISTS ( \
-                       SELECT 1 FROM unnest(hc.approved_channel_ids) AS approved(channel_id) \
+                       SELECT 1 FROM unnest(hosted_connection_channel_ids(hc.workspace_id, hc.id)) AS approved(channel_id) \
                         WHERE lower(approved.channel_id::text) \
                               = lower(o.payload->>'channel_id') \
                      ) \

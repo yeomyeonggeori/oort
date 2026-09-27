@@ -773,6 +773,7 @@ export function Composer({
   recipient,
   directory,
   dmAgent,
+  dmHint,
   offline,
   draftKey,
   onSend,
@@ -799,6 +800,11 @@ export function Composer({
   sendLabel?: string;
   /** The agent a DM answers without an @mention, if this is that kind of DM. */
   dmAgent?: RosterMember | null;
+  /**
+   * #2891 — 서버의 DM 전달 상태가 참으로 만드는 문장(`useDmDeliveryHint`).
+   * `undefined` 면 예전처럼 `dmAgent` 로 짓고, `null` 이면 아무 약속도 하지 않는다.
+   */
+  dmHint?: string | null;
   /**
    * 이 기기가 네트워크에 닿지 않는다 (NetInfo).
    *
@@ -1249,7 +1255,13 @@ export function Composer({
         </View>
       ) : null}
 
-      {dmAgent && text.trim() === '' ? (
+      {dmHint !== undefined ? (
+        dmHint !== null && text.trim() === '' ? (
+          <Text style={styles.hint} testID="composer-dm-hint">
+            {dmHint}
+          </Text>
+        ) : null
+      ) : dmAgent && text.trim() === '' ? (
         <Text style={styles.hint}>
           {/* 이 자리에 병기형을 적는 것은 번역이 아니라 **기계가 사람 앞에서
               결정을 미루는 것**이다 (goal RN-B4c / #1027). 규칙은 마지막 음절

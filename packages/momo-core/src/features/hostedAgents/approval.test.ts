@@ -74,7 +74,7 @@ describe("RED PROOF ② 자격 없는 줄은 사유와 함께 선다", () => {
     const dm = rows.find((row) => row.id === DM);
     const archived = rows.find((row) => row.id === ARCHIVED);
     expect(dm?.disabled).toBe(true);
-    expect(dm?.detail).toContain("1:1 대화는 승인 대상이 아닙니다");
+    expect(dm?.detail).toContain("1:1 대화는 여기서 고르지 않습니다");
     expect(archived?.disabled).toBe(true);
     expect(archived?.detail).toContain("보관된 채널입니다");
   });

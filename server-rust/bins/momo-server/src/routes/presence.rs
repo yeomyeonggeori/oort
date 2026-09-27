@@ -20,11 +20,18 @@
 //! the typing surface. The read returns 404 for a member with no declared status
 //! (an agent, or a soft-deleted row) rather than inventing `auto`.
 //!
+//! **DND expiry + notification-pause bundle (ADR-0124 증보 2, 「묶어」).**
+//! `dndUntilMs` (only with `status: "dnd"`) gives DND an expiry; the server
+//! pauses notifications until the same moment and restores the previous pause
+//! when DND ends — all inside `set_declared_presence_in_tx`'s transaction. The
+//! client writes once; it never PUTs `notification-rules` alongside.
+//!
 //! **Audit: none.** The original presence PUT wrote no `audit_log` row. Custom
 //! status is the same personal intent, so ADR-0176 follows that convention.
 
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
+use chrono::Utc;
 use momo_auth::Principal;
 use momo_messaging::{
     declared_presence_for, normalize_status_emoji, normalize_status_text,
@@ -34,6 +41,7 @@ use momo_messaging::{
 
 use crate::dto::{OptionalPatch, PresenceStatusResponse, SetPresenceRequest};
 use crate::error::ApiError;
+use crate::routes::notification_rules::parse_until_patch;
 use crate::routes::shared::{
     agent_tenant_tx, require_human, settle_db, workspace_scope, DbRejectable,
 };
@@ -54,6 +62,7 @@ fn parse_status(raw: &str) -> Result<PresenceStatus, ApiError> {
 fn presence_response(declared: DeclaredPresence) -> PresenceStatusResponse {
     PresenceStatusResponse {
         status: declared.status.as_db_label().to_string(),
+        dnd_until_ms: declared.dnd_until.map(|at| at.timestamp_millis()),
         status_emoji: declared.custom.emoji,
         status_text: declared.custom.text,
         status_expires_at_ms: declared.custom.expires_at.map(|at| at.timestamp_millis()),
@@ -91,6 +100,22 @@ fn parse_custom_patch(request: &SetPresenceRequest) -> Result<CustomStatusPatch,
                     .map_err(|error| ApiError::bad_request(error.to_string()))?,
             ));
         }
+    }
+    Ok(patch)
+}
+
+/// `dndUntilMs` belongs to DND only: a value on any other status is a 400 (an
+/// `away` with an expiry is a feature nobody decided). `null` is accepted on any
+/// status because "no expiry" is what a non-DND status already means.
+fn parse_dnd_until(
+    status: PresenceStatus,
+    request: &SetPresenceRequest,
+) -> Result<StatusPatch<chrono::DateTime<Utc>>, ApiError> {
+    let patch = parse_until_patch("dndUntilMs", &request.dnd_until_ms, Utc::now())?;
+    if status != PresenceStatus::Dnd && matches!(patch, StatusPatch::Set(Some(_))) {
+        return Err(ApiError::bad_request(
+            "dndUntilMs is only valid with status dnd",
+        ));
     }
     Ok(patch)
 }
@@ -140,16 +165,25 @@ pub async fn set_presence(
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let status = parse_status(&request.status)?;
     let custom = parse_custom_patch(&request)?;
+    let dnd_until = parse_dnd_until(status, &request)?;
     let member_id = principal.member_id;
 
     let outcome: DbRejectable<DeclaredPresence> =
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
-                match set_declared_presence_in_tx(conn, workspace_id, member_id, status, custom)
-                    .await?
+                match set_declared_presence_in_tx(
+                    conn,
+                    workspace_id,
+                    member_id,
+                    status,
+                    dnd_until,
+                    custom,
+                )
+                .await?
                 {
                     Some(update) => Ok(Ok(DeclaredPresence {
                         status: update.status,
+                        dnd_until: update.dnd_until,
                         custom: update.custom,
                     })),
                     // Matched no live human member row — returned before any
@@ -229,6 +263,7 @@ mod tests {
     fn response_omits_empty_custom_fields() {
         let json = serde_json::to_value(presence_response(DeclaredPresence {
             status: PresenceStatus::Auto,
+            dnd_until: None,
             custom: CustomStatus::empty(),
         }))
         .expect("ser");
@@ -236,5 +271,36 @@ mod tests {
         assert!(json.get("statusEmoji").is_none(), "{json}");
         assert!(json.get("statusText").is_none(), "{json}");
         assert!(json.get("statusExpiresAtMs").is_none(), "{json}");
+        assert!(json.get("dndUntilMs").is_none(), "{json}");
+    }
+
+    #[test]
+    fn a_dnd_expiry_is_dnd_only_and_in_the_future() {
+        let future = Utc::now().timestamp_millis() + 3_600_000;
+        let timed: SetPresenceRequest =
+            serde_json::from_value(json!({"status": "dnd", "dndUntilMs": future})).expect("body");
+        assert!(matches!(
+            parse_dnd_until(PresenceStatus::Dnd, &timed).expect("dnd"),
+            StatusPatch::Set(Some(_))
+        ));
+        let away: SetPresenceRequest =
+            serde_json::from_value(json!({"status": "away", "dndUntilMs": future})).expect("body");
+        let error = parse_dnd_until(PresenceStatus::Away, &away).expect_err("away");
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.message, "dndUntilMs is only valid with status dnd");
+        let past: SetPresenceRequest =
+            serde_json::from_value(json!({"status": "dnd", "dndUntilMs": 1})).expect("body");
+        assert_eq!(
+            parse_dnd_until(PresenceStatus::Dnd, &past)
+                .expect_err("past")
+                .status,
+            StatusCode::BAD_REQUEST
+        );
+        let cleared: SetPresenceRequest =
+            serde_json::from_value(json!({"status": "auto", "dndUntilMs": null})).expect("body");
+        assert_eq!(
+            parse_dnd_until(PresenceStatus::Auto, &cleared).expect("null"),
+            StatusPatch::Set(None)
+        );
     }
 }
