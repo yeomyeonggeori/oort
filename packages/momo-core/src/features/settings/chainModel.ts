@@ -1,6 +1,6 @@
 import { ApiError } from "../../lib/api";
 import { attachDirection } from "../../lib/koreanParticle";
-import { maskedBearer } from "./model";
+import { maskedBearer, PROVIDER_EGRESS_DENIED_HINT } from "./model";
 import type {
   ProviderChain,
   ProviderChainEntry,
@@ -676,6 +676,15 @@ export function probeReasonCopy(reason: string | undefined): string {
   }
   if (reason === "probe_not_run") {
     return "확인이 끝나지 않았습니다.";
+  }
+  // #2960: the server's egress guard refused a private, loopback or metadata
+  // address before dialling. Only the operator's opt-in changes that.
+  if (reason === "provider_egress_denied") {
+    return PROVIDER_EGRESS_DENIED_HINT;
+  }
+  // #2960: a 2xx whose body is not the documented model list.
+  if (reason === "provider_invalid_response") {
+    return "주소가 provider API가 아닌 것 같습니다. API 주소(예: …/v1)인지 확인하세요.";
   }
   if (isLoopbackProviderRefusal(reason)) {
     return loopbackProviderGuidance();

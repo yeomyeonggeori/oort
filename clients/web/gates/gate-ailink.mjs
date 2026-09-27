@@ -1,32 +1,25 @@
 #!/usr/bin/env node
-// GATE — AI 연결 OAuth 등록 (U3 / #1047, ADR-0147).
+// =============================================================================
+// GATE — 설정 › AI 연결 · 팀 연결 (#2974; 전판 U3 #1047 · ADR-0147 → #2909 개편).
 //
-// Two properties, both of which the unit tests can only assert about a function
-// and this gate asserts about the SHIPPED BUNDLE driven by a real pointer:
+//   npm run gate:ailink        (= npm run build && node gates/gate-ailink.mjs)
 //
-//   ① The PUT this panel sends for the OAuth method carries an `oauth` object
-//      and no `bearer` key, and every key in it is one the server declares.
-//      `PutProviderLinkRequest`/`PutProviderOAuthRequest` are
-//      `#[serde(deny_unknown_fields)]`, so a stray key is a 400 and not a
-//      tolerated extra — which makes "what exactly went on the wire" the thing
-//      worth measuring, rather than "did the call happen".
-//   ② No credential from the pasted document is anywhere in the DOM — not in
-//      text, not in an input value, not in an attribute — across the WHOLE form
-//      session: the moment after the paste is read, while the account label is
-//      being typed, at submit, and after the save. ADR-0004 Rules #2/#5 held by
-//      construction while the bearer was the only credential and this panel had
-//      no box that ever contained one; a paste box holds an entire auth.json in
-//      component state, so the rule now needs a measurement instead of an
-//      argument.
+// 전판은 auth.json 붙여넣기 폼(ai-link-oauth-paste)을 시험했다. #2909가 그 흐름을
+// 걷어낸 뒤로는 사라진 UI를 가리켰다. 이 판은 지금 화면을 잰다. 단위 시험은
+// 함수만 단정할 수 있고, 이 게이트는 **배포 번들을 실제 포인터로** 민다.
 //
-//      The pre-save half of that window is the half a design review found
-//      unmeasured (H1): the gate used to look only after the save had landed,
-//      which is precisely the window in which the raw document was legible.
+//   ① 팀 키 넣기(TeamKeyForm)가 보내는 PUT 본문. 서버 `PutProviderLinkRequest`는
+//      `deny_unknown_fields`라 낯선 키는 400이다. 그래서 「무엇이 선에 실렸나」를
+//      잰다: 키 집합 ⊆ {baseUrl, bearer, mode, format}, `oauth` 없음, 프리셋 형식.
+//   ② 넣은 키가 저장 뒤 DOM(글자·입력값·속성)과 접근성 트리 어디에도 없다
+//      (ADR-0004 Rules #2/#5). 입력 칸은 password 형이다.
+//   ③ 레거시 oauth-openai 연결은 읽기 전용이다: 「확인」·「키 바꾸기」가 없고,
+//      auth.json을 붙일 칸(textarea)이 화면 어디에도 없다.
+//   ④ 「연결 확인」 결과 칸(#2975): #2960 사유가 기본 갈래(「서버 사유」)로 떨어지지
+//      않고, provider 숫자 줄은 숫자가 있을 때만 선다.
 //
-// The server is stubbed at the route layer, so this touches no live instance
-// and needs no local stack. That is deliberate: the assertions are about the
-// REQUEST this client composes and the SCREEN it draws, and both are fully
-// determined by the bundle.
+// 서버는 라우트 층에서 대역한다. 라이브 인스턴스·로컬 스택을 쓰지 않는다.
+// =============================================================================
 
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -44,512 +37,303 @@ const memberId = "019f94e3-7a10-79cd-9dee-208f47edd9a8";
 const session = {
   accessToken: "gate-only-not-a-credential",
   refreshToken: "gate-only-not-a-credential",
-  member: {
-    id: memberId,
-    workspaceId,
-    kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
-  },
-  realtimeWebSocketUrl: `ws://127.0.0.1:${port + 900}/connection/websocket`,
+  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  realtimeWebSocketUrl: "ws://ailink-gate.invalid/connection/websocket",
 };
 
-// Invented for this gate. Every one of these strings is a value the screen must
-// never show and the wire must never carry twice.
-const REFRESH_TOKEN = "gate-refresh-token-not-a-credential";
-const ACCESS_TOKEN = "gate-access-token-not-a-credential";
-const ID_TOKEN = "gate-id-token-not-a-credential";
-const ACCOUNT_ID = "acct-01996f2a-7c3d-4f11-9a20-3d6f0c9b41ee";
-const ACCOUNT_LABEL = "성재 개인 ChatGPT 구독";
-const BASE_URL = "https://chatgpt.com/backend-api/codex";
-// A tenant that is NOT the default. The old H3 assertion round-tripped an
-// address that happened to equal the suggestion, which is the one case where
-// losing it is invisible — so it never measured whether the operator's own
-// value survives. That gap is exactly what a review found by hand.
-const CUSTOM_BASE_URL = "https://codex.acme-internal.test/backend-api/codex";
+// 이 게이트가 지어낸 값. 화면에 한 번도 나오면 안 된다.
+const FAKE_KEY = "gate-ailink-not-a-key-7f3c9e21d4b8a6";
+const DECLARED_PUT_KEYS = new Set(["baseUrl", "bearer", "mode", "format"]);
 
-// The measured key structure of `~/.codex/auth.json`
-// (server-rust/crates/momo-settings/src/oauth.rs), values invented.
-const AUTH_JSON = JSON.stringify(
-  {
-    OPENAI_API_KEY: null,
-    auth_mode: "chatgpt",
-    tokens: {
-      id_token: ID_TOKEN,
-      access_token: ACCESS_TOKEN,
-      refresh_token: REFRESH_TOKEN,
-      account_id: ACCOUNT_ID,
-    },
-    last_refresh: "2026-08-04T11:20:03.914Z",
-  },
-  null,
-  2
-);
-
-/** Every key `PutProviderLinkRequest` declares. Anything else is a 400. */
-const PUT_LINK_KEYS = ["baseUrl", "bearer", "mode", "oauth"];
-/** Every key `PutProviderOAuthRequest` declares. Anything else is a 400. */
-const PUT_OAUTH_KEYS = [
-  "refreshToken",
-  "accessToken",
-  "expiresAtMs",
-  "accountId",
-  "accountLabel",
-  "clientId",
-  "tokenEndpoint",
+const PRESETS = [
+  { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", format: "openai" },
+  { id: "anthropic", label: "Anthropic (Claude)", baseUrl: "https://api.anthropic.com/v1", format: "anthropic" },
+  { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", format: "openai" },
 ];
-
-const unconfiguredLink = {
-  schema: "momo.provider_link.v0",
-  configured: false,
-  source: "environment",
-  mode: "external-hermes",
-  baseUrl: "http://127.0.0.1:28080/mock",
-  endpointLabel: "127.0.0.1:28080/mock",
-  bearerConfigured: false,
-  availability: "mock",
-  keyConfigured: false,
-  diagnostics: [],
+const KEY_LINK = {
+  schema: "momo.provider_link.v0", configured: true, source: "database", mode: "external-hermes",
+  baseUrl: "https://api.anthropic.com/v1", endpointLabel: "Anthropic", bearerConfigured: true,
+  bearerLast4: FAKE_KEY.slice(-4), availability: "live", keyConfigured: true, updatedAtMs: Date.now() - 86_400_000,
+  diagnostics: [], credentialKind: "anthropic-key", format: "anthropic", presets: PRESETS,
+};
+const EMPTY_LINK = {
+  schema: "momo.provider_link.v0", configured: false, source: "environment", mode: "local-mock",
+  baseUrl: "http://mock", endpointLabel: "mock", bearerConfigured: false, availability: "mock",
+  keyConfigured: false, diagnostics: [], presets: PRESETS,
+};
+const LEGACY_LINK = {
+  ...KEY_LINK, baseUrl: "https://chatgpt.com/backend-api/codex", endpointLabel: "ChatGPT",
+  credentialKind: "oauth-openai", format: undefined,
 };
 
-// What the server answers once an ADR-0147 grant is sealed. Field for field the
-// `ProviderLinkResponse` projection, including the two additive keys.
-const oauthLink = {
-  schema: "momo.provider_link.v0",
-  configured: true,
-  source: "database",
-  mode: "external-hermes",
-  baseUrl: BASE_URL,
-  endpointLabel: "chatgpt.com/backend-api/codex",
-  bearerConfigured: true,
-  bearerLast4: "ntial",
-  availability: "available",
-  keyConfigured: true,
-  updatedAtMs: 1_785_000_000_000,
-  updatedBy: memberId,
-  diagnostics: [],
-  credentialKind: "oauth-openai",
-  credentialMeta: {
-    attribution: "personal-subscription",
-    usageScope: "internal-only",
-    accountLabel: ACCOUNT_LABEL,
-    notice:
-      "개인 계정 귀속 · 내부용. 이 연결은 특정 구성원의 개인 ChatGPT 구독으로 동작하며, 사용량은 그 사람의 구독 한도를 씁니다. 제품 기본 경로는 API 키입니다.",
-    accessTokenPresent: true,
-    accessTokenExpiresAtMs: 1_785_003_600_000,
-  },
-};
+const test = (ok, reason, entryProbe) => ({
+  schema: "momo.provider_link.test.v0", ok, reason, source: "database", mode: "external-hermes",
+  endpointLabel: "Anthropic", checkedAtMs: Date.now(),
+  ...(entryProbe
+    ? {
+        cascadeOk: ok,
+        entries: [
+          {
+            position: 0, source: "provider_link", mode: "external-hermes", endpointLabel: "Anthropic",
+            enabled: true, ok, reason, disposition: ok ? "ok" : "propagate",
+            probe: { method: "models", latencyMs: 140, probedAtMs: Date.now(), cached: false, ...entryProbe },
+          },
+        ],
+      }
+    : {}),
+});
 
-function json(route, body) {
-  return route.fulfill({
-    status: 200,
-    contentType: "application/json",
-    body: JSON.stringify(body),
+function fail(message) {
+  throw new Error(`GATE FAIL: ${message}`);
+}
+
+function json(route, body, status = 200) {
+  return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+}
+
+async function installRealtimeSocket(page) {
+  await page.addInitScript(() => {
+    class GateWebSocket {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSING = 2;
+      static CLOSED = 3;
+      constructor(url) {
+        this.url = url;
+        this.readyState = 0;
+        queueMicrotask(() => {
+          this.readyState = 1;
+          this.onopen?.(new Event("open"));
+        });
+      }
+      send(data) {
+        const replies = [];
+        for (const line of String(data).trim().split("\n")) {
+          const command = JSON.parse(line);
+          if (command.connect) replies.push({ id: command.id, connect: { client: "ailink-gate", version: "6" } });
+          else if (command.subscribe)
+            replies.push({
+              id: command.id,
+              subscribe: { recoverable: true, positioned: true, recovered: true, epoch: "ailink-gate", offset: 0 },
+            });
+          else replies.push({ id: command.id });
+        }
+        queueMicrotask(() =>
+          this.onmessage?.(new MessageEvent("message", { data: replies.map((r) => JSON.stringify(r)).join("\n") }))
+        );
+      }
+      close() {
+        this.readyState = 3;
+        this.onclose?.(new CloseEvent("close", { code: 1000 }));
+      }
+    }
+    window.WebSocket = GateWebSocket;
   });
 }
 
+/** 팀 연결 대역. `state.puts`에 PUT 본문 원문을 모은다. */
 async function installRoutes(context, state) {
-  await context.route("**/v1/**", (route) => {
+  await context.route("**/v1/**", async (route) => {
     const request = route.request();
-    const path = new URL(request.url()).pathname;
+    const url = new URL(request.url());
+    const path = url.pathname;
     if (path === "/v1/auth/login") return json(route, session);
-    if (path === "/v1/auth/refresh") {
+    if (path === "/v1/auth/realtime-token")
       return json(route, {
-        accessToken: "gate-only-not-a-credential",
-        refreshToken: "gate-only-not-a-credential",
+        token: "gate-realtime-token", tokenType: "Bearer", expiresAtMs: Date.now() + 60_000,
+        ttlSeconds: 60, workspaceId, memberId,
       });
-    }
-    // Load-bearing, and not obvious: a getToken REJECTION is what centrifuge-js
-    // treats as unrecoverable, so a stubbed-out token endpoint puts the shell
-    // into `disconnected` and every settings write control disables itself as
-    // offline. Answering a token lets the socket fail the ordinary way instead
-    // (`connecting`, retrying), which is the state a gate wants — online panel,
-    // no live realtime.
-    if (path === "/v1/auth/realtime-token") {
-      return json(route, { token: "gate-only-not-a-credential" });
-    }
-    if (path === "/v1/provider/link") {
+    if (path === "/v1/auth/refresh")
+      return json(route, { accessToken: session.accessToken, refreshToken: session.refreshToken });
+    if (path.endsWith("/roster"))
+      return json(route, {
+        members: [
+          {
+            id: memberId, workspaceId, kind: "human", role: "owner", status: "active", displayName: "곽성재",
+            handle: "seongjae", channelCount: 0, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0,
+          },
+        ],
+      });
+    if (path.startsWith("/v1/provider/link")) {
+      if (path.endsWith("/test")) return json(route, { ...state.test, checkedAtMs: Date.now() });
+      if (path.endsWith("/chain")) return json(route, { error: { code: "not_found", message: "none" } }, 404);
       if (request.method() === "PUT") {
-        state.putBodies.push(request.postData());
-        state.linkBody = oauthLink;
-        return json(route, oauthLink);
+        state.puts.push(request.postData() ?? "");
+        state.link = KEY_LINK;
       }
-      return json(route, state.linkBody);
-    }
-    if (path === "/v1/provider/link/chain") {
-      return json(route, {
-        schema: "momo.provider_link.chain.v0",
-        entries: [],
-        fallbackCount: 0,
-      });
+      return json(route, state.link);
     }
     if (path.endsWith("/channels")) return json(route, { channels: [] });
-    if (path.endsWith("/roster")) return json(route, { members: [] });
+    if (path.endsWith("/hosted-agent-connections")) return json(route, { connections: [] });
+    if (/\/v1\/workspaces\/[^/]+$/.test(path))
+      return json(route, {
+        id: workspaceId, slug: "yeomyeong", name: "여명거리", updatedAtMs: 1, roleLabels: {},
+        welcomeAgentMemberId: null, welcomePrompt: "", subscriptionAgentsEnabled: true,
+      });
     if (path.endsWith("/read-state")) return json(route, { read_states: [] });
-    if (path.includes("/messages")) return json(route, { messages: [] });
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
+    if (path.endsWith("/work-sessions")) return json(route, { sessions: [] });
+    if (path.endsWith("/messages")) return json(route, { messages: [] });
     return json(route, {});
   });
 }
 
-function fail(message) {
-  throw new Error(message);
-}
-
-/**
- * Everything a person or a script could read off the page: rendered text plus
- * every form value and every attribute. A credential hiding in a `value=` is
- * exposed exactly as badly as one printed in a paragraph.
- */
-async function pageExposure(page) {
-  return page.evaluate(() => {
-    const parts = [document.body.innerText ?? ""];
-    for (const el of document.querySelectorAll("input, textarea")) {
-      parts.push(el.value ?? "");
-    }
-    for (const el of document.querySelectorAll("*")) {
-      for (const attr of el.attributes) parts.push(attr.value);
-    }
-    return parts.join("\n");
+async function openAiPage(browser, state) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 860 }, reducedMotion: "reduce" });
+  const page = await context.newPage();
+  await installRealtimeSocket(page);
+  await installRoutes(context, state);
+  await page.goto(origin, { waitUntil: "networkidle" });
+  await advanceToAccount(page);
+  await page.getByTestId("login-email").fill("ailink@example.test");
+  await page.getByTestId("login-password").fill("gate-only");
+  await page.getByTestId("login-submit").click();
+  await page.waitForFunction(() => !location.hash.includes("login"), undefined, { timeout: 15_000 });
+  await page.evaluate(() => {
+    window.location.hash = "/settings?section=ai&aiEntry=rows";
   });
+  await page.getByTestId("ai-page").waitFor({ timeout: 15_000 });
+  return { context, page };
 }
 
-async function assertNoCredentialOnScreen(page, when) {
-  const exposure = await pageExposure(page);
-  for (const [name, secret] of [
-    ["refresh token", REFRESH_TOKEN],
-    ["access token", ACCESS_TOKEN],
-    ["id token", ID_TOKEN],
-  ]) {
-    if (exposure.includes(secret)) {
-      fail(`${when}: the ${name} is readable on the page (ADR-0004 #2/#5)`);
+/** ② 글자·입력값·속성 어디에도 키가 없다. */
+async function assertKeyNowhereInDom(page, when) {
+  const hit = await page.evaluate((needle) => {
+    if (document.body.innerText.includes(needle)) return "text";
+    for (const el of document.querySelectorAll("*")) {
+      if ("value" in el && typeof el.value === "string" && el.value.includes(needle)) return `value of <${el.tagName}>`;
+      for (const attr of el.attributes) if (attr.value.includes(needle)) return `attribute ${attr.name}`;
     }
-  }
-  // The account id is not itself a token, but the server's own projection
-  // declines to send it back. A client that displayed what the server withheld
-  // would widen the disclosure boundary from the outside.
-  if (exposure.includes(ACCOUNT_ID)) {
-    fail(`${when}: the account id is on screen, which the server itself withholds`);
-  }
+    return null;
+  }, FAKE_KEY.slice(0, 20));
+  if (hit) fail(`${when}: the key is in the DOM (${hit})`);
 }
 
-function assertPutShape(raw) {
-  if (!raw) fail("the panel sent a PUT with no body");
-  let body;
-  try {
-    body = JSON.parse(raw);
-  } catch {
-    fail(`the PUT body was not JSON: ${raw.slice(0, 120)}`);
-  }
-
-  if (!body.oauth || typeof body.oauth !== "object") {
-    fail(
-      `the PUT carried no oauth object, so this panel still cannot register a ` +
-        `grant: keys were ${JSON.stringify(Object.keys(body))}`
-    );
-  }
-  if ("bearer" in body) {
-    fail(
-      `the PUT names a bearer alongside the grant. The server refuses that pair ` +
-        `outright ("send either bearer or oauth, not both"), and an empty string ` +
-        `here is a body saying two things at once.`
-    );
-  }
-  if (body.oauth.refreshToken !== REFRESH_TOKEN) {
-    fail("the PUT did not carry the refresh token from the pasted document");
-  }
-  if (body.oauth.accessToken !== ACCESS_TOKEN) {
-    fail("the PUT dropped the access token the pasted document supplied");
-  }
-  if (body.oauth.accountId !== ACCOUNT_ID) {
-    fail("the PUT dropped the account id the pasted document supplied");
-  }
-  if (body.oauth.accountLabel !== ACCOUNT_LABEL) {
-    fail("the PUT dropped the ADR-0147 attribution label the operator typed");
-  }
-  if (body.baseUrl !== BASE_URL) fail(`the PUT pointed at ${body.baseUrl}`);
-  if (body.mode !== "external-hermes") {
-    fail(`an OAuth link must be external-hermes, not ${body.mode}`);
-  }
-
-  // deny_unknown_fields coexistence, measured against dto.rs.
-  for (const key of Object.keys(body)) {
-    if (!PUT_LINK_KEYS.includes(key)) {
-      fail(`the PUT carries \`${key}\`, which PutProviderLinkRequest rejects with a 400`);
-    }
-  }
-  for (const key of Object.keys(body.oauth)) {
-    if (!PUT_OAUTH_KEYS.includes(key)) {
-      fail(
-        `oauth.${key} is not a PutProviderOAuthRequest field, so this body is a 400 ` +
-          `(id_token in particular is refused by name)`
-      );
-    }
-  }
-  if (raw.includes(ID_TOKEN)) {
-    fail("the PUT forwarded id_token, which the server refuses and momo must not hold");
-  }
+async function assertKeyNotInAxTree(context, page, when) {
+  const cdp = await context.newCDPSession(page);
+  const { nodes } = await cdp.send("Accessibility.getFullAXTree");
+  await cdp.detach();
+  const leak = nodes.some((node) =>
+    [node.name?.value, node.value?.value, node.description?.value].some(
+      (text) => typeof text === "string" && text.includes(FAKE_KEY.slice(0, 20))
+    )
+  );
+  if (leak) fail(`${when}: the key is in the accessibility tree`);
 }
 
-async function openAiLinkForm(page) {
-  await page.getByTestId("profile-card").click();
-  await page.getByTestId("profile-card-menu").waitFor({ state: "visible" });
-  await page.getByTestId("nav-settings").click();
-  await page.waitForSelector('[data-testid="settings-route"]');
-  await page.getByRole("button", { name: "AI 연결", exact: true }).click();
-  await page.waitForSelector('[data-testid="ai-link-empty"]');
-  await page.getByRole("button", { name: "provider 연결하기", exact: true }).click();
-  await page.waitForSelector('[data-testid="ai-link-form"]');
+/** ①② 팀 키 넣기 → 저장하고 확인. */
+async function addKey(browser) {
+  const state = { link: EMPTY_LINK, puts: [], test: test(true, undefined, { outcome: "ok", modelCount: 6 }) };
+  const { context, page } = await openAiPage(browser, state);
+  await page.getByTestId("ai-team-add").click();
+  await page.getByTestId("ai-link-key-form").waitFor();
+  await page.getByTestId("ai-link-key-form").getByText("Anthropic (Claude)").click();
+  if (!(await page.getByTestId("ai-link-preset-anthropic").isChecked())) fail("the Anthropic preset did not take");
+  const input = page.getByTestId("ai-link-key-input");
+  if ((await input.getAttribute("type")) !== "password") fail("the key box is not type=password");
+  await input.fill(FAKE_KEY);
+  await page.getByTestId("ai-link-key-save").click();
+  await page.getByTestId("ai-link-probe").waitFor({ timeout: 10_000 });
+
+  if (state.puts.length !== 1) fail(`expected exactly one PUT, saw ${state.puts.length}`);
+  const body = JSON.parse(state.puts[0]);
+  const stray = Object.keys(body).filter((key) => !DECLARED_PUT_KEYS.has(key));
+  if (stray.length > 0) fail(`PUT carries undeclared keys ${JSON.stringify(stray)} (deny_unknown_fields → 400)`);
+  if ("oauth" in body) fail("PUT carries an oauth object; the paste flow was removed in #2909");
+  if (body.bearer !== FAKE_KEY) fail("PUT did not carry the typed key as bearer");
+  if (body.baseUrl !== "https://api.anthropic.com/v1" || body.format !== "anthropic") {
+    fail(`the Anthropic preset sent ${JSON.stringify({ baseUrl: body.baseUrl, format: body.format })}`);
+  }
+  if (body.mode !== "external-hermes") fail(`PUT mode ${JSON.stringify(body.mode)}`);
+
+  await assertKeyNowhereInDom(page, "after save");
+  await assertKeyNotInAxTree(context, page, "after save");
+  await context.close();
+}
+
+/** ③ 레거시 oauth-openai 연결은 읽기 전용이다. */
+async function legacyReadOnly(browser) {
+  const state = { link: LEGACY_LINK, puts: [], test: test(false, "probe_not_run") };
+  const { context, page } = await openAiPage(browser, state);
+  const row = page.getByTestId("ai-link-row");
+  await row.waitFor();
+  if (!((await row.textContent()) ?? "").includes("읽기 전용")) fail("the legacy row does not say 읽기 전용");
+  await page.getByTestId("ai-link-row-more").click();
+  await page.getByTestId("ai-team-aside").waitFor();
+  await page.getByTestId("ai-link-legacy-note").waitFor();
+  for (const id of ["ai-link-check", "ai-link-edit", "ai-link-oauth-paste"]) {
+    if ((await page.getByTestId(id).count()) > 0) fail(`the legacy link offers ${id}`);
+  }
+  if ((await page.locator("textarea").count()) > 0) fail("a textarea is on the AI page (auth.json paste box is back)");
+  if (state.puts.length > 0) fail("opening a legacy link wrote to the server");
+  await context.close();
+}
+
+/** ④ 「연결 확인」 결과 칸(#2975). */
+const CHECKS = [
+  { name: "egress", test: test(false, "provider_egress_denied", { outcome: "unreachable" }), tone: "bad", mustSay: "AGENT_PROVIDER_LOCAL_HOSTS", detail: null },
+  { name: "invalid", test: test(false, "provider_invalid_response", { outcome: "unknown", httpStatus: 200 }), tone: "bad", mustSay: "API가 아닌", detail: null },
+  { name: "auth", test: test(false, "provider_auth_failed", { outcome: "rejected", httpStatus: 401 }), tone: "bad", mustSay: "새 키를 넣어", detail: null },
+  { name: "rate", test: test(false, "provider_rate_limited", { outcome: "rate_limited", httpStatus: 429, retryAfterSeconds: 30 }), tone: "bad", mustSay: "30초 뒤", detail: null },
+  { name: "ok-silent", test: test(true, undefined, { outcome: "ok", httpStatus: 200 }), tone: "ok", mustSay: "응답을 확인했어요", detail: null },
+  {
+    name: "ok-numbers",
+    test: test(true, undefined, {
+      outcome: "ok", method: "key", httpStatus: 200, modelCount: 6,
+      rateLimit: { source: "x-ratelimit", requestsLimit: 50, requestsRemaining: 49 },
+      credit: { limit: 20, limitRemaining: 12.5, usage: 7.5 },
+    }),
+    tone: "ok",
+    mustSay: "응답을 확인했어요",
+    detail: "쓸 수 있는 모델 6개 · 요청 한도 50 중 49 남음 · 남은 크레딧 12.5 / 20 · 쓴 크레딧 7.5",
+  },
+];
+
+async function checkResults(browser) {
+  for (const check of CHECKS) {
+    const state = { link: KEY_LINK, puts: [], test: check.test };
+    const { context, page } = await openAiPage(browser, state);
+    await page.getByTestId("ai-link-row-more").click();
+    await page.getByTestId("ai-link-check").click();
+    const box = page.getByTestId("ai-link-probe");
+    await box.waitFor({ timeout: 10_000 });
+    const tone = await box.getAttribute("data-tone");
+    const text = (await page.getByTestId("ai-link-probe-text").textContent()) ?? "";
+    if (tone !== check.tone) fail(`[${check.name}] tone ${tone}, expected ${check.tone}`);
+    if (/서버 사유|서버가 보고한 사유/.test(text)) fail(`[${check.name}] fell to the default branch: ${text}`);
+    if (!text.includes(check.mustSay)) fail(`[${check.name}] result does not say ${JSON.stringify(check.mustSay)}: ${text}`);
+    const detail = page.getByTestId("ai-link-probe-detail");
+    const detailCount = await detail.count();
+    if (check.detail === null && detailCount > 0) {
+      fail(`[${check.name}] drew a numbers line with nothing to show: ${await detail.textContent()}`);
+    }
+    if (check.detail !== null && (await detail.textContent()) !== check.detail) {
+      fail(`[${check.name}] numbers line ${JSON.stringify(detailCount ? await detail.textContent() : null)}`);
+    }
+    console.log(`[ailink] ${check.name}: ${text}${check.detail ? ` | ${check.detail}` : ""}`);
+    await context.close();
+  }
 }
 
 async function main() {
-  if (!existsSync(resolve(webRoot, "dist/index.html"))) {
-    throw new Error("dist/ is missing. Run npm run build first.");
-  }
-  const state = { putBodies: [], linkBody: unconfiguredLink };
-  const server = await startGuardedPreview({
-    webRoot,
-    port,
-    portEnvVar: "AILINK_GATE_PORT",
-  });
+  if (!existsSync(resolve(webRoot, "dist/index.html"))) fail("dist/ is missing. Run npm run build first.");
+  const server = await startGuardedPreview({ webRoot, port, portEnvVar: "AILINK_GATE_PORT" });
   try {
     const browser = await chromium.launch();
     try {
-      const context = await browser.newContext({
-        viewport: { width: 1280, height: 900 },
-        reducedMotion: "reduce",
-      });
-      await installRoutes(context, state);
-      const page = await context.newPage();
-      await page.goto(origin, { waitUntil: "networkidle" });
-      await advanceToAccount(page);
-      await page.getByTestId("login-email").fill("ailink@example.test");
-      await page.getByTestId("login-password").fill("not-a-secret");
-      await page.getByTestId("login-submit").click();
-      await page.waitForSelector("nav[aria-label='워크스페이스 탐색']");
-
-      await openAiLinkForm(page);
-
-      // The method chooser has to exist before anything else is provable: with
-      // only a key form on screen there is no OAuth path to measure, which is
-      // precisely the pre-U3 state that forced a browser console snippet.
-      const oauthRadio = page.locator("#provider-method-oauth");
-      if ((await oauthRadio.count()) === 0) {
-        fail("the AI 연결 form offers no OAuth registration method");
-      }
-      await oauthRadio.check();
-
-      await page.getByTestId("ai-link-oauth-paste").fill(AUTH_JSON);
-
-      // Reading the file back to the operator is the whole point of the preview,
-      // and it must do it without quoting a single token.
-      await page.waitForSelector('[data-testid="ai-link-oauth-preview"]');
-      const preview = await page.getByTestId("ai-link-oauth-preview").innerText();
-      for (const secret of [REFRESH_TOKEN, ACCESS_TOKEN, ID_TOKEN, ACCOUNT_ID]) {
-        if (preview.includes(secret)) {
-          fail("the parsed-document preview quotes a credential back at the screen");
-        }
-      }
-
-      // ---- ② pre-save window ------------------------------------------------
-      // The raw document must be off the screen the instant it has been read.
-      // Everything after this point (typing the label, reaching the button) is
-      // exposure time the operator did not choose.
-      if ((await page.getByTestId("ai-link-oauth-paste").count()) !== 0) {
-        fail(
-          "the auth.json textarea is still on screen after a successful parse, so " +
-            "the refresh token stays legible for the rest of the form session"
-        );
-      }
-      await assertNoCredentialOnScreen(page, "right after the paste was read");
-
-      // The control the operator was typing into just left the DOM. If focus is
-      // not moved it falls to <body> and the next Tab restarts at the top of the
-      // page — a keyboard user loses their place mid-task.
-      const focusLanded = await page.evaluate(() => {
-        const active = document.activeElement;
-        if (!active || active === document.body) return "body";
-        return active.closest('[data-testid="ai-link-oauth-preview"]')
-          ? "preview"
-          : (active.getAttribute("data-testid") ?? active.tagName);
-      });
-      if (focusLanded !== "preview") {
-        fail(
-          `focus fell to ${focusLanded} when the paste box was swapped for the ` +
-            `read-back, so a keyboard user is thrown to the top of the page`
-        );
-      }
-
-      // The read-back is not a dead end: a wrong file has to be replaceable.
-      await page.getByTestId("ai-link-oauth-repaste").click();
-      await page.waitForSelector('[data-testid="ai-link-oauth-paste"]');
-      if ((await page.getByTestId("ai-link-oauth-paste").inputValue()) !== "") {
-        fail("다시 붙여넣기 restored the previous document into the box");
-      }
-      await page.getByTestId("ai-link-oauth-paste").fill(AUTH_JSON);
-      await page.waitForSelector('[data-testid="ai-link-oauth-preview"]');
-
-      // The attribution label is required by this form even though the wire
-      // allows its absence: ADR-0147 asks every surface to say whose
-      // subscription a link spends, and a blank makes that sentence a lie.
-      await page.getByRole("button", { name: "연결 저장", exact: true }).click();
-      // `Field` binds its message to the control it belongs to, so the error is
-      // addressable by that binding rather than by matching prose.
-      await page.waitForSelector("#provider-oauth-account-error");
-      if (state.putBodies.length !== 0) {
-        fail("the panel saved a subscription link with no attribution label");
-      }
-
-      await page.getByTestId("ai-link-oauth-label").fill(ACCOUNT_LABEL);
-      // Still clean with the form fully populated and one click from submit.
-      await assertNoCredentialOnScreen(page, "with the form ready to submit");
-      await page.getByRole("button", { name: "연결 저장", exact: true }).click();
-      await page.waitForSelector('[data-testid="ai-link-card"]');
-
-      // ---------------------------------------------------------------- ① ---
-      if (state.putBodies.length !== 1) {
-        fail(`expected exactly one PUT, saw ${state.putBodies.length}`);
-      }
-      assertPutShape(state.putBodies[0]);
-
-      // ---------------------------------------------------------------- ② ---
-      await assertNoCredentialOnScreen(page, "after saving the grant");
-
-      // The status card is the answer to "실패 카드가 첫 신호" — it has to state
-      // the registration method, whose account it is, and the ADR-0147 notice.
-      const card = await page.getByTestId("ai-link-card").innerText();
-      for (const expected of ["ChatGPT 계정 (OAuth)", ACCOUNT_LABEL, "액세스 토큰"]) {
-        if (!card.includes(expected)) {
-          fail(`the connection card never says ${JSON.stringify(expected)}: ${card}`);
-        }
-      }
-      if ((await page.getByTestId("ai-link-oauth-notice").count()) === 0) {
-        fail("the 개인 계정 귀속 notice the server sends is not rendered");
-      }
-
-      // --- H4: amber must mean exactly one thing on this card ---------------
-      // The attribution notice is a standing policy sentence, not an event. It
-      // was drawn identically to the live diagnostics list directly beneath it.
-      const noticeWarn = await page
-        .getByTestId("ai-link-oauth-notice")
-        .evaluate((el) => el.className.includes("text-warn"));
-      if (noticeWarn) {
-        fail(
-          "the standing attribution notice is painted --warn, so it is " +
-            "indistinguishable from a diagnostic that just happened"
-        );
-      }
-
-      // Reopening the form must not repopulate the paste box from anywhere: the
-      // document was dropped on save and there is nothing to restore it from.
-      await page.getByRole("button", { name: "연결 수정", exact: true }).click();
-      await page.waitForSelector('[data-testid="ai-link-form"]');
-      const restored = await page.getByTestId("ai-link-oauth-paste").inputValue();
-      if (restored !== "") {
-        fail("reopening the form restored the pasted auth.json into the textarea");
-      }
-      await assertNoCredentialOnScreen(page, "after reopening the form");
-
-      // --- H2: the card must not present the past in the present tense ------
-      if ((await page.getByTestId("ai-link-card-tense").count()) === 0) {
-        fail(
-          "the status card stays on screen while the form is open without saying " +
-            "that it describes the SAVED link and that saving replaces it"
-        );
-      }
-      const replaceLabel = await page
-        .getByRole("button", { name: "연결 교체 저장", exact: true })
-        .count();
-      if (replaceLabel === 0) {
-        fail("editing an existing link offers a save button that never says it replaces one");
-      }
-
-      // --- H3: a method SUGGESTS an address; it does not own one ------------
-      // First choice of a method offers its default...
-      await page.locator("#provider-method-key").check();
-      const afterKey = await page.locator("#provider-base-url").inputValue();
-      if (afterKey === BASE_URL) {
-        fail(
-          "switching to the key method kept the ChatGPT grant endpoint, which " +
-            "cannot take an API key, as the starting value"
-        );
-      }
-      await page.locator("#provider-method-oauth").check();
-      const afterOAuth = await page.locator("#provider-base-url").inputValue();
-      if (afterOAuth !== BASE_URL) {
-        fail(
-          `switching back to OAuth left ${JSON.stringify(afterOAuth)} under a hint ` +
-            `that calls the field the address a ChatGPT grant actually reaches`
-        );
-      }
-
-      // ...and after that the box belongs to whoever typed in it. A round trip
-      // through the other radio is a LOOK, not an edit: the button underneath
-      // reads "연결 교체 저장", so silently restoring a default here replaces an
-      // endpoint the operator never touched.
-      await page.locator("#provider-base-url").fill(CUSTOM_BASE_URL);
-      await page.locator("#provider-method-key").check();
-      const keyAfterCustom = await page.locator("#provider-base-url").inputValue();
-      if (keyAfterCustom === CUSTOM_BASE_URL) {
-        fail("the key method inherited the OAuth tenant address instead of its own");
-      }
-      await page.locator("#provider-method-oauth").check();
-      const restoredCustom = await page.locator("#provider-base-url").inputValue();
-      if (restoredCustom !== CUSTOM_BASE_URL) {
-        fail(
-          `a radio round trip rewrote a custom tenant address: expected ` +
-            `${JSON.stringify(CUSTOM_BASE_URL)}, got ${JSON.stringify(restoredCustom)}. ` +
-            `The operator changed nothing and their endpoint would be replaced on save.`
-        );
-      }
-
-      // The key side must come back too, not blank out.
-      await page.locator("#provider-method-key").check();
-      await page.locator("#provider-base-url").fill("https://api.openai.com/v1");
-      await page.locator("#provider-method-oauth").check();
-      await page.locator("#provider-method-key").check();
-      const restoredKey = await page.locator("#provider-base-url").inputValue();
-      if (restoredKey !== "https://api.openai.com/v1") {
-        fail(
-          `a radio round trip emptied the key method's address: got ` +
-            `${JSON.stringify(restoredKey)}. Submitting now asks for an address ` +
-            `the card is still showing as saved.`
-        );
-      }
-
-      // And the wire agrees with the screen: what survived the round trip is
-      // what gets saved.
-      await page.locator("#provider-method-oauth").check();
-      await page.getByTestId("ai-link-oauth-paste").fill(AUTH_JSON);
-      await page.waitForSelector('[data-testid="ai-link-oauth-preview"]');
-      await page.getByRole("button", { name: "연결 교체 저장", exact: true }).click();
-      await page.waitForFunction(
-        () => document.querySelector('[data-testid="ai-link-form"]') === null,
-        undefined,
-        { timeout: 10_000 }
-      );
-      if (state.putBodies.length !== 2) {
-        fail(`expected a second PUT after the round trip, saw ${state.putBodies.length}`);
-      }
-      const replaced = JSON.parse(state.putBodies[1]);
-      if (replaced.baseUrl !== CUSTOM_BASE_URL) {
-        fail(
-          `the replace-save sent ${JSON.stringify(replaced.baseUrl)} for a link the ` +
-            `operator had pointed at ${JSON.stringify(CUSTOM_BASE_URL)}`
-        );
-      }
-
-      await context.close();
+      await addKey(browser);
+      await legacyReadOnly(browser);
+      await checkResults(browser);
     } finally {
       await browser.close();
     }
   } finally {
     await server.stop();
   }
-  console.log("GATE PASS: the OAuth method sends a deny_unknown_fields-clean `oauth` body");
-  console.log("           with no bearer key; no pasted credential reaches the DOM at any");
-  console.log("           point in the form session; the card states its tense; amber is");
-  console.log("           reserved for live state; the address follows the method.");
+  console.log("GATE PASS: the team key PUT carries only declared keys (no oauth); the key never");
+  console.log("           reaches the DOM or AX tree after save; a legacy oauth link is read-only");
+  console.log("           with no paste box; check results say the #2960 reasons in words and draw");
+  console.log("           the numbers line only when the provider stated numbers.");
 }
 
 main().catch((error) => {

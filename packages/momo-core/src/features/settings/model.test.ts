@@ -188,6 +188,22 @@ describe("provider link presentation (ADR-0004 write-only bearer)", () => {
       })
     ).toContain("저장된 키가 없습니다");
 
+    // #2960 made these real answers; they fell through to the default (#2975).
+    expect(
+      providerTestMessage({ ok: false, reason: "provider_auth_failed", endpointLabel: "x" })
+    ).toBe(
+      "provider가 저장된 키를 받아들이지 않았습니다. 키가 맞는지, 만료되지 않았는지 확인한 뒤 새 키를 저장하세요."
+    );
+    expect(
+      providerTestMessage({ ok: false, reason: "provider_rate_limited", endpointLabel: "x" })
+    ).toBe("provider의 요청 한도에 걸렸습니다. 잠시 뒤 다시 확인하세요.");
+    expect(
+      providerTestMessage({ ok: false, reason: "provider_egress_denied", endpointLabel: "x" })
+    ).toContain("AGENT_PROVIDER_LOCAL_HOSTS");
+    expect(
+      providerTestMessage({ ok: false, reason: "provider_invalid_response", endpointLabel: "x" })
+    ).toBe("x 의 응답이 provider API 모양이 아닙니다. API 주소(예: …/v1)인지 확인하세요.");
+
     // An unknown reason is reported, not swallowed and not apologised for.
     expect(
       providerTestMessage({ ok: false, reason: "brand_new", endpointLabel: "x" })

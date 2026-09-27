@@ -809,6 +809,13 @@ describe("probe results (entries[] + cascadeOk)", () => {
     expect(probeReasonCopy("probe_not_run")).toBe("확인이 끝나지 않았습니다.");
     expect(probeReasonCopy("provider_status_503")).toBe("provider가 503으로 답했습니다.");
     expect(probeReasonCopy(undefined)).toBe("");
+    // #2960 reasons (#2975): they were reaching the table as 「서버가 보고한 사유: …」.
+    expect(probeReasonCopy("provider_egress_denied")).toBe(
+      "사설·루프백·메타데이터 주소라 서버가 부르지 않았습니다. 같은 망의 provider를 쓰려면 서버 운영자가 AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1을 켜고 그 호스트를 AGENT_PROVIDER_LOCAL_HOSTS에 넣어야 합니다."
+    );
+    expect(probeReasonCopy("provider_invalid_response")).toBe(
+      "주소가 provider API가 아닌 것 같습니다. API 주소(예: …/v1)인지 확인하세요."
+    );
   });
 
   // 401/403, and the most common operator mistake on this panel: a key pasted

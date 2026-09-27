@@ -482,6 +482,10 @@ describe("같은 폼 · 같은 결과 문장: 설정 × 카드 (#2880)", () => {
     return {
       settings: { text: q(settings, "ai-link-probe-text")?.textContent, tone: s.getAttribute("data-tone") },
       card: { text: c.textContent, tone: c.getAttribute("data-tone") },
+      details: {
+        settings: q(settings, "ai-link-probe-detail")?.textContent ?? null,
+        card: q(card, "ai-connect-card-team-result-detail")?.textContent ?? null,
+      },
       settingsPill: pillOf((await until(settings, "ai-link-row")).querySelector("[data-slot='state']") as HTMLElement),
       cardPill: pillOf(q(card, "ai-connect-card-team")),
     };
@@ -489,16 +493,61 @@ describe("같은 폼 · 같은 결과 문장: 설정 × 카드 (#2880)", () => {
 
   it.each([
     ["지금 서버(probe_not_run)", probe(false, "probe_not_run"), "mute", "이 서버는 아직 키를 직접 확인하지 않아요.", "확인 전"],
-    ["거절(401)", probe(false, "provider_auth_failed"), "bad", "provider가 키를 거절했어요.", "확인 실패"],
+    [
+      "거절(401)",
+      probe(false, "provider_auth_failed"),
+      "bad",
+      "provider가 키를 거절했어요. 키가 맞는지, 만료되지 않았는지 확인하고 새 키를 넣어 주세요.",
+      "확인 실패",
+    ],
+    [
+      "egress 거부(#2960)",
+      probe(false, "provider_egress_denied"),
+      "bad",
+      "사설·루프백·메타데이터 주소라 서버가 부르지 않았어요. 같은 망의 provider를 쓰려면 서버 운영자가 AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1을 켜고 그 호스트를 AGENT_PROVIDER_LOCAL_HOSTS에 넣어야 해요.",
+      "확인 실패",
+    ],
+    [
+      "API가 아닌 응답(#2960)",
+      probe(false, "provider_invalid_response"),
+      "bad",
+      "주소가 provider API가 아닌 것 같아요. API 주소(예: …/v1)가 맞는지 확인해 주세요.",
+      "확인 실패",
+    ],
+    ["한도(429)", probe(false, "provider_rate_limited"), "bad", "요청 한도에 걸렸어요. 잠시 뒤에 다시 확인해 주세요.", "확인 실패"],
+    [
+      "숫자 없는 성공(부른 확인, provider가 숫자를 밝히지 않음)",
+      {
+        ...probe(true),
+        checkedAtMs: Date.now(),
+        entries: [
+          {
+            position: 0,
+            source: "provider_link",
+            mode: "external-hermes",
+            endpointLabel: "OpenAI",
+            enabled: true,
+            ok: true,
+            disposition: "ok",
+            probe: { outcome: "ok", method: "models", latencyMs: 90, probedAtMs: Date.now(), cached: false },
+          },
+        ],
+      } as ProviderLinkTest,
+      "ok",
+      "응답을 확인했어요 · 방금",
+      "확인됨",
+    ],
   ])("%s: 두 표면이 같은 문장·같은 색·같은 알약", async (_name, result, tone, text, pill) => {
     const both = await checkBoth(result);
     expect(both.settings).toEqual({ text, tone });
+    // 숫자가 없으면 두 표면 모두 숫자 줄을 그리지 않는다.
+    expect(both.details).toEqual({ settings: null, card: null });
     expect(both.card).toEqual(both.settings);
     expect(both.cardPill.text).toBe(pill);
     expect(both.settingsPill).toEqual(both.cardPill);
   });
 
-  it("#2960 모양의 확인(모델 수·요청 한도): 두 표면이 같은 문장", async () => {
+  it("#2960 모양의 확인(모델 수·요청 한도·크레딧): 두 표면이 같은 문장·같은 숫자 줄", async () => {
     vi.mocked(testProviderLink).mockResolvedValue({
       ...probe(true),
       checkedAtMs: Date.now(),
@@ -511,7 +560,16 @@ describe("같은 폼 · 같은 결과 문장: 설정 × 카드 (#2880)", () => {
           enabled: true,
           ok: true,
           disposition: "ok",
-          probe: { outcome: "ok", method: "models", modelCount: 6, rateLimit: { source: "x-ratelimit", requestsLimit: 50 } },
+          probe: {
+            outcome: "ok",
+            method: "key",
+            latencyMs: 120,
+            probedAtMs: Date.now(),
+            cached: false,
+            modelCount: 6,
+            rateLimit: { source: "x-ratelimit", requestsLimit: 50 },
+            credit: { limit: 20, limitRemaining: 12.5, usage: 7.5 },
+          },
         },
       ],
     } as unknown as ProviderLinkTest);
@@ -524,8 +582,14 @@ describe("같은 폼 · 같은 결과 문장: 설정 × 카드 (#2880)", () => {
     act(() => cardCheck.click());
     const settingsText = await until(settings, "ai-link-probe-text");
     const cardResult = await until(card, "ai-connect-card-team-result");
-    expect(settingsText.textContent).toBe("응답을 확인했어요 · 방금 · 쓸 수 있는 모델 6개 · 요청 한도 50");
-    expect(cardResult.textContent).toBe(settingsText.textContent);
+    expect(settingsText.textContent).toBe("응답을 확인했어요 · 방금");
+    const settingsDetail = q(settings, "ai-link-probe-detail");
+    const cardDetail = q(card, "ai-connect-card-team-result-detail");
+    expect(settingsDetail?.textContent).toBe(
+      "쓸 수 있는 모델 6개 · 요청 한도 50 · 남은 크레딧 12.5 / 20 · 쓴 크레딧 7.5"
+    );
+    expect(cardDetail?.textContent).toBe(settingsDetail?.textContent);
+    expect(cardResult.textContent).toBe(`${settingsText.textContent}${settingsDetail?.textContent}`);
     expect(cardResult.getAttribute("data-tone")).toBe("ok");
     expect(q(settings, "ai-link-probe")?.getAttribute("data-tone")).toBe("ok");
     expect(q(settings, "ai-link-probe")?.textContent).toContain("키 확인됨");
@@ -826,7 +890,7 @@ describe("흐름 ③ 연결 확인 · ④ 실패 제자리", () => {
     await waitFor(() => expect(pillOf(q(host, "ai-connect-card-team"))).toEqual({ tone: "bad", text: "확인 실패" }));
     const result = q(host, "ai-connect-card-team-result") as HTMLElement;
     expect(result.getAttribute("data-tone")).toBe("bad");
-    expect(result.textContent).toBe("provider가 키를 거절했어요.");
+    expect(result.textContent).toBe("provider가 키를 거절했어요. 키가 맞는지, 만료되지 않았는지 확인하고 새 키를 넣어 주세요.");
     expect(q(host, "ai-connect-card-team-key")?.textContent).toContain("키 바꾸기");
     expect(q(host, "ai-connect-card-team-check")).toBeNull();
     expect(q(host, "ai-connect-card")).not.toBeNull();
