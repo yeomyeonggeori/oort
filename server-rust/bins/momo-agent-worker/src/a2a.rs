@@ -51,7 +51,7 @@ use momo_agent::{
     load_a2a_gate_snapshot_in_tx, load_mention_candidates_in_tx, mention_diagnostic_detail,
     mention_job_broadcast_payload, mention_job_payload, mention_run_input, paused_mention_body,
     paused_mention_props, resolve_mention_routing, A2aBlock, A2aLimits, MentionCandidate,
-    MentionTrigger, NewAgentRun, RunTrigger,
+    MentionTrigger, NewAgentRun, RunTrigger, SKIP_OWNER_ONLY_NON_OWNER,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{DbError, PgConnection};
@@ -183,6 +183,27 @@ pub async fn route_a2a_mentions_in_tx(
                 &trigger,
                 agent,
                 "agent_not_channel_member",
+                None,
+            )
+            .await?;
+            continue;
+        }
+        // ADR-0193 D4 (#2897) — a subscription (`owner_only`) agent is its
+        // owner's alone, and an agent is never that owner. Refused here on the
+        // scope itself, not left to the hosted skip below: an `owner_only`
+        // agent whose connection row is gone has nothing for that skip to see,
+        // and the team worker would otherwise run it on the team's key. The
+        // reason word is the human path's (`routes::agent_mentions`), so one
+        // query answers for both. Audit only — the D4 sentence speaks to a
+        // person who called, and nobody did. `evaluate_a2a_spawn` refuses the
+        // same target again from its own read of the column.
+        if agent.owner_only.is_some() {
+            skip_reason(
+                &mut *conn,
+                &send,
+                &trigger,
+                agent,
+                SKIP_OWNER_ONLY_NON_OWNER,
                 None,
             )
             .await?;

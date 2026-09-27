@@ -332,7 +332,8 @@ async fn build_worker(provider: Arc<dyn ChatProvider>, config: WorkerConfig) -> 
 }
 
 fn base_config() -> WorkerConfig {
-    let mut config = WorkerConfig::for_target(database_url());
+    let mut config =
+        WorkerConfig::for_target(database_url()).with_env_bearer("sk-conformance-team-key");
     config.claim_batch_size = 10;
     config
 }
