@@ -73,6 +73,17 @@ export interface PaneStatusView {
   waiting: { line: string; keycap: string | null; mark: ReactNode } | null;
 }
 
+/**
+ * 칸의 레인 표지(#2779, 제안서 §3.3 「L 칸과 A 칸은 머리 모양으로 구분한다」). 색이
+ * 아니라 글과 아이콘으로 말한다. 글은 칸 폭이 넉넉할 때 보이고, 좁으면 아이콘만
+ * 남는다(글은 칸의 접근 이름에 늘 있다).
+ */
+export interface PaneLaneView {
+  kind: "local" | "agent";
+  label: string;
+  icon: ReactNode;
+}
+
 export interface WorkbenchGridProps {
   layout: WorkbenchLayout;
   onLayoutChange: (next: WorkbenchLayout) => void;
@@ -85,6 +96,8 @@ export interface WorkbenchGridProps {
    * 접근 이름에 붙는 상태 글자다(색·모양만으로 말하지 않는다).
    */
   paneStatus?: (pane: WorkbenchPaneInfo) => PaneStatusView | null;
+  /** 칸 머리의 레인 표지(#2779). 없으면 그리지 않는다. */
+  paneLane?: (pane: WorkbenchPaneInfo) => PaneLaneView | null;
   storage?: LayoutStorageStatus;
   /** 기본은 `navigator.platform`으로 판정한다. */
   platform?: KeyPlatform;
@@ -197,6 +210,7 @@ export function WorkbenchGrid({
   renderPane,
   paneTitle,
   paneStatus,
+  paneLane,
   storage = "ok",
   platform: platformProp,
   size: sizeOverride,
@@ -338,6 +352,7 @@ export function WorkbenchGrid({
     renderPane,
     paneTitle,
     paneStatus,
+    paneLane,
     onFocusPane: (id) => apply(focusPane(layoutRef.current, id), false),
     onSplit: (id, axis) => apply(splitPane(layoutRef.current, id, axis, sizeRef.current)),
     onClose: requestClose,
@@ -406,6 +421,7 @@ interface RenderContext {
   renderPane?: (pane: WorkbenchPaneInfo) => ReactNode;
   paneTitle?: (pane: WorkbenchPaneInfo) => string;
   paneStatus?: (pane: WorkbenchPaneInfo) => PaneStatusView | null;
+  paneLane?: (pane: WorkbenchPaneInfo) => PaneLaneView | null;
   onFocusPane: (id: PaneId) => void;
   onSplit: (id: PaneId, axis: SplitAxis) => void;
   onClose: (id: PaneId) => void;
@@ -557,6 +573,7 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
   const info: WorkbenchPaneInfo = { id, index, focused, maximized };
   const title = ctx.paneTitle?.(info) ?? `칸 ${index}`;
   const status = ctx.paneStatus?.(info) ?? null;
+  const lane = ctx.paneLane?.(info) ?? null;
   const waiting = status?.waiting ?? null;
   const ref = useRef<HTMLElement>(null);
 
@@ -574,7 +591,7 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
     <section
       ref={ref}
       tabIndex={-1}
-      aria-label={`${index}번 칸, ${title}${status ? `, ${status.label}` : ""}`}
+      aria-label={`${index}번 칸, ${lane ? `${lane.label}, ` : ""}${title}${status ? `, ${status.label}` : ""}`}
       data-pane-id={id}
       data-testid="workbench-pane"
       data-focused={focused ? "" : undefined}
@@ -620,6 +637,21 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
         >
           {title}
         </span>
+        {lane ? (
+          <span
+            aria-hidden
+            data-lane={lane.kind}
+            data-testid="workbench-pane-lane"
+            title={lane.label}
+            className={cn(
+              "flex shrink-0 items-center gap-1 text-timestamp font-semibold [&_svg]:size-3",
+              lane.kind === "agent" ? "text-agent" : "text-ink-muted"
+            )}
+          >
+            {lane.icon}
+            <span className="hidden @sm:inline">{lane.label}</span>
+          </span>
+        ) : null}
         {/* 상태 글자는 칸의 접근 이름에 이미 있다. 표지는 모양만(design-review N3). */}
         {status ? (
           <span aria-hidden className="flex shrink-0 items-center">

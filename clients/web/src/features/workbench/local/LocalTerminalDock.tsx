@@ -62,7 +62,17 @@ import {
 import { nextWaitingPane, waitingLine } from "@momo/core/features/workbench/paneStatus";
 import { SessionList, StatusMark, type SessionListHandle } from "./SessionList";
 import { paneAttention, paneStatusOf } from "./paneAttention";
-import type { PaneStatusView } from "../WorkbenchGrid";
+import type { PaneLaneView, PaneStatusView } from "../WorkbenchGrid";
+import {
+  AGENT_LANE_LABEL,
+  AgentLaneIcon,
+  LOCAL_LANE_LABEL,
+  type AgentPaneSource,
+} from "../agent/agentPaneSource";
+import {
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/design/ui/dropdown-menu";
 import type { LocalSessionView } from "./localSessions";
 import { usePaneGit } from "./usePaneGit";
 import { useSessionListOpen } from "./sessionListOpen";
@@ -117,13 +127,21 @@ function fromTerminal(target: EventTarget | null): boolean {
 
 export type LocalWorkbenchPresentation = "dock" | "tab";
 
+const NO_BINDINGS: Readonly<Record<string, string>> = {};
+
 export function LocalTerminalDock({
   sessions = localSessions(),
   platform: platformProp,
   presentation = "dock",
+  agent,
 }: {
   sessions?: LocalSessions;
   platform?: KeyPlatform;
+  /**
+   * A 칸(#2779): 에이전트 작업 레인 세션을 칸에 그린다. 없으면 로컬 칸만 있다
+   * (브라우저 하네스·시험). 제품은 `useAgentPaneSource()`를 넘긴다.
+   */
+  agent?: AgentPaneSource;
   /**
    * `tab`(#2854): 사이드바 「내 작업」(`/work`)의 전체 화면 격자로 그린다. 같은
    * 세션·같은 배치(`DOCK_SESSION_KEY`)를 그리므로 도크와 **동시에 마운트하지
@@ -151,6 +169,19 @@ export function LocalTerminalDock({
   const sessionMap = useSyncSessions(sessions);
   const sessionMapRef = useRef(sessionMap);
   sessionMapRef.current = sessionMap;
+  const agentBindings = agent?.bindings ?? NO_BINDINGS;
+  const agentRef = useRef(agent);
+  agentRef.current = agent;
+  /** 이 칸이 그리는 A 세션 id. 로컬 칸이면 null. */
+  const agentOf = useCallback((id: PaneId): string | null => agentBindings[id] ?? null, [agentBindings]);
+  const agentOfRef = useRef(agentOf);
+  agentOfRef.current = agentOf;
+  /** 칸 상태: A 칸은 원천의 요약, 로컬 칸은 PTY 신호. */
+  const statusOfPane = (id: PaneId) => {
+    const bound = agentOfRef.current(id);
+    if (bound) return agentRef.current?.summary(bound)?.status;
+    return paneStatusOf(sessionMapRef.current.get(id));
+  };
   const attention = paneAttention();
   const listRef = useRef<SessionListHandle>(null);
   const list = useSessionListOpen(minimumSize(layout.root).width);
@@ -170,6 +201,11 @@ export function LocalTerminalDock({
   useEffect(() => {
     sessions.prune(paneIds(layoutRef.current.root));
   }, [sessions]);
+  // 배치에서 사라진 칸의 A 묶음도 치운다.
+  const agentStore = agent?.store;
+  useEffect(() => {
+    agentStore?.prune(paneIds(layout.root));
+  }, [agentStore, layout.root]);
 
   // 새 세션 메뉴의 하네스: 이 Mac의 PATH에서 찾은 것만(ADR-0190 D3).
   useEffect(() => {
@@ -215,6 +251,39 @@ export function LocalTerminalDock({
     [dock.open, sessions, setLayout, tab]
   );
 
+  /**
+   * A 세션을 칸에 연다(#2779). 새 세션과 같은 자리 규칙: 비어 있는 첫 칸이면 그 칸,
+   * 아니면 포커스 칸을 나눈 새 칸. 서버에 아무것도 만들지 않는다. 이미 있는 세션을
+   * 이 기기의 칸에 묶을 뿐이다.
+   */
+  const openAgent = useCallback(
+    (sessionId: string) => {
+      const store = agentRef.current?.store;
+      if (!store) return;
+      const current = layoutRef.current;
+      const ids = paneIds(current.root);
+      if (ids.length === 1 && !sessions.has(ids[0]!) && !agentOfRef.current(ids[0]!)) {
+        store.bind(ids[0]!, sessionId);
+        if (!tab) openDock();
+        return;
+      }
+      if (!tab && !dock.open) openDock();
+      const size = bodySize();
+      const axis = size.width / 2 >= WORKBENCH_MIN_PANE.width || size.width === 0 ? "row" : "column";
+      const newId = paneIdFor(current.seq);
+      const result = splitPane(current, current.focused, axis, size.width > 0 ? size : { width: 4000, height: 4000 });
+      if (!result.ok) {
+        setNotice(SPLIT_REFUSED);
+        return;
+      }
+      store.bind(newId, sessionId);
+      setNotice(null);
+      layoutRef.current = result.layout;
+      setLayout(result.layout);
+    },
+    [dock.open, sessions, setLayout, tab]
+  );
+
   const runDock = useCallback(
     (command: DockCommand) => {
       switch (command.type) {
@@ -243,7 +312,7 @@ export function LocalTerminalDock({
           const current = layoutRef.current;
           const target = nextWaitingPane(
             paneIds(current.root),
-            (id) => paneStatusOf(sessionMapRef.current.get(id)),
+            (id) => statusOfPane(id),
             current.focused
           );
           if (target === null) {
@@ -315,6 +384,12 @@ export function LocalTerminalDock({
 
   const requestClose = useCallback(
     (paneId: PaneId, close: () => void) => {
+      // A 칸은 창만 닫는다. 세션은 호스트에서 계속된다(§3.4 「칸 닫기」). 묻지 않는다.
+      if (agentOfRef.current(paneId)) {
+        agentRef.current?.store.unbind(paneId);
+        close();
+        return;
+      }
       const view = sessionMap.get(paneId);
       const closeIt = () => {
         sessions.close(paneId);
@@ -377,6 +452,23 @@ export function LocalTerminalDock({
 
   const ids = paneIds(layout.root);
   const statusView = (pane: WorkbenchPaneInfo): PaneStatusView | null => {
+    const bound = agentOf(pane.id);
+    if (bound) {
+      const summary = agent?.summary(bound) ?? null;
+      if (!summary) return null;
+      return {
+        mark: <StatusMark status={summary.status} />,
+        label: SESSION_STATUS_LABEL[summary.status],
+        waiting:
+          summary.status === "waiting"
+            ? {
+                line: summary.waitingLine ?? "권한 확인을 기다려요",
+                keycap: pane.focused ? "⌃⇧J" : pane.index <= 9 ? `⌃${pane.index}` : null,
+                mark: <StatusMark status="waiting" />,
+              }
+            : null,
+      };
+    }
     const view = sessionMap.get(pane.id);
     const status = paneStatusOf(view);
     if (!view || !status) return null;
@@ -395,7 +487,19 @@ export function LocalTerminalDock({
       waiting,
     };
   };
-  const titleOf = (pane: WorkbenchPaneInfo) => localPaneTitle(sessionMap.get(pane.id) ?? null);
+  const titleOf = (pane: WorkbenchPaneInfo) => {
+    const bound = agentOf(pane.id);
+    if (bound) return agent?.summary(bound)?.title ?? "에이전트 세션";
+    return localPaneTitle(sessionMap.get(pane.id) ?? null);
+  };
+  const laneOf = (pane: WorkbenchPaneInfo): PaneLaneView | null => {
+    // A 칸을 열 수 없는 자리(원천 없음)에서는 모든 칸이 로컬이라 표지가 말할 것이 없다.
+    if (!agent) return null;
+    return agentOf(pane.id)
+      ? { kind: "agent", label: AGENT_LANE_LABEL, icon: <AgentLaneIcon /> }
+      : { kind: "local", label: LOCAL_LANE_LABEL, icon: <SquareTerminal aria-hidden /> };
+  };
+  const hasAgentPane = ids.some((id) => agentOf(id) !== null);
   const confirmView = confirm ? sessionMap.get(confirm.paneId) ?? null : null;
   const confirmIndex = confirm ? ids.indexOf(confirm.paneId) + 1 : 0;
 
@@ -432,6 +536,32 @@ export function LocalTerminalDock({
     </Dialog>
   );
 
+  const agentItems =
+    agent && agent.candidates.length > 0 ? (
+      <>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-meta font-medium text-ink-muted">
+          {AGENT_LANE_LABEL}
+        </DropdownMenuLabel>
+        {agent.candidates.map((c) => (
+          <DropdownMenuItem
+            key={c.id}
+            onSelect={() => {
+              pickedRef.current = true;
+              openAgent(c.id);
+            }}
+            data-testid="local-terminal-open-agent"
+          >
+            <AgentLaneIcon className="size-4 shrink-0 text-agent" />
+            <span className="min-w-0 truncate">{c.label}</span>
+            <span className="ml-auto shrink-0 pl-4 text-meta text-ink-muted">
+              {[c.hostName, c.harness].filter(Boolean).join(" · ")}
+            </span>
+          </DropdownMenuItem>
+        ))}
+      </>
+    ) : null;
+
   const newSessionItems = (
     <>
           <DropdownMenuItem
@@ -459,6 +589,7 @@ export function LocalTerminalDock({
               ) : null}
             </DropdownMenuItem>
           ))}
+          {agentItems}
     </>
   );
 
@@ -530,7 +661,12 @@ export function LocalTerminalDock({
       platform={platform}
       paneTitle={titleOf}
       paneStatus={statusView}
-      renderPane={(pane) => <LocalTerminalPane pane={pane} platform={platform} sessions={sessions} />}
+      paneLane={laneOf}
+      renderPane={(pane) => {
+        const bound = agentOf(pane.id);
+        if (bound && agent) return agent.render(bound, pane.id);
+        return <LocalTerminalPane pane={pane} platform={platform} sessions={sessions} />;
+      }}
       onRequestClose={requestClose}
       onCloseLastPane={onCloseLastPane}
       notice={notice}
@@ -541,6 +677,23 @@ export function LocalTerminalDock({
 
   if (tab) {
     const listInputs: SessionListInput[] = ids.flatMap((id, i) => {
+      const bound = agentOf(id);
+      if (bound) {
+        const summary = agent?.summary(bound) ?? null;
+        return [
+          {
+            paneId: id,
+            index: i + 1,
+            title: summary?.title ?? "에이전트 세션",
+            // 목록에서도 레인을 글로 말한다(색에 기대지 않는다).
+            harness: summary ? `${summary.harness} · 에이전트` : "에이전트",
+            status: summary?.status ?? "idle",
+            shared: false,
+            // A 세션의 폴더는 서버에 없다(ADR-0188 D6). 「폴더」 묶음에 둔다.
+            git: PANE_GIT_UNKNOWN,
+          },
+        ];
+      }
       const view = sessionMap.get(id);
       if (!view) return [];
       const harness = view.program.kind === "harness" ? view.program.id : "셸";
@@ -603,7 +756,9 @@ export function LocalTerminalDock({
               {WORK_NAV.mine}
             </h1>
             <p className="min-w-0 truncate text-meta text-ink-muted" data-testid="my-work-note">
-              이 기기의 세션입니다. 서버에 기록하지 않습니다.
+              {hasAgentPane
+                ? "로컬 칸은 이 기기에서만 돌고, 에이전트 칸은 oort에 기록됩니다."
+                : "이 기기의 세션입니다. 서버에 기록하지 않습니다."}
             </p>
             <span className="flex-1" />
             {list.open ? null : sessionMenus}

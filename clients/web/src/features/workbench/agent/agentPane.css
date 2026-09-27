@@ -1,0 +1,135 @@
+/*
+ * A 칸 진행 뷰 (#2779). 시안 ⑤ 스레드 root 카드의 줄 문법을 칸 안에 옮긴다.
+ *   .steps / .step   → .agent-steps / .agent-step   (18px 표지 · 글 · 끝)
+ *   .sysl            → .agent-row                    (16px 표지 · 글 · 시각)
+ *   .pwaitc          → .agent-perm                   (신호 옅은 바탕, 반경 10)
+ * 색은 토큰만, 간격은 4·8·12·16 사다리만.
+ */
+
+.agent-steps {
+  gap: 2px;
+}
+
+.agent-step {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: var(--spacing-2);
+  align-items: center;
+  min-height: 26px;
+  font-size: var(--text-meta);
+  line-height: var(--text-meta--line-height);
+}
+
+.agent-step[data-step="pending"] {
+  color: var(--ink-muted);
+}
+
+.agent-step .sl-st,
+.agent-row .sl-st {
+  justify-content: center;
+}
+
+/*
+ * 긴 목록(수백 줄): 화면 밖 줄은 그리지 않는다. 높이는 한 줄로 어림한다.
+ */
+.agent-card,
+.agent-row:not(.agent-row-button) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 28px;
+}
+
+.agent-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: var(--spacing-2);
+  align-items: center;
+  min-height: 28px;
+  padding: var(--spacing-1) var(--spacing-4);
+  font-size: var(--text-meta);
+  line-height: var(--text-meta--line-height);
+  color: var(--ink);
+  text-align: start;
+  inline-size: 100%;
+}
+
+.agent-row[data-kind="note"],
+.agent-row[data-kind="lifecycle"],
+.agent-row[data-kind="approval"] {
+  color: var(--ink-muted);
+}
+
+.agent-row-button {
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.agent-row-button:hover {
+  background-color: var(--surface-hover);
+}
+
+.agent-time {
+  font-family: var(--font-mono);
+  font-size: var(--text-timestamp);
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.agent-kind {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: 0 var(--spacing-1);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface-muted);
+  color: var(--ink-muted);
+  font-size: var(--text-timestamp);
+  font-weight: 600;
+  line-height: var(--text-timestamp--line-height);
+  white-space: nowrap;
+}
+
+.agent-raw {
+  display: grid;
+  gap: var(--spacing-1);
+  margin: 0 var(--spacing-4) var(--spacing-2) 40px;
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius-md);
+  background-color: var(--sheet);
+  color: var(--ink);
+}
+
+.agent-perm {
+  display: grid;
+  flex: none;
+  gap: var(--spacing-2);
+  margin: 0 var(--spacing-3) var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius-md);
+  background-color: var(--signal-soft);
+}
+
+.agent-perm-l1 {
+  display: flex;
+  gap: var(--spacing-2);
+  align-items: center;
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--signal-text);
+}
+
+.agent-perm-code {
+  display: block;
+  margin: 0;
+  padding: var(--spacing-1) var(--spacing-2);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  line-height: var(--text-meta--line-height);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-block-size: calc(var(--text-meta--line-height) * 3 + var(--spacing-2));
+  overflow-y: auto;
+}
