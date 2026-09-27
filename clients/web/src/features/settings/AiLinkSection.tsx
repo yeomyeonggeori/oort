@@ -45,7 +45,6 @@ import {
   credentialKindLabel,
   credentialMeta,
   formatMoment,
-  OAUTH_CREDENTIAL_KIND,
   type LinkFormField,
   validateBaseUrl,
 } from "./oauthGrant";
@@ -59,8 +58,12 @@ import {
   AiSection,
   AiSectionHead,
   AiSource,
-  type AiPillTone,
 } from "./aiAccountsParts";
+import {
+  isLegacyTeamLink,
+  linkPill,
+  type AiPillView,
+} from "@momo/core/features/settings/aiLinkPill";
 import { AiMyAccountsSection } from "./AiMyAccountsSection";
 
 // =============================================================================
@@ -151,25 +154,6 @@ function shortDate(ms: number): string {
 function markFor(label: string): string {
   const first = label.trim().charAt(0);
   return first === "" ? "?" : first.toUpperCase();
-}
-
-/** 줄의 상태 알약. 오프라인이면 마지막 값을 확인할 수 없다고 말한다(시안 §6). */
-function linkPill(
-  link: ProviderLink,
-  legacy: boolean,
-  offline: boolean,
-  probe: ProviderLinkTest | null
-): { tone: AiPillTone; text: string } {
-  if (offline) return { tone: "mute", text: "확인할 수 없음" };
-  if (legacy) return { tone: "mute", text: "읽기 전용" };
-  if (probe) return probe.ok ? { tone: "ok", text: "확인됨" } : { tone: "warn", text: "확인 실패" };
-  if (link.configured && link.keyConfigured) {
-    return link.availability === "mock"
-      ? { tone: "mute", text: "모의 응답" }
-      : { tone: "ok", text: "연결됨" };
-  }
-  if (link.configured) return { tone: "warn", text: "자격증명 없음" };
-  return { tone: "mute", text: "연결 안 됨" };
 }
 
 export function AiLinkSection({ offline }: { offline: boolean }) {
@@ -389,7 +373,7 @@ function TeamBoard({ offline }: { offline: boolean }) {
     asideHeadingRef.current.focus({ preventScroll: true });
     setFocusHeadingAfterSave(false);
   }, [focusHeadingAfterSave, asideVisible, query.data]);
-  const legacy = link ? credentialKind(link) === OAUTH_CREDENTIAL_KIND : false;
+  const legacy = link ? isLegacyTeamLink(link) : false;
   const operator = query.isSuccess;
 
   const teamAction =
@@ -408,7 +392,8 @@ function TeamBoard({ offline }: { offline: boolean }) {
       </Button>
     ) : null;
 
-  const pill = link ? linkPill(link, legacy, offline, probe) : null;
+  // 판정은 코어 한 곳(#2941): 채팅 연결 카드와 같은 입력이면 같은 알약이다.
+  const pill = link ? linkPill({ link, offline, probe, checking: check.isPending }) : null;
   const rowName = link ? (configured ? `${link.endpointLabel} · 팀 기본` : link.endpointLabel) : "";
 
   const teamSection = (
@@ -791,7 +776,7 @@ function TeamLinkDetail({
 }: {
   link: ProviderLink;
   legacy: boolean;
-  pill: { tone: AiPillTone; text: string } | null;
+  pill: AiPillView | null;
   probe: ProviderLinkTest | null;
 }) {
   const kind = credentialKind(link);

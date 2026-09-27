@@ -1,12 +1,34 @@
 import {
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
   type MutableRefObject,
+  type ReactNode,
 } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+
+/**
+ * 타임라인 꼬리 행 (#2944 GC-3, brief §3.2 · Q1).
+ *
+ * 채팅의 로컬 연결 카드처럼 **메시지가 아닌** 것이 타임라인 맨 아래(컴포저 바로
+ * 위)에 붙는 자리다. 목록 데이터(`items`)에 들어가지 않으므로 seq·안읽음·폴딩을
+ * 건드리지 않고, virtuoso의 Footer라 스크롤과 함께 움직이며 새 메시지가 와도 늘
+ * 가장 아래에 남는다. `components`는 모듈 상수여야 한다(바뀌면 virtuoso가 목록을
+ * 다시 세운다), 그래서 내용은 컨텍스트로 건넨다.
+ */
+const TimelineTailContext = createContext<ReactNode>(null);
+
+function TimelineTail() {
+  const tail = useContext(TimelineTailContext);
+  if (tail === null || tail === undefined || tail === false) return null;
+  return <div data-testid="timeline-tail">{tail}</div>;
+}
+
+const TIMELINE_COMPONENTS = { Footer: TimelineTail };
 import {
   threadRollup,
   type Channel,
@@ -228,6 +250,7 @@ export function Timeline({
   capUnmountedArrivals,
   welcomePhase = "hidden",
   welcomeHoldWriteAction = false,
+  tail = null,
   reachedStart = false,
   canAddMember = false,
   channelName,
@@ -320,6 +343,8 @@ export function Timeline({
   welcomePhase?: WelcomeKickoffPhase;
   /** Hide the empty-channel write CTA while the band is up or the mount is pending. */
   welcomeHoldWriteAction?: boolean;
+  /** 타임라인 꼬리 행(메시지가 아닌 로컬 카드, #2944). */
+  tail?: ReactNode;
 }) {
   const ref = useRef<VirtuosoHandle>(null);
 
@@ -716,6 +741,7 @@ export function Timeline({
     // 사는 이유: 그 줄이 가리키는 곳도, 눌렀을 때 움직이는 것도 이 스크롤러다.
     <div className="relative h-full">
       <TimelineLiveRegionProvider>
+      <TimelineTailContext.Provider value={tail}>
       <Virtuoso
         key={epoch}
         ref={ref}
@@ -727,6 +753,7 @@ export function Timeline({
         // 느껴지기 때문이다.
         className="overscroll-contain h-full"
         data={items}
+        components={TIMELINE_COMPONENTS}
         data-testid="timeline-virtuoso"
         alignToBottom
         followOutput={followOutput}
@@ -844,6 +871,7 @@ export function Timeline({
           );
         }}
       />
+      </TimelineTailContext.Provider>
       {showJumpUnread && (
         <UnreadPillDock side="top">
           <UnreadPill
