@@ -109,8 +109,6 @@ export const AI_CONNECT_CARD_COPY = {
   teamDefault: '팀 기본',
   /** 자판이 올라와 몸을 접었을 때 머리에 붙는 말(design-review #2945 H1). */
   folded: '자판을 내리고 카드 펼치기',
-  /** 키 붙여넣기 안내가 선 동안 접었을 때(design-review #2945 R3-B1). */
-  foldedForKey: '입력창을 고치면 카드가 다시 펼쳐져요',
   source: 'API 키',
   legacySource: '내부용',
   check: '연결 확인',
@@ -182,18 +180,11 @@ export function AiConnectCardShell({
   header,
   children,
   testID,
-  foldForKey = false,
 }: {
   variant: 'local' | 'suggest';
   header: React.ReactNode;
   children: React.ReactNode;
   testID?: string;
-  /**
-   * 입력창의 키 붙여넣기 안내가 서 있다(R3-B1). 컴포저가 자판을 내리므로 이때는
-   * 자판 때문이 아니라 **자리 때문에** 접는다 — 큰 글씨 SE 에서 카드 몸 + 안내 +
-   * 세 줄 입력창이 한 화면을 넘어 카드 머리(닫기)가 밀려 나간다.
-   */
-  foldForKey?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {height} = useWindowDimensions();
@@ -216,17 +207,13 @@ export function AiConnectCardShell({
           testID="ai-connect-card-folded">
           <Text style={styles.folded}>{AI_CONNECT_CARD_COPY.folded}</Text>
         </Pressable>
-      ) : foldForKey ? (
-        <View style={styles.foldedRow} testID="ai-connect-card-folded-key">
-          <Sentence style={styles.folded}>{AI_CONNECT_CARD_COPY.foldedForKey}</Sentence>
-        </View>
       ) : null}
       {/* 접혀도 몸은 **내리지 않고 숨긴다**: 내리면 「연결 확인」 결과(절의 상태)가
           자판을 한 번 올렸다 내리는 것만으로 사라지고, 팀 연결을 다시 불러온다. */}
       <ScrollView
         style={[
           {maxHeight: Math.round(height * CARD_BODY_WINDOW_SHARE)},
-          (keyboardUp || foldForKey) && styles.hidden,
+          keyboardUp && styles.hidden,
         ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator
@@ -248,7 +235,12 @@ export function AiConnectCard({
   line: AiConnectLine | null;
   offline: boolean;
   onClose: () => void;
-  /** 입력창의 키 붙여넣기 안내가 서 있다 — `AiConnectCardShell` 참고. */
+  /**
+   * 입력창의 키 붙여넣기 안내가 서 있다(design-review #2945 R3-B1). 그동안 카드를
+   * **통째로 숨긴다**(내리지 않는다 — 절의 상태를 지킨다). 큰 글씨 SE 에서는 접힌
+   * 카드 머리만으로도 안내 + 세 줄 입력창과 합쳐 한 화면을 넘어, 입력창이나 안내의
+   * 첫 문장이 밀려 나간다. 안내는 입력창을 다시 누르면 거둬지고 카드가 돌아온다.
+   */
   foldForKey?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -297,11 +289,12 @@ export function AiConnectCard({
     </View>
   );
   return (
-    <View style={styles.wrap}>
+    <View
+      style={[styles.wrap, foldForKey && styles.hidden]}
+      testID="ai-connect-card-wrap">
       <AiConnectCardShell
         variant="local"
         header={header}
-        foldForKey={foldForKey}
         testID="ai-connect-card">
         <AiConnectCardBody line={line} offline={offline} />
       </AiConnectCardShell>

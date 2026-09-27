@@ -281,15 +281,30 @@ describe('카드 — 판정은 코어, 행동은 연결 확인 하나', () => {
     }
   });
 
-  it('키 붙여넣기 안내가 선 동안은 자판 없이도 몸을 접는다 (R3-B1)', async () => {
+  it('키 붙여넣기 안내가 선 동안은 카드를 통째로 숨기되 절의 상태는 지킨다 (R3-B1)', async () => {
     mockFetch.mockResolvedValue(LINK);
-    card({foldForKey: true});
-    expect(screen.getByTestId('ai-connect-card-folded-key')).toBeTruthy();
-    expect(screen.getByTestId('ai-connect-card-close')).toBeTruthy();
-    const scroll = screen.getByTestId('ai-connect-card-scroll', {
-      includeHiddenElements: true,
+    mockTest.mockResolvedValue(PROBE_OK);
+    const client = new QueryClient({
+      defaultOptions: {queries: {retry: false, gcTime: Infinity}},
     });
-    expect(StyleSheet.flatten(scroll.props.style)).toMatchObject({display: 'none'});
+    const at = (foldForKey: boolean) => (
+      <QueryClientProvider client={client}>
+        <AiConnectCard line={null} offline={false} onClose={() => {}} foldForKey={foldForKey} />
+      </QueryClientProvider>
+    );
+    const view = render(at(false));
+    await screen.findByTestId('ai-connect-card-team');
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('ai-connect-card-team-check'));
+    });
+    await screen.findByTestId('ai-connect-card-team-result');
+    view.rerender(at(true));
+    const wrap = screen.getByTestId('ai-connect-card-wrap', {includeHiddenElements: true});
+    expect(StyleSheet.flatten(wrap.props.style)).toMatchObject({display: 'none'});
+    expect(screen.queryByTestId('ai-connect-card-close')).toBeNull();
+    view.rerender(at(false));
+    expect(screen.getByTestId('ai-connect-card-team-result')).toBeTruthy();
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('닫기는 부른 쪽에 알린다', async () => {
