@@ -113,11 +113,18 @@ paths:
       operationId: testProviderLink
       summary: Probe the effective provider for reachability/auth
       description: >-
-        Performs a minimal OpenAI-compatible roundtrip against the effective
-        provider (DB link if present, else env). Returns a coarse, credential-free
-        result — the bearer and provider response bodies are never surfaced. A
-        provider failure is reported as `ok:false` with HTTP 200 (the operation
-        itself succeeded), not an error status.
+        Checks every hop of the effective cascade (position 0 = DB link if
+        present, else env; then the chain). Hops that need no call are decided
+        from configuration (hop_disabled, not_external_provider,
+        provider_not_configured). Every other hop gets ONE read-only GET through
+        the egress guard (#2960, ADR-0147 증보 2026-09-27 연결 확인):
+        `{base}/models` (Bearer, or `x-api-key` + `anthropic-version` for an
+        anthropic-key link), or `{base}/key` on openrouter.ai. No completion is
+        sent. Results carry labels and provider-stated numbers only — the key,
+        response bodies and error text are never surfaced. A provider failure is
+        `ok:false` with HTTP 200 (the operation itself succeeded). Throttled per
+        operator (6/min → 429) and per link (a repeat within 20 s reuses the last
+        report with `probe.cached: true`).
       security:
         - bearerAuth: []
       responses:
@@ -131,6 +138,15 @@ paths:
           description: >-
             Non-human principal, or a human lacking both the platform:read
             operator scope and a workspace owner/admin role (ADR-0004 증보1 D3).
+        "429":
+          description: >-
+            This operator ran more than 6 checks in the last minute. No provider
+            was called.
+          headers:
+            Retry-After:
+              description: Seconds until another check is admitted.
+              schema:
+                type: integer
 
   # ===========================================================================
   # MOMO-623 / ADR-0135 D2 — provider quota gauge.
@@ -304,9 +320,12 @@ components:
         reason:
           type: string
           description: >-
-            Coarse failure category when ok is false — e.g. provider_auth_failed,
-            provider_unreachable, provider_status_NNN, not_external_provider,
-            provider_not_configured. Never contains credentials.
+            Position 0's machine reason when ok is false — provider_auth_failed
+            (401/403), provider_unreachable, provider_rate_limited (429),
+            provider_status_NNN, provider_egress_denied,
+            provider_invalid_response, not_external_provider,
+            provider_not_configured, hop_disabled, or probe_not_run (legacy
+            oauth-openai link, not dialled). Never contains credentials.
         source:
           type: string
           enum: [database, environment]
@@ -318,6 +337,113 @@ components:
         checkedAtMs:
           type: integer
           format: int64
+        cascadeOk:
+          type: boolean
+          description: True when any hop answered (ADR-0135 D1).
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProviderChainProbe"
+    ProviderChainProbe:
+      type: object
+      additionalProperties: false
+      required: [position, source, mode, endpointLabel, enabled, ok, disposition]
+      properties:
+        position:
+          type: integer
+        source:
+          type: string
+          enum: [provider_link, environment, chain]
+        mode:
+          type: string
+          enum: [local-mock, internal-host-mock, external-hermes]
+        endpointLabel:
+          type: string
+        enabled:
+          type: boolean
+        ok:
+          type: boolean
+        reason:
+          type: string
+          description: Same vocabulary as ProviderLinkTestResponse.reason.
+        disposition:
+          type: string
+          enum: [ok, fall_over, propagate, skipped]
+        probe:
+          $ref: "#/components/schemas/ProviderProbeDetail"
+    ProviderProbeDetail:
+      type: object
+      additionalProperties: false
+      description: >-
+        Present exactly when the hop was dialled (#2960). Every number is one
+        the provider stated; no provider text is carried.
+      required: [outcome, method, latencyMs, probedAtMs, cached]
+      properties:
+        outcome:
+          type: string
+          enum: [ok, rejected, unreachable, rate_limited, unknown]
+        method:
+          type: string
+          enum: [models, key]
+          description: "`models` = GET {base}/models; `key` = OpenRouter GET {base}/key."
+        httpStatus:
+          type: integer
+          description: Absent when no response arrived.
+        latencyMs:
+          type: integer
+          format: int64
+        modelCount:
+          type: integer
+          format: int64
+          description: Length of the model list; absent when the list is paginated.
+        rateLimit:
+          $ref: "#/components/schemas/ProviderRateLimit"
+        retryAfterSeconds:
+          type: integer
+          format: int64
+        credit:
+          $ref: "#/components/schemas/ProviderKeyCredit"
+        probedAtMs:
+          type: integer
+          format: int64
+        cached:
+          type: boolean
+          description: True when the link's last report was reused inside the 20 s window.
+    ProviderRateLimit:
+      type: object
+      additionalProperties: false
+      required: [source]
+      properties:
+        source:
+          type: string
+          enum: [x-ratelimit, anthropic-ratelimit]
+        requestsLimit:
+          type: integer
+          format: int64
+        requestsRemaining:
+          type: integer
+          format: int64
+        tokensLimit:
+          type: integer
+          format: int64
+        tokensRemaining:
+          type: integer
+          format: int64
+    ProviderKeyCredit:
+      type: object
+      additionalProperties: false
+      description: OpenRouter GET /key → data.limit / limit_remaining / usage (credits).
+      required: [limit, limitRemaining, usage]
+      properties:
+        limit:
+          type: number
+          nullable: true
+        limitRemaining:
+          type: number
+          nullable: true
+        usage:
+          type: number
+          nullable: true
     PutProviderLinkRequest:
       type: object
       additionalProperties: false

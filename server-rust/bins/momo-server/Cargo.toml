@@ -73,6 +73,12 @@ momo-ephemeral = { path = "../../crates/momo-ephemeral" }
 # fetch) so this manifest still does not. Handlers only call sealed
 # settings/remove/list/proxy functions.
 momo-unfurl = { path = "../../crates/momo-unfurl" }
+# #2960 / ADR-0147 증보 2026-09-27 (연결 확인): the crate owns the HTTP client for
+# the operator's 「연결 확인」, so this manifest still does not. Its whole API is
+# `ProviderProbe::probe(&ProbeTarget)` — one egress-guarded GET of
+# `{base}/models` (or OpenRouter `{base}/key`) — and what it returns carries
+# labels and provider-stated numbers only, never a body or an error string.
+momo-provider-probe = { path = "../../crates/momo-provider-probe" }
 
 axum.workspace = true
 tokio = { workspace = true, features = ["net", "signal", "time"] }
@@ -91,7 +97,9 @@ jsonwebtoken.workspace = true
 # `reqwest` here. Until goal SRV-T2 that meant "momo-server never talks to
 # Centrifugo"; it now means something narrower but equally mechanical — the only
 # outbound HTTP this process can perform is `momo-ephemeral`'s, whose entire API
-# is `publish(&EphemeralSignal)`. Adding `reqwest` to this manifest would undo
+# is `publish(&EphemeralSignal)` — plus the sealed crates named above
+# (momo-drive, momo-t3, momo-unfurl, momo-provider-probe), each of which exposes
+# a fixed set of operations and no request builder. Adding `reqwest` to this manifest would undo
 # the guard, because a handler could then build any request to any host. The
 # durable rail is untouched: `outbox → relay → Centrifugo` remains the only path
 # a persisted message travels.

@@ -1,0 +1,33 @@
+[package]
+name = "momo-provider-probe"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# #2960 / ADR-0147 증보 2026-09-27 (연결 확인) — the operator's 「연결 확인」 probe.
+#
+# A crate rather than a module in momo-server for the reason momo-unfurl,
+# momo-drive and momo-ephemeral are crates: `reqwest` lives HERE, never in
+# momo-server's manifest, so a route handler cannot build an arbitrary outbound
+# request. The only thing the api can reach is `ProviderProbe::probe(&ProbeTarget)`,
+# which issues exactly one read-only GET (`{base}/models`, or `{base}/key` on
+# OpenRouter) through the #2852 egress guard — guarded DNS resolver, no
+# redirects, no proxy. Nothing it returns carries a response body, a header
+# value other than parsed numbers, or an error string.
+[dependencies]
+# `EgressPolicy` is the single authority for which addresses a provider URL may
+# reach (ADR-0004 증보 5 D1). This crate only adapts it to reqwest's resolver.
+momo-settings = { path = "../momo-settings" }
+
+async-trait.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+tokio = { workspace = true, features = ["net", "time"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util"] }
+axum.workspace = true

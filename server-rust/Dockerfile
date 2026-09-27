@@ -114,6 +114,7 @@ COPY server-rust/crates/momo-messaging/Cargo.toml crates/momo-messaging/
 COPY server-rust/crates/momo-mcp/Cargo.toml crates/momo-mcp/
 COPY server-rust/crates/momo-outbox/Cargo.toml crates/momo-outbox/
 COPY server-rust/crates/momo-provider/Cargo.toml crates/momo-provider/
+COPY server-rust/crates/momo-provider-probe/Cargo.toml crates/momo-provider-probe/
 COPY server-rust/crates/momo-push/Cargo.toml crates/momo-push/
 COPY server-rust/crates/momo-settings/Cargo.toml crates/momo-settings/
 COPY server-rust/crates/momo-t3/Cargo.toml crates/momo-t3/
