@@ -141,6 +141,7 @@
 pub mod a2a;
 pub mod actions;
 pub mod approval;
+pub mod card_suggest;
 pub mod dm;
 pub mod effort;
 pub mod error;
@@ -187,6 +188,12 @@ pub use approval::{
     LockedApproval, NewApproval, OverdueApproval, AUDIT_LOGIN_HANDOFF_SESSION_ID_DROPPED,
     AUDIT_SCHEMA_LOGIN_HANDOFF_SESSION_ID_DROPPED, DEFAULT_TTL_SECONDS, LISTABLE_STATUSES,
     RESUME_MODEL, RUN_CANCELLED_DECISION_REASON,
+};
+pub use card_suggest::{
+    command_suggest_props, suggestable_command, suggestable_command_ids,
+    suggestion_requester_in_tx, validate_suggestion, SuggestableCommand, SuggestionRefusal,
+    SuggestionRequester, ValidatedSuggestion, COMMAND_AI_CONNECT, COMMAND_SUGGEST_PROPS_KEY,
+    SUGGESTABLE_COMMANDS,
 };
 pub use tools::{
     approval_reason, is_executable, requires_approval, ApprovalReason, ToolCall, ToolGrant,

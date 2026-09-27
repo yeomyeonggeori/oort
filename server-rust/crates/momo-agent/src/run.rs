@@ -875,6 +875,8 @@ pub struct EligibleAgent {
     /// `agent_profile.paused`, defaulted to `false` when the agent has no
     /// profile row: an agent nobody has configured is not a paused agent.
     pub paused: bool,
+    /// A hosted connection row exists, or the agent is `owner_only` (#2924):
+    /// either way no team-served work run may exist for it.
     pub hosted_delivery_disabled: bool,
     /// `agent.tool_schema` — the operator's own provider-format function defs
     /// (goal SRV-B5a). Read here so a **work** run carries the same two tool
@@ -906,8 +908,9 @@ pub async fn load_eligible_agent_in_tx(
         "SELECT a.model, a.max_run_steps, a.max_concurrent_runs, \
                 a.tool_schema, ap.enabled_tools, \
                 COALESCE(ap.paused, false) AS paused \
-                , EXISTS (SELECT 1 FROM hosted_agent_connection hc \
-                           WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
+                , (EXISTS (SELECT 1 FROM hosted_agent_connection hc \
+                            WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
+                   OR a.invocation_scope = 'owner_only') \
                     AS hosted_delivery_disabled \
            FROM member m \
            JOIN agent a ON a.member_id = m.id AND a.workspace_id = m.workspace_id \
