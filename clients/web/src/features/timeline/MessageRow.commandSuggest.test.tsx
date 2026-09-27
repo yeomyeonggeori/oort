@@ -309,9 +309,10 @@ describe("대상 본인 — 조작 카드(시안 ③ 요청자)", () => {
     expect(card.textContent).toContain("hermes가 제안했어요");
     expect(q(card, "ai-suggest-only-me")?.textContent).toContain("나에게만 조작돼요");
     expect(card.textContent).toContain("내 계정 · 이 맥");
-    // harness=claude: 그 줄만 편다. 팀 절은 없다.
+    // harness=claude: 구독은 그 줄만, 팀 절은 함께(시안 ③ 요청자).
     expect(q(card, "ai-connect-card-codex")).toBeNull();
-    expect(q(card, "ai-connect-card-team-section")).toBeNull();
+    expect(q(card, "ai-connect-card-grok")).toBeNull();
+    await until(card, "ai-connect-card-team");
     expect(q(card, "ai-connect-card-close")).toBeNull();
     expect(q(card, "ai-connect-card-claude-login")?.textContent).toBe("Claude Code로 로그인");
     // 서버가 파생한 label도 그리지 않는다(클라가 문구를 만든다).

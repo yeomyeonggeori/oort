@@ -498,8 +498,11 @@ function SuggestedCard({ card }: { card: CommandSuggestCard }) {
   const offline = useOffline();
   const escapeFormRef = useRef<(() => boolean) | null>(null);
   const focus = card.focus;
-  const showMine = focus === null || focus === "mine" || focus === "claude" || focus === "codex";
-  const showTeam = focus === null || focus === "team";
+  const showMine = focus !== "team";
+  // 시안 ③ 요청자: `harness:"claude"` 제안도 그 구독 줄 + 팀 연결 절을 함께 보인다
+  // (로컬 `/연결 claude`는 그 줄만 편다 — 제안은 「무엇을 연결할지」의 맥락이 대화에
+  // 있으므로 팀 쪽 사실도 같이 놓는다). `scope:"mine"`만 온 제안은 내 계정 절만.
+  const showTeam = focus !== "mine";
   const initial = [...card.agentName.trim()][0]?.toUpperCase() ?? "";
 
   return (
