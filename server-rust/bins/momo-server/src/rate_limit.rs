@@ -275,7 +275,7 @@ pub fn client_ip(headers: &HeaderMap, peer: Option<SocketAddr>) -> Option<String
 /// The 429, with the `Retry-After` a client should honour. The body is the
 /// standard error envelope, so a client that parses every other error parses
 /// this one (Swift sends the same `{"error":{"message":"rate limit exceeded"}}`).
-fn too_many_requests(retry_after_seconds: u64) -> Response {
+pub(crate) fn too_many_requests(retry_after_seconds: u64) -> Response {
     let mut response =
         ApiError::new(StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded").into_response();
     if let Ok(value) = retry_after_seconds.to_string().parse() {

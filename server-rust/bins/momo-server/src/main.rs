@@ -205,6 +205,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // PROVIDER_LINK_MASTER_KEY, and the instance-global surfaces admit only a
     // `platform:read` token unless PLATFORM_ADMIN_EMAILS lists someone.
     .with_settings(config.settings.clone())
+    // #2960: 「연결 확인」 dials the provider under the operator's egress policy
+    // (the worker's inputs). The default state already holds a guarded probe
+    // limited to public addresses; this adds the operator's own opt-ins.
+    .with_provider_probe(std::sync::Arc::new(
+        momo_provider_probe::GuardedProviderProbe::new(
+            momo_server::config::provider_probe_policy_from_env(&config.settings),
+            momo_server::routes::provider_link::PROBE_TIMEOUT,
+        ),
+    ))
     // B4.3: the per-IP limiter in front of `POST /v1/join`. On by default —
     // `RATE_LIMIT_PER_IP=0` is the only way to turn it off, and the boot warns
     // when someone does.

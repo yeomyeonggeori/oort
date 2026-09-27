@@ -24,34 +24,42 @@
 //!    position 0 with a 400, so the singleton has exactly one writer and the two
 //!    stores cannot drift into two records of the same hop.
 //!
-//! ## The one surface this batch could not close: the live probe
+//! ## The live probe (#2960)
 //!
-//! `POST /v1/provider/link/test` performs every check that does not need a
-//! socket — operator authorization, cascade resolution, and the three
-//! configuration verdicts Swift's `probeHop` reaches without calling anything
-//! (`hop_disabled`, `not_external_provider`, `provider_not_configured`). For a
-//! hop that is enabled, external, and usable, Swift issues a bounded
-//! `GET {baseURL}/models`. **This server cannot**: `momo-server` deliberately
-//! links no HTTP client (`bins/momo-server/Cargo.toml`, invariant #2 — "momo
-//! never talks to Centrifugo; publishing belongs to momo-relay alone"), and
-//! adding one is a boundary change that needs an ADR, not a worker's judgement.
+//! `POST /v1/provider/link/test` first decides everything that needs no socket
+//! — operator authorization, cascade resolution, and the three configuration
+//! verdicts Swift's `probeHop` reaches without calling anything (`hop_disabled`,
+//! `not_external_provider`, `provider_not_configured`). A hop that is enabled,
+//! external and usable is then **dialled**: one read-only GET through
+//! `momo_provider_probe` (ADR-0147 증보 2026-09-27 「연결 확인」) — `{base}/models`
+//! with the credential the sealed envelope's kind selects, or OpenRouter's
+//! `{base}/key`. The crate owns the HTTP client, so this binary still links no
+//! `reqwest` (invariant #2 as ADR-0149 narrowed it), and every call goes through
+//! the #2852 egress guard.
 //!
-//! So such a hop is reported as `ok: false`, `reason: "probe_not_run"` — a label
-//! that already exists in the client's vocabulary and already renders as
-//! "확인이 끝나지 않았습니다" (`features/settings/chainModel.ts:probeReasonCopy`),
-//! with the top-level message falling through to "연결을 확인하지 못했습니다"
-//! (`model.ts:providerTestMessage`). That is the honest sentence: the check did
-//! not run. It is deliberately **not** `provider_unreachable`, which would blame
-//! a provider this server never dialled, and deliberately not `skipped`, which
-//! the panel renders as "꺼둠" and would blame the operator for parking a hop
-//! they left switched on.
+//! What comes back per hop is a machine reason from the panel's existing
+//! vocabulary (`provider_auth_failed`, `provider_unreachable`,
+//! `provider_rate_limited`, `provider_status_NNN`, plus `provider_egress_denied`
+//! and `provider_invalid_response`) and a `probe` object holding only numbers
+//! the provider itself stated. The one hop still reported as `probe_not_run` is
+//! a legacy `oauth-openai` link: its access token is refreshed by the worker,
+//! and no new such link can be made (ADR-0147 증보 2026-09-26).
+//!
+//! Two throttles bound what an operator can make this server send: a per-member
+//! window on the route (429 + `Retry-After`) and a per-link cache that reuses the
+//! last report for [`PROBE_CACHE_TTL`] instead of dialling again.
+
+use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::State;
 use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::with_provider_link_admin_tx;
+use momo_provider_probe::{ProbeCache, ProbeCredential, ProbeReport, ProbeTarget, ProviderProbe};
 use momo_settings::{
     attemptable_hops, cascade_plan, classify_probe_reason, decrypt_chain_entry, decrypt_link,
     delete_all_chain_entries, delete_link, masked_tail, read_chain, read_link,
@@ -63,11 +71,12 @@ use momo_settings::{
 };
 
 use crate::dto::{
-    ProviderChainEntryDto, ProviderChainProbeDto, ProviderChainResponse,
+    ProviderChainEntryDto, ProviderChainProbeDto, ProviderChainResponse, ProviderKeyCreditDto,
     ProviderLinkCredentialMeta, ProviderLinkResponse, ProviderLinkTestResponse,
-    PutProviderChainRequest, PutProviderLinkRequest,
+    ProviderProbeDetailDto, ProviderRateLimitDto, PutProviderChainRequest, PutProviderLinkRequest,
 };
 use crate::error::ApiError;
+use crate::rate_limit::{too_many_requests, SlidingWindowRateLimiter};
 use crate::routes::shared::{audit_via_token_id, require_instance_operator};
 use crate::AppState;
 
@@ -75,10 +84,35 @@ const LINK_SCHEMA: &str = "momo.provider_link.v0";
 const CHAIN_SCHEMA: &str = "momo.provider_link.chain.v0";
 const TEST_SCHEMA: &str = "momo.provider_link.test.v0";
 
-/// The reason label for a hop this server could not dial. See the module docs —
-/// the label is the client's existing "확인이 끝나지 않았습니다", not a verdict
-/// about the provider.
+/// The reason label for a hop this server does not dial (a legacy
+/// `oauth-openai` link — see the module docs). The client renders it as
+/// "확인이 끝나지 않았습니다", which is not a verdict about the provider.
 const PROBE_NOT_RUN: &str = "probe_not_run";
+
+/// Per-hop request timeout for the live probe.
+pub const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a link's last report is reused instead of dialling again.
+pub const PROBE_CACHE_TTL: Duration = Duration::from_secs(20);
+/// `POST …/link/test` calls one operator may make per [`OPERATOR_PROBE_WINDOW`].
+pub const OPERATOR_PROBES_PER_WINDOW: u32 = 6;
+pub const OPERATOR_PROBE_WINDOW: Duration = Duration::from_secs(60);
+
+/// The probe and its two throttles (see the module docs).
+pub struct ProviderProbeState {
+    probe: Arc<dyn ProviderProbe>,
+    cache: ProbeCache,
+    operators: SlidingWindowRateLimiter,
+}
+
+impl ProviderProbeState {
+    pub fn new(probe: Arc<dyn ProviderProbe>) -> ProviderProbeState {
+        ProviderProbeState {
+            probe,
+            cache: ProbeCache::new(PROBE_CACHE_TTL),
+            operators: SlidingWindowRateLimiter::new(),
+        }
+    }
+}
 
 /// Every route in this module needs the AES-GCM master key: without it the
 /// stored ciphertext cannot be opened and a new one cannot be sealed. Answering
@@ -488,9 +522,20 @@ pub async fn delete(
 pub async fn test(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
-) -> Result<Json<ProviderLinkTestResponse>, ApiError> {
+) -> Result<Response, ApiError> {
     require_instance_operator(&state, &principal).await?;
     let key = master_key(&state)?.to_string();
+
+    // Per-operator window, checked after authorization so a stranger cannot
+    // spend an operator's budget, and before any read or dial.
+    let verdict = state.provider_probe.operators.check(
+        &format!("provider_probe:operator:{}", principal.member_id),
+        OPERATOR_PROBES_PER_WINDOW,
+        OPERATOR_PROBE_WINDOW,
+    );
+    if !verdict.allowed {
+        return Ok(too_many_requests(verdict.retry_after_seconds));
+    }
 
     let (stored_link, stored_chain) =
         with_provider_link_admin_tx(&state.pool, principal.workspace_id, move |conn| {
@@ -504,7 +549,54 @@ pub async fn test(
         .map_err(|error| ApiError::internal("provider_link.test", error))?;
 
     let resolved = resolve_cascade(&state, &key, stored_link.as_ref(), &stored_chain);
-    let entries: Vec<ProviderChainProbeDto> = resolved.hops.iter().map(probe_hop).collect();
+    let head_credential = (resolved.head.source == ProviderSource::Database)
+        .then(|| {
+            resolved
+                .head_decrypted
+                .as_ref()
+                .map(|link| &link.credential)
+        })
+        .flatten();
+
+    // Decide what needs no socket; dial the rest concurrently so one dead hop
+    // does not serialise the route.
+    let mut entries: Vec<Option<ProviderChainProbeDto>> = Vec::with_capacity(resolved.hops.len());
+    let mut dials = tokio::task::JoinSet::new();
+    for (index, hop) in resolved.hops.iter().enumerate() {
+        let credential = if index == 0 {
+            hop_credential(hop, head_credential)
+        } else {
+            hop_credential(hop, None)
+        };
+        match configuration_verdict(hop, credential.as_ref()) {
+            Some(decided) => entries.push(Some(decided)),
+            None => {
+                entries.push(None);
+                let target = ProbeTarget {
+                    base_url: hop.base_url.clone(),
+                    credential: credential.expect("a dialled hop has a credential"),
+                };
+                let probe_state = state.provider_probe.clone();
+                let position = hop.position;
+                dials.spawn(async move {
+                    let (probed_at_ms, report, cached) =
+                        probe_through_cache(&probe_state, &target, position).await;
+                    (index, probed_at_ms, report, cached)
+                });
+            }
+        }
+    }
+    while let Some(joined) = dials.join_next().await {
+        let (index, probed_at_ms, report, cached) =
+            joined.map_err(|error| ApiError::internal("provider_link.test.probe", error))?;
+        entries[index] = Some(probed_entry(
+            &resolved.hops[index],
+            &report,
+            probed_at_ms,
+            cached,
+        ));
+    }
+    let entries: Vec<ProviderChainProbeDto> = entries.into_iter().flatten().collect();
     let head = entries.first();
 
     Ok(Json(ProviderLinkTestResponse {
@@ -517,47 +609,133 @@ pub async fn test(
         checked_at_ms: chrono::Utc::now().timestamp_millis(),
         cascade_ok: entries.iter().any(|entry| entry.ok),
         entries,
-    }))
+    })
+    .into_response())
 }
 
-/// Classify one hop as far as this server honestly can (Swift `probeHop`
-/// :202-237, minus the network call — see the module docs).
-fn probe_hop(hop: &CascadeHop) -> ProviderChainProbeDto {
-    let (ok, reason, disposition) = if !hop.enabled {
-        // A parked hop is never attempted, so it can neither serve nor fall
-        // over — it is simply skipped.
-        (false, Some("hop_disabled"), "skipped")
-    } else if hop.mode != ProviderMode::ExternalHermes {
-        // Mock modes have no real provider to reach; the operator has to
-        // configure a real base_url/bearer first.
-        (false, Some("not_external_provider"), "propagate")
-    } else if !hop.is_usable() {
-        (false, Some("provider_not_configured"), "propagate")
-    } else {
-        // Enabled, external, and usable — the one case that needs a socket this
-        // process does not have. Report that the check did not run and classify
-        // it through the same table every other reason goes through.
-        let decision = classify_probe_reason(Some(PROBE_NOT_RUN));
-        (
-            false,
-            Some(PROBE_NOT_RUN),
-            if decision.is_fall_over() {
+/// The credential a hop would present. Chain hops and the env tier carry a
+/// plain bearer; the stored head carries whatever its sealed envelope is, and
+/// that kind — never the URL — picks the header. `None` for a legacy
+/// `oauth-openai` head, which this route does not dial.
+fn hop_credential(hop: &CascadeHop, head: Option<&LinkCredential>) -> Option<ProbeCredential> {
+    match head {
+        Some(LinkCredential::AnthropicKey(key)) => Some(ProbeCredential::AnthropicKey(key.clone())),
+        Some(LinkCredential::OpenAiOAuth(_)) => None,
+        Some(LinkCredential::Bearer(_)) | None => Some(ProbeCredential::Bearer(hop.bearer.clone())),
+    }
+}
+
+/// Reuse the link's last report inside [`PROBE_CACHE_TTL`], else dial once.
+async fn probe_through_cache(
+    state: &ProviderProbeState,
+    target: &ProbeTarget,
+    position: i32,
+) -> (i64, ProbeReport, bool) {
+    let cache_key = target.cache_key(position);
+    if let Some((probed_at_ms, report)) = state.cache.get(&cache_key) {
+        return (probed_at_ms, report, true);
+    }
+    let report = state.probe.probe(target).await;
+    let probed_at_ms = chrono::Utc::now().timestamp_millis();
+    tracing::info!(
+        position,
+        endpoint = %redacted_endpoint_label(&target.base_url),
+        outcome = report.outcome.as_str(),
+        status = report.http_status,
+        "provider link probe"
+    );
+    state.cache.put(cache_key, probed_at_ms, report.clone());
+    (probed_at_ms, report, false)
+}
+
+fn disposition_for(reason: Option<&str>) -> &'static str {
+    match reason {
+        None => "ok",
+        Some(reason) => {
+            if classify_probe_reason(Some(reason)).is_fall_over() {
                 "fall_over"
             } else {
                 "propagate"
-            },
-        )
-    };
+            }
+        }
+    }
+}
 
+/// The hops this server does not dial, decided as Swift's `probeHop` did
+/// without a socket. `None` means "dial it".
+fn configuration_verdict(
+    hop: &CascadeHop,
+    credential: Option<&ProbeCredential>,
+) -> Option<ProviderChainProbeDto> {
+    let (reason, disposition) = if !hop.enabled {
+        // A parked hop is never attempted, so it can neither serve nor fall
+        // over — it is simply skipped.
+        ("hop_disabled", "skipped")
+    } else if hop.mode != ProviderMode::ExternalHermes {
+        // Mock modes have no real provider to reach.
+        ("not_external_provider", "propagate")
+    } else if !hop.is_usable() {
+        ("provider_not_configured", "propagate")
+    } else if credential.is_none() {
+        // Legacy oauth-openai head: see the module docs.
+        (PROBE_NOT_RUN, disposition_for(Some(PROBE_NOT_RUN)))
+    } else {
+        return None;
+    };
+    Some(ProviderChainProbeDto {
+        position: hop.position,
+        source: hop.source.as_str().to_string(),
+        mode: hop.mode.as_str().to_string(),
+        endpoint_label: hop.endpoint_label(),
+        enabled: hop.enabled,
+        ok: false,
+        reason: Some(reason.to_string()),
+        disposition: disposition.to_string(),
+        probe: None,
+    })
+}
+
+/// A dialled hop's row: the verdict plus the provider-stated numbers.
+fn probed_entry(
+    hop: &CascadeHop,
+    report: &ProbeReport,
+    probed_at_ms: i64,
+    cached: bool,
+) -> ProviderChainProbeDto {
     ProviderChainProbeDto {
         position: hop.position,
         source: hop.source.as_str().to_string(),
         mode: hop.mode.as_str().to_string(),
         endpoint_label: hop.endpoint_label(),
         enabled: hop.enabled,
-        ok,
-        reason: reason.map(str::to_string),
-        disposition: disposition.to_string(),
+        ok: report.reason.is_none(),
+        reason: report.reason.clone(),
+        disposition: disposition_for(report.reason.as_deref()).to_string(),
+        probe: Some(ProviderProbeDetailDto {
+            outcome: report.outcome.as_str(),
+            method: report.method.as_str(),
+            http_status: report.http_status,
+            latency_ms: report.latency_ms,
+            model_count: report.model_count,
+            rate_limit: report
+                .rate_limit
+                .as_ref()
+                .map(|limits| ProviderRateLimitDto {
+                    source: limits.source,
+                    requests_limit: limits.requests_limit,
+                    requests_remaining: limits.requests_remaining,
+                    tokens_limit: limits.tokens_limit,
+                    tokens_remaining: limits.tokens_remaining,
+                }),
+            retry_after_seconds: report.retry_after_seconds,
+            credit: report.credit.as_ref().map(|credit| ProviderKeyCreditDto {
+                limit: credit.limit,
+                limit_remaining: credit.limit_remaining,
+                usage: credit.usage,
+            }),
+            probed_at_ms,
+            cached,
+        }),
     }
 }
 
@@ -982,10 +1160,11 @@ mod tests {
         );
     }
 
-    /// The honest half of the probe: everything that needs no socket is
-    /// decided, and the one case that does says so by name.
+    /// Everything that needs no socket is decided here; a usable external hop
+    /// is handed to the dialler (`None`), and only a legacy OAuth head is still
+    /// reported as not run.
     #[test]
-    fn the_probe_reports_configuration_verdicts_and_names_the_check_it_could_not_run() {
+    fn configuration_verdicts_decide_what_is_not_dialled() {
         let hop = |mode: ProviderMode, bearer: &str, enabled: bool| CascadeHop {
             position: 1,
             source: CascadeSource::Chain,
@@ -994,33 +1173,48 @@ mod tests {
             mode,
             enabled,
         };
+        let bearer = |value: &str| Some(ProbeCredential::Bearer(value.into()));
 
-        let parked = probe_hop(&hop(
-            ProviderMode::ExternalHermes,
-            "sk-live-abcdefgh",
-            false,
-        ));
+        let parked_hop = hop(ProviderMode::ExternalHermes, "sk-live-abcdefgh", false);
+        let parked = configuration_verdict(&parked_hop, bearer("sk-live-abcdefgh").as_ref())
+            .expect("parked hops are decided");
         assert_eq!(parked.disposition, "skipped");
         assert_eq!(parked.reason.as_deref(), Some("hop_disabled"));
 
-        let mock = probe_hop(&hop(ProviderMode::LocalMock, "sk-live-abcdefgh", true));
+        let mock_hop = hop(ProviderMode::LocalMock, "sk-live-abcdefgh", true);
+        let mock = configuration_verdict(&mock_hop, bearer("x").as_ref()).expect("decided");
         assert_eq!(mock.reason.as_deref(), Some("not_external_provider"));
         assert_eq!(mock.disposition, "propagate");
 
-        let blank = probe_hop(&hop(ProviderMode::ExternalHermes, "  ", true));
+        let blank_hop = hop(ProviderMode::ExternalHermes, "  ", true);
+        let blank = configuration_verdict(&blank_hop, bearer("  ").as_ref()).expect("decided");
         assert_eq!(blank.reason.as_deref(), Some("provider_not_configured"));
 
-        let unprobed = probe_hop(&hop(ProviderMode::ExternalHermes, "sk-live-abcdefgh", true));
-        assert!(!unprobed.ok);
-        assert_eq!(
-            unprobed.reason.as_deref(),
-            Some("probe_not_run"),
-            "this server has no HTTP client (invariant #2); saying 'unreachable' \
-             would blame a provider it never dialled"
+        let live = hop(ProviderMode::ExternalHermes, "sk-live-abcdefgh", true);
+        assert!(
+            configuration_verdict(&live, bearer("sk-live-abcdefgh").as_ref()).is_none(),
+            "a usable external hop must be dialled, not labelled probe_not_run"
         );
+
+        let oauth = configuration_verdict(&live, None).expect("legacy OAuth head is not dialled");
+        assert_eq!(oauth.reason.as_deref(), Some("probe_not_run"));
         assert_eq!(
-            unprobed.disposition, "propagate",
+            oauth.disposition, "propagate",
             "an unknown reason must not claim the next provider would do better"
+        );
+    }
+
+    #[test]
+    fn dispositions_follow_the_cascade_table() {
+        assert_eq!(disposition_for(None), "ok");
+        assert_eq!(disposition_for(Some("provider_unreachable")), "fall_over");
+        assert_eq!(disposition_for(Some("provider_rate_limited")), "fall_over");
+        assert_eq!(disposition_for(Some("provider_status_503")), "fall_over");
+        assert_eq!(disposition_for(Some("provider_auth_failed")), "propagate");
+        assert_eq!(disposition_for(Some("provider_egress_denied")), "propagate");
+        assert_eq!(
+            disposition_for(Some("provider_invalid_response")),
+            "propagate"
         );
     }
 }
