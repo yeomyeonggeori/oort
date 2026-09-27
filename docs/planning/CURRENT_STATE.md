@@ -1,33 +1,29 @@
 # oort 현재 상태
 
-기준: 2026-09-24, Opus 5.5 planner. 목표는 **A**다([ADR-0187](../adr/0187-goal-a-team-daily-desktop-ios.md) Accepted): 팀이 데스크탑·iOS로 oort를 매일 쓰는 것이 먼저이고, 외부 출시는 그 뒤다. 배포 게이트는 [M7-I·M7-S](../cicd/03-store-readiness-gate.md)다. 실제 checkout·HEAD·통합 결과는 공용 로컬 기록과 Git/PR에서 확인한다.
+기준: 2026-09-27, Opus 5.5 planner. 목표는 **A**다([ADR-0187](../adr/0187-goal-a-team-daily-desktop-ios.md) Accepted): 팀이 데스크탑·iOS로 oort를 매일 쓰는 것이 먼저이고, 외부 출시는 그 뒤다. 배포 게이트는 [M7-I·M7-S](../cicd/03-store-readiness-gate.md)다. 실제 checkout·HEAD·통합 결과는 공용 로컬 기록과 Git/PR에서 확인한다.
 
 ## 전체 위치
 | 단계 | 완료 / 현재 | 다음 조건 |
 |---|---|---|
-| 실행 체계 | planner=Opus 5.5 · worker=Opus 5.5 서브에이전트 · 리뷰어 C·보안 검수·design-review=fresh 서브에이전트. 묶음 승격, STATUS 동결(증거=PR 본문) | 병렬은 PIPELINE §2 기준 |
-| 성재 결재 | 09-23 2차(iOS=원격 R1까지 팀 배포 전 · ADR-0188 Accept · next=팀 채널 · W1 전부) + 09-24: Railway **Pro**·리전 싱가포르·owner 메일 (a) · Codex 원격 「샌드박스 자동 실행 수용」(조건부, #2607) · Claude auto 기기 「시작 직후 교정」 · ASC 확인은 planner 실측 위임(#2568 기록) | 남은 확정점: 내부 테스트 기간(기본 2주)·M7-I 승인 단위·스토어 직행·Enterprise Trust 연기·#2592 포그라운드 배너·수출 신고 판단 |
-| W1 팀 인스턴스 | **가동**: `oort-team` https://oort-team.up.railway.app (Railway Pro, asia-southeast1, v0.1.6, 9서비스, 볼륨 백업 daily, Client-IP gate PASS). owner claim 완료(09-24). 첨부 경로 수리 #2606 랜딩 | 24시간 자원 재측정·비용 확정 · 10-08 전후 IP gate 재측정 · 후속: #2628 업로드 스트리밍·per-IP 제한(PR #2631 보안 검수) · #2611 notifier 권한 회수 · #2626 Caddy 에러 로그 URI · #2610 #2612 #2613 |
-| W1 iOS | uxui 랜딩: #2587 TestFlight 준비 · #2585 승인 카드 · #2593 안읽음 · #2594·#2614·#2622 점프 · **#2584 푸시 탭(design-review R3 PASS)**. ASC 자동 배포·Xcode Cloud 꺼짐 확인(09-24), ASC API 팀 키 확보 | 묶음 승격 → main 아카이브 → `momo-internal-test` 업로드(첫 증거 빌드, 승인됨) → 성재 폰 설치·앱 종료 상태 푸시. #2586(p0 목록 빔) 랜딩 뒤 두 번째 증거 빌드는 새 승인 |
-| W1 데스크탑 | 서명·공증·업데이터 서명 준비 완료. next=팀 채널 | 묶음 승격 뒤 main 증거 빌드(owner 기기 직접 전달) → Railway 로그인(#1607) |
-| 원격 작업 | engine 랜딩: R0 #2576 · R0.1+A′ #2597 · workd 뼈대 #2579 · R1.1 경화 #2605 · **R1.2 #2621**(Codex 샌드박스 수용 조건·Claude 시작 직후 교정, 보안 재검수 PASS) | R1.3 #2630(에이전트 env 허용목록 F1 — 폰 경로를 팀에 열기 전 필수) → R1 나머지(권한 다리·등록 GUI·폰 작업 탭) → M7 I-8 |
-| 폰 품질 후속 | **#2586 목록 빔(p0, 진행)** · #2632 착지 후속(진행) → #2633 첫 구독 역채움 after=0 · #2588·#2604 스크롤 · #2600 AX5 · #2595 VoiceOver 카드 · #2596 secretOnce · #2598 host 기본값 · #2603 안읽음 후속 · #2617 시각 칸 · #2629 점프 후속3 | M7-I 팀 배포 전 편성 |
-| 디자인 2.0 | [ADR-0189](../adr/0189-design-system-2-dawn-sky-multi-theme.md) Accepted(09-25): 새벽하늘 기본 + 흑연·노을띠 테마, 커스텀 신호색, 밀도 2단. DS2 시리즈 #2712~#2720 편성(상위 #2703·#2704) | DS2-0 #2712(core 토큰 원천)부터. 폰 셸 DS2-2는 #2702 랜딩 뒤. 로고는 #2705 owner 선택 대기 |
-| AX | AX-2·3a·3b·4 main(09-22). AX-6 #2512는 Railway 인스턴스 위에서(W2). AX-5·AX-8 연기(ADR-0187 D6) | — |
+| 실행 체계 | planner=Opus 5.5 · worker=Opus 5.5 서브에이전트 · 리뷰어 C·보안 검수·design-review=fresh 서브에이전트. 묶음 승격(상시 위임), STATUS 동결(증거=PR 본문) | 병렬은 PIPELINE §2 기준. 엔진 워커 1개당 `target` 20~30GB — 랜딩 직후 회수 |
+| 팀 인스턴스 | `oort-team` https://oort-team.up.railway.app **v0.1.12**(schema 91, 09-27). api 서비스 변수 `MOMO_HOSTED_DELIVERY_ENABLED=true`(09-27 owner 승인). 배포 기록 #2916(v0.1.11)·#2926(v0.1.12) | LiveKit 배치 #2759(배포 직전 owner 확인) · 팀 키 입력은 owner |
+| 증거 빌드 | 데스크탑 0.1.12 공증 DMG(owner 기기 직접 전달) · iOS 3026 `momo-internal-test`(owner 1인). main `21aead09` 기준(#2568·#1607 기록) | owner 스모크: 「Claude Code로 로그인」 모달 실제 왕복, 폰 프로필 상태·알림 일시 중지, 터미널 테마, 팀 키로 채널 대화, 사이드바 Claude Code DM |
+| 에이전트 쓰기 | BYOK Anthropic·xAI·OpenRouter(#2872, ADR-0147·0004 증보), provider egress SSRF 가드(#2852·#2894), 답 못 한 이유 안내(#2871), hosted 1:1 DM 승인(#2915, ADR-0162 증보 2), 개인 구독 격리(#2882·#2897) | 실사용 왕복 runtime-unverified — owner 확인 |
+| AI 계정 설정 | 결재 Q1~Q7(09-27, [시안](https://claude.ai/artifact/Y8GWHyaW2Z41bKxKB2uutB)). 랜딩: 재진입 #2870, 틀 #2877, 로그인 모달 #2816(공식 CLI 숨은 PTY, oort 자체 OAuth 금지), ADR-0190 D3-d~g·0193·0147 증보(#2876). Claude 구독으로 앱 명령 실행기는 닫음(Anthropic 약관) | #2878 추가·해제 연결 · #2880 팀 키 흐름 · #2881 기본 AI 표 · #2777·#2781·#2782 확장 · #2879 · #2883 Jev(판정기 ADR 뒤) |
+| 작업 탭 | 결재 Q1~Q6(09-27, [시안](https://claude.ai/artifact/Wi3dNY64UbyoQCU9q1qLuM)), 이슈 T1~T17 #2853~#2869. 랜딩: T1 ADR(#2853, ADR-0190 D3-c·D4-b, ADR-0194), T2 「내 작업」 #2854, T3 git 읽기 G1~G8 #2855(설정 키 전수 표), 작업 표면 런타임 판정 #2780 | T4 #2856 → T5·T6·T7·T8 → W-Share(T9~T12·T16) → W-Link(T13~T15·T17). M2 #2778 workd 번들·#2779 진행 뷰 |
+| 알림·상태 | 폰 프로필 빠른 설정 #2848, 방해 금지↔알림 일시 중지 묶음·기한 #2850(migration 090) | #2899 기한 선택 UI · #2851 다른 기기 즉시 반영 |
+| 디자인 2.0·브랜드 | ADR-0189, 코메토 K6, 앱 아이콘 I4, 터미널 다크 #2849 | DS2-5 #2717 · DS2-7 #2719 · DS2-8 #2720 |
 
 ## 작업별 체크포인트
 | 작업 / owner | 저장된 결과 | 다음 |
 |---|---|---|
-| #2586 목록 빔(p0) / 워커 | 원인 규명·수리·Release 캡처 진행 | design-review → 병합 트리 → 랜딩 → 두 번째 iOS 증거 빌드(새 승인) |
-| #2632 → #2633 / 워커(#2584 워커) | 착지 후속(M-1·M-2) 진행, 이어서 첫 구독 역채움 | 각 PR design-review → 랜딩 |
-| #2630 R1.3 / 워커 | 에이전트 env 허용목록·소유자 스킬 층 배제·RR-3/RR-6 | 보안 검수 → 랜딩 |
-| #2628 업로드 스트리밍 / 워커 완료 | PR #2631: 본문 전 판정·디스크 스트리밍·per-IP 120/분, 100MiB×4 RSS +1,209→+0.4MiB | 보안 검수 → 랜딩 → 다음 이미지 |
-| #2619 묶음 승격 준비 / planner | CHANGELOG [Unreleased] · 이 파일 · JOURNAL · ADR-0184 문구 | docs 게이트 → 랜딩 → 승격+양 트랙 sync → iOS 첫 증거 빌드 |
+| 후속 버그 / 워커 대기 | #2893(검수 Medium 묶음 잔여) · #2923 웹 시험 빈틈 · #2924 커넥션 없는 구독 에이전트 · #2903 고정 migration 개수 시험 · #2890 폰 안내 링크 · #2929 gitoxide 검토 | 파도 편성 |
+| 허들 / 보류 | H-6~H-12 #2762~#2768, Railway TCP LiveKit #2759 | owner 배포 확인 뒤 |
 
 ## 재개
 1. `scripts/planning_context.sh`로 복원한다. main·engine·uxui 정렬을 확인한다.
-2. 파도 표와 iOS 범위는 [목표 A 계획](2026-09-23-goal-a-plan.md)에 있다. 워커 발사는 성재의 명시 go 뒤에 한다.
-3. 미션·리뷰 전문·승격 헬퍼·ASC 점검 스크립트는 로컬 `claudedocs/resume-2026-09-23/`에 있다(재부팅에도 남는다). 계약은 이슈와 레포 문서가 정본이다.
-4. 워크트리·스크래치 회수는 `~/.local/bin/momo-worktree-reclaim.sh`(launchd 매일 06:30)가 한다. 스크래치 사본은 `~/.cache/momo-scratch/`에 둔다.
+2. 미션·리뷰 전문·승격 헬퍼(`promote-lib.sh`)·릴리스 노트는 로컬 `claudedocs/resume-2026-09-23/`에 있다. 계약은 이슈와 레포 문서가 정본이다.
+3. 릴리스·배포는 건마다 owner 승인. GitHub `release` 환경 승인은 owner 클릭이다.
+4. 워크트리·스크래치 회수는 `~/.local/bin/momo-worktree-reclaim.sh`(launchd 매일 06:30)가 한다. 엔진 워커 `target`은 랜딩 직후 수동 회수한다.
 
 이 파일은 현재 상태 하나만 유지한다. 결정은 ADR, 검증 원문은 PR 본문, 세션 이력은 JOURNAL, 실행 중 note는 공용 로컬 폴더에 둔다.
