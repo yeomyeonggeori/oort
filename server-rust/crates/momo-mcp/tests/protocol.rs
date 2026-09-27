@@ -874,6 +874,7 @@ fn both_eras_advertise_exactly_the_view_they_can_call() {
             "oort_job_release",
             "oort_run_event",
             "oort_run_complete",
+            "oort_card_suggest",
         ]
     );
     // Every advertised tool is callable, in both eras.

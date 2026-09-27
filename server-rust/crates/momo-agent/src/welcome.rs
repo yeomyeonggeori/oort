@@ -303,8 +303,9 @@ async fn load_welcome_agent_in_tx(
                          WHERE acr.workspace_id = m.workspace_id \
                            AND acr.agent_member_id = m.id \
                            AND acr.status = 'confirmed') AS is_external_runtime, \
-                EXISTS (SELECT 1 FROM hosted_agent_connection hc \
-                         WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
+                (EXISTS (SELECT 1 FROM hosted_agent_connection hc \
+                          WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
+                 OR a.invocation_scope = 'owner_only') \
                   AS is_hosted, \
                 (SELECT hc.id FROM hosted_agent_connection hc \
                    JOIN token t ON t.workspace_id = hc.workspace_id \

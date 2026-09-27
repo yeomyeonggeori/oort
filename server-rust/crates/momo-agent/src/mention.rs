@@ -111,9 +111,12 @@ pub struct MentionCandidate {
     /// `workspace.settings`, needed raw for the ADR-0131 D2 allow-list.
     pub workspace_settings: Value,
     pub paused: bool,
-    /// The agent has a `hosted_agent_connection` row of any status — i.e. it is
-    /// a hosted agent, and neither the in-process worker nor the REST gateway
-    /// feed may ever drain its jobs.
+    /// The agent has a `hosted_agent_connection` row of any status, **or** it
+    /// is a subscription (`owner_only`) agent — i.e. it is a hosted agent, and
+    /// neither the in-process worker nor the REST gateway feed may ever drain
+    /// its jobs. #2924: a subscription agent whose row is gone is still hosted
+    /// (it runs only in its owner's runtime), so the missing row reads as "no
+    /// live connection", never as "a team-key agent".
     pub hosted_delivery_disabled: bool,
     /// The **active, proved** hosted connection to deliver to, when there is
     /// one. `None` on a hosted agent means pairing/detected/expired/cleanup/
@@ -168,8 +171,9 @@ pub async fn load_mention_candidates_in_tx(
                 ap.instructions, ap.model_pref, ap.effort_pref, ap.enabled_tools, \
                 ap.version AS profile_version, \
                 COALESCE(ap.paused, false) AS paused, \
-                EXISTS (SELECT 1 FROM hosted_agent_connection hc \
-                         WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
+                (EXISTS (SELECT 1 FROM hosted_agent_connection hc \
+                          WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
+                 OR a.invocation_scope = 'owner_only') \
                   AS hosted_delivery_disabled, \
                 (SELECT hc.id FROM hosted_agent_connection hc \
                    JOIN token t ON t.workspace_id = hc.workspace_id \

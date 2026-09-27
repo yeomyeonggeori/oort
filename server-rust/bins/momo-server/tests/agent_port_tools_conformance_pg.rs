@@ -615,6 +615,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
             "oort_run_event",
             "oort_run_complete",
             "oort_action_propose",
+            "oort_card_suggest",
         ]
     );
 
@@ -701,7 +702,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
         list_tools(&client, &base, &fixture.hosted_bearer)
             .await
             .len(),
-        9,
+        10,
         "a foundation request proves the binding and re-activates it"
     );
     let reactivated: String = sqlx::query_scalar(
@@ -782,7 +783,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
         list_tools(&client, &base, &fixture.hosted_bearer)
             .await
             .len(),
-        9,
+        10,
         "restoring the connection restores the catalog"
     );
 
@@ -5087,4 +5088,874 @@ async fn a_connection_a_non_owner_confirmed_carries_no_dm() {
         .unwrap()
         .status();
     assert_eq!(status.as_u16(), 409);
+}
+
+// ---------------------------------------------------------------------------
+// (10) ADR-0186 증보 G1~G6 (GC-6 #2947) — oort_card_suggest / card_suggest
+// ---------------------------------------------------------------------------
+
+async fn momo_worker_pool() -> PgPool {
+    let options: PgConnectOptions = database_url()
+        .parse()
+        .expect("DATABASE_URL parses as a postgres connect string");
+    PgPoolOptions::new()
+        .max_connections(4)
+        .connect_with(
+            options.username("momo_worker").password(
+                &std::env::var("MOMO_WORKER_PASSWORD")
+                    .unwrap_or_else(|_| "momo_worker_dev_pw".to_string()),
+            ),
+        )
+        .await
+        .expect("connect as momo_worker after bootstrap_roles.sql")
+}
+
+/// A human mention of the hosted agent (optionally in a thread) → the trigger
+/// message id and the run it raised.
+async fn mention_2947(
+    client: &reqwest::Client,
+    base: &str,
+    su: &PgPool,
+    fixture: &Fixture,
+    root_id: Option<Uuid>,
+) -> (Uuid, Uuid) {
+    let handle_name = hosted_handle(su, fixture.hosted_agent).await;
+    let mut body = json!({
+        "clientMsgId": Uuid::new_v4(),
+        "body": format!("@{handle_name} 내 클로드 구독 연결해 줘")
+    });
+    if let Some(root_id) = root_id {
+        body["rootId"] = json!(root_id);
+    }
+    let trigger: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&body)
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    let trigger_id = Uuid::parse_str(trigger["id"].as_str().expect("trigger id")).unwrap();
+    let run_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM agent_run WHERE workspace_id=$1 AND trigger_message_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(trigger_id)
+    .fetch_one(su)
+    .await
+    .expect("the mention raised a run");
+    (trigger_id, run_id)
+}
+
+async fn suggestion_rows_2947(pool: &PgPool, workspace: Uuid) -> Vec<(Uuid, Value, Option<Uuid>)> {
+    sqlx::query_as(
+        "SELECT id, props, root_id FROM message \
+          WHERE workspace_id=$1 AND props ? 'momo.command_suggest' ORDER BY seq",
+    )
+    .bind(workspace)
+    .fetch_all(pool)
+    .await
+    .expect("suggestion rows")
+}
+
+async fn run_status_2947(pool: &PgPool, run: Uuid) -> String {
+    sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id=$1")
+        .bind(run)
+        .fetch_one(pool)
+        .await
+        .expect("run status")
+}
+
+fn assert_five_keys_2947(props: &Value, for_member: Uuid, args: Value, label: &str) {
+    let card = &props["momo.command_suggest"];
+    let mut keys: Vec<&str> = card
+        .as_object()
+        .expect("a command_suggest object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        vec!["args", "command_id", "for_member_id", "label", "v"],
+        "{props}"
+    );
+    assert_eq!(
+        props.as_object().expect("props").len(),
+        1,
+        "nothing rides beside the card: {props}"
+    );
+    assert_eq!(card["v"], json!(1));
+    assert_eq!(card["command_id"], json!("ai.connect"));
+    assert_eq!(card["args"], args);
+    assert_eq!(card["for_member_id"], json!(for_member.to_string()));
+    assert_eq!(card["label"], json!(label));
+}
+
+/// **G6, hosted.** The scope, the refused arguments, the allow-list, the pair
+/// rule, the requester, the five keys, the single send transaction, the retry,
+/// RLS, and the untouched run — every red proof `oort_card_suggest` owes.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_card_suggestion_is_one_message_for_the_person_who_asked() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+
+    let (_trigger, run) = mention_2947(&client, &base, &su, &fixture, None).await;
+
+    // ---- red proof: messages:write on both halves --------------------------
+    let full_scopes = "ARRAY['agent:port:connect','agent:inbox:read','messages:read', \
+       'messages:write','agent:jobs:read','agent:runs:callback','workspace:propose']::text[]";
+    let without_write = "ARRAY['agent:port:connect','agent:inbox:read','messages:read', \
+       'agent:jobs:read','agent:runs:callback','workspace:propose']::text[]";
+    for (table, column, id) in [
+        ("token", "scopes", fixture.hosted_token),
+        (
+            "hosted_agent_connection",
+            "approved_scopes",
+            fixture.hosted_connection,
+        ),
+    ] {
+        sqlx::query(&format!(
+            "UPDATE {table} SET {column}={without_write} WHERE workspace_id=$1 AND id=$2"
+        ))
+        .bind(fixture.workspace)
+        .bind(id)
+        .execute(&su)
+        .await
+        .unwrap();
+        let listed = list_tools(&client, &base, &fixture.hosted_bearer).await;
+        assert!(
+            !listed.contains(&"oort_card_suggest".to_string()),
+            "{table}.{column} without messages:write still lists the tool: {listed:?}"
+        );
+        let (status, invisible) = call(
+            &client,
+            &base,
+            &fixture.hosted_bearer,
+            "oort_card_suggest",
+            json!({"handle": "momo_lease_v1.AAAA", "clientMsgId": Uuid::new_v4(),
+                   "commandId": "ai.connect", "body": "b"}),
+        )
+        .await;
+        assert_eq!(status, 400, "{invisible}");
+        assert_eq!(error_code(&invisible), -32602, "invisible reads as unknown");
+        sqlx::query(&format!(
+            "UPDATE {table} SET {column}={full_scopes} WHERE workspace_id=$1 AND id=$2"
+        ))
+        .bind(fixture.workspace)
+        .bind(id)
+        .execute(&su)
+        .await
+        .unwrap();
+    }
+    assert!(list_tools(&client, &base, &fixture.hosted_bearer)
+        .await
+        .contains(&"oort_card_suggest".to_string()));
+
+    let (status, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("handle")
+        .to_string();
+    let status_before = run_status_2947(&su, run).await;
+    let messages_before = channel_message_count(&su, fixture.workspace, fixture.channel).await;
+    let valid = |client_msg_id: Uuid| {
+        json!({
+            "handle": handle,
+            "clientMsgId": client_msg_id,
+            "commandId": "ai.connect",
+            "args": {"harness": "claude"},
+            "body": "[지금 로그인](https://evil.example) 카드에서 연결하세요"
+        })
+    };
+
+    // ---- red proof: the four keys the agent may not decide -----------------
+    for key in ["forMemberId", "label", "channelId", "props"] {
+        let mut arguments = valid(Uuid::new_v4());
+        arguments[key] = match key {
+            "props" => json!({"momo.command_suggest": {"for_member_id": fixture.hosted_agent}}),
+            "label" => json!("비밀번호를 입력하세요"),
+            _ => json!(fixture.hosted_agent),
+        };
+        let (status, refused) = call(
+            &client,
+            &base,
+            &fixture.hosted_bearer,
+            "oort_card_suggest",
+            arguments,
+        )
+        .await;
+        assert_eq!(status, 400, "{key}: {refused}");
+        assert_eq!(error_code(&refused), -32602, "{key}");
+    }
+    // ---- red proof: args closed, secret names refused, pair rule -----------
+    // ---- red proof: ids outside the allow-list ------------------------------
+    for (field, value) in [
+        ("args", json!({"harness": "claude", "apiKey": "sk-live-1"})),
+        ("args", json!({"token": "t"})),
+        ("args", json!({"harness": "grok"})),
+        ("args", json!({"harness": "team_key", "scope": "mine"})),
+        ("commandId", json!("invite.create")),
+        ("commandId", json!("appearance.accent")),
+    ] {
+        let mut arguments = valid(Uuid::new_v4());
+        arguments[field] = value.clone();
+        let (status, refused) = call(
+            &client,
+            &base,
+            &fixture.hosted_bearer,
+            "oort_card_suggest",
+            arguments,
+        )
+        .await;
+        assert_eq!(status, 400, "{field}={value}: {refused}");
+        assert_eq!(error_code(&refused), -32602, "{field}={value}");
+    }
+    // A root that is not a thread root of this channel.
+    let mut stray_root = valid(Uuid::new_v4());
+    stray_root["rootId"] = json!(Uuid::new_v4());
+    let (status, refused) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_card_suggest",
+        stray_root,
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+    assert_eq!(
+        channel_message_count(&su, fixture.workspace, fixture.channel).await,
+        messages_before,
+        "every refusal writes nothing"
+    );
+
+    // ---- success -------------------------------------------------------------
+    let seq_before: i64 = sqlx::query_scalar(
+        "SELECT last_seq FROM channel_seq WHERE workspace_id=$1 AND channel_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let client_msg_id = Uuid::new_v4();
+    let (status, posted) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_card_suggest",
+        valid(client_msg_id),
+    )
+    .await;
+    assert_eq!(status, 200, "{posted}");
+    assert_eq!(structured(&posted)["deduplicated"], json!(false));
+    let message_id = structured(&posted)["messageId"]
+        .as_str()
+        .expect("messageId")
+        .to_string();
+    let (author, channel, body, props, seq, message_type): (
+        Uuid,
+        Uuid,
+        String,
+        Value,
+        i64,
+        String,
+    ) = sqlx::query_as(
+        "SELECT author_member_id, channel_id, body, props, seq, type::text FROM message \
+              WHERE workspace_id=$1 AND id=$2::uuid",
+    )
+    .bind(fixture.workspace)
+    .bind(&message_id)
+    .fetch_one(&su)
+    .await
+    .expect("the card exists");
+    assert_eq!(author, fixture.hosted_agent);
+    assert_eq!(
+        channel, fixture.channel,
+        "the handle's channel, never an argument"
+    );
+    assert_eq!(message_type, "text");
+    assert!(body.contains("카드에서 연결하세요"));
+    assert_five_keys_2947(
+        &props,
+        fixture.human,
+        json!({"harness": "claude", "scope": "mine"}),
+        "Claude 구독 연결",
+    );
+    assert!(
+        !props.to_string().contains("evil.example"),
+        "the agent's words are the body's, never the label's"
+    );
+    // One send transaction: the seq moved by exactly one, the row holds it, and
+    // exactly one broadcast outbox row carries it.
+    let seq_after: i64 = sqlx::query_scalar(
+        "SELECT last_seq FROM channel_seq WHERE workspace_id=$1 AND channel_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(seq_after, seq_before + 1);
+    assert_eq!(seq, seq_after);
+    let broadcasts: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='broadcast' \
+           AND payload->'data'->'payload'->>'id' = $2",
+    )
+    .bind(fixture.workspace)
+    .bind(&message_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(broadcasts, 1, "exactly one outbox row — no direct publish");
+
+    // ---- retry: same clientMsgId → the same one message ---------------------
+    let (status, again) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_card_suggest",
+        valid(client_msg_id),
+    )
+    .await;
+    assert_eq!(status, 200, "{again}");
+    assert_eq!(structured(&again)["deduplicated"], json!(true));
+    assert_eq!(structured(&again)["messageId"], json!(message_id));
+    assert_eq!(suggestion_rows_2947(&su, fixture.workspace).await.len(), 1);
+
+    // ---- no approval, no run transition --------------------------------------
+    let approvals: i64 = sqlx::query_scalar("SELECT count(*) FROM approval WHERE workspace_id=$1")
+        .bind(fixture.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(approvals, 0, "a suggestion is not an approval card");
+    assert_eq!(
+        run_status_2947(&su, run).await,
+        status_before,
+        "agent_run.status is untouched"
+    );
+
+    // ---- RLS: another workspace's GUC sees zero rows ------------------------
+    for (guc, expected) in [(Uuid::new_v4(), 0i64), (fixture.workspace, 1i64)] {
+        let mut tx = app.begin().await.unwrap();
+        sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+            .bind(guc.to_string())
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let visible: i64 = sqlx::query_scalar("SELECT count(*) FROM message WHERE id=$1::uuid")
+            .bind(&message_id)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+        tx.rollback().await.unwrap();
+        assert_eq!(visible, expected, "GUC {guc}");
+    }
+}
+
+/// **G3 / G6 — `for_member_id` cannot be forged, and an agent is nobody's
+/// requester.** A run whose trigger an agent wrote (or that has no trigger at
+/// all) is `no_human_requester` on both doors, with zero messages.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_run_an_agent_raised_has_nobody_to_suggest_a_card_to() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (_trigger, run) = mention_2947(&client, &base, &su, &fixture, None).await;
+
+    // An agent-authored message in the same channel.
+    let (status, spoken) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_message_post",
+        json!({"channelId": fixture.channel, "clientMsgId": Uuid::new_v4(), "body": "위임합니다"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{spoken}");
+    let agent_message =
+        Uuid::parse_str(structured(&spoken)["messageId"].as_str().unwrap()).unwrap();
+
+    let (status, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("handle")
+        .to_string();
+    let worker = momo_worker_pool().await;
+
+    for trigger in [Some(agent_message), None] {
+        sqlx::query("UPDATE agent_run SET trigger_message_id=$2 WHERE id=$1")
+            .bind(run)
+            .bind(trigger)
+            .execute(&su)
+            .await
+            .unwrap();
+        let before = channel_message_count(&su, fixture.workspace, fixture.channel).await;
+
+        let (status, refused) = call(
+            &client,
+            &base,
+            &fixture.hosted_bearer,
+            "oort_card_suggest",
+            json!({"handle": handle, "clientMsgId": Uuid::new_v4(),
+                   "commandId": "ai.connect", "body": "연결 카드예요"}),
+        )
+        .await;
+        assert_eq!(status, 409, "{trigger:?}: {refused}");
+        assert_eq!(
+            error_code(&refused),
+            -32004,
+            "no_human_requester is Unavailable"
+        );
+
+        let result = momo_agent_worker::tool_exec::execute(
+            &worker,
+            &momo_agent_worker::tool_exec::ToolContext {
+                workspace_id: fixture.workspace,
+                run_id: run,
+                channel_id: fixture.channel,
+                agent_member_id: fixture.hosted_agent,
+                approved_by: fixture.hosted_agent,
+                approved_host_id: None,
+            },
+            &momo_agent::tools::ToolCall {
+                call_id: format!("call-{trigger:?}"),
+                name: momo_agent::tools::CARD_SUGGEST.to_string(),
+                arguments: json!({"commandId": "ai.connect", "body": "연결 카드예요"}),
+            },
+        )
+        .await
+        .expect("the worker answers rather than failing");
+        assert!(result.is_error, "{result:?}");
+        assert!(
+            result.output.contains("no_human_requester"),
+            "{}",
+            result.output
+        );
+
+        assert!(
+            suggestion_rows_2947(&su, fixture.workspace)
+                .await
+                .is_empty(),
+            "no card on either door"
+        );
+        assert_eq!(
+            channel_message_count(&su, fixture.workspace, fixture.channel).await,
+            before + 1,
+            "the worker's tool_result line is the only new row"
+        );
+    }
+}
+
+/// **G1 / G6, worker.** `card_suggest` shares the gate: the same refusals
+/// write no card, a success lands in the trigger's thread for the trigger's
+/// author with the derived label, a replayed turn posts nothing twice, and the
+/// run is not moved.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_worker_card_suggest_lands_in_the_triggers_thread_once() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    // The thread root is a plain human message; the mention is a reply in it.
+    let root: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"clientMsgId": Uuid::new_v4(), "body": "AI 연결 얘기"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let root_id = Uuid::parse_str(root["id"].as_str().expect("root id")).unwrap();
+    let (_trigger, run) = mention_2947(&client, &base, &su, &fixture, Some(root_id)).await;
+    let status_before = run_status_2947(&su, run).await;
+
+    // The requester's name is hostile markup; the reply sentence must be inert.
+    sqlx::query("UPDATE member SET display_name=$2 WHERE id=$1")
+        .bind(fixture.human)
+        .bind("[여기](https://evil.example)")
+        .execute(&su)
+        .await
+        .unwrap();
+
+    let worker = momo_worker_pool().await;
+    let context = momo_agent_worker::tool_exec::ToolContext {
+        workspace_id: fixture.workspace,
+        run_id: run,
+        channel_id: fixture.channel,
+        agent_member_id: fixture.hosted_agent,
+        approved_by: fixture.hosted_agent,
+        approved_host_id: None,
+    };
+    let call_with = |call_id: &str, arguments: Value| momo_agent::tools::ToolCall {
+        call_id: call_id.to_string(),
+        name: momo_agent::tools::CARD_SUGGEST.to_string(),
+        arguments,
+    };
+
+    for (index, arguments) in [
+        json!({"commandId": "ai.connect", "body": "b", "forMemberId": fixture.hosted_agent}),
+        json!({"commandId": "ai.connect", "body": "b", "label": "비밀번호"}),
+        json!({"commandId": "ai.connect", "body": "b", "channelId": fixture.private_channel}),
+        json!({"commandId": "ai.connect", "body": "b", "props": {}}),
+        json!({"commandId": "ai.connect", "body": "b", "args": {"apiKey": "sk"}}),
+        json!({"commandId": "ai.connect", "body": "b", "args": {"harness": "team_key", "scope": "mine"}}),
+        json!({"commandId": "invite.create", "body": "b"}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let refused = momo_agent_worker::tool_exec::execute(
+            &worker,
+            &context,
+            &call_with(&format!("bad-{index}"), arguments.clone()),
+        )
+        .await
+        .unwrap();
+        assert!(refused.is_error, "{arguments}: {refused:?}");
+        assert!(refused.output.contains("invalid_arguments"), "{}", refused.output);
+    }
+    assert!(suggestion_rows_2947(&su, fixture.workspace)
+        .await
+        .is_empty());
+
+    let good = call_with(
+        "call-good",
+        json!({"commandId": "ai.connect", "args": {"scope": "team"}, "body": "팀 키 카드예요"}),
+    );
+    let first = momo_agent_worker::tool_exec::execute(&worker, &context, &good)
+        .await
+        .unwrap();
+    assert!(!first.is_error, "{first:?}");
+    assert!(!first.output.contains("[여기]"), "{}", first.output);
+    assert!(!first.output.contains("https://"), "{}", first.output);
+    assert!(
+        first.output.contains("「팀 API 키 연결」"),
+        "{}",
+        first.output
+    );
+
+    let rows = suggestion_rows_2947(&su, fixture.workspace).await;
+    assert_eq!(rows.len(), 1);
+    let (_id, props, card_root) = &rows[0];
+    assert_eq!(*card_root, Some(root_id), "the trigger's thread");
+    assert_five_keys_2947(
+        props,
+        fixture.human,
+        json!({"harness": "team_key", "scope": "team"}),
+        "팀 API 키 연결",
+    );
+    // #2959 M1: the card counts as a reply — the rollup moved and
+    // `thread.updated` went out beside it.
+    assert_eq!(
+        thread_rollup_2947(&su, root_id).await,
+        (2, 2),
+        "trigger reply + card: reply_count 2, thread.updated rows 2"
+    );
+
+    // The replay a re-claimed turn performs.
+    let replayed = momo_agent_worker::tool_exec::execute(&worker, &context, &good)
+        .await
+        .unwrap();
+    assert_eq!(replayed.output, first.output);
+    assert_eq!(suggestion_rows_2947(&su, fixture.workspace).await.len(), 1);
+    let results: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE workspace_id=$1 AND type='tool_result' \
+           AND props->>'call_id' = 'call-good'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(results, 1, "one result line beside one card");
+    assert_eq!(run_status_2947(&su, run).await, status_before);
+    let approvals: i64 = sqlx::query_scalar("SELECT count(*) FROM approval WHERE workspace_id=$1")
+        .bind(fixture.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(approvals, 0);
+}
+
+/// `(thread.reply_count, thread.updated outbox rows)` for one root.
+async fn thread_rollup_2947(pool: &PgPool, root: Uuid) -> (i32, i64) {
+    let replies: Option<i32> =
+        sqlx::query_scalar("SELECT reply_count FROM thread WHERE root_id=$1")
+            .bind(root)
+            .fetch_optional(pool)
+            .await
+            .unwrap();
+    let updates: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE kind='broadcast' \
+           AND payload->'data'->>'type' = 'thread.updated' \
+           AND upper(payload->'data'->'payload'->>'root_id') = upper($1)",
+    )
+    .bind(root.to_string())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    (replies.unwrap_or(0), updates)
+}
+
+async fn cards_2947(pool: &PgPool, workspace: Uuid) -> usize {
+    suggestion_rows_2947(pool, workspace).await.len()
+}
+
+/// **#2959 M2 — the lease and run-state guards of `oort_card_suggest`.** A
+/// handle whose lease lapsed and was re-claimed may not speak for the run; a
+/// parked or settled run raises no card. Each refusal is 409/-32005 with zero
+/// cards.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_stale_handle_or_a_parked_run_raises_no_card() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (_trigger, run) = mention_2947(&client, &base, &su, &fixture, None).await;
+
+    let claim = |client: reqwest::Client, base: String, bearer: String| async move {
+        let (status, claimed) = call(
+            &client,
+            &base,
+            &bearer,
+            "oort_jobs_claim",
+            json!({"limit": 10}),
+        )
+        .await;
+        assert_eq!(status, 200, "{claimed}");
+        structured(&claimed)["jobs"][0]["leaseHandle"]
+            .as_str()
+            .expect("a lease handle")
+            .to_string()
+    };
+    let stale = claim(client.clone(), base.clone(), fixture.hosted_bearer.clone()).await;
+    sqlx::query(
+        "UPDATE outbox SET lease_acquired_at = now() - interval '10 minutes', \
+                           lease_expires_at = now() - interval '1 minute' \
+          WHERE workspace_id=$1 AND kind='agent_job' AND partition_key=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let fresh = claim(client.clone(), base.clone(), fixture.hosted_bearer.clone()).await;
+    assert_ne!(
+        stale, fresh,
+        "a takeover must mint a new lease, or this proves nothing"
+    );
+
+    let suggest = |handle: String| {
+        json!({"handle": handle, "clientMsgId": Uuid::new_v4(),
+               "commandId": "ai.connect", "body": "연결 카드예요"})
+    };
+    let (status, refused) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_card_suggest",
+        suggest(stale.clone()),
+    )
+    .await;
+    assert_eq!(status, 409, "a stale lease must not post a card: {refused}");
+    assert_eq!(error_code(&refused), -32005);
+    assert_eq!(cards_2947(&su, fixture.workspace).await, 0);
+
+    for parked in ["awaiting_approval", "cancelled"] {
+        sqlx::query(&format!(
+            "UPDATE agent_run SET status='{parked}', deadline_at=now() + interval '1 hour' \
+              WHERE id=$1"
+        ))
+        .bind(run)
+        .execute(&su)
+        .await
+        .unwrap();
+        let (status, refused) = call(
+            &client,
+            &base,
+            &fixture.hosted_bearer,
+            "oort_card_suggest",
+            suggest(fresh.clone()),
+        )
+        .await;
+        assert_eq!(status, 409, "{parked}: {refused}");
+        assert_eq!(error_code(&refused), -32005, "{parked}");
+        assert_eq!(cards_2947(&su, fixture.workspace).await, 0, "{parked}");
+    }
+
+    // Control: the live holder on a running run does post.
+    sqlx::query("UPDATE agent_run SET status='running', deadline_at=NULL WHERE id=$1")
+        .bind(run)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, posted) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_card_suggest",
+        suggest(fresh),
+    )
+    .await;
+    assert_eq!(status, 200, "the live lease holder may post: {posted}");
+    assert_eq!(cards_2947(&su, fixture.workspace).await, 1);
+}
+
+/// **#2959 M1 (hosted) + L1.** A card with `rootId` is a thread reply in the
+/// rollup and in `thread.updated`; a deleted request or a requester who left
+/// the channel has nobody to suggest to.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_threaded_card_is_counted_and_a_withdrawn_request_gets_none() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    let root: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"clientMsgId": Uuid::new_v4(), "body": "스레드 루트"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let root_id = Uuid::parse_str(root["id"].as_str().expect("root id")).unwrap();
+    let (trigger, _run) = mention_2947(&client, &base, &su, &fixture, None).await;
+    let (status, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let suggest = |root: Option<Uuid>| {
+        let mut arguments = json!({"handle": handle, "clientMsgId": Uuid::new_v4(),
+                                   "commandId": "ai.connect", "body": "연결 카드예요"});
+        if let Some(root) = root {
+            arguments["rootId"] = json!(root);
+        }
+        arguments
+    };
+
+    assert_eq!(thread_rollup_2947(&su, root_id).await, (0, 0));
+    let (status, posted) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_card_suggest",
+        suggest(Some(root_id)),
+    )
+    .await;
+    assert_eq!(status, 200, "{posted}");
+    assert_eq!(
+        thread_rollup_2947(&su, root_id).await,
+        (1, 1),
+        "the card is one reply in the rollup, with one thread.updated"
+    );
+
+    // L1 — the person deleted the request.
+    sqlx::query("UPDATE message SET deleted_at=now() WHERE id=$1")
+        .bind(trigger)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, refused) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_card_suggest",
+        suggest(None),
+    )
+    .await;
+    assert_eq!(status, 409, "deleted request: {refused}");
+    assert_eq!(error_code(&refused), -32004);
+    sqlx::query("UPDATE message SET deleted_at=NULL WHERE id=$1")
+        .bind(trigger)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // L1 — the person left the channel.
+    sqlx::query(
+        "UPDATE membership SET left_at=now() WHERE workspace_id=$1 AND channel_id=$2 \
+           AND member_id=$3",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, refused) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_card_suggest",
+        suggest(None),
+    )
+    .await;
+    assert_eq!(status, 409, "requester left: {refused}");
+    assert_eq!(error_code(&refused), -32004);
+    assert_eq!(
+        cards_2947(&su, fixture.workspace).await,
+        1,
+        "only the threaded card"
+    );
 }
