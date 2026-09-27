@@ -29,6 +29,8 @@
 //! | `dnd_suppresses_every_reason` (ADR-0124 증보 1) | drop the `notification_rule.dnd` predicate |
 //! | `a_mention_exception_delivers_through_a_channel_mute` (증보 1) | drop the `mention_overrides_mute` arm from the mute clause |
 //! | `dnd_outranks_a_mention_exception` (증보 1) | move the `dnd` predicate below the mention-exception arm |
+//! | `a_timed_pause_suppresses_until_it_expires_then_delivers` (증보 2) | drop the `dnd_until > now()` arm from the `dnd` predicate |
+//! | `declared_dnd_pauses_pushes_and_both_lapse_together` (증보 2 「묶어」) | skip the bundle in `set_declared_presence_in_tx`, or engage it without the DND expiry |
 //! | `a_transient_relay_failure_requeues_instead_of_dropping` | settle on transient failure |
 
 use std::path::PathBuf;
@@ -36,7 +38,11 @@ use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
-use momo_db::PgPool;
+use momo_db::{with_tenant_tx, PgPool};
+use momo_messaging::{
+    presence_status_for, set_declared_presence_in_tx, CustomStatusPatch, PresenceStatus,
+    StatusPatch,
+};
 use momo_notifier::{PushConfig, PushDrain};
 use momo_push::{DispatchOutcome, PushDispatch, PushDispatcher};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -863,6 +869,152 @@ async fn dnd_outranks_a_mention_exception() {
         relay.sent().is_empty(),
         "DND must win over a mention exception — pause-everything means everything"
     );
+}
+
+/// ADR-0124 증보 2: a timed pause suppresses while `dnd_until` is ahead and
+/// delivers once it is behind — compared by the judgment SQL at drain time.
+/// Nothing sweeps the row: the SAME stored `dnd = true` row is still there when
+/// the second message is delivered.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_timed_pause_suppresses_until_it_expires_then_delivers() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let secrets = Secrets::mint();
+    let fixture = seed_dm_fixture(&su, &secrets).await;
+    focus_candidates(&su, &[fixture.workspace_id]).await;
+
+    sqlx::query(
+        "INSERT INTO notification_rule (workspace_id, member_id, dnd, dnd_until) \
+         VALUES ($1, $2, true, now() + interval '1 hour')",
+    )
+    .bind(fixture.workspace_id)
+    .bind(fixture.recipient_id)
+    .execute(&su)
+    .await
+    .expect("pause for an hour");
+
+    send_message(&su, &fixture, &secrets.body, 1).await;
+    let relay = RecordingDispatcher::accepting();
+    let pool = momo_notifier_pool().await;
+    drain(&pool, relay.clone())
+        .drain_once(32)
+        .await
+        .expect("drain while paused");
+    assert!(
+        relay.sent().is_empty(),
+        "a pause whose expiry is ahead must suppress like an open-ended one"
+    );
+
+    // Time passes: the expiry is now behind. Only the timestamp moves — `dnd`
+    // stays true, exactly what a lazily-expired row looks like with no sweeper.
+    sqlx::query(
+        "UPDATE notification_rule SET dnd_until = now() - interval '1 second' \
+          WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(fixture.workspace_id)
+    .bind(fixture.recipient_id)
+    .execute(&su)
+    .await
+    .expect("let the pause lapse");
+    let still_on: bool = sqlx::query_scalar(
+        "SELECT dnd FROM notification_rule WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(fixture.workspace_id)
+    .bind(fixture.recipient_id)
+    .fetch_one(&su)
+    .await
+    .expect("read stored dnd");
+    assert!(still_on, "the stored flag is untouched; only time moved");
+
+    let second = send_message(&su, &fixture, &secrets.body, 2).await;
+    let relay = RecordingDispatcher::accepting();
+    drain(&pool, relay.clone())
+        .drain_once(32)
+        .await
+        .expect("drain after expiry");
+    let sent = relay.sent();
+    assert_eq!(sent.len(), 1, "an expired pause must deliver: {sent:?}");
+    assert_eq!(sent[0].message_id, second.to_string());
+}
+
+/// ADR-0124 증보 2 「묶어」: choosing declared DND with an expiry pauses pushes
+/// through the presence write alone (no second write to notification-rules),
+/// and the pause lapses with DND — real wall-clock expiry, no sweeper, no
+/// timestamp rewriting.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn declared_dnd_pauses_pushes_and_both_lapse_together() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let secrets = Secrets::mint();
+    let fixture = seed_dm_fixture(&su, &secrets).await;
+    focus_candidates(&su, &[fixture.workspace_id]).await;
+
+    let workspace = fixture.workspace_id;
+    let recipient = fixture.recipient_id;
+    let until = chrono::Utc::now() + chrono::Duration::seconds(3);
+    let update = with_tenant_tx(&su, workspace, move |conn| {
+        Box::pin(async move {
+            set_declared_presence_in_tx(
+                conn,
+                workspace,
+                recipient,
+                PresenceStatus::Dnd,
+                StatusPatch::Set(Some(until)),
+                CustomStatusPatch::default(),
+            )
+            .await
+        })
+    })
+    .await
+    .expect("declare dnd for 3s")
+    .expect("a live human");
+    assert_eq!(update.status, PresenceStatus::Dnd);
+
+    send_message(&su, &fixture, &secrets.body, 1).await;
+    let relay = RecordingDispatcher::accepting();
+    let pool = momo_notifier_pool().await;
+    drain(&pool, relay.clone())
+        .drain_once(32)
+        .await
+        .expect("drain during dnd");
+    assert!(
+        relay.sent().is_empty(),
+        "declared DND must pause pushes through the presence write alone"
+    );
+
+    // Wait out the real expiry.
+    let wait = (until - chrono::Utc::now()).to_std().unwrap_or_default()
+        + std::time::Duration::from_millis(500);
+    tokio::time::sleep(wait).await;
+
+    let after = with_tenant_tx(&su, workspace, move |conn| {
+        Box::pin(async move { presence_status_for(conn, recipient).await })
+    })
+    .await
+    .expect("read presence after expiry");
+    assert_eq!(
+        after,
+        Some(PresenceStatus::Auto),
+        "an expired DND reads as auto"
+    );
+
+    let second = send_message(&su, &fixture, &secrets.body, 2).await;
+    let relay = RecordingDispatcher::accepting();
+    drain(&pool, relay.clone())
+        .drain_once(32)
+        .await
+        .expect("drain after expiry");
+    let sent = relay.sent();
+    assert_eq!(
+        sent.len(),
+        1,
+        "the pause must lapse with DND, not outlive it: {sent:?}"
+    );
+    assert_eq!(sent[0].message_id, second.to_string());
 }
 
 /// A relay that is briefly down must not cost a notification. The candidate goes

@@ -15,6 +15,23 @@
 //!   3. **the roster carries each human's declared status and no agent's** (D4).
 //!   4. **an agent cannot hold a declared status** — the domain guard matches no
 //!      row for `kind = 'agent'`, so even a bypassed route changes nothing.
+//!   5. **declared DND is bundled with the notification pause** (ADR-0124 증보
+//!      2, 성재 2026-09-27 「묶어」): choosing DND turns the pause on in the same
+//!      transaction, ending DND restores the pause that was there before, a
+//!      pause that was already on is kept, a timed DND gives the pause the same
+//!      expiry, and an explicit rule edit breaks the link.
+//!
+//! | test (5) | sabotage that makes it red |
+//! |---|---|
+//! | `choosing_dnd_pauses_notifications_and_ending_it_restores_off` | skip `engage_…` / `release_…` in `set_declared_presence_in_tx` |
+//! | `a_timed_dnd_pauses_until_the_same_moment` | engage with `None` instead of the DND expiry |
+//! | `a_pause_that_was_already_on_is_kept_through_dnd` | drop the snapshot (release to `false`), or drop the union in `bundled_until` |
+//! | `re_choosing_dnd_does_not_resnapshot_the_bundled_value` | re-snapshot on every engage |
+//! | `an_explicit_pause_edit_breaks_the_bundle` | keep `presence_prev_*` on a pause-changing rule PUT, or engage on every DND write |
+//! | `the_bundle_rolls_back_with_the_presence_write` | write the pause on a second connection/transaction |
+//! | `a_rolled_back_server_can_still_clear_a_timed_dnd` | put back a CHECK tying `dnd_until`/`presence_dnd_until` to its gate in 090 |
+//! | `a_first_write_race_does_not_drop_the_mention_exception` | engage with `Load::Lock` AND drop the member `FOR UPDATE` (two guards: either alone keeps it green) |
+//! | `an_expired_dnd_reads_as_auto_everywhere` | drop the lazy expiry from `effective_presence` or the roster `CASE` |
 //!
 //! `#[ignore]` because it needs a real Postgres. Run:
 //!
@@ -33,13 +50,17 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
 
+use chrono::{DateTime, Duration, Utc};
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::{with_tenant_tx, DbError, PgPool};
 use momo_messaging::{
-    cent_channel, create_channel, list_workspace_roster, presence_status_for,
-    set_presence_status_in_tx, ChannelKind, MemberKind, NewChannel, PresenceStatus,
+    cent_channel, create_channel, declared_presence_for, get_notification_rule_in_tx,
+    list_workspace_roster, presence_status_for, set_declared_presence_in_tx,
+    set_notification_rule_in_tx, set_presence_status_in_tx, ChannelKind, CustomStatusPatch,
+    MemberKind, NewChannel, NotificationRule, NotificationRuleUpdate, PresenceStatus,
+    PresenceUpdate, StatusPatch,
 };
 use uuid::Uuid;
 
@@ -417,5 +438,797 @@ async fn an_agent_cannot_be_given_a_declared_status() {
     assert!(
         presence_broadcasts(&su, workspace).await.is_empty(),
         "nothing was broadcast for a change that did not happen"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0124 증보 2 — declared DND ↔ notification pause bundle (#2850)
+// ---------------------------------------------------------------------------
+
+/// A whole-millisecond instant `offset` from now, so what PG stores (µs) and
+/// what the wire carries (ms) compare equal.
+fn at(offset: Duration) -> DateTime<Utc> {
+    DateTime::from_timestamp_millis((Utc::now() + offset).timestamp_millis()).expect("ms")
+}
+
+async fn declare(
+    app: &PgPool,
+    workspace: Uuid,
+    member: Uuid,
+    status: PresenceStatus,
+    until: StatusPatch<DateTime<Utc>>,
+    custom: CustomStatusPatch,
+) -> PresenceUpdate {
+    with_tenant_tx(app, workspace, move |conn| {
+        Box::pin(async move {
+            set_declared_presence_in_tx(conn, workspace, member, status, until, custom).await
+        })
+    })
+    .await
+    .expect("declare presence")
+    .expect("a live human member")
+}
+
+async fn rule(app: &PgPool, workspace: Uuid, member: Uuid) -> NotificationRule {
+    with_tenant_tx(app, workspace, move |conn| {
+        Box::pin(async move { get_notification_rule_in_tx(conn, workspace, member).await })
+    })
+    .await
+    .expect("read rule")
+}
+
+async fn put_rule(app: &PgPool, workspace: Uuid, member: Uuid, update: NotificationRuleUpdate) {
+    with_tenant_tx(app, workspace, move |conn| {
+        Box::pin(async move { set_notification_rule_in_tx(conn, workspace, member, update).await })
+    })
+    .await
+    .expect("put rule");
+}
+
+/// The bundle memory, raw (superuser).
+async fn bundle_memory(su: &PgPool, member: Uuid) -> Option<(Option<bool>, Option<DateTime<Utc>>)> {
+    sqlx::query_as(
+        "SELECT presence_prev_dnd, presence_prev_dnd_until FROM notification_rule WHERE member_id = $1",
+    )
+    .bind(member)
+    .fetch_optional(su)
+    .await
+    .expect("read bundle memory")
+}
+
+fn text_patch(text: &str) -> CustomStatusPatch {
+    CustomStatusPatch {
+        text: StatusPatch::Set(Some(text.to_string())),
+        ..CustomStatusPatch::default()
+    }
+}
+
+const OFF: NotificationRule = NotificationRule {
+    dnd: false,
+    dnd_until: None,
+    mention_overrides_mute: false,
+};
+
+/// 켜기·풀기: a member who never touched notification rules chooses DND — the
+/// pause comes on with no second write; ending DND puts it back to off and
+/// forgets the bundle.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a real Postgres"]
+async fn choosing_dnd_pauses_notifications_and_ending_it_restores_off() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let workspace = seed_workspace(&su).await;
+    let human = seed_member(&su, workspace, "human").await;
+    assert_eq!(rule(&app, workspace, human).await, OFF);
+
+    declare(
+        &app,
+        workspace,
+        human,
+        PresenceStatus::Dnd,
+        StatusPatch::Absent,
+        CustomStatusPatch::default(),
+    )
+    .await;
+    assert_eq!(
+        rule(&app, workspace, human).await,
+        NotificationRule { dnd: true, ..OFF },
+        "choosing DND must pause notifications in the same write"
+    );
+    assert_eq!(bundle_memory(&su, human).await, Some((Some(false), None)));
+
+    declare(
+        &app,
+        workspace,
+        human,
+        PresenceStatus::Auto,
+        StatusPatch::Absent,
+        CustomStatusPatch::default(),
+    )
+    .await;
+    assert_eq!(
+        rule(&app, workspace, human).await,
+        OFF,
+        "ending DND must restore the pause that was there before (off)"
+    );
+    assert_eq!(bundle_memory(&su, human).await, Some((None, None)));
+}
+
+/// 만료: a timed DND gives the pause the same expiry, and both reads carry it.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a real Postgres"]
+async fn a_timed_dnd_pauses_until_the_same_moment() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let workspace = seed_workspace(&su).await;
+    let human = seed_member(&su, workspace, "human").await;
+    let until = at(Duration::hours(1));
+
+    let update = declare(
+        &app,
+        workspace,
+        human,
+        PresenceStatus::Dnd,
+        StatusPatch::Set(Some(until)),
+        CustomStatusPatch::default(),
+    )
+    .await;
+    assert_eq!(update.status, PresenceStatus::Dnd);
+    assert_eq!(update.dnd_until, Some(until));
+    assert_eq!(
+        rule(&app, workspace, human).await,
+        NotificationRule {
+            dnd: true,
+            dnd_until: Some(until),
+            ..OFF
+        },
+        "the pause must lapse with DND — same expiry"
+    );
+    let declared = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move { declared_presence_for(conn, human).await })
+    })
+    .await
+    .expect("read declared")
+    .expect("human");
+    assert_eq!(declared.dnd_until, Some(until));
+
+    // Leaving DND clears the DND expiry column (CHECK) and the pause.
+    declare(
+        &app,
+        workspace,
+        human,
+        PresenceStatus::Away,
+        StatusPatch::Absent,
+        CustomStatusPatch::default(),
+    )
+    .await;
+    let stored: Option<DateTime<Utc>> =
+        sqlx::query_scalar("SELECT presence_dnd_until FROM member WHERE id = $1")
+            .bind(human)
+            .fetch_one(&su)
+            .await
+            .expect("read presence_dnd_until");
+    assert_eq!(stored, None);
+    assert_eq!(rule(&app, workspace, human).await, OFF);
+}
+
+/// 원래 켜져 있던 경우 유지: a pause that was already on survives DND in both
+/// directions — an open-ended one stays open-ended, a timed one is never
+/// shortened by DND and is restored exactly when DND ends.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a real Postgres"]
+async fn a_pause_that_was_already_on_is_kept_through_dnd() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let workspace = seed_workspace(&su).await;
+
+    // (a) open-ended pause, timed DND.
+    let open = seed_member(&su, workspace, "human").await;
+    put_rule(
+        &app,
+        workspace,
+        open,
+        NotificationRule { dnd: true, ..OFF }.into(),
+    )
+    .await;
+    declare(
+        &app,
+        workspace,
+        open,
+        PresenceStatus::Dnd,
+        StatusPatch::Set(Some(at(Duration::hours(1)))),
+        CustomStatusPatch::default(),
+    )
+    .await;
+    assert_eq!(
+        rule(&app, workspace, open).await,
+        NotificationRule { dnd: true, ..OFF },
+        "an open-ended pause must not be given DND's expiry"
+    );
+    declare(
+        &app,
+        workspace,
+        open,
+        PresenceStatus::Away,
+        StatusPatch::Absent,
+        CustomStatusPatch::default(),
+    )
+    .await;
+    assert_eq!(
+        rule(&app, workspace, open).await,
+        NotificationRule { dnd: true, ..OFF },
+        "ending DND must leave a pause that was on before, on"
+    );
+
+    // (b) longer timed pause, shorter DND: the pause keeps its own expiry.
+    let long = seed_member(&su, workspace, "human").await;
+    let three_h = at(Duration::hours(3));
+    put_rule(
+        &app,
+        workspace,
+        long,
+        NotificationRule {
+            dnd: true,
+            dnd_until: Some(three_h),
+            ..OFF
+        }
+        .into(),
+    )
+    .await;
+    declare(
+        &app,
+        workspace,
+        long,
+        PresenceStatus::Dnd,
+        StatusPatch::Set(Some(at(Duration::hours(1)))),
+        CustomStatusPatch::default(),
+    )
+    .await;
+    assert_eq!(rule(&app, workspace, long).await.dnd_until, Some(three_h));
+    declare(
+        &app,
+        workspace,
+        long,
+        PresenceStatus::Auto,
+        StatusPatch::Absent,
+        CustomStatusPatch::default(),
+    )
+    .await;
+    assert_eq!(
+        rule(&app, workspace, long).await,
+        NotificationRule {
+            dnd: true,
+            dnd_until: Some(three_h),
+            ..OFF
+        }
+    );
+
+    // (c) shorter timed pause, longer DND: the pause covers DND, then the
+    // original 30-minute pause is what comes back.
+    let short = seed_member(&su, workspace, "human").await;
+    let thirty = at(Duration::minutes(30));
+    let two_h = at(Duration::hours(2));
+    put_rule(
+        &app,
+        workspace,
+        short,
+        NotificationRule {
+            dnd: true,
+            dnd_until: Some(thirty),
+            ..OFF
+        }
+        .into(),
+    )
+    .await;
+    declare(
+        &app,
+        workspace,
+        short,
+        PresenceStatus::Dnd,
+        StatusPatch::Set(Some(two_h)),
+        CustomStatusPatch::default(),
+    )
+    .await;
+    assert_eq!(rule(&app, workspace, short).await.dnd_until, Some(two_h));
+    declare(
+        &app,
+        workspace,
+        short,
+        PresenceStatus::Auto,
+        StatusPatch::Absent,
+        CustomStatusPatch::default(),
+    )
+    .await;
+    assert_eq!(
+        rule(&app, workspace, short).await,
+        NotificationRule {
+            dnd: true,
+            dnd_until: Some(thirty),
+            ..OFF
+        },
+        "ending DND restores the member's own 30-minute pause"
+    );
+}
+
+/// Re-choosing DND (a new expiry, or editing a custom status while in DND) must
+/// not re-snapshot: the memory would then hold the bundled "on" and ending DND
+/// would leave notifications paused forever.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a real Postgres"]
+async fn re_choosing_dnd_does_not_resnapshot_the_bundled_value() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let workspace = seed_workspace(&su).await;
+    let human = seed_member(&su, workspace, "human").await;
+
+    declare(
+        &app,
+        workspace,
+        human,
+        PresenceStatus::Dnd,
+        StatusPatch::Set(Some(at(Duration::hours(1)))),
+        CustomStatusPatch::default(),
+    )
+    .await;
+    let two_h = at(Duration::hours(2));
+    declare(
+        &app,
+        workspace,
+        human,
+        PresenceStatus::Dnd,
+        StatusPatch::Set(Some(two_h)),
+        CustomStatusPatch::default(),
+    )
+    .await;
+    assert_eq!(
+        rule(&app, workspace, human).await,
+        NotificationRule {
+            dnd: true,
+            dnd_until: Some(two_h),
+            ..OFF
+        },
+        "a re-chosen expiry moves the pause with it"
+    );
+    // Custom-status edit while in DND: expiry kept.
+    declare(
+        &app,
+        workspace,
+        human,
+        PresenceStatus::Dnd,
+        StatusPatch::Absent,
+        text_patch("집중"),
+    )
+    .await;
+    assert_eq!(rule(&app, workspace, human).await.dnd_until, Some(two_h));
+    assert_eq!(bundle_memory(&su, human).await, Some((Some(false), None)));
+
+    declare(
+        &app,
+        workspace,
+        human,
+        PresenceStatus::Auto,
+        StatusPatch::Absent,
+        CustomStatusPatch::default(),
+    )
+    .await;
+    assert_eq!(
+        rule(&app, workspace, human).await,
+        OFF,
+        "the memory is the pre-DND off, not the bundled on"
+    );
+}
+
+/// An explicit rule PUT that changes the pause breaks the bundle: ending DND
+/// must not overwrite what the member chose by hand, and a later DND write that
+/// is not a new choice (custom-status edit) must not re-arm it. A PUT that only
+/// flips the mention exception keeps the bundle.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a real Postgres"]
+async fn an_explicit_pause_edit_breaks_the_bundle() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let workspace = seed_workspace(&su).await;
+
+    let manual = seed_member(&su, workspace, "human").await;
+    declare(
+        &app,
+        workspace,
+        manual,
+        PresenceStatus::Dnd,
+        StatusPatch::Absent,
+        CustomStatusPatch::default(),
+    )
+    .await;
+    put_rule(&app, workspace, manual, OFF.into()).await;
+    assert_eq!(
+        bundle_memory(&su, manual).await,
+        Some((None, None)),
+        "the link is broken"
+    );
+    declare(
+        &app,
+        workspace,
+        manual,
+        PresenceStatus::Dnd,
+        StatusPatch::Absent,
+        text_patch("회의"),
+    )
+    .await;
+    assert_eq!(
+        rule(&app, workspace, manual).await,
+        OFF,
+        "a custom-status edit while in DND must not re-arm a pause the member turned off"
+    );
+
+    // Manual "on" during DND, then DND ends: the manual choice stands.
+    let manual_on = seed_member(&su, workspace, "human").await;
+    declare(
+        &app,
+        workspace,
+        manual_on,
+        PresenceStatus::Dnd,
+        StatusPatch::Set(Some(at(Duration::hours(1)))),
+        CustomStatusPatch::default(),
+    )
+    .await;
+    put_rule(
+        &app,
+        workspace,
+        manual_on,
+        NotificationRule { dnd: true, ..OFF }.into(),
+    )
+    .await;
+    declare(
+        &app,
+        workspace,
+        manual_on,
+        PresenceStatus::Auto,
+        StatusPatch::Absent,
+        CustomStatusPatch::default(),
+    )
+    .await;
+    assert_eq!(
+        rule(&app, workspace, manual_on).await,
+        NotificationRule { dnd: true, ..OFF },
+        "ending DND must not overwrite a pause chosen by hand"
+    );
+
+    // Mention-exception-only toggle (pause unchanged, expiry omitted): kept.
+    let mention = seed_member(&su, workspace, "human").await;
+    let until = at(Duration::hours(1));
+    declare(
+        &app,
+        workspace,
+        mention,
+        PresenceStatus::Dnd,
+        StatusPatch::Set(Some(until)),
+        CustomStatusPatch::default(),
+    )
+    .await;
+    put_rule(
+        &app,
+        workspace,
+        mention,
+        NotificationRuleUpdate {
+            dnd: true,
+            dnd_until: StatusPatch::Absent,
+            mention_overrides_mute: true,
+        },
+    )
+    .await;
+    assert_eq!(
+        rule(&app, workspace, mention).await,
+        NotificationRule {
+            dnd: true,
+            dnd_until: Some(until),
+            mention_overrides_mute: true
+        }
+    );
+    declare(
+        &app,
+        workspace,
+        mention,
+        PresenceStatus::Auto,
+        StatusPatch::Absent,
+        CustomStatusPatch::default(),
+    )
+    .await;
+    assert_eq!(
+        rule(&app, workspace, mention).await,
+        NotificationRule {
+            mention_overrides_mute: true,
+            ..OFF
+        },
+        "a mention-only edit keeps the bundle, so ending DND still restores off"
+    );
+}
+
+/// 단일 tx: the pause is written in the presence write's own transaction — a
+/// rollback after it leaves neither the status nor the pause behind.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a real Postgres"]
+async fn the_bundle_rolls_back_with_the_presence_write() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let workspace = seed_workspace(&su).await;
+    let human = seed_member(&su, workspace, "human").await;
+
+    let outcome: Result<(), DbError> = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            set_declared_presence_in_tx(
+                conn,
+                workspace,
+                human,
+                PresenceStatus::Dnd,
+                StatusPatch::Absent,
+                CustomStatusPatch::default(),
+            )
+            .await?;
+            Err(DbError::Sqlx(sqlx::Error::RowNotFound))
+        })
+    })
+    .await;
+    assert!(outcome.is_err());
+    assert_eq!(stored_presence(&su, human).await, "auto");
+    assert_eq!(
+        bundle_memory(&su, human).await,
+        None,
+        "no rule row survived the rollback"
+    );
+    assert_eq!(rule(&app, workspace, human).await, OFF);
+}
+
+/// Lazy expiry, no sweeper: after the real DND expiry passes, the own read, the
+/// roster and the pause all read "not DND" while the stored columns still say
+/// dnd; the next write releases the bundle cleanly.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a real Postgres"]
+async fn an_expired_dnd_reads_as_auto_everywhere() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let workspace = seed_workspace(&su).await;
+    let human = seed_member(&su, workspace, "human").await;
+
+    let until = at(Duration::seconds(2));
+    declare(
+        &app,
+        workspace,
+        human,
+        PresenceStatus::Dnd,
+        StatusPatch::Set(Some(until)),
+        CustomStatusPatch::default(),
+    )
+    .await;
+    // While running, the roster carries the expiry so co-members can drop the
+    // dot on time — no event fires at expiry.
+    let running = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(
+            async move { list_workspace_roster(conn, workspace, human, false, None, 200).await },
+        )
+    })
+    .await
+    .expect("roster while running");
+    let running = running.iter().find(|m| m.id == human).expect("on roster");
+    assert_eq!(running.presence_status, Some(PresenceStatus::Dnd));
+    assert_eq!(running.dnd_until_ms, Some(until.timestamp_millis()));
+    let wait =
+        (until - Utc::now()).to_std().unwrap_or_default() + std::time::Duration::from_millis(500);
+    tokio::time::sleep(wait).await;
+
+    assert_eq!(
+        stored_presence(&su, human).await,
+        "dnd",
+        "nothing swept the column"
+    );
+    let status = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move { presence_status_for(conn, human).await })
+    })
+    .await
+    .expect("read");
+    assert_eq!(status, Some(PresenceStatus::Auto));
+    let roster = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(
+            async move { list_workspace_roster(conn, workspace, human, false, None, 200).await },
+        )
+    })
+    .await
+    .expect("roster");
+    let row = roster.iter().find(|m| m.id == human).expect("on roster");
+    assert_eq!(
+        row.presence_status,
+        Some(PresenceStatus::Auto),
+        "the roster applies the same expiry"
+    );
+    assert_eq!(row.dnd_until_ms, None, "a lapsed DND carries no expiry");
+    assert_eq!(
+        rule(&app, workspace, human).await,
+        OFF,
+        "the pause lapsed with DND"
+    );
+
+    declare(
+        &app,
+        workspace,
+        human,
+        PresenceStatus::Away,
+        StatusPatch::Absent,
+        CustomStatusPatch::default(),
+    )
+    .await;
+    assert_eq!(bundle_memory(&su, human).await, Some((None, None)));
+    assert_eq!(rule(&app, workspace, human).await, OFF);
+}
+
+/// Rollback safety (review #2901 H1): 090 is forward-only and a rollback
+/// redeploys the previous digest, so v0.1.10 runs on this schema. Its two exits
+/// — `PUT notification-rules {dnd:false}` and `PUT presence {status:auto}` —
+/// know nothing of the expiry columns and only turn the gate off. Replayed here
+/// with v0.1.10's exact SQL, both must succeed on a member in a timed, bundled
+/// DND; a shape CHECK on the expiry columns would make both a 500 and trap the
+/// member. The residual downgrade (old judgment ignores `dnd_until`, so a timed
+/// pause becomes "until turned off") is accepted and documented.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a real Postgres"]
+async fn a_rolled_back_server_can_still_clear_a_timed_dnd() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let workspace = seed_workspace(&su).await;
+    let human = seed_member(&su, workspace, "human").await;
+
+    let until = at(Duration::hours(1));
+    declare(
+        &app,
+        workspace,
+        human,
+        PresenceStatus::Dnd,
+        StatusPatch::Set(Some(until)),
+        CustomStatusPatch::default(),
+    )
+    .await;
+
+    // v0.1.10 `PUT notification-rules {dnd:false, mentionOverridesMute:false}`.
+    with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            sqlx::query(
+                "INSERT INTO notification_rule \
+                   (workspace_id, member_id, dnd, mention_overrides_mute) \
+                 VALUES ($1, $2, $3, $4) \
+                 ON CONFLICT (workspace_id, member_id) \
+                 DO UPDATE SET dnd = EXCLUDED.dnd, \
+                               mention_overrides_mute = EXCLUDED.mention_overrides_mute, \
+                               updated_at = now()",
+            )
+            .bind(workspace)
+            .bind(human)
+            .bind(false)
+            .bind(false)
+            .execute(&mut *conn)
+            .await?;
+            Ok::<_, DbError>(())
+        })
+    })
+    .await
+    .expect("v0.1.10 pause-off write must succeed on the 090 schema");
+
+    // v0.1.10 `PUT presence {status:auto}` (status-only body: no custom patch).
+    let returned: Option<String> = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            let row: Option<String> = sqlx::query_scalar(
+                "UPDATE member \
+                    SET presence_status = $1::presence_status, \
+                        status_emoji = CASE WHEN $4 THEN $5 ELSE status_emoji END, \
+                        status_text = CASE WHEN $6 THEN $7 ELSE status_text END, \
+                        status_expires_at = CASE WHEN $8 THEN $9 ELSE status_expires_at END, \
+                        updated_at = now() \
+                  WHERE id = $2 \
+                    AND workspace_id = $3 \
+                    AND kind = 'human' \
+                    AND deleted_at IS NULL \
+                RETURNING presence_status::text",
+            )
+            .bind("auto")
+            .bind(human)
+            .bind(workspace)
+            .bind(false)
+            .bind(None::<String>)
+            .bind(false)
+            .bind(None::<String>)
+            .bind(false)
+            .bind(None::<DateTime<Utc>>)
+            .fetch_optional(&mut *conn)
+            .await?;
+            Ok::<_, DbError>(row)
+        })
+    })
+    .await
+    .expect("v0.1.10 leave-DND write must succeed on the 090 schema");
+    assert_eq!(returned.as_deref(), Some("auto"));
+
+    // v0.1.10 judgment predicate now delivers.
+    let old_delivers: bool = sqlx::query_scalar(
+        "SELECT COALESCE(dnd, false) = false FROM notification_rule WHERE member_id = $1",
+    )
+    .bind(human)
+    .fetch_one(&su)
+    .await
+    .expect("old judgment predicate");
+    assert!(old_delivers, "the rolled-back server must deliver again");
+
+    // Rolled forward again, the stale expiry beside a false gate is harmless.
+    assert_eq!(rule(&app, workspace, human).await, OFF);
+    let presence = with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move { declared_presence_for(conn, human).await })
+    })
+    .await
+    .expect("read")
+    .expect("human");
+    assert_eq!(presence.status, PresenceStatus::Auto);
+    assert_eq!(presence.dnd_until, None);
+}
+
+/// Review #2901 M1: a member with no rule row. Device A's first rule PUT
+/// (mention exception on) is open; device B chooses DND at the same moment.
+/// `FOR UPDATE` on an absent row locks nothing, so without materializing the
+/// row first B would compute from the defaults and its upsert, landing after
+/// A commits, would silently reset the mention exception.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a real Postgres"]
+async fn a_first_write_race_does_not_drop_the_mention_exception() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let workspace = seed_workspace(&su).await;
+    let human = seed_member(&su, workspace, "human").await;
+
+    let mut tx_a = app.begin().await.expect("begin A");
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(workspace.to_string())
+        .execute(&mut *tx_a)
+        .await
+        .expect("bind A");
+    set_notification_rule_in_tx(
+        &mut tx_a,
+        workspace,
+        human,
+        NotificationRule {
+            mention_overrides_mute: true,
+            ..OFF
+        },
+    )
+    .await
+    .expect("A writes, uncommitted");
+
+    let app_b = app.clone();
+    let b = tokio::spawn(async move {
+        declare(
+            &app_b,
+            workspace,
+            human,
+            PresenceStatus::Dnd,
+            StatusPatch::Absent,
+            CustomStatusPatch::default(),
+        )
+        .await
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    tx_a.commit().await.expect("commit A");
+    b.await.expect("B joins");
+
+    assert_eq!(
+        rule(&app, workspace, human).await,
+        NotificationRule {
+            dnd: true,
+            dnd_until: None,
+            mention_overrides_mute: true,
+        },
+        "B must build on A's committed row, not overwrite it with defaults"
     );
 }

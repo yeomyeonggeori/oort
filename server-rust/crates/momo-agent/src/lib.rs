@@ -144,6 +144,7 @@ pub mod approval;
 pub mod dm;
 pub mod effort;
 pub mod error;
+pub mod hosted_dm;
 pub mod hosted_notice;
 pub mod korean;
 pub mod mention;
@@ -208,12 +209,18 @@ pub use effort::{
     MAX_EFFORT_LENGTH,
 };
 pub use error::AgentError;
+pub use hosted_dm::{
+    hosted_dm_approval_state, hosted_dm_delivery, list_hosted_agent_dms_in_tx,
+    load_hosted_dm_connection_in_tx, set_hosted_dm_approval_in_tx, unapproved_dm_reason,
+    HostedDmApprovalError, HostedDmApprovalState, HostedDmConnection, HostedDmDelivery,
+    HostedDmRow,
+};
 pub use hosted_notice::{
-    hosted_skip_notice_body, hosted_skip_notice_key, hosted_skip_notice_props, inert_display_name,
-    HostedSkipReason, HOSTED_DELIVERY_GUIDE_URL, HOSTED_SKIP_ACTION_HREF,
-    HOSTED_SKIP_NOTICE_AUDIT_SCHEMA, HOSTED_SKIP_NOTICE_KIND, HOSTED_SKIP_NOTICE_POSTED_ACTION,
-    HOSTED_SKIP_NOTICE_SOURCE, HOSTED_SKIP_NOTICE_THROTTLED_ACTION,
-    HOSTED_SKIP_NOTICE_THROTTLE_SECONDS,
+    hosted_skip_notice_body, hosted_skip_notice_body_with_owner, hosted_skip_notice_key,
+    hosted_skip_notice_props, inert_display_name, HostedSkipReason, HOSTED_DELIVERY_GUIDE_URL,
+    HOSTED_SKIP_ACTION_HREF, HOSTED_SKIP_NOTICE_AUDIT_SCHEMA, HOSTED_SKIP_NOTICE_KIND,
+    HOSTED_SKIP_NOTICE_POSTED_ACTION, HOSTED_SKIP_NOTICE_SOURCE,
+    HOSTED_SKIP_NOTICE_THROTTLED_ACTION, HOSTED_SKIP_NOTICE_THROTTLE_SECONDS,
 };
 pub use korean::{attach_particle, has_final_consonant, particle_for, ParticlePair};
 pub use mention::{

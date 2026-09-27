@@ -42,7 +42,6 @@ import {
   activityLines,
   activitySuffix,
   activityText,
-  agentLabelAsSubject,
   TURN_STALE_SENTENCE,
   UNKNOWN_AGENT_NAME,
   type AgentActivityLine,
@@ -73,6 +72,7 @@ import {
 } from "@/features/chat/draftStore";
 import { rememberSendLearned, useSendHintNeeded } from "@/features/chat/sendHint";
 import { useAutoGrow } from "@/features/timeline/useAutoGrow";
+import { useDmDeliveryHint } from "@/features/chat/useDmDeliveryHint";
 import { useOffline } from "@/features/common/useOffline";
 import {
   AttachButton,
@@ -165,19 +165,18 @@ export { COMPOSER_OFFLINE_COPY };
  * 그릇 바로 위의 상시 안내다. `sharedRow`가 두 배치의 경계를 DOM에도 남긴다.
  */
 function ComposerHint({
-  directory,
-  dmAgent,
+  dmHint,
   keysHintNeeded,
   pendingLink,
   sharedRow,
 }: {
-  directory: Directory;
-  dmAgent: RosterMember | null;
+  /** `useDmDeliveryHint`: the sentence the server's delivery state makes true (#2891). */
+  dmHint: string | null;
   keysHintNeeded: boolean;
   pendingLink: boolean;
   sharedRow: boolean;
 }) {
-  const lead = pendingLink || dmAgent;
+  const lead = pendingLink || dmHint !== null;
   return (
     <p
       id="composer-hint"
@@ -188,7 +187,7 @@ function ComposerHint({
         sharedRow
           ? "min-w-0 flex-1 truncate text-right text-meta text-ink-muted"
           : "px-6 pb-2 text-meta text-ink-muted",
-        !dmAgent && !pendingLink && "wide-only"
+        dmHint === null && !pendingLink && "wide-only"
       )}
       data-testid="composer-hint"
       data-composer-meta-slot={sharedRow ? "" : undefined}
@@ -196,14 +195,10 @@ function ComposerHint({
       {pendingLink && (
         <span data-testid="composer-link-hint">{COMPOSER_FORMAT_LINK_HINT}</span>
       )}
-      {dmAgent && (
+      {dmHint !== null && (
         <span data-testid="composer-dm-hint">
           {pendingLink ? HINT_SEPARATOR : ""}
-          멘션 없이 바로 말하면{" "}
-          {agentLabelAsSubject(
-            memberNameParts(directory, dmAgent.id, dmAgent.displayName)
-          )}{" "}
-          답합니다
+          {dmHint}
         </span>
       )}
       {keysHintNeeded && (
@@ -538,16 +533,17 @@ export function Composer({
    * 정해진 액션 행 안에서 바뀌므로 사람의 타이핑이 시작돼도 컴포저가 움직이지 않는다.
    * DM 힌트는 폭과 무관한 방의 성질이므로 기존처럼 폰에도 남는다.
    */
+  const dmHint = useDmDeliveryHint({ workspaceId, channelId, directory, dmAgent });
   const pendingLink = composerFormatHasPendingLink(text);
   const metaMode = composerMetaMode({
     typistCount: typists.length,
-    hasDmHint: dmAgent !== null,
+    hasDmHint: dmHint !== null,
     keysHintNeeded,
     isMobile,
     hasPendingLink: pendingLink,
   });
   const persistentPhoneDmHint = keepPhoneDmHint({
-    hasDmHint: dmAgent !== null,
+    hasDmHint: dmHint !== null,
     isMobile,
   });
   const showComposerHint = persistentPhoneDmHint || metaMode === "hint";
@@ -839,8 +835,7 @@ export function Composer({
 
       {persistentPhoneDmHint && (
         <ComposerHint
-          directory={directory}
-          dmAgent={dmAgent}
+          dmHint={dmHint}
           keysHintNeeded={keysHintNeeded}
           pendingLink={pendingLink}
           sharedRow={false}
@@ -999,8 +994,7 @@ export function Composer({
             </div>
             {metaMode === "hint" ? (
               <ComposerHint
-                directory={directory}
-                dmAgent={dmAgent}
+                dmHint={dmHint}
                 keysHintNeeded={keysHintNeeded}
                 pendingLink={pendingLink}
                 sharedRow
