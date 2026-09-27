@@ -9,6 +9,7 @@
 //   updater       self-replace the app bundle     -> commands + progress event
 //   detect        local hosted-agent signatures   -> command (T-5; passive only)
 //   harnesses     claude/codex installed + login  -> command (#2813; exit code only)
+//   git reads     a pane's repo/branch/diff numbers -> command (#2855; 8 fixed reads)
 //
 // Everything above is exposed to the web bundle as plain app commands and two
 // events; the contract is documented in `clients/desktop/README.md` and consumed
@@ -20,6 +21,10 @@ mod deeplink;
 #[cfg(desktop)]
 mod detect;
 mod discovery;
+// Eight fixed, read-only git commands in a pane's folder (ADR-0190 D3-c,
+// #2855). Parsed here; only fields reach the webview.
+#[cfg(desktop)]
+mod git_read;
 // Where harness CLIs live on this Mac (ADR-0190 D3), shared by every caller
 // that resolves `claude`/`codex` to an absolute path.
 #[cfg(desktop)]
@@ -114,6 +119,7 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_kill,
             pty::pty_ack,
+            git_read::workbench_git_read,
         ]);
 
     #[cfg(not(desktop))]
