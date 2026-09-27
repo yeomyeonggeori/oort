@@ -1,0 +1,31 @@
+appId: app.momo.ios
+name: 93-ai-connect-check-capture
+---
+# 93-ai-connect-check-capture — 자판 없이 카드 몸을 끝까지 올리고 「연결 확인」을 누른다 (#2945).
+#
+# `-momoMeasure AI-CONNECT-CARD` 위에서(92번과 같은 방식). 큰 글씨에서 버튼·알약·
+# 마스킹 꼬리까지 보이는지와, 확인 결과가 줄 자리에 서는지를 찍는다. 하네스에는
+# 서버가 없으므로 결과는 오류 갈래다.
+- extendedWaitUntil:
+    visible:
+      id: "ai-connect-card"
+    timeout: 60000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- scrollUntilVisible:
+    element:
+      id: "ai-connect-card-team-check"
+    direction: DOWN
+    timeout: 15000
+- takeScreenshot: ai-connect-scrolled
+- tapOn:
+    id: "ai-connect-card-team-check"
+- extendedWaitUntil:
+    visible:
+      id: "ai-connect-card-team-result"
+    timeout: 30000
+- scrollUntilVisible:
+    element:
+      id: "ai-connect-card-team-result"
+    direction: DOWN
+    timeout: 10000
+- takeScreenshot: ai-connect-check-result

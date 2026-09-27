@@ -1212,17 +1212,18 @@ export function Composer({
       runCommand(parsedCommand.command, parsedCommand.args);
       return;
     }
-    // 목록이 열린 채 ↑를 누르면 강조된 첫 줄을 고른다 — 웹 ↵와 같다(design-review
-    // #2945 M3). 「/연」 같은 반쯤 친 명령이 평문으로 채널에 나가지 않는다.
-    if (showSlash) {
-      acceptSlash(slashRows[0]);
-      return;
-    }
     // 키는 채팅에 실리지 않는다(brief §3.4·§5). 글은 **지우지 않는다**: 사람이
     // 키를 빼고 나머지를 보낼 수 있어야 한다. 초안 저장소에는 이미 없다 —
     // `drafts.ts` `saveDraft`가 키 모양이 든 글을 적지 않는다.
     if (containsSecretKey(body)) {
       setKeyBlocked(true);
+      return;
+    }
+    // 목록이 열린 채 ↑를 누르면 강조된 첫 줄을 고른다 — 웹 ↵와 같다(design-review
+    // #2945 M3). 「/연」 같은 반쯤 친 명령이 평문으로 채널에 나가지 않는다. 키 판정
+    // **뒤**다(R2-L1): 명령 앞머리 뒤에 붙은 키도 이유를 말하고 멈춘다.
+    if (showSlash) {
+      acceptSlash(slashRows[0]);
       return;
     }
     if (

@@ -22,6 +22,7 @@ import React, {useState} from 'react';
 import {
   ActivityIndicator,
   Image,
+  Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -43,6 +44,7 @@ import {
   radius,
   slopTo,
   space,
+  TOUCH_TARGET,
   type Palette,
 } from '../../design/tokens';
 
@@ -100,7 +102,7 @@ export const AI_CONNECT_CARD_COPY = {
   teamEnvSub: '서버 환경값',
   teamDefault: '팀 기본',
   /** 자판이 올라와 몸을 접었을 때 머리에 붙는 말(design-review #2945 H1). */
-  folded: '입력을 마치면 펼쳐져요',
+  folded: '자판을 내리고 카드 펼치기',
   source: 'API 키',
   legacySource: '내부용',
   check: '연결 확인',
@@ -151,9 +153,9 @@ function markFor(label: string): string {
 }
 
 /** 글자 배수를 따라 자라는 글리프·상자 크기 (design-review #2945 H2). */
-function useScaled(): (size: number) => number {
+function useScaled(cap: number = GLYPH_SCALE_CAP): (size: number) => number {
   const {fontScale} = useWindowDimensions();
-  const scale = Math.min(Math.max(fontScale, 1), GLYPH_SCALE_CAP);
+  const scale = Math.min(Math.max(fontScale, 1), cap);
   return (size: number) => Math.round(size * scale);
 }
 
@@ -190,9 +192,15 @@ export function AiConnectCardShell({
       testID={testID}>
       {header}
       {keyboardUp ? (
-        <Text style={styles.folded} testID="ai-connect-card-folded">
-          {AI_CONNECT_CARD_COPY.folded}
-        </Text>
+        // 누를 수 있어야 한다(design-review #2945 R2-M1): 큰 글씨에서는 대화 목록이
+        // 0pt 라 끌어서 자판을 내릴 자리가 없고, 여러 줄 입력창의 리턴은 줄바꿈이다.
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => Keyboard.dismiss()}
+          style={({pressed}) => [styles.foldedRow, pressed && styles.pressed]}
+          testID="ai-connect-card-folded">
+          <Text style={styles.folded}>{AI_CONNECT_CARD_COPY.folded}</Text>
+        </Pressable>
       ) : (
         <ScrollView
           style={{maxHeight: Math.round(height * CARD_BODY_WINDOW_SHARE)}}
@@ -227,20 +235,21 @@ export function AiConnectCard({
         style={[glyph(16), {tintColor: palette.icon}]}
         accessibilityIgnoresInvertColors
       />
-      <Text style={styles.headTitle} accessibilityRole="header">
-        {AI_CONNECT_CARD_COPY.title}
-      </Text>
-      <View style={styles.onlyChip} testID="ai-connect-card-only-me">
-        <Image
-          source={CARD_ICONS.eye}
-          style={[glyph(13), {tintColor: palette.textMuted}]}
-          accessibilityIgnoresInvertColors
-        />
-        <Text style={styles.onlyText} numberOfLines={1}>
-          {AI_CONNECT_CARD_COPY.onlyMe}
+      {/* 제목과 표지는 한 묶음이고 **접힌다**(design-review #2945 R2-H1): 큰 글씨에서
+          「나에게만」이 잘리면 이 카드의 사생활 표지가 사라진다. 닫기는 제 칸에 남는다. */}
+      <View style={styles.headTitles}>
+        <Text style={styles.headTitle} accessibilityRole="header">
+          {AI_CONNECT_CARD_COPY.title}
         </Text>
+        <View style={styles.onlyChip} testID="ai-connect-card-only-me">
+          <Image
+            source={CARD_ICONS.eye}
+            style={[glyph(13), {tintColor: palette.textMuted}]}
+            accessibilityIgnoresInvertColors
+          />
+          <Text style={styles.onlyText}>{AI_CONNECT_CARD_COPY.onlyMe}</Text>
+        </View>
       </View>
-      <View style={styles.flex} />
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={AI_CONNECT_CARD_COPY.close}
@@ -439,7 +448,9 @@ function TeamRow({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
-  const scaled = useScaled();
+  const scaled = useScaled(MARK_SCALE_CAP);
+  const {fontScale} = useWindowDimensions();
+  const stackPill = fontScale >= STACK_PILL_SCALE;
   const legacy = isLegacyTeamLink(link);
   const hasRow =
     link.configured || (link.keyConfigured && link.availability !== 'mock');
@@ -507,8 +518,13 @@ function TeamRow({
             testID="ai-connect-card-team-sub">
             {sub}
           </Text>
+          {stackPill ? (
+            <View style={styles.stackedPill}>
+              <Pill view={pill} />
+            </View>
+          ) : null}
         </View>
-        <Pill view={pill} />
+        {stackPill ? null : <Pill view={pill} />}
       </View>
       {canCheck ? (
         <View style={[styles.rowAction, {paddingLeft: scaled(MARK_SIZE) + space.sm}]}>
@@ -639,6 +655,13 @@ const BUTTON_HEIGHT = 30;
 const CARD_BODY_WINDOW_SHARE = 0.45;
 /** 글리프가 글자를 따라 커지는 상한. 아이콘이 글자보다 커지지 않게. */
 const GLYPH_SCALE_CAP = 2;
+/**
+ * 로고 칸은 글리프보다 덜 자란다(R2-H1): 이름 칸이 라틴 낱말 하나(「Anthropic」)를
+ * 온전히 담을 폭을 남긴다.
+ */
+const MARK_SCALE_CAP = 1.3;
+/** 이 배수부터 알약이 이름 아래로 내려간다 — 한 줄에 셋을 세우면 이름이 부서진다. */
+const STACK_PILL_SCALE = 1.5;
 /** 닫기 글리프 상자. */
 const CLOSE_BOX = 24;
 /** 알약 앞 점(시안 `.pill i{width:6px}`). */
@@ -673,6 +696,13 @@ function buildStyles(color: Palette) {
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: color.border,
     },
+    headTitles: {
+      flex: 1,
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      gap: space.sm,
+    },
     headTitle: {fontSize: ds2Type.subhead, fontWeight: '700', color: color.text},
     onlyChip: {
       flexDirection: 'row',
@@ -682,7 +712,6 @@ function buildStyles(color: Palette) {
       paddingVertical: space.xs,
       borderRadius: ds2Radius.pill,
       backgroundColor: color.surfaceMuted,
-      flexShrink: 1,
     },
     onlyText: {
       fontSize: ds2Type.caption,
@@ -726,6 +755,7 @@ function buildStyles(color: Palette) {
     },
     markText: {fontSize: ds2Type.caption, fontWeight: '800', color: color.text},
     rowText: {flex: 1, minWidth: 0},
+    stackedPill: {flexDirection: 'row', paddingTop: space.xs},
     nameLine: {flexDirection: 'row', alignItems: 'center', gap: space.xs, flexWrap: 'wrap'},
     name: {
       fontSize: ds2Type.subhead,
@@ -790,12 +820,17 @@ function buildStyles(color: Palette) {
       backgroundColor: color.sheet,
     },
     footText: {flex: 1, fontSize: ds2Type.caption, lineHeight: lineHeight.meta, color: color.textMuted},
-    folded: {
+    foldedRow: {
+      minHeight: TOUCH_TARGET,
+      justifyContent: 'center',
       paddingVertical: space.sm,
       paddingHorizontal: space.md,
+    },
+    folded: {
+      fontWeight: '600',
       fontSize: ds2Type.caption,
       lineHeight: lineHeight.meta,
-      color: color.textMuted,
+      color: color.text,
     },
   });
 }

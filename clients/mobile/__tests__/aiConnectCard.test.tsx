@@ -238,6 +238,11 @@ describe('카드 — 판정은 코어, 행동은 연결 확인 하나', () => {
       expect(screen.getByTestId('ai-connect-card-folded')).toBeTruthy();
       expect(screen.getByTestId('ai-connect-card-close')).toBeTruthy();
       expect(screen.queryByTestId('ai-connect-card-body')).toBeNull();
+      // 접힌 줄은 누를 수 있다 — 자판을 내린다(큰 글씨에서 끌 자리가 없다).
+      const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
+      fireEvent.press(screen.getByTestId('ai-connect-card-folded'));
+      expect(dismiss).toHaveBeenCalledTimes(1);
+      dismiss.mockRestore();
     } finally {
       spy.mockRestore();
     }
