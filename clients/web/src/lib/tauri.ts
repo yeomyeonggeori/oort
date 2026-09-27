@@ -8,7 +8,8 @@
 // permission, no keychain) when there is no shell underneath.
 //
 // The Rust half lives in `clients/desktop/src-tauri/src/{deeplink,discovery,
-// notification,keychain,updater,detect,harness_status,opener,pdf_viewer,pty}.rs` and the
+// notification,keychain,updater,detect,harness_status,opener,pdf_viewer,pty,
+// git_read}.rs` and the
 // command/event contract is documented in `clients/desktop/README.md`. Keep
 // the three in sync — a renamed command fails at runtime, not at compile time.
 //
@@ -20,6 +21,10 @@
 import { IS_TAURI } from "./env";
 import type { HostedAgentProbe as HostedAgentProbeWire } from "@momo/core/features/hostedAgents/detect";
 import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
+import type {
+  GitReadCommand,
+  GitReadResult,
+} from "@momo/core/features/workbench/gitRead";
 
 /** True when the native commands below can actually do something. */
 export function isDesktop(): boolean {
@@ -327,6 +332,33 @@ export const desktopPty = {
     await invoke<void>("pty_ack", { id, bytes });
   },
 };
+
+// ---- local git reads (#2855) --------------------------------------------------
+
+/**
+ * One of the eight fixed git reads (ADR-0190 D3-c) in the folder pane
+ * `paneId` (a `desktopPty.spawn` id) was opened in. The page names a command
+ * number and a pane only; the shell parses stdout and returns fields — never
+ * a commit subject, file contents, a remote URL or a full path. Nothing goes
+ * to the server. A browser tab, a closed pane or a failed call read as
+ * `unknown`.
+ */
+export async function readWorkbenchGit(
+  command: GitReadCommand,
+  paneId: number
+): Promise<GitReadResult> {
+  const { normalizeGitReadResult, GIT_READ_UNKNOWN } = await import(
+    "@momo/core/features/workbench/gitRead"
+  );
+  if (!IS_TAURI) return GIT_READ_UNKNOWN;
+  try {
+    return normalizeGitReadResult(
+      await invoke<unknown>("workbench_git_read", { request: { command, paneId } })
+    );
+  } catch {
+    return GIT_READ_UNKNOWN;
+  }
+}
 
 // ---- OS terminal (#2814) ------------------------------------------------------
 

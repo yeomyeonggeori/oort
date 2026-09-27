@@ -97,6 +97,7 @@ import { rememberSettingsOpener } from "@/features/settings/settingsFocus";
 import { Dialog, DialogOverlay, DialogPortal } from "@/design/ui/dialog";
 import { MODAL_CONTENT_MOTION } from "@/design/motion";
 import { cn } from "@/design/lib/cn";
+import { isDesktop } from "@/lib/tauri";
 
 // =============================================================================
 // ⌘K quick switcher (R-1 §공통계약, ADR-0133 stack: cmdk). Channels, DMs, people
@@ -667,6 +668,8 @@ export function QuickSwitcher({
       requestAnimationFrame(() => openAgentProfile(memberId)),
     session: { memberId: session.member.id },
     workspaceId,
+    // #2854: 데스크탑의 작업 콘솔은 `/work?view=console`이다.
+    desktop: isDesktop(),
   };
 
   function runCommand(command: PaletteCommand) {

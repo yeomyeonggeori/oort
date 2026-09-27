@@ -237,6 +237,8 @@
   --w-sidebar-list: 268px;
   --w-sidebar: calc(var(--spacing-rail) + var(--w-sidebar-list));
   --w-settings-nav: 240px;
+  /* 작업 탭에서 접힌 앱 사이드바 (#2854, 시안 ① `.rail` 64). */
+  --w-work-rail: var(--spacing-work-rail);
 
   /* 드로어로 설 때의 사이드바 (B6). 폰에서는 사이드바가 행을 나눠 갖지 않고 채널
    * 표면을 **덮으므로**, 열을 좁게 유지할 이유가 사라진다. 280px는 390px 폰
@@ -541,6 +543,12 @@
   --spacing-rail: 56px;
   --spacing-rail-tile: 44px;
   --spacing-rail-marker: 24px;
+  /* 작업 탭 레일 (#2854, 시안 ① `.rail` 64). 셸 열 폭(`--w-work-rail`)과 같은 값이다. */
+  --spacing-work-rail: 64px;
+  /* 「내 작업」 머리 줄 높이 (#2854, 시안 ① `.wbar` 48). */
+  --spacing-work-tab-bar: 48px;
+  /* 「팀 작업」 머리 줄 높이 (#2854, 시안 ④ `.mhd` 54). */
+  --spacing-work-board-bar: 54px;
 
   /* Diff body measure (MOMO-620 / ADR-0126 D2). A diff scrolls INSIDE its card
    * at this height, the same 400px cap the mac card uses, so a 500 line change
@@ -1286,6 +1294,31 @@
       }
     }
 
+    /* 작업 탭 레일 (#2854, 시안 ① `.rail`). 데스크탑 「내 작업」 격자에서 앱
+     * 사이드바는 64px 레일로 접힌다: 펼친 사이드바(324) 옆에서는 1440 창의 4열 칸이
+     * 칸 최소 폭 240에 못 미친다(코어 `workTabPaneWidth`). 판은 상단 줄 아래(둘째
+     * 행)에서 시작한다. macOS 신호등(x 16, 약 52 폭)이 레일 폭 64를 넘어 본문 위로
+     * 걸치기 때문이다. */
+    &[data-work-rail] {
+      /* 들어올 때는 폭을 곧바로 바꾼다: 324에서 64로 미끄러지는 동안 4열 칸이 240
+       * 아래로 내려가 격자가 한 칸 최대화로 번쩍인다(design-review M3). */
+      transition: none;
+      grid-template-columns: var(--w-work-rail) 1fr;
+      background-size:
+        var(--w-work-rail) 100%,
+        100% 100%;
+
+      /* 시안 ①에는 떠 있는 판이 없다: 머리 줄·격자·상태 줄이 창 바닥(그라데이션)
+       * 위에 곧바로 서고, 칸 하나하나가 판이다. 그래서 판의 면·그림자·반경을 걷는다. */
+      > main {
+        grid-row: 2;
+        margin: 0;
+        background-color: transparent;
+        border-radius: 0;
+        box-shadow: none;
+      }
+    }
+
     @media (prefers-contrast: more) {
       background-image: linear-gradient(
         var(--band, transparent),
@@ -1665,6 +1698,43 @@
   & [data-row-icon] {
     color: var(--ink);
   }
+
+  @media (prefers-contrast: more) {
+    box-shadow:
+      var(--elevation-rest),
+      inset 0 0 0 1px var(--line-strong);
+  }
+}
+
+/* 작업 탭 레일의 단추 (#2854, 시안 ① `.rbtn`): 44 폭 · 최소 44 · 반경 12 · 아이콘 20
+ * 위 글자 한 줄. 글자는 시안의 10px 대신 닫힌 글자 사다리의 가장 작은 칸(11)이다.
+ * 선택은 사이드바 선택 행과 같은 문법(흰 면 + rest 그림자)이다. */
+@utility work-rail-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  inline-size: var(--spacing-rail-tile);
+  min-block-size: var(--spacing-rail-tile);
+  border-radius: 12px;
+  color: var(--ink-muted);
+  font-size: var(--text-timestamp);
+  line-height: 1.2;
+  font-weight: 600;
+  text-align: center;
+  word-break: keep-all;
+
+  & svg {
+    inline-size: 1.25rem;
+    block-size: 1.25rem;
+    flex: none;
+  }
+}
+@utility work-rail-item-selected {
+  background-color: var(--surface);
+  box-shadow: var(--elevation-rest);
+  color: var(--ink);
 
   @media (prefers-contrast: more) {
     box-shadow:

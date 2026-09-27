@@ -54,4 +54,7 @@ const APP_COMMANDS: &[&str] = &[
     "pty_resize",
     "pty_kill",
     "pty_ack",
+    // Local git reads (ADR-0190 D3-c, #2855). Granted only by
+    // capabilities/git-read.json.
+    "workbench_git_read",
 ];
