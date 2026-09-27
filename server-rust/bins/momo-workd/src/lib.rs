@@ -23,6 +23,7 @@ pub mod acp;
 pub mod cli;
 pub mod client;
 pub mod config;
+#[cfg(target_os = "macos")]
 pub mod control_socket;
 pub mod controls;
 pub mod keystore;

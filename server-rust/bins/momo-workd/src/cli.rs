@@ -29,9 +29,9 @@ use std::time::Duration;
 
 use crate::client::{self, ClientError, HostClient};
 use crate::config::{ConfigError, HostState, WorkdConfig, SERVED_SCOPE};
-use crate::control_socket::{
-    ControlSocket, ControlSocketError, HostHealth, HostIdentity, PeerPolicy,
-};
+#[cfg(target_os = "macos")]
+use crate::control_socket::{ControlSocket, ControlSocketError, HostIdentity, PeerPolicy};
+use crate::controls::HostHealth;
 use crate::controls::{heartbeat_loop, ControlLoop};
 use crate::keystore::{HostKey, KeyStore, KeyStoreError};
 use crate::policy::{AdapterKind, CodexHome};
@@ -149,6 +149,7 @@ pub enum CliError {
     Usage(String),
     #[error("the server no longer accepts this host (revoked, or its owner left); stopped")]
     Revoked,
+    #[cfg(target_os = "macos")]
     #[error(transparent)]
     ControlSocket(#[from] ControlSocketError),
 }
@@ -158,6 +159,7 @@ impl CliError {
         match self {
             Self::Usage(_) | Self::Config(_) => 2,
             Self::Revoked => 3,
+            #[cfg(target_os = "macos")]
             Self::ControlSocket(ControlSocketError::AlreadyRunning(_)) => 4,
             _ => 1,
         }
@@ -259,6 +261,61 @@ pub async fn register(
     state.save(&config.state_path)?;
     tracing::info!(host_id = %state.host_id, key_store = %store.describe(), "work host registered");
     Ok(state)
+}
+
+/// Bind the control socket and serve it on a task (macOS; see
+/// [`crate::control_socket`]). `None` when the app did not ask for one.
+#[cfg(target_os = "macos")]
+fn start_control_socket(
+    path: Option<PathBuf>,
+    dev_unsigned_peer: bool,
+    state: &HostState,
+    health: Arc<HostHealth>,
+    stop: Arc<tokio::sync::Notify>,
+) -> Result<Option<tokio::task::JoinHandle<()>>, CliError> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    let policy = PeerPolicy::for_this_binary(dev_unsigned_peer).map_err(CliError::Usage)?;
+    match &policy {
+        PeerPolicy::SameTeamApp { requirement } => {
+            tracing::info!(requirement = %requirement, "control socket peers must satisfy")
+        }
+        PeerPolicy::DevUnsigned => {
+            tracing::warn!("control socket without a peer signature check (--dev-unsigned-peer)")
+        }
+        PeerPolicy::RefuseAll => tracing::warn!(
+            "this momo-workd is not team-signed: the control socket will refuse every peer"
+        ),
+    }
+    let socket = ControlSocket::bind(&path, policy)?;
+    tracing::info!(path = %socket.path().display(), "control socket listening");
+    Ok(Some(tokio::spawn(socket.serve(
+        HostIdentity {
+            host_id: state.host_id,
+            workspace_id: state.workspace_id,
+            owner_member_id: state.owner_member_id,
+        },
+        health,
+        stop,
+    ))))
+}
+
+/// The peer is checked by code signature, which only macOS has.
+#[cfg(not(target_os = "macos"))]
+fn start_control_socket(
+    path: Option<PathBuf>,
+    _dev_unsigned_peer: bool,
+    _state: &HostState,
+    _health: Arc<HostHealth>,
+    _stop: Arc<tokio::sync::Notify>,
+) -> Result<Option<tokio::task::JoinHandle<()>>, CliError> {
+    match path {
+        None => Ok(None),
+        Some(_) => Err(CliError::Usage(
+            "--control-socket needs macOS (the peer is checked by code signature)".into(),
+        )),
+    }
 }
 
 /// Delete this host's key and registration state. Idempotent: nothing to delete
@@ -372,39 +429,13 @@ pub async fn run(
     let stop = Arc::new(tokio::sync::Notify::new());
     // Bound before the first heartbeat, so a second workd for the same socket
     // stops here (exit 4) instead of racing the first one's server session.
-    let control = match control_socket {
-        Some(path) => {
-            if !cfg!(target_os = "macos") {
-                return Err(CliError::Usage(
-                    "--control-socket needs macOS (the peer is checked by code signature)".into(),
-                ));
-            }
-            let policy = PeerPolicy::for_this_binary(dev_unsigned_peer).map_err(CliError::Usage)?;
-            match &policy {
-                PeerPolicy::SameTeamApp { requirement } => {
-                    tracing::info!(requirement = %requirement, "control socket peers must satisfy")
-                }
-                PeerPolicy::DevUnsigned => tracing::warn!(
-                    "control socket without a peer signature check (--dev-unsigned-peer)"
-                ),
-                PeerPolicy::RefuseAll => tracing::warn!(
-                    "this momo-workd is not team-signed: the control socket will refuse every peer"
-                ),
-            }
-            let socket = ControlSocket::bind(&path, policy)?;
-            tracing::info!(path = %socket.path().display(), "control socket listening");
-            Some(tokio::spawn(socket.serve(
-                HostIdentity {
-                    host_id: state.host_id,
-                    workspace_id: state.workspace_id,
-                    owner_member_id: state.owner_member_id,
-                },
-                health.clone(),
-                stop.clone(),
-            )))
-        }
-        None => None,
-    };
+    let control = start_control_socket(
+        control_socket,
+        dev_unsigned_peer,
+        &state,
+        health.clone(),
+        stop.clone(),
+    )?;
     let mut controls = ControlLoop::new(api.clone(), sessions, state.owner_member_id);
     let mut heartbeat = tokio::spawn(heartbeat_loop(
         api.clone(),

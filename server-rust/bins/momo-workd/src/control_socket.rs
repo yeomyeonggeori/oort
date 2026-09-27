@@ -46,7 +46,7 @@ use std::io;
 use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _, PermissionsExt as _};
 use std::os::unix::io::{AsRawFd as _, RawFd};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -54,6 +54,8 @@ use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Notify;
 use uuid::Uuid;
+
+pub use crate::controls::HostHealth;
 
 /// The desktop app's code-signing identifier (its bundle id). The only program
 /// whose connections workd answers.
@@ -153,46 +155,6 @@ pub fn app_requirement(team: &str) -> Result<String, String> {
         "anchor apple generic and identifier \"{APP_SIGNING_IDENTIFIER}\" and \
          certificate leaf[subject.OU] = \"{team}\""
     ))
-}
-
-/// What `status` reports, updated by the heartbeat loop.
-#[derive(Debug, Default)]
-pub struct HostHealth {
-    inner: Mutex<HealthInner>,
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-struct HealthInner {
-    last_ok_ms: Option<i64>,
-    last_attempt_ms: Option<i64>,
-    failing: bool,
-}
-
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or_default()
-}
-
-impl HostHealth {
-    pub fn heartbeat_accepted(&self) {
-        let now = now_ms();
-        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        inner.last_ok_ms = Some(now);
-        inner.last_attempt_ms = Some(now);
-        inner.failing = false;
-    }
-
-    pub fn heartbeat_failed(&self) {
-        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        inner.last_attempt_ms = Some(now_ms());
-        inner.failing = true;
-    }
-
-    fn snapshot(&self) -> HealthInner {
-        *self.inner.lock().unwrap_or_else(|p| p.into_inner())
-    }
 }
 
 /// Who this host is, as `status` reports it.
@@ -414,7 +376,6 @@ pub fn respond(line: &str, identity: &HostIdentity, health: &HostHealth, stop: &
     }
 }
 
-#[cfg(target_os = "macos")]
 mod signing {
     //! The two Security.framework questions: "what team signed me?" and "does
     //! the process behind this audit token satisfy this requirement?".
@@ -517,24 +478,6 @@ mod signing {
             .check_validity(Flags::empty(), &requirement_ref)
             .map_err(|error| refuse(error.to_string()))?;
         Ok(())
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-mod signing {
-    use std::os::unix::io::RawFd;
-
-    use super::PeerRefusal;
-
-    pub fn own_team_identifier() -> Result<Option<String>, String> {
-        Ok(None)
-    }
-
-    pub fn check_peer_signature(_fd: RawFd, requirement: &str) -> Result<(), PeerRefusal> {
-        Err(PeerRefusal::Signature {
-            requirement: requirement.to_string(),
-            detail: "code signatures are checked on macOS only".into(),
-        })
     }
 }
 
