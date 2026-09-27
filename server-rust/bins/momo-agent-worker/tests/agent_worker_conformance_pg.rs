@@ -406,7 +406,7 @@ fn tune(mut config: WorkerConfig) -> WorkerConfig {
 }
 
 fn base_config() -> WorkerConfig {
-    tune(WorkerConfig::for_target(database_url()))
+    tune(WorkerConfig::for_target(database_url()).with_env_bearer("sk-conformance-team-key"))
 }
 
 // ---------------------------------------------------------------------------

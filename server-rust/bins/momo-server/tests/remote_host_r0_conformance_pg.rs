@@ -1197,7 +1197,7 @@ async fn r0_4_a_standing_auto_approval_never_reaches_a_remote_host() {
     let worker = AgentWorker::new(
         worker_pool.clone(),
         Arc::new(MockChatProvider::echo().with_tool_calls([vec![spawn_call], vec![]])),
-        WorkerConfig::for_target(database_url()),
+        WorkerConfig::for_target(database_url()).with_env_bearer("sk-conformance-team-key"),
     );
     worker.drain_once().await.expect("drain");
 
@@ -2432,7 +2432,7 @@ fn spawn_worker(worker_pool: &PgPool, call_id: &str, arguments: Value) -> AgentW
     AgentWorker::new(
         worker_pool.clone(),
         Arc::new(MockChatProvider::echo().with_tool_calls([vec![call], vec![]])),
-        WorkerConfig::for_target(database_url()),
+        WorkerConfig::for_target(database_url()).with_env_bearer("sk-conformance-team-key"),
     )
 }
 

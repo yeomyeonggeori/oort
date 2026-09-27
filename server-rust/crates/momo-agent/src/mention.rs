@@ -317,6 +317,25 @@ pub async fn load_mention_candidates_in_tx(
     Ok(candidates)
 }
 
+/// One agent member's display name, for a server line said in its name
+/// (#2897: the worker's `provider_required` line). `None` when the member is
+/// gone — the caller then says 「에이전트」 rather than nothing.
+pub async fn agent_display_name_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<Option<String>, DbError> {
+    let name: Option<String> = sqlx::query_scalar(
+        "SELECT display_name FROM member \
+          WHERE workspace_id = $1 AND id = $2 AND kind = 'agent'",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(name)
+}
+
 /// The candidate's `owner_only` facts, or `None` for a workspace agent.
 ///
 /// Migration 089's CHECK guarantees an `owner_only` row carries both an owner
@@ -835,10 +854,18 @@ pub fn mention_diagnostic_detail(
 /// reads `루나는` rather than `루나은(는)`. Swift still writes the hedge
 /// unconditionally and is deliberately not edited (port discipline — see
 /// [`crate::korean`]); a non-Hangul name still hedges here too.
+///
+/// The name goes through [`crate::inert_display_name`] first (#2900): the line
+/// is rendered as markdown and whoever named the agent chose the name. The
+/// particle is decided on the inert form, whose last character is Hangul
+/// exactly when the original's was.
 pub fn paused_mention_body(display_name: &str) -> String {
     format!(
         "{} 현재 일시정지되어 있습니다.",
-        crate::korean::attach_particle(display_name, crate::korean::ParticlePair::Topic)
+        crate::korean::attach_particle(
+            &crate::inert_display_name(display_name),
+            crate::korean::ParticlePair::Topic
+        )
     )
 }
 
@@ -1307,6 +1334,29 @@ mod tests {
         assert_eq!(props["agent_member_id"], json!(agent.to_string()));
         assert_eq!(props["kind"], json!("agent_paused"));
         assert!(paused_mention_body("hermes").starts_with("hermes은(는)"));
+    }
+
+    /// #2900 (#2889 Medium-3 동형): the paused line is a server line rendered
+    /// as markdown, and whoever names an agent must not plant a link in it.
+    #[test]
+    fn an_agent_name_cannot_plant_a_link_in_the_paused_line() {
+        for name in [
+            "[x](https://evil.example)",
+            "[보안 재인증](http://evil.example)",
+            "https://evil.example/login",
+            "`코드`",
+        ] {
+            let body = paused_mention_body(name);
+            assert!(!body.to_lowercase().contains("://evil"), "bare url: {body}");
+            assert!(!body.contains("]("), "link syntax: {body}");
+            assert!(!body.contains('['), "{body}");
+            assert!(!body.contains('`'), "{body}");
+        }
+        // An ordinary name is untouched, particle included.
+        assert_eq!(
+            paused_mention_body("루나"),
+            "루나는 현재 일시정지되어 있습니다."
+        );
     }
 
     #[test]

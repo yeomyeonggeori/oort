@@ -11,6 +11,22 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-09-27
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.12>. Tag target: `main=6373ff48`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Two database migrations since 0.1.11: `090_notification_rule_dnd_until.sql` adds nullable deadline and "value before do-not-disturb" columns to `notification_rule` and `member.presence_dnd_until` (existing rows stay NULL, so nothing changes until someone sets a deadline); `091_hosted_dm_approval.sql` adds `hosted_agent_connection.approved_dm_channel_ids` (default empty, under the table's existing FORCE RLS policy) and the `hosted_connection_channel_ids` function (SECURITY INVOKER, fixed search_path). Both are forward-only and additive; rolling the images back to 0.1.11 leaves them in place, and 0.1.11 can still clear do-not-disturb and notification pause because 090 has no deadline CHECK.
+
+### Added
+- Server: notification pause can carry a deadline, and do-not-disturb and notification pause move together — turning do-not-disturb on also pauses notifications in the same transaction, and turning it off restores what was there before. The deadline is compared when a push is decided, and the roster carries an active deadline (`dndUntilMs`). The deadline picker UI is a follow-up (#2899). (#2850, #2901, ADR-0124 amendment 2)
+- Server: a hosted agent's 1:1 DM opens. The DM between an agent's owner and that agent opens automatically, but only on a connection the owner confirmed or consented to; another member's DM with the agent opens only when the owner approves that DM. A subscription agent answers only its owner's DM, and group DMs stay closed. If an admin who is not the owner confirms the connection, its DMs close and the other-member approvals are cleared. (#2915, ADR-0162 amendment 2)
+- Web and desktop: Settings › agent credentials lists the agent's 1:1 conversations — the owner's is always open, only the owner can open or close another member's (with one more confirmation), and admins see it read-only. (#2915)
+- Web, desktop and phone: the DM composer hint follows the server's delivery state; "talk to it directly" appears only in a DM that is open to the agent. (#2915, #2891)
+
+### Not in this release
+- The server image carries the do-not-disturb deadline and bundle (api, notifier, migration 090), hosted 1:1 DM delivery and approval (api, agent-worker, migration 091) and the web bundle's 1:1 conversation list and DM hint. The phone hint ships in iOS builds, not in the image.
+- Personal-subscription isolation hardening, inert display names in more refusal lines and refusing new `auth.json` provider links on the server (#2922: #2897, #2900, #2911) landed after the build commit and ship in a later release.
+- The do-not-disturb deadline picker (#2899) and LiveKit on the team instance (#2759): huddles still do not run on `oort-team`.
+- runtime-unverified: an owner-approved hosted DM against a live agent runtime on a team instance, a do-not-disturb deadline expiring on a real phone push, TestFlight install.
+
 ## [0.1.11] - 2026-09-27
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.11>. Tag target: `main=21aead09`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. No database migration since 0.1.10: the schema stays at 089 and upgrading swaps the images only.
