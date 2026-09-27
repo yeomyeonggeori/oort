@@ -8,9 +8,9 @@
 //   work_host_status    what this Mac is: sidecar present, registered as which
 //                       host, running, the heartbeat's last outcome, which ACP
 //                       adapters were found
-//   work_host_register  write the host config, `momo-workd register` with the
-//                       owner's access token in the CHILD'S ENVIRONMENT (never
-//                       argv, never a file, never a log line), then start
+//   work_host_register  write the host config, `momo-workd register --token-stdin`
+//                       with the owner's access token on the CHILD'S STDIN (never
+//                       argv, env, a file or a log line), then start
 //   work_host_start     `momo-workd run --control-socket …` if registered
 //   work_host_stop      `shutdown` over the control socket, SIGTERM fallback
 //   work_host_forget    stop, then `momo-workd forget` (key + state) and the
@@ -144,7 +144,7 @@ pub struct LocalStatus {
     pub display_name_suggestion: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegisterRequest {
     pub server_url: String,
@@ -155,19 +155,35 @@ pub struct RegisterRequest {
     pub access_token: String,
 }
 
+/// Never prints the token (#2778 security review M3).
+impl std::fmt::Debug for RegisterRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RegisterRequest")
+            .field("server_url", &self.server_url)
+            .field("workspace_id", &self.workspace_id)
+            .field("display_name", &self.display_name)
+            .field("access_token", &"<redacted>")
+            .finish()
+    }
+}
+
 impl std::fmt::Debug for WorkHostState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("WorkHostState")
     }
 }
 
-/// The running child, if any.
+/// The running child, if any, and the one-registration-at-a-time lock (two
+/// concurrent registers would both pass `already_registered`; security L5).
 #[derive(Default)]
-pub struct WorkHostState(Mutex<Option<Child>>);
+pub struct WorkHostState {
+    child: Mutex<Option<Child>>,
+    registering: Mutex<()>,
+}
 
 impl WorkHostState {
     fn lock(&self) -> std::sync::MutexGuard<'_, Option<Child>> {
-        self.0
+        self.child
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
@@ -254,7 +270,11 @@ pub fn validate_server_url(raw: &str) -> Result<String, String> {
         url.host_str(),
         Some("localhost") | Some("127.0.0.1") | Some("[::1]")
     );
-    let scheme_ok = url.scheme() == "https" || (url.scheme() == "http" && loopback);
+    // Plain http to loopback is a development server only: in a release build
+    // another local user could listen there and take the owner's token
+    // (#2778 security review L1).
+    let scheme_ok =
+        url.scheme() == "https" || (url.scheme() == "http" && loopback && cfg!(debug_assertions));
     let origin_only = (url.path().is_empty() || url.path() == "/")
         && url.query().is_none()
         && url.fragment().is_none()
@@ -466,6 +486,11 @@ impl Service<'_> {
 
     pub fn register(&self, request: RegisterRequest) -> Result<LocalStatus, String> {
         let sidecar = self.sidecar()?.to_path_buf();
+        let _one_at_a_time = self
+            .state
+            .registering
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if read_registered(&self.layout).is_some() {
             return Err("already_registered".to_string());
         }
@@ -494,16 +519,20 @@ impl Service<'_> {
         let mut command = Command::new(&sidecar);
         command
             .arg("register")
+            .arg("--token-stdin")
             .arg("--config")
             .arg(&self.layout.config)
             .args(key_args(&self.layout, self.development))
             .env_clear()
             .envs(child_env())
-            .env("MOMO_WORKD_REGISTER_TOKEN", request.access_token.trim())
-            .stdin(Stdio::null())
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let output = run_with_timeout(command, REGISTER_TIMEOUT)?;
+        // The token crosses a pipe, not the child's environment: another
+        // same-user process can read a running child's environment (#2778
+        // security review M3), not its stdin.
+        let output =
+            run_with_timeout(command, REGISTER_TIMEOUT, Some(request.access_token.trim()))?;
         if !output.0 {
             // The last line of workd's stderr: it never carries the token
             // (workd_conformance_pg `register`), and it says why.
@@ -576,7 +605,7 @@ impl Service<'_> {
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped());
-            let output = run_with_timeout(command, REGISTER_TIMEOUT)?;
+            let output = run_with_timeout(command, REGISTER_TIMEOUT, None)?;
             if !output.0 {
                 return Err("forget_failed".to_string());
             }
@@ -607,10 +636,17 @@ fn write_private(path: &Path, body: &[u8]) -> Result<(), String> {
 fn run_with_timeout(
     mut command: Command,
     timeout: Duration,
+    stdin_line: Option<&str>,
 ) -> Result<(bool, String, String), String> {
     let mut child = command
         .spawn()
         .map_err(|error| format!("start_failed: {error}"))?;
+    if let Some(line) = stdin_line {
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(format!("{line}\n").as_bytes());
+            // Dropped here: EOF after the one line.
+        }
+    }
     let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {
@@ -782,17 +818,25 @@ mod tests {
             "not found → not allowed"
         );
         assert_eq!(config["working_directory"], "/x/home/oort-work");
-        // The token goes to the child's env only: nothing in this module
-        // builds an argument out of it.
+        // The token goes to the child's stdin only: never an argument, never
+        // the child's environment, never Debug output.
         let src = include_str!("work_host.rs");
         let code = &src[..src.find("#[cfg(test)]").unwrap()];
         assert_eq!(
-            code.matches("access_token").count(),
-            3,
-            "the field, the empty check, the child env"
+            code.matches("request.access_token").count(),
+            2,
+            "the empty check and the stdin line"
         );
-        assert!(code.contains(".env(\"MOMO_WORKD_REGISTER_TOKEN\", request.access_token.trim())"));
-        assert!(!code.contains(".arg(request.access_token"));
+        assert!(code.contains("Some(request.access_token.trim())"));
+        assert!(code.contains(".arg(\"--token-stdin\")"));
+        assert!(!code.contains("MOMO_WORKD_REGISTER_TOKEN"));
+        let request = RegisterRequest {
+            server_url: "https://t.example".into(),
+            workspace_id: "w".into(),
+            display_name: "n".into(),
+            access_token: "secret-token-value".into(),
+        };
+        assert!(!format!("{request:?}").contains("secret-token-value"));
     }
 
     #[test]

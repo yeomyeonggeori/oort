@@ -138,6 +138,11 @@ impl PeerPolicy {
     }
 }
 
+/// This binary's team id (`None` when unsigned or ad-hoc signed).
+pub fn own_team_identifier() -> Result<Option<String>, String> {
+    signing::own_team_identifier()
+}
+
 /// The code requirement a peer must satisfy. The team id is Apple's ten
 /// upper-case letters and digits; anything else is refused rather than
 /// spliced into requirement language.

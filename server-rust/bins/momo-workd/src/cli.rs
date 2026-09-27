@@ -44,8 +44,9 @@ pub const USAGE: &str = "\
 momo-workd — oort desktop work host (ADR-0188)
 
 usage:
-  momo-workd register --config PATH [--dev-key-file PATH] [--force]
-      reads the owner's access token from MOMO_WORKD_REGISTER_TOKEN
+  momo-workd register --config PATH [--dev-key-file PATH] [--force] [--token-stdin]
+      reads the owner's access token from MOMO_WORKD_REGISTER_TOKEN,
+      or from one line on stdin with --token-stdin
   momo-workd run --config PATH [--dev-key-file PATH]
                  [--control-socket PATH [--dev-unsigned-peer]]
   momo-workd forget --config PATH [--dev-key-file PATH]
@@ -64,6 +65,10 @@ pub enum Invocation {
         config: PathBuf,
         dev_key_file: Option<PathBuf>,
         force: bool,
+        /// Read the owner's token from one stdin line instead of the
+        /// environment (#2778 security review M3: another same-user process
+        /// can read a child's environment while it runs; a pipe it cannot).
+        token_stdin: bool,
     },
     Run {
         config: PathBuf,
@@ -92,6 +97,7 @@ pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
     let mut config = None;
     let mut dev_key_file = None;
     let mut force = false;
+    let mut token_stdin = false;
     let mut control_socket = None;
     let mut dev_unsigned_peer = false;
     let mut rest = args[1..].iter();
@@ -105,6 +111,7 @@ pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
             "--config" => config = Some(PathBuf::from(value("--config")?)),
             "--dev-key-file" => dev_key_file = Some(PathBuf::from(value("--dev-key-file")?)),
             "--force" if command == "register" => force = true,
+            "--token-stdin" if command == "register" => token_stdin = true,
             "--control-socket" if command == "run" => {
                 control_socket = Some(PathBuf::from(value("--control-socket")?))
             }
@@ -121,6 +128,7 @@ pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
             config,
             dev_key_file,
             force,
+            token_stdin,
         }
     } else if command == "forget" {
         Invocation::Forget {
@@ -169,6 +177,20 @@ impl CliError {
 fn key_store(config: &WorkdConfig, dev_key_file: Option<PathBuf>) -> Result<KeyStore, CliError> {
     match dev_key_file {
         Some(path) => {
+            // ADR-0188 D2: a shipped (team-signed) host keeps its key in the
+            // ThisDeviceOnly keychain, never in a file (#2778 security M1).
+            #[cfg(target_os = "macos")]
+            if crate::control_socket::own_team_identifier()
+                .ok()
+                .flatten()
+                .is_some()
+            {
+                return Err(CliError::Usage(
+                    "--dev-key-file is for unsigned development builds; this momo-workd is \
+                     team-signed and keeps its key in the keychain"
+                        .into(),
+                ));
+            }
             if !path.is_absolute() {
                 return Err(CliError::Usage(
                     "--dev-key-file must be an absolute path".into(),
@@ -491,7 +513,8 @@ mod tests {
             Invocation::Register {
                 config: "/c.json".into(),
                 dev_key_file: None,
-                force: true
+                force: true,
+                token_stdin: false,
             }
         );
         assert_eq!(
@@ -541,6 +564,16 @@ mod tests {
         .is_err());
         assert!(parse_args(&args(&["register", "--config", "/c", "--token", "t"])).is_err());
         assert!(parse_args(&args(&["run", "--config", "/c", "--force"])).is_err());
+        assert_eq!(
+            parse_args(&args(&["register", "--token-stdin", "--config", "/c.json"])).unwrap(),
+            Invocation::Register {
+                config: "/c.json".into(),
+                dev_key_file: None,
+                force: false,
+                token_stdin: true,
+            }
+        );
+        assert!(parse_args(&args(&["run", "--config", "/c", "--token-stdin"])).is_err());
         assert!(parse_args(&args(&["run"])).is_err());
         assert_eq!(
             parse_args(&args(&["forget", "--config", "/c.json"])).unwrap(),
