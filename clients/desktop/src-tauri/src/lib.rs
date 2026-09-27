@@ -10,6 +10,7 @@
 //   detect        local hosted-agent signatures   -> command (T-5; passive only)
 //   harnesses     claude/codex installed + login  -> command (#2813; exit code only)
 //   git reads     a pane's repo/branch/diff numbers -> command (#2855; 8 fixed reads)
+//   pane signals  harness hooks -> app-only Unix socket -> the pane's channel (#2776)
 //
 // Everything above is exposed to the web bundle as plain app commands and two
 // events; the contract is documented in `clients/desktop/README.md` and consumed
@@ -35,6 +36,10 @@ mod harness_path;
 mod harness_status;
 mod keychain;
 mod notification;
+// Harness hook signals for pane status dots (#2776, ADR-0190 D4-b): an
+// app-only Unix socket, a token per pane, a closed event table.
+#[cfg(desktop)]
+pub mod pane_signal;
 // Handing a URL to the platform browser needs a platform browser, and the
 // updater replaces an application bundle, which is not a thing that exists on
 // iOS/Android — both are desktop-only and so are these modules.
@@ -158,6 +163,20 @@ pub fn run() {
             if let Ok(cache) = app.path().app_cache_dir() {
                 pdf_viewer::sweep_cache(&cache);
             }
+            // Pane status hooks (#2776). A failed bind only means no status
+            // dots beyond the process lifecycle; the terminal still works.
+            #[cfg(desktop)]
+            {
+                let path = pane_signal::socket_path();
+                match pane_signal::bind(&path) {
+                    Ok(listener) => {
+                        let manager = app.state::<pty::PtyState>().0.clone();
+                        manager.set_hook_socket(path);
+                        pane_signal::serve(listener, manager);
+                    }
+                    Err(e) => eprintln!("[oort] pane signal socket unavailable: {e}"),
+                }
+            }
             // Windows and Linux hand a deep link to a NEW process as an argv
             // entry rather than to the running one, and the scheme has to be
             // registered with the OS at runtime there. macOS registers it from
@@ -204,6 +223,9 @@ pub fn run() {
             if let tauri::RunEvent::Exit = _event {
                 if let Some(state) = _app.try_state::<pty::PtyState>() {
                     state.0.kill_all();
+                    if let Some(path) = state.0.hook_socket() {
+                        pane_signal::remove(path);
+                    }
                 }
             }
         });

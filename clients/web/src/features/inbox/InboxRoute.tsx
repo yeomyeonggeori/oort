@@ -28,6 +28,8 @@ import {
   withRemindersTab,
 } from "@/features/reminders/inboxTab";
 import { FeedList } from "./FeedRow";
+import { LocalPaneInbox } from "./LocalPaneInbox";
+import { isDesktop } from "@/lib/tauri";
 import {
   ApprovalActions,
   type Armed,
@@ -403,6 +405,9 @@ export function InboxRoute() {
           />
         )}
       </header>
+
+      {/* 이 기기의 칸(#2776): 로컬 칸의 「나를 기다림」·「끝남」. 데스크탑에만 있다. */}
+      {isDesktop() ? <LocalPaneInbox /> : null}
 
       {/* tone이 판정에서 온다. `InlineBanner`는 error면 role="alert"+--danger,
           neutral이면 role="status"를 그리므로, 게이트는 그 role 하나로

@@ -93,13 +93,15 @@ function harness(
   const resizes: [number, number, number][] = [];
   let output: (b: ArrayBuffer) => void = () => undefined;
   let exit: (e: PtyExit) => void = () => undefined;
+  let signal: (s: unknown) => void = () => undefined;
   let nextId = 1;
   const spawns: unknown[] = [];
   const pty: PtyPort = {
-    spawn: vi.fn(async (request, onOutput, onExit) => {
+    spawn: vi.fn(async (request, onOutput, onExit, onSignal) => {
       spawns.push(request);
       output = onOutput;
       exit = onExit;
+      signal = onSignal ?? (() => undefined);
       return nextId++;
     }),
     write: vi.fn(async (_id, bytes) => {
@@ -136,6 +138,7 @@ function harness(
     emit: (text: string) => output(new TextEncoder().encode(text).buffer as ArrayBuffer),
     emitBytes: (n: number) => output(new Uint8Array(n).fill(65).buffer as ArrayBuffer),
     exit: (e: PtyExit) => exit(e),
+    signal: (v: unknown) => signal(v),
   };
 }
 
@@ -332,5 +335,39 @@ describe("앱 재시작 왕복(진짜 headless 미러)", () => {
     expect(view.text).toContain("line 0 한글 줄");
     expect(view.text).toContain("앱을 다시 열어 새 셸을 시작했습니다");
     expect(second.spawns.length).toBe(1);
+  });
+});
+
+describe("하네스 신호 (#2776, ADR-0190 D4-b)", () => {
+  it("닫힌 목록의 신호만 칸에 실린다", async () => {
+    const h = harness();
+    await h.sessions.ensure("p1", 80, 24);
+    expect(h.sessions.getSnapshot().get("p1")?.signal).toBeNull();
+    h.signal("waiting-permission");
+    expect(h.sessions.getSnapshot().get("p1")?.signal).toBe("waiting-permission");
+    for (const bad of ["Notification", "permission_prompt", 7, null, { kind: "turn-done" }]) h.signal(bad);
+    expect(h.sessions.getSnapshot().get("p1")?.signal).toBe("waiting-permission");
+    h.signal("turn-done");
+    expect(h.sessions.getSnapshot().get("p1")?.signal).toBe("turn-done");
+  });
+
+  it("출력은 신호가 아니다: 권한 요청처럼 보이는 글이 찍혀도 그대로", async () => {
+    const h = harness();
+    await h.sessions.ensure("p1", 80, 24);
+    h.emit("Claude needs your permission to use Bash\r\n Do you want to proceed? ❯ 1. Yes\r\n");
+    h.emit("\u001b]0;✳ waiting-permission\u0007\u001b]9;Claude is waiting for your input\u0007");
+    await settle();
+    expect(h.sessions.getSnapshot().get("p1")?.signal).toBeNull();
+  });
+
+  it("다시 시작하면 신호가 비고, 끝난 뒤 온 신호는 버린다", async () => {
+    const h = harness();
+    await h.sessions.ensure("p1", 80, 24);
+    h.signal("working");
+    h.exit({ id: 1, code: 0, signal: null });
+    h.signal("waiting-permission");
+    expect(h.sessions.getSnapshot().get("p1")?.signal).toBe("working");
+    await h.sessions.restart("p1");
+    expect(h.sessions.getSnapshot().get("p1")?.signal).toBeNull();
   });
 });

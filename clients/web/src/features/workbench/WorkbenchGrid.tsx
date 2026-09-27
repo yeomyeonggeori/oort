@@ -61,6 +61,18 @@ export interface WorkbenchPaneInfo {
   maximized: boolean;
 }
 
+export interface PaneStatusView {
+  /** 머리에 그릴 표지. */
+  mark: ReactNode;
+  /** 표지의 글자(「나를 기다림」 등). 칸의 접근 이름에 붙는다. */
+  label: string;
+  /**
+   * 「나를 기다림」: 칸에 신호색 테두리를 두르고 바닥 띠를 그린다(시안 ① `.pane.wait`
+   * · `.pwait`). null이면 기다리지 않는다.
+   */
+  waiting: { line: string; keycap: string | null } | null;
+}
+
 export interface WorkbenchGridProps {
   layout: WorkbenchLayout;
   onLayoutChange: (next: WorkbenchLayout) => void;
@@ -68,6 +80,11 @@ export interface WorkbenchGridProps {
   renderPane?: (pane: WorkbenchPaneInfo) => ReactNode;
   /** 칸 머리 제목. 없으면 「칸 N」. */
   paneTitle?: (pane: WorkbenchPaneInfo) => string;
+  /**
+   * 칸 머리의 상태 표지(#2776). 제목 뒤, 칸 단추 앞에 선다. `label`은 칸의
+   * 접근 이름에 붙는 상태 글자다(색·모양만으로 말하지 않는다).
+   */
+  paneStatus?: (pane: WorkbenchPaneInfo) => PaneStatusView | null;
   storage?: LayoutStorageStatus;
   /** 기본은 `navigator.platform`으로 판정한다. */
   platform?: KeyPlatform;
@@ -179,6 +196,7 @@ export function WorkbenchGrid({
   onLayoutChange,
   renderPane,
   paneTitle,
+  paneStatus,
   storage = "ok",
   platform: platformProp,
   size: sizeOverride,
@@ -319,6 +337,7 @@ export function WorkbenchGrid({
     userMaximized: layout.maximized,
     renderPane,
     paneTitle,
+    paneStatus,
     onFocusPane: (id) => apply(focusPane(layoutRef.current, id), false),
     onSplit: (id, axis) => apply(splitPane(layoutRef.current, id, axis, sizeRef.current)),
     onClose: requestClose,
@@ -386,6 +405,7 @@ interface RenderContext {
   single: boolean;
   renderPane?: (pane: WorkbenchPaneInfo) => ReactNode;
   paneTitle?: (pane: WorkbenchPaneInfo) => string;
+  paneStatus?: (pane: WorkbenchPaneInfo) => PaneStatusView | null;
   onFocusPane: (id: PaneId) => void;
   onSplit: (id: PaneId, axis: SplitAxis) => void;
   onClose: (id: PaneId) => void;
@@ -536,6 +556,8 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
   const userMaximized = ctx.userMaximized === id;
   const info: WorkbenchPaneInfo = { id, index, focused, maximized };
   const title = ctx.paneTitle?.(info) ?? `칸 ${index}`;
+  const status = ctx.paneStatus?.(info) ?? null;
+  const waiting = status?.waiting ?? null;
   const ref = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -552,10 +574,11 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
     <section
       ref={ref}
       tabIndex={-1}
-      aria-label={`${index}번 칸, ${title}`}
+      aria-label={`${index}번 칸, ${title}${status ? `, ${status.label}` : ""}`}
       data-pane-id={id}
       data-testid="workbench-pane"
       data-focused={focused ? "" : undefined}
+      data-waiting={waiting ? "" : undefined}
       data-maximized={maximized ? "" : undefined}
       onPointerDownCapture={() => {
         if (!focused) ctx.onFocusPane(id);
@@ -569,6 +592,7 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
         // 때만 그린다. 아니면 활성 칸은 진한 테두리와 머리 채움으로만 조용히 표시한다.
         focused ? "border-line-strong group-focus-within/wb:focus-ring" : "border-line",
         maximized && "wb-maximized",
+        waiting && "wb-waiting",
         covered && "invisible"
       )}
     >
@@ -596,6 +620,7 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
         >
           {title}
         </span>
+        {status ? <span className="wb-pane-status flex shrink-0 items-center">{status.mark}</span> : null}
         <PaneButton
           label="오른쪽으로 분할"
           platform={platform}
@@ -640,6 +665,19 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
       <div className="flex min-h-0 flex-1 flex-col">
         {ctx.renderPane ? ctx.renderPane(info) : <EmptyPane />}
       </div>
+      {waiting ? (
+        // 시안 ① `.pwait`: 칸 바닥의 띠. 무엇을 기다리는지와 그리로 가는 키.
+        <p
+          data-testid="workbench-pane-waiting"
+          className="flex shrink-0 items-center gap-2 bg-signal-soft px-2 py-1 text-meta font-semibold text-signal-text"
+        >
+          <span aria-hidden className="wb-wait-mark" />
+          <span className="min-w-0 flex-1 truncate">{waiting.line}</span>
+          {waiting.keycap ? (
+            <kbd className="shrink-0 font-mono text-timestamp font-medium">{modLabel(platform, waiting.keycap)}</kbd>
+          ) : null}
+        </p>
+      ) : null}
     </section>
   );
 }

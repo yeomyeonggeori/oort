@@ -824,6 +824,16 @@ fn nothing_but_the_command_table_reaches_the_pty() {
         ".manage(pty::PtyState::default())",
         "if let Some(state) = _app.try_state::<pty::PtyState>() {",
         "if let Some(state) = webview.try_state::<pty::PtyState>() {",
+        // The pane-signal listener (#2776) gets the session table to hand a
+        // hook's signal to its pane; `pane_signal.rs` below pins what it does.
+        "let manager = app.state::<pty::PtyState>().0.clone();",
+    ];
+    // The pane-signal listener (#2776) may name the session table and call
+    // exactly one method on it: `deliver_signal`.
+    const PANE_SIGNAL_ALLOWED: &[&str] = &[
+        "use crate::pty::PtyManager;",
+        "fn serve_one(stream: UnixStream, manager: &PtyManager) {",
+        "pub fn serve(listener: UnixListener, manager: Arc<PtyManager>) {",
     ];
     const GIT_READ_ALLOWED: &[&str] = &["state: tauri::State<'_, crate::pty::PtyState>,"];
     let sources = crate_sources();
@@ -850,6 +860,25 @@ fn nothing_but_the_command_table_reaches_the_pty() {
                     "git_read.rs uses the session table beyond folder_of"
                 );
                 assert!(code.contains("state.0.folder_of(request.pane_id)"));
+            }
+            "pane_signal.rs" => {
+                for line in code.lines() {
+                    if idents(line).into_iter().any(is_pty_ident) {
+                        assert!(
+                            PANE_SIGNAL_ALLOWED.contains(&line.trim()),
+                            "pane_signal.rs reaches the PTY: {}",
+                            line.trim()
+                        );
+                    }
+                }
+                let calls: Vec<&str> = code
+                    .match_indices("manager.")
+                    .map(|(at, _)| code[at..].split('(').next().unwrap_or(""))
+                    .collect();
+                assert!(
+                    calls.iter().all(|c| *c == "manager.deliver_signal"),
+                    "pane_signal.rs uses the session table beyond deliver_signal: {calls:?}"
+                );
             }
             "lib.rs" => {
                 for line in code.lines() {
@@ -1003,6 +1032,55 @@ fn nothing_but_the_command_table_reaches_the_pty() {
         assert!(!enqueue.contains(banned), "PtyManager::write uses {banned}");
     }
     assert_eq!(commands, PTY_COMMANDS, "pty.rs commands");
+}
+
+/// ADR-0190 D4-b 「긁지 않는다」 (#2776): a pane's status comes from what the
+/// harness says about itself, never from what it printed.
+///
+/// * The signal path (`pane_signal.rs`) names no output identifier and reads
+///   no PTY.
+/// * In `pty.rs`, the only caller of `PtySink::signal` is `deliver_signal`
+///   (the socket's path), and the output reader `read_loop` never calls it.
+#[test]
+fn pane_status_never_reads_terminal_output() {
+    let sources = crate_sources();
+    let signal_src = &sources
+        .iter()
+        .find(|(n, _)| n == "pane_signal.rs")
+        .expect("pane_signal.rs")
+        .1;
+    let signal_code = code_only(
+        &signal_src[..signal_src
+            .find("#[cfg(test)]\nmod tests")
+            .unwrap_or(signal_src.len())],
+    );
+    for banned in [
+        "output",
+        "read_loop",
+        "try_clone_reader",
+        "MasterPty",
+        "scrollback",
+    ] {
+        assert!(
+            !idents(&signal_code).contains(&banned),
+            "pane_signal.rs names {banned}"
+        );
+    }
+
+    let pty_src = &sources.iter().find(|(n, _)| n == "pty.rs").unwrap().1;
+    let pty = code_only(
+        &pty_src[..pty_src
+            .find("#[cfg(test)]\nmod tests")
+            .unwrap_or(pty_src.len())],
+    );
+    let read_loop = &pty[pty.find("fn read_loop(").expect("read_loop")..];
+    let read_loop = &read_loop[..read_loop.find("\n}").unwrap()];
+    assert!(!read_loop.contains("signal"), "read_loop makes a signal");
+    let deliver = &pty[pty.find("pub fn deliver_signal(").expect("deliver_signal")..];
+    let deliver = &deliver[..deliver.find("\n    }").unwrap()];
+    let callers = pty.matches("sink.signal(").count();
+    assert_eq!(callers, 1, "one caller of PtySink::signal");
+    assert!(deliver.contains("sink.signal(signal)"));
 }
 
 #[test]
