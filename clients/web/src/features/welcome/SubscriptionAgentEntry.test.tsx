@@ -7,6 +7,8 @@ import { waitFor as rtlWaitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, fetchRoster, type RosterMember } from "@momo/core/lib/api";
 import { fetchProviderLink, fetchWorkspace } from "@momo/core/features/settings/api";
+import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
+import { HARNESS_PILL_LABEL } from "@momo/core/features/onboarding/aiConnect";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { AiLinkSection } from "@/features/settings/AiLinkSection";
 import { AiMyAccountsSection } from "@/features/settings/AiMyAccountsSection";
@@ -28,6 +30,14 @@ vi.mock("@/lib/env", async (importOriginal) => {
       return envSlot.flag;
     },
   };
+});
+
+// 이 맥의 CLI 감지(#2813 상태 명령). AI 연결 화면과 같은 함수다.
+const probeSlot = vi.hoisted(() => ({ probes: [] as LocalHarnessProbe[] }));
+
+vi.mock("@/lib/tauri", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/tauri")>();
+  return { ...actual, detectLocalHarnesses: vi.fn(async () => probeSlot.probes) };
 });
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
@@ -129,6 +139,7 @@ beforeAll(() => {
 beforeEach(() => {
   envSlot.tauri = true;
   envSlot.flag = true;
+  probeSlot.probes = [];
   window.history.replaceState(null, "", "/");
   vi.mocked(fetchRoster).mockReset();
   vi.mocked(fetchRoster).mockResolvedValue([me("owner")]);
@@ -154,6 +165,39 @@ describe("설정 › AI 연결 입구 (#2870)", () => {
     expect(q("subscription-entry")?.getAttribute("data-surface")).toBe("rows");
     act(() => q("subscription-entry-open")?.click());
     expect(window.location.hash).toBe("#/ai-connect?from=settings");
+  });
+
+  it("AI 연결 화면이 「준비됨」으로 읽는 CLI를 내 계정 절도 같은 판정으로 싣는다 (#2938 ①)", async () => {
+    probeSlot.probes = [
+      { id: "claude", installed: true, auth: "logged_in" },
+      { id: "codex", installed: true, auth: "needs_login" },
+    ];
+    mount(createElement(AiMyAccountsSection));
+    await rtlWaitFor(() => {
+      if (!q("my-account-claude")) throw new Error("claude row");
+    });
+    expect(q("my-account-claude")?.textContent).toContain("Claude Code");
+    expect(q("my-account-claude-state")?.textContent).toBe(HARNESS_PILL_LABEL.ready);
+    expect(q("my-account-codex-state")?.textContent).toBe(HARNESS_PILL_LABEL.login);
+    // 「아직 연결한 구독이 없어요」는 준비된 CLI가 있는 동안 서지 않는다.
+    expect(host?.textContent).not.toContain("아직 연결한 구독이 없어요");
+    // 입구(재진입)는 그대로 있다.
+    act(() => q("subscription-entry-open")?.click());
+    expect(window.location.hash).toBe("#/ai-connect?from=settings");
+  });
+
+  it("설치되지 않은 CLI는 줄을 세우지 않고, 하나도 없으면 빈 줄이다", async () => {
+    probeSlot.probes = [
+      { id: "claude", installed: false, auth: "unknown" },
+      { id: "codex", installed: false, auth: "unknown" },
+    ];
+    mount(createElement(AiMyAccountsSection));
+    await rtlWaitFor(() => {
+      if (!q("subscription-entry-open")) throw new Error("entry");
+    });
+    expect(q("my-account-claude")).toBeNull();
+    expect(q("my-account-codex")).toBeNull();
+    expect(host?.textContent).toContain("아직 연결한 구독이 없어요");
   });
 
   it("provider 연결이 운영자 403 이어도 owner 에게는 입구가 선다", async () => {
