@@ -1,0 +1,26 @@
+{
+  "_comment": "#2949 GC-8 — 에이전트 제안 카드 props의 골든 벡터(ADR-0186 증보 G3). 서버가 조립한 `momo.command_suggest` 값이 한 벌이고, 서버(Rust momo_agent::card_suggest 단위 시험 + remote_host_r0_conformance_pg의 GC-8 E2E가 실제 게시된 메시지 props와 비교)와 클라이언트(GC-7 코어·웹 렌더 시험, track/uxui)가 같은 기대값을 읽는다. `for_member_id`는 자리표시 값이다: 서버 시험은 실제 요청자로, 클라이언트 시험은 자기 REQUESTER 상수로 이 값을 바꿔 끼운다. 한쪽에서만 모양이 바뀌면 다른 쪽 시험이 실패한다.",
+  "for_member_id_placeholder": "00000000-0000-7000-8000-000000000101",
+  "cases": [
+    {
+      "name": "no_args",
+      "arguments": {"commandId": "ai.connect", "body": "여기서 바로 연결할 수 있어요."},
+      "props": {"momo.command_suggest": {"v": 1, "command_id": "ai.connect", "args": {}, "for_member_id": "00000000-0000-7000-8000-000000000101", "label": "AI 연결"}}
+    },
+    {
+      "name": "claude",
+      "arguments": {"commandId": "ai.connect", "args": {"harness": "claude"}, "body": "여기서 바로 연결할 수 있어요."},
+      "props": {"momo.command_suggest": {"v": 1, "command_id": "ai.connect", "args": {"harness": "claude", "scope": "mine"}, "for_member_id": "00000000-0000-7000-8000-000000000101", "label": "Claude 구독 연결"}}
+    },
+    {
+      "name": "codex",
+      "arguments": {"commandId": "ai.connect", "args": {"harness": "codex"}, "body": "여기서 바로 연결할 수 있어요."},
+      "props": {"momo.command_suggest": {"v": 1, "command_id": "ai.connect", "args": {"harness": "codex", "scope": "mine"}, "for_member_id": "00000000-0000-7000-8000-000000000101", "label": "Codex 구독 연결"}}
+    },
+    {
+      "name": "team_key",
+      "arguments": {"commandId": "ai.connect", "args": {"scope": "team"}, "body": "여기서 바로 연결할 수 있어요."},
+      "props": {"momo.command_suggest": {"v": 1, "command_id": "ai.connect", "args": {"harness": "team_key", "scope": "team"}, "for_member_id": "00000000-0000-7000-8000-000000000101", "label": "팀 API 키 연결"}}
+    }
+  ]
+}

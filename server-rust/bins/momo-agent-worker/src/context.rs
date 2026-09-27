@@ -133,6 +133,11 @@ pub struct SystemBlocks<'a> {
     /// other a rule about behaviour. Folded into one block, an operator reading
     /// the transcript could not tell which was which.
     pub report_protocol: Option<&'a str>,
+    /// The connection-request rule for `card_suggest` (GC-8, #2949) —
+    /// `momo_agent::card_suggest::CARD_SUGGEST_DIRECTIVE`, present only when
+    /// the profile offered that tool. A rule about behaviour like the protocol,
+    /// kept as its own turn for the same reason.
+    pub card_suggest: Option<&'a str>,
 }
 
 /// Build the chat array for one turn.
@@ -168,6 +173,9 @@ pub fn assemble(
         .filter(|p| !p.is_empty())
     {
         head.push(ChatMessage::system(protocol));
+    }
+    if let Some(directive) = blocks.card_suggest.map(str::trim).filter(|d| !d.is_empty()) {
+        head.push(ChatMessage::system(directive));
     }
 
     let mut turns: Vec<Turn> = if recent_messages.is_empty() {
@@ -398,6 +406,7 @@ mod tests {
             SystemBlocks {
                 now: Some("현재 시각: 2026-08-17"),
                 report_protocol: Some(crate::completion_report::REPORT_PROTOCOL_BLOCK),
+                ..SystemBlocks::default()
             },
             20,
         );
@@ -470,6 +479,7 @@ mod tests {
                 SystemBlocks {
                     now: Some("현재 시각: 2026-08-17"),
                     report_protocol: protocol,
+                    ..SystemBlocks::default()
                 },
                 10_000,
             )
@@ -640,6 +650,47 @@ mod tests {
                 ChatMessage::user("[성재] 실제 질문"),
             ],
             "the unattributed blank line is gone; the attributed one is Swift's"
+        );
+    }
+
+    /// GC-8 (#2949): the connection-request rule is its own `system` turn,
+    /// after the protocol, and the budget never trims it — a long setup
+    /// conversation is exactly where 「연결해 줘」 comes up.
+    #[test]
+    fn the_card_suggest_directive_is_a_system_turn_the_budget_cannot_trim() {
+        let window = vec![
+            message(1, Some(5), None, &"가".repeat(200)),
+            message(2, Some(5), Some("성재"), "@hermes 내 클로드 구독 연결해 줘"),
+        ];
+        let directive = momo_agent::card_suggest::CARD_SUGGEST_DIRECTIVE;
+        let out = assemble(
+            &window,
+            Uuid::from_u128(AGENT),
+            Some(Uuid::from_u128(2)),
+            "unused",
+            Some("you are hermes"),
+            SystemBlocks {
+                now: Some("현재 시각: 2026-09-27"),
+                report_protocol: Some(crate::completion_report::REPORT_PROTOCOL_BLOCK),
+                card_suggest: Some(directive),
+            },
+            20,
+        );
+        assert_eq!(out.messages[3], ChatMessage::system(directive));
+        assert_eq!(out.dropped_count, 1, "history trimmed, the rule was not");
+
+        let without = assemble(
+            &window,
+            Uuid::from_u128(AGENT),
+            Some(Uuid::from_u128(2)),
+            "unused",
+            Some("you are hermes"),
+            SystemBlocks::default(),
+            10_000,
+        );
+        assert!(
+            without.messages.iter().all(|m| m.content != directive),
+            "no tool, no rule"
         );
     }
 }
