@@ -815,4 +815,36 @@ mod tests {
         assert!(CARD_SUGGEST_DIRECTIVE.contains("do not try to do it yourself"));
         assert!(CARD_SUGGEST_DIRECTIVE.contains("Never ask for a key, token, password"));
     }
+
+    /// GC-8 (#2949): the golden vector both tracks read. What this crate
+    /// assembles for each case is byte-for-byte the committed props, so a
+    /// change on the server side fails here before a client renders it wrong.
+    #[test]
+    fn the_props_match_the_shared_golden_vector() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../docs/api/command-suggest-ai-connect.golden.json"
+        );
+        let golden: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("read golden"))
+                .expect("golden is JSON");
+        let requester = Uuid::parse_str(
+            golden["for_member_id_placeholder"]
+                .as_str()
+                .expect("placeholder"),
+        )
+        .expect("placeholder uuid");
+        let cases = golden["cases"].as_array().expect("cases");
+        assert_eq!(cases.len(), 4, "one case per label row");
+        for case in cases {
+            let validated =
+                validate_suggestion(&case["arguments"], &[]).expect("golden arguments are legal");
+            assert_eq!(
+                command_suggest_props(&validated, requester),
+                case["props"],
+                "{}",
+                case["name"]
+            );
+        }
+    }
 }
