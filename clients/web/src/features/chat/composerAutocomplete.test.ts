@@ -51,17 +51,25 @@ const rel = (path: string) => path.slice(SRC.length);
 const MACHINE = "/features/chat/composerAutocomplete.ts";
 
 describe("트리거 파서는 하나다 (#1930)", () => {
-  it("세 트리거가 한 표에서만 정의된다", () => {
+  it("네 트리거가 한 표에서만 정의된다 (`/`는 #2942 GC-1의 네 번째 줄)", () => {
     expect(COMPOSER_TRIGGER_SPECS.map((spec) => spec.char)).toEqual([
       "@",
       "#",
       ":",
+      "/",
     ]);
     expect(COMPOSER_TRIGGER_SPECS.map((spec) => spec.kind)).toEqual([
       "mention",
       "channel",
       "emoji",
+      "command",
     ]);
+    // 맨 앞 앵커는 `/`만 갖는다. 셋은 예전 규칙(줄 시작이거나 공백 뒤) 그대로다.
+    expect(
+      COMPOSER_TRIGGER_SPECS.filter((spec) => spec.anchor === "message-start").map(
+        (spec) => spec.char
+      )
+    ).toEqual(["/"]);
   });
 
   it("트리거 세 글자와 앵커 규율을 함께 아는 파일이 하나뿐이다", () => {

@@ -21,6 +21,7 @@ import {
   Lock,
   MessageSquare,
   Milestone,
+  Plug,
   Plus,
   Search,
   Settings,
@@ -94,6 +95,7 @@ import {
 } from "@momo/core/features/commands/serverActions";
 import { isReachableHref } from "@/features/timeline/ActionResultCard";
 import { rememberSettingsOpener } from "@/features/settings/settingsFocus";
+import { hasLocalCardHost, openLocalCardIn } from "@/features/chat/localCards";
 import { Dialog, DialogOverlay, DialogPortal } from "@/design/ui/dialog";
 import { MODAL_CONTENT_MOTION } from "@/design/motion";
 import { cn } from "@/design/lib/cn";
@@ -168,6 +170,8 @@ const COMMAND_ICONS: Record<CommandIcon, LucideIcon> = {
   workstreams: Milestone,
   "create-channel": Plus,
   agent: Bot,
+  // 시안 ①의 `i-plug`. AI 연결 카드와 컴포저 `/연결` 줄이 같은 글리프를 든다.
+  "ai-connect": Plug,
 };
 
 /** 명령 id → 그 명령과 같은 일을 하는 단축키. 없으면 키캡을 그리지 않는다. */
@@ -522,6 +526,7 @@ export function QuickSwitcher({
       ) ?? null
     );
   }, [location.pathname, groups.channels, groups.dms]);
+  const currentChannelId = currentChannel?.id ?? null;
 
   // A failed DM belongs to the attempt that failed, not to the palette. The
   // palette outlives its openings — cmdk unmounts the dialog contents but this
@@ -651,10 +656,12 @@ export function QuickSwitcher({
           canCreateChannel: canCreate,
           isSurfaceProvided: surfaceProvided,
           agents: commandAgents,
+          // 카드 자리는 지금 서 있는 채널의 것이다(#2943). 채널 밖이면 없다.
+          canOpenLocalCard: () => hasLocalCardHost(currentChannelId),
         }),
         usage
       ),
-    [showDrafts, canCreate, commandAgents, usage, surfaceProvided]
+    [showDrafts, canCreate, commandAgents, usage, surfaceProvided, currentChannelId]
   );
 
   const commandContext: CommandContext = {
@@ -666,11 +673,56 @@ export function QuickSwitcher({
     openCreateChannel: () => requestAnimationFrame(() => openCreateChannel()),
     openAgentProfile: (memberId) =>
       requestAnimationFrame(() => openAgentProfile(memberId)),
+    // 로컬 카드는 **지금 보고 있는 채널**에 붙는다(#2943, brief §3.1). 채널 밖이거나
+    // 그 채널에 카드 자리가 없으면 false이고, 명령이 설정 › AI 연결로 폴백한다 —
+    // 그 이동도 위의 `navigateFromPalette` 규율(복귀 지점 기억)을 그대로 지난다.
+    openLocalCard: (card, args) => openLocalCardIn(currentChannelId, card, args),
     session: { memberId: session.member.id },
     workspaceId,
     // #2854: 데스크탑의 작업 콘솔은 `/work?view=console`이다.
     desktop: isDesktop(),
   };
+
+  // 「명령」 그룹. 자리는 친 말이 정한다(아래 `commandsFirst`).
+  const commandGroup =
+    commands.length > 0 ? (
+      
+          <Command.Group heading="명령">
+            {commands.map((command) => (
+              <CommandRow
+                key={command.id}
+                command={command}
+                onRun={runCommand}
+              />
+            ))}
+          </Command.Group>
+    ) : null;
+
+  /**
+   * 「명령」을 검색 두 줄 앞에 세우는가 (#2943 design-review R1 H-2 · R2 H-1).
+   *
+   * 좁게 판정한다. 대상은 **`client` 명령**(지금은 `ai.connect`)뿐이고, 재료는
+   * 사람이 보는 이름(제목)과 슬래시 이름·별칭뿐이다. id·uuid·meta·keywords는
+   * 보지 않는다 — 앞 판은 `commandSearchValue`를 부분 문자열로 재서 `gen`(id의
+   * `agent.routing`)·`0`(uuid)·`채널`이 ↵를 명령으로 가로챘다. 친 낱말마다
+   * 이름 낱말의 **앞머리**여야 하고, 두 글자 미만의 질의는 세우지 않는다.
+   * 그 밖의 모든 말에서 ↵는 예전처럼 메시지 검색이다(R1 B-2).
+   */
+  const commandsFirst = useMemo(() => {
+    const query = typed.trim().toLowerCase();
+    if (query.length < 2) return false;
+    const words = query.split(/\s+/);
+    return commands.some((command) => {
+      if (command.kind !== "client") return false;
+      const names = [
+        ...command.title.toLowerCase().split(/\s+/),
+        ...(command.slash
+          ? [command.slash.name, ...command.slash.aliases].map((name) => name.toLowerCase())
+          : []),
+      ];
+      return words.every((word) => names.some((name) => name.startsWith(word)));
+    });
+  }, [typed, commands]);
 
   function runCommand(command: PaletteCommand) {
     const result = command.run(commandContext);
@@ -786,6 +838,11 @@ export function QuickSwitcher({
             그룹 머리글이 표면 이름을 **한 번** 말하고(#1146 N4), 두 줄은 각자
             범위만 말한다. `Command.Empty`가 「아래 {SEARCH_SURFACE_NAME}에서
             찾을 수 있습니다」라고 가리키는 그 이름이 이 머리글이다. */}
+        {/* 친 말이 명령 이름과 맞으면 「명령」이 검색 두 줄보다 **앞**에 선다
+            (#2943 design-review H-2, 시안 ① ⌘K: 「ai 연결」 ↵ = 카드 열기).
+            검색 두 줄은 그대로 forceMount로 아래에 남는다 — 이름이 아무것도
+            안 맞을 때 쓰라고 있는 줄이라는 R1 B-2 규율은 바뀌지 않는다. */}
+        {commandsFirst && commandGroup}
         {searchProvided && (
           <Command.Group heading={SEARCH_SURFACE_NAME} forceMount>
             <Command.Item role="option"
@@ -846,17 +903,7 @@ export function QuickSwitcher({
 
             forceMount는 여기 없다. 위의 검색 두 줄과 달리 이 줄들은 **이름으로
             찾는** 줄이라, 이름이 안 맞으면 사라지는 것이 맞다. */}
-        {commands.length > 0 && (
-          <Command.Group heading="명령">
-            {commands.map((command) => (
-              <CommandRow
-                key={command.id}
-                command={command}
-                onRun={runCommand}
-              />
-            ))}
-          </Command.Group>
-        )}
+        {!commandsFirst && commandGroup}
 
         {/* 워크스페이스 행동 (ADR-0186 부록 E · D3 risk=approval).
 

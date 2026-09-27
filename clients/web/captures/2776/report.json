@@ -1,0 +1,284 @@
+{
+  "scenes": [
+    "pane-status-1440-light",
+    "inbox-local-panes-1440-light",
+    "compare-pane-status-1440-light",
+    "pane-status-1280-light",
+    "inbox-local-panes-1280-light",
+    "compare-pane-status-1280-light",
+    "pane-status-900-light",
+    "pane-status-1440-dark",
+    "inbox-local-panes-1440-dark",
+    "compare-pane-status-1440-dark",
+    "pane-status-1280-dark",
+    "inbox-local-panes-1280-dark",
+    "compare-pane-status-1280-dark",
+    "pane-status-900-dark"
+  ],
+  "checks": [
+    {
+      "name": "1440-light 칸 상태 표지(기다림 3·5, 끝남 6, 멈춤 8, 실행 중 4)",
+      "ok": true,
+      "detail": {
+        "p1": "running",
+        "p2": "running",
+        "p3": "waiting",
+        "p4": "running",
+        "p5": "waiting",
+        "p6": "done",
+        "p7": "running",
+        "p8": "stopped"
+      }
+    },
+    {
+      "name": "1440-light 바닥 띠 둘(칸 3 ⌃⇧J, 칸 5 ⌃5)",
+      "ok": true,
+      "detail": {
+        "strips": [
+          "실행 허락을 기다려요⌃⇧J",
+          "실행 허락을 기다려요⌃5"
+        ]
+      }
+    },
+    {
+      "name": "1440-light 칸 머리 넘침 0",
+      "ok": true,
+      "detail": {
+        "headerOverflow": 0
+      }
+    },
+    {
+      "name": "1440-light 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "1440-light ⌃⇧J → 칸 5",
+      "ok": true
+    },
+    {
+      "name": "1440-light 인박스 「이 기기의 칸」: 기다림과 끝남",
+      "ok": true,
+      "detail": {
+        "inboxRows": [
+          "waiting:나를 기다림5셸실행 허락을 기다려요방금",
+          "done:끝남6격자 리뷰작업이 끝났어요방금"
+        ]
+      }
+    },
+    {
+      "name": "1440-light 결정 대기 빈 문구가 기다리는 칸과 모순되지 않는다",
+      "ok": true,
+      "detail": {
+        "empty": "에이전트 승인 요청은 없습니다.위의 「이 기기의 칸」이 회원님을 기다립니다. 누르면 그 칸으로 갑니다."
+      }
+    },
+    {
+      "name": "1440-light 인박스 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "1440-light 인박스 줄 → 그 칸",
+      "ok": true
+    },
+    {
+      "name": "1280-light 칸 상태 표지(기다림 3·5, 끝남 6, 멈춤 8, 실행 중 4)",
+      "ok": true,
+      "detail": {
+        "p1": "running",
+        "p2": "running",
+        "p3": "waiting",
+        "p4": "running",
+        "p5": "waiting",
+        "p6": "done",
+        "p7": "running",
+        "p8": "stopped"
+      }
+    },
+    {
+      "name": "1280-light 바닥 띠 둘(칸 3 ⌃⇧J, 칸 5 ⌃5)",
+      "ok": true,
+      "detail": {
+        "strips": [
+          "실행 허락을 기다려요⌃⇧J",
+          "실행 허락을 기다려요⌃5"
+        ]
+      }
+    },
+    {
+      "name": "1280-light 칸 머리 넘침 0",
+      "ok": true,
+      "detail": {
+        "headerOverflow": 0
+      }
+    },
+    {
+      "name": "1280-light 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "1280-light ⌃⇧J → 칸 5",
+      "ok": true
+    },
+    {
+      "name": "1280-light 인박스 「이 기기의 칸」: 기다림과 끝남",
+      "ok": true,
+      "detail": {
+        "inboxRows": [
+          "waiting:나를 기다림5cargo test실행 허락을 기다려요방금",
+          "done:끝남6셸작업이 끝났어요방금"
+        ]
+      }
+    },
+    {
+      "name": "1280-light 결정 대기 빈 문구가 기다리는 칸과 모순되지 않는다",
+      "ok": true,
+      "detail": {
+        "empty": "에이전트 승인 요청은 없습니다.위의 「이 기기의 칸」이 회원님을 기다립니다. 누르면 그 칸으로 갑니다."
+      }
+    },
+    {
+      "name": "1280-light 인박스 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "1280-light 인박스 줄 → 그 칸",
+      "ok": true
+    },
+    {
+      "name": "900-light 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 칸 상태 표지(기다림 3·5, 끝남 6, 멈춤 8, 실행 중 4)",
+      "ok": true,
+      "detail": {
+        "p1": "running",
+        "p2": "running",
+        "p3": "waiting",
+        "p4": "running",
+        "p5": "waiting",
+        "p6": "done",
+        "p7": "running",
+        "p8": "stopped"
+      }
+    },
+    {
+      "name": "1440-dark 바닥 띠 둘(칸 3 ⌃⇧J, 칸 5 ⌃5)",
+      "ok": true,
+      "detail": {
+        "strips": [
+          "실행 허락을 기다려요⌃⇧J",
+          "실행 허락을 기다려요⌃5"
+        ]
+      }
+    },
+    {
+      "name": "1440-dark 칸 머리 넘침 0",
+      "ok": true,
+      "detail": {
+        "headerOverflow": 0
+      }
+    },
+    {
+      "name": "1440-dark 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "1440-dark ⌃⇧J → 칸 5",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 인박스 「이 기기의 칸」: 기다림과 끝남",
+      "ok": true,
+      "detail": {
+        "inboxRows": [
+          "waiting:나를 기다림5PR #2851 열림실행 허락을 기다려요방금",
+          "done:끝남6격자 리뷰작업이 끝났어요방금"
+        ]
+      }
+    },
+    {
+      "name": "1440-dark 결정 대기 빈 문구가 기다리는 칸과 모순되지 않는다",
+      "ok": true,
+      "detail": {
+        "empty": "에이전트 승인 요청은 없습니다.위의 「이 기기의 칸」이 회원님을 기다립니다. 누르면 그 칸으로 갑니다."
+      }
+    },
+    {
+      "name": "1440-dark 인박스 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "1440-dark 인박스 줄 → 그 칸",
+      "ok": true
+    },
+    {
+      "name": "1280-dark 칸 상태 표지(기다림 3·5, 끝남 6, 멈춤 8, 실행 중 4)",
+      "ok": true,
+      "detail": {
+        "p1": "running",
+        "p2": "running",
+        "p3": "waiting",
+        "p4": "running",
+        "p5": "waiting",
+        "p6": "done",
+        "p7": "running",
+        "p8": "stopped"
+      }
+    },
+    {
+      "name": "1280-dark 바닥 띠 둘(칸 3 ⌃⇧J, 칸 5 ⌃5)",
+      "ok": true,
+      "detail": {
+        "strips": [
+          "실행 허락을 기다려요⌃⇧J",
+          "실행 허락을 기다려요⌃5"
+        ]
+      }
+    },
+    {
+      "name": "1280-dark 칸 머리 넘침 0",
+      "ok": true,
+      "detail": {
+        "headerOverflow": 0
+      }
+    },
+    {
+      "name": "1280-dark 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "1280-dark ⌃⇧J → 칸 5",
+      "ok": true
+    },
+    {
+      "name": "1280-dark 인박스 「이 기기의 칸」: 기다림과 끝남",
+      "ok": true,
+      "detail": {
+        "inboxRows": [
+          "waiting:나를 기다림5relay 중복 발행실행 허락을 기다려요방금",
+          "done:끝남6셸작업이 끝났어요방금"
+        ]
+      }
+    },
+    {
+      "name": "1280-dark 결정 대기 빈 문구가 기다리는 칸과 모순되지 않는다",
+      "ok": true,
+      "detail": {
+        "empty": "에이전트 승인 요청은 없습니다.위의 「이 기기의 칸」이 회원님을 기다립니다. 누르면 그 칸으로 갑니다."
+      }
+    },
+    {
+      "name": "1280-dark 인박스 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "1280-dark 인박스 줄 → 그 칸",
+      "ok": true
+    },
+    {
+      "name": "900-dark 가로 넘침 0",
+      "ok": true
+    }
+  ]
+}

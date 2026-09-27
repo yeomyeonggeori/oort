@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { SurfaceId } from "../capabilities/serverSurfaces";
 import { serverSurface } from "../capabilities/serverSurfaces";
 import {
+  AI_CONNECT_SETTINGS_PATH,
   KNOWN_COMMAND_IDS,
   agentRoutingCommandId,
+  slashCommands,
   commandSearchValue,
   visibleCommands,
   type CommandContext,
@@ -27,19 +29,22 @@ function env(overrides: Partial<CommandEnv> = {}): CommandEnv {
     canCreateChannel: true,
     isSurfaceProvided: ALL_SURFACES,
     agents: [],
+    canOpenLocalCard: () => false,
     ...overrides,
   };
 }
 
-function context(): CommandContext & {
+function context(opened = false): CommandContext & {
   navigate: ReturnType<typeof vi.fn>;
   openCreateChannel: ReturnType<typeof vi.fn>;
   openAgentProfile: ReturnType<typeof vi.fn>;
+  openLocalCard: ReturnType<typeof vi.fn>;
 } {
   return {
     navigate: vi.fn(),
     openCreateChannel: vi.fn(),
     openAgentProfile: vi.fn(),
+    openLocalCard: vi.fn(() => opened),
     session: { memberId: "member-1" },
     workspaceId: "ws-1",
   };
@@ -54,9 +59,10 @@ describe("명령 레지스트리", () => {
     }
   });
 
-  it("이 티켓의 항목은 전부 navigate다 — client는 정의만 서 있다(AX-5)", () => {
+  it("client 명령은 ai.connect 하나다 — 나머지는 전부 navigate(#2943)", () => {
     const agents = [{ id: "a-1", displayName: "김인턴", handle: "intern" }];
     for (const command of visibleCommands(env({ agents }))) {
+      if (command.id === "ai.connect") continue;
       expect(command.kind).toBe("navigate");
     }
   });
@@ -209,5 +215,63 @@ describe("명령 레지스트리", () => {
     expect(value).toContain("디렉터리");
     expect(value).toContain("명부");
     expect(value).toContain("nav.directory");
+  });
+});
+
+describe("ai.connect (#2943 GC-2)", () => {
+  const aiConnect = (overrides: Partial<CommandEnv> = {}) =>
+    visibleCommands(env(overrides)).find((command) => command.id === "ai.connect")!;
+
+  it("client 명령이고 설정 갈래이며 제목은 「AI 연결 카드 열기」다", () => {
+    const command = aiConnect();
+    expect(command.kind).toBe("client");
+    expect(command.group).toBe("settings");
+    expect(command.title).toBe("AI 연결 카드 열기");
+    expect(commandSearchValue(command)).toContain("connect");
+  });
+
+  it("카드 자리가 있으면 카드를 열고 이동하지 않는다", () => {
+    const ctx = context(true);
+    const result = aiConnect().run(ctx, { line: "claude" });
+    expect(ctx.openLocalCard).toHaveBeenCalledWith("ai.connect", { line: "claude" });
+    expect(ctx.navigate).not.toHaveBeenCalled();
+    expect(result).toEqual({ status: "AI 연결 카드 열기", closesSurface: true });
+  });
+
+  it("카드 자리가 없으면 설정 › AI 연결로 간다(채널 밖·GC-3 전 폴백)", () => {
+    const ctx = context(false);
+    const result = aiConnect().run(ctx);
+    expect(ctx.openLocalCard).toHaveBeenCalledWith("ai.connect", {});
+    expect(ctx.navigate.mock.calls).toEqual([[AI_CONNECT_SETTINGS_PATH]]);
+    expect(AI_CONNECT_SETTINGS_PATH).toBe("/settings?section=ai");
+    expect(result).toEqual({ status: "AI 연결로 이동", closesSurface: true });
+  });
+
+  it("모르는 인자는 카드에 가지 않는다(의도만, 비밀값 없음)", () => {
+    const ctx = context(true);
+    aiConnect().run(ctx, { line: "sk-bogus", apiKey: "x" } as never);
+    expect(ctx.openLocalCard).toHaveBeenCalledWith("ai.connect", {});
+  });
+
+  it("줄의 작은 글씨가 누른 결과를 거짓 없이 말한다", () => {
+    expect(aiConnect({ canOpenLocalCard: () => true }).meta).toBe("이 채널 · 나에게만");
+    expect(aiConnect({ canOpenLocalCard: () => false }).meta).toBe("설정에서 열려요");
+  });
+
+  it("설정 › AI 연결 이동 줄이 따로 선다", () => {
+    const ctx = context();
+    const nav = visibleCommands(env()).find((command) => command.id === "nav.settings.ai")!;
+    expect(nav.run(ctx).status).toBe("AI 연결로 이동");
+    expect(ctx.navigate.mock.calls).toEqual([["/settings?section=ai"]]);
+  });
+
+  it("슬래시 이름은 client 명령만 갖는다", () => {
+    const slash = slashCommands();
+    expect(slash.map((command) => command.id)).toEqual(["ai.connect"]);
+    for (const command of visibleCommands(env())) {
+      if (command.slash !== undefined) expect(command.kind).toBe("client");
+    }
+    expect(slash[0].slash?.name).toBe("연결");
+    expect(slash[0].slash?.aliases).toEqual(["connect", "ai"]);
   });
 });

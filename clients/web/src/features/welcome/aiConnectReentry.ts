@@ -47,7 +47,56 @@ export function aiConnectReturnHash(from: AiConnectReentryFrom): string {
   return RETURN_HASH[from];
 }
 
+// ---- 히스토리 (#2938 ③) --------------------------------------------------------
+//
+// 닫기는 처음에 출발지 해시를 **새 항목으로 쌓았다**. 그러면 스택이
+// [앱, 설정, ai-connect, 설정]이 되고, 설정의 「앱으로 돌아가기」(한 칸 뒤로)가
+// 바로 아래의 ai-connect로 간다. 거기서 다시 닫으면 설정이 또 쌓여 끝나지 않았다.
+//
+// 이제 여는 쪽이 재진입 항목에 「어디 위에 쌓였는가」를 적어 둔다. 닫을 때 가려는
+// 곳이 그 자리면 한 칸 **뒤로** 간다(쌓인 항목이 사라진다). 그 표지가 없으면
+// (주소로 바로 열림·새로 고침) 또는 다른 곳으로 가면 재진입 항목을 **바꿔 끼운다**.
+// 어느 쪽이든 스택에 ai-connect가 남지 않는다.
+
+const REENTRY_ORIGIN_STATE = "oortAiConnectOrigin";
+
+function hashPath(hash: string): string {
+  const raw = hash.startsWith("#") ? hash.slice(1) : hash;
+  const queryAt = raw.indexOf("?");
+  return (queryAt === -1 ? raw : raw.slice(0, queryAt)).replace(/\/+$/, "") || "/";
+}
+
+function historyState(): Record<string, unknown> {
+  const state: unknown = window.history.state;
+  return state !== null && typeof state === "object" ? (state as Record<string, unknown>) : {};
+}
+
 /** 재진입 화면을 연다. 해시 대입이라 App의 hashchange가 받는다. */
 export function openAiConnectReentry(from: AiConnectReentryFrom): void {
+  const back = aiConnectReturnHash(from);
+  // 출발지가 곧 돌아올 자리면 그 항목을 돌아올 주소로 먼저 고쳐 둔다. 설정은
+  // 고른 절을 주소에 싣지 않으므로(#/settings), 뒤로 돌아오면 첫 절이 선다.
+  // 라우터의 상태(idx·key)는 그대로 둔다.
+  if (hashPath(window.location.hash) === hashPath(back) && window.location.hash !== back) {
+    window.history.replaceState(window.history.state, "", back);
+  }
+  const origin = window.location.hash;
   window.location.hash = aiConnectReentryHash(from);
+  window.history.replaceState({ ...historyState(), [REENTRY_ORIGIN_STATE]: origin }, "");
+}
+
+/**
+ * 재진입을 닫고 `hash`로 간다. 쌓인 자리로 돌아가면 뒤로, 아니면 바꿔 끼운다.
+ * 어느 쪽이든 히스토리에 재진입 항목이 남지 않는다.
+ */
+export function leaveAiConnectReentry(hash: string): void {
+  const { [REENTRY_ORIGIN_STATE]: origin, ...rest } = historyState();
+  if (typeof origin === "string" && origin === hash) {
+    window.history.back();
+    return;
+  }
+  window.location.replace(hash);
+  // 바꿔 끼운 항목은 라우터 상태를 잃는다. 재진입 항목의 것을 물려준다: 앱이
+  // 재진입 주소로 시작했다면 설정이 「첫 항목(idx 0)」을 알아 앱 밖으로 나가지 않는다.
+  window.history.replaceState(Object.keys(rest).length > 0 ? rest : null, "");
 }

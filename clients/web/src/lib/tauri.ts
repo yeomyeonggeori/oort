@@ -9,7 +9,7 @@
 //
 // The Rust half lives in `clients/desktop/src-tauri/src/{deeplink,discovery,
 // notification,keychain,updater,detect,harness_status,opener,pdf_viewer,pty,
-// git_read}.rs` and the
+// git_read,work_host}.rs` and the
 // command/event contract is documented in `clients/desktop/README.md`. Keep
 // the three in sync — a renamed command fails at runtime, not at compile time.
 //
@@ -21,6 +21,7 @@
 import { IS_TAURI } from "./env";
 import type { HostedAgentProbe as HostedAgentProbeWire } from "@momo/core/features/hostedAgents/detect";
 import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
+import type { LocalWorkHostStatus } from "@momo/core/features/settings/thisMacHost";
 import type {
   GitReadCommand,
   GitReadResult,
@@ -295,7 +296,14 @@ export const desktopPty = {
   async spawn(
     request: PtySpawnRequest,
     onOutput: (bytes: ArrayBuffer) => void,
-    onExit: (exit: PtyExit) => void
+    onExit: (exit: PtyExit) => void,
+    /**
+     * A harness hook's status signal for this session (#2776,
+     * `pane_signal.rs`): one of `PaneSignal` in `@momo/core` workbench
+     * `paneStatus`. Unknown values arrive as-is; the caller filters them.
+     * Never derived from output.
+     */
+    onSignal: (signal: unknown) => void = () => undefined
   ): Promise<number> {
     if (!IS_TAURI) throw new Error("local terminal unavailable");
     const { invoke: call, Channel } = await core();
@@ -303,7 +311,9 @@ export const desktopPty = {
     output.onmessage = onOutput;
     const exit = new Channel<PtyExit>();
     exit.onmessage = onExit;
-    return call<number>("pty_spawn", { request, onOutput: output, onExit: exit });
+    const signal = new Channel<unknown>();
+    signal.onmessage = onSignal;
+    return call<number>("pty_spawn", { request, onOutput: output, onExit: exit, onSignal: signal });
   },
 
   /**
@@ -359,6 +369,45 @@ export async function readWorkbenchGit(
     return GIT_READ_UNKNOWN;
   }
 }
+
+// ---- this Mac as a work host (#2778, ADR-0188 D2) -----------------------------
+
+/**
+ * The five `work_host_*` commands (`clients/desktop/src-tauri/src/work_host.rs`).
+ * Every call rejects with the shell's error code (a short snake_case string,
+ * `thisMacErrorMessage` turns it into a sentence); in a browser tab each one
+ * rejects with `unsupported_platform`, and `status` resolves `null`.
+ *
+ * `register` hands the owner's access token to the shell, which passes it to
+ * `momo-workd register` in that child's environment only.
+ */
+export const desktopWorkHost = {
+  async status(): Promise<LocalWorkHostStatus | null> {
+    if (!IS_TAURI) return null;
+    return invoke<LocalWorkHostStatus>("work_host_status");
+  },
+  async register(request: {
+    serverUrl: string;
+    workspaceId: string;
+    displayName: string;
+    accessToken: string;
+  }): Promise<LocalWorkHostStatus> {
+    if (!IS_TAURI) throw "unsupported_platform";
+    return invoke<LocalWorkHostStatus>("work_host_register", { request });
+  },
+  async start(): Promise<LocalWorkHostStatus> {
+    if (!IS_TAURI) throw "unsupported_platform";
+    return invoke<LocalWorkHostStatus>("work_host_start");
+  },
+  async stop(): Promise<LocalWorkHostStatus> {
+    if (!IS_TAURI) throw "unsupported_platform";
+    return invoke<LocalWorkHostStatus>("work_host_stop");
+  },
+  async forget(): Promise<LocalWorkHostStatus> {
+    if (!IS_TAURI) throw "unsupported_platform";
+    return invoke<LocalWorkHostStatus>("work_host_forget");
+  },
+};
 
 // ---- OS terminal (#2814) ------------------------------------------------------
 

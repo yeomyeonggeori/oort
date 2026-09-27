@@ -34,6 +34,7 @@ import {
   serializeScrollback,
   staleScrollbackEntries,
 } from "@momo/core/features/workbench/scrollbackStore";
+import { parsePaneSignal, type PaneSignal } from "@momo/core/features/workbench/paneStatus";
 import { desktopPty, type PtyExit, type PtyProgram } from "@/lib/tauri";
 
 /** 보이는 xterm이든 미러든, 이 모듈이 쓰는 xterm 표면. */
@@ -78,6 +79,11 @@ export interface LocalSessionView {
   phase: LocalSessionPhase;
   /** OSC 제목(셸이 알려 준 것). 없으면 null. */
   title: string | null;
+  /**
+   * 이 프로세스의 하네스가 hook으로 알린 마지막 신호(#2776). 셸 칸과 hook이 없는
+   * 하네스는 늘 null이다. 출력에서 만들지 않는다(ADR-0190 D4-b).
+   */
+  signal: PaneSignal | null;
   exit: PtyExit | null;
   /** 시작 실패 사유(셸이 돌려준 글). */
   error: string | null;
@@ -314,6 +320,13 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
     schedulePersist(s);
   };
 
+  const onSignal = (s: Session, generation: number, raw: unknown) => {
+    if (s.disposed || s.generation !== generation) return;
+    const signal = parsePaneSignal(raw);
+    if (signal === null || s.view.phase === "exited" || s.view.phase === "failed") return;
+    if (s.view.signal !== signal) update(s, { signal });
+  };
+
   const writeBoth = (s: Session, text: string) => {
     s.mirror.write(text);
     if (s.attachQueue !== null) s.attachQueue.push(TEXT_ENCODER.encode(text));
@@ -323,7 +336,7 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
   const spawnInto = async (s: Session) => {
     const generation = ++s.generation;
     if (generation > 1) writeBoth(s, SHOW_CURSOR);
-    update(s, { phase: "starting", exit: null, error: null, inputNotice: null });
+    update(s, { phase: "starting", exit: null, error: null, inputNotice: null, signal: null });
     try {
       const id = await deps.pty.spawn(
         {
@@ -332,7 +345,8 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
           rows: clampRows(s.mirror.rows),
         },
         (buffer) => onOutput(s, generation, buffer),
-        (exit) => onExit(s, generation, exit)
+        (exit) => onExit(s, generation, exit),
+        (signal) => onSignal(s, generation, signal)
       );
       if (s.disposed || s.generation !== generation) {
         void deps.pty.kill(id).catch(() => undefined);
@@ -400,6 +414,7 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
             program,
             phase: "starting",
             title: null,
+            signal: null,
             exit: null,
             error: null,
             inputNotice: null,
@@ -475,6 +490,12 @@ export function createLocalSessions(deps: LocalSessionsDeps) {
       const s = sessions.get(paneId);
       if (!s || s.ptyId === null) return;
       const id = s.ptyId;
+      // 「나를 기다림」에 사람이 답했다(#2776). Claude Code는 거부·중단에 hook을 내지
+      // 않으므로(스파이크 실측) 기다림은 이 사람의 입력으로 푼다. 허락이면 곧
+      // PostToolUse가, 새 요청이면 UserPromptSubmit이 뒤따른다. 출력은 보지 않는다.
+      if (s.view.signal === "waiting-permission" || s.view.signal === "waiting-input") {
+        update(s, { signal: "working" });
+      }
       const bytes = typeof data === "string" ? TEXT_ENCODER.encode(data) : data;
       for (const chunk of chunkBytes(bytes)) {
         deps.pty.write(id, chunk).then(

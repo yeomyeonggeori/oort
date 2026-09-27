@@ -12,7 +12,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { ChevronDown, ListTree, Maximize, Minimize, Plus, SquareTerminal, X } from "lucide-react";
+import { ChevronDown, ListTree, Maximize, Minimize, PanelLeftOpen, Plus, SquareTerminal, X } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import {
@@ -29,10 +29,13 @@ import {
 } from "@/design/ui/dropdown-menu";
 import {
   defaultWorkbenchLayout,
+  focusIndex,
   focusPane,
+  minimumSize,
   paneIdFor,
   paneIds,
   splitPane,
+  toggleMaximize,
   WORKBENCH_MIN_PANE,
   type PaneId,
 } from "@momo/core/features/workbench/layoutTree";
@@ -51,6 +54,18 @@ import {
 import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
 import { detectLocalHarnesses, type PtyProgram } from "@/lib/tauri";
 import { WORK_NAV } from "@momo/core/features/workbench/workTab";
+import {
+  PANE_GIT_UNKNOWN,
+  SESSION_STATUS_LABEL,
+  type SessionListInput,
+} from "@momo/core/features/workbench/sessionList";
+import { nextWaitingPane, waitingLine } from "@momo/core/features/workbench/paneStatus";
+import { SessionList, StatusMark, type SessionListHandle } from "./SessionList";
+import { paneAttention, paneStatusOf } from "./paneAttention";
+import type { PaneStatusView } from "../WorkbenchGrid";
+import type { LocalSessionView } from "./localSessions";
+import { usePaneGit } from "./usePaneGit";
+import { useSessionListOpen } from "./sessionListOpen";
 import { WorkbenchGrid, type WorkbenchPaneInfo } from "../WorkbenchGrid";
 import { useWorkbenchLayout } from "../useWorkbenchLayout";
 import { DOCK_SESSION_KEY, localSessions, type LocalSessions } from "./localSessions";
@@ -87,6 +102,12 @@ function detectPlatform(): KeyPlatform {
 
 
 const NO_WAITING = "나를 기다리는 칸이 없습니다.";
+
+/** 알림·인박스에 쓰는 칸 이름: 작업 이름(OSC 제목), 없으면 프로그램 이름. */
+function paneName(view: LocalSessionView): string {
+  if (view.title) return view.title;
+  return view.program.kind === "harness" ? HARNESS_LABEL[view.program.id] ?? view.program.id : "셸";
+}
 const SPLIT_REFUSED = "칸이 좁아 새 세션을 열 수 없습니다. 칸을 닫거나 도크를 키우세요.";
 
 /** 칸 머리에서 xterm으로 가지 않은 키: 터미널 안 사건인가. */
@@ -128,6 +149,22 @@ export function LocalTerminalDock({
   const [harnesses, setHarnesses] = useState<LocalHarnessProbe[]>([]);
   const [confirm, setConfirm] = useState<{ paneId: PaneId; close: () => void } | null>(null);
   const sessionMap = useSyncSessions(sessions);
+  const sessionMapRef = useRef(sessionMap);
+  sessionMapRef.current = sessionMap;
+  const attention = paneAttention();
+  const listRef = useRef<SessionListHandle>(null);
+  const list = useSessionListOpen(minimumSize(layout.root).width);
+  const listOpenRef = useRef(list.open);
+  listOpenRef.current = list.open;
+  const setListOpen = list.setOpen;
+  /** ⌘J(작업 탭): 접힌 목록은 펴고, 지금 칸 행으로 캐럿을 보낸다. */
+  const openListAndFocus = useCallback(() => {
+    if (!listOpenRef.current) setListOpen(true);
+    requestAnimationFrame(() => requestAnimationFrame(() => listRef.current?.focus()));
+  }, [setListOpen]);
+  // 세션 목록의 git 사실(#2855 `readWorkbenchGit`만). 목록이 보일 때만 읽는다.
+  const gitPanes = tab ? paneIds(layout.root).map((id) => [id, sessions.ptyIdOf(id)] as const) : [];
+  const gitFacts = usePaneGit(gitPanes, { enabled: tab && list.open });
 
   // 지금 배치에 없는 칸이 남긴 스크롤백을 한 번 치운다.
   useEffect(() => {
@@ -190,20 +227,42 @@ export function LocalTerminalDock({
         case "new-session":
           return newSession({ kind: "shell" });
         case "jump-palette":
-          if (!tab && !dock.open) openDock();
+          if (tab) {
+            // 「내 작업」에서 ⌘J는 세션 목록(시안 「⌘J 세션 점프」)으로 간다.
+            openListAndFocus();
+            return;
+          }
+          if (!dock.open) openDock();
           // 키로 연 목록은 닫힐 때(골랐든 Esc든) 터미널로 돌아간다. 사람은 목록
           // 단추를 만진 적이 없다(design-review R3 H).
           pickedRef.current = true;
           setJumpOpen(true);
           return;
-        case "next-waiting":
-          // 「나를 기다림」 상태는 상태 점(#2776)이 채운다. 그 전에는 기다리는
-          // 칸이 없다는 사실만 말한다.
-          if (active) setNotice(NO_WAITING);
+        case "next-waiting": {
+          // 격자 순서로 지금 칸 다음의 「나를 기다림」 칸(#2776). 도크가 닫혀 있으면 연다.
+          const current = layoutRef.current;
+          const target = nextWaitingPane(
+            paneIds(current.root),
+            (id) => paneStatusOf(sessionMapRef.current.get(id)),
+            current.focused
+          );
+          if (target === null) {
+            if (active) setNotice(NO_WAITING);
+            return;
+          }
+          if (!tab && !dock.open) openDock();
+          const result = focusPane(current, target);
+          if (result.ok) {
+            setNotice(null);
+            layoutRef.current = result.layout;
+            setLayout(result.layout);
+          }
+          focusFocusedPane();
           return;
+        }
       }
     },
-    [active, dock.open, newSession, tab]
+    [active, dock.open, newSession, tab, openListAndFocus, setLayout]
   );
 
   // 전역 키: 창의 캡처 단계. 컴포저에서든 터미널 안에서든 먼저 본다.
@@ -285,6 +344,12 @@ export function LocalTerminalDock({
     event.preventDefault();
     focusFocusedPane();
   };
+  const applyFromList = (result: ReturnType<typeof focusPane>) => {
+    if (!result.ok) return;
+    layoutRef.current = result.layout;
+    setLayout(result.layout);
+    focusFocusedPane();
+  };
   const focusFocusedPane = () => {
     requestAnimationFrame(() => {
       const root = rootRef.current;
@@ -294,9 +359,42 @@ export function LocalTerminalDock({
     });
   };
 
+  // 「나를 기다림」·「끝남」을 인박스와 OS 알림으로(#2776). 도크가 닫혀 있어도
+  // 판정은 돈다(칸의 프로세스는 계속 돈다). 사람이 보는 칸은 격자가 보일 때의 활성 칸이다.
+  useEffect(() => {
+    const order = paneIds(layout.root);
+    attention.observe(
+      order.flatMap((id, i) => {
+        const view = sessionMap.get(id);
+        const status = paneStatusOf(view);
+        return view && status ? [{ paneId: id, index: i + 1, name: paneName(view), status, signal: view.signal }] : [];
+      }),
+      active ? layout.focused : null
+    );
+  }, [attention, sessionMap, layout, active]);
+
   if (!active) return null;
 
   const ids = paneIds(layout.root);
+  const statusView = (pane: WorkbenchPaneInfo): PaneStatusView | null => {
+    const view = sessionMap.get(pane.id);
+    const status = paneStatusOf(view);
+    if (!view || !status) return null;
+    const waiting =
+      status === "waiting"
+        ? {
+            line: waitingLine(view.signal) ?? "입력을 기다려요",
+            // 시안 ①: 활성 칸은 다음 기다림으로 가는 키, 나머지는 그 칸으로 가는 키.
+            keycap: pane.focused ? "⌃⇧J" : pane.index <= 9 ? `⌃${pane.index}` : null,
+            mark: <StatusMark status="waiting" />,
+          }
+        : null;
+    return {
+      mark: <StatusMark status={status} />,
+      label: SESSION_STATUS_LABEL[status],
+      waiting,
+    };
+  };
   const titleOf = (pane: WorkbenchPaneInfo) => localPaneTitle(sessionMap.get(pane.id) ?? null);
   const confirmView = confirm ? sessionMap.get(confirm.paneId) ?? null : null;
   const confirmIndex = confirm ? ids.indexOf(confirm.paneId) + 1 : 0;
@@ -334,17 +432,8 @@ export function LocalTerminalDock({
     </Dialog>
   );
 
-  const sessionMenus = (
+  const newSessionItems = (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button type="button" variant="ghost" size="sm" data-testid="local-terminal-new" aria-keyshortcuts="Control+Shift+N">
-            <Plus aria-hidden className="size-4" />
-            새 세션
-            <ChevronDown aria-hidden className="size-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" onCloseAutoFocus={onMenuCloseAutoFocus}>
           <DropdownMenuItem
             onSelect={() => {
               pickedRef.current = true;
@@ -370,42 +459,62 @@ export function LocalTerminalDock({
               ) : null}
             </DropdownMenuItem>
           ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <DropdownMenu open={jumpOpen} onOpenChange={setJumpOpen}>
+    </>
+  );
+
+  const sessionMenus = (
+    <>
+      <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <DockIconButton label="칸 목록" keycap="⌘J" aria="Meta+J" testId="local-terminal-jump">
-            <ListTree />
-          </DockIconButton>
+          <Button type="button" variant="ghost" size="sm" data-testid="local-terminal-new" aria-keyshortcuts="Control+Shift+N">
+            <Plus aria-hidden className="size-4" />
+            새 세션
+            <ChevronDown aria-hidden className="size-4" />
+          </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          data-testid="local-terminal-jump-list"
-          onCloseAutoFocus={onMenuCloseAutoFocus}
-        >
-          {ids.map((id, i) => (
-            <DropdownMenuItem
-              key={id}
-              onSelect={() => {
-                pickedRef.current = true;
-                const result = focusPane(layoutRef.current, id);
-                if (result.ok) {
-                  layoutRef.current = result.layout;
-                  setLayout(result.layout);
-                }
-              }}
-            >
-              <span data-numeric className="w-4 font-mono text-meta text-ink-muted">
-                {i + 1}
-              </span>
-              <span className="min-w-0 truncate">{localPaneTitle(sessionMap.get(id) ?? null)}</span>
-              {sessionMap.get(id)?.phase === "exited" ? (
-                <span className="ml-auto pl-4 text-meta text-ink-muted">끝남</span>
-              ) : null}
-            </DropdownMenuItem>
-          ))}
+        <DropdownMenuContent align="end" onCloseAutoFocus={onMenuCloseAutoFocus}>
+          {newSessionItems}
         </DropdownMenuContent>
       </DropdownMenu>
+      {/* 「내 작업」에서는 세션 목록이 칸 목록이고 ⌘J도 목록으로 간다(#2856). 도크에만 둔다. */}
+      {tab ? null : (
+        <>
+          <DropdownMenu open={jumpOpen} onOpenChange={setJumpOpen}>
+            <DropdownMenuTrigger asChild>
+              <DockIconButton label="칸 목록" keycap="⌘J" aria="Meta+J" testId="local-terminal-jump">
+                <ListTree />
+              </DockIconButton>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              data-testid="local-terminal-jump-list"
+              onCloseAutoFocus={onMenuCloseAutoFocus}
+            >
+              {ids.map((id, i) => (
+                <DropdownMenuItem
+                  key={id}
+                  onSelect={() => {
+                    pickedRef.current = true;
+                    const result = focusPane(layoutRef.current, id);
+                    if (result.ok) {
+                      layoutRef.current = result.layout;
+                      setLayout(result.layout);
+                    }
+                  }}
+                >
+                  <span data-numeric className="w-4 font-mono text-meta text-ink-muted">
+                    {i + 1}
+                  </span>
+                  <span className="min-w-0 truncate">{localPaneTitle(sessionMap.get(id) ?? null)}</span>
+                  {sessionMap.get(id)?.phase === "exited" ? (
+                    <span className="ml-auto pl-4 text-meta text-ink-muted">끝남</span>
+                  ) : null}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>
+      )}
     </>
   );
   const grid = (
@@ -420,6 +529,7 @@ export function LocalTerminalDock({
       storage={storage}
       platform={platform}
       paneTitle={titleOf}
+      paneStatus={statusView}
       renderPane={(pane) => <LocalTerminalPane pane={pane} platform={platform} sessions={sessions} />}
       onRequestClose={requestClose}
       onCloseLastPane={onCloseLastPane}
@@ -430,31 +540,80 @@ export function LocalTerminalDock({
   );
 
   if (tab) {
-    // 「내 작업」(#2854, 시안 ① `.wmain`): 머리 줄 48 · 격자 좌우 여백 12. 세션 목록
-    // (T4 #2856)·배치 프리셋(T5)·worktree 보기(T6)·로그 패널(T7)은 각 이슈가 이 머리
-    // 줄과 격자 옆에 붙인다.
+    const listInputs: SessionListInput[] = ids.flatMap((id, i) => {
+      const view = sessionMap.get(id);
+      if (!view) return [];
+      const harness = view.program.kind === "harness" ? view.program.id : "셸";
+      const programName =
+        view.program.kind === "harness" ? HARNESS_LABEL[view.program.id] ?? view.program.id : "셸";
+      return [
+        {
+          paneId: id,
+          index: i + 1,
+          title: view.title ?? programName,
+          harness,
+          status: paneStatusOf(view) ?? "idle",
+          // L 세션 공유(ADR-0190 D4-b)는 이 기기에 아직 상태가 없다.
+          shared: false,
+          // 읽기 전이면 「확인 중」(null). 시작 중이거나 PTY가 있는 칸은 곧 읽는다. PTY 없이
+          // 끝난 칸(읽기 전에 끝남)은 셸이 git 읽기를 거절하므로 「폴더」다.
+          git:
+            gitFacts.get(id) ??
+            (view.phase === "starting" || sessions.ptyIdOf(id) !== null ? null : PANE_GIT_UNKNOWN),
+        },
+      ];
+    });
+    // 「내 작업」(#2854·#2856, 시안 ①): 세션 목록 268 | 머리 줄 48 · 격자 좌우 여백 12.
+    // 배치 프리셋(T5)·worktree 보기(T6)·로그 패널(T7)은 각 이슈가 머리 줄에 붙인다.
     return (
-      <section
-        ref={rootRef}
-        aria-labelledby="my-work-title"
+      <div
+        ref={rootRef as RefObject<HTMLDivElement>}
         data-testid="my-work-tab"
-        className="flex min-h-0 min-w-0 flex-1 flex-col"
+        data-session-list={list.open ? "open" : "closed"}
+        className="flex min-h-0 min-w-0 flex-1"
       >
-        <header className="flex h-work-tab-bar shrink-0 items-center gap-2 pl-4 pr-3">
-          <h1 id="my-work-title" className="shrink-0 text-title font-bold text-ink">
-            {WORK_NAV.mine}
-          </h1>
-          <p className="min-w-0 truncate text-meta text-ink-muted" data-testid="my-work-note">
-            이 기기의 세션입니다. 서버에 기록하지 않습니다.
-          </p>
-          <span className="flex-1" />
-          {sessionMenus}
-        </header>
-        <div ref={bodyRef} className="flex min-h-0 flex-1 flex-col px-3 pb-1">
-          {grid}
-        </div>
+        {list.open ? (
+          <SessionList
+            ref={listRef}
+            sessions={listInputs}
+            focusedPaneId={layout.focused}
+            platform={platform}
+            onActivate={(paneId) => applyFromList(focusPane(layoutRef.current, paneId))}
+            onMaximize={(paneId) => applyFromList(toggleMaximize(layoutRef.current, paneId))}
+            onFocusIndex={(index) => applyFromList(focusIndex(layoutRef.current, index))}
+            onCollapse={() => setListOpen(false)}
+            newSessionItems={newSessionItems}
+            onNewSessionMenuCloseAutoFocus={onMenuCloseAutoFocus}
+          />
+        ) : null}
+        <section aria-labelledby="my-work-title" className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <header className="flex h-work-tab-bar shrink-0 items-center gap-2 pl-4 pr-3">
+            {list.open ? null : (
+              <DockIconButton
+                label="세션 목록 펴기"
+                keycap="⌘J"
+                aria="Meta+J"
+                testId="session-list-expand"
+                onClick={() => openListAndFocus()}
+              >
+                <PanelLeftOpen />
+              </DockIconButton>
+            )}
+            <h1 id="my-work-title" className="shrink-0 text-title font-bold text-ink">
+              {WORK_NAV.mine}
+            </h1>
+            <p className="min-w-0 truncate text-meta text-ink-muted" data-testid="my-work-note">
+              이 기기의 세션입니다. 서버에 기록하지 않습니다.
+            </p>
+            <span className="flex-1" />
+            {list.open ? null : sessionMenus}
+          </header>
+          <div ref={bodyRef} className="flex min-h-0 flex-1 flex-col px-3 pb-1">
+            {grid}
+          </div>
+        </section>
         {closeConfirm}
-      </section>
+      </div>
     );
   }
 

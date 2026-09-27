@@ -417,6 +417,21 @@ export async function listWorkHosts(workspaceId: string): Promise<WorkHost[]> {
   return arrayField<WorkHost>(res, "workHosts") ?? [];
 }
 
+/**
+ * `DELETE /v1/workspaces/:ws/work-hosts/:host` — the owner (or an admin)
+ * revokes a host. Idempotent on the server. The first revoke tells the owner's
+ * devices (ADR-0188 D2, #2778).
+ */
+export async function revokeWorkHost(
+  workspaceId: string,
+  hostId: string
+): Promise<void> {
+  await settingsRequest<unknown>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/work-hosts/${encodeURIComponent(hostId)}`,
+    { method: "DELETE" }
+  );
+}
+
 // --- 워크스페이스: POST /v1/workspaces, GET /v1/workspaces/:ws -------------
 
 export interface CreatedWorkspace {
