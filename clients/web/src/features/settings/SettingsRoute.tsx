@@ -36,6 +36,7 @@ import { UsageSection } from "./UsageSection";
 import { WebhookSection } from "./WebhookSection";
 import { WorkHostSection } from "./WorkHostSection";
 import { WorkspaceSection } from "./WorkspaceSection";
+import { leaveSettings } from "./settingsReturn";
 import {
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_GROUPS,
@@ -100,7 +101,7 @@ export function SettingsRoute() {
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   const didEnterFocus = useRef(false);
 
-  const close = useCallback(() => navigate(-1), [navigate]);
+  const close = useCallback(() => leaveSettings(navigate), [navigate]);
 
   // 전면 전환 진입 포커스 (#1867 M-4): 현재 섹션 버튼, 없으면 h1.
   useLayoutEffect(() => {
