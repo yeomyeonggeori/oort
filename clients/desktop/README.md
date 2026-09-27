@@ -125,6 +125,11 @@ interface HostedAgentProbe {
 | `pty_resize` | `{ id, cols, rows }` | `void` \| error | Same bounds as spawn. |
 | `pty_kill` | `{ id }` | `void` \| error | SIGHUP to every process in the session (each job's group included), SIGKILL 0.5 s later to what is left. The exit arrives on `onExit`. App exit (`RunEvent::Exit`) does this for every session. |
 | `pty_ack` | `{ id, bytes }` | `void` \| error | The page drew `bytes` more output of session `id` (flow control, see `pty_spawn`). Batch it (e.g. every 64 KiB or 16 ms): one ack per output chunk costs an IPC round trip per ~1 KiB (#2824 R1 smoke: per-chunk acks took the app to ~700 MB RSS on 200 MB of output; batched acks held it at ~110 MB). |
+| `work_host_status` | — | `LocalWorkHostStatus` \| error | This Mac as a work host (ADR-0188 D2 · R1, #2778). `{ sidecar, registered: {hostId, workspaceId, ownerMemberId, serverUrl} \| null, running, heartbeat: {lastOkAtMs, failing} \| null, adapters: [{key, executable, found}], workFolder, displayNameSuggestion }`. `sidecar` is true only for a Mach-O `momo-workd` next to the app executable. `heartbeat` comes from workd over the control socket and only when the socket's peer pid is the child this app started. macOS only (`capabilities/work-host.json`); other desktops answer `unsupported_platform`. |
+| `work_host_register` | `{ request: { serverUrl, workspaceId, displayName, accessToken } }` | `LocalWorkHostStatus` \| error code | Writes `<app data>/work-host/workd.json` (0600, folder 0700): the server origin, workspace, name, `~/oort-work` as the one allowed folder, and the ACP adapters found on the search PATH (`claude-agent-acp`, `codex-acp`; none found = `no_acp_adapter`). Runs `momo-workd register --token-stdin` with the token as **one line on that child's stdin** (never argv, env, a file or a log; another same-user process can read a running child's environment but not its stdin), then `work_host_start`. `http://` is accepted for a loopback server in debug builds only. One registration at a time. Error codes: `sidecar_missing`, `already_registered`, `server_url_invalid`, `workspace_id_invalid`, `display_name_invalid`, `not_signed_in`, `timeout` (90 s), `register_failed: <workd's last stderr line>`. |
+| `work_host_start` | — | `LocalWorkHostStatus` \| error | `momo-workd run --config … --control-socket <app data>/work-host/workd.sock` as the app's child (env cleared to HOME/USER/LOGNAME/SHELL/TMPDIR/LANG/PATH). Debug builds add `--dev-key-file` and `--dev-unsigned-peer`; release builds never do. Also run at app start when registered; the child is stopped at app exit. |
+| `work_host_stop` | — | `LocalWorkHostStatus` | `{"op":"shutdown"}` on the control socket, SIGTERM after 8 s. |
+| `work_host_forget` | — | `LocalWorkHostStatus` \| error | Stop, `momo-workd forget` (host key + registration state), remove the config. The page revokes the server row (`DELETE …/work-hosts/{id}`) **before** calling this. |
 
 ```ts
 interface AvailableUpdate {
@@ -398,6 +403,37 @@ parks neither the main thread nor an async runtime worker.
 Web half: `openExternalUrl()` in `clients/web/src/lib/tauri.ts`, called from
 `ArtifactCard`'s link row, which falls back to the plain anchor in a browser and
 shows an inline failure with the address when the shell could not open it.
+
+## Work host sidecar (#2778)
+
+`tauri.conf.json > bundle > externalBin = ["binaries/momo-workd"]`. `cargo tauri
+build` runs `scripts/desktop/build_workd_sidecar.sh` first (`beforeBuildCommand`),
+which builds `momo-workd` from `server-rust` for the Tauri target triple (debug
+profile when Tauri builds debug) into `src-tauri/binaries/momo-workd-<triple>`;
+the bundler places it at `Contents/MacOS/momo-workd`. Every other build
+(`cargo test`, `clippy`) gets a placeholder from `build.rs` (a script that exits
+78), which the app never treats as a sidecar (Mach-O only).
+
+App ↔ workd is a user-only Unix socket, nothing else (no TCP; `momo-workd`
+`tests/control_socket.rs` `cs_6` measures it with `lsof`). workd checks every
+peer: same uid, and the peer's audit token satisfies `anchor apple generic and
+identifier "app.momo.desktop" and certificate leaf[subject.OU] = "<workd's own
+team>"`. An unsigned workd answers nobody unless started with
+`--dev-unsigned-peer`, which a team-signed workd refuses.
+
+Signing and notarization (owner approval per build, M7). The bundler signs the
+sidecar with the app identity; notarization covers the whole app. Checks, read
+only:
+
+```sh
+scripts/desktop/build_workd_sidecar.sh --verify-bundle <oort.app> [--require-signed]
+scripts/desktop/build_workd_sidecar.sh --dry-run-sign <oort.app>   # prints the plan, runs nothing
+```
+
+**runtime-unverified** until an owner-approved signed build: the sidecar's
+`keychain-access-groups` entitlement for the ThisDeviceOnly host key (the
+data-protection keychain refuses a binary without it), and workd accepting the
+signed app on the control socket.
 
 ## Run
 

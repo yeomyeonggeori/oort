@@ -1589,6 +1589,8 @@ dependencies = [
  "async-trait",
  "axum",
  "base64",
+ "core-foundation",
+ "core-foundation-sys",
  "ed25519-dalek",
  "getrandom 0.2.17",
  "libc",

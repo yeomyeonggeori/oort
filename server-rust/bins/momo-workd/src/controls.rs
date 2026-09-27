@@ -31,7 +31,7 @@
 //! * `read` and anything else — `unsupported_control`.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use uuid::Uuid;
@@ -233,16 +233,73 @@ impl ControlLoop {
     }
 }
 
+/// The heartbeat's last outcome, which the desktop app reads through the
+/// control socket's `status` (#2778).
+#[derive(Debug, Default)]
+pub struct HostHealth {
+    inner: Mutex<HealthSnapshot>,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct HealthSnapshot {
+    pub last_ok_ms: Option<i64>,
+    pub last_attempt_ms: Option<i64>,
+    pub failing: bool,
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or_default()
+}
+
+impl HostHealth {
+    pub fn heartbeat_accepted(&self) {
+        let now = now_ms();
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        inner.last_ok_ms = Some(now);
+        inner.last_attempt_ms = Some(now);
+        inner.failing = false;
+    }
+
+    pub fn heartbeat_failed(&self) {
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        inner.last_attempt_ms = Some(now_ms());
+        inner.failing = true;
+    }
+
+    pub fn snapshot(&self) -> HealthSnapshot {
+        *self.inner.lock().unwrap_or_else(|p| p.into_inner())
+    }
+}
+
 /// Heartbeat until the server refuses the host. Returns only on 401.
-pub async fn heartbeat_loop(api: Arc<dyn HostApi>, interval: Duration) -> ClientError {
+///
+/// Each outcome is recorded in `health`, which the control socket's `status`
+/// reports to the desktop app (#2778).
+pub async fn heartbeat_loop(
+    api: Arc<dyn HostApi>,
+    interval: Duration,
+    health: Arc<HostHealth>,
+) -> ClientError {
     let mut ticker = tokio::time::interval(interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         ticker.tick().await;
         match api.heartbeat().await {
-            Ok(()) => tracing::debug!("heartbeat accepted"),
-            Err(ClientError::Unauthorized) => return ClientError::Unauthorized,
-            Err(error) => tracing::warn!(error = %error, "heartbeat failed"),
+            Ok(()) => {
+                health.heartbeat_accepted();
+                tracing::debug!("heartbeat accepted")
+            }
+            Err(ClientError::Unauthorized) => {
+                health.heartbeat_failed();
+                return ClientError::Unauthorized;
+            }
+            Err(error) => {
+                health.heartbeat_failed();
+                tracing::warn!(error = %error, "heartbeat failed")
+            }
         }
     }
 }

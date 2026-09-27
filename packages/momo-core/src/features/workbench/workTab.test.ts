@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { WORKBENCH_MIN_PANE } from "./layoutTree";
 import {
+  sessionListFits,
   WORK_TAB_RAIL_PX,
   WORK_TAB_SESSION_LIST_PX,
   isMyWorkTab,
@@ -52,5 +53,20 @@ describe("/work 보기 판정 (ADR-0194 D1·D2)", () => {
     expect(isMyWorkTab("/work/", "", true)).toBe(true);
     expect(isMyWorkTab("/Work", "", true)).toBe(true);
     expect(isMyWorkTab("/workstreams", "", true)).toBe(false);
+  });
+});
+
+describe("sessionListFits (#2856)", () => {
+  // 4×2의 최소 폭: 240 × 4 + 경계 8 × 3 = 984.
+  const min4x2 = 4 * 240 + 3 * 8;
+  it("1440 창은 목록(268)을 편 채로 4×2가 선다", () => {
+    expect(sessionListFits(1440, min4x2)).toBe(true);
+  });
+  it("1280 창은 목록을 펴면 4×2가 240을 못 지켜 접는다", () => {
+    expect(sessionListFits(1280, min4x2)).toBe(false);
+  });
+  it("경계: 목록을 편 격자 폭이 최소 폭과 같으면 선다", () => {
+    expect(sessionListFits(64 + 268 + 24 + min4x2, min4x2)).toBe(true);
+    expect(sessionListFits(64 + 268 + 24 + min4x2 - 1, min4x2)).toBe(false);
   });
 });

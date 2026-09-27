@@ -913,6 +913,7 @@ export function DisplayController({
             role="application"
             aria-label="세션 호스트 화면, 직접 조작"
             data-testid="work-control-surface"
+            data-focus-ring="always"
             data-capturing={capturing ? "" : undefined}
             /* 링이 `focus-visible` 전용이었다 (design-review H-2): 마우스로 잡은
                캐럿은 아무 표시도 남기지 않아, 키보드를 가진 상자와 안 가진 상자가
