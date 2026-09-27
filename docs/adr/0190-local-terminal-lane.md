@@ -146,7 +146,7 @@ macOS 기준이다. Windows·Linux는 ⌘를 Ctrl로 읽는다.
 모든 명령 앞에 붙는 고정 접두 인자(생략하지 않는다):
 
 ```
-<git> --no-pager --no-optional-locks -c core.fsmonitor=false -c core.pager=cat -c color.ui=false
+<git> --no-pager --no-optional-locks -c core.fsmonitor=false -c core.pager=cat -c color.ui=false -c log.showSignature=false
 ```
 
 | # | 명령(접두 뒤, 인자 전부 고정) | 웹뷰로 넘기는 값 |
@@ -155,15 +155,38 @@ macOS 기준이다. Windows·Linux는 ⌘를 Ctrl로 읽는다.
 | G2 | `branch --show-current` | 브랜치 이름. 빈 값이면 「분리된 HEAD」 |
 | G3 | `worktree list --porcelain -z` | worktree마다 폴더의 마지막 경로 요소, 브랜치 이름, `detached`·`locked`·`prunable` 표지 |
 | G4 | `rev-list --left-right --count @{upstream}...HEAD` | 두 정수(뒤·앞 커밋 수). upstream이 없으면 명령이 0이 아닌 코드로 끝나고, 값은 「기준점 없음」이다. 다른 기준점으로 다시 시도하지 않는다 |
-| G5 | `log --no-color --format=%h%x00%ct%x00%(trailers:key=Co-Authored-By,valueonly,separator=%x2C) -n 50 @{upstream}..HEAD` | 커밋마다 짧은 해시, 커밋 시각(초), 공동 작성자 **이름**(이메일은 버린다). upstream이 없으면 G4와 같다 |
-| G6 | `diff --numstat --no-ext-diff --no-textconv -z HEAD` | 파일마다 추가·삭제 줄 수와 저장소 기준 **상대 경로**, 합계. 이진 파일은 `-` 대신 「이진」 |
+| G5 | `log --no-color --no-show-signature --format=%h%x00%ct%x00%(trailers:key=Co-Authored-By,valueonly,separator=%x2C) -n 50 @{upstream}..HEAD` | 커밋마다 짧은 해시, 커밋 시각(초), 공동 작성자 **이름**(이메일은 버린다). upstream이 없으면 G4와 같다 |
+| G6 | `diff --numstat --no-ext-diff --no-textconv --ignore-submodules=all -z HEAD` | 파일마다 추가·삭제 줄 수와 저장소 기준 **상대 경로**, 합계. 이진 파일은 `-` 대신 「이진」 |
 | G7 | `diff --numstat --no-ext-diff --no-textconv -z @{upstream}...HEAD` | G6과 같은 모양의 기준점 이후 합계와 파일별 숫자 |
-| G8 | `status --porcelain=v1 -z --untracked-files=normal` | 수정·추가·삭제·추적 안 함 파일의 **개수** 넷. 경로는 넘기지 않는다 |
+| G8 | `status --porcelain=v1 -z --untracked-files=normal --ignore-submodules=all` | 수정·추가·삭제·추적 안 함 파일의 **개수** 넷. 경로는 넘기지 않는다 |
 
 - **커밋 제목·본문, 파일 내용, diff 본문, 원격 URL은 웹뷰로도 넘기지 않는다.** 제안서 §3.5의 worktree 카드 「마지막 커밋 한 줄」은 이 증보로는 표시할 수 없다. 로컬에서 커밋 제목을 보여야 하면 이 표에 한 줄을 더하는 증보를 따로 낸다.
 - **셸 없이 실행한다.** `sh -c`, `cmd /C`, 문자열 명령 줄 조립을 쓰지 않는다. 인자는 배열로 넘긴다.
 - **웹뷰는 명령도 인자도 폴더도 넘기지 않는다.** 웹뷰가 넘기는 것은 명령 번호(G1~G8)와 칸 ID뿐이다. 실행 폴더(cwd)는 셸이 그 칸의 PTY에 기록해 둔 폴더에서 정한다. 서버 이벤트, 딥링크, workd는 이 명령을 부를 수 없다(D1과 같은 경계).
-- **설정이 코드를 실행하는 길을 막는다.** 읽기 명령도 저장소 설정(`core.fsmonitor`, 외부 diff·textconv, pager)으로 임의 프로그램을 띄울 수 있다. 위 고정 접두·`--no-ext-diff --no-textconv`로 막는다. 환경은 `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, `GIT_PAGER=cat`, `GIT_EXTERNAL_DIFF` 제거로 고정한다. 쓰기 명령(`fetch`, `gc`, `commit`, `checkout` 등)과 네트워크를 쓰는 명령은 목록에 없다.
+- **설정이 코드를 실행하는 길을 막는다.** 읽기 명령도 저장소 설정(`core.fsmonitor`, 외부 diff·textconv, pager)으로 임의 프로그램을 띄울 수 있다. 위 고정 접두·`--no-ext-diff --no-textconv`로 막는다. 환경은 상속된 `GIT_*` 전부(`GIT_EXTERNAL_DIFF` 포함) 제거 후 `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, `GIT_PAGER=cat`, `GIT_NO_LAZY_FETCH=1`로 고정한다(증보 #2855). 쓰기 명령(`fetch`, `gc`, `commit`, `checkout` 등)과 네트워크를 쓰는 명령은 목록에 없다.
+- **증보 2026-09-27(#2855, Accepted) — filter 검사.** 고정 접두는 저장소 설정의 `filter.<x>.clean`·`process`를 막지 못한다(G6·G8이 stat이 바뀐 작업 폴더 파일을 해시할 때 실행된다. 작업 폴더 `.gitattributes`, `$GIT_DIR/info/attributes`, 전역 설정 모두에서 실측). 그래서 G6·G8 직전에 같은 접두·환경으로 `config --get-regexp ^filter\..*\.(clean|process)$`(설정 읽기, 프로그램을 띄우지 않음)를 읽고, 설정된 값이 하나라도 git-lfs 표준값(`filter.lfs.clean` = `git-lfs clean -- %f`, `filter.lfs.process` = `git-lfs filter-process`)과 글자 그대로 같지 않거나 읽기가 실패하면 G6·G8을 실행하지 않고 「확인 못 함(사유 filter)」을 돌려준다. LFS 저장소의 숫자는 그대로다. 이 읽기는 여덟 명령 목록에 들지 않는 G6·G8 전용 선행 검사다. 결재: 성재 「전부 권장대로」(2026-09-27, 작업 탭 결정 범위) + planner 보안 결정(2026-09-27, 1안 「받아들이기」 기각). 시험: filter가 있으면 실행 0·unknown(세 경로), lfs 값 글자 하나 차이 거부, 검사 제거 사보타주 시 마커 생성.
+- **증보 2026-09-27(#2855 독립 보안 검수, Accepted) — 외부 프로그램 전수 표.** 키 하나씩 막기가 두 번 샜다(서브모듈 filter, `log.showSignature`). 그래서 G5에 `--no-show-signature`, G6·G8에 `--ignore-submodules=all`, 접두에 `-c log.showSignature=false`, 환경에 `GIT_NO_LAZY_FETCH=1`을 더하고(위 표와 접두에 반영), git 문서 기준으로 외부 프로그램을 띄울 수 있는 설정을 아래 표로 전수 판정한다. 발동 가능한 조합마다 실제 저장소 시험이 하나씩 있고, 각 시험은 같은 저장소에서 차단 없는 git이 실제로 발동함을 대조로 보인다. 표에 없는 키가 생기면 막지 않은 것으로 본다. **git을 올릴 때 이 표를 다시 잰다**(측정: git 2.55.0). 시간 초과 때는 git의 프로세스 그룹 전체를 끝낸다. 이름·경로 출력에서 제어 문자와 양방향·폭 없는 서식 문자를 지운다. 결재: 성재 「전부 권장대로」(2026-09-27) + planner 보안 결정(2026-09-27).
+
+| 설정 | 발동 가능한 명령 | 차단 수단 | 시험(`git_read.rs`) |
+|---|---|---|---|
+| `core.fsmonitor`(include로 끌어온 것 포함) | G6·G8 | 접두 `-c core.fsmonitor=false`(서브git에도 전파) | `a_hostile_repository_config_runs_no_program` |
+| `core.pager`, `pager.<cmd>` | 전부(tty일 때) | `--no-pager`, `-c core.pager=cat`, `GIT_PAGER=cat`, stdout 파이프 | 같은 시험 |
+| `diff.external`, `diff.<drv>.command` | G6·G7 | `--no-ext-diff` | 같은 시험(대조로 발동 확인) |
+| `diff.<drv>.textconv` | G6·G7 | `--no-textconv` | 같은 시험 |
+| `filter.<drv>.clean`·`process`(저장소·전역·include, 작업 폴더·`info/attributes`) | G6·G8 | 사전 검사: git-lfs 표준값 외 하나라도 있으면 실행 안 함 | `a_configured_filter_stops_g6_and_g8_…`, `the_git_lfs_filter_…` |
+| 서브모듈 자체 설정(filter 등), `diff.submodule`, `status.submoduleSummary` | G6·G8(서브모듈 재귀) | `--ignore-submodules=all` | `a_submodule_filter_does_not_run` |
+| `log.showSignature` + `gpg.program`·`gpg.ssh.program`·`gpg.x509.program` | G5 | `--no-show-signature` + `-c log.showSignature=false` | `a_signed_commit_runs_no_signature_program` |
+| 부분 클론 지연 fetch → `remote.*.url`(`ext::`·`remote.*.vcs` 헬퍼), `protocol.*.allow`, `core.sshCommand`, `credential.helper`, `core.askPass` | G4~G8 | `GIT_NO_LAZY_FETCH=1`(git 2.45+), `GIT_TERMINAL_PROMPT=0` | `a_partial_clone_never_fetches` |
+| `core.hooksPath`·훅(post-index-change 등) | 없음(`--no-optional-locks`로 색인을 쓰지 않음) | `GIT_OPTIONAL_LOCKS=0` | hostile 시험 |
+| `gc.auto`·자동 유지보수 | 없음(읽기 명령은 auto gc를 부르지 않음) | — | hostile 시험(pre-auto-gc 훅) |
+| `trailer.<x>.cmd` | 없음(`%(trailers)`는 파싱만) | — | hostile 시험 |
+| `core.editor`, `sequence.editor`, `merge.<drv>.driver`, `core.alternateRefsCommand` | 없음(편집·병합·fetch 전용) | — | hostile 시험 |
+| `alias.<내장 명령>` | 없음(내장 명령을 가리지 못함) | — | hostile 시험 |
+| `include.path`·`includeIf` | 위 키를 끌어온다 | 위 키별 차단이 그대로 적용된다. filter 검사는 include를 따라간다 | hostile 시험(include한 fsmonitor) |
+| 상속 환경(`GIT_DIR`, `GIT_CONFIG_PARAMETERS`, `GIT_EXTERNAL_DIFF` …) | 전부 | 상속 `GIT_*` 전부 제거 | `inherited_git_variables_do_not_reach_the_child` |
+
+- **검사와 실행 사이(TOCTOU).** filter 사전 검사와 G6·G8 실행 사이에 설정이 바뀔 수 있다. 그 틈을 쓰려면 칸 폴더의 `.git`에 쓸 수 있는, 이 사용자로 이미 도는 프로세스가 있어야 한다. 그런 프로세스는 셸 rc 파일 같은 다른 경로로도 코드를 실행할 수 있다. 따라서 이 경로는 위협 모델 밖이다. 위협 모델은 **이미 적대적인 내용을 담고 도착한 저장소**(압축본, 복사한 `.git`)다. 거부 설계를 유지한다.
+- 장기안: git 프로세스 대신 in-process 읽기(gitoxide, MIT/Apache-2.0)는 #2929에서 판단한다.
 - **stdout은 셸 안에서 파싱하고 stderr는 버린다.** 파싱 결과의 정해진 필드만 웹뷰로 넘긴다. stdout 원문을 넘기는 경로가 없다. D3-a의 두 로그인 명령은 여전히 stdout·stderr를 둘 다 버린다(그 규칙은 바뀌지 않는다).
 - 명령마다 시간 제한과 stdout 바이트 상한을 둔다(값은 구현 이슈가 정한다). 넘으면 「확인 못 함」이다.
 - **서버 호출은 0이다.** 결과는 이 기기의 웹뷰에만 간다. 서버로 가는 것은 D4-b가 허용한 합계 숫자뿐이고, 그것도 공유를 켠 세션에서만이다.

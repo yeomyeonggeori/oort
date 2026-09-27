@@ -9,12 +9,18 @@ import { sidebarPaneToggleCopy, titlebarDragProps } from "@/app/sidebarPane";
  * `data-tauri-drag-region`만 셸일 때 붙는다. 버튼은 드래그에서 뺀다.
  */
 export function AppTitlebar({
+  hideToggle = false,
   collapsed,
   onCollapsedChange,
   toggleRef,
   onToggleFocus,
   onToggleBlur,
 }: {
+  /**
+   * 「내 작업」 레일(#2854)에서는 접기 단추를 세우지 않는다. 레일이 곧 접힌 모양이고,
+   * 그 자리(인셋 80)는 레일 폭(64) 밖의 판 위다. 줄 자체(드래그 영역)는 남는다.
+   */
+  hideToggle?: boolean;
   collapsed: boolean;
   onCollapsedChange: (collapsed: boolean) => void;
   toggleRef?: Ref<HTMLButtonElement>;
@@ -32,6 +38,7 @@ export function AppTitlebar({
       data-testid="app-titlebar"
       {...titlebarDragProps(IS_TAURI)}
     >
+      {hideToggle ? null : (
       <button
         ref={toggleRef}
         type="button"
@@ -48,6 +55,7 @@ export function AppTitlebar({
       >
         <PanelLeft className="size-4" aria-hidden="true" />
       </button>
+      )}
     </header>
   );
 }

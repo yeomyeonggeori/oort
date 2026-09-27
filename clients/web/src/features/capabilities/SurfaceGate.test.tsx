@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { WorkHost } from "@momo/core/lib/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
-import { SurfaceRoute } from "./SurfaceGate";
+import { SurfaceGate, SurfaceRoute } from "./SurfaceGate";
 
 // =============================================================================
 // #2780: `/work` 라우트의 세 답. 호스트 목록을 **읽지 못한 것**을 「호스트가
@@ -56,7 +56,12 @@ function session(): SessionContextValue {
   };
 }
 
-async function mount(): Promise<{ el: HTMLElement; client: QueryClient }> {
+async function mount(
+  body: ReactElement = createElement(SurfaceRoute, {
+    surface: "workConsole",
+    children: createElement("div", { "data-testid": "console-body" }),
+  })
+): Promise<{ el: HTMLElement; client: QueryClient }> {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -69,13 +74,7 @@ async function mount(): Promise<{ el: HTMLElement; client: QueryClient }> {
     createElement(
       SessionProvider,
       { value: session() },
-      createElement(
-        SurfaceRoute,
-        {
-          surface: "workConsole",
-          children: createElement("div", { "data-testid": "console-body" }),
-        }
-      )
+      body
     )
   );
   await act(async () => {
@@ -161,5 +160,29 @@ describe("SurfaceRoute (#2780)", () => {
     expect(el.querySelector('[data-testid="surface-route-pending"]')).not.toBeNull();
     expect(el.querySelector('[data-testid="surface-unavailable-route"]')).toBeNull();
     expect(el.querySelector("h1")?.textContent).toBe("작업 콘솔");
+  });
+});
+
+describe("관전·관제 표면은 남의 개인 호스트로도 선다 (#2854 planner 결정 (a))", () => {
+  const OTHER = "00000000-0000-7000-8000-000000000102";
+  const othersPersonal = (): WorkHost => ({ ...onlineHost(), scope: "member", ownerMemberId: OTHER });
+
+  it("관제 줄·관제 서랍의 문(SurfaceGate ade)이 선다", async () => {
+    hostsAnswer.run = async () => [othersPersonal()];
+    const { el, client } = await mount(
+      createElement(SurfaceGate, {
+        surface: "ade",
+        children: createElement("div", { "data-testid": "ade-body" }),
+      })
+    );
+    await settled(client);
+    await vi.waitFor(() => expect(el.querySelector('[data-testid="ade-body"]')).not.toBeNull());
+  });
+
+  it("작업 콘솔 라우트도 선다(채널 멤버는 그 세션을 볼 수 있다)", async () => {
+    hostsAnswer.run = async () => [othersPersonal()];
+    const { el, client } = await mount();
+    await settled(client);
+    await vi.waitFor(() => expect(el.querySelector('[data-testid="console-body"]')).not.toBeNull());
   });
 });

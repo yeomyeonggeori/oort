@@ -459,6 +459,52 @@ fn tauri_grants_the_pty_commands_to_the_local_main_window_only() {
     }
 }
 
+/// Tauri's resolver: the local git read (ADR-0190 D3-c, #2855) answers the
+/// main webview's bundled origin only — same fence as the PTY commands.
+#[test]
+fn tauri_grants_the_git_read_to_the_local_main_webview_only() {
+    let mut context = crate::context();
+    let authority = context.runtime_authority_mut();
+    let local = tauri::ipc::Origin::Local;
+    let command = "workbench_git_read";
+    assert!(authority
+        .resolve_access(command, "main", "main", &local)
+        .is_some());
+    for url in [
+        "https://evil.example/",
+        "https://oort-team.up.railway.app/",
+        "http://127.0.0.1:8080/",
+    ] {
+        let remote = tauri::ipc::Origin::Remote {
+            url: url.parse().unwrap(),
+        };
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &remote)
+                .is_none(),
+            "{command} from {url}"
+        );
+    }
+    assert!(authority
+        .resolve_access(command, "other", "other", &local)
+        .is_none());
+    assert!(authority
+        .resolve_access(command, "main", "embedded", &local)
+        .is_none());
+    // Desktop table only.
+    let blocks = handler_blocks(LIB_RS);
+    let desktop = blocks
+        .iter()
+        .find(|b| b.contains(&"updater_check".to_string()))
+        .unwrap();
+    let mobile = blocks
+        .iter()
+        .find(|b| !b.contains(&"updater_check".to_string()))
+        .unwrap();
+    assert!(desktop.iter().any(|c| c == command));
+    assert!(!mobile.iter().any(|c| c == command));
+}
+
 /// The capability files themselves: only `pty.json` grants a PTY command, it
 /// names the main window only, and no capability opens anything to remote
 /// URLs. Widening any of these is RED here before it is a hole.
@@ -468,7 +514,7 @@ fn only_the_local_terminal_capability_grants_pty_and_none_is_remote() {
     let names: Vec<&str> = caps.iter().map(|(n, _)| n.as_str()).collect();
     assert_eq!(
         names,
-        ["default.json", "pty.json"],
+        ["default.json", "git-read.json", "pty.json"],
         "new capability file: review it here"
     );
     for (name, cap) in &caps {
@@ -478,6 +524,25 @@ fn only_the_local_terminal_capability_grants_pty_and_none_is_remote() {
             .into_iter()
             .filter(|p| p.contains("pty"))
             .collect();
+        let git: Vec<&str> = permission_ids(cap)
+            .into_iter()
+            .filter(|p| p.contains("git"))
+            .collect();
+        if name == "git-read.json" {
+            assert_eq!(git, ["allow-workbench-git-read"]);
+            assert_eq!(
+                permission_ids(cap).len(),
+                1,
+                "git-read.json grants one command"
+            );
+            assert_eq!(cap["webviews"], serde_json::json!(["main"]));
+            assert!(
+                cap.get("windows").is_none(),
+                "a window grant covers child webviews"
+            );
+        } else {
+            assert!(git.is_empty(), "{name} grants {git:?}");
+        }
         if name == "pty.json" {
             assert_eq!(
                 pty,
@@ -760,12 +825,32 @@ fn nothing_but_the_command_table_reaches_the_pty() {
         "if let Some(state) = _app.try_state::<pty::PtyState>() {",
         "if let Some(state) = webview.try_state::<pty::PtyState>() {",
     ];
+    const GIT_READ_ALLOWED: &[&str] = &["state: tauri::State<'_, crate::pty::PtyState>,"];
     let sources = crate_sources();
     assert!(sources.iter().any(|(n, _)| n == "pty.rs"));
     for (name, src) in &sources {
         let code = code_only(src);
         match name.as_str() {
             "pty.rs" | "shell_contract.rs" => {}
+            // The local git reads (#2855) may ask the session table for a
+            // pane's folder and nothing else: exactly these lines.
+            "git_read.rs" => {
+                for line in code.lines() {
+                    if idents(line).into_iter().any(is_pty_ident) {
+                        assert!(
+                            GIT_READ_ALLOWED.contains(&line.trim()),
+                            "git_read.rs reaches the PTY: {}",
+                            line.trim()
+                        );
+                    }
+                }
+                assert_eq!(
+                    code.matches("state.0.").count(),
+                    1,
+                    "git_read.rs uses the session table beyond folder_of"
+                );
+                assert!(code.contains("state.0.folder_of(request.pane_id)"));
+            }
             "lib.rs" => {
                 for line in code.lines() {
                     if idents(line).into_iter().any(is_pty_ident) {

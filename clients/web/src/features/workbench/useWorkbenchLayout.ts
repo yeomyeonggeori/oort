@@ -45,10 +45,35 @@ export function memoryLayoutStorage(seed: Record<string, string> = {}): LayoutSt
   };
 }
 
+/**
+ * 저장소에 쓰지 못한 배치를 이 창의 메모리에 든다(검수 #2927 M3).
+ *
+ * 도크와 「내 작업」 탭(#2854)은 같은 세션 키의 배치를 **서로 다른 인스턴스**로
+ * 그린다(한쪽이 언마운트되고 다른 쪽이 마운트된다). 저장소 쓰기가 실패하면 새
+ * 인스턴스는 기본 배치(칸 하나)로 서고, 이전 칸들의 PTY는 보이지도 닫히지도 않는
+ * 고아가 된다. 다음 분할이 같은 칸 id를 만들면 엉뚱한 세션에 다시 붙는다. 그래서
+ * 쓰기가 실패한 배치는 저장소 객체(없으면 `NO_STORAGE`)마다 메모리에 남기고, 읽기가
+ * 그것을 먼저 본다. 쓰기가 다시 성공하면 메모리를 비운다: 정상 경로는 저장소 그대로다.
+ */
+const NO_STORAGE = {};
+const unsaved = new WeakMap<object, Map<string, WorkbenchLayout>>();
+
+function unsavedFor(storage: LayoutStorage | null): Map<string, WorkbenchLayout> {
+  const owner = storage ?? NO_STORAGE;
+  let map = unsaved.get(owner);
+  if (!map) {
+    map = new Map();
+    unsaved.set(owner, map);
+  }
+  return map;
+}
+
 export function readWorkbenchLayout(
   storage: LayoutStorage | null,
   sessionKey: string
 ): { layout: WorkbenchLayout; storage: LayoutStorageStatus } {
+  const pending = unsavedFor(storage).get(sessionKey);
+  if (pending) return { layout: pending, storage: "unavailable" };
   if (storage === null) return { layout: defaultWorkbenchLayout(), storage: "unavailable" };
   let raw: string | null;
   try {
@@ -64,11 +89,17 @@ export function writeWorkbenchLayout(
   sessionKey: string,
   layout: WorkbenchLayout
 ): LayoutStorageStatus {
-  if (storage === null) return "unavailable";
+  const pending = unsavedFor(storage);
+  if (storage === null) {
+    pending.set(sessionKey, layout);
+    return "unavailable";
+  }
   try {
     storage.setItem(workbenchLayoutEntry(sessionKey), serializeWorkbenchLayout(layout));
+    pending.delete(sessionKey);
     return "ok";
   } catch {
+    pending.set(sessionKey, layout);
     return "unavailable";
   }
 }

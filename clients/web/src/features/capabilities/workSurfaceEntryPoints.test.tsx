@@ -207,11 +207,15 @@ vi.mock("@/features/emoji/useHoverNone", () => ({
 }));
 
 vi.mock("@/features/sidebar/ProfileCard", () => ({
-  ProfileCard: () => null,
+  // 레일(#2854)은 아바타만 선 컴팩트 카드를 쓴다. 그 자리만 표시해 둔다.
+  ProfileCard: ({ compact }: { compact?: boolean }) =>
+    compact ? createElement("span", { "data-testid": "profile-card-rail" }) : null,
 }));
 
 vi.mock("@/features/sidebar/WorkspaceRail", () => ({
-  WorkspaceRail: () => null,
+  // 숨김 여부(#2854 레일)만 남겨 둔다.
+  WorkspaceRail: ({ hidden }: { hidden?: boolean }) =>
+    createElement("div", { "data-testid": "workspace-rail", hidden }),
 }));
 
 // 다이얼로그만 재운다. 같은 모듈의 `Keycaps`는 ⌘K 팔레트가 키캡 힌트를 그릴 때
@@ -402,7 +406,16 @@ function sessionValue(): SessionContextValue {
   };
 }
 
-async function mount(): Promise<HTMLElement> {
+let rerenderRail: (workRail: boolean) => void = () => undefined;
+
+async function mount(
+  {
+    workRail = false,
+    entry = "/",
+    switcherOpen = true,
+    collapsed = false,
+  }: { workRail?: boolean; entry?: string; switcherOpen?: boolean; collapsed?: boolean } = {}
+): Promise<HTMLElement> {
   if (mountedRoot) {
     act(() => mountedRoot?.unmount());
     mountedRoot = null;
@@ -417,7 +430,7 @@ async function mount(): Promise<HTMLElement> {
   });
   client.setQueryData(["roster", WS], [self]);
   mountedClient = client;
-  const tree: ReactElement = createElement(
+  const tree = (workRail: boolean): ReactElement => createElement(
     QueryClientProvider,
     { client },
     createElement(
@@ -435,17 +448,19 @@ async function mount(): Promise<HTMLElement> {
         },
         createElement(
           MemoryRouter,
-          { initialEntries: ["/"] },
+          { initialEntries: [entry] },
           createElement(
             "div",
             null,
             createElement(Sidebar, {
               onOpenQuickSwitcher: () => undefined,
-              channelPaneCollapsed: false,
-              treeHidden: false,
+              channelPaneCollapsed: collapsed,
+              treeHidden: collapsed && !workRail,
+              workRail,
             }),
             createElement(QuickSwitcher, {
-              open: true,
+              // 열린 팔레트는 모달이라 캐럿을 붙든다. 캐럿 시험(H1)만 닫고 잰다.
+              open: switcherOpen,
               onOpenChange: () => undefined,
             }),
             createElement(SettingsRoute),
@@ -455,8 +470,9 @@ async function mount(): Promise<HTMLElement> {
       )
     )
   );
+  rerenderRail = (next: boolean) => mountedRoot?.render(tree(next));
   await act(async () => {
-    mountedRoot?.render(tree);
+    mountedRoot?.render(tree(workRail));
     await Promise.resolve();
   });
   await vi.waitFor(() => {
@@ -697,5 +713,151 @@ describe("작업 표면 런타임 판정: 온라인 호스트 (#2780)", () => {
       host.querySelectorAll('[data-testid="open-terminal-dock"]').length
     ).toBe(1);
     expect(entryCounts()["nav-work-console"]).toBe(0);
+  });
+});
+
+describe("남의 개인 호스트도 관전·관제 진입점을 연다 (#2854 planner 결정 (a))", () => {
+  const OTHER = "00000000-0000-7000-8000-000000000102";
+
+  // 서버는 채널 멤버에게 남의 개인 호스트 세션의 목록과 관전을 허락한다. 좁히는
+  // 판정(`isWorkHostUsableBy`)은 일을 시키는 표면(세션 이어받기)에만 쓴다.
+  it("다른 멤버의 개인 호스트만 온라인이어도 작업 콘솔·⌘K·관전 도크가 선다", async () => {
+    workFlag.provided = false;
+    hostList.hosts = [onlineHost({ scope: "member", ownerMemberId: OTHER })];
+    await mount();
+    await hostsSettled();
+    await vi.waitFor(() => {
+      expect(entryCounts()["nav-work-console"]).toBe(1);
+      expect(entryCounts()["switcher-work-console"]).toBe(1);
+      expect(entryCounts()["open-terminal-dock"]).toBe(1);
+    });
+  });
+});
+
+describe("사이드바 「작업」 두 줄 (#2854, ADR-0194 D1)", () => {
+  function rowCount(host: HTMLElement, id: string): number {
+    return host.querySelectorAll(`[data-testid="${id}"]`).length;
+  }
+
+  it("데스크탑은 호스트가 없어도 「내 작업」이 서고, 「팀 작업」과 나란하다", async () => {
+    shell.desktop = true;
+    workFlag.provided = false;
+    hostList.hosts = [];
+    const host = await mount();
+    await hostsSettled();
+    expect(rowCount(host, "nav-my-work")).toBe(1);
+    expect(rowCount(host, "nav-team-work")).toBe(1);
+    expect(host.querySelector('[data-testid="nav-my-work"]')?.textContent).toBe("내 작업");
+    expect(host.querySelector('[data-testid="nav-team-work"]')?.getAttribute("href")).toBe(
+      "/work?view=team"
+    );
+    // 인박스 바로 아래 두 줄(시안 ④ 자리).
+    const order = [...host.querySelectorAll("[data-testid^='nav-']")].map((el) =>
+      el.getAttribute("data-testid")
+    );
+    expect(order.slice(order.indexOf("nav-inbox"), order.indexOf("nav-inbox") + 3)).toEqual([
+      "nav-inbox",
+      "nav-my-work",
+      "nav-team-work",
+    ]);
+  });
+
+  it("웹에는 로컬 격자가 없어 「내 작업」 줄이 없고 「팀 작업」만 선다", async () => {
+    shell.desktop = false;
+    workFlag.provided = false;
+    hostList.hosts = [];
+    const host = await mount();
+    await hostsSettled();
+    expect(rowCount(host, "nav-my-work")).toBe(0);
+    expect(rowCount(host, "nav-team-work")).toBe(1);
+  });
+
+  it("데스크탑에서 호스트가 있으면 작업 콘솔은 `?view=console`로 간다(`/work`는 격자다)", async () => {
+    shell.desktop = true;
+    workFlag.provided = false;
+    hostList.hosts = [onlineHost()];
+    const host = await mount();
+    await hostsSettled();
+    await vi.waitFor(() => expect(rowCount(host, "nav-work-console")).toBe(1));
+    expect(host.querySelector('[data-testid="nav-work-console"]')?.getAttribute("href")).toBe(
+      "/work?view=console"
+    );
+  });
+});
+
+describe("「내 작업」 레일 (#2854, 시안 ①)", () => {
+  it("레일이면 네 목적지와 프로필만 서고, 워크스페이스 레일·채널 목록은 숨는다(언마운트하지 않는다)", async () => {
+    shell.desktop = true;
+    const host = await mount({ workRail: true, entry: "/work" });
+    const rail = host.querySelector('[data-testid="work-rail"]');
+    expect(rail).not.toBeNull();
+    const labels = [...rail!.querySelectorAll("nav a")].map((a) => a.textContent);
+    expect(labels).toEqual(["대화", "인박스", "내 작업", "팀 작업"]);
+    expect(rail!.querySelector('[data-testid="profile-card-rail"]')).not.toBeNull();
+    // 선택은 「내 작업」 하나다. 「팀 작업」도 경로는 `/work`지만 켜지지 않는다.
+    const current = [...rail!.querySelectorAll('[aria-current="page"]')].map((a) => a.textContent);
+    expect(current).toEqual(["내 작업"]);
+    expect(host.querySelector<HTMLElement>('[data-testid="sidebar-channel-pane"]')?.hidden).toBe(true);
+    expect(host.querySelector<HTMLElement>('[data-testid="workspace-rail"]')?.hidden).toBe(true);
+    expect(host.querySelector('[data-testid="channel-list"]')).not.toBeNull();
+  });
+
+  it("레일이 아니면 레일을 그리지 않는다", async () => {
+    shell.desktop = true;
+    const host = await mount({ entry: "/work" });
+    expect(host.querySelector('[data-testid="work-rail"]')).toBeNull();
+    expect(host.querySelector<HTMLElement>('[data-testid="sidebar-channel-pane"]')?.hidden).toBe(false);
+    // 채널 목록의 두 줄도 쿼리까지 보고 가른다.
+    expect(host.querySelector('[data-testid="nav-my-work"]')?.getAttribute("aria-current")).toBe("page");
+    expect(host.querySelector('[data-testid="nav-team-work"]')?.getAttribute("aria-current")).toBe("false");
+  });
+});
+
+describe("레일로 떠나면 캐럿이 채널 목록의 같은 줄로 간다 (#2854 design-review H1)", () => {
+  it("레일의 인박스를 누르면 레일이 내려간 뒤 캐럿이 nav-inbox에 있다", async () => {
+    shell.desktop = true;
+    const host = await mount({ workRail: true, entry: "/work", switcherOpen: false });
+    const link = host.querySelector<HTMLAnchorElement>('[data-testid="work-rail-inbox"]')!;
+    link.focus();
+    act(() => link.click());
+    act(() => rerenderRail(false));
+    expect(host.querySelector('[data-testid="work-rail"]')).toBeNull();
+    expect(document.activeElement?.getAttribute("data-testid")).toBe("nav-inbox");
+  });
+
+  it("접어 둔 사이드바로 돌아가면 줄이 숨어 있으므로 캐럿은 라우트 상자로 간다 (R2 H1)", async () => {
+    shell.desktop = true;
+    const host = await mount({ workRail: true, entry: "/work", switcherOpen: false, collapsed: true });
+    const route = document.createElement("div");
+    route.id = "app-route";
+    route.tabIndex = -1;
+    host.append(route);
+    const link = host.querySelector<HTMLAnchorElement>('[data-testid="work-rail-team"]')!;
+    link.focus();
+    act(() => link.click());
+    act(() => rerenderRail(false));
+    expect(document.activeElement).toBe(route);
+  });
+
+  it("레일 단추가 아닌 길로 떠나 캐럿이 떨어졌으면 라우트 상자로 간다 (검수 #2927 M1)", async () => {
+    shell.desktop = true;
+    const host = await mount({ workRail: true, entry: "/work", switcherOpen: false });
+    const route = document.createElement("div");
+    route.id = "app-route";
+    route.tabIndex = -1;
+    host.append(route);
+    (document.activeElement as HTMLElement | null)?.blur();
+    act(() => rerenderRail(false));
+    expect(document.activeElement).toBe(route);
+  });
+
+  it("캐럿이 살아 있는 곳에 있으면 옮기지 않는다", async () => {
+    shell.desktop = true;
+    const host = await mount({ workRail: true, entry: "/work", switcherOpen: false });
+    const input = document.createElement("input");
+    host.append(input);
+    input.focus();
+    act(() => rerenderRail(false));
+    expect(document.activeElement).toBe(input);
   });
 });
