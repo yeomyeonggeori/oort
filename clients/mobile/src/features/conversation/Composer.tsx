@@ -27,6 +27,7 @@ import {
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
+  AccessibilityInfo,
   Image,
   Keyboard,
   Pressable,
@@ -1238,6 +1239,11 @@ export function Composer({
     // `drafts.ts` `saveDraft`가 키 모양이 든 글을 적지 않는다.
     if (containsSecretKey(body)) {
       setKeyBlocked(true);
+      // iOS 에는 live region 이 없다(design-review #2945 R4-H1). 막을 때마다 — 이미
+      // 안내가 서 있어도 — 소리로 알린다. 웹은 안내를 새로 붙여 다시 읽힌다.
+      AccessibilityInfo.announceForAccessibility(
+        `${PHONE_SECRET_KEY_BLOCK_COPY.lead} ${PHONE_SECRET_KEY_BLOCK_COPY.tail}`,
+      );
       // 자판을 내린다(design-review #2945 R3-B1): 큰 글씨 SE 에서 자판 + 세 줄
       // 입력창 + 안내가 한 화면을 넘어 안내의 첫 문장이 잘린다. 읽을 자리를 먼저
       // 준다. 고치러 입력창을 누르면 안내는 거둔다(아래 `onInputFocus`).

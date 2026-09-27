@@ -16,10 +16,11 @@ import {
   isOperatorDenied,
   maskedBearer,
 } from '@momo/core/features/settings/model';
-import {teamCheckReason} from '@momo/core/features/settings/teamKeyForm';
+import {teamCheckResult} from '@momo/core/features/settings/teamKeyForm';
 import {useMutation, useQuery} from '@tanstack/react-query';
-import React, {useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Image,
   Keyboard,
@@ -132,20 +133,11 @@ export function isPhoneSlashRow(row: {args: {line?: AiConnectLine}}): boolean {
   return row.args.line !== 'claude' && row.args.line !== 'codex';
 }
 
-type ResultTone = 'ok' | 'bad';
+type ResultTone = 'ok' | 'bad' | 'mute';
 
 interface RowResult {
   tone: ResultTone;
   text: string;
-}
-
-/** 결과 줄의 때: 1분 안이면 「방금」(brief §6), 아니면 「15:42」. */
-function since(ms: number, now: number = Date.now()): string {
-  if (now - ms < 60_000) return '방금';
-  const date = new Date(ms);
-  const hh = String(date.getHours()).padStart(2, '0');
-  const mm = String(date.getMinutes()).padStart(2, '0');
-  return `${hh}:${mm}`;
 }
 
 function shortDate(ms: number): string {
@@ -192,11 +184,22 @@ export function AiConnectCardShell({
   // 높이는 자판에 줄지 않으므로 높이 상한만으로는 375×667 에서 대화가 0pt 가 되고,
   // 큰 글씨에서는 머리(닫기)가 화면 밖으로 밀린다. 머리는 언제나 한 줄이다.
   const keyboardUp = useKeyboardShown(true);
+  // 창 몫은 **카드 전체**의 것이다(design-review #2945 R4-H2): 큰 글씨에서 머리가
+  // 두 줄이 되면 몸의 상한에서 그만큼 뺀다. 그러지 않으면 375 큰 글씨에서 카드 +
+  // 입력창이 한 화면을 넘어 보내기가 밀려 나간다. 몸은 최소 두 줄 칸은 지킨다.
+  const [headerHeight, setHeaderHeight] = useState(0);
+  const bodyMax = Math.max(
+    TOUCH_TARGET * 2,
+    Math.round(height * CARD_BODY_WINDOW_SHARE) - headerHeight,
+  );
   return (
     <View
       style={[styles.card, variant === 'local' && styles.cardLocal]}
       testID={testID}>
-      {header}
+      <View
+        onLayout={event => setHeaderHeight(Math.round(event.nativeEvent.layout.height))}>
+        {header}
+      </View>
       {keyboardUp ? (
         // 누를 수 있어야 한다(design-review #2945 R2-M1): 큰 글씨에서는 대화 목록이
         // 0pt 라 끌어서 자판을 내릴 자리가 없고, 여러 줄 입력창의 리턴은 줄바꿈이다.
@@ -212,7 +215,7 @@ export function AiConnectCardShell({
           자판을 한 번 올렸다 내리는 것만으로 사라지고, 팀 연결을 다시 불러온다. */}
       <ScrollView
         style={[
-          {maxHeight: Math.round(height * CARD_BODY_WINDOW_SHARE)},
+          {maxHeight: bodyMax},
           keyboardUp && styles.hidden,
         ]}
         keyboardShouldPersistTaps="handled"
@@ -506,16 +509,22 @@ function TeamRow({
   if (!offline && checkError !== null && !checking) {
     result = {tone: 'bad', text: errorMessage(checkError)};
   } else if (!offline && probe && !checking) {
-    result = probe.ok
-      ? {
-          tone: 'ok',
-          text: `${AI_CONNECT_CARD_COPY.checkedOk} · ${since(probe.checkedAtMs)}`,
-        }
-      : {
-          tone: 'bad',
-          text: `${teamCheckReason(probe.reason)} ${AI_CONNECT_CARD_COPY.changeOnMac}`,
-        };
+    // 문장은 코어 `teamCheckResult` — 웹 설정 곁판과 같은 판정·같은 때 표기
+    // (design-review #2945 R4-M1). 폰은 키를 받지 않으므로 실패에만 「맥·웹에서」.
+    const core = teamCheckResult({probe, justSaved: false, nowMs: Date.now()});
+    result = {
+      tone: core.tone,
+      text:
+        core.tone === 'bad'
+          ? `${core.text} ${AI_CONNECT_CARD_COPY.changeOnMac}`
+          : core.text,
+    };
   }
+  // iOS 에는 live region 이 없다(R4-H1): 결과가 설 때 소리로 알린다.
+  const resultText = result?.text ?? null;
+  useEffect(() => {
+    if (resultText !== null) AccessibilityInfo.announceForAccessibility(resultText);
+  }, [resultText]);
 
   const name = hasRow
     ? link.configured
@@ -560,9 +569,9 @@ function TeamRow({
           </View>
           <Text
             style={[styles.sub, mono && styles.subMono]}
-            // 큰 글씨(알약이 아래로 내려가는 배수)에서는 두 줄 — 한 줄이면 마스킹
-            // 꼬리의 날짜가 잘린다(R3-M1).
-            numberOfLines={hasRow ? (stackPill ? 2 : 1) : 3}
+            // 두 줄까지 — 좁은 제안 카드(375)에서는 기본 글씨에서도 「11월 12일
+            // 저장」이 한 줄에 들지 않는다(R4-B1). 들면 한 줄 그대로다.
+            numberOfLines={hasRow ? 2 : 3}
             testID={`${idPrefix}-team-sub`}>
             {sub}
           </Text>
@@ -592,7 +601,12 @@ function TeamRow({
             styles.result,
             {
               paddingLeft: scaled(MARK_SIZE) + space.sm,
-              color: result.tone === 'ok' ? palette.ok : palette.danger,
+              color:
+                result.tone === 'ok'
+                  ? palette.ok
+                  : result.tone === 'mute'
+                    ? palette.textMuted
+                    : palette.danger,
             },
           ]}
           accessibilityLiveRegion="polite"
@@ -703,10 +717,11 @@ function SecondaryButton({
 /** 시안 `.btn` 높이. 44pt 는 슬롭이 채운다(`slopTo`). */
 const BUTTON_HEIGHT = 30;
 /**
- * 카드 몸이 창에서 가져갈 수 있는 몫(자판이 내려가 있을 때만 몸이 선다). 나머지
- * 반은 대화·머리·입력창의 것이다.
+ * 카드(머리 + 몸)가 창에서 가져갈 수 있는 몫(자판이 내려가 있을 때만 몸이 선다).
+ * 나머지는 대화·화면 머리·입력창의 것이다. 큰 글씨 SE 에서 입력창(두 줄 자리 글자)과
+ * 화면 머리를 합쳐 한 화면에 들도록 0.38 — 기본 글씨에서는 몸이 이 안에 다 든다.
  */
-const CARD_BODY_WINDOW_SHARE = 0.45;
+const CARD_BODY_WINDOW_SHARE = 0.38;
 /** 글리프가 글자를 따라 커지는 상한. 아이콘이 글자보다 커지지 않게. */
 const GLYPH_SCALE_CAP = 2;
 /**

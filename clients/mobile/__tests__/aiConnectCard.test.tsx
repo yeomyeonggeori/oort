@@ -14,7 +14,13 @@ import {
 import fs from 'fs';
 import path from 'path';
 import React from 'react';
-import {Keyboard, type KeyboardEvent, StyleSheet, TextInput} from 'react-native';
+import {
+  AccessibilityInfo,
+  Keyboard,
+  type KeyboardEvent,
+  StyleSheet,
+  TextInput,
+} from 'react-native';
 
 import {
   AI_CONNECT_CARD_COPY,
@@ -159,6 +165,9 @@ describe('카드 — 판정은 코어, 행동은 연결 확인 하나', () => {
   it('확인 실패: 사유 + 「키는 맥·웹에서」 — 폰에는 키 바꾸기가 없다', async () => {
     mockFetch.mockResolvedValue(LINK);
     mockTest.mockResolvedValue(PROBE_FAIL);
+    const announce = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => {});
     card();
     await screen.findByTestId('ai-connect-card-team');
     await act(async () => {
@@ -174,6 +183,11 @@ describe('카드 — 판정은 코어, 행동은 연결 확인 하나', () => {
     expect(screen.queryByText('키 넣기')).toBeNull();
     // 다시 확인할 길은 남는다.
     expect(screen.getByTestId('ai-connect-card-team-check')).toBeTruthy();
+    // 결과는 iOS 에서도 소리로 알린다(R4-H1).
+    expect(announce).toHaveBeenLastCalledWith(String(result.props.children));
+    announce.mockRestore();
+    // 마스킹 꼬리는 두 줄까지(좁은 폭에서 날짜가 잘리지 않게, R4-B1).
+    expect(screen.getByTestId('ai-connect-card-team-sub').props.numberOfLines).toBe(2);
   });
 
   it('비운영자(403): 줄 대신 한 문장, 버튼 0', async () => {
@@ -480,6 +494,9 @@ describe('컴포저 — `/` 명령과 키 붙여넣기 차단', () => {
   it('막으면 자판을 내리고 알리며, 입력창을 다시 누르면 안내를 거둔다 (R3-B1)', () => {
     const onKeyBlockedChange = jest.fn();
     const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
+    const announce = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => {});
     try {
       composer({onKeyBlockedChange});
       fireEvent.changeText(screen.getByTestId('composer-input'), KEY);
@@ -493,8 +510,17 @@ describe('컴포저 — `/` 명령과 키 붙여넣기 차단', () => {
       // 키가 남아 있으면 다음 전송이 다시 막는다.
       fireEvent.press(screen.getByTestId('composer-send'));
       expect(screen.getByTestId('composer-key-blocked')).toBeTruthy();
+      // iOS 에는 live region 이 없다 — 막을 때마다, 안내가 이미 서 있어도 소리로
+      // 알린다(R4-H1).
+      const said = `${PHONE_SECRET_KEY_BLOCK_COPY.lead} ${PHONE_SECRET_KEY_BLOCK_COPY.tail}`;
+      const count = () => announce.mock.calls.filter(([text]) => text === said).length;
+      const before = count();
+      expect(before).toBeGreaterThanOrEqual(2);
+      fireEvent.press(screen.getByTestId('composer-send'));
+      expect(count()).toBeGreaterThan(before);
     } finally {
       dismiss.mockRestore();
+      announce.mockRestore();
     }
   });
 

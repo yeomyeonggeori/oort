@@ -1043,7 +1043,7 @@ const AI_CONNECT_LINK: ProviderLink = {
   bearerLast4: '7c1e',
   availability: 'external',
   keyConfigured: true,
-  updatedAtMs: Date.UTC(2026, 8, 20),
+  updatedAtMs: Date.UTC(2026, 10, 12),
   diagnostics: [],
 };
 
