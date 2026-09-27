@@ -370,4 +370,15 @@ describe("하네스 신호 (#2776, ADR-0190 D4-b)", () => {
     await h.sessions.restart("p1");
     expect(h.sessions.getSnapshot().get("p1")?.signal).toBeNull();
   });
+
+  it("기다리는 칸에 사람이 입력하면 기다림이 풀린다(거부·중단에는 hook이 없다)", async () => {
+    const h = harness();
+    await h.sessions.ensure("p1", 80, 24);
+    h.signal("waiting-permission");
+    h.sessions.input("p1", "\u001b");
+    expect(h.sessions.getSnapshot().get("p1")?.signal).toBe("working");
+    h.signal("turn-done");
+    h.sessions.input("p1", "x");
+    expect(h.sessions.getSnapshot().get("p1")?.signal).toBe("turn-done");
+  });
 });

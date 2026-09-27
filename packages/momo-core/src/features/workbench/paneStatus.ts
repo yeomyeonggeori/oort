@@ -13,22 +13,24 @@ import { statusFromPhase, type SessionPhaseInput, type SessionStatus } from "./s
 // 상태는 바뀌지 않는다. 출력 내용을 읽으면 raw가 요약의 모양으로 새어 나간다
 // (ADR-0190 D4-b 「긁지 않는다」). 소스 시험이 이 모듈의 import를 잠근다.
 //
-// OSC 제목은 여기서 판정에 쓰지 않는다: #2776 스파이크에서 Claude Code의 제목은
-// 작업 이름만 싣고 실행·대기를 구분하는 표지가 없었다(PR 본문 스파이크 표).
-// 제목은 칸 이름(`LocalSessionView.title`)으로만 쓴다.
+// OSC 제목은 여기서 판정에 쓰지 않는다: #2776 스파이크에서 Claude Code의 제목
+// 머리 글자는 작업 중(◐·◑)과 그 밖(✳)만 가르고, 「허락을 기다림」과 「쉼」은 같은
+// ✳였다. hook이 그보다 먼저, 더 정확히 말한다. 제목은 칸 이름으로만 쓴다
+// (`LocalSessionView.title`). 셸 칸 안에서 사람이 띄운 하네스(hook 배선 없음)에
+// 제목 머리 글자를 쓰는 것은 후속으로 남긴다(PR 본문 REMAINING).
 // =============================================================================
 
 /**
  * 하네스 구조 신호의 닫힌 목록. 셸 칸에는 오지 않는다(hook을 내는 프로그램이
  * 없다). 데스크탑이 이 밖의 값을 보내면 무시한다(`parsePaneSignal`).
  *
- * | 신호 | Claude Code | Codex |
+ * | 신호 | Claude Code 2.1.28x hook | Codex 0.156 `notify` |
  * |---|---|---|
- * | `ready` | SessionStart | — |
- * | `working` | UserPromptSubmit, PostToolUse | — |
- * | `waiting-permission` | Notification `permission_prompt` | — (0.156 `notify`에 없음) |
- * | `waiting-input` | Notification `elicitation_dialog` | — |
- * | `turn-done` | Stop | `agent-turn-complete` |
+ * | `ready` | SessionStart | 없음 |
+ * | `working` | UserPromptSubmit, PostToolUse (+ 기다리는 칸에 사람이 입력) | 없음 |
+ * | `waiting-permission` | PermissionRequest, Notification `permission_prompt` | 없음(승인 유형이 오지 않는다) |
+ * | `waiting-input` | Notification `elicitation_dialog`(스파이크에서 관측 못 함) | 없음 |
+ * | `turn-done` | Stop | `agent-turn-complete`(제목 짓기 곁가지 턴은 뺀다) |
  */
 export type PaneSignal = "ready" | "working" | "waiting-permission" | "waiting-input" | "turn-done";
 

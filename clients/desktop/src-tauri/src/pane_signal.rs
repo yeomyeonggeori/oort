@@ -98,17 +98,29 @@ pub struct HookLine {
 
 /// The whole mapping. Anything not listed means nothing.
 ///
-/// Measured with claude 2.1.x / codex-cli 0.156 (#2776 spike, PR body):
+/// Measured with claude 2.1.280/2.1.283 and codex-cli 0.156.1 (#2776 spike,
+/// PR body):
+/// - `PermissionRequest` fires the moment Claude asks; `Notification` +
+///   `permission_prompt` follows 5–6 s later. Both mean the same wait; the
+///   webview keeps one signal, so the second changes nothing.
 /// - `Notification` + `idle_prompt` is Claude re-announcing a finished turn
 ///   after ~60 s; the pane is already 「끝남」, so it does not become
 ///   「나를 기다림」 and does not notify twice.
 /// - `PreToolUse` fires before the permission prompt, so it cannot clear a
 ///   wait; `PostToolUse` (the tool ran = the person allowed it) does.
+/// - A denial or an interrupt fires no hook at all (measured: ESC, "3. No",
+///   ESC mid-tool). The webview clears a wait on the person's own keystroke
+///   into the pane instead (`localSessions.input`).
+/// - `elicitation_dialog` was not observed in the spike; it is kept because
+///   Claude documents it as the other way a turn waits for an answer.
+/// - Codex 0.156 `notify` only ever carries `agent-turn-complete`; there is
+///   no approval type, so a Codex pane never shows 「나를 기다림」.
 pub fn signal_for(source: Source, event: &str, detail: Option<&str>) -> Option<PaneSignal> {
     match (source, event, detail) {
         (Source::Claude, "SessionStart", _) => Some(PaneSignal::Ready),
         (Source::Claude, "UserPromptSubmit" | "PostToolUse", _) => Some(PaneSignal::Working),
-        (Source::Claude, "Notification", Some("permission_prompt")) => {
+        (Source::Claude, "PermissionRequest", _)
+        | (Source::Claude, "Notification", Some("permission_prompt")) => {
             Some(PaneSignal::WaitingPermission)
         }
         (Source::Claude, "Notification", Some("elicitation_dialog")) => {
@@ -130,6 +142,7 @@ pub const CLAUDE_HOOK_EVENTS: &[&str] = &[
     "SessionStart",
     "UserPromptSubmit",
     "PostToolUse",
+    "PermissionRequest",
     "Notification",
     "Stop",
 ];
@@ -201,8 +214,28 @@ pub fn names_from_payload(source: Source, payload: &str) -> Option<(String, Opti
             bounded_name(value.get("hook_event_name"))?,
             bounded_name(value.get("notification_type")),
         )),
-        Source::Codex => Some((bounded_name(value.get("type"))?, None)),
+        Source::Codex => {
+            // Codex names each new thread with a side turn of its own, and that
+            // turn ends with its own `agent-turn-complete` whose last message
+            // is `{"title": …}` (measured). It is not the person's task
+            // finishing, so it is dropped here. The message is read only to
+            // recognise that shape; nothing of it is sent.
+            if is_title_turn(value.get("last-assistant-message")) {
+                return None;
+            }
+            Some((bounded_name(value.get("type"))?, None))
+        }
     }
+}
+
+fn is_title_turn(message: Option<&serde_json::Value>) -> bool {
+    let Some(text) = message.and_then(serde_json::Value::as_str) else {
+        return false;
+    };
+    matches!(
+        serde_json::from_str::<serde_json::Value>(text),
+        Ok(serde_json::Value::Object(map)) if map.len() == 1 && map.contains_key("title")
+    )
 }
 
 /// The hook client's line, or `None` when anything is missing.
@@ -366,6 +399,10 @@ mod tests {
         );
         assert_eq!(signal_for(c, "Stop", None), Some(TurnDone));
         assert_eq!(
+            signal_for(c, "PermissionRequest", None),
+            Some(WaitingPermission)
+        );
+        assert_eq!(
             signal_for(Source::Codex, "agent-turn-complete", None),
             Some(TurnDone)
         );
@@ -420,6 +457,25 @@ mod tests {
         assert!(line.contains("\"event\":\"agent-turn-complete\""));
         for leak in ["ghp_", "customer", "/Users/me", "thread"] {
             assert!(!line.contains(leak), "{leak} leaked: {line}");
+        }
+    }
+
+    /// Measured payload shape (spike `codex-notifyY.jsonl`): the thread-title
+    /// side turn must not read as the task finishing.
+    #[test]
+    fn codex_title_side_turn_is_not_a_finished_task() {
+        let title = r#"{"type":"agent-turn-complete","thread-id":"a","turn-id":"b","client":"codex-tui","input-messages":["Generate a concise, single-line task title"],"last-assistant-message":"{\"title\":\"Create spike_x.txt\"}"}"#;
+        assert!(client_line(Source::Codex, title, Some("1"), Some("t")).is_none());
+        for real in [
+            r#"{"type":"agent-turn-complete","last-assistant-message":"Created spike_x.txt."}"#,
+            r#"{"type":"agent-turn-complete","last-assistant-message":"{\"title\":\"x\",\"more\":1}"}"#,
+            r#"{"type":"agent-turn-complete","last-assistant-message":null}"#,
+            r#"{"type":"agent-turn-complete"}"#,
+        ] {
+            assert!(
+                client_line(Source::Codex, real, Some("1"), Some("t")).is_some(),
+                "{real}"
+            );
         }
     }
 
