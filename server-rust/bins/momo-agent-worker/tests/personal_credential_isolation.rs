@@ -38,6 +38,7 @@
 //! | `with_no_team_key_the_turn_cannot_answer_and_borrows_nothing` | call the model when `provider_is_configured` is false, or resolve a non-team credential for it |
 //! | `a_subscription_agent_with_no_connection_is_still_never_delegated_to` (#2897) | drop the explicit `owner_only` check in the worker's A2A routing (the reason word changes to the policy's `a2a_owner_only_target`); drop it **and** `evaluate_a2a_spawn`'s `target_owner_only` refusal (the team worker runs the subscription agent on the team key) |
 //! | `with_no_team_key_a_mention_turn_calls_no_model_and_says_why` (#2897) | call the model on an ordinary turn when `provider_is_configured` is false; drop the #2871 throttle on the `provider_required` line |
+//! | `the_worker_never_runs_a_subscription_agent_even_for_its_owner` (#2924) | drop the `owner_only` refusal at the top of `run_job` (the team worker answers the owner's job on the team key) |
 //!
 //! Since #2897 the A2A refusal of a subscription agent has three independent
 //! layers — the explicit scope check in the routing, the policy's own read of
@@ -951,4 +952,142 @@ async fn with_no_team_key_a_mention_turn_calls_no_model_and_says_why() {
         baseline,
         "the owner's subscription agent was used as a fallback speaker"
     );
+}
+
+/// #2924 (review-2922 M1, probe P1): a job for the owner's subscription agent
+/// that reaches this worker anyway — its connection row is gone and the owner
+/// called it — is never run on the team key. The worker is the one place
+/// every such job ends up, whichever door wrote it, so the refusal lives at
+/// the top of `run_job`: no model call, the #2871 「연결 안 됨」 line in the
+/// agent's name, the run closed as failed.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn the_worker_never_runs_a_subscription_agent_even_for_its_owner() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let t = seed_with(&su, false).await;
+
+    let provider = Arc::new(MockChatProvider::echo());
+    let worker = AgentWorker::new(
+        momo_worker_pool().await,
+        provider.clone() as Arc<dyn ChatProvider>,
+        worker_config(Some(TEAM_ENV_BEARER)),
+    );
+    // The owner's own call, exactly the job the mention route wrote for a
+    // row-less subscription agent before #2924 (`delivery = worker`).
+    let (workspace_id, channel_id, agent, owner) = (
+        t.workspace_id,
+        t.channel_id,
+        t.subscription_agent_id,
+        t.owner_id,
+    );
+    let run_id = with_tenant_tx(&su, workspace_id, move |conn| {
+        Box::pin(async move {
+            let body = format!("@{SUBSCRIBER} 이거 봐 줘");
+            let sent = send_message_with_mentions_in_tx(
+                conn,
+                workspace_id,
+                NewMessage::text(channel_id, owner, body.clone()),
+                SendExtras::default(),
+            )
+            .await?
+            .expect("a plain send");
+            let created = create_agent_run_in_tx(
+                conn,
+                workspace_id,
+                NewAgentRun {
+                    channel_id,
+                    trigger: RunTrigger::Mention {
+                        message_id: sent.message.id,
+                        agent_member_id: agent,
+                    },
+                    parent_run_id: None,
+                    max_steps: 50,
+                    depth: 0,
+                    input: json!({"schema": "momo.agent_run.input.v0", "surface": "mention",
+                                  "prompt": body, "depth": 0}),
+                },
+            )
+            .await?;
+            emit_outbox(
+                &mut *conn,
+                workspace_id,
+                OutboxKind::AgentJob,
+                "publish",
+                &json!({
+                    "run_id": created.id,
+                    "workspace_id": workspace_id,
+                    "channel_id": channel_id,
+                    "agent_member_id": agent,
+                    "author_member_id": owner,
+                    "trigger_message_id": sent.message.id,
+                    "trigger_message_seq": sent.message.seq,
+                    "model": "hosted-agent",
+                    "prompt": body,
+                    "recent_messages": [],
+                    "max_output_tokens": 256,
+                    "depth": 0,
+                    "delivery": "worker",
+                    "created_from": "server.message_send.agent_mention.v0",
+                }),
+                Some(agent),
+            )
+            .await
+            .map_err(momo_db::DbError::from)?;
+            Ok(created.id)
+        })
+    })
+    .await
+    .expect("the owner's call");
+
+    let stats = drain(&worker).await;
+    assert_eq!(stats.answered, 0, "the team worker answered it: {stats:?}");
+    assert!(
+        provider.calls().is_empty(),
+        "a subscription agent ran on the team key: {:?}",
+        provider
+            .calls()
+            .iter()
+            .map(|call| call.bearer.clone())
+            .collect::<Vec<_>>()
+    );
+    let lines: Vec<(String, String, serde_json::Value)> = sqlx::query_as(
+        "SELECT type::text, COALESCE(body, ''), props FROM message \
+          WHERE workspace_id = $1 AND channel_id = $2 AND author_member_id = $3 ORDER BY seq",
+    )
+    .bind(t.workspace_id)
+    .bind(t.channel_id)
+    .bind(t.subscription_agent_id)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(lines.len(), 1, "one 「연결 안 됨」 line: {lines:?}");
+    let (kind, body, props) = &lines[0];
+    assert_eq!(kind, "system");
+    assert!(
+        body.contains(SUBSCRIBER) && body.contains("연결이 끊겨"),
+        "{body}"
+    );
+    assert_eq!(props["reason"], "hosted_connection_unavailable");
+    assert_eq!(props["notice_for_member_id"], json!(t.owner_id.to_string()));
+    let status: String = sqlx::query_scalar(
+        "SELECT status::text FROM agent_run WHERE workspace_id = $1 AND id = $2",
+    )
+    .bind(t.workspace_id)
+    .bind(run_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(status, "failed", "the run is closed, not left running");
+    let open_jobs: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id = $1 AND kind = 'agent_job' \
+            AND partition_key = $2 AND status IN ('pending', 'processing')",
+    )
+    .bind(t.workspace_id)
+    .bind(t.subscription_agent_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(open_jobs, 0, "the job is settled, not retried forever");
 }

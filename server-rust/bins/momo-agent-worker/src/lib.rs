@@ -542,6 +542,35 @@ impl AgentWorker {
             "processing agent_job"
         );
 
+        // #2924 (review-2922 M1) — the one chokepoint every agent job passes,
+        // whichever door wrote it: a subscription agent is never run here, on
+        // the team key, even for its owner. Before the welcome's preparation
+        // (it speaks) and before any run moves.
+        match self.agent_is_owner_only(&job, &payload).await {
+            Ok(false) => {}
+            Ok(true) => {
+                tracing::warn!(
+                    outbox_id = job.id,
+                    agent_member_id = %payload.agent_member_id,
+                    "agent_job for a subscription agent reached the team worker; refused"
+                );
+                return match payload.run_id {
+                    Some(run_id) => self.settle_owner_only_refused(&job, &payload, run_id).await,
+                    None => {
+                        self.settle_done(job.id, Some(OWNER_ONLY_NOT_WORKER)).await;
+                        Settlement::Skipped
+                    }
+                };
+            }
+            Err(error) => {
+                // Fail closed: an unknown scope is not a licence to run.
+                let endpoint = self.resolve_transport().await.endpoint;
+                return self
+                    .settle_retryable(&job, &format!("owner-only check: {error}"), &endpoint)
+                    .await;
+            }
+        }
+
         if payload.is_welcome() {
             match self.prepare_welcome(&job, &mut payload).await {
                 WelcomePrep::Ready => {}
@@ -2530,6 +2559,24 @@ impl AgentWorker {
         }
     }
 
+    /// Is the job's agent a subscription (`owner_only`) agent? Read in the
+    /// job's own workspace (RLS), from the one column migration 089 makes
+    /// one-way.
+    async fn agent_is_owner_only(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+    ) -> Result<bool, momo_db::DbError> {
+        let agent_member_id = payload.agent_member_id;
+        let workspace_id = job.workspace_id;
+        with_tenant_tx(&self.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                momo_agent::agent_is_owner_only_in_tx(conn, workspace_id, agent_member_id).await
+            })
+        })
+        .await
+    }
+
     /// #2897 — a turn with no team key: close the run `failed`, and say why in
     /// the conversation as a #2871 system line in the agent's name (the way
     /// out is 설정 › AI 연결), at most once per person, thread and window. One
@@ -2542,6 +2589,55 @@ impl AgentWorker {
         payload: &AgentJobPayload,
         run_id: Uuid,
     ) -> Settlement {
+        self.settle_refused_turn(
+            job,
+            payload,
+            run_id,
+            HostedSkipReason::ProviderRequired,
+            json!({"code": PROVIDER_REQUIRED, "reason": "no team key"}),
+        )
+        .await
+    }
+
+    /// #2924 (review-2922 M1) — a job for a subscription (`owner_only`) agent
+    /// reached the team worker. That agent runs only in its owner's own
+    /// runtime over its hosted connection (ADR-0193 D1·D4), so the team key
+    /// must never answer for it — not even for the owner, and not when the
+    /// connection row is gone and every entry door's hosted check had nothing
+    /// to see. Closed as the #2871 「연결 안 됨」 line, the same sentence the
+    /// mention route says for a subscription agent with no live connection.
+    async fn settle_owner_only_refused(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+    ) -> Settlement {
+        self.settle_refused_turn(
+            job,
+            payload,
+            run_id,
+            HostedSkipReason::ConnectionUnavailable,
+            json!({"code": OWNER_ONLY_NOT_WORKER, "reason": "subscription agent"}),
+        )
+        .await
+    }
+
+    /// Close a turn the worker must not run: the run `failed`, one #2871
+    /// system line (throttled per person, thread, reason and window), audit and
+    /// rail frame, all in one transaction. No model is called; the job is done.
+    async fn settle_refused_turn(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        reason: HostedSkipReason,
+        error: Value,
+    ) -> Settlement {
+        let code = error
+            .get("code")
+            .and_then(Value::as_str)
+            .unwrap_or(reason.as_str())
+            .to_string();
         let workspace_id = job.workspace_id;
         let channel_id = payload.channel_id;
         let agent_member_id = payload.agent_member_id;
@@ -2561,7 +2657,6 @@ impl AgentWorker {
                 // Answers land in the main timeline (root_id None), so the line
                 // does too, and the throttle keys on the channel.
                 let thread_key = notice_thread_key(channel_id, None);
-                let reason = HostedSkipReason::ProviderRequired;
                 let key = hosted_skip_notice_key(
                     agent_member_id,
                     channel_id,
@@ -2638,7 +2733,6 @@ impl AgentWorker {
                         .with_schema(HOSTED_SKIP_NOTICE_AUDIT_SCHEMA, detail),
                 )
                 .await?;
-                let error = json!({"code": PROVIDER_REQUIRED, "reason": "no team key"});
                 finish_run_in_tx(conn, run_id, false, &json!({}), Some(&error)).await?;
                 emit_terminal_agent_status(
                     conn,
@@ -2655,19 +2749,20 @@ impl AgentWorker {
         .await;
         match result {
             Ok(()) => {
-                self.settle_done(job.id, Some(PROVIDER_REQUIRED)).await;
+                self.settle_done(job.id, Some(&code)).await;
                 Settlement::Skipped
             }
             Err(error) => {
                 tracing::warn!(
                     outbox_id = job.id,
                     error = %error,
-                    "provider-required commit failed"
+                    code = %code,
+                    "refused-turn commit failed"
                 );
                 // A DB error: requeue under the ordinary budget. The endpoint
                 // passed is the (unused) env one, only for redaction.
                 let endpoint = self.resolve_transport().await.endpoint;
-                self.settle_retryable(job, &format!("provider-required: {error}"), &endpoint)
+                self.settle_retryable(job, &format!("{code}: {error}"), &endpoint)
                     .await
             }
         }
@@ -3071,6 +3166,9 @@ const PROVIDER_AUTH_FAILED: &str = "provider_auth_failed";
 /// #2897 — the run's error code (and the job's done reason) when a turn found
 /// no team key. The same word as the #2871 line's `props.reason`.
 const PROVIDER_REQUIRED: &str = "provider_required";
+/// #2924 — the run error / outbox reason of a subscription agent's job that
+/// reached the team worker.
+const OWNER_ONLY_NOT_WORKER: &str = "owner_only_not_worker";
 
 /// How a turn ended, and — when it failed — under which name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
