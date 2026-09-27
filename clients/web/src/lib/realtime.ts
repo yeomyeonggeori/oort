@@ -36,6 +36,7 @@ import {
   type WorkSessionToolTransitionFrame,
 } from "@momo/core/lib/realtimeEvents";
 import { isTerminalProgressFrame } from "@momo/core/features/agents/agentRail";
+import { workHostNoticeChannelName } from "@momo/core/features/settings/thisMacHost";
 import { apiBase } from "./serverBase";
 
 // =============================================================================
@@ -485,7 +486,28 @@ export function createRealtime(
     );
   }
 
+  // ADR-0188 D2 (#2778): the owner's user-limited notice channel. The frame
+  // is handed over raw; `asWorkHostNotice` (core) decides what it is.
+  function subscribeWorkHostNotices(
+    memberId: string,
+    handlers: { onNotice: (data: unknown) => void }
+  ): () => void {
+    return attach(
+      workHostNoticeChannelName(memberId),
+      { recoverable: true, positioned: true },
+      (sub) => {
+        const onPublication = (ctx: { data?: unknown }) =>
+          handlers.onNotice(ctx.data);
+        sub.on("publication", onPublication);
+        return () => {
+          sub.off("publication", onPublication);
+        };
+      }
+    );
+  }
+
   return {
+    subscribeWorkHostNotices,
     subscribeChannel,
     subscribeAgent,
     subscribeTyping,
