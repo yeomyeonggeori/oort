@@ -254,8 +254,16 @@ describe("SettingsRoute 전면 레이아웃", () => {
     const back = root.querySelector(
       '[data-testid="settings-back-to-app"]'
     ) as HTMLButtonElement;
+    // 앱 안에서 쌓인 항목 위(라우터 idx ≥ 1)면 한 칸 뒤로.
+    window.history.pushState({ idx: 1 }, "", window.location.href);
     act(() => back.click());
     expect(navigate).toHaveBeenCalledWith(-1);
+    // 설정이 앱의 첫 항목(idx 0: 딥링크·온보딩 뒤)이면 앱 밖이 아니라 홈으로 (#2938 ③).
+    navigate.mockClear();
+    window.history.replaceState({ idx: 0 }, "", window.location.href);
+    act(() => back.click());
+    expect(navigate).toHaveBeenCalledWith("/", { replace: true });
+    expect(navigate).not.toHaveBeenCalledWith(-1);
 
     const account = mountRoute("/settings?section=account");
     expect(

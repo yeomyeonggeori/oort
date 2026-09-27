@@ -66,6 +66,58 @@ describe("#1866 포커스 모달리티", () => {
     stop();
   });
 
+  // #2938 ②: 화살표·Home/End·PageUp/Down도 캐럿을 옮기는 키보드 탐색이다(설정 절
+  // 목록·라디오 묶음·메뉴). 반면 Esc·Enter·수정 키·단축키는 탐색이 아니다: 마우스로
+  // 쓰던 사람이 Esc로 설정을 닫거나 ⌘를 눌렀다고 방금 누른 버튼에 링이 서면 안 된다
+  // (Chromium·WebKit은 포커스가 있는 채로 **아무 키**나 눌리면 그 요소를
+  // :focus-visible로 친다 — 제품 빌드 실측, scripts/capture-focus-ring.mjs).
+  it("캐럿을 옮기는 키만 keyboard 로 올린다(#2938)", () => {
+    const button = { tagName: "BUTTON", isContentEditable: false } as unknown as EventTarget;
+    const at = (key: string, target: EventTarget = button, extra: object = {}) =>
+      ({ key, target, ...extra }) as unknown as KeyboardEvent;
+    for (const key of ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End", "PageDown", "PageUp"]) {
+      const doc = fakeDocument();
+      const stop = initFocusModality(doc);
+      doc.dispatch("keydown", at(key));
+      expect(doc.documentElement.getAttribute(FOCUS_MODALITY_ATTRIBUTE), key).toBe("keyboard");
+      stop();
+    }
+    for (const key of ["Escape", "Enter", " ", "Shift", "Meta", "Control", "Alt", "a"]) {
+      const doc = fakeDocument();
+      const stop = initFocusModality(doc);
+      doc.dispatch("keydown", at(key));
+      expect(doc.documentElement.getAttribute(FOCUS_MODALITY_ATTRIBUTE), key).toBe("pointer");
+      stop();
+    }
+    // ⌘↓ 같은 단축키는 탐색이 아니다.
+    const doc = fakeDocument();
+    const stop = initFocusModality(doc);
+    doc.dispatch("keydown", at("ArrowDown", button, { metaKey: true }));
+    expect(doc.documentElement.getAttribute(FOCUS_MODALITY_ATTRIBUTE)).toBe("pointer");
+    stop();
+  });
+
+  it("글 입력 칸 안의 화살표는 캐럿 이동이라 모달리티를 바꾸지 않는다(#1866 그릇 링 유지)", () => {
+    const doc = fakeDocument();
+    const stop = initFocusModality(doc);
+    const textarea = { tagName: "TEXTAREA", isContentEditable: false } as unknown as EventTarget;
+    const input = { tagName: "INPUT", type: "text", isContentEditable: false } as unknown as EventTarget;
+    const editor = { tagName: "DIV", isContentEditable: true } as unknown as EventTarget;
+    for (const target of [textarea, input, editor]) {
+      doc.dispatch("keydown", { key: "ArrowUp", target } as unknown as KeyboardEvent);
+      expect(doc.documentElement.getAttribute(FOCUS_MODALITY_ATTRIBUTE)).toBe("pointer");
+    }
+    // 라디오·체크박스 input 의 화살표는 탐색이다.
+    const radio = { tagName: "INPUT", type: "radio", isContentEditable: false } as unknown as EventTarget;
+    doc.dispatch("keydown", { key: "ArrowDown", target: radio } as unknown as KeyboardEvent);
+    expect(doc.documentElement.getAttribute(FOCUS_MODALITY_ATTRIBUTE)).toBe("keyboard");
+    // Tab 은 글 입력 칸 안에서도 탐색이다.
+    doc.dispatch("pointerdown", { type: "pointerdown" } as Event);
+    doc.dispatch("keydown", { key: "Tab", target: textarea } as unknown as KeyboardEvent);
+    expect(doc.documentElement.getAttribute(FOCUS_MODALITY_ATTRIBUTE)).toBe("keyboard");
+    stop();
+  });
+
   it("해제 뒤에는 스탬프를 바꾸지 않는다", () => {
     const doc = fakeDocument();
     const stop = initFocusModality(doc);
