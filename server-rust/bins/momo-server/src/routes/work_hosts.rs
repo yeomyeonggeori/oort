@@ -68,6 +68,19 @@
 //! verified (`work_host_auth`) and that the path names **that** host in **that**
 //! workspace — a host may poll only its own queue.
 //!
+//! ## ADR-0188 D2: the owner's devices hear about it (#2778)
+//!
+//! 「host 등록 사실은 소유자의 모든 기기에 알린다」. A registration, and a revoke
+//! that actually revokes (the first one), writes one `broadcast` outbox row in
+//! the **same transaction** as the row change, published on the owner's
+//! user-limited channel `user:work-host#<OWNER>` ([`work_host_notice_channel`]).
+//! Every device the owner is signed in to can subscribe to it (the realtime
+//! token's `sub` is that member), and nobody else can (`allow_user_limited_
+//! channels`). A host the owner did not add — a stolen token registering a
+//! stranger's box — is therefore announced on the owner's own screens, not
+//! only in a list they would have to go and read. The payload names the host
+//! and who acted; never its public key.
+//!
 //! ## Still not served (deliberate, named)
 //!
 //! `GET .../{host}/live-sessions` (:101-104) and `POST .../{host}/reconcile`
@@ -88,13 +101,16 @@ use momo_auth::{
     lock_work_host_ownership, mark_work_host_revoked, normalize_public_key_b64,
     touch_work_host_last_seen, NewWorkHost, Principal, WorkHostRecord,
 };
-use momo_db::{with_tenant_tx, DbError};
+use momo_db::{with_tenant_tx, DbError, PgConnection};
+use momo_outbox::{emit_outbox, OutboxKind};
 use momo_t3::work_control::{
     REFUSAL_APP_HOST_MEMBER_SCOPE_REQUIRED, REFUSAL_WORKSPACE_HOST_ADMIN_REQUIRED,
 };
+use momo_wire::payload::BroadcastPayload;
 use momo_wire::{
     record_provenance, EntityRef, ProvenanceError, Signer, ENTITY_WORK_HOST_HEARTBEAT,
 };
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::dto::{
@@ -223,6 +239,75 @@ pub(crate) fn work_host_dto(record: WorkHostRecord) -> Result<WorkHostDto, ApiEr
     })
 }
 
+/// `data.type` of the owner notice for a new host.
+pub const WORK_HOST_REGISTERED: &str = "work_host.registered";
+/// `data.type` of the owner notice for a revoked host.
+pub const WORK_HOST_REVOKED: &str = "work_host.revoked";
+
+/// The owner's user-limited channel for host notices (ADR-0188 D2). Uppercase
+/// member id, like `read_state_channel`, because the realtime token's `sub` is.
+pub fn work_host_notice_channel(owner_member_id: Uuid) -> String {
+    format!(
+        "user:work-host#{}",
+        owner_member_id.to_string().to_uppercase()
+    )
+}
+
+/// The `outbox.payload` of one owner notice. No public key, no capabilities.
+pub fn work_host_notice_payload(
+    record: &WorkHostRecord,
+    event: &str,
+    actor_member_id: Uuid,
+    timestamp_ms: i64,
+) -> Value {
+    let channel = work_host_notice_channel(record.owner_member_id);
+    let data = json!({
+        "type": event,
+        "v": 1,
+        "ts": timestamp_ms,
+        "payload": {
+            "workspace_id": record.workspace_id.to_string(),
+            "host_id": record.id.to_string(),
+            "display_name": record.display_name,
+            "host_type": record.host_type,
+            "scope": record.scope,
+            "actor_member_id": actor_member_id.to_string(),
+        },
+    });
+    let envelope = BroadcastPayload {
+        idempotency_key: Some(format!("{channel}:{}:{event}", record.id)),
+        channel,
+        data,
+        version: None,
+    };
+    serde_json::to_value(envelope).expect("work host notice serializes")
+}
+
+/// One broadcast row on the owner's channel, on the caller's transaction.
+async fn emit_work_host_notice(
+    conn: &mut PgConnection,
+    record: &WorkHostRecord,
+    event: &str,
+    actor_member_id: Uuid,
+) -> Result<(), DbError> {
+    let payload = work_host_notice_payload(
+        record,
+        event,
+        actor_member_id,
+        chrono::Utc::now().timestamp_millis(),
+    );
+    emit_outbox(
+        &mut *conn,
+        record.workspace_id,
+        OutboxKind::Broadcast,
+        "publish",
+        &payload,
+        Some(record.owner_member_id),
+    )
+    .await?;
+    Ok(())
+}
+
 /// `POST /v1/workspaces/{ws}/work-hosts` → 201 (Swift `register`, :120-188),
 /// narrowed by ADR-0188 R0.1: a workspace-scoped host needs a workspace
 /// owner/admin, and an `app` host is member-scoped (module docs).
@@ -266,7 +351,11 @@ pub async fn register(
                 )));
             }
             let host_id = insert_work_host(conn, workspace_id, &new).await?;
-            Ok::<_, DbError>(Ok(load_work_host(conn, host_id).await?))
+            let record = load_work_host(conn, host_id).await?;
+            if let Some(record) = &record {
+                emit_work_host_notice(conn, record, WORK_HOST_REGISTERED, member_id).await?;
+            }
+            Ok::<_, DbError>(Ok(record))
         })
     })
     .await
@@ -404,8 +493,16 @@ pub async fn revoke(
                     "work host revoke requires owner or workspace admin",
                 )));
             }
+            let was_live = load_work_host(conn, host_id)
+                .await?
+                .is_some_and(|record| record.revoked_at_ms.is_none());
             mark_work_host_revoked(conn, host_id).await?;
-            Ok::<_, DbError>(Ok(load_work_host(conn, host_id).await?))
+            let record = load_work_host(conn, host_id).await?;
+            // Idempotent revoke: only the one that revoked announces it.
+            if let (true, Some(record)) = (was_live, &record) {
+                emit_work_host_notice(conn, record, WORK_HOST_REVOKED, member_id).await?;
+            }
+            Ok::<_, DbError>(Ok(record))
         })
     })
     .await

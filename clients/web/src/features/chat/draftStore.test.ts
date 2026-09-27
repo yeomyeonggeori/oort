@@ -236,3 +236,22 @@ describe("목록", () => {
     expect(listDrafts(NOW + DRAFT_TTL_MS + 1)).toEqual([]);
   });
 });
+
+describe("키 모양이 든 글은 초안이 되지 않는다 (#2942 GC-1, brief §3.4)", () => {
+  // 가짜 키는 조각을 이어 만든다 — 파일에 키 모양 리터럴을 두지 않는다.
+  const fakeKey = ["s", "k-", "proj-", "Ab3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dF"].join("");
+
+  it("저장소에 아무것도 남지 않고, 앞서 있던 초안도 지워진다", () => {
+    writeDraft(WS, CH_A, "쓰던 글", NOW);
+    expect(readDraft(WS, CH_A, NOW)).toBe("쓰던 글");
+    writeDraft(WS, CH_A, `쓰던 글 ${fakeKey}`, NOW);
+    expect(store.get(draftKey(WS, CH_A))).toBeUndefined();
+    expect(readDraft(WS, CH_A, NOW)).toBe("");
+    for (const value of store.values()) expect(value).not.toContain(fakeKey);
+  });
+
+  it("키가 아닌 `sk-` 낱말은 평소처럼 남는다", () => {
+    writeDraft(WS, CH_A, "sk-learn 말고 scikit-learn", NOW);
+    expect(readDraft(WS, CH_A, NOW)).toBe("sk-learn 말고 scikit-learn");
+  });
+});

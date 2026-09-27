@@ -47,6 +47,7 @@ import {
   readFirstAgentMarker,
 } from "./firstAgentStore";
 import { FirstAgentStage } from "./FirstAgentStage";
+import { openAiConnectReentry } from "./aiConnectReentry";
 
 const poseSlot = vi.hoisted(() => ({ current: null as string | null }));
 const envSlot = vi.hoisted(() => ({ tauri: false, flag: false }));
@@ -1144,6 +1145,21 @@ describe("재진입 (#2870, RCA 1-b): 설정·에이전트 화면에서 다시 �
     expect(window.location.hash).toBe("#/settings?section=ai");
     expect(continued).toBe(1);
     expect(readFirstAgentMarker(WS)).toBeNull();
+  });
+
+  it("설정에서 연 재진입의 [뒤로]는 쌓인 항목을 걷는다: 히스토리에 재진입이 남지 않는다 (#2938 ③)", async () => {
+    window.location.hash = "#/settings";
+    openAiConnectReentry("settings");
+    expect(window.location.hash).toBe("#/ai-connect?from=settings");
+    const depth = window.history.length;
+    const host = mountStage({ mode: "reentry", reentryFrom: "settings" });
+    await waitFor(() => rowIds(host).length > 0, "rows");
+    click(q(host, "ai-connect-reentry-back"));
+    await waitFor(() => window.location.hash === "#/settings?section=ai", "back to settings");
+    // 새 항목을 쌓았다면(옛 동작) 길이가 하나 늘고, 설정의 「앱으로 돌아가기」가
+    // 그 아래의 재진입으로 떨어진다.
+    expect(window.history.length).toBe(depth);
+    expect(continued).toBe(1);
   });
 
   it("[뒤로]는 에이전트 화면으로 돌아간다", async () => {

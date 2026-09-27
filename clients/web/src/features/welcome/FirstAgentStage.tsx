@@ -118,6 +118,7 @@ import { useLocalHarnessWatch } from "./useLocalHarnessWatch";
 import {
   AI_CONNECT_SETTINGS_HASH,
   aiConnectReturnHash,
+  leaveAiConnectReentry,
   type AiConnectReentryFrom,
 } from "./aiConnectReentry";
 import {
@@ -502,7 +503,7 @@ export function FirstAgentStage({
   /** 재진입을 닫고 `hash`로 간다. first-run 표지는 건드리지 않는다. */
   const closeReentry = (hash: string) => {
     setWizardOpen(false);
-    window.location.hash = hash;
+    leaveAiConnectReentry(hash);
     onContinue();
   };
 

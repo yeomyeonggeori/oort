@@ -347,6 +347,7 @@ describe("진입점", () => {
       canCreateChannel: false,
       isSurfaceProvided: () => false,
       agents: [],
+      canOpenLocalCard: () => false,
     }).find((entry) => entry.testId === "switcher-settings-agents");
     expect(command?.title).toBe(SETTINGS_SECTIONS.find((item) => item.id === "agents")?.label);
   });

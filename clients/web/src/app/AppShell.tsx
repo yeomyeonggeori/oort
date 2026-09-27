@@ -34,6 +34,7 @@ import { AgentProfileProvider } from "@/features/routing/AgentProfileDialog";
 import { MemberProfileProvider } from "@/features/directory/MemberProfileDialog";
 import { InboxHotkeys } from "@/features/inbox/InboxHotkeys";
 import { DesktopNotifications } from "@/features/notifications/DesktopNotifications";
+import { WorkHostNotices } from "@/features/notifications/WorkHostNotices";
 import { ReminderDueWatcher } from "@/features/reminders/ReminderDueWatcher";
 import { AgentWorkingRail } from "@/features/agents/AgentWorkingRail";
 import { AgentWorkPanel } from "@/features/agents/AgentWorkPanel";
@@ -439,6 +440,7 @@ export function AppShell({
            * request reaches the OS while the window is in the background
            * (MOMO-607). */}
           {!stress && <DesktopNotifications />}
+          {!stress && <WorkHostNotices />}
           {!stress && <ReminderDueWatcher />}
           {/* Renders nothing; watches every agent's progress channel so the
            * sidebar badge and the composer line describe the same turn
