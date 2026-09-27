@@ -784,7 +784,7 @@ mod tests {
     /// reason to reach for when a person says 「연결해 줘」.
     #[test]
     fn the_directive_rides_only_with_the_tool_it_names() {
-        use crate::tools::{enabled_tool_definitions, CARD_SUGGEST, WORK_SESSION_END};
+        use crate::tools::{enabled_tool_definitions, CARD_SUGGEST, CATALOG};
         let on = enabled_tool_definitions(&[CARD_SUGGEST.to_string()]);
         assert_eq!(card_suggest_directive(&on), Some(CARD_SUGGEST_DIRECTIVE));
         // The executor's spelling rule, not a byte compare.
@@ -793,7 +793,15 @@ mod tests {
             card_suggest_directive(&shouted),
             Some(CARD_SUGGEST_DIRECTIVE)
         );
-        let other = enabled_tool_definitions(&[WORK_SESSION_END.to_string()]);
+        // Every other catalog tool, switched on together, still carries no rule.
+        let others: Vec<String> = CATALOG
+            .iter()
+            .filter(|name| **name != CARD_SUGGEST)
+            .map(|name| name.to_string())
+            .collect();
+        assert!(!others.is_empty());
+        let other = enabled_tool_definitions(&others);
+        assert_eq!(other.len(), others.len());
         assert_eq!(card_suggest_directive(&other), None);
         assert_eq!(card_suggest_directive(&[]), None);
     }
