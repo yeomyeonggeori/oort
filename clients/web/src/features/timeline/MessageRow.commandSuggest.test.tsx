@@ -27,7 +27,7 @@ import { OpenMemberProfileContext } from "@/features/directory/memberProfileCont
 import { detectLocalHarnesses } from "@/lib/tauri";
 import { MemoryRouter } from "react-router-dom";
 import { AiConnectCard, AiConnectSuggestion } from "@/features/chat/AiConnectCard";
-import { CommandSuggestSlot } from "./commandSuggestSlot";
+import { CommandSuggestSlot, ThreadSurfaceRoot } from "./commandSuggestSlot";
 import { readDraft, writeDraft } from "@/features/chat/draftStore";
 import { MessageRow, type MessageRowActions } from "./MessageRow";
 import { ThreadComposer } from "./ThreadComposer";
@@ -503,5 +503,36 @@ describe("스레드 답글로 온 제안 — 부탁은 그 스레드 입력창�
     act(() => ask.click());
     expect(readDraft(WS, CH)).toBe("");
     expect(q(host, "ai-connect-card-ask-note")?.textContent).toBe("스레드를 열고 운영자를 멘션해 주세요.");
+  });
+  it("스레드 패널의 뿌리 행(자기 rootId 없음)도 그 스레드 입력창을 채운다", async () => {
+    localStorage.clear();
+    vi.mocked(fetchProviderLink).mockRejectedValue(new ApiError(403, "forbidden"));
+    const rootMessage = suggestion(TEAM);
+    const host = mount(
+      createElement(
+        CommandSuggestSlot.Provider,
+        { value: AiConnectSuggestion },
+        createElement(
+          ThreadSurfaceRoot.Provider,
+          { value: rootMessage.id },
+          createElement("div", null,
+            rowElement(rootMessage, REQUESTER),
+            createElement(ThreadComposer, {
+              workspaceId: WS,
+              channelId: CH,
+              rootId: rootMessage.id,
+              directory,
+              channels: [],
+              onSent: () => undefined,
+            })
+          )
+        )
+      ),
+      REQUESTER
+    );
+    const ask = await until(host, "ai-connect-card-ask-operator");
+    act(() => ask.click());
+    expect((host.querySelector("textarea") as HTMLTextAreaElement).value).toBe("@sky ");
+    expect(readDraft(WS, CH)).toBe("");
   });
 });

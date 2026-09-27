@@ -21,4 +21,11 @@ export interface CommandSuggestSlotProps {
   rootId: string | undefined;
 }
 
+/**
+ * 행이 지금 그려진 스레드 패널의 뿌리. 스레드 패널 안의 행은 뿌리 행도(자기 `rootId`는
+ * 비어 있다) 그 스레드 입력창을 쓴다: 입력창은 메시지의 소속이 아니라 **행이 서 있는
+ * 표면**이 정한다(design-review #2948 B, 좁은 폭에서 채널 입력창은 서랍 뒤 `inert`다).
+ */
+export const ThreadSurfaceRoot = createContext<string | null>(null);
+
 export const CommandSuggestSlot = createContext<ComponentType<CommandSuggestSlotProps> | null>(null);

@@ -120,12 +120,31 @@ let threadMode = false;
 const THREAD_ROOT = "0199dddd-0000-7000-8000-000000000002";
 function channelMessages() {
   if (!threadMode) return messages;
+  if (threadMode === "root") {
+    return [
+      messages[0],
+      messages[1],
+      { ...messages[2], thread: { reply_count: 1, last_reply_seq: 13, last_reply_at: messages[2].createdAtMs + 60_000 } },
+    ];
+  }
   return [
     messages[0],
     { ...messages[1], thread: { reply_count: 1, last_reply_seq: 12, last_reply_at: messages[2].createdAtMs } },
   ];
 }
 function threadReplies() {
+  if (threadMode === "root") {
+    return [
+      row({
+        id: "0199dddd-0000-7000-8000-000000000004",
+        seq: 13,
+        authorMemberId: memberId,
+        rootId: messages[2].id,
+        body: "팀 키는 제가 못 넣네요. 운영자에게 부탁해 볼게요.",
+        createdAtMs: messages[2].createdAtMs + 60_000,
+      }),
+    ];
+  }
   return [{ ...messages[2], rootId: THREAD_ROOT }];
 }
 
@@ -265,7 +284,7 @@ const outDir = resolve(webRoot, "captures/2948");
 
 async function scene(browser, { width, scheme, name, query, team, as, act, args, thread }) {
   viewer = as;
-  threadMode = Boolean(thread);
+  threadMode = thread ?? false;
   suggestArgs = args ?? { harness: "claude", scope: "mine" };
   const height = width === 390 ? 844 : 800;
   const context = await browser.newContext({
@@ -286,10 +305,10 @@ async function scene(browser, { width, scheme, name, query, team, as, act, args,
   );
   await page.getByTestId("composer-input").waitFor({ timeout: 15_000 });
   if (thread) {
-    await page.getByTestId("thread-anchor").first().click();
+    await page.getByTestId("thread-anchor").last().click();
     await page.getByTestId("thread-panel").waitFor();
   }
-  const slot = page.getByTestId("ai-suggest");
+  const slot = thread ? page.getByTestId("thread-panel").getByTestId("ai-suggest") : page.getByTestId("ai-suggest");
   await slot.waitFor({ timeout: 10_000 }).catch(async (error) => {
     await page.screenshot({ path: resolve(outDir, `DEBUG-${name}.png`) });
     throw error;
@@ -347,7 +366,7 @@ function scenes() {
     {
       // 스레드 답글로 온 제안: 부탁 멘션은 채널이 아니라 그 스레드 입력창에 찬다.
       name: "thread-denied",
-      thread: true,
+      thread: "reply",
       as: SUNG,
       query: "aiEntry=rows&aiProbe=claude-ready",
       args: { harness: "team_key", scope: "team" },
@@ -357,6 +376,24 @@ function scenes() {
         await page.getByTestId("thread-panel").getByTestId("ai-connect-card-ask-operator").click();
         const box = page.getByTestId("thread-composer").locator("textarea");
         const value = await box.inputValue();
+        if (value !== "@haneul ") throw new Error(`스레드 입력창에 멘션이 차지 않았다: ${JSON.stringify(value)}`);
+        const channel = await page.getByTestId("composer-input").inputValue();
+        if (channel !== "") throw new Error(`채널 입력창이 채워졌다: ${JSON.stringify(channel)}`);
+      },
+    },
+    {
+      // 채널에 올라온 제안에 누군가 스레드를 열었다: 스레드 패널의 뿌리 행(자기 rootId 없음)에서
+      // 누른 부탁도 그 스레드 입력창에 찬다(design-review #2948 B, 2차).
+      name: "thread-root",
+      thread: "root",
+      as: SUNG,
+      query: "aiEntry=rows&aiProbe=claude-ready",
+      args: { harness: "team_key", scope: "team" },
+      team: () => teamRoute({ denied: true }),
+      expect: { viewer: "target" },
+      act: async (page) => {
+        await page.getByTestId("thread-panel").getByTestId("ai-connect-card-ask-operator").click();
+        const value = await page.getByTestId("thread-composer").locator("textarea").inputValue();
         if (value !== "@haneul ") throw new Error(`스레드 입력창에 멘션이 차지 않았다: ${JSON.stringify(value)}`);
         const channel = await page.getByTestId("composer-input").inputValue();
         if (channel !== "") throw new Error(`채널 입력창이 채워졌다: ${JSON.stringify(channel)}`);

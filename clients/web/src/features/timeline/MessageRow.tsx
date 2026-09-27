@@ -118,7 +118,7 @@ import { useMarkUnread } from "./useMarkUnread";
 import { useTimelineLive } from "./timelineLiveContext";
 import { useConversationEntrance } from "./conversationEntrance";
 import { commandSuggestCard } from "@momo/core/features/timeline/commandSuggest";
-import { CommandSuggestSlot } from "./commandSuggestSlot";
+import { CommandSuggestSlot, ThreadSurfaceRoot } from "./commandSuggestSlot";
 
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same
@@ -482,6 +482,7 @@ export function MessageRow({
   // 에이전트가 제안한 연결 카드(#2948 GC-7, ADR-0186 G4). 본문은 그대로 두고 그
   // 아래에 선다. 모르는 모양은 null(본문만)이다.
   const SuggestionCard = useContext(CommandSuggestSlot);
+  const threadSurfaceRoot = useContext(ThreadSurfaceRoot);
   const suggestion = useMemo(
     () => (SuggestionCard ? commandSuggestCard(message, directory) : null),
     [SuggestionCard, message, directory]
@@ -983,7 +984,7 @@ export function MessageRow({
             viewerMemberId={actions?.myMemberId}
             directory={directory}
             channelId={message.channelId}
-            rootId={message.rootId}
+            rootId={message.rootId ?? threadSurfaceRoot ?? undefined}
           />
         )}
         {/* Provider cascade (ADR-0135 D1). Outside the card/artifact branch on
