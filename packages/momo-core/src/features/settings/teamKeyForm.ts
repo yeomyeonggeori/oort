@@ -270,8 +270,8 @@ export function teamProbeDetailParts(detail: TeamProbeDetail | null): string[] {
 
 /**
  * 문장을 글자 조각과 **그대로 쳐야 하는 이름**(서버 환경 변수)으로 나눈다. 표면은
- * 이름 조각을 고정폭·줄바꿈 없이 그린다: `…LOO|PBACK`처럼 이름 가운데서 줄이
- * 갈리면 두 낱말로 읽힌다(design-review #2975 M1).
+ * 이름 조각을 고정폭으로 그리고 밑줄 뒤에서만 줄을 가른다: `…LOO|PBACK`처럼 낱말
+ * 가운데서 갈리면 두 낱말로 읽힌다(design-review #2975 M1).
  */
 export function literalSegments(text: string): { text: string; literal: boolean }[] {
   return text

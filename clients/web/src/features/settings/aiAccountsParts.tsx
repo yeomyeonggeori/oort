@@ -370,14 +370,17 @@ export function CheckSentence({ text }: { text: string }) {
   );
 }
 
-/** provider가 밝힌 숫자 줄. 칸 안에서는 줄을 바꾸지 않는다(「198 남음 ·」이 매달리지 않게). */
+/**
+ * provider가 밝힌 숫자 줄. 칸 안에서는 줄을 바꾸지 않고, 구분점은 다음 칸에 붙어
+ * 줄 머리로 간다(줄 끝에 「198 남음 ·」이 매달리지 않게, design-review N2).
+ */
 export function CheckNumbers({ parts }: { parts: readonly string[] }) {
   return (
     <>
       {parts.map((part, index) => (
-        <span key={part}>
-          <span className="whitespace-nowrap">{part}</span>
-          {index < parts.length - 1 ? " · " : ""}
+        <span key={index}>
+          {index > 0 && " "}
+          <span className="whitespace-nowrap">{index > 0 ? `· ${part}` : part}</span>
         </span>
       ))}
     </>
