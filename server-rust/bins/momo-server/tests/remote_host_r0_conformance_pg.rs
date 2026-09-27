@@ -60,7 +60,10 @@ use std::sync::{Arc, Mutex};
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
-use momo_agent_worker::provider::{MockChatProvider, ProviderToolCall};
+use momo_agent_worker::provider::{
+    ChatCompletion, ChatProvider, ChatRequest, MockChatProvider, ProviderEndpoint, ProviderError,
+    ProviderToolCall,
+};
 use momo_agent_worker::tool_exec::{self, ToolContext};
 use momo_agent_worker::{AgentWorker, WorkerConfig};
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
@@ -2835,6 +2838,344 @@ async fn gc6_card_suggest_runs_only_when_the_profile_enabled_it() {
     .expect("enable card_suggest");
     mention_and_drain("call_card_on").await;
     assert_eq!(cards().await, 1, "the enabled profile posts the card");
+}
+
+/// Status and whole JSON body (GC-8's reads want the body, not the error code).
+async fn json_of(response: reqwest::Response) -> (u16, Value) {
+    let status = response.status().as_u16();
+    (status, response.json().await.unwrap_or(Value::Null))
+}
+
+/// GC-8 "mock hermes" (#2949): a provider that behaves like a model which read
+/// its instructions, and no better.
+///
+/// It reaches for `card_suggest` only when all three hold: the request offers
+/// the tool, a `system` turn carries the connection-request rule
+/// (`CARD_SUGGEST_DIRECTIVE`), and the person's last turn asks to connect.
+/// Otherwise it does what a model without the rule does — explains settings
+/// in text. So the E2E below cannot pass on a positional script: take the
+/// rule or the default profile away and the card is never posted.
+struct RuleFollowingHermes {
+    /// Per turn: (offered momo tools, whether the rule was in the system turns).
+    seen: Mutex<Vec<(Vec<String>, bool)>>,
+    /// Trigger texts already answered with a card, so the turn after the tool
+    /// result answers in text instead of suggesting again.
+    carded: Mutex<Vec<String>>,
+}
+
+impl RuleFollowingHermes {
+    fn new() -> RuleFollowingHermes {
+        RuleFollowingHermes {
+            seen: Mutex::new(Vec::new()),
+            carded: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn seen(&self) -> Vec<(Vec<String>, bool)> {
+        self.seen.lock().expect("hermes lock").clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl ChatProvider for RuleFollowingHermes {
+    async fn complete(
+        &self,
+        _endpoint: &ProviderEndpoint,
+        request: &ChatRequest,
+    ) -> Result<ChatCompletion, ProviderError> {
+        let offered: Vec<String> = request
+            .momo_tools
+            .iter()
+            .map(|definition| definition.name.to_string())
+            .collect();
+        let told = request.messages.iter().any(|message| {
+            message.role == "system"
+                && message.content == momo_agent::card_suggest::CARD_SUGGEST_DIRECTIVE
+        });
+        self.seen
+            .lock()
+            .expect("hermes lock")
+            .push((offered.clone(), told));
+        let last_user = request
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.role == "user")
+            .map(|message| message.content.clone())
+            .unwrap_or_default();
+        let asks_to_connect = last_user.contains("연결");
+        let mut carded = self.carded.lock().expect("hermes lock");
+        let may_suggest = offered
+            .iter()
+            .any(|name| name == momo_agent::tools::CARD_SUGGEST)
+            && told
+            && asks_to_connect
+            && !carded.contains(&last_user);
+        if may_suggest {
+            carded.push(last_user.clone());
+            let harness = if last_user.contains("클로드") {
+                json!({"harness": "claude"})
+            } else {
+                json!({})
+            };
+            return Ok(ChatCompletion {
+                text: String::new(),
+                usage: None,
+                tool_calls: vec![ProviderToolCall {
+                    id: format!("call_gc8_{}", carded.len()),
+                    // The wire name, as a real provider reports it.
+                    name: momo_agent::tools::wire_tool_name(momo_agent::tools::CARD_SUGGEST),
+                    arguments: json!({
+                        "commandId": "ai.connect",
+                        "args": harness,
+                        "body": "여기서 바로 연결할 수 있어요."
+                    })
+                    .to_string(),
+                }],
+            });
+        }
+        let text = if asks_to_connect && !carded.contains(&last_user) {
+            // The failure mode the rule exists to replace.
+            "설정 › AI 연결로 가서 구독을 연결해 주세요.".to_string()
+        } else {
+            "카드를 띄웠어요.".to_string()
+        };
+        Ok(ChatCompletion {
+            text,
+            usage: None,
+            tool_calls: Vec::new(),
+        })
+    }
+}
+
+/// GC-8 (#2949) — the whole server half of 「내 클로드 구독 연결해 줘」, with
+/// nothing staged by hand between the person's message and the card:
+///
+/// 1. an operator creates an agent through `POST …/agents` **without** saying
+///    anything about tools, and the hub reads `card_suggest` back as on;
+/// 2. a plain member asks it to connect Claude; the worker offers the tool
+///    **and** the rule, and the rule-following provider answers with the card;
+/// 3. the posted props are exactly the shared golden vector
+///    (`docs/api/command-suggest-ai-connect.golden.json`, the one the GC-7
+///    client tests render) with `for_member_id` = the member who asked, and
+///    every viewer's history carries the same props (G4: the split is the
+///    client's, never the server's);
+/// 4. the operator switches it off with `enabledTools: []`; the same request
+///    then gets neither the tool nor the rule, and no card.
+///
+/// | sabotage | red |
+/// |---|---|
+/// | worker drops the rule (`card_suggest: None`) | no card, and `told` false |
+/// | create writes no default (`default_enabled_tools` → empty) | hub reads `[]`, no card |
+/// | PUT re-applies the default when `enabledTools` is `[]` | a card after 「끔」 |
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn gc8_a_connection_request_becomes_the_card_for_the_person_who_asked() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let worker_pool = role_pool("momo_worker", &momo_worker_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let (doyun, doyun_email) = seed_human(&su, tenant.workspace, "member", "이도윤").await;
+    join_channel(&su, tenant.workspace, tenant.channel, doyun).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let owner_token = login(&http, &base, tenant.workspace, &tenant.owner_email).await;
+    let doyun_token = login(&http, &base, tenant.workspace, &doyun_email).await;
+    let ws = tenant.workspace;
+
+    // ---- 1. an agent created with no word about tools --------------------
+    let handle = format!("kometto{}", &Uuid::new_v4().simple().to_string()[..6]);
+    let created = http
+        .post(format!("{base}/v1/workspaces/{ws}/agents"))
+        .bearer_auth(&owner_token)
+        .json(&json!({
+            "displayName": "코메토",
+            "handle": handle,
+            "model": AGENT_MODEL,
+            "baseUrl": "https://gateway.invalid/v1"
+        }))
+        .send()
+        .await
+        .expect("create agent");
+    let (status, created) = json_of(created).await;
+    assert_eq!(status, 201, "{created}");
+    let agent =
+        Uuid::parse_str(created["agent"]["id"].as_str().expect("agent id")).expect("agent uuid");
+    join_channel(&su, ws, tenant.channel, agent).await;
+
+    let profile_of = || {
+        let http = http.clone();
+        let base = base.clone();
+        let owner_token = owner_token.clone();
+        async move {
+            let read = http
+                .get(format!("{base}/v1/workspaces/{ws}/agents/{agent}/profile"))
+                .bearer_auth(&owner_token)
+                .send()
+                .await
+                .expect("read profile");
+            let (status, body) = json_of(read).await;
+            assert_eq!(status, 200, "{body}");
+            body["profile"]["enabledTools"].clone()
+        }
+    };
+    assert_eq!(
+        profile_of().await,
+        json!([momo_agent::tools::CARD_SUGGEST]),
+        "the hub shows what will run: a new agent starts with card_suggest on"
+    );
+
+    // ---- 2. a plain member asks; the worker runs one turn ------------------
+    let ask_and_drain = |text: String| {
+        let http = http.clone();
+        let base = base.clone();
+        let doyun_token = doyun_token.clone();
+        let worker_pool = worker_pool.clone();
+        async move {
+            let sent = http
+                .post(format!(
+                    "{base}/v1/workspaces/{ws}/channels/{}/messages",
+                    tenant.channel
+                ))
+                .bearer_auth(&doyun_token)
+                .json(&json!({"clientMsgId": Uuid::new_v4(), "body": text}))
+                .send()
+                .await
+                .expect("send request");
+            assert_eq!(sent.status(), 201);
+            let hermes = Arc::new(RuleFollowingHermes::new());
+            let worker = AgentWorker::new(
+                worker_pool,
+                hermes.clone(),
+                WorkerConfig::for_target(database_url()).with_env_bearer("sk-conformance-team-key"),
+            );
+            worker.drain_once().await.expect("drain");
+            hermes.seen()
+        }
+    };
+    let cards = || async {
+        sqlx::query(
+            "SELECT author_member_id, channel_id, props FROM message \
+              WHERE workspace_id = $1 AND props ? 'momo.command_suggest' ORDER BY seq",
+        )
+        .bind(ws)
+        .fetch_all(&su)
+        .await
+        .expect("read cards")
+        .into_iter()
+        .map(|row| {
+            (
+                row.get::<Uuid, _>("author_member_id"),
+                row.get::<Uuid, _>("channel_id"),
+                row.get::<Value, _>("props"),
+            )
+        })
+        .collect::<Vec<_>>()
+    };
+
+    let seen = ask_and_drain(format!("@{handle} 내 클로드 구독 연결해 줘")).await;
+    assert!(!seen.is_empty(), "the worker called the provider");
+    let (offered, told) = &seen[0];
+    assert!(
+        offered
+            .iter()
+            .any(|name| name == momo_agent::tools::CARD_SUGGEST),
+        "the default profile offers the tool: {offered:?}"
+    );
+    assert!(*told, "the rule rides with the tool");
+
+    let posted = cards().await;
+    assert_eq!(posted.len(), 1, "one card for one request: {posted:?}");
+    let (author, channel, props) = &posted[0];
+    assert_eq!(*author, agent, "the agent speaks the card");
+    assert_eq!(*channel, tenant.channel, "in the room it was asked in");
+
+    // ---- 3. the props are the shared golden vector -------------------------
+    let golden: Value = serde_json::from_str(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../docs/api/command-suggest-ai-connect.golden.json"
+        ))
+        .expect("read golden"),
+    )
+    .expect("golden JSON");
+    let mut expected = golden["cases"]
+        .as_array()
+        .expect("cases")
+        .iter()
+        .find(|case| case["name"] == "claude")
+        .expect("claude case")["props"]
+        .clone();
+    expected["momo.command_suggest"]["for_member_id"] = json!(doyun.to_string());
+    assert_eq!(
+        *props, expected,
+        "server props = golden with the real requester"
+    );
+    let inner = props["momo.command_suggest"].as_object().expect("envelope");
+    let mut keys: Vec<&str> = inner.keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["args", "command_id", "for_member_id", "label", "v"]);
+    let approvals: i64 = sqlx::query_scalar("SELECT count(*) FROM approval WHERE workspace_id=$1")
+        .bind(ws)
+        .fetch_one(&su)
+        .await
+        .expect("count approvals");
+    assert_eq!(approvals, 0, "a suggestion is not an approval card");
+
+    // Every viewer reads the same props; who sees a card and who sees a line
+    // is decided on their screen (G4).
+    for token in [&doyun_token, &owner_token] {
+        let history = http
+            .get(format!(
+                "{base}/v1/workspaces/{ws}/channels/{}/messages",
+                tenant.channel
+            ))
+            .bearer_auth(token)
+            .send()
+            .await
+            .expect("read history");
+        let (status, page) = json_of(history).await;
+        assert_eq!(status, 200, "{page}");
+        let wire: Vec<&Value> = page["messages"]
+            .as_array()
+            .expect("messages")
+            .iter()
+            .filter(|message| message["props"].get("momo.command_suggest").is_some())
+            .collect();
+        assert_eq!(wire.len(), 1, "{page}");
+        assert_eq!(wire[0]["props"], expected);
+        assert_eq!(
+            wire[0]["authorMemberId"].as_str().map(str::to_lowercase),
+            Some(agent.to_string())
+        );
+    }
+
+    // ---- 4. the operator switches it off ------------------------------------
+    let off = http
+        .put(format!("{base}/v1/workspaces/{ws}/agents/{agent}/profile"))
+        .bearer_auth(&owner_token)
+        .json(&json!({"instructions": "", "enabledTools": []}))
+        .send()
+        .await
+        .expect("switch off");
+    let (status, body) = json_of(off).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        profile_of().await,
+        json!([]),
+        "the operator's 「끔」 sticks"
+    );
+
+    let seen = ask_and_drain(format!("@{handle} 코덱스 구독도 연결해 줘")).await;
+    assert!(!seen.is_empty(), "the agent still answers");
+    assert!(
+        seen.iter()
+            .all(|(offered, told)| offered.is_empty() && !told),
+        "no tool, no rule: {seen:?}"
+    );
+    assert_eq!(cards().await.len(), 1, "switched off posts no card");
 }
 
 /// Every `broadcast` outbox row on `channel`, oldest first: (`data.type`, data).

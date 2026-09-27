@@ -57,6 +57,30 @@ pub const TRIGGERS_MAX_BYTES: usize = 8_192;
 pub const ENABLED_TOOLS_MAX: usize = 128;
 pub const ENABLED_TOOL_NAME_MAX_CHARS: usize = 200;
 
+/// The tools a **new** agent's profile starts with when its creator did not
+/// say (GC-8, #2949, planner 2026-09-27).
+///
+/// Only `card_suggest`: it changes no server state (ADR-0186 D3 risk `none`)
+/// and it is the one catalog tool whose name exemption from approval makes the
+/// profile its only switch (`tools::exempt_tool_not_enabled`). An agent a
+/// person asks 「내 클로드 구독 연결해 줘」 should answer with the card from its
+/// first turn, not after an operator discovers a toggle.
+///
+/// This is a **create-time** default, written into the row, never a read-time
+/// one: the hub reads `enabledTools` back from the row, so what it shows is
+/// what runs, and an operator who saves a list without it (`[]` included)
+/// turns it off for good. A profile PUT that omits `enabledTools` still means
+/// `[]` — the default is not re-applied on edit.
+pub const DEFAULT_ENABLED_TOOLS: &[&str] = &[crate::tools::CARD_SUGGEST];
+
+/// [`DEFAULT_ENABLED_TOOLS`] as the owned list the validator takes.
+pub fn default_enabled_tools() -> Vec<String> {
+    DEFAULT_ENABLED_TOOLS
+        .iter()
+        .map(|tool| tool.to_string())
+        .collect()
+}
+
 /// Every way a create/profile body can be malformed, with Swift's wording so a
 /// client that already renders the Swift server's errors needs no second
 /// vocabulary.

@@ -1074,6 +1074,33 @@ Update/Reset 뒤 재합류: 위저드 **연결 값 다시 발급**
 벤더 채팅 앱을 CDP·스크립트·셀렉터로 제어하지 않는다. 사람은 말하고,
 에이전트는 VM 셸에서 이 파일을 집행한다.
 
+#### 3.3.16c 사람이 AI 연결을 부탁하면 — 카드를 제안한다
+
+ADR-0186 증보 G1(GC-6 #2947, GC-8 #2949). 사람이 AI 연결·AI 구독 로그인(Claude,
+Codex)·팀 API 키 연결을 부탁하면 **런타임이 직접 하지 않는다.** 할 수도 없다. 구독
+로그인은 그 사람 기기에서, 팀 키는 운영자 세션에서 한다. 런타임은 연결 카드를
+그 사람 앞에 놓는다.
+
+```text
+oort_card_suggest {handle, clientMsgId, commandId: "ai.connect", args, body}
+  -> 제안 메시지(props momo.command_suggest, 서버가 만든 다섯 키)
+```
+
+- `handle`은 그 요청을 실어 온 작업의 `oort_jobs_claim` 리스 handle이다. 서버가
+  그 작업의 채널(`rootId`면 스레드)에 쓰고, 트리거 메시지를 쓴 사람에게 카드를
+  보낸다. 채널·대상·제목을 정하는 인자는 없다.
+- `args`는 선택이고 닫혀 있다. `harness` ∈ `claude | codex | team_key`,
+  `scope` ∈ `mine | team`. 사람이 이름을 댔을 때만 `harness`를 넣는다. 다른 키
+  (`apiKey`, `token` 등)는 거절된다.
+- `body`는 카드 위에 보이는 한 문장 답이다. 설정 단계를 설명하지 않는다. 카드는
+  그 사람의 앱이 자기 설정에서 그린다.
+- **채팅에서 키·토큰·비밀번호·로그인 코드를 묻지 않는다.**
+- 스코프: 도구 자체는 `messages:write`만 필요하다(G5). handle에는
+  `agent:jobs:read`가 필요하다. 새 스코프·승인 카드가 없고 run도 멈추지 않는다.
+  평소대로 이어서 작업을 끝낸다.
+- 인박스만 읽는 루틴은 handle이 없다. 그때는 `oort_message_post`로 답하고
+  입력창에 `/연결`을 치라고 알려 준다. 같은 카드가 그 사람 화면에 열린다.
+
 #### 3.3.17 도어벨 (실시간 wake)
 
 합류(§3.3.16) 뒤의 가속기다. 정본 전달은 여전히 durable inbox다
@@ -1278,6 +1305,13 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
 3) 처리할 일이 있으면 처리하고, 응답은 oort_message_post 로 같은 채널에
    쓴다. clientMsgId 는 보낼 때마다 새 UUID. 같은 clientMsgId 재시도는
    한 메시지로 남는다.
+   사람이 AI 연결·AI 구독 로그인(Claude, Codex)·팀 API 키 연결을 부탁하면
+   직접 하려 하지 말고, 키·토큰·비밀번호·로그인 코드를 묻지 마라. 연결
+   카드를 제안한다. oort_jobs_claim 리스 handle이 있으면
+   oort_card_suggest {handle, clientMsgId, commandId:"ai.connect", body}
+   를 부른다(사람이 이름을 댔을 때만 args.harness 에 claude / codex /
+   team_key). handle이 없으면 oort_message_post 로 답하고 입력창에
+   /연결 을 치라고 알려 준다.
 4) 발화 규약: 새 정보를 더할 때만 쓴다. 사람이 물었으면 반드시 응답한다.
    그 외에는 침묵이 성공이다. 「확인했습니다」「알겠습니다」 단독
    (bare acknowledgement)은 금지.
