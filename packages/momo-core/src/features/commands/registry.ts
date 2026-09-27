@@ -53,11 +53,32 @@ export type CommandGroup = "navigate" | "create" | "settings" | "agent";
  * - `navigate` — 표면으로 데려가거나 폼을 연다. 아무 상태도 바꾸지 않는다.
  * - `client` — 이 기기의 값을 바꾼다(외양·밀도, ADR-0174 D3). 서버는 모른다.
  *
- * 이 티켓의 항목은 전부 `navigate`다. `client`는 정의만 서 있고 AX-5(#2511)가
- * 테마 명령으로 채운다 — 그때 비로소 팔레트 상태줄(ADR-0182 ②)에 **제품에서
- * 보이는** 소비자가 생긴다.
+ * 첫 `client` 명령은 `ai.connect`다(#2943, 채팅 연결 카드 GC-2). 서버를 바꾸지
+ * 않고 **이 기기·이 채널 화면에만** 붙는 로컬 카드를 연다 — 메시지가 아니므로
+ * 새로고침·채널 이동에 사라진다(brief §3.2). 카드를 붙일 자리가 없으면 설정 ›
+ * AI 연결로 간다. 테마 명령(AX-5 #2511)이 같은 갈래에 들어온다.
  */
 export type CommandKind = "navigate" | "client";
+
+/**
+ * 로컬 카드의 이름 (#2943 GC-2 계약, 카드 본체는 GC-3 #2944).
+ *
+ * 코어는 「이 카드를 열어 달라」만 말한다. 카드가 **어디에** 붙는지(지금 보고
+ * 있는 채널의 타임라인 꼬리)와 붙일 자리가 있는지는 웹이 안다.
+ */
+export type LocalCardId = "ai.connect";
+
+/** AI 연결 카드에서 펼쳐 둘 줄. `/연결 claude`·`/연결 codex`·`/연결 팀키`. */
+export type AiConnectLine = "claude" | "codex" | "team";
+
+/**
+ * 명령·카드에 실리는 인자. **의도만** 싣는다: 상태도 비밀값도 여기 없다(brief
+ * §0-3). 키는 카드의 입력 칸에서만 받고, 슬래시 인자로는 받지 않는다(GC-1이
+ * 키 모양을 보면 전송 자체를 막는다).
+ */
+export interface LocalCardArgs {
+  readonly line?: AiConnectLine;
+}
 
 /**
  * 아이콘의 **이름**. 코어는 React를 import할 수 없으므로(purity 게이트) 이름만
@@ -73,7 +94,8 @@ export type CommandIcon =
   | "work-console"
   | "workstreams"
   | "create-channel"
-  | "agent";
+  | "agent"
+  | "ai-connect";
 
 /** 명령이 알아야 하는 나 자신. 지금은 멤버 id 하나면 충분하다. */
 export interface CommandSession {
@@ -93,6 +115,13 @@ export interface CommandContext {
   readonly openAgentProfile: (memberId: string) => void;
   readonly session: CommandSession;
   readonly workspaceId: string;
+  /**
+   * 로컬 카드를 연다(#2943). 붙일 자리(지금 보고 있는 채널의 카드 자리)가
+   * 있어서 **열었으면 true**, 없으면 false다. false를 받은 명령은 스스로 폴백한다
+   * — `ai.connect`는 설정 › AI 연결로 간다. 카드 자리가 아직 없는 클라이언트는
+   * 언제나 false를 돌려주면 된다(GC-3 전의 웹, 폰).
+   */
+  readonly openLocalCard: (card: LocalCardId, args: LocalCardArgs) => boolean;
   /**
    * 데스크탑 셸인가(#2854). 데스크탑의 `/work`는 「내 작업」 격자라 작업 콘솔은
    * `/work?view=console`에 산다. 없으면 웹으로 읽는다.
@@ -140,7 +169,43 @@ export interface Command {
    * 명령에만 붙는다(서버 상태를 바꾸지 않는 명령만 제안 카드가 된다).
    */
   readonly agentSuggestable?: true;
-  readonly run: (ctx: CommandContext) => CommandResult;
+  /**
+   * 컴포저 맨 앞 `/`로 부르는 이름(#2942 GC-1). `client` 명령만 가질 수 있다.
+   * 없으면 슬래시 목록에 서지 않는다.
+   */
+  readonly slash?: SlashSpec;
+  /** `args`는 슬래시 인자처럼 **의도만** 담는다. 팔레트는 넘기지 않는다. */
+  readonly run: (ctx: CommandContext, args?: LocalCardArgs) => CommandResult;
+}
+
+/** 슬래시 인자 한 줄. `/연결 claude`의 `claude`. */
+export interface SlashArg {
+  /** 목록에 그려지는 인자 이름. */
+  readonly value: string;
+  /** 같은 인자를 부르는 다른 이름(대소문자 무시). */
+  readonly aliases: readonly string[];
+  /** 목록 줄 아래 흐린 설명. */
+  readonly hint: string;
+  readonly icon: CommandIcon;
+  /** 이 인자가 명령에 싣는 의도. */
+  readonly args: LocalCardArgs;
+}
+
+/** 슬래시로 부르는 명령의 이름표. */
+export interface SlashSpec {
+  /** 정본 이름(`/` 없이). */
+  readonly name: string;
+  /** 별칭(`/` 없이). 정본과 같은 명령을 연다. */
+  readonly aliases: readonly string[];
+  /** 목록 줄 아래 흐린 설명. 카드 자리가 있을 때의 말이다. */
+  readonly hint: string;
+  /**
+   * 카드 자리가 **없을 때**의 설명(#2943 design-review H-1). 그때 명령은 설정으로
+   * 폴백하므로 「나에게만 보여요」·「줄만 펼쳐」를 약속하지 않는다. 팔레트 줄의
+   * `metaFor`와 같은 판정(`canOpenLocalCard`)을 따른다.
+   */
+  readonly fallbackHint: string;
+  readonly args: readonly SlashArg[];
 }
 
 /** 지금 이 워크스페이스에서 무엇이 보일 수 있는가. */
@@ -159,11 +224,54 @@ export interface CommandEnv {
   readonly isSurfaceProvided: (id: SurfaceId) => boolean;
   /** 라우팅을 열 수 있는 활성 에이전트. */
   readonly agents: readonly CommandAgent[];
+  /**
+   * 지금 이 카드를 붙일 자리가 있는가(#2943). 줄의 작은 글씨가 이 답을 따른다:
+   * 자리가 있으면 「이 채널 · 나에게만」, 없으면 「설정에서 열려요」. 누르면
+   * 무엇이 일어나는지를 줄이 거짓 없이 말하게 한다.
+   */
+  readonly canOpenLocalCard: (card: LocalCardId) => boolean;
 }
 
 interface StaticCommand extends Command {
   /** 이 명령이 지금 보이는가. 표에 남아 있으나 조건이 거짓이면 그리지 않는다. */
   readonly available: (env: CommandEnv) => boolean;
+  /** 환경에 따라 바뀌는 작은 글씨. 있으면 `meta`보다 앞선다. */
+  readonly metaFor?: (env: CommandEnv) => string;
+}
+
+/** 설정 › AI 연결의 주소. 카드와 폴백과 이동 명령이 같은 자리를 가리킨다. */
+export const AI_CONNECT_SETTINGS_PATH = "/settings?section=ai";
+
+/** 설정 목차의 그 섹션 이름(`settingsNav.ts` `ai`). */
+const AI_CONNECT_SETTINGS_LABEL = "AI 연결";
+
+const AI_CONNECT_LINES: ReadonlySet<string> = new Set<AiConnectLine>([
+  "claude",
+  "codex",
+  "team",
+]);
+
+/** 인자에서 알려진 의도만 남긴다. 모르는 키는 카드에 가지 않는다. */
+function aiConnectArgs(args: LocalCardArgs | undefined): LocalCardArgs {
+  const line = args?.line;
+  return line !== undefined && AI_CONNECT_LINES.has(line) ? { line } : {};
+}
+
+/**
+ * `ai.connect` 실행(#2943 GC-2).
+ *
+ * 카드를 붙일 자리가 있으면 거기 연다. 없으면(채널 밖, 또는 카드 본체 GC-3
+ * 전) 설정 › AI 연결로 간다. 어느 쪽이든 표면(팔레트)은 닫힌다.
+ */
+function runAiConnect(ctx: CommandContext, args?: LocalCardArgs): CommandResult {
+  if (ctx.openLocalCard("ai.connect", aiConnectArgs(args))) {
+    return { status: "AI 연결 카드 열기", closesSurface: true };
+  }
+  ctx.navigate(AI_CONNECT_SETTINGS_PATH);
+  return {
+    status: `${attachDirection(AI_CONNECT_SETTINGS_LABEL)} 이동`,
+    closesSurface: true,
+  };
 }
 
 const always = (): boolean => true;
@@ -260,6 +368,66 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
     testId: "switcher-settings-agents",
     available: always,
     run: navigateTo("/settings?section=agents", "에이전트 자격"),
+  },
+  {
+    // 채팅 연결 카드의 입구(#2939 brief §3.1). 슬래시·⌘K·(2단계) 에이전트
+    // 제안 카드의 「열기」가 모두 이 한 정의의 `run`을 부른다.
+    id: "ai.connect",
+    title: "AI 연결 카드 열기",
+    group: "settings",
+    kind: "client",
+    keywords: ["연결", "connect", "ai", "구독", "api 키", "claude", "codex"],
+    icon: "ai-connect",
+    testId: "switcher-ai-connect",
+    // ADR-0186 증보 G2 — 에이전트가 이 카드를 제안할 수 있다(서버 허용목록
+    // `SUGGESTABLE_COMMANDS`와 OpenAPI `SuggestableCommandId`에 같은 id).
+    agentSuggestable: true,
+    available: always,
+    metaFor: (env) =>
+      env.canOpenLocalCard("ai.connect") ? "이 채널 · 나에게만" : "설정에서 열려요",
+    slash: {
+      name: "연결",
+      aliases: ["connect", "ai"],
+      hint: "AI 연결 카드 열기 · 나에게만 보여요",
+      fallbackHint: "설정 › AI 연결로 이동 · 메시지로 보내지 않아요",
+      args: [
+        {
+          value: "claude",
+          aliases: ["클로드"],
+          hint: "Claude 구독 줄만 펼쳐 열기",
+          icon: "ai-connect",
+          args: { line: "claude" },
+        },
+        {
+          value: "codex",
+          aliases: ["코덱스"],
+          hint: "Codex 구독 줄만 펼쳐 열기",
+          icon: "ai-connect",
+          args: { line: "codex" },
+        },
+        {
+          value: "팀키",
+          aliases: ["team", "팀"],
+          hint: "팀 API 키 줄만 펼쳐 열기 · 운영자",
+          icon: "credentials",
+          args: { line: "team" },
+        },
+      ],
+    },
+    run: runAiConnect,
+  },
+  {
+    // 시안 ① ⌘K 프레임의 두 번째 줄. 이름은 목적지(설정 목차)가 쓰는 말이다.
+    id: "nav.settings.ai",
+    title: AI_CONNECT_SETTINGS_LABEL,
+    meta: "설정",
+    group: "settings",
+    kind: "navigate",
+    keywords: ["설정", "ai", "구독", "api 키", "claude", "codex"],
+    icon: "settings",
+    testId: "switcher-settings-ai",
+    available: always,
+    run: navigateTo(AI_CONNECT_SETTINGS_PATH, AI_CONNECT_SETTINGS_LABEL),
   },
   {
     // 표면 이름은 판정표에서 든다. 진입점과 도착지가 각자 적으면 갈라진다.
@@ -372,9 +540,23 @@ export function agentRoutingCommands(
 /** 지금 이 환경에서 팔레트가 그릴 수 있는 명령 전부, 바닥 순서로. */
 export function visibleCommands(env: CommandEnv): readonly Command[] {
   const fixed = STATIC_COMMANDS.filter((command) => command.available(env)).map(
-    ({ available: _available, ...command }) => command
+    ({ available: _available, metaFor, ...command }) =>
+      metaFor === undefined ? command : { ...command, meta: metaFor(env) }
   );
   return [...fixed, ...agentRoutingCommands(env.agents)];
+}
+
+/**
+ * 슬래시로 부를 수 있는 명령 전부(#2942). 컴포저 `/` 목록의 유일한 소스다.
+ *
+ * `client` 명령만 이름을 가질 수 있다: 슬래시로 연 명령은 **전송되지 않고**
+ * 이 기기에서 끝나야 하므로(brief §3.1), 서버 상태를 바꾸는 명령이나 단순 이동은
+ * 이 목록에 서지 않는다.
+ */
+export function slashCommands(): readonly Command[] {
+  return STATIC_COMMANDS.filter(
+    (command) => command.kind === "client" && command.slash !== undefined
+  ).map(({ available: _available, metaFor: _metaFor, ...command }) => command);
 }
 
 /**

@@ -7,7 +7,8 @@ rust-version.workspace = true
 
 # ADR-0188 D2 — the desktop work host. It dials OUT to the team server only
 # (register, v2-signed heartbeat, pending-controls, ack, session create/PATCH)
-# and drives ACP agents over stdio. It opens no listening socket of any kind.
+# and drives ACP agents over stdio. It opens no TCP socket of any kind; its only
+# listener is the user-only Unix control socket the desktop app talks to (#2778).
 #
 # The loop is a library so the invariant tests can drive one control at a time
 # against a fake server; `src/main.rs` is the CLI shell.
@@ -30,7 +31,7 @@ path = "src/main.rs"
 # one crate, so signer and verifier cannot drift (ADR-0188 D2).
 momo-wire = { path = "../../crates/momo-wire" }
 
-tokio = { workspace = true, features = ["process", "io-util", "time", "sync", "signal"] }
+tokio = { workspace = true, features = ["process", "io-util", "time", "sync", "signal", "net"] }
 reqwest.workspace = true
 async-trait.workspace = true
 serde.workspace = true
@@ -50,6 +51,11 @@ libc.workspace = true
 # (ADR-0188 D2). `OSX_10_15` exposes `kSecUseDataProtectionKeychain`.
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = { version = "3.7", features = ["OSX_10_15"] }
+# The control socket's peer check (#2778): the peer's audit token and this
+# binary's own team id cross Security.framework as CF types. Both already in
+# the lock through security-framework; MIT OR Apache-2.0.
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
 
 [dev-dependencies]
 # PG conformance (tests/workd_conformance_pg.rs, #[ignore]): the real server

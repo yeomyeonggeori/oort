@@ -38,6 +38,8 @@ import {
   workTierPolicySaveMessage,
 } from "@momo/core/features/settings/model";
 import { choiceRadiosHintId } from "./fieldIds";
+import { isDesktop } from "@/lib/tauri";
+import { ThisMacHostBlock } from "./ThisMacHostBlock";
 import {
   ChoiceRadios,
   CopyButton,
@@ -112,9 +114,14 @@ export function WorkHostSection({
       title="코드 실행 호스트"
       lines={[
         "에이전트가 실제로 명령을 돌리는 자리입니다. 어떤 엔진으로 돌릴지, 어디에 등록돼 있는지, 그 자리를 잃으면 어떻게 할지를 정합니다.",
-        "여기에는 엔진 이름과 정책만 저장됩니다. 키나 호스트 경로는 저장하지 않습니다.",
+        "서버에는 엔진 이름과 정책만 저장됩니다. 호스트 키는 그 호스트를 떠나지 않습니다.",
       ]}
     >
+      {/* #2778: the desktop's own door to becoming a host, first because with
+          zero hosts it is the only thing on this panel that can change that. */}
+      {isDesktop() && (
+        <ThisMacHostBlock workspaceId={workspaceId} hosts={hosts} offline={offline} />
+      )}
       <EngineBlock offline={offline} />
       <RegistryBlock hosts={hosts} offline={offline} />
       {/* The QUERY goes down, not `hosts.data ?? []`: an empty array cannot say
@@ -306,7 +313,7 @@ function EngineBlock({ offline }: { offline: boolean }) {
 // --- 등록된 호스트 -----------------------------------------------------------
 
 const REGISTRY_LINES = [
-  "데스크톱 앱과 workd 데몬이 스스로 등록합니다. 이 화면에서 등록하지는 않습니다.",
+  "데스크톱 앱은 설정의 「이 맥」에서 등록하고, 리눅스 서버의 workd 데몬은 스스로 등록합니다.",
   "온라인 여부는 서버가 정하고, 이 목록은 30초마다 다시 읽습니다. 행은 ID 끝 6자리로 구분하고, 전체 ID는 복사 버튼으로 가져갑니다.",
 ];
 
@@ -423,7 +430,7 @@ function RegistryBlock({
             again. The copy names the app and the moment that creates the row. */}
         <EmptyInvite
           headline="등록된 호스트가 아직 없습니다."
-          detail="oort 데스크톱 앱을 이 워크스페이스 계정으로 열면 그 자리가 호스트로 등록되고, 리눅스 서버는 workd 데몬이 켜질 때 스스로 등록합니다."
+          detail="oort 데스크톱 앱의 이 화면 「이 맥」에서 등록하면 여기에 나타나고, 리눅스 서버는 workd 데몬이 켜질 때 스스로 등록합니다."
           actions={<RegistryRefreshButton hosts={hosts} offline={offline} />}
           testId="work-hosts-empty"
         />

@@ -9,6 +9,7 @@ import { recordEmojiUse } from "@/features/emoji/frequencyStore";
 import { useEmojiSkinTone } from "@/features/emoji/skinToneStore";
 import {
   channelCandidates,
+  commandCandidates,
   composerTriggerQueryAt,
   composerTriggerSpec,
   emojiCandidates,
@@ -97,6 +98,8 @@ export function useComposerAutocomplete({
   channels,
   inputRef,
   onValueChange,
+  onRunCommand,
+  commandCardAvailable = false,
 }: {
   value: string;
   members: RosterMember[];
@@ -104,6 +107,20 @@ export function useComposerAutocomplete({
   channels: Channel[];
   inputRef: RefObject<HTMLTextAreaElement | null>;
   onValueChange: (value: string) => void;
+  /**
+   * `/` 명령을 받는 컴포저만 넘긴다 (#2942 GC-1). 없으면 `/`는 목록을 열지
+   * 않는다 — 스레드 컴포저가 그렇다: 로컬 카드는 채널 타임라인 꼬리에 붙고
+   * (brief §3.2), 스레드 패널에는 그 자리가 없다.
+   *
+   * 명령 줄을 고르면 삽입하지 않고 이 함수를 부른다. 본문을 비우고 초안을
+   * 지우는 일은 호출자(컴포저)가 진다 — 초안 저장소를 아는 것은 그쪽이다.
+   */
+  onRunCommand?: (candidate: ComposerCandidate) => void;
+  /**
+   * 이 채널에 로컬 카드 자리가 있는가(#2943). 명령 줄의 설명이 이 답을 따른다
+   * — ⌘K 줄의 작은 글씨와 같은 판정이다(design-review H-1).
+   */
+  commandCardAvailable?: boolean;
 }) {
   const [caret, setCaret] = useState(0);
   const [highlight, setHighlight] = useState(0);
@@ -114,6 +131,7 @@ export function useComposerAutocomplete({
   // 사람이 할 일이 다르다. 레일의 `disconnected` 까지 보는 `useOffline` 을 쓰지
   // 않는 이유는 이 훅이 세션 없이도 서는 자리(스레드 컴포저 시험)이기 때문이다.
   const offline = useBrowserOffline();
+  const commandsEnabled = onRunCommand !== undefined;
   const query = open ? composerTriggerQueryAt(value, caret) : null;
   const kind: ComposerTriggerKind | null = query?.kind ?? null;
   const queryText = query?.text ?? null;
@@ -123,8 +141,22 @@ export function useComposerAutocomplete({
     if (kind === null || queryText === null) return NO_CANDIDATES;
     if (kind === "mention") return memberCandidates(members, queryText);
     if (kind === "channel") return channelCandidates(channels, queryText);
+    if (kind === "command") {
+      return commandsEnabled
+        ? commandCandidates(queryText, undefined, commandCardAvailable)
+        : NO_CANDIDATES;
+    }
     return emojiCandidates(entries, queryText, tone);
-  }, [kind, queryText, members, channels, entries, tone]);
+  }, [
+    kind,
+    queryText,
+    members,
+    channels,
+    entries,
+    tone,
+    commandsEnabled,
+    commandCardAvailable,
+  ]);
   const visible = candidates.length > 0;
   const spec = composerTriggerSpec(kind ?? "mention");
   const slug = spec.slug;
@@ -163,6 +195,13 @@ export function useComposerAutocomplete({
 
   const choose = (candidate: ComposerCandidate) => {
     if (!query) return;
+    if (candidate.command !== undefined) {
+      // 명령은 전송도 삽입도 아니다. 목록을 닫고 실행을 컴포저에 넘긴다.
+      setOpen(false);
+      setHighlight(0);
+      onRunCommand?.(candidate);
+      return;
+    }
     const inserted = insertComposerCandidate(
       value,
       caret,

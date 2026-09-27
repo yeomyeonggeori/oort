@@ -26,6 +26,7 @@ const EVERYTHING = {
   canCreateChannel: true,
   isSurfaceProvided: () => true,
   agents: [{ id: "agent-1", displayName: "김인턴", handle: "intern" }],
+  canOpenLocalCard: () => false,
 };
 
 const switcherSource = readFileSync("src/app/QuickSwitcher.tsx", "utf8");
@@ -122,15 +123,7 @@ describe("팔레트에 손으로 적힌 명령이 없다", () => {
 // 이 시험이 웹에 사는 이유: 코어는 `import.meta`가 금지되고 `node:fs` 타입이 없어
 // 저장소의 다른 파일을 읽을 수 없다(`momo-core` purity·eslint). 웹 시험은 이미
 // 이 레지스트리를 import하고 cwd 기준으로 파일을 읽는다.
-//
-// **GC-2(#2943) 전 과도기.** `ai.connect`는 서버 허용목록에 먼저 서고(GC-6 #2947),
-// 레지스트리 명령은 GC-2가 만든다. 그 사이의 차이는 `AWAITING_GC2`에 **이름으로**
-// 적는다. GC-2가 `ai.connect`를 `agentSuggestable: true`로 올리면 아래
-// 「대기 목록의 id는 아직 레지스트리에 없다」가 붉어진다 — 그때 이 목록에서 지운다.
 // =============================================================================
-
-/** 서버에는 있고 TS 레지스트리에는 GC-2(#2943)가 올릴 명령. */
-const AWAITING_GC2: readonly string[] = ["ai.connect"];
 
 function openapiEnum(schema: string): string[] {
   const spec = readFileSync("../../docs/api/openapi.yaml", "utf8");
@@ -166,20 +159,13 @@ describe("에이전트 제안 명령 ↔ 서버 허용목록 (SuggestableCommand
     }
   });
 
-  it("서버가 받는 명령은 전부 레지스트리에 있다(GC-2 대기분 제외)", () => {
+  it("서버가 받는 명령은 전부 레지스트리에 있다", () => {
     for (const id of spec) {
-      if (AWAITING_GC2.includes(id)) continue;
       expect(flagged, `${id}는 agentSuggestable 명령이 아니다`).toContain(id);
     }
   });
 
-  it("대기 목록의 id는 아직 레지스트리에 없고, 스펙에는 있다", () => {
-    for (const id of AWAITING_GC2) {
-      expect(spec).toContain(id);
-      expect(
-        KNOWN_COMMAND_IDS,
-        `${id}가 레지스트리에 들어왔다 — agentSuggestable: true로 올리고 AWAITING_GC2에서 지운다`
-      ).not.toContain(id);
-    }
+  it("두 집합은 같다(순서 무관)", () => {
+    expect([...flagged].sort()).toEqual([...spec].sort());
   });
 });

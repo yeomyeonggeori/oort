@@ -16,12 +16,15 @@
 //! | [`acp`] | the JSON-RPC stdio transport |
 //! | [`projection`] | `session/update` → curated server events |
 //! | [`policy`] | the D6 invariants |
+//! | [`control_socket`] | the app ↔ workd Unix socket: `status`, `shutdown`, peer signature check |
 //! | [`cli`] | `register` / `run` |
 
 pub mod acp;
 pub mod cli;
 pub mod client;
 pub mod config;
+#[cfg(target_os = "macos")]
+pub mod control_socket;
 pub mod controls;
 pub mod keystore;
 pub mod policy;

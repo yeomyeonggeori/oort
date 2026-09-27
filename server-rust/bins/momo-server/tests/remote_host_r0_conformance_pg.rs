@@ -41,6 +41,12 @@
 //! | `r01_5_an_agents_spawn_is_not_approved_onto_a_member_host` | A′: decision time | the `member_is_agent_in_tx` refusal in `approvals::decide_in_tx` |
 //! | `r01_6_a_spawn_call_that_names_a_member_host_is_refused` | A′: request time (tool) | `AgentWorker::refused_spawn_target` in `momo-agent-worker` |
 //!
+//! **R1 M2** (#2778) — the owner hears about every host added in their name:
+//!
+//! | test | rule | the guard whose removal turns it red |
+//! |---|---|---|
+//! | `r1m2_1_the_owners_devices_hear_a_host_registered_and_revoked` | ADR-0188 D2 「등록 사실을 소유자의 모든 기기에 알린다」 | `emit_work_host_notice` in `work_hosts::register` and `revoke` |
+//!
 //! `r0_8` also pins A′'s executor re-check (`tool_exec::spawn_session_in_tx`).
 //!
 //! Every refusal test also takes the **legitimate** path at the end — the owner
@@ -2829,4 +2835,123 @@ async fn gc6_card_suggest_runs_only_when_the_profile_enabled_it() {
     .expect("enable card_suggest");
     mention_and_drain("call_card_on").await;
     assert_eq!(cards().await, 1, "the enabled profile posts the card");
+}
+
+/// Every `broadcast` outbox row on `channel`, oldest first: (`data.type`, data).
+async fn notices_on(su: &PgPool, workspace: Uuid, channel: &str) -> Vec<(String, Value)> {
+    sqlx::query(
+        "SELECT payload FROM outbox \
+          WHERE workspace_id = $1 AND kind = 'broadcast' AND payload->>'channel' = $2 \
+          ORDER BY id",
+    )
+    .bind(workspace)
+    .bind(channel)
+    .fetch_all(su)
+    .await
+    .expect("read outbox")
+    .into_iter()
+    .map(|row| {
+        let payload: Value = row.get("payload");
+        (
+            payload["data"]["type"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            payload["data"].clone(),
+        )
+    })
+    .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn r1m2_1_the_owners_devices_hear_a_host_registered_and_revoked() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let (teammate, teammate_email) = seed_teammate(&su, &tenant).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let owner_token = login(&http, &base, tenant.workspace, &tenant.owner_email).await;
+    let teammate_token = login(&http, &base, tenant.workspace, &teammate_email).await;
+
+    let owner_channel = format!("user:work-host#{}", tenant.owner.to_string().to_uppercase());
+    let teammate_channel = format!("user:work-host#{}", teammate.to_string().to_uppercase());
+
+    // ---- register: one notice on the owner's own channel, same tx ----------
+    let response = register_host(
+        &http,
+        &base,
+        &owner_token,
+        tenant.workspace,
+        "member",
+        "workd",
+    )
+    .await;
+    assert_eq!(response.status(), 201);
+    let body: Value = response.json().await.unwrap();
+    let host = body["workHost"]["id"].as_str().unwrap().to_string();
+    let notices = notices_on(&su, tenant.workspace, &owner_channel).await;
+    assert_eq!(notices.len(), 1, "one notice per registration: {notices:?}");
+    assert_eq!(notices[0].0, "work_host.registered");
+    let data = &notices[0].1;
+    assert_eq!(data["payload"]["host_id"], json!(host));
+    assert_eq!(data["payload"]["display_name"], json!("member workd"));
+    assert_eq!(
+        data["payload"]["actor_member_id"],
+        json!(tenant.owner.to_string())
+    );
+    assert!(
+        !data
+            .to_string()
+            .contains(body["workHost"]["publicKey"].as_str().unwrap()),
+        "the notice never carries the host key"
+    );
+    assert!(
+        notices_on(&su, tenant.workspace, &teammate_channel)
+            .await
+            .is_empty(),
+        "nobody else's channel hears it"
+    );
+
+    // A refused registration writes neither the host nor a notice.
+    let refused = register_host(
+        &http,
+        &base,
+        &owner_token,
+        tenant.workspace,
+        "workspace",
+        "app",
+    )
+    .await;
+    assert_eq!(refused.status(), 400);
+    assert_eq!(
+        notices_on(&su, tenant.workspace, &owner_channel)
+            .await
+            .len(),
+        1
+    );
+
+    // ---- revoke by an admin: the OWNER hears it; twice → one notice -------
+    for _ in 0..2 {
+        let revoked = http
+            .delete(format!(
+                "{base}/v1/workspaces/{}/work-hosts/{host}",
+                tenant.workspace
+            ))
+            .bearer_auth(&teammate_token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(revoked.status(), 200);
+    }
+    let notices = notices_on(&su, tenant.workspace, &owner_channel).await;
+    let kinds: Vec<&str> = notices.iter().map(|(kind, _)| kind.as_str()).collect();
+    assert_eq!(kinds, ["work_host.registered", "work_host.revoked"]);
+    assert_eq!(
+        notices[1].1["payload"]["actor_member_id"],
+        json!(teammate.to_string()),
+        "the owner is told who revoked it"
+    );
 }

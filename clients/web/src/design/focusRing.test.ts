@@ -285,3 +285,109 @@ describe("검수 #1 — 전면 치환", () => {
     }
   });
 });
+
+// =============================================================================
+// #2938 ② 포인터로 움직일 때 링이 서지 않는다 (성재 0.1.12 실사용).
+//
+// 실측(scripts/capture-focus-ring.mjs, 제품 빌드 · WebKit·Chromium): 마우스로 쓰던
+// 사람이 Esc로 설정을 닫으면 캐럿 복귀 대상(프로필 카드)에 링이 섰고, 마우스로 누른
+// 버튼에 포커스가 있는 채로 ⌘·Shift를 누르면 그 버튼에 링이 섰다. 두 엔진 모두
+// 포커스가 있는 채로 **아무 키**나 눌리면 그 요소를 :focus-visible로 친다. 그래서
+// `:focus-visible` 하나로는 「키보드 탐색일 때만」을 가를 수 없다.
+//
+// 가르는 자리는 모달리티 스탬프다(focusModality.ts: 캐럿을 옮기는 키만 keyboard).
+// 포인터 모달리티 동안 컨트롤의 링을 걷는 규칙은 **레이어 밖**이어야 한다: 링을
+// 그리는 `focus-visible:focus-ring`은 utilities 레이어라, 레이어 안의 규칙은 소스
+// 순서·특정도와 무관하게 그것을 이기지 못한다.
+// =============================================================================
+
+/** 규칙이 들어 있는 at-rule 머리들(바깥부터). 중괄호 깊이로 읽는다. */
+function enclosingAtRules(css: string, index: number): string[] {
+  const stack: string[] = [];
+  let headerStart = 0;
+  for (let i = 0; i < index; i += 1) {
+    const ch = css[i];
+    if (ch === "{") {
+      stack.push(css.slice(headerStart, i).trim());
+      headerStart = i + 1;
+    } else if (ch === "}") {
+      stack.pop();
+      headerStart = i + 1;
+    } else if (ch === ";") {
+      headerStart = i + 1;
+    }
+  }
+  return stack.filter((head) => head.startsWith("@"));
+}
+
+function rulesMatching(css: string, test: (selector: string) => boolean) {
+  return [...css.matchAll(/([^{};]+)\{([^{}]*)\}/g)]
+    .map((m) => ({
+      selector: m[1].trim(),
+      body: m[2].replace(/\s+/g, " ").trim(),
+      at: enclosingAtRules(css, m.index ?? 0),
+    }))
+    .filter((rule) => test(rule.selector));
+}
+
+describe("#2938 ② 포인터 모달리티에서는 링이 서지 않는다", () => {
+  it("포인터 모달리티의 :focus-visible 링을 걷는 규칙이 레이어 밖에 있다", async () => {
+    const css = await buildCss(["focus-visible:focus-ring"]);
+    const rules = rulesMatching(
+      css,
+      (selector) =>
+        selector.includes('data-focus-modality="pointer"') && selector.includes(":focus-visible")
+    );
+    expect(rules.length, "포인터 모달리티 규칙").toBeGreaterThan(0);
+    const rule = rules[0];
+    expect(rule.body).toMatch(/outline(?:-style)?:\s*none/);
+    // 레이어 안이면 utilities 의 focus-visible:focus-ring 을 이기지 못한다.
+    expect(rule.at.filter((head) => head.startsWith("@layer")), rule.selector).toEqual([]);
+  });
+
+  it("글 입력 칸은 예외다: 클릭으로 들어가도 캐럿 자리를 링이 알린다", async () => {
+    const css = await buildCss(["focus-visible:focus-ring"]);
+    const rule = rulesMatching(
+      css,
+      (selector) =>
+        selector.includes('data-focus-modality="pointer"') && selector.includes(":focus-visible")
+    )[0];
+    expect(rule?.selector).toContain("textarea");
+    expect(rule?.selector).toContain("contenteditable");
+    expect(rule?.selector).toMatch(/input/);
+  });
+
+  it("캐럿 착지점(tabindex=-1)의 UA 링은 base 레이어에서 걷는다 — 명시한 링 유틸은 그대로 이긴다", async () => {
+    const css = await buildCss(["focus-visible:focus-ring"]);
+    const rules = rulesMatching(
+      css,
+      (selector) => selector.includes('[tabindex="-1"]') && selector.includes(":focus")
+    );
+    expect(rules.length, "tabindex=-1 규칙").toBeGreaterThan(0);
+    const rule = rules[0];
+    expect(rule.body).toMatch(/outline(?:-style)?:\s*none/);
+    expect(rule.at).toContain("@layer base");
+  });
+
+  it("자식·형제로 링을 그리는 그릇도 포인터 모달리티에서 걷힌다(레이어 밖)", async () => {
+    const css = await buildCss(["has-[:focus-visible]:focus-ring", "peer-focus-visible:focus-ring"]);
+    const rule = rulesMatching(
+      css,
+      (selector) =>
+        selector.includes('data-focus-modality="pointer"') && selector.includes(":has(:focus-visible)")
+    )[0];
+    expect(rule, "그릇 규칙").toBeDefined();
+    expect(rule?.selector).toContain(".peer:focus-visible ~ *");
+    expect(rule?.body).toMatch(/outline(?:-style)?:\s*none/);
+    expect(rule?.at.filter((head) => head.startsWith("@layer"))).toEqual([]);
+  });
+
+  it("「늘 보이는 링」 표면은 두 규칙 모두에서 빠진다 (원격 조작 화면)", async () => {
+    const css = await buildCss(["focus-visible:focus-ring"]);
+    const rules = rulesMatching(css, (selector) => selector.includes('data-focus-modality="pointer"'));
+    expect(rules.length).toBeGreaterThanOrEqual(2);
+    for (const rule of rules) expect(rule.selector).toContain('[data-focus-ring="always"]');
+    const surface = readFileSync(`${HERE}/../features/work/DisplayController.tsx`, "utf8");
+    expect(surface).toMatch(/data-testid="work-control-surface"\s+data-focus-ring="always"/);
+  });
+});
