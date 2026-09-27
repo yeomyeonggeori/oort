@@ -2938,19 +2938,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
                 />
               </View>
             }
-            composer={
-              <>
-                <AiConnectCard line={null} offline={false} onClose={() => {}} />
-                <Composer
-                  recipient="place"
-                  channelLabel="에이전트-실험"
-                  directory={DIRECTORY}
-                  draftKey="measure:ai-connect-card"
-                  onSend={() => {}}
-                  onSlashCommand={() => {}}
-                />
-              </>
-            }
+            composer={<AiConnectCardWithComposer />}
           />
         </Frame>
       );
@@ -3530,6 +3518,33 @@ export default function SurfacesHarness({
 }
 
 /** 네트워크로 나가지 않는다. 하네스는 사진을 찍지 데이터를 받지 않는다. */
+/**
+ * 대화 화면과 같은 배선: 입력창의 키 붙여넣기 안내가 서면 카드가 접힌다
+ * (design-review #2945 R3-B1). 스위치 안에서는 훅을 쓸 수 없어 따로 둔다.
+ */
+function AiConnectCardWithComposer(): React.JSX.Element {
+  const [keyBlocked, setKeyBlocked] = React.useState(false);
+  return (
+    <>
+      <AiConnectCard
+        line={null}
+        offline={false}
+        onClose={() => {}}
+        foldForKey={keyBlocked}
+      />
+      <Composer
+        recipient="place"
+        channelLabel="에이전트-실험"
+        directory={DIRECTORY}
+        draftKey="measure:ai-connect-card"
+        onSend={() => {}}
+        onSlashCommand={() => {}}
+        onKeyBlockedChange={setKeyBlocked}
+      />
+    </>
+  );
+}
+
 const harnessClient = new QueryClient({
   defaultOptions: {
     queries: {

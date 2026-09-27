@@ -5,7 +5,8 @@ name: 92-ai-connect-capture
 #
 # `-momoMeasure AI-CONNECT-CARD` 표면 위에서 친다(90번과 같은 방식, `launchApp` 없음):
 #   1. 입력창을 누르면 자판이 오르고 카드 몸이 접힌다(머리·닫기만 남는다).
-#   2. 키 모양 글을 보내면 전송이 막히고 입력창 위에 이유가 선다.
+#   2. 키 모양 글을 보내면 전송이 막히고 입력창 위에 이유가 선다. 자판이 내려가고
+#      카드는 한 줄로 접힌다(R3-B1). 입력창을 누르고 키를 지운다.
 #   3. 자판을 내리고 「연결 확인」을 누른다. 하네스에는 서버가 없으므로 결과 줄은
 #      오류 갈래다(실패 제자리 표시의 사진).
 #   4. 카드 몸을 올려 큰 글씨에서 버튼까지 보이게 한다.
@@ -40,10 +41,16 @@ name: 92-ai-connect-capture
       id: "composer-key-blocked"
     timeout: 10000
 - takeScreenshot: ai-connect-key-blocked
-# 접힌 줄을 누르면 자판이 내려간다(R2-M1). maestro `hideKeyboard`는 iOS 에서
-# 여러 줄 입력창의 리턴을 쳐 흔들리므로 카드 자신의 길을 쓴다. 큰 글씨 SE 에서는
-# 키 차단 안내 + 세 줄 입력창이 자판 위를 다 써서 접힌 줄이 화면 밖이다 — 그때만
-# `hideKeyboard`.
+# 막으면 자판이 내려가고 카드는 「입력창을 고치면…」 한 줄로 접힌다(R3-B1).
+- extendedWaitUntil:
+    visible:
+      id: "ai-connect-card-folded-key"
+    timeout: 10000
+- takeScreenshot: ai-connect-key-folded
+# 고치러 입력창을 누르면 안내를 거두고, 키를 지운 뒤 접힌 줄로 자판을 내린다.
+- tapOn:
+    id: "composer-input"
+- eraseText: 80
 - runFlow:
     when:
       visible:

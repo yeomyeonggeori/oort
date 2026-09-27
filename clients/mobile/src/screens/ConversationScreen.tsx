@@ -784,6 +784,8 @@ export default function ConversationScreen({
   } | null>(null);
   useEffect(() => setAiCard(null), [channelId]);
   const closeAiCard = useCallback(() => setAiCard(null), []);
+  // 입력창의 키 붙여넣기 안내가 선 동안 카드를 접는다(design-review #2945 R3-B1).
+  const [composerKeyBlocked, setComposerKeyBlocked] = useState(false);
   const onSlashCommand = useCallback(
     (command: Command, args: LocalCardArgs) => {
       // 코어 레지스트리의 `run`을 그대로 부른다 — 슬래시·⌘K·제안 카드가 한 경로를
@@ -1678,6 +1680,7 @@ export default function ConversationScreen({
                 line={aiCard.line}
                 offline={!networkOnline}
                 onClose={closeAiCard}
+                foldForKey={composerKeyBlocked}
               />
             ) : null}
             {/* Directly above the input, which is where the answer matters: this
@@ -1743,6 +1746,7 @@ export default function ConversationScreen({
               onTyping={onTyping}
               onSend={onSend}
               onSlashCommand={onSlashCommand}
+              onKeyBlockedChange={setComposerKeyBlocked}
             />
           </>
         }

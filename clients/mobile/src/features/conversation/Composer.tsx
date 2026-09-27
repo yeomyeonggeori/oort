@@ -28,6 +28,7 @@ import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   Image,
+  Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -847,6 +848,7 @@ export function Composer({
   sendLabel = '보내기',
   inputRef: externalInputRef,
   onSlashCommand,
+  onKeyBlockedChange,
 }: {
   channelLabel: string;
   /**
@@ -939,6 +941,12 @@ export function Composer({
    * 키 붙여넣기 차단은 이 prop과 무관하게 모든 컴포저에서 선다.
    */
   onSlashCommand?: (command: Command, args: LocalCardArgs) => void;
+  /**
+   * 키 붙여넣기 차단 안내가 서고 거둘 때 알린다 (design-review #2945 R3-B1). 대화
+   * 화면은 안내가 선 동안 AI 연결 카드를 접는다 — 큰 글씨 SE 에서 안내·입력창·
+   * 카드가 한 화면을 넘어 카드 머리가 밀려 나가지 않게.
+   */
+  onKeyBlockedChange?: (blocked: boolean) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
@@ -979,7 +987,16 @@ export function Composer({
   // 다음 키스트로크가 다시 연다 — 멘션과 같은 규율이다.
   const [slashOpen, setSlashOpen] = useState(true);
   // 키 모양을 보고 전송을 막았다. 다음 키스트로크가 지운다.
-  const [keyBlocked, setKeyBlocked] = useState(false);
+  const [keyBlocked, setKeyBlockedState] = useState(false);
+  const keyBlockedRef = useRef(false);
+  const onKeyBlockedChangeRef = useRef(onKeyBlockedChange);
+  onKeyBlockedChangeRef.current = onKeyBlockedChange;
+  const setKeyBlocked = useCallback((next: boolean) => {
+    if (keyBlockedRef.current === next) return;
+    keyBlockedRef.current = next;
+    setKeyBlockedState(next);
+    onKeyBlockedChangeRef.current?.(next);
+  }, []);
   const [attachmentPickerOpen, setAttachmentPickerOpen] = useState(false);
   const ownInputRef = useRef<TextInput | null>(null);
   const inputRef = externalInputRef ?? ownInputRef;
@@ -1134,7 +1151,11 @@ export function Composer({
       saveDraft(draftKeyRef.current, next);
     }
     onTypingRef.current?.();
-  }, []);
+  }, [setKeyBlocked]);
+
+  // 안내를 읽은 뒤 고치러 돌아왔다 — 자판이 다시 오르면 안내가 한 화면을 넘는다
+  // (R3-B1). 안내는 alert 로 이미 읽혔고, 키가 남아 있으면 다음 전송이 다시 막는다.
+  const onInputFocus = useCallback(() => setKeyBlocked(false), [setKeyBlocked]);
 
   const onSelectionChange = useCallback(
     (event: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
@@ -1182,7 +1203,7 @@ export function Composer({
       }
       onSlashCommand?.(command, args);
     },
-    [onSlashCommand],
+    [onSlashCommand, setKeyBlocked],
   );
 
   const acceptSlash = useCallback(
@@ -1217,6 +1238,10 @@ export function Composer({
     // `drafts.ts` `saveDraft`가 키 모양이 든 글을 적지 않는다.
     if (containsSecretKey(body)) {
       setKeyBlocked(true);
+      // 자판을 내린다(design-review #2945 R3-B1): 큰 글씨 SE 에서 자판 + 세 줄
+      // 입력창 + 안내가 한 화면을 넘어 안내의 첫 문장이 잘린다. 읽을 자리를 먼저
+      // 준다. 고치러 입력창을 누르면 안내는 거둔다(아래 `onInputFocus`).
+      Keyboard.dismiss();
       return;
     }
     // 목록이 열린 채 ↑를 누르면 강조된 첫 줄을 고른다 — 웹 ↵와 같다(design-review
@@ -1256,6 +1281,7 @@ export function Composer({
     }
     onSend(body, {attachments: sent.attachments});
   }, [
+    setKeyBlocked,
     text,
     onSend,
     offline,
@@ -1604,6 +1630,7 @@ export function Composer({
           value={text}
           onChangeText={onChangeText}
           onSelectionChange={onSelectionChange}
+          onFocus={onInputFocus}
           // 문장은 코어가 든다 (#1384). 이 두 줄은 웹 `chat/Composer.tsx` 와
           // **같은 문자열을 각자 짓고** 있었다: 값이 같아서 안 보였을 뿐,
           // 한쪽을 고치는 날 갈라진다. 오프라인 문장이 이미 걸어 둔 길이다.

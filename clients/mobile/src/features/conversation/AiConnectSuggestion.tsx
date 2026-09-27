@@ -13,6 +13,7 @@ import {
   type CommandSuggestCard,
 } from '@momo/core/features/timeline/commandSuggest';
 import {font, line, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {Sentence} from '../../design/atoms';
 import {usePalette, useStyles} from '../../design/theme';
 import {
   AI_CONNECT_ICON_SIZE,
@@ -119,7 +120,12 @@ function SuggestionLine({
       </View>
       {operator && open ? (
         <View style={styles.card} testID="ai-suggest-team-panel">
-          <AiConnectTeamSection offline={offline} idPrefix="ai-suggest" />
+          <AiConnectTeamSection
+            offline={offline}
+            idPrefix="ai-suggest"
+            sectionStyle={styles.section}
+            headStyle={styles.sectionHead}
+          />
         </View>
       ) : null}
     </View>
@@ -162,12 +168,17 @@ function SuggestedCard({
               style={[styles.icon, styles.noteIcon, {tintColor: palette.icon}]}
               accessibilityIgnoresInvertColors
             />
-            <Text style={styles.noteText}>{COMMAND_SUGGEST_PHONE_MINE}</Text>
+            <Sentence style={styles.noteText}>{COMMAND_SUGGEST_PHONE_MINE}</Sentence>
           </View>
         </View>
       ) : null}
       {showTeam ? (
-        <AiConnectTeamSection offline={offline} idPrefix="ai-suggest" />
+        <AiConnectTeamSection
+          offline={offline}
+          idPrefix="ai-suggest"
+          sectionStyle={styles.section}
+          headStyle={styles.sectionHead}
+        />
       ) : null}
       {showTeam ? (
         <View style={styles.foot}>

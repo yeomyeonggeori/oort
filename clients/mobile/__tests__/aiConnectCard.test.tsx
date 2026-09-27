@@ -281,6 +281,17 @@ describe('카드 — 판정은 코어, 행동은 연결 확인 하나', () => {
     }
   });
 
+  it('키 붙여넣기 안내가 선 동안은 자판 없이도 몸을 접는다 (R3-B1)', async () => {
+    mockFetch.mockResolvedValue(LINK);
+    card({foldForKey: true});
+    expect(screen.getByTestId('ai-connect-card-folded-key')).toBeTruthy();
+    expect(screen.getByTestId('ai-connect-card-close')).toBeTruthy();
+    const scroll = screen.getByTestId('ai-connect-card-scroll', {
+      includeHiddenElements: true,
+    });
+    expect(StyleSheet.flatten(scroll.props.style)).toMatchObject({display: 'none'});
+  });
+
   it('닫기는 부른 쪽에 알린다', async () => {
     mockFetch.mockResolvedValue(LINK);
     const onClose = jest.fn();
@@ -449,6 +460,27 @@ describe('컴포저 — `/` 명령과 키 붙여넣기 차단', () => {
     expect(screen.queryByTestId('composer-key-blocked')).toBeNull();
     fireEvent.press(screen.getByTestId('composer-send'));
     expect(onSend).toHaveBeenCalledWith('팀 키 이거 쓰세요');
+  });
+
+  it('막으면 자판을 내리고 알리며, 입력창을 다시 누르면 안내를 거둔다 (R3-B1)', () => {
+    const onKeyBlockedChange = jest.fn();
+    const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
+    try {
+      composer({onKeyBlockedChange});
+      fireEvent.changeText(screen.getByTestId('composer-input'), KEY);
+      fireEvent.press(screen.getByTestId('composer-send'));
+      expect(dismiss).toHaveBeenCalledTimes(1);
+      expect(onKeyBlockedChange).toHaveBeenLastCalledWith(true);
+      fireEvent(screen.getByTestId('composer-input'), 'focus');
+      expect(screen.queryByTestId('composer-key-blocked')).toBeNull();
+      expect(onKeyBlockedChange).toHaveBeenLastCalledWith(false);
+      expect(onKeyBlockedChange).toHaveBeenCalledTimes(2);
+      // 키가 남아 있으면 다음 전송이 다시 막는다.
+      fireEvent.press(screen.getByTestId('composer-send'));
+      expect(screen.getByTestId('composer-key-blocked')).toBeTruthy();
+    } finally {
+      dismiss.mockRestore();
+    }
   });
 
   it('스레드 컴포저도 키를 막는다', () => {

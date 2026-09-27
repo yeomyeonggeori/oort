@@ -29,6 +29,9 @@ import {
   Text,
   useWindowDimensions,
   View,
+  type StyleProp,
+  type TextStyle,
+  type ViewStyle,
 } from 'react-native';
 
 import {Sentence} from '../../design/atoms';
@@ -106,6 +109,8 @@ export const AI_CONNECT_CARD_COPY = {
   teamDefault: '팀 기본',
   /** 자판이 올라와 몸을 접었을 때 머리에 붙는 말(design-review #2945 H1). */
   folded: '자판을 내리고 카드 펼치기',
+  /** 키 붙여넣기 안내가 선 동안 접었을 때(design-review #2945 R3-B1). */
+  foldedForKey: '입력창을 고치면 카드가 다시 펼쳐져요',
   source: 'API 키',
   legacySource: '내부용',
   check: '연결 확인',
@@ -177,11 +182,18 @@ export function AiConnectCardShell({
   header,
   children,
   testID,
+  foldForKey = false,
 }: {
   variant: 'local' | 'suggest';
   header: React.ReactNode;
   children: React.ReactNode;
   testID?: string;
+  /**
+   * 입력창의 키 붙여넣기 안내가 서 있다(R3-B1). 컴포저가 자판을 내리므로 이때는
+   * 자판 때문이 아니라 **자리 때문에** 접는다 — 큰 글씨 SE 에서 카드 몸 + 안내 +
+   * 세 줄 입력창이 한 화면을 넘어 카드 머리(닫기)가 밀려 나간다.
+   */
+  foldForKey?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {height} = useWindowDimensions();
@@ -204,13 +216,17 @@ export function AiConnectCardShell({
           testID="ai-connect-card-folded">
           <Text style={styles.folded}>{AI_CONNECT_CARD_COPY.folded}</Text>
         </Pressable>
+      ) : foldForKey ? (
+        <View style={styles.foldedRow} testID="ai-connect-card-folded-key">
+          <Sentence style={styles.folded}>{AI_CONNECT_CARD_COPY.foldedForKey}</Sentence>
+        </View>
       ) : null}
       {/* 접혀도 몸은 **내리지 않고 숨긴다**: 내리면 「연결 확인」 결과(절의 상태)가
           자판을 한 번 올렸다 내리는 것만으로 사라지고, 팀 연결을 다시 불러온다. */}
       <ScrollView
         style={[
           {maxHeight: Math.round(height * CARD_BODY_WINDOW_SHARE)},
-          keyboardUp && styles.hidden,
+          (keyboardUp || foldForKey) && styles.hidden,
         ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator
@@ -227,10 +243,13 @@ export function AiConnectCard({
   line,
   offline,
   onClose,
+  foldForKey = false,
 }: {
   line: AiConnectLine | null;
   offline: boolean;
   onClose: () => void;
+  /** 입력창의 키 붙여넣기 안내가 서 있다 — `AiConnectCardShell` 참고. */
+  foldForKey?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
@@ -282,6 +301,7 @@ export function AiConnectCard({
       <AiConnectCardShell
         variant="local"
         header={header}
+        foldForKey={foldForKey}
         testID="ai-connect-card">
         <AiConnectCardBody line={line} offline={offline} />
       </AiConnectCardShell>
@@ -349,9 +369,18 @@ export function AiConnectCardBody({
 export function AiConnectTeamSection({
   offline,
   idPrefix = 'ai-connect-card',
+  sectionStyle,
+  headStyle,
 }: {
   offline: boolean;
   idPrefix?: string;
+  /**
+   * 절의 여백은 **담는 카드가 정한다**(design-review #2945 R3-H1): 제안 카드는
+   * 제 머리·내 계정 절과 같은 14pt 가장자리(`CONV.cardPad`)를 쓰고, 로컬 카드는
+   * 12pt 다. 절이 제 여백을 고집하면 한 카드 안에서 두 가장자리가 생긴다.
+   */
+  sectionStyle?: StyleProp<ViewStyle>;
+  headStyle?: StyleProp<TextStyle>;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const query = useQuery({
@@ -416,8 +445,8 @@ export function AiConnectTeamSection({
   }
 
   return (
-    <View style={styles.section} testID={`${idPrefix}-team-section`}>
-      <Text style={styles.sectionHead} accessibilityRole="header">
+    <View style={sectionStyle ?? styles.section} testID={`${idPrefix}-team-section`}>
+      <Text style={headStyle ?? styles.sectionHead} accessibilityRole="header">
         {AI_CONNECT_CARD_COPY.teamHead}
       </Text>
       {body}
@@ -527,9 +556,9 @@ function TeamRow({
         </View>
         <View style={styles.rowText}>
           <View style={styles.nameLine}>
-            <Text style={styles.name} numberOfLines={2}>
+            <Sentence style={styles.name} numberOfLines={2}>
               {name}
-            </Text>
+            </Sentence>
             <View style={styles.source}>
               <Text style={styles.sourceText} numberOfLines={1}>
                 {legacy ? AI_CONNECT_CARD_COPY.legacySource : AI_CONNECT_CARD_COPY.source}
@@ -538,7 +567,9 @@ function TeamRow({
           </View>
           <Text
             style={[styles.sub, mono && styles.subMono]}
-            numberOfLines={hasRow ? 1 : 3}
+            // 큰 글씨(알약이 아래로 내려가는 배수)에서는 두 줄 — 한 줄이면 마스킹
+            // 꼬리의 날짜가 잘린다(R3-M1).
+            numberOfLines={hasRow ? (stackPill ? 2 : 1) : 3}
             testID={`${idPrefix}-team-sub`}>
             {sub}
           </Text>
