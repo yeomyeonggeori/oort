@@ -1057,6 +1057,63 @@ function Frame({label, children}: {label: string; children: React.ReactNode}) {
   );
 }
 
+
+// ---- GC-7 (#2948): 에이전트가 제안한 AI 연결 카드 --------------------------------
+//
+//   AI-SUGGEST         대상 본인(운영자): 제안 머리 · 「맥에서」 한 줄 · 팀 줄 + 연결 확인
+//   AI-SUGGEST-OTHERS  같은 제안을 운영자(한 줄 + 「팀 연결 보기」)와 그 밖의 멤버
+//                      (한 줄만, 누를 것 0)가 보는 모습
+//
+// 팀 연결은 하네스 캐시에 씨앗으로 넣는다(운영자 = 200). 그 밖의 멤버는 씨앗이 없는
+// 따로 된 캐시라 운영자 판정이 서지 않는다 — 한 줄만 남는다.
+const AI_SUGGEST_LINK = {
+  schema: 'momo.provider_link.v0',
+  configured: true,
+  source: 'database',
+  mode: 'external-hermes',
+  baseUrl: 'https://api.anthropic.com/v1',
+  endpointLabel: 'Anthropic',
+  bearerConfigured: true,
+  bearerLast4: '7c1e',
+  availability: 'live',
+  keyConfigured: true,
+  updatedAtMs: NOW - 3 * 86_400_000,
+  diagnostics: [],
+  presets: [],
+};
+
+function aiSuggestMessage(): Message {
+  return {
+    ...MESSAGE,
+    id: '00000000-0000-7000-8000-0000000000c7',
+    authorMemberId: AGENT,
+    thread: undefined,
+    body: '구독 로그인은 맥에서 해야 해요. 카드를 맥에서 열어 주세요.',
+    props: {
+      'momo.command_suggest': {
+        v: 1,
+        command_id: 'ai.connect',
+        args: {},
+        for_member_id: SELF,
+        label: 'AI 연결',
+      },
+    },
+  } as Message;
+}
+
+function aiSuggestActions(me: string) {
+  return {
+    myMemberId: me,
+    onToggleReaction: async () => {},
+    onEdit: async () => {},
+    onDelete: async () => {},
+  };
+}
+
+const aiSuggestOutsider = new QueryClient({
+  defaultOptions: {queries: {retry: false, gcTime: 0}},
+});
+
 // ---- AX-7 (#2513) 픽스처: ADR-0186 부록 A·B 그대로 ----------------------------
 
 /** 부록 A. 제안한 에이전트는 로스터의 에이전트이고, 요약은 서버가 그 이름으로 짓는다. */
@@ -2521,6 +2578,44 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // (링크가 이 화면에 한 번) → 다시 열었을 때(링크 없이 영속 카드만). 픽스처는
     // ADR-0186 부록 A·B 그대로이고, 값(부록 C `secretOnce`)은 **영수증 표**로만
     // 건넨다 — 대화 화면이 결정 응답에서 받아 드는 바로 그 자리다.
+    case 'ai-suggest':
+      harnessClient.setQueryData(['settings', 'provider-link'], AI_SUGGEST_LINK);
+      return (
+        <Frame label="에이전트 제안 연결 카드 — 대상 본인 · 운영자 (#2948 GC-7)">
+          <MessageRow
+            message={aiSuggestMessage()}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            actions={aiSuggestActions(SELF)}
+          />
+        </Frame>
+      );
+    case 'ai-suggest-others':
+      harnessClient.setQueryData(['settings', 'provider-link'], AI_SUGGEST_LINK);
+      return (
+        <Frame label="같은 제안 — 운영자(위) · 그 밖의 멤버(아래) (#2948 GC-7)">
+          <MessageRow
+            message={aiSuggestMessage()}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            actions={aiSuggestActions(OTHER)}
+          />
+          <QueryClientProvider client={aiSuggestOutsider}>
+            <MessageRow
+              message={aiSuggestMessage()}
+              startsGroup
+              directory={DIRECTORY}
+              chips={[]}
+              nowMs={NOW}
+              actions={aiSuggestActions(OTHER)}
+            />
+          </QueryClientProvider>
+        </Frame>
+      );
     case 'action-approval':
       return (
         <Frame label="행동 승인 카드 — 대기 (ADR-0186 부록 A · #2513)">

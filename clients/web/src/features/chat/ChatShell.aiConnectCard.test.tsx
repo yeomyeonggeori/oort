@@ -199,6 +199,8 @@ vi.mock("./AiConnectCard", () => ({
       },
       createElement("button", { "data-testid": "stub-close", onClick: props.onClose }, "닫기")
     ),
+  // 제안 카드(#2948)는 ChatShell이 자리만 건넨다. 본체는 MessageRow.commandSuggest.test가 잰다.
+  AiConnectSuggestion: () => null,
 }));
 
 

@@ -9,6 +9,7 @@ import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { startsAuthorGroup } from "@momo/core/features/timeline/model";
 import { MessageRow, type MessageRowActions } from "./MessageRow";
 import { TimelineLiveRegionProvider } from "./timelineLiveRegion";
+import { ThreadSurfaceRoot } from "./commandSuggestSlot";
 import { ThreadComposer } from "./ThreadComposer";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
 import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
@@ -212,6 +213,7 @@ function ThreadPanelFrame({
         data-message-scroll-container=""
       >
         <TimelineLiveRegionProvider>
+        <ThreadSurfaceRoot.Provider value={root.id}>
         {/* 루트에 「답글 N개」를 적지 않는다 (goal RN-U2).
 
             성재(iOS 실기기): "답글에서 개수 업데이트는 굳이 왜 해? 목록에 나오면
@@ -283,6 +285,7 @@ function ThreadPanelFrame({
             ))}
           </Skeleton>
         </div>
+        </ThreadSurfaceRoot.Provider>
         </TimelineLiveRegionProvider>
       </div>
 
