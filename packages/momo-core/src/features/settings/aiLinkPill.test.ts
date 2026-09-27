@@ -34,6 +34,8 @@ describe("linkPill (#2941): 팀 연결 줄의 판정표", () => {
     ["확인이 도는 중", { link: LINK, offline: false, probe: probe(false), checking: true }, "run", "확인 중…"],
     ["확인 성공", { link: LINK, offline: false, probe: probe(true) }, "ok", "확인됨"],
     ["확인 실패", { link: LINK, offline: false, probe: probe(false) }, "bad", "확인 실패"],
+    // #2880: 서버가 부르지 않은 확인은 실패가 아니다.
+    ["확인 전(probe_not_run)", { link: LINK, offline: false, probe: { ...probe(false), reason: "probe_not_run" } }, "mute", "확인 전"],
     ["저장된 키, 실제 provider", { link: LINK, offline: false, probe: null }, "ok", "연결됨"],
     ["저장된 키, 모의", { link: { ...LINK, availability: "mock" }, offline: false, probe: null }, "mute", "모의 응답"],
     ["주소만 있고 키 없음", { link: { ...LINK, keyConfigured: false }, offline: false, probe: null }, "warn", "자격증명 없음"],

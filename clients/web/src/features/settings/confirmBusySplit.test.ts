@@ -111,14 +111,6 @@ const SITES = [
     lockVia: null,
   },
   {
-    file: "AiLinkSection.tsx",
-    testId: "ai-link-unlink",
-    busy: "unlinking",
-    label: "해제 중",
-    lock: "offline || (busy && !unlinking)",
-    lockVia: null,
-  },
-  {
     file: "HostedConnectionSection.tsx",
     testId: "hosted-disconnect-start",
     busy: "starting",

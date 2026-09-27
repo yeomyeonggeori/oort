@@ -289,7 +289,7 @@ export function SettingsRoute() {
             <NotificationRulesSection offline={offline} />
           )}
           {section === "updates" && <UpdateSection />}
-          {section === "ai" && <AiLinkSection offline={offline} />}
+          {section === "ai" && <AiLinkSection offline={offline} workspaceId={workspaceId} />}
           {section === "agents" && (
             <AgentCredentialsSection offline={offline} />
           )}

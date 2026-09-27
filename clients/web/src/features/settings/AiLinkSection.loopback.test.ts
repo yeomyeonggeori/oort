@@ -195,7 +195,7 @@ function mountSection(): HTMLElement {
     createElement(
       SessionProvider,
       { value: sessionValue() },
-      createElement(MemoryRouter, null, createElement(AiLinkSection, { offline: false }))
+      createElement(MemoryRouter, null, createElement(AiLinkSection, { offline: false, workspaceId: "ws-1" }))
     )
   );
   act(() => mountedRoot?.render(tree));
