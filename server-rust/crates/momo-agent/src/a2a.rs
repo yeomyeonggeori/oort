@@ -167,6 +167,11 @@ pub struct A2aGateSnapshot {
     pub chain_tokens: i64,
     /// Summed `usage_ledger.cost_micro_usd` over the same tree.
     pub chain_cost_micro_usd: i64,
+    /// The **target** is a subscription agent (`agent.invocation_scope =
+    /// 'owner_only'`, ADR-0193 D4), read here from the column itself rather
+    /// than from the mention candidate, so this refusal does not share a
+    /// failure with the routing's own check (#2897).
+    pub target_owner_only: bool,
 }
 
 /// Why a delegation did not happen. Each variant carries the numbers that
@@ -197,6 +202,10 @@ pub enum A2aBlock {
     /// provider calls later) would stop it. Refusing it costs nothing and is
     /// recorded under its own reason so it is never confused with a real cap.
     SelfMention,
+    /// The target is a subscription (`owner_only`) agent — only its owner, a
+    /// person, may call it, so no agent ever may (ADR-0193 D4, #2897). The
+    /// second of two independent refusals; the routing refuses first.
+    OwnerOnlyTarget,
 }
 
 impl A2aBlock {
@@ -215,6 +224,7 @@ impl A2aBlock {
             A2aBlock::StepCap { .. } => "a2a_loop_gate_g3",
             A2aBlock::ChainBudget { .. } => "a2a_chain_budget",
             A2aBlock::SelfMention => "a2a_self_mention",
+            A2aBlock::OwnerOnlyTarget => "a2a_owner_only_target",
         }
     }
 
@@ -227,7 +237,9 @@ impl A2aBlock {
             A2aBlock::Concurrency { .. } => Some("G1"),
             A2aBlock::ConsecutiveAuto { .. } => Some("G2"),
             A2aBlock::StepCap { .. } => Some("G3"),
-            A2aBlock::ChainBudget { .. } | A2aBlock::SelfMention => None,
+            A2aBlock::ChainBudget { .. } | A2aBlock::SelfMention | A2aBlock::OwnerOnlyTarget => {
+                None
+            }
         }
     }
 
@@ -237,8 +249,11 @@ impl A2aBlock {
     /// its own message, nobody delegated anything, and a system line would be
     /// noise a human has to learn to ignore. Every real cap does — silence is
     /// indistinguishable from "the other agent ignored me".
+    ///
+    /// An owner-only target does not either: nobody asked it anything, and
+    /// the line would announce a person's private agent to the room.
     pub fn is_visible(&self) -> bool {
-        !matches!(self, A2aBlock::SelfMention)
+        !matches!(self, A2aBlock::SelfMention | A2aBlock::OwnerOnlyTarget)
     }
 
     /// The channel line, in the register `paused_mention_body` established:
@@ -286,6 +301,7 @@ impl A2aBlock {
                 "{head}. 이 위임 체인의 비용 한도에 도달했습니다({spent}/{max} micro-USD)."
             ),
             A2aBlock::SelfMention => format!("{head}. 자기 자신은 위임 대상이 아닙니다."),
+            A2aBlock::OwnerOnlyTarget => format!("{head}. 개인 에이전트는 위임 대상이 아닙니다."),
         }
     }
 
@@ -337,7 +353,7 @@ impl A2aBlock {
                 detail.insert("chain_tokens".into(), json!(chain_tokens));
                 detail.insert("chain_cost_micro_usd".into(), json!(chain_cost_micro_usd));
             }
-            A2aBlock::SelfMention => {}
+            A2aBlock::SelfMention | A2aBlock::OwnerOnlyTarget => {}
         }
         Value::Object(detail)
     }
@@ -350,6 +366,11 @@ impl A2aBlock {
 /// a runaway agent chain stops. The DB half ([`load_a2a_gate_snapshot_in_tx`])
 /// only fetches the numbers it reads.
 pub fn evaluate_a2a_spawn(snapshot: &A2aGateSnapshot, limits: &A2aLimits) -> Result<(), A2aBlock> {
+    // ADR-0193 D4 (#2897) — first, and not a cap: no budget or streak makes a
+    // person's subscription agent something another agent may start.
+    if snapshot.target_owner_only {
+        return Err(A2aBlock::OwnerOnlyTarget);
+    }
     // G1 — the target agent's semaphore. Only runs that are *actually executing*
     // count; a run parked on a human approval must not starve a delegation.
     if snapshot.active_other_runs >= snapshot.max_concurrent_runs {
@@ -459,6 +480,7 @@ pub async fn load_a2a_gate_snapshot_in_tx(
     // as Swift does, so a dead run cannot lock an agent out permanently.
     let concurrency = sqlx::query(
         "SELECT a.max_concurrent_runs, \
+                (a.invocation_scope = 'owner_only') AS target_owner_only, \
                 ( SELECT count(*)::int FROM agent_run r \
                    WHERE r.workspace_id = $1 \
                      AND r.agent_member_id = $2 \
@@ -487,6 +509,9 @@ pub async fn load_a2a_gate_snapshot_in_tx(
     let active_other_runs: i32 = concurrency
         .try_get("active_other_runs")
         .map_err(DbError::from)?;
+    let target_owner_only: bool = concurrency
+        .try_get("target_owner_only")
+        .map_err(DbError::from)?;
 
     let chain = crate::usage::chain_usage_in_tx(&mut *conn, workspace_id, source_run_id).await?;
 
@@ -499,6 +524,7 @@ pub async fn load_a2a_gate_snapshot_in_tx(
         consecutive_auto_streak,
         chain_tokens: chain.total_tokens,
         chain_cost_micro_usd: chain.cost_micro_usd,
+        target_owner_only,
     }))
 }
 
@@ -516,7 +542,26 @@ mod tests {
             consecutive_auto_streak: 0,
             chain_tokens: 0,
             chain_cost_micro_usd: 0,
+            target_owner_only: false,
         }
+    }
+
+    /// #2897: an owner-only target is refused by the policy itself, whatever
+    /// the routing did before it, and ahead of every cap — a clear snapshot
+    /// with the flag set still refuses.
+    #[test]
+    fn an_owner_only_target_is_refused_by_the_policy_itself() {
+        let limits = A2aLimits::default();
+        assert_eq!(evaluate_a2a_spawn(&clear(), &limits), Ok(()));
+        let owner_only = A2aGateSnapshot {
+            target_owner_only: true,
+            ..clear()
+        };
+        let block = evaluate_a2a_spawn(&owner_only, &limits).expect_err("refused");
+        assert_eq!(block, A2aBlock::OwnerOnlyTarget);
+        assert_eq!(block.reason_code(), "a2a_owner_only_target");
+        assert!(!block.is_visible(), "no line announces a private agent");
+        assert!(block.gate().is_none());
     }
 
     /// #2900: the refusal line names the target agent, and whoever named it
@@ -542,6 +587,7 @@ mod tests {
                 chain_cost_micro_usd: 0,
             },
             A2aBlock::SelfMention,
+            A2aBlock::OwnerOnlyTarget,
         ];
         for name in ["[x](https://evil.example)", "https://evil.example/login"] {
             for block in &blocks {
@@ -677,6 +723,7 @@ mod tests {
             consecutive_auto_streak: 9,
             chain_tokens: i64::MAX / 2,
             chain_cost_micro_usd: i64::MAX / 2,
+            target_owner_only: false,
         };
         assert!(matches!(
             evaluate_a2a_spawn(&all, &limits),
@@ -777,6 +824,7 @@ mod tests {
                 chain_cost_micro_usd: 0,
             },
             A2aBlock::SelfMention,
+            A2aBlock::OwnerOnlyTarget,
         ];
         let mut codes: Vec<&str> = blocks.iter().map(A2aBlock::reason_code).collect();
         let total = codes.len();

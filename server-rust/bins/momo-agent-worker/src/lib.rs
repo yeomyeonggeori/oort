@@ -102,6 +102,13 @@ use momo_agent::tools::{
     ApprovalReason, ToolCall, ACTION_TYPE_TOOL_CALL, TOOL_AUDIT_SCHEMA, WORK_SESSION_SPAWN,
 };
 use momo_agent::{
+    agent_display_name_in_tx, hosted_skip_notice_body, hosted_skip_notice_key,
+    hosted_skip_notice_props, lock_and_find_recent_server_notice_in_tx, notice_thread_key,
+    HostedSkipReason, RecentNotice, HOSTED_SKIP_NOTICE_AUDIT_SCHEMA, HOSTED_SKIP_NOTICE_KIND,
+    HOSTED_SKIP_NOTICE_POSTED_ACTION, HOSTED_SKIP_NOTICE_SOURCE,
+    HOSTED_SKIP_NOTICE_THROTTLED_ACTION, HOSTED_SKIP_NOTICE_THROTTLE_SECONDS,
+};
+use momo_agent::{
     approval_reason, consume_run_step_in_tx, create_agent_run_in_tx, finish_run_in_tx,
     lock_gateway_run_in_tx, mark_run_started_in_tx, park_run_for_approval_in_tx,
     record_run_usage_in_tx, welcome_run_input, GatewayRunSnapshot, NewAgentRun, RunStatus,
@@ -112,8 +119,9 @@ use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::sqlx::postgres::PgListener;
 use momo_db::{with_tenant_tx, DbError, PgConnection, PgPool};
 use momo_messaging::{
-    patch_message_props_in_tx, send_message_in_tx, stream_message_body_in_tx, MessageType,
-    NewMessage, StreamCloseOutcome, StreamEdit, STREAM_PROPS_KEY,
+    patch_message_props_in_tx, send_message_in_tx, send_thread_notice_in_tx,
+    stream_message_body_in_tx, MessageType, NewMessage, StreamCloseOutcome, StreamEdit,
+    STREAM_PROPS_KEY,
 };
 use momo_outbox::{
     backoff_seconds, claim_agent_job_batch, mark_done, mark_failed, requeue, ClaimedAgentJob,
@@ -554,6 +562,16 @@ impl AgentWorker {
         };
 
         let mut transport = self.resolve_transport().await;
+
+        // #2897 (ADR-0135 D1: no silent fallback) — no team key, no model call,
+        // on every turn and not only the welcome's. Checked before anything
+        // runs, the approved tool of a resume included: a turn that cannot
+        // answer must not act either, and the placeholder env bearer must never
+        // be presented to an endpoint. The caller is told why in the #2871
+        // shape instead.
+        if !self.provider_is_configured(&transport) {
+            return self.settle_provider_required(&job, &payload, run_id).await;
+        }
 
         // queued → running. `false` is not an error: a run being retried after a
         // transient failure is still `failed` at this point, and its terminal
@@ -2273,6 +2291,13 @@ impl AgentWorker {
 
     fn provider_is_configured(&self, transport: &ResolvedTransport) -> bool {
         if transport.endpoint.source == ProviderSource::Database.as_str() {
+            // An OAuth link holds a grant, not a bearer: its access token is
+            // empty until the turn's own pre-flight refresh mints one, so the
+            // grant is what makes it a team key (#2897 — this check now gates
+            // every turn, not only the welcome).
+            if transport.is_oauth() {
+                return transport.credential.is_present();
+            }
             let bearer = transport.endpoint.bearer.trim();
             return !bearer.is_empty() && !is_unsafe_secret(bearer);
         }
@@ -2501,6 +2526,149 @@ impl AgentWorker {
                     Settlement::Failed => WelcomePrep::Failed,
                     _ => WelcomePrep::Requeued,
                 }
+            }
+        }
+    }
+
+    /// #2897 — a turn with no team key: close the run `failed`, and say why in
+    /// the conversation as a #2871 system line in the agent's name (the way
+    /// out is 설정 › AI 연결), at most once per person, thread and window. One
+    /// transaction: run close, line, audit and rail frame commit together
+    /// through the single message path. No model is called and nothing is
+    /// retried — only an operator adding a key changes the answer.
+    async fn settle_provider_required(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+    ) -> Settlement {
+        let workspace_id = job.workspace_id;
+        let channel_id = payload.channel_id;
+        let agent_member_id = payload.agent_member_id;
+        // The person the line is for. A job with no author (an A2A child's
+        // author is the delegating agent) still gets a line, keyed on the agent.
+        let recipient = payload.author_member_id.unwrap_or(agent_member_id);
+        let trigger_message_id = payload.trigger_message_id.unwrap_or(run_id);
+        let result = with_tenant_tx(&self.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                let Some(snapshot) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await?
+                else {
+                    return Ok(());
+                };
+                if snapshot.status == RunStatus::Cancelled {
+                    return Ok(());
+                }
+                // Answers land in the main timeline (root_id None), so the line
+                // does too, and the throttle keys on the channel.
+                let thread_key = notice_thread_key(channel_id, None);
+                let reason = HostedSkipReason::ProviderRequired;
+                let key = hosted_skip_notice_key(
+                    agent_member_id,
+                    channel_id,
+                    thread_key,
+                    recipient,
+                    reason,
+                );
+                let recent = lock_and_find_recent_server_notice_in_tx(
+                    conn,
+                    RecentNotice {
+                        key: &key,
+                        workspace_id,
+                        channel_id,
+                        author_member_id: agent_member_id,
+                        source: HOSTED_SKIP_NOTICE_SOURCE,
+                        kind_prop: "reason",
+                        kind: reason.as_str(),
+                        recipient_member_id: recipient,
+                        thread_key,
+                        window_seconds: HOSTED_SKIP_NOTICE_THROTTLE_SECONDS,
+                    },
+                )
+                .await?;
+                let mut detail = json!({
+                    "notice": HOSTED_SKIP_NOTICE_KIND,
+                    "reason": reason.as_str(),
+                    "channel_id": channel_id,
+                    "trigger_message_id": trigger_message_id,
+                    "thread_key": thread_key,
+                    "run_id": run_id,
+                });
+                let action = if recent {
+                    HOSTED_SKIP_NOTICE_THROTTLED_ACTION
+                } else {
+                    let name = agent_display_name_in_tx(conn, workspace_id, agent_member_id)
+                        .await?
+                        .unwrap_or_else(|| "에이전트".to_string());
+                    let sent = send_thread_notice_in_tx(
+                        conn,
+                        workspace_id,
+                        NewMessage {
+                            channel_id,
+                            author_member_id: agent_member_id,
+                            message_type: MessageType::System,
+                            body: Some(hosted_skip_notice_body(reason, &name)),
+                            props: hosted_skip_notice_props(
+                                reason,
+                                agent_member_id,
+                                recipient,
+                                thread_key,
+                                trigger_message_id,
+                            ),
+                            root_id: None,
+                            reply_to_id: None,
+                            // One line per run, whatever re-claims the job.
+                            client_msg_id: Some(run_id),
+                            run_id: Some(run_id),
+                            hlc_ts: None,
+                            hlc_count: None,
+                        },
+                    )
+                    .await?;
+                    if let Some(object) = detail.as_object_mut() {
+                        object.insert("notice_message_id".into(), json!(sent.message.id));
+                    }
+                    HOSTED_SKIP_NOTICE_POSTED_ACTION
+                };
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, action)
+                        .by(recipient)
+                        .about(agent_member_id)
+                        .run(run_id)
+                        .with_schema(HOSTED_SKIP_NOTICE_AUDIT_SCHEMA, detail),
+                )
+                .await?;
+                let error = json!({"code": PROVIDER_REQUIRED, "reason": "no team key"});
+                finish_run_in_tx(conn, run_id, false, &json!({}), Some(&error)).await?;
+                emit_terminal_agent_status(
+                    conn,
+                    workspace_id,
+                    snapshot.channel_id,
+                    snapshot.agent_member_id,
+                    run_id,
+                    RunStatus::Failed,
+                )
+                .await?;
+                Ok(())
+            })
+        })
+        .await;
+        match result {
+            Ok(()) => {
+                self.settle_done(job.id, Some(PROVIDER_REQUIRED)).await;
+                Settlement::Skipped
+            }
+            Err(error) => {
+                tracing::warn!(
+                    outbox_id = job.id,
+                    error = %error,
+                    "provider-required commit failed"
+                );
+                // A DB error: requeue under the ordinary budget. The endpoint
+                // passed is the (unused) env one, only for redaction.
+                let endpoint = self.resolve_transport().await.endpoint;
+                self.settle_retryable(job, &format!("provider-required: {error}"), &endpoint)
+                    .await
             }
         }
     }
@@ -2900,6 +3068,9 @@ const PROVIDER_FAILED: &str = "provider_failed";
 /// `agent_run.error.code` for a credential the provider would not accept —
 /// ADR-0004 §Rotation names this reason explicitly for 401/403.
 const PROVIDER_AUTH_FAILED: &str = "provider_auth_failed";
+/// #2897 — the run's error code (and the job's done reason) when a turn found
+/// no team key. The same word as the #2871 line's `props.reason`.
+const PROVIDER_REQUIRED: &str = "provider_required";
 
 /// How a turn ended, and — when it failed — under which name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

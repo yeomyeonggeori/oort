@@ -317,6 +317,25 @@ pub async fn load_mention_candidates_in_tx(
     Ok(candidates)
 }
 
+/// One agent member's display name, for a server line said in its name
+/// (#2897: the worker's `provider_required` line). `None` when the member is
+/// gone — the caller then says 「에이전트」 rather than nothing.
+pub async fn agent_display_name_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<Option<String>, DbError> {
+    let name: Option<String> = sqlx::query_scalar(
+        "SELECT display_name FROM member \
+          WHERE workspace_id = $1 AND id = $2 AND kind = 'agent'",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(name)
+}
+
 /// The candidate's `owner_only` facts, or `None` for a workspace agent.
 ///
 /// Migration 089's CHECK guarantees an `owner_only` row carries both an owner
