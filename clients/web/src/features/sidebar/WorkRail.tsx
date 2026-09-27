@@ -7,6 +7,7 @@ import {
   TEAM_WORK_PATH,
   WORK_NAV,
 } from "@momo/core/features/workbench/workTab";
+import { rememberRailReturn } from "./workRailReturn";
 
 // Reading this as: 작업 탭 레일(앱 사이드바가 접힌 모양) for internal team users on
 // Tauri desktop, density 7/10, motion 0/10.
@@ -58,24 +59,6 @@ function RailLink({
       </NavLink>
     </li>
   );
-}
-
-/**
- * 레일 단추로 「내 작업」을 떠나면 레일이 통째로 내려가고, 캐럿을 쥔 단추도 함께
- * 사라진다(design-review H1). 사이드바가 트리를 되살린 뒤 이 값으로 캐럿을 놓는다.
- * `undefined` = 레일에서 떠나지 않았다, `null` = 채널 목록에 같은 줄이 없다.
- */
-let pendingRailReturn: string | null | undefined;
-
-function rememberRailReturn(testId: string | null) {
-  pendingRailReturn = testId;
-}
-
-/** 한 번 읽으면 지운다. */
-export function takeRailReturn(): string | null | undefined {
-  const value = pendingRailReturn;
-  pendingRailReturn = undefined;
-  return value;
 }
 
 export function WorkRail({ footer }: { footer?: ReactNode }) {

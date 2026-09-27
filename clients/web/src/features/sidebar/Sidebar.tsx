@@ -69,7 +69,8 @@ import { SidebarNowCard } from "./SidebarNowCard";
 import { workspaceRailTile } from "./workspaceRailModel";
 import { KomettoMark } from "@/design/brand/KomettoMark";
 import { ProfileCard } from "./ProfileCard";
-import { WorkRail, takeRailReturn } from "./WorkRail";
+import { WorkRail } from "./WorkRail";
+import { takeRailReturn } from "./workRailReturn";
 import { isDesktop } from "@/lib/tauri";
 import {
   MY_WORK_PATH,
