@@ -97,7 +97,7 @@ import { useComposerDropZone } from "@/features/attachments/useComposerDropZone"
 import { ComposerAutocompleteList } from "@/features/chat/ComposerAutocompleteList";
 import { useComposerAutocomplete } from "@/features/chat/useComposerAutocomplete";
 import type { ComposerCandidate } from "@/features/chat/composerAutocomplete";
-import { openLocalCardIn } from "@/features/chat/localCards";
+import { hasLocalCardHost, openLocalCardIn } from "@/features/chat/localCards";
 import { rememberSettingsOpener } from "@/features/settings/settingsFocus";
 import { isDesktop } from "@/lib/tauri";
 import type {
@@ -443,8 +443,12 @@ export function Composer({
   // 그 글자를 덮어쓴다.
   const [text, setText] = useState(() => readDraft(workspaceId, channelId));
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  // 키 모양을 보고 전송을 막았는가 (#2942 GC-1). 막은 뒤 글을 고치면 내려간다.
-  const [secretBlocked, setSecretBlocked] = useState(false);
+  // 키 모양을 보고 전송을 막은 횟수 (#2942 GC-1). 0이면 경고가 없고, 막은 뒤
+  // 글을 고치면 0으로 내려간다. 횟수인 이유: 경고가 떠 있는 채 다시 ↵하면 줄을
+  // 새로 세워(key) 화면 낭독기가 다시 읽게 한다(design-review N-4).
+  const [secretBlocks, setSecretBlocks] = useState(0);
+  const secretBlocked = secretBlocks > 0;
+  const cardAvailable = hasLocalCardHost(channelId);
   const autocomplete = useComposerAutocomplete({
     value: text,
     members: directory.members,
@@ -452,11 +456,12 @@ export function Composer({
     inputRef,
     onValueChange: (next) => {
       setText(next);
-      setSecretBlocked(false);
+      setSecretBlocks(0);
       // 키 모양이 든 글은 저장소가 스스로 두지 않는다(`draftStore.writeDraft`).
       writeDraft(workspaceId, channelId, next);
     },
     onRunCommand: (candidate) => runCommandCandidate(candidate),
+    commandCardAvailable: cardAvailable,
   });
   const setAutocompleteCaret = autocomplete.setCaret;
   const closeAutocomplete = autocomplete.close;
@@ -632,7 +637,7 @@ export function Composer({
     setText(restored);
     setAutocompleteCaret(restored.length);
     closeAutocomplete();
-    setSecretBlocked(false);
+    setSecretBlocks(0);
     const save = () => writeDraft(workspaceId, channelId, textRef.current);
     window.addEventListener("pagehide", save);
     const onSeed = (event: Event) => {
@@ -735,7 +740,7 @@ export function Composer({
     // — 게이트 1번이 실측으로 잡은 자리다(`/연`이 초안에 남았다).
     textRef.current = "";
     setText("");
-    setSecretBlocked(false);
+    setSecretBlocks(0);
     clearDraft(workspaceId, channelId);
     autocomplete.close();
     format.dismiss();
@@ -759,7 +764,7 @@ export function Composer({
    */
   function trySend(): "sent" | "command" | "blocked" {
     if (containsSecretKey(text)) {
-      setSecretBlocked(true);
+      setSecretBlocks((count) => count + 1);
       return "blocked";
     }
     const parsed = parseSlashCommand(text);
@@ -939,8 +944,10 @@ export function Composer({
       <form onSubmit={onSubmit} className="relative p-3">
         {secretBlocked && (
           <SecretKeyBlockNotice
+            key={secretBlocks}
             id="composer-secret-block"
             testId="composer-secret-block"
+            cardAvailable={cardAvailable}
           />
         )}
         <ComposerAutocompleteList

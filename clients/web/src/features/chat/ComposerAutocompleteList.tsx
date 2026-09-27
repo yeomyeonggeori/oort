@@ -252,8 +252,11 @@ function CommandList({
                 }}
                 className={cn(
                   "flex w-full items-center gap-2 rounded-md px-3 py-row text-left text-body text-ink",
+                  // 키보드 강조는 hover와 다른 단계다(design-review M-1). 같은 색이면
+                  // 마우스가 다른 줄에 있을 때 「고른 줄」이 둘로 보인다. `@`·`#`·`:`
+                  // 목록과 같은 강조다.
                   on
-                    ? "bg-surface-hover active:bg-surface-pressed"
+                    ? "bg-accent-soft active:bg-surface-pressed"
                     : "hover:bg-surface-hover active:bg-surface-pressed"
                 )}
               >

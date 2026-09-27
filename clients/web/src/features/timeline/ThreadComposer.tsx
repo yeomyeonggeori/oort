@@ -40,6 +40,7 @@ import {
 import { useAutoGrow } from "./useAutoGrow";
 import { containsSecretKey } from "@momo/core/features/chat/secretKey";
 import { SecretKeyBlockNotice } from "@/features/chat/SecretKeyBlockNotice";
+import { hasLocalCardHost } from "@/features/chat/localCards";
 
 // =============================================================================
 // Writing a reply, from inside the thread (B11).
@@ -97,8 +98,9 @@ export function ThreadComposer({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // 키 모양을 보고 전송을 막았는가 (#2942 GC-1). 채널 컴포저와 같은 문이다.
-  const [secretBlocked, setSecretBlocked] = useState(false);
+  // 키 모양을 보고 전송을 막은 횟수 (#2942 GC-1). 채널 컴포저와 같은 문이다.
+  const [secretBlocks, setSecretBlocks] = useState(0);
+  const secretBlocked = secretBlocks > 0;
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const justComposedRef = useRef(false);
   const isMobile = useIsMobileShell();
@@ -109,7 +111,7 @@ export function ThreadComposer({
     inputRef: ref,
     onValueChange: (next) => {
       setDraft(next);
-      setSecretBlocked(false);
+      setSecretBlocks(0);
     },
     // `/` 명령은 넘기지 않는다: 로컬 카드는 채널 타임라인 꼬리에 붙고(brief
     // §3.2) 이 패널에는 그 자리가 없다. 그래서 여기서 `/`는 평문이다.
@@ -157,7 +159,7 @@ export function ThreadComposer({
     if (!canSend) return;
     // 키는 답글로도 보내지 않는다. 글은 남겨 두고 이유를 말한다.
     if (containsSecretKey(draft)) {
-      setSecretBlocked(true);
+      setSecretBlocks((count) => count + 1);
       return;
     }
     const body = draft.trim();
@@ -219,8 +221,10 @@ export function ThreadComposer({
         )}
         {secretBlocked && (
           <SecretKeyBlockNotice
+            key={secretBlocks}
             id="thread-composer-secret-block"
             testId="thread-composer-secret-block"
+            cardAvailable={hasLocalCardHost(channelId)}
           />
         )}
         <div className="relative">

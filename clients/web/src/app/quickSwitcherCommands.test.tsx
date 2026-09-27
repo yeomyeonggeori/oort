@@ -540,6 +540,37 @@ describe("AI 연결 카드 열기 (#2943 GC-2)", () => {
     }
   });
 
+  it("「ai 연결」을 치면 「명령」이 검색 줄보다 앞에 서고, 검색 줄은 남는다 (review H-2)", async () => {
+    await mount({ path: `/c/${CH}` });
+    const input = document.querySelector<HTMLInputElement>("[cmdk-input]")!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setter.call(input, "ai 연결");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await settle();
+    const order = [...document.querySelectorAll<HTMLElement>("[cmdk-item]")].map(
+      (node) => node.dataset.testid
+    );
+    const ai = order.indexOf("switcher-ai-connect");
+    const search = order.indexOf("switcher-message-search");
+    expect(ai).toBeGreaterThanOrEqual(0);
+    expect(search).toBeGreaterThan(ai);
+  });
+
+  it("명령과 안 맞는 말이면 검색 줄이 예전처럼 맨 앞이다", async () => {
+    await mount({ path: `/c/${CH}` });
+    const input = document.querySelector<HTMLInputElement>("[cmdk-input]")!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setter.call(input, "배포 로그 어제");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await settle();
+    const first = document.querySelector<HTMLElement>("[cmdk-item]");
+    expect(first?.dataset.testid).toBe("switcher-message-search");
+  });
+
   it("채널 밖에서는 다른 채널의 자리를 쓰지 않고 설정으로 간다", async () => {
     const host = vi.fn(() => true);
     const release = registerLocalCardHost(CH, host);

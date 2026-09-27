@@ -9,7 +9,16 @@ import { SECRET_KEY_BLOCK_COPY } from "@momo/core/features/chat/secretKey";
  * 줄을 쓴다 — 키는 어느 입력창에서든 같은 사고다. 입력창은 이 줄을 설명으로
  * 읽는다(`aria-describedby`).
  */
-export function SecretKeyBlockNotice({ id, testId }: { id: string; testId: string }) {
+export function SecretKeyBlockNotice({
+  id,
+  testId,
+  cardAvailable,
+}: {
+  id: string;
+  testId: string;
+  /** `/연결 팀키`가 지금 카드를 여는가, 설정으로 가는가(design-review M-2). */
+  cardAvailable: boolean;
+}) {
   return (
     <p
       id={id}
@@ -21,7 +30,7 @@ export function SecretKeyBlockNotice({ id, testId }: { id: string; testId: strin
       <span>
         {SECRET_KEY_BLOCK_COPY.lead}{" "}
         <b className="font-semibold">{SECRET_KEY_BLOCK_COPY.command}</b>
-        {SECRET_KEY_BLOCK_COPY.tail}
+        {cardAvailable ? SECRET_KEY_BLOCK_COPY.tail : SECRET_KEY_BLOCK_COPY.tailFallback}
       </span>
     </p>
   );

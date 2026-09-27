@@ -99,6 +99,7 @@ export function useComposerAutocomplete({
   inputRef,
   onValueChange,
   onRunCommand,
+  commandCardAvailable = false,
 }: {
   value: string;
   members: RosterMember[];
@@ -115,6 +116,11 @@ export function useComposerAutocomplete({
    * 지우는 일은 호출자(컴포저)가 진다 — 초안 저장소를 아는 것은 그쪽이다.
    */
   onRunCommand?: (candidate: ComposerCandidate) => void;
+  /**
+   * 이 채널에 로컬 카드 자리가 있는가(#2943). 명령 줄의 설명이 이 답을 따른다
+   * — ⌘K 줄의 작은 글씨와 같은 판정이다(design-review H-1).
+   */
+  commandCardAvailable?: boolean;
 }) {
   const [caret, setCaret] = useState(0);
   const [highlight, setHighlight] = useState(0);
@@ -136,10 +142,21 @@ export function useComposerAutocomplete({
     if (kind === "mention") return memberCandidates(members, queryText);
     if (kind === "channel") return channelCandidates(channels, queryText);
     if (kind === "command") {
-      return commandsEnabled ? commandCandidates(queryText) : NO_CANDIDATES;
+      return commandsEnabled
+        ? commandCandidates(queryText, undefined, commandCardAvailable)
+        : NO_CANDIDATES;
     }
     return emojiCandidates(entries, queryText, tone);
-  }, [kind, queryText, members, channels, entries, tone, commandsEnabled]);
+  }, [
+    kind,
+    queryText,
+    members,
+    channels,
+    entries,
+    tone,
+    commandsEnabled,
+    commandCardAvailable,
+  ]);
   const visible = candidates.length > 0;
   const spec = composerTriggerSpec(kind ?? "mention");
   const slug = spec.slug;

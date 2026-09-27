@@ -82,7 +82,7 @@ describe("③ 다른 세 트리거는 그대로", () => {
 
 describe("④ 후보는 레지스트리에서", () => {
   it("줄은 client 명령과 그 인자이고, 삽입 글자가 없다", () => {
-    const rows = commandCandidates("연");
+    const rows = commandCandidates("연", undefined, true);
     expect(rows.map((row) => row.lead)).toEqual([
       "/연결",
       "/연결 claude",
@@ -134,7 +134,7 @@ afterEach(() => {
   resetEscapeLayers();
 });
 
-function Probe({ commands }: { commands: boolean }) {
+function Probe({ commands, card = true }: { commands: boolean; card?: boolean }) {
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const auto = useComposerAutocomplete({
@@ -143,6 +143,7 @@ function Probe({ commands }: { commands: boolean }) {
     channels: [],
     inputRef,
     onValueChange: setValue,
+    commandCardAvailable: card,
     ...(commands
       ? {
           onRunCommand: (candidate: ComposerCandidate) => {
@@ -272,6 +273,20 @@ describe("④ 명령 줄은 실행이다", () => {
     mount(createElement(Probe, { commands: true }));
     typeAll("그럼 /연결");
     expect(options()).toEqual([]);
+  });
+});
+
+describe("④′ 카드 자리가 없으면 줄이 폴백을 말한다 (design-review H-1)", () => {
+  it("한 줄로 접히고 「나에게만」을 약속하지 않으며, ↵는 여전히 실행이다", () => {
+    mount(createElement(Probe, { commands: true, card: false }));
+    typeAll("/연");
+    const rows = options();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain("설정 › AI 연결로 이동");
+    expect(rows[0].textContent).not.toContain("나에게만");
+    press("Enter");
+    expect(ran.map((row) => row.command?.commandId)).toEqual(["ai.connect"]);
+    expect(sent).toEqual([]);
   });
 });
 

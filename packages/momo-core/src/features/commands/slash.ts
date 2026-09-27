@@ -89,8 +89,37 @@ function row(
 export function slashCandidates(
   query: string,
   commands: readonly Command[] = slashCommands(),
-  limit = SLASH_CANDIDATE_LIMIT
+  limit = SLASH_CANDIDATE_LIMIT,
+  options: { cardAvailable?: boolean } = {}
 ): SlashCandidate[] {
+  const rows = matchSlash(query, commands);
+  if (options.cardAvailable === true) return rows.slice(0, limit);
+  // 카드 자리가 없으면(채널 밖, GC-3 전) 명령은 설정으로 폴백한다. 인자 줄은
+  // 전부 같은 곳으로 가므로 명령당 한 줄로 접고, 설명도 그 폴백을 말한다
+  // (design-review H-1: 입구마다 같은 명령이 다른 약속을 하지 않게).
+  const seen = new Set<string>();
+  const folded: SlashCandidate[] = [];
+  for (const row of rows) {
+    if (seen.has(row.commandId)) continue;
+    seen.add(row.commandId);
+    const command = commands.find((candidate) => candidate.id === row.commandId);
+    const spec = command?.slash;
+    if (command === undefined || spec === undefined) continue;
+    const label = row.label.split(" ")[0];
+    folded.push({
+      id: command.id,
+      commandId: command.id,
+      label,
+      hint: spec.fallbackHint,
+      icon: command.icon,
+      args: {},
+      matched: Math.min(row.matched, label.length),
+    });
+  }
+  return folded.slice(0, limit);
+}
+
+function matchSlash(query: string, commands: readonly Command[]): SlashCandidate[] {
   if (/\n/.test(query)) return [];
   const parts = query.split(" ");
   if (parts.length > 2) return [];
@@ -120,7 +149,7 @@ export function slashCandidates(
       }
     }
   }
-  return out.slice(0, limit);
+  return out;
 }
 
 /** 본문 전체가 명령 하나로 읽히면 그 명령과 인자. */

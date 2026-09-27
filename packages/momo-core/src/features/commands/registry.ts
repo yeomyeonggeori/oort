@@ -187,8 +187,14 @@ export interface SlashSpec {
   readonly name: string;
   /** 별칭(`/` 없이). 정본과 같은 명령을 연다. */
   readonly aliases: readonly string[];
-  /** 목록 줄 아래 흐린 설명. */
+  /** 목록 줄 아래 흐린 설명. 카드 자리가 있을 때의 말이다. */
   readonly hint: string;
+  /**
+   * 카드 자리가 **없을 때**의 설명(#2943 design-review H-1). 그때 명령은 설정으로
+   * 폴백하므로 「나에게만 보여요」·「줄만 펼쳐」를 약속하지 않는다. 팔레트 줄의
+   * `metaFor`와 같은 판정(`canOpenLocalCard`)을 따른다.
+   */
+  readonly fallbackHint: string;
   readonly args: readonly SlashArg[];
 }
 
@@ -370,6 +376,7 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
       name: "연결",
       aliases: ["connect", "ai"],
       hint: "AI 연결 카드 열기 · 나에게만 보여요",
+      fallbackHint: "설정 › AI 연결로 이동 · 메시지로 보내지 않아요",
       args: [
         {
           value: "claude",

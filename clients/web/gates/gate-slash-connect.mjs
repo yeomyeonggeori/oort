@@ -236,9 +236,11 @@ async function exercise(browser) {
   const options = page.getByTestId("composer-command-option");
   await options.first().waitFor({ timeout: 5_000 });
   const labels = await options.allTextContents();
-  if (labels.length !== 4) fail(`/연 목록이 4줄이 아니다: ${JSON.stringify(labels)}`);
-  if (!labels[0].includes("/연결") || !labels[0].includes("나에게만 보여요"))
-    fail(`첫 줄이 「/연결 · 나에게만 보여요」가 아니다: ${labels[0]}`);
+  // 카드 자리가 없는 채널(GC-3 전): 명령당 한 줄, 설정 폴백을 말한다(review H-1).
+  if (labels.length !== 1) fail(`/연 목록이 한 줄로 접히지 않았다: ${JSON.stringify(labels)}`);
+  if (!labels[0].includes("/연결") || !labels[0].includes("설정 › AI 연결로 이동"))
+    fail(`첫 줄이 설정 폴백을 말하지 않는다: ${labels[0]}`);
+  if (labels[0].includes("나에게만")) fail("카드 자리가 없는데 「나에게만」을 약속한다");
   const expanded = await input.getAttribute("aria-expanded");
   if (expanded !== "true") fail("목록이 떴는데 입력창 aria-expanded 가 참이 아니다");
   await page.keyboard.press("Enter");
@@ -247,7 +249,7 @@ async function exercise(browser) {
   if (landed !== "#/settings?section=ai") fail(`/연결 ↵ 가 설정 › AI 연결로 가지 않았다: ${landed}`);
   if (posted.length !== 0) fail(`명령이 메시지로 전송됐다: ${JSON.stringify(posted)}`);
   if ((await draftsHold(page, "/연")) !== null) fail("명령 글자가 초안에 남았다");
-  console.log(`[1] /연 → 4줄 → ↵ → ${landed}, 전송 0`);
+  console.log(`[1] /연 → 한 줄(설정 폴백) → ↵ → ${landed}, 전송 0`);
 
   // ---- 1b. 목록을 Esc로 닫고 ↵ 해도 명령은 메시지가 아니다 --------------------
   await openChannel(page);
@@ -304,11 +306,18 @@ async function exercise(browser) {
   await row5.waitFor({ timeout: 5_000 });
   const meta = await row5.textContent();
   if (!meta?.includes("설정에서 열려요")) fail(`카드 자리가 없는데 줄이 「설정에서 열려요」를 말하지 않는다: ${meta}`);
-  await row5.click();
+  // 시안 ①: 「ai 연결」을 치면 첫 강조가 「AI 연결 카드 열기」다(review H-2).
+  await page.keyboard.type("ai 연결");
+  await wait(300);
+  const selected = await page.locator('[cmdk-item][aria-selected="true"]').getAttribute("data-testid");
+  if (selected !== "switcher-ai-connect") fail(`「ai 연결」의 첫 강조가 카드 열기가 아니다: ${selected}`);
+  if ((await page.getByTestId("switcher-message-search").count()) !== 1)
+    fail("명령이 앞에 서며 메시지 검색 줄이 사라졌다(R1 B-2)");
+  await page.keyboard.press("Enter");
   await page.waitForFunction(() => window.location.hash.startsWith("#/settings"), undefined, { timeout: 5_000 });
   if ((await hash(page)) !== "#/settings?section=ai") fail("⌘K 줄이 설정 › AI 연결로 가지 않았다");
   if (posted.length !== 1) fail("⌘K 줄이 무언가를 전송했다");
-  console.log("[5] ⌘K AI 연결 카드 열기 → #/settings?section=ai (GC-3 전 폴백)");
+  console.log("[5] ⌘K 「ai 연결」 첫 강조 = AI 연결 카드 열기 → ↵ → #/settings?section=ai (GC-3 전 폴백), 검색 줄 유지");
 
   await context.close();
 }
@@ -316,7 +325,7 @@ async function exercise(browser) {
 async function captureShots(browser) {
   const outDir = resolve(webRoot, "captures/2942");
   mkdirSync(outDir, { recursive: true });
-  for (const width of [1280, 900]) {
+  for (const width of [1280, 900, 390]) {
     for (const scheme of ["light", "dark"]) {
       const context = await browser.newContext({
         viewport: { width, height: 760 },
@@ -341,13 +350,10 @@ async function captureShots(browser) {
 
       await page.keyboard.press("Escape");
       await input.fill(`/연결 ${FAKE_KEY}`);
-      await page.keyboard.press("Enter");
+      // 폰 폭에서 ↵는 줄바꿈이다(goal B8 H4). 두 폭이 같은 문을 지나도록 버튼으로 보낸다.
+      await page.getByTestId("composer-send").click();
       await page.getByTestId("composer-secret-block").waitFor();
-      // 캡처에 키 꼬리가 그대로 찍히지 않게 입력창만 가린다(시안도 마스킹이다).
-      await page.evaluate(() => {
-        const node = document.querySelector('[data-testid="composer-input"]');
-        if (node) node.style.webkitTextSecurity = "disc";
-      });
+      // 제품이 그리는 그대로 찍는다(review M-3). FAKE_KEY 는 합성 값이다.
       await wait(200);
       await page.screenshot({ path: resolve(outDir, `key-block-${width}-${scheme}.png`) });
 
@@ -360,7 +366,7 @@ async function captureShots(browser) {
       await context.close();
     }
   }
-  console.log("[shots] captures/2942/{slash-menu,key-block,palette}-{1280,900}-{light,dark}.png");
+  console.log("[shots] captures/2942/{slash-menu,key-block,palette}-{1280,900,390}-{light,dark}.png");
 }
 
 async function main() {

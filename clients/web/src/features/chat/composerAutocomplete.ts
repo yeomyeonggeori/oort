@@ -491,9 +491,11 @@ export function emojiCandidates(
  */
 export function commandCandidates(
   query: string,
-  limit = COMPOSER_CANDIDATE_LIMIT
+  limit = COMPOSER_CANDIDATE_LIMIT,
+  /** 이 채널에 카드 자리가 있는가. 없으면 줄이 설정 폴백을 말한다(H-1). */
+  cardAvailable = false
 ): ComposerCandidate[] {
-  return slashCandidates(query, undefined, limit).map((row) => ({
+  return slashCandidates(query, undefined, limit, { cardAvailable }).map((row) => ({
     kind: "command" as const,
     id: row.id,
     lead: row.label,

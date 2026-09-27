@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { parseSlashCommand, slashCandidates, slashCommandById } from "./slash";
 import type { CommandContext } from "./registry";
 
-const labels = (query: string) => slashCandidates(query).map((row) => row.label);
+const WITH_CARD = { cardAvailable: true } as const;
+const labels = (query: string) =>
+  slashCandidates(query, undefined, undefined, WITH_CARD).map((row) => row.label);
 
 describe("슬래시 후보 (#2942 GC-1)", () => {
   it("`/`만 치면 레지스트리의 client 명령과 그 인자가 선다", () => {
@@ -10,7 +12,7 @@ describe("슬래시 후보 (#2942 GC-1)", () => {
   });
 
   it("앞머리로 고르고, 친 글자 수를 강조 길이로 준다(시안 `/연`)", () => {
-    const rows = slashCandidates("연");
+    const rows = slashCandidates("연", undefined, undefined, WITH_CARD);
     expect(rows.map((row) => row.label)).toEqual([
       "/연결",
       "/연결 claude",
@@ -45,6 +47,22 @@ describe("슬래시 후보 (#2942 GC-1)", () => {
     expect(labels("연결 해 주세요")).toEqual([]);
     expect(labels("연결 gpt")).toEqual([]);
     expect(labels("연결\n다음 줄")).toEqual([]);
+  });
+});
+
+describe("카드 자리가 없으면 폴백을 말한다 (design-review H-1)", () => {
+  it("인자 줄을 명령당 한 줄로 접고 설정 이동을 말한다", () => {
+    const rows = slashCandidates("연");
+    expect(rows.map((row) => row.label)).toEqual(["/연결"]);
+    expect(rows[0].hint).toBe("설정 › AI 연결로 이동 · 메시지로 보내지 않아요");
+    expect(rows[0].hint).not.toContain("나에게만");
+    expect(rows[0].matched).toBe(2);
+  });
+
+  it("인자까지 친 질의도 명령 한 줄로 받는다", () => {
+    expect(slashCandidates("연결 c").map((row) => row.label)).toEqual(["/연결"]);
+    expect(slashCandidates("connect 팀").map((row) => row.label)).toEqual(["/connect"]);
+    expect(slashCandidates("연결 gpt")).toEqual([]);
   });
 });
 
