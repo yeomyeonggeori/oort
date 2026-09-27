@@ -82,6 +82,7 @@ export function HarnessLoginDialog({
   onConnected,
   onFallbackStarted,
   focusAfterConnected,
+  onLoginEnded,
   fixture,
 }: {
   /** 로그인할 CLI. null이면 닫혀 있다. */
@@ -97,6 +98,11 @@ export function HarnessLoginDialog({
    * 쓴다. 없으면 AI 연결 화면의 그 줄 라디오, 그것도 없으면 연 단추.
    */
   focusAfterConnected?: () => HTMLElement | null;
+  /**
+   * 모달이 닫힌 뒤 로그인 CLI가 정말 끝났는지(#2996 재검수 M-1). 끝나야 부른 쪽이
+   * 방금 만든 폴더를 치울 수 있다. false = 제한 시간 안에 끝나지 않았다.
+   */
+  onLoginEnded?: (ended: boolean) => void;
   method?: HarnessLoginMethod;
   onClose: () => void;
   /** 상태 명령이 로그인됨을 알렸다. 부른 쪽이 목록을 다시 묻는다. */
@@ -118,6 +124,7 @@ export function HarnessLoginDialog({
           harness={harness}
           profile={profile}
           focusAfterConnected={focusAfterConnected}
+          onLoginEnded={onLoginEnded}
           method={fixture?.method ?? method}
           onClose={onClose}
           onConnected={onConnected}
@@ -135,8 +142,11 @@ function useController(
   harness: LocalHarnessId,
   profile: string | null,
   method: HarnessLoginMethod,
-  fixture: HarnessLoginFixture | null
+  fixture: HarnessLoginFixture | null,
+  onLoginEnded: ((ended: boolean) => void) | undefined
 ): LoginController | null {
+  const endedRef = useRef(onLoginEnded);
+  endedRef.current = onLoginEnded;
   const controller = useMemo(
     () =>
       fixture
@@ -162,7 +172,11 @@ function useController(
   useEffect(() => {
     if (!controller) return;
     controller.open();
-    return () => controller.dispose();
+    return () => {
+      controller.dispose();
+      const report = endedRef.current;
+      if (report) void controller.whenEnded().then(report);
+    };
   }, [controller]);
   return controller;
 }
@@ -171,6 +185,7 @@ function LoginDialogBody({
   harness,
   profile,
   focusAfterConnected,
+  onLoginEnded,
   method,
   onClose,
   onConnected,
@@ -180,13 +195,14 @@ function LoginDialogBody({
   harness: LocalHarnessId;
   profile: string | null;
   focusAfterConnected: (() => HTMLElement | null) | undefined;
+  onLoginEnded: ((ended: boolean) => void) | undefined;
   method: HarnessLoginMethod;
   onClose: () => void;
   onConnected: (harness: LocalHarnessId) => void;
   onFallbackStarted: (harness: LocalHarnessId) => void;
   fixture: HarnessLoginFixture | null;
 }) {
-  const controller = useController(harness, profile, method, fixture);
+  const controller = useController(harness, profile, method, fixture, onLoginEnded);
   const live = useSyncExternalStore(
     controller?.subscribe ?? noopSubscribe,
     controller?.getState ?? (() => IDLE_STATE),

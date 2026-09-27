@@ -37,6 +37,10 @@ mod harness_path;
 // which only `capabilities/harness-profile.json` grants.
 #[cfg(desktop)]
 mod harness_profile;
+// The removal gate's structured "signed out?" check (ADR-0190 D3-d, #2878):
+// `claude auth status --json` / `codex app-server` account/read, one field each.
+#[cfg(desktop)]
+mod profile_signout;
 // `claude auth status` / `codex login status`, exit code only (#2813,
 // ADR-0190 D3-a). The only harness commands the shell runs on its own.
 #[cfg(desktop)]

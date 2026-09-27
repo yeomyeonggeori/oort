@@ -236,6 +236,7 @@ function MyAccountRows({ onAddApiKey }: { onAddApiKey?: () => void }) {
   const [hidden, setHidden] = useState<LocalHarnessId[]>(readHiddenDefaults);
   const [login, setLogin] = useState<LoginTarget | null>(null);
   const loginConnected = useRef(false);
+  const pendingDiscard = useRef<AddSubscriptionDraft | null>(null);
   const [adding, setAdding] = useState<{
     draft: AddSubscriptionDraft | null;
   } | null>(null);
@@ -336,16 +337,27 @@ function MyAccountRows({ onAddApiKey }: { onAddApiKey?: () => void }) {
     setLogin(null);
     if (!target) return;
     if (target.fresh && !loginConnected.current) {
-      // 방금 만든 폴더인데 연결되지 않았다: 셸이 로그인 안 됨을 확인하고 지운다.
-      // 그리고 추가 창으로 돌아온다(값을 들고).
-      const draft = target.fresh;
-      void harnessProfileRemove({ harness: draft.harness, label: draft.label })
-        .catch(() => "unknown" as const)
-        .finally(refreshProfiles);
-      setAdding({ draft });
+      // 방금 만든 폴더인데 연결되지 않았다. 추가 창으로 돌아오고(값을 들고),
+      // 폴더 정리는 로그인 CLI가 정말 끝난 뒤(`onLoginEnded`)에 셸에 맡긴다. 셸은
+      // 해제와 같은 조건(CLI의 구조화된 「로그인 안 됨」)으로만 지운다(#2996 M-1).
+      pendingDiscard.current = target.fresh;
+      setAdding({ draft: target.fresh });
       return;
     }
     refreshProfiles();
+  };
+
+  const onLoginEnded = (ended: boolean) => {
+    const draft = pendingDiscard.current;
+    pendingDiscard.current = null;
+    if (!draft || !ended) {
+      // 끝나지 않은 CLI 옆에서는 치우지 않는다: 폴더는 「로그인 필요」 줄로 남는다.
+      refreshProfiles();
+      return;
+    }
+    void harnessProfileRemove({ harness: draft.harness, label: draft.label })
+      .catch(() => "unknown" as const)
+      .finally(refreshProfiles);
   };
 
   const moreId = (row: Pick<MyAccountRow, "harness" | "profile">) =>
@@ -466,6 +478,7 @@ function MyAccountRows({ onAddApiKey }: { onAddApiKey?: () => void }) {
         }}
         onFallbackStarted={(id) => harness.recheck(id)}
         fixture={loginFixture}
+        onLoginEnded={onLoginEnded}
         focusAfterConnected={() =>
           login
             ? document.querySelector<HTMLElement>(

@@ -229,34 +229,6 @@ fn probe_live() -> Vec<LocalHarnessProbe> {
     )
 }
 
-/// Removal gate for a profile folder (#2878 security review M-2): the raw exit
-/// status of the D3-a command run with that folder's variable, so the caller
-/// can demand the one code that means "signed out" instead of "anything but
-/// 0". `Ok(None)` = the command did not answer (not installed, timed out).
-pub fn profile_exit_status(
-    harness: &str,
-    env: &str,
-    dir: &Path,
-    home: &Path,
-) -> Result<Option<ExitStatus>, String> {
-    let command = STATUS_COMMANDS
-        .iter()
-        .find(|row| row.id == harness)
-        .ok_or_else(|| format!("refused: no status command for {harness:?}"))?;
-    let search_path = harness_path::current_search_path();
-    let Some(program) = harness_path::find_on_path(command.program, &search_path) else {
-        return Ok(None);
-    };
-    Ok(run_status(
-        &program,
-        command,
-        &search_path,
-        Some(home),
-        Some((env, dir)),
-        STATUS_TIMEOUT,
-    ))
-}
-
 /// The same status command against one profile folder (#2878, ADR-0190 D3-f
 /// 「완료 판정은 D3-a 상태 명령이다」). `harness_profile` resolves and checks the
 /// folder; this only runs the allowlisted row with that folder's variable.
@@ -451,20 +423,16 @@ mod tests {
                     continue;
                 }
                 let calls = src.matches("harness_status::").count();
-                // lib.rs: the command. harness_profile.rs (#2878): the import
-                // and the D3-a probe of one checked profile folder.
+                // lib.rs: the command. harness_profile.rs (#2878): the probe
+                // type and the D3-a probe of one checked profile folder.
                 let allowed = match name.as_str() {
                     "lib.rs" => 1,
-                    "harness_profile.rs" => 3,
+                    "harness_profile.rs" => 2,
                     _ => 0,
                 };
                 assert_eq!(calls, allowed, "{name} calls into harness_status {calls}x");
                 if name == "harness_profile.rs" {
                     assert_eq!(src.matches("harness_status::probe_profile(").count(), 1);
-                    assert_eq!(
-                        src.matches("harness_status::profile_exit_status(").count(),
-                        1
-                    );
                 }
                 for needle in [
                     "detect_local_harnesses",

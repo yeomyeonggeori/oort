@@ -22,7 +22,7 @@ describe("라벨 (셸 check_label과 같은 규칙)", () => {
     for (const ok of ["개인", "회사", "work-2", "Team (Max)", "가".repeat(PROFILE_LABEL_MAX)]) {
       expect(profileLabelProblem(ok), ok).toBeNull();
     }
-    for (const bad of ["", "  ", ".", "..", ".hidden", "a/b", "../x", "/tmp/x", "a\\b", "a:b", "a\nb", "회\u200b사", "\u202elabel", "가".repeat(PROFILE_LABEL_MAX + 1)]) {
+    for (const bad of ["", "  ", ".", "..", ".hidden", "a/b", "../x", "/tmp/x", "a\\b", "a:b", "a\nb", "회\u200b사", "\u202elabel", "\u3164", "a\u00a0b", "a\u3000b", "가".repeat(PROFILE_LABEL_MAX + 1)]) {
       expect(profileLabelProblem(bad), JSON.stringify(bad)).not.toBeNull();
     }
     expect(profileLabelProblem("회사", ["회사"])).toBe("이 이름의 계정이 이미 있어요.");

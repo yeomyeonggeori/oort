@@ -32,9 +32,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use std::process::ExitStatus;
-
 use crate::harness_status;
+use crate::profile_signout::{self, SignOut};
 
 /// Harnesses that take a profile folder, and the variable that points the
 /// official CLI at it (ADR-0191 D1). Grok has no profile yet (Q7).
@@ -160,6 +159,21 @@ fn is_invisible(c: char) -> bool {
             | '\u{2066}'..='\u{206F}'
             | '\u{FEFF}'
             | '\u{FFF9}'..='\u{FFFB}'
+            // Hangul fillers that render as nothing (#2996 re-review N-1).
+            | '\u{115F}'
+            | '\u{1160}'
+            | '\u{3164}'
+            | '\u{FFA0}'
+            // Line/paragraph separators and non-ASCII spaces: 「a b」 and
+            // 「a\u{00A0}b」 must not become two folders.
+            | '\u{2028}'
+            | '\u{2029}'
+            | '\u{00A0}'
+            | '\u{1680}'
+            | '\u{2000}'..='\u{200A}'
+            | '\u{202F}'
+            | '\u{205F}'
+            | '\u{3000}'
     )
 }
 
@@ -401,35 +415,22 @@ pub enum RemoveOutcome {
     Unknown,
 }
 
-/// The one exit code the status commands give for "not signed in", measured
-/// on `claude` 2.1.283 (`auth status`) and `codex-cli` 0.156.1 (`login
-/// status`) against an empty profile folder. Deletion demands exactly this:
-/// any other non-zero (a crash, a broken config, a changed subcommand) is
-/// "unknown" and keeps the folder (#2878 security review M-2). The status
-/// pill keeps its looser reading (`auth_from_exit` in the status module).
-pub const SIGNED_OUT_EXIT_CODE: i32 = 1;
-
-/// Status exit → what removal may do.
-pub fn removal_gate(status: Option<ExitStatus>) -> Option<RemoveOutcome> {
-    match status.map(|s| (s.success(), s.code())) {
-        Some((true, _)) => Some(RemoveOutcome::StillSignedIn),
-        Some((false, Some(SIGNED_OUT_EXIT_CODE))) => None,
-        _ => Some(RemoveOutcome::Unknown),
-    }
-}
-
-/// Delete a profile folder the official CLI has signed out of. `status` is
-/// the D3-a status command run with the folder's variable, as a raw exit
-/// status (injected by tests).
+/// Delete a profile folder the official CLI has signed out of. `check` is
+/// the structured sign-out check (`profile_signout`, D3-d) run with the
+/// folder's variable (injected by tests). Only an explicit "signed out" in
+/// the CLI's own structured output deletes: an exit code cannot tell a crash
+/// from a sign-out, both CLIs end either with 1 (PR #2996 re-review M-1).
 pub fn remove_profile(
     home: &Path,
     harness: &str,
     label: &str,
-    status: impl FnOnce(&str, &str, &Path) -> Option<ExitStatus>,
+    check: impl FnOnce(&str, &str, &Path) -> SignOut,
 ) -> Result<RemoveOutcome, String> {
     let (dir, env) = existing_profile(home, harness, label)?;
-    if let Some(kept) = removal_gate(status(harness, env, &dir)) {
-        return Ok(kept);
+    match check(harness, env, &dir) {
+        SignOut::SignedOut => {}
+        SignOut::SignedIn => return Ok(RemoveOutcome::StillSignedIn),
+        SignOut::Unknown => return Ok(RemoveOutcome::Unknown),
     }
     // Re-check right before deleting: the status command ran for seconds.
     check_on_disk(home, &dir)?;
@@ -483,11 +484,7 @@ pub async fn harness_profile_remove(profile: ProfileRef) -> Result<RemoveOutcome
             &home,
             &profile.harness,
             &profile.label,
-            |harness, env, dir| {
-                harness_status::profile_exit_status(harness, env, dir, &home)
-                    .ok()
-                    .flatten()
-            },
+            |harness, env, dir| profile_signout::check_signed_out(harness, env, dir, &home),
         )
     })
     .await
@@ -531,13 +528,8 @@ mod tests {
         }
     }
 
-    fn exit(code: i32) -> Option<ExitStatus> {
-        use std::os::unix::process::ExitStatusExt;
-        Some(ExitStatus::from_raw(code << 8))
-    }
-
-    fn signed_out(_: &str, _: &str, _: &Path) -> Option<ExitStatus> {
-        exit(SIGNED_OUT_EXIT_CODE)
+    fn signed_out(_: &str, _: &str, _: &Path) -> SignOut {
+        SignOut::SignedOut
     }
 
     #[test]
@@ -666,12 +658,12 @@ mod tests {
         create_profile(&home.0, "claude", "개인").unwrap();
         let dir = home.root().join("claude/개인");
         assert_eq!(
-            remove_profile(&home.0, "claude", "개인", |_, _, _| exit(0)).unwrap(),
+            remove_profile(&home.0, "claude", "개인", |_, _, _| SignOut::SignedIn).unwrap(),
             RemoveOutcome::StillSignedIn
         );
         assert!(dir.is_dir());
         assert_eq!(
-            remove_profile(&home.0, "claude", "개인", |_, _, _| None).unwrap(),
+            remove_profile(&home.0, "claude", "개인", |_, _, _| SignOut::Unknown).unwrap(),
             RemoveOutcome::Unknown
         );
         assert!(dir.is_dir());
@@ -685,7 +677,7 @@ mod tests {
         let mut seen = None;
         remove_profile(&home.0, "codex", "회사", |harness, env, dir| {
             seen = Some((harness.to_string(), env.to_string(), dir.to_path_buf()));
-            exit(0)
+            SignOut::SignedIn
         })
         .unwrap();
         assert_eq!(
@@ -713,7 +705,7 @@ mod tests {
         let mut ran = false;
         let err = remove_profile(&home.0, "claude", "evil", |_, _, _| {
             ran = true;
-            exit(SIGNED_OUT_EXIT_CODE)
+            SignOut::SignedOut
         })
         .unwrap_err();
         assert!(err.contains("symlink"), "{err}");
@@ -805,35 +797,60 @@ mod tests {
             .contains("default folder"));
     }
 
-    /// Only the measured "signed out" code deletes; any other non-zero keeps
-    /// the folder (#2878 security review M-2).
+    /// Only an explicit structured "signed out" deletes; "signed in" and
+    /// "unknown" keep the folder (PR #2996 re-review Medium-1).
     #[test]
-    fn only_the_signed_out_code_opens_the_removal_gate() {
-        assert_eq!(removal_gate(exit(SIGNED_OUT_EXIT_CODE)), None);
-        assert_eq!(removal_gate(exit(0)), Some(RemoveOutcome::StillSignedIn));
-        for code in [2, 3, 9, 126, 127, 255] {
-            assert_eq!(
-                removal_gate(exit(code)),
-                Some(RemoveOutcome::Unknown),
-                "{code}"
-            );
-        }
-        assert_eq!(removal_gate(None), Some(RemoveOutcome::Unknown));
-        {
-            use std::os::unix::process::ExitStatusExt;
-            // Killed by a signal: no code.
-            assert_eq!(
-                removal_gate(Some(ExitStatus::from_raw(9))),
-                Some(RemoveOutcome::Unknown)
-            );
-        }
+    fn only_a_structured_signed_out_opens_the_removal_gate() {
         let home = Home::new("gate");
         create_profile(&home.0, "claude", "개인").unwrap();
         assert_eq!(
-            remove_profile(&home.0, "claude", "개인", |_, _, _| exit(2)).unwrap(),
+            remove_profile(&home.0, "claude", "개인", |_, _, _| SignOut::Unknown).unwrap(),
             RemoveOutcome::Unknown
         );
+        assert_eq!(
+            remove_profile(&home.0, "claude", "개인", |_, _, _| SignOut::SignedIn).unwrap(),
+            RemoveOutcome::StillSignedIn
+        );
         assert!(home.root().join("claude/개인").is_dir());
+    }
+
+    /// End to end with a fake `claude` on PATH: a crash that exits 1 keeps the
+    /// folder, a real structured "signed out" deletes it.
+    #[test]
+    fn a_fake_cli_crash_keeps_the_folder_and_a_real_sign_out_deletes_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = Home::new("e2e");
+        let bin = home.0.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let path = std::env::join_paths([bin.clone(), "/bin".into(), "/usr/bin".into()]).unwrap();
+        let write = |body: &str| {
+            let f = bin.join("claude");
+            std::fs::write(&f, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        create_profile(&home.0, "claude", "회사").unwrap();
+        let check = |harness: &str, env: &str, dir: &Path| {
+            profile_signout::check_with(
+                harness,
+                env,
+                dir,
+                &home.0,
+                &path,
+                std::time::Duration::from_secs(5),
+            )
+        };
+        write("echo 'TypeError: cannot read keychain' >&2\nexit 1");
+        assert_eq!(
+            remove_profile(&home.0, "claude", "회사", check).unwrap(),
+            RemoveOutcome::Unknown
+        );
+        assert!(home.root().join("claude/회사").is_dir());
+        write("echo '{\"loggedIn\": false, \"authMethod\": \"none\"}'\nexit 1");
+        assert_eq!(
+            remove_profile(&home.0, "claude", "회사", check).unwrap(),
+            RemoveOutcome::Removed
+        );
+        assert!(!home.root().join("claude/회사").exists());
     }
 
     /// A label that reaches the folder only through the file system's
@@ -852,7 +869,7 @@ mod tests {
             let mut ran = false;
             let result = remove_profile(&home.0, "claude", variant, |_, _, _| {
                 ran = true;
-                exit(SIGNED_OUT_EXIT_CODE)
+                SignOut::SignedOut
             });
             assert!(result.is_err(), "{variant:?}: {result:?}");
             assert!(!ran, "{variant:?}: status ran");
@@ -879,7 +896,7 @@ mod tests {
         let err = remove_profile(&home.0, "codex", "개인", |_, _, d| {
             std::fs::remove_dir_all(d).unwrap();
             symlink(&default, d).unwrap();
-            exit(SIGNED_OUT_EXIT_CODE)
+            SignOut::SignedOut
         })
         .unwrap_err();
         assert!(err.contains("symlink"), "{err}");
@@ -934,9 +951,16 @@ mod tests {
             "a\u{FEFF}",
             "a\u{2066}b",
             "soft\u{00AD}hy",
+            "\u{3164}",
+            "\u{115F}x",
+            "a\u{00A0}b",
+            "a\u{2028}b",
+            "a\u{3000}b",
         ] {
             assert!(check_label(bad).is_err(), "{bad:?}");
         }
+        // An ordinary space in the middle stays allowed.
+        assert!(check_label("Team (Max)").is_ok());
     }
 
     #[test]

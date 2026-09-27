@@ -45,7 +45,7 @@ export function profileLabelProblem(raw: string, taken: readonly string[] = []):
   // eslint-disable-next-line no-control-regex
   if (/[/\\:\u0000-\u001f\u007f]/.test(label)) return "라벨에는 / \\ : 기호를 쓸 수 없어요.";
   // 보이지 않거나 글자 순서를 뒤집는 문자(셸 `is_invisible`와 같은 목록).
-  if (/[\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb]/.test(label)) {
+  if (/[\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb\u115f\u1160\u3164\uffa0\u2028\u2029\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/.test(label)) {
     return "라벨에 보이지 않는 문자가 있어요.";
   }
   if (taken.includes(label)) return "이 이름의 계정이 이미 있어요.";

@@ -66,8 +66,44 @@ export function createLoginController(
   const setTimer = deps.setTimer ?? ((run, ms) => setTimeout(run, ms));
   const clearTimer =
     deps.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
+  // 이 컨트롤러가 띄운 PTY가 아직 살아 있는가(#2996 재검수 M-1). 취소한 뒤 새
+  // 프로필 폴더를 치우려면, 로그인 CLI가 정말 끝난 뒤여야 한다: 끝나기 전에 치우면
+  // CLI가 자격을 마저 쓰거나 폴더를 되살릴 수 있다.
+  const alive = new Set<number>();
+  const exitedEarly = new Set<number>();
+  let spawning = 0;
+  let endWaiters: (() => void)[] = [];
+  const settleEnd = () => {
+    if (spawning > 0 || alive.size > 0) return;
+    const waiters = endWaiters;
+    endWaiters = [];
+    waiters.forEach((resolve) => resolve());
+  };
+  const trackedPty: PtyPort = {
+    ...deps.pty,
+    spawn: async (request, onOutput, onExit, onSignal) => {
+      spawning += 1;
+      try {
+        const id = await deps.pty.spawn(
+          request,
+          onOutput,
+          (exit) => {
+            if (!alive.delete(exit.id)) exitedEarly.add(exit.id);
+            onExit(exit);
+            settleEnd();
+          },
+          onSignal
+        );
+        if (!exitedEarly.delete(id)) alive.add(id);
+        return id;
+      } finally {
+        spawning -= 1;
+        settleEnd();
+      }
+    },
+  };
   const sessions: LocalSessions = createLocalSessions({
-    pty: deps.pty,
+    pty: trackedPty,
     loadMirror: deps.loadMirror,
     // 로그인 화면은 이 기기에 남기지 않는다.
     storage: () => null,
@@ -174,6 +210,20 @@ export function createLoginController(
       const previous = state.paneId;
       start(method);
       if (previous !== "") sessions.close(previous);
+    },
+    /**
+     * 이 컨트롤러가 띄운 로그인 CLI가 모두 끝났는가. `timeoutMs` 안에 끝나면 true,
+     * 아니면 false(부른 쪽은 폴더를 치우지 않는다).
+     */
+    whenEnded(timeoutMs = 5_000): Promise<boolean> {
+      if (spawning === 0 && alive.size === 0) return Promise.resolve(true);
+      return new Promise((resolve) => {
+        const timer = setTimer(() => resolve(false), timeoutMs);
+        endWaiters.push(() => {
+          clearTimer(timer);
+          resolve(true);
+        });
+      });
     },
     /** 취소·닫기: PTY를 끝내고 미러를 버린다. 다시 쓰지 않는다. */
     dispose(): void {

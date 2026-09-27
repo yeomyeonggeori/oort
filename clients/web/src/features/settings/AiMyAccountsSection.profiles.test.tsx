@@ -478,14 +478,46 @@ describe("구독 추가: 폴더 → 모달(그 프로필) → 취소면 폴더 �
       const el = await until("harness-login-cancel");
       await act(async () => el.click());
     }
+    // 추가 창으로는 곧바로 돌아온다.
+    const again = (await until("add-subscription-label")) as HTMLInputElement;
+    expect(again.value).toBe("회사");
+    // 로그인 CLI가 끝나기 전에는 폴더를 치우지 않는다(#2996 재검수 M-1).
+    await waitFor(() => expect(shell.kills).toEqual([1]));
+    await flush();
+    expect(tauri.harnessProfileRemove).not.toHaveBeenCalled();
+    // CLI가 끝나면 그때 셸에 정리를 맡긴다.
+    await act(async () => shell.exit!({ id: 1, code: null, signal: "SIGHUP" }));
     await waitFor(() =>
       expect(tauri.harnessProfileRemove).toHaveBeenCalledWith({
         harness: "claude",
         label: "회사",
       }),
     );
-    const again = (await until("add-subscription-label")) as HTMLInputElement;
-    expect(again.value).toBe("회사");
+  });
+
+  it("로그인 CLI가 제한 시간 안에 끝나지 않으면 폴더를 치우지 않는다", async () => {
+    mount();
+    {
+      const el = await until("subscription-entry-open");
+      await act(async () => el.click());
+    }
+    const input = (await until("add-subscription-label")) as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "개인2" } });
+    });
+    await act(async () => q("add-subscription-submit")!.click());
+    await until("harness-login-dialog");
+    await waitFor(() => expect(shell.spawns).toHaveLength(1));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await act(async () => q("harness-login-cancel")!.click());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(6_000);
+      });
+      expect(tauri.harnessProfileRemove).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("같은 라벨은 셸에 가기 전에 막는다", async () => {
