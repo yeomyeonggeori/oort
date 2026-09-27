@@ -208,7 +208,9 @@ export function AiConnectCardShell({
           onPress={() => Keyboard.dismiss()}
           style={({pressed}) => [styles.foldedRow, pressed && styles.pressed]}
           testID="ai-connect-card-folded">
-          <Text style={styles.folded}>{AI_CONNECT_CARD_COPY.folded}</Text>
+          <Text style={styles.folded} maxFontSizeMultiplier={HEAD_MAX_SCALE}>
+            {AI_CONNECT_CARD_COPY.folded}
+          </Text>
         </Pressable>
       ) : null}
       {/* 접혀도 몸은 **내리지 않고 숨긴다**: 내리면 「연결 확인」 결과(절의 상태)가
@@ -248,7 +250,10 @@ export function AiConnectCard({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
-  const scaled = useScaled();
+  // 머리는 화면 막대처럼 글자 배수 상한을 둔다(design-review #2945 R5-H1): 큰 글씨
+  // SE 에서 제목과 표지가 두 줄로 접히면, 자판이 오른 접힘 상태(머리 + 접힌 줄)가
+  // 판 위로 넘쳐 머리·닫기가 잘린다. 상한 안에서는 한 줄로 선다.
+  const scaled = useScaled(HEAD_MAX_SCALE);
   const glyph = (size: number) => ({width: scaled(size), height: scaled(size)});
   const header = (
     <View style={styles.head}>
@@ -260,7 +265,10 @@ export function AiConnectCard({
       {/* 제목과 표지는 한 묶음이고 **접힌다**(design-review #2945 R2-H1): 큰 글씨에서
           「나에게만」이 잘리면 이 카드의 사생활 표지가 사라진다. 닫기는 제 칸에 남는다. */}
       <View style={styles.headTitles}>
-        <Text style={styles.headTitle} accessibilityRole="header">
+        <Text
+          style={styles.headTitle}
+          accessibilityRole="header"
+          maxFontSizeMultiplier={HEAD_MAX_SCALE}>
           {AI_CONNECT_CARD_COPY.title}
         </Text>
         <View style={styles.onlyChip} testID="ai-connect-card-only-me">
@@ -269,7 +277,9 @@ export function AiConnectCard({
             style={[glyph(13), {tintColor: palette.textMuted}]}
             accessibilityIgnoresInvertColors
           />
-          <Text style={styles.onlyText}>{AI_CONNECT_CARD_COPY.onlyMe}</Text>
+          <Text style={styles.onlyText} maxFontSizeMultiplier={HEAD_MAX_SCALE}>
+            {AI_CONNECT_CARD_COPY.onlyMe}
+          </Text>
         </View>
       </View>
       <Pressable
@@ -733,6 +743,12 @@ const GLYPH_SCALE_CAP = 2;
 const MARK_SCALE_CAP = 1.3;
 /** 이 배수부터 알약이 이름 아래로 내려간다 — 한 줄에 셋을 세우면 이름이 부서진다. */
 const STACK_PILL_SCALE = 1.5;
+/**
+ * 머리·접힌 줄의 글자 배수 상한(R5-H1). 375 폭에서 「플러그 · AI 연결 · 나에게만 ·
+ * 닫기」가 한 줄에 드는 값. 화면 막대의 `BAR_CONTROL_MAX_SCALE`(1.6)과 같은 규율이고,
+ * 이 카드는 입력창 위에 자판과 함께 서므로 더 낮다.
+ */
+const HEAD_MAX_SCALE = 1.3;
 /** 닫기 글리프 상자. */
 const CLOSE_BOX = 24;
 /** 알약 앞 점(시안 `.pill i{width:6px}`). */

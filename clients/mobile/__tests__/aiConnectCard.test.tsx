@@ -321,6 +321,23 @@ describe('카드 — 판정은 코어, 행동은 연결 확인 하나', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
+  it('머리·접힌 줄은 글자 배수 상한(1.3)을 둔다 — 큰 글씨 SE 에서 한 줄 (R5-H1)', async () => {
+    mockFetch.mockResolvedValue(LINK);
+    const spy = jest.spyOn(Keyboard, 'isVisible').mockReturnValue(true);
+    try {
+      card();
+      for (const text of [
+        AI_CONNECT_CARD_COPY.title,
+        AI_CONNECT_CARD_COPY.onlyMe,
+        AI_CONNECT_CARD_COPY.folded,
+      ]) {
+        expect(screen.getByText(text).props.maxFontSizeMultiplier).toBe(1.3);
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('닫기는 부른 쪽에 알린다', async () => {
     mockFetch.mockResolvedValue(LINK);
     const onClose = jest.fn();
