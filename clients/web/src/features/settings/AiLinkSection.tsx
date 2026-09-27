@@ -525,17 +525,28 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
         <div data-area="aside" className="min-w-0">
         <AiAside
           id={TEAM_ASIDE_ID}
-          label={`${link.endpointLabel} 상세`}
-          mark={markFor(link.endpointLabel)}
-          title={rowName}
-          subtitle={legacy ? "내부용 연결 · 이 서버" : "API 키 · 이 서버 · 팀 에이전트가 씀"}
+          // 줄이 없는 서버에서 연 곁판은 추가 폼 하나다: 환경값의 모의 주소 이름을
+          // 제목으로 내밀지 않는다(시안 §4 2b 「팀 API 키 추가」).
+          label={hasRow ? `${link.endpointLabel} 상세` : "팀 API 키 추가"}
+          mark={hasRow ? markFor(link.endpointLabel) : "+"}
+          title={hasRow ? rowName : "팀 API 키 추가"}
+          subtitle={
+            !hasRow
+              ? "운영자만 · 서버에 봉인해 팀 에이전트가 씀"
+              : legacy
+                ? "내부용 연결 · 이 서버"
+                : "API 키 · 이 서버 · 팀 에이전트가 씀"
+          }
           onClose={closeAside}
           headingRef={asideHeadingRef}
           testId="ai-team-aside"
         >
           {editing ? (
             <section className="flex min-w-0 flex-col gap-3" aria-labelledby="ai-link-form-title">
-              <h4 id="ai-link-form-title" className="text-body font-bold text-ink">
+              <h4
+                id="ai-link-form-title"
+                className={hasRow ? "text-body font-bold text-ink" : "sr-only"}
+              >
                 {configured ? "키 바꾸기" : "API 키 추가"}
               </h4>
               {/* 채팅 연결 카드와 같은 폼(#2880): 프리셋 칩·password 칸·오프라인

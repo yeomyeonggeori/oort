@@ -60,7 +60,7 @@ export function TeamUnlinkDialog({
         <DialogContent
           role="alertdialog"
           opener={opener.current}
-          className="gap-3 p-5"
+          className="gap-3 p-4"
           data-testid="ai-link-unlink-dialog"
         >
           <UnlinkBody
@@ -126,7 +126,7 @@ function UnlinkBody({
         <Skeleton ready={false} rows={2} className="py-1" />
       ) : (
         <ul
-          className="flex min-w-0 list-disc flex-col gap-1 pl-5 text-body text-ink"
+          className="flex min-w-0 list-disc flex-col gap-1 pl-4 text-body text-ink"
           data-testid="ai-link-unlink-impact"
         >
           {affected === null ? (
