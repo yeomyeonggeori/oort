@@ -260,6 +260,12 @@ pub struct AppState {
     /// Default is the SSRF-guarded transport. Tests inject a loopback client.
     pub unfurl_http: Arc<dyn momo_unfurl::UnfurlHttp>,
     pub unfurl_cache: Arc<momo_unfurl::ImageCache>,
+    /// #2960 — 「연결 확인」: the only object in this process that can call a
+    /// provider, and all it can do is one guarded read-only GET per hop
+    /// (`momo_provider_probe`). Default is the guarded probe under the
+    /// **default** egress policy (public addresses only); `main.rs` replaces
+    /// it with the operator's policy, tests with a loopback-permitting one.
+    pub provider_probe: Arc<routes::provider_link::ProviderProbeState>,
 }
 
 impl AppState {
@@ -291,7 +297,24 @@ impl AppState {
             turn: None,
             unfurl_http: Arc::new(momo_unfurl::SafeUnfurlTransport::production(false)),
             unfurl_cache: Arc::new(momo_unfurl::ImageCache::default()),
+            provider_probe: Arc::new(routes::provider_link::ProviderProbeState::new(Arc::new(
+                momo_provider_probe::GuardedProviderProbe::new(
+                    momo_settings::EgressPolicy::default(),
+                    routes::provider_link::PROBE_TIMEOUT,
+                ),
+            ))),
         }
+    }
+
+    /// Replace the 「연결 확인」 probe (#2960) — `main.rs` with the operator's
+    /// egress policy, conformance tests with one that admits a loopback mock.
+    /// A fresh throttle comes with it.
+    pub fn with_provider_probe(
+        mut self,
+        probe: Arc<dyn momo_provider_probe::ProviderProbe>,
+    ) -> Self {
+        self.provider_probe = Arc::new(routes::provider_link::ProviderProbeState::new(probe));
+        self
     }
 
     /// Replace the unfurl HTTP hop (conformance tests with a mock origin).
