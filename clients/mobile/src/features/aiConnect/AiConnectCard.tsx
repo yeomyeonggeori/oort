@@ -71,6 +71,9 @@ import {
 //   · `AiConnectCardShell` — 테두리·머리 자리·높이 상한(로컬은 점선, 제안은 실선)
 //   · `AiConnectCardBody` — 두 절과 발(판정과 행동 전부)
 //   · `AiConnectCard` — 로컬 카드 = 셸 + 「AI 연결 · 나에게만 · ×」 머리 + 몸
+//   · `AiConnectTeamSection` — 「팀 연결 · 이 서버」 절. 제안 카드(GC-7,
+//     `conversation/AiConnectSuggestion.tsx`)도 이 절을 그대로 쓴다 — 팀 줄의
+//     요청·알약·확인·결과 판정이 폰에 한 벌만 있게(#2945 에서 GC-7 과 합침).
 // =============================================================================
 
 /** 설정·웹 카드와 같은 쿼리 키. 같은 캐시를 나눈다. */
@@ -321,7 +324,7 @@ export function AiConnectCardBody({
           </View>
         </View>
       ) : null}
-      {showTeam ? <TeamSection offline={offline} /> : null}
+      {showTeam ? <AiConnectTeamSection offline={offline} /> : null}
       <View style={styles.foot}>
         <Image
           source={HOME_ICONS.lock}
@@ -334,7 +337,17 @@ export function AiConnectCardBody({
   );
 }
 
-function TeamSection({offline}: {offline: boolean}): React.JSX.Element {
+/**
+ * 「팀 연결 · 이 서버」 절 — 로컬 카드와 제안 카드(GC-7)가 함께 쓰는 한 벌.
+ * `idPrefix`는 시험·캡처가 찾는 이름의 앞머리다(`<prefix>-team`, `<prefix>-team-pill` …).
+ */
+export function AiConnectTeamSection({
+  offline,
+  idPrefix = 'ai-connect-card',
+}: {
+  offline: boolean;
+  idPrefix?: string;
+}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const query = useQuery({
     queryKey: TEAM_QUERY_KEY,
@@ -344,6 +357,9 @@ function TeamSection({offline}: {offline: boolean}): React.JSX.Element {
   const [probe, setProbe] = useState<ProviderLinkTest | null>(null);
   const check = useMutation({
     mutationFn: testProviderLink,
+    // 오프라인 잠금은 버튼이 한다. react-query 의 온라인 판정에 맡기면 누른 뒤
+    // 조용히 멈춘 채 남을 수 있다(GC-7 과 같은 선택).
+    networkMode: 'always',
     onSuccess: setProbe,
   });
 
@@ -355,7 +371,7 @@ function TeamSection({offline}: {offline: boolean}): React.JSX.Element {
   let body: React.ReactNode;
   if (query.isPending) {
     body = (
-      <View style={styles.inline} testID="ai-connect-card-team-loading">
+      <View style={styles.inline} testID={`${idPrefix}-team-loading`}>
         <ActivityIndicator size="small" />
         <Sentence style={styles.noteText}>
           {AI_CONNECT_CARD_COPY.teamLoading}
@@ -363,17 +379,17 @@ function TeamSection({offline}: {offline: boolean}): React.JSX.Element {
       </View>
     );
   } else if (denied) {
-    body = <DeniedLine />;
+    body = <DeniedLine testID={`${idPrefix}-team-denied`} />;
   } else if (query.isError) {
     body = (
-      <View style={styles.errorBox} testID="ai-connect-card-team-error">
+      <View style={styles.errorBox} testID={`${idPrefix}-team-error`}>
         <Sentence style={styles.errorText} accessibilityRole="alert">
           {`${AI_CONNECT_CARD_COPY.teamLoadFailed} ${errorMessage(query.error)}`}
         </Sentence>
         <SecondaryButton
           label={AI_CONNECT_CARD_COPY.teamReload}
           onPress={() => void query.refetch()}
-          testID="ai-connect-card-team-reload"
+          testID={`${idPrefix}-team-reload`}
         />
       </View>
     );
@@ -387,6 +403,7 @@ function TeamSection({offline}: {offline: boolean}): React.JSX.Element {
         checking={check.isPending}
         checkError={check.isError ? check.error : null}
         onCheck={() => check.mutate()}
+        idPrefix={idPrefix}
       />
     );
   } else {
@@ -394,13 +411,13 @@ function TeamSection({offline}: {offline: boolean}): React.JSX.Element {
   }
 
   return (
-    <View style={styles.section} testID="ai-connect-card-team-section">
+    <View style={styles.section} testID={`${idPrefix}-team-section`}>
       <Text style={styles.sectionHead} accessibilityRole="header">
         {AI_CONNECT_CARD_COPY.teamHead}
       </Text>
       {body}
       {offline && operator ? (
-        <Sentence style={styles.offlineNote} testID="ai-connect-card-offline">
+        <Sentence style={styles.offlineNote} testID={`${idPrefix}-offline`}>
           {AI_CONNECT_CARD_COPY.offline}
         </Sentence>
       ) : null}
@@ -408,13 +425,13 @@ function TeamSection({offline}: {offline: boolean}): React.JSX.Element {
   );
 }
 
-function DeniedLine(): React.JSX.Element {
+function DeniedLine({testID}: {testID: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const scaled = useScaled();
   const glyph = (size: number) => ({width: scaled(size), height: scaled(size)});
   return (
-    <View style={styles.note} testID="ai-connect-card-team-denied">
+    <View style={styles.note} testID={testID}>
       <View style={[styles.noteIconBox, {height: scaled(lineHeight.meta)}]}>
         <Image
           source={HOME_ICONS.lock}
@@ -437,6 +454,7 @@ function TeamRow({
   checking,
   checkError,
   onCheck,
+  idPrefix,
 }: {
   link: ProviderLink;
   offline: boolean;
@@ -445,6 +463,7 @@ function TeamRow({
   checking: boolean;
   checkError: unknown;
   onCheck: () => void;
+  idPrefix: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
@@ -495,7 +514,7 @@ function TeamRow({
   const locked = offline || checking;
 
   return (
-    <View style={styles.row} testID="ai-connect-card-team">
+    <View style={styles.row} testID={`${idPrefix}-team`}>
       <View style={styles.rowMain}>
         <View
           style={[styles.mark, {width: scaled(MARK_SIZE), height: scaled(MARK_SIZE)}]}>
@@ -515,16 +534,16 @@ function TeamRow({
           <Text
             style={[styles.sub, mono && styles.subMono]}
             numberOfLines={hasRow ? 1 : 3}
-            testID="ai-connect-card-team-sub">
+            testID={`${idPrefix}-team-sub`}>
             {sub}
           </Text>
           {stackPill ? (
             <View style={styles.stackedPill}>
-              <Pill view={pill} />
+              <Pill view={pill} testID={`${idPrefix}-team-pill`} />
             </View>
           ) : null}
         </View>
-        {stackPill ? null : <Pill view={pill} />}
+        {stackPill ? null : <Pill view={pill} testID={`${idPrefix}-team-pill`} />}
       </View>
       {canCheck ? (
         <View style={[styles.rowAction, {paddingLeft: scaled(MARK_SIZE) + space.sm}]}>
@@ -534,7 +553,7 @@ function TeamRow({
             busy={checking}
             disabled={locked}
             onPress={onCheck}
-            testID="ai-connect-card-team-check"
+            testID={`${idPrefix}-team-check`}
           />
         </View>
       ) : null}
@@ -548,7 +567,7 @@ function TeamRow({
             },
           ]}
           accessibilityLiveRegion="polite"
-          testID="ai-connect-card-team-result">
+          testID={`${idPrefix}-team-result`}>
           {result.text}
         </Sentence>
       ) : null}
@@ -560,7 +579,13 @@ function TeamRow({
 
 const PILL_LABEL = '상태';
 
-export function Pill({view}: {view: AiPillView}): React.JSX.Element {
+export function Pill({
+  view,
+  testID,
+}: {
+  view: AiPillView;
+  testID: string;
+}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const tone = pillColors(palette, view.tone);
@@ -569,7 +594,7 @@ export function Pill({view}: {view: AiPillView}): React.JSX.Element {
       style={[styles.pill, {backgroundColor: tone.bg}]}
       accessible
       accessibilityLabel={`${PILL_LABEL} ${view.text}`}
-      testID="ai-connect-card-pill">
+      testID={testID}>
       {view.tone === 'run' ? (
         <ActivityIndicator size="small" color={tone.fg} style={styles.pillSpin} />
       ) : (

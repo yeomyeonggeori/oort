@@ -1,22 +1,7 @@
 import React, {useState} from 'react';
 import {Image, Pressable, StyleSheet, Text, View} from 'react-native';
-import {useMutation, useQuery} from '@tanstack/react-query';
-import {
-  fetchProviderLink,
-  testProviderLink,
-  type ProviderLinkTest,
-} from '@momo/core/features/settings/api';
-import {
-  isLegacyTeamLink,
-  linkPill,
-  type AiPillView,
-} from '@momo/core/features/settings/aiLinkPill';
-import {
-  errorMessage,
-  isOperatorDenied,
-  maskedBearer,
-} from '@momo/core/features/settings/model';
-import {teamCheckReason} from '@momo/core/features/settings/teamKeyForm';
+import {useQuery} from '@tanstack/react-query';
+import {fetchProviderLink} from '@momo/core/features/settings/api';
 import {
   COMMAND_SUGGEST_PHONE_FOOT,
   COMMAND_SUGGEST_PHONE_MINE,
@@ -27,13 +12,14 @@ import {
   commandSuggestViewer,
   type CommandSuggestCard,
 } from '@momo/core/features/timeline/commandSuggest';
-import {font, line, radius, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, line, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {usePalette, useStyles} from '../../design/theme';
 import {
   AI_CONNECT_ICON_SIZE,
   AI_CONNECT_ICONS,
   HOME_ICONS,
 } from '../../design/icons';
+import {AiConnectTeamSection, TEAM_QUERY_KEY} from '../aiConnect/AiConnectCard';
 import {CONV} from './convDesign';
 
 // =============================================================================
@@ -50,14 +36,12 @@ import {CONV} from './convDesign';
 // 코어가 준 의도(`focus`·대상·에이전트 이름)뿐이다.
 //
 // 「내 계정」 절은 A 레인 host 보고(#2781·#2782) 전이라 상태 줄 없이 「맥에서」
-// 한 줄이다(brief §3.6). GC-4(#2945) 폰 로컬 카드가 이 팀 줄 부품을 이어 쓴다.
+// 한 줄이다(brief §3.6). 「팀 연결」 절은 GC-4(#2945) 폰 로컬 카드의
+// `AiConnectTeamSection` 한 벌을 그대로 쓴다 — 팀 줄의 요청·알약·확인·결과 판정이
+// 폰에 두 벌 있지 않게(#2945 에서 합침).
 // =============================================================================
 
-/** 웹 `TEAM_QUERY_KEY`와 같은 글자. */
-const TEAM_QUERY_KEY = ['settings', 'provider-link'] as const;
 const OPERATOR_STALE_MS = 60_000;
-const TEAM_DENIED_LINE = '팀 키는 운영자만 바꾸고 확인할 수 있어요.';
-const TEAM_EMPTY_SUB = '아직 없어요. 키는 맥·웹에서 넣어요';
 
 export function AiConnectSuggestion({
   card,
@@ -135,7 +119,7 @@ function SuggestionLine({
       </View>
       {operator && open ? (
         <View style={styles.card} testID="ai-suggest-team-panel">
-          <TeamSection offline={offline} />
+          <AiConnectTeamSection offline={offline} idPrefix="ai-suggest" />
         </View>
       ) : null}
     </View>
@@ -182,7 +166,9 @@ function SuggestedCard({
           </View>
         </View>
       ) : null}
-      {showTeam ? <TeamSection offline={offline} /> : null}
+      {showTeam ? (
+        <AiConnectTeamSection offline={offline} idPrefix="ai-suggest" />
+      ) : null}
       {showTeam ? (
         <View style={styles.foot}>
           <Image
@@ -197,199 +183,12 @@ function SuggestedCard({
   );
 }
 
-function savedDate(ms: number): string {
-  const date = new Date(ms);
-  return `${date.getMonth() + 1}월 ${date.getDate()}일`;
-}
-
-function since(ms: number, now: number): string {
-  const minutes = Math.max(0, Math.round((now - ms) / 60_000));
-  if (minutes < 1) return '방금';
-  if (minutes < 60) return `${minutes}분 전`;
-  const hours = Math.round(minutes / 60);
-  return hours < 24 ? `${hours}시간 전` : `${Math.round(hours / 24)}일 전`;
-}
-
-/**
- * 팀 연결 한 줄. 알약은 코어 `linkPill`(설정·웹 카드와 같은 판정), 운영자면
- * 「연결 확인」(기존 test 라우트) 하나. 키 넣기·바꾸기는 폰에 없다(Q5).
- */
-function TeamSection({offline}: {offline: boolean}): React.JSX.Element {
-  const styles = useStyles(build);
-  const query = useQuery({
-    queryKey: TEAM_QUERY_KEY,
-    queryFn: fetchProviderLink,
-    retry: false,
-  });
-  const [probe, setProbe] = useState<ProviderLinkTest | null>(null);
-  const check = useMutation({
-    mutationFn: testProviderLink,
-    networkMode: 'always',
-    onSuccess: setProbe,
-  });
-  const link = query.data;
-  const operator = query.isSuccess;
-  const denied = query.isError && isOperatorDenied(query.error);
-
-  let body: React.ReactNode;
-  if (query.isPending) {
-    body = <Text style={styles.noteText}>불러오고 있어요</Text>;
-  } else if (denied) {
-    body = (
-      <Text style={styles.noteText} testID="ai-suggest-team-denied">
-        {TEAM_DENIED_LINE}
-      </Text>
-    );
-  } else if (query.isError || !link) {
-    body = (
-      <View style={styles.rowActions}>
-        <Text style={[styles.noteText, styles.bad]} accessibilityRole="alert">
-          {`팀 연결을 불러오지 못했어요. ${errorMessage(query.error)}`}
-        </Text>
-        <SecondaryButton
-          label="다시 불러오기"
-          onPress={() => void query.refetch()}
-          testID="ai-suggest-team-retry"
-        />
-      </View>
-    );
-  } else {
-    const hasRow =
-      link.configured || (link.keyConfigured && link.availability !== 'mock');
-    const legacy = isLegacyTeamLink(link);
-    const pill = linkPill({link, offline, probe, checking: check.isPending});
-    const tail = link.configured
-      ? `${maskedBearer(link.bearerLast4)}${
-          probe
-            ? ` · 마지막 확인 ${since(probe.checkedAtMs, Date.now())}`
-            : link.updatedAtMs
-              ? ` · ${savedDate(link.updatedAtMs)} 저장`
-              : ''
-        }`
-      : hasRow
-        ? '서버 환경값'
-        : TEAM_EMPTY_SUB;
-    let result: {tone: 'ok' | 'bad'; text: string} | null = null;
-    if (!offline && check.isError) {
-      result = {tone: 'bad', text: errorMessage(check.error)};
-    } else if (!offline && probe && !check.isPending) {
-      result = probe.ok
-        ? {tone: 'ok', text: '응답을 확인했어요 · 방금'}
-        : {tone: 'bad', text: teamCheckReason(probe.reason)};
-    }
-    body = (
-      <View style={styles.row} testID="ai-suggest-team">
-        <View style={styles.rowTop}>
-          <View style={styles.logo}>
-            <Text style={styles.logoText}>
-              {hasRow ? [...link.endpointLabel][0]?.toUpperCase() ?? '?' : '?'}
-            </Text>
-          </View>
-          <View style={styles.rowName}>
-            <View style={styles.rowTitleLine}>
-              <Text style={styles.rowTitle} numberOfLines={1}>
-                {hasRow
-                  ? link.configured
-                    ? `${link.endpointLabel} · 팀 기본`
-                    : link.endpointLabel
-                  : '팀 API 키'}
-              </Text>
-              <View style={styles.src}>
-                <Text style={styles.srcText}>{legacy ? '내부용' : 'API 키'}</Text>
-              </View>
-            </View>
-            <Text
-              style={[styles.rowSub, link.configured && styles.mono]}
-              numberOfLines={hasRow ? 1 : 2}>
-              {tail}
-            </Text>
-          </View>
-          <Pill view={pill} testID="ai-suggest-team-pill" />
-        </View>
-        {operator && hasRow && !legacy ? (
-          <View style={styles.rowActions}>
-            <SecondaryButton
-              label={check.isPending ? '확인 중' : '연결 확인'}
-              disabled={offline || check.isPending}
-              onPress={() => check.mutate()}
-              testID="ai-suggest-team-check"
-            />
-          </View>
-        ) : null}
-        {result ? (
-          <Text
-            style={[styles.noteText, result.tone === 'ok' ? styles.ok : styles.bad]}
-            accessibilityLiveRegion="polite"
-            testID="ai-suggest-team-result">
-            {result.text}
-          </Text>
-        ) : null}
-        {offline && operator ? (
-          <Text style={styles.noteText}>
-            연결이 끊겨 지금은 팀 연결을 확인할 수 없어요.
-          </Text>
-        ) : null}
-      </View>
-    );
-  }
-  return (
-    <View style={styles.section} testID="ai-suggest-team-section">
-      <Text style={styles.sectionHead}>팀 연결 · 이 서버</Text>
-      {body}
-    </View>
-  );
-}
-
-function Pill({view, testID}: {view: AiPillView; testID: string}): React.JSX.Element {
-  const styles = useStyles(build);
-  const tone = view.tone === 'bad' ? 'danger' : view.tone;
-  return (
-    <View style={[styles.pill, styles[`pill_${tone}`]]} testID={testID}>
-      <Text style={[styles.pillText, styles[`pillText_${tone}`]]}>{view.text}</Text>
-    </View>
-  );
-}
-
-function SecondaryButton({
-  label,
-  onPress,
-  disabled = false,
-  testID,
-}: {
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-  testID: string;
-}): React.JSX.Element {
-  const styles = useStyles(build);
-  return (
-    <Pressable
-      onPress={disabled ? undefined : onPress}
-      accessibilityRole="button"
-      accessibilityState={{disabled, busy: label === '확인 중'}}
-      hitSlop={slopTo(AI_SUGGEST.buttonHeight)}
-      testID={testID}
-      style={({pressed}) => [
-        styles.button,
-        disabled && styles.buttonLocked,
-        pressed && !disabled && styles.pressed,
-      ]}>
-      <Text style={styles.buttonText}>{label}</Text>
-    </Pressable>
-  );
-}
-
 /**
  * 이 카드의 치수 — 시안 `claudedocs/chat-genui-connect/mockups.html` ③·폰 값 그대로.
  * 값마다 시안 CSS 원문을 옆에 적는다(`convDesign.ts`의 `CONV`와 같은 규율: 스타일시트에
  * 숫자를 흩지 않고 한 자리에서 출처를 읽게 한다).
  */
 const AI_SUGGEST = {
-  /** `.btn{height:30px}`. 눌리는 면은 `slopTo`가 44까지 넓힌다. */
-  buttonHeight: 30,
-  /** `.lg{width:30px;height:30px;border-radius:9px}`. */
-  logo: 30,
-  logoRadius: 9,
   /** 폰 `.ag{width:20px;height:20px;font-size:10px;border-radius:28%}`. */
   agentMark: 20,
   agentMarkText: 10,
@@ -400,22 +199,6 @@ const AI_SUGGEST = {
   sectionPadTop: 6,
   /** `.pnote .ic{margin-top:1px}`. */
   noteIconNudge: 1,
-  /** `.row{gap:10px}`. */
-  lineGap: 10,
-  /** `.nm b{gap:6px}`. */
-  titleGap: 6,
-  /** `.nm b{font-size:13.5px}`. */
-  titleSize: 13.5,
-  /** `.nm .mono{font-size:11.5px}`. */
-  monoSize: 11.5,
-  /** `.src{font:600 10.5px/1;padding:3px 6px;border-radius:5px}`. */
-  srcSize: 10.5,
-  srcPadX: 6,
-  srcPadY: 3,
-  srcRadius: 5,
-  /** `.pill{font:600 11px/1;padding:5px 8px}`. */
-  pillSize: 11,
-  pillPadY: 5,
   /** `.oneline{padding:7px 10px;border-radius:10px}`. */
   onelinePadY: 7,
   onelinePadX: 10,
@@ -472,61 +255,6 @@ function build(color: Palette) {
     noteIcon: {marginTop: AI_SUGGEST.noteIconNudge},
     noteText: {flexShrink: 1, fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
     icon: {width: AI_CONNECT_ICON_SIZE, height: AI_CONNECT_ICON_SIZE},
-    ok: {color: color.ok},
-    bad: {color: color.danger},
-    /** 시안 `.row{padding:8px 0}`. */
-    row: {paddingVertical: space.sm, gap: space.xs},
-    rowTop: {flexDirection: 'row', alignItems: 'center', gap: AI_SUGGEST.lineGap},
-    logo: {
-      width: AI_SUGGEST.logo,
-      height: AI_SUGGEST.logo,
-      borderRadius: AI_SUGGEST.logoRadius,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: color.surfaceMuted,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: color.border,
-    },
-    logoText: {fontSize: font.meta, fontWeight: '800', color: color.text},
-    rowName: {flex: 1, minWidth: 0},
-    rowTitleLine: {flexDirection: 'row', alignItems: 'center', gap: AI_SUGGEST.titleGap},
-    rowTitle: {flexShrink: 1, fontSize: AI_SUGGEST.titleSize, fontWeight: '600', color: color.text},
-    rowSub: {fontSize: font.meta, color: color.textMuted},
-    mono: {fontFamily: 'Menlo', fontSize: AI_SUGGEST.monoSize},
-    src: {
-      paddingHorizontal: AI_SUGGEST.srcPadX,
-      paddingVertical: AI_SUGGEST.srcPadY,
-      borderRadius: AI_SUGGEST.srcRadius,
-      backgroundColor: color.surfaceMuted,
-    },
-    srcText: {fontSize: AI_SUGGEST.srcSize, fontWeight: '600', color: color.textMuted},
-    rowActions: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.sm, paddingLeft: AI_SUGGEST.logo + AI_SUGGEST.lineGap},
-    /** 시안 `.pill{font:600 11px/1;padding:5px 8px;border-radius:999px}`. */
-    pill: {paddingHorizontal: space.sm, paddingVertical: AI_SUGGEST.pillPadY, borderRadius: radius.pill},
-    pill_ok: {backgroundColor: color.okSurface},
-    pill_warn: {backgroundColor: color.warnSurface},
-    pill_danger: {backgroundColor: color.dangerSurface},
-    pill_mute: {backgroundColor: color.surfaceMuted},
-    pill_run: {backgroundColor: color.agentSurface},
-    pillText: {fontSize: AI_SUGGEST.pillSize, fontWeight: '600'},
-    pillText_ok: {color: color.ok},
-    pillText_warn: {color: color.warn},
-    pillText_danger: {color: color.danger},
-    pillText_mute: {color: color.textMuted},
-    pillText_run: {color: color.agent},
-    /** 시안 `.btn.sec{height:30px;padding:0 12px;border-radius:999px;border}`. */
-    button: {
-      height: AI_SUGGEST.buttonHeight,
-      paddingHorizontal: space.md,
-      borderRadius: radius.pill,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: color.border,
-      backgroundColor: color.surface,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    buttonLocked: {opacity: 0.5},
-    buttonText: {fontSize: font.meta, fontWeight: '600', color: color.text},
     pressed: {opacity: 0.6},
     /** 시안 `.cft`: 카드 발, 자물쇠 + 한 줄. */
     foot: {

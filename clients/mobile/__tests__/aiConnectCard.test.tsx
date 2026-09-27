@@ -122,7 +122,7 @@ afterEach(() => {
 });
 
 const pillText = () =>
-  screen.getByTestId('ai-connect-card-pill').props.accessibilityLabel as string;
+  screen.getByTestId('ai-connect-card-team-pill').props.accessibilityLabel as string;
 
 // -----------------------------------------------------------------------------
 describe('카드 — 판정은 코어, 행동은 연결 확인 하나', () => {
@@ -277,6 +277,22 @@ describe('import 그래프 — 알약 판정을 카드에 복사하지 않는다
     for (const word of ['연결됨', '확인 실패', '자격증명 없음', '모의 응답', '연결 안 됨', '확인할 수 없음']) {
       expect(source).not.toContain(`'${word}'`);
       expect(source).not.toContain(`"${word}"`);
+    }
+  });
+
+  // GC-7 제안 카드(#2948)와 합침: 팀 줄 판정은 폰에 한 벌만 있다.
+  it('제안 카드는 팀 절을 이 카드에서 가져오고 제 것을 두지 않는다', () => {
+    const suggestion = fs.readFileSync(
+      path.resolve(__dirname, '../src/features/conversation/AiConnectSuggestion.tsx'),
+      'utf8',
+    )
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+    expect(suggestion).toMatch(
+      /import\s*\{[^}]*\bAiConnectTeamSection\b[^}]*\}\s*from\s*'\.\.\/aiConnect\/AiConnectCard'/,
+    );
+    for (const own of [/\blinkPill\b/, /\btestProviderLink\b/, /function\s+(TeamSection|Pill|SecondaryButton)\b/]) {
+      expect(suggestion).not.toMatch(own);
     }
   });
 });
