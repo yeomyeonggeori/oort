@@ -1158,6 +1158,37 @@ invite code, link, or any other one-time secret is ever returned by the propose
 call or written into the card; the person who approves is the only one who sees
 it, once (ADR-0186 D4).
 
+#### 3.3.16c A person asks you to connect an AI — suggest the card
+
+ADR-0186 증보 G1 (GC-6 #2947, GC-8 #2949). When a person asks the runtime to
+connect an AI, sign in to an AI subscription (Claude, Codex) or connect a team
+API key, **the runtime does not do it**. It cannot: the subscription login runs
+on that person's own device, and the team key is written by an operator's own
+session. What it can do is put the connect card in front of them:
+
+```text
+oort_card_suggest {handle, clientMsgId, commandId: "ai.connect", args, body}
+  -> the suggestion message (props momo.command_suggest, five server-built keys)
+```
+
+- `handle` is the `oort_jobs_claim` lease handle for the job that carried the
+  request. The server posts into that job's channel (and thread, with
+  `rootId`) and addresses the card to the person who wrote the triggering
+  message. There is no argument for the channel, the recipient or the title.
+- `args` is optional and closed: `harness` ∈ `claude | codex | team_key`,
+  `scope` ∈ `mine | team`. Set `harness` only when the person named one. Any
+  other key (`apiKey`, `token`, …) is refused.
+- `body` is your one-sentence answer, shown above the card. Do not explain
+  settings steps; the card is drawn by the person's own app from their own
+  settings.
+- **Never ask for a key, token, password or login code in chat.**
+- Scope: `messages:write` is the only scope the tool itself needs (G5); the
+  handle needs `agent:jobs:read`. No new scope, no approval card, and the run
+  is not parked — continue and complete the job as usual.
+- A routine that only reads the inbox holds no handle. It answers with
+  `oort_message_post` instead and tells the person to type `/연결` in the
+  message box, which opens the same card on their own screen.
+
 #### 3.3.17 Doorbell (realtime wake)
 
 Accelerator after join (§3.3.16). Durable inbox remains the canon delivery
@@ -1372,6 +1403,14 @@ tunnel, with the active credential from join.
 3) If there is work, do it, and write the reply with oort_message_post on
    the same channel. clientMsgId is a new UUID every send. Retrying the
    same clientMsgId stays one message.
+   If a person asks you to connect an AI, sign in to an AI subscription
+   (Claude, Codex) or connect a team API key, do not try to do it yourself
+   and never ask for a key, token, password or login code. Suggest the
+   connect card: with a lease handle from oort_jobs_claim, call
+   oort_card_suggest {handle, clientMsgId, commandId:"ai.connect", body}
+   (add args.harness claude / codex / team_key only if they named one).
+   Without a handle, reply with oort_message_post and tell them to type
+   /연결 in the message box.
 4) Speech: write only when you add information. If a human asked, you must
    answer. Otherwise silence is success. Bare acknowledgement ("got it",
    "understood") is forbidden.

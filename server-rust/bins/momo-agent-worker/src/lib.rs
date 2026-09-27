@@ -693,6 +693,11 @@ impl AgentWorker {
         }
 
         let now_context = now_context_block(now_ms(), self.config.utc_offset_minutes);
+        // Resolved once: the same list rides the request as `momo_tools` and
+        // decides whether the model is told the connection-request rule
+        // (GC-8, #2949) — so the rule and the tool are offered together or not
+        // at all.
+        let momo_tools = payload.enabled_tools();
         let assembled = assemble(
             &payload.recent_messages,
             payload.agent_member_id,
@@ -709,6 +714,7 @@ impl AgentWorker {
                 // yields `None` here, which is the pre-#1454 context byte for
                 // byte rather than a turn carrying an emptied block.
                 report_protocol: self.config.report_protocol_block(),
+                card_suggest: momo_agent::card_suggest::card_suggest_directive(&momo_tools),
             },
             self.config.max_context_chars,
         );
@@ -747,7 +753,7 @@ impl AgentWorker {
             // against THIS build's catalog. Until this line `enabled_tools` was
             // a column nothing read — an operator could switch a tool on and the
             // only effect was a profile version bump.
-            momo_tools: payload.enabled_tools(),
+            momo_tools,
         };
 
         // ADR-0147 결정 2: a subscription OAuth link presents an access token
