@@ -14,7 +14,7 @@ import {
 import fs from 'fs';
 import path from 'path';
 import React from 'react';
-import {Keyboard, TextInput} from 'react-native';
+import {Keyboard, type KeyboardEvent, StyleSheet, TextInput} from 'react-native';
 
 import {
   AI_CONNECT_CARD_COPY,
@@ -237,7 +237,11 @@ describe('카드 — 판정은 코어, 행동은 연결 확인 하나', () => {
       card();
       expect(screen.getByTestId('ai-connect-card-folded')).toBeTruthy();
       expect(screen.getByTestId('ai-connect-card-close')).toBeTruthy();
-      expect(screen.queryByTestId('ai-connect-card-body')).toBeNull();
+      // 몸은 내리지 않고 숨긴다(절의 상태를 지킨다).
+      const scroll = screen.getByTestId('ai-connect-card-scroll', {
+        includeHiddenElements: true,
+      });
+      expect(StyleSheet.flatten(scroll.props.style)).toMatchObject({display: 'none'});
       // 접힌 줄은 누를 수 있다 — 자판을 내린다(큰 글씨에서 끌 자리가 없다).
       const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
       fireEvent.press(screen.getByTestId('ai-connect-card-folded'));
@@ -245,6 +249,35 @@ describe('카드 — 판정은 코어, 행동은 연결 확인 하나', () => {
       dismiss.mockRestore();
     } finally {
       spy.mockRestore();
+    }
+  });
+
+  it('자판을 올렸다 내려도 「연결 확인」 결과가 남고 팀 연결을 다시 부르지 않는다', async () => {
+    mockFetch.mockResolvedValue(LINK);
+    mockTest.mockResolvedValue(PROBE_OK);
+    const handlers = new Map<string, (event: KeyboardEvent) => void>();
+    const listen = jest
+      .spyOn(Keyboard, 'addListener')
+      .mockImplementation((name, handler) => {
+        handlers.set(name, handler);
+        return {remove: () => {}} as ReturnType<typeof Keyboard.addListener>;
+      });
+    const shown = {endCoordinates: {height: 300}} as KeyboardEvent;
+    try {
+      card();
+      await screen.findByTestId('ai-connect-card-team');
+      await act(async () => {
+        fireEvent.press(screen.getByTestId('ai-connect-card-team-check'));
+      });
+      await screen.findByTestId('ai-connect-card-team-result');
+      act(() => handlers.get('keyboardDidShow')?.(shown));
+      expect(screen.getByTestId('ai-connect-card-folded')).toBeTruthy();
+      act(() => handlers.get('keyboardDidHide')?.(shown));
+      expect(screen.queryByTestId('ai-connect-card-folded')).toBeNull();
+      expect(screen.getByTestId('ai-connect-card-team-result')).toBeTruthy();
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    } finally {
+      listen.mockRestore();
     }
   });
 

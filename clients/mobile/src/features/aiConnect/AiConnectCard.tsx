@@ -204,14 +204,19 @@ export function AiConnectCardShell({
           testID="ai-connect-card-folded">
           <Text style={styles.folded}>{AI_CONNECT_CARD_COPY.folded}</Text>
         </Pressable>
-      ) : (
-        <ScrollView
-          style={{maxHeight: Math.round(height * CARD_BODY_WINDOW_SHARE)}}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator>
-          {children}
-        </ScrollView>
-      )}
+      ) : null}
+      {/* 접혀도 몸은 **내리지 않고 숨긴다**: 내리면 「연결 확인」 결과(절의 상태)가
+          자판을 한 번 올렸다 내리는 것만으로 사라지고, 팀 연결을 다시 불러온다. */}
+      <ScrollView
+        style={[
+          {maxHeight: Math.round(height * CARD_BODY_WINDOW_SHARE)},
+          keyboardUp && styles.hidden,
+        ]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator
+        testID="ai-connect-card-scroll">
+        {children}
+      </ScrollView>
     </View>
   );
 }
@@ -845,6 +850,7 @@ function buildStyles(color: Palette) {
       backgroundColor: color.sheet,
     },
     footText: {flex: 1, fontSize: ds2Type.caption, lineHeight: lineHeight.meta, color: color.textMuted},
+    hidden: {display: 'none'},
     foldedRow: {
       minHeight: TOUCH_TARGET,
       justifyContent: 'center',

@@ -19,13 +19,9 @@ name: 93-ai-connect-check-capture
 - takeScreenshot: ai-connect-scrolled
 - tapOn:
     id: "ai-connect-card-team-check"
-- extendedWaitUntil:
-    visible:
-      id: "ai-connect-card-team-result"
-    timeout: 30000
 - scrollUntilVisible:
     element:
       id: "ai-connect-card-team-result"
     direction: DOWN
-    timeout: 10000
+    timeout: 30000
 - takeScreenshot: ai-connect-check-result

@@ -40,7 +40,10 @@ name: 92-ai-connect-capture
       id: "composer-key-blocked"
     timeout: 10000
 - takeScreenshot: ai-connect-key-blocked
-- hideKeyboard
+# 접힌 줄을 누르면 자판이 내려간다(R2-M1). maestro `hideKeyboard`는 iOS 에서
+# 여러 줄 입력창의 리턴을 쳐 흔들리므로 카드 자신의 길을 쓴다.
+- tapOn:
+    id: "ai-connect-card-folded"
 - extendedWaitUntil:
     visible:
       id: "ai-connect-card-body"
@@ -52,8 +55,10 @@ name: 92-ai-connect-capture
     timeout: 10000
 - tapOn:
     id: "ai-connect-card-team-check"
-- extendedWaitUntil:
-    visible:
+# 결과 줄은 큰 글씨에서 카드 몸 스크롤 아래에 선다 — 보일 때까지 올린다.
+- scrollUntilVisible:
+    element:
       id: "ai-connect-card-team-result"
+    direction: DOWN
     timeout: 30000
 - takeScreenshot: ai-connect-check-result
