@@ -1300,6 +1300,9 @@
      * 행)에서 시작한다. macOS 신호등(x 16, 약 52 폭)이 레일 폭 64를 넘어 본문 위로
      * 걸치기 때문이다. */
     &[data-work-rail] {
+      /* 들어올 때는 폭을 곧바로 바꾼다: 324에서 64로 미끄러지는 동안 4열 칸이 240
+       * 아래로 내려가 격자가 한 칸 최대화로 번쩍인다(design-review M3). */
+      transition: none;
       grid-template-columns: var(--w-work-rail) 1fr;
       background-size:
         var(--w-work-rail) 100%,

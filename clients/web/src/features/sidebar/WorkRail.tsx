@@ -24,6 +24,7 @@ function RailLink({
   label,
   testId,
   isActive,
+  returnTo,
 }: {
   to: string;
   icon: ReactNode;
@@ -31,6 +32,8 @@ function RailLink({
   testId: string;
   /** 쿼리까지 봐야 하는 목적지(내 작업·팀 작업)는 셸이 판정을 넘긴다. */
   isActive?: boolean;
+  /** 레일이 내려간 뒤 캐럿이 갈 채널 목록 줄(testid). 없으면 라우트 상자. */
+  returnTo?: string;
 }) {
   return (
     <li>
@@ -38,6 +41,7 @@ function RailLink({
         to={to}
         end
         data-testid={testId}
+        onClick={() => rememberRailReturn(returnTo ?? null)}
         // NavLink는 경로만 본다: 「팀 작업」(`/work?view=team`)도 `/work`에서 켜진다.
         aria-current={isActive === undefined ? undefined : isActive ? "page" : false}
         className={({ isActive: routeActive }) =>
@@ -56,6 +60,24 @@ function RailLink({
   );
 }
 
+/**
+ * 레일 단추로 「내 작업」을 떠나면 레일이 통째로 내려가고, 캐럿을 쥔 단추도 함께
+ * 사라진다(design-review H1). 사이드바가 트리를 되살린 뒤 이 값으로 캐럿을 놓는다.
+ * `undefined` = 레일에서 떠나지 않았다, `null` = 채널 목록에 같은 줄이 없다.
+ */
+let pendingRailReturn: string | null | undefined;
+
+function rememberRailReturn(testId: string | null) {
+  pendingRailReturn = testId;
+}
+
+/** 한 번 읽으면 지운다. */
+export function takeRailReturn(): string | null | undefined {
+  const value = pendingRailReturn;
+  pendingRailReturn = undefined;
+  return value;
+}
+
 export function WorkRail({ footer }: { footer?: ReactNode }) {
   return (
     <div
@@ -65,9 +87,9 @@ export function WorkRail({ footer }: { footer?: ReactNode }) {
       <nav aria-label="앱 탐색" className="flex flex-col items-center">
         <ul className="flex flex-col items-center gap-2">
           <RailLink to="/" icon={<MessageSquare />} label="대화" testId="work-rail-chat" isActive={false} />
-          <RailLink to="/inbox" icon={<Inbox />} label="인박스" testId="work-rail-inbox" />
+          <RailLink to="/inbox" icon={<Inbox />} label="인박스" testId="work-rail-inbox" returnTo="nav-inbox" />
           <RailLink to={MY_WORK_PATH} icon={<SquareTerminal />} label={WORK_NAV.mine} testId="work-rail-mine" isActive />
-          <RailLink to={TEAM_WORK_PATH} icon={<SquareKanban />} label={WORK_NAV.team} testId="work-rail-team" isActive={false} />
+          <RailLink to={TEAM_WORK_PATH} icon={<SquareKanban />} label={WORK_NAV.team} testId="work-rail-team" isActive={false} returnTo="nav-team-work" />
         </ul>
       </nav>
       <span className="flex-1" />

@@ -24,7 +24,7 @@ import { uuidEq, type Channel } from "@momo/core/lib/api";
 import { fetchWorkspace } from "@momo/core/features/settings/api";
 import { useSession } from "@/app/session";
 import { isSidebarTreeInert } from "@/app/sidebarPane";
-import { useInertWhile, useShellNav } from "@/app/shellNav";
+import { ROUTE_REGION_DOM_ID, useInertWhile, useShellNav } from "@/app/shellNav";
 import {
   agentTurnsInChannel,
   useAgentWorkingSignals,
@@ -69,7 +69,7 @@ import { SidebarNowCard } from "./SidebarNowCard";
 import { workspaceRailTile } from "./workspaceRailModel";
 import { KomettoMark } from "@/design/brand/KomettoMark";
 import { ProfileCard } from "./ProfileCard";
-import { WorkRail } from "./WorkRail";
+import { WorkRail, takeRailReturn } from "./WorkRail";
 import { isDesktop } from "@/lib/tauri";
 import {
   MY_WORK_PATH,
@@ -199,6 +199,20 @@ export function Sidebar({
   const workLocation = useLocation();
   const currentWorkView: WorkView | null =
     workLocation.pathname === MY_WORK_PATH ? workViewOf(workLocation.search) : null;
+  // 레일 단추로 떠나 레일이 내려가면 캐럿이 <body>에 떨어진다(design-review H1).
+  // 되살아난 채널 목록의 같은 줄로, 없으면(대화) 라우트 상자로 놓는다.
+  const wasWorkRail = useRef(workRail);
+  useEffect(() => {
+    const was = wasWorkRail.current;
+    wasWorkRail.current = workRail;
+    if (!was || workRail) return;
+    const target = takeRailReturn();
+    if (target === undefined) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const row = target ? document.querySelector<HTMLElement>(`[data-testid="${target}"]`) : null;
+    (row ?? document.getElementById(ROUTE_REGION_DOM_ID))?.focus({ preventScroll: true });
+  }, [workRail]);
 
   // 폰에서 이 사이드바는 서랍이다 (goal B6). 닫혀 있는 동안에는 화면 밖으로
   // 밀려 있을 뿐 DOM에는 남아 있으므로(스크롤 위치와 마운트를 지킨다), 탭 순서와

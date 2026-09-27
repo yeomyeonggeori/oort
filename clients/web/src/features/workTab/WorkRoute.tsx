@@ -64,7 +64,8 @@ export function TeamWorkRoute() {
           <SquareKanban aria-hidden className="size-4 shrink-0 text-icon" />
           <span className="truncate">{WORK_NAV.team}</span>
         </h1>
-        <p className="min-w-0 truncate text-meta text-ink-muted">공유된 세션만 보입니다</p>
+        {/* 시안 ④의 부제 「공유된 세션만 보입니다」는 보드의 거르기를 말한다. 보드가 서기
+            전(T11 #2863)에는 아래 빈 상태와 어긋나므로 세우지 않는다. */}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <EmptyInvite

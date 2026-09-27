@@ -14,6 +14,7 @@
 //   - 1440×900 「내 작업」 4×2: 칸 여덟의 폭이 모두 `WORKBENCH_MIN_PANE`(240) 이상,
 //     앱 사이드바 열(레일) 폭 64, 가로 넘침 0.
 //   - 1280×800 「내 작업」 4×2: 같은 것(세션 목록 T4가 서기 전 기준).
+//   - 1100×760(데스크탑 기본 창)·900×700: 4×2가 240을 못 지키면 격자가 접힌 모양을 찍는다.
 //   - 「팀 작업」 빈 상태: 데스크탑 1440·1280, 웹 390(서랍 닫힘·열림).
 // =============================================================================
 
@@ -223,7 +224,10 @@ async function myWork(browser, origin, scheme, viewport) {
   await page.getByTestId("nav-my-work").click();
   await page.getByTestId("my-work-tab").waitFor();
   await page.getByTestId("work-rail").waitFor();
-  await page.waitForFunction(() => document.querySelectorAll("[data-pane-id] .xterm-rows").length >= 8, null, { timeout: 15_000 });
+  const wide = viewport.width >= 1280;
+  // 좁은 창(1100 기본·900)에서는 4×2가 240을 못 지켜 격자가 한 칸 최대화로 접힌다
+  // (#2774 fitLayout). 그 모양을 그대로 찍고 기록한다(프리셋 안내는 T5).
+  await page.waitForFunction((n) => document.querySelectorAll("[data-pane-id] .xterm-rows").length >= n, wide ? 8 : 1, { timeout: 15_000 });
   await page.waitForTimeout(400);
   const panes = await page.evaluate(() =>
     [...document.querySelectorAll("[data-testid='my-work-tab'] [data-pane-id]")].map((el) => {
@@ -232,9 +236,15 @@ async function myWork(browser, origin, scheme, viewport) {
     })
   );
   const railWidth = await page.evaluate(() => document.querySelector("#sidebar-drawer")?.getBoundingClientRect().width ?? null);
-  check(`${tag} 칸 여덟`, panes.length === 8, { panes: panes.length });
   const narrowest = Math.min(...panes.map((p) => p.w));
-  check(`${tag} 칸 폭 ≥ ${MIN_PANE}`, narrowest >= MIN_PANE, { narrowest, panes });
+  if (wide) {
+    check(`${tag} 칸 여덟`, panes.length === 8, { panes: panes.length });
+    check(`${tag} 칸 폭 ≥ ${MIN_PANE}`, narrowest >= MIN_PANE, { narrowest, panes });
+  } else {
+    const status = await page.locator("[data-testid='my-work-tab'] [data-testid='workbench-status']").textContent().catch(() => null);
+    console.log(`info ${tag} 좁은 창: 칸 ${panes.length}, 상태 줄 ${JSON.stringify(status)}`);
+    report[`my-work-${tag}-narrow`] = { panes, status };
+  }
   check(`${tag} 앱 사이드바 레일 64`, railWidth === 64, { railWidth });
   // 세션 목록(T4 #2856, 268)이 격자 옆에 서면: 지금 격자 폭에서 268을 빼고 4열로 나눈다.
   const gridWidth = await page.evaluate(
@@ -288,6 +298,8 @@ async function main() {
     for (const scheme of ["light", "dark"]) {
       await myWork(browser, preview.origin, scheme, { width: 1440, height: 900 });
       await myWork(browser, preview.origin, scheme, { width: 1280, height: 800 });
+      await myWork(browser, preview.origin, scheme, { width: 1100, height: 760 });
+      await myWork(browser, preview.origin, scheme, { width: 900, height: 700 });
       await teamWork(browser, preview.origin, scheme, { width: 1440, height: 900 }, true);
       await teamWork(browser, preview.origin, scheme, { width: 390, height: 844 }, false);
     }

@@ -406,8 +406,14 @@ function sessionValue(): SessionContextValue {
   };
 }
 
+let rerenderRail: (workRail: boolean) => void = () => undefined;
+
 async function mount(
-  { workRail = false, entry = "/" }: { workRail?: boolean; entry?: string } = {}
+  {
+    workRail = false,
+    entry = "/",
+    switcherOpen = true,
+  }: { workRail?: boolean; entry?: string; switcherOpen?: boolean } = {}
 ): Promise<HTMLElement> {
   if (mountedRoot) {
     act(() => mountedRoot?.unmount());
@@ -423,7 +429,7 @@ async function mount(
   });
   client.setQueryData(["roster", WS], [self]);
   mountedClient = client;
-  const tree: ReactElement = createElement(
+  const tree = (workRail: boolean): ReactElement => createElement(
     QueryClientProvider,
     { client },
     createElement(
@@ -452,7 +458,8 @@ async function mount(
               workRail,
             }),
             createElement(QuickSwitcher, {
-              open: true,
+              // 열린 팔레트는 모달이라 캐럿을 붙든다. 캐럿 시험(H1)만 닫고 잰다.
+              open: switcherOpen,
               onOpenChange: () => undefined,
             }),
             createElement(SettingsRoute),
@@ -462,8 +469,9 @@ async function mount(
       )
     )
   );
+  rerenderRail = (next: boolean) => mountedRoot?.render(tree(next));
   await act(async () => {
-    mountedRoot?.render(tree);
+    mountedRoot?.render(tree(workRail));
     await Promise.resolve();
   });
   await vi.waitFor(() => {
@@ -805,5 +813,25 @@ describe("「내 작업」 레일 (#2854, 시안 ①)", () => {
     // 채널 목록의 두 줄도 쿼리까지 보고 가른다.
     expect(host.querySelector('[data-testid="nav-my-work"]')?.getAttribute("aria-current")).toBe("page");
     expect(host.querySelector('[data-testid="nav-team-work"]')?.getAttribute("aria-current")).toBe("false");
+  });
+});
+
+describe("레일로 떠나면 캐럿이 채널 목록의 같은 줄로 간다 (#2854 design-review H1)", () => {
+  it("레일의 인박스를 누르면 레일이 내려간 뒤 캐럿이 nav-inbox에 있다", async () => {
+    shell.desktop = true;
+    const host = await mount({ workRail: true, entry: "/work", switcherOpen: false });
+    const link = host.querySelector<HTMLAnchorElement>('[data-testid="work-rail-inbox"]')!;
+    link.focus();
+    act(() => link.click());
+    act(() => rerenderRail(false));
+    expect(host.querySelector('[data-testid="work-rail"]')).toBeNull();
+    expect(document.activeElement?.getAttribute("data-testid")).toBe("nav-inbox");
+  });
+
+  it("레일에서 떠나지 않고 레일이 내려가면 캐럿을 옮기지 않는다", async () => {
+    shell.desktop = true;
+    await mount({ workRail: true, entry: "/work", switcherOpen: false });
+    act(() => rerenderRail(false));
+    expect(document.activeElement?.getAttribute("data-testid")).not.toBe("nav-inbox");
   });
 });
