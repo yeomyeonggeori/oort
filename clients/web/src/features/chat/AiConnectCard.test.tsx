@@ -516,6 +516,12 @@ describe("이미 쓰는 키를 바꿀 때 (design-review #2944 H1)", () => {
     expect(save.textContent).toBe("바꿔 저장하고 확인");
     // 묻는 동안 키는 칸에만 있다.
     expect(input.value).toBe("replacement-key-000000000000000000");
+    expect(q(host, "ai-connect-card-key-replace")?.textContent).toContain("방금 확인에 실패했어요");
+    // 칸을 고치면 묻기는 처음으로(다른 키가 두 번째 누름으로 저장되지 않게).
+    act(() => input.dispatchEvent(new Event("input", { bubbles: true })));
+    expect(q(host, "ai-connect-card-key-replace")).toBeNull();
+    await act(async () => save.click());
+    expect(putProviderLink).not.toHaveBeenCalled();
     vi.mocked(putProviderLink).mockResolvedValue(KEY_LINK);
     await act(async () => save.click());
     expect(putProviderLink).toHaveBeenCalledTimes(1);
@@ -562,7 +568,7 @@ describe("흐름 ③ 연결 확인 · ④ 실패 제자리", () => {
     act(() => check.click());
     await waitFor(() => expect(vi.mocked(detectLocalHarnesses).mock.calls.length).toBe(before + 1));
     await waitFor(() =>
-      expect(q(host, "ai-connect-card-claude-result")?.textContent).toMatch(/^마지막 확인 \d{2}:\d{2}$/)
+      expect(q(host, "ai-connect-card-claude-result")?.textContent).toBe("마지막 확인 방금")
     );
     vi.mocked(detectLocalHarnesses).mockResolvedValue([
       { id: "claude", installed: true, auth: "unknown" },

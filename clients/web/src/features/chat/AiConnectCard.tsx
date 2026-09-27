@@ -98,6 +98,11 @@ function clock(ms: number): string {
   });
 }
 
+/** 결과 줄의 때: 1분 안이면 「방금」(brief §6), 아니면 「15:42」. */
+function since(ms: number): string {
+  return Date.now() - ms < 60_000 ? "방금" : clock(ms);
+}
+
 function shortDate(ms: number): string {
   const date = new Date(ms);
   return `${date.getMonth() + 1}월 ${date.getDate()}일`;
@@ -152,6 +157,7 @@ function CardRow({
   last = false,
   testId,
   pillKey,
+  wrapSub = false,
 }: {
   mark: string;
   name: string;
@@ -166,6 +172,8 @@ function CardRow({
   last?: boolean;
   testId: string;
   pillKey?: string;
+  /** 설명문이 줄의 요점이면(빈 줄의 「왜」) 자르지 않고 접는다. */
+  wrapSub?: boolean;
 }) {
   return (
     <li
@@ -187,7 +195,15 @@ function CardRow({
           <span className="truncate">{name}</span>
           <AiSource>{source}</AiSource>
         </span>
-        <span className={cn("truncate text-meta text-ink-muted", mono && "font-mono")}>{sub}</span>
+        <span
+          className={cn(
+            "text-meta text-ink-muted",
+            wrapSub ? "break-keep" : "truncate",
+            mono && "font-mono"
+          )}
+        >
+          {sub}
+        </span>
       </span>
       <span data-slot="pill" data-testid={`${testId}-pill`} data-pill={pillKey}>
         {pill && <AiPill tone={pill.tone}>{pill.text}</AiPill>}
@@ -413,7 +429,7 @@ function harnessResultLine(result: HarnessResult | undefined, pill: HarnessPill)
   if (pill === "checking") return null;
   if (pill === "recheck") return { tone: "warn", text: "CLI가 답하지 않았어요" };
   if (pill === "login") return { tone: "warn", text: "이 맥의 로그인이 풀려 있어요" };
-  return { tone: "mute", text: `마지막 확인 ${clock(result.at)}` };
+  return { tone: "mute", text: `마지막 확인 ${since(result.at)}` };
 }
 
 function HarnessRows({ only }: { only: LocalHarnessId | null }) {
@@ -647,7 +663,7 @@ function TeamSection({
     result = { tone: "bad", text: errorMessage(check.error) };
   } else if (!offline && probe && !check.isPending) {
     if (probe.ok) {
-      result = { tone: "ok", text: `응답을 확인했어요 · ${clock(probe.checkedAtMs)}` };
+      result = { tone: "ok", text: `응답을 확인했어요 · ${since(probe.checkedAtMs)}` };
     } else {
       const why = teamCheckReason(probe.reason);
       result = {
@@ -709,7 +725,15 @@ function TeamSection({
   if (query.isPending) {
     body = <Skeleton ready={false} rows={1} className="py-2" />;
   } else if (denied) {
-    body = null;
+    body = (
+      <p
+        className="flex items-start gap-2 break-keep py-2 text-body text-ink"
+        data-testid="ai-connect-card-team-denied"
+      >
+        <Lock className="mt-1 size-3 shrink-0 text-icon" aria-hidden="true" />
+        <span>{TEAM_DENIED_LINE}</span>
+      </p>
+    );
   } else if (query.isError) {
     body = (
       <div className="flex min-w-0 flex-wrap items-center gap-2 py-2" role="alert" data-testid="ai-connect-card-team-error">
@@ -739,6 +763,7 @@ function TeamSection({
                   }`
                 : "서버 환경값"
           }
+          wrapSub={!hasRow}
           pill={pill}
           action={action}
           result={result}
@@ -746,6 +771,7 @@ function TeamSection({
             editing ? (
               <TeamKeyForm
                 link={link}
+                currentFailed={failed}
                 onCancel={() => setEditing(false)}
                 onSaved={onSaved}
               />
@@ -769,14 +795,11 @@ function TeamSection({
           </p>
         )}
       </div>
-      {(editing || denied) && (
-        // 시안 `.cft`: 권한 문장은 카드 발에 한 번만 선다.
-        <p
-          className="flex items-center gap-2 border-t border-line bg-sheet px-3 py-2 text-meta text-ink-muted"
-          data-testid={denied ? "ai-connect-card-team-denied" : undefined}
-        >
+      {editing && (
+        // 시안 `.cft`: 운영자 입력의 봉인 문장은 카드 발에 한 번.
+        <p className="flex items-center gap-2 border-t border-line bg-sheet px-3 py-2 text-meta text-ink-muted">
           <Lock className="size-3 shrink-0 text-icon" aria-hidden="true" />
-          {denied ? TEAM_DENIED_LINE : OPERATOR_FOOT}
+          {OPERATOR_FOOT}
         </p>
       )}
     </section>
@@ -796,10 +819,13 @@ function TeamSection({
  */
 function TeamKeyForm({
   link,
+  currentFailed,
   onCancel,
   onSaved,
 }: {
   link: ProviderLink;
+  /** 지금 키가 방금 확인에 실패했는가(대체 경고의 문장이 달라진다). */
+  currentFailed: boolean;
   onCancel: () => void;
   onSaved: () => void;
 }) {
@@ -868,7 +894,10 @@ function TeamKeyForm({
                 name={`${inputId}-preset`}
                 value={row.id}
                 checked={presetId === row.id}
-                onChange={() => setPresetId(row.id)}
+                onChange={() => {
+                  setPresetId(row.id);
+                  setConfirmReplace(false);
+                }}
                 className="peer sr-only"
                 data-testid={`ai-connect-card-preset-${row.id}`}
               />
@@ -899,6 +928,7 @@ function TeamKeyForm({
         className="font-mono"
         aria-describedby={fieldError ? `${errorId} ${hintId}` : hintId}
         aria-invalid={fieldError ? true : undefined}
+        onInput={() => setConfirmReplace(false)}
         data-testid="ai-connect-card-key-input"
       />
       {fieldError && (
@@ -917,7 +947,9 @@ function TeamKeyForm({
       {confirmReplace && (
         <p className="break-keep text-meta text-warn" role="alert" data-testid="ai-connect-card-key-replace">
           지금 팀 기본 키({maskedBearer(link.bearerLast4)})를 이 키로 바꿔요. 팀 에이전트는 바로 새 키로 대답해요.
-          저장한 뒤에 확인하니, 틀린 키면 팀 에이전트가 멈춰요.
+          {currentFailed
+            ? " 지금 키는 방금 확인에 실패했어요. 새 키도 저장한 뒤에 확인해요."
+            : " 저장한 뒤에 확인하니, 틀린 키면 팀 에이전트가 멈춰요."}
         </p>
       )}
       <div className="flex flex-wrap items-center gap-2">
@@ -925,11 +957,11 @@ function TeamKeyForm({
           type="submit"
           size="sm"
           aria-busy={save.isPending || undefined}
-          aria-disabled={target === null || undefined}
-          className={cn(target === null && "opacity-50")}
+          aria-disabled={target === null || save.isPending || undefined}
+          className={cn((target === null || save.isPending) && "opacity-50")}
           data-testid="ai-connect-card-key-save"
         >
-          {confirmReplace ? "바꿔 저장하고 확인" : "저장하고 확인"}
+          {save.isPending ? "저장 중" : confirmReplace ? "바꿔 저장하고 확인" : "저장하고 확인"}
         </Button>
         <Button type="button" variant="ghost" size="sm" onClick={onCancel} data-testid="ai-connect-card-key-cancel">
           취소
