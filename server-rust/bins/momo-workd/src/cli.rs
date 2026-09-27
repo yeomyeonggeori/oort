@@ -4,13 +4,24 @@
 //! MOMO_WORKD_REGISTER_TOKEN=<owner access token> \
 //!   momo-workd register --config workd.json [--dev-key-file PATH] [--force]
 //! momo-workd run      --config workd.json [--dev-key-file PATH]
+//!                     [--control-socket PATH [--dev-unsigned-peer]]
+//! momo-workd forget   --config workd.json [--dev-key-file PATH]
 //! ```
+//!
+//! `forget` is the local half of 「등록 해제」 (#2778): it deletes this host's
+//! key and its registration state. The server half (revoking the row) is the
+//! owner's `DELETE …/work-hosts/{host}`, which the desktop app sends first.
 //!
 //! Registration takes the **owner's** session token (ADR-0188 D2/D3). In this
 //! slice it comes from the environment — never a command-line argument, which
 //! any local process could read from the process table — and is used for one
-//! request and dropped. The desktop app will hand it over itself once the
-//! registration GUI lands.
+//! request and dropped. The desktop app's registration GUI (#2778) hands it over
+//! the same way: in the child's environment, never in its arguments.
+//!
+//! `--control-socket` is how the desktop app, which starts `run` as its child,
+//! asks for status and a shutdown (see [`crate::control_socket`]). It is a
+//! user-only Unix socket with a peer code-signature check; workd opens no TCP
+//! socket with or without it.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,6 +29,9 @@ use std::time::Duration;
 
 use crate::client::{self, ClientError, HostClient};
 use crate::config::{ConfigError, HostState, WorkdConfig, SERVED_SCOPE};
+use crate::control_socket::{
+    ControlSocket, ControlSocketError, HostHealth, HostIdentity, PeerPolicy,
+};
 use crate::controls::{heartbeat_loop, ControlLoop};
 use crate::keystore::{HostKey, KeyStore, KeyStoreError};
 use crate::policy::{AdapterKind, CodexHome};
@@ -33,10 +47,16 @@ usage:
   momo-workd register --config PATH [--dev-key-file PATH] [--force]
       reads the owner's access token from MOMO_WORKD_REGISTER_TOKEN
   momo-workd run --config PATH [--dev-key-file PATH]
+                 [--control-socket PATH [--dev-unsigned-peer]]
+  momo-workd forget --config PATH [--dev-key-file PATH]
+      deletes the host key and the registration state (after a revoke)
   momo-workd --version
 
 --dev-key-file keeps the host key in a 0600 file instead of the keychain.
-It exists for development and tests only.";
+It exists for development and tests only.
+--control-socket answers the desktop app on a user-only Unix socket (macOS).
+--dev-unsigned-peer skips the peer's code-signature check; an unsigned
+development build only (a team-signed momo-workd refuses it).";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Invocation {
@@ -46,6 +66,12 @@ pub enum Invocation {
         force: bool,
     },
     Run {
+        config: PathBuf,
+        dev_key_file: Option<PathBuf>,
+        control_socket: Option<PathBuf>,
+        dev_unsigned_peer: bool,
+    },
+    Forget {
         config: PathBuf,
         dev_key_file: Option<PathBuf>,
     },
@@ -60,12 +86,14 @@ pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
     match command.as_str() {
         "-h" | "--help" | "help" => return Ok(Invocation::Help),
         "-V" | "--version" => return Ok(Invocation::Version),
-        "register" | "run" => {}
+        "register" | "run" | "forget" => {}
         other => return Err(format!("unknown command {other:?}")),
     }
     let mut config = None;
     let mut dev_key_file = None;
     let mut force = false;
+    let mut control_socket = None;
+    let mut dev_unsigned_peer = false;
     let mut rest = args[1..].iter();
     while let Some(argument) = rest.next() {
         let mut value = |name: &str| {
@@ -77,20 +105,34 @@ pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
             "--config" => config = Some(PathBuf::from(value("--config")?)),
             "--dev-key-file" => dev_key_file = Some(PathBuf::from(value("--dev-key-file")?)),
             "--force" if command == "register" => force = true,
+            "--control-socket" if command == "run" => {
+                control_socket = Some(PathBuf::from(value("--control-socket")?))
+            }
+            "--dev-unsigned-peer" if command == "run" => dev_unsigned_peer = true,
             other => return Err(format!("unknown argument {other:?}")),
         }
     }
     let config = config.ok_or_else(|| "--config is required".to_string())?;
+    if dev_unsigned_peer && control_socket.is_none() {
+        return Err("--dev-unsigned-peer needs --control-socket".to_string());
+    }
     Ok(if command == "register" {
         Invocation::Register {
             config,
             dev_key_file,
             force,
         }
+    } else if command == "forget" {
+        Invocation::Forget {
+            config,
+            dev_key_file,
+        }
     } else {
         Invocation::Run {
             config,
             dev_key_file,
+            control_socket,
+            dev_unsigned_peer,
         }
     })
 }
@@ -107,6 +149,8 @@ pub enum CliError {
     Usage(String),
     #[error("the server no longer accepts this host (revoked, or its owner left); stopped")]
     Revoked,
+    #[error(transparent)]
+    ControlSocket(#[from] ControlSocketError),
 }
 
 impl CliError {
@@ -114,6 +158,7 @@ impl CliError {
         match self {
             Self::Usage(_) | Self::Config(_) => 2,
             Self::Revoked => 3,
+            Self::ControlSocket(ControlSocketError::AlreadyRunning(_)) => 4,
             _ => 1,
         }
     }
@@ -216,9 +261,35 @@ pub async fn register(
     Ok(state)
 }
 
+/// Delete this host's key and registration state. Idempotent: nothing to delete
+/// is not an error.
+pub async fn forget(config_path: PathBuf, dev_key_file: Option<PathBuf>) -> Result<(), CliError> {
+    let config = WorkdConfig::load(&config_path)?;
+    let store = key_store(&config, dev_key_file)?;
+    blocking(move || store.delete()).await?;
+    match std::fs::remove_file(&config.state_path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(CliError::Config(ConfigError::Io {
+                path: config.state_path.display().to_string(),
+                source,
+            }))
+        }
+    }
+    tracing::info!("host key and registration state deleted");
+    Ok(())
+}
+
 /// Serve until a signal (exit 0) or until the server refuses the host
-/// (`CliError::Revoked`, exit 3 — ADR-0188 D7: a 401 stops remote sessions).
-pub async fn run(config_path: PathBuf, dev_key_file: Option<PathBuf>) -> Result<(), CliError> {
+/// (`CliError::Revoked`, exit 3 — ADR-0188 D7: a 401 stops remote sessions),
+/// or until the desktop app asks for `shutdown` on the control socket (exit 0).
+pub async fn run(
+    config_path: PathBuf,
+    dev_key_file: Option<PathBuf>,
+    control_socket: Option<PathBuf>,
+    dev_unsigned_peer: bool,
+) -> Result<(), CliError> {
     let config = WorkdConfig::load(&config_path)?;
     let state = HostState::load(&config.state_path)?;
     state.check_matches(&config)?;
@@ -297,10 +368,48 @@ pub async fn run(config_path: PathBuf, dev_key_file: Option<PathBuf>) -> Result<
             codex,
         },
     );
+    let health = Arc::new(HostHealth::default());
+    let stop = Arc::new(tokio::sync::Notify::new());
+    // Bound before the first heartbeat, so a second workd for the same socket
+    // stops here (exit 4) instead of racing the first one's server session.
+    let control = match control_socket {
+        Some(path) => {
+            if !cfg!(target_os = "macos") {
+                return Err(CliError::Usage(
+                    "--control-socket needs macOS (the peer is checked by code signature)".into(),
+                ));
+            }
+            let policy = PeerPolicy::for_this_binary(dev_unsigned_peer).map_err(CliError::Usage)?;
+            match &policy {
+                PeerPolicy::SameTeamApp { requirement } => {
+                    tracing::info!(requirement = %requirement, "control socket peers must satisfy")
+                }
+                PeerPolicy::DevUnsigned => tracing::warn!(
+                    "control socket without a peer signature check (--dev-unsigned-peer)"
+                ),
+                PeerPolicy::RefuseAll => tracing::warn!(
+                    "this momo-workd is not team-signed: the control socket will refuse every peer"
+                ),
+            }
+            let socket = ControlSocket::bind(&path, policy)?;
+            tracing::info!(path = %socket.path().display(), "control socket listening");
+            Some(tokio::spawn(socket.serve(
+                HostIdentity {
+                    host_id: state.host_id,
+                    workspace_id: state.workspace_id,
+                    owner_member_id: state.owner_member_id,
+                },
+                health.clone(),
+                stop.clone(),
+            )))
+        }
+        None => None,
+    };
     let mut controls = ControlLoop::new(api.clone(), sessions, state.owner_member_id);
     let mut heartbeat = tokio::spawn(heartbeat_loop(
         api.clone(),
         Duration::from_millis(config.heartbeat_interval_ms),
+        health.clone(),
     ));
     let mut terminate =
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
@@ -318,10 +427,19 @@ pub async fn run(config_path: PathBuf, dev_key_file: Option<PathBuf>) -> Result<
             _ = tokio::time::sleep(poll) => {}
             _ = terminate.recv() => break Ok(()),
             _ = tokio::signal::ctrl_c() => break Ok(()),
+            _ = stop.notified() => {
+                tracing::info!("shutdown requested on the control socket");
+                break Ok(());
+            }
             _ = &mut heartbeat => break Err(CliError::Revoked),
         }
     };
     heartbeat.abort();
+    if let Some(control) = control {
+        // Dropping the serve task drops the socket, which removes its file.
+        control.abort();
+        let _ = control.await;
+    }
     controls.sessions().shutdown().await;
     tracing::info!("work host stopped");
     outcome
@@ -356,12 +474,51 @@ mod tests {
             .unwrap(),
             Invocation::Run {
                 config: "/c.json".into(),
-                dev_key_file: Some("/k".into())
+                dev_key_file: Some("/k".into()),
+                control_socket: None,
+                dev_unsigned_peer: false,
             }
         );
+        assert_eq!(
+            parse_args(&args(&[
+                "run",
+                "--config",
+                "/c.json",
+                "--control-socket",
+                "/s/workd.sock",
+                "--dev-unsigned-peer"
+            ]))
+            .unwrap(),
+            Invocation::Run {
+                config: "/c.json".into(),
+                dev_key_file: None,
+                control_socket: Some("/s/workd.sock".into()),
+                dev_unsigned_peer: true,
+            }
+        );
+        assert!(
+            parse_args(&args(&["run", "--config", "/c", "--dev-unsigned-peer"])).is_err(),
+            "the dev flag means nothing without a control socket"
+        );
+        assert!(parse_args(&args(&[
+            "register",
+            "--config",
+            "/c",
+            "--control-socket",
+            "/s"
+        ]))
+        .is_err());
         assert!(parse_args(&args(&["register", "--config", "/c", "--token", "t"])).is_err());
         assert!(parse_args(&args(&["run", "--config", "/c", "--force"])).is_err());
         assert!(parse_args(&args(&["run"])).is_err());
+        assert_eq!(
+            parse_args(&args(&["forget", "--config", "/c.json"])).unwrap(),
+            Invocation::Forget {
+                config: "/c.json".into(),
+                dev_key_file: None
+            }
+        );
+        assert!(parse_args(&args(&["forget", "--config", "/c", "--force"])).is_err());
         assert_eq!(parse_args(&[]).unwrap(), Invocation::Help);
     }
 }

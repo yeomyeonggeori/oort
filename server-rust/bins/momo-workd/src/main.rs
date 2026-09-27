@@ -48,10 +48,16 @@ async fn main() {
                     );
                 })
         }
+        Invocation::Forget {
+            config,
+            dev_key_file,
+        } => cli::forget(config, dev_key_file).await,
         Invocation::Run {
             config,
             dev_key_file,
-        } => cli::run(config, dev_key_file).await,
+            control_socket,
+            dev_unsigned_peer,
+        } => cli::run(config, dev_key_file, control_socket, dev_unsigned_peer).await,
     };
     if let Err(error) = result {
         eprintln!("momo-workd: {error}");

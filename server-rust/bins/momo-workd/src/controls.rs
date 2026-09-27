@@ -234,15 +234,31 @@ impl ControlLoop {
 }
 
 /// Heartbeat until the server refuses the host. Returns only on 401.
-pub async fn heartbeat_loop(api: Arc<dyn HostApi>, interval: Duration) -> ClientError {
+///
+/// Each outcome is recorded in `health`, which the control socket's `status`
+/// reports to the desktop app (#2778).
+pub async fn heartbeat_loop(
+    api: Arc<dyn HostApi>,
+    interval: Duration,
+    health: Arc<crate::control_socket::HostHealth>,
+) -> ClientError {
     let mut ticker = tokio::time::interval(interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         ticker.tick().await;
         match api.heartbeat().await {
-            Ok(()) => tracing::debug!("heartbeat accepted"),
-            Err(ClientError::Unauthorized) => return ClientError::Unauthorized,
-            Err(error) => tracing::warn!(error = %error, "heartbeat failed"),
+            Ok(()) => {
+                health.heartbeat_accepted();
+                tracing::debug!("heartbeat accepted")
+            }
+            Err(ClientError::Unauthorized) => {
+                health.heartbeat_failed();
+                return ClientError::Unauthorized;
+            }
+            Err(error) => {
+                health.heartbeat_failed();
+                tracing::warn!(error = %error, "heartbeat failed")
+            }
         }
     }
 }
