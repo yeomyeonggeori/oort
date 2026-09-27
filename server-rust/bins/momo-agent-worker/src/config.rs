@@ -252,6 +252,15 @@ impl WorkerConfig {
         }
     }
 
+    /// The same config with an operator env key (`HERMES_API_KEY`) set — for
+    /// tests and embeddings whose turns are meant to reach a model. Since
+    /// #2897 a turn with no team key calls no model at all, and
+    /// [`WorkerConfig::for_target`] deliberately configures none.
+    pub fn with_env_bearer(mut self, bearer: impl Into<String>) -> WorkerConfig {
+        self.provider.bearer = bearer.into();
+        self
+    }
+
     /// The protocol block this configuration puts in front of a turn — `None`
     /// when the operator opted out.
     ///

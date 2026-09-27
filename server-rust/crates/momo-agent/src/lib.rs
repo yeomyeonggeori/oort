@@ -221,10 +221,11 @@ pub use hosted_notice::{
     HOSTED_SKIP_ACTION_HREF, HOSTED_SKIP_NOTICE_AUDIT_SCHEMA, HOSTED_SKIP_NOTICE_KIND,
     HOSTED_SKIP_NOTICE_POSTED_ACTION, HOSTED_SKIP_NOTICE_SOURCE,
     HOSTED_SKIP_NOTICE_THROTTLED_ACTION, HOSTED_SKIP_NOTICE_THROTTLE_SECONDS,
+    PROVIDER_REQUIRED_ACTION_HREF, PROVIDER_REQUIRED_ACTION_LABEL,
 };
 pub use korean::{attach_particle, has_final_consonant, particle_for, ParticlePair};
 pub use mention::{
-    allowed_agent_models, context_window_size, effective_system_prompt,
+    agent_display_name_in_tx, allowed_agent_models, context_window_size, effective_system_prompt,
     load_mention_candidates_in_tx, max_output_tokens, mention_diagnostic_detail,
     mention_job_broadcast_payload, mention_job_payload, mention_run_input, message_source,
     paused_mention_body, paused_mention_props, resolve_mention_routing, MentionCandidate,

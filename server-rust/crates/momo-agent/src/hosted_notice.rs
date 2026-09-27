@@ -7,6 +7,7 @@
 //! |---|---|
 //! | `hosted_delivery_not_enabled` | this server does not deliver to hosted runtimes at all (`MOMO_HOSTED_DELIVERY_ENABLED` closed) |
 //! | `hosted_connection_unavailable` | the agent has no active connection |
+//! | `provider_required` (#2897, written by the agent worker, no audit skip row) | the team agent's turn has no team key at all — no provider link and no operator env key — so it calls no model (ADR-0135 D1: no silent fallback) |
 //! | `hosted_channel_unapproved` | the connection was never approved for this channel. In a DM the line names what is true there instead: a 1:1 DM with someone other than the owner waits for the owner's per-DM approval (`hosted_dm_owner_approval_required`, ADR-0162 증보 2 B3); a group DM, or an agent with no owner, can never be opened (`hosted_dm_not_approvable`) |
 //!
 //! Until #2871 each of these ended in an audit row and nothing else, so from
@@ -54,6 +55,10 @@ pub const HOSTED_DELIVERY_GUIDE_URL: &str =
 pub const HOSTED_SKIP_ACTION_HREF: &str = "/settings?section=agents";
 pub const HOSTED_SKIP_ACTION_LABEL: &str = "에이전트 자격 열기";
 
+/// #2897 — the door for `provider_required`: the team key lives on 설정 › AI 연결.
+pub const PROVIDER_REQUIRED_ACTION_HREF: &str = "/settings?section=ai";
+pub const PROVIDER_REQUIRED_ACTION_LABEL: &str = "AI 연결 열기";
+
 /// The three hosted skip reasons that get a visible line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostedSkipReason {
@@ -68,6 +73,11 @@ pub enum HostedSkipReason {
     /// (ADR-0162 증보 2 B3). The reader is that someone — not the owner and
     /// usually not an admin — so the line names who to ask and has no door.
     DirectMessageAwaitingOwner,
+    /// #2897 — a worker-served agent's turn found no team key (no provider
+    /// link, no operator env key). Not a hosted reason, but the same fact
+    /// shape ("why this agent did not answer") and the same line, so the
+    /// clients' one door rule (`noticeAction.ts`) opens 설정 › AI 연결.
+    ProviderRequired,
 }
 
 impl HostedSkipReason {
@@ -82,6 +92,7 @@ impl HostedSkipReason {
             Self::ChannelUnapproved => "hosted_channel_unapproved",
             Self::DirectMessageNotApprovable => "hosted_dm_not_approvable",
             Self::DirectMessageAwaitingOwner => "hosted_dm_owner_approval_required",
+            Self::ProviderRequired => "provider_required",
         }
     }
 
@@ -95,6 +106,10 @@ impl HostedSkipReason {
             Self::ConnectionUnavailable | Self::ChannelUnapproved => {
                 Some((HOSTED_SKIP_ACTION_LABEL, HOSTED_SKIP_ACTION_HREF))
             }
+            Self::ProviderRequired => Some((
+                PROVIDER_REQUIRED_ACTION_LABEL,
+                PROVIDER_REQUIRED_ACTION_HREF,
+            )),
         }
     }
 }
@@ -145,6 +160,10 @@ pub fn hosted_skip_notice_body_with_owner(
         HostedSkipReason::DirectMessageAwaitingOwner => format!(
             "이 대화는 {agent_display_name}의 소유자 승인이 필요해서 전달하지 못했어요. \
              {owner}에게 이 대화를 승인해 달라고 부탁해 주세요."
+        ),
+        HostedSkipReason::ProviderRequired => format!(
+            "{agent_display_name}에게 연결된 AI가 없어서 답하지 못했어요. \
+             워크스페이스 관리자가 설정 › AI 연결에서 API 키를 연결할 수 있어요."
         ),
     }
 }
@@ -211,12 +230,13 @@ pub fn hosted_skip_notice_key(
 mod tests {
     use super::*;
 
-    const ALL_REASONS: [HostedSkipReason; 5] = [
+    const ALL_REASONS: [HostedSkipReason; 6] = [
         HostedSkipReason::DeliveryNotEnabled,
         HostedSkipReason::ConnectionUnavailable,
         HostedSkipReason::ChannelUnapproved,
         HostedSkipReason::DirectMessageNotApprovable,
         HostedSkipReason::DirectMessageAwaitingOwner,
+        HostedSkipReason::ProviderRequired,
     ];
 
     #[test]
@@ -344,6 +364,27 @@ mod tests {
             awaiting.get("notice_action").is_none(),
             "the reader is not the owner; a settings door would refuse them"
         );
+    }
+
+    /// #2897: the no-team-key line says what is missing and opens AI 연결.
+    #[test]
+    fn provider_required_names_the_missing_key_and_opens_ai_settings() {
+        assert_eq!(
+            hosted_skip_notice_body(HostedSkipReason::ProviderRequired, "hermes"),
+            "hermes에게 연결된 AI가 없어서 답하지 못했어요. \
+             워크스페이스 관리자가 설정 › AI 연결에서 API 키를 연결할 수 있어요."
+        );
+        let props = hosted_skip_notice_props(
+            HostedSkipReason::ProviderRequired,
+            Uuid::from_u128(1),
+            Uuid::from_u128(2),
+            Uuid::from_u128(3),
+            Uuid::from_u128(4),
+        );
+        assert_eq!(props["source"], HOSTED_SKIP_NOTICE_SOURCE);
+        assert_eq!(props["reason"], "provider_required");
+        assert_eq!(props["notice_action"]["href"], "/settings?section=ai");
+        assert_eq!(props["notice_action"]["label"], "AI 연결 열기");
     }
 
     #[test]

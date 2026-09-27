@@ -494,6 +494,87 @@ mod tests {
         assert!(PROVIDER_REQUIRED_BODY.contains("AI 연결"));
     }
 
+    /// #2897 (brief §4.5): the welcome job is handed to a runtime, so it
+    /// carries the turn and nothing about a person's runtime — not the hosted
+    /// connection the target resolution read, not an owner, not a harness.
+    #[test]
+    fn a_welcome_payload_carries_only_allowlisted_keys() {
+        const ALLOWED_KEYS: &[&str] = &[
+            "workspace_id",
+            "channel_id",
+            "agent_member_id",
+            "author_member_id",
+            "model",
+            "prompt",
+            "recent_messages",
+            "tools",
+            "enabled_tools",
+            "max_output_tokens",
+            "max_steps",
+            "step_count",
+            "depth",
+            "consecutive_auto",
+            "delivery",
+            "created_from",
+            "welcome_kind",
+            "created_at_ms",
+            "idempotency_key",
+            "run_id",
+            "system_prompt",
+        ];
+        let connection = Uuid::from_u128(77);
+        let target = WelcomeTarget {
+            agent_member_id: Uuid::from_u128(3),
+            channel_id: Uuid::from_u128(4),
+            prompt: "안녕".into(),
+            model: "gpt-4".into(),
+            system_prompt: Some("be kind".into()),
+            tool_schema: json!([]),
+            config: json!({}),
+            max_run_steps: 12,
+            enabled_tools: vec!["search".into()],
+            is_hosted: true,
+            hosted_active_connection_id: Some(connection),
+            hosted_channel_approved: true,
+        };
+        let payload = welcome_job_payload(
+            Uuid::from_u128(1),
+            Uuid::from_u128(2),
+            &target,
+            WelcomeKind::Opener,
+            "hosted",
+            1,
+            Some(Uuid::from_u128(5)),
+        );
+        let object = payload.as_object().expect("object");
+        // Anti-vacuity: every optional key is present here.
+        assert_eq!(
+            object.len(),
+            ALLOWED_KEYS.len(),
+            "keys: {:?}",
+            object.keys()
+        );
+        for key in object.keys() {
+            assert!(
+                ALLOWED_KEYS.contains(&key.as_str()),
+                "`{key}` is not an allowed welcome job key"
+            );
+        }
+        let wire = payload.to_string();
+        for forbidden in [
+            &connection.to_string(),
+            &connection.to_string().to_uppercase(),
+            "hosted_active_connection_id",
+            "owner_only",
+            "invocation_scope",
+            "subscription_harness",
+            "CLAUDE_CONFIG_DIR",
+            "CODEX_HOME",
+        ] {
+            assert!(!wire.contains(forbidden), "`{forbidden}` in {wire}");
+        }
+    }
+
     #[test]
     fn stored_prompt_falls_back_to_the_canonical_copy() {
         assert_eq!(stored_prompt(&json!({})), DEFAULT_WELCOME_PROMPT);

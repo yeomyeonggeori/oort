@@ -1359,7 +1359,7 @@ async fn ade1_5_the_spawn_tool_closes_the_loop_from_model_to_session() {
     let worker = AgentWorker::new(
         worker_pool.clone(),
         Arc::new(MockChatProvider::echo().with_tool_calls([vec![spawn_call], vec![]])),
-        WorkerConfig::for_target(database_url()),
+        WorkerConfig::for_target(database_url()).with_env_bearer("sk-conformance-team-key"),
     );
     worker.drain_once().await.expect("first drain");
 

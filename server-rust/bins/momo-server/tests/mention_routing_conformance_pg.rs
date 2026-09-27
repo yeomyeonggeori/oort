@@ -469,7 +469,11 @@ async fn audit_actions(su: &PgPool, workspace: Uuid) -> Vec<String> {
 
 async fn worker(provider: Arc<dyn ChatProvider>) -> AgentWorker {
     let pool = role_pool("momo_worker", &momo_worker_password()).await;
-    AgentWorker::new(pool, provider, WorkerConfig::for_target(database_url()))
+    AgentWorker::new(
+        pool,
+        provider,
+        WorkerConfig::for_target(database_url()).with_env_bearer("sk-conformance-team-key"),
+    )
 }
 
 /// A provider that actually streams, so the coalescing window has something to
