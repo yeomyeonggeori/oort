@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { UsersRound } from "lucide-react";
+import { SquareKanban } from "lucide-react";
 import {
   TEAM_WORK_EMPTY,
   WORK_NAV,
@@ -61,7 +61,7 @@ export function TeamWorkRoute() {
       <header className="flex h-work-board-bar shrink-0 items-center gap-3 border-b border-line px-4">
         <SidebarDrawerToggle />
         <h1 className="flex min-w-0 items-center gap-2 text-title font-bold text-ink">
-          <UsersRound aria-hidden className="size-4 shrink-0 text-icon" />
+          <SquareKanban aria-hidden className="size-4 shrink-0 text-icon" />
           <span className="truncate">{WORK_NAV.team}</span>
         </h1>
         <p className="min-w-0 truncate text-meta text-ink-muted">공유된 세션만 보입니다</p>

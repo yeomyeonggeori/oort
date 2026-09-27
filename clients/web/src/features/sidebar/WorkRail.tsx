@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
-import { Inbox, MessageSquare, SquareTerminal, Users } from "lucide-react";
+import { Inbox, MessageSquare, SquareKanban, SquareTerminal } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import {
   MY_WORK_PATH,
@@ -15,6 +15,8 @@ import {
 // 접힌다. 목적지는 채널 목록의 전역 줄과 같은 넷이고, 이름도 그 줄과 같다
 // (#1146 N4). 세로 아이콘+글자 단추에는 shadcn/Radix 프리미티브가 없어 NavLink로
 // 손으로 그린다(워크스페이스 레일과 같은 이유). 프로필 단추는 셸이 `footer`로 넣는다.
+// 「팀 작업」 아이콘은 시안의 사람 모양 대신 보드(칸반)다: 채널 목록의 「멤버」 줄이
+// 이미 사람 모양이라 두 줄이 같은 그림이 된다(시안 ④에는 「멤버」 줄이 없다).
 
 function RailLink({
   to,
@@ -65,7 +67,7 @@ export function WorkRail({ footer }: { footer?: ReactNode }) {
           <RailLink to="/" icon={<MessageSquare />} label="대화" testId="work-rail-chat" isActive={false} />
           <RailLink to="/inbox" icon={<Inbox />} label="인박스" testId="work-rail-inbox" />
           <RailLink to={MY_WORK_PATH} icon={<SquareTerminal />} label={WORK_NAV.mine} testId="work-rail-mine" isActive />
-          <RailLink to={TEAM_WORK_PATH} icon={<Users />} label={WORK_NAV.team} testId="work-rail-team" isActive={false} />
+          <RailLink to={TEAM_WORK_PATH} icon={<SquareKanban />} label={WORK_NAV.team} testId="work-rail-team" isActive={false} />
         </ul>
       </nav>
       <span className="flex-1" />

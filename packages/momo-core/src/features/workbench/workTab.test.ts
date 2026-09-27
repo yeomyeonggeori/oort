@@ -15,7 +15,7 @@ const FULL_SIDEBAR_PX = 56 + 268;
 describe("작업 탭 폭 (#2854, 제안서 §3.3)", () => {
   it("1440 창, 레일 64 + 세션 목록 268에서 4×2 칸이 최소 폭 240을 넘는다", () => {
     const input = { windowWidth: 1440, sidebarPx: WORK_TAB_RAIL_PX, sessionListPx: WORK_TAB_SESSION_LIST_PX, cols: 4 };
-    expect(workTabPaneWidth(input)).toBe(263);
+    expect(workTabPaneWidth(input)).toBe(265); // 시안 ① 「칸은 약 265×400px」
     expect(workTabPaneWidth(input)).toBeGreaterThanOrEqual(WORKBENCH_MIN_PANE.width);
     expect(workTabFits(input)).toBe(true);
   });

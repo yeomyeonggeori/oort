@@ -16,7 +16,7 @@ import {
   SquareTerminal,
   SquarePen,
   Users,
-  UsersRound,
+  SquareKanban,
   X,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -708,7 +708,7 @@ export function Sidebar({
                 )}
                 <SidebarRow
                   to={TEAM_WORK_PATH}
-                  icon={<UsersRound className="size-4" />}
+                  icon={<SquareKanban className="size-4" />}
                   label={WORK_NAV.team}
                   testId="nav-team-work"
                   isActive={currentWorkView === "team"}

@@ -23,8 +23,6 @@ export const WORK_TAB_RAIL_PX = 64;
 export const WORK_TAB_SESSION_LIST_PX = 268;
 /** 격자의 좌우 여백(시안 ① `.grid` padding 0 12). */
 export const WORK_TAB_GRID_PAD_PX = 12;
-/** 본문 판의 오른쪽 인셋(tokens.css `app-shell > main`, 8). */
-export const WORK_TAB_PANE_INSET_PX = 8;
 
 export const MY_WORK_PATH = "/work";
 export const TEAM_WORK_PATH = "/work?view=team";
@@ -64,12 +62,13 @@ export interface WorkTabWidthInput {
 }
 
 /**
- * 작업 탭에서 `cols`열 격자의 칸 하나 폭. 판 오른쪽 인셋, 격자 좌우 여백,
- * 칸 사이 경계를 빼고 나눈다(시안 ① 계산과 같은 식).
+ * 작업 탭에서 `cols`열 격자의 칸 하나 폭. 격자 좌우 여백과 칸 사이 경계를 빼고
+ * 나눈다(시안 ① 계산과 같은 식: 1440에서 약 265). 작업 탭에는 떠 있는 판이 없어
+ * 판 인셋이 없다(tokens.css `app-shell[data-work-rail]`).
  */
 export function workTabPaneWidth({ windowWidth, sidebarPx, sessionListPx, cols }: WorkTabWidthInput): number {
   const grid =
-    windowWidth - sidebarPx - sessionListPx - WORK_TAB_PANE_INSET_PX - 2 * WORK_TAB_GRID_PAD_PX;
+    windowWidth - sidebarPx - sessionListPx - 2 * WORK_TAB_GRID_PAD_PX;
   return (grid - (cols - 1) * WORKBENCH_GUTTER) / cols;
 }
 

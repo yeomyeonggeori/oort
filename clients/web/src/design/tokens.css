@@ -1297,17 +1297,22 @@
     /* 작업 탭 레일 (#2854, 시안 ① `.rail`). 데스크탑 「내 작업」 격자에서 앱
      * 사이드바는 64px 레일로 접힌다: 펼친 사이드바(324) 옆에서는 1440 창의 4열 칸이
      * 칸 최소 폭 240에 못 미친다(코어 `workTabPaneWidth`). 판은 상단 줄 아래(둘째
-     * 행)에서 시작한다. macOS 신호등(x 16, 약 52 폭)이 레일 폭 64를 넘어 판 위로
-     * 걸치기 때문이다. 레일이 판의 왼쪽 여백이다. */
+     * 행)에서 시작한다. macOS 신호등(x 16, 약 52 폭)이 레일 폭 64를 넘어 본문 위로
+     * 걸치기 때문이다. */
     &[data-work-rail] {
       grid-template-columns: var(--w-work-rail) 1fr;
       background-size:
         var(--w-work-rail) 100%,
         100% 100%;
 
+      /* 시안 ①에는 떠 있는 판이 없다: 머리 줄·격자·상태 줄이 창 바닥(그라데이션)
+       * 위에 곧바로 서고, 칸 하나하나가 판이다. 그래서 판의 면·그림자·반경을 걷는다. */
       > main {
         grid-row: 2;
-        margin-block-start: 0;
+        margin: 0;
+        background-color: transparent;
+        border-radius: 0;
+        box-shadow: none;
       }
     }
 
