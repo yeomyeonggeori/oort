@@ -8,6 +8,13 @@ describe("normalizeGitReadResult", () => {
     ).toEqual({ outcome: "ok", value: { kind: "aheadBehind", behind: 1, ahead: 2 } });
     expect(normalizeGitReadResult({ outcome: "noUpstream" })).toEqual({ outcome: "noUpstream" });
     expect(normalizeGitReadResult({ outcome: "unknown" })).toEqual({ outcome: "unknown" });
+    expect(normalizeGitReadResult({ outcome: "unknown", reason: "filter" })).toEqual({
+      outcome: "unknown",
+      reason: "filter",
+    });
+    expect(normalizeGitReadResult({ outcome: "unknown", reason: "stdout" })).toEqual({
+      outcome: "unknown",
+    });
   });
 
   it("모르는 모양은 확인 못 함이다", () => {

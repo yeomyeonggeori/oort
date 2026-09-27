@@ -28,10 +28,11 @@
 //    `GIT_DIR`/`GIT_WORK_TREE`/`GIT_CONFIG_PARAMETERS` would otherwise read
 //    another repository or config than the pane's), then `GIT_ENV` is set.
 //    `--no-ext-diff --no-textconv` on the two diffs stop the repository's
-//    external diff and textconv programs. Known gap, reported on #2855: a
-//    `filter.<driver>.clean` program named by the repository's own config and
-//    attributes still runs when git hashes a touched worktree file (G6, G8).
-//    The ADR's prefix does not cover it; closing it changes the ADR.
+//    external diff and textconv programs. A clean/process filter would still
+//    run when G6/G8 hash a touched worktree file, so those two first read
+//    `FILTER_CHECK_ARGS` (a config read, same prefix) and run only if every
+//    configured filter is one of `FILTER_ALLOWED` (git-lfs, verbatim);
+//    otherwise the answer is unknown(filter) (ADR-0190 D3-c 증보).
 // 4. **Parsed here, fields only.** stdin and stderr are null, stdout is piped
 //    into a buffer of at most `MAX_STDOUT` bytes and parsed in this file. The
 //    webview gets the fields the ADR table lists — never stdout itself, a
@@ -169,6 +170,19 @@ pub const GIT_COMMANDS: &[GitCommand] = &[
     },
 ];
 
+/// Read before G6/G8, same prefix and environment: every configured clean
+/// or process filter, as `key value` lines (ADR-0190 D3-c 증보, #2855).
+pub const FILTER_CHECK_ARGS: &[&str] =
+    &["config", "--get-regexp", r"^filter\..*\.(clean|process)$"];
+
+/// The only filter settings G6/G8 run with: git-lfs's standard values,
+/// byte for byte (what `git lfs install` writes). Keys are git's canonical
+/// form (`--get-regexp` lower-cases section and variable names).
+pub const FILTER_ALLOWED: &[(&str, &str)] = &[
+    ("filter.lfs.clean", "git-lfs clean -- %f"),
+    ("filter.lfs.process", "git-lfs filter-process"),
+];
+
 impl GitRead {
     fn row(self) -> &'static GitCommand {
         GIT_COMMANDS
@@ -182,6 +196,13 @@ impl GitRead {
     /// from "not a repository" here — G1 answers that.
     fn needs_upstream(self) -> bool {
         matches!(self, GitRead::G4 | GitRead::G5 | GitRead::G7)
+    }
+
+    /// G6 and G8 hash stat-dirty worktree files, which runs the
+    /// repository's clean/process filter. They run only after
+    /// `filters_allowed` (ADR-0190 D3-c 증보).
+    fn reads_worktree_content(self) -> bool {
+        matches!(self, GitRead::G6 | GitRead::G8)
     }
 }
 
@@ -264,14 +285,35 @@ pub enum GitValue {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "outcome", content = "value", rename_all = "camelCase")]
+#[serde(tag = "outcome", rename_all = "camelCase")]
 pub enum GitReadResult {
-    Ok(GitValue),
+    Ok {
+        value: GitValue,
+    },
     /// G4/G5/G7 exited non-zero: no upstream (「기준점 없음」).
     NoUpstream,
-    /// Could not run, timed out, too much output, failed, or unparseable
-    /// (「확인 못 함」).
-    Unknown,
+    /// Could not run, timed out, too much output, failed, unparseable, or
+    /// refused before running (「확인 못 함」).
+    Unknown {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<UnknownReason>,
+    },
+}
+
+/// Why a read was refused without running, when there is one to name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UnknownReason {
+    /// A clean/process filter outside `FILTER_ALLOWED` is configured (G6, G8).
+    Filter,
+}
+
+impl GitReadResult {
+    pub const UNKNOWN: GitReadResult = GitReadResult::Unknown { reason: None };
+
+    fn ok(value: GitValue) -> Self {
+        GitReadResult::Ok { value }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -282,17 +324,19 @@ pub enum GitReadResult {
 /// timed out, over the byte cap).
 struct Ran {
     success: bool,
+    code: Option<i32>,
     stdout: Vec<u8>,
 }
 
-/// Run one allowlisted row by absolute path in `folder`.
-fn run_git(git: &Path, folder: &Path, row: &GitCommand, timeout: Duration) -> Option<Ran> {
+/// Run one allowlisted argv (a `GIT_COMMANDS` row or `FILTER_CHECK_ARGS`)
+/// by absolute path in `folder`.
+fn run_git(git: &Path, folder: &Path, args: &[&str], timeout: Duration) -> Option<Ran> {
     if !git.is_absolute() || !folder.is_dir() {
         return None;
     }
     let mut cmd = Command::new(git);
     cmd.args(GIT_PREFIX)
-        .args(row.args)
+        .args(args)
         .current_dir(folder)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -332,12 +376,17 @@ fn run_git(git: &Path, folder: &Path, row: &GitCommand, timeout: Duration) -> Op
         let _ = tx.send(Some(buf));
     });
     let deadline = Instant::now() + timeout;
+    // The reader's one message, if it came while the child was still
+    // running (EOF can be seen before the exit is).
+    let mut drained: Option<Vec<u8>> = None;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
             Ok(None) if Instant::now() < deadline => {
-                if let Ok(None) = rx.try_recv() {
-                    break None; // over the cap
+                match rx.try_recv() {
+                    Ok(None) => break None, // over the cap
+                    Ok(Some(buf)) => drained = Some(buf),
+                    Err(_) => {}
                 }
                 std::thread::sleep(Duration::from_millis(10));
             }
@@ -349,27 +398,68 @@ fn run_git(git: &Path, folder: &Path, row: &GitCommand, timeout: Duration) -> Op
         let _ = child.wait();
         return None;
     };
-    let left = deadline.saturating_duration_since(Instant::now()) + Duration::from_millis(500);
-    let stdout = rx.recv_timeout(left).ok().flatten()?;
+    let stdout = match drained {
+        Some(buf) => buf,
+        None => {
+            let left =
+                deadline.saturating_duration_since(Instant::now()) + Duration::from_millis(500);
+            rx.recv_timeout(left).ok().flatten()?
+        }
+    };
     Some(Ran {
         success: status.success(),
+        code: status.code(),
         stdout,
     })
 }
 
+/// Before G6/G8: is every configured clean/process filter one of
+/// `FILTER_ALLOWED`, verbatim? `git config --get-regexp` reads config (all
+/// scopes, includes) and starts no program. Exit 1 = no such key. Any other
+/// answer — a key outside the list, a value that differs by one character,
+/// a failure, a timeout — is "no".
+fn filters_allowed(git: &Path, folder: &Path, timeout: Duration) -> bool {
+    let Some(ran) = run_git(git, folder, FILTER_CHECK_ARGS, timeout) else {
+        return false;
+    };
+    match ran.code {
+        Some(1) if ran.stdout.is_empty() => true,
+        Some(0) => configured_filters_allowed(&ran.stdout),
+        _ => false,
+    }
+}
+
+/// `key value` lines from `--get-regexp`. Refuse by default.
+pub fn configured_filters_allowed(out: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(out) else {
+        return false;
+    };
+    text.split('\n')
+        .filter(|line| !line.is_empty())
+        .all(|line| {
+            line.split_once(' ')
+                .is_some_and(|(key, value)| FILTER_ALLOWED.contains(&(key, value)))
+        })
+}
+
 /// One command, end to end: run, then parse into fields.
 pub fn read(git: &Path, folder: &Path, read: GitRead, timeout: Duration) -> GitReadResult {
-    let Some(ran) = run_git(git, folder, read.row(), timeout) else {
-        return GitReadResult::Unknown;
+    if read.reads_worktree_content() && !filters_allowed(git, folder, timeout) {
+        return GitReadResult::Unknown {
+            reason: Some(UnknownReason::Filter),
+        };
+    }
+    let Some(ran) = run_git(git, folder, read.row().args, timeout) else {
+        return GitReadResult::UNKNOWN;
     };
     if !ran.success {
         return if read.needs_upstream() {
             GitReadResult::NoUpstream
         } else {
-            GitReadResult::Unknown
+            GitReadResult::UNKNOWN
         };
     }
-    parse(read, &ran.stdout).map_or(GitReadResult::Unknown, GitReadResult::Ok)
+    parse(read, &ran.stdout).map_or(GitReadResult::UNKNOWN, GitReadResult::ok)
 }
 
 // ---------------------------------------------------------------------------
@@ -611,16 +701,16 @@ pub async fn workbench_git_read(
     request: GitReadRequest,
 ) -> Result<GitReadResult, ()> {
     let Some(folder) = state.0.folder_of(request.pane_id) else {
-        return Ok(GitReadResult::Unknown);
+        return Ok(GitReadResult::UNKNOWN);
     };
     let Some(git) = git_binary() else {
-        return Ok(GitReadResult::Unknown);
+        return Ok(GitReadResult::UNKNOWN);
     };
     Ok(tauri::async_runtime::spawn_blocking(move || {
         read(&git, &folder, request.command, GIT_TIMEOUT)
     })
     .await
-    .unwrap_or(GitReadResult::Unknown))
+    .unwrap_or(GitReadResult::UNKNOWN))
 }
 
 #[cfg(test)]
@@ -713,6 +803,43 @@ mod tests {
         }
     }
 
+    /// The one extra read (ADR-0190 D3-c 증보): the filter check, its argv
+    /// and its allowlist, verbatim.
+    #[test]
+    fn the_filter_check_is_one_config_read_and_a_verbatim_lfs_allowlist() {
+        assert_eq!(
+            FILTER_CHECK_ARGS,
+            ["config", "--get-regexp", "^filter\\..*\\.(clean|process)$"]
+        );
+        assert_eq!(
+            FILTER_ALLOWED,
+            [
+                ("filter.lfs.clean", "git-lfs clean -- %f"),
+                ("filter.lfs.process", "git-lfs filter-process"),
+            ]
+        );
+        assert!(configured_filters_allowed(b""));
+        assert!(configured_filters_allowed(
+            b"filter.lfs.clean git-lfs clean -- %f\nfilter.lfs.process git-lfs filter-process\n"
+        ));
+        for bad in [
+            &b"filter.pwn.clean cat\n"[..],
+            b"filter.lfs.clean git-lfs clean -- %f; id\n",
+            b"filter.lfs.clean\n",
+            b"filter.lfs.clean git-lfs clean -- %f\nfilter.x.process sh\n",
+            b"filter.a b.clean git-lfs clean -- %f\n",
+            b"\xff\n",
+        ] {
+            assert!(!configured_filters_allowed(bad), "{bad:?}");
+        }
+        let checked: Vec<GitRead> = GIT_COMMANDS
+            .iter()
+            .map(|row| row.read)
+            .filter(|r| r.reads_worktree_content())
+            .collect();
+        assert_eq!(checked, [GitRead::G6, GitRead::G8]);
+    }
+
     /// The login-status list (D3-a/D3-b) and this list are separate: neither
     /// carries the other's commands.
     #[test]
@@ -783,7 +910,7 @@ mod tests {
         let run = &run[..run.find("\n}\n").unwrap()];
         assert_eq!(run.matches(".args(").count(), 2, "{run}");
         assert_eq!(run.matches(".arg(").count(), 0, "{run}");
-        assert!(run.contains("cmd.args(GIT_PREFIX)\n        .args(row.args)"));
+        assert!(run.contains("cmd.args(GIT_PREFIX)\n        .args(args)"));
         assert!(run.contains(".stdin(Stdio::null())"));
         assert!(run.contains(".stderr(Stdio::null())"));
         assert!(run.contains(".current_dir(folder)"));
@@ -1003,7 +1130,7 @@ not a record: SECRET SUBJECT\n\
     #[test]
     fn the_wire_shape_is_tagged() {
         assert_eq!(
-            serde_json::to_value(GitReadResult::Ok(GitValue::AheadBehind {
+            serde_json::to_value(GitReadResult::ok(GitValue::AheadBehind {
                 behind: 1,
                 ahead: 2
             }))
@@ -1015,7 +1142,7 @@ not a record: SECRET SUBJECT\n\
             serde_json::json!({ "outcome": "noUpstream" })
         );
         assert_eq!(
-            serde_json::to_value(GitReadResult::Unknown).unwrap(),
+            serde_json::to_value(GitReadResult::UNKNOWN).unwrap(),
             serde_json::json!({ "outcome": "unknown" })
         );
     }
@@ -1106,9 +1233,21 @@ not a record: SECRET SUBJECT\n\
                 Scratch(dir.canonicalize().unwrap())
             }
 
+            /// The executable is written by `/bin/cp`, never through a file
+            /// descriptor of this process: a sibling test that forks while
+            /// this process holds the file open for writing would inherit
+            /// that descriptor, and exec of the script would then fail with
+            /// ETXTBSY (seen under load as a flaky "unknown").
             fn script(&self, name: &str, body: &str) -> PathBuf {
                 let path = self.0.join(name);
-                std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+                let src = self.0.join(format!("{name}.src"));
+                std::fs::write(&src, format!("#!/bin/sh\n{body}\n")).unwrap();
+                let copied = Command::new("/bin/cp")
+                    .arg(&src)
+                    .arg(&path)
+                    .status()
+                    .unwrap();
+                assert!(copied.success());
                 std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
                 path
             }
@@ -1122,6 +1261,12 @@ not a record: SECRET SUBJECT\n\
 
         const T: Duration = Duration::from_secs(10);
 
+        /// Tests that set process environment (`GIT_*`, `XDG_CONFIG_HOME`)
+        /// and tests that run real git take turns: a variable set between
+        /// `run_git`'s snapshot and its spawn would reach another test's
+        /// child.
+        static REAL_GIT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
         /// A fake git receives exactly prefix + row, for every row.
         #[test]
         fn the_fixed_argv_is_what_git_receives() {
@@ -1130,14 +1275,26 @@ not a record: SECRET SUBJECT\n\
             let git = dir.script(
                 "git",
                 &format!(
-                    "for a in \"$@\"; do printf '%s\\n' \"$a\"; done > '{}'\nprintf '/x/repo\\n'",
+                    "for a in \"$@\"; do printf '%s\\n' \"$a\"; done >> '{}'\n\
+                     [ \"$9\" = config ] && exit 1\nprintf '/x/repo\\n'",
                     log.display()
                 ),
             );
+            let check: Vec<&str> = GIT_PREFIX
+                .iter()
+                .chain(FILTER_CHECK_ARGS)
+                .copied()
+                .collect();
             for row in GIT_COMMANDS {
+                let _ = std::fs::remove_file(&log);
                 let _ = read(&git, &dir.0, row.read, T);
                 let got = std::fs::read_to_string(&log).unwrap();
-                let want: Vec<&str> = GIT_PREFIX.iter().chain(row.args).copied().collect();
+                let mut want: Vec<&str> = Vec::new();
+                // G6 and G8 read the filter settings first; nothing else does.
+                if matches!(row.read, GitRead::G6 | GitRead::G8) {
+                    want.extend(&check);
+                }
+                want.extend(GIT_PREFIX.iter().chain(row.args));
                 assert_eq!(got.lines().collect::<Vec<_>>(), want, "{:?}", row.read);
             }
         }
@@ -1179,8 +1336,8 @@ not a record: SECRET SUBJECT\n\
             let hang = dir.script("git-hang", "exec /bin/sleep 30");
             let started = Instant::now();
             assert_eq!(
-                read(&hang, &dir.0, GitRead::G6, Duration::from_millis(500)),
-                GitReadResult::Unknown
+                read(&hang, &dir.0, GitRead::G1, Duration::from_millis(500)),
+                GitReadResult::UNKNOWN
             );
             assert!(
                 started.elapsed() < Duration::from_secs(5),
@@ -1191,8 +1348,13 @@ not a record: SECRET SUBJECT\n\
             for row in GIT_COMMANDS {
                 let want = if row.read.needs_upstream() {
                     GitReadResult::NoUpstream
+                } else if row.read.reads_worktree_content() {
+                    // The filter check failed first: refuse, never run.
+                    GitReadResult::Unknown {
+                        reason: Some(UnknownReason::Filter),
+                    }
                 } else {
-                    GitReadResult::Unknown
+                    GitReadResult::UNKNOWN
                 };
                 assert_eq!(read(&fail, &dir.0, row.read, T), want, "{:?}", row.read);
             }
@@ -1205,11 +1367,25 @@ not a record: SECRET SUBJECT\n\
             );
             let missing = dir.0.join("no-such-folder");
             let ok = dir.script("git-ok", "printf '/x/repo\\n'");
-            assert_eq!(read(&ok, &missing, GitRead::G1, T), GitReadResult::Unknown);
+            assert_eq!(read(&ok, &missing, GitRead::G1, T), GitReadResult::UNKNOWN);
             assert_eq!(
                 read(Path::new("git"), &dir.0, GitRead::G1, T),
-                GitReadResult::Unknown,
+                GitReadResult::UNKNOWN,
                 "a relative program is refused"
+            );
+        }
+
+        /// A child that closes stdout and exits a little later: the reader
+        /// finishes first. Its output must still be used, not dropped.
+        #[test]
+        fn output_that_ends_before_the_exit_is_kept() {
+            let dir = Scratch::new("early-eof");
+            let git = dir.script("git", "printf '/x/repo\\n'\nexec >&-\n/bin/sleep 0.3");
+            assert_eq!(
+                read(&git, &dir.0, GitRead::G1, T),
+                GitReadResult::ok(GitValue::Repo {
+                    name: "repo".into()
+                })
             );
         }
 
@@ -1220,12 +1396,13 @@ not a record: SECRET SUBJECT\n\
                 "git",
                 &format!("head -c {} /dev/zero | tr '\\0' 'a'", MAX_STDOUT + 1),
             );
-            assert_eq!(read(&git, &dir.0, GitRead::G8, T), GitReadResult::Unknown);
+            assert_eq!(read(&git, &dir.0, GitRead::G1, T), GitReadResult::UNKNOWN);
         }
 
         /// The child sees no inherited `GIT_*` other than the fixed three.
         #[test]
         fn inherited_git_variables_do_not_reach_the_child() {
+            let _serial = REAL_GIT.lock().unwrap_or_else(|e| e.into_inner());
             let dir = Scratch::new("env");
             let git = dir.script(
                 "git",
@@ -1251,7 +1428,7 @@ not a record: SECRET SUBJECT\n\
             }
             assert_eq!(
                 result,
-                GitReadResult::Ok(GitValue::Repo {
+                GitReadResult::ok(GitValue::Repo {
                     name: "repo".into()
                 })
             );
@@ -1304,14 +1481,15 @@ not a record: SECRET SUBJECT\n\
         /// eight reads run and no marker appears; the parsed values are
         /// right; no commit subject, body or token is in the wire.
         ///
-        /// `filter.<x>.clean` is deliberately NOT here: the ADR prefix does
-        /// not stop it (see `a_clean_filter_still_runs_known_gap`).
+        /// Filters have their own test: the prefix does not stop them, the
+        /// filter check does (`a_configured_filter_stops_g6_and_g8_…`).
         #[test]
         fn a_hostile_repository_config_runs_no_program() {
             let Some(git) = real_git() else {
                 eprintln!("skip: no working git on this machine");
                 return;
             };
+            let _serial = REAL_GIT.lock().unwrap_or_else(|e| e.into_inner());
             let dir = Scratch::new("hostile");
             let repo = dir.0.join("repo");
             let marks = dir.0.join("marks");
@@ -1415,17 +1593,20 @@ not a record: SECRET SUBJECT\n\
 
             assert_eq!(
                 results[0],
-                GitReadResult::Ok(GitValue::Repo {
+                GitReadResult::ok(GitValue::Repo {
                     name: "repo".into()
                 })
             );
             assert_eq!(
                 results[1],
-                GitReadResult::Ok(GitValue::Branch {
+                GitReadResult::ok(GitValue::Branch {
                     name: Some("main".into())
                 })
             );
-            let GitReadResult::Ok(GitValue::Worktrees { worktrees }) = &results[2] else {
+            let GitReadResult::Ok {
+                value: GitValue::Worktrees { worktrees },
+            } = &results[2]
+            else {
                 panic!("{:?}", results[2]);
             };
             assert_eq!(
@@ -1437,27 +1618,36 @@ not a record: SECRET SUBJECT\n\
             );
             assert_eq!(
                 results[3],
-                GitReadResult::Ok(GitValue::AheadBehind {
+                GitReadResult::ok(GitValue::AheadBehind {
                     behind: 0,
                     ahead: 1
                 })
             );
-            let GitReadResult::Ok(GitValue::Commits { commits }) = &results[4] else {
+            let GitReadResult::Ok {
+                value: GitValue::Commits { commits },
+            } = &results[4]
+            else {
                 panic!("{:?}", results[4]);
             };
             assert_eq!(commits.len(), 1);
             assert_eq!(commits[0].co_authors, ["Ada Lovelace"]);
-            let GitReadResult::Ok(GitValue::Diff { totals, .. }) = &results[5] else {
+            let GitReadResult::Ok {
+                value: GitValue::Diff { totals, .. },
+            } = &results[5]
+            else {
                 panic!("{:?}", results[5]);
             };
             assert_eq!((totals.files, totals.added), (1, 1));
-            let GitReadResult::Ok(GitValue::Diff { totals, .. }) = &results[6] else {
+            let GitReadResult::Ok {
+                value: GitValue::Diff { totals, .. },
+            } = &results[6]
+            else {
                 panic!("{:?}", results[6]);
             };
             assert_eq!((totals.files, totals.added), (1, 1));
             assert_eq!(
                 results[7],
-                GitReadResult::Ok(GitValue::Status {
+                GitReadResult::ok(GitValue::Status {
                     modified: 1,
                     added: 0,
                     deleted: 0,
@@ -1494,37 +1684,183 @@ not a record: SECRET SUBJECT\n\
             assert!(fired.iter().any(|f| f == "diff-command"), "{fired:?}");
         }
 
-        /// Known gap (reported on #2855, not closed by ADR-0190 D3-c): a
-        /// clean filter the repository's own config and attributes name
-        /// still runs on G6/G8 when a worktree file is stat-dirty. This test
-        /// pins today's behaviour so whoever closes the gap has to touch it
-        /// and the ADR together.
-        #[test]
-        fn a_clean_filter_still_runs_known_gap() {
-            let Some(git) = real_git() else {
-                eprintln!("skip: no working git on this machine");
-                return;
-            };
-            let dir = Scratch::new("filter");
+        /// A repository with a clean filter on a stat-dirty file. Returns
+        /// (repo, marker path). `attrs` = where the attribute line goes;
+        /// `cfg` = where the driver is configured.
+        fn filter_repo(
+            dir: &Scratch,
+            git: &Path,
+            attrs: &str,
+            cfg: &str,
+            key: &str,
+        ) -> (PathBuf, PathBuf) {
             let repo = dir.0.join("repo");
             std::fs::create_dir_all(&repo).unwrap();
-            let mark = dir.0.join("clean-ran");
+            let mark = dir.0.join("filter-ran");
             let g = git.display();
             sh(
                 &repo,
                 &format!(
                     "'{g}' init -q -b main . && '{g}' config user.email t@example.com && \
-                     '{g}' config user.name t && printf 'a.txt filter=pwn\\n' > .gitattributes && \
-                     printf 'one\\n' > a.txt && '{g}' add . && '{g}' commit -q -m base && \
-                     '{g}' config filter.pwn.clean 'touch {m}; cat' && \
-                     printf 'two\\n' >> a.txt && touch -t 200001010000 a.txt",
-                    m = mark.display()
+                     '{g}' config user.name t && printf 'one\\n' > a.txt && \
+                     '{g}' add . && '{g}' commit -q -m base && \
+                     printf 'two\\n' >> a.txt && touch -t 200001010000 a.txt"
                 ),
             );
-            let _ = read(&git, &repo, GitRead::G6, T);
-            assert!(
-                mark.exists(),
-                "the clean filter no longer runs: update ADR-0190 D3-c and this test"
+            let line = "a.txt filter=pwn\n";
+            match attrs {
+                "worktree" => std::fs::write(repo.join(".gitattributes"), line).unwrap(),
+                "info" => std::fs::write(repo.join(".git/info/attributes"), line).unwrap(),
+                other => panic!("{other}"),
+            }
+            let value = format!("touch {}; cat", mark.display());
+            match cfg {
+                "repo" => sh(&repo, &format!("'{g}' config filter.pwn.{key} '{value}'")),
+                "global" => {
+                    let xdg = dir.0.join("xdg/git");
+                    std::fs::create_dir_all(&xdg).unwrap();
+                    std::fs::write(
+                        xdg.join("config"),
+                        format!("[filter \"pwn\"]\n\t{key} = {value}\n"),
+                    )
+                    .unwrap();
+                }
+                other => panic!("{other}"),
+            }
+            (repo, mark)
+        }
+
+        /// ADR-0190 D3-c 증보(#2855): a clean or process filter outside the
+        /// git-lfs allowlist — in the repository config or the user's global
+        /// config, named by the worktree's `.gitattributes` or by
+        /// `$GIT_DIR/info/attributes` — stops G6 and G8 before they run:
+        /// no program starts and the answer is unknown(filter).
+        #[test]
+        fn a_configured_filter_stops_g6_and_g8_before_anything_runs() {
+            let Some(git) = real_git() else {
+                eprintln!("skip: no working git on this machine");
+                return;
+            };
+            let _serial = REAL_GIT.lock().unwrap_or_else(|e| e.into_inner());
+            let refused = GitReadResult::Unknown {
+                reason: Some(UnknownReason::Filter),
+            };
+            for (attrs, cfg, key) in [
+                ("worktree", "repo", "clean"),
+                ("info", "repo", "clean"),
+                ("info", "repo", "process"),
+                ("worktree", "global", "clean"),
+                ("info", "global", "clean"),
+            ] {
+                let dir = Scratch::new(&format!("filter-{attrs}-{cfg}-{key}"));
+                let (repo, mark) = filter_repo(&dir, &git, attrs, cfg, key);
+                if cfg == "global" {
+                    std::env::set_var("XDG_CONFIG_HOME", dir.0.join("xdg"));
+                }
+                let g6 = read(&git, &repo, GitRead::G6, T);
+                let g8 = read(&git, &repo, GitRead::G8, T);
+                // Control: G1 still answers, and the trap is live for plain
+                // git in the same setting.
+                let g1 = read(&git, &repo, GitRead::G1, T);
+                let ran_before_control = mark.exists();
+                let _ = clean(Command::new(&git))
+                    .args(["diff", "--numstat", "HEAD"])
+                    .current_dir(&repo)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
+                if cfg == "global" {
+                    std::env::remove_var("XDG_CONFIG_HOME");
+                }
+                let case = format!("{attrs}/{cfg}/{key}");
+                assert!(!ran_before_control, "{case}: the filter ran");
+                assert_eq!(g6, refused, "{case}");
+                assert_eq!(g8, refused, "{case}");
+                assert_eq!(
+                    serde_json::to_value(&g8).unwrap(),
+                    serde_json::json!({ "outcome": "unknown", "reason": "filter" })
+                );
+                assert_eq!(
+                    g1,
+                    GitReadResult::ok(GitValue::Repo {
+                        name: "repo".into()
+                    }),
+                    "{case}"
+                );
+                assert!(mark.exists(), "{case}: control — plain git runs the filter");
+            }
+        }
+
+        /// The git-lfs standard values are allowed verbatim, so an LFS
+        /// repository keeps its numbers; one character more is refused.
+        #[test]
+        fn the_git_lfs_filter_is_allowed_verbatim_and_nothing_else() {
+            let Some(git) = real_git() else {
+                eprintln!("skip: no working git on this machine");
+                return;
+            };
+            let _serial = REAL_GIT.lock().unwrap_or_else(|e| e.into_inner());
+            let dir = Scratch::new("lfs");
+            let repo = dir.0.join("repo");
+            std::fs::create_dir_all(&repo).unwrap();
+            let g = git.display();
+            sh(
+                &repo,
+                &format!(
+                    "'{g}' init -q -b main . && '{g}' config user.email t@example.com && \
+                     '{g}' config user.name t && printf 'one\\n' > a.txt && \
+                     '{g}' add . && '{g}' commit -q -m base && printf 'two\\n' >> a.txt && \
+                     '{g}' config filter.lfs.clean 'git-lfs clean -- %f' && \
+                     '{g}' config filter.lfs.smudge 'git-lfs smudge -- %f' && \
+                     '{g}' config filter.lfs.process 'git-lfs filter-process' && \
+                     '{g}' config filter.lfs.required true"
+                ),
+            );
+            assert!(matches!(
+                read(&git, &repo, GitRead::G6, T),
+                GitReadResult::Ok { .. }
+            ));
+            assert_eq!(
+                read(&git, &repo, GitRead::G8, T),
+                GitReadResult::ok(GitValue::Status {
+                    modified: 1,
+                    added: 0,
+                    deleted: 0,
+                    untracked: 0
+                })
+            );
+            for (key, value) in [
+                ("clean", "git-lfs clean -- %f; touch /tmp/x"),
+                ("clean", "git-lfs  clean -- %f"),
+                ("process", "/usr/local/bin/git-lfs filter-process"),
+            ] {
+                sh(&repo, &format!("'{g}' config filter.lfs.{key} '{value}'"));
+                assert_eq!(
+                    read(&git, &repo, GitRead::G8, T),
+                    GitReadResult::Unknown {
+                        reason: Some(UnknownReason::Filter)
+                    },
+                    "{key} = {value}"
+                );
+                sh(
+                    &repo,
+                    &format!(
+                        "'{g}' config filter.lfs.clean 'git-lfs clean -- %f' && \
+                         '{g}' config filter.lfs.process 'git-lfs filter-process'"
+                    ),
+                );
+            }
+            // Another driver name with the standard value is refused too.
+            sh(
+                &repo,
+                &format!("'{g}' config filter.other.clean 'git-lfs clean -- %f'"),
+            );
+            assert_eq!(
+                read(&git, &repo, GitRead::G6, T),
+                GitReadResult::Unknown {
+                    reason: Some(UnknownReason::Filter)
+                }
             );
         }
     }

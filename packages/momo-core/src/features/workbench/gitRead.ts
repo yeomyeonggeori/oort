@@ -69,8 +69,12 @@ export type GitReadResult =
   | { outcome: "ok"; value: GitValue }
   /** G4·G5·G7: 기준점 없음 */
   | { outcome: "noUpstream" }
-  /** 확인 못 함: 칸 없음, git 없음, 시간 초과, 실패 */
-  | { outcome: "unknown" };
+  /**
+   * 확인 못 함: 칸 없음, git 없음, 시간 초과, 실패. `reason: "filter"` =
+   * 저장소·전역 설정에 git-lfs 표준값이 아닌 clean/process filter가 있어
+   * G6·G8을 실행하지 않았다(ADR-0190 D3-c 증보).
+   */
+  | { outcome: "unknown"; reason?: "filter" };
 
 export const GIT_READ_UNKNOWN: GitReadResult = { outcome: "unknown" };
 
@@ -79,6 +83,9 @@ export function normalizeGitReadResult(raw: unknown): GitReadResult {
   if (typeof raw !== "object" || raw === null) return GIT_READ_UNKNOWN;
   const row = raw as Record<string, unknown>;
   if (row.outcome === "noUpstream") return { outcome: "noUpstream" };
+  if (row.outcome === "unknown" && row.reason === "filter") {
+    return { outcome: "unknown", reason: "filter" };
+  }
   if (
     row.outcome === "ok" &&
     typeof row.value === "object" &&
