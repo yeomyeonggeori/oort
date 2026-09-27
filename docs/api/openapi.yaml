@@ -7090,8 +7090,9 @@ paths:
         to a tool that does not exist. The eight tools are `oort_inbox_read`,
         `oort_conversation_read`, `oort_message_post`, `oort_jobs_claim`,
         `oort_job_renew`, `oort_job_release`, `oort_run_event` and
-        `oort_run_complete`; each binds an existing domain rather than a second
-        one, and job authority travels only as an opaque `leaseHandle` that
+        `oort_run_complete`; `oort_action_propose` (ADR-0186 D2) and
+        `oort_card_suggest` (ADR-0186 증보 G1) join them under their own scopes.
+        Each binds an existing domain rather than a second one, and job authority travels only as an opaque `leaseHandle` that
         carries the channel its work came from, so the confirming human's exact
         channel grant is re-checked on every later verb. Arguments are validated
         against the tool's published `inputSchema` before execution, so
@@ -9518,7 +9519,9 @@ components:
         others opens exactly one Agent Port tool family and no REST route
         (ADR-0173 does not change that for hosted) —
         `agent:inbox:read` -> oort_inbox_read, `messages:read` ->
-        oort_conversation_read, `messages:write` -> oort_message_post,
+        oort_conversation_read, `messages:write` -> oort_message_post and
+        oort_card_suggest (ADR-0186 증보 G5: a suggestion card is a message in
+        the handle's channel and grants nothing more),
         `agent:jobs:read` -> oort_jobs_claim/oort_job_renew/oort_job_release,
         `agent:runs:callback` -> oort_run_event/oort_run_complete,
         `workspace:propose` -> oort_action_propose (ADR-0186 D2: propose only —
@@ -9538,6 +9541,27 @@ components:
         registry are held equal by one test
         (`routes::actions::the_action_ids_are_one_list_in_three_places`).
       enum: ["invite.create"]
+
+    SuggestableCommandId:
+      type: string
+      description: >
+        The closed set of client commands an agent may suggest as a card
+        (ADR-0186 증보 G2) through the Agent Port tool `oort_card_suggest` or
+        the server worker's `card_suggest`. The canonical list is
+        `momo_agent::card_suggest::SUGGESTABLE_COMMANDS`; this enum, both tools'
+        `commandId` enums and that registry are held equal by one Rust test
+        (`routes::actions::the_suggestable_ids_are_one_list_in_four_places`),
+        and the TS registry's `agentSuggestable: true` commands are measured
+        against this enum by `clients/web/src/app/commandRegistry.test.ts`.
+        Every member is a client command (risk `none`): a command that changes
+        server state is a WorkspaceActionId instead. v1 is `ai.connect`, whose
+        `args` are `harness` (`claude | codex | team_key`, no `grok` in v1) and
+        `scope` (`mine | team`), paired `team_key` with `team`. The message the
+        tool posts carries `props["momo.command_suggest"]` with exactly `v`,
+        `command_id`, `args` (normalised), `for_member_id` (the run's trigger
+        author, set by the server) and `label` (derived by the server) — never
+        connection state or any secret.
+      enum: ["ai.connect"]
 
     WorkspaceAction:
       type: object

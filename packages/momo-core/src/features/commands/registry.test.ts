@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { SurfaceId } from "../capabilities/serverSurfaces";
 import { serverSurface } from "../capabilities/serverSurfaces";
 import {
+  AGENT_SUGGESTABLE_COMMANDS,
   KNOWN_COMMAND_IDS,
   agentRoutingCommandId,
   commandSearchValue,
@@ -209,5 +210,31 @@ describe("명령 레지스트리", () => {
     expect(value).toContain("디렉터리");
     expect(value).toContain("명부");
     expect(value).toContain("nav.directory");
+  });
+});
+
+// =============================================================================
+// ADR-0186 증보 G2 — 에이전트가 제안할 수 있는 명령.
+//
+// 서버 허용목록과의 드리프트 가드는 웹 `app/commandRegistry.test.ts`에 있다:
+// 두 언어가 만나는 자리는 `docs/api/openapi.yaml`의 `SuggestableCommandId`인데,
+// 이 패키지는 `import.meta`와 `node:fs` 타입이 없어 그 파일을 읽을 수 없다.
+// 여기서는 코어만으로 잴 수 있는 규칙을 잰다.
+// =============================================================================
+
+
+describe("agentSuggestable", () => {
+  it("client 명령에만 붙는다 — 서버 상태를 바꾸지 않는 명령만 제안 카드가 된다", () => {
+    for (const command of AGENT_SUGGESTABLE_COMMANDS) {
+      expect(command.kind, command.id).toBe("client");
+    }
+  });
+
+  it("고정 명령만 담고, 같은 id가 두 번 나오지 않는다", () => {
+    const ids = AGENT_SUGGESTABLE_COMMANDS.map((command) => command.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const id of ids) {
+      expect(KNOWN_COMMAND_IDS).toContain(id);
+    }
   });
 });

@@ -1,6 +1,6 @@
 //! The Agent Port tool catalog (ADR-0162 D3/D6, HAP-E5) — protocol only.
 //!
-//! Nine thin-binding tools, each one name plus one required scope plus one
+//! Ten thin-binding tools, each one name plus one required scope plus one
 //! bounded input schema. **No product logic and no database lives here**: the
 //! server adapter injects a typed domain port and this module decides only what
 //! a given credential may see and call, and what a result or a failure looks
@@ -81,6 +81,10 @@ pub const TOOL_RUN_EVENT: &str = "oort_run_event";
 pub const TOOL_RUN_COMPLETE: &str = "oort_run_complete";
 /// ADR-0186 D2 — propose a workspace change; never perform one.
 pub const TOOL_ACTION_PROPOSE: &str = "oort_action_propose";
+/// ADR-0186 증보 2026-09-27 G1 — suggest a client-command card to the person
+/// who asked. Opened by `messages:write`: it writes one message in the run's
+/// own channel and grants nothing more (G5).
+pub const TOOL_CARD_SUGGEST: &str = "oort_card_suggest";
 
 pub const SCOPE_PORT_CONNECT: &str = "agent:port:connect";
 pub const SCOPE_INBOX_READ: &str = "agent:inbox:read";
@@ -323,9 +327,58 @@ fn action_propose_schema() -> Value {
     })
 }
 
+/// The `commandId` enum of [`card_suggest_schema`] — ADR-0186 증보 G2.
+///
+/// **A deliberate second copy** of `momo_agent::card_suggest::SUGGESTABLE_COMMANDS`'
+/// ids, for the same reason [`WORKSPACE_ACTION_IDS`] is one: this crate may not
+/// depend on the domain crate. `momo-server`'s
+/// `the_suggestable_ids_are_one_list_in_four_places` measures this list, the
+/// registry, the worker's `card_suggest` definition and `docs/api/openapi.yaml`'s
+/// `SuggestableCommandId` together.
+const SUGGESTABLE_COMMAND_IDS: [&str; 1] = ["ai.connect"];
+
+// `ai.connect`'s argument vocabulary, restated for the same reason. The domain
+// normaliser is the rule (it also enforces the pair `team_key ⇔ team`, which
+// this validator cannot express); these are the first fence, and
+// `the_card_suggest_tool_bounds_what_the_registry_normalises` compares them with
+// the registry's own schema.
+const AI_CONNECT_HARNESSES: [&str; 3] = ["claude", "codex", "team_key"];
+const AI_CONNECT_SCOPES: [&str; 2] = ["mine", "team"];
+
+/// `oort_card_suggest` — ADR-0186 증보 G1.
+///
+/// What is **absent** is the contract: no `channelId` (the channel is the
+/// handle's), no `forMemberId` (the server reads the run's trigger author), no
+/// `label` (derived from the command), no `props` (assembled by the server).
+/// `additionalProperties: false` makes each of them `InvalidArguments` before
+/// the adapter runs; the adapter refuses them again through
+/// `momo_agent::validate_suggestion`, which is the gate the worker shares.
+fn card_suggest_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["handle", "clientMsgId", "commandId", "body"],
+        "properties": {
+            "handle": required_text(512),
+            "clientMsgId": uuid_property(),
+            "commandId": {"type": "string", "enum": SUGGESTABLE_COMMAND_IDS},
+            "args": nullable(json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "harness": nullable(json!({"type": "string", "enum": AI_CONNECT_HARNESSES})),
+                    "scope": nullable(json!({"type": "string", "enum": AI_CONNECT_SCOPES}))
+                }
+            })),
+            "body": required_text(8_000),
+            "rootId": nullable(uuid_property())
+        }
+    })
+}
+
 /// The complete catalog. Order is the `tools/list` order and is stable so a
 /// client diffing two listings sees only real capability changes.
-pub const TOOL_CATALOG: [ToolDescriptor; 9] = [
+pub const TOOL_CATALOG: [ToolDescriptor; 10] = [
     ToolDescriptor {
         name: TOOL_INBOX_READ,
         title: "Read the hosted inbox",
@@ -392,6 +445,16 @@ pub const TOOL_CATALOG: [ToolDescriptor; 9] = [
         required_scope: SCOPE_WORKSPACE_PROPOSE,
         schema: action_propose_schema,
     },
+    ToolDescriptor {
+        name: TOOL_CARD_SUGGEST,
+        title: "Suggest a card",
+        description: "Answer the person who asked with a card they can act on in place \
+                      (ai.connect: connect an AI subscription or a team API key). The \
+                      server picks the channel, the recipient and the title; the card \
+                      runs nothing until that person taps it on their own device.",
+        required_scope: SCOPE_MESSAGES_WRITE,
+        schema: card_suggest_schema,
+    },
 ];
 
 /// What this server build is able to serve, independent of any credential.
@@ -417,6 +480,7 @@ impl ToolCapability {
             TOOL_RUN_EVENT,
             TOOL_RUN_COMPLETE,
             TOOL_ACTION_PROPOSE,
+            TOOL_CARD_SUGGEST,
         ],
     };
 
@@ -693,7 +757,7 @@ mod tests {
     }
 
     #[test]
-    fn the_catalog_is_exactly_the_nine_named_tools() {
+    fn the_catalog_is_exactly_the_ten_named_tools() {
         assert_eq!(
             TOOL_CATALOG.iter().map(|t| t.name).collect::<Vec<_>>(),
             vec![
@@ -706,6 +770,7 @@ mod tests {
                 "oort_run_event",
                 "oort_run_complete",
                 "oort_action_propose",
+                "oort_card_suggest",
             ]
         );
     }
@@ -735,7 +800,7 @@ mod tests {
             SCOPE_WORKSPACE_PROPOSE,
         ]);
         let view = ToolView::intersect(&all, &all, ToolCapability::FULL);
-        assert_eq!(view.names().len(), 9);
+        assert_eq!(view.names().len(), 10);
         for (name, scope) in [
             (TOOL_INBOX_READ, SCOPE_INBOX_READ),
             (TOOL_CONVERSATION_READ, SCOPE_MESSAGES_READ),
@@ -746,6 +811,7 @@ mod tests {
             (TOOL_RUN_EVENT, SCOPE_RUNS_CALLBACK),
             (TOOL_RUN_COMPLETE, SCOPE_RUNS_CALLBACK),
             (TOOL_ACTION_PROPOSE, SCOPE_WORKSPACE_PROPOSE),
+            (TOOL_CARD_SUGGEST, SCOPE_MESSAGES_WRITE),
         ] {
             assert_eq!(view.callable(name).expect(name).required_scope, scope);
         }
@@ -860,7 +926,7 @@ mod tests {
         assert!(ToolView::intersect(&token, &approved, ToolCapability::FULL).is_empty());
         assert_eq!(
             ToolView::intersect(&approved, &approved, ToolCapability::FULL).names(),
-            vec![TOOL_MESSAGE_POST]
+            vec![TOOL_MESSAGE_POST, TOOL_CARD_SUGGEST]
         );
     }
 
@@ -1091,6 +1157,102 @@ mod tests {
             assert!(code < 0);
             assert!(!message.is_empty());
             assert!(message.is_ascii());
+        }
+    }
+
+    // ---- ADR-0186 증보 G1/G5/G6: oort_card_suggest ---------------------------
+
+    /// G5 / G6 first red proof: `messages:write` on **both** halves opens the
+    /// tool, and nothing else does — not even every other hosted scope.
+    #[test]
+    fn the_card_suggest_tool_is_opened_by_messages_write_alone() {
+        let everything_but = scopes(&[
+            SCOPE_PORT_CONNECT,
+            SCOPE_INBOX_READ,
+            SCOPE_MESSAGES_READ,
+            SCOPE_JOBS_READ,
+            SCOPE_RUNS_CALLBACK,
+            SCOPE_WORKSPACE_PROPOSE,
+        ]);
+        let view = ToolView::intersect(&everything_but, &everything_but, ToolCapability::FULL);
+        assert!(!view.names().contains(&TOOL_CARD_SUGGEST));
+        assert_eq!(view.callable(TOOL_CARD_SUGGEST), view.callable("oort_nope"));
+        let mut with = everything_but.clone();
+        with.push(SCOPE_MESSAGES_WRITE.to_string());
+        assert!(
+            ToolView::intersect(&with, &everything_but, ToolCapability::FULL)
+                .callable(TOOL_CARD_SUGGEST)
+                .is_none()
+        );
+        assert!(
+            ToolView::intersect(&everything_but, &with, ToolCapability::FULL)
+                .callable(TOOL_CARD_SUGGEST)
+                .is_none()
+        );
+        assert!(ToolView::intersect(&with, &with, ToolCapability::FULL)
+            .callable(TOOL_CARD_SUGGEST)
+            .is_some());
+    }
+
+    /// G1 / G6: the arguments the agent may not decide are refused at the
+    /// protocol layer, before a transaction opens.
+    #[test]
+    fn the_card_suggest_schema_refuses_what_the_agent_may_not_decide() {
+        let suggest = TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == TOOL_CARD_SUGGEST)
+            .expect("catalog");
+        let base = || {
+            json!({
+                "handle": "momo_lease_v1.AAAA",
+                "clientMsgId": "5b1f4a2e-0000-4000-8000-000000000001",
+                "commandId": "ai.connect",
+                "body": "연결 카드를 띄워 드릴게요"
+            })
+        };
+        assert!(validate_arguments(suggest, &base()).is_ok());
+        let mut full = base();
+        full["args"] = json!({"harness": "claude", "scope": "mine"});
+        full["rootId"] = json!("5b1f4a2e-0000-4000-8000-000000000002");
+        assert!(validate_arguments(suggest, &full).is_ok());
+        for key in ["label", "forMemberId", "channelId", "props"] {
+            let mut refused = base();
+            refused[key] = json!("5b1f4a2e-0000-4000-8000-000000000003");
+            assert_eq!(
+                validate_arguments(suggest, &refused),
+                Err(ToolFailure::InvalidArguments),
+                "{key}"
+            );
+        }
+        for args in [
+            json!({"apiKey": "sk-x"}),
+            json!({"harness": "grok"}),
+            json!({"scope": "everyone"}),
+        ] {
+            let mut refused = base();
+            refused["args"] = args.clone();
+            assert_eq!(
+                validate_arguments(suggest, &refused),
+                Err(ToolFailure::InvalidArguments),
+                "{args}"
+            );
+        }
+        for id in ["invite.create", "appearance.accent"] {
+            let mut refused = base();
+            refused["commandId"] = json!(id);
+            assert_eq!(
+                validate_arguments(suggest, &refused),
+                Err(ToolFailure::InvalidArguments)
+            );
+        }
+        for required in ["handle", "clientMsgId", "commandId", "body"] {
+            let mut refused = base();
+            refused.as_object_mut().expect("object").remove(required);
+            assert_eq!(
+                validate_arguments(suggest, &refused),
+                Err(ToolFailure::InvalidArguments),
+                "{required}"
+            );
         }
     }
 }

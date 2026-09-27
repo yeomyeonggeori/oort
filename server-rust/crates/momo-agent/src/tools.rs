@@ -140,6 +140,25 @@ pub const WORK_SESSION_SPAWN: &str = "work.session.spawn";
 /// things to whatever the agent does next.
 pub const WORK_SESSION_LOGIN_HANDOFF: &str = "work.session.login_handoff";
 
+/// `card_suggest` — suggest a client-command card to the person who asked
+/// (ADR-0186 증보 2026-09-27 G1, GC-6 #2947).
+///
+/// Arguments: `{"commandId": "ai.connect", "args": {…}?, "body": "…"}`, and
+/// nothing else — [`crate::card_suggest::validate_suggestion`] is the whole
+/// gate, shared with the hosted `oort_card_suggest`.
+///
+/// ## Why this one runs without a card of its own (ADR-0114 D5 exception)
+///
+/// It changes no server state (ADR-0186 D3 risk `none`): the one write is a
+/// message in the run's own channel, the same thing the agent's ordinary answer
+/// is. What the suggestion *offers* happens only when a person taps it, on
+/// their own device and with their own authority. Gating the suggestion behind
+/// an approval card would make 「승인해야 볼 수 있는 카드」. So
+/// [`approval_reason`] exempts it **by name**, before any grant is read, and no
+/// grant can widen the exemption to another tool (planner decision
+/// 2026-09-27, #2952 review).
+pub const CARD_SUGGEST: &str = "card_suggest";
+
 /// `approval.action_type` for a tool call, matching Swift
 /// `ApprovalRuntime.pausePlan` (`ApprovalRuntime.swift:36-45`).
 ///
@@ -170,6 +189,7 @@ pub const CATALOG: &[&str] = &[
     WORK_SESSION_END,
     WORK_SESSION_SPAWN,
     WORK_SESSION_LOGIN_HANDOFF,
+    CARD_SUGGEST,
 ];
 
 /// Capabilities the product already has that a **future** batch may expose as
@@ -302,7 +322,50 @@ pub fn catalog_definitions() -> Vec<ToolDefinition> {
                 "additionalProperties": false
             }),
         },
+        ToolDefinition {
+            name: CARD_SUGGEST,
+            // The model has to learn three things here: when (a person asked to
+            // connect an AI), that the card does the connecting (so it must
+            // not walk them through settings or ask for a key), and that the
+            // title is not its to write.
+            description: "Show the person who asked you a card they can act on              in place — use `ai.connect` when they ask to connect an AI              subscription or a team API key. Put your short answer in `body`;              the card itself is drawn by their app from their own settings, so              do not explain settings steps and never ask for a key, token or              password. The card's title and recipient are set by the server.",
+            parameters: card_suggest_parameters(),
+        },
     ]
+}
+
+/// `card_suggest`'s published schema, built from the allow-list so the enum
+/// the model sees is [`crate::card_suggest::SUGGESTABLE_COMMANDS`] itself. The
+/// drift test in `momo-server` still reads it back as a *third* list, because a
+/// hand edit here would otherwise pass silently.
+fn card_suggest_parameters() -> Value {
+    let commands = &crate::card_suggest::SUGGESTABLE_COMMANDS;
+    // v1 has one command, so its args schema is the tool's; a second command
+    // turns this into a union, and `the_card_suggest_definition_embeds_the_allow_list`
+    // says so rather than drifting.
+    let args = commands
+        .first()
+        .map(|command| command.args_schema())
+        .unwrap_or_else(
+            || json!({"type": "object", "additionalProperties": false, "properties": {}}),
+        );
+    json!({
+        "type": "object",
+        "properties": {
+            "commandId": {
+                "type": "string",
+                "enum": crate::card_suggest::suggestable_command_ids(),
+                "description": "Which card. `ai.connect` is the AI connection card."
+            },
+            "args": args,
+            "body": {
+                "type": "string",
+                "description": "Your answer to the person, 1-8000 bytes. Shown above the card."
+            }
+        },
+        "required": ["commandId", "body"],
+        "additionalProperties": false
+    })
 }
 
 /// The definitions for the names an agent profile turned on — the **consumer**
@@ -591,6 +654,10 @@ pub enum ApprovalReason {
     /// approval would go looking for a grant that need not exist. Here the
     /// author is the tool.
     HumanIsTheAction,
+    /// The tool only suggests; a person acts on their own device
+    /// ([`CARD_SUGGEST`], ADR-0186 증보 G1 · ADR-0114 D5 exception). Named by the
+    /// tool, like [`Self::HumanIsTheAction`], because no grant authored it.
+    SuggestionOnly,
 }
 
 impl ApprovalReason {
@@ -601,11 +668,15 @@ impl ApprovalReason {
             ApprovalReason::PolicyUnsupported => "policy_unsupported",
             ApprovalReason::ExemptReadOnly => "exempt_read_only",
             ApprovalReason::HumanIsTheAction => "human_is_the_action",
+            ApprovalReason::SuggestionOnly => "suggestion_only",
         }
     }
 
     pub fn requires_approval(self) -> bool {
-        !matches!(self, ApprovalReason::ExemptReadOnly)
+        !matches!(
+            self,
+            ApprovalReason::ExemptReadOnly | ApprovalReason::SuggestionOnly
+        )
     }
 }
 
@@ -636,6 +707,12 @@ pub fn approval_reason(tool_name: &str, grants: Option<&[ToolGrant]>) -> Approva
     // typing somebody else's password.
     if normalize(tool_name) == normalize(WORK_SESSION_LOGIN_HANDOFF) {
         return ApprovalReason::HumanIsTheAction;
+    }
+    // ADR-0186 증보 G1 — the one approval-default exception, bound to one name.
+    // Checked before the grants are read so that a grant can neither remove it
+    // nor be the thing that extends it to anything else.
+    if normalize(tool_name) == normalize(CARD_SUGGEST) {
+        return ApprovalReason::SuggestionOnly;
     }
     let Some(grants) = grants else {
         return ApprovalReason::GrantMissingOrAmbiguous;
@@ -1057,6 +1134,7 @@ mod tests {
             ApprovalReason::PolicyUnsupported.as_str(),
             ApprovalReason::ExemptReadOnly.as_str(),
             ApprovalReason::HumanIsTheAction.as_str(),
+            ApprovalReason::SuggestionOnly.as_str(),
         ];
         let mut sorted = labels.to_vec();
         sorted.sort_unstable();
@@ -1089,5 +1167,79 @@ mod tests {
         assert_eq!(required.len(), 2);
         assert!(required.iter().any(|value| value == "session_id"));
         assert!(required.iter().any(|value| value == "reason"));
+    }
+
+    // ---- ADR-0186 증보 G1: card_suggest ------------------------------------
+
+    /// The exemption is the name `card_suggest` and nothing else: every other
+    /// catalog tool still fails closed with no grants, and no grant — not even
+    /// one saying `require_approval` — moves `card_suggest` back behind a card or
+    /// lends its exemption to a neighbour.
+    #[test]
+    fn only_card_suggest_is_exempt_by_name_and_grants_cannot_move_it() {
+        for spelling in [CARD_SUGGEST, "Card_Suggest", "  card-suggest  "] {
+            assert_eq!(
+                approval_reason(spelling, None),
+                ApprovalReason::SuggestionOnly
+            );
+            assert!(!requires_approval(spelling, None), "{spelling}");
+        }
+        let demanding = [ToolGrant {
+            tool_name: CARD_SUGGEST.to_string(),
+            approval_policy: Some("require_approval".to_string()),
+            ..ToolGrant::default()
+        }];
+        assert_eq!(
+            approval_reason(CARD_SUGGEST, Some(&demanding)),
+            ApprovalReason::SuggestionOnly
+        );
+        for other in CATALOG.iter().filter(|name| **name != CARD_SUGGEST) {
+            assert!(requires_approval(other, None), "{other} lost its gate");
+            // A grant *named* card_suggest does not reach another tool.
+            let borrowed = [ToolGrant {
+                tool_name: CARD_SUGGEST.to_string(),
+                approval_policy: Some("never".to_string()),
+                grant: Some("read".to_string()),
+                risk_level: Some("read".to_string()),
+            }];
+            assert!(requires_approval(other, Some(&borrowed)), "{other}");
+        }
+        // Nearby spellings are not the tool.
+        for near in ["card.suggest", "card_suggestion", "cardsuggest"] {
+            assert!(requires_approval(near, None), "{near}");
+        }
+        assert!(ApprovalReason::SuggestionOnly.as_str() == "suggestion_only");
+    }
+
+    /// The worker's definition is built from the allow-list, and it is a closed
+    /// object whose three keys are the ones `validate_suggestion` reads.
+    #[test]
+    fn the_card_suggest_definition_embeds_the_allow_list() {
+        let definition = catalog_definitions()
+            .into_iter()
+            .find(|definition| definition.name == CARD_SUGGEST)
+            .expect("the catalog and its definitions are the same set");
+        let parameters = &definition.parameters;
+        assert_eq!(parameters["additionalProperties"], json!(false));
+        let mut keys: Vec<&str> = parameters["properties"]
+            .as_object()
+            .expect("properties")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(keys, vec!["args", "body", "commandId"]);
+        assert_eq!(
+            crate::card_suggest::SUGGESTABLE_COMMANDS.len(),
+            1,
+            "v1 is one command; widen this definition into a union with the second"
+        );
+        assert_eq!(
+            parameters["properties"]["args"],
+            crate::card_suggest::SUGGESTABLE_COMMANDS[0].args_schema()
+        );
+        assert!(definition.description.contains("never ask for a key"));
+        assert!(is_executable(CARD_SUGGEST));
+        assert_eq!(wire_tool_name(CARD_SUGGEST), "card_suggest");
     }
 }

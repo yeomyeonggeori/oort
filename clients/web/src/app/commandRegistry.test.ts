@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  AGENT_SUGGESTABLE_COMMANDS,
   KNOWN_COMMAND_IDS,
   visibleCommands,
 } from "@momo/core/features/commands/registry";
@@ -107,5 +108,78 @@ describe("팔레트에 손으로 적힌 명령이 없다", () => {
     expect(switcherSource).toContain('heading="사람"');
     expect(switcherSource).toContain('heading="채널"');
     expect(switcherSource).toContain('heading="다이렉트 메시지"');
+  });
+});
+
+// =============================================================================
+// 드리프트 가드 — 에이전트가 제안할 수 있는 명령 (ADR-0186 증보 G2).
+//
+// 서버 허용목록(`momo_agent::card_suggest::SUGGESTABLE_COMMANDS`)과 TS 레지스트리의
+// `agentSuggestable: true` 집합은 같아야 한다. Rust는 TS를 읽지 못하므로 두 언어가
+// 만나는 자리는 `docs/api/openapi.yaml`의 `SuggestableCommandId`이고, Rust 쪽은
+// `routes::actions::the_suggestable_ids_are_one_list_in_four_places`가 잰다.
+//
+// 이 시험이 웹에 사는 이유: 코어는 `import.meta`가 금지되고 `node:fs` 타입이 없어
+// 저장소의 다른 파일을 읽을 수 없다(`momo-core` purity·eslint). 웹 시험은 이미
+// 이 레지스트리를 import하고 cwd 기준으로 파일을 읽는다.
+//
+// **GC-2(#2943) 전 과도기.** `ai.connect`는 서버 허용목록에 먼저 서고(GC-6 #2947),
+// 레지스트리 명령은 GC-2가 만든다. 그 사이의 차이는 `AWAITING_GC2`에 **이름으로**
+// 적는다. GC-2가 `ai.connect`를 `agentSuggestable: true`로 올리면 아래
+// 「대기 목록의 id는 아직 레지스트리에 없다」가 붉어진다 — 그때 이 목록에서 지운다.
+// =============================================================================
+
+/** 서버에는 있고 TS 레지스트리에는 GC-2(#2943)가 올릴 명령. */
+const AWAITING_GC2: readonly string[] = ["ai.connect"];
+
+function openapiEnum(schema: string): string[] {
+  const spec = readFileSync("../../docs/api/openapi.yaml", "utf8");
+  const lines = spec.split("\n");
+  const start = lines.findIndex((line) => line.trimEnd() === `    ${schema}:`);
+  expect(start, `openapi.yaml declares ${schema}`).toBeGreaterThan(-1);
+  for (const line of lines.slice(start + 1)) {
+    // 다음 스키마 키(네 칸 들여쓰기)에서 멈춘다 — 다른 스키마의 enum을 읽지 않는다.
+    if (line.trim() !== "" && !line.startsWith("      ")) break;
+    const match = line.match(/^\s+enum:\s*\[(.*)\]\s*$/);
+    if (match) {
+      return match[1]
+        .split(",")
+        .map((item) => item.trim().replace(/^"|"$/g, ""))
+        .filter((item) => item !== "");
+    }
+  }
+  throw new Error(`${schema} declares no inline enum`);
+}
+
+describe("에이전트 제안 명령 ↔ 서버 허용목록 (SuggestableCommandId)", () => {
+  const spec = openapiEnum("SuggestableCommandId");
+  const flagged = AGENT_SUGGESTABLE_COMMANDS.map((command) => command.id);
+
+  it("스펙 enum을 실제로 읽는다", () => {
+    expect(spec.length).toBeGreaterThan(0);
+    expect(spec).toContain("ai.connect");
+  });
+
+  it("레지스트리가 제안 가능하다고 표시한 명령은 전부 서버가 받는다", () => {
+    for (const id of flagged) {
+      expect(spec, `${id}는 SuggestableCommandId에 없다`).toContain(id);
+    }
+  });
+
+  it("서버가 받는 명령은 전부 레지스트리에 있다(GC-2 대기분 제외)", () => {
+    for (const id of spec) {
+      if (AWAITING_GC2.includes(id)) continue;
+      expect(flagged, `${id}는 agentSuggestable 명령이 아니다`).toContain(id);
+    }
+  });
+
+  it("대기 목록의 id는 아직 레지스트리에 없고, 스펙에는 있다", () => {
+    for (const id of AWAITING_GC2) {
+      expect(spec).toContain(id);
+      expect(
+        KNOWN_COMMAND_IDS,
+        `${id}가 레지스트리에 들어왔다 — agentSuggestable: true로 올리고 AWAITING_GC2에서 지운다`
+      ).not.toContain(id);
+    }
   });
 });

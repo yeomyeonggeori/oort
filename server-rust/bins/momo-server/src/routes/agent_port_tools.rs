@@ -1,4 +1,4 @@
-//! The Agent Port's nine product tools (ADR-0162 D3/D6, HAP-E5; ADR-0186 D2).
+//! The Agent Port's ten product tools (ADR-0162 D3/D6, HAP-E5; ADR-0186 D2, 증보 G1).
 //!
 //! `momo-mcp` decides what a credential may see and call; **this module is the
 //! typed domain port it is handed**, and it is the whole reason the protocol
@@ -14,6 +14,7 @@
 //! | `oort_run_event` | `routes::agent_gateway::record_gateway_event_in_tx` |
 //! | `oort_run_complete` | `routes::agent_gateway::complete_gateway_run_in_tx` |
 //! | `oort_action_propose` | `momo_agent::approval`'s producer — the *same* park #979 already wrote for tool calls |
+//! | `oort_card_suggest` | `momo_agent::card_suggest` (the gate the worker shares) + `momo_messaging::send_message_in_tx` |
 //!
 //! There is **no SQL in this file** beyond what those functions own, no second
 //! message or job ledger, and no Centrifugo publish: a hosted answer reaches a
@@ -205,6 +206,7 @@ pub(crate) async fn execute(
         momo_mcp::TOOL_RUN_EVENT => run_event(state, caller, &call.arguments).await,
         momo_mcp::TOOL_RUN_COMPLETE => run_complete(state, caller, &call.arguments).await,
         momo_mcp::TOOL_ACTION_PROPOSE => action_propose(state, caller, &call.arguments).await,
+        momo_mcp::TOOL_CARD_SUGGEST => card_suggest(state, caller, &call.arguments).await,
         _ => Err(ToolFailure::InvalidArguments),
     };
     match result {
@@ -1193,6 +1195,153 @@ async fn action_propose(
     outcome
 }
 
+// ---------------------------------------------------------------------------
+// oort_card_suggest
+// ---------------------------------------------------------------------------
+
+/// The keys this door owns itself, beside the three `validate_suggestion`
+/// reads. Every other key — `label`, `forMemberId`, `channelId`, `props`
+/// included — is refused (ADR-0186 증보 G1).
+const CARD_SUGGEST_DOOR_KEYS: [&str; 3] = ["handle", "clientMsgId", "rootId"];
+
+/// `no_human_requester` on the wire (ADR-0186 증보 G3).
+///
+/// `ToolFailure` is the closed five-answer set and a sixth, cause-carrying
+/// answer is exactly what it exists to prevent, so the refusal is spelled with
+/// one of the five: `Unavailable` — 「the target is not reachable」 — because
+/// the thing that is missing is the *recipient*, not a valid argument and not a
+/// permission. The cause is logged server-side; the agent learns it from the
+/// error code alone, and zero messages are written either way.
+const NO_HUMAN_REQUESTER_FAILURE: ToolFailure = ToolFailure::Unavailable;
+
+/// Suggest a client-command card to the person who asked (ADR-0186 증보
+/// G1~G3).
+///
+/// One tenant transaction, and the only write in it is the message:
+///
+/// 1. the arguments pass `momo_agent::validate_suggestion` — the **same** gate
+///    the worker's `card_suggest` uses — **outside** the transaction, so a bad
+///    suggestion never opens one;
+/// 2. `messages:write` is re-proved, the handle's identity binding is
+///    re-checked (`bound_handle`) and its **lease** is proved live and ours,
+///    exactly as `oort_action_propose` does — a stale handle must not be able
+///    to speak for a run somebody else now holds;
+/// 3. the requester is read from `agent_run.trigger_message_id` and must be a
+///    human, or the call is `no_human_requester` with nothing written;
+/// 4. the card goes out through `send_message_in_tx` — `channel_seq` bump,
+///    message, outbox row — in the **handle's** channel.
+///
+/// Not written: an approval row, a run transition (no `mark_run_started`, no
+/// park — `agent_run.status` is read, locked and left as it was), a props
+/// patch, an outbox row of any new kind. No PTY, no provider link, no settings
+/// route is reached from here (G1 「에이전트는 실행하지 않는다」).
+async fn card_suggest(
+    state: &AppState,
+    caller: HostedCaller,
+    arguments_value: &Value,
+) -> Result<Value, ToolFailure> {
+    let args = arguments(arguments_value)?;
+    let raw_handle = required_str(args, "handle", 512)?.to_string();
+    let client_msg_id = required_uuid(args, "clientMsgId")?;
+    let root_id = optional_uuid(args, "rootId")?;
+    let suggestion = momo_agent::validate_suggestion(arguments_value, &CARD_SUGGEST_DOOR_KEYS)
+        .map_err(|_| ToolFailure::InvalidArguments)?;
+    let secret = state.agent_port.envelope_secret().to_string();
+
+    let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+        Box::pin(async move {
+            let identity =
+                match authorize_in_tx(conn, caller, momo_auth::SCOPE_MESSAGES_WRITE).await? {
+                    Ok(identity) => identity,
+                    Err(failure) => return Ok(Err(failure)),
+                };
+            let handle = match bound_handle(&identity, caller, &raw_handle, &secret) {
+                Ok(handle) => handle,
+                Err(failure) => return Ok(Err(failure)),
+            };
+            // Re-proves the agent is active and still in the run's channel. A
+            // lock, not a write: the run's status is not touched below.
+            let Some(run) =
+                momo_agent::lock_gateway_run_in_tx(conn, caller.workspace_id, handle.run_id)
+                    .await?
+            else {
+                return Ok(Err(ToolFailure::Unavailable));
+            };
+            let lease_snapshot = momo_outbox::lock_gateway_lease_in_tx(
+                conn,
+                caller.workspace_id,
+                handle.run_id,
+                run.agent_member_id,
+                GatewayLeaseBinding {
+                    job_id: handle.job_id,
+                    lease_id: handle.lease_id,
+                },
+            )
+            .await
+            .map_err(DbError::from)?;
+            if !momo_outbox::gateway_lease_authorized(lease_snapshot, handle.lease_id, false) {
+                return Ok(Err(ToolFailure::Conflict));
+            }
+            if run.agent_member_id != caller.agent_member_id || run.channel_id != handle.channel_id
+            {
+                return Ok(Err(ToolFailure::NotAuthorized));
+            }
+            // A parked or settled run speaks no more. A suggestion is not a
+            // transition, but a card appearing under a pending approval — or
+            // after the answer — is a message about work nobody is doing.
+            if run.status.is_approval_held() || run.status.is_terminal() {
+                return Ok(Err(ToolFailure::Conflict));
+            }
+            let channel_id = handle.channel_id;
+            if let Some(root_id) = root_id {
+                if validate_thread_root_in_tx(conn, channel_id, root_id)
+                    .await?
+                    .is_err()
+                {
+                    return Ok(Err(ToolFailure::InvalidArguments));
+                }
+            }
+            let Some(requester) =
+                momo_agent::suggestion_requester_in_tx(conn, caller.workspace_id, handle.run_id)
+                    .await?
+            else {
+                tracing::info!(
+                    reason = momo_agent::SuggestionRefusal::NoHumanRequester.as_str(),
+                    "oort_card_suggest refused"
+                );
+                return Ok(Err(NO_HUMAN_REQUESTER_FAILURE));
+            };
+
+            let sent = send_message_in_tx(
+                conn,
+                caller.workspace_id,
+                NewMessage {
+                    channel_id,
+                    author_member_id: caller.agent_member_id,
+                    message_type: MessageType::Text,
+                    body: Some(suggestion.body.clone()),
+                    props: momo_agent::command_suggest_props(&suggestion, requester.member_id),
+                    root_id,
+                    reply_to_id: None,
+                    // The agent's own key, like `oort_message_post`: a retried
+                    // call with the same value is the same message.
+                    client_msg_id: Some(client_msg_id),
+                    run_id: Some(handle.run_id),
+                    hlc_ts: None,
+                    hlc_count: None,
+                },
+            )
+            .await?;
+            Ok(Ok((sent.message.id, sent.message.seq, sent.deduped)))
+        })
+    })
+    .await
+    .map_err(|error| internal("agent_port.card_suggest", error))?;
+
+    let (message_id, seq, deduped) = outcome?;
+    Ok(json!({"messageId": message_id, "seq": seq, "deduplicated": deduped}))
+}
+
 /// One reported token count.
 ///
 /// Two bounds, both of them the ledger's: `i32` is its column width, so a value
@@ -1513,5 +1662,129 @@ mod tests {
         identity.approved_scopes = vec!["messages:write".into()];
         identity.token_scopes.clear();
         assert!(!has_scope(&identity, "messages:write"));
+    }
+
+    /// The code of one `async fn name(` up to its closing brace at column 0,
+    /// with `//` comment lines removed — the doc comments name the very things
+    /// the function must not call, and a guard that matched prose would be
+    /// measuring the documentation.
+    fn function_code(source: &str, signature: &str) -> String {
+        let start = source
+            .find(signature)
+            .unwrap_or_else(|| panic!("{signature} is in the source"));
+        let body = &source[start..];
+        let end = body.find("\n}\n").expect("the function closes at column 0");
+        body[..end]
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Does `code` (lowercased) reach `word`? A compound word (`provider_link`,
+    /// `settings::`) is a substring match; a single word (`pty`) must be a whole
+    /// `_`-separated part of an identifier, so `is_empty` is not a PTY.
+    fn reaches(code: &str, word: &str) -> bool {
+        if word.contains('_') || word.contains(':') {
+            return code.contains(word);
+        }
+        code.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .flat_map(|identifier| identifier.split('_'))
+            .any(|part| part == word)
+    }
+
+    /// **ADR-0186 증보 G1 / G6 — the suggestion runs nothing.** Neither door
+    /// reaches a PTY, a provider link, a settings route, a work session, an
+    /// approval or a run transition; and the shared gate's crate cannot, because
+    /// it has no dependency that could.
+    #[test]
+    fn a_suggestion_calls_no_pty_provider_link_settings_or_run_transition() {
+        let forbidden = [
+            "pty",
+            "provider_link",
+            "momo_provider",
+            "momo_settings",
+            "settings::",
+            "work_session",
+            "momo_t3",
+            "create_pending_approval",
+            "park_run",
+            "mark_run_started",
+            "finish_run",
+            "emit_outbox",
+            "patch_message_props",
+            "send_message_with_mentions",
+        ];
+        let hosted = function_code(
+            include_str!("agent_port_tools.rs"),
+            "async fn card_suggest(",
+        );
+        let worker = function_code(
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../momo-agent-worker/src/tool_exec.rs"
+            )),
+            "async fn card_suggest(",
+        );
+        for (door, code) in [("hosted", &hosted), ("worker", &worker)] {
+            assert!(code.contains("send_message_in_tx"), "{door}: the one write");
+            assert!(
+                code.contains("validate_suggestion"),
+                "{door}: the shared gate"
+            );
+            assert!(
+                code.contains("suggestion_requester_in_tx"),
+                "{door}: the requester comes from the run"
+            );
+            let lowered = code.to_lowercase();
+            for word in forbidden {
+                assert!(
+                    !reaches(&lowered, word),
+                    "{door} card_suggest reaches `{word}`"
+                );
+            }
+        }
+        let domain = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../crates/momo-agent/src/card_suggest.rs"
+        ))
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_lowercase();
+        for word in forbidden {
+            assert!(
+                !reaches(&domain, word),
+                "momo_agent::card_suggest reaches `{word}`"
+            );
+        }
+        // The matcher itself can fail: a PTY call spelled as code is caught.
+        assert!(reaches("open_pty(session)", "pty"));
+        assert!(!reaches("args.is_empty()", "pty"));
+        let manifest = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../crates/momo-agent/Cargo.toml"
+        ));
+        let dependencies = manifest
+            .split("[dev-dependencies]")
+            .next()
+            .expect("a dependency table");
+        for crate_name in ["momo-settings", "momo-provider", "momo-t3", "momo-outbox"] {
+            assert!(
+                !dependencies
+                    .lines()
+                    .any(|line| line.trim_start().starts_with(crate_name)),
+                "momo-agent depends on {crate_name}"
+            );
+        }
+    }
+
+    /// `no_human_requester` is spelled with one of the five closed answers, and
+    /// not with the one that means "your arguments were wrong".
+    #[test]
+    fn no_human_requester_is_unavailable_on_the_wire() {
+        assert_eq!(NO_HUMAN_REQUESTER_FAILURE, ToolFailure::Unavailable);
+        assert_eq!(NO_HUMAN_REQUESTER_FAILURE.wire().1, -32004);
     }
 }
