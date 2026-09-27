@@ -11,17 +11,28 @@ name: 93-ai-connect-check-capture
       id: "ai-connect-card"
     timeout: 60000
 - runFlow: subflows/dismiss-dev-logbox.yaml
-- scrollUntilVisible:
-    element:
-      id: "ai-connect-card-team-check"
-    direction: DOWN
-    timeout: 15000
+# 카드 몸은 제 ScrollView 안에서 움직인다. maestro 의 「보임」은 ScrollView 의
+# 잘림을 모르므로(잘린 버튼 좌표를 누르면 아래 입력창이 눌려 자판이 오른다) 몸을
+# 직접 끌어 올린다.
+- repeat:
+    times: 3
+    commands:
+      - swipe:
+          from:
+            id: "ai-connect-card-scroll"
+          direction: UP
 - takeScreenshot: ai-connect-scrolled
 - tapOn:
     id: "ai-connect-card-team-check"
-- scrollUntilVisible:
-    element:
+- extendedWaitUntil:
+    visible:
       id: "ai-connect-card-team-result"
-    direction: DOWN
     timeout: 30000
+- repeat:
+    times: 3
+    commands:
+      - swipe:
+          from:
+            id: "ai-connect-card-scroll"
+          direction: UP
 - takeScreenshot: ai-connect-check-result
