@@ -1,3 +1,4 @@
+import {containsSecretKey} from '@momo/core/features/chat/secretKey';
 import {NON_SECRET_KEYS, nonSecretStore} from '../../storage/kv';
 
 // =============================================================================
@@ -165,6 +166,14 @@ export function saveDraft(
   body: string,
   nowMs: number = Date.now(),
 ): void {
+  // API 키 모양이 든 글은 저장소에 남기지 않는다 (#2945 GC-4, 웹 `draftStore.ts`
+  // #2942와 같은 문). 이 저장소는 `NON_SECRET_KEYS` — 이름 그대로 비밀이 아닌 것만
+  // 담는 평문 MMKV이고, 그 글은 컴포저가 어차피 보내지 않는 글이다. 화면의 글은
+  // 그대로 두므로 사람은 키만 빼고 이어 쓸 수 있다.
+  if (containsSecretKey(body)) {
+    clearDraft(key, nowMs);
+    return;
+  }
   try {
     const next = pruneDrafts(
       {...readDrafts(), [key]: {body, savedAtMs: nowMs}},

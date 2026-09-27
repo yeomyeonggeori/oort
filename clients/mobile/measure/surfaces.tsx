@@ -15,6 +15,9 @@ import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {SafeAreaProvider, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {SessionProvider} from '../src/session/useSession';
+import {ApiError} from '@momo/core/lib/api';
+import type {ProviderLink} from '@momo/core/features/settings/api';
+import {AiConnectCard, TEAM_QUERY_KEY} from '../src/features/aiConnect/AiConnectCard';
 import {quoteDraftFor, type QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {typingSegments} from '@momo/core/features/chat/typing';
 import {
@@ -1019,6 +1022,30 @@ function GrowthProbe({
     </View>
   );
 }
+
+/** #2945 — 카드 위의 대화 한 줄(시안의 질문). */
+const AI_CONNECT_ASK: Message = {
+  ...MESSAGE,
+  id: '00000000-0000-7000-8000-0000000029a5',
+  body: '팀 에이전트가 대답을 안 하는데, 연결 상태 어디서 봐요?',
+  thread: undefined,
+};
+
+/** #2945 — 운영자가 넣은 팀 키 하나(시안 「Anthropic · 팀 기본」). */
+const AI_CONNECT_LINK: ProviderLink = {
+  schema: 'momo.provider_link.v0',
+  configured: true,
+  source: 'database',
+  mode: 'anthropic',
+  baseUrl: 'https://api.anthropic.com',
+  endpointLabel: 'Anthropic',
+  bearerConfigured: true,
+  bearerLast4: '7c1e',
+  availability: 'external',
+  keyConfigured: true,
+  updatedAtMs: Date.UTC(2026, 8, 20),
+  diagnostics: [],
+};
 
 function Frame({label, children}: {label: string; children: React.ReactNode}) {
   const styles = useStyles(buildStyles);
@@ -2752,6 +2779,77 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </Frame>
       );
     }
+    // ---- #2945 GC-4: 폰 `/연결` 카드 — 읽기 + 운영자 연결 확인 -----------------
+    //
+    // 시안 `mockups.html` 「폰」 판의 세 장: `/연` 목록 · 로컬 카드(운영자) · 그리고
+    // 시안에 없는 비운영자 한 줄. 카드는 **배송되는 컴포넌트 그대로**이고, 팀 연결은
+    // 설정과 같은 쿼리 키에 씨앗을 뿌린다(하네스 클라이언트는 네트워크로 안 나간다).
+    case 'ai-connect-slash': {
+      saveDraft('measure:ai-connect-slash', '/연');
+      return (
+        <Frame label="폰 /연 — 명령 목록 (#2945)">
+          <View style={styles.aiConnectFill}>
+            <MessageRow
+              message={AI_CONNECT_ASK}
+              startsGroup
+              directory={DIRECTORY}
+              chips={CHIPS}
+              nowMs={NOW}
+            />
+          </View>
+          <Composer
+            recipient="place"
+            channelLabel="에이전트-실험"
+            directory={DIRECTORY}
+            draftKey="measure:ai-connect-slash"
+            onSend={() => {}}
+            onSlashCommand={() => {}}
+          />
+        </Frame>
+      );
+    }
+    case 'ai-connect-card':
+    case 'ai-connect-card-denied': {
+      if (name === 'ai-connect-card') {
+        harnessClient.setQueryData(TEAM_QUERY_KEY, AI_CONNECT_LINK);
+      } else {
+        harnessClient
+          .getQueryCache()
+          .build(harnessClient, {queryKey: [...TEAM_QUERY_KEY]})
+          .setState({
+            status: 'error',
+            error: new ApiError(403, 'forbidden'),
+            fetchStatus: 'idle',
+          });
+      }
+      return (
+        <Frame
+          label={
+            name === 'ai-connect-card'
+              ? '폰 로컬 카드 — 운영자 (#2945)'
+              : '폰 로컬 카드 — 비운영자 (#2945)'
+          }>
+          <View style={styles.aiConnectFill}>
+            <MessageRow
+              message={AI_CONNECT_ASK}
+              startsGroup
+              directory={DIRECTORY}
+              chips={CHIPS}
+              nowMs={NOW}
+            />
+          </View>
+          <AiConnectCard line={null} offline={false} onClose={() => {}} />
+          <Composer
+            recipient="place"
+            channelLabel="에이전트-실험"
+            directory={DIRECTORY}
+            draftKey="measure:ai-connect-card"
+            onSend={() => {}}
+            onSlashCommand={() => {}}
+          />
+        </Frame>
+      );
+    }
     case 'composer-offline': {
       // **글을 미리 넣어 둔다 — 배송되는 경로로.** 빈 컴포저 둘을 나란히 두면 두
       // 버튼이 똑같이 꺼져 있고(위는 「보낼 것이 없다」, 아래는 「지금 못 보낸다」),
@@ -3756,6 +3854,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
       paddingHorizontal: 12,
     },
     noticeStack: {padding: 16, gap: 12},
+    /** #2945 — 카드 위 대화 자리. 카드와 컴포저를 바닥으로 민다. */
+    aiConnectFill: {flex: 1, justifyContent: 'flex-end', paddingBottom: 8},
     /** #1503 — 수명주기 칩 여섯을 한 줄에 세운다(390pt 에서는 두 줄로 접힌다). */
     statusStrip: {
       flexDirection: 'row',

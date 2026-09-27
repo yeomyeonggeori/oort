@@ -30,6 +30,7 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
   AppState,
+  Keyboard,
   StyleSheet,
   Text,
   View,
@@ -37,6 +38,13 @@ import {
   type TextInput,
 } from 'react-native';
 import {NoticeBlock, Screen} from '../design/atoms';
+import type {
+  AiConnectLine,
+  Command,
+  CommandContext,
+  LocalCardArgs,
+} from '@momo/core/features/commands/registry';
+import {AiConnectCard} from '../features/aiConnect/AiConnectCard';
 import {font, lightPalette, SAFE_GUTTER, space, type Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
 import {AdeControlPanel} from '../features/ade/AdeControlPanel';
@@ -765,6 +773,41 @@ export default function ConversationScreen({
   // 목록이 B 채널 위에 떠 있게 된다.
   const [pinsOpen, setPinsOpen] = useState(false);
   useEffect(() => setPinsOpen(false), [channelId]);
+
+  // AI 연결 카드 (#2945 GC-4, brief §3.2·Q1). **메시지가 아니다**: 이 기기·이 채널
+  // 화면에만 있고 서버에 아무것도 보내지 않는다. 채널당 한 장이고 닫기·채널 이동·
+  // 앱 재시작에 사라진다. 방 id를 함께 들고 지금 방과 같을 때만 그리므로, 방을
+  // 옮긴 첫 프레임에도 앞 방의 카드가 보이지 않는다(효과로 지우면 한 프레임 늦다).
+  const [aiCard, setAiCard] = useState<{
+    channelId: string;
+    line: AiConnectLine | null;
+  } | null>(null);
+  useEffect(() => setAiCard(null), [channelId]);
+  const closeAiCard = useCallback(() => setAiCard(null), []);
+  const onSlashCommand = useCallback(
+    (command: Command, args: LocalCardArgs) => {
+      // 코어 레지스트리의 `run`을 그대로 부른다 — 슬래시·⌘K·제안 카드가 한 경로를
+      // 탄다(brief §3.1). 폰에서 명령이 닿는 바깥은 「카드를 연다」 하나다: 이
+      // 컴포저는 언제나 채널 안에 있으므로 자리는 늘 있고, 설정 폴백(`navigate`)은
+      // 불리지 않는다. 폰에는 웹 주소 체계가 없으므로 그 셋은 아무것도 하지 않는다.
+      const ctx: CommandContext = {
+        navigate: () => {},
+        openCreateChannel: () => {},
+        openAgentProfile: () => {},
+        session: {memberId: member.id},
+        workspaceId,
+        openLocalCard: (card, cardArgs) => {
+          if (card !== 'ai.connect') return false;
+          setAiCard({channelId, line: cardArgs.line ?? null});
+          // 카드를 읽을 자리를 연다. 자판이 올라와 있으면 카드가 대화를 다 덮는다.
+          Keyboard.dismiss();
+          return true;
+        },
+      };
+      command.run(ctx, args);
+    },
+    [channelId, member.id, workspaceId],
+  );
   const closePins = useCallback(() => setPinsOpen(false), []);
   const openPins = useCallback(() => setPinsOpen(true), []);
   // 헤더의 낱말이 개수를 말한다. 0이면 「고정한 메시지」이고 숫자를 말하지
@@ -1628,6 +1671,15 @@ export default function ConversationScreen({
         }
         composer={
           <>
+            {/* 입력창 위, 모든 줄의 맨 위 (#2945, Q1 「입력창 위 채널당 한 장」).
+                타임라인 꼬리가 아니라 여기인 이유는 PR 「시안과의 차이」 표. */}
+            {aiCard !== null && aiCard.channelId === channelId ? (
+              <AiConnectCard
+                line={aiCard.line}
+                offline={!networkOnline}
+                onClose={closeAiCard}
+              />
+            ) : null}
             {/* Directly above the input, which is where the answer matters: this
                 is the line that tells you whether to wait or to type. It sits
                 over the composer rather than in the header for the same reason
@@ -1690,6 +1742,7 @@ export default function ConversationScreen({
               inputRef={composerInputRef}
               onTyping={onTyping}
               onSend={onSend}
+              onSlashCommand={onSlashCommand}
             />
           </>
         }
