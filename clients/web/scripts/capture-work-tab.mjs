@@ -134,9 +134,9 @@ async function installRealtime(page) {
 }
 
 /** 데스크탑 셸 흉내. PTY는 칸마다 짧은 셸 출력을 내고, 나머지 명령은 빈 답이다. */
-async function installDesktop(page, layout) {
+async function installDesktop(page, layout, signals = null) {
   await page.addInitScript(
-    ({ layout }) => {
+    ({ layout, signals }) => {
       try {
         localStorage.setItem("momo.web.workbench.layout.v1:dock", JSON.stringify(layout));
       } catch {
@@ -179,9 +179,20 @@ async function installDesktop(page, layout) {
             setTimeout(() => out?.({ index: 0, message: bytes.buffer.slice(0) }), 30);
             // 칸 6(시안 「PR #2851 열림」)은 코드 0으로 끝난다(「끝남」). 목록이 git을 먼저
             // 읽도록 조금 뒤에 끝낸다(끝난 칸은 셸이 git 읽기를 거절한다).
-            if (id === 6) {
+            if (id === 6 && !signals) {
               const exit = callbacks.get(args.onExit.id);
               setTimeout(() => exit?.({ index: 0, message: { id, code: 0, signal: null } }), 900);
+            }
+            // #2776: 하네스 hook 신호(데스크탑 셸이 소켓에서 받아 채널로 준 닫힌 목록).
+            // 칸이 PTY를 띄우는 순서는 미러 청크 로딩에 따라 달라서, 캡처가 칸 머리의
+            // 제목(= PTY 번호)으로 칸을 찾아 `__captureSignal`로 보낸다.
+            if (signals && args.onSignal) {
+              const cb = callbacks.get(args.onSignal.id);
+              window.__captureSignal ??= {};
+              window.__captureSignal[title ?? ""] = (value) => cb?.({ index: 0, message: value });
+              const exit = callbacks.get(args.onExit.id);
+              window.__captureExit ??= {};
+              window.__captureExit[title ?? ""] = (code) => exit?.({ index: 0, message: { id, code, signal: null } });
             }
             return id;
           }
@@ -210,7 +221,7 @@ async function installDesktop(page, layout) {
         },
       };
     },
-    { layout }
+    { layout, signals }
   );
 }
 
@@ -223,13 +234,18 @@ async function signIn(page, origin) {
   await page.getByTestId("nav-team-work").waitFor({ timeout: 20_000 });
 }
 
-async function open(browser, origin, { viewport, scheme, desktop }) {
+// 시안 ①의 상태(#2776): 칸 3·5 나를 기다림, 나머지 실행 중(hook 「작업 중」), PTY 6 끝남(종료 0).
+// 키는 칸 id다. `exit-0`은 신호가 아니라 그 칸의 프로세스를 코드 0으로 끝낸다.
+// p8은 시안(실행 중)과 달리 코드 1로 끝내 「멈춤(×)」 표지를 증거로 남긴다(design-review M2).
+const MOCK_SIGNALS = { p3: "waiting-permission", p5: "waiting-permission", p6: "exit-0", p8: "exit-1", "*": "working" };
+
+async function open(browser, origin, { viewport, scheme, desktop, signals = null }) {
   const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce" });
   await installRoutes(context);
   const page = await context.newPage();
   await installRealtime(page);
   if (desktop) {
-    await installDesktop(page, LAYOUT_4X2);
+    await installDesktop(page, LAYOUT_4X2, signals);
     // 데스크탑 첫 화면(D0)은 서버 주소를 받아야 넘어간다. 고른 서버를 미리 둔다.
     await page.addInitScript((server) => {
       try {
@@ -391,6 +407,114 @@ async function sessionListStates(page, tag) {
   check(`${tag} 상태 장면 뒤 목록 복원`, (await page.locator("[data-testid='session-list-row']").count()) === 8);
 }
 
+/**
+ * 칸 상태(#2776, 시안 ①): 칸 머리 표지, 「나를 기다림」 테두리·바닥 띠, ⌃⇧J, 인박스 합류.
+ * 시안 ① 격자와 구현 격자를 나란히 찍는다.
+ */
+async function paneStatus(browser, origin, scheme, viewport) {
+  const tag = `${viewport.width}-${scheme}`;
+  const { context, page } = await open(browser, origin, { viewport, scheme, desktop: true, signals: MOCK_SIGNALS });
+  await page.getByTestId("nav-my-work").click();
+  await page.getByTestId("my-work-tab").waitFor();
+  await page.waitForFunction(() => document.querySelectorAll("[data-testid='my-work-tab'] [data-pane-id] .xterm-rows").length >= 8, null, { timeout: 15_000 });
+  // 칸 제목(OSC)이 선 뒤에 칸을 찾는다. 제목 없는 칸은 하나다.
+  await page.waitForFunction(() => [...document.querySelectorAll("[data-testid='my-work-tab'] [data-pane-id]")].filter((el) => (el.getAttribute("aria-label") ?? "").split(" · ").length >= 3).length >= 7, null, { timeout: 15_000 });
+  await page.evaluate((signals) => {
+    for (const el of document.querySelectorAll("[data-testid='my-work-tab'] [data-pane-id]")) {
+      const id = el.getAttribute("data-pane-id");
+      const label = el.getAttribute("aria-label") ?? "";
+      const key = Object.keys(window.__captureSignal).filter((t) => t && label.includes(t)).sort((a, b) => b.length - a.length)[0] ?? "";
+      const value = signals[id] ?? signals["*"];
+      if (value.startsWith("exit-")) window.__captureExit[key]?.(Number(value.slice(5)));
+      else window.__captureSignal[key]?.(value);
+    }
+  }, MOCK_SIGNALS);
+  await page.waitForSelector("[data-pane-id='p5'][data-waiting]", { timeout: 15_000, state: "attached" });
+  await page.waitForSelector("[data-pane-id='p8'] [data-testid='status-mark'][data-status='stopped']", { timeout: 15_000, state: "attached" });
+  if (viewport.width < 1280) {
+    // 좁은 창: 격자가 활성 칸 하나로 접힌다(#2774 fitLayout). 그 모양만 찍는다.
+    await page.waitForTimeout(300);
+    check(`${tag} 가로 넘침 0`, (await overflowX(page)) === 0);
+    await page.getByTestId("my-work-tab").screenshot({ path: resolve(OUT_DIR, `pane-status-${tag}.png`) });
+    report.scenes.push(`pane-status-${tag}`);
+    await context.close();
+    return;
+  }
+  await page.waitForTimeout(300);
+  const marks = await page.evaluate(() =>
+    Object.fromEntries(
+      [...document.querySelectorAll("[data-testid='my-work-tab'] [data-pane-id]")].map((el) => [
+        el.getAttribute("data-pane-id"),
+        el.querySelector("[data-testid='status-mark']")?.getAttribute("data-status") ?? null,
+      ])
+    )
+  );
+  const count = (st) => Object.values(marks).filter((m) => m === st).length;
+  check(`${tag} 칸 상태 표지(기다림 3·5, 끝남 6, 멈춤 8, 실행 중 4)`, marks.p3 === "waiting" && marks.p5 === "waiting" && marks.p6 === "done" && marks.p8 === "stopped" && count("running") === 4, marks);
+  const donePane = Object.keys(marks).find((k) => marks[k] === "done");
+  const strips = await page.locator("[data-testid='workbench-pane-waiting']").allTextContents();
+  check(`${tag} 바닥 띠 둘(칸 3 ⌃⇧J, 칸 5 ⌃5)`, strips.length === 2 && strips[0].endsWith("⌃⇧J") && strips[1].endsWith("⌃5"), { strips });
+  const headerOverflow = await page.evaluate(() =>
+    [...document.querySelectorAll("[data-testid='workbench-pane'] header")].filter((h) => h.scrollWidth > h.clientWidth + 1).length
+  );
+  check(`${tag} 칸 머리 넘침 0`, headerOverflow === 0, { headerOverflow });
+  check(`${tag} 가로 넘침 0`, (await overflowX(page)) === 0);
+  await page.getByTestId("my-work-tab").screenshot({ path: resolve(OUT_DIR, `pane-status-${tag}.png`) });
+  report.scenes.push(`pane-status-${tag}`);
+  await page.locator("[data-pane-id='p3']").screenshot({ path: resolve(OUT_DIR, `pane-status-${tag}-pane3.png`) });
+  // ⌃⇧J: 칸 3에서 다음 기다림(칸 5)으로.
+  await page.locator("[data-pane-id='p3'] .xterm-helper-textarea").focus();
+  await page.keyboard.press("Control+Shift+KeyJ");
+  await page.waitForSelector("[data-pane-id='p5'][data-focused]", { timeout: 5_000 });
+  check(`${tag} ⌃⇧J → 칸 5`, true);
+  await page.waitForTimeout(200);
+  await page.locator("[data-pane-id='p5']").screenshot({ path: resolve(OUT_DIR, `pane-status-${tag}-pane5-focused.png`) });
+  // 인박스: 칸 5는 봤으니 내려간다. 끝난 칸은 남는다.
+  await page.getByTestId("work-rail-inbox").click();
+  await page.getByTestId("inbox-route").waitFor();
+  await page.getByTestId("inbox-local-panes").waitFor({ timeout: 5_000 });
+  const inboxRows = await page.locator("[data-testid='inbox-local-pane']").evaluateAll((els) => els.map((e) => e.getAttribute("data-status") + ":" + e.textContent));
+  // 칸 5는 봤지만 아직 기다리므로 남는다(design-review M3). 끝난 칸 6도 있다.
+  check(`${tag} 인박스 「이 기기의 칸」: 기다림과 끝남`, inboxRows.some((r) => r.startsWith("waiting:")) && inboxRows.some((r) => r.startsWith("done:")), { inboxRows });
+  const empty = await page.getByTestId("inbox-empty").textContent().catch(() => null);
+  check(`${tag} 결정 대기 빈 문구가 기다리는 칸과 모순되지 않는다`, empty === null || !empty.includes("결정할 일이 없습니다"), { empty });
+  check(`${tag} 인박스 가로 넘침 0`, (await overflowX(page)) === 0);
+  await shot(page, `inbox-local-panes-${tag}`);
+  await page.locator("[data-testid='inbox-local-pane'][data-status='done']").first().click();
+  await page.getByTestId("my-work-tab").waitFor();
+  await page.waitForSelector(`[data-pane-id='${donePane}'][data-focused]`, { timeout: 5_000 });
+  check(`${tag} 인박스 줄 → 그 칸`, true);
+  await context.close();
+  await comparePanes(browser, scheme, tag);
+}
+
+async function comparePanes(browser, scheme, tag) {
+  const implPath = resolve(OUT_DIR, `pane-status-${tag}.png`);
+  if (!existsSync(MOCKUP) || !existsSync(implPath)) return;
+  const context = await browser.newContext({ viewport: { width: 1600, height: 1000 }, colorScheme: scheme });
+  const page = await context.newPage();
+  await page.goto(pathToFileURL(MOCKUP).href, { waitUntil: "load" });
+  await page.evaluate((s) => {
+    document.documentElement.setAttribute("data-theme", s);
+    if (s === "dark") document.querySelector("#d1")?.classList.add("dark");
+  }, scheme);
+  const grid = page.locator("#d1 .grid").first();
+  await grid.scrollIntoViewIfNeeded();
+  const mockPng = await grid.screenshot();
+  const implPng = readFileSync(implPath);
+  const bg = scheme === "dark" ? "#121317" : "#e8e8eb";
+  const ink = scheme === "dark" ? "#ededf0" : "#18181b";
+  const sheet = await context.newPage();
+  await sheet.setContent(`<!doctype html><html><body style="margin:0;background:${bg};color:${ink};font:14px -apple-system,sans-serif">
+    <div style="display:flex;flex-direction:column;gap:24px;padding:24px">
+      <figure style="margin:0"><figcaption style="margin-bottom:8px">시안 ① 격자 (${scheme})</figcaption><img style="max-width:1400px" src="data:image/png;base64,${mockPng.toString("base64")}"></figure>
+      <figure style="margin:0"><figcaption style="margin-bottom:8px">구현 #2776 ${tag}</figcaption><img style="max-width:1400px" src="data:image/png;base64,${implPng.toString("base64")}"></figure>
+    </div></body></html>`);
+  await sheet.screenshot({ path: resolve(OUT_DIR, `compare-pane-status-${tag}.png`), fullPage: true });
+  report.scenes.push(`compare-pane-status-${tag}`);
+  await context.close();
+}
+
 /** 시안 ① `.slist`와 구현 목록을 나란히. 시안 파일이 없으면 건너뛴다. */
 async function compareSessionList(browser, scheme, width) {
   const implPath = resolve(OUT_DIR, `session-list-${width}-${scheme}.png`);
@@ -425,7 +549,15 @@ async function main() {
   const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT" });
   const browser = await chromium.launch();
   try {
+    const only = process.env.WORK_TAB_ONLY;
     for (const scheme of ["light", "dark"]) {
+      if (only === "pane-status") {
+        await paneStatus(browser, preview.origin, scheme, { width: 1440, height: 900 });
+        await paneStatus(browser, preview.origin, scheme, { width: 1280, height: 800 });
+        await paneStatus(browser, preview.origin, scheme, { width: 900, height: 700 });
+        continue;
+      }
+      await paneStatus(browser, preview.origin, scheme, { width: 1440, height: 900 });
       await myWork(browser, preview.origin, scheme, { width: 1440, height: 900 });
       await myWork(browser, preview.origin, scheme, { width: 1280, height: 800 });
       await myWork(browser, preview.origin, scheme, { width: 1100, height: 760 });
