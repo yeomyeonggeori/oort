@@ -263,7 +263,8 @@ export function buildSessionList(
   for (const s of inputs) {
     const entry = repoMap.get(s.git.repo) ?? { worktrees: new Set<string>(), sessions: 0 };
     entry.sessions += 1;
-    entry.worktrees.add(s.git.worktree ?? `pane:${s.paneId}`);
+    // 저장소가 아닌 폴더의 셸은 worktree가 아니다(「폴더 · 0 worktree」).
+    if (s.git.worktree !== null) entry.worktrees.add(s.git.worktree);
     repoMap.set(s.git.repo, entry);
   }
   const repos = [...repoMap.entries()]

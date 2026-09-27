@@ -413,40 +413,45 @@ export function LocalTerminalDock({
           {newSessionItems}
         </DropdownMenuContent>
       </DropdownMenu>
-      <DropdownMenu open={jumpOpen} onOpenChange={setJumpOpen}>
-        <DropdownMenuTrigger asChild>
-          <DockIconButton label="칸 목록" keycap="⌘J" aria="Meta+J" testId="local-terminal-jump">
-            <ListTree />
-          </DockIconButton>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          data-testid="local-terminal-jump-list"
-          onCloseAutoFocus={onMenuCloseAutoFocus}
-        >
-          {ids.map((id, i) => (
-            <DropdownMenuItem
-              key={id}
-              onSelect={() => {
-                pickedRef.current = true;
-                const result = focusPane(layoutRef.current, id);
-                if (result.ok) {
-                  layoutRef.current = result.layout;
-                  setLayout(result.layout);
-                }
-              }}
+      {/* 「내 작업」에서는 세션 목록이 칸 목록이고 ⌘J도 목록으로 간다(#2856). 도크에만 둔다. */}
+      {tab ? null : (
+        <>
+          <DropdownMenu open={jumpOpen} onOpenChange={setJumpOpen}>
+            <DropdownMenuTrigger asChild>
+              <DockIconButton label="칸 목록" keycap="⌘J" aria="Meta+J" testId="local-terminal-jump">
+                <ListTree />
+              </DockIconButton>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              data-testid="local-terminal-jump-list"
+              onCloseAutoFocus={onMenuCloseAutoFocus}
             >
-              <span data-numeric className="w-4 font-mono text-meta text-ink-muted">
-                {i + 1}
-              </span>
-              <span className="min-w-0 truncate">{localPaneTitle(sessionMap.get(id) ?? null)}</span>
-              {sessionMap.get(id)?.phase === "exited" ? (
-                <span className="ml-auto pl-4 text-meta text-ink-muted">끝남</span>
-              ) : null}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
+              {ids.map((id, i) => (
+                <DropdownMenuItem
+                  key={id}
+                  onSelect={() => {
+                    pickedRef.current = true;
+                    const result = focusPane(layoutRef.current, id);
+                    if (result.ok) {
+                      layoutRef.current = result.layout;
+                      setLayout(result.layout);
+                    }
+                  }}
+                >
+                  <span data-numeric className="w-4 font-mono text-meta text-ink-muted">
+                    {i + 1}
+                  </span>
+                  <span className="min-w-0 truncate">{localPaneTitle(sessionMap.get(id) ?? null)}</span>
+                  {sessionMap.get(id)?.phase === "exited" ? (
+                    <span className="ml-auto pl-4 text-meta text-ink-muted">끝남</span>
+                  ) : null}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>
+      )}
     </>
   );
   const grid = (

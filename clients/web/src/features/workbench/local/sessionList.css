@@ -1,14 +1,13 @@
 /* =============================================================================
- * 작업 탭 세션 목록 (#2856). 시안 ① `.slist` 블록의 CSS 값을 그대로 옮겼다
- * (claudedocs/agent-workspace-2.0/workspace-mockups.html 151~181행). 시안의
- * 높이·간격(14·26·28·30·34px)과 글자 크기(11~13px)는 리듬·글자 사다리 밖이라
- * Tailwind 클래스로 적을 수 없다(tokens.css가 닫힌 사다리). 그래서 이 파일이
- * 기하를 들고, 색은 전부 토큰 변수다. 시안 값과 다른 줄은 PR 「시안과의 차이」에 있다.
+ * 작업 탭 세션 목록 (#2856). 시안 ① `.slist` 블록(claudedocs/agent-workspace-2.0/
+ * workspace-mockups.html 151~181행)의 값을 그대로 옮겼다. 사다리 밖 값은 숫자가
+ * 아니라 tokens.css 끝의 `--session-*` 이름으로만 들어온다. 색은 전부 토큰이다.
+ * 시안 값과 다른 줄은 PR 「시안과의 차이」에 있다.
  * ========================================================================== */
 
 .sl {
   /* 시안 `.slist`: 268 폭(코어 WORK_TAB_SESSION_LIST_PX), 유리 면, 오른쪽 경계. */
-  inline-size: 268px;
+  inline-size: var(--session-list-width);
   flex: none;
   display: flex;
   flex-direction: column;
@@ -30,26 +29,30 @@
 .sl-hd {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 14px 14px 10px;
+  gap: var(--spacing-2);
+  padding: var(--session-head-pad) var(--session-head-pad) var(--session-head-pad-bottom);
+}
+.sl-hd kbd {
+  font: 500 var(--text-timestamp) var(--font-mono);
+  color: var(--ink-muted);
 }
 .sl-hd h2 {
-  font-size: 17px;
-  line-height: 24px;
+  font-size: var(--session-text-title);
+  line-height: var(--text-title--line-height);
   font-weight: 800;
   letter-spacing: -0.02em;
 }
 .sl-hd .sl-r {
   margin-inline-start: auto;
   display: flex;
-  gap: 2px;
+  gap: var(--session-gap-icon);
 }
 
 /* 시안 `.ibtn` 30×30 r8. */
 .sl-ibtn {
-  inline-size: 30px;
-  block-size: 30px;
-  border-radius: 8px;
+  inline-size: var(--session-icon-button);
+  block-size: var(--session-icon-button);
+  border-radius: var(--session-radius-row);
   display: grid;
   place-items: center;
   color: var(--ink-muted);
@@ -61,29 +64,29 @@
   color: var(--ink);
 }
 .sl-ibtn svg {
-  inline-size: 16px;
-  block-size: 16px;
+  inline-size: var(--spacing-4);
+  block-size: var(--spacing-4);
 }
 
 /* 시안 `.proj`: 저장소 선택기. */
 .sl-proj {
-  margin: 0 12px 8px;
+  margin: 0 var(--session-inset) var(--spacing-2);
   display: flex;
   align-items: center;
-  gap: 8px;
-  block-size: 34px;
-  padding: 0 10px;
+  gap: var(--spacing-2);
+  block-size: var(--session-vessel-height);
+  padding: 0 var(--session-vessel-pad);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--session-radius-vessel);
   background-color: var(--surface);
-  font-size: 13px;
+  font-size: var(--session-text-row);
   font-weight: 600;
   min-inline-size: 0;
   text-align: start;
 }
 .sl-proj > svg {
-  inline-size: 16px;
-  block-size: 16px;
+  inline-size: var(--spacing-4);
+  block-size: var(--spacing-4);
   flex: none;
   color: var(--icon);
 }
@@ -97,13 +100,13 @@
   font-weight: 400;
   color: var(--ink-muted);
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: var(--session-text-mono);
   white-space: nowrap;
 }
 .sl-proj .sl-last {
   margin-inline-start: auto;
-  inline-size: 14px;
-  block-size: 14px;
+  inline-size: var(--session-icon-small);
+  block-size: var(--session-icon-small);
 }
 .sl-proj:hover {
   background-color: var(--surface-hover);
@@ -111,20 +114,20 @@
 
 /* 검색 칸: `.proj`와 같은 그릇. */
 .sl-search {
-  margin: 0 12px 8px;
+  margin: 0 var(--session-inset) var(--spacing-2);
   display: flex;
   align-items: center;
-  gap: 8px;
-  block-size: 34px;
-  padding: 0 10px;
+  gap: var(--spacing-2);
+  block-size: var(--session-vessel-height);
+  padding: 0 var(--session-vessel-pad);
   border: 1px solid var(--line-strong);
-  border-radius: 10px;
+  border-radius: var(--session-radius-vessel);
   background-color: var(--surface);
-  font-size: 13px;
+  font-size: var(--session-text-row);
 }
 .sl-search svg {
-  inline-size: 16px;
-  block-size: 16px;
+  inline-size: var(--spacing-4);
+  block-size: var(--spacing-4);
   color: var(--icon);
   flex: none;
 }
@@ -143,19 +146,19 @@
 /* 시안 `.fchips` / `.fchip`. */
 .sl-chips {
   display: flex;
-  gap: 6px;
-  padding: 0 12px 10px;
+  gap: var(--session-gap-line);
+  padding: 0 var(--session-inset) var(--session-head-pad-bottom);
   flex-wrap: wrap;
 }
 .sl-chip {
-  block-size: 26px;
-  padding: 0 9px;
-  border-radius: 13px;
-  font-size: 12px;
+  block-size: var(--session-chip-height);
+  padding: 0 var(--session-chip-pad);
+  border-radius: var(--session-radius-chip);
+  font-size: var(--text-meta);
   font-weight: 600;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--session-gap-chip);
   border: 1px solid var(--line);
   color: var(--ink-muted);
   background-color: var(--surface);
@@ -174,31 +177,31 @@
   flex: 1;
   min-block-size: 0;
   overflow-y: auto;
-  padding: 0 8px 4px;
-  font-size: 13px;
+  padding: 0 var(--spacing-2) var(--spacing-1);
+  font-size: var(--session-text-row);
 }
 
 /* 시안 `.repo`: 묶음 머리(저장소·상태). */
 .sl-group {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--session-gap-line);
   inline-size: 100%;
-  padding: 8px 6px 4px;
-  font-size: 12px;
+  padding: var(--spacing-2) var(--session-row-pad) var(--spacing-1);
+  font-size: var(--text-meta);
   font-weight: 700;
   color: var(--ink-muted);
   letter-spacing: 0.01em;
-  border-radius: 8px;
+  border-radius: var(--session-radius-row);
   text-align: start;
 }
 .sl-group + .sl-group,
 .sl-row + .sl-group {
-  margin-block-start: 6px;
+  margin-block-start: var(--session-gap-line);
 }
 .sl-group > svg {
-  inline-size: 12px;
-  block-size: 12px;
+  inline-size: var(--spacing-3);
+  block-size: var(--spacing-3);
   flex: none;
 }
 .sl-group .sl-n {
@@ -210,7 +213,7 @@
 .sl-row {
   display: block;
   inline-size: 100%;
-  border-radius: 8px;
+  border-radius: var(--session-radius-row);
   text-align: start;
   position: relative;
 }
@@ -219,35 +222,40 @@
 }
 .sl-row[aria-current="true"] {
   background-color: var(--surface);
-  box-shadow: var(--shadow-sm);
+  /* 다크에서는 면(--surface)이 유리 위에서 거의 같은 밝기라(1.0:1, design-review H1)
+   * 1px 테 하나를 더한다. 라이트는 시안 그대로다. */
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 0 0 1px light-dark(transparent, var(--line-strong));
 }
 
 /* 시안 `.wt`. */
 .sl-wt {
   display: flex;
   align-items: center;
-  gap: 6px;
-  block-size: 28px;
-  padding: 0 6px;
-  border-radius: 8px;
+  gap: var(--session-gap-line);
+  block-size: var(--session-worktree-height);
+  padding: 0 var(--session-row-pad);
+  border-radius: var(--session-radius-row);
   color: var(--ink);
   font-weight: 600;
-  font-size: 12.5px;
+  font-size: var(--session-text-worktree);
   min-inline-size: 0;
 }
 .sl-wt > svg {
-  inline-size: 14px;
-  block-size: 14px;
+  inline-size: var(--session-icon-small);
+  block-size: var(--session-icon-small);
   flex: none;
   color: var(--icon);
 }
 .sl-wt .sl-br {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-meta);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-inline-size: 132px;
+  min-inline-size: 0;
+  max-inline-size: var(--session-branch-max);
 }
 .sl-wt .sl-repo {
   color: var(--ink-muted);
@@ -256,9 +264,9 @@
 }
 .sl-wt .sl-ds {
   margin-inline-start: auto;
-  font-size: 11px;
+  font-size: var(--text-timestamp);
   display: flex;
-  gap: 4px;
+  gap: var(--session-gap-tight);
   flex: none;
 }
 .sl-plus {
@@ -273,13 +281,13 @@
 }
 /* 시안 `.chip.line` 18px 「기본」. */
 .sl-default {
-  block-size: 18px;
-  padding: 0 5px;
-  font-size: 10.5px;
+  block-size: var(--session-badge-height);
+  padding: 0 var(--session-badge-pad);
+  font-size: var(--session-text-badge);
   display: inline-flex;
   align-items: center;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: var(--session-radius-badge);
   color: var(--ink-muted);
   font-weight: 500;
 }
@@ -288,15 +296,15 @@
 .sl-ses {
   display: flex;
   align-items: center;
-  gap: 7px;
-  block-size: 30px;
-  padding: 0 6px 0 26px;
+  gap: var(--session-gap-row);
+  block-size: var(--session-row-height);
+  padding: 0 var(--session-row-pad) 0 var(--session-indent);
   min-inline-size: 0;
 }
 .sl-ses .sl-num {
-  font: 600 11px var(--font-mono);
+  font: 600 var(--text-timestamp) var(--font-mono);
   color: var(--ink-muted);
-  inline-size: 12px;
+  inline-size: var(--spacing-3);
   text-align: end;
   flex: none;
 }
@@ -308,16 +316,21 @@
   min-inline-size: 0;
 }
 .sl-ses .sl-h {
-  font-size: 11.5px;
+  font-size: var(--session-text-mono);
   color: var(--ink-muted);
   font-family: var(--font-mono);
   flex: none;
 }
 .sl-ses .sl-shr {
-  inline-size: 14px;
-  block-size: 14px;
+  inline-size: var(--session-icon-small);
+  block-size: var(--session-icon-small);
   color: var(--icon);
   flex: none;
+}
+/* 머리 없이 맨 위에 선 줄(상태로 묶기·「폴더」)은 들여쓰지 않는다. 평탄화된 줄은
+ * 위의 worktree 줄 아래 들여쓴다(시안 `.ses`). */
+.sl-row[data-depth="0"]:not([data-with-worktree]) .sl-ses {
+  padding-inline-start: var(--session-row-pad);
 }
 .sl-row[data-status="waiting"] .sl-t {
   font-weight: 700;
@@ -328,8 +341,8 @@
 .sl-st {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 12px;
+  gap: var(--session-gap-chip);
+  font-size: var(--text-meta);
   font-weight: 600;
   white-space: nowrap;
   flex: none;
@@ -337,8 +350,8 @@
 .sl-st > i {
   display: block;
   flex: none;
-  inline-size: 9px;
-  block-size: 9px;
+  inline-size: var(--session-mark);
+  block-size: var(--session-mark);
 }
 .sl-st[data-status="running"] {
   color: var(--agent);
@@ -379,8 +392,8 @@
 }
 .sl-st[data-status="done"] > i,
 .sl-st[data-status="stopped"] > i {
-  inline-size: 10px;
-  block-size: 10px;
+  inline-size: var(--session-mark-glyph);
+  block-size: var(--session-mark-glyph);
   background-color: currentColor;
   -webkit-mask: var(--sl-mask) center / contain no-repeat;
   mask: var(--sl-mask) center / contain no-repeat;
@@ -404,27 +417,27 @@
 
 /* 확인 중(첫 git 읽기 전): 높이를 지키는 막대, 번쩍임 없음. */
 .sl-skel {
-  block-size: 30px;
+  block-size: var(--session-row-height);
   display: flex;
   align-items: center;
-  padding: 0 6px 0 26px;
+  padding: 0 var(--session-row-pad) 0 var(--session-indent);
 }
 .sl-skel > span {
   display: block;
-  block-size: 10px;
+  block-size: var(--session-mark-glyph);
   inline-size: 70%;
-  border-radius: 5px;
+  border-radius: var(--session-badge-pad);
   background-color: var(--muted-soft);
 }
 
 .sl-empty {
-  padding: 8px 6px;
-  font-size: 12.5px;
+  padding: var(--spacing-2) var(--session-row-pad);
+  font-size: var(--session-text-worktree);
   color: var(--ink-muted);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
+  gap: var(--spacing-2);
 }
 
 /* 시안 `.newbtn`. */
@@ -432,37 +445,37 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  margin: 4px 12px 10px;
-  block-size: 34px;
-  border-radius: 10px;
+  gap: var(--session-gap-line);
+  margin: var(--spacing-1) var(--session-inset) var(--session-head-pad-bottom);
+  block-size: var(--session-vessel-height);
+  border-radius: var(--session-radius-vessel);
   background-color: var(--primary);
   color: var(--on-primary);
-  font-size: 13px;
+  font-size: var(--session-text-row);
   font-weight: 700;
 }
 .sl-new svg {
-  inline-size: 16px;
-  block-size: 16px;
+  inline-size: var(--spacing-4);
+  block-size: var(--spacing-4);
 }
 .sl-new kbd {
-  font: 500 11px var(--font-mono);
+  font: 500 var(--text-timestamp) var(--font-mono);
   opacity: 0.7;
 }
 
 /* 시안 `.ft`. */
 .sl-ft {
   border-block-start: 1px solid var(--line);
-  padding: 10px 14px;
-  font-size: 12px;
+  padding: var(--session-head-pad-bottom) var(--session-head-pad);
+  font-size: var(--text-meta);
   color: var(--ink-muted);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--spacing-2);
 }
 .sl-ft svg {
-  inline-size: 14px;
-  block-size: 14px;
+  inline-size: var(--session-icon-small);
+  block-size: var(--session-icon-small);
   flex: none;
 }
 .sl-ft b {

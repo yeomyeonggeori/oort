@@ -147,9 +147,9 @@ async function installDesktop(page, layout) {
       let nextPty = 1;
       const enc = new TextEncoder();
       // 시안 ①의 여덟 칸: 작업 이름(OSC 제목)과 worktree. PTY 번호는 칸 순서(1~8)다.
-      const titles = ["격자 리뷰", null, "한글 입력 수리", "회귀 시험", "relay 중복 발행", "PR #2851 열림", "프리셋 스파이크", "cargo test"];
+      const titles = ["격자 리뷰", null, "한글 입력 수리", "한글 조합 중 ⌃` 키가 터미널로 새지 않는지 회귀 시험", "relay 중복 발행", "PR #2851 열림", "프리셋 스파이크", "cargo test"];
       const folders = ["momo", "momo", "2774-xterm", "2774-xterm", "push-dup", "push-dup", "presets", "presets"];
-      const branches = { momo: "main", "2774-xterm": "feat/2774-xterm", "push-dup": "fix/push-dup", presets: "spike/presets" };
+      const branches = { momo: "main", "2774-xterm": "feat/2774-xterm", "push-dup": "fix/push-dup", presets: "spike/workbench-layout-presets-5x2" };
       const diffs = { "2774-xterm": [128, 40], "push-dup": [42, 18], presets: [9, 2] };
       const worktrees = Object.keys(branches).map((folder) => ({ folder, branch: branches[folder], detached: false, locked: false, prunable: false }));
       const scripts = [
@@ -327,6 +327,7 @@ async function myWork(browser, origin, scheme, viewport) {
     check(`${tag} 목록을 펴도 가로 넘침 0`, (await overflowX(page)) === 0);
     await shot(page, `my-work-${tag}-list-open`);
   }
+  if (viewport.width === 1440) await sessionListStates(page, tag);
   if (viewport.width === 1440 || viewport.width === 1280) {
     const list = page.getByTestId("session-list");
     if ((await list.count()) > 0) await list.screenshot({ path: resolve(OUT_DIR, `session-list-${tag}.png`) });
@@ -355,6 +356,39 @@ async function teamWork(browser, origin, scheme, viewport, desktop) {
     await shot(page, `team-work-${tag}-drawer`);
   }
   await context.close();
+}
+
+/**
+ * 세션 목록의 상태와 흐름(design-review M8): 키보드 포커스 줄(⌘J), 「나를 기다림」
+ * 빈 상태, 상태로 묶기, 찾기(남은 세션 하나 → 평탄화된 두 줄 행). 끝나면 원래대로.
+ */
+async function sessionListStates(page, tag) {
+  const list = page.getByTestId("session-list");
+  const snap = async (name) => {
+    await page.waitForTimeout(150);
+    await list.screenshot({ path: resolve(OUT_DIR, `session-list-${tag}-${name}.png`) });
+    report.scenes.push(`session-list-${tag}-${name}`);
+  };
+  await page.keyboard.press("Meta+J");
+  await page.waitForFunction(() => document.activeElement?.hasAttribute("data-session-row"));
+  await page.keyboard.press("ArrowDown");
+  await snap("keyboard-focus");
+  await page.getByTestId("session-list-filter-waiting").click();
+  await page.getByTestId("session-list-empty").waitFor();
+  await snap("empty-waiting");
+  await page.getByTestId("session-list-show-all").click();
+  await page.getByTestId("session-list-grouping").click();
+  await page.getByTestId("session-list-grouping-status").click();
+  await page.getByTestId("session-list-group").first().waitFor();
+  await snap("group-status");
+  await page.getByTestId("session-list-grouping").click();
+  await page.getByTestId("session-list-grouping-repo").click();
+  await page.getByTestId("session-list-search-toggle").click();
+  await page.getByTestId("session-list-search").fill("cargo");
+  await snap("search-flattened");
+  await page.getByTestId("session-list-search").press("Escape");
+  await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined));
+  check(`${tag} 상태 장면 뒤 목록 복원`, (await page.locator("[data-testid='session-list-row']").count()) === 8);
 }
 
 /** 시안 ① `.slist`와 구현 목록을 나란히. 시안 파일이 없으면 건너뛴다. */

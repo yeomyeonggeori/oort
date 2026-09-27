@@ -4760,3 +4760,56 @@ progress[data-upload-progress]:indeterminate::-webkit-progress-bar {
     animation: momo-upload-drift 3.2s steps(6, end) infinite;
   }
 }
+
+/* =============================================================================
+ * 작업 탭 세션 목록 기하 (#2856, 시안 ① `.slist`). 시안 값을 그대로 쓰되 숫자가
+ * 아니라 **이름**으로 들어온다(README §6: 사다리 밖 측정값은 이름으로). Tailwind
+ * 테마(@theme)가 아니라 평범한 사용자 속성이라 유틸리티를 만들지 않는다: 닫힌
+ * 사다리는 그대로 닫혀 있고, 이 이름을 읽는 곳은 `sessionList.css` 하나다.
+ * 12px·11px 글자는 기존 역할(`--text-meta`·`--text-timestamp`)을 쓴다.
+ * ========================================================================== */
+:root {
+  /* 폭: 코어 WORK_TAB_SESSION_LIST_PX와 같은 값. */
+  --session-list-width: 268px;
+  /* 줄 높이: 세션 줄 30 · worktree 줄 28 · 그릇(저장소 선택기·찾기·새 세션) 34 ·
+   * 거르기 칩 26 · 머리 아이콘 단추 30 · 「기본」 표 18. */
+  --session-row-height: 30px;
+  --session-worktree-height: 28px;
+  --session-vessel-height: 34px;
+  --session-chip-height: 26px;
+  --session-icon-button: 30px;
+  --session-badge-height: 18px;
+  /* 안쪽 여백과 들여쓰기. */
+  --session-head-pad: 14px;
+  --session-head-pad-bottom: 10px;
+  --session-inset: 12px;
+  --session-row-pad: 6px;
+  --session-indent: 26px;
+  --session-chip-pad: 9px;
+  --session-vessel-pad: 10px;
+  --session-badge-pad: 5px;
+  /* 요소 사이 틈: 줄 안 7 · worktree 줄·묶음 머리 6 · 칩 5 · 차이 숫자 4 · 머리 단추 2. */
+  --session-gap-row: 7px;
+  --session-gap-line: 6px;
+  --session-gap-chip: 5px;
+  --session-gap-tight: 4px;
+  --session-gap-icon: 2px;
+  /* 반경: 줄·아이콘 단추 8 · 그릇 10 · 칩 13(높이의 절반) · 「기본」 9. */
+  --session-radius-row: 8px;
+  --session-radius-vessel: 10px;
+  --session-radius-chip: 13px;
+  --session-radius-badge: 9px;
+  /* 글자: 목록 제목 17 · 줄 13 · worktree 12.5 · 하네스·부제 11.5 · 「기본」 10.5. */
+  --session-text-title: 17px;
+  --session-text-row: 13px;
+  --session-text-worktree: 12.5px;
+  --session-text-mono: 11.5px;
+  --session-text-badge: 10.5px;
+  /* 상태 표지 9 · 끝남·멈춤 10(시안 `.st i`). */
+  --session-mark: 9px;
+  --session-mark-glyph: 10px;
+  /* 작은 아이콘(가지·공유·저장소 선택기 꺾쇠) 14. */
+  --session-icon-small: 14px;
+  /* 브랜치 이름 최대 폭(시안 `.wt .br`). */
+  --session-branch-max: 132px;
+}

@@ -14,7 +14,7 @@ import {
   ChevronRight,
   Folder,
   GitBranch,
-  ListTree,
+  Layers,
   Plus,
   Radio,
   Search,
@@ -192,9 +192,17 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
   const totalWorktrees = (shownRepo ? [shownRepo] : model.repos).reduce((n, r) => n + r.worktrees, 0);
   const totalSessions = (shownRepo ? [shownRepo] : model.repos).reduce((n, r) => n + r.sessions, 0);
   const sharedCount = sessions.filter((s) => s.shared).length;
-  // 행에 tabIndex 0을 하나만 둔다(로빙). 지금 칸 행, 없으면 첫 행.
-  const sessionIds = model.rows.filter((r): r is SessionRow => r.kind === "session").map((r) => r.paneId);
-  const tabStop = sessionIds.includes(focusedPaneId ?? "") ? focusedPaneId : sessionIds[0] ?? null;
+  // 행에 tabIndex 0을 하나만 둔다(로빙). 지금 칸 행, 없으면 첫 행. 접힌 묶음 안의
+  // 행은 그려지지 않으므로 그려질 행에서만 고른다.
+  const renderedIds: string[] = [];
+  {
+    let group: string | null = null;
+    for (const r of model.rows) {
+      if (r.kind === "group") group = r.key;
+      else if (r.kind === "session" && !(group !== null && folded.has(group))) renderedIds.push(r.paneId);
+    }
+  }
+  const tabStop = renderedIds.includes(focusedPaneId ?? "") ? focusedPaneId : renderedIds[0] ?? null;
 
   let currentGroup: string | null = null;
   const tree: ReactNode[] = [];
@@ -256,6 +264,8 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
     <aside className="sl" aria-labelledby="session-list-title" data-testid="session-list">
       <div className="sl-hd">
         <h2 id="session-list-title">세션</h2>
+        {/* 시안의 「⌘J 이동」은 저장소 머리에 있었다. 머리를 숨기는 저장소 하나일 때도 보이게 제목 옆에 둔다. */}
+        <kbd aria-hidden title="세션 목록으로 이동">⌘J</kbd>
         <div className="sl-r">
           <button
             type="button"
@@ -284,7 +294,7 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
                 title={`묶기: ${SESSION_GROUPING_LABEL[prefs.grouping]}`}
                 data-testid="session-list-grouping"
               >
-                <ListTree />
+                <Layers />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" data-testid="session-list-grouping-menu">
@@ -326,7 +336,8 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
           <Search aria-hidden />
           <input
             ref={searchRef}
-            type="search"
+            type="text"
+            role="searchbox"
             value={query}
             placeholder="이름·브랜치·하네스"
             aria-label="세션 찾기"
@@ -544,6 +555,8 @@ function SessionRowButton({
       data-session-row=""
       data-session-pane={row.paneId}
       data-status={row.status}
+      data-depth={row.depth}
+      data-with-worktree={row.branch !== null || row.repo !== null ? "" : undefined}
       data-testid="session-list-row"
       aria-current={current ? "true" : undefined}
       aria-label={`${row.index}번 칸, ${row.title}, ${label}, ${row.harness}${row.shared ? ", 공유됨" : ""}${where ? `, ${where}` : ""}`}

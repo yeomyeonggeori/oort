@@ -389,8 +389,15 @@ describe("세션 목록 (#2856)", () => {
     expect(q("session-list")).toBeNull();
     expect(q("session-list-expand")).not.toBeNull();
     expect(q("local-terminal-new")).not.toBeNull();
+    // 「내 작업」에서 ⌘J는 목록으로 간다. ⌘J를 내건 칸 목록 단추는 도크에만 있다(design-review H2).
+    expect(q("local-terminal-jump")).toBeNull();
+    expect(document.querySelectorAll("[aria-keyshortcuts='Meta+J']")).toHaveLength(1);
+    // 접기는 기억하고, 펴기는 이번 실행에만 기억한다(M3).
+    expect(window.localStorage.getItem("momo.web.workbench.sessionList.open.v1")).toBe("closed");
     key(document.body, { code: "KeyJ", key: "j", metaKey: true });
     await vi.waitFor(() => expect(q("session-list")).not.toBeNull());
     await vi.waitFor(() => expect(document.activeElement?.getAttribute("data-session-row")).toBe(""));
+    expect(window.localStorage.getItem("momo.web.workbench.sessionList.open.v1")).toBeNull();
   });
+
 });

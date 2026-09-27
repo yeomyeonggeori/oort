@@ -1,6 +1,10 @@
 {
   "scenes": [
     "my-work-1440-light",
+    "session-list-1440-light-keyboard-focus",
+    "session-list-1440-light-empty-waiting",
+    "session-list-1440-light-group-status",
+    "session-list-1440-light-search-flattened",
     "my-work-1280-light",
     "my-work-1280-light-list-open",
     "my-work-1100-light",
@@ -11,6 +15,10 @@
     "compare-session-list-1440-light",
     "compare-session-list-1280-light",
     "my-work-1440-dark",
+    "session-list-1440-dark-keyboard-focus",
+    "session-list-1440-dark-empty-waiting",
+    "session-list-1440-dark-group-status",
+    "session-list-1440-dark-search-flattened",
     "my-work-1280-dark",
     "my-work-1280-dark-list-open",
     "my-work-1100-dark",
@@ -112,6 +120,10 @@
     },
     {
       "name": "1440-light 도크가 함께 마운트되지 않는다",
+      "ok": true
+    },
+    {
+      "name": "1440-light 상태 장면 뒤 목록 복원",
       "ok": true
     },
     {
@@ -347,6 +359,10 @@
       "ok": true
     },
     {
+      "name": "1440-dark 상태 장면 뒤 목록 복원",
+      "ok": true
+    },
+    {
       "name": "1280-dark 칸 여덟",
       "ok": true,
       "detail": {
@@ -490,14 +506,14 @@
   "my-work-1440-light-session-list": {
     "listWidth": 268,
     "rows": [
-      "5격자 리뷰셸",
+      "6격자 리뷰셸",
       "7셸셸",
       "1한글 입력 수리셸",
-      "8회귀 시험셸",
-      "2cargo test셸",
+      "2한글 조합 중 ⌃` 키가 터미널로 새지 않는지 회귀 시험셸",
       "3프리셋 스파이크셸",
-      "6relay 중복 발행셸",
-      "4PR #2851 열림셸"
+      "5cargo test셸",
+      "4relay 중복 발행셸",
+      "8PR #2851 열림셸"
     ]
   },
   "my-work-1440-light": {
@@ -776,14 +792,14 @@
   "my-work-1440-dark-session-list": {
     "listWidth": 268,
     "rows": [
-      "3셸셸",
-      "4격자 리뷰셸",
-      "1cargo test셸",
-      "8프리셋 스파이크셸",
-      "5한글 입력 수리셸",
-      "7회귀 시험셸",
-      "6relay 중복 발행셸",
-      "2PR #2851 열림셸"
+      "1격자 리뷰셸",
+      "8셸셸",
+      "2프리셋 스파이크셸",
+      "6cargo test셸",
+      "4한글 입력 수리셸",
+      "5한글 조합 중 ⌃` 키가 터미널로 새지 않는지 회귀 시험셸",
+      "7relay 중복 발행셸",
+      "3PR #2851 열림셸"
     ]
   },
   "my-work-1440-dark": {

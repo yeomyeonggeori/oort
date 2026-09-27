@@ -175,6 +175,8 @@ describe("buildSessionList", () => {
       { filter: "all", grouping: "repo" }
     );
     expect(shape(m.rows)).toEqual(["# momo", "3 @main", "# oort-site", "2 @main", "# 폴더", "1"]);
+    // 저장소가 아닌 폴더의 셸은 worktree로 세지 않는다(design-review M1).
+    expect(m.repos.find((r) => r.name === null)).toEqual({ name: null, worktrees: 0, sessions: 1 });
   });
 
   it("필터: 나를 기다림·공유. 숫자는 필터 전이다", () => {
