@@ -34,10 +34,14 @@
 //! three properties that chose this tool — see `momo_agent::tools`.
 
 use momo_agent::tools::{
-    ToolCall, ToolResult, WORK_SESSION_END, WORK_SESSION_LOGIN_HANDOFF, WORK_SESSION_SPAWN,
+    ToolCall, ToolResult, CARD_SUGGEST, WORK_SESSION_END, WORK_SESSION_LOGIN_HANDOFF,
+    WORK_SESSION_SPAWN,
 };
 use momo_db::{DbError, PgConnection, PgPool};
-use momo_messaging::{cent_channel, send_message_in_tx, MessageType, NewMessage};
+use momo_messaging::{
+    cent_channel, send_message_in_tx, send_thread_notice_in_tx, validate_thread_root_in_tx,
+    MessageType, NewMessage,
+};
 use momo_outbox::{emit_outbox, OutboxKind};
 use momo_t3::work_control::{
     bind_control_session_in_tx, control_event_payload, insert_work_control_in_tx,
@@ -113,6 +117,9 @@ pub async fn execute(
         name if name == momo_agent::tools::normalize(WORK_SESSION_LOGIN_HANDOFF) => {
             login_handoff(pool, context, call).await?
         }
+        name if name == momo_agent::tools::normalize(CARD_SUGGEST) => {
+            card_suggest(pool, context, call).await?
+        }
         // Unreachable while the catalog has one entry, and deliberately not a
         // `panic!`: a catalog entry added without an executor must degrade to a
         // message, never take the worker down.
@@ -123,6 +130,118 @@ pub async fn execute(
     };
 
     write_result(pool, context, result).await
+}
+
+/// `card_suggest` — post a client-command card for the person who asked
+/// (ADR-0186 증보 G1~G3, GC-6 #2947).
+///
+/// The worker half of the pair whose hosted half is `oort_card_suggest`, and it
+/// calls the same `momo_agent::card_suggest` functions for everything that
+/// decides *what* is posted: the argument gate, the requester, the props, the
+/// label. What differs is only plumbing the worker already owns:
+///
+/// * **where** — the trigger message's channel and thread (G1 「트리거 메시지
+///   자리」), read from the run row with the requester, and required to be the
+///   run's own channel;
+/// * **the key** — `momo_agent::card_suggest::worker_card_client_msg_id(run,
+///   call_id)`, a third key space beside this module's `call_message_id` and
+///   `result_message_id`, so a replayed turn re-posts nothing and none of the
+///   three rows can swallow another.
+///
+/// It runs with no approval card (`ApprovalReason::SuggestionOnly`) because it
+/// writes one message and runs nothing: no PTY, no provider link, no settings
+/// route. The card's single write is `send_thread_notice_in_tx` in its own tenant
+/// transaction (seq + message + outbox); the `tool_result` that follows is
+/// `write_result`'s as for every other tool.
+///
+/// Refusals are `ToolResult::error` — the model must read them — and write no
+/// card: a bad argument never opens a transaction, and a run with no human
+/// requester (an agent-to-agent delegation, a work run) is refused inside it
+/// before the send.
+async fn card_suggest(
+    pool: &PgPool,
+    context: &ToolContext,
+    call: &ToolCall,
+) -> Result<ToolResult, DbError> {
+    use momo_agent::card_suggest::{
+        command_suggest_props, suggestion_refusal_output, suggestion_requester_in_tx,
+        suggestion_tool_output, validate_suggestion, worker_card_client_msg_id, SuggestionRefusal,
+    };
+
+    let suggestion = match validate_suggestion(&call.arguments, &[]) {
+        Ok(suggestion) => suggestion,
+        Err(refusal) => {
+            return Ok(ToolResult::error(
+                &call.call_id,
+                suggestion_refusal_output(refusal),
+            ))
+        }
+    };
+    let workspace_id = context.workspace_id;
+    let run_id = context.run_id;
+    let channel_id = context.channel_id;
+    let agent_member_id = context.agent_member_id;
+    let client_msg_id = worker_card_client_msg_id(run_id, &call.call_id);
+    let label = suggestion.label;
+
+    let posted = momo_db::with_tenant_tx(pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            let Some(requester) = suggestion_requester_in_tx(conn, workspace_id, run_id).await?
+            else {
+                return Ok(Err(SuggestionRefusal::NoHumanRequester));
+            };
+            // The trigger's thread belongs to the trigger's channel. A trigger
+            // in another channel (not a shape any producer writes today) has no
+            // thread here to join, so the card goes to the run's top level
+            // rather than guessing.
+            let root_id = if requester.channel_id == channel_id {
+                requester.thread_root_id
+            } else {
+                None
+            };
+            // The trigger's root may have been deleted since (#2959 M1). A
+            // root that no longer stands has no thread to join; the card goes
+            // to the channel's top level instead of into a dead thread.
+            let root_id = match root_id {
+                Some(root)
+                    if validate_thread_root_in_tx(conn, channel_id, root)
+                        .await?
+                        .is_ok() =>
+                {
+                    Some(root)
+                }
+                _ => None,
+            };
+            // With the thread rollup + `thread.updated` when it is a reply.
+            send_thread_notice_in_tx(
+                conn,
+                workspace_id,
+                NewMessage {
+                    channel_id,
+                    author_member_id: agent_member_id,
+                    message_type: MessageType::Text,
+                    body: Some(suggestion.body.clone()),
+                    props: command_suggest_props(&suggestion, requester.member_id),
+                    root_id,
+                    reply_to_id: None,
+                    client_msg_id: Some(client_msg_id),
+                    run_id: Some(run_id),
+                    hlc_ts: None,
+                    hlc_count: None,
+                },
+            )
+            .await?;
+            Ok(Ok(requester.display_name))
+        })
+    })
+    .await?;
+
+    Ok(match posted {
+        Ok(display_name) => {
+            ToolResult::ok(&call.call_id, suggestion_tool_output(&display_name, label))
+        }
+        Err(refusal) => ToolResult::error(&call.call_id, suggestion_refusal_output(refusal)),
+    })
 }
 
 /// `work.session.login_handoff` — report how the person's intervention ended
@@ -1040,6 +1159,31 @@ mod tests {
     /// them the moment their keys agree — and the room loses the answer while
     /// keeping the question. Reverting `write_result` to `call_message_id`
     /// fails here first.
+    /// ADR-0186 증보 G1 — `card_suggest` adds a **third** message by the same
+    /// author in the same channel for one `(run, call_id)`: the tool_call card,
+    /// the suggestion card and the tool_result. Any two keys agreeing would let
+    /// the spine's `(channel, author, client_msg_id)` guard drop one silently.
+    #[test]
+    fn the_three_messages_of_one_card_suggest_call_hold_three_keys() {
+        let card = momo_agent::card_suggest::worker_card_client_msg_id;
+        for run in [Uuid::from_u128(1), Uuid::new_v4()] {
+            for call in ["call_a", "", "momo.card_suggst", "tool_result:call_a"] {
+                let keys = [
+                    call_message_id(run, call),
+                    card(run, call),
+                    result_message_id(run, call),
+                ];
+                assert_ne!(keys[0], keys[1], "{call}");
+                assert_ne!(keys[1], keys[2], "{call}");
+                assert_ne!(keys[0], keys[2], "{call}");
+                assert_ne!(
+                    keys[1], run,
+                    "the card is not keyed on the run (the reply is)"
+                );
+            }
+        }
+    }
+
     #[test]
     fn a_call_and_its_result_never_share_a_key() {
         let run = Uuid::from_u128(1);

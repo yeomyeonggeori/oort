@@ -326,6 +326,101 @@ mod tests {
         assert_eq!(spec_enum, registry, "openapi WorkspaceActionId vs ACTIONS");
     }
 
+    /// **ADR-0186 증보 G2 — the suggestable ids are one list in four places.**
+    ///
+    /// `momo_agent::card_suggest::SUGGESTABLE_COMMANDS` is the definition. The
+    /// hosted tool's `commandId` enum is the protocol crate's copy; the worker's
+    /// `card_suggest` definition is built from the registry but read back here
+    /// as its own list, so a hand edit to it cannot pass; `SuggestableCommandId`
+    /// is the published one, and the TS registry's `agentSuggestable: true` set
+    /// is measured against that same spec enum by
+    /// `clients/web/src/app/commandRegistry.test.ts` (OpenAPI is where Rust and
+    /// TS meet). Adding a command to one list only is a red test.
+    #[test]
+    fn the_suggestable_ids_are_one_list_in_four_places() {
+        let registry = momo_agent::suggestable_command_ids();
+        let enum_of = |schema: &Value, context: &str| -> Vec<String> {
+            schema["properties"]["commandId"]["enum"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{context} publishes a commandId enum"))
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .expect("an enum member is a string")
+                        .to_string()
+                })
+                .collect()
+        };
+
+        let hosted = momo_mcp::TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == momo_mcp::TOOL_CARD_SUGGEST)
+            .expect("oort_card_suggest is in the catalog");
+        assert_eq!(
+            enum_of(&hosted.input_schema(), "oort_card_suggest"),
+            registry,
+            "oort_card_suggest enum vs SUGGESTABLE_COMMANDS"
+        );
+
+        let worker = momo_agent::tools::catalog_definitions()
+            .into_iter()
+            .find(|definition| definition.name == momo_agent::tools::CARD_SUGGEST)
+            .expect("card_suggest is in the worker catalog");
+        assert_eq!(
+            enum_of(&worker.parameters, "card_suggest"),
+            registry,
+            "worker card_suggest enum vs SUGGESTABLE_COMMANDS"
+        );
+
+        assert_eq!(
+            openapi_enum("SuggestableCommandId"),
+            registry,
+            "openapi SuggestableCommandId vs SUGGESTABLE_COMMANDS"
+        );
+        // G5's line, as data: a suggestable command is never a workspace action.
+        for id in &registry {
+            assert!(actions::action_by_id(id).is_none(), "{id} is a D2 action");
+        }
+    }
+
+    /// The hosted tool bounds `args` exactly as the registry's schema does — the
+    /// protocol crate's copy of the `ai.connect` vocabulary (`grok`-free) is
+    /// measured key by key, so a harness added on one side only fails here.
+    #[test]
+    fn the_card_suggest_tool_bounds_what_the_registry_normalises() {
+        let hosted = momo_mcp::TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == momo_mcp::TOOL_CARD_SUGGEST)
+            .expect("oort_card_suggest is in the catalog");
+        let published = hosted.input_schema();
+        let tool_args = &published["properties"]["args"];
+        assert_eq!(tool_args["type"], json!(["object", "null"]));
+        assert_eq!(tool_args["additionalProperties"], json!(false));
+        assert_eq!(
+            momo_agent::SUGGESTABLE_COMMANDS.len(),
+            1,
+            "v1 is one command; widen this test with the second"
+        );
+        let registry_args = momo_agent::SUGGESTABLE_COMMANDS[0].args_schema();
+        let tool_properties = tool_args["properties"].as_object().expect("tool args");
+        let registry_properties = registry_args["properties"]
+            .as_object()
+            .expect("registry args");
+        assert_eq!(
+            tool_properties.keys().collect::<Vec<_>>(),
+            registry_properties.keys().collect::<Vec<_>>()
+        );
+        for (name, registry_property) in registry_properties {
+            assert_eq!(
+                tool_properties[name].get("enum"),
+                registry_property.get("enum"),
+                "args.{name}.enum disagrees between oort_card_suggest and SUGGESTABLE_COMMANDS"
+            );
+        }
+        assert!(!published.to_string().contains("grok"));
+    }
+
     /// **The propose tool must accept exactly what the catalog advertises.**
     ///
     /// `momo-mcp` cannot depend on `momo-agent`
