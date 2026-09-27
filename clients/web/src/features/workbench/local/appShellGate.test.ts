@@ -14,11 +14,12 @@ const src = readFileSync(
 describe("AppShell 로컬 도크 문지기", () => {
   it("도크는 데스크탑 셸에서만, 스트레스 측정이 아닐 때만 붙는다", () => {
     expect(src).toMatch(/const localTerminal = isDesktop\(\) && !stress;/);
-    const mounts = src.match(/<LocalTerminalDock\b/g) ?? [];
+    const mounts = src.match(/<(?:LocalTerminalDock|ConnectedTerminalDock)\b/g) ?? [];
     expect(mounts.length).toBe(1);
     // #2854: 「내 작업」 격자가 같은 세션을 그리는 동안 도크는 붙지 않는다. 둘이 함께
     // 서면 한 칸의 PTY에 xterm이 둘 붙는다.
-    expect(src).toMatch(/\{localTerminal && !myWorkTab && <LocalTerminalDock \/>\}/);
+    // #2779: 제품 도크는 A 칸 원천을 붙인 `ConnectedTerminalDock`이다(같은 도크 하나).
+    expect(src).toMatch(/\{localTerminal && !myWorkTab && <ConnectedTerminalDock \/>\}/);
     expect(src).toMatch(/const myWorkTab = isMyWorkTab\(routePath, shellLocation\.search, localTerminal\);/);
   });
 
