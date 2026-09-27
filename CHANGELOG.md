@@ -11,6 +11,31 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-09-27
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.13>. Tag target: `main=168ee323`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. No database migration since 0.1.12: the schema stays at 091 and upgrading swaps the images only, so rolling back to 0.1.12 needs no schema change.
+
+### Added
+- Server: "Check connection" calls the provider. `POST /v1/provider/link/test` sends one read-only GET per enabled hop (`/models`, or `/key` for OpenRouter) through the provider egress guard, and reports `ok`, `rejected`, `unreachable`, `rate_limited` or `unknown` with only the numbers the provider disclosed (model count, rate limits, OpenRouter credit). Response bodies and keys never leave the new `momo-provider-probe` crate. A checking operator gets 429 with `Retry-After` past six checks a minute, and a re-check of the same link within 20 seconds reuses the last result. (#2972, ADR-0147 amendment 2026-09-27)
+- Server: agents can suggest the AI connection card. A hosted agent calls `oort_card_suggest` and a team agent calls `card_suggest`; the card is one message for the person who asked, with no approval, no run transition and no new table. New team agents get `card_suggest` in their profile by default, with a directive to suggest the card when someone asks to connect; an explicit tool list, including an empty one, is kept, and existing agents are unchanged. (#2959, #2985, ADR-0186 amendment 2026-09-27)
+- Web and desktop: `/연결` in the composer and ⌘K "Open AI connection card" open a card at the end of the channel that only you see — subscription sign-in, the team key and a connection check. Text that looks like a key is not sent and not kept as a draft. An agent's suggested card renders for the person it is for; an operator sees one line with "View team connection", other members see one line. (#2957, #2961, #2977)
+- Web and desktop: Settings › AI connections' team connection uses the same key form as the card, shows the result of "Save and check", and before "Disconnect" names the team agents that answer with that key. The check result gives a reason and what to do for each server reason, and a line of provider numbers. (#2971, #2984)
+- Web and desktop: the work tab — "My work" (desktop) and "Team work" in the sidebar, the terminal grid across the whole route with a session list panel, and pane states (running, waiting for me, done) that reach the inbox and OS notifications. (#2927, #2951, #2958)
+- Server, web and desktop: this Mac can be registered as a code-execution host from Settings; registering or revoking a host notifies the owner's devices in the same transaction. (#2954, ADR-0188)
+
+### Changed
+- `POST …/agents` without `enabledTools` now writes `["card_suggest"]` to the new agent's profile; OpenAPI `AgentProfileInput` requires only `instructions`. (#2985)
+
+### Fixed
+- Security: a subscription (owner-only) agent without a hosted connection row no longer runs on the team key — a mention, work request or welcome ends in the "the connection is down" line, and the worker refuses owner-only runs before calling a model. (#2940)
+- Security: agent-to-agent calls refuse owner-only agents twice over, a turn without a key never calls a model, display names in refusal lines stay inert, and the server refuses creating a new provider link from `auth.json`. (#2922: #2897, #2900, #2911)
+- Web and desktop: Settings › AI connections "My account · this Mac" shows the local CLI status, focus rings no longer appear after mouse use and a modifier key, and returning from the AI connection screen no longer loops. (#2953)
+
+### Not in this release
+- The server image carries the connection check, card suggestion tools, directive and default profile, owner-only isolation and host register/revoke notices (api, agent-worker), and the web bundle's connection card, suggested-card rendering, team connection settings and work tab. The desktop local git read (#2925) and `momo-workd` sidecar (#2954) ship in desktop builds, and the phone `/연결` card (#2987) in iOS builds, not in the image.
+- LiveKit on the team instance (#2759): huddles still do not run on `oort-team`.
+- runtime-unverified: a connection check against the real provider APIs (mock shapes only), a live agent runtime suggesting the card (mock-provider E2E only), TestFlight install.
+
 ## [0.1.12] - 2026-09-27
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.12>. Tag target: `main=6373ff48`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. Two database migrations since 0.1.11: `090_notification_rule_dnd_until.sql` adds nullable deadline and "value before do-not-disturb" columns to `notification_rule` and `member.presence_dnd_until` (existing rows stay NULL, so nothing changes until someone sets a deadline); `091_hosted_dm_approval.sql` adds `hosted_agent_connection.approved_dm_channel_ids` (default empty, under the table's existing FORCE RLS policy) and the `hosted_connection_channel_ids` function (SECURITY INVOKER, fixed search_path). Both are forward-only and additive; rolling the images back to 0.1.11 leaves them in place, and 0.1.11 can still clear do-not-disturb and notification pause because 090 has no deadline CHECK.
