@@ -144,6 +144,9 @@ const BASE = "/settings?section=ai&aiEntry=rows&aiProbe=claude-ready&aiProfiles=
 
 const SCENES = [
   { name: "list", query: "", ready: "my-account-claude/회사" },
+  { name: "list-long", query: "", ready: "my-account-claude/회사", act: async (page) => {
+      await page.getByTestId("my-account-codex/회사 메인 Pro 계정 (팀 공용 아님, 개인 결제)").scrollIntoViewIfNeeded();
+    } },
   { name: "menu", query: "", ready: "my-account-claude/회사", act: async (page) => {
       await page.getByTestId("my-account-claude/회사-more").click();
       await page.getByTestId("my-account-claude/회사-menu").waitFor({ state: "visible" });
