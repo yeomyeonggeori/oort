@@ -1072,6 +1072,18 @@ export interface RealtimeHandle {
     }
   ) => () => void;
   /**
+   * The signed-in member's work-host notices (ADR-0188 D2, #2778): a host was
+   * registered or revoked in their name. One user-limited channel
+   * (`user:work-host#<MEMBER>`), recovered from history on reconnect.
+   *
+   * Optional: a runtime that has not wired it (the phone, for now) simply does
+   * not hear notices live and still sees the change in the registry list.
+   */
+  subscribeWorkHostNotices?: (
+    memberId: string,
+    handlers: { onNotice: (data: unknown) => void }
+  ) => () => void;
+  /**
    * Re-dial now, on a person's request (goal B8 B2).
    *
    * centrifuge already reconnects on its own with a backoff that reaches 20s,

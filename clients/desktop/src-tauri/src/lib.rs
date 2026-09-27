@@ -10,6 +10,7 @@
 //   detect        local hosted-agent signatures   -> command (T-5; passive only)
 //   harnesses     claude/codex installed + login  -> command (#2813; exit code only)
 //   git reads     a pane's repo/branch/diff numbers -> command (#2855; 8 fixed reads)
+//   work host     this Mac as a work host (momo-workd sidecar) -> commands (#2778)
 //
 // Everything above is exposed to the web bundle as plain app commands and two
 // events; the contract is documented in `clients/desktop/README.md` and consumed
@@ -58,6 +59,17 @@ mod shell_contract;
 mod terminal_app;
 #[cfg(desktop)]
 mod updater;
+// This Mac as a work host (ADR-0188 D2 · R1, #2778): the `momo-workd` sidecar,
+// its registration and its user-only control socket. Reachable only through
+// the five `work_host_*` commands, which only `capabilities/work-host.json`
+// grants.
+#[cfg(target_os = "macos")]
+mod work_host;
+// Windows/Linux desktop: same command names, each answering
+// `unsupported_platform` (no sidecar, no code-signature check there).
+#[cfg(all(desktop, not(target_os = "macos")))]
+#[path = "work_host_unsupported.rs"]
+mod work_host;
 
 use tauri::Manager;
 use tauri_plugin_deep_link::DeepLinkExt;
@@ -94,6 +106,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updater::UpdaterState::default())
         .manage(pty::PtyState::default())
+        .manage(work_host::WorkHostState::default())
         .invoke_handler(tauri::generate_handler![
             deeplink::deep_link_take_pending,
             discovery::discovery_start,
@@ -120,6 +133,11 @@ pub fn run() {
             pty::pty_kill,
             pty::pty_ack,
             git_read::workbench_git_read,
+            work_host::work_host_status,
+            work_host::work_host_register,
+            work_host::work_host_start,
+            work_host::work_host_stop,
+            work_host::work_host_forget,
         ]);
 
     #[cfg(not(desktop))]
@@ -152,6 +170,9 @@ pub fn run() {
         .manage(deeplink::DeepLinkState::default())
         .manage(discovery::DiscoveryState::default())
         .setup(|app| {
+            // A registered host starts with the app (ADR-0188 D2, #2778).
+            #[cfg(desktop)]
+            work_host::start_if_registered(app.handle());
             // PDF copies a previous run left behind lose their removal timers
             // with that run; sweep the stale ones now (#2701 R1, review M-3).
             #[cfg(desktop)]
@@ -204,6 +225,11 @@ pub fn run() {
             if let tauri::RunEvent::Exit = _event {
                 if let Some(state) = _app.try_state::<pty::PtyState>() {
                     state.0.kill_all();
+                }
+                // The work host is the app's child in this stage (ADR-0188
+                // D2): it stops with the app.
+                if let Some(host) = _app.try_state::<work_host::WorkHostState>() {
+                    host.stop_now();
                 }
             }
         });

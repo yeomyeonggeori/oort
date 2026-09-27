@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm --prefix ../web run dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm --prefix ../web run build",
+    "beforeBuildCommand": "sh ../../scripts/desktop/build_workd_sidecar.sh && npm --prefix ../web run build",
     "frontendDist": "../../web/dist"
   },
   "app": {
@@ -50,6 +50,7 @@
   "bundle": {
     "active": true,
     "targets": ["app", "dmg"],
+    "externalBin": ["binaries/momo-workd"],
     "macOS": {
       "minimumSystemVersion": "14.0",
       "entitlements": "Entitlements.plist"
