@@ -23,6 +23,9 @@ export interface AiPillView {
   readonly text: string;
 }
 
+/** 서버가 확인 호출을 하지 않았다는 사유(#2960 전 서버의 test 라우트). */
+export const PROBE_NOT_RUN = "probe_not_run";
+
 /** ChatGPT `auth.json`으로 만든 내부용 연결(ADR-0147). 새로 만들 수 없다. */
 export const LEGACY_OAUTH_CREDENTIAL_KIND = "oauth-openai";
 
@@ -49,6 +52,9 @@ export function linkPill(input: {
   if (offline) return { tone: "mute", text: "확인할 수 없음" };
   if (isLegacyTeamLink(link)) return { tone: "mute", text: "읽기 전용" };
   if (checking) return { tone: "run", text: "확인 중…" };
+  // 서버가 실제로 부르지 않은 확인(`probe_not_run`, #2960 전)은 실패가 아니다: 키가
+  // 거절됐다고 칠하지 않고 「확인 전」이다(#2880, brief §3.2 상태 어휘).
+  if (probe && !probe.ok && probe.reason === PROBE_NOT_RUN) return { tone: "mute", text: "확인 전" };
   if (probe) return probe.ok ? { tone: "ok", text: "확인됨" } : { tone: "bad", text: "확인 실패" };
   if (link.configured && link.keyConfigured) {
     return link.availability === "mock"
