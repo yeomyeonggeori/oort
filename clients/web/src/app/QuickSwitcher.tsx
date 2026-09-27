@@ -21,6 +21,7 @@ import {
   Lock,
   MessageSquare,
   Milestone,
+  Plug,
   Plus,
   Search,
   Settings,
@@ -94,6 +95,7 @@ import {
 } from "@momo/core/features/commands/serverActions";
 import { isReachableHref } from "@/features/timeline/ActionResultCard";
 import { rememberSettingsOpener } from "@/features/settings/settingsFocus";
+import { hasLocalCardHost, openLocalCardIn } from "@/features/chat/localCards";
 import { Dialog, DialogOverlay, DialogPortal } from "@/design/ui/dialog";
 import { MODAL_CONTENT_MOTION } from "@/design/motion";
 import { cn } from "@/design/lib/cn";
@@ -168,6 +170,8 @@ const COMMAND_ICONS: Record<CommandIcon, LucideIcon> = {
   workstreams: Milestone,
   "create-channel": Plus,
   agent: Bot,
+  // 시안 ①의 `i-plug`. AI 연결 카드와 컴포저 `/연결` 줄이 같은 글리프를 든다.
+  "ai-connect": Plug,
 };
 
 /** 명령 id → 그 명령과 같은 일을 하는 단축키. 없으면 키캡을 그리지 않는다. */
@@ -522,6 +526,7 @@ export function QuickSwitcher({
       ) ?? null
     );
   }, [location.pathname, groups.channels, groups.dms]);
+  const currentChannelId = currentChannel?.id ?? null;
 
   // A failed DM belongs to the attempt that failed, not to the palette. The
   // palette outlives its openings — cmdk unmounts the dialog contents but this
@@ -651,10 +656,12 @@ export function QuickSwitcher({
           canCreateChannel: canCreate,
           isSurfaceProvided: surfaceProvided,
           agents: commandAgents,
+          // 카드 자리는 지금 서 있는 채널의 것이다(#2943). 채널 밖이면 없다.
+          canOpenLocalCard: () => hasLocalCardHost(currentChannelId),
         }),
         usage
       ),
-    [showDrafts, canCreate, commandAgents, usage, surfaceProvided]
+    [showDrafts, canCreate, commandAgents, usage, surfaceProvided, currentChannelId]
   );
 
   const commandContext: CommandContext = {
@@ -666,6 +673,10 @@ export function QuickSwitcher({
     openCreateChannel: () => requestAnimationFrame(() => openCreateChannel()),
     openAgentProfile: (memberId) =>
       requestAnimationFrame(() => openAgentProfile(memberId)),
+    // 로컬 카드는 **지금 보고 있는 채널**에 붙는다(#2943, brief §3.1). 채널 밖이거나
+    // 그 채널에 카드 자리가 없으면 false이고, 명령이 설정 › AI 연결로 폴백한다 —
+    // 그 이동도 위의 `navigateFromPalette` 규율(복귀 지점 기억)을 그대로 지난다.
+    openLocalCard: (card, args) => openLocalCardIn(currentChannelId, card, args),
     session: { memberId: session.member.id },
     workspaceId,
     // #2854: 데스크탑의 작업 콘솔은 `/work?view=console`이다.

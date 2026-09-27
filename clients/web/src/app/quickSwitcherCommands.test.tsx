@@ -26,6 +26,7 @@ import {
 } from "@momo/core/features/commands/usage";
 import { OPEN_INBOX_SHORTCUT } from "@/app/keyboardShortcuts";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { registerLocalCardHost } from "@/features/chat/localCards";
 import {
   PALETTE_STATUS_HOLD_MS,
   QuickSwitcher,
@@ -291,6 +292,7 @@ function expectedCommands() {
       displayName: member.displayName,
       handle: member.handle,
     })),
+    canOpenLocalCard: () => false,
   });
 }
 
@@ -500,6 +502,58 @@ describe("명령을 실행하면 표면이 닫힌다", () => {
     } finally {
       setItem.mockRestore();
       getItem.mockRestore();
+    }
+  });
+});
+
+describe("AI 연결 카드 열기 (#2943 GC-2)", () => {
+  const aiRow = () =>
+    commandRows().find((row) => row.dataset.commandId === "ai.connect")!;
+
+  it("채널 안이라도 카드 자리가 없으면(GC-3 전) 설정 › AI 연결로 간다", async () => {
+    await mount({ path: `/c/${CH}` });
+    expect(aiRow().textContent).toContain("AI 연결 카드 열기");
+    expect(aiRow().textContent).toContain("설정에서 열려요");
+    await act(async () => {
+      aiRow().click();
+    });
+    await settle();
+    expect(currentPath).toBe("/settings?section=ai");
+    expect(openChangeCalls).toContain(false);
+  });
+
+  it("지금 보고 있는 채널에 카드 자리가 있으면 거기 열고 이동하지 않는다", async () => {
+    const host = vi.fn(() => true);
+    const release = registerLocalCardHost(CH, host);
+    try {
+      await mount({ path: `/c/${CH}` });
+      expect(aiRow().textContent).toContain("이 채널 · 나에게만");
+      await act(async () => {
+        aiRow().click();
+      });
+      await settle();
+      expect(host).toHaveBeenCalledWith("ai.connect", {});
+      expect(currentPath).toBe(`/c/${CH}`);
+      expect(openChangeCalls).toContain(false);
+    } finally {
+      release();
+    }
+  });
+
+  it("채널 밖에서는 다른 채널의 자리를 쓰지 않고 설정으로 간다", async () => {
+    const host = vi.fn(() => true);
+    const release = registerLocalCardHost(CH, host);
+    try {
+      await mount({ path: "/inbox" });
+      expect(aiRow().textContent).toContain("설정에서 열려요");
+      await act(async () => {
+        aiRow().click();
+      });
+      await settle();
+      expect(host).not.toHaveBeenCalled();
+      expect(currentPath).toBe("/settings?section=ai");
+    } finally {
+      release();
     }
   });
 });
