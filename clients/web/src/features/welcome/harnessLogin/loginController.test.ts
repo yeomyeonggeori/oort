@@ -172,6 +172,21 @@ describe("loginController (가짜 CLI)", () => {
     login.dispose();
   });
 
+  it("프로필 인자(#2878): 같은 로그인 줄에 라벨 하나만 더 싣는다. 경로는 없다", async () => {
+    const cli = fakeCli(LOGGED_IN);
+    const login = createLoginController("codex", "device", cli.deps, "회사");
+    login.open();
+    await flush();
+    expect(cli.spawns).toEqual([
+      { program: { kind: "login", id: "codex", method: "device", profile: "회사" }, cols: 80, rows: 24 },
+    ]);
+    cli.exit(0);
+    await flush();
+    // 판정은 부른 쪽이 넘긴 상태 명령(프로필이면 그 폴더의 것) 한 번이다.
+    expect(cli.detect).toHaveBeenCalledTimes(1);
+    login.dispose();
+  });
+
   it("콜백 성공: CLI가 끝나고 상태 명령이 로그인됨이면 연결됨", async () => {
     vi.useFakeTimers();
     const cli = fakeCli(LOGGED_IN);

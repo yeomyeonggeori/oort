@@ -43,7 +43,13 @@ import { Input } from "@/design/ui/input";
 import { KomettoGuide } from "@/features/onboarding/guide/KomettoGuide";
 import { loadBrowserMirror } from "@/features/workbench/local/localSessions";
 import { LocalTerminalPane } from "@/features/workbench/local/LocalTerminalPane";
-import { desktopPty, detectLocalHarnesses, openTerminalApp } from "@/lib/tauri";
+import { PROFILE_LOGIN_SPAWN_DETAIL } from "@momo/core/features/settings/harnessProfiles";
+import {
+  desktopPty,
+  detectLocalHarnesses,
+  harnessProfileStatus,
+  openTerminalApp,
+} from "@/lib/tauri";
 import { createLoginController, type LoginController } from "./loginController";
 
 // Reading this as: onboarding (AI 연결 · 로그인 모달) for internal team users on
@@ -67,14 +73,27 @@ export interface HarnessLoginFixture {
  */
 export function HarnessLoginDialog({
   harness,
+  profile = null,
   method = "browser",
   onClose,
   onConnected,
   onFallbackStarted,
+  focusAfterConnected,
   fixture,
 }: {
   /** 로그인할 CLI. null이면 닫혀 있다. */
   harness: LocalHarnessId | null;
+  /**
+   * oort 프로필 라벨(#2878, 시안 §3 「재연동 연결 지점」·§4 2a). 계정 목록이 넘기는
+   * 것은 이것 하나다. 셸이 그 폴더를 CLI의 설정 폴더로 넘기고, 완료 판정도 그
+   * 폴더로 돌린 상태 명령이다. 없으면 이 맥의 기본 위치(온보딩·채팅 카드).
+   */
+  profile?: string | null;
+  /**
+   * 연결된 뒤 모달이 닫힐 때 초점을 받을 곳. 연 단추가 사라지는 목록(다시 로그인)이
+   * 쓴다. 없으면 AI 연결 화면의 그 줄 라디오, 그것도 없으면 연 단추.
+   */
+  focusAfterConnected?: () => HTMLElement | null;
   method?: HarnessLoginMethod;
   onClose: () => void;
   /** 상태 명령이 로그인됨을 알렸다. 부른 쪽이 목록을 다시 묻는다. */
@@ -92,8 +111,10 @@ export function HarnessLoginDialog({
     >
       {harness !== null && (
         <LoginDialogBody
-          key={harness}
+          key={`${harness}/${profile ?? ""}`}
           harness={harness}
+          profile={profile}
+          focusAfterConnected={focusAfterConnected}
           method={fixture?.method ?? method}
           onClose={onClose}
           onConnected={onConnected}
@@ -109,6 +130,7 @@ const IDLE_STATE = { status: { phase: "waiting" } as HarnessLoginPhase, paneId: 
 
 function useController(
   harness: LocalHarnessId,
+  profile: string | null,
   method: HarnessLoginMethod,
   fixture: HarnessLoginFixture | null
 ): LoginController | null {
@@ -116,11 +138,20 @@ function useController(
     () =>
       fixture
         ? null
-        : createLoginController(harness, method, {
-            pty: desktopPty,
-            loadMirror: loadBrowserMirror,
-            detect: detectLocalHarnesses,
-          }),
+        : createLoginController(
+            harness,
+            method,
+            {
+              pty: desktopPty,
+              loadMirror: loadBrowserMirror,
+              // 판정은 로그인한 그 폴더의 상태 명령이다(프로필이면 그 프로필).
+              detect:
+                profile === null
+                  ? detectLocalHarnesses
+                  : async () => [await harnessProfileStatus({ harness, label: profile })],
+            },
+            profile
+          ),
     // 한 번 열린 모달은 한 컨트롤러를 쓴다(방법 바꾸기는 retry가 한다).
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
@@ -135,6 +166,8 @@ function useController(
 
 function LoginDialogBody({
   harness,
+  profile,
+  focusAfterConnected,
   method,
   onClose,
   onConnected,
@@ -142,13 +175,15 @@ function LoginDialogBody({
   fixture,
 }: {
   harness: LocalHarnessId;
+  profile: string | null;
+  focusAfterConnected: (() => HTMLElement | null) | undefined;
   method: HarnessLoginMethod;
   onClose: () => void;
   onConnected: (harness: LocalHarnessId) => void;
   onFallbackStarted: (harness: LocalHarnessId) => void;
   fixture: HarnessLoginFixture | null;
 }) {
-  const controller = useController(harness, method, fixture);
+  const controller = useController(harness, profile, method, fixture);
   const live = useSyncExternalStore(
     controller?.subscribe ?? noopSubscribe,
     controller?.getState ?? (() => IDLE_STATE),
@@ -176,7 +211,7 @@ function LoginDialogBody({
     return () => window.clearTimeout(timer);
   }, [fixture, status.phase, harness, onClose, onConnected]);
 
-  const guide = guideFor(harness, currentMethod, status);
+  const guide = guideFor(harness, currentMethod, status, profile);
   const spawnFailed = status.phase === "failed" && status.reason === "spawn";
   // 캡처(픽스처)는 PTY가 없어 접힘 링크만 그린다.
   const canShowTerminal =
@@ -200,6 +235,7 @@ function LoginDialogBody({
       aria-describedby={lineId}
       data-testid="harness-login-dialog"
       data-phase={status.phase}
+      data-profile={profile ?? undefined}
       onEscapeKeyDown={() => onClose()}
       onOpenAutoFocus={(event) => {
         event.preventDefault();
@@ -209,6 +245,12 @@ function LoginDialogBody({
         // 연결된 뒤에는 모달을 연 단추가 사라진다(줄이 준비됨이 된다). 캐럿을
         // 그 줄의 라디오로 옮긴다(design-review M2).
         if (!connectedRef.current) return;
+        const target = focusAfterConnected?.();
+        if (target) {
+          event.preventDefault();
+          target.focus();
+          return;
+        }
         const radio = document.getElementById(`ai-connect-${harness}`);
         if (radio) {
           event.preventDefault();
@@ -229,7 +271,7 @@ function LoginDialogBody({
       <div className="flex min-w-0 flex-col gap-2">
         {showCode && <CodeField onSubmit={(code) => controller?.submitCode(code)} />}
 
-        {spawnFailed && (
+        {spawnFailed && profile === null && (
           <FallbackRow
             harness={harness}
             onStarted={() => {
@@ -339,7 +381,8 @@ function noopSubscribe(): () => void {
 function guideFor(
   harness: LocalHarnessId,
   method: HarnessLoginMethod,
-  status: HarnessLoginPhase
+  status: HarnessLoginPhase,
+  profile: string | null
 ): { expression: ReturnType<typeof expressionForState>; line: string; detail?: string } {
   switch (status.phase) {
     case "waiting":
@@ -360,7 +403,12 @@ function guideFor(
       return {
         expression: expressionForState("trouble"),
         line: loginFailedLine(status.reason),
-        detail: loginFailedDetail(harness, status.reason),
+        // 프로필 폴더로 로그인하는 복사 명령은 없다: 기본 위치 명령을 주면 다른
+        // 계정 폴더에 로그인된다(#2878).
+        detail:
+          profile !== null && status.reason === "spawn"
+            ? PROFILE_LOGIN_SPAWN_DETAIL
+            : loginFailedDetail(harness, status.reason),
       };
   }
 }

@@ -31,7 +31,10 @@ import {
 export interface LoginControllerDeps {
   pty: PtyPort;
   loadMirror: () => Promise<MirrorFactory>;
-  /** 셸 상태 명령(`detect_local_harnesses`). */
+  /**
+   * 셸 상태 명령. 기본 로그인은 `detect_local_harnesses`, 프로필은 그 폴더로 돌린
+   * `harness_profile_status`(#2878) — 부른 쪽이 고른다.
+   */
   detect: () => Promise<LocalHarnessProbe[]>;
   setTimer?: (run: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
@@ -53,7 +56,12 @@ const TEXT_ENCODER = new TextEncoder();
 export function createLoginController(
   harness: LocalHarnessId,
   initialMethod: HarnessLoginMethod,
-  deps: LoginControllerDeps
+  deps: LoginControllerDeps,
+  /**
+   * oort 프로필 라벨(#2878, 시안 §3·§4). 있으면 셸이 그 폴더를 CLI의 설정 폴더로
+   * 넘긴다(ADR-0190 D3-f A1·A3). 없으면 이 맥의 기본 위치다.
+   */
+  profile: string | null = null
 ) {
   const setTimer = deps.setTimer ?? ((run, ms) => setTimeout(run, ms));
   const clearTimer =
@@ -126,7 +134,12 @@ export function createLoginController(
       if (id !== null) void deps.pty.kill(id).catch(() => undefined);
     }, HARNESS_LOGIN_TIMEOUT_MS);
 
-    sessions.setPendingProgram(paneId, { kind: "login", id: harness, method });
+    sessions.setPendingProgram(
+      paneId,
+      profile === null
+        ? { kind: "login", id: harness, method }
+        : { kind: "login", id: harness, method, profile }
+    );
     void sessions.ensure(paneId, HIDDEN_COLS, HIDDEN_ROWS).catch(() => {
       settle({ phase: "failed", reason: "spawn" });
     });
