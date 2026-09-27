@@ -211,9 +211,17 @@ export function Sidebar({
     if (target === undefined) return;
     const active = document.activeElement;
     if (active && active !== document.body && active.isConnected) return;
-    const row = target ? document.querySelector<HTMLElement>(`[data-testid="${target}"]`) : null;
-    (row ?? document.getElementById(ROUTE_REGION_DOM_ID))?.focus({ preventScroll: true });
-  }, [workRail]);
+    // 접어 둔 사이드바로 돌아가면 그 줄은 숨어 있거나 inert라 캐럿을 받지 못한다
+    // (design-review R2 H1). 그때와, 옮겨지지 않았을 때는 라우트 상자로 간다.
+    const row =
+      target && !channelPaneCollapsed
+        ? document.querySelector<HTMLElement>(`[data-testid="${target}"]`)
+        : null;
+    row?.focus({ preventScroll: true });
+    if (!row || document.activeElement !== row) {
+      document.getElementById(ROUTE_REGION_DOM_ID)?.focus({ preventScroll: true });
+    }
+  }, [workRail, channelPaneCollapsed]);
 
   // 폰에서 이 사이드바는 서랍이다 (goal B6). 닫혀 있는 동안에는 화면 밖으로
   // 밀려 있을 뿐 DOM에는 남아 있으므로(스크롤 위치와 마운트를 지킨다), 탭 순서와

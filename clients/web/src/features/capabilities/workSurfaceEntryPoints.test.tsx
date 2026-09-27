@@ -413,7 +413,8 @@ async function mount(
     workRail = false,
     entry = "/",
     switcherOpen = true,
-  }: { workRail?: boolean; entry?: string; switcherOpen?: boolean } = {}
+    collapsed = false,
+  }: { workRail?: boolean; entry?: string; switcherOpen?: boolean; collapsed?: boolean } = {}
 ): Promise<HTMLElement> {
   if (mountedRoot) {
     act(() => mountedRoot?.unmount());
@@ -453,8 +454,8 @@ async function mount(
             null,
             createElement(Sidebar, {
               onOpenQuickSwitcher: () => undefined,
-              channelPaneCollapsed: false,
-              treeHidden: false,
+              channelPaneCollapsed: collapsed,
+              treeHidden: collapsed && !workRail,
               workRail,
             }),
             createElement(QuickSwitcher, {
@@ -826,6 +827,20 @@ describe("레일로 떠나면 캐럿이 채널 목록의 같은 줄로 간다 (#
     act(() => rerenderRail(false));
     expect(host.querySelector('[data-testid="work-rail"]')).toBeNull();
     expect(document.activeElement?.getAttribute("data-testid")).toBe("nav-inbox");
+  });
+
+  it("접어 둔 사이드바로 돌아가면 줄이 숨어 있으므로 캐럿은 라우트 상자로 간다 (R2 H1)", async () => {
+    shell.desktop = true;
+    const host = await mount({ workRail: true, entry: "/work", switcherOpen: false, collapsed: true });
+    const route = document.createElement("div");
+    route.id = "app-route";
+    route.tabIndex = -1;
+    host.append(route);
+    const link = host.querySelector<HTMLAnchorElement>('[data-testid="work-rail-team"]')!;
+    link.focus();
+    act(() => link.click());
+    act(() => rerenderRail(false));
+    expect(document.activeElement).toBe(route);
   });
 
   it("레일에서 떠나지 않고 레일이 내려가면 캐럿을 옮기지 않는다", async () => {
