@@ -27,8 +27,11 @@ import {
   linkPill,
 } from "@momo/core/features/settings/aiLinkPill";
 import { errorMessage, isOperatorDenied, maskedBearer } from "@momo/core/features/settings/model";
-import { probeReasonCopy } from "@momo/core/features/settings/chainModel";
-import { initialPresetId, teamKeyPresets } from "@momo/core/features/settings/teamKeyForm";
+import {
+  initialPresetId,
+  teamCheckReason,
+  teamKeyPresets,
+} from "@momo/core/features/settings/teamKeyForm";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { cn } from "@/design/lib/cn";
@@ -166,7 +169,14 @@ function CardRow({
 }) {
   return (
     <li
-      className={cn("ai-card-row py-2", !last && "border-b border-line", dim && "opacity-60")}
+      className={cn(
+        "ai-card-row py-2",
+        !last && "border-b border-line",
+        dim && "opacity-60",
+        // 시안 `.flash`: 방금 성공한 줄은 옅은 ok 바탕으로 「바뀐 곳은 여기」를 말한다.
+        result?.tone === "ok" && "-mx-2 rounded-lg bg-ok-soft px-2"
+      )}
+      data-flash={result?.tone === "ok" ? "" : undefined}
       data-testid={testId}
     >
       <span data-slot="logo">
@@ -203,18 +213,12 @@ function CardRow({
   );
 }
 
-function SectionHead({ id, title, locked = false }: { id: string; title: string; locked?: boolean }) {
+function SectionHead({ id, title }: { id: string; title: string }) {
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2 pb-1 pt-2">
       <h4 id={id} className="text-meta font-bold text-ink-muted">
         {title}
       </h4>
-      {locked && (
-        <span className="inline-flex items-center gap-1 text-meta text-ink-muted">
-          <Lock className="size-3 shrink-0" aria-hidden="true" />
-          운영자만 바꿀 수 있어요
-        </span>
-      )}
     </div>
   );
 }
@@ -234,6 +238,7 @@ export function AiConnectCard({
   focusNonce,
   offline,
   onClose,
+  claimFocus = () => true,
 }: {
   /** `/연결 claude`·`codex`·`팀키`: 그 줄만 펼친다. null이면 두 절 전부. */
   line: AiConnectLine | null;
@@ -241,6 +246,12 @@ export function AiConnectCard({
   focusNonce: number;
   offline: boolean;
   onClose: () => void;
+  /**
+   * 이 nonce의 초점 이동을 가져가도 되는가. 타임라인이 목록을 다시 세우면(virtuoso
+   * `key={epoch}`) 꼬리 카드도 다시 마운트되는데, 그때 컴포저의 초점을 빼앗지
+   * 않는다(design-review #2944 M5). 한 nonce에 한 번만 참이다.
+   */
+  claimFocus?: (nonce: number) => boolean;
 }) {
   const navigate = useNavigate();
   const headingId = useId();
@@ -252,6 +263,7 @@ export function AiConnectCard({
   // 열리면(또는 다시 부르면) 카드 전체가 보이게 바닥까지 내리고 제목에 초점.
   // 꼬리 행은 virtuoso가 한 프레임 뒤에 잰다: 그 전에 내리면 카드 아래가 잘린다.
   useEffect(() => {
+    if (!claimFocus(focusNonce)) return;
     headingRef.current?.focus({ preventScroll: true });
     let second = 0;
     const first = window.requestAnimationFrame(() => {
@@ -263,6 +275,8 @@ export function AiConnectCard({
       window.cancelAnimationFrame(first);
       window.cancelAnimationFrame(second);
     };
+    // claimFocus는 부른 쪽의 ref 판정이라 의존에 넣지 않는다(nonce가 바뀔 때만).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusNonce]);
 
   // 결과 줄·키 칸이 붙어 카드가 자라면, 초점이 카드 안에 있는 동안은 카드 끝이
@@ -322,7 +336,7 @@ export function AiConnectCard({
           <button
             type="button"
             onClick={() => navigate(AI_CONNECT_SETTINGS_PATH)}
-            aria-label="설정 › AI 연결에서 열기"
+            aria-label="설정에서 열기"
             className="tap-target press inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-meta text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
             data-testid="ai-connect-card-settings"
           >
@@ -490,6 +504,7 @@ function HarnessRows({ only }: { only: LocalHarnessId | null }) {
             );
           } else {
             const checking = pill === "checking";
+            // 도는 동안은 시안처럼 흐리고 낱말도 바뀐다(design-review M1).
             action = (
               <Button
                 type="button"
@@ -497,14 +512,15 @@ function HarnessRows({ only }: { only: LocalHarnessId | null }) {
                 size="sm"
                 aria-busy={checking || undefined}
                 aria-disabled={checking || undefined}
-                aria-label={`${label} 연결 확인`}
+                aria-label={checking ? `${label} 확인 중` : `${label} 연결 확인`}
+                className={cn(checking && "opacity-50")}
                 onClick={() => {
                   if (!checking) check(id);
                 }}
                 data-testid={`ai-connect-card-${id}-check`}
               >
-                <RefreshCw aria-hidden="true" />
-                연결 확인
+                {!checking && <RefreshCw aria-hidden="true" />}
+                {checking ? "확인 중" : "연결 확인"}
               </Button>
             );
           }
@@ -618,7 +634,7 @@ function TeamSection({
     setProbe(null);
     setJustSaved(true);
     void client.invalidateQueries({ queryKey: TEAM_QUERY_KEY });
-    // 「확인하고 저장」: 기존 API는 저장 뒤에만 확인할 수 있다(저장 전 판정은
+    // 「저장하고 확인」: 기존 API는 저장 뒤에만 확인할 수 있다(저장 전 판정은
     // #2880·#2872). 그래서 저장 직후 같은 줄에서 확인을 이어 돈다.
     check.mutate();
   }
@@ -631,9 +647,9 @@ function TeamSection({
     result = { tone: "bad", text: errorMessage(check.error) };
   } else if (!offline && probe && !check.isPending) {
     if (probe.ok) {
-      result = { tone: "ok", text: `응답을 확인했어요 · ${clock(probe.checkedAtMs)} 확인` };
+      result = { tone: "ok", text: `응답을 확인했어요 · ${clock(probe.checkedAtMs)}` };
     } else {
-      const why = probeReasonCopy(probe.reason) || "연결을 확인하지 못했어요.";
+      const why = teamCheckReason(probe.reason);
       result = {
         tone: "bad",
         text: justSaved ? `${why} 저장한 키는 그대로 남아 있어요. 키를 바꾸려면 새로 넣으세요.` : why,
@@ -674,6 +690,7 @@ function TeamSection({
           {...common}
           aria-busy={checking || undefined}
           aria-disabled={lockedByOffline || checking || undefined}
+          className={cn((lockedByOffline || checking) && "opacity-50")}
           onClick={() => {
             if (lockedByOffline || checking) return;
             setJustSaved(false);
@@ -681,8 +698,8 @@ function TeamSection({
           }}
           data-testid="ai-connect-card-team-check"
         >
-          <RefreshCw aria-hidden="true" />
-          연결 확인
+          {!checking && <RefreshCw aria-hidden="true" />}
+          {checking ? "확인 중" : "연결 확인"}
         </Button>
       );
     }
@@ -692,7 +709,7 @@ function TeamSection({
   if (query.isPending) {
     body = <Skeleton ready={false} rows={1} className="py-2" />;
   } else if (denied) {
-    body = <LineNote testId="ai-connect-card-team-denied">{TEAM_DENIED_LINE}</LineNote>;
+    body = null;
   } else if (query.isError) {
     body = (
       <div className="flex min-w-0 flex-wrap items-center gap-2 py-2" role="alert" data-testid="ai-connect-card-team-error">
@@ -744,7 +761,7 @@ function TeamSection({
   return (
     <section className="flex min-w-0 flex-col" aria-labelledby={headId} data-testid="ai-connect-card-team-section">
       <div className="flex min-w-0 flex-col px-3 pb-1">
-        <SectionHead id={headId} title="팀 연결 · 이 서버" locked={denied} />
+        <SectionHead id={headId} title="팀 연결 · 이 서버" />
         {body}
         {offline && operator && (
           <p id={`${headId}-offline`} className="break-keep pb-2 text-meta text-ink-muted" data-testid="ai-connect-card-offline">
@@ -752,10 +769,14 @@ function TeamSection({
           </p>
         )}
       </div>
-      {editing && (
-        <p className="flex items-center gap-2 border-t border-line bg-sheet px-3 py-2 text-meta text-ink-muted">
+      {(editing || denied) && (
+        // 시안 `.cft`: 권한 문장은 카드 발에 한 번만 선다.
+        <p
+          className="flex items-center gap-2 border-t border-line bg-sheet px-3 py-2 text-meta text-ink-muted"
+          data-testid={denied ? "ai-connect-card-team-denied" : undefined}
+        >
           <Lock className="size-3 shrink-0 text-icon" aria-hidden="true" />
-          {OPERATOR_FOOT}
+          {denied ? TEAM_DENIED_LINE : OPERATOR_FOOT}
         </p>
       )}
     </section>
@@ -763,7 +784,11 @@ function TeamSection({
 }
 
 /**
- * 팀 키 넣기(운영자). 프리셋 칩 + 마스킹 칸 + 「확인하고 저장」.
+ * 팀 키 넣기(운영자). 프리셋 칩 + 마스킹 칸 + 「저장하고 확인」.
+ *
+ * 순서가 이름이다(design-review #2944 H1): 지금 서버에는 저장 전 판정 경로가
+ * 없어서(#2880·#2872) 저장한 뒤에 확인한다. 그래서 이미 쓰는 키가 있으면 대체하기
+ * 전에 한 번 묻는다: 확인 없이 잘 되던 팀 키를 덮어쓰지 않게.
  *
  * 키는 **비제어** 칸의 DOM 값이다. React 상태에도, 뮤테이션 변수에도 싣지 않는다:
  * `useMutation`은 마지막 변수를 캐시에 들고 있으므로 변수에 키를 넣으면 저장 뒤에도
@@ -781,6 +806,9 @@ function TeamKeyForm({
   const presets = teamKeyPresets(link);
   const [presetId, setPresetId] = useState<string | null>(() => initialPresetId(presets, link));
   const [fieldError, setFieldError] = useState<string | null>(null);
+  // 이미 쓰는 키를 대체하기 전의 한 번 묻기. 키 값은 여전히 칸(DOM)에만 있다.
+  const [confirmReplace, setConfirmReplace] = useState(false);
+  const replacing = link.configured && link.keyConfigured;
   const inputRef = useRef<HTMLInputElement>(null);
   const secretRef = useRef("");
   const inputId = useId();
@@ -818,6 +846,11 @@ function TeamKeyForm({
       return;
     }
     setFieldError(null);
+    if (replacing && !confirmReplace) {
+      setConfirmReplace(true);
+      return;
+    }
+    setConfirmReplace(false);
     secretRef.current = value;
     if (field) field.value = "";
     save.mutate(target);
@@ -881,6 +914,12 @@ function TeamKeyForm({
           {errorMessage(save.error)}
         </p>
       )}
+      {confirmReplace && (
+        <p className="break-keep text-meta text-warn" role="alert" data-testid="ai-connect-card-key-replace">
+          지금 팀 기본 키({maskedBearer(link.bearerLast4)})를 이 키로 바꿔요. 팀 에이전트는 바로 새 키로 대답해요.
+          저장한 뒤에 확인하니, 틀린 키면 팀 에이전트가 멈춰요.
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="submit"
@@ -890,7 +929,7 @@ function TeamKeyForm({
           className={cn(target === null && "opacity-50")}
           data-testid="ai-connect-card-key-save"
         >
-          확인하고 저장
+          {confirmReplace ? "바꿔 저장하고 확인" : "저장하고 확인"}
         </Button>
         <Button type="button" variant="ghost" size="sm" onClick={onCancel} data-testid="ai-connect-card-key-cancel">
           취소

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ProviderLink } from "./api";
-import { initialPresetId, teamKeyPresets } from "./teamKeyForm";
+import { initialPresetId, teamCheckReason, teamKeyPresets } from "./teamKeyForm";
 
 const base: ProviderLink = {
   schema: "momo.provider_link.v0",
@@ -49,5 +49,15 @@ describe("teamKeyPresets (#2944)", () => {
     expect(initialPresetId(presets, base)).toBe("openai");
     expect(initialPresetId(presets, { ...base, configured: true, baseUrl: "https://api.x.ai/v1/" })).toBe("xai");
     expect(initialPresetId([], base)).toBeNull();
+  });
+});
+
+describe("teamCheckReason (#2944)", () => {
+  it("아는 사유는 해요체 사람 말, 모르는 사유는 이름 그대로", () => {
+    expect(teamCheckReason("provider_auth_failed")).toBe("provider가 키를 거절했어요.");
+    expect(teamCheckReason("provider_status_429")).toBe("provider가 429 응답을 줬어요.");
+    expect(teamCheckReason("probe_not_run")).toBe("확인이 끝나지 않았어요.");
+    expect(teamCheckReason(undefined)).toBe("연결을 확인하지 못했어요.");
+    expect(teamCheckReason("weird_x")).toBe("연결을 확인하지 못했어요(서버 사유: weird_x).");
   });
 });

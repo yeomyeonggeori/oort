@@ -49,3 +49,32 @@ export function initialPresetId(
   const match = saved ? presets.find((preset) => preset.baseUrl.replace(/\/+$/, "") === saved) : undefined;
   return (match ?? presets[0]).id;
 }
+
+/**
+ * 카드의 결과 줄 문장(해요체, brief §6). 서버 사유는 기계 낱말이다: 아는 것만
+ * 사람 말로 옮기고, 모르는 것은 사유 이름을 그대로 둔다(지어내지 않는다).
+ */
+export function teamCheckReason(reason: string | undefined): string {
+  switch (reason) {
+    case "provider_auth_failed":
+      return "provider가 키를 거절했어요.";
+    case "provider_unreachable":
+      return "주소에 닿지 못했어요.";
+    case "provider_rate_limited":
+      return "요청 한도에 걸렸어요.";
+    case "provider_not_configured":
+      return "주소나 키가 비어 있어요.";
+    case "not_external_provider":
+      return "모의 모드라 실제 provider를 부르지 않아요.";
+    case "probe_not_run":
+      return "확인이 끝나지 않았어요.";
+    case undefined:
+    case "":
+      return "연결을 확인하지 못했어요.";
+    default: {
+      const status = /^provider_status_(\d{3})$/.exec(reason);
+      if (status) return `provider가 ${status[1]} 응답을 줬어요.`;
+      return `연결을 확인하지 못했어요(서버 사유: ${reason}).`;
+    }
+  }
+}

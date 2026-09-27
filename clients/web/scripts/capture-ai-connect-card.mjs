@@ -288,7 +288,9 @@ function scenes() {
         slash: "/연결 팀키",
         run: async (page) => {
           await page.getByTestId("ai-connect-card-key-form").waitFor();
-          await page.getByTestId("ai-connect-card-preset-anthropic").check({ force: true });
+          await page.getByTestId("ai-connect-card-key-form").getByText("Anthropic (Claude)").click();
+          if (!(await page.getByTestId("ai-connect-card-preset-anthropic").isChecked()))
+            throw new Error("프리셋 칩을 눌러도 고르지 못했다");
           // 캡처에는 가짜 키의 마스킹 점만 찍힌다(칸이 password다).
           await page.getByTestId("ai-connect-card-key-input").fill("capture-only-not-a-key-000000000000");
         },
@@ -325,6 +327,21 @@ function scenes() {
         run: async (page) => {
           await page.getByTestId("ai-connect-card-team-check").click();
           await page.getByTestId("ai-connect-card-team-result").waitFor();
+        },
+      },
+    },
+    {
+      name: "replace-confirm",
+      query: "aiEntry=rows&aiProbe=claude-ready",
+      team: () => teamRoute({ test: probe(false, "provider_auth_failed") }),
+      act: {
+        slash: "/연결 팀키",
+        run: async (page) => {
+          await page.getByTestId("ai-connect-card-team-check").click();
+          await page.getByTestId("ai-connect-card-team-key").click();
+          await page.getByTestId("ai-connect-card-key-input").fill("capture-only-not-a-key-000000000000");
+          await page.getByTestId("ai-connect-card-key-save").click();
+          await page.getByTestId("ai-connect-card-key-replace").waitFor();
         },
       },
     },

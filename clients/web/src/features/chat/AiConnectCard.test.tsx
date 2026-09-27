@@ -292,6 +292,27 @@ describe("카드의 겉 (#2944 시안 ①)", () => {
     expect(q(host, "ai-connect-card-team-check")?.textContent).toContain("연결 확인");
   });
 
+  it("열리면 제목에 초점, 다시 마운트돼 claimFocus가 거짓이면 초점을 빼앗지 않는다", async () => {
+    const host = mountCard();
+    await until(host, "ai-connect-card-team");
+    expect(document.activeElement?.textContent).toBe("AI 연결");
+    const other = document.createElement("textarea");
+    document.body.append(other);
+    other.focus();
+    const again = mountEl(
+      createElement(AiConnectCard, {
+        line: null,
+        focusNonce: 1,
+        offline: false,
+        onClose: () => undefined,
+        claimFocus: () => false,
+      })
+    );
+    await until(again, "ai-connect-card-team");
+    expect(document.activeElement).toBe(other);
+    other.remove();
+  });
+
   it("줄 인자(/연결 codex)는 그 줄만 펼친다", async () => {
     const host = mountCard({ line: "codex" });
     await until(host, "ai-connect-card-codex");
@@ -397,7 +418,7 @@ describe("흐름 ① 구독 로그인 (#2816 모달)", () => {
 describe("흐름 ② 팀 키 (운영자) · 비밀값", () => {
   const SECRET = ["sk", "-test-", "Q7mZ2xL9vB4nR8tK1wE6yU3i"].join("");
 
-  it("키 넣기 → 확인하고 저장: 기존 PUT → test, 줄이 제자리에서 바뀌고 키는 어디에도 남지 않는다", async () => {
+  it("키 넣기 → 저장하고 확인: 기존 PUT → test, 줄이 제자리에서 바뀌고 키는 어디에도 남지 않는다", async () => {
     vi.mocked(fetchProviderLink).mockResolvedValue(EMPTY_LINK);
     const logs = [vi.spyOn(console, "log"), vi.spyOn(console, "info"), vi.spyOn(console, "warn"), vi.spyOn(console, "error")];
     const host = mountCard();
@@ -434,6 +455,8 @@ describe("흐름 ② 팀 키 (운영자) · 비밀값", () => {
     expect(q(host, "ai-connect-card-key-form")).toBeNull();
     expect(q(host, "ai-connect-card-team")?.textContent).toContain("••••i0k2");
     expect(q(host, "ai-connect-card-team-result")?.getAttribute("data-tone")).toBe("ok");
+    // 시안 `.flash`: 방금 성공한 그 줄만 옅은 ok 바탕.
+    expect(q(host, "ai-connect-card-team")?.hasAttribute("data-flash")).toBe(true);
 
     // 비밀값이 남지 않는다: 뮤테이션 캐시·쿼리 캐시·브라우저 저장소·DOM·로그.
     const mutationState = JSON.stringify(client.getMutationCache().getAll().map((m) => m.state));
@@ -475,6 +498,31 @@ describe("흐름 ② 팀 키 (운영자) · 비밀값", () => {
   });
 });
 
+describe("이미 쓰는 키를 바꿀 때 (design-review #2944 H1)", () => {
+  it("버튼 이름이 순서를 말하고, 대체 전에 한 번 묻는다. 묻는 동안 저장은 없다", async () => {
+    vi.mocked(testProviderLink).mockResolvedValue(probe(false, "provider_auth_failed"));
+    const host = mountCard();
+    const check = await until(host, "ai-connect-card-team-check");
+    act(() => check.click());
+    const swap = await until(host, "ai-connect-card-team-key");
+    act(() => swap.click());
+    const input = (await until(host, "ai-connect-card-key-input")) as HTMLInputElement;
+    const save = q(host, "ai-connect-card-key-save") as HTMLButtonElement;
+    expect(save.textContent).toBe("저장하고 확인");
+    input.value = "replacement-key-000000000000000000";
+    await act(async () => save.click());
+    expect(putProviderLink).not.toHaveBeenCalled();
+    expect(q(host, "ai-connect-card-key-replace")?.textContent).toContain("••••a4f2");
+    expect(save.textContent).toBe("바꿔 저장하고 확인");
+    // 묻는 동안 키는 칸에만 있다.
+    expect(input.value).toBe("replacement-key-000000000000000000");
+    vi.mocked(putProviderLink).mockResolvedValue(KEY_LINK);
+    await act(async () => save.click());
+    expect(putProviderLink).toHaveBeenCalledTimes(1);
+    expect(input.value).toBe("");
+  });
+});
+
 describe("흐름 ③ 연결 확인 · ④ 실패 제자리", () => {
   it("확인 중… → 확인됨, 그 줄에서만", async () => {
     let resolveTest: (t: ProviderLinkTest) => void = () => undefined;
@@ -486,6 +534,8 @@ describe("흐름 ③ 연결 확인 · ④ 실패 제자리", () => {
     act(() => check.click());
     await waitFor(() => expect(pillOf(q(host, "ai-connect-card-team"))).toEqual({ tone: "run", text: "확인 중…" }));
     expect(check.getAttribute("aria-busy")).toBe("true");
+    expect(check.textContent).toBe("확인 중");
+    expect(check.className).toContain("opacity-50");
     await act(async () => resolveTest(probe(true)));
     expect(pillOf(q(host, "ai-connect-card-team"))).toEqual({ tone: "ok", text: "확인됨" });
   });
@@ -498,7 +548,7 @@ describe("흐름 ③ 연결 확인 · ④ 실패 제자리", () => {
     await waitFor(() => expect(pillOf(q(host, "ai-connect-card-team"))).toEqual({ tone: "bad", text: "확인 실패" }));
     const result = q(host, "ai-connect-card-team-result") as HTMLElement;
     expect(result.getAttribute("data-tone")).toBe("bad");
-    expect(result.textContent).toBe("provider가 저장된 키를 받아들이지 않았습니다.");
+    expect(result.textContent).toBe("provider가 키를 거절했어요.");
     expect(q(host, "ai-connect-card-team-key")?.textContent).toContain("키 바꾸기");
     expect(q(host, "ai-connect-card-team-check")).toBeNull();
     expect(q(host, "ai-connect-card")).not.toBeNull();
@@ -530,6 +580,8 @@ describe("네 상태 · 권한", () => {
     const host = mountCard({ line: "team" });
     const line = await until(host, "ai-connect-card-team-denied");
     expect(line.textContent).toBe("팀 키는 운영자만 바꾸고 확인할 수 있어요.");
+    // 권한 문장은 한 번만(카드 발).
+    expect(q(host, "ai-connect-card")?.textContent?.match(/운영자만/g)).toHaveLength(1);
     const section = q(host, "ai-connect-card-team-section") as HTMLElement;
     expect(section.querySelectorAll("input, button")).toHaveLength(0);
   });

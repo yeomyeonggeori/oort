@@ -329,7 +329,7 @@ describe("ChatShell 로컬 연결 카드 (#2944)", () => {
     act(() => void openLocalCardIn(CHANNEL, "ai.connect", { line: "claude" }));
     const cards = root.querySelectorAll("[data-testid='ai-connect-card']");
     expect(cards).toHaveLength(1);
-    expect(cards[0]?.getAttribute("data-nonce")).toBe("2");
+    expect(Number(cards[0]?.getAttribute("data-nonce"))).toBeGreaterThan(1);
     expect(cards[0]?.getAttribute("data-line")).toBe("claude");
   });
 

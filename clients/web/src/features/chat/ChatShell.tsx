@@ -910,19 +910,28 @@ export function ChatShell() {
     line: AiConnectLine | null;
     nonce: number;
   } | null>(null);
+  // nonce는 이 화면에서 줄곧 는다(닫고 다시 열어도 새 값): 초점 판정의 열쇠다.
+  const cardNonce = useRef(0);
   useEffect(() => {
     setLocalCard(null);
     if (channelId === null || stressCount > 0) return;
     return registerLocalCardHost(channelId, (card, args) => {
       if (card !== "ai.connect") return false;
-      setLocalCard((prev) => ({
+      setLocalCard(() => ({
         channelId,
         line: args.line ?? null,
-        nonce: (prev?.nonce ?? 0) + 1,
+        nonce: ++cardNonce.current,
       }));
       return true;
     });
   }, [channelId, stressCount]);
+  // 카드가 다시 마운트돼도(타임라인 epoch) 같은 nonce로 초점을 두 번 옮기지 않는다.
+  const focusedCardNonce = useRef(0);
+  const claimCardFocus = useCallback((nonce: number) => {
+    if (focusedCardNonce.current === nonce) return false;
+    focusedCardNonce.current = nonce;
+    return true;
+  }, []);
   const closeLocalCard = useCallback(() => {
     setLocalCard(null);
     focusComposer();
@@ -1290,6 +1299,7 @@ export function ChatShell() {
                     focusNonce={openCard.nonce}
                     offline={offline}
                     onClose={closeLocalCard}
+                    claimFocus={claimCardFocus}
                   />
                 ) : null
               }
