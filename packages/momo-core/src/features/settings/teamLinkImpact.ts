@@ -55,7 +55,7 @@ export function teamLinkAffectedAgents(input: {
   const names = new Map(channels.map((channel) => [lower(channel.id), channel.name] as const));
   return roster
     .filter((member) => member.kind === "agent" && member.status === "active" && !hosted.has(lower(member.id)))
-    .sort((a, b) => a.displayName.localeCompare(b.displayName, "ko"))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName, "ko", { numeric: true }))
     .map((member) => ({
       id: member.id,
       name: member.displayName,

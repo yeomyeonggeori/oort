@@ -121,7 +121,7 @@ function UnlinkBody({
 
   return (
     <>
-      <DialogTitle className="shrink-0 break-words text-title font-bold [overflow-wrap:anywhere]">{teamUnlinkTitle(rowName)}</DialogTitle>
+      <DialogTitle className="shrink-0 text-title font-bold [overflow-wrap:anywhere]">{teamUnlinkTitle(rowName)}</DialogTitle>
       <DialogDescription className="shrink-0 break-keep text-body text-ink-muted" data-testid="ai-link-unlink-body">
         {loading ? "이 키를 쓰는 팀 에이전트를 찾고 있어요." : teamUnlinkBody(affected)}
       </DialogDescription>
@@ -156,6 +156,11 @@ function UnlinkBody({
               </li>
             ))
           )}
+        </ul>
+      )}
+      {/* 고정 두 줄은 스크롤 목록 밖: 에이전트가 많아도 늘 보인다. */}
+      {!loading && (
+        <ul className="flex min-w-0 shrink-0 list-disc flex-col gap-1 pl-4 text-body text-ink">
           <li className="break-keep">{TEAM_UNLINK_FIXED_COPY}</li>
           <li className="break-keep" data-testid="ai-link-unlink-no-switch">
             {TEAM_UNLINK_NO_SILENT_SWITCH}

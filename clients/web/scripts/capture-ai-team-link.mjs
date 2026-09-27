@@ -358,7 +358,7 @@ const SCENES = [
     // 에이전트가 많으면 목록만 스크롤하고 버튼 줄은 창 안에 남는다(design-review #2880 H2).
     name: "unlink-many",
     setup: () => {
-      sceneState.extraAgents = Array.from({ length: 14 }, (_, i) =>
+      sceneState.extraAgents = Array.from({ length: 30 }, (_, i) =>
         member({
           id: `00000000-0000-7000-8000-0000000003${String(i).padStart(2, "0")}`,
           kind: "agent",
