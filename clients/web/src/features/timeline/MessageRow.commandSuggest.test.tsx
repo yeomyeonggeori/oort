@@ -26,7 +26,8 @@ import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { OpenMemberProfileContext } from "@/features/directory/memberProfileContext";
 import { detectLocalHarnesses } from "@/lib/tauri";
 import { MemoryRouter } from "react-router-dom";
-import { AiConnectCard } from "@/features/chat/AiConnectCard";
+import { AiConnectCard, AiConnectSuggestion } from "@/features/chat/AiConnectCard";
+import { CommandSuggestSlot } from "./commandSuggestSlot";
 import { readDraft, writeDraft } from "@/features/chat/draftStore";
 import { MessageRow, type MessageRowActions } from "./MessageRow";
 
@@ -267,14 +268,19 @@ function mount(node: ReactElement, me: string): HTMLElement {
   return host;
 }
 
+function rowElement(message: Message, me: string | null) {
+  return createElement(MessageRow, {
+    message,
+    startsGroup: true,
+    directory,
+    ...(me !== null ? { actions: actionsFor(me) } : {}),
+  });
+}
+
+/** 채널 표면(ChatShell)처럼 카드 자리를 건넨 행. */
 function mountRow(message: Message, me: string | null): HTMLElement {
   return mount(
-    createElement(MessageRow, {
-      message,
-      startsGroup: true,
-      directory,
-      ...(me !== null ? { actions: actionsFor(me) } : {}),
-    }),
+    createElement(CommandSuggestSlot.Provider, { value: AiConnectSuggestion }, rowElement(message, me)),
     me ?? SKY
   );
 }
@@ -442,5 +448,14 @@ describe("비운영자 대상 — 「운영자에게 부탁하기」(G4 · 시�
     const host = mountRow(suggestion(TEAM), REQUESTER);
     await until(host, "ai-connect-card-team");
     expect(q(host, "ai-connect-card-ask-operator")).toBeNull();
+  });
+});
+
+describe("카드 자리가 없는 표면", () => {
+  it("채널 표면 밖(자리 없음)에서는 본문만 그린다", async () => {
+    const host = mount(rowElement(suggestion(G3), REQUESTER), REQUESTER);
+    await act(async () => undefined);
+    expect(q(host, "ai-suggest")).toBeNull();
+    expect(host.textContent).toContain(BODY);
   });
 });
