@@ -400,6 +400,10 @@ struct Session {
     flow: Arc<Flow>,
     /// Session leader = session id (portable-pty calls setsid).
     pid: i32,
+    /// The checked folder the session started in (`SpawnPlan::cwd`). The
+    /// local git reads (ADR-0190 D3-c, #2855) run here and nowhere else: the
+    /// webview names a pane, never a folder.
+    folder: PathBuf,
 }
 
 #[derive(Default)]
@@ -481,6 +485,7 @@ impl PtyManager {
                 queued,
                 flow: flow.clone(),
                 pid,
+                folder: plan.cwd.clone(),
             },
         );
 
@@ -534,6 +539,16 @@ impl PtyManager {
             queued.fetch_sub(bytes.len(), Ordering::AcqRel);
             unknown(id)
         })
+    }
+
+    /// The folder session `id` started in, if it is still open. Read-only:
+    /// the only thing `git_read.rs` may ask of a session (#2855).
+    pub fn folder_of(&self, id: u32) -> Option<PathBuf> {
+        self.sessions
+            .lock()
+            .ok()?
+            .get(&id)
+            .map(|s| s.folder.clone())
     }
 
     /// The webview drew `bytes` more of this session's output.
@@ -1252,6 +1267,34 @@ mod tests {
             "group {pid} still has {:?}",
             String::from_utf8_lossy(&pgrp_left.stdout)
         );
+    }
+
+    /// The git reads (#2855) run in the folder a session started in; the
+    /// table answers for open sessions only, and forgets a session that ended.
+    #[test]
+    fn a_session_remembers_its_folder_until_it_ends() {
+        let plan = SpawnPlan {
+            program: "/bin/sh".into(),
+            args: vec!["-c", "echo ready; read _"],
+            cwd: home(),
+            size: (80, 24),
+            path: None,
+        };
+        let manager = PtyManager::default();
+        let sink = Arc::new(Recorder::default());
+        let id = manager
+            .spawn(
+                &plan,
+                build_command(&plan, base(&[("PATH", "/usr/bin:/bin")])),
+                sink.clone(),
+            )
+            .unwrap();
+        sink.wait_for("ready", SLOW);
+        assert_eq!(manager.folder_of(id), Some(home()));
+        assert_eq!(manager.folder_of(id + 1000), None);
+        manager.kill(id).unwrap();
+        sink.wait_exit(SLOW);
+        assert_eq!(manager.folder_of(id), None);
     }
 
     #[test]
