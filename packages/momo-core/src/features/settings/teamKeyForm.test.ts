@@ -9,7 +9,9 @@ import {
   teamCheckResult,
   teamKeyPresets,
   teamProbeDetail,
+  teamProbeDetailParts,
   teamProbeDetailText,
+  literalSegments,
 } from "./teamKeyForm";
 
 const base: ProviderLink = {
@@ -157,6 +159,7 @@ describe("teamCheckResult · teamProbeDetail (#2880)", () => {
       headline: "확인 전",
       text: "이 서버는 아직 키를 직접 확인하지 않아요. 키는 저장됐어요.",
       detail: null,
+      detailParts: [],
     });
     expect(result.text).not.toContain("거절");
   });
@@ -185,6 +188,7 @@ describe("teamCheckResult · teamProbeDetail (#2880)", () => {
       headline: "키 확인됨",
       text: "응답을 확인했어요 · 방금",
       detail: "쓸 수 있는 모델 6개 · 요청 한도 50 중 49 남음",
+      detailParts: ["쓸 수 있는 모델 6개", "요청 한도 50 중 49 남음"],
     });
     expect(teamProbeDetail(probe({ entries: [{ position: 0, probe: { credit: { limitRemaining: 12.5 } } }] }))).toEqual({
       creditRemaining: 12.5,
@@ -260,6 +264,27 @@ describe("teamCheckResult · teamProbeDetail (#2880)", () => {
       headline: "확인 실패",
       text: "요청 한도에 걸렸어요. 20초 뒤에 다시 확인해 주세요.",
       detail: null,
+      detailParts: [],
     });
+  });
+});
+
+describe("표면이 줄을 가르는 단위 (design-review #2975 M1·N2)", () => {
+  it("환경 변수 이름은 통째 한 조각이다", () => {
+    const segs = literalSegments(teamCheckReason("provider_egress_denied"));
+    expect(segs.filter((seg) => seg.literal).map((seg) => seg.text)).toEqual([
+      "AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1",
+      "AGENT_PROVIDER_LOCAL_HOSTS",
+    ]);
+    expect(segs.map((seg) => seg.text).join("")).toBe(teamCheckReason("provider_egress_denied"));
+    expect(literalSegments("주소에 닿지 못했어요.")).toEqual([{ text: "주소에 닿지 못했어요.", literal: false }]);
+  });
+
+  it("숫자 줄은 칸 단위로 나온다", () => {
+    expect(teamProbeDetailParts({ modelCount: 6, requestsLimit: 50, requestsRemaining: 49 })).toEqual([
+      "쓸 수 있는 모델 6개",
+      "요청 한도 50 중 49 남음",
+    ]);
+    expect(teamProbeDetailParts(null)).toEqual([]);
   });
 });

@@ -232,7 +232,13 @@ function credits(value: number): string {
 
 /** 「쓸 수 있는 모델 6개 · 요청 한도 50 중 49 남음 · 남은 크레딧 12.5」. 없는 칸은 빠진다. */
 export function teamProbeDetailText(detail: TeamProbeDetail | null): string | null {
-  if (!detail) return null;
+  const parts = teamProbeDetailParts(detail);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+/** 숫자 줄의 칸들. 표면은 칸 안에서 줄을 바꾸지 않는다(「198 남음 ·」이 매달리지 않게). */
+export function teamProbeDetailParts(detail: TeamProbeDetail | null): string[] {
+  if (!detail) return [];
   const parts: string[] = [];
   if (detail.modelCount !== undefined) parts.push(`쓸 수 있는 모델 ${count(detail.modelCount)}개`);
   if (detail.requestsLimit !== undefined) {
@@ -259,7 +265,19 @@ export function teamProbeDetailText(detail: TeamProbeDetail | null): string | nu
     parts.push("크레딧 한도 없음");
   }
   if (detail.creditUsage !== undefined) parts.push(`쓴 크레딧 ${credits(detail.creditUsage)}`);
-  return parts.length > 0 ? parts.join(" · ") : null;
+  return parts;
+}
+
+/**
+ * 문장을 글자 조각과 **그대로 쳐야 하는 이름**(서버 환경 변수)으로 나눈다. 표면은
+ * 이름 조각을 고정폭·줄바꿈 없이 그린다: `…LOO|PBACK`처럼 이름 가운데서 줄이
+ * 갈리면 두 낱말로 읽힌다(design-review #2975 M1).
+ */
+export function literalSegments(text: string): { text: string; literal: boolean }[] {
+  return text
+    .split(/(AGENT_[A-Z_]+(?:=\d+)?)/)
+    .filter((part) => part !== "")
+    .map((part) => ({ text: part, literal: /^AGENT_[A-Z_]+(?:=\d+)?$/.test(part) }));
 }
 
 /** 「15:42」. 결과 줄의 시각은 이 화면에서 본 것이라 날짜를 싣지 않는다. */
@@ -284,6 +302,8 @@ export interface TeamCheckResult {
    * 하나도 없으면 null이다. 두 표면은 null이면 그 줄을 그리지 않는다.
    */
   readonly detail: string | null;
+  /** `detail`의 칸들(`detail`은 이것을 「 · 」로 이은 것). 없으면 빈 배열. */
+  readonly detailParts: readonly string[];
 }
 
 /**
@@ -307,6 +327,7 @@ export function teamCheckResult(input: {
       headline: "키 확인됨",
       text: `응답을 확인했어요 · ${when}`,
       detail: teamProbeDetailText(numbers),
+      detailParts: teamProbeDetailParts(numbers),
     };
   }
   const copy = teamCheckReasonCopy(probe.reason, { retryAfterSeconds: numbers?.retryAfterSeconds });
@@ -317,5 +338,6 @@ export function teamCheckResult(input: {
     headline: notRun ? "확인 전" : "확인 실패",
     text: `${copy.fact}${saved}${copy.action ? ` ${copy.action}` : ""}`,
     detail: null,
+    detailParts: [],
   };
 }

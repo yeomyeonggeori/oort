@@ -272,7 +272,22 @@ const PROBE_2960 = {
   ],
 };
 
-const outDir = resolve(webRoot, "captures/2880");
+/** #2960 모양의 확인 한 벌(entries[0].probe). #2972가 track/uxui에 오기 전이라 OpenAPI 모양 대역. */
+function probeWith(ok, reason, detail) {
+  return {
+    ...probe(ok, reason),
+    cascadeOk: ok,
+    entries: [
+      {
+        position: 0, source: "provider_link", mode: "external-hermes", endpointLabel: "Anthropic", enabled: true,
+        ok, reason, disposition: ok ? "ok" : "propagate",
+        probe: { method: "models", latencyMs: 180, probedAtMs: Date.now(), cached: false, ...detail },
+      },
+    ],
+  };
+}
+
+const outDir = resolve(webRoot, process.env.CAPTURE_OUT || "captures/2880");
 
 async function scene(browser, { width, scheme, name, team, run, setup }) {
   sceneState.extraAgents = [];
@@ -431,6 +446,45 @@ const SCENES = [
       await openAside(page);
       await page.getByTestId("ai-link-check").click();
       await page.getByTestId("ai-link-probe").waitFor();
+    },
+  },
+  // #2975: #2960 사유와 provider 숫자 줄. ONLY=check-egress,check-invalid,checked-openrouter,checked-cached
+  ...[
+    ["check-egress", "provider_egress_denied", { outcome: "unreachable" }],
+    ["check-invalid", "provider_invalid_response", { outcome: "unknown", httpStatus: 200 }],
+  ].map(([name, reason, detail]) => ({
+    name,
+    team: () => teamRoute({ test: probeWith(false, reason, detail) }),
+    run: async (page) => {
+      await openAside(page);
+      await page.getByTestId("ai-link-check").click();
+      await page.getByTestId("ai-link-probe").waitFor();
+      if ((await page.getByTestId("ai-link-probe-detail").count()) > 0) throw new Error(`${name}: 숫자 없는 실패에 숫자 줄`);
+    },
+  })),
+  {
+    name: "checked-openrouter",
+    team: () =>
+      teamRoute({
+        test: probeWith(true, undefined, {
+          outcome: "ok", method: "key", httpStatus: 200, modelCount: 312,
+          rateLimit: { source: "x-ratelimit", requestsLimit: 200, requestsRemaining: 198 },
+          credit: { limit: 20, limitRemaining: 12.5, usage: 7.5 },
+        }),
+      }),
+    run: async (page) => {
+      await openAside(page);
+      await page.getByTestId("ai-link-check").click();
+      await page.getByTestId("ai-link-probe-detail").waitFor();
+    },
+  },
+  {
+    name: "checked-cached",
+    team: () => teamRoute({ test: probeWith(true, undefined, { outcome: "ok", modelCount: 6, cached: true }) }),
+    run: async (page) => {
+      await openAside(page);
+      await page.getByTestId("ai-link-check").click();
+      await page.getByTestId("ai-link-probe-detail").waitFor();
     },
   },
   {
