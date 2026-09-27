@@ -77,6 +77,8 @@ export interface ProviderLink {
   bearerLast4?: string;
   availability: string;
   keyConfigured: boolean;
+  /** 저장된 키 연결의 와이어(서버 GET이 준다, #2872). OAuth·환경값이면 없다. */
+  format?: ProviderFormat;
   updatedAtMs?: number;
   updatedBy?: string;
   diagnostics: string[];
@@ -175,7 +177,15 @@ export interface ProviderLinkInput {
   bearer?: string;
   mode?: string;
   oauth?: ProviderOAuthInput;
+  /**
+   * #2872: `openai`(없으면 이것) 또는 `anthropic`. `bearer`와만 뜻이 있다:
+   * Anthropic 콘솔 키는 Messages 와이어로 봉인된다.
+   */
+  format?: ProviderFormat;
 }
+
+/** #2872 `ProviderFormat`: 키 기반 연결이 말하는 와이어. */
+export type ProviderFormat = "openai" | "anthropic";
 
 export function fetchProviderLink(): Promise<ProviderLink> {
   return settingsRequest<ProviderLink>("/v1/provider/link");

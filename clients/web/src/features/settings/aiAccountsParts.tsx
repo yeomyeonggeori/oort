@@ -1,5 +1,6 @@
 import { forwardRef, type ReactNode } from "react";
-import { Lock, MoreHorizontal, WifiOff, X } from "lucide-react";
+import { Loader2, Lock, MoreHorizontal, WifiOff, X } from "lucide-react";
+import type { AiPillTone } from "@momo/core/features/settings/aiLinkPill";
 import { cn } from "@/design/lib/cn";
 
 // =============================================================================
@@ -10,47 +11,66 @@ import { cn } from "@/design/lib/cn";
 // 격자는 tokens.css `ai-acct-row`가 진다(그릇 폭으로 접힌다).
 // =============================================================================
 
-/** 시안 `.pill`. 색만으로 전하지 않는다: 알약 안에 늘 낱말이 있다. */
-export type AiPillTone = "ok" | "warn" | "bad" | "mute";
+/**
+ * 시안 `.pill`. 색만으로 전하지 않는다: 알약 안에 늘 낱말이 있다. 색 갈래와
+ * 낱말의 판정은 코어(`aiLinkPill.ts`, #2941)가 정한다.
+ */
+export type { AiPillTone } from "@momo/core/features/settings/aiLinkPill";
 
 const PILL_TONE: Record<AiPillTone, string> = {
   ok: "bg-ok-soft text-ok",
   warn: "bg-warn-soft text-warn",
   bad: "bg-danger-soft text-danger",
   mute: "bg-muted-soft text-ink-muted",
+  run: "bg-agent-soft text-agent",
 };
 
 export function AiPill({ tone, children }: { tone: AiPillTone; children: ReactNode }) {
   return (
     <span
       className={cn(
-        "inline-flex w-max items-center whitespace-nowrap rounded-full px-2 py-1 text-timestamp font-semibold leading-none",
+        "inline-flex w-max items-center gap-1 whitespace-nowrap rounded-full px-2 py-1 text-timestamp font-semibold leading-none",
         PILL_TONE[tone]
       )}
       data-tone={tone}
     >
+      {tone === "run" && <Loader2 aria-hidden="true" className="spinner-busy size-3 shrink-0" />}
       {children}
     </span>
   );
 }
 
 /** 시안 `.src`: 출처 알약(구독 / API 키 / 내부용). */
+/** 출처 배지(「API 키」·「구독」). 좁은 줄에서 글자 단위로 세로로 깨지지 않게 줄지 않고 한 줄로 선다(design-review #2961 H2). */
 export function AiSource({ children }: { children: ReactNode }) {
   return (
-    <span className="me-1 inline-flex rounded-sm bg-muted-soft px-1 py-px text-timestamp font-semibold text-ink-muted">
+    <span className="me-1 inline-flex shrink-0 whitespace-nowrap rounded-sm bg-muted-soft px-1 py-px text-timestamp font-semibold text-ink-muted">
       {children}
     </span>
   );
 }
 
 /** 시안 `.lg`: 로고 칸. 글자 한두 개를 싣는다(회사 로고 자산은 쓰지 않는다). */
-export function AiLogo({ mark, large = false }: { mark: string; large?: boolean }) {
+export function AiLogo({
+  mark,
+  large = false,
+  small = false,
+}: {
+  mark: string;
+  large?: boolean;
+  /** 채팅 연결 카드의 줄(시안 `.lg` 30, #2944). */
+  small?: boolean;
+}) {
   return (
     <span
       aria-hidden="true"
       className={cn(
         "grid shrink-0 place-items-center border border-line font-bold text-ink",
-        large ? "ai-logo-lg rounded-lg bg-surface text-body" : "ai-logo rounded-md bg-surface-muted text-meta"
+        large
+          ? "ai-logo-lg rounded-lg bg-surface text-body"
+          : small
+            ? "ai-logo-sm rounded-md bg-surface-muted text-meta"
+            : "ai-logo rounded-md bg-surface-muted text-meta"
       )}
     >
       {mark}
