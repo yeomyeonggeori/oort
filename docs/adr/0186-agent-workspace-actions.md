@@ -65,11 +65,12 @@ v1의 모든 워크스페이스 행동은 `approval`이다. 「관리자 위임�
 ### D5. 카드 카탈로그 — 선언형·허용목록·oort 컴포넌트가 그린다
 - 에이전트 출력은 **서버가 붙인 props**로만 카드가 된다. 에이전트가 HTML·마크업·색을 내보내는 경로는 없다. 모르는 kind는 본문 폴백(네 상태 규칙 유지).
 - v1 kinds: `approval`(기존 + 부록 A `action` 블록) · `action_result`(부록 B) · `link_once`(D4, 메모리 전용). 후속: `settings_preview`(D6, AX-5) · `form_request`(부족한 인자 1~3개 요청, v2) · `plan`/`task`(관전 도크와 결합, v2).
+- **증보 2026-09-27(GC-5)**: `command_suggest`의 `command_id:"ai.connect"`는 연결 카드로 그린다. 보는 사람별 렌더 규칙은 파일 끝 증보 G4.
 - 확인은 ADR-0182 결정 트리: 결과를 다시 찾을 일이 있으면 ③ 지속 카드(action_result), 컨트롤이 보이면 ①, 명령 표면이면 ②. 토스트 0.
 - 디자인 게이트 불변: 카드 컴포넌트는 토큰만 소비하고 `design_preflight_web` · design-review B0·H0를 지난다.
 
 ### D6. 클라이언트 명령의 에이전트 경유(테마 등)
-외양은 이 기기 localStorage다(ADR-0174 D3). 서버는 못 바꾸므로 에이전트는 `oort_message_post`에 **명령 참조 props**(`momo.command_suggest.v1 {commandId, args}`, 부록 D)를 실어 보내고, 클라이언트가 그 메시지를 `settings_preview` 카드(현재 값 → 제안 값 미리보기 + 「적용」)로 그린다. 「적용」은 레지스트리 `run`을 호출한다. 서버 실행·승인 행·감사 행이 없다(risk none). 다른 기기에서는 카드가 「이 기기에서 적용」으로 보인다. 서버 동기화 외양은 ADR-0174가 이미 후속으로 미뤘다.
+외양은 이 기기 localStorage다(ADR-0174 D3). 서버는 못 바꾸므로 에이전트는 **`oort_card_suggest`로**(증보 2026-09-27 G1이 경로를 고친다. 원문은 `oort_message_post`였으나 그 도구는 props `{}`만 쓴다) **명령 참조 props**(`momo.command_suggest.v1 {commandId, args}`, 부록 D)를 실어 보내고, 클라이언트가 그 메시지를 `settings_preview` 카드(현재 값 → 제안 값 미리보기 + 「적용」)로 그린다. 「적용」은 레지스트리 `run`을 호출한다. 서버 실행·승인 행·감사 행이 없다(risk none). 다른 기기에서는 카드가 「이 기기에서 적용」으로 보인다. 서버 동기화 외양은 ADR-0174가 이미 후속으로 미뤘다.
 
 ### D7. 스키마·RLS·쓰기 경로
 - **새 테이블·컬럼·인덱스·outbox 생산자 0.** `approval.action_type`(text)·`payload`(jsonb)·`agent_run.output`(jsonb)·자격 스코프(text[])로 충분하다. hosted 스코프 어휘를 열거한 CHECK 3개(069 `hosted_agent_connection_scopes_ck` · 074 `token_hosted_binding_ck` · 074 `hosted_oauth_request_scope_ck`)만 087에서 재작성(정오표 2026-09-22, AX-3a 실측 — 원문 「DDL 무접촉」은 CHECK 열거를 보지 못한 오기). `schema_v0.sql` 무접촉.
@@ -178,6 +179,8 @@ v1의 모든 워크스페이스 행동은 `approval`이다. 「관리자 위임�
 ```
 클라이언트는 `command_id`가 레지스트리에 없거나 kind가 `client`가 아니면 본문 폴백한다.
 
+**증보 2026-09-27(GC-5)**: 이 모양은 증보 G3로 대체된다. `for_member_id`가 더해지고, `label`은 모든 `command_id`에서 **서버가 파생**한다(에이전트 문자열이 아니다). `command_id`는 서버 허용목록(G2) 안이어야 한다. 위 `appearance.accent` 예는 AX-5가 그 명령을 허용목록에 올린 뒤에만 유효하다.
+
 ### E. `GET /v1/workspaces/{ws}/actions`
 ```json
 {"actions": [{"id": "invite.create", "title": "팀원 초대 링크 만들기", "summary": "…", "risk": "approval", "requiredRole": "admin", "argsSchema": {"type": "object", "properties": {"role": {"enum": ["member", "admin"]}, "maxUses": {"type": "integer", "minimum": 1, "maximum": 100}, "expiresInDays": {"type": "integer", "minimum": 1, "maximum": 30}}}, "executable": true, "unavailableReason": null}]}
@@ -188,3 +191,98 @@ v1의 모든 워크스페이스 행동은 `approval`이다. 「관리자 위임�
 - 정오표 D7(087) — planner 수용, 성재 통보.
 - 2026-09-22 성재 Accept: 확정점 ①run park+`run_complete` 409 ②1회 시크릿=결정 응답에만 ③테마 「적용」 버튼 ④AX-2 지금·AX-3a Accept 뒤 — 전부 승인. 같은 결재에서 W-A 발사 go(#2066 ∥ AX-2 #2507). 워커 레인은 이 배치에 한해 **Opus 5 서브에이전트**(성재 지시, PIPELINE 기본값 Grok 4.6의 예외).
 - 2026-09-22 AX-3b(#2509) 랜딩분 기록: D2 결정 분기·D4 `secretOnce`·부록 B/C 구현. 부록 B `next` 정오표(§8 B)와 403 봉투 정오표(같은 절) 반영. 부록 C `secretOnce.value`의 공개 오리진은 `MOMO_PUBLIC_BASE_URL`(설정 시) → 요청 `Host`+`X-Forwarded-Proto`(ADR-0167 파생) 순서로 결정한다 — 브리프가 가리킨 「초대 redeem 라우트의 공개 사이트 주소 정본」은 실재하지 않았다(#1926 `OORT_SITE_ADDRESS`는 Caddy 템플릿 env이고 Rust는 읽지 않는다).
+
+## 증보 2026-09-27 — 채팅 안 연결 카드: `oort_card_suggest`·`card_suggest`·허용 command_id·`for_member_id`·보는 사람별 렌더 (GC-5, #2946)
+
+- Status: **Accepted** (2026-09-27 성재 결재)
+- 결재 인용: #2939 설계 메모 §7 Q1~Q5, 성재 2026-09-27 「전부 권장대로」. 이 증보가 직접 기대는 것은 **Q3**(2단계 카드는 새 kind가 아니라 D6 `command_suggest` 재사용, `command_id:"ai.connect"`, props는 의도만, AX-5와 같은 서버 경로)와 **Q4**(제안 대상이 아닌 사람에게는 한 줄, 채널·DM·스레드 모두 허용, 운영자에게는 팀 연결 줄). 시안 https://claude.ai/artifact/UbuDdAWMtJMdxGZojCxwrz
+- 기안: Opus 5.5 worker(#2946)
+- 근거 자료: 설계 메모 `/Users/kwakseongjae/projects/momo/claudedocs/chat-genui-connect/brief.md` §1 F4·F9·F14, §4, §5, §9(gitignore, 로컬). ADR-0162(Agent Port tool→scope 닫힌 표), ADR-0193 D4(구독 에이전트 소유자 전용).
+- 범위: 2단계(에이전트가 연결 카드를 **제안**) 서버·메시지 계약만. 1단계(슬래시·⌘K·「나에게만 보여요」 로컬 카드, GC-0~4)는 서버 계약 변경이 없어 이 ADR의 D1·D3 안이다.
+
+### 무엇이 비어 있었나
+- D6은 「에이전트가 `oort_message_post`에 명령 참조 props를 실어 보낸다」고 적었다. 코드의 `oort_message_post`는 메시지를 `props: {}`로만 쓴다(`routes/agent_port_tools.rs` `message_post`). 에이전트가 props 있는 메시지를 만드는 경로는 `oort_action_propose`(승인 카드) 하나이고, 그 props도 서버가 만든다. 그래서 D6·부록 D는 **문서 계약만 있고 서버 경로가 없다**(레지스트리 주석 한 곳 말고는 `command_suggest` 참조 0).
+- 이 증보는 D6 결정(risk `none`, 사람이 자기 기기에서 적용, 승인 행·감사 행 없음)을 바꾸지 않는다. 그 결정의 **경로·필드·검증·렌더**를 채운다.
+
+### G1. 제안 도구 — hosted `oort_card_suggest`, worker `card_suggest`
+- **hosted(Agent Port)**: 새 도구 **`oort_card_suggest { handle, clientMsgId, commandId, args, body, rootId? }`**.
+  - `handle` = `oort_jobs_claim`의 lease handle. `bound_handle` 검사는 `oort_action_propose`와 같다(워크스페이스·에이전트·연결·승인 채널). 게시 채널은 **handle의 `channel_id`**다. 인자로 채널을 받지 않는다.
+  - `clientMsgId`는 필수. 같은 값의 재시도는 기존 send 멱등으로 같은 메시지를 돌려준다.
+  - `body`는 에이전트의 텍스트 답이다(1~8,000자, `oort_message_post`와 같은 상한). 카드만 있는 빈 메시지는 없다.
+  - `rootId`는 선택. 검증은 `message_post`의 `validate_thread_root_in_tx`와 같다. 채널·DM·스레드 어디서든 허용한다(Q4).
+  - **받지 않는 인자**: `label`·`forMemberId`·`channelId`·`props`. 이 키들이 오면 `InvalidArguments`(unknown key 거절)다. 에이전트가 제목 문구·대상·자리를 정할 길을 인자 표면에서 없앤다.
+- **server worker(agent-worker)**: worker `CATALOG`(`momo-agent/src/tools.rs`)에 **`card_suggest { commandId, args, body }`**를 더한다. 채널·스레드는 그 run의 트리거 메시지 자리, 멱등 키는 `(run_id, tool_call_id)`에서 결정적으로 만든다. 검증·props 조립·label 파생은 hosted와 **같은 함수**(`momo-agent`에 둔다)를 부른다.
+  - worker 도구의 승인 기본값(`requires_approval`, ADR-0114 D5)은 이 도구에 한해 **요구하지 않음**이다. 서버 상태를 바꾸지 않고(D3 risk `none`) 사람이 누를 때만 그 사람의 기기·권한으로 동작하므로, 제안 자체를 승인 카드로 막으면 「승인해야 카드를 볼 수 있는 카드」가 된다. 이 예외는 `card_suggest` 이름 하나에 묶고 grants로 넓히지 않는다.
+- 두 종류를 **같은 배치에서** 연다(GC-6). 한쪽만 열면 「어떤 에이전트는 카드를 주고 어떤 에이전트는 설정 경로만 말한다」가 된다.
+- **쓰기 경로**: 기존 `agent_tenant_tx`(`SET LOCAL app.workspace_id`) 안에서 `send_message_in_tx`(channel_seq 증가 + message INSERT + outbox INSERT 단일 tx). 승인 행 0, run park 0(run 상태를 바꾸지 않는다), props 패치 0, **새 outbox 생산자 0**, 새 테이블·컬럼 0. D7은 그대로다.
+- **에이전트는 실행하지 않는다.** 이 도구는 PTY·provider_link 라우트·설정 API 어느 것도 부르지 않는다. 로그인·키 저장·연결 확인은 사람이 카드를 누를 때 그 사람의 클라이언트가 기존 경로로 한다.
+
+### G2. 허용 command_id — 서버 허용목록 + 레지스트리 `agentSuggestable` 드리프트 가드
+- 서버 정본: `momo-agent`에 `SUGGESTABLE_COMMANDS: &[SuggestableCommand]`(id · args 스키마 · label 파생표)를 둔다. **v1 = `ai.connect` 하나.** 허용목록 밖 `commandId`는 `InvalidArguments`.
+- `ai.connect`의 `args`:
+  - `harness` ∈ `claude | codex | grok | team_key`, `scope` ∈ `mine | team`. 둘 다 선택이고, 둘 다 없으면 카드 전체(두 절)를 연다.
+  - 짝 규칙: `team_key` ⇔ `team`, `claude | codex | grok` ⇔ `mine`. 한쪽만 주면 서버가 짝을 채우고, 어긋나면 `InvalidArguments`.
+  - 그 밖의 키(예: `apiKey`, `token`, `email`)는 전부 `InvalidArguments`. 값에 자유 문자열이 들어갈 칸이 없다.
+- TS 쪽: `packages/momo-core/src/features/commands/registry.ts`의 `Command`에 선택 필드 **`agentSuggestable?: true`**를 새로 둔다(지금은 없다). `ai.connect`(kind `client`, GC-2)가 첫 항목이다. `agentSuggestable`은 kind `client` 명령에만 허용한다.
+- **드리프트 가드**(D1 「세 소비자」 방식의 확장): momo-mcp는 momo-agent에 의존할 수 없으므로(`actions.rs` 머리 주석) 도구 스키마의 enum은 두 번 쓰인다. 시험이 넷을 한 번에 잰다.
+  1. Rust `SUGGESTABLE_COMMANDS` id 집합 = `oort_card_suggest` 스키마 `commandId` enum = worker `card_suggest` 스키마 enum(Rust 시험, `the_action_ids_are_one_list_in_three_places`와 같은 자리·같은 모양).
+  2. = `docs/api/openapi.yaml`의 새 enum `SuggestableCommandId`(기존 OpenAPI rust 샘플러).
+  3. = TS 레지스트리의 `agentSuggestable: true` id 집합(코어 시험이 openapi.yaml의 enum을 읽어 비교). Rust는 TS를 읽지 못하므로 OpenAPI가 두 언어의 접점이다.
+- 앞으로 `appearance.*`(AX-5 #2511)는 같은 길을 쓴다. 명령을 늘리는 것은 네 곳을 함께 고치는 일이고, 한 곳만 고치면 시험이 실패한다.
+
+### G3. props — 의도만, 서버가 만든다
+부록 D를 이 모양으로 대체한다.
+```json
+{"momo.command_suggest": {"v": 1, "command_id": "ai.connect",
+  "args": {"harness": "claude", "scope": "mine"},
+  "for_member_id": "<요청자 member_id>",
+  "label": "Claude 구독 연결"}}
+```
+- 필드는 정확히 `v, command_id, args, for_member_id, label` 다섯이다. 서버가 조립하고 에이전트 입력을 그대로 복사하지 않는다(`args`도 G2 검증을 지난 정규화 값).
+- **`for_member_id`는 서버가 run에서 채운다.** run의 `trigger_message_id`(`agent_run`) → 그 메시지의 작성자. 작성자가 `member.kind='human'`이 아니거나(에이전트끼리의 위임 등) 트리거 메시지가 없으면 도구 실패 `no_human_requester`, 메시지 0건. 에이전트는 이 값을 인자로 줄 수 없다(G1). 구독 에이전트(`owner_only`, ADR-0193 D4)는 소유자의 호출만 전달받으므로 대상은 늘 소유자다. 이 규칙과 충돌이 없다.
+- **`label`은 서버가 `(command_id, args)`에서 파생**한다. 파생표는 `SUGGESTABLE_COMMANDS` 옆에 둔다. v1 `ai.connect`: `claude`→「Claude 구독 연결」, `codex`→「Codex 구독 연결」, `grok`→「Grok 연결」, `team_key`→「팀 API 키 연결」, 인자 없음→「AI 연결」. 상한 40자. 에이전트가 쓴 문자열이 카드 제목이 되는 길은 없다(피싱 문구 차단).
+- **props에 없는 것(불변식)**: 연결 상태·결과·키 꼬리·마지막 확인 시각·이메일·표시 이름·기기 이름·프로필 경로. 카드는 보는 사람의 클라이언트가 **자기 설정 스토어**(설정 › AI 연결과 같은 훅·같은 판정 함수)에서 살아 있는 상태를 읽어 그린다. 그래서 「제자리 갱신」은 props 패치가 아니라 로컬 상태 변화이고, 서버 쓰기는 제안 메시지 1건뿐이다.
+- 한 줄 문구의 이름(「곽성재에게 …」)은 클라이언트가 `for_member_id`를 멤버 목록에서 찾아 그린다. props에 이름을 싣지 않는다.
+
+### G4. 보는 사람별 렌더 — 클라이언트 분기, 경계는 서버·기기
+서버는 채널의 모든 멤버에게 **같은 props**를 보낸다. 분기는 클라이언트 렌더다.
+
+| 보는 사람 | 보이는 것 |
+|---|---|
+| `for_member_id` 본인(데스크탑) | 조작 가능한 연결 카드. 1단계 로컬 카드와 **같은 컴포넌트**이고 머리만 「{에이전트}가 제안했어요」. 내 계정 절 + 팀 연결 절(운영자면 조작, 아니면 읽기 전용 + 「운영자에게 부탁하기」) |
+| 본인(웹 탭) | 같은 카드. 내 계정 절은 「구독 계정은 데스크탑 앱에서만 연결하고 볼 수 있어요」 한 줄 |
+| 본인(폰) | 읽기 + (운영자면) 팀 연결 확인만. 구독 로그인·키 입력은 폰에서 받지 않는다(Q5) |
+| 운영자(본인 아님) | 한 줄 「{for_member}에게 AI 연결을 제안했어요」 + 「팀 연결 보기」(팀 키 줄만 펼침, 조작 가능). 남의 구독 상태는 보이지 않는다 |
+| 그 밖의 멤버 | 한 줄 「{for_member}에게 AI 연결을 제안했어요」. 입력·버튼 0 |
+
+- 운영자 = 서버의 `require_instance_operator`(owner/admin + `PLATFORM_ADMIN_EMAILS`)를 지나는 사람이다. 클라이언트는 이 판정을 기존 provider_link 응답(403이면 비운영자, 코어 `isOperatorDenied`)으로 안다. 카드 전용 판정을 새로 두지 않는다.
+- **경계는 숨긴 버튼이 아니다.** 구독 로그인은 본인 기기의 PTY(#2816 모달), 팀 키 쓰기·확인은 운영자 라우트(비운영자 403)다. 다른 사람이 DOM을 고쳐 버튼을 살려도 할 수 있는 일이 없고, props에 비밀이 없으니 누가 받아도 새는 것이 없다.
+- 채널·DM·스레드 모두 허용한다(Q4). 채널 전체가 한 줄을 본다는 것은 「누가 연결을 요청했다」를 드러내는데, 이는 사람이 채널에서 에이전트에게 말한 사실 이상이 아니다. 완전히 숨기면 채널의 대화 맥락이 끊겨서 택하지 않았다.
+- 알림: 제안 메시지는 그 에이전트의 일반 답과 **같은 알림 규칙**을 따른다. 카드 때문에 따로 푸시하지 않는다.
+- 제안은 승인 카드가 아니다(D3 `approval` 아님). 사람이 자기 화면에서 여는 도구 창이다. approval 행·결정 라우트·만료 스윕과 무관하다.
+- 모르는 `command_id`, kind가 `client`가 아닌 명령, `for_member_id`를 멤버 목록에서 찾지 못한 경우는 본문 폴백(부록 D 규칙 유지).
+
+### G5. 스코프·동의 화면 — `messages:write`로 충분, 문구 변경 없음
+- **판단: 새 스코프를 두지 않는다.** `oort_card_suggest`는 `messages:write`(+ handle을 얻기 위한 `agent:jobs:read`)를 요구한다. ADR-0162의 닫힌 tool→scope 표에 한 줄을 더하는 것이고, 규칙은 같다: `tools/list`는 연결·멤버십·스코프 교집합만 광고하고, `messages:write`가 토큰·승인 어느 쪽에든 없으면 list와 call 모두 fail-closed(unknown-tool).
+- 이유: 이 도구가 하는 일은 「승인한 채널에 이 에이전트 이름으로 메시지를 쓴다」이다. 카드는 서버 권한을 하나도 더 주지 않는다(G1 「에이전트는 실행하지 않는다」). 스코프를 새로 두면 hosted 스코프 어휘를 열거한 CHECK 3개(D7 정오표: 069·074·074)를 다시 쓰는 migration과 동의 화면 줄이 생기는데, 얻는 경계가 없다.
+- **동의 화면 문구는 바꾸지 않는다.** 코어 `hostedAgents/approval.ts`의 `messages:write` 줄 「메시지 쓰기 — 승인한 채널에 이 에이전트 이름으로 메시지를 씁니다. 사람이 쓴 것과 같은 자리에 남습니다.」가 제안 메시지를 그대로 설명한다. 카드를 따로 적으면 없는 권한이 있는 것처럼 읽힌다.
+- 선을 그어 둔다: 앞으로 **서버 상태를 바꾸거나 무언가를 실행하는** 카드가 생기면 그것은 이 도구가 아니라 D2(`workspace:propose` + 승인)로 간다. `oort_card_suggest`의 허용목록에 risk `approval` 명령을 올리는 것은 이 증보 위반이다.
+
+### G6. 수용 기준(GC-6·GC-7이 인용할 red proof)
+각 시험은 해당 분기를 지우면 실패해야 하고, 그 RED를 PR 본문에 남긴다.
+- `messages:write`가 토큰 또는 승인에 없으면 `oort_card_suggest`는 list·call 모두 unknown-tool.
+- 인자에 `forMemberId`·`label`·`channelId`·`props` 중 하나라도 있으면 `InvalidArguments`, 메시지 0건.
+- `args`에 허용 밖 키(`apiKey`)가 있으면 `InvalidArguments`. 짝이 어긋난 `{harness:"team_key", scope:"mine"}`도 거절.
+- 허용목록 밖 `commandId`(예: `invite.create`, `appearance.accent` — AX-5 전)는 `InvalidArguments`.
+- 성공 시 props의 `for_member_id` = 트리거 메시지 작성자. 트리거 작성자가 에이전트면 `no_human_requester`, 메시지 0건.
+- 성공 시 props 키 집합이 정확히 다섯이고 `label`이 파생표 값과 같다(에이전트가 `body`에 쓴 문장과 무관).
+- 게시는 channel_seq 증가 + message + outbox가 한 tx에 있고, 같은 `clientMsgId` 재시도는 메시지 1건, 다른 워크스페이스 GUC면 0행. `approval` 행 0, `agent_run.status` 불변.
+- 드리프트 가드(G2)의 네 집합 중 하나에만 id를 더하면 시험 실패.
+- 클라이언트: 비대상·비운영자의 카드 DOM에 input·button 0(렌더 시험). 대상과 설정 행에 같은 모의 입력을 주면 알약 문자열이 같다(1단계 GC-0 교차 시험 재사용).
+- 도구 구현이 PTY·provider_link·설정 라우트를 부르지 않는다(구조 시험).
+
+### G7. 귀결
+- (+) 「내 클로드 구독 연결해 줘」가 대화 안에서 닫힌다. 설정과 같은 부품·같은 판정이라 두 곳이 다른 상태를 말하지 않는다.
+- (+) 새 스코프·새 테이블·새 outbox 생산자 없이 기존 send tx 위에 얹힌다. AX-5 테마 카드도 이 길을 쓴다.
+- (−) hosted 에이전트 지시문과 worker 시스템 프롬프트가 「연결 요청이면 카드 제안」을 배워야 한다(GC-8).
+- (−) 제안 메시지는 채널에 남으므로 오래된 제안도 **지금 상태**로 그려진다(이미 연결했으면 「준비됨」). 제안 당시 상태를 보존하지 않는 것은 의도다.
