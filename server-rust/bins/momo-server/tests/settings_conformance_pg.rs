@@ -1094,3 +1094,92 @@ async fn an_anthropic_key_link_is_kind_tagged_and_never_echoed() {
         .await
         .expect("clear provider_link");
 }
+
+// ---------------------------------------------------------------------------
+// #2911 — ADR-0147 증보 2026-09-27: no new auth.json link, existing one kept
+// ---------------------------------------------------------------------------
+
+const TEST_OAUTH_REFRESH: &str = "rt-conformance-LEAKCANARY-2911";
+
+/// A `PUT` carrying an `auth.json` grant is refused with 400 and writes
+/// nothing, from any surface. A link that already holds such a grant (written
+/// before the amendment) stays readable and deletable.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_new_oauth_link_is_refused_and_an_existing_one_stays_readable_and_deletable() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "oauth2911").await;
+    let base = start_server(app_pool, &fixture.email).await;
+    let http = reqwest::Client::new();
+    sqlx::query("DELETE FROM provider_link")
+        .execute(&su)
+        .await
+        .expect("clear provider_link");
+    let token = login(&http, &base, &fixture).await;
+    let auth = |request: reqwest::RequestBuilder| request.bearer_auth(&token);
+
+    for body in [
+        json!({"baseUrl": "https://chatgpt.com/backend-api/codex",
+               "oauth": {"refreshToken": TEST_OAUTH_REFRESH, "accessToken": TEST_OAUTH_REFRESH}}),
+        json!({"baseUrl": "https://chatgpt.com/backend-api/codex", "format": "openai",
+               "oauth": {"refreshToken": TEST_OAUTH_REFRESH}}),
+    ] {
+        let response = auth(http.put(format!("{base}/v1/provider/link")))
+            .json(&body)
+            .send()
+            .await
+            .expect("refused write");
+        assert_eq!(response.status().as_u16(), 400, "{body}");
+        let text = response.text().await.expect("error body");
+        assert!(text.contains("auth.json"), "{text}");
+        assert!(!text.contains("LEAKCANARY"), "{text}");
+    }
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM provider_link")
+        .fetch_one(&su)
+        .await
+        .expect("count");
+    assert_eq!(rows, 0, "a refused PUT stored nothing");
+
+    // An existing grant, sealed the way the old PUT sealed it.
+    let sealed = momo_settings::seal_bearer(
+        &momo_settings::LinkCredential::OpenAiOAuth(Box::new(
+            momo_settings::OpenAiOAuthCredential::from_refresh_token(TEST_OAUTH_REFRESH),
+        ))
+        .to_sealed_plaintext(),
+        TEST_PROVIDER_MASTER_KEY,
+    )
+    .expect("seal");
+    momo_settings::upsert_link(
+        &mut su.acquire().await.expect("acquire"),
+        "https://chatgpt.com/backend-api/codex",
+        &sealed,
+        "external-hermes",
+        fixture.member,
+    )
+    .await
+    .expect("seed an existing oauth link");
+
+    let read: Value = auth(http.get(format!("{base}/v1/provider/link")))
+        .send()
+        .await
+        .expect("read")
+        .json()
+        .await
+        .expect("read body");
+    assert_eq!(read["credentialKind"], "oauth-openai", "{read}");
+    assert_eq!(read["configured"], json!(true), "{read}");
+    assert!(!read.to_string().contains("LEAKCANARY"), "{read}");
+
+    let deleted = auth(http.delete(format!("{base}/v1/provider/link")))
+        .send()
+        .await
+        .expect("delete");
+    assert_eq!(deleted.status().as_u16(), 200);
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM provider_link")
+        .fetch_one(&su)
+        .await
+        .expect("count");
+    assert_eq!(rows, 0, "the existing oauth link can still be deleted");
+}
