@@ -48,5 +48,9 @@ describe("/work 보기 판정 (ADR-0194 D1·D2)", () => {
     expect(isMyWorkTab("/work", "?view=team", true)).toBe(false);
     expect(isMyWorkTab("/work", "?session=abc", true)).toBe(false);
     expect(isMyWorkTab("/inbox", "", true)).toBe(false);
+    // 라우터가 같은 라우트로 받는 표기(끝 빗금·대소문자)도 같은 답이다(검수 #2927 M2).
+    expect(isMyWorkTab("/work/", "", true)).toBe(true);
+    expect(isMyWorkTab("/Work", "", true)).toBe(true);
+    expect(isMyWorkTab("/workstreams", "", true)).toBe(false);
   });
 });

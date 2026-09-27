@@ -112,36 +112,27 @@ describe("표면 판정표", () => {
 describe("작업 표면 런타임 판정 (#2780)", () => {
   const self = "00000000-0000-7000-8000-000000000101";
   const other = "00000000-0000-7000-8000-000000000102";
-  const mine = { scope: "member" as const, ownerMemberId: self };
-  const online = { online: true, ...mine };
-  const offline = { online: false, ...mine };
-  const revoked = { online: true, revokedAtMs: 1_800_000_000_000, ...mine };
+  const online = { online: true };
+  const offline = { online: false };
+  const revoked = { online: true, revokedAtMs: 1_800_000_000_000 };
 
-  it("온라인이고 해지되지 않은 내 호스트가 하나라도 있으면 참이다", () => {
-    expect(hasOnlineWorkHost([offline, online], self)).toBe(true);
-    expect(hasOnlineWorkHost([{ online: true, revokedAtMs: null, ...mine }], self)).toBe(true);
+  it("온라인이고 해지되지 않은 호스트가 하나라도 있으면 참이다", () => {
+    expect(hasOnlineWorkHost([offline, online])).toBe(true);
+    expect(hasOnlineWorkHost([{ online: true, revokedAtMs: null }])).toBe(true);
   });
 
   it("호스트가 없거나, 전부 오프라인이거나, 해지됐거나, 아직 모르면 거짓이다", () => {
-    expect(hasOnlineWorkHost([], self)).toBe(false);
-    expect(hasOnlineWorkHost([offline, offline], self)).toBe(false);
-    expect(hasOnlineWorkHost([revoked], self)).toBe(false);
-    expect(hasOnlineWorkHost(undefined, self)).toBe(false);
-    expect(hasOnlineWorkHost(null, self)).toBe(false);
+    expect(hasOnlineWorkHost([])).toBe(false);
+    expect(hasOnlineWorkHost([offline, offline])).toBe(false);
+    expect(hasOnlineWorkHost([revoked])).toBe(false);
+    expect(hasOnlineWorkHost(undefined)).toBe(false);
+    expect(hasOnlineWorkHost(null)).toBe(false);
   });
 
-  it("남의 개인 호스트는 온라인이어도 세지 않는다 (#2893)", () => {
-    const othersPersonal = { online: true, scope: "member" as const, ownerMemberId: other };
-    expect(hasOnlineWorkHost([othersPersonal], self)).toBe(false);
-    expect(hasOnlineWorkHost([othersPersonal, online], self)).toBe(true);
-    // 주인 id의 대소문자는 판정을 바꾸지 않는다(uuid).
-    expect(hasOnlineWorkHost([{ online: true, scope: "member", ownerMemberId: self.toUpperCase() }], self)).toBe(true);
-  });
-
-  it("팀 공용 호스트는 주인이 누구든 센다", () => {
-    const shared = { online: true, scope: "workspace" as const, ownerMemberId: other };
-    expect(hasOnlineWorkHost([shared], self)).toBe(true);
-    expect(isWorkHostUsableBy(shared, self)).toBe(true);
+  it("일을 시킬 수 있는 호스트는 팀 공용이거나 내 것이다 (#2893 · #2854 결정 (a))", () => {
+    expect(isWorkHostUsableBy({ scope: "workspace", ownerMemberId: other }, self)).toBe(true);
+    expect(isWorkHostUsableBy({ scope: "member", ownerMemberId: self.toUpperCase() }, self)).toBe(true);
+    expect(isWorkHostUsableBy({ scope: "member", ownerMemberId: other }, self)).toBe(false);
   });
 
   it("런타임으로 펼치는 표면은 작업 콘솔·코드 실행 호스트·관제 셋이다", () => {

@@ -77,6 +77,7 @@ import {
   TEAM_WORK_PATH,
   WORK_CONSOLE_VIEW_PATH,
   WORK_NAV,
+  isWorkPath,
   workViewOf,
   type WorkView,
 } from "@momo/core/features/workbench/workTab";
@@ -199,7 +200,7 @@ export function Sidebar({
   const desktopWork = isDesktop();
   const workLocation = useLocation();
   const currentWorkView: WorkView | null =
-    workLocation.pathname === MY_WORK_PATH ? workViewOf(workLocation.search) : null;
+    isWorkPath(workLocation.pathname) ? workViewOf(workLocation.search) : null;
   // 레일 단추로 떠나 레일이 내려가면 캐럿이 <body>에 떨어진다(design-review H1).
   // 되살아난 채널 목록의 같은 줄로, 없으면(대화) 라우트 상자로 놓는다.
   const wasWorkRail = useRef(workRail);
@@ -208,9 +209,14 @@ export function Sidebar({
     wasWorkRail.current = workRail;
     if (!was || workRail) return;
     const target = takeRailReturn();
-    if (target === undefined) return;
     const active = document.activeElement;
     if (active && active !== document.body && active.isConnected) return;
+    // 레일 단추가 아닌 길(⌘K·뒤로 가기·전역 단축키·프로필 메뉴)로 떠나도 레일과
+    // 터미널이 함께 내려가 캐럿이 떨어진다(검수 #2927 M1). 그때는 라우트 상자다.
+    if (target === undefined) {
+      document.getElementById(ROUTE_REGION_DOM_ID)?.focus({ preventScroll: true });
+      return;
+    }
     // 접어 둔 사이드바로 돌아가면 그 줄은 숨어 있거나 inert라 캐럿을 받지 못한다
     // (design-review R2 H1). 그때와, 옮겨지지 않았을 때는 라우트 상자로 간다.
     const row =

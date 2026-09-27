@@ -311,6 +311,24 @@ describe("세션마다 이 기기에 저장", () => {
     expect(storage.getItem(workbenchLayoutEntry("~/b"))).toBeNull();
   });
 
+  it("쓰기가 실패해도 다시 연 인스턴스(도크↔내 작업 탭)는 같은 배치를 그린다 (검수 #2927 M3)", () => {
+    const storage: LayoutStorage = {
+      getItem: () => null,
+      setItem: () => {
+        throw new DOMException("quota", "QuotaExceededError");
+      },
+    };
+    const first = render(<Persisted sessionKey="~/m3" storage={storage} />);
+    fireEvent.keyDown(grid(), { key: "d", code: "KeyD", metaKey: true });
+    fireEvent.keyDown(grid(), { key: "d", code: "KeyD", metaKey: true });
+    expect(panes()).toHaveLength(3);
+    first.unmount();
+    // 칸 하나로 돌아가면 p2·p3의 PTY가 보이지도 닫히지도 않는 고아가 된다.
+    render(<Persisted sessionKey="~/m3" storage={storage} />);
+    expect(panes()).toHaveLength(3);
+    expect(screen.getByTestId("workbench-status").textContent).toContain("저장하지 못했습니다");
+  });
+
   it("깨진 저장값은 칸 하나로 그린다", () => {
     const storage = memoryLayoutStorage({ [workbenchLayoutEntry("~/a")]: "{broken" });
     render(<Persisted sessionKey="~/a" storage={storage} />);

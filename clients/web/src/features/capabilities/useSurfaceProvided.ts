@@ -40,13 +40,14 @@ function needsHostProbe(): boolean {
  * 문장으로 말한다(`SurfaceRoute`).
  */
 export function useWorkHostPresence(): WorkHostPresence {
-  const { workspaceId, session } = useSession();
+  const { workspaceId } = useSession();
   const probe = needsHostProbe();
   const query = useWorkHosts(workspaceId, WORK_HOST_PRESENCE_POLL_MS, probe);
   if (!probe) return "present";
   if (query.data !== undefined) {
-    // 남의 개인 호스트는 세지 않는다(#2893): 들어가도 쓸 호스트가 없다.
-    return hasOnlineWorkHost(query.data, session?.member?.id ?? "") ? "present" : "absent";
+    // 관전·관제 표면의 판정이라 누구의 호스트든 센다(#2854 planner 결정 (a)).
+    // 일을 시키는 표면만 `isWorkHostUsableBy`로 좁힌다(세션 이어받기 대상).
+    return hasOnlineWorkHost(query.data) ? "present" : "absent";
   }
   return query.isError ? "error" : "unknown";
 }

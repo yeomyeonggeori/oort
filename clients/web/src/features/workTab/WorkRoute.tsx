@@ -4,6 +4,7 @@ import { SquareKanban } from "lucide-react";
 import {
   TEAM_WORK_EMPTY,
   WORK_NAV,
+  isMyWorkTab,
   workViewOf,
 } from "@momo/core/features/workbench/workTab";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
@@ -45,7 +46,10 @@ export function WorkRoute() {
   }, [needsConsoleView, location.pathname, location.search, navigate]);
 
   if (view === "team") return <TeamWorkRoute />;
-  if (desktop && view === "mine") return <LocalTerminalDock presentation="tab" />;
+  // 셸과 **같은 함수**로 판정한다: 셸이 도크를 내리는 바로 그때만 격자를 그린다.
+  if (isMyWorkTab(location.pathname, location.search, desktop)) {
+    return <LocalTerminalDock presentation="tab" />;
+  }
   return (
     <SurfaceRoute surface="workConsole">
       <WorkConsoleRoute />

@@ -47,7 +47,16 @@ export function workViewOf(search: string): WorkView {
  * 앱 셸이 이 답으로 사이드바를 레일로 접고 도크를 내린다.
  */
 export function isMyWorkTab(pathname: string, search: string, desktop: boolean): boolean {
-  return desktop && pathname === MY_WORK_PATH && workViewOf(search) === "mine";
+  return desktop && isWorkPath(pathname) && workViewOf(search) === "mine";
+}
+
+/**
+ * 라우터가 `/work`로 받는 주소인가. React Router는 대소문자를 가리지 않고 끝
+ * 빗금도 받는다(`/Work`, `/work/`). 셸(도크를 내린다)과 라우트(격자를 그린다)가
+ * 같은 답을 내야 한 칸에 xterm 둘이 붙지 않는다(검수 #2927 M2).
+ */
+export function isWorkPath(pathname: string): boolean {
+  return pathname.replace(/\/+$/, "").toLowerCase() === MY_WORK_PATH;
 }
 
 export interface WorkTabWidthInput {

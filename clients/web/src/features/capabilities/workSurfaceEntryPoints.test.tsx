@@ -716,25 +716,21 @@ describe("작업 표면 런타임 판정: 온라인 호스트 (#2780)", () => {
   });
 });
 
-describe("남의 개인 호스트는 작업 표면을 펼치지 않는다 (#2893, #2854)", () => {
+describe("남의 개인 호스트도 관전·관제 진입점을 연다 (#2854 planner 결정 (a))", () => {
   const OTHER = "00000000-0000-7000-8000-000000000102";
 
-  it("다른 멤버의 개인 호스트만 온라인이면 진입점이 0이다", async () => {
+  // 서버는 채널 멤버에게 남의 개인 호스트 세션의 목록과 관전을 허락한다. 좁히는
+  // 판정(`isWorkHostUsableBy`)은 일을 시키는 표면(세션 이어받기)에만 쓴다.
+  it("다른 멤버의 개인 호스트만 온라인이어도 작업 콘솔·⌘K·관전 도크가 선다", async () => {
     workFlag.provided = false;
     hostList.hosts = [onlineHost({ scope: "member", ownerMemberId: OTHER })];
     await mount();
     await hostsSettled();
-    expect(entryCounts()["nav-work-console"]).toBe(0);
-    expect(entryCounts()["switcher-work-console"]).toBe(0);
-    expect(entryCounts()["open-terminal-dock"]).toBe(0);
-  });
-
-  it("내 개인 호스트나 팀 공용 호스트면 선다", async () => {
-    workFlag.provided = false;
-    hostList.hosts = [onlineHost({ scope: "member", ownerMemberId: MEMBER_ID })];
-    await mount();
-    await hostsSettled();
-    await vi.waitFor(() => expect(entryCounts()["nav-work-console"]).toBe(1));
+    await vi.waitFor(() => {
+      expect(entryCounts()["nav-work-console"]).toBe(1);
+      expect(entryCounts()["switcher-work-console"]).toBe(1);
+      expect(entryCounts()["open-terminal-dock"]).toBe(1);
+    });
   });
 });
 
@@ -843,10 +839,25 @@ describe("레일로 떠나면 캐럿이 채널 목록의 같은 줄로 간다 (#
     expect(document.activeElement).toBe(route);
   });
 
-  it("레일에서 떠나지 않고 레일이 내려가면 캐럿을 옮기지 않는다", async () => {
+  it("레일 단추가 아닌 길로 떠나 캐럿이 떨어졌으면 라우트 상자로 간다 (검수 #2927 M1)", async () => {
     shell.desktop = true;
-    await mount({ workRail: true, entry: "/work", switcherOpen: false });
+    const host = await mount({ workRail: true, entry: "/work", switcherOpen: false });
+    const route = document.createElement("div");
+    route.id = "app-route";
+    route.tabIndex = -1;
+    host.append(route);
+    (document.activeElement as HTMLElement | null)?.blur();
     act(() => rerenderRail(false));
-    expect(document.activeElement?.getAttribute("data-testid")).not.toBe("nav-inbox");
+    expect(document.activeElement).toBe(route);
+  });
+
+  it("캐럿이 살아 있는 곳에 있으면 옮기지 않는다", async () => {
+    shell.desktop = true;
+    const host = await mount({ workRail: true, entry: "/work", switcherOpen: false });
+    const input = document.createElement("input");
+    host.append(input);
+    input.focus();
+    act(() => rerenderRail(false));
+    expect(document.activeElement).toBe(input);
   });
 });

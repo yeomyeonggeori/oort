@@ -228,8 +228,11 @@ describe("「내 작업」 탭 (#2854)", () => {
     expect(dockSnapshot()).toMatchObject({ open: false, fullscreen: false });
   });
 
-  it("마지막 칸을 닫아도 탭은 닫히지 않고 빈 칸 하나로 돌아간다", async () => {
+  it("마지막 칸을 닫아도 탭은 닫히지 않고 빈 칸 하나로 돌아간다. 도크 상태도 건드리지 않는다", async () => {
     const { sessions, kills } = fakeSessions();
+    // 도크가 열린 채로 들어온 경우: 탭이 closeDock()을 부르면 여기서 false가 된다
+    // (검수 #2927 N1 — 닫힌 도크로 시작하면 이 단정은 공허하다).
+    resetDockStateForTest({ open: true });
     await mount(sessions, "tab");
     await vi.waitFor(() => expect(sessions.getSnapshot().get("p1")?.phase).toBe("running"));
     key(q("fake-xterm-p1")!, { code: "KeyW", key: "w", metaKey: true });
@@ -237,7 +240,7 @@ describe("「내 작업」 탭 (#2854)", () => {
     act(() => q("local-terminal-close-confirm-ok")!.click());
     expect(kills).toEqual([1]);
     expect(q("my-work-tab")).not.toBeNull();
-    expect(dockSnapshot().open).toBe(false);
+    expect(dockSnapshot().open).toBe(true);
   });
 });
 

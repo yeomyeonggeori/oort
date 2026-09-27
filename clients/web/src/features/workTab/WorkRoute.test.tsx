@@ -75,6 +75,14 @@ describe("/work 보기 (#2854)", () => {
     expect(el.querySelector('[data-testid="work-console-stub"]')).toBeNull();
   });
 
+  it.each(["/work/", "/Work"])("데스크탑 %s도 격자이고 셸 판정과 같다(검수 #2927 M2)", async (entry) => {
+    shell.desktop = true;
+    const el = await mount(entry);
+    expect(el.querySelector('[data-testid="dock-stub"]')?.getAttribute("data-presentation")).toBe("tab");
+    const { isMyWorkTab } = await import("@momo/core/features/workbench/workTab");
+    expect(isMyWorkTab(entry, "", true)).toBe(true);
+  });
+
   it("웹 /work는 호스트 판정 뒤의 작업 콘솔 그대로다(로컬 격자가 없다)", async () => {
     const el = await mount("/work");
     expect(el.querySelector('[data-testid="dock-stub"]')).toBeNull();
