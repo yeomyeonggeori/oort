@@ -181,6 +181,21 @@ function MyAccountRow({ id, pill }: { id: LocalHarnessId; pill: HarnessPill }) {
       <span className="shrink-0" data-testid={`my-account-${id}-state`}>
         <AiPill tone={PILL_TONE[pill]}>{HARNESS_PILL_LABEL[pill]}</AiPill>
       </span>
+      {/* 로그인이 필요한 줄은 알약만으로 끝나지 않는다: AI 연결 화면(재진입)의 그
+          줄이 로그인 모달을 연다(design-review M-1). */}
+      {(pill === "login" || pill === "recheck") && (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="tap-target shrink-0"
+          aria-label={`${HARNESS_LABEL[id]} 로그인하러 AI 연결 화면 열기`}
+          onClick={() => openAiConnectReentry("settings")}
+          data-testid={`my-account-${id}-login`}
+        >
+          로그인
+        </Button>
+      )}
     </li>
   );
 }

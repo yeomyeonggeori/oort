@@ -179,6 +179,9 @@ describe("설정 › AI 연결 입구 (#2870)", () => {
     expect(q("my-account-claude")?.textContent).toContain("Claude Code");
     expect(q("my-account-claude-state")?.textContent).toBe(HARNESS_PILL_LABEL.ready);
     expect(q("my-account-codex-state")?.textContent).toBe(HARNESS_PILL_LABEL.login);
+    // 로그인 필요 줄에는 회복 행동이 있고, 준비된 줄에는 없다.
+    expect(q("my-account-claude-login")).toBeNull();
+    expect(q("my-account-codex-login")).not.toBeNull();
     // 「아직 연결한 구독이 없어요」는 준비된 CLI가 있는 동안 서지 않는다.
     expect(host?.textContent).not.toContain("아직 연결한 구독이 없어요");
     // 입구(재진입)는 그대로 있다.
