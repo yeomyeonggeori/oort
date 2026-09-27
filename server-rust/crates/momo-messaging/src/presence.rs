@@ -41,6 +41,20 @@
 //! (the roster projection) returns it only for a human. An agent's liveness is
 //! its `agent_run`. 사람은 온라인/자리 비움, 에이전트는 작업 중.
 //!
+//! ## DND expiry and the notification-pause bundle (ADR-0124 증보 2, #2850)
+//!
+//! `member.presence_dnd_until` (migration 090) gives declared DND an expiry.
+//! Like the custom-status expiry it is lazy: a `dnd` whose expiry has passed
+//! reads as `auto` everywhere it is read ([`effective_presence`]), and no job
+//! flips the column.
+//!
+//! Declared DND is bundled with the notification pause (성재 2026-09-27
+//! 「묶어」): [`set_declared_presence_in_tx`] engages or releases the bundle in
+//! `crate::notification_rule` inside its own transaction, before the presence
+//! broadcasts are emitted — one transaction, one outbox write path, and no
+//! client ever writes the pause a second time. The pause is given the same
+//! expiry, so both lapse together without a sweeper.
+//!
 //! ## Audit
 //!
 //! None. The original presence PUT wrote no `audit_log` row (personal declared
@@ -56,6 +70,9 @@ use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
 use crate::message::cent_channel;
+use crate::notification_rule::{
+    engage_presence_dnd_bundle_in_tx, release_presence_dnd_bundle_in_tx,
+};
 
 /// The `data.type` of a declared-status broadcast. Distinct from the ephemeral
 /// `ephemeral.presence` availability frame: this one is durable, arrives on the
@@ -111,7 +128,7 @@ impl PresenceStatus {
 }
 
 /// One field of a custom-status write: omitted, set, or cleared.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StatusPatch<T> {
     #[default]
     Absent,
@@ -189,10 +206,30 @@ impl CustomStatus {
 }
 
 /// Human member's durable declared status, custom fields already expire-filtered.
+///
+/// `status` is effective: an expired DND reads as [`PresenceStatus::Auto`].
+/// `dnd_until` is `Some` only while a timed DND is still running.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeclaredPresence {
     pub status: PresenceStatus,
+    pub dnd_until: Option<DateTime<Utc>>,
     pub custom: CustomStatus,
+}
+
+/// The lazy DND expiry: a stored `dnd` whose `presence_dnd_until` has passed is
+/// `auto` (no manual override). Any other status passes through with no expiry.
+pub fn effective_presence(
+    status: PresenceStatus,
+    dnd_until: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> (PresenceStatus, Option<DateTime<Utc>>) {
+    match status {
+        PresenceStatus::Dnd => match dnd_until {
+            Some(until) if until <= now => (PresenceStatus::Auto, None),
+            until => (PresenceStatus::Dnd, until),
+        },
+        other => (other, None),
+    }
 }
 
 /// Why a custom-status field was refused.
@@ -261,12 +298,14 @@ pub fn build_presence_payload(
     channel_id: Uuid,
     member_id: Uuid,
     status: PresenceStatus,
+    dnd_until: Option<DateTime<Utc>>,
     custom: &CustomStatus,
     timestamp_ms: i64,
 ) -> Value {
     let channel = cent_channel(workspace_id, channel_id);
     let member_token = member_id.to_string().to_uppercase();
     let expires_ms = custom.expires_at.map(|at| at.timestamp_millis());
+    let dnd_until_ms = dnd_until.map(|at| at.timestamp_millis());
     let data = json!({
         "type": PRESENCE_BROADCAST_TYPE,
         "v": 1,
@@ -275,6 +314,7 @@ pub fn build_presence_payload(
             "workspace_id": workspace_id.to_string().to_uppercase(),
             "member_id": member_token,
             "presence_status": status.as_db_label(),
+            "dnd_until_ms": dnd_until_ms,
             "status_emoji": custom.emoji,
             "status_text": custom.text,
             "status_expires_at_ms": expires_ms,
@@ -285,8 +325,9 @@ pub fn build_presence_payload(
         data,
         version: None,
         idempotency_key: Some(format!(
-            "presence:{channel}:{member_token}:{}:{}:{}:{}",
+            "presence:{channel}:{member_token}:{}:{}:{}:{}:{}",
             status.as_db_label(),
+            dnd_until_ms.unwrap_or(0),
             custom.emoji.as_deref().unwrap_or(""),
             custom.text.as_deref().unwrap_or(""),
             expires_ms.unwrap_or(0)
@@ -304,7 +345,8 @@ pub async fn declared_presence_for(
     member_id: Uuid,
 ) -> Result<Option<DeclaredPresence>, DbError> {
     let row = sqlx::query(
-        "SELECT presence_status::text, status_emoji, status_text, status_expires_at \
+        "SELECT presence_status::text, presence_dnd_until, status_emoji, status_text, \
+                status_expires_at, now() AS db_now \
            FROM member \
           WHERE id = $1 \
             AND kind = 'human' \
@@ -323,9 +365,12 @@ pub async fn declared_presence_for(
     let emoji: Option<String> = row.try_get("status_emoji")?;
     let text: Option<String> = row.try_get("status_text")?;
     let expires_at: Option<DateTime<Utc>> = row.try_get("status_expires_at")?;
+    let now: DateTime<Utc> = row.try_get("db_now")?;
+    let (status, dnd_until) = effective_presence(status, row.try_get("presence_dnd_until")?, now);
     Ok(Some(DeclaredPresence {
         status,
-        custom: CustomStatus::visible_at(emoji, text, expires_at, Utc::now()),
+        dnd_until,
+        custom: CustomStatus::visible_at(emoji, text, expires_at, now),
     }))
 }
 
@@ -345,6 +390,7 @@ pub async fn presence_status_for(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PresenceUpdate {
     pub status: PresenceStatus,
+    pub dnd_until: Option<DateTime<Utc>>,
     pub custom: CustomStatus,
     pub broadcast_outbox_ids: Vec<i64>,
 }
@@ -361,13 +407,58 @@ pub struct PresenceUpdate {
 /// Returns `Ok(None)` when the update matched no row (not a live human member of
 /// this workspace) — an authorization outcome, returned before any broadcast, so
 /// committing the transaction is indistinguishable from rolling it back.
+///
+/// `dnd_until` (ADR-0124 증보 2) is a patch on `presence_dnd_until`, meaningful
+/// only with `status = Dnd` (any other status clears it): `Absent` keeps a
+/// still-running expiry when DND stays on, `Set(None)` is "no expiry",
+/// `Set(Some(t))` is "until t". The notification-pause bundle is engaged when
+/// DND is newly chosen or its expiry is re-chosen, and released when the status
+/// leaves DND — in this transaction, before the broadcasts.
 pub async fn set_declared_presence_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
     status: PresenceStatus,
+    dnd_until: StatusPatch<DateTime<Utc>>,
     custom: CustomStatusPatch,
 ) -> Result<Option<PresenceUpdate>, DbError> {
+    // The status before this write, row-locked, with the database clock — the
+    // bundle engages only on a transition INTO effective DND (or an explicit new
+    // expiry), so editing a custom status while in DND never re-arms a pause the
+    // member turned off by hand.
+    let before = sqlx::query(
+        "SELECT presence_status::text, presence_dnd_until, now() AS db_now \
+           FROM member \
+          WHERE id = $1 \
+            AND workspace_id = $2 \
+            AND kind = 'human' \
+            AND deleted_at IS NULL \
+          FOR UPDATE",
+    )
+    .bind(member_id)
+    .bind(workspace_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(before) = before else {
+        return Ok(None);
+    };
+    let now: DateTime<Utc> = before.try_get("db_now")?;
+    let before_status = before
+        .try_get::<Option<String>, _>("presence_status")?
+        .as_deref()
+        .and_then(PresenceStatus::from_db_label)
+        .unwrap_or(PresenceStatus::Auto);
+    let (before_status, before_until) =
+        effective_presence(before_status, before.try_get("presence_dnd_until")?, now);
+    let next_dnd_until = if status != PresenceStatus::Dnd {
+        None
+    } else {
+        match dnd_until {
+            StatusPatch::Set(until) => until,
+            StatusPatch::Absent => before_until,
+        }
+    };
+
     let patch_emoji = custom.emoji.is_patch();
     let patch_text = custom.text.is_patch();
     let patch_expires = custom.expires_at.is_patch();
@@ -384,6 +475,7 @@ pub async fn set_declared_presence_in_tx(
     let row = sqlx::query(
         "UPDATE member \
             SET presence_status = $1::presence_status, \
+                presence_dnd_until = $10, \
                 status_emoji = CASE WHEN $4 THEN $5 ELSE status_emoji END, \
                 status_text = CASE WHEN $6 THEN $7 ELSE status_text END, \
                 status_expires_at = CASE WHEN $8 THEN $9 ELSE status_expires_at END, \
@@ -392,7 +484,8 @@ pub async fn set_declared_presence_in_tx(
             AND workspace_id = $3 \
             AND kind = 'human' \
             AND deleted_at IS NULL \
-        RETURNING presence_status::text, status_emoji, status_text, status_expires_at",
+        RETURNING presence_status::text, presence_dnd_until, status_emoji, status_text, \
+                  status_expires_at",
     )
     .bind(status.as_db_label())
     .bind(member_id)
@@ -403,6 +496,7 @@ pub async fn set_declared_presence_in_tx(
     .bind(text_value)
     .bind(patch_expires)
     .bind(expires_value)
+    .bind(next_dnd_until)
     .fetch_optional(&mut *conn)
     .await?;
     let Some(row) = row else {
@@ -411,12 +505,27 @@ pub async fn set_declared_presence_in_tx(
     let stored_status =
         PresenceStatus::from_db_label(row.try_get::<String, _>("presence_status")?.as_str())
             .unwrap_or(status);
+    let (stored_status, stored_dnd_until) =
+        effective_presence(stored_status, row.try_get("presence_dnd_until")?, now);
     let stored_custom = CustomStatus::visible_at(
         row.try_get("status_emoji")?,
         row.try_get("status_text")?,
         row.try_get("status_expires_at")?,
-        Utc::now(),
+        now,
     );
+
+    // ADR-0124 증보 2 「묶어」: the notification pause follows declared DND, in
+    // this transaction. Engage on a transition into DND or a re-chosen expiry;
+    // release whenever the status is not DND (a no-op without a bundle).
+    if stored_status == PresenceStatus::Dnd {
+        let rechosen = matches!(dnd_until, StatusPatch::Set(_));
+        if before_status != PresenceStatus::Dnd || rechosen {
+            engage_presence_dnd_bundle_in_tx(conn, workspace_id, member_id, stored_dnd_until)
+                .await?;
+        }
+    } else {
+        release_presence_dnd_bundle_in_tx(conn, workspace_id, member_id).await?;
+    }
 
     // The co-member set = the channels this member is currently in. `LEFT`
     // members and archived channels are excluded, so a broadcast never reaches a
@@ -446,6 +555,7 @@ pub async fn set_declared_presence_in_tx(
             channel_id,
             member_id,
             stored_status,
+            stored_dnd_until,
             &stored_custom,
             now_ms,
         );
@@ -463,6 +573,7 @@ pub async fn set_declared_presence_in_tx(
 
     Ok(Some(PresenceUpdate {
         status: stored_status,
+        dnd_until: stored_dnd_until,
         custom: stored_custom,
         broadcast_outbox_ids,
     }))
@@ -480,6 +591,7 @@ pub async fn set_presence_status_in_tx(
         workspace_id,
         member_id,
         status,
+        StatusPatch::Absent,
         CustomStatusPatch::default(),
     )
     .await
@@ -528,6 +640,7 @@ mod tests {
             channel,
             member,
             PresenceStatus::Dnd,
+            None,
             &CustomStatus::empty(),
             1234,
         );
@@ -561,6 +674,7 @@ mod tests {
             Uuid::from_u128(2),
             Uuid::from_u128(3),
             PresenceStatus::Away,
+            None,
             &custom,
             9,
         );
@@ -628,6 +742,59 @@ mod tests {
             normalize_status_emoji(Some("a\u{0007}b")).expect_err("ctrl"),
             CustomStatusInvalid::EmojiControl
         );
+    }
+
+    #[test]
+    fn an_expired_dnd_reads_as_auto_and_a_running_one_keeps_its_expiry() {
+        let now = Utc::now();
+        let past = now - chrono::Duration::seconds(1);
+        let future = now + chrono::Duration::hours(1);
+        assert_eq!(
+            effective_presence(PresenceStatus::Dnd, Some(past), now),
+            (PresenceStatus::Auto, None)
+        );
+        assert_eq!(
+            effective_presence(PresenceStatus::Dnd, Some(future), now),
+            (PresenceStatus::Dnd, Some(future))
+        );
+        assert_eq!(
+            effective_presence(PresenceStatus::Dnd, None, now),
+            (PresenceStatus::Dnd, None)
+        );
+        assert_eq!(
+            effective_presence(PresenceStatus::Away, Some(future), now),
+            (PresenceStatus::Away, None)
+        );
+    }
+
+    #[test]
+    fn the_dnd_expiry_rides_the_presence_payload_and_its_key() {
+        let until = DateTime::from_timestamp_millis(1_800_000_000_000).expect("ms");
+        let timed = build_presence_payload(
+            Uuid::from_u128(1),
+            Uuid::from_u128(2),
+            Uuid::from_u128(3),
+            PresenceStatus::Dnd,
+            Some(until),
+            &CustomStatus::empty(),
+            9,
+        );
+        let open = build_presence_payload(
+            Uuid::from_u128(1),
+            Uuid::from_u128(2),
+            Uuid::from_u128(3),
+            PresenceStatus::Dnd,
+            None,
+            &CustomStatus::empty(),
+            9,
+        );
+        assert_eq!(
+            timed["data"]["payload"]["dnd_until_ms"],
+            json!(1_800_000_000_000i64)
+        );
+        assert_eq!(open["data"]["payload"]["dnd_until_ms"], json!(null));
+        // A re-chosen expiry is a different event, not a coalesced double tap.
+        assert_ne!(timed["idempotency_key"], open["idempotency_key"]);
     }
 
     #[test]

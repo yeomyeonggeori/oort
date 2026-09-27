@@ -11,6 +11,31 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-09-27
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.11>. Tag target: `main=21aead09`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. No database migration since 0.1.10: the schema stays at 089 and upgrading swaps the images only.
+
+### Added
+- Server: provider links speak the Anthropic Messages wire, so a Claude API key can run a team agent. Presets for OpenAI, Anthropic, xAI (Grok) and OpenRouter; keys are scrubbed from errors, logs and debug output. (#2872, ADR-0147, ADR-0004)
+- Server: when a hosted agent cannot answer — hosted delivery off, link disconnected, channel not approved, or a 1:1 DM — the person who called it gets one line with the reason and the way to fix it (10-minute cooldown). An agent's display name can no longer inject a markdown link. (#2871)
+- Web and desktop: Settings › AI connections is reorganised into "My account · this Mac" and "Team connections · this server", with a side panel; pasting an `auth.json` no longer creates a new connection. AI connections can be reopened from settings and the agent screen, and subscription agents are on by default in builds. (#2877, #2870)
+- Desktop: Claude Code and Codex sign in through a modal that runs the official CLI in a hidden PTY. (#2816)
+- Phone: the profile shows presence, a status message and notification pause. (#2848)
+
+### Changed
+- Security: provider egress refuses private, loopback, link-local and metadata targets even over https — when a link is saved, and again at connect time against the resolved addresses (DNS rebinding) — and does not follow redirects. The OAuth token refresh path goes through the same guard. A deployment that used a private-range https host as a provider must set `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1` and list the host in `AGENT_PROVIDER_LOCAL_HOSTS`; the guarded client ignores `HTTP(S)_PROXY`. (#2852, #2894)
+- Web: the work surface opens only while a host is online. (#2780)
+- Web and phone: notification pause wording is the same everywhere. (#2848)
+- Desktop: the terminal defaults to a dark theme. (#2849)
+- Server: a test pins that the team agent path never reaches a person's own subscription credentials. (#2882)
+
+### Not in this release
+- The server image carries the Anthropic wire and presets, the provider egress guard and the "why the agent did not answer" notice (api, agent-worker), and the web bundle's AI connections settings and work-surface gate. The CLI sign-in modal and terminal theme ship in desktop builds and the phone profile in iOS builds, not in the image.
+- Do-not-disturb deadlines and the notification pause bundle (#2850, migration 090) landed after the build commit and ship in a later release.
+- Approving a hosted agent in a 1:1 DM (#2915) is in progress.
+- LiveKit on the team instance (#2759): huddles still do not run on `oort-team`.
+- runtime-unverified: an Anthropic-wire team agent against the live API on a team instance, the CLI sign-in modal in a signed DMG, TestFlight install.
+
 ## [0.1.10] - 2026-09-26
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.10>. Tag target: `main=824b909e`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres images. One database migration since 0.1.9: `089_agent_invocation_scope.sql` adds `agent.invocation_scope` (default `workspace`, so every existing agent keeps its behaviour) and `agent.subscription_harness`, their CHECK constraints, and a trigger that refuses to reopen an owner-only agent. It is forward-only; rolling the images back to 0.1.9 leaves the added columns in place.

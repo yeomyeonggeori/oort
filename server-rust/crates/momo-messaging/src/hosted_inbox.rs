@@ -228,7 +228,7 @@ pub async fn append_message_reference_in_tx(
             AND t.audience='/v1/mcp/agent-port' \
             AND 'agent:inbox:read'=ANY(t.scopes) \
             AND 'agent:inbox:read'=ANY(hc.approved_scopes) \
-            AND $2=ANY(hc.approved_channel_ids) \
+            AND $2=ANY(hosted_connection_channel_ids(hc.workspace_id, hc.id)) \
             AND m.kind='agent' AND m.status='active' AND m.deleted_at IS NULL \
             AND ap.paused=false \
           ORDER BY hc.id FOR SHARE OF hc,t,m,wm,ap,cm",
@@ -357,7 +357,7 @@ pub async fn hosted_inbox_recipients_in_tx(
             AND t.audience='/v1/mcp/agent-port' \
             AND 'agent:inbox:read'=ANY(t.scopes) \
             AND 'agent:inbox:read'=ANY(hc.approved_scopes) \
-            AND $2=ANY(hc.approved_channel_ids) \
+            AND $2=ANY(hosted_connection_channel_ids(hc.workspace_id, hc.id)) \
             AND m.kind='agent' AND m.status='active' AND m.deleted_at IS NULL \
             AND ap.paused=false \
           ORDER BY hc.id FOR SHARE OF hc,t,m,wm,ap,cm",
@@ -533,7 +533,7 @@ async fn append_reference_in_tx(
             AND t.audience='/v1/mcp/agent-port' \
             AND 'agent:inbox:read'=ANY(t.scopes) \
             AND 'agent:inbox:read'=ANY(hc.approved_scopes) \
-            AND $2=ANY(hc.approved_channel_ids) \
+            AND $2=ANY(hosted_connection_channel_ids(hc.workspace_id, hc.id)) \
             AND m.kind='agent' AND m.status='active' AND m.deleted_at IS NULL \
             AND ap.paused=false \
           ORDER BY hc.id FOR SHARE OF hc,t,m,wm,ap,cm",
@@ -669,7 +669,7 @@ pub async fn list_hosted_inbox_in_tx(
     // updates must therefore serialize before or after this page read rather
     // than between the authority check and the event query.
     let approved_channels: Option<Vec<Uuid>> = sqlx::query_scalar(
-        "SELECT hc.approved_channel_ids \
+        "SELECT hosted_connection_channel_ids(hc.workspace_id, hc.id) \
            FROM hosted_agent_connection hc \
            JOIN token t ON t.workspace_id=hc.workspace_id AND t.id=hc.active_token_id \
            JOIN member m ON m.workspace_id=hc.workspace_id AND m.id=hc.agent_member_id \
