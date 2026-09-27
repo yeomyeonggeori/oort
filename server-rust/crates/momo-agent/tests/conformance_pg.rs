@@ -394,8 +394,19 @@ async fn b26_1_ledger_row_matches_the_summary_aggregate() {
          nothing can undo"
     );
 
-    let window = validated_window(None, None, Some("day"), chrono::Utc::now())
-        .expect("the default 30-day window");
+    // `now` must come from the clock that stamped the rows. `usage_ledger.created_at`
+    // defaults to the database's `now()`, so a host `Utc::now()` here mixes two
+    // clocks: a database clock even a few milliseconds ahead of the test host
+    // (a Docker/Colima VM drifting after sleep) puts both rows after `to` and the
+    // inclusive window reports 0 (#2950). The route reads its own clock too, but
+    // that is a single-request default, not an equality this test can assert
+    // across hosts — so the test asks the database what time it is.
+    let db_now: chrono::DateTime<chrono::Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
+        .fetch_one(&su)
+        .await
+        .expect("read the database clock");
+    let window =
+        validated_window(None, None, Some("day"), db_now).expect("the default 30-day window");
     let summary = with_tenant_tx(&app, workspace_id, move |conn| {
         Box::pin(async move { usage_summary_in_tx(conn, workspace_id, window).await })
     })
