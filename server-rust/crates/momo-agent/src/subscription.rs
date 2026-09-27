@@ -152,7 +152,8 @@ pub fn subscription_notice_body(kind: SubscriptionNoticeKind, scope: &OwnerOnlyS
     match kind {
         SubscriptionNoticeKind::NonOwner => format!(
             "{}의 개인 에이전트예요. 팀이 함께 부르는 에이전트는 설정 › AI 연결에서 붙일 수 있어요.",
-            scope.owner_display_name
+            // #2900: the owner chose this name; it must not become markup.
+            crate::inert_display_name(&scope.owner_display_name)
         ),
         SubscriptionNoticeKind::OfflineQueued => format!(
             "지금은 오프라인이에요. 맥에서 {}를 다시 열면 이어서 답할게요.",
@@ -459,6 +460,33 @@ mod tests {
             subscription_notice_body(SubscriptionNoticeKind::Disabled, &s),
             "지금은 이 서버에서 구독 에이전트를 쓸 수 없어요. 설정 › AI 연결에서 API 키로 연결할 수 있어요."
         );
+    }
+
+    /// #2900 (#2889 Medium-3 동형): the D4 sentence names the owner, and the
+    /// owner chose that name — it must not become a link in a server line.
+    #[test]
+    fn an_owner_name_cannot_plant_a_link_in_the_notice() {
+        for name in [
+            "[x](https://evil.example)",
+            "[보안 재인증](http://evil.example)",
+            "https://evil.example/login",
+        ] {
+            let s = OwnerOnlyScope {
+                owner_display_name: name.into(),
+                ..scope(Uuid::from_u128(1))
+            };
+            for kind in [
+                SubscriptionNoticeKind::NonOwner,
+                SubscriptionNoticeKind::OfflineQueued,
+                SubscriptionNoticeKind::OfflineNotQueued,
+                SubscriptionNoticeKind::Disabled,
+            ] {
+                let body = subscription_notice_body(kind, &s);
+                assert!(!body.to_lowercase().contains("://evil"), "bare url: {body}");
+                assert!(!body.contains("]("), "link syntax: {body}");
+                assert!(!body.contains('['), "{body}");
+            }
+        }
     }
 
     #[test]

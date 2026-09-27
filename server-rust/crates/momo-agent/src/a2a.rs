@@ -244,6 +244,10 @@ impl A2aBlock {
     /// The channel line, in the register `paused_mention_body` established:
     /// Korean, naming the agent and the limit that held.
     pub fn system_line(&self, target_display_name: &str) -> String {
+        // #2900: whoever named the target agent must not plant markup in a
+        // server line (#2889 Medium-3 동형).
+        let inert = crate::inert_display_name(target_display_name);
+        let target_display_name = inert.as_str();
         let head = format!("{target_display_name}에게 위임하지 못했습니다");
         match self {
             A2aBlock::Depth {
@@ -512,6 +516,40 @@ mod tests {
             consecutive_auto_streak: 0,
             chain_tokens: 0,
             chain_cost_micro_usd: 0,
+        }
+    }
+
+    /// #2900: the refusal line names the target agent, and whoever named it
+    /// must not plant a link in a server line (#2889 Medium-3 동형).
+    #[test]
+    fn a_target_name_cannot_plant_a_link_in_the_refusal_line() {
+        let blocks = [
+            A2aBlock::Depth {
+                source_depth: 3,
+                max_depth: 3,
+            },
+            A2aBlock::Concurrency { active: 4, max: 4 },
+            A2aBlock::ConsecutiveAuto { streak: 3, max: 3 },
+            A2aBlock::StepCap {
+                step_count: 50,
+                max: 50,
+            },
+            A2aBlock::ChainBudget {
+                tokens: true,
+                spent: 1,
+                max: 1,
+                chain_tokens: 1,
+                chain_cost_micro_usd: 0,
+            },
+            A2aBlock::SelfMention,
+        ];
+        for name in ["[x](https://evil.example)", "https://evil.example/login"] {
+            for block in &blocks {
+                let line = block.system_line(name);
+                assert!(!line.to_lowercase().contains("://evil"), "bare url: {line}");
+                assert!(!line.contains("]("), "link syntax: {line}");
+                assert!(!line.contains('['), "{line}");
+            }
         }
     }
 
