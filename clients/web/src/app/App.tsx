@@ -33,11 +33,10 @@ import { WorkstreamDetailRoute } from "@/features/workstreams/WorkstreamDetailRo
 import { SearchRoute } from "@/features/search/SearchRoute";
 import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 import { SurfaceUnavailableRoute } from "@/features/capabilities/SurfaceUnavailable";
-import { SurfaceRoute } from "@/features/capabilities/SurfaceGate";
 import { forgetQuota } from "@momo/core/features/settings/quotaModel";
 import { forgetUsage } from "@momo/core/features/settings/usageModel";
 import { resetAdeDrawer } from "@/features/ade/adeDrawerStore";
-import { WorkConsoleRoute } from "@/features/workConsole/WorkConsoleRoute";
+import { WorkRoute } from "@/features/workTab/WorkRoute";
 import { OAuthConsentRoute } from "@/features/hostedAgents/OAuthConsentRoute";
 import { isOauthConsentPath } from "@/features/hostedAgents/oauthConsentPath";
 import type { LoginResponse, Member } from "@momo/core/lib/api";
@@ -326,15 +325,9 @@ export function App() {
           <Route path="activity" element={<ActivityRoute />} />
           <Route path="directory" element={<DirectoryRoute />} />
           <Route path="agents" element={<AgentHubRoute />} />
-          <Route
-            path="work"
-            element={
-              // #2780: 정적 표가 아니라 온라인 호스트 유무로 연다.
-              <SurfaceRoute surface="workConsole">
-                <WorkConsoleRoute />
-              </SurfaceRoute>
-            }
-          />
+          {/* 「내 작업」·「팀 작업」·작업 콘솔이 한 라우트를 나눠 쓴다(#2854). 콘솔은
+              WorkRoute 안에서 여전히 SurfaceRoute(#2780) 뒤에 선다. */}
+          <Route path="work" element={<WorkRoute />} />
           {/* 메시지 검색 (goal B12 H5). 서버가 이미 싣고 있는 경로 위에 선다. */}
           <Route
             path="search"

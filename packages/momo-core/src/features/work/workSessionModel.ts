@@ -1,5 +1,6 @@
 import { uuidEq, type Message, type WorkHost, type WorkSession } from "../../lib/api";
 import type { WorkSessionACPFrame, WorkSessionACPType } from "../../lib/realtimeEvents";
+import { isWorkHostUsableBy } from "../capabilities/serverSurfaces";
 
 // =============================================================================
 // Work session model (AX-3 / MOMO-618): every rule the 작업 세션 panel renders,
@@ -699,8 +700,8 @@ export function workSessionResumeTargets(
         host.revokedAtMs === undefined &&
         host.online &&
         !uuidEq(host.id, session.hostId) &&
-        (host.scope === "workspace" ||
-          uuidEq(host.ownerMemberId, viewerMemberId))
+        // 일을 시키는 표면의 판정 하나(#2854): 팀 공용이거나 내 것.
+        isWorkHostUsableBy(host, viewerMemberId)
     )
     .sort((a, b) => {
       const byName = a.displayName.localeCompare(b.displayName, "ko");
