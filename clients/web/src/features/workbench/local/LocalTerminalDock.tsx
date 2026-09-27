@@ -50,6 +50,7 @@ import {
 } from "@momo/core/features/workbench/dockStore";
 import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
 import { detectLocalHarnesses, type PtyProgram } from "@/lib/tauri";
+import { WORK_NAV } from "@momo/core/features/workbench/workTab";
 import { WorkbenchGrid, type WorkbenchPaneInfo } from "../WorkbenchGrid";
 import { useWorkbenchLayout } from "../useWorkbenchLayout";
 import { DOCK_SESSION_KEY, localSessions, type LocalSessions } from "./localSessions";
@@ -93,15 +94,28 @@ function fromTerminal(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(".xterm") !== null;
 }
 
+export type LocalWorkbenchPresentation = "dock" | "tab";
+
 export function LocalTerminalDock({
   sessions = localSessions(),
   platform: platformProp,
+  presentation = "dock",
 }: {
   sessions?: LocalSessions;
   platform?: KeyPlatform;
+  /**
+   * `tab`(#2854): 사이드바 「내 작업」(`/work`)의 전체 화면 격자로 그린다. 같은
+   * 세션·같은 배치(`DOCK_SESSION_KEY`)를 그리므로 도크와 **동시에 마운트하지
+   * 않는다**(한 칸의 PTY에 xterm이 둘 붙는다). 셸이 이 보기에서 도크를 내린다.
+   * 도크를 열고 닫는 키(⌃`·⌃⇧`)는 이 보기에서 아무것도 하지 않는다.
+   */
+  presentation?: LocalWorkbenchPresentation;
 }) {
   const platform = platformProp ?? detectPlatform();
   const dock = useDockState();
+  const tab = presentation === "tab";
+  /** 칸을 그리는가. 탭은 늘 그린다. */
+  const active = tab || dock.open;
   const { layout, storage, setLayout } = useWorkbenchLayout(DOCK_SESSION_KEY);
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
@@ -122,7 +136,7 @@ export function LocalTerminalDock({
 
   // 새 세션 메뉴의 하네스: 이 Mac의 PATH에서 찾은 것만(ADR-0190 D3).
   useEffect(() => {
-    if (!dock.open) return;
+    if (!active) return;
     let alive = true;
     void detectLocalHarnesses().then((found) => {
       if (alive) setHarnesses(found.filter((h) => h.installed));
@@ -130,7 +144,7 @@ export function LocalTerminalDock({
     return () => {
       alive = false;
     };
-  }, [dock.open]);
+  }, [active]);
 
   const bodySize = () => {
     const rect = bodyRef.current?.getBoundingClientRect();
@@ -144,10 +158,10 @@ export function LocalTerminalDock({
       const ids = paneIds(current.root);
       if (ids.length === 1 && !sessions.has(ids[0]!)) {
         sessions.setPendingProgram(ids[0]!, program);
-        openDock();
+        if (!tab) openDock();
         return;
       }
-      if (!dock.open) openDock();
+      if (!tab && !dock.open) openDock();
       const size = bodySize();
       const axis = size.width / 2 >= WORKBENCH_MIN_PANE.width || size.width === 0 ? "row" : "column";
       const newId = paneIdFor(current.seq);
@@ -161,20 +175,22 @@ export function LocalTerminalDock({
       layoutRef.current = result.layout;
       setLayout(result.layout);
     },
-    [dock.open, sessions, setLayout]
+    [dock.open, sessions, setLayout, tab]
   );
 
   const runDock = useCallback(
     (command: DockCommand) => {
       switch (command.type) {
         case "toggle-dock":
-          return toggleDock();
+          // 「내 작업」 탭에는 여닫을 도크가 없다. 키는 삼킨다(터미널에 NUL이
+          // 가지 않게).
+          return tab ? undefined : toggleDock();
         case "toggle-fullscreen":
-          return toggleDockFullscreen();
+          return tab ? undefined : toggleDockFullscreen();
         case "new-session":
           return newSession({ kind: "shell" });
         case "jump-palette":
-          if (!dock.open) openDock();
+          if (!tab && !dock.open) openDock();
           // 키로 연 목록은 닫힐 때(골랐든 Esc든) 터미널로 돌아간다. 사람은 목록
           // 단추를 만진 적이 없다(design-review R3 H).
           pickedRef.current = true;
@@ -183,11 +199,11 @@ export function LocalTerminalDock({
         case "next-waiting":
           // 「나를 기다림」 상태는 상태 점(#2776)이 채운다. 그 전에는 기다리는
           // 칸이 없다는 사실만 말한다.
-          if (dock.open) setNotice(NO_WAITING);
+          if (active) setNotice(NO_WAITING);
           return;
       }
     },
-    [dock.open, newSession]
+    [active, dock.open, newSession, tab]
   );
 
   // 전역 키: 창의 캡처 단계. 컴포저에서든 터미널 안에서든 먼저 본다.
@@ -217,11 +233,11 @@ export function LocalTerminalDock({
     };
     root.addEventListener("keydown", onKeyDown);
     return () => root.removeEventListener("keydown", onKeyDown);
-  }, [platform, dock.open]);
+  }, [platform, active]);
 
   // 도크가 열리면 포커스 칸의 터미널로 캐럿을 보낸다.
   useEffect(() => {
-    if (!dock.open) return;
+    if (!active) return;
     const frame = requestAnimationFrame(() => {
       const root = rootRef.current;
       if (!root || root.contains(document.activeElement)) return;
@@ -230,7 +246,7 @@ export function LocalTerminalDock({
       (input ?? pane)?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
-  }, [dock.open, dock.fullscreen]);
+  }, [active, dock.fullscreen]);
 
   const minPx = dockMinPx(layout.root);
   useLayoutEffect(() => {
@@ -253,8 +269,9 @@ export function LocalTerminalDock({
 
   const onCloseLastPane = useCallback(() => {
     setLayout(defaultWorkbenchLayout());
-    closeDock();
-  }, [setLayout]);
+    // 탭은 닫히지 않는다. 빈 칸 하나로 돌아가 새 세션을 기다린다.
+    if (!tab) closeDock();
+  }, [setLayout, tab]);
 
   /**
    * 메뉴에서 세션을 열거나 칸을 고른 뒤에는 캐럿이 그 칸의 터미널에 가야 한다.
@@ -277,12 +294,169 @@ export function LocalTerminalDock({
     });
   };
 
-  if (!dock.open) return null;
+  if (!active) return null;
 
   const ids = paneIds(layout.root);
   const titleOf = (pane: WorkbenchPaneInfo) => localPaneTitle(sessionMap.get(pane.id) ?? null);
   const confirmView = confirm ? sessionMap.get(confirm.paneId) ?? null : null;
   const confirmIndex = confirm ? ids.indexOf(confirm.paneId) + 1 : 0;
+
+  const closeConfirm = (
+    <Dialog open={confirm !== null} onOpenChange={(open) => !open && setConfirm(null)}>
+      {confirm ? (
+        <DialogContent className="gap-4 p-4" data-testid="local-terminal-close-confirm">
+          <div className="flex flex-col gap-1">
+            <DialogTitle>실행 중인 칸을 닫을까요?</DialogTitle>
+            <DialogDescription>
+              {`${confirmIndex}번 칸(${localPaneTitle(confirmView)})의 프로세스가 끝나고, 이 칸의 화면도 지워집니다.`}
+            </DialogDescription>
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => setConfirm(null)}>
+              취소
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              data-testid="local-terminal-close-confirm-ok"
+              onClick={() => {
+                const run = confirm.close;
+                setConfirm(null);
+                run();
+              }}
+            >
+              칸 닫기
+            </Button>
+          </div>
+        </DialogContent>
+      ) : null}
+    </Dialog>
+  );
+
+  const sessionMenus = (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button type="button" variant="ghost" size="sm" data-testid="local-terminal-new" aria-keyshortcuts="Control+Shift+N">
+            <Plus aria-hidden className="size-4" />
+            새 세션
+            <ChevronDown aria-hidden className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" onCloseAutoFocus={onMenuCloseAutoFocus}>
+          <DropdownMenuItem
+            onSelect={() => {
+              pickedRef.current = true;
+              newSession({ kind: "shell" });
+            }}
+            data-testid="local-terminal-new-shell"
+          >
+            셸
+            <span className="ml-auto pl-4 text-meta text-ink-muted">⌃⇧N</span>
+          </DropdownMenuItem>
+          {harnesses.map((h) => (
+            <DropdownMenuItem
+              key={h.id}
+              onSelect={() => {
+                pickedRef.current = true;
+                newSession({ kind: "harness", id: h.id });
+              }}
+              data-testid={`local-terminal-new-${h.id}`}
+            >
+              {HARNESS_LABEL[h.id] ?? h.id}
+              {h.auth === "needs_login" ? (
+                <span className="ml-auto pl-4 text-meta text-ink-muted">로그인 필요</span>
+              ) : null}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <DropdownMenu open={jumpOpen} onOpenChange={setJumpOpen}>
+        <DropdownMenuTrigger asChild>
+          <DockIconButton label="칸 목록" keycap="⌘J" aria="Meta+J" testId="local-terminal-jump">
+            <ListTree />
+          </DockIconButton>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          data-testid="local-terminal-jump-list"
+          onCloseAutoFocus={onMenuCloseAutoFocus}
+        >
+          {ids.map((id, i) => (
+            <DropdownMenuItem
+              key={id}
+              onSelect={() => {
+                pickedRef.current = true;
+                const result = focusPane(layoutRef.current, id);
+                if (result.ok) {
+                  layoutRef.current = result.layout;
+                  setLayout(result.layout);
+                }
+              }}
+            >
+              <span data-numeric className="w-4 font-mono text-meta text-ink-muted">
+                {i + 1}
+              </span>
+              <span className="min-w-0 truncate">{localPaneTitle(sessionMap.get(id) ?? null)}</span>
+              {sessionMap.get(id)?.phase === "exited" ? (
+                <span className="ml-auto pl-4 text-meta text-ink-muted">끝남</span>
+              ) : null}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
+  );
+  const grid = (
+    <WorkbenchGrid
+      className="flex-1"
+      label={tab ? "내 작업 칸" : "로컬 터미널 칸"}
+      layout={layout}
+      onLayoutChange={(next) => {
+        setNotice(null);
+        setLayout(next);
+      }}
+      storage={storage}
+      platform={platform}
+      paneTitle={titleOf}
+      renderPane={(pane) => <LocalTerminalPane pane={pane} platform={platform} sessions={sessions} />}
+      onRequestClose={requestClose}
+      onCloseLastPane={onCloseLastPane}
+      notice={notice}
+      lingeringNotice={runningPaneNotice(sessionMap, ids)}
+      crampedHelp={tab || dock.fullscreen ? undefined : "⌃⇧` 전체 화면"}
+    />
+  );
+
+  if (tab) {
+    // 「내 작업」(#2854, 시안 ① `.wmain`): 머리 줄 48 · 격자 좌우 여백 12. 세션 목록
+    // (T4 #2856)·배치 프리셋(T5)·worktree 보기(T6)·로그 패널(T7)은 각 이슈가 이 머리
+    // 줄과 격자 옆에 붙인다.
+    return (
+      <section
+        ref={rootRef}
+        aria-labelledby="my-work-title"
+        data-testid="my-work-tab"
+        className="flex min-h-0 min-w-0 flex-1 flex-col"
+      >
+        <header className="flex h-work-tab-bar shrink-0 items-center gap-2 pl-4 pr-3">
+          <h1 id="my-work-title" className="shrink-0 text-title font-bold text-ink">
+            {WORK_NAV.mine}
+          </h1>
+          <p className="min-w-0 truncate text-meta text-ink-muted" data-testid="my-work-note">
+            이 기기의 세션입니다. 서버에 기록하지 않습니다.
+          </p>
+          <span className="flex-1" />
+          {sessionMenus}
+        </header>
+        <div ref={bodyRef} className="flex min-h-0 flex-1 flex-col px-3 pb-1">
+          {grid}
+        </div>
+        {closeConfirm}
+      </section>
+    );
+  }
 
   return (
     <section
@@ -304,76 +478,7 @@ export function LocalTerminalDock({
           이 기기에서만 돌고 서버에 기록하지 않습니다.
         </p>
         <span className="flex-1" />
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button type="button" variant="ghost" size="sm" data-testid="local-terminal-new" aria-keyshortcuts="Control+Shift+N">
-              <Plus aria-hidden className="size-4" />
-              새 세션
-              <ChevronDown aria-hidden className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" onCloseAutoFocus={onMenuCloseAutoFocus}>
-            <DropdownMenuItem
-              onSelect={() => {
-                pickedRef.current = true;
-                newSession({ kind: "shell" });
-              }}
-              data-testid="local-terminal-new-shell"
-            >
-              셸
-              <span className="ml-auto pl-4 text-meta text-ink-muted">⌃⇧N</span>
-            </DropdownMenuItem>
-            {harnesses.map((h) => (
-              <DropdownMenuItem
-                key={h.id}
-                onSelect={() => {
-                  pickedRef.current = true;
-                  newSession({ kind: "harness", id: h.id });
-                }}
-                data-testid={`local-terminal-new-${h.id}`}
-              >
-                {HARNESS_LABEL[h.id] ?? h.id}
-                {h.auth === "needs_login" ? (
-                  <span className="ml-auto pl-4 text-meta text-ink-muted">로그인 필요</span>
-                ) : null}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <DropdownMenu open={jumpOpen} onOpenChange={setJumpOpen}>
-          <DropdownMenuTrigger asChild>
-            <DockIconButton label="칸 목록" keycap="⌘J" aria="Meta+J" testId="local-terminal-jump">
-              <ListTree />
-            </DockIconButton>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            data-testid="local-terminal-jump-list"
-            onCloseAutoFocus={onMenuCloseAutoFocus}
-          >
-            {ids.map((id, i) => (
-              <DropdownMenuItem
-                key={id}
-                onSelect={() => {
-                  pickedRef.current = true;
-                  const result = focusPane(layoutRef.current, id);
-                  if (result.ok) {
-                    layoutRef.current = result.layout;
-                    setLayout(result.layout);
-                  }
-                }}
-              >
-                <span data-numeric className="w-4 font-mono text-meta text-ink-muted">
-                  {i + 1}
-                </span>
-                <span className="min-w-0 truncate">{localPaneTitle(sessionMap.get(id) ?? null)}</span>
-                {sessionMap.get(id)?.phase === "exited" ? (
-                  <span className="ml-auto pl-4 text-meta text-ink-muted">끝남</span>
-                ) : null}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {sessionMenus}
         <DockIconButton
           label={dock.fullscreen ? "전체 화면 끄기" : "전체 화면 켜기"}
           keycap="⌃⇧`"
@@ -395,55 +500,9 @@ export function LocalTerminalDock({
         </DockIconButton>
       </header>
       <div ref={bodyRef} className="flex min-h-0 flex-1 flex-col px-2 pb-1">
-        <WorkbenchGrid
-          className="flex-1"
-          label="로컬 터미널 칸"
-          layout={layout}
-          onLayoutChange={(next) => {
-            setNotice(null);
-            setLayout(next);
-          }}
-          storage={storage}
-          platform={platform}
-          paneTitle={titleOf}
-          renderPane={(pane) => <LocalTerminalPane pane={pane} platform={platform} sessions={sessions} />}
-          onRequestClose={requestClose}
-          onCloseLastPane={onCloseLastPane}
-          notice={notice}
-          lingeringNotice={runningPaneNotice(sessionMap, ids)}
-          crampedHelp={dock.fullscreen ? undefined : "⌃⇧` 전체 화면"}
-        />
+        {grid}
       </div>
-      <Dialog open={confirm !== null} onOpenChange={(open) => !open && setConfirm(null)}>
-        {confirm ? (
-          <DialogContent className="gap-4 p-4" data-testid="local-terminal-close-confirm">
-            <div className="flex flex-col gap-1">
-              <DialogTitle>실행 중인 칸을 닫을까요?</DialogTitle>
-              <DialogDescription>
-                {`${confirmIndex}번 칸(${localPaneTitle(confirmView)})의 프로세스가 끝나고, 이 칸의 화면도 지워집니다.`}
-              </DialogDescription>
-            </div>
-            <div className="flex items-center justify-end gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={() => setConfirm(null)}>
-                취소
-              </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                size="sm"
-                data-testid="local-terminal-close-confirm-ok"
-                onClick={() => {
-                  const run = confirm.close;
-                  setConfirm(null);
-                  run();
-                }}
-              >
-                칸 닫기
-              </Button>
-            </div>
-          </DialogContent>
-        ) : null}
-      </Dialog>
+      {closeConfirm}
     </section>
   );
 }

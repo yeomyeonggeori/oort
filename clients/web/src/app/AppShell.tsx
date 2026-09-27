@@ -51,6 +51,7 @@ import { isDesktop } from "@/lib/tauri";
 import { cn } from "@/design/lib/cn";
 import { LocalTerminalDock } from "@/features/workbench/local/LocalTerminalDock";
 import { useDockState } from "@/features/workbench/local/dockState";
+import { isMyWorkTab } from "@momo/core/features/workbench/workTab";
 
 // =============================================================================
 // Signed-in shell: owns the single realtime rail for the session and renders
@@ -79,7 +80,8 @@ export function AppShell({
   const desktopToggleFocusedRef = useRef(false);
   // The route boundary resets when the user navigates: a failed channel must
   // not keep the next one from rendering.
-  const routePath = useLocation().pathname;
+  const shellLocation = useLocation();
+  const routePath = shellLocation.pathname;
   const isSettingsSurface = routePath === "/settings";
   const wasSettingsSurface = useRef(false);
 
@@ -89,7 +91,11 @@ export function AppShell({
   // 로컬 터미널 도크(#2774). 스트레스 측정은 합성 행만 재므로 붙이지 않는다.
   const localTerminal = isDesktop() && !stress;
   const localDock = useDockState();
-  const localDockFullscreen = localTerminal && localDock.open && localDock.fullscreen;
+  // 「내 작업」 격자(#2854, 시안 ①). 도크와 같은 세션·배치를 라우트가 그리므로 이
+  // 동안 도크는 마운트하지 않는다(한 칸에 xterm 둘). 앱 사이드바는 64px 레일로 접힌다.
+  const myWorkTab = isMyWorkTab(routePath, shellLocation.search, localTerminal);
+  const localDockFullscreen =
+    localTerminal && !myWorkTab && localDock.open && localDock.fullscreen;
   // The design capture seam (?agentwork=live|offline) seeds fixed agent turns
   // instead of watching for real ones, so the sidebar pill and the composer
   // activity line are reviewable in artifacts/design (SKILL §11). The rail is
@@ -314,16 +320,18 @@ export function AppShell({
             ref={sidebarPaint.shellRef}
             className="app-shell"
             data-sidebar-collapsed={
-              isSettingsSurface
+              isSettingsSurface || myWorkTab
                 ? undefined
                 : sidebarPaint.trackCollapsed
                   ? ""
                   : undefined
             }
+            data-work-rail={myWorkTab && !isSettingsSurface ? "" : undefined}
             data-settings-surface={isSettingsSurface ? "" : undefined}
           >
             {!isSettingsSurface && (
               <AppTitlebar
+                hideToggle={myWorkTab}
                 collapsed={sidebarPaneCollapsed}
                 onCollapsedChange={sidebarPaint.requestCollapsedChange}
                 toggleRef={sidebarToggleRef}
@@ -338,6 +346,7 @@ export function AppShell({
                 onOpenQuickSwitcher={() => setSwitcherOpen(true)}
                 channelPaneCollapsed={sidebarPaneCollapsed}
                 treeHidden={sidebarPaint.treeHidden}
+                workRail={myWorkTab}
               />
             )}
             {/* 스크림은 사이드바 **다음**에 있어야 한다: 서랍이 열린 동안 탭이 갈
@@ -421,7 +430,7 @@ export function AppShell({
               </div>
               {/* 로컬 터미널 도크(#2774, ADR-0190 D1): 데스크탑 셸에서만. 브라우저
                * 탭에는 로컬 PTY가 없으므로 도크도, ⌃` 키도 없다. */}
-              {localTerminal && <LocalTerminalDock />}
+              {localTerminal && !myWorkTab && <LocalTerminalDock />}
             </main>
           </div>
           {/* Global keyboard paths that must work from any route (R-1 §2). */}

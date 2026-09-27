@@ -65,7 +65,7 @@ let composer: HTMLTextAreaElement | null = null;
 let windowKeys: string[] = [];
 const onWindowKey = (event: KeyboardEvent) => windowKeys.push(`${event.metaKey ? "⌘" : ""}${event.key}`);
 
-async function mount(sessions: LocalSessions) {
+async function mount(sessions: LocalSessions, presentation?: "dock" | "tab") {
   host = document.createElement("main");
   document.body.append(host);
   composer = document.createElement("textarea");
@@ -73,7 +73,7 @@ async function mount(sessions: LocalSessions) {
   document.body.append(composer);
   root = createRoot(host);
   await act(async () => {
-    root?.render(createElement(LocalTerminalDock, { sessions, platform: "mac" }));
+    root?.render(createElement(LocalTerminalDock, { sessions, platform: "mac", presentation }));
   });
 }
 
@@ -201,6 +201,43 @@ describe("터미널 입력이 먼저", () => {
     await vi.waitFor(() =>
       expect(q("workbench-notice")?.textContent).toBe("나를 기다리는 칸이 없습니다.")
     );
+  });
+});
+
+describe("「내 작업」 탭 (#2854)", () => {
+  it("도크가 닫혀 있어도 격자를 그리고, 도크 여닫이 단추 없이 제목이 「내 작업」이다", async () => {
+    const { sessions } = fakeSessions();
+    await mount(sessions, "tab");
+    expect(dockSnapshot().open).toBe(false);
+    await vi.waitFor(() => expect(q("fake-xterm-p1")).not.toBeNull());
+    expect(q("my-work-tab")?.querySelector("h1")?.textContent).toBe("내 작업");
+    expect(q("local-terminal-dock")).toBeNull();
+    expect(q("local-terminal-fullscreen")).toBeNull();
+    expect(q("local-terminal-dock-close")).toBeNull();
+    expect(q("local-terminal-new")).not.toBeNull();
+  });
+
+  it("⌃`·⌃⇧`는 탭에서 도크를 열지 않는다(같은 칸이 두 번 붙지 않는다). 키는 터미널에 새지 않는다", async () => {
+    const { sessions } = fakeSessions();
+    await mount(sessions, "tab");
+    await vi.waitFor(() => expect(q("fake-xterm-p1")).not.toBeNull());
+    const toggle = key(q("fake-xterm-p1")!, { code: "Backquote", key: "`", ctrlKey: true });
+    const full = key(document.body, { code: "Backquote", key: "~", ctrlKey: true, shiftKey: true });
+    expect(toggle.defaultPrevented).toBe(true);
+    expect(full.defaultPrevented).toBe(true);
+    expect(dockSnapshot()).toMatchObject({ open: false, fullscreen: false });
+  });
+
+  it("마지막 칸을 닫아도 탭은 닫히지 않고 빈 칸 하나로 돌아간다", async () => {
+    const { sessions, kills } = fakeSessions();
+    await mount(sessions, "tab");
+    await vi.waitFor(() => expect(sessions.getSnapshot().get("p1")?.phase).toBe("running"));
+    key(q("fake-xterm-p1")!, { code: "KeyW", key: "w", metaKey: true });
+    await vi.waitFor(() => expect(q("local-terminal-close-confirm")).not.toBeNull());
+    act(() => q("local-terminal-close-confirm-ok")!.click());
+    expect(kills).toEqual([1]);
+    expect(q("my-work-tab")).not.toBeNull();
+    expect(dockSnapshot().open).toBe(false);
   });
 });
 

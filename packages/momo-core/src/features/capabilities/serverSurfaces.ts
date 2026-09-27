@@ -97,7 +97,8 @@ export const WORK_SURFACE_IDS: readonly SurfaceId[] = [
  * 이 셋은 서버 라우트가 이미 서 있다. 모자란 것은 서버가 아니라 그 워크스페이스에
  * 붙은 코드 실행 호스트다. 그래서 「이 서버가 싣는가」라는 표의 질문으로는 답이
  * 안 나오고, 표를 손으로 뒤집으면 호스트가 없는 셀프호스트에서 막다른 길이 선다.
- * 판정은 「이 워크스페이스에 온라인 호스트가 있는가」로 한다(`hasOnlineWorkHost`).
+ * 판정은 「이 워크스페이스에 내가 쓸 수 있는 온라인 호스트가 있는가」로 한다
+ * (`hasOnlineWorkHost`, #2893).
  *
  * `workstreams`는 여기 없다: 그 라우트는 아직 서버에 없다(404). 호스트가 있어도
  * 열 곳이 없다.
@@ -111,27 +112,49 @@ export const HOST_GATED_SURFACE_IDS: readonly SurfaceId[] = [
   "ade",
 ];
 
-/** 호스트 목록에서 이 판정이 읽는 두 칸. */
+/** 호스트 목록에서 이 판정이 읽는 네 칸. */
 export interface WorkHostPresenceFact {
   online: boolean;
   revokedAtMs?: number | null;
+  /** `member`는 한 사람의 개인 호스트, `workspace`는 팀 공용 호스트다. */
+  scope: "member" | "workspace";
+  ownerMemberId: string;
 }
 
 /**
- * 이 워크스페이스에 지금 온라인인 호스트가 하나라도 있는가.
+ * 이 호스트를 보는 사람이 쓸 수 있는가 (#2893 첫 줄, #2854가 함께 고친다).
+ *
+ * 개인 호스트(`scope=member`)는 주인만 일을 시킨다(ADR-0188 D4, ADR-0192). 남의
+ * 개인 호스트가 온라인이라고 작업 표면을 펼치면, 들어간 사람은 쓸 호스트가 없는
+ * 화면을 만난다. 팀 공용 호스트(`scope=workspace`)는 누구에게나 쓸 수 있는 것으로
+ * 센다.
+ */
+export function isWorkHostUsableBy(
+  host: Pick<WorkHostPresenceFact, "scope" | "ownerMemberId">,
+  selfMemberId: string
+): boolean {
+  if (host.scope === "workspace") return true;
+  return host.ownerMemberId.toLowerCase() === selfMemberId.toLowerCase();
+}
+
+/**
+ * 이 워크스페이스에 지금 온라인이고 **내가 쓸 수 있는** 호스트가 하나라도 있는가.
  *
  * `online`은 서버의 90초 heartbeat 창이다(`work_host_store.rs`). 해지된 호스트는
  * heartbeat가 남아 있어도 세지 않는다. 목록을 아직 받지 못했으면(`undefined`)
- * 거짓이다: 모르는 것을 있다고 그리면 누른 뒤에야 빈 화면을 만난다.
+ * 거짓이다: 모르는 것을 있다고 그리면 누른 뒤에야 빈 화면을 만난다. 남의 개인
+ * 호스트도 세지 않는다(`isWorkHostUsableBy`).
  */
 export function hasOnlineWorkHost(
-  hosts: readonly WorkHostPresenceFact[] | null | undefined
+  hosts: readonly WorkHostPresenceFact[] | null | undefined,
+  selfMemberId: string
 ): boolean {
   if (!hosts) return false;
   return hosts.some(
     (host) =>
       host.online === true &&
-      (host.revokedAtMs === undefined || host.revokedAtMs === null)
+      (host.revokedAtMs === undefined || host.revokedAtMs === null) &&
+      isWorkHostUsableBy(host, selfMemberId)
   );
 }
 

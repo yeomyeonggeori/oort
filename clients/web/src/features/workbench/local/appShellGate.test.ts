@@ -16,7 +16,10 @@ describe("AppShell 로컬 도크 문지기", () => {
     expect(src).toMatch(/const localTerminal = isDesktop\(\) && !stress;/);
     const mounts = src.match(/<LocalTerminalDock\b/g) ?? [];
     expect(mounts.length).toBe(1);
-    expect(src).toMatch(/\{localTerminal && <LocalTerminalDock \/>\}/);
+    // #2854: 「내 작업」 격자가 같은 세션을 그리는 동안 도크는 붙지 않는다. 둘이 함께
+    // 서면 한 칸의 PTY에 xterm이 둘 붙는다.
+    expect(src).toMatch(/\{localTerminal && !myWorkTab && <LocalTerminalDock \/>\}/);
+    expect(src).toMatch(/const myWorkTab = isMyWorkTab\(routePath, shellLocation\.search, localTerminal\);/);
   });
 
   it("전체 화면은 라우트 상자를 지우지 않고 숨긴다", () => {

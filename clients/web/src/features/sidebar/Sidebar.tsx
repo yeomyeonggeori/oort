@@ -12,9 +12,11 @@ import {
   Milestone,
   Plus,
   Search,
+  ServerCog,
   SquareTerminal,
   SquarePen,
   Users,
+  UsersRound,
   X,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -67,6 +69,16 @@ import { SidebarNowCard } from "./SidebarNowCard";
 import { workspaceRailTile } from "./workspaceRailModel";
 import { KomettoMark } from "@/design/brand/KomettoMark";
 import { ProfileCard } from "./ProfileCard";
+import { WorkRail } from "./WorkRail";
+import { isDesktop } from "@/lib/tauri";
+import {
+  MY_WORK_PATH,
+  TEAM_WORK_PATH,
+  WORK_CONSOLE_VIEW_PATH,
+  WORK_NAV,
+  workViewOf,
+  type WorkView,
+} from "@momo/core/features/workbench/workTab";
 import { sectionUnreadTotals, sidebarSectionListId } from "./sidebarSectionModel";
 import {
   sidebarUnreadCounts,
@@ -163,15 +175,30 @@ export function Sidebar({
   onOpenQuickSwitcher,
   channelPaneCollapsed,
   treeHidden,
+  workRail = false,
 }: {
   onOpenQuickSwitcher: () => void;
   channelPaneCollapsed: boolean;
   treeHidden: boolean;
+  /**
+   * 데스크탑 「내 작업」 격자(#2854, 시안 ①): 앱 사이드바가 64px 레일로 접힌다.
+   * 워크스페이스 레일과 채널 목록은 언마운트하지 않고 숨긴다(스크롤·펼친 섹션이
+   * 남는다). 이 동안에는 제목줄의 접기 상태를 따르지 않는다: 레일이 곧 접힌 모양이다.
+   */
+  workRail?: boolean;
 }) {
   const { session, workspaceId, connStatus } = useSession();
   const navigate = useNavigate();
   const navRef = useRef<HTMLDivElement>(null);
   const workConsoleProvided = useSurfaceProvided("workConsole");
+  // 「작업」 묶음 (#2854, ADR-0194 D1). 「내 작업」은 이 기기의 격자라 데스크탑에만
+  // 선다(웹에는 로컬 터미널 레인이 없다, ADR-0190 D1). 웹의 `/work`는 작업 콘솔
+  // 그대로다. 「팀 작업」은 어디서나 선다. 두 줄의 경로가 같아(`/work`) 선택은
+  // 쿼리까지 보고 가른다.
+  const desktopWork = isDesktop();
+  const workLocation = useLocation();
+  const currentWorkView: WorkView | null =
+    workLocation.pathname === MY_WORK_PATH ? workViewOf(workLocation.search) : null;
 
   // 폰에서 이 사이드바는 서랍이다 (goal B6). 닫혀 있는 동안에는 화면 밖으로
   // 밀려 있을 뿐 DOM에는 남아 있으므로(스크롤 위치와 마운트를 지킨다), 탭 순서와
@@ -185,7 +212,7 @@ export function Sidebar({
     isSidebarTreeInert({
       asDrawer,
       drawerOpen,
-      collapsed: channelPaneCollapsed,
+      collapsed: channelPaneCollapsed && !workRail,
     })
   );
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -552,6 +579,20 @@ export function Sidebar({
         data-testid="sidebar"
         data-overlay-layer={asDrawer ? "surface" : undefined}
       >
+        {workRail && (
+          <WorkRail
+            footer={
+              <ProfileCard
+                compact
+                workspaceId={workspaceId}
+                selfMemberId={session.member.id}
+                selfMember={selfMember}
+                selfName={selfName}
+                connected={connStatus === "connected"}
+              />
+            }
+          />
+        )}
         <WorkspaceRail
           workspace={{
             name: workspaceQuery.data?.name,
@@ -560,12 +601,12 @@ export function Sidebar({
           }}
           workspaceId={workspaceId}
           avatarUrl={workspaceQuery.data?.avatarUrl}
-          hidden={treeHidden}
+          hidden={treeHidden || workRail}
         />
 
         <div
           id="sidebar-channel-pane"
-          hidden={treeHidden}
+          hidden={treeHidden || workRail}
           data-sidebar-channel-pane
           data-testid="sidebar-channel-pane"
           className="sidebar-list flex h-full w-full min-w-0 flex-col"
@@ -655,6 +696,23 @@ export function Sidebar({
             <nav aria-label="워크스페이스 탐색">
               <ul className="sidebar-stack">
                 <SidebarRow to="/inbox" icon={<Inbox className="size-4" />} label="인박스" testId="nav-inbox" />
+                {/* 「작업」 두 줄 (#2854, 시안 ④ 사이드바의 자리: 인박스 바로 아래). */}
+                {desktopWork && (
+                  <SidebarRow
+                    to={MY_WORK_PATH}
+                    icon={<SquareTerminal className="size-4" />}
+                    label={WORK_NAV.mine}
+                    testId="nav-my-work"
+                    isActive={currentWorkView === "mine"}
+                  />
+                )}
+                <SidebarRow
+                  to={TEAM_WORK_PATH}
+                  icon={<UsersRound className="size-4" />}
+                  label={WORK_NAV.team}
+                  testId="nav-team-work"
+                  isActive={currentWorkView === "team"}
+                />
                 <DraftsNavItem />
                 <SidebarRow to="/activity" icon={<Activity className="size-4" />} label="활동" testId="nav-activity" />
                 <SidebarRow to="/directory" icon={<Users className="size-4" />} label="멤버" testId="nav-directory" />
@@ -663,13 +721,21 @@ export function Sidebar({
                     도크이고, 우측 WorkPanel 은 이 경로의 `open-work-panel` 이
                     연다. 표면 삭제 금지 — 셀프호스트 기본은 진입점만 접는다
                     (#2166). #2780: 정적 표가 아니라 온라인 호스트 유무로
-                    펼친다(useSurfaceProvided). */}
+                    펼친다(useSurfaceProvided). #2854: 데스크탑에서는 `/work`가
+                    「내 작업」 격자라 콘솔은 `?view=console`에 선다. */}
                 {workConsoleProvided && (
                   <SidebarRow
-                    to="/work"
-                    icon={<SquareTerminal className="size-4" />}
+                    to={desktopWork ? WORK_CONSOLE_VIEW_PATH : MY_WORK_PATH}
+                    icon={<ServerCog className="size-4" />}
                     label={serverSurface("workConsole").label}
                     testId="nav-work-console"
+                    isActive={
+                      currentWorkView === null
+                        ? false
+                        : desktopWork
+                          ? currentWorkView === "console"
+                          : currentWorkView !== "team"
+                    }
                   />
                 )}
                 {/* 메시지 검색 (goal B12 H5). 전역 목적지인 이유는 인박스와 같다:

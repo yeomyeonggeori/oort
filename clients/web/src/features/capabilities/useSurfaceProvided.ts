@@ -40,12 +40,13 @@ function needsHostProbe(): boolean {
  * 문장으로 말한다(`SurfaceRoute`).
  */
 export function useWorkHostPresence(): WorkHostPresence {
-  const { workspaceId } = useSession();
+  const { workspaceId, session } = useSession();
   const probe = needsHostProbe();
   const query = useWorkHosts(workspaceId, WORK_HOST_PRESENCE_POLL_MS, probe);
   if (!probe) return "present";
   if (query.data !== undefined) {
-    return hasOnlineWorkHost(query.data) ? "present" : "absent";
+    // 남의 개인 호스트는 세지 않는다(#2893): 들어가도 쓸 호스트가 없다.
+    return hasOnlineWorkHost(query.data, session?.member?.id ?? "") ? "present" : "absent";
   }
   return query.isError ? "error" : "unknown";
 }
