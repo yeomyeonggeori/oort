@@ -140,7 +140,8 @@ export function AgentProgressView({
           <span className="sr-only" data-testid="agent-pane-goal">{model.goal}</span>
           <span className="truncate">{[model.hostName, model.harness].filter(Boolean).join(" · ")}</span>
           <span className="flex items-center gap-1" data-testid="agent-pane-status">
-            <StatusMark status={model.status} />
+            {/* 관전자가 보는 「소유자 확인 기다림」은 도는 표지가 아니라 빈 원(대기)이다. */}
+            <StatusMark status={model.permission && !model.viewerIsOwner ? "idle" : model.status} />
             <span className="font-semibold">{model.statusLabel}</span>
           </span>
           {model.plan.length > 0 ? (
@@ -172,7 +173,7 @@ export function AgentProgressView({
       {model.plan.length > 0 && planOpen ? <PlanSteps id={planId} plan={model.plan} /> : null}
 
       <div
-        className="agent-scroll min-h-0 flex-1 overflow-y-auto"
+        className="agent-scroll overflow-y-auto"
         onScroll={(event) => {
           const el = event.currentTarget;
           stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
@@ -205,25 +206,32 @@ export function AgentProgressView({
             {`알아보지 못한 진행 ${model.skipped}개는 건너뛰었어요.`}
           </p>
         ) : null}
-        {/*
-          권한 카드는 진행 흐름의 끝에 두고 스크롤 바닥에 붙인다(sticky). 칸이 낮아도
-          진행 줄이 0이 되지 않고(design-review R1 B1), 카드가 칸보다 길면 버튼이 있는
-          아래쪽이 보이는 채로 위가 스크롤된다.
-        */}
-        {model.permission ? (
-          <PermissionCard
-            key={model.permission.requestEventId}
-            sessionId={model.sessionId}
-            permission={model.permission}
-            viewerIsOwner={model.viewerIsOwner}
-            ownerName={ownerName}
-            decide={actions.decide}
-          />
-        ) : null}
       </div>
 
+      {/*
+        권한 카드는 진행 줄과 답장 칸 사이에 붙는다. 칸이 낮으면 진행 줄이 두 줄(바닥)까지
+        먼저 줄고, 그다음 카드가 줄며 카드 안이 스크롤된다. 질문 줄과 버튼 줄은 카드
+        안에서 위아래로 붙어 늘 보인다(design-review R1·R2 B1).
+      */}
+      {model.permission ? (
+        <PermissionCard
+          key={model.permission.requestEventId}
+          sessionId={model.sessionId}
+          permission={model.permission}
+          viewerIsOwner={model.viewerIsOwner}
+          ownerName={ownerName}
+          decide={actions.decide}
+        />
+      ) : null}
+
       {model.viewerIsOwner ? (
-        <ReplyBox sessionId={model.sessionId} reply={actions.reply} ended={model.status === "done" || model.status === "stopped"} />
+        <>
+          <ReplyBox sessionId={model.sessionId} reply={actions.reply} ended={model.status === "done" || model.status === "stopped"} />
+          {/* 낮은 칸에서 권한 카드가 있으면 답장 칸 대신 이 한 줄이 보인다(agentPane.css). */}
+          <p className="agent-reply-collapsed shrink-0 border-t border-line px-4 py-1 text-timestamp text-ink-muted">
+            답장 칸은 칸을 키우면 보여요 · ⌘⇧↵ 최대화
+          </p>
+        </>
       ) : (
         <p className="shrink-0 border-t border-line px-4 py-2 text-meta text-ink-muted" data-testid="agent-pane-reply-owner-only">
           {ownerName ? `${ownerName}만 이 세션에 지시할 수 있어요.` : "소유자만 이 세션에 지시할 수 있어요."}
@@ -448,7 +456,7 @@ function PermissionCard({
         disarm();
       }}
     >
-      <p className="agent-perm-l1">
+      <p className="agent-perm-l1 agent-perm-sticky-top">
         <StatusMark status="waiting" srLabel />
         {ask}
       </p>
@@ -469,11 +477,12 @@ function PermissionCard({
       ) : null}
 
       {armed === null ? (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="agent-perm-sticky-bottom flex flex-wrap items-center gap-2">
           <Button
             ref={allowRef}
             type="button"
             size="sm"
+            className="tap-target"
             disabled={unavailable || !allowable || busy}
             aria-describedby={describedBy}
             onClick={() => arm("allow")}
@@ -486,6 +495,7 @@ function PermissionCard({
             type="button"
             size="sm"
             variant="secondary"
+            className="tap-target"
             disabled={unavailable || permission.reject === null || busy}
             aria-describedby={describedBy}
             onClick={() => arm("reject")}
@@ -496,7 +506,7 @@ function PermissionCard({
           <span className="text-timestamp text-ink-muted">나에게만 보이는 버튼이에요</span>
         </div>
       ) : armed === "allow" ? (
-        <div className="flex flex-wrap items-center gap-2" data-testid="agent-permission-confirm">
+        <div className="agent-perm-sticky-bottom flex flex-wrap items-center gap-2" data-testid="agent-permission-confirm">
           <span className="text-meta font-medium">이번 한 번만 허락할까요?</span>
           <Button type="button" size="sm" variant="ghost" onClick={disarm}>
             취소
@@ -527,7 +537,7 @@ function PermissionCard({
               data-testid="agent-permission-instruction"
             />
           </label>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="agent-perm-sticky-bottom flex flex-wrap items-center gap-2">
             <Button type="button" size="sm" variant="ghost" onClick={disarm}>
               취소
             </Button>
@@ -599,7 +609,7 @@ function ReplyBox({
   };
   return (
     <form
-      className="flex shrink-0 flex-col gap-1 border-t border-line px-3 pb-2 pt-2"
+      className="agent-reply flex shrink-0 flex-col gap-1 border-t border-line px-3 pb-2 pt-2"
       data-testid="agent-pane-reply"
       onSubmit={(event) => {
         event.preventDefault();

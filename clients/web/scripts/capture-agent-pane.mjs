@@ -53,6 +53,35 @@ async function shot(page, name) {
   report.scenes.push(name);
 }
 
+/**
+ * 권한 카드가 있는 칸의 자리(design-review R1·R2 B1): 카드 위로 진행 줄이 56px 이상,
+ * 카드의 질문 줄과 모든 버튼이 칸 안에 보인다. 두 버튼 높이가 같다.
+ */
+async function permissionFit(page, paneId) {
+  return page.evaluate((id) => {
+    const root = document.querySelector(`[data-pane-id="${id}"]`);
+    const pane = root.getBoundingClientRect();
+    const scroll = root.querySelector(".agent-scroll").getBoundingClientRect();
+    const card = root.querySelector('[data-testid="agent-permission"]');
+    const cardBox = card.getBoundingClientRect();
+    const head = card.querySelector(".agent-perm-l1").getBoundingClientRect();
+    const firstBtn = card.querySelector("button")?.getBoundingClientRect();
+    const btns = [...card.querySelectorAll("button")].map((b) => b.getBoundingClientRect());
+    const within = (r) => r.top >= cardBox.top - 1 && r.bottom <= cardBox.bottom + 1 && r.top >= pane.top && r.bottom <= pane.bottom;
+    const armBtns = [...card.querySelectorAll('[data-testid="agent-permission-allow"],[data-testid="agent-permission-reject"]')].map((b) => Math.round(b.getBoundingClientRect().height));
+    return {
+      feedVisible: Math.round(Math.min(scroll.bottom, cardBox.top) - scroll.top),
+      headVisible: within(head) && (!firstBtn || head.bottom <= firstBtn.top + 1),
+      buttonsVisible: btns.every(within),
+      armHeights: armBtns,
+    };
+  }, paneId);
+}
+
+function fitOk(fit) {
+  return fit.feedVisible >= 56 && fit.headVisible && fit.buttonsVisible && new Set(fit.armHeights).size <= 1;
+}
+
 async function scenes(browser, origin) {
   for (const scheme of ["light", "dark"]) {
     {
@@ -72,34 +101,16 @@ async function scenes(browser, origin) {
       check(`${scheme}/tab: 기다림 칸 테두리·바닥 띠`, waiting === 1, { waiting });
       await shot(page, `agent-tab-1280-${scheme}`);
 
-      // 칸 높이(B1): 진행 줄이 두 줄 이상 보이고, 권한 버튼이 칸 안에 있다.
-      const fit = await page.evaluate(() => {
-        const pane = document.querySelector('[data-pane-id="p2"]').getBoundingClientRect();
-        const scroll = document.querySelector('[data-pane-id="p2"] .agent-scroll').getBoundingClientRect();
-        const card = document.querySelector('[data-pane-id="p2"] [data-testid="agent-permission"]').getBoundingClientRect();
-        const btns = [...document.querySelectorAll('[data-pane-id="p2"] [data-testid="agent-permission"] button')].map((b) => b.getBoundingClientRect());
-        return {
-          scrollH: Math.round(scroll.height),
-          feedVisible: Math.round(card.top - scroll.top),
-          inside: btns.every((b) => b.top >= pane.top && b.bottom <= pane.bottom),
-          heights: btns.map((b) => Math.round(b.height)),
-        };
-      });
-      check(`${scheme}/tab: 기다림 칸 카드 위로 진행 줄 56px 이상 보임, 권한 버튼 칸 안`, fit.feedVisible >= 56 && fit.inside, fit);
-      check(`${scheme}/tab: 두 권한 버튼 높이 같음`, new Set(fit.heights).size === 1, fit);
+      const fit = await permissionFit(page, "p2");
+      check(`${scheme}/tab 1280: 카드 위 진행 줄 56px+, 질문 줄·버튼 보임, 버튼 높이 같음`, fitOk(fit), fit);
       const strip = await page.$$eval('[data-pane-id="p2"] [data-testid="workbench-pane-waiting"]', (e) => e.length);
       check(`${scheme}/tab: A 칸은 바닥 띠 대신 카드`, strip === 0, { strip });
 
       // 거부 무장(지시 입력 칸)이 반 높이 칸에서 넘치지 않는다.
       await page.getByTestId("agent-permission-reject").click();
       await page.getByTestId("agent-permission-instruction").waitFor();
-      const rejectFit = await page.evaluate(() => {
-        const pane = document.querySelector('[data-pane-id="p2"]').getBoundingClientRect();
-        const commit = document.querySelector('[data-testid="agent-permission-commit"]').getBoundingClientRect();
-        const reply = document.querySelector('[data-pane-id="p2"] [data-testid="agent-pane-reply"]').getBoundingClientRect();
-        return { commitInside: commit.bottom <= pane.bottom && commit.top >= pane.top, replyInside: reply.bottom <= pane.bottom + 1 };
-      });
-      check(`${scheme}/tab: 거부 무장 때 확정 버튼·답장 칸이 칸 안`, rejectFit.commitInside && rejectFit.replyInside, rejectFit);
+      const rejectFit = await permissionFit(page, "p2");
+      check(`${scheme}/tab 1280 거부 무장: 진행 줄·질문 줄·확정 버튼 보임`, fitOk(rejectFit), rejectFit);
       await shot(page, `agent-tab-1280-${scheme}-reject-armed`);
       await page.keyboard.press("Escape");
 
@@ -115,6 +126,14 @@ async function scenes(browser, origin) {
       const { context, page } = await open(browser, origin, scheme, "agent-tab", { width: 900, height: 700 });
       check(`${scheme}/900: 가로 넘침 0`, (await overflowX(page)) <= 0);
       await shot(page, `agent-tab-900-${scheme}`);
+      const fit900 = await permissionFit(page, "p2");
+      check(`${scheme}/900: 카드 위 진행 줄 56px+, 질문 줄·버튼 보임`, fitOk(fit900), fit900);
+      await page.getByTestId("agent-permission-reject").click();
+      await page.getByTestId("agent-permission-instruction").waitFor();
+      const fit900r = await permissionFit(page, "p2");
+      check(`${scheme}/900 거부 무장: 진행 줄·질문 줄·확정 버튼 보임`, fitOk(fit900r), fit900r);
+      await shot(page, `agent-tab-900-${scheme}-reject-armed`);
+      await page.keyboard.press("Escape");
       await context.close();
     }
     {
@@ -127,6 +146,8 @@ async function scenes(browser, origin) {
         })
       );
       check(`${scheme}/390: 권한 버튼이 칸 안에`, buttons.every((b) => b.right <= 390), { buttons });
+      const fit390 = await permissionFit(page, "p1");
+      check(`${scheme}/390: 질문 줄·버튼 보임, 두 버튼 높이 같음`, fitOk(fit390), fit390);
       await shot(page, `agent-one-390-${scheme}`);
       await context.close();
     }
