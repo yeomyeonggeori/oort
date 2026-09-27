@@ -6,7 +6,6 @@ import {
   AI_CONNECT_ROW_COPY,
   AI_CONNECT_SERVER_OFF_NOTE,
   HARNESS_LABEL,
-  HARNESS_PILL_LABEL,
   type HarnessPill,
 } from "@momo/core/features/onboarding/aiConnect";
 import { Button } from "@/design/ui/button";
@@ -22,8 +21,8 @@ import {
   AiPill,
   AiSection,
   AiSectionHead,
-  type AiPillTone,
 } from "./aiAccountsParts";
+import { harnessPillView } from "@momo/core/features/settings/aiLinkPill";
 
 // =============================================================================
 // 설정 › AI 연결 › 내 계정 · 이 맥 (#2877, 시안 §1·§6).
@@ -92,14 +91,6 @@ export function AiMyAccountsSection() {
   );
 }
 
-const PILL_TONE: Record<HarnessPill, AiPillTone> = {
-  ready: "ok",
-  login: "warn",
-  recheck: "warn",
-  checking: "mute",
-  install: "mute",
-};
-
 /**
  * design 모드 캡처 전용: `?aiProbe=claude-ready`. 브라우저에는 이 맥의 CLI가 없어
  * 감지 결과를 셸 없이 세울 수 없다. 제품 빌드에서는 늘 null이다.
@@ -167,6 +158,8 @@ function MyAccountRows() {
 }
 
 function MyAccountRow({ id, pill }: { id: LocalHarnessId; pill: HarnessPill }) {
+  // 판정은 코어 한 곳(#2941): 채팅 연결 카드의 같은 줄과 같은 알약이다.
+  const view = harnessPillView(pill);
   return (
     <li
       className="flex min-w-0 items-center gap-3 border-b border-line px-2 py-3"
@@ -179,7 +172,7 @@ function MyAccountRow({ id, pill }: { id: LocalHarnessId; pill: HarnessPill }) {
         <span className="truncate text-meta text-ink-muted">{ACCOUNT_DETAIL}</span>
       </div>
       <span className="shrink-0" data-testid={`my-account-${id}-state`}>
-        <AiPill tone={PILL_TONE[pill]}>{HARNESS_PILL_LABEL[pill]}</AiPill>
+        <AiPill tone={view.tone}>{view.text}</AiPill>
       </span>
       {/* 로그인이 필요한 줄은 알약만으로 끝나지 않는다: AI 연결 화면(재진입)의 그
           줄이 로그인 모달을 연다(design-review M-1). */}
