@@ -1,3 +1,4 @@
+import { LEGACY_OAUTH_CREDENTIAL_KIND } from "@momo/core/features/settings/aiLinkPill";
 import { record, str } from "@momo/core/lib/wire";
 
 // =============================================================================
@@ -322,7 +323,8 @@ export interface ProviderCredentialMeta {
   accessTokenExpiresAtMs?: number;
 }
 
-export const OAUTH_CREDENTIAL_KIND = "oauth-openai";
+/** 코어가 정본이다(#2941): 팀 연결 알약의 「읽기 전용」 판정이 같은 값을 쓴다. */
+export const OAUTH_CREDENTIAL_KIND = LEGACY_OAUTH_CREDENTIAL_KIND;
 
 /** `bearer` | `oauth-openai` | undefined (env fallback has no vault). */
 export function credentialKind(link: unknown): string | undefined {

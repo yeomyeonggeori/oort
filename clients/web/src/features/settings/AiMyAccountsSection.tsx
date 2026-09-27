@@ -1,12 +1,10 @@
 import type {
   LocalHarnessId,
-  LocalHarnessProbe,
 } from "@momo/core/features/hostedAgents/detect";
 import {
   AI_CONNECT_ROW_COPY,
   AI_CONNECT_SERVER_OFF_NOTE,
   HARNESS_LABEL,
-  HARNESS_PILL_LABEL,
   type HarnessPill,
 } from "@momo/core/features/onboarding/aiConnect";
 import { Button } from "@/design/ui/button";
@@ -22,8 +20,17 @@ import {
   AiPill,
   AiSection,
   AiSectionHead,
-  type AiPillTone,
 } from "./aiAccountsParts";
+import { harnessPillView } from "@momo/core/features/settings/aiLinkPill";
+import {
+  MY_ACCOUNTS_BROWSER_LINE,
+  MY_ACCOUNTS_DENIED_DETAIL,
+  MY_ACCOUNTS_EMPTY_DETAIL,
+  MY_ACCOUNTS_EMPTY_LINE,
+  MY_ACCOUNTS_ROW_DETAIL,
+  myAccountsBrowserTab,
+  readProbeFixture,
+} from "./aiMyAccountsModel";
 
 // =============================================================================
 // 설정 › AI 연결 › 내 계정 · 이 맥 (#2877, 시안 §1·§6).
@@ -46,13 +53,6 @@ import {
 
 export const MY_ACCOUNTS_HEADING_ID = "ai-my-accounts-title";
 
-const EMPTY_LINE = "아직 연결한 구독이 없어요.";
-const EMPTY_DETAIL =
-  "Claude나 ChatGPT 구독이 있으면 이 맥의 공식 CLI로 붙일 수 있어요.";
-const BROWSER_LINE =
-  "구독 계정은 데스크탑 앱에서만 연결하고 볼 수 있어요. 이 브라우저 탭에는 이 맥의 CLI가 없어요.";
-const DENIED_DETAIL = "구독 에이전트는 워크스페이스 owner·admin이 붙일 수 있어요.";
-const ACCOUNT_DETAIL = "구독 · 이 맥의 공식 CLI 기본 로그인";
 const OWN_ACCOUNT_FOOT =
   "본인 계정만 추가하세요. 이 계정은 이 맥에서 나만 씁니다. 팀 에이전트는 이 계정을 쓰지 않습니다.";
 
@@ -60,7 +60,7 @@ export function AiMyAccountsSection() {
   const state = useSubscriptionEntryState();
   // design 캡처의 `?aiEntry=desktop-only`는 브라우저 탭을 흉내 낸다. 그 밖에는
   // 셸 종류가 답한다. 빌드가 구독 표면을 걷었어도 브라우저 탭 사실은 그대로다.
-  const browserTab = state === "desktop-only" || (!IS_TAURI && state !== "rows" && state !== "server-off");
+  const browserTab = myAccountsBrowserTab(state, IS_TAURI);
 
   return (
     <AiSection labelledBy={MY_ACCOUNTS_HEADING_ID} testId="ai-my-accounts">
@@ -69,13 +69,13 @@ export function AiMyAccountsSection() {
         <Skeleton ready={false} rows={1} className="py-3" />
       ) : browserTab ? (
         <AiLineRow testId="subscription-entry" surface="desktop-only" last>
-          <span data-testid="subscription-entry-detail">{BROWSER_LINE}</span>
+          <span data-testid="subscription-entry-detail">{MY_ACCOUNTS_BROWSER_LINE}</span>
         </AiLineRow>
       ) : state === "rows" ? (
         <MyAccountRows />
       ) : (
         <AiLineRow testId="subscription-entry" surface={state} last>
-          <span>{EMPTY_LINE}</span>
+          <span>{MY_ACCOUNTS_EMPTY_LINE}</span>
           {state === "server-off" && (
             <span className="text-meta text-ink-muted" data-testid="subscription-entry-detail">
               {AI_CONNECT_SERVER_OFF_NOTE}
@@ -83,36 +83,13 @@ export function AiMyAccountsSection() {
           )}
           {state === "denied" && (
             <span className="text-meta text-ink-muted" data-testid="subscription-entry-detail">
-              {DENIED_DETAIL}
+              {MY_ACCOUNTS_DENIED_DETAIL}
             </span>
           )}
         </AiLineRow>
       )}
     </AiSection>
   );
-}
-
-const PILL_TONE: Record<HarnessPill, AiPillTone> = {
-  ready: "ok",
-  login: "warn",
-  recheck: "warn",
-  checking: "mute",
-  install: "mute",
-};
-
-/**
- * design 모드 캡처 전용: `?aiProbe=claude-ready`. 브라우저에는 이 맥의 CLI가 없어
- * 감지 결과를 셸 없이 세울 수 없다. 제품 빌드에서는 늘 null이다.
- */
-function readProbeFixture(): LocalHarnessProbe[] | null {
-  if (import.meta.env.MODE !== "design") return null;
-  const hash = window.location.hash;
-  const query = hash.includes("?") ? hash.slice(hash.indexOf("?")) : window.location.search;
-  if (new URLSearchParams(query).get("aiProbe") !== "claude-ready") return null;
-  return [
-    { id: "claude", installed: true, auth: "logged_in" },
-    { id: "codex", installed: true, auth: "needs_login" },
-  ];
 }
 
 function MyAccountRows() {
@@ -140,9 +117,9 @@ function MyAccountRows() {
     return (
       <>
         <AiLineRow testId="subscription-entry" surface="rows" action={addButton}>
-          <span>{EMPTY_LINE}</span>
+          <span>{MY_ACCOUNTS_EMPTY_LINE}</span>
           <span className="text-meta text-ink-muted" data-testid="subscription-entry-detail">
-            {EMPTY_DETAIL}
+            {MY_ACCOUNTS_EMPTY_DETAIL}
           </span>
         </AiLineRow>
         <AiFoot>{OWN_ACCOUNT_FOOT}</AiFoot>
@@ -167,6 +144,8 @@ function MyAccountRows() {
 }
 
 function MyAccountRow({ id, pill }: { id: LocalHarnessId; pill: HarnessPill }) {
+  // 판정은 코어 한 곳(#2941): 채팅 연결 카드의 같은 줄과 같은 알약이다.
+  const view = harnessPillView(pill);
   return (
     <li
       className="flex min-w-0 items-center gap-3 border-b border-line px-2 py-3"
@@ -176,10 +155,10 @@ function MyAccountRow({ id, pill }: { id: LocalHarnessId; pill: HarnessPill }) {
       <AiLogo mark={AI_CONNECT_ROW_COPY[id].mark} />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-body font-semibold text-ink">{HARNESS_LABEL[id]}</span>
-        <span className="truncate text-meta text-ink-muted">{ACCOUNT_DETAIL}</span>
+        <span className="truncate text-meta text-ink-muted">{MY_ACCOUNTS_ROW_DETAIL}</span>
       </div>
       <span className="shrink-0" data-testid={`my-account-${id}-state`}>
-        <AiPill tone={PILL_TONE[pill]}>{HARNESS_PILL_LABEL[pill]}</AiPill>
+        <AiPill tone={view.tone}>{view.text}</AiPill>
       </span>
       {/* 로그인이 필요한 줄은 알약만으로 끝나지 않는다: AI 연결 화면(재진입)의 그
           줄이 로그인 모달을 연다(design-review M-1). */}
