@@ -80,10 +80,8 @@ name: 92-ai-connect-capture
           direction: UP
 - tapOn:
     id: "ai-connect-card-team-check"
-- extendedWaitUntil:
-    visible:
-      id: "ai-connect-card-team-result"
-    timeout: 30000
+# 결과 줄은 몸 스크롤의 아래에 설 수 있다(큰 글씨 SE 의 몸 창은 좁다) — 먼저 끌어
+# 올리고 기다린다.
 - repeat:
     times: 3
     commands:
@@ -91,4 +89,8 @@ name: 92-ai-connect-capture
           from:
             id: "ai-connect-card-scroll"
           direction: UP
+- extendedWaitUntil:
+    visible:
+      id: "ai-connect-card-team-result"
+    timeout: 30000
 - takeScreenshot: ai-connect-check-result
