@@ -329,5 +329,5 @@ export const PROFILE_LOGIN_SPAWN_DETAIL =
 
 /** 로그인 모달이 어느 계정 폴더에 로그인하는지(design-review #2878 M-6). */
 export function profileLoginLine(harness: LocalHarnessId, profile: string): string {
-  return `${myAccountRowTitle({ harness, profile })} 계정에 로그인합니다. 이 계정의 브라우저 로그인을 쓰세요.`;
+  return `${myAccountRowTitle({ harness, profile })} 계정에 로그인합니다. 브라우저에서 이 계정으로 로그인하세요.`;
 }

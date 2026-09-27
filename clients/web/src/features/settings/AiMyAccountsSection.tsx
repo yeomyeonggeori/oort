@@ -265,6 +265,13 @@ function MyAccountRows({ onAddApiKey }: { onAddApiKey?: () => void }) {
       : myAccountRows({ probes: harness.probes, profiles, hiddenDefaults: hidden })
           .map((row) => row.key)
           .join("|");
+  // 한 번 쓰고 버리는 표지: 줄이 곧 사라지지 않으면(드문 경우) 5초 뒤 내린다.
+  // 나중의 관련 없는 목록 변화가 초점을 끌어가지 않게(2차 design-review L-1).
+  useEffect(() => {
+    if (!refocusAfterRemoval) return;
+    const timer = window.setTimeout(() => setRefocusAfterRemoval(false), 5_000);
+    return () => window.clearTimeout(timer);
+  }, [refocusAfterRemoval]);
   useEffect(() => {
     if (!refocusAfterRemoval || unlink !== null) return;
     const opener = unlinkOpener.current;
