@@ -163,7 +163,17 @@ async fn start_server(pool: PgPool, operator_email: &str) -> String {
         env_provider: momo_settings::ProviderConfig::default(),
         platform_admin_emails: vec![operator_email.to_ascii_lowercase()],
         environment: "local".to_string(),
-    });
+    })
+    // #2960: the probe really dials now. `api.example.com` must not become a
+    // real DNS lookup from CI, so this suite's resolver answers nothing — the
+    // same "no such host" a real `.example.com` gives, deterministically.
+    .with_provider_probe(std::sync::Arc::new(
+        momo_provider_probe::GuardedProviderProbe::with_lookup(
+            momo_settings::EgressPolicy::default(),
+            std::sync::Arc::new(NoAnswer),
+            std::time::Duration::from_secs(5),
+        ),
+    ));
     let app = build_app(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -173,6 +183,20 @@ async fn start_server(pool: PgPool, operator_email: &str) -> String {
         let _ = axum::serve(listener, app).await;
     });
     format!("http://{address}")
+}
+
+/// A resolver with no answers (#2960 — see `start_server`).
+struct NoAnswer;
+
+impl momo_provider_probe::HostLookup for NoAnswer {
+    fn lookup(
+        &self,
+        _host: String,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = std::io::Result<Vec<std::net::IpAddr>>> + Send>,
+    > {
+        Box::pin(async { Ok(Vec::new()) })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -473,7 +497,7 @@ async fn the_settings_panels_read_and_write_round_trip() {
         "a parked hop is not attempted"
     );
 
-    // -- 5. AI 연결 (확인) — the honest probe -------------------------------
+    // -- 5. AI 연결 (확인) — the live probe (#2960) ---------------------------
     let probe: Value = auth(http.post(format!("{base}/v1/provider/link/test")))
         .send()
         .await
@@ -483,10 +507,12 @@ async fn the_settings_panels_read_and_write_round_trip() {
         .expect("probe body");
     assert_eq!(probe["schema"], "momo.provider_link.test.v0");
     assert_eq!(
-        probe["reason"], "probe_not_run",
-        "this server has no HTTP client, and says so rather than blaming the \
-         provider it never dialled: {probe}"
+        probe["reason"], "provider_unreachable",
+        "the head was dialled and its name did not resolve: {probe}"
     );
+    assert_eq!(probe["entries"][0]["probe"]["outcome"], "unreachable");
+    assert_eq!(probe["entries"][0]["disposition"], "fall_over");
+    assert!(!probe.to_string().contains(TEST_BEARER));
     assert_eq!(probe["cascadeOk"], json!(false));
     assert_eq!(
         probe["entries"][1]["reason"], "hop_disabled",

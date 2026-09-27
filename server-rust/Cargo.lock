@@ -1363,6 +1363,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "momo-provider-probe"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "hex",
+ "momo-settings",
+ "reqwest",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "momo-push"
 version = "0.0.0"
 dependencies = [
@@ -1440,6 +1455,7 @@ dependencies = [
  "momo-messaging",
  "momo-notifier",
  "momo-outbox",
+ "momo-provider-probe",
  "momo-push",
  "momo-settings",
  "momo-t3",
