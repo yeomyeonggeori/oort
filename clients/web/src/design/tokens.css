@@ -2459,6 +2459,52 @@
   inline-size: 44px;
   block-size: 44px;
 }
+/* 채팅 로컬 연결 카드 (#2944 GC-3, 시안 claudedocs/chat-genui-connect/mockups.html
+ * `.ccard`·`.row`·`.res`·`.keyf`). 카드 폭은 메시지 본문 최대폭 620, 줄은
+ * 로고 30 · 이름 1fr · 알약 · 행동, 간격 12(시안 10을 격자의 12로). 결과 줄과 키
+ * 입력 칸은 이름 칸부터 끝까지 선다. 폭 판정은 그릇이다: 460 아래에서는 행동이
+ * 이름 칸 아래로 내려간다(390 폭에서 이름이 0으로 눌리지 않게, 시안 폰 `.row`). */
+@utility ai-card {
+  container-type: inline-size;
+  min-inline-size: 0;
+  max-inline-size: 620px;
+}
+@utility ai-card-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "logo name pill"
+    ". act act"
+    ". res res"
+    ". form form";
+  column-gap: var(--spacing-3);
+  row-gap: var(--spacing-1);
+  align-items: center;
+
+  @container (width >= 460px) {
+    grid-template-columns: 30px minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "logo name pill act"
+      ". res res res"
+      ". form form form";
+  }
+}
+.ai-card-row > [data-slot="logo"] { grid-area: logo; }
+.ai-card-row > [data-slot="name"] { grid-area: name; }
+.ai-card-row > [data-slot="pill"] { grid-area: pill; }
+.ai-card-row > [data-slot="act"] { grid-area: act; justify-self: start; }
+.ai-card-row > [data-slot="res"] { grid-area: res; }
+.ai-card-row > [data-slot="form"] { grid-area: form; }
+/* 좁은 그릇(460 아래)에서 머리의 「설정에서 열기」 글자를 접고 아이콘만 남긴다. */
+@utility ai-card-wide {
+  @container (width < 460px) {
+    display: none;
+  }
+}
+@utility ai-logo-sm {
+  inline-size: 30px;
+  block-size: 30px;
+}
 /* ⋯ 28 (시안 `.more`). */
 @utility ai-more {
   inline-size: 28px;

@@ -5,13 +5,13 @@
 // 실제 빌드(dist)를 실브라우저에서 돌려 **제품의 컴포저**가 아래를 하는지 잰다.
 // 유닛 시험이 하네스로 잰 것을 여기서는 진짜 전송 경로(POST /messages)로 다시 잰다.
 //
-//   1. `/연` → 명령 목록(4줄), ↵ → **전송 없이** 설정 › AI 연결로 간다(카드 본체
-//      GC-3 전의 계약된 폴백). 컴포저 본문과 초안이 비워진다.
+//   1. `/연` → 명령 목록(4줄), ↵ → **전송 없이** 이 채널의 타임라인 꼬리에 로컬
+//      연결 카드가 선다(#2944 GC-3). 컴포저 본문과 초안이 비워진다.
 //   2. 키 모양을 붙이고 ↵ → **전송 없음**, 입력창 위 경고 한 줄, 글은 남고, 초안
 //      저장소에 키가 없다.
 //   3. 알 수 없는 `/shrug` ↵ → 평문 전송(POST 1회, 본문 그대로).
 //   4. 문장 중간의 `/연결`은 목록을 열지 않는다.
-//   5. ⌘K 「AI 연결 카드 열기」 → 채널 안이라도 카드 자리가 없으면 설정 › AI 연결.
+//   5. ⌘K 「AI 연결 카드 열기」 → 채널 안이면 같은 카드(「이 채널 · 나에게만」), 닫기 ×.
 //
 // SLASH_GATE_SHOTS=1 이면 라이트·다크 × 1280·900 캡처를 `captures/2942/`에 남긴다.
 // 가짜 키는 조각을 이어 실행 중에 만든다 — 이 파일에 키 모양 리터럴은 없다.
@@ -165,6 +165,9 @@ async function installRoutes(context, posted) {
     if (path === "/v1/auth/refresh")
       return json(route, { accessToken: session.accessToken, refreshToken: session.refreshToken });
     if (path.endsWith("/roster")) return json(route, { members: roster });
+    // 팀 연결은 운영자만(#2944 카드의 팀 절). 이 게이트는 입구만 잰다.
+    if (path.startsWith("/v1/provider/link"))
+      return json(route, { error: { code: "forbidden", message: "operator required" } }, 403);
     if (path.endsWith("/channels")) return json(route, { channels });
     if (path.endsWith("/read-state")) return json(route, { read_states: [] });
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
@@ -230,26 +233,33 @@ async function exercise(browser) {
   await openChannel(page);
   const input = page.getByTestId("composer-input");
 
-  // ---- 1. `/연` → 목록 → ↵ → 설정 › AI 연결, 전송 없음 ----------------------
+  // ---- 1. `/연` → 목록 → ↵ → 로컬 카드, 전송 없음 ----------------------------
   await input.click();
   await page.keyboard.type("/연");
   const options = page.getByTestId("composer-command-option");
   await options.first().waitFor({ timeout: 5_000 });
   const labels = await options.allTextContents();
-  // 카드 자리가 없는 채널(GC-3 전): 명령당 한 줄, 설정 폴백을 말한다(review H-1).
-  if (labels.length !== 1) fail(`/연 목록이 한 줄로 접히지 않았다: ${JSON.stringify(labels)}`);
-  if (!labels[0].includes("/연결") || !labels[0].includes("설정 › AI 연결로 이동"))
-    fail(`첫 줄이 설정 폴백을 말하지 않는다: ${labels[0]}`);
-  if (labels[0].includes("나에게만")) fail("카드 자리가 없는데 「나에게만」을 약속한다");
+  // 카드 자리가 있는 채널(#2944 GC-3): 명령 + 인자 셋, 「나에게만 보여요」를 약속한다.
+  if (labels.length !== 4) fail(`/연 목록이 4줄이 아니다: ${JSON.stringify(labels)}`);
+  if (!labels[0].includes("/연결") || !labels[0].includes("나에게만 보여요"))
+    fail(`첫 줄이 「/연결 · 나에게만 보여요」가 아니다: ${labels[0]}`);
   const expanded = await input.getAttribute("aria-expanded");
   if (expanded !== "true") fail("목록이 떴는데 입력창 aria-expanded 가 참이 아니다");
+  const before = await hash(page);
   await page.keyboard.press("Enter");
-  await page.waitForFunction(() => window.location.hash.startsWith("#/settings"), undefined, { timeout: 5_000 });
+  const card = page.getByTestId("ai-connect-card");
+  await card.waitFor({ timeout: 5_000 });
   const landed = await hash(page);
-  if (landed !== "#/settings?section=ai") fail(`/연결 ↵ 가 설정 › AI 연결로 가지 않았다: ${landed}`);
+  if (landed !== before) fail(`/연결 ↵ 가 채널을 떠났다: ${landed}`);
+  if ((await page.locator("[data-testid='timeline-tail'] [data-testid='ai-connect-card']").count()) !== 1)
+    fail("카드가 타임라인 꼬리에 서지 않았다");
+  if (!(await card.textContent())?.includes("나에게만 보여요")) fail("카드에 「나에게만 보여요」가 없다");
   if (posted.length !== 0) fail(`명령이 메시지로 전송됐다: ${JSON.stringify(posted)}`);
   if ((await draftsHold(page, "/연")) !== null) fail("명령 글자가 초안에 남았다");
-  console.log(`[1] /연 → 한 줄(설정 폴백) → ↵ → ${landed}, 전송 0`);
+  if ((await input.inputValue()) !== "") fail("명령 글자가 컴포저에 남았다");
+  console.log(`[1] /연 → 4줄 → ↵ → 타임라인 꼬리 카드, 채널 그대로, 전송 0`);
+  await page.getByTestId("ai-connect-card-close").click();
+  if ((await card.count()) !== 0) fail("× 가 카드를 닫지 않았다");
 
   // ---- 1b. 목록을 Esc로 닫고 ↵ 해도 명령은 메시지가 아니다 --------------------
   await openChannel(page);
@@ -259,10 +269,12 @@ async function exercise(browser) {
   await page.keyboard.press("Escape");
   if ((await options.count()) !== 0) fail("Esc 가 명령 목록을 닫지 않았다");
   await page.keyboard.press("Enter");
-  await page.waitForFunction(() => window.location.hash.startsWith("#/settings"), undefined, { timeout: 5_000 });
+  await card.waitFor({ timeout: 5_000 });
+  if ((await card.getAttribute("data-line")) !== "codex") fail("/connect codex 가 codex 줄 카드를 열지 않았다");
   if (posted.length !== 0) fail(`Esc 뒤 ↵ 가 명령을 전송했다: ${JSON.stringify(posted)}`);
   if ((await draftsHold(page, "/connect")) !== null) fail("Esc 뒤 실행한 명령이 초안에 남았다");
-  console.log("[1b] /connect codex → Esc → ↵ → 설정, 전송 0");
+  console.log("[1b] /connect codex → Esc → ↵ → codex 줄 카드, 전송 0");
+  await page.getByTestId("ai-connect-card-close").click();
 
   // ---- 2. 키 붙여넣기 → 전송 없음, 경고, 글 남음, 초안 없음 -------------------
   await openChannel(page);
@@ -300,12 +312,13 @@ async function exercise(browser) {
   console.log("[4] 문장 중간 /연결 → 목록 없음");
   await input.fill("");
 
-  // ---- 5. ⌘K 「AI 연결 카드 열기」 → 폴백 이동 -------------------------------
+  // ---- 5. ⌘K 「AI 연결 카드 열기」 → 같은 카드 -------------------------------
   await page.keyboard.press("ControlOrMeta+k");
   const row5 = page.getByTestId("switcher-ai-connect");
   await row5.waitFor({ timeout: 5_000 });
   const meta = await row5.textContent();
-  if (!meta?.includes("설정에서 열려요")) fail(`카드 자리가 없는데 줄이 「설정에서 열려요」를 말하지 않는다: ${meta}`);
+  if (!meta?.includes("이 채널 · 나에게만")) fail(`카드 자리가 있는데 줄이 「이 채널 · 나에게만」을 말하지 않는다: ${meta}`);
+  const before5 = await hash(page);
   // 시안 ①: 「ai 연결」을 치면 첫 강조가 「AI 연결 카드 열기」다(review H-2).
   await page.keyboard.type("ai 연결");
   await wait(300);
@@ -323,10 +336,12 @@ async function exercise(browser) {
   await page.keyboard.type("ai 연결");
   await wait(300);
   await page.keyboard.press("Enter");
-  await page.waitForFunction(() => window.location.hash.startsWith("#/settings"), undefined, { timeout: 5_000 });
-  if ((await hash(page)) !== "#/settings?section=ai") fail("⌘K 줄이 설정 › AI 연결로 가지 않았다");
+  await card.waitFor({ timeout: 5_000 });
+  if ((await hash(page)) !== before5) fail("⌘K 줄이 채널을 떠났다");
+  if ((await card.getAttribute("data-line")) !== "all") fail("⌘K 카드가 두 절 전부를 열지 않았다");
   if (posted.length !== 1) fail("⌘K 줄이 무언가를 전송했다");
-  console.log("[5] ⌘K 「ai 연결」 첫 강조 = AI 연결 카드 열기 → ↵ → #/settings?section=ai (GC-3 전 폴백), 검색 줄 유지");
+  console.log("[5] ⌘K 「ai 연결」 첫 강조 = AI 연결 카드 열기 → ↵ → 이 채널의 카드(두 절), 검색 줄 유지");
+  await page.keyboard.press("Escape");
 
   await context.close();
 }
@@ -394,7 +409,7 @@ async function main() {
   }
   console.log("GATE PASS: `/`는 맨 앞에서만 열렸고, 명령은 전송되지 않고 실행됐고, 키는");
   console.log("           보내지 않고 이유를 말했으며 초안에도 남지 않았고, 모르는 `/`는");
-  console.log("           평문으로 갔고, ⌘K 줄은 카드 자리가 없어 설정 › AI 연결로 갔다.");
+  console.log("           평문으로 갔고, ⌘K 줄은 이 채널에 같은 카드를 열었다.");
 }
 
 await main();

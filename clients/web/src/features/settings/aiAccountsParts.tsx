@@ -50,13 +50,26 @@ export function AiSource({ children }: { children: ReactNode }) {
 }
 
 /** 시안 `.lg`: 로고 칸. 글자 한두 개를 싣는다(회사 로고 자산은 쓰지 않는다). */
-export function AiLogo({ mark, large = false }: { mark: string; large?: boolean }) {
+export function AiLogo({
+  mark,
+  large = false,
+  small = false,
+}: {
+  mark: string;
+  large?: boolean;
+  /** 채팅 연결 카드의 줄(시안 `.lg` 30, #2944). */
+  small?: boolean;
+}) {
   return (
     <span
       aria-hidden="true"
       className={cn(
         "grid shrink-0 place-items-center border border-line font-bold text-ink",
-        large ? "ai-logo-lg rounded-lg bg-surface text-body" : "ai-logo rounded-md bg-surface-muted text-meta"
+        large
+          ? "ai-logo-lg rounded-lg bg-surface text-body"
+          : small
+            ? "ai-logo-sm rounded-md bg-surface-muted text-meta"
+            : "ai-logo rounded-md bg-surface-muted text-meta"
       )}
     >
       {mark}
