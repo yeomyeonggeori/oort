@@ -1,6 +1,7 @@
 import { forwardRef, type ReactNode } from "react";
 import { Loader2, Lock, MoreHorizontal, WifiOff, X } from "lucide-react";
 import type { AiPillTone } from "@momo/core/features/settings/aiLinkPill";
+import { literalSegments } from "@momo/core/features/settings/teamKeyForm";
 import { cn } from "@/design/lib/cn";
 
 // =============================================================================
@@ -335,5 +336,53 @@ export function AiOfflineBanner() {
         보여 주고, 바꾸기는 다시 연결된 뒤에 할 수 있어요. 내 계정(이 맥)은 그대로 쓸 수 있어요.
       </p>
     </div>
+  );
+}
+
+/**
+ * 「연결 확인」 결과 문장(#2975). 서버 환경 변수 이름은 그대로 쳐야 하는 글자라
+ * 고정폭으로 그리고, 줄은 밑줄 뒤에서만 갈린다: `…LOO|PBACK`처럼 낱말 가운데서
+ * 갈리지 않는다(design-review M1). 통째 nowrap은 390 폭 카드를 넘친다.
+ * 설정 곁판과 채팅 연결 카드가 같이 쓴다.
+ */
+export function CheckSentence({ text }: { text: string }) {
+  return (
+    <>
+      {literalSegments(text).map((seg, index) =>
+        seg.literal ? (
+          <code key={index} className="font-mono" data-slot="literal">
+            {seg.text.split("_").map((piece, at, all) => (
+              <span key={at}>
+                {piece}
+                {at < all.length - 1 && (
+                  <>
+                    _<wbr />
+                  </>
+                )}
+              </span>
+            ))}
+          </code>
+        ) : (
+          seg.text
+        )
+      )}
+    </>
+  );
+}
+
+/**
+ * provider가 밝힌 숫자 줄. 칸 안에서는 줄을 바꾸지 않고, 구분점은 다음 칸에 붙어
+ * 줄 머리로 간다(줄 끝에 「198 남음 ·」이 매달리지 않게, design-review N2).
+ */
+export function CheckNumbers({ parts }: { parts: readonly string[] }) {
+  return (
+    <>
+      {parts.map((part, index) => (
+        <span key={index}>
+          {index > 0 && " "}
+          <span className="whitespace-nowrap">{index > 0 ? `· ${part}` : part}</span>
+        </span>
+      ))}
+    </>
   );
 }

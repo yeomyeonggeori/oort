@@ -18,6 +18,7 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
+import {StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -26,6 +27,7 @@ import {
   MessageRow,
   type MessageRowActions,
 } from '../src/features/conversation/MessageRow';
+import {CONV} from '../src/features/conversation/convDesign';
 import {SessionProvider} from '../src/session/useSession';
 
 // =============================================================================
@@ -179,6 +181,15 @@ describe('대상 본인 — 폰 읽기 카드', () => {
       'ai-suggest-team-check',
     ]);
     expect(within(card).queryByText('Claude 구독 연결')).toBeNull();
+  });
+
+  it('합친 팀 절은 제안 카드의 가장자리(CONV.cardPad)를 따른다 (#2945 R3-H1)', async () => {
+    renderRow(message({...G3, args: {}}), REQUESTER);
+    await screen.findByTestId('ai-suggest-team', {}, {timeout: 5000});
+    const pad = (id: string) =>
+      StyleSheet.flatten(screen.getByTestId(id).props.style).paddingHorizontal;
+    expect(pad('ai-suggest-team-section')).toBe(CONV.cardPad);
+    expect(pad('ai-suggest-team-section')).toBe(pad('ai-suggest-mine'));
   });
 
   it('팀 알약은 provider_link 응답 → 코어 linkPill(웹·설정과 같은 판정)', async () => {
