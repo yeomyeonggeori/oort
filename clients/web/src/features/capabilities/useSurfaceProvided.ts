@@ -45,6 +45,8 @@ export function useWorkHostPresence(): WorkHostPresence {
   const query = useWorkHosts(workspaceId, WORK_HOST_PRESENCE_POLL_MS, probe);
   if (!probe) return "present";
   if (query.data !== undefined) {
+    // 관전·관제 표면의 판정이라 누구의 호스트든 센다(#2854 planner 결정 (a)).
+    // 일을 시키는 표면만 `isWorkHostUsableBy`로 좁힌다(세션 이어받기 대상).
     return hasOnlineWorkHost(query.data) ? "present" : "absent";
   }
   return query.isError ? "error" : "unknown";

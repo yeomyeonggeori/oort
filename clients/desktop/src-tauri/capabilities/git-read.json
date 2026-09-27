@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "local-git-read",
+  "description": "Local git reads for the work tab (ADR-0190 D3-c, #2855): one command that runs one of eight fixed read-only git commands in a pane's folder and returns parsed fields. For the main window's own webview (label `main`) on the bundled (local) origin only, scoped by webview like pty.json so a child webview does not inherit it. No `remote` entry: a page from the network must never reach it.",
+  "webviews": [
+    "main"
+  ],
+  "platforms": [
+    "macOS",
+    "windows",
+    "linux"
+  ],
+  "permissions": [
+    "allow-workbench-git-read"
+  ]
+}

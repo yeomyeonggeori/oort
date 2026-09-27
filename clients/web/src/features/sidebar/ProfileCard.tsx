@@ -58,12 +58,18 @@ export function ProfileCard({
   selfMember,
   selfName,
   connected,
+  compact = false,
 }: {
   workspaceId: string;
   selfMemberId: string;
   selfMember: RosterMember | null | undefined;
   selfName: string;
   connected: boolean;
+  /**
+   * 작업 탭 레일(#2854, 시안 ① `.rail`의 아바타)에서는 이름 없이 아바타만 선다.
+   * 메뉴는 같다. 이름은 단추의 접근 이름과 툴팁이 말한다.
+   */
+  compact?: boolean;
 }) {
   const navigate = useNavigate();
   const { logout } = useSession();
@@ -93,13 +99,17 @@ export function ProfileCard({
           <button
             ref={triggerRef}
             type="button"
-            data-testid="profile-card"
+            data-testid={compact ? "profile-card-rail" : "profile-card"}
             aria-label={triggerName}
             title={triggerName}
-            className="tap-target flex min-w-0 flex-1 items-center gap-2 rounded-sm px-1 text-left press hover:bg-surface-hover focus-visible:focus-ring"
+            className={
+              compact
+                ? "flex size-rail-tile shrink-0 items-center justify-center rounded-md press hover:bg-surface-hover focus-visible:focus-ring"
+                : "tap-target flex min-w-0 flex-1 items-center gap-2 rounded-sm px-1 text-left press hover:bg-surface-hover focus-visible:focus-ring"
+            }
           >
             <PresenceBadge selfName={selfName} effective={effective} />
-            <span className="flex min-w-0 flex-1 flex-col">
+            <span className={compact ? "hidden" : "flex min-w-0 flex-1 flex-col"}>
               <span className="truncate text-body" data-testid="self-name">
                 {selfName}
               </span>

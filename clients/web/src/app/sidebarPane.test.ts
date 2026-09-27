@@ -148,7 +148,8 @@ describe("접힘 계약 (#1864)", () => {
     expect(sidebarSource).toContain('data-testid="open-quick-switcher"');
     expect(sidebarSource).toContain('testId="channel-item"');
     expect(sidebarSource).toContain("ProfileCard");
-    expect(sidebarSource).toContain("hidden={treeHidden}");
+    // #2854: 「내 작업」 레일 동안에도 트리는 숨는다(언마운트하지 않는다).
+    expect(sidebarSource).toContain("hidden={treeHidden || workRail}");
     expect(railSource).toContain("hidden={hidden}");
     expect(paintSource).toContain("transitionend");
     expect(paintSource).toContain("prefersReducedMotion");

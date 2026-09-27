@@ -178,6 +178,17 @@ describe("명령 레지스트리", () => {
     expect(status("nav.settings.agents")).toBe("에이전트 자격으로 이동");
   });
 
+  it("작업 콘솔은 웹이면 /work, 데스크탑이면 /work?view=console로 간다 (#2854 — 데스크탑 /work는 「내 작업」 격자)", () => {
+    const command = visibleCommands(env()).find((c) => c.id === "nav.workConsole")!;
+    const web = context();
+    command.run(web);
+    const desktop = { ...context(), desktop: true };
+    const result = command.run(desktop);
+    expect(web.navigate.mock.calls).toEqual([["/work"]]);
+    expect(desktop.navigate.mock.calls).toEqual([["/work?view=console"]]);
+    expect(result.status).toBe("작업 콘솔로 이동");
+  });
+
   it("설정 갈래의 두 명령이 제 경로로 간다", () => {
     const commands = visibleCommands(env());
     const ctx = context();
