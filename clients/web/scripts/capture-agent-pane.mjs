@@ -69,7 +69,20 @@ async function permissionFit(page, paneId) {
     const btns = [...card.querySelectorAll("button")].map((b) => b.getBoundingClientRect());
     const within = (r) => r.top >= cardBox.top - 1 && r.bottom <= cardBox.bottom + 1 && r.top >= pane.top && r.bottom <= pane.bottom;
     const armBtns = [...card.querySelectorAll('[data-testid="agent-permission-allow"],[data-testid="agent-permission-reject"]')].map((b) => Math.round(b.getBoundingClientRect().height));
+    // 일부러 접은 미리보기(거부 무장·낮은 칸)는 재지 않는다. 보이는 미리보기만 한 줄 이상이어야 한다.
+    const preEl = card.querySelector('[data-testid="agent-permission-preview"]');
+    const pre = preEl && getComputedStyle(preEl).display !== "none" ? preEl : null;
+    const ta = card.querySelector('[data-testid="agent-permission-instruction"]');
+    const bottomRow = card.querySelector(".agent-perm-sticky-bottom")?.getBoundingClientRect();
+    let taClear = true;
+    if (ta) {
+      const r = ta.getBoundingClientRect();
+      taClear = r.height >= 40 && (!bottomRow || r.bottom <= bottomRow.top + 1) && r.top >= head.bottom - 1;
+    }
     return {
+      previewLines: pre ? Math.floor(pre.clientHeight / parseFloat(getComputedStyle(pre).lineHeight)) : null,
+      previewInView: pre ? pre.getBoundingClientRect().top >= head.bottom - 1 && pre.getBoundingClientRect().bottom <= (bottomRow?.top ?? cardBox.bottom) + 1 : null,
+      textareaClear: taClear,
       feedVisible: Math.round(Math.min(scroll.bottom, cardBox.top) - scroll.top),
       headVisible: within(head) && (!firstBtn || head.bottom <= firstBtn.top + 1),
       buttonsVisible: btns.every(within),
@@ -79,7 +92,14 @@ async function permissionFit(page, paneId) {
 }
 
 function fitOk(fit) {
-  return fit.feedVisible >= 56 && fit.headVisible && fit.buttonsVisible && new Set(fit.armHeights).size <= 1;
+  return (
+    fit.feedVisible >= 56 &&
+    fit.headVisible &&
+    fit.buttonsVisible &&
+    new Set(fit.armHeights).size <= 1 &&
+    (fit.previewLines === null || (fit.previewLines >= 1 && fit.previewInView)) &&
+    fit.textareaClear
+  );
 }
 
 async function scenes(browser, origin) {
@@ -127,13 +147,21 @@ async function scenes(browser, origin) {
       check(`${scheme}/900: 가로 넘침 0`, (await overflowX(page)) <= 0);
       await shot(page, `agent-tab-900-${scheme}`);
       const fit900 = await permissionFit(page, "p2");
-      check(`${scheme}/900: 카드 위 진행 줄 56px+, 질문 줄·버튼 보임`, fitOk(fit900), fit900);
-      await page.getByTestId("agent-permission-reject").click();
-      await page.getByTestId("agent-permission-instruction").waitFor();
-      const fit900r = await permissionFit(page, "p2");
-      check(`${scheme}/900 거부 무장: 진행 줄·질문 줄·확정 버튼 보임`, fitOk(fit900r), fit900r);
-      await shot(page, `agent-tab-900-${scheme}-reject-armed`);
-      await page.keyboard.press("Escape");
+      // 낮은 칸(약 300): 요청을 다 보일 수 없으니 결정 버튼은 꺼지고 한 줄로 말한다.
+      const cramped = await page.evaluate(() => {
+        const card = document.querySelector('[data-pane-id="p2"] [data-testid="agent-permission"]');
+        return {
+          allowDisabled: card.querySelector('[data-testid="agent-permission-allow"]').disabled,
+          rejectDisabled: card.querySelector('[data-testid="agent-permission-reject"]').disabled,
+          line: card.querySelector('[data-testid="agent-permission-unavailable"]')?.textContent ?? null,
+        };
+      });
+      check(
+        `${scheme}/900: 낮은 칸은 결정 버튼 꺼짐 + 칸 키우기 안내, 질문 줄·진행 줄 보임`,
+        cramped.allowDisabled && cramped.rejectDisabled && (cramped.line ?? "").includes("칸을 키우면") &&
+          fit900.feedVisible >= 56 && fit900.headVisible && fit900.buttonsVisible,
+        { ...cramped, ...fit900 }
+      );
       await context.close();
     }
     {

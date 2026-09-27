@@ -69,7 +69,8 @@ export function summaryOf(model: AgentPaneModel): AgentPaneSummary {
   return {
     title: model.goal,
     harness: model.harness,
-    status: model.status,
+    // 관전자에게 권한 요청은 「나를 기다림」이 아니고 도는 것도 아니다: 빈 원(대기).
+    status: pending && !model.viewerIsOwner ? "idle" : model.status,
     waitingLine:
       model.status === "waiting" && pending
         ? pending.tool?.headline ?? "권한 확인을 기다려요"

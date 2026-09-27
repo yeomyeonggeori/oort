@@ -68,6 +68,28 @@ export interface AgentPaneActions {
 }
 
 export const DECIDE_UNAVAILABLE = "이 서버는 아직 칸에서 한 권한 결정을 받지 않아요. 결정 경로가 열리면 여기서 허락할 수 있어요.";
+export const CRAMPED_LINE = "칸이 낮아 요청을 다 보일 수 없어요. 칸을 키우면(⌘⇧↵) 결정할 수 있어요.";
+
+/**
+ * 칸 높이가 이보다 낮으면 권한 카드가 질문·미리보기·결정 칸을 함께 보일 수 없다
+ * (격자 반 높이의 900×700 창에서 진행 뷰 약 270). 1280×800 반 높이(약 318)는 넘는다.
+ */
+const CRAMPED_HEIGHT = 290;
+
+function useCramped(ref: React.RefObject<HTMLElement>): boolean {
+  const [cramped, setCramped] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const measure = () => setCramped(el.getBoundingClientRect().height < CRAMPED_HEIGHT && el.getBoundingClientRect().height > 0);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+  return cramped;
+}
+
 export const REPLY_UNAVAILABLE = "이 서버는 아직 칸에서 보낸 지시를 받지 않아요.";
 
 const KIND_ICON: Record<ToolCardKind, typeof FileText> = {
@@ -126,10 +148,14 @@ export function AgentProgressView({
   }, [model.feed.length]);
 
   const [planOpen, setPlanOpen] = useState(true);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const cramped = useCramped(rootRef);
   const planId = useId();
 
   return (
     <div
+      ref={rootRef}
+      data-cramped={cramped ? "" : undefined}
       className={cn("agent-pane flex min-h-0 min-w-0 flex-1 flex-col bg-surface text-ink", className)}
       data-testid="agent-pane"
       data-status={model.status}
@@ -221,6 +247,7 @@ export function AgentProgressView({
           viewerIsOwner={model.viewerIsOwner}
           ownerName={ownerName}
           decide={actions.decide}
+          cramped={cramped}
         />
       ) : null}
 
@@ -361,14 +388,21 @@ function PermissionCard({
   viewerIsOwner,
   ownerName,
   decide,
+  cramped,
 }: {
   sessionId: string;
   permission: PendingPermission;
   viewerIsOwner: boolean;
   ownerName: string | null;
   decide: AgentPaneActions["decide"];
+  /** 칸이 너무 낮아 요청과 결정 칸을 함께 보일 수 없다. */
+  cramped: boolean;
 }) {
   const [armed, setArmed] = useState<Armed>(null);
+  // 무장한 채 칸이 낮아지면 푼다(보이지 않는 확정 버튼을 남기지 않는다).
+  useEffect(() => {
+    if (cramped && armed !== null) setArmed(null);
+  }, [cramped, armed]);
   const armedAt = useRef(0);
   const [instruction, setInstruction] = useState("");
   const [busy, setBusy] = useState(false);
@@ -413,7 +447,7 @@ function PermissionCard({
   const commit = async (kind: "allow_once" | "reject_once") => {
     if (Date.now() - armedAt.current < CONFIRM_GUARD_MS) return;
     const choice = kind === "allow_once" ? permission.allow : permission.reject;
-    if (!decide || !choice || busy) return;
+    if (!decide || !choice || busy || cramped) return;
     if (kind === "allow_once" && !canAllow(permission)) return;
     setBusy(true);
     setError(null);
@@ -438,7 +472,9 @@ function PermissionCard({
   };
   const allowable = canAllow(permission);
   const unavailable = decide === null;
-  const describedBy = unavailable ? unavailableId : undefined;
+  // 낮은 칸에서는 요청을 다 보이지 못하므로 결정도 받지 않는다(design-review R3 B1).
+  const blocked = unavailable || cramped;
+  const describedBy = blocked ? unavailableId : undefined;
 
   return (
     <section
@@ -483,7 +519,7 @@ function PermissionCard({
             type="button"
             size="sm"
             className="tap-target"
-            disabled={unavailable || !allowable || busy}
+            disabled={blocked || !allowable || busy}
             aria-describedby={describedBy}
             onClick={() => arm("allow")}
             data-testid="agent-permission-allow"
@@ -496,7 +532,7 @@ function PermissionCard({
             size="sm"
             variant="secondary"
             className="tap-target"
-            disabled={unavailable || permission.reject === null || busy}
+            disabled={blocked || permission.reject === null || busy}
             aria-describedby={describedBy}
             onClick={() => arm("reject")}
             data-testid="agent-permission-reject"
@@ -526,13 +562,13 @@ function PermissionCard({
       ) : (
         <div className="flex flex-col gap-2" data-testid="agent-permission-confirm">
           <label className="flex flex-col gap-1 text-meta font-medium">
-            대신 할 일을 적어 주세요(비워 두면 거부만 해요)
+            <span className="agent-perm-instruction-label">대신 할 일을 적어 주세요(비워 두면 거부만 해요)</span>
             <textarea
               autoFocus
               rows={2}
               value={instruction}
               onChange={(event) => setInstruction(event.target.value)}
-              className="min-h-control resize-y rounded-lg border border-line-strong bg-surface px-3 py-2 text-body font-normal text-ink placeholder:text-ink-muted focus-visible:focus-ring"
+              className="agent-perm-instruction resize-y rounded-lg border border-line-strong bg-surface px-3 py-2 text-body font-normal text-ink placeholder:text-ink-muted focus-visible:focus-ring"
               placeholder="예: 설치하지 말고 이미 있는 패키지로 고쳐 줘"
               data-testid="agent-permission-instruction"
             />
@@ -555,17 +591,17 @@ function PermissionCard({
           </div>
         </div>
       )}
-      {!allowable && !unavailable && permission.allow !== null ? (
+      {!allowable && !blocked && permission.allow !== null ? (
         <p className="text-meta text-ink-muted" data-testid="agent-permission-truncated">
           미리보기가 길어 가운데가 잘렸어요. 전체를 보지 않고는 허락할 수 없어요. 거부하거나 호스트에서 결정하세요.
         </p>
       ) : null}
-      {permission.allow === null && !unavailable ? (
+      {permission.allow === null && !blocked ? (
         <p className="text-meta text-ink-muted">이번 한 번 허락할 선택지가 없어요. 거부하거나 호스트에서 결정하세요.</p>
       ) : null}
-      {unavailable ? (
+      {blocked ? (
         <p id={unavailableId} className="text-meta text-ink-muted" data-testid="agent-permission-unavailable">
-          {DECIDE_UNAVAILABLE}
+          {unavailable ? DECIDE_UNAVAILABLE : CRAMPED_LINE}
         </p>
       ) : null}
       {error ? (
