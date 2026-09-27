@@ -40,7 +40,7 @@ import {
   type TextInputSelectionChangeEventData,
   type TextLayoutEventData,
 } from 'react-native';
-import {font, line, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {usePalette, useStyles} from '../../design/theme';
 import {GlassSurface} from '../../design/glass';
 import {CONV_ICONS, CONV_ICON_SIZE, HOME_ICONS} from '../../design/icons';
@@ -1951,7 +1951,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     paddingHorizontal: SAFE_GUTTER,
     paddingTop: space.sm,
     paddingBottom: space.xs,
-    fontSize: 11.5,
+    fontSize: font.meta,
     fontWeight: '700',
     color: color.textMuted,
   },
@@ -1959,14 +1959,14 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     minHeight: TOUCH_TARGET,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: space.md,
     paddingHorizontal: SAFE_GUTTER,
-    paddingVertical: 7,
+    paddingVertical: space.xs,
   },
   slashIcon: {
     width: 28,
     height: 28,
-    borderRadius: 8,
+    borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: color.surfaceMuted,
@@ -1974,8 +1974,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     borderColor: color.border,
   },
   slashGlyph: {width: 16, height: 16},
-  slashText: {flex: 1, minWidth: 0, gap: 1},
-  slashLabel: {fontSize: 13.5, lineHeight: 18, fontWeight: '600', color: color.text},
+  slashText: {flex: 1, minWidth: 0},
+  slashLabel: {fontSize: font.label, lineHeight: line.label, fontWeight: '600', color: color.text},
   slashMatched: {color: color.accentText},
   slashHint: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
   // ---- 키 붙여넣기 차단 (#2945, 시안 `.inlinewarn`) ------------------------
@@ -1985,15 +1985,15 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   keyBlock: {
     marginHorizontal: SAFE_GUTTER,
     marginTop: space.sm,
-    paddingHorizontal: 10,
+    paddingHorizontal: space.md,
     paddingVertical: space.sm,
-    borderRadius: 10,
+    borderRadius: radius.md,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: color.warnBorder,
     backgroundColor: color.warnSurface,
   },
   keyBlockText: {
-    fontSize: 12.5,
+    fontSize: font.meta,
     lineHeight: line.meta,
     fontWeight: '500',
     color: color.text,

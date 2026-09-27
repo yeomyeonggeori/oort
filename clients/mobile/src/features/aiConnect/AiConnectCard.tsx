@@ -37,7 +37,9 @@ import {usePalette, useStyles} from '../../design/theme';
 import {
   ds2Radius,
   ds2Type,
+  font,
   line as lineHeight,
+  radius,
   slopTo,
   space,
   type Palette,
@@ -257,11 +259,13 @@ export function AiConnectCardBody({
             {AI_CONNECT_CARD_COPY.mineHead}
           </Text>
           <View style={styles.note}>
-            <Image
-              source={CARD_ICONS.laptop}
-              style={[styles.icon14, styles.noteIcon, {tintColor: palette.icon}]}
-              accessibilityIgnoresInvertColors
-            />
+            <View style={styles.noteIconBox}>
+              <Image
+                source={CARD_ICONS.laptop}
+                style={[styles.icon14, {tintColor: palette.icon}]}
+                accessibilityIgnoresInvertColors
+              />
+            </View>
             <Sentence style={styles.noteText}>
               {AI_CONNECT_CARD_COPY.mineLine}
             </Sentence>
@@ -360,11 +364,13 @@ function DeniedLine(): React.JSX.Element {
   const palette = usePalette();
   return (
     <View style={styles.note} testID="ai-connect-card-team-denied">
-      <Image
-        source={HOME_ICONS.lock}
-        style={[styles.icon13, styles.noteIcon, {tintColor: palette.icon}]}
-        accessibilityIgnoresInvertColors
-      />
+      <View style={styles.noteIconBox}>
+        <Image
+          source={HOME_ICONS.lock}
+          style={[styles.icon13, {tintColor: palette.icon}]}
+          accessibilityIgnoresInvertColors
+        />
+      </View>
       <Sentence style={styles.deniedText}>
         {AI_CONNECT_CARD_COPY.teamDenied}
       </Sentence>
@@ -578,16 +584,22 @@ function SecondaryButton({
 const BUTTON_HEIGHT = 30;
 /** 닫기 글리프 상자. */
 const CLOSE_BOX = 24;
+/** 알약 앞 점(시안 `.pill i{width:6px}`). */
+const PILL_DOT = 6;
+/** 줄 머리의 로고 칸(시안 `.pbody .row{grid-template-columns:28px …}`). */
+const MARK_SIZE = 28;
 
 function buildStyles(color: Palette) {
+  // 값은 시안 CSS에서 가져오되 폰 스케일(`space`·`font`·`line`·`radius`)에 맞춘다 —
+  // `__tests__/designSystem.test.ts`의 전수 스윕이 스케일 밖 리터럴을 막는다. 어긋난
+  // 자리(10→8, 14→12 등)는 PR 「시안과의 차이」 표에 있다.
   return StyleSheet.create({
     // 시안 `.pcomp{left:12px;right:12px}` — 입력창과 같은 가장자리에 선다.
     wrap: {paddingHorizontal: space.md, paddingTop: space.xs, paddingBottom: space.sm},
     card: {
       borderWidth: StyleSheet.hairlineWidth * 2,
       borderColor: color.border,
-      // 시안 `.pbody .ccard{border-radius:18px}` — 폰 판은 카드 사다리(20)보다 2 작다.
-      borderRadius: ds2Radius.card - 2,
+      borderRadius: ds2Radius.card,
       backgroundColor: color.surface,
       boxShadow: color.elevationRest,
       overflow: 'hidden',
@@ -597,23 +609,28 @@ function buildStyles(color: Palette) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: space.sm,
-      paddingVertical: 10,
-      paddingHorizontal: 14,
+      paddingVertical: space.sm,
+      paddingHorizontal: space.md,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: color.border,
     },
-    headTitle: {fontSize: 14, fontWeight: '700', color: color.text},
+    headTitle: {fontSize: ds2Type.subhead, fontWeight: '700', color: color.text},
     onlyChip: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 5,
+      gap: space.xs,
       paddingHorizontal: space.sm,
-      paddingVertical: 2,
+      paddingVertical: space.xs,
       borderRadius: ds2Radius.pill,
       backgroundColor: color.surfaceMuted,
       flexShrink: 1,
     },
-    onlyText: {fontSize: ds2Type.caption, fontWeight: '600', color: color.textMuted},
+    onlyText: {
+      fontSize: ds2Type.caption,
+      lineHeight: lineHeight.head,
+      fontWeight: '600',
+      color: color.textMuted,
+    },
     flex: {flex: 1},
     close: {
       width: CLOSE_BOX,
@@ -623,28 +640,29 @@ function buildStyles(color: Palette) {
       borderRadius: ds2Radius.pill,
     },
     pressed: {opacity: 0.6},
-    section: {paddingTop: 6, paddingBottom: space.xs, paddingHorizontal: 14},
+    section: {paddingTop: space.xs, paddingBottom: space.xs, paddingHorizontal: space.md},
     sectionHead: {
       fontSize: ds2Type.caption,
       fontWeight: '700',
       color: color.textMuted,
-      paddingTop: 6,
+      paddingTop: space.sm,
       paddingBottom: space.xs,
     },
-    note: {flexDirection: 'row', alignItems: 'flex-start', gap: space.sm, paddingTop: space.sm, paddingBottom: space.xs},
-    noteIcon: {marginTop: 1},
+    note: {flexDirection: 'row', alignItems: 'flex-start', gap: space.sm, paddingTop: space.xs, paddingBottom: space.xs},
+    // 글리프를 첫 줄 상자 가운데에 세운다(줄이 둘이어도 첫 줄 옆에 남는다).
+    noteIconBox: {height: lineHeight.meta, justifyContent: 'center'},
     noteText: {flex: 1, fontSize: ds2Type.caption, lineHeight: lineHeight.meta, color: color.textMuted},
-    deniedText: {flex: 1, fontSize: ds2Type.subhead, lineHeight: 19, color: color.text},
+    deniedText: {flex: 1, fontSize: ds2Type.subhead, lineHeight: lineHeight.label, color: color.text},
     inline: {flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.sm},
     errorBox: {gap: space.sm, paddingVertical: space.sm, alignItems: 'flex-start'},
     errorText: {fontSize: ds2Type.caption, lineHeight: lineHeight.meta, color: color.dangerText},
     offlineNote: {fontSize: ds2Type.caption, lineHeight: lineHeight.meta, color: color.textMuted, paddingBottom: space.sm},
     row: {paddingVertical: space.sm, gap: space.sm},
-    rowMain: {flexDirection: 'row', alignItems: 'center', gap: 10},
+    rowMain: {flexDirection: 'row', alignItems: 'center', gap: space.sm},
     mark: {
-      width: 28,
-      height: 28,
-      borderRadius: 9,
+      width: MARK_SIZE,
+      height: MARK_SIZE,
+      borderRadius: radius.md,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: color.surfaceMuted,
@@ -652,33 +670,43 @@ function buildStyles(color: Palette) {
       borderColor: color.border,
     },
     markText: {fontSize: ds2Type.caption, fontWeight: '800', color: color.text},
-    rowText: {flex: 1, minWidth: 0, gap: 2},
-    nameLine: {flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap'},
-    name: {fontSize: ds2Type.subhead, fontWeight: '600', color: color.text, flexShrink: 1},
+    rowText: {flex: 1, minWidth: 0},
+    nameLine: {flexDirection: 'row', alignItems: 'center', gap: space.xs, flexWrap: 'wrap'},
+    name: {
+      fontSize: ds2Type.subhead,
+      lineHeight: lineHeight.label,
+      fontWeight: '600',
+      color: color.text,
+      flexShrink: 1,
+    },
     source: {
-      paddingHorizontal: 6,
-      paddingVertical: 3,
-      borderRadius: 5,
+      paddingHorizontal: space.xs,
+      borderRadius: radius.sm,
       backgroundColor: color.surfaceMuted,
     },
-    sourceText: {fontSize: 10.5, fontWeight: '600', color: color.textMuted},
+    sourceText: {
+      fontSize: ds2Type.badge,
+      lineHeight: lineHeight.head,
+      fontWeight: '600',
+      color: color.textMuted,
+    },
     sub: {fontSize: ds2Type.caption, lineHeight: lineHeight.meta, color: color.textMuted},
-    subMono: {fontFamily: 'Menlo', fontSize: 11.5},
-    // 시안 `.pbody .row .btn{grid-column:2/-1}` — 버튼은 이름 칸 아래에서 시작한다.
-    rowAction: {paddingLeft: 28 + 10, flexDirection: 'row'},
-    result: {paddingLeft: 28 + 10, fontSize: ds2Type.caption, lineHeight: lineHeight.meta},
+    subMono: {fontFamily: 'Menlo', fontSize: font.meta},
+    // 시안 `.pbody .row .btn{grid-column:2/-1}` — 버튼과 결과 줄은 이름 칸 아래에서 시작한다.
+    rowAction: {paddingLeft: MARK_SIZE + space.sm, flexDirection: 'row'},
+    result: {paddingLeft: MARK_SIZE + space.sm, fontSize: ds2Type.caption, lineHeight: lineHeight.meta},
     pill: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 5,
+      gap: space.xs,
       paddingHorizontal: space.sm,
-      paddingVertical: 5,
+      paddingVertical: space.xs,
       borderRadius: ds2Radius.pill,
       flexShrink: 0,
     },
-    pillDot: {width: 6, height: 6, borderRadius: 3},
-    pillSpin: {transform: [{scale: 0.6}], width: 8, height: 8},
-    pillText: {fontSize: 11, fontWeight: '600'},
+    pillDot: {width: PILL_DOT, height: PILL_DOT, borderRadius: radius.pill},
+    pillSpin: {width: PILL_DOT, height: PILL_DOT, transform: [{scale: 0.6}]},
+    pillText: {fontSize: font.meta, lineHeight: lineHeight.head, fontWeight: '600'},
     button: {
       height: BUTTON_HEIGHT,
       paddingHorizontal: space.md,
@@ -688,16 +716,16 @@ function buildStyles(color: Palette) {
       backgroundColor: color.surface,
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 6,
+      gap: space.xs,
     },
     buttonLocked: {opacity: 0.5},
-    buttonText: {fontSize: 12.5, fontWeight: '600', color: color.text},
+    buttonText: {fontSize: font.label, fontWeight: '600', color: color.text},
     foot: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: space.sm,
       paddingVertical: space.sm,
-      paddingHorizontal: 14,
+      paddingHorizontal: space.md,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: color.border,
       backgroundColor: color.sheet,
