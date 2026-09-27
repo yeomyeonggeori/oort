@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Check, ExternalLink, Eye, KeyRound, Lock, Plug, RefreshCw, X } from "lucide-react";
@@ -15,30 +15,24 @@ import {
 import { loginActionLabel } from "@momo/core/features/onboarding/harnessLogin";
 import {
   fetchProviderLink,
-  putProviderLink,
   testProviderLink,
-  type ProviderFormat,
-  type ProviderLink,
   type ProviderLinkTest,
 } from "@momo/core/features/settings/api";
 import {
   harnessPillView,
   isLegacyTeamLink,
   linkPill,
+  PROBE_NOT_RUN,
 } from "@momo/core/features/settings/aiLinkPill";
 import { errorMessage, isOperatorDenied, maskedBearer } from "@momo/core/features/settings/model";
-import {
-  initialPresetId,
-  teamCheckReason,
-  teamKeyPresets,
-} from "@momo/core/features/settings/teamKeyForm";
+import { teamCheckClock, teamCheckResult, teamCheckSince } from "@momo/core/features/settings/teamKeyForm";
 import { Button } from "@/design/ui/button";
-import { Input } from "@/design/ui/input";
 import { cn } from "@/design/lib/cn";
 import { Skeleton } from "@/features/common/States";
 import { IS_TAURI } from "@/lib/env";
 import { openExternalUrl } from "@/lib/tauri";
 import { AiLogo, AiPill, AiSource } from "@/features/settings/aiAccountsParts";
+import { TeamKeyForm } from "@/features/settings/TeamKeyForm";
 import {
   MY_ACCOUNTS_BROWSER_LINE,
   MY_ACCOUNTS_DENIED_DETAIL,
@@ -48,6 +42,24 @@ import {
   readProbeFixture,
 } from "@/features/settings/aiMyAccountsModel";
 import { useSubscriptionEntryState } from "@/features/welcome/SubscriptionAgentEntry";
+import { useOffline } from "@/features/common/useOffline";
+import { useSession } from "@/app/session";
+import { seedComposerText, seedThreadComposerText } from "@/features/chat/draftStore";
+import type { Directory } from "@momo/core/features/workspace/directory";
+import {
+  COMMAND_SUGGEST_ASK_BUSY,
+  COMMAND_SUGGEST_ASK_NONE,
+  COMMAND_SUGGEST_ASK_OPERATOR,
+  COMMAND_SUGGEST_ASK_THREAD,
+  COMMAND_SUGGEST_ONLY_ME,
+  COMMAND_SUGGEST_TEAM_CLOSE,
+  COMMAND_SUGGEST_TEAM_OPEN,
+  commandSuggestHead,
+  commandSuggestOneLine,
+  commandSuggestViewer,
+  operatorMentionDraft,
+  type CommandSuggestCard,
+} from "@momo/core/features/timeline/commandSuggest";
 import { useLocalHarnessWatch } from "@/features/welcome/useLocalHarnessWatch";
 import {
   HarnessLoginDialog,
@@ -90,26 +102,11 @@ const OPERATOR_FOOT = "운영자만 보이는 입력이에요. 키는 서버 금
 /** 잠긴 버튼: 흐림이 포인터를 올려도 풀리지 않는다(variant의 hover:opacity-90을 덮는다). */
 const LOCKED = "opacity-50 hover:opacity-50";
 
-function trimSlash(url: string): string {
-  return url.replace(/\/+$/, "");
-}
-
-const KEY_HINT = "저장하면 다시 보이지 않아요. 마스킹 꼬리만 남아요. 이 칸의 값은 채팅·초안에 남지 않아요.";
 const GROK_SUB = "공식 CLI 상태 확인 방법을 확인하는 중이에요";
 
-/** 「15:42」. 결과 줄의 시각은 이 화면에서 본 것이라 날짜를 싣지 않는다. */
-function clock(ms: number): string {
-  return new Date(ms).toLocaleTimeString("ko-KR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-}
-
-/** 결과 줄의 때: 1분 안이면 「방금」(brief §6), 아니면 「15:42」. */
-function since(ms: number): string {
-  return Date.now() - ms < 60_000 ? "방금" : clock(ms);
-}
+/** 「15:42」·「방금」: 설정 곁판과 같은 코어 함수(#2880). */
+const clock = teamCheckClock;
+const since = (ms: number) => teamCheckSince(ms, Date.now());
 
 function shortDate(ms: number): string {
   const date = new Date(ms);
@@ -390,6 +387,225 @@ export function AiConnectCard({
   );
 }
 
+// ---- 에이전트가 제안한 카드 (#2948 GC-7, ADR-0186 증보 G3·G4, 시안 ③) ------------
+//
+// 에이전트 메시지 props `momo.command_suggest(ai.connect)`를 보는 사람별로 그린다.
+// 몸은 위 로컬 카드와 **같은 절**(`MineSection`·`TeamSection`)이고 머리만 다르다:
+// 「{에이전트}가 제안했어요 · 나에게만 조작돼요」. 점선이 아니라 실선이다 — 이
+// 카드는 로컬 도구 창이 아니라 실제 메시지에 붙은 것이다(시안 `.ccard` vs `.local`).
+//
+// props는 의도만 싣는다(G3). 이 컴포넌트는 props에서 상태를 읽지 않는다: 알약은
+// 설정과 같은 훅(구독 감지)·같은 쿼리(`TEAM_QUERY_KEY`)가 준다. 그래서 로그인하면
+// props 패치 없이 이 자리에서 바뀐다.
+//
+// 타임라인 행이다: 마운트해도 초점을 가져가거나 스크롤하지 않는다(virtuoso가 행을
+// 다시 세울 때마다 컴포저 초점을 빼앗게 된다). × 도 없다 — 메시지는 닫는 것이 아니다.
+
+/** 운영자 판정 한 번의 신선도. 제안 행이 여러 개 떠도 한 요청을 나눠 읽는다. */
+const OPERATOR_STALE_MS = 60_000;
+
+/**
+ * 제안 카드 자리. `viewerMemberId`가 없으면(읽기 전용 표면) 누구도 대상이 아니다.
+ *
+ * 운영자는 **기존 provider_link 응답**으로 안다(200 운영자, 403 아님 — G4). 같은
+ * 쿼리 키라 설정·로컬 카드와 한 캐시를 나눈다. 대상 본인에게는 묻지 않는다: 본인
+ * 카드는 팀 절이 스스로 같은 쿼리를 읽는다.
+ */
+export function AiConnectSuggestion({
+  card,
+  viewerMemberId,
+  directory,
+  channelId,
+  rootId,
+}: {
+  card: CommandSuggestCard;
+  viewerMemberId: string | undefined;
+  /** 「운영자에게 부탁하기」가 멘션할 운영자를 찾는 멤버 목록. */
+  directory: Directory;
+  /** 그 멘션을 채울 컴포저의 채널(이 메시지의 채널). */
+  channelId: string;
+  /** 스레드 답글이면 그 뿌리: 멘션은 채널이 아니라 그 스레드 입력창에 심는다. */
+  rootId?: string | undefined;
+}) {
+  const isTarget = commandSuggestViewer(card, viewerMemberId, false) === "target";
+  const operatorQuery = useQuery({
+    queryKey: TEAM_QUERY_KEY,
+    queryFn: fetchProviderLink,
+    retry: false,
+    staleTime: OPERATOR_STALE_MS,
+    // 403(비운영자)은 데이터가 없는 채로 남는다. virtuoso가 행을 다시 세울 때마다
+    // 다시 묻지 않게 한다(design-review #2948 M: `routing/capability.ts`와 같은 규율).
+    retryOnMount: false,
+    enabled: card.shape === "ok" && !isTarget,
+  });
+  const viewer = commandSuggestViewer(card, viewerMemberId, operatorQuery.isSuccess);
+  if (viewer === "target") {
+    return <SuggestedCard
+        card={card}
+        directory={directory}
+        channelId={channelId}
+        rootId={rootId}
+        viewerMemberId={viewerMemberId}
+      />;
+  }
+  return <SuggestionLine card={card} operator={viewer === "operator"} />;
+}
+
+/** 남에게 보이는 한 줄(시안 `.oneline`). 운영자면 「팀 연결 보기」가 팀 줄만 편다. */
+function SuggestionLine({ card, operator }: { card: CommandSuggestCard; operator: boolean }) {
+  const [open, setOpen] = useState(false);
+  const offline = useOffline();
+  const panelId = useId();
+  const escapeFormRef = useRef<(() => boolean) | null>(null);
+  return (
+    <div className="ai-card mt-2 flex min-w-0 flex-col gap-2" data-testid="ai-suggest" data-viewer={operator ? "operator" : "other"}>
+      <p
+        className="flex min-w-0 items-center gap-2 rounded-lg bg-sheet px-3 py-2 text-meta text-ink-muted"
+        data-testid="ai-suggest-line"
+      >
+        <Plug className="size-4 shrink-0 text-icon" aria-hidden="true" />
+        <span className="min-w-0 flex-1 break-keep">{commandSuggestOneLine(card)}</span>
+        {operator && (
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-controls={open ? panelId : undefined}
+            onClick={() => setOpen((value) => !value)}
+            // 눌리는 면은 좁은 폭에서 44(`tap-target`), 보이는 줄은 시안 `.oneline` 높이
+            // 그대로: 넓힌 만큼 음의 세로 여백으로 돌려준다(design-review #2948 M).
+            className="tap-target press -my-3 shrink-0 rounded-md px-1 text-meta font-semibold text-agent hover:underline focus-visible:focus-ring"
+            data-testid="ai-suggest-team-open"
+          >
+            {open ? COMMAND_SUGGEST_TEAM_CLOSE : COMMAND_SUGGEST_TEAM_OPEN}
+          </button>
+        )}
+      </p>
+      {operator && open && (
+        <div
+          id={panelId}
+          className="min-w-0 overflow-hidden rounded-2xl border border-line bg-surface shadow-sm"
+          data-testid="ai-suggest-team-panel"
+          onKeyDown={(event) => {
+            if (event.key !== "Escape" || event.defaultPrevented) return;
+            if (escapeFormRef.current?.()) {
+              event.preventDefault();
+              event.stopPropagation();
+            }
+          }}
+        >
+          <TeamSection offline={offline} autoOpenForm={false} escapeFormRef={escapeFormRef} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 대상 본인의 조작 카드. 로컬 카드와 같은 절, 머리만 제안 머리. */
+function SuggestedCard({
+  card,
+  directory,
+  channelId,
+  rootId,
+  viewerMemberId,
+}: {
+  card: CommandSuggestCard;
+  directory: Directory;
+  channelId: string;
+  rootId: string | undefined;
+  viewerMemberId: string | undefined;
+}) {
+  const navigate = useNavigate();
+  const { workspaceId } = useSession();
+  // 「운영자에게 부탁하기」: 컴포저에 운영자 멘션만 채운다. 보내는 것은 사람이다.
+  // 쓰던 글은 덮지 않는다(`seedComposerText`는 빈 입력창에만 심는다).
+  const askOperator = (): string | null => {
+    const draft = operatorMentionDraft(directory, viewerMemberId);
+    if (draft === null) return COMMAND_SUGGEST_ASK_NONE;
+    // 스레드 안의 제안은 그 스레드 입력창에(design-review #2948 B). 채널 입력창은
+    // 좁은 폭에서 서랍 뒤에 `inert`로 가려져 있어, 거기 심으면 아무 일도 안 난 것처럼 보인다.
+    if (rootId) {
+      const seeded = seedThreadComposerText(rootId, draft);
+      if (!seeded.mounted) return COMMAND_SUGGEST_ASK_THREAD;
+      return seeded.accepted ? null : COMMAND_SUGGEST_ASK_BUSY;
+    }
+    if (!seedComposerText(workspaceId, channelId, draft)) return COMMAND_SUGGEST_ASK_BUSY;
+    const input = document.getElementById("composer-input");
+    if (input instanceof HTMLTextAreaElement) input.focus();
+    return null;
+  };
+  const headingId = useId();
+  const offline = useOffline();
+  const escapeFormRef = useRef<(() => boolean) | null>(null);
+  const focus = card.focus;
+  const showMine = focus !== "team";
+  // 시안 ③ 요청자: `harness:"claude"` 제안도 그 구독 줄 + 팀 연결 절을 함께 보인다
+  // (로컬 `/연결 claude`는 그 줄만 편다 — 제안은 「무엇을 연결할지」의 맥락이 대화에
+  // 있으므로 팀 쪽 사실도 같이 놓는다). `scope:"mine"`만 온 제안은 내 계정 절만.
+  const showTeam = focus !== "mine";
+  const initial = [...card.agentName.trim()][0]?.toUpperCase() ?? "";
+
+  return (
+    <section
+      aria-labelledby={headingId}
+      className="ai-card mt-2 min-w-0 overflow-hidden rounded-2xl border border-line bg-surface shadow-sm"
+      data-testid="ai-suggest"
+      data-viewer="target"
+      data-focus={focus ?? "all"}
+      onKeyDown={(event) => {
+        // 키 칸이 열려 있을 때만 Esc를 가져간다(폼 닫기). 그 밖의 Esc는 타임라인 것이다.
+        if (event.key !== "Escape" || event.defaultPrevented) return;
+        if (escapeFormRef.current?.()) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+    >
+      {/* 좁은 폭에서는 칩과 「설정에서 열기」가 다음 줄로 내려간다: 제안한 에이전트의
+          이름이 잘리지 않는 것이 먼저다(design-review #2948 B1). */}
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-line px-3 py-2">
+        <span
+          aria-hidden="true"
+          className="grid size-6 shrink-0 place-items-center rounded-sm bg-agent-soft text-timestamp font-bold text-agent"
+        >
+          {initial}
+        </span>
+        <h3 id={headingId} className="min-w-0 break-keep text-meta font-semibold text-agent">
+          {commandSuggestHead(card)}
+        </h3>
+        <span className="ai-card-chipline flex">
+          <span
+            className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-muted-soft px-2 py-px text-timestamp font-semibold text-ink-muted"
+            data-testid="ai-suggest-only-me"
+          >
+            <Eye className="size-3 shrink-0" aria-hidden="true" />
+            {COMMAND_SUGGEST_ONLY_ME}
+          </span>
+        </span>
+        <span className="flex-1" />
+        <button
+          type="button"
+          onClick={() => navigate(AI_CONNECT_SETTINGS_PATH)}
+          aria-label="설정에서 열기"
+          className="tap-target press inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-meta text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
+          data-testid="ai-suggest-settings"
+        >
+          <ExternalLink className="size-3 shrink-0" aria-hidden="true" />
+          <span className="ai-card-wide">설정에서 열기</span>
+        </button>
+      </div>
+      {showMine && <MineSection only={focus === "claude" || focus === "codex" ? focus : null} />}
+      {showTeam && (
+        <TeamSection
+          offline={offline}
+          autoOpenForm={false}
+          escapeFormRef={escapeFormRef}
+          onAskOperator={askOperator}
+        />
+      )}
+    </section>
+  );
+}
+
 // ---- 내 계정 · 이 맥 ---------------------------------------------------------------
 
 function MineSection({ only }: { only: LocalHarnessId | null }) {
@@ -604,10 +820,16 @@ function TeamSection({
   offline,
   autoOpenForm,
   escapeFormRef,
+  onAskOperator,
 }: {
   offline: boolean;
   autoOpenForm: boolean;
   escapeFormRef: React.MutableRefObject<(() => boolean) | null>;
+  /**
+   * 비운영자의 다음 행동(#2948, G4 「운영자에게 부탁하기」). 있으면 거절 줄 밑에
+   * 버튼이 선다. 결과 문장을 돌려주면(채우지 못함) 그 줄에 보인다.
+   */
+  onAskOperator?: () => string | null;
 }) {
   const headId = useId();
   const client = useQueryClient();
@@ -615,6 +837,7 @@ function TeamSection({
   const [editing, setEditing] = useState(false);
   const [probe, setProbe] = useState<ProviderLinkTest | null>(null);
   const [justSaved, setJustSaved] = useState(false);
+  const [askNote, setAskNote] = useState<string | null>(null);
   const autoOpened = useRef(false);
   const actionRef = useRef<HTMLButtonElement>(null);
 
@@ -670,18 +893,13 @@ function TeamSection({
   if (!offline && check.isError) {
     result = { tone: "bad", text: errorMessage(check.error) };
   } else if (!offline && probe && !check.isPending) {
-    if (probe.ok) {
-      result = { tone: "ok", text: `응답을 확인했어요 · ${since(probe.checkedAtMs)}` };
-    } else {
-      const why = teamCheckReason(probe.reason);
-      result = {
-        tone: "bad",
-        text: justSaved ? `${why} 저장한 키는 그대로 남아 있어요. 키를 바꾸려면 새로 넣으세요.` : why,
-      };
-    }
+    // 문장은 코어 한 곳(#2880): 설정 곁판과 같은 확인에 같은 말.
+    const line = teamCheckResult({ probe, justSaved, nowMs: Date.now() });
+    result = { tone: line.tone, text: line.text };
   }
 
-  const failed = probe !== null && !probe.ok;
+  // 서버가 부르지 않은 확인(`probe_not_run`)은 실패가 아니다: 「키 바꾸기」로 몰지 않는다(#2880).
+  const failed = probe !== null && !probe.ok && probe.reason !== PROBE_NOT_RUN;
   let action: ReactNode = null;
   if (operator && link && !legacy && !editing) {
     const lockedByOffline = offline;
@@ -742,6 +960,29 @@ function TeamSection({
         <span>{TEAM_DENIED_LINE}</span>
       </p>
     );
+    if (onAskOperator) {
+      body = (
+        <div className="flex min-w-0 flex-col pb-1">
+          {body}
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setAskNote(onAskOperator())}
+              data-testid="ai-connect-card-ask-operator"
+            >
+              {COMMAND_SUGGEST_ASK_OPERATOR}
+            </Button>
+            {askNote && (
+              <span role="status" className="min-w-0 break-keep text-meta text-ink-muted" data-testid="ai-connect-card-ask-note">
+                {askNote}
+              </span>
+            )}
+          </div>
+        </div>
+      );
+    }
   } else if (query.isError) {
     body = (
       <div className="flex min-w-0 flex-wrap items-center gap-2 py-2" role="alert" data-testid="ai-connect-card-team-error">
@@ -813,244 +1054,5 @@ function TeamSection({
         </p>
       )}
     </section>
-  );
-}
-
-/**
- * 팀 키 넣기(운영자). 프리셋 칩 + 마스킹 칸 + 「저장하고 확인」.
- *
- * 순서가 이름이다(design-review #2944 H1): 지금 서버에는 저장 전 판정 경로가
- * 없어서(#2880·#2872) 저장한 뒤에 확인한다. 그래서 이미 쓰는 키가 있으면 대체하기
- * 전에 한 번 묻는다: 확인 없이 잘 되던 팀 키를 덮어쓰지 않게.
- *
- * 키는 **비제어** 칸의 DOM 값이다. React 상태에도, 뮤테이션 변수에도 싣지 않는다:
- * `useMutation`은 마지막 변수를 캐시에 들고 있으므로 변수에 키를 넣으면 저장 뒤에도
- * 메모리에 남는다. 저장을 누르는 순간 칸을 비우고 PUT 한 번에 넘긴다.
- *
- * 오프라인(review #2961 H1): react-query v5 뮤테이션의 기본 `networkMode: "online"`은
- * 끊긴 동안 fn을 부르지 않고 멈춰 두었다가 다시 이어지면 조용히 보낸다. 그러면 키가
- * 클로저에 남고, 카드를 닫은 뒤에 팀 키가 바뀐다. 그래서 ① 끊겼으면 저장 전에
- * 막고(설정 `saveLocked`와 같은 규칙), ② `networkMode: "always"`로 누른 순간 한 번만
- * 시도하며(실패는 제자리 오류 줄), ③ 폼이 사라지면 멈춘 저장과 붙잡은 값을 버린다.
- *
- * 비밀번호 관리자(review #2961 M3): 칸은 password 그대로다. text + 가림 글꼴은
- * 접근성 트리에 값을 평문으로 내보내므로 쓰지 않는다(design-review #2961 H1).
- * 저장 제안은 `autocomplete="new-password"`와 관리자별 무시 속성으로 막는다.
- */
-function TeamKeyForm({
-  link,
-  offline,
-  offlineNoteId,
-  currentFailed,
-  onCancel,
-  onSaved,
-}: {
-  link: ProviderLink;
-  /** 연결이 끊겼는가. 끊겼으면 저장을 누르기 전에 막는다(review #2961 H1). */
-  offline: boolean;
-  /** 끊긴 사유 문장의 id(저장 버튼의 aria-describedby). */
-  offlineNoteId: string;
-  /** 지금 키가 방금 확인에 실패했는가(대체 경고의 문장이 달라진다). */
-  currentFailed: boolean;
-  onCancel: () => void;
-  onSaved: () => void;
-}) {
-  const presets = teamKeyPresets(link);
-  const [presetId, setPresetId] = useState<string | null>(() => initialPresetId(presets, link));
-  const [fieldError, setFieldError] = useState<string | null>(null);
-  // 이미 쓰는 키를 대체하기 전의 한 번 묻기. 키 값은 여전히 칸(DOM)에만 있다.
-  const [confirmReplace, setConfirmReplace] = useState(false);
-  const replacing = link.configured && link.keyConfigured;
-  const inputRef = useRef<HTMLInputElement>(null);
-  const secretRef = useRef("");
-  const inputId = useId();
-  const hintId = useId();
-  const errorId = useId();
-
-  useEffect(() => {
-    inputRef.current?.focus({ preventScroll: true });
-  }, []);
-
-  const preset = presets.find((row) => row.id === presetId) ?? null;
-  // 프리셋이 아닌 지금 주소(사내 프록시 등)는 「지금 주소」 칩으로 고른다. 조용히 첫
-  // 프리셋으로 옮기지 않는다(review #2961 M4). 와이어는 저장된 format(N1).
-  const target: { baseUrl: string; format: ProviderFormat } | null = preset
-    ? { baseUrl: preset.baseUrl, format: preset.format }
-    : link.configured
-      ? { baseUrl: link.baseUrl, format: link.format ?? "openai" }
-      : null;
-  const movesAddress =
-    link.configured && target !== null && trimSlash(target.baseUrl) !== trimSlash(link.baseUrl);
-  const hasCurrentChip = link.configured && initialPresetId(presets, link) === null;
-
-  const client = useQueryClient();
-  const mutationKey = useMemo(() => ["ai-connect-card", "team-key-save", inputId], [inputId]);
-  const save = useMutation({
-    mutationKey,
-    // 누른 순간 한 번만 시도한다: 끊긴 동안 멈춰 두었다가 나중에 보내지 않는다.
-    networkMode: "always",
-    mutationFn: (input: { baseUrl: string; format: ProviderFormat }) => {
-      const bearer = secretRef.current;
-      secretRef.current = "";
-      return putProviderLink({ baseUrl: input.baseUrl, bearer, mode: "external-hermes", format: input.format });
-    },
-    onSuccess: onSaved,
-  });
-
-  // 폼이 사라지면(취소·Esc·카드 닫기·채널 이동) 붙잡은 값과 멈춘 저장을 버린다.
-  useEffect(
-    () => () => {
-      secretRef.current = "";
-      const cache = client.getMutationCache();
-      for (const mutation of cache.findAll({ mutationKey, exact: true })) {
-        if (mutation.state.isPaused) cache.remove(mutation);
-      }
-    },
-    [client, mutationKey]
-  );
-
-  const locked = offline || target === null || save.isPending;
-
-  function submit(event: React.FormEvent) {
-    event.preventDefault();
-    if (offline || save.isPending || target === null) return;
-    const field = inputRef.current;
-    const value = field?.value.trim() ?? "";
-    if (value === "") {
-      setFieldError("키를 붙여 넣으세요. 저장된 키는 다시 내려오지 않아서 매번 새로 넣어요.");
-      field?.focus();
-      return;
-    }
-    setFieldError(null);
-    if (replacing && !confirmReplace) {
-      setConfirmReplace(true);
-      return;
-    }
-    setConfirmReplace(false);
-    secretRef.current = value;
-    if (field) field.value = "";
-    save.mutate(target);
-  }
-
-  return (
-    <form
-      className="flex min-w-0 flex-col gap-2 pb-1 pt-1"
-      onSubmit={submit}
-      autoComplete="off"
-      data-form-type="other"
-      data-testid="ai-connect-card-key-form"
-      aria-label="팀 API 키 넣기"
-    >
-      {presets.length > 0 ? (
-        <fieldset className="flex min-w-0 flex-wrap gap-2">
-          <legend className="sr-only">API 제공자</legend>
-          {hasCurrentChip && (
-            <label className="press relative inline-flex min-w-0 max-w-full" title={link.endpointLabel}>
-              <input
-                type="radio"
-                name={`${inputId}-preset`}
-                value=""
-                checked={presetId === null}
-                onChange={() => {
-                  setPresetId(null);
-                  setConfirmReplace(false);
-                }}
-                className="peer sr-only"
-                data-testid="ai-connect-card-preset-current"
-              />
-              <span className="tap-target inline-flex h-control-sm min-w-0 max-w-full cursor-pointer items-center rounded-full border border-line px-3 text-meta font-semibold text-ink-muted peer-checked:border-primary peer-checked:bg-primary peer-checked:text-on-primary peer-focus-visible:focus-ring">
-                <span className="truncate">지금 주소 · {link.endpointLabel}</span>
-              </span>
-            </label>
-          )}
-          {presets.map((row) => (
-            <label key={row.id} className="press relative inline-flex">
-              <input
-                type="radio"
-                name={`${inputId}-preset`}
-                value={row.id}
-                checked={presetId === row.id}
-                onChange={() => {
-                  setPresetId(row.id);
-                  setConfirmReplace(false);
-                }}
-                className="peer sr-only"
-                data-testid={`ai-connect-card-preset-${row.id}`}
-              />
-              <span className="tap-target inline-flex h-control-sm cursor-pointer items-center rounded-full border border-line px-3 text-meta font-semibold text-ink-muted peer-checked:border-primary peer-checked:bg-primary peer-checked:text-on-primary peer-focus-visible:focus-ring">
-                {row.label}
-              </span>
-            </label>
-          ))}
-        </fieldset>
-      ) : link.configured ? (
-        <p className="break-keep text-meta text-ink-muted">지금 주소({link.endpointLabel})에 새 키를 넣어요.</p>
-      ) : (
-        <p className="break-keep text-meta text-ink-muted" data-testid="ai-connect-card-no-presets">
-          이 서버는 provider 목록을 주지 않아요. 주소는 설정 › AI 연결에서 넣어 주세요.
-        </p>
-      )}
-      <label htmlFor={inputId} className="sr-only">
-        API 키
-      </label>
-      <Input
-        id={inputId}
-        ref={inputRef}
-        type="password"
-        name="team-api-key"
-        autoComplete="new-password"
-        autoCorrect="off"
-        autoCapitalize="off"
-        spellCheck={false}
-        data-1p-ignore=""
-        data-lpignore="true"
-        data-bwignore=""
-        data-form-type="other"
-        placeholder="키를 붙여 넣으세요"
-        className="font-mono"
-        aria-describedby={fieldError ? `${errorId} ${hintId}` : hintId}
-        aria-invalid={fieldError ? true : undefined}
-        onInput={() => setConfirmReplace(false)}
-        data-testid="ai-connect-card-key-input"
-      />
-      {fieldError && (
-        <p id={errorId} className="break-keep text-meta text-danger" role="alert">
-          {fieldError}
-        </p>
-      )}
-      <p id={hintId} className="break-keep text-meta text-ink-muted">
-        {KEY_HINT}
-      </p>
-      {save.isError && (
-        <p className="break-keep text-meta text-danger" role="alert" data-testid="ai-connect-card-save-error">
-          {errorMessage(save.error)} 키는 칸에서 지웠으니 다시 붙여 넣어 주세요.
-        </p>
-      )}
-      {confirmReplace && (
-        <p className="break-keep text-meta text-warn" role="alert" data-testid="ai-connect-card-key-replace">
-          지금 팀 기본 키({maskedBearer(link.bearerLast4)})를 이 키로 바꿔요.
-          {movesAddress && preset ? ` 주소도 ${preset.label} 주소로 바뀌어요.` : ""} 팀 에이전트는 바로 새 키로 대답해요.
-          {currentFailed
-            ? " 지금 키는 방금 확인에 실패했어요. 새 키도 저장한 뒤에 확인해요."
-            : " 저장한 뒤에 확인하니, 틀린 키면 팀 에이전트가 멈춰요."}
-        </p>
-      )}
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="submit"
-          size="sm"
-          aria-busy={save.isPending || undefined}
-          aria-disabled={locked || undefined}
-          aria-describedby={offline ? offlineNoteId : undefined}
-          className={cn(locked && LOCKED)}
-          data-testid="ai-connect-card-key-save"
-        >
-          {save.isPending ? "저장 중" : confirmReplace ? "바꿔 저장하고 확인" : "저장하고 확인"}
-        </Button>
-        <Button type="button" variant="ghost" size="sm" onClick={onCancel} data-testid="ai-connect-card-key-cancel">
-          취소
-        </Button>
-      </div>
-    </form>
   );
 }

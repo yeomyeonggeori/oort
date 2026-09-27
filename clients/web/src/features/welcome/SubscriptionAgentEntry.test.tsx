@@ -204,7 +204,7 @@ describe("설정 › AI 연결 입구 (#2870)", () => {
   });
 
   it("provider 연결이 운영자 403 이어도 owner 에게는 입구가 선다", async () => {
-    mount(createElement(AiLinkSection, { offline: false }));
+    mount(createElement(AiLinkSection, { offline: false, workspaceId: "ws-1" }));
     // 운영자 안내(403 분기)가 선 **뒤에** 입구를 잰다. 로딩 분기에서 한 번 보인
     // 입구로 통과하지 않게.
     await rtlWaitFor(() => {
