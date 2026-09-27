@@ -16,6 +16,8 @@ const member = (over: Partial<RosterMember>): RosterMember => ({
   channelCount: 0,
   channelIds: [],
   capabilities: [],
+  createdAtMs: 0,
+  updatedAtMs: 0,
   ...over,
 });
 
