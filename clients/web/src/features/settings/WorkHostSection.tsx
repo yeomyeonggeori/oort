@@ -114,7 +114,7 @@ export function WorkHostSection({
       title="코드 실행 호스트"
       lines={[
         "에이전트가 실제로 명령을 돌리는 자리입니다. 어떤 엔진으로 돌릴지, 어디에 등록돼 있는지, 그 자리를 잃으면 어떻게 할지를 정합니다.",
-        "여기에는 엔진 이름과 정책만 저장됩니다. 키나 호스트 경로는 저장하지 않습니다.",
+        "서버에는 엔진 이름과 정책만 저장됩니다. 호스트 키는 그 호스트를 떠나지 않습니다.",
       ]}
     >
       {/* #2778: the desktop's own door to becoming a host, first because with
