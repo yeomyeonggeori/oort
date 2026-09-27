@@ -463,6 +463,12 @@
    * 단계가 아니다. */
   --spacing-pane-picker: 384px;
 
+  /* 컴포저 `/` 명령 목록 (#2942 GC-1). 시안 `claudedocs/chat-genui-connect/
+   * mockups.html` ①의 `.menu` 폭 440을 그대로 옮긴다. 줄이 이름 + 설명 두 줄에
+   * 아이콘 칸(28)과 ↵ 키캡을 싣기 때문에 멘션 목록(pane-sm 192)으로는 설명이
+   * 잘리고, pane-picker(384)와 pane-md(512) 사이의 시안 값이라 이름을 준다. */
+  --spacing-pane-command: 440px;
+
   /* 설정 섹션 목록의 폰 높이 캡 (#1867 design-review M-1).
    *
    * `--spacing-pane-sm`(192) 은 **가로** 바닥이다(mention 목록 · dropdown ·

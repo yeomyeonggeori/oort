@@ -38,6 +38,8 @@ import {
   sendBlockReason,
 } from "@momo/core/features/attachments/model";
 import { useAutoGrow } from "./useAutoGrow";
+import { containsSecretKey } from "@momo/core/features/chat/secretKey";
+import { SecretKeyBlockNotice } from "@/features/chat/SecretKeyBlockNotice";
 
 // =============================================================================
 // Writing a reply, from inside the thread (B11).
@@ -95,6 +97,8 @@ export function ThreadComposer({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 키 모양을 보고 전송을 막았는가 (#2942 GC-1). 채널 컴포저와 같은 문이다.
+  const [secretBlocked, setSecretBlocked] = useState(false);
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const justComposedRef = useRef(false);
   const isMobile = useIsMobileShell();
@@ -103,7 +107,12 @@ export function ThreadComposer({
     members: directory.members,
     channels,
     inputRef: ref,
-    onValueChange: setDraft,
+    onValueChange: (next) => {
+      setDraft(next);
+      setSecretBlocked(false);
+    },
+    // `/` 명령은 넘기지 않는다: 로컬 카드는 채널 타임라인 꼬리에 붙고(brief
+    // §3.2) 이 패널에는 그 자리가 없다. 그래서 여기서 `/`는 평문이다.
   });
   const emoji = useComposerEmoji({
     value: draft,
@@ -146,6 +155,11 @@ export function ThreadComposer({
 
   const submit = () => {
     if (!canSend) return;
+    // 키는 답글로도 보내지 않는다. 글은 남겨 두고 이유를 말한다.
+    if (containsSecretKey(draft)) {
+      setSecretBlocked(true);
+      return;
+    }
     const body = draft.trim();
     setSending(true);
     setError(null);
@@ -203,6 +217,12 @@ export function ThreadComposer({
             testId="thread-composer-error"
           />
         )}
+        {secretBlocked && (
+          <SecretKeyBlockNotice
+            id="thread-composer-secret-block"
+            testId="thread-composer-secret-block"
+          />
+        )}
         <div className="relative">
           <ComposerAutocompleteList
             id={`thread-${autocomplete.slug}-list`}
@@ -219,11 +239,12 @@ export function ThreadComposer({
           />
           <div
             className={cn(
-              "rounded-md border border-line-strong bg-surface-raised focus-visible-within:focus-ring",
+              "rounded-md border border-line-strong bg-surface-raised focus-visible-within:focus-ring data-warn:border-warn",
               sending && "opacity-50"
             )}
             aria-busy={sending}
             data-sending={sending ? "" : undefined}
+            data-warn={secretBlocked ? "" : undefined}
             data-testid="thread-composer-frame"
             onClick={(event) => {
               if (
@@ -244,6 +265,9 @@ export function ThreadComposer({
               // 맞춘다. 다음 코어 카피 정리에서 광고 절을 한 벌로 올릴 수 있다.
               placeholder={THREAD_COMPOSER_PLACEHOLDER}
               aria-label={THREAD_COMPOSER_PLACEHOLDER}
+              aria-describedby={
+                secretBlocked ? "thread-composer-secret-block" : undefined
+              }
               aria-autocomplete="list"
               aria-expanded={autocomplete.visible}
               aria-controls={

@@ -1,4 +1,6 @@
-import { Lock } from "lucide-react";
+import { KeyRound, Lock, Plug, type LucideIcon } from "lucide-react";
+import type { CommandIcon } from "@momo/core/features/commands/registry";
+import { Keycaps } from "@/app/ShortcutHelpDialog";
 import { cn } from "@/design/lib/cn";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import {
@@ -63,6 +65,19 @@ export function ComposerAutocompleteList({
   onRetry?: () => void;
 }) {
   if (kind === null) return null;
+  if (kind === "command") {
+    return (
+      <CommandList
+        id={id}
+        candidates={candidates}
+        highlight={highlight}
+        onChoose={onChoose}
+        testId={testId}
+        optionTestId={optionTestId}
+        className={className}
+      />
+    );
+  }
   const spec = composerTriggerSpec(kind);
   if (status !== "ready") {
     const copy = spec.deferred;
@@ -154,5 +169,127 @@ export function ComposerAutocompleteList({
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * 명령 줄의 글리프. 이름만 받는 코어 아이콘(`CommandIcon`)을 이 목록이 쓰는
+ * 것으로 푼다. ⌘K와 같은 글리프다(`QuickSwitcher` `COMMAND_ICONS`의 `ai-connect`
+ * · `credentials`). 슬래시로 부를 수 있는 명령이 늘면 여기 한 줄씩 는다.
+ */
+const COMMAND_LIST_ICONS: Partial<Record<CommandIcon, LucideIcon>> = {
+  "ai-connect": Plug,
+  credentials: KeyRound,
+};
+
+/** 목록 발치의 키 안내(시안 ① `.mf`). */
+const COMMAND_LIST_FOOT = ["↑↓ 고르기", "↵ 열기", "Esc 닫기", "메시지 맨 앞에서만 열려요"];
+
+/**
+ * `/` 명령 목록 (#2942 GC-1, 시안 `chat-genui-connect/mockups.html` ① `.menu`).
+ *
+ * `@`·`#`·`:` 의 한 줄 행과 모양이 다른 이유: 명령 줄은 **넣을 글자가 아니라
+ * 할 일**이다. 그래서 무엇을 하는지(설명 줄)와 어떤 키가 그것을 하는지(↵ 키캡,
+ * 발치 안내)가 줄에 함께 서야 하고, 시안이 그 모양을 정했다. 목록 기계(파서·
+ * 강조·키 처리·listbox 배선)는 셋과 같은 한 벌이다 — 다른 것은 그리는 모양뿐이다.
+ *
+ * 머리글·발치는 listbox 밖이다. 고를 수 없는 글자가 옵션 사이에 끼면 화면
+ * 낭독기가 그것을 옵션으로 센다.
+ */
+function CommandList({
+  id,
+  candidates,
+  highlight,
+  onChoose,
+  testId,
+  optionTestId,
+  className,
+}: {
+  id: string;
+  candidates: ComposerCandidate[];
+  highlight: number;
+  onChoose: (candidate: ComposerCandidate) => void;
+  testId: string;
+  optionTestId: string;
+  className?: string;
+}) {
+  if (candidates.length === 0) return null;
+  // 접근 이름과 머리글은 트리거 표의 데이터다(#1930 규율 그대로).
+  const spec = composerTriggerSpec("command");
+  return (
+    <div
+      data-testid={`${testId}-panel`}
+      // 넓은 창에서는 시안의 440이고, 그보다 좁은 컴포저에서는 좌우 여백 안을
+      // 채운다(폰·스레드가 열린 좁은 판). 폭이 목록을 넘어 화면 밖으로 새지 않는다.
+      className={cn(
+        "absolute bottom-full left-3 right-3 mb-2 max-w-pane-command overflow-hidden rounded-lg border border-line bg-surface-raised p-1 shadow-lg",
+        className
+      )}
+      // 목록 자리의 클릭은 캐럿을 뺏지 않는다(후보 행의 mousedown과 같은 규율).
+      onMouseDown={(event) => event.preventDefault()}
+    >
+      <p className="px-3 pb-1 pt-row text-timestamp font-semibold text-ink-muted" aria-hidden="true">
+        {spec.listLabel}
+      </p>
+      <ul id={id} role="listbox" aria-label={spec.listLabel} data-testid={testId}>
+        {candidates.map((candidate, index) => {
+          const command = candidate.command;
+          const Icon = (command && COMMAND_LIST_ICONS[command.icon]) ?? Plug;
+          const matched = command?.matched ?? 0;
+          const on = index === highlight;
+          return (
+            <li key={candidate.id}>
+              <button
+                id={`${id}-option-${index}`}
+                type="button"
+                role="option"
+                aria-selected={on}
+                data-testid={optionTestId}
+                data-command-id={command?.commandId}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  onChoose(candidate);
+                }}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md px-3 py-row text-left text-body text-ink",
+                  on
+                    ? "bg-surface-hover active:bg-surface-pressed"
+                    : "hover:bg-surface-hover active:bg-surface-pressed"
+                )}
+              >
+                <span
+                  className="grid size-control-sm shrink-0 place-items-center rounded-md border border-line bg-surface-muted text-ink-muted"
+                  aria-hidden="true"
+                >
+                  <Icon className="size-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-semibold">
+                    <span className="text-signal-text">{candidate.lead.slice(0, matched)}</span>
+                    {candidate.lead.slice(matched)}
+                  </span>
+                  <span className="block truncate text-meta text-ink-muted">
+                    {candidate.hint}
+                  </span>
+                </span>
+                {on && (
+                  <span className="shrink-0" aria-hidden="true">
+                    <Keycaps keycaps={["↵"]} variant="inline" />
+                  </span>
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <p
+        className="mt-1 flex flex-wrap gap-x-3 border-t border-line px-3 pb-1 pt-row text-timestamp text-ink-muted"
+        data-testid={`${testId}-foot`}
+      >
+        {COMMAND_LIST_FOOT.map((line) => (
+          <span key={line}>{line}</span>
+        ))}
+      </p>
+    </div>
   );
 }

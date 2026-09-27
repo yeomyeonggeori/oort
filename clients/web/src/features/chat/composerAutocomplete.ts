@@ -4,6 +4,11 @@ import { displayGlyph } from "@/features/emoji/catalog";
 import { EMOJI_CATALOG_COPY } from "@/features/emoji/copy";
 import { filterEmojis, normalizeEmojiQuery } from "@/features/emoji/search";
 import type { ComposerInsertion } from "./composerInsertion";
+import type {
+  CommandIcon,
+  LocalCardArgs,
+} from "@momo/core/features/commands/registry";
+import { slashCandidates } from "@momo/core/features/commands/slash";
 
 // =============================================================================
 // 컴포저 자동완성의 **한 기계** (#1930).
@@ -19,7 +24,7 @@ import type { ComposerInsertion } from "./composerInsertion";
 // 하나 더하고 후보 빌더를 하나 쓰면 되고, 파서를 다시 쓸 일은 없다.
 // =============================================================================
 
-export type ComposerTriggerKind = "mention" | "channel" | "emoji";
+export type ComposerTriggerKind = "mention" | "channel" | "emoji" | "command";
 
 /**
  * 후보 소스가 **비동기**인 트리거가 드는 문장 (design-review #1930 H-2).
@@ -70,6 +75,16 @@ export interface ComposerTriggerSpec {
    * 표면이 다른 말로 설명하지 않게.
    */
   deferred?: ComposerDeferredCopy;
+  /**
+   * 이 트리거가 어디서 열리는가. 없으면 `@`·`#`·`:`의 규칙(줄 시작이거나 공백
+   * 뒤)이다. `message-start`는 **메시지 맨 앞**(인덱스 0)에서만 연다 — `/`가
+   * 그렇다(#2942 GC-1). 문장 중간의 `/`는 경로·`and/or`·날짜의 글자이고, 거기서
+   * 명령 목록이 뜨면 평범한 문장이 자동완성 창을 끌고 다닌다.
+   *
+   * 맨 앞 트리거는 질의 안의 **공백 하나**를 허락한다: `/연결 claude`의 인자가
+   * 그 공백 뒤에 산다. 공백 둘부터는 명령이 아니라 문장이다.
+   */
+  anchor?: "message-start";
 }
 
 export const COMPOSER_TRIGGER_SPECS: readonly ComposerTriggerSpec[] = [
@@ -95,11 +110,25 @@ export const COMPOSER_TRIGGER_SPECS: readonly ComposerTriggerSpec[] = [
     slug: "emoji",
     deferred: EMOJI_CATALOG_COPY,
   },
+  {
+    // 네 번째 줄 (#2942 GC-1). 후보는 레지스트리의 `client` 명령에서만 온다
+    // (`@momo/core/features/commands/slash`). 알 수 없는 `/무엇`은 후보가 없어
+    // 목록이 서지 않고, ↵는 평문 전송이다.
+    kind: "command",
+    char: "/",
+    minQuery: 0,
+    listLabel: "명령",
+    slug: "command",
+    anchor: "message-start",
+  },
 ];
 
 const SPEC_BY_CHAR = new Map(
   COMPOSER_TRIGGER_SPECS.map((spec) => [spec.char, spec])
 );
+
+/** 맨 앞 트리거의 질의: 줄바꿈 없음, 공백은 하나까지(`/연결 claude`). */
+const MESSAGE_START_QUERY = /^[^\s]*(?: [^\s]*)?$/;
 
 const SPEC_BY_KIND = new Map(
   COMPOSER_TRIGGER_SPECS.map((spec) => [spec.kind, spec])
@@ -176,6 +205,11 @@ export function isComposerCaretInCode(value: string, index: number): boolean {
  *    뒤로 훑는다. `@hermes:` 를 칠 때 콜론 하나가 열려 있던 멘션 목록을 죽이면
  *    안 되고, 이 한 줄이 그것을 막는다.
  * 4. 코드 서식 안이면 열지 않는다(`allowInCode` 로만 끈다 — 아래 참조).
+ * 5. `anchor: "message-start"` 트리거(`/`)는 인덱스 0에서만 연다. 다른 자리의
+ *    그 글자는 3번처럼 평범한 본문이다. 1번의 예외도 이 트리거만 갖는다: 위
+ *    훑기가 공백에서 멈춘 뒤, 본문이 그 글자로 시작하면 **맨 앞부터 캐럿까지**를
+ *    질의로 한 번 더 본다(`MESSAGE_START_QUERY`). 훑기가 먼저인 이유는
+ *    `/연결 @her`처럼 명령 뒤에 친 멘션이 멘션으로 열려야 하기 때문이다.
  */
 export function composerTriggerQueryAt(
   value: string,
@@ -192,10 +226,14 @@ export function composerTriggerQueryAt(
   const end = Math.min(Math.max(caret, 0), value.length);
   for (let at = end - 1; at >= 0; at -= 1) {
     const char = value[at];
-    if (/\s/.test(char)) return null;
+    if (/\s/.test(char)) return messageStartQuery(value, end);
     const spec = SPEC_BY_CHAR.get(char);
     if (spec === undefined) continue;
-    if (at > 0 && !/\s/.test(value[at - 1])) continue;
+    if (spec.anchor === "message-start") {
+      if (at !== 0) continue;
+    } else if (at > 0 && !/\s/.test(value[at - 1])) {
+      continue;
+    }
     const text = value.slice(at + 1, end);
     if (text.length < spec.minQuery) return null;
     if (options?.allowInCode !== true && isComposerCaretInCode(value, at)) {
@@ -204,6 +242,15 @@ export function composerTriggerQueryAt(
     return { kind: spec.kind, start: at, text };
   }
   return null;
+}
+
+/** 규율 5의 두 번째 눈: 맨 앞 트리거가 공백 하나를 넘겨 열려 있는가. */
+function messageStartQuery(value: string, end: number): ComposerTriggerQuery | null {
+  const spec = SPEC_BY_CHAR.get(value[0] ?? "");
+  if (spec === undefined || spec.anchor !== "message-start") return null;
+  const text = value.slice(1, end);
+  if (!MESSAGE_START_QUERY.test(text)) return null;
+  return { kind: spec.kind, start: 0, text };
 }
 
 /**
@@ -256,6 +303,20 @@ export interface ComposerCandidate {
    * 바꿨다고 「자주 씀」이 갈라지면 한 사람의 습관이 여섯 벌로 흩어진다.
    */
   base?: string;
+  /**
+   * 명령 줄만 (#2942). 이 줄은 **삽입하지 않고 실행한다** — 슬래시로 연 명령은
+   * 전송되지 않는다. `insert`는 비어 있다.
+   */
+  command?: ComposerCommandPayload;
+}
+
+/** 명령 줄이 실행에 필요한 것과 그리는 데 필요한 것. */
+export interface ComposerCommandPayload {
+  commandId: string;
+  args: LocalCardArgs;
+  icon: CommandIcon;
+  /** 줄 이름(`lead`) 앞에서 사람이 이미 친 글자 수. 그 앞머리를 강조한다. */
+  matched: number;
 }
 
 /** 활성 멤버를 핸들·표시 이름 부분일치로 좁힌다. #1930 이전 규칙 그대로. */
@@ -421,6 +482,30 @@ export function emojiCandidates(
         base: entry.glyph,
       };
     });
+}
+
+/**
+ * 명령 후보 (#2942). 줄은 레지스트리의 `client` 명령에서만 나온다 — 이 함수는
+ * 코어의 슬래시 후보를 목록 행 모양으로 옮길 뿐, 이름·별칭·인자를 다시 적지
+ * 않는다.
+ */
+export function commandCandidates(
+  query: string,
+  limit = COMPOSER_CANDIDATE_LIMIT
+): ComposerCandidate[] {
+  return slashCandidates(query, undefined, limit).map((row) => ({
+    kind: "command" as const,
+    id: row.id,
+    lead: row.label,
+    hint: row.hint,
+    insert: "",
+    command: {
+      commandId: row.commandId,
+      args: row.args,
+      icon: row.icon,
+      matched: row.matched,
+    },
+  }));
 }
 
 /**

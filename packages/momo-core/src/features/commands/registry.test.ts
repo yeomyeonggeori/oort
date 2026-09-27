@@ -5,6 +5,7 @@ import {
   AI_CONNECT_SETTINGS_PATH,
   KNOWN_COMMAND_IDS,
   agentRoutingCommandId,
+  slashCommands,
   commandSearchValue,
   visibleCommands,
   type CommandContext,
@@ -262,5 +263,15 @@ describe("ai.connect (#2943 GC-2)", () => {
     const nav = visibleCommands(env()).find((command) => command.id === "nav.settings.ai")!;
     expect(nav.run(ctx).status).toBe("AI 연결로 이동");
     expect(ctx.navigate.mock.calls).toEqual([["/settings?section=ai"]]);
+  });
+
+  it("슬래시 이름은 client 명령만 갖는다", () => {
+    const slash = slashCommands();
+    expect(slash.map((command) => command.id)).toEqual(["ai.connect"]);
+    for (const command of visibleCommands(env())) {
+      if (command.slash !== undefined) expect(command.kind).toBe("client");
+    }
+    expect(slash[0].slash?.name).toBe("연결");
+    expect(slash[0].slash?.aliases).toEqual(["connect", "ai"]);
   });
 });

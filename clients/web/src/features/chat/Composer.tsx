@@ -6,6 +6,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
+import { useNavigate } from "react-router-dom";
 import { AtSign, SendHorizontal, Smile } from "lucide-react";
 import type {
   Channel,
@@ -95,6 +96,21 @@ import {
 import { useComposerDropZone } from "@/features/attachments/useComposerDropZone";
 import { ComposerAutocompleteList } from "@/features/chat/ComposerAutocompleteList";
 import { useComposerAutocomplete } from "@/features/chat/useComposerAutocomplete";
+import type { ComposerCandidate } from "@/features/chat/composerAutocomplete";
+import { openLocalCardIn } from "@/features/chat/localCards";
+import { rememberSettingsOpener } from "@/features/settings/settingsFocus";
+import { isDesktop } from "@/lib/tauri";
+import type {
+  Command as RegistryCommand,
+  CommandContext,
+  LocalCardArgs,
+} from "@momo/core/features/commands/registry";
+import {
+  parseSlashCommand,
+  slashCommandById,
+} from "@momo/core/features/commands/slash";
+import { containsSecretKey } from "@momo/core/features/chat/secretKey";
+import { SecretKeyBlockNotice } from "@/features/chat/SecretKeyBlockNotice";
 import { useComposerEmoji } from "@/features/chat/useComposerEmoji";
 import { useComposerFormat } from "@/features/chat/useComposerFormat";
 import { ComposerFormatTray } from "@/features/chat/ComposerFormatTray";
@@ -427,6 +443,8 @@ export function Composer({
   // 그 글자를 덮어쓴다.
   const [text, setText] = useState(() => readDraft(workspaceId, channelId));
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // 키 모양을 보고 전송을 막았는가 (#2942 GC-1). 막은 뒤 글을 고치면 내려간다.
+  const [secretBlocked, setSecretBlocked] = useState(false);
   const autocomplete = useComposerAutocomplete({
     value: text,
     members: directory.members,
@@ -434,8 +452,11 @@ export function Composer({
     inputRef,
     onValueChange: (next) => {
       setText(next);
+      setSecretBlocked(false);
+      // 키 모양이 든 글은 저장소가 스스로 두지 않는다(`draftStore.writeDraft`).
       writeDraft(workspaceId, channelId, next);
     },
+    onRunCommand: (candidate) => runCommandCandidate(candidate),
   });
   const setAutocompleteCaret = autocomplete.setCaret;
   const closeAutocomplete = autocomplete.close;
@@ -472,6 +493,7 @@ export function Composer({
   // 90s TTL could never fire on this surface at all. Now every render, from
   // whatever cause, re-reads the wall clock and drops what has gone quiet.
   const { session, connStatus } = useSession();
+  const navigate = useNavigate();
   // 폰에서는 Enter가 계속 줄바꿈이다 (goal B8 H4). 소프트 키보드에는 Shift+Enter가
   // 없어서, Enter를 전송으로 바꾸면 여러 줄 쓰기를 통째로 없애게 된다. 힌트 줄도
   // 같은 중단점에서 접히므로 화면과 키가 어긋나지 않는다.
@@ -610,6 +632,7 @@ export function Composer({
     setText(restored);
     setAutocompleteCaret(restored.length);
     closeAutocomplete();
+    setSecretBlocked(false);
     const save = () => writeDraft(workspaceId, channelId, textRef.current);
     window.addEventListener("pagehide", save);
     const onSeed = (event: Event) => {
@@ -682,10 +705,76 @@ export function Composer({
     });
   }
 
+  // ── `/` 명령 (#2942 GC-1 · #2943 GC-2) ──────────────────────────────────
+  //
+  // 슬래시로 연 명령은 **전송되지 않는다**(brief §3.1). 본문과 초안을 비우고
+  // 레지스트리의 `run`을 부른다. 카드 자리는 이 채널의 것이고, 없으면(GC-3 전)
+  // 명령이 설정 › AI 연결로 폴백한다 — 그 이동은 팔레트와 같은 규율로 돌아올
+  // 자리(이 입력창)를 기억한다.
+  //
+  // 채널 만들기·에이전트 프로필은 슬래시 목록에 없다(`slashCommands()`는 `client`
+  // 명령만 싣는다). 두 자리는 계약을 채우는 빈 손이다.
+  const commandContext: CommandContext = {
+    navigate: (path) => {
+      if (path === "/settings" || path.startsWith("/settings?")) {
+        rememberSettingsOpener(inputRef.current);
+      }
+      navigate(path);
+    },
+    openCreateChannel: () => undefined,
+    openAgentProfile: () => undefined,
+    openLocalCard: (card, args) => openLocalCardIn(channelId, card, args),
+    session: { memberId: session.member.id },
+    workspaceId,
+    desktop: isDesktop(),
+  };
+
+  function runCommand(command: RegistryCommand, args: LocalCardArgs) {
+    // 명령이 화면을 옮기면(설정 폴백) 이 컴포저는 다음 렌더 전에 내려가고, 그
+    // 정리 함수가 `textRef`의 **옛 글**을 초안으로 되쓴다. 그래서 참조부터 비운다
+    // — 게이트 1번이 실측으로 잡은 자리다(`/연`이 초안에 남았다).
+    textRef.current = "";
+    setText("");
+    setSecretBlocked(false);
+    clearDraft(workspaceId, channelId);
+    autocomplete.close();
+    format.dismiss();
+    command.run(commandContext, args);
+  }
+
+  function runCommandCandidate(candidate: ComposerCandidate) {
+    const payload = candidate.command;
+    if (payload === undefined) return;
+    const command = slashCommandById(payload.commandId);
+    if (command !== null) runCommand(command, payload.args);
+  }
+
+  /**
+   * 보내기의 문 하나. ↵와 보내기 버튼이 함께 지난다.
+   *
+   * 1. 키 모양이 있으면 보내지 않고 입력창 위에서 이유를 말한다. 글은 남긴다 —
+   *    사람이 키만 지우고 나머지를 보낼 수 있어야 한다.
+   * 2. 본문이 정확히 명령이면(목록을 Esc로 닫고 ↵) 보내지 않고 실행한다.
+   * 3. 그 밖은 메시지다. 알 수 없는 `/무엇`도 여기로 온다(평문).
+   */
+  function trySend(): "sent" | "command" | "blocked" {
+    if (containsSecretKey(text)) {
+      setSecretBlocked(true);
+      return "blocked";
+    }
+    const parsed = parseSlashCommand(text);
+    if (parsed !== null) {
+      runCommand(parsed.command, parsed.args);
+      return "command";
+    }
+    submit(text.trim());
+    return "sent";
+  }
+
   function onSubmit(event: FormEvent) {
     event.preventDefault();
     if (!canSend) return;
-    submit(text.trim());
+    trySend();
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -731,9 +820,8 @@ export function Composer({
         // 않는다 — 그 사람은 키가 어디 있는지 아직 모르고, 힌트 줄은 정확히 그
         // 사람을 위한 것이다. 오프라인이라 보내지 못한 누름도 세지 않는다: 배운
         // 것은 「이 키가 전송이다」인데 그 누름은 그것을 보여 주지 못했다.
-        if (canSend) {
+        if (canSend && trySend() === "sent") {
           rememberSendLearned();
-          submit(text.trim());
         }
         return;
       }
@@ -849,6 +937,12 @@ export function Composer({
       />
 
       <form onSubmit={onSubmit} className="relative p-3">
+        {secretBlocked && (
+          <SecretKeyBlockNotice
+            id="composer-secret-block"
+            testId="composer-secret-block"
+          />
+        )}
         <ComposerAutocompleteList
           id={`composer-${autocomplete.slug}-list`}
           kind={autocomplete.kind}
@@ -867,8 +961,9 @@ export function Composer({
           // 입력 그릇이 곧 떠 있는 카드다. 폰에서는 3:1 경계(--line-strong)의
           // 그릇이고, 넓은 창에서는 반경 20 · float 그림자 · 1px 선 고리다(시안).
           // 고대비에서는 고리가 다시 --line-strong이 된다(tokens.css).
-          className="composer-card focus-visible-within:focus-ring"
+          className="composer-card focus-visible-within:focus-ring data-warn:border-warn"
           data-testid="composer-frame"
+          data-warn={secretBlocked ? "" : undefined}
           onClick={(event) => {
             // 버튼과 그 자식(svg/path)은 자기 액션을 가진다. 나머지 그릇 면적은 한
             // 입력 컨트롤의 일부이므로 액션 행의 빈 폭을 눌러도 캐럿을 돌려준다.
@@ -950,7 +1045,13 @@ export function Composer({
                 ? `composer-${autocomplete.slug}-list-option-${autocomplete.highlight}`
                 : undefined
             }
-            aria-describedby={showComposerHint ? "composer-hint" : undefined}
+            aria-describedby={
+              secretBlocked
+                ? "composer-secret-block"
+                : showComposerHint
+                  ? "composer-hint"
+                  : undefined
+            }
             data-testid="composer-input"
             // 포커스 표시는 한 컨트롤인 바깥 그릇이 진다. 안쪽 textarea의 UA
             // outline까지 남기면 그릇 안에 두 번째 상자가 생긴다.

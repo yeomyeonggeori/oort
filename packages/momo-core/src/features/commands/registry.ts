@@ -159,8 +159,37 @@ export interface Command {
   readonly testId: string;
   /** 에이전트별 명령만 갖는다. 줄의 `data-member-id`가 된다. */
   readonly memberId?: string;
+  /**
+   * 컴포저 맨 앞 `/`로 부르는 이름(#2942 GC-1). `client` 명령만 가질 수 있다.
+   * 없으면 슬래시 목록에 서지 않는다.
+   */
+  readonly slash?: SlashSpec;
   /** `args`는 슬래시 인자처럼 **의도만** 담는다. 팔레트는 넘기지 않는다. */
   readonly run: (ctx: CommandContext, args?: LocalCardArgs) => CommandResult;
+}
+
+/** 슬래시 인자 한 줄. `/연결 claude`의 `claude`. */
+export interface SlashArg {
+  /** 목록에 그려지는 인자 이름. */
+  readonly value: string;
+  /** 같은 인자를 부르는 다른 이름(대소문자 무시). */
+  readonly aliases: readonly string[];
+  /** 목록 줄 아래 흐린 설명. */
+  readonly hint: string;
+  readonly icon: CommandIcon;
+  /** 이 인자가 명령에 싣는 의도. */
+  readonly args: LocalCardArgs;
+}
+
+/** 슬래시로 부르는 명령의 이름표. */
+export interface SlashSpec {
+  /** 정본 이름(`/` 없이). */
+  readonly name: string;
+  /** 별칭(`/` 없이). 정본과 같은 명령을 연다. */
+  readonly aliases: readonly string[];
+  /** 목록 줄 아래 흐린 설명. */
+  readonly hint: string;
+  readonly args: readonly SlashArg[];
 }
 
 /** 지금 이 워크스페이스에서 무엇이 보일 수 있는가. */
@@ -337,6 +366,34 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
     available: always,
     metaFor: (env) =>
       env.canOpenLocalCard("ai.connect") ? "이 채널 · 나에게만" : "설정에서 열려요",
+    slash: {
+      name: "연결",
+      aliases: ["connect", "ai"],
+      hint: "AI 연결 카드 열기 · 나에게만 보여요",
+      args: [
+        {
+          value: "claude",
+          aliases: ["클로드"],
+          hint: "Claude 구독 줄만 펼쳐 열기",
+          icon: "ai-connect",
+          args: { line: "claude" },
+        },
+        {
+          value: "codex",
+          aliases: ["코덱스"],
+          hint: "Codex 구독 줄만 펼쳐 열기",
+          icon: "ai-connect",
+          args: { line: "codex" },
+        },
+        {
+          value: "팀키",
+          aliases: ["team", "팀"],
+          hint: "팀 API 키 줄만 펼쳐 열기 · 운영자",
+          icon: "credentials",
+          args: { line: "team" },
+        },
+      ],
+    },
     run: runAiConnect,
   },
   {
@@ -455,6 +512,19 @@ export function visibleCommands(env: CommandEnv): readonly Command[] {
       metaFor === undefined ? command : { ...command, meta: metaFor(env) }
   );
   return [...fixed, ...agentRoutingCommands(env.agents)];
+}
+
+/**
+ * 슬래시로 부를 수 있는 명령 전부(#2942). 컴포저 `/` 목록의 유일한 소스다.
+ *
+ * `client` 명령만 이름을 가질 수 있다: 슬래시로 연 명령은 **전송되지 않고**
+ * 이 기기에서 끝나야 하므로(brief §3.1), 서버 상태를 바꾸는 명령이나 단순 이동은
+ * 이 목록에 서지 않는다.
+ */
+export function slashCommands(): readonly Command[] {
+  return STATIC_COMMANDS.filter(
+    (command) => command.kind === "client" && command.slash !== undefined
+  ).map(({ available: _available, metaFor: _metaFor, ...command }) => command);
 }
 
 /**

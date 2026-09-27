@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { containsSecretKey } from "@momo/core/features/chat/secretKey";
 
 // =============================================================================
 // 쓰다 만 글은 채널을 옮겨도 남는다 (U4-f · 진단 H-10).
@@ -212,7 +213,11 @@ export function writeDraft(
   nowMs: number = Date.now()
 ): void {
   const key = draftKey(workspaceId, channelId);
-  if (text === "") {
+  // 키 모양이 든 글은 두지 않는다 (#2942 GC-1, brief §3.4 「비밀값은 draftStore에
+  // 가지 않는다」). 초안은 이 기기의 로컬 저장소에 평문으로 남고, 그 글은 컴포저가
+  // 어차피 보내지 않는 글이다. 입력마다 쓰는 길과 창을 닫을 때 쓰는 길이 모두
+  // 이 함수를 지나므로 문은 여기 하나다.
+  if (text === "" || containsSecretKey(text)) {
     writeRaw(key, null);
     emitDraftsChanged();
     return;
