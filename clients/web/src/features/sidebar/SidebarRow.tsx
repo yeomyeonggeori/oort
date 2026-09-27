@@ -73,6 +73,11 @@ export interface SidebarRowProps {
    * 없으면 예전 그대로다 — 전역 목적지 행도, 별표 섹션의 행도 끌리지 않는다.
    */
   dragProps?: SidebarDragHandleProps;
+  /**
+   * 경로만으로는 선택을 가를 수 없는 줄(#2854: 「내 작업」 `/work`와 「팀 작업」
+   * `/work?view=team`은 경로가 같다)은 셸이 판정을 넘긴다. 없으면 NavLink가 정한다.
+   */
+  isActive?: boolean;
 }
 
 export function SidebarRow({
@@ -88,6 +93,7 @@ export function SidebarRow({
   dataAttrs,
   wrapLink,
   dragProps,
+  isActive: activeOverride,
 }: SidebarRowProps) {
   const hasUnread = unreadCount > 0;
   const hasMention = mentionCount > 0;
@@ -99,8 +105,9 @@ export function SidebarRow({
       {...dataAttrs}
       {...dragProps}
       data-unread={hasUnread ? "" : undefined}
+      aria-current={activeOverride === undefined ? undefined : activeOverride ? "page" : false}
       className={({ isActive }) =>
-        cn(rowClass, isActive ? activeClass : inactiveClass)
+        cn(rowClass, (activeOverride ?? isActive) ? activeClass : inactiveClass)
       }
     >
       <span data-row-icon="" aria-hidden="true">

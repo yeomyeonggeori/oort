@@ -35,6 +35,7 @@
 
 import { serverSurface, type SurfaceId } from "../capabilities/serverSurfaces";
 import { attachDirection } from "../../lib/koreanParticle";
+import { MY_WORK_PATH, WORK_CONSOLE_VIEW_PATH } from "../workbench/workTab";
 
 /**
  * 팔레트가 명령을 묶는 갈래.
@@ -92,6 +93,11 @@ export interface CommandContext {
   readonly openAgentProfile: (memberId: string) => void;
   readonly session: CommandSession;
   readonly workspaceId: string;
+  /**
+   * 데스크탑 셸인가(#2854). 데스크탑의 `/work`는 「내 작업」 격자라 작업 콘솔은
+   * `/work?view=console`에 산다. 없으면 웹으로 읽는다.
+   */
+  readonly desktop?: boolean;
 }
 
 /**
@@ -255,7 +261,12 @@ const STATIC_COMMANDS: readonly StaticCommand[] = [
     icon: "work-console",
     testId: "switcher-work-console",
     available: (env) => env.isSurfaceProvided("workConsole"),
-    run: navigateTo("/work", serverSurface("workConsole").label),
+    // #2854: 데스크탑 `/work`는 「내 작업」 격자다. 사이드바 줄과 같은 판정으로 간다.
+    run: (ctx) =>
+      navigateTo(
+        ctx.desktop ? WORK_CONSOLE_VIEW_PATH : MY_WORK_PATH,
+        serverSurface("workConsole").label
+      )(ctx),
   },
   {
     id: "nav.workstreams",
