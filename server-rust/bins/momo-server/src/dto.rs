@@ -3440,8 +3440,11 @@ pub struct AgentProfileInput {
     pub model_pref: Option<String>,
     #[serde(default, alias = "effort_pref")]
     pub effort_pref: Option<String>,
+    /// `None` when the body omits the key. On create that means
+    /// `momo_agent::DEFAULT_ENABLED_TOOLS`; on a profile PUT it means `[]`
+    /// (GC-8, #2949). An explicit list — `[]` included — is always taken as is.
     #[serde(default, alias = "enabled_tools")]
-    pub enabled_tools: Vec<String>,
+    pub enabled_tools: Option<Vec<String>>,
     #[serde(default)]
     pub triggers: Option<Value>,
 }
