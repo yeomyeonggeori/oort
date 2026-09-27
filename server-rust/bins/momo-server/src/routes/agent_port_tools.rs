@@ -61,8 +61,9 @@ use momo_mcp::{
 };
 use momo_messaging::{
     clamp_history_limit, is_channel_member, list_channel_page, list_hosted_inbox_in_tx,
-    send_message_in_tx, validate_quote_target_in_tx, validate_thread_root_in_tx, HistoryCursor,
-    MessageType, NewMessage, SendExtras, HOSTED_INBOX_LIMIT_DEFAULT,
+    send_message_in_tx, send_thread_notice_in_tx, validate_quote_target_in_tx,
+    validate_thread_root_in_tx, HistoryCursor, MessageType, NewMessage, SendExtras,
+    HOSTED_INBOX_LIMIT_DEFAULT,
 };
 use momo_outbox::GatewayLeaseBinding;
 use serde_json::{json, Map, Value};
@@ -1228,8 +1229,9 @@ const NO_HUMAN_REQUESTER_FAILURE: ToolFailure = ToolFailure::Unavailable;
 ///    to speak for a run somebody else now holds;
 /// 3. the requester is read from `agent_run.trigger_message_id` and must be a
 ///    human, or the call is `no_human_requester` with nothing written;
-/// 4. the card goes out through `send_message_in_tx` — `channel_seq` bump,
-///    message, outbox row — in the **handle's** channel.
+/// 4. the card goes out through `send_thread_notice_in_tx` — `channel_seq`
+///    bump, message, outbox row, and the thread rollup + `thread.updated` when
+///    it is a reply — in the **handle's** channel.
 ///
 /// Not written: an approval row, a run transition (no `mark_run_started`, no
 /// park — `agent_run.status` is read, locked and left as it was), a props
@@ -1312,7 +1314,11 @@ async fn card_suggest(
                 return Ok(Err(NO_HUMAN_REQUESTER_FAILURE));
             };
 
-            let sent = send_message_in_tx(
+            // `send_thread_notice_in_tx`, not `send_message_in_tx` (#2959 M1):
+            // the same single send transaction, plus the thread rollup and
+            // `thread.updated` when the card is a reply, so it shows up in the
+            // thread's count and live view. No mention pass, no inbox fan-out.
+            let sent = send_thread_notice_in_tx(
                 conn,
                 caller.workspace_id,
                 NewMessage {
@@ -1727,7 +1733,10 @@ mod tests {
             "async fn card_suggest(",
         );
         for (door, code) in [("hosted", &hosted), ("worker", &worker)] {
-            assert!(code.contains("send_message_in_tx"), "{door}: the one write");
+            assert!(
+                code.contains("send_thread_notice_in_tx"),
+                "{door}: the one write, with the thread rollup"
+            );
             assert!(
                 code.contains("validate_suggestion"),
                 "{door}: the shared gate"

@@ -744,6 +744,32 @@ pub fn approval_reason(tool_name: &str, grants: Option<&[ToolGrant]>) -> Approva
     }
 }
 
+/// A call that the gate exempts **by name** runs only when the agent's profile
+/// turned that tool on (#2959 review M3).
+///
+/// Every other catalog tool has G6's fail-closed approval as the backstop for a
+/// call the profile never advertised (a prompt-injected model, a provider that
+/// does not enforce the offered list): no grant, so a person is asked. A name
+/// exemption removes that backstop, so the profile is what stands in for it —
+/// an operator who leaves `card_suggest` off gets a refusal, not a card.
+///
+/// `true` means "refuse this call": the tool is exempt by name and absent from
+/// `enabled`. Matching is [`normalize`], the executor's rule.
+pub fn exempt_tool_not_enabled(tool_name: &str, enabled: &[ToolDefinition]) -> bool {
+    approval_reason(tool_name, None) == ApprovalReason::SuggestionOnly
+        && !enabled
+            .iter()
+            .any(|definition| normalize(definition.name) == normalize(tool_name))
+}
+
+/// The `tool_result` for [`exempt_tool_not_enabled`].
+pub fn not_enabled_output(tool_name: &str) -> String {
+    format!(
+        "Tool `{tool_name}` is not enabled for this agent, so it did not run. \
+         Answer in text instead."
+    )
+}
+
 /// The bool form, for call sites that only branch.
 pub fn requires_approval(tool_name: &str, grants: Option<&[ToolGrant]>) -> bool {
     approval_reason(tool_name, grants).requires_approval()
@@ -1241,5 +1267,19 @@ mod tests {
         assert!(definition.description.contains("never ask for a key"));
         assert!(is_executable(CARD_SUGGEST));
         assert_eq!(wire_tool_name(CARD_SUGGEST), "card_suggest");
+    }
+
+    /// #2959 M3 — the name exemption does not outrun the profile.
+    #[test]
+    fn an_exempt_tool_runs_only_when_the_profile_enabled_it() {
+        let none: Vec<ToolDefinition> = Vec::new();
+        let enabled = enabled_tool_definitions(&[CARD_SUGGEST.to_string()]);
+        for spelling in [CARD_SUGGEST, "Card-Suggest"] {
+            assert!(exempt_tool_not_enabled(spelling, &none), "{spelling}");
+            assert!(!exempt_tool_not_enabled(spelling, &enabled), "{spelling}");
+        }
+        // Gated tools keep their own backstop (the approval), untouched here.
+        assert!(!exempt_tool_not_enabled(WORK_SESSION_END, &none));
+        assert!(not_enabled_output(CARD_SUGGEST).contains("not enabled"));
     }
 }

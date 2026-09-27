@@ -349,8 +349,11 @@ pub struct SuggestionRequester {
 ///
 /// `None` — which both doors turn into `no_human_requester` with zero messages
 /// — when the run has no trigger (a work run, a resumed run whose trigger was
-/// never recorded) or the trigger's author is an agent (agent-to-agent
-/// delegation). The run row is the source rather than a job payload: the run is
+/// never recorded), the trigger's author is an agent (agent-to-agent
+/// delegation), the person deleted the request, or the person is no longer an
+/// active member of the trigger's channel (#2959 review L1: a card for someone
+/// who cannot see it would only leave 「…에게 제안했어요」 in the room, and a
+/// deleted request must not come back as a card). The run row is the source rather than a job payload: the run is
 /// durable and survives a resume, and `resume_job_payload` writes no trigger.
 ///
 /// A read. This crate still owns no message *writes* (Cargo.toml).
@@ -365,12 +368,22 @@ pub async fn suggestion_requester_in_tx(
            JOIN message t \
              ON t.id = r.trigger_message_id \
             AND t.workspace_id = $1 \
+            AND t.deleted_at IS NULL \
            JOIN member m \
              ON m.id = t.author_member_id \
             AND m.workspace_id = $1 \
             AND m.kind = 'human' \
+            AND m.status = 'active' \
+            AND m.deleted_at IS NULL \
           WHERE r.id = $2 \
-            AND r.workspace_id = $1",
+            AND r.workspace_id = $1 \
+            AND EXISTS ( \
+              SELECT 1 FROM membership ms \
+               WHERE ms.workspace_id = $1 \
+                 AND ms.channel_id = t.channel_id \
+                 AND ms.member_id = m.id \
+                 AND ms.left_at IS NULL \
+            )",
     )
     .bind(workspace_id)
     .bind(run_id)

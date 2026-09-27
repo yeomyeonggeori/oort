@@ -38,7 +38,10 @@ use momo_agent::tools::{
     WORK_SESSION_SPAWN,
 };
 use momo_db::{DbError, PgConnection, PgPool};
-use momo_messaging::{cent_channel, send_message_in_tx, MessageType, NewMessage};
+use momo_messaging::{
+    cent_channel, send_message_in_tx, send_thread_notice_in_tx, validate_thread_root_in_tx,
+    MessageType, NewMessage,
+};
 use momo_outbox::{emit_outbox, OutboxKind};
 use momo_t3::work_control::{
     bind_control_session_in_tx, control_event_payload, insert_work_control_in_tx,
@@ -147,7 +150,7 @@ pub async fn execute(
 ///
 /// It runs with no approval card (`ApprovalReason::SuggestionOnly`) because it
 /// writes one message and runs nothing: no PTY, no provider link, no settings
-/// route. The card's single write is `send_message_in_tx` in its own tenant
+/// route. The card's single write is `send_thread_notice_in_tx` in its own tenant
 /// transaction (seq + message + outbox); the `tool_result` that follows is
 /// `write_result`'s as for every other tool.
 ///
@@ -196,7 +199,21 @@ async fn card_suggest(
             } else {
                 None
             };
-            send_message_in_tx(
+            // The trigger's root may have been deleted since (#2959 M1). A
+            // root that no longer stands has no thread to join; the card goes
+            // to the channel's top level instead of into a dead thread.
+            let root_id = match root_id {
+                Some(root)
+                    if validate_thread_root_in_tx(conn, channel_id, root)
+                        .await?
+                        .is_ok() =>
+                {
+                    Some(root)
+                }
+                _ => None,
+            };
+            // With the thread rollup + `thread.updated` when it is a reply.
+            send_thread_notice_in_tx(
                 conn,
                 workspace_id,
                 NewMessage {

@@ -1213,6 +1213,11 @@ impl AgentWorker {
         let raw_arguments = raw_arguments.to_string();
         let step_ceiling = self.config.a2a.clamped().max_steps;
         let ttl = self.config.approval_ttl_seconds;
+        // #2959 M3: a tool the gate exempts by name runs only if the profile
+        // turned it on. Decided here, from the payload the job carries, before
+        // the transaction.
+        let not_enabled =
+            momo_agent::tools::exempt_tool_not_enabled(&call.name, &payload.enabled_tools());
         let grant = payload
             .tool_grants
             .as_ref()
@@ -1273,6 +1278,15 @@ impl AgentWorker {
                 // bounded by G3 like any other loop.
                 if let Some(result) = Self::refused_spawn_target(conn, workspace_id, &call).await? {
                     return Ok(ToolDisposition::Refused { result });
+                }
+
+                if not_enabled {
+                    return Ok(ToolDisposition::Refused {
+                        result: momo_agent::ToolResult::error(
+                            &call.call_id,
+                            momo_agent::tools::not_enabled_output(&call.name),
+                        ),
+                    });
                 }
 
                 if !reason.requires_approval() {

@@ -7087,12 +7087,11 @@ paths:
         server capability, so the advertised catalog is exactly the callable
         one. A credential carrying only `agent:port:connect` lists no tool and
         may call none; a tool outside the caller's view answers byte-identically
-        to a tool that does not exist. The eight tools are `oort_inbox_read`,
+        to a tool that does not exist. The ten tools are `oort_inbox_read`,
         `oort_conversation_read`, `oort_message_post`, `oort_jobs_claim`,
-        `oort_job_renew`, `oort_job_release`, `oort_run_event` and
-        `oort_run_complete`; `oort_action_propose` (ADR-0186 D2) and
-        `oort_card_suggest` (ADR-0186 증보 G1) join them under their own scopes.
-        Each binds an existing domain rather than a second one, and job authority travels only as an opaque `leaseHandle` that
+        `oort_job_renew`, `oort_job_release`, `oort_run_event`,
+        `oort_run_complete`, `oort_action_propose` (ADR-0186 D2) and
+        `oort_card_suggest` (ADR-0186 증보 G1). Each binds an existing domain rather than a second one, and job authority travels only as an opaque `leaseHandle` that
         carries the channel its work came from, so the confirming human's exact
         channel grant is re-checked on every later verb. Arguments are validated
         against the tool's published `inputSchema` before execution, so

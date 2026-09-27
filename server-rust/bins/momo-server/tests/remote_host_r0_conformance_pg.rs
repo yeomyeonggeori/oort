@@ -2726,3 +2726,107 @@ async fn r01_6_a_spawn_call_that_names_a_member_host_is_refused() {
         json!(vps.to_string())
     );
 }
+
+// ---------------------------------------------------------------------------
+// #2959 M3 — `card_suggest` runs only when the agent's profile turned it on
+// ---------------------------------------------------------------------------
+
+/// **RED PROOF (#2959 M3).** `card_suggest` is exempt from the approval gate by
+/// name, so the profile is its only backstop: a provider that calls it for an
+/// agent whose `enabled_tools` does not list it gets a refusal and posts no
+/// card; the same call on a profile that lists it posts one. Driven through the
+/// real worker loop (`drain_once`), so the check under test is the one
+/// `record_tool_call` makes.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn gc6_card_suggest_runs_only_when_the_profile_enabled_it() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let worker_pool = role_pool("momo_worker", &momo_worker_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let owner_token = login(&http, &base, tenant.workspace, &tenant.owner_email).await;
+
+    let cards = || async {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM message WHERE workspace_id=$1 \
+               AND props ? 'momo.command_suggest'",
+        )
+        .bind(tenant.workspace)
+        .fetch_one(&su)
+        .await
+        .expect("count cards")
+    };
+    let mention_and_drain = |call_id: &'static str| {
+        let http = http.clone();
+        let base = base.clone();
+        let owner_token = owner_token.clone();
+        let worker_pool = worker_pool.clone();
+        async move {
+            let sent = http
+                .post(format!(
+                    "{base}/v1/workspaces/{}/channels/{}/messages",
+                    tenant.workspace, tenant.channel
+                ))
+                .bearer_auth(&owner_token)
+                .json(&json!({"clientMsgId": Uuid::new_v4(), "body": "@hermes 내 클로드 구독 연결해 줘"}))
+                .send()
+                .await
+                .expect("send mention");
+            assert_eq!(sent.status(), 201);
+            let call = ProviderToolCall {
+                id: call_id.to_string(),
+                name: momo_agent::tools::CARD_SUGGEST.to_string(),
+                arguments: json!({"commandId": "ai.connect", "args": {"harness": "claude"},
+                                  "body": "연결 카드예요"})
+                .to_string(),
+            };
+            let worker = AgentWorker::new(
+                worker_pool,
+                Arc::new(MockChatProvider::echo().with_tool_calls([vec![call], vec![]])),
+                WorkerConfig::for_target(database_url()).with_env_bearer("sk-conformance-team-key"),
+            );
+            worker.drain_once().await.expect("drain");
+        }
+    };
+
+    // No profile → `enabled_tools` is empty.
+    mention_and_drain("call_card_off").await;
+    assert_eq!(
+        cards().await,
+        0,
+        "a tool the profile did not enable posts nothing"
+    );
+    let refusal: String = sqlx::query_scalar(
+        "SELECT props->>'output' FROM message WHERE workspace_id=$1 AND type='tool_result' \
+           AND props->>'call_id' = 'call_card_off'",
+    )
+    .bind(tenant.workspace)
+    .fetch_one(&su)
+    .await
+    .expect("the refusal is answered on the spine");
+    assert!(refusal.contains("not enabled"), "{refusal}");
+    let approvals: i64 = sqlx::query_scalar("SELECT count(*) FROM approval WHERE workspace_id=$1")
+        .bind(tenant.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(approvals, 0, "a refusal is not a card either");
+
+    // The operator turns it on.
+    sqlx::query(
+        "INSERT INTO agent_profile (agent_member_id, workspace_id, updated_by, paused, enabled_tools) \
+         VALUES ($1, $2, $3, false, '[\"card_suggest\"]'::jsonb)",
+    )
+    .bind(tenant.agent)
+    .bind(tenant.workspace)
+    .bind(tenant.owner)
+    .execute(&su)
+    .await
+    .expect("enable card_suggest");
+    mention_and_drain("call_card_on").await;
+    assert_eq!(cards().await, 1, "the enabled profile posts the card");
+}
