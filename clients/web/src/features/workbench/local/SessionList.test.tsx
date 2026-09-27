@@ -24,7 +24,20 @@ afterEach(() => {
   host?.remove();
 });
 
-const git = (worktree: string, branch: string) => ({ ...PANE_GIT_UNKNOWN, repo: "momo", worktree, branch, isDefault: worktree === "momo" });
+const git = (worktree: string, branch: string) => ({
+  ...PANE_GIT_UNKNOWN,
+  repo: "momo",
+  repoKey: "momo",
+  worktree,
+  branch,
+  isDefault: worktree === "momo",
+});
+
+function key(target: Element, k: string) {
+  act(() => {
+    target.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+  });
+}
 
 function input(index: number, over: Partial<SessionListInput>): SessionListInput {
   return {
@@ -47,7 +60,6 @@ function mount(sessions: SessionListInput[], focusedPaneId: string) {
     root?.render(
       createElement(SessionList, {
         sessions,
-        loading: false,
         focusedPaneId,
         platform: "mac",
         onActivate: () => undefined,
@@ -94,5 +106,48 @@ describe("SessionList", () => {
     expect(flat.hasAttribute("data-with-worktree")).toBe(true);
     expect(flat.textContent).toContain("feat/2774-xterm");
     expect(document.querySelector("[data-testid='session-list-repo']")?.textContent).toContain("모든 저장소");
+  });
+
+  it("트리 역할: 머리·줄이 treeitem, ←는 줄에서 머리로·머리를 접고, →는 편다(검수 #2951 M5)", () => {
+    mount([input(1, {}), input(2, { git: PANE_GIT_UNKNOWN, title: "홈 셸" })], "p1");
+    expect(document.querySelector("[data-testid='session-list-tree']")?.getAttribute("role")).toBe("tree");
+    const row = rows()[0]!;
+    expect(row.getAttribute("role")).toBe("treeitem");
+    expect(row.getAttribute("aria-level")).toBe("2");
+    expect(row.getAttribute("aria-selected")).toBe("true");
+    act(() => row.focus());
+    key(row, "ArrowLeft");
+    const head = groups()[0]!;
+    expect(document.activeElement).toBe(head);
+    key(head, "ArrowLeft");
+    expect(head.getAttribute("aria-expanded")).toBe("false");
+    expect(rows().map((r) => r.getAttribute("data-session-pane"))).toEqual(["p2"]);
+    key(groups()[0]!, "ArrowRight");
+    expect(groups()[0]!.getAttribute("aria-expanded")).toBe("true");
+    // ↓는 머리와 줄을 함께 돈다.
+    key(groups()[0]!, "ArrowDown");
+    expect(document.activeElement?.getAttribute("data-session-pane")).toBe("p1");
+  });
+
+  it("확인 중(git null)인 칸은 묶지 않고 막대 줄로 끝에, 읽기 도구에는 「git 확인 중」", () => {
+    mount([input(1, {}), input(2, { git: null, title: "새 셸" })], "p1");
+    const pending = rows().find((r) => r.getAttribute("data-session-pane") === "p2")!;
+    expect(pending.hasAttribute("data-checking")).toBe(true);
+    expect(pending.getAttribute("aria-label")).toContain("git 확인 중");
+    expect(rows().map((r) => r.getAttribute("data-session-pane"))).toEqual(["p1", "p2"]);
+  });
+
+  it("분리된 HEAD 평탄화 줄은 폴더와 「분리된 HEAD」를 보이고 이름에도 싣는다(검수 #2951 M1)", () => {
+    mount(
+      [
+        input(1, {}),
+        input(2, {}),
+        input(3, { git: { ...git("bisect", "x"), branch: null, detached: true } }),
+      ],
+      "p1"
+    );
+    const row = rows().find((r) => r.getAttribute("data-session-pane") === "p3")!;
+    expect(row.textContent).toContain("bisect (분리된 HEAD)");
+    expect(row.getAttribute("aria-label")).toContain("bisect 분리된 HEAD");
   });
 });

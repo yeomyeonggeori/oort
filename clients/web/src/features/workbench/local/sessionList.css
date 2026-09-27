@@ -415,17 +415,11 @@
   }
 }
 
-/* 확인 중(첫 git 읽기 전): 높이를 지키는 막대, 번쩍임 없음. */
-.sl-skel {
-  block-size: var(--session-row-height);
-  display: flex;
-  align-items: center;
-  padding: 0 var(--session-row-pad) 0 var(--session-indent);
-}
-.sl-skel > span {
+/* 확인 중(첫 git 읽기 전): worktree 줄 자리에 높이를 지키는 막대, 번쩍임 없음. */
+.sl-checking .sl-bar {
   display: block;
   block-size: var(--session-mark-glyph);
-  inline-size: 70%;
+  inline-size: 60%;
   border-radius: var(--session-badge-pad);
   background-color: var(--muted-soft);
 }

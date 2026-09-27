@@ -93,8 +93,6 @@ export interface SessionListHandle {
 
 export interface SessionListProps {
   sessions: readonly SessionListInput[];
-  /** 첫 git 읽기가 끝나지 않았다(높이를 지키는 막대를 보인다). */
-  loading: boolean;
   focusedPaneId: string | null;
   platform: KeyPlatform;
   onActivate: (paneId: string) => void;
@@ -109,7 +107,6 @@ export interface SessionListProps {
 export const SessionList = forwardRef<SessionListHandle, SessionListProps>(function SessionList(
   {
     sessions,
-    loading,
     focusedPaneId,
     platform,
     onActivate,
@@ -142,11 +139,22 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
     [sessions, prefs.filter, prefs.grouping, repo, query]
   );
   // 고른 저장소가 사라지면(칸을 닫았다) 전부로 돌아간다.
-  const repoGone = repo !== undefined && !model.repos.some((r) => r.name === repo);
+  const repoGone = repo !== undefined && !model.repos.some((r) => r.id === repo);
   if (repoGone) setRepo(undefined);
 
   const rowButtons = () =>
     [...(treeRef.current?.querySelectorAll<HTMLButtonElement>("[data-session-row]") ?? [])];
+  /** 트리의 모든 항목(묶음 머리 + 세션 줄), 화면 순서. */
+  const treeItems = () =>
+    [...(treeRef.current?.querySelectorAll<HTMLButtonElement>("[data-tree-item]") ?? [])];
+  const toggleGroup = (key: string, open?: boolean) =>
+    setFolded((prev) => {
+      const next = new Set(prev);
+      const isOpen = !next.has(key);
+      if ((open ?? !isOpen) === true) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   useImperativeHandle(ref, () => ({
     focus() {
@@ -168,63 +176,80 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
       onMaximize(focusedPaneId);
       return;
     }
+    const items = treeItems();
+    const active = document.activeElement as HTMLButtonElement | null;
+    const at = active ? items.indexOf(active) : -1;
+    // WAI-ARIA 트리: ←는 펼친 묶음을 접거나 줄에서 제 묶음 머리로, →는 접힌 묶음을 편다.
+    if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && active && at >= 0) {
+      const groupKey = active.dataset.groupHeader;
+      if (groupKey !== undefined) {
+        const open = active.getAttribute("aria-expanded") === "true";
+        if (event.key === "ArrowLeft" && open) toggleGroup(groupKey, false);
+        else if (event.key === "ArrowRight" && !open) toggleGroup(groupKey, true);
+        else if (event.key === "ArrowRight" && open) items[at + 1]?.focus();
+      } else if (event.key === "ArrowLeft" && active.dataset.inGroup) {
+        items.find((b) => b.dataset.groupHeader === active.dataset.inGroup)?.focus();
+      }
+      event.preventDefault();
+      return;
+    }
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Home" && event.key !== "End") return;
-    const rows = rowButtons();
-    if (rows.length === 0) return;
+    if (items.length === 0) return;
     event.preventDefault();
-    const at = rows.indexOf(document.activeElement as HTMLButtonElement);
     const next =
       event.key === "Home"
         ? 0
         : event.key === "End"
-          ? rows.length - 1
-          : Math.min(rows.length - 1, Math.max(0, at + (event.key === "ArrowDown" ? 1 : -1)));
-    rows[next]?.focus();
+          ? items.length - 1
+          : Math.min(items.length - 1, Math.max(0, at + (event.key === "ArrowDown" ? 1 : -1)));
+    items[next]?.focus();
   };
 
-  const selectedRepo = repo === undefined ? null : model.repos.find((r) => r.name === repo) ?? null;
+  const selectedRepo = repo === undefined ? null : model.repos.find((r) => r.id === repo) ?? null;
   const onlyRepo = model.repos.length === 1 ? model.repos[0]! : null;
   const shownRepo = selectedRepo ?? onlyRepo;
-  const repoName =
-    repo === undefined && onlyRepo === null
-      ? "모든 저장소"
-      : (shownRepo?.name ?? "폴더");
+  const repoName = shownRepo?.name ?? "모든 저장소";
   const totalWorktrees = (shownRepo ? [shownRepo] : model.repos).reduce((n, r) => n + r.worktrees, 0);
   const totalSessions = (shownRepo ? [shownRepo] : model.repos).reduce((n, r) => n + r.sessions, 0);
   const sharedCount = sessions.filter((s) => s.shared).length;
-  // 행에 tabIndex 0을 하나만 둔다(로빙). 지금 칸 행, 없으면 첫 행. 접힌 묶음 안의
-  // 행은 그려지지 않으므로 그려질 행에서만 고른다.
+  // 트리 항목에 tabIndex 0을 하나만 둔다(로빙). 지금 칸 행, 없으면 그려진 첫 행, 그것도
+  // 없으면(묶음이 다 접힘) 첫 묶음 머리. 접힌 묶음 안의 행은 그려지지 않는다.
   const renderedIds: string[] = [];
+  let firstGroup: string | null = null;
   {
     let group: string | null = null;
     for (const r of model.rows) {
-      if (r.kind === "group") group = r.key;
-      else if (r.kind === "session" && !(group !== null && folded.has(group))) renderedIds.push(r.paneId);
+      if (r.kind === "group") {
+        group = r.key;
+        firstGroup ??= r.key;
+      } else if (r.kind === "session" && !(group !== null && folded.has(group))) renderedIds.push(r.paneId);
     }
+    for (const p of model.pending) renderedIds.push(p.paneId);
   }
   const tabStop = renderedIds.includes(focusedPaneId ?? "") ? focusedPaneId : renderedIds[0] ?? null;
+  const groupTabStop = tabStop === null ? firstGroup : null;
 
   let currentGroup: string | null = null;
+  let currentWorktree: string | null = null;
   const tree: ReactNode[] = [];
   for (const row of model.rows) {
     if (row.kind === "group") {
       currentGroup = row.key;
+      currentWorktree = null;
       const open = !folded.has(row.key);
       tree.push(
         <button
           key={row.key}
           type="button"
+          role="treeitem"
+          aria-level={1}
           className="sl-group press-instant-fill focus-visible:focus-ring"
           aria-expanded={open}
+          data-tree-item=""
+          data-group-header={row.key}
+          tabIndex={row.key === groupTabStop ? 0 : -1}
           data-testid="session-list-group"
-          onClick={() =>
-            setFolded((prev) => {
-              const next = new Set(prev);
-              if (next.has(row.key)) next.delete(row.key);
-              else next.add(row.key);
-              return next;
-            })
-          }
+          onClick={() => toggleGroup(row.key)}
         >
           {open ? <ChevronDown aria-hidden /> : <ChevronRight aria-hidden />}
           {row.status ? <StatusMark status={row.status} /> : null}
@@ -238,8 +263,10 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
     }
     if (currentGroup !== null && folded.has(currentGroup)) continue;
     if (row.kind === "worktree") {
+      currentWorktree = worktreeText(row.branch, row.folder, row.isDefault, row.diff);
+      // 머리 줄의 내용은 그 아래 세션 줄의 이름(aria-label)에 실린다.
       tree.push(
-        <div key={row.key} className="sl-wt" data-testid="session-list-worktree">
+        <div key={row.key} className="sl-wt" aria-hidden data-testid="session-list-worktree">
           <GitBranch aria-hidden />
           <WorktreeLabel row={row} />
         </div>
@@ -250,6 +277,9 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
       <SessionRowButton
         key={row.paneId}
         row={row}
+        level={(currentGroup !== null ? 2 : 1) + row.depth}
+        group={currentGroup}
+        parentWorktree={row.depth === 1 ? currentWorktree : null}
         current={row.paneId === focusedPaneId}
         tabStop={row.paneId === tabStop}
         onActivate={onActivate}
@@ -257,6 +287,36 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
       />
     );
   }
+  // 확인 중(첫 git 읽기 전)인 세션: 묶지 않고 끝에 둔다. worktree 줄 자리는 높이를 지키는 막대다.
+  const pendingRows = model.pending.map((p) => (
+    <SessionRowButton
+      key={p.paneId}
+      row={{
+        kind: "session",
+        paneId: p.paneId,
+        index: p.index,
+        title: p.title,
+        harness: p.harness,
+        status: p.status,
+        shared: p.shared,
+        worktree: null,
+        branch: null,
+        detached: false,
+        diff: null,
+        isDefault: false,
+        repo: null,
+        depth: 0,
+      }}
+      checking
+      level={1}
+      group={null}
+      parentWorktree={null}
+      current={p.paneId === focusedPaneId}
+      tabStop={p.paneId === tabStop}
+      onActivate={onActivate}
+      onMaximize={onMaximize}
+    />
+  ));
 
   const filters: SessionFilter[] = ["all", "waiting", "shared"];
 
@@ -389,12 +449,12 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
               {repo === undefined ? <Check aria-hidden className="ml-auto size-4" /> : null}
             </DropdownMenuRadioItem>
             {model.repos.map((r) => (
-              <DropdownMenuRadioItem key={r.name ?? ""} value={r.name === null ? "" : `r:${r.name}`}>
-                <span className="min-w-0 truncate">{r.name ?? "폴더"}</span>
+              <DropdownMenuRadioItem key={r.id ?? ""} value={r.id === null ? "" : `r:${r.id}`}>
+                <span className="min-w-0 truncate">{r.name}</span>
                 <span data-numeric className="ml-auto pl-4 text-meta text-ink-muted">
                   {r.sessions}
                 </span>
-                {repo === r.name ? <Check aria-hidden className="size-4" /> : null}
+                {repo === r.id ? <Check aria-hidden className="size-4" /> : null}
               </DropdownMenuRadioItem>
             ))}
           </DropdownMenuRadioGroup>
@@ -421,22 +481,14 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
       <div
         ref={treeRef}
         className="sl-tree"
-        role="group"
+        role="tree"
         aria-label="세션"
         aria-keyshortcuts="Meta+J"
         tabIndex={-1}
         data-testid="session-list-tree"
         onKeyDown={onTreeKeyDown}
       >
-        {loading ? (
-          <div aria-busy="true" aria-label="세션 목록을 읽고 있습니다" data-testid="session-list-loading">
-            {sessions.map((s) => (
-              <div key={s.paneId} className="sl-skel">
-                <span />
-              </div>
-            ))}
-          </div>
-        ) : model.rows.length === 0 ? (
+        {model.rows.length === 0 && model.pending.length === 0 ? (
           <div className="sl-empty" data-testid="session-list-empty">
             <p>{query ? "찾는 세션이 없습니다." : SESSION_LIST_EMPTY[prefs.filter]}</p>
             {prefs.filter !== "all" || query ? (
@@ -454,7 +506,10 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
             ) : null}
           </div>
         ) : (
-          tree
+          <>
+            {tree}
+            {pendingRows}
+          </>
         )}
       </div>
 
@@ -510,14 +565,27 @@ function Diff({ diff }: { diff: WorktreeRow["diff"] }) {
   );
 }
 
+/** worktree 줄을 읽기 도구용 한 문장으로. */
+function worktreeText(
+  branch: string | null,
+  folder: string | null,
+  isDefault: boolean,
+  diff: WorktreeRow["diff"]
+): string {
+  const name = branch ?? `${folder ?? ""} 분리된 HEAD`.trim();
+  const extra = isDefault ? "기본" : diff ? `추가 ${diff.added}줄, 삭제 ${diff.deleted}줄` : null;
+  return extra ? `${name}, ${extra}` : name;
+}
+
 function WorktreeLabel({
   row,
   repo = null,
 }: {
-  row: Pick<WorktreeRow, "branch" | "isDefault" | "diff"> & { folder?: string | null };
+  row: Pick<WorktreeRow, "branch" | "isDefault" | "diff"> & { folder?: string | null; worktree?: string | null };
   repo?: string | null;
 }) {
-  const name = row.branch ?? (row.folder ? `${row.folder} (분리된 HEAD)` : "분리된 HEAD");
+  const folder = row.folder ?? row.worktree ?? null;
+  const name = row.branch ?? (folder ? `${folder} (분리된 HEAD)` : "분리된 HEAD");
   return (
     <>
       {repo ? <span className="sl-repo">{`${repo} ·`}</span> : null}
@@ -533,12 +601,20 @@ function WorktreeLabel({
 
 function SessionRowButton({
   row,
+  level,
+  group,
+  parentWorktree,
+  checking = false,
   current,
   tabStop,
   onActivate,
   onMaximize,
 }: {
   row: SessionRow;
+  level: number;
+  group: string | null;
+  parentWorktree: string | null;
+  checking?: boolean;
   current: boolean;
   tabStop: boolean;
   onActivate: (paneId: string) => void;
@@ -546,17 +622,30 @@ function SessionRowButton({
 }) {
   const label = SESSION_STATUS_LABEL[row.status];
   // 평탄화된 줄(worktree에 세션 하나, 또는 상태로 묶기)은 worktree 줄을 함께 싣는다.
-  const withWorktree = row.branch !== null || row.repo !== null;
-  const where = [row.repo, row.branch].filter(Boolean).join(" · ");
+  const withWorktree = row.worktree !== null || row.repo !== null;
+  const where = [
+    row.repo,
+    row.worktree !== null ? worktreeText(row.branch, row.worktree, row.isDefault, row.diff) : null,
+    parentWorktree,
+    checking ? "git 확인 중" : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
   return (
     <button
       type="button"
+      role="treeitem"
+      aria-level={level}
+      aria-selected={current}
       className="sl-row press-instant-fill focus-visible:focus-ring"
+      data-tree-item=""
+      data-in-group={group ?? undefined}
       data-session-row=""
       data-session-pane={row.paneId}
       data-status={row.status}
       data-depth={row.depth}
-      data-with-worktree={row.branch !== null || row.repo !== null ? "" : undefined}
+      data-with-worktree={withWorktree || checking ? "" : undefined}
+      data-checking={checking ? "" : undefined}
       data-testid="session-list-row"
       aria-current={current ? "true" : undefined}
       aria-label={`${row.index}번 칸, ${row.title}, ${label}, ${row.harness}${row.shared ? ", 공유됨" : ""}${where ? `, ${where}` : ""}`}
@@ -564,10 +653,15 @@ function SessionRowButton({
       onClick={() => onActivate(row.paneId)}
       onDoubleClick={() => onMaximize(row.paneId)}
     >
-      {withWorktree ? (
+      {checking ? (
+        <span className="sl-wt sl-checking" aria-hidden>
+          <GitBranch />
+          <span className="sl-bar" />
+        </span>
+      ) : withWorktree ? (
         <span className="sl-wt" aria-hidden>
           <GitBranch />
-          {row.branch !== null ? (
+          {row.worktree !== null ? (
             <WorktreeLabel row={row} repo={row.repo} />
           ) : (
             <span className="sl-repo">{row.repo}</span>

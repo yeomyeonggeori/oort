@@ -22,10 +22,10 @@ const worktrees = ok({
 });
 
 function git(repo: string | null, worktree: string | null, branch: string | null, extra: Partial<PaneGitFacts> = {}): PaneGitFacts {
-  return { repo, worktree, branch, detached: false, isDefault: worktree === repo, diff: null, ...extra };
+  return { repo, repoKey: repo, worktree, branch, detached: false, isDefault: worktree === repo, diff: null, ...extra };
 }
 
-function pane(index: number, g: PaneGitFacts, over: Partial<SessionListInput> = {}): SessionListInput {
+function pane(index: number, g: PaneGitFacts | null, over: Partial<SessionListInput> = {}): SessionListInput {
   return {
     paneId: `p${index}`,
     index,
@@ -133,7 +133,7 @@ describe("buildSessionList", () => {
       "  8",
     ]);
     expect(m.counts).toEqual({ all: 8, waiting: 2, shared: 3 });
-    expect(m.repos).toEqual([{ name: "momo", worktrees: 4, sessions: 8 }]);
+    expect(m.repos).toEqual([{ id: "momo\u0001momo", name: "momo", worktrees: 4, sessions: 8 }]);
   });
 
   it("세션 안의 순서: 나를 기다림 → 실행 중 → 검토 대기 → 나머지, 같으면 번호", () => {
@@ -176,7 +176,7 @@ describe("buildSessionList", () => {
     );
     expect(shape(m.rows)).toEqual(["# momo", "3 @main", "# oort-site", "2 @main", "# 폴더", "1"]);
     // 저장소가 아닌 폴더의 셸은 worktree로 세지 않는다(design-review M1).
-    expect(m.repos.find((r) => r.name === null)).toEqual({ name: null, worktrees: 0, sessions: 1 });
+    expect(m.repos.find((r) => r.id === null)).toEqual({ id: null, name: "폴더", worktrees: 0, sessions: 1 });
   });
 
   it("필터: 나를 기다림·공유. 숫자는 필터 전이다", () => {
@@ -190,27 +190,120 @@ describe("buildSessionList", () => {
     expect(shared.visible).toBe(3);
   });
 
-  it("상태로 묶으면 행마다 저장소 이름과 브랜치를 보인다", () => {
+  it("상태로 묶으면 행마다 브랜치를 싣고, 저장소가 하나면 저장소 이름은 반복하지 않는다(planner 결정)", () => {
     const m = buildSessionList(MOCK, { filter: "all", grouping: "status" });
     expect(shape(m.rows)).toEqual([
       "# 나를 기다림",
-      "3 @feat/2774-xterm [momo]",
-      "5 @fix/push-dup [momo]",
+      "3 @feat/2774-xterm",
+      "5 @fix/push-dup",
+      "# 실행 중",
+      "1 @main",
+      "4 @feat/2774-xterm",
+      "7 @spike/presets",
+      "8 @spike/presets",
+      "# 대기",
+      "2 @main",
+      "# 끝남",
+      "6 @fix/push-dup",
+    ]);
+  });
+
+  it("상태로 묶기에서 저장소가 둘이면 행마다 저장소 이름, 한 저장소를 고르면 다시 숨긴다", () => {
+    const two = [pane(1, git("momo", "momo", "main")), pane(2, git("oort-site", "oort-site", "main"))];
+    expect(shape(buildSessionList(two, { filter: "all", grouping: "status" }).rows)).toEqual([
       "# 실행 중",
       "1 @main [momo]",
-      "4 @feat/2774-xterm [momo]",
-      "7 @spike/presets [momo]",
-      "8 @spike/presets [momo]",
-      "# 대기",
-      "2 @main [momo]",
-      "# 끝남",
-      "6 @fix/push-dup [momo]",
+      "2 @main [oort-site]",
     ]);
+    const one = buildSessionList(two, { filter: "all", grouping: "status", repo: "momo\u0001momo" });
+    expect(shape(one.rows)).toEqual(["# 실행 중", "1 @main"]);
+  });
+
+  it("이름이 같은 다른 저장소(worktree 집합이 다름)는 합치지 않고 「web」「web 2」로 가른다", () => {
+    const a = paneGitFacts({
+      g1: ok({ kind: "repo", name: "web" }),
+      g2: null,
+      g3: ok({ kind: "worktrees", worktrees: [{ folder: "web", branch: "main", detached: false, locked: false, prunable: false }] }),
+      g7: null,
+    });
+    const b = paneGitFacts({
+      g1: ok({ kind: "repo", name: "web" }),
+      g2: null,
+      g3: ok({
+        kind: "worktrees",
+        worktrees: [
+          { folder: "web", branch: "main", detached: false, locked: false, prunable: false },
+          { folder: "web-fix", branch: "fix/a", detached: false, locked: false, prunable: false },
+        ],
+      }),
+      g7: null,
+    });
+    expect(a.repoKey).not.toBe(b.repoKey);
+    const m = buildSessionList([pane(1, a), pane(2, b)], { filter: "all", grouping: "repo" });
+    expect(m.repos.map((r) => r.name)).toEqual(["web", "web 2"]);
+    expect(shape(m.rows)).toEqual(["# web", "1 @main", "# web 2", "2 @main"]);
+  });
+
+  it("연결 worktree 폴더 이름이 주 worktree와 같으면 G2 브랜치로 고른다", () => {
+    const f = paneGitFacts({
+      g1: ok({ kind: "repo", name: "app" }),
+      g2: ok({ kind: "branch", name: "feat/x" }),
+      g3: ok({
+        kind: "worktrees",
+        worktrees: [
+          { folder: "app", branch: "main", detached: false, locked: false, prunable: false },
+          { folder: "app", branch: "feat/x", detached: false, locked: false, prunable: false },
+        ],
+      }),
+      g7: null,
+    });
+    expect(f.branch).toBe("feat/x");
+    expect(f.isDefault).toBe(false);
+  });
+
+  it("bare 저장소: 이름은 `.git`을 떼거나 「bare 저장소」, 어느 worktree도 「기본」이 아니다", () => {
+    const wt = (folder: string, branch: string | null) => ({ folder, branch, detached: false, locked: false, prunable: false });
+    const dotBare = paneGitFacts({
+      g1: ok({ kind: "repo", name: "main" }),
+      g2: null,
+      g3: ok({ kind: "worktrees", worktrees: [wt(".bare", null), wt("main", "main")] }),
+      g7: null,
+    });
+    expect(dotBare.repo).toBe("bare 저장소");
+    expect(dotBare.isDefault).toBe(false);
+    const dotGit = paneGitFacts({
+      g1: ok({ kind: "repo", name: "main" }),
+      g2: null,
+      g3: ok({ kind: "worktrees", worktrees: [wt("tool.git", null), wt("main", "main")] }),
+      g7: null,
+    });
+    expect(dotGit.repo).toBe("tool");
+  });
+
+  it("분리된 HEAD인 세션 하나짜리 worktree도 worktree 줄(폴더)을 싣는다", () => {
+    const m = buildSessionList(
+      [
+        pane(1, git("momo", "momo", "main")),
+        pane(2, git("momo", "momo", "main")),
+        pane(3, git("momo", "bisect", null, { detached: true })),
+      ],
+      { filter: "all", grouping: "repo" }
+    );
+    const row = sessionRowsOf(m).find((r) => r.index === 3)!;
+    expect(row).toMatchObject({ worktree: "bisect", branch: null, detached: true, depth: 0 });
+  });
+
+  it("확인 중(git null)인 세션은 묶지 않고 pending으로, 숫자에는 든다", () => {
+    const m = buildSessionList([pane(1, git("momo", "momo", "main")), pane(2, null)], { filter: "all", grouping: "repo" });
+    expect(shape(m.rows)).toEqual(["1 @main"]);
+    expect(m.pending.map((s) => s.index)).toEqual([2]);
+    expect(m.counts.all).toBe(2);
+    expect(m.visible).toBe(2);
   });
 
   it("저장소 선택과 검색", () => {
     const two = [...MOCK, pane(9, git("oort-site", "oort-site", "main"), { title: "랜딩 문구" })];
-    expect(buildSessionList(two, { filter: "all", grouping: "repo", repo: "oort-site" }).visible).toBe(1);
+    expect(buildSessionList(two, { filter: "all", grouping: "repo", repo: "oort-site\u0001oort-site" }).visible).toBe(1);
     const q = buildSessionList(two, { filter: "all", grouping: "repo", query: "PUSH-DUP" });
     expect(sessionRowsOf(q).map((r) => r.index)).toEqual([5, 6]);
     const none = buildSessionList(two, { filter: "all", grouping: "repo", query: "없는 말" });

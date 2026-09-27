@@ -491,11 +491,14 @@ export function LocalTerminalDock({
           status: statusFromPhase(view.phase, view.exit?.code ?? null, view.exit?.signal ?? null),
           // L 세션 공유(ADR-0190 D4-b)는 이 기기에 아직 상태가 없다.
           shared: false,
-          git: gitFacts.get(id) ?? PANE_GIT_UNKNOWN,
+          // 읽기 전이면 「확인 중」(null). 시작 중이거나 PTY가 있는 칸은 곧 읽는다. PTY 없이
+          // 끝난 칸(읽기 전에 끝남)은 셸이 git 읽기를 거절하므로 「폴더」다.
+          git:
+            gitFacts.get(id) ??
+            (view.phase === "starting" || sessions.ptyIdOf(id) !== null ? null : PANE_GIT_UNKNOWN),
         },
       ];
     });
-    const gitLoading = gitFacts.size === 0 && gitPanes.some(([, pty]) => pty !== null);
     // 「내 작업」(#2854·#2856, 시안 ①): 세션 목록 268 | 머리 줄 48 · 격자 좌우 여백 12.
     // 배치 프리셋(T5)·worktree 보기(T6)·로그 패널(T7)은 각 이슈가 머리 줄에 붙인다.
     return (
@@ -509,7 +512,6 @@ export function LocalTerminalDock({
           <SessionList
             ref={listRef}
             sessions={listInputs}
-            loading={gitLoading}
             focusedPaneId={layout.focused}
             platform={platform}
             onActivate={(paneId) => applyFromList(focusPane(layoutRef.current, paneId))}
