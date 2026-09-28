@@ -607,6 +607,54 @@ pub async fn revoke_device_key_signed_in_tx(
     Ok(Ok(record))
 }
 
+/// A stored `device_revoke.v1` letter, in the shape workd (E4 #3024) takes
+/// from `pendingControls.deviceRevocations[]`: the letter's own fields plus the
+/// revoked public key, which workd needs to refuse the key under any id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevocationLetter {
+    pub workspace_id: Uuid,
+    pub member_id: Uuid,
+    pub root_key_id: Uuid,
+    pub target_key_id: Uuid,
+    pub revoked_at_ms: i64,
+    pub signature: String,
+    pub target_public_key: String,
+}
+
+/// Every signed revocation letter of one member (D-7: the server relays what
+/// the root signed; a session-end revocation has no letter and is not relayed —
+/// workd never trusted a key the server alone vouched for).
+pub async fn list_revocation_letters_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<Vec<RevocationLetter>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT id, revoked_by_key_id, revoked_at_ms, revocation_sig, public_key \
+           FROM member_device_key \
+          WHERE workspace_id = $1 AND member_id = $2 AND revocation_sig IS NOT NULL \
+          ORDER BY revoked_at DESC, id \
+          LIMIT 256",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(RevocationLetter {
+                workspace_id,
+                member_id,
+                root_key_id: row.try_get("revoked_by_key_id")?,
+                target_key_id: row.try_get("id")?,
+                revoked_at_ms: row.try_get("revoked_at_ms")?,
+                signature: row.try_get("revocation_sig")?,
+                target_public_key: row.try_get("public_key")?,
+            })
+        })
+        .collect()
+}
+
 /// One lineage ended: its live keys end with it (D-7). Runs in the caller's
 /// tenant transaction next to the token revocation and the push invalidation,
 /// so the session, its registrations and its keys end in one commit. Never

@@ -1696,3 +1696,114 @@ async fn a_pre_lineage_session_is_swept_on_reuse() {
         "the replay of a pre-088 token ends its successor"
     );
 }
+
+/// A signed `GET …/pending-controls` exactly as workd sends it (v2 request).
+async fn poll_as_host(w: &World, host: Uuid, seed: u8) -> Value {
+    let path = format!(
+        "/v1/workspaces/{}/work-hosts/{host}/pending-controls",
+        w.workspace
+    );
+    let sent_at_ms = now_ms();
+    let request_id = Uuid::new_v4();
+    let payload = momo_wire::signing::request_payload(
+        "GET",
+        &path,
+        w.workspace,
+        host,
+        sent_at_ms,
+        &momo_wire::signing::sha256_hex(b""),
+        request_id,
+    );
+    let signature = momo_wire::signing::sign_base64(&[seed; 32], &payload).expect("sign");
+    let response = w
+        .http
+        .get(format!("{}{path}", w.base))
+        .header("Authorization", format!("MomoHost {host}"))
+        .header("X-Momo-Work-Host-Sent-At", sent_at_ms.to_string())
+        .header("X-Momo-Work-Host-Signature", signature)
+        .header("X-Momo-Work-Host-Request-ID", request_id.to_string())
+        .send()
+        .await
+        .expect("poll");
+    assert_eq!(
+        response.status().as_u16(),
+        200,
+        "a host polls its own queue"
+    );
+    response.json().await.expect("pending body")
+}
+
+/// D-7 / E4 #3024: the owner's signed revocation letters reach the member
+/// host in `pendingControls.deviceRevocations`, verifiable as they stand.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_member_host_is_handed_its_owners_signed_revocation_letters() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let session = w.person().await;
+    let (status, body) = w
+        .register_host(&session, "member", &ed25519_host_key(40), "맥", None)
+        .await;
+    assert_eq!(status, 201, "{body}");
+    let host = Uuid::parse_str(body["workHost"]["id"].as_str().unwrap()).unwrap();
+    let (status, body) = w
+        .register_host(&w.owner, "workspace", &ed25519_host_key(41), "팀", None)
+        .await;
+    assert_eq!(status, 201, "{body}");
+    let team_host = Uuid::parse_str(body["workHost"]["id"].as_str().unwrap()).unwrap();
+
+    let before = poll_as_host(&w, host, 40).await;
+    assert!(
+        before.get("deviceRevocations").is_none(),
+        "no letters: today's bytes ({before})"
+    );
+
+    let root = DeviceKeyPair::new("mac");
+    let root_id = w.key(&session, &root, "macos").await;
+    let handset = DeviceKeyPair::new("phone");
+    let phone_id = w.key(&session, &handset, "ios").await;
+    // A session-end revocation (no letter) is not relayed.
+    let other_phone = w.person().await;
+    w.key(&other_phone, &DeviceKeyPair::new("other"), "ios")
+        .await;
+    w.logout(&other_phone).await;
+    let at = now_ms();
+    let letter = DeviceRevoke {
+        workspace_id: w.workspace,
+        member_id: w.person_id,
+        root_key_id: root_id,
+        target_key_id: phone_id,
+        revoked_at_ms: at,
+    };
+    let (status, body) = w
+        .post(
+            &format!("{}/{phone_id}/revocation", w.keys_path()),
+            &session.access,
+            json!({ "rootKeyId": root_id, "revokedAtMs": at,
+                    "signature": root.sign(&letter.signed_bytes()) }),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+
+    let relayed = poll_as_host(&w, host, 40).await["deviceRevocations"].clone();
+    let relayed = relayed.as_array().expect("deviceRevocations");
+    assert_eq!(relayed.len(), 1, "only the signed letter: {relayed:?}");
+    let entry = &relayed[0];
+    assert_eq!(entry["targetKeyId"], phone_id.to_string());
+    assert_eq!(entry["rootKeyId"], root_id.to_string());
+    assert_eq!(entry["memberId"], w.person_id.to_string());
+    assert_eq!(entry["revokedAtMs"], at);
+    assert_eq!(entry["targetPublicKey"], handset.public_b64);
+    let root_key = BASE64.decode(&root.public_b64).unwrap();
+    let signature = BASE64.decode(entry["signature"].as_str().unwrap()).unwrap();
+    assert!(
+        letter.verify(&root_key, &signature).is_ok(),
+        "the relayed letter verifies as it stands"
+    );
+
+    let team = poll_as_host(&w, team_host, 41).await;
+    assert!(
+        team.get("deviceRevocations").is_none(),
+        "a workspace host gets no personal letters ({team})"
+    );
+}

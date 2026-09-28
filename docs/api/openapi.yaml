@@ -11376,6 +11376,44 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/WorkControl"
+        deviceRevocations:
+          type: array
+          description: >
+            ADR-0146 개정 D-7 (#3022, workd #3024): the member host owner's
+            root-signed `momo.human.device_revoke.v1` letters, for workd to verify
+            against its pinned root. Omitted when there are none and for a
+            workspace host. A session-end revocation carries no letter and is
+            not relayed.
+          items:
+            $ref: "#/components/schemas/DeviceRevocation"
+
+    DeviceRevocation:
+      type: object
+      required:
+        [workspaceId, memberId, rootKeyId, targetKeyId, revokedAtMs, signature, targetPublicKey]
+      properties:
+        workspaceId:
+          type: string
+          format: uuid
+        memberId:
+          type: string
+          format: uuid
+        rootKeyId:
+          type: string
+          format: uuid
+        targetKeyId:
+          type: string
+          format: uuid
+        revokedAtMs:
+          type: integer
+          format: int64
+          description: The time inside the signed letter.
+        signature:
+          type: string
+          description: base64 raw r‖s (canonical low-s).
+        targetPublicKey:
+          type: string
+          description: The revoked key (not inside the signed bytes).
 
     # ---- Work sessions ------------------------------------------------------
     UpdateWorkPoolRequest:

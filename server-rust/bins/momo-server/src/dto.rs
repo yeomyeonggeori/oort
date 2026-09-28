@@ -4328,6 +4328,25 @@ pub struct WorkControlResponse {
 #[serde(rename_all = "camelCase")]
 pub struct PendingWorkControlsResponse {
     pub work_controls: Vec<WorkControlDto>,
+    /// ADR-0146 개정 D-7 (#3022, workd E4 #3024): the host owner's root-signed
+    /// `device_revoke.v1` letters, relayed for workd to verify against its
+    /// pinned root. Omitted when empty, so every host that has none gets
+    /// today's bytes.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub device_revocations: Vec<DeviceRevocationDto>,
+}
+
+/// One relayed revocation letter (`pendingControls.deviceRevocations[]`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceRevocationDto {
+    pub workspace_id: String,
+    pub member_id: String,
+    pub root_key_id: String,
+    pub target_key_id: String,
+    pub revoked_at_ms: i64,
+    pub signature: String,
+    pub target_public_key: String,
 }
 
 /// Swift `WorkAutoApproveResponse` (:40-43).

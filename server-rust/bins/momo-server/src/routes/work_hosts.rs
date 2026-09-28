@@ -120,7 +120,8 @@ use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::IntoResponse;
 use axum::{Extension, Json};
 use momo_auth::device_key::{
-    verify_host_register_in_tx, HostRegisterProof, REFUSAL_DEVICE_SIGNATURE_REQUIRED,
+    list_revocation_letters_in_tx, verify_host_register_in_tx, HostRegisterProof,
+    REFUSAL_DEVICE_SIGNATURE_REQUIRED,
 };
 use momo_auth::{
     active_workspace_role, insert_work_host, insert_work_host_with_id, list_work_hosts,
@@ -140,8 +141,8 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::dto::{
-    HostRegisterSignature, PendingWorkControlsResponse, RegisterWorkHostRequest, WorkHostDto,
-    WorkHostListResponse, WorkHostResponse,
+    DeviceRevocationDto, HostRegisterSignature, PendingWorkControlsResponse,
+    RegisterWorkHostRequest, WorkHostDto, WorkHostListResponse, WorkHostResponse,
 };
 use crate::error::ApiError;
 use crate::routes::device_keys::refusal_error;
@@ -558,16 +559,23 @@ pub async fn pending_controls(
         return Err(crate::work_host_auth::signed_request_unauthorized());
     }
 
-    let controls = settle(
+    let (controls, letters) = settle(
         "work_hosts.pending_controls",
         tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
-                Ok(Ok(momo_t3::pending_controls_for_host_in_tx(
-                    conn,
-                    workspace_id,
-                    host_id,
-                )
-                .await?))
+                let controls =
+                    momo_t3::pending_controls_for_host_in_tx(conn, workspace_id, host_id).await?;
+                // D-7: a member host is handed its owner's signed revocation
+                // letters. A workspace host has no personal root to check them
+                // against, so it gets none.
+                let letters = match load_work_host(conn, host_id).await? {
+                    Some(host) if host.scope == "member" => {
+                        list_revocation_letters_in_tx(conn, workspace_id, host.owner_member_id)
+                            .await?
+                    }
+                    _ => Vec::new(),
+                };
+                Ok(Ok((controls, letters)))
             })
         })
         .await,
@@ -575,6 +583,18 @@ pub async fn pending_controls(
 
     Ok(Json(PendingWorkControlsResponse {
         work_controls: controls.into_iter().map(control_dto).collect(),
+        device_revocations: letters
+            .into_iter()
+            .map(|letter| DeviceRevocationDto {
+                workspace_id: letter.workspace_id.to_string(),
+                member_id: letter.member_id.to_string(),
+                root_key_id: letter.root_key_id.to_string(),
+                target_key_id: letter.target_key_id.to_string(),
+                revoked_at_ms: letter.revoked_at_ms,
+                signature: letter.signature,
+                target_public_key: letter.target_public_key,
+            })
+            .collect(),
     }))
 }
 
