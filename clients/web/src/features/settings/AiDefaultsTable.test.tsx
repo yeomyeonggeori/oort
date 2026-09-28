@@ -308,6 +308,12 @@ describe("팀 줄 상태 (design-review #3042)", () => {
     expect(select.disabled).toBe(true);
     expect(q("ai-default-teamAgent-note")?.textContent).toBe("연결이 끊겨 지금은 바꿀 수 없어요.");
     expect(select.getAttribute("aria-describedby")).toContain("ai-default-teamAgent-note");
+    act(() => root?.unmount());
+    host?.remove();
+    // 확인 전에도: 잠긴 확인 버튼을 누르라고 하지 않는다.
+    render(AiDefaultsTable, { teamKey: TEAM, operator: true, browserTab: false, team: teamState({ offline: true, links: [] }) });
+    expect(q("ai-default-teamAgent-note")?.textContent).toBe("연결이 끊겨 지금은 바꿀 수 없어요.");
+    expect(q("ai-default-teamAgent-model")).toBeNull();
   });
 
   it("저장이 날고 있는 줄은 두 번째 고름을 보내지 않는다", () => {
@@ -344,6 +350,7 @@ describe("팀 줄 상태 (design-review #3042)", () => {
       }),
     });
     expect(q("ai-default-summary-model")).toBeNull();
+    expect(q("ai-default-summary")?.textContent).toContain("old.example · 기본 모델 (연결이 바뀜)");
     expect(q("ai-default-summary-saved")?.textContent).toBe(
       "고른 연결(old.example)이 연결 순서에서 바뀌었거나 빠졌어요. 연결 확인을 한 뒤 다시 골라 주세요."
     );

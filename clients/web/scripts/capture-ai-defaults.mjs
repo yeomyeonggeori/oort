@@ -167,7 +167,9 @@ async function installMocks(context, team) {
   await context.route("**/v1/workspaces/*/roster", (route) => json(route, { members: [] }));
   await context.route("**/v1/provider/default-ai", (route) => {
     if (team === "member") return json(route, { error: { code: "forbidden", message: "operator required" } }, 403);
-    if (team === "operator-3042") return json(route, DEFAULT_AI);
+    // 저장 중 장면: PUT 은 답하지 않는다(「저장하고 있어요」가 선 상태를 찍는다).
+    if (team === "pending-3042" && route.request().method() === "PUT") return undefined;
+    if (team === "operator-3042" || team === "pending-3042") return json(route, DEFAULT_AI);
     return json(route, { ...DEFAULT_AI, teamAgent: null, summary: null });
   });
   await context.route("**/v1/provider/link**", (route) => {
@@ -176,7 +178,7 @@ async function installMocks(context, team) {
       if (team === "chain-3042") return json(route, CHAIN);
       return json(route, { error: { code: "not_found", message: "no chain" } }, 404);
     }
-    if (url.includes("/test") && team === "operator-3042") return json(route, CHECKED);
+    if (url.includes("/test") && (team === "operator-3042" || team === "pending-3042")) return json(route, CHECKED);
     if (team === "error") return json(route, { error: { code: "internal", message: "boom" } }, 500);
     if (team === "member") return json(route, { error: { code: "forbidden", message: "operator required" } }, 403);
     if (team === "long") return json(route, LONG_LINK);
@@ -281,6 +283,18 @@ async function moveHopOrigin(page) {
 
 const SCENES = [
   { name: "team-save", team: "operator-3042", query: "&aiDefaults=demo", ready: "ai-defaults-team-foot", act: checkConnection, focus: "ai-default-teamAgent" },
+  {
+    name: "team-save-pending",
+    team: "pending-3042",
+    query: "&aiDefaults=demo",
+    ready: "ai-defaults-team-foot",
+    act: async (page) => {
+      await checkConnection(page);
+      await page.getByTestId("ai-default-teamAgent-select").selectOption("link:0:openai/gpt-4o");
+      await page.getByTestId("ai-default-teamAgent-saved").waitFor({ state: "visible" });
+    },
+    focus: "ai-default-teamAgent",
+  },
   { name: "team-save-before-check", team: "operator-3042", query: "&aiDefaults=demo", ready: "ai-defaults-team-foot", focus: "ai-default-teamAgent" },
   { name: "team-save-member", team: "member", query: "&aiDefaults=demo", ready: "ai-defaults-team-foot", focus: "ai-default-teamAgent" },
   { name: "chain-origin", team: "chain-3042", query: "", ready: "ai-team-chain-toggle", act: moveHopOrigin },

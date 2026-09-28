@@ -206,7 +206,10 @@ export function teamOptions(
 
 /** 저장된 값을 읽기 전용 칸에 쓸 때. */
 export function teamChoiceText(rowId: TeamDefaultRowId, saved: TeamDefaultAiRow | null): string {
-  return saved === null ? TEAM_DEFAULT_UNSET_LABEL[rowId] : optionText(saved.endpointLabel, saved.modelId);
+  if (saved === null) return TEAM_DEFAULT_UNSET_LABEL[rowId];
+  // 선택 칸의 목록 밖 값과 같은 표지(확인 전후로 값 글자가 바뀌지 않게).
+  const text = optionText(saved.endpointLabel, saved.modelId);
+  return saved.linkResolved ? text : `${text} (연결이 바뀜)`;
 }
 
 // ---- 문장 ------------------------------------------------------------------------

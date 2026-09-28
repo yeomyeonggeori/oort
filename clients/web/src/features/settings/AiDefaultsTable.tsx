@@ -240,7 +240,10 @@ function DefaultRow({
       // 확인 전에는 고를 모델을 모른다. 지어낸 목록 대신 저장된 값과 할 일을 말한다.
       // 저장된 연결이 바뀌었으면 그 문장(밑)이 할 일까지 순서대로 말한다.
       choice = <ReadOnlyBox>{teamChoiceText(id, saved)}</ReadOnlyBox>;
-      if (!saved || saved.linkResolved) {
+      if (team.offline) {
+        // 확인 버튼도 잠긴 동안에는 「연결 확인을 하면」을 말하지 않는다.
+        lines.push({ key: "note", text: TEAM_DEFAULTS_OFFLINE, tone: "muted" });
+      } else if (!saved || saved.linkResolved) {
         lines.push({ key: "model", text: TEAM_DEFAULTS_CHECK_FIRST, tone: "muted" });
       }
     } else {
