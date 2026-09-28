@@ -446,11 +446,21 @@ function ThisMacRoot({
           fingerprint={fingerprint}
           detail={
             relink.isPending
-              ? "확인 창과 Touch ID로 이 맥의 서명 키를 지금 로그인에 옮기는 중입니다."
-              : "로그인이 바뀌어 이 맥의 서명 키가 지금은 서명할 수 없습니다. 같은 키를 이 로그인으로 옮기면 폰 승인과 작업 호스트 고정은 그대로이고, 비밀번호는 필요 없습니다."
+              ? null
+              : "로그인이 끝나 이 맥의 서명 키가 지금은 서명할 수 없습니다."
           }
-          detailTone={relink.isPending ? "muted" : "warn"}
+          detailTone="warn"
+          notice={
+            relink.isPending
+              ? "확인 창과 Touch ID로 이 맥의 서명 키를 이 로그인에 다시 연결하는 중입니다."
+              : null
+          }
         />
+        {!relink.isPending && (
+          <p className="break-keep text-meta text-ink-muted">
+            같은 키를 이 로그인에 다시 연결하면 폰 승인과 작업 호스트 고정은 그대로이고, 비밀번호는 필요 없습니다.
+          </p>
+        )}
         {relinkError && (
           <p
             className="break-keep text-meta text-danger"
@@ -460,23 +470,22 @@ function ThisMacRoot({
             {relinkError}
           </p>
         )}
-        {!relink.isPending && (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              aria-disabled={offline || undefined}
-              aria-describedby={offline ? reasonId : undefined}
-              className={offline ? "opacity-50" : undefined}
-              onClick={() => {
-                if (offline || relink.isPending) return;
-                relink.mutate();
-              }}
-              data-testid="device-key-relink"
-            >
-              다시 연결
-            </Button>
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            aria-disabled={offline || relink.isPending || undefined}
+            aria-describedby={offline ? reasonId : undefined}
+            aria-busy={relink.isPending || undefined}
+            className={offline || relink.isPending ? "opacity-50" : undefined}
+            onClick={() => {
+              if (offline || relink.isPending) return;
+              relink.mutate();
+            }}
+            data-testid="device-key-relink"
+          >
+            다시 연결
+          </Button>
+        </div>
         {offline && (
           <span id={reasonId} className="text-meta text-ink-muted">
             연결이 끊겨 지금은 다시 연결할 수 없습니다.

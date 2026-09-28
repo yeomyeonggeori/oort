@@ -166,7 +166,7 @@ export function SignedWorkControls({
       : key.view.kind === 'loading'
         ? '이 폰의 지시 서명 키를 확인하는 중이에요.'
         : key.view.kind === 'reconnect'
-          ? '로그인이 바뀌어 이 폰의 지시 키를 다시 연결해야 해요. 프로필 › 지시 기기에서 다시 연결해 주세요.'
+          ? '로그인이 끝나 이 폰의 지시 키를 다시 연결해야 해요. 프로필 › 지시 기기에서 다시 연결해 주세요.'
           : '이 폰은 아직 지시 기기가 아니에요. 프로필 › 지시 기기에서 등록하고 맥의 승인을 받아 주세요.';
   return (
     <SignedWorkControlsView

@@ -54,10 +54,10 @@ export function deviceKeyCopy(view: DeviceKeyView, busy = false): DeviceKeyCopy 
     return {
       badge: '다시 연결 필요',
       tone: 'warn',
-      headline: '로그인이 바뀌어 이 폰으로 지금은 지시할 수 없습니다.',
+      headline: '로그인이 끝나 이 폰으로 지금은 지시할 수 없습니다.',
       detail: view.biometryOff
-        ? '같은 키를 이 로그인으로 옮기면 맥의 승인은 그대로입니다. 옮기려면 iOS 설정에서 Face ID를 켜세요.'
-        : '같은 키를 이 로그인으로 옮기면 맥의 승인은 그대로입니다. Face ID로 한 번 확인하면 됩니다.',
+        ? '같은 키를 이 로그인에 다시 연결하면 맥의 승인은 그대로입니다. 옮기려면 iOS 설정에서 Face ID를 켜세요.'
+        : '같은 키를 이 로그인에 다시 연결하면 맥의 승인은 그대로입니다. Face ID로 한 번 확인하면 됩니다.',
     };
   }
   if (view.kind === 'unregistered' && busy) {
