@@ -2462,7 +2462,8 @@
     "choice choice";
   column-gap: var(--spacing-3);
   row-gap: var(--spacing-2);
-  align-items: center;
+  /* 칸 밑에 줄이 붙어도 제목·「내 설정」은 칸 윗선에 맞춘다(시안 §5). */
+  align-items: start;
 
   @container (width >= 520px) {
     grid-template-columns: minmax(0, 1.25fr) minmax(0, 1.5fr) 90px;

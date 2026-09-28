@@ -378,16 +378,23 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
   const failed = probe !== null && !probe.ok && probe.reason !== PROBE_NOT_RUN;
   const defaultsTeamKey: AiDefaultsTeamKey = query.isPending
     ? { status: "loading" }
-    : !link
-      ? { status: "hidden" }
-      : hasRow
-        ? {
-            status: "present",
-            name: link.endpointLabel,
-            failed,
-            modelCount: teamProbeDetail(probe)?.modelCount ?? null,
-          }
-        : { status: "absent" };
+    : query.isError
+      ? isOperatorDenied(query.error)
+        ? { status: "hidden" }
+        : { status: "error" }
+      : !link
+        ? { status: "loading" }
+        : hasRow
+          ? {
+              status: "present",
+              name: link.endpointLabel,
+              failed,
+              modelCount: teamProbeDetail(probe)?.modelCount ?? null,
+            }
+          : // 팀 연결 절의 둘째 줄과 같은 판정(모의 응답 / 대답하지 못함).
+            link.availability === "mock"
+            ? { status: "mock" }
+            : { status: "absent" };
   const rowName = link ? (configured ? `${link.endpointLabel} · 팀 기본` : link.endpointLabel) : "";
 
   const teamSection = (

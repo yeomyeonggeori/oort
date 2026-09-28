@@ -123,15 +123,35 @@ export interface AiDefaultsAccount {
 /**
  * 팀 키에 대해 이 화면이 아는 것.
  * - `present`: 서버에 팀 키가 있다(운영자라 읽었다).
- * - `absent`: 운영자가 읽었고 없다(또는 모의 응답뿐이다).
+ * - `absent`: 운영자가 읽었고 없다.
+ * - `mock`: 저장된 키가 없고 서버가 모의 응답으로만 대답한다(팀 연결 절과 같은 말).
  * - `hidden`: 운영자가 아니라 읽을 수 없다(서버 403). 있다고도 없다고도 하지 않는다.
  * - `loading`: 아직 모른다.
+ * - `error`: 403이 아닌 오류로 읽지 못했다.
+ *
+ * `name`은 서버 `endpointLabel`(주소)이다. 화면에는 `teamKeyHost`로 줄여 보인다.
  */
 export type AiDefaultsTeamKey =
   | { status: "present"; name: string; failed: boolean; modelCount: number | null }
   | { status: "absent" }
+  | { status: "mock" }
   | { status: "hidden" }
-  | { status: "loading" };
+  | { status: "loading" }
+  | { status: "error" };
+
+/**
+ * 서버 `endpointLabel`은 제품 이름이 아니라 주소다(`https://api.openai.com/v1`). 폭이
+ * 고정된 선택 칸에 넣을 이름은 호스트만(`api.openai.com`). 주소가 아니면 그대로.
+ */
+export function teamKeyHost(label: string): string {
+  const trimmed = label.trim();
+  try {
+    const host = new URL(trimmed).host;
+    return host === "" ? trimmed : host;
+  } catch {
+    return trimmed;
+  }
+}
 
 export interface AiDefaultsInput {
   /** 이 맥의 구독 계정. 브라우저 탭이면 빈 목록이다. */
@@ -151,25 +171,31 @@ export function credentialKey(ref: AiCredentialRef): string {
   return ref.kind === "teamKey" ? "teamKey" : `profile:${ref.harness}:${ref.label ?? ""}`;
 }
 
-/** 자격 이름: 「Claude · 개인」, 기본 로그인은 「Claude · 이 맥 기본 로그인」, 팀 키는 연결 이름. */
+/**
+ * 자격 이름: 「Claude · 개인」, 기본 로그인은 「Claude · 이 맥 기본 로그인」, 팀 키는
+ * 「팀 API 키 · api.openai.com」(호스트만, 선택 칸 폭 안에 들게).
+ */
 export function credentialName(ref: AiCredentialRef, teamKey: AiDefaultsTeamKey): string {
   if (ref.kind === "teamKey") {
-    return teamKey.status === "present" ? `${teamKey.name} · 팀 기본` : "팀 API 키";
+    return teamKey.status === "present" ? `팀 API 키 · ${teamKeyHost(teamKey.name)}` : "팀 API 키";
   }
   const account = ACCOUNT_LABEL[ref.harness];
   return ref.label === null ? `${account} · 이 맥 기본 로그인` : `${account} · ${ref.label}`;
 }
 
-/** 출처 알약 글자(시안 `.sel-box small`). */
-export function credentialSource(ref: AiCredentialRef): string {
-  return ref.kind === "teamKey" ? "API 키" : "구독";
+/**
+ * 출처 글자(시안 `.sel-box small`). 팀 키는 이름이 이미 「팀 API 키」라 붙이지 않는다
+ * (「팀 API 키 · API 키」 반복을 피함).
+ */
+export function credentialSource(ref: AiCredentialRef): string | null {
+  return ref.kind === "teamKey" ? null : "구독";
 }
 
 export interface AiDefaultOption {
   readonly ref: AiCredentialRef;
   readonly key: string;
   readonly name: string;
-  readonly source: string;
+  readonly source: string | null;
   /** 지금 부를 수 없는 선택지(로그인 필요 등). 목록에는 남고 이유가 붙는다. */
   readonly unavailable: string | null;
 }
@@ -207,7 +233,9 @@ export function optionsFor(rowId: AiDefaultRowId, input: AiDefaultsInput): AiDef
       }
     }
   }
-  if (row.sources.includes("teamKey") && input.teamKey.status !== "absent") {
+  // 팀 키가 있다고 읽은 때만 선택지다. 없음·모의·운영자 아님·로딩·오류에서는 있다고
+  // 단정하지 않는다(화면은 이유를 적은 읽기 전용 칸을 그린다).
+  if (row.sources.includes("teamKey") && input.teamKey.status === "present") {
     const ref: AiCredentialRef = { kind: "teamKey" };
     out.push({
       ref,
@@ -328,6 +356,20 @@ export type AiDefaultResolution =
   /** 이 행은 지금 아무것도 부를 수 없다. */
   | { state: "blocked"; using: string; sentence: string };
 
+/** 팀 키를 모를 때의 칸 글자. 알면 null. */
+function teamKeyUnknown(teamKey: AiDefaultsTeamKey): string | null {
+  switch (teamKey.status) {
+    case "hidden":
+      return "운영자만 볼 수 있어요";
+    case "loading":
+      return "팀 연결을 확인하고 있어요";
+    case "error":
+      return "팀 연결을 불러오지 못했어요";
+    default:
+      return null;
+  }
+}
+
 function accountOf(input: AiDefaultsInput, ref: AiCredentialRef & { kind: "profile" }) {
   return input.accounts.find(
     (account) => account.harness === ref.harness && account.label === ref.label
@@ -347,7 +389,9 @@ export function resolveRow(
   const teamName = credentialName({ kind: "teamKey" }, teamKey);
   switch (rowId) {
     case "appCommand": {
-      if (teamKey.status === "absent") {
+      const unknown = teamKeyUnknown(teamKey);
+      if (unknown) return { state: "ok", using: unknown, note: null };
+      if (teamKey.status === "absent" || teamKey.status === "mock") {
         return {
           state: "blocked",
           using: AI_DEFAULT_FALLBACK.appCommand,
@@ -375,7 +419,7 @@ export function resolveRow(
       }
       const name = credentialName(saved, teamKey);
       const account = accountOf(input, saved);
-      const where = rowId === "localTerminal" ? "새 세션은 셸로 열어요" : "작업마다 계정을 물어요";
+      const where = `이 칸은 「${fallback}」로 넘어가요`;
       if (!account) {
         return {
           state: "fallback",
@@ -393,6 +437,15 @@ export function resolveRow(
       return { state: "ok", using: name, note: null };
     }
     case "teamAgent": {
+      const unknown = teamKeyUnknown(teamKey);
+      if (unknown) return { state: "ok", using: `팀 키만 · ${unknown}`, note: null };
+      if (teamKey.status === "mock") {
+        return {
+          state: "fallback",
+          using: "모의 응답",
+          sentence: "저장된 팀 API 키가 없어 팀 에이전트는 모의 응답으로만 대답해요. 내 구독으로 넘어가지 않아요.",
+        };
+      }
       if (teamKey.status === "absent") {
         return {
           state: "blocked",
@@ -403,15 +456,16 @@ export function resolveRow(
       return { state: "ok", using: "에이전트마다 정함 · 팀 키만", note: null };
     }
     case "summary": {
-      if (teamKey.status === "absent") {
+      const unknown = teamKeyUnknown(teamKey);
+      if (unknown) return { state: "ok", using: unknown, note: null };
+      if (teamKey.status === "absent" || teamKey.status === "mock") {
         return {
           state: "fallback",
           using: AI_DEFAULT_FALLBACK.summary,
           sentence: "팀 API 키가 없어 요약은 쉬고, 첫 인사는 정해진 문구로 해요.",
         };
       }
-      if (teamKey.status === "present") return { state: "ok", using: teamName, note: null };
-      return { state: "ok", using: "팀 API 키", note: null };
+      return { state: "ok", using: teamName, note: null };
     }
     case "guardrail":
       return { state: "ok", using: "꺼짐 · 결정 모델 칸 준비 중", note: null };
@@ -439,15 +493,24 @@ export function rowsUsingAccount(
   for (const id of PERSONAL_ROW_IDS) {
     const saved = prefs[id];
     if (!saved || !sameCredential(saved, target)) continue;
-    out.push({ rowId: id, title: aiDefaultRow(id).title, fallback: AI_DEFAULT_FALLBACK[id] });
+    // 해제가 끝나면 `forgetAccount`가 선택을 지워 이 칸은 「고르지 않음」으로 돌아간다.
+    // 창은 표가 그 뒤에 보일 글자를 그대로 말한다.
+    out.push({ rowId: id, title: aiDefaultRow(id).title, fallback: AI_DEFAULT_UNSET_LABEL[id] });
   }
   return out;
 }
 
 /** 해제 창의 한 줄. 영향이 없으면 null(아무 줄도 그리지 않는다). */
 export function unlinkImpactLead(impact: readonly AiDefaultImpact[]): string | null {
-  return impact.length === 0 ? null : "기본 AI에서 이 계정을 쓰던 칸은 이렇게 바뀌어요.";
+  return impact.length === 0 ? null : "기본 AI에서 이 계정을 고른 칸은 이렇게 돌아가요.";
 }
+
+/**
+ * 개인 줄의 선택을 읽어 쓰는 곳(로컬 터미널 새 세션·원격 작업·⌘K 앱 명령)은 아직
+ * 없다(#2881 이탈표: AA-9 등 후속). 표가 이미 적용되는 것처럼 말하지 않게 한 줄로 적는다.
+ */
+export const AI_DEFAULTS_NOT_APPLIED =
+  "내 설정은 저장만 돼요. 터미널 새 세션과 원격 작업이 이 선택을 따르는 것은 준비 중이에요.";
 
 export function impactLine(item: AiDefaultImpact): string {
   return `${item.title}: ${item.fallback}`;

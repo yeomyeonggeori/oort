@@ -46,8 +46,9 @@ const KEY_LINK = {
   configured: true,
   source: "database",
   mode: "external-hermes",
-  baseUrl: "https://api.openai.com/v1",
-  endpointLabel: "OpenAI",
+  baseUrl: "https://openrouter.ai/api/v1",
+  // 서버 `endpoint_label()`은 주소다(provider_link.rs). 실제 형식으로 찍는다.
+  endpointLabel: "https://openrouter.ai/api/v1",
   bearerConfigured: true,
   bearerLast4: "a4f2",
   availability: "live",
@@ -62,7 +63,7 @@ const EMPTY_LINK = {
   source: "environment",
   mode: "local-mock",
   baseUrl: "http://127.0.0.1:8642/v1",
-  endpointLabel: "모의",
+  endpointLabel: "http://127.0.0.1:8642/v1",
   bearerConfigured: false,
   availability: "mock",
   keyConfigured: false,
@@ -92,6 +93,7 @@ async function installMocks(context, team) {
   await context.route("**/v1/provider/link**", (route) => {
     const url = route.request().url();
     if (url.includes("/chain")) return json(route, { error: { code: "not_found", message: "no chain" } }, 404);
+    if (team === "error") return json(route, { error: { code: "internal", message: "boom" } }, 500);
     if (team === "member") return json(route, { error: { code: "forbidden", message: "operator required" } }, 403);
     return json(route, team === "empty" ? EMPTY_LINK : KEY_LINK);
   });
@@ -176,6 +178,7 @@ const SCENES = [
   { name: "defaults-operator", team: "operator", query: "&aiDefaults=demo", ready: "ai-defaults-team-foot" },
   { name: "defaults-member", team: "member", query: "&aiDefaults=demo", ready: "ai-defaults-team-foot" },
   { name: "defaults-empty", team: "empty", query: "", ready: "ai-defaults-team-foot" },
+  { name: "defaults-error", team: "error", query: "&aiDefaults=demo", ready: "ai-defaults-table" },
   { name: "defaults-browser", team: "operator", query: "&aiEntry=desktop-only", base: "/settings?section=ai", ready: "ai-defaults-team-foot" },
   { name: "unlink-impact", team: "operator", query: "&aiDefaults=demo&aiUnlink=confirm", ready: "my-account-unlink-impact", dialog: true },
 ];

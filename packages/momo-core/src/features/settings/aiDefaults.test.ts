@@ -9,6 +9,7 @@ import {
   parseAiDefaults,
   resolveRow,
   rowsUsingAccount,
+  teamKeyHost,
   serializeAiDefaults,
   unlinkImpactLead,
   type AiDefaultsInput,
@@ -24,7 +25,7 @@ const accounts: AiDefaultsInput["accounts"] = [
 
 const input = (over: Partial<AiDefaultsInput> = {}): AiDefaultsInput => ({
   accounts,
-  teamKey: { status: "present", name: "OpenAI", failed: false, modelCount: 12 },
+  teamKey: { status: "present", name: "https://api.openai.com/v1", failed: false, modelCount: 12 },
   browserTab: false,
   ...over,
 });
@@ -80,10 +81,28 @@ describe("개인 행 선택지와 모델 줄", () => {
     expect(optionsFor("localTerminal", input({ browserTab: true }))).toEqual([]);
   });
 
-  it("운영자가 아니면(403) 팀 키가 있다고도 없다고도 하지 않는다", () => {
+  it("운영자가 아니면(403)·로딩·오류면 팀 키가 있다고도 없다고도 하지 않는다", () => {
     const hidden = input({ teamKey: { status: "hidden" } });
-    expect(optionsFor("appCommand", hidden)[0]?.name).toBe("팀 API 키");
-    expect(resolveRow("summary", {}, hidden)).toEqual({ state: "ok", using: "팀 API 키", note: null });
+    expect(optionsFor("appCommand", hidden)).toEqual([]);
+    expect(resolveRow("summary", {}, hidden)).toEqual({ state: "ok", using: "운영자만 볼 수 있어요", note: null });
+    expect(resolveRow("appCommand", {}, input({ teamKey: { status: "loading" } })).using).toBe("팀 연결을 확인하고 있어요");
+    expect(resolveRow("teamAgent", {}, input({ teamKey: { status: "error" } })).using).toBe("팀 키만 · 팀 연결을 불러오지 못했어요");
+  });
+
+  it("팀 키 이름은 서버 주소의 호스트만(선택 칸 폭), 출처 글자는 반복하지 않는다", () => {
+    const [team] = optionsFor("appCommand", input());
+    expect(team?.name).toBe("팀 API 키 · api.openai.com");
+    expect(team?.source).toBeNull();
+    expect(teamKeyHost("https://openrouter.ai/api/v1")).toBe("openrouter.ai");
+    expect(teamKeyHost("사내 게이트웨이")).toBe("사내 게이트웨이");
+  });
+
+  it("모의 응답뿐이면 팀 연결 절과 같은 말을 한다(대답할 수 없음이 아니라 모의 응답)", () => {
+    const mock = input({ teamKey: { status: "mock" } });
+    const result = resolveRow("teamAgent", {}, mock);
+    expect(result).toMatchObject({ state: "fallback", using: "모의 응답" });
+    if (result.state !== "ok") expect(result.sentence).toContain("모의 응답으로만 대답해요");
+    expect(resolveRow("summary", {}, mock)).toMatchObject({ using: "정적 문구" });
   });
 
   it("모델 이름을 지어내지 않는다: 구독은 CLI 기본값, 팀 키는 서버가 준 개수만", () => {
@@ -105,7 +124,7 @@ describe("폴백: 저장 값을 조용히 바꾸지 않고 문장으로 말한�
     expect(result).toEqual({
       state: "fallback",
       using: "셸",
-      sentence: "「Claude · 회사」 계정이 로그인 필요라 새 세션은 셸로 열어요. 다시 로그인하면 돌아와요.",
+      sentence: "「Claude · 회사」 계정이 로그인 필요라 이 칸은 「셸」로 넘어가요. 다시 로그인하면 돌아와요.",
     });
   });
 
@@ -180,12 +199,17 @@ describe("계정 해제의 영향", () => {
     remoteWork: { kind: "profile", harness: "claude", label: "회사" },
   };
 
-  it("그 계정을 고른 행을 이름과 폴백으로", () => {
+  it("그 계정을 고른 행을 이름과, 해제 뒤 표가 보일 글자로", () => {
     const impact = rowsUsingAccount(prefs, { harness: "claude", label: "회사" });
     expect(impact.map((item) => [item.title, item.fallback])).toEqual([
-      ["로컬 터미널 새 세션", "셸"],
+      ["로컬 터미널 새 세션", "마지막에 쓴 계정"],
       ["원격 작업 기본 계정", "매번 묻기"],
     ]);
+    // 해제 창의 말 = 해제(forgetAccount) 뒤 표가 그리는 글자.
+    const after = forgetAccount(prefs, { harness: "claude", label: "회사" });
+    for (const item of impact) {
+      expect(resolveRow(item.rowId, after, input()).using).toBe(item.fallback);
+    }
     expect(unlinkImpactLead(impact)).not.toBeNull();
   });
 

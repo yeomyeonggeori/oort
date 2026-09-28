@@ -1,5 +1,6 @@
 import { Lock } from "lucide-react";
 import {
+  AI_DEFAULTS_NOT_APPLIED,
   AI_DEFAULT_ROWS,
   AI_DEFAULT_UNSET_LABEL,
   credentialKey,
@@ -70,6 +71,9 @@ export function AiDefaultsTable({
         ))}
       </ul>
       <AiFoot>{PERSONAL_FOOT}</AiFoot>
+      <AiFoot>
+        <span data-testid="ai-defaults-not-applied">{AI_DEFAULTS_NOT_APPLIED}</span>
+      </AiFoot>
       {operator !== null && (
         <AiFoot>
           <span data-testid="ai-defaults-team-foot" data-operator={operator ? "yes" : "no"}>
@@ -98,6 +102,9 @@ function DefaultRow({
   const resolved = resolveRow(row.id, prefs, input);
   const personal = row.audience === "me";
   const lines: { key: string; text: string; tone: "muted" | "warn" }[] = [];
+  // 칸 밑 줄(모델·안내·폴백)은 선택 칸의 설명이다: 낭독기가 칸에서 경고를 듣는다.
+  const lineId = (key: string) => `ai-default-${row.id}-${key}`;
+  const describedBy = ["model", "note", "fallback"].map(lineId).join(" ");
 
   let choice;
   if (personal) {
@@ -107,8 +114,11 @@ function DefaultRow({
       choice = <ReadOnlyBox>데스크탑 앱에서 고를 수 있어요</ReadOnlyBox>;
     } else if (id !== "appCommand" && !accountsKnown) {
       choice = <ReadOnlyBox>이 맥의 계정을 확인하고 있어요</ReadOnlyBox>;
-    } else if (id === "appCommand" && resolved.state === "blocked" && input.teamKey.status === "absent") {
-      choice = <ReadOnlyBox>쓸 수 있는 자격이 없어요</ReadOnlyBox>;
+    } else if (id === "appCommand" && input.teamKey.status !== "present") {
+      // 팀 키가 있다고 읽은 때만 고르는 칸이다. 그 밖에는 이유를 적은 읽기 전용 칸.
+      choice = (
+        <ReadOnlyBox>{resolved.state === "blocked" ? "쓸 수 있는 자격이 없어요" : resolved.using}</ReadOnlyBox>
+      );
     } else {
       const options = optionsFor(id, input);
       // 저장한 계정이 목록에서 사라졌으면 그 값을 선택지로 남겨 둔다: 칸이 다른 값을
@@ -126,6 +136,7 @@ function DefaultRow({
       choice = (
         <Select
           aria-labelledby={titleId}
+          aria-describedby={describedBy}
           value={value}
           className="h-control rounded-md text-meta"
           onChange={(event) => {
@@ -189,6 +200,7 @@ function DefaultRow({
         {lines.map((line) => (
           <span
             key={line.key}
+            id={lineId(line.key)}
             className={cn(
               "break-keep text-timestamp",
               line.tone === "warn" ? "text-warn" : "text-ink-muted"
@@ -199,7 +211,7 @@ function DefaultRow({
           </span>
         ))}
       </div>
-      <span data-slot="who" className="text-meta">
+      <span data-slot="who" className="flex h-control items-center text-meta">
         {personal ? (
           <span className="text-agent">내 설정</span>
         ) : (
@@ -214,14 +226,18 @@ function DefaultRow({
 }
 
 function optionText(option: Pick<AiDefaultOption, "name" | "source" | "unavailable">): string {
-  const base = `${option.name} · ${option.source}`;
+  const base = option.source ? `${option.name} · ${option.source}` : option.name;
   return option.unavailable ? `${base} (${option.unavailable})` : base;
 }
 
 /** 시안 `.sel-box.ro`: 고를 수 없는 칸은 점선 테두리로 값만 보인다. */
 function ReadOnlyBox({ children }: { children: string }) {
   return (
-    <span className="flex h-control min-w-0 items-center rounded-md border border-dashed border-line px-3 text-meta text-ink-muted">
+    // 잘린 값도 끝까지 읽을 수 있게 전체 글자를 title로 둔다(서버 주소는 길다).
+    <span
+      title={children}
+      className="flex h-control min-w-0 items-center rounded-md border border-dashed border-line px-3 text-meta text-ink-muted"
+    >
       <span className="truncate">{children}</span>
     </span>
   );
