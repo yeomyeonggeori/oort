@@ -230,6 +230,24 @@ describe("decision outcomes (#3013)", () => {
     expect(document.activeElement).toBe(q('[data-testid="agent-permission"]'));
   });
 
+  it("when the server's approval.decided closes the card, the caret lands on the pane and the result is still announced", async () => {
+    const decide = vi.fn(async () => undefined);
+    const evs = events();
+    render(model(evs), { decide, reply: null });
+    await commitAllow();
+    // 서버가 같은 tx에서 쓴 `approval.decided`가 실시간(또는 다시 읽기)으로 온다.
+    const decided = ev("approval.decided", { action: "decided", status: "approved", option_id: "once", request_event_id: evs[1].eventId });
+    render(model([...evs, decided]), { decide, reply: null });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(q('[data-testid="agent-permission"]')).toBeNull();
+    expect(document.activeElement).toBe(q('[data-testid="agent-pane"]'));
+    expect(q('[data-testid="agent-pane-announce"]')!.textContent).toBe(
+      "이번 한 번 허락을 보냈어요. 에이전트가 이어서 해요."
+    );
+  });
+
   it("a failed send keeps the buttons; the same decision again (server 200) settles it", async () => {
     const decide = vi
       .fn<(d: unknown) => Promise<void>>()

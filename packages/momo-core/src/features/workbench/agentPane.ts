@@ -285,14 +285,16 @@ export function permissionLapsed(permission: Pick<PendingPermission, "atMs">, no
   return nowMs - permission.atMs >= PERMISSION_HOST_WAIT_MS;
 }
 
-export const PERMISSION_LAPSED_LINE = "10분 안에 결정하지 않아 요청이 닫혔어요. 에이전트는 거부로 받았어요.";
+// 호스트가 실제로 무엇을 했는지는 이 칸이 모른다(철회 이벤트가 오면 카드가 사라진다).
+// 그래서 일어난 것만 말한다.
+export const PERMISSION_LAPSED_LINE = "10분이 지나 이 요청은 닫혔어요. 에이전트가 다시 물으면 새 카드가 떠요.";
 export const PERMISSION_OFFLINE_LINE = "연결이 끊겨 지금은 결정할 수 없어요. 다시 연결되면 누를 수 있어요.";
 
 /** 결정을 보낸 뒤 카드가 말하는 한 줄. */
 export function permissionSentLine(kind: PermissionChoiceKind): string {
   return kind === "allow_once"
     ? "이번 한 번 허락을 보냈어요. 에이전트가 이어서 해요."
-    : "거부를 보냈어요. 에이전트는 이 도구를 쓰지 않아요.";
+    : "거부를 보냈어요. 이번 요청은 실행하지 않아요.";
 }
 
 export interface PermissionFailure {
@@ -321,7 +323,7 @@ export function permissionFailure(error: unknown): PermissionFailure {
   if (status === 409) {
     return {
       closed: true,
-      text: "이 요청은 이미 닫혔어요. 기한이 지났거나, 차례나 세션이 끝났거나, 호스트가 거둬들였어요.",
+      text: "이 요청은 이미 닫혔어요. 기한이 지났거나 세션이 끝났거나 호스트가 거둬들였어요. 에이전트가 다시 물으면 새 카드가 떠요.",
     };
   }
   if (status === 403) {

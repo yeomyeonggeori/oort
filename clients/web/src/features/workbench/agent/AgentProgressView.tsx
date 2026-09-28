@@ -160,17 +160,32 @@ export function AgentProgressView({
 
   const [planOpen, setPlanOpen] = useState(true);
   const rootRef = useRef<HTMLDivElement>(null);
+  // 권한 카드의 결과 문장은 칸 수준에서 읽힌다: 서버의 `approval.decided`가 오면 카드는
+  // 곧바로 사라지므로, 카드 안의 status 줄은 읽히기 전에 없어진다(design-review H1).
+  const [announce, setAnnounce] = useState("");
+  // 확정 버튼(또는 카드)에 있던 캐럿이 카드와 함께 사라지면 칸이 받는다(body로 떨어지지 않게).
+  const catchFocus = useCallback(() => {
+    queueMicrotask(() => {
+      const root = rootRef.current;
+      const active = document.activeElement;
+      if (root && (!active || active === document.body || !active.isConnected)) root.focus({ preventScroll: true });
+    });
+  }, []);
   const cramped = useCramped(rootRef);
   const planId = useId();
 
   return (
     <div
       ref={rootRef}
+      tabIndex={-1}
       data-cramped={cramped ? "" : undefined}
-      className={cn("agent-pane flex min-h-0 min-w-0 flex-1 flex-col bg-surface text-ink", className)}
+      className={cn("agent-pane flex min-h-0 min-w-0 flex-1 flex-col bg-surface text-ink focus-visible:focus-ring", className)}
       data-testid="agent-pane"
       data-status={model.status}
     >
+      <p role="status" className="sr-only" data-testid="agent-pane-announce">
+        {announce}
+      </p>
       {/* 목표 한 줄은 칸 머리 제목이다(격자가 그린다). 여기는 호스트 · 하네스 · 상태 · 단계. */}
       <div className="flex shrink-0 flex-col gap-1 border-b border-line px-4 py-2">
         <p className="flex min-w-0 flex-wrap items-center gap-x-2 text-meta text-ink-muted" data-testid="agent-pane-meta">
@@ -260,6 +275,8 @@ export function AgentProgressView({
           decide={actions.decide}
           cramped={cramped}
           offline={offline}
+          onOutcome={setAnnounce}
+          onLeave={catchFocus}
         />
       ) : null}
 
@@ -421,6 +438,8 @@ function PermissionCard({
   decide,
   cramped,
   offline,
+  onOutcome,
+  onLeave,
 }: {
   sessionId: string;
   permission: PendingPermission;
@@ -431,6 +450,10 @@ function PermissionCard({
   cramped: boolean;
   /** 실시간 연결이 끊겼다. */
   offline: boolean;
+  /** 결과 문장을 칸의 live region으로 올린다. */
+  onOutcome: (text: string) => void;
+  /** 카드가 캐럿을 품은 채 사라진다. */
+  onLeave: () => void;
 }) {
   const [armed, setArmed] = useState<Armed>(null);
   const lapsed = useLapsed(permission.atMs);
@@ -455,10 +478,20 @@ function PermissionCard({
     returnTo.current = null;
     (target && !target.disabled ? target : sectionRef.current)?.focus({ preventScroll: true });
   }, [armed]);
-  // 확정 버튼이 사라지면 캐럿이 body로 떨어지지 않게 카드가 받는다(결과 줄은 status로 읽힌다).
+  // 확정 버튼이 사라지면 캐럿이 body로 떨어지지 않게 카드가 받는다. 결과 문장은 칸이 읽는다.
   useEffect(() => {
-    if (outcome) sectionRef.current?.focus({ preventScroll: true });
-  }, [outcome]);
+    if (!outcome) return;
+    sectionRef.current?.focus({ preventScroll: true });
+    onOutcome(outcome.text);
+  }, [outcome, onOutcome]);
+  // 카드가 내려갈 때(서버의 `approval.decided`) 캐럿이 안에 있었으면 칸이 받는다.
+  useLayoutEffect(() => {
+    const section = sectionRef;
+    return () => {
+      const el = section.current;
+      if (el && el.contains(document.activeElement)) onLeave();
+    };
+  }, [onLeave]);
   const ask = permission.tool ? permission.tool.headline : PERMISSION_ASK.other;
 
   if (!viewerIsOwner) {
@@ -477,7 +510,8 @@ function PermissionCard({
 
   // 보냈거나 닫힌 요청: 버튼을 거둔다. 서버의 `approval.decided`가 오면 카드 자체가
   // 사라진다(모든 소유자 기기의 카드가 같은 이벤트로 닫힌다, §8.6).
-  const settled: Outcome = outcome ?? (lapsed ? { tone: "closed", text: PERMISSION_LAPSED_LINE } : null);
+  // 보내는 중에 만료되면 응답이 결론을 낸다(두 문장이 차례로 뒤집히지 않게, review M5).
+  const settled: Outcome = outcome ?? (lapsed && !busy ? { tone: "closed", text: PERMISSION_LAPSED_LINE } : null);
   if (settled) {
     return (
       <section
@@ -489,10 +523,11 @@ function PermissionCard({
         data-settled={settled.tone}
       >
         <p className="agent-perm-l1 agent-perm-sticky-top">
-          <StatusMark status={settled.tone === "sent" ? "done" : "stopped"} srLabel />
+          {/* 닫힘은 실패가 아니다(다른 기기가 허락했을 수도 있다): 중립 빈 원. */}
+          <StatusMark status={settled.tone === "sent" ? "done" : "idle"} srLabel />
           {ask}
         </p>
-        <p role="status" className="agent-perm-settled text-meta text-ink" data-testid="agent-permission-outcome">
+        <p className="agent-perm-settled break-keep text-meta text-ink" data-testid="agent-permission-outcome">
           {settled.text}
         </p>
       </section>
@@ -564,7 +599,7 @@ function PermissionCard({
       {blocked ? (
         <p
           id={unavailableId}
-          className={cn("text-meta text-ink-muted", cramped && "truncate")}
+          className={cn("break-keep text-meta text-ink-muted", cramped && "truncate")}
           data-testid="agent-permission-unavailable"
         >
           {reason}
@@ -613,7 +648,7 @@ function PermissionCard({
           >
             거부
           </Button>
-          {cramped ? null : <span className="text-timestamp text-ink-muted">나에게만 보이는 버튼이에요</span>}
+          {blocked ? null : <span className="text-timestamp text-ink-muted">나에게만 보이는 버튼이에요</span>}
         </div>
       ) : (
         <div className="agent-perm-sticky-bottom flex flex-wrap items-center gap-2" data-testid="agent-permission-confirm">
@@ -646,7 +681,7 @@ function PermissionCard({
         <p className="text-meta text-ink-muted">이번 한 번 허락할 선택지가 없어요. 거부하거나 호스트에서 결정하세요.</p>
       ) : null}
       {error ? (
-        <p role="alert" className="text-meta text-danger" data-testid="agent-permission-error">
+        <p role="alert" className="break-keep text-meta text-danger" data-testid="agent-permission-error">
           {error}
         </p>
       ) : null}

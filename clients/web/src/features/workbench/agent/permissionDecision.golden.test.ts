@@ -13,6 +13,7 @@ import {
   permissionLapsed,
   permissionSentLine,
 } from "@momo/core/features/workbench/agentPane";
+import { agentRoutes } from "./agentPaneSource";
 
 // #3013: A 칸 권한 카드가 #3000 결정 라우트에 붙는 모양을 골든
 // (docs/api/work-permission-decision.golden.json)과 맞춘다. 서버 단위 시험과 workd
@@ -174,5 +175,30 @@ describe("lapse", () => {
     const atMs = 1_790_550_000_000;
     expect(permissionLapsed({ atMs }, atMs + PERMISSION_HOST_WAIT_MS - 1)).toBe(false);
     expect(permissionLapsed({ atMs }, atMs + PERMISSION_HOST_WAIT_MS)).toBe(true);
+  });
+});
+
+describe("product route wiring", () => {
+  it("re-reads the thread after a 200 and after a settled 409; the error still reaches the card", async () => {
+    installHost();
+    goldenServer();
+    const reread = vi.fn();
+    const routes = agentRoutes(WS, reread);
+    const c = goldenCase("owner_allow_once");
+    await routes.decide!({ sessionId: SESSION, ...(c.body as WorkPermissionDecisionBody) });
+    expect(reread).toHaveBeenCalledTimes(1);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ error: { message: "x", code: "permission_already_decided" } }), {
+          status: 409,
+          headers: { "content-type": "application/json" },
+        })
+      )
+    );
+    const err = await routes.decide!({ sessionId: SESSION, ...(c.body as WorkPermissionDecisionBody) }).catch((e) => e);
+    expect((err as ApiError).code).toBe("permission_already_decided");
+    expect(reread).toHaveBeenCalledTimes(2);
+    expect(routes.reply).toBeNull();
   });
 });

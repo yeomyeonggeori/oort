@@ -21,7 +21,7 @@ import {
   type AgentPaneModel,
 } from "@momo/core/features/workbench/agentPane";
 import type { SessionStatus } from "@momo/core/features/workbench/sessionList";
-import { decideWorkPermission, type WorkSession } from "@momo/core/lib/api";
+import { ApiError, decideWorkPermission, type WorkSession } from "@momo/core/lib/api";
 import { AgentProgressView, type AgentPaneActions } from "./AgentProgressView";
 import { agentPaneStore, useAgentPaneBindings, type AgentPaneStore } from "./agentPanes";
 
@@ -86,8 +86,15 @@ export function summaryOf(model: AgentPaneModel): AgentPaneSummary {
 export function agentRoutes(workspaceId: string, afterDecide: () => void = () => {}): AgentPaneActions {
   return {
     decide: async ({ sessionId, requestEventId, optionId, kind }) => {
-      await decideWorkPermission(workspaceId, sessionId, { requestEventId, optionId, kind });
-      afterDecide();
+      try {
+        await decideWorkPermission(workspaceId, sessionId, { requestEventId, optionId, kind });
+        afterDecide();
+      } catch (err) {
+        // 서버가 결론을 낸 거절(409·403·404)도 스레드를 다시 읽는다: 다른 기기의 결정이나
+        // host 철회가 남긴 `approval.decided`가 칸 머리의 「나를 기다림」을 거둔다.
+        if (err instanceof ApiError && err.status >= 400 && err.status < 500) afterDecide();
+        throw err;
+      }
     },
     reply: null,
   };
