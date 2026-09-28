@@ -12,6 +12,11 @@
 // #3042: `ONLY=team-save,team-save-before-check,team-save-member,chain-origin
 // OUT_DIR=captures/3042` — 팀 줄 서버 저장(default-ai + 연결 확인 modelIds)과 연결
 // 순서 hop 의 주소 origin 변경(키 필수).
+//
+// #3064: `ONLY=team-save-pending,team-save-offline,chain-offline,chain-copy,nav-appearance
+// OUT_DIR=captures/3064` — 저장 중 칸의 흐림(계산된 opacity 를 재서 0.5 가 아니면
+// 실패), 오프라인(`context.setOffline`: useOffline 의 브라우저 쪽 신호), 연결 순서
+// 블록의 해요체, 390 폭의 한 줄 설정 목록.
 // =============================================================================
 
 import { spawn } from "node:child_process";
@@ -292,9 +297,51 @@ const SCENES = [
       await checkConnection(page);
       await page.getByTestId("ai-default-teamAgent-select").selectOption("link:0:openai/gpt-4o");
       await page.getByTestId("ai-default-teamAgent-saved").waitFor({ state: "visible" });
+      // #3064: 잠긴 칸은 흐려야 한다. 클래스가 아니라 계산된 값을 잰다.
+      const dim = await page
+        .getByTestId("ai-default-teamAgent-select")
+        .evaluate((el) => ({ opacity: getComputedStyle(el).opacity, cursor: getComputedStyle(el).cursor }));
+      if (dim.opacity !== "0.5" || dim.cursor !== "not-allowed") {
+        throw new Error(`저장 중 칸이 흐리지 않다: ${JSON.stringify(dim)}`);
+      }
     },
     focus: "ai-default-teamAgent",
   },
+  {
+    name: "team-save-offline",
+    team: "operator-3042",
+    query: "&aiDefaults=demo",
+    ready: "ai-defaults-team-foot",
+    act: async (page) => {
+      await checkConnection(page);
+      await page.context().setOffline(true);
+      await page.getByTestId("ai-offline-banner").waitFor({ state: "visible" });
+    },
+    focus: "ai-default-teamAgent",
+  },
+  {
+    name: "chain-offline",
+    team: "chain-3042",
+    query: "",
+    ready: "ai-team-chain-toggle",
+    act: async (page) => {
+      await moveHopOrigin(page);
+      await page.context().setOffline(true);
+      await page.getByTestId("ai-offline-banner").waitFor({ state: "visible" });
+      await page.getByTestId("chain-save").scrollIntoViewIfNeeded();
+    },
+  },
+  {
+    name: "chain-copy",
+    team: "chain-3042",
+    query: "",
+    ready: "ai-team-chain-toggle",
+    act: async (page) => {
+      await page.getByTestId("ai-team-chain-toggle").click();
+      await page.getByTestId("chain-order-rule").scrollIntoViewIfNeeded();
+    },
+  },
+  { name: "nav-appearance", team: "operator", query: "", base: "/settings?section=appearance", ready: "settings-nav", dialog: true },
   { name: "team-save-before-check", team: "operator-3042", query: "&aiDefaults=demo", ready: "ai-defaults-team-foot", focus: "ai-default-teamAgent" },
   { name: "team-save-member", team: "member", query: "&aiDefaults=demo", ready: "ai-defaults-team-foot", focus: "ai-default-teamAgent" },
   { name: "chain-origin", team: "chain-3042", query: "", ready: "ai-team-chain-toggle", act: moveHopOrigin },

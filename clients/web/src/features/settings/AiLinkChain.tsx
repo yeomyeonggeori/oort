@@ -105,7 +105,7 @@ const CHAIN_BUSY_NOTE_ID = "chain-busy-note";
  * 못한다. 뒷절의 동사는 이 버튼이 하는 일 그대로다.
  */
 const CHAIN_BUSY_NOTE =
-  "앞서 누른 것이 아직 끝나지 않았습니다. 그것이 끝나면 이어서 추가할 수 있습니다.";
+  "앞서 누른 것이 아직 끝나지 않았어요. 그것이 끝나면 이어서 추가할 수 있어요.";
 
 /**
  * Every read and write goes through the parser, so nothing downstream ever
@@ -250,7 +250,7 @@ function HopRow({
         <ConfirmButton
           label="삭제"
           ariaLabel={`${ordinal} provider 삭제`}
-          question={`${ordinal} provider를 목록에서 뺍니다.`}
+          question={`${ordinal} provider를 목록에서 빼요.`}
           confirmLabel="빼기"
           disabled={locked}
           onConfirm={onRemove}
@@ -404,12 +404,12 @@ export function ChainProbeResult({
         <p className="text-meta text-ink-muted" data-testid="chain-probe-scope">
           {checkedAtMs !== undefined && (
             <span data-numeric>
-              {new Date(checkedAtMs).toLocaleString("ko-KR")}에 확인했습니다.{" "}
+              {new Date(checkedAtMs).toLocaleString("ko-KR")}에 확인했어요.{" "}
             </span>
           )}
           {chainPending
-            ? "이 순서는 서버에 저장된 순서입니다. 아래 목록에는 아직 저장하지 않은 변경이 있어 번호가 서로 다를 수 있습니다."
-            : "번호는 서버에 저장된 순서입니다."}
+            ? "이 순서는 서버에 저장된 순서예요. 아래 목록에는 아직 저장하지 않은 변경이 있어 번호가 서로 다를 수 있어요."
+            : "번호는 서버에 저장된 순서예요."}
         </p>
       )}
     </div>
@@ -481,8 +481,8 @@ export function AiLinkChain({
   }, [dirty, onPendingChange]);
 
   const lines = [
-    "첫 provider가 응답하지 않거나 한도를 넘으면 다음 예비 provider로 넘어갑니다.",
-    "요청이 잘못되어 거절된 경우에는 넘기지 않습니다. 두 번째 provider에서도 같은 이유로 실패하기 때문입니다.",
+    "첫 provider가 응답하지 않거나 한도를 넘으면 다음 예비 provider로 넘어가요.",
+    "요청이 잘못되어 거절된 경우에는 넘기지 않아요. 두 번째 provider에서도 같은 이유로 실패하기 때문이에요.",
   ];
 
   if (query.isPending) {
@@ -510,7 +510,7 @@ export function AiLinkChain({
           </p>
         ) : isOperatorDenied(query.error) ? (
           <p className="text-body text-ink-muted" data-testid="chain-denied">
-            연결 순서는 이 서버의 운영자만 볼 수 있습니다.
+            연결 순서는 이 서버의 운영자만 볼 수 있어요.
           </p>
         ) : (
           <InlineBanner
@@ -638,7 +638,7 @@ export function AiLinkChain({
         {chain.fallbackCount > 0 && !readOnly && (
           <ConfirmButton
             label="예비 provider 전부 지우기"
-            question="저장된 예비 provider를 모두 지웁니다."
+            question="저장된 예비 provider를 모두 지워요."
             confirmLabel="지우기"
             disabled={offline || (busy && !clearing)}
             busy={clearing}
@@ -656,7 +656,7 @@ export function AiLinkChain({
           obeys silently otherwise: new rows land at the end and nothing on
           screen says why there is no way to move them. */}
       <p className="text-meta text-ink-muted" data-testid="chain-order-rule">
-        새 provider는 목록 맨 아래에 붙습니다. 저장된 키는 그 자리에 함께
+        새 provider는 목록 맨 아래에 붙어요. 저장된 키는 그 자리에 함께
         보관되므로 순서만 따로 바꿀 수는 없고, 순서를 바꾸려면 해당 provider를
         지운 뒤 키와 함께 다시 추가하세요.
       </p>
@@ -666,9 +666,9 @@ export function AiLinkChain({
           bans the silent switch, and an absence a reader would misread as "아무
           일도 없었다" is one. Said here, once, until X-15 lands. */}
       <p className="text-meta text-ink-muted" data-testid="chain-record-scope">
-        전환이 일어나면 그 실행 기록 아래에 한 줄로 남습니다. 지금은 화면을 열어
+        전환이 일어나면 그 실행 기록 아래에 한 줄로 남아요. 지금은 화면을 열어
         둔 동안 도착한 전환만 남으므로, 줄이 없다고 전환이 없었다는 뜻은
-        아닙니다.
+        아니에요.
       </p>
 
       {full && (
@@ -677,7 +677,7 @@ export function AiLinkChain({
           className="break-keep text-meta text-ink-muted"
           data-testid="chain-full"
         >
-          예비 provider는 {MAX_FALLBACK_HOPS}개까지 둘 수 있습니다. 하나를 뺀 뒤
+          예비 provider는 {MAX_FALLBACK_HOPS}개까지 둘 수 있어요. 하나를 뺀 뒤
           추가하세요.
         </p>
       )}

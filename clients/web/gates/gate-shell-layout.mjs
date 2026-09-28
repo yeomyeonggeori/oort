@@ -601,7 +601,10 @@ const SIDEBAR_WIDTH = 324;
 const PANE_GAIN_ON_COLLAPSE = SIDEBAR_WIDTH - 8;
 /** Settings replaces the titlebar, so the section list rests at y=0. */
 const SETTINGS_NAV_RESTING_TOP = 0;
-const SETTINGS_NAV_PHONE_CAP = 308;
+/** 폰(<600)의 설정 목록은 한 줄로 눕는다(#3064). 세로 308 캡이던 시절 목록과
+ *  본문이 두 스크롤 판으로 포개져 본문 글이 목록 아래로 잘려 들어가 「메뉴가 본문을
+ *  덮는다」로 읽혔다. 한 줄 = 탭 높이 44 + 위아래 p-2 16 + 아래 선 1. */
+const SETTINGS_NAV_PHONE_ROW = 61;
 
 const SHELL_METRICS = `(() => {
   const doc = document.scrollingElement || document.documentElement;
@@ -1352,40 +1355,38 @@ async function measureSettingsSurface(browser) {
   await mobile.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(mobile);
   await go(mobile, "/settings?section=profile");
-  const cap = await mobile.evaluate(`(() => {
+  const row = await mobile.evaluate(`(() => {
     const nav = document.querySelector('[data-testid="settings-nav"]');
-    if (!nav) return { missing: true };
+    const body = document.querySelector('[data-settings-scroll-viewport]');
+    if (!nav || !body) return { missing: true };
     const nr = nav.getBoundingClientRect();
+    const br = body.getBoundingClientRect();
     const items = [...nav.querySelectorAll('[data-testid^="settings-nav-"]')];
-    const vis = items.map((el) => {
-      const r = el.getBoundingClientRect();
-      const visible = Math.min(r.bottom, nr.bottom) - Math.max(r.top, nr.top);
-      return {
-        id: el.getAttribute("data-testid"),
-        h: Math.round(r.height),
-        vis: Math.round(Math.max(0, visible)),
-      };
-    });
+    const tops = [...new Set(items.map((el) => Math.round(el.getBoundingClientRect().top)))];
     return {
       top: Math.round(nr.top),
       height: Math.round(nr.height),
-      maxHeight: getComputedStyle(nav).maxBlockSize,
-      full: vis.filter((v) => v.vis >= v.h - 1 && v.vis > 0).map((v) => v.id),
-      peek: vis.filter((v) => v.vis > 8 && v.vis < v.h - 8).map((v) => v.id),
-      hidden: vis.filter((v) => v.vis <= 8).map((v) => v.id),
-      rows: vis,
+      items: items.length,
+      tops,
+      scrollsInline: nav.scrollWidth > nav.clientWidth,
+      scrollsBlock: nav.scrollHeight > nav.clientHeight,
+      bodyTop: Math.round(br.top),
+      bodyHeight: Math.round(br.height),
+      gap: Math.round(br.top - nr.bottom),
     };
   })()`);
   check(
-    "390px 설정 목록 캡이 다음 행을 반쯤 보여 주고 상단 y가 실값이다",
-    cap.missing !== true &&
-      cap.top === SETTINGS_NAV_RESTING_TOP &&
-      cap.height === SETTINGS_NAV_PHONE_CAP &&
-      cap.maxHeight === `${SETTINGS_NAV_PHONE_CAP}px` &&
-      cap.full.length >= 4 &&
-      cap.peek.length >= 1 &&
-      cap.hidden.length >= 1,
-    JSON.stringify(cap)
+    "390px 설정 목록은 한 줄로 눕고 본문이 그 아래 남은 높이를 받는다",
+    row.missing !== true &&
+      row.top === SETTINGS_NAV_RESTING_TOP &&
+      row.height === SETTINGS_NAV_PHONE_ROW &&
+      row.items >= 10 &&
+      row.tops.length === 1 &&
+      row.scrollsInline === true &&
+      row.scrollsBlock === false &&
+      row.gap === 0 &&
+      row.bodyHeight === 844 - SETTINGS_NAV_PHONE_ROW,
+    JSON.stringify(row)
   );
   await mobile.getByTestId("settings-nav-events").click();
   const scrolled = await mobile.evaluate(`(() => {
@@ -1396,19 +1397,21 @@ async function measureSettingsSurface(browser) {
     const r = el.getBoundingClientRect();
     return {
       focus: document.activeElement?.getAttribute("data-testid"),
-      fully: r.top >= nr.top - 1 && r.bottom <= nr.bottom + 1,
+      fully: r.left >= nr.left - 1 && r.right <= nr.right + 1 && r.top >= nr.top - 1 && r.bottom <= nr.bottom + 1,
+      navScrollLeft: Math.round(nav.scrollLeft),
       current: el.getAttribute("aria-current"),
     };
   })()`);
   check(
-    "390px에서 고른 설정 섹션이 목록 안으로 스크롤된다",
+    "390px에서 고른 설정 섹션이 줄 안으로 가로 스크롤된다",
     scrolled.missing !== true &&
       scrolled.focus === "settings-nav-events" &&
       scrolled.fully === true &&
+      scrolled.navScrollLeft > 0 &&
       scrolled.current === "page",
     JSON.stringify(scrolled)
   );
-  await mobile.screenshot({ path: `${OUT_DIR}/390x844-settings-nav-cap.png` });
+  await mobile.screenshot({ path: `${OUT_DIR}/390x844-settings-nav-row.png` });
   await phone.close();
 }
 
