@@ -2,9 +2,14 @@
 //! the peer's code signature. Nothing else — **no TCP, not even loopback**.
 //!
 //! The desktop app starts `momo-workd run --control-socket <path>` as its
-//! child and asks it two things over this socket: `status` (who this host is
-//! and whether the server is taking its heartbeat) and `shutdown`. Controls,
-//! sessions and keys never cross it; those stay between workd and the server.
+//! child and asks it four things over this socket: `status` (who this host is
+//! and whether the server is taking its heartbeat), `shutdown`, and — R2,
+//! ADR-0146 개정 D-6·D-7 (#3024) — `pin_root` (hand over the public half of
+//! the app's Secure Enclave key, once) and `revoke_device` (a root-signed
+//! revocation, so a revocation the server hides still lands). Controls,
+//! sessions and private keys never cross it. The root is pinned **only** here:
+//! a second, different key is refused, and only a local `momo-workd
+//! reset-root` clears it; nothing on the server path can reach it.
 //!
 //! ## Who may connect
 //!
@@ -40,6 +45,12 @@
 //!    "version":"…","heartbeat":{"lastOkAtMs":…,"lastAttemptAtMs":…,"failing":false}}
 //! → {"op":"shutdown"}
 //! ← {"ok":true}
+//! → {"op":"pin_root","keyId":"…","alg":"p256","publicKey":"<b64 33-byte SEC1>"}
+//! ← {"ok":true,"pinned":true}        (false: the same key was already pinned)
+//! ← {"ok":false,"error":"root_already_pinned"}
+//! → {"op":"revoke_device","revocation":{"workspaceId","memberId","rootKeyId",
+//!    "targetKeyId","revokedAtMs","signature","targetPublicKey"}}
+//! ← {"ok":true}
 //! ```
 
 use std::io;
@@ -52,10 +63,9 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::Notify;
 use uuid::Uuid;
 
-pub use crate::controls::HostHealth;
+pub use crate::controls::{HostHealth, SocketShared};
 
 /// The desktop app's code-signing identifier (its bundle id). The only program
 /// whose connections workd answers.
@@ -266,7 +276,7 @@ impl ControlSocket {
 
     /// Answer connections until the task is dropped. `shutdown` is signalled
     /// through `stop`.
-    pub async fn serve(self, identity: HostIdentity, health: Arc<HostHealth>, stop: Arc<Notify>) {
+    pub async fn serve(self, identity: HostIdentity, shared: SocketShared) {
         let this = Arc::new(self);
         loop {
             let stream = match this.listener.accept().await {
@@ -277,14 +287,13 @@ impl ControlSocket {
                     continue;
                 }
             };
-            let (this, identity, health, stop) =
-                (this.clone(), identity.clone(), health.clone(), stop.clone());
+            let (this, identity, shared) = (this.clone(), identity.clone(), shared.clone());
             tokio::spawn(async move {
                 if let Err(refusal) = check_peer(stream.as_raw_fd(), &this.policy) {
                     tracing::warn!(refusal = %refusal, "control socket peer refused");
                     return;
                 }
-                answer(stream, &identity, &health, &stop).await;
+                answer(stream, &identity, &shared).await;
             });
         }
     }
@@ -323,13 +332,13 @@ pub fn check_peer(fd: RawFd, policy: &PeerPolicy) -> Result<(), PeerRefusal> {
     }
 }
 
-async fn answer(stream: UnixStream, identity: &HostIdentity, health: &HostHealth, stop: &Notify) {
+async fn answer(stream: UnixStream, identity: &HostIdentity, shared: &SocketShared) {
     let (read, mut write) = stream.into_split();
     let mut reader = BufReader::new(read.take_limited());
     let mut line = String::new();
     let read = tokio::time::timeout(REQUEST_TIMEOUT, reader.read_line(&mut line)).await;
     let response = match read {
-        Ok(Ok(_)) if line.ends_with('\n') => respond(line.trim_end(), identity, health, stop),
+        Ok(Ok(_)) if line.ends_with('\n') => respond(line.trim_end(), identity, shared),
         Ok(Ok(_)) => json!({"ok": false, "error": "request_too_long_or_unterminated"}),
         Ok(Err(_)) => return,
         Err(_) => json!({"ok": false, "error": "timeout"}),
@@ -351,15 +360,17 @@ impl TakeLimited for tokio::net::unix::OwnedReadHalf {
     }
 }
 
-/// One request → one response. Pure so it can be tested without a socket.
-pub fn respond(line: &str, identity: &HostIdentity, health: &HostHealth, stop: &Notify) -> Value {
+/// One request → one response. Testable without a socket.
+pub fn respond(line: &str, identity: &HostIdentity, shared: &SocketShared) -> Value {
     let request: Value = match serde_json::from_str(line) {
         Ok(value) => value,
         Err(_) => return json!({"ok": false, "error": "invalid_json"}),
     };
+    let lock_trust = || shared.trust.lock().unwrap_or_else(|p| p.into_inner());
     match request.get("op").and_then(Value::as_str) {
         Some("status") => {
-            let heartbeat = health.snapshot();
+            let heartbeat = shared.health.snapshot();
+            let root_key_id = lock_trust().root().map(|root| root.key_id);
             json!({
                 "ok": true,
                 "hostId": identity.host_id,
@@ -371,11 +382,40 @@ pub fn respond(line: &str, identity: &HostIdentity, health: &HostHealth, stop: &
                     "lastAttemptAtMs": heartbeat.last_attempt_ms,
                     "failing": heartbeat.failing,
                 },
+                "humanSignatures": {
+                    "required": shared.human_signatures_required,
+                    "rootKeyId": root_key_id,
+                },
             })
         }
         Some("shutdown") => {
-            stop.notify_one();
+            shared.stop.notify_one();
             json!({"ok": true})
+        }
+        Some("pin_root") => {
+            let (Some(key_id), Some(alg), Some(public_key)) = (
+                request
+                    .get("keyId")
+                    .and_then(Value::as_str)
+                    .and_then(|raw| Uuid::parse_str(raw).ok()),
+                request.get("alg").and_then(Value::as_str),
+                request.get("publicKey").and_then(Value::as_str),
+            ) else {
+                return json!({"ok": false, "error": "invalid_root_key"});
+            };
+            match lock_trust().pin_root(key_id, alg, public_key, crate::client::now_ms()) {
+                Ok(pinned) => json!({"ok": true, "pinned": pinned}),
+                Err(error) => json!({"ok": false, "error": error}),
+            }
+        }
+        Some("revoke_device") => {
+            let Some(revocation) = request.get("revocation") else {
+                return json!({"ok": false, "error": "invalid_revocation"});
+            };
+            match lock_trust().apply_revocation(revocation, true) {
+                Ok(()) => json!({"ok": true}),
+                Err(error) => json!({"ok": false, "error": error}),
+            }
         }
         _ => json!({"ok": false, "error": "unknown_op"}),
     }
@@ -537,36 +577,115 @@ mod tests {
         }
     }
 
+    fn shared(dir: &Path) -> SocketShared {
+        let identity = identity();
+        SocketShared {
+            health: Arc::new(HostHealth::default()),
+            stop: Arc::new(tokio::sync::Notify::new()),
+            trust: Arc::new(std::sync::Mutex::new(
+                crate::human_trust::HumanTrust::open(
+                    dir,
+                    crate::human_trust::TrustIdentity {
+                        workspace_id: identity.workspace_id,
+                        owner_member_id: identity.owner_member_id,
+                        host_id: identity.host_id,
+                    },
+                )
+                .unwrap(),
+            )),
+            human_signatures_required: false,
+        }
+    }
+
+    fn scratch() -> PathBuf {
+        use std::os::unix::fs::DirBuilderExt as _;
+        let dir = std::env::temp_dir().join(format!("momo-workd-sock-{}", Uuid::new_v4().simple()));
+        std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        dir
+    }
+
     #[test]
-    fn the_wire_answers_status_and_shutdown_only() {
-        let health = HostHealth::default();
-        let stop = Notify::new();
-        let status = respond(r#"{"op":"status"}"#, &identity(), &health, &stop);
+    fn the_wire_answers_its_ops_only() {
+        let dir = scratch();
+        let shared = shared(&dir);
+        let health = &shared.health;
+        let status = respond(r#"{"op":"status"}"#, &identity(), &shared);
         assert_eq!(status["ok"], true);
         assert_eq!(status["hostId"], Uuid::from_u128(1).to_string());
         assert_eq!(status["heartbeat"]["lastOkAtMs"], Value::Null);
+        assert_eq!(status["humanSignatures"]["required"], false);
+        assert_eq!(status["humanSignatures"]["rootKeyId"], Value::Null);
         health.heartbeat_accepted();
-        let status = respond(r#"{"op":"status"}"#, &identity(), &health, &stop);
+        let status = respond(r#"{"op":"status"}"#, &identity(), &shared);
         assert!(status["heartbeat"]["lastOkAtMs"].as_i64().unwrap() > 0);
         assert_eq!(status["heartbeat"]["failing"], false);
         health.heartbeat_failed();
-        let status = respond(r#"{"op":"status"}"#, &identity(), &health, &stop);
+        let status = respond(r#"{"op":"status"}"#, &identity(), &shared);
         assert_eq!(status["heartbeat"]["failing"], true);
         for other in [
             r#"{"op":"spawn"}"#,
             r#"{"op":"register"}"#,
+            r#"{"op":"reset_root"}"#,
+            r#"{"op":"pin_root"}"#,
+            r#"{"op":"revoke_device"}"#,
             "not json",
             "{}",
         ] {
-            assert_eq!(
-                respond(other, &identity(), &health, &stop)["ok"],
-                false,
-                "{other}"
-            );
+            assert_eq!(respond(other, &identity(), &shared)["ok"], false, "{other}");
         }
         assert_eq!(
-            respond(r#"{"op":"shutdown"}"#, &identity(), &health, &stop)["ok"],
+            respond(r#"{"op":"shutdown"}"#, &identity(), &shared)["ok"],
             true
         );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn the_root_is_pinned_once_and_a_second_key_is_refused() {
+        use base64::Engine as _;
+        let point = |scalar: u8| {
+            let mut secret = [0u8; 32];
+            secret[31] = scalar;
+            let key = p256::ecdsa::SigningKey::from_slice(&secret).unwrap();
+            base64::engine::general_purpose::STANDARD
+                .encode(key.verifying_key().to_sec1_point(true).as_bytes())
+        };
+        let (g, g2) = (point(1), point(2));
+        let (G, G2) = (g.as_str(), g2.as_str());
+        let dir = scratch();
+        let shared = shared(&dir);
+        let pin = |key: &str, id: u128| {
+            respond(
+                &json!({"op":"pin_root","keyId":Uuid::from_u128(id),"alg":"p256","publicKey":key})
+                    .to_string(),
+                &identity(),
+                &shared,
+            )
+        };
+        assert_eq!(pin("not a key", 9)["error"], "invalid_root_key");
+        assert_eq!(pin(G, 9), json!({"ok": true, "pinned": true}));
+        assert_eq!(
+            pin(G, 9),
+            json!({"ok": true, "pinned": false}),
+            "idempotent"
+        );
+        assert_eq!(pin(G2, 10)["error"], "root_already_pinned");
+        assert_eq!(pin(G2, 9)["error"], "root_already_pinned");
+        let status = respond(r#"{"op":"status"}"#, &identity(), &shared);
+        assert_eq!(
+            status["humanSignatures"]["rootKeyId"],
+            Uuid::from_u128(9).to_string()
+        );
+        // Persisted: a restarted host still refuses the second key.
+        let reopened = self::shared(&dir);
+        let again = respond(
+            &json!({"op":"pin_root","keyId":Uuid::from_u128(10),"alg":"p256","publicKey":G2})
+                .to_string(),
+            &identity(),
+            &reopened,
+        );
+        assert_eq!(again["error"], "root_already_pinned");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

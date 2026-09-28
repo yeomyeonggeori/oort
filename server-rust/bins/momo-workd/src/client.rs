@@ -90,6 +90,12 @@ pub struct WorkControl {
     pub kind: String,
     pub payload: Value,
     pub status: String,
+    /// ADR-0146 개정 D-10 (#3024): the person's device signature over this
+    /// control, as the server relays it (see [`crate::human_trust`] for the
+    /// shape). Kept raw so a malformed envelope refuses one control instead of
+    /// failing the whole poll; absent until the server sends it (095).
+    #[serde(default)]
+    pub human_signature: Option<Value>,
 }
 
 impl WorkControl {
@@ -102,6 +108,13 @@ impl WorkControl {
 #[serde(rename_all = "camelCase")]
 struct PendingControlsResponse {
     work_controls: Vec<WorkControl>,
+    /// ADR-0146 개정 D-7 (#3024): root-signed revocations the server relays
+    /// (`device_revoke.v1`, the [`crate::human_trust`] revocation shape). The
+    /// host verifies each against its pinned root and requires the revoked
+    /// public key with it; the server can only hide one, which is why the
+    /// desktop app also hands them over locally.
+    #[serde(default)]
+    device_revocations: Vec<Value>,
 }
 
 /// `WorkSessionDto`, the fields the host uses.
@@ -229,6 +242,11 @@ pub trait HostApi: Send + Sync + 'static {
     async fn create_session(&self, request: &CreateSession) -> Result<WorkSession, ClientError>;
     async fn record_event(&self, session_id: Uuid, event: &AcpEvent) -> Result<(), ClientError>;
     async fn set_status(&self, session_id: Uuid, status: SessionStatus) -> Result<(), ClientError>;
+    /// Revocations that came with the last `pending-controls` answer, taken
+    /// once (ADR-0146 개정 D-7). None by default.
+    fn take_device_revocations(&self) -> Vec<Value> {
+        Vec::new()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -241,6 +259,7 @@ pub struct HostClient {
     workspace_id: Uuid,
     host_id: Uuid,
     key: Arc<HostKey>,
+    revocations: std::sync::Mutex<Vec<Value>>,
 }
 
 pub fn now_ms() -> i64 {
@@ -328,6 +347,7 @@ impl HostClient {
             workspace_id,
             host_id,
             key,
+            revocations: std::sync::Mutex::new(Vec::new()),
         })
     }
 
@@ -410,7 +430,18 @@ impl HostApi for HostClient {
     async fn pending_controls(&self) -> Result<Vec<WorkControl>, ClientError> {
         let path = self.workspace_path(&format!("work-hosts/{}/pending-controls", self.host_id));
         let bytes = self.signed(Method::GET, &path, None).await?;
-        Ok(decode::<PendingControlsResponse>(&bytes)?.work_controls)
+        let response = decode::<PendingControlsResponse>(&bytes)?;
+        if !response.device_revocations.is_empty() {
+            self.revocations
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .extend(response.device_revocations);
+        }
+        Ok(response.work_controls)
+    }
+
+    fn take_device_revocations(&self) -> Vec<Value> {
+        std::mem::take(&mut *self.revocations.lock().unwrap_or_else(|p| p.into_inner()))
     }
 
     async fn ack(&self, control_id: Uuid, ack: &ControlAck) -> Result<(), ClientError> {

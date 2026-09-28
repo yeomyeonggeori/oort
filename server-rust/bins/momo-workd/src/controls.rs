@@ -32,6 +32,14 @@
 //!   (ADR-0188 D5, #3000), owner only like `input`; the session checks it
 //!   against the request's nonce and the options the agent offered.
 //! * `read` and anything else — `unsupported_control`.
+//!
+//! **Device signatures (ADR-0146 개정 D-10, #3024).** With R2 on
+//! ([`ControlLoop::with_human_trust`], config `require_human_signatures`), a
+//! spawn, an input and a non-rejecting permission must also carry the owner's
+//! device signature, which [`HumanTrust::check_control`] verifies against the
+//! root pinned on this Mac and whose nonce it spends before anything runs. A
+//! server that inserts an unsigned or forged-key control is refused here.
+//! `kill` and rejections pass unsigned (D-8). With R2 off nothing changes.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -40,6 +48,7 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use crate::client::{ClientError, ControlAck, HostApi, SessionStatus, WorkControl};
+use crate::human_trust::{requires_signature, HumanTrust};
 use crate::policy::Refusal;
 use crate::session::SessionManager;
 
@@ -58,6 +67,8 @@ pub struct ControlLoop {
     sessions: SessionManager,
     owner_member_id: Uuid,
     verdicts: HashMap<Uuid, Verdict>,
+    /// R2 on: the host's trust state. `None` keeps the pre-R2 behavior.
+    human: Option<Arc<Mutex<HumanTrust>>>,
 }
 
 impl ControlLoop {
@@ -67,7 +78,52 @@ impl ControlLoop {
             sessions,
             owner_member_id,
             verdicts: HashMap::new(),
+            human: None,
         }
+    }
+
+    /// Turn R2 on: spawns, inputs and allows must carry a device signature
+    /// that chains to the root pinned in `trust` (ADR-0146 개정 D-10).
+    pub fn with_human_trust(mut self, trust: Arc<Mutex<HumanTrust>>) -> Self {
+        self.human = Some(trust);
+        self
+    }
+
+    /// Apply the revocations the server relayed with the last poll. A bad one
+    /// is logged and dropped; the server can hide a revocation but not forge
+    /// one (the local socket carries them too, D-7).
+    fn apply_relayed_revocations(&self) {
+        // Taken even with R2 off, so nothing accumulates (#3024 review M3).
+        let relayed = self.api.take_device_revocations();
+        let Some(trust) = &self.human else {
+            return;
+        };
+        for revocation in relayed {
+            // The server must name the revoked public key too: an endorsement
+            // binds a key, a revocation names an id, and a key this host has
+            // never seen has no id binding yet (#3024 review M1).
+            let result = trust
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .apply_revocation(&revocation, true);
+            if let Err(label) = result {
+                tracing::warn!(error = label, "relayed device revocation refused");
+            }
+        }
+    }
+
+    /// R2 on the host: the owner's signature, fresh, unrevoked, once.
+    fn check_signature(&self, control: &WorkControl) -> Result<(), Refusal> {
+        let Some(trust) = &self.human else {
+            return Ok(());
+        };
+        if !requires_signature(control) {
+            return Ok(());
+        }
+        trust
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .check_control(control, now_ms())
     }
 
     pub fn sessions(&mut self) -> &mut SessionManager {
@@ -78,6 +134,8 @@ impl ControlLoop {
     /// is gone): the caller stops everything (ADR-0188 D7).
     pub async fn poll_once(&mut self) -> Result<usize, ClientError> {
         let controls = self.api.pending_controls().await?;
+        // Revocations first, so a control in the same answer meets them.
+        self.apply_relayed_revocations();
         let host_id = self.api.host_id();
         let mut handled = 0;
         let mut listed = HashSet::new();
@@ -152,9 +210,13 @@ impl ControlLoop {
                 activate: None,
             }
         };
+        let authorized = |this: &Self| {
+            this.require_owner(control)?;
+            this.check_signature(control)
+        };
         match control.kind.as_str() {
             "spawn" => {
-                let spawned = match self.require_owner(control) {
+                let spawned = match authorized(self) {
                     Ok(()) => self.sessions.spawn(control).await,
                     Err(refusal) => Err(refusal),
                 };
@@ -165,27 +227,34 @@ impl ControlLoop {
                     },
                     Err(refusal) => {
                         // #2607 N-6: only the owner's own resume is closed, and
-                        // never a session this host is running.
-                        if refusal != Refusal::RequesterNotOwner {
+                        // never a session this host is running. An unsigned or
+                        // forged spawn touches nothing either (#3024).
+                        if !refusal.is_authorization() {
                             self.end_preallocated_session(control).await;
                         }
                         refused(refusal)
                     }
                 }
             }
-            "input" => match self.input(control).await {
-                Ok(()) => Verdict {
-                    ack: ControlAck::ok(control.session_id),
-                    activate: None,
-                },
+            "input" => match authorized(self) {
                 Err(refusal) => refused(refusal),
+                Ok(()) => match self.input(control).await {
+                    Ok(()) => Verdict {
+                        ack: ControlAck::ok(control.session_id),
+                        activate: None,
+                    },
+                    Err(refusal) => refused(refusal),
+                },
             },
-            "permission" => match self.permission(control).await {
-                Ok(()) => Verdict {
-                    ack: ControlAck::ok(control.session_id),
-                    activate: None,
-                },
+            "permission" => match authorized(self) {
                 Err(refusal) => refused(refusal),
+                Ok(()) => match self.permission(control).await {
+                    Ok(()) => Verdict {
+                        ack: ControlAck::ok(control.session_id),
+                        activate: None,
+                    },
+                    Err(refusal) => refused(refusal),
+                },
             },
             "kill" => {
                 let Some(session_id) = control.session_id else {
@@ -265,6 +334,17 @@ impl ControlLoop {
         crate::policy::check_prompt(text)?;
         self.sessions.input(session_id, text.to_string()).await
     }
+}
+
+/// What the control socket shares with the running host (#2778, #3024).
+#[derive(Clone)]
+pub struct SocketShared {
+    pub health: Arc<HostHealth>,
+    pub stop: Arc<tokio::sync::Notify>,
+    /// The R2 trust state `pin_root` and `revoke_device` write.
+    pub trust: Arc<Mutex<HumanTrust>>,
+    /// Reported by `status`: whether this host enforces device signatures.
+    pub human_signatures_required: bool,
 }
 
 /// The heartbeat's last outcome, which the desktop app reads through the
