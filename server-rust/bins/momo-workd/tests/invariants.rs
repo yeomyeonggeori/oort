@@ -25,7 +25,7 @@
 //! | `inv_18_a_token_split_by_a_tool_event_is_still_masked` | `EventRelay::status` flushing only complete lines (#2607 N-4) |
 //! | `inv_19_an_open_key_header_does_not_hold_the_rest_of_the_answer` | the open-key hold bound in `session::ready_len` (#2607 N-5) |
 //! | `inv_7_a_lost_spawn_ack_response_still_starts_the_session` | the settled-verdict sweep in `ControlLoop::poll_once` |
-//! | `inv_35_r2_an_allow_over_another_preview_is_refused_and_the_agent_waits` | #3118 (R2 H1): `SessionManager::permission_preview_sha256` looked up in `ControlLoop::check_signature` and `HumanTrust::check_control_with_preview` rebuilding the allow with the host's own hash; the preview relayed with the request is the tool call the agent asked about |
+//! | `inv_37_r2_an_allow_over_another_preview_is_refused_and_the_agent_waits` | #3118 (R2 H1): `SessionManager::permission_preview_sha256` looked up in `ControlLoop::check_signature` and `HumanTrust::check_control_with_preview` rebuilding the allow with the host's own hash; the preview relayed with the request is the tool call the agent asked about |
 //! | `inv_20_the_hosts_environment_never_reaches_an_agent_or_its_commands` | `policy::AGENT_ENV_ALLOWLIST` in `policy::launch_spec` (#2630 F1); `HOME` in Codex's isolation environment (#2630 F5) |
 
 use std::collections::{BTreeMap, VecDeque};
@@ -46,6 +46,7 @@ use momo_workd::session::{
     SessionManager, SessionSettings, MODE_ESCAPED_DETAIL, PERMISSION_DENIED_DETAIL,
     PERMISSION_EXPIRED_DETAIL,
 };
+use momo_workd::signature_requirement::{RequiredBy, SignatureRequirement};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -71,6 +72,8 @@ struct FakeServer {
     refuse_event_type: Mutex<Option<String>>,
     /// Revocations the next poll relays (ADR-0146 개정 D-7).
     revocations: Mutex<Vec<Value>>,
+    /// `humanControlSignatureRequired` on every poll answer (#3117).
+    requires_signatures: Mutex<Option<bool>>,
 }
 
 impl FakeServer {
@@ -82,6 +85,7 @@ impl FakeServer {
             lose_next_ack_response: Mutex::new(false),
             refuse_event_type: Mutex::new(None),
             revocations: Mutex::new(Vec::new()),
+            requires_signatures: Mutex::new(None),
         })
     }
 
@@ -208,6 +212,10 @@ impl HostApi for FakeServer {
     fn take_device_revocations(&self) -> Vec<Value> {
         std::mem::take(&mut *self.revocations.lock().unwrap())
     }
+
+    fn server_requires_human_signatures(&self) -> Option<bool> {
+        *self.requires_signatures.lock().unwrap()
+    }
 }
 
 struct Harness {
@@ -219,6 +227,9 @@ struct Harness {
     /// The host's R2 trust state (in `dir/state`), wired into `controls`
     /// only by [`harness_r2`].
     trust: Arc<Mutex<HumanTrust>>,
+    /// Whether R2 is required: forced by [`harness_r2`], the product latch by
+    /// [`harness_latching`] (#3117), off otherwise.
+    requirement: Arc<Mutex<SignatureRequirement>>,
     channel: Uuid,
     record: PathBuf,
     dir: PathBuf,
@@ -264,7 +275,25 @@ fn harness_with(tools: &[(&str, AdapterKind, &[&str])]) -> Harness {
 }
 
 fn harness_waiting(tools: &[(&str, AdapterKind, &[&str])], permission_wait: Duration) -> Harness {
-    harness_full(tools, permission_wait, false)
+    harness_full(tools, permission_wait, R2::Off)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum R2 {
+    Off,
+    /// `require_human_signatures: true` (ADR-0146 개정 D-10).
+    Forced,
+    /// As `momo-workd run` builds it (#3117): the latch in the state folder.
+    Latching,
+}
+
+/// The product wiring (#3117): R2 starts off and the server's word latches it.
+fn harness_latching(tools: &[(&str, &[&str])]) -> Harness {
+    let tools: Vec<(&str, AdapterKind, &[&str])> = tools
+        .iter()
+        .map(|(key, extra)| (*key, AdapterKind::Claude, *extra))
+        .collect();
+    harness_full(&tools, Duration::from_secs(60), R2::Latching)
 }
 
 /// R2 on (config `require_human_signatures`, ADR-0146 개정 D-10).
@@ -273,13 +302,13 @@ fn harness_r2(tools: &[(&str, &[&str])]) -> Harness {
         .iter()
         .map(|(key, extra)| (*key, AdapterKind::Claude, *extra))
         .collect();
-    harness_full(&tools, Duration::from_secs(60), true)
+    harness_full(&tools, Duration::from_secs(60), R2::Forced)
 }
 
 fn harness_full(
     tools: &[(&str, AdapterKind, &[&str])],
     permission_wait: Duration,
-    r2: bool,
+    r2: R2,
 ) -> Harness {
     let dir = std::env::temp_dir().join(format!("momo-workd-inv-{}", Uuid::new_v4().simple()));
     std::fs::create_dir_all(dir.join("repo")).unwrap();
@@ -341,8 +370,17 @@ fn harness_full(
         .unwrap(),
     ));
     let mut controls = ControlLoop::new(server.clone(), sessions, owner);
-    if r2 {
-        controls = controls.with_human_trust(trust.clone());
+    let requirement = Arc::new(Mutex::new(match r2 {
+        R2::Latching => SignatureRequirement::open(&state_dir, false),
+        R2::Forced => SignatureRequirement::forced(),
+        R2::Off => SignatureRequirement::off(),
+    }));
+    match r2 {
+        R2::Off => {}
+        R2::Forced => controls = controls.with_human_trust(trust.clone()),
+        R2::Latching => {
+            controls = controls.with_signature_requirement(trust.clone(), requirement.clone())
+        }
     }
     Harness {
         controls,
@@ -350,6 +388,7 @@ fn harness_full(
         owner,
         workspace,
         trust,
+        requirement,
         channel: Uuid::new_v4(),
         record,
         dir,
@@ -3556,6 +3595,132 @@ async fn inv_34_r2_a_reset_then_new_id_pin_moves_the_binding_and_a_stuck_host_he
     );
 }
 
+/// #3117 (E10 검수 B1): the product wiring. R2 starts off; the server's
+/// `humanControlSignatureRequired` latches it only with a root pinned, before
+/// any control of that answer; the server's later `false` and a restart do not
+/// lower it; only the local reset does.
+#[tokio::test]
+async fn inv_35_r2_the_servers_word_latches_the_host_with_a_root_and_never_lowers_it() {
+    let mut h = harness_latching(&[("claude", &[])]);
+    let root = Device::new(1);
+    let request = spawn(&h, "claude", "start");
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+    wait_for("the first turn", || {
+        h.server
+            .statuses(session)
+            .contains(&SessionStatus::Idle { exit_code: 0 })
+    })
+    .await;
+    let unsigned = |h: &Harness, text: &str| {
+        control(h, "input", h.owner, Some(session), json!({ "text": text }))
+    };
+    let latch_file = h
+        .dir
+        .join("state")
+        .join(momo_workd::signature_requirement::REQUIRED_FILE);
+
+    // The server requires signatures, no root is pinned: the half state.
+    // Not latched (latched, every signed control would be refused too).
+    *h.server.requires_signatures.lock().unwrap() = Some(true);
+    let before_root = unsigned(&h, "before the root");
+    assert_eq!(
+        poll_and_ack(&mut h, &before_root).await,
+        ControlAck::ok(Some(session))
+    );
+    {
+        let requirement = h.requirement.lock().unwrap();
+        assert!(!requirement.required());
+        assert_eq!(requirement.server_required(), Some(true));
+    }
+    assert!(!latch_file.exists());
+
+    // The root is pinned: the next answer latches — before its own control.
+    pin(&h, &root);
+    let first_after = unsigned(&h, "in the latching answer");
+    assert_eq!(
+        poll_and_ack(&mut h, &first_after).await,
+        ControlAck::refused("device_signature_required")
+    );
+    assert_eq!(
+        h.requirement.lock().unwrap().required_by(),
+        Some(RequiredBy::Server)
+    );
+    assert!(latch_file.exists());
+    let fine = signed_input(unsigned(&h, "signed is fine"), &root, InputMode::Queue);
+    assert_eq!(
+        poll_and_ack(&mut h, &fine).await,
+        ControlAck::ok(Some(session))
+    );
+
+    // The server takes it back, and says so on every answer: still refused.
+    *h.server.requires_signatures.lock().unwrap() = Some(false);
+    let after_off = unsigned(&h, "after the server said false");
+    assert_eq!(
+        poll_and_ack(&mut h, &after_off).await,
+        ControlAck::refused("device_signature_required")
+    );
+    // A restart reads the latch back.
+    *h.requirement.lock().unwrap() = SignatureRequirement::open(&h.dir.join("state"), false);
+    let after_restart = unsigned(&h, "after a restart");
+    assert_eq!(
+        poll_and_ack(&mut h, &after_restart).await,
+        ControlAck::refused("device_signature_required")
+    );
+
+    // Only the local reset lowers it.
+    h.requirement.lock().unwrap().reset().unwrap();
+    let after_reset = unsigned(&h, "after the local reset");
+    assert_eq!(
+        poll_and_ack(&mut h, &after_reset).await,
+        ControlAck::ok(Some(session))
+    );
+    wait_for("the unsigned turn after the reset", || {
+        prompts(&h)
+            .iter()
+            .any(|prompt| prompt.contains("after the local reset"))
+    })
+    .await;
+    for refused in [
+        "in the latching answer",
+        "after the server said false",
+        "after a restart",
+    ] {
+        assert!(
+            !prompts(&h).iter().any(|prompt| prompt.contains(refused)),
+            "{refused} never reached the agent"
+        );
+    }
+}
+
+/// #3117 security review Low-1: with the product wiring the trust state is
+/// always there, so "R2 on" must be the requirement. A host that has not
+/// latched R2 takes an unverified envelope's `interrupt` as a queued turn.
+#[tokio::test]
+async fn inv_36_r2_not_latched_an_unverified_interrupt_is_a_queued_turn() {
+    let mut h = harness_latching(&[("claude", &["--hang-first"])]);
+    let request = spawn(&h, "claude", "first turn hangs");
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+    wait_for("the first prompt", || prompts(&h).len() == 1).await;
+    let mut input = control(
+        &h,
+        "input",
+        h.owner,
+        Some(session),
+        json!({ "text": "an envelope nobody verified" }),
+    );
+    input.human_signature = Some(json!({ "mode": "interrupt" }));
+    assert_eq!(
+        poll_and_ack(&mut h, &input).await,
+        ControlAck::ok(Some(session))
+    );
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(
+        !received_methods(&h).contains(&"session/cancel".to_string()),
+        "an unverified mode never cancels the running turn"
+    );
+    assert_eq!(prompts(&h).len(), 1, "it waits behind the turn");
+}
+
 /// #3118 (ADR-0146 증보, R2 H1): the host verifies an allow against the
 /// preview **it** relayed. A server that showed the owner another preview
 /// (「파일을 읽어도 될까요? README.md」 over `cat ~/.ssh/id_ed25519`) gets an
@@ -3563,7 +3728,7 @@ async fn inv_34_r2_a_reset_then_new_id_pin_moves_the_binding_and_a_stuck_host_he
 /// allow that names no preview. The agent keeps waiting, and the allow over
 /// what the host relayed is the one it gets.
 #[tokio::test]
-async fn inv_35_r2_an_allow_over_another_preview_is_refused_and_the_agent_waits() {
+async fn inv_37_r2_an_allow_over_another_preview_is_refused_and_the_agent_waits() {
     use momo_wire::permission_preview::{preview_sha256, PermissionPreview};
     let mut h = harness_r2(&[("claude", &["--permission"])]);
     let root = Device::new(1);

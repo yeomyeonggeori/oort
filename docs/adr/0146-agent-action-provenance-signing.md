@@ -5,8 +5,9 @@
 - 개정: **2026-09-28 Accepted** — 사람 기기 키 서명(R2). 결재 인용: 성재 2026-09-28 「전부 권장대로」(R2 기기 키 서명 결재 Q1~Q11·Q5-b 권장안 전부, 결재 페이지 https://claude.ai/artifact/392wQKGL3SzwfM2zNjhSpZ). 기안 Opus 5.5 worker(#3020). 근거 브리프 `claudedocs/r2-device-signing/brief.md`는 gitignore 대상이라 로컬에만 있다. 아래 「개정 2026-09-28」 절이 필요한 사실과 근거(file:line)를 그대로 옮겨 담는다. 2026-07-31 본문은 역사 기록으로 두고, 미해결 절만 고쳤다.
 - 증보: **2026-09-28 (#3027 R2-E7)** — `momo.human.control.v2`(spawn이 도구·채널·재개 세션을 결속)와 서명 지시 라우트·서명 재개의 구현 계약, `momo.human.device_revoke.v2`(뿌리가 폐기 대상 공개키에 서명)와 workd 폐기서 보관(#3068). 개정 절 D-5·D-5b·D-8·D-11 범위 안의 구현 확정이며 결정은 바꾸지 않았다. 아래 「증보 2026-09-28 — R2-E7」 절.
 - 증보: **2026-09-28 (#3097)** — refresh 재사용 계보 폐기에서 기기 키 제외, 계보만 끝난 키의 자기 서명 재결속(`momo.human.device_rebind.v1`). D-7 결정 변경이며 결재 인용은 D-7 「증보 #3097」 절에 있다.
-- 증보: **2026-09-29 (#3118, R2 H1)** — 허락 서명이 사람이 본 미리보기를 묶는다. host가 권한 요청의 미리보기와 그 해시를 싣고, `momo.human.control.v3`의 permission 본문이 그 해시를 한 줄 더 서명하며, host는 자기 해시와 대조한다(migration 097, 소유자 전용 미리보기 조회). 결재 인용: R2 결재 성재 2026-09-28 「전부 권장대로」의 D-5 이행 + E10 검수(#3030) H1. 아래 「증보 2026-09-29 — 허락이 미리보기를 묶는다」 절.
 - 증보: **2026-09-29 (#3079)** — refresh 토큰 sender-constraint. 계보에 결속한 별도 SE **refresh 키**의 증명(`momo.human.refresh_proof.v1`)으로 응답 유실을 복구하고 증명 없는 재사용만 계보를 끝낸다(migration 096). 결재 인용은 D-7 「증보 #3079」 절에 있다.
+- 증보: **2026-09-29 (#3117)** — workd 서명 요구를 켜는 제품 경로(D-10 이행, E10 검수 B1). 서버 신호로 켜지고 서버가 끌 수 없는 래칫. 결재 인용: R2 결재 「전부 권장대로」(2026-09-28)의 D-10 「보안 경계는 workd」 이행. 결정은 바꾸지 않았다. 아래 「증보 2026-09-29 — workd 서명 요구 래칫」 절.
+- 증보: **2026-09-29 (#3118, R2 H1)** — 허락 서명이 사람이 본 미리보기를 묶는다. host가 권한 요청의 미리보기와 그 해시를 싣고, `momo.human.control.v3`의 permission 본문이 그 해시를 한 줄 더 서명하며, host는 자기 해시와 대조한다(migration 097, 소유자 전용 미리보기 조회). 결재 인용: R2 결재 성재 2026-09-28 「전부 권장대로」의 D-5 이행 + E10 검수(#3030) H1. 아래 「증보 2026-09-29 — 허락이 미리보기를 묶는다」 절.
 - 관련: **ADR-0145**(Rust/Axum 재작성 — 이 서명은 그 위에 얹힌다), ADR-0004(자격증명 비유입), ADR-0101(에이전트 신원), ADR-0139/0140(workd — 이미 Ed25519 서명 보유), `docs/architecture/invariants-in-rust.md`(D2 — 이 서명이 불변식을 안 건드림을 교차검증)
 - 발단: 서버 스택 재검토에서 "oort가 buzz에서 취할 만한 한 가지 = 에이전트 행동의 암호학적 provenance"로 식별 → 성재가 B안에 포함 지시 + **범위를 "상태 전이까지 넓게"로 결정**.
 
@@ -446,6 +447,35 @@ momo.human.control.v1
 - 재개 봉투의 `agentMemberId`·`folderId`는 서명에 들어가지만 서버가 원본 세션과 대조하지는 않는다. host가 폴더 id를 실행에 쓰기 시작할 때 함께 묶는다.
 - 서명 재개의 후속 세션 id가 다른 워크스페이스의 세션 id와 겹치면(전역 PK) 이름 없는 500이 난다. 무작위 UUID라 우연히는 일어나지 않고, 알려진 id를 일부러 넣어도 권한 이득은 없다(보안 검수 Low).
 - 서버에서 새 작업 spawn을 서명과 함께 만드는 경로는 아직 없다. 재개만 서명된 spawn을 만든다. 폰의 새 작업(0188 D4 DM → spawn)은 E8 이후다.
+
+## 증보 2026-09-29 — workd 서명 요구 래칫 (#3117)
+
+E10 검수(B1)는 D-10의 보안 경계인 workd 검증을 켜는 길이 제품에 없다고 판정했다. workd의 `require_human_signatures`는 기본 꺼짐이고 데스크탑 설정 작성이 이 키를 쓰지 않는다. 서버 플래그를 모두 켜도 서버·DB 관리자가 서명 없는 행을 넣거나 봉투를 떼면 소유자 맥에서 실행된다. 이 증보는 D-10을 이행하는 구현 계약이며 결정은 바꾸지 않는다. 결재 인용: R2 결재 「전부 권장대로」(성재 2026-09-28)의 D-10.
+
+- **켜는 원천은 둘이다.**
+  - 소유자 설정 `require_human_signatures: true`: 파일이 그렇게 말하는 동안 켜져 있다(종전 그대로).
+  - **서버 신호의 래칫.** `GET …/work-hosts/{host}/pending-controls` 응답에 `humanControlSignatureRequired`(= `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`, `signing-context`와 같은 값)를 싣는다. workd는 이 값이 `true`이고 **이 맥에 뿌리가 고정돼 있을 때** host 상태 폴더의 `human-required.json`(0600)에 기록한다. 기록은 같은 응답의 컨트롤을 적용하기 **전에** 끝난다. 그 뒤로는 서버가 무엇을 보내든 서명을 요구한다.
+- **서버는 켜기만 한다(D-6).** 서버의 `false`는 보고에만 쓰이고 래칫을 내리지 않는다. 켜는 쪽은 서버가 이미 할 수 있는 일(컨트롤을 보내지 않기)보다 더 주지 않는다. 뿌리 고정과 신뢰는 종전처럼 로컬 소켓만 바꾼다.
+- **뿌리가 없으면 켜지 않는다.** 뿌리 없이 켜면 서명된 지시까지 모두 `device_root_not_pinned`로 거부해 작업이 멈춘다(E10 M4의 역순서 위험). 이때 workd는 서버 신호를 메모리에만 두고 보고한다. 데스크탑 앱이 `pin_root`를 하면 다음 poll에서 래칫이 걸린다. 그래서 E10 「켜는 순서」 6은 서버 `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED=true` 하나로 끝난다. 뿌리가 고정된 host는 다음 poll(기본 2초)에 따라 켜진다.
+- **반쯤 상태를 정직하게 보인다.** 제어 소켓 `status.humanSignatures`에 `required`(유효값), `requiredBy`(`config` · `server` · `unreadable`), `latchedSinceMs`, `serverRequired`(서버의 마지막 말)를 싣는다. 데스크탑 `device_key_status`의 `host.signatureEnforcement`가 `enforced` · `server_only` · `off`로 옮긴다. `server_only`는 「서버는 요구하는데 이 맥은 아직 강제하지 않음(뿌리 없음)」이다. 이 값을 그리는 화면은 UXUI 후속이다.
+- **끄기는 로컬에서만.** 코드서명 확인 제어 소켓의 새 op `reset_signature_requirement`가 래칫 파일을 지운다. 설정의 `true`는 지우지 않는다. `forget`·`register`(새 등록 = 새 host)도 지운다. `reset-root`는 지우지 않는다. 래칫이 걸린 채 뿌리를 재설정하면 다시 고정할 때까지 거부하는데, 이것이 의도한 순서다. 이 op를 부르는 데스크탑 명령은 이번에 만들지 않았다. 웹뷰에서 부를 수 있는 명령으로 열려면 서명 명령처럼 네이티브 확인 창(`confirm.rs`) 뒤에 둔다(후속).
+- **읽을 수 없으면 켜진 것으로 본다.** 래칫 파일이 있는데 읽거나 해석할 수 없으면 켜진 것으로 본다. 이때 신뢰 상태도 읽을 수 없으면 시동을 거부한다. 설정 `true`와 같은 규칙이다. 래칫 파일을 쓰지 못해도 메모리에서는 켜고, 다음 poll에서 다시 쓴다. 쓰기 전까지 `status.humanSignatures.latchSaved`가 `false`다.
+- **「R2 켜짐」은 요구 상태다.** 서명 입력의 `mode`(interrupt)도 요구가 켜져 검증을 거친 봉투에서만 읽는다. 신뢰 상태가 늘 붙는다고 해서 검증 안 된 봉투를 믿지 않는다(보안 검수 Low-1).
+- **남는 위험: 래칫 전의 서버.** 켜는 계기가 서버의 첫 `true`다. 래칫이 걸리기 전에 이미 탈취된 서버, 또는 `forget`·`register` 뒤 새 host의 서버가 계속 `false`를 보내면 host는 켜지지 않는다. 걸린 래칫을 서버가 내릴 수는 없다. 소유자가 서버와 무관하게 켜는 길은 설정 `true`다. 데스크탑이 `pin_root` 때 소유자 의사로 래칫을 거는 안은 서버 플래그가 꺼진 동안 서명 없는 클라이언트의 허락·재개를 모두 막는다(E10 M4). 그래서 이번에는 택하지 않았고 후속 검토로 둔다.
+- **옛 버전.** 이 필드를 모르는 workd는 무시하고 종전처럼 동작한다. 이 필드를 보내지 않는 서버는 `false`와 같다. 플래그가 꺼져 있으면 응답 바이트가 종전과 같다(필드 생략).
+
+### 새 공개 API 선언 (ADR-0100)
+
+| 표면 | 변경 | 이슈 |
+|---|---|---|
+| `GET /v1/workspaces/{ws}/work-hosts/{host}/pending-controls` | 응답에 `humanControlSignatureRequired: true`를 더한다. `false`이면 생략한다 | #3117 |
+| workd 제어 소켓 | `status.humanSignatures`에 `requiredBy`·`latchedSinceMs`·`serverRequired`를 더한다. op `reset_signature_requirement`를 더한다 | #3117 |
+| workd 상태 폴더 | `human-required.json`(래칫, 0600) | #3117 |
+
+### 시험
+
+- `momo-workd` `workd_conformance_pg::wdc_8_r2_the_product_path_latches_the_host_and_the_server_cannot_undo_it`: 실제 바이너리와 실제 서버 라우터를 쓴다. 설정은 데스크탑 `build_config`가 쓰는 모양이고 `require_human_signatures`가 없다. 소켓 `pin_root` 뒤 래칫이 걸린다. 그 뒤 서명 없는 삽입 행과 봉투를 뗀 서명 지시가 거부된다. 서버를 플래그 꺼짐으로 재시작해도, host를 재시작해도 거부된다. 로컬 op로만 풀린다.
+- `invariants::inv_35_r2_the_servers_word_latches_the_host_with_a_root_and_never_lowers_it`: 같은 규칙을 DB 없이 확인한다. 래칫이 같은 응답의 컨트롤보다 먼저 걸리는지도 본다.
 
 ## 증보 2026-09-29 — 허락이 미리보기를 묶는다: `momo.human.control.v3` (#3118, R2 H1)
 

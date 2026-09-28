@@ -4522,6 +4522,13 @@ pub struct PendingWorkControlsResponse {
     /// today's bytes.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub device_revocations: Vec<DeviceRevocationDto>,
+    /// `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED` (#3117, ADR-0146 증보
+    /// 2026-09-29): the same word `signing-context` gives a device. workd
+    /// latches it on (with its root pinned) and never lowers it on a later
+    /// `false`. Omitted when `false`, so a host gets today's bytes until the
+    /// flag is switched on.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub human_control_signature_required: bool,
 }
 
 /// One relayed revocation letter (`pendingControls.deviceRevocations[]`).

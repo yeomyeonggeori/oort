@@ -203,8 +203,8 @@ COPY packages/momo-core /src/packages/momo-core
 COPY server/Fixtures /src/server/Fixtures
 # Same reason, for the API contract goldens that web tests import by
 # repo-relative path (`../../../../../docs/api/*.golden.json`, #3006 GC-8 and
-# #3035 permission decision). Only the goldens, not the rest of docs/ (#3037).
-COPY docs/api/*.golden.json /src/docs/api/
+# #3035 permission decision). Only the JSON contract files (goldens and signing vectors, #3123), not the rest of docs/ (#3037).
+COPY docs/api/*.json /src/docs/api/
 COPY clients/web/ ./
 
 ARG MOMO_BUILD_SHA=unknown
