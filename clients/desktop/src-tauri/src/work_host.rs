@@ -1,8 +1,11 @@
 // This Mac as a work host (ADR-0188 D2 · R1, #2778).
 //
-// The app carries `momo-workd` as a sidecar (`tauri.conf.json > bundle >
-// externalBin`, next to the app's own executable in `Contents/MacOS`) and
-// starts it as its child. Five commands, all for the main webview's bundled
+// The app carries `momo-workd` in a helper bundle,
+// `Contents/Helpers/momo-workd.app` (`tauri.conf.json > bundle > macOS >
+// files`, #3084), and starts its executable as its child. The helper has its
+// own App ID and provisioning profile so a signed workd can hold the
+// keychain-access-groups entitlement its data-protection host key needs,
+// apart from this app's device-key group (ADR-0146 D-3). Five commands, all for the main webview's bundled
 // origin only (`capabilities/work-host.json`):
 //
 //   work_host_status    what this Mac is: sidecar present, registered as which
@@ -41,9 +44,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::Manager;
 
-/// The sidecar's file name inside `Contents/MacOS` (the bundler strips the
-/// `-<target triple>` suffix of `binaries/momo-workd-<triple>`).
+/// The sidecar's executable name (`CFBundleExecutable` of the helper bundle).
 pub const SIDECAR_NAME: &str = "momo-workd";
+
+/// The helper bundle, relative to the app's `Contents` folder
+/// (`scripts/desktop/build_workd_sidecar.sh` builds it).
+pub const HELPER_BUNDLE: &str = "Helpers/momo-workd.app";
 
 /// The ACP adapters workd can drive, by the executable name each installs.
 /// Resolved on this Mac's PATH; only the absolute path goes into the config.
@@ -238,11 +244,32 @@ pub fn is_mach_o(path: &Path) -> bool {
     )
 }
 
-/// `momo-workd` next to this app's own executable.
+/// `momo-workd` inside this app's helper bundle. A debug build that runs
+/// outside a bundle (`cargo tauri dev`) may name a built binary with
+/// `MOMO_WORKD_BIN`; a release build never reads that variable.
 pub fn sidecar_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let path = exe.parent()?.join(SIDECAR_NAME);
-    is_mach_o(&path).then_some(path)
+    let path = helper_executable(&exe)?;
+    if is_mach_o(&path) {
+        return Some(path);
+    }
+    if cfg!(debug_assertions) {
+        let dev = PathBuf::from(std::env::var_os("MOMO_WORKD_BIN")?);
+        return (dev.is_absolute() && is_mach_o(&dev)).then_some(dev);
+    }
+    None
+}
+
+/// `<app>/Contents/Helpers/momo-workd.app/Contents/MacOS/momo-workd` for the
+/// app executable `<app>/Contents/MacOS/<exe>`.
+pub fn helper_executable(exe: &Path) -> Option<PathBuf> {
+    let contents = exe.parent()?.parent()?;
+    Some(
+        contents
+            .join(HELPER_BUNDLE)
+            .join("Contents/MacOS")
+            .join(SIDECAR_NAME),
+    )
 }
 
 pub fn find_adapters(search_path: &std::ffi::OsString) -> Vec<AdapterFound> {

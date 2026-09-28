@@ -18,7 +18,6 @@ fn main() {
     // remote URLs). `shell_contract.rs` checks this list against `lib.rs`'s
     // handler table, so a new command that is not listed here fails a test
     // instead of failing at runtime.
-    ensure_workd_sidecar();
     tauri_build::try_build(
         tauri_build::Attributes::new()
             .app_manifest(tauri_build::AppManifest::new().commands(APP_COMMANDS)),
@@ -82,41 +81,7 @@ const APP_COMMANDS: &[&str] = &[
     "device_key_deliver_revocation",
 ];
 
-/// `tauri.conf.json > bundle > externalBin` names `binaries/momo-workd`, and
-/// tauri-build copies `binaries/momo-workd-<target triple>` next to the app's
-/// executable on EVERY build — `cargo test` and `clippy` included — failing if
-/// it is missing. The real binary is built by
-/// `scripts/desktop/build_workd_sidecar.sh`, which `cargo tauri build` runs
-/// first (`beforeBuildCommand`). For every other build a placeholder stands
-/// in: a script that exits 78 and says how to build the sidecar. The app
-/// reads only a Mach-O as the sidecar (`work_host::is_mach_o`), so a
-/// placeholder shows as 「이 빌드에는 작업 호스트가 없습니다」, and
-/// `build_workd_sidecar.sh --verify-bundle` fails a bundle that carries one.
-fn ensure_workd_sidecar() {
-    let target = std::env::var("TARGET").expect("cargo sets TARGET");
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries");
-    let path = dir.join(format!("momo-workd-{target}"));
-    println!("cargo:rerun-if-changed={}", path.display());
-    if path.exists() {
-        return;
-    }
-    std::fs::create_dir_all(&dir).expect("create binaries/");
-    std::fs::write(
-        &path,
-        "#!/bin/sh\n# momo-workd placeholder (build.rs). Build the real sidecar:\n\
-         #   scripts/desktop/build_workd_sidecar.sh\n\
-         echo 'momo-workd sidecar not built: scripts/desktop/build_workd_sidecar.sh' >&2\n\
-         exit 78\n",
-    )
-    .expect("write the momo-workd placeholder");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-            .expect("chmod the momo-workd placeholder");
-    }
-    println!(
-        "cargo:warning=momo-workd sidecar placeholder written at {} (run scripts/desktop/build_workd_sidecar.sh for the real one)",
-        path.display()
-    );
-}
+// The momo-workd helper bundle (`binaries/momo-workd.app`, #3084) is read only
+// by the bundler (`bundle.macOS.files`), never by tauri-build, so `cargo test`
+// and `clippy` need no placeholder. `scripts/desktop/build_workd_sidecar.sh`
+// builds it first on `cargo tauri build` (beforeBuildCommand).

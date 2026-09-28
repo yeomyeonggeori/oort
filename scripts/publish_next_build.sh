@@ -38,6 +38,14 @@
 #             Entitlements.app.plist 로 다시 서명한다(--deep 아님: 사이드카는 그대로).
 #             빌드 전과 서명 뒤에 scripts/desktop/check_provisioning_profile.sh 가
 #             UUID·팀·application-identifier·키체인 그룹·인증서·만료(30일 전 경고)를 잰다.
+#   workd 프로파일  ~/.momo-secrets/momo-desktop-workd-developer-id.provisionprofile
+#             (레포 밖, MOMO_WORKD_PROVISIONING_PROFILE 로 덮어씀, #3084). workd 는
+#             호스트 키를 data-protection 키체인에 두므로 자기 App ID
+#             (YWQQFQM38J.app.momo.desktop.workd)의 키체인 그룹이 필요하다. 프로파일은
+#             번들만 품을 수 있어서 workd 는 Contents/Helpers/momo-workd.app 헬퍼
+#             번들로 들어간다. 안쪽부터 서명한다: 헬퍼(프로파일 + Entitlements.workd.plist)
+#             → 바깥 .app(프로파일 + Entitlements.app.plist). 앱은 workd 그룹을,
+#             헬퍼는 기기 키 그룹을 갖지 않는다(ADR-0146 D-3).
 #   Developer ID  codesign(hardened runtime) → notarytool → stapler. 업데이터가 받는
 #             tar.gz 안의 .app 은 다운로드 페이지가 주는 .app 과 동일한 스테이플된
 #             번들이다. 자동 업데이트 후 Gatekeeper 판정이 수동 설치와 같아야 한다.
@@ -131,11 +139,16 @@ UPDATER_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
 PROVISIONING_PROFILE="${MOMO_PROVISIONING_PROFILE:-$HOME/.momo-secrets/momo-desktop-developer-id.provisionprofile}"
 APP_ENTITLEMENTS="clients/desktop/src-tauri/Entitlements.app.plist"
 PROFILE_CHECK="scripts/desktop/check_provisioning_profile.sh"
+WORKD_PROVISIONING_PROFILE="${MOMO_WORKD_PROVISIONING_PROFILE:-$HOME/.momo-secrets/momo-desktop-workd-developer-id.provisionprofile}"
+WORKD_ENTITLEMENTS="clients/desktop/src-tauri/Entitlements.workd.plist"
 
 # 20분짜리 빌드 전에 멈춘다. 프로파일 없이 Entitlements.app.plist 로 서명하면
 # 빌드는 성공하고 앱은 실행되지 않는다.
 "$PROFILE_CHECK" --profile "$PROVISIONING_PROFILE" --identity "$SIGN_IDENTITY" || {
   echo "[next-publish] provisioning profile check failed: $PROVISIONING_PROFILE (docs/NEXT_CHANNEL.md §8)" >&2
+  exit 2; }
+"$PROFILE_CHECK" --target workd --profile "$WORKD_PROVISIONING_PROFILE" --identity "$SIGN_IDENTITY" || {
+  echo "[next-publish] workd provisioning profile check failed: $WORKD_PROVISIONING_PROFILE (docs/NEXT_CHANNEL.md §8)" >&2
   exit 2; }
 
 if [ "$PUBLIC" != "1" ]; then
@@ -200,10 +213,23 @@ fi
   exit 1
 }
 
-echo "[next-publish] 2/6 embed provisioning profile, re-sign .app, verify signature (.app + .dmg)"
-# 번들러는 사이드카와 앱을 Entitlements.plist(제한 entitlement 없음)로 서명했다.
-# 프로파일을 넣고 바깥 .app 만 다시 서명한다. 프로파일은 0600 으로 보관되므로
-# 0644 로 복사한다(다른 사용자 계정의 설치본도 읽는다). 격리 속성은 지운다.
+echo "[next-publish] 2/6 embed provisioning profiles, sign helper then .app, verify signature (.app + .dmg)"
+# 번들러는 앱을 Entitlements.plist(제한 entitlement 없음)로 서명했고, workd 헬퍼는
+# build_workd_sidecar.sh 가 ad-hoc 으로 봉인한 그대로다. 안쪽부터 서명한다:
+# 헬퍼에 workd 프로파일을 넣고 Entitlements.workd.plist 로 서명한 뒤, 앱에
+# 프로파일을 넣고 바깥 .app 만 다시 서명한다(--deep 아님: 헬퍼 서명을 덮지 않는다).
+# 프로파일은 0600 으로 보관되므로 0644 로 복사한다(다른 사용자 계정의 설치본도
+# 읽는다). 격리 속성은 지운다.
+HELPER_PATH="$APP_PATH/Contents/Helpers/momo-workd.app"
+[ -d "$HELPER_PATH" ] || { echo "[next-publish] workd helper not found at $HELPER_PATH" >&2; exit 1; }
+install -m 0644 "$WORKD_PROVISIONING_PROFILE" "$HELPER_PATH/Contents/embedded.provisionprofile"
+xattr -c "$HELPER_PATH/Contents/embedded.provisionprofile"
+codesign --force --options runtime --timestamp \
+  --entitlements "$WORKD_ENTITLEMENTS" --sign "$SIGN_IDENTITY" "$HELPER_PATH" \
+  >>"$WORK/codesign.log" 2>&1 || {
+    tail -20 "$WORK/codesign.log" >&2
+    echo "[next-publish] signing the workd helper with $WORKD_ENTITLEMENTS failed" >&2
+    exit 1; }
 install -m 0644 "$PROVISIONING_PROFILE" "$APP_PATH/Contents/embedded.provisionprofile"
 xattr -c "$APP_PATH/Contents/embedded.provisionprofile"
 codesign --force --options runtime --timestamp \
@@ -212,8 +238,12 @@ codesign --force --options runtime --timestamp \
     tail -20 "$WORK/codesign.log" >&2
     echo "[next-publish] re-signing the app with $APP_ENTITLEMENTS failed" >&2
     exit 1; }
-"$PROFILE_CHECK" --verify-app "$APP_PATH" --profile "$PROVISIONING_PROFILE" || {
+"$PROFILE_CHECK" --verify-app "$APP_PATH" --profile "$PROVISIONING_PROFILE" \
+  --workd-profile "$WORKD_PROVISIONING_PROFILE" || {
   echo "[next-publish] signed app failed the provisioning profile check" >&2
+  exit 1; }
+scripts/desktop/build_workd_sidecar.sh --verify-bundle "$APP_PATH" --require-signed || {
+  echo "[next-publish] signed app failed the workd helper check" >&2
   exit 1; }
 # 번들러 dmg 에는 다시 서명하기 전 .app 이 들어 있다. 같은 경로에 새로 만든다
 # (아래에서 Developer ID 로 서명·검증한다).

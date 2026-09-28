@@ -410,15 +410,29 @@ Web half: `openExternalUrl()` in `clients/web/src/lib/tauri.ts`, called from
 `ArtifactCard`'s link row, which falls back to the plain anchor in a browser and
 shows an inline failure with the address when the shell could not open it.
 
-## Work host sidecar (#2778)
+## Work host sidecar (#2778, helper bundle #3084)
 
-`tauri.conf.json > bundle > externalBin = ["binaries/momo-workd"]`. `cargo tauri
-build` runs `scripts/desktop/build_workd_sidecar.sh` first (`beforeBuildCommand`),
-which builds `momo-workd` from `server-rust` for the Tauri target triple (debug
-profile when Tauri builds debug) into `src-tauri/binaries/momo-workd-<triple>`;
-the bundler places it at `Contents/MacOS/momo-workd`. Every other build
-(`cargo test`, `clippy`) gets a placeholder from `build.rs` (a script that exits
-78), which the app never treats as a sidecar (Mach-O only).
+workd ships as a helper bundle, `oort.app/Contents/Helpers/momo-workd.app`
+(`CFBundleIdentifier` `app.momo.desktop.workd`, `LSUIElement`), through
+`tauri.conf.json > bundle > macOS > files`. `cargo tauri build` runs
+`scripts/desktop/build_workd_sidecar.sh` first (`beforeBuildCommand`), which
+builds `momo-workd` from `server-rust` for the Tauri target triple (debug
+profile when Tauri builds debug), wraps it in `src-tauri/binaries/momo-workd.app`
+and seals that bundle ad-hoc (the bundler does not sign `files`, and an outer
+app signed over an unsealed nested bundle fails `codesign --verify --deep`).
+`cargo test`/`clippy` need nothing. `cargo tauri dev` runs outside a bundle: a
+debug build then takes a built binary from `MOMO_WORKD_BIN` (release builds
+never read it).
+
+Why a bundle: workd keeps the host key in the data-protection keychain
+(ADR-0188 D2), which needs `keychain-access-groups`, a restricted entitlement
+that needs a provisioning profile, which only a bundle can carry. The helper
+has its own App ID `YWQQFQM38J.app.momo.desktop.workd` and Developer ID
+profile, and `Entitlements.workd.plist` declares only
+`YWQQFQM38J.app.momo.desktop.workd`. The app declares only the device-key
+group (`Entitlements.app.plist`). Both profiles allow `YWQQFQM38J.*`, so that
+split (ADR-0146 D-3) is held by `check_provisioning_profile.sh` and the
+desktop Rust tests, not by Apple.
 
 App ↔ workd is a user-only Unix socket, nothing else (no TCP; `momo-workd`
 `tests/control_socket.rs` `cs_6` measures it with `lsof`). workd checks every
@@ -427,26 +441,23 @@ identifier "app.momo.desktop" and certificate leaf[subject.OU] = "<workd's own
 team>"`. An unsigned workd answers nobody unless started with
 `--dev-unsigned-peer`, which a team-signed workd refuses.
 
-Signing and notarization (owner approval per build, M7). The bundler signs the
-sidecar with the app identity; notarization covers the whole app. Checks, read
-only:
+Signing and notarization (owner approval per build, M7): `publish_next_build.sh`
+signs inside out — the helper with the workd profile embedded and
+`Entitlements.workd.plist`, then the outer app with its profile and
+`Entitlements.app.plist` (no `--deep`) — and checks both with
+`check_provisioning_profile.sh --verify-app … --workd-profile …` and
+`build_workd_sidecar.sh --verify-bundle … --require-signed`. Notarization covers
+the whole app. Checks, read only:
 
 ```sh
 scripts/desktop/build_workd_sidecar.sh --verify-bundle <oort.app> [--require-signed]
 scripts/desktop/build_workd_sidecar.sh --dry-run-sign <oort.app>   # prints the plan, runs nothing
 ```
 
-**runtime-unverified** until an owner-approved signed build: the sidecar's
-`keychain-access-groups` entitlement for the ThisDeviceOnly host key (the
-data-protection keychain refuses a binary without it), and workd accepting the
-signed app on the control socket.
-
-Open (#3025): the signed path gives the sidecar **no** restricted entitlement.
-A bare Mach-O in `Contents/MacOS` cannot carry a provisioning profile, so
-granting workd `application-identifier`/`keychain-access-groups` needs its own
-App ID and Developer ID profile and workd wrapped in a helper bundle (or a
-different host-key store). Until then a signed workd's data-protection keychain
-answers `errSecMissingEntitlement` (-34018); only debug builds (`--dev-key-file`) keep a host key.
+**runtime-unverified** until an owner-approved signed build: AMFI accepting the
+helper's embedded profile (workd launches), the helper creating and reading the
+ThisDeviceOnly host key without `errSecMissingEntitlement` (-34018), and workd
+accepting the signed app on the control socket.
 
 ## Device key, the R2 root (#3025)
 
