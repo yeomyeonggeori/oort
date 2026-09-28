@@ -276,3 +276,5 @@ momo.human.control.v1
 - Matrix MSC1756 cross-signing: https://github.com/matrix-org/matrix-doc/blob/master/proposals/1756-cross-signing.md
 - Signal, Linked Devices: https://support.signal.org/hc/en-us/articles/360007320551-Linked-Devices
 - OpenSSH, PROTOCOL.sshsig: https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.sshsig
+
+역방향(2026-09-28): D-4의 「로그인용 패스키는 #3031에서 따로 검토」는 ADR-0195(패스키 로그인, Accepted)로 결정됐다. 로그인 패스키는 동기화되는 로그인 수단이고 이 개정의 기기 키와 분리한다(ADR-0195 D-11). 공유하는 것은 `p256` 검증 의존뿐이다.
