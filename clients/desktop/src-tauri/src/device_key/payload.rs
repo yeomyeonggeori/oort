@@ -13,7 +13,9 @@
 //!
 //! The Mac is the **root** (D-6), so unlike the phone (#3026, control only) it
 //! may sign all three kinds of statement: `momo.human.control.v2`,
-//! `momo.human.device_endorse.v1` and `momo.human.device_revoke.v2`. Nothing
+//! `momo.human.device_endorse.v1` and `momo.human.device_revoke.v2` — and,
+//! like the phone, its own key's move onto a new sign-in,
+//! `momo.human.device_rebind.v1` (#3103, ADR-0146 D-7 증보 #3097). Nothing
 //! else — there is no "sign these bytes" entry point anywhere in this crate.
 //!
 //! #3028 (R2-E8, ADR-0146 증보 R2-E7): control moved to **v2** for every kind
@@ -44,15 +46,20 @@ pub const DEVICE_ENDORSE_SCHEMA_V1: &str = "momo.human.device_endorse.v1";
 #[cfg_attr(not(test), allow(dead_code))]
 pub const DEVICE_REVOKE_SCHEMA_V1: &str = "momo.human.device_revoke.v1";
 pub const DEVICE_REVOKE_SCHEMA_V2: &str = "momo.human.device_revoke.v2";
+/// #3097 (momo-wire `DEVICE_REBIND_SCHEMA_V1`): a live key moves itself onto
+/// the caller's new sign-in.
+pub const DEVICE_REBIND_SCHEMA_V1: &str = "momo.human.device_rebind.v1";
 
 /// The schemas this key signs, with each payload's exact line count. The Mac
-/// is the root, so all three kinds (the phone signs only control, #3026).
+/// is the root, so all three kinds (the phone signs only control, #3026), plus
+/// its own rebind letter (#3103).
 /// v1 control and v1 revocations are NOT here (#3028): the server and workd
 /// refuse a v1 spawn, and a v1 revocation leaves the revoked key unsigned.
-pub const SIGNING_SCHEMAS: [(&str, usize); 3] = [
+pub const SIGNING_SCHEMAS: [(&str, usize); 4] = [
     (HUMAN_CONTROL_SCHEMA_V2, 13),
     (DEVICE_ENDORSE_SCHEMA_V1, 7),
     (DEVICE_REVOKE_SCHEMA_V2, 7),
+    (DEVICE_REBIND_SCHEMA_V1, 7),
 ];
 
 /// Which control recipe. Production signs v2 only; v1 is kept for the E1
@@ -327,6 +334,22 @@ pub struct RevokeRequest {
     pub target_label: String,
 }
 
+/// `device_key_sign_rebind` (#3103): move this Mac's key, left live on a
+/// sign-in that ended without revoking it (a refresh reuse, an expiry), onto
+/// the webview's current sign-in. The public key line is the enclave's own,
+/// never the webview's. `key_id`/`member_id` are the server row the page read
+/// (the shell's binding may be missing after a reinstall); the server rebuilds
+/// the letter from ITS row and the caller, so a wrong id only fails to verify.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RebindRequest {
+    pub workspace_id: Uuid,
+    pub member_id: Uuid,
+    pub key_id: Uuid,
+    /// `signing-context` `sessionId` — the caller's own lineage.
+    pub session_id: Uuid,
+}
+
 // ---- statements ------------------------------------------------------------
 
 /// Who signs: filled by the shell from its own record, never by the webview.
@@ -354,6 +377,15 @@ pub enum Statement {
         target_public_key: String,
         revoked_at_ms: i64,
     },
+    /// `momo.human.device_rebind.v1`: signed by the key it moves (the signer's
+    /// `key_id` row), never by another.
+    Rebind {
+        signer: Signer,
+        /// The enclave's public key, read by the shell.
+        public_key: String,
+        session_id: Uuid,
+        signed_at_ms: i64,
+    },
 }
 
 impl Statement {
@@ -363,6 +395,7 @@ impl Statement {
             Statement::Control { .. } => HUMAN_CONTROL_SCHEMA_V2,
             Statement::Endorse { .. } => DEVICE_ENDORSE_SCHEMA_V1,
             Statement::Revoke { .. } => DEVICE_REVOKE_SCHEMA_V2,
+            Statement::Rebind { .. } => DEVICE_REBIND_SCHEMA_V1,
         }
     }
 
@@ -395,6 +428,12 @@ impl Statement {
                     *revoked_at_ms,
                 )
             }
+            Statement::Rebind {
+                signer,
+                public_key,
+                session_id,
+                signed_at_ms,
+            } => rebind_bytes(signer, public_key, *session_id, *signed_at_ms)?,
         };
         check_signing_payload(&bytes)?;
         Ok(bytes)
@@ -488,6 +527,34 @@ pub fn revoke_bytes(
         revoked_at_ms,
     )
     .into_bytes()
+}
+
+/// `momo.human.device_rebind.v1` (#3097; momo-wire `DeviceRebind`):
+///
+/// ```text
+/// momo.human.device_rebind.v1
+/// {workspace_id}
+/// {member_id}
+/// {key_id}
+/// {public_key_b64}
+/// {session_id}        the lineage the key moves to — the caller's own
+/// {signed_at_ms}
+/// ```
+pub fn rebind_bytes(
+    signer: &Signer,
+    public_key: &str,
+    session_id: Uuid,
+    signed_at_ms: i64,
+) -> Result<Vec<u8>, PayloadError> {
+    p256_public_key(public_key)?;
+    if signed_at_ms <= 0 || signed_at_ms > MAX_SAFE_INTEGER {
+        return Err(PayloadError::Field("signed_at_ms", "out of range"));
+    }
+    Ok(format!(
+        "{DEVICE_REBIND_SCHEMA_V1}\n{}\n{}\n{}\n{public_key}\n{session_id}\n{signed_at_ms}",
+        signer.workspace_id, signer.member_id, signer.key_id,
+    )
+    .into_bytes())
 }
 
 /// The last gate before the enclave: an allowed schema with exactly its line
@@ -787,6 +854,18 @@ impl Statement {
                     short_id(request.target_key_id),
                 ),
                 confirm: "끊기".into(),
+                full_text: None,
+            },
+            Statement::Rebind {
+                signer, public_key, ..
+            } => Summary {
+                title: "oort: 이 맥의 서명 키를 새 로그인에 다시 연결합니다".into(),
+                body: format!(
+                    "지문: {}\n키 {}\n로그인이 끊긴 사이 이 키는 서명할 수 없었습니다. 같은 키를 이 로그인으로 옮기며, 폰 승인과 작업 호스트 고정은 그대로입니다.",
+                    fingerprint(public_key).unwrap_or_else(|| "(읽을 수 없음)".into()),
+                    short_id(signer.key_id),
+                ),
+                confirm: "다시 연결".into(),
                 full_text: None,
             },
         }

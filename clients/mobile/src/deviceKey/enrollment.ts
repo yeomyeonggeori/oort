@@ -1,11 +1,14 @@
 import {
   DEVICE_KEY_REFUSAL,
+  DeviceKeyRebindError,
+  keyNeedsRebind,
   listDeviceKeys,
   registerPhoneDeviceKey,
   type DeviceKey,
 } from '@momo/core/features/auth/deviceKeys';
 import {ApiError} from '@momo/core/lib/api';
 
+import {rebindPhoneKey, RebindUnavailableError} from './deviceRebind';
 import {deviceKeyFingerprint} from './fingerprint';
 import {
   createDeviceKey,
@@ -33,8 +36,14 @@ import {
 //    (D-7), and a key no row honours must not outlive the person on a shared
 //    phone.
 // 2. **The server row is found by public key**, not by `current`: a key whose
-//    lineage ended (refresh reuse, the Mac unlinking this phone) still has a
+//    lineage ended (the Mac unlinking this phone, a sign-out) still has a
 //    row — `revoked` — and that is what the person needs to see.
+// 3. **A live row on an ended sign-in is moved, not re-registered** (#3103,
+//    ADR-0146 D-7 증보 #3097). A refresh reuse or an expiry ends the sign-in
+//    but not the key: the row keeps its id and the Mac's approval and signs
+//    nothing (`lineageLive: false`) until the key signs its own
+//    `device_rebind.v1` letter (Face ID; `deviceRebind.ts`). Enrolling does
+//    that — after a QR re-link it runs on its own, so Face ID asks then.
 // =============================================================================
 
 /** What the 「지시 기기」 surfaces show. */
@@ -53,6 +62,9 @@ export type DeviceKeyView =
   | {kind: 'pending'; fingerprint: string; row: DeviceKey; biometryOff: boolean}
   | {kind: 'approved'; fingerprint: string; row: DeviceKey; biometryOff: boolean}
   | {kind: 'revoked'; fingerprint: string; row: DeviceKey; biometryOff: boolean}
+  /** Live and still approved (or pending), but its sign-in ended: it signs
+   *  nothing until it moves onto this one (#3103). */
+  | {kind: 'reconnect'; fingerprint: string; row: DeviceKey; biometryOff: boolean}
   /** The key is here but the server list did not load. */
   | {kind: 'serverError'; fingerprint: string}
   | {kind: 'localError'};
@@ -126,6 +138,7 @@ export function deriveDeviceKeyView(input: {
   const row = rowForPublicKey(rows, local.publicKey);
   if (!row) return {kind: 'unregistered', fingerprint};
   const biometryOff = local.status === 'biometryUnavailable';
+  if (keyNeedsRebind(row)) return {kind: 'reconnect', fingerprint, row, biometryOff};
   switch (row.state) {
     case 'unendorsed':
       return {kind: 'pending', fingerprint, row, biometryOff};
@@ -155,8 +168,33 @@ export class EnrollError extends Error {
 
 function enrollFailure(error: unknown): EnrollError {
   if (error instanceof EnrollError) return error;
+  if (error instanceof RebindUnavailableError) {
+    return new EnrollError(
+      '이 로그인으로는 키를 옮길 수 없습니다. 로그아웃한 뒤 다시 로그인하세요.',
+    );
+  }
+  if (error instanceof DeviceKeyRebindError) {
+    return new EnrollError(
+      '서버가 이 키를 이 로그인으로 옮기지 않았습니다. 다시 시도하세요.',
+    );
+  }
   if (error instanceof DeviceKeyError) {
     switch (error.code) {
+      case 'DEVICE_KEY_CANCELLED':
+        return new EnrollError('Face ID를 취소해 다시 연결하지 않았습니다.');
+      case 'DEVICE_KEY_LOCKED_OUT':
+        return new EnrollError(
+          'Face ID가 잠겨 다시 연결하지 못했습니다. 기기 암호로 잠금을 푼 뒤 다시 시도하세요.',
+        );
+      case 'DEVICE_KEY_PAYLOAD_REJECTED':
+        // A native build from before #3103 has no rebind in its allow-list.
+        return new EnrollError(
+          '이 앱 버전은 키를 다시 연결할 수 없습니다. 앱을 업데이트한 뒤 다시 시도하세요.',
+        );
+      case 'DEVICE_KEY_INVALIDATED':
+        return new EnrollError(
+          'Face ID 등록이 바뀌어 이 키를 더 쓸 수 없습니다. 새 키로 다시 등록하세요.',
+        );
       case 'DEVICE_KEY_MISCONFIGURED':
         return new EnrollError(
           '이 빌드에는 서명 키를 보관할 권한이 없습니다. 팀 배포 앱에서 하세요.',
@@ -171,6 +209,16 @@ function enrollFailure(error: unknown): EnrollError {
         '이 로그인으로는 더 이상 키를 등록할 수 없습니다. 다시 로그인하세요.',
       );
     }
+    if (error.code === DEVICE_KEY_REFUSAL.signatureInvalid) {
+      return new EnrollError(
+        '서버가 이 폰의 서명을 받지 않았습니다. 폰의 시계가 맞는지 확인하고 다시 시도하세요.',
+      );
+    }
+    if (error.code === DEVICE_KEY_REFUSAL.notFound) {
+      return new EnrollError(
+        '서버에 이 키가 더 이상 없습니다. 다시 시도하면 새로 등록합니다.',
+      );
+    }
     if (error.status === 403) {
       return new EnrollError('이 워크스페이스에서 키를 등록할 수 없습니다.');
     }
@@ -178,6 +226,15 @@ function enrollFailure(error: unknown): EnrollError {
   return new EnrollError(
     '지시 기기로 등록하지 못했습니다. 연결을 확인하고 다시 시도하세요.',
   );
+}
+
+/** Move this phone's live row on an ended sign-in onto this one (#3103). */
+async function rebind(
+  workspaceId: string,
+  row: DeviceKey,
+  publicKey: string,
+): Promise<void> {
+  await rebindPhoneKey({workspaceId, memberId: row.memberId, row, publicKey});
 }
 
 async function register(
@@ -188,6 +245,18 @@ async function register(
   try {
     await registerPhoneDeviceKey(workspaceId, {publicKey, label});
   } catch (error) {
+    // The key is ours, live, on an ended sign-in (the list was stale): move it.
+    if (
+      error instanceof ApiError &&
+      error.code === DEVICE_KEY_REFUSAL.rebindRequired
+    ) {
+      const rows = await listDeviceKeys(workspaceId);
+      const row = rowForPublicKey(rows, publicKey);
+      if (row && keyNeedsRebind(row)) {
+        await rebind(workspaceId, row, publicKey);
+        return;
+      }
+    }
     // Already live — a retry after a lost response. The list tells the rest.
     if (
       error instanceof ApiError &&
@@ -234,6 +303,8 @@ export async function enrollDeviceKey(input: {
     const row = rowForPublicKey(rows, publicKey);
     if (!row || row.state === 'revoked') {
       await register(input.workspaceId, input.label, publicKey);
+    } else if (keyNeedsRebind(row)) {
+      await rebind(input.workspaceId, row, publicKey);
     }
     return {kind: 'registered', publicKey};
   } catch (error) {

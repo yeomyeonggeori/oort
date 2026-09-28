@@ -44,3 +44,14 @@ export async function deviceKeyFingerprint(publicKeyB64: string): Promise<string
     .toUpperCase();
   return hex.match(/.{4}/g)!.join(" ");
 }
+
+/** Root rows this app already tried to move on its own (#3103): one Touch ID
+ *  prompt per row per app run, never a loop of them (a declined prompt
+ *  refetches the list, which would otherwise ask again). Later attempts are
+ *  the button. */
+export const autoRebindTried = new Set<string>();
+
+/** Test seam: forget the automatic attempts. */
+export function resetAutoRebindForTests(): void {
+  autoRebindTried.clear();
+}

@@ -536,7 +536,7 @@ export type DesktopHostDelivery =
   | { state: "refused"; reason: string };
 
 /**
- * The seven `device_key_*` commands. The webview never passes bytes to sign:
+ * The eight `device_key_*` commands. The webview never passes bytes to sign:
  * each call names the statement's fields and the shell builds, shows (native
  * dialog) and signs it. Rejections are the shell's short codes
  * (`device_key_declined`, `device_key_cancelled`, `device_key_unsigned_build`…).
@@ -607,6 +607,21 @@ export const desktopDeviceKey = {
   }): Promise<DesktopHostDelivery> {
     if (!IS_TAURI) throw "unsupported_platform";
     return invoke<DesktopHostDelivery>("device_key_deliver_revocation", { request });
+  },
+  /**
+   * `device_rebind.v1` (#3103, ADR-0146 D-7 증보 #3097): this Mac's key, left
+   * live on a sign-in that ended without revoking it, signs its own move onto
+   * `sessionId` (`signing-context`). The shell puts its enclave's public key in
+   * the letter and shows it natively; this page posts the result as `rebind`.
+   */
+  async signRebind(request: {
+    workspaceId: string;
+    memberId: string;
+    keyId: string;
+    sessionId: string;
+  }): Promise<{ keyId: string; publicKey: string; signedAtMs: number; signature: string }> {
+    if (!IS_TAURI) throw "unsupported_platform";
+    return invoke("device_key_sign_rebind", { request });
   },
 };
 

@@ -24,6 +24,10 @@
 //                              delivered to workd over the code-signed socket
 //                              right away (D-7)
 //   device_key_deliver_revocation  hand a stored letter to workd again
+//   device_key_sign_rebind     device_rebind.v1 (#3103): this Mac's own key,
+//                              left live on an ended sign-in, moves onto the
+//                              current one (the key's own signature, no
+//                              password; ADR-0146 D-7 증보 #3097)
 //
 // Only `capabilities/device-key.json` grants them: the main webview, bundled
 // origin, macOS.
@@ -53,11 +57,15 @@ use uuid::Uuid;
 
 use enclave::{AuthWindow, EnclaveError};
 use payload::{
-    ControlRequest, EndorseRequest, RevokeRequest, Signer, Statement, Summary, P256_PUBLIC_KEY_LEN,
+    ControlRequest, EndorseRequest, RebindRequest, RevokeRequest, Signer, Statement, Summary,
+    P256_PUBLIC_KEY_LEN,
 };
 
 /// Shown by Touch ID / the password sheet when a fresh authentication is due.
 const AUTH_REASON: &str = "지시에 서명";
+/// The same prompt for a rebind (#3103). macOS sets the reason inside its own
+/// sentence, so it stays a phrase like `AUTH_REASON`.
+const REBIND_AUTH_REASON: &str = "서명 키를 새 로그인에 다시 연결";
 
 // ---- the testable core ------------------------------------------------------
 
@@ -389,6 +397,7 @@ async fn on_worker<T: Send + 'static>(
 struct EnclavePlatform<'a> {
     worker: &'a mut Worker,
     group: String,
+    reason: &'static str,
 }
 
 impl Platform for EnclavePlatform<'_> {
@@ -400,7 +409,7 @@ impl Platform for EnclavePlatform<'_> {
         &mut self,
         message: &[u8],
     ) -> Result<([u8; P256_PUBLIC_KEY_LEN], Vec<u8>), EnclaveError> {
-        let context = self.worker.auth.context(AUTH_REASON)?;
+        let context = self.worker.auth.context(self.reason)?;
         let result = (|| {
             let key = enclave::find(&self.group, Some(&context))?.ok_or(EnclaveError::Absent)?;
             let public = enclave::public_key(&key)?;
@@ -470,9 +479,14 @@ impl Worker {
         let group = enclave::access_group().map_err(|error| error.code())?;
         let local_host = self.local_host();
         let now = now_ms();
+        let reason = match statement {
+            Statement::Rebind { .. } => REBIND_AUTH_REASON,
+            _ => AUTH_REASON,
+        };
         let mut platform = EnclavePlatform {
             worker: self,
             group,
+            reason,
         };
         sign_statement(&mut platform, &statement, root_public_key, now, local_host)
     }
@@ -1001,6 +1015,79 @@ pub async fn device_key_deliver_revocation(
         ))
     })
     .await
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebindSigned {
+    pub key_id: Uuid,
+    /// The enclave's public key the letter names.
+    pub public_key: String,
+    pub signed_at_ms: i64,
+    pub signature: String,
+}
+
+/// `device_rebind.v1` (#3103). The public key line is this enclave's own; the
+/// letter is shown natively and signed with Touch ID like every statement.
+/// The key id, member and destination sign-in come from the page (the server
+/// rebuilds the letter from its row and the caller, and moves the key only
+/// into the caller's own live sign-in: a letter naming anything else fails
+/// there). When this shell has a binding for the workspace under the same
+/// key, the page's key id must be the bound one.
+#[tauri::command]
+pub async fn device_key_sign_rebind(
+    app: tauri::AppHandle,
+    request: RebindRequest,
+) -> Result<RebindSigned, String> {
+    on_worker(app, move |worker| {
+        let (_, public_key) = worker.current_public_key().map_err(|e| e.code())?;
+        let binding = load_bindings(&bindings_path(&worker.app_data()?))
+            .roots
+            .get(&request.workspace_id)
+            .cloned();
+        rebind_precheck(binding.as_ref(), &request, &public_key)?;
+        let signer = Signer {
+            workspace_id: request.workspace_id,
+            member_id: request.member_id,
+            key_id: request.key_id,
+        };
+        let signed_at_ms = now_ms();
+        let signed = worker.sign(
+            Statement::Rebind {
+                signer,
+                public_key: public_key.clone(),
+                session_id: request.session_id,
+                signed_at_ms,
+            },
+            &public_key,
+        )?;
+        Ok(RebindSigned {
+            key_id: request.key_id,
+            public_key: signed.public_key,
+            signed_at_ms,
+            signature: signed.signature,
+        })
+    })
+    .await
+}
+
+/// A binding for this workspace that still names this enclave key pins the
+/// key id and member a rebind may name: the id does not change on a rebind
+/// (#3097), so another id there is a page asking about some other row.
+pub fn rebind_precheck(
+    binding: Option<&RootBinding>,
+    request: &RebindRequest,
+    enclave_public_key: &str,
+) -> Result<(), String> {
+    match binding {
+        Some(bound)
+            if bound.public_key == enclave_public_key
+                && (bound.key_id != request.key_id || bound.member_id != request.member_id) =>
+        {
+            Err("device_key_rebind_conflict".into())
+        }
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]

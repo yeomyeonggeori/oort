@@ -93,7 +93,7 @@ mod work_host;
 // This Mac's human device key (ADR-0146 개정 2026-09-28 D-3·D-6·D-7, #3025):
 // a Secure Enclave P-256 key, the three signed statements built in Rust, a
 // native confirmation before each signature, and the root pin on workd.
-// Reachable only through the seven `device_key_*` commands, which only
+// Reachable only through the eight `device_key_*` commands, which only
 // `capabilities/device-key.json` grants.
 #[cfg(target_os = "macos")]
 mod device_key;
@@ -190,6 +190,7 @@ pub fn run() {
             device_key::device_key_sign_endorse,
             device_key::device_key_sign_revoke,
             device_key::device_key_deliver_revocation,
+            device_key::device_key_sign_rebind,
         ]);
 
     #[cfg(not(desktop))]

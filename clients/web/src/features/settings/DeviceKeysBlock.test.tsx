@@ -8,6 +8,7 @@ import { ApiError } from "@momo/core/lib/api";
 import { resetEscapeLayers } from "@/design/ui/escapeLayer";
 import type { DesktopDeviceKeyStatus } from "@/lib/tauri";
 import { DevicesSection } from "./DevicesSection";
+import { resetAutoRebindForTests } from "./deviceKeysShared";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const ME = "00000000-0000-7000-8000-000000000101";
@@ -24,12 +25,15 @@ const desktop = vi.hoisted(() => ({
   bindRoot: vi.fn(),
   signEndorse: vi.fn(),
   signRevoke: vi.fn(),
+  signRebind: vi.fn(),
 }));
 const core = vi.hoisted(() => ({
   listDeviceKeys: vi.fn(),
   registerRootDeviceKey: vi.fn(),
   submitEndorsement: vi.fn(),
   submitRevocation: vi.fn(),
+  fetchSigningContext: vi.fn(),
+  rebindDeviceKey: vi.fn(),
   listLinkedDevices: vi.fn(),
   revokeLinkedDevice: vi.fn(),
 }));
@@ -45,6 +49,7 @@ vi.mock("@/lib/tauri", async (importOriginal) => {
       bindRoot: (...a: unknown[]) => desktop.bindRoot(...a),
       signEndorse: (...a: unknown[]) => desktop.signEndorse(...a),
       signRevoke: (...a: unknown[]) => desktop.signRevoke(...a),
+      signRebind: (...a: unknown[]) => desktop.signRebind(...a),
       signControl: vi.fn(),
       deliverRevocation: vi.fn(),
     },
@@ -59,6 +64,8 @@ vi.mock("@momo/core/features/auth/deviceKeys", async (importOriginal) => {
     registerRootDeviceKey: (...a: unknown[]) => core.registerRootDeviceKey(...a),
     submitEndorsement: (...a: unknown[]) => core.submitEndorsement(...a),
     submitRevocation: (...a: unknown[]) => core.submitRevocation(...a),
+    fetchSigningContext: (...a: unknown[]) => core.fetchSigningContext(...a),
+    rebindDeviceKey: (...a: unknown[]) => core.rebindDeviceKey(...a),
   };
 });
 
@@ -103,6 +110,7 @@ function key(overrides: Record<string, unknown> = {}) {
     state: "unendorsed",
     canInstruct: false,
     current: false,
+    lineageLive: true,
     createdAtMs: 1_790_550_000_000,
     ...overrides,
   };
@@ -137,6 +145,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   for (const fn of [...Object.values(desktop), ...Object.values(core)]) fn.mockReset();
+  resetAutoRebindForTests();
   desktop.isDesktop.mockReturnValue(true);
   desktop.status.mockResolvedValue(localStatus());
   core.listDeviceKeys.mockResolvedValue([rootRow, key()]);
@@ -459,5 +468,135 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
     expect(order).toEqual(["sign", "letter", "unlink"]);
     await waitFor(() => q(host, "linked-devices-unlink-note") !== null, "note");
     expect(q(host, "linked-devices-unlink-note")?.textContent).toContain("지시 권한도 끊었습니다");
+  });
+});
+
+describe("다시 연결 — 계보만 끝난 뿌리 키 (#3103, ADR-0146 D-7 증보 #3097)", () => {
+  const SESSION = "00000000-0000-7000-8000-00000000c001";
+  const muteRoot = { ...rootRow, current: false, lineageLive: false };
+  const context = {
+    instanceId: "inst",
+    serverTimeMs: 1,
+    maxLifetimeMs: 600_000,
+    maxClockSkewMs: 300_000,
+    humanControlSignatureRequired: true,
+    hostRegisterSignatureRequired: false,
+    sessionId: SESSION,
+  };
+  const letter = { keyId: ROOT_ID, publicKey: MAC_KEY, signedAtMs: 1_790_550_000_000, signature: "c2ln" };
+
+  it("「다시 연결 필요」를 말하고 스스로 한 번 옮긴다: 셸이 편지에 서명, 서버에 rebind, 같은 id라 다시 묶지 않는다", async () => {
+    core.listDeviceKeys.mockResolvedValue([muteRoot, key()]);
+    core.fetchSigningContext.mockResolvedValue(context);
+    let release: () => void = () => undefined;
+    desktop.signRebind.mockImplementation(
+      () => new Promise((resolve) => (release = () => resolve(letter)))
+    );
+    core.rebindDeviceKey.mockImplementation(async () => {
+      core.listDeviceKeys.mockResolvedValue([rootRow, key()]);
+      return { ...rootRow, current: true, lineageLive: true };
+    });
+    const host = mount();
+    await waitFor(() => q(host, "device-key-root-relink") !== null, "relink panel");
+    // Never 「뿌리」 while it signs nothing; the phone actions stay locked.
+    expect(q(host, "device-keys")?.dataset.deviceKeyBound).toBe("false");
+    expect(q(host, "device-key-endorse-start")?.getAttribute("aria-disabled")).toBe("true");
+    await waitFor(() => desktop.signRebind.mock.calls.length === 1, "auto sign");
+    await waitFor(() => host.textContent?.includes("다시 연결 중") ?? false, "pending chip");
+    expect(desktop.signRebind).toHaveBeenCalledWith({
+      workspaceId: WS,
+      memberId: ME,
+      keyId: ROOT_ID,
+      sessionId: SESSION,
+    });
+    await act(async () => release());
+    await waitFor(() => q(host, "device-key-root-bound") !== null, "bound again");
+    expect(core.rebindDeviceKey).toHaveBeenCalledWith(WS, {
+      publicKey: MAC_KEY,
+      platform: "macos",
+      label: "Mac",
+      rebind: { signedAtMs: letter.signedAtMs, signature: "c2ln" },
+    });
+    expect(desktop.bindRoot).not.toHaveBeenCalled();
+    expect(host.textContent).toContain("이 맥의 서명 키를 이 로그인에 다시 연결했습니다.");
+  });
+
+  it("옮기지 못하면 정직하게 말하고, 다시 묻는 일은 버튼으로만 한다 (확인 창 폭주 없음)", async () => {
+    core.listDeviceKeys.mockResolvedValue([muteRoot, key()]);
+    core.fetchSigningContext.mockResolvedValue(context);
+    desktop.signRebind.mockResolvedValue(letter);
+    // The server answered 200 but the row is not this sign-in's.
+    const { DeviceKeyRebindError } = await import("@momo/core/features/auth/deviceKeys");
+    core.rebindDeviceKey.mockRejectedValue(new DeviceKeyRebindError());
+    const host = mount();
+    await waitFor(() => q(host, "device-key-relink-error") !== null, "error");
+    expect(q(host, "device-key-relink-error")?.textContent).toBe(
+      "서버가 이 키를 이 로그인으로 옮기지 않았습니다. 목록을 다시 불러와 다시 시도하세요."
+    );
+    expect(host.textContent).toContain("다시 연결 필요");
+    // Settling refetched the list; the automatic attempt does not repeat.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    expect(desktop.signRebind).toHaveBeenCalledTimes(1);
+    desktop.signRebind.mockRejectedValue("device_key_declined");
+    await click(q(host, "device-key-relink"), "retry");
+    await waitFor(() => desktop.signRebind.mock.calls.length === 2, "manual");
+    await waitFor(
+      () => q(host, "device-key-relink-error")?.textContent === "서명을 취소했습니다.",
+      "declined"
+    );
+  });
+
+  it("세션 계보가 없는 로그인은 서명하지 않고 그 까닭을 말한다", async () => {
+    core.listDeviceKeys.mockResolvedValue([muteRoot, key()]);
+    core.fetchSigningContext.mockResolvedValue({ ...context, sessionId: null });
+    const host = mount();
+    await waitFor(() => q(host, "device-key-relink-error") !== null, "error");
+    expect(desktop.signRebind).not.toHaveBeenCalled();
+    expect(q(host, "device-key-relink-error")?.textContent).toContain("다시 로그인");
+  });
+
+  it("목록이 낡아 등록이 409 device_key_rebind_required를 받으면 비밀번호 대신 편지로 옮긴다", async () => {
+    desktop.status.mockResolvedValue(localStatus({ root: null }));
+    // The list is stale until the server says otherwise.
+    let told = false;
+    core.listDeviceKeys.mockImplementation(async () => (told ? [muteRoot, key()] : [key()]));
+    core.registerRootDeviceKey.mockImplementation(async () => {
+      told = true;
+      throw new ApiError(409, "move it", "device_key_rebind_required");
+    });
+    core.fetchSigningContext.mockResolvedValue(context);
+    desktop.signRebind.mockResolvedValue(letter);
+    core.rebindDeviceKey.mockImplementation(async () => {
+      core.listDeviceKeys.mockResolvedValue([rootRow, key()]);
+      return { ...rootRow, current: true, lineageLive: true };
+    });
+    desktop.bindRoot.mockResolvedValue({ status: localStatus(), host: { state: "delivered" } });
+    const host = mount();
+    await waitFor(() => q(host, "device-key-root-start") !== null, "start");
+    await click(q(host, "device-key-root-start"), "start");
+    const input = q<HTMLInputElement>(host, "device-key-root-password")!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      setter.call(input, "pw");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await click(q(host, "device-key-root-submit"), "submit");
+    await waitFor(() => core.rebindDeviceKey.mock.calls.length === 1, "rebind");
+    expect(core.registerRootDeviceKey).toHaveBeenCalledTimes(1);
+    // No binding on this Mac for the row: bound after the move.
+    await waitFor(() => desktop.bindRoot.mock.calls.length === 1, "bind");
+    expect(desktop.bindRoot).toHaveBeenCalledWith({
+      workspaceId: WS,
+      memberId: ME,
+      keyId: ROOT_ID,
+      publicKey: MAC_KEY,
+    });
+    // One move, one prompt: the panel's own attempt does not follow it.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    expect(desktop.signRebind).toHaveBeenCalledTimes(1);
   });
 });

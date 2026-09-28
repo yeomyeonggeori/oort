@@ -1,5 +1,6 @@
 import {listDeviceKeys} from '@momo/core/features/auth/deviceKeys';
 import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
+import {useEffect} from 'react';
 
 import {
   deriveDeviceKeyView,
@@ -29,6 +30,16 @@ export const DEVICE_KEYS_QUERY_KEY = (workspaceId: string) =>
 /** While the Mac's approval is pending, how often the list is re-read. */
 export const APPROVAL_POLL_MS = 10_000;
 
+/** Rows this app already tried to move on its own (#3103): one Face ID
+ *  prompt per row per app run. A cancelled prompt settles the queries, which
+ *  would otherwise ask again and again; after the first, it is the button. */
+const autoReconnectTried = new Set<string>();
+
+/** Test seam. */
+export function resetAutoReconnectForTests(): void {
+  autoReconnectTried.clear();
+}
+
 export interface DeviceKeyState {
   view: DeviceKeyView;
   /** Register (or re-register a revoked/unregistered key). */
@@ -44,7 +55,14 @@ export interface DeviceKeyState {
 
 export function useDeviceKey(
   workspaceId: string,
-  {poll = true}: {poll?: boolean} = {},
+  {
+    poll = true,
+    autoReconnect = false,
+  }: {
+    poll?: boolean;
+    /** 「다시 연결 필요」 moves the key once on its own (Face ID still asks). */
+    autoReconnect?: boolean;
+  } = {},
 ): DeviceKeyState {
   const client = useQueryClient();
   const local = useQuery({
@@ -90,6 +108,15 @@ export function useDeviceKey(
     mutationFn: () => replaceInvalidatedKey({workspaceId, label}),
     onSettled: settle,
   });
+  const reconnectId =
+    autoReconnect && view.kind === 'reconnect' && !view.biometryOff ? view.row.id : null;
+  const enrollMutate = enroll.mutate;
+  const enrollBusy = enroll.isPending;
+  useEffect(() => {
+    if (reconnectId === null || enrollBusy || autoReconnectTried.has(reconnectId)) return;
+    autoReconnectTried.add(reconnectId);
+    enrollMutate();
+  }, [reconnectId, enrollBusy, enrollMutate]);
   const last = replace.submittedAt > enroll.submittedAt ? replace : enroll;
   const failure =
     last.error instanceof Error ? last.error.message : last.error ? String(last.error) : null;

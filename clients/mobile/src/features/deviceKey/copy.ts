@@ -40,6 +40,26 @@ export function deviceKeyCopy(view: DeviceKeyView, busy = false): DeviceKeyCopy 
           : `iOS 설정에서 Face ID를 켜세요. 맥의 승인도 필요합니다. ${MAC_WHERE}`,
     };
   }
+  if (view.kind === 'reconnect') {
+    // #3103: live and still approved, but its sign-in ended — it signs
+    // nothing until it moves. Never 「승인됨」 (that would be a lie).
+    if (busy) {
+      return {
+        badge: '다시 연결 중',
+        tone: 'muted',
+        headline: '이 폰의 지시 키를 이 로그인에 다시 연결하는 중입니다.',
+        detail: 'Face ID로 확인하면 끝납니다.',
+      };
+    }
+    return {
+      badge: '다시 연결 필요',
+      tone: 'warn',
+      headline: '로그인이 바뀌어 이 폰으로 지금은 지시할 수 없습니다.',
+      detail: view.biometryOff
+        ? '같은 키를 이 로그인으로 옮기면 맥의 승인은 그대로입니다. 옮기려면 iOS 설정에서 Face ID를 켜세요.'
+        : '같은 키를 이 로그인으로 옮기면 맥의 승인은 그대로입니다. Face ID로 한 번 확인하면 됩니다.',
+    };
+  }
   if (view.kind === 'unregistered' && busy) {
     return {
       badge: '등록 중',
@@ -148,4 +168,6 @@ export const ACTION = {
   recheck: '다시 확인',
   retry: '다시 시도',
   busy: '등록 중',
+  reconnect: '다시 연결',
+  reconnectBusy: '다시 연결 중',
 } as const;

@@ -3490,6 +3490,7 @@ const DK_ROW: DeviceKey = {
   state: 'unendorsed',
   canInstruct: false,
   current: true,
+  lineageLive: true,
   createdAtMs: NOW,
 };
 

@@ -327,7 +327,8 @@ function ThemePage(): React.JSX.Element {
 }
 
 function DeviceKeyPage({workspaceId}: {workspaceId: string}): React.JSX.Element {
-  const state = useDeviceKey(workspaceId);
+  // 이 장을 연 사람에게만 스스로 다시 연결한다(#3103) — Face ID 창이 뜬다.
+  const state = useDeviceKey(workspaceId, {autoReconnect: true});
   return <DeviceKeyPanel state={state} />;
 }
 

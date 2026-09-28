@@ -60,6 +60,8 @@ interface Action {
   onPress: () => void;
   /** 누르면 등록이 돈다 — busy 동안 「등록 중」으로 선다. */
   enrolls: boolean;
+  /** busy 동안의 이름. 없으면 「등록 중」. */
+  busyLabel?: string;
 }
 
 export function deviceKeyActions(view: DeviceKeyView, state: DeviceKeyState): Action[] {
@@ -84,6 +86,18 @@ export function deviceKeyActions(view: DeviceKeyView, state: DeviceKeyState): Ac
       return [{key: 'replace', label: ACTION.replace, onPress: state.replace, enrolls: true}];
     case 'biometryOff':
       return [settings, recheck];
+    case 'reconnect':
+      return view.biometryOff
+        ? [settings, recheck]
+        : [
+            {
+              key: 'reconnect',
+              label: ACTION.reconnect,
+              onPress: state.enroll,
+              enrolls: true,
+              busyLabel: ACTION.reconnectBusy,
+            },
+          ];
     case 'approved':
     case 'pending':
       return view.biometryOff ? [settings, recheck] : [];
@@ -128,7 +142,8 @@ export function DeviceKeyPanel({
         >
           <View style={styles.statusHead}>
             <View style={[styles.pill, pillTone(styles, copy.tone)]}>
-              {view.kind === 'loading' || (busy && view.kind === 'unregistered') ? (
+              {view.kind === 'loading' ||
+              (busy && (view.kind === 'unregistered' || view.kind === 'reconnect')) ? (
                 <ActivityIndicator
                   size="small"
                   color={palette.textMuted}
@@ -189,7 +204,7 @@ export function DeviceKeyPanel({
           <PrimaryButton
             label={primary.label}
             busy={busy && primary.enrolls}
-            busyLabel={ACTION.busy}
+            busyLabel={primary.busyLabel ?? ACTION.busy}
             disabled={busy}
             onPress={primary.onPress}
             testID={`device-key-action-${primary.key}`}
