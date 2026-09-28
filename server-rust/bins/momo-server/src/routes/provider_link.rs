@@ -66,10 +66,10 @@ use momo_settings::{
     attemptable_hops, cascade_plan, classify_probe_reason, decrypt_chain_entry, decrypt_link,
     delete_all_chain_entries, delete_link, masked_tail, read_chain, read_link,
     redacted_endpoint_label, replace_chain, requires_strict_external_provider, resolve_link,
-    seal_bearer, upsert_link, validated_base_url, CascadeHop, CascadeSource, ChainEntryInput,
-    DecryptedChainEntry, DecryptedProviderLink, LinkCredential, ProviderFormat, ProviderMode,
-    ProviderSource, ResolvedProvider, StoredChainEntry, StoredProviderLink, ATTRIBUTION_NOTICE_KO,
-    MAX_CHAIN_ENTRIES, PROVIDER_PRESETS,
+    same_origin, seal_bearer, upsert_link, validated_base_url, CascadeHop, CascadeSource,
+    ChainEntryInput, DecryptedChainEntry, DecryptedProviderLink, LinkCredential, ProviderFormat,
+    ProviderMode, ProviderSource, ResolvedProvider, StoredChainEntry, StoredProviderLink,
+    ATTRIBUTION_NOTICE_KO, MAX_CHAIN_ENTRIES, PROVIDER_PRESETS,
 };
 
 use crate::dto::{
@@ -816,23 +816,43 @@ pub async fn put_chain(
         with_provider_link_admin_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
                 // Existing ciphertexts keyed by POSITION, so an operator can
-                // reorder or park a hop without re-typing its write-only bearer.
+                // park a hop or edit its path without re-typing its write-only
+                // bearer — but only while the hop stays on the ORIGIN the key
+                // was typed for (#3040). Anything else would let one operator
+                // point another operator's key at a host of their choosing and
+                // have 「연결 확인」 (or a later turn) deliver it there.
                 let existing = read_chain(conn).await?;
                 let mut rows: Vec<(i32, String, Vec<u8>, String, bool)> =
                     Vec::with_capacity(sealed.len());
+                let mut origin_changes: Vec<serde_json::Value> = Vec::new();
                 for (position, base_url, ciphertext, mode, enabled) in sealed {
-                    let ciphertext = match ciphertext {
-                        Some(fresh) => fresh,
-                        None => match existing
-                            .iter()
-                            .find(|row| row.position == position)
-                            .map(|row| row.bearer_ciphertext.clone())
-                        {
-                            Some(kept) => kept,
-                            // A rejection, returned before the first write, so the
-                            // transaction commits nothing either way.
-                            None => return Ok(Err(position)),
-                        },
+                    let stored = existing.iter().find(|row| row.position == position);
+                    let ciphertext = match (ciphertext, stored) {
+                        (Some(fresh), stored) => {
+                            if let Some(stored) =
+                                stored.filter(|row| !same_origin(&row.base_url, &base_url))
+                            {
+                                origin_changes.push(serde_json::json!({
+                                    "position": position,
+                                    "from": redacted_endpoint_label(&stored.base_url),
+                                    "to": redacted_endpoint_label(&base_url),
+                                }));
+                            }
+                            fresh
+                        }
+                        (None, Some(stored)) if same_origin(&stored.base_url, &base_url) => {
+                            stored.bearer_ciphertext.clone()
+                        }
+                        // Both rejections return before the first write, so the
+                        // transaction commits nothing either way.
+                        (None, Some(stored)) => {
+                            return Ok(Err(ChainKeyRefusal::OriginChanged {
+                                position,
+                                from: redacted_endpoint_label(&stored.base_url),
+                                to: redacted_endpoint_label(&base_url),
+                            }))
+                        }
+                        (None, None) => return Ok(Err(ChainKeyRefusal::NewPosition(position))),
                     };
                     rows.push((position, base_url, ciphertext, mode, enabled));
                 }
@@ -853,6 +873,9 @@ pub async fn put_chain(
                                     .iter()
                                     .map(|row| redacted_endpoint_label(&row.base_url))
                                     .collect::<Vec<_>>(),
+                                // #3040: hops whose origin moved, which is only
+                                // possible with a freshly typed key. Labels only.
+                                "origin_changed": origin_changes,
                             }),
                         ),
                 )
@@ -863,11 +886,7 @@ pub async fn put_chain(
         })
         .await
         .map_err(|error| ApiError::internal("provider_chain.put", error))?
-        .map_err(|position| {
-            ApiError::bad_request(format!(
-                "bearer is required for new chain position {position}"
-            ))
-        })?;
+        .map_err(ChainKeyRefusal::into_api_error)?;
 
     Ok(Json(chain_response(
         &state,
@@ -917,6 +936,42 @@ pub async fn delete_chain(
         stored_link.as_ref(),
         &[],
     )))
+}
+
+/// The machine code of the #3040 refusal (ADR-0188 R0 `error.code`).
+pub const KEY_REQUIRED_FOR_NEW_ORIGIN: &str = "key_required_for_new_origin";
+
+/// Why a hop submitted without a bearer cannot keep one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ChainKeyRefusal {
+    /// Nothing is stored at this position (400, the pre-#3040 sentence the web
+    /// draft model already knows).
+    NewPosition(i32),
+    /// A key is stored here, but for another origin (409, #3040). The labels
+    /// are the redacted endpoint projections — never a key, query or userinfo.
+    OriginChanged {
+        position: i32,
+        from: String,
+        to: String,
+    },
+}
+
+impl ChainKeyRefusal {
+    fn into_api_error(self) -> ApiError {
+        match self {
+            ChainKeyRefusal::NewPosition(position) => ApiError::bad_request(format!(
+                "bearer is required for new chain position {position}"
+            )),
+            ChainKeyRefusal::OriginChanged { position, from, to } => ApiError::coded(
+                StatusCode::CONFLICT,
+                KEY_REQUIRED_FOR_NEW_ORIGIN,
+                format!(
+                    "chain position {position} moved from {from} to {to}; the stored key is \
+                     not sent to a new origin — enter the key for the new provider"
+                ),
+            ),
+        }
+    }
 }
 
 /// One replace-all hop with its bearer already sealed. `None` ciphertext means
@@ -1205,6 +1260,30 @@ mod tests {
         assert_eq!(
             oauth.disposition, "propagate",
             "an unknown reason must not claim the next provider would do better"
+        );
+    }
+
+    /// #3040: the two refusals of a bearer-less hop keep their own status and
+    /// sentence; only the origin move carries the machine code.
+    #[test]
+    fn a_bearerless_hop_refusal_names_its_reason() {
+        let new = ChainKeyRefusal::NewPosition(3).into_api_error();
+        assert_eq!(new.status, StatusCode::BAD_REQUEST);
+        assert_eq!(new.code, None);
+        assert_eq!(new.message, "bearer is required for new chain position 3");
+
+        let moved = ChainKeyRefusal::OriginChanged {
+            position: 1,
+            from: "https://api.example.com/v1".into(),
+            to: "https://evil.example.com/v1".into(),
+        }
+        .into_api_error();
+        assert_eq!(moved.status, StatusCode::CONFLICT);
+        assert_eq!(moved.code, Some(KEY_REQUIRED_FOR_NEW_ORIGIN));
+        assert!(
+            moved.message.contains("chain position 1"),
+            "{}",
+            moved.message
         );
     }
 

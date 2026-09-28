@@ -1789,6 +1789,23 @@ pub async fn resume(
     let source_session_id = path_uuid(&session, "invalid work session id")?;
     let target_host_id = request.target_host_id;
     let member_id = principal.member_id;
+    let settings = state.device_keys.clone();
+    // #3027: the successor id and the signature over it travel together.
+    if request.session_id.is_some() != request.human_signature.is_some() {
+        return Err(ApiError::coded(
+            StatusCode::BAD_REQUEST,
+            CODE_RESUME_SIGNATURE_INCOMPLETE,
+            "sessionId and humanSignature are sent together",
+        ));
+    }
+    let signed =
+        request
+            .session_id
+            .zip(request.human_signature)
+            .map(|(successor_id, signature)| SignedResume {
+                successor_id,
+                signature,
+            });
 
     let source_cloud_host_id = resolve_cloud_host_id(&state.pool, workspace_id, source_session_id)
         .await
@@ -1811,6 +1828,8 @@ pub async fn resume(
                 source_cloud_host_id,
                 target_host_id,
                 target_cloud_host_id,
+                &settings,
+                signed.as_ref(),
             )
             .await
         }) as _
@@ -1840,6 +1859,19 @@ pub async fn resume(
     ))
 }
 
+/// 400 when a resume sends `sessionId` without `humanSignature` or the other
+/// way round (#3027).
+pub const CODE_RESUME_SIGNATURE_INCOMPLETE: &str = "resume_signature_incomplete";
+/// 409 when the signed successor session id is already taken (#3027).
+pub const CODE_RESUME_SESSION_TAKEN: &str = "resume_session_id_taken";
+
+/// A resume the owner signed (#3027): the successor id is the statement's
+/// session line.
+struct SignedResume {
+    successor_id: Uuid,
+    signature: crate::dto::HumanSignatureRequest,
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn resume_in_tx(
     conn: &mut momo_db::PgConnection,
@@ -1849,6 +1881,8 @@ async fn resume_in_tx(
     expected_source_cloud_host_id: Option<Uuid>,
     target_host_id: Uuid,
     expected_target_cloud_host_id: Option<Uuid>,
+    settings: &crate::config::DeviceKeySettings,
+    signed: Option<&SignedResume>,
 ) -> Rejectable<WorkSessionDetail> {
     if cloud_host_id_for_session_in_tx(conn, workspace_id, source_session_id).await?
         != expected_source_cloud_host_id
@@ -1948,7 +1982,6 @@ async fn resume_in_tx(
             "a shell cannot be resumed onto a member-scoped work host",
         )));
     }
-
     if let Err(error) = acquire_slot_in_tx(conn, workspace_id, member_id, target_host_id).await {
         return Ok(Err(match error {
             T3Error::SlotsExhausted { .. } => ApiError::new(StatusCode::CONFLICT, "pool_exhausted"),
@@ -1956,6 +1989,52 @@ async fn resume_in_tx(
             other => return Err(other),
         }));
     }
+
+    // ADR-0146 개정 D-8 (#3023 → #3027). With signed instructions required, a
+    // spawn onto a member host carries the owner's device signature. v2 gives
+    // the spawn a session line: the owner signs the successor id and the
+    // server creates the session under exactly that id, so it cannot choose
+    // which session the owner's words join (#3024 M2) — and the statement
+    // binds the tool and the channel the host will act on. The last refusal
+    // before the writes, because it spends the nonce.
+    if let Some(signed) = signed {
+        if work_session_scope_in_tx(conn, workspace_id, signed.successor_id)
+            .await?
+            .is_some()
+        {
+            return Ok(Err(ApiError::coded(
+                StatusCode::CONFLICT,
+                CODE_RESUME_SESSION_TAKEN,
+                "the signed successor session id is already taken",
+            )));
+        }
+    }
+    let target_is_member =
+        momo_t3::work_control::remote_host_owner_in_tx(conn, workspace_id, target_host_id)
+            .await?
+            .is_some();
+    let verified = match crate::human_control::authorize_human_control_in_tx(
+        conn,
+        settings,
+        &momo_auth::human_control::ControlTarget {
+            workspace_id,
+            member_id,
+            host_id: target_host_id,
+            session_id: signed.map(|signed| signed.successor_id),
+            subject: momo_auth::human_control::ControlSubject::Spawn {
+                first_prompt: &source.label,
+                tool: &source.tool,
+                channel_id: source.channel_id,
+            },
+        },
+        signed.map(|signed| &signed.signature),
+        settings.human_control_signature_required && target_is_member,
+    )
+    .await?
+    {
+        Ok(verified) => verified,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
 
     // ---- writes ------------------------------------------------------------
     // The source's ledger is settled as `orphaned`: the host it was running on
@@ -1971,7 +2050,10 @@ async fn resume_in_tx(
         .await?;
     }
 
-    let resumed_session_id = allocate_uuid_v7(conn).await?;
+    let resumed_session_id = match signed {
+        Some(signed) => signed.successor_id,
+        None => allocate_uuid_v7(conn).await?,
+    };
     let resumed = create_resumed_work_session_in_tx(
         conn,
         workspace_id,
@@ -2041,9 +2123,21 @@ async fn resume_in_tx(
             kind: KIND_SPAWN.to_string(),
             payload: serde_json::json!({"tool": resumed.tool, "label": resumed.label}),
             status: STATUS_DISPATCHED.to_string(),
+            human: verified
+                .as_ref()
+                .map(crate::human_control::signature_columns),
         },
     )
     .await?;
+    if let Some(verified) = &verified {
+        crate::human_control::record_control_provenance_in_tx(
+            conn,
+            workspace_id,
+            control.id,
+            verified,
+        )
+        .await?;
+    }
 
     // ADR-0125 D6-A "마지막 사용" (migration 061): a takeover is the most
     // deliberate host choice there is — the person picked the machine their work

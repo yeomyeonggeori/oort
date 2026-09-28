@@ -87,6 +87,12 @@ pub struct Config {
     /// Mention→run routing knobs (B5.2). Always on; only the history window is
     /// configurable.
     pub mentions: MentionSettings,
+    /// ADR-0146 개정 2026-09-28 (R2) — the server instance id signed statements
+    /// echo, and whether a member-scoped host registration must carry its root
+    /// key's `host_register` signature. **Off by default** (D-11 / Q11: the R2
+    /// switches close until the R1 re-review PASS); turning it on without an
+    /// instance id is a boot error.
+    pub device_keys: DeviceKeySettings,
     /// 휘발 신호 (ADR-0149, goal SRV-T2) — **off unless the operator hands this
     /// process the Centrifugo publish credential**, which no deployment did
     /// before this batch.
@@ -1090,6 +1096,86 @@ impl MentionSettings {
     }
 }
 
+/// Human device-key settings (ADR-0146 개정 2026-09-28, #3022).
+///
+/// * `MOMO_INSTANCE_ID` — the value every `momo.human.control.v1` statement
+///   carries in its `instance_id` line, so a statement signed for one instance
+///   does not verify on another (D-5). Opaque, operator-chosen, stable for the
+///   life of the instance. Clients never build it from a URL: E3 (#3023)
+///   serves this same value for them to echo.
+/// * `MOMO_HOST_REGISTER_SIGNATURE_REQUIRED` — `true` makes a member-scoped
+///   `POST …/work-hosts` without a verified root-key `host_register` signature
+///   a 403 `device_signature_required` (D-8). Default **off**: no desktop build
+///   signs yet (E5 #3025), and ADR-0146 D-11 keeps the R2 switches closed
+///   until the R1 security re-review PASS. A signature that IS sent is verified
+///   either way.
+/// * `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS` — `true` makes a refresh-token
+///   reuse end the lineage of every session (ADR-0188 §4 R1). Default **off**:
+///   QR-linked (phone) lineages are swept regardless; password sign-ins wait
+///   until the web client coordinates rotation across tabs, because a tab
+///   opened later spends the token an older tab holds and the server cannot
+///   tell that from theft (#3022 review H2).
+/// * `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED` — `true` makes a person's
+///   instruction to a member-scoped host (a permission **allow** today; the
+///   signed `input`/`spawn` route is E7 #3027) without a verified
+///   `momo.human.control.v1` signature a 403 `device_signature_required`, and
+///   refuses the owner's resume onto a member host (v1 cannot sign a spawn
+///   into a session the server chose, #3024 M2). Default **off** (ADR-0146
+///   D-11, Q11: closed until the R1 re-review and the R2 review PASS). A
+///   signature that IS sent is verified either way (#3023).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DeviceKeySettings {
+    pub instance_id: Option<String>,
+    pub host_register_signature_required: bool,
+    pub refresh_reuse_sweep_all_sessions: bool,
+    pub human_control_signature_required: bool,
+}
+
+impl DeviceKeySettings {
+    pub fn from_env() -> DeviceKeySettings {
+        DeviceKeySettings {
+            instance_id: env("MOMO_INSTANCE_ID").map(|value| value.trim().to_string()),
+            host_register_signature_required: env("MOMO_HOST_REGISTER_SIGNATURE_REQUIRED")
+                .is_some_and(|value| value.trim() == "true"),
+            refresh_reuse_sweep_all_sessions: env("MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS")
+                .is_some_and(|value| value.trim() == "true"),
+            human_control_signature_required: env("MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED")
+                .is_some_and(|value| value.trim() == "true"),
+        }
+    }
+
+    /// A requirement nobody could satisfy is a misconfiguration, not a closed
+    /// door: with no instance id no statement can be rebuilt, so every
+    /// member-scoped registration would be refused.
+    pub fn boot_error(&self) -> Option<&'static str> {
+        if self.host_register_signature_required && self.instance_id.is_none() {
+            return Some(
+                "MOMO_HOST_REGISTER_SIGNATURE_REQUIRED=true needs MOMO_INSTANCE_ID (the instance id signed statements carry)",
+            );
+        }
+        if self.human_control_signature_required && self.instance_id.is_none() {
+            return Some(
+                "MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED=true needs MOMO_INSTANCE_ID (the instance id signed statements carry)",
+            );
+        }
+        if self
+            .instance_id
+            .as_deref()
+            .is_some_and(|id| id.is_empty() || id.len() > 256)
+        {
+            return Some("MOMO_INSTANCE_ID must be 1..=256 bytes");
+        }
+        if self
+            .instance_id
+            .as_deref()
+            .is_some_and(|id| id.chars().any(char::is_control))
+        {
+            return Some("MOMO_INSTANCE_ID must not contain control characters");
+        }
+        None
+    }
+}
+
 /// 휘발 신호 configuration (ADR-0149, goal SRV-T2).
 ///
 /// **This is the struct that turns momo-server into the second Centrifugo
@@ -1852,6 +1938,12 @@ impl Config {
 
         let (turn, turn_ttl_clamped_from) = turn_policy_from_env();
 
+        // ADR-0146 개정 (#3022): a signature requirement nobody can meet.
+        let device_keys = DeviceKeySettings::from_env();
+        if let Some(message) = device_keys.boot_error() {
+            return Err(ConfigError::InvalidSecurity(message));
+        }
+
         Ok(Config {
             host: env_or("HOST", "0.0.0.0"),
             port: env_number("PORT", 8080u16)?,
@@ -1866,6 +1958,7 @@ impl Config {
             rate_limit: RateLimitConfig::from_env(),
             agent_port: AgentPortConfig::from_env()?,
             mentions: MentionSettings::from_env(),
+            device_keys,
             // ADR-0149: never fatal. An instance that was not given the
             // Centrifugo publish credential keeps 휘발 신호 off and answers 503
             // on the two routes — the same posture as every other subsystem
@@ -2060,6 +2153,52 @@ fn choose_log_filter(rust_log: Option<&str>, log_level: Option<&str>) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #3022: the requirement is off by default, and turning it on without the
+    /// instance id every signed statement carries is refused at boot.
+    #[test]
+    fn device_key_settings_default_off_and_refuse_an_unsatisfiable_requirement() {
+        let default = DeviceKeySettings::default();
+        assert!(!default.host_register_signature_required);
+        assert!(
+            !default.refresh_reuse_sweep_all_sessions,
+            "password sign-ins are not swept until the web client coordinates tabs"
+        );
+        assert_eq!(default.boot_error(), None);
+        assert!(
+            !default.human_control_signature_required,
+            "ADR-0146 D-11: signed instructions stay optional until R1 and R2 PASS"
+        );
+        let unsatisfiable = DeviceKeySettings {
+            instance_id: None,
+            host_register_signature_required: true,
+            ..DeviceKeySettings::default()
+        };
+        assert!(unsatisfiable.boot_error().is_some());
+        let unsatisfiable_control = DeviceKeySettings {
+            instance_id: None,
+            human_control_signature_required: true,
+            ..DeviceKeySettings::default()
+        };
+        assert!(unsatisfiable_control.boot_error().is_some());
+        let on = DeviceKeySettings {
+            instance_id: Some("inst_a".into()),
+            host_register_signature_required: true,
+            human_control_signature_required: true,
+            ..DeviceKeySettings::default()
+        };
+        assert_eq!(on.boot_error(), None);
+        let smuggled = DeviceKeySettings {
+            instance_id: Some("inst\nb".into()),
+            ..DeviceKeySettings::default()
+        };
+        assert!(smuggled.boot_error().is_some());
+        let oversized = DeviceKeySettings {
+            instance_id: Some("i".repeat(257)),
+            ..DeviceKeySettings::default()
+        };
+        assert!(oversized.boot_error().is_some());
+    }
 
     #[test]
     fn agent_port_origin_is_optional_but_present_values_are_exact_https() {

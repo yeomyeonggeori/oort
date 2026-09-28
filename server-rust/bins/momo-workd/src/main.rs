@@ -61,6 +61,7 @@ async fn main() {
             config,
             dev_key_file,
         } => cli::forget(config, dev_key_file).await,
+        Invocation::ResetRoot { config } => cli::reset_root(config),
         Invocation::Run {
             config,
             dev_key_file,

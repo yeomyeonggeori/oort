@@ -83,11 +83,20 @@ const SERVER_OWNED_PROPS_KEY: &str = "mention_member_ids";
 /// props map any member can write is not somewhere that sentence can be sourced
 /// from. The validated block arrives as `harnessRefine` instead, and
 /// `momo_messaging::refine` is what turns it into this key.
-const SERVER_OWNED_PROPS_KEYS: [&str; 3] = [
+///
+/// [`INSTRUCTION_PROPS_KEY`] (#3027) is the same forged-claim case: it marks a
+/// session-thread message as the owner's **signed** instruction, written only
+/// by `POST …/work-sessions/{session}/instructions` beside the control it
+/// names. A plain chat send must not be able to look like one.
+const SERVER_OWNED_PROPS_KEYS: [&str; 4] = [
     SERVER_OWNED_PROPS_KEY,
     STREAM_PROPS_KEY,
     HARNESS_REFINE_PROPS_KEY,
+    INSTRUCTION_PROPS_KEY,
 ];
+
+/// `momo.instruction` — see [`crate::routes::work_instructions`].
+const INSTRUCTION_PROPS_KEY: &str = crate::routes::work_instructions::PROPS_KEY;
 
 /// The props key that carries an agent run's id for readers (#1166).
 ///
@@ -1739,7 +1748,16 @@ mod tests {
         // guard, so a client that could write it could park a huge number on
         // someone else's message and freeze every later slice as "stale".
         props.insert(STREAM_PROPS_KEY.to_string(), r#"{"rev":9999}"#.to_string());
+        // #3027 — a chat send must not pass for a signed instruction.
+        props.insert(
+            INSTRUCTION_PROPS_KEY.to_string(),
+            r#"{"mode":"interrupt"}"#.to_string(),
+        );
         let value = props_value(Some(&props));
+        assert!(
+            value.get(INSTRUCTION_PROPS_KEY).is_none(),
+            "momo.instruction is server-owned and must be stripped"
+        );
         assert_eq!(value["k"], Value::String("v".into()));
         assert!(
             value.get(SERVER_OWNED_PROPS_KEY).is_none(),

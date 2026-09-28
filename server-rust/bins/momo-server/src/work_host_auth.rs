@@ -570,6 +570,12 @@ mod tests {
                 "/v1/workspaces/{ws}/work-sessions/{}/permission-decisions",
                 Uuid::from_u128(6)
             ),
+            // #3027: the owner's signed instruction. A host signing here would
+            // prompt its own agent as its owner.
+            format!(
+                "/v1/workspaces/{ws}/work-sessions/{}/instructions",
+                Uuid::from_u128(6)
+            ),
         ] {
             for method in [Method::GET, Method::POST, Method::PUT, Method::PATCH] {
                 assert!(

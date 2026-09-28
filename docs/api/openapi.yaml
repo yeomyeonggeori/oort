@@ -94,6 +94,10 @@ tags:
     description: Channel-bound ephemeral voice huddle lifecycle and LiveKit room grants.
   - name: work-hosts
     description: Registered execution hosts authenticated by Ed25519 heartbeats.
+  - name: device-keys
+    description: >
+      A person's device signing keys (Secure Enclave P-256), bound to the
+      sign-in they were registered under (ADR-0146 개정 2026-09-28 R2).
   - name: work-sessions
     description: Host-owned interactive work session ledger bound to channel thread roots.
   - name: workstreams
@@ -188,7 +192,14 @@ paths:
       description: >
         Single-use rotation (MOMO-300): the presented refresh token is revoked
         atomically; replaying it returns 401. Exactly one concurrent caller
-        wins.
+        wins. A replay of a token spent more than 30 seconds earlier also ends
+        the whole sign-in (#3022, ADR-0188 §4 R1): every live token of the
+        session lineage is revoked, with its push registrations and device
+        keys. Inside 30 seconds (a retried lost response) it is only refused.
+        This applies to QR-linked (phone) sessions always, and to password
+        sign-ins only when the instance sets
+        `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=true` (default off: browser
+        tabs rotate without cross-tab coordination).
       security: []
       requestBody:
         required: true
@@ -3210,6 +3221,252 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /v1/workspaces/{workspaceId}/device-keys:
+    post:
+      tags: [device-keys]
+      operationId: registerDeviceKey
+      summary: Register this device's signing public key (ADR-0146 개정 D-1, D-6, D-7).
+      description: >
+        Human bearer only, for the caller only (a `memberId` naming anyone else
+        is 403 `device_key_member_mismatch`). The key is bound to the caller's
+        session lineage and is revoked when that sign-in ends — logout,
+        unlinking the device, a refresh-token reuse, or any path that ends
+        every session of the member. The lineage must still be able to rotate
+        (409 `session_lineage_ended` otherwise). A `macos` key starts as a root
+        candidate (`state: root`); an `ios` key starts `unendorsed` and cannot
+        instruct until a root endorses it. The server's root is advisory: the
+        host Mac's workd pins the real root (D-10).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterDeviceKeyRequest"
+      responses:
+        "201":
+          description: Key registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceKeyResponse"
+        "400":
+          description: Unknown alg or platform, a key that is not a canonical compressed P-256 point, or a bad label.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            Agent bearer, workspace mismatch, inactive membership, another
+            member named (`device_key_member_mismatch`), a root key without the
+            right password (`device_root_password_required`), or a root key
+            from a QR-linked session (`device_root_linked_session`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            The public key is already live in this workspace
+            (`device_key_already_registered`), or this sign-in has ended
+            (`session_lineage_ended`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      tags: [device-keys]
+      operationId: listDeviceKeys
+      summary: List the caller's own device keys, revoked ones included.
+      description: >
+        Newest first. Revoked keys stay listed with their revocation letter,
+        which workd (E4) is handed. `current` marks keys of the calling sign-in.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The caller's keys.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceKeyListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, workspace mismatch, or inactive membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/device-keys/signing-context:
+    get:
+      tags: [device-keys]
+      operationId: getDeviceSigningContext
+      summary: What a device signs a momo.human.control.v1 statement against.
+      description: >
+        ADR-0146 개정 2026-09-28 D-5 · D-9 (#3023). `instanceId` is this
+        instance's `MOMO_INSTANCE_ID`, served verbatim: the `instance_id` line
+        of every signed statement (host_register and signed instructions verify
+        against the same value). Clients never build it from a URL.
+        `serverTimeMs` is the clock the ±5 min window is measured on; a device
+        signs `issuedAtMs` from its own clock plus the offset it reads here.
+        The two flags say whether this instance requires a signature today.
+        Human bearer, active member.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The signing context.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SigningContextResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, workspace mismatch, or inactive membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: >
+            `error.code` instance_id_unconfigured — the operator set no
+            `MOMO_INSTANCE_ID`, so no signed statement can verify.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/device-keys/{keyId}/endorsement:
+    post:
+      tags: [device-keys]
+      operationId: endorseDeviceKey
+      summary: Record a root key's `momo.human.device_endorse.v1` letter for a phone key (D-6 ②).
+      description: >
+        The letter is rebuilt from the stored rows (workspace, member, root key
+        id, the target's alg, public key and label) and verified under the
+        stored root key; only the root key id and the signature travel. The
+        root must be a live, unendorsed `macos` key of the caller; the target a
+        live, unendorsed `ios` key of the caller. The canonical low-s signature
+        is stored. Mac-to-Mac endorsement is the next stage.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EndorseDeviceKeyRequest"
+      responses:
+        "200":
+          description: The endorsed key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceKeyResponse"
+        "400":
+          description: Malformed id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            `device_signature_invalid`, `device_root_not_eligible`,
+            `device_key_member_mismatch`, or `device_key_revoked`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "`device_key_not_found`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`device_key_not_endorsable` — revoked, a Mac, or already endorsed."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/device-keys/{keyId}/revocation:
+    post:
+      tags: [device-keys]
+      operationId: revokeDeviceKey
+      summary: Record a root key's signed `momo.human.device_revoke.v2` (or v1) letter (D-7; v2 names the revoked public key, #3068).
+      description: >
+        Rebuilt from the stored rows plus `revokedAtMs` (the time inside the
+        letter, not after server time + 5 minutes, not before the key existed)
+        and verified under the caller's live root key. Revokes the key (never
+        deletes it) and keeps the letter for workd. A key a session end already
+        revoked still takes its letter once.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevokeDeviceKeyRequest"
+      responses:
+        "200":
+          description: The revoked key with its letter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceKeyResponse"
+        "400":
+          description: Malformed id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            `device_signature_invalid`, `device_root_not_eligible`,
+            `device_key_member_mismatch`, or `device_key_revoked` (a letter is
+            already recorded).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "`device_key_not_found`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /v1/workspaces/{workspaceId}/work-hosts:
     post:
       tags: [work-hosts]
@@ -3225,7 +3482,12 @@ paths:
         keys on `scope = member`, so the scope is not the registrant's free
         choice. ownerMemberId is always the registering member. The role is
         judged in the same tenant transaction as the insert. Capabilities are
-        boolean tool-availability flags only.
+        boolean tool-availability flags only. ADR-0146 개정 D-8 (#3022): a
+        member-scoped registration may carry `registration`, the caller's root
+        device key's `host_register` statement; when present it is always
+        verified and the host is created under the signed `hostId`. The
+        instance requires it only when `MOMO_HOST_REGISTER_SIGNATURE_REQUIRED`
+        is on (default off until the R1 security re-review PASS, ADR-0146 D-11).
       security:
         - bearerAuth: []
       parameters:
@@ -3247,7 +3509,8 @@ paths:
           description: >
             Invalid scope, type, display name, public key, or capabilities; or
             an `app` host asked to be workspace-scoped (`error.code:
-            app_host_member_scope_required`).
+            app_host_member_scope_required`); or `registration` on a
+            workspace-scoped host, or a malformed one.
           content:
             application/json:
               schema:
@@ -3258,13 +3521,30 @@ paths:
           description: >
             Agent bearer, workspace mismatch, or inactive membership; or a
             workspace-scoped host asked for by a member who is not a workspace
-            owner/admin (`error.code: workspace_host_admin_required`).
+            owner/admin (`error.code: workspace_host_admin_required`); or a
+            member-scoped host without a signature where one is required
+            (`device_signature_required`) or with one that does not hold
+            (`device_signature_invalid`, `device_root_not_eligible`,
+            `device_key_revoked`, `device_key_member_mismatch`,
+            `device_key_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`host_register_replayed` — a host with the signed `hostId` already exists."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          description: "`instance_id_unconfigured` — a signed registration on an instance with no `MOMO_INSTANCE_ID`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     get:
       tags: [work-hosts]
       operationId: listWorkHosts
@@ -4369,7 +4649,13 @@ paths:
         new running work_session reuses the same root thread, records
         resumedFromSessionId, and emits the existing spawn dispatch in one
         tenant transaction. Host paths, credentials, and process state are not
-        accepted or persisted.
+        accepted or persisted. R2 (#3027): a resume may carry the owner's
+        `momo.human.control.v2` spawn statement (`humanSignature`) together
+        with `sessionId`, the successor session id it signs; the new session
+        is created under exactly that id, and the statement binds the source's
+        tool, channel and label. Onto a member-scoped host it is required when
+        the instance sets `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED` (403
+        device_signature_required); it is verified whenever sent.
       security:
         - bearerAuth: []
       parameters:
@@ -4410,8 +4696,9 @@ paths:
         "409":
           description: >
             Source is not orphaned, target host is revoked/unavailable/outside
-            policy, target host is the source host, or the workspace/member pool
-            has no available slot.
+            policy, target host is the source host, the workspace/member pool
+            has no available slot, or (#3027) `error.code`
+            resume_session_id_taken / device_nonce_replayed.
 
   /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/permission-decisions:
     post:
@@ -4433,7 +4720,15 @@ paths:
         session's host, a server-authored `approval.decided` session event
         naming `request_event_id`, and a `work.permission.decided` audit row.
         A non-empty `instruction` is refused until R2 (owner input needs the
-        device-key signature). Golden contract:
+        device-key signature). R2 (ADR-0146 개정 D-8 · D-10, #3023):
+        `humanSignature` is the owner's `momo.human.control.v1` statement
+        (kind=permission) over the stored request event id, option id and
+        kind, this session and the session's host. It is verified whenever
+        sent; an allow requires it when the instance sets
+        `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`; a reject never does. A
+        verified signature rides on the permission control
+        (`WorkControl.humanSignature`) and is recorded in `action_signature`
+        in the same transaction; its nonce is spent once. Golden contract:
         docs/api/work-permission-decision.golden.json.
       security:
         - bearerAuth: []
@@ -4457,7 +4752,8 @@ paths:
           description: >
             `error.code` permission_kind_refused (kind is not allow_once or
             reject_once), permission_option_invalid (optionId is not an offered
-            option of that kind), or permission_instruction_unsupported.
+            option of that kind), permission_instruction_unsupported, or
+            permission_scope_unsupported (a signed scope `session` before E8).
           content:
             application/json:
               schema:
@@ -4467,9 +4763,15 @@ paths:
         "403":
           description: >
             An agent bearer (refused before the handler), `error.code`
-            permission_decider_not_human for any other non-human principal, or
+            permission_decider_not_human for any other non-human principal,
             permission_owner_only for a human who is not the session and host
-            owner.
+            owner, or a device-signature refusal (#3023):
+            device_signature_required (an allow without a signature while the
+            instance requires one), device_signature_invalid (the statement
+            does not verify for this decision, host, session or instance),
+            device_key_revoked, device_key_not_endorsed (a phone key with no
+            live root endorsement), device_signature_expired (outside ±5 min
+            or a lifetime over 10 min).
           content:
             application/json:
               schema:
@@ -4481,8 +4783,118 @@ paths:
             `error.code` permission_already_decided (a different decision was
             recorded first) or permission_request_closed (the request lapsed,
             its turn or session ended, its host was revoked, or the host
-            withdrew it). A lapsed or orphaned pending request is recorded as
-            expired/cancelled by the same call.
+            withdrew it), or device_nonce_replayed (the signed statement's
+            nonce was already spent). A lapsed or orphaned pending request is
+            recorded as expired/cancelled by the same call.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: >
+            `error.code` instance_id_unconfigured — a signature was sent to an
+            instance with no `MOMO_INSTANCE_ID`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/instructions:
+    post:
+      tags: [work-sessions]
+      operationId: sendWorkInstruction
+      summary: The session owner's signed instruction to its agent — queue or interrupt (R2-E7).
+      description: >
+        ADR-0146 개정 D-5b · D-8 · D-10 (#3027), ADR-0188 D3 · D4. Closed
+        (403 signed_instructions_disabled) unless the instance sets
+        `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`. Human bearer of the session
+        owner, who must also own the session's member-scoped host; agent
+        bearers and host-signed requests never reach it. `humanSignature` is
+        required: the owner's `momo.human.control.v2` statement (a v1 one is
+        also accepted for `input`) with kind=input over this session, the
+        session's host, NFC(text) and the mode; `clientMsgId` must equal its
+        nonce and `mode` its mode, so the server cannot turn a queued
+        instruction into an interrupt. In one tenant transaction the route
+        writes the `input` work control (signature columns, `action_signature`
+        row, dispatch event), the instruction as a session-thread message
+        (root = the session's root message, `client_msg_id` = nonce, props
+        `momo.instruction` = control id + mode) through the existing send
+        helper (channel_seq + message + outbox), and a
+        `work.instruction.sent` audit row. `queue` runs after the running
+        turn and anything already queued; `interrupt` has the host cancel the
+        running turn (ACP session/cancel) and deliver it next. A retry of an
+        accepted instruction answers 200 with the same control and message
+        before the signature is looked at. A session that is not
+        running/idle, or a host that is revoked or offline (no heartbeat in
+        90 s), is refused by name before the nonce is spent. Golden contract:
+        docs/api/work-instruction.golden.json.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkSessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkInstructionRequest"
+      responses:
+        "201":
+          description: The instruction was accepted and dispatched to the host.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkInstructionResponse"
+        "200":
+          description: A retry of an instruction already accepted (`replayed` true).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkInstructionResponse"
+        "400":
+          description: >
+            `error.code` instruction_mode_invalid, instruction_text_invalid
+            (empty, over 32768 characters, or not NFC), instruction_slash_command
+            (the host never runs an adapter command), or
+            instruction_signature_mismatch (clientMsgId is not the signed
+            nonce, or mode is not the signed mode).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            `error.code` signed_instructions_disabled (the flag is off),
+            instruction_not_human, instruction_owner_only (not the session and
+            host owner), instruction_channel_member_only (not an active member
+            of the session's channel), instruction_member_host_only (a
+            workspace-scoped host), or a device-signature refusal: device_signature_invalid,
+            device_key_revoked, device_key_not_endorsed,
+            device_signature_expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The session does not exist in this workspace.
+        "409":
+          description: >
+            `error.code` work_session_not_accepting (the session is not running
+            or idle), work_host_offline (no heartbeat in 90 s — not
+            delivered; resend the same signed instruction later),
+            work_host_revoked, instruction_nonce_reused (the nonce is on
+            another instruction, or already a chat message's clientMsgId), or
+            device_nonce_replayed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: >
+            `error.code` instance_id_unconfigured — no `MOMO_INSTANCE_ID`.
           content:
             application/json:
               schema:
@@ -7778,7 +8190,13 @@ paths:
         Same operator boundary as the read. Replaces positions >= 1 in one
         transaction; position 0 is rejected by name. Omitting an entry's bearer
         keeps the ciphertext already stored at that position, so a hop can be
-        reordered or parked without re-typing a write-only secret.
+        parked, switched mode, or moved to another path on the same origin
+        without re-typing a write-only secret. A kept key is bound to its
+        origin (scheme, host and port, default port written out): moving a hop
+        to another origin without a new bearer is a 409 (#3040, ADR-0147
+        증보 2026-09-28), so one operator cannot point another operator's key
+        at a host of their choosing. A successful replace audits
+        `origin_changed` with redacted endpoint labels only.
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -7796,6 +8214,16 @@ paths:
             Unknown body key, position 0 or a duplicate position, more than
             eight hops, an unusable baseUrl, an unknown mode, an empty bearer,
             or a new position submitted without one.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: >
+            `error.code: key_required_for_new_origin` — an entry omitted its
+            bearer while its baseUrl names a different origin than the hop
+            stored at that position. Nothing is written; resubmit the entry with
+            the key for the new provider. The message carries the position and
+            redacted endpoint labels, never a key.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -8312,7 +8740,16 @@ components:
                 member-scoped host), `workspace_host_admin_required` (a
                 workspace-scoped host registered by a member who is not a
                 workspace owner/admin), `app_host_member_scope_required` (an
-                `app` host registered with a scope other than `member`).
+                `app` host registered with a scope other than `member`),
+                `key_required_for_new_origin` (a provider chain hop moved to
+                another origin without a new key); ADR-0146 개정 R2 (#3022):
+                `device_signature_required`, `device_signature_invalid`,
+                `device_key_revoked`, `device_key_not_found`,
+                `device_key_member_mismatch`, `device_root_not_eligible`,
+                `device_key_not_endorsable`, `device_key_already_registered`,
+                `session_lineage_ended`, `device_root_password_required`,
+                `device_root_linked_session`, `host_register_replayed`,
+                `instance_id_unconfigured`.
 
     # ---- Memory Plane (ADR-0129 / MOMO-526) ---------------------------------
     MemoryScope:
@@ -10707,6 +11144,317 @@ components:
           additionalProperties:
             type: boolean
           description: Boolean tool-availability flags only.
+        registration:
+          $ref: "#/components/schemas/HostRegisterSignature"
+
+    HostRegisterSignature:
+      type: object
+      additionalProperties: false
+      required: [deviceKeyId, hostId, nonce, issuedAtMs, expiresAtMs, signature]
+      description: >
+        The root device key's `momo.human.control.v1` statement with
+        `kind=host_register` (ADR-0146 개정 D-5, D-8). The server rebuilds the
+        bytes from its own instance id, the caller's workspace and member, and
+        this request's `publicKey`, `hostId` and `displayName`; `issuedAtMs`
+        must be within 5 minutes of server time and `expiresAtMs` at most 10
+        minutes after it.
+      properties:
+        deviceKeyId:
+          type: string
+          format: uuid
+        hostId:
+          type: string
+          format: uuid
+          description: The host id candidate; the host is created under it.
+        nonce:
+          type: string
+          format: uuid
+        issuedAtMs:
+          type: integer
+          format: int64
+        expiresAtMs:
+          type: integer
+          format: int64
+        signature:
+          type: string
+          description: base64 of raw r‖s (64 bytes); high-s is accepted and normalized.
+
+    RegisterDeviceKeyRequest:
+      type: object
+      additionalProperties: false
+      required: [alg, publicKey, platform]
+      properties:
+        alg:
+          type: string
+          enum: [p256]
+        publicKey:
+          type: string
+          minLength: 44
+          maxLength: 44
+          description: base64 STANDARD of the 33-byte compressed SEC1 point (canonical encoding).
+        platform:
+          type: string
+          enum: [macos, ios]
+        label:
+          type: string
+          maxLength: 80
+        memberId:
+          type: string
+          format: uuid
+          description: Optional; must be the caller.
+        currentPassword:
+          type: string
+          description: >
+            Required for a `macos` (root) key — the caller's password,
+            re-entered, under the password-change rate limit. A root key is
+            refused from a QR-linked session (`device_root_linked_session`).
+
+    EndorseDeviceKeyRequest:
+      type: object
+      additionalProperties: false
+      required: [rootKeyId, signature]
+      properties:
+        rootKeyId:
+          type: string
+          format: uuid
+        signature:
+          type: string
+          description: base64 of raw r‖s (64 bytes) over `momo.human.device_endorse.v1`.
+
+    RevokeDeviceKeyRequest:
+      type: object
+      additionalProperties: false
+      required: [rootKeyId, revokedAtMs, signature]
+      properties:
+        rootKeyId:
+          type: string
+          format: uuid
+        revokedAtMs:
+          type: integer
+          format: int64
+          description: The time inside the signed letter.
+        signature:
+          type: string
+          description: base64 of raw r‖s (64 bytes) over `momo.human.device_revoke.v2` (the stored key's public key is its fifth field, #3068) or `momo.human.device_revoke.v1`. A host relayed a v1 letter revokes the key id only.
+
+    DeviceKey:
+      type: object
+      required:
+        [id, workspaceId, memberId, alg, publicKey, platform, label, state, canInstruct, current, createdAtMs]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspaceId:
+          type: string
+          format: uuid
+        memberId:
+          type: string
+          format: uuid
+        alg:
+          type: string
+          enum: [p256]
+        publicKey:
+          type: string
+        platform:
+          type: string
+          enum: [macos, ios]
+        label:
+          type: string
+        state:
+          type: string
+          enum: [root, endorsed, unendorsed, revoked]
+          description: >
+            `root` = a live, unendorsed Mac key (root candidate); `endorsed` =
+            a live key whose endorsing root is still live; `unendorsed` = 지시
+            불가; `revoked`.
+        canInstruct:
+          type: boolean
+          description: "`state` is `root` or `endorsed`."
+        current:
+          type: boolean
+          description: Registered under the caller's own sign-in.
+        endorsedByKeyId:
+          type: string
+          format: uuid
+        endorsementSignature:
+          type: string
+        endorsedAtMs:
+          type: integer
+          format: int64
+        createdAtMs:
+          type: integer
+          format: int64
+        revokedAtMs:
+          type: integer
+          format: int64
+        revokedReason:
+          type: string
+          enum: [signed, logout, device_unlinked, refresh_reuse, member_sessions_ended]
+        revokedByKeyId:
+          type: string
+          format: uuid
+        revocationSignature:
+          type: string
+        revocationSignedAtMs:
+          type: integer
+          format: int64
+
+    DeviceKeyResponse:
+      type: object
+      required: [deviceKey]
+      properties:
+        deviceKey:
+          $ref: "#/components/schemas/DeviceKey"
+
+    DeviceKeyListResponse:
+      type: object
+      required: [deviceKeys]
+      properties:
+        deviceKeys:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceKey"
+
+    SigningContextResponse:
+      type: object
+      required:
+        [instanceId, serverTimeMs, maxLifetimeMs, maxClockSkewMs,
+         humanControlSignatureRequired, hostRegisterSignatureRequired,
+         humanControlSchema]
+      properties:
+        instanceId:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: MOMO_INSTANCE_ID verbatim — the statement's instance_id line.
+        serverTimeMs:
+          type: integer
+          format: int64
+        maxLifetimeMs:
+          type: integer
+          format: int64
+          description: Longest expiresAtMs − issuedAtMs accepted (600000).
+        maxClockSkewMs:
+          type: integer
+          format: int64
+          description: Largest |issuedAtMs − server now| accepted (300000).
+        humanControlSignatureRequired:
+          type: boolean
+          description: MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED.
+        hostRegisterSignatureRequired:
+          type: boolean
+          description: MOMO_HOST_REGISTER_SIGNATURE_REQUIRED.
+        humanControlSchema:
+          type: string
+          enum: [momo.human.control.v2]
+          description: >
+            The control schema a device signs (#3027). A v1 statement is still
+            accepted for every kind but spawn.
+
+    HumanSignatureRequest:
+      type: object
+      description: >
+        A person's `momo.human.control.v2` signature (v1 accepted for every
+        kind but spawn, #3027) sent beside an instruction (ADR-0146 개정 D-5 ·
+        D-10, #3023). Only what the server
+        cannot derive travels here; it rebuilds the 13 lines from its own
+        instance id and the workspace, member, host, session and content it is
+        about to write.
+      required: [deviceKeyId, nonce, issuedAtMs, expiresAtMs, signature]
+      additionalProperties: false
+      properties:
+        deviceKeyId:
+          type: string
+          format: uuid
+        nonce:
+          type: string
+          format: uuid
+          description: 128-bit random, spent once (input — the client_msg_id).
+        issuedAtMs:
+          type: integer
+          format: int64
+        expiresAtMs:
+          type: integer
+          format: int64
+          description: At most issuedAtMs + 600000.
+        signature:
+          type: string
+          description: base64 raw r‖s (64 bytes), either s form.
+        mode:
+          type: string
+          enum: [queue, interrupt]
+          description: input only.
+        scope:
+          type: string
+          enum: [once, session]
+          description: permission only (`session` refused until E8).
+        agentMemberId:
+          type: string
+          format: uuid
+          description: spawn only.
+        folderId:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: spawn only — the opaque folder id (ADR-0188 D6).
+
+    WorkControlHumanSignature:
+      type: object
+      description: >
+        The envelope a member host re-verifies (`momo-workd` human_trust, E4
+        #3024): the stored signature columns (migration 095) plus the signing
+        key and, for a phone, the root's device_endorse.v1 letter. Only on the
+        host's pending-controls read.
+      required:
+        [alg, instanceId, deviceKeyId, devicePublicKey, nonce, issuedAtMs,
+         expiresAtMs, signature]
+      properties:
+        alg:
+          type: string
+          enum: [p256]
+        instanceId:
+          type: string
+        deviceKeyId:
+          type: string
+          format: uuid
+        devicePublicKey:
+          type: string
+          description: base64 of the 33-byte compressed SEC1 point.
+        endorsement:
+          type: object
+          required: [rootKeyId, label, signature]
+          properties:
+            rootKeyId:
+              type: string
+              format: uuid
+            label:
+              type: string
+            signature:
+              type: string
+        nonce:
+          type: string
+          format: uuid
+        issuedAtMs:
+          type: integer
+          format: int64
+        expiresAtMs:
+          type: integer
+          format: int64
+        mode:
+          type: string
+          enum: [queue, interrupt]
+        scope:
+          type: string
+          enum: [once, session]
+        agentMemberId:
+          type: string
+          format: uuid
+        folderId:
+          type: string
+        signature:
+          type: string
+          description: canonical low-s raw r‖s, base64.
 
     CreateCloudHostRequest:
       type: object
@@ -10941,6 +11689,46 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/WorkControl"
+        deviceRevocations:
+          type: array
+          description: >
+            ADR-0146 개정 D-7 (#3022, workd #3024): the member host owner's
+            root-signed `momo.human.device_revoke` (v2, or v1) letters, for workd to verify
+            against its pinned root. Omitted when there are none and for a
+            workspace host. A session-end revocation carries no letter and is
+            not relayed. At most the newest 256 are sent, so a host keeps every
+            letter it has seen. `targetPublicKey` is outside the signed bytes:
+            a host binds it to the key it already holds for `targetKeyId`.
+          items:
+            $ref: "#/components/schemas/DeviceRevocation"
+
+    DeviceRevocation:
+      type: object
+      required:
+        [workspaceId, memberId, rootKeyId, targetKeyId, revokedAtMs, signature, targetPublicKey]
+      properties:
+        workspaceId:
+          type: string
+          format: uuid
+        memberId:
+          type: string
+          format: uuid
+        rootKeyId:
+          type: string
+          format: uuid
+        targetKeyId:
+          type: string
+          format: uuid
+        revokedAtMs:
+          type: integer
+          format: int64
+          description: The time inside the signed letter.
+        signature:
+          type: string
+          description: base64 raw r‖s (canonical low-s).
+        targetPublicKey:
+          type: string
+          description: The revoked key (not inside the signed bytes).
 
     # ---- Work sessions ------------------------------------------------------
     UpdateWorkPoolRequest:
@@ -11152,11 +11940,22 @@ components:
     ResumeWorkSessionRequest:
       type: object
       required: [targetHostId]
+      additionalProperties: false
       properties:
         targetHostId:
           type: string
           format: uuid
           description: Active registered host allowed by the effective tier policy.
+        sessionId:
+          type: string
+          format: uuid
+          description: >
+            #3027 — the successor session id the owner signed (the v2 spawn's
+            session line). Sent with humanSignature and only then (400
+            resume_signature_incomplete); 409 resume_session_id_taken when it
+            already exists.
+        humanSignature:
+          $ref: "#/components/schemas/HumanSignatureRequest"
 
     PutWorkTierPolicyRequest:
       type: object
@@ -11822,6 +12621,62 @@ components:
           description: >
             Reserved for 「거부하고 지시」. Refused (400
             permission_instruction_unsupported) while non-empty, until R2.
+        humanSignature:
+          $ref: "#/components/schemas/HumanSignatureRequest"
+
+    WorkInstructionRequest:
+      type: object
+      required: [text, mode, clientMsgId, humanSignature]
+      additionalProperties: false
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 32768
+          description: NFC. Becomes the next turn's prompt and the thread message, verbatim.
+        mode:
+          type: string
+          enum: [queue, interrupt]
+          description: Must equal humanSignature.mode (the mode is signed).
+        clientMsgId:
+          type: string
+          format: uuid
+          description: The thread message's idempotency key; must equal humanSignature.nonce.
+        humanSignature:
+          $ref: "#/components/schemas/HumanSignatureRequest"
+
+    WorkInstructionMessage:
+      type: object
+      required: [id, channelId, rootId, seq, clientMsgId]
+      properties:
+        id:
+          type: string
+          format: uuid
+        channelId:
+          type: string
+          format: uuid
+        rootId:
+          type: string
+          format: uuid
+          description: The session's root message (the session thread).
+        seq:
+          type: integer
+          format: int64
+        clientMsgId:
+          type: string
+          format: uuid
+
+    WorkInstructionResponse:
+      type: object
+      required: [workControl, message, replayed]
+      properties:
+        workControl:
+          $ref: "#/components/schemas/WorkControl"
+        message:
+          $ref: "#/components/schemas/WorkInstructionMessage"
+        replayed:
+          type: boolean
+          description: true when this answered a retry of an accepted instruction.
 
     WorkPermissionRequest:
       type: object
@@ -11927,6 +12782,8 @@ components:
         updatedAtMs:
           type: integer
           format: int64
+        humanSignature:
+          $ref: "#/components/schemas/WorkControlHumanSignature"
 
     WorkControlResponse:
       type: object

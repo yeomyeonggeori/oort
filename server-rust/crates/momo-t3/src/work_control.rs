@@ -143,6 +143,31 @@ pub struct WorkControlRow {
     pub approval_message_id: Option<Uuid>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
+    /// ADR-0146 개정 D-10 (095, #3023): the person's signature on this control,
+    /// when it was signed. `None` for every unsigned row.
+    pub human: Option<HumanSignatureColumns>,
+}
+
+/// The `work_control` signature columns (095). All set or all NULL — the
+/// `work_control_human_signature_ck` CHECK — and written only from a statement
+/// `momo_auth::human_control::verify_human_control_in_tx` accepted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HumanSignatureColumns {
+    pub device_key_id: Uuid,
+    pub instance_id: String,
+    pub nonce: Uuid,
+    pub issued_at_ms: i64,
+    pub expires_at_ms: i64,
+    /// `input` only.
+    pub mode: Option<String>,
+    /// `permission` only.
+    pub scope: Option<String>,
+    /// `spawn` only.
+    pub spawn_agent_member_id: Option<Uuid>,
+    /// `spawn` only.
+    pub spawn_folder_id: Option<String>,
+    /// Canonical low-s raw `r‖s`, base64.
+    pub signature: String,
 }
 
 impl WorkControlRow {
@@ -167,6 +192,9 @@ pub struct NewWorkControl {
     pub kind: String,
     pub payload: Value,
     pub status: String,
+    /// The person's verified signature (095). `None` for every path that does
+    /// not carry one.
+    pub human: Option<HumanSignatureColumns>,
 }
 
 const CONTROL_COLUMNS: &str = "id, \
@@ -180,7 +208,17 @@ const CONTROL_COLUMNS: &str = "id, \
      status, \
      approval_message_id, \
      floor(extract(epoch from created_at) * 1000)::bigint AS created_at_ms, \
-     floor(extract(epoch from updated_at) * 1000)::bigint AS updated_at_ms";
+     floor(extract(epoch from updated_at) * 1000)::bigint AS updated_at_ms, \
+     device_key_id, \
+     human_instance_id, \
+     human_nonce, \
+     human_issued_at_ms, \
+     human_expires_at_ms, \
+     human_mode, \
+     human_scope, \
+     human_spawn_agent_member_id, \
+     human_spawn_folder_id, \
+     human_signature";
 
 fn decode_control(row: &sqlx::postgres::PgRow) -> Result<WorkControlRow, sqlx::Error> {
     use sqlx::Row as _;
@@ -197,7 +235,27 @@ fn decode_control(row: &sqlx::postgres::PgRow) -> Result<WorkControlRow, sqlx::E
         approval_message_id: row.try_get("approval_message_id")?,
         created_at_ms: row.try_get("created_at_ms")?,
         updated_at_ms: row.try_get("updated_at_ms")?,
+        human: decode_human(row)?,
     })
+}
+
+fn decode_human(row: &sqlx::postgres::PgRow) -> Result<Option<HumanSignatureColumns>, sqlx::Error> {
+    use sqlx::Row as _;
+    let Some(signature) = row.try_get::<Option<String>, _>("human_signature")? else {
+        return Ok(None);
+    };
+    Ok(Some(HumanSignatureColumns {
+        device_key_id: row.try_get("device_key_id")?,
+        instance_id: row.try_get("human_instance_id")?,
+        nonce: row.try_get("human_nonce")?,
+        issued_at_ms: row.try_get("human_issued_at_ms")?,
+        expires_at_ms: row.try_get("human_expires_at_ms")?,
+        mode: row.try_get("human_mode")?,
+        scope: row.try_get("human_scope")?,
+        spawn_agent_member_id: row.try_get("human_spawn_agent_member_id")?,
+        spawn_folder_id: row.try_get("human_spawn_folder_id")?,
+        signature,
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -363,10 +421,15 @@ pub async fn insert_work_control_in_tx(
     let sql = format!(
         "INSERT INTO work_control \
            (workspace_id, channel_id, requester_member_id, target_host_id, \
-            session_id, kind, payload, status) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+            session_id, kind, payload, status, \
+            device_key_id, human_instance_id, human_nonce, human_issued_at_ms, \
+            human_expires_at_ms, human_mode, human_scope, \
+            human_spawn_agent_member_id, human_spawn_folder_id, human_signature) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, \
+                 $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) \
          RETURNING {CONTROL_COLUMNS}"
     );
+    let human = new.human.as_ref();
     let row = sqlx::query(&sql)
         .bind(workspace_id)
         .bind(new.channel_id)
@@ -376,6 +439,16 @@ pub async fn insert_work_control_in_tx(
         .bind(&new.kind)
         .bind(&new.payload)
         .bind(&new.status)
+        .bind(human.map(|h| h.device_key_id))
+        .bind(human.map(|h| h.instance_id.as_str()))
+        .bind(human.map(|h| h.nonce))
+        .bind(human.map(|h| h.issued_at_ms))
+        .bind(human.map(|h| h.expires_at_ms))
+        .bind(human.and_then(|h| h.mode.as_deref()))
+        .bind(human.and_then(|h| h.scope.as_deref()))
+        .bind(human.and_then(|h| h.spawn_agent_member_id))
+        .bind(human.and_then(|h| h.spawn_folder_id.as_deref()))
+        .bind(human.map(|h| h.signature.as_str()))
         .fetch_one(&mut *conn)
         .await?;
     Ok(decode_control(&row)?)
@@ -1885,6 +1958,7 @@ mod tests {
             approval_message_id: None,
             created_at_ms: 1_700_000_000_000,
             updated_at_ms: 1_700_000_001_000,
+            human: None,
         }
     }
 

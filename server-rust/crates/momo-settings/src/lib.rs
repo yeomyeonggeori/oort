@@ -121,8 +121,8 @@ pub use oauth::{
 };
 pub use presets::{ProviderFormat, ProviderPreset, PROVIDER_PRESETS};
 pub use provider::{
-    is_unsafe_secret, redacted_endpoint_label, requires_strict_external_provider,
-    validated_base_url, BaseUrlInvalid, ProviderConfig, ProviderMode,
+    is_unsafe_secret, redacted_endpoint_label, requires_strict_external_provider, same_origin,
+    url_origin, validated_base_url, BaseUrlInvalid, ProviderConfig, ProviderMode,
 };
 pub use quota::{list_quota_snapshots, QuotaSnapshot};
 pub use tier::{

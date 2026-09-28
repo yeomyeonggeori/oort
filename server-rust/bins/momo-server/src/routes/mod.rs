@@ -21,6 +21,7 @@ pub mod channels;
 pub mod claim;
 pub mod cloud_hosts;
 pub mod credits;
+pub mod device_keys;
 pub mod device_link;
 pub mod devices;
 /// ADR-0165 / LIVE-1 — 관전 라이브 화면: the display half of the attach plane.
@@ -75,6 +76,7 @@ pub mod welcome;
 /// #1114 — the host-control ledger (ADR-0114 D4/D5) and its spawn approval.
 pub mod work_controls;
 pub mod work_hosts;
+pub mod work_instructions;
 pub mod work_permissions;
 pub mod work_sessions;
 pub mod work_tier_policy;

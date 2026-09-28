@@ -827,6 +827,180 @@ pub struct RegisterWorkHostRequest {
     pub public_key: String,
     #[serde(default)]
     pub capabilities: Option<BTreeMap<String, bool>>,
+    /// ADR-0146 개정 D-8 (#3022): the root device key's `host_register`
+    /// statement. Member-scoped `POST …/work-hosts` only; verified whenever
+    /// present, required when the instance turned the requirement on.
+    #[serde(default)]
+    pub registration: Option<HostRegisterSignature>,
+}
+
+/// The signed half of a member-scoped host registration (`momo.human.control.v1`
+/// with `kind=host_register`). The server rebuilds the statement from its own
+/// instance id, the caller's workspace and member, and the host key, id and
+/// display name this request registers; only what it cannot know travels here.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HostRegisterSignature {
+    /// The signing root key (`member_device_key.id`).
+    pub device_key_id: String,
+    /// The host id candidate. The host row is created under this id.
+    pub host_id: String,
+    pub nonce: String,
+    pub issued_at_ms: i64,
+    pub expires_at_ms: i64,
+    /// base64 raw r‖s (64 bytes).
+    pub signature: String,
+}
+
+// ---------------------------------------------------------------------------
+// Device signing keys (ADR-0146 개정 2026-09-28, #3022)
+// ---------------------------------------------------------------------------
+
+/// `POST /v1/workspaces/{ws}/device-keys`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RegisterDeviceKeyRequest {
+    /// `p256`.
+    pub alg: String,
+    /// base64 of the 33-byte compressed SEC1 point (canonical encoding).
+    pub public_key: String,
+    /// `macos` | `ios`.
+    pub platform: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Optional, and only ever the caller: a key is registered for the member
+    /// the bearer names, and any other value is refused.
+    #[serde(default)]
+    pub member_id: Option<String>,
+    /// Required for a `macos` (root) key: the caller's password, re-entered.
+    /// A bearer token alone must not mint the key that signs host
+    /// registrations and endorses phones (#3022 review H1).
+    #[serde(default)]
+    pub current_password: Option<String>,
+}
+
+/// `POST /v1/workspaces/{ws}/device-keys/{key}/endorsement` — a
+/// `device_endorse.v1` letter. The letter's other fields are the stored rows.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EndorseDeviceKeyRequest {
+    pub root_key_id: String,
+    /// base64 raw r‖s (64 bytes).
+    pub signature: String,
+}
+
+/// `POST /v1/workspaces/{ws}/device-keys/{key}/revocation` — a
+/// `device_revoke.v2` letter (#3068).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RevokeDeviceKeyRequest {
+    pub root_key_id: String,
+    /// The time inside the signed letter.
+    pub revoked_at_ms: i64,
+    /// base64 raw r‖s (64 bytes).
+    pub signature: String,
+}
+
+/// One device key. `state` is derived: `root` (a root candidate), `endorsed`,
+/// `unendorsed` (「지시 불가」) or `revoked`; `canInstruct` is `root|endorsed`.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceKeyDto {
+    pub id: String,
+    pub workspace_id: String,
+    pub member_id: String,
+    pub alg: String,
+    pub public_key: String,
+    pub platform: String,
+    pub label: String,
+    pub state: &'static str,
+    pub can_instruct: bool,
+    /// Registered under the caller's own sign-in.
+    pub current: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endorsed_by_key_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endorsement_signature: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endorsed_at_ms: Option<i64>,
+    pub created_at_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_by_key_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revocation_signature: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revocation_signed_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceKeyResponse {
+    pub device_key: DeviceKeyDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceKeyListResponse {
+    pub device_keys: Vec<DeviceKeyDto>,
+}
+
+/// `GET /v1/workspaces/{ws}/device-keys/signing-context` (#3023, ADR-0146 개정
+/// D-5 · D-9): what a device needs to sign a `momo.human.control.v1` statement
+/// this instance will accept.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SigningContextResponse {
+    /// `MOMO_INSTANCE_ID`, verbatim — the statement's `instance_id` line. The
+    /// one source: the same value `host_register` verifies against (#3022).
+    pub instance_id: String,
+    /// The server clock. A device signs `issuedAtMs` from its own clock
+    /// corrected by the offset it measures here (D-9 시계 보정).
+    pub server_time_ms: i64,
+    /// Longest `expiresAtMs − issuedAtMs` accepted (10 min).
+    pub max_lifetime_ms: i64,
+    /// Largest `|issuedAtMs − server now|` accepted (±5 min).
+    pub max_clock_skew_ms: i64,
+    /// `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`.
+    pub human_control_signature_required: bool,
+    /// `MOMO_HOST_REGISTER_SIGNATURE_REQUIRED`.
+    pub host_register_signature_required: bool,
+    /// The control schema a device signs (`momo.human.control.v2`, #3027).
+    /// A v1 statement is still accepted for every kind but `spawn`.
+    pub human_control_schema: &'static str,
+}
+
+/// A person's `momo.human.control.v2` (or, but for a spawn, v1) signature sent
+/// beside an instruction
+/// (#3023, ADR-0146 개정 D-5 · D-10). Only what the server cannot derive
+/// travels here: it rebuilds the statement from its own instance id and the
+/// workspace, member, host, session and content it is about to write.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HumanSignatureRequest {
+    /// The signing key (`member_device_key.id`).
+    pub device_key_id: Uuid,
+    /// 128-bit random, spent once (`input`: the `client_msg_id`).
+    pub nonce: Uuid,
+    pub issued_at_ms: i64,
+    pub expires_at_ms: i64,
+    /// base64 raw r‖s (64 bytes).
+    pub signature: String,
+    /// `input`: `queue` | `interrupt`.
+    #[serde(default)]
+    pub mode: Option<String>,
+    /// `permission`: `once` (`session` opens with E8 #3028).
+    #[serde(default)]
+    pub scope: Option<String>,
+    /// `spawn`: the agent member the statement names.
+    #[serde(default)]
+    pub agent_member_id: Option<Uuid>,
+    /// `spawn`: the opaque folder id (ADR-0188 D6).
+    #[serde(default)]
+    pub folder_id: Option<String>,
 }
 
 // `POST …/work-hosts/{host}/heartbeat` has no request DTO since ADR-0188 D7:
@@ -1069,6 +1243,19 @@ pub struct WorkToolProfilesResponse {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ResumeWorkSessionRequest {
     pub target_host_id: Uuid,
+    /// ADR-0146 개정 D-8 (#3027): the successor session id the owner signed
+    /// (the `momo.human.control.v2` spawn's session line). Sent together with
+    /// `humanSignature` and only then; the server creates the new session
+    /// under exactly this id, so it cannot choose which session the owner's
+    /// words join (#3024 M2).
+    #[serde(default)]
+    pub session_id: Option<Uuid>,
+    /// The owner's device signature over the resume's spawn (`kind=spawn`,
+    /// v2: agent, folder, tool, channel, label, and `sessionId`). Required
+    /// for a member-scoped target when `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`
+    /// is on; verified whenever sent.
+    #[serde(default)]
+    pub human_signature: Option<HumanSignatureRequest>,
 }
 
 /// Swift `WorkSessionDTO` (:57-75).
@@ -4149,6 +4336,49 @@ pub struct WorkPermissionDecisionRequest {
     /// the next turn is an owner `input`, which is R2 (ADR-0188 D3).
     #[serde(default)]
     pub instruction: Option<String>,
+    /// ADR-0146 개정 D-8 · D-10 (#3023): the owner's device signature over this
+    /// decision (`kind=permission`). Required for an allow when the instance
+    /// set `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`; verified whenever sent.
+    #[serde(default)]
+    pub human_signature: Option<HumanSignatureRequest>,
+}
+
+/// `POST …/work-sessions/{session}/instructions` request (#3027, ADR-0146
+/// 개정 D-5b · D-8): the owner's signed instruction to the session's agent.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkInstructionRequest {
+    /// The instruction, NFC, 1...32768 characters. It becomes the next turn's
+    /// prompt and the session-thread message, verbatim.
+    pub text: String,
+    /// `queue` (after the running turn) | `interrupt` (cancel it, go next).
+    /// Must equal `humanSignature.mode` — the mode is signed.
+    pub mode: String,
+    /// The idempotency key of the thread message; must equal
+    /// `humanSignature.nonce` (ADR-0146 D-5: `client_msg_id` = nonce).
+    pub client_msg_id: Uuid,
+    /// The owner's `momo.human.control` statement, `kind=input`. Required.
+    pub human_signature: HumanSignatureRequest,
+}
+
+/// The thread message an instruction left (#3027).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkInstructionMessageDto {
+    pub id: String,
+    pub channel_id: String,
+    pub root_id: String,
+    pub seq: i64,
+    pub client_msg_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkInstructionResponse {
+    pub work_control: WorkControlDto,
+    pub message: WorkInstructionMessageDto,
+    /// `true` when this answered a retry of an instruction already accepted.
+    pub replayed: bool,
 }
 
 /// One decided (or still pending) permission request.
@@ -4191,6 +4421,11 @@ pub struct WorkControlDto {
     pub approval_message_id: Option<String>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
+    /// ADR-0146 개정 D-10 (#3023): the person's signature envelope, in the
+    /// shape the host verifies (`momo-workd` `human_trust`, E4 #3063). Sent on
+    /// the host's `pending-controls` read only; absent for an unsigned control.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub human_signature: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -4209,6 +4444,25 @@ pub struct WorkControlResponse {
 #[serde(rename_all = "camelCase")]
 pub struct PendingWorkControlsResponse {
     pub work_controls: Vec<WorkControlDto>,
+    /// ADR-0146 개정 D-7 (#3022, workd E4 #3024): the host owner's root-signed
+    /// `device_revoke.v2` letter (#3068)., relayed for workd to verify against its
+    /// pinned root. Omitted when empty, so every host that has none gets
+    /// today's bytes.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub device_revocations: Vec<DeviceRevocationDto>,
+}
+
+/// One relayed revocation letter (`pendingControls.deviceRevocations[]`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceRevocationDto {
+    pub workspace_id: String,
+    pub member_id: String,
+    pub root_key_id: String,
+    pub target_key_id: String,
+    pub revoked_at_ms: i64,
+    pub signature: String,
+    pub target_public_key: String,
 }
 
 /// Swift `WorkAutoApproveResponse` (:40-43).
