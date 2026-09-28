@@ -21,6 +21,7 @@ import {
   linkUnresolvedSentence,
   TEAM_DEFAULTS_CHECK_FIRST,
   TEAM_DEFAULTS_NOT_APPLIED,
+  TEAM_DEFAULTS_OFFLINE,
   teamChoiceText,
   teamModelNote,
   teamOptionKey,
@@ -51,6 +52,8 @@ import { useAiDefaults, useMyAccounts, writeAiDefaults } from "./aiDefaultsStore
 // `off`만 받아 읽기 전용이다.
 // =============================================================================
 
+/** 운영자, 팀 줄을 아직 읽는 중. 실패라고 말하지 않는다(design-review #3042 H1). */
+const TEAM_FOOT_OPERATOR_LOADING = "팀 줄은 운영자 설정이에요.";
 /** 운영자인데 팀 줄을 읽지 못했다(옛 서버 404·오류). 저장 칸이 없다는 사실만. */
 const TEAM_FOOT_OPERATOR =
   "팀 줄은 운영자 설정이에요. 이 서버에서 팀 줄을 불러오지 못해 지금은 서버가 정한 값을 보여 줘요.";
@@ -70,6 +73,8 @@ export interface TeamDefaultsState {
   /** 저장이 날고 있는 줄과 그 값. */
   readonly pending: { rowId: TeamDefaultRowId; input: TeamDefaultAiInput | null } | null;
   readonly saveError: { rowId: TeamDefaultRowId; message: string } | null;
+  /** 실시간 연결이 끊겼다: 팀 연결 절의 다른 쓰기처럼 칸을 잠그고 이유를 적는다. */
+  readonly offline: boolean;
   readonly onChoose: (rowId: TeamDefaultRowId, input: TeamDefaultAiInput | null) => void;
 }
 
@@ -111,7 +116,13 @@ export function AiDefaultsTable({
       {operator !== null && (
         <AiFoot>
           <span data-testid="ai-defaults-team-foot" data-operator={operator ? "yes" : "no"}>
-            {!operator ? TEAM_FOOT_MEMBER : team?.status === "ready" ? TEAM_DEFAULTS_NOT_APPLIED : TEAM_FOOT_OPERATOR}
+            {!operator
+              ? TEAM_FOOT_MEMBER
+              : team?.status === "ready"
+                ? TEAM_DEFAULTS_NOT_APPLIED
+                : team?.status === "error"
+                  ? TEAM_FOOT_OPERATOR
+                  : TEAM_FOOT_OPERATOR_LOADING}
           </span>
         </AiFoot>
       )}
@@ -143,6 +154,8 @@ function DefaultRow({
   const describedBy = ["model", "note", "fallback", "saved", "error"].map(lineId).join(" ");
 
   let choice;
+  // 운영자에게 열린 팀 줄: 「운영자」 표지에 자물쇠를 달지 않는다(잠김이 아니다).
+  let teamEditable = false;
   if (personal) {
     const id = row.id as PersonalRowId;
     const saved = prefs[id] ?? null;
@@ -222,11 +235,17 @@ function DefaultRow({
     const pending = team.pending?.rowId === id ? team.pending.input : undefined;
     const selected: TeamDefaultAiInput | null =
       pending !== undefined ? pending : saved ? { linkPosition: saved.linkPosition, modelId: saved.modelId } : null;
-    if (team.links.length === 0) {
+    const canPick = team.links.length > 0;
+    if (!canPick) {
       // 확인 전에는 고를 모델을 모른다. 지어낸 목록 대신 저장된 값과 할 일을 말한다.
+      // 저장된 연결이 바뀌었으면 그 문장(밑)이 할 일까지 순서대로 말한다.
       choice = <ReadOnlyBox>{teamChoiceText(id, saved)}</ReadOnlyBox>;
-      lines.push({ key: "model", text: TEAM_DEFAULTS_CHECK_FIRST, tone: "muted" });
+      if (!saved || saved.linkResolved) {
+        lines.push({ key: "model", text: TEAM_DEFAULTS_CHECK_FIRST, tone: "muted" });
+      }
     } else {
+      teamEditable = true;
+      const busy = pending !== undefined;
       const options = teamOptions(id, saved, team.links);
       const value = teamOptionKey(selected);
       const current = options.find((option) => option.key === value);
@@ -237,7 +256,12 @@ function DefaultRow({
           value={value}
           title={current?.text}
           className="h-control rounded-md text-meta"
+          // 오프라인이면 잠근다(팀 연결 절의 확인·끊기와 같다). 저장이 날고 있는 동안은
+          // 초점을 뺏지 않게 aria-disabled 로만 막는다: 두 번째 고름이 첫 저장과 경합하지 않게.
+          disabled={team.offline}
+          aria-disabled={busy || undefined}
           onChange={(event) => {
+            if (busy) return;
             const picked = options.find((option) => option.key === event.target.value);
             if (picked) team.onChoose(id, picked.input);
           }}
@@ -257,7 +281,10 @@ function DefaultRow({
       lines.push({ key: "saved", text: "저장하고 있어요", tone: "muted" });
     }
     if (saved && !saved.linkResolved && pending === undefined) {
-      lines.push({ key: "saved", text: linkUnresolvedSentence(saved), tone: "warn" });
+      lines.push({ key: "saved", text: linkUnresolvedSentence(saved, canPick), tone: "warn" });
+    }
+    if (canPick && team.offline) {
+      lines.push({ key: "note", text: TEAM_DEFAULTS_OFFLINE, tone: "muted" });
     }
     if (team.saveError?.rowId === id) {
       lines.push({ key: "error", text: team.saveError.message, tone: "warn" });
@@ -308,6 +335,8 @@ function DefaultRow({
       <span data-slot="who" className="flex h-control items-center text-meta">
         {personal ? (
           <span className="text-agent">내 설정</span>
+        ) : teamEditable ? (
+          <span className="text-ink-muted">운영자</span>
         ) : (
           <span className="inline-flex items-center gap-1 text-ink-muted">
             <Lock className="size-3 shrink-0" aria-hidden="true" />

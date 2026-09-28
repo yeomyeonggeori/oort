@@ -447,6 +447,7 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
     links: probeModelLists(probe),
     pending: saveTeamDefault.isPending ? saveTeamDefault.variables : null,
     saveError: teamSaveError,
+    offline,
     onChoose: (rowId, input) => saveTeamDefault.mutate({ rowId, input }),
   };
 

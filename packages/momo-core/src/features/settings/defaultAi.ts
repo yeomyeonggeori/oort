@@ -217,9 +217,16 @@ export const TEAM_DEFAULTS_NOT_APPLIED =
 
 export const TEAM_DEFAULTS_CHECK_FIRST = "연결 확인을 하면 고를 수 있는 모델이 보여요.";
 
-export function linkUnresolvedSentence(saved: TeamDefaultAiRow): string {
-  return `고른 연결(${teamKeyHost(saved.endpointLabel)})이 연결 순서에서 바뀌었거나 빠졌어요. 다시 골라 주세요.`;
+/**
+ * 저장된 연결이 바뀌었다. 고를 칸이 없는 확인 전에는 할 일(연결 확인)을 같은 문장에
+ * 순서대로 넣는다: 「다시 골라 주세요」 옆에 고를 칸이 없으면 문장이 거짓이 된다.
+ */
+export function linkUnresolvedSentence(saved: TeamDefaultAiRow, canPick = true): string {
+  const head = `고른 연결(${teamKeyHost(saved.endpointLabel)})이 연결 순서에서 바뀌었거나 빠졌어요.`;
+  return canPick ? `${head} 다시 골라 주세요.` : `${head} 연결 확인을 한 뒤 다시 골라 주세요.`;
 }
+
+export const TEAM_DEFAULTS_OFFLINE = "연결이 끊겨 지금은 바꿀 수 없어요.";
 
 /** 고른 연결의 목록 사정. 말할 것이 없으면 null. */
 export function teamModelNote(

@@ -172,6 +172,7 @@ function teamState(over: Partial<TeamDefaultsState> = {}): TeamDefaultsState {
     links: probeModelLists(PROBE),
     pending: null,
     saveError: null,
+    offline: false,
     onChoose: () => undefined,
     ...over,
   };
@@ -288,6 +289,70 @@ describe("기본 AI 표 팀 줄 저장 (#3042)", () => {
     });
     expect(q("ai-default-summary-error")?.getAttribute("role")).toBe("alert");
     expect(q("ai-default-teamAgent-error")).toBeNull();
+  });
+});
+
+describe("팀 줄 상태 (design-review #3042)", () => {
+  it("읽는 중에는 불러오지 못했다고 말하지 않는다", () => {
+    render(AiDefaultsTable, { teamKey: TEAM, operator: true, browserTab: false, team: teamState({ status: "loading", value: null }) });
+    expect(q("ai-defaults-team-foot")?.textContent).toBe("팀 줄은 운영자 설정이에요.");
+    act(() => root?.unmount());
+    host?.remove();
+    render(AiDefaultsTable, { teamKey: TEAM, operator: true, browserTab: false, team: teamState({ status: "error", value: null }) });
+    expect(q("ai-defaults-team-foot")?.textContent).toContain("불러오지 못해");
+  });
+
+  it("오프라인이면 칸을 잠그고 이유를 적는다", () => {
+    render(AiDefaultsTable, { teamKey: TEAM, operator: true, browserTab: false, team: teamState({ offline: true }) });
+    const select = q("ai-default-teamAgent-select") as HTMLSelectElement;
+    expect(select.disabled).toBe(true);
+    expect(q("ai-default-teamAgent-note")?.textContent).toBe("연결이 끊겨 지금은 바꿀 수 없어요.");
+    expect(select.getAttribute("aria-describedby")).toContain("ai-default-teamAgent-note");
+  });
+
+  it("저장이 날고 있는 줄은 두 번째 고름을 보내지 않는다", () => {
+    const onChoose = vi.fn();
+    render(AiDefaultsTable, {
+      teamKey: TEAM,
+      operator: true,
+      browserTab: false,
+      team: teamState({ onChoose, pending: { rowId: "teamAgent", input: { linkPosition: 0, modelId: "gpt-4o" } } }),
+    });
+    const select = q("ai-default-teamAgent-select") as HTMLSelectElement;
+    expect(select.getAttribute("aria-disabled")).toBe("true");
+    expect(q("ai-default-teamAgent-saved")?.textContent).toBe("저장하고 있어요");
+    act(() => {
+      select.value = "link:0:gpt-4o-mini";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(onChoose).not.toHaveBeenCalled();
+    // 다른 줄은 막지 않는다.
+    expect(q("ai-default-summary-select")?.getAttribute("aria-disabled")).toBeNull();
+  });
+
+  it("확인 전 + 바뀐 연결은 할 일을 한 문장에 순서대로 말한다", () => {
+    render(AiDefaultsTable, {
+      teamKey: TEAM,
+      operator: true,
+      browserTab: false,
+      team: teamState({
+        links: [],
+        value: {
+          teamAgent: null,
+          summary: { linkPosition: 3, endpointLabel: "https://old.example/v1", linkResolved: false, modelId: null },
+        },
+      }),
+    });
+    expect(q("ai-default-summary-model")).toBeNull();
+    expect(q("ai-default-summary-saved")?.textContent).toBe(
+      "고른 연결(old.example)이 연결 순서에서 바뀌었거나 빠졌어요. 연결 확인을 한 뒤 다시 골라 주세요."
+    );
+  });
+
+  it("열린 팀 줄의 운영자 표지에는 자물쇠가 없고, 읽기 전용 줄에는 있다", () => {
+    render(AiDefaultsTable, { teamKey: TEAM, operator: true, browserTab: false, team: teamState() });
+    expect(q("ai-default-teamAgent")?.querySelector("svg")).toBeNull();
+    expect(q("ai-default-guardrail")?.querySelector("svg")).not.toBeNull();
   });
 });
 
