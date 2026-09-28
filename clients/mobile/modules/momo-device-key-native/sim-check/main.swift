@@ -267,7 +267,7 @@ if let pub = try? P256.Signing.PublicKey(compressedRepresentation: rKeyData),
   check(false, "refresh: vector key/signature decode")
 }
 for (name, bad) in [
-  ("uppercase workspace", { try RK.proofBytes(workspaceId: rWorkspace.uppercased(), memberId: rMember, publicKey: rKeyData, refreshToken: rToken, nonce: rNonce, signedAtMs: rAt) }),
+  ("uppercase workspace", { try RK.proofBytes(workspaceId: "ABCDEF00-0000-4000-8000-000000000001", memberId: rMember, publicKey: rKeyData, refreshToken: rToken, nonce: rNonce, signedAtMs: rAt) }),
   ("empty token", { try RK.proofBytes(workspaceId: rWorkspace, memberId: rMember, publicKey: rKeyData, refreshToken: "", nonce: rNonce, signedAtMs: rAt) }),
   ("zero time", { try RK.proofBytes(workspaceId: rWorkspace, memberId: rMember, publicKey: rKeyData, refreshToken: rToken, nonce: rNonce, signedAtMs: 0) }),
   ("short key", { try RK.proofBytes(workspaceId: rWorkspace, memberId: rMember, publicKey: rKeyData.dropLast(), refreshToken: rToken, nonce: rNonce, signedAtMs: rAt) }),
