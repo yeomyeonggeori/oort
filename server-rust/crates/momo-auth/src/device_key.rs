@@ -814,13 +814,11 @@ pub async fn verify_host_register_in_tx(
     let Ok(signature) = BASE64.decode(&proof.signature_b64) else {
         return Ok(Err(DeviceKeyRefusal::SignatureInvalid));
     };
-    let Ok(signed_bytes) = statement.signed_bytes() else {
-        return Ok(Err(DeviceKeyRefusal::SignatureInvalid));
-    };
-    match statement.verify(&root.public_key_bytes(), &signature) {
-        Ok(canonical) => Ok(Ok(VerifiedHostRegister {
-            signature: canonical,
-            signed_bytes,
+    // v2, or v1 (same bytes but the first line, #3027).
+    match statement.verify_any(&root.public_key_bytes(), &signature) {
+        Ok(verified) => Ok(Ok(VerifiedHostRegister {
+            signature: verified.signature,
+            signed_bytes: verified.signed_bytes,
             public_key_b64: root.public_key.clone(),
         })),
         Err(_) => Ok(Err(DeviceKeyRefusal::SignatureInvalid)),

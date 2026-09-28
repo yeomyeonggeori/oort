@@ -1,6 +1,8 @@
-//! Shared human-signing vectors (#3021, ADR-0146 개정 2026-09-28 D-5).
+//! Shared human-signing vectors (#3021, ADR-0146 개정 2026-09-28 D-5; v2 #3027).
 //!
-//! `docs/api/human-control-signing.vectors.json` holds each case's inputs, the
+//! `docs/api/human-control-signing.vectors.json` (v1, frozen — the phone keeps a
+//! byte-identical copy) and `docs/api/human-control-signing-v2.vectors.json`
+//! (`momo.human.control.v2`) hold each case's inputs, the
 //! bytes JS and Swift built from them (the generator refuses to write unless the
 //! two agree), and signatures made by WebCrypto, CryptoKit and a Secure Enclave
 //! key. This file is the third implementation: it rebuilds the bytes from the
@@ -13,8 +15,8 @@
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use momo_wire::human_control::{
-    normalize_p256_signature, verify_p256, ControlContent, DeviceEndorse, DeviceKeyAlg,
-    DeviceRevoke, HumanControl, HumanSigningError, InputMode, PermissionScope,
+    normalize_p256_signature, verify_p256, ControlContent, ControlSchema, DeviceEndorse,
+    DeviceKeyAlg, DeviceRevoke, HumanControl, HumanSigningError, InputMode, PermissionScope,
 };
 use p256::ecdsa::{Signature, VerifyingKey};
 use serde_json::Value;
@@ -23,9 +25,23 @@ use unicode_normalization::UnicodeNormalization as _;
 use uuid::Uuid;
 
 const VECTORS: &str = include_str!("../../../../docs/api/human-control-signing.vectors.json");
+const VECTORS_V2: &str = include_str!("../../../../docs/api/human-control-signing-v2.vectors.json");
 
 fn doc() -> Value {
     serde_json::from_str(VECTORS).expect("vectors parse")
+}
+
+fn doc_v2() -> Value {
+    serde_json::from_str(VECTORS_V2).expect("v2 vectors parse")
+}
+
+/// The control schema a case is written in (`None` for endorse / revoke).
+fn schema_of(tc: &Value) -> Option<ControlSchema> {
+    match s(tc, "schema") {
+        "momo.human.control.v1" => Some(ControlSchema::V1),
+        "momo.human.control.v2" => Some(ControlSchema::V2),
+        _ => None,
+    }
 }
 
 fn s<'a>(v: &'a Value, k: &str) -> &'a str {
@@ -48,9 +64,14 @@ fn content(c: &Value) -> ControlContent<'_> {
             },
             text: s(c, "text"),
         },
+        // v1 cases carry no tool / channel (v1 does not encode them).
         "spawn" => ControlContent::Spawn {
             agent_member_id: u(c, "agent_member_id"),
             folder_id: s(c, "folder_id"),
+            tool: c["tool"].as_str().unwrap_or(""),
+            channel_id: c["channel_id"]
+                .as_str()
+                .map_or(Uuid::nil(), |id| id.parse().expect("channel_id")),
             first_prompt: s(c, "first_prompt"),
         },
         "permission" => ControlContent::Permission {
@@ -121,7 +142,9 @@ fn revoke(tc: &Value) -> DeviceRevoke {
 
 fn rebuild(tc: &Value) -> Vec<u8> {
     match s(tc, "schema") {
-        "momo.human.control.v1" => control(tc).signed_bytes().expect("control bytes"),
+        "momo.human.control.v1" | "momo.human.control.v2" => control(tc)
+            .signed_bytes_as(schema_of(tc).unwrap())
+            .expect("control bytes"),
         "momo.human.device_endorse.v1" => endorse(tc).signed_bytes().expect("endorse bytes"),
         "momo.human.device_revoke.v1" => revoke(tc).signed_bytes(),
         x => panic!("schema {x}"),
@@ -147,8 +170,11 @@ fn sigs(tc: &Value) -> Vec<Sig> {
         .collect()
 }
 
+/// v1 cases then v2 cases.
 fn cases() -> Vec<Value> {
-    doc()["cases"].as_array().expect("cases").clone()
+    let mut all = doc()["cases"].as_array().expect("cases").clone();
+    all.extend(doc_v2()["cases"].as_array().expect("v2 cases").clone());
+    all
 }
 
 #[test]
@@ -188,6 +214,30 @@ fn the_file_covers_every_schema_kind_and_signer() {
         doc()["high_s_rule"].as_str().unwrap().split(':').next(),
         Some("normalize-then-verify")
     );
+    // v2: every control kind, and a spawn both fresh and resumed.
+    let v2 = doc_v2()["cases"].as_array().unwrap().clone();
+    assert!(v2
+        .iter()
+        .all(|tc| s(tc, "schema") == "momo.human.control.v2"));
+    let mut kinds: Vec<&str> = v2.iter().map(|tc| s(&tc["content"], "kind")).collect();
+    kinds.sort();
+    kinds.dedup();
+    assert_eq!(
+        kinds,
+        [
+            "bundle_manifest",
+            "host_register",
+            "input",
+            "permission",
+            "spawn"
+        ]
+    );
+    let spawn_sessions: Vec<bool> = v2
+        .iter()
+        .filter(|tc| s(&tc["content"], "kind") == "spawn")
+        .map(|tc| tc["fields"]["session_id"].is_null())
+        .collect();
+    assert_eq!(spawn_sessions, [true, false]);
 }
 
 #[test]
@@ -207,13 +257,14 @@ fn rust_rebuilds_the_bytes_js_and_swift_recorded() {
         );
         if let Some(c) = tc.get("content") {
             let content = content(c);
+            let schema = schema_of(&tc).unwrap();
             assert_eq!(
-                String::from_utf8(content.canonical_bytes().unwrap()).unwrap(),
+                String::from_utf8(content.canonical_bytes_as(schema).unwrap()).unwrap(),
                 s(&tc, "content_canonical"),
                 "{name}"
             );
             assert_eq!(
-                content.content_sha256().unwrap(),
+                content.content_sha256_as(schema).unwrap(),
                 s(&tc, "content_sha256"),
                 "{name}"
             );
@@ -235,13 +286,86 @@ fn every_recorded_signature_verifies() {
         // The typed verifiers agree with the raw one.
         let x = &sigs(&tc)[0];
         match s(&tc, "schema") {
-            "momo.human.control.v1" => control(&tc).verify(&x.key, &x.sig).map(|_| ()),
+            "momo.human.control.v1" | "momo.human.control.v2" => control(&tc)
+                .verify_as(schema_of(&tc).unwrap(), &x.key, &x.sig)
+                .map(|_| ()),
             "momo.human.device_endorse.v1" => endorse(&tc).verify(&x.key, &x.sig).map(|_| ()),
             _ => revoke(&tc).verify(&x.key, &x.sig).map(|_| ()),
         }
         .expect("typed verify");
     }
-    assert_eq!(n, 24);
+    assert_eq!(n, 24 + 21);
+}
+
+/// What a verifier accepts ([`HumanControl::verify_any`]): every v2 statement;
+/// a v1 statement for every kind whose v1 bytes say the same; never a v1
+/// `spawn`, which bound neither tool nor channel.
+#[test]
+fn verify_any_takes_v2_and_only_the_v1_kinds_that_mean_the_same() {
+    let mut v1_accepted = Vec::new();
+    for tc in cases() {
+        let Some(schema) = schema_of(&tc) else {
+            continue;
+        };
+        let name = s(&tc, "name").to_string();
+        let kind = s(&tc["content"], "kind").to_string();
+        let mut statement = control(&tc);
+        // A v1 spawn case has no tool/channel; give it v2's so the v2 bytes
+        // build and the refusal is the schema's, not a missing field's.
+        if let (
+            ControlSchema::V1,
+            ControlContent::Spawn {
+                agent_member_id,
+                folder_id,
+                first_prompt,
+                ..
+            },
+        ) = (schema, &statement.content)
+        {
+            let (agent_member_id, folder_id, first_prompt) =
+                (*agent_member_id, *folder_id, *first_prompt);
+            statement.content = ControlContent::Spawn {
+                agent_member_id,
+                folder_id,
+                tool: "claude",
+                channel_id: Uuid::from_u128(0xcc01),
+                first_prompt,
+            };
+        }
+        for x in sigs(&tc) {
+            let verdict = statement.verify_any(&x.key, &x.sig);
+            match (schema, kind.as_str()) {
+                (ControlSchema::V2, _) => {
+                    let v = verdict.unwrap_or_else(|e| panic!("{name}: {e}"));
+                    assert_eq!(v.schema, ControlSchema::V2, "{name}");
+                    assert_eq!(v.signed_bytes, rebuild(&tc), "{name}");
+                }
+                (ControlSchema::V1, kind) if kind != "spawn" => {
+                    let v = verdict.unwrap_or_else(|e| panic!("{name}: {e}"));
+                    assert_eq!(v.schema, ControlSchema::V1, "{name}");
+                    v1_accepted.push(name.clone());
+                }
+                (ControlSchema::V1, _) => {
+                    assert_eq!(
+                        verdict,
+                        Err(HumanSigningError::BadSignature),
+                        "{name}: a v1 spawn must not pass a verifier"
+                    );
+                }
+            }
+        }
+    }
+    v1_accepted.dedup();
+    assert_eq!(
+        v1_accepted,
+        [
+            "control_input_queue_nfc",
+            "control_input_interrupt",
+            "control_permission_session",
+            "control_bundle_manifest",
+            "control_host_register"
+        ]
+    );
 }
 
 /// Guard against a tool NFC-normalizing the vectors file: the NFC case must
@@ -289,8 +413,9 @@ fn every_line_is_load_bearing() {
             }
         }
     }
-    // 6 controls × 13 + endorse 7 + revoke 6 = 91 lines, × 3 signers.
-    assert_eq!(checked, 91 * 3);
+    // v1: 6 controls × 13 + endorse 7 + revoke 6 = 91 lines; v2: 7 × 13 = 91.
+    // × 3 signers.
+    assert_eq!(checked, (91 + 91) * 3);
 }
 
 /// Changing any one structured input — including every content field — makes
@@ -317,7 +442,8 @@ fn every_structured_field_is_load_bearing() {
             }
         };
         match s(&tc, "schema") {
-            "momo.human.control.v1" => {
+            "momo.human.control.v1" | "momo.human.control.v2" => {
+                let schema = schema_of(&tc).unwrap();
                 let base = control(&tc);
                 let mut muts: Vec<(&str, HumanControl)> = vec![
                     (
@@ -413,6 +539,8 @@ fn every_structured_field_is_load_bearing() {
                             ControlContent::Spawn {
                                 agent_member_id: other,
                                 folder_id: "f",
+                                tool: "claude",
+                                channel_id: other,
                                 first_prompt: text,
                             },
                         ),
@@ -420,33 +548,67 @@ fn every_structured_field_is_load_bearing() {
                     ControlContent::Spawn {
                         agent_member_id,
                         folder_id,
+                        tool,
+                        channel_id,
                         first_prompt,
-                    } => vec![
-                        (
-                            "agent_member_id",
-                            ControlContent::Spawn {
-                                agent_member_id: other,
-                                folder_id,
-                                first_prompt,
-                            },
-                        ),
-                        (
-                            "folder_id",
-                            ControlContent::Spawn {
-                                agent_member_id: *agent_member_id,
-                                folder_id: "fld_other",
-                                first_prompt,
-                            },
-                        ),
-                        (
-                            "first_prompt",
-                            ControlContent::Spawn {
-                                agent_member_id: *agent_member_id,
-                                folder_id,
-                                first_prompt: "other",
-                            },
-                        ),
-                    ],
+                    } => {
+                        let mut v = vec![
+                            (
+                                "agent_member_id",
+                                ControlContent::Spawn {
+                                    agent_member_id: other,
+                                    folder_id,
+                                    tool,
+                                    channel_id: *channel_id,
+                                    first_prompt,
+                                },
+                            ),
+                            (
+                                "folder_id",
+                                ControlContent::Spawn {
+                                    agent_member_id: *agent_member_id,
+                                    folder_id: "fld_other",
+                                    tool,
+                                    channel_id: *channel_id,
+                                    first_prompt,
+                                },
+                            ),
+                            (
+                                "first_prompt",
+                                ControlContent::Spawn {
+                                    agent_member_id: *agent_member_id,
+                                    folder_id,
+                                    tool,
+                                    channel_id: *channel_id,
+                                    first_prompt: "other",
+                                },
+                            ),
+                        ];
+                        // v2 binds the tool and the channel (v1 does not encode them).
+                        if schema == ControlSchema::V2 {
+                            v.push((
+                                "tool",
+                                ControlContent::Spawn {
+                                    agent_member_id: *agent_member_id,
+                                    folder_id,
+                                    tool: "shell",
+                                    channel_id: *channel_id,
+                                    first_prompt,
+                                },
+                            ));
+                            v.push((
+                                "channel_id",
+                                ControlContent::Spawn {
+                                    agent_member_id: *agent_member_id,
+                                    folder_id,
+                                    tool,
+                                    channel_id: other,
+                                    first_prompt,
+                                },
+                            ));
+                        }
+                        v
+                    }
                     ControlContent::Permission {
                         request_event_id,
                         option_id,
@@ -526,7 +688,7 @@ fn every_structured_field_is_load_bearing() {
                     ],
                 };
                 for (what, m) in muts {
-                    rejects(m.signed_bytes(), what);
+                    rejects(m.signed_bytes_as(schema), what);
                     checked += 1;
                 }
                 for (what, content) in content_muts {
@@ -534,7 +696,7 @@ fn every_structured_field_is_load_bearing() {
                         content,
                         ..base.clone()
                     };
-                    rejects(m.signed_bytes(), what);
+                    rejects(m.signed_bytes_as(schema), what);
                     checked += 1;
                 }
                 if let ControlContent::HostRegister {
@@ -553,13 +715,13 @@ fn every_structured_field_is_load_bearing() {
                         },
                         ..base.clone()
                     };
-                    rejects(m.signed_bytes(), "host_id");
+                    rejects(m.signed_bytes_as(schema), "host_id");
                     assert_eq!(
                         HumanControl {
                             host_id: other,
                             ..base.clone()
                         }
-                        .signed_bytes(),
+                        .signed_bytes_as(schema),
                         Err(HumanSigningError::HostIdMismatch)
                     );
                     checked += 1;
@@ -655,9 +817,14 @@ fn every_structured_field_is_load_bearing() {
             }
         }
     }
-    // input×2 (9+3 each) + spawn (9+3) + permission (9+4) + manifest (9+1)
-    // + host_register (8+2+1) + endorse 5 + revoke 5.
-    assert_eq!(checked, 24 + 12 + 13 + 10 + 11 + 5 + 5);
+    // v1: input×2 (9+3 each) + spawn (9+3) + permission (9+4) + manifest
+    // (9+1) + host_register (8+2+1) + endorse 5 + revoke 5.
+    // v2: input×2 (9+3 each) + spawn×2 (9+5 each: tool, channel_id) +
+    // permission (9+4) + manifest (9+1) + host_register (8+2+1).
+    assert_eq!(
+        checked,
+        (24 + 12 + 13 + 10 + 11 + 5 + 5) + (24 + 28 + 13 + 10 + 11)
+    );
 }
 
 fn flip_s(sig: &[u8]) -> Vec<u8> {
@@ -703,7 +870,7 @@ fn high_s_is_normalized_then_verified() {
             );
         }
     }
-    assert_eq!(high + low, 24);
+    assert_eq!(high + low, 24 + 21);
     eprintln!("recorded signatures: {high} high-s, {low} low-s (flipped variants cover both)");
 }
 
@@ -795,14 +962,70 @@ fn structural_rules_are_enforced_before_any_signature() {
         .find(|c| s(c, "name") == "control_spawn")
         .unwrap();
     let sp = control(&spawn);
+    // v1 never had a session line for a spawn…
     assert_eq!(
         HumanControl {
             session_id: Some(Uuid::nil()),
             ..sp.clone()
         }
-        .signed_bytes(),
+        .signed_bytes_as(ControlSchema::V1),
         Err(HumanSigningError::SessionForbidden("spawn"))
     );
+    // …v2 carries one for a resume, and still refuses one on the kinds that
+    // never have a session.
+    let v2_spawn = cases()
+        .into_iter()
+        .find(|c| s(c, "name") == "control_v2_spawn")
+        .unwrap();
+    let sp2 = control(&v2_spawn);
+    assert!(HumanControl {
+        session_id: Some(Uuid::nil()),
+        ..sp2.clone()
+    }
+    .signed_bytes()
+    .is_ok());
+    let manifest = cases()
+        .into_iter()
+        .find(|c| s(c, "name") == "control_v2_bundle_manifest")
+        .unwrap();
+    assert_eq!(
+        HumanControl {
+            session_id: Some(Uuid::nil()),
+            ..control(&manifest)
+        }
+        .signed_bytes(),
+        Err(HumanSigningError::SessionForbidden("bundle_manifest"))
+    );
+    // A v2 tool is a token: empty or a newline moves nothing.
+    for bad in ["", "claude\nshell"] {
+        let ControlContent::Spawn {
+            agent_member_id,
+            folder_id,
+            channel_id,
+            first_prompt,
+            ..
+        } = sp2.content
+        else {
+            unreachable!()
+        };
+        assert!(
+            matches!(
+                HumanControl {
+                    content: ControlContent::Spawn {
+                        agent_member_id,
+                        folder_id,
+                        tool: bad,
+                        channel_id,
+                        first_prompt,
+                    },
+                    ..sp2.clone()
+                }
+                .signed_bytes(),
+                Err(HumanSigningError::InvalidField { field: "tool", .. })
+            ),
+            "{bad:?}"
+        );
+    }
     for bad in ["", "a\nb", "a\u{7f}"] {
         assert!(
             matches!(

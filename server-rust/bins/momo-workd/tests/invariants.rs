@@ -2090,29 +2090,53 @@ fn signed(control: WorkControl, device: &Device, endorsement: Option<Value>) -> 
 }
 
 fn signed_at(
-    mut control: WorkControl,
+    control: WorkControl,
     device: &Device,
     endorsement: Option<Value>,
     issued_at_ms: i64,
     expires_at_ms: i64,
     nonce: Uuid,
 ) -> WorkControl {
+    signed_full(
+        control,
+        device,
+        endorsement,
+        issued_at_ms,
+        expires_at_ms,
+        nonce,
+        InputMode::Queue,
+    )
+}
+
+fn signed_full(
+    mut control: WorkControl,
+    device: &Device,
+    endorsement: Option<Value>,
+    issued_at_ms: i64,
+    expires_at_ms: i64,
+    nonce: Uuid,
+    mode: InputMode,
+) -> WorkControl {
     let payload = control.payload.clone();
     let text = |key: &str| payload[key].as_str().unwrap().to_string();
-    let (label, input, option_id, option_kind) = (
+    let (label, tool, input, option_id, option_kind) = (
         payload["label"].as_str().map(str::to_string),
+        payload["tool"].as_str().map(str::to_string),
         payload["text"].as_str().map(str::to_string),
         payload["option_id"].as_str().map(str::to_string),
         payload["kind"].as_str().map(str::to_string),
     );
     let content = match control.kind.as_str() {
         "input" => ControlContent::Input {
-            mode: InputMode::Queue,
+            mode,
             text: input.as_deref().unwrap(),
         },
+        // v2 (#3027): the tool and the channel the host acts on are signed.
         "spawn" => ControlContent::Spawn {
             agent_member_id: AGENT,
             folder_id: FOLDER,
+            tool: tool.as_deref().unwrap(),
+            channel_id: control.channel_id,
             first_prompt: label.as_deref().unwrap(),
         },
         "permission" => ControlContent::Permission {
@@ -2129,11 +2153,8 @@ fn signed_at(
         member_id: control.requester_member_id,
         device_key_id: device.id,
         host_id: control.target_host_id,
-        session_id: if control.kind == "spawn" {
-            None
-        } else {
-            control.session_id
-        },
+        // v2: a spawn's session line is its (resume) session, `-` when fresh.
+        session_id: control.session_id,
         nonce,
         issued_at_ms,
         expires_at_ms,
@@ -2145,7 +2166,7 @@ fn signed_at(
         "deviceKeyId": device.id, "devicePublicKey": device.public(),
         "endorsement": endorsement,
         "nonce": nonce, "issuedAtMs": issued_at_ms, "expiresAtMs": expires_at_ms,
-        "mode": "queue", "scope": "once",
+        "mode": mode.as_str(), "scope": "once",
         "agentMemberId": AGENT, "folderId": FOLDER,
         "signature": signature,
     }));
@@ -2694,5 +2715,48 @@ async fn inv_26_r2_nothing_on_the_server_path_moves_the_root() {
     assert_eq!(
         h.trust.lock().unwrap().root().map(|r| r.public_key.clone()),
         Some(root.public())
+    );
+}
+
+/// #3027: a v2 spawn binds the tool and the channel, and a resume's session
+/// line is the session the owner signed — a server that swaps the tool or the
+/// channel under a genuine signature, or signs nothing into the session line
+/// of a resume, is refused; the owner's signed resume runs.
+#[tokio::test]
+async fn inv_28_r2_a_v2_spawn_binds_tool_channel_and_the_resume_session() {
+    let mut h = harness_r2(&[("claude", &[]), ("codex-like", &[])]);
+    let root = Device::new(1);
+    pin(&h, &root);
+
+    let mut tool_swapped = signed(spawn(&h, "claude", "list files"), &root, None);
+    tool_swapped.payload["tool"] = json!("codex-like");
+    assert_eq!(
+        poll_and_ack(&mut h, &tool_swapped).await,
+        ControlAck::refused("device_signature_invalid")
+    );
+    let mut channel_swapped = signed(spawn(&h, "claude", "list files"), &root, None);
+    channel_swapped.channel_id = Uuid::new_v4();
+    assert_eq!(
+        poll_and_ack(&mut h, &channel_swapped).await,
+        ControlAck::refused("device_signature_invalid")
+    );
+    let mut other_resume = spawn(&h, "claude", "continue");
+    other_resume.session_id = Some(Uuid::new_v4());
+    let mut other_resume = signed(other_resume, &root, None);
+    other_resume.session_id = Some(Uuid::new_v4());
+    assert_eq!(
+        poll_and_ack(&mut h, &other_resume).await,
+        ControlAck::refused("device_signature_invalid")
+    );
+    assert!(stub_log(&h).is_empty(), "no agent was launched");
+
+    // The owner's own signed resume (its successor session in the line) runs.
+    let successor = Uuid::new_v4();
+    let mut resume = spawn(&h, "claude", "continue the work");
+    resume.session_id = Some(successor);
+    let resume = signed(resume, &root, None);
+    assert_eq!(
+        poll_and_ack(&mut h, &resume).await,
+        ControlAck::ok(Some(successor))
     );
 }

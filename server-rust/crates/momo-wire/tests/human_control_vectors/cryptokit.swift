@@ -1,4 +1,5 @@
-// CryptoKit half of the #3021 shared vectors (ADR-0146 개정 2026-09-28 D-5).
+// CryptoKit half of the #3021 shared vectors (ADR-0146 개정 2026-09-28 D-5;
+// momo.human.control.v2 #3027).
 // Invoked by generate.mjs: `swift cryptokit.swift <vectors.json>`.
 //
 // Builds every case's content bytes and signed payload **independently** in
@@ -79,11 +80,14 @@ func canonicalJson(_ v: Any) throws -> String {
     throw VectorError.bad("json value \(v)")
 }
 
-func contentBytes(_ c: [String: Any]) throws -> Data {
+func contentBytes(_ c: [String: Any], schema: String) throws -> Data {
     let text: String
     switch try str(c["kind"]) {
     case "input":
         text = nfc(try str(c["text"]))
+    case "spawn" where schema == "momo.human.control.v2":
+        // v2 (#3027): the tool and the channel, before the free-text prompt.
+        text = "\(try uuid(c["agent_member_id"]))\n\(try str(c["folder_id"]))\n\(try str(c["tool"]))\n\(try uuid(c["channel_id"]))\n\(nfc(try str(c["first_prompt"])))"
     case "spawn":
         text = "\(try uuid(c["agent_member_id"]))\n\(try str(c["folder_id"]))\n\(nfc(try str(c["first_prompt"])))"
     case "permission":
@@ -103,7 +107,7 @@ func payload(_ tc: [String: Any]) throws -> Data {
     let f = tc["fields"] as! [String: Any]
     var lines = [schema]
     switch schema {
-    case "momo.human.control.v1":
+    case "momo.human.control.v1", "momo.human.control.v2":
         let c = tc["content"] as! [String: Any]
         let kind = try str(c["kind"])
         let session = f["session_id"] is NSNull ? "-" : try uuid(f["session_id"])
@@ -112,7 +116,7 @@ func payload(_ tc: [String: Any]) throws -> Data {
             try uuid(f["device_key_id"]), try uuid(f["host_id"]), session, kind,
             kind == "input" ? try str(c["mode"]) : "-",
             try uuid(f["nonce"]), String(try int64(f["issued_at_ms"])), String(try int64(f["expires_at_ms"])),
-            sha256Hex(try contentBytes(c)),
+            sha256Hex(try contentBytes(c, schema: schema)),
         ]
     case "momo.human.device_endorse.v1":
         lines += [

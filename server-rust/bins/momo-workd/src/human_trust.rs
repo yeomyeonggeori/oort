@@ -16,11 +16,13 @@
 //! ## Checking a control ([`HumanTrust::check_control`])
 //!
 //! The host never takes the server's word for what was signed. It rebuilds the
-//! 13 `momo.human.control.v1` lines from **the control it would act on** — its
+//! 13 `momo.human.control.v2` lines from **the control it would act on** — its
 //! workspace, requester, target host, session, kind, and the payload text /
-//! label / permission decision — plus the envelope's own fields (instance id,
-//! key id, nonce, times, mode, scope, spawn ids), and verifies the device
-//! signature over those bytes. Then:
+//! label / tool / permission decision and, for a spawn, its channel — plus the
+//! envelope's own fields (instance id, key id, nonce, times, mode, scope, spawn
+//! agent and folder), and verifies the device signature over those bytes. A v1
+//! statement is accepted for every kind but a spawn (same bytes apart from the
+//! first line; `HumanControl::verify_any`, #3027). Then:
 //!
 //! 1. the key is the pinned root, or carries a `device_endorse.v1` signed by
 //!    the pinned root over **this** public key, workspace and owner;
@@ -60,8 +62,12 @@
 //! controls), never to un-revoke.
 //!
 //! ```text
-//! (spawn) a signed spawn never carries a session_id: v1 has no session line
-//! for it, so a resume cannot be signed and is refused while R2 is on.
+//! (spawn) v2 (#3027) binds `payload.tool` and the control's `channel_id`, and
+//! its session line is the control's `session_id`: `-` for a fresh spawn, the
+//! successor session for a resume — the one the owner named when signing, so
+//! the server cannot choose which session the owner's words join.
+//! (input) `mode` is signed: `queue` waits behind the running turn, `interrupt`
+//! cancels it (ACP `session/cancel`) and goes next.
 //! ```
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -432,21 +438,22 @@ impl HumanTrust {
                     return Err(Refusal::DeviceSignatureInvalid);
                 };
                 let first_prompt = payload("label").ok_or(Refusal::InvalidControl)?;
+                let tool = payload("tool").ok_or(Refusal::InvalidControl)?;
                 require_nfc(first_prompt)?;
-                // `momo.human.control.v1` has no session line for a spawn, so a
-                // resume (a session the server preallocated) cannot be signed:
-                // the server would choose which session the owner's words
-                // join (#3024 review M2).
-                if control.session_id.is_some() {
-                    return Err(Refusal::DeviceSignatureInvalid);
-                }
+                // v2 (#3027): the session line is the control's session — `-`
+                // for a fresh spawn, and for a resume the successor the owner
+                // signed, so the server cannot pick which session the words
+                // join (#3024 review M2). v1 (no such line) is refused below by
+                // `verify_any`.
                 (
                     ControlContent::Spawn {
                         agent_member_id,
                         folder_id,
+                        tool,
+                        channel_id: control.channel_id,
                         first_prompt,
                     },
-                    None,
+                    control.session_id,
                 )
             }
             "permission" => {
@@ -555,15 +562,12 @@ impl HumanTrust {
             .decode(&envelope.signature)
             .map_err(|_| Refusal::DeviceSignatureInvalid)?;
         statement
-            .verify(&key, &signature)
+            .verify_any(&key, &signature)
             .map_err(|_| Refusal::DeviceSignatureInvalid)?;
         // 4. Fresh on this host's clock.
         check_control_window(envelope.issued_at_ms, envelope.expires_at_ms, now_ms)
             .map_err(|_| Refusal::DeviceSignatureExpired)?;
         // What this host does not run yet is refused before a nonce is spent.
-        if envelope.mode.as_deref() == Some("interrupt") && control.kind == "input" {
-            return Err(Refusal::UnsupportedControl);
-        }
         if envelope.scope.as_deref() == Some("session") && control.kind == "permission" {
             return Err(Refusal::UnsupportedControl);
         }
