@@ -416,7 +416,10 @@ export function exclusiveRotation<T>(work: () => Promise<T>): Promise<T> {
     // waits for this rotation instead of destroying it mid-air (#3098). Taken
     // after the lock and the re-read — a rotation still queued behind another
     // window has spent nothing and needs no hold.
-    const held = isDesktop() && (await desktopRotationHold.begin());
+    // Bounded like every other shell call here (#3072 M2): a stuck IPC must
+    // not stall every 401 retry behind the lock.
+    const held =
+      isDesktop() && (await within(desktopRotationHold.begin(), KEYCHAIN_WAIT_MS, false));
     try {
       const result = await work();
       // Release only once the rotated token is where the next holder reads it.
