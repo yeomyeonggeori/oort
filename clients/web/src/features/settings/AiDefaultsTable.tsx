@@ -133,11 +133,16 @@ function DefaultRow({
             }
           : null;
       const value = saved ? credentialKey(saved) : id === "appCommand" ? "teamKey" : "";
+      // WebKit(Tauri)은 네이티브 선택 칸에 말줄임을 그리지 않는다: 잘린 값도 끝까지
+      // 읽히게 고른 글자 전체를 title로 둔다(#3010 design-review M2).
+      const current = [...options, ...(orphan ? [orphan] : [])].find((option) => option.key === value);
+      const fullText = current ? optionText(current) : id === "appCommand" ? undefined : AI_DEFAULT_UNSET_LABEL[id];
       choice = (
         <Select
           aria-labelledby={titleId}
           aria-describedby={describedBy}
           value={value}
+          title={fullText}
           className="h-control rounded-md text-meta"
           onChange={(event) => {
             const next = event.target.value;
