@@ -170,6 +170,7 @@ fn flag(required: bool) -> DeviceKeySettings {
         instance_id: Some(INSTANCE_ID.to_string()),
         host_register_signature_required: required,
         refresh_reuse_sweep_all_sessions: false,
+        human_control_signature_required: false,
     }
 }
 

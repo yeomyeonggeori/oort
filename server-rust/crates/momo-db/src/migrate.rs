@@ -469,19 +469,25 @@ mod tests {
     /// ENABLE + FORCE RLS + `ws_isolation`) and `action_signature.alg` with a
     /// per-algorithm public-key CHECK. Re-runnable statements.
     /// schema_v0.sql is not modified.
+    ///
+    /// 095 is #3023's signed-control half (ADR-0146 개정 2026-09-28 R2-E3):
+    /// `human_control_nonce` (one-time `momo.human.control.v1` nonces; ENABLE +
+    /// FORCE RLS + `ws_isolation`) and the `work_control` signature columns
+    /// with an all-or-none, per-kind CHECK. `work_control_payload_ck` is not
+    /// changed. Re-runnable statements. schema_v0.sql is not modified.
     #[test]
-    fn discovers_contiguous_migrations_001_to_094() {
+    fn discovers_contiguous_migrations_001_to_095() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            94,
-            "expected 94 migrations under {}",
+            95,
+            "expected 95 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 94);
+        assert_eq!(migrations.last().unwrap().version, 95);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

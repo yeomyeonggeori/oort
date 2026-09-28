@@ -5,6 +5,7 @@
 //! GET  /v1/workspaces/{ws}/device-keys                    (bearer, human) list own
 //! POST /v1/workspaces/{ws}/device-keys/{key}/endorsement  (bearer, human) device_endorse.v1
 //! POST /v1/workspaces/{ws}/device-keys/{key}/revocation   (bearer, human) device_revoke.v1
+//! GET  /v1/workspaces/{ws}/device-keys/signing-context    (bearer, human) instance id + clock (#3023)
 //! ```
 //!
 //! A signed-in device uploads its Secure Enclave P-256 public key. The row is
@@ -50,7 +51,7 @@ use uuid::Uuid;
 
 use crate::dto::{
     DeviceKeyDto, DeviceKeyListResponse, DeviceKeyResponse, EndorseDeviceKeyRequest,
-    RegisterDeviceKeyRequest, RevokeDeviceKeyRequest,
+    RegisterDeviceKeyRequest, RevokeDeviceKeyRequest, SigningContextResponse,
 };
 use crate::error::ApiError;
 use crate::routes::password::admit_password_change;
@@ -122,6 +123,55 @@ fn root_password_refused() -> ApiError {
 
 fn not_active() -> ApiError {
     ApiError::forbidden("not an active workspace member")
+}
+
+/// `GET /v1/workspaces/{ws}/device-keys/signing-context` → 200 (#3023).
+///
+/// The `instance_id` line of every `momo.human.control.v1` statement is this
+/// instance's `MOMO_INSTANCE_ID`, served verbatim — the one source the
+/// `host_register` check (#3022) and every signed instruction verify against;
+/// a client never builds it from a URL (D-5). `serverTimeMs` is the clock the
+/// ±5 min window is measured on: a device signs `issuedAtMs` from its own
+/// clock plus the offset it reads here (D-9 시계 보정). 503
+/// `instance_id_unconfigured` when the operator set no instance id — nothing
+/// signed could verify.
+pub async fn signing_context(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(workspace): Path<String>,
+) -> Result<Json<SigningContextResponse>, ApiError> {
+    require_human(&principal, HUMAN_ONLY)?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let member_id = principal.member_id;
+    let active = with_tenant_tx(&state.pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            Ok::<_, DbError>(
+                active_workspace_role(conn, workspace_id, member_id)
+                    .await?
+                    .is_some(),
+            )
+        })
+    })
+    .await
+    .map_err(|error| ApiError::internal("device_keys.signing_context", error))?;
+    if !active {
+        return Err(not_active());
+    }
+    let Some(instance_id) = state.device_keys.instance_id.clone() else {
+        return Err(ApiError::coded(
+            StatusCode::SERVICE_UNAVAILABLE,
+            crate::human_control::REFUSAL_INSTANCE_ID_UNCONFIGURED,
+            "this instance has no MOMO_INSTANCE_ID, so no signed statement can verify",
+        ));
+    };
+    Ok(Json(SigningContextResponse {
+        instance_id,
+        server_time_ms: chrono::Utc::now().timestamp_millis(),
+        max_lifetime_ms: momo_wire::human_control::MAX_LIFETIME_MS,
+        max_clock_skew_ms: momo_wire::human_control::MAX_CLOCK_SKEW_MS,
+        human_control_signature_required: state.device_keys.human_control_signature_required,
+        host_register_signature_required: state.device_keys.host_register_signature_required,
+    }))
 }
 
 /// `POST /v1/workspaces/{ws}/device-keys` → 201.

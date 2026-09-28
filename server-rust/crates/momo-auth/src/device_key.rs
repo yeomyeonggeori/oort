@@ -399,7 +399,7 @@ pub async fn list_member_device_keys_in_tx(
 /// this path, or the two can deadlock. `session_id` never changes, so reading
 /// it unlocked is sound. `false` when the key is not the caller's (the caller
 /// then refuses on the locked read).
-async fn lock_root_lineage(
+pub(crate) async fn lock_root_lineage(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
@@ -740,10 +740,24 @@ pub struct HostRegisterProof {
     pub signature_b64: String,
 }
 
+/// A `host_register` statement that verified: what `action_signature` keeps
+/// (#3023 records it as the person's provenance of the registration).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedHostRegister {
+    /// The canonical low-s signature.
+    pub signature: [u8; 64],
+    /// The 13 lines that verified.
+    pub signed_bytes: Vec<u8>,
+    /// The root key's stored public key (base64).
+    pub public_key_b64: String,
+}
+
 /// Verify a `host_register` statement against the caller's live root
 /// candidate. `host_public_key_b64` and `label` are the values the host row
 /// will store (already normalized); `instance_id` is the server's own, never
-/// the caller's. Returns the canonical low-s signature on success.
+/// the caller's. The nonce is not spent here: the route spends it
+/// (`human_control::consume_human_nonce_in_tx`) once it knows the host id is
+/// free, so a replay still reads `host_register_replayed`.
 #[allow(clippy::too_many_arguments)]
 pub async fn verify_host_register_in_tx(
     conn: &mut PgConnection,
@@ -754,7 +768,7 @@ pub async fn verify_host_register_in_tx(
     host_public_key_b64: &str,
     label: &str,
     now_ms: i64,
-) -> Result<Result<[u8; 64], DeviceKeyRefusal>, sqlx::Error> {
+) -> Result<Result<VerifiedHostRegister, DeviceKeyRefusal>, sqlx::Error> {
     // Lineage first (token rows), then the root row — the order every session
     // end takes — and both share-locked, so a concurrent end cannot commit
     // between this check and the host insert.
@@ -800,8 +814,15 @@ pub async fn verify_host_register_in_tx(
     let Ok(signature) = BASE64.decode(&proof.signature_b64) else {
         return Ok(Err(DeviceKeyRefusal::SignatureInvalid));
     };
+    let Ok(signed_bytes) = statement.signed_bytes() else {
+        return Ok(Err(DeviceKeyRefusal::SignatureInvalid));
+    };
     match statement.verify(&root.public_key_bytes(), &signature) {
-        Ok(canonical) => Ok(Ok(canonical)),
+        Ok(canonical) => Ok(Ok(VerifiedHostRegister {
+            signature: canonical,
+            signed_bytes,
+            public_key_b64: root.public_key.clone(),
+        })),
         Err(_) => Ok(Err(DeviceKeyRefusal::SignatureInvalid)),
     }
 }
