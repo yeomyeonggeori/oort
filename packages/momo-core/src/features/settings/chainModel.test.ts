@@ -9,6 +9,7 @@ import {
   chainErrorCopy,
   chainSaveMessage,
   chainSummary,
+  CHAIN_KEY_REQUIRED_FOR_NEW_ORIGIN,
   chainUnreadableCopy,
   draftBlockedHint,
   draftErrors,
@@ -27,6 +28,9 @@ import {
   LOOPBACK_REFUSAL_WIRE,
   MAX_FALLBACK_HOPS,
   nextPosition,
+  ORIGIN_CHANGED_KEY_HINT,
+  ORIGIN_CHANGED_KEY_REQUIRED,
+  originChanged,
   parseProbeEntries,
   parseProviderChain,
   patchDraftRow,
@@ -857,5 +861,66 @@ describe("loopback provider refusal (#2204)", () => {
     );
     expect(isLoopbackProviderRefusal(new ApiError(500, "boom"))).toBe(false);
     expect(loopbackProviderGuidance()).toBe(LOOPBACK_PROVIDER_HINT);
+  });
+});
+
+// #3042 (#3040 server): a kept key is bound to its origin. Moving a stored hop to
+// another scheme/host/port with an empty key field is a guaranteed 409, so the
+// draft asks for the key first and the save names the next action.
+describe("a stored hop moved to another origin", () => {
+  const stored = () => draftFromChain(CHAIN)[0]; // https://gateway.dawn.internal:8443/v1
+
+  it("keeps a same-origin path change savable without a key", () => {
+    const moved = { ...stored(), baseUrl: "https://gateway.dawn.internal:8443/v2/" };
+    expect(originChanged(moved)).toBe(false);
+    expect(draftRowError(moved)).toBeNull();
+    expect(bearerHint(moved)).toBe("저장된 키 ••••c40a. 비워 두면 그대로 둡니다.");
+  });
+
+  it("treats the default port written out as the same origin", () => {
+    const row = { ...draftFromChain(CHAIN)[1], baseUrl: "https://BACKUP.dawn.internal:443/v2" };
+    expect(originChanged(row)).toBe(false);
+    expect(draftRowError(row)).toBeNull();
+  });
+
+  it.each([
+    ["host", "https://attacker.example:8443/v1"],
+    ["port", "https://gateway.dawn.internal:9443/v1"],
+    ["scheme", "http://gateway.dawn.internal:8443/v1"],
+    ["a parent-looking host", "https://gateway.dawn.internal.attacker.example:8443/v1"],
+  ])("requires a new key when the origin changes (%s)", (_what, baseUrl) => {
+    const moved = { ...stored(), baseUrl };
+    expect(originChanged(moved)).toBe(true);
+    expect(draftRowError(moved)).toEqual({
+      field: "bearer",
+      message: ORIGIN_CHANGED_KEY_REQUIRED,
+      next: "바뀐 주소의 키를 입력하면",
+    });
+    expect(bearerHint(moved)).toBe(ORIGIN_CHANGED_KEY_HINT);
+    expect(draftBlockedHint([moved], draftErrors([moved]))).toBe(
+      "2차 provider 바뀐 주소의 키를 입력하면 저장할 수 있습니다."
+    );
+    // With a key typed the row saves, and the key goes on the wire.
+    const keyed = { ...moved, bearer: "sk-new-origin-key" };
+    expect(draftRowError(keyed)).toBeNull();
+    expect(draftToInput([keyed])[0]).toMatchObject({ baseUrl, bearer: "sk-new-origin-key" });
+  });
+
+  it("does not ask a new row twice", () => {
+    const fresh = addDraftRow([])[0];
+    expect(originChanged({ ...fresh, baseUrl: "https://other.example/v1" })).toBe(false);
+  });
+
+  it("answers the 409 with the next action, by code and by status", () => {
+    const coded = new ApiError(
+      409,
+      "chain position 1 moved from gateway.dawn.internal:8443 to attacker.example; a new bearer is required",
+      "key_required_for_new_origin"
+    );
+    expect(chainSaveMessage(coded)).toBe(CHAIN_KEY_REQUIRED_FOR_NEW_ORIGIN);
+    expect(chainSaveMessage(new ApiError(409, "conflict"))).toBe(CHAIN_KEY_REQUIRED_FOR_NEW_ORIGIN);
+    expect(CHAIN_KEY_REQUIRED_FOR_NEW_ORIGIN).toMatch(/^주소가 바뀌면 키를 다시 넣어 주세요\./);
+    // Not the retry sentence an operator cannot act on.
+    expect(chainSaveMessage(coded)).not.toContain("잠시 뒤에");
   });
 });

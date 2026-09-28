@@ -198,6 +198,13 @@ export interface ChainDraftRow {
   bearerLast4?: string;
   /** The server has never stored this row, so a key is required to save it. */
   isNew: boolean;
+  /**
+   * The address the server holds for this position (#3042). A kept key is bound
+   * to that address's origin (#3040, ADR-0147 증보 2026-09-28): move the row to
+   * another scheme/host/port and the server refuses an empty key with a 409, so
+   * the draft has to ask for one first. Absent on a new row.
+   */
+  storedBaseUrl?: string;
 }
 
 /** Fallback hops only: position 0 is the singleton and is not editable here. */
@@ -225,8 +232,41 @@ export function draftFromChain(chain: ProviderChain): ChainDraftRow[] {
       ? { bearerLast4: entry.bearerLast4 }
       : {}),
     isNew: false,
+    storedBaseUrl: entry.baseUrl,
   }));
 }
+
+/**
+ * `scheme://host:port` of an address, or null when it does not parse. WHATWG
+ * `URL.origin` already lowercases the host and drops a default port, so
+ * `https://a.example:443/v1` and `https://a.example/v2` are one origin — the
+ * server's rule (`momo_settings::same_origin`, default port written out).
+ */
+function originOf(raw: string): string | null {
+  try {
+    const origin = new URL(raw.trim()).origin;
+    return origin === "null" ? null : origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The stored row now points at a different origin than the key it holds was
+ * saved for. An address that does not parse counts as different, as it does on
+ * the server: a false "same" would send the kept key somewhere new.
+ */
+export function originChanged(row: ChainDraftRow): boolean {
+  if (row.isNew || row.storedBaseUrl === undefined) return false;
+  const before = originOf(row.storedBaseUrl);
+  const after = originOf(row.baseUrl);
+  return before === null || after === null || before !== after;
+}
+
+/** Row error and key hint for a stored row moved to another origin (#3042). */
+export const ORIGIN_CHANGED_KEY_REQUIRED = "주소가 바뀌어 새 키가 필요해요.";
+export const ORIGIN_CHANGED_KEY_HINT =
+  "주소가 다른 곳으로 바뀌면 저장된 키는 따라가지 않아요. 새 주소의 키를 넣어 주세요.";
 
 /**
  * What the key field of one hop says under it.
@@ -242,6 +282,9 @@ export function bearerHint(row: ChainDraftRow): string {
   if (row.isNew) {
     return "입력한 값은 저장 즉시 암호화되며 화면으로 다시 돌아오지 않습니다.";
   }
+  // 「비워 두면 그대로 둡니다」 is false here: the kept key stays with the old
+  // origin and an empty field is a guaranteed 409.
+  if (originChanged(row)) return ORIGIN_CHANGED_KEY_HINT;
   if (!row.bearerConfigured) {
     return "이 provider에는 저장된 키가 없습니다. 키를 입력해야 실제로 시도됩니다.";
   }
@@ -376,6 +419,13 @@ export function draftRowError(row: ChainDraftRow): DraftRowError | null {
       next: "키를 입력하면",
     };
   }
+  if (originChanged(row) && row.bearer.trim() === "") {
+    return {
+      field: "bearer",
+      message: ORIGIN_CHANGED_KEY_REQUIRED,
+      next: "바뀐 주소의 키를 입력하면",
+    };
+  }
   return null;
 }
 
@@ -483,6 +533,12 @@ export function chainDirtyHint(offline: boolean): string {
     : "아직 저장되지 않았습니다. 연결 순서 저장을 눌러야 적용됩니다.";
 }
 
+/** `error.code` of the chain PUT refusal for a keyless origin change (#3040). */
+export const KEY_REQUIRED_FOR_NEW_ORIGIN = "key_required_for_new_origin";
+
+export const CHAIN_KEY_REQUIRED_FOR_NEW_ORIGIN =
+  "주소가 바뀌면 키를 다시 넣어 주세요. 주소를 바꾼 provider의 키 칸에 새 키를 입력한 뒤 다시 저장해 주세요.";
+
 /** Save failures the operator can act on, from the server's own 400 rules. */
 export function chainSaveMessage(error: unknown): string {
   if (error instanceof ApiError) {
@@ -494,6 +550,14 @@ export function chainSaveMessage(error: unknown): string {
     }
     if (error.status === 403) {
       return "provider 연결은 이 서버의 운영자만 바꿀 수 있습니다.";
+    }
+    // #3040: a kept key never follows its hop to another origin. The code is the
+    // contract; a 409 without it (a proxy, a reworded server) still means the
+    // same next action on this route, which has no other 409.
+    if (error.code === KEY_REQUIRED_FOR_NEW_ORIGIN || error.status === 409) {
+      // No hop number: the server names its storage position, which stops
+      // matching the attempt order (「2차」…) once a middle hop is deleted.
+      return CHAIN_KEY_REQUIRED_FOR_NEW_ORIGIN;
     }
   }
   return "연결 순서를 저장하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
