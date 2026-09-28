@@ -327,6 +327,8 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
       rootKeyId: ROOT_ID,
       signature: "c2ln",
     });
+    await waitFor(() => q(host, "device-key-phone-notice") !== null, "notice");
+    expect(document.activeElement).toBe(q(host, "device-key-phone-notice"));
   });
 
   it("승인 단계는 초점을 패널로 옮기고, 취소하면 승인 버튼으로 돌려놓는다", async () => {

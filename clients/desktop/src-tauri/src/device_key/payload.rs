@@ -670,14 +670,19 @@ impl Statement {
             },
             Statement::Revoke { request, .. } => Summary {
                 title: "oort: 이 기기의 지시 권한을 끊습니다".into(),
+                // The fingerprint is the key this Mac's host will stop
+                // trusting (the letter names the key id, the host is handed
+                // this public key with it); both are on screen so a mismatch
+                // is visible (security review H1b).
                 body: format!(
-                    "키 {}\n기기 이름: 「{}」\n끊은 기기는 이 맥에서 다시 승인해야 지시할 수 있습니다.",
-                    short_id(request.target_key_id),
+                    "지문: {}\n기기 이름: 「{}」, 키 {}\n끊은 기기는 이 맥에서 다시 승인해야 지시할 수 있습니다.",
+                    fingerprint(&request.target_public_key).unwrap_or_else(|| "(읽을 수 없음)".into()),
                     if request.target_label.trim().is_empty() {
                         "이름 없음".to_string()
                     } else {
                         first_line(&request.target_label)
                     },
+                    short_id(request.target_key_id),
                 ),
                 confirm: "끊기".into(),
                 full_text: None,
@@ -702,7 +707,9 @@ fn token(field: &'static str, value: &str) -> Result<(), PayloadError> {
 
 /// Characters that render as nothing, or as a line break a dialog cannot
 /// tell from a real one, yet are signed: format characters (Cf, bidi and
-/// zero-width included, U+200D ZWJ excepted so emoji sequences survive), the
+/// zero-width included, U+200D ZWJ excepted so emoji sequences survive),
+/// variation selectors (U+FE0F, the emoji presentation selector, excepted),
+/// blank fillers (Hangul fillers, U+034F, U+180B–D, U+2800), the
 /// Unicode line and paragraph separators (Zl, Zp), private use (Co) and the
 /// tag block a language model reads but a person cannot see. E1 only refuses
 /// Cc; this signer refuses more, so it never signs what it could not show
@@ -711,6 +718,14 @@ pub fn is_hidden_char(c: char) -> bool {
     matches!(
         c as u32,
         0x00AD
+            | 0x034F
+            | 0x115F..=0x1160
+            | 0x180B..=0x180D
+            | 0x2800
+            | 0x3164
+            | 0xFE00..=0xFE0E
+            | 0xFFA0
+            | 0xE0100..=0xE01EF
             | 0x0600..=0x0605
             | 0x061C
             | 0x06DD

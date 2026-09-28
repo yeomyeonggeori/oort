@@ -528,7 +528,11 @@ function Fingerprint({ value }: { value: string }) {
   return (
     <p className="text-meta text-ink-muted">
       지문{" "}
-      <span className="font-mono text-ink" data-numeric="" data-testid="device-key-fingerprint">
+      <span
+        className="whitespace-nowrap font-mono text-ink"
+        data-numeric=""
+        data-testid="device-key-fingerprint"
+      >
         {value}
       </span>
     </p>
@@ -557,14 +561,26 @@ function PhoneKeyRow({
   const noFingerprintId = useId();
   const startRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const noticeRef = useRef<HTMLParagraphElement | null>(null);
+  // After an approval the trigger is gone (the row turns 지시 기기): focus the
+  // outcome sentence instead of dropping it on <body> (design-review R2 M1).
+  const landOnNotice = useRef(false);
   // Focus follows the two-step flow (ConfirmButton's rule): into the panel
   // when it opens, back to the trigger when it closes.
   const wasAsking = useRef(false);
   useEffect(() => {
     if (asking) panelRef.current?.focus({ preventScroll: true });
-    else if (wasAsking.current) startRef.current?.focus({ preventScroll: true });
+    else if (wasAsking.current && !landOnNotice.current) {
+      startRef.current?.focus({ preventScroll: true });
+    }
     wasAsking.current = asking;
   }, [asking]);
+  useEffect(() => {
+    if (notice && landOnNotice.current) {
+      landOnNotice.current = false;
+      noticeRef.current?.focus({ preventScroll: true });
+    }
+  }, [notice]);
   const refresh = () =>
     void client.invalidateQueries({ queryKey: DEVICE_KEYS_QUERY_KEY(workspaceId) });
 
@@ -584,6 +600,7 @@ function PhoneKeyRow({
       });
     },
     onSuccess: () => {
+      landOnNotice.current = true;
       setAsking(false);
       setNotice(`지시 기기로 승인했습니다: ${label}`);
     },
@@ -736,7 +753,7 @@ function PhoneKeyRow({
           </p>
           {fingerprint ? (
             <p
-              className="font-mono text-title text-ink"
+              className="whitespace-nowrap font-mono text-title text-ink"
               data-numeric=""
               data-testid="device-key-endorse-fingerprint"
             >
@@ -779,7 +796,13 @@ function PhoneKeyRow({
         </p>
       )}
       {notice && (
-        <p className="break-keep text-meta text-ink-muted" role="status">
+        <p
+          ref={noticeRef}
+          tabIndex={-1}
+          className="break-keep text-meta text-ink-muted focus-visible:focus-ring"
+          role="status"
+          data-testid="device-key-phone-notice"
+        >
           {notice}
         </p>
       )}

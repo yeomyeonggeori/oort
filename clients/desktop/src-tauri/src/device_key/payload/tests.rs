@@ -387,6 +387,17 @@ fn the_dialog_shows_what_is_signed_and_nothing_that_can_spoof_it() {
         "{summary:?}"
     );
     assert!(summary.body.contains("「성재의 iPhone」"));
+
+    // Revoke: the fingerprint of the key the host will drop, first.
+    let case = cases()
+        .into_iter()
+        .find(|c| c["name"] == "device_revoke")
+        .unwrap();
+    let summary = statement_of(&case).summary(None);
+    assert!(
+        summary.body.starts_with(&format!("지문: {fp}\n")),
+        "{summary:?}"
+    );
 }
 
 /// Security review H2·H3: a character that renders as nothing (or as a line
@@ -405,6 +416,10 @@ fn invisible_characters_are_never_signed() {
         '\u{2029}',  // paragraph separator
         '\u{E0041}', // tag LATIN CAPITAL A
         '\u{E000}',  // private use
+        '\u{FE00}',  // variation selector 1
+        '\u{E0100}', // variation selector 17
+        '\u{3164}',  // Hangul filler
+        '\u{2800}',  // braille blank
         '\r',
     ] {
         let mut r = request.clone();
@@ -436,7 +451,7 @@ fn invisible_characters_are_never_signed() {
     let mut r = request.clone();
     r.content = ControlContent::Input {
         mode: InputMode::Queue,
-        text: "팀 👨\u{200D}👩\u{200D}👧\t확인".into(),
+        text: "팀 👨\u{200D}👩\u{200D}👧 ❤\u{FE0F}\t확인".into(),
     };
     assert!(Statement::Control { signer, request: r }
         .signed_bytes(now)
