@@ -122,3 +122,55 @@ describe("refreshSessionOutcome — 세 결말이 구별된다", () => {
     await expect(refreshSessionOutcome()).resolves.toBe("rejected");
   });
 });
+
+describe("exclusiveRotation — 호스트의 탭 간 배타 구간 (#3067)", () => {
+  it("회전은 호스트의 배타 구간 안에서, 그 안에서 다시 읽은 토큰으로 한다", async () => {
+    let token = "refresh-stale";
+    const order: string[] = [];
+    const { base } = port({
+      getRefreshToken: () => token,
+      exclusiveRotation: async (work) => {
+        order.push("lock");
+        token = "refresh-reread"; // 호스트의 재읽기가 다른 탭의 회전 결과를 받아들였다
+        try {
+          return await work();
+        } finally {
+          order.push("release");
+        }
+      },
+    });
+    install(base);
+    const presented: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        order.push("fetch");
+        presented.push(JSON.parse(String(init?.body)).refreshToken);
+        return new Response(JSON.stringify({ accessToken: "a-2", refreshToken: "r-2" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      })
+    );
+
+    await expect(refreshSessionOutcome()).resolves.toBe("rotated");
+    expect(presented).toEqual(["refresh-reread"]);
+    expect(order).toEqual(["lock", "fetch", "release"]);
+  });
+
+  it("배타 구간을 얻지 못하면(락 대기 초과) unreachable — 세션은 지우지도 만료시키지도 않는다", async () => {
+    const { base, cleared, marked } = port({
+      exclusiveRotation: async () => {
+        throw new Error("rotation lease wait timed out");
+      },
+    });
+    install(base);
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(restoreSession()).resolves.toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(cleared).not.toHaveBeenCalled();
+    expect(marked).not.toHaveBeenCalled();
+  });
+});

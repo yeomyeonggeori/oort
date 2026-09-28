@@ -56,6 +56,24 @@ export interface SessionPort {
   markAuthExpired(): void;
   /** Forget everything, including the credential store's copy. */
   clearSession(): void;
+  /**
+   * Run one refresh rotation as the ONLY rotation this credential store sees
+   * (#3067). Optional: a host whose store is reachable from exactly one JS
+   * context (the phone) omits it and the core rotates directly.
+   *
+   * A host whose store is shared — browser tabs and desktop windows share
+   * localStorage and the keychain item — must, before calling `work`:
+   *   1. take a cross-context exclusive lock, and
+   *   2. re-read its store and adopt what it finds, so `getRefreshToken()`
+   *      answers the token another context may have rotated to meanwhile;
+   * and must release only after `work`'s `applyRotation` is durably written.
+   * Presenting a token another context already spent is exactly what the
+   * server treats as theft (#3065 reuse detection).
+   *
+   * Rejecting (lock wait timed out, lock API failure) is reported by the core
+   * as `unreachable`: nothing answered, so nothing is proven about the session.
+   */
+  exclusiveRotation?<T>(work: () => Promise<T>): Promise<T>;
 }
 
 /** Everything the core needs from the platform it is running on. */

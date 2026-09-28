@@ -713,8 +713,9 @@ function parseError(res: HttpResponse): ApiError {
 // The refresh token is single-use (MOMO-300): the server revokes the presented
 // token as it issues the new pair. Concurrent 401s must therefore funnel into
 // ONE rotation, because a second concurrent call would present an
-// already-revoked token and end the session. Cross-TAB races stay possible
-// while the token lives in localStorage; see ./session.ts.
+// already-revoked token and end the session. That single flight is per JS
+// context; across tabs and desktop windows the host's `exclusiveRotation`
+// serialises rotations and re-reads the shared store first (#3067).
 
 /**
  * Why a rotation attempt ended. The distinction is load-bearing: **only
@@ -745,34 +746,47 @@ let rotationInFlight: Promise<Rotation> | null = null;
 function rotateSession(): Promise<Rotation> {
   rotationInFlight ??= (async (): Promise<Rotation> => {
     try {
-      const refreshToken = coreSession().getRefreshToken();
-      // Having no token to present is not a network problem: there is nothing
-      // to rotate and nothing to keep waiting for.
-      if (!refreshToken) return { outcome: "rejected", pair: null };
-      const res = await rawRequest(
-        "/v1/auth/refresh",
-        { method: "POST", body: JSON.stringify({ refreshToken }) },
-        null
-      );
-      if (!res.ok) {
-        coreSession().markAuthExpired();
-        return { outcome: "rejected", pair: null };
-      }
-      const pair = refreshResponseFromWire(res.json<unknown>());
-      // A no-op when a logout wiped the store meanwhile; `pair` still reaches
-      // that logout through the result.
-      coreSession().applyRotation(pair.accessToken, pair.refreshToken);
-      return { outcome: "rotated", pair };
+      const session = coreSession();
+      return session.exclusiveRotation
+        ? await session.exclusiveRotation(rotateOnce)
+        : await rotateOnce();
     } catch {
-      // Offline, unreachable server, or a blown deadline: the caller keeps
-      // rendering cached content (P15) and the session is not declared dead,
-      // because nothing answered to say it is.
+      // Offline, unreachable server, a blown deadline, or a cross-context lock
+      // that never came free: the caller keeps rendering cached content (P15)
+      // and the session is not declared dead, because nothing answered to say
+      // it is.
       return { outcome: "unreachable", pair: null };
     } finally {
       rotationInFlight = null;
     }
   })();
   return rotationInFlight;
+}
+
+/**
+ * The rotation itself. Reads the refresh token only here — inside the host's
+ * exclusive section, after its re-read — so a token another tab already spent
+ * is never the one presented.
+ */
+async function rotateOnce(): Promise<Rotation> {
+  const refreshToken = coreSession().getRefreshToken();
+  // Having no token to present is not a network problem: there is nothing
+  // to rotate and nothing to keep waiting for.
+  if (!refreshToken) return { outcome: "rejected", pair: null };
+  const res = await rawRequest(
+    "/v1/auth/refresh",
+    { method: "POST", body: JSON.stringify({ refreshToken }) },
+    null
+  );
+  if (!res.ok) {
+    coreSession().markAuthExpired();
+    return { outcome: "rejected", pair: null };
+  }
+  const pair = refreshResponseFromWire(res.json<unknown>());
+  // A no-op when a logout wiped the store meanwhile; `pair` still reaches
+  // that logout through the result.
+  coreSession().applyRotation(pair.accessToken, pair.refreshToken);
+  return { outcome: "rotated", pair };
 }
 
 /** The detailed rotation. Use this wherever the *reason* changes what you do. */

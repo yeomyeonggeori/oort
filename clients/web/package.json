@@ -43,6 +43,7 @@
     "gate:composer": "npm run build && node gates/gate-composer.mjs",
     "gate:webhook": "npm run build && node gates/gate-webhook-credential.mjs",
     "gate:attachment": "npm run build && node gates/gate-attachment.mjs",
+    "gate:refresh-tabs": "npm run build && node gates/gate-refresh-tabs.mjs",
     "capture:attachment": "npm run build && ATTACH_GATE_SHOTS=1 node gates/gate-attachment.mjs",
     "build:design": "tsc -b && vite build --mode design",
     "capture:design": "npm run build:design && node scripts/capture-screens.mjs",
