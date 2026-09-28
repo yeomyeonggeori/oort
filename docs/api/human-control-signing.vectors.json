@@ -1,5 +1,5 @@
 {
-  "_comment": "#3021 \u2014 ADR-0146 \uac1c\uc815 2026-09-28 D-5 \uacf5\uc720 \ud14c\uc2a4\ud2b8 \ubca1\ud130. \uc0ac\ub78c \uae30\uae30 \ud0a4 \uc11c\uba85 \ubc14\uc774\ud2b8 3\uc885(momo.human.control.v1 \u00b7 device_endorse.v1 \u00b7 device_revoke.v1)\uc758 \uc785\ub825(schema\u00b7fields\u00b7content)\uacfc \ud30c\uc0dd\uac12(content_canonical\u00b7content_sha256\u00b7payload\u00b7payload_sha256), \uadf8\ub9ac\uace0 WebCrypto(node)\u00b7CryptoKit(Swift \uc18c\ud504\ud2b8\uc6e8\uc5b4 \ud0a4, \uac00\ub2a5\ud558\uba74 Secure Enclave \uc784\uc2dc \ud0a4)\uac00 \uc2e4\uc81c\ub85c \ub9cc\ub4e0 \uc11c\uba85. Rust(momo-wire tests/human_control_vectors.rs)\uac00 \uc785\ub825\uc5d0\uc11c \ubc14\uc774\ud2b8\ub97c \ub2e4\uc2dc \ub9cc\ub4e4\uc5b4 \uac19\uc74c\uc744 \ud655\uc778\ud558\uace0 \ubaa8\ub4e0 \uc11c\uba85\uc744 \uac80\uc99d\ud55c\ub2e4. \uc7ac\uc0dd\uc131: node server-rust/crates/momo-wire/tests/human_control_vectors/generate.mjs (Swift\uc640 JS \ubc14\uc774\ud2b8\uac00 \ub2e4\ub974\uba74 \uc4f0\uc9c0 \uc54a\ub294\ub2e4). \ube44ASCII\ub294 \ubaa8\ub450 \\u \uc774\uc2a4\ucf00\uc774\ud504\ub85c \uc801\uc5b4 \ud3b8\uc9d1\uae30\uc758 NFC \uc815\uaddc\ud654\uac00 \ubd84\ud574\ud615 \uc2dc\ud5d8 \ubb38\uc790\uc5f4\uc744 \ub9dd\uac00\ub728\ub9ac\uc9c0 \ubabb\ud558\uac8c \ud55c\ub2e4. \ud0a4\ub294 \uace0\uc815 \ub77c\ubca8\uc758 SHA-256\uc5d0\uc11c \ub9cc\ub4e0 \uc2dc\ud5d8 \uc804\uc6a9 \ud0a4\ub2e4.",
+  "_comment": "#3021 \u2014 ADR-0146 \uac1c\uc815 2026-09-28 D-5 \uacf5\uc720 \ud14c\uc2a4\ud2b8 \ubca1\ud130. \uc0ac\ub78c \uae30\uae30 \ud0a4 \uc11c\uba85 \ubc14\uc774\ud2b8 3\uc885(momo.human.control.v1 \u00b7 device_endorse.v1 \u00b7 device_revoke.v1)\uc758 \uc785\ub825(schema\u00b7fields\u00b7content)\uacfc \ud30c\uc0dd\uac12(content_canonical\u00b7content_sha256\u00b7payload\u00b7payload_sha256), \uadf8\ub9ac\uace0 WebCrypto(node)\u00b7CryptoKit(Swift \uc18c\ud504\ud2b8\uc6e8\uc5b4 \ud0a4 + Secure Enclave \uc784\uc2dc \ud0a4, \uc0dd\uc131\uc5d0\ub294 SE\uac00 \uc788\ub294 \ub9e5\uc774 \ud544\uc694)\uac00 \uc2e4\uc81c\ub85c \ub9cc\ub4e0 \uc11c\uba85. Rust(momo-wire tests/human_control_vectors.rs)\uac00 \uc785\ub825\uc5d0\uc11c \ubc14\uc774\ud2b8\ub97c \ub2e4\uc2dc \ub9cc\ub4e4\uc5b4 \uac19\uc74c\uc744 \ud655\uc778\ud558\uace0 \ubaa8\ub4e0 \uc11c\uba85\uc744 \uac80\uc99d\ud55c\ub2e4. \uc7ac\uc0dd\uc131: node server-rust/crates/momo-wire/tests/human_control_vectors/generate.mjs (Swift\uc640 JS \ubc14\uc774\ud2b8\uac00 \ub2e4\ub974\uba74 \uc4f0\uc9c0 \uc54a\ub294\ub2e4). \ube44ASCII\ub294 \ubaa8\ub450 \\u \uc774\uc2a4\ucf00\uc774\ud504\ub85c \uc801\uc5b4 \ud3b8\uc9d1\uae30\uc758 NFC \uc815\uaddc\ud654\uac00 \ubd84\ud574\ud615 \uc2dc\ud5d8 \ubb38\uc790\uc5f4\uc744 \ub9dd\uac00\ub728\ub9ac\uc9c0 \ubabb\ud558\uac8c \ud55c\ub2e4. \ud0a4\ub294 \uace0\uc815 \ub77c\ubca8\uc758 SHA-256\uc5d0\uc11c \ub9cc\ub4e0 \uc2dc\ud5d8 \uc804\uc6a9 \ud0a4\ub2e4.",
   "format": "momo.human.signing.vectors/v1",
   "algorithm": "ECDSA P-256 / SHA-256 over the payload bytes",
   "public_key_encoding": "base64 STANDARD of the 33-byte compressed SEC1 point",
@@ -34,17 +34,17 @@
         {
           "signer": "webcrypto",
           "public_key": "Al5MJdwsIiT7groXgUDS9kC6VMwSS1QutnuZEZlbxi5S",
-          "signature": "Lrq/KysiTAcFGep2EbrgJB/hewq2nuRYirPRFz4GAWvQvVb2IgvtvZHLQQ5oPx2Uz0T4LrM6p7zcjZFpRNMFbg=="
+          "signature": "XxYpybUq5UhwvKytiisgDdMa+sdoPAg3o7HC1VVMajfaWS95A9/TVX5gGav9dEv/XxRZY0s0PT2YUmEhv1oGgQ=="
         },
         {
           "signer": "cryptokit",
           "public_key": "AgBmMkJ9ZDo8OW7LaZbuUluxsG1dG33gCQzHURTemcBr",
-          "signature": "/chM+oiDIqyvWX+OvoS95F4ubqeU8AfuM1mRFn1GQL0dwLwd9dGNGoCZYABGgzuAZ0OBrsjdqnlxV8eanKr62A=="
+          "signature": "T/oTRhJxaadUBdjdZbNTVu8X94m873eaKhaIaQsAPWMATDRGhRcKtoRPWfh34u3R2ch4f2QqS1aqFczWP8IP3A=="
         },
         {
           "signer": "cryptokit-secure-enclave",
-          "public_key": "A84+bSnaqVZLg7Wb61dj9b3FR1cS7NtV2U5XRT51f9WJ",
-          "signature": "u3iiQcbMISV+zktav5+RC7v3u71tQDcXyoE/L/VWoKf+wTm+6+hF1bW7mcRbqvRAbuSEkoDPZ4UyR+mjNZqM4Q=="
+          "public_key": "A+nLMkl6mLq7rAtgEJZnEYe+DAk4UlAYeb9eNnqM1Eey",
+          "signature": "G3XY/Mwn8T1aC357juTGQ+IkKLkW07/HrZy8MPbNeqoIvxY1HRZ/CtcPTtJcpAX96OoXOrpUtVrenyLvUSeDNQ=="
         }
       ]
     },
@@ -75,17 +75,17 @@
         {
           "signer": "webcrypto",
           "public_key": "Al5MJdwsIiT7groXgUDS9kC6VMwSS1QutnuZEZlbxi5S",
-          "signature": "B1mPlZniFRNO9p1LilbiU9FLCVMNcxzB+3ji2vNQYt66U+r5hVwxjfgaKe1Pu7cBU/FIN6vVICYrHO+S9Nm/oQ=="
+          "signature": "Z8OzIcVPdDQJWPflF89rpfMVwZmedJ53nSH1Dq/kXnPAKqIi660F1O3LzFaCLK7yvekKKNpeHhnXLwCj9CUZfg=="
         },
         {
           "signer": "cryptokit",
           "public_key": "AgBmMkJ9ZDo8OW7LaZbuUluxsG1dG33gCQzHURTemcBr",
-          "signature": "t2Igwd1hMNcQQJipNEKyyS9NZRM2ArRqjrbho1UGUAQCts+MtScvNkr9QLonv83AvGZuw6cJCFkdM+WHVqPmxA=="
+          "signature": "oRT1HU/LbCG+NhfnJRdt93/Av+oR01/GLK9Z7ojDO39WkL653B7Svhu5B+6Ej4+K++vaqE9+9gKRI/vA40W58g=="
         },
         {
           "signer": "cryptokit-secure-enclave",
-          "public_key": "A84+bSnaqVZLg7Wb61dj9b3FR1cS7NtV2U5XRT51f9WJ",
-          "signature": "Tg+L4hePlLwnRg17aiF9OdkNS+k7vEGeC/fw89iWKuGzCwlEFuioBuQ20mhU23Ktnf/SmrhVFELR8rQSWcM24g=="
+          "public_key": "A+nLMkl6mLq7rAtgEJZnEYe+DAk4UlAYeb9eNnqM1Eey",
+          "signature": "VNG865l9Cjb/IGvSBEApT3YHVdQ9XZ0b+TLIIFYkafjzr4a2JSHsTN8D2xem6Mph/FPMLAN7POcqWkCb6KBBYg=="
         }
       ]
     },
@@ -117,17 +117,17 @@
         {
           "signer": "webcrypto",
           "public_key": "Al5MJdwsIiT7groXgUDS9kC6VMwSS1QutnuZEZlbxi5S",
-          "signature": "QlfYkXmu31KkEa//zh8IDTDiOShVi2LkzBMYi9qoPC8KVc5LWtute0KX/sddba4mXLihCwTng2Fpy4GNbAwEhQ=="
+          "signature": "G7Jhkf3JRJItr53z6bA9b6NkY/dvx8FlKIaijXJES/xh4+McyFI71WSYiABirzVYMmgFdMKTNY8rA98IFKhS2A=="
         },
         {
           "signer": "cryptokit",
           "public_key": "AgBmMkJ9ZDo8OW7LaZbuUluxsG1dG33gCQzHURTemcBr",
-          "signature": "0b5HR5s+GW++ZGaOS1mMt0/XN60OWamhUyJKNMPHGoabISipq0qjVAPmG4o59X8wENJpOPlx8YCSkX2gOlbRCQ=="
+          "signature": "BAOS99I2cmdtR8TDaqkflJKyGCbWoVoFoAyP4SiG5oKA5jighNooEjIMW21ttoC1oJtv5sTlewtBB2vSGfAXug=="
         },
         {
           "signer": "cryptokit-secure-enclave",
-          "public_key": "A84+bSnaqVZLg7Wb61dj9b3FR1cS7NtV2U5XRT51f9WJ",
-          "signature": "kD4WTAqrJTFtr8FkAmAsUTtGuIxFQDly5uzO54/wlnPPQ91Bfgb2eKz3xD8ouxDp47zVy/HxUPmXGgPVVzlRKA=="
+          "public_key": "A+nLMkl6mLq7rAtgEJZnEYe+DAk4UlAYeb9eNnqM1Eey",
+          "signature": "WfdeV0fpSXyoo1eS0W1chyY+Cp5yCYoowhRfpKxIiNb4LHa95zBoHucQnzuFMw70A0DW1LPDlzdZz80+MEFv3g=="
         }
       ]
     },
@@ -160,17 +160,17 @@
         {
           "signer": "webcrypto",
           "public_key": "Al5MJdwsIiT7groXgUDS9kC6VMwSS1QutnuZEZlbxi5S",
-          "signature": "KAsrTxsOmAi3878HMsqbhsSLV/dXcev7rYTBm2dvSgY0bAAcK9P2uUDkwiat1kYNc4u1HGENQKburqIN0Cq7zw=="
+          "signature": "s7inHy8Ht6Jr/e7orAJUfP1n+VPBYZRl71UIA5n0V84nUdSl/jpVNBDaDqSu/ke+XkkWxr2V4DsVRnz4ZZRWdA=="
         },
         {
           "signer": "cryptokit",
           "public_key": "AgBmMkJ9ZDo8OW7LaZbuUluxsG1dG33gCQzHURTemcBr",
-          "signature": "RBjV2RQ42g0fmgJjVGGAd4WZGxDu3E0J3P36Jfkg7HW6ozedy1O9/WtM8nbA+vH3bc2fZJYXzwp28VHiXZ0yzQ=="
+          "signature": "uShfLDBbBkFTLFKJjuOtaO5FvxFSS+dOyy1DwWy1A1SjWzaRVKBuggiIXHTlvIpapitaX79UIU9Sdag/I9SrtA=="
         },
         {
           "signer": "cryptokit-secure-enclave",
-          "public_key": "A84+bSnaqVZLg7Wb61dj9b3FR1cS7NtV2U5XRT51f9WJ",
-          "signature": "SgjCjIkBm2xRuZiABE3Djz7xad72rpGlGwo5lNyQ55rVaeK1Ctg7YUU7gk5nKKXYcvtCSPT0w1/yaRxRSCAbnQ=="
+          "public_key": "A+nLMkl6mLq7rAtgEJZnEYe+DAk4UlAYeb9eNnqM1Eey",
+          "signature": "FJd4Qx+1QUzWvEP+Y7KJ2gCQ/enR/+CHvIeGxmA1bC1gVhh5LUjnZdVFsuxOebD6FPIr5iDWbViSM5cbB/RuMw=="
         }
       ]
     },
@@ -219,17 +219,17 @@
         {
           "signer": "webcrypto",
           "public_key": "Al5MJdwsIiT7groXgUDS9kC6VMwSS1QutnuZEZlbxi5S",
-          "signature": "ymxL0bLy0LWEsNGvjguhWIMqYbV0Ra5JsWz+Lhg1K2DJsKza7U4p7hpSC9qxtQDafIPSVRXdJxJAGujZMSsXKA=="
+          "signature": "slAXt4qYS0I9uz6aH3ZWK9yTt/ZcAAPWKRjXoO3epoudDdNJ/g/RCl+5KQwSIj4cPL6zPfrFSWoObP1yLOMF8g=="
         },
         {
           "signer": "cryptokit",
           "public_key": "AgBmMkJ9ZDo8OW7LaZbuUluxsG1dG33gCQzHURTemcBr",
-          "signature": "NLbT8vbCOFQ96U1zalBYxntLkvoXFv9AAj804A8bzraM2IycsY5+e7lBclD6viM5SylLR5wvFXWKxwD0L0DkCw=="
+          "signature": "ZddqSUzY1Rdpga1f7T1Wt+JPMPs19dDE3+u6um7G6E7BXw7SI/yL5u8EwUvPL7x/qatZJgk+coTRRGMAcbzUBA=="
         },
         {
           "signer": "cryptokit-secure-enclave",
-          "public_key": "A84+bSnaqVZLg7Wb61dj9b3FR1cS7NtV2U5XRT51f9WJ",
-          "signature": "CESYQQFjZjEPGqB+b+L++tbm7lHU0AZ5Ev9q9DKd4aPjlXQznKmKNTYCFYDzbriEKR/xROzLr5xsNtWIGWPEqA=="
+          "public_key": "A+nLMkl6mLq7rAtgEJZnEYe+DAk4UlAYeb9eNnqM1Eey",
+          "signature": "owvapnIB2OAnrtriO9fIvHQFxSnCyjFAGvieIAh8bN/vU5aWacY2waIQRHUAwS4r/eOnYSM5VVLRJW6fN2+IpQ=="
         }
       ]
     },
@@ -261,17 +261,17 @@
         {
           "signer": "webcrypto",
           "public_key": "Al5MJdwsIiT7groXgUDS9kC6VMwSS1QutnuZEZlbxi5S",
-          "signature": "66Bb4hUeuLYMNn3sZJx+twGUDbHzykGg9bgNs9lFvF8epxNdx5xF0hwkDiUtK28LOgEv76frCLo1RTlHhcLnew=="
+          "signature": "MHl6qAPS8x5Fm6KpdvomncH97V4YRQ6f93sKwMyy9ghOk4VYeJTYGm6XxFIU2jDI7viEpndZl/EYblpFZMbx9w=="
         },
         {
           "signer": "cryptokit",
           "public_key": "AgBmMkJ9ZDo8OW7LaZbuUluxsG1dG33gCQzHURTemcBr",
-          "signature": "yt7zR/aAXd1pFt909sdu3M7oboVq79QU3LIeES6oZ91kvFQR6h4XiQP8cIY39o9MbLaCSSVuzWeBfrA9y0R+Ag=="
+          "signature": "xCNTBY0l/PnRDbc/1ci1hhDdpC1JFJfFvv8khihjAL6GqnGQhP9RfuomOay4L9CJ9EWeYuFS/x9Y4tyldXZ/Ew=="
         },
         {
           "signer": "cryptokit-secure-enclave",
-          "public_key": "A84+bSnaqVZLg7Wb61dj9b3FR1cS7NtV2U5XRT51f9WJ",
-          "signature": "g7Perzr7XIrwhRvHSDqEZLT/6yT8yBPxDnsCrmvoX+v9Eid1Hwk6t9d6GCDCjqYUcl1XvsNoetgBNg0kAAXQ8w=="
+          "public_key": "A+nLMkl6mLq7rAtgEJZnEYe+DAk4UlAYeb9eNnqM1Eey",
+          "signature": "VQHBnnanscIpi+9+LwwAbCl1jwJWwaP1b13PtzqZcgDuDFDAWvxv9TZMgh+qgvDe8OOkhSZZbjKs2X6Coeijvw=="
         }
       ]
     },
@@ -292,17 +292,17 @@
         {
           "signer": "webcrypto",
           "public_key": "Al5MJdwsIiT7groXgUDS9kC6VMwSS1QutnuZEZlbxi5S",
-          "signature": "iDydYFB2bY3fSBhXTaKEsHfkzbtQLjSxYaJG8Asrv0Xt2IEBWmsX9cfKI4Q/GZZBI9yv4zH73Nja0kgToDmOtQ=="
+          "signature": "3u7h/USs8k+WPfdBz5nP1UMC8O6n87s3YjeQ4QO1F0HOoUHZP1EzEpZvXwpNGkXovBartBxkCkMgSonLZRxUBw=="
         },
         {
           "signer": "cryptokit",
           "public_key": "AgBmMkJ9ZDo8OW7LaZbuUluxsG1dG33gCQzHURTemcBr",
-          "signature": "08M755osNNDzKBEP6Bqsy4GyQTsTZIQsJ4Ey7//sc/nXVn+8fbuWiXVw8TCNbmfu7Jys+wMrCrdXM2MdtqCg9Q=="
+          "signature": "f+euRDsT2DQ5HLZ8Zo9jlZSh3IKPTLp2/98oMr9lBJA++jDnarJPdeuSDTGFdokmJshEb6S9DeGXbmQC13m8ig=="
         },
         {
           "signer": "cryptokit-secure-enclave",
-          "public_key": "A84+bSnaqVZLg7Wb61dj9b3FR1cS7NtV2U5XRT51f9WJ",
-          "signature": "bN6yVy4D/bjRFGjdWBX1nBFchb4DYbrvQr7tfjJeqhE4woP84+y04S5isWCPQxuXw/bH2Q0MDzJuOs4QA3ihtA=="
+          "public_key": "A+nLMkl6mLq7rAtgEJZnEYe+DAk4UlAYeb9eNnqM1Eey",
+          "signature": "dZvB5pBpSS6sbmCbkhROWrjWH8UrP7T8kBKKZeBUQ5rAKqw1brZE0Mx1AxzDew6p6ClDmvn8ZWiU7bdGZG/YoQ=="
         }
       ]
     },
@@ -322,17 +322,17 @@
         {
           "signer": "webcrypto",
           "public_key": "Al5MJdwsIiT7groXgUDS9kC6VMwSS1QutnuZEZlbxi5S",
-          "signature": "ujgVXbG4LhgdFgpziEuckdSN5IIkckA944sI2gM5x6GwVNqXAfGgvOvM7vPnRN7MMikB/Mj/tD+XSTr/IrZ79g=="
+          "signature": "p1v7SIFK65O94fcPkoeXjK7t2NuSctB/I2d2Mz8lQ4y2UGLIcm2vq790znnOfzF6a1V6tofxEf8DZFaKvASEHA=="
         },
         {
           "signer": "cryptokit",
           "public_key": "AgBmMkJ9ZDo8OW7LaZbuUluxsG1dG33gCQzHURTemcBr",
-          "signature": "fMROsCX4tn0isyTAC2pX94MlZ73auM1X9U8I6QmYAdfNlmG8y/01iuJnl97GoEx1ngHFFA4gykqmihJOU7KUBw=="
+          "signature": "FfFo8BN2RPFFY7Sorx1PjyU4a6T0eYBGTHIGH4cm3H98F87ETkjmGicYdJUVqBxQOivkvo1SdJT8V6u57s8fWw=="
         },
         {
           "signer": "cryptokit-secure-enclave",
-          "public_key": "A84+bSnaqVZLg7Wb61dj9b3FR1cS7NtV2U5XRT51f9WJ",
-          "signature": "XtGxxlkN60CJ9VXxnW4I9Kve5GGMTwL6HhUfFTztpC6GfK+7WH3CvzaNIk/nuABdg9kaB2GZWixTko3qaDI4sQ=="
+          "public_key": "A+nLMkl6mLq7rAtgEJZnEYe+DAk4UlAYeb9eNnqM1Eey",
+          "signature": "amW+K3+cO37EATQKxZr7sY0hM3vVk87G3aF7Col+QNkzlb9WdK2bemIgqCovskHz4F7Qy4InVrkSoi6a3pRsiw=="
         }
       ]
     }

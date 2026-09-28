@@ -9,7 +9,7 @@
 //      (this file) and signs them with WebCrypto ECDSA P-256/SHA-256;
 //   2. runs cryptokit.swift, which builds the same bytes independently in Swift
 //      and signs with CryptoKit (a fixed software key, plus an ephemeral Secure
-//      Enclave key when the Mac has one);
+//      Enclave key — so this needs a Mac with a Secure Enclave);
 //   3. refuses to write unless the Swift bytes equal the JS bytes exactly;
 //   4. writes the derived fields + every signature back into the file.
 // The Rust side (tests/human_control_vectors.rs) rebuilds the bytes a third
@@ -169,7 +169,7 @@ for (const tc of doc.cases) {
 
 const out = {
   _comment:
-    "#3021 — ADR-0146 개정 2026-09-28 D-5 공유 테스트 벡터. 사람 기기 키 서명 바이트 3종(momo.human.control.v1 · device_endorse.v1 · device_revoke.v1)의 입력(schema·fields·content)과 파생값(content_canonical·content_sha256·payload·payload_sha256), 그리고 WebCrypto(node)·CryptoKit(Swift 소프트웨어 키, 가능하면 Secure Enclave 임시 키)가 실제로 만든 서명. Rust(momo-wire tests/human_control_vectors.rs)가 입력에서 바이트를 다시 만들어 같음을 확인하고 모든 서명을 검증한다. 재생성: node server-rust/crates/momo-wire/tests/human_control_vectors/generate.mjs (Swift와 JS 바이트가 다르면 쓰지 않는다). 비ASCII는 모두 \\u 이스케이프로 적어 편집기의 NFC 정규화가 분해형 시험 문자열을 망가뜨리지 못하게 한다. 키는 고정 라벨의 SHA-256에서 만든 시험 전용 키다.",
+    "#3021 — ADR-0146 개정 2026-09-28 D-5 공유 테스트 벡터. 사람 기기 키 서명 바이트 3종(momo.human.control.v1 · device_endorse.v1 · device_revoke.v1)의 입력(schema·fields·content)과 파생값(content_canonical·content_sha256·payload·payload_sha256), 그리고 WebCrypto(node)·CryptoKit(Swift 소프트웨어 키 + Secure Enclave 임시 키, 생성에는 SE가 있는 맥이 필요)가 실제로 만든 서명. Rust(momo-wire tests/human_control_vectors.rs)가 입력에서 바이트를 다시 만들어 같음을 확인하고 모든 서명을 검증한다. 재생성: node server-rust/crates/momo-wire/tests/human_control_vectors/generate.mjs (Swift와 JS 바이트가 다르면 쓰지 않는다). 비ASCII는 모두 \\u 이스케이프로 적어 편집기의 NFC 정규화가 분해형 시험 문자열을 망가뜨리지 못하게 한다. 키는 고정 라벨의 SHA-256에서 만든 시험 전용 키다.",
   format: "momo.human.signing.vectors/v1",
   algorithm: "ECDSA P-256 / SHA-256 over the payload bytes",
   public_key_encoding: "base64 STANDARD of the 33-byte compressed SEC1 point",

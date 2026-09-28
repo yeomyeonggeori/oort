@@ -6,9 +6,10 @@
 // `precomposedStringWithCanonicalMapping`, canonical JSON below), then signs:
 //   * `cryptokit`                — P256.Signing software key, scalar =
 //                                  SHA-256("momo.human.signing.vectors/cryptokit")
-//   * `cryptokit-secure-enclave` — an ephemeral SecureEnclave.P256 key, when the
-//                                  Mac has a Secure Enclave (same byte format as
-//                                  the phone/desktop keys; key is not persisted)
+//   * `cryptokit-secure-enclave` — an ephemeral SecureEnclave.P256 key (same byte
+//                                  format as the phone/desktop keys; not
+//                                  persisted). A Mac without a Secure Enclave
+//                                  exits 2 instead of writing partial vectors.
 // Prints JSON: {"cases":[{"name","payload_b64","signatures":[...]}]}.
 
 import CryptoKit
@@ -133,8 +134,14 @@ let path = CommandLine.arguments[1]
 let doc = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as! [String: Any]
 let seed = Data(SHA256.hash(data: Data("momo.human.signing.vectors/cryptokit".utf8)))
 let software = try P256.Signing.PrivateKey(rawRepresentation: seed)
-let enclave: SecureEnclave.P256.Signing.PrivateKey? =
-    SecureEnclave.isAvailable ? try? SecureEnclave.P256.Signing.PrivateKey() : nil
+// The committed file must carry a Secure Enclave signature (the Rust test
+// requires it), so a Mac without one refuses rather than writing a file the
+// tests reject.
+guard SecureEnclave.isAvailable else {
+    FileHandle.standardError.write(Data("no Secure Enclave: run on an Apple silicon / T2 Mac\n".utf8))
+    exit(2)
+}
+let enclave: SecureEnclave.P256.Signing.PrivateKey? = try SecureEnclave.P256.Signing.PrivateKey()
 
 var out: [[String: Any]] = []
 for tc in doc["cases"] as! [[String: Any]] {
