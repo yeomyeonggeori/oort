@@ -889,6 +889,7 @@ async fn a_signed_revocation_is_kept_and_a_forged_one_refused() {
     let root_id = w.key(&session, &root, "macos").await;
     let phone_id = w.key(&session, &handset, "ios").await;
     let at = now_ms();
+    // #3068: v2 letters name the revoked public key (the phone's).
     let letter = |signer: &DeviceKeyPair, target: Uuid, member: Uuid| {
         signer.sign(
             &DeviceRevoke {
@@ -898,7 +899,8 @@ async fn a_signed_revocation_is_kept_and_a_forged_one_refused() {
                 target_key_id: target,
                 revoked_at_ms: at,
             }
-            .signed_bytes(),
+            .signed_bytes_v2(&handset.public_b64)
+            .expect("v2 letter"),
         )
     };
     let path = format!("{}/{phone_id}/revocation", w.keys_path());
@@ -1918,6 +1920,7 @@ async fn an_endorsement_letter_is_used_once_and_a_lost_root_can_be_replaced() {
             target_key_id: first_id,
             revoked_at_ms: at,
         }
+        // v1 — what the desktop app (E5) signs today — is still recorded.
         .signed_bytes(),
     );
     let (status, body) = w
@@ -2063,7 +2066,7 @@ async fn a_member_host_is_handed_its_owners_signed_revocation_letters() {
             &format!("{}/{phone_id}/revocation", w.keys_path()),
             &session.access,
             json!({ "rootKeyId": root_id, "revokedAtMs": at,
-                    "signature": root.sign(&letter.signed_bytes()) }),
+                    "signature": root.sign(&letter.signed_bytes_v2(&handset.public_b64).unwrap()) }),
         )
         .await;
     assert_eq!(status, 200, "{body}");
@@ -2080,7 +2083,9 @@ async fn a_member_host_is_handed_its_owners_signed_revocation_letters() {
     let root_key = BASE64.decode(&root.public_b64).unwrap();
     let signature = BASE64.decode(entry["signature"].as_str().unwrap()).unwrap();
     assert!(
-        letter.verify(&root_key, &signature).is_ok(),
+        letter
+            .verify_v2(&handset.public_b64, &root_key, &signature)
+            .is_ok(),
         "the relayed letter verifies as it stands"
     );
 

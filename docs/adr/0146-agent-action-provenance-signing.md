@@ -3,6 +3,7 @@
 - Status: **Accepted** (2026-07-31 성재 “권고대로 진행” — 범위=3표면 + 세부 3결정 확정. 기안 Fable)
 - **확정된 세부 3결정(2026-07-31)**: ①서명 페이로드 = 정규화 content+author, 서버 부여 seq는 2단계(행위자가 content 서명 → 서버가 seq 부여 후 envelope) ②행위자 단계 = **에이전트·workd 먼저**(키 보유·즉시), 사람은 device 키 결속 후 fast-follow ③UX = **초기 감사 로그·API 전용**(UI 뱃지 없음 — 부분 서명기의 “무서명=미검증” 오독 방지), 사람 서명까지 차면 뱃지 도입.
 - 개정: **2026-09-28 Accepted** — 사람 기기 키 서명(R2). 결재 인용: 성재 2026-09-28 「전부 권장대로」(R2 기기 키 서명 결재 Q1~Q11·Q5-b 권장안 전부, 결재 페이지 https://claude.ai/artifact/392wQKGL3SzwfM2zNjhSpZ). 기안 Opus 5.5 worker(#3020). 근거 브리프 `claudedocs/r2-device-signing/brief.md`는 gitignore 대상이라 로컬에만 있다. 아래 「개정 2026-09-28」 절이 필요한 사실과 근거(file:line)를 그대로 옮겨 담는다. 2026-07-31 본문은 역사 기록으로 두고, 미해결 절만 고쳤다.
+- 증보: **2026-09-28 (#3027 R2-E7)** — `momo.human.control.v2`(spawn이 도구·채널·재개 세션을 결속)와 서명 지시 라우트·서명 재개의 구현 계약, `momo.human.device_revoke.v2`(뿌리가 폐기 대상 공개키에 서명)와 workd 폐기서 보관(#3068). 개정 절 D-5·D-5b·D-8·D-11 범위 안의 구현 확정이며 결정은 바꾸지 않았다. 아래 「증보 2026-09-28 — R2-E7」 절.
 - 관련: **ADR-0145**(Rust/Axum 재작성 — 이 서명은 그 위에 얹힌다), ADR-0004(자격증명 비유입), ADR-0101(에이전트 신원), ADR-0139/0140(workd — 이미 Ed25519 서명 보유), `docs/architecture/invariants-in-rust.md`(D2 — 이 서명이 불변식을 안 건드림을 교차검증)
 - 발단: 서버 스택 재검토에서 "oort가 buzz에서 취할 만한 한 가지 = 에이전트 행동의 암호학적 provenance"로 식별 → 성재가 B안에 포함 지시 + **범위를 "상태 전이까지 넓게"로 결정**.
 
@@ -295,3 +296,56 @@ momo.human.control.v1
 - OpenSSH, PROTOCOL.sshsig: https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.sshsig
 
 역방향(2026-09-28): D-4의 「로그인용 패스키는 #3031에서 따로 검토」는 ADR-0195(패스키 로그인, Accepted)로 결정됐다. 로그인 패스키는 동기화되는 로그인 수단이고 이 개정의 기기 키와 분리한다(ADR-0195 D-11). 공유하는 것은 `p256` 검증 의존뿐이다.
+
+## 증보 2026-09-28 — R2-E7 서명 지시 라우트와 `momo.human.control.v2` (#3027, #3068)
+
+개정 절의 결정(D-5 페이로드, D-5b 별도 서명 지시 라우트, D-8 범위, D-9 재생 방지, D-10 검증 위치, D-11 플래그)을 코드 계약으로 옮긴다. 결정은 바꾸지 않았다. E4(#3063)·E3(#3075)가 남긴 인계 셋을 여기서 닫는다.
+
+### v2 — 13줄 틀은 그대로, spawn만 달라진다
+
+- 첫 줄이 `momo.human.control.v2`다. 줄 수와 순서는 v1과 같다. 줄 수를 세는 서명기(폰 네이티브 모듈, #3066)는 허용 스키마 문자열만 바꾸면 된다.
+- **spawn 본문**은 `{agent_member_id}\n{folder_id}\n{tool}\n{channel_id}\n{NFC(first_prompt)}`다. v1은 도구와 채널을 서명하지 않아서, 서버가 유효한 서명 아래에서 둘을 바꿀 수 있었다(E4 인계 ①).
+- **spawn 세션 줄**은 재개일 때 후속 세션 id를 담는다. 새 작업은 `-`다. 소유자가 후속 id를 정해 서명하고, 서버는 그 id로 세션을 만든다. 그래서 서버가 「소유자의 말이 붙을 세션」을 고르지 못한다(#3024 M2). 이것으로 R2를 켜면 재개가 403이 되던 문제가 풀린다(E3 인계 ③).
+- **v1 수용 범위.** input·permission·bundle_manifest·host_register의 v1 바이트는 첫 줄만 다르고 뜻이 같다. 그래서 서버와 workd는 이 종류에 한해 v1 문장도 받는다(`HumanControl::verify_any`). v1 spawn은 받지 않는다. 폰이 지금 v1만 서명하므로 input·permission은 폰 허용 목록을 바꾸기 전에도 동작한다.
+- agent·folder는 v1부터 본문에 서명돼 있다(E3 인계 ②). host는 지금 폴더 id를 실행에 쓰지 않는다(허용 폴더 하나). 여러 폴더를 받게 되면 host가 이 id로 폴더를 고른다.
+- 공유 벡터: v1 `docs/api/human-control-signing.vectors.json`은 폰이 바이트 동일 사본을 두므로 고치지 않는다. v2 사례는 `docs/api/human-control-signing-v2.vectors.json`에 있다. WebCrypto·CryptoKit(소프트웨어 키 + Secure Enclave 임시 키) 서명을 Rust가 다시 검증한다.
+- 서명 맥락 응답(`GET …/device-keys/signing-context`)에 `humanControlSchema: momo.human.control.v2`가 더해진다.
+
+### 서명 지시 라우트 — `POST /v1/workspaces/{ws}/work-sessions/{session}/instructions`
+
+- **닫힘.** `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`가 꺼져 있으면 403 `signed_instructions_disabled`로 거부한다(D-11).
+- **주체.** 사람 bearer, 세션 소유자이자 member host 소유자만 된다(0188 D3). 세션 채널의 활성 멤버여야 한다(지시는 그 채널의 메시지이기도 하다, 403 `instruction_channel_member_only`). 에이전트 scope 목록과 host 서명 허용 목록에 넣지 않았다.
+- **서명 필수.** `kind=input` 문장이 세션·host·NFC(text)·mode를 묶는다. `clientMsgId`는 nonce와 같아야 하고 본문 `mode`는 서명된 mode와 같아야 한다(400 `instruction_signature_mismatch`). 서버는 예약(queue)을 끼어들기(interrupt)로 바꾸지 못한다.
+- **한 tx.** `input` 컨트롤(서명 컬럼, `action_signature`, 디스패치 이벤트), 세션 스레드 메시지, 감사 행 `work.instruction.sent`를 함께 쓴다. 메시지는 기존 send 헬퍼(`send_thread_notice_in_tx`)가 쓴다. root는 세션 루트 메시지, `client_msg_id`는 nonce, props `momo.instruction`에는 컨트롤 id와 mode가 들어간다. channel_seq·message·outbox가 한 tx인 것은 그대로다. `momo-messaging`은 바뀌지 않았다. 멘션 처리와 호스티드 에이전트 알림은 하지 않는다. 지시가 가는 곳은 ACP 세션이고, 다른 런타임을 깨우지 않는다.
+- **재시도는 재생이 아니다.** 서명을 보기 전에 이 nonce를 단 컨트롤을 찾는다. 같은 지시면 200으로 같은 컨트롤과 메시지를 돌려준다(`replayed: true`). 다른 지시에 쓰인 nonce, 또는 이미 일반 메시지의 `clientMsgId`로 쓰인 nonce면 409 `instruction_nonce_reused`다(E3 인계 ①). props 키 `momo.instruction`은 서버 소유 키라 일반 메시지 전송에서는 지워진다.
+- **정직한 거부.** 세션이 running·idle이 아니면 409 `work_session_not_accepting`, host가 폐기됐으면 409 `work_host_revoked`, 90초 안에 heartbeat가 없으면 409 `work_host_offline`이다. 모두 nonce를 쓰기 전에 판정한다. 그래서 같은 서명 지시를 나중에 다시 보낼 수 있다.
+- **순서(#3001 계약).** queue는 진행 중인 턴과 이미 쌓인 지시 뒤에 간다. interrupt는 host가 진행 중인 턴을 ACP `session/cancel`로 취소한 뒤 큐 맨 앞에서 보낸다. 앞선 interrupt가 있으면 그 뒤, 모든 queue 앞이다(보낸 순서 유지). 턴이 없으면 바로 시작한다. 취소하는 턴이 기다리던 권한 요청은 `cancelled`로 답하고 서버에서 거둔다. 큐가 가득 차도 interrupt는 8개까지 더 받는다(서버가 이미 기록하고 nonce를 쓴 신호이므로). mode는 host가 검증한 서명 문장에서만 읽는다(R2 켠 host). 서명 없는 input, R2를 끈 host의 input은 queue다.
+- 계약 골든: `docs/api/work-instruction.golden.json`.
+
+### 서명 재개 — `POST …/work-sessions/{session}/resume`
+
+- 본문에 `sessionId`(후속 세션 id)와 `humanSignature`(v2 spawn 문장)를 함께 싣는다. 하나만 오면 400 `resume_signature_incomplete`다. 이미 있는 id면 409 `resume_session_id_taken`이다.
+- 서버는 원본 세션의 도구·채널·라벨과 후속 id로 문장을 다시 만들어 검증한다. member host 대상이고 플래그가 켜져 있으면 서명이 필수다(403 `device_signature_required`). 보낸 서명은 플래그와 무관하게 검증한다.
+
+### 폐기서 v2와 workd 보관 (#3068)
+
+- **`momo.human.device_revoke.v2`.** v1 줄들에 폐기 대상 공개키(압축 SEC1 33바이트의 base64) 한 줄을 시각 앞에 더한다. 승인서는 공개키를, v1 폐기서는 key id만 서명해서, 이 host가 본 적 없는 키는 뿌리가 어느 키를 폐기했는지 알 수 없었다. v2에서는 뿌리가 공개키에 서명한다. 서버의 폐기 라우트는 v2를 저장된 키 행의 공개키로 검증하고, 데스크탑 앱(E5, track/uxui #3076)이 지금 서명하는 v1도 받는다. 데스크탑이 v2로 옮기면 전달 경로도 공개키를 결속한다(UXUI 후속).
+- **workd가 공개키를 받는 조건.** v2 폐기서(뿌리의 말)이거나, 로컬 소켓(코드서명 확인된 데스크탑 앱의 말)일 때만 받는다. 서버가 전달한 v1 폐기서의 공개키는 서명 밖 값이라 받지 않는다. 서명된 key id와, 이 host가 그 id로 이미 본 키만 폐기하고 `revocation_key_unsigned`로 답한다. 전에는 키 A의 진짜 폐기서에 키 B의 공개키를 붙이면 B까지 폐기됐고, 미끼 키를 붙이면 A의 진짜 키가 새 id로 돌아올 수 있었다(보안 검수 High). v2 폐기서의 공개키를 서버가 바꾸면 서명이 맞지 않아 폐기서 전체가 거부된다. 서버가 폐기를 숨기는 것과 같고, 그 경우는 로컬 소켓이 막는다(D-7).
+- **영구 보관.** 적용한 폐기서는 모두 `human-trust.json`의 `revocations`(폐기된 key id별, 스키마·받은 공개키 포함)에 남는다. 서버는 최신 256개만 전달하므로, 전달 목록에서 빠진 폐기도 재시작 뒤까지 유지되어야 한다.
+
+### 버전 정합
+
+| 표면 | 서명하는 control 스키마 | 비고 |
+|---|---|---|
+| 서버(momo-auth `verify_human_control_in_tx`) | v2, 그리고 spawn 외 v1 | 이 증보 |
+| workd(`human_trust::check_control`) | v2, 그리고 spawn 외 v1 | 이 증보 |
+| 폰 네이티브 모듈(#3066) | v1만 허용 | spawn(새 작업·재개)을 서명하려면 허용 목록을 `momo.human.control.v2`로 옮겨야 한다(UXUI 후속). input·permission은 지금도 받는다 |
+| 데스크탑 Tauri(E5 #3025, track/uxui #3076) | control.v1(다섯 종류 모두), device_endorse.v1, device_revoke.v1 | spawn(새 작업·재개)은 control.v2로 옮겨야 서버·host가 받는다. 폐기서는 v1도 받지만(전달되면 id만 폐기), 공개키 결속을 위해 device_revoke.v2로 옮긴다(UXUI 후속). input·permission·host_register는 v1 그대로 받는다 |
+
+### 남은 것
+
+- 플래그 켜기는 R1 재검수와 R2 보안 검수(E10 #3030) PASS 뒤다(D-11 그대로).
+- 뿌리를 고정하기 전에 받은 폐기서는 지금처럼 버린다(`root_not_pinned`). 고정 뒤 256개 창 안의 폐기서는 다음 poll에 다시 온다.
+- 재개 봉투의 `agentMemberId`·`folderId`는 서명에 들어가지만 서버가 원본 세션과 대조하지는 않는다. host가 폴더 id를 실행에 쓰기 시작할 때 함께 묶는다.
+- 서명 재개의 후속 세션 id가 다른 워크스페이스의 세션 id와 겹치면(전역 PK) 이름 없는 500이 난다. 무작위 UUID라 우연히는 일어나지 않고, 알려진 id를 일부러 넣어도 권한 이득은 없다(보안 검수 Low).
+- 서버에서 새 작업 spawn을 서명과 함께 만드는 경로는 아직 없다. 재개만 서명된 spawn을 만든다. 폰의 새 작업(0188 D4 DM → spawn)은 E8 이후다.

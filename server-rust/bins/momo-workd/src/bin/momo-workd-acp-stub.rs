@@ -27,6 +27,10 @@
 //!   --escape-mode ID     during each prompt, report `current_mode_update` → ID
 //!   --escape-via-config  report that escape as `config_option_update` instead
 //!   --hang               never answer `session/prompt` until cancelled
+//!   --hang-first         like `--hang`, for the first prompt only (#3027:
+//!                        an owner's interrupt cancels it, later turns end)
+//!   --slow-cancel        answer a cancelled prompt 500 ms after the cancel
+//!                        (#3027: room for a second interrupt to queue)
 //!   --leak               during each prompt, stream synthetic credentials in
 //!                        slow chunks that split a token and a PEM header
 //!   --setsid-grandchild PATH
@@ -64,6 +68,8 @@ struct Options {
     escape_mode: Option<String>,
     escape_via_config: bool,
     hang: bool,
+    hang_first: bool,
+    slow_cancel: bool,
     leak: bool,
     setsid_grandchild: Option<String>,
     exit_after_turn: bool,
@@ -87,6 +93,8 @@ fn parse() -> Options {
         escape_mode: None,
         escape_via_config: false,
         hang: false,
+        hang_first: false,
+        slow_cancel: false,
         leak: false,
         setsid_grandchild: None,
         exit_after_turn: false,
@@ -110,6 +118,8 @@ fn parse() -> Options {
             "--escape-mode" => options.escape_mode = args.next(),
             "--escape-via-config" => options.escape_via_config = true,
             "--hang" => options.hang = true,
+            "--hang-first" => options.hang_first = true,
+            "--slow-cancel" => options.slow_cancel = true,
             "--leak" => options.leak = true,
             "--setsid-grandchild" => options.setsid_grandchild = args.next(),
             "--exit-after-turn" => options.exit_after_turn = true,
@@ -135,6 +145,8 @@ struct Stub {
     options: Options,
     /// The mode the stub is in: `--mode`, then whatever `session/set_mode` set.
     current_mode: String,
+    /// Prompts received so far (`--hang-first`).
+    prompts: usize,
     out: std::io::Stdout,
     lines: std::io::Lines<std::io::StdinLock<'static>>,
     next_id: i64,
@@ -244,6 +256,7 @@ impl Stub {
 
     fn prompt(&mut self, id: &Value, params: &Value) {
         let session_id = params["sessionId"].as_str().unwrap_or_default().to_string();
+        self.prompts += 1;
         self.record(json!({"prompt_mode": self.current_mode}));
         let text = params["prompt"][0]["text"]
             .as_str()
@@ -403,11 +416,14 @@ impl Stub {
             };
             self.update(&session_id, update);
         }
-        if self.options.hang {
+        if self.options.hang || (self.options.hang_first && self.prompts == 1) {
             loop {
                 match self.read() {
                     None => return,
                     Some(message) if message["method"] == "session/cancel" => {
+                        if self.options.slow_cancel {
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                        }
                         self.respond(id, json!({"stopReason": "cancelled"}));
                         return;
                     }
@@ -524,6 +540,7 @@ fn main() {
     let stdin: &'static std::io::Stdin = Box::leak(Box::new(std::io::stdin()));
     let mut stub = Stub {
         current_mode: options.mode.clone(),
+        prompts: 0,
         options,
         out: std::io::stdout(),
         lines: stdin.lock().lines(),

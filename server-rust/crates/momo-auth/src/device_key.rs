@@ -23,7 +23,7 @@
 //!   member. The bytes are rebuilt from the **stored** rows (target key, alg,
 //!   label; root key), never from the request, and the canonical low-s
 //!   signature E1 returns is what is stored.
-//! * **Revocation** (D-7): a `device_revoke.v1` letter from a live root
+//! * **Revocation** (D-7): a `device_revoke.v2` (or v1) letter (#3068) from a live root
 //!   candidate, or the end of the key's session lineage. Rows are never deleted.
 //! * **host_register** (D-8): [`verify_host_register_in_tx`] — the root
 //!   candidate's `momo.human.control.v1` statement over the host key, host id
@@ -70,7 +70,7 @@ pub const REFUSAL_DEVICE_ROOT_LINKED_SESSION: &str = "device_root_linked_session
 /// Why a key ended (`member_device_key_revoked_ck`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceKeyRevocationReason {
-    /// A `device_revoke.v1` letter from the root.
+    /// A `device_revoke.v2` (or v1) letter from the root (#3068).
     Signed,
     /// The session logged out.
     Logout,
@@ -531,7 +531,7 @@ pub async fn endorse_device_key_in_tx(
     Ok(Ok(record))
 }
 
-/// Record a `device_revoke.v1` letter (D-7). A key the session end already
+/// Record a `device_revoke.v2` or v1 letter (D-7, #3068). A key the session end already
 /// revoked still takes the letter once, so workd can be handed it.
 #[allow(clippy::too_many_arguments)]
 pub async fn revoke_device_key_signed_in_tx(
@@ -583,7 +583,15 @@ pub async fn revoke_device_key_signed_in_tx(
     let Ok(signature) = BASE64.decode(signature_b64) else {
         return Ok(Err(DeviceKeyRefusal::SignatureInvalid));
     };
-    let canonical = match letter.verify(&root.public_key_bytes(), &signature) {
+    // #3068: `device_revoke.v2` (the root names the revoked public key, so
+    // the relayed letter binds key and id for the host), or v1 — what the
+    // desktop app (E5 #3076) signs today. A host that is relayed a v1 letter
+    // revokes the id only; the local socket carries the key (workd
+    // `human_trust`).
+    let canonical = match letter
+        .verify_v2(&target.public_key, &root.public_key_bytes(), &signature)
+        .or_else(|_| letter.verify(&root.public_key_bytes(), &signature))
+    {
         Ok(canonical) => canonical,
         Err(_) => return Ok(Err(DeviceKeyRefusal::SignatureInvalid)),
     };
@@ -607,7 +615,7 @@ pub async fn revoke_device_key_signed_in_tx(
     Ok(Ok(record))
 }
 
-/// A stored `device_revoke.v1` letter, in the shape workd (E4 #3024) takes
+/// A stored `device_revoke` letter (v2, or v1), in the shape workd (E4 #3024) takes
 /// from `pendingControls.deviceRevocations[]`: the letter's own fields plus the
 /// revoked public key, which workd needs to refuse the key under any id.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -814,13 +822,11 @@ pub async fn verify_host_register_in_tx(
     let Ok(signature) = BASE64.decode(&proof.signature_b64) else {
         return Ok(Err(DeviceKeyRefusal::SignatureInvalid));
     };
-    let Ok(signed_bytes) = statement.signed_bytes() else {
-        return Ok(Err(DeviceKeyRefusal::SignatureInvalid));
-    };
-    match statement.verify(&root.public_key_bytes(), &signature) {
-        Ok(canonical) => Ok(Ok(VerifiedHostRegister {
-            signature: canonical,
-            signed_bytes,
+    // v2, or v1 (same bytes but the first line, #3027).
+    match statement.verify_any(&root.public_key_bytes(), &signature) {
+        Ok(verified) => Ok(Ok(VerifiedHostRegister {
+            signature: verified.signature,
+            signed_bytes: verified.signed_bytes,
             public_key_b64: root.public_key.clone(),
         })),
         Err(_) => Ok(Err(DeviceKeyRefusal::SignatureInvalid)),

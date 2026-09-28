@@ -3414,7 +3414,7 @@ paths:
     post:
       tags: [device-keys]
       operationId: revokeDeviceKey
-      summary: Record a root key's signed `momo.human.device_revoke.v1` letter (D-7).
+      summary: Record a root key's signed `momo.human.device_revoke.v2` (or v1) letter (D-7; v2 names the revoked public key, #3068).
       description: >
         Rebuilt from the stored rows plus `revokedAtMs` (the time inside the
         letter, not after server time + 5 minutes, not before the key existed)
@@ -4649,7 +4649,13 @@ paths:
         new running work_session reuses the same root thread, records
         resumedFromSessionId, and emits the existing spawn dispatch in one
         tenant transaction. Host paths, credentials, and process state are not
-        accepted or persisted.
+        accepted or persisted. R2 (#3027): a resume may carry the owner's
+        `momo.human.control.v2` spawn statement (`humanSignature`) together
+        with `sessionId`, the successor session id it signs; the new session
+        is created under exactly that id, and the statement binds the source's
+        tool, channel and label. Onto a member-scoped host it is required when
+        the instance sets `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED` (403
+        device_signature_required); it is verified whenever sent.
       security:
         - bearerAuth: []
       parameters:
@@ -4690,8 +4696,9 @@ paths:
         "409":
           description: >
             Source is not orphaned, target host is revoked/unavailable/outside
-            policy, target host is the source host, or the workspace/member pool
-            has no available slot.
+            policy, target host is the source host, the workspace/member pool
+            has no available slot, or (#3027) `error.code`
+            resume_session_id_taken / device_nonce_replayed.
 
   /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/permission-decisions:
     post:
@@ -4787,6 +4794,107 @@ paths:
           description: >
             `error.code` instance_id_unconfigured — a signature was sent to an
             instance with no `MOMO_INSTANCE_ID`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/instructions:
+    post:
+      tags: [work-sessions]
+      operationId: sendWorkInstruction
+      summary: The session owner's signed instruction to its agent — queue or interrupt (R2-E7).
+      description: >
+        ADR-0146 개정 D-5b · D-8 · D-10 (#3027), ADR-0188 D3 · D4. Closed
+        (403 signed_instructions_disabled) unless the instance sets
+        `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`. Human bearer of the session
+        owner, who must also own the session's member-scoped host; agent
+        bearers and host-signed requests never reach it. `humanSignature` is
+        required: the owner's `momo.human.control.v2` statement (a v1 one is
+        also accepted for `input`) with kind=input over this session, the
+        session's host, NFC(text) and the mode; `clientMsgId` must equal its
+        nonce and `mode` its mode, so the server cannot turn a queued
+        instruction into an interrupt. In one tenant transaction the route
+        writes the `input` work control (signature columns, `action_signature`
+        row, dispatch event), the instruction as a session-thread message
+        (root = the session's root message, `client_msg_id` = nonce, props
+        `momo.instruction` = control id + mode) through the existing send
+        helper (channel_seq + message + outbox), and a
+        `work.instruction.sent` audit row. `queue` runs after the running
+        turn and anything already queued; `interrupt` has the host cancel the
+        running turn (ACP session/cancel) and deliver it next. A retry of an
+        accepted instruction answers 200 with the same control and message
+        before the signature is looked at. A session that is not
+        running/idle, or a host that is revoked or offline (no heartbeat in
+        90 s), is refused by name before the nonce is spent. Golden contract:
+        docs/api/work-instruction.golden.json.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkSessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkInstructionRequest"
+      responses:
+        "201":
+          description: The instruction was accepted and dispatched to the host.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkInstructionResponse"
+        "200":
+          description: A retry of an instruction already accepted (`replayed` true).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkInstructionResponse"
+        "400":
+          description: >
+            `error.code` instruction_mode_invalid, instruction_text_invalid
+            (empty, over 32768 characters, or not NFC), instruction_slash_command
+            (the host never runs an adapter command), or
+            instruction_signature_mismatch (clientMsgId is not the signed
+            nonce, or mode is not the signed mode).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            `error.code` signed_instructions_disabled (the flag is off),
+            instruction_not_human, instruction_owner_only (not the session and
+            host owner), instruction_channel_member_only (not an active member
+            of the session's channel), instruction_member_host_only (a
+            workspace-scoped host), or a device-signature refusal: device_signature_invalid,
+            device_key_revoked, device_key_not_endorsed,
+            device_signature_expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The session does not exist in this workspace.
+        "409":
+          description: >
+            `error.code` work_session_not_accepting (the session is not running
+            or idle), work_host_offline (no heartbeat in 90 s — not
+            delivered; resend the same signed instruction later),
+            work_host_revoked, instruction_nonce_reused (the nonce is on
+            another instruction, or already a chat message's clientMsgId), or
+            device_nonce_replayed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: >
+            `error.code` instance_id_unconfigured — no `MOMO_INSTANCE_ID`.
           content:
             application/json:
               schema:
@@ -11127,7 +11235,7 @@ components:
           description: The time inside the signed letter.
         signature:
           type: string
-          description: base64 of raw r‖s (64 bytes) over `momo.human.device_revoke.v1`.
+          description: base64 of raw r‖s (64 bytes) over `momo.human.device_revoke.v2` (the stored key's public key is its fifth field, #3068) or `momo.human.device_revoke.v1`. A host relayed a v1 letter revokes the key id only.
 
     DeviceKey:
       type: object
@@ -11212,7 +11320,8 @@ components:
       type: object
       required:
         [instanceId, serverTimeMs, maxLifetimeMs, maxClockSkewMs,
-         humanControlSignatureRequired, hostRegisterSignatureRequired]
+         humanControlSignatureRequired, hostRegisterSignatureRequired,
+         humanControlSchema]
       properties:
         instanceId:
           type: string
@@ -11236,12 +11345,19 @@ components:
         hostRegisterSignatureRequired:
           type: boolean
           description: MOMO_HOST_REGISTER_SIGNATURE_REQUIRED.
+        humanControlSchema:
+          type: string
+          enum: [momo.human.control.v2]
+          description: >
+            The control schema a device signs (#3027). A v1 statement is still
+            accepted for every kind but spawn.
 
     HumanSignatureRequest:
       type: object
       description: >
-        A person's `momo.human.control.v1` signature sent beside an
-        instruction (ADR-0146 개정 D-5 · D-10, #3023). Only what the server
+        A person's `momo.human.control.v2` signature (v1 accepted for every
+        kind but spawn, #3027) sent beside an instruction (ADR-0146 개정 D-5 ·
+        D-10, #3023). Only what the server
         cannot derive travels here; it rebuilds the 13 lines from its own
         instance id and the workspace, member, host, session and content it is
         about to write.
@@ -11577,7 +11693,7 @@ components:
           type: array
           description: >
             ADR-0146 개정 D-7 (#3022, workd #3024): the member host owner's
-            root-signed `momo.human.device_revoke.v1` letters, for workd to verify
+            root-signed `momo.human.device_revoke` (v2, or v1) letters, for workd to verify
             against its pinned root. Omitted when there are none and for a
             workspace host. A session-end revocation carries no letter and is
             not relayed. At most the newest 256 are sent, so a host keeps every
@@ -11824,11 +11940,22 @@ components:
     ResumeWorkSessionRequest:
       type: object
       required: [targetHostId]
+      additionalProperties: false
       properties:
         targetHostId:
           type: string
           format: uuid
           description: Active registered host allowed by the effective tier policy.
+        sessionId:
+          type: string
+          format: uuid
+          description: >
+            #3027 — the successor session id the owner signed (the v2 spawn's
+            session line). Sent with humanSignature and only then (400
+            resume_signature_incomplete); 409 resume_session_id_taken when it
+            already exists.
+        humanSignature:
+          $ref: "#/components/schemas/HumanSignatureRequest"
 
     PutWorkTierPolicyRequest:
       type: object
@@ -12496,6 +12623,60 @@ components:
             permission_instruction_unsupported) while non-empty, until R2.
         humanSignature:
           $ref: "#/components/schemas/HumanSignatureRequest"
+
+    WorkInstructionRequest:
+      type: object
+      required: [text, mode, clientMsgId, humanSignature]
+      additionalProperties: false
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 32768
+          description: NFC. Becomes the next turn's prompt and the thread message, verbatim.
+        mode:
+          type: string
+          enum: [queue, interrupt]
+          description: Must equal humanSignature.mode (the mode is signed).
+        clientMsgId:
+          type: string
+          format: uuid
+          description: The thread message's idempotency key; must equal humanSignature.nonce.
+        humanSignature:
+          $ref: "#/components/schemas/HumanSignatureRequest"
+
+    WorkInstructionMessage:
+      type: object
+      required: [id, channelId, rootId, seq, clientMsgId]
+      properties:
+        id:
+          type: string
+          format: uuid
+        channelId:
+          type: string
+          format: uuid
+        rootId:
+          type: string
+          format: uuid
+          description: The session's root message (the session thread).
+        seq:
+          type: integer
+          format: int64
+        clientMsgId:
+          type: string
+          format: uuid
+
+    WorkInstructionResponse:
+      type: object
+      required: [workControl, message, replayed]
+      properties:
+        workControl:
+          $ref: "#/components/schemas/WorkControl"
+        message:
+          $ref: "#/components/schemas/WorkInstructionMessage"
+        replayed:
+          type: boolean
+          description: true when this answered a retry of an accepted instruction.
 
     WorkPermissionRequest:
       type: object

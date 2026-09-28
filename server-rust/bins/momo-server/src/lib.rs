@@ -1021,6 +1021,13 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/work-sessions/{session}/permission-decisions",
             post(routes::work_permissions::decide),
         )
+        // ADR-0146 개정 D-5b (#3027): the owner's signed instruction. Same
+        // boundary as the decision route: human bearer only, never signable
+        // by a host, absent from `momo_auth::required_agent_scope`.
+        .route(
+            "/v1/workspaces/{ws}/work-sessions/{session}/instructions",
+            post(routes::work_instructions::send),
+        )
         // work controls — the host-control ledger (#1114, ADR-0114 D4/D5)
         .route(
             "/v1/workspaces/{ws}/work-controls",

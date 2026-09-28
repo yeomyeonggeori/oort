@@ -9,13 +9,13 @@
 //! `\n`-joined fields, UTF-8, no trailing newline):
 //!
 //! ```text
-//! momo.human.control.v1          momo.human.device_endorse.v1   momo.human.device_revoke.v1
+//! momo.human.control.v2          momo.human.device_endorse.v1   momo.human.device_revoke.v2
 //! {instance_id}                  {workspace_id}                 {workspace_id}
 //! {workspace_id}                 {member_id}                    {member_id}
 //! {member_id}                    {root_key_id}                  {root_key_id}
 //! {device_key_id}                {target_alg}                   {target_key_id}
-//! {host_id}                      {target_public_key_b64}        {revoked_at_ms}
-//! {session_id | "-"}             {label (NFC)}
+//! {host_id}                      {target_public_key_b64}        {target_public_key_b64}
+//! {session_id | "-"}             {label (NFC)}                  {revoked_at_ms}
 //! {kind}
 //! {mode | "-"}
 //! {nonce}
@@ -23,6 +23,9 @@
 //! {expires_at_ms}
 //! {content_sha256}
 //! ```
+//!
+//! (`device_revoke.v1` is the v2 letter without the public-key line; a host
+//! takes a revoked public key only from a v2 letter, #3068.)
 //!
 //! ## Field rules (what E1 fixes on top of the ADR)
 //!
@@ -46,10 +49,32 @@
 //! | kind              | bytes                                                         |
 //! |-------------------|---------------------------------------------------------------|
 //! | `input`           | `NFC(text)`                                                   |
-//! | `spawn`           | `{agent_member_id}\n{folder_id}\n{NFC(first_prompt)}`         |
+//! | `spawn` (v2)      | `{agent_member_id}\n{folder_id}\n{tool}\n{channel_id}\n{NFC(first_prompt)}` |
+//! | `spawn` (v1)      | `{agent_member_id}\n{folder_id}\n{NFC(first_prompt)}` (retired) |
 //! | `permission`      | `{request_event_id}\n{option_id}\n{option_kind}\n{scope}`     |
 //! | `bundle_manifest` | [`canonical_json`] of the manifest                            |
 //! | `host_register`   | `{host_public_key_b64}\n{host_id}\n{NFC(label)}`              |
+//!
+//! ## v2 (R2-E7 #3027) and what stays of v1
+//!
+//! `momo.human.control.v2` keeps v1's 13-line frame — only the schema string
+//! changes — so a signer that checks the line count needs no other change.
+//! Two things differ, both about `spawn`:
+//!
+//! * its content binds the **`tool`** (the allowlist key the host launches)
+//!   and the **`channel_id`** (the room the session belongs to) as fixed
+//!   fields before the free-text prompt. Under v1 a server could have swapped
+//!   either under a valid signature (E4 #3063 deviation ①);
+//! * its session line may carry a session: a resume names the successor
+//!   session the owner chose, so the server cannot pick which session the
+//!   owner's words join (#3024 review M2). A fresh spawn still writes `-`.
+//!
+//! Every other kind is byte-identical to v1 apart from the first line.
+//! Verifiers ([`HumanControl::verify_any`]) therefore accept a v1 statement
+//! for those kinds — nothing a v1 signature says differs from the v2 one —
+//! and refuse a v1 `spawn`, which never bound the tool or the channel. (The
+//! phone's native signer allows `momo.human.control.v1` only until its
+//! allowlist moves; input and permission keep working meanwhile.)
 //!
 //! ## high-s: normalize, then verify (one rule, fixed here)
 //!
@@ -75,9 +100,15 @@ use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization as _;
 use uuid::Uuid;
 
+/// Retired for `spawn`; still accepted for `input` / `permission` (see the
+/// module docs, v2).
 pub const HUMAN_CONTROL_SCHEMA_V1: &str = "momo.human.control.v1";
+/// The current control schema (R2-E7 #3027).
+pub const HUMAN_CONTROL_SCHEMA_V2: &str = "momo.human.control.v2";
 pub const DEVICE_ENDORSE_SCHEMA_V1: &str = "momo.human.device_endorse.v1";
 pub const DEVICE_REVOKE_SCHEMA_V1: &str = "momo.human.device_revoke.v1";
+/// v2 (#3068): the root signs the revoked device's public key too.
+pub const DEVICE_REVOKE_SCHEMA_V2: &str = "momo.human.device_revoke.v2";
 
 /// The placeholder for an absent `session_id` / `mode`.
 pub const ABSENT: &str = "-";
@@ -127,6 +158,22 @@ pub enum FreshnessError {
     ClockSkew,
     #[error("expired")]
     Expired,
+}
+
+/// Which `momo.human.control` schema a statement is built in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlSchema {
+    V1,
+    V2,
+}
+
+impl ControlSchema {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ControlSchema::V1 => HUMAN_CONTROL_SCHEMA_V1,
+            ControlSchema::V2 => HUMAN_CONTROL_SCHEMA_V2,
+        }
+    }
 }
 
 /// `input` delivery mode. The server may not turn a queued input into an
@@ -189,6 +236,12 @@ pub enum ControlContent<'a> {
         agent_member_id: Uuid,
         /// ADR-0188 D6 opaque folder id.
         folder_id: &'a str,
+        /// v2: the allowlist key the host launches (`payload.tool`). Not
+        /// encoded under v1.
+        tool: &'a str,
+        /// v2: the room the session belongs to (`work_control.channel_id`).
+        /// Not encoded under v1.
+        channel_id: Uuid,
         first_prompt: &'a str,
     },
     Permission {
@@ -228,24 +281,47 @@ impl ControlContent<'_> {
         }
     }
 
-    fn requires_session(&self) -> bool {
-        matches!(
-            self,
-            ControlContent::Input { .. } | ControlContent::Permission { .. }
-        )
+    /// The session line's rule for this kind under `schema`.
+    fn session_rule(&self, schema: ControlSchema) -> SessionRule {
+        match (self, schema) {
+            (ControlContent::Input { .. } | ControlContent::Permission { .. }, _) => {
+                SessionRule::Required
+            }
+            (ControlContent::Spawn { .. }, ControlSchema::V2) => SessionRule::Optional,
+            _ => SessionRule::Forbidden,
+        }
     }
 
-    /// The canonical content bytes (see the module table).
+    /// The canonical content bytes (see the module table), in the current
+    /// schema (v2).
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, HumanSigningError> {
+        self.canonical_bytes_as(ControlSchema::V2)
+    }
+
+    /// The canonical content bytes under `schema`. Only `spawn` differs.
+    pub fn canonical_bytes_as(&self, schema: ControlSchema) -> Result<Vec<u8>, HumanSigningError> {
         let text = match self {
             ControlContent::Input { text, .. } => nfc(text),
             ControlContent::Spawn {
                 agent_member_id,
                 folder_id,
+                tool,
+                channel_id,
                 first_prompt,
             } => {
                 token("folder_id", folder_id)?;
-                format!("{agent_member_id}\n{folder_id}\n{}", nfc(first_prompt))
+                match schema {
+                    ControlSchema::V1 => {
+                        format!("{agent_member_id}\n{folder_id}\n{}", nfc(first_prompt))
+                    }
+                    ControlSchema::V2 => {
+                        token("tool", tool)?;
+                        format!(
+                            "{agent_member_id}\n{folder_id}\n{tool}\n{channel_id}\n{}",
+                            nfc(first_prompt)
+                        )
+                    }
+                }
             }
             ControlContent::Permission {
                 request_event_id,
@@ -276,11 +352,25 @@ impl ControlContent<'_> {
 
     /// Lowercase hex SHA-256 of [`Self::canonical_bytes`].
     pub fn content_sha256(&self) -> Result<String, HumanSigningError> {
-        Ok(hex::encode(Sha256::digest(self.canonical_bytes()?)))
+        self.content_sha256_as(ControlSchema::V2)
+    }
+
+    /// Lowercase hex SHA-256 of [`Self::canonical_bytes_as`].
+    pub fn content_sha256_as(&self, schema: ControlSchema) -> Result<String, HumanSigningError> {
+        Ok(hex::encode(Sha256::digest(
+            self.canonical_bytes_as(schema)?,
+        )))
     }
 }
 
-/// A `momo.human.control.v1` statement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionRule {
+    Required,
+    Optional,
+    Forbidden,
+}
+
+/// A `momo.human.control` statement (built as v2 unless a caller asks for v1).
 #[derive(Debug, Clone, PartialEq)]
 pub struct HumanControl<'a> {
     /// The server-issued instance id, echoed verbatim (never built from a URL).
@@ -290,7 +380,8 @@ pub struct HumanControl<'a> {
     pub device_key_id: Uuid,
     /// Target host; for `host_register`, the host id candidate.
     pub host_id: Uuid,
-    /// Required for `input`/`permission`; absent for the rest.
+    /// Required for `input`/`permission`; optional for a v2 `spawn` (a
+    /// resume's successor session); absent for the rest.
     pub session_id: Option<Uuid>,
     /// 128-bit random; for `input` it is the `client_msg_id`.
     pub nonce: Uuid,
@@ -300,25 +391,33 @@ pub struct HumanControl<'a> {
 }
 
 impl HumanControl<'_> {
-    /// The 13-line bytes the device key signs. Structural rules only; time is
-    /// [`check_control_window`]'s job.
+    /// The 13-line v2 bytes the device key signs. Structural rules only;
+    /// time is [`check_control_window`]'s job.
     pub fn signed_bytes(&self) -> Result<Vec<u8>, HumanSigningError> {
+        self.signed_bytes_as(ControlSchema::V2)
+    }
+
+    /// The 13-line bytes under `schema`.
+    pub fn signed_bytes_as(&self, schema: ControlSchema) -> Result<Vec<u8>, HumanSigningError> {
         token("instance_id", self.instance_id)?;
         let kind = self.content.kind();
-        let session = match (self.content.requires_session(), self.session_id) {
-            (true, Some(id)) => id.to_string(),
-            (true, None) => return Err(HumanSigningError::SessionRequired(kind)),
-            (false, None) => ABSENT.to_string(),
-            (false, Some(_)) => return Err(HumanSigningError::SessionForbidden(kind)),
+        let session = match (self.content.session_rule(schema), self.session_id) {
+            (SessionRule::Required | SessionRule::Optional, Some(id)) => id.to_string(),
+            (SessionRule::Required, None) => return Err(HumanSigningError::SessionRequired(kind)),
+            (SessionRule::Optional | SessionRule::Forbidden, None) => ABSENT.to_string(),
+            (SessionRule::Forbidden, Some(_)) => {
+                return Err(HumanSigningError::SessionForbidden(kind))
+            }
         };
         if let ControlContent::HostRegister { host_id, .. } = &self.content {
             if *host_id != self.host_id {
                 return Err(HumanSigningError::HostIdMismatch);
             }
         }
-        let content_sha256 = self.content.content_sha256()?;
+        let content_sha256 = self.content.content_sha256_as(schema)?;
         Ok(format!(
-            "{HUMAN_CONTROL_SCHEMA_V1}\n{}\n{}\n{}\n{}\n{}\n{session}\n{kind}\n{}\n{}\n{}\n{}\n{content_sha256}",
+            "{}\n{}\n{}\n{}\n{}\n{}\n{session}\n{kind}\n{}\n{}\n{}\n{}\n{content_sha256}",
+            schema.as_str(),
             self.instance_id,
             self.workspace_id,
             self.member_id,
@@ -332,8 +431,8 @@ impl HumanControl<'_> {
         .into_bytes())
     }
 
-    /// Rebuild the bytes and verify `signature` (raw `r‖s`) under the device
-    /// key. Returns the canonical low-s signature. Does not check time.
+    /// Rebuild the v2 bytes and verify `signature` (raw `r‖s`) under the
+    /// device key. Returns the canonical low-s signature. Does not check time.
     pub fn verify(
         &self,
         device_public_key: &[u8],
@@ -341,6 +440,57 @@ impl HumanControl<'_> {
     ) -> Result<[u8; P256_SIGNATURE_LEN], HumanSigningError> {
         verify_p256(device_public_key, &self.signed_bytes()?, signature)
     }
+
+    /// Verify under `schema`.
+    pub fn verify_as(
+        &self,
+        schema: ControlSchema,
+        device_public_key: &[u8],
+        signature: &[u8],
+    ) -> Result<[u8; P256_SIGNATURE_LEN], HumanSigningError> {
+        verify_p256(device_public_key, &self.signed_bytes_as(schema)?, signature)
+    }
+
+    /// What a verifier accepts (module docs, v2): the v2 statement, or — for
+    /// every kind but `spawn`, whose v1 bytes say the same thing — the v1 one.
+    /// A v1 `spawn` is refused. Returns the schema that verified, its bytes
+    /// and the canonical low-s signature.
+    pub fn verify_any(
+        &self,
+        device_public_key: &[u8],
+        signature: &[u8],
+    ) -> Result<VerifiedStatement, HumanSigningError> {
+        let v2 = self.signed_bytes_as(ControlSchema::V2)?;
+        match verify_p256(device_public_key, &v2, signature) {
+            Ok(canonical) => Ok(VerifiedStatement {
+                schema: ControlSchema::V2,
+                signed_bytes: v2,
+                signature: canonical,
+            }),
+            Err(v2_error) => {
+                if matches!(self.content, ControlContent::Spawn { .. }) {
+                    return Err(v2_error);
+                }
+                let v1 = self.signed_bytes_as(ControlSchema::V1)?;
+                let canonical = verify_p256(device_public_key, &v1, signature)?;
+                Ok(VerifiedStatement {
+                    schema: ControlSchema::V1,
+                    signed_bytes: v1,
+                    signature: canonical,
+                })
+            }
+        }
+    }
+}
+
+/// A statement [`HumanControl::verify_any`] accepted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedStatement {
+    pub schema: ControlSchema,
+    /// The exact bytes that verified (for `action_signature`).
+    pub signed_bytes: Vec<u8>,
+    /// Canonical low-s raw `r‖s`.
+    pub signature: [u8; P256_SIGNATURE_LEN],
 }
 
 /// `momo.human.device_endorse.v1` — the root key approves another device key as
@@ -390,7 +540,8 @@ impl DeviceEndorse<'_> {
     }
 }
 
-/// `momo.human.device_revoke.v1` — the root key revokes a device key.
+/// `momo.human.device_revoke.v1` / `.v2` — the root key revokes a device key
+/// (v2 also names its public key, #3068).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeviceRevoke {
     pub workspace_id: Uuid,
@@ -419,6 +570,56 @@ impl DeviceRevoke {
         signature: &[u8],
     ) -> Result<[u8; P256_SIGNATURE_LEN], HumanSigningError> {
         verify_p256(root_public_key, &self.signed_bytes(), signature)
+    }
+
+    /// `momo.human.device_revoke.v2` (#3068): v1's lines with the revoked
+    /// key's public key (base64 of the 33-byte compressed point, canonical)
+    /// before the time. An endorsement binds a public key and v1 names only a
+    /// key id, so under v1 a host that never saw the key could not tell which
+    /// key the root meant; under v2 the root says it.
+    ///
+    /// ```text
+    /// momo.human.device_revoke.v2
+    /// {workspace_id}
+    /// {member_id}
+    /// {root_key_id}
+    /// {target_key_id}
+    /// {target_public_key_b64}
+    /// {revoked_at_ms}
+    /// ```
+    pub fn signed_bytes_v2(
+        &self,
+        target_public_key_b64: &str,
+    ) -> Result<Vec<u8>, HumanSigningError> {
+        let key = canonical_b64_of_len(
+            "target_public_key_b64",
+            target_public_key_b64,
+            P256_PUBLIC_KEY_LEN,
+        )?;
+        parse_p256_public_key(&key)?;
+        Ok(format!(
+            "{DEVICE_REVOKE_SCHEMA_V2}\n{}\n{}\n{}\n{}\n{target_public_key_b64}\n{}",
+            self.workspace_id,
+            self.member_id,
+            self.root_key_id,
+            self.target_key_id,
+            self.revoked_at_ms,
+        )
+        .into_bytes())
+    }
+
+    /// Verify a v2 letter over `target_public_key_b64`.
+    pub fn verify_v2(
+        &self,
+        target_public_key_b64: &str,
+        root_public_key: &[u8],
+        signature: &[u8],
+    ) -> Result<[u8; P256_SIGNATURE_LEN], HumanSigningError> {
+        verify_p256(
+            root_public_key,
+            &self.signed_bytes_v2(target_public_key_b64)?,
+            signature,
+        )
     }
 }
 
@@ -710,8 +911,21 @@ mod tests {
         let content = ControlContent::Spawn {
             agent_member_id: Uuid::from_u128(1),
             folder_id: "a\nb",
+            tool: "claude",
+            channel_id: Uuid::from_u128(2),
             first_prompt: "p",
         };
         assert!(content.canonical_bytes().is_err());
+        let content = ControlContent::Spawn {
+            agent_member_id: Uuid::from_u128(1),
+            folder_id: "f",
+            tool: "claude\ncodex",
+            channel_id: Uuid::from_u128(2),
+            first_prompt: "p",
+        };
+        assert!(matches!(
+            content.canonical_bytes(),
+            Err(HumanSigningError::InvalidField { field: "tool", .. })
+        ));
     }
 }

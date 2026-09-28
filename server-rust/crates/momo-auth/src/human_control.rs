@@ -24,11 +24,15 @@
 //!    live root candidate of the same member **re-verifies now** against the
 //!    stored rows. An unendorsed phone key is 「지시 불가」.
 //! 3. **The statement.** The 13 lines are rebuilt from what the server is about
-//!    to write — the route's workspace, member, host, session and content, and
+//!    to write — the route's workspace, member, host, session and content (for
+//!    a spawn also its tool and channel, v2 #3027), and
 //!    this instance's id (`MOMO_INSTANCE_ID`, never the request's) — plus the
 //!    envelope's key id, nonce, times, and the per-kind fields the content
 //!    needs (input `mode`, permission `scope`, spawn agent/folder). A statement
 //!    for another host, session, mode, text or option does not verify.
+//!    `momo.human.control.v2` is checked; a v1 statement is accepted for
+//!    `input` / `permission` only, whose v1 bytes say the same thing
+//!    (`HumanControl::verify_any`) — never for a spawn.
 //!    Text must already be NFC: the host refuses any other spelling (#3024
 //!    L4), so the server does too.
 //! 4. **The time window** (D-9): ±5 min around the server clock, lifetime
@@ -47,8 +51,8 @@
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use momo_wire::human_control::{
-    check_control_window, ControlContent, DeviceEndorse, DeviceKeyAlg, HumanControl, InputMode,
-    PermissionScope, MAX_CLOCK_SKEW_MS,
+    check_control_window, ControlContent, ControlSchema, DeviceEndorse, DeviceKeyAlg, HumanControl,
+    InputMode, PermissionScope, MAX_CLOCK_SKEW_MS,
 };
 use sqlx::PgConnection;
 use uuid::Uuid;
@@ -125,8 +129,13 @@ pub struct HumanSignatureInput {
 pub enum ControlSubject<'a> {
     /// `payload.text`.
     Input { text: &'a str },
-    /// `payload.label` — the first prompt the host starts the agent with.
-    Spawn { first_prompt: &'a str },
+    /// `payload.label` — the first prompt the host starts the agent with —
+    /// plus `payload.tool` and the control's channel (v2 #3027).
+    Spawn {
+        first_prompt: &'a str,
+        tool: &'a str,
+        channel_id: Uuid,
+    },
     /// The stored request's event id and the stored option (id and kind).
     Permission {
         request_event_id: Uuid,
@@ -154,7 +163,8 @@ pub struct ControlTarget<'a> {
     /// The host the control will be addressed to (the session's host, or the
     /// host a spawn was asked for).
     pub host_id: Uuid,
-    /// `None` for a spawn (v1 has no session line for it).
+    /// Required for input/permission. For a spawn, `Some` only on a resume:
+    /// the successor session the owner named (v2 #3027).
     pub session_id: Option<Uuid>,
     pub subject: ControlSubject<'a>,
 }
@@ -164,6 +174,8 @@ pub struct ControlTarget<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedHumanControl {
     pub key: DeviceKeyRecord,
+    /// The schema that verified (v2, or v1 for input/permission).
+    pub schema: ControlSchema,
     pub instance_id: String,
     pub nonce: Uuid,
     pub issued_at_ms: i64,
@@ -362,7 +374,11 @@ pub async fn verify_human_control_in_tx(
                 None,
             )
         }
-        ControlSubject::Spawn { first_prompt } => {
+        ControlSubject::Spawn {
+            first_prompt,
+            tool,
+            channel_id,
+        } => {
             if input.mode.is_some() || input.scope.is_some() {
                 return Ok(Err(HumanControlRefusal::Invalid));
             }
@@ -378,6 +394,8 @@ pub async fn verify_human_control_in_tx(
                 ControlContent::Spawn {
                     agent_member_id,
                     folder_id,
+                    tool,
+                    channel_id,
                     first_prompt,
                 },
                 None,
@@ -424,16 +442,13 @@ pub async fn verify_human_control_in_tx(
         expires_at_ms: input.expires_at_ms,
         content,
     };
-    let Ok(signed_bytes) = statement.signed_bytes() else {
-        return Ok(Err(HumanControlRefusal::Invalid));
-    };
     let (Ok(public_key), Ok(signature)) = (
         BASE64.decode(&key.public_key),
         BASE64.decode(&input.signature_b64),
     ) else {
         return Ok(Err(HumanControlRefusal::Invalid));
     };
-    let Ok(canonical) = statement.verify(&public_key, &signature) else {
+    let Ok(verified) = statement.verify_any(&public_key, &signature) else {
         return Ok(Err(HumanControlRefusal::Invalid));
     };
 
@@ -462,6 +477,7 @@ pub async fn verify_human_control_in_tx(
     };
     Ok(Ok(VerifiedHumanControl {
         key,
+        schema: verified.schema,
         instance_id: instance_id.to_string(),
         nonce: input.nonce,
         issued_at_ms: input.issued_at_ms,
@@ -470,8 +486,8 @@ pub async fn verify_human_control_in_tx(
         scope,
         agent_member_id,
         folder_id,
-        signature_b64: BASE64.encode(canonical),
-        signed_bytes,
+        signature_b64: BASE64.encode(verified.signature),
+        signed_bytes: verified.signed_bytes,
     }))
 }
 

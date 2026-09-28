@@ -4,7 +4,7 @@
 //! POST /v1/workspaces/{ws}/device-keys                    (bearer, human) register
 //! GET  /v1/workspaces/{ws}/device-keys                    (bearer, human) list own
 //! POST /v1/workspaces/{ws}/device-keys/{key}/endorsement  (bearer, human) device_endorse.v1
-//! POST /v1/workspaces/{ws}/device-keys/{key}/revocation   (bearer, human) device_revoke.v1
+//! POST /v1/workspaces/{ws}/device-keys/{key}/revocation   (bearer, human) device_revoke.v2
 //! GET  /v1/workspaces/{ws}/device-keys/signing-context    (bearer, human) instance id + clock (#3023)
 //! ```
 //!
@@ -171,6 +171,7 @@ pub async fn signing_context(
         max_clock_skew_ms: momo_wire::human_control::MAX_CLOCK_SKEW_MS,
         human_control_signature_required: state.device_keys.human_control_signature_required,
         host_register_signature_required: state.device_keys.host_register_signature_required,
+        human_control_schema: momo_wire::human_control::HUMAN_CONTROL_SCHEMA_V2,
     }))
 }
 

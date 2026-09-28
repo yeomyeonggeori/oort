@@ -1,8 +1,14 @@
 #!/usr/bin/env node
-// Regenerates docs/api/human-control-signing.vectors.json (#3021, ADR-0146 개정
-// 2026-09-28 D-5). One command, run on a Mac from anywhere:
+// Regenerates a human-signing vectors file (#3021, ADR-0146 개정 2026-09-28 D-5;
+// v2 #3027). One command, run on a Mac from anywhere:
 //
-//   node server-rust/crates/momo-wire/tests/human_control_vectors/generate.mjs
+//   node server-rust/crates/momo-wire/tests/human_control_vectors/generate.mjs [file]
+//
+// `file` defaults to docs/api/human-control-signing.vectors.json (v1, frozen:
+// the phone keeps a byte-identical copy, so it is not regenerated for v2).
+// The v2 cases live in docs/api/human-control-signing-v2.vectors.json:
+//
+//   node …/generate.mjs docs/api/human-control-signing-v2.vectors.json
 //
 // What it does, per case (inputs = each case's `schema`/`fields`/`content`):
 //   1. builds content bytes + the signed payload in TypeScript-flavoured JS
@@ -28,7 +34,7 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, "../../../../..");
-const vectorsPath = resolve(repo, "docs/api/human-control-signing.vectors.json");
+const vectorsPath = resolve(repo, process.argv[2] ?? "docs/api/human-control-signing.vectors.json");
 const subtle = globalThis.crypto.subtle;
 
 const ABSENT = "-";
@@ -51,12 +57,15 @@ function canonicalJson(v) {
   return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(v[k])}`).join(",")}}`;
 }
 
-function contentBytes(c) {
+function contentBytes(c, schema) {
   switch (c.kind) {
     case "input":
       return utf8(nfc(c.text));
     case "spawn":
-      return utf8(`${c.agent_member_id}\n${c.folder_id}\n${nfc(c.first_prompt)}`);
+      // v2 (#3027) binds the tool and the channel before the free-text prompt.
+      return schema === "momo.human.control.v2"
+        ? utf8(`${c.agent_member_id}\n${c.folder_id}\n${c.tool}\n${c.channel_id}\n${nfc(c.first_prompt)}`)
+        : utf8(`${c.agent_member_id}\n${c.folder_id}\n${nfc(c.first_prompt)}`);
     case "permission":
       return utf8(`${c.request_event_id}\n${c.option_id}\n${c.option_kind}\n${c.scope}`);
     case "bundle_manifest":
@@ -71,7 +80,8 @@ function contentBytes(c) {
 function payloadBytes(tc) {
   const f = tc.fields;
   switch (tc.schema) {
-    case "momo.human.control.v1": {
+    case "momo.human.control.v1":
+    case "momo.human.control.v2": {
       const c = tc.content;
       const mode = c.kind === "input" ? c.mode : ABSENT;
       return utf8(
@@ -88,7 +98,7 @@ function payloadBytes(tc) {
           f.nonce,
           String(f.issued_at_ms),
           String(f.expires_at_ms),
-          sha256(contentBytes(c)).toString("hex"),
+          sha256(contentBytes(c, tc.schema)).toString("hex"),
         ].join("\n"),
       );
     }
@@ -109,6 +119,19 @@ function payloadBytes(tc) {
         [tc.schema, f.workspace_id, f.member_id, f.root_key_id, f.target_key_id, String(f.revoked_at_ms)].join(
           "\n",
         ),
+      );
+    // #3068: v2 names the revoked public key.
+    case "momo.human.device_revoke.v2":
+      return utf8(
+        [
+          tc.schema,
+          f.workspace_id,
+          f.member_id,
+          f.root_key_id,
+          f.target_key_id,
+          f.target_public_key_b64,
+          String(f.revoked_at_ms),
+        ].join("\n"),
       );
     default:
       throw new Error(`unknown schema ${tc.schema}`);
@@ -154,7 +177,7 @@ for (const tc of doc.cases) {
     throw new Error(`payload mismatch between Swift and JS for ${tc.name}`);
   }
   if (tc.content) {
-    const cb = contentBytes(tc.content);
+    const cb = contentBytes(tc.content, tc.schema);
     tc.content_canonical = cb.toString("utf8");
     tc.content_sha256 = sha256(cb).toString("hex");
   }
@@ -167,9 +190,12 @@ for (const tc of doc.cases) {
   ];
 }
 
+const isV2 = doc.cases.every((tc) => tc.schema.endsWith(".v2"));
+const comment = isV2
+  ? "#3027·#3068 — momo.human.control.v2와 momo.human.device_revoke.v2(뿌리가 폐기 대상 공개키에도 서명한다) 공유 테스트 벡터(ADR-0146 개정 2026-09-28 D-5, R2-E7). v1과 같은 13줄 틀이고 첫 줄만 v2다. spawn 본문이 도구(tool)와 채널(channel_id)을 자유 문장(첫 프롬프트) 앞의 고정 필드로 결속하고, spawn 세션 줄은 재개(resume)의 후속 세션 id를 담을 수 있다(새 작업은 `-`). input·permission·bundle_manifest·host_register의 본문은 v1과 같다. 입력(schema·fields·content)과 파생값, WebCrypto(node)·CryptoKit(소프트웨어 키 + Secure Enclave 임시 키)의 실제 서명을 담고 Rust(momo-wire tests/human_control_vectors.rs)가 바이트를 다시 만들어 모든 서명을 검증한다. v1 파일(human-control-signing.vectors.json)은 폰이 바이트 동일 사본을 두므로 고치지 않는다. 재생성: node server-rust/crates/momo-wire/tests/human_control_vectors/generate.mjs docs/api/human-control-signing-v2.vectors.json. 비ASCII는 \\u 이스케이프, 키는 고정 라벨의 SHA-256에서 만든 시험 전용 키다."
+  : doc._comment;
 const out = {
-  _comment:
-    "#3021 — ADR-0146 개정 2026-09-28 D-5 공유 테스트 벡터. 사람 기기 키 서명 바이트 3종(momo.human.control.v1 · device_endorse.v1 · device_revoke.v1)의 입력(schema·fields·content)과 파생값(content_canonical·content_sha256·payload·payload_sha256), 그리고 WebCrypto(node)·CryptoKit(Swift 소프트웨어 키 + Secure Enclave 임시 키, 생성에는 SE가 있는 맥이 필요)가 실제로 만든 서명. Rust(momo-wire tests/human_control_vectors.rs)가 입력에서 바이트를 다시 만들어 같음을 확인하고 모든 서명을 검증한다. 재생성: node server-rust/crates/momo-wire/tests/human_control_vectors/generate.mjs (Swift와 JS 바이트가 다르면 쓰지 않는다). 비ASCII는 모두 \\u 이스케이프로 적어 편집기의 NFC 정규화가 분해형 시험 문자열을 망가뜨리지 못하게 한다. 키는 고정 라벨의 SHA-256에서 만든 시험 전용 키다.",
+  _comment: comment,
   format: "momo.human.signing.vectors/v1",
   algorithm: "ECDSA P-256 / SHA-256 over the payload bytes",
   public_key_encoding: "base64 STANDARD of the 33-byte compressed SEC1 point",

@@ -14,7 +14,10 @@
 //!   only while the session is still `running`. A refused spawn that arrived
 //!   with a session the server already allocated for it (a resume) ends that
 //!   session, so the ledger is not left with a `running` session nothing runs.
-//! * `input` — the host owner's instruction, queued as the next turn.
+//! * `input` — the host owner's instruction. `queue` (the default, and every
+//!   unsigned input) is the next turn after the running one and anything
+//!   already queued; `interrupt` (#3027, only from a signed statement's
+//!   `mode`) cancels the running turn with ACP `session/cancel` and goes next.
 //!
 //! A spawn label or an input that starts with `/` is refused
 //! (`slash_command_refused`, #2602 L-7): it would run an adapter command, not a
@@ -48,7 +51,7 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use crate::client::{ClientError, ControlAck, HostApi, SessionStatus, WorkControl};
-use crate::human_trust::{requires_signature, HumanTrust};
+use crate::human_trust::{requires_signature, HumanTrust, RevocationSource};
 use crate::policy::Refusal;
 use crate::session::SessionManager;
 
@@ -105,7 +108,7 @@ impl ControlLoop {
             let result = trust
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
-                .apply_revocation(&revocation, true);
+                .apply_revocation(&revocation, RevocationSource::Relayed);
             if let Err(label) = result {
                 tracing::warn!(error = label, "relayed device revocation refused");
             }
@@ -332,7 +335,19 @@ impl ControlLoop {
             .filter(|text| !text.is_empty())
             .ok_or(Refusal::InvalidControl)?;
         crate::policy::check_prompt(text)?;
-        self.sessions.input(session_id, text.to_string()).await
+        // The mode travels only inside the owner's signed statement, and is
+        // read only when this host verified it (R2 on). Otherwise — or with
+        // no statement — the instruction is a queued turn.
+        let interrupt = self.human.is_some()
+            && control
+                .human_signature
+                .as_ref()
+                .and_then(|envelope| envelope.get("mode"))
+                .and_then(serde_json::Value::as_str)
+                == Some("interrupt");
+        self.sessions
+            .input(session_id, text.to_string(), interrupt)
+            .await
     }
 }
 

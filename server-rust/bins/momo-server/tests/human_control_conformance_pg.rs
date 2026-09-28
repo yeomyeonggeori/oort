@@ -1111,7 +1111,8 @@ async fn every_misplaced_signed_allow_is_refused_by_name() {
             target_key_id: s.phone_id,
             revoked_at_ms: at,
         }
-        .signed_bytes(),
+        .signed_bytes_v2(&s.phone.public_b64)
+        .expect("v2 letter"),
     );
     let signed_before_revocation = s.phone_allow(session, request);
     let (status, body) = s
@@ -1264,6 +1265,10 @@ async fn a_phone_allow_falls_with_its_roots_sign_in() {
 // the chokepoint, for the kinds E7 will route
 // ---------------------------------------------------------------------------
 
+/// The tool and channel a probed spawn names (v2 #3027 signs both).
+const PROBE_TOOL: &str = "claude";
+const PROBE_CHANNEL: Uuid = Uuid::from_u128(0x3027_cc01);
+
 #[derive(Clone)]
 struct Probe {
     subject: ProbeSubject,
@@ -1287,6 +1292,8 @@ async fn probe(s: &Stage, probe: Probe) -> Result<(), HumanControlRefusal> {
                 ProbeSubject::Input(text) => ControlSubject::Input { text },
                 ProbeSubject::Spawn(prompt) => ControlSubject::Spawn {
                     first_prompt: prompt,
+                    tool: PROBE_TOOL,
+                    channel_id: PROBE_CHANNEL,
                 },
             };
             let target = ControlTarget {
@@ -1372,6 +1379,8 @@ fn signed_spawn(
         content: ControlContent::Spawn {
             agent_member_id: agent,
             folder_id: "folder-1",
+            tool: PROBE_TOOL,
+            channel_id: PROBE_CHANNEL,
             first_prompt: prompt,
         },
     }
@@ -1548,7 +1557,11 @@ async fn the_chokepoint_holds_for_input_and_spawn() {
                     subject: if subject == "input" {
                         ControlSubject::Input { text: "hi" }
                     } else {
-                        ControlSubject::Spawn { first_prompt: "hi" }
+                        ControlSubject::Spawn {
+                            first_prompt: "hi",
+                            tool: PROBE_TOOL,
+                            channel_id: PROBE_CHANNEL,
+                        }
                     },
                 };
                 let outcome = momo_server::human_control::authorize_human_control_in_tx(

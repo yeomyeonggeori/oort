@@ -11,7 +11,7 @@
 //! * [`payload`] — outbox / agent_job payload structs (JSON DTOs).
 //! * [`human_control`] — ADR-0146 개정 2026-09-28 (R2): the human device-key
 //!   signing bytes (`momo.human.control.v1`, `device_endorse.v1`,
-//!   `device_revoke.v1`) and P-256 verification, shared with Swift/TS through
+//!   `device_revoke.v2`) and P-256 verification, shared with Swift/TS through
 //!   `docs/api/human-control-signing.vectors.json`.
 //! * [`provenance`] — ADR-0146 action provenance (Accepted): the per-surface
 //!   signing payloads and `record_provenance`, the **only** `action_signature`
