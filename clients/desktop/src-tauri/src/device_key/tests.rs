@@ -457,3 +457,49 @@ fn workd_status_carries_the_pinned_public_key() {
         None
     );
 }
+
+/// #3028 security review M1: the webview names the endorsed id (unsigned,
+/// once not on the dialog). The record must not be re-pointed.
+#[test]
+fn an_endorsement_cannot_repoint_the_record() {
+    let ws = Uuid::from_u128(1);
+    let root = Uuid::from_u128(0xd001);
+    let mut endorsed = Endorsed::default();
+    endorsed.keys.insert(
+        Uuid::from_u128(0xd002),
+        EndorsedKey {
+            workspace_id: ws,
+            public_key: KEY_A.into(),
+        },
+    );
+    // A new phone under a new id: fine. The same letter again: fine.
+    assert_eq!(
+        endorse_precheck(&endorsed, ws, root, Uuid::from_u128(0xd003), &key_b()),
+        Ok(())
+    );
+    assert_eq!(
+        endorse_precheck(&endorsed, ws, root, Uuid::from_u128(0xd002), KEY_A),
+        Ok(())
+    );
+    // Phone B's key filed under stolen phone A's id: refused.
+    assert!(endorse_precheck(&endorsed, ws, root, Uuid::from_u128(0xd002), &key_b()).is_err());
+    // Phone A's key again under another id: refused.
+    assert!(endorse_precheck(&endorsed, ws, root, Uuid::from_u128(0xd004), KEY_A).is_err());
+    // This Mac's own root id: refused.
+    assert!(endorse_precheck(&endorsed, ws, root, root, &key_b()).is_err());
+}
+
+#[test]
+fn the_endorse_dialog_names_the_key_id() {
+    let statement = Statement::Endorse {
+        signer: signer(),
+        request: EndorseRequest {
+            workspace_id: Uuid::from_u128(1),
+            target_key_id: Uuid::from_u128(0xabcdef12),
+            target_alg: "p256".into(),
+            target_public_key: KEY_A.into(),
+            label: "성재의 iPhone".into(),
+        },
+    };
+    assert!(statement.summary(None).body.contains("키 abcdef12"));
+}

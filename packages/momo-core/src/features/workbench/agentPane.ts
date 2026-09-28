@@ -305,11 +305,14 @@ export function permissionSentLine(kind: PermissionChoiceKind, scope: Permission
   return "거부를 보냈어요. 이번 요청은 실행하지 않아요.";
 }
 
-/** 「거부 + 지시」의 결과 한 줄. 지시가 닿지 않았으면 거부와 따로 말한다(D-5b). */
+/**
+ * 「거부 + 지시」의 결과 한 줄. 지시가 닿지 않았으면 거부와 따로 말한다(D-5b). 쓴 글은
+ * 버리지 않는다: 표면이 지시 칸으로 옮기고, 이 문장이 그 사실을 말한다.
+ */
 export function rejectWithInstructionLine(instructionDelivered: boolean, failure?: string): string {
   return instructionDelivered
     ? "거부하고 지시를 보냈어요. 지시는 다음 차례에 전달돼요."
-    : `거부는 보냈어요. 지시는 전달 안 됨: ${failure ?? "다시 보내 주세요."}`;
+    : `거부는 보냈어요. 지시는 전달 안 됨 · ${failure ?? "다시 보내 주세요."} 쓴 지시는 지시 칸에 옮겨 두었어요.`;
 }
 
 export interface PermissionFailure {

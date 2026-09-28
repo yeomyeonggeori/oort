@@ -211,6 +211,38 @@ pub fn revocation_target(
         .ok_or_else(|| "device_key_not_endorsed_here".to_string())
 }
 
+/// May this shell endorse `public_key` under `target_key_id`? Checked BEFORE
+/// the dialog, so a letter this shell would not record is never signed
+/// (#3028 security review M1: the id is the webview's, unsigned, and not on
+/// the dialog, so a page could otherwise file a real phone's key under a
+/// stolen phone's id, or under this Mac's own root id).
+///
+/// - never this Mac's own root key id;
+/// - an id already recorded keeps its key (no overwrite with another key);
+/// - a key already recorded under another id is not filed twice.
+pub fn endorse_precheck(
+    endorsed: &Endorsed,
+    workspace_id: Uuid,
+    root_key_id: Uuid,
+    target_key_id: Uuid,
+    public_key: &str,
+) -> Result<(), String> {
+    if target_key_id == root_key_id {
+        return Err("device_key_endorse_conflict: root".into());
+    }
+    if let Some(known) = endorsed.keys.get(&target_key_id) {
+        if known.public_key != public_key || known.workspace_id != workspace_id {
+            return Err("device_key_endorse_conflict: id".into());
+        }
+    }
+    if endorsed.keys.iter().any(|(id, key)| {
+        *id != target_key_id && key.public_key == public_key && key.workspace_id == workspace_id
+    }) {
+        return Err("device_key_endorse_conflict: key".into());
+    }
+    Ok(())
+}
+
 /// Before a root binding is written: may this Mac's workd take `current` for
 /// this workspace? Compared by PUBLIC KEY (#3078): a re-login gives the same
 /// enclave key a new server id, and workd rebinds that over the local socket.
@@ -807,6 +839,13 @@ pub async fn device_key_sign_endorse(
         let (signer, binding) = worker.signer_for(request.workspace_id)?;
         let target_key_id = request.target_key_id;
         let target_public_key = request.target_public_key.clone();
+        endorse_precheck(
+            &load_endorsed(&endorsed_path(&worker.app_data()?)),
+            request.workspace_id,
+            signer.key_id,
+            target_key_id,
+            &target_public_key,
+        )?;
         let signed = worker.sign(Statement::Endorse { signer, request }, &binding.public_key)?;
         // Remember what was endorsed under this id: a later revocation signs
         // this public key and no other (#3028).

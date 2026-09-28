@@ -138,6 +138,8 @@ describe('permission card', () => {
     const text = String(screen.getByTestId('work-permission-outcome').props.children);
     expect(text).toContain('거부는 보냈어요');
     expect(text).toContain('전달 안 됨');
+    // The written instruction is not lost: it moves into the instruction box.
+    expect(screen.getByTestId('work-instruction-input').props.value).toBe('다르게');
   });
 
   it('a cancelled Face ID keeps the card open with its reason', async () => {

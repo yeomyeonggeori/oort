@@ -319,7 +319,9 @@ export function deviceKeyErrorMessage(code: unknown): string {
     case "device_key_no_letter":
       return "이 맥에서 서명한 해제 기록이 없어 다시 보낼 수 없습니다.";
     case "device_key_not_endorsed_here":
-      return "이 맥에서 승인한 적이 없는 키라 이 맥에서는 끊을 수 없습니다. 그 기기의 연결을 끊으면 서버에서 키도 함께 해제됩니다.";
+      return "이 맥에 이 키를 승인한 기록이 없어 해제에 서명할 수 없습니다. 그 기기의 연결을 끊으면 서버에서는 키가 해제되지만, 이 맥의 작업 호스트에는 알려지지 않습니다.";
+    case "device_key_endorse_conflict":
+      return "이 맥이 이미 다른 키를 이 이름으로 승인했거나 같은 키를 다른 이름으로 승인했습니다. 목록을 다시 불러와 확인하세요.";
     default:
       return "서명하지 못했습니다. 다시 시도하세요.";
   }

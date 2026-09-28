@@ -25,7 +25,7 @@ import {
 import type {WorkSessionEvent} from '@momo/core/features/work/workSessionModel';
 import {decideWorkPermission, type WorkSession} from '@momo/core/lib/api';
 import {useQuery} from '@tanstack/react-query';
-import React, {useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
 
 import {PrimaryButton, SectionLabel, Sentence} from '../../design/atoms';
@@ -222,6 +222,8 @@ export function SignedWorkControlsView({
   initial?: SignedWorkInitial;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  // 닿지 않은 「거부 + 지시」의 글을 지시 칸으로 옮긴다(버리지 않는다, D-5b).
+  const [seed, setSeed] = useState<string | null>(null);
   return (
     <View testID="work-signed-controls">
       {block ? (
@@ -241,10 +243,12 @@ export function SignedWorkControlsView({
           fallbackReject={fallbackReject}
           lapsed={permissionLapsed(permission, now())}
           initial={initial}
+          onUndelivered={setSeed}
         />
       ) : null}
       {ended ? null : (
         <InstructionBox
+          seed={seed}
           online={online}
           block={block}
           actions={actions}
@@ -265,7 +269,9 @@ function PermissionCard({
   fallbackReject,
   lapsed,
   initial,
+  onUndelivered,
 }: {
+  onUndelivered: (text: string) => void;
   permission: PendingPermission;
   online: boolean;
   block: SignBlock;
@@ -321,6 +327,7 @@ function PermissionCard({
         }
         if (out.state === 'reject_failed') throw out.error;
         const delivered = out.instruction.state === 'sent';
+        if (!delivered) onUndelivered(text);
         setOutcome({
           tone: delivered ? 'sent' : 'partial',
           text: rejectWithInstructionLine(
@@ -450,6 +457,7 @@ function PermissionCard({
 }
 
 function InstructionBox({
+  seed,
   online,
   block,
   actions,
@@ -459,10 +467,14 @@ function InstructionBox({
   block: SignBlock;
   actions: SignedWorkActions | null;
   initial?: SignedWorkInitial;
+  seed: string | null;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const [text, setText] = useState(initial?.text ?? '');
+  useEffect(() => {
+    if (seed) setText(current => (current.trim() === '' ? seed : current));
+  }, [seed]);
   const [busy, setBusy] = useState<'queue' | 'interrupt' | null>(null);
   const [note, setNote] = useState<{failed: boolean; text: string} | null>(
     initial?.note ?? null,

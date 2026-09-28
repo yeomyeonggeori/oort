@@ -65,7 +65,10 @@ import {
   type SignedWorkActions,
   type SignedWorkInitial,
 } from '../src/features/work/SignedWorkControls';
-import type {PendingPermission} from '@momo/core/features/workbench/agentPane';
+import {
+  rejectWithInstructionLine,
+  type PendingPermission,
+} from '@momo/core/features/workbench/agentPane';
 import {ThemeControl} from '../src/design/ThemeControl';
 import {parseExecutionPlan} from '@momo/core/lib/executionPlan';
 import {measureMode} from './root';
@@ -3579,8 +3582,12 @@ function SignedWorkSurface({which}: {which: string}): React.JSX.Element {
           ? {
               outcome: {
                 tone: 'partial',
-                text: '거부는 보냈어요. 지시는 전달 안 됨: 호스트가 90초 넘게 응답하지 않아 보내지 않았어요. 호스트가 켜져 있는지 확인한 뒤 다시 보내 주세요.',
+                text: rejectWithInstructionLine(
+                  false,
+                  '호스트가 90초 넘게 응답하지 않아 보내지 않았어요. 호스트가 켜져 있는지 확인한 뒤 다시 보내 주세요.',
+                ),
               },
+              text: '그 파일 말고 테스트만 고쳐 줘',
             }
           : which === 'session-sent'
             ? {

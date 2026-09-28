@@ -207,6 +207,7 @@ export function AgentProgressView({
   // 권한 카드의 결과 문장은 칸 수준에서 읽힌다: 서버의 `approval.decided`가 오면 카드는
   // 곧바로 사라지므로, 카드 안의 status 줄은 읽히기 전에 없어진다(design-review H1).
   const [announce, setAnnounce] = useState("");
+  const [replySeed, setReplySeed] = useState<string | null>(null);
   // 확정 버튼(또는 카드)에 있던 캐럿이 카드와 함께 사라지면 칸이 받는다(body로 떨어지지 않게).
   const catchFocus = useCallback(() => {
     queueMicrotask(() => {
@@ -323,6 +324,7 @@ export function AgentProgressView({
           offline={offline}
           inApp={instructFrom === "app"}
           onOutcome={setAnnounce}
+          onUndelivered={setReplySeed}
           onLeave={catchFocus}
         />
       ) : null}
@@ -330,6 +332,7 @@ export function AgentProgressView({
       {model.viewerIsOwner ? (
         <>
           <ReplyBox
+            seed={replySeed}
             sessionId={model.sessionId}
             reply={actions.reply}
             ended={model.status === "done" || model.status === "stopped"}
@@ -497,6 +500,7 @@ function PermissionCard({
   offline,
   inApp,
   onOutcome,
+  onUndelivered,
   onLeave,
 }: {
   sessionId: string;
@@ -514,6 +518,8 @@ function PermissionCard({
   inApp: boolean;
   /** 결과 문장을 칸의 live region으로 올린다. */
   onOutcome: (text: string) => void;
+  /** 「거부 + 지시」의 지시가 닿지 않았다: 쓴 글을 지시 칸으로 옮긴다(D-5b). */
+  onUndelivered: (text: string) => void;
   /** 카드가 캐럿을 품은 채 사라진다. */
   onLeave: () => void;
 }) {
@@ -531,6 +537,7 @@ function PermissionCard({
   const [rejectNote, setRejectNote] = useState("");
   const unavailableId = useId();
   const rejectNoteId = useId();
+  const rejectHintId = useId();
   const allowRef = useRef<HTMLButtonElement>(null);
   const sessionRef = useRef<HTMLButtonElement>(null);
   const rejectRef = useRef<HTMLButtonElement>(null);
@@ -602,10 +609,15 @@ function PermissionCard({
       >
         <p className="agent-perm-l1 agent-perm-sticky-top">
           {/* 닫힘은 실패가 아니다(다른 기기가 허락했을 수도 있다): 중립 빈 원. */}
-          <StatusMark status={settled.tone === "sent" ? "done" : settled.tone === "partial" ? "stopped" : "idle"} srLabel />
+          {/* partial: 거부는 갔다(완료). 닿지 않은 것은 지시이고, 문장이 danger로 말한다. */}
+          <StatusMark status={settled.tone === "closed" ? "idle" : "done"} srLabel />
           {ask}
         </p>
-        <p className="agent-perm-settled break-keep text-meta text-ink" data-testid="agent-permission-outcome">
+        <p
+          className={cn("agent-perm-settled break-keep text-meta", settled.tone === "partial" ? "text-danger" : "text-ink")}
+          role={settled.tone === "partial" ? "alert" : undefined}
+          data-testid="agent-permission-outcome"
+        >
           {settled.text}
         </p>
       </section>
@@ -646,6 +658,7 @@ function PermissionCard({
         }
         if (out.state === "reject_failed") throw out.error;
         const delivered = out.instruction.state === "sent";
+        if (!delivered) onUndelivered(note);
         const line = rejectWithInstructionLine(
           delivered,
           out.instruction.state === "not_delivered" ? out.instruction.text : undefined
@@ -794,6 +807,9 @@ function PermissionCard({
               </label>
               <textarea
                 id={rejectNoteId}
+                // 확정 버튼 대신 이 칸이 캐럿을 받는다(누른 「거부」가 사라진다, design-review H1).
+                autoFocus
+                aria-describedby={rejectHintId}
                 rows={2}
                 value={rejectNote}
                 disabled={busy}
@@ -802,7 +818,9 @@ function PermissionCard({
                 placeholder="예: 그 파일 말고 테스트만 고쳐 줘"
                 data-testid="agent-permission-reject-note"
               />
-              <p className="text-timestamp text-ink-muted">지시는 기기 서명을 거쳐 다음 차례에 전달돼요.</p>
+              <p id={rejectHintId} className="text-timestamp text-ink-muted">
+                지시는 기기 서명을 거쳐 다음 차례에 전달돼요.
+              </p>
             </div>
           ) : null}
           <div className="flex flex-wrap items-center gap-2">
@@ -857,11 +875,14 @@ function PermissionCard({
 }
 
 function ReplyBox({
+  seed,
   sessionId,
   reply,
   ended,
   inApp,
 }: {
+  /** 닿지 않은 「거부 + 지시」의 글. 칸이 비어 있으면 옮겨 담는다. */
+  seed: string | null;
   sessionId: string;
   reply: AgentPaneActions["reply"];
   ended: boolean;
@@ -878,6 +899,9 @@ function ReplyBox({
     setNote(null);
     setFailed(false);
   }, [text]);
+  useEffect(() => {
+    if (seed) setText((current) => (current.trim() === "" ? seed : current));
+  }, [seed]);
   const unavailable = reply === null;
   const disabled = inApp || unavailable || ended || busy;
   const send = async (mode: ReplyMode) => {

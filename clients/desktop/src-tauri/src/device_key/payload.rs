@@ -759,9 +759,10 @@ impl Statement {
             Statement::Endorse { request, .. } => Summary {
                 title: "oort: 이 폰을 지시 기기로 승인합니다".into(),
                 body: format!(
-                    "지문: {}\n기기 이름: 「{}」\n설정 화면에 보인 지문과 같고, 방금 연결한 폰이 맞을 때만 승인하세요.",
+                    "지문: {}\n기기 이름: 「{}」, 키 {}\n설정 화면에 보인 지문과 같고, 방금 연결한 폰이 맞을 때만 승인하세요.",
                     fingerprint(&request.target_public_key).unwrap_or_default(),
                     first_line(&request.label),
+                    short_id(request.target_key_id),
                 ),
                 confirm: "승인".into(),
                 full_text: None,

@@ -595,6 +595,12 @@ describe("signed surface (#3028)", () => {
     expect(q('[data-testid="agent-permission"]')!.getAttribute("data-settled")).toBe("sent");
   });
 
+  it("arming reject with the instruction box puts the caret in the box, not on body (design-review H1)", () => {
+    render(model(events()), { decide: vi.fn(async () => undefined), reply: null, sessionScope: true, rejectWithInstruction: vi.fn() });
+    click(q('[data-testid="agent-permission-reject"]'));
+    expect(document.activeElement).toBe(q('[data-testid="agent-permission-reject-note"]'));
+  });
+
   it("a cancelled signature on 「거부 + 지시」 keeps the card and says 「전달 안 됨」", async () => {
     const rejectWithInstruction = vi.fn(async () => ({
       state: "not_sent" as const,
@@ -625,6 +631,9 @@ describe("signed surface (#3028)", () => {
     await commit();
     const card = q('[data-testid="agent-permission"]')!;
     expect(card.getAttribute("data-settled")).toBe("partial");
+    // 쓴 지시는 버리지 않는다: 지시 칸으로 옮겨 다시 보낼 수 있다(design-review M1).
+    expect((q('[data-testid="agent-pane-reply-input"]') as HTMLTextAreaElement).value).toBe("다르게 해 줘");
+    expect(q('[data-testid="agent-permission-outcome"]')!.getAttribute("role")).toBe("alert");
     const text = q('[data-testid="agent-permission-outcome"]')!.textContent!;
     expect(text).toContain("거부는 보냈어요");
     expect(text).toContain("전달 안 됨");
