@@ -94,7 +94,7 @@ buzz(Nostr)의 최대 강점은 **모든 행동이 서명된 이벤트 = 위·�
 
 - 폰 키의 접근 제어는 `biometryCurrentSet`이다. 서명마다 Face ID가 필요하고 기기 암호로 대신할 수 없다. Face ID 등록이 바뀌면 키가 무효가 된다[S]. 그러면 뿌리 맥에서 다시 승인한다(D-6).
 - 키는 **앱 전용 키체인 접근 그룹**에 둔다. 알림 확장(NSE)과 공유하는 기존 그룹(F18)에는 두지 않는다. 그래서 「잠긴 폰의 알림 답장은 지시가 되지 않는다」(0188:113)가 암호 성질이 된다. NSE는 키에 닿지 못하고 Face ID를 띄울 수도 없다.
-- 프로비저닝 프로파일 변경은 owner 손이 필요하다. `scripts/verify_ios_signing.sh`에 새 그룹을 넣는다(E6 #3026).
+- 프로비저닝 프로파일 변경은 owner 손이 필요하다. 새 그룹은 두 가드가 지킨다(E6 #3026): 선언 쪽 `clients/mobile/__tests__/deviceKeyContract.test.ts`, 서명 산출물 쪽 `clients/mobile/ios/ci_scripts/ci_post_xcodebuild.sh` §4b. (정정 2026-09-28: 처음 적은 `scripts/verify_ios_signing.sh`는 503d5ee3 W-S1에서 이미 은퇴했다.)
 
 ### D-3. 맥 — Tauri 셸이 SE 키를 들고 `userPresence`, 재사용 창 ≤300초
 

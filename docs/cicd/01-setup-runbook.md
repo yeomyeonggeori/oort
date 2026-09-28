@@ -40,8 +40,10 @@ bundle exec fastlane match developer_id --platform macos --app_identifier com.da
 ```
 
 > 위 두 명령 전에 App Group·App ID capability를 먼저 만들어 두면 재작업이 없다 —
-> `docs/cicd/01-setup-runbook.md` §1~2. 실행 전후로
-> `./scripts/verify_ios_signing.sh`(자격증명 불필요)로 식별자 정합을 확인한다.
+> `docs/cicd/01-setup-runbook.md` §1~2. 식별자·키체인 그룹 정합은 선언 쪽
+> `clients/mobile/__tests__/pushContract.test.ts`·`deviceKeyContract.test.ts`(자격증명
+> 불필요), 서명 산출물 쪽 `clients/mobile/ios/ci_scripts/ci_post_xcodebuild.sh`가
+> 확인한다(옛 `scripts/verify_ios_signing.sh`는 503d5ee3에서 은퇴).
 
 ## 3. GitHub Secrets 등록 (docs/cicd/02 목록)
 ```bash

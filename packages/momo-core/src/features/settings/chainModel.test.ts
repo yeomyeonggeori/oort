@@ -9,6 +9,7 @@ import {
   chainErrorCopy,
   chainSaveMessage,
   chainSummary,
+  CHAIN_KEY_REQUIRED_FOR_NEW_ORIGIN,
   chainUnreadableCopy,
   draftBlockedHint,
   draftErrors,
@@ -27,6 +28,9 @@ import {
   LOOPBACK_REFUSAL_WIRE,
   MAX_FALLBACK_HOPS,
   nextPosition,
+  ORIGIN_CHANGED_KEY_HINT,
+  ORIGIN_CHANGED_KEY_REQUIRED,
+  originChanged,
   parseProbeEntries,
   parseProviderChain,
   patchDraftRow,
@@ -291,7 +295,7 @@ describe("draft validation mirrors the server", () => {
   it("rejects an address the server's validatedBaseURL would reject", () => {
     expect(draftRowError({ ...NEW_ROW, baseUrl: "api.example.com" })).toEqual({
       field: "baseUrl",
-      message: "주소는 http:// 또는 https:// 로 시작해야 합니다.",
+      message: "주소는 http:// 또는 https:// 로 시작해야 해요.",
       next: "주소를 http:// 또는 https:// 로 시작하게 고치면",
     });
   });
@@ -305,7 +309,7 @@ describe("draft validation mirrors the server", () => {
       draftRowError({ ...NEW_ROW, baseUrl: "https://api.example.com/v1" })
     ).toEqual({
       field: "bearer",
-      message: "새 provider는 키를 입력해야 저장됩니다.",
+      message: "새 provider는 키를 입력해야 저장돼요.",
       next: "키를 입력하면",
     });
   });
@@ -316,7 +320,7 @@ describe("draft validation mirrors the server", () => {
   // state as a placeholder.
   it("states the same rule as a next action, for a row nobody has touched yet", () => {
     expect(draftBlockedHint([NEW_ROW], draftErrors([NEW_ROW]))).toBe(
-      "2차 provider 주소를 입력하면 저장할 수 있습니다."
+      "2차 provider 주소를 입력하면 저장할 수 있어요."
     );
   });
 
@@ -327,8 +331,18 @@ describe("draft validation mirrors the server", () => {
       { ...NEW_ROW, key: "new-4", position: 4 },
     ];
     expect(draftBlockedHint(draft, draftErrors(draft))).toBe(
-      "4차 provider 주소를 입력하면 저장할 수 있습니다. 채워야 할 항목은 모두 2개입니다."
+      "4차 provider 주소를 입력하면 저장할 수 있어요. 채워야 할 항목은 모두 2개예요."
     );
+  });
+
+  // #3064 design-review M1: offline, the blocked line said 「…입력하면 저장할 수
+  // 있어요」 under a dimmed save button — a promise the rail cannot keep.
+  it("does not promise a save while offline", () => {
+    const hint = draftBlockedHint([NEW_ROW], draftErrors([NEW_ROW]), true);
+    expect(hint).toBe(
+      "2차 provider 주소를 입력하면 연결이 돌아온 뒤에 저장할 수 있어요. 지금은 서버에 연결되어 있지 않아요."
+    );
+    expect(hint).not.toContain("입력하면 저장할 수 있어요");
   });
 
   it("says nothing at all when the draft is savable", () => {
@@ -341,7 +355,7 @@ describe("draft validation mirrors the server", () => {
   // at the top of a panel this block is at the foot of.
   it("names the rail when the rail is what blocks the save", () => {
     expect(chainDirtyHint(false)).toBe(
-      "아직 저장되지 않았습니다. 연결 순서 저장을 눌러야 적용됩니다."
+      "아직 저장되지 않았어요. 연결 순서 저장을 눌러야 적용돼요."
     );
     expect(chainDirtyHint(true)).toContain("서버에 연결되어 있지 않아 저장할 수 없고");
     expect(chainDirtyHint(true)).not.toBe(chainDirtyHint(false));
@@ -436,7 +450,7 @@ describe("failure copy", () => {
   // read that as "this server has no chain yet", never as an empty chain.
   it("turns the pre-engine 404 into a sentence with a next step", () => {
     expect(chainErrorCopy(new ApiError(404, "HTTP 404"))).toBe(
-      "이 서버는 아직 프로바이더 연결 순서를 제공하지 않습니다. 지금은 위의 provider 하나만 쓰입니다. 서버를 업데이트한 뒤 다시 열어보세요."
+      "이 서버는 아직 프로바이더 연결 순서를 제공하지 않아요. 지금은 위의 provider 하나만 쓰여요. 서버를 업데이트한 뒤 다시 열어보세요."
     );
   });
 
@@ -449,13 +463,13 @@ describe("failure copy", () => {
     expect(
       chainSaveMessage(new ApiError(400, "duplicate chain position 2"))
     ).toBe(
-      "서버가 이 연결 순서를 받지 않았습니다. 서버가 보고한 사유: duplicate chain position 2"
+      "서버가 이 연결 순서를 받지 않았어요. 서버가 보고한 사유: duplicate chain position 2"
     );
   });
 
   it("answers a 403 with who can, not with a retry", () => {
     expect(chainSaveMessage(new ApiError(403, "forbidden"))).toBe(
-      "provider 연결은 이 서버의 운영자만 바꿀 수 있습니다."
+      "provider 연결은 이 서버의 운영자만 바꿀 수 있어요."
     );
   });
 });
@@ -463,7 +477,7 @@ describe("failure copy", () => {
 describe("summary line", () => {
   it("says what a chain of one actually means", () => {
     expect(chainSummary(HEAD_ONLY)).toBe(
-      "예비 provider가 없습니다. 첫 provider가 응답하지 않으면 그 실행은 실패합니다."
+      "예비 provider가 없어요. 첫 provider가 응답하지 않으면 그 실행은 실패해요."
     );
   });
 
@@ -473,10 +487,10 @@ describe("summary line", () => {
   // 꺼둠 chip read as "both fallbacks are live", the opposite of the truth.
   it("reports the server's attemptable count and says the head is in it", () => {
     expect(chainSummary(CHAIN)).toBe(
-      "예비 provider 2개. 첫 provider까지 합쳐 지금 실제로 시도되는 경로는 2개입니다."
+      "예비 provider 2개. 첫 provider까지 합쳐 지금 실제로 시도되는 경로는 2개예요."
     );
     expect(chainSummary({ ...CHAIN, attemptableCount: 1 })).toBe(
-      "예비 provider 2개. 첫 provider까지 합쳐 지금 실제로 시도되는 경로는 1개입니다."
+      "예비 provider 2개. 첫 provider까지 합쳐 지금 실제로 시도되는 경로는 1개예요."
     );
   });
 
@@ -485,7 +499,7 @@ describe("summary line", () => {
   // key would be exactly the invented fact it was written to prevent.
   it("drops the attempt clause when the body carried no count", () => {
     const parsed = parseProviderChain({ entries: CHAIN.entries })!;
-    expect(chainSummary(parsed)).toBe("예비 provider 2개를 두었습니다.");
+    expect(chainSummary(parsed)).toBe("예비 provider 2개를 두었어요.");
   });
 
   // The measured failure this whole path exists for: a body whose third entry
@@ -504,7 +518,7 @@ describe("summary line", () => {
       attemptableCount: 4,
     })!;
     expect(chainSummary(parsed)).toBe(
-      "이 서버가 보낸 항목 중 일부를 읽지 못해, 예비 provider가 몇 개인지 말할 수 없습니다."
+      "이 서버가 보낸 항목 중 일부를 읽지 못해, 예비 provider가 몇 개인지 말할 수 없어요."
     );
     expect(chainSummary(parsed)).not.toMatch(/\d개/);
   });
@@ -524,7 +538,7 @@ describe("an unreadable entry makes the chain read-only", () => {
       entries: [CHAIN.entries[0], { position: 1 }, null],
     })!;
     expect(chainUnreadableCopy(parsed)).toBe(
-      "이 서버가 보낸 연결 순서에서 2번째, 3번째 항목을 읽지 못했습니다. 지금 저장하면 그 항목이 서버에서 지워지므로 저장을 막았습니다. 아래 목록은 읽은 항목만 보여 줍니다. 서버 버전을 확인한 뒤 다시 열어보세요."
+      "이 서버가 보낸 연결 순서에서 2번째, 3번째 항목을 읽지 못했어요. 지금 저장하면 그 항목이 서버에서 지워지므로 저장을 막았어요. 아래 목록은 읽은 항목만 보여 줘요. 서버 버전을 확인한 뒤 다시 열어보세요."
     );
   });
 });
@@ -532,13 +546,13 @@ describe("an unreadable entry makes the chain read-only", () => {
 describe("key field hint", () => {
   it("prints the masked tail the API answers with", () => {
     expect(bearerHint(draftFromChain(CHAIN)[0])).toBe(
-      "저장된 키 ••••c40a. 비워 두면 그대로 둡니다."
+      "저장된 키 ••••c40a. 비워 두면 그대로 둬요."
     );
   });
 
   it("promises nothing about a new row's key beyond what happens to it", () => {
     expect(bearerHint(addDraftRow([])[0])).toBe(
-      "입력한 값은 저장 즉시 암호화되며 화면으로 다시 돌아오지 않습니다."
+      "입력한 값은 저장 즉시 암호화되며 화면으로 다시 돌아오지 않아요."
     );
   });
 
@@ -548,9 +562,9 @@ describe("key field hint", () => {
   it("does not print a stored key and its absence in the same sentence", () => {
     const stored = draftFromChain(CHAIN)[0];
     const { bearerLast4: _drop, ...noTail } = stored;
-    expect(bearerHint(noTail)).toBe("키가 저장되어 있습니다. 비워 두면 그대로 둡니다.");
+    expect(bearerHint(noTail)).toBe("키가 저장되어 있어요. 비워 두면 그대로 둬요.");
     expect(bearerHint({ ...noTail, bearerConfigured: false })).toBe(
-      "이 provider에는 저장된 키가 없습니다. 키를 입력해야 실제로 시도됩니다."
+      "이 provider에는 저장된 키가 없어요. 키를 입력해야 실제로 시도돼요."
     );
   });
 });
@@ -561,7 +575,7 @@ describe("what the head row may claim", () => {
   // announced an attempt that never happens.
   it("does not promise an attempt for a head with no key", () => {
     expect(headClaim({ ...CHAIN.entries[0], bearerConfigured: false })).toBe(
-      "키가 없어 지금은 시도하지 않습니다. 위의 provider 연결에서 키를 저장하면 가장 먼저 시도합니다."
+      "키가 없어 지금은 시도하지 않아요. 위의 provider 연결에서 키를 저장하면 가장 먼저 시도해요."
     );
   });
 
@@ -574,18 +588,18 @@ describe("what the head row may claim", () => {
         mode: "local-mock",
         bearerConfigured: false,
       })
-    ).toBe("가장 먼저 시도합니다. 이 항목은 위의 provider 연결에서 바꿉니다.");
+    ).toBe("가장 먼저 시도해요. 이 항목은 위의 provider 연결에서 바꿔요.");
   });
 
   it("says a parked head is parked", () => {
     expect(headClaim({ ...CHAIN.entries[0], enabled: false })).toBe(
-      "꺼져 있어 시도하지 않습니다. 이 항목은 위의 provider 연결에서 바꿉니다."
+      "꺼져 있어 시도하지 않아요. 이 항목은 위의 provider 연결에서 바꿔요."
     );
   });
 
   it("keeps the plain sentence for a live, keyed head", () => {
     expect(headClaim(CHAIN.entries[0])).toBe(
-      "가장 먼저 시도합니다. 이 항목은 위의 provider 연결에서 바꿉니다."
+      "가장 먼저 시도해요. 이 항목은 위의 provider 연결에서 바꿔요."
     );
   });
 });
@@ -647,21 +661,21 @@ describe("probe results (entries[] + cascadeOk)", () => {
         endpointLabel: "api.anthropic.com",
         tone: "warn",
         label: "다음으로 넘어감",
-        detail: "주소에 닿지 못했습니다. 다음 provider로 넘어갑니다.",
+        detail: "주소에 닿지 못했어요. 다음 provider로 넘어가요.",
       },
       {
         ordinal: "2차",
         endpointLabel: "gateway.dawn.internal:8443",
         tone: "ok",
         label: "응답함",
-        detail: "이 provider가 지금 실행을 처리합니다.",
+        detail: "이 provider가 지금 실행을 처리해요.",
       },
       {
         ordinal: "3차",
         endpointLabel: "backup.dawn.internal",
         tone: "muted",
         label: "꺼둠",
-        detail: "꺼져 있어 시도하지 않습니다.",
+        detail: "꺼져 있어 시도하지 않아요.",
       },
     ]);
   });
@@ -686,7 +700,7 @@ describe("probe results (entries[] + cascadeOk)", () => {
     expect(rows[0].tone).toBe("danger");
     expect(rows[0].label).toBe("여기서 멈춤");
     expect(rows[0].detail).toBe(
-      "provider가 401로 답했습니다. 다음 provider로 넘겨도 같은 이유로 실패하므로 여기서 멈춥니다."
+      "provider가 401로 답했어요. 다음 provider로 넘겨도 같은 이유로 실패하므로 여기서 멈춰요."
     );
   });
 
@@ -717,10 +731,10 @@ describe("probe results (entries[] + cascadeOk)", () => {
       { ...ENTRIES[0], reason: "provider_rate_limited" },
     ]);
     expect(rows[0].detail).toBe(
-      "provider가 503으로 답했습니다. 다음 provider로 넘어갑니다."
+      "provider가 503으로 답했어요. 다음 provider로 넘어가요."
     );
     expect(rows[1].detail).toBe(
-      "요청 한도를 넘었습니다. 다음 provider로 넘어갑니다."
+      "요청 한도를 넘었어요. 다음 provider로 넘어가요."
     );
     expect(rows.every((row) => !row.detail.includes("응답하지 않아"))).toBe(true);
   });
@@ -734,7 +748,7 @@ describe("probe results (entries[] + cascadeOk)", () => {
     expect(rows[0].tone).toBe("muted");
     expect(rows[0].label).toBe("목 모드");
     expect(rows[0].detail).toBe(
-      "모드가 목으로 되어 있어 이번 확인에서는 실제 provider를 부르지 않았습니다."
+      "모드가 목으로 되어 있어 이번 확인에서는 실제 provider를 부르지 않았어요."
     );
   });
 
@@ -745,7 +759,7 @@ describe("probe results (entries[] + cascadeOk)", () => {
   it("headlines a fallen-over-but-serving chain as serving", () => {
     expect(cascadeProbeSummary(true, ENTRIES)).toEqual({
       tone: "ok",
-      text: "2차 provider가 응답했습니다. 확인한 2개 중 1개가 응답합니다.",
+      text: "2차 provider가 응답했어요. 확인한 2개 중 1개가 응답해요.",
     });
   });
 
@@ -754,7 +768,7 @@ describe("probe results (entries[] + cascadeOk)", () => {
       cascadeProbeSummary(false, [ENTRIES[0], { ...ENTRIES[1], ok: false }])
     ).toEqual({
       tone: "warn",
-      text: "확인한 provider 2개 중 응답한 곳이 없습니다. 지금은 실행이 실패합니다.",
+      text: "확인한 provider 2개 중 응답한 곳이 없어요. 지금은 실행이 실패해요.",
     });
   });
 
@@ -765,7 +779,7 @@ describe("probe results (entries[] + cascadeOk)", () => {
     const summary = cascadeProbeSummary(false, [MOCK_HEAD]);
     expect(summary).toEqual({
       tone: "muted",
-      text: "확인할 수 있는 실제 provider가 없습니다. 모드가 목으로 되어 있어 이번 확인은 어디에도 요청하지 않았습니다.",
+      text: "확인할 수 있는 실제 provider가 없어요. 모드가 목으로 되어 있어 이번 확인은 어디에도 요청하지 않았어요.",
     });
     expect(summary.text).not.toContain("실패");
   });
@@ -780,14 +794,14 @@ describe("probe results (entries[] + cascadeOk)", () => {
       ])
     ).toEqual({
       tone: "warn",
-      text: "확인한 provider 1개 중 응답한 곳이 없습니다. 목 모드 provider는 이번 확인에서 부르지 않았습니다.",
+      text: "확인한 provider 1개 중 응답한 곳이 없어요. 목 모드 provider는 이번 확인에서 부르지 않았어요.",
     });
   });
 
   it("says so when every hop is parked", () => {
     expect(cascadeProbeSummary(false, [{ ...ENTRIES[2], position: 0 }])).toEqual({
       tone: "warn",
-      text: "켜져 있는 provider가 없습니다. 하나 이상 켜야 실행할 수 있습니다.",
+      text: "켜져 있는 provider가 없어요. 하나 이상 켜야 실행할 수 있어요.",
     });
   });
 
@@ -796,25 +810,25 @@ describe("probe results (entries[] + cascadeOk)", () => {
   it("trusts the rows over a cascadeOk flag they do not support", () => {
     expect(cascadeProbeSummary(true, [{ ...ENTRIES[0], ok: false }])).toEqual({
       tone: "warn",
-      text: "확인한 provider 1개 중 응답한 곳이 없습니다. 지금은 실행이 실패합니다.",
+      text: "확인한 provider 1개 중 응답한 곳이 없어요. 지금은 실행이 실패해요.",
     });
   });
 
   it("translates every reason the probe can emit, generated ones included", () => {
     expect(probeReasonCopy("not_external_provider")).toBe(
-      "모드가 목으로 되어 있어 실제 provider를 부르지 않습니다."
+      "모드가 목으로 되어 있어 실제 provider를 부르지 않아요."
     );
-    expect(probeReasonCopy("provider_not_configured")).toBe("주소나 키가 비어 있습니다.");
-    expect(probeReasonCopy("provider_rate_limited")).toBe("요청 한도를 넘었습니다.");
-    expect(probeReasonCopy("probe_not_run")).toBe("확인이 끝나지 않았습니다.");
-    expect(probeReasonCopy("provider_status_503")).toBe("provider가 503으로 답했습니다.");
+    expect(probeReasonCopy("provider_not_configured")).toBe("주소나 키가 비어 있어요.");
+    expect(probeReasonCopy("provider_rate_limited")).toBe("요청 한도를 넘었어요.");
+    expect(probeReasonCopy("probe_not_run")).toBe("확인이 끝나지 않았어요.");
+    expect(probeReasonCopy("provider_status_503")).toBe("provider가 503으로 답했어요.");
     expect(probeReasonCopy(undefined)).toBe("");
     // #2960 reasons (#2975): they were reaching the table as 「서버가 보고한 사유: …」.
     expect(probeReasonCopy("provider_egress_denied")).toBe(
       "사설·루프백·메타데이터 주소라 서버가 부르지 않았습니다. 같은 망의 provider를 쓰려면 서버 운영자가 AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1을 켜고 그 호스트를 AGENT_PROVIDER_LOCAL_HOSTS에 넣어야 합니다."
     );
     expect(probeReasonCopy("provider_invalid_response")).toBe(
-      "주소가 provider API가 아닌 것 같습니다. API 주소(예: …/v1)인지 확인하세요."
+      "주소가 provider API가 아닌 것 같아요. API 주소(예: …/v1)인지 확인하세요."
     );
   });
 
@@ -822,7 +836,7 @@ describe("probe results (entries[] + cascadeOk)", () => {
   // wrong or rotated away. It was reaching the screen as the machine label.
   it("translates the auth failure the classifier names in its own comment", () => {
     expect(probeReasonCopy("provider_auth_failed")).toBe(
-      "provider가 저장된 키를 받아들이지 않았습니다."
+      "provider가 저장된 키를 받아들이지 않았어요."
     );
   });
 
@@ -857,5 +871,66 @@ describe("loopback provider refusal (#2204)", () => {
     );
     expect(isLoopbackProviderRefusal(new ApiError(500, "boom"))).toBe(false);
     expect(loopbackProviderGuidance()).toBe(LOOPBACK_PROVIDER_HINT);
+  });
+});
+
+// #3042 (#3040 server): a kept key is bound to its origin. Moving a stored hop to
+// another scheme/host/port with an empty key field is a guaranteed 409, so the
+// draft asks for the key first and the save names the next action.
+describe("a stored hop moved to another origin", () => {
+  const stored = () => draftFromChain(CHAIN)[0]; // https://gateway.dawn.internal:8443/v1
+
+  it("keeps a same-origin path change savable without a key", () => {
+    const moved = { ...stored(), baseUrl: "https://gateway.dawn.internal:8443/v2/" };
+    expect(originChanged(moved)).toBe(false);
+    expect(draftRowError(moved)).toBeNull();
+    expect(bearerHint(moved)).toBe("저장된 키 ••••c40a. 비워 두면 그대로 둬요.");
+  });
+
+  it("treats the default port written out as the same origin", () => {
+    const row = { ...draftFromChain(CHAIN)[1], baseUrl: "https://BACKUP.dawn.internal:443/v2" };
+    expect(originChanged(row)).toBe(false);
+    expect(draftRowError(row)).toBeNull();
+  });
+
+  it.each([
+    ["host", "https://attacker.example:8443/v1"],
+    ["port", "https://gateway.dawn.internal:9443/v1"],
+    ["scheme", "http://gateway.dawn.internal:8443/v1"],
+    ["a parent-looking host", "https://gateway.dawn.internal.attacker.example:8443/v1"],
+  ])("requires a new key when the origin changes (%s)", (_what, baseUrl) => {
+    const moved = { ...stored(), baseUrl };
+    expect(originChanged(moved)).toBe(true);
+    expect(draftRowError(moved)).toEqual({
+      field: "bearer",
+      message: ORIGIN_CHANGED_KEY_REQUIRED,
+      next: "바뀐 주소의 키를 입력하면",
+    });
+    expect(bearerHint(moved)).toBe(ORIGIN_CHANGED_KEY_HINT);
+    expect(draftBlockedHint([moved], draftErrors([moved]))).toBe(
+      "2차 provider 바뀐 주소의 키를 입력하면 저장할 수 있어요."
+    );
+    // With a key typed the row saves, and the key goes on the wire.
+    const keyed = { ...moved, bearer: "sk-new-origin-key" };
+    expect(draftRowError(keyed)).toBeNull();
+    expect(draftToInput([keyed])[0]).toMatchObject({ baseUrl, bearer: "sk-new-origin-key" });
+  });
+
+  it("does not ask a new row twice", () => {
+    const fresh = addDraftRow([])[0];
+    expect(originChanged({ ...fresh, baseUrl: "https://other.example/v1" })).toBe(false);
+  });
+
+  it("answers the 409 with the next action, by code and by status", () => {
+    const coded = new ApiError(
+      409,
+      "chain position 1 moved from gateway.dawn.internal:8443 to attacker.example; a new bearer is required",
+      "key_required_for_new_origin"
+    );
+    expect(chainSaveMessage(coded)).toBe(CHAIN_KEY_REQUIRED_FOR_NEW_ORIGIN);
+    expect(chainSaveMessage(new ApiError(409, "conflict"))).toBe(CHAIN_KEY_REQUIRED_FOR_NEW_ORIGIN);
+    expect(CHAIN_KEY_REQUIRED_FOR_NEW_ORIGIN).toMatch(/^주소가 바뀌면 키를 다시 넣어 주세요\./);
+    // Not the retry sentence an operator cannot act on.
+    expect(chainSaveMessage(coded)).not.toContain("잠시 뒤에");
   });
 });

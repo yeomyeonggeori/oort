@@ -601,7 +601,12 @@ const SIDEBAR_WIDTH = 324;
 const PANE_GAIN_ON_COLLAPSE = SIDEBAR_WIDTH - 8;
 /** Settings replaces the titlebar, so the section list rests at y=0. */
 const SETTINGS_NAV_RESTING_TOP = 0;
-const SETTINGS_NAV_PHONE_CAP = 308;
+/** 폰(<600)의 설정 목록은 한 줄로 눕는다(#3064). 세로 308 캡이던 시절 목록과
+ *  본문이 두 스크롤 판으로 포개져 본문 글이 목록 아래로 잘려 들어가 「메뉴가 본문을
+ *  덮는다」로 읽혔다. 한 줄 = 탭 높이 44 + 위아래 p-2 16 + 아래 선 1. */
+const SETTINGS_NAV_PHONE_ROW = 61;
+/** 고른 섹션을 들일 때 창 끝에서 남기는 이웃 한 칸(`scroll-padding-inline`). */
+const SETTINGS_NAV_PHONE_PEEK = 44;
 
 const SHELL_METRICS = `(() => {
   const doc = document.scrollingElement || document.documentElement;
@@ -1352,40 +1357,73 @@ async function measureSettingsSurface(browser) {
   await mobile.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(mobile);
   await go(mobile, "/settings?section=profile");
-  const cap = await mobile.evaluate(`(() => {
+  const row = await mobile.evaluate(`(() => {
     const nav = document.querySelector('[data-testid="settings-nav"]');
-    if (!nav) return { missing: true };
+    const body = document.querySelector('[data-settings-scroll-viewport]');
+    if (!nav || !body) return { missing: true };
     const nr = nav.getBoundingClientRect();
+    const br = body.getBoundingClientRect();
     const items = [...nav.querySelectorAll('[data-testid^="settings-nav-"]')];
-    const vis = items.map((el) => {
-      const r = el.getBoundingClientRect();
-      const visible = Math.min(r.bottom, nr.bottom) - Math.max(r.top, nr.top);
-      return {
-        id: el.getAttribute("data-testid"),
-        h: Math.round(r.height),
-        vis: Math.round(Math.max(0, visible)),
-      };
-    });
+    const tops = [...new Set(items.map((el) => Math.round(el.getBoundingClientRect().top)))];
     return {
       top: Math.round(nr.top),
       height: Math.round(nr.height),
-      maxHeight: getComputedStyle(nav).maxBlockSize,
-      full: vis.filter((v) => v.vis >= v.h - 1 && v.vis > 0).map((v) => v.id),
-      peek: vis.filter((v) => v.vis > 8 && v.vis < v.h - 8).map((v) => v.id),
-      hidden: vis.filter((v) => v.vis <= 8).map((v) => v.id),
-      rows: vis,
+      items: items.length,
+      tops,
+      scrollsInline: nav.scrollWidth > nav.clientWidth,
+      scrollsBlock: nav.scrollHeight > nav.clientHeight,
+      // 「더 있다」 단서(#3064 H1): 줄 끝 24(마스크가 흐리는 자리)에 걸쳐
+      // 흐려지며 사라지는 섹션이 있다. 섹션 사이 틈(4·8)이 24보다 좁으므로 줄이
+      // 넘치는 한 늘 성립하고, 마스크가 빠지면 아래 mask 단정이 떨어진다.
+      peek: items
+        .map((el) => el.getBoundingClientRect())
+        .filter((r) => r.right > nr.right - 24 && r.left < nr.right - 2).length,
+      edge: items
+        .map((el) => el.getBoundingClientRect())
+        .filter((r) => r.right > nr.right - 120 && r.left < nr.right + 120)
+        .map((r) => [Math.round(r.left), Math.round(r.right)]),
+      mask: getComputedStyle(nav).maskImage || getComputedStyle(nav).webkitMaskImage || "",
+      bodyTop: Math.round(br.top),
+      bodyHeight: Math.round(br.height),
+      gap: Math.round(br.top - nr.bottom),
     };
   })()`);
   check(
-    "390px 설정 목록 캡이 다음 행을 반쯤 보여 주고 상단 y가 실값이다",
-    cap.missing !== true &&
-      cap.top === SETTINGS_NAV_RESTING_TOP &&
-      cap.height === SETTINGS_NAV_PHONE_CAP &&
-      cap.maxHeight === `${SETTINGS_NAV_PHONE_CAP}px` &&
-      cap.full.length >= 4 &&
-      cap.peek.length >= 1 &&
-      cap.hidden.length >= 1,
-    JSON.stringify(cap)
+    "390px 설정 목록은 한 줄로 눕고 본문이 그 아래 남은 높이를 받는다",
+    row.missing !== true &&
+      row.top === SETTINGS_NAV_RESTING_TOP &&
+      row.height === SETTINGS_NAV_PHONE_ROW &&
+      row.items >= 10 &&
+      row.tops.length === 1 &&
+      row.scrollsInline === true &&
+      row.scrollsBlock === false &&
+      row.peek >= 1 &&
+      row.mask.startsWith("linear-gradient") &&
+      row.gap === 0 &&
+      row.bodyHeight === 844 - SETTINGS_NAV_PHONE_ROW,
+    JSON.stringify(row)
+  );
+  // 가운데 섹션: 창 끝에 붙지 않고 이웃 한 칸(44)을 남긴다(#3064 H1). 줄 끝의
+  // 섹션은 더 스크롤할 곳이 없으니 이 단정의 대상이 아니다.
+  await mobile.getByTestId("settings-nav-ai").click();
+  const middle = await mobile.evaluate(`(() => {
+    const nav = document.querySelector('[data-testid="settings-nav"]');
+    const el = document.querySelector('[data-testid="settings-nav-ai"]');
+    if (!nav || !el) return { missing: true };
+    const nr = nav.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    return {
+      atEnd: Math.ceil(nav.scrollLeft + nav.clientWidth) >= nav.scrollWidth,
+      leftRoom: Math.round(r.left - nr.left),
+      rightRoom: Math.round(nr.right - r.right),
+    };
+  })()`);
+  check(
+    "390px에서 고른 가운데 섹션 곁에 이웃 한 칸이 보인다",
+    middle.missing !== true &&
+      middle.atEnd === false &&
+      Math.min(middle.leftRoom, middle.rightRoom) >= SETTINGS_NAV_PHONE_PEEK - 1,
+    JSON.stringify(middle)
   );
   await mobile.getByTestId("settings-nav-events").click();
   const scrolled = await mobile.evaluate(`(() => {
@@ -1396,19 +1434,21 @@ async function measureSettingsSurface(browser) {
     const r = el.getBoundingClientRect();
     return {
       focus: document.activeElement?.getAttribute("data-testid"),
-      fully: r.top >= nr.top - 1 && r.bottom <= nr.bottom + 1,
+      fully: r.left >= nr.left - 1 && r.right <= nr.right + 1 && r.top >= nr.top - 1 && r.bottom <= nr.bottom + 1,
+      navScrollLeft: Math.round(nav.scrollLeft),
       current: el.getAttribute("aria-current"),
     };
   })()`);
   check(
-    "390px에서 고른 설정 섹션이 목록 안으로 스크롤된다",
+    "390px에서 고른 설정 섹션이 줄 안으로 가로 스크롤된다",
     scrolled.missing !== true &&
       scrolled.focus === "settings-nav-events" &&
       scrolled.fully === true &&
+      scrolled.navScrollLeft > 0 &&
       scrolled.current === "page",
     JSON.stringify(scrolled)
   );
-  await mobile.screenshot({ path: `${OUT_DIR}/390x844-settings-nav-cap.png` });
+  await mobile.screenshot({ path: `${OUT_DIR}/390x844-settings-nav-row.png` });
   await phone.close();
 }
 

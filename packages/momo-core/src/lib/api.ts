@@ -713,8 +713,9 @@ function parseError(res: HttpResponse): ApiError {
 // The refresh token is single-use (MOMO-300): the server revokes the presented
 // token as it issues the new pair. Concurrent 401s must therefore funnel into
 // ONE rotation, because a second concurrent call would present an
-// already-revoked token and end the session. Cross-TAB races stay possible
-// while the token lives in localStorage; see ./session.ts.
+// already-revoked token and end the session. That single flight is per JS
+// context; across tabs and desktop windows the host's `exclusiveRotation`
+// serialises rotations and re-reads the shared store first (#3067).
 
 /**
  * Why a rotation attempt ended. The distinction is load-bearing: **only
@@ -741,38 +742,88 @@ interface Rotation {
 }
 
 let rotationInFlight: Promise<Rotation> | null = null;
+/**
+ * The in-flight rotation's refresh POST has left (#3067). Before that, the
+ * rotation may still be queued behind another tab's lock and has spent nothing,
+ * so `logout()` does not wait for it — the wait bought nothing and delayed the
+ * server revocation by up to the lock wait.
+ */
+let rotationPosted = false;
+/** `logout()` joined the in-flight rotation and will revoke the pair it mints. */
+let rotationJoinedByLogout = false;
 
 function rotateSession(): Promise<Rotation> {
   rotationInFlight ??= (async (): Promise<Rotation> => {
     try {
-      const refreshToken = coreSession().getRefreshToken();
-      // Having no token to present is not a network problem: there is nothing
-      // to rotate and nothing to keep waiting for.
-      if (!refreshToken) return { outcome: "rejected", pair: null };
-      const res = await rawRequest(
-        "/v1/auth/refresh",
-        { method: "POST", body: JSON.stringify({ refreshToken }) },
-        null
-      );
-      if (!res.ok) {
-        coreSession().markAuthExpired();
-        return { outcome: "rejected", pair: null };
-      }
-      const pair = refreshResponseFromWire(res.json<unknown>());
-      // A no-op when a logout wiped the store meanwhile; `pair` still reaches
-      // that logout through the result.
-      coreSession().applyRotation(pair.accessToken, pair.refreshToken);
-      return { outcome: "rotated", pair };
+      const session = coreSession();
+      return session.exclusiveRotation
+        ? await session.exclusiveRotation(rotateOnce)
+        : await rotateOnce();
     } catch {
-      // Offline, unreachable server, or a blown deadline: the caller keeps
-      // rendering cached content (P15) and the session is not declared dead,
-      // because nothing answered to say it is.
+      // Offline, unreachable server, a blown deadline, or a cross-context lock
+      // that never came free: the caller keeps rendering cached content (P15)
+      // and the session is not declared dead, because nothing answered to say
+      // it is.
       return { outcome: "unreachable", pair: null };
     } finally {
       rotationInFlight = null;
+      rotationPosted = false;
+      rotationJoinedByLogout = false;
     }
   })();
   return rotationInFlight;
+}
+
+/**
+ * The rotation itself. Reads the refresh token only here — inside the host's
+ * exclusive section, after its re-read — so a token another tab already spent
+ * is never the one presented.
+ */
+async function rotateOnce(): Promise<Rotation> {
+  const refreshToken = coreSession().getRefreshToken();
+  // Having no token to present is not a network problem: there is nothing
+  // to rotate and nothing to keep waiting for.
+  if (!refreshToken) return { outcome: "rejected", pair: null };
+  rotationPosted = true;
+  const res = await rawRequest(
+    "/v1/auth/refresh",
+    { method: "POST", body: JSON.stringify({ refreshToken }) },
+    null
+  );
+  if (!res.ok) {
+    coreSession().markAuthExpired();
+    return { outcome: "rejected", pair: null };
+  }
+  const pair = refreshResponseFromWire(res.json<unknown>());
+  // The store may have moved on while the request was in the air: a logout
+  // (here or in another tab) emptied it, or another tab signed a DIFFERENT
+  // account in and this tab adopted that record. The minted pair belongs to the
+  // session that was presented, so it is applied only if that session is still
+  // the stored one — otherwise it would land under someone else's identity
+  // (#3072 review H1: `{member: Y, refreshToken: X's}`).
+  if (coreSession().getRefreshToken() !== refreshToken) {
+    // Nobody will hold this pair. A logout that joined this rotation revokes it
+    // itself; otherwise end it here so it does not live on the server for 30
+    // days (#3072 review M1).
+    if (!rotationJoinedByLogout) void revokePair(pair);
+    // Nothing is proven about the session now in the store — it is not ours.
+    return { outcome: "unreachable", pair };
+  }
+  coreSession().applyRotation(pair.accessToken, pair.refreshToken);
+  return { outcome: "rotated", pair };
+}
+
+/** Best effort: end a pair nobody will hold. Never rejects. */
+async function revokePair(pair: RefreshResponse): Promise<void> {
+  try {
+    await rawRequest(
+      "/v1/auth/logout",
+      { method: "POST", body: JSON.stringify({ refreshToken: pair.refreshToken }) },
+      pair.accessToken
+    );
+  } catch {
+    // The pair expires on its own; there is no one to tell.
+  }
 }
 
 /** The detailed rotation. Use this wherever the *reason* changes what you do. */
@@ -1143,7 +1194,11 @@ export interface LogoutOptions {
  * rotation fails, the captured pair is all there is, as before.
  */
 export async function logout(options: LogoutOptions = {}): Promise<void> {
-  const rotation = rotationInFlight;
+  // Join only a rotation that has actually presented its token. One still
+  // waiting for another tab's lock has spent nothing: once the store is wiped
+  // below it finds no token and never posts (#3072 review M1).
+  const rotation = rotationPosted ? rotationInFlight : null;
+  if (rotation) rotationJoinedByLogout = true;
   let access = coreSession().getAccessToken();
   let refresh = coreSession().getRefreshToken();
   coreSession().clearSession();

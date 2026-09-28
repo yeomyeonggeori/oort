@@ -78,7 +78,7 @@ describe("settingsNav", () => {
     );
   });
 
-  it("caps the phone nav with this surface's named height, not pane-sm", () => {
+  it("lays the phone nav in one scrolling row instead of a capped column (#3064)", () => {
     const css = readFileSync(join(WEB_SRC, "design/tokens.css"), "utf8");
     const start = css.indexOf("@utility settings-nav");
     let depth = 0;
@@ -94,9 +94,13 @@ describe("settingsNav", () => {
       }
     }
     const utility = css.slice(start, end);
-    expect(utility).toContain("max-block-size: var(--spacing-settings-nav)");
-    expect(utility).not.toContain("--spacing-pane-sm");
-    expect(css).toMatch(/--spacing-settings-nav:\s*308px;/);
+    const phone = utility.slice(utility.indexOf("@media (width < 600px)"));
+    expect(phone).toContain("display: flex");
+    expect(phone).toContain("overflow-x: auto");
+    expect(phone).toContain("overflow-y: hidden");
+    // The capped column is what stacked two scroll panes on a 390 phone.
+    expect(utility).not.toContain("max-block-size");
+    expect(css).not.toContain("--spacing-settings-nav");
   });
 
   it("AppShell swaps app chrome for the settings surface", () => {

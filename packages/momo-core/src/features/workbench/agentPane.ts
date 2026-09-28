@@ -1,4 +1,5 @@
 import { uuidEq, type WorkSession } from "../../lib/api";
+import { humanSignatureRefusal } from "../auth/humanSignature";
 import {
   foldSessionEvents,
   type WorkEventRow,
@@ -317,6 +318,11 @@ export function permissionFailure(error: unknown): PermissionFailure {
     typeof error === "object" && error !== null && typeof (error as { code?: unknown }).code === "string"
       ? (error as { code: string }).code
       : null;
+  // 기기 서명 거부(E3 #3023)는 status보다 먼저 이름으로 읽는다. 403이라고 모두
+  // 「소유자만」이 아니고, 409 `device_nonce_replayed`는 요청이 닫힌 것이 아니다.
+  // 서명 거부는 요청을 닫지 않는다: 거부(서명 없음)는 여전히 보낼 수 있다.
+  const signature = humanSignatureRefusal(error);
+  if (signature) return { closed: false, text: signature.text };
   if (status === 409 && code === "permission_already_decided") {
     return { closed: true, text: "이미 다른 결정이 먼저 들어갔어요. 다른 기기에서 결정했을 수 있어요." };
   }
