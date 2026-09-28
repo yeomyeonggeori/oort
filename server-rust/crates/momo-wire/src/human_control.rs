@@ -25,7 +25,9 @@
 //! ```
 //!
 //! (`device_revoke.v1` is the v2 letter without the public-key line; a host
-//! takes a revoked public key only from a v2 letter, #3068.)
+//! takes a revoked public key only from a v2 letter, #3068.
+//! `momo.human.device_rebind.v1`, #3097, is signed by the key it moves — see
+//! [`DeviceRebind`].)
 //!
 //! ## Field rules (what E1 fixes on top of the ADR)
 //!
@@ -109,6 +111,8 @@ pub const DEVICE_ENDORSE_SCHEMA_V1: &str = "momo.human.device_endorse.v1";
 pub const DEVICE_REVOKE_SCHEMA_V1: &str = "momo.human.device_revoke.v1";
 /// v2 (#3068): the root signs the revoked device's public key too.
 pub const DEVICE_REVOKE_SCHEMA_V2: &str = "momo.human.device_revoke.v2";
+/// #3097 (ADR-0146 D-7 증보): a live key moves itself onto a new sign-in.
+pub const DEVICE_REBIND_SCHEMA_V1: &str = "momo.human.device_rebind.v1";
 
 /// The placeholder for an absent `session_id` / `mode`.
 pub const ABSENT: &str = "-";
@@ -623,6 +627,68 @@ impl DeviceRevoke {
     }
 }
 
+/// `momo.human.device_rebind.v1` (#3097, ADR-0146 D-7 증보) — a device key
+/// moves **itself** onto the caller's new sign-in, after the lineage it was
+/// registered under ended without revoking it (a refresh-token reuse, or the
+/// sign-in expiring). Signed by the key being moved, never by the root: the
+/// proof is possession of that key, which a stolen refresh token does not give.
+///
+/// ```text
+/// momo.human.device_rebind.v1
+/// {workspace_id}
+/// {member_id}
+/// {key_id}
+/// {public_key_b64}
+/// {session_id}        the lineage the key moves to — the caller's own
+/// {signed_at_ms}
+/// ```
+///
+/// The destination lineage makes a letter single-use without a nonce: the
+/// server moves the key only into the caller's own live lineage, and only out
+/// of a lineage that can no longer rotate. A lineage never becomes live again,
+/// so once the key sits in `session_id` the letter names the lineage it is
+/// already in, and after that lineage ends it names a dead one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeviceRebind<'a> {
+    pub workspace_id: Uuid,
+    pub member_id: Uuid,
+    pub key_id: Uuid,
+    /// Base64 of the 33-byte compressed SEC1 key (canonical encoding).
+    pub public_key_b64: &'a str,
+    pub session_id: Uuid,
+    pub signed_at_ms: i64,
+}
+
+impl DeviceRebind<'_> {
+    pub fn signed_bytes(&self) -> Result<Vec<u8>, HumanSigningError> {
+        let key = canonical_b64_of_len("public_key_b64", self.public_key_b64, P256_PUBLIC_KEY_LEN)?;
+        parse_p256_public_key(&key)?;
+        if self.signed_at_ms <= 0 || self.signed_at_ms > MAX_SAFE_INTEGER {
+            return Err(HumanSigningError::InvalidField {
+                field: "signed_at_ms",
+                reason: "must be a positive safe integer",
+            });
+        }
+        Ok(format!(
+            "{DEVICE_REBIND_SCHEMA_V1}\n{}\n{}\n{}\n{}\n{}\n{}",
+            self.workspace_id,
+            self.member_id,
+            self.key_id,
+            self.public_key_b64,
+            self.session_id,
+            self.signed_at_ms,
+        )
+        .into_bytes())
+    }
+
+    /// Verify against the key's own public key (the one the letter names).
+    pub fn verify(&self, signature: &[u8]) -> Result<[u8; P256_SIGNATURE_LEN], HumanSigningError> {
+        let bytes = self.signed_bytes()?;
+        let key = canonical_b64_of_len("public_key_b64", self.public_key_b64, P256_PUBLIC_KEY_LEN)?;
+        verify_p256(&key, &bytes, signature)
+    }
+}
+
 /// Freshness of a control against the verifier's clock (ADR-0146 D-9):
 /// `issued < expires ≤ issued + 10 min`, `|now − issued| ≤ 5 min`, `now < expires`.
 pub fn check_control_window(
@@ -868,6 +934,60 @@ mod tests {
         );
         // No overflow at the i64 extremes.
         assert!(check_control_window(i64::MIN, i64::MAX, 0).is_err());
+    }
+
+    /// #3097: the rebind letter's exact bytes, and that it binds the key, the
+    /// destination lineage and the time — and verifies only under the key it
+    /// names.
+    #[test]
+    fn device_rebind_bytes_are_fixed_and_bind_the_destination_lineage() {
+        use p256::ecdsa::signature::Signer as _;
+        let signing = p256::ecdsa::SigningKey::from_slice(&[7u8; 32]).unwrap();
+        let public = BASE64.encode(signing.verifying_key().to_sec1_point(true).as_bytes());
+        let letter = DeviceRebind {
+            workspace_id: Uuid::from_u128(1),
+            member_id: Uuid::from_u128(2),
+            key_id: Uuid::from_u128(3),
+            public_key_b64: &public,
+            session_id: Uuid::from_u128(4),
+            signed_at_ms: 1_790_000_000_000,
+        };
+        assert_eq!(
+            String::from_utf8(letter.signed_bytes().unwrap()).unwrap(),
+            format!(
+                "momo.human.device_rebind.v1\n\
+                 00000000-0000-0000-0000-000000000001\n\
+                 00000000-0000-0000-0000-000000000002\n\
+                 00000000-0000-0000-0000-000000000003\n\
+                 {public}\n\
+                 00000000-0000-0000-0000-000000000004\n\
+                 1790000000000"
+            )
+        );
+        let signature: p256::ecdsa::Signature = signing.sign(&letter.signed_bytes().unwrap());
+        assert!(letter.verify(&signature.to_bytes()).is_ok());
+        let elsewhere = DeviceRebind {
+            session_id: Uuid::from_u128(5),
+            ..letter
+        };
+        assert_eq!(
+            elsewhere.verify(&signature.to_bytes()),
+            Err(HumanSigningError::BadSignature),
+            "a letter for one lineage moves the key into no other"
+        );
+        let other_key = p256::ecdsa::SigningKey::from_slice(&[8u8; 32]).unwrap();
+        let forged: p256::ecdsa::Signature = other_key.sign(&letter.signed_bytes().unwrap());
+        assert_eq!(
+            letter.verify(&forged.to_bytes()),
+            Err(HumanSigningError::BadSignature),
+            "only the key being moved can sign its move"
+        );
+        assert!(DeviceRebind {
+            signed_at_ms: 0,
+            ..letter
+        }
+        .signed_bytes()
+        .is_err());
     }
 
     #[test]

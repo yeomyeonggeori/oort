@@ -17,7 +17,7 @@
 //! | `unlinking_a_phone_revokes_its_key` | drop the key half of the unlink cascade |
 //! | `a_member_wide_session_end_revokes_every_key` | drop the key half of `end_member_sessions_in_tx` |
 //! | `an_access_token_outliving_its_logout_cannot_register_a_key` | check the access row instead of a live refresh of the lineage |
-//! | `a_reused_refresh_token_ends_the_whole_lineage` | **R1** — drop `end_reused_lineage` from the `Revoked` arm |
+//! | `a_reused_refresh_token_ends_the_whole_lineage` | **R1** — drop `end_reused_lineage` from the `Revoked` arm; **#3097** — revoke the lineage's keys on a reuse |
 //! | `a_lost_rotation_response_is_answered_again_with_the_same_pair` | **#3074** — drop the reissue, or mint a fresh pair on it |
 //! | `a_spent_token_is_not_reissued_once_its_successor_moved_on_or_the_window_closed` | drop the successor-live, the grace or the member check of the reissue |
 //! | `concurrent_presentations_of_one_token_get_one_pair` | drop the reissue from the non-linked single-use gate's losing arm |
@@ -25,6 +25,9 @@
 //! | `host_register_signature_is_optional_until_the_flag_and_verified_whenever_sent` | drop the verification when the flag is off, or the flag check |
 //! | `host_register_refuses_every_forged_or_misplaced_signature` | skip `verify`, accept a non-root key, rebuild from the request instead of the stored row, or drop the host-id collision |
 //! | `migration_094_reapplies_as_a_noop_and_keeps_rls_forced` | a non-idempotent statement in 094, or a missing FORCE |
+//! | `a_reused_roots_key_is_mute_until_its_own_letter_moves_it` | **#3097** — skip the rebind letter's `verify`, drop the key's lineage check from `host_register` / the phone's endorser, or answer a dead-lineage key with `already_registered` |
+//! | `a_rebind_letter_is_single_use_and_only_ever_moves_a_dead_lineages_key` | **#3097** — drop the `LineageLive` refusal, or build the letter from anything but the caller's own sign-in |
+//! | `a_phone_key_moves_to_its_new_link_with_its_approval_and_logout_still_ends_it` | **#3097** — mint a new row (new id, no approval) on rebind, or let a root move into a linked session |
 //!
 //! `#[ignore]` — needs a real Postgres plus the runtime roles:
 //!
@@ -48,7 +51,7 @@ use momo_db::PgPool;
 use momo_server::config::DeviceKeySettings;
 use momo_server::{build_app, AppState, RealtimeAdvert};
 use momo_wire::human_control::{
-    ControlContent, DeviceEndorse, DeviceKeyAlg, DeviceRevoke, HumanControl,
+    ControlContent, DeviceEndorse, DeviceKeyAlg, DeviceRebind, DeviceRevoke, HumanControl,
 };
 use p256::ecdsa::signature::Signer as _;
 use p256::ecdsa::{Signature, SigningKey};
@@ -342,6 +345,65 @@ fn now_ms() -> i64 {
 }
 
 impl World {
+    /// The caller's sign-in lineage, as `signing-context` serves it (#3097).
+    async fn session_id(&self, session: &Session) -> Uuid {
+        let (status, body) = self
+            .call(
+                reqwest::Method::GET,
+                &format!("{}/signing-context", self.keys_path()),
+                &session.access,
+                None,
+            )
+            .await;
+        assert_eq!(status, 200, "signing-context: {body}");
+        Uuid::parse_str(body["sessionId"].as_str().expect("sessionId")).expect("uuid")
+    }
+
+    /// A `device_rebind.v1` letter by `key` (#3097).
+    fn rebind_letter(
+        &self,
+        key: &DeviceKeyPair,
+        key_id: Uuid,
+        session_id: Uuid,
+        signed_at_ms: i64,
+    ) -> Value {
+        let bytes = DeviceRebind {
+            workspace_id: self.workspace,
+            member_id: self.person_id,
+            key_id,
+            public_key_b64: &key.public_b64,
+            session_id,
+            signed_at_ms,
+        }
+        .signed_bytes()
+        .expect("rebind bytes");
+        json!({ "signedAtMs": signed_at_ms, "signature": key.sign(&bytes) })
+    }
+
+    /// Register `key` again with a `rebind` letter (no password, #3097).
+    async fn rebind(
+        &self,
+        session: &Session,
+        key: &DeviceKeyPair,
+        platform: &str,
+        letter: Value,
+    ) -> (u16, Value) {
+        self.post(
+            &self.keys_path(),
+            &session.access,
+            json!({ "alg": "p256", "publicKey": key.public_b64, "platform": platform, "rebind": letter }),
+        )
+        .await
+    }
+
+    async fn key_view(&self, session: &Session, id: Uuid) -> Value {
+        self.list(session)
+            .await
+            .into_iter()
+            .find(|k| k["id"] == id.to_string())
+            .expect("the key is listed")
+    }
+
     async fn person(&self) -> Session {
         login(
             &self.http,
@@ -1177,8 +1239,8 @@ async fn a_reused_refresh_token_ends_the_whole_lineage() {
     );
     assert_eq!(
         w.key_row(key_id).await,
-        (Some("refresh_reuse".to_string()), true),
-        "the lineage's device key ends with it"
+        (None, false),
+        "#3097: the lineage's device key is NOT revoked — a copied refresh token is not a copied key"
     );
     assert!(
         w.access_works(&bystander.access).await,
@@ -1319,7 +1381,8 @@ async fn a_spent_token_is_not_reissued_once_its_successor_moved_on_or_the_window
     );
     assert_eq!(
         w.key_row(key_id).await,
-        (Some("refresh_reuse".to_string()), true)
+        (None, false),
+        "#3097: a reuse ends the tokens, not the key"
     );
     let (status, _) = w.rotate(&y).await;
     assert_eq!(status, 401, "the other holder of Y is a reuse");
@@ -1886,7 +1949,8 @@ async fn by_default_a_reuse_ends_a_linked_phone_lineage_but_not_a_password_sign_
     );
     assert_eq!(
         w.key_row(key_id).await,
-        (Some("refresh_reuse".to_string()), true)
+        (None, false),
+        "#3097: the phone's key survives the sweep of its lineage"
     );
     assert!(
         w.access_works(&desktop.access).await,
@@ -2093,5 +2157,330 @@ async fn a_member_host_is_handed_its_owners_signed_revocation_letters() {
     assert!(
         team.get("deviceRevocations").is_none(),
         "a workspace host gets no personal letters ({team})"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// #3097 — a refresh-token reuse keeps the device key; the key moves itself
+// ---------------------------------------------------------------------------
+
+/// End a lineage by reuse: `victim` rotates, the stale token comes back past
+/// the grace window. Returns nothing; every token of the lineage is dead.
+async fn reuse_lineage(w: &World, session: &Session) {
+    let (status, next) = w.rotate(session).await;
+    assert_eq!(status, 200);
+    w.age_spent(&session.refresh).await;
+    let (status, _) = w.rotate(session).await;
+    assert_eq!(status, 401, "the stale token is a reuse");
+    let (status, _) = w.rotate(&next.unwrap()).await;
+    assert_eq!(status, 401, "and the reuse ended the lineage");
+}
+
+/// #3097: a reuse (sweep on, so a password sign-in is swept) leaves the root
+/// key live but mute — it signs no host registration, and the phone it
+/// approved reads 「지시 불가」. After the owner signs in again, a register of
+/// the same key is told to rebind; a rebind without the key's own signature is
+/// refused whatever else the caller holds; the key's own letter moves it —
+/// same id, root again, the phone approved again with no new letter.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_reused_roots_key_is_mute_until_its_own_letter_moves_it() {
+    let _lock = test_lock().await;
+    let w = world_with(sweep_all()).await;
+    let mac = w.person().await;
+    let root = DeviceKeyPair::new("mac");
+    let root_id = w.key(&mac, &root, "macos").await;
+    let phone = w.person().await;
+    let handset = DeviceKeyPair::new("phone");
+    let phone_id = w.key(&phone, &handset, "ios").await;
+    let letter = w.endorsement(w.person_id, &root, root_id, &handset, "기기");
+    assert_eq!(w.endorse(&mac, phone_id, root_id, &letter).await.0, 200);
+
+    reuse_lineage(&w, &mac).await;
+    assert_eq!(w.key_row(root_id).await, (None, false), "the key is kept");
+
+    // Mute: the key's lineage is dead, so nothing it signs is taken.
+    let view = w.key_view(&phone, root_id).await;
+    assert_eq!(view["lineageLive"], false, "{view}");
+    let host_key = ed25519_host_key(31);
+    let statement = w.host_statement(
+        w.person_id,
+        &root,
+        root_id,
+        Uuid::new_v4(),
+        &host_key,
+        "맥",
+        now_ms(),
+    );
+    let (status, body) = w
+        .register_host(&phone, "member", &host_key, "맥", Some(statement))
+        .await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(code(&body), Some("device_key_revoked"));
+    let view = w.key_view(&phone, phone_id).await;
+    assert_eq!(
+        view["state"], "unendorsed",
+        "the root's approval lapses: {view}"
+    );
+    assert_eq!(view["canInstruct"], false);
+
+    // The owner signs in again. The same key is not registered twice…
+    let mac2 = w.person().await;
+    let (status, body) = w.register_key(&mac2, &root, "macos", "맥").await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(code(&body), Some("device_key_rebind_required"));
+
+    // …and no rebind succeeds without the key's own signature. A holder of a
+    // stolen refresh token has a live sign-in and every public fact, but not
+    // the key.
+    let session2 = w.session_id(&mac2).await;
+    let forger = DeviceKeyPair::new("thief");
+    let forged = {
+        let bytes = DeviceRebind {
+            workspace_id: w.workspace,
+            member_id: w.person_id,
+            key_id: root_id,
+            public_key_b64: &root.public_b64,
+            session_id: session2,
+            signed_at_ms: now_ms(),
+        }
+        .signed_bytes()
+        .unwrap();
+        json!({ "signedAtMs": now_ms(), "signature": forger.sign(&bytes) })
+    };
+    for (letter, why) in [
+        (forged, "signed by another key"),
+        (
+            json!({ "signedAtMs": now_ms(), "signature": BASE64.encode([0u8; 64]) }),
+            "no signature at all",
+        ),
+        (
+            w.rebind_letter(&root, root_id, Uuid::new_v4(), now_ms()),
+            "the key's letter for another sign-in",
+        ),
+        (
+            w.rebind_letter(&root, root_id, session2, now_ms() - 6 * 60 * 1000),
+            "a stale letter",
+        ),
+    ] {
+        let (status, body) = w.rebind(&mac2, &root, "macos", letter).await;
+        assert_eq!(status, 403, "{why}: {body}");
+        assert_eq!(code(&body), Some("device_signature_invalid"), "{why}");
+    }
+    assert_eq!(
+        w.key_view(&mac2, root_id).await["lineageLive"],
+        false,
+        "nothing moved"
+    );
+
+    // The key's own letter, for this sign-in: moved, same id, no password.
+    let (status, body) = w
+        .rebind(
+            &mac2,
+            &root,
+            "macos",
+            w.rebind_letter(&root, root_id, session2, now_ms()),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let key = &body["deviceKey"];
+    assert_eq!(key["id"], root_id.to_string(), "the same row, the same id");
+    assert_eq!(key["state"], "root");
+    assert_eq!(key["current"], true);
+    assert_eq!(key["lineageLive"], true);
+    let view = w.key_view(&phone, phone_id).await;
+    assert_eq!(
+        view["state"], "endorsed",
+        "the phone's approval holds again, no new letter: {view}"
+    );
+    let statement = w.host_statement(
+        w.person_id,
+        &root,
+        root_id,
+        Uuid::new_v4(),
+        &host_key,
+        "맥",
+        now_ms(),
+    );
+    let (status, body) = w
+        .register_host(&mac2, "member", &host_key, "맥", Some(statement))
+        .await;
+    assert_eq!(status, 201, "the moved root signs again: {body}");
+
+    // The key now lives and ends with the new sign-in.
+    w.logout(&mac2).await;
+    assert_eq!(
+        w.key_row(root_id).await,
+        (Some("logout".to_string()), true),
+        "a logout still revokes the key"
+    );
+    let mac3 = w.person().await;
+    let session3 = w.session_id(&mac3).await;
+    let (status, body) = w
+        .rebind(
+            &mac3,
+            &root,
+            "macos",
+            w.rebind_letter(&root, root_id, session3, now_ms()),
+        )
+        .await;
+    assert_eq!(status, 404, "a revoked key is never moved back: {body}");
+    assert_eq!(code(&body), Some("device_key_not_found"));
+}
+
+/// #3097: a letter moves the key only out of a lineage that can no longer
+/// rotate and only into the caller's own live one, so it is single-use with no
+/// nonce: replayed from another live sign-in it names the wrong lineage, and a
+/// letter for that other sign-in is refused while the key's lineage is live.
+/// A key whose sign-in simply expired moves the same way.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_rebind_letter_is_single_use_and_only_ever_moves_a_dead_lineages_key() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let mac = w.person().await;
+    let root = DeviceKeyPair::new("mac");
+    let root_id = w.key(&mac, &root, "macos").await;
+
+    // A live key does not move, even with its own valid letter.
+    let other = w.person().await;
+    let other_session = w.session_id(&other).await;
+    let (status, body) = w
+        .rebind(
+            &other,
+            &root,
+            "macos",
+            w.rebind_letter(&root, root_id, other_session, now_ms()),
+        )
+        .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(code(&body), Some("device_key_already_registered"));
+
+    // The sign-in expires on its own (no session end ran).
+    sqlx::query(
+        "UPDATE token SET expires_at = now() - interval '1 minute' \
+          WHERE session_id = (SELECT session_id FROM member_device_key WHERE id = $1) \
+            AND label = 'refresh'",
+    )
+    .bind(root_id)
+    .execute(&w.su)
+    .await
+    .expect("expire the root's sign-in");
+    let mac2 = w.person().await;
+    let session2 = w.session_id(&mac2).await;
+    let letter = w.rebind_letter(&root, root_id, session2, now_ms());
+    let (status, body) = w.rebind(&mac2, &root, "macos", letter.clone()).await;
+    assert_eq!(status, 200, "an expired sign-in's key moves too: {body}");
+
+    // Replayed by another live sign-in of the same person: refused — the
+    // letter names mac2's lineage, and the key's lineage (mac2) is live.
+    let (status, body) = w.rebind(&other, &root, "macos", letter.clone()).await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(code(&body), Some("device_key_already_registered"));
+    // Replayed by mac2 itself: nothing to move (a no-op, same row).
+    let (status, body) = w.rebind(&mac2, &root, "macos", letter.clone()).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["deviceKey"]["id"], root_id.to_string());
+    // Once mac2's lineage ends by reuse (sweep off: a password sign-in is not
+    // swept, so end it out of band), the old letter moves nothing into a
+    // third sign-in.
+    sqlx::query(
+        "UPDATE token SET revoked_at = now() \
+          WHERE session_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(session2)
+    .execute(&w.su)
+    .await
+    .expect("end mac2's lineage without a session end");
+    let mac3 = w.person().await;
+    let (status, body) = w.rebind(&mac3, &root, "macos", letter).await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(code(&body), Some("device_signature_invalid"));
+
+    // Another member cannot move the person's key, with any letter.
+    let stranger = w.other().await;
+    let stranger_session = w.session_id(&stranger).await;
+    let (status, body) = w
+        .rebind(
+            &stranger,
+            &root,
+            "macos",
+            w.rebind_letter(&root, root_id, stranger_session, now_ms()),
+        )
+        .await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(code(&body), Some("device_key_member_mismatch"));
+}
+
+/// #3097: a phone's lineage is swept by reuse (by default — a linked
+/// lineage). Its key stays live and keeps the root's approval; the re-linked
+/// phone moves it with its own letter and can instruct again with no new
+/// approval. A root never moves into a linked session. Unlinking the phone
+/// still revokes the key.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_phone_key_moves_to_its_new_link_with_its_approval_and_logout_still_ends_it() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let desktop = w.person().await;
+    let root = DeviceKeyPair::new("mac");
+    let root_id = w.key(&desktop, &root, "macos").await;
+    let phone = w.link_phone(&desktop, "Rebind 3097").await;
+    let handset = DeviceKeyPair::new("phone");
+    let phone_id = w.key(&phone, &handset, "ios").await;
+    let letter = w.endorsement(w.person_id, &root, root_id, &handset, "기기");
+    assert_eq!(w.endorse(&desktop, phone_id, root_id, &letter).await.0, 200);
+
+    reuse_lineage(&w, &phone).await;
+    assert_eq!(w.key_row(phone_id).await, (None, false));
+    let view = w.key_view(&desktop, phone_id).await;
+    assert_eq!(view["lineageLive"], false, "{view}");
+
+    // Re-linked: a new lineage. The key moves with its approval.
+    let phone2 = w.link_phone(&desktop, "Rebind 3097").await;
+    let (status, body) = w.register_key(&phone2, &handset, "ios", "기기").await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(code(&body), Some("device_key_rebind_required"));
+    let session2 = w.session_id(&phone2).await;
+    let (status, body) = w
+        .rebind(
+            &phone2,
+            &handset,
+            "ios",
+            w.rebind_letter(&handset, phone_id, session2, now_ms()),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["deviceKey"]["id"], phone_id.to_string());
+    assert_eq!(body["deviceKey"]["state"], "endorsed", "{body}");
+    assert_eq!(body["deviceKey"]["canInstruct"], true);
+
+    // A root key never moves into a linked (phone) session, even with its
+    // own letter.
+    sqlx::query(
+        "UPDATE token SET revoked_at = now() \
+          WHERE session_id = (SELECT session_id FROM member_device_key WHERE id = $1) \
+            AND revoked_at IS NULL",
+    )
+    .bind(root_id)
+    .execute(&w.su)
+    .await
+    .expect("end the root's lineage out of band");
+    let (status, body) = w
+        .rebind(
+            &phone2,
+            &root,
+            "macos",
+            w.rebind_letter(&root, root_id, session2, now_ms()),
+        )
+        .await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(code(&body), Some("device_root_linked_session"));
+
+    // Logging the phone out still revokes its (moved) key.
+    w.logout(&phone2).await;
+    assert_eq!(
+        w.key_row(phone_id).await,
+        (Some("logout".to_string()), true)
     );
 }

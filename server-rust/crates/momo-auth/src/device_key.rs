@@ -12,8 +12,13 @@
 //!   key, and neither can a root.
 //! * **Lineage-bound.** A key is registered under the caller's session lineage
 //!   and only while that lineage can still rotate
-//!   ([`crate::lock_live_session_lineage`]); ending the lineage revokes it
+//!   ([`crate::lock_live_session_lineage`]), and signs only while it can. A
+//!   logout, unlinking the device and every member-wide session end revoke it
 //!   ([`revoke_session_device_keys_in_tx`], [`revoke_member_device_keys_in_tx`]).
+//!   A refresh-token reuse does **not** (#3097, ADR-0146 D-7 증보): it ends the
+//!   tokens only, and the key — like one whose sign-in simply expired — stays
+//!   live but mute until the device moves it onto its new sign-in with a
+//!   letter the key itself signs ([`rebind_device_key_in_tx`]).
 //! * **Root candidate** = a live `macos` key with no endorsement (D-6 ①). The
 //!   server cannot tell the host Mac's key from any other Mac's; workd pins the
 //!   real root over its local socket. What the server refuses is every shape
@@ -24,7 +29,8 @@
 //!   label; root key), never from the request, and the canonical low-s
 //!   signature E1 returns is what is stored.
 //! * **Revocation** (D-7): a `device_revoke.v2` (or v1) letter (#3068) from a live root
-//!   candidate, or the end of the key's session lineage. Rows are never deleted.
+//!   candidate, or a logout / unlink / member-wide end of the key's session
+//!   lineage. Rows are never deleted.
 //! * **host_register** (D-8): [`verify_host_register_in_tx`] — the root
 //!   candidate's `momo.human.control.v1` statement over the host key, host id
 //!   candidate and label.
@@ -39,7 +45,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use momo_wire::human_control::{
     check_control_window, parse_p256_public_key, ControlContent, DeviceEndorse, DeviceKeyAlg,
-    DeviceRevoke, HumanControl, MAX_CLOCK_SKEW_MS, P256_PUBLIC_KEY_LEN,
+    DeviceRebind, DeviceRevoke, HumanControl, MAX_CLOCK_SKEW_MS, P256_PUBLIC_KEY_LEN,
 };
 use sqlx::{PgConnection, Row};
 
@@ -66,8 +72,13 @@ pub const REFUSAL_SESSION_LINEAGE_ENDED: &str = "session_lineage_ended";
 pub const REFUSAL_DEVICE_ROOT_PASSWORD_REQUIRED: &str = "device_root_password_required";
 /// A root key cannot come from a QR-linked (labelled) session: that is a phone.
 pub const REFUSAL_DEVICE_ROOT_LINKED_SESSION: &str = "device_root_linked_session";
+/// The public key is live under the caller, on a sign-in that can no longer
+/// rotate: send a `device_rebind.v1` letter to move it onto this one (#3097).
+pub const REFUSAL_DEVICE_KEY_REBIND_REQUIRED: &str = "device_key_rebind_required";
 
-/// Why a key ended (`member_device_key_revoked_ck`).
+/// Why a key ended (`member_device_key_revoked_ck`). The CHECK also allows
+/// `refresh_reuse`: rows a reuse revoked before #3097. Nothing writes it now —
+/// a reuse ends the tokens, not the key (ADR-0146 D-7 증보).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceKeyRevocationReason {
     /// A `device_revoke.v2` (or v1) letter from the root (#3068).
@@ -76,8 +87,6 @@ pub enum DeviceKeyRevocationReason {
     Logout,
     /// The linked device was disconnected (ADR-0180 D5).
     DeviceUnlinked,
-    /// A spent refresh token was presented again (ADR-0188 R1).
-    RefreshReuse,
     /// Every session of the member ended (password change or reset,
     /// suspension, removal, leaving, owner takeover).
     MemberSessionsEnded,
@@ -89,7 +98,6 @@ impl DeviceKeyRevocationReason {
             DeviceKeyRevocationReason::Signed => "signed",
             DeviceKeyRevocationReason::Logout => "logout",
             DeviceKeyRevocationReason::DeviceUnlinked => "device_unlinked",
-            DeviceKeyRevocationReason::RefreshReuse => "refresh_reuse",
             DeviceKeyRevocationReason::MemberSessionsEnded => "member_sessions_ended",
         }
     }
@@ -139,6 +147,9 @@ pub struct DeviceKeyRecord {
     pub endorsed_at_ms: Option<i64>,
     /// The endorser row is live (NULL endorsement → `false`).
     pub endorser_live: bool,
+    /// The key's own sign-in can still rotate (#3097). A live key on an ended
+    /// lineage signs nothing until [`rebind_device_key_in_tx`] moves it.
+    pub lineage_live: bool,
     pub created_at_ms: i64,
     pub revoked_at_ms: Option<i64>,
     pub revoked_reason: Option<String>,
@@ -245,6 +256,11 @@ pub enum DeviceKeyRefusal {
     RootNotEligible,
     /// The target cannot be endorsed (revoked, a Mac, or already endorsed).
     NotEndorsable,
+    /// A rebind of a key whose sign-in is still live (#3097): it stays where
+    /// it is, and the public key reads as registered.
+    LineageLive,
+    /// A rebind of a root (`macos`) key into a QR-linked (phone) session.
+    RootLinkedSession,
     /// The target key is already revoked and already carries a letter.
     Revoked,
     /// The signature does not verify, or the statement is stale or malformed.
@@ -258,6 +274,8 @@ impl DeviceKeyRefusal {
             DeviceKeyRefusal::MemberMismatch => REFUSAL_DEVICE_KEY_MEMBER_MISMATCH,
             DeviceKeyRefusal::RootNotEligible => REFUSAL_DEVICE_ROOT_NOT_ELIGIBLE,
             DeviceKeyRefusal::NotEndorsable => REFUSAL_DEVICE_KEY_NOT_ENDORSABLE,
+            DeviceKeyRefusal::LineageLive => REFUSAL_DEVICE_KEY_ALREADY_REGISTERED,
+            DeviceKeyRefusal::RootLinkedSession => REFUSAL_DEVICE_ROOT_LINKED_SESSION,
             DeviceKeyRefusal::Revoked => REFUSAL_DEVICE_KEY_REVOKED,
             DeviceKeyRefusal::SignatureInvalid => REFUSAL_DEVICE_SIGNATURE_INVALID,
         }
@@ -284,10 +302,24 @@ macro_rules! endorser_live_sql {
     };
 }
 
+/// "The sign-in of key `k` can still rotate" — `endorser_live_sql!`'s lineage
+/// half, for the key itself (#3097).
+macro_rules! own_lineage_live_sql {
+    () => {
+        "EXISTS ( \
+            SELECT 1 FROM token t \
+             WHERE t.workspace_id = k.workspace_id AND t.actor_member_id = k.member_id \
+               AND t.kind = 'session' AND t.session_id = k.session_id \
+               AND t.label = 'refresh' AND t.revoked_at IS NULL \
+               AND (t.expires_at IS NULL OR t.expires_at > now()))"
+    };
+}
+
 const KEY_COLUMNS: &str = concat!("k.id, k.workspace_id, k.member_id, k.session_id, k.alg, \
      k.public_key, k.platform, k.label, k.endorsed_by_key_id, k.endorsement_sig, \
      (extract(epoch FROM k.endorsed_at) * 1000)::bigint AS endorsed_at_ms, \
      ", endorser_live_sql!(), " AS endorser_live, \
+     ", own_lineage_live_sql!(), " AS lineage_live, \
      (extract(epoch FROM k.created_at) * 1000)::bigint AS created_at_ms, \
      (extract(epoch FROM k.revoked_at) * 1000)::bigint AS revoked_at_ms, \
      k.revoked_reason, k.revoked_by_key_id, k.revocation_sig, k.revoked_at_ms AS revocation_signed_at_ms");
@@ -309,6 +341,7 @@ fn decode_key(row: &sqlx::postgres::PgRow) -> Result<DeviceKeyRecord, sqlx::Erro
         endorsement_sig: row.try_get("endorsement_sig")?,
         endorsed_at_ms: row.try_get("endorsed_at_ms")?,
         endorser_live: row.try_get("endorser_live")?,
+        lineage_live: row.try_get("lineage_live")?,
         created_at_ms: row.try_get("created_at_ms")?,
         revoked_at_ms: row.try_get("revoked_at_ms")?,
         revoked_reason: row.try_get("revoked_reason")?,
@@ -396,9 +429,13 @@ pub async fn list_member_device_keys_in_tx(
 ///
 /// Called **before** any `member_device_key` row lock: every session end
 /// locks `token` rows first and `member_device_key` rows second, and so must
-/// this path, or the two can deadlock. `session_id` never changes, so reading
-/// it unlocked is sound. `false` when the key is not the caller's (the caller
-/// then refuses on the locked read).
+/// this path, or the two can deadlock. `session_id` is read unlocked. It
+/// changes in one place only, [`rebind_device_key_in_tx`], and only from a
+/// lineage that can no longer rotate to a live one (#3097). A reader that
+/// read the old value therefore finds a dead lineage and refuses (fail-closed,
+/// the caller signs again); a live value it read cannot move under it, because
+/// the rebind refuses a key whose lineage is live. `false` when the key is not
+/// the caller's (the caller then refuses on the locked read).
 pub(crate) async fn lock_root_lineage(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -689,6 +726,134 @@ pub async fn revoke_session_device_keys_in_tx(
     .rows_affected())
 }
 
+/// The caller's live key row for `public_key`, if the public key is live in
+/// this workspace under the caller on a sign-in other than `caller_session`
+/// that can no longer rotate — the shape a register answers with
+/// [`REFUSAL_DEVICE_KEY_REBIND_REQUIRED`] rather than "already registered".
+pub async fn rebindable_key_id_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    caller_session: Uuid,
+    public_key: &str,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    let sql = concat!(
+        "SELECT k.id FROM member_device_key k \
+          WHERE k.workspace_id = $1 AND k.member_id = $2 AND k.public_key = $3 \
+            AND k.revoked_at IS NULL AND k.session_id <> $4 AND NOT ",
+        own_lineage_live_sql!()
+    );
+    sqlx::query_scalar(sql)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(public_key)
+        .bind(caller_session)
+        .fetch_optional(&mut *conn)
+        .await
+}
+
+/// A `device_rebind.v1` letter (#3097, ADR-0146 D-7 증보): move the caller's
+/// live key for `public_key` onto the caller's own sign-in `caller_session`.
+///
+/// The caller (the register route) has already share-locked `caller_session`
+/// as live ([`crate::lock_live_session_lineage`]) — token rows first, then the
+/// key row here, the order every session end takes.
+///
+/// Refused unless all hold:
+///   * the public key is live in this workspace, under the caller
+///     (`NotFound` / `MemberMismatch`);
+///   * the key's own lineage can no longer rotate (`LineageLive`): a live
+///     sign-in keeps its key, and a lineage never becomes live again, which is
+///     what makes the letter single-use (see [`DeviceRebind`]);
+///   * a root (`macos`) key is not moved into a QR-linked session
+///     (`RootLinkedSession`), as at registration;
+///   * `signed_at_ms` is within ±[`MAX_CLOCK_SKEW_MS`] of `now_ms`, and the
+///     letter — rebuilt from the **stored** key id and public key plus the
+///     caller's workspace, member and sign-in — verifies under that same key
+///     (`SignatureInvalid`).
+///
+/// No password: the proof is the key itself, which is what the root
+/// password step-up (review H1) stands in for when a key is *new*. The id,
+/// the endorsement letter and everything signed under the id stay, so a phone
+/// keeps its approval and workd keeps its pin. Moving the key onto the caller's
+/// own lineage already in place is a no-op that still needs a valid letter.
+#[allow(clippy::too_many_arguments)]
+pub async fn rebind_device_key_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    caller_session: Uuid,
+    caller_linked: bool,
+    public_key: &str,
+    signed_at_ms: i64,
+    signature_b64: &str,
+    now_ms: i64,
+) -> Result<Result<DeviceKeyRecord, DeviceKeyRefusal>, sqlx::Error> {
+    let found: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM member_device_key \
+          WHERE workspace_id = $1 AND public_key = $2 AND revoked_at IS NULL",
+    )
+    .bind(workspace_id)
+    .bind(public_key)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(key_id) = found else {
+        return Ok(Err(DeviceKeyRefusal::NotFound));
+    };
+    lock_keys_in_tx(conn, &[key_id]).await?;
+    let Some(key) = load_device_key_in_tx(conn, key_id).await? else {
+        return Ok(Err(DeviceKeyRefusal::NotFound));
+    };
+    if !key.is_live() {
+        return Ok(Err(DeviceKeyRefusal::NotFound));
+    }
+    if key.member_id != member_id {
+        return Ok(Err(DeviceKeyRefusal::MemberMismatch));
+    }
+    if key.alg != DEVICE_KEY_ALG_P256 {
+        return Ok(Err(DeviceKeyRefusal::SignatureInvalid));
+    }
+    if key.session_id != caller_session && key.lineage_live {
+        return Ok(Err(DeviceKeyRefusal::LineageLive));
+    }
+    if key.platform == DEVICE_KEY_PLATFORM_MACOS && caller_linked {
+        return Ok(Err(DeviceKeyRefusal::RootLinkedSession));
+    }
+    if signed_at_ms <= 0 || signed_at_ms.abs_diff(now_ms) > MAX_CLOCK_SKEW_MS as u64 {
+        return Ok(Err(DeviceKeyRefusal::SignatureInvalid));
+    }
+    let letter = DeviceRebind {
+        workspace_id,
+        member_id,
+        key_id: key.id,
+        public_key_b64: &key.public_key,
+        session_id: caller_session,
+        signed_at_ms,
+    };
+    let Ok(signature) = BASE64.decode(signature_b64) else {
+        return Ok(Err(DeviceKeyRefusal::SignatureInvalid));
+    };
+    if letter.verify(&signature).is_err() {
+        return Ok(Err(DeviceKeyRefusal::SignatureInvalid));
+    }
+    if key.session_id == caller_session {
+        return Ok(Ok(key));
+    }
+    sqlx::query(
+        "UPDATE member_device_key SET session_id = $2 \
+          WHERE id = $1 AND revoked_at IS NULL AND session_id = $3",
+    )
+    .bind(key.id)
+    .bind(caller_session)
+    .bind(key.session_id)
+    .execute(&mut *conn)
+    .await?;
+    let record = load_device_key_in_tx(conn, key.id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+    Ok(Ok(record))
+}
+
 /// Every session of the member ended: every live key of the member ends.
 pub async fn revoke_member_device_keys_in_tx(
     conn: &mut PgConnection,
@@ -854,6 +1019,7 @@ mod tests {
             endorsement_sig: None,
             endorsed_at_ms: None,
             endorser_live: false,
+            lineage_live: true,
             created_at_ms: 0,
             revoked_at_ms: None,
             revoked_reason: None,

@@ -118,7 +118,6 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::Json;
-use momo_auth::device_key::DeviceKeyRevocationReason;
 use momo_auth::{
     carries_privileged_scope, find_linked_device_id_by_refresh_in_tx, lock_linked_device_in_tx,
     lock_member_session_tokens_by_ids, new_session_id, rebind_device_link_session_in_tx,
@@ -139,7 +138,7 @@ use crate::dto::{
     RefreshResponse,
 };
 use crate::error::{db_error, ApiError};
-use crate::session_end::end_session_lineage_in_tx;
+use crate::session_end::{end_session_lineage_in_tx, LineageEnd};
 use crate::AppState;
 
 /// The workspace seeded by `server/Migrations/002_seed.sql`, used when a login
@@ -694,8 +693,11 @@ const REFRESH_REUSE_GRACE_SECONDS: f64 = 30.0;
 /// R1 (#3022): the refresh row `refresh_id` was presented after it was spent.
 /// Unless it was spent within [`REFRESH_REUSE_GRACE_SECONDS`], end its whole
 /// lineage — every live token, and with them the lineage's push registrations
-/// and device keys — in the caller's transaction, which the caller then
-/// commits with its 401. A row with no lineage (spent before 088 and never
+/// — in the caller's transaction, which the caller then commits with its 401.
+/// The lineage's device keys are **not** revoked (#3097, ADR-0146 D-7 증보):
+/// a copied refresh token is not a copied Secure Enclave key. They sign
+/// nothing until the owner's next sign-in moves them with a letter the key
+/// itself signs (`crate::session_end`). A row with no lineage (spent before 088 and never
 /// rotated since) names nothing else to revoke.
 ///
 /// **Which lineages.** A QR-linked lineage (the row carries an ADR-0180
@@ -740,7 +742,7 @@ async fn end_reused_lineage(
         workspace_id,
         member_id,
         session_id,
-        DeviceKeyRevocationReason::RefreshReuse,
+        LineageEnd::RefreshReuse,
     )
     .await
 }
@@ -1072,7 +1074,7 @@ pub async fn logout(
                                 workspace_id,
                                 member_id,
                                 session_id,
-                                DeviceKeyRevocationReason::Logout,
+                                LineageEnd::Logout,
                             )
                             .await?;
                         }

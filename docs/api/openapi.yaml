@@ -3230,9 +3230,20 @@ paths:
         Human bearer only, for the caller only (a `memberId` naming anyone else
         is 403 `device_key_member_mismatch`). The key is bound to the caller's
         session lineage and is revoked when that sign-in ends — logout,
-        unlinking the device, a refresh-token reuse, or any path that ends
-        every session of the member. The lineage must still be able to rotate
-        (409 `session_lineage_ended` otherwise). A `macos` key starts as a root
+        unlinking the device, or any path that ends every session of the
+        member. A refresh-token reuse ends the tokens but not the key (#3097,
+        ADR-0146 D-7 증보): the key stays live but signs nothing
+        (`lineageLive: false`) until it is moved with `rebind`. The lineage
+        must still be able to rotate (409 `session_lineage_ended` otherwise).
+        **Rebind (#3097).** The same public key, live under the caller on a
+        sign-in that can no longer rotate (a reuse or an expiry), is a 409
+        `device_key_rebind_required`. Send the same body with `rebind` — a
+        `momo.human.device_rebind.v1` letter signed by that key over
+        `{workspaceId}\n{memberId}\n{keyId}\n{publicKey}\n{sessionId}\n{signedAtMs}`
+        (`sessionId` from `signing-context`) — and the row moves onto this
+        sign-in (200) with its id and endorsement. No password is needed; the
+        key's own signature is the proof. `platform` and `label` are the stored
+        row's. A `macos` key starts as a root
         candidate (`state: root`); an `ios` key starts `unendorsed` and cannot
         instruct until a root endorses it. The server's root is advisory: the
         host Mac's workd pins the real root (D-10).
@@ -3247,6 +3258,12 @@ paths:
             schema:
               $ref: "#/components/schemas/RegisterDeviceKeyRequest"
       responses:
+        "200":
+          description: Rebind — the existing key row moved onto this sign-in (#3097).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceKeyResponse"
         "201":
           description: Key registered.
           content:
@@ -3265,17 +3282,28 @@ paths:
           description: >
             Agent bearer, workspace mismatch, inactive membership, another
             member named (`device_key_member_mismatch`), a root key without the
-            right password (`device_root_password_required`), or a root key
-            from a QR-linked session (`device_root_linked_session`).
+            right password (`device_root_password_required`), a root key
+            from (or rebound into) a QR-linked session
+            (`device_root_linked_session`), or a rebind letter that does not
+            verify under the key, names another sign-in, or is more than
+            ±5 min off (`device_signature_invalid`).
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: >
-            The public key is already live in this workspace
-            (`device_key_already_registered`), or this sign-in has ended
+            The public key is already live in this workspace on a live sign-in
+            (`device_key_already_registered`; also a rebind of such a key), it
+            is the caller's on an ended sign-in and must be moved with `rebind`
+            (`device_key_rebind_required`), or this sign-in has ended
             (`session_lineage_ended`).
+        "404":
+          description: A rebind of a public key with no live row (`device_key_not_found`) — register it fresh.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
           content:
             application/json:
               schema:
@@ -11208,6 +11236,21 @@ components:
             Required for a `macos` (root) key — the caller's password,
             re-entered, under the password-change rate limit. A root key is
             refused from a QR-linked session (`device_root_linked_session`).
+            Not needed with `rebind`.
+        rebind:
+          type: object
+          additionalProperties: false
+          required: [signedAtMs, signature]
+          description: >
+            #3097 — a `momo.human.device_rebind.v1` letter signed by the key
+            being moved (see the operation description).
+          properties:
+            signedAtMs:
+              type: integer
+              format: int64
+            signature:
+              type: string
+              description: base64 of raw r‖s (64 bytes).
 
     EndorseDeviceKeyRequest:
       type: object
@@ -11240,7 +11283,7 @@ components:
     DeviceKey:
       type: object
       required:
-        [id, workspaceId, memberId, alg, publicKey, platform, label, state, canInstruct, current, createdAtMs]
+        [id, workspaceId, memberId, alg, publicKey, platform, label, state, canInstruct, current, lineageLive, createdAtMs]
       properties:
         id:
           type: string
@@ -11274,6 +11317,11 @@ components:
         current:
           type: boolean
           description: Registered under the caller's own sign-in.
+        lineageLive:
+          type: boolean
+          description: >
+            The key's sign-in can still rotate (#3097). A live key with
+            `lineageLive: false` signs nothing until it is moved with `rebind`.
         endorsedByKeyId:
           type: string
           format: uuid
@@ -11291,6 +11339,7 @@ components:
         revokedReason:
           type: string
           enum: [signed, logout, device_unlinked, refresh_reuse, member_sessions_ended]
+          description: "`refresh_reuse` appears only on rows revoked before #3097; a reuse no longer revokes a key."
         revokedByKeyId:
           type: string
           format: uuid
@@ -11321,7 +11370,7 @@ components:
       required:
         [instanceId, serverTimeMs, maxLifetimeMs, maxClockSkewMs,
          humanControlSignatureRequired, hostRegisterSignatureRequired,
-         humanControlSchema]
+         humanControlSchema, sessionId]
       properties:
         instanceId:
           type: string
@@ -11351,6 +11400,14 @@ components:
           description: >
             The control schema a device signs (#3027). A v1 statement is still
             accepted for every kind but spawn.
+        sessionId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >
+            The caller's sign-in lineage — the `session_id` line of a
+            `momo.human.device_rebind.v1` letter (#3097). Null for a sign-in
+            from before lineages (088).
 
     HumanSignatureRequest:
       type: object
