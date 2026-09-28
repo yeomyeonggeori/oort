@@ -194,12 +194,35 @@ paths:
         atomically; replaying it returns 401. Exactly one concurrent caller
         wins. A replay of a token spent more than 30 seconds earlier also ends
         the whole sign-in (#3022, ADR-0188 §4 R1): every live token of the
-        session lineage is revoked, with its push registrations and device
-        keys. Inside 30 seconds (a retried lost response) it is only refused.
-        This applies to QR-linked (phone) sessions always, and to password
-        sign-ins only when the instance sets
-        `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=true` (default off: browser
-        tabs rotate without cross-tab coordination).
+        session lineage is revoked, with its push registrations; its device
+        keys are kept (#3097). Inside 30 seconds (a retried lost response) the
+        replay is answered with the pair that rotation already issued, while
+        nobody has rotated it (#3074). The lineage ending applies to QR-linked
+        (phone) sessions always, and to password sign-ins only when the
+        instance sets `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=true` (default
+        off: browser tabs rotate without cross-tab coordination).
+
+
+        **Sender constraint (#3079, ADR-0146 D-7 증보).** A native client
+        (phone, desktop) sends `deviceProof`, a `momo.human.refresh_proof.v1`
+        statement signed by a Secure Enclave *refresh key* (P-256, no
+        biometry or presence check — separate from the control device key).
+        The first proof binds that key to the sign-in lineage for good, but
+        only on the sign-in's own first refresh token and within 10 minutes of
+        signing in: a native client refreshes once with a proof right after
+        signing in. Afterwards: a spent token presented with the lineage key's
+        proof recovers the sign-in however long ago it was spent (a fresh pair
+        in the same lineage; every other live token of it is revoked), unless
+        the lineage has ended. Under `MOMO_REFRESH_PROOF_MODE=require` a
+        key-bound lineage needs a verified proof on every refresh: a live
+        token without one is refused and not spent (`refresh_proof_required`,
+        `refresh_proof_invalid`), and a spent token without one — or with
+        another key's — ends the lineage, inside the 30-second window too.
+        Under the default `observe` a missing or wrong proof changes nothing.
+        `refresh_proof_stale` and `refresh_proof_replayed` come only from the
+        lineage's own key: sign again (fresh nonce, server time from the
+        response `Date` header) — they are not a sign-out. Browsers send no
+        proof and are unaffected in every mode.
       security: []
       requestBody:
         required: true
@@ -215,7 +238,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefreshResponse"
         "401":
-          description: Invalid, expired, revoked, or already-used refresh token.
+          description: >
+            Invalid, expired, revoked, or already-used refresh token; or
+            (#3079) a key-bound lineage's missing or unverified proof, coded
+            `refresh_proof_required` | `refresh_proof_invalid` |
+            `refresh_proof_stale` | `refresh_proof_replayed`.
           content:
             application/json:
               schema:
@@ -9289,6 +9316,31 @@ components:
       properties:
         refreshToken:
           type: string
+        deviceProof:
+          $ref: "#/components/schemas/RefreshDeviceProof"
+
+    RefreshDeviceProof:
+      type: object
+      description: >
+        #3079 (ADR-0146 D-7 증보). `signature` is ECDSA P-256 / SHA-256 over the
+        UTF-8 bytes `momo.human.refresh_proof.v1\n{workspaceId}\n{memberId}\n{publicKey}\n{sha256Hex(refreshToken)}\n{nonce}\n{signedAtMs}`
+        (UUIDs lowercase hyphenated, hash lowercase hex, no trailing newline),
+        by the lineage's refresh key. `signedAtMs` must be within ±5 minutes of
+        the server clock; each `nonce` is accepted once.
+      required: [publicKey, nonce, signedAtMs, signature]
+      properties:
+        publicKey:
+          type: string
+          description: base64 (standard, padded) of the 33-byte compressed SEC1 P-256 point.
+        nonce:
+          type: string
+          format: uuid
+        signedAtMs:
+          type: integer
+          format: int64
+        signature:
+          type: string
+          description: base64 (standard) of the raw 64-byte r‖s; either s form is accepted.
 
     RefreshResponse:
       type: object
