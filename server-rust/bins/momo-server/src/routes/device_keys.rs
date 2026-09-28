@@ -36,10 +36,15 @@ use axum::{Extension, Json};
 use momo_auth::device_key::{
     endorse_device_key_in_tx, insert_device_key_in_tx, list_member_device_keys_in_tx,
     load_device_key_in_tx, revoke_device_key_signed_in_tx, validated_new_device_key,
-    DeviceKeyRecord, DeviceKeyRefusal, REFUSAL_DEVICE_KEY_ALREADY_REGISTERED,
-    REFUSAL_DEVICE_KEY_MEMBER_MISMATCH, REFUSAL_SESSION_LINEAGE_ENDED,
+    verify_own_password_in_tx, DeviceKeyRecord, DeviceKeyRefusal, DEVICE_KEY_PLATFORM_MACOS,
+    REFUSAL_DEVICE_KEY_ALREADY_REGISTERED, REFUSAL_DEVICE_KEY_MEMBER_MISMATCH,
+    REFUSAL_DEVICE_ROOT_LINKED_SESSION, REFUSAL_DEVICE_ROOT_PASSWORD_REQUIRED,
+    REFUSAL_SESSION_LINEAGE_ENDED,
 };
-use momo_auth::{active_workspace_role, lock_live_session_lineage, session_id_of, Principal};
+use momo_auth::{
+    active_workspace_role, lock_live_session_lineage, session_device_label, session_id_of,
+    Principal,
+};
 use momo_db::{with_tenant_tx, DbError};
 use uuid::Uuid;
 
@@ -48,6 +53,7 @@ use crate::dto::{
     RegisterDeviceKeyRequest, RevokeDeviceKeyRequest,
 };
 use crate::error::ApiError;
+use crate::routes::password::admit_password_change;
 use crate::routes::shared::{path_uuid, require_human, workspace_scope};
 use crate::AppState;
 
@@ -106,6 +112,14 @@ pub(crate) fn device_key_dto(
     }
 }
 
+fn root_password_refused() -> ApiError {
+    ApiError::coded(
+        StatusCode::FORBIDDEN,
+        REFUSAL_DEVICE_ROOT_PASSWORD_REQUIRED,
+        "registering a root (macos) key needs your current password",
+    )
+}
+
 fn not_active() -> ApiError {
     ApiError::forbidden("not an active workspace member")
 }
@@ -115,6 +129,7 @@ pub async fn register(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path(workspace): Path<String>,
+    headers: axum::http::HeaderMap,
     Json(request): Json<RegisterDeviceKeyRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     require_human(&principal, HUMAN_ONLY)?;
@@ -147,6 +162,18 @@ pub async fn register(
     let Some(token_id) = principal.token_id else {
         return Err(lineage_ended());
     };
+    // A root key (review H1). It signs host registrations and endorses
+    // phones, so a bearer token alone — a stolen refresh token, say — must
+    // not be able to mint one: the password is re-entered, under the same
+    // per-member / per-IP budget as a password change (this is a password
+    // check, and must not be a cheaper oracle than that route).
+    let root_password = if new.platform == DEVICE_KEY_PLATFORM_MACOS {
+        admit_password_change(&state, &headers, member_id)?;
+        let password = request.current_password.filter(|p| !p.is_empty());
+        Some(password.ok_or_else(root_password_refused)?)
+    } else {
+        None
+    };
 
     let outcome = with_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
@@ -163,6 +190,26 @@ pub async fn register(
             else {
                 return Ok(Err(lineage_ended()));
             };
+            if let Some(password) = root_password.as_deref() {
+                // A QR-linked session is a phone (ADR-0180): never a root.
+                if session_device_label(conn, token_id)
+                    .await
+                    .map_err(DbError::from)?
+                    .is_some()
+                {
+                    return Ok(Err(ApiError::coded(
+                        StatusCode::FORBIDDEN,
+                        REFUSAL_DEVICE_ROOT_LINKED_SESSION,
+                        "a root key is registered from a password sign-in on the host Mac",
+                    )));
+                }
+                if !verify_own_password_in_tx(conn, workspace_id, member_id, password)
+                    .await
+                    .map_err(DbError::from)?
+                {
+                    return Ok(Err(root_password_refused()));
+                }
+            }
             if !lock_live_session_lineage(conn, workspace_id, member_id, session_id)
                 .await
                 .map_err(DbError::from)?

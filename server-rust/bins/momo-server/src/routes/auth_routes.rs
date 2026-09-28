@@ -69,16 +69,18 @@
 //! push registrations and device keys end with it, in the transaction that
 //! answers the 401 (it commits). The next rotation by whoever won is refused.
 //!
-//! That only holds if the winner's replacement pair already exists when the
-//! loser sweeps, so every rotation now consumes **and** records its new pair
-//! in one transaction (the linked-device path always did). Before, a plain
-//! rotation revoked in one transaction and recorded in a second, and a reuse
-//! sweep landing between the two left the winner's pair alive.
+//! **Grace.** A token spent less than 30 seconds ago is refused without the
+//! sweep (`REFRESH_REUSE_GRACE_SECONDS`): web tabs share one refresh token and
+//! rotate without cross-tab coordination, and a client whose rotation response
+//! was lost retries within one request deadline (15 s). Those are the same
+//! holder; the window keeps them from signing every tab out. A second holder
+//! who replays inside the window is refused and not detected — the pre-#3022
+//! behaviour, confined to 30 seconds.
 //!
-//! Cost, named: a client that loses the response to a successful rotation and
-//! retries with the old token signs itself out. The clients rotate
-//! single-flight (`rotationInFlight`, momo-core `api.ts`), so only a lost
-//! response does this.
+//! Every rotation also consumes **and** records its new pair in one
+//! transaction now (the linked-device path always did): a rotation is
+//! all-or-nothing, and a sweep can never commit between a winner's consume and
+//! its mint.
 //!
 //! Deviations (deliberate, see PR body):
 //!   * no platform-admin scope elevation and no privileged-session sweep on
@@ -421,10 +423,27 @@ pub async fn refresh(
             // The replacement pair continues this session's lineage (#2677).
             // A pre-088 session has none yet and is given one here, once: from
             // this rotation on, what the phone registers is attributable.
-            let session_id = session_id_of(conn, old_refresh_id)
+            let session_id = match session_id_of(conn, old_refresh_id)
                 .await
                 .map_err(DbError::from)?
-                .unwrap_or_else(new_session_id);
+            {
+                Some(session_id) => session_id,
+                None => {
+                    // #3022 review M5: the spent row carries the lineage too,
+                    // so a later replay of it can name — and end — the
+                    // lineage its successor continues.
+                    let session_id = new_session_id();
+                    momo_db::sqlx::query(
+                        "UPDATE token SET session_id = $2 WHERE id = $1 AND session_id IS NULL",
+                    )
+                    .bind(old_refresh_id)
+                    .bind(session_id)
+                    .execute(&mut *conn)
+                    .await
+                    .map_err(DbError::from)?;
+                    session_id
+                }
+            };
 
             if let Some(device_id) = find_linked_device_id_by_refresh_in_tx(
                 conn,
@@ -442,11 +461,17 @@ pub async fn refresh(
                         .await
                         .map_err(DbError::from)?
                 else {
-                    end_reused_lineage(conn, workspace_id, member_id, old_refresh_id).await?;
+                    end_lineage_if_spent(conn, workspace_id, member_id, &presented, old_refresh_id)
+                        .await?;
                     return Ok(RefreshGate::AlreadyUsed);
                 };
+                // A binding that moved on is a reuse only when it moved
+                // because the presented token was spent (a concurrent winner
+                // rotated it). A binding moved under a still-live token is a
+                // refusal, not evidence of a second holder.
                 if locked.refresh_id != old_refresh_id {
-                    end_reused_lineage(conn, workspace_id, member_id, old_refresh_id).await?;
+                    end_lineage_if_spent(conn, workspace_id, member_id, &presented, old_refresh_id)
+                        .await?;
                     return Ok(RefreshGate::AlreadyUsed);
                 }
 
@@ -594,23 +619,49 @@ pub async fn refresh(
     }
 }
 
+/// How long after a refresh row was spent presenting it again is still taken
+/// for the same client's retry rather than a second holder (#3022 review H2).
+///
+/// Two honest clients present a spent token: a web session open in several
+/// tabs (they share one refresh token in localStorage and nothing coordinates
+/// their rotations across tabs — momo-core `api.ts`), and a client whose
+/// rotation response was lost and that retries. The retry lands at most one
+/// request deadline later: `REQUEST_TIMEOUT_MS = 15_000` (momo-core
+/// `http.ts`). Twice that, so a retry after a timed-out attempt still falls
+/// inside. Inside the window the presentation is refused (401) and nothing
+/// else happens — the pre-#3022 behaviour. Outside it the lineage ends. The
+/// same shape as a refresh-token "reuse interval" in hosted identity
+/// providers [S].
+const REFRESH_REUSE_GRACE_SECONDS: f64 = 30.0;
+
 /// R1 (#3022): the refresh row `refresh_id` was presented after it was spent.
-/// End its whole lineage — every live token, and with them the lineage's push
-/// registrations and device keys — in the caller's transaction, which the
-/// caller then commits with its 401. A pre-088 row has no lineage to name;
-/// nothing else can be attributed to it, so nothing more is revoked.
+/// Unless it was spent within [`REFRESH_REUSE_GRACE_SECONDS`], end its whole
+/// lineage — every live token, and with them the lineage's push registrations
+/// and device keys — in the caller's transaction, which the caller then
+/// commits with its 401. A row with no lineage (spent before 088 and never
+/// rotated since) names nothing else to revoke.
 async fn end_reused_lineage(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
     refresh_id: Uuid,
 ) -> Result<(), DbError> {
-    let Some(session_id) = session_id_of(conn, refresh_id)
-        .await
-        .map_err(DbError::from)?
-    else {
+    let row: Option<(Option<Uuid>, bool)> = momo_db::sqlx::query_as(
+        "SELECT session_id, \
+                COALESCE(revoked_at > now() - make_interval(secs => $2), false) \
+           FROM token WHERE id = $1",
+    )
+    .bind(refresh_id)
+    .bind(REFRESH_REUSE_GRACE_SECONDS)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(DbError::from)?;
+    let Some((Some(session_id), within_grace)) = row else {
         return Ok(());
     };
+    if within_grace {
+        return Ok(());
+    }
     revoke_session_lineage_tokens(conn, workspace_id, member_id, session_id)
         .await
         .map_err(DbError::from)?;
@@ -622,6 +673,24 @@ async fn end_reused_lineage(
         DeviceKeyRevocationReason::RefreshReuse,
     )
     .await
+}
+
+/// [`end_reused_lineage`] when the presented refresh row is revoked by now —
+/// the linked path's refusals that follow a concurrent winner's rotation.
+async fn end_lineage_if_spent(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    presented: &str,
+    refresh_id: Uuid,
+) -> Result<(), DbError> {
+    if matches!(
+        token_state(conn, presented).await.map_err(DbError::from)?,
+        TokenState::Revoked { .. }
+    ) {
+        end_reused_lineage(conn, workspace_id, member_id, refresh_id).await?;
+    }
+    Ok(())
 }
 
 /// What a non-linked rotation records, inside the gate transaction.

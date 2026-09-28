@@ -872,6 +872,11 @@ pub struct RegisterDeviceKeyRequest {
     /// the bearer names, and any other value is refused.
     #[serde(default)]
     pub member_id: Option<String>,
+    /// Required for a `macos` (root) key: the caller's password, re-entered.
+    /// A bearer token alone must not mint the key that signs host
+    /// registrations and endorses phones (#3022 review H1).
+    #[serde(default)]
+    pub current_password: Option<String>,
 }
 
 /// `POST /v1/workspaces/{ws}/device-keys/{key}/endorsement` — a

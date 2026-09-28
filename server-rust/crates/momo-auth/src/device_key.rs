@@ -42,6 +42,8 @@ use momo_wire::human_control::{
     DeviceRevoke, HumanControl, MAX_CLOCK_SKEW_MS, P256_PUBLIC_KEY_LEN,
 };
 use sqlx::{PgConnection, Row};
+
+use crate::token_store::lock_live_session_lineage;
 use uuid::Uuid;
 
 pub const DEVICE_KEY_ALG_P256: &str = "p256";
@@ -60,6 +62,10 @@ pub const REFUSAL_DEVICE_ROOT_NOT_ELIGIBLE: &str = "device_root_not_eligible";
 pub const REFUSAL_DEVICE_KEY_NOT_ENDORSABLE: &str = "device_key_not_endorsable";
 pub const REFUSAL_DEVICE_KEY_ALREADY_REGISTERED: &str = "device_key_already_registered";
 pub const REFUSAL_SESSION_LINEAGE_ENDED: &str = "session_lineage_ended";
+/// A root (`macos`) key needs the caller's password re-entered (review H1).
+pub const REFUSAL_DEVICE_ROOT_PASSWORD_REQUIRED: &str = "device_root_password_required";
+/// A root key cannot come from a QR-linked (labelled) session: that is a phone.
+pub const REFUSAL_DEVICE_ROOT_LINKED_SESSION: &str = "device_root_linked_session";
 
 /// Why a key ended (`member_device_key_revoked_ck`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -367,14 +373,51 @@ pub async fn list_member_device_keys_in_tx(
     rows.iter().map(decode_key).collect()
 }
 
+/// Whether the named root key's session lineage can still rotate, with that
+/// lineage's refresh rows share-locked for the rest of the transaction
+/// (review M4). A key whose sign-in expired on its own is never swept by a
+/// session end, so `revoked_at` alone would let it sign forever.
+///
+/// Called **before** any `member_device_key` row lock: every session end
+/// locks `token` rows first and `member_device_key` rows second, and so must
+/// this path, or the two can deadlock. `session_id` never changes, so reading
+/// it unlocked is sound. `false` when the key is not the caller's (the caller
+/// then refuses on the locked read).
+async fn lock_root_lineage(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    root_key_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let session: Option<Uuid> = sqlx::query_scalar(
+        "SELECT session_id FROM member_device_key \
+          WHERE id = $1 AND workspace_id = $2 AND member_id = $3",
+    )
+    .bind(root_key_id)
+    .bind(workspace_id)
+    .bind(member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    match session {
+        Some(session_id) => {
+            lock_live_session_lineage(conn, workspace_id, member_id, session_id).await
+        }
+        None => Ok(false),
+    }
+}
+
 /// A root key the caller named, checked against the caller.
 fn eligible_root(
     root: Option<DeviceKeyRecord>,
     member_id: Uuid,
+    lineage_live: bool,
 ) -> Result<DeviceKeyRecord, DeviceKeyRefusal> {
     let root = root.ok_or(DeviceKeyRefusal::RootNotEligible)?;
     if root.member_id != member_id {
         return Err(DeviceKeyRefusal::MemberMismatch);
+    }
+    if !root.is_live() || !lineage_live {
+        return Err(DeviceKeyRefusal::Revoked);
     }
     if !root.is_root_candidate() || root.alg != DEVICE_KEY_ALG_P256 {
         return Err(DeviceKeyRefusal::RootNotEligible);
@@ -392,6 +435,7 @@ pub async fn endorse_device_key_in_tx(
     root_key_id: Uuid,
     signature_b64: &str,
 ) -> Result<Result<DeviceKeyRecord, DeviceKeyRefusal>, sqlx::Error> {
+    let lineage_live = lock_root_lineage(conn, workspace_id, member_id, root_key_id).await?;
     lock_keys_in_tx(conn, &[target_id, root_key_id]).await?;
     let Some(target) = load_device_key_in_tx(conn, target_id).await? else {
         return Ok(Err(DeviceKeyRefusal::NotFound));
@@ -399,13 +443,19 @@ pub async fn endorse_device_key_in_tx(
     if target.member_id != member_id {
         return Ok(Err(DeviceKeyRefusal::MemberMismatch));
     }
-    let root = match eligible_root(load_device_key_in_tx(conn, root_key_id).await?, member_id) {
+    let root = match eligible_root(
+        load_device_key_in_tx(conn, root_key_id).await?,
+        member_id,
+        lineage_live,
+    ) {
         Ok(root) => root,
         Err(refusal) => return Ok(Err(refusal)),
     };
     if !target.is_live()
         || target.platform != DEVICE_KEY_PLATFORM_IOS
-        || target.endorsed_by_key_id.is_some()
+        // An endorsement whose root is gone may be replaced (D-6: 「맥에서 다시
+        // 승인」); a live one may not.
+        || (target.endorsed_by_key_id.is_some() && target.endorser_live)
         || target.alg != DEVICE_KEY_ALG_P256
     {
         return Ok(Err(DeviceKeyRefusal::NotEndorsable));
@@ -426,15 +476,35 @@ pub async fn endorse_device_key_in_tx(
         Ok(canonical) => canonical,
         Err(_) => return Ok(Err(DeviceKeyRefusal::SignatureInvalid)),
     };
+    // A letter is used once (review M3). The endorse bytes name no target row
+    // and no time, so a letter for a key that was later revoked would
+    // otherwise endorse the same public key again once it is re-registered.
+    // The stored form is canonical low-s, so both encodings of one signature
+    // compare equal here.
+    let canonical_b64 = BASE64.encode(canonical);
+    let spent: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM member_device_key \
+                         WHERE workspace_id = $1 AND endorsement_sig = $2)",
+    )
+    .bind(workspace_id)
+    .bind(&canonical_b64)
+    .fetch_one(&mut *conn)
+    .await?;
+    if spent {
+        return Ok(Err(DeviceKeyRefusal::NotEndorsable));
+    }
 
     sqlx::query(
-        "UPDATE member_device_key \
+        "UPDATE member_device_key k \
             SET endorsed_by_key_id = $2, endorsement_sig = $3, endorsed_at = now() \
-          WHERE id = $1 AND revoked_at IS NULL AND endorsed_by_key_id IS NULL",
+          WHERE k.id = $1 AND k.revoked_at IS NULL \
+            AND (k.endorsed_by_key_id IS NULL \
+                 OR EXISTS (SELECT 1 FROM member_device_key e \
+                             WHERE e.id = k.endorsed_by_key_id AND e.revoked_at IS NOT NULL))",
     )
     .bind(target.id)
     .bind(root.id)
-    .bind(BASE64.encode(canonical))
+    .bind(&canonical_b64)
     .execute(&mut *conn)
     .await?;
     let record = load_device_key_in_tx(conn, target.id)
@@ -456,6 +526,7 @@ pub async fn revoke_device_key_signed_in_tx(
     signature_b64: &str,
     now_ms: i64,
 ) -> Result<Result<DeviceKeyRecord, DeviceKeyRefusal>, sqlx::Error> {
+    let lineage_live = lock_root_lineage(conn, workspace_id, member_id, root_key_id).await?;
     lock_keys_in_tx(conn, &[target_id, root_key_id]).await?;
     let Some(target) = load_device_key_in_tx(conn, target_id).await? else {
         return Ok(Err(DeviceKeyRefusal::NotFound));
@@ -463,7 +534,11 @@ pub async fn revoke_device_key_signed_in_tx(
     if target.member_id != member_id {
         return Ok(Err(DeviceKeyRefusal::MemberMismatch));
     }
-    let root = match eligible_root(load_device_key_in_tx(conn, root_key_id).await?, member_id) {
+    let root = match eligible_root(
+        load_device_key_in_tx(conn, root_key_id).await?,
+        member_id,
+        lineage_live,
+    ) {
         Ok(root) => root,
         Err(refusal) => return Ok(Err(refusal)),
     };
@@ -558,6 +633,29 @@ pub async fn revoke_member_device_keys_in_tx(
     .rows_affected())
 }
 
+/// Re-check the caller's password without changing anything — the step-up a
+/// root registration needs (review H1: a stolen refresh token alone must not
+/// mint a root). `false` for a wrong password or a member with none.
+pub async fn verify_own_password_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    password: &str,
+) -> Result<bool, sqlx::Error> {
+    let ok: Option<Option<bool>> = sqlx::query_scalar(
+        "SELECT CASE WHEN h.password_hash IS NULL OR h.password_hash = '' THEN false \
+                     ELSE momo_password_verify($3, h.password_hash) END \
+           FROM human h \
+          WHERE h.member_id = $1 AND h.workspace_id = $2",
+    )
+    .bind(member_id)
+    .bind(workspace_id)
+    .bind(password)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(ok.flatten() == Some(true))
+}
+
 // ---------------------------------------------------------------------------
 // host_register (D-8)
 // ---------------------------------------------------------------------------
@@ -591,8 +689,11 @@ pub async fn verify_host_register_in_tx(
     label: &str,
     now_ms: i64,
 ) -> Result<Result<[u8; 64], DeviceKeyRefusal>, sqlx::Error> {
-    // Share-lock the root so a concurrent session end or revocation cannot
-    // commit between this check and the host insert.
+    // Lineage first (token rows), then the root row — the order every session
+    // end takes — and both share-locked, so a concurrent end cannot commit
+    // between this check and the host insert.
+    let lineage_live =
+        lock_root_lineage(conn, workspace_id, member_id, proof.device_key_id).await?;
     sqlx::query("SELECT id FROM member_device_key WHERE id = $1 FOR SHARE")
         .bind(proof.device_key_id)
         .fetch_optional(&mut *conn)
@@ -603,7 +704,9 @@ pub async fn verify_host_register_in_tx(
         Some(root) if root.member_id != member_id => {
             return Ok(Err(DeviceKeyRefusal::MemberMismatch))
         }
-        Some(root) if !root.is_live() => return Ok(Err(DeviceKeyRefusal::Revoked)),
+        Some(root) if !root.is_live() || !lineage_live => {
+            return Ok(Err(DeviceKeyRefusal::Revoked))
+        }
         Some(root) => root,
     };
     if !root.is_root_candidate() || root.alg != DEVICE_KEY_ALG_P256 {

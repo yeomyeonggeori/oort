@@ -387,12 +387,27 @@ impl World {
         platform: &str,
         label: &str,
     ) -> (u16, Value) {
-        self.post(
-            &self.keys_path(),
-            &session.access,
-            json!({ "alg": "p256", "publicKey": key.public_b64, "platform": platform, "label": label }),
+        // A root (macos) key needs the password re-entered (review H1).
+        let mut body = json!({ "alg": "p256", "publicKey": key.public_b64, "platform": platform, "label": label });
+        if platform == "macos" {
+            body["currentPassword"] = json!(TEST_PASSWORD);
+        }
+        self.post(&self.keys_path(), &session.access, body).await
+    }
+
+    /// Push the spent refresh row's `revoked_at` past the reuse grace window,
+    /// so a replay reads as a second holder rather than the same client's retry.
+    async fn age_spent(&self, raw_refresh: &str) {
+        let aged = sqlx::query(
+            "UPDATE token SET revoked_at = revoked_at - interval '31 seconds' \
+              WHERE token_hash = digest($1::text, 'sha256') AND revoked_at IS NOT NULL",
         )
+        .bind(raw_refresh)
+        .execute(&self.su)
         .await
+        .expect("age the spent refresh row")
+        .rows_affected();
+        assert_eq!(aged, 1, "the presented refresh row was spent");
     }
 
     /// Register and return the new key id, asserting 201.
@@ -781,7 +796,7 @@ async fn an_endorsement_verifies_against_the_stored_rows_only() {
     let (status, body) = w
         .endorse(&session, fourth_id, lone_root_id, &signature)
         .await;
-    expect_refused(status, &body, "device_root_not_eligible");
+    expect_refused(status, &body, "device_key_revoked");
 }
 
 #[tokio::test]
@@ -1037,10 +1052,23 @@ async fn a_reused_refresh_token_ends_the_whole_lineage() {
     let bystander = w.person().await;
     let key_id = w.key(&stolen, &DeviceKeyPair::new("phone"), "ios").await;
 
-    // The thief rotates first; the victim then presents the spent token.
+    // The thief rotates first.
     let (status, thief) = w.rotate(&stolen).await;
     assert_eq!(status, 200);
     let thief = thief.unwrap();
+
+    // Inside the grace window a replay is the same client's retry (a second
+    // tab, a lost response): refused, and nothing else ends (review H2).
+    let (status, _) = w.rotate(&stolen).await;
+    assert_eq!(status, 401, "a spent refresh token is refused");
+    assert!(
+        w.access_works(&thief.access).await,
+        "a replay inside the grace window does not end the lineage"
+    );
+    assert!(!w.key_row(key_id).await.1);
+
+    // Past the window, the victim's replay is a second holder.
+    w.age_spent(&stolen.refresh).await;
     let (status, _) = w.rotate(&stolen).await;
     assert_eq!(status, 401, "a spent refresh token is refused");
 
@@ -1374,4 +1402,196 @@ fn hex_digest() -> String {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
+}
+
+// ---------------------------------------------------------------------------
+// review follow-ups (H1, M3, M4, M5, L9)
+// ---------------------------------------------------------------------------
+
+/// H1: a bearer token alone cannot mint a root.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_root_key_needs_the_password_and_a_password_sign_in() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let session = w.person().await;
+    let root = DeviceKeyPair::new("mac");
+    for body in [
+        json!({ "alg": "p256", "publicKey": root.public_b64, "platform": "macos" }),
+        json!({ "alg": "p256", "publicKey": root.public_b64, "platform": "macos",
+                "currentPassword": "wrong-password" }),
+    ] {
+        let (status, body) = w.post(&w.keys_path(), &session.access, body).await;
+        assert_eq!(status, 403, "{body}");
+        assert_eq!(code(&body), Some("device_root_password_required"));
+    }
+    let (status, body) = w.register_key(&session, &root, "macos", "맥").await;
+    assert_eq!(status, 201, "the password makes it a root: {body}");
+    // A phone key needs no password.
+    let (status, _) = w
+        .register_key(&session, &DeviceKeyPair::new("phone"), "ios", "")
+        .await;
+    assert_eq!(status, 201);
+
+    // A QR-linked session is a phone, never a root — even with the password.
+    let issued = w
+        .http
+        .post(format!("{}/v1/auth/device-link", w.base))
+        .bearer_auth(&session.access)
+        .header("host", &w.host)
+        .header("x-forwarded-proto", "http")
+        .send()
+        .await
+        .expect("issue device link");
+    let voucher = issued.json::<Value>().await.unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let redeemed = w
+        .http
+        .post(format!("{}/v1/auth/device-link/redeem", w.base))
+        .header("host", &w.host)
+        .header("x-forwarded-proto", "http")
+        .json(&json!({ "token": voucher, "device": { "name": "Linked 3022", "platform": "ios" } }))
+        .send()
+        .await
+        .expect("redeem");
+    let linked = session_from(&redeemed.json::<Value>().await.unwrap());
+    let (status, body) = w
+        .register_key(&linked, &DeviceKeyPair::new("linked mac"), "macos", "")
+        .await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(code(&body), Some("device_root_linked_session"));
+}
+
+/// M4: a root whose sign-in expired on its own signs nothing.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_root_whose_sign_in_expired_signs_nothing() {
+    let _lock = test_lock().await;
+    let w = world_with(flag(true)).await;
+    let mac = w.person().await;
+    let phone = w.person().await;
+    let root = DeviceKeyPair::new("mac");
+    let root_id = w.key(&mac, &root, "macos").await;
+    let handset = DeviceKeyPair::new("phone");
+    let phone_id = w.key(&phone, &handset, "ios").await;
+    sqlx::query(
+        "UPDATE token SET expires_at = now() - interval '1 minute' \
+          WHERE session_id = (SELECT session_id FROM member_device_key WHERE id = $1) \
+            AND label = 'refresh'",
+    )
+    .bind(root_id)
+    .execute(&w.su)
+    .await
+    .expect("expire the root's sign-in");
+
+    let signature = w.endorsement(w.person_id, &root, root_id, &handset, "기기");
+    let (status, body) = w.endorse(&phone, phone_id, root_id, &signature).await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(code(&body), Some("device_key_revoked"));
+
+    let key = ed25519_host_key(21);
+    let statement = w.host_statement(
+        w.person_id,
+        &root,
+        root_id,
+        Uuid::new_v4(),
+        &key,
+        "맥",
+        now_ms(),
+    );
+    let (status, body) = w
+        .register_host(&phone, "member", &key, "맥", Some(statement))
+        .await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(code(&body), Some("device_key_revoked"));
+}
+
+/// M3 and L9: a letter is used once, and a phone whose root is gone can be
+/// approved again by a new root.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn an_endorsement_letter_is_used_once_and_a_lost_root_can_be_replaced() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let mac = w.person().await;
+    let root = DeviceKeyPair::new("mac");
+    let root_id = w.key(&mac, &root, "macos").await;
+    let handset = DeviceKeyPair::new("phone");
+
+    // Endorse, revoke by letter, re-register the same key, replay the letter.
+    let phone = w.person().await;
+    let first_id = w.key(&phone, &handset, "ios").await;
+    let letter = w.endorsement(w.person_id, &root, root_id, &handset, "기기");
+    assert_eq!(w.endorse(&mac, first_id, root_id, &letter).await.0, 200);
+    let at = now_ms();
+    let revoke = root.sign(
+        &DeviceRevoke {
+            workspace_id: w.workspace,
+            member_id: w.person_id,
+            root_key_id: root_id,
+            target_key_id: first_id,
+            revoked_at_ms: at,
+        }
+        .signed_bytes(),
+    );
+    let (status, body) = w
+        .post(
+            &format!("{}/{first_id}/revocation", w.keys_path()),
+            &mac.access,
+            json!({ "rootKeyId": root_id, "revokedAtMs": at, "signature": revoke }),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let again_id = w.key(&phone, &handset, "ios").await;
+    let (status, body) = w.endorse(&mac, again_id, root_id, &letter).await;
+    assert_eq!(status, 409, "a spent letter endorses nothing again: {body}");
+    assert_eq!(code(&body), Some("device_key_not_endorsable"));
+
+    // The root's sign-in ends; a new root on a new sign-in re-approves.
+    let second = DeviceKeyPair::new("second phone");
+    let second_id = w.key(&phone, &second, "ios").await;
+    let letter = w.endorsement(w.person_id, &root, root_id, &second, "기기");
+    assert_eq!(w.endorse(&mac, second_id, root_id, &letter).await.0, 200);
+    w.logout(&mac).await;
+    let mac2 = w.person().await;
+    let new_root = DeviceKeyPair::new("new mac");
+    let new_root_id = w.key(&mac2, &new_root, "macos").await;
+    let letter = w.endorsement(w.person_id, &new_root, new_root_id, &second, "기기");
+    let (status, body) = w.endorse(&mac2, second_id, new_root_id, &letter).await;
+    assert_eq!(
+        status, 200,
+        "a phone whose root is gone is approved again: {body}"
+    );
+    assert_eq!(body["deviceKey"]["state"], "endorsed");
+}
+
+/// M5: a sign-in from before 088 is swept too, once it has rotated.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_pre_lineage_session_is_swept_on_reuse() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let old = w.person().await;
+    sqlx::query(
+        "UPDATE token SET session_id = NULL \
+          WHERE token_hash IN (digest($1::text, 'sha256'), digest($2::text, 'sha256'))",
+    )
+    .bind(&old.access)
+    .bind(&old.refresh)
+    .execute(&w.su)
+    .await
+    .expect("make the session pre-088");
+    let (status, thief) = w.rotate(&old).await;
+    assert_eq!(status, 200);
+    let thief = thief.unwrap();
+    w.age_spent(&old.refresh).await;
+    let (status, _) = w.rotate(&old).await;
+    assert_eq!(status, 401);
+    let (status, _) = w.rotate(&thief).await;
+    assert_eq!(
+        status, 401,
+        "the replay of a pre-088 token ends its successor"
+    );
 }

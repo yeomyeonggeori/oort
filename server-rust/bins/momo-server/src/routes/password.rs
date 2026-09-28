@@ -38,7 +38,7 @@ fn spec_password(raw: &str) -> Result<String, ApiError> {
     normalized_claim_password(raw).map_err(|error| ApiError::bad_request(error.to_string()))
 }
 
-fn admit_password_change(
+pub(crate) fn admit_password_change(
     state: &AppState,
     headers: &HeaderMap,
     member_id: Uuid,
