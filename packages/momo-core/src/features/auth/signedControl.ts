@@ -307,3 +307,40 @@ export async function signedResume(input: {
     humanSignature,
   });
 }
+
+/**
+ * The agent member a session's events name (`agent_member_id`, server-validated
+ * on every ACP event). A signed resume names it (v2 spawn); the server does not
+ * compare it with the source yet (ADR-0146 증보 E7 「남은 것」), so the value is
+ * the one the session itself reported, never a guess. Null when no event says.
+ */
+export function agentMemberIdFromEvents(
+  events: ReadonlyArray<{ payload: Record<string, unknown> }>
+): string | null {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const id = events[i]!.payload.agent_member_id;
+    if (typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id)) return id.toLowerCase();
+  }
+  return null;
+}
+
+export const RESUME_AGENT_UNKNOWN_LINE =
+  "이 세션의 에이전트를 기록에서 찾지 못해 서명한 인수를 만들 수 없어요. 원래 호스트에서 이어 가세요.";
+
+/**
+ * A resume failure in a sentence: the signer's or the signature's reason
+ * first, otherwise `fallback` (the handoff copy, which reads status + message).
+ */
+export function resumeFailureLine(
+  error: unknown,
+  fallback: (status: number | undefined, message: string | undefined) => string
+): string {
+  if (error instanceof SignerRefusal) return error.message;
+  const signature = humanSignatureRefusal(error);
+  if (signature) return signature.text;
+  const status =
+    typeof error === "object" && error !== null && typeof (error as { status?: unknown }).status === "number"
+      ? (error as { status: number }).status
+      : undefined;
+  return fallback(status, error instanceof Error ? error.message : undefined);
+}

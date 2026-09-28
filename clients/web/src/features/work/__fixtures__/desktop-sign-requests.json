@@ -1,0 +1,125 @@
+[
+  {
+    "name": "control_v2_input_queue_nfc",
+    "signer": {
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "memberId": "00000000-0000-7000-8000-000000000101",
+      "keyId": "00000000-0000-7000-8000-00000000d001"
+    },
+    "request": {
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "instanceId": "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
+      "hostId": "00000000-0000-7000-8000-00000000f001",
+      "sessionId": "00000000-0000-7000-8000-00000000c001",
+      "nonce": "0193a5b8-7c1e-7d2a-9f00-0000000000b0",
+      "issuedAtMs": 1790550000000,
+      "expiresAtMs": 1790550600000,
+      "content": {
+        "kind": "input",
+        "mode": "queue",
+        "text": "한 건 더: café 리팩터\n두 번째 줄"
+      }
+    },
+    "payload": "momo.human.control.v2\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d001\n00000000-0000-7000-8000-00000000f001\n00000000-0000-7000-8000-00000000c001\ninput\nqueue\n0193a5b8-7c1e-7d2a-9f00-0000000000b0\n1790550000000\n1790550600000\nde033a4e6fc8ff9d5587c835807ffc44083f46fc18f02ee7597dfe8c0b186bec"
+  },
+  {
+    "name": "control_v2_input_interrupt",
+    "signer": {
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "memberId": "00000000-0000-7000-8000-000000000101",
+      "keyId": "00000000-0000-7000-8000-00000000d001"
+    },
+    "request": {
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "instanceId": "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
+      "hostId": "00000000-0000-7000-8000-00000000f001",
+      "sessionId": "00000000-0000-7000-8000-00000000c001",
+      "nonce": "0193a5b8-7c1e-7d2a-9f00-0000000000b1",
+      "issuedAtMs": 1790550001000,
+      "expiresAtMs": 1790550301000,
+      "content": {
+        "kind": "input",
+        "mode": "interrupt",
+        "text": "stop and run the tests"
+      }
+    },
+    "payload": "momo.human.control.v2\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d001\n00000000-0000-7000-8000-00000000f001\n00000000-0000-7000-8000-00000000c001\ninput\ninterrupt\n0193a5b8-7c1e-7d2a-9f00-0000000000b1\n1790550001000\n1790550301000\n6ae6400575956230bd5f95785e5d09d31224f6fbf19c7f841b5d373bf71f3c14"
+  },
+  {
+    "name": "control_v2_spawn",
+    "signer": {
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "memberId": "00000000-0000-7000-8000-000000000101",
+      "keyId": "00000000-0000-7000-8000-00000000d002"
+    },
+    "request": {
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "instanceId": "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
+      "hostId": "00000000-0000-7000-8000-00000000f001",
+      "sessionId": null,
+      "nonce": "5f2c1a9e-3b4d-4e6f-8a7b-9c0d1e2f3ab2",
+      "issuedAtMs": 1790550002000,
+      "expiresAtMs": 1790550602000,
+      "content": {
+        "kind": "spawn",
+        "agentMemberId": "00000000-0000-7000-8000-000000000a01",
+        "folderId": "fld_7Q2m",
+        "tool": "claude",
+        "channelId": "00000000-0000-7000-8000-00000000cc01",
+        "firstPrompt": "Fix the flaky test.\n\n이슈 #3021도 봐 줘."
+      }
+    },
+    "payload": "momo.human.control.v2\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d002\n00000000-0000-7000-8000-00000000f001\n-\nspawn\n-\n5f2c1a9e-3b4d-4e6f-8a7b-9c0d1e2f3ab2\n1790550002000\n1790550602000\n4dc9801bfc2e8bd835e80066568a5fd22a75b62a43e60a89d3f4984d3e59668c"
+  },
+  {
+    "name": "control_v2_spawn_resume",
+    "signer": {
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "memberId": "00000000-0000-7000-8000-000000000101",
+      "keyId": "00000000-0000-7000-8000-00000000d002"
+    },
+    "request": {
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "instanceId": "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
+      "hostId": "00000000-0000-7000-8000-00000000f001",
+      "sessionId": "00000000-0000-7000-8000-00000000c002",
+      "nonce": "5f2c1a9e-3b4d-4e6f-8a7b-9c0d1e2f3ac1",
+      "issuedAtMs": 1790550002000,
+      "expiresAtMs": 1790550602000,
+      "content": {
+        "kind": "spawn",
+        "agentMemberId": "00000000-0000-7000-8000-000000000a01",
+        "folderId": "fld_7Q2m",
+        "tool": "codex",
+        "channelId": "00000000-0000-7000-8000-00000000cc01",
+        "firstPrompt": "이어서 해 줘"
+      }
+    },
+    "payload": "momo.human.control.v2\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d002\n00000000-0000-7000-8000-00000000f001\n00000000-0000-7000-8000-00000000c002\nspawn\n-\n5f2c1a9e-3b4d-4e6f-8a7b-9c0d1e2f3ac1\n1790550002000\n1790550602000\n570400e66bfdf2900a942dd06371491ea495025f3c4b2268edcc4fbc4c92b1c1"
+  },
+  {
+    "name": "control_v2_permission_session",
+    "signer": {
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "memberId": "00000000-0000-7000-8000-000000000101",
+      "keyId": "00000000-0000-7000-8000-00000000d002"
+    },
+    "request": {
+      "workspaceId": "00000000-0000-7000-8000-000000000001",
+      "instanceId": "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
+      "hostId": "00000000-0000-7000-8000-00000000f001",
+      "sessionId": "00000000-0000-7000-8000-00000000c001",
+      "nonce": "0b5e8c4d-2f1a-4c3b-9d8e-7f6a5b4c3db3",
+      "issuedAtMs": 1790550003000,
+      "expiresAtMs": 1790550063000,
+      "content": {
+        "kind": "permission",
+        "requestEventId": "00000000-0000-4000-8000-00000000e001",
+        "optionId": "allow-once",
+        "optionKind": "allow_once",
+        "scope": "session"
+      }
+    },
+    "payload": "momo.human.control.v2\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d002\n00000000-0000-7000-8000-00000000f001\n00000000-0000-7000-8000-00000000c001\npermission\n-\n0b5e8c4d-2f1a-4c3b-9d8e-7f6a5b4c3db3\n1790550003000\n1790550063000\neac6d4dd5fdc4e8047453a12767587d0d2af8fd93bc664d3b72ea275ce070e0e"
+  }
+]

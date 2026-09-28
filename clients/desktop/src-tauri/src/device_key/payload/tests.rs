@@ -660,3 +660,35 @@ fn no_dialog_text_carries_a_dash() {
         }
     }
 }
+
+/// #3028 cross test, Rust half: the JSON the desktop page hands
+/// `device_key_sign_control` (made by `shellControlRequest` in
+/// `clients/web/src/features/work/signedWork.ts`, pinned by its test) builds
+/// exactly the v2 vector bytes here. Together: page → shell → vector payload.
+const APP_REQUESTS: &str =
+    include_str!("../../../../../web/src/features/work/__fixtures__/desktop-sign-requests.json");
+
+#[test]
+fn the_webviews_requests_build_the_v2_vector_bytes() {
+    let entries: Vec<Value> = serde_json::from_str(APP_REQUESTS).unwrap();
+    assert_eq!(entries.len(), 5, "input ×2, permission, spawn, resume");
+    for entry in entries {
+        let name = entry["name"].as_str().unwrap();
+        let signer = Signer {
+            workspace_id: uuid(&entry["signer"]["workspaceId"]),
+            member_id: uuid(&entry["signer"]["memberId"]),
+            key_id: uuid(&entry["signer"]["keyId"]),
+        };
+        let request: ControlRequest = serde_json::from_value(entry["request"].clone())
+            .unwrap_or_else(|e| panic!("{name}: the shell refuses the page's request: {e}"));
+        let now = request.issued_at_ms + 1_000;
+        let bytes = Statement::Control { signer, request }
+            .signed_bytes(now)
+            .unwrap();
+        assert_eq!(
+            std::str::from_utf8(&bytes).unwrap(),
+            entry["payload"].as_str().unwrap(),
+            "{name}"
+        );
+    }
+}

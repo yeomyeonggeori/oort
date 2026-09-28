@@ -23,6 +23,7 @@ import {
   permissionLapsed,
   permissionSentLine,
   permissionWaitingLine,
+  rejectWithInstructionLine,
   type AgentFeedItem,
   type AgentPaneModel,
   type AgentToolCard,
@@ -33,6 +34,13 @@ import {
 import { StatusMark } from "../local/SessionList";
 import type { SessionStatus } from "@momo/core/features/workbench/sessionList";
 import type { WorkPermissionDecisionBody } from "@momo/core/lib/api";
+import {
+  NOT_DELIVERED,
+  instructionFailureLine,
+  type Delivery,
+  type PermissionScope,
+  type RejectWithInstructionOutcome,
+} from "@momo/core/features/auth/signedControl";
 import {
   INSTRUCT_IN_APP_LINE,
   humanSignatureRefusal,
@@ -48,7 +56,9 @@ import "./agentPane.css";
 //
 // - 위: 목표 한 줄, 호스트 · 하네스, 계획 진행.
 // - 가운데: ACP plan 단계 목록, tool-call은 접힌 카드. 펼치기(「원문 보기」)는 소유자만.
-// - 권한 카드: 「이번 한 번 허락」·「거부」만(ADR-0188 D5). 두 번 눌러야
+// - 권한 카드: 「이번 한 번 허락」·「거부」(ADR-0188 D5). 서명하는 표면이 서명을
+//   요구하는 서버에 있으면(R2-E8 #3028) 「이 세션 동안 허락」과 「거부 + 지시」(거부
+//   확인 칸의 선택 입력)가 더해진다. 두 번 눌러야
 //   결정한다(무장 → 확정, 무장 직후 400ms와 키 반복은 받지 않는다). 결정은 사람이
 //   확정 버튼을 눌렀을 때만 만든다. 마운트·다시 그리기·이벤트 재전달에는 부르지 않는다.
 //   결정은 #3000 라우트로 간다(§8.6, 골든 work-permission-decision). 지시를 붙인
@@ -64,8 +74,17 @@ import "./agentPane.css";
  * 칸이 만드는 결정. `sessionId`는 경로로, 나머지 셋이 본문 전부다(골든). 지시문
  * 자리는 없다: 서버가 R2 전까지 비어 있지 않은 `instruction`을 400으로 거부한다.
  */
-export interface PermissionDecision extends WorkPermissionDecisionBody {
+export interface PermissionDecision extends Omit<WorkPermissionDecisionBody, "humanSignature"> {
   sessionId: string;
+  /** 허락의 범위. 서명하는 경로만 `session`을 받는다(#3028). */
+  scope?: PermissionScope;
+}
+
+export interface RejectWithInstructionRequest {
+  sessionId: string;
+  requestEventId: string;
+  optionId: string;
+  text: string;
 }
 
 export interface AgentReply {
@@ -80,7 +99,12 @@ export interface AgentReply {
  */
 export interface AgentPaneActions {
   decide: ((decision: PermissionDecision) => Promise<void>) | null;
-  reply: ((reply: AgentReply) => Promise<void>) | null;
+  /** 서명한 지시는 닿았는지(`Delivery`)를 돌려준다. 닿지 않으면 「전달 안 됨」. */
+  reply: ((reply: AgentReply) => Promise<Delivery | void>) | null;
+  /** 「이 세션 동안 허락」을 낼 수 있다(서명하는 표면 + 서명을 요구하는 서버). */
+  sessionScope?: boolean;
+  /** 「거부 + 지시」: 서명 없는 거부 + 서명한 지시. 없으면 거부만. */
+  rejectWithInstruction?: ((request: RejectWithInstructionRequest) => Promise<RejectWithInstructionOutcome>) | null;
 }
 
 export const DECIDE_UNAVAILABLE = "이 서버는 아직 칸에서 한 권한 결정을 받지 않아요. 결정 경로가 열리면 여기서 허락할 수 있어요.";
@@ -293,6 +317,8 @@ export function AgentProgressView({
           viewerIsOwner={model.viewerIsOwner}
           ownerName={ownerName}
           decide={actions.decide}
+          sessionScope={actions.sessionScope === true}
+          rejectWithInstruction={actions.rejectWithInstruction ?? null}
           cramped={cramped}
           offline={offline}
           inApp={instructFrom === "app"}
@@ -428,7 +454,7 @@ const SEND_KEY =
     ? "⌘↵"
     : "Ctrl+↵";
 
-type Armed = "allow" | "reject" | null;
+type Armed = "allow" | "allow_session" | "reject" | null;
 
 /** 미리보기 칸이 한 번에 보이는 줄 수(agentPane.css `.agent-perm-code`와 같다). */
 const PREVIEW_LINES = 3;
@@ -437,8 +463,11 @@ function previewLines(text: string): number {
   return text.split("\n").length;
 }
 
-/** 결정을 보낸 뒤의 카드: 보냈다(`sent`) 또는 다시 눌러도 소용없다(`closed`). */
-type Outcome = { tone: "sent" | "closed"; text: string } | null;
+/**
+ * 결정을 보낸 뒤의 카드: 보냈다(`sent`), 다시 눌러도 소용없다(`closed`), 거부는 갔지만
+ * 함께 보낸 지시가 닿지 않았다(`partial`, 「전달 안 됨」).
+ */
+type Outcome = { tone: "sent" | "closed" | "partial"; text: string } | null;
 
 /** 요청이 host 대기 시간을 넘기는 순간 한 번 다시 그린다(주기 타이머가 아니다). */
 function useLapsed(atMs: number): boolean {
@@ -462,6 +491,8 @@ function PermissionCard({
   viewerIsOwner,
   ownerName,
   decide,
+  sessionScope,
+  rejectWithInstruction,
   cramped,
   offline,
   inApp,
@@ -473,6 +504,8 @@ function PermissionCard({
   viewerIsOwner: boolean;
   ownerName: string | null;
   decide: AgentPaneActions["decide"];
+  sessionScope: boolean;
+  rejectWithInstruction: NonNullable<AgentPaneActions["rejectWithInstruction"]> | null;
   /** 칸이 너무 낮아 요청과 결정 칸을 함께 보일 수 없다. */
   cramped: boolean;
   /** 실시간 연결이 끊겼다. */
@@ -495,8 +528,11 @@ function PermissionCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
+  const [rejectNote, setRejectNote] = useState("");
   const unavailableId = useId();
+  const rejectNoteId = useId();
   const allowRef = useRef<HTMLButtonElement>(null);
+  const sessionRef = useRef<HTMLButtonElement>(null);
   const rejectRef = useRef<HTMLButtonElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
   // 허락을 보낸 뒤 서버가 서명을 요구한다고 답해 칸이 안내로 바뀌면(#3029): 허락 무장을
@@ -504,7 +540,7 @@ function PermissionCard({
   useEffect(() => {
     if (!inApp) return;
     setError(null);
-    if (armed === "allow") {
+    if (armed === "allow" || armed === "allow_session") {
       setArmed(null);
       sectionRef.current?.focus({ preventScroll: true });
     }
@@ -513,7 +549,12 @@ function PermissionCard({
   const returnTo = useRef<Armed>(null);
   useEffect(() => {
     if (armed !== null || returnTo.current === null) return;
-    const target = returnTo.current === "allow" ? allowRef.current : rejectRef.current;
+    const target =
+      returnTo.current === "allow"
+        ? allowRef.current
+        : returnTo.current === "allow_session"
+          ? sessionRef.current
+          : rejectRef.current;
     returnTo.current = null;
     (target && !target.disabled ? target : sectionRef.current)?.focus({ preventScroll: true });
   }, [armed]);
@@ -561,7 +602,7 @@ function PermissionCard({
       >
         <p className="agent-perm-l1 agent-perm-sticky-top">
           {/* 닫힘은 실패가 아니다(다른 기기가 허락했을 수도 있다): 중립 빈 원. */}
-          <StatusMark status={settled.tone === "sent" ? "done" : "idle"} srLabel />
+          <StatusMark status={settled.tone === "sent" ? "done" : settled.tone === "partial" ? "stopped" : "idle"} srLabel />
           {ask}
         </p>
         <p className="agent-perm-settled break-keep text-meta text-ink" data-testid="agent-permission-outcome">
@@ -580,21 +621,51 @@ function PermissionCard({
     setError(null);
     setArmed(next);
   };
-  const commit = async (kind: "allow_once" | "reject_once") => {
+  const commit = async (kind: "allow_once" | "reject_once", scope: PermissionScope = "once") => {
     if (Date.now() - armedAt.current < CONFIRM_GUARD_MS) return;
     const choice = kind === "allow_once" ? permission.allow : permission.reject;
     if (!decide || !choice || busy || cramped || offline) return;
     if (permissionLapsed(permission, Date.now())) return;
     if (kind === "allow_once" && (inApp || !canAllow(permission))) return;
+    if (scope === "session" && !sessionScope) return;
+    const note = kind === "reject_once" && rejectWithInstruction ? rejectNote.trim() : "";
     setBusy(true);
     setError(null);
     try {
-      // 본문은 셋뿐이다(골든). 같은 결정을 다시 보내면 서버가 200으로 같은 행을 준다.
-      await decide({ sessionId, requestEventId: permission.requestEventId, optionId: choice.optionId, kind });
+      if (note !== "" && rejectWithInstruction) {
+        // 「거부 + 지시」: 서명이 먼저다. 취소하면 거부도 보내지 않는다(signedControl).
+        const out = await rejectWithInstruction({
+          sessionId,
+          requestEventId: permission.requestEventId,
+          optionId: choice.optionId,
+          text: note,
+        });
+        if (out.state === "not_sent") {
+          setError(`${NOT_DELIVERED} · ${out.text}`);
+          return;
+        }
+        if (out.state === "reject_failed") throw out.error;
+        const delivered = out.instruction.state === "sent";
+        const line = rejectWithInstructionLine(
+          delivered,
+          out.instruction.state === "not_delivered" ? out.instruction.text : undefined
+        );
+        onOutcome(line);
+        setOutcome({ tone: delivered ? "sent" : "partial", text: line });
+        return;
+      }
+      // 같은 결정을 다시 보내면 서버가 200으로 같은 행을 준다.
+      await decide({
+        sessionId,
+        requestEventId: permission.requestEventId,
+        optionId: choice.optionId,
+        kind,
+        ...(kind === "allow_once" ? { scope } : {}),
+      });
       // 칸에 먼저 올린다: 실시간 `approval.decided`가 응답보다 먼저 와 카드가 이미
       // 내려갔어도 결과는 읽힌다(design-review R2 Low).
-      onOutcome(permissionSentLine(kind));
-      setOutcome({ tone: "sent", text: permissionSentLine(kind) });
+      onOutcome(permissionSentLine(kind, scope));
+      setOutcome({ tone: "sent", text: permissionSentLine(kind, scope) });
     } catch (err) {
       const failure = permissionFailure(err);
       if (failure.closed) {
@@ -684,6 +755,21 @@ function PermissionCard({
           >
             이번 한 번 허락
           </Button>
+          {sessionScope ? (
+            <Button
+              ref={sessionRef}
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="tap-target"
+              disabled={blocked || !allowable || busy}
+              aria-describedby={inAppLine ? unavailableId : describedBy}
+              onClick={() => arm("allow_session")}
+              data-testid="agent-permission-allow-session"
+            >
+              이 세션 동안 허락
+            </Button>
+          ) : null}
           <Button
             ref={rejectRef}
             type="button"
@@ -700,25 +786,57 @@ function PermissionCard({
           {blocked ? null : <span className="text-timestamp text-ink-muted">나에게만 보이는 버튼이에요</span>}
         </div>
       ) : (
-        <div className="agent-perm-sticky-bottom flex flex-wrap items-center gap-2" data-testid="agent-permission-confirm">
-          <span className="text-meta font-medium">
-            {armed === "allow" ? "이번 한 번만 허락할까요?" : "이번 요청을 거부할까요?"}
-          </span>
-          <Button type="button" size="sm" variant="ghost" onClick={disarm} disabled={busy}>
-            취소
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant={armed === "allow" ? "default" : "destructive"}
-            autoFocus
-            disabled={busy || (armed === "allow" && !allowable)}
-            onKeyDown={noRepeat}
-            onClick={() => void commit(armed === "allow" ? "allow_once" : "reject_once")}
-            data-testid="agent-permission-commit"
-          >
-            {armed === "allow" ? "허락 보내기" : "거부 보내기"}
-          </Button>
+        <div className="agent-perm-sticky-bottom flex flex-col gap-2" data-testid="agent-permission-confirm">
+          {armed === "reject" && rejectWithInstruction ? (
+            <div className="flex flex-col gap-1">
+              <label htmlFor={rejectNoteId} className="text-meta text-ink">
+                거부하면서 보낼 지시 <span className="text-ink-muted">(비우면 거부만 보내요)</span>
+              </label>
+              <textarea
+                id={rejectNoteId}
+                rows={2}
+                value={rejectNote}
+                disabled={busy}
+                onChange={(event) => setRejectNote(event.target.value)}
+                className="w-full min-w-0 resize-none rounded-lg border border-line-strong bg-surface px-3 py-1 text-body text-ink placeholder:text-ink-muted focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-60"
+                placeholder="예: 그 파일 말고 테스트만 고쳐 줘"
+                data-testid="agent-permission-reject-note"
+              />
+              <p className="text-timestamp text-ink-muted">지시는 기기 서명을 거쳐 다음 차례에 전달돼요.</p>
+            </div>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-meta font-medium">
+              {armed === "allow"
+                ? "이번 한 번만 허락할까요?"
+                : armed === "allow_session"
+                  ? "이 세션이 끝날 때까지 같은 요청을 허락할까요?"
+                  : "이번 요청을 거부할까요?"}
+            </span>
+            <Button type="button" size="sm" variant="ghost" onClick={disarm} disabled={busy}>
+              취소
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={armed === "reject" ? "destructive" : "default"}
+              autoFocus={!(armed === "reject" && rejectWithInstruction)}
+              disabled={busy || (armed !== "reject" && !allowable)}
+              onKeyDown={noRepeat}
+              onClick={() =>
+                void (armed === "reject"
+                  ? commit("reject_once")
+                  : commit("allow_once", armed === "allow_session" ? "session" : "once"))
+              }
+              data-testid="agent-permission-commit"
+            >
+              {armed === "allow" || armed === "allow_session"
+                ? "허락 보내기"
+                : rejectNote.trim() !== "" && rejectWithInstruction
+                  ? "거부하고 지시 보내기"
+                  : "거부 보내기"}
+            </Button>
+          </div>
         </div>
       )}
       {!inApp && !allowable && !blocked && permission.allow !== null ? (
@@ -753,8 +871,13 @@ function ReplyBox({
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  /** 서명한 지시가 닿지 않았다(D-5b 「전달 안 됨」). 글은 칸에 남긴다. */
+  const [failed, setFailed] = useState(false);
   const hintId = useId();
-  useEffect(() => setNote(null), [text]);
+  useEffect(() => {
+    setNote(null);
+    setFailed(false);
+  }, [text]);
   const unavailable = reply === null;
   const disabled = inApp || unavailable || ended || busy;
   const send = async (mode: ReplyMode) => {
@@ -762,11 +885,18 @@ function ReplyBox({
     if (inApp || !reply || body === "" || busy) return;
     setBusy(true);
     try {
-      await reply({ sessionId, text: body, mode });
+      const out = await reply({ sessionId, text: body, mode });
+      if (out && out.state === "not_delivered") {
+        // 글을 지우지 않는다: 그대로 다시 보낼 수 있다. 채팅으로 조용히 남기지 않는다.
+        setNote(`${NOT_DELIVERED} · ${out.text}`);
+        setFailed(true);
+        return;
+      }
       setText("");
       setNote(mode === "queue" ? "다음 차례에 전달돼요." : "지금 차례에 끼어들었어요.");
     } catch (err) {
-      setNote(humanSignatureRefusal(err)?.text ?? "지시를 보내지 못했어요. 호스트 연결을 확인한 뒤 다시 보내세요.");
+      setNote(`${NOT_DELIVERED} · ${humanSignatureRefusal(err)?.text ?? instructionFailureLine(err)}`);
+      setFailed(true);
     } finally {
       setBusy(false);
     }
@@ -816,9 +946,11 @@ function ReplyBox({
       </div>
       <p
         id={hintId}
-        className="agent-reply-hint min-w-0 text-timestamp text-ink-muted"
+        className={cn("agent-reply-hint min-w-0 text-timestamp", failed ? "text-danger" : "text-ink-muted")}
         data-testid="agent-pane-reply-hint"
         data-in-app={inApp ? "" : undefined}
+        data-failed={failed ? "" : undefined}
+        role={failed ? "alert" : undefined}
       >
         {inApp ? REPLY_IN_APP_HINT : unavailable ? REPLY_UNAVAILABLE : note ?? `기본은 다음 차례 예약이에요 · ${SEND_KEY}`}
       </p>
