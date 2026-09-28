@@ -1,6 +1,7 @@
 import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -375,6 +376,73 @@ describe('알림 일시 중지 (#2848)', () => {
     expect(
       within(sheet).getByTestId('profile-pause-row').props.accessibilityState,
     ).toMatchObject({checked: false});
+  });
+});
+
+describe('알림 일시 중지는 쓰기 직전에 다시 읽는다 (#2893)', () => {
+  async function readySheet() {
+    const sheet = await openSheet();
+    await waitFor(() =>
+      expect(
+        within(sheet).getByTestId('profile-pause-row').props.accessibilityState,
+      ).toMatchObject({disabled: false}),
+    );
+    return sheet;
+  }
+
+  it('시트를 연 뒤 웹에서 켠 멘션 예외를 폰 토글이 덮어쓰지 않는다', async () => {
+    server.rules = {dnd: false, mentionOverridesMute: false};
+    const sheet = await readySheet();
+    // 폰 캐시(staleTime 30초)가 살아 있는 동안 웹 설정이 멘션 예외를 켠다.
+    server.rules = {dnd: false, mentionOverridesMute: true};
+
+    fireEvent.press(within(sheet).getByTestId('profile-pause-row'));
+
+    await waitFor(() => expect(rulesPuts()).toHaveLength(1));
+    expect(rulesPuts()[0].body).toEqual({dnd: true, mentionOverridesMute: true});
+  });
+
+  it('다시 읽기가 실패하면 쓰지 않고, 스위치를 되돌리고 그렇게 말한다', async () => {
+    const sheet = await readySheet();
+    server.rulesRead = 'fail';
+
+    fireEvent.press(within(sheet).getByTestId('profile-pause-row'));
+
+    await waitFor(() => expect(within(sheet).getByTestId('pause-failure')).toBeTruthy());
+    expect(rulesPuts()).toHaveLength(0);
+    expect(
+      within(sheet).getByTestId('profile-pause-row').props.accessibilityState,
+    ).toMatchObject({checked: false});
+  });
+
+  it('한 번 읽은 뒤 재조회가 실패해도 켜진 스위치와 「불러오지 못했습니다」가 함께 서지 않는다', async () => {
+    server.rules = {dnd: true, mentionOverridesMute: false};
+    const sheet = await readySheet();
+    server.rulesRead = 'fail';
+
+    await act(async () => {
+      await queryClient!
+        .refetchQueries({queryKey: ['settings', 'notification-rules', WS]})
+        .catch(() => undefined);
+    });
+    // 재조회가 정말 실패했는지 먼저 확인한다(양성 대조).
+    expect(
+      queryClient!.getQueryState(['settings', 'notification-rules', WS])?.status,
+    ).toBe('error');
+
+    // 관찰자가 실패를 그릴 틈을 준다(이 틈 없이 재면 옛 그림을 읽고 통과한다).
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    });
+    const row = within(sheet).getByTestId('profile-pause-row');
+    expect(row.props.accessibilityState).toMatchObject({checked: true});
+    expect(
+      within(sheet).getByTestId('profile-pause-switch', {includeHiddenElements: true}),
+    ).toBeTruthy();
+    expect(row).not.toHaveTextContent(/불러오지 못했습니다/);
+    expect(row.props.accessibilityHint).not.toMatch(/불러오지 못했습니다/);
+    expect(within(sheet).queryByTestId('profile-pause-retry')).toBeNull();
+    expect(row).toHaveTextContent(/직접 끌 때까지/);
   });
 });
 

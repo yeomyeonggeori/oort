@@ -79,7 +79,7 @@ import {
 } from "@momo/core/features/timeline/stress";
 import { Composer } from "@/features/chat/Composer";
 import { canCreateChannelNow } from "@momo/core/features/channels/model";
-import { useSurfaceProvided } from "@/features/capabilities/useSurfaceProvided";
+import { useSurfaceProvidedWhileOpen } from "@/features/capabilities/useSurfaceProvided";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
 import { useOpenAddChannelMember } from "@/features/channels/useAddChannelMember";
 import {
@@ -419,11 +419,13 @@ export function ChatShell() {
   const localDock = useDockState();
   //   * #2780: 그 판정은 정적 표가 아니라 「이 워크스페이스에 온라인 호스트가
   //     있는가」다(useSurfaceProvided). 데스크탑 로컬 도크는 이 판정 밖이다.
-  const workProvided = useSurfaceProvided("work");
-  const terminalDockProvided = !localTerminal && workProvided;
-  const terminalButtonShown = localTerminal || terminalDockProvided;
+  //   * #2893: 열어 둔 관전 도크는 호스트가 잠깐 오프라인이 돼도 유예 동안 남고,
+  //     그 동안 버튼도 남는다(닫을 손잡이). 닫혀 있으면 유예 없이 바로 접힌다.
   const [workOpen, setWorkOpen] = useState(false);
   const [dockOpen, setDockOpen] = useState(false);
+  const workProvided = useSurfaceProvidedWhileOpen("work", dockOpen && !localTerminal);
+  const terminalDockProvided = !localTerminal && workProvided;
+  const terminalButtonShown = localTerminal || terminalDockProvided;
   const terminalPressed = localTerminal ? localDock.open : dockOpen;
   const terminalToggleRef = useRef<HTMLButtonElement>(null);
   useEffect(() => setDockOpen(false), [channelId]);

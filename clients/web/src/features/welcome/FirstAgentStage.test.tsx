@@ -546,9 +546,16 @@ describe("알약과 선택", () => {
   it("준비됨 줄은 미리 골라지고, 로그인 필요 줄은 고를 수 없다", async () => {
     subscriptionOn();
     const host = mountStage();
+    // #2973: 미리 고르기는 알약이 「준비됨」으로 그려진 **뒤** 효과(setSelected)가
+    // 한 번 더 그려서 생긴다. RTL waitFor는 act 밖에서 돌고 조건이 맞으면
+    // setTimeout(0) 한 번만 흘리므로, 알약만 기다리면 부하 때 그 효과가 아직
+    // 커밋되지 않은 트리를 단정한다(CI 「expected false to be true」, 원래 :555 checked).
+    // 그래서 이 시험이 재는 끝 상태 — 줄이 골라짐 — 까지 기다린다.
     await waitFor(
-      () => q(host, "ai-connect-pill-claude")?.getAttribute("data-pill") === "ready",
-      "claude ready"
+      () =>
+        q(host, "ai-connect-pill-claude")?.getAttribute("data-pill") === "ready" &&
+        host.querySelector<HTMLInputElement>("#ai-connect-claude")?.checked === true,
+      "claude ready and preselected"
     );
     expect(q(host, "ai-connect-pill-claude")?.textContent).toBe("준비됨");
     expect(q(host, "ai-connect-pill-codex")?.textContent).toBe("로그인 필요");

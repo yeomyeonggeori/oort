@@ -13,8 +13,8 @@ vi.mock("@/lib/tauri", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/tauri")>()),
   isDesktop: () => shell.desktop,
 }));
-vi.mock("@/features/workbench/local/LocalTerminalDock", () => ({
-  LocalTerminalDock: ({ presentation }: { presentation?: string }) =>
+vi.mock("@/features/workbench/agent/ConnectedTerminalDock", () => ({
+  ConnectedTerminalDock: ({ presentation }: { presentation?: string }) =>
     createElement("div", { "data-testid": "dock-stub", "data-presentation": presentation ?? "dock" }),
 }));
 vi.mock("@/features/capabilities/SurfaceGate", () => ({

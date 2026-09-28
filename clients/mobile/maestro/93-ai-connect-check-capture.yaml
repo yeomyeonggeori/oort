@@ -24,15 +24,8 @@ name: 93-ai-connect-check-capture
 - takeScreenshot: ai-connect-scrolled
 - tapOn:
     id: "ai-connect-card-team-check"
-# 결과 줄은 몸 스크롤의 아래에 설 수 있다(큰 글씨 SE 의 몸 창은 좁다) — 먼저 끌어
-# 올리고 기다린다.
-- repeat:
-    times: 3
-    commands:
-      - swipe:
-          from:
-            id: "ai-connect-card-scroll"
-          direction: UP
+# 결과 줄은 몸 스크롤의 아래에 설 수 있다(큰 글씨 SE 의 몸 창은 좁다). 끌어 올리지
+# 않는다 — 결과 줄이 서면 카드가 몸을 끝까지 내린다(#2988). 사진이 그것을 든다.
 - extendedWaitUntil:
     visible:
       id: "ai-connect-card-team-result"

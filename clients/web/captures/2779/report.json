@@ -1,0 +1,374 @@
+{
+  "scenes": [
+    "agent-tab-1280-light",
+    "agent-tab-1280-light-reject-armed",
+    "agent-tab-1280-light-armed-raw",
+    "agent-tab-900-light",
+    "agent-one-390-light",
+    "agent-observer-1280-light",
+    "agent-unavailable-1280-light",
+    "agent-tab-1280-dark",
+    "agent-tab-1280-dark-reject-armed",
+    "agent-tab-1280-dark-armed-raw",
+    "agent-tab-900-dark",
+    "agent-one-390-dark",
+    "agent-observer-1280-dark",
+    "agent-unavailable-1280-dark",
+    "agent-long-1280-light",
+    "compare-agent-pane-light",
+    "compare-agent-pane-dark"
+  ],
+  "checks": [
+    {
+      "name": "light/tab: 레인 표지(로컬 1, 에이전트 2)",
+      "ok": true,
+      "detail": {
+        "lanes": [
+          "local",
+          "agent",
+          "agent"
+        ]
+      }
+    },
+    {
+      "name": "light/tab: A 칸 접근 이름에 「에이전트 · oort에 기록」",
+      "ok": true,
+      "detail": {
+        "labels": [
+          "1번 칸, 로컬, 로컬 · 셸, 실행 중",
+          "2번 칸, 에이전트 · oort에 기록, 온보딩 1단계 문구 다듬기, 나를 기다림",
+          "3번 칸, 에이전트 · oort에 기록, 푸시 알림 두 번 오는 문제 수리, 실행 중"
+        ]
+      }
+    },
+    {
+      "name": "light/tab: 권한 카드 1(기다림 칸)",
+      "ok": true,
+      "detail": {
+        "perm": 1
+      }
+    },
+    {
+      "name": "light/tab: 「항상 허용」 없음",
+      "ok": true,
+      "detail": {
+        "text": "나를 기다림파일을 고쳐도 될까요?onboarding/copy.ts\n- 워크스페이스를 만듭니다\n+ 워크스페이스를 만들어요\n- 팀원을 초대합니다\n+ 팀원을 초대해요\n(+6 −6)전체 6줄 · 미리보기 칸을 스크롤해서 끝까지 보세요이번 한 번 허락거부하고 지시나에게만 보이는 버튼이에요"
+      }
+    },
+    {
+      "name": "light/tab: 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "light/tab: 모르는 종류 한 줄 폴백",
+      "ok": true,
+      "detail": {
+        "skipped": "알아보지 못한 진행 1개는 건너뛰었어요."
+      }
+    },
+    {
+      "name": "light/tab: 기다림 칸 테두리·바닥 띠",
+      "ok": true,
+      "detail": {
+        "waiting": 1
+      }
+    },
+    {
+      "name": "light/tab 1280: 카드 위 진행 줄 56px+, 질문 줄·버튼 보임, 버튼 높이 같음",
+      "ok": true,
+      "detail": {
+        "previewLines": 2,
+        "previewInView": true,
+        "textareaClear": true,
+        "feedVisible": 96,
+        "headVisible": true,
+        "buttonsVisible": true,
+        "armHeights": [
+          28,
+          28
+        ]
+      }
+    },
+    {
+      "name": "light/tab: A 칸은 바닥 띠 대신 카드",
+      "ok": true,
+      "detail": {
+        "strip": 0
+      }
+    },
+    {
+      "name": "light/tab 1280 거부 무장: 진행 줄·질문 줄·확정 버튼 보임",
+      "ok": true,
+      "detail": {
+        "previewLines": null,
+        "previewInView": null,
+        "textareaClear": true,
+        "feedVisible": 94,
+        "headVisible": true,
+        "buttonsVisible": true,
+        "armHeights": []
+      }
+    },
+    {
+      "name": "light/900: 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "light/900: 낮은 칸은 결정 버튼 꺼짐 + 칸 키우기 안내, 질문 줄·진행 줄 보임",
+      "ok": true,
+      "detail": {
+        "allowDisabled": true,
+        "rejectDisabled": true,
+        "line": "칸을 키우면(⌘⇧↵) 결정할 수 있어요.",
+        "lineInside": true,
+        "previewLines": null,
+        "previewInView": null,
+        "textareaClear": true,
+        "feedVisible": 78,
+        "headVisible": true,
+        "buttonsVisible": true,
+        "armHeights": [
+          28,
+          28
+        ]
+      }
+    },
+    {
+      "name": "light/390: 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "light/390: 권한 버튼이 칸 안에",
+      "ok": true,
+      "detail": {
+        "buttons": [
+          {
+            "w": 95.5625,
+            "right": 132.5625
+          },
+          {
+            "w": 89.375,
+            "right": 229.9375
+          }
+        ]
+      }
+    },
+    {
+      "name": "light/390: 질문 줄·버튼 보임, 두 버튼 높이 같음",
+      "ok": true,
+      "detail": {
+        "previewLines": 3,
+        "previewInView": true,
+        "textareaClear": true,
+        "feedVisible": 234,
+        "headVisible": true,
+        "buttonsVisible": true,
+        "armHeights": [
+          44,
+          44
+        ]
+      }
+    },
+    {
+      "name": "light/observer: 권한 버튼 0",
+      "ok": true,
+      "detail": {
+        "n": 0
+      }
+    },
+    {
+      "name": "light/observer: 원문 보기 0",
+      "ok": true,
+      "detail": {
+        "raw": 0
+      }
+    },
+    {
+      "name": "light/unavailable: 허락 버튼 보이되 꺼짐",
+      "ok": true
+    },
+    {
+      "name": "dark/tab: 레인 표지(로컬 1, 에이전트 2)",
+      "ok": true,
+      "detail": {
+        "lanes": [
+          "local",
+          "agent",
+          "agent"
+        ]
+      }
+    },
+    {
+      "name": "dark/tab: A 칸 접근 이름에 「에이전트 · oort에 기록」",
+      "ok": true,
+      "detail": {
+        "labels": [
+          "1번 칸, 로컬, 로컬 · 셸, 실행 중",
+          "2번 칸, 에이전트 · oort에 기록, 온보딩 1단계 문구 다듬기, 나를 기다림",
+          "3번 칸, 에이전트 · oort에 기록, 푸시 알림 두 번 오는 문제 수리, 실행 중"
+        ]
+      }
+    },
+    {
+      "name": "dark/tab: 권한 카드 1(기다림 칸)",
+      "ok": true,
+      "detail": {
+        "perm": 1
+      }
+    },
+    {
+      "name": "dark/tab: 「항상 허용」 없음",
+      "ok": true,
+      "detail": {
+        "text": "나를 기다림파일을 고쳐도 될까요?onboarding/copy.ts\n- 워크스페이스를 만듭니다\n+ 워크스페이스를 만들어요\n- 팀원을 초대합니다\n+ 팀원을 초대해요\n(+6 −6)전체 6줄 · 미리보기 칸을 스크롤해서 끝까지 보세요이번 한 번 허락거부하고 지시나에게만 보이는 버튼이에요"
+      }
+    },
+    {
+      "name": "dark/tab: 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "dark/tab: 모르는 종류 한 줄 폴백",
+      "ok": true,
+      "detail": {
+        "skipped": "알아보지 못한 진행 1개는 건너뛰었어요."
+      }
+    },
+    {
+      "name": "dark/tab: 기다림 칸 테두리·바닥 띠",
+      "ok": true,
+      "detail": {
+        "waiting": 1
+      }
+    },
+    {
+      "name": "dark/tab 1280: 카드 위 진행 줄 56px+, 질문 줄·버튼 보임, 버튼 높이 같음",
+      "ok": true,
+      "detail": {
+        "previewLines": 2,
+        "previewInView": true,
+        "textareaClear": true,
+        "feedVisible": 96,
+        "headVisible": true,
+        "buttonsVisible": true,
+        "armHeights": [
+          28,
+          28
+        ]
+      }
+    },
+    {
+      "name": "dark/tab: A 칸은 바닥 띠 대신 카드",
+      "ok": true,
+      "detail": {
+        "strip": 0
+      }
+    },
+    {
+      "name": "dark/tab 1280 거부 무장: 진행 줄·질문 줄·확정 버튼 보임",
+      "ok": true,
+      "detail": {
+        "previewLines": null,
+        "previewInView": null,
+        "textareaClear": true,
+        "feedVisible": 94,
+        "headVisible": true,
+        "buttonsVisible": true,
+        "armHeights": []
+      }
+    },
+    {
+      "name": "dark/900: 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "dark/900: 낮은 칸은 결정 버튼 꺼짐 + 칸 키우기 안내, 질문 줄·진행 줄 보임",
+      "ok": true,
+      "detail": {
+        "allowDisabled": true,
+        "rejectDisabled": true,
+        "line": "칸을 키우면(⌘⇧↵) 결정할 수 있어요.",
+        "lineInside": true,
+        "previewLines": null,
+        "previewInView": null,
+        "textareaClear": true,
+        "feedVisible": 78,
+        "headVisible": true,
+        "buttonsVisible": true,
+        "armHeights": [
+          28,
+          28
+        ]
+      }
+    },
+    {
+      "name": "dark/390: 가로 넘침 0",
+      "ok": true
+    },
+    {
+      "name": "dark/390: 권한 버튼이 칸 안에",
+      "ok": true,
+      "detail": {
+        "buttons": [
+          {
+            "w": 95.5625,
+            "right": 132.5625
+          },
+          {
+            "w": 89.375,
+            "right": 229.9375
+          }
+        ]
+      }
+    },
+    {
+      "name": "dark/390: 질문 줄·버튼 보임, 두 버튼 높이 같음",
+      "ok": true,
+      "detail": {
+        "previewLines": 3,
+        "previewInView": true,
+        "textareaClear": true,
+        "feedVisible": 234,
+        "headVisible": true,
+        "buttonsVisible": true,
+        "armHeights": [
+          44,
+          44
+        ]
+      }
+    },
+    {
+      "name": "dark/observer: 권한 버튼 0",
+      "ok": true,
+      "detail": {
+        "n": 0
+      }
+    },
+    {
+      "name": "dark/observer: 원문 보기 0",
+      "ok": true,
+      "detail": {
+        "raw": 0
+      }
+    },
+    {
+      "name": "dark/unavailable: 허락 버튼 보이되 꺼짐",
+      "ok": true
+    },
+    {
+      "name": "long: 604 카드(고정 4 + 600)가 그려진다",
+      "ok": true,
+      "detail": {
+        "cards": 604,
+        "ms": 145
+      }
+    },
+    {
+      "name": "long: 스크롤 20 프레임 1초 안",
+      "ok": true,
+      "detail": {
+        "scrollMs": 153
+      }
+    }
+  ]
+}
