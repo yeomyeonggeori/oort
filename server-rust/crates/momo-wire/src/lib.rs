@@ -9,10 +9,15 @@
 //! Modules:
 //! * [`signing`] — WorkHost heartbeat/request payload builders + Ed25519 sign/verify.
 //! * [`payload`] — outbox / agent_job payload structs (JSON DTOs).
+//! * [`human_control`] — ADR-0146 개정 2026-09-28 (R2): the human device-key
+//!   signing bytes (`momo.human.control.v1`, `device_endorse.v1`,
+//!   `device_revoke.v1`) and P-256 verification, shared with Swift/TS through
+//!   `docs/api/human-control-signing.vectors.json`.
 //! * [`provenance`] — ADR-0146 action provenance (Accepted): the per-surface
 //!   signing payloads and `record_provenance`, the **only** `action_signature`
 //!   writer in the workspace (migration 060).
 
+pub mod human_control;
 pub mod payload;
 pub mod provenance;
 pub mod signing;

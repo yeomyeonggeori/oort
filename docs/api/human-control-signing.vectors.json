@@ -1,0 +1,340 @@
+{
+  "_comment": "#3021 \u2014 ADR-0146 \uac1c\uc815 2026-09-28 D-5 \uacf5\uc720 \ud14c\uc2a4\ud2b8 \ubca1\ud130. \uc0ac\ub78c \uae30\uae30 \ud0a4 \uc11c\uba85 \ubc14\uc774\ud2b8 3\uc885(momo.human.control.v1 \u00b7 device_endorse.v1 \u00b7 device_revoke.v1)\uc758 \uc785\ub825(schema\u00b7fields\u00b7content)\uacfc \ud30c\uc0dd\uac12(content_canonical\u00b7content_sha256\u00b7payload\u00b7payload_sha256), \uadf8\ub9ac\uace0 WebCrypto(node)\u00b7CryptoKit(Swift \uc18c\ud504\ud2b8\uc6e8\uc5b4 \ud0a4, \uac00\ub2a5\ud558\uba74 Secure Enclave \uc784\uc2dc \ud0a4)\uac00 \uc2e4\uc81c\ub85c \ub9cc\ub4e0 \uc11c\uba85. Rust(momo-wire tests/human_control_vectors.rs)\uac00 \uc785\ub825\uc5d0\uc11c \ubc14\uc774\ud2b8\ub97c \ub2e4\uc2dc \ub9cc\ub4e4\uc5b4 \uac19\uc74c\uc744 \ud655\uc778\ud558\uace0 \ubaa8\ub4e0 \uc11c\uba85\uc744 \uac80\uc99d\ud55c\ub2e4. \uc7ac\uc0dd\uc131: node server-rust/crates/momo-wire/tests/human_control_vectors/generate.mjs (Swift\uc640 JS \ubc14\uc774\ud2b8\uac00 \ub2e4\ub974\uba74 \uc4f0\uc9c0 \uc54a\ub294\ub2e4). \ube44ASCII\ub294 \ubaa8\ub450 \\u \uc774\uc2a4\ucf00\uc774\ud504\ub85c \uc801\uc5b4 \ud3b8\uc9d1\uae30\uc758 NFC \uc815\uaddc\ud654\uac00 \ubd84\ud574\ud615 \uc2dc\ud5d8 \ubb38\uc790\uc5f4\uc744 \ub9dd\uac00\ub728\ub9ac\uc9c0 \ubabb\ud558\uac8c \ud55c\ub2e4. \ud0a4\ub294 \uace0\uc815 \ub77c\ubca8\uc758 SHA-256\uc5d0\uc11c \ub9cc\ub4e0 \uc2dc\ud5d8 \uc804\uc6a9 \ud0a4\ub2e4.",
+  "format": "momo.human.signing.vectors/v1",
+  "algorithm": "ECDSA P-256 / SHA-256 over the payload bytes",
+  "public_key_encoding": "base64 STANDARD of the 33-byte compressed SEC1 point",
+  "signature_encoding": "base64 STANDARD of raw r||s (64 bytes); signers may emit high-s",
+  "high_s_rule": "normalize-then-verify: s > n/2 is replaced by n - s before verification and the low-s 64 bytes are the canonical stored form; one-time use comes from the nonce (ADR-0146 D-1, D-9), not from signature bytes",
+  "cases": [
+    {
+      "name": "control_input_queue_nfc",
+      "note": "text is deliberately NOT NFC (decomposed Hangul jamo + e + U+0301, multi-line): every implementation must NFC-normalize to hit content_sha256",
+      "schema": "momo.human.control.v1",
+      "fields": {
+        "instance_id": "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
+        "workspace_id": "00000000-0000-7000-8000-000000000001",
+        "member_id": "00000000-0000-7000-8000-000000000101",
+        "device_key_id": "00000000-0000-7000-8000-00000000d001",
+        "host_id": "00000000-0000-7000-8000-00000000f001",
+        "session_id": "00000000-0000-7000-8000-00000000c001",
+        "nonce": "0193a5b8-7c1e-7d2a-9f00-0000000000a1",
+        "issued_at_ms": 1790550000000,
+        "expires_at_ms": 1790550600000
+      },
+      "content": {
+        "kind": "input",
+        "mode": "queue",
+        "text": "\u1112\u1161\u11ab \u1100\u1165\u11ab \u1103\u1165: cafe\u0301 \ub9ac\ud329\ud130\n\ub450 \ubc88\uc9f8 \uc904"
+      },
+      "content_canonical": "\ud55c \uac74 \ub354: caf\u00e9 \ub9ac\ud329\ud130\n\ub450 \ubc88\uc9f8 \uc904",
+      "content_sha256": "de033a4e6fc8ff9d5587c835807ffc44083f46fc18f02ee7597dfe8c0b186bec",
+      "payload": "momo.human.control.v1\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d001\n00000000-0000-7000-8000-00000000f001\n00000000-0000-7000-8000-00000000c001\ninput\nqueue\n0193a5b8-7c1e-7d2a-9f00-0000000000a1\n1790550000000\n1790550600000\nde033a4e6fc8ff9d5587c835807ffc44083f46fc18f02ee7597dfe8c0b186bec",
+      "payload_sha256": "2547cbaf819b3913c9448f1c22f1531a2f6f7333ff4c34d3442e155ea0453f6c",
+      "signatures": [
+        {
+          "signer": "webcrypto",
+          "public_key": "Al5MJdwsIiT7groXgUDS9kC6VMwSS1QutnuZEZlbxi5S",
+          "signature": "Lrq/KysiTAcFGep2EbrgJB/hewq2nuRYirPRFz4GAWvQvVb2IgvtvZHLQQ5oPx2Uz0T4LrM6p7zcjZFpRNMFbg=="
+        },
+        {
+          "signer": "cryptokit",
+          "public_key": "AgBmMkJ9ZDo8OW7LaZbuUluxsG1dG33gCQzHURTemcBr",
+          "signature": "/chM+oiDIqyvWX+OvoS95F4ubqeU8AfuM1mRFn1GQL0dwLwd9dGNGoCZYABGgzuAZ0OBrsjdqnlxV8eanKr62A=="
+        },
+        {
+          "signer": "cryptokit-secure-enclave",
+          "public_key": "A84+bSnaqVZLg7Wb61dj9b3FR1cS7NtV2U5XRT51f9WJ",
+          "signature": "u3iiQcbMISV+zktav5+RC7v3u71tQDcXyoE/L/VWoKf+wTm+6+hF1bW7mcRbqvRAbuSEkoDPZ4UyR+mjNZqM4Q=="
+        }
+      ]
+    },
+    {
+      "name": "control_input_interrupt",
+      "schema": "momo.human.control.v1",
+      "fields": {
+        "instance_id": "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
+        "workspace_id": "00000000-0000-7000-8000-000000000001",
+        "member_id": "00000000-0000-7000-8000-000000000101",
+        "device_key_id": "00000000-0000-7000-8000-00000000d001",
+        "host_id": "00000000-0000-7000-8000-00000000f001",
+        "session_id": "00000000-0000-7000-8000-00000000c001",
+        "nonce": "0193a5b8-7c1e-7d2a-9f00-0000000000a2",
+        "issued_at_ms": 1790550001000,
+        "expires_at_ms": 1790550301000
+      },
+      "content": {
+        "kind": "input",
+        "mode": "interrupt",
+        "text": "stop and run the tests"
+      },
+      "content_canonical": "stop and run the tests",
+      "content_sha256": "6ae6400575956230bd5f95785e5d09d31224f6fbf19c7f841b5d373bf71f3c14",
+      "payload": "momo.human.control.v1\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d001\n00000000-0000-7000-8000-00000000f001\n00000000-0000-7000-8000-00000000c001\ninput\ninterrupt\n0193a5b8-7c1e-7d2a-9f00-0000000000a2\n1790550001000\n1790550301000\n6ae6400575956230bd5f95785e5d09d31224f6fbf19c7f841b5d373bf71f3c14",
+      "payload_sha256": "9dd1a314b8dd3490fd089506e4adf39b4f4d8a093c0d166c33ebf45bf1edfe25",
+      "signatures": [
+        {
+          "signer": "webcrypto",
+          "public_key": "Al5MJdwsIiT7groXgUDS9kC6VMwSS1QutnuZEZlbxi5S",
+          "signature": "B1mPlZniFRNO9p1LilbiU9FLCVMNcxzB+3ji2vNQYt66U+r5hVwxjfgaKe1Pu7cBU/FIN6vVICYrHO+S9Nm/oQ=="
+        },
+        {
+          "signer": "cryptokit",
+          "public_key": "AgBmMkJ9ZDo8OW7LaZbuUluxsG1dG33gCQzHURTemcBr",
+          "signature": "t2Igwd1hMNcQQJipNEKyyS9NZRM2ArRqjrbho1UGUAQCts+MtScvNkr9QLonv83AvGZuw6cJCFkdM+WHVqPmxA=="
+        },
+        {
+          "signer": "cryptokit-secure-enclave",
+          "public_key": "A84+bSnaqVZLg7Wb61dj9b3FR1cS7NtV2U5XRT51f9WJ",
+          "signature": "Tg+L4hePlLwnRg17aiF9OdkNS+k7vEGeC/fw89iWKuGzCwlEFuioBuQ20mhU23Ktnf/SmrhVFELR8rQSWcM24g=="
+        }
+      ]
+    },
+    {
+      "name": "control_spawn",
+      "schema": "momo.human.control.v1",
+      "fields": {
+        "instance_id": "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
+        "workspace_id": "00000000-0000-7000-8000-000000000001",
+        "member_id": "00000000-0000-7000-8000-000000000101",
+        "device_key_id": "00000000-0000-7000-8000-00000000d002",
+        "host_id": "00000000-0000-7000-8000-00000000f001",
+        "session_id": null,
+        "nonce": "5f2c1a9e-3b4d-4e6f-8a7b-9c0d1e2f3a4b",
+        "issued_at_ms": 1790550002000,
+        "expires_at_ms": 1790550602000
+      },
+      "content": {
+        "kind": "spawn",
+        "agent_member_id": "00000000-0000-7000-8000-000000000a01",
+        "folder_id": "fld_7Q2m",
+        "first_prompt": "Fix the flaky test.\n\n\uc774\uc288 #3021\ub3c4 \ubd10 \uc918."
+      },
+      "content_canonical": "00000000-0000-7000-8000-000000000a01\nfld_7Q2m\nFix the flaky test.\n\n\uc774\uc288 #3021\ub3c4 \ubd10 \uc918.",
+      "content_sha256": "1263ae1a37eb0fc00d964d946997e1d3a48123dbcd46812a335ca23707b40d17",
+      "payload": "momo.human.control.v1\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d002\n00000000-0000-7000-8000-00000000f001\n-\nspawn\n-\n5f2c1a9e-3b4d-4e6f-8a7b-9c0d1e2f3a4b\n1790550002000\n1790550602000\n1263ae1a37eb0fc00d964d946997e1d3a48123dbcd46812a335ca23707b40d17",
+      "payload_sha256": "c74a07dcbde8535000f617b1dd61ac238784ac732ee0351a1b2789b2aef49bea",
+      "signatures": [
+        {
+          "signer": "webcrypto",
+          "public_key": "Al5MJdwsIiT7groXgUDS9kC6VMwSS1QutnuZEZlbxi5S",
+          "signature": "QlfYkXmu31KkEa//zh8IDTDiOShVi2LkzBMYi9qoPC8KVc5LWtute0KX/sddba4mXLihCwTng2Fpy4GNbAwEhQ=="
+        },
+        {
+          "signer": "cryptokit",
+          "public_key": "AgBmMkJ9ZDo8OW7LaZbuUluxsG1dG33gCQzHURTemcBr",
+          "signature": "0b5HR5s+GW++ZGaOS1mMt0/XN60OWamhUyJKNMPHGoabISipq0qjVAPmG4o59X8wENJpOPlx8YCSkX2gOlbRCQ=="
+        },
+        {
+          "signer": "cryptokit-secure-enclave",
+          "public_key": "A84+bSnaqVZLg7Wb61dj9b3FR1cS7NtV2U5XRT51f9WJ",
+          "signature": "kD4WTAqrJTFtr8FkAmAsUTtGuIxFQDly5uzO54/wlnPPQ91Bfgb2eKz3xD8ouxDp47zVy/HxUPmXGgPVVzlRKA=="
+        }
+      ]
+    },
+    {
+      "name": "control_permission_session",
+      "schema": "momo.human.control.v1",
+      "fields": {
+        "instance_id": "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
+        "workspace_id": "00000000-0000-7000-8000-000000000001",
+        "member_id": "00000000-0000-7000-8000-000000000101",
+        "device_key_id": "00000000-0000-7000-8000-00000000d002",
+        "host_id": "00000000-0000-7000-8000-00000000f001",
+        "session_id": "00000000-0000-7000-8000-00000000c001",
+        "nonce": "0b5e8c4d-2f1a-4c3b-9d8e-7f6a5b4c3d2e",
+        "issued_at_ms": 1790550003000,
+        "expires_at_ms": 1790550063000
+      },
+      "content": {
+        "kind": "permission",
+        "request_event_id": "00000000-0000-4000-8000-00000000e001",
+        "option_id": "allow-once",
+        "option_kind": "allow_once",
+        "scope": "session"
+      },
+      "content_canonical": "00000000-0000-4000-8000-00000000e001\nallow-once\nallow_once\nsession",
+      "content_sha256": "eac6d4dd5fdc4e8047453a12767587d0d2af8fd93bc664d3b72ea275ce070e0e",
+      "payload": "momo.human.control.v1\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d002\n00000000-0000-7000-8000-00000000f001\n00000000-0000-7000-8000-00000000c001\npermission\n-\n0b5e8c4d-2f1a-4c3b-9d8e-7f6a5b4c3d2e\n1790550003000\n1790550063000\neac6d4dd5fdc4e8047453a12767587d0d2af8fd93bc664d3b72ea275ce070e0e",
+      "payload_sha256": "cab415ca373fd93a057bb5eb041549bdbaac30831ca81a1fd951f40262a6751c",
+      "signatures": [
+        {
+          "signer": "webcrypto",
+          "public_key": "Al5MJdwsIiT7groXgUDS9kC6VMwSS1QutnuZEZlbxi5S",
+          "signature": "KAsrTxsOmAi3878HMsqbhsSLV/dXcev7rYTBm2dvSgY0bAAcK9P2uUDkwiat1kYNc4u1HGENQKburqIN0Cq7zw=="
+        },
+        {
+          "signer": "cryptokit",
+          "public_key": "AgBmMkJ9ZDo8OW7LaZbuUluxsG1dG33gCQzHURTemcBr",
+          "signature": "RBjV2RQ42g0fmgJjVGGAd4WZGxDu3E0J3P36Jfkg7HW6ozedy1O9/WtM8nbA+vH3bc2fZJYXzwp28VHiXZ0yzQ=="
+        },
+        {
+          "signer": "cryptokit-secure-enclave",
+          "public_key": "A84+bSnaqVZLg7Wb61dj9b3FR1cS7NtV2U5XRT51f9WJ",
+          "signature": "SgjCjIkBm2xRuZiABE3Djz7xad72rpGlGwo5lNyQ55rVaeK1Ctg7YUU7gk5nKKXYcvtCSPT0w1/yaRxRSCAbnQ=="
+        }
+      ]
+    },
+    {
+      "name": "control_bundle_manifest",
+      "note": "keys include U+FF61 and U+1F600, whose UTF-16 order differs from their UTF-8 order; a string carries U+0001 and a quote",
+      "schema": "momo.human.control.v1",
+      "fields": {
+        "instance_id": "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
+        "workspace_id": "00000000-0000-7000-8000-000000000001",
+        "member_id": "00000000-0000-7000-8000-000000000101",
+        "device_key_id": "00000000-0000-7000-8000-00000000d001",
+        "host_id": "00000000-0000-7000-8000-00000000f001",
+        "session_id": null,
+        "nonce": "8d9e0f1a-2b3c-4d5e-8f6a-7b8c9d0e1f2a",
+        "issued_at_ms": 1790550004000,
+        "expires_at_ms": 1790550604000
+      },
+      "content": {
+        "kind": "bundle_manifest",
+        "manifest": {
+          "version": 1,
+          "items": [
+            {
+              "path": "CLAUDE.md",
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0
+            },
+            {
+              "path": ".mcp.json",
+              "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+              "bytes": 3
+            }
+          ],
+          "\uff61": true,
+          "\ud83d\ude00": null,
+          "label": "q\"\u0001 \ud300",
+          "negative": -9007199254740991
+        }
+      },
+      "content_canonical": "{\"items\":[{\"bytes\":0,\"path\":\"CLAUDE.md\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"},{\"bytes\":3,\"path\":\".mcp.json\",\"sha256\":\"4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865\"}],\"label\":\"q\\\"\\u0001 \ud300\",\"negative\":-9007199254740991,\"version\":1,\"\ud83d\ude00\":null,\"\uff61\":true}",
+      "content_sha256": "3da7368677b182df6384293bc833c2633208a3c87f5879711b6b98c63cb0adce",
+      "payload": "momo.human.control.v1\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d001\n00000000-0000-7000-8000-00000000f001\n-\nbundle_manifest\n-\n8d9e0f1a-2b3c-4d5e-8f6a-7b8c9d0e1f2a\n1790550004000\n1790550604000\n3da7368677b182df6384293bc833c2633208a3c87f5879711b6b98c63cb0adce",
+      "payload_sha256": "59217c20fb20f2128bef9309a0417a1750c7bf7667bdb22b1a49cde17f75f7de",
+      "signatures": [
+        {
+          "signer": "webcrypto",
+          "public_key": "Al5MJdwsIiT7groXgUDS9kC6VMwSS1QutnuZEZlbxi5S",
+          "signature": "ymxL0bLy0LWEsNGvjguhWIMqYbV0Ra5JsWz+Lhg1K2DJsKza7U4p7hpSC9qxtQDafIPSVRXdJxJAGujZMSsXKA=="
+        },
+        {
+          "signer": "cryptokit",
+          "public_key": "AgBmMkJ9ZDo8OW7LaZbuUluxsG1dG33gCQzHURTemcBr",
+          "signature": "NLbT8vbCOFQ96U1zalBYxntLkvoXFv9AAj804A8bzraM2IycsY5+e7lBclD6viM5SylLR5wvFXWKxwD0L0DkCw=="
+        },
+        {
+          "signer": "cryptokit-secure-enclave",
+          "public_key": "A84+bSnaqVZLg7Wb61dj9b3FR1cS7NtV2U5XRT51f9WJ",
+          "signature": "CESYQQFjZjEPGqB+b+L++tbm7lHU0AZ5Ev9q9DKd4aPjlXQznKmKNTYCFYDzbriEKR/xROzLr5xsNtWIGWPEqA=="
+        }
+      ]
+    },
+    {
+      "name": "control_host_register",
+      "schema": "momo.human.control.v1",
+      "fields": {
+        "instance_id": "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
+        "workspace_id": "00000000-0000-7000-8000-000000000001",
+        "member_id": "00000000-0000-7000-8000-000000000101",
+        "device_key_id": "00000000-0000-7000-8000-00000000d001",
+        "host_id": "00000000-0000-7000-8000-00000000f002",
+        "session_id": null,
+        "nonce": "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f",
+        "issued_at_ms": 1790550005000,
+        "expires_at_ms": 1790550605000
+      },
+      "content": {
+        "kind": "host_register",
+        "host_public_key_b64": "ERERERERERERERERERERERERERERERERERERERERERE=",
+        "host_id": "00000000-0000-7000-8000-00000000f002",
+        "label": "\uc131\uc7ac\uc758 MacBook Pro"
+      },
+      "content_canonical": "ERERERERERERERERERERERERERERERERERERERERERE=\n00000000-0000-7000-8000-00000000f002\n\uc131\uc7ac\uc758 MacBook Pro",
+      "content_sha256": "6ddfb2cc496f86dbc840799dc7ba382ccaeb0d12e9e179b66e7115af002535b9",
+      "payload": "momo.human.control.v1\ninst_01J9Z6T3QK8Y2W5N7M4R0P1XAB\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d001\n00000000-0000-7000-8000-00000000f002\n-\nhost_register\n-\nc3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f\n1790550005000\n1790550605000\n6ddfb2cc496f86dbc840799dc7ba382ccaeb0d12e9e179b66e7115af002535b9",
+      "payload_sha256": "8e1ddd469a58e06161472865fbc5542ffa7859fede2d2da5eff21a24ae42360c",
+      "signatures": [
+        {
+          "signer": "webcrypto",
+          "public_key": "Al5MJdwsIiT7groXgUDS9kC6VMwSS1QutnuZEZlbxi5S",
+          "signature": "66Bb4hUeuLYMNn3sZJx+twGUDbHzykGg9bgNs9lFvF8epxNdx5xF0hwkDiUtK28LOgEv76frCLo1RTlHhcLnew=="
+        },
+        {
+          "signer": "cryptokit",
+          "public_key": "AgBmMkJ9ZDo8OW7LaZbuUluxsG1dG33gCQzHURTemcBr",
+          "signature": "yt7zR/aAXd1pFt909sdu3M7oboVq79QU3LIeES6oZ91kvFQR6h4XiQP8cIY39o9MbLaCSSVuzWeBfrA9y0R+Ag=="
+        },
+        {
+          "signer": "cryptokit-secure-enclave",
+          "public_key": "A84+bSnaqVZLg7Wb61dj9b3FR1cS7NtV2U5XRT51f9WJ",
+          "signature": "g7Perzr7XIrwhRvHSDqEZLT/6yT8yBPxDnsCrmvoX+v9Eid1Hwk6t9d6GCDCjqYUcl1XvsNoetgBNg0kAAXQ8w=="
+        }
+      ]
+    },
+    {
+      "name": "device_endorse",
+      "schema": "momo.human.device_endorse.v1",
+      "fields": {
+        "workspace_id": "00000000-0000-7000-8000-000000000001",
+        "member_id": "00000000-0000-7000-8000-000000000101",
+        "root_key_id": "00000000-0000-7000-8000-00000000d001",
+        "target_alg": "p256",
+        "target_public_key_b64": "A2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW",
+        "label": "\u1109\u1165\u11bc\u110c\u1162\u110b\u1174 iPhone"
+      },
+      "payload": "momo.human.device_endorse.v1\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d001\np256\nA2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW\n\uc131\uc7ac\uc758 iPhone",
+      "payload_sha256": "2373f9df799af79907f41e49cdc18f49cd5f48cb76aaba77e20f734f585a46d4",
+      "signatures": [
+        {
+          "signer": "webcrypto",
+          "public_key": "Al5MJdwsIiT7groXgUDS9kC6VMwSS1QutnuZEZlbxi5S",
+          "signature": "iDydYFB2bY3fSBhXTaKEsHfkzbtQLjSxYaJG8Asrv0Xt2IEBWmsX9cfKI4Q/GZZBI9yv4zH73Nja0kgToDmOtQ=="
+        },
+        {
+          "signer": "cryptokit",
+          "public_key": "AgBmMkJ9ZDo8OW7LaZbuUluxsG1dG33gCQzHURTemcBr",
+          "signature": "08M755osNNDzKBEP6Bqsy4GyQTsTZIQsJ4Ey7//sc/nXVn+8fbuWiXVw8TCNbmfu7Jys+wMrCrdXM2MdtqCg9Q=="
+        },
+        {
+          "signer": "cryptokit-secure-enclave",
+          "public_key": "A84+bSnaqVZLg7Wb61dj9b3FR1cS7NtV2U5XRT51f9WJ",
+          "signature": "bN6yVy4D/bjRFGjdWBX1nBFchb4DYbrvQr7tfjJeqhE4woP84+y04S5isWCPQxuXw/bH2Q0MDzJuOs4QA3ihtA=="
+        }
+      ]
+    },
+    {
+      "name": "device_revoke",
+      "schema": "momo.human.device_revoke.v1",
+      "fields": {
+        "workspace_id": "00000000-0000-7000-8000-000000000001",
+        "member_id": "00000000-0000-7000-8000-000000000101",
+        "root_key_id": "00000000-0000-7000-8000-00000000d001",
+        "target_key_id": "00000000-0000-7000-8000-00000000d002",
+        "revoked_at_ms": 1790551000000
+      },
+      "payload": "momo.human.device_revoke.v1\n00000000-0000-7000-8000-000000000001\n00000000-0000-7000-8000-000000000101\n00000000-0000-7000-8000-00000000d001\n00000000-0000-7000-8000-00000000d002\n1790551000000",
+      "payload_sha256": "120447e22148821883162e04d6beeca3bbdeddeb48a138ea985bc00fc3a6c095",
+      "signatures": [
+        {
+          "signer": "webcrypto",
+          "public_key": "Al5MJdwsIiT7groXgUDS9kC6VMwSS1QutnuZEZlbxi5S",
+          "signature": "ujgVXbG4LhgdFgpziEuckdSN5IIkckA944sI2gM5x6GwVNqXAfGgvOvM7vPnRN7MMikB/Mj/tD+XSTr/IrZ79g=="
+        },
+        {
+          "signer": "cryptokit",
+          "public_key": "AgBmMkJ9ZDo8OW7LaZbuUluxsG1dG33gCQzHURTemcBr",
+          "signature": "fMROsCX4tn0isyTAC2pX94MlZ73auM1X9U8I6QmYAdfNlmG8y/01iuJnl97GoEx1ngHFFA4gykqmihJOU7KUBw=="
+        },
+        {
+          "signer": "cryptokit-secure-enclave",
+          "public_key": "A84+bSnaqVZLg7Wb61dj9b3FR1cS7NtV2U5XRT51f9WJ",
+          "signature": "XtGxxlkN60CJ9VXxnW4I9Kve5GGMTwL6HhUfFTztpC6GfK+7WH3CvzaNIk/nuABdg9kaB2GZWixTko3qaDI4sQ=="
+        }
+      ]
+    }
+  ]
+}

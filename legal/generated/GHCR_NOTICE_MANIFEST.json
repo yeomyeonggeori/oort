@@ -1,21 +1,21 @@
 {
   "counts": {
-    "cargo": 297,
+    "cargo": 321,
     "npm": 469,
-    "unique_blobs": 381
+    "unique_blobs": 398
   },
   "format": "ghcr-notice-bundle/v1",
   "generator": "scripts/generate_ghcr_notice_bundle.py",
   "image_files": {
-    "GHCR_THIRD_PARTY_NOTICES.txt": "5f09259ed15190d24c570888f267f883dbc6cd9fce458345d7bc6ad5729b4f78",
+    "GHCR_THIRD_PARTY_NOTICES.txt": "1e3c153248a7d69c4cf0f544f3da3d02030e6f3a7eddcd4b9134276171e534f1",
     "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
-    "NOTICE": "615ad5e316c1c8ff3b90e317a880af9eca84b9396a9a94422ce52a2a50ef8036",
-    "THIRD_PARTY_NOTICES.md": "ca504fceca9321842cc55272bbc2ff6f02a67447f6750f491482803e25d37613"
+    "NOTICE": "bdf5b59ae727afd096d80adeaa5d3ee11a44fae40f8cc10940b6fc36fb492392",
+    "THIRD_PARTY_NOTICES.md": "d059850cdc5c825b1052f1445321125270fcfa407708febe0e88420a7a9b0009"
   },
   "inputs": {
     "clarify_sha256": "fcb9ac157804777c306cebdcc24f804992a74fcf87c27d42dbc5d9370a7ed8e6",
     "clients_web_package_lock_sha256": "3fe4cf55556ea18354f1024dfe564626553ceacb9310b290404e9e2af5ee736a",
-    "server_rust_cargo_lock_sha256": "d0a329bbe5957fcc4750ed25149f0def16de44cd47d93ba37c90c4ab22d795ee",
+    "server_rust_cargo_lock_sha256": "9c5a7802811a527f6ffb965a9f15e87f47aad289ce034ee60fa36899ca8669d4",
     "spdx_texts_sha256": {
       "0BSD.txt": "3662a9adfe6feddb077f96dfad3cb30408540a2a3eae5a656b7ff4375e622be0",
       "Apache-2.0.txt": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
@@ -29,8 +29,8 @@
     }
   },
   "outputs": {
-    "bundle_sha256": "5f09259ed15190d24c570888f267f883dbc6cd9fce458345d7bc6ad5729b4f78",
-    "sha256_manifest_sha256": "2bbfc51f6a3f6a47379fa50387c4616ff69d13700d66ed611b5258477411d2a7"
+    "bundle_sha256": "1e3c153248a7d69c4cf0f544f3da3d02030e6f3a7eddcd4b9134276171e534f1",
+    "sha256_manifest_sha256": "e2168d10bd039941ac9ab99c32da0bc2a9f4e3b0a37922a91b3ae63f05a83eeb"
   },
   "packages": [
     {
@@ -286,6 +286,27 @@
       "files": [
         {
           "name": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "54fb6dfe99a6906f862aa40282f0e8e9d9d0f22d57d99ab8acbaf4c8ceaa70e0",
+          "source": "package-tree"
+        }
+      ],
+      "name": "base16ct",
+      "repository": "https://github.com/RustCrypto/formats",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT",
+      "version": "1.0.0"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
           "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
           "source": "package-tree"
         },
@@ -363,6 +384,27 @@
       "source": "package-tree",
       "spdx": "MIT OR Apache-2.0",
       "version": "0.10.4"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "98181e7249d0c01737645ec982499ce99a0f07eb8f7d625b8840d799d10dbc01",
+          "source": "package-tree"
+        }
+      ],
+      "name": "block-buffer",
+      "repository": "https://github.com/RustCrypto/utils",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.12.1"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
@@ -549,6 +591,48 @@
       "files": [
         {
           "name": "LICENSE-APACHE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "70c9d40f1f9545c3f133b8a67206e89da850f6468eed072281bb3701514114a9",
+          "source": "package-tree"
+        }
+      ],
+      "name": "cmov",
+      "repository": "https://github.com/RustCrypto/utils",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT",
+      "version": "0.5.4"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "73b9dc2e79c7308998dd30296e073aefaefb944a68fb89aa412c23c0edcabcaa",
+          "source": "package-tree"
+        }
+      ],
+      "name": "const-oid",
+      "repository": "https://github.com/RustCrypto/formats",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT",
+      "version": "0.10.2"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
           "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
           "source": "package-tree"
         },
@@ -605,6 +689,27 @@
       "source": "package-tree",
       "spdx": "MIT OR Apache-2.0",
       "version": "0.8.7"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "003736bc98408b53511b9cc8ff5d1af3bf0a8f17d53841cc39d8ab1b96a195b0",
+          "source": "package-tree"
+        }
+      ],
+      "name": "cpubits",
+      "repository": "https://github.com/RustCrypto/utils",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.1.1"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
@@ -743,6 +848,27 @@
         },
         {
           "name": "LICENSE-MIT",
+          "sha256": "57a4d75c1d095bb94754a478f3cd15e60ac66a5c5627d844be01a918eea5fe88",
+          "source": "package-tree"
+        }
+      ],
+      "name": "crypto-bigint",
+      "repository": "https://github.com/RustCrypto/crypto-bigint",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT",
+      "version": "0.7.5"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
           "sha256": "3521672491a3479422d5fe1aca6645dd2984090f85da6e5205abfb18fb7a6897",
           "source": "package-tree"
         }
@@ -764,6 +890,27 @@
         },
         {
           "name": "LICENSE-MIT",
+          "sha256": "d2e7ec5355c96eeade56b09187ceb48a6a30299da3ce7531a66d3d11405ab963",
+          "source": "package-tree"
+        }
+      ],
+      "name": "crypto-common",
+      "repository": "https://github.com/RustCrypto/traits",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.2.2"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
           "sha256": "63af4bea227c94d021e99427f6ca3a4b8efddadcca93ab6130f708cf6138cf68",
           "source": "package-tree"
         }
@@ -773,6 +920,27 @@
       "source": "package-tree",
       "spdx": "MIT OR Apache-2.0",
       "version": "0.9.2"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "91585c36e4fb9ab4ca0d3dfac5d66d3c0c62cc51f640a0e1196542daf2267eae",
+          "source": "package-tree"
+        }
+      ],
+      "name": "ctutils",
+      "repository": "https://github.com/RustCrypto/utils",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT",
+      "version": "0.4.2"
     },
     {
       "copyright": "Copyright (c) 2016-2021 isis agora lovecruft. All rights reserved.; Copyright (c) 2016-2021 Henry de Valence. All rights reserved.; Copyright (c) 2012 The Go Authors. All rights reserved.; copyright notice, this list of conditions and the following disclaimer",
@@ -833,6 +1001,27 @@
       "version": "0.7.10"
     },
     {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "73b9dc2e79c7308998dd30296e073aefaefb944a68fb89aa412c23c0edcabcaa",
+          "source": "package-tree"
+        }
+      ],
+      "name": "der",
+      "repository": "https://github.com/RustCrypto/formats",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT",
+      "version": "0.8.2"
+    },
+    {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2024 Jacob Pratt et al.",
       "ecosystem": "cargo",
       "files": [
@@ -880,6 +1069,27 @@
       "files": [
         {
           "name": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "af59cea35d7f5e2777a713b8d155d65efa2c339eb43f3c14e868c6ac8506edad",
+          "source": "package-tree"
+        }
+      ],
+      "name": "digest",
+      "repository": "https://github.com/RustCrypto/traits",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.11.3"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
           "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
           "source": "package-tree"
         },
@@ -910,6 +1120,27 @@
       "source": "package-tree",
       "spdx": "MIT",
       "version": "0.15.7"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2018-2022 RustCrypto Developers",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "78779d420019e6b4630376af8e86b6b335ee8a2f89ede6e0411e0469a326aaa4",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "9aa4f92bfcde293ebeca9e2379fa18d1d61f000977da144c7b74c2986c9b6466",
+          "source": "package-tree"
+        }
+      ],
+      "name": "ecdsa",
+      "repository": "https://github.com/RustCrypto/signatures",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT",
+      "version": "0.17.0"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2018-2022 RustCrypto Developers",
@@ -968,6 +1199,27 @@
       "source": "package-tree",
       "spdx": "MIT OR Apache-2.0",
       "version": "1.17.0"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "d8c4ab431f20da8452c9a217084163822e5fd9d134e1343903c929f2859fc8fd",
+          "source": "package-tree"
+        }
+      ],
+      "name": "elliptic-curve",
+      "repository": "https://github.com/RustCrypto/traits",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT",
+      "version": "0.14.1"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
@@ -1052,6 +1304,27 @@
       "source": "package-tree",
       "spdx": "Apache-2.0 OR MIT",
       "version": "5.4.2"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "3708458dee7f359ac6c9c5558023ed481be87e5372c43ebd7f2ca7ad23c12026",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "8d0c1d1d4b2bebf5b9211f0e883d5a482b7808f3ed31320da14ddee95811f4ef",
+          "source": "package-tree"
+        }
+      ],
+      "name": "ff",
+      "repository": "https://github.com/zkcrypto/ff",
+      "source": "package-tree",
+      "spdx": "MIT/Apache-2.0",
+      "version": "0.14.0"
     },
     {
       "copyright": "Copyright 2015-2020 the fiat-crypto authors (see the AUTHORS file); Copyright (c) 2015-2020 the fiat-crypto authors (see the AUTHORS file); Copyright (c) 2015-2020 the fiat-crypto authors (see the AUTHORS file).",
@@ -1474,6 +1747,32 @@
       "version": "0.5.1"
     },
     {
+      "copyright": "copyright assignment is required to contribute to the \"group\" library.; copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "COPYRIGHT",
+          "sha256": "7429802d3e67e3308471b91fbea341e484c4e0a23d0fb230a8636c38184cec79",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "source": "package-tree"
+        }
+      ],
+      "name": "group",
+      "repository": "https://github.com/zkcrypto/group",
+      "source": "package-tree",
+      "spdx": "MIT/Apache-2.0",
+      "version": "0.14.0"
+    },
+    {
       "copyright": "Copyright (c) 2017 h2 authors",
       "ecosystem": "cargo",
       "files": [
@@ -1642,6 +1941,27 @@
       "files": [
         {
           "name": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "9e0dfd2dd4173a530e238cb6adb37aa78c34c6bc7444e0e10c1ab5d8881f63ba",
+          "source": "package-tree"
+        }
+      ],
+      "name": "hmac",
+      "repository": "https://github.com/RustCrypto/MACs",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.13.0"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
           "sha256": "8ada45cd9f843acf64e4722ae262c622a2b3b3007c7310ef36ac1061a30f6adb",
           "source": "package-tree"
         },
@@ -1751,6 +2071,27 @@
       "source": "package-tree",
       "spdx": "MIT OR Apache-2.0",
       "version": "1.0.3"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "70c9d40f1f9545c3f133b8a67206e89da850f6468eed072281bb3701514114a9",
+          "source": "package-tree"
+        }
+      ],
+      "name": "hybrid-array",
+      "repository": "https://github.com/RustCrypto/hybrid-array",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.4.15"
     },
     {
       "copyright": "Copyright (c) 2014-2026 Sean McArthur",
@@ -2612,6 +2953,27 @@
       "files": [
         {
           "name": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "d8c4ab431f20da8452c9a217084163822e5fd9d134e1343903c929f2859fc8fd",
+          "source": "package-tree"
+        }
+      ],
+      "name": "p256",
+      "repository": "https://github.com/RustCrypto/elliptic-curves",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT",
+      "version": "0.14.0"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
           "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
           "source": "package-tree"
         },
@@ -2915,6 +3277,48 @@
       "source": "package-tree",
       "spdx": "MIT OR Apache-2.0",
       "version": "0.2.21"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "4621bda86773a67b5645bbd25cf1bf8b6820d4fcec3885b23b9ceec612007f63",
+          "source": "package-tree"
+        }
+      ],
+      "name": "primefield",
+      "repository": "https://github.com/RustCrypto/elliptic-curves",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT",
+      "version": "0.14.0"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "233b95ccbf90dc67e32f3e8995c489f6312d9191ebd141a931c3b684f1e3be6d",
+          "source": "package-tree"
+        }
+      ],
+      "name": "primeorder",
+      "repository": "https://github.com/RustCrypto/elliptic-curves",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT",
+      "version": "0.14.0"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
@@ -3299,6 +3703,27 @@
       "version": "0.12.28"
     },
     {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2018-2022 RustCrypto Developers",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "78779d420019e6b4630376af8e86b6b335ee8a2f89ede6e0411e0469a326aaa4",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "9aa4f92bfcde293ebeca9e2379fa18d1d61f000977da144c7b74c2986c9b6466",
+          "source": "package-tree"
+        }
+      ],
+      "name": "rfc6979",
+      "repository": "https://github.com/RustCrypto/signatures",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT",
+      "version": "0.6.0"
+    },
+    {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
       "ecosystem": "cargo",
       "files": [
@@ -3512,6 +3937,27 @@
       "source": "package-tree",
       "spdx": "MIT OR Apache-2.0",
       "version": "1.2.0"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "57a4d75c1d095bb94754a478f3cd15e60ac66a5c5627d844be01a918eea5fe88",
+          "source": "package-tree"
+        }
+      ],
+      "name": "sec1",
+      "repository": "https://github.com/RustCrypto/formats",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT",
+      "version": "0.8.1"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
@@ -3761,6 +4207,27 @@
       "version": "0.10.9"
     },
     {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "831e0f43ad0bf014c1c4fec5767aae470434c1d66d6e671be2d823e729063e25",
+          "source": "package-tree"
+        }
+      ],
+      "name": "sha2",
+      "repository": "https://github.com/RustCrypto/hashes",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.11.0"
+    },
+    {
       "copyright": "Copyright (c) 2019 Eliza Weisman",
       "ecosystem": "cargo",
       "files": [
@@ -3838,6 +4305,27 @@
       "source": "package-tree",
       "spdx": "Apache-2.0 OR MIT",
       "version": "2.2.0"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "9aa4f92bfcde293ebeca9e2379fa18d1d61f000977da144c7b74c2986c9b6466",
+          "source": "package-tree"
+        }
+      ],
+      "name": "signature",
+      "repository": "https://github.com/RustCrypto/traits",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT",
+      "version": "3.0.0"
     },
     {
       "copyright": "Copyright (c) 2017 Adam Wick",
@@ -5842,6 +6330,27 @@
       "source": "package-tree",
       "spdx": "MIT OR Apache-2.0",
       "version": "0.52.6"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "c1c9d5ca65122bab96e368709f8cfe9b92b443a3c21306c3260fc98eaac7e5fc",
+          "source": "package-tree"
+        }
+      ],
+      "name": "wnaf",
+      "repository": "https://github.com/RustCrypto/elliptic-curves",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT",
+      "version": "0.14.1"
     },
     {
       "copyright": "COPYRIGHT AND PERMISSION NOTICE; Copyright © 2020-2024 Unicode, Inc.",

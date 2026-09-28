@@ -44,6 +44,11 @@ Direct desktop dependencies an ADR introduced are named there too
 ADR-0190) and libc (MIT OR Apache-2.0); the Tauri desktop Cargo graph
 is license-gated by scripts/check_cargo_licenses.sh.
 
+Direct server dependencies an ADR introduced are named in
+legal/THIRD_PARTY_NOTICES.md ("Server direct additions"), currently p256
+(Apache-2.0 OR MIT) and unicode-normalization (MIT OR Apache-2.0),
+ADR-0146 amendment 2026-09-28; both are also in the generated bundle.
+
 Named runtime companions operators actually run next to these images:
 
 - PostgreSQL 18 (PostgreSQL License)
