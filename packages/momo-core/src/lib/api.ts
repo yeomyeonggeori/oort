@@ -3018,19 +3018,33 @@ export async function endWorkSession(
   return res.workSession;
 }
 
-/** Continue an orphaned git lineage on an explicitly chosen eligible host. */
+/**
+ * Continue an orphaned git lineage on an explicitly chosen eligible host.
+ *
+ * `signed` (#3027 → #3028): the successor session id the owner chose and the
+ * owner's `momo.human.control.v2` spawn over it. They travel together or not
+ * at all (400 `resume_signature_incomplete`); the server creates the new
+ * session under exactly that id. Required for a member host when the server
+ * requires signed instructions (403 `device_signature_required`).
+ */
 export async function resumeWorkSession(
   workspaceId: string,
   sessionId: string,
-  targetHostId: string
+  targetHostId: string,
+  signed?: { sessionId: string; humanSignature: HumanSignatureRequest }
 ): Promise<WorkSession> {
+  const body: Record<string, unknown> = { targetHostId };
+  if (signed) {
+    body.sessionId = signed.sessionId;
+    body.humanSignature = humanSignatureRequestBody(signed.humanSignature);
+  }
   const res = await request<{ workSession: WorkSession }>(
     `/v1/workspaces/${encodeURIComponent(
       workspaceId
     )}/work-sessions/${encodeURIComponent(sessionId)}/resume`,
     {
       method: "POST",
-      body: JSON.stringify({ targetHostId }),
+      body: JSON.stringify(body),
     }
   );
   return res.workSession;
@@ -3060,9 +3074,11 @@ export async function setWorkSessionObservation(
 // POST /v1/workspaces/{ws}/work-sessions/{session}/permission-decisions
 //
 // Golden contract: docs/api/work-permission-decision.golden.json. The body is
-// exactly `requestEventId`·`optionId`·`kind`. `instruction` is NOT sent: the
-// route refuses a non-empty one with 400 `permission_instruction_unsupported`
-// until R2 (owner input needs the device-key signature). Only the session owner
+// `requestEventId`·`optionId`·`kind`, plus `humanSignature` on a signed allow
+// (#3028, ADR-0146 개정 D-8). `instruction` is NEVER sent: 「거부 + 지시」 is a
+// plain reject here followed by a signed `input` on the instruction route
+// (`sendWorkInstruction`), so the route's 400 `permission_instruction_unsupported`
+// stays what it is. Only the session owner
 // (= host owner) may decide; the first decision wins (same again → 200 with the
 // same row, a different one → 409 `permission_already_decided`), and a lapsed,
 // cancelled or withdrawn request answers 409 `permission_request_closed`.
@@ -3073,6 +3089,49 @@ export interface WorkPermissionDecisionBody {
   requestEventId: string;
   optionId: string;
   kind: WorkPermissionKind;
+  /** The owner's device signature over an allow (never on a reject, D-8). */
+  humanSignature?: HumanSignatureRequest;
+}
+
+// ---- The owner's device signature on the wire (ADR-0146 개정 D-5 · D-10) ----
+//
+// Server `HumanSignatureRequest` is `deny_unknown_fields`: a signer's extra
+// output (the phone's `schema`, the desktop shell's `devicePublicKey` and
+// `payloadSha256`) would turn every signed request into a 400. So the body is
+// rebuilt key by key, like the decision body.
+
+export interface HumanSignatureRequest {
+  deviceKeyId: string;
+  /** 128-bit random; for `input` the `clientMsgId`. */
+  nonce: string;
+  issuedAtMs: number;
+  expiresAtMs: number;
+  /** base64 raw r‖s. */
+  signature: string;
+  /** `input`: `queue` | `interrupt`. */
+  mode?: "queue" | "interrupt";
+  /** `permission`: `once` | `session`. */
+  scope?: "once" | "session";
+  /** `spawn` only. */
+  agentMemberId?: string;
+  folderId?: string;
+}
+
+export function humanSignatureRequestBody(
+  signature: HumanSignatureRequest
+): HumanSignatureRequest {
+  const body: HumanSignatureRequest = {
+    deviceKeyId: signature.deviceKeyId,
+    nonce: signature.nonce,
+    issuedAtMs: signature.issuedAtMs,
+    expiresAtMs: signature.expiresAtMs,
+    signature: signature.signature,
+  };
+  if (signature.mode !== undefined) body.mode = signature.mode;
+  if (signature.scope !== undefined) body.scope = signature.scope;
+  if (signature.agentMemberId !== undefined) body.agentMemberId = signature.agentMemberId;
+  if (signature.folderId !== undefined) body.folderId = signature.folderId;
+  return body;
 }
 
 export interface WorkPermissionRequest {
@@ -3093,11 +3152,15 @@ export interface WorkPermissionRequest {
 export function workPermissionDecisionBody(
   decision: WorkPermissionDecisionBody
 ): WorkPermissionDecisionBody {
-  return {
+  const body: WorkPermissionDecisionBody = {
     requestEventId: decision.requestEventId,
     optionId: decision.optionId,
     kind: decision.kind,
   };
+  if (decision.humanSignature) {
+    body.humanSignature = humanSignatureRequestBody(decision.humanSignature);
+  }
+  return body;
 }
 
 export async function decideWorkPermission(
@@ -3112,6 +3175,52 @@ export async function decideWorkPermission(
     { method: "POST", body: JSON.stringify(workPermissionDecisionBody(decision)) }
   );
   return res.permissionRequest;
+}
+
+// ---- Signed instruction (#3027 R2-E7 → #3028) --------------------------------
+// POST /v1/workspaces/{ws}/work-sessions/{session}/instructions
+//
+// Golden: docs/api/work-instruction.golden.json. The owner's signed `input`:
+// `clientMsgId` MUST equal the signature's nonce and `mode` the signed mode
+// (400 `instruction_signature_mismatch`). Closed while the server does not
+// require signed instructions (403 `signed_instructions_disabled`). A retry
+// of the same signed instruction answers 200 with `replayed: true`.
+
+export type WorkInstructionMode = "queue" | "interrupt";
+
+export interface WorkInstructionBody {
+  text: string;
+  mode: WorkInstructionMode;
+  clientMsgId: string;
+  humanSignature: HumanSignatureRequest;
+}
+
+export interface WorkInstructionResult {
+  workControl: { id: string; status: string };
+  message: { id: string; channelId: string; rootId: string; seq: number; clientMsgId: string };
+  replayed: boolean;
+}
+
+export function workInstructionBody(body: WorkInstructionBody): WorkInstructionBody {
+  return {
+    text: body.text,
+    mode: body.mode,
+    clientMsgId: body.clientMsgId,
+    humanSignature: humanSignatureRequestBody(body.humanSignature),
+  };
+}
+
+export async function sendWorkInstruction(
+  workspaceId: string,
+  sessionId: string,
+  body: WorkInstructionBody
+): Promise<WorkInstructionResult> {
+  return request<WorkInstructionResult>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/work-sessions/${encodeURIComponent(sessionId)}/instructions`,
+    { method: "POST", body: JSON.stringify(workInstructionBody(body)) }
+  );
 }
 
 // ---- Terminal attach capability (ADR-0126 D1 / ADR-0125 D10) ----------------
