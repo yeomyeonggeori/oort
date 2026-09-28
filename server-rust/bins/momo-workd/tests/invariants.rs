@@ -3387,3 +3387,107 @@ async fn inv_33_r2_a_relogin_rebinds_the_roots_key_id_only_on_the_local_socket()
         Err("root_key_id_retired")
     );
 }
+
+/// #3078 review M1/L2: a local `reset-root` then a pin under a new id (the
+/// workaround before #3078) moves the root key's binding too, and a host
+/// already stuck that way heals on the app's next `pin_root`. A rebind never
+/// takes a revoked id or another key's id.
+#[tokio::test]
+async fn inv_34_r2_a_reset_then_new_id_pin_moves_the_binding_and_a_stuck_host_heals() {
+    let mut h = harness_r2(&[("claude", &[])]);
+    let root = Device::new(1);
+    let phone = Device::new(2);
+    let lost = Device::new(3);
+    pin(&h, &root);
+    let request = signed(spawn(&h, "claude", "start"), &root, None);
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+    let input = |h: &Harness, device: &Device, endorsed: Option<Value>, text: &str| {
+        signed(
+            control(h, "input", h.owner, Some(session), json!({ "text": text })),
+            device,
+            endorsed,
+        )
+    };
+    let phone_ok = input(&h, &phone, Some(endorsement(&h, &root, &phone)), "phone");
+    assert!(poll_and_ack(&mut h, &phone_ok).await.ok);
+    h.trust
+        .lock()
+        .unwrap()
+        .apply_revocation(
+            &revocation(&h, &root, &lost, true),
+            RevocationSource::LocalApp,
+        )
+        .unwrap();
+
+    // A rebind takes neither a revoked id nor another key's id.
+    {
+        let mut trust = h.trust.lock().unwrap();
+        assert_eq!(
+            trust.pin_root(lost.id, "p256", &root.public(), now_ms()),
+            Err("root_key_revoked")
+        );
+        assert_eq!(
+            trust.pin_root(phone.id, "p256", &root.public(), now_ms()),
+            Err("root_key_id_taken")
+        );
+        assert_eq!(trust.root().map(|r| r.key_id), Some(root.id));
+    }
+
+    // reset-root, then the same key under a new id: the root still signs.
+    let second = root.renamed();
+    {
+        let mut trust = h.trust.lock().unwrap();
+        trust.reset_root().unwrap();
+        assert_eq!(
+            trust.pin_root(second.id, "p256", &second.public(), now_ms()),
+            Ok(true)
+        );
+        assert_eq!(
+            trust.pin_root(root.id, "p256", &root.public(), now_ms()),
+            Err("root_key_id_retired"),
+            "the id before the reset is retired"
+        );
+    }
+    let after_reset = input(&h, &second, None, "after a reset");
+    assert_eq!(
+        poll_and_ack(&mut h, &after_reset).await,
+        ControlAck::ok(Some(session))
+    );
+
+    // A host left stuck by an older workd: pinned under a third id while the
+    // key is still bound under the second. The app's next pin heals it.
+    let third = root.renamed();
+    let state_dir = h.dir.join("state");
+    let trust_file = state_dir.join("human-trust.json");
+    let mut raw: Value =
+        serde_json::from_str(&std::fs::read_to_string(&trust_file).unwrap()).unwrap();
+    raw["root"]["keyId"] = json!(third.id);
+    raw.as_object_mut().unwrap().remove("retiredRootKeyIds");
+    std::fs::write(&trust_file, serde_json::to_vec_pretty(&raw).unwrap()).unwrap();
+    let identity = h.trust.lock().unwrap().identity();
+    *h.trust.lock().unwrap() = HumanTrust::open(&state_dir, identity).unwrap();
+    let stuck = input(&h, &third, None, "stuck");
+    assert_eq!(
+        poll_and_ack(&mut h, &stuck).await,
+        ControlAck::refused("device_signature_invalid"),
+        "the stale binding refuses the root"
+    );
+    assert_eq!(
+        h.trust
+            .lock()
+            .unwrap()
+            .pin_root(third.id, "p256", &third.public(), now_ms()),
+        Ok(false),
+        "the same pin: nothing moves but the stale binding"
+    );
+    let healed = input(&h, &third, None, "healed");
+    assert_eq!(
+        poll_and_ack(&mut h, &healed).await,
+        ControlAck::ok(Some(session))
+    );
+    let old = input(&h, &second, None, "the stale id");
+    assert_eq!(
+        poll_and_ack(&mut h, &old).await,
+        ControlAck::refused("device_signature_invalid")
+    );
+}
