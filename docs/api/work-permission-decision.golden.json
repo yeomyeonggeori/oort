@@ -60,6 +60,7 @@
     {"name": "option_kind_mismatch", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "reject-once", "kind": "allow_once"}, "status": 400, "code": "permission_option_invalid"},
     {"name": "empty_option", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "", "kind": "allow_once"}, "status": 400, "code": "permission_option_invalid"},
     {"name": "instruction", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "reject-once", "kind": "reject_once", "instruction": "use the public key"}, "status": 400, "code": "permission_instruction_unsupported"},
+    {"name": "session_scope_signed", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "allow-once", "kind": "allow_once", "humanSignature": {"deviceKeyId": "00000000-0000-7000-8000-00000000d001", "nonce": "00000000-0000-4000-8000-00000000f001", "issuedAtMs": 1790550000000, "expiresAtMs": 1790550300000, "signature": "AAAA", "scope": "session"}}, "status": 400, "code": "permission_scope_unsupported", "note": "「이 세션 동안」 opens with E8 (#3028); sign scope once"},
     {"name": "blank_instruction", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "reject-once", "kind": "reject_once", "instruction": "  "}, "status": 200, "note": "blank is no instruction"},
     {"name": "not_the_owner", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "allow-once", "kind": "allow_once"}, "principal": "teammate", "status": 403, "code": "permission_owner_only"},
     {"name": "agent_bearer", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "allow-once", "kind": "allow_once"}, "principal": "agent", "status": 403},
@@ -73,7 +74,18 @@
     "permission_option_invalid",
     "permission_instruction_unsupported",
     "permission_already_decided",
-    "permission_request_closed"
+    "permission_request_closed",
+    "permission_scope_unsupported"
   ],
+  "device_signature_error_codes": {
+    "_comment": "#3023 (ADR-0146 개정 D-8 · D-10): humanSignature 거부의 이름 붙은 오류. 서명은 보내면 항상 검증하고, MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED가 켜지면 allow에 필수다. reject는 서명하지 않는다. 라벨은 host(momo-workd human_trust)와 같다.",
+    "device_signature_required": 403,
+    "device_signature_invalid": 403,
+    "device_key_revoked": 403,
+    "device_key_not_endorsed": 403,
+    "device_signature_expired": 403,
+    "device_nonce_replayed": 409,
+    "instance_id_unconfigured": 503
+  },
   "ttl_seconds": 600
 }

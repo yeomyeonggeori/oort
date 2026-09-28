@@ -47,6 +47,7 @@
 //! | `wdc_3_a_revoked_host_stops` | ADR-0188 D7: after revoke the host gets 401 and exits (code 3) |
 //! | `wdc_4_a_member_host_takes_its_owner_and_kill_only` | the agent's spawn request is refused (`remote_host_kill_only`) and an agent-origin dispatched spawn is never delivered, while the owner's resume completes and an agent's `kill` is delivered; no seed on the wire |
 //! | `wdc_6_the_owner_decides_a_permission_request_once_and_nobody_else_can` | ADR-0188 D5 (#3000): the agent's request becomes a `work_permission_request` row (FORCE RLS); an agent bearer (the owner's own agent), a teammate, an `allow_always` (by kind or by an option id relabelled `allow_once`), an instruction and an unknown request are refused and the agent keeps waiting; the owner's `allow_once` becomes a `permission` control the host acks, the agent gets exactly that option, the server's `approval.decided` and an audit row are written; the same decision again is 200 with one control, a different one 409; a lapsed request is 409 and `expired`; ending the session cancels what is pending and answers the agent `cancelled` |
+//! | `wdc_7_r2_signed_resume_then_queue_and_interrupt_end_to_end` | #3027, R2 on at both ends (server flag, host `require_human_signatures` with the root pinned): the owner's resume signed over its successor session runs on the real binary; a signed `queue` sent through `POST …/instructions` waits behind the hung first turn, a signed `interrupt` cancels it (ACP `session/cancel`) and runs next, then the queued one; both instructions are session-thread messages keyed by their nonce |
 //! | `wdc_5_a_workspace_host_is_not_served` | a workspace-scoped host registered through the API by the workspace owner: `momo-workd run` refuses it (exit 2) and sends nothing |
 
 use std::net::SocketAddr;
@@ -295,6 +296,13 @@ struct Server {
 }
 
 async fn start_server(pool: PgPool) -> Server {
+    start_server_with(pool, momo_server::config::DeviceKeySettings::default()).await
+}
+
+async fn start_server_with(
+    pool: PgPool,
+    device_keys: momo_server::config::DeviceKeySettings,
+) -> Server {
     let _ = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::WARN)
         .with_test_writer()
@@ -303,7 +311,8 @@ async fn start_server(pool: PgPool) -> Server {
         pool,
         TEST_JWT_SECRET.to_string(),
         "ws://127.0.0.1:8000/connection/websocket".to_string(),
-    );
+    )
+    .with_device_keys(device_keys);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind momo-server");
@@ -2169,4 +2178,312 @@ async fn wdc_6_the_owner_decides_a_permission_request_once_and_nobody_else_can()
     eprintln!("wdc_6: lapsed → 409 expired; end → pending cancelled, agent answered cancelled");
 
     assert_eq!(workd.stop().await, Some(0));
+}
+
+// ---------------------------------------------------------------------------
+// #3027 — R2 end to end on the real binary
+// ---------------------------------------------------------------------------
+
+const INSTANCE_3027: &str = "inst_3027_wdc";
+
+/// A software P-256 key standing in for the desktop app's Secure Enclave key.
+struct RootKey {
+    signing: p256::ecdsa::SigningKey,
+    public_b64: String,
+}
+
+impl RootKey {
+    fn new() -> RootKey {
+        let signing = p256::ecdsa::SigningKey::from_slice(&[27; 32]).expect("scalar");
+        let point = signing.verifying_key().to_sec1_point(true);
+        RootKey {
+            public_b64: base64::engine::general_purpose::STANDARD.encode(point.as_bytes()),
+            signing,
+        }
+    }
+
+    fn sign(&self, bytes: &[u8]) -> String {
+        use p256::ecdsa::signature::Signer as _;
+        let signature: p256::ecdsa::Signature = self.signing.sign(bytes);
+        base64::engine::general_purpose::STANDARD.encode(signature.to_bytes())
+    }
+}
+
+fn now_ms_3027() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_millis() as i64
+}
+
+fn stub_prompts(workd: &Workd, key: &str) -> Vec<String> {
+    workd
+        .record(key)
+        .iter()
+        .filter(|entry| entry["received"]["method"] == "session/prompt")
+        .map(|entry| entry["received"]["params"]["prompt"][0]["text"].to_string())
+        .collect()
+}
+
+fn stub_methods(workd: &Workd, key: &str) -> Vec<String> {
+    workd
+        .record(key)
+        .iter()
+        .filter_map(|entry| entry["received"]["method"].as_str().map(str::to_string))
+        .collect()
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn wdc_7_r2_signed_resume_then_queue_and_interrupt_end_to_end() {
+    use momo_wire::human_control::{ControlContent, HumanControl, InputMode};
+
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed_fixture(&su, &app_pool).await;
+    let server = start_server_with(
+        app_pool,
+        momo_server::config::DeviceKeySettings {
+            instance_id: Some(INSTANCE_3027.to_string()),
+            human_control_signature_required: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let base = server.base.as_str();
+    let http = reqwest::Client::new();
+    let token = login(&http, base, &fixture).await;
+    let workspace = fixture.workspace;
+
+    // The host, with R2 on and the desktop app's root pinned in its state
+    // folder (as `pin_root` over the control socket leaves it).
+    let mut workd = Workd::new(base, &fixture, &[("claude", &["--hang-first"])]);
+    let mut config: Value = serde_json::from_slice(&std::fs::read(&workd.config).unwrap()).unwrap();
+    config["require_human_signatures"] = json!(true);
+    std::fs::write(&workd.config, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
+    let registered = workd.register(&token).await;
+    let host = Uuid::parse_str(registered["hostId"].as_str().expect("hostId")).unwrap();
+
+    let root = RootKey::new();
+    let response = http
+        .post(format!("{base}/v1/workspaces/{workspace}/device-keys"))
+        .bearer_auth(&token)
+        .json(
+            &json!({ "alg": "p256", "publicKey": root.public_b64, "platform": "macos",
+                       "label": "맥", "currentPassword": TEST_PASSWORD }),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201, "the root key registers");
+    let body: Value = response.json().await.unwrap();
+    let root_id = Uuid::parse_str(body["deviceKey"]["id"].as_str().unwrap()).unwrap();
+    {
+        let mut trust = momo_workd::human_trust::HumanTrust::open(
+            &workd.dir.join("state"),
+            momo_workd::human_trust::TrustIdentity {
+                workspace_id: workspace,
+                owner_member_id: fixture.owner,
+                host_id: host,
+            },
+        )
+        .expect("trust state");
+        assert_eq!(
+            trust.pin_root(root_id, "p256", &root.public_b64, now_ms_3027()),
+            Ok(true)
+        );
+    }
+    workd.start();
+    wait_until("the host to heartbeat", &workd, || async {
+        host_row(&http, base, &token, &fixture, host).await["lastSeenAtMs"]
+            .as_i64()
+            .map(|_| ())
+    })
+    .await;
+
+    // ---- the owner's resume, signed over the successor session -------------
+    let old_laptop = register_idle_member_host(&http, base, &token, &fixture).await;
+    let created: Value = http
+        .post(format!("{base}/v1/workspaces/{workspace}/work-sessions"))
+        .bearer_auth(&token)
+        .json(&json!({ "channelId": fixture.channel, "hostId": old_laptop,
+                       "tool": "claude", "label": "first turn hangs" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let source = Uuid::parse_str(created["workSession"]["id"].as_str().unwrap()).unwrap();
+    orphan_session(&su, source).await;
+    let successor = Uuid::new_v4();
+    let issued = now_ms_3027();
+    let nonce = Uuid::new_v4();
+    let bytes = HumanControl {
+        instance_id: INSTANCE_3027,
+        workspace_id: workspace,
+        member_id: fixture.owner,
+        device_key_id: root_id,
+        host_id: host,
+        session_id: Some(successor),
+        nonce,
+        issued_at_ms: issued,
+        expires_at_ms: issued + 5 * 60 * 1000,
+        content: ControlContent::Spawn {
+            agent_member_id: fixture.agent,
+            folder_id: "repo",
+            tool: "claude",
+            channel_id: fixture.channel,
+            first_prompt: "first turn hangs",
+        },
+    }
+    .signed_bytes()
+    .unwrap();
+    let resumed = http
+        .post(format!(
+            "{base}/v1/workspaces/{workspace}/work-sessions/{source}/resume"
+        ))
+        .bearer_auth(&token)
+        .json(
+            &json!({ "targetHostId": host, "sessionId": successor, "humanSignature": {
+                "deviceKeyId": root_id, "nonce": nonce, "issuedAtMs": issued,
+                "expiresAtMs": issued + 5 * 60 * 1000, "agentMemberId": fixture.agent,
+                "folderId": "repo", "signature": root.sign(&bytes),
+            }}),
+        )
+        .send()
+        .await
+        .unwrap();
+    let (session, spawn) = accepted_resume(&su, &fixture, host, resumed).await;
+    assert_eq!(
+        session, successor,
+        "the session is the one the owner signed"
+    );
+    wait_until("the signed resume to be acked", &workd, || async {
+        (control_state(&su, spawn).await == ("acked".to_string(), Some(session))).then_some(())
+    })
+    .await;
+    wait_until("the hung first turn", &workd, || async {
+        (stub_prompts(&workd, "claude").len() == 1).then_some(())
+    })
+    .await;
+
+    // ---- queue, then interrupt, through the instruction route --------------
+    let instruct = |text: &str, mode: InputMode| {
+        let issued = now_ms_3027();
+        let nonce = Uuid::new_v4();
+        let bytes = HumanControl {
+            instance_id: INSTANCE_3027,
+            workspace_id: workspace,
+            member_id: fixture.owner,
+            device_key_id: root_id,
+            host_id: host,
+            session_id: Some(session),
+            nonce,
+            issued_at_ms: issued,
+            expires_at_ms: issued + 5 * 60 * 1000,
+            content: ControlContent::Input { mode, text },
+        }
+        .signed_bytes()
+        .unwrap();
+        (
+            nonce,
+            json!({ "text": text, "mode": mode.as_str(), "clientMsgId": nonce,
+            "humanSignature": {
+                "deviceKeyId": root_id, "nonce": nonce, "issuedAtMs": issued,
+                "expiresAtMs": issued + 5 * 60 * 1000, "mode": mode.as_str(),
+                "signature": root.sign(&bytes),
+            }}),
+        )
+    };
+    let send = |body: Value| {
+        let http = http.clone();
+        let token = token.clone();
+        async move {
+            let response = http
+                .post(format!(
+                    "{base}/v1/workspaces/{workspace}/work-sessions/{session}/instructions"
+                ))
+                .bearer_auth(&token)
+                .json(&body)
+                .send()
+                .await
+                .unwrap();
+            let status = response.status().as_u16();
+            (
+                status,
+                response.json::<Value>().await.unwrap_or(Value::Null),
+            )
+        }
+    };
+    let (queue_nonce, body) = instruct("queued after the turn", InputMode::Queue);
+    let (status, queued) = send(body).await;
+    assert_eq!(status, 201, "{queued}");
+    let queued_control = Uuid::parse_str(queued["workControl"]["id"].as_str().unwrap()).unwrap();
+    wait_until("the queued instruction acked", &workd, || async {
+        (control_state(&su, queued_control).await.0 == "acked").then_some(())
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert_eq!(
+        stub_prompts(&workd, "claude").len(),
+        1,
+        "the queued instruction waits behind the running turn"
+    );
+
+    let (interrupt_nonce, body) = instruct("stop and do this now", InputMode::Interrupt);
+    let (status, interrupted) = send(body).await;
+    assert_eq!(status, 201, "{interrupted}");
+    wait_until("the interrupt and the queued turn", &workd, || async {
+        (stub_prompts(&workd, "claude").len() == 3).then_some(())
+    })
+    .await;
+    let prompts = stub_prompts(&workd, "claude");
+    assert_eq!(
+        prompts,
+        [
+            json!("first turn hangs").to_string(),
+            json!("stop and do this now").to_string(),
+            json!("queued after the turn").to_string(),
+        ],
+        "interrupt goes first, then the queue"
+    );
+    let methods = stub_methods(&workd, "claude");
+    let cancel = methods
+        .iter()
+        .position(|m| m == "session/cancel")
+        .expect("the hung turn was cancelled");
+    let second_prompt = methods
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| *m == "session/prompt")
+        .nth(1)
+        .map(|(i, _)| i)
+        .unwrap();
+    assert!(cancel < second_prompt, "{methods:?}");
+
+    // Both instructions are thread messages keyed by their nonce.
+    let root_message: Uuid =
+        sqlx::query_scalar("SELECT root_message_id FROM work_session WHERE id = $1")
+            .bind(session)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    for (nonce, text) in [
+        (queue_nonce, "queued after the turn"),
+        (interrupt_nonce, "stop and do this now"),
+    ] {
+        let (root_id_row, body): (Option<Uuid>, Option<String>) = sqlx::query_as(
+            "SELECT root_id, body FROM message WHERE channel_id = $1 AND client_msg_id = $2",
+        )
+        .bind(fixture.channel)
+        .bind(nonce)
+        .fetch_one(&su)
+        .await
+        .expect("the instruction's thread message");
+        assert_eq!(root_id_row, Some(root_message));
+        assert_eq!(body.as_deref(), Some(text));
+    }
+    workd.stop().await;
 }

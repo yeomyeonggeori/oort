@@ -83,6 +83,7 @@ gh run watch "$(gh run list --workflow=release-desktop.yml -L1 --json databaseId
 | Developer ID Application | 인증서 + 개인키 | 로그인 키체인 `Developer ID Application: Kwak Seongjae (YWQQFQM38J)` | ✅ `security find-identity -v -p codesigning` 에 valid |
 | 공증 | notarytool 키체인 프로파일 `momo-notary` | 로그인 키체인 | ✅ `xcrun notarytool history --keychain-profile momo-notary` 성공 (Accepted 이력 있음) |
 | 업데이터 서명 | minisign 개인키 | `~/.momo-secrets/momo-updater.key` (0600, 레포 밖) | ✅ 존재. 공개키는 `tauri.conf.json` 에 컴파일됨 |
+| 앱 프로비저닝 | Developer ID 프로비저닝 프로파일(비밀 아님: 공개 인증서·팀 id) | `~/.momo-secrets/momo-desktop-developer-id.provisionprofile` (레포 밖) | ✅ 2026-09-28 발급(#3025). 인증서 만료 2027-02-01. 발행 스크립트가 빌드 전에 검사 |
 | 툴체인 | rust 1.95 / tauri-cli 2.11 / node 24 / npm 11 / Xcode 26.5 | 로그인 셸 PATH | ✅ 워크플로 preflight 가 매번 재확인 |
 
 즉 **Developer ID 서명·공증·업데이터 서명 전부 자격이 충족되어 있고, 자리표시자(placeholder)로 남긴 항목은 없다.**
@@ -94,6 +95,7 @@ gh run watch "$(gh run list --workflow=release-desktop.yml -L1 --json databaseId
 | Variable | `MOMO_SIGN_IDENTITY` | 위 Developer ID 문자열이 기본값 |
 | Variable | `MOMO_NOTARY_PROFILE` | `momo-notary` |
 | Variable | `MOMO_UPDATER_KEY` | `~/.momo-secrets/momo-updater.key` |
+| (스크립트 기본값) | `MOMO_PROVISIONING_PROFILE` | `~/.momo-secrets/momo-desktop-developer-id.provisionprofile`. 워크플로가 넘기지 않으므로 러너에서는 기본 경로만 쓴다 |
 | Variable | `MOMO_DIST_REPO` | `yeomyeonggeori/momo-alpha` |
 | Secret | `MOMO_DIST_TOKEN` | 러너 사용자의 `gh`/git 자격을 그대로 쓴다(기본 경로) |
 | Secret | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | **필수**(2026-09-23부터 키에 암호가 있다). 값은 성재 맥의 로그인 키체인 항목 `momo-updater-key`에 있다 |

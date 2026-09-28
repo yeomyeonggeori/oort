@@ -33,16 +33,35 @@
 //! 「거부하고 지시」's instruction is refused while R1 lasts: the next turn it
 //! would start is an owner `input`, which ADR-0188 D3 opens only with R2's
 //! device-key signature.
+//!
+//! ## R2 — the owner's device signature (ADR-0146 개정 D-8 · D-10, #3023)
+//!
+//! A decision may carry `humanSignature`: the owner's `momo.human.control.v1`
+//! statement (`kind=permission`) over the stored request event id, the stored
+//! option id and kind, and the scope. It is verified whenever it is sent
+//! ([`crate::human_control`]), against the session's host and session — never
+//! the request's — and, once verified, rides on the `permission` control
+//! (`WorkControl.humanSignature` for workd) with an `action_signature` row in
+//! the same transaction.
+//!
+//! * An **allow** needs it when the instance set
+//!   `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED` (403 `device_signature_required`).
+//! * A **reject** never needs it (D-8: the switch-off side is unsigned).
+//! * Scope `session` (「이 세션 동안」) is refused until E8 (#3028) opens it —
+//!   400 `permission_scope_unsupported`; the host refuses it too.
+//! * The idempotent retry of a decided request answers before the signature
+//!   is looked at, so resending the same signed decision is not a replay.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
+use momo_auth::human_control::{ControlSubject, ControlTarget};
 use momo_auth::{Principal, PrincipalKind};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
 use momo_t3::work_control::{
-    active_host_owner_in_tx, insert_work_control_in_tx, NewWorkControl, KIND_PERMISSION,
-    STATUS_APPROVED as CONTROL_STATUS_APPROVED,
+    active_host_owner_in_tx, insert_work_control_in_tx, target_work_host_in_tx, NewWorkControl,
+    HOST_SCOPE_MEMBER, KIND_PERMISSION, STATUS_APPROVED as CONTROL_STATUS_APPROVED,
 };
 use momo_t3::work_permission::{
     attach_permission_control_in_tx, close_permission_request_in_tx,
@@ -54,11 +73,15 @@ use momo_t3::{lock_work_session_detail_in_tx, T3Error};
 use serde_json::json;
 use uuid::Uuid;
 
+use crate::config::DeviceKeySettings;
 use crate::dto::{
-    WorkPermissionDecisionRequest, WorkPermissionDecisionResponse, WorkPermissionRequestDto,
-    WorkSessionAcpEvent,
+    HumanSignatureRequest, WorkPermissionDecisionRequest, WorkPermissionDecisionResponse,
+    WorkPermissionRequestDto, WorkSessionAcpEvent,
 };
 use crate::error::ApiError;
+use crate::human_control::{
+    authorize_human_control_in_tx, record_control_provenance_in_tx, signature_columns,
+};
 use crate::routes::shared::{
     audit_via_token_id, path_uuid, settle, tenant_tx, workspace_scope, Rejectable,
 };
@@ -75,6 +98,8 @@ pub const CODE_OPTION_INVALID: &str = "permission_option_invalid";
 pub const CODE_INSTRUCTION_UNSUPPORTED: &str = "permission_instruction_unsupported";
 pub const CODE_ALREADY_DECIDED: &str = "permission_already_decided";
 pub const CODE_REQUEST_CLOSED: &str = "permission_request_closed";
+/// #3023: a signed decision for 「이 세션 동안」 before E8 (#3028) opens it.
+pub const CODE_SCOPE_UNSUPPORTED: &str = "permission_scope_unsupported";
 
 const AUDIT_PERMISSION_DECIDED: &str = "work.permission.decided";
 const SCHEMA_PERMISSION_DECIDED: &str = "momo.work_permission.decided.v1";
@@ -104,11 +129,13 @@ fn closed() -> ApiError {
 }
 
 /// Everything judged before a transaction opens.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 struct Decision {
     request_event_id: Uuid,
     option_id: String,
     kind: String,
+    /// The owner's device signature, verified inside the transaction.
+    human_signature: Option<HumanSignatureRequest>,
 }
 
 fn validated_decision(
@@ -151,10 +178,22 @@ fn validated_decision(
             "an instruction with a rejection is not accepted yet (owner input is R2)",
         ));
     }
+    if request
+        .human_signature
+        .as_ref()
+        .is_some_and(|signature| signature.scope.as_deref() == Some("session"))
+    {
+        return Err(ApiError::coded(
+            StatusCode::BAD_REQUEST,
+            CODE_SCOPE_UNSUPPORTED,
+            "「이 세션 동안」 is not accepted yet; sign scope once",
+        ));
+    }
     Ok(Decision {
         request_event_id: request.request_event_id,
         option_id,
         kind: kind.to_string(),
+        human_signature: request.human_signature,
     })
 }
 
@@ -180,6 +219,7 @@ pub async fn decide(
     let session_id = path_uuid(&session, "invalid work session id")?;
     let member_id = principal.member_id;
     let via_token_id = audit_via_token_id(&principal);
+    let settings = state.device_keys.clone();
 
     let row = settle(
         "work_permissions.decide",
@@ -187,10 +227,13 @@ pub async fn decide(
             Box::pin(async move {
                 decide_in_tx(
                     conn,
-                    workspace_id,
-                    session_id,
-                    member_id,
-                    via_token_id,
+                    DecideInput {
+                        workspace_id,
+                        session_id,
+                        member_id,
+                        via_token_id,
+                        settings: &settings,
+                    },
                     &decision,
                 )
                 .await
@@ -203,14 +246,26 @@ pub async fn decide(
     }))
 }
 
-async fn decide_in_tx(
-    conn: &mut PgConnection,
+struct DecideInput<'a> {
     workspace_id: Uuid,
     session_id: Uuid,
     member_id: Uuid,
     via_token_id: Option<Uuid>,
+    settings: &'a DeviceKeySettings,
+}
+
+async fn decide_in_tx(
+    conn: &mut PgConnection,
+    input: DecideInput<'_>,
     decision: &Decision,
 ) -> Rejectable<PermissionRequestRow> {
+    let DecideInput {
+        workspace_id,
+        session_id,
+        member_id,
+        via_token_id,
+        settings,
+    } = input;
     // Lock order: session → host (share) → request, the order ingestion
     // (session → request) and revoke (host → request) agree with.
     let Some((session, _)) = lock_work_session_detail_in_tx(conn, workspace_id, session_id).await?
@@ -295,6 +350,38 @@ async fn decide_in_tx(
         )));
     };
 
+    // R2 (#3023): the owner's device signature over exactly this decision —
+    // the STORED event id and option, this session, the session's host. The
+    // last check before the writes: it spends the nonce.
+    let host_is_member = target_work_host_in_tx(conn, workspace_id, session.host_id)
+        .await?
+        .is_some_and(|host| host.scope == HOST_SCOPE_MEMBER);
+    let required = settings.human_control_signature_required
+        && host_is_member
+        && option.kind == KIND_ALLOW_ONCE;
+    let verified = match authorize_human_control_in_tx(
+        conn,
+        settings,
+        &ControlTarget {
+            workspace_id,
+            member_id,
+            host_id: session.host_id,
+            session_id: Some(session_id),
+            subject: ControlSubject::Permission {
+                request_event_id: request.request_event_id,
+                option_id: &option.option_id,
+                option_kind: &option.kind,
+            },
+        },
+        decision.human_signature.as_ref(),
+        required,
+    )
+    .await?
+    {
+        Ok(verified) => verified,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+
     // ---- writes ------------------------------------------------------------
     let Some(decided) =
         decide_permission_request_in_tx(conn, workspace_id, request.id, member_id, &option).await?
@@ -321,9 +408,13 @@ async fn decide_in_tx(
                 &option.kind,
             ),
             status: CONTROL_STATUS_APPROVED.to_string(),
+            human: verified.as_ref().map(signature_columns),
         },
     )
     .await?;
+    if let Some(verified) = &verified {
+        record_control_provenance_in_tx(conn, workspace_id, control.id, verified).await?;
+    }
     let control = dispatch_control_in_tx(conn, workspace_id, &control).await?;
     let decided = attach_permission_control_in_tx(conn, workspace_id, decided.id, control.id)
         .await?
@@ -369,6 +460,7 @@ async fn decide_in_tx(
                     "kind": option.kind,
                     "control_id": control.id.to_string(),
                     "control_status": control.status,
+                    "device_key_id": verified.as_ref().map(|v| v.key.id.to_string()),
                 }),
             ),
     )
@@ -398,6 +490,7 @@ mod tests {
             option_id: "allow-once".into(),
             kind: kind.into(),
             instruction: None,
+            human_signature: None,
         }
     }
 
@@ -470,6 +563,7 @@ mod tests {
                 CODE_INSTRUCTION_UNSUPPORTED,
                 CODE_ALREADY_DECIDED,
                 CODE_REQUEST_CLOSED,
+                CODE_SCOPE_UNSUPPORTED,
             ]
         );
         assert_eq!(
@@ -513,8 +607,8 @@ mod tests {
             }
         }
         assert_eq!(
-            checked, 6,
-            "the golden's six pre-database refusals were exercised"
+            checked, 7,
+            "the golden's seven pre-database refusals were exercised"
         );
     }
 

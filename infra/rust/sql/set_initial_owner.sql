@@ -79,6 +79,15 @@ BEGIN
    WHERE workspace_id = '00000000-0000-7000-8000-000000000001'
      AND member_id = '00000000-0000-7000-8000-000000000101'
      AND invalidated_at IS NULL;
+
+  -- #3022 (ADR-0146 개정 D-7): the device signing keys those sessions
+  -- registered end with them too. Rows are revoked, never deleted.
+  UPDATE member_device_key
+     SET revoked_at = now(),
+         revoked_reason = 'member_sessions_ended'
+   WHERE workspace_id = '00000000-0000-7000-8000-000000000001'
+     AND member_id = '00000000-0000-7000-8000-000000000101'
+     AND revoked_at IS NULL;
 END
 $$;
 

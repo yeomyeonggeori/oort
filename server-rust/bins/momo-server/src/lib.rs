@@ -33,10 +33,12 @@ pub mod config;
 pub mod cors;
 pub mod dto;
 pub mod error;
+pub mod human_control;
 mod livekit;
 pub mod rate_limit;
 pub mod realtime_advert;
 pub mod routes;
+mod session_end;
 pub mod work_host_auth;
 
 pub use realtime_advert::{
@@ -52,8 +54,8 @@ use axum::Router;
 use momo_db::PgPool;
 
 use crate::config::{
-    AgentGatewaySettings, AgentPortConfig, CorsConfig, EphemeralSettings, LiveKitConfig,
-    MentionSettings, RateLimitConfig, RealtimeSettings, SettingsConfig, T3Settings,
+    AgentGatewaySettings, AgentPortConfig, CorsConfig, DeviceKeySettings, EphemeralSettings,
+    LiveKitConfig, MentionSettings, RateLimitConfig, RealtimeSettings, SettingsConfig, T3Settings,
     WebhookSettings,
 };
 use crate::error::ApiError;
@@ -198,6 +200,9 @@ pub struct AppState {
     /// disabled state: routing an `@mention` to its agent is the product, so an
     /// instance that configured nothing still does it.
     pub mentions: Arc<MentionSettings>,
+    /// ADR-0146 개정 2026-09-28 (#3022): the instance id signed statements echo
+    /// and the (default-off) host-registration signature requirement.
+    pub device_keys: Arc<DeviceKeySettings>,
     /// MOMO-605 CORS origin allowlist (ADR-0133 P2). Fail-closed-empty like the
     /// rest: an instance that named no origin mounts no CORS middleware at all,
     /// which is byte-for-byte today's behaviour.
@@ -287,6 +292,7 @@ impl AppState {
             rate_limit: Arc::new(RateLimitState::default()),
             agent_port: Arc::new(AgentPortState::default()),
             mentions: Arc::new(MentionSettings::default()),
+            device_keys: Arc::new(DeviceKeySettings::default()),
             cors: Arc::new(CorsConfig::default()),
             ephemeral: Arc::new(EphemeralState::default()),
             webhook: Arc::new(WebhookSettings::default()),
@@ -460,6 +466,13 @@ impl AppState {
     /// Attach the mention-routing knobs (B5.2).
     pub fn with_mentions(mut self, settings: MentionSettings) -> Self {
         self.mentions = Arc::new(settings);
+        self
+    }
+
+    /// Attach the device-key settings (#3022). Default: no instance id and no
+    /// host-registration signature requirement.
+    pub fn with_device_keys(mut self, settings: DeviceKeySettings) -> Self {
+        self.device_keys = Arc::new(settings);
         self
     }
 
@@ -937,6 +950,24 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/devices/{device}",
             delete(routes::devices::revoke),
         )
+        // A person's device signing keys (ADR-0146 개정 2026-09-28, #3022).
+        .route(
+            "/v1/workspaces/{ws}/device-keys",
+            post(routes::device_keys::register).get(routes::device_keys::list),
+        )
+        // What a device signs against (#3023): the instance id and the clock.
+        .route(
+            "/v1/workspaces/{ws}/device-keys/signing-context",
+            get(routes::device_keys::signing_context),
+        )
+        .route(
+            "/v1/workspaces/{ws}/device-keys/{key}/endorsement",
+            post(routes::device_keys::endorse),
+        )
+        .route(
+            "/v1/workspaces/{ws}/device-keys/{key}/revocation",
+            post(routes::device_keys::revoke),
+        )
         // work hosts (ADR-0125 registry)
         .route(
             "/v1/workspaces/{ws}/work-hosts",
@@ -989,6 +1020,13 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/work-sessions/{session}/permission-decisions",
             post(routes::work_permissions::decide),
+        )
+        // ADR-0146 개정 D-5b (#3027): the owner's signed instruction. Same
+        // boundary as the decision route: human bearer only, never signable
+        // by a host, absent from `momo_auth::required_agent_scope`.
+        .route(
+            "/v1/workspaces/{ws}/work-sessions/{session}/instructions",
+            post(routes::work_instructions::send),
         )
         // work controls — the host-control ledger (#1114, ADR-0114 D4/D5)
         .route(
