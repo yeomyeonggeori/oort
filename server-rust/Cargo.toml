@@ -66,6 +66,15 @@ libc = "0.2"
 # `shatype`. Raising it to SHA-256 to match the rest of this block would make
 # every browser fail to authenticate against the TURN. See `momo_t3::turn`.
 sha1 = "0.10"
+# ADR-0146 개정 2026-09-28 D-1 (#3021): human device keys are Secure Enclave
+# P-256 ECDSA (raw r||s, compressed SEC1). RustCrypto `p256` (Apache-2.0 OR MIT)
+# verifies them in `momo_wire::human_control`; verification only needs the
+# `ecdsa` feature, so no PEM/pkcs8/getrandom. The passkey brief (#3031) is to
+# reuse this same crate rather than add a second P-256 stack.
+p256 = { version = "0.14", default-features = false, features = ["ecdsa"] }
+# NFC for human-written text inside signed bytes (ADR-0146 D-5: `input` body and
+# `spawn` first prompt). Already in the lock via sqlx; MIT OR Apache-2.0.
+unicode-normalization = "0.1"
 
 # auth
 jsonwebtoken = "9"
