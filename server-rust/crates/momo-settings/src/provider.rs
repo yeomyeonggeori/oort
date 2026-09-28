@@ -577,6 +577,9 @@ mod tests {
         for moved in [
             "https://evil.example.com/v1",
             "https://api.example.com.evil.test/v1",
+            "https://xapi.example.com/v1",
+            "https://api%2eexample.com/v1",
+            "https://api.example.com./v1",
             "http://api.example.com/v1",
             "https://api.example.com:8443/v1",
             "https://[::1]:443/v1",
