@@ -20,11 +20,10 @@
 //! by `momo_join_private.device_link_workspace_id`. The voucher itself is not a
 //! credential — presenting it as `Authorization` is 401.
 
-use crate::session_end::end_session_lineage_in_tx;
+use crate::session_end::{end_session_lineage_in_tx, LineageEnd};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::{Extension, Json};
-use momo_auth::device_key::DeviceKeyRevocationReason;
 use momo_auth::{
     confirm_device_link_sas_in_tx, consume_device_link_in_tx, device_link_status_in_tx,
     issue_device_link_in_tx, linked_device_session_id_in_tx, list_linked_devices_in_tx,
@@ -406,7 +405,7 @@ pub async fn revoke_device(
                         workspace_id,
                         member_id,
                         session_id,
-                        DeviceKeyRevocationReason::DeviceUnlinked,
+                        LineageEnd::DeviceUnlinked,
                     )
                     .await?;
                 }
