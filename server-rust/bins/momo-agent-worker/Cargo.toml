@@ -30,6 +30,8 @@ momo-db = { path = "../../crates/momo-db" }
 momo-messaging = { path = "../../crates/momo-messaging" }
 momo-outbox = { path = "../../crates/momo-outbox" }
 momo-settings = { path = "../../crates/momo-settings" }
+# #2976: the egress guard's reqwest plumbing, shared with momo-provider-probe.
+momo-egress = { path = "../../crates/momo-egress" }
 # goal SRV-T1: the one tool this worker executes is `work.session.end`, and its
 # executor calls the SAME domain functions `routes::work_sessions::end` calls —
 # `end_work_session_in_tx` + `terminate_in_tx` under the ADR-0140 lock ladder.

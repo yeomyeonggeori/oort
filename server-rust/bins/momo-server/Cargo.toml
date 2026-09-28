@@ -99,7 +99,9 @@ jsonwebtoken.workspace = true
 # outbound HTTP this process can perform is `momo-ephemeral`'s, whose entire API
 # is `publish(&EphemeralSignal)` — plus the sealed crates named above
 # (momo-drive, momo-t3, momo-unfurl, momo-provider-probe), each of which exposes
-# a fixed set of operations and no request builder. Adding `reqwest` to this manifest would undo
+# a fixed set of operations and no request builder. `momo-egress` (#2976) does
+# expose a client builder and is reached only through momo-provider-probe — it
+# must not be listed here either. Adding `reqwest` to this manifest would undo
 # the guard, because a handler could then build any request to any host. The
 # durable rail is untouched: `outbox → relay → Centrifugo` remains the only path
 # a persisted message travels.
