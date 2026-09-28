@@ -1115,11 +1115,20 @@ impl MentionSettings {
 ///   until the web client coordinates rotation across tabs, because a tab
 ///   opened later spends the token an older tab holds and the server cannot
 ///   tell that from theft (#3022 review H2).
+/// * `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED` — `true` makes a person's
+///   instruction to a member-scoped host (a permission **allow** today; the
+///   signed `input`/`spawn` route is E7 #3027) without a verified
+///   `momo.human.control.v1` signature a 403 `device_signature_required`, and
+///   refuses the owner's resume onto a member host (v1 cannot sign a spawn
+///   into a session the server chose, #3024 M2). Default **off** (ADR-0146
+///   D-11, Q11: closed until the R1 re-review and the R2 review PASS). A
+///   signature that IS sent is verified either way (#3023).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeviceKeySettings {
     pub instance_id: Option<String>,
     pub host_register_signature_required: bool,
     pub refresh_reuse_sweep_all_sessions: bool,
+    pub human_control_signature_required: bool,
 }
 
 impl DeviceKeySettings {
@@ -1129,6 +1138,8 @@ impl DeviceKeySettings {
             host_register_signature_required: env("MOMO_HOST_REGISTER_SIGNATURE_REQUIRED")
                 .is_some_and(|value| value.trim() == "true"),
             refresh_reuse_sweep_all_sessions: env("MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS")
+                .is_some_and(|value| value.trim() == "true"),
+            human_control_signature_required: env("MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED")
                 .is_some_and(|value| value.trim() == "true"),
         }
     }
@@ -1141,6 +1152,18 @@ impl DeviceKeySettings {
             return Some(
                 "MOMO_HOST_REGISTER_SIGNATURE_REQUIRED=true needs MOMO_INSTANCE_ID (the instance id signed statements carry)",
             );
+        }
+        if self.human_control_signature_required && self.instance_id.is_none() {
+            return Some(
+                "MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED=true needs MOMO_INSTANCE_ID (the instance id signed statements carry)",
+            );
+        }
+        if self
+            .instance_id
+            .as_deref()
+            .is_some_and(|id| id.is_empty() || id.len() > 256)
+        {
+            return Some("MOMO_INSTANCE_ID must be 1..=256 bytes");
         }
         if self
             .instance_id
@@ -2142,24 +2165,39 @@ mod tests {
             "password sign-ins are not swept until the web client coordinates tabs"
         );
         assert_eq!(default.boot_error(), None);
+        assert!(
+            !default.human_control_signature_required,
+            "ADR-0146 D-11: signed instructions stay optional until R1 and R2 PASS"
+        );
         let unsatisfiable = DeviceKeySettings {
             instance_id: None,
             host_register_signature_required: true,
-            refresh_reuse_sweep_all_sessions: false,
+            ..DeviceKeySettings::default()
         };
         assert!(unsatisfiable.boot_error().is_some());
+        let unsatisfiable_control = DeviceKeySettings {
+            instance_id: None,
+            human_control_signature_required: true,
+            ..DeviceKeySettings::default()
+        };
+        assert!(unsatisfiable_control.boot_error().is_some());
         let on = DeviceKeySettings {
             instance_id: Some("inst_a".into()),
             host_register_signature_required: true,
-            refresh_reuse_sweep_all_sessions: false,
+            human_control_signature_required: true,
+            ..DeviceKeySettings::default()
         };
         assert_eq!(on.boot_error(), None);
         let smuggled = DeviceKeySettings {
             instance_id: Some("inst\nb".into()),
-            host_register_signature_required: false,
-            refresh_reuse_sweep_all_sessions: false,
+            ..DeviceKeySettings::default()
         };
         assert!(smuggled.boot_error().is_some());
+        let oversized = DeviceKeySettings {
+            instance_id: Some("i".repeat(257)),
+            ..DeviceKeySettings::default()
+        };
+        assert!(oversized.boot_error().is_some());
     }
 
     #[test]

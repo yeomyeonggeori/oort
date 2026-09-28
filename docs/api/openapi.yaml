@@ -3306,6 +3306,47 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/device-keys/signing-context:
+    get:
+      tags: [device-keys]
+      operationId: getDeviceSigningContext
+      summary: What a device signs a momo.human.control.v1 statement against.
+      description: >
+        ADR-0146 개정 2026-09-28 D-5 · D-9 (#3023). `instanceId` is this
+        instance's `MOMO_INSTANCE_ID`, served verbatim: the `instance_id` line
+        of every signed statement (host_register and signed instructions verify
+        against the same value). Clients never build it from a URL.
+        `serverTimeMs` is the clock the ±5 min window is measured on; a device
+        signs `issuedAtMs` from its own clock plus the offset it reads here.
+        The two flags say whether this instance requires a signature today.
+        Human bearer, active member.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The signing context.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SigningContextResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, workspace mismatch, or inactive membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: >
+            `error.code` instance_id_unconfigured — the operator set no
+            `MOMO_INSTANCE_ID`, so no signed statement can verify.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /v1/workspaces/{workspaceId}/device-keys/{keyId}/endorsement:
     post:
       tags: [device-keys]
@@ -4672,7 +4713,15 @@ paths:
         session's host, a server-authored `approval.decided` session event
         naming `request_event_id`, and a `work.permission.decided` audit row.
         A non-empty `instruction` is refused until R2 (owner input needs the
-        device-key signature). Golden contract:
+        device-key signature). R2 (ADR-0146 개정 D-8 · D-10, #3023):
+        `humanSignature` is the owner's `momo.human.control.v1` statement
+        (kind=permission) over the stored request event id, option id and
+        kind, this session and the session's host. It is verified whenever
+        sent; an allow requires it when the instance sets
+        `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`; a reject never does. A
+        verified signature rides on the permission control
+        (`WorkControl.humanSignature`) and is recorded in `action_signature`
+        in the same transaction; its nonce is spent once. Golden contract:
         docs/api/work-permission-decision.golden.json.
       security:
         - bearerAuth: []
@@ -4696,7 +4745,8 @@ paths:
           description: >
             `error.code` permission_kind_refused (kind is not allow_once or
             reject_once), permission_option_invalid (optionId is not an offered
-            option of that kind), or permission_instruction_unsupported.
+            option of that kind), permission_instruction_unsupported, or
+            permission_scope_unsupported (a signed scope `session` before E8).
           content:
             application/json:
               schema:
@@ -4706,9 +4756,15 @@ paths:
         "403":
           description: >
             An agent bearer (refused before the handler), `error.code`
-            permission_decider_not_human for any other non-human principal, or
+            permission_decider_not_human for any other non-human principal,
             permission_owner_only for a human who is not the session and host
-            owner.
+            owner, or a device-signature refusal (#3023):
+            device_signature_required (an allow without a signature while the
+            instance requires one), device_signature_invalid (the statement
+            does not verify for this decision, host, session or instance),
+            device_key_revoked, device_key_not_endorsed (a phone key with no
+            live root endorsement), device_signature_expired (outside ±5 min
+            or a lifetime over 10 min).
           content:
             application/json:
               schema:
@@ -4720,8 +4776,17 @@ paths:
             `error.code` permission_already_decided (a different decision was
             recorded first) or permission_request_closed (the request lapsed,
             its turn or session ended, its host was revoked, or the host
-            withdrew it). A lapsed or orphaned pending request is recorded as
-            expired/cancelled by the same call.
+            withdrew it), or device_nonce_replayed (the signed statement's
+            nonce was already spent). A lapsed or orphaned pending request is
+            recorded as expired/cancelled by the same call.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: >
+            `error.code` instance_id_unconfigured — a signature was sent to an
+            instance with no `MOMO_INSTANCE_ID`.
           content:
             application/json:
               schema:
@@ -11143,6 +11208,138 @@ components:
           items:
             $ref: "#/components/schemas/DeviceKey"
 
+    SigningContextResponse:
+      type: object
+      required:
+        [instanceId, serverTimeMs, maxLifetimeMs, maxClockSkewMs,
+         humanControlSignatureRequired, hostRegisterSignatureRequired]
+      properties:
+        instanceId:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: MOMO_INSTANCE_ID verbatim — the statement's instance_id line.
+        serverTimeMs:
+          type: integer
+          format: int64
+        maxLifetimeMs:
+          type: integer
+          format: int64
+          description: Longest expiresAtMs − issuedAtMs accepted (600000).
+        maxClockSkewMs:
+          type: integer
+          format: int64
+          description: Largest |issuedAtMs − server now| accepted (300000).
+        humanControlSignatureRequired:
+          type: boolean
+          description: MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED.
+        hostRegisterSignatureRequired:
+          type: boolean
+          description: MOMO_HOST_REGISTER_SIGNATURE_REQUIRED.
+
+    HumanSignatureRequest:
+      type: object
+      description: >
+        A person's `momo.human.control.v1` signature sent beside an
+        instruction (ADR-0146 개정 D-5 · D-10, #3023). Only what the server
+        cannot derive travels here; it rebuilds the 13 lines from its own
+        instance id and the workspace, member, host, session and content it is
+        about to write.
+      required: [deviceKeyId, nonce, issuedAtMs, expiresAtMs, signature]
+      additionalProperties: false
+      properties:
+        deviceKeyId:
+          type: string
+          format: uuid
+        nonce:
+          type: string
+          format: uuid
+          description: 128-bit random, spent once (input — the client_msg_id).
+        issuedAtMs:
+          type: integer
+          format: int64
+        expiresAtMs:
+          type: integer
+          format: int64
+          description: At most issuedAtMs + 600000.
+        signature:
+          type: string
+          description: base64 raw r‖s (64 bytes), either s form.
+        mode:
+          type: string
+          enum: [queue, interrupt]
+          description: input only.
+        scope:
+          type: string
+          enum: [once, session]
+          description: permission only (`session` refused until E8).
+        agentMemberId:
+          type: string
+          format: uuid
+          description: spawn only.
+        folderId:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: spawn only — the opaque folder id (ADR-0188 D6).
+
+    WorkControlHumanSignature:
+      type: object
+      description: >
+        The envelope a member host re-verifies (`momo-workd` human_trust, E4
+        #3024): the stored signature columns (migration 095) plus the signing
+        key and, for a phone, the root's device_endorse.v1 letter. Only on the
+        host's pending-controls read.
+      required:
+        [alg, instanceId, deviceKeyId, devicePublicKey, nonce, issuedAtMs,
+         expiresAtMs, signature]
+      properties:
+        alg:
+          type: string
+          enum: [p256]
+        instanceId:
+          type: string
+        deviceKeyId:
+          type: string
+          format: uuid
+        devicePublicKey:
+          type: string
+          description: base64 of the 33-byte compressed SEC1 point.
+        endorsement:
+          type: object
+          required: [rootKeyId, label, signature]
+          properties:
+            rootKeyId:
+              type: string
+              format: uuid
+            label:
+              type: string
+            signature:
+              type: string
+        nonce:
+          type: string
+          format: uuid
+        issuedAtMs:
+          type: integer
+          format: int64
+        expiresAtMs:
+          type: integer
+          format: int64
+        mode:
+          type: string
+          enum: [queue, interrupt]
+        scope:
+          type: string
+          enum: [once, session]
+        agentMemberId:
+          type: string
+          format: uuid
+        folderId:
+          type: string
+        signature:
+          type: string
+          description: canonical low-s raw r‖s, base64.
+
     CreateCloudHostRequest:
       type: object
       required: [displayName, confirmPaidCloud, idempotencyRef]
@@ -12297,6 +12494,8 @@ components:
           description: >
             Reserved for 「거부하고 지시」. Refused (400
             permission_instruction_unsupported) while non-empty, until R2.
+        humanSignature:
+          $ref: "#/components/schemas/HumanSignatureRequest"
 
     WorkPermissionRequest:
       type: object
@@ -12402,6 +12601,8 @@ components:
         updatedAtMs:
           type: integer
           format: int64
+        humanSignature:
+          $ref: "#/components/schemas/WorkControlHumanSignature"
 
     WorkControlResponse:
       type: object

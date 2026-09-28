@@ -380,6 +380,84 @@ pub async fn record_provenance(
     Ok(Provenance::AlreadyRecorded(existing))
 }
 
+/// `entity_type` for a person's signed control (ADR-0146 개정 D-10, #3023);
+/// `entity_id` = the `work_control.id` the statement authorized.
+pub const ENTITY_WORK_CONTROL: &str = "work_control";
+/// `entity_type` for a root key's signed `host_register` (ADR-0146 개정 D-8,
+/// #3023 taking over #3022's handoff); `entity_id` = the registered host id.
+pub const ENTITY_WORK_HOST_REGISTER: &str = "work_host.register";
+
+/// The person's half of [`record_provenance`] (ADR-0146 개정 2026-09-28, D-1 ·
+/// D-5 · D-10, #3023): a `momo.human.control.v1` statement signed by a device
+/// key (P-256, `alg = 'p256'`), recorded in the same transaction as the write
+/// it authorized.
+///
+/// Same rules as the Ed25519 path: the caller passes the **server-resolved**
+/// device public key (`member_device_key.public_key`, never the request's) and
+/// the statement bytes it rebuilt from its own rows
+/// ([`crate::human_control::HumanControl::signed_bytes`]); the signature is
+/// verified here, before the insert. What is stored is the canonical **low-s**
+/// form, so the two spellings ECDSA allows for one signature are one row.
+///
+/// 「한 행동 = 한 행」: ECDSA may sign the same bytes many times with different
+/// signatures, so the uniqueness that matters is the statement's nonce —
+/// consumed once in `human_control_nonce` (095) by the caller's verify step in
+/// the same transaction. A re-presentation of the exact stored signature is
+/// [`Provenance::AlreadyRecorded`], as on the Ed25519 path.
+pub async fn record_human_provenance(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    entity: &EntityRef,
+    signer_member_id: Uuid,
+    device_public_key_b64: &str,
+    signature_b64: &str,
+    signed_bytes: &[u8],
+) -> Result<Provenance, ProvenanceError> {
+    let Ok(canonical) = crate::human_control::verify_p256_base64(
+        device_public_key_b64,
+        signed_bytes,
+        signature_b64,
+    ) else {
+        return Err(ProvenanceError::SignatureRejected {
+            entity_type: entity.kind.clone(),
+            entity_id: entity.id,
+        });
+    };
+    let signature = BASE64.encode(canonical);
+    let digest = sha256_hex(signed_bytes);
+
+    let inserted: Option<Uuid> = sqlx::query_scalar(
+        "INSERT INTO action_signature \
+           (workspace_id, entity_type, entity_id, signer_member_id, \
+            signer_pubkey, signature, signed_payload_digest, alg) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'p256') \
+         ON CONFLICT (workspace_id, signature) DO NOTHING \
+         RETURNING id",
+    )
+    .bind(workspace_id)
+    .bind(&entity.kind)
+    .bind(entity.id)
+    .bind(signer_member_id)
+    .bind(device_public_key_b64)
+    .bind(&signature)
+    .bind(&digest)
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    if let Some(id) = inserted {
+        return Ok(Provenance::Recorded(id));
+    }
+
+    let existing: Uuid =
+        sqlx::query("SELECT id FROM action_signature WHERE workspace_id = $1 AND signature = $2")
+            .bind(workspace_id)
+            .bind(&signature)
+            .fetch_one(&mut *conn)
+            .await?
+            .try_get("id")?;
+    Ok(Provenance::AlreadyRecorded(existing))
+}
+
 /// Base64 of a raw 64-byte signature, in the exact spelling migration 060's
 /// `action_signature_signature_ck` accepts. Callers that already hold a base64
 /// signature from the wire pass it straight through; this exists for signers.

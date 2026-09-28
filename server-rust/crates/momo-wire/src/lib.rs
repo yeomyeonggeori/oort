@@ -23,9 +23,10 @@ pub mod provenance;
 pub mod signing;
 
 pub use provenance::{
-    record_provenance, EntityRef, MessageContent, Provenance, ProvenanceError, SignedAction,
-    Signer, ENTITY_MESSAGE, ENTITY_WORK_HOST_HEARTBEAT, ENTITY_WORK_HOST_TERMINAL_ATTACH_VALIDATE,
-    MESSAGE_SCHEMA_V1,
+    record_human_provenance, record_provenance, EntityRef, MessageContent, Provenance,
+    ProvenanceError, SignedAction, Signer, ENTITY_MESSAGE, ENTITY_WORK_CONTROL,
+    ENTITY_WORK_HOST_HEARTBEAT, ENTITY_WORK_HOST_REGISTER,
+    ENTITY_WORK_HOST_TERMINAL_ATTACH_VALIDATE, MESSAGE_SCHEMA_V1,
 };
 pub use signing::{
     heartbeat_payload, request_payload, sha256_hex, sign, sign_base64, verify, verify_base64,

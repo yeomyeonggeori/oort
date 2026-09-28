@@ -948,6 +948,57 @@ pub struct DeviceKeyListResponse {
     pub device_keys: Vec<DeviceKeyDto>,
 }
 
+/// `GET /v1/workspaces/{ws}/device-keys/signing-context` (#3023, ADR-0146 개정
+/// D-5 · D-9): what a device needs to sign a `momo.human.control.v1` statement
+/// this instance will accept.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SigningContextResponse {
+    /// `MOMO_INSTANCE_ID`, verbatim — the statement's `instance_id` line. The
+    /// one source: the same value `host_register` verifies against (#3022).
+    pub instance_id: String,
+    /// The server clock. A device signs `issuedAtMs` from its own clock
+    /// corrected by the offset it measures here (D-9 시계 보정).
+    pub server_time_ms: i64,
+    /// Longest `expiresAtMs − issuedAtMs` accepted (10 min).
+    pub max_lifetime_ms: i64,
+    /// Largest `|issuedAtMs − server now|` accepted (±5 min).
+    pub max_clock_skew_ms: i64,
+    /// `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`.
+    pub human_control_signature_required: bool,
+    /// `MOMO_HOST_REGISTER_SIGNATURE_REQUIRED`.
+    pub host_register_signature_required: bool,
+}
+
+/// A person's `momo.human.control.v1` signature sent beside an instruction
+/// (#3023, ADR-0146 개정 D-5 · D-10). Only what the server cannot derive
+/// travels here: it rebuilds the statement from its own instance id and the
+/// workspace, member, host, session and content it is about to write.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HumanSignatureRequest {
+    /// The signing key (`member_device_key.id`).
+    pub device_key_id: Uuid,
+    /// 128-bit random, spent once (`input`: the `client_msg_id`).
+    pub nonce: Uuid,
+    pub issued_at_ms: i64,
+    pub expires_at_ms: i64,
+    /// base64 raw r‖s (64 bytes).
+    pub signature: String,
+    /// `input`: `queue` | `interrupt`.
+    #[serde(default)]
+    pub mode: Option<String>,
+    /// `permission`: `once` (`session` opens with E8 #3028).
+    #[serde(default)]
+    pub scope: Option<String>,
+    /// `spawn`: the agent member the statement names.
+    #[serde(default)]
+    pub agent_member_id: Option<Uuid>,
+    /// `spawn`: the opaque folder id (ADR-0188 D6).
+    #[serde(default)]
+    pub folder_id: Option<String>,
+}
+
 // `POST …/work-hosts/{host}/heartbeat` has no request DTO since ADR-0188 D7:
 // the v1 body (`sentAtMs` + a v1 signature) is gone, the v2 proof travels in the
 // `MomoHost` headers, and the server reads nothing from the (signed) body.
@@ -4268,6 +4319,11 @@ pub struct WorkPermissionDecisionRequest {
     /// the next turn is an owner `input`, which is R2 (ADR-0188 D3).
     #[serde(default)]
     pub instruction: Option<String>,
+    /// ADR-0146 개정 D-8 · D-10 (#3023): the owner's device signature over this
+    /// decision (`kind=permission`). Required for an allow when the instance
+    /// set `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`; verified whenever sent.
+    #[serde(default)]
+    pub human_signature: Option<HumanSignatureRequest>,
 }
 
 /// One decided (or still pending) permission request.
@@ -4310,6 +4366,11 @@ pub struct WorkControlDto {
     pub approval_message_id: Option<String>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
+    /// ADR-0146 개정 D-10 (#3023): the person's signature envelope, in the
+    /// shape the host verifies (`momo-workd` `human_trust`, E4 #3063). Sent on
+    /// the host's `pending-controls` read only; absent for an unsigned control.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub human_signature: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]

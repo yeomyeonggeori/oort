@@ -123,6 +123,7 @@ use momo_auth::device_key::{
     list_revocation_letters_in_tx, verify_host_register_in_tx, HostRegisterProof,
     REFUSAL_DEVICE_SIGNATURE_REQUIRED,
 };
+use momo_auth::human_control::{consume_human_nonce_in_tx, db_now_ms, HumanControlRefusal};
 use momo_auth::{
     active_workspace_role, insert_work_host, insert_work_host_with_id, list_work_hosts,
     load_work_host, lock_work_host_ownership, mark_work_host_revoked, normalize_public_key_b64,
@@ -136,13 +137,14 @@ use momo_t3::work_control::{
 use momo_wire::payload::BroadcastPayload;
 use momo_wire::{
     record_provenance, EntityRef, ProvenanceError, Signer, ENTITY_WORK_HOST_HEARTBEAT,
+    ENTITY_WORK_HOST_REGISTER,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::dto::{
     DeviceRevocationDto, HostRegisterSignature, PendingWorkControlsResponse,
-    RegisterWorkHostRequest, WorkHostDto, WorkHostListResponse, WorkHostResponse,
+    RegisterWorkHostRequest, WorkControlDto, WorkHostDto, WorkHostListResponse, WorkHostResponse,
 };
 use crate::error::ApiError;
 use crate::routes::device_keys::refusal_error;
@@ -414,7 +416,6 @@ pub async fn register(
             "this instance has no MOMO_INSTANCE_ID, so no signed registration can verify",
         ));
     }
-    let now_ms = chrono::Utc::now().timestamp_millis();
 
     let member_id = principal.member_id;
     let outcome = with_tenant_tx(&state.pool, workspace_id, move |conn| {
@@ -436,6 +437,9 @@ pub async fn register(
             let host_id = match &proof {
                 None => insert_work_host(conn, workspace_id, &new).await?,
                 Some(proof) => {
+                    // The database clock, inside the transaction: the one the
+                    // nonce prune uses too (#3023 review L3).
+                    let now_ms = db_now_ms(conn).await?;
                     // The root is share-locked by the verification, so a session
                     // end cannot revoke it between this check and the insert.
                     let verified = verify_host_register_in_tx(
@@ -449,18 +453,55 @@ pub async fn register(
                         now_ms,
                     )
                     .await?;
-                    if let Err(refusal) = verified {
-                        return Ok(Err(refusal_error(refusal)));
+                    let verified = match verified {
+                        Ok(verified) => verified,
+                        Err(refusal) => return Ok(Err(refusal_error(refusal))),
+                    };
+                    let replayed = || {
+                        ApiError::coded(
+                            StatusCode::CONFLICT,
+                            REFUSAL_HOST_REGISTER_REPLAYED,
+                            "a host with this signed id already exists",
+                        )
+                    };
+                    // A replay of the same statement names the host it made:
+                    // answered as such before the nonce is looked at.
+                    if work_host_id_taken(conn, proof.host_id).await? {
+                        return Ok(Err(replayed()));
+                    }
+                    // #3023 (D-9): the statement's nonce, once — the same
+                    // ledger every signed instruction spends from.
+                    if !consume_human_nonce_in_tx(
+                        conn,
+                        workspace_id,
+                        proof.nonce,
+                        proof.device_key_id,
+                        "host_register",
+                        proof.expires_at_ms,
+                    )
+                    .await?
+                    {
+                        return Ok(Err(crate::human_control::refusal_error(
+                            HumanControlRefusal::NonceReplayed,
+                        )));
                     }
                     let Some(host_id) =
                         insert_work_host_with_id(conn, workspace_id, proof.host_id, &new).await?
                     else {
-                        return Ok(Err(ApiError::coded(
-                            StatusCode::CONFLICT,
-                            REFUSAL_HOST_REGISTER_REPLAYED,
-                            "a host with this signed id already exists",
-                        )));
+                        return Ok(Err(replayed()));
                     };
+                    // #3022 handoff ①: the root's statement is the person's
+                    // provenance of this registration, in the same commit.
+                    crate::human_control::record_signed_statement_in_tx(
+                        conn,
+                        workspace_id,
+                        &EntityRef::new(ENTITY_WORK_HOST_REGISTER, host_id),
+                        member_id,
+                        &verified.public_key_b64,
+                        &momo_wire::provenance::signature_base64(&verified.signature),
+                        &verified.signed_bytes,
+                    )
+                    .await?;
                     host_id
                 }
             };
@@ -482,6 +523,15 @@ pub async fn register(
             work_host: work_host_dto(record)?,
         }),
     ))
+}
+
+/// Whether a host row with this id exists in the transaction's workspace.
+async fn work_host_id_taken(conn: &mut PgConnection, host_id: Uuid) -> Result<bool, DbError> {
+    momo_db::sqlx::query_scalar::<_, bool>("SELECT EXISTS (SELECT 1 FROM work_host WHERE id = $1)")
+        .bind(host_id)
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(DbError::from)
 }
 
 /// `GET /v1/workspaces/{ws}/work-hosts` (Swift `list`, :190-216).
@@ -559,12 +609,15 @@ pub async fn pending_controls(
         return Err(crate::work_host_auth::signed_request_unauthorized());
     }
 
-    let (controls, letters) = settle(
+    let (controls, envelopes, letters) = settle(
         "work_hosts.pending_controls",
         tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
                 let controls =
                     momo_t3::pending_controls_for_host_in_tx(conn, workspace_id, host_id).await?;
+                // ADR-0146 개정 D-10 (#3023): a signed control travels with
+                // the person's signature, in the shape the host re-verifies.
+                let envelopes = crate::human_control::envelopes_in_tx(conn, &controls).await?;
                 // D-7: a member host is handed its owner's signed revocation
                 // letters. A workspace host has no personal root to check them
                 // against, so it gets none.
@@ -575,14 +628,23 @@ pub async fn pending_controls(
                     }
                     _ => Vec::new(),
                 };
-                Ok(Ok((controls, letters)))
+                Ok(Ok((controls, envelopes, letters)))
             })
         })
         .await,
     )?;
 
     Ok(Json(PendingWorkControlsResponse {
-        work_controls: controls.into_iter().map(control_dto).collect(),
+        work_controls: controls
+            .into_iter()
+            .map(|control| {
+                let envelope = envelopes.get(&control.id).cloned();
+                WorkControlDto {
+                    human_signature: envelope,
+                    ..control_dto(control)
+                }
+            })
+            .collect(),
         device_revocations: letters
             .into_iter()
             .map(|letter| DeviceRevocationDto {

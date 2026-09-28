@@ -71,6 +71,7 @@ pub mod ephemeral_grant;
 pub mod hosted_connection;
 pub mod hosted_disconnect;
 pub mod hosted_oauth;
+pub mod human_control;
 pub mod issue;
 pub mod jwt;
 pub mod owner_claim;

@@ -1789,6 +1789,7 @@ pub async fn resume(
     let source_session_id = path_uuid(&session, "invalid work session id")?;
     let target_host_id = request.target_host_id;
     let member_id = principal.member_id;
+    let human_signature_required = state.device_keys.human_control_signature_required;
 
     let source_cloud_host_id = resolve_cloud_host_id(&state.pool, workspace_id, source_session_id)
         .await
@@ -1811,6 +1812,7 @@ pub async fn resume(
                 source_cloud_host_id,
                 target_host_id,
                 target_cloud_host_id,
+                human_signature_required,
             )
             .await
         }) as _
@@ -1849,6 +1851,7 @@ async fn resume_in_tx(
     expected_source_cloud_host_id: Option<Uuid>,
     target_host_id: Uuid,
     expected_target_cloud_host_id: Option<Uuid>,
+    human_signature_required: bool,
 ) -> Rejectable<WorkSessionDetail> {
     if cloud_host_id_for_session_in_tx(conn, workspace_id, source_session_id).await?
         != expected_source_cloud_host_id
@@ -1948,6 +1951,24 @@ async fn resume_in_tx(
             "a shell cannot be resumed onto a member-scoped work host",
         )));
     }
+    // ADR-0146 개정 D-8 (#3023). With signed instructions required, a spawn
+    // onto a member host must carry the owner's device signature — and
+    // `momo.human.control.v1` has no session line for a spawn, so a resume
+    // (whose session the server pre-allocates) cannot be signed at all: the
+    // server would choose which session the owner's words join (#3024 M2).
+    // The host refuses it; this refuses it before a session and a slot are
+    // taken for nothing. Until E1 v2 / E7 (#3027) add the line.
+    if human_signature_required
+        && momo_t3::work_control::remote_host_owner_in_tx(conn, workspace_id, target_host_id)
+            .await?
+            .is_some()
+    {
+        return Ok(Err(ApiError::coded(
+            StatusCode::FORBIDDEN,
+            momo_auth::device_key::REFUSAL_DEVICE_SIGNATURE_REQUIRED,
+            "a resume onto a member-scoped work host cannot carry a device signature yet",
+        )));
+    }
 
     if let Err(error) = acquire_slot_in_tx(conn, workspace_id, member_id, target_host_id).await {
         return Ok(Err(match error {
@@ -2041,6 +2062,7 @@ async fn resume_in_tx(
             kind: KIND_SPAWN.to_string(),
             payload: serde_json::json!({"tool": resumed.tool, "label": resumed.label}),
             status: STATUS_DISPATCHED.to_string(),
+            human: None,
         },
     )
     .await?;

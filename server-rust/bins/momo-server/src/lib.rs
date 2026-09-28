@@ -33,6 +33,7 @@ pub mod config;
 pub mod cors;
 pub mod dto;
 pub mod error;
+pub mod human_control;
 mod livekit;
 pub mod rate_limit;
 pub mod realtime_advert;
@@ -953,6 +954,11 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/device-keys",
             post(routes::device_keys::register).get(routes::device_keys::list),
+        )
+        // What a device signs against (#3023): the instance id and the clock.
+        .route(
+            "/v1/workspaces/{ws}/device-keys/signing-context",
+            get(routes::device_keys::signing_context),
         )
         .route(
             "/v1/workspaces/{ws}/device-keys/{key}/endorsement",
