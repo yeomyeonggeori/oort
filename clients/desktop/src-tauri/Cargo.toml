@@ -48,6 +48,26 @@ tauri-plugin-updater = "2"
 # not have to grow the D-Bus/secret-service stack unless it is built there.
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }
+# Human device key, R2 (ADR-0146 개정 2026-09-28 D-1·D-3·D-5, #3025): a Secure
+# Enclave P-256 key behind userPresence, the three signed statements built in
+# Rust (never by the webview), and a native confirmation before every
+# signature. All MIT OR Apache-2.0 (objc2* also Zlib). security-framework,
+# core-foundation, objc2* were already in this graph through keyring/tauri;
+# p256 and unicode-normalization are new direct dependencies
+# (legal/THIRD_PARTY_NOTICES.md).
+security-framework = "3"
+security-framework-sys = { version = "2", features = ["OSX_10_15"] }
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSGeometry", "objc2-core-foundation"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAlert", "NSApplication", "NSResponder", "NSButton", "NSControl", "NSView", "NSScrollView", "NSTextView", "NSText", "NSClipView", "NSGraphics", "objc2-core-foundation"] }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
+sha2 = "0.10"
+base64 = "0.22"
+hex = "0.4"
+uuid = { version = "1", features = ["serde"] }
+unicode-normalization = "0.1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }

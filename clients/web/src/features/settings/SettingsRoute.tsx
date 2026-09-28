@@ -281,7 +281,13 @@ export function SettingsRoute() {
           >
           {section === "profile" && <ProfileSection offline={offline} />}
           {section === "account" && <AccountSection />}
-          {section === "devices" && <DevicesSection offline={offline} />}
+          {section === "devices" && (
+            <DevicesSection
+              offline={offline}
+              workspaceId={workspaceId}
+              memberId={session.member.id}
+            />
+          )}
           {section === "appearance" && <AppearanceSection />}
           {section === "terminal" && <TerminalSection />}
           {section === "link-previews" && <LinkPreviewSection />}

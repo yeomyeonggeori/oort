@@ -441,6 +441,59 @@ scripts/desktop/build_workd_sidecar.sh --dry-run-sign <oort.app>   # prints the 
 data-protection keychain refuses a binary without it), and workd accepting the
 signed app on the control socket.
 
+## Device key, the R2 root (#3025)
+
+ADR-0146 개정 2026-09-28 D-1·D-3·D-5·D-6·D-7. Code: `src-tauri/src/device_key/`
+(`payload.rs` builds the three signed statements, `enclave.rs` is the Secure
+Enclave, `confirm.rs` the native dialog). Granted only by
+`capabilities/device-key.json` (main webview, bundled origin, macOS). Web half:
+`desktopDeviceKey` in `clients/web/src/lib/tauri.ts`, UI in
+`clients/web/src/features/settings/DeviceKeysBlock.tsx` (설정 › 기기 › 지시 서명).
+
+| command | does |
+|---|---|
+| `device_key_status { workspaceId? }` | `support` (`ready`/`absent`/`unsupported`/`unsigned_build`/`entitlement_missing`/`error`), public key + fingerprint, this workspace's root binding, the running workd's pinned root |
+| `device_key_create` | make the enclave key; an existing one is returned |
+| `device_key_bind_root { workspaceId, memberId, keyId, publicKey }` | after `POST …/device-keys` (password): native confirm, remember key id ↔ workspace (`<app data>/device-key/roots.json`, 0600), `pin_root` on workd |
+| `device_key_sign_control { … content }` | `momo.human.control.v1`: `input`, `spawn`, `permission` (the bytes for `host_register`/`bundle_manifest` exist, the command refuses them until their dialogs can show the host key and every bundle item) |
+| `device_key_sign_endorse { workspaceId, targetKeyId, targetAlg, targetPublicKey, label }` | `device_endorse.v1` |
+| `device_key_sign_revoke { workspaceId, targetKeyId, targetPublicKey, targetLabel }` | `device_revoke.v1`, then `revoke_device` on workd right away |
+| `device_key_deliver_revocation { workspaceId, targetKeyId }` | hand a letter this shell signed (kept in `<app data>/device-key/revocations.json`, 0600) to workd again |
+
+Rules the code holds:
+
+- **The webview never passes bytes to sign.** Each command takes typed fields;
+  the shell builds the statement (a port of `momo-wire` `human_control.rs`,
+  checked byte for byte against the shared E1 vectors), fills the signer's
+  identity from its own binding, and checks the result against an allow-list of
+  the three schemas and their line counts.
+- **A native `NSAlert` before every signature** shows what is signed (target
+  host and session, kind, the whole instruction or first prompt in a scrolling
+  view, agent and folder, permission request and option; fingerprint first for
+  an approval, key id for a revocation). 취소 is first and answers Escape; the
+  confirm button has no key equivalent; a confirm within 0.7 s of the dialog
+  appearing shows it again; after a decline no dialog is raised for 3 s.
+- **Nothing invisible is signed.** Format characters (ZWJ excepted), line and
+  paragraph separators, private use and tag characters are refused in every
+  signed text and label, stricter than E1's control-character rule.
+- **No software key.** Token `SecureEnclave`, `PrivateKeyUsage | UserPresence`,
+  `WhenUnlockedThisDeviceOnly`, data-protection keychain, access group
+  `<TEAM>.app.momo.desktop.devicekey` (team read from this binary's own
+  signature). An unsigned build answers `unsigned_build`, a signed build without
+  the entitlement `entitlement_missing` (-34018); neither ever holds a key.
+- **Reuse window ≤300 s** (default 300): one evaluated `LAContext` kept on the
+  signing thread and invalidated after the window.
+  `touchIDAuthenticationAllowableReuseDuration` is 0: Apple's header limits it to
+  lock-screen unlocks, and unlocking the Mac must not stand in for a signature.
+- One worker thread runs every enclave call, one at a time.
+
+**Owner step before a signed build can hold the key** (`runtime-unverified`
+until then): `keychain-access-groups` is a restricted entitlement for a
+Developer ID app, so it needs a provisioning profile embedded in the bundle, and
+adding the entitlement without the profile stops the signed app from launching.
+The exact change is in PR #3025's body; it is not in `Entitlements.plist` yet on
+purpose.
+
 ## Run
 
 Normal dev (spawns the `clients/web` Vite dev server on 5173, then opens the window):
