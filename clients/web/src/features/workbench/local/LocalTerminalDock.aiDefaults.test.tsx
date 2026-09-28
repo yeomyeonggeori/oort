@@ -31,6 +31,8 @@ vi.mock("./LocalTerminalPane", () => ({
 let probes: LocalHarnessProbe[] = [];
 let profiles: HarnessProfileRef[] = [];
 let profileAuth: LocalHarnessProbe["auth"] = "logged_in";
+/** 있으면 상태 명령이 이 약속을 기다린다(셸의 CLI 상태 명령이 도는 시간). */
+let statusGate: Promise<void> | null = null;
 const statusCalls: string[] = [];
 vi.mock("@/lib/tauri", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/tauri")>()),
@@ -38,6 +40,7 @@ vi.mock("@/lib/tauri", async (importOriginal) => ({
   harnessProfileList: async () => profiles,
   harnessProfileStatus: async (profile: HarnessProfileRef) => {
     statusCalls.push(`${profile.harness}/${profile.label}`);
+    if (statusGate) await statusGate;
     return { id: profile.harness, installed: true, auth: profileAuth };
   },
   readWorkbenchGit: async () => ({ outcome: "unknown" }),
@@ -157,6 +160,7 @@ beforeEach(() => {
   profiles = [{ harness: "claude", label: "개인" }];
   profileAuth = "logged_in";
   statusCalls.length = 0;
+  statusGate = null;
 });
 
 afterEach(() => {
@@ -210,5 +214,30 @@ describe("로컬 터미널 새 세션이 기본 AI 선택을 따른다 (#3010)",
     ]);
     expect(sentence).toContain("로그인 필요");
     await vi.waitFor(() => expect(q("workbench-notice")?.textContent).toBe(sentence));
+  });
+
+  it("계정을 확인하는 동안 무엇을 하는지 말하고, 그사이 또 고르면 무시한다(칸이 하나만 뜬다)", async () => {
+    writeAiDefaults({ localTerminal: { kind: "profile", harness: "claude", label: "개인" } });
+    let release = () => undefined as void;
+    statusGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { sessions, programs } = fakeSessions();
+    await mount(sessions);
+    const before = programs.length;
+    await openMenu();
+    await act(async () => q("local-terminal-new-claude")!.click());
+    await vi.waitFor(() =>
+      expect(q("workbench-notice")?.textContent).toBe("「Claude · 개인」 계정을 확인하고 있어요.")
+    );
+    await openMenu();
+    await act(async () => q("local-terminal-new-claude")!.click());
+    expect(statusCalls).toEqual(["claude/개인"]);
+    await act(async () => release());
+    await vi.waitFor(() => expect(programs).toContainEqual({ kind: "harness", id: "claude", profile: "개인" }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(programs.filter((p) => p.kind === "harness")).toHaveLength(1);
+    expect(programs.length).toBe(before + 1);
+    expect(q("workbench-notice")?.textContent ?? "").not.toContain("확인하고 있어요");
   });
 });

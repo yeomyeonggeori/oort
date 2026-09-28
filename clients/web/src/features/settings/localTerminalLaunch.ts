@@ -1,6 +1,8 @@
 import type { LocalHarnessId, LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
 import {
+  credentialName,
   localTerminalLaunch,
+  type AiCredentialRef,
   type AiDefaultsAccount,
   type AiDefaultsPrefs,
   type LocalTerminalLaunch,
@@ -63,4 +65,9 @@ export async function resolveLocalTerminalLaunch(
     accounts.push({ harness: row.harness, label: row.profile, auth });
   }
   return localTerminalLaunch(harness, prefs, { accounts, teamKey: { status: "loading" } });
+}
+
+/** 저장된 계정을 확인하는 동안 도크가 보이는 한 줄. */
+export function checkingAccountLine(ref: AiCredentialRef): string {
+  return `「${credentialName(ref, { status: "loading" })}」 계정을 확인하고 있어요.`;
 }

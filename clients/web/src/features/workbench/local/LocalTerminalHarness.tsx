@@ -168,11 +168,15 @@ function aiLaunchSource(scene: string) {
       prefs: () => ({ localTerminal: { kind: "profile" as const, harness: "claude" as const, label: "개인" } }),
       profiles: async () => (scene === "ai-missing" ? [] : [{ harness: "claude" as const, label: "개인" }]),
       hiddenDefaults: () => [],
-      profileStatus: async () => ({
-        id: "claude" as const,
-        installed: true,
-        auth: scene === "ai-login" ? ("needs_login" as const) : ("logged_in" as const),
-      }),
+      // `ai-checking`: 상태 명령이 끝나지 않는다(확인 줄을 찍는다).
+      profileStatus: async () => {
+        if (scene === "ai-checking") await new Promise<never>(() => undefined);
+        return {
+          id: "claude" as const,
+          installed: true,
+          auth: scene === "ai-login" ? ("needs_login" as const) : ("logged_in" as const),
+        };
+      },
     },
   };
 }

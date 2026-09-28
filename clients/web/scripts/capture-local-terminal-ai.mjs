@@ -9,6 +9,7 @@
 //   - ai-account: 새 세션 메뉴에 고른 계정이 보인다.
 //   - ai-missing: 그 계정이 목록에 없다 → Claude를 고르면 표와 같은 문장 + 셸.
 //   - ai-login: 그 계정이 로그인 필요 → 같은 모양.
+//   - ai-checking: 셸이 그 계정의 상태를 확인하는 동안의 한 줄.
 // 라이트·다크 × 1280·390 → captures/3010/*.png
 // =============================================================================
 
@@ -51,6 +52,15 @@ const SCENES = [
       await openMenu(page);
       await page.getByTestId("local-terminal-new-claude").click();
       await page.getByTestId("workbench-notice").filter({ hasText: "목록에 없어" }).waitFor();
+    },
+  },
+  {
+    name: "dock-checking",
+    scene: "ai-checking",
+    act: async (page) => {
+      await openMenu(page);
+      await page.getByTestId("local-terminal-new-claude").click();
+      await page.getByTestId("workbench-notice").filter({ hasText: "확인하고 있어요" }).waitFor();
     },
   },
   {

@@ -53,8 +53,9 @@ import {
 } from "@momo/core/features/workbench/dockStore";
 import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
 import { detectLocalHarnesses, type PtyProgram } from "@/lib/tauri";
-import { useAiDefaults } from "@/features/settings/aiDefaultsStore";
+import { readAiDefaults, useAiDefaults } from "@/features/settings/aiDefaultsStore";
 import {
+  checkingAccountLine,
   resolveLocalTerminalLaunch,
   type LocalTerminalLaunchDeps,
 } from "@/features/settings/localTerminalLaunch";
@@ -241,15 +242,18 @@ export function LocalTerminalDock({
     return { width: rect?.width ?? 0, height: rect?.height ?? 0 };
   };
 
-  /** 새 세션: 비어 있는 첫 칸이면 그 칸이, 아니면 포커스 칸을 나눈 새 칸이 띄운다. */
+  /**
+   * 새 세션: 비어 있는 첫 칸이면 그 칸이, 아니면 포커스 칸을 나눈 새 칸이 띄운다.
+   * 칸을 열었으면 true(칸이 좁아 나누지 못하면 false).
+   */
   const newSession = useCallback(
-    (program: PtyProgram) => {
+    (program: PtyProgram): boolean => {
       const current = layoutRef.current;
       const ids = paneIds(current.root);
       if (ids.length === 1 && !sessions.has(ids[0]!)) {
         sessions.setPendingProgram(ids[0]!, program);
         if (!tab) openDock();
-        return;
+        return true;
       }
       if (!tab && !dock.open) openDock();
       const size = bodySize();
@@ -259,11 +263,12 @@ export function LocalTerminalDock({
       const result = splitPane(current, current.focused, axis, size.width > 0 ? size : { width: 4000, height: 4000 });
       if (!result.ok) {
         setNotice(SPLIT_REFUSED);
-        return;
+        return false;
       }
       setNotice(null);
       layoutRef.current = result.layout;
       setLayout(result.layout);
+      return true;
     },
     [dock.open, sessions, setLayout, tab]
   );
@@ -275,23 +280,42 @@ export function LocalTerminalDock({
    */
   const harnessesRef = useRef(harnesses);
   harnessesRef.current = harnesses;
+  /**
+   * 저장된 프로필을 쓰기 전에 셸이 그 폴더로 CLI 상태 명령을 돌린다(길면 6초). 그동안
+   * 메뉴는 닫혀 있으므로 무엇을 하는지 한 줄로 말하고, 또 고른 것은 무시한다(칸이 둘
+   * 뜨지 않게, design-review #3010 H1). 상태를 모르면(시간 초과) 그 계정으로 띄운다:
+   * 로그인이 필요하면 CLI가 칸 안에서 직접 말한다.
+   */
+  const launchingRef = useRef(false);
   const newHarnessSession = useCallback(
     async (id: LocalHarnessProbe["id"]) => {
-      const launch = await resolveLocalTerminalLaunch(
-        id,
-        harnessesRef.current,
-        launchSourceRef.current?.deps
-      );
-      if (launch.kind === "shell") {
-        newSession({ kind: "shell" });
-        setNotice(launch.sentence);
-        return;
+      if (launchingRef.current) return;
+      launchingRef.current = true;
+      try {
+        const saved = (launchSourceRef.current?.deps.prefs ?? readAiDefaults)().localTerminal;
+        if (saved?.kind === "profile" && saved.harness === id && saved.label !== null) {
+          setNotice(checkingAccountLine(saved));
+        }
+        const launch = await resolveLocalTerminalLaunch(
+          id,
+          harnessesRef.current,
+          launchSourceRef.current?.deps
+        );
+        if (launch.kind === "shell") {
+          // 칸을 열었을 때만 「셸로 넘어가요」라고 말한다. 못 열었으면 그 이유가 남는다.
+          if (newSession({ kind: "shell" })) setNotice(launch.sentence);
+          return;
+        }
+        const opened = newSession(
+          launch.profile === null
+            ? { kind: "harness", id }
+            : { kind: "harness", id, profile: launch.profile }
+        );
+        // 확인 줄을 내린다(칸을 못 열었으면 그 이유가 이미 대신 섰다).
+        if (opened) setNotice(null);
+      } finally {
+        launchingRef.current = false;
       }
-      newSession(
-        launch.profile === null
-          ? { kind: "harness", id }
-          : { kind: "harness", id, profile: launch.profile }
-      );
     },
     [newSession]
   );
@@ -628,7 +652,7 @@ export function LocalTerminalDock({
                 ? aiPrefs.localTerminal
                 : null;
             const meta = chosen
-              ? (chosen.label ?? "기본 로그인")
+              ? (chosen.label ?? "이 맥 기본 로그인")
               : h.auth === "needs_login"
                 ? "로그인 필요"
                 : null;
