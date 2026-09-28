@@ -21,7 +21,7 @@ import {
   type AgentPaneModel,
 } from "@momo/core/features/workbench/agentPane";
 import type { SessionStatus } from "@momo/core/features/workbench/sessionList";
-import type { WorkSession } from "@momo/core/lib/api";
+import { ApiError, decideWorkPermission, type WorkSession } from "@momo/core/lib/api";
 import { AgentProgressView, type AgentPaneActions } from "./AgentProgressView";
 import { agentPaneStore, useAgentPaneBindings, type AgentPaneStore } from "./agentPanes";
 
@@ -78,8 +78,27 @@ export function summaryOf(model: AgentPaneModel): AgentPaneSummary {
   };
 }
 
-/** 이 서버에는 아직 칸에서 보낼 결정·지시 경로가 없다(ADR-0188 D5 권한 다리, R2 사람 지시). */
-export const NO_AGENT_ROUTES: AgentPaneActions = { decide: null, reply: null };
+/**
+ * 권한 결정은 #3000 라우트로 간다(ADR-0188 §8.6). 지시(답장)는 R2의 기기 키 서명
+ * 전까지 길이 없다. 카드는 서버의 `approval.decided`가 실시간으로 오면 닫힌다.
+ * 실시간을 놓쳤을 때를 위해 결정이 닿으면 스레드를 한 번 다시 읽는다.
+ */
+export function agentRoutes(workspaceId: string, afterDecide: () => void = () => {}): AgentPaneActions {
+  return {
+    decide: async ({ sessionId, requestEventId, optionId, kind }) => {
+      try {
+        await decideWorkPermission(workspaceId, sessionId, { requestEventId, optionId, kind });
+        afterDecide();
+      } catch (err) {
+        // 서버가 결론을 낸 거절(409·403·404)도 스레드를 다시 읽는다: 다른 기기의 결정이나
+        // host 철회가 남긴 `approval.decided`가 칸 머리의 「나를 기다림」을 거둔다.
+        if (err instanceof ApiError && err.status >= 400 && err.status < 500) afterDecide();
+        throw err;
+      }
+    },
+    reply: null,
+  };
+}
 
 function PaneMissing({ onClear, loading }: { onClear: () => void; loading: boolean }) {
   if (loading) return <Skeleton ready={false} rows={4} className="p-4" />;
@@ -203,7 +222,8 @@ export function useAgentPaneSource(): AgentPaneSource {
             model={entry.model}
             // 세션 소유자의 이름(보는 사람이 아니다). 모르면 「소유자」로 말한다.
             ownerName={entry.ownerId ? memberFor(directory, entry.ownerId)?.displayName ?? null : null}
-            actions={NO_AGENT_ROUTES}
+            actions={agentRoutes(workspaceId, entry.refetch)}
+            offline={connStatus === "disconnected"}
           />
         </>
       );
