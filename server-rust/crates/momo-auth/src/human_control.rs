@@ -13,8 +13,12 @@
 //!
 //! 1. **The key.** A `member_device_key` row of *this* workspace and *this*
 //!    member (the requester, who the route has already made the host's owner),
-//!    `alg = p256`, not revoked, and its session lineage still able to rotate
-//!    (share-locked, the order every session end takes: token rows first).
+//!    `alg = p256`, not revoked, and its session lineage still able to rotate.
+//!    For a phone, its endorsing root's lineage too. Both lineages (token rows)
+//!    and then both key rows, in id order, are share-locked for the rest of the
+//!    transaction — the order every session end takes (token rows first) — so
+//!    a logout of the phone *or of the Mac* cannot commit between this check
+//!    and the control it authorizes (#3023 review M1).
 //! 2. **The chain** (D-6). The key is a root candidate (a live `macos` key
 //!    nobody endorsed), or an `ios` key whose `device_endorse.v1` letter from a
 //!    live root candidate of the same member **re-verifies now** against the
@@ -28,11 +32,14 @@
 //!    Text must already be NFC: the host refuses any other spelling (#3024
 //!    L4), so the server does too.
 //! 4. **The time window** (D-9): ±5 min around the server clock, lifetime
-//!    ≤ 10 min.
+//!    ≤ 10 min. Routes pass the database clock read inside the transaction
+//!    ([`db_now_ms`]), the same clock the nonce prune uses.
 //! 5. **The nonce, last** (D-9): `INSERT … ON CONFLICT DO NOTHING RETURNING`
-//!    into `human_control_nonce` (095). Last, because a refused request in
-//!    this codebase commits its transaction: nothing that can still refuse
-//!    comes after the nonce is spent.
+//!    into `human_control_nonce` (095). Last among this module's checks,
+//!    because a refused request in this codebase commits its transaction. A
+//!    route may still lose a race after it (the request closed, the host id
+//!    taken); that refusal commits with the nonce spent — the statement could
+//!    never have succeeded, so closing it is the right outcome (#3023 L1).
 //!
 //! The switch-off side is never signed (D-8): `kill`, a `reject_*` decision
 //! and host revoke do not reach this module.
@@ -214,14 +221,26 @@ pub async fn consume_human_nonce_in_tx(
     Ok(consumed.is_some())
 }
 
+/// The database clock, in ms — the one clock the time window and the nonce
+/// prune share (#3023 review L3: a `now` taken before a lock wait could pass a
+/// statement that expired while the request waited).
+pub async fn db_now_ms(conn: &mut PgConnection) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint")
+        .fetch_one(&mut *conn)
+        .await
+}
+
 /// The key may instruct: a root candidate, or a phone whose endorsement
-/// re-verifies against its (live, root-candidate, same-member) endorser.
+/// re-verifies against its (live, root-candidate, same-member) endorser whose
+/// own lineage is live (`endorser_lineage_live`, locked by the caller).
 async fn key_can_instruct(
     conn: &mut PgConnection,
     key: &DeviceKeyRecord,
+    endorser_lineage_live: bool,
 ) -> Result<bool, sqlx::Error> {
     match key.state() {
         DeviceKeyState::Root => Ok(true),
+        DeviceKeyState::Endorsed if !endorser_lineage_live => Ok(false),
         DeviceKeyState::Endorsed => {
             let (Some(root_id), Some(letter)) = (key.endorsed_by_key_id, &key.endorsement_sig)
             else {
@@ -269,7 +288,19 @@ pub async fn verify_human_control_in_tx(
     input: &HumanSignatureInput,
     now_ms: i64,
 ) -> Result<Result<VerifiedHumanControl, HumanControlRefusal>, sqlx::Error> {
-    // 1. The key: lineage (token rows) first, then the key row, both shared.
+    // 1. The key. The endorser id is read unlocked (it never changes on a
+    // live endorsement); then both lineages (token rows), then both key rows
+    // in id order, all shared (review M1).
+    let endorser: Option<Uuid> = sqlx::query_scalar::<_, Option<Uuid>>(
+        "SELECT endorsed_by_key_id FROM member_device_key \
+          WHERE id = $1 AND workspace_id = $2 AND member_id = $3",
+    )
+    .bind(input.device_key_id)
+    .bind(target.workspace_id)
+    .bind(target.member_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    .flatten();
     let lineage_live = lock_root_lineage(
         conn,
         target.workspace_id,
@@ -277,10 +308,21 @@ pub async fn verify_human_control_in_tx(
         input.device_key_id,
     )
     .await?;
-    sqlx::query("SELECT id FROM member_device_key WHERE id = $1 FOR SHARE")
-        .bind(input.device_key_id)
-        .fetch_optional(&mut *conn)
-        .await?;
+    let endorser_lineage_live = match endorser {
+        Some(root_id) => {
+            lock_root_lineage(conn, target.workspace_id, target.member_id, root_id).await?
+        }
+        None => true,
+    };
+    let mut ids = vec![input.device_key_id];
+    ids.extend(endorser);
+    ids.sort();
+    sqlx::query(
+        "SELECT id FROM member_device_key WHERE id = ANY($1::uuid[]) ORDER BY id FOR SHARE",
+    )
+    .bind(&ids)
+    .fetch_all(&mut *conn)
+    .await?;
     let Some(key) = load_device_key_in_tx(conn, input.device_key_id).await? else {
         return Ok(Err(HumanControlRefusal::Invalid));
     };
@@ -294,7 +336,7 @@ pub async fn verify_human_control_in_tx(
         return Ok(Err(HumanControlRefusal::KeyRevoked));
     }
     // 2. The chain.
-    if !key_can_instruct(conn, &key).await? {
+    if !key_can_instruct(conn, &key, endorser_lineage_live).await? {
         return Ok(Err(HumanControlRefusal::NotEndorsed));
     }
 

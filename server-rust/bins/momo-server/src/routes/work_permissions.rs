@@ -220,7 +220,6 @@ pub async fn decide(
     let member_id = principal.member_id;
     let via_token_id = audit_via_token_id(&principal);
     let settings = state.device_keys.clone();
-    let now_ms = chrono::Utc::now().timestamp_millis();
 
     let row = settle(
         "work_permissions.decide",
@@ -234,7 +233,6 @@ pub async fn decide(
                         member_id,
                         via_token_id,
                         settings: &settings,
-                        now_ms,
                     },
                     &decision,
                 )
@@ -254,7 +252,6 @@ struct DecideInput<'a> {
     member_id: Uuid,
     via_token_id: Option<Uuid>,
     settings: &'a DeviceKeySettings,
-    now_ms: i64,
 }
 
 async fn decide_in_tx(
@@ -268,7 +265,6 @@ async fn decide_in_tx(
         member_id,
         via_token_id,
         settings,
-        now_ms,
     } = input;
     // Lock order: session → host (share) → request, the order ingestion
     // (session → request) and revoke (host → request) agree with.
@@ -379,7 +375,6 @@ async fn decide_in_tx(
         },
         decision.human_signature.as_ref(),
         required,
-        now_ms,
     )
     .await?
     {

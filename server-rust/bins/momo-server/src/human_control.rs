@@ -31,12 +31,14 @@
 use axum::http::StatusCode;
 use momo_auth::device_key::{load_device_key_in_tx, DeviceKeyRecord};
 use momo_auth::human_control::{
-    verify_human_control_in_tx, ControlTarget, HumanControlRefusal, HumanSignatureInput,
+    db_now_ms, verify_human_control_in_tx, ControlTarget, HumanControlRefusal, HumanSignatureInput,
     VerifiedHumanControl,
 };
 use momo_db::{DbError, PgConnection};
 use momo_t3::{HumanSignatureColumns, WorkControlRow};
-use momo_wire::{record_human_provenance, EntityRef, ProvenanceError, ENTITY_WORK_CONTROL};
+use momo_wire::{
+    record_human_provenance, EntityRef, Provenance, ProvenanceError, ENTITY_WORK_CONTROL,
+};
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
@@ -106,7 +108,6 @@ pub async fn authorize_human_control_in_tx(
     target: &ControlTarget<'_>,
     signature: Option<&HumanSignatureRequest>,
     required: bool,
-    now_ms: i64,
 ) -> Result<Result<Option<VerifiedHumanControl>, ApiError>, DbError> {
     let Some(signature) = signature else {
         return Ok(if required {
@@ -122,6 +123,8 @@ pub async fn authorize_human_control_in_tx(
             "this instance has no MOMO_INSTANCE_ID, so no signed instruction can verify",
         )));
     };
+    // The database clock, inside the transaction (review L3).
+    let now_ms = db_now_ms(conn).await?;
     let verified = verify_human_control_in_tx(
         conn,
         instance_id,
@@ -192,7 +195,13 @@ pub async fn record_signed_statement_in_tx(
     )
     .await
     {
-        Ok(_) => Ok(()),
+        Ok(Provenance::Recorded(_)) => Ok(()),
+        // The nonce makes a statement one action; an existing row for these
+        // exact signature bytes would bind the control to another entity's
+        // proof. Refused, not absorbed (#3023 review N1).
+        Ok(Provenance::AlreadyRecorded(_)) => Err(DbError::Sqlx(momo_db::sqlx::Error::Protocol(
+            "a human statement's signature is already recorded for another action".to_string(),
+        ))),
         Err(ProvenanceError::Db(error)) => Err(DbError::from(error)),
         Err(ProvenanceError::SignatureRejected { .. }) => {
             Err(DbError::Sqlx(momo_db::sqlx::Error::Protocol(

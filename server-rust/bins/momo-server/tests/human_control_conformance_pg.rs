@@ -16,6 +16,7 @@
 //! | `flag_on_refuses_an_unsigned_allow_but_never_a_reject` | drop the `required` judgment, or require it for a reject |
 //! | `a_signed_allow_rides_on_the_control_and_is_recorded_once` | drop the columns, the envelope, the provenance row, or answer a retry by re-verifying |
 //! | `every_misplaced_signed_allow_is_refused_by_name` | rebuild from the request instead of the stored option / session / host / instance, skip the chain, the revocation, the window or the nonce |
+//! | `a_phone_allow_falls_with_its_roots_sign_in` | drop the endorser-lineage check and the endorser-live read (review M1) |
 //! | `the_chokepoint_holds_for_input_and_spawn` | same, for the kinds E7 will route; mode swap, other host, resume session, NFC |
 //! | `a_resume_onto_a_member_host_is_refused_while_signatures_are_required` | drop the resume refusal |
 //! | `host_register_spends_its_nonce_and_records_provenance` | drop the nonce or the provenance on the signed registration |
@@ -227,6 +228,7 @@ struct Stage {
     base: String,
     workspace: Uuid,
     person: Uuid,
+    person_email: String,
     access: String,
     other_access: String,
     other: Uuid,
@@ -474,12 +476,16 @@ impl Stage {
     }
 
     async fn decide(&self, session: Uuid, body: Value) -> (u16, Value) {
+        self.decide_as(&self.access, session, body).await
+    }
+
+    async fn decide_as(&self, bearer: &str, session: Uuid, body: Value) -> (u16, Value) {
         self.post(
             &format!(
                 "/v1/workspaces/{}/work-sessions/{session}/permission-decisions",
                 self.workspace
             ),
-            &self.access,
+            bearer,
             body,
         )
         .await
@@ -567,6 +573,7 @@ async fn stage_with(config: DeviceKeySettings) -> Stage {
         base,
         workspace,
         person,
+        person_email: person_email.clone(),
         access,
         other_access,
         other,
@@ -1167,6 +1174,92 @@ async fn every_misplaced_signed_allow_is_refused_by_name() {
     assert_eq!(s.request_status(second_request).await, "pending");
 }
 
+/// Review M1: a phone's allow stands on its root's sign-in as well as its own.
+/// The Mac's lineage ends on its own (its refresh rows revoked, the key row
+/// untouched — no session end reached it): the phone signed on another sign-in
+/// is 「지시 불가」 from then on.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_phone_allow_falls_with_its_roots_sign_in() {
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    // The phone signs in on its own lineage and registers there.
+    let phone_access = login(&s.http, &s.base, s.workspace, &s.person_email).await;
+    let handset = DeviceKeyPair::new("second phone");
+    let (status, body) = s
+        .post(
+            &s.keys_path(),
+            &phone_access,
+            json!({ "alg": "p256", "publicKey": handset.public_b64, "platform": "ios", "label": "둘째 폰" }),
+        )
+        .await;
+    assert_eq!(status, 201, "{body}");
+    let handset_id = Uuid::parse_str(body["deviceKey"]["id"].as_str().unwrap()).unwrap();
+    let letter = s.root.sign(
+        &DeviceEndorse {
+            workspace_id: s.workspace,
+            member_id: s.person,
+            root_key_id: s.root_id,
+            target_alg: DeviceKeyAlg::P256,
+            target_public_key_b64: &handset.public_b64,
+            label: "둘째 폰",
+        }
+        .signed_bytes()
+        .unwrap(),
+    );
+    let (status, body) = s
+        .post(
+            &format!("{}/{handset_id}/endorsement", s.keys_path()),
+            &phone_access,
+            json!({ "rootKeyId": s.root_id, "signature": letter }),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+
+    let session = s.session().await;
+    let request = s.permission_request(session).await;
+    let signed = |nonce: Uuid| {
+        s.permission_statement(
+            &handset,
+            handset_id,
+            s.host,
+            session,
+            request,
+            "allow-once",
+            "allow_once",
+            nonce,
+            now_ms(),
+            INSTANCE_ID,
+        )
+    };
+    // The Mac's sign-in lapses; its key row still reads live.
+    let lapsed = sqlx::query(
+        "UPDATE token SET revoked_at = now() \
+          WHERE session_id = (SELECT session_id FROM member_device_key WHERE id = $1) \
+            AND revoked_at IS NULL",
+    )
+    .bind(s.root_id)
+    .execute(&s.su)
+    .await
+    .unwrap()
+    .rows_affected();
+    assert!(lapsed > 0, "the Mac's lineage had live rows");
+    let (status, answer) = s
+        .decide_as(
+            &phone_access,
+            session,
+            json!({ "requestEventId": request, "optionId": "allow-once", "kind": "allow_once",
+                    "humanSignature": signed(Uuid::new_v4()) }),
+        )
+        .await;
+    assert_eq!(
+        (status, code(&answer)),
+        (403, Some("device_key_not_endorsed")),
+        "{answer}"
+    );
+    assert_eq!(s.controls_of(session).await, 0);
+}
+
 // ---------------------------------------------------------------------------
 // the chokepoint, for the kinds E7 will route
 // ---------------------------------------------------------------------------
@@ -1459,12 +1552,7 @@ async fn the_chokepoint_holds_for_input_and_spawn() {
                     },
                 };
                 let outcome = momo_server::human_control::authorize_human_control_in_tx(
-                    conn,
-                    &config,
-                    &target,
-                    None,
-                    true,
-                    now_ms(),
+                    conn, &config, &target, None, true,
                 )
                 .await?;
                 Ok::<_, DbError>(outcome.err().and_then(|error| error.code))

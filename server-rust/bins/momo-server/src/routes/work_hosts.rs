@@ -123,7 +123,7 @@ use momo_auth::device_key::{
     list_revocation_letters_in_tx, verify_host_register_in_tx, HostRegisterProof,
     REFUSAL_DEVICE_SIGNATURE_REQUIRED,
 };
-use momo_auth::human_control::{consume_human_nonce_in_tx, HumanControlRefusal};
+use momo_auth::human_control::{consume_human_nonce_in_tx, db_now_ms, HumanControlRefusal};
 use momo_auth::{
     active_workspace_role, insert_work_host, insert_work_host_with_id, list_work_hosts,
     load_work_host, lock_work_host_ownership, mark_work_host_revoked, normalize_public_key_b64,
@@ -416,7 +416,6 @@ pub async fn register(
             "this instance has no MOMO_INSTANCE_ID, so no signed registration can verify",
         ));
     }
-    let now_ms = chrono::Utc::now().timestamp_millis();
 
     let member_id = principal.member_id;
     let outcome = with_tenant_tx(&state.pool, workspace_id, move |conn| {
@@ -438,6 +437,9 @@ pub async fn register(
             let host_id = match &proof {
                 None => insert_work_host(conn, workspace_id, &new).await?,
                 Some(proof) => {
+                    // The database clock, inside the transaction: the one the
+                    // nonce prune uses too (#3023 review L3).
+                    let now_ms = db_now_ms(conn).await?;
                     // The root is share-locked by the verification, so a session
                     // end cannot revoke it between this check and the insert.
                     let verified = verify_host_register_in_tx(
