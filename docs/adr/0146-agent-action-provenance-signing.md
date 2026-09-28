@@ -5,6 +5,7 @@
 - 개정: **2026-09-28 Accepted** — 사람 기기 키 서명(R2). 결재 인용: 성재 2026-09-28 「전부 권장대로」(R2 기기 키 서명 결재 Q1~Q11·Q5-b 권장안 전부, 결재 페이지 https://claude.ai/artifact/392wQKGL3SzwfM2zNjhSpZ). 기안 Opus 5.5 worker(#3020). 근거 브리프 `claudedocs/r2-device-signing/brief.md`는 gitignore 대상이라 로컬에만 있다. 아래 「개정 2026-09-28」 절이 필요한 사실과 근거(file:line)를 그대로 옮겨 담는다. 2026-07-31 본문은 역사 기록으로 두고, 미해결 절만 고쳤다.
 - 증보: **2026-09-28 (#3027 R2-E7)** — `momo.human.control.v2`(spawn이 도구·채널·재개 세션을 결속)와 서명 지시 라우트·서명 재개의 구현 계약, `momo.human.device_revoke.v2`(뿌리가 폐기 대상 공개키에 서명)와 workd 폐기서 보관(#3068). 개정 절 D-5·D-5b·D-8·D-11 범위 안의 구현 확정이며 결정은 바꾸지 않았다. 아래 「증보 2026-09-28 — R2-E7」 절.
 - 증보: **2026-09-28 (#3097)** — refresh 재사용 계보 폐기에서 기기 키 제외, 계보만 끝난 키의 자기 서명 재결속(`momo.human.device_rebind.v1`). D-7 결정 변경이며 결재 인용은 D-7 「증보 #3097」 절에 있다.
+- 증보: **2026-09-29 (#3079)** — refresh 토큰 sender-constraint. 계보에 결속한 별도 SE **refresh 키**의 증명(`momo.human.refresh_proof.v1`)으로 응답 유실을 복구하고 증명 없는 재사용만 계보를 끝낸다(migration 096). 결재 인용은 D-7 「증보 #3079」 절에 있다.
 - 관련: **ADR-0145**(Rust/Axum 재작성 — 이 서명은 그 위에 얹힌다), ADR-0004(자격증명 비유입), ADR-0101(에이전트 신원), ADR-0139/0140(workd — 이미 Ed25519 서명 보유), `docs/architecture/invariants-in-rust.md`(D2 — 이 서명이 불변식을 안 건드림을 교차검증)
 - 발단: 서버 스택 재검토에서 "oort가 buzz에서 취할 만한 한 가지 = 에이전트 행동의 암호학적 provenance"로 식별 → 성재가 B안에 포함 지시 + **범위를 "상태 전이까지 넓게"로 결정**.
 
@@ -250,6 +251,52 @@ momo.human.control.v1
   - **클라이언트 계약(보안 검수 L2).** 편지의 `session_id`는 기기가 `signing-context`에서 받는다. 편지는 네이티브 층(Tauri·iOS)이 자기 인증된 `signing-context` 호출로 만들고, webview에 일반 「바이트 서명」을 열지 않는다. 재결속 200의 `current`가 `true`가 아니면 실패로 보고 알린다.
   - **남은 것(클라이언트).** 데스크탑 E5와 폰이 409 `device_key_rebind_required`와 `lineageLive: false`를 받아 편지에 서명하는 흐름은 후속이다. 그 전까지 이 상태의 기기는 서버에서 지시 불가로 남는다. 다만 키는 폐기되지 않으므로, 재결속을 구현한 클라이언트는 비밀번호나 재승인 없이 복구한다.
   - 시험: `device_key_conformance_pg`의 `a_reused_roots_key_is_mute_until_its_own_letter_moves_it` · `a_rebind_letter_is_single_use_and_only_ever_moves_a_dead_lineages_key` · `a_phone_key_moves_to_its_new_link_with_its_approval_and_logout_still_ends_it`, 그리고 재사용 단정을 「키 유지」로 뒤집은 세 시험(`a_reused_refresh_token_ends_the_whole_lineage` 외). momo-wire `device_rebind_bytes_are_fixed_and_bind_the_destination_lineage`, momo-server `session_end` `only_a_reuse_keeps_the_lineages_keys`.
+
+- **증보 2026-09-29 — refresh 토큰 sender-constraint: 계보의 refresh 키가 서명한 증명(#3079). Accepted.** 결재 인용: 성재 2026-09-28 「ㄱㄱ」(응답 유실 대응 제안 1·2 지금, 3은 E10 전 — 조사 `claudedocs/refresh-loss/research.md`). 이 증보가 제안 3이다. 이슈 #3079 결재 코멘트: 「기기 키가 있는 세션의 refresh에 기기 키 증명(DPoP 방식) — 증명 있는 재사용은 정상 재시도로 재발급, 증명 없는 재사용만 계보 폐기. R2-E10(#3030) 전 필수」. 기안 Opus 5.5 worker(#3079).
+  - **문제.** #3074의 재발급은 30초 창과 「후속 pair가 아직 살아 있음」에 기댄다. 절전·Cmd+Q(#3098 인계: tao 종료 이벤트는 거부할 수 없다)·끊긴 네트워크로 몇 분~몇 시간 뒤에 돌아온 기기는 둘 다 놓쳐서 로그아웃된다. 반대로 창 안에서는 옛 토큰을 가진 누구든 살아 있는 pair를 받는다(#3074 M1의 받아들인 비용). 서버는 토큰을 공유하는 두 클라이언트를 구별할 수단이 없었다.
+  - **근거.** RFC 9449 §5: 공개 클라이언트의 refresh 토큰은 공개키에 결속되고 쓸 때마다 같은 키의 증명을 낸다. RFC 9700 §4.14.2는 sender-constraint를 회전과 나란한 MUST 선택지로 둔다. 결속된 토큰은 키 없이 복제해도 쓸 수 없으므로, 서버는 「증명 있는 재제시 = 그 기기의 재시도」로 읽을 수 있다.
+  - **증명 형식 — momo-wire 스키마, DPoP JWT가 아니다.** 폰(Expo 네이티브)과 데스크탑(Tauri 셸)의 서명 경로는 이미 `\n`으로 이은 스키마 바이트에 raw r‖s P-256 서명을 만든다(D-1, low-s 정규화는 서버가 한다). DPoP JWT는 JWS 인코딩·DER↔raw 변환·JWK 썸프린트·`htu` 일치를 세 서명자에 새로 요구하고 얻는 것이 없다. 모양은 RFC 9449를 따르되 전선 형식은 관례를 따른다.
+
+    ```text
+    momo.human.refresh_proof.v1
+    {workspace_id}
+    {member_id}
+    {public_key_b64}          refresh 키(33바이트 압축 SEC1, 정준 base64)
+    {refresh_token_sha256}    제시한 refresh 토큰 원문의 SHA-256 소문자 hex
+    {nonce}                   클라이언트 128비트, 서버 1회 소비
+    {signed_at_ms}            서버 시각 ±5분
+    ```
+
+    토큰 해시 줄이 sender-constraint다(RFC 9449 `ath`의 역할). 증명은 그 토큰 하나에만 유효하다. 계보(`session_id`)는 넣지 않는다. 토큰이 이미 한 계보에 속하고, access가 만료된 기기는 `signing-context`로 계보를 물을 수 없다. 서버 nonce(DPoP-Nonce)는 왕복이 하나 더 들어 택하지 않았다. 재생은 시각 창과 nonce 1회 소비로 막는다(D-9와 같은 모양).
+  - **별도 refresh 키가 필요하다.** 폰 키는 `biometryCurrentSet`(D-2)이라 서명마다 Face ID가 뜨고, 맥 키는 `userPresence`(D-3, 재사용 창 ≤300초)라 15분마다 도는 백그라운드 refresh에 쓸 수 없다. 그래서 기기는 **refresh 전용 SE P-256 키**를 따로 만든다. 접근 제어는 `privateKeyUsage`만(생체·암호 없음), 보관은 `ThisDeviceOnly`(백업·이전 불가), 폰은 백그라운드 refresh를 위해 `AfterFirstUnlockThisDeviceOnly`이고 NSE와 공유하지 않는 앱 전용 그룹이다.
+    - 이 키는 **신뢰 역할이 없다.** 뿌리가 아니고, 승인되지 않고, 목록에 나오지 않고, 지시를 인가하지 않는다. refresh 토큰이 이미 주는 것 말고는 아무것도 열지 않고 refresh를 **좁히기만** 한다. 그래서 결재 범위(「기기 키 증명」) 안이다.
+    - **`member_device_key`에 넣지 않는다.** 그 표의 행은 전부 신뢰 행위자다. 뿌리 후보는 「승인 없는 살아 있는 `macos` 키」로 정해지고, 공개키는 워크스페이스에서 살아 있는 동안 하나이며, #3097에 따라 재사용 뒤에도 살아서 다음 로그인에서 `device_key_rebind_required`로 재결속 편지를 요구한다. 거기에 종류 컬럼을 더하면 뿌리 판정·승인 CHECK·목록·세션 종료 경로 다섯 곳에 필터를 더해야 하고, 하나라도 빠지면 비밀번호 없이 올린 refresh 키가 뿌리가 된다. 대신 **새 표 `session_refresh_key`**(migration 096)를 둔다.
+  - **결속(DB 계약, migration 096).** `session_refresh_key(workspace_id, session_id PK, member_id, alg, public_key)`: 계보당 키 하나. **첫 증명이 결속한다** — 살아 있는 토큰으로 온 첫 refresh의 증명이 자기 키로 서명이 맞으면 그 키를 계보에 묶고(`INSERT … ON CONFLICT DO NOTHING`), 이후 바뀌지 않는다. 새 로그인은 새 계보라 다시 결속한다(같은 공개키여도 된다). 행은 폐기하지 않는다. 계보가 끝나면 증명할 것이 없다. `refresh_proof_nonce(workspace_id, nonce PK, session_id, expires_at)`: 095 모양, 창이 닫힐 때(`signed_at_ms`+5분)까지 보관, 소비 전에 지난 행을 지운다. 두 표 모두 RLS ENABLE + FORCE + `ws_isolation`.
+    - **TOFU 창.** 결속 전에 토큰을 훔친 쪽이 먼저 결속할 수 있다. 그래서 네이티브 클라이언트는 **로그인 직후 증명을 실은 refresh를 한 번** 한다(클라이언트 계약). 로그인·QR 교환 때 결속하는 방법은 증명할 토큰이 아직 없어 다른 문장이 필요하다. 후속으로 둔다.
+  - **검사 순서.** 서명(계보의 키인가) → 시각 창 → nonce 소비. 계보의 키로 서명이 맞지 않는 증명은 nonce를 쓰지 않는다. 진짜 기기가 아직 보낼 수 있기 때문이다.
+  - **판정 표**(`momo-server` `auth_routes::answer_spent`가 한곳에서 정한다).
+
+    | 제시 | 증명 | `observe`(기본) | `require` |
+    |---|---|---|---|
+    | 살아 있는 토큰 | 계보의 키, 검증됨 | 회전 | 회전 |
+    | 살아 있는 토큰 | 없음 / 다른 키 / 시각 밖 / nonce 재사용 | 회전(종전) | 401 `refresh_proof_required`·`_invalid`·`_stale`·`_replayed`, **소비 안 함**, 계보 유지 |
+    | 소비된 토큰 | 계보의 키, 검증됨 | 30초 안이고 후속 pair가 살아 있으면 그 pair(#3074), 아니면 **계보 복구**(시간 제한 없음) | 같음 |
+    | 소비된 토큰 | 계보의 키지만 시각 밖·nonce 재사용 | 401 `_stale`·`_replayed`, 계보 유지 | 같음 |
+    | 소비된 토큰 | 없음 / 다른 키 | 종전(#3074 재발급 → #3022) | **계보 종료**, 30초 안이어도, 비밀번호 로그인이어도 |
+    | 결속 없는 계보(웹·옛 클라이언트) | — | 종전 | 종전 |
+
+    - **계보 복구.** 계보가 아직 회전할 수 있으면(살아 있는 refresh 행이 있으면) 그 계보의 살아 있는 토큰을 모두 폐기하고 **같은 계보**에 새 pair를 발급한다. 푸시 등록·기기 키·refresh 키는 그대로다. QR 연결이면 연결 행을 새 pair로 다시 묶는다. 멤버가 활성이 아니면 403이다. 로그아웃·해제·폐기·만료로 끝난 계보는 되살리지 않는다. #3074의 결정적 파생을 이어 가지 않고 새로 발급하는 이유: 파생은 `revoked_at`에 기대고 체인이 길어질수록 깨지기 쉽다. 증명이 있으면 서버가 기기를 알아보므로 같은 바이트를 재현할 필요가 없다.
+    - **시각 밖·nonce 재사용은 복제가 아니다.** 서명이 계보의 키로 맞았으므로 제시자는 키를 가졌다. 복제로 보면 같은 본문을 다시 보낸 기기나 시계가 틀린 기기가 로그아웃된다(이 이슈가 막으려는 일). 클라이언트는 이 두 코드를 로그아웃으로 다루지 않고 새 nonce와 서버 시각(응답 `Date` 헤더)으로 다시 서명한다.
+    - **`require`의 계보 종료는 30초 유예와 #3022 H2의 「비밀번호 로그인 제외」를 적용하지 않는다.** 유예는 웹 탭과 응답 유실을 위한 것인데, 키가 결속된 계보는 네이티브 한 프로세스이고 응답 유실은 증명으로 복구된다. 끝낼 때는 #3097 표의 「refresh 재사용」 행과 같다(토큰·푸시 폐기, 기기 키 유지).
+  - **단계 도입 — `MOMO_REFRESH_PROOF_MODE=off|observe|require`, 기본 `observe`.** `observe`는 증명을 결속하고 검증된 증명을 복구에 쓰지만, 증명이 없거나 틀려도 결과를 바꾸지 않고 판정을 로그(`auth.refresh proof`)로 남긴다. 결속은 모드와 무관하게 남으므로 `require`로 바꾸는 순간 그동안 결속된 계보가 강제된다. `off`는 증명을 무시한다. 다른 값은 부팅 오류다. `require`는 폰·데스크탑이 증명을 싣는 빌드가 퍼진 뒤, R2 보안 검수(E10 #3030)와 함께 owner가 켠다.
+  - **보안 성질과 남는 것.**
+    - 복제된 refresh 토큰만으로는 결속된 계보를 회전할 수 없다(`require`). 창 안 공존(#3074 M1)도 닫힌다. 증명 없는 제시는 곧바로 계보를 끝낸다.
+    - 키는 SE에서 나오지 않는다[S]. 기기에서 코드를 실행하는 공격자는 키로 서명을 **요청**할 수 있다. 그 경우는 이 설계가 막지 않는다(기기 침해는 D-10의 범위).
+    - 캡처한 증명은 그 토큰, ±5분, 한 번에만 유효하다. 캡처한 요청 전체를 다시 보내면 `refresh_proof_replayed`로 거부되고 계보는 유지된다(탐지 신호 대신 오탐 없는 쪽을 택했다).
+    - 모양이 틀린 `deviceProof`(형식 오류 JSON)는 본문 해석에서 4xx로 끝나고 아무것도 소비·종료하지 않는다.
+  - **새 공개 API(ADR-0100).** `RefreshRequest.deviceProof`(`publicKey`·`nonce`·`signedAtMs`·`signature`), 401 코드 `refresh_proof_required`·`refresh_proof_invalid`·`refresh_proof_stale`·`refresh_proof_replayed`, 스키마 `momo.human.refresh_proof.v1`(momo-wire `RefreshProof`), 환경 변수 `MOMO_REFRESH_PROOF_MODE`, migration 096.
+  - **클라이언트(후속, UXUI).** 폰·데스크탑이 refresh 키를 만들고, 로그인 직후 결속하고, 모든 refresh에 증명을 싣고, 네 코드를 다루는 일은 후속 이슈다. 데스크탑은 회전을 웹뷰에서 **Tauri 셸(Rust)로 옮긴다** — 키가 셸에 있고(D-3), 셸이 회전을 들면 Cmd+Q 중 회전이 끊겨도 다음 실행에서 증명으로 복구된다(#3098 인계). 그 전까지 이 서버 변경은 결속이 없는 모든 계보에 종전과 같다.
+  - 시험: `refresh_proof_conformance_pg` 11건(응답 유실 1시간 뒤 복구 — 수리 전 RED, QR 연결 복구와 연결 재결속, 창 안 복제 → 종료, 다른 키 → 거부·종료, 재사용·시각 밖 → 거부·유지, `require` 미증명 → 소비 없음, `observe` 종전 유지, 웹 불변, 끝난 계보 불부활, 정지 멤버, 096 재적용·RLS), momo-wire `refresh_proof_bytes_are_fixed_and_bind_the_presented_token`, momo-auth `only_a_missing_or_foreign_proof_is_a_copy`.
 
 ### D-8. 서명 범위
 

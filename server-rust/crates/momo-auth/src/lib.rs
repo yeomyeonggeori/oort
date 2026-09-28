@@ -76,6 +76,7 @@ pub mod issue;
 pub mod jwt;
 pub mod owner_claim;
 pub mod realtime;
+pub mod refresh_proof;
 pub mod token_store;
 pub mod work_host_request;
 pub mod work_host_store;
@@ -178,6 +179,9 @@ pub use realtime::{
     realtime_info_string, sign_centrifugo_connection, CentrifugoConnectionClaims,
     IssuedRealtimeToken, RealtimeTokenMeta, CONNECTION_TOKEN_TTL_SECONDS, REALTIME_INFO_SCHEMA,
     REALTIME_META_SCHEMA,
+};
+pub use refresh_proof::{
+    judge_refresh_proof, PresentedRefreshProof, ProofInput, ProofVerdict, RefreshProofMode,
 };
 pub use token_store::{
     carries_privileged_scope, has_active_realtime_credential, lock_live_session_lineage,

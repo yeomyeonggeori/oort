@@ -19,6 +19,7 @@
 //! is the operator's job (compose/systemd), so no secret is ever read from a file
 //! by this process, and no secret value is ever logged.
 
+use momo_auth::RefreshProofMode;
 use momo_db::pool::PoolConfig;
 
 /// Fatal misconfiguration found at boot. Messages name environment *keys* only —
@@ -1123,16 +1124,34 @@ impl MentionSettings {
 ///   into a session the server chose, #3024 M2). Default **off** (ADR-0146
 ///   D-11, Q11: closed until the R1 re-review and the R2 review PASS). A
 ///   signature that IS sent is verified either way (#3023).
+/// * `MOMO_REFRESH_PROOF_MODE` — `off` | `observe` | `require` (#3079,
+///   ADR-0146 D-7 증보). How `POST /v1/auth/refresh` treats the
+///   `momo.human.refresh_proof.v1` proof a native client signs with its
+///   lineage's refresh key. Default **`observe`**: a proof that is sent binds
+///   the lineage's key (first proof) and a verified one recovers a lineage
+///   whose rotation response was lost, however long ago; a missing or bad
+///   proof changes nothing. `require` makes a key-bound lineage need a
+///   verified proof on every refresh and ends it when its spent token comes
+///   back without one (inside the 30 s window too). Lineages bound under
+///   `observe` are enforced the moment the mode flips. `off` ignores proofs.
+///   Any other value is a boot error.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeviceKeySettings {
     pub instance_id: Option<String>,
     pub host_register_signature_required: bool,
     pub refresh_reuse_sweep_all_sessions: bool,
     pub human_control_signature_required: bool,
+    pub refresh_proof_mode: RefreshProofMode,
+    /// `MOMO_REFRESH_PROOF_MODE` was set to something unparseable.
+    pub refresh_proof_mode_invalid: bool,
 }
 
 impl DeviceKeySettings {
     pub fn from_env() -> DeviceKeySettings {
+        let refresh_proof_mode = match env("MOMO_REFRESH_PROOF_MODE") {
+            None => Some(RefreshProofMode::default()),
+            Some(raw) => RefreshProofMode::parse(&raw),
+        };
         DeviceKeySettings {
             instance_id: env("MOMO_INSTANCE_ID").map(|value| value.trim().to_string()),
             host_register_signature_required: env("MOMO_HOST_REGISTER_SIGNATURE_REQUIRED")
@@ -1141,6 +1160,8 @@ impl DeviceKeySettings {
                 .is_some_and(|value| value.trim() == "true"),
             human_control_signature_required: env("MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED")
                 .is_some_and(|value| value.trim() == "true"),
+            refresh_proof_mode: refresh_proof_mode.unwrap_or_default(),
+            refresh_proof_mode_invalid: refresh_proof_mode.is_none(),
         }
     }
 
@@ -1148,6 +1169,9 @@ impl DeviceKeySettings {
     /// door: with no instance id no statement can be rebuilt, so every
     /// member-scoped registration would be refused.
     pub fn boot_error(&self) -> Option<&'static str> {
+        if self.refresh_proof_mode_invalid {
+            return Some("MOMO_REFRESH_PROOF_MODE must be off, observe or require");
+        }
         if self.host_register_signature_required && self.instance_id.is_none() {
             return Some(
                 "MOMO_HOST_REGISTER_SIGNATURE_REQUIRED=true needs MOMO_INSTANCE_ID (the instance id signed statements carry)",
@@ -2169,6 +2193,16 @@ mod tests {
             !default.human_control_signature_required,
             "ADR-0146 D-11: signed instructions stay optional until R1 and R2 PASS"
         );
+        assert_eq!(
+            default.refresh_proof_mode,
+            RefreshProofMode::Observe,
+            "#3079: proofs are honored but not required until the clients ship"
+        );
+        let garbled = DeviceKeySettings {
+            refresh_proof_mode_invalid: true,
+            ..DeviceKeySettings::default()
+        };
+        assert!(garbled.boot_error().is_some());
         let unsatisfiable = DeviceKeySettings {
             instance_id: None,
             host_register_signature_required: true,

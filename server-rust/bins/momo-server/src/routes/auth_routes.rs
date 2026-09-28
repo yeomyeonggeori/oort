@@ -94,6 +94,17 @@
 //! stores no copy of the pair; it re-signs it
 //! (`momo_auth::sign_rotation_successor`).
 //!
+//! **Sender constraint (#3079, ADR-0146 D-7 증보 2026-09-29).** A native
+//! client binds its lineage to a Secure Enclave refresh key (the first
+//! `deviceProof` on a live token binds it, `momo_auth::refresh_proof`) and
+//! signs every refresh with `momo.human.refresh_proof.v1`. The proof is
+//! judged once at the top of the transaction; every answer to a spent token
+//! then goes through [`answer_spent`]: a verified proof recovers the lineage
+//! however long ago the token was spent ([`recover_lineage`]); under
+//! `MOMO_REFRESH_PROOF_MODE=require` a key-bound lineage's spent token without
+//! its key ends the lineage at once, and a live one is refused unspent. A
+//! lineage with no key (browsers) is unchanged in every mode.
+//!
 //! Every rotation also consumes **and** records its new pair in one
 //! transaction now (the linked-device path always did): a rotation is
 //! all-or-nothing, and a sweep can never commit between a winner's consume and
@@ -119,14 +130,15 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::Json;
 use momo_auth::{
-    carries_privileged_scope, find_linked_device_id_by_refresh_in_tx, lock_linked_device_in_tx,
-    lock_member_session_tokens_by_ids, new_session_id, rebind_device_link_session_in_tx,
-    rebind_locked_device_link_session_in_tx, record_session_token,
-    record_session_token_with_device, revoke_privileged_session_tokens,
+    carries_privileged_scope, find_linked_device_id_by_refresh_in_tx, judge_refresh_proof,
+    lock_linked_device_in_tx, lock_member_session_tokens_by_ids, new_session_id,
+    rebind_device_link_session_in_tx, rebind_locked_device_link_session_in_tx,
+    record_session_token, record_session_token_with_device, revoke_privileged_session_tokens,
     revoke_session_lineage_tokens, revoke_token, session_device_label, session_id_of, sign_access,
     sign_refresh, sign_rotation_successor, token_state, verify_app_access, verify_app_refresh,
-    without_privileged_scopes, AuthError, DeviceSessionRecord, IssuedToken, TokenRejection,
-    TokenState, SESSION_LABEL_ACCESS, SESSION_LABEL_REFRESH,
+    without_privileged_scopes, AuthError, DeviceSessionRecord, IssuedToken, PresentedRefreshProof,
+    ProofInput, ProofVerdict, RefreshProofMode, TokenRejection, TokenState, SESSION_LABEL_ACCESS,
+    SESSION_LABEL_REFRESH,
 };
 use momo_db::{with_tenant_tx, DbError, PgConnection};
 use momo_messaging::{get_member, verify_password_login, PasswordLogin};
@@ -361,6 +373,9 @@ enum RefreshGate {
     MemberInactive,
     /// The atomic single-use gate was lost: this token was already spent.
     AlreadyUsed,
+    /// #3079: the lineage is key-bound and this presentation did not prove
+    /// it (under `require`, or a key holder's stale / replayed proof).
+    ProofRefused(ProofVerdict),
     /// Rotation finished in this transaction — linked or not: consume, mint,
     /// record (and rebind) either all committed or all rolled back (#3022).
     Issued {
@@ -414,26 +429,70 @@ pub async fn refresh(
     let rotated_scopes = scopes.clone();
     let reissue_scopes = scopes.clone();
     let sweep_all = state.device_keys.refresh_reuse_sweep_all_sessions;
+    let proof_mode = state.device_keys.refresh_proof_mode;
+    let proof = request.device_proof.map(|proof| PresentedRefreshProof {
+        public_key_b64: proof.public_key,
+        nonce: proof.nonce,
+        signed_at_ms: proof.signed_at_ms,
+        signature_b64: proof.signature,
+    });
     let gate = with_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
-            // #3074: every refusal of a spent token below first asks whether
-            // it is a lost rotation response being retried.
+            // (1) Advisory pre-check — precise 401s for a logged-out/rotated
+            // token. The *atomic* gate is the revoke below, not this read.
+            let presented_state = token_state(conn, &presented).await.map_err(DbError::from)?;
+
+            // (1b) #3079: what the proof says about the presenter, judged
+            // against the presented row's lineage. A first proof on a live
+            // token binds the lineage's refresh key.
+            let verdict = match presented_state {
+                TokenState::Active { id } | TokenState::Revoked { id } => {
+                    let lineage = session_id_of(conn, id).await.map_err(DbError::from)?;
+                    judge_refresh_proof(
+                        conn,
+                        ProofInput {
+                            mode: proof_mode,
+                            workspace_id,
+                            member_id,
+                            session_id: lineage,
+                            presented: &presented,
+                            proof: proof.as_ref(),
+                            may_bind: matches!(presented_state, TokenState::Active { .. }),
+                        },
+                    )
+                    .await
+                    .map_err(DbError::from)?
+                }
+                _ => ProofVerdict::Unbound,
+            };
+            if verdict != ProofVerdict::Unbound {
+                tracing::info!(
+                    mode = proof_mode.as_str(),
+                    verdict = verdict.as_str(),
+                    spent = matches!(presented_state, TokenState::Revoked { .. }),
+                    "auth.refresh proof"
+                );
+            }
+
+            // #3074 / #3079: every refusal of a spent token below first asks
+            // whether it is a lost rotation response being retried.
             let reissue = Reissue {
                 workspace_id,
                 member_id,
                 presented: &presented,
                 scopes: &reissue_scopes,
                 jwt_secret: jwt_secret.as_str(),
+                verdict,
+                proof_mode,
+                sweep_all,
+                downgrade,
             };
-            // (1) Advisory pre-check — precise 401s for a logged-out/rotated
-            // token. The *atomic* gate is the revoke below, not this read.
-            let old_refresh_id = match token_state(conn, &presented).await.map_err(DbError::from)? {
+            let old_refresh_id = match presented_state {
                 // R1 (#3022): a spent refresh token, presented again.
                 TokenState::Revoked { id } => {
-                    if let Some(gate) = reissue_lost_rotation(conn, &reissue).await? {
+                    if let Some(gate) = answer_spent(conn, &reissue, id, false).await? {
                         return Ok(gate);
                     }
-                    end_reused_lineage(conn, workspace_id, member_id, id, sweep_all).await?;
                     return Ok(RefreshGate::Rejected(TokenRejection::Revoked));
                 }
                 other => match other.require_active() {
@@ -441,6 +500,14 @@ pub async fn refresh(
                     Err(rejection) => return Ok(RefreshGate::Rejected(rejection)),
                 },
             };
+
+            // (1c) #3079 `require`: a key-bound lineage rotates only for its
+            // key. Refused before anything is spent — a live token presented
+            // without the key is not a copy *in use*, and the device still
+            // holds it.
+            if proof_mode == RefreshProofMode::Require && verdict.is_unproven_bound() {
+                return Ok(RefreshGate::ProofRefused(verdict));
+            }
 
             // (2) The credential is alive, but the human behind it may not be.
             // RLS scopes this lookup to the token's workspace, so "active in
@@ -477,18 +544,9 @@ pub async fn refresh(
                         .await
                         .map_err(DbError::from)?
                 else {
-                    if let Some(gate) = reissue_lost_rotation(conn, &reissue).await? {
+                    if let Some(gate) = answer_spent(conn, &reissue, old_refresh_id, true).await? {
                         return Ok(gate);
                     }
-                    end_lineage_if_spent(
-                        conn,
-                        workspace_id,
-                        member_id,
-                        &presented,
-                        old_refresh_id,
-                        sweep_all,
-                    )
-                    .await?;
                     return Ok(RefreshGate::AlreadyUsed);
                 };
                 // A binding that moved on is a reuse only when it moved
@@ -496,18 +554,9 @@ pub async fn refresh(
                 // rotated it). A binding moved under a still-live token is a
                 // refusal, not evidence of a second holder.
                 if locked.refresh_id != old_refresh_id {
-                    if let Some(gate) = reissue_lost_rotation(conn, &reissue).await? {
+                    if let Some(gate) = answer_spent(conn, &reissue, old_refresh_id, true).await? {
                         return Ok(gate);
                     }
-                    end_lineage_if_spent(
-                        conn,
-                        workspace_id,
-                        member_id,
-                        &presented,
-                        old_refresh_id,
-                        sweep_all,
-                    )
-                    .await?;
                     return Ok(RefreshGate::AlreadyUsed);
                 }
                 // Stamped only now, under the device-link and token locks the
@@ -520,11 +569,9 @@ pub async fn refresh(
                     .await
                     .map_err(DbError::from)?;
                 if !revoke.revoked_now {
-                    if let Some(gate) = reissue_lost_rotation(conn, &reissue).await? {
+                    if let Some(gate) = answer_spent(conn, &reissue, old_refresh_id, false).await? {
                         return Ok(gate);
                     }
-                    end_reused_lineage(conn, workspace_id, member_id, old_refresh_id, sweep_all)
-                        .await?;
                     return Ok(RefreshGate::AlreadyUsed);
                 }
                 if downgrade {
@@ -608,11 +655,9 @@ pub async fn refresh(
                 .await
                 .map_err(DbError::from)?;
             if !revoke.revoked_now {
-                if let Some(gate) = reissue_lost_rotation(conn, &reissue).await? {
+                if let Some(gate) = answer_spent(conn, &reissue, old_refresh_id, false).await? {
                     return Ok(gate);
                 }
-                end_reused_lineage(conn, workspace_id, member_id, old_refresh_id, sweep_all)
-                    .await?;
                 return Ok(RefreshGate::AlreadyUsed);
             }
             let Some(old_refresh_id) = revoke.id else {
@@ -667,6 +712,7 @@ pub async fn refresh(
         RefreshGate::AlreadyUsed => Err(ApiError::unauthorized(
             "refresh token already used or revoked",
         )),
+        RefreshGate::ProofRefused(verdict) => Err(proof_refusal(verdict)),
         RefreshGate::Issued { access, refresh } => Ok(Json(RefreshResponse {
             access_token: access.token,
             refresh_token: refresh.token,
@@ -767,13 +813,273 @@ async fn rotated_at_unix(conn: &mut PgConnection, refresh_id: Uuid) -> Result<i6
     .map_err(DbError::from)
 }
 
-/// What a lost rotation response is re-signed from.
+/// What a lost rotation response is re-signed from, and what decides how a
+/// spent presentation is answered ([`answer_spent`]).
 struct Reissue<'a> {
     workspace_id: Uuid,
     member_id: Uuid,
     presented: &'a str,
     scopes: &'a [String],
     jwt_secret: &'a str,
+    /// #3079: the presentation's proof, judged once at the top of the tx.
+    verdict: ProofVerdict,
+    proof_mode: RefreshProofMode,
+    sweep_all: bool,
+    /// The presented token carried a privileged scope: a recovered pair is
+    /// minted without it and the sibling privileged sessions are swept.
+    downgrade: bool,
+}
+
+/// #3079: the 401 a key-bound lineage's unproven presentation gets. Each is
+/// coded so a client can tell "sign again" (stale, replayed) from "this was
+/// not your key" — a client must not treat `refresh_proof_stale` or
+/// `refresh_proof_replayed` as a sign-out.
+fn proof_refusal(verdict: ProofVerdict) -> ApiError {
+    let (code, message) = match verdict {
+        ProofVerdict::Missing => ("refresh_proof_required", "refresh proof required"),
+        ProofVerdict::Stale => (
+            "refresh_proof_stale",
+            "refresh proof is outside the time window; sign it again with the server time",
+        ),
+        ProofVerdict::Replayed => (
+            "refresh_proof_replayed",
+            "refresh proof nonce was already used; sign it again with a fresh nonce",
+        ),
+        ProofVerdict::Forged | ProofVerdict::Unbound | ProofVerdict::Verified { .. } => (
+            "refresh_proof_invalid",
+            "refresh proof is not this session's key",
+        ),
+    };
+    ApiError::coded(axum::http::StatusCode::UNAUTHORIZED, code, message)
+}
+
+/// How a **spent** presentation is answered — the one decision table every
+/// refusal of a spent token goes through (#3022 → #3074 → #3079):
+///
+/// | proof (bound lineage)          | answer                                       | lineage |
+/// |--------------------------------|----------------------------------------------|---------|
+/// | verified                       | the #3074 pair if still unused, else a fresh pair for the live lineage ([`recover_lineage`]) — no time limit | kept |
+/// | stale / replayed (key's own)   | 401 coded, sign again                        | kept    |
+/// | missing / another key, `require` | 401                                        | **ended**, even inside 30 s |
+/// | missing / another key, `observe`; or unbound | #3074 reissue inside 30 s, else #3022 | as before |
+///
+/// `None` = the caller's own refusal. `only_if_spent`: the linked path's
+/// refusals, which follow a binding that may have moved under a still-live
+/// token — nothing happens unless the presented row is revoked by now.
+async fn answer_spent(
+    conn: &mut PgConnection,
+    reissue: &Reissue<'_>,
+    refresh_id: Uuid,
+    only_if_spent: bool,
+) -> Result<Option<RefreshGate>, DbError> {
+    if only_if_spent
+        && !matches!(
+            token_state(conn, reissue.presented)
+                .await
+                .map_err(DbError::from)?,
+            TokenState::Revoked { .. }
+        )
+    {
+        return Ok(None);
+    }
+    match reissue.verdict {
+        ProofVerdict::Verified { .. } => {
+            if let Some(gate) = reissue_lost_rotation(conn, reissue).await? {
+                return Ok(Some(gate));
+            }
+            recover_lineage(conn, reissue, refresh_id).await
+        }
+        ProofVerdict::Stale | ProofVerdict::Replayed => {
+            Ok(Some(RefreshGate::ProofRefused(reissue.verdict)))
+        }
+        verdict if reissue.proof_mode == RefreshProofMode::Require && verdict.is_copy() => {
+            tracing::warn!(
+                verdict = verdict.as_str(),
+                "auth.refresh: a key-bound lineage's spent token came back without its key; ending the lineage"
+            );
+            end_lineage(conn, reissue.workspace_id, reissue.member_id, refresh_id).await?;
+            Ok(None)
+        }
+        _ => {
+            if let Some(gate) = reissue_lost_rotation(conn, reissue).await? {
+                return Ok(Some(gate));
+            }
+            end_reused_lineage(
+                conn,
+                reissue.workspace_id,
+                reissue.member_id,
+                refresh_id,
+                reissue.sweep_all,
+            )
+            .await?;
+            Ok(None)
+        }
+    }
+}
+
+/// The live tail of a lineage: its newest refresh row that can still rotate.
+const LIVE_LINEAGE_TAIL_SQL: &str = "SELECT id, device_label \
+       FROM token \
+      WHERE workspace_id = $1 \
+        AND actor_member_id = $2 \
+        AND kind = 'session' \
+        AND session_id = $3 \
+        AND label = 'refresh' \
+        AND revoked_at IS NULL \
+        AND (expires_at IS NULL OR expires_at > now()) \
+      ORDER BY id DESC \
+      LIMIT 1";
+
+/// #3079: a spent token came back with a verified proof from its lineage's
+/// key — the device that holds the lineage lost a rotation response (sleep,
+/// Cmd+Q, a dead network) and holds only the spent token, however long ago it
+/// was spent. While the lineage can still rotate, every live token of it is
+/// revoked (whatever pair the lost response carried, and anything a copy
+/// minted from it) and a fresh pair continues the **same** lineage: its push
+/// registrations, device keys and refresh key stay. The device link, if any,
+/// is rebound to the fresh pair.
+///
+/// `None` (the caller refuses) when the lineage has ended — logout, unlink, a
+/// sweep, expiry — or its link moved under the lock. A dead lineage stays
+/// dead: a proof recovers a sign-in, it never resurrects one.
+///
+/// SABOTAGE(recover-no-member-check): drop the member check — the suspended
+/// member test must go RED.
+async fn recover_lineage(
+    conn: &mut PgConnection,
+    reissue: &Reissue<'_>,
+    refresh_id: Uuid,
+) -> Result<Option<RefreshGate>, DbError> {
+    let (workspace_id, member_id) = (reissue.workspace_id, reissue.member_id);
+    let Some(session_id) = session_id_of(conn, refresh_id)
+        .await
+        .map_err(DbError::from)?
+    else {
+        return Ok(None);
+    };
+    let member = get_member(conn, member_id).await?;
+    if member.is_none_or(|member| member.status != "active") {
+        return Ok(Some(RefreshGate::MemberInactive));
+    }
+    let tail: Option<(Uuid, Option<String>)> = momo_db::sqlx::query_as(LIVE_LINEAGE_TAIL_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(session_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(DbError::from)?;
+    let Some((tail_id, device_label)) = tail else {
+        return Ok(None);
+    };
+    // Linked device: the stable link row first, then tokens (the order every
+    // linked rotation and unlink takes).
+    let locked =
+        match find_linked_device_id_by_refresh_in_tx(conn, workspace_id, member_id, tail_id)
+            .await
+            .map_err(DbError::from)?
+        {
+            Some(device_id) => {
+                match lock_linked_device_in_tx(conn, workspace_id, member_id, device_id)
+                    .await
+                    .map_err(DbError::from)?
+                {
+                    Some(locked) if locked.refresh_id == tail_id => Some(locked),
+                    _ => return Ok(None),
+                }
+            }
+            None => None,
+        };
+    revoke_session_lineage_tokens(conn, workspace_id, member_id, session_id)
+        .await
+        .map_err(DbError::from)?;
+    if reissue.downgrade {
+        revoke_privileged_session_tokens(conn, workspace_id, member_id)
+            .await
+            .map_err(DbError::from)?;
+    }
+    let access = sign_access(member_id, workspace_id, reissue.scopes, reissue.jwt_secret)
+        .map_err(signing_error)?;
+    let refresh = sign_refresh(member_id, workspace_id, reissue.scopes, reissue.jwt_secret)
+        .map_err(signing_error)?;
+    let mut ids = [Uuid::nil(); 2];
+    for (slot, (token, label)) in [
+        (&access, SESSION_LABEL_ACCESS),
+        (&refresh, SESSION_LABEL_REFRESH),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        ids[slot] = record_session_token_with_device(
+            conn,
+            workspace_id,
+            member_id,
+            DeviceSessionRecord {
+                raw_token: &token.token,
+                label,
+                scopes: reissue.scopes,
+                expires_at_unix: token.expires_at,
+                device_label: device_label.as_deref(),
+                pending_sas: false,
+                session_id,
+            },
+        )
+        .await
+        .map_err(DbError::from)?;
+    }
+    if let Some(locked) = locked {
+        let rebound = rebind_locked_device_link_session_in_tx(
+            conn,
+            workspace_id,
+            member_id,
+            locked.id,
+            locked.access_id,
+            locked.refresh_id,
+            ids[0],
+            ids[1],
+        )
+        .await
+        .map_err(DbError::from)?;
+        if !rebound {
+            return Err(DbError::Sqlx(momo_db::sqlx::Error::Protocol(
+                "linked-device binding changed".to_string(),
+            )));
+        }
+    }
+    tracing::info!(
+        "auth.refresh: a verified proof recovered a lineage whose rotation response was lost"
+    );
+    Ok(Some(RefreshGate::Issued { access, refresh }))
+}
+
+/// #3079 `require`: a key-bound lineage whose spent token came back without
+/// its key ends now — no 30 s grace (that grace exists for browser tabs and
+/// lost responses, and a key-bound lineage's device proves both), and no
+/// linked-only rule (#3022 H2's tab concern does not apply to a lineage that
+/// holds a key). Same ending as [`end_reused_lineage`]: tokens and push
+/// registrations, keys kept (#3097).
+async fn end_lineage(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    refresh_id: Uuid,
+) -> Result<(), DbError> {
+    let Some(session_id) = session_id_of(conn, refresh_id)
+        .await
+        .map_err(DbError::from)?
+    else {
+        return Ok(());
+    };
+    revoke_session_lineage_tokens(conn, workspace_id, member_id, session_id)
+        .await
+        .map_err(DbError::from)?;
+    end_session_lineage_in_tx(
+        conn,
+        workspace_id,
+        member_id,
+        session_id,
+        LineageEnd::RefreshReuse,
+    )
+    .await
 }
 
 /// #3074 (ADR-0146 D-7 증보): answer a spent refresh token with the pair its
@@ -834,25 +1140,6 @@ async fn reissue_lost_rotation(
         return Ok(None);
     }
     Ok(Some(RefreshGate::Issued { access, refresh }))
-}
-
-/// [`end_reused_lineage`] when the presented refresh row is revoked by now —
-/// the linked path's refusals that follow a concurrent winner's rotation.
-async fn end_lineage_if_spent(
-    conn: &mut PgConnection,
-    workspace_id: Uuid,
-    member_id: Uuid,
-    presented: &str,
-    refresh_id: Uuid,
-    sweep_all: bool,
-) -> Result<(), DbError> {
-    if matches!(
-        token_state(conn, presented).await.map_err(DbError::from)?,
-        TokenState::Revoked { .. }
-    ) {
-        end_reused_lineage(conn, workspace_id, member_id, refresh_id, sweep_all).await?;
-    }
-    Ok(())
 }
 
 /// #3022 review M5: a pre-088 row gets the lineage its successor continues,

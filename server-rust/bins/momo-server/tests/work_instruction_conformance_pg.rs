@@ -143,6 +143,7 @@ fn settings(required: bool) -> DeviceKeySettings {
         host_register_signature_required: false,
         refresh_reuse_sweep_all_sessions: false,
         human_control_signature_required: required,
+        ..DeviceKeySettings::default()
     }
 }
 
