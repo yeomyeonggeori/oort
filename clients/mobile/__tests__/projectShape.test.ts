@@ -1,9 +1,9 @@
-import {execFileSync, execSync} from 'child_process';
-import {existsSync, readFileSync, readdirSync, statSync} from 'fs';
-import {join, resolve} from 'path';
+import { execFileSync, execSync } from 'child_process';
+import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
+import { join, resolve } from 'path';
 import * as ts from 'typescript';
-import {darkPalette, lightPalette} from '../src/design/tokens';
-import {NSE_KEYCHAIN_ACCESS_GROUP} from '../src/storage/secureSession';
+import { darkPalette, lightPalette } from '../src/design/tokens';
+import { NSE_KEYCHAIN_ACCESS_GROUP } from '../src/storage/secureSession';
 
 // =============================================================================
 // Mechanical guards for the decisions this project cannot afford to lose by
@@ -46,18 +46,24 @@ function sourceFiles(dir: string, acc: string[] = []): string[] {
 // string, a template literal or a regex. The parser knows where each of those
 // ends, so only real comments go. The printer re-spaces the code, which the
 // patterns below tolerate (`\s*`); identifiers and literals are unchanged.
-const commentFreePrinter = ts.createPrinter({removeComments: true});
+const commentFreePrinter = ts.createPrinter({ removeComments: true });
 function stripComments(fileName: string, source: string): string {
   const kind = fileName.endsWith('.tsx')
     ? ts.ScriptKind.TSX
     : fileName.endsWith('.jsx')
-      ? ts.ScriptKind.JSX
-      : fileName.endsWith('.js')
-        ? ts.ScriptKind.JS
-        : ts.ScriptKind.TS;
+    ? ts.ScriptKind.JSX
+    : fileName.endsWith('.js')
+    ? ts.ScriptKind.JS
+    : ts.ScriptKind.TS;
   // setParentNodes=true: the printer keeps a string literal's original quotes
   // only when it can walk up to the source file.
-  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, kind);
+  const sf = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    kind,
+  );
   return commentFreePrinter.printFile(sf);
 }
 const codeCache = new Map<string, string>();
@@ -96,7 +102,12 @@ describe('comment removal used by the code guards (review of #2587)', () => {
       expect(code).toContain(kept);
     }
     // … and the comments are gone.
-    for (const dropped of ['catch-all', 'window.x', 'jsdoc naming', 'trailing, names']) {
+    for (const dropped of [
+      'catch-all',
+      'window.x',
+      'jsdoc naming',
+      'trailing, names',
+    ]) {
       expect(code).not.toContain(dropped);
     }
   });
@@ -116,7 +127,9 @@ describe('the iOS project survives (ADR-0137 D7 정오 7항)', () => {
   });
 
   it('has no script that could run prebuild', () => {
-    const pkg = JSON.parse(readFileSync(join(APP_ROOT, 'package.json'), 'utf8'));
+    const pkg = JSON.parse(
+      readFileSync(join(APP_ROOT, 'package.json'), 'utf8'),
+    );
     for (const [name, script] of Object.entries<string>(pkg.scripts)) {
       expect(`${name}: ${script}`).not.toContain('prebuild');
     }
@@ -161,7 +174,9 @@ describe('the Xcode Cloud lane stays reachable (#1115, docs/cicd/10 §8)', () =>
     // workspace cannot be selected at all. The rest of the bundle is IDE state
     // and must stay ignored — see clients/mobile/.gitignore for both halves.
     expect(
-      tracked('clients/mobile/ios/MomoMobile.xcworkspace/contents.xcworkspacedata'),
+      tracked(
+        'clients/mobile/ios/MomoMobile.xcworkspace/contents.xcworkspacedata',
+      ),
     ).not.toBe('');
     const ignored = (path: string) => {
       try {
@@ -196,7 +211,9 @@ describe('the Xcode Cloud lane stays reachable (#1115, docs/cicd/10 §8)', () =>
     // minimum, so a drift between them would let CI accept a Node this app
     // says it does not run on.
     const pin = readFileSync(join(APP_ROOT, '.node-version'), 'utf8').trim();
-    const pkg = JSON.parse(readFileSync(join(APP_ROOT, 'package.json'), 'utf8'));
+    const pkg = JSON.parse(
+      readFileSync(join(APP_ROOT, 'package.json'), 'utf8'),
+    );
     expect(pkg.engines.node).toBe(`>= ${pin}`);
   });
 });
@@ -207,7 +224,9 @@ describe('Android is on hold, not half-started (성재 결정 6)', () => {
   });
 
   it('has no android build script', () => {
-    const pkg = JSON.parse(readFileSync(join(APP_ROOT, 'package.json'), 'utf8'));
+    const pkg = JSON.parse(
+      readFileSync(join(APP_ROOT, 'package.json'), 'utf8'),
+    );
     expect(Object.keys(pkg.scripts)).not.toContain('android');
   });
 });
@@ -267,13 +286,19 @@ describe('the push inheritance identifiers match the Portal (ADR-0137 D7)', () =
   });
 
   it('registers both invite URL schemes', () => {
-    const plist = readFileSync(join(APP_ROOT, 'ios/MomoMobile/Info.plist'), 'utf8');
+    const plist = readFileSync(
+      join(APP_ROOT, 'ios/MomoMobile/Info.plist'),
+      'utf8',
+    );
     expect(plist).toContain('<string>oort</string>');
     expect(plist).toContain('<string>momo</string>');
   });
 
   it('keeps ATS open for local networking only', () => {
-    const plist = readFileSync(join(APP_ROOT, 'ios/MomoMobile/Info.plist'), 'utf8');
+    const plist = readFileSync(
+      join(APP_ROOT, 'ios/MomoMobile/Info.plist'),
+      'utf8',
+    );
     expect(plist).toMatch(/NSAllowsLocalNetworking<\/key>\s*<true\/>/);
     // The switch that requires justification at review stays off.
     expect(plist).toMatch(/NSAllowsArbitraryLoads<\/key>\s*<false\/>/);
@@ -282,9 +307,9 @@ describe('the push inheritance identifiers match the Portal (ADR-0137 D7)', () =
 
 describe('boot order (spike #837 gate 2)', () => {
   const entry = readFileSync(join(APP_ROOT, 'index.js'), 'utf8');
-  const imports = [...entry.matchAll(/^import\s+(?:.*\s+from\s+)?['"](.+)['"];/gm)].map(
-    m => m[1],
-  );
+  const imports = [
+    ...entry.matchAll(/^import\s+(?:.*\s+from\s+)?['"](.+)['"];/gm),
+  ].map(m => m[1]);
 
   it('installs the URL polyfill before anything else', () => {
     // A module that captured `URL` at import time would keep React Native's
@@ -325,7 +350,8 @@ describe('DOM is in `lib`, so the discipline is enforced by a gate', () => {
     // that would wave those through, they are banned mechanically — the same
     // trade `@momo/core` makes, which stays pure via a gate and not via a `lib`
     // setting.
-    const banned = /\b(document|localStorage|sessionStorage)\b|\bwindow\.|\bnavigator\.|\blocation\.href\b/;
+    const banned =
+      /\b(document|localStorage|sessionStorage)\b|\bwindow\.|\bnavigator\.|\blocation\.href\b/;
     const offenders = sourceFiles(join(APP_ROOT, 'src'))
       .concat([join(APP_ROOT, 'App.tsx'), join(APP_ROOT, 'index.js')])
       .filter(file => {
@@ -396,7 +422,9 @@ describe('layering', () => {
   it('imports the core, never the web client', () => {
     const offenders = sourceFiles(join(APP_ROOT, 'src'))
       .concat([join(APP_ROOT, 'App.tsx'), join(APP_ROOT, 'index.js')])
-      .filter(file => /from\s+['"].*clients\/web/.test(readFileSync(file, 'utf8')));
+      .filter(file =>
+        /from\s+['"].*clients\/web/.test(readFileSync(file, 'utf8')),
+      );
     expect(offenders).toEqual([]);
   });
 
@@ -419,9 +447,14 @@ describe('what the upload declares stays true of the code (#2568)', () => {
   // looks at the code again. Each assertion below ties one declaration to the
   // code fact it rests on, so a change that makes the declaration false fails
   // here instead of shipping a false statement to Apple.
-  const plist = readFileSync(join(APP_ROOT, 'ios/MomoMobile/Info.plist'), 'utf8');
+  const plist = readFileSync(
+    join(APP_ROOT, 'ios/MomoMobile/Info.plist'),
+    'utf8',
+  );
   const plistString = (key: string) =>
-    plist.match(new RegExp(`<key>${key}</key>\\s*<string>([^<]*)</string>`))?.[1];
+    plist.match(
+      new RegExp(`<key>${key}</key>\\s*<string>([^<]*)</string>`),
+    )?.[1];
 
   // Everything that ends up in the JS bundle: this client plus the core, which
   // Metro compiles from source (the core's colocated tests do not ship).
@@ -435,7 +468,12 @@ describe('what the upload declares stays true of the code (#2568)', () => {
           file => !/\.test\.tsx?$/.test(file),
         ),
       )
-      .map(file => ({file, code: codeOf(file)}));
+      .map(file => ({ file, code: codeOf(file) }));
+
+  const DEVICE_KEY_STORE = join(
+    APP_ROOT,
+    'modules/momo-device-key-native/ios/MomoDeviceKeyStore.swift',
+  );
 
   function nativeFiles(dir: string, acc: string[] = []): string[] {
     for (const entry of readdirSync(dir)) {
@@ -464,7 +502,9 @@ describe('what the upload declares stays true of the code (#2568)', () => {
   });
 
   it('declares only exempt encryption', () => {
-    expect(plist).toMatch(/<key>ITSAppUsesNonExemptEncryption<\/key>\s*<false\/>/);
+    expect(plist).toMatch(
+      /<key>ITSAppUsesNonExemptEncryption<\/key>\s*<false\/>/,
+    );
   });
 
   it('keeps that declaration true: MMKV is never given a key', () => {
@@ -476,15 +516,17 @@ describe('what the upload declares stays true of the code (#2568)', () => {
     // `false` would then be a false export declaration.
     const banned = /\bencryptionKey\b|\.(?:en|re)crypt\s*\(|\bsubtle\b/;
     const offenders = shippedCode()
-      .filter(({code}) => banned.test(code))
-      .map(({file}) => file);
+      .filter(({ code }) => banned.test(code))
+      .map(({ file }) => file);
     expect(offenders).toEqual([]);
   });
 
   it('keeps that declaration true: no crypto library and no native cipher', () => {
     // A tripwire, not a proof: a dependency whose name says it implements
     // cryptography reopens the question before it can ship unnoticed.
-    const pkg = JSON.parse(readFileSync(join(APP_ROOT, 'package.json'), 'utf8'));
+    const pkg = JSON.parse(
+      readFileSync(join(APP_ROOT, 'package.json'), 'utf8'),
+    );
     expect(
       Object.keys(pkg.dependencies).filter(name =>
         /crypt|sodium|nacl|cipher|ssl|aes\b|argon/i.test(name),
@@ -496,10 +538,37 @@ describe('what the upload declares stays true of the code (#2568)', () => {
     // (`CCCrypt`, `CCCryptor…`) or a Security-framework key encryption call.
     const nativeCipher =
       /\bimport\s+(?:CryptoKit|CommonCrypto)\b|#\s*(?:import|include)\s*<CommonCrypto\b|\bCCCrypt(?:or\w*)?\b|\bSecKeyEncrypt\b|\bSecKeyCreateEncryptedData\b/;
-    const native = ['ios/MomoMobile', 'ios/NotificationService', 'ios/MomoPushKit', 'modules']
+    const native = [
+      'ios/MomoMobile',
+      'ios/NotificationService',
+      'ios/MomoPushKit',
+      'modules',
+    ]
       .flatMap(dir => nativeFiles(join(APP_ROOT, dir)))
+      .filter(file => file !== DEVICE_KEY_STORE)
       .filter(file => nativeCipher.test(readFileSync(file, 'utf8')));
     expect(native).toEqual([]);
+  });
+
+  it('keeps that declaration true: the device key only SIGNS (#3026)', () => {
+    // The one sanctioned CryptoKit import. MomoDeviceKeyStore uses it for a
+    // Secure Enclave ECDSA signature and nothing else — authentication, not
+    // confidentiality. The moment it encrypts or agrees a key, the Info.plist
+    // `false` has to be judged again, so any cipher, sealed box, symmetric key
+    // or key agreement in this file fails here.
+    const code = readFileSync(DEVICE_KEY_STORE, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/.*$/gm, '');
+    expect(code).toMatch(/\bimport\s+CryptoKit\b/);
+    expect(code).not.toMatch(
+      /\b(?:AES|ChaChaPoly|SealedBox|HPKE|SymmetricKey|KeyAgreement|sharedSecretFromKeyAgreement|HMAC|SecKeyEncrypt|SecKeyCreateEncryptedData|SecKeyCopyKeyExchangeResult)\b/,
+    );
+    // Only the Signing half of the enclave API.
+    const enclaveUses = code.match(/SecureEnclave\.P256\.\w+/g) ?? [];
+    expect(enclaveUses.length).toBeGreaterThan(0);
+    expect(new Set(enclaveUses)).toEqual(
+      new Set(['SecureEnclave.P256.Signing']),
+    );
   });
 
   it('keeps the microphone sentence true: nothing asks for the microphone', () => {
@@ -510,10 +579,12 @@ describe('what the upload declares stays true of the code (#2568)', () => {
     const banned =
       /\b(?:requestMicrophonePermissionsAsync|getMicrophonePermissionsAsync|useMicrophonePermissions|recordAsync|requestRecordingPermissionsAsync|useAudioRecorder)\b|\bmode\s*=\s*\{?\s*['"]video['"]/;
     const offenders = shippedCode()
-      .filter(({code}) => banned.test(code))
-      .map(({file}) => file);
+      .filter(({ code }) => banned.test(code))
+      .map(({ file }) => file);
     expect(offenders).toEqual([]);
-    const pkg = JSON.parse(readFileSync(join(APP_ROOT, 'package.json'), 'utf8'));
+    const pkg = JSON.parse(
+      readFileSync(join(APP_ROOT, 'package.json'), 'utf8'),
+    );
     expect(
       Object.keys(pkg.dependencies).filter(name =>
         /audio|voice|webrtc|record|speech|^expo-av$/i.test(name),
@@ -529,16 +600,22 @@ describe('the app icon App Store Connect requires (#2643)', () => {
   // build and gate stayed green. actool derives those Info.plist keys and every
   // device size from one 1024 image (the single-size catalog), so the guard is
   // on that one file.
-  const ICONSET = join(APP_ROOT, 'ios/MomoMobile/Images.xcassets/AppIcon.appiconset');
+  const ICONSET = join(
+    APP_ROOT,
+    'ios/MomoMobile/Images.xcassets/AppIcon.appiconset',
+  );
   const images = () =>
-    JSON.parse(readFileSync(join(ICONSET, 'Contents.json'), 'utf8')).images as Array<
-      Record<string, string>
-    >;
+    JSON.parse(readFileSync(join(ICONSET, 'Contents.json'), 'utf8'))
+      .images as Array<Record<string, string>>;
 
   it('is one universal 1024 image, present as a real file', () => {
     const list = images();
     expect(list).toHaveLength(1);
-    expect(list[0]).toMatchObject({idiom: 'universal', platform: 'ios', size: '1024x1024'});
+    expect(list[0]).toMatchObject({
+      idiom: 'universal',
+      platform: 'ios',
+      size: '1024x1024',
+    });
     expect(list[0].filename).toBeTruthy();
     expect(existsSync(join(ICONSET, list[0].filename))).toBe(true);
   });
@@ -564,8 +641,9 @@ describe('the app icon App Store Connect requires (#2643)', () => {
   it('is the set the app target compiles', () => {
     // Both configurations of the app target; the extension has no icon.
     expect(
-      readFileSync(PBXPROJ, 'utf8').match(/ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;/g)
-        ?.length,
+      readFileSync(PBXPROJ, 'utf8').match(
+        /ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;/g,
+      )?.length,
     ).toBe(2);
   });
 });
@@ -599,12 +677,14 @@ describe('the launch screen is the boot background and nothing else (#2668)', ()
     /^0x[0-9a-f]{2}$/i.test(value)
       ? parseInt(value.slice(2), 16)
       : value.includes('.')
-        ? Math.round(parseFloat(value) * 255)
-        : parseInt(value, 10);
+      ? Math.round(parseFloat(value) * 255)
+      : parseInt(value, 10);
   const hex = (components: Record<string, string>): string =>
     '#' +
     ['red', 'green', 'blue']
-      .map(channel => componentByte(components[channel]).toString(16).padStart(2, '0'))
+      .map(channel =>
+        componentByte(components[channel]).toString(16).padStart(2, '0'),
+      )
       .join('');
 
   it('is the storyboard Info.plist launches', () => {
@@ -642,15 +722,17 @@ describe('the launch screen is the boot background and nothing else (#2668)', ()
       ),
     ).colors as Array<{
       idiom: string;
-      appearances?: Array<{appearance: string; value: string}>;
-      color: {'color-space': string; components: Record<string, string>};
+      appearances?: Array<{ appearance: string; value: string }>;
+      color: { 'color-space': string; components: Record<string, string> };
     }>;
     // Two entries, because the boot screen has two palettes. A high-contrast
     // variant here would have nothing on the JS side to match.
     expect(colors).toHaveLength(2);
     const any = colors.find(entry => entry.appearances === undefined);
     const dark = colors.find(entry =>
-      entry.appearances?.some(a => a.appearance === 'luminosity' && a.value === 'dark'),
+      entry.appearances?.some(
+        a => a.appearance === 'luminosity' && a.value === 'dark',
+      ),
     );
     // sRGB, because that is how React Native reads a hex string
     // (RCTDefaultReactNativeFactoryDelegate.defaultColorSpace). The same bytes
@@ -682,11 +764,16 @@ describe('the local upload build number rule (#2568)', () => {
   // and no counter file has to be committed. App Store Connect only accepts a
   // number higher than the previous upload of the same version.
   const script = join(APP_ROOT, 'scripts/archive-release.sh');
-  const kst = (local: string) => Math.floor(Date.parse(`${local}+09:00`) / 1000);
+  const kst = (local: string) =>
+    Math.floor(Date.parse(`${local}+09:00`) / 1000);
   const buildNumber = (now: number, ...args: string[]) =>
     execFileSync('bash', [script, '--print-build-number', ...args], {
       encoding: 'utf8',
-      env: {...process.env, MOMO_IOS_BUILD_NOW: String(now), MOMO_IOS_BUILD_NUMBER: ''},
+      env: {
+        ...process.env,
+        MOMO_IOS_BUILD_NOW: String(now),
+        MOMO_IOS_BUILD_NUMBER: '',
+      },
       stdio: 'pipe',
     }).trim();
 
@@ -699,7 +786,9 @@ describe('the local upload build number rule (#2568)', () => {
   });
 
   it('numbers a same-day re-upload above the first one', () => {
-    expect(buildNumber(kst('2026-09-23T12:00:00'), '--seq', '1')).toBe('3022.1');
+    expect(buildNumber(kst('2026-09-23T12:00:00'), '--seq', '1')).toBe(
+      '3022.1',
+    );
   });
 
   it('refuses a clock from before the rule', () => {
@@ -709,7 +798,7 @@ describe('the local upload build number rule (#2568)', () => {
   it('is committed executable', () => {
     const entry = execSync(
       'git ls-files -s -- clients/mobile/scripts/archive-release.sh',
-      {cwd: REPO_ROOT, encoding: 'utf8'},
+      { cwd: REPO_ROOT, encoding: 'utf8' },
     ).trim();
     expect(entry.split(' ')[0]).toBe('100755');
   });
