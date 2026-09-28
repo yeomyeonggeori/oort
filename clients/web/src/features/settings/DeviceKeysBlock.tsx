@@ -624,7 +624,6 @@ function PhoneKeyRow({
         (await desktopDeviceKey.signRevoke({
           workspaceId,
           targetKeyId: phone.id,
-          targetPublicKey: phone.publicKey,
           targetLabel: phone.label,
         }));
       setLetter(signed);

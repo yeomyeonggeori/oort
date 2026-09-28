@@ -8,8 +8,17 @@ use serde_json::Value;
 const VECTORS: &str =
     include_str!("../../../../../mobile/__tests__/fixtures/human-control-signing.vectors.json");
 
+/// The E7 v2 vectors (#3027·#3068): control v2 and device_revoke.v2.
+const VECTORS_V2: &str =
+    include_str!("../../../../../../docs/api/human-control-signing-v2.vectors.json");
+
 fn cases() -> Vec<Value> {
     let root: Value = serde_json::from_str(VECTORS).unwrap();
+    root["cases"].as_array().unwrap().clone()
+}
+
+fn cases_v2() -> Vec<Value> {
+    let root: Value = serde_json::from_str(VECTORS_V2).unwrap();
     root["cases"].as_array().unwrap().clone()
 }
 
@@ -26,6 +35,14 @@ fn signer_of(fields: &Value, key_field: &str) -> Signer {
 }
 
 fn control_request(fields: &Value, content: &Value) -> ControlRequest {
+    let mut content = content.clone();
+    // A v1 spawn names no tool or channel; the v1 recipe ignores them, the
+    // struct needs them.
+    if content["kind"] == "spawn" && content.get("tool").is_none() {
+        content["tool"] = Value::from("unused-by-v1");
+        content["channel_id"] = Value::from(Uuid::nil().to_string());
+    }
+    let content = &content;
     // The vector's content object is the E1 shape (snake_case); the webview
     // sends camelCase. Re-key it the way the bridge does.
     let mut camel = serde_json::Map::new();
@@ -66,7 +83,7 @@ fn control_request(fields: &Value, content: &Value) -> ControlRequest {
 fn statement_of(case: &Value) -> Statement {
     let fields = &case["fields"];
     match case["schema"].as_str().unwrap() {
-        HUMAN_CONTROL_SCHEMA_V1 => Statement::Control {
+        HUMAN_CONTROL_SCHEMA_V1 | HUMAN_CONTROL_SCHEMA_V2 => Statement::Control {
             signer: signer_of(fields, "device_key_id"),
             request: control_request(fields, &case["content"]),
         },
@@ -80,15 +97,17 @@ fn statement_of(case: &Value) -> Statement {
                 label: fields["label"].as_str().unwrap().into(),
             },
         },
-        DEVICE_REVOKE_SCHEMA_V1 => Statement::Revoke {
+        DEVICE_REVOKE_SCHEMA_V1 | DEVICE_REVOKE_SCHEMA_V2 => Statement::Revoke {
             signer: signer_of(fields, "root_key_id"),
             request: RevokeRequest {
                 workspace_id: uuid(&fields["workspace_id"]),
                 target_key_id: uuid(&fields["target_key_id"]),
-                // Any valid point: not part of the signed bytes.
-                target_public_key: "A2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW".into(),
                 target_label: String::new(),
             },
+            target_public_key: fields["target_public_key_b64"]
+                .as_str()
+                .unwrap_or("A2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW")
+                .into(),
             revoked_at_ms: fields["revoked_at_ms"].as_i64().unwrap(),
         },
         other => panic!("unknown schema {other}"),
@@ -100,13 +119,85 @@ fn now_for(case: &Value) -> i64 {
     case["fields"]["issued_at_ms"].as_i64().unwrap_or(0) + 1_000
 }
 
+fn verify_all(name: &str, case: &Value, bytes: &[u8]) {
+    let signatures = case["signatures"].as_array().unwrap();
+    assert!(signatures.len() >= 3, "{name}: webcrypto, cryptokit, SE");
+    for signature in signatures {
+        let key = BASE64
+            .decode(signature["public_key"].as_str().unwrap())
+            .unwrap();
+        let raw = BASE64
+            .decode(signature["signature"].as_str().unwrap())
+            .unwrap();
+        assert!(
+            verify_raw(&key, bytes, &raw),
+            "{name}: {} signature",
+            signature["signer"]
+        );
+    }
+}
+
+/// E1 (v1): the port still rebuilds every v1 byte, but only the endorsement
+/// is signable now; v1 control and v1 revocations never reach the enclave.
 #[test]
-fn every_shared_vector_rebuilds_byte_for_byte_and_every_signature_verifies() {
+fn every_v1_vector_rebuilds_but_only_the_endorsement_is_still_signable() {
     let cases = cases();
     assert_eq!(
         cases.len(),
         8,
         "the E1 vector set changed; review this port"
+    );
+    for case in &cases {
+        let name = case["name"].as_str().unwrap();
+        let fields = &case["fields"];
+        let bytes = match (case["schema"].as_str().unwrap(), statement_of(case)) {
+            (HUMAN_CONTROL_SCHEMA_V1, Statement::Control { signer, request }) => {
+                assert_eq!(
+                    request
+                        .content
+                        .content_sha256_for(ControlSchema::V1)
+                        .unwrap(),
+                    case["content_sha256"].as_str().unwrap(),
+                    "{name}: content sha256"
+                );
+                control_bytes_for(ControlSchema::V1, &signer, &request).unwrap()
+            }
+            (DEVICE_ENDORSE_SCHEMA_V1, statement) => statement.signed_bytes(now_for(case)).unwrap(),
+            (DEVICE_REVOKE_SCHEMA_V1, _) => format!(
+                "{DEVICE_REVOKE_SCHEMA_V1}\n{}\n{}\n{}\n{}\n{}",
+                fields["workspace_id"].as_str().unwrap(),
+                fields["member_id"].as_str().unwrap(),
+                fields["root_key_id"].as_str().unwrap(),
+                fields["target_key_id"].as_str().unwrap(),
+                fields["revoked_at_ms"].as_i64().unwrap(),
+            )
+            .into_bytes(),
+            (other, _) => panic!("{name}: unexpected schema {other}"),
+        };
+        assert_eq!(
+            std::str::from_utf8(&bytes).unwrap(),
+            case["payload"].as_str().unwrap(),
+            "{name}: payload bytes"
+        );
+        verify_all(name, case, &bytes);
+        let signable = check_signing_payload(&bytes).is_ok();
+        assert_eq!(
+            signable,
+            case["schema"] == DEVICE_ENDORSE_SCHEMA_V1,
+            "{name}: only the endorsement stays signable"
+        );
+    }
+}
+
+/// E7 (v2, #3027·#3068): every case is built by the production path
+/// (`Statement::signed_bytes`, allow-list included) and equals the vector.
+#[test]
+fn every_v2_vector_rebuilds_byte_for_byte_and_every_signature_verifies() {
+    let cases = cases_v2();
+    assert_eq!(
+        cases.len(),
+        8,
+        "the E7 vector set changed; review this port"
     );
     let mut schemas = std::collections::BTreeSet::new();
     for case in &cases {
@@ -125,53 +216,141 @@ fn every_shared_vector_rebuilds_byte_for_byte_and_every_signature_verifies() {
         );
         if let Statement::Control { request, .. } = &statement {
             assert_eq!(
-                request.content.content_sha256().unwrap(),
+                request
+                    .content
+                    .content_sha256_for(ControlSchema::V2)
+                    .unwrap(),
                 case["content_sha256"].as_str().unwrap(),
                 "{name}: content sha256"
             );
         }
-        let signatures = case["signatures"].as_array().unwrap();
-        assert!(signatures.len() >= 3, "{name}: webcrypto, cryptokit, SE");
-        for signature in signatures {
-            let key = BASE64
-                .decode(signature["public_key"].as_str().unwrap())
-                .unwrap();
-            let raw = BASE64
-                .decode(signature["signature"].as_str().unwrap())
-                .unwrap();
-            assert!(
-                verify_raw(&key, &bytes, &raw),
-                "{name}: {} signature",
-                signature["signer"]
-            );
-        }
+        verify_all(name, case, &bytes);
         schemas.insert(statement.schema());
     }
     assert_eq!(
-        schemas.len(),
-        3,
-        "control, endorse and revoke all come from the vectors"
+        schemas,
+        [HUMAN_CONTROL_SCHEMA_V2, DEVICE_REVOKE_SCHEMA_V2]
+            .into_iter()
+            .collect(),
+        "control v2 and revoke v2 both come from the vectors"
     );
 }
 
+/// The revocation names the PUBLIC KEY it revokes: a letter built over
+/// another key is different bytes, so the vector's signatures fail on it.
 #[test]
-fn the_revocation_letter_is_the_e1_vector() {
-    let case = cases()
+fn the_revocation_letter_is_the_v2_vector_and_binds_the_public_key() {
+    let case = cases_v2()
         .into_iter()
-        .find(|c| c["name"] == "device_revoke")
+        .find(|c| c["name"] == "device_revoke_v2")
         .unwrap();
     let fields = &case["fields"];
+    let signer = signer_of(fields, "root_key_id");
     let bytes = revoke_bytes(
-        &signer_of(fields, "root_key_id"),
+        &signer,
         uuid(&fields["target_key_id"]),
+        fields["target_public_key_b64"].as_str().unwrap(),
         fields["revoked_at_ms"].as_i64().unwrap(),
     );
     assert_eq!(bytes, case["payload"].as_str().unwrap().as_bytes());
+    let other_key = BASE64.encode(
+        p256::ecdsa::SigningKey::from_slice(&[5u8; 32])
+            .unwrap()
+            .verifying_key()
+            .to_encoded_point(true)
+            .as_bytes(),
+    );
+    let swapped = revoke_bytes(
+        &signer,
+        uuid(&fields["target_key_id"]),
+        &other_key,
+        fields["revoked_at_ms"].as_i64().unwrap(),
+    );
+    let signature = &case["signatures"][0];
+    let key = BASE64
+        .decode(signature["public_key"].as_str().unwrap())
+        .unwrap();
+    let raw = BASE64
+        .decode(signature["signature"].as_str().unwrap())
+        .unwrap();
+    assert!(verify_raw(&key, &bytes, &raw));
+    assert!(!verify_raw(&key, &swapped, &raw), "the key is signed");
+}
+
+/// A v1 spawn is never produced: the production recipe is v2, and a v2 spawn
+/// binds the tool and the channel (changing either changes the bytes).
+#[test]
+fn a_spawn_is_signed_as_v2_and_binds_tool_channel_and_the_resumed_session() {
+    let case = cases_v2()
+        .into_iter()
+        .find(|c| c["name"] == "control_v2_spawn_resume")
+        .unwrap();
+    let Statement::Control { signer, request } = statement_of(&case) else {
+        unreachable!()
+    };
+    let now = now_for(&case);
+    let base = Statement::Control {
+        signer,
+        request: request.clone(),
+    }
+    .signed_bytes(now)
+    .unwrap();
+    assert!(base.starts_with(b"momo.human.control.v2\n"));
+    for (what, changed) in [
+        ("tool", {
+            let mut r = request.clone();
+            if let ControlContent::Spawn { tool, .. } = &mut r.content {
+                *tool = "claude".into();
+            }
+            r
+        }),
+        ("channel", {
+            let mut r = request.clone();
+            if let ControlContent::Spawn { channel_id, .. } = &mut r.content {
+                *channel_id = Uuid::from_u128(77);
+            }
+            r
+        }),
+        ("session", {
+            let mut r = request.clone();
+            r.session_id = Some(Uuid::from_u128(78));
+            r
+        }),
+    ] {
+        let bytes = Statement::Control {
+            signer,
+            request: changed,
+        }
+        .signed_bytes(now)
+        .unwrap();
+        assert_ne!(bytes, base, "{what} is signed");
+    }
+    // A bundle or host registration still names no session.
+    let bundle = cases_v2()
+        .into_iter()
+        .find(|c| c["name"] == "control_v2_bundle_manifest")
+        .unwrap();
+    let Statement::Control {
+        signer,
+        mut request,
+    } = statement_of(&bundle)
+    else {
+        unreachable!()
+    };
+    request.session_id = Some(Uuid::from_u128(1));
+    assert_eq!(
+        control_bytes(&signer, &request),
+        Err(PayloadError::SessionForbidden)
+    );
 }
 
 #[test]
 fn only_the_three_schemas_with_their_exact_line_counts_are_signable() {
-    for case in cases() {
+    for case in cases_v2().into_iter().chain(
+        cases()
+            .into_iter()
+            .filter(|c| c["schema"] == DEVICE_ENDORSE_SCHEMA_V1),
+    ) {
         let payload = case["payload"].as_str().unwrap();
         assert_eq!(check_signing_payload(payload.as_bytes()), Ok(()));
         // A trailing newline or an appended line changes the count.
@@ -182,6 +361,7 @@ fn only_the_three_schemas_with_their_exact_line_counts_are_signable() {
     }
     for foreign in [
         "momo.human.control.v2\na",
+        "momo.human.control.v3\na\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl",
         "momo.work.host.v1\na\nb",
         "hello",
         "",
@@ -199,6 +379,11 @@ fn input_case() -> (Signer, ControlRequest) {
     let case = cases()
         .into_iter()
         .find(|c| c["name"] == "control_input_queue_nfc")
+        .map(|mut c| {
+            // Production signs v2; the input bytes but the first line match.
+            c["schema"] = Value::from(HUMAN_CONTROL_SCHEMA_V2);
+            c
+        })
         .unwrap();
     let Statement::Control { signer, request } = statement_of(&case) else {
         unreachable!()
@@ -388,14 +573,16 @@ fn the_dialog_shows_what_is_signed_and_nothing_that_can_spoof_it() {
     );
     assert!(summary.body.contains("「성재의 iPhone」"));
 
-    // Revoke: the fingerprint of the key the host will drop, first.
-    let case = cases()
+    // Revoke: the fingerprint of the key the host will drop (the one the
+    // v2 letter signs), first.
+    let case = cases_v2()
         .into_iter()
-        .find(|c| c["name"] == "device_revoke")
+        .find(|c| c["name"] == "device_revoke_v2")
         .unwrap();
     let summary = statement_of(&case).summary(None);
+    let revoked = fingerprint(case["fields"]["target_public_key_b64"].as_str().unwrap()).unwrap();
     assert!(
-        summary.body.starts_with(&format!("지문: {fp}\n")),
+        summary.body.starts_with(&format!("지문: {revoked}\n")),
         "{summary:?}"
     );
 }
@@ -462,7 +649,7 @@ fn invisible_characters_are_never_signed() {
 /// here: no em/en dash in any title, body or button (design-review M8).
 #[test]
 fn no_dialog_text_carries_a_dash() {
-    for case in cases() {
+    for case in cases().into_iter().chain(cases_v2()) {
         let summary = statement_of(&case).summary(None);
         for text in [&summary.title, &summary.body, &summary.confirm] {
             assert!(

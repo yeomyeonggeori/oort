@@ -318,6 +318,8 @@ export function deviceKeyErrorMessage(code: unknown): string {
       return "이 종류의 서명은 아직 이 앱에서 할 수 없습니다.";
     case "device_key_no_letter":
       return "이 맥에서 서명한 해제 기록이 없어 다시 보낼 수 없습니다.";
+    case "device_key_not_endorsed_here":
+      return "이 맥에서 승인한 적이 없는 키라 이 맥에서는 끊을 수 없습니다. 그 기기의 연결을 끊으면 서버에서 키도 함께 해제됩니다.";
     default:
       return "서명하지 못했습니다. 다시 시도하세요.";
   }
