@@ -3,10 +3,13 @@ import { ApiError } from "../../lib/api";
 import { WireShapeError } from "../../lib/wire";
 import { installCoreHost, resetCoreHost } from "../../runtime/host";
 import {
+  fetchSigningContext,
   listDeviceKeys,
   parseDeviceKey,
+  parseSigningContext,
   phoneKeyForLinkedDevice,
   phoneKeys,
+  registerPhoneDeviceKey,
   registerRootDeviceKey,
   rootRowFor,
   submitEndorsement,
@@ -132,6 +135,63 @@ describe("deviceKeys wire (E2 DeviceKeyDto)", () => {
       `https://oort.test/v1/workspaces/${WS}/device-keys/k1/revocation`,
     ]);
     expect(bodies[1]).toEqual({ rootKeyId: "r", revokedAtMs: 7, signature: "s" });
+  });
+});
+
+describe("the phone's side (#3026 E6)", () => {
+  it("registers an ios key with no password field at all", async () => {
+    installHost();
+    const calls: { url: string; init: RequestInit }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        calls.push({ url, init });
+        return new Response(JSON.stringify({ deviceKey: row() }), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        });
+      })
+    );
+    const key = await registerPhoneDeviceKey(WS, { publicKey: PHONE_KEY, label: "iPhone 17 Pro" });
+    expect(key.state).toBe("unendorsed");
+    expect(calls[0]!.url).toBe(`https://oort.test/v1/workspaces/${WS}/device-keys`);
+    expect(calls[0]!.init.method).toBe("POST");
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({
+      alg: "p256",
+      publicKey: PHONE_KEY,
+      platform: "ios",
+      label: "iPhone 17 Pro",
+    });
+  });
+
+  it("reads the signing context verbatim and refuses a partial one", async () => {
+    installHost();
+    const context = {
+      instanceId: "inst_01J9Z6T3QK8Y2W5N7M4R0P1XAB",
+      serverTimeMs: 1_790_550_000_000,
+      maxLifetimeMs: 600_000,
+      maxClockSkewMs: 300_000,
+      humanControlSignatureRequired: true,
+      hostRegisterSignatureRequired: false,
+    };
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        urls.push(url);
+        return new Response(JSON.stringify(context), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      })
+    );
+    expect(await fetchSigningContext(WS)).toEqual(context);
+    expect(urls).toEqual([`https://oort.test/v1/workspaces/${WS}/device-keys/signing-context`]);
+    expect(() => parseSigningContext({ ...context, instanceId: "" })).toThrow(WireShapeError);
+    expect(() => parseSigningContext({ ...context, maxLifetimeMs: 0 })).toThrow(WireShapeError);
+    expect(() =>
+      parseSigningContext({ ...context, humanControlSignatureRequired: undefined })
+    ).toThrow(WireShapeError);
   });
 });
 

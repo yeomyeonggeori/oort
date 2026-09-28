@@ -24,6 +24,7 @@ import {
   type OpenHostedConnection,
   type Tab,
 } from '../nav/state';
+import {DeviceKeyLinkGate} from '../features/deviceKey/DeviceKeyLinkSheet';
 import {NotificationPrimerGate} from '../features/onboarding/NotificationPrimer';
 import PushProvider from '../push/PushProvider';
 import {useNotificationTapRouting} from '../push/useNotificationTapRouting';
@@ -99,6 +100,8 @@ export default function AppShell({member}: {member: Member}): React.JSX.Element 
           <Shell />
           {/* M3 알림 미리 안내(#2820). 권한이 아직 안 물어졌을 때만 셸 위에 선다. */}
           <NotificationPrimerGate />
+          {/* QR 연결 직후 기기 키 등록과 맥 승인 대기(#3026). M3 뒤에 선다. */}
+          <DeviceKeyLinkGate />
         </RealtimeProvider>
       </PushProvider>
     </SessionProvider>

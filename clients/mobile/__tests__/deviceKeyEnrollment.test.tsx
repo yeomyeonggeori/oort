@@ -1,0 +1,539 @@
+import type {DeviceKey} from '@momo/core/features/auth/deviceKeys';
+import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react-native';
+import React from 'react';
+
+import '../src/boot/polyfills';
+import '../src/boot/coreHost';
+
+import {bytesToBase64} from '../src/deviceKey/base64';
+import {
+  deriveDeviceKeyView,
+  enrollDeviceKey,
+  EnrollError,
+  forgetDeviceKeyOnSignOut,
+  replaceInvalidatedKey,
+  type DeviceKeyView,
+} from '../src/deviceKey/enrollment';
+import {deviceKeyCopy} from '../src/features/deviceKey/copy';
+import {DeviceKeyLinkGate} from '../src/features/deviceKey/DeviceKeyLinkSheet';
+import {DeviceKeyPanel} from '../src/features/deviceKey/DeviceKeyPanel';
+import {deviceLinkDevice} from '../src/features/deviceLink/deviceIdentity';
+import {noteConnectRoute, resetConnectRoute} from '../src/features/onboarding/phoneFlow';
+import {SessionProvider, useSession} from '../src/session/useSession';
+import {__setNonSecretStore} from '../src/storage/kv';
+import {
+  __resetSessionStore,
+  keychainSettled,
+  sessionPort,
+} from '../src/storage/secureSession';
+import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+
+/**
+ * The Mac's own function, from clients/web as it ships. Loaded with `require`
+ * so this project's `tsc` does not type-check the web tree (its `@/` alias is
+ * the web project's); jest runs it through babel like the core.
+ */
+const {deviceKeyFingerprint: webFingerprint} =
+  require('../../web/src/features/settings/deviceKeysShared') as {
+    deviceKeyFingerprint: (publicKeyB64: string) => Promise<string>;
+  };
+
+// =============================================================================
+// #3026 stage 2 — the phone's key is made at QR link, registered, and waits for
+// the root Mac (ADR-0146 개정 2026-09-28 D-2 · D-6 ② · D-7).
+//
+// Under test: what the enrollment does to the enclave double and the server
+// double, what each state says on screen, and the two deletion rules —
+// `invalidated` is deleted only on the person's press, and sign-out deletes the
+// key the server just revoked. Real enclave / Face ID is runtime-unverified
+// (owner device check).
+// =============================================================================
+
+type NativeDouble = {
+  secureEnclaveAvailable: boolean;
+  status: jest.Mock;
+  create: jest.Mock;
+  publicKey: jest.Mock;
+  sign: jest.Mock;
+  remove: jest.Mock;
+};
+
+let mockNative: NativeDouble | null = null;
+
+jest.mock('expo-modules-core', () => ({
+  requireOptionalNativeModule: (name: string) =>
+    name === 'MomoDeviceKeyNative'
+      ? new Proxy(
+          {},
+          {
+            get: (_target, prop) =>
+              (mockNative as Record<string | symbol, unknown> | null)?.[prop],
+          },
+        )
+      : null,
+}));
+
+const WS = '22222222-2222-4222-8222-222222222222';
+const MEMBER = '11111111-1111-4111-8111-111111111111';
+const BASE = 'https://api.example.com';
+const KEY = 'A2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW';
+const OTHER_KEY = bytesToBase64(Uint8Array.from([0x03, ...new Array(32).fill(5)]));
+const SHARED_FINGERPRINT = '5BAF F89D E7DE 5C1D 7B61';
+
+const LOGIN_BODY = {
+  accessToken: 'access-token-1',
+  refreshToken: 'refresh-token-1',
+  realtimeWebSocketUrl: 'wss://api.example.com/connection/websocket',
+  member: {
+    id: MEMBER,
+    workspaceId: WS,
+    kind: 'human' as const,
+    displayName: '곽성재',
+    handle: 'seongjae',
+  },
+};
+
+function nativeError(code: string): Error {
+  return Object.assign(new Error(code), {code});
+}
+
+/** An enclave double with a key slot, like MomoDeviceKeyStore. */
+function phone(initial: {key?: string | null; status?: string} = {}): NativeDouble {
+  let key: string | null = initial.key ?? null;
+  let forced: string | undefined = initial.status;
+  return {
+    secureEnclaveAvailable: true,
+    status: jest.fn(async () => forced ?? (key ? 'ready' : 'absent')),
+    create: jest.fn(async () => {
+      if (key) throw nativeError('DEVICE_KEY_ALREADY_EXISTS');
+      key = KEY;
+      forced = undefined;
+      return key;
+    }),
+    publicKey: jest.fn(async () => key),
+    sign: jest.fn(),
+    remove: jest.fn(async () => {
+      key = null;
+      forced = undefined;
+    }),
+  };
+}
+
+function row(overrides: Partial<DeviceKey> = {}): DeviceKey {
+  return {
+    id: '00000000-0000-7000-8000-00000000d002',
+    workspaceId: WS,
+    memberId: MEMBER,
+    alg: 'p256',
+    publicKey: KEY,
+    platform: 'ios',
+    label: 'iPhone',
+    state: 'unendorsed',
+    canInstruct: false,
+    current: true,
+    createdAtMs: 1_790_550_000_000,
+    ...overrides,
+  };
+}
+
+interface Call {
+  method: string;
+  path: string;
+  body: unknown;
+}
+
+let calls: Call[];
+let serverRows: DeviceKey[];
+let registerStatus: number;
+let registerCode: string | undefined;
+let listFails: boolean;
+
+function memoryStore() {
+  const map = new Map<string, string>();
+  return {
+    getString: (key: string) => map.get(key),
+    set: (key: string, value: string) => void map.set(key, String(value)),
+    remove: (key: string) => map.delete(key),
+  };
+}
+
+beforeEach(async () => {
+  __setNonSecretStore(memoryStore());
+  __resetSessionStore();
+  __resetServerBaseCache();
+  setServerBase(BASE);
+  sessionPort.applyLogin(LOGIN_BODY);
+  await keychainSettled();
+  resetConnectRoute();
+  mockNative = phone();
+  calls = [];
+  serverRows = [];
+  registerStatus = 201;
+  registerCode = undefined;
+  listFails = false;
+  globalThis.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const method = init?.method ?? 'GET';
+    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+    calls.push({method, path: url.pathname, body});
+    const json = (status: number, value: unknown) =>
+      new Response(JSON.stringify(value), {
+        status,
+        headers: {'Content-Type': 'application/json'},
+      });
+    if (url.pathname === `/v1/workspaces/${WS}/device-keys`) {
+      if (method === 'POST') {
+        if (registerStatus !== 201) {
+          return json(registerStatus, {error: {message: 'no', code: registerCode}});
+        }
+        const created = row({publicKey: body.publicKey, label: body.label, createdAtMs: Date.now()});
+        serverRows = [created, ...serverRows];
+        return json(201, {deviceKey: created});
+      }
+      if (listFails) throw new TypeError('Network request failed');
+      return json(200, {deviceKeys: serverRows});
+    }
+    return json(200, {status: 'ok'});
+  }) as unknown as typeof fetch;
+});
+
+afterEach(() => {
+  cleanup();
+  __setNonSecretStore(null);
+});
+
+const posts = () => calls.filter(c => c.method === 'POST' && c.path.endsWith('/device-keys'));
+const LABEL = () => deviceLinkDevice().name;
+
+// ---- the view ---------------------------------------------------------------
+
+describe('deriveDeviceKeyView — every state says only what it knows', () => {
+  const ready = {status: 'ready' as const, publicKey: KEY};
+  const derive = (over: Partial<Parameters<typeof deriveDeviceKeyView>[0]>) =>
+    deriveDeviceKeyView({local: ready, localError: null, rows: [], rowsError: null, ...over});
+
+  it('maps the enclave and the server row to one state', () => {
+    expect(derive({local: {status: 'unsupported', publicKey: null}}).kind).toBe('unsupported');
+    expect(derive({local: {status: 'invalidated', publicKey: null}}).kind).toBe('invalidated');
+    expect(derive({local: {status: 'absent', publicKey: null}}).kind).toBe('unregistered');
+    expect(derive({local: {status: 'biometryUnavailable', publicKey: null}}).kind).toBe(
+      'biometryOff',
+    );
+    expect(derive({rows: []}).kind).toBe('unregistered');
+    expect(derive({rows: [row()]}).kind).toBe('pending');
+    expect(derive({rows: [row({state: 'endorsed', canInstruct: true})]}).kind).toBe('approved');
+    expect(derive({rows: [row({state: 'revoked'})]}).kind).toBe('revoked');
+    expect(derive({rows: undefined}).kind).toBe('loading');
+    expect(derive({rowsError: new Error('offline')}).kind).toBe('serverError');
+    expect(derive({local: undefined}).kind).toBe('loading');
+  });
+
+  it('prefers the live row over an older revoked one for the same key', () => {
+    const rows = [
+      row({id: 'old', state: 'revoked', createdAtMs: 1}),
+      row({id: 'new', state: 'unendorsed', createdAtMs: 2}),
+    ];
+    const view = derive({rows});
+    expect(view.kind).toBe('pending');
+    expect(view.kind === 'pending' && view.row.id).toBe('new');
+  });
+
+  it("ignores other devices' keys — a Mac root or another phone is not this phone", () => {
+    const rows = [
+      row({publicKey: OTHER_KEY, state: 'endorsed'}),
+      row({platform: 'macos', state: 'root'}),
+    ];
+    expect(derive({rows}).kind).toBe('unregistered');
+  });
+
+  it('keeps a key whose Face ID is merely off, and says so', () => {
+    const view = derive({
+      local: {status: 'biometryUnavailable', publicKey: KEY},
+      rows: [row({state: 'endorsed'})],
+    });
+    expect(view).toMatchObject({kind: 'approved', biometryOff: true});
+  });
+
+  it('shows the Mac fingerprint, not a phone-only one', async () => {
+    const view = derive({rows: [row()]});
+    expect(view.kind === 'pending' && view.fingerprint).toBe(SHARED_FINGERPRINT);
+    expect(await webFingerprint(KEY)).toBe(SHARED_FINGERPRINT);
+  });
+});
+
+// ---- the actions --------------------------------------------------------------
+
+describe('enrollDeviceKey', () => {
+  it('creates a key and registers it as this phone, under the QR redeem name', async () => {
+    const outcome = await enrollDeviceKey({workspaceId: WS, label: LABEL()});
+    expect(outcome).toEqual({kind: 'registered', publicKey: KEY});
+    expect(mockNative!.create).toHaveBeenCalledTimes(1);
+    expect(posts().map(c => c.body)).toEqual([
+      {alg: 'p256', publicKey: KEY, platform: 'ios', label: LABEL()},
+    ]);
+  });
+
+  it('does not register twice when the key already has a live row', async () => {
+    mockNative = phone({key: KEY});
+    serverRows = [row()];
+    await enrollDeviceKey({workspaceId: WS, label: LABEL()});
+    expect(mockNative.create).not.toHaveBeenCalled();
+    expect(posts()).toHaveLength(0);
+  });
+
+  it('re-registers a good key whose row was revoked (the Mac re-approves)', async () => {
+    mockNative = phone({key: KEY});
+    serverRows = [row({state: 'revoked'})];
+    await enrollDeviceKey({workspaceId: WS, label: LABEL()});
+    expect(mockNative.remove).not.toHaveBeenCalled();
+    expect(posts()).toHaveLength(1);
+  });
+
+  it('treats 409 already-registered as done when the list shows it live', async () => {
+    mockNative = phone({key: KEY});
+    registerStatus = 409;
+    registerCode = 'device_key_already_registered';
+    let listed = 0;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'GET') {
+        listed += 1;
+        serverRows = listed === 1 ? [] : [row()];
+      }
+      return realFetch(input, init);
+    }) as unknown as typeof fetch;
+    await expect(enrollDeviceKey({workspaceId: WS, label: LABEL()})).resolves.toEqual({
+      kind: 'registered',
+      publicKey: KEY,
+    });
+  });
+
+  it('never deletes an invalidated key on its own', async () => {
+    mockNative = phone({key: KEY, status: 'invalidated'});
+    expect(await enrollDeviceKey({workspaceId: WS, label: LABEL()})).toEqual({
+      kind: 'invalidated',
+    });
+    expect(mockNative.remove).not.toHaveBeenCalled();
+    expect(mockNative.create).not.toHaveBeenCalled();
+    expect(posts()).toHaveLength(0);
+  });
+
+  it('says unsupported on a simulator', async () => {
+    mockNative = {...phone(), secureEnclaveAvailable: false, status: jest.fn(async () => 'unsupported')};
+    expect((await enrollDeviceKey({workspaceId: WS, label: 'x'})).kind).toBe('unsupported');
+    // A module that refuses with UNSUPPORTED mid-way (MomoDeviceKeyStore.create).
+    mockNative = phone();
+    mockNative.create.mockRejectedValueOnce(nativeError('DEVICE_KEY_UNSUPPORTED'));
+    expect((await enrollDeviceKey({workspaceId: WS, label: 'x'})).kind).toBe('unsupported');
+    expect(posts()).toHaveLength(0);
+  });
+
+  it('says Face ID is off when there is no biometry to bind a key to', async () => {
+    mockNative = phone({status: 'biometryUnavailable'});
+    expect((await enrollDeviceKey({workspaceId: WS, label: 'x'})).kind).toBe('biometryOff');
+    mockNative = phone();
+    mockNative.create.mockRejectedValueOnce(nativeError('DEVICE_KEY_BIOMETRY_UNAVAILABLE'));
+    expect((await enrollDeviceKey({workspaceId: WS, label: 'x'})).kind).toBe('biometryOff');
+  });
+
+  it('fails with a sentence, not a code, when the server cannot be reached', async () => {
+    listFails = true;
+    const error = await enrollDeviceKey({workspaceId: WS, label: 'x'}).catch(e => e);
+    expect(error).toBeInstanceOf(EnrollError);
+    expect(error.message).toBe(
+      '지시 기기로 등록하지 못했습니다. 연결을 확인하고 다시 시도하세요.',
+    );
+  });
+
+  it('names an ended sign-in', async () => {
+    registerStatus = 409;
+    registerCode = 'session_lineage_ended';
+    const error = await enrollDeviceKey({workspaceId: WS, label: 'x'}).catch(e => e);
+    expect(error.message).toBe(
+      '이 로그인으로는 더 이상 키를 등록할 수 없습니다. 다시 로그인하세요.',
+    );
+  });
+});
+
+describe('replaceInvalidatedKey — the person pressed 「새 키로 다시 등록」', () => {
+  it('deletes the proven-dead key, makes a new one and registers it', async () => {
+    mockNative = phone({key: OTHER_KEY, status: 'invalidated'});
+    const outcome = await replaceInvalidatedKey({workspaceId: WS, label: LABEL()});
+    expect(mockNative.remove).toHaveBeenCalledTimes(1);
+    expect(mockNative.create).toHaveBeenCalledTimes(1);
+    expect(outcome).toEqual({kind: 'registered', publicKey: KEY});
+    expect(posts()).toHaveLength(1);
+  });
+
+  it('refuses to delete a key that is not invalidated any more (stale screen)', async () => {
+    mockNative = phone({key: KEY});
+    serverRows = [row()];
+    await replaceInvalidatedKey({workspaceId: WS, label: LABEL()});
+    expect(mockNative.remove).not.toHaveBeenCalled();
+  });
+});
+
+describe('sign-out', () => {
+  it('forgets the enclave key the server revokes with the lineage', async () => {
+    mockNative = phone({key: KEY});
+    let signOut: (() => void) | null = null;
+    function Probe(): null {
+      signOut = useSession().signOut;
+      return null;
+    }
+    render(
+      <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {gcTime: 0}}})}>
+        <SessionProvider member={LOGIN_BODY.member as never}>
+          <Probe />
+        </SessionProvider>
+      </QueryClientProvider>,
+    );
+    act(() => signOut!());
+    await waitFor(() => expect(mockNative!.remove).toHaveBeenCalledTimes(1));
+  });
+
+  it('is quiet where there is no module (simulator build without it)', () => {
+    mockNative = null;
+    expect(() => forgetDeviceKeyOnSignOut()).not.toThrow();
+  });
+});
+
+// ---- the screens --------------------------------------------------------------
+
+function panelFor(view: DeviceKeyView, over: {failure?: string | null; busy?: boolean} = {}) {
+  const state = {
+    view,
+    enroll: jest.fn(),
+    replace: jest.fn(),
+    refresh: jest.fn(),
+    busy: over.busy ?? false,
+    failure: over.failure ?? null,
+  };
+  render(<DeviceKeyPanel state={state} />);
+  return state;
+}
+
+describe('DeviceKeyPanel — each state on screen', () => {
+  const r = row();
+  const cases: [DeviceKeyView, string | null, string[]][] = [
+    [{kind: 'unsupported'}, null, []],
+    [{kind: 'biometryOff'}, null, ['settings', 'recheck']],
+    [{kind: 'invalidated'}, null, ['replace']],
+    [{kind: 'unregistered', fingerprint: null}, null, ['enroll']],
+    [{kind: 'pending', fingerprint: SHARED_FINGERPRINT, row: r, biometryOff: false}, SHARED_FINGERPRINT, []],
+    [{kind: 'approved', fingerprint: SHARED_FINGERPRINT, row: r, biometryOff: false}, SHARED_FINGERPRINT, []],
+    [{kind: 'revoked', fingerprint: SHARED_FINGERPRINT, row: r, biometryOff: false}, SHARED_FINGERPRINT, ['reenroll']],
+    [{kind: 'serverError', fingerprint: SHARED_FINGERPRINT}, SHARED_FINGERPRINT, ['retry']],
+  ];
+
+  it.each(cases.map(c => [c[0].kind, ...c] as const))(
+    '%s: badge, sentence, fingerprint and actions',
+    (_kind, view, fingerprint, actions) => {
+      panelFor(view);
+      const copy = deviceKeyCopy(view);
+      expect(screen.getByTestId('device-key-badge').props.children).toBe(copy.badge);
+      expect(screen.getByTestId('device-key-headline').props.children).toBe(copy.headline);
+      if (fingerprint) {
+        expect(screen.getByTestId('device-key-fingerprint').props.children).toBe(fingerprint);
+      } else {
+        expect(screen.queryByTestId('device-key-fingerprint')).toBeNull();
+      }
+      const shown = ['enroll', 'reenroll', 'replace', 'settings', 'recheck', 'retry'].filter(
+        a => screen.queryByTestId(`device-key-action-${a}`) !== null,
+      );
+      expect(shown).toEqual(actions);
+    },
+  );
+
+  it('pending tells the person where on the Mac to approve', () => {
+    panelFor({kind: 'pending', fingerprint: SHARED_FINGERPRINT, row: r, biometryOff: false});
+    expect(screen.getByTestId('device-key-detail').props.children).toContain(
+      '설정 › 기기 › 지시 서명',
+    );
+  });
+
+  it('invalidated only offers the explicit replacement, and wires it to replace()', () => {
+    const state = panelFor({kind: 'invalidated'});
+    fireEvent.press(screen.getByTestId('device-key-action-replace'));
+    expect(state.replace).toHaveBeenCalledTimes(1);
+    expect(state.enroll).not.toHaveBeenCalled();
+  });
+
+  it('shows the failure sentence and a busy action', () => {
+    panelFor({kind: 'unregistered', fingerprint: null}, {failure: '실패 문장', busy: true});
+    expect(screen.getByTestId('device-key-failure').props.children).toBe('실패 문장');
+    expect(screen.getByTestId('device-key-action-enroll').props.accessibilityState).toMatchObject({
+      disabled: true,
+    });
+  });
+});
+
+// ---- QR link → key → sheet ------------------------------------------------------
+
+function renderGate() {
+  const client = new QueryClient({
+    defaultOptions: {queries: {retry: false, gcTime: 0}, mutations: {gcTime: 0}},
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <SessionProvider member={LOGIN_BODY.member as never}>
+        <DeviceKeyLinkGate />
+      </SessionProvider>
+    </QueryClientProvider>,
+  );
+}
+
+describe('the QR link gate', () => {
+  it('after a QR link: makes the key, registers it, and shows 「승인 대기」 with the Mac fingerprint', async () => {
+    noteConnectRoute('qr');
+    renderGate();
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0].body).toMatchObject({platform: 'ios', publicKey: KEY, label: LABEL()});
+    await waitFor(() =>
+      expect(screen.getByTestId('device-key-badge').props.children).toBe('승인 대기'),
+    );
+    expect(screen.getByTestId('device-key-fingerprint').props.children).toBe(
+      await webFingerprint(KEY),
+    );
+    expect(mockNative!.sign).not.toHaveBeenCalled();
+  });
+
+  it('on a simulator: says so honestly and registers nothing', async () => {
+    mockNative = {...phone(), secureEnclaveAvailable: false, status: jest.fn(async () => 'unsupported')};
+    noteConnectRoute('qr');
+    renderGate();
+    await waitFor(() =>
+      expect(screen.getByTestId('device-key-badge').props.children).toBe('쓸 수 없음'),
+    );
+    expect(posts()).toHaveLength(0);
+  });
+
+  it('does nothing after a password sign-in or an invite', async () => {
+    noteConnectRoute('qr');
+    noteConnectRoute('signIn');
+    renderGate();
+    await act(async () => {});
+    expect(screen.queryByTestId('device-key-link-sheet')).toBeNull();
+    expect(mockNative!.create).not.toHaveBeenCalled();
+    expect(posts()).toHaveLength(0);
+  });
+
+  it('runs once per link: a remount does not register again', async () => {
+    noteConnectRoute('qr');
+    const first = renderGate();
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    first.unmount();
+    renderGate();
+    await act(async () => {});
+    expect(posts()).toHaveLength(1);
+    expect(screen.queryByTestId('device-key-link-sheet')).toBeNull();
+  });
+});

@@ -65,6 +65,17 @@ import {measureMode} from './root';
 import {Shell} from '../src/shell/AppShell';
 import {INITIAL_NAV} from '../src/nav/state';
 import {ProfileSheet} from '../src/features/profile/ProfileSheet';
+import {PageSheet} from '../src/design/PageSheet';
+import {LinkSheetBody} from '../src/features/deviceKey/DeviceKeyLinkSheet';
+import {DeviceKeyPanel} from '../src/features/deviceKey/DeviceKeyPanel';
+import {
+  DEVICE_KEY_LOCAL_QUERY_KEY,
+  DEVICE_KEYS_QUERY_KEY,
+  useDeviceKey,
+  type DeviceKeyState,
+} from '../src/features/deviceKey/useDeviceKey';
+import type {DeviceKeyView} from '../src/deviceKey/enrollment';
+import type {DeviceKey} from '@momo/core/features/auth/deviceKeys';
 import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
 import {NoticeBlock} from '../src/design/atoms';
 import {ResultRow, SearchBody} from '../src/screens/SearchScreen';
@@ -1768,6 +1779,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     />
   );
 
+  if (name.startsWith('device-key-')) {
+    return <DeviceKeySurface which={name.slice('device-key-'.length)} />;
+  }
+
   switch (name) {
     case 'quote-ready': {
       const draft = quoteDraftFor({
@@ -3438,6 +3453,128 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </Frame>
       );
   }
+}
+
+// ---- #3026 지시 기기 ------------------------------------------------------------
+//
+// 시뮬레이터에는 Secure Enclave 가 없어 살아 있는 앱은 「쓸 수 없음」 하나만 그린다
+// (`device-key-live` 가 그 판이다 — 실제 네이티브 모듈을 읽는다). 나머지 상태는
+// 배송되는 `LinkSheetBody`·`DeviceKeyPanel` 에 그 상태를 건네 찍는다.
+//
+//   -momoMeasure DEVICE-KEY-PENDING · LIGHT-DEVICE-KEY-PENDING · …
+//   (pending approved revoked invalidated biometryoff unregistered unsupported
+//    servererror registering live profile)
+
+const DK_KEY = 'A2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW';
+const DK_FINGERPRINT = '5BAF F89D E7DE 5C1D 7B61';
+const DK_ROW: DeviceKey = {
+  id: '00000000-0000-7000-8000-00000000d002',
+  workspaceId: 'measure-ws',
+  memberId: SELF,
+  alg: 'p256',
+  publicKey: DK_KEY,
+  platform: 'ios',
+  label: 'iPhone 17 Pro',
+  state: 'unendorsed',
+  canInstruct: false,
+  current: true,
+  createdAtMs: NOW,
+};
+
+function dkView(which: string): DeviceKeyView {
+  switch (which) {
+    case 'approved':
+      return {kind: 'approved', fingerprint: DK_FINGERPRINT, row: {...DK_ROW, state: 'endorsed'}, biometryOff: false};
+    case 'approved-faceid-off':
+      return {kind: 'approved', fingerprint: DK_FINGERPRINT, row: {...DK_ROW, state: 'endorsed'}, biometryOff: true};
+    case 'revoked':
+      return {kind: 'revoked', fingerprint: DK_FINGERPRINT, row: {...DK_ROW, state: 'revoked'}, biometryOff: false};
+    case 'invalidated':
+      return {kind: 'invalidated'};
+    case 'biometryoff':
+      return {kind: 'biometryOff'};
+    case 'unregistered':
+    case 'registering':
+      return {kind: 'unregistered', fingerprint: null};
+    case 'unsupported':
+      return {kind: 'unsupported'};
+    case 'servererror':
+      return {kind: 'serverError', fingerprint: DK_FINGERPRINT};
+    default:
+      return {kind: 'pending', fingerprint: DK_FINGERPRINT, row: DK_ROW, biometryOff: false};
+  }
+}
+
+function dkState(which: string): DeviceKeyState {
+  return {
+    view: dkView(which),
+    enroll: () => {},
+    replace: () => {},
+    refresh: () => {},
+    busy: which === 'registering',
+    failure:
+      which === 'unregistered'
+        ? '지시 기기로 등록하지 못했습니다. 연결을 확인하고 다시 시도하세요.'
+        : null,
+  };
+}
+
+/** 살아 있는 훅 — 이 시뮬레이터의 네이티브 모듈을 실제로 읽는다. */
+function LiveDeviceKeySheet(): React.JSX.Element {
+  const state = useDeviceKey(HARNESS_MEMBER.workspaceId, {poll: false});
+  return <LinkSheetBody state={state} onClose={() => {}} />;
+}
+
+const liveDeviceKeyClient = new QueryClient({
+  defaultOptions: {queries: {retry: false, gcTime: 0}},
+});
+
+function DeviceKeySurface({which}: {which: string}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  if (which === 'profile') {
+    // 프로필 시트의 「연결 › 지시 기기」 줄. 줄은 씨앗을 뿌린 두 질의를 읽는다.
+    harnessClient.setQueryData(DEVICE_KEY_LOCAL_QUERY_KEY, {status: 'ready', publicKey: DK_KEY});
+    harnessClient.setQueryData(DEVICE_KEYS_QUERY_KEY(HARNESS_MEMBER.workspaceId), [DK_ROW]);
+    return (
+      <View style={styles.fill}>
+        <Shell />
+        <ProfileSheet
+          workspaceId={HARNESS_MEMBER.workspaceId}
+          member={HARNESS_MEMBER}
+          directory={makeDirectory(SHELL_ROSTER)}
+          connected
+          onSignOut={() => {}}
+          onClose={() => {}}
+        />
+      </View>
+    );
+  }
+  if (which === 'profile-page') {
+    return (
+      <View style={styles.fill}>
+        <Shell />
+        <PageSheet onClose={() => {}} accessibilityLabel="지시 기기">
+          <View style={{paddingTop: space.xl}}>
+            <DeviceKeyPanel state={dkState('pending')} />
+          </View>
+        </PageSheet>
+      </View>
+    );
+  }
+  return (
+    <View style={styles.fill}>
+      <Shell />
+      <PageSheet onClose={() => {}} accessibilityLabel="지시 기기">
+        {which === 'live' ? (
+          <QueryClientProvider client={liveDeviceKeyClient}>
+            <LiveDeviceKeySheet />
+          </QueryClientProvider>
+        ) : (
+          <LinkSheetBody state={dkState(which)} onClose={() => {}} />
+        )}
+      </PageSheet>
+    </View>
+  );
 }
 
 /** The results phase draws the shipping row, handed fixture hits. */
