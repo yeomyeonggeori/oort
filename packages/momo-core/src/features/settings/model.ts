@@ -527,11 +527,18 @@ export function isSlugConflict(error: unknown): boolean {
   return error instanceof ApiError && error.status === 409;
 }
 
-/** Server message when there is one, a readable fallback when there is not. */
+/**
+ * 서버가 준 문장이 있으면 그것, 없으면 읽을 수 있는 폴백.
+ *
+ * 폴백은 해요체다(#2988): 이 문장은 AI 연결 카드(웹·폰)의 해요체 앞말
+ * 「팀 연결을 불러오지 못했어요.」 뒤에 이어 붙고, 확인 실패 줄에도 홀로 선다.
+ */
+export const ERROR_MESSAGE_FALLBACK = "요청을 끝내지 못했어요. 잠시 뒤에 다시 시도해 주세요.";
+
 export function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
   if (error instanceof Error && error.message) return error.message;
-  return "요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+  return ERROR_MESSAGE_FALLBACK;
 }
 
 function statusOf(error: unknown): number {
