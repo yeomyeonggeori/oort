@@ -79,6 +79,13 @@ export function DevicesSection({
         offline={offline}
         onLinked={() => {
           void client.invalidateQueries({ queryKey: LINKED_DEVICES_QUERY_KEY });
+          // A phone registers its key when it links (E6): it shows up for
+          // approval in 지시 서명 without a reload (D-6 ②).
+          if (signing) {
+            void client.invalidateQueries({
+              queryKey: DEVICE_KEYS_QUERY_KEY(signing.workspaceId),
+            });
+          }
         }}
       />
     </SectionShell>
