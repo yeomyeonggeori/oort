@@ -41,6 +41,15 @@ export interface DeviceKey {
    * the key together with its sign-in, so a live row there is a live lineage.
    */
   lineageLive: boolean;
+  /**
+   * #3119 (ADR-0146 D-6 증보 「QR 연결로만」): the key's sign-in came from a
+   * QR device link. A phone key with `false` is never approved; one approved
+   * before the rule keeps working and reads 「QR 아님」. Absent on an older
+   * server.
+   */
+  linkedSession?: boolean;
+  /** #3119: that QR was issued from a Mac sign-in — the only phones a root approves. */
+  linkedFromMac?: boolean;
   endorsedByKeyId?: string;
   endorsedAtMs?: number;
   createdAtMs: number;
@@ -99,6 +108,8 @@ export function parseDeviceKey(value: unknown): DeviceKey {
     current,
     lineageLive: lineageLive ?? true,
     createdAtMs,
+    ...optional("linkedSession", bool(source, "linkedSession")),
+    ...optional("linkedFromMac", bool(source, "linkedFromMac")),
     ...optional("endorsedByKeyId", str(source, "endorsedByKeyId")),
     ...optional("endorsedAtMs", num(source, "endorsedAtMs")),
     ...optional("revokedAtMs", num(source, "revokedAtMs")),
@@ -317,14 +328,28 @@ export const DEVICE_KEY_REFUSAL = {
   /** #3097: a rebind of a key with no live row (it was revoked). */
   notFound: "device_key_not_found",
   signatureInvalid: "device_signature_invalid",
+  /** #3119: a phone key is registered (or moved) only on a QR-linked sign-in. */
+  requiresLinkedSession: "device_key_requires_linked_session",
+  /** #3119: the phone's QR was not issued from a Mac sign-in. */
+  linkNotFromMac: "device_key_link_not_from_mac",
 } as const;
 
 // ---- views ------------------------------------------------------------------
 
-/** A phone key the root can act on: live phone keys, newest first. */
+/**
+ * A phone key the root can act on: live phone keys, newest first. An
+ * unapproved key the server will not let a root approve (#3119 — not from a
+ * QR link, or from a QR no Mac issued) is not a candidate. An approved one
+ * stays: it keeps working, and `linkedSession === false` marks it 「QR 아님」.
+ */
 export function phoneKeys(keys: readonly DeviceKey[]): DeviceKey[] {
   return keys
     .filter((key) => key.platform === "ios" && key.state !== "revoked")
+    .filter(
+      (key) =>
+        key.state !== "unendorsed" ||
+        (key.linkedSession !== false && key.linkedFromMac !== false)
+    )
     .sort((a, b) => b.createdAtMs - a.createdAtMs);
 }
 
@@ -436,6 +461,10 @@ export function deviceKeyServerMessage(code: string | undefined, fallback: strin
       return "서버에 이 키가 더 이상 없습니다. 목록을 다시 불러와 새로 등록하세요.";
     case DEVICE_KEY_REFUSAL.signatureInvalid:
       return "서버가 이 기기의 서명을 받지 않았습니다. 기기 시계가 맞는지 확인하고 다시 시도하세요.";
+    case DEVICE_KEY_REFUSAL.requiresLinkedSession:
+      return "이 폰은 QR로 연결되지 않아 지시 기기가 될 수 없습니다. 맥에서 QR로 한 번 연결하세요.";
+    case DEVICE_KEY_REFUSAL.linkNotFromMac:
+      return "이 폰은 맥이 아닌 곳에서 띄운 QR로 연결됐습니다. 맥에서 QR로 다시 연결하세요.";
     default:
       return fallback;
   }

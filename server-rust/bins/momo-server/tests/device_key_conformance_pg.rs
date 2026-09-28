@@ -28,6 +28,9 @@
 //! | `a_reused_roots_key_is_mute_until_its_own_letter_moves_it` | **#3097** — skip the rebind letter's `verify`, drop the key's lineage check from `host_register` / the phone's endorser, or answer a dead-lineage key with `already_registered` |
 //! | `a_rebind_letter_is_single_use_and_only_ever_moves_a_dead_lineages_key` | **#3097** — drop the `LineageLive` refusal, or build the letter from anything but the caller's own sign-in |
 //! | `a_phone_key_moves_to_its_new_link_with_its_approval_and_logout_still_ends_it` | **#3097** — mint a new row (new id, no approval) on rebind, or let a root move into a linked session |
+//! | `h2_a_phone_key_is_registered_only_on_a_qr_linked_sign_in` | **#3119** — drop the register route's linked check, drop the endorse `linked_from_mac` check, match any consumed link of the member instead of the key's lineage, or any Mac key instead of the issuer's lineage |
+//! | `h2_a_pre_rule_phone_key_is_never_a_candidate_and_an_approved_one_is_marked` | **#3119** — drop the endorse `linked_session` check, or let an `ios` rebind leave a non-linked lineage |
+//! | `h2_a_phone_key_moves_only_from_a_link_to_a_link` | **#3119** — let an `ios` rebind land on a non-linked sign-in |
 //!
 //! `#[ignore]` — needs a real Postgres plus the runtime roles:
 //!

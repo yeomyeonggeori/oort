@@ -362,6 +362,16 @@ describe('enrollDeviceKey', () => {
       '이 로그인으로는 더 이상 키를 등록할 수 없습니다. 다시 로그인하세요.',
     );
   });
+
+  it('tells a phone signed in by address to link by QR from the Mac (#3119)', async () => {
+    registerStatus = 403;
+    registerCode = 'device_key_requires_linked_session';
+    const error = await enrollDeviceKey({workspaceId: WS, label: 'x'}).catch(e => e);
+    expect(error).toBeInstanceOf(EnrollError);
+    expect(error.message).toBe(
+      '이 폰으로 지시하려면 맥에서 QR로 한 번 연결하세요. 대화와 알림은 그대로 씁니다.',
+    );
+  });
 });
 
 // ---- #3103: a live key on an ended sign-in moves itself ------------------------
