@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // =============================================================================
-// 설정 › 기기 › 「지시 서명」 캡처와 실측 (#3025, ADR-0146 개정 R2-E5).
+// 설정 › 기기 › 「지시 서명」 캡처와 실측 (#3025, ADR-0146 개정 R2-E5; 다시 연결 #3103).
 //
 //   npm run build && node scripts/capture-device-keys.mjs
 //   → artifacts/device-keys/*.png + report.json
@@ -67,6 +67,13 @@ async function installRoutes(context, keys, linked) {
     if (path.endsWith("/roster")) return json(route, { members: roster });
     if (path.endsWith("/read-state")) return json(route, { read_states: [] });
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
+    if (path.endsWith("/device-keys/signing-context")) {
+      return json(route, {
+        instanceId: "capture", serverTimeMs: Date.now(), maxLifetimeMs: 600_000, maxClockSkewMs: 300_000,
+        humanControlSignatureRequired: true, hostRegisterSignatureRequired: false,
+        sessionId: "019a3c1e-0000-7000-8000-00000000c001",
+      });
+    }
     if (path.endsWith("/device-keys")) return json(route, { deviceKeys: keys });
     if (path === "/v1/auth/devices") return json(route, { devices: linked });
     if (path.endsWith("/work-hosts")) return json(route, { workHosts: [] });
@@ -116,6 +123,7 @@ function keyRow(over = {}) {
   };
 }
 const rootRow = keyRow({ id: ROOT_ID, platform: "macos", publicKey: MAC_KEY, label: "Mac", state: "root", canInstruct: true, current: true });
+const muteRoot = { ...rootRow, current: false, lineageLive: false };
 const endorsed = keyRow({
   id: "019a3c1e-0000-7000-8000-00000000d003", publicKey: "AgBmMkJ9ZDo8OW7LaZbuUluxsG1dG33gCQzHURTemcBr",
   label: "지현의 iPhone 15 (회사 테스트 기기, 3층 회의실 충전 거치대)", state: "endorsed", canInstruct: true,
@@ -132,8 +140,8 @@ function local(over = {}) {
   };
 }
 
-async function installDesktop(page, status) {
-  await page.addInitScript(({ status }) => {
+async function installDesktop(page, status, rebind) {
+  await page.addInitScript(({ status, rebind }) => {
     const callbacks = new Map();
     let nextCallback = 1;
     window.__TAURI_INTERNALS__ = {
@@ -143,6 +151,11 @@ async function installDesktop(page, status) {
       convertFileSrc: (p) => p,
       async invoke(cmd) {
         if (cmd === "device_key_status") return status;
+        // #3103: the shell's native dialog + Touch ID, held open or declined.
+        if (cmd === "device_key_sign_rebind") {
+          if (rebind === "declined") throw "device_key_declined";
+          return new Promise(() => {});
+        }
         if (cmd === "work_host_status") return null;
         if (cmd === "detect_local_harnesses") return { harnesses: [] };
         if (cmd === "detect_hosted_agents") return [];
@@ -155,7 +168,7 @@ async function installDesktop(page, status) {
         return null;
       },
     };
-  }, { status });
+  }, { status, rebind: rebind ?? "pending" });
 }
 
 async function signIn(page, origin) {
@@ -179,13 +192,13 @@ async function shoot(page, tag) {
   report.scenes.push(tag);
 }
 
-async function scene(browser, origin, { name, scheme, viewport, status, keys, expectBound, act }) {
+async function scene(browser, origin, { name, scheme, viewport, status, keys, expectBound, act, rebind }) {
   const tag = `${name}-${viewport.width}-${scheme}`;
   const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce" });
   await installRoutes(context, keys, linked);
   const page = await context.newPage();
   await installRealtime(page);
-  await installDesktop(page, status);
+  await installDesktop(page, status, rebind);
   await page.addInitScript((server) => {
     try { localStorage.setItem("momo.web.server.v1", server); } catch { /* 저장소 없는 캡처 */ }
   }, origin);
@@ -221,6 +234,21 @@ const SCENES = [
     act: async (page) => {
       await page.getByTestId("device-key-root-start").click();
       await page.getByTestId("device-key-root-password").focus();
+    },
+  },
+  // #3103: the root row's sign-in ended without revoking it (lineageLive false).
+  {
+    name: "relink-pending", status: local(), keys: [muteRoot, keyRow(), endorsed], expectBound: false,
+    rebind: "pending",
+    act: async (page) => {
+      await page.getByTestId("device-key-root-relink").getByText("다시 연결 중").waitFor();
+    },
+  },
+  {
+    name: "relink-failed", status: local(), keys: [muteRoot, keyRow(), endorsed], expectBound: false,
+    rebind: "declined",
+    act: async (page) => {
+      await page.getByTestId("device-key-relink-error").waitFor();
     },
   },
   {
