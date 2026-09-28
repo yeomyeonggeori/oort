@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { compile } from "tailwindcss";
 import { describe, expect, it } from "vitest";
 import { ENTER_CONVERSATION_ANIMATION_NAME, ENTER_CONVERSATION_CLASS } from "@/design/motion";
+import { AT_BOTTOM_SLACK_PX } from "./navigation";
 
 /**
  * Chromium half of Timeline burst (#2050 R5). Node environment so
@@ -211,6 +212,48 @@ ${css}
 }
 
 /**
+ * 「바닥」 precondition for the same-tick cases. `timeline-virtuoso` attached
+ * is not enough: under load virtuoso can still be reporting "not at bottom"
+ * from its first measurement pass (the jump-latest pill is up, gap already
+ * inside the slack) when the burst lands, and Timeline then correctly treats
+ * the reader as scrolled up — 1 leftover grant, 1 play (#3082 probe:
+ * `PRE pill=true rows=8 gap=44` → got 1). Wait until the history rows are
+ * mounted, the scroller sits within the slack of its bottom and virtuoso
+ * agrees (no jump-latest pill), on two consecutive frames. Frame-paced, no
+ * frame budget: a timeline that never settles at bottom fails the test by
+ * its own timeout.
+ */
+async function waitForSettledBottom(
+  page: import("playwright").Page,
+  historyRows: number
+): Promise<void> {
+  await page.evaluate(
+    async ({ rows, slack }) => {
+      await new Promise<void>((resolve) => {
+        let streak = 0;
+        const atBottom = () => {
+          const scroller = document.querySelector("[data-virtuoso-scroller]");
+          if (!(scroller instanceof HTMLElement)) return false;
+          const gap = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+          return (
+            document.querySelectorAll("[data-testid='timeline-message']").length >= rows &&
+            gap <= slack &&
+            document.querySelector("[data-testid='jump-latest']") === null
+          );
+        };
+        const onFrame = () => {
+          streak = atBottom() ? streak + 1 : 0;
+          if (streak >= 2) resolve();
+          else requestAnimationFrame(onFrame);
+        };
+        requestAnimationFrame(onFrame);
+      });
+    },
+    { rows: historyRows, slack: AT_BOTTOM_SLACK_PX }
+  );
+}
+
+/**
  * Counts `motion-enter-conversation` starts for one live delivery and settles
  * on product state, not on time. Settled = no delivered id still holds a
  * play grant (every granted row mounted and consumed it, or the cap evicted
@@ -312,6 +355,7 @@ describe("virtualized Timeline burst (Chromium)", () => {
           state: "attached",
           timeout: 4000,
         });
+        await waitForSettledBottom(handle.page, 8);
         const measured = await measureArrivalStarts(
           handle.page,
           [
@@ -357,6 +401,7 @@ describe("virtualized Timeline burst (Chromium)", () => {
           state: "attached",
           timeout: 4000,
         });
+        await waitForSettledBottom(handle.page, 8);
         const ids = arrivalIds(n);
         const measured = await measureArrivalStarts(
           handle.page,
