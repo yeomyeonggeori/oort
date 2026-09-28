@@ -39,7 +39,7 @@ use momo_workd::client::{
 };
 use momo_workd::config::ToolEntry;
 use momo_workd::controls::ControlLoop;
-use momo_workd::human_trust::{HumanTrust, TrustIdentity};
+use momo_workd::human_trust::{HumanTrust, RevocationSource, TrustIdentity};
 use momo_workd::policy::{AdapterKind, CodexHome};
 use momo_workd::session::{
     SessionManager, SessionSettings, MODE_ESCAPED_DETAIL, PERMISSION_DENIED_DETAIL,
@@ -2065,17 +2065,23 @@ fn endorsement(h: &Harness, root: &Device, target: &Device) -> Value {
     json!({"rootKeyId": root.id, "label": label, "signature": root.sign(&bytes)})
 }
 
-/// `root`'s `device_revoke.v1` for `target`.
+/// `root`'s revocation of `target`: with the key, a `device_revoke.v2`
+/// letter (the root signs the public key, #3068); without, a v1 letter that
+/// names the id only.
 fn revocation(h: &Harness, root: &Device, target: &Device, with_key: bool) -> Value {
     let revoked_at_ms = now_ms();
-    let bytes = DeviceRevoke {
+    let letter = DeviceRevoke {
         workspace_id: h.workspace,
         member_id: h.owner,
         root_key_id: root.id,
         target_key_id: target.id,
         revoked_at_ms,
-    }
-    .signed_bytes();
+    };
+    let bytes = if with_key {
+        letter.signed_bytes_v2(&target.public()).unwrap()
+    } else {
+        letter.signed_bytes()
+    };
     let mut value = json!({
         "workspaceId": h.workspace, "memberId": h.owner, "rootKeyId": root.id,
         "targetKeyId": target.id, "revokedAtMs": revoked_at_ms,
@@ -2084,6 +2090,14 @@ fn revocation(h: &Harness, root: &Device, target: &Device, with_key: bool) -> Va
     if with_key {
         value["targetPublicKey"] = json!(target.public());
     }
+    value
+}
+
+/// A root-signed **v1** letter for `target`, with `public_key` attached outside
+/// the signature — what a server could relay (#3068).
+fn revocation_v1_with(h: &Harness, root: &Device, target: &Device, public_key: &str) -> Value {
+    let mut value = revocation(h, root, target, false);
+    value["targetPublicKey"] = json!(public_key);
     value
 }
 
@@ -2544,16 +2558,25 @@ async fn inv_24_r2_revocations_from_the_app_and_relayed_by_the_server() {
     {
         let mut trust = h.trust.lock().unwrap();
         assert_eq!(
-            trust.apply_revocation(&revocation(&h, &root, &root, true), true),
+            trust.apply_revocation(
+                &revocation(&h, &root, &root, true),
+                RevocationSource::LocalApp
+            ),
             Err("revocation_targets_root")
         );
         assert_eq!(
-            trust.apply_revocation(&revocation(&h, &root, &tablet, false), true),
+            trust.apply_revocation(
+                &revocation(&h, &root, &tablet, false),
+                RevocationSource::LocalApp
+            ),
             Err("revocation_public_key_required")
         );
         // The tablet, never seen by this host, revoked from the Mac.
         trust
-            .apply_revocation(&revocation(&h, &root, &tablet, true), true)
+            .apply_revocation(
+                &revocation(&h, &root, &tablet, true),
+                RevocationSource::LocalApp,
+            )
             .unwrap();
     }
     let tablet_ok = Some(endorsement(&h, &root, &tablet));
@@ -2895,18 +2918,21 @@ async fn inv_28_r2_a_v2_spawn_binds_tool_channel_and_the_resume_session() {
     );
 }
 
-/// #3068: a relayed letter's `targetPublicKey` sits outside the root's
-/// signature, so it only counts when it agrees with the key id this host has
-/// bound — one genuine letter for a tablet carrying the phone's public key
-/// revokes the tablet's id, not the phone.
+/// #3068: a revocation's public key counts only on the root's word (a v2
+/// letter) or the desktop app's (the local socket). Relayed by the server, a
+/// v1 letter's key — outside the signature — is not taken: one genuine letter
+/// for a tablet carrying the phone's key revokes the tablet's id, not the
+/// phone; a v2 letter whose key the server swapped for a decoy verifies not at
+/// all; the genuine v2 letter revokes the tablet's key under any id.
 #[tokio::test]
-async fn inv_29_r2_a_letters_unsigned_public_key_is_bound_to_its_key_id() {
+async fn inv_29_r2_a_revoked_public_key_counts_only_on_the_roots_or_the_apps_word() {
     let mut h = harness_r2(&[("claude", &[])]);
     let root = Device::new(1);
     let phone = Device::new(2);
     let tablet = Device::new(3);
     pin(&h, &root);
     let phone_ok = Some(endorsement(&h, &root, &phone));
+    let tablet_ok = Some(endorsement(&h, &root, &tablet));
     let request = signed(spawn(&h, "claude", "start"), &phone, phone_ok.clone());
     let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
     let input = |h: &Harness, device: &Device, endorsed: Option<Value>, text: &str| {
@@ -2917,37 +2943,81 @@ async fn inv_29_r2_a_letters_unsigned_public_key_is_bound_to_its_key_id() {
         )
     };
 
-    // The root genuinely revoked the tablet; the server attaches the phone's
-    // public key to that letter.
-    let mut lying = revocation(&h, &root, &tablet, true);
-    lying["targetPublicKey"] = json!(phone.public());
+    // A root-signed v1 letter for the tablet, relayed with the phone's key.
+    let lying = revocation_v1_with(&h, &root, &tablet, &phone.public());
     assert_eq!(
-        h.trust.lock().unwrap().apply_revocation(&lying, true),
-        Err("revocation_key_mismatch")
+        h.trust
+            .lock()
+            .unwrap()
+            .apply_revocation(&lying, RevocationSource::Relayed),
+        Err("revocation_key_unsigned")
     );
     h.server.revocations.lock().unwrap().push(lying);
     let still = input(&h, &phone, phone_ok.clone(), "the phone was never revoked");
     assert_eq!(
         poll_and_ack(&mut h, &still).await,
-        ControlAck::ok(Some(session))
+        ControlAck::ok(Some(session)),
+        "the root never signed the phone's key"
     );
     // The signed part landed: the tablet's id is revoked.
-    let tablet_ok = Some(endorsement(&h, &root, &tablet));
-    let from_tablet = input(&h, &tablet, tablet_ok, "tablet");
+    let from_tablet = input(&h, &tablet, tablet_ok.clone(), "tablet");
     assert_eq!(
         poll_and_ack(&mut h, &from_tablet).await,
         ControlAck::refused("device_key_revoked")
     );
-    // The mirror: the phone's own id with another key is not taken either.
-    let mut other_key = revocation(&h, &root, &phone, true);
-    other_key["targetPublicKey"] = json!(Device::new(9).public());
+
+    // A v2 letter: the key is inside the signature, so a decoy fails it…
+    let laptop = Device::new(4);
+    let laptop_ok = Some(endorsement(&h, &root, &laptop));
+    let mut decoy = revocation(&h, &root, &laptop, true);
+    decoy["targetPublicKey"] = json!(Device::new(9).public());
     assert_eq!(
-        h.trust.lock().unwrap().apply_revocation(&other_key, true),
-        Err("revocation_key_mismatch")
+        h.trust
+            .lock()
+            .unwrap()
+            .apply_revocation(&decoy, RevocationSource::Relayed),
+        Err("revocation_signature_invalid")
     );
+    // …and the genuine one revokes the laptop's key under any id.
+    h.server
+        .revocations
+        .lock()
+        .unwrap()
+        .push(revocation(&h, &root, &laptop, true));
+    let renamed = input(&h, &laptop.renamed(), laptop_ok, "laptop under a new id");
+    assert_eq!(
+        poll_and_ack(&mut h, &renamed).await,
+        ControlAck::refused("device_key_revoked")
+    );
+
+    // The desktop app's word (the local socket) is taken for a v1 letter.
+    let tablet_key = tablet.public();
+    h.trust
+        .lock()
+        .unwrap()
+        .apply_revocation(
+            &revocation_v1_with(&h, &root, &tablet, &tablet_key),
+            RevocationSource::LocalApp,
+        )
+        .expect("the app names the key");
+    let tablet_renamed = input(&h, &tablet.renamed(), tablet_ok, "tablet under a new id");
+    assert_eq!(
+        poll_and_ack(&mut h, &tablet_renamed).await,
+        ControlAck::refused("device_key_revoked")
+    );
+
     let archived = h.trust.lock().unwrap().revocations().clone();
-    assert_eq!(archived[&tablet.id].target_public_key, None);
-    assert_eq!(archived[&phone.id].target_public_key, None);
+    assert_eq!(archived[&tablet.id].schema, "momo.human.device_revoke.v1");
+    assert_eq!(
+        archived[&tablet.id].target_public_key, None,
+        "the first (relayed) letter did not take a key"
+    );
+    assert_eq!(archived[&laptop.id].schema, "momo.human.device_revoke.v2");
+    assert_eq!(
+        archived[&laptop.id].target_public_key,
+        Some(laptop.public())
+    );
+    assert!(!archived.contains_key(&phone.id));
 }
 
 /// #3068: the server relays at most the newest 256 letters. Every letter the
@@ -3011,5 +3081,107 @@ async fn inv_30_r2_revocations_outlive_the_relay_window_and_a_restart() {
     assert_eq!(
         poll_and_ack(&mut h, &from_first).await,
         ControlAck::refused("device_key_revoked")
+    );
+}
+
+/// #3027 review: two interrupts that queue before the cancelled turn ends run
+/// in the order they were sent, both ahead of the queue.
+#[tokio::test]
+async fn inv_31_r2_interrupts_keep_their_order_ahead_of_the_queue() {
+    let mut h = harness_r2(&[("claude", &["--hang-first", "--slow-cancel"])]);
+    let root = Device::new(1);
+    pin(&h, &root);
+    let request = signed(spawn(&h, "claude", "first turn hangs"), &root, None);
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+    wait_for("the first prompt", || prompts(&h).len() == 1).await;
+    let input = |h: &Harness, text: &str| {
+        control(h, "input", h.owner, Some(session), json!({ "text": text }))
+    };
+    for (text, mode) in [
+        ("queued", InputMode::Queue),
+        ("interrupt one", InputMode::Interrupt),
+        ("interrupt two", InputMode::Interrupt),
+    ] {
+        let control = signed_input(input(&h, text), &root, mode);
+        assert_eq!(
+            poll_and_ack(&mut h, &control).await,
+            ControlAck::ok(Some(session))
+        );
+    }
+    wait_for("all four turns", || prompts(&h).len() == 4).await;
+    let sent = prompts(&h);
+    assert!(sent[1].contains("interrupt one"), "{sent:?}");
+    assert!(sent[2].contains("interrupt two"), "{sent:?}");
+    assert!(sent[3].contains("queued"), "{sent:?}");
+}
+
+/// #3027 review: an interrupt answers the cancelled turn's pending permission
+/// request `cancelled` (ACP) and withdraws it on the server before the next
+/// turn, so no allow can land on a turn that is gone.
+#[tokio::test]
+async fn inv_32_r2_an_interrupt_withdraws_the_cancelled_turns_permission_request() {
+    let mut h = harness_r2(&[("claude", &["--permission"])]);
+    let root = Device::new(1);
+    pin(&h, &root);
+    let request = signed(spawn(&h, "claude", "read the secret"), &root, None);
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+    wait_for("the request to reach the owner", || {
+        h.server
+            .events()
+            .iter()
+            .any(|event| event.event_type == "approval.requested")
+    })
+    .await;
+    let interrupt = signed_input(
+        control(
+            &h,
+            "input",
+            h.owner,
+            Some(session),
+            json!({ "text": "never mind, do this" }),
+        ),
+        &root,
+        InputMode::Interrupt,
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &interrupt).await,
+        ControlAck::ok(Some(session))
+    );
+    wait_for("the interrupt's turn", || prompts(&h).len() == 2).await;
+    assert_eq!(
+        permission_outcomes(&h).first(),
+        Some(&json!({"outcome": "cancelled"})),
+        "the cancelled turn's request is answered cancelled"
+    );
+    let events = h.server.events();
+    let requested = events
+        .iter()
+        .find(|event| event.event_type == "approval.requested")
+        .unwrap();
+    let withdrawn = events
+        .iter()
+        .find(|event| event.event_type == "approval.decided")
+        .expect("the withdrawal is on the stream");
+    assert_eq!(withdrawn.payload["status"], "rejected");
+    assert_eq!(
+        withdrawn.payload["request_event_id"],
+        json!(requested.event_id)
+    );
+    // The owner's late allow for it finds nothing to answer.
+    let late = signed(
+        decision(
+            &h,
+            h.owner,
+            session,
+            &requested.event_id.to_string(),
+            "allow-once",
+            "allow_once",
+        ),
+        &root,
+        None,
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &late).await,
+        ControlAck::refused("permission_request_unknown")
     );
 }

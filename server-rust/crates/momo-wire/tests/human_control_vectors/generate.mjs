@@ -120,6 +120,19 @@ function payloadBytes(tc) {
           "\n",
         ),
       );
+    // #3068: v2 names the revoked public key.
+    case "momo.human.device_revoke.v2":
+      return utf8(
+        [
+          tc.schema,
+          f.workspace_id,
+          f.member_id,
+          f.root_key_id,
+          f.target_key_id,
+          f.target_public_key_b64,
+          String(f.revoked_at_ms),
+        ].join("\n"),
+      );
     default:
       throw new Error(`unknown schema ${tc.schema}`);
   }
@@ -177,9 +190,9 @@ for (const tc of doc.cases) {
   ];
 }
 
-const isV2 = doc.cases.every((tc) => tc.schema === "momo.human.control.v2");
+const isV2 = doc.cases.every((tc) => tc.schema.endsWith(".v2"));
 const comment = isV2
-  ? "#3027 — momo.human.control.v2 공유 테스트 벡터(ADR-0146 개정 2026-09-28 D-5, R2-E7). v1과 같은 13줄 틀이고 첫 줄만 v2다. spawn 본문이 도구(tool)와 채널(channel_id)을 자유 문장(첫 프롬프트) 앞의 고정 필드로 결속하고, spawn 세션 줄은 재개(resume)의 후속 세션 id를 담을 수 있다(새 작업은 `-`). input·permission·bundle_manifest·host_register의 본문은 v1과 같다. 입력(schema·fields·content)과 파생값, WebCrypto(node)·CryptoKit(소프트웨어 키 + Secure Enclave 임시 키)의 실제 서명을 담고 Rust(momo-wire tests/human_control_vectors.rs)가 바이트를 다시 만들어 모든 서명을 검증한다. v1 파일(human-control-signing.vectors.json)은 폰이 바이트 동일 사본을 두므로 고치지 않는다. 재생성: node server-rust/crates/momo-wire/tests/human_control_vectors/generate.mjs docs/api/human-control-signing-v2.vectors.json. 비ASCII는 \\u 이스케이프, 키는 고정 라벨의 SHA-256에서 만든 시험 전용 키다."
+  ? "#3027·#3068 — momo.human.control.v2와 momo.human.device_revoke.v2(뿌리가 폐기 대상 공개키에도 서명한다) 공유 테스트 벡터(ADR-0146 개정 2026-09-28 D-5, R2-E7). v1과 같은 13줄 틀이고 첫 줄만 v2다. spawn 본문이 도구(tool)와 채널(channel_id)을 자유 문장(첫 프롬프트) 앞의 고정 필드로 결속하고, spawn 세션 줄은 재개(resume)의 후속 세션 id를 담을 수 있다(새 작업은 `-`). input·permission·bundle_manifest·host_register의 본문은 v1과 같다. 입력(schema·fields·content)과 파생값, WebCrypto(node)·CryptoKit(소프트웨어 키 + Secure Enclave 임시 키)의 실제 서명을 담고 Rust(momo-wire tests/human_control_vectors.rs)가 바이트를 다시 만들어 모든 서명을 검증한다. v1 파일(human-control-signing.vectors.json)은 폰이 바이트 동일 사본을 두므로 고치지 않는다. 재생성: node server-rust/crates/momo-wire/tests/human_control_vectors/generate.mjs docs/api/human-control-signing-v2.vectors.json. 비ASCII는 \\u 이스케이프, 키는 고정 라벨의 SHA-256에서 만든 시험 전용 키다."
   : doc._comment;
 const out = {
   _comment: comment,

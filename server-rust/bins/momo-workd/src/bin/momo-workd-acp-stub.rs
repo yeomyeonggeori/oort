@@ -29,6 +29,8 @@
 //!   --hang               never answer `session/prompt` until cancelled
 //!   --hang-first         like `--hang`, for the first prompt only (#3027:
 //!                        an owner's interrupt cancels it, later turns end)
+//!   --slow-cancel        answer a cancelled prompt 500 ms after the cancel
+//!                        (#3027: room for a second interrupt to queue)
 //!   --leak               during each prompt, stream synthetic credentials in
 //!                        slow chunks that split a token and a PEM header
 //!   --setsid-grandchild PATH
@@ -67,6 +69,7 @@ struct Options {
     escape_via_config: bool,
     hang: bool,
     hang_first: bool,
+    slow_cancel: bool,
     leak: bool,
     setsid_grandchild: Option<String>,
     exit_after_turn: bool,
@@ -91,6 +94,7 @@ fn parse() -> Options {
         escape_via_config: false,
         hang: false,
         hang_first: false,
+        slow_cancel: false,
         leak: false,
         setsid_grandchild: None,
         exit_after_turn: false,
@@ -115,6 +119,7 @@ fn parse() -> Options {
             "--escape-via-config" => options.escape_via_config = true,
             "--hang" => options.hang = true,
             "--hang-first" => options.hang_first = true,
+            "--slow-cancel" => options.slow_cancel = true,
             "--leak" => options.leak = true,
             "--setsid-grandchild" => options.setsid_grandchild = args.next(),
             "--exit-after-turn" => options.exit_after_turn = true,
@@ -416,6 +421,9 @@ impl Stub {
                 match self.read() {
                     None => return,
                     Some(message) if message["method"] == "session/cancel" => {
+                        if self.options.slow_cancel {
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                        }
                         self.respond(id, json!({"stopReason": "cancelled"}));
                         return;
                     }

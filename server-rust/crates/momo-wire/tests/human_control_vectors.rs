@@ -147,6 +147,9 @@ fn rebuild(tc: &Value) -> Vec<u8> {
             .expect("control bytes"),
         "momo.human.device_endorse.v1" => endorse(tc).signed_bytes().expect("endorse bytes"),
         "momo.human.device_revoke.v1" => revoke(tc).signed_bytes(),
+        "momo.human.device_revoke.v2" => revoke(tc)
+            .signed_bytes_v2(s(&tc["fields"], "target_public_key_b64"))
+            .expect("revoke v2 bytes"),
         x => panic!("schema {x}"),
     }
 }
@@ -199,6 +202,7 @@ fn the_file_covers_every_schema_kind_and_signer() {
             "control/spawn",
             "momo.human.device_endorse.v1",
             "momo.human.device_revoke.v1",
+            "momo.human.device_revoke.v2",
         ]
     );
     for tc in &cases {
@@ -215,10 +219,14 @@ fn the_file_covers_every_schema_kind_and_signer() {
         Some("normalize-then-verify")
     );
     // v2: every control kind, and a spawn both fresh and resumed.
-    let v2 = doc_v2()["cases"].as_array().unwrap().clone();
-    assert!(v2
+    let v2: Vec<Value> = doc_v2()["cases"]
+        .as_array()
+        .unwrap()
         .iter()
-        .all(|tc| s(tc, "schema") == "momo.human.control.v2"));
+        .filter(|tc| s(tc, "schema") == "momo.human.control.v2")
+        .cloned()
+        .collect();
+    assert_eq!(v2.len(), 7);
     let mut kinds: Vec<&str> = v2.iter().map(|tc| s(&tc["content"], "kind")).collect();
     kinds.sort();
     kinds.dedup();
@@ -290,11 +298,14 @@ fn every_recorded_signature_verifies() {
                 .verify_as(schema_of(&tc).unwrap(), &x.key, &x.sig)
                 .map(|_| ()),
             "momo.human.device_endorse.v1" => endorse(&tc).verify(&x.key, &x.sig).map(|_| ()),
+            "momo.human.device_revoke.v2" => revoke(&tc)
+                .verify_v2(s(&tc["fields"], "target_public_key_b64"), &x.key, &x.sig)
+                .map(|_| ()),
             _ => revoke(&tc).verify(&x.key, &x.sig).map(|_| ()),
         }
         .expect("typed verify");
     }
-    assert_eq!(n, 24 + 21);
+    assert_eq!(n, 24 + 21 + 3);
 }
 
 /// What a verifier accepts ([`HumanControl::verify_any`]): every v2 statement;
@@ -413,9 +424,9 @@ fn every_line_is_load_bearing() {
             }
         }
     }
-    // v1: 6 controls × 13 + endorse 7 + revoke 6 = 91 lines; v2: 7 × 13 = 91.
-    // × 3 signers.
-    assert_eq!(checked, (91 + 91) * 3);
+    // v1: 6 controls × 13 + endorse 7 + revoke 6 = 91 lines; v2: 7 × 13 = 91
+    // + revoke v2 7. × 3 signers.
+    assert_eq!(checked, (91 + 91 + 7) * 3);
 }
 
 /// Changing any one structured input — including every content field — makes
@@ -772,6 +783,62 @@ fn every_structured_field_is_load_bearing() {
                     checked += 1;
                 }
             }
+            "momo.human.device_revoke.v2" => {
+                let base = revoke(&tc);
+                let key = s(&tc["fields"], "target_public_key_b64");
+                // Another valid compressed point: the revoked key is signed.
+                let other_key = BASE64.encode(&sigs(&tc)[0].key);
+                let muts = [
+                    (
+                        "workspace_id",
+                        DeviceRevoke {
+                            workspace_id: other,
+                            ..base
+                        },
+                        key,
+                    ),
+                    (
+                        "member_id",
+                        DeviceRevoke {
+                            member_id: other,
+                            ..base
+                        },
+                        key,
+                    ),
+                    (
+                        "root_key_id",
+                        DeviceRevoke {
+                            root_key_id: other,
+                            ..base
+                        },
+                        key,
+                    ),
+                    (
+                        "target_key_id",
+                        DeviceRevoke {
+                            target_key_id: other,
+                            ..base
+                        },
+                        key,
+                    ),
+                    (
+                        "revoked_at_ms",
+                        DeviceRevoke {
+                            revoked_at_ms: base.revoked_at_ms + 1,
+                            ..base
+                        },
+                        key,
+                    ),
+                    ("target_public_key_b64", base, other_key.as_str()),
+                ];
+                for (what, m, key) in muts {
+                    rejects(m.signed_bytes_v2(key), what);
+                    checked += 1;
+                }
+                // The same letter read as v1 does not verify either.
+                rejects(Ok(base.signed_bytes()), "schema");
+                checked += 1;
+            }
             _ => {
                 let base = revoke(&tc);
                 for (what, m) in [
@@ -823,7 +890,7 @@ fn every_structured_field_is_load_bearing() {
     // permission (9+4) + manifest (9+1) + host_register (8+2+1).
     assert_eq!(
         checked,
-        (24 + 12 + 13 + 10 + 11 + 5 + 5) + (24 + 28 + 13 + 10 + 11)
+        (24 + 12 + 13 + 10 + 11 + 5 + 5) + (24 + 28 + 13 + 10 + 11) + 7
     );
 }
 
@@ -870,7 +937,7 @@ fn high_s_is_normalized_then_verified() {
             );
         }
     }
-    assert_eq!(high + low, 24 + 21);
+    assert_eq!(high + low, 24 + 21 + 3);
     eprintln!("recorded signatures: {high} high-s, {low} low-s (flipped variants cover both)");
 }
 

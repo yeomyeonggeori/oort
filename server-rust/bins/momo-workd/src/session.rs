@@ -131,6 +131,10 @@ pub const PERMISSION_DENIED_DETAIL: &str =
     "권한 요청을 거부했습니다. 이 요청은 원격 승인으로 보낼 수 없었습니다.";
 /// Shown when the owner's decision did not arrive within the host's wait.
 pub const PERMISSION_EXPIRED_DETAIL: &str = "권한 요청에 제때 답이 없어 거부했습니다.";
+/// The owner interrupted the turn that was asking (#3027): its pending
+/// permission requests are answered `cancelled`, as ACP requires of a client
+/// that cancels a prompt turn, and withdrawn on the server.
+pub const PERMISSION_INTERRUPTED_DETAIL: &str = "지시로 턴을 멈춰 권한 요청을 거뒀습니다.";
 /// How long the host keeps an agent's permission request open for its owner:
 /// the server's deadline (`momo_t3::work_permission::PERMISSION_REQUEST_TTL_SECONDS`,
 /// 600 s) plus a margin, so an in-time decision is never discarded here.
@@ -159,6 +163,11 @@ pub struct SessionSettings {
 /// Most instructions one session keeps queued behind its running turn
 /// (#2602 L-2).
 pub const MAX_QUEUED_PROMPTS: usize = 16;
+/// Room an owner's interrupt still has when the queue is full (#3027): the
+/// server has already recorded the signed instruction and spent its nonce, so
+/// the off-and-redirect signal must not be the one that bounces. Still
+/// bounded, so no stream of controls grows the queue without limit.
+pub const MAX_QUEUED_INTERRUPTS: usize = 8;
 
 enum Command {
     Prompt {
@@ -348,6 +357,7 @@ impl SessionManager {
             in_flight: None,
             start_pending: false,
             cancel_sent: false,
+            queued_interrupts: 0,
             permissions: HashMap::new(),
             permission_wait: self.settings.permission_wait,
         };
@@ -672,6 +682,8 @@ struct SessionTask {
     start_pending: bool,
     /// `session/cancel` already went out for the running turn (#3027).
     cancel_sent: bool,
+    /// How many of the queue's front entries are owner interrupts (#3027).
+    queued_interrupts: usize,
     /// Bridged permission requests waiting for the owner, by event id.
     permissions: HashMap<Uuid, PendingPermission>,
     permission_wait: Duration,
@@ -717,14 +729,23 @@ impl SessionTask {
                     interrupt,
                     reply,
                 })) => {
-                    if self.queue.len() >= MAX_QUEUED_PROMPTS {
+                    let limit = if interrupt {
+                        MAX_QUEUED_PROMPTS + MAX_QUEUED_INTERRUPTS
+                    } else {
+                        MAX_QUEUED_PROMPTS
+                    };
+                    if self.queue.len() >= limit {
                         let _ = reply.send(Err(Refusal::InputQueueFull));
                         None
                     } else if interrupt {
-                        self.queue.push_front(text);
+                        // Ahead of every queued instruction, behind earlier
+                        // interrupts: two interrupts run in the order sent.
+                        let at = self.queued_interrupts.min(self.queue.len());
+                        self.queue.insert(at, text);
+                        self.queued_interrupts = at + 1;
                         let _ = reply.send(Ok(()));
                         if self.in_flight.is_some() {
-                            self.interrupt_running_turn()
+                            self.interrupt_running_turn().await
                         } else {
                             self.start_next_turn().await
                         }
@@ -912,10 +933,29 @@ impl SessionTask {
     /// The owner's interrupt (#3027): cancel the running turn. The agent
     /// answers the in-flight `session/prompt` with `cancelled`; that turn end
     /// starts the front of the queue — the interrupting instruction — next.
-    /// Called only with a turn in flight.
-    fn interrupt_running_turn(&mut self) -> Option<End> {
+    /// Called only with a turn in flight. Pending permission requests of the
+    /// cancelled turn are answered `cancelled` (ACP) and withdrawn on the
+    /// server first, so no allow can land on a turn that is gone.
+    async fn interrupt_running_turn(&mut self) -> Option<End> {
         if self.cancel_sent {
             return None;
+        }
+        let pending: Vec<Uuid> = self.permissions.keys().copied().collect();
+        for event_id in pending {
+            let pending = self.permissions.remove(&event_id).expect("listed above");
+            if self
+                .conn
+                .respond(
+                    pending.rpc_id,
+                    policy::PermissionDecision::Cancelled.to_result(),
+                )
+                .is_err()
+            {
+                return Some(End::AgentExited);
+            }
+            self.relay
+                .permission_denied(Some(event_id), PERMISSION_INTERRUPTED_DETAIL)
+                .await;
         }
         match self
             .conn
@@ -953,6 +993,7 @@ impl SessionTask {
             }
         }
         let text = self.queue.pop_front().expect("checked non-empty");
+        self.queued_interrupts = self.queued_interrupts.saturating_sub(1);
         self.cancel_sent = false;
         match self.conn.start_request(
             "session/prompt",

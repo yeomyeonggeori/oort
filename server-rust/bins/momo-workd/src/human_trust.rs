@@ -48,7 +48,7 @@
 //!   "signature": b64(r‖s) }
 //! ```
 //!
-//! ## Revocation (`device_revoke.v1`, local socket or `pendingControls.deviceRevocations`)
+//! ## Revocation (`device_revoke.v2`, local socket or `pendingControls.deviceRevocations`)
 //!
 //! ```text
 //! { "workspaceId", "memberId", "rootKeyId", "targetKeyId", "revokedAtMs",
@@ -57,12 +57,20 @@
 //!
 //! `targetPublicKey` is required on both paths: the endorsement binds a public
 //! key, the revocation names a key id, and a key this host never saw has no id
-//! binding yet. It sits **outside** the root's signature, so it is bound to
-//! the signed key id before it counts (#3068): a public key already seen under
-//! another id, or an id already seen with another public key, is not taken
-//! from the letter (`revocation_key_mismatch`) — the signed part (the id) is
-//! still revoked. Without that, one genuine letter for key A carrying key B's
-//! public key would revoke B, which the root never signed.
+//! binding yet. **Whose word the public key is** decides whether it counts
+//! (#3068):
+//!
+//! * a `device_revoke.v2` letter carries it inside the root's signature — the
+//!   root says which key it revoked, and the host revokes that key under any
+//!   id;
+//! * a `device_revoke.v1` letter does not. From the local socket (the
+//!   code-signed desktop app, [`RevocationSource::LocalApp`]) the app's word
+//!   is taken, as before. **Relayed by the server** it is not: only the signed
+//!   key id (and every key this host already saw under it) is revoked, and the
+//!   letter answers `revocation_key_unsigned`. Otherwise one genuine letter
+//!   for key A carrying key B's public key would revoke B — or carry a decoy,
+//!   so that A's real key came back under a new id with its endorsement.
+//!   The server accepts only v2 letters since #3068, so it has none to relay.
 //!
 //! Every letter this host applied is kept in `human-trust.json`
 //! (`revocations`, by revoked key id) for good: the server relays at most the
@@ -85,7 +93,8 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use momo_wire::human_control::{
     check_control_window, parse_p256_public_key, ControlContent, DeviceEndorse, DeviceKeyAlg,
-    DeviceRevoke, HumanControl, InputMode, PermissionScope, MAX_CLOCK_SKEW_MS, P256_PUBLIC_KEY_LEN,
+    DeviceRevoke, HumanControl, InputMode, PermissionScope, DEVICE_REVOKE_SCHEMA_V1,
+    DEVICE_REVOKE_SCHEMA_V2, MAX_CLOCK_SKEW_MS, P256_PUBLIC_KEY_LEN,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -137,16 +146,28 @@ struct TrustState {
     revocations: BTreeMap<Uuid, StoredRevocation>,
 }
 
-/// A `device_revoke.v1` letter as it was verified and applied.
+/// A `device_revoke` letter as it was verified and applied.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StoredRevocation {
+    /// `momo.human.device_revoke.v1` | `.v2`.
+    pub schema: String,
     pub root_key_id: Uuid,
     pub revoked_at_ms: i64,
     pub signature: String,
-    /// Kept only when it was bound to the key id (see the module docs).
+    /// Kept only when this host took it (see the module docs).
     #[serde(default)]
     pub target_public_key: Option<String>,
+}
+
+/// Where a revocation letter came from — whose word its unsigned public key
+/// would be (#3068).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RevocationSource {
+    /// The code-signed desktop app on this Mac, over the control socket.
+    LocalApp,
+    /// `pendingControls.deviceRevocations` — the server's word.
+    Relayed,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -335,53 +356,34 @@ impl HumanTrust {
         Ok(())
     }
 
-    /// Apply a root-signed `device_revoke.v1`. `require_public_key` is set on
-    /// the local socket, where the app knows the revoked device's public key
-    /// and must give it, so a revoked key cannot return under a new id.
+    /// Apply a root-signed revocation letter (`device_revoke.v2`, or v1 —
+    /// see the module docs for what a v1 letter's public key is worth).
     ///
-    /// `Err("revocation_key_mismatch")` (#3068): the letter's `targetPublicKey`
-    /// (outside the signature) disagrees with a binding this host already
-    /// holds. The signed part — the key id — is revoked all the same; the
-    /// public key is not taken from the letter.
+    /// `Err("revocation_key_unsigned")` (#3068): a relayed v1 letter whose
+    /// public key this host had not already bound to the revoked id. The id
+    /// (the signed part) is revoked all the same; the key is not taken.
     pub fn apply_revocation(
         &mut self,
         raw: &Value,
-        require_public_key: bool,
+        source: RevocationSource,
     ) -> Result<(), &'static str> {
         let revocation: Revocation =
             serde_json::from_value(raw.clone()).map_err(|_| "invalid_revocation")?;
         let root = self.state.root.clone().ok_or("root_not_pinned")?;
-        // #3068: the unsigned public key, checked against what this host has
-        // already bound — before anything else, so the per-poll relay of a
-        // mismatched letter writes nothing.
-        let key_mismatch = revocation.target_public_key.as_deref().is_some_and(|key| {
-            let bound_id = self.state.key_ids.get(key);
-            let bound_key = self
-                .state
-                .key_ids
-                .iter()
-                .find(|(_, id)| **id == revocation.target_key_id)
-                .map(|(bound, _)| bound.as_str());
-            bound_id.is_some_and(|id| *id != revocation.target_key_id)
-                || bound_key.is_some_and(|bound| bound != key)
-        });
+        // The key is named on both paths (#3024 review M1).
+        let target_public_key = revocation
+            .target_public_key
+            .as_deref()
+            .ok_or("revocation_public_key_required")?;
         // Already applied (the server relays the list on every poll): nothing
         // to verify or write again.
         if self
             .state
             .revoked_key_ids
             .contains(&revocation.target_key_id)
+            && self.state.revoked_public_keys.contains(target_public_key)
         {
-            if key_mismatch {
-                return Err("revocation_key_mismatch");
-            }
-            if revocation
-                .target_public_key
-                .as_ref()
-                .is_none_or(|key| self.state.revoked_public_keys.contains(key))
-            {
-                return Ok(());
-            }
+            return Ok(());
         }
         if revocation.workspace_id != self.identity.workspace_id
             || revocation.member_id != self.identity.owner_member_id
@@ -391,35 +393,38 @@ impl HumanTrust {
         if revocation.root_key_id != root.key_id {
             return Err("revocation_not_from_root");
         }
-        if revocation.target_key_id == root.key_id
-            || revocation.target_public_key.as_deref() == Some(root.public_key.as_str())
-        {
+        if revocation.target_key_id == root.key_id || target_public_key == root.public_key {
             return Err("revocation_targets_root");
         }
-        let target_public_key = match revocation.target_public_key.as_deref() {
-            Some(b64) => Some(
-                device_public_key(b64)
-                    .map(|_| b64.to_string())
-                    .ok_or("invalid_revocation")?,
-            ),
-            None if require_public_key => return Err("revocation_public_key_required"),
-            None => None,
-        };
+        if device_public_key(target_public_key).is_none() {
+            return Err("invalid_revocation");
+        }
         let root_key = BASE64
             .decode(&root.public_key)
             .map_err(|_| "trust_unavailable")?;
         let signature = BASE64
             .decode(&revocation.signature)
             .map_err(|_| "revocation_signature_invalid")?;
-        DeviceRevoke {
+        let letter = DeviceRevoke {
             workspace_id: revocation.workspace_id,
             member_id: revocation.member_id,
             root_key_id: revocation.root_key_id,
             target_key_id: revocation.target_key_id,
             revoked_at_ms: revocation.revoked_at_ms,
-        }
-        .verify(&root_key, &signature)
-        .map_err(|_| "revocation_signature_invalid")?;
+        };
+        // v2: the root signed the key. v1: only the id.
+        let key_signed = if letter
+            .verify_v2(target_public_key, &root_key, &signature)
+            .is_ok()
+        {
+            true
+        } else {
+            letter
+                .verify(&root_key, &signature)
+                .map_err(|_| "revocation_signature_invalid")?;
+            false
+        };
+        let take_key = key_signed || source == RevocationSource::LocalApp;
 
         let mut next = self.state.clone();
         next.revoked_key_ids.insert(revocation.target_key_id);
@@ -430,33 +435,35 @@ impl HumanTrust {
             .filter(|(_, id)| **id == revocation.target_key_id)
             .map(|(key, _)| key.clone())
             .collect();
+        let already_bound = bound.iter().any(|key| key == target_public_key);
         next.revoked_public_keys.extend(bound);
-        // The letter's own public key only when it agrees with the bindings.
-        let bound_key = match target_public_key {
-            Some(key) if !key_mismatch => {
-                next.key_ids
-                    .entry(key.clone())
-                    .or_insert(revocation.target_key_id);
-                next.revoked_public_keys.insert(key.clone());
-                Some(key)
-            }
-            _ => None,
-        };
+        if take_key {
+            next.key_ids
+                .entry(target_public_key.to_string())
+                .or_insert(revocation.target_key_id);
+            next.revoked_public_keys
+                .insert(target_public_key.to_string());
+        }
         next.revocations
             .entry(revocation.target_key_id)
             .or_insert(StoredRevocation {
+                schema: if key_signed {
+                    DEVICE_REVOKE_SCHEMA_V2
+                } else {
+                    DEVICE_REVOKE_SCHEMA_V1
+                }
+                .to_string(),
                 root_key_id: revocation.root_key_id,
                 revoked_at_ms: revocation.revoked_at_ms,
                 signature: revocation.signature.clone(),
-                target_public_key: bound_key,
+                target_public_key: take_key.then(|| target_public_key.to_string()),
             });
         if next != self.state {
             self.commit_state(next)?;
-            tracing::info!(target_key_id = %revocation.target_key_id, "device key revoked on this host");
+            tracing::info!(target_key_id = %revocation.target_key_id, key_signed, "device key revoked on this host");
         }
-        if key_mismatch {
-            tracing::warn!(target_key_id = %revocation.target_key_id, "revocation's public key disagrees with this host's binding; the id is revoked, the key is not");
-            return Err("revocation_key_mismatch");
+        if !take_key && !already_bound {
+            return Err("revocation_key_unsigned");
         }
         Ok(())
     }

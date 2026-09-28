@@ -890,7 +890,7 @@ pub struct EndorseDeviceKeyRequest {
 }
 
 /// `POST /v1/workspaces/{ws}/device-keys/{key}/revocation` — a
-/// `device_revoke.v1` letter.
+/// `device_revoke.v2` letter (#3068).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RevokeDeviceKeyRequest {
@@ -4445,7 +4445,7 @@ pub struct WorkControlResponse {
 pub struct PendingWorkControlsResponse {
     pub work_controls: Vec<WorkControlDto>,
     /// ADR-0146 개정 D-7 (#3022, workd E4 #3024): the host owner's root-signed
-    /// `device_revoke.v1` letters, relayed for workd to verify against its
+    /// `device_revoke.v2` letter (#3068)., relayed for workd to verify against its
     /// pinned root. Omitted when empty, so every host that has none gets
     /// today's bytes.
     #[serde(skip_serializing_if = "Vec::is_empty")]

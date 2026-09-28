@@ -51,7 +51,7 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use crate::client::{ClientError, ControlAck, HostApi, SessionStatus, WorkControl};
-use crate::human_trust::{requires_signature, HumanTrust};
+use crate::human_trust::{requires_signature, HumanTrust, RevocationSource};
 use crate::policy::Refusal;
 use crate::session::SessionManager;
 
@@ -108,7 +108,7 @@ impl ControlLoop {
             let result = trust
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
-                .apply_revocation(&revocation, true);
+                .apply_revocation(&revocation, RevocationSource::Relayed);
             if let Err(label) = result {
                 tracing::warn!(error = label, "relayed device revocation refused");
             }
@@ -335,14 +335,16 @@ impl ControlLoop {
             .filter(|text| !text.is_empty())
             .ok_or(Refusal::InvalidControl)?;
         crate::policy::check_prompt(text)?;
-        // The mode travels only inside the owner's signed statement (the host
-        // verified it above when R2 is on). No statement → a queued turn.
-        let interrupt = control
-            .human_signature
-            .as_ref()
-            .and_then(|envelope| envelope.get("mode"))
-            .and_then(serde_json::Value::as_str)
-            == Some("interrupt");
+        // The mode travels only inside the owner's signed statement, and is
+        // read only when this host verified it (R2 on). Otherwise — or with
+        // no statement — the instruction is a queued turn.
+        let interrupt = self.human.is_some()
+            && control
+                .human_signature
+                .as_ref()
+                .and_then(|envelope| envelope.get("mode"))
+                .and_then(serde_json::Value::as_str)
+                == Some("interrupt");
         self.sessions
             .input(session_id, text.to_string(), interrupt)
             .await

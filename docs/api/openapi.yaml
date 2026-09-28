@@ -3414,7 +3414,7 @@ paths:
     post:
       tags: [device-keys]
       operationId: revokeDeviceKey
-      summary: Record a root key's signed `momo.human.device_revoke.v1` letter (D-7).
+      summary: Record a root key's signed `momo.human.device_revoke.v2` letter (D-7; v2 names the revoked public key, #3068).
       description: >
         Rebuilt from the stored rows plus `revokedAtMs` (the time inside the
         letter, not after server time + 5 minutes, not before the key existed)
@@ -4869,8 +4869,9 @@ paths:
           description: >
             `error.code` signed_instructions_disabled (the flag is off),
             instruction_not_human, instruction_owner_only (not the session and
-            host owner), instruction_member_host_only (a workspace-scoped
-            host), or a device-signature refusal: device_signature_invalid,
+            host owner), instruction_channel_member_only (not an active member
+            of the session's channel), instruction_member_host_only (a
+            workspace-scoped host), or a device-signature refusal: device_signature_invalid,
             device_key_revoked, device_key_not_endorsed,
             device_signature_expired.
           content:
@@ -4885,7 +4886,8 @@ paths:
             or idle), work_host_offline (no heartbeat in 90 s — not
             delivered; resend the same signed instruction later),
             work_host_revoked, instruction_nonce_reused (the nonce is on
-            another instruction), or device_nonce_replayed.
+            another instruction, or already a chat message's clientMsgId), or
+            device_nonce_replayed.
           content:
             application/json:
               schema:
@@ -11233,7 +11235,7 @@ components:
           description: The time inside the signed letter.
         signature:
           type: string
-          description: base64 of raw r‖s (64 bytes) over `momo.human.device_revoke.v1`.
+          description: base64 of raw r‖s (64 bytes) over `momo.human.device_revoke.v2` (the stored key's public key is its fifth field; v1 letters are refused, #3068).
 
     DeviceKey:
       type: object
@@ -11691,7 +11693,7 @@ components:
           type: array
           description: >
             ADR-0146 개정 D-7 (#3022, workd #3024): the member host owner's
-            root-signed `momo.human.device_revoke.v1` letters, for workd to verify
+            root-signed `momo.human.device_revoke.v2` letters, for workd to verify
             against its pinned root. Omitted when there are none and for a
             workspace host. A session-end revocation carries no letter and is
             not relayed. At most the newest 256 are sent, so a host keeps every

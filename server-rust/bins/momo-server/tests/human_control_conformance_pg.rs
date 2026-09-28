@@ -1111,7 +1111,8 @@ async fn every_misplaced_signed_allow_is_refused_by_name() {
             target_key_id: s.phone_id,
             revoked_at_ms: at,
         }
-        .signed_bytes(),
+        .signed_bytes_v2(&s.phone.public_b64)
+        .expect("v2 letter"),
     );
     let signed_before_revocation = s.phone_allow(session, request);
     let (status, body) = s

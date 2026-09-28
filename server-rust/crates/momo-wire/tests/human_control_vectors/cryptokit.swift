@@ -128,6 +128,13 @@ func payload(_ tc: [String: Any]) throws -> Data {
             try uuid(f["workspace_id"]), try uuid(f["member_id"]), try uuid(f["root_key_id"]),
             try uuid(f["target_key_id"]), String(try int64(f["revoked_at_ms"])),
         ]
+    case "momo.human.device_revoke.v2":
+        // #3068: v2 names the revoked public key.
+        lines += [
+            try uuid(f["workspace_id"]), try uuid(f["member_id"]), try uuid(f["root_key_id"]),
+            try uuid(f["target_key_id"]), try str(f["target_public_key_b64"]),
+            String(try int64(f["revoked_at_ms"])),
+        ]
     default:
         throw VectorError.bad("schema \(schema)")
     }

@@ -9,13 +9,13 @@
 //! `\n`-joined fields, UTF-8, no trailing newline):
 //!
 //! ```text
-//! momo.human.control.v2          momo.human.device_endorse.v1   momo.human.device_revoke.v1
+//! momo.human.control.v2          momo.human.device_endorse.v1   momo.human.device_revoke.v2
 //! {instance_id}                  {workspace_id}                 {workspace_id}
 //! {workspace_id}                 {member_id}                    {member_id}
 //! {member_id}                    {root_key_id}                  {root_key_id}
 //! {device_key_id}                {target_alg}                   {target_key_id}
-//! {host_id}                      {target_public_key_b64}        {revoked_at_ms}
-//! {session_id | "-"}             {label (NFC)}
+//! {host_id}                      {target_public_key_b64}        {target_public_key_b64}
+//! {session_id | "-"}             {label (NFC)}                  {revoked_at_ms}
 //! {kind}
 //! {mode | "-"}
 //! {nonce}
@@ -23,6 +23,9 @@
 //! {expires_at_ms}
 //! {content_sha256}
 //! ```
+//!
+//! (`device_revoke.v1` is the v2 letter without the public-key line; a host
+//! takes a revoked public key only from a v2 letter, #3068.)
 //!
 //! ## Field rules (what E1 fixes on top of the ADR)
 //!
@@ -104,6 +107,8 @@ pub const HUMAN_CONTROL_SCHEMA_V1: &str = "momo.human.control.v1";
 pub const HUMAN_CONTROL_SCHEMA_V2: &str = "momo.human.control.v2";
 pub const DEVICE_ENDORSE_SCHEMA_V1: &str = "momo.human.device_endorse.v1";
 pub const DEVICE_REVOKE_SCHEMA_V1: &str = "momo.human.device_revoke.v1";
+/// v2 (#3068): the root signs the revoked device's public key too.
+pub const DEVICE_REVOKE_SCHEMA_V2: &str = "momo.human.device_revoke.v2";
 
 /// The placeholder for an absent `session_id` / `mode`.
 pub const ABSENT: &str = "-";
@@ -535,7 +540,8 @@ impl DeviceEndorse<'_> {
     }
 }
 
-/// `momo.human.device_revoke.v1` — the root key revokes a device key.
+/// `momo.human.device_revoke.v1` / `.v2` — the root key revokes a device key
+/// (v2 also names its public key, #3068).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeviceRevoke {
     pub workspace_id: Uuid,
@@ -564,6 +570,56 @@ impl DeviceRevoke {
         signature: &[u8],
     ) -> Result<[u8; P256_SIGNATURE_LEN], HumanSigningError> {
         verify_p256(root_public_key, &self.signed_bytes(), signature)
+    }
+
+    /// `momo.human.device_revoke.v2` (#3068): v1's lines with the revoked
+    /// key's public key (base64 of the 33-byte compressed point, canonical)
+    /// before the time. An endorsement binds a public key and v1 names only a
+    /// key id, so under v1 a host that never saw the key could not tell which
+    /// key the root meant; under v2 the root says it.
+    ///
+    /// ```text
+    /// momo.human.device_revoke.v2
+    /// {workspace_id}
+    /// {member_id}
+    /// {root_key_id}
+    /// {target_key_id}
+    /// {target_public_key_b64}
+    /// {revoked_at_ms}
+    /// ```
+    pub fn signed_bytes_v2(
+        &self,
+        target_public_key_b64: &str,
+    ) -> Result<Vec<u8>, HumanSigningError> {
+        let key = canonical_b64_of_len(
+            "target_public_key_b64",
+            target_public_key_b64,
+            P256_PUBLIC_KEY_LEN,
+        )?;
+        parse_p256_public_key(&key)?;
+        Ok(format!(
+            "{DEVICE_REVOKE_SCHEMA_V2}\n{}\n{}\n{}\n{}\n{target_public_key_b64}\n{}",
+            self.workspace_id,
+            self.member_id,
+            self.root_key_id,
+            self.target_key_id,
+            self.revoked_at_ms,
+        )
+        .into_bytes())
+    }
+
+    /// Verify a v2 letter over `target_public_key_b64`.
+    pub fn verify_v2(
+        &self,
+        target_public_key_b64: &str,
+        root_public_key: &[u8],
+        signature: &[u8],
+    ) -> Result<[u8; P256_SIGNATURE_LEN], HumanSigningError> {
+        verify_p256(
+            root_public_key,
+            &self.signed_bytes_v2(target_public_key_b64)?,
+            signature,
+        )
     }
 }
 

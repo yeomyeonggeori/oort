@@ -4,7 +4,7 @@
 //! POST /v1/workspaces/{ws}/device-keys                    (bearer, human) register
 //! GET  /v1/workspaces/{ws}/device-keys                    (bearer, human) list own
 //! POST /v1/workspaces/{ws}/device-keys/{key}/endorsement  (bearer, human) device_endorse.v1
-//! POST /v1/workspaces/{ws}/device-keys/{key}/revocation   (bearer, human) device_revoke.v1
+//! POST /v1/workspaces/{ws}/device-keys/{key}/revocation   (bearer, human) device_revoke.v2
 //! GET  /v1/workspaces/{ws}/device-keys/signing-context    (bearer, human) instance id + clock (#3023)
 //! ```
 //!

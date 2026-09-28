@@ -815,6 +815,50 @@ async fn a_retry_answers_the_same_and_a_reused_nonce_is_refused() {
     assert_eq!(status, 409, "{body}");
     assert_eq!(code(&body), Some("instruction_nonce_reused"));
     assert_eq!(s.input_controls().await, 1);
+
+    // A nonce the owner already used as a chat message's clientMsgId would
+    // fold the instruction into that old row: refused before it is spent.
+    let live = s.session().await;
+    let chat_nonce = Uuid::new_v4();
+    let (status, body) = s
+        .post(
+            &format!(
+                "/v1/workspaces/{}/channels/{}/messages",
+                s.workspace, s.channel
+            ),
+            &s.access,
+            json!({ "clientMsgId": chat_nonce, "body": "그냥 채팅" }),
+        )
+        .await;
+    assert_eq!(status, 201, "{body}");
+    let spent = s.spent_nonces().await;
+    let signature = instruction_signature(
+        &s,
+        &s.root,
+        s.root_id,
+        live,
+        "채팅과 같은 키",
+        InputMode::Queue,
+        chat_nonce,
+        ControlSchema::V2,
+    );
+    let (status, body) = s
+        .post(
+            &s.instructions_path(live),
+            &s.access,
+            instruction_body("채팅과 같은 키", InputMode::Queue, chat_nonce, signature),
+        )
+        .await;
+    assert_eq!(
+        (status, code(&body)),
+        (409, Some("instruction_nonce_reused")),
+        "{body}"
+    );
+    assert_eq!(
+        s.spent_nonces().await,
+        spent,
+        "refused before the nonce is spent"
+    );
 }
 
 #[tokio::test]
@@ -929,6 +973,18 @@ async fn only_the_owner_instructs() {
     let (status, body, _) = s.instruct(moved, "남의 맥", InputMode::Queue).await;
     assert_eq!(status, 403, "{body}");
     assert_eq!(code(&body), Some("instruction_owner_only"));
+
+    // The owner left the session's channel: no instruction (it is a message
+    // there too).
+    sqlx::query("UPDATE membership SET left_at = now() WHERE channel_id = $1 AND member_id = $2")
+        .bind(s.channel)
+        .bind(s.person)
+        .execute(&s.su)
+        .await
+        .unwrap();
+    let (status, body, _) = s.instruct(session, "나간 채널", InputMode::Queue).await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(code(&body), Some("instruction_channel_member_only"));
     assert_eq!(s.input_controls().await, 0);
     assert_eq!(s.spent_nonces().await, 0);
 }

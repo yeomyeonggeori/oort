@@ -52,7 +52,7 @@ use momo_auth::human_control::{ControlSubject, ControlTarget};
 use momo_auth::{Principal, PrincipalKind};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{sqlx, PgConnection};
-use momo_messaging::{send_thread_notice_in_tx, MessageType, NewMessage};
+use momo_messaging::{is_channel_member, send_thread_notice_in_tx, MessageType, NewMessage};
 use momo_t3::work_control::{
     insert_work_control_in_tx, lock_work_control_in_tx, target_work_host_in_tx, NewWorkControl,
     WorkControlRow, HOST_SCOPE_MEMBER, KIND_INPUT, STATUS_APPROVED,
@@ -87,6 +87,7 @@ pub const CODE_NONCE_REUSED: &str = "instruction_nonce_reused";
 pub const CODE_SESSION_NOT_ACCEPTING: &str = "work_session_not_accepting";
 pub const CODE_HOST_OFFLINE: &str = "work_host_offline";
 pub const CODE_HOST_REVOKED: &str = "work_host_revoked";
+pub const CODE_CHANNEL_MEMBER_ONLY: &str = "instruction_channel_member_only";
 
 /// The server-owned props key the thread message carries (like `momo.stream`).
 pub const PROPS_KEY: &str = "momo.instruction";
@@ -272,15 +273,28 @@ async fn replay_in_tx(
     .fetch_optional(&mut *conn)
     .await
     .map_err(momo_db::DbError::from)?;
-    let Some(control_id) = existing else {
-        return Ok(Ok(None));
-    };
     let reused = || {
         Ok(Err(ApiError::coded(
             StatusCode::CONFLICT,
             CODE_NONCE_REUSED,
             "this signed nonce was already used for another instruction",
         )))
+    };
+    let Some(control_id) = existing else {
+        // The nonce is also the thread message's idempotency key: a message
+        // the owner already sent under it (a plain chat send) would swallow
+        // this one into the old row. Refused before the nonce is spent.
+        let taken: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM message \
+                WHERE channel_id = $1 AND author_member_id = $2 AND client_msg_id = $3)",
+        )
+        .bind(session.channel_id)
+        .bind(member_id)
+        .bind(nonce)
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(momo_db::DbError::from)?;
+        return if taken { reused() } else { Ok(Ok(None)) };
     };
     let Some(control) = lock_work_control_in_tx(conn, workspace_id, control_id).await? else {
         return reused();
@@ -366,6 +380,15 @@ async fn send_in_tx(
             StatusCode::FORBIDDEN,
             CODE_OWNER_ONLY,
             "only the host owner can instruct its agent",
+        )));
+    }
+    // The instruction is also a message in the session's channel: the same
+    // membership a send needs (a member who left cannot post there).
+    if !is_channel_member(conn, session.channel_id, member_id).await? {
+        return Ok(Err(ApiError::coded(
+            StatusCode::FORBIDDEN,
+            CODE_CHANNEL_MEMBER_ONLY,
+            "instructions need an active membership of the session's channel",
         )));
     }
 
@@ -542,6 +565,7 @@ mod tests {
                 CODE_SESSION_NOT_ACCEPTING,
                 CODE_HOST_OFFLINE,
                 CODE_HOST_REVOKED,
+                CODE_CHANNEL_MEMBER_ONLY,
             ]
         );
         assert_eq!(golden["props_key"], PROPS_KEY);

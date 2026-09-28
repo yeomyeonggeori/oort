@@ -54,7 +54,8 @@
     "instruction_nonce_reused",
     "work_session_not_accepting",
     "work_host_offline",
-    "work_host_revoked"
+    "work_host_revoked",
+    "instruction_channel_member_only"
   ],
   "signature_error_codes": [
     "device_signature_invalid",
@@ -284,6 +285,26 @@
       "code": "instruction_nonce_reused"
     },
     {
+      "name": "nonce_is_a_chat_message_already",
+      "database": true,
+      "body": {
+        "text": "\ud14c\uc2a4\ud2b8 \ub3cc\ub824 \uc918",
+        "mode": "queue",
+        "clientMsgId": "0193a5b8-7c1e-7d2a-9f00-00000000b0a1",
+        "humanSignature": {
+          "deviceKeyId": "00000000-0000-7000-8000-00000000d001",
+          "nonce": "0193a5b8-7c1e-7d2a-9f00-00000000b0a1",
+          "issuedAtMs": 1790550000000,
+          "expiresAtMs": 1790550600000,
+          "mode": "queue",
+          "signature": "<base64 raw r||s, 64 bytes>"
+        }
+      },
+      "status": 409,
+      "code": "instruction_nonce_reused",
+      "_comment": "clientMsgId(=nonce)\ub85c \uc774\ubbf8 \ubcf4\ub0b8 \uc77c\ubc18 \uba54\uc2dc\uc9c0\uac00 \uc788\uc73c\uba74 \uc9c0\uc2dc\uac00 \uadf8 \ud589\uc5d0 \ud761\uc218\ub418\ubbc0\ub85c, nonce\ub97c \uc4f0\uae30 \uc804\uc5d0 \uac70\ubd80\ud55c\ub2e4."
+    },
+    {
       "name": "not_the_session_owner",
       "database": true,
       "body": {
@@ -320,6 +341,25 @@
       },
       "status": 403,
       "code": "instruction_member_host_only"
+    },
+    {
+      "name": "left_the_channel",
+      "database": true,
+      "body": {
+        "text": "\ud14c\uc2a4\ud2b8 \ub3cc\ub824 \uc918",
+        "mode": "queue",
+        "clientMsgId": "0193a5b8-7c1e-7d2a-9f00-00000000b0a1",
+        "humanSignature": {
+          "deviceKeyId": "00000000-0000-7000-8000-00000000d001",
+          "nonce": "0193a5b8-7c1e-7d2a-9f00-00000000b0a1",
+          "issuedAtMs": 1790550000000,
+          "expiresAtMs": 1790550600000,
+          "mode": "queue",
+          "signature": "<base64 raw r||s, 64 bytes>"
+        }
+      },
+      "status": 403,
+      "code": "instruction_channel_member_only"
     },
     {
       "name": "session_ended",

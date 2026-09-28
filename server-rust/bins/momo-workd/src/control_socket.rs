@@ -412,7 +412,9 @@ pub fn respond(line: &str, identity: &HostIdentity, shared: &SocketShared) -> Va
             let Some(revocation) = request.get("revocation") else {
                 return json!({"ok": false, "error": "invalid_revocation"});
             };
-            match lock_trust().apply_revocation(revocation, true) {
+            match lock_trust()
+                .apply_revocation(revocation, crate::human_trust::RevocationSource::LocalApp)
+            {
                 Ok(()) => json!({"ok": true}),
                 Err(error) => json!({"ok": false, "error": error}),
             }
