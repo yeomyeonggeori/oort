@@ -2004,6 +2004,17 @@ impl Device {
         }
     }
 
+    /// The `n`th of many distinct keys (#3068's 300 letters).
+    fn nth(n: u16) -> Self {
+        let mut secret = [0u8; 32];
+        secret[0] = 0x6b;
+        secret[30..].copy_from_slice(&(n + 1).to_be_bytes());
+        Self {
+            id: Uuid::new_v4(),
+            key: SigningKey::from_slice(&secret).unwrap(),
+        }
+    }
+
     /// The same key under another key id.
     fn renamed(&self) -> Self {
         Self {
@@ -2881,5 +2892,124 @@ async fn inv_28_r2_a_v2_spawn_binds_tool_channel_and_the_resume_session() {
     assert_eq!(
         poll_and_ack(&mut h, &resume).await,
         ControlAck::ok(Some(successor))
+    );
+}
+
+/// #3068: a relayed letter's `targetPublicKey` sits outside the root's
+/// signature, so it only counts when it agrees with the key id this host has
+/// bound — one genuine letter for a tablet carrying the phone's public key
+/// revokes the tablet's id, not the phone.
+#[tokio::test]
+async fn inv_29_r2_a_letters_unsigned_public_key_is_bound_to_its_key_id() {
+    let mut h = harness_r2(&[("claude", &[])]);
+    let root = Device::new(1);
+    let phone = Device::new(2);
+    let tablet = Device::new(3);
+    pin(&h, &root);
+    let phone_ok = Some(endorsement(&h, &root, &phone));
+    let request = signed(spawn(&h, "claude", "start"), &phone, phone_ok.clone());
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+    let input = |h: &Harness, device: &Device, endorsed: Option<Value>, text: &str| {
+        signed(
+            control(h, "input", h.owner, Some(session), json!({ "text": text })),
+            device,
+            endorsed,
+        )
+    };
+
+    // The root genuinely revoked the tablet; the server attaches the phone's
+    // public key to that letter.
+    let mut lying = revocation(&h, &root, &tablet, true);
+    lying["targetPublicKey"] = json!(phone.public());
+    assert_eq!(
+        h.trust.lock().unwrap().apply_revocation(&lying, true),
+        Err("revocation_key_mismatch")
+    );
+    h.server.revocations.lock().unwrap().push(lying);
+    let still = input(&h, &phone, phone_ok.clone(), "the phone was never revoked");
+    assert_eq!(
+        poll_and_ack(&mut h, &still).await,
+        ControlAck::ok(Some(session))
+    );
+    // The signed part landed: the tablet's id is revoked.
+    let tablet_ok = Some(endorsement(&h, &root, &tablet));
+    let from_tablet = input(&h, &tablet, tablet_ok, "tablet");
+    assert_eq!(
+        poll_and_ack(&mut h, &from_tablet).await,
+        ControlAck::refused("device_key_revoked")
+    );
+    // The mirror: the phone's own id with another key is not taken either.
+    let mut other_key = revocation(&h, &root, &phone, true);
+    other_key["targetPublicKey"] = json!(Device::new(9).public());
+    assert_eq!(
+        h.trust.lock().unwrap().apply_revocation(&other_key, true),
+        Err("revocation_key_mismatch")
+    );
+    let archived = h.trust.lock().unwrap().revocations().clone();
+    assert_eq!(archived[&tablet.id].target_public_key, None);
+    assert_eq!(archived[&phone.id].target_public_key, None);
+}
+
+/// #3068: the server relays at most the newest 256 letters. Every letter the
+/// host applied stays applied — and kept — after it falls out of the relay and
+/// across a restart.
+#[tokio::test]
+async fn inv_30_r2_revocations_outlive_the_relay_window_and_a_restart() {
+    let mut h = harness_r2(&[("claude", &[])]);
+    let root = Device::new(1);
+    pin(&h, &root);
+    let devices: Vec<Device> = (0..300).map(Device::nth).collect();
+    let letters: Vec<Value> = devices
+        .iter()
+        .map(|device| revocation(&h, &root, device, true))
+        .collect();
+    let request = signed(spawn(&h, "claude", "start"), &root, None);
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+
+    // Two polls: the oldest 256, then the window moved to the newest 256.
+    for window in [&letters[..256], &letters[300 - 256..]] {
+        h.server
+            .revocations
+            .lock()
+            .unwrap()
+            .extend(window.iter().cloned());
+        let tick = signed(
+            control(
+                &h,
+                "input",
+                h.owner,
+                Some(session),
+                json!({ "text": "tick" }),
+            ),
+            &root,
+            None,
+        );
+        assert_eq!(
+            poll_and_ack(&mut h, &tick).await,
+            ControlAck::ok(Some(session))
+        );
+    }
+
+    // A restart reads the state folder back.
+    let state_dir = h.dir.join("state");
+    let identity = h.trust.lock().unwrap().identity();
+    *h.trust.lock().unwrap() = HumanTrust::open(&state_dir, identity).unwrap();
+    assert_eq!(h.trust.lock().unwrap().revocations().len(), 300);
+    // The first key, whose letter the server no longer relays, stays revoked.
+    let first = &devices[0];
+    let from_first = signed(
+        control(
+            &h,
+            "input",
+            h.owner,
+            Some(session),
+            json!({ "text": "old key" }),
+        ),
+        first,
+        Some(endorsement(&h, &root, first)),
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &from_first).await,
+        ControlAck::refused("device_key_revoked")
     );
 }
