@@ -323,7 +323,15 @@ export async function harnessProfileRemove(profile: HarnessProfileRef): Promise<
  */
 export type PtyProgram =
   | { kind: "shell" }
-  | { kind: "harness"; id: "claude" | "codex" | "grok" }
+  | {
+      kind: "harness";
+      id: "claude" | "codex" | "grok";
+      /**
+       * 프로필 라벨(#3010, ADR-0191 D1): 기본 AI 표의 「로컬 터미널 새 세션」 선택.
+       * 없으면 이 맥의 기본 위치. 셸이 폴더를 정하고, 폴더가 없으면 거부한다.
+       */
+      profile?: string;
+    }
   | {
       kind: "login";
       id: "claude" | "codex";

@@ -1,0 +1,6 @@
+{
+  "name": "momo-device-key-native",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local Expo module (issue #3026, ADR-0146 개정 2026-09-28 D-1·D-2). The phone's human device key: Secure Enclave P-256, biometryCurrentSet, app-only keychain access group. The private key never reaches JS. No JS entry point on purpose — callers use src/deviceKey/native.ts."
+}
