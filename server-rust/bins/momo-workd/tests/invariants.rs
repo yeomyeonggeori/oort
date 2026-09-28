@@ -3185,3 +3185,205 @@ async fn inv_32_r2_an_interrupt_withdraws_the_cancelled_turns_permission_request
         ControlAck::refused("permission_request_unknown")
     );
 }
+
+/// #3078: a re-login gives the same Secure Enclave root key a **new key id**
+/// (ADR-0146 D-7: the old row is revoked with its session lineage, the same
+/// public key gets a new row). The pin is the public key: the desktop app may
+/// move it to the new id over the local socket; nothing on the server path
+/// can, and a different public key is refused as before.
+#[tokio::test]
+async fn inv_33_r2_a_relogin_rebinds_the_roots_key_id_only_on_the_local_socket() {
+    let mut h = harness_r2(&[("claude", &[])]);
+    let root = Device::new(1);
+    let phone = Device::new(2);
+    let lost = Device::new(3);
+    let stranger = Device::new(4);
+    let tablet = Device::new(5);
+    pin(&h, &root);
+    let request = signed(spawn(&h, "claude", "start"), &root, None);
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+    let input = |h: &Harness, device: &Device, endorsed: Option<Value>, text: &str| {
+        signed(
+            control(h, "input", h.owner, Some(session), json!({ "text": text })),
+            device,
+            endorsed,
+        )
+    };
+    // The root has signed under its first id (the host bound key → id), and
+    // a phone it approved works.
+    let old_approval = Some(endorsement(&h, &root, &phone));
+    let before = input(&h, &phone, old_approval.clone(), "before");
+    assert_eq!(
+        poll_and_ack(&mut h, &before).await,
+        ControlAck::ok(Some(session))
+    );
+    // A letter the root signed before logging out that this host has not
+    // seen yet (it was off): it must still land after the re-login.
+    let unseen_letter = revocation(&h, &root, &lost, true);
+
+    // Log out, log in: the same key under a new id.
+    let relogin = root.renamed();
+
+    // The server path cannot move the root to it.
+    let early = input(&h, &relogin, None, "the server says this is the root");
+    assert_eq!(
+        poll_and_ack(&mut h, &early).await,
+        ControlAck::refused("device_signature_invalid")
+    );
+    h.server
+        .revocations
+        .lock()
+        .unwrap()
+        .push(revocation(&h, &relogin, &lost, true));
+    let tick = input(&h, &root, None, "tick");
+    assert!(poll_and_ack(&mut h, &tick).await.ok);
+    {
+        let trust = h.trust.lock().unwrap();
+        assert_eq!(trust.root().map(|r| r.key_id), Some(root.id));
+        assert!(
+            !trust.revocations().contains_key(&lost.id),
+            "a letter under an id the host has not pinned is not the root's"
+        );
+    }
+
+    // The local socket: a different key under the new id is still refused;
+    // the same key is rebound, once.
+    {
+        let mut trust = h.trust.lock().unwrap();
+        assert_eq!(
+            trust.pin_root(relogin.id, "p256", &stranger.public(), now_ms()),
+            Err("root_already_pinned")
+        );
+        assert_eq!(
+            trust.pin_root(stranger.id, "p256", &stranger.public(), now_ms()),
+            Err("root_already_pinned")
+        );
+        assert_eq!(
+            trust.pin_root(relogin.id, "p256", &relogin.public(), now_ms()),
+            Ok(true)
+        );
+        assert_eq!(
+            trust.pin_root(relogin.id, "p256", &relogin.public(), now_ms()),
+            Ok(false),
+            "idempotent"
+        );
+        let pinned = trust.root().unwrap();
+        assert_eq!(pinned.key_id, relogin.id);
+        assert_eq!(pinned.public_key, root.public());
+        // The retired id does not come back.
+        assert_eq!(
+            trust.pin_root(root.id, "p256", &root.public(), now_ms()),
+            Err("root_key_id_retired")
+        );
+    }
+
+    // The new id signs; the retired id does not.
+    let after = input(&h, &relogin, None, "after the re-login");
+    assert_eq!(
+        poll_and_ack(&mut h, &after).await,
+        ControlAck::ok(Some(session))
+    );
+    let retired = input(&h, &root, None, "the old id");
+    assert_eq!(
+        poll_and_ack(&mut h, &retired).await,
+        ControlAck::refused("device_signature_invalid")
+    );
+    // An approval under the retired id is refused (as on the server: its root
+    // row is revoked, the phone reads 「지시 불가」); the Mac approves again.
+    let stale = input(&h, &phone, old_approval, "old approval");
+    assert_eq!(
+        poll_and_ack(&mut h, &stale).await,
+        ControlAck::refused("device_key_not_endorsed")
+    );
+    let again = input(
+        &h,
+        &phone,
+        Some(endorsement(&h, &relogin, &phone)),
+        "approved again",
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &again).await,
+        ControlAck::ok(Some(session))
+    );
+    // Nor does an approved key get the retired id as its own.
+    let squatter = Device {
+        id: root.id,
+        key: tablet.key.clone(),
+    };
+    let squat = input(
+        &h,
+        &squatter,
+        Some(endorsement(&h, &relogin, &squatter)),
+        "under the root's old id",
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &squat).await,
+        ControlAck::refused("device_signature_invalid")
+    );
+
+    // The letter signed before the re-login lands (same key, retired id).
+    h.server.revocations.lock().unwrap().push(unseen_letter);
+    let tick = input(&h, &relogin, None, "tick");
+    assert!(poll_and_ack(&mut h, &tick).await.ok);
+    assert!(h.trust.lock().unwrap().revocations().contains_key(&lost.id));
+    let from_lost = input(
+        &h,
+        &lost,
+        Some(endorsement(&h, &relogin, &lost)),
+        "lost device",
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &from_lost).await,
+        ControlAck::refused("device_key_revoked")
+    );
+
+    // No letter revokes the root under either id — not even a relayed v1
+    // letter naming the retired id with a decoy key.
+    {
+        let mut trust = h.trust.lock().unwrap();
+        for (letter, source) in [
+            (
+                revocation(&h, &relogin, &root, true),
+                RevocationSource::LocalApp,
+            ),
+            (
+                revocation(&h, &relogin, &relogin, true),
+                RevocationSource::LocalApp,
+            ),
+            (
+                revocation_v1_with(&h, &relogin, &root, &stranger.public()),
+                RevocationSource::Relayed,
+            ),
+            (
+                revocation_v1_with(&h, &root, &root, &stranger.public()),
+                RevocationSource::Relayed,
+            ),
+        ] {
+            assert_eq!(
+                trust.apply_revocation(&letter, source),
+                Err("revocation_targets_root")
+            );
+        }
+    }
+
+    // A restart reads the rebind back.
+    let state_dir = h.dir.join("state");
+    let identity = h.trust.lock().unwrap().identity();
+    *h.trust.lock().unwrap() = HumanTrust::open(&state_dir, identity).unwrap();
+    assert_eq!(
+        h.trust.lock().unwrap().root().map(|r| r.key_id),
+        Some(relogin.id)
+    );
+    let restarted = input(&h, &relogin, None, "after a restart");
+    assert_eq!(
+        poll_and_ack(&mut h, &restarted).await,
+        ControlAck::ok(Some(session))
+    );
+    assert_eq!(
+        h.trust
+            .lock()
+            .unwrap()
+            .pin_root(root.id, "p256", &root.public(), now_ms()),
+        Err("root_key_id_retired")
+    );
+}

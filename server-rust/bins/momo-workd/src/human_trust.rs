@@ -7,9 +7,12 @@
 //! * `human-trust.json` — the **pinned root**: the Secure Enclave P-256 key of
 //!   the desktop app on this Mac, handed over once on the code-signed control
 //!   socket (`pin_root`, [`crate::control_socket`]). Nothing the server sends
-//!   can set or change it; a different key is refused (`root_already_pinned`)
-//!   and only a local reset (`momo-workd reset-root`, or `forget` + register)
-//!   clears it. Also the revoked keys and the key-id ↔ public-key bindings.
+//!   can set or change it; a different public key is refused
+//!   (`root_already_pinned`) and only a local reset (`momo-workd reset-root`,
+//!   or `forget` + register) clears it. **The pin is the public key** (#3078):
+//!   the same key under a new key id — a re-login gives the key a new server
+//!   row (D-7) — is rebound on the same socket, and the old id is retired.
+//!   Also the revoked keys and the key-id ↔ public-key bindings.
 //! * `human-nonces.json` — every nonce this host consumed, kept until its
 //!   control has expired, so a restart does not reopen a replay window (D-9).
 //!
@@ -129,6 +132,19 @@ pub struct PinnedRoot {
     /// Canonical base64 of the 33-byte compressed point.
     pub public_key: String,
     pub pinned_at_ms: i64,
+    /// Key ids this same public key was pinned under before a re-login moved
+    /// it (#3078). Retired: never a root id again, never another key's id,
+    /// never a revocation target; a letter the root signed under one still
+    /// counts (same key, the id is inside the signed bytes).
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub former_key_ids: BTreeSet<Uuid>,
+}
+
+impl PinnedRoot {
+    /// The id the root is pinned under now, or one it held before (#3078).
+    pub fn held(&self, key_id: Uuid) -> bool {
+        self.key_id == key_id || self.former_key_ids.contains(&key_id)
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -313,7 +329,14 @@ impl HumanTrust {
     }
 
     /// Pin the desktop app's root key, once. The same key again is a no-op
-    /// (`Ok(false)`); any other key is refused until a local reset.
+    /// (`Ok(false)`); any other **public key** is refused until a local reset.
+    ///
+    /// The same public key under a new key id is a **rebind** (`Ok(true)`,
+    /// #3078): a re-login revokes the old key row with its session lineage and
+    /// the server gives the same Secure Enclave key a new row (ADR-0146 D-7).
+    /// The pin is the key, so the app may move it to the new id; the old id is
+    /// retired. This is reachable only from the code-signed control socket —
+    /// nothing on the server path calls it (D-6 ①, `inv_26`, `inv_33`).
     pub fn pin_root(
         &mut self,
         key_id: Uuid,
@@ -325,11 +348,13 @@ impl HumanTrust {
             return Err("invalid_root_key");
         }
         if let Some(root) = &self.state.root {
-            return if root.key_id == key_id && root.public_key == public_key_b64 {
-                Ok(false)
-            } else {
-                Err("root_already_pinned")
-            };
+            if root.public_key != public_key_b64 {
+                return Err("root_already_pinned");
+            }
+            if root.key_id == key_id {
+                return Ok(false);
+            }
+            return self.rebind_root(key_id, now_ms);
         }
         if self.state.revoked_key_ids.contains(&key_id)
             || self.state.revoked_public_keys.contains(public_key_b64)
@@ -342,9 +367,47 @@ impl HumanTrust {
             alg: alg.to_string(),
             public_key: public_key_b64.to_string(),
             pinned_at_ms: now_ms,
+            former_key_ids: BTreeSet::new(),
         });
         self.commit_state(next)?;
         tracing::info!(root_key_id = %key_id, "human root key pinned");
+        Ok(true)
+    }
+
+    /// The pinned public key under a new key id (#3078). The new id must be
+    /// free: not retired, not revoked, not another key's.
+    fn rebind_root(&mut self, key_id: Uuid, now_ms: i64) -> Result<bool, &'static str> {
+        let root = self.state.root.clone().ok_or("root_not_pinned")?;
+        if root.former_key_ids.contains(&key_id) {
+            return Err("root_key_id_retired");
+        }
+        if self.state.revoked_key_ids.contains(&key_id)
+            || self.state.revoked_public_keys.contains(&root.public_key)
+        {
+            return Err("root_key_revoked");
+        }
+        if self
+            .state
+            .key_ids
+            .iter()
+            .any(|(key, id)| *id == key_id && *key != root.public_key)
+        {
+            return Err("root_key_id_taken");
+        }
+        let mut next = self.state.clone();
+        // The root's own key → id binding (step 3 of `check_control`) moves
+        // with it; the old id stays reserved in `former_key_ids`.
+        next.key_ids.insert(root.public_key.clone(), key_id);
+        let mut former_key_ids = root.former_key_ids.clone();
+        former_key_ids.insert(root.key_id);
+        next.root = Some(PinnedRoot {
+            key_id,
+            former_key_ids,
+            pinned_at_ms: now_ms,
+            ..root.clone()
+        });
+        self.commit_state(next)?;
+        tracing::info!(root_key_id = %key_id, former_key_id = %root.key_id, "human root key rebound to a new key id");
         Ok(true)
     }
 
@@ -400,10 +463,13 @@ impl HumanTrust {
         {
             return Err("revocation_not_for_this_host");
         }
-        if revocation.root_key_id != root.key_id {
+        // A letter the root signed under an id it held before a re-login is
+        // still the root's (#3078): the signature is checked against the same
+        // pinned key, over bytes that name that id.
+        if !root.held(revocation.root_key_id) {
             return Err("revocation_not_from_root");
         }
-        if revocation.target_key_id == root.key_id || target_public_key == root.public_key {
+        if root.held(revocation.target_key_id) || target_public_key == root.public_key {
             return Err("revocation_targets_root");
         }
         if device_public_key(target_public_key).is_none() {
@@ -588,6 +654,10 @@ impl HumanTrust {
         let root_key = BASE64
             .decode(&root.public_key)
             .map_err(|_| Refusal::DeviceTrustUnavailable)?;
+        if root.former_key_ids.contains(&envelope.device_key_id) {
+            // Retired by a re-login (#3078): not the root, nor anyone else.
+            return Err(Refusal::DeviceSignatureInvalid);
+        }
         if envelope.device_key_id == root.key_id {
             if envelope.device_public_key != root.public_key {
                 return Err(Refusal::DeviceKeyNotEndorsed);
