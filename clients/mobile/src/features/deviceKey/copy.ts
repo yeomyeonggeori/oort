@@ -20,7 +20,34 @@ export interface DeviceKeyCopy {
 
 export const MAC_WHERE = '맥의 oort에서 설정 › 기기 › 지시 서명을 여세요.';
 
-export function deviceKeyCopy(view: DeviceKeyView): DeviceKeyCopy {
+/**
+ * 맥 화면과 같은 낱말을 쓴다(`DeviceKeysBlock`: 「승인 전」, 「지시 권한 끊기」).
+ * `busy` 는 등록이 진행 중인가 — 「아직 지시 기기가 아닙니다」가 실패처럼 읽히지 않게.
+ */
+export function deviceKeyCopy(view: DeviceKeyView, busy = false): DeviceKeyCopy {
+  // 승인은 됐지만 Face ID 를 지금 못 쓴다 — 「지시할 수 있습니다」라고 말하면 거짓이다.
+  if (
+    (view.kind === 'approved' || view.kind === 'pending') &&
+    view.biometryOff
+  ) {
+    return {
+      badge: 'Face ID 필요',
+      tone: 'warn',
+      headline: 'Face ID를 켜야 이 폰으로 지시할 수 있습니다.',
+      detail:
+        view.kind === 'approved'
+          ? '맥의 승인은 그대로 있습니다. iOS 설정에서 Face ID를 켜고 이 앱에 허용한 뒤 다시 확인하세요.'
+          : `iOS 설정에서 Face ID를 켜세요. 맥의 승인도 필요합니다. ${MAC_WHERE}`,
+    };
+  }
+  if (view.kind === 'unregistered' && busy) {
+    return {
+      badge: '등록 중',
+      tone: 'muted',
+      headline: '이 폰을 지시 기기로 등록하는 중입니다.',
+      detail: '',
+    };
+  }
   switch (view.kind) {
     case 'loading':
       return {
@@ -69,7 +96,7 @@ export function deviceKeyCopy(view: DeviceKeyView): DeviceKeyCopy {
       };
     case 'pending':
       return {
-        badge: '승인 대기',
+        badge: '승인 전',
         tone: 'warn',
         headline: '맥의 승인을 기다리고 있습니다.',
         detail: `${MAC_WHERE} 아래 지문이 맥에 보이는 것과 같을 때만 「지시 기기로 승인」을 누르세요.`,
@@ -83,7 +110,7 @@ export function deviceKeyCopy(view: DeviceKeyView): DeviceKeyCopy {
       };
     case 'revoked':
       return {
-        badge: '폐기됨',
+        badge: '끊김',
         tone: 'danger',
         headline: '이 폰의 지시 권한이 끊겼습니다.',
         detail:
@@ -106,9 +133,9 @@ export function deviceKeyCopy(view: DeviceKeyView): DeviceKeyCopy {
   }
 }
 
-/** 키는 있는데 Face ID를 지금 못 쓸 때 덧붙이는 한 줄(키는 그대로다). */
+/** 끊긴 키인데 Face ID 도 지금 못 쓸 때 덧붙이는 한 줄(키는 그대로다). */
 export const BIOMETRY_OFF_NOTE =
-  'Face ID를 지금 쓸 수 없어 지시에 서명할 수 없습니다. iOS 설정에서 Face ID를 켜세요. 키는 그대로 있습니다.';
+  'Face ID도 지금 쓸 수 없습니다. 다시 등록한 뒤 지시하려면 iOS 설정에서 Face ID를 켜세요.';
 
 export const FINGERPRINT_LABEL = '지문';
 export const FINGERPRINT_HINT = '맥에 보이는 지문과 한 글자씩 같아야 합니다.';

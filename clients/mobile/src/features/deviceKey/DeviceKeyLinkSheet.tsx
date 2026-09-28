@@ -7,6 +7,7 @@ import {PageSheet, usePageSheetClose} from '../../design/PageSheet';
 import {useStyles} from '../../design/theme';
 import {
   font,
+  line,
   radius,
   SAFE_GUTTER,
   space,
@@ -20,7 +21,7 @@ import {
   qrKeyEnrollmentArmed,
 } from '../onboarding/phoneFlow';
 import {DEVICE_KEY_TITLE} from './copy';
-import {DeviceKeyPanel} from './DeviceKeyPanel';
+import {DeviceKeyPanel, hasDeviceKeyAction} from './DeviceKeyPanel';
 import {useDeviceKey, type DeviceKeyState} from './useDeviceKey';
 
 // =============================================================================
@@ -42,8 +43,9 @@ import {useDeviceKey, type DeviceKeyState} from './useDeviceKey';
 // 상관없이 쓴다 — 이 시트는 무엇도 막지 않는다.
 // =============================================================================
 
-export const LINK_SHEET_INTRO =
-  'QR 연결을 마쳤습니다. 이 폰으로 에이전트에게 지시하려면 맥에서 이 폰을 승인해야 합니다.';
+/** 고정 문장은 이것 하나다 — 나머지는 상태마다 판이 말한다(R1 M1: 「맥에서
+ *  승인해야 합니다」가 이미 승인된 폰·키를 못 만드는 폰에도 붙었다). */
+export const LINK_SHEET_INTRO = 'QR 연결을 마쳤습니다.';
 
 export function DeviceKeyLinkGate(): React.JSX.Element | null {
   const {workspaceId} = useSession();
@@ -128,13 +130,17 @@ export function LinkSheetBody({
           {LINK_SHEET_INTRO}
         </Sentence>
         <DeviceKeyPanel state={state} />
-        <View style={styles.done}>
-          <PrimaryButton
-            label="확인"
-            onPress={slideClose}
-            testID="device-key-link-done"
-          />
-        </View>
+        {/* 다음 행동이 있으면 판의 채움 버튼이 주인이다 — 닫기는 머리의 「닫기」
+            하나로 충분하다(R1 M2). 할 일이 없을 때만 「확인」이 선다. */}
+        {hasDeviceKeyAction(state) ? null : (
+          <View style={styles.done}>
+            <PrimaryButton
+              label="확인"
+              onPress={slideClose}
+              testID="device-key-link-done"
+            />
+          </View>
+        )}
       </ScrollView>
     </View>
   );
@@ -177,7 +183,7 @@ const buildStyles = (color: Palette) =>
     intro: {
       fontSize: font.body,
       color: color.text,
-      lineHeight: 22,
+      lineHeight: line.body,
       paddingHorizontal: SAFE_GUTTER + space.xs,
     },
     done: {paddingHorizontal: SAFE_GUTTER},

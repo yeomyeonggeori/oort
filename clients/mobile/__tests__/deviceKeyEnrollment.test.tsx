@@ -408,6 +408,14 @@ describe('sign-out', () => {
 
 // ---- the screens --------------------------------------------------------------
 
+/** The fingerprint as a person reads it: every group, in order. */
+function shownFingerprint(): string {
+  return screen
+    .getAllByTestId('device-key-fingerprint-group')
+    .map(node => node.props.children)
+    .join(' ');
+}
+
 function panelFor(view: DeviceKeyView, over: {failure?: string | null; busy?: boolean} = {}) {
   const state = {
     view,
@@ -430,6 +438,7 @@ describe('DeviceKeyPanel — each state on screen', () => {
     [{kind: 'unregistered', fingerprint: null}, null, ['enroll']],
     [{kind: 'pending', fingerprint: SHARED_FINGERPRINT, row: r, biometryOff: false}, SHARED_FINGERPRINT, []],
     [{kind: 'approved', fingerprint: SHARED_FINGERPRINT, row: r, biometryOff: false}, SHARED_FINGERPRINT, []],
+    [{kind: 'approved', fingerprint: SHARED_FINGERPRINT, row: r, biometryOff: true}, SHARED_FINGERPRINT, ['settings', 'recheck']],
     [{kind: 'revoked', fingerprint: SHARED_FINGERPRINT, row: r, biometryOff: false}, SHARED_FINGERPRINT, ['reenroll']],
     [{kind: 'serverError', fingerprint: SHARED_FINGERPRINT}, SHARED_FINGERPRINT, ['retry']],
   ];
@@ -442,7 +451,7 @@ describe('DeviceKeyPanel — each state on screen', () => {
       expect(screen.getByTestId('device-key-badge').props.children).toBe(copy.badge);
       expect(screen.getByTestId('device-key-headline').props.children).toBe(copy.headline);
       if (fingerprint) {
-        expect(screen.getByTestId('device-key-fingerprint').props.children).toBe(fingerprint);
+        expect(shownFingerprint()).toBe(fingerprint);
       } else {
         expect(screen.queryByTestId('device-key-fingerprint')).toBeNull();
       }
@@ -452,6 +461,26 @@ describe('DeviceKeyPanel — each state on screen', () => {
       expect(shown).toEqual(actions);
     },
   );
+
+  it('approved with Face ID off does not claim the phone can instruct (R1 H1)', () => {
+    panelFor({kind: 'approved', fingerprint: SHARED_FINGERPRINT, row: r, biometryOff: true});
+    expect(screen.getByTestId('device-key-badge').props.children).toBe('Face ID 필요');
+    expect(screen.getByTestId('device-key-headline').props.children).not.toBe(
+      '이 폰으로 에이전트에게 지시할 수 있습니다.',
+    );
+  });
+
+  it('shows every fingerprint group, one element each, so a line never breaks inside a group (R1 B1)', () => {
+    panelFor({kind: 'pending', fingerprint: SHARED_FINGERPRINT, row: r, biometryOff: false});
+    const groups = screen.getAllByTestId('device-key-fingerprint-group');
+    expect(groups.map(g => g.props.children)).toEqual(SHARED_FINGERPRINT.split(' '));
+    for (const g of groups) expect(g.props.numberOfLines).toBeUndefined();
+  });
+
+  it('says it is registering while it is, not that the phone is not an instruction device', () => {
+    panelFor({kind: 'unregistered', fingerprint: null}, {busy: true});
+    expect(screen.getByTestId('device-key-badge').props.children).toBe('등록 중');
+  });
 
   it('pending tells the person where on the Mac to approve', () => {
     panelFor({kind: 'pending', fingerprint: SHARED_FINGERPRINT, row: r, biometryOff: false});
@@ -492,15 +521,15 @@ function renderGate() {
 }
 
 describe('the QR link gate', () => {
-  it('after a QR link: makes the key, registers it, and shows 「승인 대기」 with the Mac fingerprint', async () => {
+  it('after a QR link: makes the key, registers it, and shows 「승인 전」 with the Mac fingerprint', async () => {
     noteConnectRoute('qr');
     renderGate();
     await waitFor(() => expect(posts()).toHaveLength(1));
     expect(posts()[0].body).toMatchObject({platform: 'ios', publicKey: KEY, label: LABEL()});
     await waitFor(() =>
-      expect(screen.getByTestId('device-key-badge').props.children).toBe('승인 대기'),
+      expect(screen.getByTestId('device-key-badge').props.children).toBe('승인 전'),
     );
-    expect(screen.getByTestId('device-key-fingerprint').props.children).toBe(
+    expect(shownFingerprint()).toBe(
       await webFingerprint(KEY),
     );
     expect(mockNative!.sign).not.toHaveBeenCalled();

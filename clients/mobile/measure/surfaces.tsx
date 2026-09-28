@@ -67,7 +67,6 @@ import {INITIAL_NAV} from '../src/nav/state';
 import {ProfileSheet} from '../src/features/profile/ProfileSheet';
 import {PageSheet} from '../src/design/PageSheet';
 import {LinkSheetBody} from '../src/features/deviceKey/DeviceKeyLinkSheet';
-import {DeviceKeyPanel} from '../src/features/deviceKey/DeviceKeyPanel';
 import {
   DEVICE_KEY_LOCAL_QUERY_KEY,
   DEVICE_KEYS_QUERY_KEY,
@@ -3549,15 +3548,27 @@ function DeviceKeySurface({which}: {which: string}): React.JSX.Element {
       </View>
     );
   }
-  if (which === 'profile-page') {
+  if (which === 'profile-page' || which === 'profile-page-faceid-off') {
+    // 실제 프로필 시트의 안쪽 장 — 머리의 「‹ 프로필」까지 배송되는 그대로.
+    harnessClient.setQueryData(DEVICE_KEY_LOCAL_QUERY_KEY, {
+      status: which === 'profile-page' ? 'ready' : 'biometryUnavailable',
+      publicKey: DK_KEY,
+    });
+    harnessClient.setQueryData(DEVICE_KEYS_QUERY_KEY(HARNESS_MEMBER.workspaceId), [
+      which === 'profile-page' ? DK_ROW : {...DK_ROW, state: 'endorsed', canInstruct: true},
+    ]);
     return (
       <View style={styles.fill}>
         <Shell />
-        <PageSheet onClose={() => {}} accessibilityLabel="지시 기기">
-          <View style={{paddingTop: space.xl}}>
-            <DeviceKeyPanel state={dkState('pending')} />
-          </View>
-        </PageSheet>
+        <ProfileSheet
+          workspaceId={HARNESS_MEMBER.workspaceId}
+          member={HARNESS_MEMBER}
+          directory={makeDirectory(SHELL_ROSTER)}
+          connected
+          onSignOut={() => {}}
+          onClose={() => {}}
+          initialPage="deviceKey"
+        />
       </View>
     );
   }

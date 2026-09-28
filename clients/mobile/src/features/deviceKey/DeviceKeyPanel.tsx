@@ -1,16 +1,30 @@
-import React from 'react';
-import {ActivityIndicator, Linking, StyleSheet, Text, View} from 'react-native';
+import React, {useEffect} from 'react';
+import {
+  AccessibilityInfo,
+  ActivityIndicator,
+  Linking,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
-import {GroupRow, GroupSection, Sentence} from '../../design/atoms';
+import {
+  GroupSection,
+  OutlineButton,
+  PrimaryButton,
+  Sentence,
+} from '../../design/atoms';
 import {usePalette, useStyles} from '../../design/theme';
 import {
   font,
+  line,
   radius,
   SAFE_GUTTER,
   space,
   type Palette,
 } from '../../design/tokens';
 import {fingerprintAccessibilityLabel} from '../../deviceKey/fingerprint';
+import type {DeviceKeyView} from '../../deviceKey/enrollment';
 import {
   ACTION,
   BIOMETRY_OFF_NOTE,
@@ -27,14 +41,59 @@ import type {DeviceKeyState} from './useDeviceKey';
 // 시트가 같은 판을 쓴다 — 두 자리가 다른 문장을 말하면 사람은 어느 쪽을 믿을지
 // 모른다.
 //
-// 지문은 맥 화면과 **한 글자씩 대조**하는 값이라 판에서 가장 크다. 맥의 승인 창도
-// 같은 네 자 묶음 다섯 개를 보인다(`deviceKeyFingerprint`, 공유 사례
-// `5BAF F89D E7DE 5C1D 7B61`). SAS 네 자리(`font.display`)처럼 두 화면 사이에서
-// 맞춰 보는 숫자다.
+// 지문은 맥 화면과 **한 글자씩 대조**하는 값이다. 맥의 승인 창도 같은 네 자 묶음
+// 다섯 개를 보인다(`deviceKeyFingerprint`, 공유 사례 `5BAF F89D E7DE 5C1D 7B61`).
+// 그래서 어떤 글자 크기에서도 **끝까지** 보여야 한다: 묶음마다 따로 서는 글자라
+// 줄은 묶음 사이에서만 바뀌고, 줄 수 제한이 없다(design-review R1 B1 — AX-L 에서
+// 마지막 묶음이 말줄임으로 사라졌다).
 //
-// 모르는 것은 말하지 않는다: 서버 목록을 못 읽었으면 「승인 대기」도 「승인됨」도
+// 다음 행동(등록·다시 등록·새 키·iOS 설정)이 있으면 그것이 판 아래의 **채움
+// 버튼**이다(R1 M2). 둘째 행동은 테두리 버튼이다.
+//
+// 모르는 것은 말하지 않는다: 서버 목록을 못 읽었으면 「승인 전」도 「승인됨」도
 // 그리지 않고 「불러오지 못했습니다」를 말한다.
 // =============================================================================
+
+interface Action {
+  key: string;
+  label: string;
+  onPress: () => void;
+  /** 누르면 등록이 돈다 — busy 동안 「등록 중」으로 선다. */
+  enrolls: boolean;
+}
+
+export function deviceKeyActions(view: DeviceKeyView, state: DeviceKeyState): Action[] {
+  const settings: Action = {
+    key: 'settings',
+    label: ACTION.openSettings,
+    onPress: () => void Linking.openSettings(),
+    enrolls: false,
+  };
+  const recheck: Action = {
+    key: 'recheck',
+    label: ACTION.recheck,
+    onPress: state.refresh,
+    enrolls: false,
+  };
+  switch (view.kind) {
+    case 'unregistered':
+      return [{key: 'enroll', label: ACTION.enroll, onPress: state.enroll, enrolls: true}];
+    case 'revoked':
+      return [{key: 'reenroll', label: ACTION.reenroll, onPress: state.enroll, enrolls: true}];
+    case 'invalidated':
+      return [{key: 'replace', label: ACTION.replace, onPress: state.replace, enrolls: true}];
+    case 'biometryOff':
+      return [settings, recheck];
+    case 'approved':
+    case 'pending':
+      return view.biometryOff ? [settings, recheck] : [];
+    case 'serverError':
+    case 'localError':
+      return [{key: 'retry', label: ACTION.retry, onPress: state.refresh, enrolls: false}];
+    default:
+      return [];
+  }
+}
 
 export function DeviceKeyPanel({
   state,
@@ -46,39 +105,21 @@ export function DeviceKeyPanel({
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const {view, busy, failure} = state;
-  const copy = deviceKeyCopy(view);
+  const copy = deviceKeyCopy(view, busy);
   const fingerprint =
     'fingerprint' in view && view.fingerprint ? view.fingerprint : null;
-  const biometryOff = 'biometryOff' in view && view.biometryOff;
+  const revokedFaceIdOff = view.kind === 'revoked' && view.biometryOff;
+  const actions = deviceKeyActions(view, state);
+  const [primary, ...rest] = actions;
 
-  const actions: {label: string; onPress: () => void; key: string}[] = [];
-  switch (view.kind) {
-    case 'unregistered':
-      actions.push({key: 'enroll', label: ACTION.enroll, onPress: state.enroll});
-      break;
-    case 'revoked':
-      actions.push({key: 'reenroll', label: ACTION.reenroll, onPress: state.enroll});
-      break;
-    case 'invalidated':
-      actions.push({key: 'replace', label: ACTION.replace, onPress: state.replace});
-      break;
-    case 'biometryOff':
-      actions.push(
-        {key: 'settings', label: ACTION.openSettings, onPress: () => void Linking.openSettings()},
-        {key: 'recheck', label: ACTION.recheck, onPress: state.refresh},
-      );
-      break;
-    case 'serverError':
-    case 'localError':
-      actions.push({key: 'retry', label: ACTION.retry, onPress: state.refresh});
-      break;
-    default:
-      break;
-  }
+  // iOS 에는 live region 이 없다 — 실패 문장은 직접 읽어 준다(R1 M5).
+  useEffect(() => {
+    if (failure) AccessibilityInfo.announceForAccessibility(failure);
+  }, [failure]);
 
   return (
     <View style={styles.root} testID={testID}>
-      <GroupSection label={DEVICE_KEY_TITLE}>
+      <GroupSection>
         <View
           accessible
           accessibilityLabel={`${DEVICE_KEY_TITLE}: ${copy.badge}. ${copy.headline} ${copy.detail}`}
@@ -87,7 +128,7 @@ export function DeviceKeyPanel({
         >
           <View style={styles.statusHead}>
             <View style={[styles.pill, pillTone(styles, copy.tone)]}>
-              {view.kind === 'loading' ? (
+              {view.kind === 'loading' || (busy && view.kind === 'unregistered') ? (
                 <ActivityIndicator
                   size="small"
                   color={palette.textMuted}
@@ -112,8 +153,8 @@ export function DeviceKeyPanel({
               {copy.detail}
             </Sentence>
           ) : null}
-          {biometryOff ? (
-            <Sentence style={styles.warnNote} testID="device-key-biometry-note">
+          {revokedFaceIdOff ? (
+            <Sentence style={styles.detail} testID="device-key-biometry-note">
               {BIOMETRY_OFF_NOTE}
             </Sentence>
           ) : null}
@@ -125,48 +166,57 @@ export function DeviceKeyPanel({
             accessible
             accessibilityLabel={`${FINGERPRINT_LABEL}, ${fingerprintAccessibilityLabel(fingerprint)}`}
             accessibilityHint={FINGERPRINT_HINT}
+            testID="device-key-fingerprint"
           >
             <Text style={styles.fingerprintLabel}>{FINGERPRINT_LABEL}</Text>
-            <Text
-              style={styles.fingerprintValue}
-              selectable
-              numberOfLines={2}
-              testID="device-key-fingerprint"
-            >
-              {fingerprint}
-            </Text>
+            <View style={styles.fingerprintGroups}>
+              {fingerprint.split(' ').map((group, index) => (
+                <Text
+                  key={index}
+                  style={styles.fingerprintGroup}
+                  testID="device-key-fingerprint-group"
+                >
+                  {group}
+                </Text>
+              ))}
+            </View>
           </View>
         ) : null}
-
-        {actions.map(action => (
-          <GroupRow
-            key={action.key}
-            title={busy && action.key !== 'settings' ? ACTION.busy : action.label}
-            tone="accent"
-            separated
-            disabled={busy}
-            onPress={action.onPress}
-            trailing={
-              busy && action.key !== 'settings' && action.key !== 'recheck' ? (
-                <ActivityIndicator size="small" color={palette.textMuted} />
-              ) : undefined
-            }
-            testID={`device-key-action-${action.key}`}
-          />
-        ))}
       </GroupSection>
 
+      {primary ? (
+        <View style={styles.actions}>
+          <PrimaryButton
+            label={primary.label}
+            busy={busy && primary.enrolls}
+            busyLabel={ACTION.busy}
+            disabled={busy}
+            onPress={primary.onPress}
+            testID={`device-key-action-${primary.key}`}
+          />
+          {rest.map(action => (
+            <OutlineButton
+              key={action.key}
+              label={action.label}
+              onPress={action.onPress}
+              testID={`device-key-action-${action.key}`}
+            />
+          ))}
+        </View>
+      ) : null}
+
       {failure ? (
-        <Sentence
-          style={styles.failure}
-          accessibilityLiveRegion="polite"
-          testID="device-key-failure"
-        >
+        <Sentence style={styles.failure} testID="device-key-failure">
           {failure}
         </Sentence>
       ) : null}
     </View>
   );
+}
+
+/** 행동이 있는가 — 링크 시트가 자기 「확인」을 채움으로 세울지 정한다. */
+export function hasDeviceKeyAction(state: DeviceKeyState): boolean {
+  return deviceKeyActions(state.view, state).length > 0;
 }
 
 type Styles = ReturnType<typeof buildStyles>;
@@ -210,12 +260,9 @@ function dotTone(styles: Styles, tone: DeviceKeyTone) {
   }
 }
 
-/** 지문 글자. 두 화면을 오가며 맞춰 보는 값이라 본문보다 한 단 크다. */
-const FINGERPRINT_FONT = font.heading + 2;
-
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    root: {gap: space.sm},
+    root: {gap: space.md},
     status: {
       paddingHorizontal: space.lg,
       paddingVertical: space.md,
@@ -246,8 +293,7 @@ const buildStyles = (color: Palette) =>
     labelDanger: {color: color.dangerText},
     labelMuted: {color: color.textMuted},
     headline: {fontSize: font.body, fontWeight: '600', color: color.text},
-    detail: {fontSize: font.label, color: color.textMuted, lineHeight: 18},
-    warnNote: {fontSize: font.label, color: color.text, lineHeight: 18},
+    detail: {fontSize: font.label, color: color.textMuted, lineHeight: line.label},
     fingerprint: {
       paddingHorizontal: space.lg,
       paddingVertical: space.md,
@@ -260,17 +306,23 @@ const buildStyles = (color: Palette) =>
       color: color.textMuted,
       fontWeight: '600',
     },
-    fingerprintValue: {
+    // 묶음 사이에서만 줄이 바뀐다. 간격은 한 글자 폭쯤(space.md).
+    fingerprintGroups: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      columnGap: space.md,
+    },
+    fingerprintGroup: {
       fontFamily: 'Menlo',
-      fontSize: FINGERPRINT_FONT,
+      fontSize: font.heading,
       fontWeight: '600',
       color: color.text,
-      letterSpacing: 1,
     },
+    actions: {paddingHorizontal: SAFE_GUTTER, gap: space.sm},
     failure: {
       fontSize: font.label,
-      color: color.dangerText,
-      lineHeight: 18,
+      color: color.danger,
+      lineHeight: line.label,
       paddingHorizontal: SAFE_GUTTER + space.xs,
     },
   });

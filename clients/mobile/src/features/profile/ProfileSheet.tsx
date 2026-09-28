@@ -136,12 +136,12 @@ import {useDeviceKey} from '../deviceKey/useDeviceKey';
 // ## 지시 기기 (#3026)
 //
 // 대신 **이 폰 자신**이 지시 기기인가는 여기서 보인다: 「연결」 묶음의 한 줄이
-// 상태(승인 대기·승인됨·폐기됨·무효…)를 말하고, 누르면 같은 시트 안의 한 장이
+// 상태(승인 전·승인됨·끊김·무효…)를 말하고, 누르면 같은 시트 안의 한 장이
 // 지문과 다음 행동을 보인다(`features/deviceKey/DeviceKeyPanel`). QR 연결 직후 한
 // 번 뜨는 시트와 같은 판이다. 승인은 맥이 한다 — 이 장은 맥의 어디를 열지 말한다.
 // =============================================================================
 
-type Page = 'profile' | 'theme' | 'status' | 'deviceKey';
+export type Page = 'profile' | 'theme' | 'status' | 'deviceKey';
 
 const PAGE_TITLE: Record<Page, string> = {
   profile: '내 프로필',
@@ -157,6 +157,7 @@ export function ProfileSheet({
   connected,
   onSignOut,
   onClose,
+  initialPage = 'profile',
 }: {
   workspaceId: string;
   member: Member;
@@ -165,6 +166,8 @@ export function ProfileSheet({
   connected: boolean;
   onSignOut: () => void;
   onClose: () => void;
+  /** 처음 열 장. 앱은 늘 `profile` 이고, 측정 하네스가 안쪽 장을 찍을 때 쓴다. */
+  initialPage?: Page;
 }): React.JSX.Element {
   // 셸의 페이지 시트(시안 `.a-sheet`: 위 58, 반경 30, `sheet` 바탕, 스크림, 손잡이)
   // 안에 선다 (ADR-0189 D1, DS2-2 #2714). 이 시트는 한때 iOS `pageSheet` 였다 —
@@ -179,6 +182,7 @@ export function ProfileSheet({
         connected={connected}
         onSignOut={onSignOut}
         onClose={onClose}
+        initialPage={initialPage}
       />
     </PageSheet>
   );
@@ -191,6 +195,7 @@ function SheetBody({
   connected,
   onSignOut,
   onClose,
+  initialPage,
 }: {
   workspaceId: string;
   member: Member;
@@ -198,12 +203,13 @@ function SheetBody({
   connected: boolean;
   onSignOut: () => void;
   onClose: () => void;
+  initialPage: Page;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
   // 「닫기」도 스크림·끌기와 같이 미끄러져 나간다.
   const slideClose = usePageSheetClose() ?? onClose;
-  const [page, setPage] = useState<Page>('profile');
+  const [page, setPage] = useState<Page>(initialPage);
   const scrollRef = useRef<ScrollView>(null);
   const revealEnd = useCallback(
     () => scrollRef.current?.scrollToEnd({animated: true}),
