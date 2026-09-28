@@ -43,6 +43,12 @@
 //! root pinned on this Mac and whose nonce it spends before anything runs. A
 //! server that inserts an unsigned or forged-key control is refused here.
 //! `kill` and rejections pass unsigned (D-8). With R2 off nothing changes.
+//!
+//! **What turns R2 on (#3117).** [`ControlLoop::with_signature_requirement`]:
+//! the owner's config, or the server's `humanControlSignatureRequired` from a
+//! poll answer, **latched** on disk once a root is pinned, before any control
+//! of that answer is applied. A later `false` does not lower it
+//! ([`crate::signature_requirement`]).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -54,6 +60,7 @@ use crate::client::{ClientError, ControlAck, HostApi, SessionStatus, WorkControl
 use crate::human_trust::{requires_signature, HumanTrust, RevocationSource};
 use crate::policy::Refusal;
 use crate::session::SessionManager;
+use crate::signature_requirement::SignatureRequirement;
 
 const STATUS_DISPATCHED: &str = "dispatched";
 
@@ -70,8 +77,10 @@ pub struct ControlLoop {
     sessions: SessionManager,
     owner_member_id: Uuid,
     verdicts: HashMap<Uuid, Verdict>,
-    /// R2 on: the host's trust state. `None` keeps the pre-R2 behavior.
+    /// The host's trust state. `None` keeps the pre-R2 behavior.
     human: Option<Arc<Mutex<HumanTrust>>>,
+    /// Whether signatures are required now (#3117). Read on every control.
+    requirement: Arc<Mutex<SignatureRequirement>>,
 }
 
 impl ControlLoop {
@@ -82,14 +91,60 @@ impl ControlLoop {
             owner_member_id,
             verdicts: HashMap::new(),
             human: None,
+            requirement: Arc::new(Mutex::new(SignatureRequirement::off())),
         }
     }
 
     /// Turn R2 on: spawns, inputs and allows must carry a device signature
     /// that chains to the root pinned in `trust` (ADR-0146 개정 D-10).
-    pub fn with_human_trust(mut self, trust: Arc<Mutex<HumanTrust>>) -> Self {
+    pub fn with_human_trust(self, trust: Arc<Mutex<HumanTrust>>) -> Self {
+        self.with_signature_requirement(trust, Arc::new(Mutex::new(SignatureRequirement::forced())))
+    }
+
+    /// The product path (#3117): R2 is on while `requirement` says so — the
+    /// owner's config, or the server's word latched with a root pinned in
+    /// `trust`. `momo-workd run` always builds the loop this way.
+    pub fn with_signature_requirement(
+        mut self,
+        trust: Arc<Mutex<HumanTrust>>,
+        requirement: Arc<Mutex<SignatureRequirement>>,
+    ) -> Self {
         self.human = Some(trust);
+        self.requirement = requirement;
         self
+    }
+
+    fn signatures_required(&self) -> bool {
+        self.requirement
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .required()
+    }
+
+    /// The server's word from the answer just read: latch it when it says
+    /// `true` and a root is pinned (#3117). Written before any control of the
+    /// same answer is applied. A latch that cannot be written leaves the host
+    /// as it was and is tried again on the next poll.
+    fn note_server_requirement(&self) {
+        let Some(server_required) = self.api.server_requires_human_signatures() else {
+            return;
+        };
+        let Some(trust) = &self.human else {
+            return;
+        };
+        let root_pinned = trust
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .root()
+            .is_some();
+        let noted = self
+            .requirement
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .note_server(server_required, root_pinned, now_ms());
+        if let Err(error) = noted {
+            tracing::error!(error = %error, "could not latch the signature requirement");
+        }
     }
 
     /// Apply the revocations the server relayed with the last poll. A bad one
@@ -101,6 +156,9 @@ impl ControlLoop {
         let Some(trust) = &self.human else {
             return;
         };
+        if !self.signatures_required() {
+            return;
+        }
         for revocation in relayed {
             // The server must name the revoked public key too: an endorsement
             // binds a key, a revocation names an id, and a key this host has
@@ -120,7 +178,7 @@ impl ControlLoop {
         let Some(trust) = &self.human else {
             return Ok(());
         };
-        if !requires_signature(control) {
+        if !self.signatures_required() || !requires_signature(control) {
             return Ok(());
         }
         trust
@@ -137,7 +195,9 @@ impl ControlLoop {
     /// is gone): the caller stops everything (ADR-0188 D7).
     pub async fn poll_once(&mut self) -> Result<usize, ClientError> {
         let controls = self.api.pending_controls().await?;
-        // Revocations first, so a control in the same answer meets them.
+        // The server's word on R2 first (#3117), then revocations, so a
+        // control in the same answer meets both.
+        self.note_server_requirement();
         self.apply_relayed_revocations();
         let host_id = self.api.host_id();
         let mut handled = 0;
@@ -358,8 +418,9 @@ pub struct SocketShared {
     pub stop: Arc<tokio::sync::Notify>,
     /// The R2 trust state `pin_root` and `revoke_device` write.
     pub trust: Arc<Mutex<HumanTrust>>,
-    /// Reported by `status`: whether this host enforces device signatures.
-    pub human_signatures_required: bool,
+    /// Reported by `status`, and lowered by `reset_signature_requirement`
+    /// (#3117): whether this host enforces device signatures, and why.
+    pub requirement: Arc<Mutex<SignatureRequirement>>,
 }
 
 /// The heartbeat's last outcome, which the desktop app reads through the
