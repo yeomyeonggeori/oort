@@ -450,10 +450,17 @@ export interface RealtimeTokenResponse {
 
 export class ApiError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  /**
+   * `error.code` of the envelope when the server named the refusal (openapi
+   * `ErrorResponse`: the message may be reworded, the code is not). Absent for
+   * every error older than ADR-0188 R0 and for bodies without one.
+   */
+  readonly code: string | undefined;
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -696,9 +703,10 @@ function rawRequest(
 }
 
 function parseError(res: HttpResponse): ApiError {
-  const body = res.jsonOrNull<{ error?: { message?: string } }>();
+  const body = res.jsonOrNull<{ error?: { message?: string; code?: unknown } }>();
   const message = body?.error?.message ?? `HTTP ${res.status}`;
-  return new ApiError(res.status, message);
+  const code = body?.error?.code;
+  return new ApiError(res.status, message, typeof code === "string" && code !== "" ? code : undefined);
 }
 
 // ---- refresh rotation (single flight) ---------------------------------------
@@ -2991,6 +2999,64 @@ export async function setWorkSessionObservation(
     { method: "PATCH", body: JSON.stringify({ observation }) }
   );
   return res.workSession;
+}
+
+// ---- Permission decision (ADR-0188 D5 §8.6, #3000 / #3013) ------------------
+// POST /v1/workspaces/{ws}/work-sessions/{session}/permission-decisions
+//
+// Golden contract: docs/api/work-permission-decision.golden.json. The body is
+// exactly `requestEventId`·`optionId`·`kind`. `instruction` is NOT sent: the
+// route refuses a non-empty one with 400 `permission_instruction_unsupported`
+// until R2 (owner input needs the device-key signature). Only the session owner
+// (= host owner) may decide; the first decision wins (same again → 200 with the
+// same row, a different one → 409 `permission_already_decided`), and a lapsed,
+// cancelled or withdrawn request answers 409 `permission_request_closed`.
+
+export type WorkPermissionKind = "allow_once" | "reject_once";
+
+export interface WorkPermissionDecisionBody {
+  requestEventId: string;
+  optionId: string;
+  kind: WorkPermissionKind;
+}
+
+export interface WorkPermissionRequest {
+  id: string;
+  sessionId: string;
+  requestEventId: string;
+  status: "pending" | "approved" | "rejected" | "expired" | "cancelled";
+  decidedOptionId?: string;
+  decidedKind?: WorkPermissionKind;
+  expiresAtMs?: number;
+}
+
+/**
+ * The wire body, built key by key. Nothing else the caller carries (a draft
+ * instruction, the session id, a stray field) can ride along: the session goes
+ * in the path, and the three keys are the whole body.
+ */
+export function workPermissionDecisionBody(
+  decision: WorkPermissionDecisionBody
+): WorkPermissionDecisionBody {
+  return {
+    requestEventId: decision.requestEventId,
+    optionId: decision.optionId,
+    kind: decision.kind,
+  };
+}
+
+export async function decideWorkPermission(
+  workspaceId: string,
+  sessionId: string,
+  decision: WorkPermissionDecisionBody
+): Promise<WorkPermissionRequest> {
+  const res = await request<{ permissionRequest: WorkPermissionRequest }>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/work-sessions/${encodeURIComponent(sessionId)}/permission-decisions`,
+    { method: "POST", body: JSON.stringify(workPermissionDecisionBody(decision)) }
+  );
+  return res.permissionRequest;
 }
 
 // ---- Terminal attach capability (ADR-0126 D1 / ADR-0125 D10) ----------------

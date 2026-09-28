@@ -396,6 +396,27 @@ components:
           type: integer
           format: int64
           description: Length of the model list; absent when the list is paginated.
+        modelIds:
+          type: array
+          maxItems: 100
+          description: >-
+            #3009 (ADR-0147 증보 2026-09-28). The model ids the provider's own
+            `/models` list named (`data[].id`), in list order. Only string ids
+            that pass the server's sanitizer (1-64 characters of
+            `[A-Za-z0-9._:/@+-]`, starting with a letter or digit) are kept;
+            duplicates collapse; any id carrying an 8-byte piece of the
+            presented key is dropped. Absent for OpenRouter's `/key` check (no
+            key-scoped list) and when no documented body was read. The only
+            provider text this object carries.
+          items:
+            type: string
+            pattern: "^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,63}$"
+        modelIdsTruncated:
+          type: boolean
+          description: >-
+            Present (true) when the provider named more ids than `modelIds`
+            holds: the list is paginated (`has_more`) or passed the cap of 100.
+            Ids dropped by the sanitizer do not count.
         rateLimit:
           $ref: "#/components/schemas/ProviderRateLimit"
         retryAfterSeconds:

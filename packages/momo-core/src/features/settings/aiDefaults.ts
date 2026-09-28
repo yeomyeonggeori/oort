@@ -1,5 +1,7 @@
+import { attachParticle } from "../../lib/koreanParticle";
 import type { LocalHarnessAuth, LocalHarnessId } from "../hostedAgents/detect";
 import { LOCAL_HARNESS_IDS } from "../hostedAgents/detect";
+import { HARNESS_LABEL } from "../onboarding/aiConnect";
 import { ACCOUNT_LABEL } from "./harnessProfiles";
 
 // =============================================================================
@@ -344,7 +346,9 @@ export const AI_DEFAULT_FALLBACK: Record<AiDefaultRowId, string> = {
 /** 개인 행의 「고르지 않음」 선택지 글자. */
 export const AI_DEFAULT_UNSET_LABEL: Record<PersonalRowId, string> = {
   appCommand: "팀 API 키",
-  localTerminal: "마지막에 쓴 계정",
+  // 고르지 않으면 새 세션은 CLI가 제 기본 위치(이 맥의 기본 로그인)로 뜬다(#3010).
+  // 「마지막에 쓴 계정」을 기억하는 곳은 없다.
+  localTerminal: "이 맥 기본 로그인",
   remoteWork: "매번 묻기",
 };
 
@@ -435,7 +439,13 @@ export function resolveRow(
           sentence: `「${name}」 계정이 로그인 필요라 ${where}. 다시 로그인하면 돌아와요.`,
         };
       }
-      return { state: "ok", using: name, note: null };
+      // 로컬 터미널은 이 선택을 실제로 읽는다(#3010, `localTerminalLaunch`). 원격 작업은
+      // 아직 읽는 곳이 없다: 표 밑 한 줄(`AI_DEFAULTS_NOT_APPLIED`)이 그것을 말한다.
+      const note =
+        rowId === "localTerminal"
+          ? `새 세션에서 ${attachParticle(HARNESS_LABEL[saved.harness], "object")} 열면 이 계정으로 떠요`
+          : null;
+      return { state: "ok", using: name, note };
     }
     case "teamAgent": {
       const unknown = teamKeyUnknown(teamKey);
@@ -507,11 +517,13 @@ export function unlinkImpactLead(impact: readonly AiDefaultImpact[]): string | n
 }
 
 /**
- * 개인 줄의 선택을 읽어 쓰는 곳(로컬 터미널 새 세션·원격 작업·⌘K 앱 명령)은 아직
- * 없다(#2881 이탈표: AA-9 등 후속). 표가 이미 적용되는 것처럼 말하지 않게 한 줄로 적는다.
+ * 개인 줄 가운데 로컬 터미널 새 세션은 선택을 읽는다(#3010). 원격 작업은 아직 읽는 곳이
+ * 없다: 폰에서 시작한 작업은 이 맥의 `momo-workd`가 띄우고, 그 프로세스에 프로필 폴더를
+ * 넘기는 일은 ADR-0191 D1 조건 8(환경 허용목록·red proof)을 지는 엔진 쪽 후속이다. 표가
+ * 이미 적용되는 것처럼 말하지 않게 한 줄로 적는다.
  */
 export const AI_DEFAULTS_NOT_APPLIED =
-  "내 설정은 이 기기에만 저장돼요. 터미널 새 세션과 원격 작업이 이 선택을 따르는 것은 준비 중이에요.";
+  "내 설정은 이 기기에만 저장돼요. 원격 작업이 이 선택을 따르는 것은 준비 중이에요.";
 
 export function impactLine(item: AiDefaultImpact): string {
   return `${item.title}: ${item.fallback}`;
@@ -525,4 +537,33 @@ export function forgetAccount(
   let next = prefs;
   for (const item of rowsUsingAccount(prefs, account)) next = withChoice(next, item.rowId, null);
   return next;
+}
+
+// ---- 로컬 터미널 새 세션이 저장된 선택을 읽는다(#3010) -----------------------------
+
+/**
+ * 새 세션 메뉴에서 하네스 하나를 골랐을 때 무엇을 띄우는가.
+ * - `harness`: 그 하네스를 띄운다. `profile`이 있으면 그 oort 프로필 폴더로, `null`이면
+ *   CLI 기본 위치(이 맥의 기본 로그인)로. `account`는 저장된 계정 이름(없으면 null).
+ * - `shell`: 저장된 계정을 지금 쓸 수 없다(목록에서 사라짐·로그인 필요). 조용히 다른
+ *   계정으로 넘어가지 않고, 표와 **같은 문장**(`resolveRow`)을 보이며 셸을 띄운다.
+ */
+export type LocalTerminalLaunch =
+  | { kind: "harness"; harness: LocalHarnessId; profile: string | null; account: string | null }
+  | { kind: "shell"; sentence: string };
+
+export function localTerminalLaunch(
+  harness: LocalHarnessId,
+  prefs: AiDefaultsPrefs,
+  input: Omit<AiDefaultsInput, "browserTab">
+): LocalTerminalLaunch {
+  const saved = prefs.localTerminal;
+  // 다른 하네스의 계정을 골라 두었으면 이 하네스는 기본 위치로 뜬다. 다른 CLI의 계정을
+  // 이 CLI에 넘기지 않는다.
+  if (!saved || saved.kind !== "profile" || saved.harness !== harness) {
+    return { kind: "harness", harness, profile: null, account: null };
+  }
+  const resolved = resolveRow("localTerminal", prefs, { ...input, browserTab: false });
+  if (resolved.state !== "ok") return { kind: "shell", sentence: resolved.sentence };
+  return { kind: "harness", harness, profile: saved.label, account: resolved.using };
 }

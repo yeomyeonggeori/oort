@@ -125,6 +125,12 @@ fn ensure_schema_and_roles() {
 /// listed-instance-operator path MOMO-583 defines; the fixture never mints a
 /// `platform:read` token, so this is the path under test.
 async fn start_server(pool: PgPool, operator_email: &str) -> String {
+    start_server_for(pool, &[operator_email]).await
+}
+
+/// [`start_server`] with several listed instance operators (#3040: two
+/// operators of one instance, each in their own workspace).
+async fn start_server_for(pool: PgPool, operator_emails: &[&str]) -> String {
     let state = AppState::new(
         pool,
         TEST_JWT_SECRET.to_string(),
@@ -136,7 +142,10 @@ async fn start_server(pool: PgPool, operator_email: &str) -> String {
             allow_local_loopback: true,
             ..Default::default()
         },
-        platform_admin_emails: vec![operator_email.to_ascii_lowercase()],
+        platform_admin_emails: operator_emails
+            .iter()
+            .map(|email| email.to_ascii_lowercase())
+            .collect(),
         environment: "local".to_string(),
     })
     // The operator opt-in (flag on): physical loopback is admitted, so the
@@ -310,6 +319,24 @@ async fn provider_mock() -> (u16, Arc<AtomicUsize>) {
                         .into_response()
                 }
             }),
+        )
+        // #3009: a list that tries to leak the presented key through its ids.
+        .route(
+            "/echo-ids/v1/models",
+            get(move |headers: HeaderMap| async move {
+                let key = headers
+                    .get("authorization")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.strip_prefix("Bearer "))
+                    .unwrap_or("")
+                    .to_string();
+                let (head, tail) = key.split_at(key.len() / 2);
+                axum::Json(json!({"data": [
+                    {"id": key.clone()}, {"id": head}, {"id": tail},
+                    {"id": format!("m-{key}")}, {"id": "gpt-real"}, {"id": "bad id"},
+                ]}))
+                .into_response()
+            }),
         );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -378,6 +405,9 @@ async fn the_connection_check_dials_the_provider() {
     assert_eq!(entry["probe"]["method"], "models");
     assert_eq!(entry["probe"]["httpStatus"], json!(200));
     assert_eq!(entry["probe"]["modelCount"], json!(3));
+    // #3009: the ids the list named, sanitized, and no truncation flag.
+    assert_eq!(entry["probe"]["modelIds"], json!(["a", "b", "c"]));
+    assert_eq!(entry["probe"].get("modelIdsTruncated"), None);
     assert_eq!(entry["probe"]["rateLimit"]["source"], "x-ratelimit");
     assert_eq!(entry["probe"]["rateLimit"]["requestsLimit"], json!(5000));
     assert_eq!(
@@ -405,6 +435,7 @@ async fn the_connection_check_dials_the_provider() {
     put(json!({"baseUrl": format!("http://127.0.0.1:{port}/openai/v1"), "bearer": BAD})).await;
     let refused = check_json().await;
     assert_eq!(refused["ok"], json!(false));
+    assert_eq!(refused["entries"][0]["probe"].get("modelIds"), None);
     assert_eq!(refused["reason"], "provider_auth_failed", "{refused}");
     assert_eq!(refused["entries"][0]["probe"]["outcome"], "rejected");
     assert_eq!(refused["entries"][0]["probe"]["httpStatus"], json!(401));
@@ -421,6 +452,10 @@ async fn the_connection_check_dials_the_provider() {
     let anthropic = check_json().await;
     assert_eq!(anthropic["ok"], json!(true), "{anthropic}");
     assert_eq!(anthropic["entries"][0]["probe"]["modelCount"], json!(2));
+    assert_eq!(
+        anthropic["entries"][0]["probe"]["modelIds"],
+        json!(["claude-a", "claude-b"])
+    );
     assert_eq!(
         anthropic["entries"][0]["probe"]["rateLimit"]["source"],
         "anthropic-ratelimit"
@@ -456,4 +491,518 @@ async fn the_connection_check_dials_the_provider() {
         3,
         "a refused check dials nothing"
     );
+}
+
+// ---------------------------------------------------------------------------
+// #3009 — model ids in the check, and the 「기본 AI」 operator rows
+// ---------------------------------------------------------------------------
+
+async fn reset_provider_tables(su: &PgPool) {
+    for table in [
+        "provider_default_ai",
+        "provider_link_chain",
+        "provider_link",
+    ] {
+        sqlx::query(&format!("DELETE FROM {table}"))
+            .execute(su)
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_connection_check_names_model_ids_but_never_the_key() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su, "probe-ids").await;
+    let base = start_server(momo_app_pool().await, &fixture.email).await;
+    let http = reqwest::Client::new();
+    reset_provider_tables(&su).await;
+    let token = login(&http, &base, &fixture).await;
+    let (port, _) = provider_mock().await;
+
+    let saved = http
+        .put(format!("{base}/v1/provider/link"))
+        .bearer_auth(&token)
+        .json(&json!({"baseUrl": format!("http://127.0.0.1:{port}/echo-ids/v1"), "bearer": GOOD}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(saved.status(), 200);
+    let response = http
+        .post(format!("{base}/v1/provider/link/test"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let text = response.text().await.unwrap();
+    let (head, tail) = GOOD.split_at(GOOD.len() / 2);
+    for piece in [GOOD, head, tail] {
+        assert!(
+            !text.contains(piece),
+            "a piece of the key reached the response: {text}"
+        );
+    }
+    let probe: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(probe["ok"], json!(true), "{probe}");
+    assert_eq!(
+        probe["entries"][0]["probe"]["modelIds"],
+        json!(["gpt-real"]),
+        "only the real, well-formed id survives"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_default_ai_rows_are_operator_only_and_never_a_personal_credential() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let operator = seed(&su, "default-ai-op").await;
+    // An owner of their own workspace, verified, but not a listed operator.
+    let stranger = seed(&su, "default-ai-owner").await;
+    let base = start_server(app_pool.clone(), &operator.email).await;
+    let http = reqwest::Client::new();
+    reset_provider_tables(&su).await;
+    let op = login(&http, &base, &operator).await;
+    let other = login(&http, &base, &stranger).await;
+    let url = format!("{base}/v1/provider/default-ai");
+
+    let put = |token: &str, body: Value| {
+        let request = http.put(&url).bearer_auth(token).json(&body);
+        async move {
+            let response = request.send().await.unwrap();
+            let status = response.status().as_u16();
+            let text = response.text().await.unwrap();
+            (
+                status,
+                serde_json::from_str::<Value>(&text).unwrap_or(json!(text)),
+            )
+        }
+    };
+    let get = |token: &str| {
+        let request = http.get(&url).bearer_auth(token);
+        async move {
+            let response = request.send().await.unwrap();
+            let status = response.status().as_u16();
+            (
+                status,
+                response.json::<Value>().await.unwrap_or(Value::Null),
+            )
+        }
+    };
+
+    // -- 1. not an operator: both verbs are 403, and nothing is written -------
+    assert_eq!(get(&other).await.0, 403);
+    let body = json!({"teamAgent": {"source": "team_link", "linkPosition": 0}});
+    assert_eq!(put(&other, body).await.0, 403);
+
+    // -- 2. operator, nothing chosen: both rows null, guardrail off ------------
+    let (status, empty) = get(&op).await;
+    assert_eq!(status, 200, "{empty}");
+    assert_eq!(empty["schema"], "momo.provider.default_ai.v0");
+    assert_eq!(empty["teamAgent"], Value::Null);
+    assert_eq!(empty["summary"], Value::Null);
+    assert_eq!(
+        empty["guardrail"],
+        json!({"mode": "off", "available": false})
+    );
+
+    // A link and one chain hop to point at.
+    let link = http
+        .put(format!("{base}/v1/provider/link"))
+        .bearer_auth(&op)
+        .json(&json!({"baseUrl": "http://127.0.0.1:9/openai/v1", "bearer": GOOD}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(link.status(), 200);
+    let chain = |host: &'static str| {
+        let request = http
+            .put(format!("{base}/v1/provider/link/chain"))
+            .bearer_auth(&op)
+            .json(&json!({"entries": [{"position": 1, "baseUrl": host, "bearer": GOOD}]}));
+        async move { assert_eq!(request.send().await.unwrap().status(), 200) }
+    };
+    chain("http://127.0.0.1:10/first/v1").await;
+
+    // -- 3. a personal credential is refused, by the route and by the table ---
+    for source in ["profile", "subscription", "personal"] {
+        let (status, error) = put(
+            &op,
+            json!({"teamAgent": {"source": source, "linkPosition": 0}}),
+        )
+        .await;
+        assert_eq!(status, 400, "{source}: {error}");
+    }
+    let (status, _) = put(
+        &op,
+        json!({"teamAgent": {"source": "team_link", "linkPosition": 0,
+                             "profileDir": "/Users/me/.oort/profiles/work"}}),
+    )
+    .await;
+    assert!(
+        (400..500).contains(&status),
+        "an extra field rode along: {status}"
+    );
+    let refused = sqlx::query(
+        "INSERT INTO provider_default_ai (role, credential_source, link_position, link_endpoint_label) \
+         VALUES ('team_agent', 'profile', 0, 'x')",
+    )
+    .execute(&su)
+    .await
+    .expect_err("the table refuses a personal source");
+    assert!(
+        refused
+            .to_string()
+            .contains("provider_default_ai_source_ck"),
+        "{refused}"
+    );
+    let refused = sqlx::query(
+        "INSERT INTO provider_default_ai (role, link_position, link_endpoint_label, model_id) \
+         VALUES ('summary', 0, 'x', 'bad id')",
+    )
+    .execute(&su)
+    .await
+    .expect_err("the table refuses a malformed model id");
+    assert!(
+        refused.to_string().contains("provider_default_ai_model_ck"),
+        "{refused}"
+    );
+
+    // Unconfigured position, bad model id, guardrail on: all 400.
+    for body in [
+        json!({"summary": {"source": "team_link", "linkPosition": 7}}),
+        json!({"summary": {"source": "team_link", "linkPosition": 0, "modelId": "gpt 5"}}),
+        json!({"guardrail": {"mode": "observe"}}),
+    ] {
+        assert_eq!(put(&op, body.clone()).await.0, 400, "{body}");
+    }
+    assert_eq!(
+        get(&op).await.1["teamAgent"],
+        Value::Null,
+        "a refused body wrote nothing"
+    );
+
+    // -- 4. set both rows, then patch one: the other is kept -------------------
+    let (status, saved) = put(
+        &op,
+        json!({
+            "teamAgent": {"source": "team_link", "linkPosition": 0, "modelId": "gpt-5.4-codex"},
+            "summary": {"source": "team_link", "linkPosition": 1},
+            "guardrail": {"mode": "off"},
+        }),
+    )
+    .await;
+    assert_eq!(status, 200, "{saved}");
+    assert_eq!(saved["teamAgent"]["source"], "team_link");
+    assert_eq!(saved["teamAgent"]["linkPosition"], json!(0));
+    assert_eq!(
+        saved["teamAgent"]["endpointLabel"],
+        "http://127.0.0.1:9/openai/v1"
+    );
+    assert_eq!(saved["teamAgent"]["linkResolved"], json!(true));
+    assert_eq!(saved["teamAgent"]["modelId"], "gpt-5.4-codex");
+    assert_eq!(saved["summary"]["linkPosition"], json!(1));
+    assert_eq!(saved["summary"]["modelId"], Value::Null);
+    assert!(!saved.to_string().contains(GOOD), "{saved}");
+
+    let (_, patched) = put(&op, json!({"teamAgent": null})).await;
+    assert_eq!(patched["teamAgent"], Value::Null);
+    assert_eq!(
+        patched["summary"]["linkPosition"],
+        json!(1),
+        "the summary row was kept"
+    );
+
+    // -- 5. the chain moves under a saved row: reported, not followed ----------
+    chain("http://127.0.0.1:11/second/v1").await;
+    let (_, drifted) = get(&op).await;
+    assert_eq!(
+        drifted["summary"]["linkResolved"],
+        json!(false),
+        "{drifted}"
+    );
+    assert_eq!(
+        drifted["summary"]["endpointLabel"],
+        "http://127.0.0.1:10/first/v1"
+    );
+
+    // -- 6. audit: one row per change, carrying no key -------------------------
+    let audits: Vec<Value> = sqlx::query(
+        "SELECT detail FROM audit_log WHERE action = 'provider_default_ai.updated' \
+            AND workspace_id = $1 ORDER BY created_at",
+    )
+    .bind(operator.workspace)
+    .fetch_all(&su)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|row| row.get::<Value, _>(0))
+    .collect();
+    assert_eq!(audits.len(), 3, "{audits:?}");
+    assert!(
+        audits.iter().all(|a| !a.to_string().contains(GOOD)),
+        "{audits:?}"
+    );
+    assert_eq!(audits[2]["cleared"], json!(true), "{audits:?}");
+
+    // -- 7. RLS: an ordinary momo_app transaction sees no row ------------------
+    let rows_as_superuser: i64 = sqlx::query("SELECT count(*)::bigint FROM provider_default_ai")
+        .fetch_one(&su)
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(rows_as_superuser, 1);
+    let mut tx = app_pool.begin().await.unwrap();
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(operator.workspace.to_string())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let seen: i64 = sqlx::query("SELECT count(*)::bigint FROM provider_default_ai")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(seen, 0, "a tenant transaction reached the operator rows");
+    let wrote = sqlx::query(
+        "INSERT INTO provider_default_ai (role, link_position, link_endpoint_label) \
+         VALUES ('team_agent', 0, 'x')",
+    )
+    .execute(&mut *tx)
+    .await;
+    assert!(wrote.is_err(), "a tenant transaction wrote an operator row");
+}
+
+// ---------------------------------------------------------------------------
+// #3040 — a kept chain key never follows its hop to a new origin
+// ---------------------------------------------------------------------------
+
+const KEY_A: &str = "sk-3040-operator-a-key-0001";
+const KEY_A2: &str = "sk-3040-operator-a-key-0002";
+const KEY_B: &str = "sk-3040-operator-b-own-key-9";
+
+/// A provider mock that answers every GET `…/models` with a valid list and
+/// records `(path, presented bearer)` for each hit. Two of them on two ports
+/// are two origins.
+async fn recording_mock() -> (u16, Arc<Mutex<Vec<(String, String)>>>) {
+    use axum::http::{HeaderMap, Uri};
+    let seen: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
+    let log = seen.clone();
+    let app = axum::Router::new().fallback(move |uri: Uri, headers: HeaderMap| {
+        let log = log.clone();
+        async move {
+            let key = headers
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("Bearer "))
+                .unwrap_or("")
+                .to_string();
+            log.lock().unwrap().push((uri.path().to_string(), key));
+            axum::Json(json!({"object": "list", "data": [{"id": "m-1"}]}))
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (port, seen)
+}
+
+fn keys_seen(seen: &Arc<Mutex<Vec<(String, String)>>>) -> Vec<String> {
+    seen.lock()
+        .unwrap()
+        .iter()
+        .map(|(_, key)| key.clone())
+        .collect()
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_kept_chain_key_is_never_sent_to_a_new_origin() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let operator_a = seed(&su, "3040-op-a").await;
+    let operator_b = seed(&su, "3040-op-b").await;
+    let base = start_server_for(
+        momo_app_pool().await,
+        &[operator_a.email.as_str(), operator_b.email.as_str()],
+    )
+    .await;
+    let http = reqwest::Client::new();
+    reset_provider_tables(&su).await;
+    let a = login(&http, &base, &operator_a).await;
+    let b = login(&http, &base, &operator_b).await;
+    let (port_a, seen_a) = recording_mock().await;
+    let (port_b, seen_b) = recording_mock().await;
+    let host_a = |path: &str| format!("http://127.0.0.1:{port_a}{path}");
+    let host_b = |path: &str| format!("http://127.0.0.1:{port_b}{path}");
+
+    let put_chain = |token: &str, entries: Value| {
+        let request = http
+            .put(format!("{base}/v1/provider/link/chain"))
+            .bearer_auth(token)
+            .json(&json!({ "entries": entries }));
+        async move {
+            let response = request.send().await.unwrap();
+            let status = response.status().as_u16();
+            let text = response.text().await.unwrap();
+            (status, text)
+        }
+    };
+    let check = |token: &str| {
+        let request = http
+            .post(format!("{base}/v1/provider/link/test"))
+            .bearer_auth(token);
+        async move {
+            let response = request.send().await.unwrap();
+            assert_eq!(response.status(), 200);
+            response.json::<Value>().await.unwrap()
+        }
+    };
+    let chain = |token: &str| {
+        let request = http
+            .get(format!("{base}/v1/provider/link/chain"))
+            .bearer_auth(token);
+        async move { request.send().await.unwrap().json::<Value>().await.unwrap() }
+    };
+
+    // -- 0. the head cannot move without a key either (no kept-key path) -----
+    let head = http
+        .put(format!("{base}/v1/provider/link"))
+        .bearer_auth(&b)
+        .json(&json!({"baseUrl": host_b("/v1")}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(head.status(), 400, "the head always takes a fresh key");
+
+    // -- 1. operator A stores two hops, each with its own key ----------------
+    let (status, text) = put_chain(
+        &a,
+        json!([
+            {"position": 1, "baseUrl": host_a("/v1"), "bearer": KEY_A},
+            {"position": 2, "baseUrl": host_b("/v1"), "bearer": KEY_A2},
+        ]),
+    )
+    .await;
+    assert_eq!(status, 200, "{text}");
+    check(&a).await;
+    assert_eq!(keys_seen(&seen_a), vec![KEY_A.to_string()]);
+    assert_eq!(keys_seen(&seen_b), vec![KEY_A2.to_string()]);
+    seen_a.lock().unwrap().clear();
+    seen_b.lock().unwrap().clear();
+
+    // -- 2. operator B points A's hop at B's host, no key, and checks --------
+    let (hijack_status, hijack_text) = put_chain(
+        &b,
+        json!([
+            {"position": 1, "baseUrl": host_b("/steal/v1")},
+            {"position": 2, "baseUrl": host_b("/v1")},
+        ]),
+    )
+    .await;
+    check(&b).await;
+    assert!(
+        !keys_seen(&seen_b).contains(&KEY_A.to_string()),
+        "operator A's key reached operator B's host: {:?}",
+        seen_b.lock().unwrap()
+    );
+    assert_eq!(hijack_status, 409, "{hijack_text}");
+    let error: Value = serde_json::from_str(&hijack_text).unwrap();
+    assert_eq!(error["error"]["code"], "key_required_for_new_origin");
+    assert!(!hijack_text.contains(KEY_A) && !hijack_text.contains(KEY_A2));
+    let kept = chain(&a).await;
+    assert_eq!(
+        kept["entries"][1]["endpointLabel"],
+        json!(host_a("/v1")),
+        "a refused PUT wrote nothing: {kept}"
+    );
+
+    // -- 3. the reorder variant: swap the two hops' URLs, no keys ------------
+    seen_a.lock().unwrap().clear();
+    seen_b.lock().unwrap().clear();
+    let (status, text) = put_chain(
+        &b,
+        json!([
+            {"position": 1, "baseUrl": host_b("/v1")},
+            {"position": 2, "baseUrl": host_a("/v1")},
+        ]),
+    )
+    .await;
+    assert_eq!(status, 409, "{text}");
+    check(&a).await;
+    assert!(!keys_seen(&seen_b).contains(&KEY_A.to_string()));
+    assert!(!keys_seen(&seen_a).contains(&KEY_A2.to_string()));
+
+    // -- 4. same origin, new path, parked: the key is kept -------------------
+    seen_a.lock().unwrap().clear();
+    let (status, text) = put_chain(
+        &b,
+        json!([
+            {"position": 1, "baseUrl": host_a("/v2")},
+            {"position": 2, "baseUrl": host_b("/v1"), "enabled": false},
+        ]),
+    )
+    .await;
+    assert_eq!(status, 200, "same-origin path change keeps the key: {text}");
+    check(&b).await;
+    assert_eq!(
+        seen_a.lock().unwrap().clone(),
+        vec![("/v2/models".to_string(), KEY_A.to_string())],
+        "the kept key went to the same origin's new path"
+    );
+
+    // -- 5. moving origin WITH a fresh key is fine, and audited --------------
+    seen_b.lock().unwrap().clear();
+    let (status, text) = put_chain(
+        &b,
+        json!([
+            {"position": 1, "baseUrl": host_b("/mine/v1"), "bearer": KEY_B},
+            {"position": 2, "baseUrl": host_b("/v1"), "enabled": false},
+        ]),
+    )
+    .await;
+    assert_eq!(status, 200, "{text}");
+    check(&b).await;
+    assert_eq!(keys_seen(&seen_b), vec![KEY_B.to_string()]);
+
+    let audits: Vec<Value> = sqlx::query(
+        "SELECT detail FROM audit_log WHERE action = 'provider_link_chain.updated' \
+            AND workspace_id = $1 ORDER BY created_at",
+    )
+    .bind(operator_b.workspace)
+    .fetch_all(&su)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|row| row.get::<Value, _>(0))
+    .collect();
+    assert_eq!(
+        audits.len(),
+        2,
+        "refused PUTs write no audit row: {audits:?}"
+    );
+    assert_eq!(audits[0]["origin_changed"], json!([]), "{audits:?}");
+    assert_eq!(
+        audits[1]["origin_changed"],
+        json!([{"position": 1, "from": host_a("/v2"), "to": host_b("/mine/v1")}]),
+        "{audits:?}"
+    );
+    let leaked: i64 = sqlx::query(
+        "SELECT count(*)::bigint FROM audit_log \
+          WHERE detail::text LIKE $1 OR detail::text LIKE $2 OR detail::text LIKE $3",
+    )
+    .bind(format!("%{KEY_A}%"))
+    .bind(format!("%{KEY_A2}%"))
+    .bind(format!("%{KEY_B}%"))
+    .fetch_one(&su)
+    .await
+    .unwrap()
+    .get::<i64, _>(0);
+    assert_eq!(leaked, 0, "a key reached audit_log");
 }

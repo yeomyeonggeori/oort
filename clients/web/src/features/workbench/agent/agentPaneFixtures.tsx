@@ -1,4 +1,4 @@
-import type { WorkSession } from "@momo/core/lib/api";
+import { ApiError, type WorkSession } from "@momo/core/lib/api";
 import type { WorkSessionEvent } from "@momo/core/features/work/workSessionModel";
 import { agentPaneModel, type AgentPaneModel } from "@momo/core/features/workbench/agentPane";
 import { AgentProgressView, type AgentPaneActions } from "./AgentProgressView";
@@ -10,7 +10,10 @@ import { summaryOf, type AgentPaneSource } from "./agentPaneSource";
 
 const OWNER = "00000000-0000-7000-8000-000000000101";
 const OTHER = "00000000-0000-7000-8000-000000000202";
-const T0 = Date.UTC(2026, 8, 28, 1, 40);
+// 권한 요청은 630초가 지나면 닫힌 것으로 그리므로(#3013) 시각은 지금에서 거꾸로 센다.
+// 「만료」 장면만 요청(5분째)을 11분 전에 둔다.
+const MINUTE = 60_000;
+let T0 = Date.now() - 6 * MINUTE;
 
 function session(id: string, label: string, tool: string, status: WorkSession["status"]): WorkSession {
   return {
@@ -125,10 +128,45 @@ const DEMO_ACTIONS: AgentPaneActions = {
   reply: async () => undefined,
 };
 
-export type AgentFixtureScene = "tab" | "one" | "observer" | "long" | "unavailable";
+/** 결정 라우트의 답을 장면별로 흉내 낸다(골든 `cases`의 오류 코드). */
+function sceneActions(scene: AgentFixtureScene): AgentPaneActions {
+  if (scene === "unavailable") return { decide: null, reply: null };
+  if (scene === "conflict") {
+    return {
+      decide: async () => {
+        throw new ApiError(409, "permission already decided", "permission_already_decided");
+      },
+      reply: null,
+    };
+  }
+  if (scene === "closed") {
+    return {
+      decide: async () => {
+        throw new ApiError(409, "permission request closed", "permission_request_closed");
+      },
+      reply: null,
+    };
+  }
+  // 제품과 같이 지시(답장) 길은 없다(R2).
+  if (scene === "decided" || scene === "lapsed" || scene === "offline") return { ...DEMO_ACTIONS, reply: null };
+  return DEMO_ACTIONS;
+}
+
+export type AgentFixtureScene =
+  | "tab"
+  | "one"
+  | "observer"
+  | "long"
+  | "unavailable"
+  | "decided"
+  | "conflict"
+  | "closed"
+  | "lapsed"
+  | "offline";
 
 /** 하네스 장면별 원천. 묶음은 메모리 저장소(캡처는 이 기기 저장소를 건드리지 않는다). */
 export function fixtureAgentSource(scene: AgentFixtureScene): AgentPaneSource {
+  T0 = Date.now() - (scene === "lapsed" ? 16 : 6) * MINUTE;
   const mem = new Map<string, string>();
   const store = createAgentPaneStore(() => ({
     getItem: (k) => mem.get(k) ?? null,
@@ -165,7 +203,7 @@ export function fixtureAgentSource(scene: AgentFixtureScene): AgentPaneSource {
   } else {
     store.bind("p1", SESSION_WAIT);
   }
-  const actions = scene === "unavailable" ? { decide: null, reply: null } : DEMO_ACTIONS;
+  const actions = sceneActions(scene);
   return {
     store,
     bindings: store.get(),
@@ -179,7 +217,9 @@ export function fixtureAgentSource(scene: AgentFixtureScene): AgentPaneSource {
     },
     render: (id) => {
       const m = models.get(id);
-      return m ? <AgentProgressView model={m} ownerName="곽성재" actions={actions} /> : null;
+      return m ? (
+        <AgentProgressView model={m} ownerName="곽성재" actions={actions} offline={scene === "offline"} />
+      ) : null;
     },
   };
 }

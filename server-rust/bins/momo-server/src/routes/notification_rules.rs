@@ -1,7 +1,7 @@
 //! 알림 규칙 (ADR-0124 증보 1) — the member-global notification rules surface.
 //!
 //! ```text
-//! GET|PUT /v1/workspaces/{ws}/notification-rules    the caller's own rules
+//! GET|PUT|PATCH /v1/workspaces/{ws}/notification-rules    the caller's own rules
 //! ```
 //!
 //! This is the second input to the P9 notifier judgment. 018's
@@ -20,6 +20,12 @@
 //! notifier. A PUT that changes the pause breaks a declared-DND bundle (see
 //! `momo_messaging::notification_rule`), so ending DND later never overwrites
 //! what the member chose here.
+//!
+//! #3012: `PATCH` changes only the fields its body names, merged under the row
+//! lock onto what is stored when the write lands. `PUT` stays for compatibility
+//! (older clients), but a PUT is a whole snapshot: when the web panel and the
+//! phone each PUT what they last read, the later one reverts the earlier one's
+//! switch. New client code uses PATCH.
 
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -27,11 +33,14 @@ use chrono::{DateTime, Utc};
 use momo_auth::{active_workspace_role, Principal};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_messaging::{
-    get_notification_rule_in_tx, set_notification_rule_in_tx, NotificationRule,
-    NotificationRuleUpdate, StatusPatch,
+    get_notification_rule_in_tx, patch_notification_rule_in_tx, set_notification_rule_in_tx,
+    NotificationRule, NotificationRulePatch, NotificationRuleUpdate, StatusPatch,
 };
 
-use crate::dto::{NotificationRulesResponse, OptionalPatch, UpdateNotificationRulesRequest};
+use crate::dto::{
+    NotificationRulesResponse, OptionalPatch, PatchNotificationRulesRequest,
+    UpdateNotificationRulesRequest,
+};
 use crate::error::ApiError;
 use crate::routes::shared::{
     agent_tenant_tx, audit_via_token_id, require_human, settle_db, workspace_scope, DbRejectable,
@@ -166,6 +175,85 @@ pub async fn put(
     Ok(Json(rules_response(rule)))
 }
 
+/// The PATCH body as a domain patch. An empty body is a 400: it would write an
+/// audit row for a change nobody asked for.
+fn patch_from_request(
+    request: &PatchNotificationRulesRequest,
+    now: DateTime<Utc>,
+) -> Result<NotificationRulePatch, ApiError> {
+    let patch = NotificationRulePatch {
+        dnd: request.dnd,
+        dnd_until: parse_until_patch("dndUntilMs", &request.dnd_until_ms, now)?,
+        mention_overrides_mute: request.mention_overrides_mute,
+    };
+    if patch.is_empty() {
+        return Err(ApiError::bad_request(
+            "name at least one of dnd, dndUntilMs, mentionOverridesMute",
+        ));
+    }
+    Ok(patch)
+}
+
+/// `PATCH /v1/workspaces/{ws}/notification-rules` — change only the named
+/// fields of the caller's rules (#3012).
+pub async fn patch(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(workspace): Path<String>,
+    Json(request): Json<PatchNotificationRulesRequest>,
+) -> Result<Json<NotificationRulesResponse>, ApiError> {
+    require_human(&principal, "notification rules require a human bearer")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let member_id = principal.member_id;
+    let via_token = audit_via_token_id(&principal);
+    let patch = patch_from_request(&request, Utc::now())?;
+    let fields: Vec<&'static str> = [
+        patch.dnd.map(|_| "dnd"),
+        (patch.dnd_until != StatusPatch::Absent).then_some("dndUntilMs"),
+        patch.mention_overrides_mute.map(|_| "mentionOverridesMute"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    let outcome: DbRejectable<NotificationRule> =
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                if active_workspace_role(conn, workspace_id, member_id)
+                    .await?
+                    .is_none()
+                {
+                    return Ok(Err(ApiError::forbidden("active human membership required")));
+                }
+                let saved =
+                    patch_notification_rule_in_tx(conn, workspace_id, member_id, patch).await?;
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, "notification_rule.updated")
+                        .by(member_id)
+                        .about(member_id)
+                        .via_token(via_token)
+                        .with_schema(
+                            "momo.notification_rule.updated.v1",
+                            serde_json::json!({
+                                "dnd": saved.dnd,
+                                "dnd_until_ms": saved.dnd_until.map(|at| at.timestamp_millis()),
+                                "mention_overrides_mute": saved.mention_overrides_mute,
+                                // Which fields the request named (#3012).
+                                "patched": fields,
+                            }),
+                        ),
+                )
+                .await?;
+                Ok(Ok(saved))
+            })
+        })
+        .await;
+
+    let rule = settle_db("notification_rules.patch", outcome)?;
+    Ok(Json(rules_response(rule)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,6 +339,48 @@ mod tests {
         // A future switch must not be silently swallowed before it exists.
         assert!(serde_json::from_value::<UpdateNotificationRulesRequest>(
             serde_json::json!({"dnd": false, "mentionOverridesMute": false, "keyword": "x"})
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn a_patch_names_only_what_it_changes_and_an_empty_one_is_refused() {
+        let now = DateTime::from_timestamp_millis(1_000_000).expect("ms");
+        let parse = |body: serde_json::Value| {
+            serde_json::from_value::<PatchNotificationRulesRequest>(body).expect("parse")
+        };
+        let only_mention = patch_from_request(
+            &parse(serde_json::json!({"mentionOverridesMute": true})),
+            now,
+        )
+        .expect("mention only");
+        assert_eq!(
+            only_mention,
+            NotificationRulePatch {
+                dnd: None,
+                dnd_until: StatusPatch::Absent,
+                mention_overrides_mute: Some(true),
+            }
+        );
+        let timed = patch_from_request(
+            &parse(serde_json::json!({"dnd": true, "dndUntilMs": 1_000_001})),
+            now,
+        )
+        .expect("timed");
+        assert_eq!(timed.dnd, Some(true));
+        assert_eq!(
+            timed.dnd_until,
+            StatusPatch::Set(DateTime::from_timestamp_millis(1_000_001))
+        );
+        assert_eq!(timed.mention_overrides_mute, None);
+
+        for empty in [serde_json::json!({}), serde_json::json!({"dnd": null})] {
+            let error = patch_from_request(&parse(empty), now).expect_err("empty");
+            assert_eq!(error.status, axum::http::StatusCode::BAD_REQUEST);
+        }
+        assert!(patch_from_request(&parse(serde_json::json!({"dndUntilMs": 5})), now).is_err());
+        assert!(serde_json::from_value::<PatchNotificationRulesRequest>(
+            serde_json::json!({"dnd": true, "keyword": "x"})
         )
         .is_err());
     }

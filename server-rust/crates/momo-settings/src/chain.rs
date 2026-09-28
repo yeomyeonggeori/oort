@@ -61,10 +61,12 @@ pub struct DecryptedChainEntry {
 
 /// The desired state of one hop as the operator supplied it.
 ///
-/// `bearer: None` means "keep the secret already stored **at this position**".
-/// That is why a position is an identity and never silently rewritten: moving a
-/// base URL to another position without re-typing its key would pair it with a
-/// different provider's credential.
+/// `bearer: None` means "keep the secret already stored **at this position**",
+/// and only while the hop stays on the stored hop's origin (#3040,
+/// [`crate::same_origin`]; the route answers 409 `key_required_for_new_origin`
+/// otherwise). That is why a position is an identity and never silently
+/// rewritten: moving a base URL to another position without re-typing its key
+/// would pair it with a different provider's credential.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChainEntryInput {
     pub position: i32,
