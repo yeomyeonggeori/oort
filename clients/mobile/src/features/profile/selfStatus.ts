@@ -6,7 +6,7 @@ import {
 } from '@momo/core/lib/api';
 import {
   fetchNotificationRules,
-  putNotificationRules,
+  patchNotificationRules,
   type NotificationRules,
 } from '@momo/core/features/settings/notificationRules';
 import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
@@ -21,21 +21,21 @@ import {workspaceKeys} from '../workspace/queries';
 //   * 상태(온라인·자리 비움·방해 금지)와 상태 글 — `PUT /presence`
 //     (ADR-0160 ③, ADR-0176). REST→PG→outbox→relay 한 길이고, 서버가 같은
 //     트랜잭션에서 `type: presence` 를 내 채널들에 방송한다.
-//   * 알림 일시 중지 — `PUT /notification-rules {dnd}` (ADR-0124 증보 1). 푸시
-//     판정(`momo-push` `judge_targets`)이 이 행 하나로 내 모든 푸시를 거른다.
+//   * 알림 일시 중지 — `PATCH /notification-rules {dnd}` (ADR-0124 증보 1·3,
+//     #3042). 푸시 판정(`momo-push` `judge_targets`)이 이 행 하나로 내 모든
+//     푸시를 거른다.
 //
 // 웹과 **같은 캐시 키**를 쓴다: 명부는 `['roster', ws]`(웹 `PresenceControl`),
 // 알림 규칙은 `['settings', 'notification-rules', ws]`(웹
 // `NotificationRulesSection`). 한 글자라도 다르면 「폰에서 바꿨는데 폰의 다른
 // 자리가 옛 값을 그린다」가 된다.
 //
-// ## 알림 규칙은 통째로 바뀐다
+// ## 알림 규칙은 바꾼 스위치만 보낸다
 //
-// `PUT /notification-rules` 는 두 스위치를 **모두** 받는다(부분 갱신 없음). 폰이
-// 일시 중지만 바꾸면서 `mentionOverridesMute` 를 모르는 채 `false` 로 보내면, 웹
-// 설정에서 켜 둔 멘션 예외가 조용히 꺼진다. 그래서 쓰기는 **읽은 값 위에서만**
-// 한다 — 읽기 전에는 스위치를 누를 수 없고, 누르면 서버에서 다시 읽은 값 위에
-// 쓴다(`usePauseNotifications`, #2893).
+// `PUT /notification-rules` 는 두 스위치를 **모두** 받는 통째 치환이라, 폰이
+// 일시 중지만 바꾸면서 모르는(또는 오래된) `mentionOverridesMute` 를 함께 보내면
+// 웹 설정에서 켜 둔 멘션 예외가 조용히 꺼진다. 서버 부분 갱신(#3012 `PATCH`)으로
+// 옮겨 `{dnd}` 하나만 싣는다(`usePauseNotifications`, #3042).
 // =============================================================================
 
 export const notificationRulesKey = (workspaceId: string) =>
@@ -98,19 +98,20 @@ export function useSetPresence(workspaceId: string, selfId: string) {
  * `ready` 가 거짓이면 규칙을 아직 못 읽었다. 그때는 스위치를 잠근다 — 모르는
  * 멘션 예외를 덮어쓰지 않으려고.
  *
- * ## 쓰기 직전에 다시 읽는다 (#2893)
+ * ## 쓰기는 이 스위치 하나만 싣는다 (#3042)
  *
  * 폰 캐시는 최대 30초 오래됐을 수 있다(`queryClient` `staleTime`, 포커스 재조회
- * 없음). 그 사이 웹 설정이 멘션 예외를 켜면, 캐시 위에서 만든 통째 PUT 이 그것을
- * 조용히 끈다. 그래서 쓰기는 **서버에서 방금 읽은 규칙** 위에서 한다. 다시 읽기가
- * 실패하면 쓰지 않는다(쓰기 실패와 같게 되돌리고 말한다). 근본 해결은 서버 부분
- * 갱신이다(별도 이슈).
+ * 없음). 그 사이 웹 설정이 멘션 예외를 켜면, 읽은 값으로 만든 통째 PUT 은 그것을
+ * 조용히 끈다. 쓰기 직전에 다시 읽어도(#2893) 읽기와 쓰기 사이의 틈은 남는다.
+ * 그래서 `PATCH {dnd}` 로 이 스위치만 보낸다(#3012 서버 부분 갱신). 서버가 행
+ * 잠금 아래에서 **도착한 때의** 값 위에 합치므로 멘션 예외는 누가 언제 바꿨든
+ * 그대로 남는다.
  *
  * ## 「읽지 못했다」는 한 번도 못 읽었을 때만
  *
  * 한 번 읽은 뒤의 재조회 실패는 화면을 바꾸지 않는다. 읽은 값으로 스위치를 계속
  * 그리면서 「불러오지 못했습니다」를 함께 말하면 화면이 스스로 모순된다. 쓰기는
- * 어차피 직전에 다시 읽으므로 오래된 값이 서버로 가지 않는다.
+ * 이 스위치 하나만 싣으므로 오래된 값이 서버로 가지 않는다.
  */
 export function usePauseNotifications(workspaceId: string) {
   const client = useQueryClient();
@@ -121,10 +122,8 @@ export function usePauseNotifications(workspaceId: string) {
     retry: false,
   });
   const mutation = useMutation({
-    mutationFn: async (paused: boolean) => {
-      const fresh = await fetchNotificationRules(workspaceId);
-      return putNotificationRules(workspaceId, {...fresh, dnd: paused});
-    },
+    mutationFn: (paused: boolean) =>
+      patchNotificationRules(workspaceId, {dnd: paused}),
     onMutate: async (paused: boolean) => {
       await client.cancelQueries({queryKey: key});
       const previous = client.getQueryData<NotificationRules>(key);
@@ -149,7 +148,8 @@ export function usePauseNotifications(workspaceId: string) {
     pending: mutation.isPending,
     failed: mutation.isError,
     setPaused: (paused: boolean) => {
-      // 한 번은 읽어야 스위치가 선다. 실제로 싣는 값은 직전 재조회가 정한다.
+      // 한 번은 읽어야 스위치가 선다(모르는 상태를 「꺼짐」으로 그리지 않게).
+      // 쓰기는 이 스위치 하나라 읽은 값의 나머지는 서버로 가지 않는다.
       if (rules === undefined || mutation.isPending) return;
       mutation.mutate(paused);
     },
