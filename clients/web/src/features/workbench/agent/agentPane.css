@@ -235,17 +235,7 @@
     display: none;
   }
 
-  /* 낮은 칸의 거부 무장: 안내 글은 입력 칸의 placeholder·접근 이름이 대신한다. */
-  .agent-perm-instruction-label {
-    position: absolute;
-    inline-size: 1px;
-    block-size: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-
-  /* 권한 카드가 있으면 답장 칸은 한 줄 안내로 접는다(카드의 「거부하고 지시」가 지시 길이다). */
+  /* 권한 카드가 있으면 답장 칸은 한 줄 안내로 접는다(카드가 먼저다). */
   .agent-pane:has(.agent-perm) .agent-reply {
     display: none;
   }
@@ -256,17 +246,20 @@
 }
 
 /*
- * 거부 무장: 지시 입력 칸이 자리를 쓴다. 미리보기는 거부에는 필요 없고(허락만 요청을
- * 다 봐야 한다), 질문 줄이 무엇을 거부하는지 말한다. 그래서 접는다.
+ * 보냈거나 닫힌 카드: 질문 줄 아래 한 줄. 더는 나를 기다리지 않으므로 신호색을
+ * 거두고 중립 바탕으로 내린다. 버튼 줄이 없으니 최소 키도 두 줄이다.
  */
-.agent-perm[data-armed="reject"] .agent-perm-code,
-.agent-perm[data-armed="reject"] [data-testid="agent-permission-more"] {
-  display: none;
+.agent-perm[data-settled] {
+  min-block-size: 0;
+  background-color: var(--surface-muted);
 }
 
-/* 지시 입력 칸은 두 줄 아래로 줄지 않는다. */
-.agent-perm-instruction {
-  min-block-size: calc(var(--text-body--line-height) * 2 + var(--spacing-4));
+.agent-perm[data-settled] .agent-perm-sticky-top {
+  background-color: var(--surface-muted);
+}
+
+.agent-perm[data-settled] .agent-perm-l1 {
+  color: var(--ink);
 }
 
 .agent-perm > :last-child:not(.agent-perm-sticky-bottom) {

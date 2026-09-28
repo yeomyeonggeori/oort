@@ -11,6 +11,9 @@
 // 장면(라이트·다크): 1280×800 「내 작업」(로컬 1 + A 2) · 390×844 A 한 칸 ·
 // 1280 소유자 아님 · 1280 결정 경로 없음 · 1280 긴 목록(600) · 1280 원문 펼침·무장.
 // MOCKUP=<workspace-tab-mockups.html> 가 있으면 시안 ⑤ 스레드 카드와 나란히 놓는다.
+//
+// #3013 결정 상태(라이트·다크 × 1280·390): 결정 전 · 무장 · 확정(200) · 409 이미 결정 ·
+// 409 닫힘 · 만료(630초) · 오프라인 잠금. 결정 라우트의 답은 흉내(`sceneActions`)다.
 // =============================================================================
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -126,9 +129,11 @@ async function scenes(browser, origin) {
       const strip = await page.$$eval('[data-pane-id="p2"] [data-testid="workbench-pane-waiting"]', (e) => e.length);
       check(`${scheme}/tab: A 칸은 바닥 띠 대신 카드`, strip === 0, { strip });
 
-      // 거부 무장(지시 입력 칸)이 반 높이 칸에서 넘치지 않는다.
+      // 거부 무장이 반 높이 칸에서 넘치지 않는다. 지시 입력 칸은 없다(#3013, R2 전 400).
       await page.getByTestId("agent-permission-reject").click();
-      await page.getByTestId("agent-permission-instruction").waitFor();
+      await page.getByTestId("agent-permission-confirm").waitFor();
+      const ta = await page.$$eval('[data-testid="agent-permission"] textarea', (els) => els.length);
+      check(`${scheme}/tab: 거부 무장에 지시 입력 칸 없음`, ta === 0, { ta });
       const rejectFit = await permissionFit(page, "p2");
       check(`${scheme}/tab 1280 거부 무장: 진행 줄·질문 줄·확정 버튼 보임`, fitOk(rejectFit), rejectFit);
       await shot(page, `agent-tab-1280-${scheme}-reject-armed`);
@@ -225,6 +230,69 @@ async function scenes(browser, origin) {
   }
 }
 
+/** 무장 → 400ms 가드 → 확정. */
+async function commitAllow(page) {
+  await page.getByTestId("agent-permission-allow").click();
+  await page.getByTestId("agent-permission-confirm").waitFor();
+  await page.waitForTimeout(450);
+  await page.getByTestId("agent-permission-commit").click();
+  await page.getByTestId("agent-permission-outcome").waitFor();
+}
+
+async function decisionScenes(browser, origin) {
+  for (const scheme of ["light", "dark"]) {
+    for (const [label, viewport] of [["1280", DESKTOP], ["390", PHONE]]) {
+      const tag = `${label}-${scheme}`;
+      {
+        const { context, page } = await open(browser, origin, scheme, "agent-decided", viewport);
+        const allow = await page.$eval('[data-testid="agent-permission-allow"]', (e) => !e.disabled);
+        check(`${tag}/결정 전: 허락 버튼 켜짐`, allow);
+        await shot(page, `decision-before-${tag}`);
+        await page.getByTestId("agent-permission-allow").click();
+        await page.getByTestId("agent-permission-confirm").waitFor();
+        await shot(page, `decision-armed-${tag}`);
+        await page.waitForTimeout(450);
+        await page.getByTestId("agent-permission-commit").click();
+        await page.getByTestId("agent-permission-outcome").waitFor();
+        const text = await page.textContent('[data-testid="agent-permission-outcome"]');
+        const buttons = await page.$$eval('[data-testid="agent-permission"] button', (els) => els.length);
+        check(`${tag}/확정: 보냄 한 줄, 버튼 0`, (text ?? "").includes("허락을 보냈어요") && buttons === 0, { text, buttons });
+        check(`${tag}/확정: 가로 넘침 0`, (await overflowX(page)) <= 0);
+        await shot(page, `decision-sent-${tag}`);
+        await context.close();
+      }
+      for (const [scene, needle] of [["conflict", "이미 다른 결정"], ["closed", "이미 닫혔어요"]]) {
+        const { context, page } = await open(browser, origin, scheme, `agent-${scene}`, viewport);
+        await commitAllow(page);
+        const text = await page.textContent('[data-testid="agent-permission-outcome"]');
+        const buttons = await page.$$eval('[data-testid="agent-permission"] button', (els) => els.length);
+        check(`${tag}/409 ${scene}: 「${needle}」, 버튼 0`, (text ?? "").includes(needle) && buttons === 0, { text, buttons });
+        await shot(page, `decision-409-${scene}-${tag}`);
+        await context.close();
+      }
+      {
+        const { context, page } = await open(browser, origin, scheme, "agent-lapsed", viewport);
+        const text = await page.textContent('[data-testid="agent-permission-outcome"]');
+        const buttons = await page.$$eval('[data-testid="agent-permission"] button', (els) => els.length);
+        check(`${tag}/만료: 닫힘 한 줄, 버튼 0`, (text ?? "").includes("요청은 닫혔어요") && buttons === 0, { text, buttons });
+        await shot(page, `decision-lapsed-${tag}`);
+        await context.close();
+      }
+      {
+        const { context, page } = await open(browser, origin, scheme, "agent-offline", viewport);
+        const state = await page.evaluate(() => ({
+          allow: document.querySelector('[data-testid="agent-permission-allow"]').disabled,
+          reject: document.querySelector('[data-testid="agent-permission-reject"]').disabled,
+          line: document.querySelector('[data-testid="agent-permission-unavailable"]')?.textContent ?? null,
+        }));
+        check(`${tag}/오프라인: 두 버튼 잠김 + 이유 한 줄`, state.allow && state.reject && (state.line ?? "").includes("연결이 끊겨"), state);
+        await shot(page, `decision-offline-${tag}`);
+        await context.close();
+      }
+    }
+  }
+}
+
 async function compare(browser) {
   if (!MOCKUP || !existsSync(MOCKUP)) {
     console.log("MOCKUP 없음: 비교 이미지는 건너뛴다");
@@ -265,8 +333,9 @@ async function main() {
   try {
     const browser = await chromium.launch();
     try {
-      await scenes(browser, preview.origin);
-      await compare(browser);
+      if (process.env.ONLY !== "decision") await scenes(browser, preview.origin);
+      await decisionScenes(browser, preview.origin);
+      if (process.env.ONLY !== "decision") await compare(browser);
     } finally {
       await browser.close();
     }

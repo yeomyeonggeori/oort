@@ -63,7 +63,7 @@ describe("기본 AI 표 화면", () => {
     // 같은 화면의 개인 줄은 구독을 선택지로 받는다.
     const local = q("ai-default-localTerminal-select") as HTMLSelectElement;
     expect(Array.from(local.options).map((o) => o.textContent)).toEqual([
-      "마지막에 쓴 계정",
+      "이 맥 기본 로그인",
       "Claude · 이 맥 기본 로그인 · 구독",
       "Claude · 개인 · 구독",
       "Claude · 회사 · 구독 (로그인 필요)",
@@ -162,14 +162,14 @@ describe("연결 해제 창: 기본 AI 칸을 이름으로 (#2878이 기다리�
       onUnlinked: () => undefined,
       fixture: { status: { phase: "confirm" } },
       impact: [
-        { rowId: "localTerminal", title: "로컬 터미널 새 세션", fallback: "마지막에 쓴 계정" },
+        { rowId: "localTerminal", title: "로컬 터미널 새 세션", fallback: "이 맥 기본 로그인" },
         { rowId: "remoteWork", title: "원격 작업 기본 계정", fallback: "매번 묻기" },
       ],
     });
     const box = q("my-account-unlink-impact");
     expect(box?.textContent).toContain("기본 AI에서 이 계정을 고른 칸은 이렇게 돌아가요.");
     expect(Array.from(box?.querySelectorAll("li") ?? []).map((li) => li.textContent)).toEqual([
-      "로컬 터미널 새 세션: 마지막에 쓴 계정",
+      "로컬 터미널 새 세션: 이 맥 기본 로그인",
       "원격 작업 기본 계정: 매번 묻기",
     ]);
   });

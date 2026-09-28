@@ -102,8 +102,16 @@ const DRAIN_GRACE: Duration = Duration::from_secs(1);
 pub enum Program {
     /// The user's login shell.
     Shell,
-    /// One of `HARNESSES`, resolved on this machine.
-    Harness { id: String },
+    /// One of `HARNESSES`, resolved on this machine. `profile` is a label
+    /// (#3010, ADR-0191 D1): the account the person chose for new terminal
+    /// sessions. The shell turns it into the profile folder exactly as for a
+    /// sign-in (`harness_profile::existing_profile`). Absent = the CLI's own
+    /// default location on this Mac.
+    Harness {
+        id: String,
+        #[serde(default)]
+        profile: Option<String>,
+    },
     /// The official CLI's sign-in command: one row of `LOGIN_COMMANDS`.
     /// `profile` is a label (#2878): the shell turns it into the profile
     /// folder (`harness_profile::existing_profile`). Absent = the CLI's own
@@ -272,10 +280,16 @@ pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan,
                 profile: Some(profile),
             })
         }
-        Program::Harness { id } => {
+        Program::Harness { id, profile } => {
             if !HARNESSES.contains(&id.as_str()) {
                 return Err(format!("refused: unknown harness {id:?}"));
             }
+            // Checked before PATH: a missing or tampered profile folder is
+            // refused, never quietly replaced by the default sign-in.
+            let profile = match profile {
+                Some(label) => Some(profile_env(host, id, label)?),
+                None => None,
+            };
             let program = harness_path::find_on_path(id, &host.path)
                 .ok_or_else(|| format!("refused: {id} is not installed on this machine"))?;
             Ok(SpawnPlan {
@@ -285,7 +299,7 @@ pub fn plan_spawn(request: &SpawnRequest, host: &HostFacts) -> Result<SpawnPlan,
                 size,
                 path: Some(host.path.clone()),
                 hooks: true,
-                profile: None,
+                profile,
             })
         }
     }
@@ -929,7 +943,7 @@ pub async fn pty_spawn(
         let mut cmd = build_command(&plan, std::env::vars_os());
         // The hook wiring is the only argv a harness gets, and it is fixed
         // here: this binary's own path and a closed event list (#2776).
-        if let (Program::Harness { id }, true) = (&request.program, plan.hooks) {
+        if let (Program::Harness { id, .. }, true) = (&request.program, plan.hooks) {
             if manager.hook_socket().is_some() {
                 if let Some(args) = std::env::current_exe()
                     .ok()
@@ -1026,7 +1040,10 @@ mod tests {
 
     fn harness_request(id: &str) -> SpawnRequest {
         SpawnRequest {
-            program: Program::Harness { id: id.into() },
+            program: Program::Harness {
+                id: id.into(),
+                profile: None,
+            },
             cwd: None,
             cols: 80,
             rows: 24,
@@ -1057,7 +1074,8 @@ mod tests {
         assert_eq!(
             ok.program,
             Program::Harness {
-                id: "claude".into()
+                id: "claude".into(),
+                profile: None,
             }
         );
         for extra in [
@@ -1121,6 +1139,7 @@ mod tests {
         }
         let facts = HostFacts::current(&Program::Harness {
             id: "claude".into(),
+            profile: None,
         })
         .unwrap();
         assert_eq!(
@@ -2034,6 +2053,83 @@ mod tests {
             cols: 80,
             rows: 24,
         }
+    }
+
+    fn profile_harness_request(id: &str, profile: &str) -> SpawnRequest {
+        SpawnRequest {
+            program: Program::Harness {
+                id: id.into(),
+                profile: Some(profile.into()),
+            },
+            cwd: None,
+            cols: 80,
+            rows: 24,
+        }
+    }
+
+    /// #3010 (ADR-0191 D1): a new terminal session opens the account chosen in
+    /// 기본 AI — the profile folder's variable reaches the harness, over
+    /// whatever the app inherited. Without a profile none is set.
+    #[test]
+    fn a_harness_session_runs_in_the_chosen_profile_folder() {
+        let ok: SpawnRequest = serde_json::from_str(
+            r#"{"program":{"kind":"harness","id":"claude","profile":"회사"},"cols":80,"rows":24}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            ok.program,
+            profile_harness_request("claude", "회사").program
+        );
+
+        let bin = login_bin("profile-harness");
+        let host = profile_host("harness", &bin);
+        let claude_dir = harness_profile::profile_root(&host.home).join("claude/회사");
+        let plan = plan_spawn(&profile_harness_request("claude", "회사"), &host).unwrap();
+        assert_eq!(plan.program, bin.join("claude"));
+        assert!(plan.hooks);
+        assert_eq!(
+            plan.profile,
+            Some(("CLAUDE_CONFIG_DIR", claude_dir.clone()))
+        );
+        let env = env_of(&build_command(
+            &plan,
+            base(&[
+                ("PATH", "/usr/bin"),
+                ("CLAUDE_CONFIG_DIR", "/somewhere/else"),
+            ]),
+        ));
+        assert_eq!(
+            env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
+            Some(claude_dir.to_str().unwrap())
+        );
+
+        let plain = plan_spawn(&harness_request("claude"), &host).unwrap();
+        assert_eq!(plain.profile, None);
+        std::fs::remove_dir_all(&host.home).ok();
+        std::fs::remove_dir_all(bin).ok();
+    }
+
+    /// #3010: a chosen account that is gone (or never was) is refused, not
+    /// swapped for this Mac's default sign-in. The web layer says so and opens
+    /// a shell instead (core `resolveRow`).
+    #[test]
+    fn a_harness_session_refuses_a_profile_that_is_not_there() {
+        let bin = login_bin("profile-harness-refuse");
+        let host = profile_host("harness-refuse", &bin);
+        for (id, profile) in [
+            ("claude", "없는계정"),
+            ("claude", ""),
+            ("claude", "../codex/개인"),
+            // Grok has no profile folder (ADR-0191 D1: spike first).
+            ("grok", "회사"),
+        ] {
+            assert!(
+                plan_spawn(&profile_harness_request(id, profile), &host).is_err(),
+                "accepted {id} {profile:?}"
+            );
+        }
+        std::fs::remove_dir_all(&host.home).ok();
+        std::fs::remove_dir_all(bin).ok();
     }
 
     /// ADR-0190 D3-g: the sign-in and sign-out lists are separate. A row that

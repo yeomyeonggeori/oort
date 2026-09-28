@@ -60,6 +60,9 @@ clients/web/node_modules
 clients/web/dist
 clients/web/artifacts
 docs
+# Web tests import these API contract goldens by repo path; the web stage
+# COPYs them so the image build runs the same tsc -b as a laptop (#3037).
+!docs/api/*.golden.json
 fastlane
 # Do not exclude the `legal/` directory itself. A blanket `legal` pattern
 # makes COPY legal/... fail with "not found" because this file REPLACES the
