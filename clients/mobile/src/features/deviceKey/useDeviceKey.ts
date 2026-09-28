@@ -72,7 +72,9 @@ export function useDeviceKey(
     local: local.data,
     localError: local.error,
     rows: hasKey ? rows.data : undefined,
-    rowsError: hasKey ? rows.error : null,
+    // A failed background re-read (the approval poll) keeps the last list the
+    // server gave: 「불러오지 못했습니다」 is for when there is nothing to show.
+    rowsError: hasKey && rows.data === undefined ? rows.error : null,
   });
 
   const settle = () => {
