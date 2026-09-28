@@ -15,7 +15,13 @@ import { CONFIRM_GUARD_MS } from "@/features/timeline/ApprovalActions";
 import {
   DEFAULT_REPLY_MODE,
   PERMISSION_ASK,
+  PERMISSION_LAPSED_LINE,
+  PERMISSION_OFFLINE_LINE,
+  PERMISSION_HOST_WAIT_MS,
   canAllow,
+  permissionFailure,
+  permissionLapsed,
+  permissionSentLine,
   permissionWaitingLine,
   type AgentFeedItem,
   type AgentPaneModel,
@@ -26,6 +32,7 @@ import {
 } from "@momo/core/features/workbench/agentPane";
 import { StatusMark } from "../local/SessionList";
 import type { SessionStatus } from "@momo/core/features/workbench/sessionList";
+import type { WorkPermissionDecisionBody } from "@momo/core/lib/api";
 import "./agentPane.css";
 
 // Reading this as: 작업 공간 A 칸 진행 뷰(에이전트 작업 레인 한 세션) for internal
@@ -36,20 +43,21 @@ import "./agentPane.css";
 //
 // - 위: 목표 한 줄, 호스트 · 하네스, 계획 진행.
 // - 가운데: ACP plan 단계 목록, tool-call은 접힌 카드. 펼치기(「원문 보기」)는 소유자만.
-// - 권한 카드: 「이번 한 번 허락」·「거부하고 지시」만(ADR-0188 D5). 두 번 눌러야
+// - 권한 카드: 「이번 한 번 허락」·「거부」만(ADR-0188 D5). 두 번 눌러야
 //   결정한다(무장 → 확정, 무장 직후 400ms와 키 반복은 받지 않는다). 결정은 사람이
 //   확정 버튼을 눌렀을 때만 만든다. 마운트·다시 그리기·이벤트 재전달에는 부르지 않는다.
+//   결정은 #3000 라우트로 간다(§8.6, 골든 work-permission-decision). 지시를 붙인
+//   거부는 R2까지 서버가 400으로 거부하므로 입력 칸도 두지 않는다(#3013).
 // - 아래: 답장 칸. 기본은 다음 차례 예약, 끼어들기는 따로 누르는 버튼(D4).
 //
 // 모든 글은 React 텍스트 노드로 그린다. HTML로 해석하는 자리가 없다.
 
-export interface PermissionDecision {
+/**
+ * 칸이 만드는 결정. `sessionId`는 경로로, 나머지 셋이 본문 전부다(골든). 지시문
+ * 자리는 없다: 서버가 R2 전까지 비어 있지 않은 `instruction`을 400으로 거부한다.
+ */
+export interface PermissionDecision extends WorkPermissionDecisionBody {
   sessionId: string;
-  requestEventId: string;
-  optionId: string;
-  kind: "allow_once" | "reject_once";
-  /** 거부하고 지시: 다음 입력으로 보낼 지시문. */
-  instruction?: string;
 }
 
 export interface AgentReply {
@@ -121,12 +129,15 @@ export function AgentProgressView({
   model,
   ownerName,
   actions,
+  offline = false,
   className,
 }: {
   model: AgentPaneModel;
   /** 소유자 표시 이름(소유자가 아닌 사람에게 「누구의 확인」을 말할 때). */
   ownerName: string | null;
   actions: AgentPaneActions;
+  /** 실시간 연결이 끊겼다. 결정은 잠그고 이유를 한 줄로 말한다. */
+  offline?: boolean;
   className?: string;
 }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
@@ -248,6 +259,7 @@ export function AgentProgressView({
           ownerName={ownerName}
           decide={actions.decide}
           cramped={cramped}
+          offline={offline}
         />
       ) : null}
 
@@ -382,6 +394,25 @@ function previewLines(text: string): number {
   return text.split("\n").length;
 }
 
+/** 결정을 보낸 뒤의 카드: 보냈다(`sent`) 또는 다시 눌러도 소용없다(`closed`). */
+type Outcome = { tone: "sent" | "closed"; text: string } | null;
+
+/** 요청이 host 대기 시간을 넘기는 순간 한 번 다시 그린다(주기 타이머가 아니다). */
+function useLapsed(atMs: number): boolean {
+  const [lapsed, setLapsed] = useState(() => permissionLapsed({ atMs }, Date.now()));
+  useEffect(() => {
+    if (lapsed) return;
+    const left = atMs + PERMISSION_HOST_WAIT_MS - Date.now();
+    if (left <= 0) {
+      setLapsed(true);
+      return;
+    }
+    const timer = setTimeout(() => setLapsed(true), left);
+    return () => clearTimeout(timer);
+  }, [atMs, lapsed]);
+  return lapsed;
+}
+
 function PermissionCard({
   sessionId,
   permission,
@@ -389,6 +420,7 @@ function PermissionCard({
   ownerName,
   decide,
   cramped,
+  offline,
 }: {
   sessionId: string;
   permission: PendingPermission;
@@ -397,16 +429,20 @@ function PermissionCard({
   decide: AgentPaneActions["decide"];
   /** 칸이 너무 낮아 요청과 결정 칸을 함께 보일 수 없다. */
   cramped: boolean;
+  /** 실시간 연결이 끊겼다. */
+  offline: boolean;
 }) {
   const [armed, setArmed] = useState<Armed>(null);
-  // 무장한 채 칸이 낮아지면 푼다(보이지 않는 확정 버튼을 남기지 않는다).
+  const lapsed = useLapsed(permission.atMs);
+  // 무장한 채 칸이 낮아지거나, 연결이 끊기거나, 요청이 닫히면 푼다(보이지 않거나
+  // 누를 수 없는 확정 버튼을 남기지 않는다).
   useEffect(() => {
-    if (cramped && armed !== null) setArmed(null);
-  }, [cramped, armed]);
+    if ((cramped || offline || lapsed) && armed !== null) setArmed(null);
+  }, [cramped, offline, lapsed, armed]);
   const armedAt = useRef(0);
-  const [instruction, setInstruction] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<Outcome>(null);
   const unavailableId = useId();
   const allowRef = useRef<HTMLButtonElement>(null);
   const rejectRef = useRef<HTMLButtonElement>(null);
@@ -419,6 +455,10 @@ function PermissionCard({
     returnTo.current = null;
     (target && !target.disabled ? target : sectionRef.current)?.focus({ preventScroll: true });
   }, [armed]);
+  // 확정 버튼이 사라지면 캐럿이 body로 떨어지지 않게 카드가 받는다(결과 줄은 status로 읽힌다).
+  useEffect(() => {
+    if (outcome) sectionRef.current?.focus({ preventScroll: true });
+  }, [outcome]);
   const ask = permission.tool ? permission.tool.headline : PERMISSION_ASK.other;
 
   if (!viewerIsOwner) {
@@ -429,7 +469,31 @@ function PermissionCard({
           {ask}
         </p>
         <p className="text-meta text-ink-muted" data-testid="agent-permission-waiting">
-          {permissionWaitingLine(ownerName)}
+          {lapsed ? PERMISSION_LAPSED_LINE : permissionWaitingLine(ownerName)}
+        </p>
+      </section>
+    );
+  }
+
+  // 보냈거나 닫힌 요청: 버튼을 거둔다. 서버의 `approval.decided`가 오면 카드 자체가
+  // 사라진다(모든 소유자 기기의 카드가 같은 이벤트로 닫힌다, §8.6).
+  const settled: Outcome = outcome ?? (lapsed ? { tone: "closed", text: PERMISSION_LAPSED_LINE } : null);
+  if (settled) {
+    return (
+      <section
+        ref={sectionRef}
+        tabIndex={-1}
+        className="agent-perm focus-visible:focus-ring"
+        aria-label="권한 요청"
+        data-testid="agent-permission"
+        data-settled={settled.tone}
+      >
+        <p className="agent-perm-l1 agent-perm-sticky-top">
+          <StatusMark status={settled.tone === "sent" ? "done" : "stopped"} srLabel />
+          {ask}
+        </p>
+        <p role="status" className="agent-perm-settled text-meta text-ink" data-testid="agent-permission-outcome">
+          {settled.text}
         </p>
       </section>
     );
@@ -447,21 +511,19 @@ function PermissionCard({
   const commit = async (kind: "allow_once" | "reject_once") => {
     if (Date.now() - armedAt.current < CONFIRM_GUARD_MS) return;
     const choice = kind === "allow_once" ? permission.allow : permission.reject;
-    if (!decide || !choice || busy || cramped) return;
+    if (!decide || !choice || busy || cramped || offline) return;
+    if (permissionLapsed(permission, Date.now())) return;
     if (kind === "allow_once" && !canAllow(permission)) return;
     setBusy(true);
     setError(null);
     try {
-      await decide({
-        sessionId,
-        requestEventId: permission.requestEventId,
-        optionId: choice.optionId,
-        kind,
-        ...(kind === "reject_once" && instruction.trim() !== "" ? { instruction: instruction.trim() } : {}),
-      });
-      disarm();
-    } catch {
-      setError("결정을 보내지 못했어요. 호스트가 요청을 거둬들였을 수 있어요. 잠시 뒤 다시 누르세요.");
+      // 본문은 셋뿐이다(골든). 같은 결정을 다시 보내면 서버가 200으로 같은 행을 준다.
+      await decide({ sessionId, requestEventId: permission.requestEventId, optionId: choice.optionId, kind });
+      setOutcome({ tone: "sent", text: permissionSentLine(kind) });
+    } catch (err) {
+      const failure = permissionFailure(err);
+      if (failure.closed) setOutcome({ tone: "closed", text: failure.text });
+      else setError(failure.text);
     } finally {
       setBusy(false);
     }
@@ -473,8 +535,10 @@ function PermissionCard({
   const allowable = canAllow(permission);
   const unavailable = decide === null;
   // 낮은 칸에서는 요청을 다 보이지 못하므로 결정도 받지 않는다(design-review R3 B1).
-  const blocked = unavailable || cramped;
+  // 연결이 끊기면 결정이 닿았는지 알 길(실시간 `approval.decided`)이 없으므로 잠근다.
+  const blocked = unavailable || cramped || offline;
   const describedBy = blocked ? unavailableId : undefined;
+  const reason = unavailable ? DECIDE_UNAVAILABLE : offline ? PERMISSION_OFFLINE_LINE : CRAMPED_LINE;
 
   return (
     <section
@@ -496,10 +560,14 @@ function PermissionCard({
         <StatusMark status="waiting" srLabel />
         {ask}
       </p>
-      {/* 낮은 칸: 이유를 질문 바로 밑에 한 줄로(버튼 뒤에 두면 잘린다, design-review R4). */}
-      {cramped && !unavailable ? (
-        <p id={unavailableId} className="truncate text-meta text-ink-muted" data-testid="agent-permission-unavailable">
-          {CRAMPED_LINE}
+      {/* 누를 수 없는 이유는 질문 바로 밑에 한 줄로(버튼 뒤에 두면 잘린다, design-review R4). */}
+      {blocked ? (
+        <p
+          id={unavailableId}
+          className={cn("text-meta text-ink-muted", cramped && "truncate")}
+          data-testid="agent-permission-unavailable"
+        >
+          {reason}
         </p>
       ) : null}
       {permission.preview ? (
@@ -543,58 +611,30 @@ function PermissionCard({
             onClick={() => arm("reject")}
             data-testid="agent-permission-reject"
           >
-            거부하고 지시
+            거부
           </Button>
           {cramped ? null : <span className="text-timestamp text-ink-muted">나에게만 보이는 버튼이에요</span>}
         </div>
-      ) : armed === "allow" ? (
+      ) : (
         <div className="agent-perm-sticky-bottom flex flex-wrap items-center gap-2" data-testid="agent-permission-confirm">
-          <span className="text-meta font-medium">이번 한 번만 허락할까요?</span>
-          <Button type="button" size="sm" variant="ghost" onClick={disarm}>
+          <span className="text-meta font-medium">
+            {armed === "allow" ? "이번 한 번만 허락할까요?" : "이번 요청을 거부할까요?"}
+          </span>
+          <Button type="button" size="sm" variant="ghost" onClick={disarm} disabled={busy}>
             취소
           </Button>
           <Button
             type="button"
             size="sm"
+            variant={armed === "allow" ? "default" : "destructive"}
             autoFocus
-            disabled={busy || !allowable}
+            disabled={busy || (armed === "allow" && !allowable)}
             onKeyDown={noRepeat}
-            onClick={() => void commit("allow_once")}
+            onClick={() => void commit(armed === "allow" ? "allow_once" : "reject_once")}
             data-testid="agent-permission-commit"
           >
-            허락 보내기
+            {armed === "allow" ? "허락 보내기" : "거부 보내기"}
           </Button>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2" data-testid="agent-permission-confirm">
-          <label className="flex flex-col gap-1 text-meta font-medium">
-            <span className="agent-perm-instruction-label">대신 할 일을 적어 주세요(비워 두면 거부만 해요)</span>
-            <textarea
-              autoFocus
-              rows={2}
-              value={instruction}
-              onChange={(event) => setInstruction(event.target.value)}
-              className="agent-perm-instruction resize-y rounded-lg border border-line-strong bg-surface px-3 py-2 text-body font-normal text-ink placeholder:text-ink-muted focus-visible:focus-ring"
-              placeholder="예: 설치하지 말고 이미 있는 패키지로 고쳐 줘"
-              data-testid="agent-permission-instruction"
-            />
-          </label>
-          <div className="agent-perm-sticky-bottom flex flex-wrap items-center gap-2">
-            <Button type="button" size="sm" variant="ghost" onClick={disarm}>
-              취소
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="destructive"
-              disabled={busy}
-              onKeyDown={noRepeat}
-              onClick={() => void commit("reject_once")}
-              data-testid="agent-permission-commit"
-            >
-              거부하고 보내기
-            </Button>
-          </div>
         </div>
       )}
       {!allowable && !blocked && permission.allow !== null ? (
@@ -605,13 +645,8 @@ function PermissionCard({
       {permission.allow === null && !blocked ? (
         <p className="text-meta text-ink-muted">이번 한 번 허락할 선택지가 없어요. 거부하거나 호스트에서 결정하세요.</p>
       ) : null}
-      {unavailable ? (
-        <p id={unavailableId} className="text-meta text-ink-muted" data-testid="agent-permission-unavailable">
-          {DECIDE_UNAVAILABLE}
-        </p>
-      ) : null}
       {error ? (
-        <p role="alert" className="text-meta text-danger">
+        <p role="alert" className="text-meta text-danger" data-testid="agent-permission-error">
           {error}
         </p>
       ) : null}

@@ -3,9 +3,15 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkSession } from "@momo/core/lib/api";
+import { ApiError, type WorkSession } from "@momo/core/lib/api";
 import type { WorkSessionEvent } from "@momo/core/features/work/workSessionModel";
-import { agentPaneModel, type AgentPaneModel } from "@momo/core/features/workbench/agentPane";
+import {
+  PERMISSION_HOST_WAIT_MS,
+  PERMISSION_LAPSED_LINE,
+  PERMISSION_OFFLINE_LINE,
+  agentPaneModel,
+  type AgentPaneModel,
+} from "@momo/core/features/workbench/agentPane";
 import { CONFIRM_GUARD_MS } from "@/features/timeline/ApprovalActions";
 import {
   AgentProgressView,
@@ -18,6 +24,8 @@ import {
 //   - 권한 카드는 사람이 무장 → 확정을 누르기 전에는 결정을 만들지 않는다.
 //   - 「항상 허용」은 어떤 이름표를 달고 와도 버튼이 되지 않는다.
 //   - 답장의 기본은 다음 차례, 끼어들기는 따로 누른 버튼에서만.
+// #3013: 결정의 결과(보냄·409 두 가지·403·닿지 못함), 오프라인 잠금, 630초 만료,
+// 거부에 지시문이 실리지 않음.
 
 const OWNER = "00000000-0000-7000-8000-000000000101";
 const OTHER = "00000000-0000-7000-8000-000000000202";
@@ -47,7 +55,8 @@ function ev(type: string, payload: Record<string, unknown>): WorkSessionEvent {
     eventId: `ev-${n}`,
     type: type as WorkSessionEvent["type"],
     sessionId: SID,
-    atMs: 1_784_998_548_500 + n * 1000,
+    // 시계(beforeEach)보다 1분 앞. 권한 요청은 630초 뒤 닫힌다.
+    atMs: Date.parse("2026-09-28T00:59:00Z") + n,
     seq: n,
     payload: { work_session_id: SID, ...payload },
   };
@@ -82,14 +91,14 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function render(m: AgentPaneModel, actions: AgentPaneActions, ownerName: string | null = "곽성재") {
+function render(m: AgentPaneModel, actions: AgentPaneActions, ownerName: string | null = "곽성재", offline = false) {
   if (!host) {
     host = document.createElement("div");
     document.body.append(host);
     root = createRoot(host);
   }
   act(() => {
-    root!.render(createElement(AgentProgressView, { model: m, ownerName, actions }));
+    root!.render(createElement(AgentProgressView, { model: m, ownerName, actions, offline }));
   });
   return host;
 }
@@ -137,7 +146,7 @@ describe("permission card", () => {
     const decide = vi.fn(async () => undefined);
     render(model([tool("bash", "npm install"), ask([ONCE, REJECT])]), { decide, reply: null });
     click(q('[data-testid="agent-permission-reject"]'));
-    const box = q('[data-testid="agent-permission-instruction"]')!;
+    const box = q('[data-testid="agent-permission-commit"]')!;
     act(() => {
       box.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     });
@@ -146,23 +155,20 @@ describe("permission card", () => {
     expect(decide).not.toHaveBeenCalled();
   });
 
-  it("reject carries the instruction as the next input", async () => {
+  it("reject sends only the three golden keys; there is no instruction box to fill", async () => {
     const decide = vi.fn(async () => undefined);
     render(model([tool("bash", "npm install"), ask([ONCE, REJECT])]), { decide, reply: null });
     click(q('[data-testid="agent-permission-reject"]'));
-    const box = q('[data-testid="agent-permission-instruction"]') as HTMLTextAreaElement;
-    act(() => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
-      setter.call(box, "설치하지 말고 고쳐 줘");
-      box.dispatchEvent(new Event("input", { bubbles: true }));
-    });
+    expect(q('[data-testid="agent-permission"] textarea')).toBeNull();
+    expect(q('[data-testid="agent-permission-instruction"]')).toBeNull();
     act(() => vi.advanceTimersByTime(CONFIRM_GUARD_MS));
     await act(async () => {
       q('[data-testid="agent-permission-commit"]')!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(decide).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "reject_once", optionId: "no", instruction: "설치하지 말고 고쳐 줘" })
-    );
+    expect(decide).toHaveBeenCalledTimes(1);
+    const [decision] = decide.mock.calls[0] as unknown as [Record<string, unknown>];
+    expect(Object.keys(decision).sort()).toEqual(["kind", "optionId", "requestEventId", "sessionId"]);
+    expect(decision).toMatchObject({ kind: "reject_once", optionId: "no" });
   });
 
   it("allow_always never becomes a button, whatever its name says", () => {
@@ -198,6 +204,111 @@ describe("permission card", () => {
     expect(q('[data-testid="agent-permission-preview"]')).toBeNull();
     expect(q('[data-testid="agent-permission-waiting"]')!.textContent).toBe("곽성재의 확인을 기다려요");
     expect(q('[data-testid="agent-pane-reply"]')).toBeNull();
+  });
+});
+
+async function commitAllow() {
+  click(q('[data-testid="agent-permission-allow"]'));
+  act(() => vi.advanceTimersByTime(CONFIRM_GUARD_MS));
+  await act(async () => {
+    q('[data-testid="agent-permission-commit"]')!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+}
+
+describe("decision outcomes (#3013)", () => {
+  const events = () => [tool("bash", "npm install"), ask([ONCE, REJECT])];
+
+  it("200: the buttons go and the card says what was sent", async () => {
+    const decide = vi.fn(async () => undefined);
+    render(model(events()), { decide, reply: null });
+    await commitAllow();
+    expect(q('[data-testid="agent-permission-allow"]')).toBeNull();
+    expect(q('[data-testid="agent-permission-outcome"]')!.textContent).toBe(
+      "이번 한 번 허락을 보냈어요. 에이전트가 이어서 해요."
+    );
+    expect(q('[data-testid="agent-permission"]')!.getAttribute("data-settled")).toBe("sent");
+    expect(document.activeElement).toBe(q('[data-testid="agent-permission"]'));
+  });
+
+  it("a failed send keeps the buttons; the same decision again (server 200) settles it", async () => {
+    const decide = vi
+      .fn<(d: unknown) => Promise<void>>()
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockResolvedValueOnce(undefined);
+    render(model(events()), { decide, reply: null });
+    await commitAllow();
+    expect(q('[data-testid="agent-permission-error"]')!.textContent).toBe(
+      "결정을 보내지 못했어요. 연결을 확인한 뒤 다시 누르세요."
+    );
+    // 무장은 풀리지 않았다: 같은 확정 버튼을 다시 누른다.
+    await act(async () => {
+      q('[data-testid="agent-permission-commit"]')!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(decide).toHaveBeenCalledTimes(2);
+    expect(decide.mock.calls[0][0]).toEqual(decide.mock.calls[1][0]);
+    expect(q('[data-testid="agent-permission-outcome"]')!.textContent).toContain("허락을 보냈어요");
+  });
+
+  it("409 permission_already_decided: another decision won, said plainly, no buttons", async () => {
+    const decide = vi.fn(async () => {
+      throw new ApiError(409, "x", "permission_already_decided");
+    });
+    render(model(events()), { decide, reply: null });
+    await commitAllow();
+    expect(q('[data-testid="agent-permission-commit"]')).toBeNull();
+    expect(q('[data-testid="agent-permission-outcome"]')!.textContent).toBe(
+      "이미 다른 결정이 먼저 들어갔어요. 다른 기기에서 결정했을 수 있어요."
+    );
+    expect(q('[data-testid="agent-permission"]')!.getAttribute("data-settled")).toBe("closed");
+  });
+
+  it("409 permission_request_closed: the request is closed, a different sentence", async () => {
+    const decide = vi.fn(async () => {
+      throw new ApiError(409, "x", "permission_request_closed");
+    });
+    render(model(events()), { decide, reply: null });
+    await commitAllow();
+    const text = q('[data-testid="agent-permission-outcome"]')!.textContent ?? "";
+    expect(text).toContain("이 요청은 이미 닫혔어요");
+    expect(text).not.toContain("다른 결정");
+  });
+
+  it("403: only the owner decides", async () => {
+    const decide = vi.fn(async () => {
+      throw new ApiError(403, "x", "permission_owner_only");
+    });
+    render(model(events()), { decide, reply: null });
+    await commitAllow();
+    expect(q('[data-testid="agent-permission-outcome"]')!.textContent).toContain("소유자만 결정할 수 있어요");
+    expect(q('[data-testid="agent-permission-allow"]')).toBeNull();
+  });
+
+  it("offline locks both buttons with one line of reason, and disarms", () => {
+    const decide = vi.fn(async () => undefined);
+    const m = model(events());
+    render(m, { decide, reply: null });
+    click(q('[data-testid="agent-permission-allow"]'));
+    expect(q('[data-testid="agent-permission-confirm"]')).not.toBeNull();
+    render(m, { decide, reply: null }, "곽성재", true);
+    expect(q('[data-testid="agent-permission-confirm"]')).toBeNull();
+    expect((q('[data-testid="agent-permission-allow"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((q('[data-testid="agent-permission-reject"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(q('[data-testid="agent-permission-unavailable"]')!.textContent).toBe(PERMISSION_OFFLINE_LINE);
+    expect(decide).not.toHaveBeenCalled();
+  });
+
+  it("the card closes itself when the host stops waiting (630s)", () => {
+    const decide = vi.fn(async () => undefined);
+    const evs = events();
+    const requestedAt = evs[1].atMs;
+    render(model(evs), { decide, reply: null });
+    act(() => vi.setSystemTime(requestedAt + PERMISSION_HOST_WAIT_MS - 2_000));
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(q('[data-testid="agent-permission-allow"]')).not.toBeNull();
+    act(() => vi.advanceTimersByTime(PERMISSION_HOST_WAIT_MS));
+    expect(q('[data-testid="agent-permission-allow"]')).toBeNull();
+    expect(q('[data-testid="agent-permission-outcome"]')!.textContent).toBe(PERMISSION_LAPSED_LINE);
+    expect(decide).not.toHaveBeenCalled();
   });
 });
 

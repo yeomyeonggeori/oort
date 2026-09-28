@@ -17,7 +17,8 @@ import type { SessionStatus } from "./sessionList";
 // 1. tool-call 카드의 종류(읽음·수정·실행·변경·검색·도구). 도구 이름은 내부 어휘라
 //    화면에 쓰지 않고, 종류와 한국어 문구로만 옮긴다.
 // 2. 권한 카드. 폰 경로 제약(ADR-0188 D5)을 데스크탑 칸에도 그대로 건다:
-//    「이번 한 번」(`allow_once`)과 「거부하고 지시」(`reject_once`)만 보인다.
+//    「이번 한 번」(`allow_once`)과 「거부」(`reject_once`)만 보인다. 지시를 붙인
+//    거부는 R2까지 서버가 받지 않는다(§8.6, 400 `permission_instruction_unsupported`).
 //    「항상 허용」·bypass·자동 모드 선택지는 받더라도 버린다. 버튼은 host 소유자
 //    (= 세션 소유자)에게만 있다(D3). 결정은 사람이 버튼을 눌렀을 때만 만든다.
 // 3. 표시 정화(D5): 보이지 않는 문자·방향 제어 무력화, 필드당 3,500자 앞뒤 남기고
@@ -267,6 +268,72 @@ export function canAllow(permission: PendingPermission): boolean {
   if (permission.allow === null) return false;
   if (permission.preview?.truncated) return false;
   return true;
+}
+
+// ---- 결정의 결과 (ADR-0188 §8.6, #3013) -------------------------------------
+
+/**
+ * host가 요청을 기다리는 시간. 서버 마감(골든 `ttl_seconds` 600)에 30초를 더한
+ * 값이고, 이 시각에 host가 에이전트에게 거부로 답하고 요청을 거둔다(§8.6). 칸은
+ * 이 시각이 지나면 요청을 닫힌 것으로 그린다. 600~630초 사이에 누른 결정은 서버가
+ * 409 `permission_request_closed`로 답하고, 카드는 그 사실을 그대로 말한다.
+ */
+export const PERMISSION_HOST_WAIT_MS = 630_000;
+
+/** 요청 시각에서 host 대기 시간이 지났는가. 시계가 틀린 기기에서는 틀릴 수 있다. */
+export function permissionLapsed(permission: Pick<PendingPermission, "atMs">, nowMs: number): boolean {
+  return nowMs - permission.atMs >= PERMISSION_HOST_WAIT_MS;
+}
+
+export const PERMISSION_LAPSED_LINE = "10분 안에 결정하지 않아 요청이 닫혔어요. 에이전트는 거부로 받았어요.";
+export const PERMISSION_OFFLINE_LINE = "연결이 끊겨 지금은 결정할 수 없어요. 다시 연결되면 누를 수 있어요.";
+
+/** 결정을 보낸 뒤 카드가 말하는 한 줄. */
+export function permissionSentLine(kind: PermissionChoiceKind): string {
+  return kind === "allow_once"
+    ? "이번 한 번 허락을 보냈어요. 에이전트가 이어서 해요."
+    : "거부를 보냈어요. 에이전트는 이 도구를 쓰지 않아요.";
+}
+
+export interface PermissionFailure {
+  /** 다시 눌러도 달라지지 않는다: 버튼을 거두고 카드를 닫힌 모양으로 둔다. */
+  closed: boolean;
+  text: string;
+}
+
+/**
+ * 결정 라우트가 거절한 이유를 사람의 문장으로(골든 `error_codes`). `status`·`code`만
+ * 읽는다(서버 `message`는 바뀔 수 있다). 같은 결정을 다시 보내면 서버가 200으로
+ * 같은 행을 돌려주므로, 여기로 오는 것은 진짜 거절과 닿지 못한 경우뿐이다.
+ */
+export function permissionFailure(error: unknown): PermissionFailure {
+  const status =
+    typeof error === "object" && error !== null && typeof (error as { status?: unknown }).status === "number"
+      ? (error as { status: number }).status
+      : null;
+  const code =
+    typeof error === "object" && error !== null && typeof (error as { code?: unknown }).code === "string"
+      ? (error as { code: string }).code
+      : null;
+  if (status === 409 && code === "permission_already_decided") {
+    return { closed: true, text: "이미 다른 결정이 먼저 들어갔어요. 다른 기기에서 결정했을 수 있어요." };
+  }
+  if (status === 409) {
+    return {
+      closed: true,
+      text: "이 요청은 이미 닫혔어요. 기한이 지났거나, 차례나 세션이 끝났거나, 호스트가 거둬들였어요.",
+    };
+  }
+  if (status === 403) {
+    return { closed: true, text: "이 세션의 소유자만 결정할 수 있어요. 서버가 이 결정을 받지 않았어요." };
+  }
+  if (status === 404) {
+    return { closed: true, text: "서버에서 이 요청을 찾지 못했어요. 호스트에서 결정하세요." };
+  }
+  if (status === 400) {
+    return { closed: true, text: "서버가 이 선택지를 받지 않았어요. 호스트에서 결정하세요." };
+  }
+  return { closed: false, text: "결정을 보내지 못했어요. 연결을 확인한 뒤 다시 누르세요." };
 }
 
 // ---- 답장 방식 --------------------------------------------------------------
