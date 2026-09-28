@@ -7,6 +7,7 @@
 - 증보: **2026-09-28 (#3097)** — refresh 재사용 계보 폐기에서 기기 키 제외, 계보만 끝난 키의 자기 서명 재결속(`momo.human.device_rebind.v1`). D-7 결정 변경이며 결재 인용은 D-7 「증보 #3097」 절에 있다.
 - 증보: **2026-09-29 (#3079)** — refresh 토큰 sender-constraint. 계보에 결속한 별도 SE **refresh 키**의 증명(`momo.human.refresh_proof.v1`)으로 응답 유실을 복구하고 증명 없는 재사용만 계보를 끝낸다(migration 096). 결재 인용은 D-7 「증보 #3079」 절에 있다.
 - 증보: **2026-09-29 (#3117)** — workd 서명 요구를 켜는 제품 경로(D-10 이행, E10 검수 B1). 서버 신호로 켜지고 서버가 끌 수 없는 래칫. 결재 인용: R2 결재 「전부 권장대로」(2026-09-28)의 D-10 「보안 경계는 workd」 이행. 결정은 바꾸지 않았다. 아래 「증보 2026-09-29 — workd 서명 요구 래칫」 절.
+- 증보: **2026-09-29 (#3118, R2 H1)** — 허락 서명이 사람이 본 미리보기를 묶는다. host가 권한 요청의 미리보기와 그 해시를 싣고, `momo.human.control.v3`의 permission 본문이 그 해시를 한 줄 더 서명하며, host는 자기 해시와 대조한다(migration 097, 소유자 전용 미리보기 조회). 결재 인용: R2 결재 성재 2026-09-28 「전부 권장대로」의 D-5 이행 + E10 검수(#3030) H1. 아래 「증보 2026-09-29 — 허락이 미리보기를 묶는다」 절.
 - 관련: **ADR-0145**(Rust/Axum 재작성 — 이 서명은 그 위에 얹힌다), ADR-0004(자격증명 비유입), ADR-0101(에이전트 신원), ADR-0139/0140(workd — 이미 Ed25519 서명 보유), `docs/architecture/invariants-in-rust.md`(D2 — 이 서명이 불변식을 안 건드림을 교차검증)
 - 발단: 서버 스택 재검토에서 "oort가 buzz에서 취할 만한 한 가지 = 에이전트 행동의 암호학적 provenance"로 식별 → 성재가 B안에 포함 지시 + **범위를 "상태 전이까지 넓게"로 결정**.
 
@@ -475,4 +476,66 @@ E10 검수(B1)는 D-10의 보안 경계인 workd 검증을 켜는 길이 제품�
 
 - `momo-workd` `workd_conformance_pg::wdc_8_r2_the_product_path_latches_the_host_and_the_server_cannot_undo_it`: 실제 바이너리와 실제 서버 라우터를 쓴다. 설정은 데스크탑 `build_config`가 쓰는 모양이고 `require_human_signatures`가 없다. 소켓 `pin_root` 뒤 래칫이 걸린다. 그 뒤 서명 없는 삽입 행과 봉투를 뗀 서명 지시가 거부된다. 서버를 플래그 꺼짐으로 재시작해도, host를 재시작해도 거부된다. 로컬 op로만 풀린다.
 - `invariants::inv_35_r2_the_servers_word_latches_the_host_with_a_root_and_never_lowers_it`: 같은 규칙을 DB 없이 확인한다. 래칫이 같은 응답의 컨트롤보다 먼저 걸리는지도 본다.
+
+## 증보 2026-09-29 — 허락이 미리보기를 묶는다: `momo.human.control.v3` (#3118, R2 H1)
+
+결재 인용: 성재 2026-09-28 「전부 권장대로」(R2 결재, D-5 「서명은 사람이 본 것을 묶는다」의 이행) + E10 보안 검수(#3030, `claudedocs/resume-2026-09-23/review-r2-e10.md`) H1. D-5·D-10의 결정을 바꾸지 않고, v2가 빠뜨린 한 줄을 더한다.
+
+### 무엇이 열려 있었나 (H1)
+
+- v2까지 permission 본문은 `{request_event_id}\n{option_id}\n{option_kind}\n{scope}`였다. host는 이 넷만 대조했다.
+- 카드의 미리보기는 요청 직전에 **서버가 전달한** `agent.status`에서 추론했다(`agentPane.ts` `pendingPermission`). workd의 `approval.requested`에는 선택지만 실렸다.
+- 그래서 악의적 서버가 샌드박스 밖 명령 요청 앞의 이벤트를 「파일을 읽어도 될까요? README.md」로 바꾸면, 소유자의 Face ID 허락이 유효한 서명이 되어 host가 실제 명령을 허락했다.
+
+### 결정
+
+- **host가 원천이다.** workd가 ACP `session/request_permission`의 도구 호출(요청의 `toolCall`에, 에이전트가 앞서 알린 같은 `toolCallId`의 필드를 합친 것)에서 미리보기를 만든다.
+  - 닫힌 객체 `momo.work_permission.preview.v1`: `schema`, `kind`(ACP ToolKind 닫힌 어휘, 그 밖은 `other`), `title`, `locations`(경로, 줄마다 하나), `input`(원 입력의 압축 JSON), `truncated`.
+  - 정화는 0188 D5 규칙 그대로다. 보이지 않는 문자·방향 제어·줄/문단 구분자를 지우고(릴레이 집합 ∪ 자격 스캔의 보이지 않는 집합 ∪ U+2028/2029), 자격 문자열을 가리고, 필드당 3,500자에서 앞뒤를 남기고 자른다. 하나라도 자르면 `truncated`가 참이다.
+  - 자격 문자열은 host 가림(`redact_credentials`)에 더해, 앱 표시 정화(`agentPane.ts` `CREDENTIAL_PATTERNS`)가 가리는 모양을 모두 같거나 더 넓게 가린다(`mask_display_shapes`, 보안 검수 M1). 그래야 정직한 `Authorization: Bearer …` 요청도 앱이 바꾸지 않고 보여 주어 허락할 수 있다.
+  - 정규 바이트는 그 객체의 `canonical_json`(bundle_manifest와 같은 함수)이다. 해시는 그 SHA-256 소문자 hex다(`momo_wire::permission_preview`).
+- **host는 요청을 올리기 전에** 해시를 세션의 원장(`SessionManager::permission_preview_sha256`)에 적는다. `approval.requested`에 `preview`와 `preview_sha256`을 싣는다.
+- **서버는 그대로 중계한다.**
+  - 수신 때 둘이 함께 오고 서로 맞는지만 확인한다(정직한 행의 일관성).
+  - 요청 행(`work_permission_request.preview`·`preview_sha256`, migration 097)에 저장한다.
+  - 세션 스레드 메시지와 실시간 방송에서는 `preview`를 빼고 해시만 남긴다(0188 D5 「채널로 방송하지 않는다」).
+  - 미리보기는 소유자 조회 `GET /v1/workspaces/{ws}/work-sessions/{session}/permission-requests/{requestEventId}`로만 준다. 사람 bearer이고 세션 소유자이자 host 소유자여야 한다. 그 밖은 없는 요청과 같은 404다. 에이전트 scope 목록과 host 서명 허용 목록에 넣지 않았다.
+- **`momo.human.control.v3`.** v2의 13줄 틀 그대로이고 첫 줄만 v3다. permission 본문에 다섯째 줄 `{preview_sha256}`이 붙는다. 다른 kind의 본문은 v2와 같다.
+  - `ControlContent::Permission.preview_sha256`이 어떤 본문이 있는지 정한다. `Some`이면 v3 본문만 만들어지고(v1·v2로는 만들 수 없다), `None`(미리보기 없이 기록된 옛 요청)이면 v1·v2 본문만 만들어진다.
+  - 그래서 `verify_any`는 미리보기가 있는 요청에 v1·v2 허락을 받지 않는다. 다른 kind는 v2를, input·bundle_manifest·host_register는 v1도 전처럼 받는다.
+- **앱은 자기가 렌더한 미리보기로 해시를 다시 계산한다**(`@momo/core` `checkPermissionPreview`, 폰·데스크탑·웹 공용). 서명하는 조건은 넷이다.
+  - 닫힌 객체다.
+  - 표시 정화(`sanitizeDisplayText`)가 어느 필드도 바꾸지 않는다. 가림·무력화·자름이 없어 본 것이 곧 서명할 바이트다. host 정화가 코어 정화의 상위 집합이라 정직한 미리보기에서는 일어나지 않는다.
+  - 다시 계산한 해시가 요청의 `preview_sha256`과 같다.
+  - `truncated`가 거짓이다(0188 D5 「잘린 미리보기는 펼치기 전에는 허용할 수 없다」).
+  - 서명에는 **다시 계산한** 해시를 싣는다.
+- **서버의 검증**(`verify_human_control_in_tx`)은 저장된 해시로 문장을 다시 만든다. 클라이언트의 말은 쓰지 않는다. **host의 검증**(`check_control_with_preview`)은 자기 원장의 해시로 다시 만든다. 원장에 없는 요청(이미 답했거나, 거둬졌거나, 이 host가 올린 적 없는 요청)의 permission은 `permission_request_unknown`이다.
+- **결과.** 서버는 앱이 보여 주는 것을 바꿀 수 있다. 그러나 허락이 뜻하는 바는 바꾸지 못한다.
+  - 미리보기만 바꾸면 앱이 해시 불일치로 서명하지 않는다.
+  - 미리보기와 해시를 함께 바꾸면 앱은 바꾼 미리보기의 해시에 서명한다. host가 자기 해시와 달라 거부한다(`device_signature_invalid`). 에이전트는 계속 기다린다.
+
+### 호환 — 실패 쪽으로 닫는다
+
+- 이 PR 뒤 host는 모든 권한 요청에 미리보기를 싣는다. 그래서 workd R2를 켠 host에서는 permission 허락이 사실상 v3만 된다.
+- 폰 네이티브 서명기(#3066)와 데스크탑 셸(E5)은 아직 v1/v2 permission 본문을 서명한다. **workd R2 스위치(#3117)를 켜기 전에 두 서명기의 v3 전환(uxui 후속)이 먼저 배포되어야 한다.** 그 전에 켜면 서명한 허락이 host에서 `device_signature_invalid`가 된다. 거부·중단은 서명이 필요 없어 그대로 된다.
+- v2 허락을 경고만 하고 받는 선택은 버렸다. 받으면 H1이 그대로 열려 있다.
+- 서버도 미리보기가 저장된 요청에는 v2 허락을 403 `device_signature_invalid`로 거부한다. 미리보기 없이 기록된 요청(097 이전 행, 옛 host)은 v2 허락을 전처럼 받는다.
+
+### 버전 정합 (갱신)
+
+| 표면 | control 스키마 | 비고 |
+|---|---|---|
+| 서버 | v3; v2(미리보기 있는 permission 제외); v1(spawn·미리보기 있는 permission 제외) | 이 증보 |
+| workd | 같음. permission은 자기 원장의 해시로만 다시 만든다 | 이 증보 |
+| 폰 네이티브 모듈 | v1만 허용 | permission 허락을 v3로 옮겨야 한다(uxui 후속, #3117 켜기 전 필수) |
+| 데스크탑 Tauri | control.v1 | 같음. 확인 창에 미리보기를 보여야 한다(#3076 잔여, uxui 후속) |
+
+- 공유 벡터: `docs/api/human-control-signing-v3.vectors.json`(permission 두 사례는 미리보기 객체·정규 바이트·해시를 함께 싣는다). WebCrypto·CryptoKit(소프트웨어 + Secure Enclave) 서명을 Rust가 다시 검증한다. 코어의 사본 `packages/momo-core/src/features/workbench/__fixtures__/permission-preview.vectors.json`은 Rust가 벡터와 같은지 확인한다.
+
+### 남은 것 (uxui 후속)
+
+- 폰·데스크탑 서명기의 v3 permission 본문. 폰 Swift 허용 목록과 `humanControl.ts`, 데스크탑 `payload.rs`를 옮긴다.
+- 폰 권한 카드와 데스크탑 칸이 미리보기를 소유자 조회로 받는다. `checkPermissionPreview`가 통과할 때만 허락 버튼을 연다.
+- 데스크탑 네이티브 확인 창에 같은 미리보기를 보인다(#3076·#3094 잔여).
+- 잘린 미리보기를 펼칠 전체 미리보기 조회는 없다. 잘린 요청은 거부하거나 맥 앞에서 결정한다.
 

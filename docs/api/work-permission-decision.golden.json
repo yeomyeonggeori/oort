@@ -6,7 +6,7 @@
     "auth": "human bearer of the session owner (= host owner). Agent bearers and host signatures never reach it."
   },
   "approval_requested_event": {
-    "_comment": "워크드가 올리는 세션 이벤트(realtime `approval.requested` 프레임과 스레드 System 메시지 props.event). event_id가 requestEventId다. 선택지는 allow_once·reject_once뿐이고 이름은 고정 문자열이다(에이전트가 쓴 글은 싣지 않는다).",
+    "_comment": "워크드가 올리는 세션 이벤트(realtime `approval.requested` 프레임과 스레드 System 메시지 props.event). event_id가 requestEventId다. 선택지는 allow_once·reject_once뿐이고 이름은 고정 문자열이다(에이전트가 쓴 글은 싣지 않는다). #3118: host는 정화한 미리보기(`preview`, momo.work_permission.preview.v1)와 그 해시(`preview_sha256`)를 함께 올리고, 서버는 미리보기를 요청 행에 두어 소유자 조회로만 주며 방송·스레드에는 해시만 남긴다(아래 모양). 허락은 이 해시에 서명한다(momo.human.control.v3).",
     "event_id": "00000000-0000-4000-8000-00000000e001",
     "type": "approval.requested",
     "payload": {
@@ -16,7 +16,8 @@
       "options": [
         {"option_id": "allow-once", "kind": "allow_once", "name": "Allow once"},
         {"option_id": "reject-once", "kind": "reject_once", "name": "Reject"}
-      ]
+      ],
+      "preview_sha256": "722d12c20aff8fb180b5923d2ccbb8bc2baca0d8cf774c59d7113e3d303e8512"
     }
   },
   "approval_decided_event": {

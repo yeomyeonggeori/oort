@@ -12,6 +12,7 @@
 //! | test | what it proves |
 //! |---|---|
 //! | `the_servers_envelope_passes_the_hosts_verifier` | a phone allow (endorsed by the root) and a root allow both verify on the host; the host's own replay barrier, a host with another pinned root, and an envelope or payload changed after the server relayed it are each refused by name |
+//! | `the_servers_envelope_passes_the_hosts_verifier` (#3118) | the host relays its own preview (`projection::permission_preview`) with its hash; the owner reads it from the owner-only route, re-hashes it and signs v3; the host verifies with **its** hash, and refuses the same control when its hash differs (a server showed another preview) or when it holds none |
 //! | `signed_instructions_and_a_signed_resume_pass_the_hosts_verifier` | #3027: a queue and an interrupt sent through `POST …/instructions`, and a resume the owner signed with its successor session, verify on the host exactly as relayed; the text, the mode, the tool, the channel or the session changed after relay are refused |
 //!
 //! `#[ignore]` — needs a `pgvector/pgvector:pg18` superuser DB plus the runtime
@@ -200,8 +201,18 @@ impl World {
         (status, response.json().await.unwrap_or(Value::Null))
     }
 
-    async fn permission_request(&self, session: Uuid) -> Uuid {
+    /// The host relays a request with the preview it builds itself (#3118)
+    /// — from a tool call named `title`. Returns the event id and the hash the
+    /// host keeps.
+    async fn permission_request(&self, session: Uuid, title: &str) -> (Uuid, String) {
         let event_id = Uuid::new_v4();
+        let preview = momo_workd::projection::permission_preview(
+            &mut Vec::new(),
+            &json!({"toolCall": {"toolCallId": "call-1", "kind": "execute", "title": title,
+                                 "rawInput": {"command": title}}}),
+        )
+        .to_value();
+        let hash = momo_wire::permission_preview::preview_sha256(&preview).unwrap();
         let (status, body) = self
             .host_request(
                 "PATCH",
@@ -214,17 +225,40 @@ impl World {
                         "options": [
                             {"option_id": "allow-once", "kind": "allow_once", "name": "Allow once"},
                             {"option_id": "reject-once", "kind": "reject_once", "name": "Reject"}
-                        ]
+                        ],
+                        "preview": preview, "preview_sha256": hash
                     }
                 }})),
             )
             .await;
         assert_eq!(status, 200, "relay approval.requested: {body}");
-        event_id
+        (event_id, hash)
     }
 
-    /// Sign `allow-once` of `request` and have the owner send the decision.
+    /// The owner's app: read the request's preview from the owner-only route
+    /// and hash what it would render (#3118).
+    async fn rendered_preview_sha256(&self, session: Uuid, request: Uuid) -> String {
+        let response = self
+            .http
+            .get(format!(
+                "{}/v1/workspaces/{}/work-sessions/{session}/permission-requests/{request}",
+                self.base, self.workspace
+            ))
+            .bearer_auth(&self.access)
+            .send()
+            .await
+            .expect("get preview");
+        assert_eq!(response.status().as_u16(), 200);
+        let body: Value = response.json().await.unwrap();
+        let hash = momo_wire::permission_preview::preview_sha256(&body["preview"]).unwrap();
+        assert_eq!(body["permissionRequest"]["previewSha256"], json!(hash));
+        hash
+    }
+
+    /// Sign `allow-once` of `request` over the preview the owner's app read,
+    /// and have the owner send the decision.
     async fn signed_allow(&self, device: &Device, key_id: Uuid, session: Uuid, request: Uuid) {
+        let rendered = self.rendered_preview_sha256(session, request).await;
         let issued = now_ms();
         let nonce = Uuid::new_v4();
         let bytes = HumanControl {
@@ -242,6 +276,7 @@ impl World {
                 option_id: "allow-once",
                 option_kind: "allow_once",
                 scope: PermissionScope::Once,
+                preview_sha256: Some(&rendered),
             },
         }
         .signed_bytes()
@@ -501,9 +536,9 @@ async fn the_servers_envelope_passes_the_hosts_verifier() {
     } = stage().await;
     let workspace = w.workspace;
     let person = w.person;
-    let first = w.permission_request(session).await;
+    let (first, first_hash) = w.permission_request(session, "git push").await;
     w.signed_allow(&phone, phone_id, session, first).await;
-    let second = w.permission_request(session).await;
+    let (second, second_hash) = w.permission_request(session, "rm -rf target").await;
     w.signed_allow(&root, root_id, session, second).await;
 
     let controls = w.pending().await;
@@ -538,12 +573,40 @@ async fn the_servers_envelope_passes_the_hosts_verifier() {
         Ok(true)
     );
 
+    // #3118: the host verifies each allow with the preview hash IT relayed.
+    // A host that relayed another preview for that request (a server showed
+    // the owner something else) refuses, and one waiting on nothing refuses.
+    let fresh_host = || {
+        let mut t = HumanTrust::open(&trust_dir(), identity).unwrap();
+        t.pin_root(root_id, "p256", &root.public_b64, now_ms())
+            .unwrap();
+        t
+    };
+    assert_eq!(
+        fresh_host().check_control_with_preview(&from_phone, Some(&second_hash), now_ms()),
+        Err(Refusal::DeviceSignatureInvalid),
+        "an allow over another preview"
+    );
+    assert_eq!(
+        fresh_host().check_control(&from_phone, now_ms()),
+        Err(Refusal::PermissionRequestUnknown),
+        "a request the host is not waiting on"
+    );
+
     // What the server built passes the host's verifier — both chains.
-    assert_eq!(trust.check_control(&from_phone, now_ms()), Ok(()), "phone");
-    assert_eq!(trust.check_control(&from_root, now_ms()), Ok(()), "root");
+    assert_eq!(
+        trust.check_control_with_preview(&from_phone, Some(&first_hash), now_ms()),
+        Ok(()),
+        "phone"
+    );
+    assert_eq!(
+        trust.check_control_with_preview(&from_root, Some(&second_hash), now_ms()),
+        Ok(()),
+        "root"
+    );
     // The host's own barrier: the same control again is a replay.
     assert_eq!(
-        trust.check_control(&from_phone, now_ms()),
+        trust.check_control_with_preview(&from_phone, Some(&first_hash), now_ms()),
         Err(Refusal::DeviceNonceReplayed)
     );
 
@@ -554,11 +617,11 @@ async fn the_servers_envelope_passes_the_hosts_verifier() {
         .pin_root(Uuid::new_v4(), "p256", &stranger.public_b64, now_ms())
         .unwrap();
     assert_eq!(
-        elsewhere.check_control(&from_phone, now_ms()),
+        elsewhere.check_control_with_preview(&from_phone, Some(&first_hash), now_ms()),
         Err(Refusal::DeviceKeyNotEndorsed)
     );
     assert_eq!(
-        elsewhere.check_control(&from_root, now_ms()),
+        elsewhere.check_control_with_preview(&from_root, Some(&second_hash), now_ms()),
         Err(Refusal::DeviceKeyNotEndorsed)
     );
 
@@ -572,19 +635,19 @@ async fn the_servers_envelope_passes_the_hosts_verifier() {
     let mut other_option = from_root.clone();
     other_option.payload["option_id"] = json!("allow-always");
     assert_eq!(
-        fresh().check_control(&other_option, now_ms()),
+        fresh().check_control_with_preview(&other_option, Some(&second_hash), now_ms()),
         Err(Refusal::DeviceSignatureInvalid)
     );
     let mut scope_swapped = from_root.clone();
     scope_swapped.human_signature.as_mut().unwrap()["scope"] = json!("session");
     assert_eq!(
-        fresh().check_control(&scope_swapped, now_ms()),
+        fresh().check_control_with_preview(&scope_swapped, Some(&second_hash), now_ms()),
         Err(Refusal::DeviceSignatureInvalid)
     );
     let mut other_session = from_phone.clone();
     other_session.session_id = Some(Uuid::new_v4());
     assert_eq!(
-        fresh().check_control(&other_session, now_ms()),
+        fresh().check_control_with_preview(&other_session, Some(&first_hash), now_ms()),
         Err(Refusal::DeviceSignatureInvalid)
     );
 }

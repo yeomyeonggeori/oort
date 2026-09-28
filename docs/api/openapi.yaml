@@ -4778,7 +4778,10 @@ paths:
         device-key signature). R2 (ADR-0146 개정 D-8 · D-10, #3023):
         `humanSignature` is the owner's `momo.human.control.v1` statement
         (kind=permission) over the stored request event id, option id and
-        kind, this session and the session's host. It is verified whenever
+        kind, this session and the session's host — and, for a request the
+        host relayed with a preview, `momo.human.control.v3` whose fifth
+        permission line is the stored `previewSha256` (#3118; a v1/v2 allow
+        is then refused as device_signature_invalid). It is verified whenever
         sent; an allow requires it when the instance sets
         `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`; a reject never does. A
         verified signature rides on the permission control
@@ -4853,6 +4856,58 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/permission-requests/{requestEventId}:
+    get:
+      tags: [work-sessions]
+      operationId: getWorkPermissionPreview
+      summary: The session owner's read of one permission request and its preview (#3118).
+      description: >
+        ADR-0188 D5 「미리보기는 소유자의 조회로만」, ADR-0146 증보 2026-09-29
+        (R2 H1). The host relays each ACP permission request with a sanitised
+        preview (`momo.work_permission.preview.v1`: tool kind, title,
+        locations, input summary, truncated) and its SHA-256; the server
+        stores both on the request and broadcasts only the hash. This route
+        returns the preview as the host sent it, to the session owner who is
+        also the host owner, human bearer only (agent bearers and host-signed
+        requests never reach it). The app re-hashes the preview it renders
+        (`@momo/core` `checkPermissionPreview`) and signs an allow only when
+        that equals `permissionRequest.previewSha256`; the host compares the
+        signed line with its own hash.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkSessionId"
+        - name: requestEventId
+          in: path
+          required: true
+          description: The `approval.requested` event id.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The request, the options the host offered, and the preview (null for a request relayed without one).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkPermissionPreviewResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            An agent bearer (refused before the handler), or `error.code`
+            permission_decider_not_human for any other non-human principal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: >
+            No such request in this session — or the caller is not the
+            session and host owner (the same answer, so the route does not say
+            which requests exist).
 
   /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/instructions:
     post:
@@ -11448,10 +11503,12 @@ components:
           description: MOMO_HOST_REGISTER_SIGNATURE_REQUIRED.
         humanControlSchema:
           type: string
-          enum: [momo.human.control.v2]
+          enum: [momo.human.control.v3]
           description: >
-            The control schema a device signs (#3027). A v1 statement is still
-            accepted for every kind but spawn.
+            The control schema a device signs (#3118: a permission allow binds
+            the request's preview hash). A v2 statement is still accepted for
+            every kind but a permission whose request carries a preview; a v1
+            one also not for spawn.
         sessionId:
           type: string
           format: uuid
@@ -12833,6 +12890,13 @@ components:
         expiresAtMs:
           type: integer
           format: int64
+        previewSha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: >
+            #3118: SHA-256 of the host's preview (canonical JSON) — the line a
+            `momo.human.control.v3` allow signs. Absent for a request relayed
+            without a preview.
 
     WorkPermissionDecisionResponse:
       type: object
@@ -12840,6 +12904,60 @@ components:
       properties:
         permissionRequest:
           $ref: "#/components/schemas/WorkPermissionRequest"
+
+    WorkPermissionPreview:
+      type: object
+      description: >
+        #3118 `momo.work_permission.preview.v1`, closed. Built and sanitised by
+        the host (invisible and direction characters removed, credential
+        shapes masked, each text field at most 3,500 characters with head and
+        tail kept). Its canonical bytes are the sorted-key compact JSON
+        (`JSON.stringify` escaping).
+      additionalProperties: false
+      required: [schema, kind, title, locations, input, truncated]
+      properties:
+        schema:
+          type: string
+          enum: [momo.work_permission.preview.v1]
+        kind:
+          type: string
+          enum: [read, edit, delete, move, search, execute, think, fetch, switch_mode, other]
+        title:
+          type: string
+          maxLength: 3500
+        locations:
+          type: string
+          maxLength: 3500
+          description: The request's paths, one per line (`path` or `path:line`).
+        input:
+          type: string
+          maxLength: 3500
+          description: The tool's raw input as compact JSON.
+        truncated:
+          type: boolean
+          description: Some field was cut; an app does not allow over a cut preview.
+
+    WorkPermissionPreviewResponse:
+      type: object
+      required: [permissionRequest, options, preview]
+      properties:
+        permissionRequest:
+          $ref: "#/components/schemas/WorkPermissionRequest"
+        options:
+          type: array
+          items:
+            type: object
+            required: [optionId, kind]
+            properties:
+              optionId:
+                type: string
+              kind:
+                type: string
+                enum: [allow_once, reject_once]
+        preview:
+          allOf:
+            - $ref: "#/components/schemas/WorkPermissionPreview"
+          nullable: true
 
     WorkControlAckRequest:
       type: object
