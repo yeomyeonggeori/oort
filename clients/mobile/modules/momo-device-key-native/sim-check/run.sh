@@ -19,9 +19,13 @@ SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
 ARCH="$(uname -m)"
 VECTORS="$HERE/../../../__tests__/fixtures/human-control-signing.vectors.json"
 [ -f "$VECTORS" ] || { echo "error: missing $VECTORS" >&2; exit 1; }
+REBIND="$HERE/../../../__tests__/fixtures/device-rebind.vector.json"
+[ -f "$REBIND" ] || { echo "error: missing $REBIND" >&2; exit 1; }
+REFRESH="$HERE/../../../__tests__/fixtures/refresh-proof.vector.json"
+[ -f "$REFRESH" ] || { echo "error: missing $REFRESH" >&2; exit 1; }
 xcrun --sdk iphonesimulator swiftc -O -warnings-as-errors \
   -target "${ARCH}-apple-ios16.4-simulator" -sdk "$SDK" \
   -o "$OUT/device-key-sim-check" \
-  "$HERE/../ios/MomoDeviceKeyStore.swift" "$HERE/main.swift"
+  "$HERE/../ios/MomoDeviceKeyStore.swift" "$HERE/../ios/MomoRefreshKeyStore.swift" "$HERE/main.swift"
 [ -x "$OUT/device-key-sim-check" ] || { echo "error: compile failed" >&2; exit 1; }
-xcrun simctl spawn "$UDID" "$OUT/device-key-sim-check" "$VECTORS"
+xcrun simctl spawn "$UDID" "$OUT/device-key-sim-check" "$VECTORS" "$REBIND" "$REFRESH"

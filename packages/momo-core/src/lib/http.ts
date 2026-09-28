@@ -69,17 +69,28 @@ export interface HttpResponse {
   readonly ok: boolean;
   /** Raw body text, read within the deadline. Empty string for an empty body. */
   readonly text: string;
+  /**
+   * The `Date` header, or null. The refresh proof's clock correction reads it
+   * (`refresh_proof_stale`, #3106).
+   */
+  readonly date?: string | null;
   /** Parsed body. Throws on a body that is not JSON, like `Response.json()`. */
   json<T>(): T;
   /** Parsed body, or null when there is none or it is not JSON. */
   jsonOrNull<T>(): T | null;
 }
 
-function httpResponse(status: number, ok: boolean, text: string): HttpResponse {
+function httpResponse(
+  status: number,
+  ok: boolean,
+  text: string,
+  date: string | null = null
+): HttpResponse {
   return {
     status,
     ok,
     text,
+    date,
     json<T>(): T {
       return JSON.parse(text) as T;
     },
@@ -127,7 +138,7 @@ export async function fetchWithDeadline(
     // Still under the same signal: a body that stalls after the headers is the
     // same infinite wait, and it aborts on the same deadline.
     const text = await res.text();
-    return httpResponse(res.status, res.ok, text);
+    return httpResponse(res.status, res.ok, text, res.headers?.get?.("Date") ?? null);
   } catch (error) {
     if (timedOut) throw new NetworkError("timeout", timeoutMs, error);
     if (callerSignal?.aborted) throw error; // the caller cancelled; not a failure

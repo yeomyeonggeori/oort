@@ -51,10 +51,24 @@ export function phoneOnboardingDots(
 // ---- 연결 화면이 M3에 넘기는 한 칸 ------------------------------------------
 
 let connectedRoute: PhoneRoute | null = null;
+/** QR 연결 뒤 기기 키를 한 번 만들고 등록할지(#3026, ADR-0146 개정 D-6 ②). */
+let keyEnrollmentArmed = false;
 
 /** 연결 화면이 세션을 세우기 직전에 부른다. */
 export function noteConnectRoute(route: PhoneRoute): void {
   connectedRoute = route;
+  // QR로 시작했다가 주소 로그인으로 들어오면 풀린다 — 키는 QR 연결의 몫이다.
+  keyEnrollmentArmed = route === 'qr';
+}
+
+/** 셸이 QR 연결 직후 한 번 읽는다. 읽지 않고 들여다보기만 한다. */
+export function qrKeyEnrollmentArmed(): boolean {
+  return keyEnrollmentArmed;
+}
+
+/** 셸이 등록을 시작하며 부른다. 같은 연결로 두 번 등록하지 않는다. */
+export function consumeQrKeyEnrollment(): void {
+  keyEnrollmentArmed = false;
 }
 
 /** M3이 읽는다. 읽어도 지우지 않는다(같은 세션 안에서 다시 그려질 수 있다). */
@@ -65,6 +79,7 @@ export function lastConnectRoute(): PhoneRoute | null {
 /** 로그아웃·시험 정리용. */
 export function resetConnectRoute(): void {
   connectedRoute = null;
+  keyEnrollmentArmed = false;
 }
 
 // ---- M3을 보일지 (ADR-0193 D8, #2820) ---------------------------------------

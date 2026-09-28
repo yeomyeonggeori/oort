@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { apiBase as coreApiBase, coreHostInstalled } from "@momo/core/runtime/host";
+import { apiBase as coreApiBase, coreHostInstalled, coreSession } from "@momo/core/runtime/host";
 import { setServerBase } from "./serverBase";
 import "./coreHost";
 
@@ -33,5 +33,17 @@ describe("core host installation", () => {
     expect(coreApiBase()).toBe("https://oort.example.com");
     setServerBase(null);
     expect(coreApiBase()).toBe("");
+  });
+});
+
+// #3106: only the desktop shell carries the refresh (and so gets the bind
+// refresh after each sign-in). A browser installs neither port, so its
+// refreshes and sign-ins stay exactly what they were. Sabotage: install them
+// unconditionally — every browser sign-in gains an extra rotation. RED.
+describe("refresh proof ports (#3106)", () => {
+  it("a browser installs no refresh-through-host and no proof signer", () => {
+    expect(coreSession().refreshThroughHost).toBeUndefined();
+    expect(coreSession().revokeThroughHost).toBeUndefined();
+    expect(coreSession().signRefreshProof).toBeUndefined();
   });
 });

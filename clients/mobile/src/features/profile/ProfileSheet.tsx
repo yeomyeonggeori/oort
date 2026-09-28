@@ -76,6 +76,9 @@ import {COPY_RECEIPT_MS, copyText} from '../conversation/copy';
 import {currentAppVersionLabel} from './appVersion';
 import {usePauseNotifications, useSetPresence} from './selfStatus';
 import {StatusPage} from './StatusPage';
+import {DEVICE_KEY_TITLE, deviceKeyCopy} from '../deviceKey/copy';
+import {DeviceKeyPanel} from '../deviceKey/DeviceKeyPanel';
+import {useDeviceKey} from '../deviceKey/useDeviceKey';
 
 // =============================================================================
 // 내 프로필 시트 — 대화 목록 머리의 아바타가 여는 곳 (#2702).
@@ -129,14 +132,22 @@ import {StatusPage} from './StatusPage';
 //
 // 없다. 폰은 기기 연결의 **받는 쪽**(QR 을 읽어 로그인한다)이고 연결된 기기 목록을
 // 가진 쪽이 아니다. 없는 항목을 자리만 그려 두지 않는다.
+//
+// ## 지시 기기 (#3026)
+//
+// 대신 **이 폰 자신**이 지시 기기인가는 여기서 보인다: 「연결」 묶음의 한 줄이
+// 상태(승인 전·승인됨·끊김·무효…)를 말하고, 누르면 같은 시트 안의 한 장이
+// 지문과 다음 행동을 보인다(`features/deviceKey/DeviceKeyPanel`). QR 연결 직후 한
+// 번 뜨는 시트와 같은 판이다. 승인은 맥이 한다 — 이 장은 맥의 어디를 열지 말한다.
 // =============================================================================
 
-type Page = 'profile' | 'theme' | 'status';
+export type Page = 'profile' | 'theme' | 'status' | 'deviceKey';
 
 const PAGE_TITLE: Record<Page, string> = {
   profile: '내 프로필',
   theme: '테마',
   status: CUSTOM_STATUS_DIALOG_TITLE,
+  deviceKey: DEVICE_KEY_TITLE,
 };
 
 export function ProfileSheet({
@@ -146,6 +157,7 @@ export function ProfileSheet({
   connected,
   onSignOut,
   onClose,
+  initialPage = 'profile',
 }: {
   workspaceId: string;
   member: Member;
@@ -154,6 +166,8 @@ export function ProfileSheet({
   connected: boolean;
   onSignOut: () => void;
   onClose: () => void;
+  /** 처음 열 장. 앱은 늘 `profile` 이고, 측정 하네스가 안쪽 장을 찍을 때 쓴다. */
+  initialPage?: Page;
 }): React.JSX.Element {
   // 셸의 페이지 시트(시안 `.a-sheet`: 위 58, 반경 30, `sheet` 바탕, 스크림, 손잡이)
   // 안에 선다 (ADR-0189 D1, DS2-2 #2714). 이 시트는 한때 iOS `pageSheet` 였다 —
@@ -168,6 +182,7 @@ export function ProfileSheet({
         connected={connected}
         onSignOut={onSignOut}
         onClose={onClose}
+        initialPage={initialPage}
       />
     </PageSheet>
   );
@@ -180,6 +195,7 @@ function SheetBody({
   connected,
   onSignOut,
   onClose,
+  initialPage,
 }: {
   workspaceId: string;
   member: Member;
@@ -187,12 +203,13 @@ function SheetBody({
   connected: boolean;
   onSignOut: () => void;
   onClose: () => void;
+  initialPage: Page;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
   // 「닫기」도 스크림·끌기와 같이 미끄러져 나간다.
   const slideClose = usePageSheetClose() ?? onClose;
-  const [page, setPage] = useState<Page>('profile');
+  const [page, setPage] = useState<Page>(initialPage);
   const scrollRef = useRef<ScrollView>(null);
   const revealEnd = useCallback(
     () => scrollRef.current?.scrollToEnd({animated: true}),
@@ -269,6 +286,8 @@ function SheetBody({
       >
         {page === 'theme' ? (
           <ThemePage />
+        ) : page === 'deviceKey' ? (
+          <DeviceKeyPage workspaceId={workspaceId} />
         ) : page === 'status' ? (
           <StatusPage
             workspaceId={workspaceId}
@@ -285,6 +304,7 @@ function SheetBody({
             connected={connected}
             onOpenTheme={() => setPage('theme')}
             onOpenStatus={() => setPage('status')}
+            onOpenDeviceKey={() => setPage('deviceKey')}
             onSignOut={onSignOut}
             onRevealEnd={revealEnd}
           />
@@ -306,6 +326,12 @@ function ThemePage(): React.JSX.Element {
   );
 }
 
+function DeviceKeyPage({workspaceId}: {workspaceId: string}): React.JSX.Element {
+  // 이 장을 연 사람에게만 스스로 다시 연결한다(#3103) — Face ID 창이 뜬다.
+  const state = useDeviceKey(workspaceId, {autoReconnect: true});
+  return <DeviceKeyPanel state={state} />;
+}
+
 function ProfilePage({
   workspaceId,
   member,
@@ -313,6 +339,7 @@ function ProfilePage({
   connected,
   onOpenTheme,
   onOpenStatus,
+  onOpenDeviceKey,
   onSignOut,
   onRevealEnd,
 }: {
@@ -322,6 +349,7 @@ function ProfilePage({
   connected: boolean;
   onOpenTheme: () => void;
   onOpenStatus: () => void;
+  onOpenDeviceKey: () => void;
   onSignOut: () => void;
   /** 확인 블록이 열리면 시트를 끝까지 내린다 — 두 버튼이 접힌 곳 아래에 서지 않게. */
   onRevealEnd: () => void;
@@ -393,6 +421,8 @@ function ProfilePage({
     setPresence.mutate({status});
   };
   const server = getServerBase();
+  // 줄의 값만 읽는다 — 승인을 기다리며 목록을 되읽는 일은 그 장이 열렸을 때만 한다.
+  const deviceKey = deviceKeyCopy(useDeviceKey(workspaceId, {poll: false}).view);
 
   return (
     <>
@@ -618,6 +648,16 @@ function ProfilePage({
           title="서버"
           detail={server ?? '이 기기에 저장된 서버 주소가 없습니다.'}
           testID="profile-server-row"
+        />
+        <GroupRow
+          title={DEVICE_KEY_TITLE}
+          value={deviceKey.badge}
+          chevron
+          separated
+          onPress={onOpenDeviceKey}
+          accessibilityLabel={`${DEVICE_KEY_TITLE}, ${deviceKey.badge}`}
+          accessibilityHint="이 폰이 에이전트에게 지시할 수 있는지와 지문을 봅니다."
+          testID="profile-device-key-row"
         />
       </GroupSection>
 

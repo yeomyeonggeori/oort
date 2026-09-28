@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({
   desktop: false,
   keychain: {
     available: vi.fn(async () => true),
-    load: vi.fn(async (): Promise<string | null> => null),
+    handle: vi.fn(async (): Promise<string | null> => null),
     store: vi.fn(async () => true),
     clear: vi.fn(async () => true),
   },
@@ -27,6 +27,15 @@ const mocks = vi.hoisted(() => ({
 vi.mock("./tauri", () => ({
   isDesktop: () => mocks.desktop,
   desktopKeychain: mocks.keychain,
+  desktopRotationHold: { begin: async () => false, end: async () => {} },
+  desktopSession: {
+    refreshAttempt: vi.fn(async () => {
+      throw new Error("the keychain never confirmed this session");
+    }),
+    revoke: vi.fn(async () => {
+      throw new Error("the shell does not hold this raw token");
+    }),
+  },
 }));
 
 const WEB_KEY = "momo.web.session.v1";

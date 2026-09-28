@@ -34,9 +34,16 @@ const APP_COMMANDS: &[&str] = &[
     "notification_request_permission",
     "notification_show",
     "keychain_available",
-    "keychain_load_refresh_token",
+    // Desktop: the webview's handle for the stored token (#3106).
+    "keychain_refresh_token_handle",
     "keychain_store_refresh_token",
     "keychain_clear_refresh_token",
+    // A window close waits for a refresh rotation in flight (#3098).
+    "session_rotation_begin",
+    "session_rotation_end",
+    // The shell's own rotation and logout revocation (#3106).
+    "session_refresh_attempt",
+    "session_revoke",
     "open_external_url",
     "open_pdf_attachment",
     "detect_hosted_agents",
@@ -79,6 +86,7 @@ const APP_COMMANDS: &[&str] = &[
     "device_key_sign_endorse",
     "device_key_sign_revoke",
     "device_key_deliver_revocation",
+    "device_key_sign_rebind",
 ];
 
 // The momo-workd helper bundle (`binaries/momo-workd.app`, #3084) is read only

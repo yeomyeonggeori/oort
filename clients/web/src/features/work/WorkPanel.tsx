@@ -10,13 +10,13 @@
 // 타임라인 세션 카드(`openWorkSession`)·`?work=`다. 같은 세션의
 // ObserverTerminal 을 두 번 마운트하지 않기 위해 ChatShell 이 둘을 XOR 한다.
 // 입력 왕복은 여기도 도크도 없다.
+import { useHumanControlSigning, useResumeWorkSession } from "./signedWork";
+import { resumeFailureLine } from "@momo/core/features/auth/signedControl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PanelRightClose, PanelRightOpen, X } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import {
-  ApiError,
-  resumeWorkSession,
   uuidEq,
   type Channel,
   type WorkHost,
@@ -726,6 +726,8 @@ export function WorkPanel({
   onClose: () => void;
 }) {
   const { session: auth, workspaceId, connStatus } = useSession();
+  const signing = useHumanControlSigning(workspaceId, true);
+  const resume = useResumeWorkSession(workspaceId, signing.signed);
   const channelsQuery = useChannels(workspaceId);
   const directoryQuery = useDirectory(workspaceId);
   const sessionsQuery = useWorkSessions(workspaceId);
@@ -874,11 +876,7 @@ export function WorkPanel({
       setResumingHostId(targetHostId);
       setResumeError(null);
       try {
-        const resumed = await resumeWorkSession(
-          workspaceId,
-          session.id,
-          targetHostId
-        );
+        const resumed = await resume(session, targetHostId);
         await sessionsQuery.refetch();
         setResumeSessionId(null);
         onSelectedIdChange(resumed.id);
@@ -887,21 +885,16 @@ export function WorkPanel({
         // 슬롯이 찼을 때도 멀쩡한 호스트를 고치라고 시켰다. 서버의 거절 어휘는
         // 닫혀 있으므로(pool_exhausted · member_limit · …) 코어가 그것을 행동으로
         // 번역한다 (ADR-0154 D3 「실패를 무엇을 하면 되는지로」).
-        setResumeError(
-          takeoverFailureCopy(
-            error instanceof ApiError ? error.status : undefined,
-            error instanceof Error ? error.message : undefined
-          )
-        );
+        setResumeError(resumeFailureLine(error, takeoverFailureCopy));
       } finally {
         setResumingHostId(null);
       }
     },
     [
       onSelectedIdChange,
+      resume,
       resumingHostId,
       sessionsQuery,
-      workspaceId,
     ]
   );
 

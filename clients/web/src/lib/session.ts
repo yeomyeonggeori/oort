@@ -6,8 +6,14 @@ import {
   type PersistedSession,
   type SessionStorageMode,
 } from "@momo/core/lib/sessionModel";
+import type {
+  HostRefreshAnswer,
+  HostRefreshRequest,
+  HostRevokeRequest,
+} from "@momo/core/runtime/host";
 import { withRotationLock } from "./rotationLock";
-import { desktopKeychain, isDesktop } from "./tauri";
+import { apiBase } from "./serverBase";
+import { desktopKeychain, desktopRotationHold, desktopSession, isDesktop } from "./tauri";
 
 export {
   parsePersistedMetadata,
@@ -59,9 +65,15 @@ export {
 //   token to move (MOMO-606): see `hydrate()`.
 //
 //   desktop + keychain   token in the OS credential store, metadata in
-//                        `momo.desktop.session.v1`. An injected script can no
-//                        longer read the token back — it can still ASK the shell
-//                        to use it, which is a real and smaller residual risk.
+//                        `momo.desktop.session.v1`. Since #3106 the SHELL
+//                        rotates it (with the refresh-key proof) and this
+//                        module holds only a handle (`shell:` + a hash): the
+//                        raw token is in webview memory only between a
+//                        sign-in and its first (immediate, bind) rotation. An
+//                        injected script can no longer read the token back and
+//                        cannot make the shell send it to another server; it
+//                        can still ASK the shell to rotate or revoke it, which
+//                        is a real and smaller residual risk.
 //   browser, or a shell  the pre-existing `momo.web.session.v1` record, token
 //   whose keychain       included. Unchanged, and honest: a Linux box with no
 //   will not answer      Secret Service still signs in, it just does not gain a
@@ -131,12 +143,25 @@ function readStorage(): PersistedSession | null {
   return parsePersistedSession(readRaw(STORAGE_KEY));
 }
 
+/** A handle the shell answers with in place of the token (#3106). */
+export const SHELL_HANDLE_PREFIX = "shell:";
+
+function isShellHandle(token: string): boolean {
+  return token.startsWith(SHELL_HANDLE_PREFIX);
+}
+
 function writeStorage(value: PersistedSession | null): void {
   if (storageMode === "keychain") {
     writeRaw(DESKTOP_METADATA_KEY, value ? JSON.stringify(sessionMetadataOf(value)) : null);
     queueKeychain(async () => {
       if (!value) return desktopKeychain.clear();
-      if (await desktopKeychain.store(value.refreshToken)) {
+      // The shell rotated and already stored the successor; a handle is not
+      // a token and must never overwrite one. Other windows still hear it.
+      if (isShellHandle(value.refreshToken)) {
+        writeRaw(DESKTOP_ROTATED_KEY, `${Date.now()}:${Math.random()}`);
+        return true;
+      }
+      if (await desktopKeychain.store(value.refreshToken, apiBase())) {
         writeRaw(DESKTOP_ROTATED_KEY, `${Date.now()}:${Math.random()}`);
         return true;
       }
@@ -224,7 +249,7 @@ async function hydrate(): Promise<void> {
   // here would sign someone out for no reason, and leaving it behind would
   // defeat the point of moving it at all.
   if (legacy) {
-    if (!(await desktopKeychain.store(legacy.refreshToken))) return;
+    if (!(await desktopKeychain.store(legacy.refreshToken, apiBase()))) return;
     storageMode = "keychain";
     writeRaw(DESKTOP_METADATA_KEY, JSON.stringify(sessionMetadataOf(legacy)));
     writeRaw(STORAGE_KEY, null);
@@ -232,7 +257,7 @@ async function hydrate(): Promise<void> {
   }
 
   storageMode = "keychain";
-  const refreshToken = await desktopKeychain.load();
+  const refreshToken = await desktopKeychain.handle();
   if (metadata && refreshToken) {
     persisted = { refreshToken, ...metadata };
     notify();
@@ -362,7 +387,7 @@ async function resyncFromStore(): Promise<void> {
     }
     // A failed read answers null; keep what memory holds rather than turning a
     // flaky credential store into a sign-out.
-    const refreshToken = await within(desktopKeychain.load(), KEYCHAIN_WAIT_MS, null);
+    const refreshToken = await within(desktopKeychain.handle(), KEYCHAIN_WAIT_MS, null);
     if (refreshToken) adoptExternal({ refreshToken, ...metadata });
     return;
   }
@@ -412,13 +437,78 @@ function adoptExternal(next: PersistedSession | null): void {
 export function exclusiveRotation<T>(work: () => Promise<T>): Promise<T> {
   return withRotationLock(async () => {
     await resyncFromStore();
-    const result = await work();
-    // Release only once the rotated token is where the next holder reads it.
-    // localStorage writes are synchronous; the keychain's are queued, and a
-    // hung one is waited on only up to KEYCHAIN_WAIT_MS.
-    await flushKeychain();
-    return result;
+    // Desktop: from here until the new token is written, closing the window
+    // waits for this rotation instead of destroying it mid-air (#3098). Taken
+    // after the lock and the re-read — a rotation still queued behind another
+    // window has spent nothing and needs no hold.
+    // Bounded like every other shell call here (#3072 M2): a stuck IPC must
+    // not stall every 401 retry behind the lock.
+    const held =
+      isDesktop() && (await within(desktopRotationHold.begin(), KEYCHAIN_WAIT_MS, false));
+    try {
+      const result = await work();
+      // Release only once the rotated token is where the next holder reads it.
+      // localStorage writes are synchronous; the keychain's are queued, and a
+      // hung one is waited on only up to KEYCHAIN_WAIT_MS.
+      await flushKeychain();
+      return result;
+    } finally {
+      if (held) void desktopRotationHold.end();
+    }
   });
+}
+
+/**
+ * SessionPort.refreshThroughHost (#3106): in keychain mode the shell carries
+ * the refresh — token, proof, POST, keychain write — and answers with a
+ * handle. Null (the core POSTs itself) in a browser or a run demoted to web
+ * storage, where this module still holds the token.
+ */
+export async function refreshThroughHost(
+  request: HostRefreshRequest
+): Promise<HostRefreshAnswer | null> {
+  if (!isDesktop() || storageMode !== "keychain") return null;
+  // Only once the keychain has answered with a handle is the shell known to
+  // hold this session's token (`exclusiveRotation`'s re-read adopts it, after
+  // the sign-in's queued write). A raw token still in memory means the
+  // keychain has not confirmed it — a write stuck behind an access prompt, a
+  // read that failed — so the core rotates it as before rather than have the
+  // shell find nothing and sign the person out.
+  const current = persisted?.refreshToken;
+  if (!current || !isShellHandle(current)) {
+    // The bind refresh must not go without the proof: it would spend the
+    // sign-in's first token and leave the sign-in unbound (#3079 MUST 1).
+    // Nothing answered → the core keeps the token and retries the bind.
+    if (request.bind) throw new Error("the keychain has not confirmed the sign-in's token yet");
+    return null;
+  }
+  // Anything still queued (a clear) lands first.
+  await flushKeychain();
+  if (storageMode !== "keychain") return null;
+  return desktopSession.refreshAttempt({ apiBase: apiBase(), ...request });
+}
+
+/**
+ * SessionPort.revokeThroughHost (#3106): logout's server half with the token
+ * the shell holds (the shell also rotates it with a proof when the access
+ * token has expired). False in a browser or a demoted run.
+ */
+export async function revokeThroughHost(request: HostRevokeRequest): Promise<boolean> {
+  if (!isDesktop() || storageMode !== "keychain") return false;
+  // A raw token is one the core itself rotated to (the keychain never
+  // confirmed the session) — it is not in the shell; revoke it directly.
+  if (request.refreshToken && !isShellHandle(request.refreshToken)) return false;
+  const { accessToken, workspaceId, memberId } = request;
+  try {
+    await within(
+      desktopSession.revoke({ apiBase: apiBase(), accessToken, workspaceId, memberId }),
+      20_000,
+      false
+    );
+  } catch {
+    // Best effort, like every revocation.
+  }
+  return true;
 }
 
 function onStorage(event: StorageEvent): void {

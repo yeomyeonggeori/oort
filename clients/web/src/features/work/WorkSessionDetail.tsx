@@ -1,12 +1,12 @@
+import { useHumanControlSigning, useResumeWorkSession } from "./signedWork";
+import { resumeFailureLine } from "@momo/core/features/auth/signedControl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, KeyRound, Loader2 } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import {
-  ApiError,
   endWorkSession,
-  resumeWorkSession,
   sendThreadReply,
   uuidEq,
   type WorkHost,
@@ -524,6 +524,8 @@ function HandoffSection({
   onResumed: (sessionId: string) => void;
 }) {
   const { session: auth, workspaceId } = useSession();
+  const signing = useHumanControlSigning(workspaceId, true);
+  const resume = useResumeWorkSession(workspaceId, signing.signed);
   const [open, setOpen] = useState(false);
   const [busyHostId, setBusyHostId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -543,20 +545,12 @@ function HandoffSection({
     setBusyHostId(targetHostId);
     setError(null);
     try {
-      const resumed = await resumeWorkSession(
-        workspaceId,
-        session.id,
-        targetHostId
-      );
+      const resumed = await resume(session, targetHostId);
       setOpen(false);
       onResumed(resumed.id);
     } catch (caught) {
-      setError(
-        takeoverFailureCopy(
-          caught instanceof ApiError ? caught.status : undefined,
-          caught instanceof Error ? caught.message : undefined
-        )
-      );
+      // 서명한 인수(#3028)의 거절은 사유별 문장으로, 나머지는 인수 문장으로.
+      setError(resumeFailureLine(caught, takeoverFailureCopy));
     } finally {
       setBusyHostId(null);
     }
