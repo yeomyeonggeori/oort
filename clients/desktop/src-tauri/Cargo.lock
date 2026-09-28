@@ -2317,6 +2317,8 @@ dependencies = [
  "p256",
  "percent-encoding",
  "portable-pty",
+ "reqwest",
+ "rustls",
  "security-framework 3.7.0",
  "security-framework-sys",
  "serde",

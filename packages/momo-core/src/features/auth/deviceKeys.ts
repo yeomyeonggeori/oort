@@ -7,6 +7,7 @@
 //   GET  /v1/workspaces/{ws}/device-keys                    the caller's own keys
 //   POST /v1/workspaces/{ws}/device-keys/{key}/endorsement  device_endorse.v1
 //   POST /v1/workspaces/{ws}/device-keys/{key}/revocation   device_revoke.v1
+//   POST /v1/workspaces/{ws}/device-keys  + `rebind`        device_rebind.v1 (#3097)
 //
 // Signing never happens here: the host Mac's desktop shell holds the Secure
 // Enclave key and builds every signed statement itself (clients/desktop
@@ -32,6 +33,14 @@ export interface DeviceKey {
   canInstruct: boolean;
   /** Registered under the caller's own sign-in. */
   current: boolean;
+  /**
+   * The key's sign-in can still rotate (#3097, ADR-0146 D-7 증보). A live key
+   * with `false` signs nothing — the server refuses it as revoked — until the
+   * device moves it onto its new sign-in with a `device_rebind.v1` letter
+   * (`rebindDeviceKey`). Absent on a server from before #3097, which revoked
+   * the key together with its sign-in, so a live row there is a live lineage.
+   */
+  lineageLive: boolean;
   endorsedByKeyId?: string;
   endorsedAtMs?: number;
   createdAtMs: number;
@@ -57,6 +66,7 @@ export function parseDeviceKey(value: unknown): DeviceKey {
   const state = str(source, "state");
   const canInstruct = bool(source, "canInstruct");
   const current = bool(source, "current");
+  const lineageLive = bool(source, "lineageLive");
   const createdAtMs = num(source, "createdAtMs");
   if (
     !id ||
@@ -69,6 +79,7 @@ export function parseDeviceKey(value: unknown): DeviceKey {
     !(STATES as readonly string[]).includes(state) ||
     canInstruct === undefined ||
     current === undefined ||
+    ("lineageLive" in source && lineageLive === undefined) ||
     createdAtMs === undefined
   ) {
     throw new WireShapeError();
@@ -86,6 +97,7 @@ export function parseDeviceKey(value: unknown): DeviceKey {
     state: state as DeviceKeyState,
     canInstruct,
     current,
+    lineageLive: lineageLive ?? true,
     createdAtMs,
     ...optional("endorsedByKeyId", str(source, "endorsedByKeyId")),
     ...optional("endorsedAtMs", num(source, "endorsedAtMs")),
@@ -134,6 +146,139 @@ export async function registerRootDeviceKey(
   );
 }
 
+/**
+ * Register the phone's enclave key (#3026 E6, ADR-0146 개정 D-6 ②). It starts
+ * `unendorsed` — 「지시 불가」 — until the root Mac signs `device_endorse.v1`.
+ * No password: an `ios` key cannot sign host registrations or endorse anyone.
+ * `label` must be the name the QR redeem sent (`DeviceLinkDevice.name`): the
+ * Mac pairs its linked-device row with this key by label
+ * (`phoneKeyForLinkedDevice`).
+ */
+export async function registerPhoneDeviceKey(
+  workspaceId: string,
+  input: { publicKey: string; label: string }
+): Promise<DeviceKey> {
+  return one(
+    await settingsRequest<unknown>(base(workspaceId), {
+      method: "POST",
+      body: JSON.stringify({
+        alg: "p256",
+        publicKey: input.publicKey,
+        platform: "ios",
+        label: input.label,
+      }),
+    })
+  );
+}
+
+/**
+ * The server answered a rebind, but the key is not on this sign-in (`current`
+ * is not true, or its lineage still cannot rotate). ADR-0146 D-7 증보 클라이언트
+ * 계약: that is a failure, said as one — never read as 「다시 연결했습니다」.
+ */
+export class DeviceKeyRebindError extends Error {
+  constructor() {
+    super("device_key_rebind_not_current");
+    this.name = "DeviceKeyRebindError";
+  }
+}
+
+/**
+ * Move this device's live key onto the caller's sign-in (#3097, ADR-0146 D-7
+ * 증보): the register body again, with `rebind` — a `momo.human.device_rebind.v1`
+ * letter the key itself signed. The letter is built and signed natively (the
+ * desktop shell's `device_key_sign_rebind`, the phone's `signDeviceRebind`);
+ * this only posts it. `platform` and `label` are validated by the server and
+ * the stored row's are kept. 200 → the moved row, which must be `current`.
+ */
+export async function rebindDeviceKey(
+  workspaceId: string,
+  input: {
+    publicKey: string;
+    platform: "macos" | "ios";
+    label: string;
+    rebind: { signedAtMs: number; signature: string };
+  }
+): Promise<DeviceKey> {
+  const key = one(
+    await settingsRequest<unknown>(base(workspaceId), {
+      method: "POST",
+      body: JSON.stringify({
+        alg: "p256",
+        publicKey: input.publicKey,
+        platform: input.platform,
+        label: input.label,
+        rebind: { signedAtMs: input.rebind.signedAtMs, signature: input.rebind.signature },
+      }),
+    })
+  );
+  if (key.current !== true || key.lineageLive !== true) throw new DeviceKeyRebindError();
+  return key;
+}
+
+/**
+ * `GET …/device-keys/signing-context` (#3023): the `instance_id` line every
+ * `momo.human.control.v1` statement carries, verbatim (a client never builds it
+ * from a URL — D-5), and the server clock a signer corrects its own by (D-9).
+ */
+export interface SigningContext {
+  instanceId: string;
+  serverTimeMs: number;
+  maxLifetimeMs: number;
+  maxClockSkewMs: number;
+  humanControlSignatureRequired: boolean;
+  hostRegisterSignatureRequired: boolean;
+  /**
+   * The caller's sign-in lineage — the `session_id` line of a
+   * `device_rebind.v1` letter (#3097). `null` from a server before #3097 or
+   * for a sign-in from before lineages (088): such a sign-in cannot rebind.
+   * The parser always sets it; optional only so callers that build a context
+   * by hand (tests, the control signers) need not.
+   */
+  sessionId?: string | null;
+}
+
+export function parseSigningContext(value: unknown): SigningContext {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  const instanceId = str(source, "instanceId");
+  const serverTimeMs = num(source, "serverTimeMs");
+  const maxLifetimeMs = num(source, "maxLifetimeMs");
+  const maxClockSkewMs = num(source, "maxClockSkewMs");
+  const humanControlSignatureRequired = bool(source, "humanControlSignatureRequired");
+  const hostRegisterSignatureRequired = bool(source, "hostRegisterSignatureRequired");
+  const rawSession = source["sessionId"];
+  if (rawSession !== undefined && rawSession !== null && typeof rawSession !== "string") {
+    throw new WireShapeError();
+  }
+  if (
+    !instanceId ||
+    serverTimeMs === undefined ||
+    maxLifetimeMs === undefined ||
+    maxLifetimeMs <= 0 ||
+    maxClockSkewMs === undefined ||
+    humanControlSignatureRequired === undefined ||
+    hostRegisterSignatureRequired === undefined
+  ) {
+    throw new WireShapeError();
+  }
+  return {
+    instanceId,
+    serverTimeMs,
+    maxLifetimeMs,
+    maxClockSkewMs,
+    humanControlSignatureRequired,
+    hostRegisterSignatureRequired,
+    sessionId: typeof rawSession === "string" && rawSession !== "" ? rawSession : null,
+  };
+}
+
+export async function fetchSigningContext(workspaceId: string): Promise<SigningContext> {
+  return parseSigningContext(
+    await settingsRequest<unknown>(`${base(workspaceId)}/signing-context`, { cache: "no-store" })
+  );
+}
+
 export async function submitEndorsement(
   workspaceId: string,
   targetKeyId: string,
@@ -167,6 +312,11 @@ export const DEVICE_KEY_REFUSAL = {
   rootLinkedSession: "device_root_linked_session",
   alreadyRegistered: "device_key_already_registered",
   lineageEnded: "session_lineage_ended",
+  /** #3097: the same key is live under this member on an ended sign-in. */
+  rebindRequired: "device_key_rebind_required",
+  /** #3097: a rebind of a key with no live row (it was revoked). */
+  notFound: "device_key_not_found",
+  signatureInvalid: "device_signature_invalid",
 } as const;
 
 // ---- views ------------------------------------------------------------------
@@ -178,14 +328,26 @@ export function phoneKeys(keys: readonly DeviceKey[]): DeviceKey[] {
     .sort((a, b) => b.createdAtMs - a.createdAtMs);
 }
 
-/** This Mac's live row for `publicKey`, if the server has one. */
+/**
+ * This Mac's live row for `publicKey`, if the server has one — with whether it
+ * can sign (#3097). A row whose sign-in ended without revoking it (a refresh
+ * reuse, an expiry) is still this Mac's root, and still found here: the way
+ * back is `rebind` with the key's own letter, not a new registration with the
+ * password. Until then it signs nothing, so it is never `bound`.
+ */
 export function rootRowFor(
   keys: readonly DeviceKey[],
   publicKey: string
-): DeviceKey | undefined {
-  return keys.find(
+): { row: DeviceKey; lineageLive: boolean } | undefined {
+  const row = keys.find(
     (key) => key.platform === "macos" && key.publicKey === publicKey && key.state === "root"
   );
+  return row ? { row, lineageLive: row.lineageLive } : undefined;
+}
+
+/** A live key left on an ended sign-in: it must be moved before it signs. */
+export function keyNeedsRebind(key: DeviceKey): boolean {
+  return key.state !== "revoked" && !key.lineageLive;
 }
 
 /**
@@ -212,7 +374,8 @@ export function phoneKeyForLinkedDevice(
  * code itself is never shown (it is not the person's vocabulary).
  */
 export function deviceKeyErrorMessage(code: unknown): string {
-  const raw = typeof code === "string" ? code : "";
+  const raw =
+    typeof code === "string" ? code : code instanceof DeviceKeyRebindError ? code.message : "";
   const key = raw.split(":")[0]!.trim();
   switch (key) {
     case "device_key_declined":
@@ -243,6 +406,14 @@ export function deviceKeyErrorMessage(code: unknown): string {
       return "이 종류의 서명은 아직 이 앱에서 할 수 없습니다.";
     case "device_key_no_letter":
       return "이 맥에서 서명한 해제 기록이 없어 다시 보낼 수 없습니다.";
+    case "device_key_not_endorsed_here":
+      return "이 맥에 이 키를 승인한 기록이 없어 해제에 서명할 수 없습니다. 그 기기의 연결을 끊으면 서버에서는 키가 해제되지만, 이 맥의 작업 호스트에는 알려지지 않습니다.";
+    case "device_key_rebind_not_current":
+      return "서버가 이 키를 이 로그인으로 옮기지 않았습니다. 목록을 다시 불러와 다시 시도하세요.";
+    case "device_key_no_session":
+      return "이 로그인은 키를 옮길 수 없습니다. 로그아웃한 뒤 다시 로그인하세요.";
+    case "device_key_endorse_conflict":
+      return "이 맥이 이미 다른 키를 이 이름으로 승인했거나 같은 키를 다른 이름으로 승인했습니다. 목록을 다시 불러와 확인하세요.";
     default:
       return "서명하지 못했습니다. 다시 시도하세요.";
   }
@@ -259,6 +430,12 @@ export function deviceKeyServerMessage(code: string | undefined, fallback: strin
       return "이 키는 이미 등록돼 있습니다. 목록을 다시 불러오세요.";
     case DEVICE_KEY_REFUSAL.lineageEnded:
       return "이 로그인은 더 이상 키를 등록할 수 없습니다. 다시 로그인하세요.";
+    case DEVICE_KEY_REFUSAL.rebindRequired:
+      return "이 키는 끝난 로그인에 묶여 있습니다. 다시 연결하세요.";
+    case DEVICE_KEY_REFUSAL.notFound:
+      return "서버에 이 키가 더 이상 없습니다. 목록을 다시 불러와 새로 등록하세요.";
+    case DEVICE_KEY_REFUSAL.signatureInvalid:
+      return "서버가 이 기기의 서명을 받지 않았습니다. 기기 시계가 맞는지 확인하고 다시 시도하세요.";
     default:
       return fallback;
   }
@@ -266,29 +443,8 @@ export function deviceKeyServerMessage(code: string | undefined, fallback: strin
 
 // ---- signing context and who may instruct from where (#3029 E9) --------------
 
-/**
- * `GET …/device-keys/signing-context` (E3 #3023, `SigningContextResponse`). This
- * module reads only the flag: the desktop shell fetches the rest itself when it
- * signs (E8 #3028).
- */
-export interface SigningContext {
-  instanceId: string;
-  serverTimeMs: number;
-  /** `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`. */
-  humanControlSignatureRequired: boolean;
-}
-
-export function parseSigningContext(value: unknown): SigningContext {
-  const source = record(value);
-  if (source === null) throw new WireShapeError();
-  const instanceId = str(source, "instanceId");
-  const serverTimeMs = num(source, "serverTimeMs");
-  const required = bool(source, "humanControlSignatureRequired");
-  if (!instanceId || serverTimeMs === undefined || required === undefined) {
-    throw new WireShapeError();
-  }
-  return { instanceId, serverTimeMs, humanControlSignatureRequired: required };
-}
+// `SigningContext` / `parseSigningContext` live above, next to `fetchSigningContext`
+// (#3026 E6: the phone signs with the full context; this flag reader shares it).
 
 /**
  * Whether this server requires a device signature on an allow or an

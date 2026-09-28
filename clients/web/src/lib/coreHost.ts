@@ -9,7 +9,10 @@ import {
   getPersistedSession,
   getRefreshToken,
   markAuthExpired,
+  refreshThroughHost,
+  revokeThroughHost,
 } from "./session";
+import { isDesktop } from "./tauri";
 
 // =============================================================================
 // The web client's implementation of the core host port (ADR-0137 D3).
@@ -40,5 +43,9 @@ installCoreHost({
     markAuthExpired,
     clearSession,
     exclusiveRotation,
+    // The desktop shell carries the refresh and its proof (#3106). A browser
+    // installs neither: its refreshes, and its sign-ins (no bind refresh),
+    // stay exactly what they were.
+    ...(isDesktop() ? { refreshThroughHost, revokeThroughHost } : {}),
   },
 });

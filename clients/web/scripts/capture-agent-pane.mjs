@@ -338,6 +338,72 @@ async function decisionScenes(browser, origin) {
   }
 }
 
+// #3028 R2-E8: 데스크탑 셸이 서명하는 칸(라이트·다크 × 1280·390). 셸·서버 왕복은 흉내다.
+async function signedScenes(browser, origin) {
+  for (const scheme of ["light", "dark"]) {
+    for (const [label, viewport] of [["1280", DESKTOP], ["390", PHONE]]) {
+      const tag = `${label}-${scheme}`;
+      {
+        const { context, page } = await open(browser, origin, scheme, "agent-signed", viewport);
+        const state = await page.evaluate(() => ({
+          once: !document.querySelector('[data-testid="agent-permission-allow"]').disabled,
+          session: !document.querySelector('[data-testid="agent-permission-allow-session"]')?.disabled,
+          input: !document.querySelector('[data-testid="agent-pane-reply-input"]').disabled,
+        }));
+        check(`${tag}/서명 칸: 이번 한 번·이 세션 동안·지시 칸 켜짐`, state.once && state.session && state.input, state);
+        check(`${tag}/서명 칸: 가로 넘침 0`, (await overflowX(page)) <= 0);
+        await shot(page, `signed-before-${tag}`);
+        await page.getByTestId("agent-permission-reject").click();
+        await page.getByTestId("agent-permission-reject-note").fill("그 파일 말고 테스트만 고쳐 줘");
+        const label = await page.textContent('[data-testid="agent-permission-commit"]');
+        check(`${tag}/거부 + 지시: 확정 버튼 「거부하고 지시 보내기」`, label === "거부하고 지시 보내기", { label });
+        check(`${tag}/거부 + 지시: 가로 넘침 0`, (await overflowX(page)) <= 0);
+        await shot(page, `signed-reject-note-${tag}`);
+        await page.getByRole("button", { name: "취소" }).click();
+        await page.getByTestId("agent-permission-allow-session").click();
+        await page.getByTestId("agent-permission-confirm").waitFor();
+        await shot(page, `signed-session-armed-${tag}`);
+        await page.waitForTimeout(450);
+        await page.getByTestId("agent-permission-commit").click();
+        await page.getByTestId("agent-permission-outcome").waitFor();
+        const text = await page.textContent('[data-testid="agent-permission-outcome"]');
+        check(`${tag}/이 세션 동안: 보냄 한 줄`, (text ?? "").includes("이 세션 동안 허락을 보냈어요"), { text });
+        await shot(page, `signed-session-sent-${tag}`);
+        await context.close();
+      }
+      {
+        const { context, page } = await open(browser, origin, scheme, "agent-signed-fail", viewport);
+        await page.getByTestId("agent-pane-reply-input").fill("이어서 lint까지 돌려 줘");
+        await page.getByTestId("agent-pane-queue").click();
+        await page.locator('[data-testid="agent-pane-reply-hint"][data-failed]').waitFor();
+        const hint = await page.textContent('[data-testid="agent-pane-reply-hint"]');
+        const kept = await page.inputValue('[data-testid="agent-pane-reply-input"]');
+        check(`${tag}/지시 전달 안 됨: 사유 + 글 남음`, (hint ?? "").startsWith("전달 안 됨") && kept.length > 0, { hint, kept });
+        await shot(page, `signed-reply-not-delivered-${tag}`);
+        await context.close();
+      }
+      {
+        // 장면을 섞지 않는다(design-review): 새 칸에서 「거부 + 지시」만.
+        const { context, page } = await open(browser, origin, scheme, "agent-signed-fail", viewport);
+        await page.getByTestId("agent-permission-reject").click();
+        const caret = await page.evaluate(() => document.activeElement?.getAttribute("data-testid"));
+        check(`${tag}/거부 무장: 캐럿은 지시 칸`, caret === "agent-permission-reject-note", { caret });
+        await page.getByTestId("agent-permission-reject-note").fill("다르게 해 줘");
+        await page.waitForTimeout(450);
+        await page.getByTestId("agent-permission-commit").click();
+        await page.getByTestId("agent-permission-outcome").waitFor();
+        const text = await page.textContent('[data-testid="agent-permission-outcome"]');
+        const settled = await page.getAttribute('[data-testid="agent-permission"]', "data-settled");
+        const moved = await page.inputValue('[data-testid="agent-pane-reply-input"]');
+        check(`${tag}/거부 갔고 지시 전달 안 됨: 둘 다 말함, 글은 지시 칸으로`, settled === "partial" && (text ?? "").includes("전달 안 됨") && moved === "다르게 해 줘", { text, settled, moved });
+        check(`${tag}/실패 장면: 가로 넘침 0`, (await overflowX(page)) <= 0);
+        await shot(page, `signed-partial-${tag}`);
+        await context.close();
+      }
+    }
+  }
+}
+
 async function compare(browser) {
   if (!MOCKUP || !existsSync(MOCKUP)) {
     console.log("MOCKUP 없음: 비교 이미지는 건너뛴다");
@@ -378,9 +444,14 @@ async function main() {
   try {
     const browser = await chromium.launch();
     try {
-      if (process.env.ONLY !== "decision") await scenes(browser, preview.origin);
-      await decisionScenes(browser, preview.origin);
-      if (process.env.ONLY !== "decision") await compare(browser);
+      if (process.env.ONLY === "signed") {
+        await signedScenes(browser, preview.origin);
+      } else {
+        if (process.env.ONLY !== "decision") await scenes(browser, preview.origin);
+        await decisionScenes(browser, preview.origin);
+        await signedScenes(browser, preview.origin);
+      }
+      if (process.env.ONLY !== "decision" && process.env.ONLY !== "signed") await compare(browser);
     } finally {
       await browser.close();
     }

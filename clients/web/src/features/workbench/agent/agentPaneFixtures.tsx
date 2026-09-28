@@ -158,6 +158,37 @@ function sceneActions(scene: AgentFixtureScene): AgentPaneActions {
       reply: null,
     };
   }
+  // #3028: 데스크탑 셸 + 서명을 요구하는 서버. 허락·지시가 서명 경로로 간다(흉내: 셸 없이 성공).
+  if (scene === "signed") {
+    return {
+      decide: async () => undefined,
+      reply: async () => ({ state: "sent" }),
+      sessionScope: true,
+      rejectWithInstruction: async () => ({ state: "rejected", instruction: { state: "sent" } }),
+    };
+  }
+  // #3028: 서명·전달이 실패한다. 지시는 「전달 안 됨」, 거부는 갔지만 지시는 닿지 않음.
+  if (scene === "signed-fail") {
+    return {
+      decide: async () => undefined,
+      reply: async () => ({
+        state: "not_delivered",
+        stage: "sign",
+        text: "서명을 취소해서 보내지 않았어요.",
+        error: null,
+      }),
+      sessionScope: true,
+      rejectWithInstruction: async () => ({
+        state: "rejected",
+        instruction: {
+          state: "not_delivered",
+          stage: "server",
+          text: "호스트가 90초 넘게 응답하지 않아 보내지 않았어요. 호스트가 켜져 있는지 확인한 뒤 다시 보내 주세요.",
+          error: null,
+        },
+      }),
+    };
+  }
   // 제품과 같이 지시(답장) 길은 없다(R2).
   if (scene === "decided" || scene === "lapsed" || scene === "offline" || scene === "browser") {
     return { ...DEMO_ACTIONS, reply: null };
@@ -179,7 +210,11 @@ export type AgentFixtureScene =
   /** 일반 브라우저 + 서명을 요구하는 서버(ADR-0146 개정 D-4, #3029). */
   | "browser"
   /** 허락이 403 `device_signature_required`로 돌아온다(#3029). */
-  | "signature";
+  | "signature"
+  /** 데스크탑 셸이 서명한다(#3028): 「이 세션 동안」·「거부 + 지시」·지시 칸. */
+  | "signed"
+  /** 같은 표면, 서명·전달 실패(#3028 「전달 안 됨」). */
+  | "signed-fail";
 
 /**
  * `signature` 장면: 제품처럼 403 `device_signature_required`를 받으면 플래그를 다시

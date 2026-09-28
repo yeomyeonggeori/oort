@@ -18,6 +18,7 @@ import {
   subscribeSession,
 } from '../storage/secureSession';
 import {authGate, type AuthGate} from './authGate';
+import {forgetDeviceKeyOnSignOut} from '../deviceKey/enrollment';
 import {clearAllDrafts} from '../features/conversation/drafts';
 import {clearAllAttachmentDrafts} from '../features/attachments/draftStore';
 import {revokeDevice} from '../push/devices';
@@ -254,6 +255,10 @@ export function SessionProvider({
     // 지워도 원장에 남지만 안 보낸 글은 이 기기에만 있다. 웹이 같은 자리에서 같은
     // 일을 한다(`clients/web/src/app/session.tsx`).
     clearAllDrafts();
+    // 지시 기기 키도 지운다 (#3026, ADR-0146 개정 D-7). 서버는 이 로그인 계보가
+    // 끝나며 키 행을 폐기하고, 어떤 행도 받아 주지 않는 키가 다음 사람의 로그인까지
+    // 남을 까닭이 없다. 다음 QR 연결이 새 키를 만들고 맥이 다시 승인한다.
+    forgetDeviceKeyOnSignOut();
     // 첨부 초안은 더 위험하다: 메모리 안에 구 bearer로 만든 upload session id와
     // native PUT이 살아 있을 수 있다. 화면만 비우지 않고 진행 중 PUT도 취소하며,
     // 늦게 도착한 create/complete 응답도 세션 세대 경계에서 버린다 (#1703).

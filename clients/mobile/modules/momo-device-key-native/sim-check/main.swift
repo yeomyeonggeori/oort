@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import LocalAuthentication
 
@@ -54,8 +55,23 @@ check(
   Set(rootMacPayloads.map { schemaOf($0.1) }) == ["momo.human.device_endorse.v1", "momo.human.device_revoke.v1"],
   "vectors carry the root-Mac endorse/revoke payloads")
 check(
-  MomoDeviceKeyStore.signingSchemas == ["momo.human.control.v1": 13],
-  "the phone allows only momo.human.control.v1 (13 lines)")
+  MomoDeviceKeyStore.signingSchemas == [
+    "momo.human.control.v1": 13, "momo.human.control.v2": 13, "momo.human.device_rebind.v1": 7,
+  ],
+  "the phone allows only momo.human.control.v1/v2 (13 lines) and its own device_rebind.v1 (7 lines)")
+
+// ---- #3103: the rebind letter momo-wire printed (argv[2]) --------------------
+guard CommandLine.arguments.count > 2,
+  let rebindData = FileManager.default.contents(atPath: CommandLine.arguments[2]),
+  let rebindJSON = try? JSONSerialization.jsonObject(with: rebindData) as? [String: Any],
+  let rebindPayload = rebindJSON["payload"] as? String,
+  let rebindInputs = rebindJSON["inputs"] as? [String: Any],
+  let rebindKey = rebindInputs["publicKey"] as? String
+else {
+  print("FAIL: usage: device-key-sim-check <vectors.json> <device-rebind.vector.json>")
+  exit(1)
+}
+let rebind = Data(rebindPayload.utf8)
 
 // ---- 1. no enclave, no key -------------------------------------------------
 check(MomoDeviceKeyStore.secureEnclaveAvailable == false, "secureEnclaveAvailable is false")
@@ -107,6 +123,22 @@ func rejects(_ data: Data) -> Bool {
 for (name, payload) in phonePayloads {
   check(!rejects(payload), "accepts vector \(name)")
 }
+check(!rejects(rebind), "accepts the momo-wire device_rebind.v1 letter (7 lines)")
+let rebindText = String(decoding: rebind, as: UTF8.self)
+check(rejects(rebind + Data("\nx".utf8)), "rejects a rebind letter with an 8th line")
+check(
+  rejects(Data(rebindText.split(separator: "\n").dropLast().joined(separator: "\n").utf8)),
+  "rejects a rebind letter one line short")
+check(rejects(rebind + Data([0x0A])), "rejects a rebind letter with a trailing newline")
+// The key signs only its own move.
+check((try? MomoDeviceKeyStore.checkRebindNamesKey(rebind, publicKeyBase64: rebindKey)) != nil,
+  "a rebind letter naming this key passes the own-key check")
+let otherKey = (rebindKey.hasPrefix("A") ? "B" : "A") + rebindKey.dropFirst()
+check(otherKey != rebindKey, "the other key differs from the letter's")
+check((try? MomoDeviceKeyStore.checkRebindNamesKey(rebind, publicKeyBase64: otherKey)) == nil,
+  "a rebind letter naming another key is refused")
+check((try? MomoDeviceKeyStore.checkRebindNamesKey(phonePayloads[0].1, publicKeyBase64: "x")) != nil,
+  "the own-key check leaves control payloads alone")
 // ADR-0146 D-6/D-7: endorsements and revocations are the root Mac's to sign.
 for (name, payload) in rootMacPayloads {
   check(rejects(payload), "rejects root-Mac vector \(name)")
@@ -120,7 +152,7 @@ var mutations: [(String, Data)] = [
   ("trailing newline", control + Data([0x0A])),
   ("extra line", control + Data("\nx".utf8)),
   ("one line short", Data(controlText.split(separator: "\n").dropLast().joined(separator: "\n").utf8)),
-  ("schema v2", Data(controlText.replacingOccurrences(of: "momo.human.control.v1", with: "momo.human.control.v2").utf8)),
+  ("schema v3", Data(controlText.replacingOccurrences(of: "momo.human.control.v1", with: "momo.human.control.v3").utf8)),
   ("schema with suffix", Data(controlText.replacingOccurrences(of: "momo.human.control.v1\n", with: "momo.human.control.v1x\n").utf8)),
   ("leading space", Data(" ".utf8) + control),
   ("CR line breaks", Data(controlText.replacingOccurrences(of: "\n", with: "\r\n").utf8)),
@@ -195,6 +227,85 @@ check(FP.compare(stored: modernA, legacyNow: a, domainStateNow: b) == .changed, 
 check(FP.compare(stored: modernA, legacyNow: a, domainStateNow: nil) == .unknown, "fingerprint: no value from the same API → unknown")
 check(FP.compare(stored: nil, legacyNow: a, domainStateNow: a) == .unknown, "fingerprint: nothing stored → unknown")
 check(FP.compare(stored: Data([0x09]) + a, legacyNow: a, domainStateNow: a) == .unknown, "fingerprint: unknown tag → unknown")
+
+// ---- 4. #3106: the refresh key (argv[3], momo-wire's refresh_proof vector) ----
+guard CommandLine.arguments.count > 3,
+  let refreshData = FileManager.default.contents(atPath: CommandLine.arguments[3]),
+  let refreshJSON = try? JSONSerialization.jsonObject(with: refreshData) as? [String: Any],
+  let refreshPayload = refreshJSON["payload"] as? String,
+  let refreshSignature = refreshJSON["signature"] as? String,
+  let refreshHash = refreshJSON["refreshTokenSha256"] as? String,
+  let refreshInputs = refreshJSON["inputs"] as? [String: Any],
+  let rWorkspace = refreshInputs["workspaceId"] as? String,
+  let rMember = refreshInputs["memberId"] as? String,
+  let rKey = refreshInputs["publicKey"] as? String,
+  let rToken = refreshInputs["refreshToken"] as? String,
+  let rNonce = refreshInputs["nonce"] as? String,
+  let rAt = (refreshInputs["signedAtMs"] as? NSNumber)?.int64Value,
+  let rKeyData = Data(base64Encoded: rKey)
+else {
+  print("FAIL: usage: device-key-sim-check <vectors.json> <device-rebind.vector.json> <refresh-proof.vector.json>")
+  exit(1)
+}
+typealias RK = MomoRefreshKeyStore
+let refresh = Data(refreshPayload.utf8)
+
+// The bytes are momo-wire's, byte for byte.
+check(RK.tokenSha256Hex(rToken) == refreshHash, "refresh: token hash equals momo-wire's")
+let built = try? RK.proofBytes(
+  workspaceId: rWorkspace, memberId: rMember, publicKey: rKeyData, refreshToken: rToken,
+  nonce: rNonce, signedAtMs: rAt)
+check(built == refresh, "refresh: proofBytes equals the momo-wire vector payload")
+// And momo-wire's signature verifies over them under the vector's key (a
+// public key only — no software private key is constructed anywhere).
+if let pub = try? P256.Signing.PublicKey(compressedRepresentation: rKeyData),
+  let sigData = Data(base64Encoded: refreshSignature),
+  let sig = try? P256.Signing.ECDSASignature(rawRepresentation: sigData)
+{
+  check(pub.isValidSignature(sig, for: built ?? Data()), "refresh: the vector signature verifies over proofBytes")
+} else {
+  check(false, "refresh: vector key/signature decode")
+}
+for (name, bad) in [
+  ("uppercase workspace", { try RK.proofBytes(workspaceId: "ABCDEF00-0000-4000-8000-000000000001", memberId: rMember, publicKey: rKeyData, refreshToken: rToken, nonce: rNonce, signedAtMs: rAt) }),
+  ("empty token", { try RK.proofBytes(workspaceId: rWorkspace, memberId: rMember, publicKey: rKeyData, refreshToken: "", nonce: rNonce, signedAtMs: rAt) }),
+  ("zero time", { try RK.proofBytes(workspaceId: rWorkspace, memberId: rMember, publicKey: rKeyData, refreshToken: rToken, nonce: rNonce, signedAtMs: 0) }),
+  ("short key", { try RK.proofBytes(workspaceId: rWorkspace, memberId: rMember, publicKey: rKeyData.dropLast(), refreshToken: rToken, nonce: rNonce, signedAtMs: rAt) }),
+] as [(String, () throws -> Data)] {
+  check((try? bad()) == nil, "refresh: proofBytes refuses \(name)")
+}
+
+// Cross-sabotage: each key signs only its own statements.
+func refreshRejects(_ data: Data, _ key: String) -> Bool {
+  (try? RK.checkProofPayload(data, publicKeyBase64: key)) == nil
+}
+check(!refreshRejects(refresh, rKey), "refresh key: accepts the vector proof naming its key")
+check(refreshRejects(refresh, otherKey), "refresh key: refuses a proof naming another key")
+check(refreshRejects(refresh + Data([0x0A]), rKey), "refresh key: refuses a trailing newline")
+for (name, payload) in phonePayloads {
+  check(refreshRejects(payload, rKey), "refresh key: refuses instruction \(name)")
+}
+check(refreshRejects(rebind, rKey), "refresh key: refuses a rebind letter")
+check(rejects(refresh), "instruction key: refuses a refresh proof (not in signingSchemas)")
+check(MomoDeviceKeyStore.signingSchemas[RK.schema] == nil, "instruction key: refresh_proof.v1 is not an allowed schema")
+
+// No biometry on the refresh key; the instruction key keeps it (sabotage:
+// add .biometryCurrentSet here and background refreshes fail — RED).
+check(RK.accessFlags == [.privateKeyUsage], "refresh key: access control is privateKeyUsage only")
+check(RK.service != "app.momo.ios.devicekey" && RK.keyAccount != "p256-signing-v1",
+  "refresh key: a different item from the instruction key")
+
+// No enclave, no key, no software fallback.
+let refreshStore = try! RK(accessGroup: group)
+do {
+  let proof = try refreshStore.prove(workspaceId: rWorkspace, memberId: rMember, refreshToken: rToken, signedAtMs: rAt)
+  check(false, "refresh key: prove() refused — but it RETURNED a proof by \(proof.publicKey) (software fallback)")
+} catch let failure as MomoDeviceKeyFailure {
+  check(failure == .unsupported, "refresh key: prove() refused with \(failure.code)")
+} catch { check(false, "refresh key: prove() typed error") }
+for bad in ["", "YWQQFQM38J.app.momo.ios.shared"] {
+  check((try? RK(accessGroup: bad)) == nil, "refresh key: init refuses access group '\(bad)'")
+}
 
 print(failures == 0 ? "PASS" : "FAILED (\(failures))")
 exit(failures == 0 ? 0 : 1)
