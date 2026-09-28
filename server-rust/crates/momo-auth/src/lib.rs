@@ -76,6 +76,7 @@ pub mod issue;
 pub mod jwt;
 pub mod owner_claim;
 pub mod realtime;
+pub mod refresh_proof;
 pub mod token_store;
 pub mod work_host_request;
 pub mod work_host_store;
@@ -179,14 +180,18 @@ pub use realtime::{
     IssuedRealtimeToken, RealtimeTokenMeta, CONNECTION_TOKEN_TTL_SECONDS, REALTIME_INFO_SCHEMA,
     REALTIME_META_SCHEMA,
 };
+pub use refresh_proof::{
+    judge_refresh_proof, PresentedRefreshProof, ProofInput, ProofVerdict, RefreshProofMode,
+};
 pub use token_store::{
     carries_privileged_scope, has_active_realtime_credential, lock_live_session_lineage,
-    lock_member_session_tokens_by_ids, lock_session_for_registration, new_session_id,
-    record_session_token, record_session_token_with_device, revoke_member_session_tokens,
-    revoke_member_session_tokens_by_ids, revoke_privileged_session_tokens,
-    revoke_session_lineage_tokens, revoke_token, session_device_label, session_id_of, token_state,
-    without_privileged_scopes, DeviceSessionRecord, RegistrationSession, RevokeOutcome,
-    TokenRejection, TokenState, PRIVILEGED_SCOPES, SCOPE_REALTIME_SUBSCRIBE, SESSION_LABEL_ACCESS,
+    lock_member_session_tokens_by_ids, lock_session_for_registration, lock_session_rows_in_tx,
+    new_session_id, record_session_token, record_session_token_with_device,
+    revoke_member_session_tokens, revoke_member_session_tokens_by_ids,
+    revoke_privileged_session_tokens, revoke_session_lineage_tokens, revoke_token,
+    session_device_label, session_id_of, token_state, without_privileged_scopes,
+    DeviceSessionRecord, LockedSessionRow, RegistrationSession, RevokeOutcome, TokenRejection,
+    TokenState, PRIVILEGED_SCOPES, SCOPE_REALTIME_SUBSCRIBE, SESSION_LABEL_ACCESS,
     SESSION_LABEL_REFRESH,
 };
 pub use work_host_request::{

@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use crate::issue::{sign_access, sign_refresh, IssuedToken};
 use crate::token_store::{
-    lock_member_session_tokens_by_ids, new_session_id, record_session_token_with_device,
-    revoke_member_session_tokens_by_ids, DeviceSessionRecord, SESSION_LABEL_ACCESS,
+    lock_session_rows_in_tx, new_session_id, record_session_token_with_device,
+    revoke_member_session_tokens_by_ids, session_id_of, DeviceSessionRecord, SESSION_LABEL_ACCESS,
     SESSION_LABEL_REFRESH,
 };
 
@@ -579,8 +579,11 @@ const FIND_LINKED_DEVICE_BY_REFRESH_SQL: &str = "SELECT id \
        AND redeemed_refresh_token_id = $3 \
        AND consumed_at IS NOT NULL";
 
-/// Device row first (`FOR UPDATE`), then token rows in id order. Refresh and
-/// revoke share this order so they cannot invert `device_link_token` vs `token`.
+/// Device row first (`FOR UPDATE`), then — in one id-ordered acquisition —
+/// the bound pair and its lineage's live rows (the session-row rule,
+/// `crate::token_store::lock_session_rows_in_tx`, #3107). Refresh, recovery
+/// and unlink share this order so they cannot invert `device_link_token` vs
+/// `token`, nor the pair vs the lineage's lower rows.
 const LOCK_LINKED_DEVICE_SQL: &str = "SELECT \
         id, \
         redeemed_access_token_id, \
@@ -650,9 +653,17 @@ pub async fn find_linked_device_id_by_refresh_in_tx(
         .await
 }
 
-/// Lock the stable `device_link_token` row, then its current session pair in
-/// id order, then re-read the binding. Missing / unconsumed / incomplete pair
-/// all collapse to `None`.
+/// Lock the stable `device_link_token` row, then its current session pair
+/// **together with every live row of the pair's lineage** in one id-ordered
+/// acquisition, then re-read the binding. Missing / unconsumed / incomplete
+/// pair all collapse to `None`.
+///
+/// Why the whole lineage and not just the pair (#3107): the caller may go on
+/// to lock the lineage (recovery, a reuse sweep). Had it locked the pair
+/// first, it would then wait on a lower-id live row of the lineage while
+/// holding the pair's higher ids — and a sweep that never takes the link row
+/// holds that lower row and needs the pair. The binding cannot move while the
+/// link row is held, so the lineage read under it is the one the pair is in.
 pub async fn lock_linked_device_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -671,10 +682,15 @@ pub async fn lock_linked_device_in_tx(
     let Some(locked) = locked_device_from_row(row)? else {
         return Ok(None);
     };
-    lock_member_session_tokens_by_ids(
+    let lineage = session_id_of(conn, locked.refresh_id).await?;
+    // SABOTAGE(pair-first): pass `None` for `lineage` — the pair is then
+    // locked before the lineage's lower rows and
+    // `a_linked_recovery_and_a_lineage_sweep_never_deadlock` dies with 40P01.
+    lock_session_rows_in_tx(
         conn,
         workspace_id,
         member_id,
+        lineage,
         &[locked.access_id, locked.refresh_id],
     )
     .await?;

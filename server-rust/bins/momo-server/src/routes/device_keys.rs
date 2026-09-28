@@ -10,7 +10,8 @@
 //!
 //! A signed-in device uploads its Secure Enclave P-256 public key. The row is
 //! bound to the caller's session lineage and ends with it (logout, unlinking,
-//! a refresh-token reuse, every member-wide session end — `crate::session_end`).
+//! every member-wide session end — `crate::session_end`). A refresh-token reuse
+//! ends the tokens only (#3097): the key stays, mute, until it is moved.
 //!
 //! * **Register.** For the caller only: the member is the bearer's, and a
 //!   `memberId` naming anyone else is a 403 `device_key_member_mismatch`. A key
@@ -19,6 +20,15 @@
 //!   to rotate (409 `session_lineage_ended` otherwise). A `macos` key starts as
 //!   a **root candidate**; an `ios` key starts **unendorsed** — 「지시 불가」 —
 //!   and stays so until a root endorses it.
+//! * **Rebind** (#3097, ADR-0146 D-7 증보). The same public key, live under
+//!   the caller on a sign-in that can no longer rotate (a reuse or an expiry
+//!   ended it without revoking the key), is a 409
+//!   `device_key_rebind_required`. The device then sends the same register
+//!   body with `rebind`: a `device_rebind.v1` letter the key itself signs over
+//!   its id, its public key and the caller's sign-in. The row moves onto the
+//!   caller's lineage (200) with its id, its endorsement and its history — no
+//!   password, because the key's own signature is the proof. A stolen
+//!   refresh token cannot produce it.
 //! * **Endorse** (D-6 ②). The body carries only the root key id and the
 //!   signature; the letter is rebuilt from the stored rows, so a label or key
 //!   the request made up cannot be what verified.
@@ -36,12 +46,14 @@ use axum::response::IntoResponse;
 use axum::{Extension, Json};
 use momo_auth::device_key::{
     endorse_device_key_in_tx, insert_device_key_in_tx, list_member_device_keys_in_tx,
-    load_device_key_in_tx, revoke_device_key_signed_in_tx, validated_new_device_key,
-    verify_own_password_in_tx, DeviceKeyRecord, DeviceKeyRefusal, DEVICE_KEY_PLATFORM_MACOS,
+    load_device_key_in_tx, rebind_device_key_in_tx, rebindable_key_id_in_tx,
+    revoke_device_key_signed_in_tx, validated_new_device_key, verify_own_password_in_tx,
+    DeviceKeyRecord, DeviceKeyRefusal, DEVICE_KEY_PLATFORM_MACOS,
     REFUSAL_DEVICE_KEY_ALREADY_REGISTERED, REFUSAL_DEVICE_KEY_MEMBER_MISMATCH,
-    REFUSAL_DEVICE_ROOT_LINKED_SESSION, REFUSAL_DEVICE_ROOT_PASSWORD_REQUIRED,
-    REFUSAL_SESSION_LINEAGE_ENDED,
+    REFUSAL_DEVICE_KEY_REBIND_REQUIRED, REFUSAL_DEVICE_ROOT_LINKED_SESSION,
+    REFUSAL_DEVICE_ROOT_PASSWORD_REQUIRED, REFUSAL_SESSION_LINEAGE_ENDED,
 };
+use momo_auth::human_control::db_now_ms;
 use momo_auth::{
     active_workspace_role, lock_live_session_lineage, session_device_label, session_id_of,
     Principal,
@@ -76,6 +88,14 @@ pub(crate) fn refusal_error(refusal: DeviceKeyRefusal) -> ApiError {
             StatusCode::CONFLICT,
             "only a live, unendorsed phone key can be endorsed",
         ),
+        DeviceKeyRefusal::LineageLive => (
+            StatusCode::CONFLICT,
+            "this public key is already registered to a live sign-in",
+        ),
+        DeviceKeyRefusal::RootLinkedSession => (
+            StatusCode::FORBIDDEN,
+            "a root key is registered from a password sign-in on the host Mac",
+        ),
         DeviceKeyRefusal::Revoked => (StatusCode::FORBIDDEN, "the device key is revoked"),
         DeviceKeyRefusal::SignatureInvalid => (
             StatusCode::FORBIDDEN,
@@ -95,6 +115,7 @@ pub(crate) fn device_key_dto(
         workspace_id: record.workspace_id.to_string(),
         member_id: record.member_id.to_string(),
         current: caller_session == Some(record.session_id),
+        lineage_live: record.lineage_live,
         alg: record.alg,
         public_key: record.public_key,
         platform: record.platform,
@@ -143,13 +164,17 @@ pub async fn signing_context(
     require_human(&principal, HUMAN_ONLY)?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let member_id = principal.member_id;
-    let active = with_tenant_tx(&state.pool, workspace_id, move |conn| {
+    let token_id = principal.token_id;
+    let (active, session_id) = with_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
-            Ok::<_, DbError>(
-                active_workspace_role(conn, workspace_id, member_id)
-                    .await?
-                    .is_some(),
-            )
+            let active = active_workspace_role(conn, workspace_id, member_id)
+                .await?
+                .is_some();
+            let session_id = match token_id {
+                Some(id) => session_id_of(conn, id).await.map_err(DbError::from)?,
+                None => None,
+            };
+            Ok::<_, DbError>((active, session_id))
         })
     })
     .await
@@ -172,6 +197,7 @@ pub async fn signing_context(
         human_control_signature_required: state.device_keys.human_control_signature_required,
         host_register_signature_required: state.device_keys.host_register_signature_required,
         human_control_schema: momo_wire::human_control::HUMAN_CONTROL_SCHEMA_V2,
+        session_id: session_id.map(|id| id.to_string()),
     }))
 }
 
@@ -213,6 +239,19 @@ pub async fn register(
     let Some(token_id) = principal.token_id else {
         return Err(lineage_ended());
     };
+    if let Some(rebind) = request.rebind {
+        return rebind_key(
+            &state,
+            workspace_id,
+            member_id,
+            token_id,
+            new.public_key,
+            rebind.signed_at_ms,
+            rebind.signature,
+        )
+        .await
+        .map(|dto| (StatusCode::OK, Json(DeviceKeyResponse { device_key: dto })));
+    }
     // A root key (review H1). It signs host registrations and endorses
     // phones, so a bearer token alone — a stolen refresh token, say — must
     // not be able to mint one: the password is re-entered, under the same
@@ -272,6 +311,25 @@ pub async fn register(
                     .await
                     .map_err(DbError::from)?
             else {
+                // #3097: the caller's own key, left live on a sign-in that
+                // ended without revoking it, is moved — never registered twice.
+                if rebindable_key_id_in_tx(
+                    conn,
+                    workspace_id,
+                    member_id,
+                    session_id,
+                    &new.public_key,
+                )
+                .await
+                .map_err(DbError::from)?
+                .is_some()
+                {
+                    return Ok(Err(ApiError::coded(
+                        StatusCode::CONFLICT,
+                        REFUSAL_DEVICE_KEY_REBIND_REQUIRED,
+                        "this key is registered to a sign-in that ended; send a device_rebind letter to move it here",
+                    )));
+                }
                 return Ok(Err(ApiError::coded(
                     StatusCode::CONFLICT,
                     REFUSAL_DEVICE_KEY_ALREADY_REGISTERED,
@@ -295,6 +353,76 @@ pub async fn register(
         StatusCode::CREATED,
         Json(DeviceKeyResponse { device_key: dto }),
     ))
+}
+
+/// The `rebind` arm of `register` (#3097): move the caller's live key onto the
+/// caller's live sign-in with the key's own `device_rebind.v1` letter.
+async fn rebind_key(
+    state: &AppState,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    token_id: Uuid,
+    public_key: String,
+    signed_at_ms: i64,
+    signature: String,
+) -> Result<DeviceKeyDto, ApiError> {
+    let lineage_ended = || {
+        ApiError::coded(
+            StatusCode::CONFLICT,
+            REFUSAL_SESSION_LINEAGE_ENDED,
+            "this sign-in can no longer take a device key; sign in again",
+        )
+    };
+    let outcome = with_tenant_tx(&state.pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            if active_workspace_role(conn, workspace_id, member_id)
+                .await?
+                .is_none()
+            {
+                return Ok(Err(not_active()));
+            }
+            let Some(session_id) = session_id_of(conn, token_id).await.map_err(DbError::from)?
+            else {
+                return Ok(Err(lineage_ended()));
+            };
+            // The caller's lineage (token rows) first, share-locked for the
+            // rest of the transaction, then the key row — the order every
+            // session end takes, so a logout of this sign-in cannot commit
+            // between the check and the move.
+            if !lock_live_session_lineage(conn, workspace_id, member_id, session_id)
+                .await
+                .map_err(DbError::from)?
+            {
+                return Ok(Err(lineage_ended()));
+            }
+            let caller_linked = session_device_label(conn, token_id)
+                .await
+                .map_err(DbError::from)?
+                .is_some();
+            let now_ms = db_now_ms(conn).await.map_err(DbError::from)?;
+            let outcome = rebind_device_key_in_tx(
+                conn,
+                workspace_id,
+                member_id,
+                session_id,
+                caller_linked,
+                &public_key,
+                signed_at_ms,
+                &signature,
+                now_ms,
+            )
+            .await
+            .map_err(DbError::from)?;
+            Ok::<_, DbError>(
+                outcome
+                    .map(|record| device_key_dto(record, Some(session_id)))
+                    .map_err(refusal_error),
+            )
+        })
+    })
+    .await
+    .map_err(|error| ApiError::internal("device_keys.rebind", error))?;
+    outcome
 }
 
 /// `GET /v1/workspaces/{ws}/device-keys` — the caller's own keys, newest first,

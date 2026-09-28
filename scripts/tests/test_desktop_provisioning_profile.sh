@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/desktop/check_provisioning_profile.sh (#3025) against generated
+# scripts/desktop/check_provisioning_profile.sh (#3025, workd helper #3084) against generated
 # fixtures: CMS-signed profiles from a throwaway self-signed certificate, and
 # ad-hoc signed fake bundles. No keychain identity, no Developer ID signing, no
 # network. Needs macOS (security, codesign, PlistBuddy) and openssl 3.
@@ -7,7 +7,9 @@ set -euo pipefail
 
 ROOT="$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)"
 CHECK="$ROOT/scripts/desktop/check_provisioning_profile.sh"
-PINNED="$(sed -n 's/^PINNED_UUID="\(.*\)"$/\1/p' "$CHECK")"
+PINNED="$(sed -n 's/^PINNED_UUID="\([^"]*\)".*$/\1/p' "$CHECK")"
+PINNED_WORKD="$(sed -n 's/^PINNED_WORKD_UUID="\([^"]*\)".*$/\1/p' "$CHECK")"
+[ -n "$PINNED" ] && [ -n "$PINNED_WORKD" ] || { echo "[provisioning-profile] FAIL: cannot read the pinned UUIDs" >&2; exit 1; }
 TEAM="YWQQFQM38J"
 IDENTITY="Developer ID Application: Fixture (${TEAM})"
 
@@ -74,7 +76,8 @@ PY
 }
 
 run() { # <profile> [cert name]: prints output, returns the checker's status
-  "$CHECK" --profile "$W/$1.provisionprofile" --identity "$IDENTITY" \
+  # TARGET=workd checks the helper's profile; MOMO_*_ENTITLEMENTS pass through.
+  "$CHECK" --target "${TARGET:-app}" --profile "$W/$1.provisionprofile" --identity "$IDENTITY" \
     --cert-sha1 "$(sha1 "${2:-good}")" >"$W/out" 2>&1
 }
 expect_ok() { # <label> <profile> [cert]
@@ -142,22 +145,57 @@ if "$CHECK" --profile "$W/good.provisionprofile" --identity "Developer ID Applic
   --cert-sha1 "$(sha1 good)" >"$W/out" 2>&1; then bad "an identity without a team passed"
 else pass "identity without a team (RED)"; fi
 
+# --target workd: the helper's own profile (#3084).
+WORKD_ID="${TEAM}.app.momo.desktop.workd"
+profile workd UUID="$PINNED_WORKD" "ent.com.apple.application-identifier=$WORKD_ID"
+TARGET=workd expect_ok "workd: a Developer ID profile for the helper's App ID" workd
+TARGET=workd expect_red "workd: the app's profile is not the helper's" good "not the pinned"
+profile workdappid UUID="$PINNED_WORKD"
+TARGET=workd expect_red "workd: a profile with the app's App ID" workdappid "profile application-identifier"
+expect_red "app: the helper's profile is not the app's" workd "not the pinned"
+
+# The plists themselves: each side asks for exactly its own group.
+ENT_APP="$ROOT/clients/desktop/src-tauri/Entitlements.app.plist"
+ENT_WORKD="$ROOT/clients/desktop/src-tauri/Entitlements.workd.plist"
+ENT_BASE="$ROOT/clients/desktop/src-tauri/Entitlements.plist"
+with_group() { # <in plist> <out> <extra group>
+  python3 - "$1" "$2" "$3" <<'PY'
+import plistlib, sys
+p = plistlib.load(open(sys.argv[1], "rb"))
+p["keychain-access-groups"] = p.get("keychain-access-groups", []) + [sys.argv[3]]
+plistlib.dump(p, open(sys.argv[2], "wb"))
+PY
+}
+with_group "$ENT_WORKD" "$W/workd-devicekey.plist" "${TEAM}.app.momo.desktop.devicekey"
+MOMO_WORKD_ENTITLEMENTS="$W/workd-devicekey.plist" TARGET=workd \
+  expect_red "workd: Entitlements.workd.plist also asks for the device-key group" workd "never share a group"
+with_group "$ENT_APP" "$W/app-workd.plist" "$WORKD_ID"
+MOMO_APP_ENTITLEMENTS="$W/app-workd.plist" \
+  expect_red "app: Entitlements.app.plist also asks for workd's group" good "never share a group"
+
 # --verify-app on ad-hoc signed fake bundles. Ad-hoc signatures carry readable
 # entitlements, which is all this mode reads.
-ENT_APP="$ROOT/clients/desktop/src-tauri/Entitlements.app.plist"
-ENT_BASE="$ROOT/clients/desktop/src-tauri/Entitlements.plist"
-bundle() { # <name> <app entitlements> <sidecar entitlements> [embed profile]
+bundle() { # <name> <app entitlements> <helper entitlements> [app profile] [helper profile] [bare]
   local app="$W/$1/oort.app"
-  mkdir -p "$app/Contents/MacOS"
+  local helper="$app/Contents/Helpers/momo-workd.app"
+  mkdir -p "$app/Contents/MacOS" "$helper/Contents/MacOS"
   /usr/libexec/PlistBuddy -c 'Add :CFBundleExecutable string oort' \
     -c 'Add :CFBundleIdentifier string app.momo.desktop' "$app/Contents/Info.plist" >/dev/null
+  /usr/libexec/PlistBuddy -c 'Add :CFBundleExecutable string momo-workd' \
+    -c 'Add :CFBundleIdentifier string app.momo.desktop.workd' "$helper/Contents/Info.plist" >/dev/null
   cp /usr/bin/true "$app/Contents/MacOS/oort"
-  cp /usr/bin/true "$app/Contents/MacOS/momo-workd"
+  cp /usr/bin/true "$helper/Contents/MacOS/momo-workd"
+  [ -z "${6:-}" ] || cp /usr/bin/true "$app/Contents/MacOS/momo-workd"
   [ -z "${4:-}" ] || cp "$W/$4.provisionprofile" "$app/Contents/embedded.provisionprofile"
-  codesign --force -s - --entitlements "$3" "$app/Contents/MacOS/momo-workd" 2>/dev/null
+  [ -z "${5:-}" ] || cp "$W/$5.provisionprofile" "$helper/Contents/embedded.provisionprofile"
+  [ -z "${6:-}" ] || codesign --force -s - "$app/Contents/MacOS/momo-workd" 2>/dev/null
+  codesign --force -s - --entitlements "$3" "$helper" 2>/dev/null
   codesign --force -s - --entitlements "$2" "$app" 2>/dev/null
 }
-verify() { "$CHECK" --verify-app "$W/$1/oort.app" --profile "$W/good.provisionprofile" >"$W/out" 2>&1; }
+verify() {
+  "$CHECK" --verify-app "$W/$1/oort.app" --profile "$W/good.provisionprofile" \
+    --workd-profile "$W/workd.provisionprofile" >"$W/out" 2>&1
+}
 expect_app() { # <label> <bundle> ok|<fragment>
   if verify "$2"; then
     [ "$3" = ok ] && pass "$1" || bad "$1: expected RED, the check passed"
@@ -165,25 +203,50 @@ expect_app() { # <label> <bundle> ok|<fragment>
   else bad "$1: $(cat "$W/out")"; fi
 }
 
-bundle signed "$ENT_APP" "$ENT_BASE" good
-expect_app "signed app: profile embedded, app has the group, sidecar has none" signed ok
+bundle signed "$ENT_APP" "$ENT_WORKD" good workd
+expect_app "signed app + helper: each embeds its profile and holds exactly its own group" signed ok
 
-bundle sidecar "$ENT_APP" "$ENT_APP" good
-expect_app "the sidecar signed with the device-key group" sidecar "momo-workd sidecar is signed with"
+bundle helperdevice "$ENT_APP" "$W/workd-devicekey.plist" good workd
+expect_app "the helper signed with the device-key group" helperdevice "holds the device-key group"
 
-bundle base "$ENT_BASE" "$ENT_BASE" good
-expect_app "the app signed without the restricted entitlements (bundler plist only)" base "wants"
+bundle appworkd "$W/app-workd.plist" "$ENT_WORKD" good workd
+expect_app "the app signed with workd's group" appworkd "the app holds workd's keychain group"
 
-bundle noprofile "$ENT_APP" "$ENT_BASE"
-expect_app "no embedded profile" noprofile "no Contents/embedded.provisionprofile"
+bundle helperapp "$ENT_APP" "$ENT_APP" good workd
+expect_app "the helper signed with the app's entitlements" helperapp "momo-workd helper"
+
+bundle helperbase "$ENT_APP" "$ENT_BASE" good workd
+expect_app "the helper signed without its restricted entitlements (bundler plist)" helperbase "Entitlements.workd.plist wants"
+
+bundle base "$ENT_BASE" "$ENT_WORKD" good workd
+expect_app "the app signed without the restricted entitlements (bundler plist only)" base "Entitlements.app.plist wants"
+
+bundle noprofile "$ENT_APP" "$ENT_WORKD" "" workd
+expect_app "no embedded app profile" noprofile "no Contents/embedded.provisionprofile"
+
+bundle nohelperprofile "$ENT_APP" "$ENT_WORKD" good
+expect_app "the helper has no embedded profile" nohelperprofile "the helper has no"
+
+bundle helperwrong "$ENT_APP" "$ENT_WORKD" good good
+expect_app "the helper embeds the app's profile" helperwrong "differs from"
 
 profile other2 UUID=11111111-1111-1111-1111-111111111111
-bundle otherprofile "$ENT_APP" "$ENT_BASE" other2
-expect_app "a different embedded profile" otherprofile "differs from"
+bundle otherprofile "$ENT_APP" "$ENT_WORKD" other2 workd
+expect_app "a different embedded app profile" otherprofile "differs from"
 
-# publish_next_build.sh wiring: the profile is checked before the build, then
-# embedded, the outer .app re-signed with Entitlements.app.plist (never --deep,
-# which would re-sign the sidecar too), then checked again before notarization.
+bundle bare "$ENT_APP" "$ENT_WORKD" good workd bare
+expect_app "a bare Contents/MacOS/momo-workd left in the app" bare "a bare Contents/MacOS/momo-workd"
+
+if "$CHECK" --verify-app "$W/signed/oort.app" --profile "$W/good.provisionprofile" >"$W/out" 2>&1; then
+  bad "--verify-app without --workd-profile passed"
+else pass "--verify-app without --workd-profile (RED)"; fi
+
+# publish_next_build.sh wiring: both profiles are checked before the build;
+# then inside out: the workd profile embedded in the helper and the helper
+# signed with Entitlements.workd.plist, the app profile embedded and the outer
+# .app re-signed with Entitlements.app.plist (never --deep, which would
+# re-sign the helper with the app's entitlements), then both checked again
+# before notarization.
 if python3 - "$ROOT/scripts/publish_next_build.sh" >"$W/out" 2>&1 <<'PY'
 import re, sys
 lines = [l for l in open(sys.argv[1], encoding="utf-8").read().splitlines()
@@ -195,22 +258,30 @@ def at(pattern):
         raise SystemExit("publish_next_build.sh: missing %s" % pattern)
     return m.start()
 pre = at(r'"\$PROFILE_CHECK" --profile "\$PROVISIONING_PROFILE" --identity "\$SIGN_IDENTITY"')
+pre_workd = at(r'"\$PROFILE_CHECK" --target workd --profile "\$WORKD_PROVISIONING_PROFILE" --identity "\$SIGN_IDENTITY"')
 build = at(r"cargo tauri build")
+helper_embed = at(r'install -m 0644 "\$WORKD_PROVISIONING_PROFILE" "\$HELPER_PATH/Contents/embedded\.provisionprofile"')
+helper_sign = at(r'--entitlements "\$WORKD_ENTITLEMENTS" --sign "\$SIGN_IDENTITY" "\$HELPER_PATH"')
 embed = at(r'install -m 0644 "\$PROVISIONING_PROFILE" "\$APP_PATH/Contents/embedded\.provisionprofile"')
 resign = at(r'--entitlements "\$APP_ENTITLEMENTS" --sign "\$SIGN_IDENTITY" "\$APP_PATH"')
-verify = at(r'"\$PROFILE_CHECK" --verify-app "\$APP_PATH"')
+verify = at(r'"\$PROFILE_CHECK" --verify-app "\$APP_PATH" --profile "\$PROVISIONING_PROFILE" \\\n\s*--workd-profile "\$WORKD_PROVISIONING_PROFILE"')
+verify_helper = at(r'build_workd_sidecar\.sh --verify-bundle "\$APP_PATH" --require-signed')
 notary = at(r"notarytool submit")
-if not pre < build < embed < resign < verify < notary:
-    raise SystemExit("publish_next_build.sh: order is not check < build < embed < re-sign < verify < notarize")
+if not max(pre, pre_workd) < build < helper_embed < helper_sign < embed < resign < verify < verify_helper < notary:
+    raise SystemExit("publish_next_build.sh: order is not checks < build < helper embed < helper sign < app embed < app re-sign < verify < verify helper < notarize")
+if not re.search(r'HELPER_PATH="\$APP_PATH/Contents/Helpers/momo-workd\.app"', text):
+    raise SystemExit("publish_next_build.sh: HELPER_PATH is not Contents/Helpers/momo-workd.app")
+if not re.search(r'WORKD_ENTITLEMENTS="clients/desktop/src-tauri/Entitlements\.workd\.plist"', text):
+    raise SystemExit("publish_next_build.sh: WORKD_ENTITLEMENTS is not Entitlements.workd.plist")
 start = text.rfind("codesign", 0, resign)
 stmt = text[start:text.find('"$APP_PATH"', resign)]
 if "--deep" in stmt:
-    raise SystemExit("publish_next_build.sh: the app re-sign uses --deep (would re-sign the sidecar)")
+    raise SystemExit("publish_next_build.sh: the app re-sign uses --deep (would re-sign the helper)")
 if not re.search(r'APP_ENTITLEMENTS="clients/desktop/src-tauri/Entitlements\.app\.plist"', text):
     raise SystemExit("publish_next_build.sh: APP_ENTITLEMENTS is not Entitlements.app.plist")
 print("ok")
 PY
-then pass "publish_next_build.sh: check before build, embed, re-sign (no --deep), verify before notarization"
+then pass "publish_next_build.sh: both checks before build, helper then app (no --deep), both verified before notarization"
 else bad "$(cat "$W/out")"; fi
 
 if [ "$fails" -gt 0 ]; then
