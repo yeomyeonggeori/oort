@@ -128,6 +128,13 @@ export interface HostRefreshRequest {
   memberId: string;
   /** Server time minus local time, from a `refresh_proof_stale` answer. */
   skewMs: number;
+  /**
+   * This is the bind refresh right after a sign-in (#3106 MUST 1). A host
+   * that cannot carry it WITH a proof right now should reject (the core keeps
+   * the token and retries the bind) rather than answer null: a proofless
+   * refresh would spend the sign-in's first token and leave it unbound.
+   */
+  bind?: boolean;
 }
 
 /** One refresh the host made. Mirrors the shell's `AttemptAnswer`. */

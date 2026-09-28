@@ -258,6 +258,15 @@ describe("desktop runtime with a working keychain", () => {
     });
     expect(answer).toBeNull();
     expect(mocks.shell.refreshAttempt).not.toHaveBeenCalled();
+    // …but the bind refresh must not go without a proof: it defers.
+    await expect(
+      session.refreshThroughHost({
+        workspaceId: member.workspaceId,
+        memberId: member.id,
+        skewMs: 0,
+        bind: true,
+      })
+    ).rejects.toThrow("not confirmed");
   });
 
   it("revokes through the shell, which holds the token", async () => {

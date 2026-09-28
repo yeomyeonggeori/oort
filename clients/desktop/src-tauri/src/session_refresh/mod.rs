@@ -36,8 +36,11 @@
 // The token itself reaches the shell only at sign-in
 // (`keychain_store_refresh_token`, with the server origin it belongs to) and
 // is presented only to that origin: a script in the webview can ask for a
-// rotation, but not send the token somewhere else. Redirects are not
-// followed.
+// rotation, but cannot send a token the shell already holds somewhere else.
+// (A script that knows a raw token — e.g. the sign-in's first one while it is
+// still in webview memory — can store it with an origin of its choosing and
+// have it presented and proved there; that needs code execution in the
+// webview, ADR-0146 D-10's scope.) Redirects are not followed.
 //
 // Serialised: one `gate` for every read-modify-write of the stored token
 // (attempt, store, clear, revoke, handle), so two windows can never present
@@ -67,10 +70,6 @@ use uuid::Uuid;
 pub const REFRESH_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// What `getRefreshToken()` answers in the webview while the shell holds it.
 pub const HANDLE_PREFIX: &str = "shell:";
-/// The webview's clock correction is bounded: a day covers any real skew,
-/// and a script cannot use it to date a proof arbitrarily (the server's ±5 min
-/// window is the real bound either way).
-pub const MAX_SKEW_MS: i64 = 24 * 60 * 60 * 1000;
 
 /// `shell:` + the first 32 hex of the token's SHA-256. Enough to tell two
 /// tokens apart across windows; useless to present.
@@ -413,7 +412,10 @@ pub async fn attempt<T: Transport, S: TokenStore, K: RefreshSigner>(
             ..AttemptAnswer::default()
         });
     };
-    let signed_at_ms = now_ms.saturating_add(request.skew_ms.clamp(-MAX_SKEW_MS, MAX_SKEW_MS));
+    // The skew is the server's own clock (its `Date`), not clamped: a Mac
+    // whose clock is days off must still sign in the server's ±5 min window,
+    // and the proof never leaves the shell except to the pinned origin.
+    let signed_at_ms = now_ms.saturating_add(request.skew_ms);
     let (answer, proved) = post_refresh(
         transport,
         signer,
@@ -547,8 +549,10 @@ pub async fn revoke<T: Transport, S: TokenStore, K: RefreshSigner>(
                 .await?;
             return Ok((200..300).contains(&done.status));
         }
-        if answer.status != 401
-            || error_code(&answer.body).as_deref() == Some("refresh_proof_stale")
+        // Only a replayed nonce or a plain 401 (a racing recovery) is worth
+        // one more try; stale, required and invalid will not change.
+        let code = error_code(&answer.body);
+        if answer.status != 401 || !matches!(code.as_deref(), None | Some("refresh_proof_replayed"))
         {
             return Ok(false);
         }

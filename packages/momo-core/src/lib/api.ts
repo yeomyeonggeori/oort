@@ -821,11 +821,12 @@ interface RefreshAttempt {
 async function refreshAttempt(
   refreshToken: string,
   identity: { workspaceId: string; memberId: string } | null,
-  skewMs: number
+  skewMs: number,
+  bind = false
 ): Promise<RefreshAttempt> {
   const session = coreSession();
   if (identity && session.refreshThroughHost) {
-    const answer = await session.refreshThroughHost({ ...identity, skewMs });
+    const answer = await session.refreshThroughHost({ ...identity, skewMs, ...(bind ? { bind } : {}) });
     if (answer) {
       const pair =
         answer.status === 200 && answer.accessToken && answer.refreshToken
@@ -890,22 +891,28 @@ async function refreshAttempt(
  */
 async function refreshWithRetries(
   refreshToken: string,
-  identity: { workspaceId: string; memberId: string } | null
+  identity: { workspaceId: string; memberId: string } | null,
+  bind = false
 ): Promise<{ pair: RefreshResponse; handle: boolean } | null> {
   let skewMs = 0;
   let plainRetried = false;
   for (let attempt = 1; attempt <= MAX_REFRESH_ATTEMPTS; attempt++) {
-    const answer = await refreshAttempt(refreshToken, identity, skewMs);
+    const answer = await refreshAttempt(refreshToken, identity, skewMs, bind);
     if (answer.pair) return { pair: answer.pair, handle: answer.handle };
     const retry = refreshRetry(answer.status, answer.code, answer.proved, plainRetried);
     if (retry === "sign-out") return null;
     if (retry === "re-sign-with-server-time") {
       skewMs = serverSkewMs(answer.date, Date.now()) ?? skewMs;
-    } else if (answer.code === undefined) {
+    } else if (answer.code !== "refresh_proof_replayed") {
+      // A plain 401 — or one with a code this client does not know — gets
+      // its one retry, no more.
       plainRetried = true;
     }
   }
-  return null;
+  // Out of attempts while the server still said "sign again" (stale or
+  // replayed): that is never a sign-out (#3079). Nothing is proven about the
+  // session; keep it and let the next rotation try again.
+  throw new Error("refresh proof retries exhausted");
 }
 
 function identityOf(): { workspaceId: string; memberId: string } | null {
@@ -957,7 +964,9 @@ async function rotateOnce(): Promise<Rotation> {
   // to rotate and nothing to keep waiting for.
   if (!refreshToken) return { outcome: "rejected", pair: null };
   rotationPosted = true;
-  const rotated = await refreshWithRetries(refreshToken, identityOf());
+  const bind = nextRotationBinds;
+  nextRotationBinds = false;
+  const rotated = await refreshWithRetries(refreshToken, identityOf(), bind);
   if (!rotated) {
     coreSession().markAuthExpired();
     return { outcome: "rejected", pair: null };
@@ -1035,9 +1044,14 @@ function hostProvesRefresh(): boolean {
   return Boolean(session.signRefreshProof || session.refreshThroughHost);
 }
 
+/** The next rotation is a sign-in's bind refresh (see `HostRefreshRequest.bind`). */
+let nextRotationBinds = false;
+
 function bindRefreshKey(retry: number): void {
   if (!hostProvesRefresh()) return;
+  nextRotationBinds = true;
   void refreshSessionOutcome().then((outcome) => {
+    nextRotationBinds = false;
     if (outcome !== "unreachable" || retry >= BIND_RETRIES) return;
     // Nothing answered, so what is stored now is still the sign-in's first
     // token (or the desktop shell's handle for it).

@@ -475,7 +475,13 @@ export async function refreshThroughHost(
   // read that failed — so the core rotates it as before rather than have the
   // shell find nothing and sign the person out.
   const current = persisted?.refreshToken;
-  if (!current || !isShellHandle(current)) return null;
+  if (!current || !isShellHandle(current)) {
+    // The bind refresh must not go without the proof: it would spend the
+    // sign-in's first token and leave the sign-in unbound (#3079 MUST 1).
+    // Nothing answered → the core keeps the token and retries the bind.
+    if (request.bind) throw new Error("the keychain has not confirmed the sign-in's token yet");
+    return null;
+  }
   // Anything still queued (a clear) lands first.
   await flushKeychain();
   if (storageMode !== "keychain") return null;

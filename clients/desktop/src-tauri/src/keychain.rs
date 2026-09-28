@@ -121,8 +121,9 @@ pub async fn keychain_refresh_token_handle(
 /// Stores (or replaces) the refresh token. `origin` is the server it belongs
 /// to (`https://host[:port]`, #3106): the shell will present this token only
 /// there, so a script cannot point `session_refresh_attempt` at another host.
-/// A store without one (a legacy record moved from web storage) forgets the
-/// old pin; the first rotation then records the origin it is asked for.
+/// Required: a store without one is refused (the web layer then keeps the
+/// session in web storage). Only an item written by a build before #3106 is
+/// unpinned; its first rotation records the origin it is asked for.
 #[cfg(desktop)]
 #[tauri::command]
 pub async fn keychain_store_refresh_token(
@@ -134,13 +135,18 @@ pub async fn keychain_store_refresh_token(
     if token.is_empty() {
         return Err("refusing to store an empty refresh token".into());
     }
-    let origin = match origin {
-        Some(raw) => Some(
-            crate::session_refresh::origin_of(&raw)
-                .ok_or("refusing an origin that is not http(s)")?,
-        ),
-        None => None,
-    };
+    // A handle is not a token; storing one would lose the session.
+    if token.starts_with(crate::session_refresh::HANDLE_PREFIX) {
+        return Err("refusing to store a handle as a refresh token".into());
+    }
+    // Always pinned on the desktop: an unpinned token would take whatever
+    // origin its first rotation names (#3106 review).
+    let origin = Some(
+        origin
+            .as_deref()
+            .and_then(crate::session_refresh::origin_of)
+            .ok_or("refusing a refresh token without its http(s) server origin")?,
+    );
     let shell = app.state::<crate::session_refresh::SessionShell>();
     let _one = shell.gate().lock().await;
     // A new sign-in: a token stashed by an earlier clear belongs to another

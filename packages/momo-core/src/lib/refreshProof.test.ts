@@ -237,6 +237,24 @@ describe("phone: the core POSTs, the host signs", () => {
     expect(again.events).toContain("expired");
   });
 
+  // Review M1: out of attempts while the server still says "sign again" is
+  // not a sign-out. Sabotage: return null (sign-out) after the loop — RED.
+  it("stale to the last attempt keeps the session (unreachable), never signs out", async () => {
+    const h = harness({ signer: true });
+    h.reply(refused("refresh_proof_stale"), refused("refresh_proof_stale"), refused("refresh_proof_stale"));
+    await expect(refreshSessionOutcome()).resolves.toBe("unreachable");
+    expect(h.sent).toHaveLength(3);
+    expect(h.events).toEqual([]);
+    expect(h.refresh()).toBe("rt-0");
+  });
+
+  it("an unknown 401 code on a proved refresh gets the one retry, not two", async () => {
+    const h = harness({ signer: true });
+    h.reply(refused("something_new"), refused("something_new"), pair(1));
+    await expect(refreshSessionOutcome()).resolves.toBe("rejected");
+    expect(h.sent).toHaveLength(2);
+  });
+
   it("required and invalid sign out at once, as before", async () => {
     for (const code of ["refresh_proof_required", "refresh_proof_invalid"]) {
       const h = harness({ signer: true });
@@ -349,6 +367,39 @@ describe("desktop: the shell carries the refresh", () => {
     await expect(refreshSessionOutcome()).resolves.toBe("rotated");
     expect(h.hostCalls[0]).toBe(0);
     expect(Math.abs(h.hostCalls[1] - 600_000)).toBeLessThan(2_000);
+  });
+
+  // Review M3: the bind refresh tells the host it is one, so a host that
+  // cannot prove right now defers (rejects) instead of letting the core spend
+  // the first token without a proof.
+  it("the bind refresh is marked, and a host that defers it keeps the first token", async () => {
+    vi.useFakeTimers();
+    const seen: Array<boolean | undefined> = [];
+    const h = harness({ host: () => null });
+    h.port.refreshThroughHost = async (request) => {
+      seen.push(request.bind);
+      if (seen.length === 1) throw new Error("keychain not confirmed yet");
+      return { status: 200, accessToken: "at-1", refreshToken: "shell:abc", proved: true };
+    };
+    h.reply({
+      status: 200,
+      body: {
+        accessToken: "at-L",
+        refreshToken: "rt-L",
+        member,
+        realtimeWebSocketUrl: "wss://server.test/ws",
+      },
+    });
+    await login("a@b.test", "pw");
+    await vi.waitFor(() => expect(seen).toEqual([true]));
+    expect(h.sent.map((s) => s.path)).toEqual(["/v1/auth/login"]);
+    expect(h.refresh()).toBe("rt-L");
+    await vi.advanceTimersByTimeAsync(BIND_RETRY_MS);
+    await vi.waitFor(() => expect(h.refresh()).toBe("shell:abc"));
+    expect(seen).toEqual([true, true]);
+    // An ordinary rotation is not a bind.
+    await refreshSessionOutcome();
+    expect(seen[2]).toBeUndefined();
   });
 
   it("a shell that cannot carry it now falls back to the core's own POST", async () => {
