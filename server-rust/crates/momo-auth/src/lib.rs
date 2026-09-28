@@ -160,7 +160,8 @@ pub use hosted_oauth::{
     HOSTED_OAUTH_REQUEST_TTL_SECONDS, HOSTED_OAUTH_REQUEST_TYP,
 };
 pub use issue::{
-    sign_access, sign_app_token, sign_refresh, IssuedToken, ACCESS_TTL_SECONDS, REFRESH_TTL_SECONDS,
+    sign_access, sign_app_token, sign_refresh, sign_rotation_successor, IssuedToken,
+    ACCESS_TTL_SECONDS, REFRESH_TTL_SECONDS,
 };
 pub use jwt::{
     verify_app_access, verify_app_refresh, AppClaims, AuthError, Principal, PrincipalKind,
