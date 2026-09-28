@@ -271,6 +271,56 @@ pub async fn set_notification_rule_in_tx(
     Ok(next.effective(now))
 }
 
+/// A field-level rule write (#3012, `PATCH …/notification-rules`). Every field
+/// is optional: an absent field keeps what is stored **at the moment of the
+/// write**, read under the row lock — not what the client last saw. That is
+/// what lets the web settings panel and the phone each change their own switch
+/// without erasing the other's (a PUT carries a whole snapshot, so the later of
+/// two PUTs silently reverts the earlier one's field).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct NotificationRulePatch {
+    pub dnd: Option<bool>,
+    /// Same meaning as [`NotificationRuleUpdate::dnd_until`]; ignored (cleared)
+    /// when the resulting `dnd` is false.
+    pub dnd_until: StatusPatch<DateTime<Utc>>,
+    pub mention_overrides_mute: Option<bool>,
+}
+
+impl NotificationRulePatch {
+    /// Whether the patch names no field at all.
+    pub fn is_empty(&self) -> bool {
+        self.dnd.is_none()
+            && self.mention_overrides_mute.is_none()
+            && self.dnd_until == StatusPatch::Absent
+    }
+}
+
+/// Apply a [`NotificationRulePatch`] to the calling member's rule and return the
+/// effective stored value.
+///
+/// The row is materialized and row-locked **before** the merge base is read, so
+/// two concurrent patches serialize: the second one waits, then merges onto the
+/// first one's committed row. The write itself is [`set_notification_rule_in_tx`]
+/// (same transaction, lock already held), so the expiry and DND-bundle rules
+/// are exactly the PUT's: a patch that leaves the pause alone keeps a bundle.
+pub async fn patch_notification_rule_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    patch: NotificationRulePatch,
+) -> Result<NotificationRule, DbError> {
+    let (current, now) = load_rule(conn, workspace_id, member_id, Load::Materialize).await?;
+    let base = current.effective(now);
+    let update = NotificationRuleUpdate {
+        dnd: patch.dnd.unwrap_or(base.dnd),
+        dnd_until: patch.dnd_until,
+        mention_overrides_mute: patch
+            .mention_overrides_mute
+            .unwrap_or(base.mention_overrides_mute),
+    };
+    set_notification_rule_in_tx(conn, workspace_id, member_id, update).await
+}
+
 /// The pause a DND bundle sets: on, until the later of the pre-bundle pause
 /// and the DND expiry. A pre-bundle pause with no expiry keeps the result
 /// indefinite ("원래 켜져 있었으면 유지"); a pre-bundle pause that was off

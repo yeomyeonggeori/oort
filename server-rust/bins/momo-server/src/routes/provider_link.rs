@@ -41,9 +41,11 @@
 //! vocabulary (`provider_auth_failed`, `provider_unreachable`,
 //! `provider_rate_limited`, `provider_status_NNN`, plus `provider_egress_denied`
 //! and `provider_invalid_response`) and a `probe` object holding only numbers
-//! the provider itself stated. The one hop still reported as `probe_not_run` is
-//! a legacy `oauth-openai` link: its access token is refreshed by the worker,
-//! and no new such link can be made (ADR-0147 증보 2026-09-26).
+//! the provider itself stated — plus, since #3009, the sanitized model ids its
+//! `/models` list named (`modelIds`, `momo_provider_probe::model_ids`). The one
+//! hop still reported as `probe_not_run` is a legacy `oauth-openai` link: its
+//! access token is refreshed by the worker, and no new such link can be made
+//! (ADR-0147 증보 2026-09-26).
 //!
 //! Two throttles bound what an operator can make this server send: a per-member
 //! window on the route (429 + `Retry-After`) and a per-link cache that reuses the
@@ -717,6 +719,8 @@ fn probed_entry(
             http_status: report.http_status,
             latency_ms: report.latency_ms,
             model_count: report.model_count,
+            model_ids: report.model_ids.clone(),
+            model_ids_truncated: report.model_ids_truncated,
             rate_limit: report
                 .rate_limit
                 .as_ref()
