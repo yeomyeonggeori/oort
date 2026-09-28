@@ -975,6 +975,13 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/work-sessions/{session}/resume",
             post(routes::work_sessions::resume),
         )
+        // ADR-0188 D5 (#3000): the session owner's permission decision.
+        // Human bearer only — never on the signed host allow-list, and absent
+        // from `momo_auth::required_agent_scope`.
+        .route(
+            "/v1/workspaces/{ws}/work-sessions/{session}/permission-decisions",
+            post(routes::work_permissions::decide),
+        )
         // work controls — the host-control ledger (#1114, ADR-0114 D4/D5)
         .route(
             "/v1/workspaces/{ws}/work-controls",

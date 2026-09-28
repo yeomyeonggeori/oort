@@ -256,6 +256,7 @@ POST /v1/workspaces/{workspaceId}/work-sessions
 GET /v1/workspaces/{workspaceId}/work-sessions
 PATCH /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}
 POST /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/resume
+POST /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/permission-decisions
 
 # ── work control 원장 + 서명 데몬 경로 (#1114 / #1132 이탈 6 / #1143) ───────
 # 이 다섯 줄이 #1132 가 "실제로 왕복시키지 않은 5개"라며 미등재로 남긴 그 연산들이다.

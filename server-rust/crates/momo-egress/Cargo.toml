@@ -1,0 +1,29 @@
+[package]
+name = "momo-egress"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# #2976 — the one reqwest adapter for the #2852 egress guard.
+#
+# The DECISION is `momo_settings::EgressPolicy` (ADR-0004 증보 5 D1). This crate
+# is only the plumbing that makes a reqwest socket open to exactly the addresses
+# that decision accepted: the guarded DNS resolver, the literal/pre-DNS
+# precheck, the lookup deadline, and the no-redirect/no-proxy client builder.
+# `momo-agent-worker` (provider call, OAuth refresh) and `momo-provider-probe`
+# (「연결 확인」) both build their clients here, so the two cannot drift.
+#
+# It holds `reqwest`, so `momo-server` must never list it in `[dependencies]`
+# (invariant #2 — the same seal as momo-provider-probe/momo-unfurl). The api
+# reaches it only through momo-provider-probe's sealed `ProviderProbe::probe`.
+# No third-party crate enters the graph: every dependency below is already a
+# workspace dependency of both consumers.
+[dependencies]
+momo-settings = { path = "../momo-settings" }
+
+reqwest.workspace = true
+tokio = { workspace = true, features = ["net", "time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "time"] }

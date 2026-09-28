@@ -4150,6 +4150,30 @@ guard_jq --arg source "$(printf '%s' "$RESUME_SOURCE_SESSION_ID" | tr '[:upper:]
   "resume opens a new Run with durable lineage"
 RESUMED_SESSION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workSession.id')"
 canonical_uuid "$RESUMED_SESSION_ID" || { echo "[openapi-rust] candidate returned a non-canonical resumed session id" >&2; exit 1; }
+
+# ADR-0188 D5 (#3000) — 권한 다리의 사람 결정. 요청 행은 member 호스트의 workd 가
+# `approval.requested` 이벤트로 올릴 때 생기는데, 이 부분집합에는 workd 가 없다.
+# 그래서 전제(요청 행)만 SQL 로 심고 결정 자체는 실 HTTP 다. 결정자는 세션·호스트
+# 소유자인 게이트 사람이고, 결정은 그 호스트 앞 `permission` 컨트롤이 된다.
+PERMISSION_REQUEST_EVENT_ID="$(lower_uuid)"
+run_sql <<SQL
+INSERT INTO work_permission_request
+  (workspace_id, work_session_id, host_id, channel_id, request_event_id, options, expires_at)
+VALUES ('$WS', '$RESUMED_SESSION_ID', '$RESUME_HOST_ID', '$GENERAL_CHANNEL_ID',
+        '$PERMISSION_REQUEST_EVENT_ID',
+        '[{"option_id":"allow-once","kind":"allow_once"},{"option_id":"reject-once","kind":"reject_once"}]',
+        now() + interval '10 minutes');
+SQL
+sample work-permission-decide post \
+  "/v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/permission-decisions" \
+  "/v1/workspaces/$WS/work-sessions/$RESUMED_SESSION_ID/permission-decisions" 200 \
+  "$(jq -cn --arg id "$PERMISSION_REQUEST_EVENT_ID" \
+      '{requestEventId:$id,optionId:"allow-once",kind:"allow_once"}')" "$ACCESS"
+guard_jq '.permissionRequest.status == "approved"
+   and .permissionRequest.decidedKind == "allow_once"
+   and (.permissionRequest.controlId | type == "string")' \
+  "the owner's allow_once becomes a permission control"
+
 expect resumed-session-end patch "/v1/workspaces/$WS/work-sessions/$RESUMED_SESSION_ID" 200 \
   '{"status":"ended","exitCode":0}' "$ACCESS"
 

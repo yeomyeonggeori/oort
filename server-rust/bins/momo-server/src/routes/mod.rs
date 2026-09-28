@@ -74,6 +74,7 @@ pub mod welcome;
 /// #1114 — the host-control ledger (ADR-0114 D4/D5) and its spawn approval.
 pub mod work_controls;
 pub mod work_hosts;
+pub mod work_permissions;
 pub mod work_sessions;
 pub mod work_tier_policy;
 pub mod work_tool_profiles;

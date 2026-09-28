@@ -484,6 +484,48 @@ async fn private_literals_are_refused_without_a_lookup() {
     assert_eq!(hits.load(Ordering::SeqCst), 0);
 }
 
+/// The review-2972 PoC's address-notation variants, pointed at a live
+/// loopback service. The lookup answers a PUBLIC address, so a variant the
+/// precheck mistook for a name (while the connector parsed it as a literal)
+/// would pass the precheck and be dialled — a hit is the regression.
+fn notation_variants(port: u16) -> Vec<String> {
+    vec![
+        format!("http://front.test@127.0.0.1:{port}/v1"),
+        format!("http://front.test:x@0x7f000001:{port}/v1"),
+        format!("http://2130706433:{port}/v1"),
+        format!("HTTP://0177.0.0.1:{port}/v1"),
+        format!("http://%31%32%37.0.0.1:{port}/v1"),
+        format!("http://127.0.0.1.:{port}/v1"),
+        format!("http:\\\\127.0.0.1:{port}/v1"),
+        format!("http://\u{2460}\u{2461}\u{2466}.0.0.1:{port}/v1"),
+        format!("http://[::ffff:0:7f00:1]:{port}/v1"),
+        format!("http://[::ffff:7f00:1]:{port}/v1"),
+        format!("http://0.0.0.0:{port}/v1"),
+        format!("http://[::]:{port}/v1"),
+    ]
+}
+
+#[tokio::test]
+async fn address_notation_variants_are_refused_and_never_dialled() {
+    let (port, hits) = mock().await;
+    for base in notation_variants(port) {
+        let report = default_policy(ScriptedLookup::new(&[&["93.184.216.34"]]))
+            .probe(&target(base.clone(), ProbeCredential::Bearer(GOOD.into())))
+            .await;
+        assert_eq!(
+            report.reason.as_deref(),
+            Some(EGRESS_DENIED_REASON),
+            "{base}: {report:?}"
+        );
+        assert_eq!(report.http_status, None, "{base}");
+    }
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        0,
+        "a notation variant was dialled"
+    );
+}
+
 #[tokio::test]
 async fn a_redirect_to_an_internal_address_is_not_followed() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
