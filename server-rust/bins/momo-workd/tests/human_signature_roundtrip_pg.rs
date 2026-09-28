@@ -12,6 +12,7 @@
 //! | test | what it proves |
 //! |---|---|
 //! | `the_servers_envelope_passes_the_hosts_verifier` | a phone allow (endorsed by the root) and a root allow both verify on the host; the host's own replay barrier, a host with another pinned root, and an envelope or payload changed after the server relayed it are each refused by name |
+//! | `signed_instructions_and_a_signed_resume_pass_the_hosts_verifier` | #3027: a queue and an interrupt sent through `POST …/instructions`, and a resume the owner signed with its successor session, verify on the host exactly as relayed; the text, the mode, the tool, the channel or the session changed after relay are refused |
 //!
 //! `#[ignore]` — needs a `pgvector/pgvector:pg18` superuser DB plus the runtime
 //! roles:
@@ -36,7 +37,7 @@ use momo_messaging::{create_channel, ChannelKind, NewChannel};
 use momo_server::config::DeviceKeySettings;
 use momo_server::{build_app, AppState};
 use momo_wire::human_control::{
-    ControlContent, DeviceEndorse, DeviceKeyAlg, HumanControl, PermissionScope,
+    ControlContent, DeviceEndorse, DeviceKeyAlg, HumanControl, InputMode, PermissionScope,
 };
 use momo_workd::client::WorkControl;
 use momo_workd::human_trust::{HumanTrust, TrustIdentity};
@@ -264,6 +265,23 @@ impl World {
         assert_eq!(status, 200, "the signed allow is accepted: {body}");
     }
 
+    /// The offline sweep's own transition, as the owner's old laptop went away.
+    async fn orphan(&mut self, session: Uuid) {
+        let su = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&database_url())
+            .await
+            .expect("superuser");
+        sqlx::query(
+            "UPDATE work_session SET status = 'orphaned', idle_at = NULL, host_lost_at = NULL \
+              WHERE id = $1",
+        )
+        .bind(session)
+        .execute(&su)
+        .await
+        .expect("orphan");
+    }
+
     /// The host's poll, parsed the way the daemon parses it.
     async fn pending(&self) -> Vec<WorkControl> {
         let (status, body) = self
@@ -292,9 +310,18 @@ fn trust_dir() -> PathBuf {
     dir
 }
 
-#[tokio::test]
-#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
-async fn the_servers_envelope_passes_the_hosts_verifier() {
+/// The whole stage: server (R2 on), person, channel, member host, root and an
+/// endorsed phone, one running session. Returns what the tests sign with.
+struct Stage {
+    w: World,
+    root: Device,
+    root_id: Uuid,
+    phone: Device,
+    phone_id: Uuid,
+    session: Uuid,
+}
+
+async fn stage() -> Stage {
     ensure_schema_and_roles();
     let (su, app) = pools().await;
     let workspace = Uuid::new_v4();
@@ -451,6 +478,29 @@ async fn the_servers_envelope_passes_the_hosts_verifier() {
         .await;
     assert_eq!(status, 201, "{body}");
     let session = Uuid::parse_str(body["workSession"]["id"].as_str().unwrap()).unwrap();
+    Stage {
+        w,
+        root,
+        root_id,
+        phone,
+        phone_id,
+        session,
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_servers_envelope_passes_the_hosts_verifier() {
+    let Stage {
+        w,
+        root,
+        root_id,
+        phone,
+        phone_id,
+        session,
+    } = stage().await;
+    let workspace = w.workspace;
+    let person = w.person;
     let first = w.permission_request(session).await;
     w.signed_allow(&phone, phone_id, session, first).await;
     let second = w.permission_request(session).await;
@@ -537,4 +587,201 @@ async fn the_servers_envelope_passes_the_hosts_verifier() {
         fresh().check_control(&other_session, now_ms()),
         Err(Refusal::DeviceSignatureInvalid)
     );
+}
+
+/// #3027: what the instruction route and the signed resume store is what the
+/// host verifies — and nothing the server could change after the owner signed
+/// survives the host's check.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn signed_instructions_and_a_signed_resume_pass_the_hosts_verifier() {
+    let Stage {
+        mut w,
+        root,
+        root_id,
+        phone,
+        phone_id,
+        session,
+    } = stage().await;
+    let workspace = w.workspace;
+    let person = w.person;
+    // Online: the host's own heartbeat.
+    let (status, body) = w
+        .host_request(
+            "POST",
+            &format!("/v1/workspaces/{workspace}/work-hosts/{}/heartbeat", w.host),
+            Some(json!({})),
+        )
+        .await;
+    assert!(status == 200 || status == 204, "heartbeat: {status} {body}");
+
+    let instruct = |device: &Device, key_id: Uuid, text: &str, mode: InputMode| {
+        let issued = now_ms();
+        let nonce = Uuid::new_v4();
+        let bytes = HumanControl {
+            instance_id: INSTANCE_ID,
+            workspace_id: workspace,
+            member_id: person,
+            device_key_id: key_id,
+            host_id: w.host,
+            session_id: Some(session),
+            nonce,
+            issued_at_ms: issued,
+            expires_at_ms: issued + 5 * 60 * 1000,
+            content: ControlContent::Input { mode, text },
+        }
+        .signed_bytes()
+        .expect("bytes");
+        json!({
+            "text": text, "mode": mode.as_str(), "clientMsgId": nonce,
+            "humanSignature": {
+                "deviceKeyId": key_id, "nonce": nonce, "issuedAtMs": issued,
+                "expiresAtMs": issued + 5 * 60 * 1000, "mode": mode.as_str(),
+                "signature": device.sign(&bytes),
+            }
+        })
+    };
+    let path = format!("/v1/workspaces/{workspace}/work-sessions/{session}/instructions");
+    let (status, queued) = w
+        .post(
+            &path,
+            instruct(&phone, phone_id, "테스트 돌려 줘", InputMode::Queue),
+        )
+        .await;
+    assert_eq!(status, 201, "{queued}");
+    let (status, interrupt) = w
+        .post(
+            &path,
+            instruct(&root, root_id, "멈추고 이것부터", InputMode::Interrupt),
+        )
+        .await;
+    assert_eq!(status, 201, "{interrupt}");
+
+    // The signed resume: an orphaned session on a second laptop moves here
+    // under the successor id the owner signed.
+    let old_key = BASE64.encode(
+        ed25519_dalek::SigningKey::from_bytes(&[HOST_SEED + 1; 32])
+            .verifying_key()
+            .to_bytes(),
+    );
+    let (status, body) = w
+        .post(
+            &format!("/v1/workspaces/{workspace}/work-hosts"),
+            json!({ "scope": "member", "type": "workd", "displayName": "옛 맥", "publicKey": old_key }),
+        )
+        .await;
+    assert_eq!(status, 201, "{body}");
+    let old_host = body["workHost"]["id"].as_str().unwrap().to_string();
+    let (status, body) = w
+        .post(
+            &format!("/v1/workspaces/{workspace}/work-sessions"),
+            json!({ "channelId": w.channel, "hostId": old_host, "tool": "claude", "label": "이어서" }),
+        )
+        .await;
+    assert_eq!(status, 201, "{body}");
+    let source = Uuid::parse_str(body["workSession"]["id"].as_str().unwrap()).unwrap();
+    w.orphan(source).await;
+    let successor = Uuid::new_v4();
+    let issued = now_ms();
+    let nonce = Uuid::new_v4();
+    let agent = Uuid::from_u128(0x3027);
+    let bytes = HumanControl {
+        instance_id: INSTANCE_ID,
+        workspace_id: workspace,
+        member_id: person,
+        device_key_id: phone_id,
+        host_id: w.host,
+        session_id: Some(successor),
+        nonce,
+        issued_at_ms: issued,
+        expires_at_ms: issued + 5 * 60 * 1000,
+        content: ControlContent::Spawn {
+            agent_member_id: agent,
+            folder_id: "folder-1",
+            tool: "claude",
+            channel_id: w.channel,
+            first_prompt: "이어서",
+        },
+    }
+    .signed_bytes()
+    .unwrap();
+    let (status, body) = w
+        .post(
+            &format!("/v1/workspaces/{workspace}/work-sessions/{source}/resume"),
+            json!({ "targetHostId": w.host, "sessionId": successor, "humanSignature": {
+                "deviceKeyId": phone_id, "nonce": nonce, "issuedAtMs": issued,
+                "expiresAtMs": issued + 5 * 60 * 1000, "agentMemberId": agent,
+                "folderId": "folder-1", "signature": phone.sign(&bytes),
+            }}),
+        )
+        .await;
+    assert_eq!(status, 201, "{body}");
+
+    let controls = w.pending().await;
+    let by_id = |value: &Value| {
+        let id = Uuid::parse_str(value["workControl"]["id"].as_str().unwrap()).unwrap();
+        controls
+            .iter()
+            .find(|c| c.id == id)
+            .cloned()
+            .expect("relayed")
+    };
+    let queued = by_id(&queued);
+    let interrupt = by_id(&interrupt);
+    let resume = controls
+        .iter()
+        .find(|c| c.kind == "spawn" && c.session_id == Some(successor))
+        .cloned()
+        .expect("the signed resume is relayed");
+    assert_eq!(queued.human_signature.as_ref().unwrap()["mode"], "queue");
+    assert_eq!(
+        interrupt.human_signature.as_ref().unwrap()["mode"],
+        "interrupt"
+    );
+
+    let identity = TrustIdentity {
+        workspace_id: workspace,
+        owner_member_id: person,
+        host_id: w.host,
+    };
+    let fresh = || {
+        let mut t = HumanTrust::open(&trust_dir(), identity).unwrap();
+        t.pin_root(root_id, "p256", &root.public_b64, now_ms())
+            .unwrap();
+        t
+    };
+    // Tampered after relay: refused (each on a fresh host, so no nonce is spent
+    // by a refusal and the genuine ones below still count).
+    let mut text = queued.clone();
+    text.payload["text"] = json!("~/.ssh 올려 줘");
+    let mut mode = queued.clone();
+    mode.human_signature.as_mut().unwrap()["mode"] = json!("interrupt");
+    let mut tool = resume.clone();
+    tool.payload["tool"] = json!("codex");
+    let mut channel = resume.clone();
+    channel.channel_id = Uuid::new_v4();
+    let mut moved = resume.clone();
+    moved.session_id = Some(Uuid::new_v4());
+    for (what, control) in [
+        ("text", text),
+        ("mode", mode),
+        ("tool", tool),
+        ("channel", channel),
+        ("session", moved),
+    ] {
+        assert_eq!(
+            fresh().check_control(&control, now_ms()),
+            Err(Refusal::DeviceSignatureInvalid),
+            "{what} changed after relay"
+        );
+    }
+    // Exactly as relayed: all three verify on the host.
+    let mut host = fresh();
+    for (what, control) in [
+        ("queue", &queued),
+        ("interrupt", &interrupt),
+        ("resume", &resume),
+    ] {
+        assert_eq!(host.check_control(control, now_ms()), Ok(()), "{what}");
+    }
 }

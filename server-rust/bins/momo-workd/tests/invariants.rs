@@ -2108,6 +2108,20 @@ fn signed_at(
     )
 }
 
+/// An owner's input in `mode` (#3027), signed by `device`.
+fn signed_input(control: WorkControl, device: &Device, mode: InputMode) -> WorkControl {
+    let now = now_ms();
+    signed_full(
+        control,
+        device,
+        None,
+        now,
+        now + 5 * 60 * 1000,
+        Uuid::new_v4(),
+        mode,
+    )
+}
+
 fn signed_full(
     mut control: WorkControl,
     device: &Device,
@@ -2715,6 +2729,115 @@ async fn inv_26_r2_nothing_on_the_server_path_moves_the_root() {
     assert_eq!(
         h.trust.lock().unwrap().root().map(|r| r.public_key.clone()),
         Some(root.public())
+    );
+}
+
+/// #3027 (R2-E7): the owner's signed `queue` waits behind the running turn;
+/// the signed `interrupt` cancels it (ACP `session/cancel`) and is delivered
+/// next, ahead of the queue. The mode is a signed line: a queued instruction
+/// the server relabels `interrupt` is refused.
+#[tokio::test]
+async fn inv_27_r2_queue_waits_for_the_turn_and_interrupt_cancels_it_first() {
+    let mut h = harness_r2(&[("claude", &["--hang-first"])]);
+    let root = Device::new(1);
+    pin(&h, &root);
+    let request = signed(spawn(&h, "claude", "first turn hangs"), &root, None);
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+    wait_for("the first prompt", || prompts(&h).len() == 1).await;
+
+    let input = |h: &Harness, text: &str| {
+        control(h, "input", h.owner, Some(session), json!({ "text": text }))
+    };
+    // queue: accepted, and not delivered while the turn runs.
+    let queued = signed_input(input(&h, "queued after the turn"), &root, InputMode::Queue);
+    assert_eq!(
+        poll_and_ack(&mut h, &queued).await,
+        ControlAck::ok(Some(session))
+    );
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert_eq!(
+        prompts(&h).len(),
+        1,
+        "a queued instruction waits for the turn"
+    );
+    assert!(
+        !received_methods(&h).contains(&"session/cancel".to_string()),
+        "queue never cancels"
+    );
+
+    // The mode is signed: the server cannot promote a queue to an interrupt.
+    let mut promoted = signed_input(input(&h, "promoted by the server"), &root, InputMode::Queue);
+    promoted.human_signature.as_mut().unwrap()["mode"] = json!("interrupt");
+    assert_eq!(
+        poll_and_ack(&mut h, &promoted).await,
+        ControlAck::refused("device_signature_invalid")
+    );
+
+    // interrupt: the running turn is cancelled, then this goes next — before
+    // the instruction queued earlier.
+    let interrupt = signed_input(
+        input(&h, "stop and do this now"),
+        &root,
+        InputMode::Interrupt,
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &interrupt).await,
+        ControlAck::ok(Some(session))
+    );
+    wait_for("the interrupt and the queued turn", || {
+        prompts(&h).len() == 3
+    })
+    .await;
+    let sent = prompts(&h);
+    assert!(sent[0].contains("first turn hangs"), "{sent:?}");
+    assert!(sent[1].contains("stop and do this now"), "{sent:?}");
+    assert!(sent[2].contains("queued after the turn"), "{sent:?}");
+    let methods = received_methods(&h);
+    let cancel = methods
+        .iter()
+        .position(|m| m == "session/cancel")
+        .expect("the running turn was cancelled");
+    let prompt_positions: Vec<usize> = methods
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| *m == "session/prompt")
+        .map(|(i, _)| i)
+        .collect();
+    assert!(
+        prompt_positions[0] < cancel && cancel < prompt_positions[1],
+        "cancel comes between the hung turn and the interrupt: {methods:?}"
+    );
+    assert_eq!(
+        methods.iter().filter(|m| *m == "session/cancel").count(),
+        1,
+        "one cancel for one running turn"
+    );
+    wait_for("idle after the queue drained", || {
+        h.server
+            .statuses(session)
+            .contains(&SessionStatus::Idle { exit_code: 0 })
+    })
+    .await;
+
+    // With no turn running an interrupt simply starts; nothing is cancelled.
+    let idle_interrupt = signed_input(
+        input(&h, "interrupt while idle"),
+        &root,
+        InputMode::Interrupt,
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &idle_interrupt).await,
+        ControlAck::ok(Some(session))
+    );
+    wait_for("the idle interrupt", || prompts(&h).len() == 4).await;
+    assert!(prompts(&h)[3].contains("interrupt while idle"));
+    assert_eq!(
+        received_methods(&h)
+            .iter()
+            .filter(|m| *m == "session/cancel")
+            .count(),
+        1,
+        "an interrupt with nothing running cancels nothing"
     );
 }
 

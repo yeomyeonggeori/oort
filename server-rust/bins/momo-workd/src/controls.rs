@@ -14,7 +14,10 @@
 //!   only while the session is still `running`. A refused spawn that arrived
 //!   with a session the server already allocated for it (a resume) ends that
 //!   session, so the ledger is not left with a `running` session nothing runs.
-//! * `input` — the host owner's instruction, queued as the next turn.
+//! * `input` — the host owner's instruction. `queue` (the default, and every
+//!   unsigned input) is the next turn after the running one and anything
+//!   already queued; `interrupt` (#3027, only from a signed statement's
+//!   `mode`) cancels the running turn with ACP `session/cancel` and goes next.
 //!
 //! A spawn label or an input that starts with `/` is refused
 //! (`slash_command_refused`, #2602 L-7): it would run an adapter command, not a
@@ -332,7 +335,17 @@ impl ControlLoop {
             .filter(|text| !text.is_empty())
             .ok_or(Refusal::InvalidControl)?;
         crate::policy::check_prompt(text)?;
-        self.sessions.input(session_id, text.to_string()).await
+        // The mode travels only inside the owner's signed statement (the host
+        // verified it above when R2 is on). No statement → a queued turn.
+        let interrupt = control
+            .human_signature
+            .as_ref()
+            .and_then(|envelope| envelope.get("mode"))
+            .and_then(serde_json::Value::as_str)
+            == Some("interrupt");
+        self.sessions
+            .input(session_id, text.to_string(), interrupt)
+            .await
     }
 }
 
