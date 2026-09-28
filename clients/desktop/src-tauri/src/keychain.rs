@@ -12,6 +12,12 @@
 // would let any script in the webview enumerate whatever else this app ever
 // stores, which throws away most of what the keychain was for.
 //
+// Since #3106 the token also never comes back OUT: the shell rotates it itself
+// (`session_refresh`), and the webview gets a handle (`shell:` + a hash) to
+// tell one stored token from another. A second item under the same service,
+// `refresh-token-origin`, pins the token to the server it belongs to; it is
+// not secret.
+//
 // Keychain calls can block on a user prompt (macOS asks before an unfamiliar
 // binary reads an existing item), so every call goes through `spawn_blocking`
 // rather than stalling the IPC thread.
@@ -89,18 +95,97 @@ pub async fn keychain_available() -> bool {
     blocking(|| Ok(probe().is_ok())).await.unwrap_or(false)
 }
 
-/// Reads the stored refresh token, or `None` when there is no session to resume.
+/// What `getRefreshToken()` answers in the webview while the shell holds the
+/// token (#3106): `shell:` + 32 hex of its SHA-256, or `None` when there is no
+/// session to resume. The raw token never comes back across the bridge — it
+/// used to (`keychain_load_refresh_token`, removed), which let any script in
+/// the webview read it; now the shell rotates it itself
+/// (`session_refresh_attempt`) and the webview only needs to tell one stored
+/// token from another.
+#[cfg(desktop)]
 #[tauri::command]
-pub async fn keychain_load_refresh_token() -> Result<Option<String>, String> {
+pub async fn keychain_refresh_token_handle(
+    app: tauri::AppHandle,
+) -> Result<Option<String>, String> {
+    use tauri::Manager as _;
+    let shell = app.state::<crate::session_refresh::SessionShell>();
+    let _one = shell.gate().lock().await;
     blocking(|| match entry()?.get_password() {
-        Ok(token) => Ok(Some(token)),
+        Ok(token) => Ok(Some(crate::session_refresh::handle_of(&token))),
         Err(KeyringError::NoEntry) => Ok(None),
         Err(error) => Err(error),
     })
     .await
 }
 
-/// Stores (or replaces) the refresh token.
+/// Stores (or replaces) the refresh token. `origin` is the server it belongs
+/// to (`https://host[:port]`, #3106): the shell will present this token only
+/// there, so a script cannot point `session_refresh_attempt` at another host.
+/// A store without one (a legacy record moved from web storage) forgets the
+/// old pin; the first rotation then records the origin it is asked for.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn keychain_store_refresh_token(
+    app: tauri::AppHandle,
+    token: String,
+    origin: Option<String>,
+) -> Result<(), String> {
+    use tauri::Manager as _;
+    if token.is_empty() {
+        return Err("refusing to store an empty refresh token".into());
+    }
+    let origin = match origin {
+        Some(raw) => Some(
+            crate::session_refresh::origin_of(&raw)
+                .ok_or("refusing an origin that is not http(s)")?,
+        ),
+        None => None,
+    };
+    let shell = app.state::<crate::session_refresh::SessionShell>();
+    let _one = shell.gate().lock().await;
+    // A new sign-in: a token stashed by an earlier clear belongs to another
+    // session and must not be revoked with this one's access token.
+    shell.forget_pending_revoke();
+    blocking(move || {
+        entry()?.set_password(&token)?;
+        write_origin(origin.as_deref())
+    })
+    .await
+}
+
+/// Deletes the stored refresh token. Succeeds when there was nothing to delete —
+/// logout must never fail because the device was already clean.
+///
+/// The token is kept in memory (never on disk) until `session_revoke` takes
+/// it: the web layer wipes the store BEFORE it revokes (a slow network must
+/// never leave a usable token on the device), and the revocation needs the
+/// token the webview no longer holds (#3106).
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn keychain_clear_refresh_token(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager as _;
+    let shell = app.state::<crate::session_refresh::SessionShell>();
+    // Behind any rotation in flight, so what is stashed is the token it wrote.
+    let _one = shell.gate().lock().await;
+    let stored = blocking(|| match entry()?.get_password() {
+        Ok(token) => Ok(Some(token)),
+        Err(KeyringError::NoEntry) => Ok(None),
+        Err(error) => Err(error),
+    })
+    .await
+    .unwrap_or(None);
+    if let Some(token) = stored {
+        shell.stash_for_revoke(token);
+    }
+    blocking(|| match entry()?.delete_credential() {
+        Ok(()) => Ok(()),
+        Err(KeyringError::NoEntry) => Ok(()),
+        Err(error) => Err(error),
+    })
+    .await
+}
+
+#[cfg(not(desktop))]
 #[tauri::command]
 pub async fn keychain_store_refresh_token(token: String) -> Result<(), String> {
     if token.is_empty() {
@@ -109,8 +194,7 @@ pub async fn keychain_store_refresh_token(token: String) -> Result<(), String> {
     blocking(move || entry()?.set_password(&token)).await
 }
 
-/// Deletes the stored refresh token. Succeeds when there was nothing to delete —
-/// logout must never fail because the device was already clean.
+#[cfg(not(desktop))]
 #[tauri::command]
 pub async fn keychain_clear_refresh_token() -> Result<(), String> {
     blocking(|| match entry()?.delete_credential() {
@@ -119,4 +203,67 @@ pub async fn keychain_clear_refresh_token() -> Result<(), String> {
         Err(error) => Err(error),
     })
     .await
+}
+
+// ---- the shell's own rotation (#3106) ---------------------------------------
+
+/// Account for the origin the stored token belongs to. Not secret.
+#[cfg(desktop)]
+const ORIGIN_ACCOUNT: &str = "refresh-token-origin";
+
+#[cfg(desktop)]
+fn origin_entry() -> Result<Entry, KeyringError> {
+    Entry::new(SERVICE, ORIGIN_ACCOUNT)
+}
+
+#[cfg(desktop)]
+fn write_origin(origin: Option<&str>) -> Result<(), KeyringError> {
+    match origin {
+        Some(origin) => origin_entry()?.set_password(origin),
+        None => match origin_entry()?.delete_credential() {
+            Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
+            Err(error) => Err(error),
+        },
+    }
+}
+
+/// The OS credential store as `session_refresh::TokenStore`. Same service
+/// and account as the commands above: one token, no key parameter.
+#[cfg(desktop)]
+pub struct KeyringStore;
+
+#[cfg(desktop)]
+impl crate::session_refresh::TokenStore for KeyringStore {
+    fn load(&self) -> Result<Option<String>, String> {
+        match entry().and_then(|e| e.get_password()) {
+            Ok(token) => Ok(Some(token)),
+            Err(KeyringError::NoEntry) => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn store(&self, token: &str) -> Result<(), String> {
+        entry()
+            .and_then(|e| e.set_password(token))
+            .map_err(|error| error.to_string())
+    }
+
+    fn clear(&self) -> Result<(), String> {
+        match entry().and_then(|e| e.delete_credential()) {
+            Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn origin(&self) -> Result<Option<String>, String> {
+        match origin_entry().and_then(|e| e.get_password()) {
+            Ok(origin) => Ok(Some(origin)),
+            Err(KeyringError::NoEntry) => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn set_origin(&self, origin: Option<&str>) -> Result<(), String> {
+        write_origin(origin).map_err(|error| error.to_string())
+    }
 }

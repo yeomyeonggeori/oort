@@ -20,9 +20,15 @@ const mocks = vi.hoisted(() => ({
   desktop: false,
   keychain: {
     available: vi.fn(async () => true),
-    load: vi.fn(async (): Promise<string | null> => null),
+    handle: vi.fn(async (): Promise<string | null> => null),
     store: vi.fn(async () => true),
     clear: vi.fn(async () => true),
+  },
+  /** #3106: what the shell presents — the token the keychain holds. */
+  shell: {
+    held: null as string | null,
+    presented: [] as string[],
+    serial: 100,
   },
 }));
 
@@ -30,6 +36,23 @@ vi.mock("./tauri", () => ({
   isDesktop: () => mocks.desktop,
   desktopKeychain: mocks.keychain,
   desktopRotationHold: { begin: async () => false, end: async () => {} },
+  // The shell's rotation (#3106): presents the keychain's token, stores the
+  // successor, answers with a handle.
+  desktopSession: {
+    refreshAttempt: async () => {
+      if (!mocks.shell.held) return { status: 401, code: "session_absent", proved: false };
+      mocks.shell.presented.push(mocks.shell.held);
+      mocks.shell.serial += 1;
+      mocks.shell.held = `refresh-token-${mocks.shell.serial}`;
+      return {
+        status: 200,
+        accessToken: `access-token-${mocks.shell.serial}`,
+        refreshToken: `shell:${mocks.shell.held}`,
+        proved: true,
+      };
+    },
+    revoke: async () => true,
+  },
 }));
 
 const WEB_KEY = "momo.web.session.v1";
@@ -118,7 +141,9 @@ beforeEach(() => {
   }) as typeof window.addEventListener);
   mocks.desktop = false;
   vi.clearAllMocks();
-  mocks.keychain.load.mockImplementation(async () => null);
+  mocks.keychain.handle.mockImplementation(async () => null);
+  mocks.shell.held = null;
+  mocks.shell.presented = [];
   localStorage.clear();
 });
 
@@ -257,11 +282,17 @@ describe("데스크톱(키체인) — 같은 규칙", () => {
     session.applyLogin(login);
     await flush();
     const presented = stubServer();
-    mocks.keychain.load.mockImplementation(async () => "refresh-token-from-window-b");
+    // Window B rotated: the keychain holds its token now.
+    mocks.shell.held = "refresh-token-from-window-b";
+    mocks.keychain.handle.mockImplementation(async () => `shell:${mocks.shell.held}`);
 
     expect(await api.refreshSessionOutcome()).toBe("rotated");
-    expect(presented).toEqual(["refresh-token-from-window-b"]);
-    expect(mocks.keychain.store).toHaveBeenLastCalledWith("refresh-token-2");
+    // #3106: the shell presents what the keychain holds; the webview POSTs
+    // nothing and writes no token.
+    expect(mocks.shell.presented).toEqual(["refresh-token-from-window-b"]);
+    expect(presented).toEqual([]);
+    expect(session.getRefreshToken()).toBe(`shell:${mocks.shell.held}`);
+    expect(mocks.keychain.store).toHaveBeenLastCalledWith("refresh-token-1", "https://oort.example.com");
   });
 
   it("키체인 쓰기가 거절돼 웹 저장소로 강등되는 중에 회전해도 로그아웃되지 않는다", async () => {
@@ -308,12 +339,12 @@ describe("데스크톱(키체인) — 같은 규칙", () => {
     const { session } = await loadApp();
     session.applyLogin(login);
     await flush();
-    mocks.keychain.load.mockImplementation(async () => "refresh-token-7");
+    mocks.keychain.handle.mockImplementation(async () => "shell:refresh-token-7");
 
     fromOtherTab(ROTATED_KEY, "nonce-from-window-b");
     await flush();
 
-    expect(session.getRefreshToken()).toBe("refresh-token-7");
+    expect(session.getRefreshToken()).toBe("shell:refresh-token-7");
   });
 
   it("다른 창의 로그아웃(메타데이터 삭제)은 이 창의 세션도 끝낸다", async () => {

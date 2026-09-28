@@ -8,8 +8,8 @@
 // permission, no keychain) when there is no shell underneath.
 //
 // The Rust half lives in `clients/desktop/src-tauri/src/{deeplink,discovery,
-// notification,keychain,updater,detect,harness_status,opener,pdf_viewer,pty,
-// git_read,work_host,device_key}.rs` and the
+// notification,keychain,session_refresh,updater,detect,harness_status,opener,
+// pdf_viewer,pty,git_read,work_host,device_key}.rs` and the
 // command/event contract is documented in `clients/desktop/README.md`. Keep
 // the three in sync — a renamed command fails at runtime, not at compile time.
 //
@@ -739,22 +739,32 @@ export const desktopKeychain = {
     }
   },
 
-  /** The stored refresh token, or null when there is no session to resume. */
-  async load(): Promise<string | null> {
+  /**
+   * A handle for the stored refresh token (`shell:` + 32 hex of its SHA-256),
+   * or null when there is no session to resume (#3106). The token itself
+   * never comes back from the shell: the shell rotates it
+   * (`desktopSession.refreshAttempt`), so the webview only needs to tell one
+   * stored token from another.
+   */
+  async handle(): Promise<string | null> {
     if (!IS_TAURI) return null;
     try {
-      return await invoke<string | null>("keychain_load_refresh_token");
+      return await invoke<string | null>("keychain_refresh_token_handle");
     } catch (error) {
       console.warn("[momo] keychain read failed", error);
       return null;
     }
   },
 
-  /** Store (replacing) the refresh token. Returns false if it did not land. */
-  async store(token: string): Promise<boolean> {
+  /**
+   * Store (replacing) the refresh token, pinned to the server `origin` it
+   * belongs to — the shell presents it nowhere else (#3106). Returns false
+   * if it did not land.
+   */
+  async store(token: string, origin?: string): Promise<boolean> {
     if (!IS_TAURI) return false;
     try {
-      await invoke<void>("keychain_store_refresh_token", { token });
+      await invoke<void>("keychain_store_refresh_token", { token, origin: origin || null });
       return true;
     } catch (error) {
       console.warn("[momo] keychain write failed", error);
@@ -799,6 +809,45 @@ export const desktopRotationHold = {
     } catch {
       // The shell's cap (CLOSE_WAIT_CAP) bounds a hold nobody released.
     }
+  },
+};
+
+/** The shell's `AttemptAnswer` (session_refresh/mod.rs). */
+export interface DesktopRefreshAnswer {
+  status: number;
+  code?: string;
+  date?: string;
+  accessToken?: string;
+  /** A handle, never the token. */
+  refreshToken?: string;
+  proved: boolean;
+}
+
+/**
+ * The refresh rotation, carried by the shell (#3106, ADR-0146 D-7 증보 #3079):
+ * it reads the token it keeps, signs `momo.human.refresh_proof.v1` with this
+ * Mac's refresh key, POSTs, stores the successor, and answers with the access
+ * token and a handle. `refreshAttempt` rejects when nothing answered (the core
+ * reads that as `unreachable` and keeps the session).
+ */
+export const desktopSession = {
+  async refreshAttempt(request: {
+    apiBase: string;
+    workspaceId: string;
+    memberId: string;
+    skewMs: number;
+  }): Promise<DesktopRefreshAnswer> {
+    return invoke<DesktopRefreshAnswer>("session_refresh_attempt", { request });
+  },
+
+  /** Logout's server half, with the token only the shell holds. */
+  async revoke(request: {
+    apiBase: string;
+    accessToken: string;
+    workspaceId: string;
+    memberId: string;
+  }): Promise<boolean> {
+    return invoke<boolean>("session_revoke", { request });
   },
 };
 

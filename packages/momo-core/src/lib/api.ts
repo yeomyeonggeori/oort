@@ -23,7 +23,7 @@
 // =============================================================================
 
 import { fetchWithDeadline, NetworkError, type HttpResponse } from "./http";
-import { apiBase, coreSession } from "../runtime/host";
+import { apiBase, coreSession, type RefreshDeviceProof } from "../runtime/host";
 import { parseExecutionPlan, type SpawnExecutionPlan } from "./executionPlan";
 import { restoredLoginResponse } from "./sessionModel";
 import {
@@ -739,6 +739,178 @@ export type RefreshOutcome = "rotated" | "rejected" | "unreachable";
 interface Rotation {
   outcome: RefreshOutcome;
   pair: RefreshResponse | null;
+  /**
+   * The pair's refresh token is the host's handle, not a token (#3106): the
+   * desktop shell holds the real one. Revoke with the access half only, or
+   * through the host.
+   */
+  handle?: boolean;
+}
+
+// ---- refresh proof (#3106, ADR-0146 D-7 증보 #3079) ----------------------------
+//
+// A native client (phone, desktop) signs every refresh with its refresh key
+// (`momo.human.refresh_proof.v1`). The server answers a key-bound lineage's
+// unproven or mis-proven refresh with one of four codes; two of them mean
+// "sign again", never "signed out". One policy for both hosts:
+//
+//   refresh_proof_stale      re-sign with the server's clock (response `Date`)
+//   refresh_proof_replayed   re-sign (a fresh nonce comes with every proof)
+//   refresh_proof_required   sign out (as before)
+//   refresh_proof_invalid    sign out (as before)
+//   any other 401 on a       re-sign ONCE, then sign out — two recoveries of the
+//   proved refresh           same device racing: the loser gets a plain 401
+//                            (client contract MUST 2)
+//
+// A lost answer (timeout, app killed) needs nothing here: the stored token is
+// kept, and the next rotation presents it with a fresh proof — the server
+// recovers the lineage however long ago the token was spent.
+
+export const REFRESH_PROOF_CODES = [
+  "refresh_proof_required",
+  "refresh_proof_invalid",
+  "refresh_proof_stale",
+  "refresh_proof_replayed",
+] as const;
+
+/** At most this many refresh POSTs per rotation (1 + retries). */
+export const MAX_REFRESH_ATTEMPTS = 3;
+
+/** What one refused refresh attempt means for the next one. */
+export type RefreshRetry = "sign-out" | "re-sign" | "re-sign-with-server-time";
+
+/**
+ * The retry policy, pure. `plainRetried`: a plain 401 on a proved refresh
+ * already had its one retry in this rotation.
+ */
+export function refreshRetry(
+  status: number,
+  code: string | undefined,
+  proved: boolean,
+  plainRetried: boolean
+): RefreshRetry {
+  if (status !== 401) return "sign-out";
+  if (code === "refresh_proof_stale") return "re-sign-with-server-time";
+  if (code === "refresh_proof_replayed") return "re-sign";
+  if (code === "refresh_proof_required" || code === "refresh_proof_invalid") return "sign-out";
+  return proved && !plainRetried ? "re-sign" : "sign-out";
+}
+
+/** Server time minus local time from a `Date` header, or null. */
+export function serverSkewMs(date: string | null | undefined, localNowMs: number): number | null {
+  if (!date) return null;
+  const server = Date.parse(date);
+  return Number.isFinite(server) ? server - localNowMs : null;
+}
+
+/** One refresh attempt's answer, whoever carried it. */
+interface RefreshAttempt {
+  status: number;
+  code?: string;
+  date?: string | null;
+  pair: RefreshResponse | null;
+  proved: boolean;
+  handle: boolean;
+}
+
+/**
+ * One POST: through the host when it carries the refresh (desktop shell), else
+ * here, with the host's proof when it has a refresh key (phone). Throws when
+ * nothing answered.
+ */
+async function refreshAttempt(
+  refreshToken: string,
+  identity: { workspaceId: string; memberId: string } | null,
+  skewMs: number
+): Promise<RefreshAttempt> {
+  const session = coreSession();
+  if (identity && session.refreshThroughHost) {
+    const answer = await session.refreshThroughHost({ ...identity, skewMs });
+    if (answer) {
+      const pair =
+        answer.status === 200 && answer.accessToken && answer.refreshToken
+          ? { accessToken: answer.accessToken, refreshToken: answer.refreshToken }
+          : null;
+      if (answer.status === 200 && !pair) throw new WireShapeError();
+      return {
+        status: answer.status,
+        code: answer.code,
+        date: answer.date,
+        pair,
+        proved: answer.proved,
+        handle: true,
+      };
+    }
+  }
+  let deviceProof: RefreshDeviceProof | null = null;
+  if (identity && session.signRefreshProof) {
+    try {
+      deviceProof = await session.signRefreshProof({
+        refreshToken,
+        ...identity,
+        signedAtMs: Date.now() + skewMs,
+      });
+    } catch {
+      // No proof is still a refresh: `observe` rotates it as before, and
+      // `require` answers `refresh_proof_required` — a sign-out either way
+      // the key could not have prevented.
+      deviceProof = null;
+    }
+  }
+  const res = await rawRequest(
+    "/v1/auth/refresh",
+    {
+      method: "POST",
+      body: JSON.stringify(deviceProof ? { refreshToken, deviceProof } : { refreshToken }),
+    },
+    null
+  );
+  if (res.ok) {
+    return {
+      status: res.status,
+      pair: refreshResponseFromWire(res.json<unknown>()),
+      proved: deviceProof !== null,
+      handle: false,
+    };
+  }
+  return {
+    status: res.status,
+    code: parseError(res).code,
+    date: res.date ?? null,
+    pair: null,
+    proved: deviceProof !== null,
+    handle: false,
+  };
+}
+
+/**
+ * Attempts until a pair, a sign-out, or `MAX_REFRESH_ATTEMPTS`. Returns the
+ * pair (and whether it is a handle), or null for a sign-out. Throws when
+ * nothing answered.
+ */
+async function refreshWithRetries(
+  refreshToken: string,
+  identity: { workspaceId: string; memberId: string } | null
+): Promise<{ pair: RefreshResponse; handle: boolean } | null> {
+  let skewMs = 0;
+  let plainRetried = false;
+  for (let attempt = 1; attempt <= MAX_REFRESH_ATTEMPTS; attempt++) {
+    const answer = await refreshAttempt(refreshToken, identity, skewMs);
+    if (answer.pair) return { pair: answer.pair, handle: answer.handle };
+    const retry = refreshRetry(answer.status, answer.code, answer.proved, plainRetried);
+    if (retry === "sign-out") return null;
+    if (retry === "re-sign-with-server-time") {
+      skewMs = serverSkewMs(answer.date, Date.now()) ?? skewMs;
+    } else if (answer.code === undefined) {
+      plainRetried = true;
+    }
+  }
+  return null;
+}
+
+function identityOf(): { workspaceId: string; memberId: string } | null {
+  const member = coreSession().getPersistedSession()?.member;
+  return member ? { workspaceId: member.workspaceId, memberId: member.id } : null;
 }
 
 let rotationInFlight: Promise<Rotation> | null = null;
@@ -785,16 +957,12 @@ async function rotateOnce(): Promise<Rotation> {
   // to rotate and nothing to keep waiting for.
   if (!refreshToken) return { outcome: "rejected", pair: null };
   rotationPosted = true;
-  const res = await rawRequest(
-    "/v1/auth/refresh",
-    { method: "POST", body: JSON.stringify({ refreshToken }) },
-    null
-  );
-  if (!res.ok) {
+  const rotated = await refreshWithRetries(refreshToken, identityOf());
+  if (!rotated) {
     coreSession().markAuthExpired();
     return { outcome: "rejected", pair: null };
   }
-  const pair = refreshResponseFromWire(res.json<unknown>());
+  const { pair, handle } = rotated;
   // The store may have moved on while the request was in the air: a logout
   // (here or in another tab) emptied it, or another tab signed a DIFFERENT
   // account in and this tab adopted that record. The minted pair belongs to the
@@ -805,20 +973,27 @@ async function rotateOnce(): Promise<Rotation> {
     // Nobody will hold this pair. A logout that joined this rotation revokes it
     // itself; otherwise end it here so it does not live on the server for 30
     // days (#3072 review M1).
-    if (!rotationJoinedByLogout) void revokePair(pair);
+    if (!rotationJoinedByLogout) void revokePair(pair, handle);
     // Nothing is proven about the session now in the store — it is not ours.
-    return { outcome: "unreachable", pair };
+    return { outcome: "unreachable", pair, handle };
   }
   coreSession().applyRotation(pair.accessToken, pair.refreshToken);
-  return { outcome: "rotated", pair };
+  return { outcome: "rotated", pair, handle };
 }
 
-/** Best effort: end a pair nobody will hold. Never rejects. */
-async function revokePair(pair: RefreshResponse): Promise<void> {
+/**
+ * Best effort: end a pair nobody will hold. Never rejects. A handle is not a
+ * token: the server would refuse the whole logout over it (it validates the
+ * refresh half first), so only the access half goes.
+ */
+async function revokePair(pair: RefreshResponse, handle = false): Promise<void> {
   try {
     await rawRequest(
       "/v1/auth/logout",
-      { method: "POST", body: JSON.stringify({ refreshToken: pair.refreshToken }) },
+      {
+        method: "POST",
+        body: JSON.stringify(handle ? {} : { refreshToken: pair.refreshToken }),
+      },
       pair.accessToken
     );
   } catch {
@@ -834,6 +1009,45 @@ export function refreshSessionOutcome(): Promise<RefreshOutcome> {
 /** Boolean view, for callers that only need "did I end up with a usable token". */
 export function refreshSession(): Promise<boolean> {
   return refreshSessionOutcome().then((outcome) => outcome === "rotated");
+}
+
+/** How long to wait before retrying a bind refresh nothing answered. */
+export const BIND_RETRY_MS = 30_000;
+/** Bind retries after the first attempt; all land well inside 10 minutes. */
+export const BIND_RETRIES = 3;
+
+/**
+ * Adopt a fresh sign-in and, on a host with a refresh key, refresh ONCE right
+ * away with a proof (#3106, client contract MUST 1): the server binds the key
+ * to the sign-in only on its first refresh token and only within 10 minutes,
+ * so a later first refresh would leave this sign-in unbound — and without
+ * `require`'s protection — until the next sign-in. A bind that nothing
+ * answered is retried a few times while the first token is still the stored
+ * one. A browser (no key) is unchanged: no extra refresh.
+ */
+function adoptSignIn(response: LoginResponse): void {
+  coreSession().applyLogin(response);
+  bindRefreshKey(0);
+}
+
+function hostProvesRefresh(): boolean {
+  const session = coreSession();
+  return Boolean(session.signRefreshProof || session.refreshThroughHost);
+}
+
+function bindRefreshKey(retry: number): void {
+  if (!hostProvesRefresh()) return;
+  void refreshSessionOutcome().then((outcome) => {
+    if (outcome !== "unreachable" || retry >= BIND_RETRIES) return;
+    // Nothing answered, so what is stored now is still the sign-in's first
+    // token (or the desktop shell's handle for it).
+    const first = coreSession().getRefreshToken();
+    setTimeout(() => {
+      // Only while that is still what is stored: once anything rotated it,
+      // the bind window has been used (or has passed).
+      if (first && coreSession().getRefreshToken() === first) bindRefreshKey(retry + 1);
+    }, BIND_RETRY_MS);
+  });
 }
 
 /**
@@ -949,7 +1163,7 @@ export async function login(
   );
   if (!res.ok) throw parseError(res);
   const loginResponse = loginResponseFromWire(res.json<unknown>());
-  coreSession().applyLogin(loginResponse);
+  adoptSignIn(loginResponse);
   return loginResponse;
 }
 
@@ -1028,7 +1242,7 @@ export async function joinWithInvite(
   );
   if (!res.ok) throw parseError(res);
   const joinResponse = joinResponseFromWire(res.json<unknown>());
-  coreSession().applyLogin(joinResponse);
+  adoptSignIn(joinResponse);
   return joinResponse;
 }
 
@@ -1051,7 +1265,7 @@ export async function claimOwnerPassword(
   );
   if (!res.ok) throw parseError(res);
   const claimResponse = loginResponseFromWire(res.json<unknown>());
-  coreSession().applyLogin(claimResponse);
+  adoptSignIn(claimResponse);
   return claimResponse;
 }
 
@@ -1106,14 +1320,14 @@ export async function redeemDeviceLink(
   if (!res.ok) throw parseError(res);
   const result = deviceLinkRedeemFromWire(res.json<unknown>());
   if (!result.pendingSas) {
-    coreSession().applyLogin(result.session);
+    adoptSignIn(result.session);
   }
   return result;
 }
 
 /** Land the redeemed session after SAS confirm (or immediately if no hold). */
 export function activateDeviceLinkSession(session: LoginResponse): void {
-  coreSession().applyLogin(session);
+  adoptSignIn(session);
 }
 
 /**
@@ -1201,6 +1415,8 @@ export async function logout(options: LogoutOptions = {}): Promise<void> {
   if (rotation) rotationJoinedByLogout = true;
   let access = coreSession().getAccessToken();
   let refresh = coreSession().getRefreshToken();
+  // Captured before the wipe: the proof and the host's revocation name them.
+  const identity = identityOf();
   coreSession().clearSession();
   if (rotation) {
     // Never rejects: the rotation turns its own failures into an outcome.
@@ -1218,6 +1434,18 @@ export async function logout(options: LogoutOptions = {}): Promise<void> {
       // Best effort by contract: the session still has to end.
     }
   }
+  // The desktop shell holds the refresh token (#3106): it revokes with it,
+  // and rotates it with a proof first when the access token has expired.
+  const session = coreSession();
+  if (session.revokeThroughHost && identity) {
+    try {
+      if (await session.revokeThroughHost({ accessToken: access, refreshToken: refresh, ...identity }))
+        return;
+    } catch {
+      // Best effort, like every revocation here.
+      return;
+    }
+  }
   const revoke = (accessToken: string, refreshToken: string | null) =>
     rawRequest(
       "/v1/auth/logout",
@@ -1233,15 +1461,12 @@ export async function logout(options: LogoutOptions = {}): Promise<void> {
       // The access token expired before the server revoked anything, while the
       // refresh token is alive for 30 days. Rotate that pair once and revoke
       // the result, otherwise the session stays valid on the server. The store
-      // is already wiped, so this rotation is carried by locals only.
-      const rotated = await rawRequest(
-        "/v1/auth/refresh",
-        { method: "POST", body: JSON.stringify({ refreshToken: refresh }) },
-        null
-      );
-      if (rotated.ok) {
-        const pair = refreshResponseFromWire(rotated.json<unknown>());
-        await revoke(pair.accessToken, pair.refreshToken);
+      // is already wiped, so this rotation is carried by locals only — with
+      // the refresh key's proof like every refresh (#3106): under `require`
+      // an unproven one would be refused and the lineage would live on.
+      const rotated = await refreshWithRetries(refresh, identity);
+      if (rotated && !rotated.handle) {
+        await revoke(rotated.pair.accessToken, rotated.pair.refreshToken);
       }
     }
   } catch {

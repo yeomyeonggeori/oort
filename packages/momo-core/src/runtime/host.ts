@@ -77,6 +77,84 @@ export interface SessionPort {
    * as `unreachable`: nothing answered, so nothing is proven about the session.
    */
   exclusiveRotation?<T>(work: () => Promise<T>): Promise<T>;
+  /**
+   * The phone's refresh key (#3106, ADR-0146 D-7 증보 #3079): sign
+   * `momo.human.refresh_proof.v1` for this refresh token. The native side
+   * builds the bytes from these typed fields and picks the nonce; it signs
+   * nothing else. Resolves null when this device has no refresh key (no Secure
+   * Enclave, module absent) — the refresh then goes without a proof. Optional:
+   * a browser has no key and never proves.
+   */
+  signRefreshProof?(request: RefreshProofRequest): Promise<RefreshDeviceProof | null>;
+  /**
+   * The desktop shell carries the refresh itself (#3106): it reads the token
+   * it keeps, signs the proof, POSTs, stores the successor and answers with
+   * the access token and a HANDLE for the new refresh token, so the webview
+   * never holds the token. One attempt per call; the retry policy stays in the
+   * core. Resolves null when the host cannot carry it right now (the core then
+   * POSTs itself); rejects when nothing answered.
+   */
+  refreshThroughHost?(request: HostRefreshRequest): Promise<HostRefreshAnswer | null>;
+  /**
+   * Logout's server revocation through the host that holds the token
+   * (#3106). Resolves true when the host carried it (whatever the server
+   * said); false when the core should revoke with what it holds.
+   */
+  revokeThroughHost?(request: HostRevokeRequest): Promise<boolean>;
+}
+
+/** What a refresh proof binds (momo-wire `RefreshProof`, #3079). */
+export interface RefreshProofRequest {
+  /** The raw refresh token this request presents; only its SHA-256 is signed. */
+  refreshToken: string;
+  workspaceId: string;
+  memberId: string;
+  /** Local clock plus the server skew learned from `refresh_proof_stale`. */
+  signedAtMs: number;
+}
+
+/** `RefreshRequest.deviceProof` (docs/api/openapi.yaml `RefreshDeviceProof`). */
+export interface RefreshDeviceProof {
+  /** base64 of the 33-byte compressed SEC1 refresh key. */
+  publicKey: string;
+  nonce: string;
+  signedAtMs: number;
+  /** base64 of raw r‖s (64 bytes). */
+  signature: string;
+}
+
+export interface HostRefreshRequest {
+  workspaceId: string;
+  memberId: string;
+  /** Server time minus local time, from a `refresh_proof_stale` answer. */
+  skewMs: number;
+}
+
+/** One refresh the host made. Mirrors the shell's `AttemptAnswer`. */
+export interface HostRefreshAnswer {
+  status: number;
+  /** `error.code` of a refusal. */
+  code?: string;
+  /** The response `Date` header. */
+  date?: string;
+  /** 200 only. */
+  accessToken?: string;
+  /** 200 only: what `getRefreshToken()` answers from now on — a handle. */
+  refreshToken?: string;
+  /** A proof went with the request. */
+  proved: boolean;
+}
+
+export interface HostRevokeRequest {
+  accessToken: string;
+  /**
+   * What the core holds for the refresh half: the host's handle, or a raw
+   * token the host never confirmed (then the host answers false and the core
+   * revokes with it).
+   */
+  refreshToken: string | null;
+  workspaceId: string;
+  memberId: string;
 }
 
 /** Everything the core needs from the platform it is running on. */

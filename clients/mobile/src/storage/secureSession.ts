@@ -7,6 +7,7 @@ import {
 } from '@momo/core/lib/sessionModel';
 import type {SessionPort} from '@momo/core/runtime/host';
 import {ACCESSIBLE, getGenericPassword, resetGenericPassword, setGenericPassword} from 'react-native-keychain';
+import {refreshKeySupported, signRefreshProof} from '../deviceKey/refreshKey';
 import {withBackgroundTask} from '../lib/backgroundTask';
 import {NON_SECRET_KEYS, nonSecretStore} from './kv';
 
@@ -337,7 +338,12 @@ export function exclusiveRotation<T>(work: () => Promise<T>): Promise<T> {
   });
 }
 
-/** The core's port, assembled from the functions above. */
+/** The core's port, assembled from the functions above. `signRefreshProof`
+ *  (#3106): every refresh carries the refresh key's proof, and a host that has
+ *  one also gets the bind refresh right after each sign-in (core `adoptSignIn`).
+ *  Inside `exclusiveRotation`, so a proof's retries share the background task.
+ *  Only where an enclave exists: a simulator (and the gate builds on one) has
+ *  no key, so it gets neither a proof nor an extra bind refresh. */
 export const sessionPort: SessionPort = {
   getAccessToken,
   getRefreshToken,
@@ -347,6 +353,7 @@ export const sessionPort: SessionPort = {
   markAuthExpired,
   clearSession,
   exclusiveRotation,
+  ...(refreshKeySupported() ? {signRefreshProof: signRefreshProof} : {}),
 };
 
 /** Test seam: forget everything in memory, including the hydrate latch. */

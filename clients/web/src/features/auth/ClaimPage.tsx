@@ -26,7 +26,7 @@ import {
   finishOwnerOnboardingInvite,
   markOwnerOnboardingPending,
 } from "@/features/onboarding/ownerOnboardingStore";
-import { applyLogin } from "@/lib/session";
+import { replacePersistedMember } from "@/lib/session";
 import { readClaimToken } from "./claimPath";
 import {
   holdSessionRestore,
@@ -137,7 +137,10 @@ export function ClaimPage({
     if (!current) return;
     const next = { ...current, member };
     claimedRef.current = next;
-    applyLogin(next);
+    // The member only: `current` carries the claim's first token pair, which
+    // the bind refresh right after the claim (#3106) has already rotated —
+    // re-applying it would put a spent token back in the store.
+    replacePersistedMember(member);
     setClaimed(next);
   }
 
