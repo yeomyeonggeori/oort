@@ -455,10 +455,10 @@ Enclave, `confirm.rs` the native dialog). Granted only by
 | `device_key_status { workspaceId? }` | `support` (`ready`/`absent`/`unsupported`/`unsigned_build`/`entitlement_missing`/`error`), public key + fingerprint, this workspace's root binding, the running workd's pinned root |
 | `device_key_create` | make the enclave key; an existing one is returned |
 | `device_key_bind_root { workspaceId, memberId, keyId, publicKey }` | after `POST …/device-keys` (password): native confirm, remember key id ↔ workspace (`<app data>/device-key/roots.json`, 0600), `pin_root` on workd |
-| `device_key_sign_control { … content }` | `momo.human.control.v1`, all five kinds |
+| `device_key_sign_control { … content }` | `momo.human.control.v1`: `input`, `spawn`, `permission` (the bytes for `host_register`/`bundle_manifest` exist, the command refuses them until their dialogs can show the host key and every bundle item) |
 | `device_key_sign_endorse { workspaceId, targetKeyId, targetAlg, targetPublicKey, label }` | `device_endorse.v1` |
 | `device_key_sign_revoke { workspaceId, targetKeyId, targetPublicKey, targetLabel }` | `device_revoke.v1`, then `revoke_device` on workd right away |
-| `device_key_deliver_revocation { … }` | hand a stored letter to workd again |
+| `device_key_deliver_revocation { workspaceId, targetKeyId }` | hand a letter this shell signed (kept in `<app data>/device-key/revocations.json`, 0600) to workd again |
 
 Rules the code holds:
 
@@ -468,10 +468,14 @@ Rules the code holds:
   identity from its own binding, and checks the result against an allow-list of
   the three schemas and their line counts.
 - **A native `NSAlert` before every signature** shows what is signed (target
-  host, kind, first line of an instruction; fingerprint and label for an
-  approval). 취소 is first and answers Escape; the confirm button has no key
-  equivalent, so a dialog a page script raises cannot be accepted by a Return
-  meant for the composer.
+  host and session, kind, the whole instruction or first prompt in a scrolling
+  view, agent and folder, permission request and option; fingerprint first for
+  an approval, key id for a revocation). 취소 is first and answers Escape; the
+  confirm button has no key equivalent; a confirm within 0.7 s of the dialog
+  appearing shows it again; after a decline no dialog is raised for 3 s.
+- **Nothing invisible is signed.** Format characters (ZWJ excepted), line and
+  paragraph separators, private use and tag characters are refused in every
+  signed text and label, stricter than E1's control-character rule.
 - **No software key.** Token `SecureEnclave`, `PrivateKeyUsage | UserPresence`,
   `WhenUnlockedThisDeviceOnly`, data-protection keychain, access group
   `<TEAM>.app.momo.desktop.devicekey` (team read from this binary's own
@@ -479,8 +483,8 @@ Rules the code holds:
   the entitlement `entitlement_missing` (-34018); neither ever holds a key.
 - **Reuse window ≤300 s** (default 300): one evaluated `LAContext` kept on the
   signing thread and invalidated after the window.
-  `touchIDAuthenticationAllowableReuseDuration` is set to the same value, but
-  Apple's header limits it to lock-screen unlocks, so it is not the in-app window.
+  `touchIDAuthenticationAllowableReuseDuration` is 0: Apple's header limits it to
+  lock-screen unlocks, and unlocking the Mac must not stand in for a signature.
 - One worker thread runs every enclave call, one at a time.
 
 **Owner step before a signed build can hold the key** (`runtime-unverified`
