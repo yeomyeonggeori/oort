@@ -6,7 +6,12 @@
 //! momo-workd run      --config workd.json [--dev-key-file PATH]
 //!                     [--control-socket PATH [--dev-unsigned-peer]]
 //! momo-workd forget   --config workd.json [--dev-key-file PATH]
+//! momo-workd reset-root --config workd.json
 //! ```
+//!
+//! `reset-root` forgets the pinned R2 root key (ADR-0146 개정 D-6) so the
+//! desktop app can pin a new one. It is local only: nothing the server sends
+//! can pin, replace or clear the root.
 //!
 //! `forget` is the local half of 「등록 해제」 (#2778): it deletes this host's
 //! key and its registration state. The server half (revoking the row) is the
@@ -32,7 +37,9 @@ use crate::config::{ConfigError, HostState, WorkdConfig, SERVED_SCOPE};
 #[cfg(target_os = "macos")]
 use crate::control_socket::{ControlSocket, ControlSocketError, HostIdentity, PeerPolicy};
 use crate::controls::HostHealth;
+use crate::controls::SocketShared;
 use crate::controls::{heartbeat_loop, ControlLoop};
+use crate::human_trust::{HumanTrust, TrustIdentity};
 use crate::keystore::{HostKey, KeyStore, KeyStoreError};
 use crate::policy::{AdapterKind, CodexHome};
 use crate::session::{SessionManager, SessionSettings};
@@ -51,6 +58,8 @@ usage:
                  [--control-socket PATH [--dev-unsigned-peer]]
   momo-workd forget --config PATH [--dev-key-file PATH]
       deletes the host key and the registration state (after a revoke)
+  momo-workd reset-root --config PATH
+      forgets the pinned device root key (a new one can then be pinned)
   momo-workd --version
 
 --dev-key-file keeps the host key in a 0600 file instead of the keychain.
@@ -80,6 +89,9 @@ pub enum Invocation {
         config: PathBuf,
         dev_key_file: Option<PathBuf>,
     },
+    ResetRoot {
+        config: PathBuf,
+    },
     Help,
     Version,
 }
@@ -91,7 +103,7 @@ pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
     match command.as_str() {
         "-h" | "--help" | "help" => return Ok(Invocation::Help),
         "-V" | "--version" => return Ok(Invocation::Version),
-        "register" | "run" | "forget" => {}
+        "register" | "run" | "forget" | "reset-root" => {}
         other => return Err(format!("unknown command {other:?}")),
     }
     let mut config = None;
@@ -109,7 +121,9 @@ pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
         };
         match argument.as_str() {
             "--config" => config = Some(PathBuf::from(value("--config")?)),
-            "--dev-key-file" => dev_key_file = Some(PathBuf::from(value("--dev-key-file")?)),
+            "--dev-key-file" if command != "reset-root" => {
+                dev_key_file = Some(PathBuf::from(value("--dev-key-file")?))
+            }
             "--force" if command == "register" => force = true,
             "--token-stdin" if command == "register" => token_stdin = true,
             "--control-socket" if command == "run" => {
@@ -130,6 +144,8 @@ pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
             force,
             token_stdin,
         }
+    } else if command == "reset-root" {
+        Invocation::ResetRoot { config }
     } else if command == "forget" {
         Invocation::Forget {
             config,
@@ -292,8 +308,7 @@ fn start_control_socket(
     path: Option<PathBuf>,
     dev_unsigned_peer: bool,
     state: &HostState,
-    health: Arc<HostHealth>,
-    stop: Arc<tokio::sync::Notify>,
+    shared: SocketShared,
 ) -> Result<Option<tokio::task::JoinHandle<()>>, CliError> {
     let Some(path) = path else {
         return Ok(None);
@@ -318,8 +333,7 @@ fn start_control_socket(
             workspace_id: state.workspace_id,
             owner_member_id: state.owner_member_id,
         },
-        health,
-        stop,
+        shared,
     ))))
 }
 
@@ -329,8 +343,7 @@ fn start_control_socket(
     path: Option<PathBuf>,
     _dev_unsigned_peer: bool,
     _state: &HostState,
-    _health: Arc<HostHealth>,
-    _stop: Arc<tokio::sync::Notify>,
+    _shared: SocketShared,
 ) -> Result<Option<tokio::task::JoinHandle<()>>, CliError> {
     match path {
         None => Ok(None),
@@ -356,7 +369,51 @@ pub async fn forget(config_path: PathBuf, dev_key_file: Option<PathBuf>) -> Resu
             }))
         }
     }
-    tracing::info!("host key and registration state deleted");
+    // Host re-registration is root reset (ADR-0146 개정 D-6).
+    for name in [
+        crate::human_trust::TRUST_FILE,
+        crate::human_trust::NONCE_FILE,
+    ] {
+        let path = state_folder(&config).join(name);
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(CliError::Config(ConfigError::Io {
+                    path: path.display().to_string(),
+                    source,
+                }))
+            }
+        }
+    }
+    tracing::info!("host key, registration state and device trust deleted");
+    Ok(())
+}
+
+/// The host state folder: beside `state_path`, where Codex's home also lives.
+fn state_folder(config: &WorkdConfig) -> PathBuf {
+    config
+        .state_path
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn trust_identity(state: &HostState) -> TrustIdentity {
+    TrustIdentity {
+        workspace_id: state.workspace_id,
+        owner_member_id: state.owner_member_id,
+        host_id: state.host_id,
+    }
+}
+
+/// Forget the pinned root key (local reset, ADR-0146 개정 D-6).
+pub fn reset_root(config_path: PathBuf) -> Result<(), CliError> {
+    let config = WorkdConfig::load(&config_path)?;
+    let state = HostState::load(&config.state_path)?;
+    let mut trust = HumanTrust::open(&state_folder(&config), trust_identity(&state))?;
+    trust.reset_root()?;
+    tracing::info!("device root key forgotten; the desktop app can pin a new one");
     Ok(())
 }
 
@@ -450,16 +507,37 @@ pub async fn run(
     );
     let health = Arc::new(HostHealth::default());
     let stop = Arc::new(tokio::sync::Notify::new());
+    // ADR-0146 개정 (#3024): the pinned root and the nonce ledger. Opened even
+    // with R2 off, so the desktop app can pin its root before R2 is switched on.
+    let trust = Arc::new(std::sync::Mutex::new(HumanTrust::open(
+        &state_folder(&config),
+        trust_identity(&state),
+    )?));
     // Bound before the first heartbeat, so a second workd for the same socket
     // stops here (exit 4) instead of racing the first one's server session.
     let control = start_control_socket(
         control_socket,
         dev_unsigned_peer,
         &state,
-        health.clone(),
-        stop.clone(),
+        SocketShared {
+            health: health.clone(),
+            stop: stop.clone(),
+            trust: trust.clone(),
+            human_signatures_required: config.require_human_signatures,
+        },
     )?;
     let mut controls = ControlLoop::new(api.clone(), sessions, state.owner_member_id);
+    if config.require_human_signatures {
+        tracing::info!(
+            root_pinned = trust
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .root()
+                .is_some(),
+            "R2: spawns, inputs and allows need the owner's device signature"
+        );
+        controls = controls.with_human_trust(trust.clone());
+    }
     let mut heartbeat = tokio::spawn(heartbeat_loop(
         api.clone(),
         Duration::from_millis(config.heartbeat_interval_ms),
@@ -584,6 +662,20 @@ mod tests {
             }
         );
         assert!(parse_args(&args(&["forget", "--config", "/c", "--force"])).is_err());
+        assert_eq!(
+            parse_args(&args(&["reset-root", "--config", "/c.json"])).unwrap(),
+            Invocation::ResetRoot {
+                config: "/c.json".into()
+            }
+        );
+        assert!(parse_args(&args(&[
+            "reset-root",
+            "--config",
+            "/c",
+            "--dev-key-file",
+            "/k"
+        ]))
+        .is_err());
         assert_eq!(parse_args(&[]).unwrap(), Invocation::Help);
     }
 }

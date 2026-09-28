@@ -39,6 +39,7 @@ use momo_workd::client::{
 };
 use momo_workd::config::ToolEntry;
 use momo_workd::controls::ControlLoop;
+use momo_workd::human_trust::{HumanTrust, TrustIdentity};
 use momo_workd::policy::{AdapterKind, CodexHome};
 use momo_workd::session::{
     SessionManager, SessionSettings, MODE_ESCAPED_DETAIL, PERMISSION_DENIED_DETAIL,
@@ -67,6 +68,8 @@ struct FakeServer {
     /// Answer 409 to every event of this type (a server that does not take
     /// the permission bridge's request).
     refuse_event_type: Mutex<Option<String>>,
+    /// Revocations the next poll relays (ADR-0146 개정 D-7).
+    revocations: Mutex<Vec<Value>>,
 }
 
 impl FakeServer {
@@ -77,6 +80,7 @@ impl FakeServer {
             calls: Mutex::new(Vec::new()),
             lose_next_ack_response: Mutex::new(false),
             refuse_event_type: Mutex::new(None),
+            revocations: Mutex::new(Vec::new()),
         })
     }
 
@@ -199,12 +203,21 @@ impl HostApi for FakeServer {
             .push(Call::Status(session_id, status));
         Ok(())
     }
+
+    fn take_device_revocations(&self) -> Vec<Value> {
+        std::mem::take(&mut *self.revocations.lock().unwrap())
+    }
 }
 
 struct Harness {
     server: Arc<FakeServer>,
     controls: ControlLoop,
     owner: Uuid,
+    /// The host's workspace (R2 statements name it).
+    workspace: Uuid,
+    /// The host's R2 trust state (in `dir/state`), wired into `controls`
+    /// only by [`harness_r2`].
+    trust: Arc<Mutex<HumanTrust>>,
     channel: Uuid,
     record: PathBuf,
     dir: PathBuf,
@@ -250,6 +263,23 @@ fn harness_with(tools: &[(&str, AdapterKind, &[&str])]) -> Harness {
 }
 
 fn harness_waiting(tools: &[(&str, AdapterKind, &[&str])], permission_wait: Duration) -> Harness {
+    harness_full(tools, permission_wait, false)
+}
+
+/// R2 on (config `require_human_signatures`, ADR-0146 개정 D-10).
+fn harness_r2(tools: &[(&str, &[&str])]) -> Harness {
+    let tools: Vec<(&str, AdapterKind, &[&str])> = tools
+        .iter()
+        .map(|(key, extra)| (*key, AdapterKind::Claude, *extra))
+        .collect();
+    harness_full(&tools, Duration::from_secs(60), true)
+}
+
+fn harness_full(
+    tools: &[(&str, AdapterKind, &[&str])],
+    permission_wait: Duration,
+    r2: bool,
+) -> Harness {
     let dir = std::env::temp_dir().join(format!("momo-workd-inv-{}", Uuid::new_v4().simple()));
     std::fs::create_dir_all(dir.join("repo")).unwrap();
     let record = dir.join("stub.jsonl");
@@ -287,12 +317,38 @@ fn harness_waiting(tools: &[(&str, AdapterKind, &[&str])], permission_wait: Dura
             .with_owner_home(Some(owner_home.clone())),
     };
     let owner = Uuid::new_v4();
+    let workspace = Uuid::new_v4();
     let codex = settings.codex.clone();
     let sessions = SessionManager::new(server.clone(), settings);
+    let state_dir = dir.join("state");
+    {
+        use std::os::unix::fs::DirBuilderExt as _;
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&state_dir)
+            .unwrap();
+    }
+    let trust = Arc::new(Mutex::new(
+        HumanTrust::open(
+            &state_dir,
+            TrustIdentity {
+                workspace_id: workspace,
+                owner_member_id: owner,
+                host_id: server.host_id,
+            },
+        )
+        .unwrap(),
+    ));
+    let mut controls = ControlLoop::new(server.clone(), sessions, owner);
+    if r2 {
+        controls = controls.with_human_trust(trust.clone());
+    }
     Harness {
-        controls: ControlLoop::new(server.clone(), sessions, owner),
+        controls,
         server,
         owner,
+        workspace,
+        trust,
         channel: Uuid::new_v4(),
         record,
         dir,
@@ -324,7 +380,7 @@ fn control(
 ) -> WorkControl {
     WorkControl {
         id: Uuid::new_v4(),
-        workspace_id: Uuid::new_v4(),
+        workspace_id: h.workspace,
         channel_id: h.channel,
         requester_member_id: requester,
         target_host_id: h.server.host_id,
@@ -332,6 +388,7 @@ fn control(
         kind: kind.to_string(),
         payload,
         status: "dispatched".to_string(),
+        human_signature: None,
     }
 }
 
@@ -347,8 +404,10 @@ fn spawn(h: &Harness, tool: &str, label: &str) -> WorkControl {
 }
 
 fn stub_log(h: &Harness) -> Vec<Value> {
-    std::fs::read_to_string(&h.record)
-        .unwrap_or_default()
+    let raw = std::fs::read_to_string(&h.record).unwrap_or_default();
+    // A line the stub is still writing is not a line yet.
+    let complete = &raw[..raw.rfind('\n').map_or(0, |end| end + 1)];
+    complete
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect()
@@ -1907,5 +1966,648 @@ async fn inv_20_the_hosts_environment_never_reaches_an_agent_or_its_commands() {
             .map(PathBuf::from),
         Some(h.owner_home.clone()),
         "Claude keeps the owner's HOME: its sign-in lives there"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// R2 — ADR-0146 개정 2026-09-28 D-6 · D-7 · D-8 · D-9 · D-10 (#3024)
+//
+// The fake server here *is* the fixture that goes around the real server: it
+// hands the host whatever controls a compromised or buggy server could insert.
+// The host must refuse every one that its owner's pinned root does not vouch
+// for, on its own.
+// ---------------------------------------------------------------------------
+
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
+use momo_wire::human_control::{
+    ControlContent, DeviceEndorse, DeviceKeyAlg, DeviceRevoke, HumanControl, InputMode,
+    PermissionScope,
+};
+use p256::ecdsa::signature::Signer as _;
+use p256::ecdsa::{Signature, SigningKey};
+
+/// One of the owner's Secure Enclave devices, played with a fixed key.
+struct Device {
+    id: Uuid,
+    key: SigningKey,
+}
+
+impl Device {
+    fn new(scalar: u8) -> Self {
+        let mut secret = [0u8; 32];
+        secret[0] = 0x5a;
+        secret[31] = scalar;
+        Self {
+            id: Uuid::new_v4(),
+            key: SigningKey::from_slice(&secret).unwrap(),
+        }
+    }
+
+    /// The same key under another key id.
+    fn renamed(&self) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            key: self.key.clone(),
+        }
+    }
+
+    fn public(&self) -> String {
+        BASE64.encode(self.key.verifying_key().to_sec1_point(true).as_bytes())
+    }
+
+    fn sign(&self, bytes: &[u8]) -> String {
+        let signature: Signature = self.key.sign(bytes);
+        BASE64.encode(signature.to_bytes())
+    }
+}
+
+const INSTANCE: &str = "oort-test-instance";
+const AGENT: Uuid = Uuid::from_u128(0xa6e7);
+const FOLDER: &str = "folder-main";
+
+fn now_ms() -> i64 {
+    momo_workd::client::now_ms()
+}
+
+fn pin(h: &Harness, root: &Device) {
+    h.trust
+        .lock()
+        .unwrap()
+        .pin_root(root.id, "p256", &root.public(), now_ms())
+        .expect("pin");
+}
+
+/// `root`'s `device_endorse.v1` for `target`, as the server would relay it.
+fn endorsement(h: &Harness, root: &Device, target: &Device) -> Value {
+    let label = "성재의 iPhone";
+    let bytes = DeviceEndorse {
+        workspace_id: h.workspace,
+        member_id: h.owner,
+        root_key_id: root.id,
+        target_alg: DeviceKeyAlg::P256,
+        target_public_key_b64: &target.public(),
+        label,
+    }
+    .signed_bytes()
+    .unwrap();
+    json!({"rootKeyId": root.id, "label": label, "signature": root.sign(&bytes)})
+}
+
+/// `root`'s `device_revoke.v1` for `target`.
+fn revocation(h: &Harness, root: &Device, target: &Device, with_key: bool) -> Value {
+    let revoked_at_ms = now_ms();
+    let bytes = DeviceRevoke {
+        workspace_id: h.workspace,
+        member_id: h.owner,
+        root_key_id: root.id,
+        target_key_id: target.id,
+        revoked_at_ms,
+    }
+    .signed_bytes();
+    let mut value = json!({
+        "workspaceId": h.workspace, "memberId": h.owner, "rootKeyId": root.id,
+        "targetKeyId": target.id, "revokedAtMs": revoked_at_ms,
+        "signature": root.sign(&bytes),
+    });
+    if with_key {
+        value["targetPublicKey"] = json!(target.public());
+    }
+    value
+}
+
+/// Sign exactly what `control` carries, as the owner's `device` would.
+fn signed(control: WorkControl, device: &Device, endorsement: Option<Value>) -> WorkControl {
+    let now = now_ms();
+    signed_at(
+        control,
+        device,
+        endorsement,
+        now,
+        now + 5 * 60 * 1000,
+        Uuid::new_v4(),
+    )
+}
+
+fn signed_at(
+    mut control: WorkControl,
+    device: &Device,
+    endorsement: Option<Value>,
+    issued_at_ms: i64,
+    expires_at_ms: i64,
+    nonce: Uuid,
+) -> WorkControl {
+    let payload = control.payload.clone();
+    let text = |key: &str| payload[key].as_str().unwrap().to_string();
+    let (label, input, option_id, option_kind) = (
+        payload["label"].as_str().map(str::to_string),
+        payload["text"].as_str().map(str::to_string),
+        payload["option_id"].as_str().map(str::to_string),
+        payload["kind"].as_str().map(str::to_string),
+    );
+    let content = match control.kind.as_str() {
+        "input" => ControlContent::Input {
+            mode: InputMode::Queue,
+            text: input.as_deref().unwrap(),
+        },
+        "spawn" => ControlContent::Spawn {
+            agent_member_id: AGENT,
+            folder_id: FOLDER,
+            first_prompt: label.as_deref().unwrap(),
+        },
+        "permission" => ControlContent::Permission {
+            request_event_id: Uuid::parse_str(&text("request_event_id")).unwrap(),
+            option_id: option_id.as_deref().unwrap(),
+            option_kind: option_kind.as_deref().unwrap(),
+            scope: PermissionScope::Once,
+        },
+        other => panic!("{other} is not signed"),
+    };
+    let statement = HumanControl {
+        instance_id: INSTANCE,
+        workspace_id: control.workspace_id,
+        member_id: control.requester_member_id,
+        device_key_id: device.id,
+        host_id: control.target_host_id,
+        session_id: if control.kind == "spawn" {
+            None
+        } else {
+            control.session_id
+        },
+        nonce,
+        issued_at_ms,
+        expires_at_ms,
+        content,
+    };
+    let signature = device.sign(&statement.signed_bytes().unwrap());
+    control.human_signature = Some(json!({
+        "alg": "p256", "instanceId": INSTANCE,
+        "deviceKeyId": device.id, "devicePublicKey": device.public(),
+        "endorsement": endorsement,
+        "nonce": nonce, "issuedAtMs": issued_at_ms, "expiresAtMs": expires_at_ms,
+        "mode": "queue", "scope": "once",
+        "agentMemberId": AGENT, "folderId": FOLDER,
+        "signature": signature,
+    }));
+    control
+}
+
+/// The same signed envelope on a new control row: what a server replaying an
+/// old instruction would send.
+fn replayed(h: &Harness, original: &WorkControl) -> WorkControl {
+    let mut copy = original.clone();
+    copy.id = Uuid::new_v4();
+    assert_eq!(copy.target_host_id, h.server.host_id);
+    copy
+}
+
+fn prompts(h: &Harness) -> Vec<String> {
+    stub_log(h)
+        .iter()
+        .filter(|entry| entry["received"]["method"] == "session/prompt")
+        .map(|entry| entry["received"]["params"]["prompt"].to_string())
+        .collect()
+}
+
+async fn poll_and_ack(h: &mut Harness, control: &WorkControl) -> ControlAck {
+    h.server.push(control.clone());
+    h.controls.poll_once().await.unwrap();
+    ack_for(h, control.id)
+}
+
+#[tokio::test]
+async fn inv_21_with_r2_off_nothing_changes() {
+    let mut h = harness(&[("claude", &[])]);
+    // Even an envelope that would never verify is not looked at.
+    let mut request = spawn(&h, "claude", "summarise the repo");
+    request.human_signature = Some(json!({"alg": "p256", "garbage": true}));
+    let ack = poll_and_ack(&mut h, &request).await;
+    assert!(ack.ok, "{ack:?}");
+    let session = ack.session_id.unwrap();
+    wait_for("the first turn", || {
+        h.server
+            .statuses(session)
+            .contains(&SessionStatus::Idle { exit_code: 0 })
+    })
+    .await;
+    let input = control(
+        &h,
+        "input",
+        h.owner,
+        Some(session),
+        json!({"text": "unsigned is fine before R2"}),
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &input).await,
+        ControlAck::ok(Some(session))
+    );
+}
+
+#[tokio::test]
+async fn inv_22_r2_the_host_refuses_what_the_server_inserts_unsigned_or_forged() {
+    let mut h = harness_r2(&[("claude", &[])]);
+    let root = Device::new(1);
+    let phone = Device::new(2);
+    let stranger = Device::new(3);
+    let fake_root = Device::new(4);
+
+    // Nothing pinned yet: nothing counts, not even the right key.
+    let unsigned = spawn(&h, "claude", "unsigned");
+    assert_eq!(
+        poll_and_ack(&mut h, &unsigned).await,
+        ControlAck::refused("device_signature_required")
+    );
+    let early = signed(spawn(&h, "claude", "before pin"), &root, None);
+    assert_eq!(
+        poll_and_ack(&mut h, &early).await,
+        ControlAck::refused("device_root_not_pinned")
+    );
+    pin(&h, &root);
+
+    let preallocated = Uuid::new_v4();
+    let mut resume = spawn(&h, "claude", "unsigned resume");
+    resume.session_id = Some(preallocated);
+    let cases: Vec<(&str, WorkControl, &str)> = vec![
+        (
+            "no signature",
+            spawn(&h, "claude", "unsigned"),
+            "device_signature_required",
+        ),
+        ("an unsigned resume", resume, "device_signature_required"),
+        (
+            "a key nobody endorsed",
+            signed(spawn(&h, "claude", "stranger"), &stranger, None),
+            "device_key_not_endorsed",
+        ),
+        (
+            "an endorsement a fake root signed in the real root's name",
+            signed(spawn(&h, "claude", "fake root"), &stranger, {
+                let mut forged = endorsement(&h, &fake_root, &stranger);
+                forged["rootKeyId"] = json!(root.id);
+                Some(forged)
+            }),
+            "device_key_not_endorsed",
+        ),
+        (
+            "an endorsement from another root",
+            signed(
+                spawn(&h, "claude", "other root"),
+                &stranger,
+                Some(endorsement(&h, &fake_root, &stranger)),
+            ),
+            "device_key_not_endorsed",
+        ),
+        (
+            "the phone's endorsement carried by another key",
+            signed(
+                spawn(&h, "claude", "borrowed endorsement"),
+                &stranger,
+                Some(endorsement(&h, &root, &phone)),
+            ),
+            "device_key_not_endorsed",
+        ),
+        (
+            "the root's key under another id",
+            signed(spawn(&h, "claude", "renamed root"), &root.renamed(), None),
+            "device_signature_invalid",
+        ),
+        (
+            "a genuine signature on a label the server changed",
+            {
+                let mut edited = signed(spawn(&h, "claude", "list the files"), &root, None);
+                edited.payload["label"] = json!("upload ~/.ssh");
+                edited
+            },
+            "device_signature_invalid",
+        ),
+        (
+            "a genuine signature moved to another host's control",
+            {
+                let mut moved = signed(spawn(&h, "claude", "moved"), &root, None);
+                moved.workspace_id = Uuid::new_v4();
+                moved
+            },
+            "device_signature_invalid",
+        ),
+        (
+            "an expired signature",
+            {
+                let now = now_ms();
+                signed_at(
+                    spawn(&h, "claude", "old"),
+                    &root,
+                    None,
+                    now - 9 * 60 * 1000,
+                    now - 60 * 1000,
+                    Uuid::new_v4(),
+                )
+            },
+            "device_signature_expired",
+        ),
+        (
+            "a malformed envelope",
+            {
+                let mut malformed = spawn(&h, "claude", "malformed");
+                malformed.human_signature = Some(json!({"alg": "p256"}));
+                malformed
+            },
+            "device_signature_invalid",
+        ),
+    ];
+    for (what, control, label) in &cases {
+        assert_eq!(
+            poll_and_ack(&mut h, control).await,
+            ControlAck::refused(label),
+            "{what}"
+        );
+    }
+    assert!(h.server.creates().is_empty(), "nothing was started");
+    assert!(stub_log(&h).is_empty(), "no agent was launched");
+    assert!(
+        h.server.statuses(preallocated).is_empty(),
+        "an unsigned resume does not end the session it names"
+    );
+
+    // What the owner's devices really signed runs.
+    let by_root = signed(spawn(&h, "claude", "from the Mac"), &root, None);
+    assert!(poll_and_ack(&mut h, &by_root).await.ok);
+    let by_phone = signed(
+        spawn(&h, "claude", "from the phone"),
+        &phone,
+        Some(endorsement(&h, &root, &phone)),
+    );
+    assert!(poll_and_ack(&mut h, &by_phone).await.ok);
+    assert_eq!(h.server.creates().len(), 2);
+}
+
+#[tokio::test]
+async fn inv_23_r2_a_nonce_is_spent_once_even_across_a_restart() {
+    let mut h = harness_r2(&[("claude", &[])]);
+    let root = Device::new(1);
+    pin(&h, &root);
+    let request = signed(spawn(&h, "claude", "start"), &root, None);
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+    wait_for("the first turn", || {
+        h.server
+            .statuses(session)
+            .contains(&SessionStatus::Idle { exit_code: 0 })
+    })
+    .await;
+
+    let input = signed(
+        control(
+            &h,
+            "input",
+            h.owner,
+            Some(session),
+            json!({"text": "run the tests once"}),
+        ),
+        &root,
+        None,
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &input).await,
+        ControlAck::ok(Some(session))
+    );
+    let again = replayed(&h, &input);
+    assert_eq!(
+        poll_and_ack(&mut h, &again).await,
+        ControlAck::refused("device_nonce_replayed")
+    );
+
+    // A restart: the trust state is read back from the host state folder.
+    let state_dir = h.dir.join("state");
+    let nonce_file = state_dir.join(momo_workd::human_trust::NONCE_FILE);
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        assert_eq!(
+            std::fs::metadata(&nonce_file).unwrap().mode() & 0o777,
+            0o600
+        );
+    }
+    let identity = h.trust.lock().unwrap().identity();
+    *h.trust.lock().unwrap() = HumanTrust::open(&state_dir, identity).unwrap();
+    let after_restart = replayed(&h, &input);
+    assert_eq!(
+        poll_and_ack(&mut h, &after_restart).await,
+        ControlAck::refused("device_nonce_replayed"),
+        "the ledger outlives the process"
+    );
+    wait_for("the input's turn", || {
+        prompts(&h)
+            .iter()
+            .any(|prompt| prompt.contains("run the tests once"))
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        prompts(&h)
+            .iter()
+            .filter(|prompt| prompt.contains("run the tests once"))
+            .count(),
+        1,
+        "the instruction ran once"
+    );
+}
+
+#[tokio::test]
+async fn inv_24_r2_revocations_from_the_app_and_relayed_by_the_server() {
+    let mut h = harness_r2(&[("claude", &[])]);
+    let root = Device::new(1);
+    let phone = Device::new(2);
+    let tablet = Device::new(3);
+    pin(&h, &root);
+    let phone_ok = Some(endorsement(&h, &root, &phone));
+    let request = signed(spawn(&h, "claude", "start"), &phone, phone_ok.clone());
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+    let input = |h: &Harness, device: &Device, endorsed: Option<Value>, text: &str| {
+        signed(
+            control(h, "input", h.owner, Some(session), json!({ "text": text })),
+            device,
+            endorsed,
+        )
+    };
+
+    // A revocation the root did not sign is dropped; the phone still works.
+    let mut forged = revocation(&h, &root, &phone, false);
+    forged["signature"] = revocation(&h, &phone, &phone, false)["signature"].clone();
+    let mut not_root = revocation(&h, &phone, &phone, false);
+    not_root["rootKeyId"] = json!(phone.id);
+    h.server
+        .revocations
+        .lock()
+        .unwrap()
+        .extend([forged, not_root]);
+    let still = input(&h, &phone, phone_ok.clone(), "still mine");
+    assert_eq!(
+        poll_and_ack(&mut h, &still).await,
+        ControlAck::ok(Some(session))
+    );
+
+    // Nothing revokes the root; the local socket path must name the key.
+    {
+        let mut trust = h.trust.lock().unwrap();
+        assert_eq!(
+            trust.apply_revocation(&revocation(&h, &root, &root, true), true),
+            Err("revocation_targets_root")
+        );
+        assert_eq!(
+            trust.apply_revocation(&revocation(&h, &root, &tablet, false), true),
+            Err("revocation_public_key_required")
+        );
+        // The tablet, never seen by this host, revoked from the Mac.
+        trust
+            .apply_revocation(&revocation(&h, &root, &tablet, true), true)
+            .unwrap();
+    }
+    let tablet_ok = Some(endorsement(&h, &root, &tablet));
+    let from_tablet = input(&h, &tablet.renamed(), tablet_ok, "tablet under a new id");
+    assert_eq!(
+        poll_and_ack(&mut h, &from_tablet).await,
+        ControlAck::refused("device_key_revoked")
+    );
+
+    // The server relays the root's revocation of the phone (no public key).
+    h.server
+        .revocations
+        .lock()
+        .unwrap()
+        .push(revocation(&h, &root, &phone, false));
+    let revoked = input(&h, &phone, phone_ok.clone(), "after revoke");
+    assert_eq!(
+        poll_and_ack(&mut h, &revoked).await,
+        ControlAck::refused("device_key_revoked")
+    );
+    // The same key under a fresh id, with its (still valid) endorsement.
+    let renamed = input(&h, &phone.renamed(), phone_ok, "same key, new id");
+    assert_eq!(
+        poll_and_ack(&mut h, &renamed).await,
+        ControlAck::refused("device_key_revoked")
+    );
+    // The root still speaks.
+    let from_root = input(&h, &root, None, "root still works");
+    assert_eq!(
+        poll_and_ack(&mut h, &from_root).await,
+        ControlAck::ok(Some(session))
+    );
+}
+
+#[tokio::test]
+async fn inv_25_r2_stopping_needs_no_signature_allowing_does() {
+    let mut h = harness_r2(&[("claude", &["--permission"])]);
+    let root = Device::new(1);
+    pin(&h, &root);
+    let request = signed(spawn(&h, "claude", "read the secret"), &root, None);
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+    let requested = |h: &Harness, n: usize| {
+        h.server
+            .events()
+            .into_iter()
+            .filter(|event| event.event_type == "approval.requested")
+            .nth(n)
+            .map(|event| event.event_id.to_string())
+    };
+    wait_for("the first request", || requested(&h, 0).is_some()).await;
+    let first = requested(&h, 0).unwrap();
+
+    let unsigned_allow = decision(&h, h.owner, session, &first, "allow-once", "allow_once");
+    assert_eq!(
+        poll_and_ack(&mut h, &unsigned_allow).await,
+        ControlAck::refused("device_signature_required")
+    );
+    // An allow dressed as a rejection passes the signature gate and is still
+    // refused: the option's own kind decides (policy::owner_choice).
+    let dressed = decision(&h, h.owner, session, &first, "allow-once", "reject_once");
+    assert_eq!(
+        poll_and_ack(&mut h, &dressed).await,
+        ControlAck::refused("permission_option_refused")
+    );
+    assert!(permission_outcomes(&h).is_empty());
+    // A real rejection needs no signature (D-8).
+    let reject = decision(&h, h.owner, session, &first, "reject-once", "reject_once");
+    assert_eq!(
+        poll_and_ack(&mut h, &reject).await,
+        ControlAck::ok(Some(session))
+    );
+
+    // Next turn, next request: the signed allow is exactly what the agent gets.
+    let next = signed(
+        control(
+            &h,
+            "input",
+            h.owner,
+            Some(session),
+            json!({"text": "try again"}),
+        ),
+        &root,
+        None,
+    );
+    assert!(poll_and_ack(&mut h, &next).await.ok);
+    wait_for("the second request", || requested(&h, 1).is_some()).await;
+    let second = requested(&h, 1).unwrap();
+    let allow = signed(
+        decision(&h, h.owner, session, &second, "allow-once", "allow_once"),
+        &root,
+        None,
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &allow).await,
+        ControlAck::ok(Some(session))
+    );
+    wait_for("both outcomes", || permission_outcomes(&h).len() == 2).await;
+    assert_eq!(
+        permission_outcomes(&h)[1],
+        json!({"outcome": "selected", "optionId": "allow-once"})
+    );
+
+    // Stopping needs nothing (D-8).
+    let kill = control(&h, "kill", h.owner, Some(session), json!({}));
+    assert_eq!(
+        poll_and_ack(&mut h, &kill).await,
+        ControlAck::ok(Some(session))
+    );
+}
+
+#[tokio::test]
+async fn inv_26_r2_nothing_on_the_server_path_moves_the_root() {
+    let mut h = harness_r2(&[("claude", &[])]);
+    let root = Device::new(1);
+    let attacker = Device::new(9);
+    pin(&h, &root);
+    // A control that asks the host to pin, and one that smuggles a root field.
+    let pin_op = control(
+        &h,
+        "pin_root",
+        h.owner,
+        None,
+        json!({"keyId": attacker.id, "alg": "p256", "publicKey": attacker.public()}),
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &pin_op).await,
+        ControlAck::refused("unsupported_control")
+    );
+    let mut smuggled = signed(spawn(&h, "claude", "as the new root"), &attacker, None);
+    smuggled.human_signature.as_mut().unwrap()["root"] =
+        json!({"keyId": attacker.id, "publicKey": attacker.public()});
+    smuggled.human_signature.as_mut().unwrap()["deviceKeyId"] = json!(root.id);
+    assert_eq!(
+        poll_and_ack(&mut h, &smuggled).await,
+        ControlAck::refused("device_key_not_endorsed")
+    );
+    // A relayed "revocation" of the root is refused too.
+    h.server
+        .revocations
+        .lock()
+        .unwrap()
+        .push(revocation(&h, &root, &root, false));
+    assert_eq!(
+        h.trust.lock().unwrap().root().map(|r| r.key_id),
+        Some(root.id)
+    );
+    let ok = signed(spawn(&h, "claude", "the real root"), &root, None);
+    assert!(poll_and_ack(&mut h, &ok).await.ok);
+    assert_eq!(
+        h.trust.lock().unwrap().root().map(|r| r.public_key.clone()),
+        Some(root.public())
     );
 }

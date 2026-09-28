@@ -12,11 +12,12 @@
 //! | [`keystore`] | the Ed25519 host key: keychain (ThisDeviceOnly) or the dev file |
 //! | [`client`] | v2-signed server calls, and the [`client::HostApi`] seam |
 //! | [`controls`] | poll → apply once → ack; the heartbeat loop |
+//! | [`human_trust`] | R2 (ADR-0146 개정): pinned root, endorsement chain, device-signature check, nonce ledger, revocations |
 //! | [`session`] | the session manager and the per-session ACP task |
 //! | [`acp`] | the JSON-RPC stdio transport |
 //! | [`projection`] | `session/update` → curated server events |
 //! | [`policy`] | the D6 invariants |
-//! | [`control_socket`] | the app ↔ workd Unix socket: `status`, `shutdown`, peer signature check |
+//! | [`control_socket`] | the app ↔ workd Unix socket: `status`, `shutdown`, `pin_root`, `revoke_device`, peer signature check |
 //! | [`cli`] | `register` / `run` |
 
 pub mod acp;
@@ -26,6 +27,7 @@ pub mod config;
 #[cfg(target_os = "macos")]
 pub mod control_socket;
 pub mod controls;
+pub mod human_trust;
 pub mod keystore;
 pub mod policy;
 pub mod proctree;
