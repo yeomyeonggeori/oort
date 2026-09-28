@@ -47,6 +47,17 @@ import { HarnessUnlinkDialog } from "@/features/welcome/harnessLogin/HarnessUnli
 import { useSubscriptionEntryState } from "@/features/welcome/SubscriptionAgentEntry";
 import { useLocalHarnessWatch } from "@/features/welcome/useLocalHarnessWatch";
 import {
+  forgetAccount,
+  rowsUsingAccount,
+  type AiDefaultsAccount,
+} from "@momo/core/features/settings/aiDefaults";
+import {
+  publishMyAccounts,
+  readAiDefaults,
+  useAiDefaults,
+  writeAiDefaults,
+} from "./aiDefaultsStore";
+import {
   AddSubscriptionDialog,
   type AddSubscriptionDraft,
 } from "./AddSubscriptionDialog";
@@ -281,6 +292,29 @@ function MyAccountRows({ onAddApiKey }: { onAddApiKey?: () => void }) {
     addRef.current?.focus();
   }, [refocusAfterRemoval, unlink, rowsKey]);
 
+  // 기본 AI 표(#2881)가 같은 줄을 선택지로 쓴다: 감지를 한 번 더 돌리지 않게 알린다.
+  const accountsSnapshot: AiDefaultsAccount[] | null =
+    harness.probes === null
+      ? null
+      : myAccountRows({ probes: harness.probes, profiles, hiddenDefaults: hidden }).map((row) => {
+          const probe =
+            row.profile === null
+              ? (harness.probes?.find((p) => p.id === row.harness) ?? null)
+              : statusOf({ harness: row.harness, label: row.profile });
+          return { harness: row.harness, label: row.profile, auth: probe?.auth ?? "unknown" };
+        });
+  const accountsSnapshotKey =
+    accountsSnapshot === null
+      ? null
+      : accountsSnapshot.map((a) => `${a.harness}/${a.label ?? ""}=${a.auth}`).join("|");
+  const latestAccounts = useRef(accountsSnapshot);
+  latestAccounts.current = accountsSnapshot;
+  useEffect(() => {
+    publishMyAccounts(latestAccounts.current);
+  }, [accountsSnapshotKey]);
+  useEffect(() => () => publishMyAccounts(null), []);
+  const aiDefaults = useAiDefaults();
+
   if (harness.probes === null) {
     return <Skeleton ready={false} rows={1} className="py-3" />;
   }
@@ -496,8 +530,11 @@ function MyAccountRows({ onAddApiKey }: { onAddApiKey?: () => void }) {
           // 진행 중에 닫혀도 폴더 상태가 바뀌었을 수 있다: 목록을 다시 묻는다.
           refreshProfiles();
         }}
+        impact={unlink ? rowsUsingAccount(aiDefaults, { harness: unlink.harness, label: unlink.profile }) : []}
         onRemoveFromList={(row) => {
           setRefocusAfterRemoval(true);
+          // 창이 이미 알린 대로, 이 로그인을 고른 기본 AI 칸은 기본값으로 돌아간다.
+          writeAiDefaults(forgetAccount(readAiDefaults(), { harness: row.harness, label: null }));
           const next = [
             ...hidden.filter((id) => id !== row.harness),
             row.harness,
@@ -507,6 +544,9 @@ function MyAccountRows({ onAddApiKey }: { onAddApiKey?: () => void }) {
         }}
         onUnlinked={(done) => {
           if (done) setRefocusAfterRemoval(true);
+          if (done && unlink && unlink.profile !== null) {
+            writeAiDefaults(forgetAccount(readAiDefaults(), { harness: unlink.harness, label: unlink.profile }));
+          }
           refreshProfiles();
         }}
         fixture={unlinkFixture ? { status: unlinkFixture } : null}

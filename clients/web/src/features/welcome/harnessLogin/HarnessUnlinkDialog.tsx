@@ -23,6 +23,11 @@ import {
   LOGIN_TERMINAL_SHOW_LABEL,
 } from "@momo/core/features/onboarding/harnessLogin";
 import { keyPlatformOf } from "@momo/core/features/workbench/keymap";
+import {
+  impactLine,
+  unlinkImpactLead,
+  type AiDefaultImpact,
+} from "@momo/core/features/settings/aiDefaults";
 import { Button } from "@/design/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/design/ui/dialog";
 import { loadBrowserMirror } from "@/features/workbench/local/localSessions";
@@ -54,7 +59,13 @@ export function HarnessUnlinkDialog({
   onRemoveFromList,
   onUnlinked,
   fixture,
+  impact = [],
 }: {
+  /**
+   * 이 계정을 기본으로 고른 기본 AI 칸과 넘어갈 곳(#2881, 코어 `rowsUsingAccount`).
+   * 비어 있으면 아무 줄도 그리지 않는다.
+   */
+  impact?: readonly AiDefaultImpact[];
   /** 대상 줄. null이면 닫혀 있다. */
   row: Pick<MyAccountRow, "harness" | "profile"> | null;
   opener: RefObject<HTMLElement | null>;
@@ -93,6 +104,7 @@ export function HarnessUnlinkDialog({
           {row.profile === null ? (
             <RemoveFromListBody
               row={row}
+              impact={impact}
               onCancel={onClose}
               onConfirm={() => {
                 onRemoveFromList(row);
@@ -107,6 +119,7 @@ export function HarnessUnlinkDialog({
               onUnlinked={onUnlinked}
               onLockChange={setLocked}
               fixture={fixture ?? null}
+              impact={impact}
             />
           )}
         </DialogContent>
@@ -115,12 +128,35 @@ export function HarnessUnlinkDialog({
   );
 }
 
+/**
+ * 해제 영향: 「기본 AI에서 이 계정을 쓰던 칸」과 그 칸이 넘어갈 곳(brief §3.4). 확인
+ * 단계에만 선다. 조용히 폴백으로 바뀌지 않게 이름으로 먼저 말한다.
+ */
+function ImpactList({ impact }: { impact: readonly AiDefaultImpact[] }) {
+  const lead = unlinkImpactLead(impact);
+  if (lead === null) return null;
+  return (
+    <div className="flex min-w-0 flex-col gap-1 rounded-lg bg-surface-muted px-3 py-2" data-testid="my-account-unlink-impact">
+      <p className="break-keep text-meta text-ink">{lead}</p>
+      <ul className="flex flex-col gap-1">
+        {impact.map((item) => (
+          <li key={item.rowId} className="break-keep text-meta text-ink-muted">
+            {impactLine(item)}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function RemoveFromListBody({
   row,
+  impact,
   onCancel,
   onConfirm,
 }: {
   row: Pick<MyAccountRow, "harness" | "profile">;
+  impact: readonly AiDefaultImpact[];
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -132,6 +168,7 @@ function RemoveFromListBody({
       <DialogDescription className="break-keep text-body text-ink-muted" data-testid="my-account-unlink-body">
         {unlinkDialogBody(row)}
       </DialogDescription>
+      <ImpactList impact={impact} />
       <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" size="sm" className="tap-target" onClick={onCancel} data-testid="my-account-unlink-cancel">
           {LOGIN_CANCEL_LABEL}
@@ -163,8 +200,10 @@ function UnlinkProfileBody({
   onUnlinked,
   onLockChange,
   fixture,
+  impact,
 }: {
   profile: HarnessProfileRef;
+  impact: readonly AiDefaultImpact[];
   onClose: () => void;
   onUnlinked: (done: boolean) => void;
   onLockChange: (locked: boolean) => void;
@@ -257,6 +296,7 @@ function UnlinkProfileBody({
       >
         {body}
       </DialogDescription>
+      {status.phase === "confirm" && <ImpactList impact={impact} />}
 
       {canShowTerminal && (
         <div className="flex min-w-0 flex-col gap-2">
