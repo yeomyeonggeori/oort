@@ -65,6 +65,10 @@ use momo_t3::work_control::{
     record_host_last_used_in_tx, resume_target_rejection_in_tx, NewWorkControl,
     ResumeTargetRejection, KIND_SPAWN, STATUS_DISPATCHED,
 };
+use momo_t3::work_permission::{
+    bridgeable_options, cancel_pending_for_session_in_tx, insert_permission_request_in_tx,
+    withdraw_permission_request_in_tx, NewPermissionRequest,
+};
 use momo_t3::{
     acquire_slot_in_tx, allocate_uuid_v7, card_props, close_control_window_in_tx,
     cloud_host_id_for_host, cloud_host_id_for_host_in_tx, cloud_host_id_for_session_in_tx,
@@ -730,6 +734,9 @@ async fn end_in_tx(
     // ended underneath somebody's keyboard.
     close_control_window_for_ended_session_in_tx(conn, workspace_id, ended.channel_id, session_id)
         .await?;
+    // ADR-0188 D5: a request the ended session was waiting on can no longer
+    // be answered by anyone (#3000).
+    cancel_pending_for_session_in_tx(conn, workspace_id, session_id).await?;
 
     let props = card_props(
         ended.id,
@@ -950,7 +957,7 @@ const FORBIDDEN_ACP_KEY_NEEDLES: &[&str] = &[
 ];
 
 #[derive(Debug)]
-struct ValidatedAcpEvent {
+pub(crate) struct ValidatedAcpEvent {
     channel_id: Uuid,
     body: String,
     safe_payload: Value,
@@ -1050,6 +1057,65 @@ async fn record_acp_event_in_tx(
         )));
     }
 
+    let recorded =
+        publish_session_event_in_tx(conn, workspace_id, &existing, event, normalized).await?;
+
+    // ADR-0188 D5 (#3000): a relayed permission request becomes a decidable
+    // row, keyed by this event's id — the host-issued nonce the decision must
+    // name. Only the options the bridge can choose are kept; a request that
+    // offers neither `allow_once` nor `reject_once` records nothing to decide.
+    // A retried event (deduped message) records nothing new.
+    if recorded && event.event_type == "approval.requested" {
+        let options = bridgeable_options(
+            normalized
+                .safe_payload
+                .get("options")
+                .unwrap_or(&Value::Null),
+        );
+        if !options.is_empty() {
+            insert_permission_request_in_tx(
+                conn,
+                workspace_id,
+                &NewPermissionRequest {
+                    work_session_id: session_id,
+                    host_id: existing.host_id,
+                    channel_id: existing.channel_id,
+                    request_event_id: event.event_id,
+                    options,
+                },
+            )
+            .await?;
+        }
+    }
+    // The host answered the agent itself (its wait ran out, the turn was
+    // cancelled): the request it names can no longer be decided. A host can
+    // only withdraw — never approve — through this path.
+    if event.event_type == "approval.decided" {
+        if let Some(request_event_id) = normalized
+            .safe_payload
+            .get("request_event_id")
+            .and_then(Value::as_str)
+            .and_then(|raw| Uuid::parse_str(raw).ok())
+        {
+            withdraw_permission_request_in_tx(conn, workspace_id, session_id, request_event_id)
+                .await?;
+        }
+    }
+
+    Ok(Ok(existing))
+}
+
+/// Record one session event as a System message in the session's thread and
+/// broadcast it — the ingestion path and the server's own session events
+/// (`approval.decided` from the permission decision route, #3000) share it.
+/// Returns `false` when the event id was already recorded (a retry).
+pub(crate) async fn publish_session_event_in_tx(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    existing: &WorkSessionDetail,
+    event: &WorkSessionAcpEvent,
+    normalized: &ValidatedAcpEvent,
+) -> Result<bool, T3Error> {
     let sent = send_message_in_tx(
         conn,
         workspace_id,
@@ -1090,12 +1156,11 @@ async fn record_acp_event_in_tx(
         .await
         .map_err(|error| T3Error::from(momo_db::DbError::from(error)))?;
     }
-
-    Ok(Ok(existing))
+    Ok(!sent.deduped)
 }
 
 /// Swift `validatedACPEvent` (`WorkSessionRoutes.swift:2203-2291`).
-fn validated_acp_event(
+pub(crate) fn validated_acp_event(
     event: &WorkSessionAcpEvent,
     session_id: Uuid,
 ) -> Result<ValidatedAcpEvent, ApiError> {
@@ -1201,7 +1266,16 @@ fn validated_acp_event(
             "Approval requested".to_string()
         }
         "approval.decided" => {
-            allowed.extend(["action", "status", "option_id"]);
+            // `request_event_id` (#3000): which `approval.requested` this
+            // decision closes — named by the server's own decision event and
+            // by a host that withdrew a request it answered itself.
+            allowed.extend(["action", "status", "option_id", "request_event_id"]);
+            if let Some(request) = payload.get("request_event_id") {
+                let parsed = request.as_str().map(Uuid::parse_str);
+                if !matches!(parsed, Some(Ok(_))) {
+                    return Err(ApiError::bad_request("invalid ACP approval decision"));
+                }
+            }
             let status = payload.get("status").and_then(Value::as_str);
             if payload.get("action").and_then(Value::as_str) != Some("decided")
                 || !matches!(status, Some("approved") | Some("rejected"))
@@ -1534,6 +1608,11 @@ async fn transition_lifecycle_in_tx(
             "work session state changed; retry",
         )));
     };
+    // ADR-0188 D5 (#3000): the turn is over, so a permission request it was
+    // waiting on is too — a later turn is a different question.
+    if target_status == "idle" {
+        cancel_pending_for_session_in_tx(conn, workspace_id, session_id).await?;
+    }
 
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

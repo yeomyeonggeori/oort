@@ -5,6 +5,7 @@
 - 개정: 2026-09-24 §8 — 성재 결정 두 가지(Codex 「샌드박스 자동 실행 수용」, Claude 기본 모드가 auto인 기기 「시작 직후 교정」)와 R1.1 보안 재검수 N-1~N-10 반영(#2607). D6 문구와 §3 불변식 한 줄을 고쳤다.
 - 개정: 2026-09-24 §8.1 — R1.2 보안 재검수(#2621) 후속 R1.3(#2630). 조건 1·2를 보강하고 조건 8(환경 변수 허용목록)을 더했다. RR-3을 보강하고 RR-6을 더했다. F5 선택 근거와 운영 메모를 적었다. §3 불변식 문구는 바꾸지 않았다.
 - 개정: 2026-09-26 D6에 ADR-0192 D3 「설정 묶음」 예외 포인터 한 줄, **§8.5 증보**(§8.1 조건 1·8·F5를 ADR-0191 D1 계정 프로필과 ADR-0192 D3 설정 묶음에 한해 조항별로 완화). 로컬 터미널 레인은 ADR-0190(이 ADR의 원격 불변식 밖, 원장 비경유)
+- 증보: 2026-09-28 **§8.6** — D5 권한 다리의 구현 계약(#3000): 권한 요청 테이블(migration 092), `permission` 컨트롤, 사람 결정 라우트, 멱등·409 의미, 「거부 + 지시」 R2 유보. 결재 인용: 작업 탭 결재 Q1~Q6(2026-09-27, 성재) + planner 편성 #3000. D5 본문은 바꾸지 않았다.
 - Deciders: 성재
 - 발제: ADR-0187 D3 — 성재 「그 정도 수준의 원격 작업 그리고 알림 시스템 그리고 데스크탑에서 사용자들이 했던 걸 트래킹하고 온전히 독까지 요청할 수 있는 마치 코덱스나 클라우드에 iOS 앱 같은 느낌」, D2 「테이스케일 안 쓰고 iOS 앱을 쓰는 걸 목표로」
 - 승계(Accepted, 이 ADR은 현행 스택 위에 다시 세운다):
@@ -417,3 +418,33 @@ oort는 벤더 클라우드 자리에 **팀 자신의 Railway 서버**가 있으
   - 고유 접두는 어디서 시작해도 잡는다.
   - 계열: Anthropic·OpenAI·Stripe·GitHub·GitLab·npm·Slack·Google API·AWS(id·secret)·JWT·URL 비밀번호
   - 릴레이는 메시지가 끝나기 전에는 완결된 줄만 보낸다. 다른 이벤트가 사이에 껴도 끝 조각을 붙잡아 둔다. 열린 키 블록 보류에는 상한이 있다.
+
+### 8.6 권한 다리 구현 계약 (2026-09-28, #3000)
+
+**근거.** 작업 탭 결재 Q1~Q6(2026-09-27, 성재)과 planner 편성 #3000. D5가 정한 것을 코드 계약으로 옮긴다. D5 본문과 §3 불변식은 바꾸지 않았다.
+
+- **요청 행 = `work_permission_request`(migration 092).**
+  - host가 ACP `session/request_permission`을 받으면 `approval.requested` 세션 이벤트를 서명 PATCH로 올린다. 그 이벤트의 `event_id`가 D5의 「host가 발급한 1회 nonce」다.
+  - 수집 tx가 같은 자리에서 행을 만든다. 키는 (workspace, session, `request_event_id`)이고 host·channel이 함께 묶인다. ENABLE + FORCE RLS, `ws_isolation` 정책 대상이다.
+  - 선택지는 `allow_once`·`reject_once`만 저장한다. host도 이 둘만 올리고, 이름은 고정 문자열이다(에이전트가 쓴 도구 제목·선택지 이름은 싣지 않는다).
+  - 상태는 `pending → approved | rejected | expired | cancelled`이고, 모든 전이는 `WHERE status = 'pending'` 조건부 UPDATE다(첫 결정이 이긴다).
+  - 마감은 10분이다(D7 「짧은 TTL」). host는 30초 더 기다린다. 제때 온 결정을 host 시계가 버리지 않게 하기 위해서다.
+- **결정 라우트 = `POST /v1/workspaces/{ws}/work-sessions/{session}/permission-decisions`.**
+  - 사람 bearer만 받는다. 에이전트 bearer는 `required_agent_scope`에 없어서 핸들러에 닿지 않는다. host 서명 allow-list에도 넣지 않았다(D3). 핸들러도 사람이 아닌 principal을 다시 거부한다.
+  - 결정자는 세션 소유자이면서 host 소유자다(D3). 채널 멤버십이나 관리자 역할로 대신할 수 없다. 그래서 에이전트는 자기 권한 요청을 승인할 수 없다.
+  - 본문은 `requestEventId`·`optionId`·`kind`다. `kind`는 `allow_once`·`reject_once`만 받는다. 저장된 선택지의 종류와 같아야 한다. 이름표를 바꾼 `allow_always`도 거부한다.
+  - 같은 결정을 다시 보내면 200으로 같은 행을 돌려준다. 다른 결정은 409 `permission_already_decided`다.
+  - 마감이 지났거나, 턴·세션이 끝났거나, host가 폐기됐거나, host가 스스로 거둔 요청은 409 `permission_request_closed`다. 이때 행도 `expired`·`cancelled`로 닫는다.
+  - 한 tx에서 네 가지를 한다: 행 판정, host 앞 `permission` 컨트롤(서버만 만든다, D3), `request_event_id`를 가리키는 서버의 `approval.decided` 세션 이벤트(모든 소유자 기기의 카드를 닫는다), 감사 행 `work.permission.decided`.
+- **`permission` 컨트롤.** payload는 정확히 `request_event_id`·`option_id`·`kind`다(092 `work_control_payload_ck`). 요청 하나에 컨트롤 하나다(unique index). `POST …/work-controls`는 이 종류를 받지 않는다.
+- **host 쪽.**
+  - 컨트롤은 소유자 요청자만 받는다. 그리고 그 세션이 기다리는 nonce와, 에이전트가 제시한 그 종류의 선택지에만 답한다. 모르는 nonce나 이미 답한 요청이면 `permission_request_unknown`으로 버린다. 선택지·종류가 맞지 않으면 `permission_option_refused`다.
+  - 대기 시간이 끝나면 에이전트 자신의 `reject_once`로 답한다. 동시에 `request_event_id`를 단 `approval.decided`(rejected)로 서버의 행을 거둔다. host가 올린 `approval.decided`는 행을 `cancelled`로 닫을 뿐이고 승인할 수 없다.
+  - 세션이 끝나면 대기 중인 요청에 `cancelled`로 답한다. 서버는 세션 종료·idle 전이·host 폐기 때 대기 행을 `cancelled`로 닫는다.
+  - 올릴 수 없는 요청은 전처럼 즉시 거부한다. 한 번짜리 선택지가 없거나 서버가 받지 않은 경우다.
+- **「거부 + 지시」는 R2로 미룬다.** 지시문을 다음 입력으로 보내는 것은 소유자 `input`이다. D3는 이를 R2의 기기 키 서명에서만 연다. 그래서 R1 동안 결정 라우트는 비어 있지 않은 `instruction`을 400 `permission_instruction_unsupported`로 거부한다.
+- **남은 것(이번 계약 밖).**
+  - 미리보기의 소유자 전용 방송(D5 「채널로 방송하지 않는다」). 지금 `approval.requested`는 선택지만 싣고 세션 스레드(채널)로 간다. 도구 미리보기는 싣지 않는다.
+  - 푸시 라우팅(D8).
+  - 마감 지난 대기 행의 주기 청소. 라우트가 결정 시점에 닫으므로 판정은 옳다.
+- 계약 골든: `docs/api/work-permission-decision.golden.json`. 웹 `decide` 포트(`agentPane.ts` `PermissionDecision`)가 붙을 모양이다.

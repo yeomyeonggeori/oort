@@ -144,6 +144,12 @@ pub enum Refusal {
     /// The session already has as many queued instructions as it keeps
     /// (#2602 L-2).
     InputQueueFull,
+    /// ADR-0188 D5: a `permission` control names no request this session is
+    /// waiting on (unknown nonce, or one already answered) — discarded.
+    PermissionRequestUnknown,
+    /// A `permission` control names an option the request did not offer
+    /// with that kind, or a kind the bridge never chooses (`allow_always`).
+    PermissionOptionRefused,
 }
 
 impl Refusal {
@@ -167,6 +173,8 @@ impl Refusal {
             Self::SlashCommandRefused => "slash_command_refused",
             Self::HostBusy => "host_busy",
             Self::InputQueueFull => "input_queue_full",
+            Self::PermissionRequestUnknown => "permission_request_unknown",
+            Self::PermissionOptionRefused => "permission_option_refused",
         }
     }
 }
@@ -917,6 +925,10 @@ pub struct PermissionOption {
 pub enum PermissionDecision {
     /// Select the agent's own one-time rejection.
     Reject { option_id: String },
+    /// Select the option the host owner chose through the bridge (ADR-0188 D5)
+    /// — always an `allow_once` or `reject_once` the agent itself offered
+    /// ([`owner_choice`]).
+    Selected { option_id: String },
     /// No one-time rejection on offer: answer `cancelled`, which every ACP agent
     /// must treat as "not permitted".
     Cancelled,
@@ -926,12 +938,50 @@ impl PermissionDecision {
     /// The `session/request_permission` result.
     pub fn to_result(&self) -> Value {
         match self {
-            Self::Reject { option_id } => {
+            Self::Reject { option_id } | Self::Selected { option_id } => {
                 json!({"outcome": {"outcome": "selected", "optionId": option_id}})
             }
             Self::Cancelled => json!({"outcome": {"outcome": "cancelled"}}),
         }
     }
+}
+
+/// The option kinds the bridge can put in front of the owner (ADR-0188 D5,
+/// R1 「이번 한 번」만). `allow_always`/`reject_always` would make the agent
+/// write a rule file; they are never offered and never chosen.
+pub const BRIDGE_OPTION_KINDS: [&str; 2] = ["allow_once", "reject_once"];
+
+/// The options of a request the owner may choose from — the agent's own
+/// `allow_once`/`reject_once`, nothing else. Empty when it offers neither.
+pub fn bridge_options(options: &[PermissionOption]) -> Vec<PermissionOption> {
+    options
+        .iter()
+        .filter(|option| {
+            BRIDGE_OPTION_KINDS.contains(&option.kind.as_str())
+                && !option.option_id.is_empty()
+                && option.option_id.chars().count() <= 128
+        })
+        .cloned()
+        .collect()
+}
+
+/// The owner's choice, checked on the host against what the agent offered
+/// (ADR-0188 D5: the host never trusts the server's word for the kind). The
+/// option must be one of `offered` (already [`bridge_options`]), and its kind
+/// must be the kind the decision states.
+pub fn owner_choice(
+    offered: &[PermissionOption],
+    option_id: &str,
+    kind: &str,
+) -> Result<PermissionDecision, Refusal> {
+    offered
+        .iter()
+        .find(|option| option.option_id == option_id)
+        .filter(|option| option.kind == kind && BRIDGE_OPTION_KINDS.contains(&option.kind.as_str()))
+        .map(|option| PermissionDecision::Selected {
+            option_id: option.option_id.clone(),
+        })
+        .ok_or(Refusal::PermissionOptionRefused)
 }
 
 /// Parse the options of a `session/request_permission` request.
@@ -957,10 +1007,12 @@ pub fn permission_options(params: &Value) -> Vec<PermissionOption> {
         .unwrap_or_default()
 }
 
-/// ADR-0188 D5/D6 until the R1 permission bridge exists: **every** request is
-/// denied. Never an `allow_*` option, and never `reject_always` either — a
-/// persistent rule would be written into the agent's settings, and ADR-0188 D5
-/// keeps the host from writing rule files.
+/// The host's own answer when nobody decides: the request offered nothing the
+/// bridge can put in front of the owner, the server did not take the request,
+/// or the owner's decision did not arrive in time. **Denied** — never an
+/// `allow_*` option, and never `reject_always` either: a persistent rule would
+/// be written into the agent's settings, and ADR-0188 D5 keeps the host from
+/// writing rule files.
 pub fn decide_permission(options: &[PermissionOption]) -> PermissionDecision {
     options
         .iter()
@@ -1102,6 +1154,67 @@ mod tests {
         assert_eq!(
             PermissionDecision::Cancelled.to_result(),
             json!({"outcome": {"outcome": "cancelled"}})
+        );
+    }
+
+    /// ADR-0188 D5 (#3000): the owner chooses only among the agent's own
+    /// one-time options, and the host checks the kind against what the agent
+    /// offered — not against what the decision says.
+    #[test]
+    fn the_owner_chooses_only_an_offered_once_option_of_the_stated_kind() {
+        let offered_by_agent = vec![
+            PermissionOption {
+                option_id: "allow-always".into(),
+                kind: "allow_always".into(),
+            },
+            PermissionOption {
+                option_id: "allow-once".into(),
+                kind: "allow_once".into(),
+            },
+            PermissionOption {
+                option_id: "reject-once".into(),
+                kind: "reject_once".into(),
+            },
+            PermissionOption {
+                option_id: "reject-always".into(),
+                kind: "reject_always".into(),
+            },
+        ];
+        let bridged = bridge_options(&offered_by_agent);
+        assert_eq!(
+            bridged.iter().map(|o| o.kind.as_str()).collect::<Vec<_>>(),
+            ["allow_once", "reject_once"]
+        );
+        assert_eq!(
+            owner_choice(&bridged, "allow-once", "allow_once"),
+            Ok(PermissionDecision::Selected {
+                option_id: "allow-once".into()
+            })
+        );
+        assert_eq!(
+            owner_choice(&bridged, "reject-once", "reject_once")
+                .unwrap()
+                .to_result(),
+            json!({"outcome": {"outcome": "selected", "optionId": "reject-once"}})
+        );
+        // An always option — even labelled as a once kind — is never chosen.
+        for (id, kind) in [
+            ("allow-always", "allow_once"),
+            ("allow-always", "allow_always"),
+            ("reject-always", "reject_once"),
+            ("allow-once", "reject_once"),
+            ("missing", "allow_once"),
+        ] {
+            assert_eq!(
+                owner_choice(&bridged, id, kind),
+                Err(Refusal::PermissionOptionRefused),
+                "{id} as {kind}"
+            );
+        }
+        // And even an unfiltered list cannot smuggle an always kind through.
+        assert_eq!(
+            owner_choice(&offered_by_agent, "allow-always", "allow_always"),
+            Err(Refusal::PermissionOptionRefused)
         );
     }
 

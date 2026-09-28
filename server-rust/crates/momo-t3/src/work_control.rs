@@ -65,6 +65,11 @@ pub const KIND_SPAWN: &str = "spawn";
 pub const KIND_INPUT: &str = "input";
 pub const KIND_READ: &str = "read";
 pub const KIND_KILL: &str = "kill";
+/// ADR-0188 D5 (#3000, migration 092): the owner's decision on a permission
+/// request, addressed to the host. Only the server's decision transaction
+/// creates one (`routes::work_permissions`); `POST …/work-controls` never
+/// accepts it.
+pub const KIND_PERMISSION: &str = "permission";
 
 pub const STATUS_PENDING_APPROVAL: &str = "pending_approval";
 pub const STATUS_APPROVED: &str = "approved";
