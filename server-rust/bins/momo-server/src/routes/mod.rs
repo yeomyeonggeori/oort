@@ -21,6 +21,7 @@ pub mod channels;
 pub mod claim;
 pub mod cloud_hosts;
 pub mod credits;
+pub mod device_keys;
 pub mod device_link;
 pub mod devices;
 /// ADR-0165 / LIVE-1 — 관전 라이브 화면: the display half of the attach plane.

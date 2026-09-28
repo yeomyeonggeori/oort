@@ -81,6 +81,29 @@
 //! only in a list they would have to go and read. The payload names the host
 //! and who acted; never its public key.
 //!
+//! ## ADR-0146 개정 D-8: a member-scoped registration is signed (#3022)
+//!
+//! A stolen refresh token could otherwise register a stranger's box as the
+//! victim's host. So a member-scoped registration may carry `registration`:
+//! the member's **root device key** (a live, unendorsed `macos` key — D-6 ①)
+//! signing `momo.human.control.v1` with `kind=host_register` over the host
+//! public key, the host id candidate and the display name. The server rebuilds
+//! the statement from its own instance id (`MOMO_INSTANCE_ID`) and the rows this
+//! request writes, checks the ±5 min / 10 min window, verifies, and creates the
+//! host **under the signed host id** — a replay collides with that row (409
+//! `host_register_replayed`), which is the statement's single use until E3's
+//! nonce ledger (095) exists.
+//!
+//! * A signature that is sent is always verified: a bad one is a 403
+//!   `device_signature_invalid` / `device_key_revoked` / …, never ignored.
+//! * A missing one is refused (403 `device_signature_required`) only when the
+//!   instance set `MOMO_HOST_REGISTER_SIGNATURE_REQUIRED=true`. Default off —
+//!   no desktop build signs yet (E5 #3025), and ADR-0146 D-11 / Q11 keeps the
+//!   R2 switches closed until the R1 re-review PASS. Off, an unsigned
+//!   registration is exactly today's.
+//! * `registration` on a workspace-scoped host is a 400: the root key is a
+//!   person's, and a team host is the workspace's.
+//!
 //! ## Still not served (deliberate, named)
 //!
 //! `GET .../{host}/live-sessions` (:101-104) and `POST .../{host}/reconcile`
@@ -96,9 +119,13 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::IntoResponse;
 use axum::{Extension, Json};
+use momo_auth::device_key::{
+    list_revocation_letters_in_tx, verify_host_register_in_tx, HostRegisterProof,
+    REFUSAL_DEVICE_SIGNATURE_REQUIRED,
+};
 use momo_auth::{
-    active_workspace_role, insert_work_host, list_work_hosts, load_work_host,
-    lock_work_host_ownership, mark_work_host_revoked, normalize_public_key_b64,
+    active_workspace_role, insert_work_host, insert_work_host_with_id, list_work_hosts,
+    load_work_host, lock_work_host_ownership, mark_work_host_revoked, normalize_public_key_b64,
     touch_work_host_last_seen, NewWorkHost, Principal, WorkHostRecord,
 };
 use momo_db::{with_tenant_tx, DbError, PgConnection};
@@ -114,10 +141,11 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::dto::{
-    PendingWorkControlsResponse, RegisterWorkHostRequest, WorkHostDto, WorkHostListResponse,
-    WorkHostResponse,
+    DeviceRevocationDto, HostRegisterSignature, PendingWorkControlsResponse,
+    RegisterWorkHostRequest, WorkHostDto, WorkHostListResponse, WorkHostResponse,
 };
 use crate::error::ApiError;
+use crate::routes::device_keys::refusal_error;
 use crate::routes::shared::{path_uuid, require_human, settle, tenant_tx, workspace_scope};
 use crate::routes::work_controls::control_dto;
 use crate::work_host_auth::{
@@ -135,6 +163,30 @@ use crate::AppState;
 /// [`heartbeat`] answers the ordinary signed-request 401 rather than a 500.
 /// Namespaced and versioned so no genuine driver error can be mistaken for it.
 const HEARTBEAT_PROVENANCE_REFUSED: &str = "momo.work_hosts.heartbeat_provenance_refused.v1";
+
+/// 409: a signed host id that already names a host — a replayed statement.
+pub const REFUSAL_HOST_REGISTER_REPLAYED: &str = "host_register_replayed";
+/// 503: a signed registration on an instance with no `MOMO_INSTANCE_ID`.
+pub const REFUSAL_INSTANCE_ID_UNCONFIGURED: &str = "instance_id_unconfigured";
+
+/// Parse the wire signature half. Shape errors are 400s; whether it verifies
+/// is decided in the transaction, against the stored root key.
+fn host_register_proof(raw: HostRegisterSignature) -> Result<HostRegisterProof, ApiError> {
+    let uuid = |value: &str, message: &'static str| {
+        Uuid::parse_str(value).map_err(|_| ApiError::bad_request(message))
+    };
+    Ok(HostRegisterProof {
+        device_key_id: uuid(
+            &raw.device_key_id,
+            "registration.deviceKeyId must be a UUID",
+        )?,
+        host_id: uuid(&raw.host_id, "registration.hostId must be a UUID")?,
+        nonce: uuid(&raw.nonce, "registration.nonce must be a UUID")?,
+        issued_at_ms: raw.issued_at_ms,
+        expires_at_ms: raw.expires_at_ms,
+        signature_b64: raw.signature,
+    })
+}
 
 pub(crate) fn validated_scope(raw: &str) -> Result<String, ApiError> {
     let value = raw.trim().to_lowercase();
@@ -333,6 +385,37 @@ pub async fn register(
         seen_now: false,
     };
 
+    let proof = match request.registration {
+        Some(signature) => {
+            if new.scope != "member" {
+                return Err(ApiError::bad_request(
+                    "registration signs a member-scoped host; a workspace host takes none",
+                ));
+            }
+            Some(host_register_proof(signature)?)
+        }
+        None => None,
+    };
+    if proof.is_none()
+        && new.scope == "member"
+        && state.device_keys.host_register_signature_required
+    {
+        return Err(ApiError::coded(
+            StatusCode::FORBIDDEN,
+            REFUSAL_DEVICE_SIGNATURE_REQUIRED,
+            "a member-scoped work host needs its root device key's host_register signature",
+        ));
+    }
+    let instance_id = state.device_keys.instance_id.clone();
+    if proof.is_some() && instance_id.is_none() {
+        return Err(ApiError::coded(
+            StatusCode::SERVICE_UNAVAILABLE,
+            REFUSAL_INSTANCE_ID_UNCONFIGURED,
+            "this instance has no MOMO_INSTANCE_ID, so no signed registration can verify",
+        ));
+    }
+    let now_ms = chrono::Utc::now().timestamp_millis();
+
     let member_id = principal.member_id;
     let outcome = with_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
@@ -350,7 +433,37 @@ pub async fn register(
                     "a workspace-scoped work host requires a workspace owner or admin",
                 )));
             }
-            let host_id = insert_work_host(conn, workspace_id, &new).await?;
+            let host_id = match &proof {
+                None => insert_work_host(conn, workspace_id, &new).await?,
+                Some(proof) => {
+                    // The root is share-locked by the verification, so a session
+                    // end cannot revoke it between this check and the insert.
+                    let verified = verify_host_register_in_tx(
+                        conn,
+                        workspace_id,
+                        member_id,
+                        instance_id.as_deref().unwrap_or_default(),
+                        proof,
+                        &new.public_key,
+                        &new.display_name,
+                        now_ms,
+                    )
+                    .await?;
+                    if let Err(refusal) = verified {
+                        return Ok(Err(refusal_error(refusal)));
+                    }
+                    let Some(host_id) =
+                        insert_work_host_with_id(conn, workspace_id, proof.host_id, &new).await?
+                    else {
+                        return Ok(Err(ApiError::coded(
+                            StatusCode::CONFLICT,
+                            REFUSAL_HOST_REGISTER_REPLAYED,
+                            "a host with this signed id already exists",
+                        )));
+                    };
+                    host_id
+                }
+            };
             let record = load_work_host(conn, host_id).await?;
             if let Some(record) = &record {
                 emit_work_host_notice(conn, record, WORK_HOST_REGISTERED, member_id).await?;
@@ -446,16 +559,23 @@ pub async fn pending_controls(
         return Err(crate::work_host_auth::signed_request_unauthorized());
     }
 
-    let controls = settle(
+    let (controls, letters) = settle(
         "work_hosts.pending_controls",
         tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
-                Ok(Ok(momo_t3::pending_controls_for_host_in_tx(
-                    conn,
-                    workspace_id,
-                    host_id,
-                )
-                .await?))
+                let controls =
+                    momo_t3::pending_controls_for_host_in_tx(conn, workspace_id, host_id).await?;
+                // D-7: a member host is handed its owner's signed revocation
+                // letters. A workspace host has no personal root to check them
+                // against, so it gets none.
+                let letters = match load_work_host(conn, host_id).await? {
+                    Some(host) if host.scope == "member" => {
+                        list_revocation_letters_in_tx(conn, workspace_id, host.owner_member_id)
+                            .await?
+                    }
+                    _ => Vec::new(),
+                };
+                Ok(Ok((controls, letters)))
             })
         })
         .await,
@@ -463,6 +583,18 @@ pub async fn pending_controls(
 
     Ok(Json(PendingWorkControlsResponse {
         work_controls: controls.into_iter().map(control_dto).collect(),
+        device_revocations: letters
+            .into_iter()
+            .map(|letter| DeviceRevocationDto {
+                workspace_id: letter.workspace_id.to_string(),
+                member_id: letter.member_id.to_string(),
+                root_key_id: letter.root_key_id.to_string(),
+                target_key_id: letter.target_key_id.to_string(),
+                revoked_at_ms: letter.revoked_at_ms,
+                signature: letter.signature,
+                target_public_key: letter.target_public_key,
+            })
+            .collect(),
     }))
 }
 

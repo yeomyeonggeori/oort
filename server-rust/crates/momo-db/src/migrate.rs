@@ -462,19 +462,26 @@ mod tests {
     /// `workspace_id`), ENABLE + FORCE RLS behind the `app.provider_link_admin`
     /// operator GUC, `credential_source` CHECKed to `team_link`.
     /// schema_v0.sql is not modified.
+    ///
+    /// 094 is #3022's device signing keys (ADR-0146 개정 2026-09-28 R2-E2):
+    /// `member_device_key` (a person's P-256 key bound to the session lineage
+    /// it was registered under, with its endorsement and revocation letters;
+    /// ENABLE + FORCE RLS + `ws_isolation`) and `action_signature.alg` with a
+    /// per-algorithm public-key CHECK. Re-runnable statements.
+    /// schema_v0.sql is not modified.
     #[test]
-    fn discovers_contiguous_migrations_001_to_093() {
+    fn discovers_contiguous_migrations_001_to_094() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            93,
-            "expected 93 migrations under {}",
+            94,
+            "expected 94 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 93);
+        assert_eq!(migrations.last().unwrap().version, 94);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

@@ -224,6 +224,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // B5.2: mention→run routing is always on (routing an `@mention` to its agent
     // is the product); the only knob is how much history rides the job.
     .with_mentions(config.mentions.clone())
+    // ADR-0146 개정 (#3022): member-scoped host registration signatures are
+    // verified when sent and required only when the operator turned on
+    // MOMO_HOST_REGISTER_SIGNATURE_REQUIRED (off until the R1 re-review PASS).
+    .with_device_keys(config.device_keys.clone())
     // MOMO-605: no cross-origin surface at all unless the operator named an
     // origin in MOMO_CORS_ALLOWED_ORIGINS.
     .with_cors(config.cors.clone())

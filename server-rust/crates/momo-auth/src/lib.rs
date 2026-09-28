@@ -65,6 +65,7 @@
 pub mod agent_bearer;
 pub mod agent_credential;
 pub mod agent_scope;
+pub mod device_key;
 pub mod device_link;
 pub mod ephemeral_grant;
 pub mod hosted_connection;
@@ -177,22 +178,23 @@ pub use realtime::{
     REALTIME_META_SCHEMA,
 };
 pub use token_store::{
-    carries_privileged_scope, has_active_realtime_credential, lock_member_session_tokens_by_ids,
-    lock_session_for_registration, new_session_id, record_session_token,
-    record_session_token_with_device, revoke_member_session_tokens,
-    revoke_member_session_tokens_by_ids, revoke_privileged_session_tokens, revoke_token,
-    session_device_label, session_id_of, token_state, without_privileged_scopes,
-    DeviceSessionRecord, RegistrationSession, RevokeOutcome, TokenRejection, TokenState,
-    PRIVILEGED_SCOPES, SCOPE_REALTIME_SUBSCRIBE, SESSION_LABEL_ACCESS, SESSION_LABEL_REFRESH,
+    carries_privileged_scope, has_active_realtime_credential, lock_live_session_lineage,
+    lock_member_session_tokens_by_ids, lock_session_for_registration, new_session_id,
+    record_session_token, record_session_token_with_device, revoke_member_session_tokens,
+    revoke_member_session_tokens_by_ids, revoke_privileged_session_tokens,
+    revoke_session_lineage_tokens, revoke_token, session_device_label, session_id_of, token_state,
+    without_privileged_scopes, DeviceSessionRecord, RegistrationSession, RevokeOutcome,
+    TokenRejection, TokenState, PRIVILEGED_SCOPES, SCOPE_REALTIME_SUBSCRIBE, SESSION_LABEL_ACCESS,
+    SESSION_LABEL_REFRESH,
 };
 pub use work_host_request::{
     consume_work_host_request_id, load_work_host_signing_credential, WorkHostSigningCredential,
     REQUEST_REPLAY_RETENTION_MINUTES,
 };
 pub use work_host_store::{
-    insert_work_host, list_work_hosts, load_work_host, lock_work_host_ownership,
-    mark_work_host_revoked, touch_work_host_last_seen, NewWorkHost, WorkHostOwnership,
-    WorkHostRecord, ONLINE_WINDOW_SECONDS,
+    insert_work_host, insert_work_host_with_id, list_work_hosts, load_work_host,
+    lock_work_host_ownership, mark_work_host_revoked, touch_work_host_last_seen, NewWorkHost,
+    WorkHostOwnership, WorkHostRecord, ONLINE_WINDOW_SECONDS,
 };
 pub use workhost::{
     heartbeat_timestamp_is_fresh, normalize_public_key_b64, verify_work_host_request,
