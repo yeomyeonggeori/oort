@@ -75,13 +75,24 @@
 //! later spends the token an older tab still holds, and that is
 //! indistinguishable from theft (review H2). See `end_reused_lineage`.
 //!
-//! **Grace.** A token spent less than 30 seconds ago is refused without the
-//! sweep (`REFRESH_REUSE_GRACE_SECONDS`): web tabs share one refresh token and
-//! rotate without cross-tab coordination, and a client whose rotation response
-//! was lost retries within one request deadline (15 s). Those are the same
-//! holder; the window keeps them from signing every tab out. A second holder
-//! who replays inside the window is refused and not detected — the pre-#3022
-//! behaviour, confined to 30 seconds.
+//! **Grace.** A token spent less than 30 seconds ago is never swept
+//! (`REFRESH_REUSE_GRACE_SECONDS`): web tabs share one refresh token, and a
+//! client whose rotation response was lost (tab closed mid-request, F5, sleep,
+//! a slow network past the 15 s deadline) still holds only the spent token.
+//! Inside the window, while the pair that rotation minted is still unused, the
+//! presentation is answered with **that same pair** again (#3074,
+//! `reissue_lost_rotation`, ADR-0146 D-7 증보): a refusal would not save the
+//! lineage from the client's point of view — its 401 signs every tab out.
+//! Otherwise (the successor was rotated, logged out or swept) it is refused
+//! and nothing else happens. "Unused" means **not yet rotated**: calling the
+//! API with the successor's access token does not count. The accepted cost
+//! (ADR-0146 D-7 증보, #3074 review M1): anyone holding the spent token who
+//! presents it inside the window receives the live pair too, where #3022 gave
+//! them a 401. Two holders are caught only when their presentations of one
+//! token fall more than 30 s apart; a co-holder that rotates in lockstep with
+//! the client (both hold the same access `exp`) is never detected. The server
+//! stores no copy of the pair; it re-signs it
+//! (`momo_auth::sign_rotation_successor`).
 //!
 //! Every rotation also consumes **and** records its new pair in one
 //! transaction now (the linked-device path always did): a rotation is
@@ -114,9 +125,9 @@ use momo_auth::{
     rebind_locked_device_link_session_in_tx, record_session_token,
     record_session_token_with_device, revoke_privileged_session_tokens,
     revoke_session_lineage_tokens, revoke_token, session_device_label, session_id_of, sign_access,
-    sign_refresh, token_state, verify_app_access, verify_app_refresh, without_privileged_scopes,
-    AuthError, DeviceSessionRecord, IssuedToken, TokenRejection, TokenState, SESSION_LABEL_ACCESS,
-    SESSION_LABEL_REFRESH,
+    sign_refresh, sign_rotation_successor, token_state, verify_app_access, verify_app_refresh,
+    without_privileged_scopes, AuthError, DeviceSessionRecord, IssuedToken, TokenRejection,
+    TokenState, SESSION_LABEL_ACCESS, SESSION_LABEL_REFRESH,
 };
 use momo_db::{with_tenant_tx, DbError, PgConnection};
 use momo_messaging::{get_member, verify_password_login, PasswordLogin};
@@ -402,14 +413,27 @@ pub async fn refresh(
     let jwt_secret = state.jwt_secret.clone();
     let linked_scopes = scopes.clone();
     let rotated_scopes = scopes.clone();
+    let reissue_scopes = scopes.clone();
     let sweep_all = state.device_keys.refresh_reuse_sweep_all_sessions;
     let gate = with_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
+            // #3074: every refusal of a spent token below first asks whether
+            // it is a lost rotation response being retried.
+            let reissue = Reissue {
+                workspace_id,
+                member_id,
+                presented: &presented,
+                scopes: &reissue_scopes,
+                jwt_secret: jwt_secret.as_str(),
+            };
             // (1) Advisory pre-check — precise 401s for a logged-out/rotated
             // token. The *atomic* gate is the revoke below, not this read.
             let old_refresh_id = match token_state(conn, &presented).await.map_err(DbError::from)? {
                 // R1 (#3022): a spent refresh token, presented again.
                 TokenState::Revoked { id } => {
+                    if let Some(gate) = reissue_lost_rotation(conn, &reissue).await? {
+                        return Ok(gate);
+                    }
                     end_reused_lineage(conn, workspace_id, member_id, id, sweep_all).await?;
                     return Ok(RefreshGate::Rejected(TokenRejection::Revoked));
                 }
@@ -454,6 +478,9 @@ pub async fn refresh(
                         .await
                         .map_err(DbError::from)?
                 else {
+                    if let Some(gate) = reissue_lost_rotation(conn, &reissue).await? {
+                        return Ok(gate);
+                    }
                     end_lineage_if_spent(
                         conn,
                         workspace_id,
@@ -470,6 +497,9 @@ pub async fn refresh(
                 // rotated it). A binding moved under a still-live token is a
                 // refusal, not evidence of a second holder.
                 if locked.refresh_id != old_refresh_id {
+                    if let Some(gate) = reissue_lost_rotation(conn, &reissue).await? {
+                        return Ok(gate);
+                    }
                     end_lineage_if_spent(
                         conn,
                         workspace_id,
@@ -491,6 +521,9 @@ pub async fn refresh(
                     .await
                     .map_err(DbError::from)?;
                 if !revoke.revoked_now {
+                    if let Some(gate) = reissue_lost_rotation(conn, &reissue).await? {
+                        return Ok(gate);
+                    }
                     end_reused_lineage(conn, workspace_id, member_id, old_refresh_id, sweep_all)
                         .await?;
                     return Ok(RefreshGate::AlreadyUsed);
@@ -501,16 +534,18 @@ pub async fn refresh(
                         .map_err(DbError::from)?;
                 }
 
-                let access =
-                    sign_access(member_id, workspace_id, &linked_scopes, jwt_secret.as_str())
-                        .map_err(|error| {
-                            DbError::Sqlx(momo_db::sqlx::Error::Protocol(error.to_string()))
-                        })?;
-                let refresh =
-                    sign_refresh(member_id, workspace_id, &linked_scopes, jwt_secret.as_str())
-                        .map_err(|error| {
-                            DbError::Sqlx(momo_db::sqlx::Error::Protocol(error.to_string()))
-                        })?;
+                // #3074: the successor is a pure function of this rotation,
+                // so a retry of a lost response can sign it again.
+                let rotated_at = rotated_at_unix(conn, old_refresh_id).await?;
+                let (access, refresh) = sign_rotation_successor(
+                    member_id,
+                    workspace_id,
+                    &linked_scopes,
+                    jwt_secret.as_str(),
+                    &presented,
+                    rotated_at,
+                )
+                .map_err(signing_error)?;
                 let device_label = locked.device_label.clone();
                 let access_id = record_session_token_with_device(
                     conn,
@@ -574,6 +609,9 @@ pub async fn refresh(
                 .await
                 .map_err(DbError::from)?;
             if !revoke.revoked_now {
+                if let Some(gate) = reissue_lost_rotation(conn, &reissue).await? {
+                    return Ok(gate);
+                }
                 end_reused_lineage(conn, workspace_id, member_id, old_refresh_id, sweep_all)
                     .await?;
                 return Ok(RefreshGate::AlreadyUsed);
@@ -612,6 +650,7 @@ pub async fn refresh(
                     device_label: device_label.as_deref(),
                     old_refresh_id,
                     session_id,
+                    presented: &presented,
                 },
             )
             .await?;
@@ -640,15 +679,16 @@ pub async fn refresh(
 /// for the same client's retry rather than a second holder (#3022 review H2).
 ///
 /// Two honest clients present a spent token: a web session open in several
-/// tabs (they share one refresh token in localStorage and nothing coordinates
-/// their rotations across tabs — momo-core `api.ts`), and a client whose
+/// tabs (they share one refresh token in localStorage), and a client whose
 /// rotation response was lost and that retries. The retry lands at most one
 /// request deadline later: `REQUEST_TIMEOUT_MS = 15_000` (momo-core
 /// `http.ts`). Twice that, so a retry after a timed-out attempt still falls
-/// inside. Inside the window the presentation is refused (401) and nothing
-/// else happens — the pre-#3022 behaviour. Outside it the lineage ends. The
-/// same shape as a refresh-token "reuse interval" in hosted identity
-/// providers [S].
+/// inside. Inside the window the presentation is answered with the pair the
+/// rotation already issued, while that pair is unused (#3074,
+/// [`reissue_lost_rotation`]); else refused (401) with nothing else ended.
+/// Outside it the lineage ends. The same shape as a refresh-token "reuse
+/// interval" in hosted identity providers [S], which likewise accept a reuse
+/// inside the interval instead of refusing it.
 const REFRESH_REUSE_GRACE_SECONDS: f64 = 30.0;
 
 /// R1 (#3022): the refresh row `refresh_id` was presented after it was spent.
@@ -705,6 +745,95 @@ async fn end_reused_lineage(
     .await
 }
 
+fn signing_error(error: AuthError) -> DbError {
+    DbError::Sqlx(momo_db::sqlx::Error::Protocol(error.to_string()))
+}
+
+/// The second the refresh row `refresh_id` was spent, as Postgres wrote it —
+/// the `iat` of the pair that replaces it (#3074). Read back inside the
+/// rotating transaction, right after its own revoke, so it is the value every
+/// later retry reads too (`revoked_at` is only ever written once:
+/// `COALESCE(revoked_at, …)` or `WHERE revoked_at IS NULL` everywhere).
+async fn rotated_at_unix(conn: &mut PgConnection, refresh_id: Uuid) -> Result<i64, DbError> {
+    momo_db::sqlx::query_scalar(
+        "SELECT floor(extract(epoch FROM revoked_at))::bigint FROM token \
+          WHERE id = $1 AND revoked_at IS NOT NULL",
+    )
+    .bind(refresh_id)
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(DbError::from)
+}
+
+/// What a lost rotation response is re-signed from.
+struct Reissue<'a> {
+    workspace_id: Uuid,
+    member_id: Uuid,
+    presented: &'a str,
+    scopes: &'a [String],
+    jwt_secret: &'a str,
+}
+
+/// #3074 (ADR-0146 D-7 증보): answer a spent refresh token with the pair its
+/// rotation already issued, when that is what the presentation must be — the
+/// same client retrying after it lost the response (tab closed mid-request,
+/// F5, sleep, a slow network past the request deadline), or a second tab that
+/// lost the race for the single-use gate.
+///
+/// All three must hold, else `None` and the caller refuses as before (#3022):
+///   1. the presented row was spent within [`REFRESH_REUSE_GRACE_SECONDS`];
+///   2. the pair re-signed from it ([`sign_rotation_successor`]) is exactly a
+///      recorded pair of this server — both `token_hash`es found — and both
+///      halves are still live. A successor someone already rotated, logged
+///      out or swept is never handed out again: the presenter is then not the
+///      client that lost it. A token revoked by a logout has no recorded
+///      successor at all;
+///   3. the member is still active. Defence in depth: suspending a member
+///      also ends their sessions, so (2) refuses first in practice.
+///
+/// Nothing is written: the pair is the one already recorded, rebound and
+/// counted. The server never stores the pair itself, only `sha256(jwt)`.
+async fn reissue_lost_rotation(
+    conn: &mut PgConnection,
+    reissue: &Reissue<'_>,
+) -> Result<Option<RefreshGate>, DbError> {
+    let row: Option<(Option<i64>, bool)> = momo_db::sqlx::query_as(
+        "SELECT floor(extract(epoch FROM revoked_at))::bigint, \
+                COALESCE(revoked_at > now() - make_interval(secs => $2), false) \
+           FROM token WHERE token_hash = digest($1::text, 'sha256')",
+    )
+    .bind(reissue.presented)
+    .bind(REFRESH_REUSE_GRACE_SECONDS)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(DbError::from)?;
+    let Some((Some(rotated_at), true)) = row else {
+        return Ok(None);
+    };
+    let (access, refresh) = sign_rotation_successor(
+        reissue.member_id,
+        reissue.workspace_id,
+        reissue.scopes,
+        reissue.jwt_secret,
+        reissue.presented,
+        rotated_at,
+    )
+    .map_err(signing_error)?;
+    for half in [&access.token, &refresh.token] {
+        if !matches!(
+            token_state(conn, half).await.map_err(DbError::from)?,
+            TokenState::Active { .. }
+        ) {
+            return Ok(None);
+        }
+    }
+    let member = get_member(conn, reissue.member_id).await?;
+    if member.is_none_or(|member| member.status != "active") {
+        return Ok(None);
+    }
+    Ok(Some(RefreshGate::Issued { access, refresh }))
+}
+
 /// [`end_reused_lineage`] when the presented refresh row is revoked by now —
 /// the linked path's refusals that follow a concurrent winner's rotation.
 async fn end_lineage_if_spent(
@@ -751,6 +880,9 @@ struct RotatedPair<'a> {
     device_label: Option<&'a str>,
     old_refresh_id: Uuid,
     session_id: Uuid,
+    /// The refresh token this rotation spends: the successor is derived from
+    /// it (#3074, [`sign_rotation_successor`]).
+    presented: &'a str,
 }
 
 /// Mint the replacement pair and record both halves (and, for a labelled
@@ -761,20 +893,14 @@ async fn record_rotated_pair_in_tx(
     conn: &mut PgConnection,
     pair: RotatedPair<'_>,
 ) -> Result<(IssuedToken, IssuedToken), DbError> {
-    let signing_error =
-        |error: AuthError| DbError::Sqlx(momo_db::sqlx::Error::Protocol(error.to_string()));
-    let access = sign_access(
+    let rotated_at = rotated_at_unix(conn, pair.old_refresh_id).await?;
+    let (access, refresh) = sign_rotation_successor(
         pair.member_id,
         pair.workspace_id,
         pair.scopes,
         pair.jwt_secret,
-    )
-    .map_err(signing_error)?;
-    let refresh = sign_refresh(
-        pair.member_id,
-        pair.workspace_id,
-        pair.scopes,
-        pair.jwt_secret,
+        pair.presented,
+        rotated_at,
     )
     .map_err(signing_error)?;
     let access_id = record_session_token_with_device(

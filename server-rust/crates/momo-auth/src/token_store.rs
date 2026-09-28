@@ -257,9 +257,11 @@ pub async fn lock_session_for_registration(
 ///
 /// `expires_at_unix` is the JWT's `exp` in unix seconds — the same value
 /// [`crate::IssuedToken`] returns, so the row and the token can never disagree.
-/// Every App JWT carries a random `jti`, so `ON CONFLICT (token_hash) DO
-/// NOTHING` is a defensive guard against a (practically impossible) sha256
-/// collision, not a dedupe path. `session_id` is the lineage both halves of the
+/// Every App JWT carries a unique `jti` — random, or for a rotation's
+/// successor derived from the spent token, which the single-use gate lets
+/// rotate once (#3074) — so `ON CONFLICT (token_hash) DO NOTHING` is a
+/// defensive guard against a (practically impossible) sha256 collision, not a
+/// dedupe path. `session_id` is the lineage both halves of the
 /// pair share (#2677).
 #[allow(clippy::too_many_arguments)]
 pub async fn record_session_token(

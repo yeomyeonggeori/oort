@@ -970,7 +970,9 @@ async fn revoke_first_then_refresh_is_refused() {
 }
 
 /// Acceptance 4, duplicate rotation: two presentations of one refresh token
-/// wait on the same row, and exactly one of them may mint a pair.
+/// wait on the same row, and exactly one of them may mint a pair. Since #3074
+/// the other is answered with that same pair (the loser of the single-use gate
+/// is the same client retrying, or a second tab), not a 401.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn concurrent_duplicate_refresh_mints_exactly_one_pair() {
@@ -986,23 +988,18 @@ async fn concurrent_duplicate_refresh_mints_exactly_one_pair() {
 
     let (first_status, first_raw) = join_request(first, "first refresh").await;
     let (second_status, second_raw) = join_request(second, "second refresh").await;
-    let mut statuses = [first_status, second_status];
-    statuses.sort_unstable();
     assert_eq!(
-        statuses,
-        [200, 401],
-        "exactly one concurrent presentation may rotate"
+        [first_status, second_status],
+        [200, 200],
+        "both concurrent presentations are answered"
     );
-    let (winner_raw, loser_raw) = if first_status == 200 {
-        (first_raw, second_raw)
-    } else {
-        (second_raw, first_raw)
-    };
-    assert!(
-        loser_raw.contains("refresh token already used or revoked"),
-        "the loser is the single-use 401"
+    let first_body: Value = serde_json::from_str(&first_raw).expect("first body");
+    let second_body: Value = serde_json::from_str(&second_raw).expect("second body");
+    assert_eq!(
+        first_body, second_body,
+        "with one and the same pair: only one was minted"
     );
-
+    let winner_raw = first_raw;
     let rotated: Value = serde_json::from_str(&winner_raw).expect("winning refresh body");
     let new_access = rotated["accessToken"]
         .as_str()
