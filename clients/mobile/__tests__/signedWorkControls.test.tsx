@@ -34,6 +34,7 @@ const PERMISSION: PendingPermission = {
   atMs: 1_790_550_000_000,
   tool: {kind: 'execute', headline: '명령을 실행해도 될까요?'},
   preview: {text: 'npm test', truncated: false, omitted: 0, masked: 0, neutralized: 0},
+  previewSha256: null,
   allow: {kind: 'allow_once', optionId: 'once'},
   reject: {kind: 'reject_once', optionId: 'no'},
   hiddenOptions: 0,
