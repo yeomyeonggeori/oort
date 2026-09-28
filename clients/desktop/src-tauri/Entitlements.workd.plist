@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements of the momo-workd helper bundle (#3084),
+  oort.app/Contents/Helpers/momo-workd.app.
+
+  The bundler never reads this file. scripts/publish_next_build.sh embeds the
+  workd Developer ID provisioning profile (App ID YWQQFQM38J.app.momo.desktop.workd)
+  as Contents/Helpers/momo-workd.app/Contents/embedded.provisionprofile, signs
+  the helper with this file, and only then re-signs the outer app
+  (Entitlements.app.plist), inside out.
+
+  Why a helper bundle: workd keeps the host's Ed25519 key in the
+  data-protection keychain (ADR-0188 D2), which answers errSecMissingEntitlement
+  (-34018) to a binary without keychain-access-groups. That entitlement is
+  restricted, so it needs a profile, and a bare Mach-O cannot carry one.
+
+  keychain-access-groups: workd's own group and nothing else. Never the app's
+  device-key group (<TEAM>.app.momo.desktop.devicekey, ADR-0146 D-3). Both
+  profiles allow <TEAM>.*, so the separation is these two files, held by
+  scripts/desktop/check_provisioning_profile.sh and the desktop Rust tests.
+  One group only, so workd's `access_group: None` resolves to it.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.application-identifier</key>
+	<string>YWQQFQM38J.app.momo.desktop.workd</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>YWQQFQM38J</string>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>YWQQFQM38J.app.momo.desktop.workd</string>
+	</array>
+</dict>
+</plist>

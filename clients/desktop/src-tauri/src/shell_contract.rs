@@ -710,16 +710,27 @@ fn tauri_grants_the_profile_commands_to_the_local_main_webview_only() {
     }
 }
 
-/// `tauri.conf.json` bundles the sidecar under the name `work_host.rs` looks
-/// for, and `cargo tauri build` builds the real one first.
+/// `tauri.conf.json` bundles the workd helper where `work_host.rs` looks for
+/// it, and `cargo tauri build` builds the real one first.
 #[test]
 fn the_bundle_carries_the_workd_sidecar() {
     let conf: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+    // A helper bundle, not a bare `externalBin` (#3084): only a bundle can
+    // carry the provisioning profile workd's keychain group needs.
+    assert!(conf["bundle"].get("externalBin").is_none(), "{conf}");
     assert_eq!(
-        conf["bundle"]["externalBin"],
-        serde_json::json!(["binaries/momo-workd"])
+        conf["bundle"]["macOS"]["files"],
+        serde_json::json!({ "Helpers/momo-workd.app": "binaries/momo-workd.app" })
     );
     assert_eq!(crate::work_host::SIDECAR_NAME, "momo-workd");
+    assert_eq!(
+        crate::work_host::helper_executable(std::path::Path::new(
+            "/Applications/oort.app/Contents/MacOS/oort"
+        )),
+        Some(std::path::PathBuf::from(
+            "/Applications/oort.app/Contents/Helpers/momo-workd.app/Contents/MacOS/momo-workd"
+        ))
+    );
     let before = conf["build"]["beforeBuildCommand"].as_str().unwrap();
     assert!(
         before.starts_with("sh ../../scripts/desktop/build_workd_sidecar.sh && "),

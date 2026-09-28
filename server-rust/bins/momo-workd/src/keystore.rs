@@ -11,9 +11,16 @@
 //!   Mac. `AfterFirstUnlock` rather than `WhenUnlocked` because the point of the
 //!   host is to keep serving the owner's phone while the Mac sits locked at home.
 //!   The data-protection keychain refuses a binary without the
-//!   `keychain-access-groups` entitlement, which is what makes "only the signed
-//!   app and its sidecar can read it" a property of the OS rather than of this
-//!   file. An unsigned dev build therefore fails here — loudly, with no fallback.
+//!   `keychain-access-groups` entitlement (`errSecMissingEntitlement`, -34018),
+//!   which is what makes "only the signed workd can read it" a property of the
+//!   OS rather than of this file. That entitlement needs a provisioning
+//!   profile, so the signed desktop app ships workd as a helper bundle,
+//!   `oort.app/Contents/Helpers/momo-workd.app`, with its own App ID
+//!   `<TEAM>.app.momo.desktop.workd` and the one group of that name (#3084;
+//!   `clients/desktop/src-tauri/Entitlements.workd.plist`). The app itself
+//!   never holds that group, and workd never holds the app's device-key group
+//!   (ADR-0146 D-3). An unsigned dev build fails here — loudly, with no
+//!   fallback.
 //! * [`KeyStore::File`] — development and tests only, reachable solely through
 //!   the explicit `--dev-key-file` flag. Written `0600` in a `0700` directory,
 //!   and refused on read when the mode or owner is anything else.
@@ -33,8 +40,8 @@ use ed25519_dalek::SigningKey;
 /// Ed25519 seed length (CryptoKit `rawRepresentation`, `momo_wire::sign`).
 pub const SEED_LEN: usize = 32;
 
-/// macOS keychain service for the host key. Prefixed by the desktop bundle id
-/// (`app.momo.desktop`) because the sidecar ships inside that bundle.
+/// macOS keychain service for the host key: the helper bundle's identifier
+/// (`app.momo.desktop.workd`, inside the `app.momo.desktop` bundle).
 pub const KEYCHAIN_SERVICE: &str = "app.momo.desktop.workd";
 
 #[derive(Debug, thiserror::Error)]
@@ -364,8 +371,10 @@ fn check_private_file(path: &Path, metadata: &std::fs::Metadata) -> Result<(), K
 pub struct KeychainKeyStore {
     service: String,
     account: String,
-    /// `<TEAMID>.app.momo.desktop` in a signed bundle, shared by the app and the
-    /// sidecar. `None` uses the binary's default access group.
+    /// `None` in the desktop helper: the binary's default access group, which
+    /// is the first (and only) entry of its `keychain-access-groups`,
+    /// `<TEAMID>.app.momo.desktop.workd` — workd's alone, never shared with
+    /// the app (#3084, ADR-0146 D-3).
     access_group: Option<String>,
 }
 

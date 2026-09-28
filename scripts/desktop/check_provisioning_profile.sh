@@ -1,29 +1,40 @@
 #!/usr/bin/env bash
-# Developer ID provisioning profile guard for the signed desktop app (#3025).
+# Developer ID provisioning profile guard for the signed desktop app (#3025)
+# and its momo-workd helper bundle (#3084).
 #
 #   check_provisioning_profile.sh --profile <file> --identity "<Developer ID Application: … (TEAM)>"
-#                                 [--cert-sha1 <hex>]
-#       Before a signed build. Fails unless the profile can authorize
-#       clients/desktop/src-tauri/Entitlements.app.plist for this identity.
+#                                 [--target app|workd] [--cert-sha1 <hex>]
+#       Before a signed build. Fails unless the profile can authorize the
+#       target's entitlements file for this identity:
+#         app    clients/desktop/src-tauri/Entitlements.app.plist    (oort.app)
+#         workd  clients/desktop/src-tauri/Entitlements.workd.plist  (Contents/Helpers/momo-workd.app)
 #
-#   check_provisioning_profile.sh --verify-app <oort.app> --profile <file>
-#       After signing. Fails unless the app carries that profile and the
-#       restricted entitlements, and the momo-workd sidecar carries none.
+#   check_provisioning_profile.sh --verify-app <oort.app> --profile <file> --workd-profile <file>
+#       After signing. Fails unless the app and the helper each embed their own
+#       profile and carry exactly their own restricted entitlements, the app
+#       never holds workd's keychain group, the helper never holds the
+#       device-key group (ADR-0146 D-3), and no bare Contents/MacOS/momo-workd
+#       is left in the bundle.
 #
-# Why it exists: Entitlements.app.plist asks for keychain-access-groups and
+# Why it exists: both plists ask for keychain-access-groups and
 # application-identifier. Signed without a matching embedded profile, macOS
-# refuses to launch the app. The build would still succeed, so nothing else
-# would notice before a person double-clicks it.
+# refuses to launch the code. The build would still succeed, so nothing else
+# would notice before a person double-clicks it. Both profiles allow
+# <TEAM>.*, so the group split between the app and workd is held here and by
+# the desktop Rust tests, not by Apple.
 #
 # Pre-build checks (all must hold):
 #   - the file exists and decodes (security cms -D)
-#   - UUID is the pinned one (PINNED_UUID below; a renewed profile is a commit)
+#   - UUID is the target's pinned one (PINNED_UUID / PINNED_WORKD_UUID below;
+#     a renewed profile is a commit)
 #   - Platform has OSX, ProvisionsAllDevices is true (a Developer ID profile)
 #   - TeamIdentifier has the team in the identity's parentheses
-#   - Entitlements.com.apple.application-identifier = <TEAM>.<tauri.conf identifier>
-#     and com.apple.developer.team-identifier = <TEAM>
-#   - Entitlements.app.plist asks for exactly that id and team, and each of its
-#     keychain-access-groups matches a pattern the profile allows
+#   - Entitlements.com.apple.application-identifier = <TEAM>.<bundle id>
+#     (app: the tauri.conf identifier; workd: that + ".workd") and
+#     com.apple.developer.team-identifier = <TEAM>
+#   - the target's plist asks for exactly that id and team, and for exactly
+#     the target's one keychain group (app: <TEAM>.app.momo.desktop.devicekey,
+#     workd: <TEAM>.app.momo.desktop.workd), which the profile's patterns allow
 #   - DeveloperCertificates has the identity's certificate (SHA-1 from
 #     `security find-identity`, or --cert-sha1): the profile authorizes only
 #     the certificates it names
@@ -35,13 +46,16 @@
 # profile holds public certificates and ids only).
 set -euo pipefail
 
-PINNED_UUID="bd2fdf42-52d3-48f8-a8c4-2d4722cdb057"
+PINNED_UUID="bd2fdf42-52d3-48f8-a8c4-2d4722cdb057"       # momo desktop Developer ID
+PINNED_WORKD_UUID="a8144372-6b25-4d98-b456-3998d660a444" # momo desktop workd Developer ID
 WARN_DAYS=30
 
 ROOT="$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)"
 TAURI_DIR="$ROOT/clients/desktop/src-tauri"
 APP_ENTITLEMENTS="${MOMO_APP_ENTITLEMENTS:-$TAURI_DIR/Entitlements.app.plist}"
+WORKD_ENTITLEMENTS="${MOMO_WORKD_ENTITLEMENTS:-$TAURI_DIR/Entitlements.workd.plist}"
 TAURI_CONF="$TAURI_DIR/tauri.conf.json"
+HELPER_REL="Contents/Helpers/momo-workd.app"
 
 die() { echo "check_provisioning_profile: $*" >&2; exit 1; }
 
@@ -49,16 +63,20 @@ PROFILE=""
 IDENTITY=""
 CERT_SHA1=""
 VERIFY_APP=""
+WORKD_PROFILE=""
+TARGET="app"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --profile) PROFILE="${2:-}"; shift 2 ;;
     --identity) IDENTITY="${2:-}"; shift 2 ;;
     --cert-sha1) CERT_SHA1="${2:-}"; shift 2 ;;
     --verify-app) VERIFY_APP="${2:-}"; shift 2 ;;
+    --workd-profile) WORKD_PROFILE="${2:-}"; shift 2 ;;
+    --target) TARGET="${2:-}"; shift 2 ;;
     *) die "unknown argument $1" ;;
   esac
 done
-[ -n "$PROFILE" ] || die "usage: --profile <file> (--identity <name> | --verify-app <oort.app>)"
+[ -n "$PROFILE" ] || die "usage: --profile <file> (--identity <name> [--target app|workd] | --verify-app <oort.app> --workd-profile <file>)"
 [ -f "$PROFILE" ] || die "provisioning profile not found: $PROFILE"
 [ -s "$PROFILE" ] || die "provisioning profile is empty: $PROFILE"
 
@@ -77,6 +95,10 @@ decode "$PROFILE" "$WORK/profile.plist" || die "cannot decode provisioning profi
 if [ -n "$VERIFY_APP" ]; then
   app="$VERIFY_APP"
   [ -d "$app" ] || die "no bundle at $app"
+  [ -n "$WORKD_PROFILE" ] || die "usage: --verify-app <oort.app> --profile <file> --workd-profile <file>"
+  [ -f "$WORKD_PROFILE" ] || die "workd provisioning profile not found: $WORKD_PROFILE"
+  decode "$WORKD_PROFILE" "$WORK/workd-profile.plist" \
+    || die "cannot decode workd provisioning profile (not CMS?): $WORKD_PROFILE"
   embedded="$app/Contents/embedded.provisionprofile"
   [ -f "$embedded" ] || die "the app has no Contents/embedded.provisionprofile"
   cmp -s "$embedded" "$PROFILE" || die "Contents/embedded.provisionprofile differs from $PROFILE"
@@ -84,41 +106,65 @@ if [ -n "$VERIFY_APP" ]; then
   [ -n "$exe" ] || die "bundle Info.plist has no CFBundleExecutable"
   codesign -d --entitlements - --xml "$app" >"$WORK/app-ent.plist" 2>/dev/null \
     || die "cannot read the app's signed entitlements (unsigned?)"
-  sidecar="$app/Contents/MacOS/momo-workd"
-  [ -f "$sidecar" ] || die "the app has no Contents/MacOS/momo-workd"
-  codesign -d --entitlements - --xml "$sidecar" >"$WORK/side-ent.plist" 2>/dev/null \
-    || die "cannot read the momo-workd sidecar's signature"
-  python3 - "$WORK/profile.plist" "$WORK/app-ent.plist" "$WORK/side-ent.plist" "$APP_ENTITLEMENTS" <<'PY'
+  [ ! -e "$app/Contents/MacOS/momo-workd" ] \
+    || die "a bare Contents/MacOS/momo-workd is in the app (it cannot carry a profile; workd ships as $HELPER_REL)"
+  helper="$app/$HELPER_REL"
+  [ -d "$helper" ] || die "the app has no $HELPER_REL"
+  [ -f "$helper/Contents/embedded.provisionprofile" ] \
+    || die "the helper has no $HELPER_REL/Contents/embedded.provisionprofile"
+  cmp -s "$helper/Contents/embedded.provisionprofile" "$WORKD_PROFILE" \
+    || die "$HELPER_REL/Contents/embedded.provisionprofile differs from $WORKD_PROFILE"
+  codesign -d --entitlements - --xml "$helper" >"$WORK/helper-ent.plist" 2>/dev/null \
+    || die "cannot read the momo-workd helper's signature"
+  python3 - "$WORK/profile.plist" "$WORK/app-ent.plist" "$APP_ENTITLEMENTS" \
+    "$WORK/workd-profile.plist" "$WORK/helper-ent.plist" "$WORKD_ENTITLEMENTS" <<'PY'
 import fnmatch, plistlib, sys
 
-profile = plistlib.load(open(sys.argv[1], "rb"))
+RESTRICTED = ("keychain-access-groups", "com.apple.application-identifier",
+              "com.apple.developer.team-identifier")
 def load(path):
     data = open(path, "rb").read().strip()
     return plistlib.loads(data) if data else {}
-signed, sidecar, wanted = load(sys.argv[2]), load(sys.argv[3]), load(sys.argv[4])
-allowed = profile.get("Entitlements", {})
 errors = []
-for key, value in wanted.items():
-    if signed.get(key) != value:
-        errors.append("signed app entitlement %s = %r, Entitlements.app.plist wants %r" % (key, signed.get(key), value))
-app_id = signed.get("com.apple.application-identifier")
-if app_id != allowed.get("com.apple.application-identifier"):
-    errors.append("signed application-identifier %r is not the profile's %r" % (app_id, allowed.get("com.apple.application-identifier")))
-patterns = allowed.get("keychain-access-groups", [])
-for group in signed.get("keychain-access-groups", []):
-    if not any(fnmatch.fnmatchcase(group, p) for p in patterns):
-        errors.append("signed keychain group %r is not allowed by the profile %r" % (group, patterns))
-for key in ("keychain-access-groups", "com.apple.application-identifier", "com.apple.developer.team-identifier"):
-    if key in sidecar:
-        errors.append("momo-workd sidecar is signed with %s (ADR-0146 D-3: app only; a bare binary has no profile)" % key)
+def check(name, profile_path, signed_path, wanted_path, wanted_name):
+    profile, signed, wanted = load(profile_path), load(signed_path), load(wanted_path)
+    allowed = profile.get("Entitlements", {})
+    for key, value in wanted.items():
+        if signed.get(key) != value:
+            errors.append("signed %s entitlement %s = %r, %s wants %r" % (name, key, signed.get(key), wanted_name, value))
+    for key in RESTRICTED:
+        if key in signed and key not in wanted:
+            errors.append("signed %s carries %s, which %s does not ask for" % (name, key, wanted_name))
+    app_id = signed.get("com.apple.application-identifier")
+    if app_id != allowed.get("com.apple.application-identifier"):
+        errors.append("signed %s application-identifier %r is not its profile's %r" % (name, app_id, allowed.get("com.apple.application-identifier")))
+    patterns = allowed.get("keychain-access-groups", [])
+    for group in signed.get("keychain-access-groups", []):
+        if not any(fnmatch.fnmatchcase(group, p) for p in patterns):
+            errors.append("signed %s keychain group %r is not allowed by its profile %r" % (name, group, patterns))
+    return signed
+app = check("app", sys.argv[1], sys.argv[2], sys.argv[3], "Entitlements.app.plist")
+helper = check("momo-workd helper", sys.argv[4], sys.argv[5], sys.argv[6], "Entitlements.workd.plist")
+for group in helper.get("keychain-access-groups", []):
+    if group.endswith(".app.momo.desktop.devicekey"):
+        errors.append("momo-workd helper holds the device-key group %r (ADR-0146 D-3: the app only)" % group)
+for group in app.get("keychain-access-groups", []):
+    if group.endswith(".app.momo.desktop.workd"):
+        errors.append("the app holds workd's keychain group %r (the host key is workd's alone)" % group)
 if errors:
     for e in errors:
         print("check_provisioning_profile: " + e, file=sys.stderr)
     sys.exit(1)
-print("ok  signed app: embedded profile matches, restricted entitlements present and allowed; sidecar has none")
+print("ok  signed app and momo-workd helper: each embeds its own profile and carries exactly its own restricted entitlements; keychain groups split")
 PY
   exit 0
 fi
+
+case "$TARGET" in
+  app) ENTITLEMENTS="$APP_ENTITLEMENTS"; PINNED="$PINNED_UUID"; SUFFIX=""; GROUP_SUFFIX="app.momo.desktop.devicekey" ;;
+  workd) ENTITLEMENTS="$WORKD_ENTITLEMENTS"; PINNED="$PINNED_WORKD_UUID"; SUFFIX=".workd"; GROUP_SUFFIX="app.momo.desktop.workd" ;;
+  *) die "--target is app or workd, not '$TARGET'" ;;
+esac
 
 [ -n "$IDENTITY" ] || die "usage: --profile <file> --identity \"Developer ID Application: … (TEAM)\""
 TEAM="$(printf '%s' "$IDENTITY" | sed -n -E 's/.*\(([A-Z0-9]{10})\)[[:space:]]*$/\1/p')"
@@ -134,20 +180,22 @@ if [ -z "$CERT_SHA1" ]; then
   CERT_SHA1="$hashes"
 fi
 
-python3 - "$WORK/profile.plist" "$APP_ENTITLEMENTS" "$TAURI_CONF" "$PINNED_UUID" "$TEAM" "$CERT_SHA1" "$WARN_DAYS" <<'PY'
-import datetime, fnmatch, hashlib, json, plistlib, subprocess, sys
+python3 - "$WORK/profile.plist" "$ENTITLEMENTS" "$TAURI_CONF" "$PINNED" "$TEAM" "$CERT_SHA1" "$WARN_DAYS" \
+  "$SUFFIX" "$GROUP_SUFFIX" <<'PY'
+import datetime, fnmatch, hashlib, json, os, plistlib, subprocess, sys
 
-profile_path, ent_path, conf_path, pinned, team, cert_sha1, warn_days = sys.argv[1:8]
+profile_path, ent_path, conf_path, pinned, team, cert_sha1, warn_days, suffix, group_suffix = sys.argv[1:10]
 profile = plistlib.load(open(profile_path, "rb"))
 wanted = plistlib.load(open(ent_path, "rb"))
-identifier = json.load(open(conf_path, encoding="utf-8"))["identifier"]
+ent_name = os.path.basename(ent_path)
+identifier = json.load(open(conf_path, encoding="utf-8"))["identifier"] + suffix
 errors = []
 
 def fail(msg):
     errors.append(msg)
 
 if profile.get("UUID") != pinned:
-    fail("profile UUID %r is not the pinned %s (a renewed profile needs PINNED_UUID updated in a commit)" % (profile.get("UUID"), pinned))
+    fail("profile UUID %r is not the pinned %s (a renewed profile needs the pinned UUID updated in a commit)" % (profile.get("UUID"), pinned))
 if "OSX" not in profile.get("Platform", []):
     fail("profile Platform %r has no OSX" % (profile.get("Platform"),))
 if profile.get("ProvisionsAllDevices") is not True:
@@ -162,13 +210,14 @@ if allowed.get("com.apple.application-identifier") != want_app_id:
 if allowed.get("com.apple.developer.team-identifier") != team:
     fail("profile team-identifier %r != %s" % (allowed.get("com.apple.developer.team-identifier"), team))
 if wanted.get("com.apple.application-identifier") != want_app_id:
-    fail("Entitlements.app.plist application-identifier %r != %s" % (wanted.get("com.apple.application-identifier"), want_app_id))
+    fail("%s application-identifier %r != %s" % (ent_name, wanted.get("com.apple.application-identifier"), want_app_id))
 if wanted.get("com.apple.developer.team-identifier") != team:
-    fail("Entitlements.app.plist team-identifier %r != %s" % (wanted.get("com.apple.developer.team-identifier"), team))
+    fail("%s team-identifier %r != %s" % (ent_name, wanted.get("com.apple.developer.team-identifier"), team))
 patterns = allowed.get("keychain-access-groups", [])
 groups = wanted.get("keychain-access-groups", [])
-if not groups:
-    fail("Entitlements.app.plist asks for no keychain-access-groups")
+want_groups = ["%s.%s" % (team, group_suffix)]
+if groups != want_groups:
+    fail("%s keychain-access-groups %r != %r (ADR-0146 D-3: the app and workd never share a group)" % (ent_name, groups, want_groups))
 for group in groups:
     if not any(fnmatch.fnmatchcase(group, p) for p in patterns):
         fail("keychain group %r is not allowed by the profile's %r" % (group, patterns))
