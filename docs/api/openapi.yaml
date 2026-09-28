@@ -192,10 +192,11 @@ paths:
       description: >
         Single-use rotation (MOMO-300): the presented refresh token is revoked
         atomically; replaying it returns 401. Exactly one concurrent caller
-        wins. A replay — or losing that race — also ends the whole sign-in
-        (#3022, ADR-0188 §4 R1): every live token of the session lineage is
-        revoked, with its push registrations and device keys, so the pair the
-        winner got is refused on its next use.
+        wins. A replay of a token spent more than 30 seconds earlier also ends
+        the whole sign-in (#3022, ADR-0188 §4 R1): every live token of the
+        session lineage is revoked, with its push registrations and device
+        keys. Inside 30 seconds (another tab, a retried lost response) it is
+        only refused.
       security: []
       requestBody:
         required: true
@@ -3259,8 +3260,10 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: >
-            Agent bearer, workspace mismatch, inactive membership, or another
-            member named (`device_key_member_mismatch`).
+            Agent bearer, workspace mismatch, inactive membership, another
+            member named (`device_key_member_mismatch`), a root key without the
+            right password (`device_root_password_required`), or a root key
+            from a QR-linked session (`device_root_linked_session`).
           content:
             application/json:
               schema:
@@ -8568,7 +8571,8 @@ components:
                 `device_key_revoked`, `device_key_not_found`,
                 `device_key_member_mismatch`, `device_root_not_eligible`,
                 `device_key_not_endorsable`, `device_key_already_registered`,
-                `session_lineage_ended`, `host_register_replayed`,
+                `session_lineage_ended`, `device_root_password_required`,
+                `device_root_linked_session`, `host_register_replayed`,
                 `instance_id_unconfigured`.
 
     # ---- Memory Plane (ADR-0129 / MOMO-526) ---------------------------------
@@ -11022,6 +11026,12 @@ components:
           type: string
           format: uuid
           description: Optional; must be the caller.
+        currentPassword:
+          type: string
+          description: >
+            Required for a `macos` (root) key — the caller's password,
+            re-entered, under the password-change rate limit. A root key is
+            refused from a QR-linked session (`device_root_linked_session`).
 
     EndorseDeviceKeyRequest:
       type: object
