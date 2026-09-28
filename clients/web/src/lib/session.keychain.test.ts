@@ -18,11 +18,22 @@ const mocks = vi.hoisted(() => ({
     store: vi.fn(async () => true),
     clear: vi.fn(async () => true),
   },
+  log: [] as string[],
+  hold: {
+    begin: vi.fn(async (): Promise<boolean> => {
+      mocks.log.push("hold:begin");
+      return true;
+    }),
+    end: vi.fn(async (): Promise<void> => {
+      mocks.log.push("hold:end");
+    }),
+  },
 }));
 
 vi.mock("./tauri", () => ({
   isDesktop: () => mocks.desktop,
   desktopKeychain: mocks.keychain,
+  desktopRotationHold: mocks.hold,
 }));
 
 const WEB_KEY = "momo.web.session.v1";
@@ -74,6 +85,7 @@ beforeEach(() => {
   mocks.keychain.store.mockResolvedValue(true);
   mocks.keychain.clear.mockResolvedValue(true);
   vi.clearAllMocks();
+  mocks.log.length = 0;
 });
 
 describe("browser runtime", () => {
@@ -206,6 +218,102 @@ describe("desktop runtime with a working keychain", () => {
     expect(session.hasPersistedSession()).toBe(false);
     expect(store.has(DESKTOP_KEY)).toBe(false);
     expect(mocks.keychain.clear).toHaveBeenCalled();
+  });
+});
+
+// #3098 — closing the window destroys the webview, and with it a rotation whose
+// response or keychain write is still in the air. The shell defers the close
+// while a hold is open (clients/desktop/src-tauri/src/rotation_hold.rs); what
+// is pinned here is that the web half opens the hold before the POST and
+// releases it only once the rotated token is in the keychain.
+describe("desktop: a rotation holds the window open until its token is stored (#3098)", () => {
+  beforeEach(() => {
+    mocks.desktop = true;
+  });
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  async function signedIn() {
+    const session = await loadStore();
+    await session.initSessionStore();
+    session.applyLogin(login);
+    await flush();
+    mocks.log.length = 0;
+    return session;
+  }
+
+  it("holds from before the POST until the keychain write has landed", async () => {
+    const session = await signedIn();
+    const server = deferred<void>();
+    const write = deferred<boolean>();
+    mocks.keychain.store.mockImplementationOnce(async () => {
+      mocks.log.push("keychain:write-started");
+      const ok = await write.promise;
+      mocks.log.push("keychain:written");
+      return ok;
+    });
+
+    const rotation = session.exclusiveRotation(async () => {
+      mocks.log.push("post");
+      await server.promise; // the slow response the window is closed during
+      session.applyRotation("access.2", "refresh.2");
+      return "rotated";
+    });
+    await vi.waitFor(() => expect(mocks.log).toContain("post"));
+    expect(mocks.log).toEqual(["hold:begin", "post"]);
+
+    server.resolve();
+    await vi.waitFor(() => expect(mocks.log).toContain("keychain:write-started"));
+    await flush();
+    // The server has revoked refresh.token; refresh.2 is not written yet.
+    expect(mocks.log).not.toContain("hold:end");
+
+    write.resolve(true);
+    await expect(rotation).resolves.toBe("rotated");
+    await flush();
+    expect(mocks.log).toEqual([
+      "hold:begin",
+      "post",
+      "keychain:write-started",
+      "keychain:written",
+      "hold:end",
+    ]);
+    expect(mocks.keychain.store).toHaveBeenLastCalledWith("refresh.2");
+  });
+
+  it("releases the hold when the rotation fails", async () => {
+    const session = await signedIn();
+    await expect(
+      session.exclusiveRotation(async () => {
+        mocks.log.push("post");
+        throw new TypeError("Failed to fetch");
+      })
+    ).rejects.toThrow("Failed to fetch");
+    await flush();
+    expect(mocks.log).toEqual(["hold:begin", "post", "hold:end"]);
+  });
+
+  it("owes no release when the shell did not take the hold", async () => {
+    const session = await signedIn();
+    mocks.hold.begin.mockResolvedValueOnce(false);
+    await session.exclusiveRotation(async () => "rotated");
+    await flush();
+    expect(mocks.hold.end).not.toHaveBeenCalled();
+  });
+
+  it("asks for no hold in a browser", async () => {
+    mocks.desktop = false;
+    const session = await signedIn();
+    await session.exclusiveRotation(async () => "rotated");
+    expect(mocks.hold.begin).not.toHaveBeenCalled();
   });
 });
 

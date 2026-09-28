@@ -48,6 +48,10 @@ mod profile_signout;
 mod harness_status;
 mod keychain;
 mod notification;
+// A window close waits (bounded) for a refresh rotation in flight, so the
+// rotated token reaches the keychain (#3098).
+#[cfg(desktop)]
+mod rotation_hold;
 // Harness hook signals for pane status dots (#2776, ADR-0190 D4-b): an
 // app-only Unix socket, a token per pane, a closed event table.
 #[cfg(desktop)]
@@ -134,6 +138,14 @@ pub fn run() {
         .manage(pty::PtyState::default())
         .manage(work_host::WorkHostState::default())
         .manage(device_key::DeviceKeyState::default())
+        .manage(rotation_hold::RotationHold::default())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    rotation_hold::on_close_requested(window, api);
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             deeplink::deep_link_take_pending,
             discovery::discovery_start,
@@ -145,6 +157,8 @@ pub fn run() {
             keychain::keychain_load_refresh_token,
             keychain::keychain_store_refresh_token,
             keychain::keychain_clear_refresh_token,
+            rotation_hold::session_rotation_begin,
+            rotation_hold::session_rotation_end,
             opener::open_external_url,
             pdf_viewer::open_pdf_attachment,
             detect::detect_hosted_agents,
@@ -200,6 +214,10 @@ pub fn run() {
         if webview.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started {
             if let Some(state) = webview.try_state::<pty::PtyState>() {
                 state.0.kill_all();
+            }
+            // Rotations the previous page opened can never end now (#3098).
+            if let Some(hold) = webview.try_state::<rotation_hold::RotationHold>() {
+                hold.reset();
             }
         }
     });

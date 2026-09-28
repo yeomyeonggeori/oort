@@ -38,6 +38,9 @@ const APP_COMMANDS: &[&str] = &[
     "keychain_load_refresh_token",
     "keychain_store_refresh_token",
     "keychain_clear_refresh_token",
+    // A window close waits for a refresh rotation in flight (#3098).
+    "session_rotation_begin",
+    "session_rotation_end",
     "open_external_url",
     "open_pdf_attachment",
     "detect_hosted_agents",

@@ -94,6 +94,8 @@ PODS:
     - hermes-engine/Pre-built (= 250829098.0.16)
   - hermes-engine/Pre-built (250829098.0.16)
   - MMKVCore (2.4.0)
+  - MomoBackgroundTaskNative (1.0.0):
+    - ExpoModulesCore
   - MomoDeviceKeyNative (1.0.0):
     - ExpoModulesCore
   - MomoKeyboardNative (1.0.0):
@@ -2133,6 +2135,7 @@ DEPENDENCIES:
   - ExpoNotifications (from `../node_modules/expo-notifications/ios`)
   - FBLazyVector (from `../node_modules/react-native/Libraries/FBLazyVector`)
   - hermes-engine (from `../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)
+  - MomoBackgroundTaskNative (from `../modules/momo-background-task-native/ios`)
   - MomoDeviceKeyNative (from `../modules/momo-device-key-native/ios`)
   - MomoKeyboardNative (from `../modules/momo-keyboard-native/ios`)
   - MomoPushNative (from `../modules/momo-push-native/ios`)
@@ -2268,6 +2271,8 @@ EXTERNAL SOURCES:
   hermes-engine:
     :podspec: "../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec"
     :tag: hermes-v250829098.0.16
+  MomoBackgroundTaskNative:
+    :path: "../modules/momo-background-task-native/ios"
   MomoDeviceKeyNative:
     :path: "../modules/momo-device-key-native/ios"
   MomoKeyboardNative:
@@ -2457,6 +2462,7 @@ SPEC CHECKSUMS:
   FBLazyVector: 3c3be9a019176b5699455f7f66c5444b78a411c6
   hermes-engine: 017aba474510092d38cc82328f1102186301db3e
   MMKVCore: 3d16ce9f7d411e135020915fde98a056859a1efa
+  MomoBackgroundTaskNative: 75a5fd03f072d40976a6be7f2e8a7d40c49cc736
   MomoDeviceKeyNative: 2aa502b968215f65772fbec852ce09be8d3b0b51
   MomoKeyboardNative: d57ac23397a03cd0d9f8484e3f1c38a16ed87663
   MomoPushNative: c9da9159bd25034adfc6cb2496213f5b481afe04

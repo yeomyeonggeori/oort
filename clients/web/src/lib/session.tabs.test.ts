@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("./tauri", () => ({
   isDesktop: () => mocks.desktop,
   desktopKeychain: mocks.keychain,
+  desktopRotationHold: { begin: async () => false, end: async () => {} },
 }));
 
 const WEB_KEY = "momo.web.session.v1";

@@ -1,0 +1,6 @@
+{
+  "name": "momo-background-task-native",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local Expo module (#3098). Wraps UIApplication.beginBackgroundTask/endBackgroundTask so a refresh-token rotation that is in the air when the app goes to the background finishes — response received AND the new token written to the keychain — instead of being frozen about five seconds later. No JS entry point on purpose — callers use requireOptionalNativeModule('MomoBackgroundTask') from src/lib/backgroundTask.ts."
+}

@@ -7,6 +7,7 @@ import {
 } from '@momo/core/lib/sessionModel';
 import type {SessionPort} from '@momo/core/runtime/host';
 import {ACCESSIBLE, getGenericPassword, resetGenericPassword, setGenericPassword} from 'react-native-keychain';
+import {withBackgroundTask} from '../lib/backgroundTask';
 import {NON_SECRET_KEYS, nonSecretStore} from './kv';
 
 // =============================================================================
@@ -293,6 +294,49 @@ export function clearSession(): void {
   notify();
 }
 
+/**
+ * How long a rotation waits for its keychain write before letting go of the
+ * background task anyway. Same bound and same reason as the web client's
+ * KEYCHAIN_WAIT_MS: the core's single flight is held until this returns, so a
+ * write that never answers must not stall every later 401 with it.
+ */
+export const ROTATION_KEYCHAIN_WAIT_MS = 5_000;
+
+const noop = (): void => {};
+
+function keychainSettledWithin(ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<void>(settle => {
+    timer = setTimeout(settle, ms);
+  });
+  return Promise.race([keychainWrites.then(noop, noop), late]).finally(
+    () => clearTimeout(timer),
+  );
+}
+
+/** The background task's name, as it shows in iOS diagnostics. */
+export const ROTATION_TASK_NAME = 'oort.refresh-rotation';
+
+/**
+ * SessionPort.exclusiveRotation for the phone (#3098). This process has one JS
+ * context, so there is no cross-context lock to take; what the phone needs is
+ * TIME. The whole rotation — the refresh POST, its response, and the keychain
+ * write of the new token — runs inside one iOS background task, begun before
+ * the POST leaves and ended only once the write has landed. Without it, going
+ * to the background mid-rotation froze the app about five seconds later with
+ * the old token already revoked by the server and the new one never stored.
+ */
+export function exclusiveRotation<T>(work: () => Promise<T>): Promise<T> {
+  return withBackgroundTask(ROTATION_TASK_NAME, async () => {
+    try {
+      return await work();
+    } finally {
+      // `applyRotation` only queued the write; the task has to outlive it.
+      await keychainSettledWithin(ROTATION_KEYCHAIN_WAIT_MS);
+    }
+  });
+}
+
 /** The core's port, assembled from the functions above. */
 export const sessionPort: SessionPort = {
   getAccessToken,
@@ -302,6 +346,7 @@ export const sessionPort: SessionPort = {
   applyRotation,
   markAuthExpired,
   clearSession,
+  exclusiveRotation,
 };
 
 /** Test seam: forget everything in memory, including the hydrate latch. */
