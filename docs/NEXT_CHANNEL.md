@@ -155,6 +155,7 @@ spctl -a -t exec -vv /tmp/check/oort.app
 | minisign 개인키 | `~/.momo-secrets/momo-updater.key` (0600, 레포 밖). 2026-09-23부터 암호로 보호된다. 암호는 로그인 키체인 항목 `momo-updater-key`에 있고, 꺼낼 때 확인 창이 뜬다 |
 | Developer ID | `Developer ID Application: Kwak Seongjae (YWQQFQM38J)` |
 | 프로비저닝 프로파일 | `~/.momo-secrets/momo-desktop-developer-id.provisionprofile` (레포 밖, `MOMO_PROVISIONING_PROFILE`로 덮어씀). 기기 키 키체인 그룹에 필요하다. 인증서 만료 2027-02-01. 스크립트가 빌드 전에 `scripts/desktop/check_provisioning_profile.sh`로 잰다(#3025) |
+| workd 프로비저닝 프로파일 | `~/.momo-secrets/momo-desktop-workd-developer-id.provisionprofile` (레포 밖, `MOMO_WORKD_PROVISIONING_PROFILE`로 덮어씀). App ID `YWQQFQM38J.app.momo.desktop.workd`, workd 헬퍼(`Contents/Helpers/momo-workd.app`)의 호스트 키 키체인 그룹에 필요하다. 인증서 만료 2027-02-01. 스크립트가 빌드 전에 `check_provisioning_profile.sh --target workd`로 잰다(#3084) |
 | 공증 | notarytool 키체인 프로파일 `momo-notary` |
 | 배포 저장소 | `yeomyeonggeori/momo-alpha` (이 레포가 아님 — `MOMO_DIST_REPO` 기본값) |
 
@@ -174,6 +175,7 @@ test -f ~/.momo-secrets/momo-updater.key && echo "minisign key: present"
 test -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" || { echo "updater key password not exported (keychain item momo-updater-key)"; exit 1; }
 security find-identity -v -p codesigning | grep -F "Developer ID Application: Kwak Seongjae (YWQQFQM38J)"
 scripts/desktop/check_provisioning_profile.sh --profile ~/.momo-secrets/momo-desktop-developer-id.provisionprofile --identity "Developer ID Application: Kwak Seongjae (YWQQFQM38J)"
+scripts/desktop/check_provisioning_profile.sh --target workd --profile ~/.momo-secrets/momo-desktop-workd-developer-id.provisionprofile --identity "Developer ID Application: Kwak Seongjae (YWQQFQM38J)"
 xcrun notarytool history --keychain-profile momo-notary >/dev/null && echo "notary profile: ok"
 command -v cargo >/dev/null && cargo tauri --version
 gh auth status

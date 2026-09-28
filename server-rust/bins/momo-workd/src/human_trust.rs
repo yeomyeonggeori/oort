@@ -7,9 +7,12 @@
 //! * `human-trust.json` — the **pinned root**: the Secure Enclave P-256 key of
 //!   the desktop app on this Mac, handed over once on the code-signed control
 //!   socket (`pin_root`, [`crate::control_socket`]). Nothing the server sends
-//!   can set or change it; a different key is refused (`root_already_pinned`)
-//!   and only a local reset (`momo-workd reset-root`, or `forget` + register)
-//!   clears it. Also the revoked keys and the key-id ↔ public-key bindings.
+//!   can set or change it; a different public key is refused
+//!   (`root_already_pinned`) and only a local reset (`momo-workd reset-root`,
+//!   or `forget` + register) clears it. **The pin is the public key** (#3078):
+//!   the same key under a new key id — a re-login gives the key a new server
+//!   row (D-7) — is rebound on the same socket, and the old id is retired.
+//!   Also the revoked keys and the key-id ↔ public-key bindings.
 //! * `human-nonces.json` — every nonce this host consumed, kept until its
 //!   control has expired, so a restart does not reopen a replay window (D-9).
 //!
@@ -30,7 +33,8 @@
 //! 3. a public key keeps the first key id it was seen under, and a key id its
 //!    first public key (an endorsement binds a public key while a revocation
 //!    names a key id; without this a revoked key could come back under a new
-//!    id);
+//!    id). The pinned root's own key is the exception: a local `pin_root`
+//!    moves it to a new id and retires the old one (#3078);
 //! 4. the time window holds on the host clock (±5 min, ≤10 min lifetime);
 //! 5. the nonce is new — and it is written to disk **before** the control is
 //!    acted on.
@@ -145,6 +149,21 @@ struct TrustState {
     /// Every root-signed revocation letter applied, by revoked key id (#3068).
     #[serde(default)]
     revocations: BTreeMap<Uuid, StoredRevocation>,
+    /// Key ids a root public key was pinned or bound under before it moved to
+    /// a new id (#3078: a re-login gives the same key a new server row), →
+    /// that public key. Kept across a local reset. Retired: never a root id
+    /// again, never another key's id, never a revocation target; a letter the
+    /// same root key signed under one still counts (the id is inside the
+    /// signed bytes).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    retired_root_key_ids: BTreeMap<Uuid, String>,
+}
+
+impl TrustState {
+    /// `key_id` is the pinned root's, now or before a re-login (#3078).
+    fn root_holds(&self, root: &PinnedRoot, key_id: Uuid) -> bool {
+        root.key_id == key_id || self.retired_root_key_ids.get(&key_id) == Some(&root.public_key)
+    }
 }
 
 /// A `device_revoke` letter as it was verified and applied.
@@ -313,7 +332,14 @@ impl HumanTrust {
     }
 
     /// Pin the desktop app's root key, once. The same key again is a no-op
-    /// (`Ok(false)`); any other key is refused until a local reset.
+    /// (`Ok(false)`); any other **public key** is refused until a local reset.
+    ///
+    /// The same public key under a new key id is a **rebind** (`Ok(true)`,
+    /// #3078): a re-login revokes the old key row with its session lineage and
+    /// the server gives the same Secure Enclave key a new row (ADR-0146 D-7).
+    /// The pin is the key, so the app may move it to the new id; the old id is
+    /// retired. This is reachable only from the code-signed control socket —
+    /// nothing on the server path calls it (D-6 ①, `inv_26`, `inv_33`).
     pub fn pin_root(
         &mut self,
         key_id: Uuid,
@@ -324,27 +350,66 @@ impl HumanTrust {
         if alg != ALG_P256 || device_public_key(public_key_b64).is_none() {
             return Err("invalid_root_key");
         }
-        if let Some(root) = &self.state.root {
-            return if root.key_id == key_id && root.public_key == public_key_b64 {
-                Ok(false)
-            } else {
-                Err("root_already_pinned")
-            };
+        let current = self.state.root.clone();
+        if let Some(root) = &current {
+            if root.public_key != public_key_b64 {
+                return Err("root_already_pinned");
+            }
+        }
+        let unchanged = current.as_ref().is_some_and(|root| root.key_id == key_id);
+        if self.state.retired_root_key_ids.contains_key(&key_id) {
+            return Err("root_key_id_retired");
         }
         if self.state.revoked_key_ids.contains(&key_id)
             || self.state.revoked_public_keys.contains(public_key_b64)
         {
             return Err("root_key_revoked");
         }
+        if self
+            .state
+            .key_ids
+            .iter()
+            .any(|(key, id)| *id == key_id && key != public_key_b64)
+        {
+            return Err("root_key_id_taken");
+        }
         let mut next = self.state.clone();
-        next.root = Some(PinnedRoot {
-            key_id,
-            alg: alg.to_string(),
-            public_key: public_key_b64.to_string(),
-            pinned_at_ms: now_ms,
+        // Every other id this key was the root under, or was bound under
+        // (step 3 of `check_control` — also one left behind by a local reset
+        // and a pin under a new id), is retired; the key's binding moves to
+        // `key_id`. The same key and id again only heals a stale binding.
+        let previous = [
+            current.as_ref().map(|root| root.key_id),
+            next.key_ids.get(public_key_b64).copied(),
+        ];
+        for id in previous.into_iter().flatten() {
+            if id != key_id {
+                next.retired_root_key_ids
+                    .insert(id, public_key_b64.to_string());
+            }
+        }
+        next.key_ids.insert(public_key_b64.to_string(), key_id);
+        next.root = Some(match current.clone().filter(|_| unchanged) {
+            Some(root) => root,
+            None => PinnedRoot {
+                key_id,
+                alg: alg.to_string(),
+                public_key: public_key_b64.to_string(),
+                pinned_at_ms: now_ms,
+            },
         });
-        self.commit_state(next)?;
-        tracing::info!(root_key_id = %key_id, "human root key pinned");
+        if next != self.state {
+            self.commit_state(next)?;
+        }
+        if unchanged {
+            return Ok(false);
+        }
+        match current {
+            Some(root) => {
+                tracing::info!(root_key_id = %key_id, former_key_id = %root.key_id, "human root key rebound to a new key id")
+            }
+            None => tracing::info!(root_key_id = %key_id, "human root key pinned"),
+        }
         Ok(true)
     }
 
@@ -400,10 +465,15 @@ impl HumanTrust {
         {
             return Err("revocation_not_for_this_host");
         }
-        if revocation.root_key_id != root.key_id {
+        // A letter the root signed under an id it held before a re-login is
+        // still the root's (#3078): the signature is checked against the same
+        // pinned key, over bytes that name that id.
+        if !self.state.root_holds(&root, revocation.root_key_id) {
             return Err("revocation_not_from_root");
         }
-        if revocation.target_key_id == root.key_id || target_public_key == root.public_key {
+        if self.state.root_holds(&root, revocation.target_key_id)
+            || target_public_key == root.public_key
+        {
             return Err("revocation_targets_root");
         }
         if device_public_key(target_public_key).is_none() {
@@ -588,6 +658,14 @@ impl HumanTrust {
         let root_key = BASE64
             .decode(&root.public_key)
             .map_err(|_| Refusal::DeviceTrustUnavailable)?;
+        if self
+            .state
+            .retired_root_key_ids
+            .contains_key(&envelope.device_key_id)
+        {
+            // Retired by a re-login (#3078): not the root, nor anyone else.
+            return Err(Refusal::DeviceSignatureInvalid);
+        }
         if envelope.device_key_id == root.key_id {
             if envelope.device_public_key != root.public_key {
                 return Err(Refusal::DeviceKeyNotEndorsed);

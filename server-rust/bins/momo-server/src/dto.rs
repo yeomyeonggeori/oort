@@ -137,6 +137,23 @@ pub struct LoginResponse {
 #[serde(rename_all = "camelCase")]
 pub struct RefreshRequest {
     pub refresh_token: String,
+    /// #3079 (ADR-0146 D-7 증보): a native client's
+    /// `momo.human.refresh_proof.v1`, signed by its lineage's refresh key.
+    /// Browsers send none.
+    #[serde(default)]
+    pub device_proof: Option<RefreshDeviceProof>,
+}
+
+/// `RefreshRequest.deviceProof` — see momo-wire `RefreshProof` for the bytes.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefreshDeviceProof {
+    /// base64 STANDARD of the refresh key's 33-byte compressed SEC1 point.
+    pub public_key: String,
+    pub nonce: Uuid,
+    pub signed_at_ms: i64,
+    /// base64 STANDARD of the raw 64-byte `r‖s` (either `s`).
+    pub signature: String,
 }
 
 /// `POST /v1/auth/refresh` response (Swift `RefreshResponse`, `DTOs.swift:55-58`)
@@ -874,9 +891,29 @@ pub struct RegisterDeviceKeyRequest {
     pub member_id: Option<String>,
     /// Required for a `macos` (root) key: the caller's password, re-entered.
     /// A bearer token alone must not mint the key that signs host
-    /// registrations and endorses phones (#3022 review H1).
+    /// registrations and endorses phones (#3022 review H1). Not needed with
+    /// `rebind`: the key's own signature is the proof there.
     #[serde(default)]
     pub current_password: Option<String>,
+    /// #3097: move the caller's live key for `publicKey` — left on a sign-in
+    /// that ended without revoking it (a refresh-token reuse, an expiry) —
+    /// onto this sign-in. `platform` and `label` are then the stored row's;
+    /// the request's are only validated.
+    #[serde(default)]
+    pub rebind: Option<RebindDeviceKeyRequest>,
+}
+
+/// A `momo.human.device_rebind.v1` letter, signed by the key being moved
+/// (#3097, ADR-0146 D-7 증보). The other lines are the stored key id and
+/// public key and the caller's workspace, member and sign-in
+/// (`signing-context` `sessionId`).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RebindDeviceKeyRequest {
+    /// The letter's time, within ±5 min of the server clock.
+    pub signed_at_ms: i64,
+    /// base64 raw r‖s (64 bytes).
+    pub signature: String,
 }
 
 /// `POST /v1/workspaces/{ws}/device-keys/{key}/endorsement` — a
@@ -917,6 +954,9 @@ pub struct DeviceKeyDto {
     pub can_instruct: bool,
     /// Registered under the caller's own sign-in.
     pub current: bool,
+    /// The key's sign-in can still rotate (#3097). `false` on a live key means
+    /// it signs nothing until it is moved onto a live sign-in (`rebind`).
+    pub lineage_live: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub endorsed_by_key_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -971,6 +1011,10 @@ pub struct SigningContextResponse {
     /// The control schema a device signs (`momo.human.control.v2`, #3027).
     /// A v1 statement is still accepted for every kind but `spawn`.
     pub human_control_schema: &'static str,
+    /// The caller's sign-in lineage (`token.session_id`) — the `session_id`
+    /// line of a `momo.human.device_rebind.v1` letter (#3097). `null` for a
+    /// sign-in from before lineages (088), which can register nothing.
+    pub session_id: Option<String>,
 }
 
 /// A person's `momo.human.control.v2` (or, but for a spawn, v1) signature sent
@@ -5220,6 +5264,21 @@ mod tests {
         let request: RefreshRequest =
             serde_json::from_value(serde_json::json!({"refreshToken": "r"})).expect("decode");
         assert_eq!(request.refresh_token, "r");
+        assert!(request.device_proof.is_none(), "a browser sends no proof");
+        let proven: RefreshRequest = serde_json::from_value(serde_json::json!({
+            "refreshToken": "r",
+            "deviceProof": {
+                "publicKey": "k",
+                "nonce": "00000000-0000-0000-0000-000000000001",
+                "signedAtMs": 1,
+                "signature": "s"
+            }
+        }))
+        .expect("decode a proof");
+        let proof = proven.device_proof.expect("proof");
+        assert_eq!(proof.public_key, "k");
+        assert_eq!(proof.signed_at_ms, 1);
+        assert_eq!(proof.signature, "s");
 
         let json = serde_json::to_value(RefreshResponse {
             access_token: "a".into(),

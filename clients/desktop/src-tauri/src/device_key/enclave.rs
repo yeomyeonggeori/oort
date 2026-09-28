@@ -530,52 +530,52 @@ mod tests {
         }
     }
 
+    /// The body of the plist element right after `<key>{key}</key>`.
+    fn plist_value<'a>(plist: &'a str, key: &str) -> Option<&'a str> {
+        let marker = format!("<key>{key}</key>");
+        let rest = plist[plist.find(&marker)? + marker.len()..].trim_start();
+        let (open, close) = if rest.starts_with("<array>") {
+            ("<array>", "</array>")
+        } else if rest.starts_with("<string>") {
+            ("<string>", "</string>")
+        } else {
+            return Some(&rest[..rest.find('>')? + 1]);
+        };
+        Some(rest[open.len()..rest.find(close)?].trim())
+    }
+
     /// The signed app's entitlements (#3025): `Entitlements.app.plist` is what
     /// `publish_next_build.sh` re-signs the outer .app with, after embedding
     /// the provisioning profile. `Entitlements.plist` is what the bundler signs
-    /// the app *and the momo-workd sidecar* with, so it must stay free of the
-    /// restricted keys (D-3, and a bare sidecar has no profile).
+    /// the app with before that, so it stays free of the restricted keys.
     #[test]
     fn only_the_signed_app_entitlements_declare_the_device_key_group() {
         const APP: &str = include_str!("../../Entitlements.app.plist");
         const BASE: &str = include_str!("../../Entitlements.plist");
         const CONF: &str = include_str!("../../tauri.conf.json");
 
-        /// The body of the element right after `<key>{key}</key>`.
-        fn value<'a>(plist: &'a str, key: &str) -> Option<&'a str> {
-            let marker = format!("<key>{key}</key>");
-            let rest = plist[plist.find(&marker)? + marker.len()..].trim_start();
-            let (open, close) = if rest.starts_with("<array>") {
-                ("<array>", "</array>")
-            } else if rest.starts_with("<string>") {
-                ("<string>", "</string>")
-            } else {
-                return Some(&rest[..rest.find('>')? + 1]);
-            };
-            Some(rest[open.len()..rest.find(close)?].trim())
-        }
-
         let identifier = serde_json::from_str::<serde_json::Value>(CONF).unwrap()["identifier"]
             .as_str()
             .unwrap()
             .to_owned();
-        let team = value(APP, "com.apple.developer.team-identifier").expect("team-identifier");
+        let team =
+            plist_value(APP, "com.apple.developer.team-identifier").expect("team-identifier");
         assert_eq!(
-            value(APP, "com.apple.application-identifier"),
+            plist_value(APP, "com.apple.application-identifier"),
             Some(format!("{team}.{identifier}").as_str())
         );
         assert_eq!(
-            value(APP, "keychain-access-groups"),
+            plist_value(APP, "keychain-access-groups"),
             Some(format!("<string>{}</string>", access_group_for(Some(team)).unwrap()).as_str()),
             "the app declares exactly the device-key group"
         );
         // A superset of the bundler's plist: the re-sign replaces it.
         assert_eq!(
-            value(BASE, "com.apple.security.device.audio-input"),
+            plist_value(BASE, "com.apple.security.device.audio-input"),
             Some("<true/>")
         );
         assert_eq!(
-            value(APP, "com.apple.security.device.audio-input"),
+            plist_value(APP, "com.apple.security.device.audio-input"),
             Some("<true/>")
         );
         for restricted in [
@@ -584,11 +584,58 @@ mod tests {
             "com.apple.developer.team-identifier",
         ] {
             assert_eq!(
-                value(BASE, restricted),
+                plist_value(BASE, restricted),
                 None,
-                "Entitlements.plist also signs the sidecar and must not hold {restricted}"
+                "Entitlements.plist (the bundler's plist) must not hold {restricted}"
             );
         }
+    }
+
+    /// The momo-workd helper bundle's entitlements (#3084):
+    /// `publish_next_build.sh` signs `Contents/Helpers/momo-workd.app` with
+    /// `Entitlements.workd.plist` under its own App ID and profile. Both
+    /// profiles allow `<TEAM>.*`, so these files are what keep the host key's
+    /// group and the device-key group apart (D-3): each side declares exactly
+    /// its own group and never the other's.
+    #[test]
+    fn the_workd_helper_declares_only_its_own_group_and_the_app_never_holds_it() {
+        const APP: &str = include_str!("../../Entitlements.app.plist");
+        const WORKD: &str = include_str!("../../Entitlements.workd.plist");
+        const CONF: &str = include_str!("../../tauri.conf.json");
+
+        let conf = serde_json::from_str::<serde_json::Value>(CONF).unwrap();
+        let identifier = conf["identifier"].as_str().unwrap();
+        let team = plist_value(WORKD, "com.apple.developer.team-identifier").expect("team");
+        assert_eq!(
+            Some(team),
+            plist_value(APP, "com.apple.developer.team-identifier")
+        );
+        let workd_id = format!("{team}.{identifier}.workd");
+        assert_eq!(
+            plist_value(WORKD, "com.apple.application-identifier"),
+            Some(workd_id.as_str())
+        );
+        assert_eq!(
+            plist_value(WORKD, "keychain-access-groups"),
+            Some(format!("<string>{workd_id}</string>").as_str()),
+            "the helper declares exactly workd's group"
+        );
+        let device_group = access_group_for(Some(team)).unwrap();
+        assert!(
+            !WORKD.contains(&format!("<string>{device_group}</string>")),
+            "the helper must not hold the device-key group (D-3)"
+        );
+        assert!(
+            !APP.contains(&format!("<string>{workd_id}</string>")),
+            "the app must not hold workd's group"
+        );
+        // Nothing the helper does not need: no microphone, no other key.
+        assert_eq!(WORKD.matches("<key>").count(), 3, "{WORKD}");
+        // The helper ships where work_host.rs looks for it.
+        assert_eq!(
+            conf["bundle"]["macOS"]["files"],
+            serde_json::json!({ "Helpers/momo-workd.app": "binaries/momo-workd.app" })
+        );
     }
 
     /// #3106: the two enclave keys are different items with different

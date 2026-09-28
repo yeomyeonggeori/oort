@@ -475,19 +475,24 @@ mod tests {
     /// FORCE RLS + `ws_isolation`) and the `work_control` signature columns
     /// with an all-or-none, per-kind CHECK. `work_control_payload_ck` is not
     /// changed. Re-runnable statements. schema_v0.sql is not modified.
+    ///
+    /// 096 is #3079's refresh-token sender constraint (ADR-0146 D-7 증보):
+    /// `session_refresh_key` (one refresh-proof key per session lineage) and
+    /// `refresh_proof_nonce` (one-time proof nonces), both ENABLE + FORCE RLS
+    /// + `ws_isolation`. Re-runnable statements. schema_v0.sql is not modified.
     #[test]
-    fn discovers_contiguous_migrations_001_to_095() {
+    fn discovers_contiguous_migrations_001_to_096() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            95,
-            "expected 95 migrations under {}",
+            96,
+            "expected 96 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 95);
+        assert_eq!(migrations.last().unwrap().version, 96);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

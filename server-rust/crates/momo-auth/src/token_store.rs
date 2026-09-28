@@ -499,19 +499,91 @@ pub async fn revoke_member_session_tokens_by_ids(
     Ok(rows.len() as u64)
 }
 
-/// Lock every still-live session row of one lineage in **id order** — the same
-/// order [`lock_member_session_tokens_by_ids`] takes — before the lineage sweep
-/// flips them, so a reuse sweep racing a linked refresh or a logout cannot
-/// invert their row locks.
-const LOCK_SESSION_LINEAGE_SQL: &str = "SELECT id \
+/// # Session-row lock order (#3107) — the one rule
+///
+/// Every transaction that locks `token` **session** rows takes them in ONE
+/// acquisition, in **id order**, through [`lock_session_rows_in_tx`]:
+///
+/// 1. the `device_link_token` row first, when the path touches a QR link
+///    (`momo_auth::device_link::lock_linked_device_in_tx`) — it is what
+///    serializes a link's binding, and no path locks it after a `token` row;
+/// 2. then every session row the transaction will lock: the named ids (the
+///    bound pair, a logout's pair) **and** every still-live row of the lineage
+///    they belong to, in a single `ORDER BY id FOR UPDATE`;
+/// 3. whatever the transaction locks later (a lineage sweep's `UPDATE`, the
+///    recovery's re-read, a rebind that revokes the old access half) is a row
+///    it already holds or a row it inserted itself.
+///
+/// Why one acquisition and not "the pair, then the lineage": two id-ordered
+/// acquisitions in a row are not id-ordered together. A linked path that
+/// held the bound pair (the lineage's highest ids) and then locked the
+/// lineage waited on a lower live row while holding the pair — and a sweep
+/// that does not pass through the link row (reuse, `end_lineage`, sign-out)
+/// holds that lower row and needs the pair: 40P01 (#3105 review, Low).
+///
+/// Why link → tokens and not tokens → link: the link row is the only lock
+/// that keeps the binding (which pair, hence which lineage) still while it is
+/// read; lineage-first would have to guess the lineage from an unlocked read
+/// and retry when it moved. Paths without a link never take the link row, so
+/// they cannot close a cycle through it.
+///
+/// Member-wide sweeps (`revoke_member_session_tokens`,
+/// `revoke_privileged_session_tokens`) are plain `UPDATE`s over many lineages
+/// and are not covered by this rule (follow-up, see #3107's PR).
+const LOCK_SESSION_ROWS_SQL: &str = "SELECT id, \
+            (revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())) AS live \
        FROM token \
       WHERE workspace_id = $1 \
         AND actor_member_id = $2 \
         AND kind = 'session' \
-        AND session_id = $3 \
-        AND revoked_at IS NULL \
+        AND ( \
+              id = ANY($3::uuid[]) \
+           OR ($4::uuid IS NOT NULL AND session_id = $4 AND revoked_at IS NULL) \
+            ) \
       ORDER BY id \
         FOR UPDATE";
+
+/// One locked session row: its id, and whether it is live (unrevoked and
+/// unexpired) as of the lock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LockedSessionRow {
+    pub id: Uuid,
+    pub live: bool,
+}
+
+/// THE session-row lock (see [`LOCK_SESSION_ROWS_SQL`] for the rule): `ids`
+/// (revoked or not — a revoked sibling still serializes) plus every
+/// still-live row of `lineage`, in one id-ordered `FOR UPDATE`. Missing and
+/// foreign ids are skipped (the owner filter). `lineage = None` (a pre-088
+/// pair) locks `ids` alone.
+///
+/// SABOTAGE(pair-first): have `lock_linked_device_in_tx` pass `None` here —
+/// `a_linked_recovery_and_a_lineage_sweep_never_deadlock` goes RED (40P01).
+pub async fn lock_session_rows_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    lineage: Option<Uuid>,
+    ids: &[Uuid],
+) -> Result<Vec<LockedSessionRow>, sqlx::Error> {
+    if ids.is_empty() && lineage.is_none() {
+        return Ok(Vec::new());
+    }
+    let mut ordered = ids.to_vec();
+    ordered.sort_unstable();
+    ordered.dedup();
+    let rows: Vec<(Uuid, bool)> = sqlx::query_as(LOCK_SESSION_ROWS_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(&ordered)
+        .bind(lineage)
+        .fetch_all(&mut *conn)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, live)| LockedSessionRow { id, live })
+        .collect())
+}
 
 /// The lineage sweep. The member predicate is belt-and-braces (a lineage never
 /// spans members); `revoked_at IS NULL` keeps a repeat a no-op that reports 0.
@@ -539,12 +611,9 @@ pub async fn revoke_session_lineage_tokens(
     member_id: Uuid,
     session_id: Uuid,
 ) -> Result<u64, sqlx::Error> {
-    sqlx::query(LOCK_SESSION_LINEAGE_SQL)
-        .bind(workspace_id)
-        .bind(member_id)
-        .bind(session_id)
-        .fetch_all(&mut *conn)
-        .await?;
+    // The one rule (#3107): the lineage's rows in one id-ordered acquisition
+    // before the sweep flips them.
+    lock_session_rows_in_tx(conn, workspace_id, member_id, Some(session_id), &[]).await?;
     let rows = sqlx::query(REVOKE_SESSION_LINEAGE_SQL)
         .bind(workspace_id)
         .bind(member_id)
@@ -595,31 +664,15 @@ pub async fn lock_live_session_lineage(
     Ok(!rows.is_empty())
 }
 
-/// Lock the named session rows in **id order** so refresh and revoke cannot
-/// invert `device_link_token` vs `token` locks. Callers must already hold the
-/// stable device-link row. Missing/foreign ids are skipped (same owner filter
-/// as the revoke sweep).
-const LOCK_MEMBER_SESSION_BY_IDS_SQL: &str = "SELECT id       FROM token      WHERE workspace_id = $1        AND actor_member_id = $2        AND kind = 'session'        AND id = ANY($3::uuid[])      ORDER BY id        FOR UPDATE";
-
-/// Take `FOR UPDATE` on `ids` in a stable order. Empty input is a no-op.
+/// Take `FOR UPDATE` on `ids` in id order — [`lock_session_rows_in_tx`] with
+/// no lineage. Logout's pair. Empty input is a no-op.
 pub async fn lock_member_session_tokens_by_ids(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
     ids: &[Uuid],
 ) -> Result<(), sqlx::Error> {
-    if ids.is_empty() {
-        return Ok(());
-    }
-    let mut ordered = ids.to_vec();
-    ordered.sort_unstable();
-    ordered.dedup();
-    sqlx::query(LOCK_MEMBER_SESSION_BY_IDS_SQL)
-        .bind(workspace_id)
-        .bind(member_id)
-        .bind(&ordered)
-        .fetch_all(&mut *conn)
-        .await?;
+    lock_session_rows_in_tx(conn, workspace_id, member_id, None, ids).await?;
     Ok(())
 }
 
@@ -859,13 +912,17 @@ mod tests {
             "FOR UPDATE",
         ] {
             assert!(
-                LOCK_MEMBER_SESSION_BY_IDS_SQL.contains(needle),
-                "lock_member_session_tokens_by_ids lost `{needle}`"
+                LOCK_SESSION_ROWS_SQL.contains(needle),
+                "lock_session_rows_in_tx lost `{needle}`"
             );
         }
+        // A named id is locked whether revoked or not (an already-revoked
+        // sibling still serializes refresh and revoke); only the lineage arm
+        // is narrowed to live rows.
         assert!(
-            !LOCK_MEMBER_SESSION_BY_IDS_SQL.contains("revoked_at IS NULL"),
-            "the lock must still serialize an already-revoked sibling so refresh and revoke share one order"
+            LOCK_SESSION_ROWS_SQL
+                .contains("OR ($4::uuid IS NOT NULL AND session_id = $4 AND revoked_at IS NULL)"),
+            "the named ids and the lineage's live rows must be ONE id-ordered acquisition (#3107)"
         );
     }
 
