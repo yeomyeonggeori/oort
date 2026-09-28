@@ -4032,6 +4032,45 @@ pub struct WorkControlAckRequest {
     pub error_label: Option<String>,
 }
 
+/// `POST …/work-sessions/{session}/permission-decisions` request (#3000,
+/// ADR-0188 D5 §8.6). The web port's `PermissionDecision` minus `sessionId`,
+/// which is the path.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkPermissionDecisionRequest {
+    /// The `approval.requested` event id the decision answers.
+    pub request_event_id: Uuid,
+    pub option_id: String,
+    /// `allow_once` | `reject_once`. Anything else is refused.
+    pub kind: String,
+    /// 「거부하고 지시」's text. Refused while it is non-empty: turning it into
+    /// the next turn is an owner `input`, which is R2 (ADR-0188 D3).
+    #[serde(default)]
+    pub instruction: Option<String>,
+}
+
+/// One decided (or still pending) permission request.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkPermissionRequestDto {
+    pub id: String,
+    pub session_id: String,
+    pub request_event_id: String,
+    pub status: String,
+    pub decided_option_id: Option<String>,
+    pub decided_kind: Option<String>,
+    pub decided_by: Option<String>,
+    pub decided_at_ms: Option<i64>,
+    pub control_id: Option<String>,
+    pub expires_at_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkPermissionDecisionResponse {
+    pub permission_request: WorkPermissionRequestDto,
+}
+
 /// Swift `WorkControlDTO` (:21-34).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

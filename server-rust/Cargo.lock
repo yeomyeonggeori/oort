@@ -1185,6 +1185,7 @@ dependencies = [
  "chrono",
  "momo-agent",
  "momo-db",
+ "momo-egress",
  "momo-messaging",
  "momo-outbox",
  "momo-settings",
@@ -1245,6 +1246,15 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "momo-egress"
+version = "0.0.0"
+dependencies = [
+ "momo-settings",
+ "reqwest",
+ "tokio",
 ]
 
 [[package]]
@@ -1369,6 +1379,7 @@ dependencies = [
  "async-trait",
  "axum",
  "hex",
+ "momo-egress",
  "momo-settings",
  "reqwest",
  "serde_json",

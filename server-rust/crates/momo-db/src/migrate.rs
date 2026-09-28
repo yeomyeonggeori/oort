@@ -448,19 +448,27 @@ mod tests {
     /// "the rooms this connection covers". The table stays under its existing
     /// FORCE RLS policy; no table or policy is added. schema_v0.sql is not
     /// modified.
+    ///
+    /// 092 is #3000's permission bridge (ADR-0188 D5 §8.6):
+    /// `work_permission_request` (one row per ACP permission request a member
+    /// host relayed, keyed by its `approval.requested` event id; ENABLE + FORCE
+    /// RLS + `ws_isolation`) and the `permission` kind on `work_control`
+    /// (`work_control_kind_ck` and `work_control_payload_ck` rewritten, 029's
+    /// arms unchanged, plus a unique index of one decision per request).
+    /// schema_v0.sql is not modified.
     #[test]
-    fn discovers_contiguous_migrations_001_to_091() {
+    fn discovers_contiguous_migrations_001_to_092() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            91,
-            "expected 91 migrations under {}",
+            92,
+            "expected 92 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 91);
+        assert_eq!(migrations.last().unwrap().version, 92);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

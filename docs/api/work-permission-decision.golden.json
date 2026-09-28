@@ -1,0 +1,79 @@
+{
+  "_comment": "#3000 — ADR-0188 D5 §8.6 권한 다리의 계약 골든. 웹 A 칸 권한 카드의 `decide` 포트(packages/momo-core agentPane.ts `PermissionDecision`, clients/web AgentProgressView.tsx)가 붙을 서버 모양이 한 벌이다. 서버(momo-server routes::work_permissions 단위 시험이 이 파일의 요청 사례·오류 코드를 읽고, momo-workd invariants inv_3가 approval.requested 선택지를 읽는다)와 클라이언트(uxui 후속)가 같은 기대값을 쓴다. uuid는 자리표시 값이다. 포트 대응: PermissionDecision.sessionId → 경로의 {workSessionId}, requestEventId·optionId·kind → 본문 그대로, instruction → 비어 있지 않으면 R2 전까지 400이므로 보내지 않는다.",
+  "route": {
+    "method": "POST",
+    "path": "/v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/permission-decisions",
+    "auth": "human bearer of the session owner (= host owner). Agent bearers and host signatures never reach it."
+  },
+  "approval_requested_event": {
+    "_comment": "워크드가 올리는 세션 이벤트(realtime `approval.requested` 프레임과 스레드 System 메시지 props.event). event_id가 requestEventId다. 선택지는 allow_once·reject_once뿐이고 이름은 고정 문자열이다(에이전트가 쓴 글은 싣지 않는다).",
+    "event_id": "00000000-0000-4000-8000-00000000e001",
+    "type": "approval.requested",
+    "payload": {
+      "action": "requested",
+      "action_type": "tool_call",
+      "status": "pending",
+      "options": [
+        {"option_id": "allow-once", "kind": "allow_once", "name": "Allow once"},
+        {"option_id": "reject-once", "kind": "reject_once", "name": "Reject"}
+      ]
+    }
+  },
+  "approval_decided_event": {
+    "_comment": "결정 트랜잭션에서 서버가 쓰는 세션 이벤트. 모든 소유자 기기의 카드를 닫는다. request_event_id로 어느 요청인지 가리킨다. host가 스스로 거부(대기 시간 초과)할 때도 같은 모양(status rejected + request_event_id)으로 올라오며, 서버에서는 그 요청을 cancelled로 닫기만 한다.",
+    "type": "approval.decided",
+    "payload": {
+      "action": "decided",
+      "status": "approved",
+      "option_id": "allow-once",
+      "request_event_id": "00000000-0000-4000-8000-00000000e001"
+    }
+  },
+  "permission_control_payload": {
+    "_comment": "host로 가는 work_control kind=permission의 닫힌 payload(092 work_control_payload_ck).",
+    "request_event_id": "00000000-0000-4000-8000-00000000e001",
+    "option_id": "allow-once",
+    "kind": "allow_once"
+  },
+  "ok_response": {
+    "permissionRequest": {
+      "id": "00000000-0000-7000-8000-00000000a001",
+      "sessionId": "00000000-0000-7000-8000-00000000c001",
+      "requestEventId": "00000000-0000-4000-8000-00000000e001",
+      "status": "approved",
+      "decidedOptionId": "allow-once",
+      "decidedKind": "allow_once",
+      "decidedBy": "00000000-0000-7000-8000-000000000101",
+      "decidedAtMs": 1790550000000,
+      "controlId": "00000000-0000-7000-8000-00000000b001",
+      "expiresAtMs": 1790550600000
+    }
+  },
+  "cases": [
+    {"name": "owner_allow_once", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "allow-once", "kind": "allow_once"}, "status": 200, "note": "status approved; a permission control is dispatched to the host"},
+    {"name": "owner_reject_once", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "reject-once", "kind": "reject_once"}, "status": 200, "note": "status rejected"},
+    {"name": "same_decision_again", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "allow-once", "kind": "allow_once"}, "status": 200, "note": "after owner_allow_once: the same row, the same controlId"},
+    {"name": "different_decision_after", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "reject-once", "kind": "reject_once"}, "status": 409, "code": "permission_already_decided"},
+    {"name": "allow_always_kind", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "allow-once", "kind": "allow_always"}, "status": 400, "code": "permission_kind_refused"},
+    {"name": "reject_always_kind", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "reject-once", "kind": "reject_always"}, "status": 400, "code": "permission_kind_refused"},
+    {"name": "always_option_relabelled", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "allow-always", "kind": "allow_once"}, "status": 400, "code": "permission_option_invalid"},
+    {"name": "option_kind_mismatch", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "reject-once", "kind": "allow_once"}, "status": 400, "code": "permission_option_invalid"},
+    {"name": "empty_option", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "", "kind": "allow_once"}, "status": 400, "code": "permission_option_invalid"},
+    {"name": "instruction", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "reject-once", "kind": "reject_once", "instruction": "use the public key"}, "status": 400, "code": "permission_instruction_unsupported"},
+    {"name": "blank_instruction", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "reject-once", "kind": "reject_once", "instruction": "  "}, "status": 200, "note": "blank is no instruction"},
+    {"name": "not_the_owner", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "allow-once", "kind": "allow_once"}, "principal": "teammate", "status": 403, "code": "permission_owner_only"},
+    {"name": "agent_bearer", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "allow-once", "kind": "allow_once"}, "principal": "agent", "status": 403},
+    {"name": "unknown_request", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e999", "optionId": "allow-once", "kind": "allow_once"}, "status": 404},
+    {"name": "lapsed_or_closed", "body": {"requestEventId": "00000000-0000-4000-8000-00000000e001", "optionId": "allow-once", "kind": "allow_once"}, "status": 409, "code": "permission_request_closed", "note": "deadline passed (recorded expired), or turn/session ended, host revoked, host withdrew (recorded cancelled)"}
+  ],
+  "error_codes": [
+    "permission_decider_not_human",
+    "permission_owner_only",
+    "permission_kind_refused",
+    "permission_option_invalid",
+    "permission_instruction_unsupported",
+    "permission_already_decided",
+    "permission_request_closed"
+  ],
+  "ttl_seconds": 600
+}

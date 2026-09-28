@@ -28,6 +28,9 @@
 //! still cannot turn someone else's words into a prompt on the owner's Mac.
 //! `kill` is accepted from anyone the server delivers it for.
 //! * `kill` — stop the agent; the session reports `ended`.
+//! * `permission` — the owner's decision on a bridged permission request
+//!   (ADR-0188 D5, #3000), owner only like `input`; the session checks it
+//!   against the request's nonce and the options the agent offered.
 //! * `read` and anything else — `unsupported_control`.
 
 use std::collections::{HashMap, HashSet};
@@ -177,6 +180,13 @@ impl ControlLoop {
                 },
                 Err(refusal) => refused(refusal),
             },
+            "permission" => match self.permission(control).await {
+                Ok(()) => Verdict {
+                    ack: ControlAck::ok(control.session_id),
+                    activate: None,
+                },
+                Err(refusal) => refused(refusal),
+            },
             "kill" => {
                 let Some(session_id) = control.session_id else {
                     return refused(Refusal::InvalidControl);
@@ -219,6 +229,30 @@ impl ControlLoop {
         {
             tracing::warn!(%session_id, error = %error, "could not end a refused resume session");
         }
+    }
+
+    /// ADR-0188 D3·D5: the owner's decision, and nobody else's.
+    async fn permission(&mut self, control: &WorkControl) -> Result<(), Refusal> {
+        self.require_owner(control)?;
+        let session_id = control.session_id.ok_or(Refusal::InvalidControl)?;
+        let request_event_id = control
+            .payload_str("request_event_id")
+            .and_then(|raw| Uuid::parse_str(raw).ok())
+            .ok_or(Refusal::InvalidControl)?;
+        let (Some(option_id), Some(kind)) = (
+            control.payload_str("option_id"),
+            control.payload_str("kind"),
+        ) else {
+            return Err(Refusal::InvalidControl);
+        };
+        self.sessions
+            .permission(
+                session_id,
+                request_event_id,
+                option_id.to_string(),
+                kind.to_string(),
+            )
+            .await
     }
 
     async fn input(&mut self, control: &WorkControl) -> Result<(), Refusal> {
