@@ -194,9 +194,13 @@ public struct MomoDeviceKeyStore {
   /// The E1 schema lines this key may sign, with each payload's exact line
   /// count (momo-wire `human_control.rs` `signed_bytes`). Instructions only:
   /// `device_endorse.v1`/`device_revoke.v1` are the root Mac's (ADR-0146
-  /// D-6/D-7), so the phone key refuses them.
+  /// D-6/D-7), so the phone key refuses them. `control.v2` (#3027 E7, #3028
+  /// E8) is what the phone signs: the same 13-line frame, a spawn binding the
+  /// tool, the channel and a resume's session. v1 stays for input/permission
+  /// statements the server still accepts.
   public static let signingSchemas: [String: Int] = [
-    "momo.human.control.v1": 13
+    "momo.human.control.v1": 13,
+    "momo.human.control.v2": 13,
   ]
   /// Largest payload accepted. The E1 control vectors top out at 384 bytes;
   /// every field is an id, a number or a hex digest.

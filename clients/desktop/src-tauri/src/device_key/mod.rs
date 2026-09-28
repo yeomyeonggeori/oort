@@ -15,11 +15,14 @@
 //   device_key_bind_root       after the server registered the key (password
 //                              re-entered in the web UI): remember key id ↔
 //                              workspace, then `pin_root` on this Mac's workd
-//   device_key_sign_control    momo.human.control.v1 (all five kinds; the Mac
-//                              is the root)
-//   device_key_sign_endorse    device_endorse.v1 for a phone key
-//   device_key_sign_revoke     device_revoke.v1, delivered to workd over the
-//                              code-signed socket right away (D-7)
+//   device_key_sign_control    momo.human.control.v2 (input · spawn ·
+//                              permission; #3028)
+//   device_key_sign_endorse    device_endorse.v1 for a phone key; records
+//                              (key id → public key) in `endorsed.json`
+//   device_key_sign_revoke     device_revoke.v2 over the public key THIS shell
+//                              recorded for that id (never the webview's),
+//                              delivered to workd over the code-signed socket
+//                              right away (D-7)
 //   device_key_deliver_revocation  hand a stored letter to workd again
 //
 // Only `capabilities/device-key.json` grants them: the main webview, bundled
@@ -162,6 +165,114 @@ pub struct StoredLetter {
     pub revoked_at_ms: i64,
     pub signature: String,
     pub target_public_key: String,
+}
+
+/// The phone keys this shell endorsed, by key id (#3028, E7 인계 ③ High).
+/// A revocation signs the public key recorded HERE: the webview carries server
+/// data, and a server that could name the public key of a revocation could
+/// make the root sign "revoke key A" over key B (or over a decoy, letting A
+/// come back under a new id).
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Endorsed {
+    #[serde(default)]
+    pub keys: BTreeMap<Uuid, EndorsedKey>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EndorsedKey {
+    pub workspace_id: Uuid,
+    pub public_key: String,
+}
+
+fn endorsed_path(app_data: &Path) -> PathBuf {
+    app_data.join("device-key").join("endorsed.json")
+}
+
+pub fn load_endorsed(path: &Path) -> Endorsed {
+    std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+/// The public key a revocation of `target_key_id` signs: only one this shell
+/// endorsed for the same workspace. Anything else is refused by name.
+pub fn revocation_target(
+    endorsed: &Endorsed,
+    workspace_id: Uuid,
+    target_key_id: Uuid,
+) -> Result<String, String> {
+    endorsed
+        .keys
+        .get(&target_key_id)
+        .filter(|key| key.workspace_id == workspace_id)
+        .map(|key| key.public_key.clone())
+        .ok_or_else(|| "device_key_not_endorsed_here".to_string())
+}
+
+/// May this shell endorse `public_key` under `target_key_id`? Checked BEFORE
+/// the dialog, so a letter this shell would not record is never signed
+/// (#3028 security review M1: the id is the webview's, unsigned, and not on
+/// the dialog, so a page could otherwise file a real phone's key under a
+/// stolen phone's id, or under this Mac's own root id).
+///
+/// - never this Mac's own root key id;
+/// - an id already recorded keeps its key (no overwrite with another key);
+/// - a key already recorded under another id is not filed twice.
+pub fn endorse_precheck(
+    endorsed: &Endorsed,
+    workspace_id: Uuid,
+    root_key_id: Uuid,
+    target_key_id: Uuid,
+    public_key: &str,
+) -> Result<(), String> {
+    if target_key_id == root_key_id {
+        return Err("device_key_endorse_conflict: root".into());
+    }
+    if let Some(known) = endorsed.keys.get(&target_key_id) {
+        if known.public_key != public_key || known.workspace_id != workspace_id {
+            return Err("device_key_endorse_conflict: id".into());
+        }
+    }
+    if endorsed.keys.iter().any(|(id, key)| {
+        *id != target_key_id && key.public_key == public_key && key.workspace_id == workspace_id
+    }) {
+        return Err("device_key_endorse_conflict: key".into());
+    }
+    Ok(())
+}
+
+/// Before a root binding is written: may this Mac's workd take `current` for
+/// this workspace? Compared by PUBLIC KEY (#3078): a re-login gives the same
+/// enclave key a new server id, and workd rebinds that over the local socket.
+/// Only a workd from before #3078 (no `rootPublicKey`) falls back to the id.
+pub fn bind_precheck(
+    trust: Option<&crate::work_host::HostTrust>,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    key_id: Uuid,
+    current_public_key: &str,
+) -> Result<(), String> {
+    let Some(trust) = trust else { return Ok(()) };
+    let ours = trust.workspace_id == workspace_id.to_string()
+        && trust.owner_member_id == member_id.to_string();
+    if !ours {
+        return Ok(());
+    }
+    match (
+        trust.root_public_key.as_deref(),
+        trust.root_key_id.as_deref(),
+    ) {
+        (Some(pinned), _) if pinned != current_public_key => {
+            Err("device_key_host_pinned_other".into())
+        }
+        (Some(_), _) => Ok(()),
+        (None, Some(pinned)) if pinned != key_id.to_string() => {
+            Err("device_key_host_pinned_other".into())
+        }
+        _ => Ok(()),
+    }
 }
 
 fn letters_path(app_data: &Path) -> PathBuf {
@@ -614,20 +725,21 @@ pub async fn device_key_bind_root(
         if current != request.public_key {
             return Err("device_key_changed".into());
         }
-        // A host already pinned to another key id would refuse this one for
+        // A host already pinned to another KEY would refuse this one for
         // good (only a local reset clears a pin): say so before anything is
-        // written (security review M4).
+        // written (security review M4). The same key under a new id (a
+        // re-login) goes on to `pin_root`, which rebinds it (#3078).
         {
             let state = worker.app.state::<crate::work_host::WorkHostState>();
             if let Ok(service) = crate::work_host::service(&worker.app, &state) {
                 if let Ok(Some(trust)) = service.host_trust() {
-                    let ours = trust.workspace_id == request.workspace_id.to_string()
-                        && trust.owner_member_id == request.member_id.to_string();
-                    if let (true, Some(pinned)) = (ours, trust.root_key_id.as_deref()) {
-                        if pinned != request.key_id.to_string() {
-                            return Err("device_key_host_pinned_other".into());
-                        }
-                    }
+                    bind_precheck(
+                        Some(&trust),
+                        request.workspace_id,
+                        request.member_id,
+                        request.key_id,
+                        &current,
+                    )?;
                 }
             }
         }
@@ -672,7 +784,7 @@ pub async fn device_key_bind_root(
     .await
 }
 
-/// The control kinds `device_key_sign_control` signs today.
+/// The control kinds `device_key_sign_control` signs today (v2).
 pub const SIGNABLE_CONTROL_KINDS: [&str; 3] = ["input", "spawn", "permission"];
 
 #[derive(Debug, Serialize)]
@@ -726,7 +838,31 @@ pub async fn device_key_sign_endorse(
     on_worker(app, move |worker| {
         let (signer, binding) = worker.signer_for(request.workspace_id)?;
         let target_key_id = request.target_key_id;
+        let target_public_key = request.target_public_key.clone();
+        endorse_precheck(
+            &load_endorsed(&endorsed_path(&worker.app_data()?)),
+            request.workspace_id,
+            signer.key_id,
+            target_key_id,
+            &target_public_key,
+        )?;
         let signed = worker.sign(Statement::Endorse { signer, request }, &binding.public_key)?;
+        // Remember what was endorsed under this id: a later revocation signs
+        // this public key and no other (#3028).
+        {
+            let state = worker.app.state::<DeviceKeyState>();
+            let _one = state.bindings.lock().unwrap_or_else(|p| p.into_inner());
+            let path = endorsed_path(&worker.app_data()?);
+            let mut endorsed = load_endorsed(&path);
+            endorsed.keys.insert(
+                target_key_id,
+                EndorsedKey {
+                    workspace_id: signer.workspace_id,
+                    public_key: target_public_key,
+                },
+            );
+            save_private_json(&path, &endorsed)?;
+        }
         Ok(EndorseSigned {
             target_key_id,
             root_key_id: signer.key_id,
@@ -775,11 +911,17 @@ pub async fn device_key_sign_revoke(
         let (signer, binding) = worker.signer_for(request.workspace_id)?;
         let revoked_at_ms = now_ms();
         let target_key_id = request.target_key_id;
-        let target_public_key = request.target_public_key.clone();
+        // The key this shell endorsed under that id — never the webview's.
+        let target_public_key = revocation_target(
+            &load_endorsed(&endorsed_path(&worker.app_data()?)),
+            request.workspace_id,
+            target_key_id,
+        )?;
         let signed = worker.sign(
             Statement::Revoke {
                 signer,
                 request,
+                target_public_key: target_public_key.clone(),
                 revoked_at_ms,
             },
             &binding.public_key,

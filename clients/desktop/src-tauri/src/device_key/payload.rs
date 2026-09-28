@@ -12,9 +12,16 @@
 //! recorded signature must verify over the bytes this file builds.
 //!
 //! The Mac is the **root** (D-6), so unlike the phone (#3026, control only) it
-//! may sign all three schemas: `momo.human.control.v1`,
-//! `momo.human.device_endorse.v1` and `momo.human.device_revoke.v1`. Nothing
+//! may sign all three kinds of statement: `momo.human.control.v2`,
+//! `momo.human.device_endorse.v1` and `momo.human.device_revoke.v2`. Nothing
 //! else — there is no "sign these bytes" entry point anywhere in this crate.
+//!
+//! #3028 (R2-E8, ADR-0146 증보 R2-E7): control moved to **v2** for every kind
+//! (a spawn binds the tool and the channel, and a resume's successor session;
+//! the other kinds are v1's bytes under a new first line), and revocations to
+//! **device_revoke.v2** (the root also signs the revoked public key). The v1
+//! recipes stay only so the E1 vectors still prove this port; the allow-list
+//! below no longer lets them reach the enclave.
 //!
 //! The same typed statement also produces the native confirmation text
 //! ([`Statement::summary`]), so what the person approves is what is signed —
@@ -31,16 +38,42 @@ use unicode_normalization::UnicodeNormalization as _;
 use uuid::Uuid;
 
 pub const HUMAN_CONTROL_SCHEMA_V1: &str = "momo.human.control.v1";
+pub const HUMAN_CONTROL_SCHEMA_V2: &str = "momo.human.control.v2";
 pub const DEVICE_ENDORSE_SCHEMA_V1: &str = "momo.human.device_endorse.v1";
+/// Kept for the E1 vectors only (tests); never signed (#3028).
+#[cfg_attr(not(test), allow(dead_code))]
 pub const DEVICE_REVOKE_SCHEMA_V1: &str = "momo.human.device_revoke.v1";
+pub const DEVICE_REVOKE_SCHEMA_V2: &str = "momo.human.device_revoke.v2";
 
 /// The schemas this key signs, with each payload's exact line count. The Mac
-/// is the root, so all three (the phone signs only the first, #3026).
+/// is the root, so all three kinds (the phone signs only control, #3026).
+/// v1 control and v1 revocations are NOT here (#3028): the server and workd
+/// refuse a v1 spawn, and a v1 revocation leaves the revoked key unsigned.
 pub const SIGNING_SCHEMAS: [(&str, usize); 3] = [
-    (HUMAN_CONTROL_SCHEMA_V1, 13),
+    (HUMAN_CONTROL_SCHEMA_V2, 13),
     (DEVICE_ENDORSE_SCHEMA_V1, 7),
-    (DEVICE_REVOKE_SCHEMA_V1, 6),
+    (DEVICE_REVOKE_SCHEMA_V2, 7),
 ];
+
+/// Which control recipe. Production signs v2 only; v1 is kept for the E1
+/// vectors (the bytes of input·permission·bundle·host_register are the same
+/// but the first line; spawn differs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlSchema {
+    /// The E1 vectors only; production never builds it.
+    #[cfg_attr(not(test), allow(dead_code))]
+    V1,
+    V2,
+}
+
+impl ControlSchema {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ControlSchema::V1 => HUMAN_CONTROL_SCHEMA_V1,
+            ControlSchema::V2 => HUMAN_CONTROL_SCHEMA_V2,
+        }
+    }
+}
 
 /// Largest signed payload accepted: every line is an id, a number, a hex
 /// digest, a key or a short label; free text is only ever hashed.
@@ -135,6 +168,10 @@ pub enum ControlContent {
     Spawn {
         agent_member_id: Uuid,
         folder_id: String,
+        /// v2: the harness the host will run (`claude`, `codex`, …).
+        tool: String,
+        /// v2: the channel the session thread lives in.
+        channel_id: Uuid,
         first_prompt: String,
     },
     Permission {
@@ -178,7 +215,13 @@ impl ControlContent {
         )
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, PayloadError> {
+    /// v2 only: a spawn MAY name a session (a resume's successor id, #3027).
+    fn allows_session(&self, schema: ControlSchema) -> bool {
+        self.requires_session()
+            || (schema == ControlSchema::V2 && matches!(self, ControlContent::Spawn { .. }))
+    }
+
+    pub fn canonical_bytes_for(&self, schema: ControlSchema) -> Result<Vec<u8>, PayloadError> {
         let text = match self {
             ControlContent::Input { text, .. } => {
                 readable_text("text", text)?;
@@ -187,11 +230,24 @@ impl ControlContent {
             ControlContent::Spawn {
                 agent_member_id,
                 folder_id,
+                tool,
+                channel_id,
                 first_prompt,
             } => {
                 token("folder_id", folder_id)?;
                 readable_text("first_prompt", first_prompt)?;
-                format!("{agent_member_id}\n{folder_id}\n{}", nfc(first_prompt))
+                match schema {
+                    ControlSchema::V1 => {
+                        format!("{agent_member_id}\n{folder_id}\n{}", nfc(first_prompt))
+                    }
+                    ControlSchema::V2 => {
+                        token("tool", tool)?;
+                        format!(
+                            "{agent_member_id}\n{folder_id}\n{tool}\n{channel_id}\n{}",
+                            nfc(first_prompt)
+                        )
+                    }
+                }
             }
             ControlContent::Permission {
                 request_event_id,
@@ -220,8 +276,10 @@ impl ControlContent {
         Ok(text.into_bytes())
     }
 
-    pub fn content_sha256(&self) -> Result<String, PayloadError> {
-        Ok(hex::encode(Sha256::digest(self.canonical_bytes()?)))
+    pub fn content_sha256_for(&self, schema: ControlSchema) -> Result<String, PayloadError> {
+        Ok(hex::encode(Sha256::digest(
+            self.canonical_bytes_for(schema)?,
+        )))
     }
 }
 
@@ -256,15 +314,14 @@ pub struct EndorseRequest {
     pub label: String,
 }
 
-/// `device_key_sign_revoke`.
+/// `device_key_sign_revoke`. Names the key by id only (#3028, E7 인계 ③
+/// High): the public key the letter signs is the one THIS shell recorded when
+/// it endorsed that id, never a value the webview (i.e. server data) passes.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RevokeRequest {
     pub workspace_id: Uuid,
     pub target_key_id: Uuid,
-    /// Required by workd on the local path (E4): a revoked key must not come
-    /// back under a new id. Not signed.
-    pub target_public_key: String,
     /// For the confirmation only.
     #[serde(default)]
     pub target_label: String,
@@ -293,6 +350,8 @@ pub enum Statement {
     Revoke {
         signer: Signer,
         request: RevokeRequest,
+        /// From the shell's endorsement record, not the request.
+        target_public_key: String,
         revoked_at_ms: i64,
     },
 }
@@ -301,9 +360,9 @@ impl Statement {
     #[cfg(test)]
     pub fn schema(&self) -> &'static str {
         match self {
-            Statement::Control { .. } => HUMAN_CONTROL_SCHEMA_V1,
+            Statement::Control { .. } => HUMAN_CONTROL_SCHEMA_V2,
             Statement::Endorse { .. } => DEVICE_ENDORSE_SCHEMA_V1,
-            Statement::Revoke { .. } => DEVICE_REVOKE_SCHEMA_V1,
+            Statement::Revoke { .. } => DEVICE_REVOKE_SCHEMA_V2,
         }
     }
 
@@ -319,13 +378,22 @@ impl Statement {
             Statement::Revoke {
                 signer,
                 request,
+                target_public_key,
                 revoked_at_ms,
             } => {
                 if *revoked_at_ms <= 0 || *revoked_at_ms > MAX_SAFE_INTEGER {
                     return Err(PayloadError::Field("revoked_at_ms", "out of range"));
                 }
-                p256_public_key(&request.target_public_key)?;
-                revoke_bytes(signer, request.target_key_id, *revoked_at_ms)
+                if request.workspace_id != signer.workspace_id {
+                    return Err(PayloadError::Field("workspace_id", "not the signer's"));
+                }
+                p256_public_key(target_public_key)?;
+                revoke_bytes(
+                    signer,
+                    request.target_key_id,
+                    target_public_key,
+                    *revoked_at_ms,
+                )
             }
         };
         check_signing_payload(&bytes)?;
@@ -333,7 +401,16 @@ impl Statement {
     }
 }
 
+/// The v2 statement (what production signs).
 pub fn control_bytes(signer: &Signer, request: &ControlRequest) -> Result<Vec<u8>, PayloadError> {
+    control_bytes_for(ControlSchema::V2, signer, request)
+}
+
+pub fn control_bytes_for(
+    schema: ControlSchema,
+    signer: &Signer,
+    request: &ControlRequest,
+) -> Result<Vec<u8>, PayloadError> {
     token("instance_id", &request.instance_id)?;
     if request.workspace_id != signer.workspace_id {
         return Err(PayloadError::Field("workspace_id", "not the signer's"));
@@ -343,6 +420,7 @@ pub fn control_bytes(signer: &Signer, request: &ControlRequest) -> Result<Vec<u8
         (true, Some(id)) => id.to_string(),
         (true, None) => return Err(PayloadError::SessionRequired),
         (false, None) => ABSENT.to_string(),
+        (false, Some(id)) if content.allows_session(schema) => id.to_string(),
         (false, Some(_)) => return Err(PayloadError::SessionForbidden),
     };
     if let ControlContent::HostRegister { host_id, .. } = content {
@@ -350,9 +428,10 @@ pub fn control_bytes(signer: &Signer, request: &ControlRequest) -> Result<Vec<u8
             return Err(PayloadError::HostIdMismatch);
         }
     }
-    let content_sha256 = content.content_sha256()?;
+    let content_sha256 = content.content_sha256_for(schema)?;
     Ok(format!(
-        "{HUMAN_CONTROL_SCHEMA_V1}\n{}\n{}\n{}\n{}\n{}\n{session}\n{}\n{}\n{}\n{}\n{}\n{content_sha256}",
+        "{}\n{}\n{}\n{}\n{}\n{}\n{session}\n{}\n{}\n{}\n{}\n{}\n{content_sha256}",
+        schema.as_str(),
         request.instance_id,
         signer.workspace_id,
         signer.member_id,
@@ -391,10 +470,22 @@ pub fn endorse_bytes(signer: &Signer, request: &EndorseRequest) -> Result<Vec<u8
     .into_bytes())
 }
 
-pub fn revoke_bytes(signer: &Signer, target_key_id: Uuid, revoked_at_ms: i64) -> Vec<u8> {
+/// `momo.human.device_revoke.v2` (#3068): v1's lines plus the revoked public
+/// key before the time, so the root's signature names the key, not only its id.
+pub fn revoke_bytes(
+    signer: &Signer,
+    target_key_id: Uuid,
+    target_public_key: &str,
+    revoked_at_ms: i64,
+) -> Vec<u8> {
     format!(
-        "{DEVICE_REVOKE_SCHEMA_V1}\n{}\n{}\n{}\n{}\n{}",
-        signer.workspace_id, signer.member_id, signer.key_id, target_key_id, revoked_at_ms,
+        "{DEVICE_REVOKE_SCHEMA_V2}\n{}\n{}\n{}\n{}\n{}\n{}",
+        signer.workspace_id,
+        signer.member_id,
+        signer.key_id,
+        target_key_id,
+        target_public_key,
+        revoked_at_ms,
     )
     .into_bytes()
 }
@@ -588,13 +679,20 @@ impl Statement {
                         ControlContent::Spawn {
                             agent_member_id,
                             folder_id,
+                            tool,
                             first_prompt,
+                            ..
                         } => (
-                            "새 작업",
+                            if request.session_id.is_some() {
+                                "이어서 하기"
+                            } else {
+                                "새 작업"
+                            },
                             vec![
                                 format!(
-                                    "에이전트 {}, 폴더 {}",
+                                    "에이전트 {}, 도구 {}, 폴더 {}",
                                     short_id(*agent_member_id),
+                                    first_line(tool),
                                     first_line(folder_id)
                                 ),
                                 format!(
@@ -661,22 +759,26 @@ impl Statement {
             Statement::Endorse { request, .. } => Summary {
                 title: "oort: 이 폰을 지시 기기로 승인합니다".into(),
                 body: format!(
-                    "지문: {}\n기기 이름: 「{}」\n설정 화면에 보인 지문과 같고, 방금 연결한 폰이 맞을 때만 승인하세요.",
+                    "지문: {}\n기기 이름: 「{}」, 키 {}\n설정 화면에 보인 지문과 같고, 방금 연결한 폰이 맞을 때만 승인하세요.",
                     fingerprint(&request.target_public_key).unwrap_or_default(),
                     first_line(&request.label),
+                    short_id(request.target_key_id),
                 ),
                 confirm: "승인".into(),
                 full_text: None,
             },
-            Statement::Revoke { request, .. } => Summary {
+            Statement::Revoke {
+                request,
+                target_public_key,
+                ..
+            } => Summary {
                 title: "oort: 이 기기의 지시 권한을 끊습니다".into(),
                 // The fingerprint is the key this Mac's host will stop
-                // trusting (the letter names the key id, the host is handed
-                // this public key with it); both are on screen so a mismatch
-                // is visible (security review H1b).
+                // trusting: the one this shell endorsed under that id, which
+                // the v2 letter signs (security review H1b, #3028).
                 body: format!(
                     "지문: {}\n기기 이름: 「{}」, 키 {}\n끊은 기기는 이 맥에서 다시 승인해야 지시할 수 있습니다.",
-                    fingerprint(&request.target_public_key).unwrap_or_else(|| "(읽을 수 없음)".into()),
+                    fingerprint(target_public_key).unwrap_or_else(|| "(읽을 수 없음)".into()),
                     if request.target_label.trim().is_empty() {
                         "이름 없음".to_string()
                     } else {

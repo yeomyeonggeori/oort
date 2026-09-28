@@ -496,7 +496,8 @@ export interface DesktopDeviceKeyStatus {
   host: { running: boolean; matches: boolean; pinnedRootKeyId: string | null } | null;
 }
 
-/** `device_key_sign_control`'s request (`payload::ControlRequest`). */
+/** `device_key_sign_control`'s request (`payload::ControlRequest`). A spawn
+ * with `sessionId` is a resume: the successor id the owner signs (v2). */
 export interface DesktopControlRequest {
   workspaceId: string;
   instanceId: string;
@@ -507,7 +508,15 @@ export interface DesktopControlRequest {
   expiresAtMs: number;
   content:
     | { kind: "input"; mode: "queue" | "interrupt"; text: string }
-    | { kind: "spawn"; agentMemberId: string; folderId: string; firstPrompt: string }
+    | {
+        kind: "spawn";
+        agentMemberId: string;
+        folderId: string;
+        /** v2 (#3028): the harness and the session channel are signed. */
+        tool: string;
+        channelId: string;
+        firstPrompt: string;
+      }
     | {
         kind: "permission";
         requestEventId: string;
@@ -552,7 +561,7 @@ export const desktopDeviceKey = {
     if (!IS_TAURI) throw "unsupported_platform";
     return invoke("device_key_bind_root", { request });
   },
-  /** `momo.human.control.v1` (E8 #3028 wires the cards to it). */
+  /** `momo.human.control.v2` (#3028: the cards, the reply box and resume). */
   async signControl(request: DesktopControlRequest): Promise<{
     deviceKeyId: string;
     devicePublicKey: string;
@@ -572,10 +581,14 @@ export const desktopDeviceKey = {
     if (!IS_TAURI) throw "unsupported_platform";
     return invoke("device_key_sign_endorse", { request });
   },
+  /**
+   * `device_revoke.v2`. Names the key by id only: the shell signs the public
+   * key it recorded when it endorsed that id, never one from this page (#3028,
+   * E7 인계 ③). An id this Mac never endorsed → `device_key_not_endorsed_here`.
+   */
   async signRevoke(request: {
     workspaceId: string;
     targetKeyId: string;
-    targetPublicKey: string;
     targetLabel: string;
   }): Promise<{
     rootKeyId: string;

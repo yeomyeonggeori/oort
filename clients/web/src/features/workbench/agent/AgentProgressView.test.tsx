@@ -149,6 +149,7 @@ describe("permission card", () => {
       requestEventId: expect.stringMatching(/^ev-/),
       optionId: "once",
       kind: "allow_once",
+      scope: "once",
     });
   });
 
@@ -521,8 +522,158 @@ describe("browser instructs from the app (#3029)", () => {
     await act(async () => {
       q('[data-testid="agent-pane-queue"]')!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
+    // #3028: a signed instruction that does not arrive says so first (D-5b 「전달 안 됨」).
     expect(q('[data-testid="agent-pane-reply-hint"]')!.textContent).toBe(
-      humanSignatureRefusal({ code: "device_key_not_endorsed" })!.text
+      `전달 안 됨 · ${humanSignatureRefusal({ code: "device_key_not_endorsed" })!.text}`
     );
+    expect(q('[data-testid="agent-pane-reply-hint"]')!.getAttribute("role")).toBe("alert");
+  });
+});
+
+// ---- #3028 R2-E8: 서명하는 표면(데스크탑 셸 + 서명을 요구하는 서버) ---------------
+
+describe("signed surface (#3028)", () => {
+  const events = () => [tool("bash", "npm install"), ask([ONCE, REJECT])];
+  function typeInto(selector: string, text: string) {
+    const box = q(selector) as HTMLTextAreaElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      setter.call(box, text);
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+  async function commit() {
+    act(() => vi.advanceTimersByTime(CONFIRM_GUARD_MS));
+    await act(async () => {
+      q('[data-testid="agent-permission-commit"]')!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+  }
+
+  it("without the signed path there is no 「이 세션 동안」 and no instruction box on reject (today's card)", () => {
+    render(model(events()), { decide: vi.fn(async () => undefined), reply: null });
+    expect(q('[data-testid="agent-permission-allow-session"]')).toBeNull();
+    click(q('[data-testid="agent-permission-reject"]'));
+    expect(q('[data-testid="agent-permission-reject-note"]')).toBeNull();
+  });
+
+  it("「이 세션 동안 허락」 sends scope session, only after arming", async () => {
+    const decide = vi.fn(async () => undefined);
+    render(model(events()), { decide, reply: null, sessionScope: true, rejectWithInstruction: vi.fn() });
+    click(q('[data-testid="agent-permission-allow-session"]'));
+    expect(decide).not.toHaveBeenCalled();
+    expect(q('[data-testid="agent-permission-confirm"]')!.textContent).toContain("이 세션이 끝날 때까지");
+    await commit();
+    expect(decide).toHaveBeenCalledWith(expect.objectContaining({ kind: "allow_once", optionId: "once", scope: "session" }));
+    expect(q('[data-testid="agent-permission-outcome"]')!.textContent).toContain("이 세션 동안 허락을 보냈어요");
+  });
+
+  it("a truncated preview locks 「이 세션 동안」 too", () => {
+    const long = "x\n".repeat(3000);
+    render(model([tool("bash", long), ask([ONCE, REJECT])]), {
+      decide: vi.fn(async () => undefined),
+      reply: null,
+      sessionScope: true,
+    });
+    expect((q('[data-testid="agent-permission-allow-session"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("「거부 + 지시」: the note goes to rejectWithInstruction; an empty note is a plain reject", async () => {
+    const decide = vi.fn(async () => undefined);
+    const rejectWithInstruction = vi.fn(async () => ({ state: "rejected" as const, instruction: { state: "sent" as const } }));
+    render(model(events()), { decide, reply: null, sessionScope: true, rejectWithInstruction });
+    click(q('[data-testid="agent-permission-reject"]'));
+    typeInto('[data-testid="agent-permission-reject-note"]', "테스트만 고쳐 줘");
+    expect(q('[data-testid="agent-permission-commit"]')!.textContent).toBe("거부하고 지시 보내기");
+    await commit();
+    expect(decide).not.toHaveBeenCalled();
+    expect(rejectWithInstruction).toHaveBeenCalledWith({
+      sessionId: SID,
+      requestEventId: expect.stringMatching(/^ev-/),
+      optionId: "no",
+      text: "테스트만 고쳐 줘",
+    });
+    expect(q('[data-testid="agent-permission"]')!.getAttribute("data-settled")).toBe("sent");
+  });
+
+  it("arming reject with the instruction box puts the caret in the box, not on body (design-review H1)", () => {
+    render(model(events()), { decide: vi.fn(async () => undefined), reply: null, sessionScope: true, rejectWithInstruction: vi.fn() });
+    click(q('[data-testid="agent-permission-reject"]'));
+    expect(document.activeElement).toBe(q('[data-testid="agent-permission-reject-note"]'));
+  });
+
+  it("an undelivered 「거부 + 지시」 is added after a draft already in the reply box, never dropped", async () => {
+    const rejectWithInstruction = vi.fn(async () => ({
+      state: "rejected" as const,
+      instruction: { state: "not_delivered" as const, stage: "server" as const, text: "호스트", error: null },
+    }));
+    render(model(events()), { decide: vi.fn(async () => undefined), reply: vi.fn(), sessionScope: true, rejectWithInstruction });
+    typeInto('[data-testid="agent-pane-reply-input"]', "쓰던 글");
+    click(q('[data-testid="agent-permission-reject"]'));
+    typeInto('[data-testid="agent-permission-reject-note"]', "다르게 해 줘");
+    await commit();
+    expect((q('[data-testid="agent-pane-reply-input"]') as HTMLTextAreaElement).value).toBe("쓰던 글\n다르게 해 줘");
+  });
+
+  it("a cancelled signature on 「거부 + 지시」 keeps the card and says 「전달 안 됨」", async () => {
+    const rejectWithInstruction = vi.fn(async () => ({
+      state: "not_sent" as const,
+      text: "서명을 취소해서 보내지 않았어요.",
+      error: null,
+    }));
+    render(model(events()), { decide: vi.fn(async () => undefined), reply: null, sessionScope: true, rejectWithInstruction });
+    click(q('[data-testid="agent-permission-reject"]'));
+    typeInto('[data-testid="agent-permission-reject-note"]', "다르게 해 줘");
+    await commit();
+    expect(q('[data-testid="agent-permission-error"]')!.textContent).toBe("전달 안 됨 · 서명을 취소해서 보내지 않았어요.");
+    expect(q('[data-testid="agent-permission"]')!.getAttribute("data-settled")).toBeNull();
+  });
+
+  it("rejected but the instruction did not arrive: the card says both, never just 「거부를 보냈어요」", async () => {
+    const rejectWithInstruction = vi.fn(async () => ({
+      state: "rejected" as const,
+      instruction: {
+        state: "not_delivered" as const,
+        stage: "server" as const,
+        text: "호스트가 90초 넘게 응답하지 않아 보내지 않았어요.",
+        error: null,
+      },
+    }));
+    render(model(events()), { decide: vi.fn(async () => undefined), reply: null, sessionScope: true, rejectWithInstruction });
+    click(q('[data-testid="agent-permission-reject"]'));
+    typeInto('[data-testid="agent-permission-reject-note"]', "다르게 해 줘");
+    await commit();
+    const card = q('[data-testid="agent-permission"]')!;
+    expect(card.getAttribute("data-settled")).toBe("partial");
+    // 쓴 지시는 버리지 않는다: 지시 칸으로 옮겨 다시 보낼 수 있다(design-review M1).
+    expect((q('[data-testid="agent-pane-reply-input"]') as HTMLTextAreaElement).value).toBe("다르게 해 줘");
+    expect(q('[data-testid="agent-permission-outcome"]')!.getAttribute("role")).toBe("alert");
+    const text = q('[data-testid="agent-permission-outcome"]')!.textContent!;
+    expect(text).toContain("거부는 보냈어요");
+    expect(text).toContain("전달 안 됨");
+    expect(text).toContain("호스트가 90초");
+  });
+
+  it("a signed reply that does not arrive keeps the text and says 「전달 안 됨」 (never cleared as if sent)", async () => {
+    const reply = vi.fn(async () => ({
+      state: "not_delivered" as const,
+      stage: "sign" as const,
+      text: "서명을 취소해서 보내지 않았어요.",
+      error: null,
+    }));
+    render(model([tool("bash")]), { decide: null, reply });
+    const box = q('[data-testid="agent-pane-reply-input"]') as HTMLTextAreaElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      setter.call(box, "이어서 해 줘");
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      q('[data-testid="agent-pane-interrupt"]')!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(reply).toHaveBeenCalledWith({ sessionId: SID, text: "이어서 해 줘", mode: "interrupt" });
+    const hint = q('[data-testid="agent-pane-reply-hint"]')!;
+    expect(hint.textContent).toBe("전달 안 됨 · 서명을 취소해서 보내지 않았어요.");
+    expect(hint.getAttribute("data-failed")).toBe("");
+    expect(box.value).toBe("이어서 해 줘");
   });
 });

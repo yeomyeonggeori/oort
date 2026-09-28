@@ -1,5 +1,5 @@
 import { useMemo, type ReactNode } from "react";
-import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries } from "@tanstack/react-query";
 import { Bot } from "lucide-react";
 import { Button } from "@/design/ui/button";
 import { Skeleton } from "@/features/common/States";
@@ -22,12 +22,18 @@ import {
 } from "@momo/core/features/workbench/agentPane";
 import type { SessionStatus } from "@momo/core/features/workbench/sessionList";
 import { ApiError, decideWorkPermission, type WorkSession } from "@momo/core/lib/api";
-import { fetchHumanControlSignatureRequired } from "@momo/core/features/auth/deviceKeys";
 import {
   HUMAN_SIGNATURE_REFUSAL,
   instructFrom,
   type InstructFrom,
 } from "@momo/core/features/auth/humanSignature";
+import {
+  rejectWithInstruction,
+  signedAllow,
+  signedInstruction,
+  type HumanControlSigner,
+} from "@momo/core/features/auth/signedControl";
+import { desktopSigner, useHumanControlSigning } from "@/features/work/signedWork";
 import { isDesktop } from "@/lib/tauri";
 import { AgentProgressView, type AgentPaneActions } from "./AgentProgressView";
 import { agentPaneStore, useAgentPaneBindings, type AgentPaneStore } from "./agentPanes";
@@ -86,19 +92,35 @@ export function summaryOf(model: AgentPaneModel): AgentPaneSummary {
 }
 
 /**
- * 권한 결정은 #3000 라우트로 간다(ADR-0188 §8.6). 지시(답장)는 R2의 기기 키 서명
- * 전까지 길이 없다. 카드는 서버의 `approval.decided`가 실시간으로 오면 닫힌다.
- * 실시간을 놓쳤을 때를 위해 결정이 닿으면 스레드를 한 번 다시 읽는다.
+ * 권한 결정은 #3000 라우트로 간다(ADR-0188 §8.6). 카드는 서버의 `approval.decided`가
+ * 실시간으로 오면 닫힌다. 실시간을 놓쳤을 때를 위해 결정이 닿으면 스레드를 한 번 다시 읽는다.
+ *
+ * `signing`(#3028 R2-E8): 데스크탑 셸이고 서버가 서명을 요구할 때만 있다. 그때 허락은
+ * 서명해 보내고(「이 세션 동안」 포함), 지시(답장)와 「거부 + 지시」가 열린다. 없으면
+ * 지금 그대로다: 서명 없는 결정, 지시 길 없음(D-11).
  */
 export function agentRoutes(
   workspaceId: string,
   afterDecide: () => void = () => {},
-  onSignatureRequired: () => void = () => {}
+  onSignatureRequired: () => void = () => {},
+  signing: { signer: HumanControlSigner; session: Pick<WorkSession, "id" | "hostId"> } | null = null
 ): AgentPaneActions {
   return {
-    decide: async ({ sessionId, requestEventId, optionId, kind }) => {
+    decide: async ({ sessionId, requestEventId, optionId, kind, scope }) => {
       try {
-        await decideWorkPermission(workspaceId, sessionId, { requestEventId, optionId, kind });
+        if (signing && kind === "allow_once") {
+          await signedAllow({
+            workspaceId,
+            session: signing.session,
+            requestEventId,
+            optionId,
+            scope: scope ?? "once",
+            signer: signing.signer,
+          });
+        } else {
+          // 거부는 서명하지 않는다(D-8). 서명 경로가 없으면 허락도 지금처럼.
+          await decideWorkPermission(workspaceId, sessionId, { requestEventId, optionId, kind });
+        }
         afterDecide();
       } catch (err) {
         // 서버가 서명을 요구한다고 답했다: 플래그를 다시 읽어 칸을 안내로 바꾼다(D-4).
@@ -109,7 +131,25 @@ export function agentRoutes(
         throw err;
       }
     },
-    reply: null,
+    reply: signing
+      ? async ({ text, mode }) =>
+          signedInstruction({ workspaceId, session: signing.session, text, mode, signer: signing.signer })
+      : null,
+    sessionScope: signing !== null,
+    rejectWithInstruction: signing
+      ? async ({ requestEventId, optionId, text }) => {
+          const out = await rejectWithInstruction({
+            workspaceId,
+            session: signing.session,
+            requestEventId,
+            optionId,
+            text,
+            signer: signing.signer,
+          });
+          if (out.state !== "not_sent") afterDecide();
+          return out;
+        }
+      : null,
   };
 }
 
@@ -136,31 +176,24 @@ function PaneError({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-export const SIGNING_REQUIRED_KEY = (workspaceId: string) =>
-  ["device-keys", workspaceId, "signing-context", "human-control-required"] as const;
-
 /**
- * 이 화면에서 허락·지시를 보내는가(ADR-0146 개정 D-4 · D-11, #3029). 데스크탑 셸은
- * 묻지 않는다(서명 명령이 있다, 카드 배선은 E8 #3028). 일반 브라우저는 서버가
- * `humanControlSignatureRequired: true`라고 말할 때만 안내로 바꾼다. 읽는 중·모름
- * (E3 이전 서버 404, `MOMO_INSTANCE_ID` 없음 503, 네트워크)은 지금 동작 그대로다.
+ * 이 화면에서 허락·지시를 보내는가(ADR-0146 개정 D-4 · D-11, #3029 · #3028). 일반
+ * 브라우저는 서버가 `humanControlSignatureRequired: true`라고 말할 때만 안내로 바꾼다.
+ * 데스크탑 셸은 같은 값을 읽어 서명 경로를 연다(`signed`). 읽는 중·모름(E3 이전 서버
+ * 404, `MOMO_INSTANCE_ID` 없음 503, 네트워크)은 지금 동작 그대로다.
  */
 export function useInstructFrom(workspaceId: string, enabled: boolean): {
   from: InstructFrom;
+  /** 데스크탑 셸 + 서명을 요구하는 서버: 허락·지시에 서명한다. */
+  signed: boolean;
   recheck: () => void;
 } {
   const desktopShell = isDesktop();
-  const client = useQueryClient();
-  const key = SIGNING_REQUIRED_KEY(workspaceId);
-  const query = useQuery({
-    queryKey: key,
-    queryFn: () => fetchHumanControlSignatureRequired(workspaceId),
-    enabled: enabled && !desktopShell,
-    staleTime: 5 * 60_000,
-  });
+  const signing = useHumanControlSigning(workspaceId, enabled);
   return {
-    from: instructFrom({ desktopShell, signatureRequired: query.data ?? null }),
-    recheck: () => void client.invalidateQueries({ queryKey: key }),
+    from: instructFrom({ desktopShell, signatureRequired: signing.signatureRequired }),
+    signed: signing.signed,
+    recheck: signing.recheck,
   };
 }
 
@@ -180,6 +213,7 @@ export function useAgentPaneSource(): AgentPaneSource {
   const viewer = auth.member.id;
   const { directory } = useDirectory(workspaceId);
   const instruct = useInstructFrom(workspaceId, workOn);
+  const signer = useMemo(() => (instruct.signed ? desktopSigner(workspaceId) : null), [instruct.signed, workspaceId]);
 
   const boundIds = useMemo(() => [...new Set(Object.values(bindings))], [bindings]);
   const bound = useMemo(
@@ -197,7 +231,14 @@ export function useAgentPaneSource(): AgentPaneSource {
   const models = useMemo(() => {
     const out = new Map<
       string,
-      { model: AgentPaneModel | null; ownerId: string; loading: boolean; error: boolean; refetch: () => void }
+      {
+        model: AgentPaneModel | null;
+        session: WorkSession;
+        ownerId: string;
+        loading: boolean;
+        error: boolean;
+        refetch: () => void;
+      }
     >();
     bound.forEach((s: WorkSession, i) => {
       const q = threads[i];
@@ -217,6 +258,7 @@ export function useAgentPaneSource(): AgentPaneSource {
           : null;
       out.set(s.id.toLowerCase(), {
         model,
+        session: s,
         ownerId: s.memberId,
         loading: q?.isPending ?? true,
         error: q?.isError ?? false,
@@ -264,7 +306,12 @@ export function useAgentPaneSource(): AgentPaneSource {
             model={entry.model}
             // 세션 소유자의 이름(보는 사람이 아니다). 모르면 「소유자」로 말한다.
             ownerName={entry.ownerId ? memberFor(directory, entry.ownerId)?.displayName ?? null : null}
-            actions={agentRoutes(workspaceId, entry.refetch, instruct.recheck)}
+            actions={agentRoutes(
+              workspaceId,
+              entry.refetch,
+              instruct.recheck,
+              signer ? { signer, session: entry.session } : null
+            )}
             offline={connStatus === "disconnected"}
             instructFrom={instruct.from}
           />

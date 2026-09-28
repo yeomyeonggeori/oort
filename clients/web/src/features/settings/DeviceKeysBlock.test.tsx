@@ -373,7 +373,6 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
     expect(desktop.signRevoke).toHaveBeenCalledWith({
       workspaceId: WS,
       targetKeyId: PHONE_ID,
-      targetPublicKey: PHONE_KEY,
       targetLabel: PHONE_LABEL,
     });
     expect(core.submitRevocation).toHaveBeenCalledWith(WS, PHONE_ID, {
