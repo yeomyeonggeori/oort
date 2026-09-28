@@ -598,24 +598,24 @@ impl Statement {
                     }
                 };
                 Summary {
-                    title: format!("oort — {kind}에 서명할까요?"),
+                    title: format!("oort: {kind}에 서명합니다"),
                     body: format!("대상: {host}, {session}\n내용: {detail}"),
                     confirm: "서명".into(),
                 }
             }
             Statement::Endorse { request, .. } => Summary {
-                title: "이 폰을 지시 기기로 승인할까요?".into(),
+                title: "oort: 이 폰을 지시 기기로 승인합니다".into(),
                 body: format!(
-                    "기기: {}\n지문: {}\n폰 화면의 지문과 같을 때만 승인하세요.",
+                    "기기: {}\n지문: {}\n설정 화면에 보인 지문과 같고, 방금 연결한 폰이 맞을 때만 승인하세요.",
                     first_line(&request.label),
                     fingerprint(&request.target_public_key).unwrap_or_default(),
                 ),
                 confirm: "승인".into(),
             },
             Statement::Revoke { request, .. } => Summary {
-                title: "이 기기의 지시 권한을 끊을까요?".into(),
+                title: "oort: 이 기기의 지시 권한을 끊습니다".into(),
                 body: format!(
-                    "기기: {}\n지문: {}\n끊은 기기는 이 맥에서 다시 승인해야 지시할 수 있어요.",
+                    "기기: {}\n지문: {}\n끊은 기기는 이 맥에서 다시 승인해야 지시할 수 있습니다.",
                     if request.target_label.trim().is_empty() {
                         short_id(request.target_key_id)
                     } else {

@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Monitor, Smartphone } from "lucide-react";
 import { ApiError } from "@momo/core/lib/api";
@@ -160,7 +160,9 @@ function DeviceKeysBody({
     ? "연결이 끊겨 지금은 승인하거나 끊을 수 없습니다."
     : bound
       ? null
-      : "이 맥을 뿌리로 등록한 뒤 폰을 승인할 수 있습니다.";
+      : local.support === "ready" || local.support === "absent"
+        ? "이 맥을 뿌리로 등록한 뒤 폰을 승인할 수 있습니다."
+        : "이 앱에서는 서명할 수 없어 폰을 승인하거나 끊을 수 없습니다.";
 
   return (
     <div
@@ -181,7 +183,7 @@ function DeviceKeysBody({
         <h4 className="text-meta font-semibold text-ink">지시 기기</h4>
         {phones.length === 0 ? (
           <p className="break-keep text-body text-ink-muted" data-testid="device-keys-no-phone">
-            승인할 폰이 없습니다. 아래 「기기 연결」로 폰을 붙이면 여기에서 승인합니다.
+            승인할 폰이 없습니다. 아래 「폰 연결」로 폰을 붙이면 여기에서 승인합니다.
           </p>
         ) : (
           <ul
@@ -273,6 +275,14 @@ function ThisMacRoot({
   const [password, setPassword] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const fingerprint = local.fingerprint;
+  const rootStartRef = useRef<HTMLButtonElement | null>(null);
+  const passwordRef = useRef<HTMLInputElement | null>(null);
+  const wasAsking = useRef(false);
+  useEffect(() => {
+    if (asking) passwordRef.current?.focus({ preventScroll: true });
+    else if (wasAsking.current) rootStartRef.current?.focus({ preventScroll: true });
+    wasAsking.current = asking;
+  }, [asking]);
 
   const register = useMutation({
     mutationFn: async () => {
@@ -353,7 +363,7 @@ function ThisMacRoot({
         fingerprint={fingerprint}
         detail={
           local.root && !rootRow
-            ? "서버에서 이 맥의 키가 끝났습니다(로그아웃 등). 다시 등록하세요."
+            ? "로그아웃 등으로 이 맥의 키 등록이 해제됐습니다. 다시 등록하세요."
             : "이 맥을 뿌리로 등록해야 폰을 지시 기기로 승인할 수 있습니다."
         }
         notice={notice}
@@ -361,6 +371,14 @@ function ThisMacRoot({
       {asking && needsPassword ? (
         <form
           className="flex min-w-0 flex-col gap-2"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.stopPropagation();
+              setAsking(false);
+              setPassword("");
+              register.reset();
+            }
+          }}
           onSubmit={(event) => {
             event.preventDefault();
             if (!canSubmit || register.isPending) return;
@@ -375,6 +393,7 @@ function ThisMacRoot({
             error={errorText}
           >
             <Input
+              ref={passwordRef}
               id={passwordId}
               type="password"
               autoComplete="current-password"
@@ -418,6 +437,7 @@ function ThisMacRoot({
           )}
           <div className="flex flex-wrap items-center gap-2">
             <Button
+              ref={rootStartRef}
               size="sm"
               aria-disabled={offline || undefined}
               aria-describedby={offline ? reasonId : undefined}
@@ -518,8 +538,20 @@ function PhoneKeyRow({
   const client = useQueryClient();
   const fingerprint = useFingerprint(phone.publicKey);
   const [asking, setAsking] = useState(false);
+  const [revokeAsking, setRevokeAsking] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const label = phone.label.trim() || "이름 없는 폰";
+  const noFingerprintId = useId();
+  const startRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  // Focus follows the two-step flow (ConfirmButton's rule): into the panel
+  // when it opens, back to the trigger when it closes.
+  const wasAsking = useRef(false);
+  useEffect(() => {
+    if (asking) panelRef.current?.focus({ preventScroll: true });
+    else if (wasAsking.current) startRef.current?.focus({ preventScroll: true });
+    wasAsking.current = asking;
+  }, [asking]);
   const refresh = () =>
     void client.invalidateQueries({ queryKey: DEVICE_KEYS_QUERY_KEY(workspaceId) });
 
@@ -540,7 +572,7 @@ function PhoneKeyRow({
     },
     onSuccess: () => {
       setAsking(false);
-      setNotice(`${label}을 지시 기기로 승인했습니다.`);
+      setNotice(`지시 기기로 승인했습니다: ${label}`);
     },
     onSettled: refresh,
   });
@@ -566,11 +598,35 @@ function PhoneKeyRow({
   });
 
   const endorsed = phone.state === "endorsed";
+  const close = () => {
+    setAsking(false);
+    endorse.reset();
+  };
   const error = endorse.isError
     ? serverError(endorse.error, "승인하지 못했습니다. 다시 시도하세요.")
     : revoke.isError
       ? serverError(revoke.error, "지시 권한을 끊지 못했습니다. 다시 시도하세요.")
       : null;
+
+  const identity = (
+    <div className="flex min-w-0 flex-1 items-start gap-2">
+      <Smartphone className="mt-px size-4 shrink-0 text-ink-muted" aria-hidden="true" />
+      <div className="flex min-w-0 flex-1 flex-col gap-px">
+        <p className="flex min-w-0 flex-wrap items-center gap-2 text-body text-ink">
+          <span className="min-w-0 break-keep">{label}</span>
+          {endorsed ? (
+            <StatusChip tone="ok">지시 기기</StatusChip>
+          ) : (
+            <StatusChip tone="warn">승인 전</StatusChip>
+          )}
+        </p>
+        {/* The approve panel shows it large; one fingerprint on screen at a time. */}
+        {fingerprint && !asking && <Fingerprint value={fingerprint} />}
+      </div>
+    </div>
+  );
+
+  const canApprove = !locked && fingerprint !== null;
 
   return (
     <li
@@ -578,50 +634,73 @@ function PhoneKeyRow({
       data-testid={`device-key-phone-${phone.id}`}
       data-device-key-state={phone.state}
     >
-      <div className="flex min-w-0 items-start gap-2">
-        <Smartphone className="mt-px size-4 shrink-0 text-ink-muted" aria-hidden="true" />
-        <div className="flex min-w-0 flex-1 flex-col gap-px">
-          <p className="flex min-w-0 flex-wrap items-center gap-2 text-body text-ink">
-            <span className="min-w-0 break-keep">{label}</span>
-            {endorsed ? (
-              <StatusChip tone="ok">지시 기기</StatusChip>
-            ) : (
-              <StatusChip tone="warn">승인 전</StatusChip>
-            )}
-          </p>
-          {fingerprint && <Fingerprint value={fingerprint} />}
-        </div>
+      {/* Same grammar as 연결된 기기 rows: identity left, the one action right;
+          the row stacks while a confirmation is open. */}
+      <div
+        className={
+          asking || revokeAsking
+            ? "flex min-w-0 flex-col items-stretch gap-2"
+            : "flex min-w-0 items-start justify-between gap-3"
+        }
+      >
+        {identity}
+        {!endorsed && !asking && (
+          <div className="shrink-0">
+            <Button
+              ref={startRef}
+              size="sm"
+              variant="secondary"
+              aria-disabled={locked || undefined}
+              aria-describedby={locked ? lockedReasonId : undefined}
+              className={locked ? "opacity-50" : undefined}
+              onClick={() => {
+                if (locked) return;
+                setAsking(true);
+              }}
+              data-testid="device-key-endorse-start"
+            >
+              지시 기기로 승인
+            </Button>
+          </div>
+        )}
+        {endorsed && (
+          <div className={revokeAsking ? "min-w-0" : "shrink-0"}>
+            <ConfirmButton
+              label="지시 권한 끊기"
+              subject={label}
+              question="끊은 폰은 이 맥에서 다시 승인해야 지시할 수 있습니다."
+              confirmLabel="끊기"
+              busy={revoke.isPending}
+              busyLabel="끊는 중"
+              disabled={locked}
+              describedBy={locked ? lockedReasonId : undefined}
+              onAskingChange={setRevokeAsking}
+              onConfirm={() => revoke.mutate()}
+              testId="device-key-revoke"
+            />
+          </div>
+        )}
       </div>
 
-      {!endorsed && !asking && (
-        <div>
-          <Button
-            size="sm"
-            variant="secondary"
-            aria-disabled={locked || undefined}
-            aria-describedby={locked ? lockedReasonId : undefined}
-            className={locked ? "opacity-50" : undefined}
-            onClick={() => {
-              if (locked) return;
-              setAsking(true);
-            }}
-            data-testid="device-key-endorse-start"
-          >
-            이 폰을 지시 기기로 승인
-          </Button>
-        </div>
-      )}
       {!endorsed && asking && (
         <div
-          className="flex min-w-0 flex-col gap-2 rounded-md bg-surface-muted p-3"
+          ref={panelRef}
+          tabIndex={-1}
+          className="flex min-w-0 flex-col gap-2 rounded-md bg-surface-muted p-3 focus-visible:focus-ring"
           role="group"
-          aria-label={`${label} 승인`}
+          aria-label={`승인: ${label}`}
           data-testid="device-key-endorse-confirm"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.stopPropagation();
+              close();
+            }
+          }}
         >
           <p className="break-keep text-body text-ink">
-            폰 화면에 보이는 지문이 아래와 같을 때만 승인하세요.
+            방금 이 계정에 연결한 폰이 맞는지 확인하고 승인하세요. 이 폰 키의 지문입니다.
           </p>
-          {fingerprint && (
+          {fingerprint ? (
             <p
               className="font-mono text-title text-ink"
               data-numeric=""
@@ -629,49 +708,35 @@ function PhoneKeyRow({
             >
               {fingerprint}
             </p>
+          ) : (
+            <p className="break-keep text-meta text-ink-muted" id={noFingerprintId}>
+              지문을 계산하지 못해 지금은 승인할 수 없습니다.
+            </p>
           )}
           <p className="break-keep text-meta text-ink-muted">
-            승인하면 이 맥이 확인 창을 띄우고 Touch ID로 서명합니다.
+            승인하면 이 맥이 확인 창을 띄우고 Touch ID로 서명합니다. 확인 창의 지문도 같은지 보세요.
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
               aria-busy={endorse.isPending || undefined}
+              aria-disabled={!canApprove || undefined}
+              aria-describedby={
+                locked ? lockedReasonId : fingerprint === null ? noFingerprintId : undefined
+              }
+              className={canApprove ? undefined : "opacity-50"}
               onClick={() => {
-                if (endorse.isPending) return;
+                if (!canApprove || endorse.isPending) return;
                 endorse.mutate();
               }}
               data-testid="device-key-endorse-submit"
             >
-              {endorse.isPending ? "승인 중" : "지문이 같습니다, 승인"}
+              {endorse.isPending ? "승인 중" : "지시 기기로 승인"}
             </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                setAsking(false);
-                endorse.reset();
-              }}
-            >
+            <Button size="sm" variant="ghost" onClick={close}>
               취소
             </Button>
           </div>
-        </div>
-      )}
-      {endorsed && (
-        <div>
-          <ConfirmButton
-            label="지시 권한 끊기"
-            subject={label}
-            question="끊은 폰은 이 맥에서 다시 승인해야 지시할 수 있습니다."
-            confirmLabel="끊기"
-            busy={revoke.isPending}
-            busyLabel="끊는 중"
-            disabled={locked}
-            describedBy={locked ? lockedReasonId : undefined}
-            onConfirm={() => revoke.mutate()}
-            testId="device-key-revoke"
-          />
         </div>
       )}
       {error && (

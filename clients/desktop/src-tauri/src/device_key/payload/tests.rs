@@ -380,3 +380,19 @@ fn the_dialog_shows_what_is_signed_and_nothing_that_can_spoof_it() {
         .body
         .contains(&fingerprint("A2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW").unwrap()));
 }
+
+/// The web pre-flight cannot read Rust, so the dialog's copy rule is held
+/// here: no em/en dash in any title, body or button (design-review M8).
+#[test]
+fn no_dialog_text_carries_a_dash() {
+    for case in cases() {
+        let summary = statement_of(&case).summary(None);
+        for text in [&summary.title, &summary.body, &summary.confirm] {
+            assert!(
+                !text.contains('\u{2014}') && !text.contains('\u{2013}'),
+                "{}: {text}",
+                case["name"]
+            );
+        }
+    }
+}

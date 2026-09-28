@@ -294,7 +294,7 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
     core.listDeviceKeys.mockResolvedValue([key(), { ...rootRow, state: "revoked" }]);
     const host = mount();
     await waitFor(() => q(host, "device-key-root-unbound") !== null, "unbound");
-    expect(host.textContent).toContain("서버에서 이 맥의 키가 끝났습니다");
+    expect(host.textContent).toContain("이 맥의 키 등록이 해제됐습니다");
     expect(q(host, "device-keys")?.dataset.deviceKeyBound).toBe("false");
     expect(q(host, "device-key-endorse-start")?.getAttribute("aria-disabled")).toBe("true");
   });
@@ -327,6 +327,20 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
       rootKeyId: ROOT_ID,
       signature: "c2ln",
     });
+  });
+
+  it("승인 단계는 초점을 패널로 옮기고, 취소하면 승인 버튼으로 돌려놓는다", async () => {
+    const host = mount();
+    await waitFor(() => q(host, "device-key-endorse-start") !== null, "phone row");
+    await click(q(host, "device-key-endorse-start"), "start");
+    expect(document.activeElement).toBe(q(host, "device-key-endorse-confirm"));
+    await act(async () => {
+      q(host, "device-key-endorse-confirm")!.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+      );
+    });
+    expect(q(host, "device-key-endorse-confirm")).toBeNull();
+    expect(document.activeElement).toBe(q(host, "device-key-endorse-start"));
   });
 
   it("네이티브 확인 창에서 취소하면 서버에 아무것도 내지 않는다", async () => {

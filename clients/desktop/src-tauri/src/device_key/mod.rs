@@ -555,9 +555,9 @@ pub async fn device_key_bind_root(
             return Err("device_key_changed".into());
         }
         let summary = Summary {
-            title: "이 맥을 지시 서명의 뿌리로 쓸까요?".into(),
+            title: "oort: 이 맥을 지시 서명의 뿌리로 씁니다".into(),
             body: format!(
-                "지문: {}\n이 맥의 작업 호스트가 이 키를 뿌리로 고정해요. 고정은 이 맥에서만 되돌릴 수 있어요.",
+                "지문: {}\n이 맥의 작업 호스트가 이 키를 뿌리로 고정합니다. 고정은 이 맥에서만 되돌릴 수 있습니다.",
                 payload::fingerprint(&current).unwrap_or_default()
             ),
             confirm: "뿌리로 쓰기".into(),

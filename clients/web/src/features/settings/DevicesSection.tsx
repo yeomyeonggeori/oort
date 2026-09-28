@@ -49,7 +49,7 @@ export function DevicesSection({
           });
           return `그 폰의 지시 권한도 끊었습니다. ${hostDeliveryCopy(letter.host)}`;
         } catch {
-          return "지시 권한 폐기서는 보내지 못했습니다. 연결 해제로 서버의 키는 함께 끝납니다.";
+          return "지시 권한 해제에 서명하지 못했습니다. 연결을 끊으면 서버에서는 그 폰의 키도 함께 해제됩니다.";
         } finally {
           void client.invalidateQueries({
             queryKey: DEVICE_KEYS_QUERY_KEY(signing.workspaceId),
@@ -61,7 +61,11 @@ export function DevicesSection({
   return (
     <SectionShell
       title="기기"
-      lines={["이 계정에 QR로 붙인 기기입니다."]}
+      lines={[
+        signing
+          ? "지시에 서명하는 기기와, 이 계정에 QR로 붙인 기기입니다."
+          : "이 계정에 QR로 붙인 기기입니다.",
+      ]}
     >
       {signing && (
         <DeviceKeysBlock
