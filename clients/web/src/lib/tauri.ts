@@ -23,6 +23,10 @@ import type { HostedAgentProbe as HostedAgentProbeWire } from "@momo/core/featur
 import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
 import type { LocalWorkHostStatus } from "@momo/core/features/settings/thisMacHost";
 import type {
+  HarnessProfileRef,
+  ProfileRemoveOutcome,
+} from "@momo/core/features/settings/harnessProfiles";
+import type {
   GitReadCommand,
   GitReadResult,
 } from "@momo/core/features/workbench/gitRead";
@@ -261,6 +265,54 @@ export async function detectLocalHarnesses(): Promise<LocalHarnessProbe[]> {
   }
 }
 
+// ---- account profiles (#2878, ADR-0191 D1, ADR-0190 D3-f) ---------------------
+
+/**
+ * oort 프로필 폴더. 웹뷰는 하네스 id와 라벨만 넘기고, 폴더는 셸이 정하고 검사한다
+ * (`harness_profile.rs`). 브라우저 탭에는 프로필이 없다: 목록은 빈 배열, 나머지는
+ * 거부한다.
+ */
+export async function harnessProfileList(): Promise<HarnessProfileRef[]> {
+  const { normalizeProfileList } = await import("@momo/core/features/settings/harnessProfiles");
+  if (!IS_TAURI) return [];
+  try {
+    return normalizeProfileList(await invoke<unknown>("harness_profile_list"));
+  } catch {
+    return [];
+  }
+}
+
+/** 새 빈 프로필 폴더. 같은 라벨이 있으면 셸이 거부한다(「already exists」). */
+export async function harnessProfileCreate(profile: HarnessProfileRef): Promise<void> {
+  if (!IS_TAURI) throw new Error("not_desktop");
+  await invoke<void>("harness_profile_create", { profile });
+}
+
+/** 그 프로필 폴더로 돌린 D3-a 상태 명령. 실패하면 「모름」. */
+export async function harnessProfileStatus(profile: HarnessProfileRef): Promise<LocalHarnessProbe> {
+  const unknown: LocalHarnessProbe = { id: profile.harness, installed: false, auth: "unknown" };
+  if (!IS_TAURI) return unknown;
+  try {
+    const { normalizeLocalHarnessProbes } = await import(
+      "@momo/core/features/hostedAgents/detect"
+    );
+    const raw = await invoke<unknown>("harness_profile_status", { profile });
+    return normalizeLocalHarnessProbes([raw]).find((row) => row.id === profile.harness) ?? unknown;
+  } catch {
+    return unknown;
+  }
+}
+
+/**
+ * 폴더 삭제. 셸이 상태 명령을 다시 돌려 「로그인 안 됨」일 때만 지운다. 거부(경로
+ * 검사 실패)는 reject, 지우지 않은 결말은 `still_signed_in`·`unknown`.
+ */
+export async function harnessProfileRemove(profile: HarnessProfileRef): Promise<ProfileRemoveOutcome> {
+  if (!IS_TAURI) throw new Error("not_desktop");
+  const { normalizeRemoveOutcome } = await import("@momo/core/features/settings/harnessProfiles");
+  return normalizeRemoveOutcome(await invoke<unknown>("harness_profile_remove", { profile }));
+}
+
 // ---- local terminal lane (#2772 shell, #2774 panes) ---------------------------
 
 /**
@@ -272,7 +324,15 @@ export async function detectLocalHarnesses(): Promise<LocalHarnessProbe[]> {
 export type PtyProgram =
   | { kind: "shell" }
   | { kind: "harness"; id: "claude" | "codex" | "grok" }
-  | { kind: "login"; id: "claude" | "codex"; method: "browser" | "device" };
+  | {
+      kind: "login";
+      id: "claude" | "codex";
+      method: "browser" | "device";
+      /** 프로필 라벨(#2878). 없으면 이 맥의 기본 위치. 셸이 폴더를 정한다. */
+      profile?: string;
+    }
+  /** 공식 CLI 로그아웃(ADR-0190 D3-f A2·A5). 늘 oort 프로필이다. */
+  | { kind: "logout"; id: "claude" | "codex"; profile: string };
 
 export interface PtyExit {
   id: number;

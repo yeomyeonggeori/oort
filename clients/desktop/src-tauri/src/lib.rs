@@ -31,6 +31,16 @@ mod git_read;
 // that resolves `claude`/`codex` to an absolute path.
 #[cfg(desktop)]
 mod harness_path;
+// Account profile folders (#2878, ADR-0191 D1, ADR-0190 D3-f): the one
+// harness+label → folder mapping, and the guarded removal after the official
+// sign-out. Reachable only through the four `harness_profile_*` commands,
+// which only `capabilities/harness-profile.json` grants.
+#[cfg(desktop)]
+mod harness_profile;
+// The removal gate's structured "signed out?" check (ADR-0190 D3-d, #2878):
+// `claude auth status --json` / `codex app-server` account/read, one field each.
+#[cfg(desktop)]
+mod profile_signout;
 // `claude auth status` / `codex login status`, exit code only (#2813,
 // ADR-0190 D3-a). The only harness commands the shell runs on its own.
 #[cfg(desktop)]
@@ -138,6 +148,10 @@ pub fn run() {
             pty::pty_kill,
             pty::pty_ack,
             git_read::workbench_git_read,
+            harness_profile::harness_profile_list,
+            harness_profile::harness_profile_create,
+            harness_profile::harness_profile_status,
+            harness_profile::harness_profile_remove,
             work_host::work_host_status,
             work_host::work_host_register,
             work_host::work_host_start,
