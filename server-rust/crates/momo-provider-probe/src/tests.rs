@@ -189,6 +189,24 @@ async fn mock() -> (u16, Arc<AtomicUsize>) {
                 c8();
                 axum::response::Html("<html>welcome</html>")
             }),
+        )
+        // #3009: a hostile list that tries to leak the presented key through
+        // the model ids — whole, sliced, padded — next to one real id.
+        .route(
+            "/echo-ids/v1/models",
+            get(move |headers: HeaderMap| async move {
+                let key = bearer(&headers);
+                let (head, tail) = key.split_at(key.len() / 2);
+                axum::Json(serde_json::json!({
+                    "data": [
+                        {"id": key.clone()},
+                        {"id": head},
+                        {"id": tail},
+                        {"id": format!("model-{key}-x")},
+                        {"id": "gpt-real"},
+                    ],
+                }))
+            }),
         );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -684,4 +702,138 @@ async fn openrouter_with_a_trailing_dot_is_still_checked_on_key() {
         .await;
     assert_eq!(report.method, ProbeMethod::Key, "{report:?}");
     assert_eq!(report.outcome, ProbeOutcome::Rejected, "{report:?}");
+}
+
+// ---------------------------------------------------------------------------
+// #3009 — model ids
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn the_models_list_reports_its_ids_and_a_page_is_marked_truncated() {
+    let (port, _) = mock().await;
+    let report = opted_in(&[])
+        .probe(&target(
+            format!("http://127.0.0.1:{port}/openai/v1/"),
+            ProbeCredential::Bearer(GOOD.into()),
+        ))
+        .await;
+    assert_eq!(
+        report.model_ids.as_deref(),
+        Some(&["a".to_string(), "b".to_string(), "c".to_string()][..])
+    );
+    assert!(!report.model_ids_truncated);
+
+    let anthropic = opted_in(&[])
+        .probe(&target(
+            format!("http://127.0.0.1:{port}/anthropic/v1"),
+            ProbeCredential::AnthropicKey(GOOD.into()),
+        ))
+        .await;
+    assert_eq!(
+        anthropic.model_ids.as_deref(),
+        Some(&["claude-a".to_string(), "claude-b".to_string()][..])
+    );
+
+    let paged = opted_in(&[])
+        .probe(&target(
+            format!("http://127.0.0.1:{port}/anthropic-paged/v1"),
+            ProbeCredential::AnthropicKey(GOOD.into()),
+        ))
+        .await;
+    assert_eq!(paged.model_ids.as_deref(), Some(&["x".to_string()][..]));
+    assert!(
+        paged.model_ids_truncated,
+        "a first page is not the whole list"
+    );
+
+    // A refused key has no list.
+    let refused = opted_in(&[])
+        .probe(&target(
+            format!("http://127.0.0.1:{port}/openai/v1"),
+            ProbeCredential::Bearer(BAD.into()),
+        ))
+        .await;
+    assert_eq!(refused.model_ids, None);
+}
+
+#[tokio::test]
+async fn openrouter_key_check_reports_no_model_ids() {
+    let (port, _) = mock().await;
+    let report = opted_in(&["openrouter.ai"])
+        .probe(&target(
+            format!("http://openrouter.ai:{port}/api/v1"),
+            ProbeCredential::Bearer(GOOD.into()),
+        ))
+        .await;
+    assert_eq!(report.outcome, ProbeOutcome::Ok, "{report:?}");
+    // The public /models is never read, so there is no key-scoped list.
+    assert_eq!(report.model_ids, None);
+}
+
+#[tokio::test]
+async fn a_list_that_echoes_the_key_into_ids_repeats_none_of_it() {
+    let (port, _) = mock().await;
+    let report = opted_in(&[])
+        .probe(&target(
+            format!("http://127.0.0.1:{port}/echo-ids/v1"),
+            ProbeCredential::Bearer(GOOD.into()),
+        ))
+        .await;
+    assert_eq!(report.outcome, ProbeOutcome::Ok, "{report:?}");
+    assert_eq!(
+        report.model_ids.as_deref(),
+        Some(&["gpt-real".to_string()][..]),
+        "only the real id survives"
+    );
+    assert_no_key(&report);
+    let debug = format!("{report:?}");
+    let (head, tail) = GOOD.split_at(GOOD.len() / 2);
+    assert!(!debug.contains(head) && !debug.contains(tail), "{debug}");
+}
+
+#[test]
+fn model_ids_keeps_only_sanitized_unique_string_ids_up_to_the_cap() {
+    let body = serde_json::json!({"data": [
+        {"id": "gpt-5"}, {"id": "gpt-5"}, {"id": 7}, {"name": "no-id"}, "bare",
+        {"id": "bad id"}, {"id": "<script>"}, {"id": " claude-x "}, {"id": null},
+    ]});
+    let (ids, truncated) = model_ids(&body, "sk-unrelated-secret");
+    assert_eq!(ids, vec!["gpt-5".to_string(), "claude-x".to_string()]);
+    assert!(!truncated, "dropped ids are not truncation");
+
+    let many: Vec<serde_json::Value> = (0..MAX_PROBE_MODEL_IDS + 5)
+        .map(|i| serde_json::json!({"id": format!("m-{i}")}))
+        .collect();
+    let (ids, truncated) = model_ids(&serde_json::json!({"data": many}), "");
+    assert_eq!(ids.len(), MAX_PROBE_MODEL_IDS);
+    assert!(truncated);
+
+    let (ids, truncated) = model_ids(&serde_json::json!({"object": "list"}), "");
+    assert!(ids.is_empty() && !truncated);
+}
+
+#[test]
+fn model_ids_drops_any_id_carrying_an_eight_byte_piece_of_the_key() {
+    // A made-up, low-entropy key: long enough for several distinct 8-byte
+    // windows, and not a credential shape a secret scanner should chase.
+    let key = &["sk", "or", "v1", "fixture", "not", "a", "real", "key"].join("-");
+    let body = serde_json::json!({"data": [
+        {"id": key},
+        {"id": &key[..12]},
+        {"id": &key[10..]},
+        {"id": format!("x-{}", &key[4..12])},
+        {"id": &key[..7]},
+        {"id": "gpt-5.4-codex"},
+    ]});
+    let (ids, _) = model_ids(&body, key);
+    // A 7-byte slice is below the window and is kept: every id shares short
+    // runs with some key, so that is not treated as the key.
+    assert_eq!(ids, vec![key[..7].to_string(), "gpt-5.4-codex".to_string()]);
+
+    // A key shorter than the window is matched whole.
+    let (ids, _) = model_ids(
+        &serde_json::json!({"data": [{"id": "abc"}, {"id": "xabcx"}, {"id": "ab"}]}),
+        "abc",
+    );
+    assert_eq!(ids, vec!["ab".to_string()]);
 }

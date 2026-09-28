@@ -3009,6 +3009,80 @@ pub struct ProviderChainProbeDto {
     pub probe: Option<ProviderProbeDetailDto>,
 }
 
+// ---------------------------------------------------------------------------
+// provider default AI (#3009)
+// ---------------------------------------------------------------------------
+
+/// `GET|PUT /v1/provider/default-ai` response — the 「기본 AI」 team rows.
+/// A row that was never chosen (or was cleared) is `null`: the server decides.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderDefaultAiResponse {
+    pub schema: &'static str,
+    pub team_agent: Option<ProviderDefaultAiRowDto>,
+    pub summary: Option<ProviderDefaultAiRowDto>,
+    pub guardrail: ProviderDefaultAiGuardrailDto,
+}
+
+/// One stored team row: a link reference and a model id, nothing else.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderDefaultAiRowDto {
+    /// Always `team_link`.
+    pub source: &'static str,
+    /// Cascade position: 0 = the provider link, >= 1 = a chain hop.
+    pub link_position: i32,
+    /// The redacted endpoint label the position had when it was chosen.
+    pub endpoint_label: String,
+    /// False when the position no longer exists or now has a different
+    /// endpoint (the chain was edited after this row was saved).
+    pub link_resolved: bool,
+    /// `null` = the link's own default model.
+    pub model_id: Option<String>,
+    pub updated_by: Option<String>,
+    pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderDefaultAiGuardrailDto {
+    /// `off` until the decision-model ADR is Accepted (AI 계정 Q6).
+    pub mode: &'static str,
+    /// False: the guardrail row cannot be turned on on this server yet.
+    pub available: bool,
+}
+
+/// `PUT /v1/provider/default-ai` body. Each row is a patch: omitted = keep,
+/// `null` = clear, object = replace that row. Unknown fields are refused so a
+/// path, token or profile field cannot ride along.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PutProviderDefaultAiRequest {
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub team_agent: OptionalPatch<ProviderDefaultAiRowInput>,
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub summary: OptionalPatch<ProviderDefaultAiRowInput>,
+    #[serde(default)]
+    pub guardrail: Option<ProviderDefaultAiGuardrailInput>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProviderDefaultAiRowInput {
+    /// Must be `team_link`; anything else (a personal subscription, a profile)
+    /// is a 400.
+    pub source: String,
+    pub link_position: i32,
+    #[serde(default)]
+    pub model_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProviderDefaultAiGuardrailInput {
+    pub mode: String,
+}
+
 /// What one live probe saw (#2960). Every number is one the provider stated —
 /// a list length, a rate-limit header, OpenRouter's key record — and nothing
 /// here is text the provider sent.
@@ -3025,6 +3099,17 @@ pub struct ProviderProbeDetailDto {
     /// Omitted when the list was paginated (a first page is not a count).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_count: Option<u64>,
+    /// #3009 — the model ids the list body named (`data[].id`), each passed
+    /// through `momo_settings::sanitized_model_id`, deduplicated, at most
+    /// `MAX_PROBE_MODEL_IDS`. Omitted when the method has no model list
+    /// (OpenRouter `/key`) or the body was not read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_ids: Option<Vec<String>>,
+    /// True when the provider named more ids than `modelIds` carries: the list
+    /// said it is paginated, or it passed the cap. Ids the sanitizer dropped do
+    /// not count as truncation.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub model_ids_truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rate_limit: Option<ProviderRateLimitDto>,
     #[serde(skip_serializing_if = "Option::is_none")]

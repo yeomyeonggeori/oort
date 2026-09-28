@@ -7771,6 +7771,70 @@ paths:
         "403": {$ref: "#/components/responses/ProviderOperatorForbidden"}
         "429": {$ref: "#/components/responses/RateLimited"}
 
+  /v1/provider/default-ai:
+    get:
+      tags: [agents]
+      operationId: getProviderDefaultAi
+      summary: Read the 「기본 AI」 team rows (team agent answer, channel summary).
+      description: >
+        #3009 (ADR-0147 증보 2026-09-28, ADR-0190 증보 2026-09-28).
+        Instance-global operator surface with the same boundary as
+        `/v1/provider/link` (MOMO-583): a human carrying platform:read, or an
+        owner/admin whose verified email is on the instance operator allowlist.
+        Everyone else gets 403 and no values — the same verdict the settings
+        table uses. A row holds a team link reference (cascade position plus
+        the endpoint label it had when chosen) and a model id; never a bearer,
+        path or token. `null` = never chosen, the server decides. The agent
+        worker does not read these rows yet (precedence when it does: the
+        agent's own model, then `teamAgent.modelId`, then `AGENT_MODEL`).
+      security: [{bearerAuth: []}]
+      responses:
+        "200":
+          description: The team rows and the guardrail state.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProviderDefaultAiResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/ProviderOperatorForbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+    put:
+      tags: [agents]
+      operationId: putProviderDefaultAi
+      summary: Change 「기본 AI」 team rows (patch per row).
+      description: >
+        Same operator boundary as the read. Each row is a patch: omitted keeps
+        it, `null` clears it, an object replaces it. `source` must be
+        `team_link` — a team row never runs on a personal subscription
+        (brief §4.5 invariant 2; the table CHECK refuses it again).
+        `linkPosition` must name a configured hop (0 = the provider link or its
+        env fallback). `modelId` is not checked against a live probe; the
+        picker filters by the connection check's `modelIds`. `guardrail` accepts
+        only `off` until the decision-model ADR is Accepted (AI 계정 Q6). Every
+        row change writes a `provider_default_ai.updated` audit row.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PutProviderDefaultAiRequest"}
+      responses:
+        "200":
+          description: The team rows after the change.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProviderDefaultAiResponse"}
+        "400":
+          description: >
+            A source other than team_link, an unconfigured or negative
+            linkPosition, a malformed modelId, or a guardrail mode other than off.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/ProviderOperatorForbidden"}
+        "422": {description: Unknown field in the body (the body is closed).}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
   /v1/provider/effort-table:
     get:
       tags: [agents]
@@ -10272,6 +10336,77 @@ components:
         muted:
           type: boolean
 
+    ProviderDefaultAiResponse:
+      type: object
+      additionalProperties: false
+      required: [schema, teamAgent, summary, guardrail]
+      properties:
+        schema: {type: string, enum: [momo.provider.default_ai.v0]}
+        teamAgent:
+          nullable: true
+          allOf:
+            - {$ref: "#/components/schemas/ProviderDefaultAiRow"}
+        summary:
+          nullable: true
+          allOf:
+            - {$ref: "#/components/schemas/ProviderDefaultAiRow"}
+        guardrail: {$ref: "#/components/schemas/ProviderDefaultAiGuardrail"}
+    ProviderDefaultAiRow:
+      type: object
+      additionalProperties: false
+      required: [source, linkPosition, endpointLabel, linkResolved, modelId, updatedBy, updatedAtMs]
+      properties:
+        source: {type: string, enum: [team_link]}
+        linkPosition: {type: integer, minimum: 0}
+        endpointLabel:
+          type: string
+          description: Redacted endpoint label the position had when it was chosen.
+        linkResolved:
+          type: boolean
+          description: False when the position is gone or now has a different endpoint.
+        modelId:
+          type: string
+          nullable: true
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,63}$"
+          description: "`null` = the link's own default model."
+        updatedBy: {type: string, nullable: true, format: uuid}
+        updatedAtMs: {type: integer, format: int64}
+    ProviderDefaultAiGuardrail:
+      type: object
+      additionalProperties: false
+      required: [mode, available]
+      properties:
+        mode: {type: string, enum: ["off"]}
+        available: {type: boolean, enum: [false]}
+    PutProviderDefaultAiRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        teamAgent:
+          nullable: true
+          allOf:
+            - {$ref: "#/components/schemas/ProviderDefaultAiRowInput"}
+        summary:
+          nullable: true
+          allOf:
+            - {$ref: "#/components/schemas/ProviderDefaultAiRowInput"}
+        guardrail:
+          type: object
+          additionalProperties: false
+          required: [mode]
+          properties:
+            mode: {type: string, enum: ["off"]}
+    ProviderDefaultAiRowInput:
+      type: object
+      additionalProperties: false
+      required: [source, linkPosition]
+      properties:
+        source: {type: string, enum: [team_link]}
+        linkPosition: {type: integer, minimum: 0}
+        modelId:
+          type: string
+          nullable: true
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,63}$"
     UpdateNotificationRulesRequest:
       type: object
       required: [dnd, mentionOverridesMute]

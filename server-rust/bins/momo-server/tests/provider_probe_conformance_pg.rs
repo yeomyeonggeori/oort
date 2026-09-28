@@ -310,6 +310,24 @@ async fn provider_mock() -> (u16, Arc<AtomicUsize>) {
                         .into_response()
                 }
             }),
+        )
+        // #3009: a list that tries to leak the presented key through its ids.
+        .route(
+            "/echo-ids/v1/models",
+            get(move |headers: HeaderMap| async move {
+                let key = headers
+                    .get("authorization")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.strip_prefix("Bearer "))
+                    .unwrap_or("")
+                    .to_string();
+                let (head, tail) = key.split_at(key.len() / 2);
+                axum::Json(json!({"data": [
+                    {"id": key.clone()}, {"id": head}, {"id": tail},
+                    {"id": format!("m-{key}")}, {"id": "gpt-real"}, {"id": "bad id"},
+                ]}))
+                .into_response()
+            }),
         );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -378,6 +396,9 @@ async fn the_connection_check_dials_the_provider() {
     assert_eq!(entry["probe"]["method"], "models");
     assert_eq!(entry["probe"]["httpStatus"], json!(200));
     assert_eq!(entry["probe"]["modelCount"], json!(3));
+    // #3009: the ids the list named, sanitized, and no truncation flag.
+    assert_eq!(entry["probe"]["modelIds"], json!(["a", "b", "c"]));
+    assert_eq!(entry["probe"].get("modelIdsTruncated"), None);
     assert_eq!(entry["probe"]["rateLimit"]["source"], "x-ratelimit");
     assert_eq!(entry["probe"]["rateLimit"]["requestsLimit"], json!(5000));
     assert_eq!(
@@ -405,6 +426,7 @@ async fn the_connection_check_dials_the_provider() {
     put(json!({"baseUrl": format!("http://127.0.0.1:{port}/openai/v1"), "bearer": BAD})).await;
     let refused = check_json().await;
     assert_eq!(refused["ok"], json!(false));
+    assert_eq!(refused["entries"][0]["probe"].get("modelIds"), None);
     assert_eq!(refused["reason"], "provider_auth_failed", "{refused}");
     assert_eq!(refused["entries"][0]["probe"]["outcome"], "rejected");
     assert_eq!(refused["entries"][0]["probe"]["httpStatus"], json!(401));
@@ -421,6 +443,10 @@ async fn the_connection_check_dials_the_provider() {
     let anthropic = check_json().await;
     assert_eq!(anthropic["ok"], json!(true), "{anthropic}");
     assert_eq!(anthropic["entries"][0]["probe"]["modelCount"], json!(2));
+    assert_eq!(
+        anthropic["entries"][0]["probe"]["modelIds"],
+        json!(["claude-a", "claude-b"])
+    );
     assert_eq!(
         anthropic["entries"][0]["probe"]["rateLimit"]["source"],
         "anthropic-ratelimit"
@@ -456,4 +482,288 @@ async fn the_connection_check_dials_the_provider() {
         3,
         "a refused check dials nothing"
     );
+}
+
+// ---------------------------------------------------------------------------
+// #3009 — model ids in the check, and the 「기본 AI」 operator rows
+// ---------------------------------------------------------------------------
+
+async fn reset_provider_tables(su: &PgPool) {
+    for table in [
+        "provider_default_ai",
+        "provider_link_chain",
+        "provider_link",
+    ] {
+        sqlx::query(&format!("DELETE FROM {table}"))
+            .execute(su)
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_connection_check_names_model_ids_but_never_the_key() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su, "probe-ids").await;
+    let base = start_server(momo_app_pool().await, &fixture.email).await;
+    let http = reqwest::Client::new();
+    reset_provider_tables(&su).await;
+    let token = login(&http, &base, &fixture).await;
+    let (port, _) = provider_mock().await;
+
+    let saved = http
+        .put(format!("{base}/v1/provider/link"))
+        .bearer_auth(&token)
+        .json(&json!({"baseUrl": format!("http://127.0.0.1:{port}/echo-ids/v1"), "bearer": GOOD}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(saved.status(), 200);
+    let response = http
+        .post(format!("{base}/v1/provider/link/test"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let text = response.text().await.unwrap();
+    let (head, tail) = GOOD.split_at(GOOD.len() / 2);
+    for piece in [GOOD, head, tail] {
+        assert!(
+            !text.contains(piece),
+            "a piece of the key reached the response: {text}"
+        );
+    }
+    let probe: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(probe["ok"], json!(true), "{probe}");
+    assert_eq!(
+        probe["entries"][0]["probe"]["modelIds"],
+        json!(["gpt-real"]),
+        "only the real, well-formed id survives"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_default_ai_rows_are_operator_only_and_never_a_personal_credential() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let operator = seed(&su, "default-ai-op").await;
+    // An owner of their own workspace, verified, but not a listed operator.
+    let stranger = seed(&su, "default-ai-owner").await;
+    let base = start_server(app_pool.clone(), &operator.email).await;
+    let http = reqwest::Client::new();
+    reset_provider_tables(&su).await;
+    let op = login(&http, &base, &operator).await;
+    let other = login(&http, &base, &stranger).await;
+    let url = format!("{base}/v1/provider/default-ai");
+
+    let put = |token: &str, body: Value| {
+        let request = http.put(&url).bearer_auth(token).json(&body);
+        async move {
+            let response = request.send().await.unwrap();
+            let status = response.status().as_u16();
+            let text = response.text().await.unwrap();
+            (
+                status,
+                serde_json::from_str::<Value>(&text).unwrap_or(json!(text)),
+            )
+        }
+    };
+    let get = |token: &str| {
+        let request = http.get(&url).bearer_auth(token);
+        async move {
+            let response = request.send().await.unwrap();
+            let status = response.status().as_u16();
+            (
+                status,
+                response.json::<Value>().await.unwrap_or(Value::Null),
+            )
+        }
+    };
+
+    // -- 1. not an operator: both verbs are 403, and nothing is written -------
+    assert_eq!(get(&other).await.0, 403);
+    let body = json!({"teamAgent": {"source": "team_link", "linkPosition": 0}});
+    assert_eq!(put(&other, body).await.0, 403);
+
+    // -- 2. operator, nothing chosen: both rows null, guardrail off ------------
+    let (status, empty) = get(&op).await;
+    assert_eq!(status, 200, "{empty}");
+    assert_eq!(empty["schema"], "momo.provider.default_ai.v0");
+    assert_eq!(empty["teamAgent"], Value::Null);
+    assert_eq!(empty["summary"], Value::Null);
+    assert_eq!(
+        empty["guardrail"],
+        json!({"mode": "off", "available": false})
+    );
+
+    // A link and one chain hop to point at.
+    let link = http
+        .put(format!("{base}/v1/provider/link"))
+        .bearer_auth(&op)
+        .json(&json!({"baseUrl": "http://127.0.0.1:9/openai/v1", "bearer": GOOD}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(link.status(), 200);
+    let chain = |host: &'static str| {
+        let request = http
+            .put(format!("{base}/v1/provider/link/chain"))
+            .bearer_auth(&op)
+            .json(&json!({"entries": [{"position": 1, "baseUrl": host, "bearer": GOOD}]}));
+        async move { assert_eq!(request.send().await.unwrap().status(), 200) }
+    };
+    chain("http://127.0.0.1:10/first/v1").await;
+
+    // -- 3. a personal credential is refused, by the route and by the table ---
+    for source in ["profile", "subscription", "personal"] {
+        let (status, error) = put(
+            &op,
+            json!({"teamAgent": {"source": source, "linkPosition": 0}}),
+        )
+        .await;
+        assert_eq!(status, 400, "{source}: {error}");
+    }
+    let (status, _) = put(
+        &op,
+        json!({"teamAgent": {"source": "team_link", "linkPosition": 0,
+                             "profileDir": "/Users/me/.oort/profiles/work"}}),
+    )
+    .await;
+    assert!(
+        (400..500).contains(&status),
+        "an extra field rode along: {status}"
+    );
+    let refused = sqlx::query(
+        "INSERT INTO provider_default_ai (role, credential_source, link_position, link_endpoint_label) \
+         VALUES ('team_agent', 'profile', 0, 'x')",
+    )
+    .execute(&su)
+    .await
+    .expect_err("the table refuses a personal source");
+    assert!(
+        refused
+            .to_string()
+            .contains("provider_default_ai_source_ck"),
+        "{refused}"
+    );
+    let refused = sqlx::query(
+        "INSERT INTO provider_default_ai (role, link_position, link_endpoint_label, model_id) \
+         VALUES ('summary', 0, 'x', 'bad id')",
+    )
+    .execute(&su)
+    .await
+    .expect_err("the table refuses a malformed model id");
+    assert!(
+        refused.to_string().contains("provider_default_ai_model_ck"),
+        "{refused}"
+    );
+
+    // Unconfigured position, bad model id, guardrail on: all 400.
+    for body in [
+        json!({"summary": {"source": "team_link", "linkPosition": 7}}),
+        json!({"summary": {"source": "team_link", "linkPosition": 0, "modelId": "gpt 5"}}),
+        json!({"guardrail": {"mode": "observe"}}),
+    ] {
+        assert_eq!(put(&op, body.clone()).await.0, 400, "{body}");
+    }
+    assert_eq!(
+        get(&op).await.1["teamAgent"],
+        Value::Null,
+        "a refused body wrote nothing"
+    );
+
+    // -- 4. set both rows, then patch one: the other is kept -------------------
+    let (status, saved) = put(
+        &op,
+        json!({
+            "teamAgent": {"source": "team_link", "linkPosition": 0, "modelId": "gpt-5.4-codex"},
+            "summary": {"source": "team_link", "linkPosition": 1},
+            "guardrail": {"mode": "off"},
+        }),
+    )
+    .await;
+    assert_eq!(status, 200, "{saved}");
+    assert_eq!(saved["teamAgent"]["source"], "team_link");
+    assert_eq!(saved["teamAgent"]["linkPosition"], json!(0));
+    assert_eq!(
+        saved["teamAgent"]["endpointLabel"],
+        "http://127.0.0.1:9/openai/v1"
+    );
+    assert_eq!(saved["teamAgent"]["linkResolved"], json!(true));
+    assert_eq!(saved["teamAgent"]["modelId"], "gpt-5.4-codex");
+    assert_eq!(saved["summary"]["linkPosition"], json!(1));
+    assert_eq!(saved["summary"]["modelId"], Value::Null);
+    assert!(!saved.to_string().contains(GOOD), "{saved}");
+
+    let (_, patched) = put(&op, json!({"teamAgent": null})).await;
+    assert_eq!(patched["teamAgent"], Value::Null);
+    assert_eq!(
+        patched["summary"]["linkPosition"],
+        json!(1),
+        "the summary row was kept"
+    );
+
+    // -- 5. the chain moves under a saved row: reported, not followed ----------
+    chain("http://127.0.0.1:11/second/v1").await;
+    let (_, drifted) = get(&op).await;
+    assert_eq!(
+        drifted["summary"]["linkResolved"],
+        json!(false),
+        "{drifted}"
+    );
+    assert_eq!(
+        drifted["summary"]["endpointLabel"],
+        "http://127.0.0.1:10/first/v1"
+    );
+
+    // -- 6. audit: one row per change, carrying no key -------------------------
+    let audits: Vec<Value> = sqlx::query(
+        "SELECT detail FROM audit_log WHERE action = 'provider_default_ai.updated' \
+            AND workspace_id = $1 ORDER BY created_at",
+    )
+    .bind(operator.workspace)
+    .fetch_all(&su)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|row| row.get::<Value, _>(0))
+    .collect();
+    assert_eq!(audits.len(), 3, "{audits:?}");
+    assert!(
+        audits.iter().all(|a| !a.to_string().contains(GOOD)),
+        "{audits:?}"
+    );
+    assert_eq!(audits[2]["cleared"], json!(true), "{audits:?}");
+
+    // -- 7. RLS: an ordinary momo_app transaction sees no row ------------------
+    let rows_as_superuser: i64 = sqlx::query("SELECT count(*)::bigint FROM provider_default_ai")
+        .fetch_one(&su)
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(rows_as_superuser, 1);
+    let mut tx = app_pool.begin().await.unwrap();
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(operator.workspace.to_string())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let seen: i64 = sqlx::query("SELECT count(*)::bigint FROM provider_default_ai")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(seen, 0, "a tenant transaction reached the operator rows");
+    let wrote = sqlx::query(
+        "INSERT INTO provider_default_ai (role, link_position, link_endpoint_label) \
+         VALUES ('team_agent', 0, 'x')",
+    )
+    .execute(&mut *tx)
+    .await;
+    assert!(wrote.is_err(), "a tenant transaction wrote an operator row");
 }
