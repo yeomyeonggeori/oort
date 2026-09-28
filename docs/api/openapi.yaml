@@ -4364,6 +4364,81 @@ paths:
             policy, target host is the source host, or the workspace/member pool
             has no available slot.
 
+  /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/permission-decisions:
+    post:
+      tags: [work-sessions]
+      operationId: decideWorkPermission
+      summary: The session owner's decision on an ACP permission request (ADR-0188 D5).
+      description: >
+        ADR-0188 D5 §8.6 (#3000). A member host relays an ACP
+        `session/request_permission` as an `approval.requested` session event;
+        its `event_id` is the request's one-time nonce and the value this route
+        takes as `requestEventId`. Human bearer of the session owner, who must
+        also be the host owner, only: agent bearers and host-signed requests
+        never reach it, and channel membership or an admin role is not a
+        substitute. `kind` is `allow_once` or `reject_once` and must match the
+        stored kind of the offered option (`allow_always`/`reject_always` are
+        never chosen). The first decision wins: the same decision again answers
+        200 with the same row, a different one 409. In one tenant transaction
+        the decision becomes a `permission` work control addressed to the
+        session's host, a server-authored `approval.decided` session event
+        naming `request_event_id`, and a `work.permission.decided` audit row.
+        A non-empty `instruction` is refused until R2 (owner input needs the
+        device-key signature). Golden contract:
+        docs/api/work-permission-decision.golden.json.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkSessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkPermissionDecisionRequest"
+      responses:
+        "200":
+          description: The request as decided (also the answer to an identical retry).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkPermissionDecisionResponse"
+        "400":
+          description: >
+            `error.code` permission_kind_refused (kind is not allow_once or
+            reject_once), permission_option_invalid (optionId is not an offered
+            option of that kind), or permission_instruction_unsupported.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            An agent bearer (refused before the handler), `error.code`
+            permission_decider_not_human for any other non-human principal, or
+            permission_owner_only for a human who is not the session and host
+            owner.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The session, or a request of this session with that id, does not exist.
+        "409":
+          description: >
+            `error.code` permission_already_decided (a different decision was
+            recorded first) or permission_request_closed (the request lapsed,
+            its turn or session ended, its host was revoked, or the host
+            withdrew it). A lapsed or orphaned pending request is recorded as
+            expired/cancelled by the same call.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/terminal-attach:
     post:
       tags: [work-sessions]
@@ -10835,6 +10910,11 @@ components:
             Normalized progress, plan, approval, or terminal lifecycle summary.
             Terminal created/ended uses agent.status with terminal_event and an
             optional exit_code; raw terminal bytes never enter this object.
+            ADR-0188 D5 (#3000): an approval.requested whose options include
+            allow_once/reject_once (with `kind`) records a decidable
+            permission request keyed by this event_id; approval.decided may
+            carry request_event_id (uuid), and a host-relayed one only
+            withdraws (cancels) that pending request.
           additionalProperties: true
 
     EndWorkSessionRequest:
@@ -11479,6 +11559,9 @@ components:
           description: Required for input/read/kill and forbidden for spawn.
         kind:
           type: string
+          description: >
+            `permission` is not accepted here; only the permission decision
+            route creates it (ADR-0188 D3·D5).
           enum: [spawn, input, read, kill]
         payload:
           $ref: "#/components/schemas/WorkControlPayload"
@@ -11486,9 +11569,10 @@ components:
     WorkControlPayload:
       description: >
         Closed field union selected by kind: spawn requires exactly tool+label,
-        input exactly text, read accepts only optional tail_lines, and kill is
-        empty. No path, cwd, environment, process state, or credential fields
-        are accepted.
+        input exactly text, read accepts only optional tail_lines, kill is
+        empty, and permission (server-created, #3000) is exactly
+        request_event_id+option_id+kind. No path, cwd, environment, process
+        state, or credential fields are accepted.
       type: object
       properties:
         tool:
@@ -11506,6 +11590,88 @@ components:
           type: integer
           minimum: 1
           maximum: 9999
+        request_event_id:
+          type: string
+          format: uuid
+          description: permission only — the approval.requested event id.
+        option_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: permission only — the ACP option the owner chose.
+        kind:
+          type: string
+          enum: [allow_once, reject_once]
+          description: permission only.
+
+    WorkPermissionDecisionRequest:
+      type: object
+      required: [requestEventId, optionId, kind]
+      additionalProperties: false
+      properties:
+        requestEventId:
+          type: string
+          format: uuid
+          description: The approval.requested session event id (the host's one-time nonce).
+        optionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        kind:
+          type: string
+          enum: [allow_once, reject_once]
+        instruction:
+          type: string
+          description: >
+            Reserved for 「거부하고 지시」. Refused (400
+            permission_instruction_unsupported) while non-empty, until R2.
+
+    WorkPermissionRequest:
+      type: object
+      required: [id, sessionId, requestEventId, status, expiresAtMs]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        requestEventId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, approved, rejected, expired, cancelled]
+        decidedOptionId:
+          type: string
+          nullable: true
+        decidedKind:
+          type: string
+          nullable: true
+          enum: [allow_once, reject_once, null]
+        decidedBy:
+          type: string
+          format: uuid
+          nullable: true
+        decidedAtMs:
+          type: integer
+          format: int64
+          nullable: true
+        controlId:
+          type: string
+          format: uuid
+          nullable: true
+          description: The permission work control carrying the decision to the host.
+        expiresAtMs:
+          type: integer
+          format: int64
+
+    WorkPermissionDecisionResponse:
+      type: object
+      required: [permissionRequest]
+      properties:
+        permissionRequest:
+          $ref: "#/components/schemas/WorkPermissionRequest"
 
     WorkControlAckRequest:
       type: object
@@ -11549,7 +11715,7 @@ components:
           format: uuid
         kind:
           type: string
-          enum: [spawn, input, read, kill]
+          enum: [spawn, input, read, kill, permission]
         payload:
           $ref: "#/components/schemas/WorkControlPayload"
         status:

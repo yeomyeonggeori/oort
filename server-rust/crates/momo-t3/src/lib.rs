@@ -75,6 +75,9 @@ pub mod turn;
 /// ADR-0114 D4/D5 + ADR-0125 D6-A — the host-control ledger and the spawn
 /// approval card's host candidates.
 pub mod work_control;
+/// ADR-0188 D5 (#3000) — the permission bridge's ledger: an ACP permission
+/// request relayed by a member host, decided once by the session owner.
+pub mod work_permission;
 
 pub use billing::{
     acquire_slot_in_tx, pause_usage_in_tx, reserve_provisioning_slot_in_tx, resume_usage_in_tx,

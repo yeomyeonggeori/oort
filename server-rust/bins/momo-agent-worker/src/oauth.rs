@@ -172,7 +172,7 @@ impl HttpTokenRefresher {
     /// endpoint.
     pub fn new(request_timeout: Duration, mut policy: EgressPolicy) -> HttpTokenRefresher {
         policy.operator_hosts.clear();
-        let guard = EgressGuard::system(policy);
+        let guard = EgressGuard::system(policy, request_timeout);
         HttpTokenRefresher::with_guard(request_timeout, guard)
     }
 
@@ -206,8 +206,7 @@ impl TokenRefresher for HttpTokenRefresher {
             body["client_id"] = json!(client_id);
         }
 
-        self.guard
-            .precheck(token_endpoint)
+        crate::egress::precheck_url(&self.guard, token_endpoint)
             .await
             .map_err(|error| match error {
                 ProviderError::Unreachable(message) => RefreshError::Unreachable(message),
@@ -396,7 +395,8 @@ mod tests {
     }
 
     fn refresher(policy: EgressPolicy, lookup: Arc<dyn HostLookup>) -> HttpTokenRefresher {
-        HttpTokenRefresher::with_guard(Duration::from_secs(5), EgressGuard::new(policy, lookup))
+        let timeout = Duration::from_secs(5);
+        HttpTokenRefresher::with_guard(timeout, EgressGuard::new(policy, lookup, timeout))
     }
 
     const INTERNAL: &str = r#"{"error":"internal","error_description":"INTERNAL-SECRET-FROM-127"}"#;
@@ -427,6 +427,33 @@ mod tests {
             hits.load(Ordering::SeqCst),
             0,
             "the grant reached the internal service"
+        );
+    }
+
+    /// #2976: the token endpoint's precheck lookup is bounded by the refresh
+    /// timeout too, and a slow resolver is `Unreachable`, not a verdict.
+    #[tokio::test]
+    async fn a_slow_token_endpoint_lookup_is_bounded_by_the_request_timeout() {
+        let timeout = Duration::from_millis(300);
+        let refresher = HttpTokenRefresher::with_guard(
+            timeout,
+            EgressGuard::new(
+                EgressPolicy::default(),
+                Arc::new(crate::egress::tests::SlowLookup {
+                    delay: Duration::from_secs(6),
+                }),
+                timeout,
+            ),
+        );
+        let started = std::time::Instant::now();
+        let result = refresher
+            .refresh("https://slow-dns.example/oauth/token", None, "rt-grant")
+            .await;
+        let elapsed = started.elapsed();
+        assert!(elapsed < Duration::from_secs(2), "took {elapsed:?}");
+        assert!(
+            matches!(result, Err(RefreshError::Unreachable(_))),
+            "{result:?}"
         );
     }
 

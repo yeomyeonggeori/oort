@@ -563,6 +563,13 @@ mod tests {
             format!("/v1/workspaces/{ws}/approvals/{approval}/decision"),
             format!("/v1/workspaces/{ws}/approvals"),
             format!("/v1/agent-runs/{run}/approval-decisions"),
+            // ADR-0188 D5 (#3000): the permission bridge's decision route. A
+            // host signing here would answer its own agent's request as its
+            // owner.
+            format!(
+                "/v1/workspaces/{ws}/work-sessions/{}/permission-decisions",
+                Uuid::from_u128(6)
+            ),
         ] {
             for method in [Method::GET, Method::POST, Method::PUT, Method::PATCH] {
                 assert!(
