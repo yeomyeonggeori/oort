@@ -1,7 +1,7 @@
 // =============================================================================
 // 알림 규칙 — member-global notification rules (ADR-0124 증보 1, W-B2-3).
 //
-// Wire contract: docs/api/openapi.yaml `notification-rules` (GET/PUT),
+// Wire contract: docs/api/openapi.yaml `notification-rules` (GET/PUT/PATCH),
 // server-rust/bins/momo-server/src/routes/notification_rules.rs,
 // server/Migrations/066_notification_rule.sql.
 //
@@ -73,6 +73,10 @@ export function fetchNotificationRules(
   );
 }
 
+/**
+ * Whole-object replace. Kept for the server's older-client contract; the web
+ * and phone surfaces write through {@link patchNotificationRules} (#3042).
+ */
 export function putNotificationRules(
   workspaceId: string,
   rules: NotificationRules,
@@ -88,6 +92,45 @@ export function putNotificationRules(
   if (options.dndUntilMs !== undefined) body.dndUntilMs = options.dndUntilMs;
   return settingsRequest<unknown>(rulesPath(workspaceId), {
     method: "PUT",
+    body: JSON.stringify(body),
+  }).then(notificationRulesFromWire);
+}
+
+/**
+ * The fields a {@link patchNotificationRules} call changes. Every one is
+ * optional and an omitted field keeps what the server holds **when the write
+ * lands** (#3012, ADR-0124 증보 3) — the merge happens under the server's row
+ * lock, not over this client's last read.
+ */
+export interface NotificationRulesPatch {
+  dnd?: boolean;
+  mentionOverridesMute?: boolean;
+  /** PUT meaning: `null` = open-ended, a number must be in the future. */
+  dndUntilMs?: number | null;
+}
+
+/**
+ * Change only the named switches (#3042). Web settings and the phone each own a
+ * different switch; a whole-object PUT built from a read that is even a second
+ * old erases the switch the other device just changed. Sending just the field
+ * this surface touched is what keeps both. An empty patch is refused here, as
+ * the server would (400), rather than spent as a round trip.
+ */
+export function patchNotificationRules(
+  workspaceId: string,
+  patch: NotificationRulesPatch
+): Promise<NotificationRules> {
+  const body: Record<string, unknown> = {};
+  if (patch.dnd !== undefined) body.dnd = patch.dnd;
+  if (patch.mentionOverridesMute !== undefined) {
+    body.mentionOverridesMute = patch.mentionOverridesMute;
+  }
+  if (patch.dndUntilMs !== undefined) body.dndUntilMs = patch.dndUntilMs;
+  if (Object.keys(body).length === 0) {
+    return Promise.reject(new Error("empty notification-rules patch"));
+  }
+  return settingsRequest<unknown>(rulesPath(workspaceId), {
+    method: "PATCH",
     body: JSON.stringify(body),
   }).then(notificationRulesFromWire);
 }

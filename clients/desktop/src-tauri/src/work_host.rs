@@ -406,26 +406,91 @@ fn peer_pid(stream: &UnixStream) -> Option<u32> {
 
 /// One request on the control socket, believed only if the peer is `expected`.
 pub fn ask_workd(socket: &Path, expected_pid: u32, op: &str) -> Result<Value, String> {
-    let mut stream = UnixStream::connect(socket).map_err(|_| "socket_unavailable".to_string())?;
+    ask_workd_request(socket, expected_pid, &json!({ "op": op })).map_err(|error| match error {
+        WorkdError::Refused(_) => "socket_refused".to_string(),
+        WorkdError::Socket(code) => code,
+    })
+}
+
+/// Why a control-socket request failed: the socket itself, or workd's own
+/// `{"ok":false,"error":…}` (R2 needs the reason: `root_already_pinned`,
+/// `revocation_signature_invalid`, …).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkdError {
+    Socket(String),
+    Refused(String),
+}
+
+impl WorkdError {
+    pub fn code(&self) -> String {
+        match self {
+            WorkdError::Socket(code) => code.clone(),
+            WorkdError::Refused(code) => format!("workd_refused: {code}"),
+        }
+    }
+}
+
+/// One JSON request on the control socket (ADR-0146 개정 D-6·D-7 `pin_root`,
+/// `revoke_device`), believed only if the peer is `expected`.
+pub fn ask_workd_request(
+    socket: &Path,
+    expected_pid: u32,
+    request: &Value,
+) -> Result<Value, WorkdError> {
+    let socket_error = |code: &str| WorkdError::Socket(code.to_string());
+    let mut stream = UnixStream::connect(socket).map_err(|_| socket_error("socket_unavailable"))?;
     if peer_pid(&stream) != Some(expected_pid) {
-        return Err("socket_peer_not_our_child".to_string());
+        return Err(socket_error("socket_peer_not_our_child"));
     }
     stream.set_read_timeout(Some(SOCKET_TIMEOUT)).ok();
     stream.set_write_timeout(Some(SOCKET_TIMEOUT)).ok();
+    let mut line = serde_json::to_vec(request).map_err(|_| socket_error("socket_write_failed"))?;
+    line.push(b'\n');
     stream
-        .write_all(format!("{{\"op\":\"{op}\"}}\n").as_bytes())
-        .map_err(|_| "socket_write_failed".to_string())?;
+        .write_all(&line)
+        .map_err(|_| socket_error("socket_write_failed"))?;
     let mut out = String::new();
     stream
         .take(64 * 1024)
         .read_to_string(&mut out)
-        .map_err(|_| "socket_read_failed".to_string())?;
+        .map_err(|_| socket_error("socket_read_failed"))?;
     let value: Value =
-        serde_json::from_str(out.trim()).map_err(|_| "socket_no_answer".to_string())?;
+        serde_json::from_str(out.trim()).map_err(|_| socket_error("socket_no_answer"))?;
     if value.get("ok") != Some(&Value::Bool(true)) {
-        return Err("socket_refused".to_string());
+        let reason = value
+            .get("error")
+            .and_then(Value::as_str)
+            .filter(|code| {
+                !code.is_empty()
+                    && code.len() <= 64
+                    && code.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+            })
+            .unwrap_or("unknown");
+        return Err(WorkdError::Refused(reason.to_string()));
     }
     Ok(value)
+}
+
+/// What the running workd says about R2 trust (`status.humanSignatures`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostTrust {
+    pub host_id: String,
+    pub workspace_id: String,
+    pub owner_member_id: String,
+    /// `None`: nothing pinned yet (or a workd from before #3024).
+    pub root_key_id: Option<String>,
+}
+
+pub fn host_trust_of(status: &Value) -> Option<HostTrust> {
+    let field = |name: &str| status.get(name)?.as_str().map(str::to_string);
+    Some(HostTrust {
+        host_id: field("hostId")?,
+        workspace_id: field("workspaceId")?,
+        owner_member_id: field("ownerMemberId")?,
+        root_key_id: status["humanSignatures"]["rootKeyId"]
+            .as_str()
+            .map(str::to_string),
+    })
 }
 
 fn heartbeat_of(status: &Value) -> Heartbeat {
@@ -476,6 +541,50 @@ impl Service<'_> {
             work_folder: self.layout.work_folder.display().to_string(),
             display_name_suggestion: host_name(),
         }
+    }
+
+    /// The running workd's R2 view, or `None` when it is not running.
+    pub fn host_trust(&self) -> Result<Option<HostTrust>, WorkdError> {
+        let Some(pid) = self.state.running_pid() else {
+            return Ok(None);
+        };
+        let status = ask_workd_request(&self.layout.socket, pid, &json!({ "op": "status" }))?;
+        Ok(host_trust_of(&status))
+    }
+
+    /// `pin_root` (ADR-0146 D-6 ①): the root's public half, once. `Ok(true)`
+    /// pinned now, `Ok(false)` the same key was already pinned.
+    pub fn pin_root(&self, key_id: &str, public_key: &str) -> Result<bool, WorkdError> {
+        let pid = self
+            .state
+            .running_pid()
+            .ok_or_else(|| WorkdError::Socket("not_running".into()))?;
+        let answer = ask_workd_request(
+            &self.layout.socket,
+            pid,
+            &json!({ "op": "pin_root", "keyId": key_id, "alg": "p256", "publicKey": public_key }),
+        )?;
+        Ok(answer.get("pinned") == Some(&Value::Bool(true)))
+    }
+
+    /// `revoke_device` (ADR-0146 D-7): a root-signed letter, straight to the
+    /// host — the server cannot hide it.
+    pub fn revoke_device(&self, revocation: &Value) -> Result<(), WorkdError> {
+        let pid = self
+            .state
+            .running_pid()
+            .ok_or_else(|| WorkdError::Socket("not_running".into()))?;
+        ask_workd_request(
+            &self.layout.socket,
+            pid,
+            &json!({ "op": "revoke_device", "revocation": revocation }),
+        )
+        .map(|_| ())
+    }
+
+    /// Where this Mac is registered, if it is.
+    pub fn registered(&self) -> Option<Registered> {
+        read_registered(&self.layout)
     }
 
     fn sidecar(&self) -> Result<&Path, String> {
@@ -673,7 +782,10 @@ fn run_with_timeout(
 
 // ---- commands -----------------------------------------------------------------
 
-fn service<'a>(app: &tauri::AppHandle, state: &'a WorkHostState) -> Result<Service<'a>, String> {
+pub(crate) fn service<'a>(
+    app: &tauri::AppHandle,
+    state: &'a WorkHostState,
+) -> Result<Service<'a>, String> {
     let app_data = app
         .path()
         .app_data_dir()
@@ -713,16 +825,22 @@ pub async fn work_host_register(
     app: tauri::AppHandle,
     request: RegisterRequest,
 ) -> Result<LocalStatus, String> {
-    blocking(app, move |service| service.register(request)).await
+    let status = blocking(app.clone(), move |service| service.register(request)).await?;
+    // Registration starts the host; pin a root bound before it existed (#3025).
+    crate::device_key::pin_after_start(&app);
+    Ok(status)
 }
 
 #[tauri::command]
 pub async fn work_host_start(app: tauri::AppHandle) -> Result<LocalStatus, String> {
-    blocking(app, |service| {
+    let status = blocking(app.clone(), |service| {
         service.start()?;
         Ok(service.status())
     })
-    .await
+    .await?;
+    // R2 (#3025): a root bound before this host existed is pinned now.
+    crate::device_key::pin_after_start(&app);
+    Ok(status)
 }
 
 #[tauri::command]
@@ -745,8 +863,11 @@ pub fn start_if_registered(app: &tauri::AppHandle) {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<WorkHostState>();
         if let Ok(service) = service(&app, &state) {
-            if read_registered(&service.layout).is_some() && service.sidecar.is_some() {
-                let _ = service.start();
+            if read_registered(&service.layout).is_some()
+                && service.sidecar.is_some()
+                && service.start().is_ok()
+            {
+                crate::device_key::pin_after_start(&app);
             }
         }
     });

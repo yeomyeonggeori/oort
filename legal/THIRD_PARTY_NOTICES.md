@@ -93,6 +93,9 @@ Direct desktop (Tauri shell) dependencies an ADR introduced. The full
 |---|---|---|---|---|
 | portable-pty | 0.9.0 | MIT | `clients/desktop/src-tauri` (local terminal PTY) | ADR-0190 D1, #2772 |
 | libc | 0.2 | MIT OR Apache-2.0 | `clients/desktop/src-tauri` (process-group signals for PTY sessions) | ADR-0190 D1, #2772 |
+| p256 | 0.13.2 | Apache-2.0 OR MIT | `clients/desktop/src-tauri` (device key: compressed SEC1, DER→raw low-s, self-verify) | ADR-0146 개정 2026-09-28 D-1, #3025 |
+| unicode-normalization | 0.1.25 | MIT OR Apache-2.0 | `clients/desktop/src-tauri` (NFC for signed human text, same as `momo-wire`) | ADR-0146 개정 2026-09-28 D-5, #3025 |
+| security-framework / -sys, core-foundation, objc2, objc2-foundation, objc2-app-kit | 3 / 2, 0.10, 0.6, 0.3, 0.3 | MIT OR Apache-2.0 (objc2*: also Zlib) | `clients/desktop/src-tauri` (Secure Enclave key, LAContext, NSAlert); already in the graph via keyring/tauri, now direct | ADR-0146 개정 2026-09-28 D-3, #3025 |
 
 ## Historical (frozen snapshots)
 

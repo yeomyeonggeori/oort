@@ -59,7 +59,21 @@ function disconnectTriggerSelector(id: string): string {
   return `[data-testid="linked-device-row-${id}"] [data-testid="linked-device-disconnect"]`;
 }
 
-export function LinkedDevicesList({ offline }: { offline: boolean }) {
+/**
+ * Runs before a device is unlinked and returns one sentence to show after it
+ * (or null). The desktop's R2 root uses it to sign and deliver a revocation
+ * letter for the phone's instruction key (ADR-0146 D-7, #3025). It never
+ * blocks the unlink: a failure comes back as a sentence.
+ */
+export type BeforeUnlink = (device: LinkedDevice) => Promise<string | null>;
+
+export function LinkedDevicesList({
+  offline,
+  beforeUnlink,
+}: {
+  offline: boolean;
+  beforeUnlink?: BeforeUnlink;
+}) {
   const client = useQueryClient();
   const list = useQuery(linkedDevicesQuery());
   const currentReasonId = useId();
@@ -67,6 +81,8 @@ export function LinkedDevicesList({ offline }: { offline: boolean }) {
   const [rowError, setRowError] = useState<string | null>(null);
   const [goneNotice, setGoneNotice] = useState<string | null>(null);
   const [removed, setRemoved] = useState("");
+  const [unlinkNote, setUnlinkNote] = useState<string | null>(null);
+  const unlinking = useRef<LinkedDevice | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
   const landing = useRef<string | null>(null);
 
@@ -88,10 +104,18 @@ export function LinkedDevicesList({ offline }: { offline: boolean }) {
   }, [list.data]);
 
   const revoke = useMutation({
-    mutationFn: (id: string) => revokeLinkedDevice(id),
+    mutationFn: async (id: string) => {
+      // onMutate runs first and has already dropped the row from the cache.
+      const device = unlinking.current?.id === id ? unlinking.current : undefined;
+      const note = device && beforeUnlink ? await beforeUnlink(device) : null;
+      await revokeLinkedDevice(id);
+      return note;
+    },
+    onSuccess: (note) => setUnlinkNote(note),
     onMutate: async (id) => {
       setRowError(null);
       setGoneNotice(null);
+      setUnlinkNote(null);
       await client.cancelQueries({ queryKey: LINKED_DEVICES_QUERY_KEY });
       const previous = client.getQueryData<LinkedDevice[]>(
         LINKED_DEVICES_QUERY_KEY
@@ -100,6 +124,7 @@ export function LinkedDevicesList({ offline }: { offline: boolean }) {
       const gone = current.findIndex((row) => row.id === id);
       const neighbour = current[gone + 1] ?? current[gone - 1];
       landing.current = neighbour?.id ?? "";
+      unlinking.current = current[gone] ?? null;
       const label = current[gone]?.label;
       setRemoved(label ? `${label} 연결을 해제했습니다.` : "");
       client.setQueryData<LinkedDevice[]>(
@@ -211,6 +236,15 @@ export function LinkedDevicesList({ offline }: { offline: boolean }) {
         {removed}
       </p>
 
+      {unlinkNote && (
+        <p
+          className="break-keep text-meta text-ink-muted"
+          role="status"
+          data-testid="linked-devices-unlink-note"
+        >
+          {unlinkNote}
+        </p>
+      )}
       {goneNotice && (
         <p
           className="break-keep text-meta text-ink-muted"

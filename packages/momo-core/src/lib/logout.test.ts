@@ -271,11 +271,12 @@ describe("logout — 진행 중인 회전에 합류한다 (#2677 리뷰 M1)", ()
     expect.soft(JSON.parse(wire.revocation()?.body ?? "null")).toEqual({
       refreshToken: "refresh-2",
     });
-    // 지운 저장소는 회전 결과로 되살아나지 않는다.
+    // 지운 저장소는 회전 결과로 되살아나지 않는다. #3072 리뷰 H1 뒤로는 코어가
+    // 저장된 토큰이 제시한 토큰과 다르면 `applyRotation` 자체를 부르지 않는다
+    // (호스트의 drop 에 기대지 않는다). 폐기는 합류한 로그아웃이 한 번만 보낸다.
     expect(wire.events).toEqual([
       "POST /v1/auth/refresh",
       "wipe",
-      "rotation-dropped",
       "hook:access-2",
       "POST /v1/auth/logout",
     ]);

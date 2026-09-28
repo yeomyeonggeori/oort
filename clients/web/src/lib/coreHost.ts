@@ -4,6 +4,7 @@ import {
   applyLogin,
   applyRotation,
   clearSession,
+  exclusiveRotation,
   getAccessToken,
   getPersistedSession,
   getRefreshToken,
@@ -38,5 +39,6 @@ installCoreHost({
     applyRotation,
     markAuthExpired,
     clearSession,
+    exclusiveRotation,
   },
 });

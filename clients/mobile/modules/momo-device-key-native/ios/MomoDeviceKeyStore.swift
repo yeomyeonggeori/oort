@@ -37,23 +37,48 @@ import Security
 //      enclave can use — and what it returns is the compressed SEC1 public key
 //      (33 bytes) and raw r‖s signatures (64 bytes).
 //
-// Out of scope for stage 1: the signed payload bytes (E1 #3021) and the server
-// registration (E2 #3022). `sign` takes arbitrary bytes.
+// Hardening before stage 2 (review of #3043, M-1..M-4):
+//
+//   5. Only instruction payloads are signed (M-3). `sign` refuses any message
+//      that is not exactly a 13-line `momo.human.control.v1` payload with no
+//      control character, so the key is not an oracle for arbitrary bytes.
+//      Endorsements and revocations (`device_endorse.v1`/`device_revoke.v1`)
+//      are signed by the root Mac only (ADR-0146 D-6/D-7) and refused here
+//      (server-rust/crates/momo-wire/src/human_control.rs,
+//      docs/api/human-control-signing.vectors.json).
+//
+//   6. `invalidated` is reported only on proof (M-1, M-2). The enclave is the
+//      arbiter: a key is invalidated when the enclave rejects its handle, when
+//      the biometry it was bound to is gone (not enrolled / no passcode), or
+//      when Face ID has just SUCCEEDED and the enclave still refuses while the
+//      enrollment fingerprint differs from the one taken at creation. A Face ID
+//      permission switched off, a transient enclave error or a fingerprint that
+//      moved on its own (the SDK warns it "can change exceptionally between
+//      major OS versions") is never reported as `invalidated` — the caller
+//      deletes on `invalidated`, and deleting forces a root-Mac re-approval.
+//
+//   7. `create` and `delete` are serialized, and the key handle is written
+//      add-only, so two concurrent `create` calls cannot leave the device
+//      holding a key other than the one whose public half was returned (M-4).
 // =============================================================================
 
 public enum MomoDeviceKeyStatus: String {
   /// No Secure Enclave on this device (every simulator). Nothing can be created.
   case unsupported
-  /// The enclave exists but no biometry is enrolled, so a `biometryCurrentSet`
-  /// key cannot be created.
+  /// Face ID cannot be used right now. With no key: nothing is enrolled, so a
+  /// `biometryCurrentSet` key cannot be created. With a key: Face ID is off
+  /// for this app or temporarily unavailable — the key is intact and signs
+  /// again once Face ID is back. The caller must NOT delete it.
   case biometryUnavailable
   /// No key yet.
   case absent
-  /// A key exists and the enrolled biometry has not changed since it was made.
+  /// A key exists and nothing proves it unusable. (A Face ID re-enrollment is
+  /// proven at the next `sign`, which then fails with `.invalidated`.)
   case ready
-  /// A key exists but can never sign again (Face ID re-enrolled or removed).
-  /// The caller deletes it and creates a new one, which then needs a fresh
-  /// endorsement from the root Mac (ADR-0146 D-6).
+  /// A key exists but can never sign again: the enclave rejects its handle, or
+  /// the biometry it was bound to is gone. The caller deletes it and creates a
+  /// new one, which then needs a fresh endorsement from the root Mac
+  /// (ADR-0146 D-6).
   case invalidated
 }
 
@@ -66,6 +91,7 @@ public enum MomoDeviceKeyFailure: Error, Equatable {
   case invalidated
   case cancelled
   case lockedOut
+  case payloadRejected(String)
   case failed(String)
 
   /// The `code` JS sees on the rejected promise. Mirrored by
@@ -80,6 +106,7 @@ public enum MomoDeviceKeyFailure: Error, Equatable {
     case .invalidated: return "DEVICE_KEY_INVALIDATED"
     case .cancelled: return "DEVICE_KEY_CANCELLED"
     case .lockedOut: return "DEVICE_KEY_LOCKED_OUT"
+    case .payloadRejected: return "DEVICE_KEY_PAYLOAD_REJECTED"
     case .failed: return "DEVICE_KEY_FAILED"
     }
   }
@@ -87,16 +114,35 @@ public enum MomoDeviceKeyFailure: Error, Equatable {
   public var message: String {
     switch self {
     case .unsupported: return "This device has no Secure Enclave; no device key can exist here."
-    case .biometryUnavailable: return "No biometry is enrolled; a biometryCurrentSet key cannot be created."
+    case .biometryUnavailable: return "Face ID is not available to this app right now."
     case .misconfigured(let why): return "Device key access group is misconfigured: \(why)"
     case .alreadyExists: return "A device key already exists. Delete it first."
     case .absent: return "No device key exists."
     case .invalidated: return "The device key can no longer sign (biometry enrollment changed)."
     case .cancelled: return "The user cancelled Face ID."
     case .lockedOut: return "Biometry is locked out; unlock the phone with its passcode first."
+    case .payloadRejected(let why): return "Refusing to sign: \(why)"
     case .failed(let why): return "Device key operation failed: \(why)"
     }
   }
+}
+
+/// What the biometry state says about an EXISTING key, before any Face ID.
+public enum MomoDeviceKeyHealth: Equatable {
+  /// Nothing proves the key unusable.
+  case intact
+  /// Face ID is off or temporarily unavailable; the key itself is untouched.
+  case biometryUnavailable
+  /// The biometry the key was bound to is gone.
+  case invalidated
+}
+
+/// The enrollment fingerprint now, compared with the one taken at creation.
+public enum MomoDeviceKeyFingerprintComparison: Equatable {
+  case same
+  case changed
+  /// No stored fingerprint, or no current value from the same API.
+  case unknown
 }
 
 public struct MomoDeviceKeyStore {
@@ -109,7 +155,14 @@ public struct MomoDeviceKeyStore {
 
   static let service = "app.momo.ios.devicekey"
   static let keyAccount = "p256-signing-v1"
-  static let domainStateAccount = "biometry-domain-state-v1"
+  /// Tagged fingerprint (see `Fingerprint`). v1 held an untagged
+  /// `evaluatedPolicyDomainState`; it is never read, only deleted.
+  static let fingerprintAccount = "biometry-fingerprint-v2"
+  static let retiredFingerprintAccounts = ["biometry-domain-state-v1"]
+
+  /// `create`, `delete` and the post-sign fingerprint refresh run one at a
+  /// time, process-wide (M-4). `sign` itself is never queued: it waits on Face ID.
+  private static let mutations = DispatchQueue(label: "app.momo.ios.devicekey.mutations")
 
   let accessGroup: String
 
@@ -136,6 +189,130 @@ public struct MomoDeviceKeyStore {
     #endif
   }
 
+  // MARK: - signing payloads (M-3)
+
+  /// The E1 schema lines this key may sign, with each payload's exact line
+  /// count (momo-wire `human_control.rs` `signed_bytes`). Instructions only:
+  /// `device_endorse.v1`/`device_revoke.v1` are the root Mac's (ADR-0146
+  /// D-6/D-7), so the phone key refuses them.
+  public static let signingSchemas: [String: Int] = [
+    "momo.human.control.v1": 13
+  ]
+  /// Largest payload accepted. The E1 control vectors top out at 384 bytes;
+  /// every field is an id, a number or a hex digest.
+  public static let maxSigningPayloadBytes = 2048
+
+  /// Accepts only an E1 payload: UTF-8 lines joined by `\n` with no other
+  /// control character (momo-wire `no_control`), whose first line is an
+  /// allowed schema and whose line count is exactly that schema's — so a
+  /// trailing newline or an appended line is refused too. Free instruction
+  /// text never appears in the signed bytes; it is hashed into
+  /// `content_sha256`.
+  public static func checkSigningPayload(_ message: Data) throws {
+    guard !message.isEmpty else { throw MomoDeviceKeyFailure.payloadRejected("empty message") }
+    guard message.count <= maxSigningPayloadBytes else {
+      throw MomoDeviceKeyFailure.payloadRejected("longer than \(maxSigningPayloadBytes) bytes")
+    }
+    guard let text = String(data: message, encoding: .utf8) else {
+      throw MomoDeviceKeyFailure.payloadRejected("not UTF-8")
+    }
+    guard
+      !text.unicodeScalars.contains(where: {
+        $0 != "\n" && $0.properties.generalCategory == .control
+      })
+    else {
+      throw MomoDeviceKeyFailure.payloadRejected("control character other than a line break")
+    }
+    let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+    guard let expected = signingSchemas[String(lines[0])] else {
+      throw MomoDeviceKeyFailure.payloadRejected("first line is not an allowed schema")
+    }
+    guard lines.count == expected else {
+      throw MomoDeviceKeyFailure.payloadRejected("\(lines[0]) has \(expected) lines, got \(lines.count)")
+    }
+  }
+
+  // MARK: - classification (M-1, M-2) — pure, so sim-check runs it
+
+  /// `canEvaluatePolicy` failed (or not: `nil`) — what that says about an
+  /// existing key. Only a biometry set that is GONE invalidates a
+  /// `biometryCurrentSet` key; a switched-off permission or unavailable
+  /// sensor does not.
+  public static func health(canEvaluateError code: LAError.Code?) -> MomoDeviceKeyHealth {
+    guard let code else { return .intact }
+    switch code {
+    case .biometryNotEnrolled, .passcodeNotSet:
+      return .invalidated
+    case .biometryLockout:
+      // Enrollment is intact; `sign` reports `.lockedOut`.
+      return .intact
+    default:
+      // .biometryNotAvailable covers "Face ID switched off for oort" in
+      // Settings as well as a sensor that is temporarily unavailable.
+      return .biometryUnavailable
+    }
+  }
+
+  /// `evaluatePolicy` (Face ID) failed with `code`.
+  public static func failure(evaluating code: LAError.Code) -> MomoDeviceKeyFailure {
+    switch code {
+    case .userCancel, .appCancel, .systemCancel, .userFallback:
+      return .cancelled
+    case .biometryLockout:
+      return .lockedOut
+    case .biometryNotEnrolled, .passcodeNotSet:
+      return .invalidated
+    case .biometryNotAvailable:
+      return .biometryUnavailable
+    default:
+      return .failed("biometry error \(code.rawValue)")
+    }
+  }
+
+  /// Face ID has just SUCCEEDED and the enclave still refused to open the
+  /// handle or sign. That alone is not proof — a transient enclave error or a
+  /// context invalidated by backgrounding looks the same — so it is
+  /// `invalidated` only when the enrollment fingerprint has changed too.
+  public static func failure(
+    afterAuthenticatedEnclaveError detail: String,
+    fingerprint: MomoDeviceKeyFingerprintComparison
+  ) -> MomoDeviceKeyFailure {
+    fingerprint == .changed ? .invalidated : .failed("enclave signing: \(detail)")
+  }
+
+  // MARK: - enrollment fingerprint
+
+  /// A stored fingerprint is tagged with the API that produced it and is only
+  /// ever compared with the same API: `evaluatedPolicyDomainState` (deprecated
+  /// in iOS 18) and `domainState.biometry.stateHash` are different values, so
+  /// mixing them would make an OS upgrade look like a Face ID re-enrollment.
+  public enum Fingerprint {
+    public static let legacyTag: UInt8 = 0x01  // evaluatedPolicyDomainState, iOS < 18
+    public static let domainStateTag: UInt8 = 0x02  // domainState.biometry.stateHash, iOS 18+
+
+    public static func tagged(_ tag: UInt8, _ raw: Data?) -> Data? {
+      guard let raw, !raw.isEmpty else { return nil }
+      return Data([tag]) + raw
+    }
+
+    /// `stored` is the tagged value from creation; `legacyNow`/`domainStateNow`
+    /// are the untagged values each API reports now (nil = not available).
+    public static func compare(
+      stored: Data?, legacyNow: Data?, domainStateNow: Data?
+    ) -> MomoDeviceKeyFingerprintComparison {
+      guard let stored, stored.count > 1 else { return .unknown }
+      let raw = stored.dropFirst()
+      let now: Data?
+      switch stored[stored.startIndex] {
+      case legacyTag: now = legacyNow
+      case domainStateTag: now = domainStateNow
+      default: return .unknown
+      }
+      guard let now, !now.isEmpty else { return .unknown }
+      return Data(raw) == now ? .same : .changed
+    }
+  }
+
   // MARK: - status
 
   /// Throws only `.misconfigured`/`.failed` (the keychain itself refused): a
@@ -143,14 +320,19 @@ public struct MomoDeviceKeyStore {
   public func status() throws -> MomoDeviceKeyStatus {
     guard Self.secureEnclaveAvailable else { return .unsupported }
     guard let blob = try readItemOrNil(Self.keyAccount) else {
-      return biometryEnrolled() ? .absent : .biometryUnavailable
+      return biometryCheck().error == nil ? .absent : .biometryUnavailable
     }
-    // A blob this enclave cannot open (restored onto other hardware — which
-    // ThisDeviceOnly should already prevent) can never sign.
+    // Opening the handle needs no authentication; an enclave that rejects it
+    // outright (a blob restored onto other hardware — which ThisDeviceOnly
+    // should already prevent) will never sign with it.
     guard (try? SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: blob)) != nil else {
       return .invalidated
     }
-    return biometryChangedSinceCreation() ? .invalidated : .ready
+    switch Self.health(canEvaluateError: biometryCheck().error) {
+    case .intact: return .ready
+    case .biometryUnavailable: return .biometryUnavailable
+    case .invalidated: return .invalidated
+    }
   }
 
   // MARK: - create
@@ -158,7 +340,17 @@ public struct MomoDeviceKeyStore {
   /// Returns the compressed SEC1 public key (33 bytes).
   public func create() throws -> Data {
     guard Self.secureEnclaveAvailable else { throw MomoDeviceKeyFailure.unsupported }
-    guard biometryEnrolled() else { throw MomoDeviceKeyFailure.biometryUnavailable }
+    return try Self.mutations.sync { try createLocked() }
+  }
+
+  private func createLocked() throws -> Data {
+    let check = biometryCheck()
+    guard check.error == nil else { throw MomoDeviceKeyFailure.biometryUnavailable }
+    // Without a fingerprint a later enclave refusal could never be told apart
+    // from a transient error; refuse rather than make half a key (N-7).
+    guard let fingerprint = Self.currentFingerprint(check.context) else {
+      throw MomoDeviceKeyFailure.failed("no biometry fingerprint available")
+    }
     if try readItemOrNil(Self.keyAccount) != nil { throw MomoDeviceKeyFailure.alreadyExists }
 
     var acError: Unmanaged<CFError>?
@@ -180,16 +372,14 @@ public struct MomoDeviceKeyStore {
       throw MomoDeviceKeyFailure.failed("enclave key generation: \(error.localizedDescription)")
     }
 
-    try writeItem(Self.keyAccount, key.dataRepresentation)
-    if let state = currentDomainState() {
-      do {
-        try writeItem(Self.domainStateAccount, state)
-      } catch {
-        // Half a key is worse than none: without its domain state it would
-        // report `invalidated` forever. Roll back.
-        deleteItem(Self.keyAccount)
-        throw error
-      }
+    // Add-only: never replace a handle someone else just wrote (M-4).
+    try addItem(Self.keyAccount, key.dataRepresentation)
+    do {
+      try writeItem(Self.fingerprintAccount, fingerprint)
+    } catch {
+      // Half a key is worse than none. Roll back.
+      deleteItem(Self.keyAccount)
+      throw error
     }
     return key.publicKey.compressedRepresentation
   }
@@ -210,87 +400,115 @@ public struct MomoDeviceKeyStore {
   // MARK: - sign
 
   /// ECDSA P-256 over SHA-256(message). Returns raw r‖s (64 bytes), the same
-  /// shape WebCrypto produces. Face ID is raised with `reason`.
+  /// shape WebCrypto produces. Face ID is raised with `reason`. `message` must
+  /// be an E1 payload (`checkSigningPayload`).
   public func sign(_ message: Data, reason: String) async throws -> Data {
+    // The payload check is pure input validation and runs first, so the
+    // simulator (no enclave) still proves it is wired in (sim-check).
+    try Self.checkSigningPayload(message)
     guard Self.secureEnclaveAvailable else { throw MomoDeviceKeyFailure.unsupported }
-    guard !message.isEmpty else { throw MomoDeviceKeyFailure.failed("empty message") }
     guard let blob = try readItemOrNil(Self.keyAccount) else { throw MomoDeviceKeyFailure.absent }
-    if biometryChangedSinceCreation() { throw MomoDeviceKeyFailure.invalidated }
 
     // Evaluate first so user-facing outcomes (cancel, lockout) arrive as clean
     // LAErrors instead of opaque enclave errors; the evaluated context is then
-    // handed to the key so Face ID is not raised twice.
+    // handed to the key so Face ID is not raised twice. No reuse window:
+    // a fresh context per signature.
     let context = LAContext()
     context.localizedCancelTitle = "취소"
+    // biometryCurrentSet never accepts the passcode; do not offer it (N-4).
+    context.localizedFallbackTitle = ""
     do {
       _ = try await context.evaluatePolicy(
         .deviceOwnerAuthenticationWithBiometrics, localizedReason: reason)
     } catch let error as LAError {
-      switch error.code {
-      case .userCancel, .appCancel, .systemCancel, .userFallback:
-        throw MomoDeviceKeyFailure.cancelled
-      case .biometryLockout:
-        throw MomoDeviceKeyFailure.lockedOut
-      case .biometryNotEnrolled, .biometryNotAvailable:
-        throw MomoDeviceKeyFailure.invalidated
-      default:
-        throw MomoDeviceKeyFailure.failed("biometry: \(error.localizedDescription)")
-      }
+      throw Self.failure(evaluating: error.code)
     }
 
+    let signature: Data
     do {
       let key = try SecureEnclave.P256.Signing.PrivateKey(
         dataRepresentation: blob, authenticationContext: context)
-      return try key.signature(for: message).rawRepresentation
+      signature = try key.signature(for: message).rawRepresentation
     } catch {
-      // Face ID just succeeded, so a key that still refuses is one whose
-      // biometryCurrentSet binding no longer matches the enrolled set.
-      throw MomoDeviceKeyFailure.invalidated
+      throw Self.failure(
+        afterAuthenticatedEnclaveError: error.localizedDescription,
+        fingerprint: try compareFingerprint(context))
     }
+    // The enclave just signed under biometryCurrentSet, so the enrollment is
+    // the one the key was bound to: re-baseline a fingerprint that moved on
+    // its own (OS upgrade, or a v1/legacy value on iOS 18+). Best effort.
+    refreshFingerprint(context)
+    return signature
   }
 
   // MARK: - delete
 
   public func delete() {
-    deleteItem(Self.keyAccount)
-    deleteItem(Self.domainStateAccount)
+    Self.mutations.sync {
+      deleteItem(Self.keyAccount)
+      deleteItem(Self.fingerprintAccount)
+      for account in Self.retiredFingerprintAccounts { deleteItem(account) }
+    }
   }
 
   // MARK: - biometry
 
-  private func biometryEnrolled() -> Bool {
-    var error: NSError?
-    return LAContext().canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
-  }
-
-  /// The enrolled-biometry fingerprint. `evaluatedPolicyDomainState` is used on
-  /// every OS version on purpose: mixing it with iOS 18's
-  /// `domainState.biometry.stateHash` would make an OS upgrade look like a
-  /// Face ID re-enrollment and invalidate every key.
-  private func currentDomainState() -> Data? {
+  /// A fresh context that has run `canEvaluatePolicy` (which is what fills in
+  /// its domain state), and the LAError code when it said no.
+  private func biometryCheck() -> (context: LAContext, error: LAError.Code?) {
     let context = LAContext()
     var error: NSError?
-    guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
-      return nil
+    if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+      return (context, nil)
     }
-    return context.evaluatedPolicyDomainState
+    return (context, LAError.Code(rawValue: error?.code ?? LAError.Code.biometryNotAvailable.rawValue) ?? .biometryNotAvailable)
   }
 
-  /// True when the key can no longer sign because the enrolled set changed.
-  /// Lockout is NOT a change (enrollment is intact), so it reads as false and
-  /// `sign` reports `.lockedOut` instead.
-  private func biometryChangedSinceCreation() -> Bool {
-    let context = LAContext()
-    var error: NSError?
-    if !context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
-      if let code = error.map({ LAError.Code(rawValue: $0.code) }), code == .biometryLockout {
-        return false
-      }
-      return true  // nothing enrolled any more
+  /// The tagged fingerprint to store from `context`: the iOS 18 API where it
+  /// exists, the legacy one below.
+  ///
+  /// The legacy header documents its value as set "when canEvaluatePolicy
+  /// succeeds for a biometric policy"; the iOS 18 header only says `stateHash`
+  /// is nil when nothing is enrolled and does not say whether
+  /// `canEvaluatePolicy` alone fills it. So a nil `stateHash` falls back to the
+  /// legacy value rather than refusing `create()` on every iOS 18+ phone
+  /// (runtime-unverified); the first successful signature then re-baselines
+  /// to the iOS 18 value.
+  private static func currentFingerprint(_ context: LAContext) -> Data? {
+    if #available(iOS 18.0, macOS 15.0, *),
+      let modern = Fingerprint.tagged(Fingerprint.domainStateTag, context.domainState.biometry.stateHash)
+    {
+      return modern
     }
-    guard let now = context.evaluatedPolicyDomainState else { return false }
-    guard let then = try? readItemOrNil(Self.domainStateAccount) else { return true }
-    return now != then
+    return Fingerprint.tagged(Fingerprint.legacyTag, legacyDomainState(context))
+  }
+
+  /// Only for fingerprints taken below iOS 18 (tag 0x01): the one API that can
+  /// be compared with them. Deployment target is 16.4, so this is not a
+  /// deprecation warning; raising it to 18 retires this path (N-2).
+  private static func legacyDomainState(_ context: LAContext) -> Data? {
+    context.evaluatedPolicyDomainState
+  }
+
+  private func compareFingerprint(_ context: LAContext) throws -> MomoDeviceKeyFingerprintComparison {
+    let stored = try readItemOrNil(Self.fingerprintAccount)
+    var domainStateNow: Data?
+    if #available(iOS 18.0, macOS 15.0, *) {
+      domainStateNow = context.domainState.biometry.stateHash
+    }
+    let legacyNow =
+      stored?.first == Fingerprint.legacyTag ? Self.legacyDomainState(context) : nil
+    return Fingerprint.compare(stored: stored, legacyNow: legacyNow, domainStateNow: domainStateNow)
+  }
+
+  private func refreshFingerprint(_ context: LAContext) {
+    guard let now = Self.currentFingerprint(context) else { return }
+    Self.mutations.sync {
+      guard (try? readItemOrNil(Self.keyAccount)) != nil,
+        (try? readItemOrNil(Self.fingerprintAccount)) != now
+      else { return }
+      try? writeItem(Self.fingerprintAccount, now)
+    }
   }
 
   // MARK: - keychain (always the app-only group)
@@ -320,8 +538,8 @@ public struct MomoDeviceKeyStore {
     }
   }
 
-  private func writeItem(_ account: String, _ data: Data) throws {
-    deleteItem(account)
+  /// Adds without replacing: a duplicate is `.alreadyExists`, never an overwrite.
+  private func addItem(_ account: String, _ data: Data) throws {
     var query = baseQuery(account)
     query[kSecValueData as String] = data
     query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
@@ -329,10 +547,17 @@ public struct MomoDeviceKeyStore {
     let status = SecItemAdd(query as CFDictionary, nil)
     switch status {
     case errSecSuccess: return
+    case errSecDuplicateItem: throw MomoDeviceKeyFailure.alreadyExists
     case errSecMissingEntitlement:
       throw MomoDeviceKeyFailure.misconfigured("the app is not entitled to \(accessGroup) (-34018)")
     default: throw MomoDeviceKeyFailure.failed("keychain write \(status)")
     }
+  }
+
+  /// Replaces. Only for the fingerprint, never for the key handle.
+  private func writeItem(_ account: String, _ data: Data) throws {
+    deleteItem(account)
+    try addItem(account, data)
   }
 
   private func deleteItem(_ account: String) {

@@ -96,6 +96,7 @@ async function loadApp() {
 function stubServer() {
   const calls: WireCall[] = [];
   const rotation = deferred<void>();
+  const refreshSent = deferred<void>();
   answerRotation = () => rotation.resolve();
   vi.stubGlobal(
     "fetch",
@@ -107,6 +108,7 @@ function stubServer() {
         body: typeof init?.body === "string" ? init.body : null,
       });
       if (url.pathname === "/v1/auth/refresh") {
+        refreshSent.resolve();
         await rotation.promise;
         return jsonResponse({ accessToken: "access-token-2", refreshToken: "refresh-token-2" });
       }
@@ -115,6 +117,12 @@ function stubServer() {
   );
   return {
     calls,
+    /**
+     * The refresh POST has left. Since #3067 a rotation first takes the
+     * cross-tab lock and re-reads the store, so "a rotation is in the air"
+     * means THIS moment, not the call to refreshSessionOutcome().
+     */
+    refreshSent: refreshSent.promise,
     revocation: () => calls.find((call) => call.path === "/v1/auth/logout"),
   };
 }
@@ -141,6 +149,7 @@ describe("웹 로그아웃 — 진행 중인 회전에 합류한다 (#2677 리�
     const server = stubServer();
 
     const rotation = api.refreshSessionOutcome();
+    await server.refreshSent;
     const leaving = api.logout(); // 웹은 인자 없이 부른다
     expect(session.getAccessToken()).toBeNull(); // 사람은 즉시 나간다
     answerRotation?.();
@@ -155,6 +164,25 @@ describe("웹 로그아웃 — 진행 중인 회전에 합류한다 (#2677 리�
     });
     expect(session.getAccessToken()).toBeNull();
     expect(session.getPersistedSession()).toBeNull();
+    expect(storage.has(WEB_KEY)).toBe(false);
+  });
+
+  it("회전이 락을 기다리는 사이 로그아웃하면 회전은 토큰을 내지 않고, 폐기는 들고 있던 pair 로 (#3067)", async () => {
+    const { session, api } = await loadApp();
+    session.applyLogin(login);
+    const server = stubServer();
+
+    // 요청이 아직 나가지 않았다: 락 안의 재읽기가 비워진 저장소를 본다.
+    const rotation = api.refreshSessionOutcome();
+    const leaving = api.logout();
+    await Promise.all([rotation, leaving]);
+
+    expect(await rotation).toBe("rejected");
+    expect(server.calls.map((call) => call.path)).toEqual(["/v1/auth/logout"]);
+    expect(server.revocation()?.authorization).toBe("Bearer access-token-1");
+    expect(JSON.parse(server.revocation()?.body ?? "null")).toEqual({
+      refreshToken: "refresh-token-1",
+    });
     expect(storage.has(WEB_KEY)).toBe(false);
   });
 
@@ -186,6 +214,7 @@ describe("데스크톱(키체인) 로그아웃 — 같은 합류, 키체인에�
     const server = stubServer();
 
     const rotation = api.refreshSessionOutcome();
+    await server.refreshSent;
     const leaving = api.logout();
     answerRotation?.();
     await Promise.all([rotation, leaving]);

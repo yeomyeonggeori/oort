@@ -8,6 +8,15 @@
 // `aiDefaults=demo`(개인 줄 선택: 터미널=Claude · 개인, 원격=Claude · 회사(로그인 필요)) ·
 // `aiUnlink=confirm`(회사 줄 해제 창). 팀 연결은 운영자(200)·운영자 아님(403)·비어
 // 있음(모의)으로 나눈다. 라이트·다크 × 1280·390 → captures/2881/*.png
+//
+// #3042: `ONLY=team-save,team-save-before-check,team-save-member,chain-origin
+// OUT_DIR=captures/3042` — 팀 줄 서버 저장(default-ai + 연결 확인 modelIds)과 연결
+// 순서 hop 의 주소 origin 변경(키 필수).
+//
+// #3064: `ONLY=team-save-pending,team-save-offline,chain-offline,chain-copy,nav-appearance
+// OUT_DIR=captures/3064` — 저장 중 칸의 흐림(계산된 opacity 를 재서 0.5 가 아니면
+// 실패), 오프라인(`context.setOffline`: useOffline 의 브라우저 쪽 신호), 연결 순서
+// 블록의 해요체, 390 폭의 한 줄 설정 목록.
 // =============================================================================
 
 import { spawn } from "node:child_process";
@@ -79,6 +88,68 @@ const EMPTY_LINK = {
   diagnostics: [],
 };
 
+// #3042: 연결 확인이 돌려준 모델 id(서버가 정화한 값의 실제 모양).
+const CHECKED = {
+  schema: "momo.provider_link.test.v0",
+  ok: true,
+  source: "database",
+  mode: "external-hermes",
+  endpointLabel: "https://openrouter.ai/api/v1",
+  checkedAtMs: 1_790_000_000_000,
+  cascadeOk: true,
+  entries: [
+    {
+      position: 0,
+      source: "provider_link",
+      mode: "external-hermes",
+      endpointLabel: "https://openrouter.ai/api/v1",
+      enabled: true,
+      ok: true,
+      disposition: "ok",
+      probe: {
+        outcome: "ok",
+        method: "models",
+        latencyMs: 180,
+        probedAtMs: 1_790_000_000_000,
+        cached: false,
+        modelCount: 4,
+        modelIds: ["anthropic/claude-sonnet-4", "openai/gpt-4o", "openai/gpt-4o-mini", "google/gemini-2.5-pro"],
+      },
+    },
+  ],
+};
+const DEFAULT_AI = {
+  schema: "momo.provider.default_ai.v0",
+  teamAgent: {
+    source: "team_link",
+    linkPosition: 0,
+    endpointLabel: "https://openrouter.ai/api/v1",
+    linkResolved: true,
+    modelId: "anthropic/claude-sonnet-4",
+    updatedBy: null,
+    updatedAtMs: 1_790_000_000_000,
+  },
+  summary: {
+    source: "team_link",
+    linkPosition: 2,
+    endpointLabel: "https://backup.dawn.internal/v1",
+    linkResolved: false,
+    modelId: null,
+    updatedBy: null,
+    updatedAtMs: 1_790_000_000_000,
+  },
+  guardrail: { mode: "off", available: false },
+};
+const CHAIN = {
+  schema: "momo.provider_link.chain.v0",
+  entries: [
+    { position: 0, source: "provider_link", mode: "external-hermes", baseUrl: "https://openrouter.ai/api/v1", endpointLabel: "https://openrouter.ai/api/v1", enabled: true, bearerConfigured: true, bearerLast4: "a4f2", updatedAtMs: 1 },
+    { position: 1, source: "chain", mode: "external-hermes", baseUrl: "https://gateway.dawn.internal:8443/v1", endpointLabel: "gateway.dawn.internal:8443", enabled: true, bearerConfigured: true, bearerLast4: "c40a", updatedAtMs: 1 },
+  ],
+  fallbackCount: 1,
+  attemptableCount: 2,
+};
+
 async function installMocks(context, team) {
   await context.route("**/v1/**", (route) =>
     json(route, { channels: [], members: [], read_states: [], messages: [] })
@@ -99,9 +170,20 @@ async function installMocks(context, team) {
   );
   await context.route("**/v1/workspaces/*/channels", (route) => json(route, { channels: CHANNELS }));
   await context.route("**/v1/workspaces/*/roster", (route) => json(route, { members: [] }));
+  await context.route("**/v1/provider/default-ai", (route) => {
+    if (team === "member") return json(route, { error: { code: "forbidden", message: "operator required" } }, 403);
+    // 저장 중 장면: PUT 은 답하지 않는다(「저장하고 있어요」가 선 상태를 찍는다).
+    if (team === "pending-3042" && route.request().method() === "PUT") return undefined;
+    if (team === "operator-3042" || team === "pending-3042") return json(route, DEFAULT_AI);
+    return json(route, { ...DEFAULT_AI, teamAgent: null, summary: null });
+  });
   await context.route("**/v1/provider/link**", (route) => {
     const url = route.request().url();
-    if (url.includes("/chain")) return json(route, { error: { code: "not_found", message: "no chain" } }, 404);
+    if (url.includes("/chain")) {
+      if (team === "chain-3042") return json(route, CHAIN);
+      return json(route, { error: { code: "not_found", message: "no chain" } }, 404);
+    }
+    if (url.includes("/test") && (team === "operator-3042" || team === "pending-3042")) return json(route, CHECKED);
     if (team === "error") return json(route, { error: { code: "internal", message: "boom" } }, 500);
     if (team === "member") return json(route, { error: { code: "forbidden", message: "operator required" } }, 403);
     if (team === "long") return json(route, LONG_LINK);
@@ -184,7 +266,90 @@ async function signedIn(browser, { viewport, scheme }, team) {
 
 const BASE = "/settings?section=ai&aiEntry=rows&aiProbe=claude-ready&aiProfiles=demo";
 
+/** 곁판에서 「연결 확인」을 누르고 결과가 선 뒤 곁판을 닫는다(#3042). */
+async function checkConnection(page) {
+  await page.getByTestId("ai-link-row-more").click();
+  await page.getByTestId("ai-link-check").click();
+  await page.getByTestId("ai-link-probe").waitFor({ state: "visible" });
+  await page.getByTestId("ai-team-aside-close").click();
+  await page.getByTestId("ai-default-teamAgent-select").waitFor({ state: "visible" });
+  await page.getByTestId("ai-defaults").evaluate((el) => el.scrollIntoView({ block: "start" }));
+}
+
+/** 연결 순서를 열고 저장된 hop 의 주소를 다른 host 로 바꾼 뒤 칸을 떠난다(#3042). */
+async function moveHopOrigin(page) {
+  await page.getByTestId("ai-team-chain-toggle").click();
+  const url = page.getByLabel("2차 provider 주소");
+  await url.fill("https://llm.other-vendor.example/v1");
+  await page.getByLabel("2차 provider 키").focus();
+  await page.getByLabel("2차 provider 모드").focus();
+  await page.getByTestId("chain-hop").first().evaluate((el) => el.scrollIntoView({ block: "center" }));
+}
+
 const SCENES = [
+  { name: "team-save", team: "operator-3042", query: "&aiDefaults=demo", ready: "ai-defaults-team-foot", act: checkConnection, focus: "ai-default-teamAgent" },
+  {
+    name: "team-save-pending",
+    team: "pending-3042",
+    query: "&aiDefaults=demo",
+    ready: "ai-defaults-team-foot",
+    act: async (page) => {
+      await checkConnection(page);
+      await page.getByTestId("ai-default-teamAgent-select").selectOption("link:0:openai/gpt-4o");
+      await page.getByTestId("ai-default-teamAgent-saved").waitFor({ state: "visible" });
+      // #3064: 잠긴 칸은 흐려야 한다. 클래스가 아니라 계산된 값을 잰다.
+      const dim = await page
+        .getByTestId("ai-default-teamAgent-select")
+        .evaluate((el) => ({ opacity: getComputedStyle(el).opacity, cursor: getComputedStyle(el).cursor }));
+      if (dim.opacity !== "0.5" || dim.cursor !== "not-allowed") {
+        throw new Error(`저장 중 칸이 흐리지 않다: ${JSON.stringify(dim)}`);
+      }
+    },
+    focus: "ai-default-teamAgent",
+  },
+  {
+    name: "team-save-offline",
+    team: "operator-3042",
+    query: "&aiDefaults=demo",
+    ready: "ai-defaults-team-foot",
+    act: async (page) => {
+      await checkConnection(page);
+      await page.context().setOffline(true);
+      await page.getByTestId("ai-offline-banner").waitFor({ state: "visible" });
+    },
+    focus: "ai-default-teamAgent",
+  },
+  {
+    name: "chain-offline",
+    team: "chain-3042",
+    query: "",
+    ready: "ai-team-chain-toggle",
+    act: async (page) => {
+      await moveHopOrigin(page);
+      await page.context().setOffline(true);
+      await page.getByTestId("ai-offline-banner").waitFor({ state: "visible" });
+      // #3064 M1: 흐린 저장 버튼 곁에서 「입력하면 저장할 수 있어요」를 약속하지 않는다.
+      const blocked = await page.getByTestId("chain-blocked").textContent();
+      if (!blocked?.includes("연결이 돌아온 뒤에")) {
+        throw new Error(`오프라인 차단 문장이 저장을 약속한다: ${blocked}`);
+      }
+      await page.getByTestId("chain-blocked").scrollIntoViewIfNeeded();
+    },
+  },
+  {
+    name: "chain-copy",
+    team: "chain-3042",
+    query: "",
+    ready: "ai-team-chain-toggle",
+    act: async (page) => {
+      await page.getByTestId("ai-team-chain-toggle").click();
+      await page.getByTestId("chain-order-rule").scrollIntoViewIfNeeded();
+    },
+  },
+  { name: "nav-appearance", team: "operator", query: "", base: "/settings?section=appearance", ready: "settings-nav", dialog: true },
+  { name: "team-save-before-check", team: "operator-3042", query: "&aiDefaults=demo", ready: "ai-defaults-team-foot", focus: "ai-default-teamAgent" },
+  { name: "team-save-member", team: "member", query: "&aiDefaults=demo", ready: "ai-defaults-team-foot", focus: "ai-default-teamAgent" },
+  { name: "chain-origin", team: "chain-3042", query: "", ready: "ai-team-chain-toggle", act: moveHopOrigin },
   { name: "defaults-operator", team: "operator", query: "&aiDefaults=demo", ready: "ai-defaults-team-foot" },
   { name: "defaults-member", team: "member", query: "&aiDefaults=demo", ready: "ai-defaults-team-foot" },
   { name: "defaults-empty", team: "empty", query: "", ready: "ai-defaults-team-foot" },
@@ -211,6 +376,10 @@ async function shoot(browser, frame, scene) {
     await page.getByTestId("ai-defaults").evaluate((el) => el.scrollIntoView({ block: "start" }));
   }
   if (scene.act) await scene.act(page);
+  // 좁은 폭에서는 팀 줄이 첫 화면 밖이다: 볼 줄을 위로 올린다(#3042).
+  if (scene.focus && frame.viewport.width < 800) {
+    await page.getByTestId(scene.focus).evaluate((el) => el.scrollIntoView({ block: "start" }));
+  }
   await page.waitForTimeout(250);
   const engine = process.env.BROWSER === "webkit" ? "-webkit" : "";
   const path = `${OUT_DIR}/${scene.name}-${frame.viewport.width}-${frame.scheme}${engine}.png`;

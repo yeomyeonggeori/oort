@@ -6,6 +6,7 @@ import {
   type PersistedSession,
   type SessionStorageMode,
 } from "@momo/core/lib/sessionModel";
+import { withRotationLock } from "./rotationLock";
 import { desktopKeychain, isDesktop } from "./tauri";
 
 export {
@@ -75,6 +76,12 @@ export {
 const STORAGE_KEY = "momo.web.session.v1";
 /** Desktop metadata record. Separate key, because it never holds the token. */
 const DESKTOP_METADATA_KEY = "momo.desktop.session.v1";
+/**
+ * Desktop only: bumped after every keychain write that landed (#3067). The token
+ * itself never touches localStorage in keychain mode, so without this no other
+ * window would hear a rotation. Not secret — a nonce, not the token.
+ */
+const DESKTOP_ROTATED_KEY = "momo.desktop.session.rotated.v1";
 
 function readRaw(key: string): string | null {
   try {
@@ -85,14 +92,17 @@ function readRaw(key: string): string | null {
   }
 }
 
-function writeRaw(key: string, value: string | null): void {
+/** True when the write landed. */
+function writeRaw(key: string, value: string | null): boolean {
   try {
-    if (typeof localStorage === "undefined") return;
+    if (typeof localStorage === "undefined") return false;
     if (value === null) localStorage.removeItem(key);
     else localStorage.setItem(key, value);
+    return true;
   } catch {
     // Storage unavailable (private mode, quota, embedded webview policy): the
     // session simply will not survive a reload. In-memory state keeps working.
+    return false;
   }
 }
 
@@ -126,7 +136,10 @@ function writeStorage(value: PersistedSession | null): void {
     writeRaw(DESKTOP_METADATA_KEY, value ? JSON.stringify(sessionMetadataOf(value)) : null);
     queueKeychain(async () => {
       if (!value) return desktopKeychain.clear();
-      if (await desktopKeychain.store(value.refreshToken)) return true;
+      if (await desktopKeychain.store(value.refreshToken)) {
+        writeRaw(DESKTOP_ROTATED_KEY, `${Date.now()}:${Math.random()}`);
+        return true;
+      }
       // The credential store refused the write: no Secret Service, or an item
       // this build's signature may not overwrite. Dropping the token here would
       // sign the person out on the next launch for no reason they could act on,
@@ -134,16 +147,24 @@ function writeStorage(value: PersistedSession | null): void {
       // claiming a guarantee it is no longer delivering.
       storageMode = "web";
       writeRaw(DESKTOP_METADATA_KEY, null);
-      writeRaw(STORAGE_KEY, JSON.stringify(value));
+      webStoreHolds = writeRaw(STORAGE_KEY, JSON.stringify(value));
       return false;
     });
     return;
   }
-  writeRaw(STORAGE_KEY, value ? JSON.stringify(value) : null);
+  webStoreHolds = writeRaw(STORAGE_KEY, value ? JSON.stringify(value) : null);
 }
 
 let accessToken: string | null = null;
 let persisted: PersistedSession | null = readStorage();
+/**
+ * Web mode: whether the shared record is known to mirror this tab's session —
+ * true after a write here landed or a record was read from it. When storage
+ * refuses writes (private mode, quota) the stored record is absent or stale,
+ * and a re-read must not turn that into "signed out elsewhere" or into a spent
+ * token (#3067).
+ */
+let webStoreHolds = persisted !== null;
 let authExpired = false;
 const listeners = new Set<() => void>();
 
@@ -283,6 +304,152 @@ export function applyRotation(newAccess: string, newRefresh: string): void {
   persisted = { ...persisted, refreshToken: newRefresh };
   writeStorage(persisted);
   notify();
+}
+
+// ---- cross-tab / cross-window coordination (#3067) ---------------------------
+//
+// Every tab of this origin — and every window of the desktop shell — shares one
+// stored refresh token. The token is single-use, and since #3065 the server
+// reads a spent token coming back as theft. So:
+//
+//   rotate     only inside `exclusiveRotation`: take the origin-wide lock, RE-READ
+//              the store (another tab may have rotated while this one waited),
+//              rotate with what is stored now, and release only once the new
+//              token is durably written — keychain writes included.
+//   listen     a `storage` event from another tab updates this tab's copy of the
+//              refresh token, and a removed record ends this tab's session too.
+//              A rotation whose answer lands after the store moved on (logout,
+//              or another account signed in elsewhere) is not applied; the core
+//              revokes the orphaned pair instead (#3072 review H1/M1).
+//
+// The access token is never shared: it stays in memory (see the header). A tab
+// that adopts another tab's refresh token keeps its own access token until it
+// expires and then rotates — with the adopted, unspent token.
+
+/**
+ * How long a rotation waits on the credential store before going on without it
+ * (#3072 review M2). A keychain call can hang — a macOS access prompt left open
+ * for an item another build signed — and the rotation holds the cross-tab lock
+ * while it waits, so an unbounded wait would stall this window's every 401 retry
+ * and its logout's revocation, and every other window behind the lock.
+ */
+export const KEYCHAIN_WAIT_MS = 5_000;
+
+/** `work`'s value, or `fallback` once `ms` has passed. Never rejects. */
+function within<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<T>((settle) => {
+    timer = setTimeout(() => settle(fallback), ms);
+  });
+  return Promise.race([work.catch(() => fallback), late]).finally(() => clearTimeout(timer));
+}
+
+const flushKeychain = () => within(keychainWrites.then(() => undefined), KEYCHAIN_WAIT_MS, undefined);
+
+/** Adopt whatever the shared store holds now. Never writes, so it never echoes. */
+async function resyncFromStore(): Promise<void> {
+  if (storageMode === "keychain") {
+    // This window's own writes first, or the read below races them.
+    await flushKeychain();
+  }
+  // Re-checked AFTER the flush: a refused keychain write demotes the run to web
+  // storage (and drops the metadata record) while it is being awaited.
+  if (storageMode === "keychain") {
+    const metadata = parsePersistedMetadata(readRaw(DESKTOP_METADATA_KEY));
+    if (!metadata) {
+      adoptExternal(null);
+      return;
+    }
+    // A failed read answers null; keep what memory holds rather than turning a
+    // flaky credential store into a sign-out.
+    const refreshToken = await within(desktopKeychain.load(), KEYCHAIN_WAIT_MS, null);
+    if (refreshToken) adoptExternal({ refreshToken, ...metadata });
+    return;
+  }
+  if (!webStoreHolds) return; // the store never held this session; memory is the truth
+  adoptExternal(readStorage());
+}
+
+/**
+ * Take a record written by another tab (or re-read from the store) as this
+ * tab's truth, without writing it back.
+ */
+function adoptExternal(next: PersistedSession | null): void {
+  const current = persisted;
+  if (next === null) {
+    if (current === null) return;
+    // Signed out elsewhere. `authExpired` is the lever the app shell already
+    // answers by returning to the connect screen (app/session.tsx); its local
+    // clearSession() then finds the store already empty.
+    persisted = null;
+    accessToken = null;
+    authExpired = true;
+    notify();
+    return;
+  }
+  if (current && current.member.id !== next.member.id) {
+    // Another account signed in over this one in a different tab. This tab's UI,
+    // caches and realtime rail all belong to the old identity; start over.
+    persisted = next;
+    accessToken = null;
+    try {
+      globalThis.location?.reload();
+    } catch {
+      // Not a browser: the next request 401s and rotates as the new account.
+    }
+    return;
+  }
+  if (current?.refreshToken === next.refreshToken) return;
+  persisted = next;
+  if (!current) authExpired = false;
+  notify();
+}
+
+/**
+ * The host half of the core's rotation (SessionPort.exclusiveRotation): lock,
+ * re-read, rotate, flush, release.
+ */
+export function exclusiveRotation<T>(work: () => Promise<T>): Promise<T> {
+  return withRotationLock(async () => {
+    await resyncFromStore();
+    const result = await work();
+    // Release only once the rotated token is where the next holder reads it.
+    // localStorage writes are synchronous; the keychain's are queued, and a
+    // hung one is waited on only up to KEYCHAIN_WAIT_MS.
+    await flushKeychain();
+    return result;
+  });
+}
+
+function onStorage(event: StorageEvent): void {
+  // `key === null` is localStorage.clear() in another tab.
+  if (event.key === null) {
+    void resyncFromStore();
+    return;
+  }
+  if (storageMode === "keychain") {
+    if (event.key === DESKTOP_METADATA_KEY || event.key === DESKTOP_ROTATED_KEY) {
+      void resyncFromStore();
+    }
+    return;
+  }
+  if (event.key !== STORAGE_KEY) return;
+  if (event.newValue === null) {
+    adoptExternal(null);
+    return;
+  }
+  // A record this build cannot parse (another bundle version, a partial write)
+  // is not a logout. Ignore it rather than sign every tab out.
+  const next = parsePersistedSession(event.newValue);
+  if (!next) return;
+  webStoreHolds = true;
+  adoptExternal(next);
+}
+
+try {
+  globalThis.addEventListener?.("storage", onStorage as EventListener);
+} catch {
+  // Not a window: there are no other tabs to hear from.
 }
 
 /**

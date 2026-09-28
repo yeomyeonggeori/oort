@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../../lib/api";
+import { installCoreHost, resetCoreHost, type SessionPort } from "../../runtime/host";
 import {
   DEFAULT_NOTIFICATION_RULES,
   notificationRulesFromWire,
+  patchNotificationRules,
 } from "./notificationRules";
 
 describe("notificationRulesFromWire", () => {
@@ -55,5 +58,84 @@ describe("notificationRulesFromWire", () => {
     expect(
       notificationRulesFromWire({ dnd: "yes", mentionOverridesMute: 1 })
     ).toEqual(DEFAULT_NOTIFICATION_RULES);
+  });
+});
+
+// ---- #3042: the write is a field PATCH ---------------------------------------
+//
+// The fake server below does what the real one does (#3012): PUT replaces the
+// whole rule, PATCH merges the named fields into what is stored when it lands.
+// "Another device" changes a switch between this client's read and its write;
+// only a patch that names the ONE field this surface touched keeps that change.
+
+describe("patchNotificationRules (#3042)", () => {
+  const WS = "00000000-0000-7000-8000-000000000001";
+
+  function installHost(): void {
+    const session: SessionPort = {
+      getAccessToken: () => "access-token",
+      getRefreshToken: () => null,
+      getPersistedSession: () => null,
+      applyLogin: () => {},
+      applyRotation: () => {},
+      markAuthExpired: () => {},
+      clearSession: () => {},
+    };
+    installCoreHost({
+      apiBase: () => "https://oort.test",
+      absoluteApiBase: () => "https://oort.test",
+      buildMode: () => "test",
+      session,
+    });
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    resetCoreHost();
+  });
+
+  it("sends only the named field, with PATCH, and reads the stored rule back", async () => {
+    installHost();
+    let stored = { dnd: false, mentionOverridesMute: true };
+    const calls: { method: string; body: unknown }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body));
+        calls.push({ method: String(init?.method), body });
+        stored = init?.method === "PATCH" ? { ...stored, ...body } : body;
+        return new Response(JSON.stringify(stored), { status: 200 });
+      })
+    );
+    await expect(patchNotificationRules(WS, { dnd: true })).resolves.toEqual({
+      dnd: true,
+      mentionOverridesMute: true,
+    });
+    expect(calls).toEqual([{ method: "PATCH", body: { dnd: true } }]);
+  });
+
+  it("refuses an empty patch without a round trip", async () => {
+    installHost();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(patchNotificationRules(WS, {})).rejects.toThrow(/empty/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("carries the server's error.code on a refusal", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ error: { message: "nope", code: "some_code" } }),
+            { status: 409 }
+          )
+      )
+    );
+    const error = await patchNotificationRules(WS, { dnd: true }).catch((e) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 409, message: "nope", code: "some_code" });
   });
 });

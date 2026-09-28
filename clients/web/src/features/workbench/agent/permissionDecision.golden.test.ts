@@ -202,3 +202,37 @@ describe("product route wiring", () => {
     expect(routes.reply).toBeNull();
   });
 });
+
+describe("device signature required (#3029)", () => {
+  it("a 403 device_signature_required re-reads the flag so the pane turns to the app line", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ error: { message: "x", code: "device_signature_required" } }), {
+          status: 403,
+          headers: { "content-type": "application/json" },
+        })
+      )
+    );
+    const reread = vi.fn();
+    const recheck = vi.fn();
+    const routes = agentRoutes(WS, reread, recheck);
+    const c = goldenCase("owner_allow_once");
+    const err = await routes.decide!({ sessionId: SESSION, ...(c.body as WorkPermissionDecisionBody) }).catch((e) => e);
+    expect((err as ApiError).code).toBe("device_signature_required");
+    expect(recheck).toHaveBeenCalledTimes(1);
+    // 다른 403은 플래그를 다시 읽지 않는다.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ error: { message: "x", code: "permission_owner_only" } }), {
+          status: 403,
+          headers: { "content-type": "application/json" },
+        })
+      )
+    );
+    await routes.decide!({ sessionId: SESSION, ...(c.body as WorkPermissionDecisionBody) }).catch(() => undefined);
+    expect(recheck).toHaveBeenCalledTimes(1);
+  });
+});

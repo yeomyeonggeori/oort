@@ -46,8 +46,16 @@ export async function settingsRequest<T>(
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const res = await fetchWithDeadline(`${apiBase()}${path}`, { ...init, headers });
   if (!res.ok) {
-    const body = res.jsonOrNull<{ error?: { message?: string } }>();
-    throw new ApiError(res.status, body?.error?.message ?? `HTTP ${res.status}`);
+    const body = res.jsonOrNull<{ error?: { message?: string; code?: unknown } }>();
+    // `error.code` rides along (#3042): a refusal the panel has to answer with a
+    // next action (체인 409 `key_required_for_new_origin`) is named by its code,
+    // because the message is the server's to reword.
+    const code = body?.error?.code;
+    throw new ApiError(
+      res.status,
+      body?.error?.message ?? `HTTP ${res.status}`,
+      typeof code === "string" && code !== "" ? code : undefined
+    );
   }
   return responseRecord(res.json<unknown>()) as T;
 }
