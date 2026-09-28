@@ -383,10 +383,11 @@ both sat on Tailwind's stock `max-w-lg`, the same 512px wearing no name, so the
 token file had never heard of the measure the two overlays share. They alternate
 at the same anchor, so it is one measure and it gets one name.
 
-`--spacing-settings-nav` 308px is the phone **height** cap of the settings
-section list (#1867 M-1). It is not a pane: borrowing `pane-sm` as max-block-size
-showed four of fourteen rows with no peek of the next. The number is this
-surface's row rhythm (tap-target 44 + chrome) so the fifth row is half visible.
+The settings section list has no phone height token any more (#3064). Below
+600px it is one horizontally scrolling row (`settings-nav` utility), not a
+column capped at 308px: the capped column stacked two scroll panes on a 390
+phone and body text slid under the list's bottom edge, which read as the menu
+covering the page (#1867 M-1 had introduced `--spacing-settings-nav`).
 
 Body caps are a fifth axis: `max-h-diff-body` 400px (MOMO-620), the height a
 diff scrolls inside its card. It is not a pane (a pane is a width) and the rhythm

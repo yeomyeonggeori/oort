@@ -469,25 +469,6 @@
    * 잘리고, pane-picker(384)와 pane-md(512) 사이의 시안 값이라 이름을 준다. */
   --spacing-pane-command: 440px;
 
-  /* 설정 섹션 목록의 폰 높이 캡 (#1867 design-review M-1).
-   *
-   * `--spacing-pane-sm`(192) 은 **가로** 바닥이다(mention 목록 · dropdown ·
-   * 부차 패널이 양보할 때의 폭). 앞 판이 그 값을 이 목록의 max-block-size 로
-   * 빌려 썼고, 14개 행 리듬에서 4행만 보이며 다음 행의 스크롤 단서가 없었다.
-   * 축을 빌려 쓰지 않는다.
-   *
-   * 값은 이 표면의 행 리듬에서 나온다 (width < 600px, tap-target 44):
-   *   p-2 상하 16
-   *   「앱으로 돌아가기」 44 + 그 아래 pb-3 12
-   *   첫 그룹 라벨 18 (text-meta 1.125rem) + gap-1 4
-   *   개인 4행 (44×4 + gap-1×3 = 188)
-   *   넷째와 다섯째 사이 gap-1 4 + 다섯째 행의 절반 22
-   *   --------------------------------
-   *   308
-   * 다섯째가 반쯤 보여야 목록이 이어진다는 단서가 된다. 유틸 `settings-nav` 가
-   * 600px 미만에서만 이 값을 max-block-size 로 든다. */
-  --spacing-settings-nav: 308px;
-
   /* QR 모듈 피치 바닥 (#1989 H3).
    *
    * `--spacing-pane-sm`(192) 은 **가로** 바닥이다(mention 목록 · dropdown ·
@@ -2337,7 +2318,7 @@
 
 /* 설정의 두 열 (B6 / #1867). 앱 사이드바를 대체하므로 넓은 창의 목록 폭은
  * `--w-settings-nav`(240px)다. 390px 폰에서는 그 열이 본문을 밀어내므로 목록이
- * 본문 위로 올라가 가로로 눕는다. */
+ * 본문 위로 올라가 한 줄로 눕는다(`settings-nav`, #3064). */
 @utility settings-layout {
   display: flex;
   min-block-size: 0;
@@ -2372,6 +2353,29 @@
   border-inline-start: var(--spacing-marker) solid var(--accent);
 }
 
+/* 설정 섹션 목록 (#1867, #3064). 넓은 창에서는 240 열, 600 미만에서는 본문 위의
+ * **한 줄**이다.
+ *
+ * 한 줄인 이유(#3064): 앞 판은 폰에서 목록을 세로로 두고 높이를 308로 잘랐다
+ * (#1867 M-1). 그러면 390×844에서 목록과 본문이 위아래로 포개진 두 스크롤 판이
+ * 된다. 목록은 화면의 36%를 들고, 본문은 536에 갇혀 스크롤할 때마다 글줄이
+ * 목록의 아래 선에 반쯤 잘려 들어갔다. z-index도 겹침도 없었지만 사람 눈에는
+ * 「메뉴가 본문을 덮는다」로 읽혔다(#3010·#3042 캡처). 한 줄이면 목록은 61
+ * (아래 산술)이고 본문이 나머지를 받는다. 섹션은 가로로 스크롤하고,
+ * 고른 섹션은 SettingsRoute가 `scrollIntoView({ inline: "nearest" })`로 줄 안에
+ * 들인다. 그룹 라벨(개인·워크스페이스·연결)은 줄 안의 구분 글자로 남는다.
+ *
+ * 「더 있다」는 단서(#3064 design-review H1): 세로 캡이 다섯째 행을 반쯤 보여
+ * 준 것과 같은 일을 가로에서 둘이 한다.
+ * - 양 끝 24(본문 p-6과 같은 여백)를 흐리는 마스크. 줄 가운데의 섹션이 창
+ *   끝에서 잘려 사라지며 이어진다는 것을 말한다. 끝까지 밀면 흐린 자리에는 빈
+ *   여백만 남아 첫·끝 섹션은 온전히 보인다. 항상 보이는 스크롤 막대
+ *   (`scrollbar-visible`)는 쓰지 않는다: 폰 WebKit은 ::-webkit-scrollbar 를
+ *   그리지 않고, 헤드리스 Chromium도 그리지 않아 잴 수 없었다(실측 0px).
+ *   마스크는 칠이 아니라 가림이라 색 토큰이 없다.
+ * - `scroll-padding-inline` = 탭 하나(44): 고른 섹션을 들일 때 창 끝에 붙이지
+ *   않고 이웃 한 칸 자리를 남긴다.
+ * 줄 높이는 탭 44 + p-2 위아래 16 + 선 1 = 61이다. */
 @utility settings-nav {
   inline-size: var(--w-settings-nav);
   flex-shrink: 0;
@@ -2379,10 +2383,58 @@
   border-inline-end: 1px solid var(--line);
 
   @media (width < 600px) {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
     inline-size: auto;
-    max-block-size: var(--spacing-settings-nav);
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-inline: var(--spacing-6);
+    scroll-padding-inline: var(--tap-target);
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      black var(--spacing-6),
+      black calc(100% - var(--spacing-6)),
+      transparent
+    );
     border-inline-end: 0;
     border-block-end: 1px solid var(--line);
+  }
+}
+
+/* 목록의 한 묶음(돌아가기 · 그룹 라벨 + 섹션들). 넓은 창은 세로 쌓기와 아래
+ * 여백 12, 폰은 줄 안에서 옆으로 선다. */
+@utility settings-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  padding-block-end: var(--spacing-3);
+
+  @media (width < 600px) {
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+    padding-block-end: 0;
+  }
+}
+
+@utility settings-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+
+  @media (width < 600px) {
+    flex-direction: row;
+  }
+}
+
+@utility settings-nav-item {
+  inline-size: 100%;
+
+  @media (width < 600px) {
+    inline-size: auto;
+    white-space: nowrap;
   }
 }
 

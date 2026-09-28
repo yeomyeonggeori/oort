@@ -140,7 +140,7 @@ export function chainUnreadableCopy(chain: ProviderChain): string | null {
   const unreadable = chain.unreadable;
   if (unreadable === undefined || unreadable.length === 0) return null;
   const where = unreadable.map((index) => `${index}번째`).join(", ");
-  return `이 서버가 보낸 연결 순서에서 ${where} 항목을 읽지 못했습니다. 지금 저장하면 그 항목이 서버에서 지워지므로 저장을 막았습니다. 아래 목록은 읽은 항목만 보여 줍니다. 서버 버전을 확인한 뒤 다시 열어보세요.`;
+  return `이 서버가 보낸 연결 순서에서 ${where} 항목을 읽지 못했어요. 지금 저장하면 그 항목이 서버에서 지워지므로 저장을 막았어요. 아래 목록은 읽은 항목만 보여 줘요. 서버 버전을 확인한 뒤 다시 열어보세요.`;
 }
 
 /** Probe hops off the `/test` body. Empty when the server sent none. */
@@ -170,7 +170,7 @@ export function parseProbeEntries(raw: unknown): ProviderChainProbe[] {
 
 /** Copy for a 200 whose body this panel cannot read. */
 export const CHAIN_UNREADABLE =
-  "이 서버가 보낸 연결 순서 응답을 읽지 못했습니다. 서버 버전을 확인한 뒤 다시 시도하세요.";
+  "이 서버가 보낸 연결 순서 응답을 읽지 못했어요. 서버 버전을 확인한 뒤 다시 시도하세요.";
 
 // ---- the draft --------------------------------------------------------------
 
@@ -280,18 +280,18 @@ export const ORIGIN_CHANGED_KEY_HINT =
  */
 export function bearerHint(row: ChainDraftRow): string {
   if (row.isNew) {
-    return "입력한 값은 저장 즉시 암호화되며 화면으로 다시 돌아오지 않습니다.";
+    return "입력한 값은 저장 즉시 암호화되며 화면으로 다시 돌아오지 않아요.";
   }
   // 「비워 두면 그대로 둡니다」 is false here: the kept key stays with the old
   // origin and an empty field is a guaranteed 409.
   if (originChanged(row)) return ORIGIN_CHANGED_KEY_HINT;
   if (!row.bearerConfigured) {
-    return "이 provider에는 저장된 키가 없습니다. 키를 입력해야 실제로 시도됩니다.";
+    return "이 provider에는 저장된 키가 없어요. 키를 입력해야 실제로 시도돼요.";
   }
   if (row.bearerLast4 === undefined) {
-    return "키가 저장되어 있습니다. 비워 두면 그대로 둡니다.";
+    return "키가 저장되어 있어요. 비워 두면 그대로 둬요.";
   }
-  return `저장된 키 ${maskedBearer(row.bearerLast4)}. 비워 두면 그대로 둡니다.`;
+  return `저장된 키 ${maskedBearer(row.bearerLast4)}. 비워 두면 그대로 둬요.`;
 }
 
 /**
@@ -306,12 +306,12 @@ export function bearerHint(row: ChainDraftRow): string {
  */
 export function headClaim(entry: ProviderChainEntry): string {
   if (!entry.enabled) {
-    return "꺼져 있어 시도하지 않습니다. 이 항목은 위의 provider 연결에서 바꿉니다.";
+    return "꺼져 있어 시도하지 않아요. 이 항목은 위의 provider 연결에서 바꿔요.";
   }
   if (entry.mode === "external-hermes" && !entry.bearerConfigured) {
-    return "키가 없어 지금은 시도하지 않습니다. 위의 provider 연결에서 키를 저장하면 가장 먼저 시도합니다.";
+    return "키가 없어 지금은 시도하지 않아요. 위의 provider 연결에서 키를 저장하면 가장 먼저 시도해요.";
   }
-  return "가장 먼저 시도합니다. 이 항목은 위의 provider 연결에서 바꿉니다.";
+  return "가장 먼저 시도해요. 이 항목은 위의 provider 연결에서 바꿔요.";
 }
 
 /**
@@ -408,14 +408,14 @@ export function draftRowError(row: ChainDraftRow): DraftRowError | null {
   if (!/^https?:\/\/.+/.test(url)) {
     return {
       field: "baseUrl",
-      message: "주소는 http:// 또는 https:// 로 시작해야 합니다.",
+      message: "주소는 http:// 또는 https:// 로 시작해야 해요.",
       next: "주소를 http:// 또는 https:// 로 시작하게 고치면",
     };
   }
   if (row.isNew && row.bearer.trim() === "") {
     return {
       field: "bearer",
-      message: "새 provider는 키를 입력해야 저장됩니다.",
+      message: "새 provider는 키를 입력해야 저장돼요.",
       next: "키를 입력하면",
     };
   }
@@ -451,15 +451,20 @@ export function draftErrors(
  */
 export function draftBlockedHint(
   rows: readonly ChainDraftRow[],
-  errors: ReadonlyMap<string, DraftRowError>
+  errors: ReadonlyMap<string, DraftRowError>,
+  offline = false
 ): string | null {
   if (errors.size === 0) return null;
   const index = rows.findIndex((row) => errors.has(row.key));
   const error = index < 0 ? undefined : errors.get(rows[index].key);
   if (error === undefined) return null;
-  const first = `${hopOrdinal(index + 1)} provider ${error.next} 저장할 수 있습니다.`;
+  // Offline, fixing the row is not enough: the save button stays dimmed until the
+  // rail is back, so the sentence says both conditions (#3064 design-review M1).
+  const first = offline
+    ? `${hopOrdinal(index + 1)} provider ${error.next} 연결이 돌아온 뒤에 저장할 수 있어요. 지금은 서버에 연결되어 있지 않아요.`
+    : `${hopOrdinal(index + 1)} provider ${error.next} 저장할 수 있어요.`;
   if (errors.size === 1) return first;
-  return `${first} 채워야 할 항목은 모두 ${errors.size}개입니다.`;
+  return `${first} 채워야 할 항목은 모두 ${errors.size}개예요.`;
 }
 
 /**
@@ -513,7 +518,7 @@ export function draftIsDirty(
 export function chainErrorCopy(error: unknown): string | null {
   if (!(error instanceof ApiError)) return null;
   if (error.status === 404) {
-    return "이 서버는 아직 프로바이더 연결 순서를 제공하지 않습니다. 지금은 위의 provider 하나만 쓰입니다. 서버를 업데이트한 뒤 다시 열어보세요.";
+    return "이 서버는 아직 프로바이더 연결 순서를 제공하지 않아요. 지금은 위의 provider 하나만 쓰여요. 서버를 업데이트한 뒤 다시 열어보세요.";
   }
   return null;
 }
@@ -529,8 +534,8 @@ export function chainErrorCopy(error: unknown): string | null {
  */
 export function chainDirtyHint(offline: boolean): string {
   return offline
-    ? "아직 저장되지 않았습니다. 지금은 서버에 연결되어 있지 않아 저장할 수 없고, 연결이 돌아오면 연결 순서 저장을 누르세요."
-    : "아직 저장되지 않았습니다. 연결 순서 저장을 눌러야 적용됩니다.";
+    ? "아직 저장되지 않았어요. 지금은 서버에 연결되어 있지 않아 저장할 수 없고, 연결이 돌아오면 연결 순서 저장을 누르세요."
+    : "아직 저장되지 않았어요. 연결 순서 저장을 눌러야 적용돼요.";
 }
 
 /** `error.code` of the chain PUT refusal for a keyless origin change (#3040). */
@@ -543,13 +548,13 @@ export const CHAIN_KEY_REQUIRED_FOR_NEW_ORIGIN =
 export function chainSaveMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 404) {
-      return "이 서버는 아직 프로바이더 연결 순서를 저장할 수 없습니다. 서버를 업데이트한 뒤 다시 시도하세요.";
+      return "이 서버는 아직 프로바이더 연결 순서를 저장할 수 없어요. 서버를 업데이트한 뒤 다시 시도하세요.";
     }
     if (error.status === 400) {
-      return `서버가 이 연결 순서를 받지 않았습니다. 서버가 보고한 사유: ${error.message}`;
+      return `서버가 이 연결 순서를 받지 않았어요. 서버가 보고한 사유: ${error.message}`;
     }
     if (error.status === 403) {
-      return "provider 연결은 이 서버의 운영자만 바꿀 수 있습니다.";
+      return "provider 연결은 이 서버의 운영자만 바꿀 수 있어요.";
     }
     // #3040: a kept key never follows its hop to another origin. The code is the
     // contract; a 409 without it (a proxy, a reworded server) still means the
@@ -560,7 +565,7 @@ export function chainSaveMessage(error: unknown): string {
       return CHAIN_KEY_REQUIRED_FOR_NEW_ORIGIN;
     }
   }
-  return "연결 순서를 저장하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+  return "연결 순서를 저장하지 못했어요. 잠시 뒤에 다시 시도하세요.";
 }
 
 /**
@@ -588,17 +593,17 @@ export function chainSaveMessage(error: unknown): string {
  */
 export function chainSummary(chain: ProviderChain): string {
   if (chain.unreadable !== undefined && chain.unreadable.length > 0) {
-    return "이 서버가 보낸 항목 중 일부를 읽지 못해, 예비 provider가 몇 개인지 말할 수 없습니다.";
+    return "이 서버가 보낸 항목 중 일부를 읽지 못해, 예비 provider가 몇 개인지 말할 수 없어요.";
   }
   const fallbacks = chain.fallbackCount;
   if (fallbacks === 0) {
-    return "예비 provider가 없습니다. 첫 provider가 응답하지 않으면 그 실행은 실패합니다.";
+    return "예비 provider가 없어요. 첫 provider가 응답하지 않으면 그 실행은 실패해요.";
   }
   const attemptable = chain.attemptableCount;
   if (attemptable === undefined) {
-    return `예비 provider ${fallbacks}개를 두었습니다.`;
+    return `예비 provider ${fallbacks}개를 두었어요.`;
   }
-  return `예비 provider ${fallbacks}개. 첫 provider까지 합쳐 지금 실제로 시도되는 경로는 ${attemptable}개입니다.`;
+  return `예비 provider ${fallbacks}개. 첫 provider까지 합쳐 지금 실제로 시도되는 경로는 ${attemptable}개예요.`;
 }
 
 // ---- probe results ----------------------------------------------------------
@@ -670,14 +675,14 @@ function dispositionCopy(entry: ProviderChainProbe): {
     return {
       tone: "ok",
       label: "응답함",
-      detail: "이 provider가 지금 실행을 처리합니다.",
+      detail: "이 provider가 지금 실행을 처리해요.",
     };
   }
   if (entry.disposition === "skipped") {
     return {
       tone: "muted",
       label: "꺼둠",
-      detail: "꺼져 있어 시도하지 않습니다.",
+      detail: "꺼져 있어 시도하지 않아요.",
     };
   }
   if (entry.reason === MOCK_MODE_REASON) {
@@ -687,7 +692,7 @@ function dispositionCopy(entry: ProviderChainProbe): {
       // States what the probe did, and stops. Whether the mock answers a real
       // turn is a different question this check never asked.
       detail:
-        "모드가 목으로 되어 있어 이번 확인에서는 실제 provider를 부르지 않았습니다.",
+        "모드가 목으로 되어 있어 이번 확인에서는 실제 provider를 부르지 않았어요.",
     };
   }
   const reason = probeReasonCopy(entry.reason);
@@ -695,13 +700,13 @@ function dispositionCopy(entry: ProviderChainProbe): {
     return {
       tone: "warn",
       label: "다음으로 넘어감",
-      detail: `${reason} 다음 provider로 넘어갑니다.`,
+      detail: `${reason} 다음 provider로 넘어가요.`,
     };
   }
   return {
     tone: "danger",
     label: "여기서 멈춤",
-    detail: `${reason} 다음 provider로 넘겨도 같은 이유로 실패하므로 여기서 멈춥니다.`,
+    detail: `${reason} 다음 provider로 넘겨도 같은 이유로 실패하므로 여기서 멈춰요.`,
   };
 }
 
@@ -721,25 +726,25 @@ export function probeReasonCopy(reason: string | undefined): string {
   if (reason === undefined || reason === "") return "";
   if (reason === "hop_disabled") return "";
   if (reason === "not_external_provider") {
-    return "모드가 목으로 되어 있어 실제 provider를 부르지 않습니다.";
+    return "모드가 목으로 되어 있어 실제 provider를 부르지 않아요.";
   }
   if (reason === "provider_not_configured") {
-    return "주소나 키가 비어 있습니다.";
+    return "주소나 키가 비어 있어요.";
   }
   // 401/403 from `ProviderCascadeClassifier`, and the single most common
   // operator mistake on this panel: a key that was pasted wrong or has been
   // rotated away. It was falling through to the machine label.
   if (reason === "provider_auth_failed") {
-    return "provider가 저장된 키를 받아들이지 않았습니다.";
+    return "provider가 저장된 키를 받아들이지 않았어요.";
   }
   if (reason === "provider_unreachable") {
-    return "주소에 닿지 못했습니다.";
+    return "주소에 닿지 못했어요.";
   }
   if (reason === "provider_rate_limited") {
-    return "요청 한도를 넘었습니다.";
+    return "요청 한도를 넘었어요.";
   }
   if (reason === "probe_not_run") {
-    return "확인이 끝나지 않았습니다.";
+    return "확인이 끝나지 않았어요.";
   }
   // #2960: the server's egress guard refused a private, loopback or metadata
   // address before dialling. Only the operator's opt-in changes that.
@@ -748,13 +753,13 @@ export function probeReasonCopy(reason: string | undefined): string {
   }
   // #2960: a 2xx whose body is not the documented model list.
   if (reason === "provider_invalid_response") {
-    return "주소가 provider API가 아닌 것 같습니다. API 주소(예: …/v1)인지 확인하세요.";
+    return "주소가 provider API가 아닌 것 같아요. API 주소(예: …/v1)인지 확인하세요.";
   }
   if (isLoopbackProviderRefusal(reason)) {
     return loopbackProviderGuidance();
   }
   const status = /^provider_status_(\d{3})$/.exec(reason);
-  if (status) return `provider가 ${attachDirection(status[1])} 답했습니다.`;
+  if (status) return `provider가 ${attachDirection(status[1])} 답했어요.`;
   return `서버가 보고한 사유: ${reason}`;
 }
 
@@ -815,7 +820,7 @@ export function cascadeProbeSummary(
   if (cascadeOk && first >= 0) {
     return {
       tone: "ok",
-      text: `${hopOrdinal(first)} provider가 응답했습니다. 확인한 ${probed.length}개 중 ${answered}개가 응답합니다.`,
+      text: `${hopOrdinal(first)} provider가 응답했어요. 확인한 ${probed.length}개 중 ${answered}개가 응답해요.`,
     };
   }
   const mocked = entries.filter(isMockMode).length;
@@ -823,22 +828,22 @@ export function cascadeProbeSummary(
     return mocked > 0
       ? {
           tone: "muted",
-          text: "확인할 수 있는 실제 provider가 없습니다. 모드가 목으로 되어 있어 이번 확인은 어디에도 요청하지 않았습니다.",
+          text: "확인할 수 있는 실제 provider가 없어요. 모드가 목으로 되어 있어 이번 확인은 어디에도 요청하지 않았어요.",
         }
       : {
           tone: "warn",
-          text: "켜져 있는 provider가 없습니다. 하나 이상 켜야 실행할 수 있습니다.",
+          text: "켜져 있는 provider가 없어요. 하나 이상 켜야 실행할 수 있어요.",
         };
   }
   if (mocked > 0) {
     return {
       tone: "warn",
-      text: `확인한 provider ${probed.length}개 중 응답한 곳이 없습니다. 목 모드 provider는 이번 확인에서 부르지 않았습니다.`,
+      text: `확인한 provider ${probed.length}개 중 응답한 곳이 없어요. 목 모드 provider는 이번 확인에서 부르지 않았어요.`,
     };
   }
   return {
     tone: "warn",
-    text: `확인한 provider ${probed.length}개 중 응답한 곳이 없습니다. 지금은 실행이 실패합니다.`,
+    text: `확인한 provider ${probed.length}개 중 응답한 곳이 없어요. 지금은 실행이 실패해요.`,
   };
 }
 
@@ -853,7 +858,7 @@ export const LOOPBACK_REFUSAL_WIRE =
  * a client switch, and this sentence must not claim a flag that is not there.
  */
 export const LOOPBACK_PROVIDER_HINT =
-  "이 서버는 같은 컴퓨터의 주소(127.0.0.1·localhost)로 가는 연결을 기본으로 거절합니다. 서버 운영자가 셀프호스트 설정에서 로컬 provider 허용을 켠 뒤 다시 확인해 주세요.";
+  "이 서버는 같은 컴퓨터의 주소(127.0.0.1·localhost)로 가는 연결을 기본으로 거절해요. 서버 운영자가 셀프호스트 설정에서 로컬 provider 허용을 켠 뒤 다시 확인해 주세요.";
 
 function refusalText(error: unknown): string {
   if (typeof error === "string") return error;
