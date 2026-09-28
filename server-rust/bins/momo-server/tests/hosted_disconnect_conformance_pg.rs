@@ -22,6 +22,7 @@ use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::{with_tenant_tx, PgPool};
+use momo_mcp::TOOL_CATALOG;
 use momo_server::config::{AgentGatewayMode, AgentGatewaySettings, AgentPortConfig};
 use momo_server::{build_app, AppState};
 use serde_json::{json, Value};
@@ -39,17 +40,18 @@ const HOSTED_SCOPES: [&str; 6] = [
     "agent:jobs:read",
     "agent:runs:callback",
 ];
-/// Every product tool a live hosted credential can reach (HAP-E5).
-const PRODUCT_TOOLS: [&str; 8] = [
-    "oort_inbox_read",
-    "oort_conversation_read",
-    "oort_message_post",
-    "oort_jobs_claim",
-    "oort_job_renew",
-    "oort_job_release",
-    "oort_run_event",
-    "oort_run_complete",
-];
+/// Every product tool a live hosted credential can reach (HAP-E5): the
+/// `momo-mcp` catalog, in its order, narrowed to the tools one of
+/// [`HOSTED_SCOPES`] opens. Read from the catalog so a new tool (#2959
+/// `oort_card_suggest`, #3069) is expected here without a second list to
+/// forget; the scope filter is what this test adds, not a copy of the catalog.
+fn product_tools() -> Vec<&'static str> {
+    TOOL_CATALOG
+        .iter()
+        .filter(|tool| HOSTED_SCOPES.contains(&tool.required_scope))
+        .map(|tool| tool.name)
+        .collect()
+}
 
 fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("set DATABASE_URL to an isolated PostgreSQL 18 URL")
@@ -740,10 +742,10 @@ async fn a_disconnect_start_revokes_pauses_suppresses_and_closes_every_capabilit
     let base = start_server(app).await;
     let client = reqwest::Client::new();
 
-    // A live connection: eight tools, and one claimed lease in hand.
+    // A live connection: every hosted-scope tool, and one claimed lease in hand.
     let (status, tools) = list_tools(&client, &base, &fixture.hosted.bearer).await;
     assert_eq!(status, 200);
-    assert_eq!(tools, PRODUCT_TOOLS.to_vec());
+    assert_eq!(tools, product_tools());
     let handle = mention_and_claim(&client, &base, &su, &fixture, &fixture.hosted).await;
     let leased_before: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='agent_job' \
@@ -862,7 +864,7 @@ async fn a_disconnect_start_revokes_pauses_suppresses_and_closes_every_capabilit
     let (status, tools) = list_tools(&client, &base, &fixture.hosted.bearer).await;
     assert_eq!(status, 401, "the transport refuses the revoked bearer");
     assert!(tools.is_empty());
-    for tool in PRODUCT_TOOLS {
+    for tool in product_tools() {
         let (status, _) = call(&client, &base, &fixture.hosted.bearer, tool, json!({})).await;
         assert_eq!(status, 401, "{tool} after disconnect");
     }
@@ -958,7 +960,7 @@ async fn a_disconnect_start_revokes_pauses_suppresses_and_closes_every_capabilit
     // ---- the sibling hosted agent and the managed one are untouched --------
     let (status, sibling_tools) = list_tools(&client, &base, &fixture.sibling.bearer).await;
     assert_eq!(status, 200);
-    assert_eq!(sibling_tools, PRODUCT_TOOLS.to_vec());
+    assert_eq!(sibling_tools, product_tools());
     assert_eq!(
         connection_status(&su, fixture.workspace, fixture.sibling.connection).await,
         "active"
@@ -1693,7 +1695,7 @@ async fn a_reconnect_is_a_new_namespace_and_never_revives_the_old_one() {
 
     let (status, tools) = list_tools(&client, &base, &reconnected.bearer).await;
     assert_eq!(status, 200);
-    assert_eq!(tools, PRODUCT_TOOLS.to_vec(), "the new era is fully open");
+    assert_eq!(tools, product_tools(), "the new era is fully open");
 
     // Everything from the old era stays dead.
     let (status, _) = list_tools(&client, &base, &old_bearer).await;

@@ -18,8 +18,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use momo_workd::control_socket::{
-    ControlSocket, ControlSocketError, HostHealth, HostIdentity, PeerPolicy,
+    ControlSocket, ControlSocketError, HostHealth, HostIdentity, PeerPolicy, SocketShared,
 };
+use momo_workd::human_trust::{HumanTrust, TrustIdentity};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::UnixStream;
 use tokio::sync::Notify;
@@ -62,8 +63,23 @@ fn identity() -> HostIdentity {
 fn serve(path: &Path, policy: PeerPolicy) -> (tokio::task::JoinHandle<()>, Arc<Notify>) {
     let socket = ControlSocket::bind(path, policy).expect("bind");
     let stop = Arc::new(Notify::new());
-    let task =
-        tokio::spawn(socket.serve(identity(), Arc::new(HostHealth::default()), stop.clone()));
+    let identity = identity();
+    let trust = HumanTrust::open(
+        path.parent().expect("socket folder"),
+        TrustIdentity {
+            workspace_id: identity.workspace_id,
+            owner_member_id: identity.owner_member_id,
+            host_id: identity.host_id,
+        },
+    )
+    .expect("trust state");
+    let shared = SocketShared {
+        health: Arc::new(HostHealth::default()),
+        stop: stop.clone(),
+        trust: Arc::new(std::sync::Mutex::new(trust)),
+        human_signatures_required: false,
+    };
+    let task = tokio::spawn(socket.serve(identity, shared));
     (task, stop)
 }
 

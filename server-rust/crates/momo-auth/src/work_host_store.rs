@@ -144,6 +144,39 @@ pub async fn insert_work_host(
     Ok(id)
 }
 
+/// [`insert_work_host`] under a caller-chosen id — the host id candidate a
+/// root device key signed (`host_register`, ADR-0146 개정 D-8, #3022). `None`
+/// when a host with that id already exists (in any workspace): a replayed
+/// statement collides with the row it created, which is what makes the
+/// statement single-use without a nonce ledger.
+pub async fn insert_work_host_with_id(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    host_id: Uuid,
+    new: &NewWorkHost,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(
+        "INSERT INTO work_host \
+           (id, workspace_id, scope, owner_member_id, type, display_name, \
+            public_key, capabilities, last_seen_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, \
+                 CASE WHEN $9 THEN clock_timestamp() ELSE NULL END) \
+         ON CONFLICT (id) DO NOTHING \
+         RETURNING id",
+    )
+    .bind(host_id)
+    .bind(workspace_id)
+    .bind(&new.scope)
+    .bind(new.owner_member_id)
+    .bind(&new.host_type)
+    .bind(&new.display_name)
+    .bind(&new.public_key)
+    .bind(&new.capabilities_json)
+    .bind(new.seen_now)
+    .fetch_optional(&mut *conn)
+    .await
+}
+
 /// Re-read one host (Swift `loadHost` :695-712). RLS confines the lookup to the
 /// transaction's workspace, so the id alone is a safe predicate — same as Swift.
 pub async fn load_work_host(

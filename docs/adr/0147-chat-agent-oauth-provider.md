@@ -7,6 +7,7 @@
 - 증보: 2026-09-27 AI 계정(#2876) — 설정 화면에서도 `auth.json` 붙여넣기로 새 링크를 만들 수 없다. 「증보 2026-09-26」 절 끝 한 줄
 - 증보: 2026-09-27 연결 확인(#2960) — `POST /v1/provider/link/test`가 봉인 크레이트를 거쳐 provider에 읽기 전용 GET 한 번을 보낸다. 결정 4의 「momo-server HTTP 0」을 좁힌다. 파일 끝 「증보 2026-09-27 — 연결 확인」 절
 - 증보: 2026-09-28 기본 AI 운영자 행(#3009) — `GET/PUT /v1/provider/default-ai`와 새 테이블 `provider_default_ai`(migration 093), 그리고 연결 확인 응답의 `modelIds`. 연결 확인 증보의 「provider 문자열은 크레이트 밖으로 나가지 않는다」를 모델 id 한 가지만큼 좁힌다. 파일 끝 「증보 2026-09-28 — 기본 AI 운영자 행」 절
+- 증보: 2026-09-28 키는 origin에 묶인다(#3040) — `PUT /v1/provider/link/chain`이 키 없이 hop의 origin을 바꾸면 409 `key_required_for_new_origin`. 파일 끝 「증보 2026-09-28 — 체인 키는 origin에 묶인다」 절
 - 발단: 티키타카 smoke의 provider 선택에서 성재가 API 키 대신 ChatGPT 구독 OAuth(Codex CLI 방식)를 지정.
 
 ## 결정
@@ -129,3 +130,19 @@
 - **검증.**
   - 격리 PG 시험(`provider_probe_conformance_pg.rs`): 비운영자 403, 개인 source의 라우트 400과 CHECK 거부, 행 patch, 체인 이동 감지, audit에 키 없음, 테넌트 트랜잭션 0행·쓰기 거부, 키를 조각내 되돌리는 mock에서 `modelIds`에 조각 없음.
   - 사보타주로 가드마다 빨강을 확인했다. 실제 provider 왕복은 runtime-unverified다.
+
+## 증보 2026-09-28 — 체인 키는 origin에 묶인다
+
+- Status: **Accepted**. 결재 인용: 보안 결함 수리 — planner 편성 #3040, PR #3039 보안 검수 발견(diff 밖 기존 High).
+- 기안·구현: Opus 5.5 worker(#3040).
+- **결함.** `PUT /v1/provider/link/chain`은 bearer를 생략한 hop에 같은 위치의 저장 키를 그대로 붙였다. base URL은 무엇이든 받았다. 그래서 운영자 B가 운영자 A의 hop을 자기 host로 돌리고 「연결 확인」을 누르면 A의 키가 B의 host로 갔다. egress 가드는 공개 host를 막지 않는다. 두 hop의 URL을 서로 바꾸는 재배치도 같은 결과였다.
+- **D1. 저장 키는 origin에 묶인다.** origin은 `scheme://host:port`다. 기본 포트는 적어서 비교한다(`https` 443, `http` 80). 그래서 `https://a.example`과 `https://a.example:443`은 같은 origin이다. scheme·host는 쓰기 게이트가 이미 소문자로 정규화한다. 해석되지 않는 URL은 다른 origin으로 본다. 구현은 `momo_settings::url_origin`·`same_origin`이다.
+- **D2. 키 없이 origin을 바꾸면 409다.** 요청 hop에 bearer가 없고, 그 위치의 저장 hop이 다른 origin이면 `409` + `error.code: key_required_for_new_origin`(ADR-0188 R0)이다. 트랜잭션은 첫 쓰기 전에 끝나므로 아무것도 바뀌지 않는다. 메시지에는 위치와 가린 endpoint label만 싣는다. 키는 싣지 않는다.
+  - **폐기 대신 409를 고른 근거.** migration 042의 `bearer_ciphertext`는 `NOT NULL`이고 길이 0을 CHECK로 막는다. 「키 없는 hop」은 새 migration 없이 표현할 수 없다. 조용히 폐기하면 hop 행이 사라지거나 cascade가 짧아진다. 운영자는 저장 성공으로 읽는다. 409는 스키마를 바꾸지 않고 의도를 되묻는다.
+  - 새 위치에 bearer가 없으면 예전 그대로 `400 bearer is required for new chain position N`이다(웹 초안 모델이 이 문장을 안다).
+- **D3. 같은 origin 안의 변경은 키를 유지한다.** 경로 변경(`/v1` → `/v2`), `mode`, `enabled`는 저장 키를 유지한다. provider 키가 발급되는 신뢰 경계가 서버(origin)이기 때문이다. 정직한 한계: 한 origin 아래 경로로 테넌트를 나누는 게이트웨이라면 경로 변경이 다른 테넌트로 갈 수 있다. 그런 hop은 경로를 바꿀 때 키를 다시 넣는다(운영 안내). 서버는 막지 않는다.
+- **D4. 머리 hop과 `format`.** 위치 0(`PUT /v1/provider/link`)은 이미 매번 새 키를 요구한다(`bearer must not be empty`). 그래서 base URL이나 `format`을 바꿀 때 저장 키가 따라가는 경로가 없다. 체인 hop에는 `format` 필드가 없다. 체인 hop은 한 종류(bearer)뿐이다. 수용기준의 「format이 바뀌면」은 이 두 사실로 닫힌다.
+- **D5. audit.** 성공한 체인 PUT의 `provider_link_chain.updated`에 `origin_changed: [{position, from, to}]`를 싣는다. `from`·`to`는 가린 endpoint label이다. origin이 바뀐 hop만 담는다. 그런 hop은 새 키를 받은 hop뿐이다. 거부된 PUT(409·400)은 아무것도 쓰지 않으므로 audit 행도 없다.
+- **worker 대답 경로.** 지금 agent-worker는 `provider_link`(위치 0)만 읽는다(`resolve_transport` → `read_link`). 체인 hop은 읽지 않는다. 그래서 오늘 이 결함은 「연결 확인」으로만 드러났다. 기본 AI 행(#3009 D1)이 위치 1 이상을 가리킬 수 있어서, worker가 체인을 읽게 되면 같은 유출이 대답 경로로 옮겨 간다. 수리는 쓰기 시점에 있으므로 그 경로도 함께 막는다. 머리 행의 다른 쓰기는 worker의 `reseal_link_credential` 하나다. 이 함수는 봉투만 바꾸고 `base_url`은 바꾸지 않는다.
+- **검증.** 격리 PG 시험 `provider_probe_conformance_pg.rs::a_kept_chain_key_is_never_sent_to_a_new_origin`. 운영자 A·B 두 명, 두 origin의 기록 mock을 쓴다. 바꿔치기와 재배치 뒤 연결 확인에서 B의 mock이 A의 키를 0회 받는다. 수리 전 이 시험은 빨갛다. 같은 origin 경로 변경은 키를 유지하고, 새 키와 함께 origin을 바꾸면 audit에 label만 남는다. 사보타주 기록은 PR 본문에 있다.
+- **범위 밖(후속).** 웹 설정의 체인 초안은 저장 hop의 URL을 바꿔도 키를 요구하지 않고, 409를 일반 오류 문장으로 보인다. uxui 후속 이슈로 다룬다.

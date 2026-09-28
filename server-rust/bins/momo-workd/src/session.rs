@@ -131,6 +131,10 @@ pub const PERMISSION_DENIED_DETAIL: &str =
     "권한 요청을 거부했습니다. 이 요청은 원격 승인으로 보낼 수 없었습니다.";
 /// Shown when the owner's decision did not arrive within the host's wait.
 pub const PERMISSION_EXPIRED_DETAIL: &str = "권한 요청에 제때 답이 없어 거부했습니다.";
+/// The owner interrupted the turn that was asking (#3027): its pending
+/// permission requests are answered `cancelled`, as ACP requires of a client
+/// that cancels a prompt turn, and withdrawn on the server.
+pub const PERMISSION_INTERRUPTED_DETAIL: &str = "지시로 턴을 멈춰 권한 요청을 거뒀습니다.";
 /// How long the host keeps an agent's permission request open for its owner:
 /// the server's deadline (`momo_t3::work_permission::PERMISSION_REQUEST_TTL_SECONDS`,
 /// 600 s) plus a margin, so an in-time decision is never discarded here.
@@ -159,10 +163,18 @@ pub struct SessionSettings {
 /// Most instructions one session keeps queued behind its running turn
 /// (#2602 L-2).
 pub const MAX_QUEUED_PROMPTS: usize = 16;
+/// Room an owner's interrupt still has when the queue is full (#3027): the
+/// server has already recorded the signed instruction and spent its nonce, so
+/// the off-and-redirect signal must not be the one that bounces. Still
+/// bounded, so no stream of controls grows the queue without limit.
+pub const MAX_QUEUED_INTERRUPTS: usize = 8;
 
 enum Command {
     Prompt {
         text: String,
+        /// The owner's `interrupt` (#3027): cancel the running turn (ACP
+        /// `session/cancel`) and go next, ahead of anything queued.
+        interrupt: bool,
         reply: oneshot::Sender<Result<(), Refusal>>,
     },
     Kill {
@@ -344,6 +356,8 @@ impl SessionManager {
             queue: VecDeque::new(),
             in_flight: None,
             start_pending: false,
+            cancel_sent: false,
+            queued_interrupts: 0,
             permissions: HashMap::new(),
             permission_wait: self.settings.permission_wait,
         };
@@ -369,12 +383,29 @@ impl SessionManager {
             return;
         };
         let (reply, _) = oneshot::channel();
-        let _ = handle.commands.send(Command::Prompt { text, reply }).await;
+        let _ = handle
+            .commands
+            .send(Command::Prompt {
+                text,
+                interrupt: false,
+                reply,
+            })
+            .await;
     }
 
-    /// Queue one owner instruction for the session (ADR-0188 D4: a reply is the
-    /// next turn, not an interruption).
-    pub async fn input(&mut self, session_id: Uuid, text: String) -> Result<(), Refusal> {
+    /// Hand one owner instruction to the session (#3027, ADR-0188 D4).
+    ///
+    /// * `queue` — the next turn after everything already queued; a running
+    ///   turn finishes first.
+    /// * `interrupt` — the running turn is cancelled (ACP `session/cancel`)
+    ///   and this instruction goes next, ahead of the queue. With no turn
+    ///   running it simply starts now.
+    pub async fn input(
+        &mut self,
+        session_id: Uuid,
+        text: String,
+        interrupt: bool,
+    ) -> Result<(), Refusal> {
         self.reap();
         let handle = self
             .sessions
@@ -383,7 +414,11 @@ impl SessionManager {
         let (reply, answer) = oneshot::channel();
         handle
             .commands
-            .send(Command::Prompt { text, reply })
+            .send(Command::Prompt {
+                text,
+                interrupt,
+                reply,
+            })
             .await
             .map_err(|_| Refusal::SessionClosed)?;
         answer.await.unwrap_or(Err(Refusal::SessionClosed))
@@ -645,6 +680,10 @@ struct SessionTask {
     in_flight: Option<oneshot::Receiver<RpcResult>>,
     /// A queued prompt could not start (transient server error); retry on tick.
     start_pending: bool,
+    /// `session/cancel` already went out for the running turn (#3027).
+    cancel_sent: bool,
+    /// How many of the queue's front entries are owner interrupts (#3027).
+    queued_interrupts: usize,
     /// Bridged permission requests waiting for the owner, by event id.
     permissions: HashMap<Uuid, PendingPermission>,
     permission_wait: Duration,
@@ -685,10 +724,31 @@ impl SessionTask {
                     let _ = reply.send(answer);
                     end
                 }
-                Event::Command(Some(Command::Prompt { text, reply })) => {
-                    if self.queue.len() >= MAX_QUEUED_PROMPTS {
+                Event::Command(Some(Command::Prompt {
+                    text,
+                    interrupt,
+                    reply,
+                })) => {
+                    let limit = if interrupt {
+                        MAX_QUEUED_PROMPTS + MAX_QUEUED_INTERRUPTS
+                    } else {
+                        MAX_QUEUED_PROMPTS
+                    };
+                    if self.queue.len() >= limit {
                         let _ = reply.send(Err(Refusal::InputQueueFull));
                         None
+                    } else if interrupt {
+                        // Ahead of every queued instruction, behind earlier
+                        // interrupts: two interrupts run in the order sent.
+                        let at = self.queued_interrupts.min(self.queue.len());
+                        self.queue.insert(at, text);
+                        self.queued_interrupts = at + 1;
+                        let _ = reply.send(Ok(()));
+                        if self.in_flight.is_some() {
+                            self.interrupt_running_turn().await
+                        } else {
+                            self.start_next_turn().await
+                        }
                     } else {
                         self.queue.push_back(text);
                         let _ = reply.send(Ok(()));
@@ -870,6 +930,46 @@ impl SessionTask {
         None
     }
 
+    /// The owner's interrupt (#3027): cancel the running turn. The agent
+    /// answers the in-flight `session/prompt` with `cancelled`; that turn end
+    /// starts the front of the queue — the interrupting instruction — next.
+    /// Called only with a turn in flight. Pending permission requests of the
+    /// cancelled turn are answered `cancelled` (ACP) and withdrawn on the
+    /// server first, so no allow can land on a turn that is gone.
+    async fn interrupt_running_turn(&mut self) -> Option<End> {
+        if self.cancel_sent {
+            return None;
+        }
+        let pending: Vec<Uuid> = self.permissions.keys().copied().collect();
+        for event_id in pending {
+            let pending = self.permissions.remove(&event_id).expect("listed above");
+            if self
+                .conn
+                .respond(
+                    pending.rpc_id,
+                    policy::PermissionDecision::Cancelled.to_result(),
+                )
+                .is_err()
+            {
+                return Some(End::AgentExited);
+            }
+            self.relay
+                .permission_denied(Some(event_id), PERMISSION_INTERRUPTED_DETAIL)
+                .await;
+        }
+        match self
+            .conn
+            .notify("session/cancel", json!({"sessionId": self.acp_session_id}))
+        {
+            Ok(()) => {
+                self.cancel_sent = true;
+                tracing::info!(session_id = %self.session_id, "owner interrupt: running turn cancelled");
+                None
+            }
+            Err(_) => Some(End::AgentExited),
+        }
+    }
+
     async fn start_next_turn(&mut self) -> Option<End> {
         self.start_pending = false;
         if self.in_flight.is_some() || self.queue.is_empty() {
@@ -893,6 +993,8 @@ impl SessionTask {
             }
         }
         let text = self.queue.pop_front().expect("checked non-empty");
+        self.queued_interrupts = self.queued_interrupts.saturating_sub(1);
+        self.cancel_sent = false;
         match self.conn.start_request(
             "session/prompt",
             json!({
