@@ -14,6 +14,7 @@ const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
 
 const fetchNotificationRules = vi.hoisted(() => vi.fn());
 const putNotificationRules = vi.hoisted(() => vi.fn());
+const patchNotificationRules = vi.hoisted(() => vi.fn());
 
 vi.mock("@momo/core/features/settings/notificationRules", async (importOriginal) => {
   const actual =
@@ -26,6 +27,8 @@ vi.mock("@momo/core/features/settings/notificationRules", async (importOriginal)
       fetchNotificationRules(workspaceId) as Promise<NotificationRules>,
     putNotificationRules: (workspaceId: string, rules: NotificationRules) =>
       putNotificationRules(workspaceId, rules) as Promise<NotificationRules>,
+    patchNotificationRules: (workspaceId: string, patch: Partial<NotificationRules>) =>
+      patchNotificationRules(workspaceId, patch) as Promise<NotificationRules>,
   };
 });
 
@@ -53,15 +56,29 @@ beforeAll(() => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 });
 
+/**
+ * The server as #3012 made it: one stored rule per member. PUT replaces it
+ * whole; PATCH merges the named fields into what is stored when it lands.
+ */
+let stored: NotificationRules = { dnd: false, mentionOverridesMute: false };
+
 beforeEach(() => {
   fetchNotificationRules.mockReset();
   putNotificationRules.mockReset();
-  fetchNotificationRules.mockResolvedValue({
-    dnd: false,
-    mentionOverridesMute: false,
-  });
+  patchNotificationRules.mockReset();
+  stored = { dnd: false, mentionOverridesMute: false };
+  fetchNotificationRules.mockImplementation(async () => ({ ...stored }));
   putNotificationRules.mockImplementation(
-    async (_workspaceId: string, rules: NotificationRules) => rules
+    async (_workspaceId: string, rules: NotificationRules) => {
+      stored = { dnd: rules.dnd, mentionOverridesMute: rules.mentionOverridesMute };
+      return { ...stored };
+    }
+  );
+  patchNotificationRules.mockImplementation(
+    async (_workspaceId: string, patch: Partial<NotificationRules>) => {
+      stored = { ...stored, ...patch };
+      return { ...stored };
+    }
   );
   localStorage.clear();
   reloadDesktopNotificationKindsForTest(localStorage);
@@ -137,7 +154,7 @@ async function mountSection(offline = false): Promise<HTMLElement> {
 }
 
 describe("NotificationRulesSection DND regression", () => {
-  it("keeps the server DND PUT on the workspace-rule toggle", async () => {
+  it("writes the DND toggle as a one-field PATCH (#3042)", async () => {
     const host = await mountSection();
     await vi.waitFor(() => {
       expect(
@@ -153,12 +170,45 @@ describe("NotificationRulesSection DND regression", () => {
       dnd.click();
     });
     await vi.waitFor(() => {
-      expect(putNotificationRules).toHaveBeenCalledTimes(1);
+      expect(patchNotificationRules).toHaveBeenCalledTimes(1);
     });
-    expect(putNotificationRules).toHaveBeenCalledWith(WS, {
-      dnd: true,
-      mentionOverridesMute: false,
+    expect(patchNotificationRules).toHaveBeenCalledWith(WS, { dnd: true });
+    expect(putNotificationRules).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      const now = host.querySelector(
+        '[data-testid="notification-rules-dnd"]'
+      ) as HTMLInputElement;
+      expect(now.checked).toBe(true);
     });
+  });
+
+  // #3042 race regression. This panel read the rule, then the phone changed the
+  // OTHER switch. A toggle here must not write the stale read back over it.
+  // Before the fix the save was a whole-object PUT of this panel's snapshot and
+  // the phone's change was erased.
+  it("keeps a switch another device changed after this panel read the rule", async () => {
+    const host = await mountSection();
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="notification-rules-dnd"]')).not.toBeNull();
+    });
+    // Another device: the phone turns the pause on while this panel shows it off.
+    stored = { ...stored, dnd: true };
+
+    const mention = host.querySelector(
+      '[data-testid="notification-rules-mention"]'
+    ) as HTMLInputElement;
+    expect(mention.checked).toBe(false);
+    await act(async () => {
+      mention.click();
+    });
+    await vi.waitFor(() => {
+      expect(stored.mentionOverridesMute).toBe(true);
+    });
+    // The phone's pause survived this panel's write…
+    expect(stored).toEqual({ dnd: true, mentionOverridesMute: true });
+    // …and the panel now shows the server's answer, not its stale snapshot.
+    const dnd = host.querySelector('[data-testid="notification-rules-dnd"]') as HTMLInputElement;
+    await vi.waitFor(() => expect(dnd.checked).toBe(true));
   });
 
   it("names the server-vs-device split in copy", async () => {

@@ -269,3 +269,15 @@ b97d2240178b601d1f5e9b1183b36c00a5a14641:clients/web/src/features/welcome/freshS
 # 체크섬(podspec 해시)을 키로 읽는다. 자격증명이 아니다(#3026, PR #3043).
 #   clients/mobile/ios/Podfile.lock:2460  [generic-api-key]  기기 키 네이티브 모듈 파드의 체크섬
 57d107294a9084dc013939ce220098490454b042:clients/mobile/ios/Podfile.lock:generic-api-key:2460
+# 시험·캡처용 P-256 **공개키**(압축 SEC1 base64)를 담은 상수 이름이 *_KEY라서 generic-api-key가
+# 키로 읽는다. 공개키는 비밀이 아니다 — 비밀키는 Secure Enclave 밖으로 나오지 않는다(#3025, PR #3076).
+#   packages/momo-core/src/features/auth/deviceKeys.test.ts:19  [generic-api-key]  시험용 기기 공개키 상수
+0ee16d8edae6298e9440c0ff82c121d7150cdedf:packages/momo-core/src/features/auth/deviceKeys.test.ts:generic-api-key:19
+#   packages/momo-core/src/features/auth/deviceKeys.test.ts:20  [generic-api-key]  시험용 기기 공개키 상수
+0ee16d8edae6298e9440c0ff82c121d7150cdedf:packages/momo-core/src/features/auth/deviceKeys.test.ts:generic-api-key:20
+#   clients/web/scripts/capture-device-keys.mjs:109  [generic-api-key]  시험용 기기 공개키 상수
+62b4bfbfcf979872ad51a1aacb8d7dc04f91ed79:clients/web/scripts/capture-device-keys.mjs:generic-api-key:109
+#   clients/web/src/features/settings/DeviceKeysBlock.test.tsx:16  [generic-api-key]  시험용 기기 공개키 상수
+0ee16d8edae6298e9440c0ff82c121d7150cdedf:clients/web/src/features/settings/DeviceKeysBlock.test.tsx:generic-api-key:16
+#   clients/web/src/features/settings/DeviceKeysBlock.test.tsx:17  [generic-api-key]  시험용 기기 공개키 상수
+0ee16d8edae6298e9440c0ff82c121d7150cdedf:clients/web/src/features/settings/DeviceKeysBlock.test.tsx:generic-api-key:17

@@ -71,6 +71,15 @@ const APP_COMMANDS: &[&str] = &[
     "work_host_start",
     "work_host_stop",
     "work_host_forget",
+    // This Mac's human device key (ADR-0146 개정 R2-E5, #3025). Granted only
+    // by capabilities/device-key.json.
+    "device_key_status",
+    "device_key_create",
+    "device_key_bind_root",
+    "device_key_sign_control",
+    "device_key_sign_endorse",
+    "device_key_sign_revoke",
+    "device_key_deliver_revocation",
 ];
 
 /// `tauri.conf.json > bundle > externalBin` names `binaries/momo-workd`, and

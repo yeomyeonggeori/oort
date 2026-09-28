@@ -193,19 +193,24 @@ echo "ok: the extension carries no aps-environment"
 # the only thing keeping it out is the extension's .entitlements file, and this
 # is where a regression there becomes visible after signing.
 device_key_group="$EXPECTED_TEAM.$DEVICE_KEY_GROUP_SUFFIX"
-plutil -extract keychain-access-groups xml1 -o - "$WORK/app.plist" 2>/dev/null |
-  grep -qF "<string>$device_key_group</string>" ||
+# The group arrays are captured first and grepped from a here-string: under
+# pipefail, `plutil | grep -q` can lose to SIGPIPE, and in the extension check
+# that would read as "not found" — a false GREEN (review of #3043, N-1).
+app_groups="$(plutil -extract keychain-access-groups json -o - "$WORK/app.plist" 2>/dev/null || true)"
+grep -qF "\"$device_key_group\"" <<<"$app_groups" ||
   fail "the app was signed WITHOUT the device-key group $device_key_group.
        Every Secure Enclave device-key call then returns -34018 on device and the
        phone can never sign an instruction (src/deviceKey/native.ts)."
 echo "ok: the app was granted $device_key_group"
-if plutil -extract keychain-access-groups xml1 -o - "$WORK/appex.plist" 2>/dev/null |
-  grep -qF "$DEVICE_KEY_GROUP_SUFFIX"; then
-  fail "the EXTENSION was signed WITH the device-key group ($DEVICE_KEY_GROUP_SUFFIX).
-       The notification extension must never reach the device key (ADR-0146 D-2).
-       Remove it from NotificationService/MomoMobileNotificationService.entitlements."
-fi
-echo "ok: the extension carries no $DEVICE_KEY_GROUP_SUFFIX group"
+# Exactly the shared group, nothing else: a wildcard or any extra group would
+# pass a "devicekey is absent" grep while still granting the enclave handle.
+appex_groups="$(plutil -extract keychain-access-groups json -o - "$WORK/appex.plist" 2>/dev/null || true)"
+[ "$appex_groups" = "[\"$EXPECTED_TEAM.$KEYCHAIN_GROUP_SUFFIX\"]" ] ||
+  fail "the EXTENSION was signed with keychain groups ${appex_groups:-<none>},
+       not exactly [\"$EXPECTED_TEAM.$KEYCHAIN_GROUP_SUFFIX\"]. The notification
+       extension must never reach the device key (ADR-0146 D-2).
+       Fix NotificationService/MomoMobileNotificationService.entitlements."
+echo "ok: the extension carries exactly $EXPECTED_TEAM.$KEYCHAIN_GROUP_SUFFIX (no $DEVICE_KEY_GROUP_SUFFIX)"
 app_dk="$(plist_value "$APP" MomoDeviceKeyAccessGroup)"
 [ "$app_dk" = "$device_key_group" ] ||
   fail "the app's MomoDeviceKeyAccessGroup is '${app_dk:-<missing>}', not $device_key_group.

@@ -84,7 +84,10 @@ case "${1:-}" in
 [dry-run] signed release path for $app — nothing below is executed.
   1. cargo tauri build (beforeBuildCommand builds binaries/momo-workd-<triple>)
      with APPLE_SIGNING_IDENTITY set: the bundler signs Contents/MacOS/momo-workd
-     and then the app (hardened runtime, Entitlements.plist).
+     and then the app (hardened runtime, Entitlements.plist: no restricted keys).
+     publish_next_build.sh then embeds the provisioning profile and re-signs the
+     outer app only with Entitlements.app.plist (device-key group; the sidecar
+     keeps the bundler's signature), checked by check_provisioning_profile.sh.
   2. $0 --verify-bundle "$app" --require-signed
      sidecar Mach-O · same TeamIdentifier as the app · hardened runtime ·
      codesign --verify --strict (--deep for the app) · the app satisfies

@@ -29,6 +29,15 @@
 #   minisign  개인키 ~/.momo-secrets/momo-updater.key (레포 밖, 0600), 공개키는
 #             tauri.conf.json 에 박혀 빌드에 컴파일된다. 서명 검증 실패 시 업데이터가
 #             설치 자체를 하지 않으므로, Pages 가 털려도 코드는 못 넣는다.
+#   프로비저닝 프로파일  ~/.momo-secrets/momo-desktop-developer-id.provisionprofile
+#             (레포 밖, MOMO_PROVISIONING_PROFILE 로 덮어씀, #3025). 기기 키의
+#             keychain-access-groups 는 Developer ID 앱에 제한된 entitlement 라서
+#             프로파일이 번들에 있어야 앱이 실행된다. 번들러는 사이드카와 앱을 같은
+#             Entitlements.plist 로 서명하므로(tauri-bundler sign.rs), 번들러 뒤에
+#             프로파일을 Contents/embedded.provisionprofile 로 넣고 바깥 .app 만
+#             Entitlements.app.plist 로 다시 서명한다(--deep 아님: 사이드카는 그대로).
+#             빌드 전과 서명 뒤에 scripts/desktop/check_provisioning_profile.sh 가
+#             UUID·팀·application-identifier·키체인 그룹·인증서·만료(30일 전 경고)를 잰다.
 #   Developer ID  codesign(hardened runtime) → notarytool → stapler. 업데이터가 받는
 #             tar.gz 안의 .app 은 다운로드 페이지가 주는 .app 과 동일한 스테이플된
 #             번들이다. 자동 업데이트 후 Gatekeeper 판정이 수동 설치와 같아야 한다.
@@ -119,6 +128,15 @@ SIGN_IDENTITY="${MOMO_SIGN_IDENTITY:-Developer ID Application: Kwak Seongjae (YW
 NOTARY_PROFILE="${MOMO_NOTARY_PROFILE:-momo-notary}"
 UPDATER_KEY="${MOMO_UPDATER_KEY:-$HOME/.momo-secrets/momo-updater.key}"
 UPDATER_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
+PROVISIONING_PROFILE="${MOMO_PROVISIONING_PROFILE:-$HOME/.momo-secrets/momo-desktop-developer-id.provisionprofile}"
+APP_ENTITLEMENTS="clients/desktop/src-tauri/Entitlements.app.plist"
+PROFILE_CHECK="scripts/desktop/check_provisioning_profile.sh"
+
+# 20분짜리 빌드 전에 멈춘다. 프로파일 없이 Entitlements.app.plist 로 서명하면
+# 빌드는 성공하고 앱은 실행되지 않는다.
+"$PROFILE_CHECK" --profile "$PROVISIONING_PROFILE" --identity "$SIGN_IDENTITY" || {
+  echo "[next-publish] provisioning profile check failed: $PROVISIONING_PROFILE (docs/NEXT_CHANNEL.md §8)" >&2
+  exit 2; }
 
 if [ "$PUBLIC" != "1" ]; then
   [ -f "$UPDATER_KEY" ] || {
@@ -182,7 +200,32 @@ fi
   exit 1
 }
 
-echo "[next-publish] 2/6 verify signature (.app + .dmg)"
+echo "[next-publish] 2/6 embed provisioning profile, re-sign .app, verify signature (.app + .dmg)"
+# 번들러는 사이드카와 앱을 Entitlements.plist(제한 entitlement 없음)로 서명했다.
+# 프로파일을 넣고 바깥 .app 만 다시 서명한다. 프로파일은 0600 으로 보관되므로
+# 0644 로 복사한다(다른 사용자 계정의 설치본도 읽는다). 격리 속성은 지운다.
+install -m 0644 "$PROVISIONING_PROFILE" "$APP_PATH/Contents/embedded.provisionprofile"
+xattr -c "$APP_PATH/Contents/embedded.provisionprofile"
+codesign --force --options runtime --timestamp \
+  --entitlements "$APP_ENTITLEMENTS" --sign "$SIGN_IDENTITY" "$APP_PATH" \
+  >>"$WORK/codesign.log" 2>&1 || {
+    tail -20 "$WORK/codesign.log" >&2
+    echo "[next-publish] re-signing the app with $APP_ENTITLEMENTS failed" >&2
+    exit 1; }
+"$PROFILE_CHECK" --verify-app "$APP_PATH" --profile "$PROVISIONING_PROFILE" || {
+  echo "[next-publish] signed app failed the provisioning profile check" >&2
+  exit 1; }
+# 번들러 dmg 에는 다시 서명하기 전 .app 이 들어 있다. 같은 경로에 새로 만든다
+# (아래에서 Developer ID 로 서명·검증한다).
+rm -f "$DMG_PATH"
+DMG_STAGE0="$WORK/dmgroot0"
+mkdir -p "$DMG_STAGE0"
+cp -R "$APP_PATH" "$DMG_STAGE0/"
+ln -s /Applications "$DMG_STAGE0/Applications"
+hdiutil create -volname oort -srcfolder "$DMG_STAGE0" -ov -format UDZO \
+  "$DMG_PATH" >>"$WORK/codesign.log" 2>&1 || {
+    echo "[next-publish] hdiutil create dmg (re-signed app) failed" >&2
+    exit 1; }
 codesign --verify --strict --deep "$APP_PATH" 2>>"$WORK/codesign.log" || {
   tail -20 "$WORK/codesign.log" >&2
   echo "[next-publish] the bundler did not produce a valid signature (APPLE_SIGNING_IDENTITY?)" >&2

@@ -36,7 +36,12 @@ export const Select = React.forwardRef<
       // 44px 입력 옆에 32px 선택이 서면 두 칸이 같은 줄에서 높이가 어긋나고,
       // 손가락은 둘 중 하나만 맞힌다 — 위 주석이 말하는 "둘 다 같은 방식으로
       // 앉는다"는 색만의 이야기가 아니다.
-      "tap-target h-field w-full min-w-0 truncate rounded-lg border border-line-strong bg-transparent pl-3 pr-9 text-body text-ink transition-colors focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50",
+      //
+      // `aria-disabled` 은 `disabled` 와 같은 흐림을 진다 (#3064). 저장이 날고 있는
+      // 칸은 초점을 지키려고 native `disabled` 대신 `aria-disabled` + 가드로
+      // 잠그는데(#1486 문법: 잠금 = aria-disabled + 흐림 + 사유 + 가드), 흐림이
+      // `disabled:` 에만 걸려 있어 잠긴 칸이 고를 수 있는 칸처럼 보였다.
+      "tap-target h-field w-full min-w-0 truncate rounded-lg border border-line-strong bg-transparent pl-3 pr-9 text-body text-ink transition-colors focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50",
       className
     )}
     {...props}
