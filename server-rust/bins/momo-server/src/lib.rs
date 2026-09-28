@@ -769,6 +769,12 @@ pub fn build_app(state: AppState) -> Router {
                 .delete(routes::provider_link::delete),
         )
         .route("/v1/provider/link/test", post(routes::provider_link::test))
+        // #3009 — 「기본 AI」 team rows. Instance-global like `provider/link`,
+        // so the same MOMO-583 operator gate on both verbs.
+        .route(
+            "/v1/provider/default-ai",
+            get(routes::provider_default_ai::get).put(routes::provider_default_ai::put),
+        )
         .route(
             "/v1/provider/link/chain",
             get(routes::provider_link::get_chain)
@@ -805,7 +811,9 @@ pub fn build_app(state: AppState) -> Router {
         // one. The per-CHANNEL sibling is `channels/{ch}/notification-pref` above.
         .route(
             "/v1/workspaces/{ws}/notification-rules",
-            get(routes::notification_rules::get).put(routes::notification_rules::put),
+            get(routes::notification_rules::get)
+                .put(routes::notification_rules::put)
+                .patch(routes::notification_rules::patch),
         )
         // ADR-0175 / #1888 — personal message reminders. Human-only, owner
         // scoped, no outbox fan-out (v1 is a client poll).

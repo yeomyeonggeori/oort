@@ -2,6 +2,7 @@
 
 - Status: **Accepted** (2026-07-18, 성재 — D1~D3 권고안 승인 "ㄱㄱ". MOMO-477 발급, track/engine)
 - 증보 2: 2026-09-27 **Accepted** — 알림 일시 중지 만료와 방해 금지 묶음(#2850). 파일 끝 「증보 2」 절
+- 증보 3: 2026-09-28 **Accepted**(증보 2 결재 범위의 쓰기 모양 보강, planner 편성 #3012) — 필드 단위 `PATCH …/notification-rules`. 파일 끝 「증보 3」 절
 - 관련: ADR-0120(푸시 — 판정은 notifier 한 곳), ux-bible P8(알림 예산)·P9(판정 로직 서버 단일화), ENGINE_HANDOFF B-4, ADR-0109(unread — 배지는 별개 데이터)
 - 발단: 설정 UI·서버 계약 양측 부재(2026-07-18 갭 감사 B-4). dogfood에서 채널이 늘며 알림 통제 수요.
 
@@ -115,3 +116,12 @@ MOMO-477 단일 goal: `018_notification_pref` migration((workspace, member, chan
 - (−) 묶음 기억 컬럼 두 개. 규칙은 이 절과 `momo_messaging::notification_rule`에 있다.
 - 후속: 반복 스케줄(조용한 시간), 채널별 기한 음소거 UI.
 
+## 증보 3 (2026-09-28, **Accepted** — 증보 2 결재 범위의 쓰기 모양 보강, planner 편성 #3012) — 알림 규칙 필드 단위 PATCH
+
+- 발단: #2893 후속(PR #3011). 폰은 쓰기 직전에 다시 읽어서 막았지만, 웹 설정 화면은 여전히 규칙 전체를 PUT한다. 그래서 폰에서 켠 일시 중지를 웹이 자기가 전에 읽은 값(꺼짐)으로 되돌릴 수 있다. 격리 PG 시험 `a_put_from_a_stale_snapshot_erases_the_other_clients_pause`가 이 경합을 재현한다.
+- **결정.** `PATCH /v1/workspaces/{ws}/notification-rules`를 더한다.
+  - `dnd`·`dndUntilMs`·`mentionOverridesMute`가 모두 선택이다. 생략한 필드는 **쓰기가 닿는 순간 저장된 값**을 유지한다. 행을 materialize하고 `FOR UPDATE`로 잠근 **뒤에** 병합 기준을 읽으므로, 동시 PATCH 둘은 직렬화되고 뒤의 것이 앞의 것이 커밋한 행 위에 병합된다.
+  - 쓰기는 PUT과 같은 함수를 쓴다. 그래서 기한 규칙과 방해 금지 묶음 규칙이 같다. 일시 중지를 바꾸면 묶음이 끊기고, 멘션 예외만 바꾸면 묶음이 남는다.
+  - 빈 body는 400이다. 모르는 필드도 400이다(PUT과 같다). audit는 기존 `notification_rule.updated`에 `patched`(요청이 이름한 필드 목록)를 더한다.
+- **호환.** PUT은 그대로 남는다(구 클라이언트). 새 클라이언트 코드는 PATCH를 쓴다. 웹·폰 전환은 uxui 후속 이슈다.
+- **테이블·RLS 변경 없음.** migration이 없다.

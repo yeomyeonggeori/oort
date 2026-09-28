@@ -36,6 +36,7 @@
 //! |---|---|---|
 //! | [`provider`] | provider mode/URL vocabulary, endpoint redaction, base-URL validation | `Config.swift:502-700`, `AgentRoutes.validatedBaseURL` |
 //! | [`crypto`] | AES-GCM sealed bearer + masked tail | `Provider/ProviderLinkCrypto.swift` |
+//! | [`default_ai`] | 「기본 AI」 operator rows (#3009) + the shared model-id sanitizer | no Swift ancestor |
 //! | [`link`] | `provider_link` singleton store + DB-over-env resolution | `Provider/ProviderLinkStore.swift`, `ProviderLinkResolver.swift` |
 //! | [`oauth`] | the `oauth-openai` sealed-payload kind (ADR-0147) | no Swift source — Rust-only |
 //! | [`chain`] | `provider_link_chain` store + the cascade plan/classifier | `Provider/ProviderLinkChainStore.swift`, `ProviderCascade.swift` |
@@ -56,6 +57,7 @@
 
 pub mod chain;
 pub mod crypto;
+pub mod default_ai;
 pub mod egress;
 pub mod engine;
 pub mod invite;
@@ -77,6 +79,10 @@ pub use chain::{
     RATE_LIMITED_REASON, UNREACHABLE_REASON,
 };
 pub use crypto::{masked_tail, open_bearer, seal_bearer, CryptoError, SEALED_BOX_VERSION};
+pub use default_ai::{
+    delete_default_ai, read_default_ai, sanitized_model_id, upsert_default_ai, DefaultAiRole,
+    StoredDefaultAi, GUARDRAIL_OFF, MAX_MODEL_ID_BYTES, MAX_PROBE_MODEL_IDS, TEAM_LINK_SOURCE,
+};
 pub use egress::{is_non_public_ip, EgressDenied, EgressPolicy};
 pub use engine::{
     read_work_host_engine, upsert_work_host_engine, validated_engine, StoredWorkHostEngine,

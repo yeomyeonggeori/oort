@@ -456,19 +456,25 @@ mod tests {
     /// (`work_control_kind_ck` and `work_control_payload_ck` rewritten, 029's
     /// arms unchanged, plus a unique index of one decision per request).
     /// schema_v0.sql is not modified.
+    ///
+    /// 093 is #3009's 「기본 AI」 team rows (ADR-0147 증보 2026-09-28):
+    /// `provider_default_ai`, instance-global like `provider_link` (no
+    /// `workspace_id`), ENABLE + FORCE RLS behind the `app.provider_link_admin`
+    /// operator GUC, `credential_source` CHECKed to `team_link`.
+    /// schema_v0.sql is not modified.
     #[test]
-    fn discovers_contiguous_migrations_001_to_092() {
+    fn discovers_contiguous_migrations_001_to_093() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            92,
-            "expected 92 migrations under {}",
+            93,
+            "expected 93 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 92);
+        assert_eq!(migrations.last().unwrap().version, 93);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {
