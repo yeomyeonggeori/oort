@@ -402,3 +402,149 @@ describe("락이 풀리지 않을 때", () => {
     expect(work).not.toHaveBeenCalled();
   });
 });
+
+// =============================================================================
+// #3072 보안 검수 — H1(계정 간 토큰 섞임), M1(고아 pair·로그아웃 대기), M2(멈춘
+// 키체인). 검수 PoC P1·P2·P3·P3b 를 기대값을 뒤집어 회귀 시험으로 들였다.
+// =============================================================================
+
+const memberY = { ...member, id: "0199bbbb-0000-7000-8000-00000000000b", displayName: "다른 사람" };
+
+function gatedServer(pair: { accessToken: string; refreshToken: string }) {
+  const presented: string[] = [];
+  const revoked: { authorization: string | null; body: string }[] = [];
+  let release: () => void = () => {};
+  const gate = new Promise<void>((settle) => (release = settle));
+  let sent: () => void = () => {};
+  const posted = new Promise<void>((settle) => (sent = settle));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/v1/auth/refresh") {
+        presented.push(JSON.parse(String(init?.body)).refreshToken);
+        sent();
+        await gate;
+        return new Response(JSON.stringify(pair), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.pathname === "/v1/auth/logout") {
+        revoked.push({ authorization: new Headers(init?.headers).get("Authorization"), body: String(init?.body) });
+      }
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    })
+  );
+  return { presented, revoked, release: () => release(), posted };
+}
+
+describe("#3072 H1 — 회전 응답은 제시한 세션이 아직 저장돼 있을 때만 적용한다", () => {
+  it("P3: 회전 중 다른 탭이 다른 계정으로 로그인하면, X 의 새 토큰은 Y 이름 아래 저장되지 않고 폐기된다", async () => {
+    const A = await loadApp();
+    A.session.applyLogin(login); // X, refresh-token-1
+    const server = gatedServer({ accessToken: "X-access-2", refreshToken: "X-refresh-2" });
+    const reload = vi.fn();
+    vi.stubGlobal("location", { ...window.location, reload });
+
+    const rotation = A.api.refreshSessionOutcome();
+    await server.posted;
+    const yRecord = stored("Y-refresh-1", memberY);
+    fromOtherTab(WEB_KEY, yRecord);
+    expect(reload).toHaveBeenCalled();
+    server.release(); // 응답이 reload 보다 먼저 도착한다
+
+    expect(await rotation).toBe("unreachable");
+    await flush();
+    expect(localStorage.getItem(WEB_KEY)).toBe(yRecord); // Y 의 기록 그대로
+    expect(A.session.getAccessToken()).not.toBe("X-access-2");
+    expect(server.revoked).toEqual([
+      { authorization: "Bearer X-access-2", body: JSON.stringify({ refreshToken: "X-refresh-2" }) },
+    ]);
+  });
+
+  it("P3b: 로그아웃 → Y 로그인 → A 응답 도착 순서에서도 Y 기록은 오염되지 않고, B(Y)는 X 토큰을 받지 않는다", async () => {
+    const A = await loadApp();
+    A.session.applyLogin(login);
+    const server = gatedServer({ accessToken: "X-access-2", refreshToken: "X-refresh-2" });
+    vi.stubGlobal("location", { ...window.location, reload: vi.fn() });
+
+    const rotation = A.api.refreshSessionOutcome();
+    await server.posted;
+    fromOtherTab(WEB_KEY, null); // B 로그아웃
+    expect(A.session.hasPersistedSession()).toBe(false);
+    const yRecord = stored("Y-refresh-1", memberY);
+    fromOtherTab(WEB_KEY, yRecord); // B 가 Y 로 로그인
+    server.release();
+
+    expect(await rotation).toBe("unreachable");
+    await flush();
+    expect(localStorage.getItem(WEB_KEY)).toBe(yRecord);
+    expect(A.session.getRefreshToken()).toBe("Y-refresh-1");
+    expect(A.session.getAccessToken()).toBeNull();
+    expect(server.revoked.map((call) => call.body)).toEqual([JSON.stringify({ refreshToken: "X-refresh-2" })]);
+  });
+});
+
+describe("#3072 M1 — 로그아웃과 다른 탭의 회전", () => {
+  it("P1: B 의 회전이 날아가는 중 A 가 로그아웃하면, B 는 발급받은 pair 를 버리고 서버에서 폐기한다", async () => {
+    const A = await loadApp();
+    A.session.applyLogin(login);
+    const B = await loadApp();
+    const server = gatedServer({ accessToken: "access-token-2", refreshToken: "refresh-token-2" });
+
+    const bRotation = B.api.refreshSessionOutcome();
+    await server.posted;
+    const aLogout = A.api.logout();
+    window.dispatchEvent(new StorageEvent("storage", { key: WEB_KEY, newValue: null }));
+    await aLogout;
+    server.release();
+
+    expect(await bRotation).toBe("unreachable");
+    await flush();
+    expect(B.session.getRefreshToken()).toBeNull();
+    expect(localStorage.getItem(WEB_KEY)).toBeNull();
+    expect(server.revoked.map((call) => call.body)).toContain(JSON.stringify({ refreshToken: "refresh-token-2" }));
+  });
+
+  it("다른 탭이 락을 쥔 동안 로그아웃하면, 락을 기다리지 않고 즉시 서버 폐기를 보낸다", async () => {
+    const { session, api } = await loadApp();
+    session.applyLogin(login);
+    const server = gatedServer({ accessToken: "unused", refreshToken: "unused" });
+    const lock = await import("./rotationLock");
+    // 살아 있는 다른 탭의 임대
+    localStorage.setItem(lock.LEASE_KEY, JSON.stringify({ owner: "tab-b", expiresAt: Date.now() + 60_000 }));
+
+    const rotation = api.refreshSessionOutcome(); // 락 대기
+    await new Promise((settle) => setTimeout(settle, 120));
+    const started = Date.now();
+    await api.logout();
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(server.revoked.map((call) => call.body)).toEqual([JSON.stringify({ refreshToken: "refresh-token-1" })]);
+
+    localStorage.removeItem(lock.LEASE_KEY); // 다른 탭이 놓는다
+    expect(await rotation).toBe("rejected"); // 저장소가 비어 토큰을 내지 않는다
+    expect(server.presented).toEqual([]);
+  });
+});
+
+describe("#3072 M2 — 멈춘 키체인은 회전을 무기한 붙잡지 않는다", () => {
+  beforeEach(() => {
+    mocks.desktop = true;
+  });
+
+  it("P2: store 가 끝나지 않아도 KEYCHAIN_WAIT_MS 안팎에서 회전이 끝나고 락을 놓는다", async () => {
+    const { session, api, } = await loadApp();
+    vi.useFakeTimers({ toFake: ["setTimeout", "setInterval", "Date"] });
+    mocks.keychain.store.mockImplementation(() => new Promise<boolean>(() => {})); // 열린 채 남은 접근 프롬프트
+    session.applyLogin(login);
+    const presented = stubServer();
+
+    const outcome = api.refreshSessionOutcome();
+    await vi.advanceTimersByTimeAsync(session.KEYCHAIN_WAIT_MS * 2 + 1_000);
+    vi.useRealTimers();
+
+    expect(await outcome).toBe("rotated");
+    expect(presented).toEqual(["refresh-token-1"]);
+    const lock = await import("./rotationLock");
+    expect(localStorage.getItem(lock.LEASE_KEY)).toBeNull();
+    mocks.keychain.store.mockImplementation(async () => true);
+  });
+});

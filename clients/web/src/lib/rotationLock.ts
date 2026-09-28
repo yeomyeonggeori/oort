@@ -19,11 +19,14 @@
 //                     LEASE_TTL_MS.
 //   neither           no shared store either, so there is nothing to race.
 //
-// Residual, stated rather than hidden: a tab closed while its refresh POST is in
-// the air loses the answer. The server has already spent the token, the new one
-// never reaches storage, and the next holder presents the spent one. Holding
-// the lock longer cannot help (the answer is gone either way); the server's
-// 30 s retry grace (#3065) is what absorbs this case.
+// Residual, stated rather than hidden: a tab closed (or a network lost) while its
+// refresh POST is in the air loses the answer. The server has already spent the
+// token, the new one never reaches storage, and the next holder presents the
+// spent one. No lock can prevent that — the answer is gone either way. The
+// server answers a spent token with 401 inside its 30 s retry grace too (#3065):
+// the grace only spares the LINEAGE from being revoked, it does not spare the
+// user the sign-out. Absorbing the sign-out would need the server to re-issue
+// within the grace; that is an engine follow-up, not something this module can do.
 //
 // Waiting is bounded (LOCK_WAIT_MS). A rotation stuck behind a holder that never
 // finishes rejects, which the core reports as `unreachable` — the session is
@@ -35,7 +38,7 @@ export const LEASE_KEY = "momo.session.rotationLease.v1";
 
 /** Longer than one rotation's own deadline (REQUEST_TIMEOUT_MS, 15 s). */
 export const LOCK_WAIT_MS = 20_000;
-/** Kept well under the server's 30 s retry grace, renewed while held. */
+/** Short, so a dead holder frees the lock quickly; renewed while held. */
 export const LEASE_TTL_MS = 5_000;
 const LEASE_SETTLE_MS = 40;
 

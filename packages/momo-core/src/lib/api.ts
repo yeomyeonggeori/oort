@@ -742,6 +742,15 @@ interface Rotation {
 }
 
 let rotationInFlight: Promise<Rotation> | null = null;
+/**
+ * The in-flight rotation's refresh POST has left (#3067). Before that, the
+ * rotation may still be queued behind another tab's lock and has spent nothing,
+ * so `logout()` does not wait for it — the wait bought nothing and delayed the
+ * server revocation by up to the lock wait.
+ */
+let rotationPosted = false;
+/** `logout()` joined the in-flight rotation and will revoke the pair it mints. */
+let rotationJoinedByLogout = false;
 
 function rotateSession(): Promise<Rotation> {
   rotationInFlight ??= (async (): Promise<Rotation> => {
@@ -758,6 +767,8 @@ function rotateSession(): Promise<Rotation> {
       return { outcome: "unreachable", pair: null };
     } finally {
       rotationInFlight = null;
+      rotationPosted = false;
+      rotationJoinedByLogout = false;
     }
   })();
   return rotationInFlight;
@@ -773,6 +784,7 @@ async function rotateOnce(): Promise<Rotation> {
   // Having no token to present is not a network problem: there is nothing
   // to rotate and nothing to keep waiting for.
   if (!refreshToken) return { outcome: "rejected", pair: null };
+  rotationPosted = true;
   const res = await rawRequest(
     "/v1/auth/refresh",
     { method: "POST", body: JSON.stringify({ refreshToken }) },
@@ -783,10 +795,35 @@ async function rotateOnce(): Promise<Rotation> {
     return { outcome: "rejected", pair: null };
   }
   const pair = refreshResponseFromWire(res.json<unknown>());
-  // A no-op when a logout wiped the store meanwhile; `pair` still reaches
-  // that logout through the result.
+  // The store may have moved on while the request was in the air: a logout
+  // (here or in another tab) emptied it, or another tab signed a DIFFERENT
+  // account in and this tab adopted that record. The minted pair belongs to the
+  // session that was presented, so it is applied only if that session is still
+  // the stored one — otherwise it would land under someone else's identity
+  // (#3072 review H1: `{member: Y, refreshToken: X's}`).
+  if (coreSession().getRefreshToken() !== refreshToken) {
+    // Nobody will hold this pair. A logout that joined this rotation revokes it
+    // itself; otherwise end it here so it does not live on the server for 30
+    // days (#3072 review M1).
+    if (!rotationJoinedByLogout) void revokePair(pair);
+    // Nothing is proven about the session now in the store — it is not ours.
+    return { outcome: "unreachable", pair };
+  }
   coreSession().applyRotation(pair.accessToken, pair.refreshToken);
   return { outcome: "rotated", pair };
+}
+
+/** Best effort: end a pair nobody will hold. Never rejects. */
+async function revokePair(pair: RefreshResponse): Promise<void> {
+  try {
+    await rawRequest(
+      "/v1/auth/logout",
+      { method: "POST", body: JSON.stringify({ refreshToken: pair.refreshToken }) },
+      pair.accessToken
+    );
+  } catch {
+    // The pair expires on its own; there is no one to tell.
+  }
 }
 
 /** The detailed rotation. Use this wherever the *reason* changes what you do. */
@@ -1157,7 +1194,11 @@ export interface LogoutOptions {
  * rotation fails, the captured pair is all there is, as before.
  */
 export async function logout(options: LogoutOptions = {}): Promise<void> {
-  const rotation = rotationInFlight;
+  // Join only a rotation that has actually presented its token. One still
+  // waiting for another tab's lock has spent nothing: once the store is wiped
+  // below it finds no token and never posts (#3072 review M1).
+  const rotation = rotationPosted ? rotationInFlight : null;
+  if (rotation) rotationJoinedByLogout = true;
   let access = coreSession().getAccessToken();
   let refresh = coreSession().getRefreshToken();
   coreSession().clearSession();

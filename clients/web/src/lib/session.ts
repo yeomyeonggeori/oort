@@ -317,18 +317,40 @@ export function applyRotation(newAccess: string, newRefresh: string): void {
 //              rotate with what is stored now, and release only once the new
 //              token is durably written — keychain writes included.
 //   listen     a `storage` event from another tab updates this tab's copy of the
-//              refresh token (so a logout from here revokes the live token, not a
-//              spent one), and a removed record ends this tab's session too.
+//              refresh token, and a removed record ends this tab's session too.
+//              A rotation whose answer lands after the store moved on (logout,
+//              or another account signed in elsewhere) is not applied; the core
+//              revokes the orphaned pair instead (#3072 review H1/M1).
 //
 // The access token is never shared: it stays in memory (see the header). A tab
 // that adopts another tab's refresh token keeps its own access token until it
 // expires and then rotates — with the adopted, unspent token.
 
+/**
+ * How long a rotation waits on the credential store before going on without it
+ * (#3072 review M2). A keychain call can hang — a macOS access prompt left open
+ * for an item another build signed — and the rotation holds the cross-tab lock
+ * while it waits, so an unbounded wait would stall this window's every 401 retry
+ * and its logout's revocation, and every other window behind the lock.
+ */
+export const KEYCHAIN_WAIT_MS = 5_000;
+
+/** `work`'s value, or `fallback` once `ms` has passed. Never rejects. */
+function within<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<T>((settle) => {
+    timer = setTimeout(() => settle(fallback), ms);
+  });
+  return Promise.race([work.catch(() => fallback), late]).finally(() => clearTimeout(timer));
+}
+
+const flushKeychain = () => within(keychainWrites.then(() => undefined), KEYCHAIN_WAIT_MS, undefined);
+
 /** Adopt whatever the shared store holds now. Never writes, so it never echoes. */
 async function resyncFromStore(): Promise<void> {
   if (storageMode === "keychain") {
     // This window's own writes first, or the read below races them.
-    await keychainWrites.catch(() => undefined);
+    await flushKeychain();
   }
   // Re-checked AFTER the flush: a refused keychain write demotes the run to web
   // storage (and drops the metadata record) while it is being awaited.
@@ -340,7 +362,7 @@ async function resyncFromStore(): Promise<void> {
     }
     // A failed read answers null; keep what memory holds rather than turning a
     // flaky credential store into a sign-out.
-    const refreshToken = await desktopKeychain.load();
+    const refreshToken = await within(desktopKeychain.load(), KEYCHAIN_WAIT_MS, null);
     if (refreshToken) adoptExternal({ refreshToken, ...metadata });
     return;
   }
@@ -392,8 +414,9 @@ export function exclusiveRotation<T>(work: () => Promise<T>): Promise<T> {
     await resyncFromStore();
     const result = await work();
     // Release only once the rotated token is where the next holder reads it.
-    // localStorage writes are synchronous; the keychain's are queued.
-    await keychainWrites.catch(() => undefined);
+    // localStorage writes are synchronous; the keychain's are queued, and a
+    // hung one is waited on only up to KEYCHAIN_WAIT_MS.
+    await flushKeychain();
     return result;
   });
 }
