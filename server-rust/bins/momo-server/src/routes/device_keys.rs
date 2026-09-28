@@ -171,6 +171,7 @@ pub async fn signing_context(
         max_clock_skew_ms: momo_wire::human_control::MAX_CLOCK_SKEW_MS,
         human_control_signature_required: state.device_keys.human_control_signature_required,
         host_register_signature_required: state.device_keys.host_register_signature_required,
+        human_control_schema: momo_wire::human_control::HUMAN_CONTROL_SCHEMA_V2,
     }))
 }
 

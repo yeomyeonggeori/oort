@@ -968,9 +968,13 @@ pub struct SigningContextResponse {
     pub human_control_signature_required: bool,
     /// `MOMO_HOST_REGISTER_SIGNATURE_REQUIRED`.
     pub host_register_signature_required: bool,
+    /// The control schema a device signs (`momo.human.control.v2`, #3027).
+    /// A v1 statement is still accepted for every kind but `spawn`.
+    pub human_control_schema: &'static str,
 }
 
-/// A person's `momo.human.control.v1` signature sent beside an instruction
+/// A person's `momo.human.control.v2` (or, but for a spawn, v1) signature sent
+/// beside an instruction
 /// (#3023, ADR-0146 개정 D-5 · D-10). Only what the server cannot derive
 /// travels here: it rebuilds the statement from its own instance id and the
 /// workspace, member, host, session and content it is about to write.
@@ -1239,6 +1243,19 @@ pub struct WorkToolProfilesResponse {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ResumeWorkSessionRequest {
     pub target_host_id: Uuid,
+    /// ADR-0146 개정 D-8 (#3027): the successor session id the owner signed
+    /// (the `momo.human.control.v2` spawn's session line). Sent together with
+    /// `humanSignature` and only then; the server creates the new session
+    /// under exactly this id, so it cannot choose which session the owner's
+    /// words join (#3024 M2).
+    #[serde(default)]
+    pub session_id: Option<Uuid>,
+    /// The owner's device signature over the resume's spawn (`kind=spawn`,
+    /// v2: agent, folder, tool, channel, label, and `sessionId`). Required
+    /// for a member-scoped target when `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`
+    /// is on; verified whenever sent.
+    #[serde(default)]
+    pub human_signature: Option<HumanSignatureRequest>,
 }
 
 /// Swift `WorkSessionDTO` (:57-75).
@@ -4324,6 +4341,44 @@ pub struct WorkPermissionDecisionRequest {
     /// set `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`; verified whenever sent.
     #[serde(default)]
     pub human_signature: Option<HumanSignatureRequest>,
+}
+
+/// `POST …/work-sessions/{session}/instructions` request (#3027, ADR-0146
+/// 개정 D-5b · D-8): the owner's signed instruction to the session's agent.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkInstructionRequest {
+    /// The instruction, NFC, 1...32768 characters. It becomes the next turn's
+    /// prompt and the session-thread message, verbatim.
+    pub text: String,
+    /// `queue` (after the running turn) | `interrupt` (cancel it, go next).
+    /// Must equal `humanSignature.mode` — the mode is signed.
+    pub mode: String,
+    /// The idempotency key of the thread message; must equal
+    /// `humanSignature.nonce` (ADR-0146 D-5: `client_msg_id` = nonce).
+    pub client_msg_id: Uuid,
+    /// The owner's `momo.human.control` statement, `kind=input`. Required.
+    pub human_signature: HumanSignatureRequest,
+}
+
+/// The thread message an instruction left (#3027).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkInstructionMessageDto {
+    pub id: String,
+    pub channel_id: String,
+    pub root_id: String,
+    pub seq: i64,
+    pub client_msg_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkInstructionResponse {
+    pub work_control: WorkControlDto,
+    pub message: WorkInstructionMessageDto,
+    /// `true` when this answered a retry of an instruction already accepted.
+    pub replayed: bool,
 }
 
 /// One decided (or still pending) permission request.
