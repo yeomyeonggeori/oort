@@ -53,6 +53,11 @@ import {
 } from "@momo/core/features/workbench/dockStore";
 import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
 import { detectLocalHarnesses, type PtyProgram } from "@/lib/tauri";
+import { useAiDefaults } from "@/features/settings/aiDefaultsStore";
+import {
+  resolveLocalTerminalLaunch,
+  type LocalTerminalLaunchDeps,
+} from "@/features/settings/localTerminalLaunch";
 import { WORK_NAV } from "@momo/core/features/workbench/workTab";
 import {
   PANE_GIT_UNKNOWN,
@@ -134,6 +139,7 @@ export function LocalTerminalDock({
   platform: platformProp,
   presentation = "dock",
   agent,
+  launchSource,
 }: {
   sessions?: LocalSessions;
   platform?: KeyPlatform;
@@ -149,6 +155,14 @@ export function LocalTerminalDock({
    * 도크를 열고 닫는 키(⌃`·⌃⇧`)는 이 보기에서 아무것도 하지 않는다.
    */
   presentation?: LocalWorkbenchPresentation;
+  /**
+   * 새 세션 메뉴의 하네스 감지와 기본 AI 계정 판정의 재료(#3010). 없으면 이 맥의 셸
+   * 명령을 쓴다. 브라우저 하네스(캡처)만 넘긴다.
+   */
+  launchSource?: {
+    detect: () => Promise<LocalHarnessProbe[]>;
+    deps: LocalTerminalLaunchDeps;
+  };
 }) {
   const platform = platformProp ?? detectPlatform();
   const dock = useDockState();
@@ -165,6 +179,9 @@ export function LocalTerminalDock({
   const pickedRef = useRef(false);
   const [jumpOpen, setJumpOpen] = useState(false);
   const [harnesses, setHarnesses] = useState<LocalHarnessProbe[]>([]);
+  const aiPrefs = useAiDefaults();
+  const launchSourceRef = useRef(launchSource);
+  launchSourceRef.current = launchSource;
   const [confirm, setConfirm] = useState<{ paneId: PaneId; close: () => void } | null>(null);
   const sessionMap = useSyncSessions(sessions);
   const sessionMapRef = useRef(sessionMap);
@@ -211,7 +228,7 @@ export function LocalTerminalDock({
   useEffect(() => {
     if (!active) return;
     let alive = true;
-    void detectLocalHarnesses().then((found) => {
+    void (launchSourceRef.current?.detect ?? detectLocalHarnesses)().then((found) => {
       if (alive) setHarnesses(found.filter((h) => h.installed));
     });
     return () => {
@@ -249,6 +266,34 @@ export function LocalTerminalDock({
       setLayout(result.layout);
     },
     [dock.open, sessions, setLayout, tab]
+  );
+
+  /**
+   * 하네스 새 세션(#3010): 기본 AI 표의 「로컬 터미널 새 세션」 계정으로 띄운다. 그
+   * 계정을 지금 쓸 수 없으면 다른 계정으로 조용히 넘어가지 않는다. 표와 같은 문장을
+   * 보이고 표가 말한 폴백(셸)을 띄운다.
+   */
+  const harnessesRef = useRef(harnesses);
+  harnessesRef.current = harnesses;
+  const newHarnessSession = useCallback(
+    async (id: LocalHarnessProbe["id"]) => {
+      const launch = await resolveLocalTerminalLaunch(
+        id,
+        harnessesRef.current,
+        launchSourceRef.current?.deps
+      );
+      if (launch.kind === "shell") {
+        newSession({ kind: "shell" });
+        setNotice(launch.sentence);
+        return;
+      }
+      newSession(
+        launch.profile === null
+          ? { kind: "harness", id }
+          : { kind: "harness", id, profile: launch.profile }
+      );
+    },
+    [newSession]
   );
 
   /**
@@ -576,21 +621,38 @@ export function LocalTerminalDock({
             셸
             <span className="ml-auto pl-4 text-meta text-ink-muted">⌃⇧N</span>
           </DropdownMenuItem>
-          {harnesses.map((h) => (
-            <DropdownMenuItem
-              key={h.id}
-              onSelect={() => {
-                pickedRef.current = true;
-                newSession({ kind: "harness", id: h.id });
-              }}
-              data-testid={`local-terminal-new-${h.id}`}
-            >
-              {HARNESS_LABEL[h.id] ?? h.id}
-              {h.auth === "needs_login" ? (
-                <span className="ml-auto pl-4 text-meta text-ink-muted">로그인 필요</span>
-              ) : null}
-            </DropdownMenuItem>
-          ))}
+          {harnesses.map((h) => {
+            // 기본 AI 표에서 고른 계정(#3010). 없으면 기본 로그인의 상태만 말한다.
+            const chosen =
+              aiPrefs.localTerminal?.kind === "profile" && aiPrefs.localTerminal.harness === h.id
+                ? aiPrefs.localTerminal
+                : null;
+            const meta = chosen
+              ? (chosen.label ?? "기본 로그인")
+              : h.auth === "needs_login"
+                ? "로그인 필요"
+                : null;
+            return (
+              <DropdownMenuItem
+                key={h.id}
+                onSelect={() => {
+                  pickedRef.current = true;
+                  void newHarnessSession(h.id);
+                }}
+                data-testid={`local-terminal-new-${h.id}`}
+              >
+                {HARNESS_LABEL[h.id] ?? h.id}
+                {meta !== null ? (
+                  <span
+                    className="ml-auto min-w-0 truncate pl-4 text-meta text-ink-muted"
+                    data-testid={chosen ? `local-terminal-new-${h.id}-account` : undefined}
+                  >
+                    {meta}
+                  </span>
+                ) : null}
+              </DropdownMenuItem>
+            );
+          })}
           {agentItems}
     </>
   );

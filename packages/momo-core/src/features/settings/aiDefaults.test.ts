@@ -3,7 +3,9 @@ import {
   AI_DEFAULT_ROWS,
   AI_DEFAULT_ROW_IDS,
   PERSONAL_ROW_IDS,
+  AI_DEFAULTS_NOT_APPLIED,
   forgetAccount,
+  localTerminalLaunch,
   modelLine,
   optionsFor,
   parseAiDefaults,
@@ -136,7 +138,14 @@ describe("폴백: 저장 값을 조용히 바꾸지 않고 문장으로 말한�
 
   it("쓸 수 있으면 그 계정 이름을 쓴다", () => {
     const ok = resolveRow("localTerminal", { localTerminal: { kind: "profile", harness: "claude", label: "개인" } }, input());
-    expect(ok).toEqual({ state: "ok", using: "Claude · 개인", note: null });
+    expect(ok).toEqual({
+      state: "ok",
+      using: "Claude · 개인",
+      note: "새 세션에서 Claude Code를 열면 이 계정으로 떠요",
+    });
+    // 원격 작업은 아직 읽는 곳이 없다: 칸 밑에 적용된다고 말하지 않는다.
+    const remote = resolveRow("remoteWork", { remoteWork: { kind: "profile", harness: "claude", label: "개인" } }, input());
+    expect(remote).toEqual({ state: "ok", using: "Claude · 개인", note: null });
   });
 
   it("팀 키 없음: 앱 명령은 막히고 요약은 정적 문구", () => {
@@ -202,7 +211,7 @@ describe("계정 해제의 영향", () => {
   it("그 계정을 고른 행을 이름과, 해제 뒤 표가 보일 글자로", () => {
     const impact = rowsUsingAccount(prefs, { harness: "claude", label: "회사" });
     expect(impact.map((item) => [item.title, item.fallback])).toEqual([
-      ["로컬 터미널 새 세션", "마지막에 쓴 계정"],
+      ["로컬 터미널 새 세션", "이 맥 기본 로그인"],
       ["원격 작업 기본 계정", "매번 묻기"],
     ]);
     // 해제 창의 말 = 해제(forgetAccount) 뒤 표가 그리는 글자.
@@ -232,5 +241,42 @@ describe("계정 해제의 영향", () => {
     expect(AI_DEFAULT_ROWS.filter((row) => row.audience === "me").map((r) => r.id)).toEqual([
       ...PERSONAL_ROW_IDS,
     ]);
+  });
+});
+
+describe("로컬 터미널 새 세션이 저장된 선택을 읽는다 (#3010)", () => {
+  const launchInput = { accounts, teamKey: { status: "loading" } as const };
+
+  it("고른 계정이 있으면 그 프로필로, 기본 로그인을 골랐으면 프로필 없이", () => {
+    expect(
+      localTerminalLaunch("claude", { localTerminal: { kind: "profile", harness: "claude", label: "개인" } }, launchInput)
+    ).toEqual({ kind: "harness", harness: "claude", profile: "개인", account: "Claude · 개인" });
+    expect(
+      localTerminalLaunch("claude", { localTerminal: { kind: "profile", harness: "claude", label: null } }, launchInput)
+    ).toEqual({ kind: "harness", harness: "claude", profile: null, account: "Claude · 이 맥 기본 로그인" });
+  });
+
+  it("고르지 않았거나 다른 CLI의 계정을 골랐으면 이 CLI의 기본 위치로(다른 CLI의 계정을 넘기지 않는다)", () => {
+    const plain = { kind: "harness", harness: "codex", profile: null, account: null };
+    expect(localTerminalLaunch("codex", {}, launchInput)).toEqual(plain);
+    expect(
+      localTerminalLaunch("codex", { localTerminal: { kind: "profile", harness: "claude", label: "개인" } }, launchInput)
+    ).toEqual(plain);
+  });
+
+  it("쓸 수 없으면 조용히 넘어가지 않고 표와 같은 문장으로 셸을 띄운다(교차)", () => {
+    for (const label of ["회사", "지운 계정"]) {
+      const prefs: AiDefaultsPrefs = { localTerminal: { kind: "profile", harness: "claude", label } };
+      const table = resolveRow("localTerminal", prefs, { ...launchInput, browserTab: false });
+      expect(table.state).toBe("fallback");
+      const launch = localTerminalLaunch("claude", prefs, launchInput);
+      expect(launch).toEqual({ kind: "shell", sentence: table.state === "ok" ? null : table.sentence });
+      expect(table.using).toBe("셸");
+    }
+  });
+
+  it("표 밑 한 줄은 원격 작업만 준비 중이라고 말한다", () => {
+    expect(AI_DEFAULTS_NOT_APPLIED).toContain("원격 작업");
+    expect(AI_DEFAULTS_NOT_APPLIED).not.toContain("터미널");
   });
 });

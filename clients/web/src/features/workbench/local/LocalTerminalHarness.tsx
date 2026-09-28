@@ -13,6 +13,7 @@ import {
 import { TerminalSection, TerminalThemeChoiceGroup } from "@/features/settings/TerminalSection";
 import { isTerminalThemeChoice } from "@momo/core/features/workbench/terminalTheme";
 import { setTerminalTheme } from "./terminalTheme";
+import { writeAiDefaults } from "@/features/settings/aiDefaultsStore";
 import { LocalTerminalDock } from "./LocalTerminalDock";
 import { createLocalSessions, DOCK_SESSION_KEY, loadBrowserMirror, type PtyPort } from "./localSessions";
 import { openDock, resetDockStateForTest, toggleDockFullscreen, useDockState } from "./dockState";
@@ -152,6 +153,30 @@ function fourLayout(): WorkbenchLayout {
   return l;
 }
 
+/**
+ * `ai-account`·`ai-missing`·`ai-login` 장면(#3010): 기본 AI 표에서 로컬 터미널 새 세션을
+ * 「Claude · 개인」으로 골라 둔 상태. 이 맥의 감지와 프로필 목록은 고정 값이다.
+ */
+function aiLaunchSource(scene: string) {
+  if (!scene.startsWith("ai-")) return undefined;
+  return {
+    detect: async () => [
+      { id: "claude" as const, installed: true, auth: "logged_in" as const },
+      { id: "codex" as const, installed: true, auth: "needs_login" as const },
+    ],
+    deps: {
+      prefs: () => ({ localTerminal: { kind: "profile" as const, harness: "claude" as const, label: "개인" } }),
+      profiles: async () => (scene === "ai-missing" ? [] : [{ harness: "claude" as const, label: "개인" }]),
+      hiddenDefaults: () => [],
+      profileStatus: async () => ({
+        id: "claude" as const,
+        installed: true,
+        auth: scene === "ai-login" ? ("needs_login" as const) : ("logged_in" as const),
+      }),
+    },
+  };
+}
+
 export function LocalTerminalHarness() {
   const [params] = useSearchParams();
   const scene = params.get("scene") ?? "one";
@@ -173,6 +198,11 @@ export function LocalTerminalHarness() {
     [scene]
   );
   const dock = useDockState();
+  const launchSource = useMemo(() => aiLaunchSource(scene), [scene]);
+  useMemo(() => {
+    // 메뉴의 계정 표시는 저장된 선택을 읽는다(판정 재료는 `launchSource`).
+    if (scene.startsWith("ai-")) writeAiDefaults(launchSource!.deps.prefs());
+  }, [scene, launchSource]);
   const agentScene: AgentFixtureScene | null = scene.startsWith("agent-")
     ? (scene.slice("agent-".length) as AgentFixtureScene)
     : null;
@@ -241,7 +271,7 @@ export function LocalTerminalHarness() {
           </div>
         ) : null}
       </div>
-      <LocalTerminalDock sessions={sessions} platform="mac" />
+      <LocalTerminalDock sessions={sessions} platform="mac" launchSource={launchSource} />
     </main>
   );
 }
