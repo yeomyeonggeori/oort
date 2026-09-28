@@ -14,13 +14,16 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
+import { chromium, webkit } from "playwright";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR
   ? resolve(process.env.OUT_DIR)
   : resolve(WEB_ROOT, "captures/2881");
+// Tauri 셸은 WKWebView다. 선택 칸 화살표처럼 엔진마다 다르게 그리는 것은
+// `BROWSER=webkit`으로 같은 장면을 WebKit에서도 찍는다(#3010).
+const ENGINE = process.env.BROWSER === "webkit" ? webkit : chromium;
 const PORT = Number(process.env.CAPTURE_PORT || 5288);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 
@@ -56,6 +59,12 @@ const KEY_LINK = {
   format: "openai",
   updatedAtMs: 1_790_000_000_000,
   diagnostics: [],
+};
+// #3010: 공용 선택 칸이 화살표 자리를 비우는지 재는 긴 자체 호스트(#3007 리뷰 Medium).
+const LONG_LINK = {
+  ...KEY_LINK,
+  baseUrl: "https://llm-gateway.platform.internal.example.co.kr:8443/v1",
+  endpointLabel: "https://llm-gateway.platform.internal.example.co.kr:8443/v1",
 };
 const EMPTY_LINK = {
   schema: "momo.provider_link.v0",
@@ -95,6 +104,7 @@ async function installMocks(context, team) {
     if (url.includes("/chain")) return json(route, { error: { code: "not_found", message: "no chain" } }, 404);
     if (team === "error") return json(route, { error: { code: "internal", message: "boom" } }, 500);
     if (team === "member") return json(route, { error: { code: "forbidden", message: "operator required" } }, 403);
+    if (team === "long") return json(route, LONG_LINK);
     return json(route, team === "empty" ? EMPTY_LINK : KEY_LINK);
   });
 }
@@ -180,6 +190,7 @@ const SCENES = [
   { name: "defaults-empty", team: "empty", query: "", ready: "ai-defaults-team-foot" },
   { name: "defaults-error", team: "error", query: "&aiDefaults=demo", ready: "ai-defaults-table" },
   { name: "defaults-browser", team: "operator", query: "&aiEntry=desktop-only", base: "/settings?section=ai", ready: "ai-defaults-team-foot" },
+  { name: "defaults-long-host", team: "long", query: "&aiDefaults=demo", ready: "ai-defaults-team-foot" },
   { name: "unlink-impact", team: "operator", query: "&aiDefaults=demo&aiUnlink=confirm", ready: "my-account-unlink-impact", dialog: true },
 ];
 
@@ -201,7 +212,8 @@ async function shoot(browser, frame, scene) {
   }
   if (scene.act) await scene.act(page);
   await page.waitForTimeout(250);
-  const path = `${OUT_DIR}/${scene.name}-${frame.viewport.width}-${frame.scheme}.png`;
+  const engine = process.env.BROWSER === "webkit" ? "-webkit" : "";
+  const path = `${OUT_DIR}/${scene.name}-${frame.viewport.width}-${frame.scheme}${engine}.png`;
   await page.screenshot({ path });
   await context.close();
   return path;
@@ -221,7 +233,7 @@ async function main() {
   process.on("exit", shutdown);
   try {
     await waitForServer(ORIGIN);
-    const browser = await chromium.launch();
+    const browser = await ENGINE.launch();
     try {
       const only = process.env.ONLY ? process.env.ONLY.split(",") : null;
       for (const scene of SCENES) {
