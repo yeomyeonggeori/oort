@@ -341,29 +341,8 @@ export function deviceKeyServerMessage(code: string | undefined, fallback: strin
 
 // ---- signing context and who may instruct from where (#3029 E9) --------------
 
-/**
- * `GET …/device-keys/signing-context` (E3 #3023, `SigningContextResponse`). This
- * module reads only the flag: the desktop shell fetches the rest itself when it
- * signs (E8 #3028).
- */
-export interface SigningContext {
-  instanceId: string;
-  serverTimeMs: number;
-  /** `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`. */
-  humanControlSignatureRequired: boolean;
-}
-
-export function parseSigningContext(value: unknown): SigningContext {
-  const source = record(value);
-  if (source === null) throw new WireShapeError();
-  const instanceId = str(source, "instanceId");
-  const serverTimeMs = num(source, "serverTimeMs");
-  const required = bool(source, "humanControlSignatureRequired");
-  if (!instanceId || serverTimeMs === undefined || required === undefined) {
-    throw new WireShapeError();
-  }
-  return { instanceId, serverTimeMs, humanControlSignatureRequired: required };
-}
+// `SigningContext` / `parseSigningContext` live above, next to `fetchSigningContext`
+// (#3026 E6: the phone signs with the full context; this flag reader shares it).
 
 /**
  * Whether this server requires a device signature on an allow or an
