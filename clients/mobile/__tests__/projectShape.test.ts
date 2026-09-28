@@ -474,6 +474,12 @@ describe('what the upload declares stays true of the code (#2568)', () => {
     APP_ROOT,
     'modules/momo-device-key-native/ios/MomoDeviceKeyStore.swift',
   );
+  const REFRESH_KEY_STORE = join(
+    APP_ROOT,
+    'modules/momo-device-key-native/ios/MomoRefreshKeyStore.swift',
+  );
+  /** The only files allowed to import CryptoKit: enclave signatures. */
+  const SIGNING_KEY_STORES = [DEVICE_KEY_STORE, REFRESH_KEY_STORE];
 
   function nativeFiles(dir: string, acc: string[] = []): string[] {
     for (const entry of readdirSync(dir)) {
@@ -545,30 +551,32 @@ describe('what the upload declares stays true of the code (#2568)', () => {
       'modules',
     ]
       .flatMap(dir => nativeFiles(join(APP_ROOT, dir)))
-      .filter(file => file !== DEVICE_KEY_STORE)
+      .filter(file => !SIGNING_KEY_STORES.includes(file))
+      // The simulator check verifies momo-wire's vector signature with a
+      // CryptoKit PUBLIC key (#3106). It is a test program: the podspec links
+      // only `ios/`, so it never ships.
+      .filter(file => !file.includes('/momo-device-key-native/sim-check/'))
       .filter(file => nativeCipher.test(readFileSync(file, 'utf8')));
     expect(native).toEqual([]);
   });
 
-  it('keeps that declaration true: the device key only SIGNS (#3026)', () => {
-    // The one sanctioned CryptoKit import. MomoDeviceKeyStore uses it for a
-    // Secure Enclave ECDSA signature and nothing else — authentication, not
-    // confidentiality. The moment it encrypts or agrees a key, the Info.plist
-    // `false` has to be judged again, so any cipher, sealed box, symmetric key
-    // or key agreement in this file fails here.
-    const code = readFileSync(DEVICE_KEY_STORE, 'utf8')
+  // #3106: the refresh key is the second sanctioned CryptoKit import — a
+  // Secure Enclave ECDSA signature over a proof, and SHA-256 of the refresh
+  // token inside it. Authentication, not confidentiality: the same rule.
+  it.each([
+    ['the device key (#3026)', DEVICE_KEY_STORE],
+    ['the refresh key (#3106)', REFRESH_KEY_STORE],
+  ])('keeps that declaration true: %s only SIGNS', (_name, file) => {
+    const code = readFileSync(file, 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/\/\/.*$/gm, '');
     expect(code).toMatch(/\bimport\s+CryptoKit\b/);
     expect(code).not.toMatch(
       /\b(?:AES|ChaChaPoly|SealedBox|HPKE|SymmetricKey|KeyAgreement|sharedSecretFromKeyAgreement|HMAC|SecKeyEncrypt|SecKeyCreateEncryptedData|SecKeyCopyKeyExchangeResult)\b/,
     );
-    // Only the Signing half of the enclave API.
     const enclaveUses = code.match(/SecureEnclave\.P256\.\w+/g) ?? [];
     expect(enclaveUses.length).toBeGreaterThan(0);
-    expect(new Set(enclaveUses)).toEqual(
-      new Set(['SecureEnclave.P256.Signing']),
-    );
+    expect(new Set(enclaveUses)).toEqual(new Set(['SecureEnclave.P256.Signing']));
   });
 
   it('keeps the microphone sentence true: nothing asks for the microphone', () => {

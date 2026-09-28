@@ -17,6 +17,14 @@
 // here, not in JS, because the party that can force the window shut must own
 // the bound: a webview that never calls `_end` cannot keep the app alive.
 //
+// Since #3106 the desktop's rotation itself runs in the shell
+// (`session_refresh_attempt`): the POST and the keychain write are Rust, and
+// the attempt holds this same hold through `shell_rotation()`. That count is
+// separate from the webview's `begin`/`end`, because a page reload (`reset`)
+// ends the webview's rotations but not a POST the shell still has in the air.
+// The webview still brackets its rotation (the core's retry loop around the
+// attempts), which stays harmless.
+//
 // Scope, stated plainly: this covers closing the window (the red button,
 // Cmd+W), which on this single-window app is also how it quits via the window.
 // It does NOT cover Cmd+Q / the app menu's Quit: that is AppKit `terminate:`,
@@ -28,10 +36,11 @@
 use std::sync::{Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
-/// How long a close waits for an open rotation. The core's own worst case for
-/// one rotation once its POST has left: the request deadline
-/// (`REQUEST_TIMEOUT_MS`, 15 s, packages/momo-core/src/lib/http.ts) plus the
-/// bounded keychain flush (`KEYCHAIN_WAIT_MS`, 5 s, clients/web/src/lib/session.ts).
+/// How long a close waits for an open rotation. The worst case for one
+/// rotation once its POST has left: the request deadline (the shell's
+/// `session_refresh::REFRESH_REQUEST_TIMEOUT` and the core's
+/// `REQUEST_TIMEOUT_MS`, both 15 s) plus the bounded keychain flush
+/// (`KEYCHAIN_WAIT_MS`, 5 s, clients/web/src/lib/session.ts).
 /// Anything the core itself would still be waiting for is waited for; nothing
 /// longer. The window is already hidden, so the wait is not something the
 /// person sits through.
@@ -39,8 +48,11 @@ pub const CLOSE_WAIT_CAP: Duration = Duration::from_secs(20);
 
 #[derive(Default)]
 struct Inner {
-    /// Rotations begun and not yet ended.
+    /// Rotations the webview began and has not ended.
     open: u32,
+    /// Rotations the shell itself has in flight (#3106). Not cleared by a
+    /// page reload: the shell's POST outlives the page.
+    shell_open: u32,
     /// A deferred close is already waiting; further close clicks are ignored.
     closing: bool,
 }
@@ -71,7 +83,22 @@ impl RotationHold {
     pub fn end(&self) {
         let mut inner = self.lock();
         inner.open = inner.open.saturating_sub(1);
-        if inner.open == 0 {
+        if inner.busy() == 0 {
+            self.idle.notify_all();
+        }
+    }
+
+    /// The shell's own rotation (#3106): held until the guard drops.
+    pub fn shell_rotation(&self) -> ShellRotation<'_> {
+        let mut inner = self.lock();
+        inner.shell_open = inner.shell_open.saturating_add(1);
+        ShellRotation { hold: self }
+    }
+
+    fn end_shell(&self) {
+        let mut inner = self.lock();
+        inner.shell_open = inner.shell_open.saturating_sub(1);
+        if inner.busy() == 0 {
             self.idle.notify_all();
         }
     }
@@ -81,7 +108,9 @@ impl RotationHold {
     pub fn reset(&self) {
         let mut inner = self.lock();
         inner.open = 0;
-        self.idle.notify_all();
+        if inner.busy() == 0 {
+            self.idle.notify_all();
+        }
     }
 
     /// A close request arrived. `Wait`: defer it, and this caller is the one
@@ -92,7 +121,7 @@ impl RotationHold {
         let mut inner = self.lock();
         if inner.closing {
             CloseDecision::AlreadyWaiting
-        } else if inner.open == 0 {
+        } else if inner.busy() == 0 {
             CloseDecision::CloseNow
         } else {
             inner.closing = true;
@@ -106,10 +135,27 @@ impl RotationHold {
         let inner = self.lock();
         let (inner, timeout) = self
             .idle
-            .wait_timeout_while(inner, cap, |inner| inner.open > 0)
+            .wait_timeout_while(inner, cap, |inner| inner.busy() > 0)
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         drop(inner);
         !timeout.timed_out()
+    }
+}
+
+impl Inner {
+    fn busy(&self) -> u32 {
+        self.open.saturating_add(self.shell_open)
+    }
+}
+
+/// One shell rotation in flight; ends it on drop (any return path, a panic).
+pub struct ShellRotation<'a> {
+    hold: &'a RotationHold,
+}
+
+impl Drop for ShellRotation<'_> {
+    fn drop(&mut self) {
+        self.hold.end_shell();
     }
 }
 
@@ -248,6 +294,30 @@ mod tests {
         hold.reset();
         assert!(hold.wait_idle(Duration::from_millis(10)));
         assert_eq!(hold.defer_close(), CloseDecision::CloseNow);
+    }
+
+    /// #3106: a reload ends the webview's rotations, not the shell's POST.
+    /// Sabotage: clear `shell_open` in `reset` and the close below destroys
+    /// the window with the shell's rotation still in the air — RED.
+    #[test]
+    fn a_reload_does_not_release_the_shells_own_rotation() {
+        let hold = RotationHold::default();
+        let shell = hold.shell_rotation();
+        hold.begin();
+        hold.reset();
+        assert_eq!(hold.defer_close(), CloseDecision::Wait);
+        assert!(
+            !hold.wait_idle(Duration::from_millis(20)),
+            "the shell's rotation is open"
+        );
+        drop(shell);
+        assert!(hold.wait_idle(Duration::from_millis(20)));
+    }
+
+    #[test]
+    fn the_cap_covers_the_shells_own_rotation() {
+        let bound = crate::session_refresh::REFRESH_REQUEST_TIMEOUT;
+        assert!(CLOSE_WAIT_CAP >= bound, "{CLOSE_WAIT_CAP:?} < {bound:?}");
     }
 
     #[test]

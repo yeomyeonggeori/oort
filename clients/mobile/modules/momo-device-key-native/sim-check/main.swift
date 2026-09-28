@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import LocalAuthentication
 
@@ -226,6 +227,85 @@ check(FP.compare(stored: modernA, legacyNow: a, domainStateNow: b) == .changed, 
 check(FP.compare(stored: modernA, legacyNow: a, domainStateNow: nil) == .unknown, "fingerprint: no value from the same API → unknown")
 check(FP.compare(stored: nil, legacyNow: a, domainStateNow: a) == .unknown, "fingerprint: nothing stored → unknown")
 check(FP.compare(stored: Data([0x09]) + a, legacyNow: a, domainStateNow: a) == .unknown, "fingerprint: unknown tag → unknown")
+
+// ---- 4. #3106: the refresh key (argv[3], momo-wire's refresh_proof vector) ----
+guard CommandLine.arguments.count > 3,
+  let refreshData = FileManager.default.contents(atPath: CommandLine.arguments[3]),
+  let refreshJSON = try? JSONSerialization.jsonObject(with: refreshData) as? [String: Any],
+  let refreshPayload = refreshJSON["payload"] as? String,
+  let refreshSignature = refreshJSON["signature"] as? String,
+  let refreshHash = refreshJSON["refreshTokenSha256"] as? String,
+  let refreshInputs = refreshJSON["inputs"] as? [String: Any],
+  let rWorkspace = refreshInputs["workspaceId"] as? String,
+  let rMember = refreshInputs["memberId"] as? String,
+  let rKey = refreshInputs["publicKey"] as? String,
+  let rToken = refreshInputs["refreshToken"] as? String,
+  let rNonce = refreshInputs["nonce"] as? String,
+  let rAt = (refreshInputs["signedAtMs"] as? NSNumber)?.int64Value,
+  let rKeyData = Data(base64Encoded: rKey)
+else {
+  print("FAIL: usage: device-key-sim-check <vectors.json> <device-rebind.vector.json> <refresh-proof.vector.json>")
+  exit(1)
+}
+typealias RK = MomoRefreshKeyStore
+let refresh = Data(refreshPayload.utf8)
+
+// The bytes are momo-wire's, byte for byte.
+check(RK.tokenSha256Hex(rToken) == refreshHash, "refresh: token hash equals momo-wire's")
+let built = try? RK.proofBytes(
+  workspaceId: rWorkspace, memberId: rMember, publicKey: rKeyData, refreshToken: rToken,
+  nonce: rNonce, signedAtMs: rAt)
+check(built == refresh, "refresh: proofBytes equals the momo-wire vector payload")
+// And momo-wire's signature verifies over them under the vector's key (a
+// public key only — no software private key is constructed anywhere).
+if let pub = try? P256.Signing.PublicKey(compressedRepresentation: rKeyData),
+  let sigData = Data(base64Encoded: refreshSignature),
+  let sig = try? P256.Signing.ECDSASignature(rawRepresentation: sigData)
+{
+  check(pub.isValidSignature(sig, for: built ?? Data()), "refresh: the vector signature verifies over proofBytes")
+} else {
+  check(false, "refresh: vector key/signature decode")
+}
+for (name, bad) in [
+  ("uppercase workspace", { try RK.proofBytes(workspaceId: "ABCDEF00-0000-4000-8000-000000000001", memberId: rMember, publicKey: rKeyData, refreshToken: rToken, nonce: rNonce, signedAtMs: rAt) }),
+  ("empty token", { try RK.proofBytes(workspaceId: rWorkspace, memberId: rMember, publicKey: rKeyData, refreshToken: "", nonce: rNonce, signedAtMs: rAt) }),
+  ("zero time", { try RK.proofBytes(workspaceId: rWorkspace, memberId: rMember, publicKey: rKeyData, refreshToken: rToken, nonce: rNonce, signedAtMs: 0) }),
+  ("short key", { try RK.proofBytes(workspaceId: rWorkspace, memberId: rMember, publicKey: rKeyData.dropLast(), refreshToken: rToken, nonce: rNonce, signedAtMs: rAt) }),
+] as [(String, () throws -> Data)] {
+  check((try? bad()) == nil, "refresh: proofBytes refuses \(name)")
+}
+
+// Cross-sabotage: each key signs only its own statements.
+func refreshRejects(_ data: Data, _ key: String) -> Bool {
+  (try? RK.checkProofPayload(data, publicKeyBase64: key)) == nil
+}
+check(!refreshRejects(refresh, rKey), "refresh key: accepts the vector proof naming its key")
+check(refreshRejects(refresh, otherKey), "refresh key: refuses a proof naming another key")
+check(refreshRejects(refresh + Data([0x0A]), rKey), "refresh key: refuses a trailing newline")
+for (name, payload) in phonePayloads {
+  check(refreshRejects(payload, rKey), "refresh key: refuses instruction \(name)")
+}
+check(refreshRejects(rebind, rKey), "refresh key: refuses a rebind letter")
+check(rejects(refresh), "instruction key: refuses a refresh proof (not in signingSchemas)")
+check(MomoDeviceKeyStore.signingSchemas[RK.schema] == nil, "instruction key: refresh_proof.v1 is not an allowed schema")
+
+// No biometry on the refresh key; the instruction key keeps it (sabotage:
+// add .biometryCurrentSet here and background refreshes fail — RED).
+check(RK.accessFlags == [.privateKeyUsage], "refresh key: access control is privateKeyUsage only")
+check(RK.service != "app.momo.ios.devicekey" && RK.keyAccount != "p256-signing-v1",
+  "refresh key: a different item from the instruction key")
+
+// No enclave, no key, no software fallback.
+let refreshStore = try! RK(accessGroup: group)
+do {
+  let proof = try refreshStore.prove(workspaceId: rWorkspace, memberId: rMember, refreshToken: rToken, signedAtMs: rAt)
+  check(false, "refresh key: prove() refused — but it RETURNED a proof by \(proof.publicKey) (software fallback)")
+} catch let failure as MomoDeviceKeyFailure {
+  check(failure == .unsupported, "refresh key: prove() refused with \(failure.code)")
+} catch { check(false, "refresh key: prove() typed error") }
+for bad in ["", "YWQQFQM38J.app.momo.ios.shared"] {
+  check((try? RK(accessGroup: bad)) == nil, "refresh key: init refuses access group '\(bad)'")
+}
 
 print(failures == 0 ? "PASS" : "FAILED (\(failures))")
 exit(failures == 0 ? 0 : 1)

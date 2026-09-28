@@ -6,6 +6,8 @@
 //   discovery     _momo._tcp browse               -> `momo:discovery` event
 //   notification  mentions/approvals              -> commands
 //   keychain      refresh token at rest           -> commands
+//   session       the refresh rotation + its proof -> commands (#3106; the
+//                 webview gets the access token and a handle, never the token)
 //   updater       self-replace the app bundle     -> commands + progress event
 //   detect        local hosted-agent signatures   -> command (T-5; passive only)
 //   harnesses     claude/codex installed + login  -> command (#2813; exit code only)
@@ -48,6 +50,11 @@ mod profile_signout;
 mod harness_status;
 mod keychain;
 mod notification;
+// The shell's own refresh rotation with the refresh-key proof (#3106,
+// ADR-0146 D-7 증보 #3079): the webview asks for a rotation and gets the
+// access token and a handle, never the refresh token.
+#[cfg(desktop)]
+mod session_refresh;
 // A window close waits (bounded) for a refresh rotation in flight, so the
 // rotated token reaches the keychain (#3098).
 #[cfg(desktop)]
@@ -139,6 +146,7 @@ pub fn run() {
         .manage(work_host::WorkHostState::default())
         .manage(device_key::DeviceKeyState::default())
         .manage(rotation_hold::RotationHold::default())
+        .manage(session_refresh::SessionShell::default())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
@@ -154,11 +162,13 @@ pub fn run() {
             notification::notification_request_permission,
             notification::notification_show,
             keychain::keychain_available,
-            keychain::keychain_load_refresh_token,
+            keychain::keychain_refresh_token_handle,
             keychain::keychain_store_refresh_token,
             keychain::keychain_clear_refresh_token,
             rotation_hold::session_rotation_begin,
             rotation_hold::session_rotation_end,
+            session_refresh::session_refresh_attempt,
+            session_refresh::session_revoke,
             opener::open_external_url,
             pdf_viewer::open_pdf_attachment,
             detect::detect_hosted_agents,
@@ -202,7 +212,6 @@ pub fn run() {
         notification::notification_request_permission,
         notification::notification_show,
         keychain::keychain_available,
-        keychain::keychain_load_refresh_token,
         keychain::keychain_store_refresh_token,
         keychain::keychain_clear_refresh_token,
         app_version,

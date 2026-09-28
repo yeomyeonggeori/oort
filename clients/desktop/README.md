@@ -110,9 +110,11 @@ interface HostedAgentProbe {
 | `notification_request_permission` | — | same | Desktop: always `"granted"`, no prompt. macOS asks on the first `notification_show` instead (#2676). |
 | `notification_show` | `{ title: string, body?: string }` | `boolean` | `false` = not shown because permission is not granted. Desktop never returns `false`: a banner macOS drops is still `true` (#2676). |
 | `keychain_available` | — | `boolean` | Probes the credential store. |
-| `keychain_load_refresh_token` | — | `string \| null` | |
-| `keychain_store_refresh_token` | `{ token: string }` | `void` \| error | Rejects an empty token. |
-| `keychain_clear_refresh_token` | — | `void` \| error | Succeeds when there was nothing to delete. |
+| `keychain_refresh_token_handle` | — | `string \| null` | `shell:` + 32 hex of the stored token's SHA-256, or `null` (#3106). The token itself never comes back to the webview (`keychain_load_refresh_token` was removed). |
+| `keychain_store_refresh_token` | `{ token: string, origin: string }` | `void` \| error | Rejects an empty token, a `shell:` handle, or a missing/non-http(s) origin. `origin` pins the token to its server: the shell presents it nowhere else (#3106). |
+| `keychain_clear_refresh_token` | — | `void` \| error | Succeeds when there was nothing to delete. Keeps the token in memory only for `session_revoke` (#3106). |
+| `session_refresh_attempt` | `{ request: { apiBase, workspaceId, memberId, skewMs } }` | `{ status, code?, date?, accessToken?, refreshToken?, proved }` \| error | One `/v1/auth/refresh` POST made by the shell (#3106, ADR-0146 D-7 증보 #3079): the keychain's token, this Mac's Secure Enclave **refresh key** proof (`momo.human.refresh_proof.v1`; PrivateKeyUsage only, no Touch ID), the successor written to the keychain before it answers. `refreshToken` is a handle. Only to the pinned origin; no redirects. Error = nothing answered (the token is kept; the next attempt recovers with a proof). The retry policy is the core's. |
+| `session_revoke` | `{ request: { apiBase, accessToken, workspaceId, memberId } }` | `boolean` \| error | Logout's server half with the token only the shell holds; wipes the keychain item either way. |
 | `session_rotation_begin` | — | `void` | A refresh rotation's POST is about to leave; closing the main window now hides it and waits (≤ 20 s) for `_end` before destroying it (#3098). |
 | `session_rotation_end` | — | `void` | That rotation is over and its token written. An `_end` without a `_begin` is a no-op. |
 | `open_external_url` | `{ url: string }` | `void` \| error | Opens one **https** URL in the OS browser. Rejects anything else. Desktop only. |

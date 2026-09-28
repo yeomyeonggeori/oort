@@ -37,7 +37,7 @@
 // main thread and the worker waits for them.
 
 mod confirm;
-mod enclave;
+pub(crate) mod enclave;
 pub mod payload;
 
 use std::collections::BTreeMap;
