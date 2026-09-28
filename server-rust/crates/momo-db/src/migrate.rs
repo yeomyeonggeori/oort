@@ -480,19 +480,24 @@ mod tests {
     /// `session_refresh_key` (one refresh-proof key per session lineage) and
     /// `refresh_proof_nonce` (one-time proof nonces), both ENABLE + FORCE RLS
     /// + `ws_isolation`. Re-runnable statements. schema_v0.sql is not modified.
+    ///
+    /// 097 is #3118's permission preview (ADR-0146 증보 R2 H1): nullable
+    /// `work_permission_request.preview` / `preview_sha256` with a both-or-none
+    /// CHECK. No table or policy is added. Re-runnable statements.
+    /// schema_v0.sql is not modified.
     #[test]
-    fn discovers_contiguous_migrations_001_to_096() {
+    fn discovers_contiguous_migrations_001_to_097() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            96,
-            "expected 96 migrations under {}",
+            97,
+            "expected 97 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 96);
+        assert_eq!(migrations.last().unwrap().version, 97);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

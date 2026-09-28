@@ -207,6 +207,149 @@ fn plan_entry(entry: &Value) -> Option<Value> {
     Some(json!({"content": content, "status": status, "priority": priority}))
 }
 
+// ---- permission preview (#3118, ADR-0146 증보 H1 · ADR-0188 D5) -----------
+
+/// Most tool calls remembered per session for their preview: a permission
+/// request names one by `toolCallId`, and ACP lets the request carry only a
+/// partial update of the call the agent announced before.
+pub const MAX_REMEMBERED_TOOL_CALLS: usize = 64;
+
+/// Fold a `tool_call` / `tool_call_update` notification's fields into what
+/// this session remembers of that call. Later non-null fields win (ACP
+/// `ToolCallUpdate` semantics). Returns `false` for anything else.
+pub fn remember_tool_call(calls: &mut Vec<(String, Map<String, Value>)>, params: &Value) -> bool {
+    let Some(update) = params.get("update").and_then(Value::as_object) else {
+        return false;
+    };
+    if !matches!(
+        update.get("sessionUpdate").and_then(Value::as_str),
+        Some("tool_call") | Some("tool_call_update")
+    ) {
+        return false;
+    }
+    let Some(id) = update.get("toolCallId").and_then(Value::as_str) else {
+        return false;
+    };
+    merge_tool_call(calls, id, update);
+    true
+}
+
+fn merge_tool_call(
+    calls: &mut Vec<(String, Map<String, Value>)>,
+    id: &str,
+    fields: &Map<String, Value>,
+) {
+    let index = match calls.iter().position(|(known, _)| known == id) {
+        Some(index) => index,
+        None => {
+            if calls.len() >= MAX_REMEMBERED_TOOL_CALLS {
+                calls.remove(0);
+            }
+            calls.push((id.to_string(), Map::new()));
+            calls.len() - 1
+        }
+    };
+    let entry = &mut calls[index].1;
+    for key in ["title", "kind", "locations", "rawInput"] {
+        if let Some(value) = fields.get(key).filter(|value| !value.is_null()) {
+            entry.insert(key.to_string(), value.clone());
+        }
+    }
+}
+
+/// The preview of one `session/request_permission` (#3118): the tool call it
+/// names, as this session knows it, with the request's own fields on top —
+/// sanitised the way ADR-0188 D5 says. The host is the preview's source; the
+/// hash of [`momo_wire::permission_preview::PermissionPreview::to_value`] is
+/// what an owner's allow must name.
+pub fn permission_preview(
+    calls: &mut Vec<(String, Map<String, Value>)>,
+    params: &Value,
+) -> momo_wire::permission_preview::PermissionPreview {
+    let request = params
+        .get("toolCall")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let fields = match request.get("toolCallId").and_then(Value::as_str) {
+        Some(id) => {
+            merge_tool_call(calls, id, &request);
+            calls
+                .iter()
+                .find(|(known, _)| known == id)
+                .map(|(_, fields)| fields.clone())
+                .unwrap_or_default()
+        }
+        None => request,
+    };
+    let kind = fields
+        .get("kind")
+        .and_then(Value::as_str)
+        .map(tool_kind)
+        .unwrap_or("other");
+    let title = fields
+        .get("title")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let locations: Vec<String> = fields
+        .get("locations")
+        .and_then(Value::as_array)
+        .map(|locations| {
+            locations
+                .iter()
+                .filter_map(|location| {
+                    let path = location.get("path").and_then(Value::as_str)?;
+                    Some(match location.get("line").and_then(Value::as_u64) {
+                        Some(line) => format!("{path}:{line}"),
+                        None => path.to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let input = match fields.get("rawInput") {
+        None | Some(Value::Null) => String::new(),
+        Some(Value::String(text)) => text.clone(),
+        Some(value) => value.to_string(),
+    };
+    let mut truncated = false;
+    let mut field = |text: &str| {
+        let (bounded, cut) = preview_field(text);
+        truncated |= cut;
+        bounded
+    };
+    let title = field(title);
+    let locations = field(&locations.join("\n"));
+    let input = field(&input);
+    momo_wire::permission_preview::PermissionPreview {
+        kind: kind.to_string(),
+        title,
+        locations,
+        input,
+        truncated,
+    }
+}
+
+/// One preview field: invisible and direction characters removed — the
+/// relay's set, the credential scan's invisible set, and the line and
+/// paragraph separators, so an app's display sanitiser finds nothing left to
+/// neutralise and shows exactly the hashed bytes — credential shapes masked,
+/// then at most [`MAX_FIELD_CHARS`] characters with head and tail kept.
+/// Returns whether it was cut.
+fn preview_field(text: &str) -> (String, bool) {
+    let visible: String = text
+        .chars()
+        .filter(|character| {
+            !is_disallowed(*character)
+                && !crate::redact::is_invisible(*character)
+                && !matches!(character, '\u{2028}' | '\u{2029}')
+        })
+        .collect();
+    let masked = redact_credentials(&visible);
+    let cut = masked.chars().count() > MAX_FIELD_CHARS;
+    (bound_field(&masked, MAX_FIELD_CHARS), cut)
+}
+
 /// Remove characters that change how text renders without being visible:
 /// bidi embeddings/overrides/isolates and marks, zero-width space and word
 /// joiner family, BOM, Mongolian vowel separator, and C0/C1 controls other than
@@ -481,6 +624,74 @@ mod tests {
         assert_eq!(open_private_key_block("-----BEGIN OPENSSH PRIV"), Some(0));
         assert_eq!(open_private_key_block(PEM), None);
         assert_eq!(open_private_key_block("no key"), None);
+    }
+
+    /// #3118: the preview is the request's tool call as the session knows
+    /// it, sanitised, masked and bounded — and its hash moves with each field.
+    #[test]
+    fn a_permission_preview_is_the_named_tool_call_sanitised() {
+        let mut calls = Vec::new();
+        assert!(remember_tool_call(
+            &mut calls,
+            &update(json!({"sessionUpdate": "tool_call", "toolCallId": "call-1",
+                "title": "Run `cat ~/.ssh/id_ed25519`", "kind": "execute",
+                "locations": [{"path": "/home/me/.ssh/id_ed25519", "line": 3}],
+                "rawInput": {"command": "cat ~/.ssh/id_ed25519"}}))
+        ));
+        // The request carries a partial update: its title wins, the rest is
+        // what the agent announced.
+        let preview = permission_preview(
+            &mut calls,
+            &json!({"toolCall": {"toolCallId": "call-1",
+                "title": "Run \u{202E}`cat x`\u{2028} ghp_0123456789abcdefghijklmnopqrstuvwxyz"}}),
+        );
+        assert_eq!(preview.kind, "execute");
+        assert_eq!(
+            preview.title,
+            format!("Run `cat x` {REDACTED_CREDENTIAL}"),
+            "direction and separator characters removed, the token masked"
+        );
+        assert_eq!(preview.locations, "/home/me/.ssh/id_ed25519:3");
+        assert_eq!(preview.input, r#"{"command":"cat ~/.ssh/id_ed25519"}"#);
+        assert!(!preview.truncated);
+        let hash = momo_wire::permission_preview::preview_sha256(&preview.to_value()).unwrap();
+        assert_eq!(hash.len(), 64);
+
+        // An unknown call and a bare request still give a preview (of what
+        // there is); a long input is cut and says so.
+        let bare = permission_preview(&mut calls, &json!({}));
+        assert_eq!(
+            (bare.kind.as_str(), bare.title.as_str(), bare.truncated),
+            ("other", "", false)
+        );
+        let long = permission_preview(
+            &mut calls,
+            &json!({"toolCall": {"toolCallId": "call-2", "kind": "sudo",
+                "rawInput": "y".repeat(MAX_FIELD_CHARS + 10)}}),
+        );
+        assert_eq!(long.kind, "other");
+        assert!(long.truncated);
+        assert_eq!(long.input.chars().count(), MAX_FIELD_CHARS);
+        assert!(momo_wire::permission_preview::validate_preview(&long.to_value()).is_ok());
+    }
+
+    #[test]
+    fn remembered_tool_calls_are_bounded() {
+        let mut calls = Vec::new();
+        for n in 0..(MAX_REMEMBERED_TOOL_CALLS + 5) {
+            remember_tool_call(
+                &mut calls,
+                &update(
+                    json!({"sessionUpdate": "tool_call", "toolCallId": format!("c{n}"), "title": "t"}),
+                ),
+            );
+        }
+        assert_eq!(calls.len(), MAX_REMEMBERED_TOOL_CALLS);
+        assert_eq!(calls[0].0, "c5");
+        assert!(!remember_tool_call(
+            &mut calls,
+            &update(json!({"sessionUpdate": "plan", "entries": []}))
+        ));
     }
 
     #[test]

@@ -59,15 +59,17 @@ use momo_auth::human_control::{ControlSubject, ControlTarget};
 use momo_auth::{Principal, PrincipalKind};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
+use momo_t3::lifecycle::load_work_session_in_tx;
 use momo_t3::work_control::{
     active_host_owner_in_tx, insert_work_control_in_tx, target_work_host_in_tx, NewWorkControl,
     HOST_SCOPE_MEMBER, KIND_PERMISSION, STATUS_APPROVED as CONTROL_STATUS_APPROVED,
 };
 use momo_t3::work_permission::{
     attach_permission_control_in_tx, close_permission_request_in_tx,
-    decide_permission_request_in_tx, is_bridgeable_kind, lock_permission_request_in_tx,
-    permission_control_payload, PermissionOption, PermissionRequestRow, KIND_ALLOW_ONCE,
-    STATUS_APPROVED, STATUS_CANCELLED, STATUS_EXPIRED, STATUS_PENDING, STATUS_REJECTED,
+    decide_permission_request_in_tx, is_bridgeable_kind, load_permission_request_in_tx,
+    lock_permission_request_in_tx, permission_control_payload, PermissionOption,
+    PermissionRequestRow, KIND_ALLOW_ONCE, STATUS_APPROVED, STATUS_CANCELLED, STATUS_EXPIRED,
+    STATUS_PENDING, STATUS_REJECTED,
 };
 use momo_t3::{lock_work_session_detail_in_tx, T3Error};
 use serde_json::json;
@@ -76,7 +78,8 @@ use uuid::Uuid;
 use crate::config::DeviceKeySettings;
 use crate::dto::{
     HumanSignatureRequest, WorkPermissionDecisionRequest, WorkPermissionDecisionResponse,
-    WorkPermissionRequestDto, WorkSessionAcpEvent,
+    WorkPermissionOptionDto, WorkPermissionPreviewResponse, WorkPermissionRequestDto,
+    WorkSessionAcpEvent,
 };
 use crate::error::ApiError;
 use crate::human_control::{
@@ -117,6 +120,7 @@ fn dto(row: &PermissionRequestRow) -> WorkPermissionRequestDto {
         decided_at_ms: row.decided_at_ms,
         control_id: row.control_id.map(|id| id.to_string()),
         expires_at_ms: row.expires_at_ms,
+        preview_sha256: row.preview_sha256.clone(),
     }
 }
 
@@ -246,6 +250,68 @@ pub async fn decide(
     }))
 }
 
+/// `GET /v1/workspaces/{ws}/work-sessions/{session}/permission-requests/{request}`
+/// (#3118, ADR-0188 D5 「미리보기는 소유자의 조회로만」): the request, its
+/// options and the host's preview — to the session owner only, the same D3
+/// rule as the decision route (a human bearer, the session's member, the
+/// host's owner). Anyone else gets the same 404 as for a request that does
+/// not exist, so the route does not say which requests exist.
+pub async fn preview(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, session, request)): Path<(String, String, String)>,
+) -> Result<Json<WorkPermissionPreviewResponse>, ApiError> {
+    if principal.kind != PrincipalKind::Human {
+        return Err(ApiError::coded(
+            StatusCode::FORBIDDEN,
+            CODE_NOT_HUMAN,
+            "a permission preview is for the session owner's human bearer",
+        ));
+    }
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let session_id = path_uuid(&session, "invalid work session id")?;
+    let request_event_id = path_uuid(&request, "invalid permission request id")?;
+    let member_id = principal.member_id;
+    let row = settle(
+        "work_permissions.preview",
+        tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                let not_found = || ApiError::not_found("permission request not found");
+                let Some(session) = load_work_session_in_tx(conn, workspace_id, session_id).await?
+                else {
+                    return Ok(Err(not_found()));
+                };
+                if session.member_id != member_id {
+                    return Ok(Err(not_found()));
+                }
+                let host_owner =
+                    active_host_owner_in_tx(conn, workspace_id, session.host_id).await?;
+                if host_owner.is_some_and(|owner| owner != member_id) {
+                    return Ok(Err(not_found()));
+                }
+                Ok(
+                    load_permission_request_in_tx(conn, workspace_id, session_id, request_event_id)
+                        .await?
+                        .ok_or_else(not_found),
+                )
+            })
+        })
+        .await,
+    )?;
+    Ok(Json(WorkPermissionPreviewResponse {
+        permission_request: dto(&row),
+        options: row
+            .options
+            .iter()
+            .map(|option| WorkPermissionOptionDto {
+                option_id: option.option_id.clone(),
+                kind: option.kind.clone(),
+            })
+            .collect(),
+        preview: row.preview.clone(),
+    }))
+}
+
 struct DecideInput<'a> {
     workspace_id: Uuid,
     session_id: Uuid,
@@ -371,6 +437,9 @@ async fn decide_in_tx(
                 request_event_id: request.request_event_id,
                 option_id: &option.option_id,
                 option_kind: &option.kind,
+                // #3118: the STORED hash of the host's preview — a v3 allow
+                // must name it; never the client's word for it.
+                preview_sha256: request.preview_sha256.as_deref(),
             },
         },
         decision.human_signature.as_ref(),
@@ -620,5 +689,13 @@ mod tests {
             Uuid::from_u128(4)
         );
         assert_eq!(momo_auth::required_agent_scope("POST", &path), None);
+        // #3118: nor is the owner's preview read.
+        let preview = format!(
+            "/v1/workspaces/{}/work-sessions/{}/permission-requests/{}",
+            Uuid::from_u128(2),
+            Uuid::from_u128(4),
+            Uuid::from_u128(6)
+        );
+        assert_eq!(momo_auth::required_agent_scope("GET", &preview), None);
     }
 }

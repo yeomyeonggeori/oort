@@ -123,10 +123,19 @@ impl ControlLoop {
         if !requires_signature(control) {
             return Ok(());
         }
+        // #3118: an allow is checked against the preview this host relayed
+        // for its request — looked up here, never read from the control.
+        let preview = match (control.kind.as_str(), control.session_id) {
+            ("permission", Some(session_id)) => control
+                .payload_str("request_event_id")
+                .and_then(|raw| Uuid::parse_str(raw).ok())
+                .and_then(|request| self.sessions.permission_preview_sha256(session_id, request)),
+            _ => None,
+        };
         trust
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .check_control(control, now_ms())
+            .check_control_with_preview(control, preview.as_deref(), now_ms())
     }
 
     pub fn sessions(&mut self) -> &mut SessionManager {
