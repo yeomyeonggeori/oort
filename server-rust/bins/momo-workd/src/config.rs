@@ -86,6 +86,45 @@ pub fn read_owned_file(path: &Path) -> Result<String, ConfigError> {
     Ok(raw)
 }
 
+/// Write `body` to `path` as this user's `0600` file: a sibling created with
+/// `O_EXCL`, synced, then renamed into place, so a reader sees the old file or
+/// the new one and never half of either. A missing folder is created `0700`
+/// (#2602 L-4); an existing one must pass [`check_parent_folder`] (#2607 N-10).
+pub fn write_private_file(path: &Path, body: &[u8]) -> Result<(), ConfigError> {
+    let io = |source: std::io::Error| ConfigError::Io {
+        path: path.display().to_string(),
+        source,
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(parent)
+            .map_err(io)?;
+    }
+    check_parent_folder(path)?;
+    let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+    let _ = std::fs::remove_file(&temporary);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&temporary)
+        .map_err(io)?;
+    file.write_all(body)
+        .and_then(|()| file.sync_all())
+        .map_err(io)?;
+    drop(file);
+    std::fs::rename(&temporary, path).map_err(io)?;
+    // The rename itself durable: the nonce ledger must survive a power loss.
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::File::open(parent)
+            .and_then(|folder| folder.sync_all())
+            .map_err(io)?;
+    }
+    Ok(())
+}
+
 /// The folder holding a file the host takes orders from: owned by this user
 /// (or root) and writable by no one else (#2607 N-10).
 pub fn check_parent_folder(path: &Path) -> Result<(), ConfigError> {
@@ -184,6 +223,12 @@ pub struct WorkdConfig {
     /// refused with `host_busy` (#2602 L-2).
     #[serde(default = "default_max_sessions")]
     pub max_sessions: usize,
+    /// ADR-0146 개정 D-10·D-11 (#3024): refuse a spawn, an input or an allow
+    /// that does not carry the owner's device signature chaining to the root
+    /// pinned on this Mac. Off by default until the server sends signatures
+    /// and R2 is switched on (E10 #3030); off, the host behaves as before.
+    #[serde(default)]
+    pub require_human_signatures: bool,
 }
 
 /// One allowlisted tool.
@@ -329,35 +374,9 @@ impl HostState {
 
     /// Written with `0600` via a sibling + rename, like the dev key file.
     pub fn save(&self, path: &Path) -> Result<(), ConfigError> {
-        let io = |source: std::io::Error| ConfigError::Io {
-            path: path.display().to_string(),
-            source,
-        };
-        if let Some(parent) = path.parent() {
-            // A new folder is this user's alone (#2602 L-4); one that already
-            // exists must be too (#2607 N-10).
-            std::fs::DirBuilder::new()
-                .recursive(true)
-                .mode(0o700)
-                .create(parent)
-                .map_err(io)?;
-        }
-        check_parent_folder(path)?;
-        let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
-        let _ = std::fs::remove_file(&temporary);
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&temporary)
-            .map_err(io)?;
-        let body = serde_json::to_vec_pretty(self).expect("HostState serialises");
-        file.write_all(&body)
-            .and_then(|()| file.write_all(b"\n"))
-            .and_then(|()| file.sync_all())
-            .map_err(io)?;
-        drop(file);
-        std::fs::rename(&temporary, path).map_err(io)
+        let mut body = serde_json::to_vec_pretty(self).expect("HostState serialises");
+        body.push(b'\n');
+        write_private_file(path, &body)
     }
 
     /// The state must describe the host this config points at.
@@ -409,6 +428,7 @@ mod tests {
         assert_eq!(config.heartbeat_interval_ms, 30_000);
         assert_eq!(config.max_sessions, 4);
         assert_eq!(config.server_base(), "https://oort.example.com");
+        assert!(!config.require_human_signatures, "R2 is off by default");
     }
 
     #[test]

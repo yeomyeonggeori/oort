@@ -150,6 +150,44 @@ pub enum Refusal {
     /// A `permission` control names an option the request did not offer
     /// with that kind, or a kind the bridge never chooses (`allow_always`).
     PermissionOptionRefused,
+    /// ADR-0146 D-10: R2 is on and a spawn, an input or an allow arrived
+    /// without a device signature.
+    DeviceSignatureRequired,
+    /// The device signature does not verify over the bytes the host rebuilt
+    /// from the control it would act on, or its envelope is malformed or
+    /// names another workspace, member, host or session.
+    DeviceSignatureInvalid,
+    /// The signing key is neither the pinned root nor endorsed by it (D-6).
+    DeviceKeyNotEndorsed,
+    /// The signing key was revoked by a root-signed revocation (D-7).
+    DeviceKeyRevoked,
+    /// No root key is pinned on this host yet, so no signature can count.
+    DeviceRootNotPinned,
+    /// Outside the signed time window (D-9: ±5 min skew, ≤10 min lifetime).
+    DeviceSignatureExpired,
+    /// The nonce was already consumed on this host (D-9), also across restarts.
+    DeviceNonceReplayed,
+    /// The host's trust state could not be read or written; refused closed.
+    DeviceTrustUnavailable,
+}
+
+impl Refusal {
+    /// A refusal about who may ask, not about what was asked: nothing the
+    /// control names (such as a preallocated session) is touched.
+    pub fn is_authorization(self) -> bool {
+        matches!(
+            self,
+            Self::RequesterNotOwner
+                | Self::DeviceSignatureRequired
+                | Self::DeviceSignatureInvalid
+                | Self::DeviceKeyNotEndorsed
+                | Self::DeviceKeyRevoked
+                | Self::DeviceRootNotPinned
+                | Self::DeviceSignatureExpired
+                | Self::DeviceNonceReplayed
+                | Self::DeviceTrustUnavailable
+        )
+    }
 }
 
 impl Refusal {
@@ -175,6 +213,14 @@ impl Refusal {
             Self::InputQueueFull => "input_queue_full",
             Self::PermissionRequestUnknown => "permission_request_unknown",
             Self::PermissionOptionRefused => "permission_option_refused",
+            Self::DeviceSignatureRequired => "device_signature_required",
+            Self::DeviceSignatureInvalid => "device_signature_invalid",
+            Self::DeviceKeyNotEndorsed => "device_key_not_endorsed",
+            Self::DeviceKeyRevoked => "device_key_revoked",
+            Self::DeviceRootNotPinned => "device_root_not_pinned",
+            Self::DeviceSignatureExpired => "device_signature_expired",
+            Self::DeviceNonceReplayed => "device_nonce_replayed",
+            Self::DeviceTrustUnavailable => "device_trust_unavailable",
         }
     }
 }

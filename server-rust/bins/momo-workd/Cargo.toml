@@ -64,3 +64,6 @@ momo-server = { path = "../momo-server" }
 momo-db = { path = "../../crates/momo-db" }
 momo-messaging = { path = "../../crates/momo-messaging" }
 axum.workspace = true
+# R2 invariants (#3024): the tests play the owner's Secure Enclave devices with
+# fixed P-256 keys. Already a workspace dependency via momo-wire.
+p256.workspace = true

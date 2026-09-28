@@ -1791,6 +1791,7 @@ dependencies = [
  "momo-messaging",
  "momo-server",
  "momo-wire",
+ "p256",
  "reqwest",
  "security-framework",
  "serde",
