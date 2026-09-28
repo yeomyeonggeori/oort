@@ -1,6 +1,11 @@
 import { createPortal } from "react-dom";
+import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { FirstAgentStage } from "./FirstAgentStage";
-import { readAiConnectReentry } from "./aiConnectReentry";
+import {
+  aiConnectReturnHash,
+  leaveAiConnectReentry,
+  readAiConnectReentry,
+} from "./aiConnectReentry";
 
 // =============================================================================
 // AI 연결 재진입 라우트 (#2870 → #2893).
@@ -17,6 +22,10 @@ import { readAiConnectReentry } from "./aiConnectReentry";
 
 export function AiConnectReentryRoute() {
   const from = readAiConnectReentry(window.location.hash)?.from ?? "agents";
+  // Esc 는 이 전면 층의 것이다(#2909 review M3): 닫기와 같다. 층이 없으면 Esc 가
+  // 밑의 설정 라우트까지 떨어져 설정이 닫혔다. 층 안의 로그인 모달이 열려 있으면
+  // Radix 가 먼저 받는다(escapeLayer 머리말). 초점은 설정 쪽이 「구독 추가」로 돌린다.
+  useEscapeLayer(true, () => leaveAiConnectReentry(aiConnectReturnHash(from)));
   return createPortal(
     <div
       className="layer-overlay-surface fixed inset-0 overflow-y-auto bg-pane"

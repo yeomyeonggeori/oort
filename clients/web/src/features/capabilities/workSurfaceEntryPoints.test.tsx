@@ -22,6 +22,7 @@ import { Sidebar } from "@/features/sidebar/Sidebar";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { SettingsRoute } from "@/features/settings/SettingsRoute";
 import { ChatShell } from "@/features/chat/ChatShell";
+import { WORK_HOST_OFFLINE_GRACE_MS } from "./useSurfaceProvided";
 import {
   dockSnapshot,
   resetDockStateForTest,
@@ -713,6 +714,67 @@ describe("작업 표면 런타임 판정: 온라인 호스트 (#2780)", () => {
       host.querySelectorAll('[data-testid="open-terminal-dock"]').length
     ).toBe(1);
     expect(entryCounts()["nav-work-console"]).toBe(0);
+  });
+});
+
+describe("열린 관전 도크는 호스트가 잠깐 오프라인이 돼도 바로 내려가지 않는다 (#2893)", () => {
+  const GRACE = WORK_HOST_OFFLINE_GRACE_MS;
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  const advance = (ms: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+
+  async function goOffline(): Promise<void> {
+    hostList.hosts = [onlineHost({ online: false })];
+    await act(async () => {
+      const done = mountedClient?.refetchQueries({ queryKey: ["work-hosts", WS] });
+      await vi.advanceTimersByTimeAsync(1);
+      await done;
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(
+      mountedClient?.getQueryData<WorkHost[]>(["work-hosts", WS])?.[0]?.online
+    ).toBe(false);
+  }
+
+  async function mountWithHost(): Promise<HTMLElement> {
+    shell.desktop = false;
+    workFlag.provided = false;
+    hostList.hosts = [onlineHost()];
+    const host = await mount();
+    await hostsSettled();
+    await vi.waitFor(() => expect(entryCounts()["open-terminal-dock"]).toBe(1));
+    return host;
+  }
+
+  it("열어 둔 도크와 그 버튼은 유예 동안 남고, 지나면 함께 접힌다", async () => {
+    const host = await mountWithHost();
+    act(() =>
+      host.querySelector<HTMLButtonElement>('[data-testid="open-terminal-dock"]')?.click()
+    );
+    expect(host.querySelector('[data-testid="observer-dock-stub"]')).not.toBeNull();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    await goOffline();
+    await advance(GRACE - 1_000);
+    expect(host.querySelector('[data-testid="observer-dock-stub"]')).not.toBeNull();
+    expect(entryCounts()["open-terminal-dock"]).toBe(1);
+    // 닫힌 진입점(사이드바)은 유예하지 않는다: 누른 뒤 빈 화면을 만나지 않게.
+    expect(entryCounts()["nav-work-console"]).toBe(0);
+
+    await advance(2_000);
+    expect(host.querySelector('[data-testid="observer-dock-stub"]')).toBeNull();
+    expect(entryCounts()["open-terminal-dock"]).toBe(0);
+  });
+
+  it("도크가 닫혀 있으면 버튼은 유예 없이 바로 접힌다", async () => {
+    await mountWithHost();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await goOffline();
+    expect(entryCounts()["open-terminal-dock"]).toBe(0);
   });
 });
 
