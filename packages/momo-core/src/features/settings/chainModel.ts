@@ -451,13 +451,18 @@ export function draftErrors(
  */
 export function draftBlockedHint(
   rows: readonly ChainDraftRow[],
-  errors: ReadonlyMap<string, DraftRowError>
+  errors: ReadonlyMap<string, DraftRowError>,
+  offline = false
 ): string | null {
   if (errors.size === 0) return null;
   const index = rows.findIndex((row) => errors.has(row.key));
   const error = index < 0 ? undefined : errors.get(rows[index].key);
   if (error === undefined) return null;
-  const first = `${hopOrdinal(index + 1)} provider ${error.next} 저장할 수 있어요.`;
+  // Offline, fixing the row is not enough: the save button stays dimmed until the
+  // rail is back, so the sentence says both conditions (#3064 design-review M1).
+  const first = offline
+    ? `${hopOrdinal(index + 1)} provider ${error.next} 연결이 돌아온 뒤에 저장할 수 있어요. 지금은 서버에 연결되어 있지 않아요.`
+    : `${hopOrdinal(index + 1)} provider ${error.next} 저장할 수 있어요.`;
   if (errors.size === 1) return first;
   return `${first} 채워야 할 항목은 모두 ${errors.size}개예요.`;
 }

@@ -548,7 +548,7 @@ export function AiLinkChain({
   // 막아야 한다). 갈라낼 것이 없고, 문법만 옮긴다.
   const addLocked = full || busy || readOnly;
   const canSave = dirty && errors.size === 0 && !offline && !readOnly;
-  const blocked = draftBlockedHint(draft, errors);
+  const blocked = draftBlockedHint(draft, errors, offline);
 
   /**
    * 한 잠금에 한 문장 (#1542 규율). 순서는 오래 가는 사실부터다: 읽을 수 없는

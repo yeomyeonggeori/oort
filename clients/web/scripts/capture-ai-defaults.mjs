@@ -328,7 +328,12 @@ const SCENES = [
       await moveHopOrigin(page);
       await page.context().setOffline(true);
       await page.getByTestId("ai-offline-banner").waitFor({ state: "visible" });
-      await page.getByTestId("chain-save").scrollIntoViewIfNeeded();
+      // #3064 M1: 흐린 저장 버튼 곁에서 「입력하면 저장할 수 있어요」를 약속하지 않는다.
+      const blocked = await page.getByTestId("chain-blocked").textContent();
+      if (!blocked?.includes("연결이 돌아온 뒤에")) {
+        throw new Error(`오프라인 차단 문장이 저장을 약속한다: ${blocked}`);
+      }
+      await page.getByTestId("chain-blocked").scrollIntoViewIfNeeded();
     },
   },
   {

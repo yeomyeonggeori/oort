@@ -335,6 +335,16 @@ describe("draft validation mirrors the server", () => {
     );
   });
 
+  // #3064 design-review M1: offline, the blocked line said 「…입력하면 저장할 수
+  // 있어요」 under a dimmed save button — a promise the rail cannot keep.
+  it("does not promise a save while offline", () => {
+    const hint = draftBlockedHint([NEW_ROW], draftErrors([NEW_ROW]), true);
+    expect(hint).toBe(
+      "2차 provider 주소를 입력하면 연결이 돌아온 뒤에 저장할 수 있어요. 지금은 서버에 연결되어 있지 않아요."
+    );
+    expect(hint).not.toContain("입력하면 저장할 수 있어요");
+  });
+
   it("says nothing at all when the draft is savable", () => {
     const draft = draftFromChain(CHAIN);
     expect(draftBlockedHint(draft, draftErrors(draft))).toBeNull();

@@ -605,6 +605,8 @@ const SETTINGS_NAV_RESTING_TOP = 0;
  *  본문이 두 스크롤 판으로 포개져 본문 글이 목록 아래로 잘려 들어가 「메뉴가 본문을
  *  덮는다」로 읽혔다. 한 줄 = 탭 높이 44 + 위아래 p-2 16 + 아래 선 1. */
 const SETTINGS_NAV_PHONE_ROW = 61;
+/** 고른 섹션을 들일 때 창 끝에서 남기는 이웃 한 칸(`scroll-padding-inline`). */
+const SETTINGS_NAV_PHONE_PEEK = 44;
 
 const SHELL_METRICS = `(() => {
   const doc = document.scrollingElement || document.documentElement;
@@ -1370,6 +1372,17 @@ async function measureSettingsSurface(browser) {
       tops,
       scrollsInline: nav.scrollWidth > nav.clientWidth,
       scrollsBlock: nav.scrollHeight > nav.clientHeight,
+      // 「더 있다」 단서(#3064 H1): 줄 끝 24(마스크가 흐리는 자리)에 걸쳐
+      // 흐려지며 사라지는 섹션이 있다. 섹션 사이 틈(4·8)이 24보다 좁으므로 줄이
+      // 넘치는 한 늘 성립하고, 마스크가 빠지면 아래 mask 단정이 떨어진다.
+      peek: items
+        .map((el) => el.getBoundingClientRect())
+        .filter((r) => r.right > nr.right - 24 && r.left < nr.right - 2).length,
+      edge: items
+        .map((el) => el.getBoundingClientRect())
+        .filter((r) => r.right > nr.right - 120 && r.left < nr.right + 120)
+        .map((r) => [Math.round(r.left), Math.round(r.right)]),
+      mask: getComputedStyle(nav).maskImage || getComputedStyle(nav).webkitMaskImage || "",
       bodyTop: Math.round(br.top),
       bodyHeight: Math.round(br.height),
       gap: Math.round(br.top - nr.bottom),
@@ -1384,9 +1397,33 @@ async function measureSettingsSurface(browser) {
       row.tops.length === 1 &&
       row.scrollsInline === true &&
       row.scrollsBlock === false &&
+      row.peek >= 1 &&
+      row.mask.startsWith("linear-gradient") &&
       row.gap === 0 &&
       row.bodyHeight === 844 - SETTINGS_NAV_PHONE_ROW,
     JSON.stringify(row)
+  );
+  // 가운데 섹션: 창 끝에 붙지 않고 이웃 한 칸(44)을 남긴다(#3064 H1). 줄 끝의
+  // 섹션은 더 스크롤할 곳이 없으니 이 단정의 대상이 아니다.
+  await mobile.getByTestId("settings-nav-ai").click();
+  const middle = await mobile.evaluate(`(() => {
+    const nav = document.querySelector('[data-testid="settings-nav"]');
+    const el = document.querySelector('[data-testid="settings-nav-ai"]');
+    if (!nav || !el) return { missing: true };
+    const nr = nav.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    return {
+      atEnd: Math.ceil(nav.scrollLeft + nav.clientWidth) >= nav.scrollWidth,
+      leftRoom: Math.round(r.left - nr.left),
+      rightRoom: Math.round(nr.right - r.right),
+    };
+  })()`);
+  check(
+    "390px에서 고른 가운데 섹션 곁에 이웃 한 칸이 보인다",
+    middle.missing !== true &&
+      middle.atEnd === false &&
+      Math.min(middle.leftRoom, middle.rightRoom) >= SETTINGS_NAV_PHONE_PEEK - 1,
+    JSON.stringify(middle)
   );
   await mobile.getByTestId("settings-nav-events").click();
   const scrolled = await mobile.evaluate(`(() => {

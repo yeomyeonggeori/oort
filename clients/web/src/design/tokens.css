@@ -2361,9 +2361,21 @@
  * 된다. 목록은 화면의 36%를 들고, 본문은 536에 갇혀 스크롤할 때마다 글줄이
  * 목록의 아래 선에 반쯤 잘려 들어갔다. z-index도 겹침도 없었지만 사람 눈에는
  * 「메뉴가 본문을 덮는다」로 읽혔다(#3010·#3042 캡처). 한 줄이면 목록은 61
- * (탭 44 + p-2 16 + 선 1)이고 본문이 나머지를 받는다. 섹션은 가로로 스크롤하고,
+ * (아래 산술)이고 본문이 나머지를 받는다. 섹션은 가로로 스크롤하고,
  * 고른 섹션은 SettingsRoute가 `scrollIntoView({ inline: "nearest" })`로 줄 안에
- * 들인다. 그룹 라벨(개인·워크스페이스·연결)은 줄 안의 구분 글자로 남는다. */
+ * 들인다. 그룹 라벨(개인·워크스페이스·연결)은 줄 안의 구분 글자로 남는다.
+ *
+ * 「더 있다」는 단서(#3064 design-review H1): 세로 캡이 다섯째 행을 반쯤 보여
+ * 준 것과 같은 일을 가로에서 둘이 한다.
+ * - 양 끝 24(본문 p-6과 같은 여백)를 흐리는 마스크. 줄 가운데의 섹션이 창
+ *   끝에서 잘려 사라지며 이어진다는 것을 말한다. 끝까지 밀면 흐린 자리에는 빈
+ *   여백만 남아 첫·끝 섹션은 온전히 보인다. 항상 보이는 스크롤 막대
+ *   (`scrollbar-visible`)는 쓰지 않는다: 폰 WebKit은 ::-webkit-scrollbar 를
+ *   그리지 않고, 헤드리스 Chromium도 그리지 않아 잴 수 없었다(실측 0px).
+ *   마스크는 칠이 아니라 가림이라 색 토큰이 없다.
+ * - `scroll-padding-inline` = 탭 하나(44): 고른 섹션을 들일 때 창 끝에 붙이지
+ *   않고 이웃 한 칸 자리를 남긴다.
+ * 줄 높이는 탭 44 + p-2 위아래 16 + 선 1 = 61이다. */
 @utility settings-nav {
   inline-size: var(--w-settings-nav);
   flex-shrink: 0;
@@ -2377,6 +2389,15 @@
     inline-size: auto;
     overflow-x: auto;
     overflow-y: hidden;
+    padding-inline: var(--spacing-6);
+    scroll-padding-inline: var(--tap-target);
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      black var(--spacing-6),
+      black calc(100% - var(--spacing-6)),
+      transparent
+    );
     border-inline-end: 0;
     border-block-end: 1px solid var(--line);
   }
