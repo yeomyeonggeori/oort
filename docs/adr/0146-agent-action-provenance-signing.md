@@ -2,7 +2,7 @@
 
 - Status: **Accepted** (2026-07-31 성재 “권고대로 진행” — 범위=3표면 + 세부 3결정 확정. 기안 Fable)
 - **확정된 세부 3결정(2026-07-31)**: ①서명 페이로드 = 정규화 content+author, 서버 부여 seq는 2단계(행위자가 content 서명 → 서버가 seq 부여 후 envelope) ②행위자 단계 = **에이전트·workd 먼저**(키 보유·즉시), 사람은 device 키 결속 후 fast-follow ③UX = **초기 감사 로그·API 전용**(UI 뱃지 없음 — 부분 서명기의 “무서명=미검증” 오독 방지), 사람 서명까지 차면 뱃지 도입.
-- 개정: **2026-09-28 Accepted** — 사람 기기 키 서명(R2). 결재 인용: 성재 2026-09-28 「전부 권장대로」(R2 기기 키 서명 결재 Q1~Q11·Q5-b 권장안 전부, 결재 페이지 https://claude.ai/artifact/392wQKGL3SzwfM2zNjhSpZ). 기안 Opus 5.5 worker(#3020). 근거 브리프 `claudedocs/r2-device-signing/brief.md`는 gitignore 대상이라 로컬에만 있다. 이 ADR의 [개정 절](#개정-2026-09-28--사람-기기-키-서명-r2)이 필요한 사실과 근거(file:line)를 그대로 옮겨 담는다. 2026-07-31 본문은 역사 기록으로 두고, 미해결 절만 고쳤다.
+- 개정: **2026-09-28 Accepted** — 사람 기기 키 서명(R2). 결재 인용: 성재 2026-09-28 「전부 권장대로」(R2 기기 키 서명 결재 Q1~Q11·Q5-b 권장안 전부, 결재 페이지 https://claude.ai/artifact/392wQKGL3SzwfM2zNjhSpZ). 기안 Opus 5.5 worker(#3020). 근거 브리프 `claudedocs/r2-device-signing/brief.md`는 gitignore 대상이라 로컬에만 있다. 아래 「개정 2026-09-28」 절이 필요한 사실과 근거(file:line)를 그대로 옮겨 담는다. 2026-07-31 본문은 역사 기록으로 두고, 미해결 절만 고쳤다.
 - 관련: **ADR-0145**(Rust/Axum 재작성 — 이 서명은 그 위에 얹힌다), ADR-0004(자격증명 비유입), ADR-0101(에이전트 신원), ADR-0139/0140(workd — 이미 Ed25519 서명 보유), `docs/architecture/invariants-in-rust.md`(D2 — 이 서명이 불변식을 안 건드림을 교차검증)
 - 발단: 서버 스택 재검토에서 "oort가 buzz에서 취할 만한 한 가지 = 에이전트 행동의 암호학적 provenance"로 식별 → 성재가 B안에 포함 지시 + **범위를 "상태 전이까지 넓게"로 결정**.
 
@@ -111,7 +111,7 @@ buzz(Nostr)의 최대 강점은 **모든 행동이 서명된 이벤트 = 위·�
 
 ### D-5. 페이로드 `momo.human.control.v1`
 
-`momo-wire` 관례(스키마 문자열 + 줄바꿈, F7)를 따른다. 스키마 문자열이 `sshsig` 네임스페이스처럼 용도를 분리한다[S]. 서명 대상 바이트는 아래 12줄을 `\n`으로 이은 UTF-8이다.
+`momo-wire` 관례(스키마 문자열 + 줄바꿈, F7)를 따른다. 스키마 문자열이 `sshsig` 네임스페이스처럼 용도를 분리한다[S]. 서명 대상 바이트는 아래 13줄(스키마 문자열 + 필드 12개)을 `\n`으로 이은 UTF-8이다.
 
 ```
 momo.human.control.v1
@@ -214,7 +214,7 @@ momo.human.control.v1
 
 - **서버(E3 #3023):** 쓰기 chokepoint `verify_human_control`에서 검증한다. 거부하면 이름 붙은 오류 `device_signature_required` · `device_signature_invalid` · `device_key_revoked`를 돌려준다. 성공하면 컨트롤 행과 `action_signature`(`record_provenance`, 설계 4의 사람 경로)를 같은 tx에 쓴다.
 - **workd(E4 #3024):** 컨트롤에 실려 온 서명 원문과 페이로드를 다시 만들어 검증하고, 키가 자기가 고정한 뿌리까지 이어지는지 보고, nonce를 소비한다. 서버가 서명 없는·위조 키 컨트롤을 넣어도 host가 거부한다. 이것이 0188 §6 「host는 서명 없는 사람 컨트롤을 거부한다」를 채운다.
-- 그러려면 `WorkControl`(F15)에 서명 필드가 늘고 `work_control_payload_ck`(029→092)를 한 번 더 바꾼다(migration 094, E3).
+- 그러려면 `WorkControl`(F15)에 서명 필드가 늘고 `work_control_payload_ck`(029→092)를 한 번 더 바꾼다(migration 095, E3).
 
 ### D-11. 착수와 켜기 — 구현은 지금, 사람 지시는 플래그로 닫아 둔다
 
@@ -235,9 +235,9 @@ momo.human.control.v1
 
 ### DB 계약 (새 migration만)
 
-- **093**(E2 #3022): `member_device_key`(workspace, member, session_id, alg, public_key, platform, label, endorsed_by_key_id, endorsement_sig, created_at, revoked_at). RLS FORCE와 `ws_isolation` 정책 대상에 넣는다. `action_signature` CHECK 완화와 `alg` 컬럼(기존 행 `ed25519`).
-- **094**(E3 #3023): `human_control_nonce`(048 모양, RLS FORCE) + `work_control` 서명 컬럼·`payload_ck` 변경.
-- `schema_v0.sql`은 건드리지 않는다. 마지막 migration은 092이고, 093·094 번호는 편성 시점 기준이다(머지 순서에 따라 다시 매길 수 있다).
+- **094**(E2 #3022): `member_device_key`(workspace, member, session_id, alg, public_key, platform, label, endorsed_by_key_id, endorsement_sig, created_at, revoked_at). RLS FORCE와 `ws_isolation` 정책 대상에 넣는다. `action_signature` CHECK 완화와 `alg` 컬럼(기존 행 `ed25519`).
+- **095**(E3 #3023): `human_control_nonce`(048 모양, RLS FORCE) + `work_control` 서명 컬럼·`payload_ck` 변경.
+- `schema_v0.sql`은 건드리지 않는다. 093은 #3009(`provider_default_ai`)가 먼저 쓴다. 094·095 번호는 편성 시점 기준이다(머지 순서에 따라 다시 매길 수 있다).
 
 ### 이슈 시리즈
 
@@ -245,8 +245,8 @@ momo.human.control.v1
 |---|---|---|---|
 | E0 | #3020 | planner(docs) | 이 개정 + ADR-0188 §4·§8.6·ADR-0192 D3 역방향 줄 |
 | E1 | #3021 | 엔진 | `momo-wire` 사람 서명 바이트 3종 + P-256 검증 + 3언어 공유 벡터 |
-| E2 | #3022 | 엔진 | migration 093 기기 키 등록·폐기 + 세션 계보 연쇄 폐기 + refresh 재사용 계보 폐기(R1) + host 등록 뿌리 서명 |
-| E3 | #3023 | 엔진 | migration 094 `human_control_nonce` + `verify_human_control` + `record_provenance` 사람 경로 |
+| E2 | #3022 | 엔진 | migration 094 기기 키 등록·폐기 + 세션 계보 연쇄 폐기 + refresh 재사용 계보 폐기(R1) + host 등록 뿌리 서명 |
+| E3 | #3023 | 엔진 | migration 095 `human_control_nonce` + `verify_human_control` + `record_provenance` 사람 경로 |
 | E4 | #3024 | 엔진 | workd 뿌리 고정·승인 사슬·컨트롤 서명 재검증·nonce 영속·폐기서 적용 |
 | E5 | #3025 | 데스크탑 | Tauri SE 키·Touch ID(재사용 ≤300초)·workd 뿌리 전달·폰 지시 기기 승인 UI |
 | E6 | #3026 | 폰 | Expo 네이티브 모듈 SE P-256·`biometryCurrentSet`·앱 전용 키체인 그룹, QR 연결 때 키 등록 |
