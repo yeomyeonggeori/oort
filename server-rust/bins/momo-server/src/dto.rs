@@ -1960,6 +1960,23 @@ pub struct UpdateNotificationRulesRequest {
     pub dnd_until_ms: OptionalPatch<i64>,
 }
 
+/// `PATCH …/notification-rules` request (#3012). Every field is optional and an
+/// omitted one keeps what is stored when the write lands, so the web panel and
+/// the phone can each change one switch without erasing the other's. At least
+/// one field is required; unknown fields are refused, as on PUT.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PatchNotificationRulesRequest {
+    #[serde(default)]
+    pub dnd: Option<bool>,
+    #[serde(default)]
+    pub mention_overrides_mute: Option<bool>,
+    /// Omitted = keep a still-running expiry, `null` = no expiry, value = until
+    /// then (must be in the future). Ignored when the resulting `dnd` is false.
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub dnd_until_ms: OptionalPatch<i64>,
+}
+
 /// `GET/PUT …/notification-rules` response (ADR-0124 증보 1) — the effective rule,
 /// re-read by the caller, not an echo. Absence of a stored row answers as both
 /// `false`, the pre-증보 behaviour.

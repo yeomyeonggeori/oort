@@ -2679,6 +2679,55 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+    patch:
+      tags: [channels]
+      operationId: patchNotificationRules
+      summary: Change only the named fields of the caller's notification rules.
+      description: >
+        #3012 (ADR-0124 증보 3). Every field is optional; an omitted field keeps
+        what is stored when the write lands — merged under the row lock, not
+        from the client's last read — so the web settings panel and the phone
+        can each change their own switch without erasing the other's (two PUTs
+        of stale snapshots would). `dndUntilMs` has the PUT meaning and is
+        ignored when the resulting `dnd` is false. An empty body is a 400. A
+        patch that changes the pause detaches it from declared DND, as a PUT
+        does; a patch that leaves the pause alone keeps the link. PUT remains
+        for older clients.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchNotificationRulesRequest"
+      responses:
+        "200":
+          description: The stored notification rules after the patch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationRulesResponse"
+        "400":
+          description: >-
+            Empty body, unknown field, or a `dndUntilMs` not in the future.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active human membership required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /v1/workspaces/{workspaceId}/members/me/sidebar-prefs:
     get:
       tags: [sidebar]
@@ -10407,6 +10456,19 @@ components:
           type: string
           nullable: true
           pattern: "^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,63}$"
+    PatchNotificationRulesRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: "#3012. Every field optional; omitted = keep what is stored."
+      properties:
+        dnd: {type: boolean, nullable: true}
+        mentionOverridesMute: {type: boolean, nullable: true}
+        dndUntilMs:
+          type: integer
+          nullable: true
+          format: int64
+          description: Omitted keeps a running expiry, null is open-ended, a value must be in the future.
     UpdateNotificationRulesRequest:
       type: object
       required: [dnd, mentionOverridesMute]

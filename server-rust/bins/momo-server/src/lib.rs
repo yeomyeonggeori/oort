@@ -811,7 +811,9 @@ pub fn build_app(state: AppState) -> Router {
         // one. The per-CHANNEL sibling is `channels/{ch}/notification-pref` above.
         .route(
             "/v1/workspaces/{ws}/notification-rules",
-            get(routes::notification_rules::get).put(routes::notification_rules::put),
+            get(routes::notification_rules::get)
+                .put(routes::notification_rules::put)
+                .patch(routes::notification_rules::patch),
         )
         // ADR-0175 / #1888 — personal message reminders. Human-only, owner
         // scoped, no outbox fan-out (v1 is a client poll).
