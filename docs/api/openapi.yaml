@@ -7778,7 +7778,13 @@ paths:
         Same operator boundary as the read. Replaces positions >= 1 in one
         transaction; position 0 is rejected by name. Omitting an entry's bearer
         keeps the ciphertext already stored at that position, so a hop can be
-        reordered or parked without re-typing a write-only secret.
+        parked, switched mode, or moved to another path on the same origin
+        without re-typing a write-only secret. A kept key is bound to its
+        origin (scheme, host and port, default port written out): moving a hop
+        to another origin without a new bearer is a 409 (#3040, ADR-0147
+        증보 2026-09-28), so one operator cannot point another operator's key
+        at a host of their choosing. A successful replace audits
+        `origin_changed` with redacted endpoint labels only.
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -7796,6 +7802,16 @@ paths:
             Unknown body key, position 0 or a duplicate position, more than
             eight hops, an unusable baseUrl, an unknown mode, an empty bearer,
             or a new position submitted without one.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: >
+            `error.code: key_required_for_new_origin` — an entry omitted its
+            bearer while its baseUrl names a different origin than the hop
+            stored at that position. Nothing is written; resubmit the entry with
+            the key for the new provider. The message carries the position and
+            redacted endpoint labels, never a key.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -8312,7 +8328,9 @@ components:
                 member-scoped host), `workspace_host_admin_required` (a
                 workspace-scoped host registered by a member who is not a
                 workspace owner/admin), `app_host_member_scope_required` (an
-                `app` host registered with a scope other than `member`).
+                `app` host registered with a scope other than `member`),
+                `key_required_for_new_origin` (a provider chain hop moved to
+                another origin without a new key).
 
     # ---- Memory Plane (ADR-0129 / MOMO-526) ---------------------------------
     MemoryScope:

@@ -318,6 +318,39 @@ pub fn redacted_endpoint_label(raw: &str) -> String {
     }
 }
 
+/// The origin a stored key is bound to: `scheme://host:port`, with the
+/// scheme's default port written out (`https` → 443, `http` → 80) so
+/// `https://a.example` and `https://a.example:443` are one origin. `None` when
+/// the URL does not parse — callers treat that as "a different origin".
+///
+/// #3040 (ADR-0147 증보 2026-09-28 「키는 origin에 묶인다」): a key the chain
+/// PUT keeps without re-entry may only keep going to the origin it was typed
+/// for. Path is deliberately not part of it — a path change stays on the same
+/// server, which is the trust boundary a provider key is issued against.
+pub fn url_origin(raw: &str) -> Option<String> {
+    let parts = split_url(raw)?;
+    let port = parts.port.or(match parts.scheme.as_str() {
+        "https" => Some(443),
+        "http" => Some(80),
+        _ => None,
+    })?;
+    let host = if parts.ipv6_literal {
+        format!("[{}]", parts.host)
+    } else {
+        parts.host
+    };
+    Some(format!("{}://{host}:{port}", parts.scheme))
+}
+
+/// Whether a key stored for `stored` may be kept when the hop now points at
+/// `requested` — true only when both parse and name the same [`url_origin`].
+pub fn same_origin(stored: &str, requested: &str) -> bool {
+    match (url_origin(stored), url_origin(requested)) {
+        (Some(stored), Some(requested)) => stored == requested,
+        _ => false,
+    }
+}
+
 /// Rejection reasons of the write-side base-URL gate, each carrying the Swift
 /// message verbatim (`AgentRoutes.validatedBaseURL` :199-247).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -517,6 +550,52 @@ fn split_url(raw: &str) -> Option<UrlParts> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #3040: the origin a kept key is bound to. Host, scheme and port each
+    /// make a new origin; a path does not; a default port is the same origin
+    /// whether written or not.
+    #[test]
+    fn a_key_is_bound_to_scheme_host_and_port_not_path() {
+        assert_eq!(
+            url_origin("https://api.example.com/v1").as_deref(),
+            Some("https://api.example.com:443")
+        );
+        assert_eq!(
+            url_origin("http://127.0.0.1:8080/x").as_deref(),
+            Some("http://127.0.0.1:8080")
+        );
+        assert_eq!(
+            url_origin("https://[::1]:8443/v1").as_deref(),
+            Some("https://[::1]:8443")
+        );
+        assert_eq!(url_origin("not a url"), None);
+
+        let stored = "https://api.example.com/v1";
+        assert!(same_origin(stored, "https://api.example.com/v2/other"));
+        assert!(same_origin(stored, "https://api.example.com:443/v1"));
+        assert!(same_origin(stored, "HTTPS://API.EXAMPLE.COM/v1"));
+        for moved in [
+            "https://evil.example.com/v1",
+            "https://api.example.com.evil.test/v1",
+            "https://xapi.example.com/v1",
+            "https://api%2eexample.com/v1",
+            "https://api.example.com./v1",
+            "http://api.example.com/v1",
+            "https://api.example.com:8443/v1",
+            "https://[::1]:443/v1",
+            "garbage",
+        ] {
+            assert!(!same_origin(stored, moved), "{moved}");
+        }
+        assert!(
+            !same_origin("garbage", "garbage"),
+            "unparsable is never same"
+        );
+        assert!(!same_origin(
+            "http://127.0.0.1:18080/a",
+            "http://127.0.0.1:18081/a"
+        ));
+    }
 
     #[test]
     fn an_unknown_mode_falls_back_to_the_mock_never_to_the_external_boundary() {
