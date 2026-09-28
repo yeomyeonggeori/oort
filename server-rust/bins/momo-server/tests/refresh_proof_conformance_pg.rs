@@ -19,6 +19,8 @@
 //! | `a_browser_session_is_unchanged_under_require` | require a proof of an unbound lineage |
 //! | `a_proof_never_resurrects_an_ended_lineage` | recover from a lineage with no live refresh row |
 //! | `a_suspended_member_is_not_recovered` | drop the member check in `recover_lineage` |
+//! | `a_sign_out_racing_a_recovery_is_not_undone` | ignore an empty tail spend in `recover_lineage` (SABOTAGE recover-no-tail-gate; review H1) |
+//! | `a_key_binds_only_to_a_fresh_sign_ins_first_token` | drop `lineage_is_bindable` (review M1) |
 //! | `migration_096_reapplies_as_a_noop_and_keeps_rls_forced` | a non-idempotent statement in 096, or a missing FORCE |
 //!
 //! `#[ignore]` — needs a real Postgres plus the runtime roles:
@@ -820,6 +822,120 @@ async fn a_suspended_member_is_not_recovered() {
 
     let (status, body) = w.rotate_with(&held, &key).await;
     assert_eq!(status, 403, "a suspended member is not recovered: {body}");
+}
+
+/// Review H1: a sign-out that commits while a recovery is under way wins.
+/// The test holds the lineage's tail row locked, lets the recovery read the
+/// tail and block, ends the lineage as a logout would, and commits: the
+/// recovery must find its tail spent and mint nothing.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_sign_out_racing_a_recovery_is_not_undone() {
+    let _lock = test_lock().await;
+    let w = world_with(mode(RefreshProofMode::Require)).await;
+    let key = RefreshKey::new("desktop");
+    let held = w.bound(w.login().await, &key).await;
+    let lineage = w.session_id(&held.refresh).await;
+    let (status, body) = w.rotate_with(&held, &key).await;
+    assert_eq!(status, 200);
+    let lost = session_from(&body);
+    w.lose_long_ago(&held, &lost).await;
+
+    let mut signout = w.su.begin().await.expect("begin");
+    sqlx::query(
+        "SELECT id FROM token WHERE session_id = $1 AND revoked_at IS NULL ORDER BY id FOR UPDATE",
+    )
+    .bind(lineage)
+    .fetch_all(&mut *signout)
+    .await
+    .expect("hold the lineage's live rows");
+
+    let proof = w.proof(&key, &held.refresh, now_ms());
+    let url = format!("{}/v1/auth/refresh", w.base);
+    let refresh = held.refresh.clone();
+    let http = w.http.clone();
+    let recovery = tokio::spawn(async move {
+        let response = http
+            .post(url)
+            .json(&json!({ "refreshToken": refresh, "deviceProof": proof }))
+            .send()
+            .await
+            .expect("recovery");
+        let status = response.status().as_u16();
+        (
+            status,
+            response.json::<Value>().await.unwrap_or(Value::Null),
+        )
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    sqlx::query("UPDATE token SET revoked_at = now() WHERE session_id = $1 AND revoked_at IS NULL")
+        .bind(lineage)
+        .execute(&mut *signout)
+        .await
+        .expect("end the lineage");
+    signout.commit().await.expect("commit the sign-out");
+
+    let (status, body) = recovery.await.expect("recovery task");
+    assert_eq!(
+        status, 401,
+        "the recovery lost to the sign-out and minted nothing: {body}"
+    );
+    assert_eq!(
+        w.live_refresh_rows(lineage).await,
+        0,
+        "the ended lineage stays ended"
+    );
+}
+
+/// Review M1: first-come binding is trust-on-first-use, so it is kept to the
+/// sign-in's own first refresh token, young. A lineage that has rotated (a
+/// browser tab, an older client) or is older than the window never binds —
+/// otherwise one copied live token would let its holder bind a key and take
+/// the lineage over by "recovering" it.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_key_binds_only_to_a_fresh_sign_ins_first_token() {
+    let _lock = test_lock().await;
+    let w = world_with(mode(RefreshProofMode::Observe)).await;
+    let key = RefreshKey::new("copy");
+
+    // A lineage that already rotated once without a key.
+    let tab = w.login().await;
+    let (status, body) = w.rotate(&tab).await;
+    assert_eq!(status, 200);
+    let rotated = session_from(&body);
+    let (status, body) = w.rotate_with(&rotated, &key).await;
+    assert_eq!(
+        status, 200,
+        "observe: the refresh itself goes through: {body}"
+    );
+    assert_eq!(
+        w.bound_key(&session_from(&body).refresh).await,
+        None,
+        "a rotated lineage never binds"
+    );
+
+    // A first token older than the window.
+    let old = w.login().await;
+    sqlx::query(
+        "UPDATE token SET created_at = now() - interval '11 minutes' \
+          WHERE token_hash = digest($1::text, 'sha256')",
+    )
+    .bind(&old.refresh)
+    .execute(&w.su)
+    .await
+    .unwrap();
+    let (status, body) = w.rotate_with(&old, &key).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        w.bound_key(&session_from(&body).refresh).await,
+        None,
+        "an old sign-in never binds"
+    );
+
+    // The fresh sign-in's first token does.
+    let fresh = w.login().await;
+    w.bound(fresh, &key).await;
 }
 
 // ---------------------------------------------------------------------------

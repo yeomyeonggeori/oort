@@ -195,8 +195,12 @@ pub async fn judge_refresh_proof(
         }
         None => {
             // First proof of the lineage: it binds its own key, if it proves
-            // possession of it and the token is live.
+            // possession of it, the token is live, and the lineage is still
+            // the sign-in's own first refresh token (review M1).
             if !signature_ok || !input.may_bind {
+                return Ok(ProofVerdict::Unbound);
+            }
+            if !lineage_is_bindable(conn, input.workspace_id, session_id).await? {
                 return Ok(ProofVerdict::Unbound);
             }
             if !within_clock_skew(proof.signed_at_ms, db_now_ms(conn).await?) {
@@ -236,6 +240,40 @@ pub async fn judge_refresh_proof(
         return Ok(ProofVerdict::Replayed);
     }
     Ok(ProofVerdict::Verified { bound_now })
+}
+
+/// How long after sign-in a lineage may still bind its refresh key.
+pub const BIND_WINDOW_SECONDS: f64 = 600.0;
+
+/// A lineage binds only while it has never rotated (its one refresh row is
+/// the one sign-in or QR redeem issued) and that row is younger than
+/// [`BIND_WINDOW_SECONDS`] (#3079 review M1). First-come binding is a
+/// trust-on-first-use; without this, whoever once copied a live token of any
+/// unbound lineage — every browser tab, every older client — could bind their
+/// own key and from then on recover (take over) the lineage at will. A native
+/// client binds with the refresh right after it signs in; a session signed
+/// in before its client learned to bind stays unbound until the next sign-in.
+const BINDABLE_LINEAGE_SQL: &str = "SELECT count(*) = 1 \
+            AND bool_and(created_at > now() - make_interval(secs => $3)) \
+       FROM token \
+      WHERE workspace_id = $1 \
+        AND session_id = $2 \
+        AND kind = 'session' \
+        AND label = 'refresh'";
+
+/// See [`BINDABLE_LINEAGE_SQL`].
+pub async fn lineage_is_bindable(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar::<_, Option<bool>>(BINDABLE_LINEAGE_SQL)
+        .bind(workspace_id)
+        .bind(session_id)
+        .bind(BIND_WINDOW_SECONDS)
+        .fetch_one(&mut *conn)
+        .await
+        .map(|value| value.unwrap_or(false))
 }
 
 /// The refresh key a lineage is bound to, if any.
@@ -300,10 +338,16 @@ pub async fn consume_refresh_proof_nonce(
     nonce: Uuid,
     signed_at_ms: i64,
 ) -> Result<bool, sqlx::Error> {
-    sqlx::query("DELETE FROM refresh_proof_nonce WHERE workspace_id = $1 AND expires_at < now()")
-        .bind(workspace_id)
-        .execute(&mut *conn)
-        .await?;
+    // A second of margin: the window is judged on whole milliseconds, and a
+    // row must not be pruned by the very transaction that could still accept
+    // its proof (review N1).
+    sqlx::query(
+        "DELETE FROM refresh_proof_nonce \
+          WHERE workspace_id = $1 AND expires_at < now() - interval '1 second'",
+    )
+    .bind(workspace_id)
+    .execute(&mut *conn)
+    .await?;
     let keep_until_ms = signed_at_ms.saturating_add(MAX_CLOCK_SKEW_MS);
     let consumed: Option<Uuid> = sqlx::query_scalar(
         "INSERT INTO refresh_proof_nonce (workspace_id, nonce, session_id, expires_at) \

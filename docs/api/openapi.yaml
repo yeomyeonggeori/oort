@@ -207,8 +207,9 @@ paths:
         (phone, desktop) sends `deviceProof`, a `momo.human.refresh_proof.v1`
         statement signed by a Secure Enclave *refresh key* (P-256, no
         biometry or presence check — separate from the control device key).
-        The first proof on a live token binds that key to the sign-in lineage
-        for good; a native client should refresh once with a proof right after
+        The first proof binds that key to the sign-in lineage for good, but
+        only on the sign-in's own first refresh token and within 10 minutes of
+        signing in: a native client refreshes once with a proof right after
         signing in. Afterwards: a spent token presented with the lineage key's
         proof recovers the sign-in however long ago it was spent (a fresh pair
         in the same lineage; every other live token of it is revoked), unless

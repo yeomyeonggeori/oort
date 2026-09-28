@@ -930,6 +930,14 @@ const LIVE_LINEAGE_TAIL_SQL: &str = "SELECT id, device_label \
       ORDER BY id DESC \
       LIMIT 1";
 
+/// Revoke the live tail by id, only while it is still live.
+const SPEND_LINEAGE_TAIL_SQL: &str = "UPDATE token \
+        SET revoked_at = now() \
+      WHERE id = $1 \
+        AND revoked_at IS NULL \
+        AND (expires_at IS NULL OR expires_at > now()) \
+    RETURNING id";
+
 /// #3079: a spent token came back with a verified proof from its lineage's
 /// key — the device that holds the lineage lost a rotation response (sleep,
 /// Cmd+Q, a dead network) and holds only the spent token, however long ago it
@@ -944,7 +952,8 @@ const LIVE_LINEAGE_TAIL_SQL: &str = "SELECT id, device_label \
 /// dead: a proof recovers a sign-in, it never resurrects one.
 ///
 /// SABOTAGE(recover-no-member-check): drop the member check — the suspended
-/// member test must go RED.
+/// member test must go RED. SABOTAGE(recover-no-tail-gate): ignore an empty
+/// `SPEND_LINEAGE_TAIL_SQL` — the concurrent-recovery test must go RED.
 async fn recover_lineage(
     conn: &mut PgConnection,
     reissue: &Reissue<'_>,
@@ -989,6 +998,19 @@ async fn recover_lineage(
             }
             None => None,
         };
+    // Spend the tail atomically — the recovery's single-use gate, like
+    // `revoke_token` is a rotation's (review H1). The read above took no lock:
+    // a logout, unlink or sweep that committed since has revoked the tail,
+    // and this UPDATE then finds nothing and the lineage stays ended. Two
+    // concurrent recoveries serialize here and only one mints.
+    let spent_tail: Option<Uuid> = momo_db::sqlx::query_scalar(SPEND_LINEAGE_TAIL_SQL)
+        .bind(tail_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(DbError::from)?;
+    if spent_tail.is_none() {
+        return Ok(None);
+    }
     revoke_session_lineage_tokens(conn, workspace_id, member_id, session_id)
         .await
         .map_err(DbError::from)?;
