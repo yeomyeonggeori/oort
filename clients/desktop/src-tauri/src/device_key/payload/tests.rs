@@ -344,13 +344,95 @@ fn a_spawn_is_signed_as_v2_and_binds_tool_channel_and_the_resumed_session() {
     );
 }
 
+/// #3103 cross test, Rust half: the letter momo-wire's `DeviceRebind` printed
+/// for its own golden inputs (`device-rebind.vector.json`; the TS builder and
+/// the Swift allow-list read the same file). The bytes match, the recorded
+/// signature verifies over them, and they pass the allow-list as 7 lines.
+const REBIND_VECTOR: &str =
+    include_str!("../../../../../mobile/__tests__/fixtures/device-rebind.vector.json");
+
+fn rebind_vector() -> (Statement, String, String) {
+    let v: Value = serde_json::from_str(REBIND_VECTOR).unwrap();
+    let i = &v["inputs"];
+    let statement = Statement::Rebind {
+        signer: Signer {
+            workspace_id: uuid(&i["workspaceId"]),
+            member_id: uuid(&i["memberId"]),
+            key_id: uuid(&i["keyId"]),
+        },
+        public_key: i["publicKey"].as_str().unwrap().to_string(),
+        session_id: uuid(&i["sessionId"]),
+        signed_at_ms: i["signedAtMs"].as_i64().unwrap(),
+    };
+    (
+        statement,
+        v["payload"].as_str().unwrap().to_string(),
+        v["signature"].as_str().unwrap().to_string(),
+    )
+}
+
 #[test]
-fn only_the_three_schemas_with_their_exact_line_counts_are_signable() {
-    for case in cases_v2().into_iter().chain(
-        cases()
-            .into_iter()
-            .filter(|c| c["schema"] == DEVICE_ENDORSE_SCHEMA_V1),
-    ) {
+fn the_rebind_letter_is_momo_wires_bytes_and_its_signature_verifies() {
+    let (statement, payload, signature) = rebind_vector();
+    assert_eq!(statement.schema(), DEVICE_REBIND_SCHEMA_V1);
+    let bytes = statement.signed_bytes(0).unwrap();
+    assert_eq!(String::from_utf8(bytes.clone()).unwrap(), payload);
+    assert_eq!(payload.split('\n').count(), 7);
+    let Statement::Rebind { public_key, .. } = &statement else {
+        unreachable!()
+    };
+    let key = BASE64.decode(public_key).unwrap();
+    let raw = BASE64.decode(&signature).unwrap();
+    assert!(verify_raw(&key, &bytes, &raw));
+    // Another destination sign-in is another letter: the signature is not it.
+    let Statement::Rebind {
+        signer,
+        public_key,
+        signed_at_ms,
+        ..
+    } = statement.clone()
+    else {
+        unreachable!()
+    };
+    let elsewhere = Statement::Rebind {
+        signer,
+        public_key: public_key.clone(),
+        session_id: Uuid::from_u128(5),
+        signed_at_ms,
+    };
+    assert!(!verify_raw(&key, &elsewhere.signed_bytes(0).unwrap(), &raw));
+    // Out-of-range time and a key that is not a compressed point are refused.
+    for bad in [
+        Statement::Rebind {
+            signer,
+            public_key: public_key.clone(),
+            session_id: Uuid::from_u128(4),
+            signed_at_ms: 0,
+        },
+        Statement::Rebind {
+            signer,
+            public_key: "AAAA".into(),
+            session_id: Uuid::from_u128(4),
+            signed_at_ms,
+        },
+    ] {
+        assert!(bad.signed_bytes(0).is_err());
+    }
+}
+
+#[test]
+fn only_the_four_schemas_with_their_exact_line_counts_are_signable() {
+    let (_, rebind, _) = rebind_vector();
+    let rebind_case = serde_json::json!({ "payload": rebind });
+    for case in cases_v2()
+        .into_iter()
+        .chain(
+            cases()
+                .into_iter()
+                .filter(|c| c["schema"] == DEVICE_ENDORSE_SCHEMA_V1),
+        )
+        .chain([rebind_case])
+    {
         let payload = case["payload"].as_str().unwrap();
         assert_eq!(check_signing_payload(payload.as_bytes()), Ok(()));
         // A trailing newline or an appended line changes the count.
@@ -359,6 +441,9 @@ fn only_the_three_schemas_with_their_exact_line_counts_are_signable() {
         // A carriage return is a control character.
         assert!(check_signing_payload(payload.replacen('\n', "\r\n", 1).as_bytes()).is_err());
     }
+    // The rebind letter one line short is refused.
+    let short = rebind.rsplit_once('\n').unwrap().0.to_string();
+    assert!(check_signing_payload(short.as_bytes()).is_err());
     for foreign in [
         "momo.human.control.v2\na",
         "momo.human.control.v3\na\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl",
@@ -649,13 +734,16 @@ fn invisible_characters_are_never_signed() {
 /// here: no em/en dash in any title, body or button (design-review M8).
 #[test]
 fn no_dialog_text_carries_a_dash() {
-    for case in cases().into_iter().chain(cases_v2()) {
-        let summary = statement_of(&case).summary(None);
+    let summaries = cases()
+        .into_iter()
+        .chain(cases_v2())
+        .map(|case| (case["name"].to_string(), statement_of(&case).summary(None)))
+        .chain([("rebind".to_string(), rebind_vector().0.summary(None))]);
+    for (name, summary) in summaries {
         for text in [&summary.title, &summary.body, &summary.confirm] {
             assert!(
                 !text.contains('\u{2014}') && !text.contains('\u{2013}'),
-                "{}: {text}",
-                case["name"]
+                "{name}: {text}"
             );
         }
     }

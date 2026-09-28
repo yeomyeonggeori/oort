@@ -503,3 +503,83 @@ fn the_endorse_dialog_names_the_key_id() {
     };
     assert!(statement.summary(None).body.contains("키 abcdef12"));
 }
+
+// ---- #3103 rebind -------------------------------------------------------------
+
+fn rebind_request() -> RebindRequest {
+    RebindRequest {
+        workspace_id: Uuid::from_u128(1),
+        member_id: Uuid::from_u128(0x101),
+        key_id: Uuid::from_u128(0xd001),
+        session_id: Uuid::from_u128(0x5e55),
+    }
+}
+
+#[test]
+fn a_rebind_is_confirmed_then_signed_by_the_key_it_names() {
+    let mut fake = Fake::new(true);
+    let public = fake.public_b64();
+    let request = rebind_request();
+    let statement = Statement::Rebind {
+        signer: Signer {
+            workspace_id: request.workspace_id,
+            member_id: request.member_id,
+            key_id: request.key_id,
+        },
+        public_key: public.clone(),
+        session_id: request.session_id,
+        signed_at_ms: NOW,
+    };
+    let signed = sign_statement(&mut fake, &statement, &public, NOW, None).unwrap();
+    let bytes = statement.signed_bytes(NOW).unwrap();
+    let text = String::from_utf8(bytes.clone()).unwrap();
+    assert_eq!(
+        text,
+        format!(
+            "momo.human.device_rebind.v1\n{}\n{}\n{}\n{public}\n{}\n{NOW}",
+            request.workspace_id, request.member_id, request.key_id, request.session_id
+        )
+    );
+    assert!(verify_raw(
+        &BASE64.decode(&public).unwrap(),
+        &bytes,
+        &BASE64.decode(&signed.signature).unwrap()
+    ));
+    let summary = fake.last_summary.unwrap();
+    assert_eq!(summary.confirm, "다시 연결");
+    assert!(summary.body.contains("d001"), "{summary:?}");
+    // Declined: nothing reaches the enclave.
+    let mut no = Fake::new(false);
+    assert_eq!(
+        sign_statement(&mut no, &statement, &public, NOW, None).unwrap_err(),
+        "device_key_declined"
+    );
+    assert_eq!(no.signs, 0);
+}
+
+#[test]
+fn a_rebind_may_not_name_another_row_than_this_workspaces_binding() {
+    let request = rebind_request();
+    let ours = RootBinding {
+        key_id: request.key_id,
+        member_id: request.member_id,
+        public_key: "K".into(),
+    };
+    assert_eq!(rebind_precheck(None, &request, "K"), Ok(()));
+    assert_eq!(rebind_precheck(Some(&ours), &request, "K"), Ok(()));
+    let other_id = RootBinding {
+        key_id: Uuid::from_u128(0xd002),
+        ..ours.clone()
+    };
+    assert_eq!(
+        rebind_precheck(Some(&other_id), &request, "K").unwrap_err(),
+        "device_key_rebind_conflict"
+    );
+    let other_member = RootBinding {
+        member_id: Uuid::from_u128(0x102),
+        ..ours.clone()
+    };
+    assert!(rebind_precheck(Some(&other_member), &request, "K").is_err());
+    // A binding for a key the enclave no longer holds says nothing.
+    assert_eq!(rebind_precheck(Some(&other_id), &request, "NEW"), Ok(()));
+}

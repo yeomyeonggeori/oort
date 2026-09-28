@@ -3475,7 +3475,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
 //
 //   -momoMeasure DEVICE-KEY-PENDING · LIGHT-DEVICE-KEY-PENDING · …
 //   (pending approved revoked invalidated biometryoff unregistered unsupported
-//    servererror registering live profile)
+//    servererror registering reconnect reconnecting live profile)
 
 const DK_KEY = 'A2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW';
 const DK_FINGERPRINT = '5BAF F89D E7DE 5C1D 7B61';
@@ -3490,6 +3490,7 @@ const DK_ROW: DeviceKey = {
   state: 'unendorsed',
   canInstruct: false,
   current: true,
+  lineageLive: true,
   createdAtMs: NOW,
 };
 
@@ -3512,6 +3513,15 @@ function dkView(which: string): DeviceKeyView {
       return {kind: 'unsupported'};
     case 'servererror':
       return {kind: 'serverError', fingerprint: DK_FINGERPRINT};
+    // #3103: live and approved, its sign-in ended — 「다시 연결 필요」.
+    case 'reconnect':
+    case 'reconnecting':
+      return {
+        kind: 'reconnect',
+        fingerprint: DK_FINGERPRINT,
+        row: {...DK_ROW, state: 'endorsed', current: false, lineageLive: false},
+        biometryOff: false,
+      };
     default:
       return {kind: 'pending', fingerprint: DK_FINGERPRINT, row: DK_ROW, biometryOff: false};
   }
@@ -3523,11 +3533,13 @@ function dkState(which: string): DeviceKeyState {
     enroll: () => {},
     replace: () => {},
     refresh: () => {},
-    busy: which === 'registering',
+    busy: which === 'registering' || which === 'reconnecting',
     failure:
       which === 'unregistered'
         ? '지시 기기로 등록하지 못했습니다. 연결을 확인하고 다시 시도하세요.'
-        : null,
+        : which === 'reconnect'
+          ? 'Face ID를 취소해 다시 연결하지 않았습니다.'
+          : null,
   };
 }
 

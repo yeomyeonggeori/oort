@@ -139,6 +139,7 @@ function row(overrides: Partial<DeviceKey> = {}): DeviceKey {
     state: 'unendorsed',
     canInstruct: false,
     current: true,
+    lineageLive: true,
     createdAtMs: 1_790_550_000_000,
     ...overrides,
   };
@@ -363,6 +364,170 @@ describe('enrollDeviceKey', () => {
   });
 });
 
+// ---- #3103: a live key on an ended sign-in moves itself ------------------------
+
+describe('rebind — 409 device_key_rebind_required and lineageLive: false (#3103)', () => {
+  const SESSION = '33333333-3333-4333-8333-333333333333';
+  const SIG = bytesToBase64(new Uint8Array(64).fill(9));
+  let rebindAnswer: {status: number; body: unknown} | null;
+  let contextSession: string | null;
+
+  beforeEach(() => {
+    rebindAnswer = null;
+    contextSession = SESSION;
+    const base = globalThis.fetch;
+    globalThis.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const json = (status: number, value: unknown) =>
+        new Response(JSON.stringify(value), {
+          status,
+          headers: {'Content-Type': 'application/json'},
+        });
+      if (url.pathname.endsWith('/device-keys/signing-context')) {
+        calls.push({method: 'GET', path: url.pathname, body: undefined});
+        return json(200, {
+          instanceId: 'inst',
+          serverTimeMs: Date.now(),
+          maxLifetimeMs: 600_000,
+          maxClockSkewMs: 300_000,
+          humanControlSignatureRequired: true,
+          hostRegisterSignatureRequired: false,
+          sessionId: contextSession,
+        });
+      }
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      if (init?.method === 'POST' && body?.rebind) {
+        calls.push({method: 'POST', path: url.pathname, body});
+        const answer = rebindAnswer ?? {
+          status: 200,
+          body: {deviceKey: row({state: 'endorsed', current: true, lineageLive: true})},
+        };
+        return json(answer.status, answer.body);
+      }
+      return base(input, init);
+    }) as unknown as typeof fetch;
+  });
+
+  const rebinds = () => posts().filter(c => (c.body as {rebind?: unknown}).rebind);
+
+  it('moves a live, approved row on an ended sign-in with its own letter — no new row', async () => {
+    mockNative = phone({key: KEY});
+    mockNative.sign.mockResolvedValue(SIG);
+    serverRows = [row({state: 'endorsed', current: false, lineageLive: false})];
+    await expect(enrollDeviceKey({workspaceId: WS, label: LABEL()})).resolves.toEqual({
+      kind: 'registered',
+      publicKey: KEY,
+    });
+    expect(mockNative.create).not.toHaveBeenCalled();
+    // One letter, signed with Face ID, naming this key and the context's sign-in.
+    expect(mockNative.sign).toHaveBeenCalledTimes(1);
+    const [message, reason] = mockNative.sign.mock.calls[0] as [string, string];
+    const lines = Buffer.from(message, 'base64').toString('utf8').split('\n');
+    expect(lines.slice(0, 6)).toEqual([
+      'momo.human.device_rebind.v1',
+      WS,
+      MEMBER,
+      row().id,
+      KEY,
+      SESSION,
+    ]);
+    expect(reason).toBe('이 폰의 지시 키를 새 로그인에 다시 연결해요');
+    expect(rebinds()).toHaveLength(1);
+    expect(rebinds()[0]!.body).toMatchObject({
+      alg: 'p256',
+      publicKey: KEY,
+      platform: 'ios',
+      rebind: {signature: SIG, signedAtMs: Number(lines[6])},
+    });
+    // Never a fresh registration (that would need the Mac to approve again).
+    expect(posts().filter(c => !(c.body as {rebind?: unknown}).rebind)).toHaveLength(0);
+  });
+
+  it('answers a 409 device_key_rebind_required (stale list) by moving the key', async () => {
+    mockNative = phone({key: KEY});
+    mockNative.sign.mockResolvedValue(SIG);
+    registerStatus = 409;
+    registerCode = 'device_key_rebind_required';
+    let listed = 0;
+    const withRebind = globalThis.fetch;
+    globalThis.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'GET' && String(input).endsWith('/device-keys')) {
+        listed += 1;
+        serverRows = listed === 1 ? [] : [row({current: false, lineageLive: false})];
+      }
+      return withRebind(input, init);
+    }) as unknown as typeof fetch;
+    await enrollDeviceKey({workspaceId: WS, label: LABEL()});
+    expect(mockNative.sign).toHaveBeenCalledTimes(1);
+    expect(rebinds()).toHaveLength(1);
+  });
+
+  it('treats a 200 whose row is not current as a failure, and says so', async () => {
+    mockNative = phone({key: KEY});
+    mockNative.sign.mockResolvedValue(SIG);
+    serverRows = [row({current: false, lineageLive: false})];
+    rebindAnswer = {
+      status: 200,
+      // Live lineage, but not THIS sign-in's: still not moved here.
+      body: {deviceKey: row({current: false, lineageLive: true})},
+    };
+    const error = await enrollDeviceKey({workspaceId: WS, label: LABEL()}).catch(e => e);
+    expect(error).toBeInstanceOf(EnrollError);
+    expect(error.message).toBe(
+      '서버가 이 키를 이 로그인으로 옮기지 않았습니다. 다시 시도하세요.',
+    );
+  });
+
+  it('signs nothing without a sign-in to move to, and names a refused letter', async () => {
+    mockNative = phone({key: KEY});
+    mockNative.sign.mockResolvedValue(SIG);
+    serverRows = [row({current: false, lineageLive: false})];
+    contextSession = null;
+    const none = await enrollDeviceKey({workspaceId: WS, label: LABEL()}).catch(e => e);
+    expect(none.message).toBe(
+      '이 로그인으로는 키를 옮길 수 없습니다. 로그아웃한 뒤 다시 로그인하세요.',
+    );
+    expect(mockNative.sign).not.toHaveBeenCalled();
+    contextSession = SESSION;
+    rebindAnswer = {
+      status: 403,
+      body: {error: {message: 'no', code: 'device_signature_invalid'}},
+    };
+    const refused = await enrollDeviceKey({workspaceId: WS, label: LABEL()}).catch(e => e);
+    expect(refused.message).toContain('시계');
+  });
+
+  it('says a cancelled Face ID plainly', async () => {
+    mockNative = phone({key: KEY});
+    mockNative.sign.mockRejectedValue(nativeError('DEVICE_KEY_CANCELLED'));
+    serverRows = [row({current: false, lineageLive: false})];
+    const error = await enrollDeviceKey({workspaceId: WS, label: LABEL()}).catch(e => e);
+    expect(error.message).toBe('Face ID를 취소해 다시 연결하지 않았습니다.');
+    expect(rebinds()).toHaveLength(0);
+  });
+
+  it('shows 「다시 연결 필요」, never 「승인됨」, for such a row', () => {
+    const view = deriveDeviceKeyView({
+      local: {status: 'ready', publicKey: KEY},
+      localError: null,
+      rows: [row({state: 'endorsed', canInstruct: true, current: false, lineageLive: false})],
+      rowsError: null,
+    });
+    expect(view.kind).toBe('reconnect');
+    expect(deviceKeyCopy(view).badge).toBe('다시 연결 필요');
+    expect(deviceKeyCopy(view, true).badge).toBe('다시 연결 중');
+    // A server from before #3097 (no field) reads as live.
+    expect(
+      deriveDeviceKeyView({
+        local: {status: 'ready', publicKey: KEY},
+        localError: null,
+        rows: [row({state: 'endorsed'})],
+        rowsError: null,
+      }).kind,
+    ).toBe('approved');
+  });
+});
+
 describe('replaceInvalidatedKey — the person pressed 「새 키로 다시 등록」', () => {
   it('deletes the proven-dead key, makes a new one and registers it', async () => {
     mockNative = phone({key: OTHER_KEY, status: 'invalidated'});
@@ -441,6 +606,8 @@ describe('DeviceKeyPanel — each state on screen', () => {
     [{kind: 'approved', fingerprint: SHARED_FINGERPRINT, row: r, biometryOff: true}, SHARED_FINGERPRINT, ['settings', 'recheck']],
     [{kind: 'revoked', fingerprint: SHARED_FINGERPRINT, row: r, biometryOff: false}, SHARED_FINGERPRINT, ['reenroll']],
     [{kind: 'serverError', fingerprint: SHARED_FINGERPRINT}, SHARED_FINGERPRINT, ['retry']],
+    [{kind: 'reconnect', fingerprint: SHARED_FINGERPRINT, row: r, biometryOff: false}, SHARED_FINGERPRINT, ['reconnect']],
+    [{kind: 'reconnect', fingerprint: SHARED_FINGERPRINT, row: r, biometryOff: true}, SHARED_FINGERPRINT, ['settings', 'recheck']],
   ];
 
   it.each(cases.map(c => [c[0].kind, ...c] as const))(
@@ -455,7 +622,7 @@ describe('DeviceKeyPanel — each state on screen', () => {
       } else {
         expect(screen.queryByTestId('device-key-fingerprint')).toBeNull();
       }
-      const shown = ['enroll', 'reenroll', 'replace', 'settings', 'recheck', 'retry'].filter(
+      const shown = ['enroll', 'reenroll', 'reconnect', 'replace', 'settings', 'recheck', 'retry'].filter(
         a => screen.queryByTestId(`device-key-action-${a}`) !== null,
       );
       expect(shown).toEqual(actions);

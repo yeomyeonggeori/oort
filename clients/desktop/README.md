@@ -468,6 +468,7 @@ Enclave, `confirm.rs` the native dialog). Granted only by
 | `device_key_sign_endorse { workspaceId, targetKeyId, targetAlg, targetPublicKey, label }` | `device_endorse.v1` |
 | `device_key_sign_revoke { workspaceId, targetKeyId, targetPublicKey, targetLabel }` | `device_revoke.v1`, then `revoke_device` on workd right away |
 | `device_key_deliver_revocation { workspaceId, targetKeyId }` | hand a letter this shell signed (kept in `<app data>/device-key/revocations.json`, 0600) to workd again |
+| `device_key_sign_rebind { workspaceId, memberId, keyId, sessionId }` | `device_rebind.v1` (#3103, ADR-0146 D-7 증보 #3097): this enclave's own public key, the page's key id (must equal this workspace's binding when there is one) and `signing-context.sessionId`; native confirm + Touch ID. The page posts it as `rebind` on `POST …/device-keys` and treats a 200 whose `current` is not true as a failure |
 
 Rules the code holds:
 

@@ -83,6 +83,7 @@ const APP_COMMANDS: &[&str] = &[
     "device_key_sign_endorse",
     "device_key_sign_revoke",
     "device_key_deliver_revocation",
+    "device_key_sign_rebind",
 ];
 
 /// `tauri.conf.json > bundle > externalBin` names `binaries/momo-workd`, and

@@ -54,8 +54,23 @@ check(
   Set(rootMacPayloads.map { schemaOf($0.1) }) == ["momo.human.device_endorse.v1", "momo.human.device_revoke.v1"],
   "vectors carry the root-Mac endorse/revoke payloads")
 check(
-  MomoDeviceKeyStore.signingSchemas == ["momo.human.control.v1": 13, "momo.human.control.v2": 13],
-  "the phone allows only momo.human.control.v1/v2 (13 lines)")
+  MomoDeviceKeyStore.signingSchemas == [
+    "momo.human.control.v1": 13, "momo.human.control.v2": 13, "momo.human.device_rebind.v1": 7,
+  ],
+  "the phone allows only momo.human.control.v1/v2 (13 lines) and its own device_rebind.v1 (7 lines)")
+
+// ---- #3103: the rebind letter momo-wire printed (argv[2]) --------------------
+guard CommandLine.arguments.count > 2,
+  let rebindData = FileManager.default.contents(atPath: CommandLine.arguments[2]),
+  let rebindJSON = try? JSONSerialization.jsonObject(with: rebindData) as? [String: Any],
+  let rebindPayload = rebindJSON["payload"] as? String,
+  let rebindInputs = rebindJSON["inputs"] as? [String: Any],
+  let rebindKey = rebindInputs["publicKey"] as? String
+else {
+  print("FAIL: usage: device-key-sim-check <vectors.json> <device-rebind.vector.json>")
+  exit(1)
+}
+let rebind = Data(rebindPayload.utf8)
 
 // ---- 1. no enclave, no key -------------------------------------------------
 check(MomoDeviceKeyStore.secureEnclaveAvailable == false, "secureEnclaveAvailable is false")
@@ -107,6 +122,22 @@ func rejects(_ data: Data) -> Bool {
 for (name, payload) in phonePayloads {
   check(!rejects(payload), "accepts vector \(name)")
 }
+check(!rejects(rebind), "accepts the momo-wire device_rebind.v1 letter (7 lines)")
+let rebindText = String(decoding: rebind, as: UTF8.self)
+check(rejects(rebind + Data("\nx".utf8)), "rejects a rebind letter with an 8th line")
+check(
+  rejects(Data(rebindText.split(separator: "\n").dropLast().joined(separator: "\n").utf8)),
+  "rejects a rebind letter one line short")
+check(rejects(rebind + Data([0x0A])), "rejects a rebind letter with a trailing newline")
+// The key signs only its own move.
+check((try? MomoDeviceKeyStore.checkRebindNamesKey(rebind, publicKeyBase64: rebindKey)) != nil,
+  "a rebind letter naming this key passes the own-key check")
+let otherKey = (rebindKey.hasPrefix("A") ? "B" : "A") + rebindKey.dropFirst()
+check(otherKey != rebindKey, "the other key differs from the letter's")
+check((try? MomoDeviceKeyStore.checkRebindNamesKey(rebind, publicKeyBase64: otherKey)) == nil,
+  "a rebind letter naming another key is refused")
+check((try? MomoDeviceKeyStore.checkRebindNamesKey(phonePayloads[0].1, publicKeyBase64: "x")) != nil,
+  "the own-key check leaves control payloads alone")
 // ADR-0146 D-6/D-7: endorsements and revocations are the root Mac's to sign.
 for (name, payload) in rootMacPayloads {
   check(rejects(payload), "rejects root-Mac vector \(name)")
