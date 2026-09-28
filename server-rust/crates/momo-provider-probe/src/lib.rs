@@ -27,6 +27,18 @@
 //! parsed number, and no transport error text leaves this crate — so a provider
 //! that echoes the key back in its error has nowhere to put it.
 //!
+//! **One kind of provider text does leave, on purpose (#3009): model ids.** A
+//! `/models` 2xx body's `data[].id` strings are the only source of "which models
+//! this key can call" the 「기본 AI」 picker may show (AI 계정 brief §4.2 — no
+//! hard-coded ids). They cross this boundary only through [`model_ids`]:
+//! string ids only, each through `momo_settings::sanitized_model_id` (charset
+//! allow-list, 64-byte cap), deduplicated, at most `MAX_PROBE_MODEL_IDS`, and
+//! any id that contains the presented key — or is an 8+ byte piece of it — is
+//! dropped. That is a guard against an *accidental* echo, not a guarantee: the
+//! endpoint already received the key in its request headers, and one that
+//! wanted to could re-case it or slice it below the window. OpenRouter's `/key`
+//! has no model list, so it reports none.
+//!
 //! ## What guards the socket
 //!
 //! [`momo_egress::EgressGuard`] — the #2852 egress policy on every resolved
@@ -41,7 +53,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use momo_settings::{EgressDenied, EgressPolicy, RATE_LIMITED_REASON, UNREACHABLE_REASON};
+use momo_settings::{
+    sanitized_model_id, EgressDenied, EgressPolicy, MAX_PROBE_MODEL_IDS, RATE_LIMITED_REASON,
+    UNREACHABLE_REASON,
+};
 use sha2::{Digest, Sha256};
 
 use momo_egress::EgressGuard;
@@ -196,6 +211,12 @@ pub struct ProbeReport {
     pub http_status: Option<u16>,
     pub latency_ms: u64,
     pub model_count: Option<u64>,
+    /// #3009 — sanitized `data[].id` values (see [`model_ids`]). `None` when the
+    /// method has no model list or no documented body was read.
+    pub model_ids: Option<Vec<String>>,
+    /// The provider named more ids than `model_ids` holds (paginated list, or
+    /// past the cap).
+    pub model_ids_truncated: bool,
     pub rate_limit: Option<RateLimitNumbers>,
     pub retry_after_seconds: Option<u64>,
     pub credit: Option<KeyCredit>,
@@ -210,6 +231,8 @@ impl ProbeReport {
             http_status: None,
             latency_ms: 0,
             model_count: None,
+            model_ids: None,
+            model_ids_truncated: false,
             rate_limit: None,
             retry_after_seconds: None,
             credit: None,
@@ -346,6 +369,8 @@ impl ProviderProbe for GuardedProviderProbe {
             http_status: Some(status),
             latency_ms,
             model_count: None,
+            model_ids: None,
+            model_ids_truncated: false,
             rate_limit,
             retry_after_seconds,
             credit: None,
@@ -372,6 +397,13 @@ impl ProviderProbe for GuardedProviderProbe {
                         report.outcome = ProbeOutcome::Ok;
                         report.model_count = model_count;
                         report.credit = credit;
+                        if method == ProbeMethod::Models {
+                            if let Some(value) = parsed.as_ref() {
+                                let (ids, truncated) = model_ids(value, target.credential.secret());
+                                report.model_ids = Some(ids);
+                                report.model_ids_truncated = truncated;
+                            }
+                        }
                     }
                     None => {
                         report.outcome = ProbeOutcome::Unknown;
@@ -461,6 +493,67 @@ fn read_body(
             ))
         }
     }
+}
+
+/// The model ids a `/models` body names, as this server will repeat them:
+/// `(ids, truncated)`.
+///
+/// * only `data[].id` values that are JSON strings;
+/// * each through [`sanitized_model_id`] — anything else is dropped silently
+///   (a dropped id is not "truncation": the provider did not name a usable id);
+/// * any id containing an 8-byte piece of `secret` is dropped — the key is never
+///   repeated, whole or sliced across several ids (slices shorter than 8 bytes
+///   are not treated as the key: every model id shares short runs with some key);
+/// * duplicates collapse to the first;
+/// * at most [`MAX_PROBE_MODEL_IDS`]; `truncated` is true past the cap, or when
+///   the list says it is paginated (`has_more: true`, Anthropic).
+const SECRET_WINDOW: usize = 8;
+
+pub fn model_ids(value: &serde_json::Value, secret: &str) -> (Vec<String>, bool) {
+    let paginated = value
+        .get("has_more")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let Some(items) = value.get("data").and_then(serde_json::Value::as_array) else {
+        return (Vec::new(), paginated);
+    };
+    // Every 8-byte window of the key: an id holding any of them repeats part of
+    // the key, whether it holds the whole key, a slice of it, or a slice padded
+    // with other text. A key shorter than a window is matched whole.
+    let secret = secret.trim().as_bytes();
+    let windows: Vec<&[u8]> = if secret.is_empty() {
+        Vec::new()
+    } else if secret.len() < SECRET_WINDOW {
+        vec![secret]
+    } else {
+        secret.windows(SECRET_WINDOW).collect()
+    };
+    let leaks = |id: &str| {
+        let id = id.as_bytes();
+        windows
+            .iter()
+            .any(|window| id.windows(window.len()).any(|piece| piece == *window))
+    };
+    let mut ids: Vec<String> = Vec::new();
+    let mut truncated = paginated;
+    for item in items {
+        let Some(id) = item
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .and_then(sanitized_model_id)
+        else {
+            continue;
+        };
+        if leaks(&id) || ids.contains(&id) {
+            continue;
+        }
+        if ids.len() == MAX_PROBE_MODEL_IDS {
+            truncated = true;
+            break;
+        }
+        ids.push(id);
+    }
+    (ids, truncated)
 }
 
 fn header_number(headers: &reqwest::header::HeaderMap, name: &str) -> Option<u64> {
