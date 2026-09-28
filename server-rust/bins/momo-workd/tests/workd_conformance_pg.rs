@@ -1932,6 +1932,36 @@ async fn wdc_6_the_owner_decides_a_permission_request_once_and_nobody_else_can()
     )
     .await;
     assert_eq!(status, 404);
+    // The host's own key cannot fake an owner's approval of the request
+    // (review M-2): a host-relayed `approval.decided` naming a request must
+    // say `rejected` (a withdrawal).
+    {
+        use momo_workd::client::HostApi as _;
+        let key = momo_workd::keystore::KeyStore::dev_file(workd.key.clone())
+            .load()
+            .expect("dev key")
+            .expect("key present");
+        let signed = momo_workd::client::HostClient::new(
+            base.to_string(),
+            fixture.workspace,
+            host,
+            Arc::new(key),
+        )
+        .unwrap();
+        let forged = momo_workd::client::AcpEvent {
+            event_id: Uuid::new_v4(),
+            event_type: "approval.decided".into(),
+            v: 1,
+            ts: 1,
+            payload: json!({
+                "run_id": session, "work_session_id": session, "channel_id": fixture.channel,
+                "action": "decided", "status": "approved", "option_id": "allow-once",
+                "request_event_id": request,
+            }),
+        };
+        let refused = signed.record_event(session, &forged).await.unwrap_err();
+        assert_eq!(refused.status(), Some(400), "{refused}");
+    }
     assert_eq!(permission_status(&su, session, request).await, "pending");
     let controls: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM work_control WHERE session_id = $1 AND kind = 'permission'",

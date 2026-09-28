@@ -953,7 +953,19 @@ pub const BRIDGE_OPTION_KINDS: [&str; 2] = ["allow_once", "reject_once"];
 
 /// The options of a request the owner may choose from — the agent's own
 /// `allow_once`/`reject_once`, nothing else. Empty when it offers neither.
+///
+/// A request that offers the same `optionId` twice is not bridged at all
+/// (#3000 review M-1): the agent decides what an id means, so an id listed as
+/// both `allow_always` and `allow_once` would let 「이번 한 번」 select an
+/// always rule.
 pub fn bridge_options(options: &[PermissionOption]) -> Vec<PermissionOption> {
+    let mut seen = std::collections::HashSet::new();
+    if !options
+        .iter()
+        .all(|option| seen.insert(option.option_id.as_str()))
+    {
+        return Vec::new();
+    }
     options
         .iter()
         .filter(|option| {
@@ -1211,6 +1223,22 @@ mod tests {
                 "{id} as {kind}"
             );
         }
+        // One id under two kinds: the whole request is not bridged (M-1).
+        let ambiguous = vec![
+            PermissionOption {
+                option_id: "a".into(),
+                kind: "allow_always".into(),
+            },
+            PermissionOption {
+                option_id: "a".into(),
+                kind: "allow_once".into(),
+            },
+            PermissionOption {
+                option_id: "r".into(),
+                kind: "reject_once".into(),
+            },
+        ];
+        assert!(bridge_options(&ambiguous).is_empty());
         // And even an unfiltered list cannot smuggle an always kind through.
         assert_eq!(
             owner_choice(&offered_by_agent, "allow-always", "allow_always"),

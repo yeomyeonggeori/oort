@@ -61,6 +61,19 @@ pub fn bridgeable_options(options: &Value) -> Vec<PermissionOption> {
     let Some(items) = options.as_array() else {
         return Vec::new();
     };
+    // The same id twice (under any kinds) is ambiguous — the agent decides
+    // what an id means — so nothing is decidable (#3000 review M-1).
+    let mut seen = std::collections::HashSet::new();
+    let unique = items.iter().all(|item| {
+        seen.insert(
+            item.get("option_id")
+                .map(|id| id.to_string())
+                .unwrap_or_default(),
+        )
+    });
+    if !unique {
+        return Vec::new();
+    }
     items
         .iter()
         .take(OPTIONS_MAX)
@@ -390,6 +403,13 @@ mod tests {
             ]
         );
         assert!(bridgeable_options(&json!({})).is_empty());
+        // One id under two kinds: nothing is decidable (review M-1).
+        assert!(bridgeable_options(&json!([
+            {"option_id": "a", "name": "Always", "kind": "allow_always"},
+            {"option_id": "a", "name": "Once", "kind": "allow_once"},
+            {"option_id": "r", "name": "Reject", "kind": "reject_once"}
+        ]))
+        .is_empty());
         assert!(!is_bridgeable_kind("allow_always"));
         assert!(!is_bridgeable_kind("reject_always"));
     }

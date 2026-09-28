@@ -442,9 +442,13 @@ oort는 벤더 클라우드 자리에 **팀 자신의 Railway 서버**가 있으
   - 대기 시간이 끝나면 에이전트 자신의 `reject_once`로 답한다. 동시에 `request_event_id`를 단 `approval.decided`(rejected)로 서버의 행을 거둔다. host가 올린 `approval.decided`는 행을 `cancelled`로 닫을 뿐이고 승인할 수 없다.
   - 세션이 끝나면 대기 중인 요청에 `cancelled`로 답한다. 서버는 세션 종료·idle 전이·host 폐기 때 대기 행을 `cancelled`로 닫는다.
   - 올릴 수 없는 요청은 전처럼 즉시 거부한다. 한 번짜리 선택지가 없거나 서버가 받지 않은 경우다.
+  - 같은 `optionId`가 두 번 나오는 요청은 올리지 않는다(서버도 결정 가능한 행을 만들지 않는다). id의 뜻은 에이전트가 정하므로, 한 id가 `allow_always`와 `allow_once`로 함께 오면 「이번 한 번」이 항상 허용을 고를 수 있다(보안 검수 M-1).
+  - host가 올리는 `approval.decided`가 `request_event_id`를 달면 `status`는 `rejected`여야 한다(철회). 요청에 묶인 승인 이벤트는 서버의 결정 라우트만 쓴다(보안 검수 M-2).
 - **「거부 + 지시」는 R2로 미룬다.** 지시문을 다음 입력으로 보내는 것은 소유자 `input`이다. D3는 이를 R2의 기기 키 서명에서만 연다. 그래서 R1 동안 결정 라우트는 비어 있지 않은 `instruction`을 400 `permission_instruction_unsupported`로 거부한다.
 - **남은 것(이번 계약 밖).**
   - 미리보기의 소유자 전용 방송(D5 「채널로 방송하지 않는다」). 지금 `approval.requested`는 선택지만 싣고 세션 스레드(채널)로 간다. 도구 미리보기는 싣지 않는다.
   - 푸시 라우팅(D8).
   - 마감 지난 대기 행의 주기 청소. 라우트가 결정 시점에 닫으므로 판정은 옳다.
+  - host가 `permission` 컨트롤을 거부했을 때(nonce 불명 등) 요청 행에 되쓰기. 지금은 컨트롤이 `failed`로 남고 행은 결정된 상태다. 에이전트는 허락받지 못하므로 닫힌 쪽 실패다(검수 L-1).
+  - 서버가 `approval.requested`의 선택지 이름·id 문자 집합을 정규화하는 것, 세션당 요청 수 상한(검수 L-2·L-3).
 - 계약 골든: `docs/api/work-permission-decision.golden.json`. 웹 `decide` 포트(`agentPane.ts` `PermissionDecision`)가 붙을 모양이다.

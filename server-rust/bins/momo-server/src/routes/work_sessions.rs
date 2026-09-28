@@ -981,6 +981,17 @@ async fn record_acp_event(
         return Err(ApiError::bad_request("ACP event exceeds 65536 bytes"));
     }
     let normalized = validated_acp_event(&event, session_id)?;
+    // #3000 review M-2: a host can only WITHDRAW a bridged permission request.
+    // An `approval.decided` naming one must say `rejected`; an approved event
+    // bound to a request is the server's alone (the owner's decision route).
+    if event.event_type == "approval.decided"
+        && event.payload.get("request_event_id").is_some()
+        && event.payload.get("status").and_then(Value::as_str) != Some("rejected")
+    {
+        return Err(ApiError::bad_request(
+            "a host may only withdraw a permission request",
+        ));
+    }
     let key = format!("work-acp:{workspace_id}:{session_id}");
     if !state
         .rate_limit
