@@ -188,6 +188,18 @@ export function SignedWorkControls({
   );
 }
 
+/**
+ * A starting state for the capture lane (`measure/surfaces.tsx`), which cannot
+ * tap a simulator. The product never passes it.
+ */
+export interface SignedWorkInitial {
+  asking?: boolean;
+  rejectNote?: string;
+  outcome?: CardOutcome;
+  text?: string;
+  note?: {failed: boolean; text: string};
+}
+
 /** Presentational: everything above is data. */
 export function SignedWorkControlsView({
   permission,
@@ -197,6 +209,7 @@ export function SignedWorkControlsView({
   actions,
   fallbackReject,
   now = Date.now,
+  initial,
 }: {
   permission: PendingPermission | null;
   ended: boolean;
@@ -206,6 +219,7 @@ export function SignedWorkControlsView({
   /** Reject without a key (reject is never signed, D-8). */
   fallbackReject: ((permission: PendingPermission) => Promise<void>) | null;
   now?: () => number;
+  initial?: SignedWorkInitial;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
@@ -226,16 +240,22 @@ export function SignedWorkControlsView({
           actions={actions}
           fallbackReject={fallbackReject}
           lapsed={permissionLapsed(permission, now())}
+          initial={initial}
         />
       ) : null}
       {ended ? null : (
-        <InstructionBox online={online} block={block} actions={actions} />
+        <InstructionBox
+          online={online}
+          block={block}
+          actions={actions}
+          initial={initial}
+        />
       )}
     </View>
   );
 }
 
-type CardOutcome = {tone: 'sent' | 'closed' | 'partial'; text: string} | null;
+export type CardOutcome = {tone: 'sent' | 'closed' | 'partial'; text: string} | null;
 
 function PermissionCard({
   permission,
@@ -244,6 +264,7 @@ function PermissionCard({
   actions,
   fallbackReject,
   lapsed,
+  initial,
 }: {
   permission: PendingPermission;
   online: boolean;
@@ -251,15 +272,18 @@ function PermissionCard({
   actions: SignedWorkActions | null;
   fallbackReject: ((permission: PendingPermission) => Promise<void>) | null;
   lapsed: boolean;
+  initial?: SignedWorkInitial;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const [busy, setBusy] = useState<'once' | 'session' | 'reject' | null>(null);
-  const [asking, setAsking] = useState(false);
-  const [note, setNote] = useState('');
+  const [asking, setAsking] = useState(initial?.asking ?? false);
+  const [note, setNote] = useState(initial?.rejectNote ?? '');
   const [error, setError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<CardOutcome>(
-    lapsed ? {tone: 'closed', text: PERMISSION_LAPSED_LINE} : null,
+    lapsed
+      ? {tone: 'closed', text: PERMISSION_LAPSED_LINE}
+      : initial?.outcome ?? null,
   );
   const ask = permission.tool ? permission.tool.headline : PERMISSION_ASK.other;
   const allowable =
@@ -429,16 +453,20 @@ function InstructionBox({
   online,
   block,
   actions,
+  initial,
 }: {
   online: boolean;
   block: SignBlock;
   actions: SignedWorkActions | null;
+  initial?: SignedWorkInitial;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
-  const [text, setText] = useState('');
+  const [text, setText] = useState(initial?.text ?? '');
   const [busy, setBusy] = useState<'queue' | 'interrupt' | null>(null);
-  const [note, setNote] = useState<{failed: boolean; text: string} | null>(null);
+  const [note, setNote] = useState<{failed: boolean; text: string} | null>(
+    initial?.note ?? null,
+  );
   const ready = online && block === null && actions !== null;
   const send = async (mode: 'queue' | 'interrupt') => {
     const body = text.trim();

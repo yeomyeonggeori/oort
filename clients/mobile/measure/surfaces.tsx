@@ -5,6 +5,7 @@ import type {SearchPhase} from '@momo/core/features/search/searchModel';
 import React from 'react';
 import {
   LogBox,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -59,6 +60,12 @@ import {
   type TimelineGeometry,
 } from '../src/features/conversation/Timeline';
 import {Screen, ScreenHeader} from '../src/design/atoms';
+import {
+  SignedWorkControlsView,
+  type SignedWorkActions,
+  type SignedWorkInitial,
+} from '../src/features/work/SignedWorkControls';
+import type {PendingPermission} from '@momo/core/features/workbench/agentPane';
 import {ThemeControl} from '../src/design/ThemeControl';
 import {parseExecutionPlan} from '@momo/core/lib/executionPlan';
 import {measureMode} from './root';
@@ -1780,6 +1787,9 @@ export function Surface({name}: {name: string}): React.JSX.Element {
 
   if (name.startsWith('device-key-')) {
     return <DeviceKeySurface which={name.slice('device-key-'.length)} />;
+  }
+  if (name.startsWith('signed-work-')) {
+    return <SignedWorkSurface which={name.slice('signed-work-'.length)} />;
   }
 
   switch (name) {
@@ -3527,6 +3537,78 @@ function LiveDeviceKeySheet(): React.JSX.Element {
 const liveDeviceKeyClient = new QueryClient({
   defaultOptions: {queries: {retry: false, gcTime: 0}},
 });
+
+// ---- #3028 R2-E8: 작업 상세의 서명 권한 카드·지시 칸 ------------------------------
+//
+// 배송되는 `SignedWorkControlsView`에 상태를 건넨다(시뮬레이터는 탭할 수 없다).
+// 행동은 흉내다 — Face ID·서버 왕복은 이 사진에 없다(runtime-unverified).
+const SW_PERMISSION: PendingPermission = {
+  requestEventId: 'ev-1',
+  atMs: Date.now() - 60_000,
+  tool: {kind: 'edit', headline: '파일을 고쳐도 될까요?'},
+  preview: {
+    text: 'onboarding/copy.ts\n− 워크스페이스를 만듭니다\n+ 워크스페이스를 만들어요',
+    truncated: false,
+    omitted: 0,
+    masked: 0,
+    neutralized: 0,
+  },
+  allow: {kind: 'allow_once', optionId: 'once'},
+  reject: {kind: 'reject_once', optionId: 'no'},
+  hiddenOptions: 0,
+};
+const SW_ACTIONS: SignedWorkActions = {
+  allow: async () => undefined,
+  reject: async () => undefined,
+  rejectWithInstruction: async () => ({state: 'rejected', instruction: {state: 'sent'}}),
+  instruct: async () => ({state: 'sent'}),
+};
+
+function SignedWorkSurface({which}: {which: string}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const blocked = which === 'blocked';
+  const initial: SignedWorkInitial | undefined =
+    which === 'reject-note'
+      ? {asking: true, rejectNote: '그 파일 말고 테스트만 고쳐 줘'}
+      : which === 'not-delivered'
+        ? {
+            text: '이어서 lint까지 돌려 줘',
+            note: {failed: true, text: '전달 안 됨 · Face ID를 취소해서 보내지 않았어요.'},
+          }
+        : which === 'partial'
+          ? {
+              outcome: {
+                tone: 'partial',
+                text: '거부는 보냈어요. 지시는 전달 안 됨: 호스트가 90초 넘게 응답하지 않아 보내지 않았어요. 호스트가 켜져 있는지 확인한 뒤 다시 보내 주세요.',
+              },
+            }
+          : which === 'session-sent'
+            ? {
+                outcome: {
+                  tone: 'sent',
+                  text: '이 세션 동안 허락을 보냈어요. 이 세션에서 같은 요청은 다시 묻지 않아요.',
+                },
+              }
+            : undefined;
+  return (
+    <View style={styles.fill}>
+      <Screen>
+        <ScreenHeader title="온보딩 1단계 문구 다듬기" subtitle="실행 중" onBack={() => {}} backLabel="작업 목록으로" />
+        <ScrollView>
+          <SignedWorkControlsView
+            permission={which === 'no-request' ? null : SW_PERMISSION}
+            ended={false}
+            online
+            block={blocked ? '이 폰은 아직 지시 기기가 아니에요. 프로필 › 지시 기기에서 등록하고 맥의 승인을 받아 주세요.' : null}
+            actions={blocked ? null : SW_ACTIONS}
+            fallbackReject={blocked ? async () => undefined : null}
+            initial={initial}
+          />
+        </ScrollView>
+      </Screen>
+    </View>
+  );
+}
 
 function DeviceKeySurface({which}: {which: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
