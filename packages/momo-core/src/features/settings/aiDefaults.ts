@@ -360,7 +360,8 @@ export type AiDefaultResolution =
 function teamKeyUnknown(teamKey: AiDefaultsTeamKey): string | null {
   switch (teamKey.status) {
     case "hidden":
-      return "운영자만 볼 수 있어요";
+      // 멤버가 모르는 것은 키의 정체다. 앱 명령을 쓸 수 없다는 말이 아니다(2차 M1').
+      return "팀 API 키 · 운영자 설정";
     case "loading":
       return "팀 연결을 확인하고 있어요";
     case "error":
@@ -510,7 +511,7 @@ export function unlinkImpactLead(impact: readonly AiDefaultImpact[]): string | n
  * 없다(#2881 이탈표: AA-9 등 후속). 표가 이미 적용되는 것처럼 말하지 않게 한 줄로 적는다.
  */
 export const AI_DEFAULTS_NOT_APPLIED =
-  "내 설정은 저장만 돼요. 터미널 새 세션과 원격 작업이 이 선택을 따르는 것은 준비 중이에요.";
+  "내 설정은 이 기기에만 저장돼요. 터미널 새 세션과 원격 작업이 이 선택을 따르는 것은 준비 중이에요.";
 
 export function impactLine(item: AiDefaultImpact): string {
   return `${item.title}: ${item.fallback}`;

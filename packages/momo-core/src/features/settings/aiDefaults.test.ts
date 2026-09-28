@@ -84,7 +84,7 @@ describe("개인 행 선택지와 모델 줄", () => {
   it("운영자가 아니면(403)·로딩·오류면 팀 키가 있다고도 없다고도 하지 않는다", () => {
     const hidden = input({ teamKey: { status: "hidden" } });
     expect(optionsFor("appCommand", hidden)).toEqual([]);
-    expect(resolveRow("summary", {}, hidden)).toEqual({ state: "ok", using: "운영자만 볼 수 있어요", note: null });
+    expect(resolveRow("summary", {}, hidden)).toEqual({ state: "ok", using: "팀 API 키 · 운영자 설정", note: null });
     expect(resolveRow("appCommand", {}, input({ teamKey: { status: "loading" } })).using).toBe("팀 연결을 확인하고 있어요");
     expect(resolveRow("teamAgent", {}, input({ teamKey: { status: "error" } })).using).toBe("팀 키만 · 팀 연결을 불러오지 못했어요");
   });

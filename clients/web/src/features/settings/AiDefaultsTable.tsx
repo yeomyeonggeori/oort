@@ -41,7 +41,7 @@ const TEAM_FOOT_OPERATOR =
   "팀 줄은 운영자 설정이에요. 서버에 저장하는 칸이 아직 없어 지금은 서버가 정한 값을 보여 줘요.";
 const TEAM_FOOT_MEMBER = "팀 줄은 이 서버의 운영자만 바꿀 수 있어요.";
 const PERSONAL_FOOT =
-  "내 구독은 나만 보는 결과에만 쓰입니다. 팀 에이전트와 요약은 내 구독으로 넘어가지 않습니다. 내 설정은 이 기기에만 저장돼요.";
+  "내 구독은 나만 보는 결과에만 쓰입니다. 팀 에이전트와 요약은 내 구독으로 넘어가지 않습니다.";
 
 export function AiDefaultsTable({
   teamKey,

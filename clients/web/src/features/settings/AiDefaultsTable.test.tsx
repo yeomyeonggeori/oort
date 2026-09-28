@@ -122,8 +122,8 @@ describe("기본 AI 표 화면", () => {
     expect(q("ai-defaults-team-foot")?.textContent).toBe("팀 줄은 이 서버의 운영자만 바꿀 수 있어요.");
     // 팀 키가 있다고 단정하지 않는다: 앱 명령은 고르는 칸이 아니라 이유 칸.
     expect(q("ai-default-appCommand-select")).toBeNull();
-    expect(q("ai-default-appCommand")?.textContent).toContain("운영자만 볼 수 있어요");
-    expect(q("ai-default-summary")?.textContent).toContain("운영자만 볼 수 있어요");
+    expect(q("ai-default-appCommand")?.textContent).toContain("팀 API 키 · 운영자 설정");
+    expect(q("ai-default-summary")?.textContent).toContain("팀 API 키 · 운영자 설정");
   });
 
   it("팀 키가 없으면 앱 명령·팀 에이전트는 막히고 이유를 말한다", () => {

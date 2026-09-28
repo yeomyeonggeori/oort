@@ -320,7 +320,7 @@ describe("기본 AI 표의 운영자 판정 = 팀 연결의 서버 답 (#2881)",
     mount();
     const foot = await until("ai-defaults-team-foot");
     expect(foot.dataset.operator).toBe("no");
-    expect(q("ai-default-summary")?.textContent).toContain("운영자만 볼 수 있어요");
+    expect(q("ai-default-summary")?.textContent).toContain("팀 API 키 · 운영자 설정");
     expect(q("ai-default-teamAgent")?.dataset.state).toBe("ok");
   });
 });
