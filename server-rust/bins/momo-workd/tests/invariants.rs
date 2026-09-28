@@ -3627,3 +3627,32 @@ async fn inv_35_r2_the_servers_word_latches_the_host_with_a_root_and_never_lower
         );
     }
 }
+
+/// #3117 security review Low-1: with the product wiring the trust state is
+/// always there, so "R2 on" must be the requirement. A host that has not
+/// latched R2 takes an unverified envelope's `interrupt` as a queued turn.
+#[tokio::test]
+async fn inv_36_r2_not_latched_an_unverified_interrupt_is_a_queued_turn() {
+    let mut h = harness_latching(&[("claude", &["--hang-first"])]);
+    let request = spawn(&h, "claude", "first turn hangs");
+    let session = poll_and_ack(&mut h, &request).await.session_id.unwrap();
+    wait_for("the first prompt", || prompts(&h).len() == 1).await;
+    let mut input = control(
+        &h,
+        "input",
+        h.owner,
+        Some(session),
+        json!({ "text": "an envelope nobody verified" }),
+    );
+    input.human_signature = Some(json!({ "mode": "interrupt" }));
+    assert_eq!(
+        poll_and_ack(&mut h, &input).await,
+        ControlAck::ok(Some(session))
+    );
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(
+        !received_methods(&h).contains(&"session/cancel".to_string()),
+        "an unverified mode never cancels the running turn"
+    );
+    assert_eq!(prompts(&h).len(), 1, "it waits behind the turn");
+}

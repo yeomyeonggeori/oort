@@ -30,6 +30,9 @@
 //!   root refuses until a root is pinned again, which is the intended order.
 //! * **Unreadable is on.** A latch file that exists but cannot be read or
 //!   parsed counts as latched (fail closed); resetting it locally clears it.
+//! * **Unwritable is on too.** A latch that cannot be written is held in
+//!   memory all the same (the host enforces from that answer on) and written
+//!   on a later poll; `status` says `latchSaved: false` until it is.
 
 use std::path::{Path, PathBuf};
 
@@ -86,6 +89,8 @@ pub struct SignatureRequirement {
     path: Option<PathBuf>,
     config: bool,
     latch: Option<Latch>,
+    /// The latch is held in memory but not yet on disk (a write failed).
+    unsaved: bool,
     unreadable: bool,
     /// The last `humanControlSignatureRequired` the server sent. Memory only:
     /// the server's word is reported, never trusted to lower anything.
@@ -119,6 +124,7 @@ impl SignatureRequirement {
             path: Some(path),
             config: config_required,
             latch,
+            unsaved: false,
             unreadable,
             server_required: None,
         }
@@ -131,6 +137,7 @@ impl SignatureRequirement {
             path: None,
             config: true,
             latch: None,
+            unsaved: false,
             unreadable: false,
             server_required: None,
         }
@@ -142,6 +149,7 @@ impl SignatureRequirement {
             path: None,
             config: false,
             latch: None,
+            unsaved: false,
             unreadable: false,
             server_required: None,
         }
@@ -171,9 +179,25 @@ impl SignatureRequirement {
         self.server_required
     }
 
+    /// `false` while a latch is held in memory only (its write failed).
+    pub fn latch_saved(&self) -> bool {
+        !self.unsaved
+    }
+
+    fn save(&self, latch: &Latch) -> Result<(), ConfigError> {
+        let Some(path) = &self.path else {
+            return Ok(());
+        };
+        let mut body = serde_json::to_vec_pretty(latch).expect("latch serialises");
+        body.push(b'\n');
+        write_private_file(path, &body)
+    }
+
     /// The server's word from one `pending-controls` answer. `true` with a
     /// pinned root latches it (written before this returns); `false` changes
-    /// nothing but the report.
+    /// nothing but the report. A latch whose write fails is held in memory
+    /// anyway (fail closed) and the error returned; the write is tried again
+    /// on the next call, whatever the server says then.
     pub fn note_server(
         &mut self,
         server_required: bool,
@@ -182,6 +206,12 @@ impl SignatureRequirement {
     ) -> Result<Noted, ConfigError> {
         let first_word = self.server_required != Some(server_required);
         self.server_required = Some(server_required);
+        if self.unsaved {
+            if let Some(latch) = self.latch.clone() {
+                self.save(&latch)?;
+                self.unsaved = false;
+            }
+        }
         if !server_required || self.latch.is_some() {
             return Ok(Noted::Unchanged);
         }
@@ -198,13 +228,13 @@ impl SignatureRequirement {
             since_ms: now_ms,
             source: RequiredBy::Server.label().to_string(),
         };
-        if let Some(path) = &self.path {
-            let mut body = serde_json::to_vec_pretty(&latch).expect("latch serialises");
-            body.push(b'\n');
-            write_private_file(path, &body)?;
-        }
+        let saved = self.save(&latch);
         self.latch = Some(latch);
         self.unreadable = false;
+        if let Err(error) = saved {
+            self.unsaved = true;
+            return Err(error);
+        }
         tracing::info!("R2 latched: the server requires device signatures and a root is pinned; this host now requires them whatever the server says later");
         Ok(Noted::Latched)
     }
@@ -225,6 +255,7 @@ impl SignatureRequirement {
             }
         }
         self.latch = None;
+        self.unsaved = false;
         self.unreadable = false;
         tracing::warn!("R2 latch reset locally; the host requires signatures again only when the server says so (with a root pinned) or the config does");
         Ok(())
@@ -276,6 +307,30 @@ mod tests {
         reopened.reset().unwrap();
         assert!(!reopened.required());
         assert!(!SignatureRequirement::open(&dir, false).required());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Security review Low-2: a latch that cannot be written still holds.
+    #[test]
+    fn an_unwritable_latch_holds_in_memory_and_is_written_later() {
+        let dir = folder();
+        let mut req = SignatureRequirement::open(&dir, false);
+        // The latch's path is a folder: the write (a rename over it) fails.
+        std::fs::create_dir(dir.join(REQUIRED_FILE)).unwrap();
+        assert!(req.note_server(true, true, 1).is_err());
+        assert_eq!(req.required_by(), Some(RequiredBy::Server));
+        assert!(!req.latch_saved());
+        // Still unwritable, and the server says `false`: still required.
+        assert!(req.note_server(false, true, 2).is_err());
+        assert!(req.required());
+        // Writable again: written on the next answer, whatever it says.
+        std::fs::remove_dir(dir.join(REQUIRED_FILE)).unwrap();
+        assert_eq!(req.note_server(false, true, 3).unwrap(), Noted::Unchanged);
+        assert!(req.latch_saved());
+        assert_eq!(
+            SignatureRequirement::open(&dir, false).latched_since_ms(),
+            Some(1)
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -398,7 +398,10 @@ impl ControlLoop {
         // The mode travels only inside the owner's signed statement, and is
         // read only when this host verified it (R2 on). Otherwise — or with
         // no statement — the instruction is a queued turn.
+        // #3117: "R2 on" is the requirement now, not the trust being wired
+        // (`run` always wires it) — an unverified envelope's mode is ignored.
         let interrupt = self.human.is_some()
+            && self.signatures_required()
             && control
                 .human_signature
                 .as_ref()

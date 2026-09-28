@@ -53,7 +53,7 @@
 //! ← {"ok":true,"hostId":"…","workspaceId":"…","ownerMemberId":"…",
 //!    "version":"…","heartbeat":{"lastOkAtMs":…,"lastAttemptAtMs":…,"failing":false},
 //!    "humanSignatures":{"required":bool,"requiredBy":"config"|"server"|"unreadable"|null,
-//!       "latchedSinceMs":…|null,"serverRequired":bool|null,
+//!       "latchedSinceMs":…|null,"latchSaved":bool,"serverRequired":bool|null,
 //!       "rootKeyId":…|null,"rootPublicKey":…|null}}
 //!   `serverRequired: true` with `required: false` is the half state: the
 //!   server requires signatures and this host does not enforce them yet (no
@@ -409,6 +409,7 @@ pub fn respond(line: &str, identity: &HostIdentity, shared: &SocketShared) -> Va
                     "required": requirement.required(),
                     "requiredBy": requirement.required_by().map(|by| by.label()),
                     "latchedSinceMs": requirement.latched_since_ms(),
+                    "latchSaved": requirement.latch_saved(),
                     "serverRequired": requirement.server_required(),
                     "rootKeyId": root_key_id,
                     // The pin's identity (#3078): the app compares this, not
