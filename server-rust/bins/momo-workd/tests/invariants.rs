@@ -6,7 +6,8 @@
 //! |---|---|
 //! | `inv_1_remote_shell_is_refused_even_when_allowlisted` | `policy::check_remote_tool` in `SessionManager::spawn` |
 //! | `inv_2_a_session_outside_the_fixed_mode_is_corrected_before_its_first_prompt_or_refused` | `policy::check_session_modes`, `session::correct_mode` and `policy::check_mode_confirmed` in `session::handshake` (ADR-0188 §8, #2607); the agent's last mode report wins, before and after its answer (#2630 F2) |
-//! | `inv_3_every_permission_request_is_denied_with_a_reason` | `policy::decide_permission` (never `allow_*`) |
+//! | `inv_3_a_permission_request_waits_for_its_owner_and_gets_exactly_their_choice` | the bridge in `SessionTask::on_permission_request` / `on_owner_decision` and `policy::owner_choice` (ADR-0188 D5, #3000): only `allow_once`/`reject_once` are relayed, the agent is answered only by the owner's `permission` control naming the relayed nonce and an offered option of that kind; `ControlLoop::permission`'s `require_owner` |
+//! | `inv_3b_a_request_nobody_answers_is_denied_and_one_that_cannot_be_relayed_is_denied_at_once` | `SessionTask::expire_permissions` (the host's wait), the not-relayed fallback in `on_permission_request`, and `finish` answering `cancelled` |
 //! | `inv_4_round_trip_events_idle_input_kill` | the curated projection, idle/running, owner-only input, kill → ended |
 //! | `inv_5_leaving_the_fixed_mode_mid_session_closes_it` | `policy::check_mode_update` |
 //! | `inv_6_codex_runs_only_from_the_hosts_own_home` | `policy::prepare_codex_home` and `policy::check_project_config` in `SessionManager::spawn`, the Codex launch environment (ADR-0188 §8, #2607) |
@@ -41,6 +42,7 @@ use momo_workd::controls::ControlLoop;
 use momo_workd::policy::{AdapterKind, CodexHome};
 use momo_workd::session::{
     SessionManager, SessionSettings, MODE_ESCAPED_DETAIL, PERMISSION_DENIED_DETAIL,
+    PERMISSION_EXPIRED_DETAIL,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -62,6 +64,9 @@ struct FakeServer {
     calls: Mutex<Vec<Call>>,
     /// Commit the next ack, then answer as if its response was lost.
     lose_next_ack_response: Mutex<bool>,
+    /// Answer 409 to every event of this type (a server that does not take
+    /// the permission bridge's request).
+    refuse_event_type: Mutex<Option<String>>,
 }
 
 impl FakeServer {
@@ -71,6 +76,7 @@ impl FakeServer {
             controls: Mutex::new(VecDeque::new()),
             calls: Mutex::new(Vec::new()),
             lose_next_ack_response: Mutex::new(false),
+            refuse_event_type: Mutex::new(None),
         })
     }
 
@@ -173,6 +179,12 @@ impl HostApi for FakeServer {
     }
 
     async fn record_event(&self, session_id: Uuid, event: &AcpEvent) -> Result<(), ClientError> {
+        if self.refuse_event_type.lock().unwrap().as_deref() == Some(event.event_type.as_str()) {
+            return Err(ClientError::Status {
+                status: 409,
+                message: "refused by the test".into(),
+            });
+        }
         self.calls
             .lock()
             .unwrap()
@@ -234,6 +246,10 @@ fn harness(tools: &[(&str, &[&str])]) -> Harness {
 }
 
 fn harness_with(tools: &[(&str, AdapterKind, &[&str])]) -> Harness {
+    harness_waiting(tools, Duration::from_secs(60))
+}
+
+fn harness_waiting(tools: &[(&str, AdapterKind, &[&str])], permission_wait: Duration) -> Harness {
     let dir = std::env::temp_dir().join(format!("momo-workd-inv-{}", Uuid::new_v4().simple()));
     std::fs::create_dir_all(dir.join("repo")).unwrap();
     let record = dir.join("stub.jsonl");
@@ -266,6 +282,7 @@ fn harness_with(tools: &[(&str, AdapterKind, &[&str])]) -> Harness {
         acp_start_timeout: Duration::from_secs(10),
         parent_env,
         max_sessions: 2,
+        permission_wait,
         codex: CodexHome::beside(&dir.join("state").join("host.json"))
             .with_owner_home(Some(owner_home.clone())),
     };
@@ -544,8 +561,34 @@ async fn inv_2_a_session_outside_the_fixed_mode_is_corrected_before_its_first_pr
     assert_eq!(prompt_modes, ["default"]);
 }
 
+fn permission_outcomes(h: &Harness) -> Vec<Value> {
+    stub_log(h)
+        .into_iter()
+        .filter_map(|entry| entry.get("permission_outcome").cloned())
+        .collect()
+}
+
+/// The owner's `permission` control for the relayed request `event_id`.
+fn decision(
+    h: &Harness,
+    requester: Uuid,
+    session: Uuid,
+    event_id: &str,
+    option_id: &str,
+    kind: &str,
+) -> WorkControl {
+    control(
+        h,
+        "permission",
+        requester,
+        Some(session),
+        json!({"request_event_id": event_id, "option_id": option_id, "kind": kind}),
+    )
+}
+
+/// ADR-0188 D5 (#3000): the permission bridge on the host.
 #[tokio::test]
-async fn inv_3_every_permission_request_is_denied_with_a_reason() {
+async fn inv_3_a_permission_request_waits_for_its_owner_and_gets_exactly_their_choice() {
     let mut h = harness(&[("claude", &["--permission"])]);
     let request = spawn(&h, "claude", "read the secret");
     h.server.push(request.clone());
@@ -554,39 +597,230 @@ async fn inv_3_every_permission_request_is_denied_with_a_reason() {
         .session_id
         .expect("spawn acked with its session");
 
+    wait_for("the request to reach the owner", || {
+        h.server
+            .events()
+            .iter()
+            .any(|event| event.event_type == "approval.requested")
+    })
+    .await;
+    let requested = h
+        .server
+        .events()
+        .into_iter()
+        .find(|event| event.event_type == "approval.requested")
+        .unwrap();
+    let event_id = requested.event_id.to_string();
+    // Only the agent's own one-time options, with fixed names; the
+    // `allow_always` the stub offered never crosses, nor does its tool call.
+    // The shape is the golden contract's (docs/api/work-permission-decision.golden.json).
+    let golden: Value = serde_json::from_str(include_str!(
+        "../../../../docs/api/work-permission-decision.golden.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        requested.payload["options"],
+        golden["approval_requested_event"]["payload"]["options"]
+    );
+    for key in ["action", "action_type", "status"] {
+        assert_eq!(
+            requested.payload[key], golden["approval_requested_event"]["payload"][key],
+            "{key}"
+        );
+    }
+    let text = requested.payload.to_string();
+    assert!(
+        !text.contains("allow-always") && !text.contains("id_ed25519"),
+        "{text}"
+    );
+
+    // Nothing answers the agent until the owner decides.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        permission_outcomes(&h).is_empty(),
+        "the agent waits for its owner"
+    );
+
+    // Refused, and the request keeps waiting:
+    //  * somebody other than the owner (ADR-0188 D3);
+    let stranger = decision(
+        &h,
+        Uuid::new_v4(),
+        session,
+        &event_id,
+        "allow-once",
+        "allow_once",
+    );
+    //  * an option the bridge never relayed, even labelled as a once kind;
+    let always = decision(
+        &h,
+        h.owner,
+        session,
+        &event_id,
+        "allow-always",
+        "allow_once",
+    );
+    //  * an offered option under the other kind;
+    let relabelled = decision(&h, h.owner, session, &event_id, "reject-once", "allow_once");
+    //  * a nonce this session never issued.
+    let unknown = decision(
+        &h,
+        h.owner,
+        session,
+        &Uuid::new_v4().to_string(),
+        "allow-once",
+        "allow_once",
+    );
+    for control in [&stranger, &always, &relabelled, &unknown] {
+        h.server.push(control.clone());
+    }
+    h.controls.poll_once().await.unwrap();
+    assert_eq!(
+        ack_for(&h, stranger.id),
+        ControlAck::refused("requester_not_owner")
+    );
+    assert_eq!(
+        ack_for(&h, always.id),
+        ControlAck::refused("permission_option_refused")
+    );
+    assert_eq!(
+        ack_for(&h, relabelled.id),
+        ControlAck::refused("permission_option_refused")
+    );
+    assert_eq!(
+        ack_for(&h, unknown.id),
+        ControlAck::refused("permission_request_unknown")
+    );
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        permission_outcomes(&h).is_empty(),
+        "no refused decision answered the agent"
+    );
+
+    // The owner's choice is exactly what the agent gets.
+    let allow = decision(&h, h.owner, session, &event_id, "allow-once", "allow_once");
+    h.server.push(allow.clone());
+    h.controls.poll_once().await.unwrap();
+    assert_eq!(ack_for(&h, allow.id), ControlAck::ok(Some(session)));
     wait_for("the turn to end", || {
         h.server
             .statuses(session)
             .contains(&SessionStatus::Idle { exit_code: 0 })
     })
     .await;
-
-    let outcomes: Vec<Value> = stub_log(&h)
-        .into_iter()
-        .filter_map(|entry| entry.get("permission_outcome").cloned())
-        .collect();
     assert_eq!(
-        outcomes,
-        vec![json!({"outcome": "selected", "optionId": "reject-once"})],
-        "the host must answer the agent's own one-time rejection — never an allow option"
+        permission_outcomes(&h),
+        vec![json!({"outcome": "selected", "optionId": "allow-once"})]
     );
 
+    // Once: the same decision again names an answered request.
+    let again = decision(&h, h.owner, session, &event_id, "allow-once", "allow_once");
+    h.server.push(again.clone());
+    h.controls.poll_once().await.unwrap();
+    assert_eq!(
+        ack_for(&h, again.id),
+        ControlAck::refused("permission_request_unknown")
+    );
+    assert_eq!(permission_outcomes(&h).len(), 1);
+    // The host made no decision of its own on the stream.
+    assert!(
+        h.server
+            .events()
+            .iter()
+            .all(|event| event.event_type != "approval.decided"),
+        "the server announces the owner's decision, not the host"
+    );
+}
+
+#[tokio::test]
+async fn inv_3b_a_request_nobody_answers_is_denied_and_one_that_cannot_be_relayed_is_denied_at_once(
+) {
+    // The host's own wait runs out: the agent's own one-time rejection, and
+    // the request withdrawn on the server with the reason.
+    let mut h = harness_waiting(
+        &[("claude", AdapterKind::Claude, &["--permission"])],
+        Duration::from_millis(400),
+    );
+    let request = spawn(&h, "claude", "read the secret");
+    h.server.push(request.clone());
+    h.controls.poll_once().await.unwrap();
+    let session = ack_for(&h, request.id).session_id.unwrap();
+    wait_for("the turn to end", || {
+        h.server
+            .statuses(session)
+            .contains(&SessionStatus::Idle { exit_code: 0 })
+    })
+    .await;
+    assert_eq!(
+        permission_outcomes(&h),
+        vec![json!({"outcome": "selected", "optionId": "reject-once"})],
+        "never an allow option"
+    );
     let events = h.server.events();
-    let decided = events
+    let requested = events
+        .iter()
+        .find(|event| event.event_type == "approval.requested")
+        .unwrap();
+    let withdrawn = events
         .iter()
         .find(|event| event.event_type == "approval.decided")
-        .expect("the denial is on the stream");
-    assert_eq!(decided.payload["status"], "rejected");
-    assert!(
-        events.iter().any(|event| event.event_type == "agent.status"
-            && event.payload["detail"] == PERMISSION_DENIED_DETAIL),
-        "the reason is on the stream"
+        .expect("the withdrawal is on the stream");
+    assert_eq!(withdrawn.payload["status"], "rejected");
+    assert_eq!(
+        withdrawn.payload["request_event_id"],
+        json!(requested.event_id),
+        "it names the request it withdraws"
     );
-    assert!(
-        events
+    assert!(events.iter().any(|event| event.event_type == "agent.status"
+        && event.payload["detail"] == PERMISSION_EXPIRED_DETAIL));
+    drop(h);
+
+    // A server that does not take the request: denied at once, as before the
+    // bridge existed.
+    let mut h = harness(&[("claude", &["--permission"])]);
+    *h.server.refuse_event_type.lock().unwrap() = Some("approval.requested".into());
+    let request = spawn(&h, "claude", "read the secret");
+    h.server.push(request.clone());
+    h.controls.poll_once().await.unwrap();
+    let session = ack_for(&h, request.id).session_id.unwrap();
+    wait_for("the turn to end", || {
+        h.server
+            .statuses(session)
+            .contains(&SessionStatus::Idle { exit_code: 0 })
+    })
+    .await;
+    assert_eq!(
+        permission_outcomes(&h),
+        vec![json!({"outcome": "selected", "optionId": "reject-once"})]
+    );
+    assert!(h
+        .server
+        .events()
+        .iter()
+        .any(|event| event.event_type == "agent.status"
+            && event.payload["detail"] == PERMISSION_DENIED_DETAIL));
+    drop(h);
+
+    // The session ends while the request waits: `cancelled`.
+    let mut h = harness(&[("claude", &["--permission"])]);
+    let request = spawn(&h, "claude", "read the secret");
+    h.server.push(request.clone());
+    h.controls.poll_once().await.unwrap();
+    let session = ack_for(&h, request.id).session_id.unwrap();
+    wait_for("the request to reach the owner", || {
+        h.server
+            .events()
             .iter()
-            .all(|event| event.event_type != "approval.requested"),
-        "no preview of the request (its tool call or options) crosses to the room"
+            .any(|event| event.event_type == "approval.requested")
+    })
+    .await;
+    let kill = control(&h, "kill", h.owner, Some(session), json!({}));
+    h.server.push(kill.clone());
+    h.controls.poll_once().await.unwrap();
+    assert_eq!(ack_for(&h, kill.id), ControlAck::ok(Some(session)));
+    assert_eq!(
+        permission_outcomes(&h),
+        vec![json!({"outcome": "cancelled"})]
     );
 }
 

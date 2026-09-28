@@ -444,6 +444,7 @@ pub async fn run(
             // Filtered per launch to `policy::AGENT_ENV_ALLOWLIST` (#2630 F1).
             parent_env: std::env::vars().collect(),
             max_sessions: config.max_sessions,
+            permission_wait: crate::session::DEFAULT_PERMISSION_WAIT,
             codex,
         },
     );

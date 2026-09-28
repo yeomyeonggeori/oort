@@ -25,10 +25,31 @@
 //!    created, and only after that the first prompt sent.
 //!
 //! After that the session task owns the agent. It relays the curated event
-//! stream ([`crate::projection`]), answers every `session/request_permission`
-//! with a denial plus the reason on the stream ([`policy::decide_permission`]),
-//! reports `idle` when a turn ends and `running` before the next one, and closes
-//! the session if the agent ever leaves the fixed mode.
+//! stream ([`crate::projection`]), bridges every `session/request_permission`
+//! to its owner (ADR-0188 D5, #3000 — below), reports `idle` when a turn ends
+//! and `running` before the next one, and closes the session if the agent ever
+//! leaves the fixed mode.
+//!
+//! ## The permission bridge (ADR-0188 D5)
+//!
+//! A request that offers an `allow_once` or a `reject_once` is relayed as an
+//! `approval.requested` event carrying only those options
+//! ([`policy::bridge_options`]); the event's id is the request's one-time
+//! nonce. The agent is not answered until one of these happens:
+//!
+//! * a `permission` control from the owner names that event id and one of the
+//!   relayed options with its kind ([`policy::owner_choice`]) — the agent gets
+//!   exactly that option. A control naming anything else is refused and the
+//!   request keeps waiting; one naming an unknown or answered id is refused
+//!   (`permission_request_unknown`) and discarded;
+//! * the host's own wait ([`SessionSettings::permission_wait`], longer than
+//!   the server's deadline) runs out — the agent's own one-time rejection, and
+//!   an `approval.decided` that withdraws the request on the server;
+//! * the session ends — `cancelled`, as ACP requires of a client that cancels.
+//!
+//! A request that offers neither kind, or that the server does not take, is
+//! denied at once with the reason on the stream ([`policy::decide_permission`]),
+//! exactly as before the bridge existed.
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::PathBuf;
@@ -103,9 +124,17 @@ const TERMINATE_GRACE: Duration = Duration::from_secs(3);
 const MODE_CONFIRM_GRACE: Duration = Duration::from_secs(2);
 const CANCEL_GRACE: Duration = Duration::from_secs(2);
 
-/// Shown on the session stream when a permission request is refused.
+/// Shown on the session stream when a permission request is refused without
+/// reaching the owner (nothing bridgeable on offer, or the server did not take
+/// it).
 pub const PERMISSION_DENIED_DETAIL: &str =
-    "권한 요청을 거부했습니다. 원격 세션의 권한 승인은 아직 열리지 않았습니다.";
+    "권한 요청을 거부했습니다. 이 요청은 원격 승인으로 보낼 수 없었습니다.";
+/// Shown when the owner's decision did not arrive within the host's wait.
+pub const PERMISSION_EXPIRED_DETAIL: &str = "권한 요청에 제때 답이 없어 거부했습니다.";
+/// How long the host keeps an agent's permission request open for its owner:
+/// the server's deadline (`momo_t3::work_permission::PERMISSION_REQUEST_TTL_SECONDS`,
+/// 600 s) plus a margin, so an in-time decision is never discarded here.
+pub const DEFAULT_PERMISSION_WAIT: Duration = Duration::from_secs(630);
 /// Shown when the agent leaves the fixed permission mode.
 pub const MODE_ESCAPED_DETAIL: &str = "권한 모드가 고정 모드를 벗어나 원격 세션을 닫았습니다.";
 
@@ -122,6 +151,9 @@ pub struct SessionSettings {
     pub max_sessions: usize,
     /// Codex's host-only home and temp folder (ADR-0188 §8).
     pub codex: policy::CodexHome,
+    /// How long a bridged permission request waits for its owner
+    /// ([`DEFAULT_PERMISSION_WAIT`]).
+    pub permission_wait: Duration,
 }
 
 /// Most instructions one session keeps queued behind its running turn
@@ -136,6 +168,22 @@ enum Command {
     Kill {
         reply: oneshot::Sender<i32>,
     },
+    /// The owner's decision on one bridged permission request (ADR-0188 D5).
+    Permission {
+        request_event_id: Uuid,
+        option_id: String,
+        kind: String,
+        reply: oneshot::Sender<Result<(), Refusal>>,
+    },
+}
+
+/// A permission request relayed to the owner and not yet answered.
+struct PendingPermission {
+    /// The agent's JSON-RPC request id.
+    rpc_id: Value,
+    /// What the owner may choose — the agent's own one-time options.
+    offered: Vec<policy::PermissionOption>,
+    deadline: Instant,
 }
 
 struct SessionHandle {
@@ -296,6 +344,8 @@ impl SessionManager {
             queue: VecDeque::new(),
             in_flight: None,
             start_pending: false,
+            permissions: HashMap::new(),
+            permission_wait: self.settings.permission_wait,
         };
         let join = tokio::spawn(task.run(receiver));
         self.sessions.insert(
@@ -334,6 +384,33 @@ impl SessionManager {
         handle
             .commands
             .send(Command::Prompt { text, reply })
+            .await
+            .map_err(|_| Refusal::SessionClosed)?;
+        answer.await.unwrap_or(Err(Refusal::SessionClosed))
+    }
+
+    /// Hand the owner's decision to the session waiting on it (ADR-0188 D5).
+    pub async fn permission(
+        &mut self,
+        session_id: Uuid,
+        request_event_id: Uuid,
+        option_id: String,
+        kind: String,
+    ) -> Result<(), Refusal> {
+        self.reap();
+        let handle = self
+            .sessions
+            .get(&session_id)
+            .ok_or(Refusal::SessionNotFound)?;
+        let (reply, answer) = oneshot::channel();
+        handle
+            .commands
+            .send(Command::Permission {
+                request_event_id,
+                option_id,
+                kind,
+                reply,
+            })
             .await
             .map_err(|_| Refusal::SessionClosed)?;
         answer.await.unwrap_or(Err(Refusal::SessionClosed))
@@ -568,6 +645,9 @@ struct SessionTask {
     in_flight: Option<oneshot::Receiver<RpcResult>>,
     /// A queued prompt could not start (transient server error); retry on tick.
     start_pending: bool,
+    /// Bridged permission requests waiting for the owner, by event id.
+    permissions: HashMap<Uuid, PendingPermission>,
+    permission_wait: Duration,
 }
 
 impl SessionTask {
@@ -595,6 +675,16 @@ impl SessionTask {
                     Some(End::Killed(reply))
                 }
                 Event::Command(Some(Command::Kill { reply })) => Some(End::Killed(reply)),
+                Event::Command(Some(Command::Permission {
+                    request_event_id,
+                    option_id,
+                    kind,
+                    reply,
+                })) => {
+                    let (answer, end) = self.on_owner_decision(request_event_id, &option_id, &kind);
+                    let _ = reply.send(answer);
+                    end
+                }
                 Event::Command(Some(Command::Prompt { text, reply })) => {
                     if self.queue.len() >= MAX_QUEUED_PROMPTS {
                         let _ = reply.send(Err(Refusal::InputQueueFull));
@@ -626,7 +716,9 @@ impl SessionTask {
                     // adapter's group is known before anything can orphan it.
                     self.conn.observe_tree();
                     self.relay.flush_due().await;
-                    if self.start_pending {
+                    if let Some(end) = self.expire_permissions().await {
+                        Some(end)
+                    } else if self.start_pending {
                         self.start_next_turn().await
                     } else {
                         None
@@ -676,13 +768,7 @@ impl SessionTask {
             }
             Incoming::Notification { .. } => None,
             Incoming::Request { id, method, params } if method == "session/request_permission" => {
-                // ADR-0188 D5/D6: denied, always, until the R1 bridge exists.
-                let decision = policy::decide_permission(&policy::permission_options(&params));
-                if self.conn.respond(id, decision.to_result()).is_err() {
-                    return Some(End::AgentExited);
-                }
-                self.relay.permission_denied().await;
-                None
+                self.on_permission_request(id, &params).await
             }
             Incoming::Request { id, .. } => {
                 // `fs/*` and `terminal/*` were not offered in `initialize`, and
@@ -695,6 +781,93 @@ impl SessionTask {
                 None
             }
         }
+    }
+
+    /// ADR-0188 D5: relay the request to the owner, or deny it at once when
+    /// it cannot be relayed.
+    async fn on_permission_request(&mut self, id: Value, params: &Value) -> Option<End> {
+        let options = policy::permission_options(params);
+        let offered = policy::bridge_options(&options);
+        if !offered.is_empty() {
+            let event_id = Uuid::new_v4();
+            if self.relay.permission_requested(event_id, &offered).await {
+                self.permissions.insert(
+                    event_id,
+                    PendingPermission {
+                        rpc_id: id,
+                        offered,
+                        deadline: Instant::now() + self.permission_wait,
+                    },
+                );
+                return None;
+            }
+            tracing::warn!(session_id = %self.session_id, "permission request not relayed; denied");
+        }
+        let decision = policy::decide_permission(&options);
+        if self.conn.respond(id, decision.to_result()).is_err() {
+            return Some(End::AgentExited);
+        }
+        self.relay
+            .permission_denied(None, PERMISSION_DENIED_DETAIL)
+            .await;
+        None
+    }
+
+    /// The owner's decision, checked against what the agent offered.
+    fn on_owner_decision(
+        &mut self,
+        request_event_id: Uuid,
+        option_id: &str,
+        kind: &str,
+    ) -> (Result<(), Refusal>, Option<End>) {
+        let Some(pending) = self.permissions.get(&request_event_id) else {
+            return (Err(Refusal::PermissionRequestUnknown), None);
+        };
+        let decision = match policy::owner_choice(&pending.offered, option_id, kind) {
+            Ok(decision) => decision,
+            // The request keeps waiting: a malformed decision is not one.
+            Err(refusal) => return (Err(refusal), None),
+        };
+        let pending = self
+            .permissions
+            .remove(&request_event_id)
+            .expect("looked up above");
+        tracing::info!(session_id = %self.session_id, %request_event_id, kind, "owner decided a permission request");
+        if self
+            .conn
+            .respond(pending.rpc_id, decision.to_result())
+            .is_err()
+        {
+            return (Err(Refusal::SessionClosed), Some(End::AgentExited));
+        }
+        (Ok(()), None)
+    }
+
+    /// Requests whose owner did not answer within the host's wait: the
+    /// agent's own one-time rejection, and the request withdrawn on the server.
+    async fn expire_permissions(&mut self) -> Option<End> {
+        let now = Instant::now();
+        let lapsed: Vec<Uuid> = self
+            .permissions
+            .iter()
+            .filter(|(_, pending)| pending.deadline <= now)
+            .map(|(id, _)| *id)
+            .collect();
+        for event_id in lapsed {
+            let pending = self.permissions.remove(&event_id).expect("listed above");
+            let decision = policy::decide_permission(&pending.offered);
+            if self
+                .conn
+                .respond(pending.rpc_id, decision.to_result())
+                .is_err()
+            {
+                return Some(End::AgentExited);
+            }
+            self.relay
+                .permission_denied(Some(event_id), PERMISSION_EXPIRED_DETAIL)
+                .await;
+        }
+        None
     }
 
     async fn start_next_turn(&mut self) -> Option<End> {
@@ -770,6 +943,14 @@ impl SessionTask {
     }
 
     async fn finish(mut self, end: End) {
+        // ACP: a client that cancels answers every pending permission request
+        // `cancelled`. The server cancels the rows when the session ends.
+        for (_, pending) in self.permissions.drain() {
+            let _ = self.conn.respond(
+                pending.rpc_id,
+                policy::PermissionDecision::Cancelled.to_result(),
+            );
+        }
         if let Some(in_flight) = self.in_flight.take() {
             // ACP: cancel the running turn and give the agent a moment to
             // answer it with `cancelled` before its process is stopped.
@@ -919,27 +1100,69 @@ impl EventRelay {
         self.send("agent.status", payload).await;
     }
 
-    /// The denial and its reason, as two events: `approval.decided` (rejected)
-    /// marks the interrupted tool row, and an `agent.status` note says why.
-    /// Neither carries the request's tool call or options — no preview crosses
-    /// (ADR-0188 D5: previews go to the owner's devices only, and that bridge is
-    /// R1's next slice).
-    pub async fn permission_denied(&mut self) {
+    /// A host-made denial and its reason, as two events: `approval.decided`
+    /// (rejected) marks the interrupted tool row — and, when it names the
+    /// bridged request it answers, withdraws that request on the server — and
+    /// an `agent.status` note says why.
+    pub async fn permission_denied(&mut self, request_event_id: Option<Uuid>, detail: &str) {
         self.flush_ready().await;
         let mut decided = Map::new();
         decided.insert("action".into(), json!("decided"));
         decided.insert("status".into(), json!("rejected"));
+        if let Some(request_event_id) = request_event_id {
+            decided.insert("request_event_id".into(), json!(request_event_id));
+        }
         self.send("approval.decided", decided).await;
         self.send(
             "agent.status",
-            projection::status_payload("thinking", [("detail", json!(PERMISSION_DENIED_DETAIL))]),
+            projection::status_payload("thinking", [("detail", json!(detail))]),
         )
         .await;
     }
 
+    /// ADR-0188 D5: the request, for its owner. Only the options the owner may
+    /// choose (the agent's own `allow_once`/`reject_once`), with fixed names —
+    /// nothing the agent wrote (its tool call, its option labels) crosses here.
+    /// The event id is the request's one-time nonce. `true` when the server
+    /// took it; the agent is then answered by the owner's decision.
+    pub async fn permission_requested(
+        &mut self,
+        event_id: Uuid,
+        offered: &[policy::PermissionOption],
+    ) -> bool {
+        self.flush_ready().await;
+        let options: Vec<Value> = offered
+            .iter()
+            .map(|option| {
+                json!({
+                    "option_id": option.option_id,
+                    "kind": option.kind,
+                    "name": if option.kind == "allow_once" { "Allow once" } else { "Reject" },
+                })
+            })
+            .collect();
+        let mut fields = Map::new();
+        fields.insert("action".into(), json!("requested"));
+        fields.insert("action_type".into(), json!("tool_call"));
+        fields.insert("status".into(), json!("pending"));
+        fields.insert("options".into(), Value::Array(options));
+        self.send_as(event_id, "approval.requested", fields).await
+    }
+
     async fn send(&mut self, event_type: &str, fields: Map<String, Value>) {
+        // One id per event, reused across retries: the server dedupes on it.
+        self.send_as(Uuid::new_v4(), event_type, fields).await;
+    }
+
+    /// Send one event under `event_id`; `true` when the server recorded it.
+    async fn send_as(
+        &mut self,
+        event_id: Uuid,
+        event_type: &str,
+        fields: Map<String, Value>,
+    ) -> bool {
         if self.revoked {
-            return;
+            return false;
         }
         let mut payload = Map::new();
         // The server binds an event to its session through these three keys
@@ -949,8 +1172,7 @@ impl EventRelay {
         payload.insert("channel_id".into(), json!(self.channel_id));
         payload.extend(fields);
         let event = AcpEvent {
-            // One id per event, reused across retries: the server dedupes on it.
-            event_id: Uuid::new_v4(),
+            event_id,
             event_type: event_type.to_string(),
             v: 1,
             ts: now_ms(),
@@ -958,10 +1180,10 @@ impl EventRelay {
         };
         for attempt in 0..3u32 {
             match self.api.record_event(self.session_id, &event).await {
-                Ok(()) => return,
+                Ok(()) => return true,
                 Err(ClientError::Unauthorized) => {
                     self.revoked = true;
-                    return;
+                    return false;
                 }
                 Err(error) if error.is_transient() && attempt < 2 => {
                     tokio::time::sleep(Duration::from_millis(250 * 4u64.pow(attempt))).await;
@@ -973,10 +1195,11 @@ impl EventRelay {
                         status = error.status(),
                         "session event dropped"
                     );
-                    return;
+                    return false;
                 }
             }
         }
+        false
     }
 }
 

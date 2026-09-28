@@ -497,6 +497,10 @@ pub async fn revoke(
                 .await?
                 .is_some_and(|record| record.revoked_at_ms.is_none());
             mark_work_host_revoked(conn, host_id).await?;
+            // ADR-0188 D5 (#3000): a revoked host can answer no permission
+            // request, so none of its sessions' requests stays decidable.
+            momo_t3::work_permission::cancel_pending_for_host_in_tx(conn, workspace_id, host_id)
+                .await?;
             let record = load_work_host(conn, host_id).await?;
             // Idempotent revoke: only the one that revoked announces it.
             if let (true, Some(record)) = (was_live, &record) {

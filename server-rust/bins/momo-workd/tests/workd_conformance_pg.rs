@@ -46,6 +46,7 @@
 //! | `wdc_2_mode_correction_codex_and_refusals_on_a_member_host` | the owner's resume onto an agent that opens in `auto` is corrected to the fixed mode before its first prompt and runs (#2607); one that refuses the correction is refused (`permission_mode_refused`) and the session the server allocated for it is ended by the host; a Codex resume runs from the host's own `CODEX_HOME`, with the host's own folder as `HOME` and the confined command environment in its config (ADR-0188 §8, #2630); a shell is refused at the resume (403 `remote_host_shell_refused`) and never reaches the host |
 //! | `wdc_3_a_revoked_host_stops` | ADR-0188 D7: after revoke the host gets 401 and exits (code 3) |
 //! | `wdc_4_a_member_host_takes_its_owner_and_kill_only` | the agent's spawn request is refused (`remote_host_kill_only`) and an agent-origin dispatched spawn is never delivered, while the owner's resume completes and an agent's `kill` is delivered; no seed on the wire |
+//! | `wdc_6_the_owner_decides_a_permission_request_once_and_nobody_else_can` | ADR-0188 D5 (#3000): the agent's request becomes a `work_permission_request` row (FORCE RLS); an agent bearer (the owner's own agent), a teammate, an `allow_always` (by kind or by an option id relabelled `allow_once`), an instruction and an unknown request are refused and the agent keeps waiting; the owner's `allow_once` becomes a `permission` control the host acks, the agent gets exactly that option, the server's `approval.decided` and an audit row are written; the same decision again is 200 with one control, a different one 409; a lapsed request is 409 and `expired`; ending the session cancels what is pending and answers the agent `cancelled` |
 //! | `wdc_5_a_workspace_host_is_not_served` | a workspace-scoped host registered through the API by the workspace owner: `momo-workd run` refuses it (exit 2) and sends nothing |
 
 use std::net::SocketAddr;
@@ -1000,6 +1001,129 @@ async fn session_events(
         .collect()
 }
 
+/// ADR-0188 D5 (#3000): the session's pending permission request, once the
+/// host has relayed it — its `approval.requested` event id.
+async fn wait_for_pending_permission(su: &PgPool, session: Uuid, workd: &Workd) -> Uuid {
+    wait_until("a pending permission request", workd, || async {
+        sqlx::query_scalar::<_, Uuid>(
+            "SELECT request_event_id FROM work_permission_request \
+              WHERE work_session_id = $1 AND status = 'pending' \
+              ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(session)
+        .fetch_optional(su)
+        .await
+        .expect("read permission requests")
+    })
+    .await
+}
+
+async fn permission_status(su: &PgPool, session: Uuid, request: Uuid) -> String {
+    sqlx::query_scalar(
+        "SELECT status FROM work_permission_request \
+          WHERE work_session_id = $1 AND request_event_id = $2",
+    )
+    .bind(session)
+    .bind(request)
+    .fetch_one(su)
+    .await
+    .expect("read permission request")
+}
+
+/// `POST …/work-sessions/{session}/permission-decisions` → (status, body).
+async fn decide(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    fixture: &Fixture,
+    session: Uuid,
+    body: Value,
+) -> (u16, Value) {
+    let response = http
+        .post(format!(
+            "{base}/v1/workspaces/{}/work-sessions/{session}/permission-decisions",
+            fixture.workspace
+        ))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .expect("permission decision");
+    let status = response.status().as_u16();
+    let body = response.json().await.unwrap_or(Value::Null);
+    (status, body)
+}
+
+/// A teammate: an active human in the workspace and in the session's channel,
+/// signed in. Returns their bearer.
+async fn teammate_token(
+    su: &PgPool,
+    http: &reqwest::Client,
+    base: &str,
+    fixture: &Fixture,
+) -> String {
+    let teammate = Uuid::new_v4();
+    let email = format!("{teammate}@wdc3000.test");
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, 'human', $3, $3)",
+    )
+    .bind(teammate)
+    .bind(fixture.workspace)
+    .bind(teammate.to_string())
+    .execute(su)
+    .await
+    .expect("seed teammate");
+    sqlx::query(
+        "INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash) \
+         VALUES ($1, $2, $3, true, momo_password_hash($4))",
+    )
+    .bind(teammate)
+    .bind(fixture.workspace)
+    .bind(&email)
+    .bind(TEST_PASSWORD)
+    .execute(su)
+    .await
+    .expect("seed teammate auth");
+    // An admin, even: a role is not a substitute for being the owner.
+    sqlx::query(
+        "INSERT INTO workspace_membership (workspace_id, member_id, role) VALUES ($1, $2, 'admin')",
+    )
+    .bind(fixture.workspace)
+    .bind(teammate)
+    .execute(su)
+    .await
+    .expect("seed teammate membership");
+    sqlx::query(
+        "INSERT INTO membership (workspace_id, channel_id, member_id, role) \
+         VALUES ($1, $2, $3, 'member') \
+         ON CONFLICT (channel_id, member_id) DO UPDATE SET left_at = NULL",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .bind(teammate)
+    .execute(su)
+    .await
+    .expect("seed teammate channel membership");
+    let body: Value = http
+        .post(format!("{base}/v1/auth/login"))
+        .json(&json!({
+            "email": email,
+            "password": TEST_PASSWORD,
+            "workspace": fixture.workspace.to_string(),
+        }))
+        .send()
+        .await
+        .expect("teammate login")
+        .json()
+        .await
+        .expect("teammate login body");
+    body["accessToken"]
+        .as_str()
+        .expect("teammate accessToken")
+        .to_string()
+}
+
 fn listening_tcp_sockets(pid: u32) -> String {
     let output = Command::new("lsof")
         .args(["-nP", "-a", "-p", &pid.to_string(), "-iTCP", "-sTCP:LISTEN"])
@@ -1059,6 +1183,20 @@ async fn wdc_1_owner_resume_round_trip_and_no_seed_on_the_wire() {
     })
     .await;
     eprintln!("wdc_1: the owner's resume {spawn} acked with session {session}");
+    // ADR-0188 D5 (#3000): the agent's permission request waits for its
+    // owner; the owner refuses it through the decision route.
+    let request = wait_for_pending_permission(&su, session, &workd).await;
+    let (status, body) = decide(
+        &http,
+        base,
+        &token,
+        &fixture,
+        session,
+        json!({"requestEventId": request, "optionId": "reject-once", "kind": "reject_once"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["permissionRequest"]["status"], "rejected");
     wait_until("the first turn to go idle", &workd, || async {
         (session_status(&su, session).await == "idle").then_some(())
     })
@@ -1087,17 +1225,27 @@ async fn wdc_1_owner_resume_round_trip_and_no_seed_on_the_wire() {
         .iter()
         .any(|row| row["props"]["event"]["tool_call_name"] == "execute"));
     let decided = of_type("approval.decided");
-    assert_eq!(decided.len(), 1, "one denial on the ledger");
+    assert_eq!(decided.len(), 1, "one decision on the ledger");
     assert_eq!(decided[0]["props"]["event"]["status"], "rejected");
-    assert!(
-        of_type("agent.status")
-            .iter()
-            .any(|row| row["body"] == PERMISSION_DENIED_DETAIL),
-        "the reason is on the ledger"
+    assert_eq!(
+        decided[0]["props"]["event"]["request_event_id"],
+        json!(request.to_string())
+    );
+    let requested = of_type("approval.requested");
+    assert_eq!(requested.len(), 1, "one request on the ledger");
+    assert_eq!(
+        requested[0]["props"]["event"]["options"],
+        json!([
+            {"option_id": "allow-once", "kind": "allow_once", "name": "Allow once"},
+            {"option_id": "reject-once", "kind": "reject_once", "name": "Reject"}
+        ]),
+        "only the one-time options, and no text the agent wrote"
     );
     assert!(
-        of_type("approval.requested").is_empty(),
-        "no preview crosses"
+        !of_type("agent.status")
+            .iter()
+            .any(|row| row["body"] == PERMISSION_DENIED_DETAIL),
+        "the host did not deny on its own"
     );
     let ledger = serde_json::to_string(&events).unwrap();
     assert!(
@@ -1116,10 +1264,10 @@ async fn wdc_1_owner_resume_round_trip_and_no_seed_on_the_wire() {
     assert_eq!(
         outcomes,
         vec![json!({"outcome": "selected", "optionId": "reject-once"})],
-        "the agent was answered with its own one-time rejection"
+        "the agent was answered with the owner's one-time rejection"
     );
     eprintln!(
-        "wdc_1: {} session events on the ledger, denial + reason present",
+        "wdc_1: {} session events on the ledger, the owner's rejection present",
         events.len()
     );
     // #2630 F1, through the real `run`: the host's environment reached
@@ -1648,4 +1796,377 @@ async fn wdc_5_a_workspace_host_is_not_served() {
         "a host that is not served never comes online"
     );
     eprintln!("wdc_5: workspace host {host} refused by run (exit 2), nothing sent");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn wdc_6_the_owner_decides_a_permission_request_once_and_nobody_else_can() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed_fixture(&su, &app_pool).await;
+    let server = start_server(app_pool.clone()).await;
+    let base = server.base.as_str();
+    let http = reqwest::Client::new();
+    let token = login(&http, base, &fixture).await;
+    let teammate = teammate_token(&su, &http, base, &fixture).await;
+    // The owner's own agent (`agent.owner_human_id` = the owner) — the one
+    // whose request this is, in spirit.
+    let agent = agent_bearer(&su, &fixture).await;
+
+    let mut workd = Workd::new(base, &fixture, &[("claude", &["--permission"])]);
+    let registered = workd.register(&token).await;
+    let host = Uuid::parse_str(registered["hostId"].as_str().expect("hostId")).unwrap();
+    workd.start();
+    let resumed = owner_resume(
+        &su,
+        &http,
+        base,
+        &token,
+        &fixture,
+        host,
+        "claude",
+        "read the secret",
+    )
+    .await;
+    let (session, _) = accepted_resume(&su, &fixture, host, resumed).await;
+    let request = wait_for_pending_permission(&su, session, &workd).await;
+    eprintln!("wdc_6: session {session} waits on permission request {request}");
+
+    // ---- the table is a tenant table (FORCE RLS) ----------------------------
+    let forced: bool = sqlx::query_scalar(
+        "SELECT relrowsecurity AND relforcerowsecurity FROM pg_class \
+          WHERE oid = 'public.work_permission_request'::regclass",
+    )
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(forced, "work_permission_request is ENABLE + FORCE RLS");
+    // As `momo_app` (NOBYPASSRLS): another workspace's scope sees nothing,
+    // this workspace's sees its request.
+    for (scope, expected) in [(Uuid::new_v4(), 0i64), (fixture.workspace, 1i64)] {
+        let mut tx = app_pool.begin().await.unwrap();
+        sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+            .bind(scope.to_string())
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let seen: i64 = sqlx::query_scalar("SELECT count(*) FROM work_permission_request")
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+        tx.rollback().await.unwrap();
+        assert_eq!(seen, expected, "RLS scope {scope}");
+    }
+
+    let allow = json!({"requestEventId": request, "optionId": "allow-once", "kind": "allow_once"});
+    let refused = |status: u16, body: &Value, code: &str| {
+        assert_eq!(body["error"]["code"], code, "{status} {body}");
+    };
+
+    // ---- refusals: the agent keeps waiting through all of them -------------
+    // An agent bearer — the owner's own agent — cannot approve its request.
+    let (status, body) = decide(&http, base, &agent, &fixture, session, allow.clone()).await;
+    assert_eq!(status, 403, "an agent never decides: {body}");
+    // A teammate — an admin, in the channel — is not the owner.
+    let (status, body) = decide(&http, base, &teammate, &fixture, session, allow.clone()).await;
+    assert_eq!(status, 403, "{body}");
+    refused(status, &body, "permission_owner_only");
+    // 「항상 허용」, by kind…
+    let (status, body) = decide(
+        &http,
+        base,
+        &token,
+        &fixture,
+        session,
+        json!({"requestEventId": request, "optionId": "allow-once", "kind": "allow_always"}),
+    )
+    .await;
+    assert_eq!(status, 400, "{body}");
+    refused(status, &body, "permission_kind_refused");
+    // …or by the agent's own always option relabelled as a once kind.
+    let (status, body) = decide(
+        &http,
+        base,
+        &token,
+        &fixture,
+        session,
+        json!({"requestEventId": request, "optionId": "allow-always", "kind": "allow_once"}),
+    )
+    .await;
+    assert_eq!(status, 400, "{body}");
+    refused(status, &body, "permission_option_invalid");
+    // An offered option under the other kind.
+    let (status, body) = decide(
+        &http,
+        base,
+        &token,
+        &fixture,
+        session,
+        json!({"requestEventId": request, "optionId": "reject-once", "kind": "allow_once"}),
+    )
+    .await;
+    assert_eq!(status, 400, "{body}");
+    refused(status, &body, "permission_option_invalid");
+    // 「거부하고 지시」's instruction is R2.
+    let (status, body) = decide(
+        &http,
+        base,
+        &token,
+        &fixture,
+        session,
+        json!({"requestEventId": request, "optionId": "reject-once", "kind": "reject_once",
+               "instruction": "use the public key instead"}),
+    )
+    .await;
+    assert_eq!(status, 400, "{body}");
+    refused(status, &body, "permission_instruction_unsupported");
+    // A request this session never made.
+    let (status, _) = decide(
+        &http,
+        base,
+        &token,
+        &fixture,
+        session,
+        json!({"requestEventId": Uuid::new_v4(), "optionId": "allow-once", "kind": "allow_once"}),
+    )
+    .await;
+    assert_eq!(status, 404);
+    // The host's own key cannot fake an owner's approval of the request
+    // (review M-2): a host-relayed `approval.decided` naming a request must
+    // say `rejected` (a withdrawal).
+    {
+        use momo_workd::client::HostApi as _;
+        let key = momo_workd::keystore::KeyStore::dev_file(workd.key.clone())
+            .load()
+            .expect("dev key")
+            .expect("key present");
+        let signed = momo_workd::client::HostClient::new(
+            base.to_string(),
+            fixture.workspace,
+            host,
+            Arc::new(key),
+        )
+        .unwrap();
+        let forged = momo_workd::client::AcpEvent {
+            event_id: Uuid::new_v4(),
+            event_type: "approval.decided".into(),
+            v: 1,
+            ts: 1,
+            payload: json!({
+                "run_id": session, "work_session_id": session, "channel_id": fixture.channel,
+                "action": "decided", "status": "approved", "option_id": "allow-once",
+                "request_event_id": request,
+            }),
+        };
+        let refused = signed.record_event(session, &forged).await.unwrap_err();
+        assert_eq!(refused.status(), Some(400), "{refused}");
+    }
+    assert_eq!(permission_status(&su, session, request).await, "pending");
+    let controls: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM work_control WHERE session_id = $1 AND kind = 'permission'",
+    )
+    .bind(session)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(controls, 0, "no refused decision made a control");
+    assert!(
+        workd
+            .record("claude")
+            .iter()
+            .all(|entry| entry.get("permission_outcome").is_none()),
+        "the agent is still waiting"
+    );
+    eprintln!(
+        "wdc_6: agent 403, teammate 403, always 400×2, relabel 400, instruction 400, unknown 404"
+    );
+
+    // ---- the owner's allow_once ---------------------------------------------
+    let (status, body) = decide(&http, base, &token, &fixture, session, allow.clone()).await;
+    assert_eq!(status, 200, "{body}");
+    let first = body["permissionRequest"].clone();
+    assert_eq!(first["status"], "approved");
+    assert_eq!(first["decidedKind"], "allow_once");
+    assert_eq!(first["decidedBy"], json!(fixture.owner.to_string()));
+    let control = Uuid::parse_str(first["controlId"].as_str().expect("controlId")).unwrap();
+    wait_until("the permission control ack", &workd, || async {
+        (control_state(&su, control).await.0 == "acked").then_some(())
+    })
+    .await;
+    wait_until("the turn to go idle", &workd, || async {
+        (session_status(&su, session).await == "idle").then_some(())
+    })
+    .await;
+    let outcomes: Vec<Value> = workd
+        .record("claude")
+        .into_iter()
+        .filter_map(|entry| entry.get("permission_outcome").cloned())
+        .collect();
+    assert_eq!(
+        outcomes,
+        vec![json!({"outcome": "selected", "optionId": "allow-once"})],
+        "the agent got exactly the owner's choice"
+    );
+    let (kind, requester, payload): (String, Uuid, Value) =
+        sqlx::query_as("SELECT kind, requester_member_id, payload FROM work_control WHERE id = $1")
+            .bind(control)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(kind, "permission");
+    assert_eq!(requester, fixture.owner);
+    assert_eq!(
+        payload,
+        json!({"request_event_id": request.to_string(), "option_id": "allow-once", "kind": "allow_once"})
+    );
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log \
+          WHERE workspace_id = $1 AND action = 'work.permission.decided' \
+            AND actor_member_id = $2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.owner)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1, "the decision is in the audit log");
+    let events = session_events(&http, base, &token, &fixture, &su, session).await;
+    let decided: Vec<&Value> = events
+        .iter()
+        .filter(|row| row["props"]["event_type"] == "approval.decided")
+        .collect();
+    assert_eq!(decided.len(), 1);
+    assert_eq!(decided[0]["props"]["event"]["status"], "approved");
+    assert_eq!(
+        decided[0]["props"]["event"]["request_event_id"],
+        json!(request.to_string())
+    );
+    eprintln!("wdc_6: owner allow_once → control {control} acked, agent got allow-once, audited");
+
+    // ---- once ------------------------------------------------------------------
+    let (status, body) = decide(&http, base, &token, &fixture, session, allow.clone()).await;
+    assert_eq!(status, 200, "the same decision again is the same answer");
+    assert_eq!(body["permissionRequest"], first);
+    let (status, body) = decide(
+        &http,
+        base,
+        &token,
+        &fixture,
+        session,
+        json!({"requestEventId": request, "optionId": "reject-once", "kind": "reject_once"}),
+    )
+    .await;
+    assert_eq!(status, 409, "{body}");
+    refused(status, &body, "permission_already_decided");
+    let controls: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM work_control WHERE session_id = $1 AND kind = 'permission'",
+    )
+    .bind(session)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(controls, 1, "one decision, one control");
+
+    // ---- a lapsed request -------------------------------------------------------
+    // The owner's next instruction starts a turn with a new request.
+    insert_control(
+        &su,
+        &fixture,
+        host,
+        fixture.owner,
+        Some(session),
+        "input",
+        json!({"text": "and the other one"}),
+    )
+    .await;
+    let second = wait_for_pending_permission(&su, session, &workd).await;
+    assert_ne!(second, request);
+    sqlx::query(
+        "UPDATE work_permission_request SET expires_at = now() - interval '1 second' \
+          WHERE work_session_id = $1 AND request_event_id = $2",
+    )
+    .bind(session)
+    .bind(second)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, body) = decide(
+        &http,
+        base,
+        &token,
+        &fixture,
+        session,
+        json!({"requestEventId": second, "optionId": "allow-once", "kind": "allow_once"}),
+    )
+    .await;
+    assert_eq!(status, 409, "{body}");
+    refused(status, &body, "permission_request_closed");
+    assert_eq!(permission_status(&su, session, second).await, "expired");
+
+    // ---- the session ends: pending requests are cancelled -------------------
+    let stray = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO work_permission_request \
+           (workspace_id, work_session_id, host_id, channel_id, request_event_id, options, expires_at) \
+         VALUES ($1, $2, $3, $4, $5, '[{\"option_id\":\"a\",\"kind\":\"allow_once\"}]', \
+                 now() + interval '10 minutes')",
+    )
+    .bind(fixture.workspace)
+    .bind(session)
+    .bind(host)
+    .bind(fixture.channel)
+    .bind(stray)
+    .execute(&su)
+    .await
+    .unwrap();
+    let kill = insert_control(
+        &su,
+        &fixture,
+        host,
+        fixture.owner,
+        Some(session),
+        "kill",
+        json!({}),
+    )
+    .await;
+    wait_until("the session to end", &workd, || async {
+        (control_state(&su, kill).await.0 == "acked"
+            && session_status(&su, session).await == "ended")
+            .then_some(())
+    })
+    .await;
+    assert_eq!(
+        permission_status(&su, session, stray).await,
+        "cancelled",
+        "ADR-0188 D5: the end cancels what is pending"
+    );
+    assert_eq!(
+        permission_status(&su, session, second).await,
+        "expired",
+        "a closed request stays as it closed"
+    );
+    let outcomes: Vec<Value> = workd
+        .record("claude")
+        .into_iter()
+        .filter_map(|entry| entry.get("permission_outcome").cloned())
+        .collect();
+    assert_eq!(
+        outcomes.last(),
+        Some(&json!({"outcome": "cancelled"})),
+        "the waiting agent is answered `cancelled` when the session ends"
+    );
+    let (status, body) = decide(
+        &http,
+        base,
+        &token,
+        &fixture,
+        session,
+        json!({"requestEventId": stray, "optionId": "a", "kind": "allow_once"}),
+    )
+    .await;
+    assert_eq!(status, 409, "{body}");
+    eprintln!("wdc_6: lapsed → 409 expired; end → pending cancelled, agent answered cancelled");
+
+    assert_eq!(workd.stop().await, Some(0));
 }
