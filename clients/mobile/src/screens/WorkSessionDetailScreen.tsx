@@ -49,6 +49,10 @@ import {
 } from '../features/work/model';
 import {useWorkSessionEvents} from '../features/work/queries';
 import {
+  SignedWorkControls,
+  useSigningRequired,
+} from '../features/work/SignedWorkControls';
+import {
   WorkLocationBadge,
   WorkStatusBadge,
 } from '../features/work/WorkSessionParts';
@@ -79,6 +83,11 @@ export default function WorkSessionDetailScreen({
   const session =
     sessionsQuery.data?.find(candidate => uuidEq(candidate.id, sessionId)) ?? null;
   const eventsQuery = useWorkSessionEvents(workspaceId, session);
+  const isOwner =
+    session !== null && session.memberId.toLowerCase() === member.id.toLowerCase();
+  // R2-E8 (#3028): the owner may allow and instruct from here once the server
+  // requires device signatures (D-11). Otherwise this stays read-only.
+  const signing = useSigningRequired(workspaceId, isOwner);
 
   const channels = useMemo(
     () => [...channelsQuery.groups.channels, ...channelsQuery.groups.dms],
@@ -287,6 +296,16 @@ export default function WorkSessionDetailScreen({
             </View>
           ) : null}
 
+          {isOwner ? (
+            <SignedWorkControls
+              workspaceId={workspaceId}
+              memberId={member.id}
+              session={session}
+              events={sessionEvents}
+              online={online}
+            />
+          ) : null}
+
           <View style={styles.originWrap}>
             <Pressable
               accessibilityRole="button"
@@ -329,7 +348,11 @@ export default function WorkSessionDetailScreen({
           </View>
 
           <NoticeBlock
-            headline="읽기 전용으로 확인할 수 있습니다."
+            headline={
+              isOwner && signing
+                ? '허락과 지시만 이 화면에서 보낼 수 있습니다.'
+                : '읽기 전용으로 확인할 수 있습니다.'
+            }
             detail="이 화면은 작업 상태와 진행 요약만 보여 줍니다. 터미널 화면이나 입력 내용, 실행 경로와 환경 정보는 표시하거나 기기에 저장하지 않습니다."
             testID="work-detail-readonly"
           />
