@@ -13,24 +13,42 @@ import {hex, sha256, utf8} from './sha256';
 // `momo_wire::human_control`, the generator `generate.mjs`), and
 // `__tests__/humanControl.test.ts` rebuilds every v1 case from its inputs.
 //
-// The schema is an ARGUMENT, not a constant: E7 (#3027) is minting `v2`. A
-// schema this file has no recipe for is refused before anything is hashed —
-// signing v1 bytes under a v2 label would be a statement nobody meant. E8
-// (#3028) adds v2 here and to the native allow-list together.
+// The schema is an ARGUMENT, not a constant. A schema this file has no recipe
+// for is refused before anything is hashed. #3028 (E8) added `v2` here and to
+// the native allow-list together (ADR-0146 증보 R2-E7): the same 13-line frame;
+// a v2 spawn binds the tool and the channel and may name a resume's successor
+// session. The phone SIGNS v2 (`PHONE_SIGNING_SCHEMA`); v1 stays as a recipe
+// for the E1 vectors. A v1 spawn is refused here — the server and the host
+// refuse it too, so signing one would only ever fail after Face ID.
 //
 // Only what a phone signs is here: `input`, `spawn`, `permission`.
 // `host_register` and `bundle_manifest` are the root Mac's (D-6 ①, ADR-0192 D3).
 // Nothing on this path sends anything; E8 carries the result to the route.
 // =============================================================================
 
-export const HUMAN_CONTROL_SCHEMAS = ['momo.human.control.v1'] as const;
+export const HUMAN_CONTROL_SCHEMAS = [
+  'momo.human.control.v1',
+  'momo.human.control.v2',
+] as const;
 export type HumanControlSchema = (typeof HUMAN_CONTROL_SCHEMAS)[number];
+
+/** What the phone signs (#3028). */
+export const PHONE_SIGNING_SCHEMA: HumanControlSchema = 'momo.human.control.v2';
 
 const ABSENT = '-';
 
 export type HumanControlContent =
   | {kind: 'input'; mode: 'queue' | 'interrupt'; text: string}
-  | {kind: 'spawn'; agentMemberId: string; folderId: string; firstPrompt: string}
+  | {
+      kind: 'spawn';
+      agentMemberId: string;
+      folderId: string;
+      /** v2: the harness (`claude`, `codex`, …). */
+      tool?: string;
+      /** v2: the session thread's channel. */
+      channelId?: string;
+      firstPrompt: string;
+    }
   | {
       kind: 'permission';
       requestEventId: string;
@@ -96,10 +114,17 @@ export function humanControlContentBytes(
     case 'input':
       return utf8(content.text.normalize('NFC'));
     case 'spawn':
+      if (schema === 'momo.human.control.v1') {
+        throw new HumanControlInputError(
+          'a v1 spawn is refused by the server and the host; sign v2',
+        );
+      }
       return utf8(
         [
           line('agentMemberId', content.agentMemberId),
           line('folderId', content.folderId),
+          line('tool', content.tool ?? ''),
+          line('channelId', content.channelId ?? ''),
           content.firstPrompt.normalize('NFC'),
         ].join('\n'),
       );

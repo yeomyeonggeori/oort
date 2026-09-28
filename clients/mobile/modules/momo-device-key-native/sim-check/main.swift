@@ -54,8 +54,8 @@ check(
   Set(rootMacPayloads.map { schemaOf($0.1) }) == ["momo.human.device_endorse.v1", "momo.human.device_revoke.v1"],
   "vectors carry the root-Mac endorse/revoke payloads")
 check(
-  MomoDeviceKeyStore.signingSchemas == ["momo.human.control.v1": 13],
-  "the phone allows only momo.human.control.v1 (13 lines)")
+  MomoDeviceKeyStore.signingSchemas == ["momo.human.control.v1": 13, "momo.human.control.v2": 13],
+  "the phone allows only momo.human.control.v1/v2 (13 lines)")
 
 // ---- 1. no enclave, no key -------------------------------------------------
 check(MomoDeviceKeyStore.secureEnclaveAvailable == false, "secureEnclaveAvailable is false")
@@ -120,7 +120,7 @@ var mutations: [(String, Data)] = [
   ("trailing newline", control + Data([0x0A])),
   ("extra line", control + Data("\nx".utf8)),
   ("one line short", Data(controlText.split(separator: "\n").dropLast().joined(separator: "\n").utf8)),
-  ("schema v2", Data(controlText.replacingOccurrences(of: "momo.human.control.v1", with: "momo.human.control.v2").utf8)),
+  ("schema v3", Data(controlText.replacingOccurrences(of: "momo.human.control.v1", with: "momo.human.control.v3").utf8)),
   ("schema with suffix", Data(controlText.replacingOccurrences(of: "momo.human.control.v1\n", with: "momo.human.control.v1x\n").utf8)),
   ("leading space", Data(" ".utf8) + control),
   ("CR line breaks", Data(controlText.replacingOccurrences(of: "\n", with: "\r\n").utf8)),
