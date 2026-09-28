@@ -930,13 +930,17 @@ const LIVE_LINEAGE_TAIL_SQL: &str = "SELECT id, device_label \
       ORDER BY id DESC \
       LIMIT 1";
 
-/// Revoke the live tail by id, only while it is still live.
-const SPEND_LINEAGE_TAIL_SQL: &str = "UPDATE token \
-        SET revoked_at = now() \
-      WHERE id = $1 \
+/// Every still-live row of one lineage, locked in id order (the order of
+/// every lineage sweep), with whether it is unexpired.
+const LOCK_LIVE_LINEAGE_ROWS_SQL: &str = "SELECT id, (expires_at IS NULL OR expires_at > now()) \
+       FROM token \
+      WHERE workspace_id = $1 \
+        AND actor_member_id = $2 \
+        AND kind = 'session' \
+        AND session_id = $3 \
         AND revoked_at IS NULL \
-        AND (expires_at IS NULL OR expires_at > now()) \
-    RETURNING id";
+      ORDER BY id \
+        FOR UPDATE";
 
 /// #3079: a spent token came back with a verified proof from its lineage's
 /// key — the device that holds the lineage lost a rotation response (sleep,
@@ -952,8 +956,8 @@ const SPEND_LINEAGE_TAIL_SQL: &str = "UPDATE token \
 /// dead: a proof recovers a sign-in, it never resurrects one.
 ///
 /// SABOTAGE(recover-no-member-check): drop the member check — the suspended
-/// member test must go RED. SABOTAGE(recover-no-tail-gate): ignore an empty
-/// `SPEND_LINEAGE_TAIL_SQL` — the concurrent-recovery test must go RED.
+/// member test must go RED. SABOTAGE(recover-no-tail-gate): skip the tail check after
+/// `LOCK_LIVE_LINEAGE_ROWS_SQL` — the concurrent-recovery test must go RED.
 async fn recover_lineage(
     conn: &mut PgConnection,
     reissue: &Reissue<'_>,
@@ -998,17 +1002,25 @@ async fn recover_lineage(
             }
             None => None,
         };
-    // Spend the tail atomically — the recovery's single-use gate, like
+    // Lock the lineage's live rows in id order — the order logout, unlink and
+    // every lineage sweep take (re-review M: spending the tail first locked
+    // the highest id before the lower ones and could deadlock with them) —
+    // then gate on the tail: the recovery's single-use check, like
     // `revoke_token` is a rotation's (review H1). The read above took no lock:
     // a logout, unlink or sweep that committed since has revoked the tail,
-    // and this UPDATE then finds nothing and the lineage stays ended. Two
+    // it is not among the locked rows, and the lineage stays ended. Two
     // concurrent recoveries serialize here and only one mints.
-    let spent_tail: Option<Uuid> = momo_db::sqlx::query_scalar(SPEND_LINEAGE_TAIL_SQL)
-        .bind(tail_id)
-        .fetch_optional(&mut *conn)
+    let locked_live: Vec<(Uuid, bool)> = momo_db::sqlx::query_as(LOCK_LIVE_LINEAGE_ROWS_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(session_id)
+        .fetch_all(&mut *conn)
         .await
         .map_err(DbError::from)?;
-    if spent_tail.is_none() {
+    if !locked_live
+        .iter()
+        .any(|(id, unexpired)| *id == tail_id && *unexpired)
+    {
         return Ok(None);
     }
     revoke_session_lineage_tokens(conn, workspace_id, member_id, session_id)

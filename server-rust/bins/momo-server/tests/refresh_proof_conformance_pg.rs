@@ -19,7 +19,7 @@
 //! | `a_browser_session_is_unchanged_under_require` | require a proof of an unbound lineage |
 //! | `a_proof_never_resurrects_an_ended_lineage` | recover from a lineage with no live refresh row |
 //! | `a_suspended_member_is_not_recovered` | drop the member check in `recover_lineage` |
-//! | `a_sign_out_racing_a_recovery_is_not_undone` | ignore an empty tail spend in `recover_lineage` (SABOTAGE recover-no-tail-gate; review H1) |
+//! | `a_sign_out_racing_a_recovery_is_not_undone` | skip the tail check after the lineage lock (SABOTAGE recover-no-tail-gate; review H1), or lock the tail before the lower ids (deadlock) |
 //! | `a_key_binds_only_to_a_fresh_sign_ins_first_token` | drop `lineage_is_bindable` (review M1) |
 //! | `migration_096_reapplies_as_a_noop_and_keeps_rls_forced` | a non-idempotent statement in 096, or a missing FORCE |
 //!
@@ -825,9 +825,11 @@ async fn a_suspended_member_is_not_recovered() {
 }
 
 /// Review H1: a sign-out that commits while a recovery is under way wins.
-/// The test holds the lineage's tail row locked, lets the recovery read the
-/// tail and block, ends the lineage as a logout would, and commits: the
-/// recovery must find its tail spent and mint nothing.
+/// The test takes the lineage's lowest live row the way every id-ordered
+/// sweep does, lets the recovery read the tail and block, then ends the whole
+/// lineage (which needs the tail row too) and commits: no deadlock (re-review
+/// M — a recovery that locked the tail first would form a cycle here and one
+/// side would die with 40P01), and the recovery mints nothing.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn a_sign_out_racing_a_recovery_is_not_undone() {
@@ -843,7 +845,8 @@ async fn a_sign_out_racing_a_recovery_is_not_undone() {
 
     let mut signout = w.su.begin().await.expect("begin");
     sqlx::query(
-        "SELECT id FROM token WHERE session_id = $1 AND revoked_at IS NULL ORDER BY id FOR UPDATE",
+        "SELECT id FROM token WHERE session_id = $1 AND revoked_at IS NULL \
+          ORDER BY id LIMIT 1 FOR UPDATE",
     )
     .bind(lineage)
     .fetch_all(&mut *signout)
