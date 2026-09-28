@@ -50,7 +50,7 @@ import {
 import { SurfaceGate } from "@/features/capabilities/SurfaceGate";
 import { isDesktop } from "@/lib/tauri";
 import { cn } from "@/design/lib/cn";
-import { LocalTerminalDock } from "@/features/workbench/local/LocalTerminalDock";
+import { ConnectedTerminalDock } from "@/features/workbench/agent/ConnectedTerminalDock";
 import { useDockState } from "@/features/workbench/local/dockState";
 import { isMyWorkTab } from "@momo/core/features/workbench/workTab";
 
@@ -431,7 +431,7 @@ export function AppShell({
               </div>
               {/* 로컬 터미널 도크(#2774, ADR-0190 D1): 데스크탑 셸에서만. 브라우저
                * 탭에는 로컬 PTY가 없으므로 도크도, ⌃` 키도 없다. */}
-              {localTerminal && !myWorkTab && <LocalTerminalDock />}
+              {localTerminal && !myWorkTab && <ConnectedTerminalDock />}
             </main>
           </div>
           {/* Global keyboard paths that must work from any route (R-1 §2). */}

@@ -16,6 +16,8 @@ import { setTerminalTheme } from "./terminalTheme";
 import { LocalTerminalDock } from "./LocalTerminalDock";
 import { createLocalSessions, DOCK_SESSION_KEY, loadBrowserMirror, type PtyPort } from "./localSessions";
 import { openDock, resetDockStateForTest, toggleDockFullscreen, useDockState } from "./dockState";
+import { fixtureAgentSource, type AgentFixtureScene } from "../agent/agentPaneFixtures";
+import { useAgentPaneBindings } from "../agent/agentPanes";
 
 // Reading this as: 로컬 터미널 도크 하네스(진단 표면) for internal team users on
 // web+Tauri, density 7/10, motion 0/10.
@@ -26,6 +28,8 @@ import { openDock, resetDockStateForTest, toggleDockFullscreen, useDockState } f
 // 앱에서 확인한다(PR 본문).
 //
 // `?scene=one|four|full|palette|exited|failed|exited-four|failed-four|exited-harness-four|storage-fail|stack3|stack3-exited|settings-web|settings-desktop`
+// `agent-tab|agent-one|agent-observer|agent-long|agent-unavailable`(#2779): 「내 작업」 탭에
+// A 칸(에이전트 작업 레인 진행 뷰)을 섞어 그린다. 원천은 흉내(`agentPaneFixtures`).
 // `&term=dark|app|light`: 칸 색 테마(#2849). 없으면 저장된 값(기본 어둡게).
 // `palette` 장면은 ANSI 16색·powerline 모양 프롬프트·Claude Code 모양 TUI를 찍고,
 // 채널 자리에 설정 › 터미널의 색 고르기를 둔다(바꾸면 칸이 바로 따라 바뀐다).
@@ -106,6 +110,15 @@ function demoPty(mode: "live" | "exited" | "failed" = "live", banner = BANNER): 
 
 const SIZE = { width: 1600, height: 1000 };
 
+const NO_BINDINGS = {};
+const EMPTY_STORE = {
+  get: () => NO_BINDINGS,
+  subscribe: () => () => undefined,
+  bind: () => undefined,
+  unbind: () => undefined,
+  prune: () => undefined,
+};
+
 const memoryMap = new Map<string, string>();
 const memory = {
   getItem: (k: string) => memoryMap.get(k) ?? null,
@@ -119,6 +132,17 @@ function stack3Layout(): WorkbenchLayout {
   let l = splitPane(defaultWorkbenchLayout(), "p1", "column", SIZE).layout;
   l = splitPane(l, "p2", "column", SIZE).layout;
   return l;
+}
+
+/** A 칸 장면: 로컬 칸 하나 | (A 기다림 / A 실행 중). */
+function agentTabLayout(): WorkbenchLayout {
+  let l = splitPane(defaultWorkbenchLayout(), "p1", "row", SIZE).layout;
+  l = splitPane(l, "p2", "column", SIZE).layout;
+  return focusPaneOrSame(l, "p2");
+}
+
+function focusPaneOrSame(l: WorkbenchLayout, id: string): WorkbenchLayout {
+  return { ...l, focused: id };
 }
 
 function fourLayout(): WorkbenchLayout {
@@ -149,6 +173,12 @@ export function LocalTerminalHarness() {
     [scene]
   );
   const dock = useDockState();
+  const agentScene: AgentFixtureScene | null = scene.startsWith("agent-")
+    ? (scene.slice("agent-".length) as AgentFixtureScene)
+    : null;
+  const agentBase = useMemo(() => (agentScene ? fixtureAgentSource(agentScene) : null), [agentScene]);
+  const agentBindings = useAgentPaneBindings(agentBase?.store ?? EMPTY_STORE);
+  const agent = agentBase ? { ...agentBase, bindings: agentBindings } : undefined;
   const term = params.get("term");
   // 칸이 처음 그려지기 전에 고른다(첫 테마부터 맞게).
   useMemo(() => {
@@ -163,7 +193,9 @@ export function LocalTerminalHarness() {
 
   useMemo(() => {
     try {
-      const layout = scene.startsWith("stack3")
+      const layout = scene === "agent-tab"
+        ? agentTabLayout()
+        : scene.startsWith("stack3")
         ? stack3Layout()
         : scene === "four" || scene === "full" || scene.endsWith("-four")
           ? fourLayout()
@@ -179,6 +211,14 @@ export function LocalTerminalHarness() {
     if (scene !== "full") openDock();
     if (scene === "full") toggleDockFullscreen();
   }, [scene]);
+
+  if (agent) {
+    return (
+      <main className="flex h-full min-h-0 flex-col bg-pane text-ink" data-testid="local-terminal-harness">
+        <LocalTerminalDock sessions={sessions} platform="mac" presentation="tab" agent={agent} />
+      </main>
+    );
+  }
 
   if (scene === "settings-web" || scene === "settings-desktop") {
     return (

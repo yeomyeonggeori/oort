@@ -12,7 +12,7 @@ import { Button } from "@/design/ui/button";
 import { EmptyInvite } from "@/features/common/States";
 import { SurfaceRoute } from "@/features/capabilities/SurfaceGate";
 import { WorkConsoleRoute } from "@/features/workConsole/WorkConsoleRoute";
-import { LocalTerminalDock } from "@/features/workbench/local/LocalTerminalDock";
+import { ConnectedTerminalDock } from "@/features/workbench/agent/ConnectedTerminalDock";
 import { isDesktop } from "@/lib/tauri";
 
 // Reading this as: 작업 탭 라우트(`/work`) for internal team users on web+Tauri,
@@ -48,7 +48,7 @@ export function WorkRoute() {
   if (view === "team") return <TeamWorkRoute />;
   // 셸과 **같은 함수**로 판정한다: 셸이 도크를 내리는 바로 그때만 격자를 그린다.
   if (isMyWorkTab(location.pathname, location.search, desktop)) {
-    return <LocalTerminalDock presentation="tab" />;
+    return <ConnectedTerminalDock presentation="tab" />;
   }
   return (
     <SurfaceRoute surface="workConsole">

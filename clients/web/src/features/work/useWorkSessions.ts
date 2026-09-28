@@ -87,12 +87,14 @@ const LEDGER_POLL_MS = 60_000;
  */
 export function useWorkSessions(
   workspaceId: string,
-  refetchIntervalMs: number = LEDGER_POLL_MS
+  refetchIntervalMs: number = LEDGER_POLL_MS,
+  enabled: boolean = true
 ) {
   return useQuery({
     queryKey: ["work-sessions", workspaceId],
     queryFn: () => fetchWorkSessions(workspaceId),
     refetchInterval: refetchIntervalMs,
+    enabled: enabled && workspaceId !== "",
   });
 }
 
@@ -132,15 +134,21 @@ export interface SessionEventPage {
    * 것이 정확히 가장 최근 리포트다.
    */
   reports: SessionCompletionReport[];
+  /**
+   * `work_session_event`라고 적혔지만 읽지 못한 답글 수(모르는 이벤트 종류, 잘못된
+   * 봉투). A 칸 진행 뷰(#2779)가 「건너뛴 진행 N개」 한 줄로 말한다.
+   */
+  skipped?: number;
 }
 
-async function fetchSessionEvents(
+export async function fetchSessionEvents(
   workspaceId: string,
   channelId: string,
   rootId: string
 ): Promise<SessionEventPage> {
   const events: WorkSessionEvent[] = [];
   const reports: SessionCompletionReport[] = [];
+  let skipped = 0;
   let cursor: number | undefined;
   for (let page = 0; page < EVENT_MAX_PAGES; page += 1) {
     const res = await fetchThreadReplies(
@@ -156,15 +164,19 @@ async function fetchSessionEvents(
         events.push(event);
         continue;
       }
+      if (message.props?.kind === "work_session_event") {
+        skipped += 1;
+        continue;
+      }
       const report = sessionCompletionReport(message);
       if (report) reports.push(report);
     }
     if (res.nextCursor === undefined) {
-      return { events, truncated: false, reports };
+      return { events, truncated: false, reports, skipped };
     }
     cursor = res.nextCursor;
   }
-  return { events, truncated: true, reports };
+  return { events, truncated: true, reports, skipped };
 }
 
 /**
