@@ -468,7 +468,8 @@ describe('rebind — 409 device_key_rebind_required and lineageLive: false (#310
     serverRows = [row({current: false, lineageLive: false})];
     rebindAnswer = {
       status: 200,
-      body: {deviceKey: row({current: false, lineageLive: false})},
+      // Live lineage, but not THIS sign-in's: still not moved here.
+      body: {deviceKey: row({current: false, lineageLive: true})},
     };
     const error = await enrollDeviceKey({workspaceId: WS, label: LABEL()}).catch(e => e);
     expect(error).toBeInstanceOf(EnrollError);

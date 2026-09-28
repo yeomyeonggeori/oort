@@ -132,7 +132,9 @@ check(rejects(rebind + Data([0x0A])), "rejects a rebind letter with a trailing n
 // The key signs only its own move.
 check((try? MomoDeviceKeyStore.checkRebindNamesKey(rebind, publicKeyBase64: rebindKey)) != nil,
   "a rebind letter naming this key passes the own-key check")
-check((try? MomoDeviceKeyStore.checkRebindNamesKey(rebind, publicKeyBase64: "A" + rebindKey.dropFirst())) == nil,
+let otherKey = (rebindKey.hasPrefix("A") ? "B" : "A") + rebindKey.dropFirst()
+check(otherKey != rebindKey, "the other key differs from the letter's")
+check((try? MomoDeviceKeyStore.checkRebindNamesKey(rebind, publicKeyBase64: otherKey)) == nil,
   "a rebind letter naming another key is refused")
 check((try? MomoDeviceKeyStore.checkRebindNamesKey(phonePayloads[0].1, publicKeyBase64: "x")) != nil,
   "the own-key check leaves control payloads alone")
