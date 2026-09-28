@@ -26,7 +26,6 @@ const PORT = Number(process.env.CAPTURE_PORT || 5199);
 
 const workspaceId = "00000000-0000-7000-8000-000000000001";
 const memberId = "00000000-0000-7000-8000-000000000101";
-const hostId = "019a3c1e-5b7d-7e20-9c41-8d2f0a6b3e17";
 const channels = [
   { id: "00000000-0000-7000-8000-000000000201", workspaceId, kind: "public", name: "workbench", muted: false },
 ];

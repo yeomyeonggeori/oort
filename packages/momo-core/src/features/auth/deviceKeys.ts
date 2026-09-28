@@ -10,8 +10,8 @@
 //
 // Signing never happens here: the host Mac's desktop shell holds the Secure
 // Enclave key and builds every signed statement itself (clients/desktop
-// `device_key`). This module is the wire, the parsers, and the fingerprint a
-// person compares between the phone and the Mac.
+// `device_key`). This module is the wire, the parsers and the refusal copy.
+// (The fingerprint lives in clients/web: see `deviceKeysShared.ts`.)
 // =============================================================================
 
 import { settingsRequest } from "../settings/api";
@@ -202,30 +202,6 @@ export function phoneKeyForLinkedDevice(
   if (platform !== "ios" && platform !== "iphone") return undefined;
   const matches = phoneKeys(keys).filter((key) => key.label === device.label);
   return matches.length === 1 ? matches[0] : undefined;
-}
-
-// ---- fingerprint --------------------------------------------------------------
-
-function decodeBase64(value: string): Uint8Array<ArrayBuffer> {
-  const binary = atob(value);
-  const out = new Uint8Array(new ArrayBuffer(binary.length));
-  for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
-  return out;
-}
-
-/**
- * SHA-256 over the 33 compressed key bytes, the first 10 bytes as upper-case hex
- * in five groups of four. The desktop shell's native dialog computes the same
- * value (`payload::fingerprint`, shared case `5BAF F89D E7DE 5C1D 7B61`); the
- * phone should show it too (E6 stage 2).
- */
-export async function deviceKeyFingerprint(publicKeyB64: string): Promise<string> {
-  const bytes = decodeBase64(publicKeyB64);
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
-  const hex = Array.from(digest.slice(0, 10), (b) => b.toString(16).padStart(2, "0"))
-    .join("")
-    .toUpperCase();
-  return hex.match(/.{4}/g)!.join(" ");
 }
 
 // ---- the desktop shell's refusals, in sentences --------------------------------

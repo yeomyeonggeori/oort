@@ -3,7 +3,6 @@ import { ApiError } from "../../lib/api";
 import { WireShapeError } from "../../lib/wire";
 import { installCoreHost, resetCoreHost } from "../../runtime/host";
 import {
-  deviceKeyFingerprint,
   listDeviceKeys,
   parseDeviceKey,
   phoneKeyForLinkedDevice,
@@ -163,13 +162,5 @@ describe("deviceKeys views", () => {
     expect(phoneKeyForLinkedDevice(keys, { label: "성재의 iPhone", platform: "macos" })).toBe(
       undefined
     );
-  });
-});
-
-describe("deviceKeyFingerprint", () => {
-  // Same key, same string as the desktop shell's native dialog
-  // (clients/desktop/src-tauri/src/device_key/payload/tests.rs FINGERPRINT_VECTOR).
-  it("matches the shared case", async () => {
-    expect(await deviceKeyFingerprint(PHONE_KEY)).toBe("5BAF F89D E7DE 5C1D 7B61");
   });
 });

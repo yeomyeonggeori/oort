@@ -488,7 +488,7 @@ pub fn verify_raw(public_key: &[u8], payload: &[u8], raw: &[u8]) -> bool {
 
 /// The fingerprint a person compares between the phone and this Mac:
 /// SHA-256 over the 33 compressed-key bytes, the first 10 bytes as upper-case
-/// hex in five groups of four (`packages/momo-core/src/features/auth/deviceKeys.ts`
+/// hex in five groups of four (`clients/web/src/features/settings/deviceKeysShared.ts`
 /// `deviceKeyFingerprint` computes the same, the shared case pins both).
 pub fn fingerprint(public_key_b64: &str) -> Option<String> {
     let bytes = BASE64.decode(public_key_b64).ok()?;

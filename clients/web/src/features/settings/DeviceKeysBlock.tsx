@@ -5,7 +5,6 @@ import { ApiError } from "@momo/core/lib/api";
 import { NetworkError } from "@momo/core/lib/http";
 import {
   deviceKeyErrorMessage,
-  deviceKeyFingerprint,
   deviceKeyServerMessage,
   listDeviceKeys,
   phoneKeys,
@@ -19,7 +18,11 @@ import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { InlineBanner, Skeleton } from "@/features/common/States";
 import { desktopDeviceKey, type DesktopDeviceKeyStatus } from "@/lib/tauri";
-import { DEVICE_KEYS_QUERY_KEY, hostDeliveryCopy } from "./deviceKeysShared";
+import {
+  DEVICE_KEYS_QUERY_KEY,
+  deviceKeyFingerprint,
+  hostDeliveryCopy,
+} from "./deviceKeysShared";
 import { ConfirmButton, Field, StatusChip, Subsection } from "./SettingsFields";
 
 // Reading this as: settings for internal team users on web+Tauri,
