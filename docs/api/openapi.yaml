@@ -94,6 +94,10 @@ tags:
     description: Channel-bound ephemeral voice huddle lifecycle and LiveKit room grants.
   - name: work-hosts
     description: Registered execution hosts authenticated by Ed25519 heartbeats.
+  - name: device-keys
+    description: >
+      A person's device signing keys (Secure Enclave P-256), bound to the
+      sign-in they were registered under (ADR-0146 개정 2026-09-28 R2).
   - name: work-sessions
     description: Host-owned interactive work session ledger bound to channel thread roots.
   - name: workstreams
@@ -188,7 +192,10 @@ paths:
       description: >
         Single-use rotation (MOMO-300): the presented refresh token is revoked
         atomically; replaying it returns 401. Exactly one concurrent caller
-        wins.
+        wins. A replay — or losing that race — also ends the whole sign-in
+        (#3022, ADR-0188 §4 R1): every live token of the session lineage is
+        revoked, with its push registrations and device keys, so the pair the
+        winner got is refused on its next use.
       security: []
       requestBody:
         required: true
@@ -3210,6 +3217,209 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /v1/workspaces/{workspaceId}/device-keys:
+    post:
+      tags: [device-keys]
+      operationId: registerDeviceKey
+      summary: Register this device's signing public key (ADR-0146 개정 D-1, D-6, D-7).
+      description: >
+        Human bearer only, for the caller only (a `memberId` naming anyone else
+        is 403 `device_key_member_mismatch`). The key is bound to the caller's
+        session lineage and is revoked when that sign-in ends — logout,
+        unlinking the device, a refresh-token reuse, or any path that ends
+        every session of the member. The lineage must still be able to rotate
+        (409 `session_lineage_ended` otherwise). A `macos` key starts as a root
+        candidate (`state: root`); an `ios` key starts `unendorsed` and cannot
+        instruct until a root endorses it. The server's root is advisory: the
+        host Mac's workd pins the real root (D-10).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterDeviceKeyRequest"
+      responses:
+        "201":
+          description: Key registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceKeyResponse"
+        "400":
+          description: Unknown alg or platform, a key that is not a canonical compressed P-256 point, or a bad label.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            Agent bearer, workspace mismatch, inactive membership, or another
+            member named (`device_key_member_mismatch`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            The public key is already live in this workspace
+            (`device_key_already_registered`), or this sign-in has ended
+            (`session_lineage_ended`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      tags: [device-keys]
+      operationId: listDeviceKeys
+      summary: List the caller's own device keys, revoked ones included.
+      description: >
+        Newest first. Revoked keys stay listed with their revocation letter,
+        which workd (E4) is handed. `current` marks keys of the calling sign-in.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The caller's keys.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceKeyListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, workspace mismatch, or inactive membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/device-keys/{keyId}/endorsement:
+    post:
+      tags: [device-keys]
+      operationId: endorseDeviceKey
+      summary: Record a root key's `momo.human.device_endorse.v1` letter for a phone key (D-6 ②).
+      description: >
+        The letter is rebuilt from the stored rows (workspace, member, root key
+        id, the target's alg, public key and label) and verified under the
+        stored root key; only the root key id and the signature travel. The
+        root must be a live, unendorsed `macos` key of the caller; the target a
+        live, unendorsed `ios` key of the caller. The canonical low-s signature
+        is stored. Mac-to-Mac endorsement is the next stage.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EndorseDeviceKeyRequest"
+      responses:
+        "200":
+          description: The endorsed key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceKeyResponse"
+        "400":
+          description: Malformed id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            `device_signature_invalid`, `device_root_not_eligible`,
+            `device_key_member_mismatch`, or `device_key_revoked`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "`device_key_not_found`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`device_key_not_endorsable` — revoked, a Mac, or already endorsed."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/device-keys/{keyId}/revocation:
+    post:
+      tags: [device-keys]
+      operationId: revokeDeviceKey
+      summary: Record a root key's signed `momo.human.device_revoke.v1` letter (D-7).
+      description: >
+        Rebuilt from the stored rows plus `revokedAtMs` (the time inside the
+        letter, not after server time + 5 minutes, not before the key existed)
+        and verified under the caller's live root key. Revokes the key (never
+        deletes it) and keeps the letter for workd. A key a session end already
+        revoked still takes its letter once.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevokeDeviceKeyRequest"
+      responses:
+        "200":
+          description: The revoked key with its letter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceKeyResponse"
+        "400":
+          description: Malformed id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            `device_signature_invalid`, `device_root_not_eligible`,
+            `device_key_member_mismatch`, or `device_key_revoked` (a letter is
+            already recorded).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "`device_key_not_found`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /v1/workspaces/{workspaceId}/work-hosts:
     post:
       tags: [work-hosts]
@@ -3225,7 +3435,12 @@ paths:
         keys on `scope = member`, so the scope is not the registrant's free
         choice. ownerMemberId is always the registering member. The role is
         judged in the same tenant transaction as the insert. Capabilities are
-        boolean tool-availability flags only.
+        boolean tool-availability flags only. ADR-0146 개정 D-8 (#3022): a
+        member-scoped registration may carry `registration`, the caller's root
+        device key's `host_register` statement; when present it is always
+        verified and the host is created under the signed `hostId`. The
+        instance requires it only when `MOMO_HOST_REGISTER_SIGNATURE_REQUIRED`
+        is on (default off until the R1 security re-review PASS, ADR-0146 D-11).
       security:
         - bearerAuth: []
       parameters:
@@ -3247,7 +3462,8 @@ paths:
           description: >
             Invalid scope, type, display name, public key, or capabilities; or
             an `app` host asked to be workspace-scoped (`error.code:
-            app_host_member_scope_required`).
+            app_host_member_scope_required`); or `registration` on a
+            workspace-scoped host, or a malformed one.
           content:
             application/json:
               schema:
@@ -3258,13 +3474,30 @@ paths:
           description: >
             Agent bearer, workspace mismatch, or inactive membership; or a
             workspace-scoped host asked for by a member who is not a workspace
-            owner/admin (`error.code: workspace_host_admin_required`).
+            owner/admin (`error.code: workspace_host_admin_required`); or a
+            member-scoped host without a signature where one is required
+            (`device_signature_required`) or with one that does not hold
+            (`device_signature_invalid`, `device_root_not_eligible`,
+            `device_key_revoked`, `device_key_member_mismatch`,
+            `device_key_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`host_register_replayed` — a host with the signed `hostId` already exists."
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          description: "`instance_id_unconfigured` — a signed registration on an instance with no `MOMO_INSTANCE_ID`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     get:
       tags: [work-hosts]
       operationId: listWorkHosts
@@ -8330,7 +8563,13 @@ components:
                 workspace owner/admin), `app_host_member_scope_required` (an
                 `app` host registered with a scope other than `member`),
                 `key_required_for_new_origin` (a provider chain hop moved to
-                another origin without a new key).
+                another origin without a new key); ADR-0146 개정 R2 (#3022):
+                `device_signature_required`, `device_signature_invalid`,
+                `device_key_revoked`, `device_key_not_found`,
+                `device_key_member_mismatch`, `device_root_not_eligible`,
+                `device_key_not_endorsable`, `device_key_already_registered`,
+                `session_lineage_ended`, `host_register_replayed`,
+                `instance_id_unconfigured`.
 
     # ---- Memory Plane (ADR-0129 / MOMO-526) ---------------------------------
     MemoryScope:
@@ -10725,6 +10964,171 @@ components:
           additionalProperties:
             type: boolean
           description: Boolean tool-availability flags only.
+        registration:
+          $ref: "#/components/schemas/HostRegisterSignature"
+
+    HostRegisterSignature:
+      type: object
+      additionalProperties: false
+      required: [deviceKeyId, hostId, nonce, issuedAtMs, expiresAtMs, signature]
+      description: >
+        The root device key's `momo.human.control.v1` statement with
+        `kind=host_register` (ADR-0146 개정 D-5, D-8). The server rebuilds the
+        bytes from its own instance id, the caller's workspace and member, and
+        this request's `publicKey`, `hostId` and `displayName`; `issuedAtMs`
+        must be within 5 minutes of server time and `expiresAtMs` at most 10
+        minutes after it.
+      properties:
+        deviceKeyId:
+          type: string
+          format: uuid
+        hostId:
+          type: string
+          format: uuid
+          description: The host id candidate; the host is created under it.
+        nonce:
+          type: string
+          format: uuid
+        issuedAtMs:
+          type: integer
+          format: int64
+        expiresAtMs:
+          type: integer
+          format: int64
+        signature:
+          type: string
+          description: base64 of raw r‖s (64 bytes); high-s is accepted and normalized.
+
+    RegisterDeviceKeyRequest:
+      type: object
+      additionalProperties: false
+      required: [alg, publicKey, platform]
+      properties:
+        alg:
+          type: string
+          enum: [p256]
+        publicKey:
+          type: string
+          minLength: 44
+          maxLength: 44
+          description: base64 STANDARD of the 33-byte compressed SEC1 point (canonical encoding).
+        platform:
+          type: string
+          enum: [macos, ios]
+        label:
+          type: string
+          maxLength: 80
+        memberId:
+          type: string
+          format: uuid
+          description: Optional; must be the caller.
+
+    EndorseDeviceKeyRequest:
+      type: object
+      additionalProperties: false
+      required: [rootKeyId, signature]
+      properties:
+        rootKeyId:
+          type: string
+          format: uuid
+        signature:
+          type: string
+          description: base64 of raw r‖s (64 bytes) over `momo.human.device_endorse.v1`.
+
+    RevokeDeviceKeyRequest:
+      type: object
+      additionalProperties: false
+      required: [rootKeyId, revokedAtMs, signature]
+      properties:
+        rootKeyId:
+          type: string
+          format: uuid
+        revokedAtMs:
+          type: integer
+          format: int64
+          description: The time inside the signed letter.
+        signature:
+          type: string
+          description: base64 of raw r‖s (64 bytes) over `momo.human.device_revoke.v1`.
+
+    DeviceKey:
+      type: object
+      required:
+        [id, workspaceId, memberId, alg, publicKey, platform, label, state, canInstruct, current, createdAtMs]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspaceId:
+          type: string
+          format: uuid
+        memberId:
+          type: string
+          format: uuid
+        alg:
+          type: string
+          enum: [p256]
+        publicKey:
+          type: string
+        platform:
+          type: string
+          enum: [macos, ios]
+        label:
+          type: string
+        state:
+          type: string
+          enum: [root, endorsed, unendorsed, revoked]
+          description: >
+            `root` = a live, unendorsed Mac key (root candidate); `endorsed` =
+            a live key whose endorsing root is still live; `unendorsed` = 지시
+            불가; `revoked`.
+        canInstruct:
+          type: boolean
+          description: "`state` is `root` or `endorsed`."
+        current:
+          type: boolean
+          description: Registered under the caller's own sign-in.
+        endorsedByKeyId:
+          type: string
+          format: uuid
+        endorsementSignature:
+          type: string
+        endorsedAtMs:
+          type: integer
+          format: int64
+        createdAtMs:
+          type: integer
+          format: int64
+        revokedAtMs:
+          type: integer
+          format: int64
+        revokedReason:
+          type: string
+          enum: [signed, logout, device_unlinked, refresh_reuse, member_sessions_ended]
+        revokedByKeyId:
+          type: string
+          format: uuid
+        revocationSignature:
+          type: string
+        revocationSignedAtMs:
+          type: integer
+          format: int64
+
+    DeviceKeyResponse:
+      type: object
+      required: [deviceKey]
+      properties:
+        deviceKey:
+          $ref: "#/components/schemas/DeviceKey"
+
+    DeviceKeyListResponse:
+      type: object
+      required: [deviceKeys]
+      properties:
+        deviceKeys:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceKey"
 
     CreateCloudHostRequest:
       type: object

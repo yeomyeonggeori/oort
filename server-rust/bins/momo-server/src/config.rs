@@ -2122,6 +2122,30 @@ fn choose_log_filter(rust_log: Option<&str>, log_level: Option<&str>) -> String 
 mod tests {
     use super::*;
 
+    /// #3022: the requirement is off by default, and turning it on without the
+    /// instance id every signed statement carries is refused at boot.
+    #[test]
+    fn device_key_settings_default_off_and_refuse_an_unsatisfiable_requirement() {
+        let default = DeviceKeySettings::default();
+        assert!(!default.host_register_signature_required);
+        assert_eq!(default.boot_error(), None);
+        let unsatisfiable = DeviceKeySettings {
+            instance_id: None,
+            host_register_signature_required: true,
+        };
+        assert!(unsatisfiable.boot_error().is_some());
+        let on = DeviceKeySettings {
+            instance_id: Some("inst_a".into()),
+            host_register_signature_required: true,
+        };
+        assert_eq!(on.boot_error(), None);
+        let smuggled = DeviceKeySettings {
+            instance_id: Some("inst\nb".into()),
+            host_register_signature_required: false,
+        };
+        assert!(smuggled.boot_error().is_some());
+    }
+
     #[test]
     fn agent_port_origin_is_optional_but_present_values_are_exact_https() {
         let unset = AgentPortConfig::default();
