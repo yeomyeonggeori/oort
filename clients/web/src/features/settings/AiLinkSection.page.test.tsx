@@ -307,6 +307,24 @@ describe("예비 provider 순서는 운영자에게 접혀 남는다 (#2877)", (
   });
 });
 
+describe("기본 AI 표의 운영자 판정 = 팀 연결의 서버 답 (#2881)", () => {
+  it("provider link 200이면 운영자 줄, 팀 요약 칸은 그 연결 이름", async () => {
+    mount();
+    const foot = await until("ai-defaults-team-foot");
+    expect(foot.dataset.operator).toBe("yes");
+    expect(q("ai-default-summary")?.textContent).toContain("OpenAI · 팀 기본");
+  });
+
+  it("403이면 운영자 아님 줄, 팀 키가 있다고도 없다고도 하지 않는다", async () => {
+    vi.mocked(fetchProviderLink).mockRejectedValue(new ApiError(403, "operator required"));
+    mount();
+    const foot = await until("ai-defaults-team-foot");
+    expect(foot.dataset.operator).toBe("no");
+    expect(q("ai-default-summary")?.textContent).toContain("팀 API 키");
+    expect(q("ai-default-teamAgent")?.dataset.state).toBe("ok");
+  });
+});
+
 describe("곁판의 키보드 길 (design-review #2877 H-1·H-2)", () => {
   function esc() {
     act(() => {

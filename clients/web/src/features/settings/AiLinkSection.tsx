@@ -12,7 +12,12 @@ import {
   type ProviderLink,
   type ProviderLinkTest,
 } from "@momo/core/features/settings/api";
-import { teamCheckResult } from "@momo/core/features/settings/teamKeyForm";
+import { teamCheckResult, teamProbeDetail } from "@momo/core/features/settings/teamKeyForm";
+import type { AiDefaultsTeamKey } from "@momo/core/features/settings/aiDefaults";
+import { IS_TAURI } from "@/lib/env";
+import { useSubscriptionEntryState } from "@/features/welcome/SubscriptionAgentEntry";
+import { AiDefaultsTable } from "./AiDefaultsTable";
+import { myAccountsBrowserTab } from "./aiMyAccountsModel";
 import {
   choiceLabel,
   errorMessage,
@@ -68,7 +73,8 @@ import { AiMyAccountsSection } from "./AiMyAccountsSection";
 // 위에서 아래로 선다.
 //   1. 내 계정 · 이 맥 — 이 맥의 공식 CLI 구독(`AiMyAccountsSection`)
 //   2. 팀 연결 · 이 서버 — 서버 provider 연결(아래). 운영자만 바꾼다
-//   3. 기본 AI — 자리만(#2881)
+//   3. 기본 AI — 기능별 표(#2881 `AiDefaultsTable`). 개인 줄은 이 기기 저장, 팀 줄은
+//      운영자 서버 설정(읽기 전용)
 // 줄을 누르면 오른쪽 곁판이 열린다. 목록은 평평한 행, 곁판만 `sheet` 판이다.
 //
 // 팀 연결 줄은 R-1 §5의 인스턴스 전역 provider 연결 하나다(GET/PUT/DELETE +
@@ -176,6 +182,7 @@ export function AiLinkSection({ offline, workspaceId }: { offline: boolean; work
  */
 function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: string }) {
   const client = useQueryClient();
+  const browserTab = myAccountsBrowserTab(useSubscriptionEntryState(), IS_TAURI);
   const query = useQuery({
     queryKey: ["settings", "provider-link"],
     queryFn: fetchProviderLink,
@@ -342,6 +349,12 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
   }, [focusHeadingAfterSave, asideVisible, query.data]);
   const legacy = link ? isLegacyTeamLink(link) : false;
   const operator = query.isSuccess;
+  // 기본 AI 표의 팀 줄 판정은 이 절과 같은 서버 답이다(운영자 200 · 아니면 403).
+  const operatorAnswer: boolean | null = query.isSuccess
+    ? true
+    : query.isError && isOperatorDenied(query.error)
+      ? false
+      : null;
 
   const teamAction =
     operator && link && !hasRow ? (
@@ -363,6 +376,18 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
   const pill = link ? linkPill({ link, offline, probe, checking: check.isPending }) : null;
   // 방금 확인에서 키가 실패했는가. 서버가 부르지 않은 확인(`probe_not_run`)은 실패가 아니다.
   const failed = probe !== null && !probe.ok && probe.reason !== PROBE_NOT_RUN;
+  const defaultsTeamKey: AiDefaultsTeamKey = query.isPending
+    ? { status: "loading" }
+    : !link
+      ? { status: "hidden" }
+      : hasRow
+        ? {
+            status: "present",
+            name: link.endpointLabel,
+            failed,
+            modelCount: teamProbeDetail(probe)?.modelCount ?? null,
+          }
+        : { status: "absent" };
   const rowName = link ? (configured ? `${link.endpointLabel} · 팀 기본` : link.endpointLabel) : "";
 
   const teamSection = (
@@ -519,12 +544,7 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
             title="기본 AI"
             scope="기능마다 부를 계정과 모델"
           />
-          <AiLineRow last>
-            <span className="flex min-w-0 flex-wrap items-center gap-2">
-              기능마다 어떤 AI를 부를지 고르는 표는 준비 중이에요.
-              <AiPill tone="mute">준비 중</AiPill>
-            </span>
-          </AiLineRow>
+          <AiDefaultsTable teamKey={defaultsTeamKey} operator={operatorAnswer} browserTab={browserTab} />
         </AiSection>
       </div>
 

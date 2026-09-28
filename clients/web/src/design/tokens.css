@@ -2450,6 +2450,32 @@
 .ai-acct-row > [data-slot="state"] { grid-area: state; }
 .ai-acct-row > [data-slot="use"] { grid-area: use; }
 .ai-acct-row > [data-slot="more"] { grid-area: more; }
+/* 기본 AI 표의 한 줄 (#2881, 시안 §5 `.dt`): 기능 1.25fr · 선택 1.5fr · 누구 설정 90,
+ * 간격 12. 폭 판정은 목록 열(`ai-pane`) 그릇이다: 520 아래(390 폰 창)에서는 기능과
+ * 「누구 설정」이 한 줄, 선택 칸이 그 밑 전체 폭으로 내려간다(시안 §7 폰 설정 판이
+ * 쌓는 순서). */
+@utility ai-default-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "feature who"
+    "choice choice";
+  column-gap: var(--spacing-3);
+  row-gap: var(--spacing-2);
+  align-items: center;
+
+  @container (width >= 520px) {
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1.5fr) 90px;
+    grid-template-areas: "feature choice who";
+    row-gap: 0;
+  }
+}
+.ai-default-row > [data-slot="feature"] { grid-area: feature; }
+.ai-default-row > [data-slot="choice"] { grid-area: choice; }
+.ai-default-row > [data-slot="who"] { grid-area: who; justify-self: end; }
+@container (width >= 520px) {
+  .ai-default-row > [data-slot="who"] { justify-self: start; }
+}
 /* 로고 칸 36 / 곁판 머리 44 (시안 `.lg`, `.ah .lg`). */
 @utility ai-logo {
   inline-size: 36px;
