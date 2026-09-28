@@ -160,7 +160,9 @@ describe("honest sentences for each answer", () => {
           ? 403
           : 400;
       const f = permissionFailure(new ApiError(status, "", code));
-      expect(f.closed).toBe(true);
+      // 「이 세션 동안」을 서버가 아직 받지 않는 것(#3028)은 요청을 닫지 않는다:
+      // 「이번 한 번」으로 다시 보낼 수 있다.
+      expect(f.closed).toBe(code !== "permission_scope_unsupported");
       expect(f.text).not.toMatch(/permission_|[A-Za-z]{4,}/);
       expect(f.text).toMatch(/요\.$/);
     }

@@ -6,6 +6,8 @@
 //   discovery     _momo._tcp browse               -> `momo:discovery` event
 //   notification  mentions/approvals              -> commands
 //   keychain      refresh token at rest           -> commands
+//   session       the refresh rotation + its proof -> commands (#3106; the
+//                 webview gets the access token and a handle, never the token)
 //   updater       self-replace the app bundle     -> commands + progress event
 //   detect        local hosted-agent signatures   -> command (T-5; passive only)
 //   harnesses     claude/codex installed + login  -> command (#2813; exit code only)
@@ -48,6 +50,15 @@ mod profile_signout;
 mod harness_status;
 mod keychain;
 mod notification;
+// The shell's own refresh rotation with the refresh-key proof (#3106,
+// ADR-0146 D-7 증보 #3079): the webview asks for a rotation and gets the
+// access token and a handle, never the refresh token.
+#[cfg(desktop)]
+mod session_refresh;
+// A window close waits (bounded) for a refresh rotation in flight, so the
+// rotated token reaches the keychain (#3098).
+#[cfg(desktop)]
+mod rotation_hold;
 // Harness hook signals for pane status dots (#2776, ADR-0190 D4-b): an
 // app-only Unix socket, a token per pane, a closed event table.
 #[cfg(desktop)]
@@ -89,7 +100,7 @@ mod work_host;
 // This Mac's human device key (ADR-0146 개정 2026-09-28 D-3·D-6·D-7, #3025):
 // a Secure Enclave P-256 key, the three signed statements built in Rust, a
 // native confirmation before each signature, and the root pin on workd.
-// Reachable only through the seven `device_key_*` commands, which only
+// Reachable only through the eight `device_key_*` commands, which only
 // `capabilities/device-key.json` grants.
 #[cfg(target_os = "macos")]
 mod device_key;
@@ -134,6 +145,15 @@ pub fn run() {
         .manage(pty::PtyState::default())
         .manage(work_host::WorkHostState::default())
         .manage(device_key::DeviceKeyState::default())
+        .manage(rotation_hold::RotationHold::default())
+        .manage(session_refresh::SessionShell::default())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    rotation_hold::on_close_requested(window, api);
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             deeplink::deep_link_take_pending,
             discovery::discovery_start,
@@ -142,9 +162,13 @@ pub fn run() {
             notification::notification_request_permission,
             notification::notification_show,
             keychain::keychain_available,
-            keychain::keychain_load_refresh_token,
+            keychain::keychain_refresh_token_handle,
             keychain::keychain_store_refresh_token,
             keychain::keychain_clear_refresh_token,
+            rotation_hold::session_rotation_begin,
+            rotation_hold::session_rotation_end,
+            session_refresh::session_refresh_attempt,
+            session_refresh::session_revoke,
             opener::open_external_url,
             pdf_viewer::open_pdf_attachment,
             detect::detect_hosted_agents,
@@ -176,6 +200,7 @@ pub fn run() {
             device_key::device_key_sign_endorse,
             device_key::device_key_sign_revoke,
             device_key::device_key_deliver_revocation,
+            device_key::device_key_sign_rebind,
         ]);
 
     #[cfg(not(desktop))]
@@ -187,7 +212,6 @@ pub fn run() {
         notification::notification_request_permission,
         notification::notification_show,
         keychain::keychain_available,
-        keychain::keychain_load_refresh_token,
         keychain::keychain_store_refresh_token,
         keychain::keychain_clear_refresh_token,
         app_version,
@@ -200,6 +224,10 @@ pub fn run() {
         if webview.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Started {
             if let Some(state) = webview.try_state::<pty::PtyState>() {
                 state.0.kill_all();
+            }
+            // Rotations the previous page opened can never end now (#3098).
+            if let Some(hold) = webview.try_state::<rotation_hold::RotationHold>() {
+                hold.reset();
             }
         }
     });

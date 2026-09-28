@@ -1,0 +1,15 @@
+{
+  "schema": "momo.human.refresh_proof.v1",
+  "source": "server-rust/crates/momo-wire/src/human_control.rs RefreshProof (#3079, track/engine 726ed1a02): the inputs of refresh_proof_bytes_are_fixed_and_bind_the_presented_token, signed by the P-256 key with scalar [9; 32] (RFC 6979, low-s). Bytes, token hash and signature were printed by momo-wire itself (#3106).",
+  "inputs": {
+    "workspaceId": "00000000-0000-0000-0000-000000000001",
+    "memberId": "00000000-0000-0000-0000-000000000002",
+    "publicKey": "AnE1+k/ZOgnc6Yu/aBtL/PUOfA1jVOYq+wv/KjQpYXhl",
+    "refreshToken": "header.payload.signature",
+    "nonce": "00000000-0000-0000-0000-000000000003",
+    "signedAtMs": 1790000000000
+  },
+  "refreshTokenSha256": "256d04db4e5e4ac308751ed0885b722b758630567c53a7125ed9fbd068e5c3f6",
+  "payload": "momo.human.refresh_proof.v1\n00000000-0000-0000-0000-000000000001\n00000000-0000-0000-0000-000000000002\nAnE1+k/ZOgnc6Yu/aBtL/PUOfA1jVOYq+wv/KjQpYXhl\n256d04db4e5e4ac308751ed0885b722b758630567c53a7125ed9fbd068e5c3f6\n00000000-0000-0000-0000-000000000003\n1790000000000",
+  "signature": "s+O++kWdEqX+lqScDtFBfZEVMQA8+XE9qQ+0sgCJc100vAedg3OOAhoaDRg/Zh312D00TMCGxgqrVFl7dbEorw=="
+}

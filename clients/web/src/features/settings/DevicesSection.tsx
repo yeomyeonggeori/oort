@@ -39,7 +39,6 @@ export function DevicesSection({
           const letter = await desktopDeviceKey.signRevoke({
             workspaceId: signing.workspaceId,
             targetKeyId: key.id,
-            targetPublicKey: key.publicKey,
             targetLabel: key.label,
           });
           await submitRevocation(signing.workspaceId, key.id, {

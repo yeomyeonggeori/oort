@@ -1,0 +1,14 @@
+{
+  "schema": "momo.human.device_rebind.v1",
+  "source": "server-rust/crates/momo-wire/src/human_control.rs DeviceRebind (#3097, track/engine 3d124d429): the inputs of device_rebind_bytes_are_fixed_and_bind_the_destination_lineage, signed by the P-256 key with scalar [7; 32] (RFC 6979, low-s). Bytes and signature were printed by momo-wire itself (#3103).",
+  "inputs": {
+    "workspaceId": "00000000-0000-0000-0000-000000000001",
+    "memberId": "00000000-0000-0000-0000-000000000002",
+    "keyId": "00000000-0000-0000-0000-000000000003",
+    "publicKey": "Ax4YUy/UdUwC8wQdnHXOszuD/9gax85P6ILMscmLxYlu",
+    "sessionId": "00000000-0000-0000-0000-000000000004",
+    "signedAtMs": 1790000000000
+  },
+  "payload": "momo.human.device_rebind.v1\n00000000-0000-0000-0000-000000000001\n00000000-0000-0000-0000-000000000002\n00000000-0000-0000-0000-000000000003\nAx4YUy/UdUwC8wQdnHXOszuD/9gax85P6ILMscmLxYlu\n00000000-0000-0000-0000-000000000004\n1790000000000",
+  "signature": "KE+RFXhInFACvgKr1vq/0uQPlF+gMc9+wMaC4kQjmNRpEsGTZmFkaPsGsriXSmdLOvekAKU5vnzsf2kJd7YzPA=="
+}

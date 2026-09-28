@@ -4,10 +4,13 @@ import { Monitor, Smartphone } from "lucide-react";
 import { ApiError } from "@momo/core/lib/api";
 import { NetworkError } from "@momo/core/lib/http";
 import {
+  DEVICE_KEY_REFUSAL,
   deviceKeyErrorMessage,
   deviceKeyServerMessage,
+  fetchSigningContext,
   listDeviceKeys,
   phoneKeys,
+  rebindDeviceKey,
   registerRootDeviceKey,
   rootRowFor,
   submitEndorsement,
@@ -23,6 +26,7 @@ import {
   type DesktopHostDelivery,
 } from "@/lib/tauri";
 import {
+  autoRebindTried,
   DEVICE_KEYS_QUERY_KEY,
   deviceKeyFingerprint,
   hostDeliveryCopy,
@@ -43,6 +47,13 @@ import { ConfirmButton, Field, StatusChip, Subsection } from "./SettingsFields";
 //
 // Every signature is built, shown (native dialog) and signed by the shell. This
 // file only chooses which statement to ask for and posts the letters.
+//
+// #3103 (ADR-0146 D-7 증보 #3097): a refresh reuse or an expiry ends this
+// Mac's sign-in without revoking its key. The row stays `root` but signs
+// nothing (`lineageLive: false`) until the key moves itself onto the current
+// sign-in (`device_rebind.v1`, no password). The panel says so (「다시 연결
+// 필요」), tries once on its own — Touch ID still asks — and, if that fails,
+// says why and leaves the button.
 // =============================================================================
 
 const LOCAL_KEY = (workspaceId: string) =>
@@ -155,18 +166,23 @@ function DeviceKeysBody({
   local: DesktopDeviceKeyStatus;
   keys: DeviceKey[];
 }) {
-  const rootRow = local.publicKey ? rootRowFor(keys, local.publicKey) : undefined;
+  const found = local.publicKey ? rootRowFor(keys, local.publicKey) : undefined;
+  const rootRow = found?.row;
+  // A root row on an ended sign-in signs nothing: never 「뿌리」 (#3103).
+  const mute = found !== undefined && !found.lineageLive;
   const bound =
-    local.root !== null && rootRow !== undefined && rootRow.id === local.root.keyId;
+    !mute && local.root !== null && rootRow !== undefined && rootRow.id === local.root.keyId;
   const phones = phoneKeys(keys);
   const lockedReasonId = useId();
   const lockedReason = offline
     ? "연결이 끊겨 지금은 승인하거나 끊을 수 없습니다."
     : bound
       ? null
-      : local.support === "ready" || local.support === "absent"
-        ? "이 맥을 뿌리로 등록한 뒤 폰을 승인할 수 있습니다."
-        : "이 앱에서는 서명할 수 없어 폰을 승인하거나 끊을 수 없습니다.";
+      : mute
+        ? "이 맥을 다시 연결하면 폰을 승인하거나 끊을 수 있습니다."
+        : local.support === "ready" || local.support === "absent"
+          ? "이 맥을 뿌리로 등록한 뒤 폰을 승인할 수 있습니다."
+          : "이 앱에서는 서명할 수 없어 폰을 승인하거나 끊을 수 없습니다.";
 
   return (
     <div
@@ -181,6 +197,7 @@ function DeviceKeysBody({
         offline={offline}
         local={local}
         rootRow={rootRow}
+        mute={mute}
         bound={bound}
       />
       <div className="flex min-w-0 flex-col gap-2">
@@ -257,12 +274,54 @@ function pinCopy(
   };
 }
 
+/**
+ * Move this Mac's root row onto the current sign-in (#3103): the shell signs
+ * the key's own `device_rebind.v1` letter (native dialog, Touch ID), this page
+ * posts it, and a moved row that is not `current` is a failure
+ * (`rebindDeviceKey`). The key id does not change, so the shell's binding and
+ * workd's pin stay; only a Mac with no binding for this row binds it after.
+ */
+async function rebindRoot(input: {
+  workspaceId: string;
+  memberId: string;
+  row: DeviceKey;
+  local: DesktopDeviceKeyStatus;
+}): Promise<DesktopHostDelivery | null> {
+  const { workspaceId, memberId, row, local } = input;
+  // Any attempt, the button's or the register path's, counts as the one
+  // automatic attempt for this row: never two prompts for one move.
+  autoRebindTried.add(row.id);
+  const context = await fetchSigningContext(workspaceId);
+  if (!context.sessionId) throw "device_key_no_session";
+  const letter = await desktopDeviceKey.signRebind({
+    workspaceId,
+    memberId,
+    keyId: row.id,
+    sessionId: context.sessionId,
+  });
+  const moved = await rebindDeviceKey(workspaceId, {
+    publicKey: letter.publicKey,
+    platform: "macos",
+    label: row.label.trim() || "Mac",
+    rebind: { signedAtMs: letter.signedAtMs, signature: letter.signature },
+  });
+  if (local.root?.keyId === moved.id) return null;
+  const bound = await desktopDeviceKey.bindRoot({
+    workspaceId,
+    memberId,
+    keyId: moved.id,
+    publicKey: letter.publicKey,
+  });
+  return bound.host;
+}
+
 function ThisMacRoot({
   workspaceId,
   memberId,
   offline,
   local,
   rootRow,
+  mute,
   bound,
 }: {
   workspaceId: string;
@@ -270,6 +329,7 @@ function ThisMacRoot({
   offline: boolean;
   local: DesktopDeviceKeyStatus;
   rootRow: DeviceKey | undefined;
+  mute: boolean;
   bound: boolean;
 }) {
   const client = useQueryClient();
@@ -288,37 +348,75 @@ function ThisMacRoot({
     wasAsking.current = asking;
   }, [asking]);
 
+  const settle = () => {
+    void client.invalidateQueries({ queryKey: LOCAL_KEY(workspaceId) });
+    void client.invalidateQueries({ queryKey: DEVICE_KEYS_QUERY_KEY(workspaceId) });
+  };
+
   const register = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<string> => {
       setNotice(null);
       const created = local.publicKey ? local : await desktopDeviceKey.create();
       const publicKey = created.publicKey;
       if (!publicKey) throw created.detail ?? "device_key_absent";
+      const moveIfMute = async (keys: DeviceKey[]) => {
+        const found = rootRowFor(keys, publicKey);
+        if (!found || found.lineageLive) return null;
+        const host = await rebindRoot({ workspaceId, memberId, row: found.row, local: created });
+        return relinkNotice(host);
+      };
       const keys = await listDeviceKeys(workspaceId);
-      const row =
-        rootRowFor(keys, publicKey) ??
-        (await registerRootDeviceKey(workspaceId, {
-          publicKey,
-          label: "Mac",
-          currentPassword: password,
-        }));
-      return desktopDeviceKey.bindRoot({
+      const moved = await moveIfMute(keys);
+      if (moved) return moved;
+      let row = rootRowFor(keys, publicKey)?.row;
+      if (!row) {
+        try {
+          row = await registerRootDeviceKey(workspaceId, {
+            publicKey,
+            label: "Mac",
+            currentPassword: password,
+          });
+        } catch (error) {
+          // The list was stale: the key is ours on an ended sign-in (#3103).
+          if (error instanceof ApiError && error.code === DEVICE_KEY_REFUSAL.rebindRequired) {
+            const again = await moveIfMute(await listDeviceKeys(workspaceId));
+            if (again) return again;
+          }
+          throw error;
+        }
+      }
+      const result = await desktopDeviceKey.bindRoot({
         workspaceId,
         memberId,
         keyId: row.id,
         publicKey,
       });
+      return bindNotice(result.host);
     },
-    onSuccess: (result) => {
+    onSuccess: (text) => {
       setAsking(false);
       setPassword("");
-      setNotice(bindNotice(result.host));
+      setNotice(text);
     },
-    onSettled: () => {
-      void client.invalidateQueries({ queryKey: LOCAL_KEY(workspaceId) });
-      void client.invalidateQueries({ queryKey: DEVICE_KEYS_QUERY_KEY(workspaceId) });
-    },
+    onSettled: settle,
   });
+
+  const relink = useMutation({
+    mutationFn: async () => {
+      setNotice(null);
+      if (!rootRow) throw "device_key_absent";
+      return relinkNotice(await rebindRoot({ workspaceId, memberId, row: rootRow, local }));
+    },
+    onSuccess: (text) => setNotice(text),
+    onSettled: settle,
+  });
+  const relinkMutate = relink.mutate;
+  const autoId = mute && rootRow && !offline ? rootRow.id : null;
+  useEffect(() => {
+    if (autoId === null || autoRebindTried.has(autoId)) return;
+    autoRebindTried.add(autoId);
+    relinkMutate();
+  }, [autoId, relinkMutate]);
 
   const blocked = unsupportedCopy(local);
   if (blocked) {
@@ -329,6 +427,71 @@ function ThisMacRoot({
         detail={blocked}
         testId="device-key-root-unsupported"
       />
+    );
+  }
+
+  if (mute && rootRow) {
+    const relinkError = relink.isError
+      ? serverError(relink.error, "다시 연결하지 못했습니다. 다시 시도하세요.")
+      : null;
+    return (
+      <div className="flex min-w-0 flex-col gap-3" data-testid="device-key-root-relink">
+        <RootRow
+          title="이 맥"
+          chip={
+            <StatusChip tone={relink.isPending ? "muted" : "warn"}>
+              {relink.isPending ? "다시 연결 중" : "다시 연결 필요"}
+            </StatusChip>
+          }
+          fingerprint={fingerprint}
+          detail={
+            relink.isPending
+              ? null
+              : "로그인이 끝나 이 맥의 서명 키가 지금은 서명할 수 없습니다."
+          }
+          detailTone="warn"
+          notice={
+            relink.isPending
+              ? "확인 창과 Touch ID로 이 맥의 서명 키를 이 로그인에 다시 연결하는 중입니다."
+              : null
+          }
+        />
+        {!relink.isPending && (
+          <p className="break-keep text-meta text-ink-muted">
+            같은 키를 이 로그인에 다시 연결하면 폰 승인과 작업 호스트 고정은 그대로이고, 비밀번호는 필요 없습니다.
+          </p>
+        )}
+        {relinkError && (
+          <p
+            className="break-keep text-meta text-danger"
+            role="alert"
+            data-testid="device-key-relink-error"
+          >
+            {relinkError}
+          </p>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            aria-disabled={offline || relink.isPending || undefined}
+            aria-describedby={offline ? reasonId : undefined}
+            aria-busy={relink.isPending || undefined}
+            className={offline || relink.isPending ? "opacity-50" : undefined}
+            onClick={() => {
+              if (offline || relink.isPending) return;
+              relink.mutate();
+            }}
+            data-testid="device-key-relink"
+          >
+            다시 연결
+          </Button>
+        </div>
+        {offline && (
+          <span id={reasonId} className="text-meta text-ink-muted">
+            연결이 끊겨 지금은 다시 연결할 수 없습니다.
+          </span>
+        )}
+      </div>
     );
   }
 
@@ -462,6 +625,21 @@ function ThisMacRoot({
       )}
     </div>
   );
+}
+
+function relinkNotice(host: DesktopHostDelivery | null): string {
+  const done = "이 맥의 서명 키를 이 로그인에 다시 연결했습니다.";
+  switch (host?.state) {
+    case undefined:
+    case "delivered":
+      return done;
+    case "notRunning":
+      return `${done} 작업 호스트가 켜지면 고정합니다.`;
+    case "otherHost":
+      return `${done} 이 맥의 작업 호스트는 다른 워크스페이스 것이라 고정하지 않았습니다.`;
+    case "refused":
+      return `${done} 작업 호스트가 고정을 받지 않았습니다.`;
+  }
 }
 
 function bindNotice(host: DesktopHostDelivery): string {
@@ -624,7 +802,6 @@ function PhoneKeyRow({
         (await desktopDeviceKey.signRevoke({
           workspaceId,
           targetKeyId: phone.id,
-          targetPublicKey: phone.publicKey,
           targetLabel: phone.label,
         }));
       setLetter(signed);

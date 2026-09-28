@@ -40,12 +40,16 @@ import Security
 // Hardening before stage 2 (review of #3043, M-1..M-4):
 //
 //   5. Only instruction payloads are signed (M-3). `sign` refuses any message
-//      that is not exactly a 13-line `momo.human.control.v1` payload with no
-//      control character, so the key is not an oracle for arbitrary bytes.
+//      that is not exactly a 13-line `momo.human.control.v1`/`v2` payload with
+//      no control character, so the key is not an oracle for arbitrary bytes.
 //      Endorsements and revocations (`device_endorse.v1`/`device_revoke.v1`)
 //      are signed by the root Mac only (ADR-0146 D-6/D-7) and refused here
 //      (server-rust/crates/momo-wire/src/human_control.rs,
-//      docs/api/human-control-signing.vectors.json).
+//      docs/api/human-control-signing.vectors.json). The one other letter is
+//      the key's own move onto a new sign-in, `momo.human.device_rebind.v1`
+//      (7 lines, #3103; ADR-0146 D-7 증보 #3097), and only when its public-key
+//      line is THIS key's (`checkRebindNamesKey`): the key signs its own move,
+//      never another key's.
 //
 //   6. `invalidated` is reported only on proof (M-1, M-2). The enclave is the
 //      arbiter: a key is invalidated when the enclave rejects its handle, when
@@ -194,10 +198,29 @@ public struct MomoDeviceKeyStore {
   /// The E1 schema lines this key may sign, with each payload's exact line
   /// count (momo-wire `human_control.rs` `signed_bytes`). Instructions only:
   /// `device_endorse.v1`/`device_revoke.v1` are the root Mac's (ADR-0146
-  /// D-6/D-7), so the phone key refuses them.
+  /// D-6/D-7), so the phone key refuses them. `control.v2` (#3027 E7, #3028
+  /// E8) is what the phone signs: the same 13-line frame, a spawn binding the
+  /// tool, the channel and a resume's session. v1 stays for input/permission
+  /// statements the server still accepts.
   public static let signingSchemas: [String: Int] = [
-    "momo.human.control.v1": 13
+    "momo.human.control.v1": 13,
+    "momo.human.control.v2": 13,
+    "momo.human.device_rebind.v1": 7,
   ]
+  /// #3103 (momo-wire `DEVICE_REBIND_SCHEMA_V1`): the key moves itself onto
+  /// the caller's new sign-in. Line 5 (index 4) is the key's own public key.
+  public static let rebindSchema = "momo.human.device_rebind.v1"
+
+  /// A rebind letter must name this key's own public key (compressed SEC1,
+  /// base64) on its public-key line. Any other payload passes untouched.
+  public static func checkRebindNamesKey(_ message: Data, publicKeyBase64: String) throws {
+    let text = String(decoding: message, as: UTF8.self)
+    let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+    guard lines.first.map(String.init) == rebindSchema else { return }
+    guard lines.count == 7, String(lines[4]) == publicKeyBase64 else {
+      throw MomoDeviceKeyFailure.payloadRejected("a rebind letter names another key")
+    }
+  }
   /// Largest payload accepted. The E1 control vectors top out at 384 bytes;
   /// every field is an id, a number or a hex digest.
   public static let maxSigningPayloadBytes = 2048
@@ -408,6 +431,15 @@ public struct MomoDeviceKeyStore {
     try Self.checkSigningPayload(message)
     guard Self.secureEnclaveAvailable else { throw MomoDeviceKeyFailure.unsupported }
     guard let blob = try readItemOrNil(Self.keyAccount) else { throw MomoDeviceKeyFailure.absent }
+    // A rebind letter moves THIS key: its public-key line must be ours. The
+    // public half needs no authentication, so this runs before Face ID.
+    if message.starts(with: Data((Self.rebindSchema + "\n").utf8)) {
+      guard let own = try? SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: blob) else {
+        throw MomoDeviceKeyFailure.invalidated
+      }
+      try Self.checkRebindNamesKey(
+        message, publicKeyBase64: own.publicKey.compressedRepresentation.base64EncodedString())
+    }
 
     // Evaluate first so user-facing outcomes (cancel, lockout) arrive as clean
     // LAErrors instead of opaque enclave errors; the evaluated context is then

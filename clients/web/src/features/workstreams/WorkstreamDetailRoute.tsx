@@ -1,3 +1,5 @@
+import { useHumanControlSigning, useResumeWorkSession } from "@/features/work/signedWork";
+import { resumeFailureLine } from "@momo/core/features/auth/signedControl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -31,8 +33,6 @@ import {
 import { SESSION_STATUS_CLASS } from "@momo/core/features/work/workSessionFormat";
 import { particleFor } from "@momo/core/lib/koreanParticle";
 import {
-  ApiError,
-  resumeWorkSession,
   type WorkHost,
   type WorkstreamRun,
   type WorkstreamStatus,
@@ -250,6 +250,8 @@ function ContinuationBlock({
   const { session, workspaceId } = useSession();
   const offline = useOffline();
   const queryClient = useQueryClient();
+  const signing = useHumanControlSigning(workspaceId, true);
+  const resume = useResumeWorkSession(workspaceId, signing.signed);
   const [open, setOpen] = useState(false);
   const [pendingHostId, setPendingHostId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -304,7 +306,7 @@ function ContinuationBlock({
         // ADR-0143 changed is who the server accepts, not what the act is
         // called: a second verb for "continue this work" would be a second
         // thing to keep in step with the ledger.
-        await resumeWorkSession(workspaceId, run.id, hostId);
+        await resume(run.id, hostId);
         // The evidence is this page's own run list, so the confirmation is the
         // refreshed list rather than a navigation away from it: the reader sees
         // their own name join the goal's history, which is the fact ADR-0143
@@ -325,17 +327,12 @@ function ContinuationBlock({
         // 세 가지 — 상태 변화 · `pool_exhausted` · `member_limit` — 에 전부
         // 「이력을 새로고침하세요」라고 답했다. 슬롯이 찬 사람에게 그것은 아무리
         // 반복해도 풀리지 않는 지시다.
-        setError(
-          takeoverFailureCopy(
-            cause instanceof ApiError ? cause.status : undefined,
-            cause instanceof Error ? cause.message : undefined
-          )
-        );
+        setError(resumeFailureLine(cause, takeoverFailureCopy));
       } finally {
         setPendingHostId(null);
       }
     },
-    [queryClient, workspaceId]
+    [queryClient, resume, workspaceId]
   );
 
   // 끝난 목표에는 이력을 기다릴 이유가 없다. 목표의 상태는 이 페이지가 이미

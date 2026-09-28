@@ -14,16 +14,40 @@ const mocks = vi.hoisted(() => ({
   desktop: false,
   keychain: {
     available: vi.fn(async () => true),
-    load: vi.fn(async (): Promise<string | null> => null),
+    handle: vi.fn(async (): Promise<string | null> => null),
     store: vi.fn(async () => true),
     clear: vi.fn(async () => true),
+  },
+  log: [] as string[],
+  shell: {
+    refreshAttempt: vi.fn(async (_request: Record<string, unknown>) => ({
+      status: 200,
+      accessToken: "access.shell",
+      refreshToken: "shell:0123456789abcdef0123456789abcdef",
+      proved: true,
+    })),
+    revoke: vi.fn(async (_request: Record<string, unknown>) => true),
+  },
+  hold: {
+    begin: vi.fn(async (): Promise<boolean> => {
+      mocks.log.push("hold:begin");
+      return true;
+    }),
+    end: vi.fn(async (): Promise<void> => {
+      mocks.log.push("hold:end");
+    }),
   },
 }));
 
 vi.mock("./tauri", () => ({
   isDesktop: () => mocks.desktop,
   desktopKeychain: mocks.keychain,
+  desktopRotationHold: mocks.hold,
+  desktopSession: mocks.shell,
 }));
+
+const SERVER = "https://oort.test";
+vi.mock("./serverBase", () => ({ apiBase: () => SERVER }));
 
 const WEB_KEY = "momo.web.session.v1";
 const DESKTOP_KEY = "momo.desktop.session.v1";
@@ -70,10 +94,11 @@ function loadStore(seed: Record<string, string> = {}) {
 beforeEach(() => {
   mocks.desktop = false;
   mocks.keychain.available.mockResolvedValue(true);
-  mocks.keychain.load.mockResolvedValue(null);
+  mocks.keychain.handle.mockResolvedValue(null);
   mocks.keychain.store.mockResolvedValue(true);
   mocks.keychain.clear.mockResolvedValue(true);
   vi.clearAllMocks();
+  mocks.log.length = 0;
 });
 
 describe("browser runtime", () => {
@@ -98,7 +123,7 @@ describe("desktop runtime with a working keychain", () => {
   });
 
   it("resumes from the keychain, with the token absent from web storage", async () => {
-    mocks.keychain.load.mockResolvedValue("stored.refresh");
+    mocks.keychain.handle.mockResolvedValue("shell:stored");
     const session = await loadStore({
       [DESKTOP_KEY]: JSON.stringify({
         realtimeWebSocketUrl: login.realtimeWebSocketUrl,
@@ -109,7 +134,8 @@ describe("desktop runtime with a working keychain", () => {
 
     expect(session.getSessionStorageMode()).toBe("keychain");
     expect(session.hasPersistedSession()).toBe(true);
-    expect(session.getRefreshToken()).toBe("stored.refresh");
+    // #3106: a handle — the shell never hands the token back.
+    expect(session.getRefreshToken()).toBe("shell:stored");
     expect(store.has(WEB_KEY)).toBe(false);
   });
 
@@ -117,7 +143,7 @@ describe("desktop runtime with a working keychain", () => {
     const session = await loadStore({ [WEB_KEY]: webRecord("legacy.refresh") });
     await session.initSessionStore();
 
-    expect(mocks.keychain.store).toHaveBeenCalledWith("legacy.refresh");
+    expect(mocks.keychain.store).toHaveBeenCalledWith("legacy.refresh", SERVER);
     expect(store.has(WEB_KEY)).toBe(false);
     expect(JSON.parse(store.get(DESKTOP_KEY)!)).toEqual({
       realtimeWebSocketUrl: login.realtimeWebSocketUrl,
@@ -146,7 +172,7 @@ describe("desktop runtime with a working keychain", () => {
     await session.initSessionStore();
 
     expect(mocks.keychain.available).not.toHaveBeenCalled();
-    expect(mocks.keychain.load).not.toHaveBeenCalled();
+    expect(mocks.keychain.handle).not.toHaveBeenCalled();
     expect(session.getSessionStorageMode()).toBe("keychain");
     expect(session.hasPersistedSession()).toBe(false);
   });
@@ -165,17 +191,103 @@ describe("desktop runtime with a working keychain", () => {
     expect(session.getRefreshToken()).toBe("refresh.token");
   });
 
-  it("writes rotations to the keychain and never to web storage", async () => {
+  it("writes the sign-in's token to the keychain, pinned to its server, never to web storage", async () => {
     const session = await loadStore();
     await session.initSessionStore();
 
     session.applyLogin(login);
-    session.applyRotation("access.2", "refresh.2");
     await flush();
 
-    expect(mocks.keychain.store).toHaveBeenLastCalledWith("refresh.2");
+    expect(mocks.keychain.store).toHaveBeenLastCalledWith("refresh.token", SERVER);
     expect(store.has(WEB_KEY)).toBe(false);
-    expect(JSON.stringify([...store.values()])).not.toContain("refresh.2");
+    expect(JSON.stringify([...store.values()])).not.toContain("refresh.token");
+  });
+
+  // #3106: the shell rotated and stored the successor itself; what comes
+  // back is a handle. Sabotage: drop the handle check in `writeStorage` — the
+  // handle overwrites the real token in the keychain and the next launch is
+  // signed out. RED.
+  it("never writes a shell handle over the token, but tells other windows", async () => {
+    const session = await loadStore();
+    await session.initSessionStore();
+    session.applyLogin(login);
+    await flush();
+    mocks.keychain.store.mockClear();
+
+    session.applyRotation("access.2", "shell:0123456789abcdef0123456789abcdef");
+    await flush();
+
+    expect(mocks.keychain.store).not.toHaveBeenCalled();
+    expect(store.get("momo.desktop.session.rotated.v1")).toBeTruthy();
+    expect(session.getRefreshToken()).toBe("shell:0123456789abcdef0123456789abcdef");
+  });
+
+  it("the shell carries the refresh once the keychain has confirmed the sign-in's token", async () => {
+    const session = await loadStore();
+    await session.initSessionStore();
+    const written = { done: false };
+    mocks.keychain.store.mockImplementationOnce(async () => {
+      await flush();
+      written.done = true;
+      return true;
+    });
+    mocks.keychain.handle.mockImplementation(async () =>
+      written.done ? "shell:0123456789abcdef0123456789abcdef" : null
+    );
+    session.applyLogin(login);
+    const request = { workspaceId: member.workspaceId, memberId: member.id, skewMs: 0 };
+
+    // The rotation's re-read waits for the queued write, then adopts the handle.
+    const answer = await session.exclusiveRotation(() => session.refreshThroughHost(request));
+    expect(answer?.status).toBe(200);
+    expect(mocks.shell.refreshAttempt).toHaveBeenCalledWith({ apiBase: SERVER, ...request });
+  });
+
+  // A raw token in memory = the keychain never confirmed it (a stuck write, a
+  // failed read). Sabotage: drop the handle check — the shell is asked, finds
+  // nothing (`session_absent`) and the person is signed out. RED.
+  it("leaves an unconfirmed token to the core instead of asking the shell", async () => {
+    const session = await loadStore();
+    await session.initSessionStore();
+    session.applyLogin(login);
+    await flush();
+    const answer = await session.refreshThroughHost({
+      workspaceId: member.workspaceId,
+      memberId: member.id,
+      skewMs: 0,
+    });
+    expect(answer).toBeNull();
+    expect(mocks.shell.refreshAttempt).not.toHaveBeenCalled();
+    // …but the bind refresh must not go without a proof: it defers.
+    await expect(
+      session.refreshThroughHost({
+        workspaceId: member.workspaceId,
+        memberId: member.id,
+        skewMs: 0,
+        bind: true,
+      })
+    ).rejects.toThrow("not confirmed");
+  });
+
+  it("revokes through the shell, which holds the token", async () => {
+    const session = await loadStore();
+    await session.initSessionStore();
+    session.applyLogin(login);
+    await flush();
+    await expect(
+      session.revokeThroughHost({
+        accessToken: "access.token",
+        refreshToken: "shell:0123456789abcdef0123456789abcdef",
+        workspaceId: member.workspaceId,
+        memberId: member.id,
+      })
+    ).resolves.toBe(true);
+    expect(mocks.shell.revoke).toHaveBeenCalledWith({
+      apiBase: SERVER,
+      accessToken: "access.token",
+      workspaceId: member.workspaceId,
+      memberId: member.id,
+    });
   });
 
   it("erases the credential store on logout", async () => {
@@ -193,7 +305,7 @@ describe("desktop runtime with a working keychain", () => {
   });
 
   it("discards metadata left without its token instead of half-resuming", async () => {
-    mocks.keychain.load.mockResolvedValue(null);
+    mocks.keychain.handle.mockResolvedValue(null);
     const session = await loadStore({
       [DESKTOP_KEY]: JSON.stringify({
         realtimeWebSocketUrl: login.realtimeWebSocketUrl,
@@ -206,6 +318,87 @@ describe("desktop runtime with a working keychain", () => {
     expect(session.hasPersistedSession()).toBe(false);
     expect(store.has(DESKTOP_KEY)).toBe(false);
     expect(mocks.keychain.clear).toHaveBeenCalled();
+  });
+});
+
+// #3098 — closing the window destroys the webview, and with it a rotation whose
+// response or keychain write is still in the air. The shell defers the close
+// while a hold is open (clients/desktop/src-tauri/src/rotation_hold.rs); what
+// is pinned here is that the web half opens the hold before the POST and
+// releases it only once the rotated token is in the keychain.
+describe("desktop: a rotation holds the window open until its token is stored (#3098)", () => {
+  beforeEach(() => {
+    mocks.desktop = true;
+  });
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  async function signedIn() {
+    const session = await loadStore();
+    await session.initSessionStore();
+    session.applyLogin(login);
+    await flush();
+    mocks.log.length = 0;
+    return session;
+  }
+
+  it("holds from before the POST until the keychain write has landed", async () => {
+    // Since #3106 the POST and the keychain write are the shell's (it holds
+    // the close itself, `shell_rotation`); the webview's bracket still spans
+    // the whole attempt, from before it to after it settled.
+    const session = await signedIn();
+    const server = deferred<void>();
+
+    const rotation = session.exclusiveRotation(async () => {
+      mocks.log.push("post");
+      await server.promise; // the slow response the window is closed during
+      session.applyRotation("access.2", "shell:0123456789abcdef0123456789abcdef");
+      return "rotated";
+    });
+    await vi.waitFor(() => expect(mocks.log).toContain("post"));
+    expect(mocks.log).toEqual(["hold:begin", "post"]);
+    await flush();
+    expect(mocks.log).not.toContain("hold:end");
+
+    server.resolve();
+    await expect(rotation).resolves.toBe("rotated");
+    await flush();
+    expect(mocks.log).toEqual(["hold:begin", "post", "hold:end"]);
+  });
+
+  it("releases the hold when the rotation fails", async () => {
+    const session = await signedIn();
+    await expect(
+      session.exclusiveRotation(async () => {
+        mocks.log.push("post");
+        throw new TypeError("Failed to fetch");
+      })
+    ).rejects.toThrow("Failed to fetch");
+    await flush();
+    expect(mocks.log).toEqual(["hold:begin", "post", "hold:end"]);
+  });
+
+  it("owes no release when the shell did not take the hold", async () => {
+    const session = await signedIn();
+    mocks.hold.begin.mockResolvedValueOnce(false);
+    await session.exclusiveRotation(async () => "rotated");
+    await flush();
+    expect(mocks.hold.end).not.toHaveBeenCalled();
+  });
+
+  it("asks for no hold in a browser", async () => {
+    mocks.desktop = false;
+    const session = await signedIn();
+    await session.exclusiveRotation(async () => "rotated");
+    expect(mocks.hold.begin).not.toHaveBeenCalled();
   });
 });
 

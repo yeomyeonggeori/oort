@@ -506,6 +506,9 @@ pub struct HostTrust {
     pub owner_member_id: String,
     /// `None`: nothing pinned yet (or a workd from before #3024).
     pub root_key_id: Option<String>,
+    /// The pinned root's public key (#3078). `None`: nothing pinned, or a
+    /// workd from before #3078 (then only the id can be compared).
+    pub root_public_key: Option<String>,
 }
 
 pub fn host_trust_of(status: &Value) -> Option<HostTrust> {
@@ -515,6 +518,9 @@ pub fn host_trust_of(status: &Value) -> Option<HostTrust> {
         workspace_id: field("workspaceId")?,
         owner_member_id: field("ownerMemberId")?,
         root_key_id: status["humanSignatures"]["rootKeyId"]
+            .as_str()
+            .map(str::to_string),
+        root_public_key: status["humanSignatures"]["rootPublicKey"]
             .as_str()
             .map(str::to_string),
     })

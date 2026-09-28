@@ -45,7 +45,33 @@ public class MomoDeviceKeyNativeModule: Module {
     AsyncFunction("remove") { () throws in
       try momoDeviceKeyRun { try momoDeviceKeyStore().delete() }
     }
+
+    // #3106: the REFRESH key (MomoRefreshKeyStore) — a separate enclave key
+    // with no biometry. Typed fields in, a proof out: there is no "sign these
+    // bytes" for this key, and it signs only `momo.human.refresh_proof.v1`.
+    AsyncFunction("signRefreshProof") {
+      (workspaceId: String, memberId: String, refreshToken: String, signedAtMs: Double) throws
+        -> [String: Any] in
+      guard let at = Int64(exactly: signedAtMs.rounded()) else {
+        throw momoDeviceKeyException(.payloadRejected("signedAtMs is not an integer"))
+      }
+      return try momoDeviceKeyRun {
+        let proof = try momoRefreshKeyStore().prove(
+          workspaceId: workspaceId, memberId: memberId, refreshToken: refreshToken, signedAtMs: at)
+        return [
+          "publicKey": proof.publicKey,
+          "nonce": proof.nonce,
+          "signedAtMs": Double(proof.signedAtMs),
+          "signature": proof.signature,
+        ]
+      }
+    }
   }
+}
+
+private func momoRefreshKeyStore() throws -> MomoRefreshKeyStore {
+  let raw = Bundle.main.object(forInfoDictionaryKey: MomoDeviceKeyStore.accessGroupInfoKey) as? String
+  return try MomoRefreshKeyStore(accessGroup: raw ?? "")
 }
 
 /// The access group comes from the app's Info.plist, where Xcode expands the

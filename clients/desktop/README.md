@@ -110,9 +110,13 @@ interface HostedAgentProbe {
 | `notification_request_permission` | — | same | Desktop: always `"granted"`, no prompt. macOS asks on the first `notification_show` instead (#2676). |
 | `notification_show` | `{ title: string, body?: string }` | `boolean` | `false` = not shown because permission is not granted. Desktop never returns `false`: a banner macOS drops is still `true` (#2676). |
 | `keychain_available` | — | `boolean` | Probes the credential store. |
-| `keychain_load_refresh_token` | — | `string \| null` | |
-| `keychain_store_refresh_token` | `{ token: string }` | `void` \| error | Rejects an empty token. |
-| `keychain_clear_refresh_token` | — | `void` \| error | Succeeds when there was nothing to delete. |
+| `keychain_refresh_token_handle` | — | `string \| null` | `shell:` + 32 hex of the stored token's SHA-256, or `null` (#3106). The token itself never comes back to the webview (`keychain_load_refresh_token` was removed). |
+| `keychain_store_refresh_token` | `{ token: string, origin: string }` | `void` \| error | Rejects an empty token, a `shell:` handle, or a missing/non-http(s) origin. `origin` pins the token to its server: the shell presents it nowhere else (#3106). |
+| `keychain_clear_refresh_token` | — | `void` \| error | Succeeds when there was nothing to delete. Keeps the token in memory only for `session_revoke` (#3106). |
+| `session_refresh_attempt` | `{ request: { apiBase, workspaceId, memberId, skewMs } }` | `{ status, code?, date?, accessToken?, refreshToken?, proved }` \| error | One `/v1/auth/refresh` POST made by the shell (#3106, ADR-0146 D-7 증보 #3079): the keychain's token, this Mac's Secure Enclave **refresh key** proof (`momo.human.refresh_proof.v1`; PrivateKeyUsage only, no Touch ID), the successor written to the keychain before it answers. `refreshToken` is a handle. Only to the pinned origin; no redirects. Error = nothing answered (the token is kept; the next attempt recovers with a proof). The retry policy is the core's. |
+| `session_revoke` | `{ request: { apiBase, accessToken, workspaceId, memberId } }` | `boolean` \| error | Logout's server half with the token only the shell holds; wipes the keychain item either way. |
+| `session_rotation_begin` | — | `void` | A refresh rotation's POST is about to leave; closing the main window now hides it and waits (≤ 20 s) for `_end` before destroying it (#3098). |
+| `session_rotation_end` | — | `void` | That rotation is over and its token written. An `_end` without a `_begin` is a no-op. |
 | `open_external_url` | `{ url: string }` | `void` \| error | Opens one **https** URL in the OS browser. Rejects anything else. Desktop only. |
 | `open_pdf_attachment` | raw bytes (invoke body) + header `x-oort-file-name` (percent-encoded) | `void` \| error | Writes one PDF to `<app cache>/pdf-preview/<unique>/<name>.pdf` and opens it in the OS default viewer (#2701). Rejects a body without a `%PDF-` header in its first 1 KiB or over 100 MiB; the name is re-derived (always `.pdf`, no separators). Each copy (dir 0700, file 0600) is removed 10 minutes after launch; copies older than an hour are swept at app start and on every call. The raw body only survives the custom-protocol IPC transport, so the shell CSP must keep `connect-src ipc: http://ipc.localhost` (pinned by `shell_contract.rs` and `desktopShellContract.test.ts`; without it every invoke silently falls back to postMessage JSON). Desktop only. |
 | `detect_hosted_agents` | — | `HostedAgentProbe[]` | Passive allowlist only (app bundle path, bundle id, process name). Never scans ports. Empty-flags, not an error, when nothing matches. Desktop only. |
@@ -477,6 +481,7 @@ Enclave, `confirm.rs` the native dialog). Granted only by
 | `device_key_sign_endorse { workspaceId, targetKeyId, targetAlg, targetPublicKey, label }` | `device_endorse.v1` |
 | `device_key_sign_revoke { workspaceId, targetKeyId, targetPublicKey, targetLabel }` | `device_revoke.v1`, then `revoke_device` on workd right away |
 | `device_key_deliver_revocation { workspaceId, targetKeyId }` | hand a letter this shell signed (kept in `<app data>/device-key/revocations.json`, 0600) to workd again |
+| `device_key_sign_rebind { workspaceId, memberId, keyId, sessionId }` | `device_rebind.v1` (#3103, ADR-0146 D-7 증보 #3097): this enclave's own public key, the page's key id (must equal this workspace's binding when there is one) and `signing-context.sessionId`; native confirm + Touch ID. The page posts it as `rebind` on `POST …/device-keys` and treats a 200 whose `current` is not true as a failure |
 
 Rules the code holds:
 

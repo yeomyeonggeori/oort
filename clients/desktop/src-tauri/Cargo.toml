@@ -43,6 +43,22 @@ portable-pty = "0.9.0"
 # plugin itself is rather than pulled into a mobile build that cannot use it.
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2"
+# The shell's own refresh rotation (#3106, ADR-0146 D-7 증보 #3079): the shell
+# POSTs `/v1/auth/refresh` with the keychain's token and its refresh-key proof,
+# so the webview never reads the token back. reqwest 0.13 was already in this
+# graph through tauri-plugin-updater (TLS comes from there); no feature and no
+# crate is added (Cargo.lock unchanged). sha2/base64/hex/uuid moved here from
+# the macOS block: the handle and the nonce are needed on every desktop.
+reqwest = { version = "0.13", default-features = false }
+# reqwest's TLS here is `rustls-no-provider` (the updater's choice), so a
+# client needs a process crypto provider; the shell installs ring's, exactly as
+# tauri-plugin-updater does before its own requests. Same features as the
+# updater's dependency: no crate added.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+sha2 = "0.10"
+base64 = "0.22"
+hex = "0.4"
+uuid = { version = "1", features = ["serde", "v4"] }
 
 # OS credential store for the refresh token. Platform-gated so a Linux build does
 # not have to grow the D-Bus/secret-service stack unless it is built there.
@@ -63,10 +79,6 @@ objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSGeometry", "objc2-core-foundation"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAlert", "NSApplication", "NSResponder", "NSButton", "NSControl", "NSView", "NSScrollView", "NSTextView", "NSText", "NSClipView", "NSGraphics", "objc2-core-foundation"] }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
-sha2 = "0.10"
-base64 = "0.22"
-hex = "0.4"
-uuid = { version = "1", features = ["serde"] }
 unicode-normalization = "0.1"
 
 [target.'cfg(target_os = "windows")'.dependencies]

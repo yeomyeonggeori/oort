@@ -37,7 +37,7 @@ use core_foundation::dictionary::CFDictionary;
 use core_foundation::error::CFError;
 use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
-use core_foundation_sys::base::CFTypeRef;
+use core_foundation_sys::base::{CFOptionFlags, CFTypeRef};
 use core_foundation_sys::dictionary::CFDictionaryRef;
 use core_foundation_sys::string::CFStringRef;
 use objc2::msg_send;
@@ -69,6 +69,25 @@ pub const ACCESS_GROUP_SUFFIX: &str = "app.momo.desktop.devicekey";
 /// The key's application tag: one key per Mac user per app.
 pub const KEY_TAG: &[u8] = b"app.momo.desktop.devicekey.p256-signing-v1";
 const KEY_LABEL: &str = "oort device key (P-256, Secure Enclave)";
+/// The device key's access: Touch ID / login password per signature (D-3),
+/// readable only while unlocked.
+pub const KEY_ACCESS_FLAGS: CFOptionFlags =
+    kSecAccessControlPrivateKeyUsage | kSecAccessControlUserPresence;
+pub const KEY_PROTECTION: ProtectionMode = ProtectionMode::AccessibleWhenUnlockedThisDeviceOnly;
+
+/// The refresh key (#3106, ADR-0146 D-7 증보 #3079): a SECOND enclave key,
+/// a different item (its own tag) in the same app-only group. It signs only
+/// `momo.human.refresh_proof.v1` (`session_refresh::proof`), in the background
+/// with no dialog, so it has `PrivateKeyUsage` and nothing else — no
+/// presence, no biometry — and `AfterFirstUnlockThisDeviceOnly`, so a refresh
+/// of a locked Mac overnight still signs (a refusal there would read as a
+/// sign-out under `require`). It has no trust role: the server keeps it in
+/// `session_refresh_key`, never in `member_device_key`.
+pub const REFRESH_KEY_TAG: &[u8] = b"app.momo.desktop.refreshkey.p256-v1";
+const REFRESH_KEY_LABEL: &str = "oort refresh key (P-256, Secure Enclave)";
+pub const REFRESH_KEY_ACCESS_FLAGS: CFOptionFlags = kSecAccessControlPrivateKeyUsage;
+pub const REFRESH_KEY_PROTECTION: ProtectionMode =
+    ProtectionMode::AccessibleAfterFirstUnlockThisDeviceOnly;
 
 /// D-3: the reuse window is 0–300 s and defaults to 300.
 pub const REUSE_WINDOW_MAX_SECS: u64 = 300;
@@ -213,7 +232,11 @@ fn key_of(raw: CFStringRef) -> CFString {
     unsafe { CFString::wrap_under_get_rule(raw) }
 }
 
-fn private_key_query(group: &str, context: Option<&AnyObject>) -> CFDictionary<CFString, CFType> {
+fn private_key_query(
+    tag: &[u8],
+    group: &str,
+    context: Option<&AnyObject>,
+) -> CFDictionary<CFString, CFType> {
     let mut pairs: Vec<(CFString, CFType)> = vec![
         // SAFETY (all `unsafe` reads below): immutable framework constants.
         (
@@ -226,7 +249,7 @@ fn private_key_query(group: &str, context: Option<&AnyObject>) -> CFDictionary<C
         ),
         (
             key_of(unsafe { kSecAttrApplicationTag }),
-            CFData::from_buffer(KEY_TAG).into_CFType(),
+            CFData::from_buffer(tag).into_CFType(),
         ),
         (
             key_of(unsafe { kSecAttrAccessGroup }),
@@ -257,7 +280,21 @@ fn private_key_query(group: &str, context: Option<&AnyObject>) -> CFDictionary<C
 /// The enclave key's handle, or `None`. Finding the handle needs no
 /// authentication; using it to sign does.
 pub fn find(group: &str, context: Option<&AnyObject>) -> Result<Option<SecKey>, EnclaveError> {
-    let query = private_key_query(group, context);
+    find_tagged(KEY_TAG, group, context)
+}
+
+/// The refresh key's handle, or `None` (#3106). Signing with it needs no
+/// authentication either.
+pub fn find_refresh_key(group: &str) -> Result<Option<SecKey>, EnclaveError> {
+    find_tagged(REFRESH_KEY_TAG, group, None)
+}
+
+fn find_tagged(
+    tag: &[u8],
+    group: &str,
+    context: Option<&AnyObject>,
+) -> Result<Option<SecKey>, EnclaveError> {
+    let query = private_key_query(tag, group, context);
     let mut out: CFTypeRef = std::ptr::null();
     // SAFETY: a valid query dictionary and out pointer.
     let status = unsafe { SecItemCopyMatching(query.as_concrete_TypeRef(), &mut out) };
@@ -274,14 +311,32 @@ pub fn find(group: &str, context: Option<&AnyObject>) -> Result<Option<SecKey>, 
 /// Create the key. Refuses when one exists (a second key would silently
 /// replace the root every paired phone was endorsed by).
 pub fn create(group: &str) -> Result<SecKey, EnclaveError> {
-    if find(group, None)?.is_some() {
+    create_tagged(KEY_TAG, KEY_LABEL, KEY_PROTECTION, KEY_ACCESS_FLAGS, group)
+}
+
+/// Create the refresh key (#3106). Refuses when one exists, like `create`.
+pub fn create_refresh_key(group: &str) -> Result<SecKey, EnclaveError> {
+    create_tagged(
+        REFRESH_KEY_TAG,
+        REFRESH_KEY_LABEL,
+        REFRESH_KEY_PROTECTION,
+        REFRESH_KEY_ACCESS_FLAGS,
+        group,
+    )
+}
+
+fn create_tagged(
+    tag: &[u8],
+    label: &str,
+    protection: ProtectionMode,
+    flags: CFOptionFlags,
+    group: &str,
+) -> Result<SecKey, EnclaveError> {
+    if find_tagged(tag, group, None)?.is_some() {
         return Err(EnclaveError::Failed("already_exists".into()));
     }
-    let access = SecAccessControl::create_with_protection(
-        Some(ProtectionMode::AccessibleWhenUnlockedThisDeviceOnly),
-        kSecAccessControlPrivateKeyUsage | kSecAccessControlUserPresence,
-    )
-    .map_err(|error| EnclaveError::Failed(format!("access control {}", error.code())))?;
+    let access = SecAccessControl::create_with_protection(Some(protection), flags)
+        .map_err(|error| EnclaveError::Failed(format!("access control {}", error.code())))?;
     let private: CFDictionary<CFString, CFType> = CFDictionary::from_CFType_pairs(&[
         (
             key_of(unsafe { kSecAttrIsPermanent }),
@@ -289,11 +344,11 @@ pub fn create(group: &str) -> Result<SecKey, EnclaveError> {
         ),
         (
             key_of(unsafe { kSecAttrApplicationTag }),
-            CFData::from_buffer(KEY_TAG).into_CFType(),
+            CFData::from_buffer(tag).into_CFType(),
         ),
         (
             key_of(unsafe { kSecAttrLabel }),
-            CFString::new(KEY_LABEL).into_CFType(),
+            CFString::new(label).into_CFType(),
         ),
         (
             key_of(unsafe { kSecAttrAccessGroup }),
@@ -581,6 +636,33 @@ mod tests {
             conf["bundle"]["macOS"]["files"],
             serde_json::json!({ "Helpers/momo-workd.app": "binaries/momo-workd.app" })
         );
+    }
+
+    /// #3106: the two enclave keys are different items with different
+    /// access. The instruction key keeps presence on every signature; the
+    /// refresh key has no presence (a background refresh cannot show a
+    /// dialog) and stays usable while the Mac is locked. Sabotage: give the
+    /// refresh key `KEY_TAG` and a refresh would find — and try to use — the
+    /// Touch ID key; give the device key `REFRESH_KEY_ACCESS_FLAGS` and an
+    /// instruction would sign without Touch ID. Either goes RED here.
+    #[test]
+    fn the_refresh_key_is_another_item_without_presence_and_the_device_key_keeps_it() {
+        assert_ne!(REFRESH_KEY_TAG, KEY_TAG);
+        assert!(!REFRESH_KEY_TAG.starts_with(KEY_TAG) && !KEY_TAG.starts_with(REFRESH_KEY_TAG));
+        assert_eq!(REFRESH_KEY_ACCESS_FLAGS, kSecAccessControlPrivateKeyUsage);
+        assert_eq!(REFRESH_KEY_ACCESS_FLAGS & kSecAccessControlUserPresence, 0);
+        assert_eq!(
+            KEY_ACCESS_FLAGS,
+            kSecAccessControlPrivateKeyUsage | kSecAccessControlUserPresence
+        );
+        assert!(matches!(
+            REFRESH_KEY_PROTECTION,
+            ProtectionMode::AccessibleAfterFirstUnlockThisDeviceOnly
+        ));
+        assert!(matches!(
+            KEY_PROTECTION,
+            ProtectionMode::AccessibleWhenUnlockedThisDeviceOnly
+        ));
     }
 
     #[test]
