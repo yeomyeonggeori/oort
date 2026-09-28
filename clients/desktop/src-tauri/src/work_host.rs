@@ -509,6 +509,28 @@ pub struct HostTrust {
     /// The pinned root's public key (#3078). `None`: nothing pinned, or a
     /// workd from before #3078 (then only the id can be compared).
     pub root_public_key: Option<String>,
+    /// Whether this host enforces device signatures now (#3117).
+    pub signatures_required: bool,
+    /// What the server last said (`humanControlSignatureRequired`); `None`
+    /// before its first answer, or a workd from before #3117.
+    pub server_requires_signatures: Option<bool>,
+}
+
+impl HostTrust {
+    /// R2 on this host, as the app should say it (#3117):
+    /// `enforced` — the host refuses unsigned spawns, inputs and allows;
+    /// `server_only` — the server requires signatures, this host does not
+    /// enforce them yet (no root pinned here; it latches after `pin_root`);
+    /// `off` — neither.
+    pub fn signature_enforcement(&self) -> &'static str {
+        if self.signatures_required {
+            "enforced"
+        } else if self.server_requires_signatures == Some(true) {
+            "server_only"
+        } else {
+            "off"
+        }
+    }
 }
 
 pub fn host_trust_of(status: &Value) -> Option<HostTrust> {
@@ -523,6 +545,8 @@ pub fn host_trust_of(status: &Value) -> Option<HostTrust> {
         root_public_key: status["humanSignatures"]["rootPublicKey"]
             .as_str()
             .map(str::to_string),
+        signatures_required: status["humanSignatures"]["required"].as_bool() == Some(true),
+        server_requires_signatures: status["humanSignatures"]["serverRequired"].as_bool(),
     })
 }
 
