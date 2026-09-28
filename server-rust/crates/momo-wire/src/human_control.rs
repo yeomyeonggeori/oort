@@ -25,7 +25,10 @@
 //! ```
 //!
 //! (`device_revoke.v1` is the v2 letter without the public-key line; a host
-//! takes a revoked public key only from a v2 letter, #3068.)
+//! takes a revoked public key only from a v2 letter, #3068.
+//! `momo.human.device_rebind.v1`, #3097, is signed by the key it moves — see
+//! [`DeviceRebind`]. `momo.human.refresh_proof.v1`, #3079, is signed by a
+//! lineage's refresh key on every refresh — see [`RefreshProof`].)
 //!
 //! ## Field rules (what E1 fixes on top of the ADR)
 //!
@@ -109,6 +112,11 @@ pub const DEVICE_ENDORSE_SCHEMA_V1: &str = "momo.human.device_endorse.v1";
 pub const DEVICE_REVOKE_SCHEMA_V1: &str = "momo.human.device_revoke.v1";
 /// v2 (#3068): the root signs the revoked device's public key too.
 pub const DEVICE_REVOKE_SCHEMA_V2: &str = "momo.human.device_revoke.v2";
+/// #3097 (ADR-0146 D-7 증보): a live key moves itself onto a new sign-in.
+pub const DEVICE_REBIND_SCHEMA_V1: &str = "momo.human.device_rebind.v1";
+/// #3079 (ADR-0146 D-7 증보): a refresh request's proof of the lineage's
+/// refresh key — the sender-constraint on a refresh token.
+pub const REFRESH_PROOF_SCHEMA_V1: &str = "momo.human.refresh_proof.v1";
 
 /// The placeholder for an absent `session_id` / `mode`.
 pub const ABSENT: &str = "-";
@@ -623,6 +631,154 @@ impl DeviceRevoke {
     }
 }
 
+/// `momo.human.device_rebind.v1` (#3097, ADR-0146 D-7 증보) — a device key
+/// moves **itself** onto the caller's new sign-in, after the lineage it was
+/// registered under ended without revoking it (a refresh-token reuse, or the
+/// sign-in expiring). Signed by the key being moved, never by the root: the
+/// proof is possession of that key, which a stolen refresh token does not give.
+///
+/// ```text
+/// momo.human.device_rebind.v1
+/// {workspace_id}
+/// {member_id}
+/// {key_id}
+/// {public_key_b64}
+/// {session_id}        the lineage the key moves to — the caller's own
+/// {signed_at_ms}
+/// ```
+///
+/// The destination lineage makes a letter single-use without a nonce: the
+/// server moves the key only into the caller's own live lineage, and only out
+/// of a lineage that can no longer rotate. A lineage never becomes live again,
+/// so once the key sits in `session_id` the letter names the lineage it is
+/// already in, and after that lineage ends it names a dead one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeviceRebind<'a> {
+    pub workspace_id: Uuid,
+    pub member_id: Uuid,
+    pub key_id: Uuid,
+    /// Base64 of the 33-byte compressed SEC1 key (canonical encoding).
+    pub public_key_b64: &'a str,
+    pub session_id: Uuid,
+    pub signed_at_ms: i64,
+}
+
+impl DeviceRebind<'_> {
+    pub fn signed_bytes(&self) -> Result<Vec<u8>, HumanSigningError> {
+        let key = canonical_b64_of_len("public_key_b64", self.public_key_b64, P256_PUBLIC_KEY_LEN)?;
+        parse_p256_public_key(&key)?;
+        if self.signed_at_ms <= 0 || self.signed_at_ms > MAX_SAFE_INTEGER {
+            return Err(HumanSigningError::InvalidField {
+                field: "signed_at_ms",
+                reason: "must be a positive safe integer",
+            });
+        }
+        Ok(format!(
+            "{DEVICE_REBIND_SCHEMA_V1}\n{}\n{}\n{}\n{}\n{}\n{}",
+            self.workspace_id,
+            self.member_id,
+            self.key_id,
+            self.public_key_b64,
+            self.session_id,
+            self.signed_at_ms,
+        )
+        .into_bytes())
+    }
+
+    /// Verify against the key's own public key (the one the letter names).
+    pub fn verify(&self, signature: &[u8]) -> Result<[u8; P256_SIGNATURE_LEN], HumanSigningError> {
+        let bytes = self.signed_bytes()?;
+        let key = canonical_b64_of_len("public_key_b64", self.public_key_b64, P256_PUBLIC_KEY_LEN)?;
+        verify_p256(&key, &bytes, signature)
+    }
+}
+
+/// `momo.human.refresh_proof.v1` (#3079, ADR-0146 D-7 증보) — the proof a
+/// native client attaches to `POST /v1/auth/refresh`, signed by the refresh
+/// key its sign-in lineage is bound to (a Secure Enclave P-256 key with no
+/// biometry or presence check, so a background refresh can sign):
+///
+/// ```text
+/// momo.human.refresh_proof.v1
+/// {workspace_id}
+/// {member_id}
+/// {public_key_b64}         the refresh key (canonical base64, 33-byte SEC1)
+/// {refresh_token_sha256}   lowercase hex SHA-256 of the presented refresh token
+/// {nonce}                  128 random bits, one-time on the server
+/// {signed_at_ms}           server time ±5 min
+/// ```
+///
+/// The token-hash line is the sender constraint (the role RFC 9449 §4.2's
+/// `ath` plays for an access token): a proof is good for one refresh token
+/// only, so a proof captured for a spent token proves nothing about its
+/// successor. The nonce makes a proof single-use; the time bounds how long an
+/// unconsumed one keeps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RefreshProof<'a> {
+    pub workspace_id: Uuid,
+    pub member_id: Uuid,
+    /// Base64 of the 33-byte compressed SEC1 key (canonical encoding).
+    pub public_key_b64: &'a str,
+    /// [`refresh_token_sha256_hex`] of the presented refresh token.
+    pub refresh_token_sha256: &'a str,
+    pub nonce: Uuid,
+    pub signed_at_ms: i64,
+}
+
+/// Lowercase hex SHA-256 of a raw refresh token — the
+/// `{refresh_token_sha256}` line of [`RefreshProof`].
+pub fn refresh_token_sha256_hex(raw_refresh_token: &str) -> String {
+    hex::encode(Sha256::digest(raw_refresh_token.as_bytes()))
+}
+
+impl RefreshProof<'_> {
+    pub fn signed_bytes(&self) -> Result<Vec<u8>, HumanSigningError> {
+        let key = canonical_b64_of_len("public_key_b64", self.public_key_b64, P256_PUBLIC_KEY_LEN)?;
+        parse_p256_public_key(&key)?;
+        if self.refresh_token_sha256.len() != 64
+            || !self
+                .refresh_token_sha256
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(HumanSigningError::InvalidField {
+                field: "refresh_token_sha256",
+                reason: "must be 64 lowercase hex characters",
+            });
+        }
+        if self.signed_at_ms <= 0 || self.signed_at_ms > MAX_SAFE_INTEGER {
+            return Err(HumanSigningError::InvalidField {
+                field: "signed_at_ms",
+                reason: "must be a positive safe integer",
+            });
+        }
+        Ok(format!(
+            "{REFRESH_PROOF_SCHEMA_V1}\n{}\n{}\n{}\n{}\n{}\n{}",
+            self.workspace_id,
+            self.member_id,
+            self.public_key_b64,
+            self.refresh_token_sha256,
+            self.nonce,
+            self.signed_at_ms,
+        )
+        .into_bytes())
+    }
+
+    /// Verify against the public key the proof names. The caller decides
+    /// whether that key is the lineage's (the server compares it with the
+    /// bound key before trusting this result).
+    pub fn verify(&self, signature: &[u8]) -> Result<[u8; P256_SIGNATURE_LEN], HumanSigningError> {
+        let bytes = self.signed_bytes()?;
+        let key = canonical_b64_of_len("public_key_b64", self.public_key_b64, P256_PUBLIC_KEY_LEN)?;
+        verify_p256(&key, &bytes, signature)
+    }
+}
+
+/// `|now − signed_at_ms| ≤ 5 min` (ADR-0146 D-9's skew window), overflow-safe.
+pub fn within_clock_skew(signed_at_ms: i64, now_ms: i64) -> bool {
+    (i128::from(now_ms) - i128::from(signed_at_ms)).abs() <= i128::from(MAX_CLOCK_SKEW_MS)
+}
+
 /// Freshness of a control against the verifier's clock (ADR-0146 D-9):
 /// `issued < expires ≤ issued + 10 min`, `|now − issued| ≤ 5 min`, `now < expires`.
 pub fn check_control_window(
@@ -868,6 +1024,143 @@ mod tests {
         );
         // No overflow at the i64 extremes.
         assert!(check_control_window(i64::MIN, i64::MAX, 0).is_err());
+    }
+
+    /// #3079: the refresh proof's exact bytes, and that it binds the key, the
+    /// presented token, the nonce and the time — and verifies only under the
+    /// key it names.
+    #[test]
+    fn refresh_proof_bytes_are_fixed_and_bind_the_presented_token() {
+        use p256::ecdsa::signature::Signer as _;
+        let signing = p256::ecdsa::SigningKey::from_slice(&[9u8; 32]).unwrap();
+        let public = BASE64.encode(signing.verifying_key().to_sec1_point(true).as_bytes());
+        let token_hash = refresh_token_sha256_hex("header.payload.signature");
+        assert_eq!(
+            token_hash,
+            hex::encode(Sha256::digest(b"header.payload.signature")),
+            "the token line is the lowercase hex SHA-256 of the raw token"
+        );
+        let proof = RefreshProof {
+            workspace_id: Uuid::from_u128(1),
+            member_id: Uuid::from_u128(2),
+            public_key_b64: &public,
+            refresh_token_sha256: &token_hash,
+            nonce: Uuid::from_u128(3),
+            signed_at_ms: 1_790_000_000_000,
+        };
+        assert_eq!(
+            String::from_utf8(proof.signed_bytes().unwrap()).unwrap(),
+            format!(
+                "momo.human.refresh_proof.v1\n\
+                 00000000-0000-0000-0000-000000000001\n\
+                 00000000-0000-0000-0000-000000000002\n\
+                 {public}\n\
+                 {token_hash}\n\
+                 00000000-0000-0000-0000-000000000003\n\
+                 1790000000000"
+            )
+        );
+        let signature: p256::ecdsa::Signature = signing.sign(&proof.signed_bytes().unwrap());
+        assert!(proof.verify(&signature.to_bytes()).is_ok());
+        let successor_hash = refresh_token_sha256_hex("header.payload.other");
+        let for_another_token = RefreshProof {
+            refresh_token_sha256: &successor_hash,
+            ..proof
+        };
+        assert_eq!(
+            for_another_token.verify(&signature.to_bytes()),
+            Err(HumanSigningError::BadSignature),
+            "a proof for one refresh token proves nothing about another"
+        );
+        assert_eq!(
+            RefreshProof {
+                nonce: Uuid::from_u128(4),
+                ..proof
+            }
+            .verify(&signature.to_bytes()),
+            Err(HumanSigningError::BadSignature),
+            "the nonce is signed"
+        );
+        let other_key = p256::ecdsa::SigningKey::from_slice(&[8u8; 32]).unwrap();
+        let forged: p256::ecdsa::Signature = other_key.sign(&proof.signed_bytes().unwrap());
+        assert_eq!(
+            proof.verify(&forged.to_bytes()),
+            Err(HumanSigningError::BadSignature),
+            "only the named key proves"
+        );
+        let upper = token_hash.to_uppercase();
+        assert!(RefreshProof {
+            refresh_token_sha256: &upper,
+            ..proof
+        }
+        .signed_bytes()
+        .is_err());
+        assert!(RefreshProof {
+            signed_at_ms: 0,
+            ..proof
+        }
+        .signed_bytes()
+        .is_err());
+        assert!(within_clock_skew(1_000_000, 1_000_000 + MAX_CLOCK_SKEW_MS));
+        assert!(!within_clock_skew(
+            1_000_000,
+            1_000_000 + MAX_CLOCK_SKEW_MS + 1
+        ));
+        assert!(!within_clock_skew(i64::MIN, i64::MAX));
+    }
+
+    /// #3097: the rebind letter's exact bytes, and that it binds the key, the
+    /// destination lineage and the time — and verifies only under the key it
+    /// names.
+    #[test]
+    fn device_rebind_bytes_are_fixed_and_bind_the_destination_lineage() {
+        use p256::ecdsa::signature::Signer as _;
+        let signing = p256::ecdsa::SigningKey::from_slice(&[7u8; 32]).unwrap();
+        let public = BASE64.encode(signing.verifying_key().to_sec1_point(true).as_bytes());
+        let letter = DeviceRebind {
+            workspace_id: Uuid::from_u128(1),
+            member_id: Uuid::from_u128(2),
+            key_id: Uuid::from_u128(3),
+            public_key_b64: &public,
+            session_id: Uuid::from_u128(4),
+            signed_at_ms: 1_790_000_000_000,
+        };
+        assert_eq!(
+            String::from_utf8(letter.signed_bytes().unwrap()).unwrap(),
+            format!(
+                "momo.human.device_rebind.v1\n\
+                 00000000-0000-0000-0000-000000000001\n\
+                 00000000-0000-0000-0000-000000000002\n\
+                 00000000-0000-0000-0000-000000000003\n\
+                 {public}\n\
+                 00000000-0000-0000-0000-000000000004\n\
+                 1790000000000"
+            )
+        );
+        let signature: p256::ecdsa::Signature = signing.sign(&letter.signed_bytes().unwrap());
+        assert!(letter.verify(&signature.to_bytes()).is_ok());
+        let elsewhere = DeviceRebind {
+            session_id: Uuid::from_u128(5),
+            ..letter
+        };
+        assert_eq!(
+            elsewhere.verify(&signature.to_bytes()),
+            Err(HumanSigningError::BadSignature),
+            "a letter for one lineage moves the key into no other"
+        );
+        let other_key = p256::ecdsa::SigningKey::from_slice(&[8u8; 32]).unwrap();
+        let forged: p256::ecdsa::Signature = other_key.sign(&letter.signed_bytes().unwrap());
+        assert_eq!(
+            letter.verify(&forged.to_bytes()),
+            Err(HumanSigningError::BadSignature),
+            "only the key being moved can sign its move"
+        );
+        assert!(DeviceRebind {
+            signed_at_ms: 0,
+            ..letter
+        }
+        .signed_bytes()
+        .is_err());
     }
 
     #[test]

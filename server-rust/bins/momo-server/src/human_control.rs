@@ -292,6 +292,7 @@ mod tests {
             endorsement_sig: endorsed.then(|| format!("{}==", "A".repeat(86))),
             endorsed_at_ms: endorsed.then_some(1),
             endorser_live: endorsed,
+            lineage_live: true,
             created_at_ms: 0,
             revoked_at_ms: None,
             revoked_reason: None,

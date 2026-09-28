@@ -8,8 +8,10 @@
 //! the app's Secure Enclave key, once) and `revoke_device` (a root-signed
 //! revocation, so a revocation the server hides still lands). Controls,
 //! sessions and private keys never cross it. The root is pinned **only** here:
-//! a second, different key is refused, and only a local `momo-workd
-//! reset-root` clears it; nothing on the server path can reach it.
+//! a second, different public key is refused, and only a local `momo-workd
+//! reset-root` clears it; nothing on the server path can reach it. The same
+//! public key under a new key id (a re-login, #3078) is rebound here too —
+//! and only here.
 //!
 //! ## Who may connect
 //!
@@ -46,8 +48,10 @@
 //! → {"op":"shutdown"}
 //! ← {"ok":true}
 //! → {"op":"pin_root","keyId":"…","alg":"p256","publicKey":"<b64 33-byte SEC1>"}
-//! ← {"ok":true,"pinned":true}        (false: the same key was already pinned)
-//! ← {"ok":false,"error":"root_already_pinned"}
+//! ← {"ok":true,"pinned":true}        (false: the same key and id were already pinned;
+//!                                     true also when the same key moved to a new id, #3078)
+//! ← {"ok":false,"error":"root_already_pinned"}     (another public key)
+//! ← {"ok":false,"error":"root_key_id_retired"}     (an id this key held before)
 //! → {"op":"revoke_device","revocation":{"workspaceId","memberId","rootKeyId",
 //!    "targetKeyId","revokedAtMs","signature","targetPublicKey"}}
 //! ← {"ok":true}
@@ -370,7 +374,10 @@ pub fn respond(line: &str, identity: &HostIdentity, shared: &SocketShared) -> Va
     match request.get("op").and_then(Value::as_str) {
         Some("status") => {
             let heartbeat = shared.health.snapshot();
-            let root_key_id = lock_trust().root().map(|root| root.key_id);
+            let (root_key_id, root_public_key) = lock_trust()
+                .root()
+                .map(|root| (root.key_id, root.public_key.clone()))
+                .unzip();
             json!({
                 "ok": true,
                 "hostId": identity.host_id,
@@ -385,6 +392,9 @@ pub fn respond(line: &str, identity: &HostIdentity, shared: &SocketShared) -> Va
                 "humanSignatures": {
                     "required": shared.human_signatures_required,
                     "rootKeyId": root_key_id,
+                    // The pin's identity (#3078): the app compares this, not
+                    // the id, to tell a re-login from another key.
+                    "rootPublicKey": root_public_key,
                 },
             })
         }
@@ -617,6 +627,7 @@ mod tests {
         assert_eq!(status["heartbeat"]["lastOkAtMs"], Value::Null);
         assert_eq!(status["humanSignatures"]["required"], false);
         assert_eq!(status["humanSignatures"]["rootKeyId"], Value::Null);
+        assert_eq!(status["humanSignatures"]["rootPublicKey"], Value::Null);
         health.heartbeat_accepted();
         let status = respond(r#"{"op":"status"}"#, &identity(), &shared);
         assert!(status["heartbeat"]["lastOkAtMs"].as_i64().unwrap() > 0);
@@ -679,6 +690,18 @@ mod tests {
             status["humanSignatures"]["rootKeyId"],
             Uuid::from_u128(9).to_string()
         );
+        assert_eq!(status["humanSignatures"]["rootPublicKey"], G);
+        // #3078: the same key under a new id (a re-login) is rebound here.
+        assert_eq!(pin(G, 11), json!({"ok": true, "pinned": true}));
+        assert_eq!(pin(G, 11), json!({"ok": true, "pinned": false}));
+        assert_eq!(pin(G, 9)["error"], "root_key_id_retired");
+        assert_eq!(pin(G2, 12)["error"], "root_already_pinned");
+        let status = respond(r#"{"op":"status"}"#, &identity(), &shared);
+        assert_eq!(
+            status["humanSignatures"]["rootKeyId"],
+            Uuid::from_u128(11).to_string()
+        );
+        assert_eq!(status["humanSignatures"]["rootPublicKey"], G);
         // Persisted: a restarted host still refuses the second key.
         let reopened = self::shared(&dir);
         let again = respond(
