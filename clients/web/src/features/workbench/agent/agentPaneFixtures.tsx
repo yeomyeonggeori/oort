@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { ApiError, type WorkSession } from "@momo/core/lib/api";
+import type { InstructFrom } from "@momo/core/features/auth/humanSignature";
 import type { WorkSessionEvent } from "@momo/core/features/work/workSessionModel";
 import { agentPaneModel, type AgentPaneModel } from "@momo/core/features/workbench/agentPane";
 import { AgentProgressView, type AgentPaneActions } from "./AgentProgressView";
@@ -147,8 +149,19 @@ function sceneActions(scene: AgentFixtureScene): AgentPaneActions {
       reply: null,
     };
   }
+  // 서명을 요구하는 서버인데 이 칸이 아직 몰랐다(플래그 모름): 서버가 이름으로 거부한다(#3029).
+  if (scene === "signature") {
+    return {
+      decide: async () => {
+        throw new ApiError(403, "this instruction needs the owner's device-key signature", "device_signature_required");
+      },
+      reply: null,
+    };
+  }
   // 제품과 같이 지시(답장) 길은 없다(R2).
-  if (scene === "decided" || scene === "lapsed" || scene === "offline") return { ...DEMO_ACTIONS, reply: null };
+  if (scene === "decided" || scene === "lapsed" || scene === "offline" || scene === "browser") {
+    return { ...DEMO_ACTIONS, reply: null };
+  }
   return DEMO_ACTIONS;
 }
 
@@ -162,7 +175,40 @@ export type AgentFixtureScene =
   | "conflict"
   | "closed"
   | "lapsed"
-  | "offline";
+  | "offline"
+  /** 일반 브라우저 + 서명을 요구하는 서버(ADR-0146 개정 D-4, #3029). */
+  | "browser"
+  /** 허락이 403 `device_signature_required`로 돌아온다(#3029). */
+  | "signature";
+
+/**
+ * `signature` 장면: 제품처럼 403 `device_signature_required`를 받으면 플래그를 다시
+ * 읽어 안내로 바뀐다(agentPaneSource `recheck`). 캡처는 오류 직후가 아니라 바뀐 뒤다.
+ */
+function SignatureScene({ model, actions }: { model: AgentPaneModel; actions: AgentPaneActions }) {
+  const [from, setFrom] = useState<InstructFrom>("here");
+  const decide = actions.decide;
+  return (
+    <AgentProgressView
+      model={model}
+      ownerName="곽성재"
+      instructFrom={from}
+      actions={{
+        ...actions,
+        decide: decide
+          ? async (d) => {
+              try {
+                await decide(d);
+              } catch (err) {
+                setTimeout(() => setFrom("app"), 300);
+                throw err;
+              }
+            }
+          : null,
+      }}
+    />
+  );
+}
 
 /** 하네스 장면별 원천. 묶음은 메모리 저장소(캡처는 이 기기 저장소를 건드리지 않는다). */
 export function fixtureAgentSource(scene: AgentFixtureScene): AgentPaneSource {
@@ -217,8 +263,15 @@ export function fixtureAgentSource(scene: AgentFixtureScene): AgentPaneSource {
     },
     render: (id) => {
       const m = models.get(id);
+      if (m && scene === "signature") return <SignatureScene model={m} actions={actions} />;
       return m ? (
-        <AgentProgressView model={m} ownerName="곽성재" actions={actions} offline={scene === "offline"} />
+        <AgentProgressView
+          model={m}
+          ownerName="곽성재"
+          actions={actions}
+          offline={scene === "offline"}
+          instructFrom={scene === "browser" ? "app" : "here"}
+        />
       ) : null;
     },
   };
