@@ -11810,6 +11810,13 @@ components:
             a host binds it to the key it already holds for `targetKeyId`.
           items:
             $ref: "#/components/schemas/DeviceRevocation"
+        humanControlSignatureRequired:
+          type: boolean
+          description: >
+            #3117 (ADR-0146 증보 2026-09-29): `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`,
+            the same value `signing-context` reports. workd latches device-signature
+            enforcement on when this is true and a root is pinned on the Mac, and a
+            later false never lowers it. Omitted when false.
 
     DeviceRevocation:
       type: object

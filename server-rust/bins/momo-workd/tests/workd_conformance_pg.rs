@@ -2655,6 +2655,13 @@ async fn wait_for_ack_label(
 async fn wdc_8_r2_the_product_path_latches_the_host_and_the_server_cannot_undo_it() {
     use momo_wire::human_control::{ControlContent, HumanControl, InputMode};
 
+    // The control socket is macOS only (the peer is checked by code
+    // signature); elsewhere `run --control-socket` refuses to start.
+    if !cfg!(target_os = "macos") {
+        eprintln!("wdc_8: the control socket needs macOS; skipped");
+        return;
+    }
+
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let app_pool = momo_app_pool().await;
