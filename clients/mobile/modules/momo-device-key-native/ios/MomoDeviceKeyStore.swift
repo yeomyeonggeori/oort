@@ -465,9 +465,19 @@ public struct MomoDeviceKeyStore {
 
   /// The tagged fingerprint to store from `context`: the iOS 18 API where it
   /// exists, the legacy one below.
+  ///
+  /// The legacy header documents its value as set "when canEvaluatePolicy
+  /// succeeds for a biometric policy"; the iOS 18 header only says `stateHash`
+  /// is nil when nothing is enrolled and does not say whether
+  /// `canEvaluatePolicy` alone fills it. So a nil `stateHash` falls back to the
+  /// legacy value rather than refusing `create()` on every iOS 18+ phone
+  /// (runtime-unverified); the first successful signature then re-baselines
+  /// to the iOS 18 value.
   private static func currentFingerprint(_ context: LAContext) -> Data? {
-    if #available(iOS 18.0, macOS 15.0, *) {
-      return Fingerprint.tagged(Fingerprint.domainStateTag, context.domainState.biometry.stateHash)
+    if #available(iOS 18.0, macOS 15.0, *),
+      let modern = Fingerprint.tagged(Fingerprint.domainStateTag, context.domainState.biometry.stateHash)
+    {
+      return modern
     }
     return Fingerprint.tagged(Fingerprint.legacyTag, legacyDomainState(context))
   }
