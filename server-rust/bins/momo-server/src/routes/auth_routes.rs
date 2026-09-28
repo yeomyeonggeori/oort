@@ -131,8 +131,8 @@ use axum::http::HeaderMap;
 use axum::Json;
 use momo_auth::{
     carries_privileged_scope, find_linked_device_id_by_refresh_in_tx, judge_refresh_proof,
-    lock_linked_device_in_tx, lock_member_session_tokens_by_ids, new_session_id,
-    rebind_device_link_session_in_tx, rebind_locked_device_link_session_in_tx,
+    lock_linked_device_in_tx, lock_member_session_tokens_by_ids, lock_session_rows_in_tx,
+    new_session_id, rebind_device_link_session_in_tx, rebind_locked_device_link_session_in_tx,
     record_session_token, record_session_token_with_device, revoke_privileged_session_tokens,
     revoke_session_lineage_tokens, revoke_token, session_device_label, session_id_of, sign_access,
     sign_refresh, sign_rotation_successor, token_state, verify_app_access, verify_app_refresh,
@@ -538,7 +538,10 @@ pub async fn refresh(
             .map_err(DbError::from)?
             {
                 // Linked path: stable device row first, then the current pair
-                // in id order. Consume / mint / rebind stay in this tx.
+                // and its lineage's live rows in ONE id-ordered acquisition
+                // (#3107): the reuse / recovery answers below lock the lineage
+                // again and must find it already held. Consume / mint /
+                // rebind stay in this tx.
                 let Some(locked) =
                     lock_linked_device_in_tx(conn, workspace_id, member_id, device_id)
                         .await
@@ -930,18 +933,6 @@ const LIVE_LINEAGE_TAIL_SQL: &str = "SELECT id, device_label \
       ORDER BY id DESC \
       LIMIT 1";
 
-/// Every still-live row of one lineage, locked in id order (the order of
-/// every lineage sweep), with whether it is unexpired.
-const LOCK_LIVE_LINEAGE_ROWS_SQL: &str = "SELECT id, (expires_at IS NULL OR expires_at > now()) \
-       FROM token \
-      WHERE workspace_id = $1 \
-        AND actor_member_id = $2 \
-        AND kind = 'session' \
-        AND session_id = $3 \
-        AND revoked_at IS NULL \
-      ORDER BY id \
-        FOR UPDATE";
-
 /// #3079: a spent token came back with a verified proof from its lineage's
 /// key — the device that holds the lineage lost a rotation response (sleep,
 /// Cmd+Q, a dead network) and holds only the spent token, however long ago it
@@ -957,7 +948,7 @@ const LOCK_LIVE_LINEAGE_ROWS_SQL: &str = "SELECT id, (expires_at IS NULL OR expi
 ///
 /// SABOTAGE(recover-no-member-check): drop the member check — the suspended
 /// member test must go RED. SABOTAGE(recover-no-tail-gate): skip the tail check after
-/// `LOCK_LIVE_LINEAGE_ROWS_SQL` — the concurrent-recovery test must go RED.
+/// the lineage lock — the concurrent-recovery test must go RED.
 async fn recover_lineage(
     conn: &mut PgConnection,
     reissue: &Reissue<'_>,
@@ -984,8 +975,10 @@ async fn recover_lineage(
     let Some((tail_id, device_label)) = tail else {
         return Ok(None);
     };
-    // Linked device: the stable link row first, then tokens (the order every
-    // linked rotation and unlink takes).
+    // Linked device: the stable link row first, then the bound pair and the
+    // whole lineage in one id-ordered acquisition (the session-row rule,
+    // `momo_auth::lock_session_rows_in_tx`, #3107) — the order every linked
+    // rotation and unlink takes.
     let locked =
         match find_linked_device_id_by_refresh_in_tx(conn, workspace_id, member_id, tail_id)
             .await
@@ -1010,17 +1003,14 @@ async fn recover_lineage(
     // a logout, unlink or sweep that committed since has revoked the tail,
     // it is not among the locked rows, and the lineage stays ended. Two
     // concurrent recoveries serialize here and only one mints.
-    let locked_live: Vec<(Uuid, bool)> = momo_db::sqlx::query_as(LOCK_LIVE_LINEAGE_ROWS_SQL)
-        .bind(workspace_id)
-        .bind(member_id)
-        .bind(session_id)
-        .fetch_all(&mut *conn)
+    //
+    // On the linked branch every one of these rows is already held (the link
+    // lock took the lineage with the pair): this re-lock waits on nothing and
+    // only reads which rows are still live.
+    let locked_live = lock_session_rows_in_tx(conn, workspace_id, member_id, Some(session_id), &[])
         .await
         .map_err(DbError::from)?;
-    if !locked_live
-        .iter()
-        .any(|(id, unexpired)| *id == tail_id && *unexpired)
-    {
+    if !locked_live.iter().any(|row| row.id == tail_id && row.live) {
         return Ok(None);
     }
     revoke_session_lineage_tokens(conn, workspace_id, member_id, session_id)
