@@ -14,12 +14,20 @@
 	<!-- LOAD-BEARING. This — not the App Group — is the channel the extension
 	     reads the push-fetch session through (kSecAttrAccessGroup,
 	     MomoPushShared/PushNotification.swift:73). It must be the SAME STRING in
-	     both entitlement files; scripts/verify_ios_signing.sh enforces that.
+	     both entitlement files; __tests__/pushContract.test.ts enforces that for the
+	     declaration, ios/ci_scripts/ci_post_xcodebuild.sh for the signed product.
 	     If it diverges the extension does not crash, it silently fails open and
 	     ships the relay's placeholder alert forever. -->
 	<key>keychain-access-groups</key>
 	<array>
 		<string>$(AppIdentifierPrefix)app.momo.ios.shared</string>
+		<!-- APP ONLY (#3026, ADR-0146 개정 2026-09-28 D-2): the Secure Enclave
+		     device key. The extension must never declare it — then it cannot read
+		     the key handle nor raise Face ID for it.
+		     ORDER IS LOAD-BEARING: keychain writes that name no group land in the
+		     FIRST group listed (secureSession.ts). Keep the shared group first so
+		     existing items do not move on upgrade. -->
+		<string>$(AppIdentifierPrefix)app.momo.ios.devicekey</string>
 	</array>
 </dict>
 </plist>
