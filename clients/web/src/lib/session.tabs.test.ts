@@ -156,7 +156,48 @@ describe("웹 — 락 안에서 저장소를 다시 읽는다", () => {
   });
 });
 
+describe("웹 — 저장소가 쓰기를 거절할 때 재읽기는 로그아웃이 아니다", () => {
+  it("쓰기가 실패하는 저장소(프라이빗 모드·할당량)에서도 메모리 세션으로 회전한다", async () => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota", "QuotaExceededError");
+    });
+    const { session, api } = await loadApp();
+    session.applyLogin(login);
+    const presented = stubServer();
+
+    expect(await api.refreshSessionOutcome()).toBe("rotated");
+    expect(presented).toEqual(["refresh-token-1"]);
+    expect(session.getAuthExpired()).toBe(false);
+    setItem.mockRestore();
+  });
+
+  it("회전 결과의 쓰기만 실패하면, 저장소에 남은 쓰인 토큰을 다시 받아들이지 않는다", async () => {
+    const { session, api } = await loadApp();
+    session.applyLogin(login); // 이 쓰기는 닿는다
+    const presented = stubServer();
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota", "QuotaExceededError");
+    });
+
+    expect(await api.refreshSessionOutcome()).toBe("rotated"); // refresh-token-1 → -2, 저장 실패
+    expect(await api.refreshSessionOutcome()).toBe("rotated");
+    expect(presented).toEqual(["refresh-token-1", "refresh-token-2"]); // 저장소의 -1(쓰인 것)을 다시 내지 않는다
+    setItem.mockRestore();
+  });
+});
+
 describe("웹 — storage 이벤트", () => {
+  it("해석할 수 없는 기록(다른 번들 버전)은 로그아웃이 아니다", async () => {
+    const { session } = await loadApp();
+    session.applyLogin(login);
+
+    fromOtherTab(WEB_KEY, JSON.stringify({ refreshToken: "x", shape: "from-a-future-build" }));
+
+    expect(session.hasPersistedSession()).toBe(true);
+    expect(session.getRefreshToken()).toBe("refresh-token-1");
+    expect(session.getAuthExpired()).toBe(false);
+  });
+
   it("다른 탭의 회전 토큰을 받아들이고, 이 탭의 access 토큰은 그대로 둔다", async () => {
     const { session } = await loadApp();
     session.applyLogin(login);
@@ -220,6 +261,23 @@ describe("데스크톱(키체인) — 같은 규칙", () => {
     expect(await api.refreshSessionOutcome()).toBe("rotated");
     expect(presented).toEqual(["refresh-token-from-window-b"]);
     expect(mocks.keychain.store).toHaveBeenLastCalledWith("refresh-token-2");
+  });
+
+  it("키체인 쓰기가 거절돼 웹 저장소로 강등되는 중에 회전해도 로그아웃되지 않는다", async () => {
+    const { session, api } = await loadApp();
+    // 거절이 **회전이 락을 잡은 뒤**에 도착한다: 재읽기가 키체인 분기로 들어선 다음
+    // 큐를 기다리는 사이 강등된다.
+    mocks.keychain.store.mockImplementation(
+      () => new Promise<boolean>((settle) => setTimeout(() => settle(false), 150))
+    );
+    session.applyLogin(login); // 큐에 든 키체인 쓰기가 거절 → 웹 저장소로 강등
+    const presented = stubServer();
+
+    expect(await api.refreshSessionOutcome()).toBe("rotated");
+    expect(presented).toEqual(["refresh-token-1"]);
+    expect(session.getSessionStorageMode()).toBe("web");
+    expect(session.getAuthExpired()).toBe(false);
+    mocks.keychain.store.mockImplementation(async () => true);
   });
 
   it("키체인 읽기가 실패(null)하면 메모리의 토큰을 지키고 로그아웃으로 바꾸지 않는다", async () => {

@@ -92,14 +92,17 @@ function readRaw(key: string): string | null {
   }
 }
 
-function writeRaw(key: string, value: string | null): void {
+/** True when the write landed. */
+function writeRaw(key: string, value: string | null): boolean {
   try {
-    if (typeof localStorage === "undefined") return;
+    if (typeof localStorage === "undefined") return false;
     if (value === null) localStorage.removeItem(key);
     else localStorage.setItem(key, value);
+    return true;
   } catch {
     // Storage unavailable (private mode, quota, embedded webview policy): the
     // session simply will not survive a reload. In-memory state keeps working.
+    return false;
   }
 }
 
@@ -144,16 +147,24 @@ function writeStorage(value: PersistedSession | null): void {
       // claiming a guarantee it is no longer delivering.
       storageMode = "web";
       writeRaw(DESKTOP_METADATA_KEY, null);
-      writeRaw(STORAGE_KEY, JSON.stringify(value));
+      webStoreHolds = writeRaw(STORAGE_KEY, JSON.stringify(value));
       return false;
     });
     return;
   }
-  writeRaw(STORAGE_KEY, value ? JSON.stringify(value) : null);
+  webStoreHolds = writeRaw(STORAGE_KEY, value ? JSON.stringify(value) : null);
 }
 
 let accessToken: string | null = null;
 let persisted: PersistedSession | null = readStorage();
+/**
+ * Web mode: whether the shared record is known to mirror this tab's session —
+ * true after a write here landed or a record was read from it. When storage
+ * refuses writes (private mode, quota) the stored record is absent or stale,
+ * and a re-read must not turn that into "signed out elsewhere" or into a spent
+ * token (#3067).
+ */
+let webStoreHolds = persisted !== null;
 let authExpired = false;
 const listeners = new Set<() => void>();
 
@@ -318,6 +329,10 @@ async function resyncFromStore(): Promise<void> {
   if (storageMode === "keychain") {
     // This window's own writes first, or the read below races them.
     await keychainWrites.catch(() => undefined);
+  }
+  // Re-checked AFTER the flush: a refused keychain write demotes the run to web
+  // storage (and drops the metadata record) while it is being awaited.
+  if (storageMode === "keychain") {
     const metadata = parsePersistedMetadata(readRaw(DESKTOP_METADATA_KEY));
     if (!metadata) {
       adoptExternal(null);
@@ -329,6 +344,7 @@ async function resyncFromStore(): Promise<void> {
     if (refreshToken) adoptExternal({ refreshToken, ...metadata });
     return;
   }
+  if (!webStoreHolds) return; // the store never held this session; memory is the truth
   adoptExternal(readStorage());
 }
 
@@ -394,7 +410,17 @@ function onStorage(event: StorageEvent): void {
     }
     return;
   }
-  if (event.key === STORAGE_KEY) adoptExternal(parsePersistedSession(event.newValue));
+  if (event.key !== STORAGE_KEY) return;
+  if (event.newValue === null) {
+    adoptExternal(null);
+    return;
+  }
+  // A record this build cannot parse (another bundle version, a partial write)
+  // is not a logout. Ignore it rather than sign every tab out.
+  const next = parsePersistedSession(event.newValue);
+  if (!next) return;
+  webStoreHolds = true;
+  adoptExternal(next);
 }
 
 try {

@@ -19,6 +19,12 @@
 //                     LEASE_TTL_MS.
 //   neither           no shared store either, so there is nothing to race.
 //
+// Residual, stated rather than hidden: a tab closed while its refresh POST is in
+// the air loses the answer. The server has already spent the token, the new one
+// never reaches storage, and the next holder presents the spent one. Holding
+// the lock longer cannot help (the answer is gone either way); the server's
+// 30 s retry grace (#3065) is what absorbs this case.
+//
 // Waiting is bounded (LOCK_WAIT_MS). A rotation stuck behind a holder that never
 // finishes rejects, which the core reports as `unreachable` — the session is
 // kept, not declared dead.
