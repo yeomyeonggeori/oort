@@ -11,7 +11,8 @@
 //!
 //! `reset-root` forgets the pinned R2 root key (ADR-0146 개정 D-6) so the
 //! desktop app can pin a new one. It is local only: nothing the server sends
-//! can pin, replace or clear the root.
+//! can pin, replace or clear the root. Run it while `momo-workd run` is
+//! stopped: a running host keeps the root it loaded.
 //!
 //! `forget` is the local half of 「등록 해제」 (#2778): it deletes this host's
 //! key and its registration state. The server half (revoking the row) is the
@@ -59,7 +60,8 @@ usage:
   momo-workd forget --config PATH [--dev-key-file PATH]
       deletes the host key and the registration state (after a revoke)
   momo-workd reset-root --config PATH
-      forgets the pinned device root key (a new one can then be pinned)
+      forgets the pinned device root key (a new one can then be pinned);
+      run it while the host is stopped
   momo-workd --version
 
 --dev-key-file keeps the host key in a 0600 file instead of the keychain.
@@ -297,6 +299,9 @@ pub async fn register(
         scope: registered.scope,
     };
     state.save(&config.state_path)?;
+    // A new registration is a new root (ADR-0146 개정 D-6): the old pin and
+    // its ledger do not carry over (#3024 review L1).
+    remove_trust_files(&config)?;
     tracing::info!(host_id = %state.host_id, key_store = %store.describe(), "work host registered");
     Ok(state)
 }
@@ -370,11 +375,17 @@ pub async fn forget(config_path: PathBuf, dev_key_file: Option<PathBuf>) -> Resu
         }
     }
     // Host re-registration is root reset (ADR-0146 개정 D-6).
+    remove_trust_files(&config)?;
+    tracing::info!("host key, registration state and device trust deleted");
+    Ok(())
+}
+
+fn remove_trust_files(config: &WorkdConfig) -> Result<(), CliError> {
     for name in [
         crate::human_trust::TRUST_FILE,
         crate::human_trust::NONCE_FILE,
     ] {
-        let path = state_folder(&config).join(name);
+        let path = state_folder(config).join(name);
         match std::fs::remove_file(&path) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -386,7 +397,6 @@ pub async fn forget(config_path: PathBuf, dev_key_file: Option<PathBuf>) -> Resu
             }
         }
     }
-    tracing::info!("host key, registration state and device trust deleted");
     Ok(())
 }
 
@@ -509,10 +519,16 @@ pub async fn run(
     let stop = Arc::new(tokio::sync::Notify::new());
     // ADR-0146 개정 (#3024): the pinned root and the nonce ledger. Opened even
     // with R2 off, so the desktop app can pin its root before R2 is switched on.
-    let trust = Arc::new(std::sync::Mutex::new(HumanTrust::open(
-        &state_folder(&config),
-        trust_identity(&state),
-    )?));
+    let trust = match HumanTrust::open(&state_folder(&config), trust_identity(&state)) {
+        Ok(trust) => trust,
+        // R2 off must not change whether the host starts (#3024 review L2).
+        Err(error) if !config.require_human_signatures => {
+            tracing::warn!(error = %error, "device trust state unreadable; R2 is off, continuing");
+            HumanTrust::empty(&state_folder(&config), trust_identity(&state))
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let trust = Arc::new(std::sync::Mutex::new(trust));
     // Bound before the first heartbeat, so a second workd for the same socket
     // stops here (exit 4) instead of racing the first one's server session.
     let control = start_control_socket(

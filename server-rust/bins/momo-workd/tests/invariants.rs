@@ -2197,9 +2197,23 @@ async fn inv_21_with_r2_off_nothing_changes() {
         Some(session),
         json!({"text": "unsigned is fine before R2"}),
     );
+    // Relayed revocations are drained and dropped, not kept (#3024 review M3).
+    h.server
+        .revocations
+        .lock()
+        .unwrap()
+        .push(json!({"anything": true}));
     assert_eq!(
         poll_and_ack(&mut h, &input).await,
         ControlAck::ok(Some(session))
+    );
+    assert!(h.server.revocations.lock().unwrap().is_empty());
+    assert!(
+        !h.dir
+            .join("state")
+            .join(momo_workd::human_trust::TRUST_FILE)
+            .exists(),
+        "R2 off writes no trust state"
     );
 }
 
@@ -2281,11 +2295,29 @@ async fn inv_22_r2_the_host_refuses_what_the_server_inserts_unsigned_or_forged()
             "device_signature_invalid",
         ),
         (
-            "a genuine signature moved to another host's control",
+            "a genuine signature moved to another workspace",
             {
                 let mut moved = signed(spawn(&h, "claude", "moved"), &root, None);
                 moved.workspace_id = Uuid::new_v4();
                 moved
+            },
+            "device_signature_invalid",
+        ),
+        (
+            "a genuine new-work signature turned into a resume of a server-chosen session",
+            {
+                let mut resumed = signed(spawn(&h, "claude", "new work"), &root, None);
+                resumed.session_id = Some(preallocated);
+                resumed
+            },
+            "device_signature_invalid",
+        ),
+        (
+            "a genuine signature on text respelled to the same NFC form",
+            {
+                let mut respelled = signed(spawn(&h, "claude", "caf\u{e9}"), &root, None);
+                respelled.payload["label"] = json!("cafe\u{301}");
+                respelled
             },
             "device_signature_invalid",
         ),
@@ -2373,6 +2405,24 @@ async fn inv_23_r2_a_nonce_is_spent_once_even_across_a_restart() {
     assert_eq!(
         poll_and_ack(&mut h, &again).await,
         ControlAck::refused("device_nonce_replayed")
+    );
+    // The session is a signed line: moving a fresh instruction to another
+    // session breaks the signature itself, not an identity pre-check.
+    let mut elsewhere = signed(
+        control(
+            &h,
+            "input",
+            h.owner,
+            Some(session),
+            json!({"text": "meant for this session"}),
+        ),
+        &root,
+        None,
+    );
+    elsewhere.session_id = Some(Uuid::new_v4());
+    assert_eq!(
+        poll_and_ack(&mut h, &elsewhere).await,
+        ControlAck::refused("device_signature_invalid")
     );
 
     // A restart: the trust state is read back from the host state folder.
@@ -2467,12 +2517,42 @@ async fn inv_24_r2_revocations_from_the_app_and_relayed_by_the_server() {
         ControlAck::refused("device_key_revoked")
     );
 
-    // The server relays the root's revocation of the phone (no public key).
+    // A relayed revocation must name the public key (#3024 review M1): the
+    // root's genuine revocation without it is dropped.
     h.server
         .revocations
         .lock()
         .unwrap()
         .push(revocation(&h, &root, &phone, false));
+    let not_yet = input(&h, &phone, phone_ok.clone(), "not yet revoked");
+    assert_eq!(
+        poll_and_ack(&mut h, &not_yet).await,
+        ControlAck::ok(Some(session))
+    );
+    // A key this host has never seen, revoked through the server, stays
+    // revoked under any id.
+    let laptop = Device::new(5);
+    h.server
+        .revocations
+        .lock()
+        .unwrap()
+        .push(revocation(&h, &root, &laptop, true));
+    // The server relays the root's revocation of the phone.
+    h.server
+        .revocations
+        .lock()
+        .unwrap()
+        .push(revocation(&h, &root, &phone, true));
+    let from_laptop = input(
+        &h,
+        &laptop.renamed(),
+        Some(endorsement(&h, &root, &laptop)),
+        "laptop under a new id",
+    );
+    assert_eq!(
+        poll_and_ack(&mut h, &from_laptop).await,
+        ControlAck::refused("device_key_revoked")
+    );
     let revoked = input(&h, &phone, phone_ok.clone(), "after revoke");
     assert_eq!(
         poll_and_ack(&mut h, &revoked).await,
@@ -2599,13 +2679,17 @@ async fn inv_26_r2_nothing_on_the_server_path_moves_the_root() {
         .revocations
         .lock()
         .unwrap()
-        .push(revocation(&h, &root, &root, false));
+        .push(revocation(&h, &root, &root, true));
+    let ok = signed(spawn(&h, "claude", "the real root"), &root, None);
+    assert!(poll_and_ack(&mut h, &ok).await.ok);
+    assert!(
+        h.server.revocations.lock().unwrap().is_empty(),
+        "the poll took it"
+    );
     assert_eq!(
         h.trust.lock().unwrap().root().map(|r| r.key_id),
         Some(root.id)
     );
-    let ok = signed(spawn(&h, "claude", "the real root"), &root, None);
-    assert!(poll_and_ack(&mut h, &ok).await.ok);
     assert_eq!(
         h.trust.lock().unwrap().root().map(|r| r.public_key.clone()),
         Some(root.public())

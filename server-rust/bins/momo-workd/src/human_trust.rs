@@ -50,7 +50,18 @@
 //!
 //! ```text
 //! { "workspaceId", "memberId", "rootKeyId", "targetKeyId", "revokedAtMs",
-//!   "signature": b64(r‖s), "targetPublicKey": b64 (required on the socket) }
+//!   "signature": b64(r‖s), "targetPublicKey": b64 }
+//! ```
+//!
+//! `targetPublicKey` is required on both paths: the endorsement binds a public
+//! key, the revocation names a key id, and a key this host never saw has no id
+//! binding yet. It sits outside the root's signature, so a server could only
+//! use it to revoke *more* (a denial it can already cause by withholding
+//! controls), never to un-revoke.
+//!
+//! ```text
+//! (spawn) a signed spawn never carries a session_id: v1 has no session line
+//! for it, so a resume cannot be signed and is refused while R2 is on.
 //! ```
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -214,6 +225,18 @@ impl HumanTrust {
         })
     }
 
+    /// An empty state at `state_dir` that has not read its files: for a host
+    /// with R2 off whose trust files cannot be read (it must still start).
+    pub fn empty(state_dir: &Path, identity: TrustIdentity) -> Self {
+        Self {
+            identity,
+            trust_path: state_dir.join(TRUST_FILE),
+            nonce_path: state_dir.join(NONCE_FILE),
+            state: TrustState::default(),
+            ledger: NonceLedger::default(),
+        }
+    }
+
     pub fn identity(&self) -> TrustIdentity {
         self.identity
     }
@@ -287,6 +310,19 @@ impl HumanTrust {
         let revocation: Revocation =
             serde_json::from_value(raw.clone()).map_err(|_| "invalid_revocation")?;
         let root = self.state.root.clone().ok_or("root_not_pinned")?;
+        // Already applied (the server relays the list on every poll): nothing
+        // to verify or write again.
+        if self
+            .state
+            .revoked_key_ids
+            .contains(&revocation.target_key_id)
+            && revocation
+                .target_public_key
+                .as_ref()
+                .is_none_or(|key| self.state.revoked_public_keys.contains(key))
+        {
+            return Ok(());
+        }
         if revocation.workspace_id != self.identity.workspace_id
             || revocation.member_id != self.identity.owner_member_id
         {
@@ -384,6 +420,7 @@ impl HumanTrust {
                     _ => return Err(Refusal::DeviceSignatureInvalid),
                 };
                 let text = payload("text").ok_or(Refusal::InvalidControl)?;
+                require_nfc(text)?;
                 (ControlContent::Input { mode, text }, control.session_id)
             }
             "spawn" => {
@@ -393,6 +430,14 @@ impl HumanTrust {
                     return Err(Refusal::DeviceSignatureInvalid);
                 };
                 let first_prompt = payload("label").ok_or(Refusal::InvalidControl)?;
+                require_nfc(first_prompt)?;
+                // `momo.human.control.v1` has no session line for a spawn, so a
+                // resume (a session the server preallocated) cannot be signed:
+                // the server would choose which session the owner's words
+                // join (#3024 review M2).
+                if control.session_id.is_some() {
+                    return Err(Refusal::DeviceSignatureInvalid);
+                }
                 (
                     ControlContent::Spawn {
                         agent_member_id,
@@ -546,6 +591,23 @@ impl HumanTrust {
         })?;
         self.ledger = ledger;
         Ok(())
+    }
+}
+
+/// The signature covers NFC text (momo-wire D-5) while the host acts on the
+/// bytes it was given: text whose NFC form differs could be swapped for
+/// another spelling of the same signature (#3024 review L4). Refused.
+fn require_nfc(text: &str) -> Result<(), Refusal> {
+    let normalized = ControlContent::Input {
+        mode: InputMode::Queue,
+        text,
+    }
+    .canonical_bytes()
+    .map_err(|_| Refusal::DeviceSignatureInvalid)?;
+    if normalized == text.as_bytes() {
+        Ok(())
+    } else {
+        Err(Refusal::DeviceSignatureInvalid)
     }
 }
 

@@ -93,14 +93,19 @@ impl ControlLoop {
     /// is logged and dropped; the server can hide a revocation but not forge
     /// one (the local socket carries them too, D-7).
     fn apply_relayed_revocations(&self) {
+        // Taken even with R2 off, so nothing accumulates (#3024 review M3).
+        let relayed = self.api.take_device_revocations();
         let Some(trust) = &self.human else {
             return;
         };
-        for revocation in self.api.take_device_revocations() {
+        for revocation in relayed {
+            // The server must name the revoked public key too: an endorsement
+            // binds a key, a revocation names an id, and a key this host has
+            // never seen has no id binding yet (#3024 review M1).
             let result = trust
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
-                .apply_revocation(&revocation, false);
+                .apply_revocation(&revocation, true);
             if let Err(label) = result {
                 tracing::warn!(error = label, "relayed device revocation refused");
             }

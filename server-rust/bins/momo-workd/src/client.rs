@@ -110,8 +110,9 @@ struct PendingControlsResponse {
     work_controls: Vec<WorkControl>,
     /// ADR-0146 개정 D-7 (#3024): root-signed revocations the server relays
     /// (`device_revoke.v1`, the [`crate::human_trust`] revocation shape). The
-    /// host verifies each against its pinned root; the server can only hide
-    /// one, which is why the desktop app also hands them over locally.
+    /// host verifies each against its pinned root and requires the revoked
+    /// public key with it; the server can only hide one, which is why the
+    /// desktop app also hands them over locally.
     #[serde(default)]
     device_revocations: Vec<Value>,
 }

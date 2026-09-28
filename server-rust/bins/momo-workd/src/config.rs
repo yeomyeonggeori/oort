@@ -115,7 +115,14 @@ pub fn write_private_file(path: &Path, body: &[u8]) -> Result<(), ConfigError> {
         .and_then(|()| file.sync_all())
         .map_err(io)?;
     drop(file);
-    std::fs::rename(&temporary, path).map_err(io)
+    std::fs::rename(&temporary, path).map_err(io)?;
+    // The rename itself durable: the nonce ledger must survive a power loss.
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::File::open(parent)
+            .and_then(|folder| folder.sync_all())
+            .map_err(io)?;
+    }
+    Ok(())
 }
 
 /// The folder holding a file the host takes orders from: owned by this user
