@@ -1,5 +1,6 @@
 import { uuidEq, type WorkSession } from "../../lib/api";
 import { humanSignatureRefusal } from "../auth/humanSignature";
+import { SCOPE_UNSUPPORTED_LINE, SignerRefusal, type PermissionScope } from "../auth/signedControl";
 import {
   foldSessionEvents,
   type WorkEventRow,
@@ -18,8 +19,11 @@ import type { SessionStatus } from "./sessionList";
 // 1. tool-call 카드의 종류(읽음·수정·실행·변경·검색·도구). 도구 이름은 내부 어휘라
 //    화면에 쓰지 않고, 종류와 한국어 문구로만 옮긴다.
 // 2. 권한 카드. 폰 경로 제약(ADR-0188 D5)을 데스크탑 칸에도 그대로 건다:
-//    「이번 한 번」(`allow_once`)과 「거부」(`reject_once`)만 보인다. 지시를 붙인
-//    거부는 R2까지 서버가 받지 않는다(§8.6, 400 `permission_instruction_unsupported`).
+//    「이번 한 번」(`allow_once`)과 「거부」(`reject_once`)만 보인다. 서버가 서명을
+//    요구하고 이 표면이 서명할 수 있으면(R2-E8 #3028) 「이 세션 동안」 허락과
+//    「거부 + 지시」가 더해진다. 「이 세션 동안」도 에이전트의 `allow_once` 선택지를
+//    고르고 범위만 서명에 싣는다(host가 기억한다, D5). 「거부 + 지시」는 서명 없는
+//    거부 + 서명한 `input` 두 요청이다(`signedControl.ts`).
 //    「항상 허용」·bypass·자동 모드 선택지는 받더라도 버린다. 버튼은 host 소유자
 //    (= 세션 소유자)에게만 있다(D3). 결정은 사람이 버튼을 눌렀을 때만 만든다.
 // 3. 표시 정화(D5): 보이지 않는 문자·방향 제어 무력화, 필드당 3,500자 앞뒤 남기고
@@ -292,10 +296,20 @@ export const PERMISSION_LAPSED_LINE = "10분이 지나 이 요청은 닫혔어�
 export const PERMISSION_OFFLINE_LINE = "연결이 끊겨 지금은 결정할 수 없어요. 다시 연결되면 누를 수 있어요.";
 
 /** 결정을 보낸 뒤 카드가 말하는 한 줄. */
-export function permissionSentLine(kind: PermissionChoiceKind): string {
-  return kind === "allow_once"
-    ? "이번 한 번 허락을 보냈어요. 에이전트가 이어서 해요."
-    : "거부를 보냈어요. 이번 요청은 실행하지 않아요.";
+export function permissionSentLine(kind: PermissionChoiceKind, scope: PermissionScope = "once"): string {
+  if (kind === "allow_once") {
+    return scope === "session"
+      ? "이 세션 동안 허락을 보냈어요. 이 세션에서 같은 요청은 다시 묻지 않아요."
+      : "이번 한 번 허락을 보냈어요. 에이전트가 이어서 해요.";
+  }
+  return "거부를 보냈어요. 이번 요청은 실행하지 않아요.";
+}
+
+/** 「거부 + 지시」의 결과 한 줄. 지시가 닿지 않았으면 거부와 따로 말한다(D-5b). */
+export function rejectWithInstructionLine(instructionDelivered: boolean, failure?: string): string {
+  return instructionDelivered
+    ? "거부하고 지시를 보냈어요. 지시는 다음 차례에 전달돼요."
+    : `거부는 보냈어요. 지시는 전달 안 됨: ${failure ?? "다시 보내 주세요."}`;
 }
 
 export interface PermissionFailure {
@@ -321,8 +335,14 @@ export function permissionFailure(error: unknown): PermissionFailure {
   // 기기 서명 거부(E3 #3023)는 status보다 먼저 이름으로 읽는다. 403이라고 모두
   // 「소유자만」이 아니고, 409 `device_nonce_replayed`는 요청이 닫힌 것이 아니다.
   // 서명 거부는 요청을 닫지 않는다: 거부(서명 없음)는 여전히 보낼 수 있다.
+  // 서명하지 못했다(취소·키 없음): 아무것도 보내지 않았고 요청은 열려 있다.
+  if (error instanceof SignerRefusal) return { closed: false, text: error.message };
   const signature = humanSignatureRefusal(error);
   if (signature) return { closed: false, text: signature.text };
+  // 서버가 「이 세션 동안」을 아직 받지 않는다(#3023): 「이번 한 번」은 여전히 된다.
+  if (status === 400 && code === "permission_scope_unsupported") {
+    return { closed: false, text: SCOPE_UNSUPPORTED_LINE };
+  }
   if (status === 409 && code === "permission_already_decided") {
     return { closed: true, text: "이미 다른 결정이 먼저 들어갔어요. 다른 기기에서 결정했을 수 있어요." };
   }
