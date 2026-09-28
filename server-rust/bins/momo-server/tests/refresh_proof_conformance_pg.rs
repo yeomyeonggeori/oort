@@ -20,6 +20,7 @@
 //! | `a_proof_never_resurrects_an_ended_lineage` | recover from a lineage with no live refresh row |
 //! | `a_suspended_member_is_not_recovered` | drop the member check in `recover_lineage` |
 //! | `a_sign_out_racing_a_recovery_is_not_undone` | skip the tail check after the lineage lock (SABOTAGE recover-no-tail-gate; review H1), or lock the tail before the lower ids (deadlock) |
+//! | `a_linked_recovery_and_a_lineage_sweep_never_deadlock` | #3107 — `lock_linked_device_in_tx` locks the bound pair before the lineage's lower rows (SABOTAGE pair-first) |
 //! | `a_key_binds_only_to_a_fresh_sign_ins_first_token` | drop `lineage_is_bindable` (review M1) |
 //! | `migration_096_reapplies_as_a_noop_and_keeps_rls_forced` | a non-idempotent statement in 096, or a missing FORCE |
 //!
@@ -887,6 +888,153 @@ async fn a_sign_out_racing_a_recovery_is_not_undone() {
         w.live_refresh_rows(lineage).await,
         0,
         "the ended lineage stays ended"
+    );
+}
+
+/// #3107: a QR-linked phone's recovery racing a lineage sweep that does not
+/// pass through the link row (a reuse sweep, `end_lineage`, a sign-out of the
+/// lineage). The linked lineage carries an older live access half below the
+/// bound pair — the shape the #3105 review named (a rotation that left its
+/// access half live; the test un-revokes it, the state a non-linked rotation
+/// leaves behind).
+///
+/// The sweep takes the lineage's rows in id order and holds the lowest; the
+/// recovery must then park on that lowest row **holding no token row**. Before
+/// #3107, `lock_linked_device_in_tx` took the bound pair (the highest ids) and
+/// the recovery's lineage lock then waited on the lower row while holding the
+/// pair: the sweep, needing the pair, closed the cycle and one side died with
+/// 40P01 (a 500, or a sweep that never commits).
+///
+/// SABOTAGE(pair-first): in `lock_linked_device_in_tx`, lock only the pair
+/// (`lock_session_rows_in_tx(.., None, &[access, refresh])`) — this test goes
+/// RED with a deadlock.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_linked_recovery_and_a_lineage_sweep_never_deadlock() {
+    let _lock = test_lock().await;
+    let w = world_with(mode(RefreshProofMode::Require)).await;
+    let desktop = w.login().await;
+    let key = RefreshKey::new("phone");
+    let first = w.link_phone(&desktop).await;
+    let lineage = w.session_id(&first.refresh).await;
+    let phone = w.bound(first.clone(), &key).await;
+    let (status, body) = w.rotate_with(&phone, &key).await;
+    assert_eq!(status, 200);
+    let lost = session_from(&body);
+    w.lose_long_ago(&phone, &lost).await;
+
+    // The older live access half, below the bound pair.
+    let older: Uuid = sqlx::query_scalar(
+        "UPDATE token SET revoked_at = NULL \
+          WHERE token_hash = digest($1::text, 'sha256') RETURNING id",
+    )
+    .bind(&first.access)
+    .fetch_one(&w.su)
+    .await
+    .expect("revive the older access half");
+    let (bound_access, bound_refresh): (Uuid, Uuid) = sqlx::query_as(
+        "SELECT redeemed_access_token_id, redeemed_refresh_token_id FROM device_link_token \
+          WHERE workspace_id = $1 AND member_id = $2 AND redeemed_refresh_token_id IS NOT NULL",
+    )
+    .bind(w.workspace)
+    .bind(w.person_id)
+    .fetch_one(&w.su)
+    .await
+    .expect("the link row");
+    assert!(
+        older < bound_access && bound_access < bound_refresh,
+        "premise: the older live row sorts below the bound pair"
+    );
+    let lowest: Uuid = sqlx::query_scalar(
+        "SELECT id FROM token WHERE session_id = $1 AND revoked_at IS NULL ORDER BY id LIMIT 1",
+    )
+    .bind(lineage)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(lowest, older, "premise: the same lineage");
+
+    // The sweep: lineage rows in id order, the lowest one first.
+    let mut sweep = w.su.begin().await.expect("begin");
+    let sweep_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *sweep)
+        .await
+        .unwrap();
+    sqlx::query("SELECT id FROM token WHERE id = $1 FOR UPDATE")
+        .bind(older)
+        .fetch_one(&mut *sweep)
+        .await
+        .expect("hold the lineage's lowest live row");
+
+    let proof = w.proof(&key, &phone.refresh, now_ms());
+    let url = format!("{}/v1/auth/refresh", w.base);
+    let refresh = phone.refresh.clone();
+    let http = w.http.clone();
+    let recovery = tokio::spawn(async move {
+        let response = http
+            .post(url)
+            .json(&json!({ "refreshToken": refresh, "deviceProof": proof }))
+            .send()
+            .await
+            .expect("recovery");
+        let status = response.status().as_u16();
+        (
+            status,
+            response.json::<Value>().await.unwrap_or(Value::Null),
+        )
+    });
+
+    // Deterministic interleaving: wait until the recovery is parked on a
+    // `token` row lock (the lowest row), not on a timer.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let parked: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity \
+              WHERE datname = current_database() AND pid <> $1 AND pid <> pg_backend_pid() \
+                AND usename = 'momo_app' AND state = 'active' AND wait_event_type = 'Lock' \
+                AND query LIKE '%FROM token%'",
+        )
+        .bind(sweep_pid)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+        if parked == 1 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the recovery never parked on the lineage's lowest row"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+
+    // The rest of the sweep needs the bound pair.
+    let swept = sqlx::query(
+        "UPDATE token SET revoked_at = now() WHERE session_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(lineage)
+    .execute(&mut *sweep)
+    .await;
+    match swept {
+        Ok(_) => sweep.commit().await.expect("commit the sweep"),
+        Err(error) => {
+            let _ = sweep.rollback().await;
+            let (status, body) = recovery.await.expect("recovery task");
+            panic!(
+                "the sweep died while the recovery held the bound pair (recovery {status} {body}): {error}"
+            );
+        }
+    }
+
+    let (status, body) = recovery.await.expect("recovery task");
+    assert_eq!(
+        status, 401,
+        "the recovery waited for the sweep, lost to it and minted nothing (no 40P01 → 500): {body}"
+    );
+    assert_eq!(
+        w.live_refresh_rows(lineage).await,
+        0,
+        "the swept lineage stays ended"
     );
 }
 
