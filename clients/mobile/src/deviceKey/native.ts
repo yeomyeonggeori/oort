@@ -12,9 +12,12 @@ import { base64ToBytes, bytesToBase64 } from './base64';
 // surface. What it can hand out is public by construction:
 //
 //   - the compressed SEC1 public key (33 bytes, base64)
-//   - raw r‖s ECDSA-P256-SHA256 signatures (64 bytes) over bytes the CALLER
-//     supplies — this stage does not build any payload (E1 #3021) or register
-//     the key anywhere (E2 #3022).
+//   - raw r‖s ECDSA-P256-SHA256 signatures (64 bytes) over an E1 payload the
+//     CALLER builds (#3021). Native signs nothing else: the first line must be
+//     `momo.human.control.v1`, `momo.human.device_endorse.v1` or
+//     `momo.human.device_revoke.v1` with exactly that schema's line count,
+//     otherwise DEVICE_KEY_PAYLOAD_REJECTED (MomoDeviceKeyStore
+//     `checkSigningPayload`). This stage registers the key nowhere (E2 #3022).
 //
 // There is no function, native or JS, that returns the private key or the
 // enclave handle.
@@ -43,6 +46,15 @@ export const DEVICE_KEY_SIGNATURE_BYTES = 64;
 /** The Face ID prompt's reason line when the caller gives none. 해요체. */
 export const DEFAULT_SIGN_REASON = '에이전트에게 보낼 지시를 확인해요';
 
+/**
+ * - `biometryUnavailable`: Face ID cannot be used right now. With a key this
+ *   means Face ID is off for the app or temporarily unavailable — the key is
+ *   intact; do NOT delete it.
+ * - `invalidated`: reported only on proof (the enclave rejects the handle, or
+ *   the enrolled biometry is gone). Safe to delete and re-create. A Face ID
+ *   re-enrollment is proven at the next sign, which rejects
+ *   DEVICE_KEY_INVALIDATED; DEVICE_KEY_FAILED is never a reason to delete.
+ */
 export type DeviceKeyStatus =
   | 'unsupported'
   | 'biometryUnavailable'
@@ -70,6 +82,7 @@ export const DEVICE_KEY_ERROR_CODES = [
   'DEVICE_KEY_INVALIDATED',
   'DEVICE_KEY_CANCELLED',
   'DEVICE_KEY_LOCKED_OUT',
+  'DEVICE_KEY_PAYLOAD_REJECTED',
   'DEVICE_KEY_FAILED',
   'DEVICE_KEY_NOT_LINKED',
   'DEVICE_KEY_MALFORMED',
@@ -186,8 +199,9 @@ export async function deviceKeyPublicKey(): Promise<DeviceKeyPublic | null> {
 }
 
 /**
- * Signs `message` with Face ID. Returns raw r‖s (64 bytes). The caller owns the
- * bytes; stage 1 builds no payload.
+ * Signs `message` with Face ID. Returns raw r‖s (64 bytes). `message` must be
+ * an E1 signing payload (see the header); anything else rejects
+ * DEVICE_KEY_PAYLOAD_REJECTED before Face ID is raised.
  */
 export async function signWithDeviceKey(
   message: Uint8Array,
