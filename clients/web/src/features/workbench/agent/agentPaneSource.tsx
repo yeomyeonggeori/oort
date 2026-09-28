@@ -1,5 +1,5 @@
 import { useMemo, type ReactNode } from "react";
-import { useQueries } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot } from "lucide-react";
 import { Button } from "@/design/ui/button";
 import { Skeleton } from "@/features/common/States";
@@ -22,6 +22,13 @@ import {
 } from "@momo/core/features/workbench/agentPane";
 import type { SessionStatus } from "@momo/core/features/workbench/sessionList";
 import { ApiError, decideWorkPermission, type WorkSession } from "@momo/core/lib/api";
+import { fetchHumanControlSignatureRequired } from "@momo/core/features/auth/deviceKeys";
+import {
+  HUMAN_SIGNATURE_REFUSAL,
+  instructFrom,
+  type InstructFrom,
+} from "@momo/core/features/auth/humanSignature";
+import { isDesktop } from "@/lib/tauri";
 import { AgentProgressView, type AgentPaneActions } from "./AgentProgressView";
 import { agentPaneStore, useAgentPaneBindings, type AgentPaneStore } from "./agentPanes";
 
@@ -83,13 +90,19 @@ export function summaryOf(model: AgentPaneModel): AgentPaneSummary {
  * 전까지 길이 없다. 카드는 서버의 `approval.decided`가 실시간으로 오면 닫힌다.
  * 실시간을 놓쳤을 때를 위해 결정이 닿으면 스레드를 한 번 다시 읽는다.
  */
-export function agentRoutes(workspaceId: string, afterDecide: () => void = () => {}): AgentPaneActions {
+export function agentRoutes(
+  workspaceId: string,
+  afterDecide: () => void = () => {},
+  onSignatureRequired: () => void = () => {}
+): AgentPaneActions {
   return {
     decide: async ({ sessionId, requestEventId, optionId, kind }) => {
       try {
         await decideWorkPermission(workspaceId, sessionId, { requestEventId, optionId, kind });
         afterDecide();
       } catch (err) {
+        // 서버가 서명을 요구한다고 답했다: 플래그를 다시 읽어 칸을 안내로 바꾼다(D-4).
+        if (err instanceof ApiError && err.code === HUMAN_SIGNATURE_REFUSAL.required) onSignatureRequired();
         // 서버가 결론을 낸 거절(409·403·404)도 스레드를 다시 읽는다: 다른 기기의 결정이나
         // host 철회가 남긴 `approval.decided`가 칸 머리의 「나를 기다림」을 거둔다.
         if (err instanceof ApiError && err.status >= 400 && err.status < 500) afterDecide();
@@ -123,6 +136,34 @@ function PaneError({ onRetry }: { onRetry: () => void }) {
   );
 }
 
+export const SIGNING_REQUIRED_KEY = (workspaceId: string) =>
+  ["device-keys", workspaceId, "signing-context", "human-control-required"] as const;
+
+/**
+ * 이 화면에서 허락·지시를 보내는가(ADR-0146 개정 D-4 · D-11, #3029). 데스크탑 셸은
+ * 묻지 않는다(서명 명령이 있다, 카드 배선은 E8 #3028). 일반 브라우저는 서버가
+ * `humanControlSignatureRequired: true`라고 말할 때만 안내로 바꾼다. 읽는 중·모름
+ * (E3 이전 서버 404, `MOMO_INSTANCE_ID` 없음 503, 네트워크)은 지금 동작 그대로다.
+ */
+export function useInstructFrom(workspaceId: string, enabled: boolean): {
+  from: InstructFrom;
+  recheck: () => void;
+} {
+  const desktopShell = isDesktop();
+  const client = useQueryClient();
+  const key = SIGNING_REQUIRED_KEY(workspaceId);
+  const query = useQuery({
+    queryKey: key,
+    queryFn: () => fetchHumanControlSignatureRequired(workspaceId),
+    enabled: enabled && !desktopShell,
+    staleTime: 5 * 60_000,
+  });
+  return {
+    from: instructFrom({ desktopShell, signatureRequired: query.data ?? null }),
+    recheck: () => void client.invalidateQueries({ queryKey: key }),
+  };
+}
+
 /**
  * 제품 원천. 칸에 묶인 세션의 스레드만 읽는다(묶이지 않은 세션은 목록 한 줄뿐).
  * 실시간은 작업 콘솔과 같은 레일을 쓴다.
@@ -138,6 +179,7 @@ export function useAgentPaneSource(): AgentPaneSource {
   const hosts = hostsQuery.data;
   const viewer = auth.member.id;
   const { directory } = useDirectory(workspaceId);
+  const instruct = useInstructFrom(workspaceId, workOn);
 
   const boundIds = useMemo(() => [...new Set(Object.values(bindings))], [bindings]);
   const bound = useMemo(
@@ -222,8 +264,9 @@ export function useAgentPaneSource(): AgentPaneSource {
             model={entry.model}
             // 세션 소유자의 이름(보는 사람이 아니다). 모르면 「소유자」로 말한다.
             ownerName={entry.ownerId ? memberFor(directory, entry.ownerId)?.displayName ?? null : null}
-            actions={agentRoutes(workspaceId, entry.refetch)}
+            actions={agentRoutes(workspaceId, entry.refetch, instruct.recheck)}
             offline={connStatus === "disconnected"}
+            instructFrom={instruct.from}
           />
         </>
       );
