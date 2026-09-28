@@ -201,6 +201,10 @@ COPY packages/momo-core /src/packages/momo-core
 # them identical is the whole point of this ticket — an image that builds by a
 # different recipe than the repo is how the two drift apart again.
 COPY server/Fixtures /src/server/Fixtures
+# Same reason, for the API contract goldens that web tests import by
+# repo-relative path (`../../../../../docs/api/*.golden.json`, #3006 GC-8 and
+# #3035 permission decision). Only the goldens, not the rest of docs/ (#3037).
+COPY docs/api/*.golden.json /src/docs/api/
 COPY clients/web/ ./
 
 ARG MOMO_BUILD_SHA=unknown
