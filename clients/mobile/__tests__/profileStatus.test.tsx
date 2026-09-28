@@ -30,9 +30,9 @@ import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 //   1. 온라인·자리 비움·방해 금지를 시트에서 고르면 `PUT /presence` 가 그 상태
 //      **하나만** 싣고 나간다(상태 글 키는 건드리지 않는다). 알약은 바로 바뀌고,
 //      실패하면 되돌아가며 그렇게 말한다.
-//   2. 알림 일시 중지는 `PUT /notification-rules` 이고, **읽은 멘션 예외를 그대로
-//      싣는다** — 통째 치환 계약이라 모르는 값을 false 로 보내면 웹에서 켠 예외가
-//      꺼진다. 읽기 전·읽기 실패 때는 스위치가 잠긴다.
+//   2. 알림 일시 중지는 `PATCH /notification-rules {dnd}` 이고, **멘션 예외를
+//      싣지 않는다**(#3042) — 통째 PUT 은 읽은 뒤 웹이 바꾼 예외를 지운다. 읽기
+//      전·읽기 실패 때는 스위치가 잠긴다.
 //   3. 상태 글은 시트 안의 한 장에서 이모지·글·지우기 시간을 고르고, 선언 상태는
 //      그대로 둔 채 저장한다. 저장된 만료는 「지금대로」로 남길 수 있다.
 //
@@ -67,10 +67,16 @@ interface Server {
   rules: {dnd: boolean; mentionOverridesMute: boolean};
   /** 규칙 GET 의 답을 바꾼다: 'ok' | 'fail' | 'hang'. */
   rulesRead: 'ok' | 'fail' | 'hang';
+  /**
+   * 다른 기기(웹)가 폰의 **마지막 읽기 뒤, 폰의 쓰기가 닿기 전에** 쓰는 값(#3042
+   * 경합 재현). 다음 규칙 GET 에 답한 직후에, GET 없이 쓰기가 먼저 오면 그 쓰기
+   * 직전에 한 번 반영한다.
+   */
+  afterRead?: Partial<{dnd: boolean; mentionOverridesMute: boolean}>;
   presenceFails: boolean;
   /** 명부 GET 을 실패시킨다 — 되돌림이 재조회 없이도 서는지 재려고. */
   rosterFails: boolean;
-  puts: {path: string; body: unknown}[];
+  puts: {path: string; method?: string; body: unknown}[];
 }
 
 let server: Server;
@@ -104,17 +110,27 @@ function installFetch(): void {
   globalThis.fetch = jest.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
     if (url.includes('/notification-rules')) {
-      if (method === 'PUT') {
+      // #3012 서버: PUT 은 통째 치환, PATCH 는 적힌 필드만 **도착한 때의** 값 위에 합친다.
+      if (method === 'PUT' || method === 'PATCH') {
         const body = JSON.parse(String(init?.body));
-        server.puts.push({path: 'notification-rules', body});
-        server.rules = body;
+        if (server.afterRead) {
+          server.rules = {...server.rules, ...server.afterRead};
+          server.afterRead = undefined;
+        }
+        server.puts.push({path: 'notification-rules', method, body});
+        server.rules = method === 'PATCH' ? {...server.rules, ...body} : body;
         return jsonResponse(200, server.rules);
       }
       if (server.rulesRead === 'fail') {
         return jsonResponse(500, {error: {message: 'boom'}});
       }
       if (server.rulesRead === 'hang') return new Promise<Response>(() => {});
-      return jsonResponse(200, server.rules);
+      const answer = jsonResponse(200, {...server.rules});
+      if (server.afterRead) {
+        server.rules = {...server.rules, ...server.afterRead};
+        server.afterRead = undefined;
+      }
+      return answer;
     }
     if (url.includes('/presence')) {
       const body = JSON.parse(String(init?.body ?? '{}'));
@@ -281,7 +297,7 @@ describe('상태를 시트에서 바로 바꾼다 (#2848)', () => {
 });
 
 describe('알림 일시 중지 (#2848)', () => {
-  it('스위치 줄이 스위치로 읽히고, 켜면 읽은 멘션 예외를 그대로 싣는다', async () => {
+  it('스위치 줄이 스위치로 읽히고, 켜면 일시 중지 하나만 PATCH 로 싣는다', async () => {
     const sheet = await openSheet();
     const row = within(sheet).getByTestId('profile-pause-row');
     await waitFor(() =>
@@ -293,8 +309,9 @@ describe('알림 일시 중지 (#2848)', () => {
     fireEvent.press(row);
 
     await waitFor(() => expect(rulesPuts()).toHaveLength(1));
-    // 통째 치환 계약: 웹에서 켜 둔 멘션 예외(true)가 그대로 나가야 한다.
-    expect(rulesPuts()[0].body).toEqual({dnd: true, mentionOverridesMute: true});
+    // 멘션 예외는 싣지 않는다 — 서버가 도착한 때의 값을 지킨다(#3042).
+    expect(rulesPuts()[0]).toMatchObject({method: 'PATCH', body: {dnd: true}});
+    expect(server.rules).toEqual({dnd: true, mentionOverridesMute: true});
     await waitFor(() =>
       expect(
         within(sheet).getByTestId('profile-pause-row').props.accessibilityState,
@@ -315,7 +332,7 @@ describe('알림 일시 중지 (#2848)', () => {
     );
     fireEvent(within(sheet).getByTestId('profile-pause-switch', {includeHiddenElements: true}), 'valueChange', false);
     await waitFor(() => expect(rulesPuts()).toHaveLength(1));
-    expect(rulesPuts()[0].body).toEqual({dnd: false, mentionOverridesMute: false});
+    expect(rulesPuts()[0]).toMatchObject({method: 'PATCH', body: {dnd: false}});
   });
 
   it('규칙을 아직 못 읽었으면 잠겨 있고, 눌러도 아무것도 보내지 않는다', async () => {
@@ -362,7 +379,7 @@ describe('알림 일시 중지 (#2848)', () => {
     );
     const real = globalThis.fetch;
     globalThis.fetch = jest.fn(async (url: string, init?: RequestInit) => {
-      if (url.includes('/notification-rules') && init?.method === 'PUT') {
+      if (url.includes('/notification-rules') && init?.method === 'PATCH') {
         return jsonResponse(500, {error: {message: 'x'}});
       }
       return (real as unknown as (u: string, i?: RequestInit) => Promise<Response>)(
@@ -379,7 +396,7 @@ describe('알림 일시 중지 (#2848)', () => {
   });
 });
 
-describe('알림 일시 중지는 쓰기 직전에 다시 읽는다 (#2893)', () => {
+describe('알림 일시 중지는 다른 기기의 변경을 지우지 않는다 (#2893 → #3042 PATCH)', () => {
   async function readySheet() {
     const sheet = await openSheet();
     await waitFor(() =>
@@ -399,20 +416,23 @@ describe('알림 일시 중지는 쓰기 직전에 다시 읽는다 (#2893)', ()
     fireEvent.press(within(sheet).getByTestId('profile-pause-row'));
 
     await waitFor(() => expect(rulesPuts()).toHaveLength(1));
-    expect(rulesPuts()[0].body).toEqual({dnd: true, mentionOverridesMute: true});
+    expect(rulesPuts()[0].body).toEqual({dnd: true});
+    expect(server.rules).toEqual({dnd: true, mentionOverridesMute: true});
   });
 
-  it('다시 읽기가 실패하면 쓰지 않고, 스위치를 되돌리고 그렇게 말한다', async () => {
+  // #3042 경합 회귀. 폰이 규칙을 읽은 **뒤**, 쓰기가 닿기 전에 웹이 멘션 예외를
+  // 켠다. 읽은 값으로 만든 통째 PUT 은 그 사이의 변경을 지운다(다시 읽어도 틈은
+  // 남는다). 바꾼 필드 하나만 싣는 PATCH 만 둘 다 남긴다.
+  it('읽은 뒤 쓰기 전에 웹이 바꾼 멘션 예외를 폰 토글이 지우지 않는다', async () => {
+    server.rules = {dnd: false, mentionOverridesMute: false};
     const sheet = await readySheet();
-    server.rulesRead = 'fail';
+    // 다음 규칙 GET 에 답하자마자 웹이 멘션 예외를 켠다.
+    server.afterRead = {mentionOverridesMute: true};
 
     fireEvent.press(within(sheet).getByTestId('profile-pause-row'));
 
-    await waitFor(() => expect(within(sheet).getByTestId('pause-failure')).toBeTruthy());
-    expect(rulesPuts()).toHaveLength(0);
-    expect(
-      within(sheet).getByTestId('profile-pause-row').props.accessibilityState,
-    ).toMatchObject({checked: false});
+    await waitFor(() => expect(rulesPuts()).toHaveLength(1));
+    expect(server.rules).toEqual({dnd: true, mentionOverridesMute: true});
   });
 
   it('한 번 읽은 뒤 재조회가 실패해도 켜진 스위치와 「불러오지 못했습니다」가 함께 서지 않는다', async () => {
