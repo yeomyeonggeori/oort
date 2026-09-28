@@ -22,7 +22,7 @@
 | 확장이 **자기 번들 ID로 서명**됨 | `codesign -dv` → `Identifier=app.momo.ios.NotificationService` |
 | `MomoKeychainAccessGroup` 이 **실제 값으로 확장**됨(양쪽 프로세스) | 빌드 산출 Info.plist 에서 `YWQQFQM38J.app.momo.ios.shared` 확인 |
 | `MomoAPNSEnvironment` 가 **구성별로 확장**됨 | Debug 산출물이 `development` |
-| entitlement **선언 대칭**(앱↔확장 공유 그룹 동일, `aps-environment` 는 앱만) | `scripts/verify_ios_signing.sh` |
+| entitlement **선언 대칭**(앱↔확장 공유 그룹 동일, `aps-environment` 는 앱만, 기기 키 그룹은 앱만) | `clients/mobile/__tests__/pushContract.test.ts`, `clients/mobile/__tests__/deviceKeyContract.test.ts` |
 | 승계 Swift 391줄이 **동결 킷과 바이트 일치** | `scripts/verify_push_kit_inheritance.sh` |
 | 액션 분기·워크스페이스 가드·재시도 정책 | `clients/mobile/__tests__/push*.test.ts` |
 
@@ -59,9 +59,11 @@ bundle exec fastlane match development --readonly false
 #    scheme=MomoMobile, 실기기 선택, Run
 ```
 
-`fastlane/Matchfile` 의 `app_identifier` 에 **두 식별자**가 다 있어야 한다
-(`scripts/verify_ios_signing.sh` 가 강제한다):
-`app.momo.ios`, `app.momo.ios.NotificationService`.
+프로비저닝은 **두 식별자**(`app.momo.ios`, `app.momo.ios.NotificationService`)
+모두에 필요하다. 서명된 산출물이 각자 자기 식별자로 서명됐는지는 Xcode Cloud의
+`clients/mobile/ios/ci_scripts/ci_post_xcodebuild.sh` §2가 강제한다. (정정
+2026-09-28: 예전 `fastlane/Matchfile`·`scripts/verify_ios_signing.sh`는 503d5ee3
+W-S1에서 은퇴했다. 위 1)의 fastlane 명령도 그때의 기록이다.)
 
 ### 로그 보는 법 (모든 단계에서 씀)
 

@@ -12,6 +12,7 @@
 //   git reads     a pane's repo/branch/diff numbers -> command (#2855; 8 fixed reads)
 //   pane signals  harness hooks -> app-only Unix socket -> the pane's channel (#2776)
 //   work host     this Mac as a work host (momo-workd sidecar) -> commands (#2778)
+//   device key    Secure Enclave P-256 signing key, the R2 root (#3025)
 //
 // Everything above is exposed to the web bundle as plain app commands and two
 // events; the contract is documented in `clients/desktop/README.md` and consumed
@@ -85,6 +86,16 @@ mod work_host;
 #[cfg(all(desktop, not(target_os = "macos")))]
 #[path = "work_host_unsupported.rs"]
 mod work_host;
+// This Mac's human device key (ADR-0146 개정 2026-09-28 D-3·D-6·D-7, #3025):
+// a Secure Enclave P-256 key, the three signed statements built in Rust, a
+// native confirmation before each signature, and the root pin on workd.
+// Reachable only through the seven `device_key_*` commands, which only
+// `capabilities/device-key.json` grants.
+#[cfg(target_os = "macos")]
+mod device_key;
+#[cfg(all(desktop, not(target_os = "macos")))]
+#[path = "device_key_unsupported.rs"]
+mod device_key;
 
 use tauri::Manager;
 use tauri_plugin_deep_link::DeepLinkExt;
@@ -122,6 +133,7 @@ pub fn run() {
         .manage(updater::UpdaterState::default())
         .manage(pty::PtyState::default())
         .manage(work_host::WorkHostState::default())
+        .manage(device_key::DeviceKeyState::default())
         .invoke_handler(tauri::generate_handler![
             deeplink::deep_link_take_pending,
             discovery::discovery_start,
@@ -157,6 +169,13 @@ pub fn run() {
             work_host::work_host_start,
             work_host::work_host_stop,
             work_host::work_host_forget,
+            device_key::device_key_status,
+            device_key::device_key_create,
+            device_key::device_key_bind_root,
+            device_key::device_key_sign_control,
+            device_key::device_key_sign_endorse,
+            device_key::device_key_sign_revoke,
+            device_key::device_key_deliver_revocation,
         ]);
 
     #[cfg(not(desktop))]

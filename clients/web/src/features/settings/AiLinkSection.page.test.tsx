@@ -15,6 +15,10 @@ import {
   putProviderLink,
   testProviderLink,
 } from "@momo/core/features/settings/api";
+import {
+  fetchProviderDefaultAi,
+  putProviderDefaultAi,
+} from "@momo/core/features/settings/defaultAi";
 import { escapeIsClaimed } from "@/design/ui/escapeLayer";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { AiLinkSection } from "./AiLinkSection";
@@ -62,6 +66,11 @@ vi.mock("@momo/core/features/settings/api", async (importOriginal) => {
     putProviderLink: vi.fn(),
     testProviderLink: vi.fn(),
   };
+});
+
+vi.mock("@momo/core/features/settings/defaultAi", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@momo/core/features/settings/defaultAi")>();
+  return { ...actual, fetchProviderDefaultAi: vi.fn(), putProviderDefaultAi: vi.fn() };
 });
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -223,6 +232,9 @@ beforeEach(() => {
   vi.mocked(listChannels).mockResolvedValue([]);
   vi.mocked(listHostedConnections).mockReset();
   vi.mocked(listHostedConnections).mockResolvedValue({ connections: [] });
+  vi.mocked(fetchProviderDefaultAi).mockReset();
+  vi.mocked(fetchProviderDefaultAi).mockResolvedValue({ teamAgent: null, summary: null });
+  vi.mocked(putProviderDefaultAi).mockReset();
   vi.mocked(testProviderLink).mockReset();
   vi.mocked(testProviderLink).mockResolvedValue({
     schema: "momo.provider_link.test.v0",
@@ -322,6 +334,97 @@ describe("기본 AI 표의 운영자 판정 = 팀 연결의 서버 답 (#2881)",
     expect(foot.dataset.operator).toBe("no");
     expect(q("ai-default-summary")?.textContent).toContain("팀 API 키 · 운영자 설정");
     expect(q("ai-default-teamAgent")?.dataset.state).toBe("ok");
+  });
+});
+
+describe("기본 AI 팀 줄 저장 = default-ai 서버 답 (#3042)", () => {
+  const CHECKED = {
+    schema: "momo.provider_link.test.v0",
+    ok: true,
+    source: "database",
+    mode: "external-hermes",
+    endpointLabel: "OpenAI",
+    checkedAtMs: Date.now(),
+    entries: [
+      {
+        position: 0,
+        source: "provider_link",
+        mode: "external-hermes",
+        endpointLabel: "https://api.openai.com/v1",
+        enabled: true,
+        ok: true,
+        disposition: "ok",
+        probe: { outcome: "ok", method: "models", latencyMs: 90, probedAtMs: 1, cached: false, modelIds: ["gpt-4o"] },
+      },
+    ],
+  };
+
+  async function checkNow() {
+    await until("ai-link-row");
+    act(() => (q("ai-link-row-more") as HTMLButtonElement).click());
+    act(() => (q("ai-link-check") as HTMLButtonElement).click());
+    await rtlWaitFor(() => expect(testProviderLink).toHaveBeenCalledTimes(1));
+  }
+
+  it("운영자(200)는 확인한 모델에서 골라 서버에 저장한다", async () => {
+    vi.mocked(testProviderLink).mockResolvedValue(CHECKED as never);
+    vi.mocked(putProviderDefaultAi).mockResolvedValue({
+      teamAgent: { linkPosition: 0, endpointLabel: "https://api.openai.com/v1", linkResolved: true, modelId: "gpt-4o" },
+      summary: null,
+    });
+    mount();
+    // 확인 전: 칸이 아니라 할 일.
+    await rtlWaitFor(() =>
+      expect(q("ai-default-teamAgent-model")?.textContent).toBe("연결 확인을 하면 고를 수 있는 모델이 보여요.")
+    );
+    await checkNow();
+    const select = (await until("ai-default-teamAgent-select")) as HTMLSelectElement;
+    act(() => {
+      select.value = "link:0:gpt-4o";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await rtlWaitFor(() => expect(putProviderDefaultAi).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(putProviderDefaultAi).mock.calls[0]).toEqual([
+      "teamAgent",
+      { linkPosition: 0, modelId: "gpt-4o" },
+    ]);
+    await rtlWaitFor(() =>
+      expect((q("ai-default-teamAgent-select") as HTMLSelectElement).value).toBe("link:0:gpt-4o")
+    );
+    expect(q("ai-defaults-team-foot")?.textContent).toContain("팀 줄의 선택은 서버에 저장돼요.");
+  });
+
+  it("default-ai 가 403이면 확인한 뒤에도 칸이 없다(서버 판정)", async () => {
+    vi.mocked(testProviderLink).mockResolvedValue(CHECKED as never);
+    vi.mocked(fetchProviderDefaultAi).mockRejectedValue(new ApiError(403, "operator required"));
+    mount();
+    await checkNow();
+    await until("ai-link-probe");
+    expect(q("ai-default-teamAgent-select")).toBeNull();
+    expect(q("ai-default-summary-select")).toBeNull();
+  });
+
+  it("비운영자(link 403)는 default-ai 를 부르지도 않는다", async () => {
+    vi.mocked(fetchProviderLink).mockRejectedValue(new ApiError(403, "operator required"));
+    mount();
+    await until("ai-defaults-team-foot");
+    expect(fetchProviderDefaultAi).not.toHaveBeenCalled();
+    expect(q("ai-default-teamAgent-select")).toBeNull();
+  });
+
+  it("저장이 403이면 그 줄에 누가 바꿀 수 있는지 말한다", async () => {
+    vi.mocked(testProviderLink).mockResolvedValue(CHECKED as never);
+    vi.mocked(putProviderDefaultAi).mockRejectedValue(new ApiError(403, "operator required"));
+    mount();
+    await checkNow();
+    const select = (await until("ai-default-summary-select")) as HTMLSelectElement;
+    act(() => {
+      select.value = "link:0:";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    const error = await until("ai-default-summary-error");
+    expect(error.textContent).toBe("팀 줄은 이 서버의 운영자만 바꿀 수 있어요.");
+    expect((q("ai-default-summary-select") as HTMLSelectElement | null)?.value ?? "").toBe("");
   });
 });
 

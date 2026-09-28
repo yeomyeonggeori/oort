@@ -8,8 +8,9 @@ import {
   NOTIFICATION_PAUSE_DESCRIPTION,
   NOTIFICATION_PAUSE_LABEL,
   NOTIFICATION_RULES_SERVER_NOTE,
-  putNotificationRules,
+  patchNotificationRules,
   type NotificationRules,
+  type NotificationRulesPatch,
 } from "@momo/core/features/settings/notificationRules";
 import { InlineBanner, Skeleton } from "@/features/common/States";
 import { DesktopNotificationGroup } from "./DesktopNotificationGroup";
@@ -33,9 +34,11 @@ import { SectionShell, SettingsToggleRow, Subsection } from "./SettingsFields";
 //
 // The switches are the platform checkbox, not a custom control: it already gives
 // the space toggle, the accessible name, and a focus ring, and this bundle
-// carries no Radix Switch. Each write replaces the whole rule (the server PUT is
-// whole-object), applied optimistically so the toggle moves at click speed and
-// rolls back if the round trip fails.
+// carries no Radix Switch. Each write names only the switch it changed (PATCH,
+// #3042): the phone writes the pause from its profile sheet, and a whole-object
+// PUT of this panel's last read would erase whatever it changed since. Applied
+// optimistically so the toggle moves at click speed, rolled back if the round
+// trip fails, and replaced by the server's merged answer when it lands.
 // =============================================================================
 
 const LINES = [
@@ -62,13 +65,16 @@ export function NotificationRulesSection({ offline }: { offline: boolean }) {
   const offlineReasonId = useId();
 
   const save = useMutation({
-    mutationFn: (next: NotificationRules) =>
-      putNotificationRules(workspaceId, next),
-    onMutate: async (next) => {
+    mutationFn: (patch: NotificationRulesPatch) =>
+      patchNotificationRules(workspaceId, patch),
+    onMutate: async (patch) => {
       setIssue(null);
       await client.cancelQueries({ queryKey });
       const previous = client.getQueryData<NotificationRules>(queryKey);
-      client.setQueryData<NotificationRules>(queryKey, next);
+      if (previous) {
+        const { dndUntilMs: _until, ...fields } = patch;
+        client.setQueryData<NotificationRules>(queryKey, { ...previous, ...fields });
+      }
       return { previous };
     },
     onError: (_error, _next, context) => {
@@ -119,7 +125,7 @@ export function NotificationRulesSection({ offline }: { offline: boolean }) {
               checked={current.dnd}
               disabled={disabled}
               describedBy={offline ? offlineReasonId : undefined}
-              onToggle={(dnd) => save.mutate({ ...current, dnd })}
+              onToggle={(dnd) => save.mutate({ dnd })}
             />
             <SettingsToggleRow
               testId="notification-rules-mention"
@@ -128,9 +134,7 @@ export function NotificationRulesSection({ offline }: { offline: boolean }) {
               checked={current.mentionOverridesMute}
               disabled={disabled}
               describedBy={offline ? offlineReasonId : undefined}
-              onToggle={(mentionOverridesMute) =>
-                save.mutate({ ...current, mentionOverridesMute })
-              }
+              onToggle={(mentionOverridesMute) => save.mutate({ mentionOverridesMute })}
             />
           </div>
 

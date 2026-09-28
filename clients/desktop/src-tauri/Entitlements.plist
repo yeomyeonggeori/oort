@@ -6,8 +6,15 @@
   `tauri.conf.json > bundle > macOS > entitlements`.
 
   Keep it to what the app actually needs. WKWebView's JIT runs in WebKit's own
-  WebContent process, and the keychain works without an entitlement, so neither
-  belongs here.
+  WebContent process, so it does not belong here.
+
+  The bundler signs the momo-workd sidecar with this same file. So it holds no
+  restricted entitlement (application-identifier, keychain-access-groups):
+  those need a provisioning profile, which a bare sidecar binary cannot carry,
+  and the device-key group is the app's alone (ADR-0146 D-3). The signed app
+  gets them from Entitlements.app.plist, which scripts/publish_next_build.sh
+  applies to the outer .app after embedding the profile. The legacy login
+  keychain the sign-in token uses needs no entitlement.
 
   com.apple.security.device.audio-input: huddle microphone. Under the hardened
   runtime, TCC denies the microphone without showing a prompt when this is

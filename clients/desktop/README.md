@@ -441,6 +441,86 @@ scripts/desktop/build_workd_sidecar.sh --dry-run-sign <oort.app>   # prints the 
 data-protection keychain refuses a binary without it), and workd accepting the
 signed app on the control socket.
 
+Open (#3025): the signed path gives the sidecar **no** restricted entitlement.
+A bare Mach-O in `Contents/MacOS` cannot carry a provisioning profile, so
+granting workd `application-identifier`/`keychain-access-groups` needs its own
+App ID and Developer ID profile and workd wrapped in a helper bundle (or a
+different host-key store). Until then a signed workd's data-protection keychain
+answers `errSecMissingEntitlement` (-34018); only debug builds (`--dev-key-file`) keep a host key.
+
+## Device key, the R2 root (#3025)
+
+ADR-0146 개정 2026-09-28 D-1·D-3·D-5·D-6·D-7. Code: `src-tauri/src/device_key/`
+(`payload.rs` builds the three signed statements, `enclave.rs` is the Secure
+Enclave, `confirm.rs` the native dialog). Granted only by
+`capabilities/device-key.json` (main webview, bundled origin, macOS). Web half:
+`desktopDeviceKey` in `clients/web/src/lib/tauri.ts`, UI in
+`clients/web/src/features/settings/DeviceKeysBlock.tsx` (설정 › 기기 › 지시 서명).
+
+| command | does |
+|---|---|
+| `device_key_status { workspaceId? }` | `support` (`ready`/`absent`/`unsupported`/`unsigned_build`/`entitlement_missing`/`error`), public key + fingerprint, this workspace's root binding, the running workd's pinned root |
+| `device_key_create` | make the enclave key; an existing one is returned |
+| `device_key_bind_root { workspaceId, memberId, keyId, publicKey }` | after `POST …/device-keys` (password): native confirm, remember key id ↔ workspace (`<app data>/device-key/roots.json`, 0600), `pin_root` on workd |
+| `device_key_sign_control { … content }` | `momo.human.control.v1`: `input`, `spawn`, `permission` (the bytes for `host_register`/`bundle_manifest` exist, the command refuses them until their dialogs can show the host key and every bundle item) |
+| `device_key_sign_endorse { workspaceId, targetKeyId, targetAlg, targetPublicKey, label }` | `device_endorse.v1` |
+| `device_key_sign_revoke { workspaceId, targetKeyId, targetPublicKey, targetLabel }` | `device_revoke.v1`, then `revoke_device` on workd right away |
+| `device_key_deliver_revocation { workspaceId, targetKeyId }` | hand a letter this shell signed (kept in `<app data>/device-key/revocations.json`, 0600) to workd again |
+
+Rules the code holds:
+
+- **The webview never passes bytes to sign.** Each command takes typed fields;
+  the shell builds the statement (a port of `momo-wire` `human_control.rs`,
+  checked byte for byte against the shared E1 vectors), fills the signer's
+  identity from its own binding, and checks the result against an allow-list of
+  the three schemas and their line counts.
+- **A native `NSAlert` before every signature** shows what is signed (target
+  host and session, kind, the whole instruction or first prompt in a scrolling
+  view, agent and folder, permission request and option; fingerprint first for
+  an approval, key id for a revocation). 취소 is first and answers Escape; the
+  confirm button has no key equivalent; a confirm within 0.7 s of the dialog
+  appearing shows it again; after a decline no dialog is raised for 3 s.
+- **Nothing invisible is signed.** Format characters (ZWJ excepted), line and
+  paragraph separators, private use and tag characters are refused in every
+  signed text and label, stricter than E1's control-character rule.
+- **No software key.** Token `SecureEnclave`, `PrivateKeyUsage | UserPresence`,
+  `WhenUnlockedThisDeviceOnly`, data-protection keychain, access group
+  `<TEAM>.app.momo.desktop.devicekey` (team read from this binary's own
+  signature). An unsigned build answers `unsigned_build`, a signed build without
+  the entitlement `entitlement_missing` (-34018); neither ever holds a key.
+- **Reuse window ≤300 s** (default 300): one evaluated `LAContext` kept on the
+  signing thread and invalidated after the window.
+  `touchIDAuthenticationAllowableReuseDuration` is 0: Apple's header limits it to
+  lock-screen unlocks, and unlocking the Mac must not stand in for a signature.
+- One worker thread runs every enclave call, one at a time.
+
+**Signed builds and the provisioning profile** (#3025; `runtime-unverified`
+until an owner-approved signed build): `keychain-access-groups` is a restricted
+entitlement for a Developer ID app, so the bundle must carry a provisioning
+profile that allows it, or the signed app does not launch.
+
+- Profile: `momo desktop Developer ID` (App ID `YWQQFQM38J.app.momo.desktop`,
+  UUID pinned in `scripts/desktop/check_provisioning_profile.sh`), kept outside
+  the repo at `~/.momo-secrets/momo-desktop-developer-id.provisionprofile`
+  (`MOMO_PROVISIONING_PROFILE` overrides). The profile expires 2044; the
+  Developer ID certificate it names expires 2027-02-01, which is the date that
+  counts.
+- `Entitlements.plist` is what the bundler signs the app **and the workd
+  sidecar** with (one plist for every target), so it holds no restricted key.
+- `Entitlements.app.plist` adds `com.apple.application-identifier`,
+  `com.apple.developer.team-identifier` and the device-key group.
+  `scripts/publish_next_build.sh` copies the profile to
+  `Contents/embedded.provisionprofile` after the bundler and re-signs only the
+  outer `.app` with it (no `--deep`), so the sidecar keeps its own signature.
+- The profile is not in `tauri.conf.json > bundle > macOS > files`: the bundler
+  fails when that file is missing, which would break every build on a machine
+  without the profile, and it would copy the file's 0600 mode.
+- `check_provisioning_profile.sh` runs before the build (UUID, team, App ID,
+  allowed groups, the signing certificate, expiry; warns 30 days ahead) and
+  again on the signed app (embedded profile, app entitlements, none on the
+  sidecar). Unsigned builds (`cargo tauri dev`, `cargo tauri build` without
+  `APPLE_SIGNING_IDENTITY`) never read either file.
+
 ## Run
 
 Normal dev (spawns the `clients/web` Vite dev server on 5173, then opens the window):

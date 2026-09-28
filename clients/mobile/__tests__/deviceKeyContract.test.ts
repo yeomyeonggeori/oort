@@ -1,7 +1,10 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { DEVICE_KEY_ACCESS_GROUP } from '../src/deviceKey/native';
+import {
+  DEVICE_KEY_ACCESS_GROUP,
+  DEVICE_KEY_ERROR_CODES,
+} from '../src/deviceKey/native';
 
 // =============================================================================
 // #3026 / ADR-0146 개정 2026-09-28 D-2: the device key lives in a keychain group
@@ -117,7 +120,7 @@ describe('MomoDeviceKeyStore — the properties no simulator can run', () => {
     );
     for (const fn of ['create', 'publicKey', 'sign']) {
       const body = code.match(
-        new RegExp(`func ${fn}\\([^)]*\\)[^{]*\\{([\\s\\S]*?)\\n  \\}`),
+        new RegExp(`func ${fn}\\([^)]*\\)[^{]*\\{([\\s\\S]*?)\\n {2}\\}`),
       );
       expect(body?.[1]).toMatch(
         /guard Self\.secureEnclaveAvailable else \{ throw MomoDeviceKeyFailure\.unsupported \}/,
@@ -148,5 +151,98 @@ describe('MomoDeviceKeyStore — the properties no simulator can run', () => {
     );
     expect(code).toContain('publicKey.compressedRepresentation');
     expect(code).toContain('.rawRepresentation');
+  });
+});
+
+// Review of #3043 (M-3, M-4) — what the simulator cannot run. The payload
+// allowlist and the invalidated classification themselves run for real in
+// modules/momo-device-key-native/sim-check against the vectors below.
+describe('MomoDeviceKeyStore — hardening before stage 2', () => {
+  const code = swiftCode(store);
+  const FIXTURE = join(
+    __dirname,
+    'fixtures/human-control-signing.vectors.json',
+  );
+  const vectors = JSON.parse(read(FIXTURE)) as {
+    cases: { name: string; schema: string; payload: string }[];
+  };
+
+  it('mirrors every native error code in JS', () => {
+    const swiftCodes = [...code.matchAll(/return "(DEVICE_KEY_[A-Z_]+)"/g)].map(
+      m => m[1],
+    );
+    expect(swiftCodes).toContain('DEVICE_KEY_PAYLOAD_REJECTED');
+    const jsOnly = ['DEVICE_KEY_NOT_LINKED', 'DEVICE_KEY_MALFORMED'];
+    expect([...swiftCodes].sort()).toEqual(
+      DEVICE_KEY_ERROR_CODES.filter(c => !jsOnly.includes(c)).sort(),
+    );
+  });
+
+  it('allows only momo.human.control.v1, with its vector line count', () => {
+    // ADR-0146 D-6/D-7: endorse/revoke are signed by the root Mac, never the phone.
+    const control = vectors.cases.filter(
+      c => c.schema === 'momo.human.control.v1',
+    );
+    expect(control.length).toBeGreaterThanOrEqual(6);
+    const counts = new Set(control.map(c => c.payload.split('\n').length));
+    expect([...counts]).toEqual([13]);
+    const table = code.match(
+      /signingSchemas: \[String: Int\] = \[([\s\S]*?)\]/,
+    );
+    const fromSwift: Record<string, number> = {};
+    for (const m of (table?.[1] ?? '').matchAll(/"([^"]+)": (\d+)/g)) {
+      fromSwift[m[1]] = Number(m[2]);
+    }
+    expect(fromSwift).toEqual({ 'momo.human.control.v1': 13 });
+  });
+
+  it('keeps the vector fixture identical to the E1 original once both are here', () => {
+    // docs/api/… arrives on track/uxui with the engine sync; until then the
+    // fixture is the copy (origin/track/engine blob 2fcc3096).
+    const original = join(
+      APP_ROOT,
+      '../../docs/api/human-control-signing.vectors.json',
+    );
+    let upstream: string | null = null;
+    try {
+      upstream = read(original);
+    } catch {
+      upstream = null;
+    }
+    if (upstream !== null) expect(read(FIXTURE)).toBe(upstream);
+    expect(vectors.cases.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it('checks the payload before anything else in sign()', () => {
+    const body =
+      code.match(/func sign\([^)]*\)[^{]*\{([\s\S]*?)\n {2}\}/)?.[1] ?? '';
+    const firstStatement = body.trim().split('\n')[0];
+    expect(firstStatement).toBe('try Self.checkSigningPayload(message)');
+  });
+
+  it('serializes create/delete and writes the key handle add-only (M-4)', () => {
+    const create =
+      code.match(/public func create\(\)[^{]*\{([\s\S]*?)\n {2}\}/)?.[1] ?? '';
+    expect(create).toMatch(/Self\.mutations\.sync \{ try createLocked\(\) \}/);
+    const del =
+      code.match(/public func delete\(\)[^{]*\{([\s\S]*?)\n {2}\}/)?.[1] ?? '';
+    expect(del).toMatch(/Self\.mutations\.sync \{/);
+    const locked =
+      code.match(/func createLocked\(\)[^{]*\{([\s\S]*?)\n {2}\}/)?.[1] ?? '';
+    expect(locked).toMatch(
+      /try addItem\(Self\.keyAccount, key\.dataRepresentation\)/,
+    );
+    expect(locked).not.toMatch(/writeItem\(Self\.keyAccount/);
+    const add =
+      code.match(/func addItem\([^)]*\)[^{]*\{([\s\S]*?)\n {2}\}/)?.[1] ?? '';
+    expect(add).not.toMatch(/deleteItem/);
+    expect(add).toMatch(
+      /case errSecDuplicateItem: throw MomoDeviceKeyFailure\.alreadyExists/,
+    );
+  });
+
+  it('takes the enrollment fingerprint from the iOS 18 API, legacy only in one place', () => {
+    expect(code.match(/evaluatedPolicyDomainState/g)).toHaveLength(1);
+    expect(code).toMatch(/context\.domainState\.biometry\.stateHash/);
   });
 });

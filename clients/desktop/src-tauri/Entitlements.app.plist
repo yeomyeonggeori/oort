@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements of the signed oort.app itself (R2-E5 follow-up, #3025).
+
+  The bundler never reads this file. scripts/publish_next_build.sh embeds the
+  Developer ID provisioning profile as Contents/embedded.provisionprofile and
+  then re-signs the outer .app only (no deep signing) with this file.
+
+  Why a second file: the bundler signs every external binary with the one
+  plist in tauri.conf.json > bundle > macOS > entitlements (tauri-bundler
+  2.9 sign.rs). That would hand the momo-workd sidecar the device-key group,
+  which ADR-0146 D-3 forbids, and a bare Mach-O cannot carry a provisioning
+  profile to authorize it. So Entitlements.plist (bundler, app + sidecar) keeps
+  unrestricted entitlements only, and this file adds the restricted ones for
+  the app.
+
+  Must be a superset of Entitlements.plist (the re-sign replaces the app's
+  entitlements). Every key below the first must be allowed by the profile:
+  scripts/desktop/check_provisioning_profile.sh checks that before the build
+  and again on the signed bundle. Signing with these keys and no matching
+  profile produces an app that macOS refuses to launch.
+
+  keychain-access-groups: the Secure Enclave device key's group,
+  <TEAM>.app.momo.desktop.devicekey (device_key/enclave.rs ACCESS_GROUP_SUFFIX).
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<key>com.apple.application-identifier</key>
+	<string>YWQQFQM38J.app.momo.desktop</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>YWQQFQM38J</string>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>YWQQFQM38J.app.momo.desktop.devicekey</string>
+	</array>
+</dict>
+</plist>
