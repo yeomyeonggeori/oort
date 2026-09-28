@@ -2532,11 +2532,12 @@ async fn inv_24_r2_revocations_from_the_app_and_relayed_by_the_server() {
     // A key this host has never seen, revoked through the server, stays
     // revoked under any id.
     let laptop = Device::new(5);
-    h.server
-        .revocations
-        .lock()
-        .unwrap()
-        .push(revocation(&h, &root, &laptop, true));
+    h.server.revocations.lock().unwrap().push({
+        // A field the server may add later does not drop the revocation.
+        let mut relayed = revocation(&h, &root, &laptop, true);
+        relayed["label"] = json!("성재의 MacBook Air");
+        relayed
+    });
     // The server relays the root's revocation of the phone.
     h.server
         .revocations

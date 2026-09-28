@@ -158,8 +158,10 @@ struct Endorsement {
     signature: String,
 }
 
+/// Unknown fields are tolerated (as on every server DTO): a field the server
+/// adds later must not turn every relayed revocation into a dropped one.
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct Revocation {
     workspace_id: Uuid,
     member_id: Uuid,
