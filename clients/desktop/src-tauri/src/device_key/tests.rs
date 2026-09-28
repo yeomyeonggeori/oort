@@ -1,0 +1,240 @@
+use super::payload::*;
+use super::*;
+use p256::ecdsa::signature::Signer as _;
+use p256::ecdsa::SigningKey;
+use p256::elliptic_curve::scalar::IsHigh as _;
+
+/// A software key standing in for the enclave — tests only. The shipped
+/// `Platform` has no software branch (`enclave.rs`).
+struct Fake {
+    key: SigningKey,
+    answer: bool,
+    confirms: usize,
+    signs: usize,
+    fail: Option<EnclaveError>,
+    corrupt_der: bool,
+    last_summary: Option<Summary>,
+}
+
+impl Fake {
+    fn new(answer: bool) -> Self {
+        Self {
+            key: SigningKey::from_slice(&[11u8; 32]).unwrap(),
+            answer,
+            confirms: 0,
+            signs: 0,
+            fail: None,
+            corrupt_der: false,
+            last_summary: None,
+        }
+    }
+
+    fn public_b64(&self) -> String {
+        BASE64.encode(self.key.verifying_key().to_encoded_point(true).as_bytes())
+    }
+}
+
+impl Platform for Fake {
+    fn confirm(&mut self, summary: &Summary) -> bool {
+        self.confirms += 1;
+        self.last_summary = Some(summary.clone());
+        self.answer
+    }
+
+    fn sign(
+        &mut self,
+        message: &[u8],
+    ) -> Result<([u8; P256_PUBLIC_KEY_LEN], Vec<u8>), EnclaveError> {
+        self.signs += 1;
+        if let Some(error) = self.fail.clone() {
+            return Err(error);
+        }
+        let signature: p256::ecdsa::Signature = self.key.sign(message);
+        let mut der = signature.to_der().as_bytes().to_vec();
+        if self.corrupt_der {
+            let last = der.len() - 1;
+            der[last] ^= 1;
+        }
+        let mut public = [0u8; P256_PUBLIC_KEY_LEN];
+        public.copy_from_slice(self.key.verifying_key().to_encoded_point(true).as_bytes());
+        Ok((public, der))
+    }
+}
+
+const NOW: i64 = 1_790_550_001_000;
+
+fn signer() -> Signer {
+    Signer {
+        workspace_id: Uuid::from_u128(1),
+        member_id: Uuid::from_u128(0x101),
+        key_id: Uuid::from_u128(0xd001),
+    }
+}
+
+fn input(text: &str) -> Statement {
+    Statement::Control {
+        signer: signer(),
+        request: ControlRequest {
+            workspace_id: Uuid::from_u128(1),
+            instance_id: "inst_1".into(),
+            host_id: Uuid::from_u128(0xf001),
+            session_id: Some(Uuid::from_u128(0xc001)),
+            nonce: Uuid::from_u128(0xa1),
+            issued_at_ms: NOW - 1_000,
+            expires_at_ms: NOW + 60_000,
+            content: ControlContent::Input {
+                mode: InputMode::Queue,
+                text: text.into(),
+            },
+        },
+    }
+}
+
+#[test]
+fn a_declined_dialog_never_reaches_the_enclave() {
+    let mut fake = Fake::new(false);
+    let root = fake.public_b64();
+    let error = sign_statement(&mut fake, &input("테스트 돌려 줘"), &root, NOW, None).unwrap_err();
+    assert_eq!(error, "device_key_declined");
+    assert_eq!((fake.confirms, fake.signs), (1, 0));
+}
+
+#[test]
+fn a_rejected_statement_is_never_shown_or_signed() {
+    let mut fake = Fake::new(true);
+    let root = fake.public_b64();
+    // Outside its window on this clock.
+    let error = sign_statement(
+        &mut fake,
+        &input("x"),
+        &root,
+        NOW + MAX_CLOCK_SKEW_MS + 10_000,
+        None,
+    )
+    .unwrap_err();
+    assert!(error.starts_with("device_key_payload_rejected"), "{error}");
+    assert_eq!((fake.confirms, fake.signs), (0, 0));
+}
+
+#[test]
+fn a_confirmed_statement_comes_back_low_s_and_verifiable_over_the_built_bytes() {
+    let mut fake = Fake::new(true);
+    let root = fake.public_b64();
+    let statement = input("테스트 돌려 줘\n둘째 줄");
+    let signed = sign_statement(
+        &mut fake,
+        &statement,
+        &root,
+        NOW,
+        Some(Uuid::from_u128(0xf001)),
+    )
+    .unwrap();
+    let bytes = statement.signed_bytes(NOW).unwrap();
+    let raw = BASE64.decode(&signed.signature).unwrap();
+    assert_eq!(raw.len(), 64);
+    let sig = p256::ecdsa::Signature::from_slice(&raw).unwrap();
+    assert!(!bool::from(sig.s().is_high()));
+    assert!(verify_raw(
+        &BASE64.decode(&signed.public_key).unwrap(),
+        &bytes,
+        &raw
+    ));
+    assert_eq!(signed.payload_sha256, hex::encode(Sha256::digest(&bytes)));
+    let summary = fake.last_summary.unwrap();
+    assert!(summary.body.contains("이 맥"), "{summary:?}");
+    assert!(
+        summary.body.contains("테스트 돌려 줘 (여러 줄)"),
+        "{summary:?}"
+    );
+}
+
+#[test]
+fn a_key_that_is_not_the_bound_root_signs_nothing_out() {
+    let mut fake = Fake::new(true);
+    let other = BASE64.encode(
+        SigningKey::from_slice(&[12u8; 32])
+            .unwrap()
+            .verifying_key()
+            .to_encoded_point(true)
+            .as_bytes(),
+    );
+    assert_eq!(
+        sign_statement(&mut fake, &input("x"), &other, NOW, None).unwrap_err(),
+        "device_key_changed"
+    );
+}
+
+#[test]
+fn enclave_refusals_and_bad_signatures_surface_by_name() {
+    let mut fake = Fake::new(true);
+    let root = fake.public_b64();
+    fake.fail = Some(EnclaveError::Cancelled);
+    assert_eq!(
+        sign_statement(&mut fake, &input("x"), &root, NOW, None).unwrap_err(),
+        "device_key_cancelled"
+    );
+    fake.fail = Some(EnclaveError::EntitlementMissing);
+    assert_eq!(
+        sign_statement(&mut fake, &input("x"), &root, NOW, None).unwrap_err(),
+        "device_key_entitlement_missing"
+    );
+    fake.fail = None;
+    fake.corrupt_der = true;
+    assert!(sign_statement(&mut fake, &input("x"), &root, NOW, None)
+        .unwrap_err()
+        .starts_with("device_key_failed"));
+}
+
+/// workd (E4 `human_trust.rs` Revocation) reads exactly these seven fields.
+#[test]
+fn the_local_letter_has_workds_field_names() {
+    let letter = revocation_json(
+        &signer(),
+        Uuid::from_u128(0xd002),
+        1_790_551_000_000,
+        "sig",
+        "A2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW",
+    );
+    let mut keys: Vec<_> = letter.as_object().unwrap().keys().cloned().collect();
+    keys.sort();
+    assert_eq!(
+        keys,
+        [
+            "memberId",
+            "revokedAtMs",
+            "rootKeyId",
+            "signature",
+            "targetKeyId",
+            "targetPublicKey",
+            "workspaceId"
+        ]
+    );
+    assert_eq!(letter["revokedAtMs"], 1_790_551_000_000i64);
+    assert_eq!(letter["rootKeyId"], Uuid::from_u128(0xd001).to_string());
+}
+
+#[test]
+fn bindings_are_private_files_and_round_trip() {
+    let dir = std::env::temp_dir().join(format!("oort-device-key-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = bindings_path(&dir);
+    assert_eq!(load_bindings(&path), Bindings::default());
+    let mut bindings = Bindings::default();
+    bindings.roots.insert(
+        Uuid::from_u128(1),
+        RootBinding {
+            key_id: Uuid::from_u128(2),
+            member_id: Uuid::from_u128(3),
+            public_key: "A2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW".into(),
+        },
+    );
+    save_bindings(&path, &bindings).unwrap();
+    assert_eq!(load_bindings(&path), bindings);
+    use std::os::unix::fs::MetadataExt as _;
+    assert_eq!(std::fs::metadata(&path).unwrap().mode() & 0o777, 0o600);
+    assert_eq!(
+        std::fs::metadata(path.parent().unwrap()).unwrap().mode() & 0o777,
+        0o700
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

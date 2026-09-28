@@ -573,6 +573,78 @@ fn tauri_grants_the_work_host_commands_to_the_local_main_webview_only() {
     }
 }
 
+const DEVICE_KEY_COMMANDS: [&str; 7] = [
+    "device_key_status",
+    "device_key_create",
+    "device_key_bind_root",
+    "device_key_sign_control",
+    "device_key_sign_endorse",
+    "device_key_sign_revoke",
+    "device_key_deliver_revocation",
+];
+const DEVICE_KEY_PERMISSIONS: [&str; 7] = [
+    "allow-device-key-status",
+    "allow-device-key-create",
+    "allow-device-key-bind-root",
+    "allow-device-key-sign-control",
+    "allow-device-key-sign-endorse",
+    "allow-device-key-sign-revoke",
+    "allow-device-key-deliver-revocation",
+];
+
+/// Tauri's resolver: the device key (ADR-0146 개정 R2-E5, #3025) answers the
+/// main webview's bundled origin only. A page from the network — the team
+/// server's origin included — must never reach the signing key, and a child
+/// webview must not either.
+#[test]
+fn tauri_grants_the_device_key_commands_to_the_local_main_webview_only() {
+    let mut context = crate::context();
+    let authority = context.runtime_authority_mut();
+    let local = tauri::ipc::Origin::Local;
+    for command in DEVICE_KEY_COMMANDS {
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &local)
+                .is_some(),
+            "{command} local main"
+        );
+        for url in [
+            "https://evil.example/",
+            "https://oort-team.up.railway.app/",
+            "http://127.0.0.1:8080/",
+        ] {
+            let remote = tauri::ipc::Origin::Remote {
+                url: url.parse().unwrap(),
+            };
+            assert!(
+                authority
+                    .resolve_access(command, "main", "main", &remote)
+                    .is_none(),
+                "{command} from {url}"
+            );
+        }
+        assert!(authority
+            .resolve_access(command, "other", "other", &local)
+            .is_none());
+        assert!(authority
+            .resolve_access(command, "main", "embedded", &local)
+            .is_none());
+    }
+    let blocks = handler_blocks(LIB_RS);
+    let desktop = blocks
+        .iter()
+        .find(|b| b.contains(&"updater_check".to_string()))
+        .unwrap();
+    let mobile = blocks
+        .iter()
+        .find(|b| !b.contains(&"updater_check".to_string()))
+        .unwrap();
+    for command in DEVICE_KEY_COMMANDS {
+        assert!(desktop.iter().any(|c| c == command), "{command}");
+        assert!(!mobile.iter().any(|c| c == command), "{command}");
+    }
+}
+
 const HARNESS_PROFILE_COMMANDS: [&str; 4] = [
     "harness_profile_list",
     "harness_profile_create",
@@ -671,6 +743,7 @@ fn only_the_local_terminal_capability_grants_pty_and_none_is_remote() {
         names,
         [
             "default.json",
+            "device-key.json",
             "git-read.json",
             "harness-profile.json",
             "pty.json",
@@ -742,6 +815,26 @@ fn only_the_local_terminal_capability_grants_pty_and_none_is_remote() {
             );
         } else {
             assert!(host.is_empty(), "{name} grants {host:?}");
+        }
+        let device_key: Vec<&str> = permission_ids(cap)
+            .into_iter()
+            .filter(|p| p.contains("device-key"))
+            .collect();
+        if name == "device-key.json" {
+            assert_eq!(device_key, DEVICE_KEY_PERMISSIONS);
+            assert_eq!(
+                permission_ids(cap).len(),
+                DEVICE_KEY_PERMISSIONS.len(),
+                "device-key.json grants only the device key commands"
+            );
+            assert_eq!(cap["webviews"], serde_json::json!(["main"]));
+            assert_eq!(cap["platforms"], serde_json::json!(["macOS"]));
+            assert!(
+                cap.get("windows").is_none(),
+                "a window grant covers child webviews"
+            );
+        } else {
+            assert!(device_key.is_empty(), "{name} grants {device_key:?}");
         }
         if name == "pty.json" {
             assert_eq!(

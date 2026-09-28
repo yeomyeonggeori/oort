@@ -9,7 +9,7 @@
 //
 // The Rust half lives in `clients/desktop/src-tauri/src/{deeplink,discovery,
 // notification,keychain,updater,detect,harness_status,opener,pdf_viewer,pty,
-// git_read,work_host}.rs` and the
+// git_read,work_host,device_key}.rs` and the
 // command/event contract is documented in `clients/desktop/README.md`. Keep
 // the three in sync — a renamed command fails at runtime, not at compile time.
 //
@@ -474,6 +474,128 @@ export const desktopWorkHost = {
   async forget(): Promise<LocalWorkHostStatus> {
     if (!IS_TAURI) throw "unsupported_platform";
     return invoke<LocalWorkHostStatus>("work_host_forget");
+  },
+};
+
+// ---- this Mac's device key (#3025, ADR-0146 개정 R2 D-3·D-6·D-7) -------------
+
+/** `device_key_status` (`clients/desktop/src-tauri/src/device_key/mod.rs`). */
+export interface DesktopDeviceKeyStatus {
+  support:
+    | "ready"
+    | "absent"
+    | "unsupported"
+    | "unsigned_build"
+    | "entitlement_missing"
+    | "error";
+  detail: string | null;
+  publicKey: string | null;
+  fingerprint: string | null;
+  root: { keyId: string; memberId: string; publicKey: string } | null;
+  reuseWindowSeconds: number;
+  host: { running: boolean; matches: boolean; pinnedRootKeyId: string | null } | null;
+}
+
+/** `device_key_sign_control`'s request (`payload::ControlRequest`). */
+export interface DesktopControlRequest {
+  workspaceId: string;
+  instanceId: string;
+  hostId: string;
+  sessionId?: string | null;
+  nonce: string;
+  issuedAtMs: number;
+  expiresAtMs: number;
+  content:
+    | { kind: "input"; mode: "queue" | "interrupt"; text: string }
+    | { kind: "spawn"; agentMemberId: string; folderId: string; firstPrompt: string }
+    | {
+        kind: "permission";
+        requestEventId: string;
+        optionId: string;
+        optionKind: string;
+        scope: "once" | "session";
+      }
+    | { kind: "bundle_manifest"; manifest: unknown }
+    | { kind: "host_register"; hostPublicKeyB64: string; hostId: string; label: string };
+}
+
+/** What happened on the local workd socket. */
+export type DesktopHostDelivery =
+  | { state: "delivered" }
+  | { state: "notRunning" }
+  | { state: "otherHost" }
+  | { state: "refused"; reason: string };
+
+/**
+ * The seven `device_key_*` commands. The webview never passes bytes to sign:
+ * each call names the statement's fields and the shell builds, shows (native
+ * dialog) and signs it. Rejections are the shell's short codes
+ * (`device_key_declined`, `device_key_cancelled`, `device_key_unsigned_build`…).
+ */
+export const desktopDeviceKey = {
+  async status(workspaceId?: string): Promise<DesktopDeviceKeyStatus | null> {
+    if (!IS_TAURI) return null;
+    return invoke<DesktopDeviceKeyStatus>("device_key_status", {
+      request: workspaceId ? { workspaceId } : null,
+    });
+  },
+  async create(): Promise<DesktopDeviceKeyStatus> {
+    if (!IS_TAURI) throw "unsupported_platform";
+    return invoke<DesktopDeviceKeyStatus>("device_key_create");
+  },
+  async bindRoot(request: {
+    workspaceId: string;
+    memberId: string;
+    keyId: string;
+    publicKey: string;
+  }): Promise<{ status: DesktopDeviceKeyStatus; host: DesktopHostDelivery }> {
+    if (!IS_TAURI) throw "unsupported_platform";
+    return invoke("device_key_bind_root", { request });
+  },
+  /** `momo.human.control.v1` (E8 #3028 wires the cards to it). */
+  async signControl(request: DesktopControlRequest): Promise<{
+    deviceKeyId: string;
+    devicePublicKey: string;
+    signature: string;
+    payloadSha256: string;
+  }> {
+    if (!IS_TAURI) throw "unsupported_platform";
+    return invoke("device_key_sign_control", { request });
+  },
+  async signEndorse(request: {
+    workspaceId: string;
+    targetKeyId: string;
+    targetAlg: "p256";
+    targetPublicKey: string;
+    label: string;
+  }): Promise<{ targetKeyId: string; rootKeyId: string; signature: string }> {
+    if (!IS_TAURI) throw "unsupported_platform";
+    return invoke("device_key_sign_endorse", { request });
+  },
+  async signRevoke(request: {
+    workspaceId: string;
+    targetKeyId: string;
+    targetPublicKey: string;
+    targetLabel: string;
+  }): Promise<{
+    rootKeyId: string;
+    targetKeyId: string;
+    revokedAtMs: number;
+    signature: string;
+    host: DesktopHostDelivery;
+  }> {
+    if (!IS_TAURI) throw "unsupported_platform";
+    return invoke("device_key_sign_revoke", { request });
+  },
+  async deliverRevocation(request: {
+    workspaceId: string;
+    targetKeyId: string;
+    revokedAtMs: number;
+    signature: string;
+    targetPublicKey: string;
+  }): Promise<DesktopHostDelivery> {
+    if (!IS_TAURI) throw "unsupported_platform";
+    return invoke<DesktopHostDelivery>("device_key_deliver_revocation", { request });
   },
 };
 
