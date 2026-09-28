@@ -601,6 +601,19 @@ describe("signed surface (#3028)", () => {
     expect(document.activeElement).toBe(q('[data-testid="agent-permission-reject-note"]'));
   });
 
+  it("an undelivered 「거부 + 지시」 is added after a draft already in the reply box, never dropped", async () => {
+    const rejectWithInstruction = vi.fn(async () => ({
+      state: "rejected" as const,
+      instruction: { state: "not_delivered" as const, stage: "server" as const, text: "호스트", error: null },
+    }));
+    render(model(events()), { decide: vi.fn(async () => undefined), reply: vi.fn(), sessionScope: true, rejectWithInstruction });
+    typeInto('[data-testid="agent-pane-reply-input"]', "쓰던 글");
+    click(q('[data-testid="agent-permission-reject"]'));
+    typeInto('[data-testid="agent-permission-reject-note"]', "다르게 해 줘");
+    await commit();
+    expect((q('[data-testid="agent-pane-reply-input"]') as HTMLTextAreaElement).value).toBe("쓰던 글\n다르게 해 줘");
+  });
+
   it("a cancelled signature on 「거부 + 지시」 keeps the card and says 「전달 안 됨」", async () => {
     const rejectWithInstruction = vi.fn(async () => ({
       state: "not_sent" as const,

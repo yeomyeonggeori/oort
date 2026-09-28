@@ -207,7 +207,7 @@ export function AgentProgressView({
   // 권한 카드의 결과 문장은 칸 수준에서 읽힌다: 서버의 `approval.decided`가 오면 카드는
   // 곧바로 사라지므로, 카드 안의 status 줄은 읽히기 전에 없어진다(design-review H1).
   const [announce, setAnnounce] = useState("");
-  const [replySeed, setReplySeed] = useState<string | null>(null);
+  const [replySeed, setReplySeed] = useState<{ text: string } | null>(null);
   // 확정 버튼(또는 카드)에 있던 캐럿이 카드와 함께 사라지면 칸이 받는다(body로 떨어지지 않게).
   const catchFocus = useCallback(() => {
     queueMicrotask(() => {
@@ -324,7 +324,7 @@ export function AgentProgressView({
           offline={offline}
           inApp={instructFrom === "app"}
           onOutcome={setAnnounce}
-          onUndelivered={setReplySeed}
+          onUndelivered={(text) => setReplySeed({ text })}
           onLeave={catchFocus}
         />
       ) : null}
@@ -663,7 +663,8 @@ function PermissionCard({
           delivered,
           out.instruction.state === "not_delivered" ? out.instruction.text : undefined
         );
-        onOutcome(line);
+        // partial은 카드 문장이 role=alert로 직접 말한다(두 번 읽히지 않게, review R2 L-1).
+        if (delivered) onOutcome(line);
         setOutcome({ tone: delivered ? "sent" : "partial", text: line });
         return;
       }
@@ -882,7 +883,7 @@ function ReplyBox({
   inApp,
 }: {
   /** 닿지 않은 「거부 + 지시」의 글. 칸이 비어 있으면 옮겨 담는다. */
-  seed: string | null;
+  seed: { text: string } | null;
   sessionId: string;
   reply: AgentPaneActions["reply"];
   ended: boolean;
@@ -900,7 +901,8 @@ function ReplyBox({
     setFailed(false);
   }, [text]);
   useEffect(() => {
-    if (seed) setText((current) => (current.trim() === "" ? seed : current));
+    // 칸에 쓰던 글이 있어도 잃지 않는다: 뒤에 붙인다(design-review R2 M-1).
+    if (seed) setText((current) => (current.trim() === "" ? seed.text : `${current.trimEnd()}\n${seed.text}`));
   }, [seed]);
   const unavailable = reply === null;
   const disabled = inApp || unavailable || ended || busy;

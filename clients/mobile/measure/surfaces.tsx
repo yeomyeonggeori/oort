@@ -3573,7 +3573,7 @@ function SignedWorkSurface({which}: {which: string}): React.JSX.Element {
   const initial: SignedWorkInitial | undefined =
     which === 'reject-note'
       ? {asking: true, rejectNote: '그 파일 말고 테스트만 고쳐 줘'}
-      : which === 'not-delivered'
+      : which === 'not-delivered' || which === 'box-not-delivered'
         ? {
             text: '이어서 lint까지 돌려 줘',
             note: {failed: true, text: '전달 안 됨 · Face ID를 취소해서 보내지 않았어요.'},
@@ -3603,7 +3603,19 @@ function SignedWorkSurface({which}: {which: string}): React.JSX.Element {
         <ScreenHeader title="온보딩 1단계 문구 다듬기" subtitle="실행 중" onBack={() => {}} backLabel="작업 목록으로" />
         <ScrollView>
           <SignedWorkControlsView
-            permission={which === 'no-request' ? null : SW_PERMISSION}
+            permission={
+              which === 'no-request' || which === 'box-not-delivered'
+                ? null
+                : which === 'long-preview'
+                  ? {
+                      ...SW_PERMISSION,
+                      preview: {
+                        ...SW_PERMISSION.preview!,
+                        text: Array.from({length: 14}, (_, i) => `${i % 2 ? '+' : '−'} 줄 ${i + 1}: 워크스페이스 문구를 해요체로 바꿔요`).join('\n'),
+                      },
+                    }
+                  : SW_PERMISSION
+            }
             ended={false}
             online
             block={blocked ? '이 폰은 아직 지시 기기가 아니에요. 프로필 › 지시 기기에서 등록하고 맥의 승인을 받아 주세요.' : null}

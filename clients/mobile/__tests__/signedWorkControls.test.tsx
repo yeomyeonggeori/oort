@@ -105,6 +105,14 @@ describe('permission card', () => {
     expect(fallbackReject).toHaveBeenCalledWith(PERMISSION);
   });
 
+  it('shows the whole preview (never clipped) and hides the allow buttons while rejecting', () => {
+    view(actions());
+    expect(screen.getByTestId('work-permission-preview').props.numberOfLines).toBeUndefined();
+    fireEvent.press(screen.getByTestId('work-permission-reject'));
+    expect(screen.queryByTestId('work-permission-allow')).toBeNull();
+    expect(screen.queryByTestId('work-permission-allow-session')).toBeNull();
+  });
+
   it('「거부 + 지시」 sends the note through the signed path, not as a plain reject', async () => {
     const a = actions();
     view(a);

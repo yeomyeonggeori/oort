@@ -223,7 +223,7 @@ export function SignedWorkControlsView({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   // 닿지 않은 「거부 + 지시」의 글을 지시 칸으로 옮긴다(버리지 않는다, D-5b).
-  const [seed, setSeed] = useState<string | null>(null);
+  const [seed, setSeed] = useState<{text: string} | null>(null);
   return (
     <View testID="work-signed-controls">
       {block ? (
@@ -243,11 +243,12 @@ export function SignedWorkControlsView({
           fallbackReject={fallbackReject}
           lapsed={permissionLapsed(permission, now())}
           initial={initial}
-          onUndelivered={setSeed}
+          onUndelivered={text => setSeed({text})}
         />
       ) : null}
       {ended ? null : (
         <InstructionBox
+          quiet={permission !== null}
           seed={seed}
           online={online}
           block={block}
@@ -356,10 +357,9 @@ function PermissionCard({
           {ask}
         </Sentence>
         {permission.preview ? (
-          <Text
-            style={styles.preview}
-            numberOfLines={6}
-            testID="work-permission-preview">
+          // The whole preview, never clipped: an allow is signed over what the
+          // person saw (0188 D5; design-review B1). The page scrolls, not the box.
+          <Text style={styles.preview} testID="work-permission-preview">
             {permission.preview.text}
           </Text>
         ) : null}
@@ -382,26 +382,31 @@ function PermissionCard({
                 오프라인이라 지금은 결정할 수 없어요.
               </Sentence>
             ) : null}
-            <PrimaryButton
-              label="이번 한 번 허락"
-              busyLabel="Face ID 확인 중"
-              busy={busy === 'once'}
-              disabled={!allowable || (busy !== null && busy !== 'once')}
-              onPress={() => void allow('once')}
-              testID="work-permission-allow"
-            />
-            <SecondaryButton
-              label="이 세션 동안 허락"
-              disabled={!allowable || busy !== null}
-              onPress={() => void allow('session')}
-              testID="work-permission-allow-session"
-            />
+            {asking ? null : (
+              <>
+                <PrimaryButton
+                  label="이번 한 번 허락"
+                  busyLabel="Face ID 확인 중"
+                  busy={busy === 'once'}
+                  disabled={!allowable || (busy !== null && busy !== 'once')}
+                  onPress={() => void allow('once')}
+                  testID="work-permission-allow"
+                />
+                <SecondaryButton
+                  label="이 세션 동안 허락"
+                  disabled={!allowable || busy !== null}
+                  onPress={() => void allow('session')}
+                  testID="work-permission-allow-session"
+                />
+              </>
+            )}
             {asking ? (
               <View style={styles.rejectBox} testID="work-permission-reject-confirm">
                 <Text style={styles.fieldLabel} nativeID="reject-note-label">
                   거부하면서 보낼 지시 (비우면 거부만 보내요)
                 </Text>
                 <TextInput
+                  lineBreakStrategyIOS="hangul-word"
                   style={styles.input}
                   value={note}
                   onChangeText={setNote}
@@ -417,6 +422,9 @@ function PermissionCard({
                   accessibilityLabelledBy="reject-note-label"
                   testID="work-permission-reject-note"
                 />
+                <Sentence style={styles.hint}>
+                  지시는 Face ID로 서명해 다음 차례에 전달돼요.
+                </Sentence>
                 <DangerButton
                   label={note.trim() !== '' ? '거부하고 지시 보내기' : '거부 보내기'}
                   disabled={!rejectable || busy !== null}
@@ -457,6 +465,7 @@ function PermissionCard({
 }
 
 function InstructionBox({
+  quiet,
   seed,
   online,
   block,
@@ -467,13 +476,20 @@ function InstructionBox({
   block: SignBlock;
   actions: SignedWorkActions | null;
   initial?: SignedWorkInitial;
-  seed: string | null;
+  seed: {text: string} | null;
+  /** A permission card is waiting above: its allow is the one filled button. */
+  quiet: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const [text, setText] = useState(initial?.text ?? '');
   useEffect(() => {
-    if (seed) setText(current => (current.trim() === '' ? seed : current));
+    // A draft already in the box is kept: the undelivered text goes after it.
+    if (seed) {
+      setText(current =>
+        current.trim() === '' ? seed.text : `${current.trimEnd()}\n${seed.text}`,
+      );
+    }
   }, [seed]);
   const [busy, setBusy] = useState<'queue' | 'interrupt' | null>(null);
   const [note, setNote] = useState<{failed: boolean; text: string} | null>(
@@ -503,6 +519,7 @@ function InstructionBox({
       <SectionLabel label="다음 지시" />
       <View style={styles.cardBody}>
         <TextInput
+          lineBreakStrategyIOS="hangul-word"
           style={styles.input}
           value={text}
           onChangeText={value => {
@@ -516,14 +533,23 @@ function InstructionBox({
           accessibilityLabel="다음 지시"
           testID="work-instruction-input"
         />
-        <PrimaryButton
-          label="다음 차례로 보내기"
-          busyLabel="Face ID 확인 중"
-          busy={busy === 'queue'}
-          disabled={!ready || text.trim() === '' || busy === 'interrupt'}
-          onPress={() => void send('queue')}
-          testID="work-instruction-queue"
-        />
+        {quiet ? (
+          <SecondaryButton
+            label={busy === 'queue' ? 'Face ID 확인 중' : '다음 차례로 보내기'}
+            disabled={!ready || text.trim() === '' || busy !== null}
+            onPress={() => void send('queue')}
+            testID="work-instruction-queue"
+          />
+        ) : (
+          <PrimaryButton
+            label="다음 차례로 보내기"
+            busyLabel="Face ID 확인 중"
+            busy={busy === 'queue'}
+            disabled={!ready || text.trim() === '' || busy === 'interrupt'}
+            onPress={() => void send('queue')}
+            testID="work-instruction-queue"
+          />
+        )}
         <SecondaryButton
           label="지금 끼어들기"
           disabled={!ready || text.trim() === '' || busy !== null}
