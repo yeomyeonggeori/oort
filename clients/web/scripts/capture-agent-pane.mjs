@@ -274,7 +274,7 @@ async function decisionScenes(browser, origin) {
         const { context, page } = await open(browser, origin, scheme, "agent-lapsed", viewport);
         const text = await page.textContent('[data-testid="agent-permission-outcome"]');
         const buttons = await page.$$eval('[data-testid="agent-permission"] button', (els) => els.length);
-        check(`${tag}/만료: 닫힘 한 줄, 버튼 0`, (text ?? "").includes("요청이 닫혔어요") && buttons === 0, { text, buttons });
+        check(`${tag}/만료: 닫힘 한 줄, 버튼 0`, (text ?? "").includes("요청은 닫혔어요") && buttons === 0, { text, buttons });
         await shot(page, `decision-lapsed-${tag}`);
         await context.close();
       }
