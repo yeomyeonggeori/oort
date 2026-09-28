@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   HOST_GATED_SURFACE_IDS,
   hasOnlineWorkHost,
@@ -23,6 +23,14 @@ import { useWorkHosts } from "@/features/work/useWorkSessions";
 
 /** 호스트가 켜지고 꺼지는 것을 다시 보는 주기. heartbeat 창(90초)보다 짧다. */
 export const WORK_HOST_PRESENCE_POLL_MS = 60_000;
+
+/**
+ * 열린 작업 표면이 호스트를 잃고도 서 있는 시간 (#2893).
+ *
+ * 폴 두 번(120초)이다. heartbeat 90초 창 경계에서 한 번 흔들린 답(폴 한 번)에
+ * 보던 콘솔·관제 서랍·관전 도크가 사라지지 않게 한다.
+ */
+export const WORK_HOST_OFFLINE_GRACE_MS = 2 * WORK_HOST_PRESENCE_POLL_MS;
 
 export type WorkHostPresence = "unknown" | "present" | "absent" | "error";
 
@@ -65,4 +73,37 @@ export function useSurfaceProvidedPredicate(): (id: SurfaceId) => boolean {
 /** 표면 하나의 판정. 진입점 하나를 세울지 정하는 쪽이 쓴다. */
 export function useSurfaceProvided(id: SurfaceId): boolean {
   return useSurfaceProvidedPredicate()(id);
+}
+
+/**
+ * **열린** 표면의 판정 (#2893).
+ *
+ * 열려 있는 동안 한 번 제공됐으면, 제공이 끊긴 뒤에도 `WORK_HOST_OFFLINE_GRACE_MS`
+ * 동안 참이다. 그 안에 호스트가 돌아오면 유예를 거두고, 다시 끊기면 처음부터
+ * 센다. 닫혀 있으면(`open=false`) 유예가 없다: 진입점은 지금 판정을 그대로 따른다
+ * (누른 뒤에야 빈 화면을 만나지 않게, #2780).
+ *
+ * 쓰는 곳: 작업 콘솔 라우트(`SurfaceRoute`), 관제 줄·관제 서랍(`SurfaceGate`),
+ * 채널 헤더의 관전 도크(`ChatShell`, 도크가 열려 있을 때만).
+ */
+export function useSurfaceProvidedWhileOpen(
+  id: SurfaceId,
+  open: boolean = true,
+): boolean {
+  const live = useSurfaceProvided(id);
+  const [held, setHeld] = useState(false);
+  useEffect(() => {
+    if (!open) {
+      setHeld(false);
+      return;
+    }
+    if (live) {
+      setHeld(true);
+      return;
+    }
+    if (!held) return;
+    const timer = setTimeout(() => setHeld(false), WORK_HOST_OFFLINE_GRACE_MS);
+    return () => clearTimeout(timer);
+  }, [open, live, held]);
+  return live || (open && held);
 }

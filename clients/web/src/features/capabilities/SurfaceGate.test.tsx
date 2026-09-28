@@ -7,6 +7,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { WorkHost } from "@momo/core/lib/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { SurfaceGate, SurfaceRoute } from "./SurfaceGate";
+import { WORK_HOST_OFFLINE_GRACE_MS } from "./useSurfaceProvided";
 
 // =============================================================================
 // #2780: `/work` 라우트의 세 답. 호스트 목록을 **읽지 못한 것**을 「호스트가
@@ -184,5 +185,104 @@ describe("관전·관제 표면은 남의 개인 호스트로도 선다 (#2854 p
     const { el, client } = await mount();
     await settled(client);
     await vi.waitFor(() => expect(el.querySelector('[data-testid="console-body"]')).not.toBeNull());
+  });
+});
+
+describe("열린 표면은 호스트가 잠깐 오프라인이 돼도 바로 내려가지 않는다 (#2893)", () => {
+  // heartbeat는 90초 창이고 목록은 60초마다 다시 읽는다. 창 경계에서 한 번 흔들린
+  // 답에 열어 둔 콘솔·관제 서랍이 사라지면, 보던 작업을 잃는다.
+  // 첫 답은 실제 시계로 받고, 그 뒤 시간만 가짜 시계로 민다(벽시계 경합 없음).
+  const GRACE = WORK_HOST_OFFLINE_GRACE_MS;
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const advance = (ms: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+
+  async function answer(client: QueryClient, online: boolean): Promise<void> {
+    hostsAnswer.run = async () => [{ ...onlineHost(), online }];
+    await act(async () => {
+      const done = client.refetchQueries({ queryKey: ["work-hosts", WS] });
+      await vi.advanceTimersByTimeAsync(1);
+      await done;
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    // 양성 대조: 캐시가 정말 그 답으로 바뀌었다.
+    expect(client.getQueryData<WorkHost[]>(["work-hosts", WS])?.[0]?.online).toBe(online);
+  }
+
+  async function openConsole(): Promise<{ el: HTMLElement; client: QueryClient }> {
+    hostsAnswer.run = async () => [onlineHost()];
+    const mounted = await mount();
+    await settled(mounted.client);
+    await vi.waitFor(() =>
+      expect(mounted.el.querySelector('[data-testid="console-body"]')).not.toBeNull()
+    );
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    return mounted;
+  }
+
+  it("유예는 폴 두 번(120초)이다", () => {
+    expect(GRACE).toBe(120_000);
+  });
+
+  it("열린 작업 콘솔은 유예 동안 남고, 유예가 지나면 빈 상태로 간다", async () => {
+    const { el, client } = await openConsole();
+
+    await answer(client, false);
+    await advance(GRACE - 1_000);
+    expect(el.querySelector('[data-testid="console-body"]')).not.toBeNull();
+    expect(el.querySelector('[data-testid="surface-unavailable-route"]')).toBeNull();
+
+    await advance(2_000);
+    expect(el.querySelector('[data-testid="console-body"]')).toBeNull();
+    expect(el.querySelector('[data-testid="surface-unavailable-route"]')).not.toBeNull();
+  });
+
+  it("유예 안에 호스트가 돌아오면 유예를 거두고, 다시 끊기면 처음부터 센다", async () => {
+    const { el, client } = await openConsole();
+
+    await answer(client, false);
+    await advance(GRACE / 2);
+    await answer(client, true);
+    await advance(GRACE / 4);
+    await answer(client, false);
+    // 첫 끊김부터 재면 유예가 이미 지났을 시점이다. 두 번째 끊김부터는 아직이다.
+    await advance(GRACE / 2);
+    expect(el.querySelector('[data-testid="console-body"]')).not.toBeNull();
+    await advance(GRACE / 2 + 1_000);
+    expect(el.querySelector('[data-testid="console-body"]')).toBeNull();
+  });
+
+  it("열린 관제 서랍(SurfaceGate ade)도 유예 동안 남는다", async () => {
+    hostsAnswer.run = async () => [onlineHost()];
+    const { el, client } = await mount(
+      createElement(SurfaceGate, {
+        surface: "ade",
+        children: createElement("div", { "data-testid": "ade-body" }),
+      })
+    );
+    await settled(client);
+    await vi.waitFor(() => expect(el.querySelector('[data-testid="ade-body"]')).not.toBeNull());
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    await answer(client, false);
+    await advance(GRACE - 1_000);
+    expect(el.querySelector('[data-testid="ade-body"]')).not.toBeNull();
+    await advance(2_000);
+    expect(el.querySelector('[data-testid="ade-body"]')).toBeNull();
+  });
+
+  it("호스트가 없을 때 새로 연 화면은 유예 없이 바로 빈 상태다", async () => {
+    hostsAnswer.run = async () => [{ ...onlineHost(), online: false }];
+    const { el, client } = await mount();
+    await settled(client);
+    await vi.waitFor(() => {
+      expect(el.querySelector('[data-testid="surface-unavailable-route"]')).not.toBeNull();
+    });
+    expect(el.querySelector('[data-testid="console-body"]')).toBeNull();
   });
 });
