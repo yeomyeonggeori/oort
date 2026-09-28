@@ -229,7 +229,6 @@ struct Stage {
     base: String,
     workspace: Uuid,
     person: Uuid,
-    person_email: String,
     access: String,
     other_access: String,
     other: Uuid,
@@ -288,6 +287,36 @@ async fn login(http: &reqwest::Client, base: &str, workspace: Uuid, email: &str)
         .expect("login");
     assert_eq!(response.status().as_u16(), 200, "seeded human logs in");
     let body: Value = response.json().await.expect("login body");
+    body["accessToken"].as_str().expect("access").to_string()
+}
+
+/// A phone QR-linked (ADR-0180) from the sign-in `desktop_access` — since #3119
+/// the only kind of sign-in a phone key registers on. Its access token.
+async fn link_phone(http: &reqwest::Client, base: &str, desktop_access: &str) -> String {
+    let host = base.trim_start_matches("http://");
+    let issued = http
+        .post(format!("{base}/v1/auth/device-link"))
+        .bearer_auth(desktop_access)
+        .header("host", host)
+        .header("x-forwarded-proto", "http")
+        .send()
+        .await
+        .expect("issue device link");
+    assert_eq!(issued.status().as_u16(), 201, "issue device link");
+    let voucher = issued.json::<Value>().await.expect("link body")["token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    let redeemed = http
+        .post(format!("{base}/v1/auth/device-link/redeem"))
+        .header("host", host)
+        .header("x-forwarded-proto", "http")
+        .json(&json!({ "token": voucher, "device": { "name": "폰", "platform": "ios" } }))
+        .send()
+        .await
+        .expect("redeem device link");
+    assert_eq!(redeemed.status().as_u16(), 200, "redeem device link");
+    let body: Value = redeemed.json().await.expect("redeem body");
     body["accessToken"].as_str().expect("access").to_string()
 }
 
@@ -574,7 +603,6 @@ async fn stage_with(config: DeviceKeySettings) -> Stage {
         base,
         workspace,
         person,
-        person_email: person_email.clone(),
         access,
         other_access,
         other,
@@ -609,10 +637,11 @@ async fn stage_with(config: DeviceKeySettings) -> Stage {
         .await;
     assert_eq!(status, 201, "register root: {body}");
     stage.root_id = Uuid::parse_str(body["deviceKey"]["id"].as_str().unwrap()).unwrap();
+    let phone_access = link_phone(&stage.http, &stage.base, &stage.access).await;
     let (status, body) = stage
         .post(
             &stage.keys_path(),
-            &stage.access,
+            &phone_access,
             json!({ "alg": "p256", "publicKey": stage.phone.public_b64, "platform": "ios",
                     "label": "폰" }),
         )
@@ -917,10 +946,11 @@ async fn every_misplaced_signed_allow_is_refused_by_name() {
 
     // An unendorsed phone key (승인서 없는 폰 키).
     let bare = DeviceKeyPair::new("bare phone");
+    let bare_phone = link_phone(&s.http, &s.base, &s.access).await;
     let (status, body) = s
         .post(
             &s.keys_path(),
-            &s.access,
+            &bare_phone,
             json!({ "alg": "p256", "publicKey": bare.public_b64, "platform": "ios", "label": "새 폰" }),
         )
         .await;
@@ -1185,8 +1215,8 @@ async fn every_misplaced_signed_allow_is_refused_by_name() {
 async fn a_phone_allow_falls_with_its_roots_sign_in() {
     let _lock = test_lock().await;
     let s = stage(true).await;
-    // The phone signs in on its own lineage and registers there.
-    let phone_access = login(&s.http, &s.base, s.workspace, &s.person_email).await;
+    // The phone links on its own lineage (QR, #3119) and registers there.
+    let phone_access = link_phone(&s.http, &s.base, &s.access).await;
     let handset = DeviceKeyPair::new("second phone");
     let (status, body) = s
         .post(

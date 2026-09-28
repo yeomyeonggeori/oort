@@ -275,6 +275,36 @@ async fn login(http: &reqwest::Client, base: &str, workspace: Uuid, email: &str)
     body["accessToken"].as_str().expect("access").to_string()
 }
 
+/// A phone QR-linked (ADR-0180) from the sign-in `desktop_access` — since #3119
+/// the only kind of sign-in a phone key registers on. Its access token.
+async fn link_phone(http: &reqwest::Client, base: &str, desktop_access: &str) -> String {
+    let host = base.trim_start_matches("http://");
+    let issued = http
+        .post(format!("{base}/v1/auth/device-link"))
+        .bearer_auth(desktop_access)
+        .header("host", host)
+        .header("x-forwarded-proto", "http")
+        .send()
+        .await
+        .expect("issue device link");
+    assert_eq!(issued.status().as_u16(), 201, "issue device link");
+    let voucher = issued.json::<Value>().await.expect("link body")["token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    let redeemed = http
+        .post(format!("{base}/v1/auth/device-link/redeem"))
+        .header("host", host)
+        .header("x-forwarded-proto", "http")
+        .json(&json!({ "token": voucher, "device": { "name": "폰", "platform": "ios" } }))
+        .send()
+        .await
+        .expect("redeem device link");
+    assert_eq!(redeemed.status().as_u16(), 200, "redeem device link");
+    let body: Value = redeemed.json().await.expect("redeem body");
+    body["accessToken"].as_str().expect("access").to_string()
+}
+
 impl Stage {
     async fn call(
         &self,
@@ -459,10 +489,11 @@ async fn stage_with(config: DeviceKeySettings) -> Stage {
         .await;
     assert_eq!(status, 201, "register root: {body}");
     stage.root_id = Uuid::parse_str(body["deviceKey"]["id"].as_str().unwrap()).unwrap();
+    let phone_access = link_phone(&stage.http, &stage.base, &stage.access).await;
     let (status, body) = stage
         .post(
             &stage.keys_path(),
-            &stage.access,
+            &phone_access,
             json!({ "alg": "p256", "publicKey": stage.phone.public_b64, "platform": "ios",
                     "label": "폰" }),
         )
