@@ -234,7 +234,15 @@ export function deviceKeyErrorMessage(code: unknown): string {
     case "device_key_not_root_here":
       return "이 맥이 이 워크스페이스의 뿌리로 등록돼 있지 않습니다.";
     case "device_key_payload_rejected":
-      return "서명할 내용이 올바르지 않아 서명하지 않았습니다.";
+      return "서명할 내용에 보이지 않는 문자나 올바르지 않은 값이 있어 서명하지 않았습니다.";
+    case "device_key_host_pinned_other":
+      return "이 맥의 작업 호스트가 이미 다른 키를 뿌리로 고정했습니다. 작업 호스트를 다시 등록해야 합니다.";
+    case "device_key_pin_refused":
+      return "이 맥의 작업 호스트가 이 키를 뿌리로 받지 않았습니다. 작업 호스트 상태를 확인하세요.";
+    case "device_key_kind_not_enabled":
+      return "이 종류의 서명은 아직 이 앱에서 할 수 없습니다.";
+    case "device_key_no_letter":
+      return "이 맥에서 서명한 해제 기록이 없어 다시 보낼 수 없습니다.";
     default:
       return "서명하지 못했습니다. 다시 시도하세요.";
   }

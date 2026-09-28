@@ -19,9 +19,10 @@
 //! The reuse window (D-3, ≤300 s) is an [`AuthWindow`]: one evaluated
 //! `LAContext` kept on the signing thread and handed to every signature for at
 //! most that long, then invalidated. `touchIDAuthenticationAllowableReuseDuration`
-//! is set to the same value, but Apple's header documents it as reuse of a
-//! **lock-screen** unlock only ("It does not allow reusing previous biometric
-//! matches in application"), so it is not what makes the in-app window.
+//! is set to **0**: Apple's header documents it as reuse of a lock-screen
+//! unlock ("It does not allow reusing previous biometric matches in
+//! application"), so a non-zero value would let unlocking the Mac stand in for
+//! the first signature's Touch ID (security review M2).
 //!
 //! Every Apple call here is `runtime-unverified` until an owner-approved signed
 //! build runs on a Mac with Touch ID (M7).
@@ -390,7 +391,7 @@ impl AuthWindow {
             }
         }
         self.forget();
-        new_context(self.window, reason)
+        new_context(reason)
     }
 
     /// After a signature succeeded with `context`: start (or keep) its window.
@@ -421,14 +422,15 @@ impl Drop for AuthWindow {
     }
 }
 
-fn new_context(window: Duration, reason: &str) -> Result<Retained<AnyObject>, EnclaveError> {
+fn new_context(reason: &str) -> Result<Retained<AnyObject>, EnclaveError> {
     let class =
         AnyClass::get(c"LAContext").ok_or(EnclaveError::Unsupported("no LocalAuthentication"))?;
     // SAFETY: `+[LAContext new]` returns a +1 instance; the setters take an
     // NSTimeInterval (f64) and an NSString.
     unsafe {
         let context: Retained<AnyObject> = msg_send![class, new];
-        let _: () = msg_send![&*context, setTouchIDAuthenticationAllowableReuseDuration: window.as_secs_f64()];
+        // Never a lock-screen unlock in place of this signature's own check.
+        let _: () = msg_send![&*context, setTouchIDAuthenticationAllowableReuseDuration: 0.0f64];
         let reason = NSString::from_str(reason);
         let _: () = msg_send![&*context, setLocalizedReason: &*reason];
         Ok(context)

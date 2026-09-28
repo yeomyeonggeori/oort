@@ -142,6 +142,40 @@ pub fn load_bindings(path: &Path) -> Bindings {
 
 /// 0600 in a 0700 folder, written through a sibling + rename.
 pub fn save_bindings(path: &Path, bindings: &Bindings) -> Result<(), String> {
+    save_private_json(path, bindings)
+}
+
+/// Revocation letters this shell signed, by target key id. The only letters
+/// `device_key_deliver_revocation` will hand to workd again: a page script
+/// cannot replay a letter with a public key of its choosing (security
+/// review H1).
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Letters {
+    #[serde(default)]
+    pub letters: BTreeMap<Uuid, StoredLetter>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredLetter {
+    pub workspace_id: Uuid,
+    pub revoked_at_ms: i64,
+    pub signature: String,
+    pub target_public_key: String,
+}
+
+fn letters_path(app_data: &Path) -> PathBuf {
+    app_data.join("device-key").join("revocations.json")
+}
+
+pub fn load_letters(path: &Path) -> Letters {
+    std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+fn save_private_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
     let folder = path.parent().ok_or("device_key_failed: no folder")?;
     std::fs::DirBuilder::new()
         .recursive(true)
@@ -158,7 +192,7 @@ pub fn save_bindings(path: &Path, bindings: &Bindings) -> Result<(), String> {
         .mode(0o600)
         .open(&temporary)
         .map_err(|error| format!("device_key_failed: {error}"))?;
-    let body = serde_json::to_vec_pretty(bindings).expect("bindings serialize");
+    let body = serde_json::to_vec_pretty(value).expect("state serializes");
     file.write_all(&body)
         .and_then(|()| file.sync_all())
         .map_err(|error| format!("device_key_failed: {error}"))?;
@@ -173,7 +207,14 @@ type Job = Box<dyn FnOnce(&mut Worker) + Send>;
 pub struct Worker {
     app: tauri::AppHandle,
     auth: AuthWindow,
+    /// When the person last declined a dialog: a page script that keeps
+    /// raising dialogs to catch a click gets none for a short while after a
+    /// "no" (security review M3).
+    declined_at: Option<std::time::Instant>,
 }
+
+/// Quiet period after a declined dialog.
+const DECLINE_COOLDOWN: Duration = Duration::from_secs(3);
 
 #[derive(Default)]
 pub struct DeviceKeyState {
@@ -196,6 +237,7 @@ impl DeviceKeyState {
                         auth: AuthWindow::new(enclave::clamp_window(
                             enclave::REUSE_WINDOW_DEFAULT_SECS,
                         )),
+                        declined_at: None,
                     };
                     for job in rx {
                         job(&mut worker);
@@ -240,7 +282,7 @@ struct EnclavePlatform<'a> {
 
 impl Platform for EnclavePlatform<'_> {
     fn confirm(&mut self, summary: &Summary) -> bool {
-        confirm::ask(&self.worker.app, summary.clone())
+        self.worker.confirm(summary.clone())
     }
 
     fn sign(
@@ -263,6 +305,17 @@ impl Platform for EnclavePlatform<'_> {
 }
 
 impl Worker {
+    fn confirm(&mut self, summary: Summary) -> bool {
+        if let Some(at) = self.declined_at {
+            if at.elapsed() < DECLINE_COOLDOWN {
+                return false;
+            }
+        }
+        let yes = confirm::ask(&self.app, summary);
+        self.declined_at = (!yes).then(std::time::Instant::now);
+        yes
+    }
+
     fn app_data(&self) -> Result<PathBuf, String> {
         self.app
             .path()
@@ -312,6 +365,13 @@ impl Worker {
         };
         sign_statement(&mut platform, &statement, root_public_key, now, local_host)
     }
+}
+
+fn short(id: Uuid) -> String {
+    // The tail: a UUIDv7's head is its timestamp, so rows made the same day
+    // share it and it would not tell two keys apart.
+    let text = id.simple().to_string();
+    text[text.len() - 8..].to_string()
 }
 
 fn now_ms() -> i64 {
@@ -554,15 +614,35 @@ pub async fn device_key_bind_root(
         if current != request.public_key {
             return Err("device_key_changed".into());
         }
+        // A host already pinned to another key id would refuse this one for
+        // good (only a local reset clears a pin): say so before anything is
+        // written (security review M4).
+        {
+            let state = worker.app.state::<crate::work_host::WorkHostState>();
+            if let Ok(service) = crate::work_host::service(&worker.app, &state) {
+                if let Ok(Some(trust)) = service.host_trust() {
+                    let ours = trust.workspace_id == request.workspace_id.to_string()
+                        && trust.owner_member_id == request.member_id.to_string();
+                    if let (true, Some(pinned)) = (ours, trust.root_key_id.as_deref()) {
+                        if pinned != request.key_id.to_string() {
+                            return Err("device_key_host_pinned_other".into());
+                        }
+                    }
+                }
+            }
+        }
         let summary = Summary {
             title: "oort: 이 맥을 지시 서명의 뿌리로 씁니다".into(),
             body: format!(
-                "지문: {}\n이 맥의 작업 호스트가 이 키를 뿌리로 고정합니다. 고정은 이 맥에서만 되돌릴 수 있습니다.",
-                payload::fingerprint(&current).unwrap_or_default()
+                "지문: {}\n워크스페이스 {}, 키 {}\n이 맥의 작업 호스트가 이 키를 뿌리로 고정합니다. 고정은 이 맥에서만 되돌릴 수 있습니다.",
+                payload::fingerprint(&current).unwrap_or_default(),
+                short(request.workspace_id),
+                short(request.key_id),
             ),
             confirm: "뿌리로 쓰기".into(),
+            full_text: None,
         };
-        if !confirm::ask(&worker.app, summary) {
+        if !worker.confirm(summary) {
             return Err("device_key_declined".into());
         }
         let binding = RootBinding {
@@ -570,6 +650,12 @@ pub async fn device_key_bind_root(
             member_id: request.member_id,
             public_key: current,
         };
+        // Pin first; the binding is written only when the host took it or
+        // there is no host here to take it yet (pinned at its next start).
+        let host = pin_binding(&worker.app, request.workspace_id, &binding);
+        if let HostDelivery::Refused { reason } = &host {
+            return Err(format!("device_key_pin_refused: {reason}"));
+        }
         {
             let state = worker.app.state::<DeviceKeyState>();
             let _one = state.bindings.lock().unwrap_or_else(|p| p.into_inner());
@@ -578,7 +664,6 @@ pub async fn device_key_bind_root(
             bindings.roots.insert(request.workspace_id, binding.clone());
             save_bindings(&path, &bindings)?;
         }
-        let host = pin_binding(&worker.app, request.workspace_id, &binding);
         Ok(BindResult {
             status: status_of(worker, Some(request.workspace_id)),
             host,
@@ -586,6 +671,9 @@ pub async fn device_key_bind_root(
     })
     .await
 }
+
+/// The control kinds `device_key_sign_control` signs today.
+pub const SIGNABLE_CONTROL_KINDS: [&str; 3] = ["input", "spawn", "permission"];
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -601,6 +689,14 @@ pub async fn device_key_sign_control(
     app: tauri::AppHandle,
     request: ControlRequest,
 ) -> Result<ControlSigned, String> {
+    // `host_register` and `bundle_manifest` are signable bytes (E1) but no
+    // surface asks for them yet, and their dialogs cannot yet show what matters
+    // (the host key, every bundle item): refused until they are wired
+    // (security review H5).
+    let kind = request.content.kind();
+    if !SIGNABLE_CONTROL_KINDS.contains(&kind) {
+        return Err(format!("device_key_kind_not_enabled: {kind}"));
+    }
     on_worker(app, move |worker| {
         let (signer, binding) = worker.signer_for(request.workspace_id)?;
         let signed = worker.sign(Statement::Control { signer, request }, &binding.public_key)?;
@@ -688,6 +784,22 @@ pub async fn device_key_sign_revoke(
             },
             &binding.public_key,
         )?;
+        {
+            let state = worker.app.state::<DeviceKeyState>();
+            let _one = state.bindings.lock().unwrap_or_else(|p| p.into_inner());
+            let path = letters_path(&worker.app_data()?);
+            let mut letters = load_letters(&path);
+            letters.letters.insert(
+                target_key_id,
+                StoredLetter {
+                    workspace_id: signer.workspace_id,
+                    revoked_at_ms,
+                    signature: signed.signature.clone(),
+                    target_public_key: target_public_key.clone(),
+                },
+            );
+            save_private_json(&path, &letters)?;
+        }
         let letter = revocation_json(
             &signer,
             target_key_id,
@@ -714,13 +826,11 @@ pub async fn device_key_sign_revoke(
 pub struct DeliverRequest {
     pub workspace_id: Uuid,
     pub target_key_id: Uuid,
-    pub revoked_at_ms: i64,
-    pub signature: String,
-    pub target_public_key: String,
 }
 
-/// A letter that could not reach workd at signing time (not running), again.
-/// workd verifies it against its own pinned root, so this carries no trust.
+/// Hand a letter this shell signed to workd again (it was not running at
+/// signing time). Only the stored letter, exactly as signed and confirmed;
+/// nothing from the request but which one.
 #[tauri::command]
 pub async fn device_key_deliver_revocation(
     app: tauri::AppHandle,
@@ -728,12 +838,18 @@ pub async fn device_key_deliver_revocation(
 ) -> Result<HostDelivery, String> {
     on_worker(app, move |worker| {
         let (signer, _) = worker.signer_for(request.workspace_id)?;
+        let stored = load_letters(&letters_path(&worker.app_data()?))
+            .letters
+            .get(&request.target_key_id)
+            .cloned()
+            .filter(|letter| letter.workspace_id == request.workspace_id)
+            .ok_or("device_key_no_letter")?;
         let letter = revocation_json(
             &signer,
             request.target_key_id,
-            request.revoked_at_ms,
-            &request.signature,
-            &request.target_public_key,
+            stored.revoked_at_ms,
+            &stored.signature,
+            &stored.target_public_key,
         );
         Ok(host_delivery(
             &worker.app,

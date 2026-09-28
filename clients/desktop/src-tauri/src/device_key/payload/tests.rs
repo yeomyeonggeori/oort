@@ -357,28 +357,90 @@ pub const FINGERPRINT_VECTOR: &str = "5BAF F89D E7DE 5C1D 7B61";
 fn the_dialog_shows_what_is_signed_and_nothing_that_can_spoof_it() {
     let (signer, mut request) = input_case();
     let host = request.host_id;
+    let now = request.issued_at_ms + 1_000;
+    let text = "\n  테스트를 돌려 줘\n둘째 줄: 그다음 lint도";
     request.content = ControlContent::Input {
         mode: InputMode::Interrupt,
-        text: "\n  테스트를 돌려 줘\u{202E}txt.exe\n둘째 줄".into(),
+        text: text.into(),
     };
-    let summary = Statement::Control { signer, request }.summary(Some(host));
+    let statement = Statement::Control { signer, request };
+    assert!(statement.signed_bytes(now).is_ok());
+    let summary = statement.summary(Some(host));
     assert!(summary.title.contains("지금 끼어들기"), "{summary:?}");
     assert!(summary.body.contains("이 맥"), "{summary:?}");
     assert!(
-        summary.body.contains("테스트를 돌려 줘txt.exe (여러 줄)"),
+        summary.body.contains("테스트를 돌려 줘 (3줄"),
         "{summary:?}"
     );
-    assert!(!summary.body.contains('\u{202E}'));
+    // Every signed character is on screen: the whole text, not a first line.
+    assert_eq!(summary.full_text.as_deref(), Some(text));
 
     let case = cases()
         .into_iter()
         .find(|c| c["name"] == "device_endorse")
         .unwrap();
     let summary = statement_of(&case).summary(None);
-    assert!(summary.body.contains("성재의 iPhone"));
-    assert!(summary
-        .body
-        .contains(&fingerprint("A2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW").unwrap()));
+    let fp = fingerprint("A2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW").unwrap();
+    // The fingerprint comes first, on its own line, before the label.
+    assert!(
+        summary.body.starts_with(&format!("지문: {fp}\n")),
+        "{summary:?}"
+    );
+    assert!(summary.body.contains("「성재의 iPhone」"));
+}
+
+/// Security review H2·H3: a character that renders as nothing (or as a line
+/// break the dialog cannot tell from a real one) is never signed: not in an
+/// instruction, a first prompt, a label or a token.
+#[test]
+fn invisible_characters_are_never_signed() {
+    let (signer, request) = input_case();
+    let now = request.issued_at_ms + 1_000;
+    for hidden in [
+        '\u{202E}',  // RLO
+        '\u{2066}',  // LRI
+        '\u{200B}',  // zero-width space
+        '\u{FEFF}',  // BOM
+        '\u{2028}',  // line separator
+        '\u{2029}',  // paragraph separator
+        '\u{E0041}', // tag LATIN CAPITAL A
+        '\u{E000}',  // private use
+        '\r',
+    ] {
+        let mut r = request.clone();
+        r.content = ControlContent::Input {
+            mode: InputMode::Queue,
+            text: format!("테스트 돌려 줘{hidden}rm -rf"),
+        };
+        assert!(
+            Statement::Control { signer, request: r }
+                .signed_bytes(now)
+                .is_err(),
+            "input {:04X}",
+            hidden as u32
+        );
+        let endorse = EndorseRequest {
+            workspace_id: signer.workspace_id,
+            target_key_id: Uuid::from_u128(4),
+            target_alg: "p256".into(),
+            target_public_key: "A2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW".into(),
+            label: format!("iPhone{hidden}지문: 0000"),
+        };
+        assert!(
+            endorse_bytes(&signer, &endorse).is_err(),
+            "label {:04X}",
+            hidden as u32
+        );
+    }
+    // ZWJ emoji sequences and tabs are ordinary text.
+    let mut r = request.clone();
+    r.content = ControlContent::Input {
+        mode: InputMode::Queue,
+        text: "팀 👨\u{200D}👩\u{200D}👧\t확인".into(),
+    };
+    assert!(Statement::Control { signer, request: r }
+        .signed_bytes(now)
+        .is_ok());
 }
 
 /// The web pre-flight cannot read Rust, so the dialog's copy rule is held

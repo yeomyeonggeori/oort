@@ -142,9 +142,10 @@ fn a_confirmed_statement_comes_back_low_s_and_verifiable_over_the_built_bytes() 
     assert_eq!(signed.payload_sha256, hex::encode(Sha256::digest(&bytes)));
     let summary = fake.last_summary.unwrap();
     assert!(summary.body.contains("이 맥"), "{summary:?}");
-    assert!(
-        summary.body.contains("테스트 돌려 줘 (여러 줄)"),
-        "{summary:?}"
+    assert!(summary.body.contains("테스트 돌려 줘 (2줄"), "{summary:?}");
+    assert_eq!(
+        summary.full_text.as_deref(),
+        Some("테스트 돌려 줘\n둘째 줄")
     );
 }
 
@@ -236,5 +237,36 @@ fn bindings_are_private_files_and_round_trip() {
         std::fs::metadata(path.parent().unwrap()).unwrap().mode() & 0o777,
         0o700
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Security review H5: kinds whose dialogs cannot yet show what matters are
+/// not signable through the command.
+#[test]
+fn only_instruction_kinds_are_signable_through_the_command() {
+    assert_eq!(SIGNABLE_CONTROL_KINDS, ["input", "spawn", "permission"]);
+    assert!(!SIGNABLE_CONTROL_KINDS.contains(&"host_register"));
+    assert!(!SIGNABLE_CONTROL_KINDS.contains(&"bundle_manifest"));
+}
+
+#[test]
+fn signed_letters_are_kept_privately_for_replay() {
+    let dir = std::env::temp_dir().join(format!("oort-device-key-l-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = letters_path(&dir);
+    let mut letters = Letters::default();
+    letters.letters.insert(
+        Uuid::from_u128(0xd002),
+        StoredLetter {
+            workspace_id: Uuid::from_u128(1),
+            revoked_at_ms: 5,
+            signature: "sig".into(),
+            target_public_key: "A2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW".into(),
+        },
+    );
+    save_private_json(&path, &letters).unwrap();
+    assert_eq!(load_letters(&path), letters);
+    use std::os::unix::fs::MetadataExt as _;
+    assert_eq!(std::fs::metadata(&path).unwrap().mode() & 0o777, 0o600);
     let _ = std::fs::remove_dir_all(&dir);
 }

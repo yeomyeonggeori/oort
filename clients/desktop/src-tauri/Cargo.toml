@@ -60,8 +60,8 @@ security-framework-sys = { version = "2", features = ["OSX_10_15"] }
 core-foundation = "0.10"
 core-foundation-sys = "0.8"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAlert", "NSApplication", "NSResponder", "NSButton", "NSControl", "NSView"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSGeometry", "objc2-core-foundation"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAlert", "NSApplication", "NSResponder", "NSButton", "NSControl", "NSView", "NSScrollView", "NSTextView", "NSText", "NSClipView", "NSGraphics", "objc2-core-foundation"] }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
 sha2 = "0.10"
 base64 = "0.22"

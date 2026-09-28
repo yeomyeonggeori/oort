@@ -385,6 +385,37 @@ describe("설정 › 기기 › 지시 서명 (#3025)", () => {
     );
   });
 
+  it("서버 제출이 실패하면 같은 폐기서로 다시 보내고, 다시 서명하지 않는다", async () => {
+    core.listDeviceKeys.mockResolvedValue([rootRow, key({ state: "endorsed", canInstruct: true })]);
+    desktop.signRevoke.mockResolvedValue({
+      rootKeyId: ROOT_ID,
+      targetKeyId: PHONE_ID,
+      revokedAtMs: 9,
+      signature: "cmV2",
+      host: { state: "delivered" },
+    });
+    core.submitRevocation
+      .mockRejectedValueOnce(new ApiError(500, "boom"))
+      .mockResolvedValueOnce(key({ state: "revoked" }));
+    const host = mount();
+    await waitFor(() => q(host, "device-key-revoke") !== null, "revoke");
+    await click(q(host, "device-key-revoke"), "ask");
+    await click(q(host, "device-key-revoke-confirm"), "confirm");
+    await waitFor(
+      () => host.textContent?.includes("작업 호스트에는 알렸지만 서버에는 알리지 못했습니다") ?? false,
+      "honest partial"
+    );
+    await click(q(host, "device-key-revoke"), "ask again");
+    await click(q(host, "device-key-revoke-confirm"), "confirm again");
+    await waitFor(() => core.submitRevocation.mock.calls.length === 2, "resubmitted");
+    expect(desktop.signRevoke).toHaveBeenCalledTimes(1);
+    expect(core.submitRevocation.mock.calls[1]).toEqual([
+      WS,
+      PHONE_ID,
+      { rootKeyId: ROOT_ID, revokedAtMs: 9, signature: "cmV2" },
+    ]);
+  });
+
   it("연결 기기 해제: 같은 이름의 지시 기기 하나면 폐기서를 먼저 보내고 연결을 끊는다", async () => {
     core.listDeviceKeys.mockResolvedValue([rootRow, key({ state: "endorsed", canInstruct: true })]);
     core.listLinkedDevices.mockResolvedValue({

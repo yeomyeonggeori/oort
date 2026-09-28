@@ -587,12 +587,10 @@ export const desktopDeviceKey = {
     if (!IS_TAURI) throw "unsupported_platform";
     return invoke("device_key_sign_revoke", { request });
   },
+  /** Re-send a letter this shell signed (it keeps them; nothing else is sent). */
   async deliverRevocation(request: {
     workspaceId: string;
     targetKeyId: string;
-    revokedAtMs: number;
-    signature: string;
-    targetPublicKey: string;
   }): Promise<DesktopHostDelivery> {
     if (!IS_TAURI) throw "unsupported_platform";
     return invoke<DesktopHostDelivery>("device_key_deliver_revocation", { request });

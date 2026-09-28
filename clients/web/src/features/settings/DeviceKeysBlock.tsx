@@ -17,7 +17,11 @@ import {
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { InlineBanner, Skeleton } from "@/features/common/States";
-import { desktopDeviceKey, type DesktopDeviceKeyStatus } from "@/lib/tauri";
+import {
+  desktopDeviceKey,
+  type DesktopDeviceKeyStatus,
+  type DesktopHostDelivery,
+} from "@/lib/tauri";
 import {
   DEVICE_KEYS_QUERY_KEY,
   deviceKeyFingerprint,
@@ -308,11 +312,7 @@ function ThisMacRoot({
     onSuccess: (result) => {
       setAsking(false);
       setPassword("");
-      setNotice(
-        result.host.state === "delivered"
-          ? "이 맥을 뿌리로 등록하고 작업 호스트에 고정했습니다."
-          : "이 맥을 뿌리로 등록했습니다. 작업 호스트가 켜지면 고정합니다."
-      );
+      setNotice(bindNotice(result.host));
     },
     onSettled: () => {
       void client.invalidateQueries({ queryKey: LOCAL_KEY(workspaceId) });
@@ -464,6 +464,19 @@ function ThisMacRoot({
   );
 }
 
+function bindNotice(host: DesktopHostDelivery): string {
+  switch (host.state) {
+    case "delivered":
+      return "이 맥을 뿌리로 등록하고 작업 호스트에 고정했습니다.";
+    case "notRunning":
+      return "이 맥을 뿌리로 등록했습니다. 작업 호스트가 켜지면 고정합니다.";
+    case "otherHost":
+      return "이 맥을 뿌리로 등록했습니다. 이 맥의 작업 호스트는 다른 워크스페이스 것이라 고정하지 않았습니다.";
+    case "refused":
+      return "이 맥을 뿌리로 등록했지만 작업 호스트가 고정을 받지 않았습니다.";
+  }
+}
+
 function RootRow({
   title,
   chip,
@@ -577,23 +590,38 @@ function PhoneKeyRow({
     onSettled: refresh,
   });
 
+  // The letter, once signed, is kept until the server has it: a failed post
+  // is retried with the same letter, never by signing again, and the note
+  // says honestly that the host here already knows (security review M5).
+  const [letter, setLetter] = useState<{
+    rootKeyId: string;
+    revokedAtMs: number;
+    signature: string;
+    host: DesktopHostDelivery;
+  } | null>(null);
   const revoke = useMutation({
     mutationFn: async () => {
       setNotice(null);
-      const letter = await desktopDeviceKey.signRevoke({
-        workspaceId,
-        targetKeyId: phone.id,
-        targetPublicKey: phone.publicKey,
-        targetLabel: phone.label,
-      });
+      const signed =
+        letter ??
+        (await desktopDeviceKey.signRevoke({
+          workspaceId,
+          targetKeyId: phone.id,
+          targetPublicKey: phone.publicKey,
+          targetLabel: phone.label,
+        }));
+      setLetter(signed);
       await submitRevocation(workspaceId, phone.id, {
-        rootKeyId: letter.rootKeyId,
-        revokedAtMs: letter.revokedAtMs,
-        signature: letter.signature,
+        rootKeyId: signed.rootKeyId,
+        revokedAtMs: signed.revokedAtMs,
+        signature: signed.signature,
       });
-      return letter.host;
+      return signed.host;
     },
-    onSuccess: (host) => setNotice(`지시 권한을 끊었습니다. ${hostDeliveryCopy(host)}`),
+    onSuccess: (host) => {
+      setLetter(null);
+      setNotice(`지시 권한을 끊었습니다. ${hostDeliveryCopy(host)}`);
+    },
     onSettled: refresh,
   });
 
@@ -605,7 +633,13 @@ function PhoneKeyRow({
   const error = endorse.isError
     ? serverError(endorse.error, "승인하지 못했습니다. 다시 시도하세요.")
     : revoke.isError
-      ? serverError(revoke.error, "지시 권한을 끊지 못했습니다. 다시 시도하세요.")
+      ? letter
+        ? `${
+            letter.host.state === "delivered"
+              ? "이 맥의 작업 호스트에는 알렸지만 서버에는 알리지 못했습니다."
+              : "서명은 했지만 서버에 알리지 못했습니다."
+          } ${serverError(revoke.error, "다시 보내세요.")}`
+        : serverError(revoke.error, "지시 권한을 끊지 못했습니다. 다시 시도하세요.")
       : null;
 
   const identity = (

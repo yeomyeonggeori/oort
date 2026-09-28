@@ -180,13 +180,17 @@ impl ControlContent {
 
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, PayloadError> {
         let text = match self {
-            ControlContent::Input { text, .. } => nfc(text),
+            ControlContent::Input { text, .. } => {
+                readable_text("text", text)?;
+                nfc(text)
+            }
             ControlContent::Spawn {
                 agent_member_id,
                 folder_id,
                 first_prompt,
             } => {
                 token("folder_id", folder_id)?;
+                readable_text("first_prompt", first_prompt)?;
                 format!("{agent_member_id}\n{folder_id}\n{}", nfc(first_prompt))
             }
             ControlContent::Permission {
@@ -209,7 +213,7 @@ impl ControlContent {
                 label,
             } => {
                 canonical_b64_of_len("host_public_key_b64", host_public_key_b64, 32)?;
-                no_control("label", label)?;
+                label_ok(label)?;
                 format!("{host_public_key_b64}\n{host_id}\n{}", nfc(label))
             }
         };
@@ -371,7 +375,7 @@ pub fn endorse_bytes(signer: &Signer, request: &EndorseRequest) -> Result<Vec<u8
         return Err(PayloadError::Field("target_alg", "not p256"));
     }
     p256_public_key(&request.target_public_key)?;
-    no_control("label", &request.label)?;
+    label_ok(&request.label)?;
     if request.label.chars().count() > LABEL_MAX_CHARS {
         return Err(PayloadError::Field("label", "too long"));
     }
@@ -511,13 +515,17 @@ pub struct Summary {
     pub title: String,
     pub body: String,
     pub confirm: String,
+    /// The whole instruction or first prompt, shown in a scrolling read-only
+    /// view under the body: every signed character is on screen (security
+    /// review H3), not only the first line.
+    pub full_text: Option<String>,
 }
 
 const SUMMARY_LINE_CHARS: usize = 80;
 
-/// The first non-blank line, trimmed to [`SUMMARY_LINE_CHARS`], with a note
-/// when more follows. Control characters (bidi overrides included) never reach
-/// the dialog.
+/// One line of display text: the first non-blank line, trimmed to
+/// [`SUMMARY_LINE_CHARS`]. Control and hidden characters never reach the
+/// dialog (the signer already refuses them in signed text).
 pub fn first_line(text: &str) -> String {
     let normalized = nfc(text);
     let mut lines = normalized.lines().map(str::trim).filter(|l| !l.is_empty());
@@ -526,25 +534,30 @@ pub fn first_line(text: &str) -> String {
     };
     let clean: String = first
         .chars()
-        .filter(|c| !c.is_control() && !is_bidi_control(*c))
+        .filter(|c| !c.is_control() && !is_hidden_char(*c))
         .collect();
     let mut out: String = clean.chars().take(SUMMARY_LINE_CHARS).collect();
-    let truncated = clean.chars().count() > SUMMARY_LINE_CHARS;
-    if truncated {
+    if clean.chars().count() > SUMMARY_LINE_CHARS {
         out.push('…');
-    }
-    if lines.next().is_some() {
-        out.push_str(" (여러 줄)");
     }
     out
 }
 
-fn is_bidi_control(c: char) -> bool {
-    matches!(c, '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+/// "3줄, 120자" for the text the scrolling view holds.
+pub fn text_size(text: &str) -> String {
+    let normalized = nfc(text);
+    format!(
+        "{}줄, {}자",
+        normalized.lines().count().max(1),
+        normalized.chars().count()
+    )
 }
 
 fn short_id(id: Uuid) -> String {
-    id.to_string().chars().take(8).collect()
+    // The tail: a UUIDv7's head is its timestamp, so rows made the same day
+    // share it and it would not tell two keys apart.
+    let text = id.simple().to_string();
+    text[text.len() - 8..].to_string()
 }
 
 impl Statement {
@@ -558,72 +571,116 @@ impl Statement {
                 } else {
                     format!("다른 호스트 ({})", short_id(request.host_id))
                 };
-                let session = request
-                    .session_id
-                    .map(|id| format!("세션 {}", short_id(id)))
-                    .unwrap_or_else(|| "새 세션".to_string());
-                let (kind, detail) = match &request.content {
-                    ControlContent::Input { mode, text } => (
-                        match mode {
-                            InputMode::Queue => "지시 (다음 차례)",
-                            InputMode::Interrupt => "지시 (지금 끼어들기)",
-                        },
-                        first_line(text),
-                    ),
-                    ControlContent::Spawn { first_prompt, .. } => {
-                        ("새 작업", first_line(first_prompt))
-                    }
-                    ControlContent::Permission {
-                        option_kind, scope, ..
-                    } => (
-                        "권한 허용",
-                        format!(
-                            "{} · {}",
-                            first_line(option_kind),
-                            match scope {
-                                PermissionScope::Once => "이번 한 번",
-                                PermissionScope::Session => "이 세션 동안",
-                            }
-                        ),
-                    ),
-                    ControlContent::BundleManifest { manifest } => (
-                        "설정 묶음 목록",
-                        match manifest.get("items").and_then(|v| v.as_array()) {
-                            Some(items) => format!("항목 {}개", items.len()),
-                            None => "목록".to_string(),
-                        },
-                    ),
-                    ControlContent::HostRegister { label, .. } => {
-                        ("호스트 등록", first_line(label))
-                    }
+                let target = match request.session_id {
+                    Some(id) => format!("{host}, 세션 {}", short_id(id)),
+                    None => host,
                 };
+                let (kind, lines, full_text): (&str, Vec<String>, Option<String>) =
+                    match &request.content {
+                        ControlContent::Input { mode, text } => (
+                            match mode {
+                                InputMode::Queue => "지시 (다음 차례)",
+                                InputMode::Interrupt => "지시 (지금 끼어들기)",
+                            },
+                            vec![format!("내용: {} ({})", first_line(text), text_size(text))],
+                            Some(nfc(text)),
+                        ),
+                        ControlContent::Spawn {
+                            agent_member_id,
+                            folder_id,
+                            first_prompt,
+                        } => (
+                            "새 작업",
+                            vec![
+                                format!(
+                                    "에이전트 {}, 폴더 {}",
+                                    short_id(*agent_member_id),
+                                    first_line(folder_id)
+                                ),
+                                format!(
+                                    "첫 지시: {} ({})",
+                                    first_line(first_prompt),
+                                    text_size(first_prompt)
+                                ),
+                            ],
+                            Some(nfc(first_prompt)),
+                        ),
+                        ControlContent::Permission {
+                            request_event_id,
+                            option_id,
+                            option_kind,
+                            scope,
+                        } => (
+                            "권한 허용",
+                            vec![format!(
+                                "요청 {}, 선택 {} ({}), {}",
+                                short_id(*request_event_id),
+                                first_line(option_id),
+                                first_line(option_kind),
+                                match scope {
+                                    PermissionScope::Once => "이번 한 번",
+                                    PermissionScope::Session => "이 세션 동안",
+                                }
+                            )],
+                            None,
+                        ),
+                        ControlContent::BundleManifest { manifest } => (
+                            "설정 묶음 목록",
+                            vec![match manifest.get("items").and_then(|v| v.as_array()) {
+                                Some(items) => format!("항목 {}개", items.len()),
+                                None => "목록".to_string(),
+                            }],
+                            None,
+                        ),
+                        ControlContent::HostRegister {
+                            label,
+                            host_public_key_b64,
+                            ..
+                        } => (
+                            "호스트 등록",
+                            vec![format!(
+                                "「{}」, 호스트 키 {}",
+                                first_line(label),
+                                host_public_key_b64.chars().take(12).collect::<String>()
+                            )],
+                            None,
+                        ),
+                    };
+                let mut body = format!("대상: {target}");
+                for line in lines {
+                    body.push('\n');
+                    body.push_str(&line);
+                }
                 Summary {
                     title: format!("oort: {kind}에 서명합니다"),
-                    body: format!("대상: {host}, {session}\n내용: {detail}"),
+                    body,
                     confirm: "서명".into(),
+                    full_text,
                 }
             }
             Statement::Endorse { request, .. } => Summary {
                 title: "oort: 이 폰을 지시 기기로 승인합니다".into(),
                 body: format!(
-                    "기기: {}\n지문: {}\n설정 화면에 보인 지문과 같고, 방금 연결한 폰이 맞을 때만 승인하세요.",
-                    first_line(&request.label),
+                    "지문: {}\n기기 이름: 「{}」\n설정 화면에 보인 지문과 같고, 방금 연결한 폰이 맞을 때만 승인하세요.",
                     fingerprint(&request.target_public_key).unwrap_or_default(),
+                    first_line(&request.label),
                 ),
                 confirm: "승인".into(),
+                full_text: None,
             },
             Statement::Revoke { request, .. } => Summary {
                 title: "oort: 이 기기의 지시 권한을 끊습니다".into(),
                 body: format!(
-                    "기기: {}\n지문: {}\n끊은 기기는 이 맥에서 다시 승인해야 지시할 수 있습니다.",
+                    "키 {}\n기기 이름: 「{}」\n끊은 기기는 이 맥에서 다시 승인해야 지시할 수 있습니다.",
+                    short_id(request.target_key_id),
                     if request.target_label.trim().is_empty() {
-                        short_id(request.target_key_id)
+                        "이름 없음".to_string()
                     } else {
                         first_line(&request.target_label)
                     },
-                    fingerprint(&request.target_public_key).unwrap_or_default(),
                 ),
                 confirm: "끊기".into(),
+                full_text: None,
             },
         }
     }
@@ -639,7 +696,70 @@ fn token(field: &'static str, value: &str) -> Result<(), PayloadError> {
     if value.is_empty() {
         return Err(PayloadError::Field(field, "empty"));
     }
-    no_control(field, value)
+    no_control(field, value)?;
+    no_hidden(field, value)
+}
+
+/// Characters that render as nothing, or as a line break a dialog cannot
+/// tell from a real one, yet are signed: format characters (Cf, bidi and
+/// zero-width included, U+200D ZWJ excepted so emoji sequences survive), the
+/// Unicode line and paragraph separators (Zl, Zp), private use (Co) and the
+/// tag block a language model reads but a person cannot see. E1 only refuses
+/// Cc; this signer refuses more, so it never signs what it could not show
+/// (security review H2·H3).
+pub fn is_hidden_char(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x00AD
+            | 0x0600..=0x0605
+            | 0x061C
+            | 0x06DD
+            | 0x070F
+            | 0x0890..=0x0891
+            | 0x08E2
+            | 0x180E
+            | 0x200B..=0x200C
+            | 0x200E..=0x200F
+            | 0x2028..=0x202E
+            | 0x2060..=0x2064
+            | 0x2066..=0x206F
+            | 0xFEFF
+            | 0xFFF9..=0xFFFB
+            | 0x110BD
+            | 0x110CD
+            | 0x13430..=0x1343F
+            | 0x1BCA0..=0x1BCA3
+            | 0x1D173..=0x1D17A
+            | 0xE000..=0xF8FF
+            | 0xE0000..=0xE007F
+            | 0xF0000..=0x10FFFF
+    )
+}
+
+fn no_hidden(field: &'static str, value: &str) -> Result<(), PayloadError> {
+    if value.chars().any(is_hidden_char) {
+        return Err(PayloadError::Field(field, "invisible character"));
+    }
+    Ok(())
+}
+
+/// Free text a person reads (an instruction, a first prompt): line breaks
+/// and tabs are text; every other control character and every hidden one is
+/// refused.
+fn readable_text(field: &'static str, value: &str) -> Result<(), PayloadError> {
+    if value
+        .chars()
+        .any(|c| (c.is_control() && c != '\n' && c != '\t') || is_hidden_char(c))
+    {
+        return Err(PayloadError::Field(field, "invisible or control character"));
+    }
+    Ok(())
+}
+
+/// A label: one line, nothing hidden.
+fn label_ok(value: &str) -> Result<(), PayloadError> {
+    no_control("label", value)?;
+    no_hidden("label", value)
 }
 
 fn no_control(field: &'static str, value: &str) -> Result<(), PayloadError> {
