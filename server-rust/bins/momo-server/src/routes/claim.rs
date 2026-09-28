@@ -27,6 +27,7 @@
 //! Token lookup and consume live in `momo_auth::owner_claim`. Session rows are
 //! `issue_and_record_session`. The audit row is `momo_db::audit::write_audit`.
 
+use crate::session_end::end_member_sessions_in_tx;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::Json;
@@ -36,7 +37,6 @@ use momo_auth::{
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
-use momo_push::invalidate_member_push_tokens_in_tx;
 
 use crate::dto::{ClaimRequest, LoginResponse, MemberDto};
 use crate::error::{db_error, ApiError};
@@ -103,11 +103,10 @@ pub async fn claim(
                             ("owner.claim", "momo.owner.claim.v1")
                         };
                     // A reset revokes every session of the member
-                    // (`consume_claim_in_tx`); their push registrations end in
+                    // (`consume_claim_in_tx`); their push registrations and device keys (#3022) end in
                     // the same commit (#2677). An owner bootstrap revokes none.
                     if outcome.claim_kind == momo_auth::CLAIM_KIND_PASSWORD_RESET {
-                        invalidate_member_push_tokens_in_tx(conn, workspace_id, outcome.member_id)
-                            .await?;
+                        end_member_sessions_in_tx(conn, workspace_id, outcome.member_id).await?;
                     }
                     write_audit(
                         conn,

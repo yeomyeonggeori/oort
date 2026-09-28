@@ -257,9 +257,11 @@ pub async fn lock_session_for_registration(
 ///
 /// `expires_at_unix` is the JWT's `exp` in unix seconds — the same value
 /// [`crate::IssuedToken`] returns, so the row and the token can never disagree.
-/// Every App JWT carries a random `jti`, so `ON CONFLICT (token_hash) DO
-/// NOTHING` is a defensive guard against a (practically impossible) sha256
-/// collision, not a dedupe path. `session_id` is the lineage both halves of the
+/// Every App JWT carries a unique `jti` — random, or for a rotation's
+/// successor derived from the spent token, which the single-use gate lets
+/// rotate once (#3074) — so `ON CONFLICT (token_hash) DO NOTHING` is a
+/// defensive guard against a (practically impossible) sha256 collision, not a
+/// dedupe path. `session_id` is the lineage both halves of the
 /// pair share (#2677).
 #[allow(clippy::too_many_arguments)]
 pub async fn record_session_token(
@@ -495,6 +497,102 @@ pub async fn revoke_member_session_tokens_by_ids(
         .fetch_all(&mut *conn)
         .await?;
     Ok(rows.len() as u64)
+}
+
+/// Lock every still-live session row of one lineage in **id order** — the same
+/// order [`lock_member_session_tokens_by_ids`] takes — before the lineage sweep
+/// flips them, so a reuse sweep racing a linked refresh or a logout cannot
+/// invert their row locks.
+const LOCK_SESSION_LINEAGE_SQL: &str = "SELECT id \
+       FROM token \
+      WHERE workspace_id = $1 \
+        AND actor_member_id = $2 \
+        AND kind = 'session' \
+        AND session_id = $3 \
+        AND revoked_at IS NULL \
+      ORDER BY id \
+        FOR UPDATE";
+
+/// The lineage sweep. The member predicate is belt-and-braces (a lineage never
+/// spans members); `revoked_at IS NULL` keeps a repeat a no-op that reports 0.
+const REVOKE_SESSION_LINEAGE_SQL: &str = "UPDATE token \
+        SET revoked_at = COALESCE(revoked_at, now()) \
+      WHERE workspace_id = $1 \
+        AND actor_member_id = $2 \
+        AND kind = 'session' \
+        AND session_id = $3 \
+        AND revoked_at IS NULL \
+    RETURNING id";
+
+/// Revoke every still-live **session** token of one lineage (`token.session_id`,
+/// #2677) — every access and refresh half that sign-in ever minted, however
+/// many rotations ago. The R1 half of #3022: a refresh token presented after it
+/// was spent means two parties hold the lineage, and neither may keep it
+/// (ADR-0188 §4 R1 「재사용이 보이면 그 기기의 세션 계열을 전부 폐기」).
+///
+/// Ending the lineage ends what was registered under it: the caller runs the
+/// push and device-key halves in the same transaction. Returns how many rows
+/// this call flipped.
+pub async fn revoke_session_lineage_tokens(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    session_id: Uuid,
+) -> Result<u64, sqlx::Error> {
+    sqlx::query(LOCK_SESSION_LINEAGE_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(session_id)
+        .fetch_all(&mut *conn)
+        .await?;
+    let rows = sqlx::query(REVOKE_SESSION_LINEAGE_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(session_id)
+        .fetch_all(&mut *conn)
+        .await?;
+    Ok(rows.len() as u64)
+}
+
+/// Share-lock the live refresh half(s) of one lineage, in id order.
+///
+/// A lineage is alive while it can still rotate: some refresh row of it is
+/// unrevoked and unexpired. An access token alone is not enough — a plain
+/// rotation leaves the older access halves live for their 15 minutes, so an
+/// access token can outlive the logout that ended its lineage (#2696). A
+/// device key bound to such a lineage would outlive the sign-in it claims to
+/// belong to, so key registration asks this instead of the access row.
+///
+/// `FOR SHARE` in id order serializes with every sweep that ends the lineage
+/// (logout, unlink, the reuse sweep, the member-wide sweeps all take `FOR
+/// UPDATE` or `UPDATE` on these rows): whichever commits first, the other sees
+/// it.
+const LOCK_LIVE_LINEAGE_SQL: &str = "SELECT id \
+       FROM token \
+      WHERE workspace_id = $1 \
+        AND actor_member_id = $2 \
+        AND kind = 'session' \
+        AND session_id = $3 \
+        AND label = 'refresh' \
+        AND revoked_at IS NULL \
+        AND (expires_at IS NULL OR expires_at > now()) \
+      ORDER BY id \
+        FOR SHARE";
+
+/// See [`LOCK_LIVE_LINEAGE_SQL`]. `true` when the lineage can still rotate.
+pub async fn lock_live_session_lineage(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    session_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let rows = sqlx::query(LOCK_LIVE_LINEAGE_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(session_id)
+        .fetch_all(&mut *conn)
+        .await?;
+    Ok(!rows.is_empty())
 }
 
 /// Lock the named session rows in **id order** so refresh and revoke cannot

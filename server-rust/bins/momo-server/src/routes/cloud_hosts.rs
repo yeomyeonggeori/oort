@@ -557,6 +557,14 @@ pub async fn register_cloud_host(
             "cloud workd must register workspace-scoped type=cloud",
         ));
     }
+    // A root device key signs a person's member-scoped host (ADR-0146 개정
+    // D-8); a cloud host is the workspace's and is proved by its bootstrap
+    // token. Refused rather than ignored, like every other shape here.
+    if request.registration.is_some() {
+        return Err(ApiError::bad_request(
+            "registration signs a member-scoped host; a cloud host takes none",
+        ));
+    }
     let display_name = validated_display_name(&request.display_name)?;
     let public_key = validated_public_key(&request.public_key)?;
     let capabilities_json = validated_capabilities(request.capabilities.as_ref())?;

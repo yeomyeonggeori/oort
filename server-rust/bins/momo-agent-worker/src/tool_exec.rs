@@ -958,6 +958,7 @@ async fn spawn_session_in_tx(
                 "label": input.arguments.label,
             }),
             status: STATUS_APPROVED.to_string(),
+            human: None,
         },
     )
     .await?;

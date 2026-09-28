@@ -62,6 +62,17 @@ is file-existence evidence, not a legal-sufficiency declaration.
 - `clients/web-legacy` (not the SPA the Rust image copies)
 - in-app “Open Source Licenses” UI (#35)
 
+### Server direct additions
+
+Direct `server-rust` dependencies an ADR introduced. Their full license texts
+are already in the generated bundle above (they are in `server-rust/Cargo.lock`);
+this table only records why they are there.
+
+| Component | Version | License | Where | Introduced by |
+|---|---|---|---|---|
+| p256 (RustCrypto; brings ecdsa, elliptic-curve, primeorder, sec1 and their RustCrypto deps) | 0.14.0 | Apache-2.0 OR MIT | `server-rust/crates/momo-wire` (human device-key P-256 verification) | ADR-0146 개정 2026-09-28 D-1, #3021 |
+| unicode-normalization | 0.1.25 | MIT OR Apache-2.0 | `server-rust/crates/momo-wire` (NFC of signed human text; was already transitive via sqlx) | ADR-0146 개정 2026-09-28 D-5, #3021 |
+
 ### Phone client direct additions
 
 Direct phone dependencies or copied assets that an ADR or design issue introduced. The

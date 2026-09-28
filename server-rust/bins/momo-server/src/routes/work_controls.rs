@@ -153,6 +153,7 @@ pub(crate) fn control_dto(control: WorkControlRow) -> WorkControlDto {
         approval_message_id: control.approval_message_id.map(|id| id.to_string()),
         created_at_ms: control.created_at_ms,
         updated_at_ms: control.updated_at_ms,
+        human_signature: None,
     }
 }
 
@@ -426,6 +427,7 @@ async fn create_in_tx(conn: &mut PgConnection, input: CreateInput) -> Rejectable
             } else {
                 STATUS_PENDING_APPROVAL.to_string()
             },
+            human: None,
         },
     )
     .await?;

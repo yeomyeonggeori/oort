@@ -731,19 +731,30 @@ async fn http_smoke_logout_and_refresh_rotation() {
         "the rotated access token must be recorded, or the middleware 401s it"
     );
 
-    // single-use: replaying the spent refresh token is dead
+    // single-use, with the #3074 retry: while nobody has used the pair it
+    // minted, replaying the spent token (a lost response) is answered with
+    // THAT pair again — never a new one.
     let replay = http
         .post(format!("{base}/v1/auth/refresh"))
         .json(&json!({"refreshToken": refresh2}))
         .send()
         .await
         .expect("refresh replay");
-    assert_eq!(replay.status(), 401, "a refresh token is single-use");
-    let replay: Value = replay.json().await.expect("error body");
     assert_eq!(
-        replay["error"]["message"],
-        json!("token has been revoked"),
-        "the rotated row is revoked, so the pre-check names it precisely"
+        replay.status(),
+        200,
+        "a lost rotation response is answered again"
+    );
+    let replay: Value = replay.json().await.expect("replay body");
+    assert_eq!(
+        replay["accessToken"],
+        json!(access3),
+        "the same access token"
+    );
+    assert_eq!(
+        replay["refreshToken"],
+        json!(refresh3),
+        "the same refresh token"
     );
 
     // the pre-rotation access token is untouched by rotation (Swift parity:
@@ -755,6 +766,21 @@ async fn http_smoke_logout_and_refresh_rotation() {
         .await
         .expect("second rotation");
     assert_eq!(rotated_again.status(), 200, "the new refresh token spends");
+
+    // Once the successor has been used, the spent token is dead.
+    let replay = http
+        .post(format!("{base}/v1/auth/refresh"))
+        .json(&json!({"refreshToken": refresh2}))
+        .send()
+        .await
+        .expect("refresh replay after the successor rotated");
+    assert_eq!(replay.status(), 401, "a refresh token is single-use");
+    let replay: Value = replay.json().await.expect("error body");
+    assert_eq!(
+        replay["error"]["message"],
+        json!("token has been revoked"),
+        "the rotated row is revoked, so the pre-check names it precisely"
+    );
 
     // ---- wrong-typ and mismatched-session bodies -------------------------
     let access_as_refresh = http
