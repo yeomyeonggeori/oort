@@ -103,7 +103,9 @@ function SuggestionLine({
           style={[styles.icon, {tintColor: palette.icon}]}
           accessibilityIgnoresInvertColors
         />
-        <Text style={styles.onelineText}>{commandSuggestOneLine(card)}</Text>
+        <Text style={styles.onelineText} lineBreakStrategyIOS="hangul-word">
+          {commandSuggestOneLine(card)}
+        </Text>
         {operator ? (
           <Pressable
             onPress={() => setOpen(value => !value)}
@@ -152,9 +154,13 @@ function SuggestedCard({
         <View style={styles.agentMark}>
           <Text style={styles.agentMarkText}>{initial}</Text>
         </View>
+        {/* 글자 배수 상한은 두지 않는다(#2988, R6 M2 판단): 이 머리는 대화 목록 안에서
+            함께 스크롤하는 정보 글이라 자판 위 높이 예산(로컬 카드 머리의 1.3)이 걸리지
+            않는다. 큰 글씨에서는 두 줄로 접히되 낱말 경계에서 접는다(「제안했어/요」 방지). */}
         <Text
           style={styles.headText}
           numberOfLines={2}
+          lineBreakStrategyIOS="hangul-word"
           accessibilityRole="header">
           {commandSuggestHead(card)}
         </Text>
@@ -187,7 +193,9 @@ function SuggestedCard({
             style={[styles.footIcon, {tintColor: palette.icon}]}
             accessibilityIgnoresInvertColors
           />
-          <Text style={styles.footText}>{COMMAND_SUGGEST_PHONE_FOOT}</Text>
+          <Text style={styles.footText} lineBreakStrategyIOS="hangul-word">
+            {COMMAND_SUGGEST_PHONE_FOOT}
+          </Text>
         </View>
       ) : null}
     </View>

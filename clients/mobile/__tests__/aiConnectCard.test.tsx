@@ -16,11 +16,14 @@ import path from 'path';
 import React from 'react';
 import {
   AccessibilityInfo,
+  Dimensions,
   Keyboard,
   type KeyboardEvent,
+  ScrollView,
   StyleSheet,
   TextInput,
 } from 'react-native';
+import {ERROR_MESSAGE_FALLBACK} from '@momo/core/features/settings/model';
 
 import {
   AI_CONNECT_CARD_COPY,
@@ -29,11 +32,15 @@ import {
 import {
   Composer,
   PHONE_SECRET_KEY_BLOCK_COPY,
+  slashHintLines,
+  slashListMaxHeight,
+  slashRowHeight,
 } from '../src/features/conversation/Composer';
 import {
   channelDraftKey,
   readDraft,
 } from '../src/features/conversation/drafts';
+import {line} from '../src/design/tokens';
 import {__setNonSecretStore} from '../src/storage/kv';
 
 // =============================================================================
@@ -321,21 +328,58 @@ describe('카드 — 판정은 코어, 행동은 연결 확인 하나', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
-  it('머리·접힌 줄은 글자 배수 상한(1.3)을 둔다 — 큰 글씨 SE 에서 한 줄 (R5-H1)', async () => {
+  it('머리는 글자 배수 상한 1.3, 제 줄에 혼자 서는 접힌 줄은 1.6 (R5-H1 · #2988)', async () => {
     mockFetch.mockResolvedValue(LINK);
     const spy = jest.spyOn(Keyboard, 'isVisible').mockReturnValue(true);
     try {
       card();
-      for (const text of [
-        AI_CONNECT_CARD_COPY.title,
-        AI_CONNECT_CARD_COPY.onlyMe,
-        AI_CONNECT_CARD_COPY.folded,
-      ]) {
+      for (const text of [AI_CONNECT_CARD_COPY.title, AI_CONNECT_CARD_COPY.onlyMe]) {
         expect(screen.getByText(text).props.maxFontSizeMultiplier).toBe(1.3);
       }
+      expect(
+        screen.getByText(AI_CONNECT_CARD_COPY.folded).props.maxFontSizeMultiplier,
+      ).toBe(1.6);
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it('확인 결과 줄이 서면 몸 스크롤을 끝까지 내린다 — 큰 글씨에서 결과가 창 아래에 숨지 않게 (#2988)', async () => {
+    mockFetch.mockResolvedValue(LINK);
+    mockTest.mockResolvedValue(PROBE_OK);
+    const scrollToEnd = ScrollView.prototype.scrollToEnd as jest.Mock;
+    scrollToEnd.mockClear();
+    card();
+    await screen.findByTestId('ai-connect-card-team');
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('ai-connect-card-team-check'));
+    });
+    const result = await screen.findByTestId('ai-connect-card-team-result');
+    expect(scrollToEnd).not.toHaveBeenCalled();
+    // 결과 줄이 자리를 잡는 순간(네이티브 layout) — 기기에서 오는 그 사건이다.
+    fireEvent(result, 'layout', {
+      nativeEvent: {layout: {x: 0, y: 320, width: 300, height: 40}},
+    });
+    expect(scrollToEnd).toHaveBeenCalledTimes(1);
+    expect(scrollToEnd).toHaveBeenLastCalledWith({animated: true});
+  });
+
+  it('마스킹 꼬리는 한글 낱말 경계에서만 접는다 — 「저/장」 방지 (#2988)', async () => {
+    mockFetch.mockResolvedValue(LINK);
+    card();
+    const sub = await screen.findByTestId('ai-connect-card-team-sub');
+    expect(sub.props.lineBreakStrategyIOS).toBe('hangul-word');
+    expect(String(sub.props.children)).toMatch(/저장$/);
+  });
+
+  it('불러오기 실패 줄은 한 말투(해요체)로 이어진다 (#2988)', async () => {
+    mockFetch.mockRejectedValue('network down');
+    card();
+    await screen.findByTestId('ai-connect-card-team-error');
+    const text = screen.getByText(
+      `${AI_CONNECT_CARD_COPY.teamLoadFailed} ${ERROR_MESSAGE_FALLBACK}`,
+    );
+    expect(String(text.props.children)).not.toMatch(/습니다|하세요/);
   });
 
   it('닫기는 부른 쪽에 알린다', async () => {
@@ -420,6 +464,36 @@ describe('컴포저 — `/` 명령과 키 붙여넣기 차단', () => {
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.getByTestId('composer-input').props.value).toBe('');
     expect(readDraft(CH)).toBe('');
+  });
+
+  it('큰 글씨에서는 설명이 접혀 말줄임되지 않고, 행 높이·목록 상한이 그만큼 자란다 (#2988)', () => {
+    expect(slashHintLines(1)).toBe(1);
+    expect(slashHintLines(1.235)).toBe(2);
+    expect(slashHintLines(2)).toBe(2);
+    expect(slashHintLines(3.143)).toBe(3);
+    for (const fontScale of [1, 1.235, 2, 2.143, 3.143]) {
+      const row = slashRowHeight(fontScale);
+      // 행은 이름 한 줄 + 설명 N 줄을 담는다(반 행이 생기지 않게 목록 상한은 정수배).
+      expect(row).toBeGreaterThanOrEqual(
+        Math.ceil((line.label + line.meta * slashHintLines(fontScale)) * fontScale),
+      );
+      expect(slashListMaxHeight(fontScale, 667) % row).toBe(0);
+    }
+    const base = Dimensions.get('window');
+    try {
+      const big = {...base, fontScale: 3.143};
+      Dimensions.set({window: big, screen: big});
+      composer({onSlashCommand: jest.fn()});
+      fireEvent.changeText(screen.getByTestId('composer-input'), '/연');
+      const hints = screen.getAllByTestId('slash-option-hint');
+      expect(hints.length).toBeGreaterThan(0);
+      for (const hint of hints) {
+        expect(hint.props.numberOfLines).toBe(3);
+        expect(hint.props.lineBreakStrategyIOS).toBe('hangul-word');
+      }
+    } finally {
+      Dimensions.set({window: base, screen: base});
+    }
   });
 
   it('폰 목록에는 구독 줄 인자(claude·codex)가 서지 않는다 — 폰 카드에 그 줄이 없다', () => {

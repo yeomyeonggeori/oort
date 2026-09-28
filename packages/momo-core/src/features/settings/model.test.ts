@@ -6,6 +6,7 @@ import {
   buildJoinLink,
   choiceLabel,
   eligibleAutoTargets,
+  ERROR_MESSAGE_FALLBACK,
   errorMessage,
   formatDay,
   INVITE_ROLES,
@@ -620,6 +621,12 @@ describe("error mapping", () => {
       "engine must be one of opencode, goose, codex-local"
     );
     expect(errorMessage("string throw")).toContain("다시 시도");
+  });
+
+  it("폴백은 해요체다 — 카드의 해요체 앞말 뒤에 붙는다 (#2988)", () => {
+    expect(errorMessage("string throw")).toBe("요청을 끝내지 못했어요. 잠시 뒤에 다시 시도해 주세요.");
+    expect(errorMessage(new Error(""))).toBe(ERROR_MESSAGE_FALLBACK);
+    expect(ERROR_MESSAGE_FALLBACK).not.toMatch(/습니다|하세요/);
   });
 });
 

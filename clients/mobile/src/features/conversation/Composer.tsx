@@ -595,13 +595,28 @@ const MENTION_AGENT_KIND = '에이전트';
  * 글자에서는 그 값이 44 를 넘고 그때부터 행이 그것이다.
  */
 /**
- * 슬래시 목록 한 행의 높이 (design-review #2945 H3). 두 줄(이름 `line.label` +
- * 설명 `line.meta`)과 위아래 여백이 글자 배수를 따라 자라고, 엄지의 바닥은 44다.
+ * 슬래시 목록 설명이 접힐 수 있는 줄 수 (#2988). 기본 글씨에서는 한 줄이다(시안).
+ * 글씨가 커지면 설명(「AI 연결 카드 열기 · 나에게만 보여요」, 스무 자 안팎)이 한
+ * 줄에 들지 않아 말줄임되고, 잘리는 것은 하필 「나에게만」·「운영자」 같은 표지다.
+ * 375 폭에서 설명 칸은 ~260pt 이고 글자 폭은 `font.meta × 배수`라, 배수가 2 를 넘는
+ * 접근성 크기에서는 두 줄로도 모자란다 — 그래서 2 까지는 두 줄, 그 위는 세 줄.
+ */
+export function slashHintLines(fontScale: number): number {
+  if (fontScale <= 1) return 1;
+  return fontScale <= 2 ? 2 : 3;
+}
+
+/**
+ * 슬래시 목록 한 행의 높이 (design-review #2945 H3). 이름 `line.label` 한 줄 +
+ * 설명 `line.meta` × `slashHintLines` 줄과 위아래 여백이 글자 배수를 따라 자라고,
+ * 엄지의 바닥은 44다. 목록 상한(`slashListMaxHeight`)이 이 값의 정수배라 설명이
+ * 접히는 만큼 여기서 함께 자라야 반 행이 생기지 않는다.
  */
 export function slashRowHeight(fontScale: number): number {
   return Math.max(
     TOUCH_TARGET,
-    Math.ceil((line.label + line.meta) * fontScale) + space.xs * 2,
+    Math.ceil((line.label + line.meta * slashHintLines(fontScale)) * fontScale) +
+      space.xs * 2,
   );
 }
 
@@ -1412,7 +1427,11 @@ export function Composer({
                     </Text>
                     {row.label.slice(row.matched)}
                   </Text>
-                  <Text style={styles.slashHint} numberOfLines={1}>
+                  <Text
+                    style={styles.slashHint}
+                    numberOfLines={slashHintLines(fontScale)}
+                    lineBreakStrategyIOS="hangul-word"
+                    testID="slash-option-hint">
                     {row.hint}
                   </Text>
                 </View>
