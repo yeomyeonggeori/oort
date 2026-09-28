@@ -120,7 +120,7 @@ function toContent(c: VectorCase): HumanControlContent {
         requestEventId: x.request_event_id,
         optionId: x.option_id,
         optionKind: x.option_kind,
-        scope: x.scope,
+        scope: x.scope as 'once' | 'session',
       };
     default:
       throw new Error(`not a phone kind: ${x.kind}`);

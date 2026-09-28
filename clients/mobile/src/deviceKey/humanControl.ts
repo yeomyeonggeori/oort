@@ -55,7 +55,7 @@ export type HumanControlContent =
       optionId: string;
       optionKind: string;
       /** 「이번 한 번」 `once` · 「이 세션 동안」 `session` (D-8). */
-      scope: string;
+      scope: 'once' | 'session';
     };
 
 export interface HumanControlFields {
@@ -205,7 +205,7 @@ export interface HumanSignature {
   /** base64 raw r‖s. */
   signature: string;
   mode?: 'queue' | 'interrupt';
-  scope?: string;
+  scope?: 'once' | 'session';
   agentMemberId?: string;
   folderId?: string;
 }

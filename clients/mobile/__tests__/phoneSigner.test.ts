@@ -117,7 +117,7 @@ describe('phoneSigner', () => {
   const identity = {workspaceId: 'w', memberId: 'm', deviceKeyId: 'k'};
 
   it('returns exactly the server’s envelope keys (no `schema`)', async () => {
-    const sign = jest.fn(async () => ({
+    const sign = jest.fn(async (_input: unknown) => ({
       schema: 'momo.human.control.v2' as const,
       deviceKeyId: 'k',
       nonce: control.nonce,
@@ -128,7 +128,7 @@ describe('phoneSigner', () => {
     }));
     const signer = phoneSigner(identity, {
       context: async () => context('i', 1_790_550_000_000),
-      sign,
+      sign: sign as never,
       now: () => 1_790_550_000_000,
     });
     const envelope = await signer.sign(control);
