@@ -279,6 +279,37 @@ async function decisionScenes(browser, origin) {
         await context.close();
       }
       {
+        // #3029: 일반 브라우저 + 서명 요구 서버. 허락과 답장 칸이 같은 판정으로 안내가 되고, 거부는 켜져 있다.
+        const { context, page } = await open(browser, origin, scheme, "agent-browser", viewport);
+        const state = await page.evaluate(() => ({
+          allow: document.querySelector('[data-testid="agent-permission-allow"]').disabled,
+          reject: document.querySelector('[data-testid="agent-permission-reject"]').disabled,
+          line: document.querySelector('[data-testid="agent-permission-in-app"]')?.textContent ?? null,
+          input: document.querySelector('[data-testid="agent-pane-reply-input"]')?.disabled ?? null,
+          hint: document.querySelector('[data-testid="agent-pane-reply-hint"]')?.hasAttribute("data-in-app") ?? false,
+        }));
+        check(
+          `${tag}/브라우저: 허락 꺼짐 + 앱 안내, 거부 켜짐, 답장 칸도 안내`,
+          state.allow && !state.reject && (state.line ?? "").includes("폰이나 데스크탑 앱에서") && state.input === true && state.hint,
+          state
+        );
+        check(`${tag}/브라우저: 가로 넘침 0`, (await overflowX(page)) <= 0);
+        await shot(page, `browser-in-app-${tag}`);
+        await context.close();
+      }
+      {
+        const { context, page } = await open(browser, origin, scheme, "agent-signature", viewport);
+        await page.getByTestId("agent-permission-allow").click();
+        await page.getByTestId("agent-permission-confirm").waitFor();
+        await page.waitForTimeout(450);
+        await page.getByTestId("agent-permission-commit").click();
+        await page.getByTestId("agent-permission-error").waitFor();
+        const text = await page.textContent('[data-testid="agent-permission-error"]');
+        check(`${tag}/서명 필요: 앱 안내 문장, 「소유자만」 아님`, (text ?? "").includes("기기 서명") && !(text ?? "").includes("소유자만"), { text });
+        await shot(page, `signature-required-${tag}`);
+        await context.close();
+      }
+      {
         const { context, page } = await open(browser, origin, scheme, "agent-offline", viewport);
         const state = await page.evaluate(() => ({
           allow: document.querySelector('[data-testid="agent-permission-allow"]').disabled,

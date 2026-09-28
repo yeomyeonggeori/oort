@@ -147,8 +147,19 @@ function sceneActions(scene: AgentFixtureScene): AgentPaneActions {
       reply: null,
     };
   }
+  // 서명을 요구하는 서버인데 이 칸이 아직 몰랐다(플래그 모름): 서버가 이름으로 거부한다(#3029).
+  if (scene === "signature") {
+    return {
+      decide: async () => {
+        throw new ApiError(403, "this instruction needs the owner's device-key signature", "device_signature_required");
+      },
+      reply: null,
+    };
+  }
   // 제품과 같이 지시(답장) 길은 없다(R2).
-  if (scene === "decided" || scene === "lapsed" || scene === "offline") return { ...DEMO_ACTIONS, reply: null };
+  if (scene === "decided" || scene === "lapsed" || scene === "offline" || scene === "browser") {
+    return { ...DEMO_ACTIONS, reply: null };
+  }
   return DEMO_ACTIONS;
 }
 
@@ -162,7 +173,11 @@ export type AgentFixtureScene =
   | "conflict"
   | "closed"
   | "lapsed"
-  | "offline";
+  | "offline"
+  /** 일반 브라우저 + 서명을 요구하는 서버(ADR-0146 개정 D-4, #3029). */
+  | "browser"
+  /** 허락이 403 `device_signature_required`로 돌아온다(#3029). */
+  | "signature";
 
 /** 하네스 장면별 원천. 묶음은 메모리 저장소(캡처는 이 기기 저장소를 건드리지 않는다). */
 export function fixtureAgentSource(scene: AgentFixtureScene): AgentPaneSource {
@@ -218,7 +233,13 @@ export function fixtureAgentSource(scene: AgentFixtureScene): AgentPaneSource {
     render: (id) => {
       const m = models.get(id);
       return m ? (
-        <AgentProgressView model={m} ownerName="곽성재" actions={actions} offline={scene === "offline"} />
+        <AgentProgressView
+          model={m}
+          ownerName="곽성재"
+          actions={actions}
+          offline={scene === "offline"}
+          instructFrom={scene === "browser" ? "app" : "here"}
+        />
       ) : null;
     },
   };

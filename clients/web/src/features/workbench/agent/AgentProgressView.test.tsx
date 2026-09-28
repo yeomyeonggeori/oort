@@ -14,11 +14,14 @@ import {
 } from "@momo/core/features/workbench/agentPane";
 import { CONFIRM_GUARD_MS } from "@/features/timeline/ApprovalActions";
 import {
+  ALLOW_IN_APP_LINE,
   AgentProgressView,
   DECIDE_UNAVAILABLE,
+  REPLY_IN_APP_HINT,
   REPLY_UNAVAILABLE,
   type AgentPaneActions,
 } from "./AgentProgressView";
+import { humanSignatureRefusal, type InstructFrom } from "@momo/core/features/auth/humanSignature";
 
 // A 칸 진행 뷰(#2779). 사보타주 대상은 셋이다:
 //   - 권한 카드는 사람이 무장 → 확정을 누르기 전에는 결정을 만들지 않는다.
@@ -91,14 +94,20 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function render(m: AgentPaneModel, actions: AgentPaneActions, ownerName: string | null = "곽성재", offline = false) {
+function render(
+  m: AgentPaneModel,
+  actions: AgentPaneActions,
+  ownerName: string | null = "곽성재",
+  offline = false,
+  instructFrom: InstructFrom = "here"
+) {
   if (!host) {
     host = document.createElement("div");
     document.body.append(host);
     root = createRoot(host);
   }
   act(() => {
-    root!.render(createElement(AgentProgressView, { model: m, ownerName, actions, offline }));
+    root!.render(createElement(AgentProgressView, { model: m, ownerName, actions, offline, instructFrom }));
   });
   return host;
 }
@@ -395,5 +404,106 @@ describe("reply", () => {
     render(model([tool("bash")]), { decide: null, reply: null });
     expect((q('[data-testid="agent-pane-reply-input"]') as HTMLTextAreaElement).disabled).toBe(true);
     expect(q('[data-testid="agent-pane-reply-hint"]')!.textContent).toBe(REPLY_UNAVAILABLE);
+  });
+});
+
+// #3029 (R2-E9, ADR-0146 개정 D-4): 일반 브라우저 + 서명을 요구하는 서버. 사보타주 대상:
+//   - 권한 카드의 허락과 답장 칸이 같은 값(`instructFrom`)을 읽는다(한쪽만 안내면 실패).
+//   - 거부는 안내 아래에서도 그대로 보낸다.
+//   - 서명 거부는 사유마다 다른 문장이고, 「소유자만」으로 뭉개지지 않는다.
+describe("browser instructs from the app (#3029)", () => {
+  const events = () => [tool("bash", "npm install"), ask([ONCE, REJECT])];
+
+  function typeReply(text: string) {
+    const box = q('[data-testid="agent-pane-reply-input"]') as HTMLTextAreaElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      setter.call(box, text);
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
+  it.each(["here", "app"] as const)("the allow button and the reply box read the same value (%s)", async (from) => {
+    const decide = vi.fn(async () => undefined);
+    const reply = vi.fn(async () => undefined);
+    render(model(events()), { decide, reply }, "곽성재", false, from);
+    const app = from === "app";
+    const allow = q('[data-testid="agent-permission-allow"]') as HTMLButtonElement;
+    const inApp = q('[data-testid="agent-permission-in-app"]');
+    const input = q('[data-testid="agent-pane-reply-input"]') as HTMLTextAreaElement;
+    const hint = q('[data-testid="agent-pane-reply-hint"]')!;
+    // 권한 카드
+    expect(allow.disabled).toBe(app);
+    expect(inApp?.textContent ?? null).toBe(app ? ALLOW_IN_APP_LINE : null);
+    expect(allow.getAttribute("aria-describedby")).toBe(app ? inApp!.id : null);
+    expect((q('[data-testid="agent-permission-reject"]') as HTMLButtonElement).disabled).toBe(false);
+    // 답장 칸 — 같은 판정
+    expect(input.disabled).toBe(app);
+    expect(hint.textContent === REPLY_IN_APP_HINT).toBe(app);
+    expect(input.placeholder).toBe(app ? "지시는 폰이나 데스크탑 앱에서 보내 주세요" : "다음 지시를 적어요");
+    // 판정이 두 자리에서 어긋나지 않는다.
+    expect(allow.disabled).toBe(input.disabled);
+    // 브라우저에서는 무엇을 눌러도 허락·지시가 나가지 않는다.
+    typeReply("다음은 테스트부터");
+    click(allow);
+    await act(async () => {
+      q('[data-testid="agent-pane-queue"]')!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      q('[data-testid="agent-pane-interrupt"]')!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(decide).toHaveBeenCalledTimes(0);
+    expect(reply.mock.calls.length > 0).toBe(!app);
+  });
+
+  it("reject still goes from the browser", async () => {
+    const decide = vi.fn(async () => undefined);
+    render(model(events()), { decide, reply: null }, "곽성재", false, "app");
+    click(q('[data-testid="agent-permission-reject"]'));
+    act(() => vi.advanceTimersByTime(CONFIRM_GUARD_MS));
+    await act(async () => {
+      q('[data-testid="agent-permission-commit"]')!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(decide).toHaveBeenCalledWith({ sessionId: SID, requestEventId: expect.any(String), optionId: "no", kind: "reject_once" });
+    expect(q('[data-testid="agent-permission-outcome"]')!.textContent).toContain("거부를 보냈어요");
+  });
+
+  it("offline or cramped reasons win over the app line (one reason at a time)", () => {
+    render(model(events()), { decide: async () => undefined, reply: null }, "곽성재", true, "app");
+    expect(q('[data-testid="agent-permission-in-app"]')).toBeNull();
+    expect(q('[data-testid="agent-permission-unavailable"]')!.textContent).toBe(PERMISSION_OFFLINE_LINE);
+  });
+
+  it.each([
+    [403, "device_signature_required"],
+    [403, "device_key_not_endorsed"],
+    [403, "device_key_revoked"],
+    [403, "device_signature_expired"],
+    [403, "device_signature_invalid"],
+    [409, "device_nonce_replayed"],
+  ] as const)("%s %s on an allow: its own sentence, the request stays open", async (status, code) => {
+    const decide = vi.fn(async () => {
+      throw new ApiError(status, "server words", code);
+    });
+    render(model(events()), { decide, reply: null });
+    await commitAllow();
+    const error = q('[data-testid="agent-permission-error"]')!.textContent;
+    expect(error).toBe(humanSignatureRefusal({ code })!.text);
+    expect(error).not.toContain("소유자만");
+    expect(error).not.toContain("이미 닫혔어요");
+    expect(q('[data-testid="agent-permission-outcome"]')).toBeNull();
+    expect(q('[data-testid="agent-permission"]')!.getAttribute("data-settled")).toBeNull();
+  });
+
+  it("a refused instruction says why in the reply hint", async () => {
+    const reply = vi.fn(async () => {
+      throw new ApiError(403, "x", "device_key_not_endorsed");
+    });
+    render(model([tool("bash")]), { decide: null, reply });
+    typeReply("이어서");
+    await act(async () => {
+      q('[data-testid="agent-pane-queue"]')!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(q('[data-testid="agent-pane-reply-hint"]')!.textContent).toBe(
+      humanSignatureRefusal({ code: "device_key_not_endorsed" })!.text
+    );
   });
 });

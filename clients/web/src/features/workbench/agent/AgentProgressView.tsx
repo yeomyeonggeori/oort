@@ -33,6 +33,11 @@ import {
 import { StatusMark } from "../local/SessionList";
 import type { SessionStatus } from "@momo/core/features/workbench/sessionList";
 import type { WorkPermissionDecisionBody } from "@momo/core/lib/api";
+import {
+  INSTRUCT_IN_APP_LINE,
+  humanSignatureRefusal,
+  type InstructFrom,
+} from "@momo/core/features/auth/humanSignature";
 import "./agentPane.css";
 
 // Reading this as: 작업 공간 A 칸 진행 뷰(에이전트 작업 레인 한 세션) for internal
@@ -49,6 +54,9 @@ import "./agentPane.css";
 //   결정은 #3000 라우트로 간다(§8.6, 골든 work-permission-decision). 지시를 붙인
 //   거부는 R2까지 서버가 400으로 거부하므로 입력 칸도 두지 않는다(#3013).
 // - 아래: 답장 칸. 기본은 다음 차례 예약, 끼어들기는 따로 누르는 버튼(D4).
+// - 일반 브라우저 + 서명을 요구하는 서버(`instructFrom` = "app", ADR-0146 개정 D-4):
+//   「이번 한 번 허락」과 답장 칸은 「폰이나 데스크탑 앱에서 보내 주세요」로 바뀐다.
+//   거부는 그대로다(거부는 서명하지 않는다). 두 자리는 같은 값 하나를 읽는다(#3029).
 //
 // 모든 글은 React 텍스트 노드로 그린다. HTML로 해석하는 자리가 없다.
 
@@ -100,6 +108,11 @@ function useCramped(ref: React.RefObject<HTMLElement>): boolean {
 
 export const REPLY_UNAVAILABLE = "이 서버는 아직 칸에서 보낸 지시를 받지 않아요.";
 
+/** 브라우저에서 허락을 누를 수 없는 이유(D-4). 거부는 여기서 된다고 함께 말한다. */
+export const ALLOW_IN_APP_LINE = `이번 한 번 허락은 ${INSTRUCT_IN_APP_LINE}. 거부는 여기서도 할 수 있어요.`;
+/** 브라우저의 답장 칸(D-4). 자리 표시 글은 `INSTRUCT_IN_APP_LINE`. */
+export const REPLY_IN_APP_HINT = "브라우저는 지시에 서명하지 않아요 · 보기와 거부는 여기서 할 수 있어요";
+
 const KIND_ICON: Record<ToolCardKind, typeof FileText> = {
   read: FileText,
   edit: FilePen,
@@ -130,6 +143,7 @@ export function AgentProgressView({
   ownerName,
   actions,
   offline = false,
+  instructFrom = "here",
   className,
 }: {
   model: AgentPaneModel;
@@ -138,6 +152,11 @@ export function AgentProgressView({
   actions: AgentPaneActions;
   /** 실시간 연결이 끊겼다. 결정은 잠그고 이유를 한 줄로 말한다. */
   offline?: boolean;
+  /**
+   * 허락·지시를 이 화면에서 보내는가(`here`), 앱에서 보내라고 안내하는가(`app`).
+   * 권한 카드와 답장 칸이 이 한 값을 함께 읽는다(ADR-0146 개정 D-4, #3029).
+   */
+  instructFrom?: InstructFrom;
   className?: string;
 }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
@@ -275,6 +294,7 @@ export function AgentProgressView({
           decide={actions.decide}
           cramped={cramped}
           offline={offline}
+          inApp={instructFrom === "app"}
           onOutcome={setAnnounce}
           onLeave={catchFocus}
         />
@@ -282,7 +302,12 @@ export function AgentProgressView({
 
       {model.viewerIsOwner ? (
         <>
-          <ReplyBox sessionId={model.sessionId} reply={actions.reply} ended={model.status === "done" || model.status === "stopped"} />
+          <ReplyBox
+            sessionId={model.sessionId}
+            reply={actions.reply}
+            ended={model.status === "done" || model.status === "stopped"}
+            inApp={instructFrom === "app"}
+          />
           {/* 낮은 칸에서 권한 카드가 있으면 답장 칸 대신 이 한 줄이 보인다(agentPane.css). */}
           <p className="agent-reply-collapsed shrink-0 border-t border-line px-4 py-1 text-timestamp text-ink-muted">
             답장 칸은 칸을 키우면 보여요 · ⌘⇧↵ 최대화
@@ -438,6 +463,7 @@ function PermissionCard({
   decide,
   cramped,
   offline,
+  inApp,
   onOutcome,
   onLeave,
 }: {
@@ -450,6 +476,8 @@ function PermissionCard({
   cramped: boolean;
   /** 실시간 연결이 끊겼다. */
   offline: boolean;
+  /** 이 브라우저는 허락을 보낼 수 없다(D-4). 거부는 그대로. */
+  inApp: boolean;
   /** 결과 문장을 칸의 live region으로 올린다. */
   onOutcome: (text: string) => void;
   /** 카드가 캐럿을 품은 채 사라진다. */
@@ -546,7 +574,7 @@ function PermissionCard({
     const choice = kind === "allow_once" ? permission.allow : permission.reject;
     if (!decide || !choice || busy || cramped || offline) return;
     if (permissionLapsed(permission, Date.now())) return;
-    if (kind === "allow_once" && !canAllow(permission)) return;
+    if (kind === "allow_once" && (inApp || !canAllow(permission))) return;
     setBusy(true);
     setError(null);
     try {
@@ -570,13 +598,15 @@ function PermissionCard({
   const noRepeat = (event: ReactKeyboardEvent) => {
     if (event.repeat) event.preventDefault();
   };
-  const allowable = canAllow(permission);
+  const allowable = canAllow(permission) && !inApp;
   const unavailable = decide === null;
   // 낮은 칸에서는 요청을 다 보이지 못하므로 결정도 받지 않는다(design-review R3 B1).
   // 연결이 끊기면 결정이 닿았는지 알 길(실시간 `approval.decided`)이 없으므로 잠근다.
   const blocked = unavailable || cramped || offline;
   const describedBy = blocked ? unavailableId : undefined;
   const reason = unavailable ? DECIDE_UNAVAILABLE : offline ? PERMISSION_OFFLINE_LINE : CRAMPED_LINE;
+  // 브라우저의 허락(D-4): 허락만 잠그고 한 줄로 말한다. 거부는 잠그지 않는다.
+  const inAppLine = inApp && !blocked && permission.allow !== null;
 
   return (
     <section
@@ -608,6 +638,11 @@ function PermissionCard({
           {reason}
         </p>
       ) : null}
+      {inAppLine ? (
+        <p id={unavailableId} className="break-keep text-meta text-ink-muted" data-testid="agent-permission-in-app">
+          {ALLOW_IN_APP_LINE}
+        </p>
+      ) : null}
       {permission.preview ? (
         <pre
           tabIndex={0}
@@ -632,7 +667,7 @@ function PermissionCard({
             size="sm"
             className="tap-target"
             disabled={blocked || !allowable || busy}
-            aria-describedby={describedBy}
+            aria-describedby={inAppLine ? unavailableId : describedBy}
             onClick={() => arm("allow")}
             data-testid="agent-permission-allow"
           >
@@ -675,7 +710,7 @@ function PermissionCard({
           </Button>
         </div>
       )}
-      {!allowable && !blocked && permission.allow !== null ? (
+      {!inApp && !allowable && !blocked && permission.allow !== null ? (
         <p className="text-meta text-ink-muted" data-testid="agent-permission-truncated">
           미리보기가 길어 가운데가 잘렸어요. 전체를 보지 않고는 허락할 수 없어요. 거부하거나 호스트에서 결정하세요.
         </p>
@@ -696,10 +731,13 @@ function ReplyBox({
   sessionId,
   reply,
   ended,
+  inApp,
 }: {
   sessionId: string;
   reply: AgentPaneActions["reply"];
   ended: boolean;
+  /** 이 브라우저는 지시를 보낼 수 없다(D-4). 경로가 있어도 보내지 않는다. */
+  inApp: boolean;
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -707,17 +745,17 @@ function ReplyBox({
   const hintId = useId();
   useEffect(() => setNote(null), [text]);
   const unavailable = reply === null;
-  const disabled = unavailable || ended || busy;
+  const disabled = inApp || unavailable || ended || busy;
   const send = async (mode: ReplyMode) => {
     const body = text.trim();
-    if (!reply || body === "" || busy) return;
+    if (inApp || !reply || body === "" || busy) return;
     setBusy(true);
     try {
       await reply({ sessionId, text: body, mode });
       setText("");
       setNote(mode === "queue" ? "다음 차례에 전달돼요." : "지금 차례에 끼어들었어요.");
-    } catch {
-      setNote("지시를 보내지 못했어요. 호스트 연결을 확인한 뒤 다시 보내세요.");
+    } catch (err) {
+      setNote(humanSignatureRefusal(err)?.text ?? "지시를 보내지 못했어요. 호스트 연결을 확인한 뒤 다시 보내세요.");
     } finally {
       setBusy(false);
     }
@@ -748,7 +786,7 @@ function ReplyBox({
           }
         }}
         className="h-control w-full min-w-0 resize-none @md:w-auto @md:flex-1 rounded-lg border border-line-strong bg-surface px-3 py-1 text-body text-ink placeholder:text-ink-muted focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-60"
-        placeholder={ended ? "끝난 세션이에요" : "다음 지시를 적어요"}
+        placeholder={ended ? "끝난 세션이에요" : inApp ? `지시는 ${INSTRUCT_IN_APP_LINE}` : "다음 지시를 적어요"}
         data-testid="agent-pane-reply-input"
       />
         <Button
@@ -765,8 +803,13 @@ function ReplyBox({
           다음 차례로 보내기
         </Button>
       </div>
-      <p id={hintId} className="agent-reply-hint min-w-0 text-timestamp text-ink-muted" data-testid="agent-pane-reply-hint">
-        {unavailable ? REPLY_UNAVAILABLE : note ?? `기본은 다음 차례 예약이에요 · ${SEND_KEY}`}
+      <p
+        id={hintId}
+        className="agent-reply-hint min-w-0 text-timestamp text-ink-muted"
+        data-testid="agent-pane-reply-hint"
+        data-in-app={inApp ? "" : undefined}
+      >
+        {inApp ? REPLY_IN_APP_HINT : unavailable ? REPLY_UNAVAILABLE : note ?? `기본은 다음 차례 예약이에요 · ${SEND_KEY}`}
       </p>
     </form>
   );
