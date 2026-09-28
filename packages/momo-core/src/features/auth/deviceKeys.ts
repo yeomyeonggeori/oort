@@ -338,3 +338,49 @@ export function deviceKeyServerMessage(code: string | undefined, fallback: strin
       return fallback;
   }
 }
+
+// ---- signing context and who may instruct from where (#3029 E9) --------------
+
+/**
+ * `GET …/device-keys/signing-context` (E3 #3023, `SigningContextResponse`). This
+ * module reads only the flag: the desktop shell fetches the rest itself when it
+ * signs (E8 #3028).
+ */
+export interface SigningContext {
+  instanceId: string;
+  serverTimeMs: number;
+  /** `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`. */
+  humanControlSignatureRequired: boolean;
+}
+
+export function parseSigningContext(value: unknown): SigningContext {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  const instanceId = str(source, "instanceId");
+  const serverTimeMs = num(source, "serverTimeMs");
+  const required = bool(source, "humanControlSignatureRequired");
+  if (!instanceId || serverTimeMs === undefined || required === undefined) {
+    throw new WireShapeError();
+  }
+  return { instanceId, serverTimeMs, humanControlSignatureRequired: required };
+}
+
+/**
+ * Whether this server requires a device signature on an allow or an
+ * instruction. `null` = unknown: a server from before E3 (404), no
+ * `MOMO_INSTANCE_ID` (503 `instance_id_unconfigured`), a network error or an
+ * odd body. Unknown is never read as "on" (ADR-0146 개정 D-11: the flag stays
+ * closed until R1·R2 PASS, so nothing changes without the server saying so).
+ */
+export async function fetchHumanControlSignatureRequired(
+  workspaceId: string
+): Promise<boolean | null> {
+  try {
+    const res = await settingsRequest<unknown>(`${base(workspaceId)}/signing-context`, {
+      cache: "no-store",
+    });
+    return parseSigningContext(res).humanControlSignatureRequired;
+  } catch {
+    return null;
+  }
+}
