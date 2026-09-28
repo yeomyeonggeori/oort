@@ -14,9 +14,11 @@ import { ENTER_CONVERSATION_ANIMATION_NAME, ENTER_CONVERSATION_CLASS } from "@/d
  * 제품 경로 재생 단정은 로컬 게이트·design-review의 Chromium 레인에서만;
  * CI 유닛 레인은 grant 단정까지 (`it.skipIf(!chromiumAvailable)`).
  *
- * Waits are event-driven: `animationstart` for `motion-enter-conversation`
- * resolves a promise at N, and `animationend` before N is a loud ceiling.
- * No wall-clock sleep, no rAF counting.
+ * Waits settle on product state (see `measureArrivalStarts`): no grant left
+ * for the delivered ids and no row still carrying `enter-conversation`.
+ * `animationend` before N is not a ceiling — under load the starts land in
+ * separate frames after the first 500ms entrance ended (#3082). No
+ * wall-clock sleep, no rAF counting in the arrival cases.
  */
 
 const require_ = createRequire(import.meta.url);
@@ -138,6 +140,14 @@ async function launchBurstHarness(opts: { history?: number } = {}): Promise<{
   const css = compiler.build([...new Set(candidates)]);
   const browser = await chromium.launch();
   const page = await browser.newPage();
+  // Deterministic load lever (#3082): OORT_BURST_CPU_THROTTLE=30 slows the
+  // page's main thread 30x so arrivals land in separate frames the way a
+  // load≥20 merge-tree run makes them. Unset = rate 1 = no-op.
+  const throttle = Number(process.env.OORT_BURST_CPU_THROTTLE ?? "1");
+  if (throttle > 1) {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: throttle });
+  }
   const pageErrors: string[] = [];
   page.on("pageerror", (err) => {
     pageErrors.push(err instanceof Error ? err.message : String(err));
@@ -200,6 +210,20 @@ ${css}
   return { browser, page };
 }
 
+/**
+ * Counts `motion-enter-conversation` starts for one live delivery and settles
+ * on product state, not on time. Settled = no delivered id still holds a
+ * play grant (every granted row mounted and consumed it, or the cap evicted
+ * it) AND no row still carries `enter-conversation` (every started entrance
+ * ran to animationend and dropped the class). At settle the start count is
+ * final; the caller asserts it. Under load the three starts can land in
+ * separate frames after the first 500ms entrance already ended (#3082), so
+ * `animationend` is not a ceiling. The check runs on every start/end, DOM
+ * mutation and frame — grant consumption is a ref write with no mutation,
+ * so a product that never applies the class still settles (and fails) on
+ * the next frame instead of hanging to the test timeout. No frame budget,
+ * no wall clock.
+ */
 async function measureArrivalStarts(
   page: import("playwright").Page,
   ids: readonly string[],
@@ -208,43 +232,67 @@ async function measureArrivalStarts(
   seqStart: number
 ): Promise<number> {
   return page.evaluate(
-    async ({ animationName, nextIds, want: need, body: text, seqStart: seq }) => {
-      const baseline = window.__timelineBurst.arrivalStarts();
-      const current = () => window.__timelineBurst.arrivalStarts();
+    async ({ animationName, entranceClass, nextIds, want: need, body: text, seqStart: seq }) => {
+      const burst = window.__timelineBurst;
+      const baseline = burst.arrivalStarts();
+      const got = () => burst.arrivalStarts() - baseline;
       return await new Promise<number>((resolve, reject) => {
-        const onStart = (event: AnimationEvent) => {
-          if (event.animationName !== animationName) return;
-          if (current() >= baseline + need) {
-            cleanup();
-            resolve(current() - baseline);
-          }
-        };
-        const onEnd = (event: AnimationEvent) => {
-          if (event.animationName !== animationName) return;
-          if (current() < baseline + need) {
-            cleanup();
+        let frameHandle = 0;
+        let done = false;
+        const settled = () =>
+          burst.playCount(nextIds) === 0 &&
+          document.querySelectorAll(`.${entranceClass}`).length === 0;
+        const check = () => {
+          if (done) return;
+          if (got() > need) {
+            finish();
             reject(
               new Error(
-                `motion-enter-conversation animationstart ceiling: expected ${need}, got ${current() - baseline} before animationend`
+                `${animationName} animationstart ceiling: expected ${need}, got ${got()}`
               )
             );
+            return;
+          }
+          if (settled()) {
+            finish();
+            resolve(got());
           }
         };
-        function cleanup() {
-          document.removeEventListener("animationstart", onStart, true);
-          document.removeEventListener("animationend", onEnd, true);
+        const onAnimation = (event: AnimationEvent) => {
+          if (event.animationName === animationName) check();
+        };
+        const onFrame = () => {
+          check();
+          if (!done) frameHandle = requestAnimationFrame(onFrame);
+        };
+        const obs = new MutationObserver(check);
+        function finish() {
+          done = true;
+          document.removeEventListener("animationstart", onAnimation, true);
+          document.removeEventListener("animationend", onAnimation, true);
+          obs.disconnect();
+          cancelAnimationFrame(frameHandle);
         }
-        document.addEventListener("animationstart", onStart, true);
-        document.addEventListener("animationend", onEnd, true);
-        window.__timelineBurst.deliverLive(nextIds, seq, text);
-        if (current() >= baseline + need) {
-          cleanup();
-          resolve(current() - baseline);
+        document.addEventListener("animationstart", onAnimation, true);
+        document.addEventListener("animationend", onAnimation, true);
+        burst.deliverLive(nextIds, seq, text);
+        if (burst.playCount(nextIds) === 0) {
+          finish();
+          reject(new Error(`deliverLive issued no play grant for ${nextIds.length} arrivals`));
+          return;
         }
+        obs.observe(document.documentElement, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ["class"],
+        });
+        frameHandle = requestAnimationFrame(onFrame);
       });
     },
     {
       animationName: ENTER_CONVERSATION_ANIMATION_NAME,
+      entranceClass: ENTER_CONVERSATION_CLASS,
       nextIds: ids,
       want,
       body,
@@ -264,50 +312,17 @@ describe("virtualized Timeline burst (Chromium)", () => {
           state: "attached",
           timeout: 4000,
         });
-        const measured = await handle.page.evaluate(async (animationName) => {
-          const baseline = window.__timelineBurst.arrivalStarts();
-          const want = 3;
-          const current = () => window.__timelineBurst.arrivalStarts();
-          return await new Promise<number>((resolve, reject) => {
-            const onStart = (event: AnimationEvent) => {
-              if (event.animationName !== animationName) return;
-              if (current() >= baseline + want) {
-                cleanup();
-                resolve(current() - baseline);
-              }
-            };
-            const onEnd = (event: AnimationEvent) => {
-              if (event.animationName !== animationName) return;
-              if (current() < baseline + want) {
-                cleanup();
-                reject(
-                  new Error(
-                    `motion-enter-conversation animationstart ceiling: expected ${want}, got ${current() - baseline} before animationend`
-                  )
-                );
-              }
-            };
-            function cleanup() {
-              document.removeEventListener("animationstart", onStart, true);
-              document.removeEventListener("animationend", onEnd, true);
-            }
-            document.addEventListener("animationstart", onStart, true);
-            document.addEventListener("animationend", onEnd, true);
-            window.__timelineBurst.deliverLive(
-              [
-                "0199eeee-0000-7000-8000-000000000411",
-                "0199eeee-0000-7000-8000-000000000412",
-                "0199eeee-0000-7000-8000-000000000413",
-              ],
-              21,
-              "같은 틱 arrival"
-            );
-            if (current() >= baseline + want) {
-              cleanup();
-              resolve(current() - baseline);
-            }
-          });
-        }, ENTER_CONVERSATION_ANIMATION_NAME);
+        const measured = await measureArrivalStarts(
+          handle.page,
+          [
+            "0199eeee-0000-7000-8000-000000000411",
+            "0199eeee-0000-7000-8000-000000000412",
+            "0199eeee-0000-7000-8000-000000000413",
+          ],
+          3,
+          "같은 틱 arrival",
+          21
+        );
         expect(measured).toBe(3);
         // Settled-row computed style is real here (jsdom's injected sheet
         // never parses; animationName is always ""). History rows must not
