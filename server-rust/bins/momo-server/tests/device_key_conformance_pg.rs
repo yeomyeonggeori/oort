@@ -19,9 +19,9 @@
 //! | `an_access_token_outliving_its_logout_cannot_register_a_key` | check the access row instead of a live refresh of the lineage |
 //! | `a_reused_refresh_token_ends_the_whole_lineage` | **R1** — drop `end_reused_lineage` from the `Revoked` arm |
 //! | `a_lost_rotation_response_is_answered_again_with_the_same_pair` | **#3074** — drop the reissue, or mint a fresh pair on it |
-//! | `a_spent_token_is_not_reissued_once_its_successor_moved_on_or_the_window_closed` | drop the successor-live or the grace check of the reissue |
-//! | `concurrent_presentations_of_one_token_get_one_pair` | drop the reissue from the single-use gate's losing arm |
-//! | `a_linked_phone_that_lost_a_rotation_response_keeps_its_lineage` | drop the reissue from the linked path |
+//! | `a_spent_token_is_not_reissued_once_its_successor_moved_on_or_the_window_closed` | drop the successor-live, the grace or the member check of the reissue |
+//! | `concurrent_presentations_of_one_token_get_one_pair` | drop the reissue from the non-linked single-use gate's losing arm |
+//! | `a_linked_phone_that_lost_a_rotation_response_keeps_its_lineage` | sign the linked rotation's pair at random (not derived) |
 //! | `host_register_signature_is_optional_until_the_flag_and_verified_whenever_sent` | drop the verification when the flag is off, or the flag check |
 //! | `host_register_refuses_every_forged_or_misplaced_signature` | skip `verify`, accept a non-root key, rebuild from the request instead of the stored row, or drop the host-id collision |
 //! | `migration_094_reapplies_as_a_noop_and_keeps_rls_forced` | a non-idempotent statement in 094, or a missing FORCE |
@@ -435,6 +435,31 @@ impl World {
         .fetch_one(&self.su)
         .await
         .expect("count lineage rows")
+    }
+
+    /// Revoke one token row out of band (no cascade).
+    async fn revoke_raw(&self, raw: &str) {
+        let revoked = sqlx::query(
+            "UPDATE token SET revoked_at = now() \
+              WHERE token_hash = digest($1::text, 'sha256') AND revoked_at IS NULL",
+        )
+        .bind(raw)
+        .execute(&self.su)
+        .await
+        .expect("revoke one row")
+        .rows_affected();
+        assert_eq!(revoked, 1);
+    }
+
+    /// Set the person's `member.status` directly — the guard alone, without
+    /// the session ending a real suspension performs.
+    async fn set_person_status(&self, status: &str) {
+        sqlx::query("UPDATE member SET status = $2::member_status WHERE id = $1")
+            .bind(self.person_id)
+            .bind(status)
+            .execute(&self.su)
+            .await
+            .expect("set member status");
     }
 
     /// A QR-linked phone session of the person (ADR-0180 device link).
@@ -1235,6 +1260,34 @@ async fn a_spent_token_is_not_reissued_once_its_successor_moved_on_or_the_window
         "inside the window the refusal ends nothing (#3022 grace)"
     );
 
+    // Each half of the successor must be live: a dead access half (revoked
+    // out of band) is not handed out with its live refresh.
+    let a = w.person().await;
+    let (_, b) = w.rotate(&a).await;
+    let b = b.unwrap();
+    w.revoke_raw(&b.access).await;
+    let (status, _) = w.rotate(&a).await;
+    assert_eq!(
+        status, 401,
+        "a successor with a dead half is never handed out"
+    );
+
+    // And the member must still be active (the guard itself, without the
+    // session ending a real suspension also performs).
+    let a = w.person().await;
+    let (_, b) = w.rotate(&a).await;
+    let b = b.unwrap();
+    w.set_person_status("suspended").await;
+    let (status, _) = w.rotate(&a).await;
+    w.set_person_status("active").await;
+    assert_eq!(status, 401, "a suspended member gets nothing back");
+    let (status, _) = w.rotate(&a).await;
+    assert_eq!(
+        status, 200,
+        "the same retry, once active again, is answered"
+    );
+    assert!(w.access_works(&b.access).await);
+
     // A → B lost, and the retry comes after the window: the #3022 reuse, as
     // before. A real wait, not `age_spent`: moving `revoked_at` would also move
     // the successor's `iat` and fail the reissue for the wrong reason, leaving
@@ -1243,6 +1296,18 @@ async fn a_spent_token_is_not_reissued_once_its_successor_moved_on_or_the_window
     let key_id = w.key(&a, &DeviceKeyPair::new("late"), "ios").await;
     let (_, b) = w.rotate(&a).await;
     let b = b.unwrap();
+    // The same wait covers a reissued pair held by two parties (review L3):
+    // X → Y, X again → the same Y. One holder rotates Y → Z; the other
+    // presents Y past the window, and the lineage ends — Z with it.
+    let x = w.person().await;
+    let (_, y) = w.rotate(&x).await;
+    let y = y.unwrap();
+    let (status, shared) = w.rotate(&x).await;
+    assert_eq!(status, 200);
+    assert_eq!(shared.unwrap().refresh, y.refresh, "both hold Y");
+    let (status, z) = w.rotate(&y).await;
+    assert_eq!(status, 200);
+    let z = z.unwrap();
     tokio::time::sleep(std::time::Duration::from_secs(31)).await;
     let (status, _) = w.rotate(&a).await;
     assert_eq!(status, 401, "past the window a spent token is a reuse");
@@ -1253,6 +1318,12 @@ async fn a_spent_token_is_not_reissued_once_its_successor_moved_on_or_the_window
     assert_eq!(
         w.key_row(key_id).await,
         (Some("refresh_reuse".to_string()), true)
+    );
+    let (status, _) = w.rotate(&y).await;
+    assert_eq!(status, 401, "the other holder of Y is a reuse");
+    assert!(
+        !w.access_works(&z.access).await,
+        "and the rotating holder's newer pair ends with the lineage"
     );
 
     // A logged-out token inside the window is not a lost rotation.
@@ -1289,9 +1360,12 @@ async fn concurrent_presentations_of_one_token_get_one_pair() {
     }
 }
 
-/// #3074 on a QR-linked phone: the linked path reissues the same pair and the
-/// device binding still follows it (the phone lineage is always swept on reuse,
-/// so a lost response there used to cost the root-signed device key).
+/// #3074 on a QR-linked phone: a lost response on the linked path is answered
+/// with the same pair, the binding still follows it, and the phone key lives
+/// (the phone lineage is always swept on reuse, so a lost response there used
+/// to cost the device key). The retry is answered by the `Revoked` pre-check
+/// arm; the linked path's own refusal arms are covered by
+/// `linked_devices_conformance_pg::concurrent_duplicate_refresh_mints_exactly_one_pair`.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn a_linked_phone_that_lost_a_rotation_response_keeps_its_lineage() {

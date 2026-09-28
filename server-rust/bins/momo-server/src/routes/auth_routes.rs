@@ -83,11 +83,15 @@
 //! presentation is answered with **that same pair** again (#3074,
 //! `reissue_lost_rotation`, ADR-0146 D-7 증보): a refusal would not save the
 //! lineage from the client's point of view — its 401 signs every tab out.
-//! Otherwise (the successor was used, logged out or swept) it is refused and
-//! nothing else happens. The accepted cost: a second holder who replays inside
-//! the window, before the client uses the pair, receives the live pair too and
-//! is caught only when both rotate it — the next rotation after the first is a
-//! reuse. The server stores no copy of the pair; it re-signs it
+//! Otherwise (the successor was rotated, logged out or swept) it is refused
+//! and nothing else happens. "Unused" means **not yet rotated**: calling the
+//! API with the successor's access token does not count. The accepted cost
+//! (ADR-0146 D-7 증보, #3074 review M1): anyone holding the spent token who
+//! presents it inside the window receives the live pair too, where #3022 gave
+//! them a 401. Two holders are caught only when their presentations of one
+//! token fall more than 30 s apart; a co-holder that rotates in lockstep with
+//! the client (both hold the same access `exp`) is never detected. The server
+//! stores no copy of the pair; it re-signs it
 //! (`momo_auth::sign_rotation_successor`).
 //!
 //! Every rotation also consumes **and** records its new pair in one
@@ -784,7 +788,8 @@ struct Reissue<'a> {
 ///      out or swept is never handed out again: the presenter is then not the
 ///      client that lost it. A token revoked by a logout has no recorded
 ///      successor at all;
-///   3. the member is still active.
+///   3. the member is still active. Defence in depth: suspending a member
+///      also ends their sessions, so (2) refuses first in practice.
 ///
 /// Nothing is written: the pair is the one already recorded, rebound and
 /// counted. The server never stores the pair itself, only `sha256(jwt)`.
