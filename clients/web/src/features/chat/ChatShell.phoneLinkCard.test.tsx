@@ -171,6 +171,7 @@ vi.mock("@/features/work/WorkPanel", () => ({
 // 재지 않으므로 호스트 없음(셀프호스트 기본)으로 고정한다.
 vi.mock("@/features/capabilities/useSurfaceProvided", () => ({
   useSurfaceProvided: () => false,
+  useSurfaceProvidedWhileOpen: () => false,
   useSurfaceProvidedPredicate: () => () => false,
   useWorkHostPresence: () => "absent",
 }));
