@@ -441,6 +441,13 @@ scripts/desktop/build_workd_sidecar.sh --dry-run-sign <oort.app>   # prints the 
 data-protection keychain refuses a binary without it), and workd accepting the
 signed app on the control socket.
 
+Open (#3025): the signed path gives the sidecar **no** restricted entitlement.
+A bare Mach-O in `Contents/MacOS` cannot carry a provisioning profile, so
+granting workd `application-identifier`/`keychain-access-groups` needs its own
+App ID and Developer ID profile and workd wrapped in a helper bundle (or a
+different host-key store). Until then a signed workd's data-protection keychain
+answers `errSecMissingEntitlement` (-34018); only debug builds (`--dev-key-file`) keep a host key.
+
 ## Device key, the R2 root (#3025)
 
 ADR-0146 개정 2026-09-28 D-1·D-3·D-5·D-6·D-7. Code: `src-tauri/src/device_key/`
@@ -487,12 +494,32 @@ Rules the code holds:
   lock-screen unlocks, and unlocking the Mac must not stand in for a signature.
 - One worker thread runs every enclave call, one at a time.
 
-**Owner step before a signed build can hold the key** (`runtime-unverified`
-until then): `keychain-access-groups` is a restricted entitlement for a
-Developer ID app, so it needs a provisioning profile embedded in the bundle, and
-adding the entitlement without the profile stops the signed app from launching.
-The exact change is in PR #3025's body; it is not in `Entitlements.plist` yet on
-purpose.
+**Signed builds and the provisioning profile** (#3025; `runtime-unverified`
+until an owner-approved signed build): `keychain-access-groups` is a restricted
+entitlement for a Developer ID app, so the bundle must carry a provisioning
+profile that allows it, or the signed app does not launch.
+
+- Profile: `momo desktop Developer ID` (App ID `YWQQFQM38J.app.momo.desktop`,
+  UUID pinned in `scripts/desktop/check_provisioning_profile.sh`), kept outside
+  the repo at `~/.momo-secrets/momo-desktop-developer-id.provisionprofile`
+  (`MOMO_PROVISIONING_PROFILE` overrides). The profile expires 2044; the
+  Developer ID certificate it names expires 2027-02-01, which is the date that
+  counts.
+- `Entitlements.plist` is what the bundler signs the app **and the workd
+  sidecar** with (one plist for every target), so it holds no restricted key.
+- `Entitlements.app.plist` adds `com.apple.application-identifier`,
+  `com.apple.developer.team-identifier` and the device-key group.
+  `scripts/publish_next_build.sh` copies the profile to
+  `Contents/embedded.provisionprofile` after the bundler and re-signs only the
+  outer `.app` with it (no `--deep`), so the sidecar keeps its own signature.
+- The profile is not in `tauri.conf.json > bundle > macOS > files`: the bundler
+  fails when that file is missing, which would break every build on a machine
+  without the profile, and it would copy the file's 0600 mode.
+- `check_provisioning_profile.sh` runs before the build (UUID, team, App ID,
+  allowed groups, the signing certificate, expiry; warns 30 days ahead) and
+  again on the signed app (embedded profile, app entitlements, none on the
+  sidecar). Unsigned builds (`cargo tauri dev`, `cargo tauri build` without
+  `APPLE_SIGNING_IDENTITY`) never read either file.
 
 ## Run
 
