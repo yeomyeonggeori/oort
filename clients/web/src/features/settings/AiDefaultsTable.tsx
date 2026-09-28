@@ -151,7 +151,7 @@ function DefaultRow({
           )}
         </Select>
       );
-      if (saved && resolved.state === "ok") {
+      if (id !== "appCommand" && saved && resolved.state === "ok") {
         lines.push({ key: "model", text: modelLine(saved, input.teamKey), tone: "muted" });
       }
       if (id === "appCommand" && resolved.state === "ok") {

@@ -19,7 +19,7 @@ let root: Root | null = null;
 
 const TEAM: AiDefaultsTeamKey = { status: "present", name: "OpenAI", failed: false, modelCount: 12 };
 
-function render(node: Parameters<typeof createElement>[0], props: Record<string, unknown>) {
+function render<P extends object>(node: (props: P) => ReturnType<typeof AiDefaultsTable>, props: P) {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -51,6 +51,7 @@ afterEach(() => {
 
 describe("기본 AI 표 화면", () => {
   it("팀이 보는 줄에는 선택 칸도 구독 이름도 없다(수용 기준, DOM)", () => {
+    act(() => writeAiDefaults({ appCommand: { kind: "teamKey" } }));
     render(AiDefaultsTable, { teamKey: TEAM, operator: true, browserTab: false });
     for (const id of ["teamAgent", "summary", "guardrail"]) {
       const row = q(`ai-default-${id}`);
@@ -73,6 +74,8 @@ describe("기본 AI 표 화면", () => {
       ["OpenAI · 팀 기본 · API 키", false],
       ["내 구독 · 준비 중", true],
     ]);
+    // 앱 명령의 모델 줄은 한 번만 선다(저장 값이 팀 키여도).
+    expect(q("ai-default-appCommand")?.querySelectorAll('[data-testid="ai-default-appCommand-model"]')).toHaveLength(1);
     expect(q("ai-default-summary-model")?.textContent).toBe("모델은 서버가 정함 · 이 키로 쓸 수 있는 모델 12개");
   });
 
