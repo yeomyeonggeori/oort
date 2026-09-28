@@ -1,0 +1,31 @@
+{
+  "_comment": "#3118 \u2014 docs/api/human-control-signing-v3.vectors.json\uc758 permission \uc0ac\ub840 \ubbf8\ub9ac\ubcf4\uae30(host\uac00 \ub9cc\ub4e0 \ub2eb\ud78c \uac1d\uccb4\u00b7\uc815\uaddc \ubc14\uc774\ud2b8\u00b7SHA-256) \uc0ac\ubcf8. \ucf54\uc5b4\ub294 \uc800\uc7a5\uc18c \ubc16 \ud30c\uc77c\uc744 \uc77d\uc744 \uc218 \uc5c6\uc5b4 \uc0ac\ubcf8\uc744 \ub450\uace0, Rust(momo-wire tests/human_control_vectors.rs)\uac00 \uc774 \uc0ac\ubcf8\uc774 \ubca1\ud130\uc640 \uac19\uc740\uc9c0 \ud655\uc778\ud55c\ub2e4. \uc7ac\uc0dd\uc131: \ubca1\ud130\ub97c \ub2e4\uc2dc \ub9cc\ub4e0 \ub4a4 permission \uc0ac\ub840\uc758 content.preview\u00b7preview_canonical\u00b7preview_sha256\uc744 \uc62e\uae34\ub2e4.",
+  "cases": [
+    {
+      "name": "control_v3_permission_once",
+      "preview": {
+        "schema": "momo.work_permission.preview.v1",
+        "kind": "execute",
+        "title": "Run `git push origin main`",
+        "locations": "",
+        "input": "{\"command\":\"git push origin main\"}",
+        "truncated": false
+      },
+      "preview_canonical": "{\"input\":\"{\\\"command\\\":\\\"git push origin main\\\"}\",\"kind\":\"execute\",\"locations\":\"\",\"schema\":\"momo.work_permission.preview.v1\",\"title\":\"Run `git push origin main`\",\"truncated\":false}",
+      "preview_sha256": "722d12c20aff8fb180b5923d2ccbb8bc2baca0d8cf774c59d7113e3d303e8512"
+    },
+    {
+      "name": "control_v3_permission_session",
+      "preview": {
+        "schema": "momo.work_permission.preview.v1",
+        "kind": "edit",
+        "title": "Edit \"\uc124\uc815.md\" \u2014 \ud83d\udd27 tabs\there",
+        "locations": "/Users/me/project/\uc124\uc815.md\n/Users/me/project/README.md",
+        "input": "{\"new_string\":\"a\\nb\",\"path\":\"\uc124\uc815.md\"}",
+        "truncated": true
+      },
+      "preview_canonical": "{\"input\":\"{\\\"new_string\\\":\\\"a\\\\nb\\\",\\\"path\\\":\\\"\uc124\uc815.md\\\"}\",\"kind\":\"edit\",\"locations\":\"/Users/me/project/\uc124\uc815.md\\n/Users/me/project/README.md\",\"schema\":\"momo.work_permission.preview.v1\",\"title\":\"Edit \\\"\uc124\uc815.md\\\" \u2014 \ud83d\udd27 tabs\\there\",\"truncated\":true}",
+      "preview_sha256": "97efd225d64728fc87fa7c9db0a261c6db7943f7733f8a80d5e2374d6b0f3852"
+    }
+  ]
+}

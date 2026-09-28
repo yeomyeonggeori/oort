@@ -292,3 +292,8 @@ d2e7f6626fa75c026e983cf6fe1e97e54005d46f:clients/mobile/__tests__/deviceKeyEnrol
 4ea0a05e7e994c80ad78ac631a9356b065be712c:clients/mobile/__tests__/fixtures/refresh-proof.vector.json:generic-api-key:12
 #   docs/api/refresh-proof.vector.json:12  [generic-api-key]  시험 벡터의 토큰 해시 필드
 4ea0a05e7e994c80ad78ac631a9356b065be712c:docs/api/refresh-proof.vector.json:generic-api-key:12
+# workd 권한 미리보기 가림(redaction) 단위 시험의 가짜 자격 문자열 — 가림 규칙이 잡는지 보려고 일부러 자격 모양으로 쓴 픽스처다(#3118, PR #3122). 실제 자격 아님.
+#   server-rust/bins/momo-workd/src/projection.rs:803  [curl-auth-header]  가림 시험 픽스처
+a8378190d76fb74ed6c5df312788691cd5c06521:server-rust/bins/momo-workd/src/projection.rs:curl-auth-header:803
+#   server-rust/bins/momo-workd/src/projection.rs:811  [aws-access-token]  가림 시험 픽스처
+a8378190d76fb74ed6c5df312788691cd5c06521:server-rust/bins/momo-workd/src/projection.rs:aws-access-token:811

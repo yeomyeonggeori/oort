@@ -30,9 +30,12 @@
 //!    envelope's key id, nonce, times, and the per-kind fields the content
 //!    needs (input `mode`, permission `scope`, spawn agent/folder). A statement
 //!    for another host, session, mode, text or option does not verify.
-//!    `momo.human.control.v2` is checked; a v1 statement is accepted for
-//!    `input` / `permission` only, whose v1 bytes say the same thing
-//!    (`HumanControl::verify_any`) — never for a spawn.
+//!    `momo.human.control.v3` is checked; a v2 statement is accepted for every
+//!    kind but a permission whose request carries a preview (#3118: a v3
+//!    allow binds the stored preview hash, so what the owner saw is part of
+//!    the statement), and a v1 one for `input` / a preview-less `permission`
+//!    only, whose v1 bytes say the same thing (`HumanControl::verify_any`) —
+//!    never for a spawn.
 //!    Text must already be NFC: the host refuses any other spelling (#3024
 //!    L4), so the server does too.
 //! 4. **The time window** (D-9): ±5 min around the server clock, lifetime
@@ -136,11 +139,14 @@ pub enum ControlSubject<'a> {
         tool: &'a str,
         channel_id: Uuid,
     },
-    /// The stored request's event id and the stored option (id and kind).
+    /// The stored request's event id and the stored option (id and kind),
+    /// and the stored preview hash the host relayed with the request (#3118;
+    /// `None` only for a request recorded before hosts sent previews).
     Permission {
         request_event_id: Uuid,
         option_id: &'a str,
         option_kind: &'a str,
+        preview_sha256: Option<&'a str>,
     },
 }
 
@@ -407,6 +413,7 @@ pub async fn verify_human_control_in_tx(
             request_event_id,
             option_id,
             option_kind,
+            preview_sha256,
         } => {
             if input.mode.is_some() || input.agent_member_id.is_some() || input.folder_id.is_some()
             {
@@ -423,6 +430,7 @@ pub async fn verify_human_control_in_tx(
                     option_id,
                     option_kind,
                     scope,
+                    preview_sha256,
                 },
                 None,
                 Some(scope.as_str()),

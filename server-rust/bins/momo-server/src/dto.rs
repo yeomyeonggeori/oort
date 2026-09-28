@@ -1015,8 +1015,10 @@ pub struct SigningContextResponse {
     pub human_control_signature_required: bool,
     /// `MOMO_HOST_REGISTER_SIGNATURE_REQUIRED`.
     pub host_register_signature_required: bool,
-    /// The control schema a device signs (`momo.human.control.v2`, #3027).
-    /// A v1 statement is still accepted for every kind but `spawn`.
+    /// The control schema a device signs (`momo.human.control.v3`, #3118: a
+    /// permission allow binds the request's preview hash). A v2 statement is
+    /// still accepted for every kind but a previewed permission, and a v1 one
+    /// for every kind but spawn and a previewed permission.
     pub human_control_schema: &'static str,
     /// The caller's sign-in lineage (`token.session_id`) — the `session_id`
     /// line of a `momo.human.device_rebind.v1` letter (#3097). `null` for a
@@ -4446,12 +4448,38 @@ pub struct WorkPermissionRequestDto {
     pub decided_at_ms: Option<i64>,
     pub control_id: Option<String>,
     pub expires_at_ms: i64,
+    /// #3118: SHA-256 (lowercase hex) of the host's preview — the line a
+    /// `momo.human.control.v3` allow signs. Absent for a request relayed
+    /// without a preview.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_sha256: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkPermissionDecisionResponse {
     pub permission_request: WorkPermissionRequestDto,
+}
+
+/// One option the owner may choose, as the host offered it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkPermissionOptionDto {
+    pub option_id: String,
+    pub kind: String,
+}
+
+/// `GET …/work-sessions/{session}/permission-requests/{requestEventId}`
+/// (#3118, owner only): the request with the host's preview, relayed as the
+/// host sent it. The app re-hashes the preview it renders and signs only
+/// when that equals `previewSha256` (and the host compares with its own).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkPermissionPreviewResponse {
+    pub permission_request: WorkPermissionRequestDto,
+    pub options: Vec<WorkPermissionOptionDto>,
+    /// The closed `momo.work_permission.preview.v1` object, or null.
+    pub preview: Option<serde_json::Value>,
 }
 
 /// Swift `WorkControlDTO` (:21-34).

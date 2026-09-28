@@ -133,6 +133,10 @@ pub struct PermissionRequestRow {
     pub decided_at_ms: Option<i64>,
     pub control_id: Option<Uuid>,
     pub created_at_ms: i64,
+    /// #3118 (097): the host-built preview — owner-only — and its hash, the
+    /// line a v3 allow signs. Both `None` for a request relayed without one.
+    pub preview: Option<Value>,
+    pub preview_sha256: Option<String>,
 }
 
 const COLUMNS: &str = "id, workspace_id, work_session_id, host_id, channel_id, \
@@ -142,7 +146,8 @@ const COLUMNS: &str = "id, workspace_id, work_session_id, host_id, channel_id, \
      decided_by, decided_option_id, decided_kind, \
      floor(extract(epoch from decided_at) * 1000)::bigint AS decided_at_ms, \
      control_id, \
-     floor(extract(epoch from created_at) * 1000)::bigint AS created_at_ms";
+     floor(extract(epoch from created_at) * 1000)::bigint AS created_at_ms, \
+     preview, preview_sha256";
 
 fn decode(row: &sqlx::postgres::PgRow) -> Result<PermissionRequestRow, sqlx::Error> {
     use sqlx::Row as _;
@@ -164,6 +169,8 @@ fn decode(row: &sqlx::postgres::PgRow) -> Result<PermissionRequestRow, sqlx::Err
         decided_at_ms: row.try_get("decided_at_ms")?,
         control_id: row.try_get("control_id")?,
         created_at_ms: row.try_get("created_at_ms")?,
+        preview: row.try_get("preview")?,
+        preview_sha256: row.try_get("preview_sha256")?,
     })
 }
 
@@ -175,6 +182,9 @@ pub struct NewPermissionRequest {
     pub channel_id: Uuid,
     pub request_event_id: Uuid,
     pub options: Vec<PermissionOption>,
+    /// #3118: the host's preview and its hash, already checked against each
+    /// other (`momo_wire::permission_preview::check_relayed_preview`).
+    pub preview: Option<(Value, String)>,
 }
 
 /// Record a relayed request. A retried event (same id) records nothing new.
@@ -187,9 +197,9 @@ pub async fn insert_permission_request_in_tx(
     let result = sqlx::query(
         "INSERT INTO work_permission_request \
            (workspace_id, work_session_id, host_id, channel_id, request_event_id, \
-            options, expires_at) \
+            options, expires_at, preview, preview_sha256) \
          VALUES ($1, $2, $3, $4, $5, $6, \
-                 clock_timestamp() + make_interval(secs => $7)) \
+                 clock_timestamp() + make_interval(secs => $7), $8, $9) \
          ON CONFLICT (workspace_id, work_session_id, request_event_id) DO NOTHING",
     )
     .bind(workspace_id)
@@ -199,6 +209,8 @@ pub async fn insert_permission_request_in_tx(
     .bind(new.request_event_id)
     .bind(options_json(&new.options))
     .bind(PERMISSION_REQUEST_TTL_SECONDS as f64)
+    .bind(new.preview.as_ref().map(|(preview, _)| preview.clone()))
+    .bind(new.preview.as_ref().map(|(_, hash)| hash.clone()))
     .execute(&mut *conn)
     .await?;
     Ok(result.rows_affected() == 1)
@@ -216,6 +228,27 @@ pub async fn lock_permission_request_in_tx(
         "SELECT {COLUMNS} FROM work_permission_request \
           WHERE workspace_id = $1 AND work_session_id = $2 AND request_event_id = $3 \
           FOR UPDATE"
+    );
+    let row = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(work_session_id)
+        .bind(request_event_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    row.as_ref().map(decode).transpose().map_err(Into::into)
+}
+
+/// Read one request of one session, unlocked (the owner's preview read,
+/// #3118).
+pub async fn load_permission_request_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    work_session_id: Uuid,
+    request_event_id: Uuid,
+) -> Result<Option<PermissionRequestRow>, T3Error> {
+    let sql = format!(
+        "SELECT {COLUMNS} FROM work_permission_request \
+          WHERE workspace_id = $1 AND work_session_id = $2 AND request_event_id = $3"
     );
     let row = sqlx::query(&sql)
         .bind(workspace_id)

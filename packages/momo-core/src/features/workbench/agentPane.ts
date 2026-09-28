@@ -167,10 +167,20 @@ export interface PendingPermission {
   /** 요청 이벤트 id(결정이 가리키는 것). */
   requestEventId: string;
   atMs: number;
-  /** 요청이 멈춰 세운 도구의 종류와 문구. 없으면 null. */
+  /**
+   * 요청 직전 `agent.status`에서 **추론한** 도구의 종류와 문구. 없으면 null.
+   * 서버가 전달한 이벤트라 서명에 묶이지 않는다(#3118 R2 H1). 서명한 허락의 근거로
+   * 쓰지 않는다 — 그것은 `previewSha256`과 `checkPermissionPreview`의 몫이다.
+   */
   tool: { kind: ToolCardKind; headline: string } | null;
-  /** 요청이 멈춰 세운 도구의 요약(정화 뒤). 없으면 null. */
+  /** 같은 추론의 요약(정화 뒤). 없으면 null. 표시용이고 서명에 묶이지 않는다. */
   preview: SanitizedText | null;
+  /**
+   * host가 요청과 함께 올린 미리보기의 SHA-256(#3118). 미리보기 자체는 소유자
+   * 조회(`GET …/permission-requests/{id}`)로 받고, `checkPermissionPreview`가
+   * 렌더한 미리보기로 다시 계산해 이것과 대조한다. 옛 host의 요청이면 null.
+   */
+  previewSha256: string | null;
   allow: PermissionChoice | null;
   reject: PermissionChoice | null;
   /** 받았지만 칸이 보이지 않는 선택지 수(항상 허용·모르는 종류 등). */
@@ -234,11 +244,16 @@ export function pendingPermission(
         else hidden += 1;
       }
       const kind = lastTool ? toolCardKind(lastTool.name) : null;
+      const previewSha256 =
+        typeof payload.preview_sha256 === "string" && /^[0-9a-f]{64}$/.test(payload.preview_sha256)
+          ? payload.preview_sha256
+          : null;
       pending = {
         requestEventId: event.eventId,
         atMs: event.atMs,
         tool: lastTool && kind ? { kind, headline: PERMISSION_ASK[kind] } : null,
         preview: lastTool?.detail !== undefined ? sanitizeDisplayText(lastTool.detail) : null,
+        previewSha256,
         allow,
         reject,
         hiddenOptions: hidden,

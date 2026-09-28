@@ -39,6 +39,14 @@ export type ControlContentToSign =
       /** The stored option kind (`allow_once`). */
       optionKind: string;
       scope: PermissionScope;
+      /**
+       * #3118 (`momo.human.control.v3`): the hash of the preview this app
+       * rendered — `checkPermissionPreview(...).sha256`, never the request's
+       * word for it. Signers that still build v2 ignore it, and a host that
+       * relayed a preview refuses their allow; moving the phone and desktop
+       * signers to v3 is the uxui follow-up.
+       */
+      previewSha256?: string;
     }
   | {
       kind: "spawn";

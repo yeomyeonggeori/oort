@@ -53,7 +53,7 @@
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
@@ -205,10 +205,52 @@ struct SessionHandle {
     initial_prompt: Option<String>,
 }
 
+/// #3118 (R2 H1): the preview hash of every permission request a session
+/// relayed and still waits on, by `(session, request event id)`. Written by
+/// the session task **before** the request leaves the host, read by the
+/// control loop's signature check, so an owner's allow is verified against
+/// the preview the host itself read from the agent — never the server's.
+#[derive(Clone, Default)]
+pub struct PreviewLedger(Arc<Mutex<HashMap<(Uuid, Uuid), String>>>);
+
+impl PreviewLedger {
+    fn insert(&self, session_id: Uuid, request_event_id: Uuid, preview_sha256: String) {
+        self.0
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert((session_id, request_event_id), preview_sha256);
+    }
+
+    fn remove(&self, session_id: Uuid, request_event_id: Uuid) {
+        self.0
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&(session_id, request_event_id));
+    }
+
+    /// Drop the entries of sessions that are gone (a task that ended without
+    /// its own cleanup — aborted or panicked).
+    fn retain_sessions(&self, live: impl Fn(&Uuid) -> bool) {
+        self.0
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .retain(|(session_id, _), _| live(session_id));
+    }
+
+    fn get(&self, session_id: Uuid, request_event_id: Uuid) -> Option<String> {
+        self.0
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&(session_id, request_event_id))
+            .cloned()
+    }
+}
+
 pub struct SessionManager {
     api: Arc<dyn HostApi>,
     settings: Arc<SessionSettings>,
     sessions: HashMap<Uuid, SessionHandle>,
+    previews: PreviewLedger,
 }
 
 impl SessionManager {
@@ -217,7 +259,19 @@ impl SessionManager {
             api,
             settings: Arc::new(settings),
             sessions: HashMap::new(),
+            previews: PreviewLedger::default(),
         }
+    }
+
+    /// The preview hash this host relayed for `request_event_id` of
+    /// `session_id`, while the session still waits on it (#3118). `None`
+    /// for a request this host is not waiting on.
+    pub fn permission_preview_sha256(
+        &self,
+        session_id: Uuid,
+        request_event_id: Uuid,
+    ) -> Option<String> {
+        self.previews.get(session_id, request_event_id)
     }
 
     /// Sessions whose task is still alive.
@@ -235,6 +289,9 @@ impl SessionManager {
     /// Forget sessions whose task has finished (the agent exited on its own).
     pub fn reap(&mut self) {
         self.sessions.retain(|_, handle| !handle.task.is_finished());
+        let sessions = &self.sessions;
+        self.previews
+            .retain_sessions(|session_id| sessions.contains_key(session_id));
     }
 
     /// Open a session for a dispatched spawn. On success the server session
@@ -360,6 +417,8 @@ impl SessionManager {
             queued_interrupts: 0,
             permissions: HashMap::new(),
             permission_wait: self.settings.permission_wait,
+            previews: self.previews.clone(),
+            tool_calls: Vec::new(),
         };
         let join = tokio::spawn(task.run(receiver));
         self.sessions.insert(
@@ -687,6 +746,11 @@ struct SessionTask {
     /// Bridged permission requests waiting for the owner, by event id.
     permissions: HashMap<Uuid, PendingPermission>,
     permission_wait: Duration,
+    /// #3118: the preview hashes of `permissions`, shared with the manager.
+    previews: PreviewLedger,
+    /// #3118: what the agent announced of its tool calls, for the preview of
+    /// a permission request that names one (bounded).
+    tool_calls: Vec<(String, Map<String, Value>)>,
 }
 
 impl SessionTask {
@@ -810,6 +874,7 @@ impl SessionTask {
         }
         match message {
             Incoming::Notification { method, params } if method == "session/update" => {
+                projection::remember_tool_call(&mut self.tool_calls, &params);
                 match projection::project(&params) {
                     Projection::Text(text) => self.relay.push_text(&text).await,
                     Projection::Status(payload) => self.relay.status(payload).await,
@@ -850,7 +915,21 @@ impl SessionTask {
         let offered = policy::bridge_options(&options);
         if !offered.is_empty() {
             let event_id = Uuid::new_v4();
-            if self.relay.permission_requested(event_id, &offered).await {
+            // #3118: the host is the preview's source. Its hash is recorded
+            // before the request leaves, so no decision can arrive first.
+            let preview = projection::permission_preview(&mut self.tool_calls, params).to_value();
+            let Ok(preview_sha256) = momo_wire::permission_preview::preview_sha256(&preview) else {
+                // Unreachable for a host-built preview; refuse closed.
+                tracing::error!(session_id = %self.session_id, "permission preview did not build; denied");
+                return self.deny_unrelayed(id, &options).await;
+            };
+            self.previews
+                .insert(self.session_id, event_id, preview_sha256.clone());
+            if self
+                .relay
+                .permission_requested(event_id, &offered, preview, &preview_sha256)
+                .await
+            {
                 self.permissions.insert(
                     event_id,
                     PendingPermission {
@@ -861,9 +940,20 @@ impl SessionTask {
                 );
                 return None;
             }
+            self.previews.remove(self.session_id, event_id);
             tracing::warn!(session_id = %self.session_id, "permission request not relayed; denied");
         }
-        let decision = policy::decide_permission(&options);
+        self.deny_unrelayed(id, &options).await
+    }
+
+    /// Deny a request that could not be relayed (D5 「올릴 수 없는 요청은 즉시
+    /// 거부」).
+    async fn deny_unrelayed(
+        &mut self,
+        id: Value,
+        options: &[policy::PermissionOption],
+    ) -> Option<End> {
+        let decision = policy::decide_permission(options);
         if self.conn.respond(id, decision.to_result()).is_err() {
             return Some(End::AgentExited);
         }
@@ -889,8 +979,7 @@ impl SessionTask {
             Err(refusal) => return (Err(refusal), None),
         };
         let pending = self
-            .permissions
-            .remove(&request_event_id)
+            .take_permission(request_event_id)
             .expect("looked up above");
         tracing::info!(session_id = %self.session_id, %request_event_id, kind, "owner decided a permission request");
         if self
@@ -901,6 +990,12 @@ impl SessionTask {
             return (Err(Refusal::SessionClosed), Some(End::AgentExited));
         }
         (Ok(()), None)
+    }
+
+    /// Forget one waiting request, and its preview hash with it.
+    fn take_permission(&mut self, request_event_id: Uuid) -> Option<PendingPermission> {
+        self.previews.remove(self.session_id, request_event_id);
+        self.permissions.remove(&request_event_id)
     }
 
     /// Requests whose owner did not answer within the host's wait: the
@@ -914,7 +1009,7 @@ impl SessionTask {
             .map(|(id, _)| *id)
             .collect();
         for event_id in lapsed {
-            let pending = self.permissions.remove(&event_id).expect("listed above");
+            let pending = self.take_permission(event_id).expect("listed above");
             let decision = policy::decide_permission(&pending.offered);
             if self
                 .conn
@@ -942,7 +1037,7 @@ impl SessionTask {
         }
         let pending: Vec<Uuid> = self.permissions.keys().copied().collect();
         for event_id in pending {
-            let pending = self.permissions.remove(&event_id).expect("listed above");
+            let pending = self.take_permission(event_id).expect("listed above");
             if self
                 .conn
                 .respond(
@@ -1047,7 +1142,8 @@ impl SessionTask {
     async fn finish(mut self, end: End) {
         // ACP: a client that cancels answers every pending permission request
         // `cancelled`. The server cancels the rows when the session ends.
-        for (_, pending) in self.permissions.drain() {
+        for (request_event_id, pending) in self.permissions.drain() {
+            self.previews.remove(self.session_id, request_event_id);
             let _ = self.conn.respond(
                 pending.rpc_id,
                 policy::PermissionDecision::Cancelled.to_result(),
@@ -1224,13 +1320,18 @@ impl EventRelay {
 
     /// ADR-0188 D5: the request, for its owner. Only the options the owner may
     /// choose (the agent's own `allow_once`/`reject_once`), with fixed names —
-    /// nothing the agent wrote (its tool call, its option labels) crosses here.
+    /// the agent's option labels never cross. The tool call crosses only as
+    /// the sanitised **preview** (#3118, [`projection::permission_preview`])
+    /// with its hash: the server keeps the preview for the owner and
+    /// broadcasts the hash alone, and an owner's allow must sign that hash.
     /// The event id is the request's one-time nonce. `true` when the server
     /// took it; the agent is then answered by the owner's decision.
     pub async fn permission_requested(
         &mut self,
         event_id: Uuid,
         offered: &[policy::PermissionOption],
+        preview: Value,
+        preview_sha256: &str,
     ) -> bool {
         self.flush_ready().await;
         let options: Vec<Value> = offered
@@ -1248,6 +1349,8 @@ impl EventRelay {
         fields.insert("action_type".into(), json!("tool_call"));
         fields.insert("status".into(), json!("pending"));
         fields.insert("options".into(), Value::Array(options));
+        fields.insert("preview".into(), preview);
+        fields.insert("preview_sha256".into(), json!(preview_sha256));
         self.send_as(event_id, "approval.requested", fields).await
     }
 
