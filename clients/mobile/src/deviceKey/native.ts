@@ -13,11 +13,10 @@ import { base64ToBytes, bytesToBase64 } from './base64';
 //
 //   - the compressed SEC1 public key (33 bytes, base64)
 //   - raw r‖s ECDSA-P256-SHA256 signatures (64 bytes) over an E1 payload the
-//     CALLER builds (#3021). Native signs nothing else: the first line must be
-//     `momo.human.control.v1`, `momo.human.device_endorse.v1` or
-//     `momo.human.device_revoke.v1` with exactly that schema's line count,
-//     otherwise DEVICE_KEY_PAYLOAD_REJECTED (MomoDeviceKeyStore
-//     `checkSigningPayload`). This stage registers the key nowhere (E2 #3022).
+//     CALLER builds (#3021). Native signs nothing else: exactly a 13-line
+//     `momo.human.control.v1` payload, otherwise DEVICE_KEY_PAYLOAD_REJECTED
+//     (MomoDeviceKeyStore `checkSigningPayload`). Endorsements and revocations
+//     are the root Mac's to sign (ADR-0146 D-6/D-7). This stage registers the key nowhere (E2 #3022).
 //
 // There is no function, native or JS, that returns the private key or the
 // enclave handle.

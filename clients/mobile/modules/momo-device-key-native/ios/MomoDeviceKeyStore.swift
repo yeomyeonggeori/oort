@@ -39,11 +39,12 @@ import Security
 //
 // Hardening before stage 2 (review of #3043, M-1..M-4):
 //
-//   5. Only the three E1 payload shapes are signed (M-3). `sign` refuses any
-//      message that is not exactly a `momo.human.control.v1` (13 lines),
-//      `momo.human.device_endorse.v1` (7) or `momo.human.device_revoke.v1` (6)
-//      payload with no control character, so the key is not an oracle for arbitrary
-//      bytes (server-rust/crates/momo-wire/src/human_control.rs,
+//   5. Only instruction payloads are signed (M-3). `sign` refuses any message
+//      that is not exactly a 13-line `momo.human.control.v1` payload with no
+//      control character, so the key is not an oracle for arbitrary bytes.
+//      Endorsements and revocations (`device_endorse.v1`/`device_revoke.v1`)
+//      are signed by the root Mac only (ADR-0146 D-6/D-7) and refused here
+//      (server-rust/crates/momo-wire/src/human_control.rs,
 //      docs/api/human-control-signing.vectors.json).
 //
 //   6. `invalidated` is reported only on proof (M-1, M-2). The enclave is the
@@ -191,14 +192,14 @@ public struct MomoDeviceKeyStore {
   // MARK: - signing payloads (M-3)
 
   /// The E1 schema lines this key may sign, with each payload's exact line
-  /// count (momo-wire `human_control.rs` `signed_bytes`).
+  /// count (momo-wire `human_control.rs` `signed_bytes`). Instructions only:
+  /// `device_endorse.v1`/`device_revoke.v1` are the root Mac's (ADR-0146
+  /// D-6/D-7), so the phone key refuses them.
   public static let signingSchemas: [String: Int] = [
-    "momo.human.control.v1": 13,
-    "momo.human.device_endorse.v1": 7,
-    "momo.human.device_revoke.v1": 6,
+    "momo.human.control.v1": 13
   ]
-  /// Largest payload accepted. The E1 vectors top out at 384 bytes; every
-  /// field is an id, a number, a hex digest or (endorse) a short device label.
+  /// Largest payload accepted. The E1 control vectors top out at 384 bytes;
+  /// every field is an id, a number or a hex digest.
   public static let maxSigningPayloadBytes = 2048
 
   /// Accepts only an E1 payload: UTF-8 lines joined by `\n` with no other

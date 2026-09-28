@@ -46,10 +46,16 @@ let payloads: [(String, Data)] = cases.compactMap { c in
   return (name, Data(p.utf8))
 }
 check(payloads.count == cases.count && payloads.count >= 8, "read \(payloads.count) E1 vector payloads")
-let schemasSeen = Set(payloads.map { String(decoding: $0.1.prefix(while: { $0 != 0x0A }), as: UTF8.self) })
+func schemaOf(_ p: Data) -> String { String(decoding: p.prefix(while: { $0 != 0x0A }), as: UTF8.self) }
+let phonePayloads = payloads.filter { schemaOf($0.1) == "momo.human.control.v1" }
+let rootMacPayloads = payloads.filter { schemaOf($0.1) != "momo.human.control.v1" }
+check(phonePayloads.count >= 6, "vectors carry \(phonePayloads.count) control.v1 payloads")
 check(
-  schemasSeen == Set(MomoDeviceKeyStore.signingSchemas.keys),
-  "vectors cover exactly the allowed schemas \(schemasSeen.sorted())")
+  Set(rootMacPayloads.map { schemaOf($0.1) }) == ["momo.human.device_endorse.v1", "momo.human.device_revoke.v1"],
+  "vectors carry the root-Mac endorse/revoke payloads")
+check(
+  MomoDeviceKeyStore.signingSchemas == ["momo.human.control.v1": 13],
+  "the phone allows only momo.human.control.v1 (13 lines)")
 
 // ---- 1. no enclave, no key -------------------------------------------------
 check(MomoDeviceKeyStore.secureEnclaveAvailable == false, "secureEnclaveAvailable is false")
@@ -74,7 +80,7 @@ do {
 // A valid E1 payload gets past the payload check and stops at the enclave.
 runSync {
   do {
-    _ = try await store.sign(payloads[0].1, reason: "시험")
+    _ = try await store.sign(phonePayloads[0].1, reason: "시험")
     check(false, "sign(valid payload) refused")
   } catch let failure as MomoDeviceKeyFailure {
     check(failure == .unsupported, "sign(valid payload) refused with \(failure.code)")
@@ -98,11 +104,15 @@ func rejects(_ data: Data) -> Bool {
   } catch { return false }
 }
 
-for (name, payload) in payloads {
+for (name, payload) in phonePayloads {
   check(!rejects(payload), "accepts vector \(name)")
 }
+// ADR-0146 D-6/D-7: endorsements and revocations are the root Mac's to sign.
+for (name, payload) in rootMacPayloads {
+  check(rejects(payload), "rejects root-Mac vector \(name)")
+}
 
-let control = payloads.first { $0.0.hasPrefix("control_") }!.1
+let control = phonePayloads.first { $0.0.hasPrefix("control_") }!.1
 let controlText = String(decoding: control, as: UTF8.self)
 var mutations: [(String, Data)] = [
   ("three arbitrary bytes", Data([1, 2, 3])),
@@ -116,7 +126,7 @@ var mutations: [(String, Data)] = [
   ("CR line breaks", Data(controlText.replacingOccurrences(of: "\n", with: "\r\n").utf8)),
   ("NUL inside", Data(controlText.replacingOccurrences(of: "input", with: "in\u{0}put").utf8)),
   ("invalid UTF-8", control + Data([0xFF])),
-  ("oversize", Data(("momo.human.device_revoke.v1\n" + String(repeating: "a", count: 3000) + "\n1\n2\n3\n4").utf8)),
+  ("oversize", Data(controlText.replacingOccurrences(of: "input", with: String(repeating: "a", count: 3000)).utf8)),
   ("bare JSON", Data("{\"kind\":\"input\",\"text\":\"rm -rf\"}".utf8)),
 ]
 // A control payload relabelled as endorse keeps 13 lines: refused by count.

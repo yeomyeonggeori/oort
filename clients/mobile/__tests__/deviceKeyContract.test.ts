@@ -178,12 +178,14 @@ describe('MomoDeviceKeyStore — hardening before stage 2', () => {
     );
   });
 
-  it('allows exactly the E1 schemas, each with its vector line count', () => {
-    const fromVectors: Record<string, number> = {};
-    for (const c of vectors.cases) {
-      expect(c.payload.split('\n')[0]).toBe(c.schema);
-      fromVectors[c.schema] = c.payload.split('\n').length;
-    }
+  it('allows only momo.human.control.v1, with its vector line count', () => {
+    // ADR-0146 D-6/D-7: endorse/revoke are signed by the root Mac, never the phone.
+    const control = vectors.cases.filter(
+      c => c.schema === 'momo.human.control.v1',
+    );
+    expect(control.length).toBeGreaterThanOrEqual(6);
+    const counts = new Set(control.map(c => c.payload.split('\n').length));
+    expect([...counts]).toEqual([13]);
     const table = code.match(
       /signingSchemas: \[String: Int\] = \[([\s\S]*?)\]/,
     );
@@ -191,12 +193,7 @@ describe('MomoDeviceKeyStore — hardening before stage 2', () => {
     for (const m of (table?.[1] ?? '').matchAll(/"([^"]+)": (\d+)/g)) {
       fromSwift[m[1]] = Number(m[2]);
     }
-    expect(fromSwift).toEqual(fromVectors);
-    expect(Object.keys(fromSwift).sort()).toEqual([
-      'momo.human.control.v1',
-      'momo.human.device_endorse.v1',
-      'momo.human.device_revoke.v1',
-    ]);
+    expect(fromSwift).toEqual({ 'momo.human.control.v1': 13 });
   });
 
   it('keeps the vector fixture identical to the E1 original once both are here', () => {
