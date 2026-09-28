@@ -702,6 +702,29 @@ fn the_token_is_presented_only_to_the_origin_it_was_stored_for() {
     assert_eq!(store.origin().unwrap().as_deref(), Some(BASE));
 }
 
+/// Review Low: a skew no proof can carry is refused before anything is sent
+/// (else the refresh would go unproven). Sabotage: drop the range check —
+/// the POST goes out without a proof, RED.
+#[test]
+fn a_skew_no_proof_can_carry_sends_nothing() {
+    let server = server();
+    let token = server.sign_in();
+    let store = MemStore::with(&token);
+    let key = Arc::new(SoftKey::new(5));
+    for skew in [i64::MIN, -T0 - 1, i64::MAX] {
+        let result = block(attempt(
+            &server,
+            store.clone(),
+            key.clone(),
+            &request(skew),
+            T0,
+        ));
+        assert_eq!(result, Err("session_bad_skew".into()), "skew {skew}");
+    }
+    assert!(server.state().seen.is_empty());
+    assert_eq!(store.token().as_deref(), Some(token.as_str()));
+}
+
 #[test]
 fn no_stored_token_is_a_sign_out_not_a_network_error() {
     let server = server();

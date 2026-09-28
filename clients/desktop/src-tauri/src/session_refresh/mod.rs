@@ -416,6 +416,12 @@ pub async fn attempt<T: Transport, S: TokenStore, K: RefreshSigner>(
     // whose clock is days off must still sign in the server's ±5 min window,
     // and the proof never leaves the shell except to the pinned origin.
     let signed_at_ms = now_ms.saturating_add(request.skew_ms);
+    // A time no proof can carry would send the refresh WITHOUT one (the
+    // signer refuses it) — under `require` that ends the lineage. Refuse
+    // here instead: nothing is sent, the token stays.
+    if signed_at_ms <= 0 || signed_at_ms > (1 << 53) - 1 {
+        return Err("session_bad_skew".into());
+    }
     let (answer, proved) = post_refresh(
         transport,
         signer,
