@@ -433,8 +433,10 @@ pub async fn list_member_device_keys_in_tx(
 /// changes in one place only, [`rebind_device_key_in_tx`], and only from a
 /// lineage that can no longer rotate to a live one (#3097). A reader that
 /// read the old value therefore finds a dead lineage and refuses (fail-closed,
-/// the caller signs again); a live value it read cannot move under it, because
-/// the rebind refuses a key whose lineage is live. `false` when the key is not
+/// the caller signs again). A lineage it found live is moved away only if it
+/// expires on its own in between (the rebind judges expiry at its own
+/// `now()`); the reader then re-reads the key on the owner's new live sign-in,
+/// which the key's own letter authorised — never on a dead one. `false` when the key is not
 /// the caller's (the caller then refuses on the locked read).
 pub(crate) async fn lock_root_lineage(
     conn: &mut PgConnection,
@@ -839,7 +841,7 @@ pub async fn rebind_device_key_in_tx(
     if key.session_id == caller_session {
         return Ok(Ok(key));
     }
-    sqlx::query(
+    let moved = sqlx::query(
         "UPDATE member_device_key SET session_id = $2 \
           WHERE id = $1 AND revoked_at IS NULL AND session_id = $3",
     )
@@ -847,7 +849,12 @@ pub async fn rebind_device_key_in_tx(
     .bind(caller_session)
     .bind(key.session_id)
     .execute(&mut *conn)
-    .await?;
+    .await?
+    .rows_affected();
+    // The row is locked above and was just read live on `key.session_id`.
+    if moved != 1 {
+        return Err(sqlx::Error::RowNotFound);
+    }
     let record = load_device_key_in_tx(conn, key.id)
         .await?
         .ok_or(sqlx::Error::RowNotFound)?;

@@ -2397,6 +2397,28 @@ async fn a_rebind_letter_is_single_use_and_only_ever_moves_a_dead_lineages_key()
     assert_eq!(status, 403, "{body}");
     assert_eq!(code(&body), Some("device_signature_invalid"));
 
+    // The caller's own sign-in must still be able to rotate (review L1): an
+    // access token that outlived its lineage moves nothing, even with the
+    // key's valid letter for that lineage.
+    let mac4 = w.person().await;
+    let session4 = w.session_id(&mac4).await;
+    w.revoke_raw(&mac4.refresh).await;
+    let (status, body) = w
+        .rebind(
+            &mac4,
+            &root,
+            "macos",
+            w.rebind_letter(&root, root_id, session4, now_ms()),
+        )
+        .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(code(&body), Some("session_lineage_ended"));
+    assert_eq!(
+        w.key_view(&mac3, root_id).await["lineageLive"],
+        false,
+        "the key did not move onto the ended sign-in"
+    );
+
     // Another member cannot move the person's key, with any letter.
     let stranger = w.other().await;
     let stranger_session = w.session_id(&stranger).await;
@@ -2415,8 +2437,8 @@ async fn a_rebind_letter_is_single_use_and_only_ever_moves_a_dead_lineages_key()
 /// #3097: a phone's lineage is swept by reuse (by default — a linked
 /// lineage). Its key stays live and keeps the root's approval; the re-linked
 /// phone moves it with its own letter and can instruct again with no new
-/// approval. A root never moves into a linked session. Unlinking the phone
-/// still revokes the key.
+/// approval. A root never moves into a linked session. Logging the phone out
+/// still revokes the (moved) key.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn a_phone_key_moves_to_its_new_link_with_its_approval_and_logout_still_ends_it() {

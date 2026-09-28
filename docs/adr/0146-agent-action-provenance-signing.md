@@ -246,6 +246,8 @@ momo.human.control.v1
     - `session_id`는 더 이상 불변이 아니다. 바뀌는 곳은 이 재결속 한 곳이고, 죽은 계보에서 산 계보로만 바뀐다. 서명 검사는 `session_id`를 잠그지 않고 읽는다. 옛 값을 읽었다면 죽은 계보를 보고 거부한다(fail-closed이고, 기기는 다시 서명하면 된다). 산 값을 읽었다면 그 값은 옮겨지지 않는다. 잠금 순서는 모든 세션 종료와 같다(토큰 행 → 키 행).
   - **폐기된 키는 옮기지 않는다.** 로그아웃·해제·폐기서·멤버 전체 종료 뒤의 재결속은 404 `device_key_not_found`다. 기기는 종전대로 새로 등록한다(새 id, 뿌리는 비밀번호, 폰은 재승인). D-6 증보(#3078)의 workd 재고정이 이 경우에 해당한다.
   - **새 공개 API(ADR-0100).** 등록 본문 `rebind`, 응답 200(재결속), 거부 코드 `device_key_rebind_required`, `DeviceKey.lineageLive`, `signing-context.sessionId`, 편지 스키마 `momo.human.device_rebind.v1`(momo-wire `DeviceRebind`). migration은 없다.
+  - **094 주석.** `094_member_device_key.sql` 머리말과 `member_device_key.session_id` 컬럼 주석은 아직 「refresh 재사용이 키를 폐기한다」고 적혀 있다. 094는 고치지 않으며, 이 증보가 그 문장을 대신한다.
+  - **클라이언트 계약(보안 검수 L2).** 편지의 `session_id`는 기기가 `signing-context`에서 받는다. 편지는 네이티브 층(Tauri·iOS)이 자기 인증된 `signing-context` 호출로 만들고, webview에 일반 「바이트 서명」을 열지 않는다. 재결속 200의 `current`가 `true`가 아니면 실패로 보고 알린다.
   - **남은 것(클라이언트).** 데스크탑 E5와 폰이 409 `device_key_rebind_required`와 `lineageLive: false`를 받아 편지에 서명하는 흐름은 후속이다. 그 전까지 이 상태의 기기는 서버에서 지시 불가로 남는다. 다만 키는 폐기되지 않으므로, 재결속을 구현한 클라이언트는 비밀번호나 재승인 없이 복구한다.
   - 시험: `device_key_conformance_pg`의 `a_reused_roots_key_is_mute_until_its_own_letter_moves_it` · `a_rebind_letter_is_single_use_and_only_ever_moves_a_dead_lineages_key` · `a_phone_key_moves_to_its_new_link_with_its_approval_and_logout_still_ends_it`, 그리고 재사용 단정을 「키 유지」로 뒤집은 세 시험(`a_reused_refresh_token_ends_the_whole_lineage` 외). momo-wire `device_rebind_bytes_are_fixed_and_bind_the_destination_lineage`, momo-server `session_end` `only_a_reuse_keeps_the_lineages_keys`.
 
