@@ -70,7 +70,8 @@
 //!   letter answers `revocation_key_unsigned`. Otherwise one genuine letter
 //!   for key A carrying key B's public key would revoke B — or carry a decoy,
 //!   so that A's real key came back under a new id with its endorsement.
-//!   The server accepts only v2 letters since #3068, so it has none to relay.
+//!   The desktop app (E5) signs v1 today; once it signs v2 the relay binds the
+//!   key too, and until then the local socket does.
 //!
 //! Every letter this host applied is kept in `human-trust.json`
 //! (`revocations`, by revoked key id) for good: the server relays at most the
@@ -376,12 +377,21 @@ impl HumanTrust {
             .as_deref()
             .ok_or("revocation_public_key_required")?;
         // Already applied (the server relays the list on every poll): nothing
-        // to verify or write again.
+        // to verify or write again. A relayed letter for an id this host
+        // already keeps a letter for is the same stored letter again (the
+        // server records one per key) — including a v1 one whose key was not
+        // taken, which would otherwise be re-verified and re-reported on
+        // every poll.
         if self
             .state
             .revoked_key_ids
             .contains(&revocation.target_key_id)
-            && self.state.revoked_public_keys.contains(target_public_key)
+            && (self.state.revoked_public_keys.contains(target_public_key)
+                || (source == RevocationSource::Relayed
+                    && self
+                        .state
+                        .revocations
+                        .contains_key(&revocation.target_key_id)))
         {
             return Ok(());
         }

@@ -3414,7 +3414,7 @@ paths:
     post:
       tags: [device-keys]
       operationId: revokeDeviceKey
-      summary: Record a root key's signed `momo.human.device_revoke.v2` letter (D-7; v2 names the revoked public key, #3068).
+      summary: Record a root key's signed `momo.human.device_revoke.v2` (or v1) letter (D-7; v2 names the revoked public key, #3068).
       description: >
         Rebuilt from the stored rows plus `revokedAtMs` (the time inside the
         letter, not after server time + 5 minutes, not before the key existed)
@@ -11235,7 +11235,7 @@ components:
           description: The time inside the signed letter.
         signature:
           type: string
-          description: base64 of raw r‖s (64 bytes) over `momo.human.device_revoke.v2` (the stored key's public key is its fifth field; v1 letters are refused, #3068).
+          description: base64 of raw r‖s (64 bytes) over `momo.human.device_revoke.v2` (the stored key's public key is its fifth field, #3068) or `momo.human.device_revoke.v1`. A host relayed a v1 letter revokes the key id only.
 
     DeviceKey:
       type: object
@@ -11693,7 +11693,7 @@ components:
           type: array
           description: >
             ADR-0146 개정 D-7 (#3022, workd #3024): the member host owner's
-            root-signed `momo.human.device_revoke.v2` letters, for workd to verify
+            root-signed `momo.human.device_revoke` (v2, or v1) letters, for workd to verify
             against its pinned root. Omitted when there are none and for a
             workspace host. A session-end revocation carries no letter and is
             not relayed. At most the newest 256 are sent, so a host keeps every

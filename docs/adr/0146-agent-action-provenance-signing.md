@@ -313,7 +313,7 @@ momo.human.control.v1
 
 ### 폐기서 v2와 workd 보관 (#3068)
 
-- **`momo.human.device_revoke.v2`.** v1 줄들에 폐기 대상 공개키(압축 SEC1 33바이트의 base64) 한 줄을 시각 앞에 더한다. 승인서는 공개키를, v1 폐기서는 key id만 서명해서, 이 host가 본 적 없는 키는 뿌리가 어느 키를 폐기했는지 알 수 없었다. v2에서는 뿌리가 공개키에 서명한다. 서버의 폐기 라우트는 v2만 받는다(저장된 키 행의 공개키로 검증). 폐기서를 서명하는 것은 뿌리 맥(E5)뿐이고 아직 서명기가 없으므로 v1 폐기서는 운영에 없다.
+- **`momo.human.device_revoke.v2`.** v1 줄들에 폐기 대상 공개키(압축 SEC1 33바이트의 base64) 한 줄을 시각 앞에 더한다. 승인서는 공개키를, v1 폐기서는 key id만 서명해서, 이 host가 본 적 없는 키는 뿌리가 어느 키를 폐기했는지 알 수 없었다. v2에서는 뿌리가 공개키에 서명한다. 서버의 폐기 라우트는 v2를 저장된 키 행의 공개키로 검증하고, 데스크탑 앱(E5, track/uxui #3076)이 지금 서명하는 v1도 받는다. 데스크탑이 v2로 옮기면 전달 경로도 공개키를 결속한다(UXUI 후속).
 - **workd가 공개키를 받는 조건.** v2 폐기서(뿌리의 말)이거나, 로컬 소켓(코드서명 확인된 데스크탑 앱의 말)일 때만 받는다. 서버가 전달한 v1 폐기서의 공개키는 서명 밖 값이라 받지 않는다. 서명된 key id와, 이 host가 그 id로 이미 본 키만 폐기하고 `revocation_key_unsigned`로 답한다. 전에는 키 A의 진짜 폐기서에 키 B의 공개키를 붙이면 B까지 폐기됐고, 미끼 키를 붙이면 A의 진짜 키가 새 id로 돌아올 수 있었다(보안 검수 High). v2 폐기서의 공개키를 서버가 바꾸면 서명이 맞지 않아 폐기서 전체가 거부된다. 서버가 폐기를 숨기는 것과 같고, 그 경우는 로컬 소켓이 막는다(D-7).
 - **영구 보관.** 적용한 폐기서는 모두 `human-trust.json`의 `revocations`(폐기된 key id별, 스키마·받은 공개키 포함)에 남는다. 서버는 최신 256개만 전달하므로, 전달 목록에서 빠진 폐기도 재시작 뒤까지 유지되어야 한다.
 
@@ -324,7 +324,7 @@ momo.human.control.v1
 | 서버(momo-auth `verify_human_control_in_tx`) | v2, 그리고 spawn 외 v1 | 이 증보 |
 | workd(`human_trust::check_control`) | v2, 그리고 spawn 외 v1 | 이 증보 |
 | 폰 네이티브 모듈(#3066) | v1만 허용 | spawn(새 작업·재개)을 서명하려면 허용 목록을 `momo.human.control.v2`로 옮겨야 한다(UXUI 후속). input·permission은 지금도 받는다 |
-| 데스크탑 Tauri(E5 #3025) | 아직 없음 | 처음부터 control v2·device_revoke v2로 만든다 |
+| 데스크탑 Tauri(E5 #3025, track/uxui #3076) | control.v1(다섯 종류 모두), device_endorse.v1, device_revoke.v1 | spawn(새 작업·재개)은 control.v2로 옮겨야 서버·host가 받는다. 폐기서는 v1도 받지만(전달되면 id만 폐기), 공개키 결속을 위해 device_revoke.v2로 옮긴다(UXUI 후속). input·permission·host_register는 v1 그대로 받는다 |
 
 ### 남은 것
 

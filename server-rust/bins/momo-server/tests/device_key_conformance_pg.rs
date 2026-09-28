@@ -847,27 +847,6 @@ async fn a_signed_revocation_is_kept_and_a_forged_one_refused() {
         .await;
     assert_eq!(status, 403, "{body}");
     assert_eq!(code(&body), Some("device_signature_invalid"));
-    // #3068: a v1 letter (no public-key line) is refused — the relayed letter
-    // must bind the key for the host.
-    let v1 = root.sign(
-        &DeviceRevoke {
-            workspace_id: w.workspace,
-            member_id: w.person_id,
-            root_key_id: root_id,
-            target_key_id: phone_id,
-            revoked_at_ms: at,
-        }
-        .signed_bytes(),
-    );
-    let (status, body) = w
-        .post(
-            &path,
-            &session.access,
-            json!({ "rootKeyId": root_id, "revokedAtMs": at, "signature": v1 }),
-        )
-        .await;
-    assert_eq!(status, 403, "{body}");
-    assert_eq!(code(&body), Some("device_signature_invalid"));
     // The letter's time is part of what was signed.
     let (status, body) = w
         .post(
@@ -1659,8 +1638,8 @@ async fn an_endorsement_letter_is_used_once_and_a_lost_root_can_be_replaced() {
             target_key_id: first_id,
             revoked_at_ms: at,
         }
-        .signed_bytes_v2(&handset.public_b64)
-        .expect("v2 letter"),
+        // v1 — what the desktop app (E5) signs today — is still recorded.
+        .signed_bytes(),
     );
     let (status, body) = w
         .post(
