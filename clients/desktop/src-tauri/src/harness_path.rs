@@ -85,6 +85,14 @@ pub const STRIPPED_ENV: &[&str] = &[
     "OPENAI_BASE_URL",
     "OPENAI_ORG_ID",
     "OPENAI_PROJECT",
+    // credential-store and profile redirects (#2878 security review H-1): Claude
+    // Code names its keychain item after `CLAUDE_SECURESTORAGE_CONFIG_DIR` when
+    // it is set (empty = the default item), ahead of `CLAUDE_CONFIG_DIR`. An
+    // inherited value would point a profile's sign-out or status at another
+    // account's item.
+    "CLAUDE_SECURESTORAGE_CONFIG_DIR",
+    "ANTHROPIC_CONFIG_DIR",
+    "ANTHROPIC_PROFILE",
     // a harness launched from inside another one
     "CLAUDECODE",
     "CLAUDE_CODE_ENTRYPOINT",

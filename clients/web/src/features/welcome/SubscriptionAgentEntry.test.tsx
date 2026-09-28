@@ -184,9 +184,13 @@ describe("설정 › AI 연결 입구 (#2870)", () => {
     expect(q("my-account-codex-login")).not.toBeNull();
     // 「아직 연결한 구독이 없어요」는 준비된 CLI가 있는 동안 서지 않는다.
     expect(host?.textContent).not.toContain("아직 연결한 구독이 없어요");
-    // 입구(재진입)는 그대로 있다.
+    // 설치된 CLI가 있으면 「구독 추가」는 추가 창(CLI·라벨 → 그 프로필로 로그인 모달)을
+    // 연다(#2878, 시안 §4). 재진입(설치 안내)은 설치된 CLI가 없을 때의 길이다.
     act(() => q("subscription-entry-open")?.click());
-    expect(window.location.hash).toBe("#/ai-connect?from=settings");
+    expect(window.location.hash).not.toBe("#/ai-connect?from=settings");
+    await rtlWaitFor(() => {
+      if (!document.querySelector('[data-testid="add-subscription-dialog"]')) throw new Error("add");
+    });
   });
 
   it("설치되지 않은 CLI는 줄을 세우지 않고, 하나도 없으면 빈 줄이다", async () => {

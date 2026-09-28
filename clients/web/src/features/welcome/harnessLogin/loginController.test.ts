@@ -172,6 +172,47 @@ describe("loginController (가짜 CLI)", () => {
     login.dispose();
   });
 
+  it("프로필 인자(#2878): 같은 로그인 줄에 라벨 하나만 더 싣는다. 경로는 없다", async () => {
+    const cli = fakeCli(LOGGED_IN);
+    const login = createLoginController("codex", "device", cli.deps, "회사");
+    login.open();
+    await flush();
+    expect(cli.spawns).toEqual([
+      { program: { kind: "login", id: "codex", method: "device", profile: "회사" }, cols: 80, rows: 24 },
+    ]);
+    cli.exit(0);
+    await flush();
+    // 판정은 부른 쪽이 넘긴 상태 명령(프로필이면 그 폴더의 것) 한 번이다.
+    expect(cli.detect).toHaveBeenCalledTimes(1);
+    login.dispose();
+  });
+
+  it("whenEnded: 취소 뒤 로그인 CLI가 정말 끝나야 true, 끝나지 않으면 제한 시간 뒤 false (#2996 M-1)", async () => {
+    vi.useFakeTimers();
+    const cli = fakeCli(NEEDS_LOGIN);
+    const login = createLoginController("claude", "browser", cli.deps, "회사");
+    login.open();
+    await vi.advanceTimersByTimeAsync(0);
+    login.dispose();
+    let ended: boolean | null = null;
+    void login.whenEnded(5_000).then((v) => (ended = v));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(ended).toBeNull();
+    cli.exit(null, "SIGHUP");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ended).toBe(true);
+
+    const hung = fakeCli(NEEDS_LOGIN);
+    const other = createLoginController("claude", "browser", hung.deps, "개인");
+    other.open();
+    await vi.advanceTimersByTimeAsync(0);
+    other.dispose();
+    let result: boolean | null = null;
+    void other.whenEnded(5_000).then((v) => (result = v));
+    await vi.advanceTimersByTimeAsync(5_001);
+    expect(result).toBe(false);
+  });
+
   it("콜백 성공: CLI가 끝나고 상태 명령이 로그인됨이면 연결됨", async () => {
     vi.useFakeTimers();
     const cli = fakeCli(LOGGED_IN);

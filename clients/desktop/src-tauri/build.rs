@@ -58,6 +58,12 @@ const APP_COMMANDS: &[&str] = &[
     // Local git reads (ADR-0190 D3-c, #2855). Granted only by
     // capabilities/git-read.json.
     "workbench_git_read",
+    // Account profile folders (ADR-0191 D1, ADR-0190 D3-f, #2878). Granted
+    // only by capabilities/harness-profile.json.
+    "harness_profile_list",
+    "harness_profile_create",
+    "harness_profile_status",
+    "harness_profile_remove",
     // This Mac as a work host (ADR-0188 D2, #2778). Granted only by
     // capabilities/work-host.json.
     "work_host_status",

@@ -18,7 +18,14 @@ import {
 } from '@momo/core/features/settings/model';
 import {teamCheckResult} from '@momo/core/features/settings/teamKeyForm';
 import {useMutation, useQuery} from '@tanstack/react-query';
-import React, {useEffect, useState} from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import {
   AccessibilityInfo,
   ActivityIndicator,
@@ -35,7 +42,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 
-import {Sentence} from '../../design/atoms';
+import {BAR_CONTROL_MAX_SCALE, Sentence} from '../../design/atoms';
 import {useKeyboardShown} from '../../lib/useKeyboardShown';
 import {CARD_ICONS} from '../../design/icons/cardIcons';
 import {HOME_ICONS, SHELL_ICONS} from '../../design/icons';
@@ -160,6 +167,14 @@ function useScaled(cap: number = GLYPH_SCALE_CAP): (size: number) => number {
 // ---- 셸 ----------------------------------------------------------------------
 
 /**
+ * 몸 스크롤의 끝을 보이게 하는 손잡이(#2988). 큰 글씨에서는 「연결 확인」 결과 줄이
+ * 몸 창 아래에 서서, 누른 사람이 결과를 보려면 직접 끌어 올려야 했다. 결과 줄이
+ * 자리를 잡으면(`onLayout`) 셸이 몸을 끝까지 내린다 — 결과 줄 뒤에는 발 한 줄뿐이다.
+ * 몸이 창보다 짧으면(기본 글씨) 움직일 것이 없다. 셸 밖(제안 카드)에서는 `null`.
+ */
+const CardScrollRevealContext = createContext<(() => void) | null>(null);
+
+/**
  * 카드의 그릇. 머리는 부르는 쪽이 넣는다.
  *
  * - `local`: 점선 테두리(시안 `.ccard.local`) — 메시지가 아니라 이 화면의 도구 창.
@@ -180,6 +195,10 @@ export function AiConnectCardShell({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {height} = useWindowDimensions();
+  const scrollRef = useRef<ScrollView>(null);
+  const revealEnd = useCallback(() => {
+    scrollRef.current?.scrollToEnd({animated: true});
+  }, []);
   // 자판이 올라오면 몸을 접고 머리만 남긴다 (design-review #2945 H1). iOS 의 창
   // 높이는 자판에 줄지 않으므로 높이 상한만으로는 375×667 에서 대화가 0pt 가 되고,
   // 큰 글씨에서는 머리(닫기)가 화면 밖으로 밀린다. 머리는 언제나 한 줄이다.
@@ -208,7 +227,7 @@ export function AiConnectCardShell({
           onPress={() => Keyboard.dismiss()}
           style={({pressed}) => [styles.foldedRow, pressed && styles.pressed]}
           testID="ai-connect-card-folded">
-          <Text style={styles.folded} maxFontSizeMultiplier={HEAD_MAX_SCALE}>
+          <Text style={styles.folded} maxFontSizeMultiplier={FOLDED_MAX_SCALE}>
             {AI_CONNECT_CARD_COPY.folded}
           </Text>
         </Pressable>
@@ -216,6 +235,7 @@ export function AiConnectCardShell({
       {/* 접혀도 몸은 **내리지 않고 숨긴다**: 내리면 「연결 확인」 결과(절의 상태)가
           자판을 한 번 올렸다 내리는 것만으로 사라지고, 팀 연결을 다시 불러온다. */}
       <ScrollView
+        ref={scrollRef}
         style={[
           {maxHeight: bodyMax},
           keyboardUp && styles.hidden,
@@ -223,7 +243,9 @@ export function AiConnectCardShell({
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator
         testID="ai-connect-card-scroll">
-        {children}
+        <CardScrollRevealContext.Provider value={revealEnd}>
+          {children}
+        </CardScrollRevealContext.Provider>
       </ScrollView>
     </View>
   );
@@ -514,6 +536,7 @@ function TeamRow({
   const hasRow =
     link.configured || (link.keyConfigured && link.availability !== 'mock');
   const pill = linkPill({link, offline, probe, checking});
+  const revealEnd = useContext(CardScrollRevealContext);
 
   let result: RowResult | null = null;
   if (!offline && checkError !== null && !checking) {
@@ -579,6 +602,9 @@ function TeamRow({
           </View>
           <Text
             style={[styles.sub, mono && styles.subMono]}
+            // 한글은 낱말 경계에서만 접는다(#2988): 「11월 12일 저/장」처럼 낱말 가운데서
+            // 줄이 바뀌지 않게. `Sentence`와 같은 전략이다.
+            lineBreakStrategyIOS="hangul-word"
             // 두 줄까지 — 좁은 제안 카드(375)에서는 기본 글씨에서도 「11월 12일
             // 저장」이 한 줄에 들지 않는다(R4-B1). 들면 한 줄 그대로다.
             numberOfLines={hasRow ? 2 : 3}
@@ -607,6 +633,9 @@ function TeamRow({
       ) : null}
       {result ? (
         <Sentence
+          // 문장이 바뀌면 새로 서서 `onLayout`이 다시 온다(같은 높이의 다른 결과도 보인다).
+          key={result.text}
+          onLayout={revealEnd ?? undefined}
           style={[
             styles.result,
             {
@@ -749,6 +778,15 @@ const STACK_PILL_SCALE = 1.5;
  * 이 카드는 입력창 위에 자판과 함께 서므로 더 낮다.
  */
 const HEAD_MAX_SCALE = 1.3;
+/**
+ * 접힌 줄(「자판을 내리고 카드 펼치기」)의 글자 배수 상한 (#2988, R6 M1 판단).
+ * 머리의 1.3 은 **한 줄에 넷**(플러그·제목·표지·닫기)을 세우려는 값이다. 접힌 줄은
+ * 제 줄에 혼자 서므로 그 이유가 없다: 375 폭에서 `ds2Type.caption × 1.6`이면 열세 자
+ * 남짓(~270pt)이 가장자리 안(327pt)에 한 줄로 들고, 줄 높이(`line.meta × 1.6` +
+ * 여백)는 엄지 바닥 44 와 거의 같아(+1pt) 자판 위 높이 예산(R5-H1)을 바꾸지 않는다.
+ * 그래서 화면 막대의 조작 글자와 같은 1.6(`BAR_CONTROL_MAX_SCALE`)으로 올린다.
+ */
+const FOLDED_MAX_SCALE = BAR_CONTROL_MAX_SCALE;
 /** 닫기 글리프 상자. */
 const CLOSE_BOX = 24;
 /** 알약 앞 점(시안 `.pill i{width:6px}`). */

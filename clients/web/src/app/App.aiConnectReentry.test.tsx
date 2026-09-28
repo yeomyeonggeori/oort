@@ -221,6 +221,24 @@ describe("App: AI 연결 재진입 (#2870)", { timeout: 20_000 }, () => {
     expect(shellMounts.count).toBe(1);
   });
 
+  it("Esc 는 재진입 층을 닫는다: 밑의 셸로 떨어지지 않는다 (#2909 review M3)", async () => {
+    applyLogin(session);
+    window.history.replaceState(null, "", "/#/ai-connect?from=agents");
+    const host = await mountApp();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="first-agent-stage"]')).not.toBeNull();
+    });
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(window.location.hash).toBe("#/agents");
+      expect(document.querySelector('[data-testid="first-agent-stage"]')).toBeNull();
+    });
+    void host;
+  });
+
   it("다른 주소는 셸이다", async () => {
     applyLogin(session);
     window.history.replaceState(null, "", "/#/");

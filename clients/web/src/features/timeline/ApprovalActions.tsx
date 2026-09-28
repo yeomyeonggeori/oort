@@ -91,6 +91,8 @@ export const TIME_GATED_CONTROLS = [
   timeGatedTestId("approval"),
   timeGatedTestId("inbox-approval"),
   timeGatedTestId("handoff"),
+  // A 칸 권한 카드(#2779, workbench/agent/AgentProgressView). 같은 400ms 무장 간격.
+  timeGatedTestId("agent-permission"),
 ] as const;
 
 /**

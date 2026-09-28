@@ -60,6 +60,7 @@
     "capture:phone-onboarding": "npm run build:design && node scripts/capture-phone-onboarding.mjs",
     "capture:workbench": "npm run build:design && node scripts/capture-workbench.mjs",
     "capture:local-terminal": "npm run build:design && node scripts/capture-local-terminal.mjs",
+    "capture:agent-pane": "npm run build:design && node scripts/capture-agent-pane.mjs",
     "capture:work-tab": "npm run build && node scripts/capture-work-tab.mjs",
     "capture:this-mac": "npm run build && node scripts/capture-this-mac.mjs",
     "icons:mark": "node scripts/brand-mark.mjs",

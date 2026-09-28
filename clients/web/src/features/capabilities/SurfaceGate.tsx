@@ -10,7 +10,7 @@ import { useWorkHosts } from "@/features/work/useWorkSessions";
 import { SurfaceUnavailableRoute } from "./SurfaceUnavailable";
 import {
   WORK_HOST_PRESENCE_POLL_MS,
-  useSurfaceProvided,
+  useSurfaceProvidedWhileOpen,
   useWorkHostPresence,
 } from "./useSurfaceProvided";
 
@@ -19,6 +19,8 @@ import {
  *
  * 세션 공급자 안쪽에서만 판정할 수 있으므로(호스트 목록은 워크스페이스마다 다르다),
  * 공급자를 여는 셸 본문이 직접 훅을 부르지 않고 이 문을 둔다.
+ *
+ * 이미 서 있던 자식은 호스트가 오프라인이 돼도 유예 동안 남는다(#2893).
  */
 export function SurfaceGate({
   surface,
@@ -27,7 +29,7 @@ export function SurfaceGate({
   surface: SurfaceId;
   children: ReactNode;
 }) {
-  return useSurfaceProvided(surface) ? <>{children}</> : null;
+  return useSurfaceProvidedWhileOpen(surface) ? <>{children}</> : null;
 }
 
 /**
@@ -40,6 +42,7 @@ export function SurfaceGate({
  * - 목록을 읽지 못했으면 「없다」가 아니라 「읽지 못했다」고 말하고 다시 시도를
  *   준다. 서버가 아프거나 연결이 끊긴 것을 호스트가 없는 것으로 말하면 거짓이다.
  * - 목록을 읽었고 온라인 호스트가 없으면 이유를 말하는 빈 상태로 간다.
+ * - 이미 열려 있던 화면은 호스트가 오프라인이 돼도 유예 동안 남는다(#2893).
  */
 export function SurfaceRoute({
   surface,
@@ -48,7 +51,7 @@ export function SurfaceRoute({
   surface: SurfaceId;
   children: ReactNode;
 }) {
-  const provided = useSurfaceProvided(surface);
+  const provided = useSurfaceProvidedWhileOpen(surface);
   const presence = useWorkHostPresence();
   if (provided) return <>{children}</>;
   if (presence === "absent" || presence === "present") {
