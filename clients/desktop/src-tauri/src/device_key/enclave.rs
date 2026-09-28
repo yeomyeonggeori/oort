@@ -61,9 +61,10 @@ use security_framework_sys::keychain_item::SecItemCopyMatching;
 
 use super::payload;
 
-/// The access group without the team prefix. Declared only by the app's
-/// `Entitlements.plist` (owner step in the PR, with the provisioning profile);
-/// never by the workd sidecar.
+/// The access group without the team prefix. Declared only by the signed
+/// app's `Entitlements.app.plist`, which `publish_next_build.sh` applies with
+/// the embedded Developer ID provisioning profile (#3025); never by the
+/// bundler's `Entitlements.plist`, which also signs the workd sidecar.
 pub const ACCESS_GROUP_SUFFIX: &str = "app.momo.desktop.devicekey";
 /// The key's application tag: one key per Mac user per app.
 pub const KEY_TAG: &[u8] = b"app.momo.desktop.devicekey.p256-signing-v1";
@@ -471,6 +472,67 @@ mod tests {
                 let error = classify(code, during);
                 assert!(error.code().starts_with("device_key_"), "{error:?}");
             }
+        }
+    }
+
+    /// The signed app's entitlements (#3025): `Entitlements.app.plist` is what
+    /// `publish_next_build.sh` re-signs the outer .app with, after embedding
+    /// the provisioning profile. `Entitlements.plist` is what the bundler signs
+    /// the app *and the momo-workd sidecar* with, so it must stay free of the
+    /// restricted keys (D-3, and a bare sidecar has no profile).
+    #[test]
+    fn only_the_signed_app_entitlements_declare_the_device_key_group() {
+        const APP: &str = include_str!("../../Entitlements.app.plist");
+        const BASE: &str = include_str!("../../Entitlements.plist");
+        const CONF: &str = include_str!("../../tauri.conf.json");
+
+        /// The body of the element right after `<key>{key}</key>`.
+        fn value<'a>(plist: &'a str, key: &str) -> Option<&'a str> {
+            let marker = format!("<key>{key}</key>");
+            let rest = plist[plist.find(&marker)? + marker.len()..].trim_start();
+            let (open, close) = if rest.starts_with("<array>") {
+                ("<array>", "</array>")
+            } else if rest.starts_with("<string>") {
+                ("<string>", "</string>")
+            } else {
+                return Some(&rest[..rest.find('>')? + 1]);
+            };
+            Some(rest[open.len()..rest.find(close)?].trim())
+        }
+
+        let identifier = serde_json::from_str::<serde_json::Value>(CONF).unwrap()["identifier"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let team = value(APP, "com.apple.developer.team-identifier").expect("team-identifier");
+        assert_eq!(
+            value(APP, "com.apple.application-identifier"),
+            Some(format!("{team}.{identifier}").as_str())
+        );
+        assert_eq!(
+            value(APP, "keychain-access-groups"),
+            Some(format!("<string>{}</string>", access_group_for(Some(team)).unwrap()).as_str()),
+            "the app declares exactly the device-key group"
+        );
+        // A superset of the bundler's plist: the re-sign replaces it.
+        assert_eq!(
+            value(BASE, "com.apple.security.device.audio-input"),
+            Some("<true/>")
+        );
+        assert_eq!(
+            value(APP, "com.apple.security.device.audio-input"),
+            Some("<true/>")
+        );
+        for restricted in [
+            "keychain-access-groups",
+            "com.apple.application-identifier",
+            "com.apple.developer.team-identifier",
+        ] {
+            assert_eq!(
+                value(BASE, restricted),
+                None,
+                "Entitlements.plist also signs the sidecar and must not hold {restricted}"
+            );
         }
     }
 
