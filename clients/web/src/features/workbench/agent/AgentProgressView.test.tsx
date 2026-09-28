@@ -18,6 +18,7 @@ import {
   AgentProgressView,
   DECIDE_UNAVAILABLE,
   REPLY_IN_APP_HINT,
+  REPLY_IN_APP_PLACEHOLDER,
   REPLY_UNAVAILABLE,
   type AgentPaneActions,
 } from "./AgentProgressView";
@@ -440,7 +441,8 @@ describe("browser instructs from the app (#3029)", () => {
     // 답장 칸 — 같은 판정
     expect(input.disabled).toBe(app);
     expect(hint.textContent === REPLY_IN_APP_HINT).toBe(app);
-    expect(input.placeholder).toBe(app ? "지시는 폰이나 데스크탑 앱에서 보내 주세요" : "다음 지시를 적어요");
+    expect(hint.textContent === "지시는 폰이나 데스크탑 앱에서 보내 주세요").toBe(app);
+    expect(input.placeholder).toBe(app ? REPLY_IN_APP_PLACEHOLDER : "다음 지시를 적어요");
     // 판정이 두 자리에서 어긋나지 않는다.
     expect(allow.disabled).toBe(input.disabled);
     // 브라우저에서는 무엇을 눌러도 허락·지시가 나가지 않는다.
@@ -491,6 +493,23 @@ describe("browser instructs from the app (#3029)", () => {
     expect(error).not.toContain("이미 닫혔어요");
     expect(q('[data-testid="agent-permission-outcome"]')).toBeNull();
     expect(q('[data-testid="agent-permission"]')!.getAttribute("data-settled")).toBeNull();
+  });
+
+  it("after a 403 device_signature_required the pane turns to the app line: no armed allow, one sentence, caret on the card", async () => {
+    const decide = vi.fn(async () => {
+      throw new ApiError(403, "x", "device_signature_required");
+    });
+    const m = model(events());
+    render(m, { decide, reply: null });
+    await commitAllow();
+    expect(q('[data-testid="agent-permission-error"]')).not.toBeNull();
+    // 소스가 플래그를 다시 읽고 `app`으로 바꾼다.
+    render(m, { decide, reply: null }, "곽성재", false, "app");
+    expect(q('[data-testid="agent-permission-confirm"]')).toBeNull();
+    expect(q('[data-testid="agent-permission-error"]')).toBeNull();
+    expect(q('[data-testid="agent-permission-in-app"]')!.textContent).toBe(ALLOW_IN_APP_LINE);
+    expect((q('[data-testid="agent-permission-reject"]') as HTMLButtonElement).disabled).toBe(false);
+    expect(document.activeElement).toBe(q('[data-testid="agent-permission"]'));
   });
 
   it("a refused instruction says why in the reply hint", async () => {

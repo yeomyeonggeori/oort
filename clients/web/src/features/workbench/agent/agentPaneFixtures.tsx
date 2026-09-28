@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { ApiError, type WorkSession } from "@momo/core/lib/api";
+import type { InstructFrom } from "@momo/core/features/auth/humanSignature";
 import type { WorkSessionEvent } from "@momo/core/features/work/workSessionModel";
 import { agentPaneModel, type AgentPaneModel } from "@momo/core/features/workbench/agentPane";
 import { AgentProgressView, type AgentPaneActions } from "./AgentProgressView";
@@ -179,6 +181,35 @@ export type AgentFixtureScene =
   /** 허락이 403 `device_signature_required`로 돌아온다(#3029). */
   | "signature";
 
+/**
+ * `signature` 장면: 제품처럼 403 `device_signature_required`를 받으면 플래그를 다시
+ * 읽어 안내로 바뀐다(agentPaneSource `recheck`). 캡처는 오류 직후가 아니라 바뀐 뒤다.
+ */
+function SignatureScene({ model, actions }: { model: AgentPaneModel; actions: AgentPaneActions }) {
+  const [from, setFrom] = useState<InstructFrom>("here");
+  const decide = actions.decide;
+  return (
+    <AgentProgressView
+      model={model}
+      ownerName="곽성재"
+      instructFrom={from}
+      actions={{
+        ...actions,
+        decide: decide
+          ? async (d) => {
+              try {
+                await decide(d);
+              } catch (err) {
+                setTimeout(() => setFrom("app"), 300);
+                throw err;
+              }
+            }
+          : null,
+      }}
+    />
+  );
+}
+
 /** 하네스 장면별 원천. 묶음은 메모리 저장소(캡처는 이 기기 저장소를 건드리지 않는다). */
 export function fixtureAgentSource(scene: AgentFixtureScene): AgentPaneSource {
   T0 = Date.now() - (scene === "lapsed" ? 16 : 6) * MINUTE;
@@ -232,6 +263,7 @@ export function fixtureAgentSource(scene: AgentFixtureScene): AgentPaneSource {
     },
     render: (id) => {
       const m = models.get(id);
+      if (m && scene === "signature") return <SignatureScene model={m} actions={actions} />;
       return m ? (
         <AgentProgressView
           model={m}

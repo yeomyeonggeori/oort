@@ -110,8 +110,9 @@ export const REPLY_UNAVAILABLE = "이 서버는 아직 칸에서 보낸 지시�
 
 /** 브라우저에서 허락을 누를 수 없는 이유(D-4). 거부는 여기서 된다고 함께 말한다. */
 export const ALLOW_IN_APP_LINE = `이번 한 번 허락은 ${INSTRUCT_IN_APP_LINE}. 거부는 여기서도 할 수 있어요.`;
-/** 브라우저의 답장 칸(D-4). 자리 표시 글은 `INSTRUCT_IN_APP_LINE`. */
-export const REPLY_IN_APP_HINT = "브라우저는 지시에 서명하지 않아요 · 보기와 거부는 여기서 할 수 있어요";
+/** 브라우저의 답장 칸(D-4). 어디서 보내는지는 힌트가, 여기서 안 되는 것은 자리 표시 글이 말한다. */
+export const REPLY_IN_APP_HINT = `지시는 ${INSTRUCT_IN_APP_LINE}`;
+export const REPLY_IN_APP_PLACEHOLDER = "브라우저에서는 지시를 보낼 수 없어요";
 
 const KIND_ICON: Record<ToolCardKind, typeof FileText> = {
   read: FileText,
@@ -498,6 +499,16 @@ function PermissionCard({
   const allowRef = useRef<HTMLButtonElement>(null);
   const rejectRef = useRef<HTMLButtonElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
+  // 허락을 보낸 뒤 서버가 서명을 요구한다고 답해 칸이 안내로 바뀌면(#3029): 허락 무장을
+  // 풀고 캐럿을 카드로 옮기며, 같은 말을 하는 오류 줄은 안내 줄 하나로 줄인다(review M1).
+  useEffect(() => {
+    if (!inApp) return;
+    setError(null);
+    if (armed === "allow") {
+      setArmed(null);
+      sectionRef.current?.focus({ preventScroll: true });
+    }
+  }, [inApp, armed]);
   /** 무장을 풀면 캐럿을 누른 버튼으로 돌려준다(design-review R1 M3). */
   const returnTo = useRef<Armed>(null);
   useEffect(() => {
@@ -786,7 +797,7 @@ function ReplyBox({
           }
         }}
         className="h-control w-full min-w-0 resize-none @md:w-auto @md:flex-1 rounded-lg border border-line-strong bg-surface px-3 py-1 text-body text-ink placeholder:text-ink-muted focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-60"
-        placeholder={ended ? "끝난 세션이에요" : inApp ? `지시는 ${INSTRUCT_IN_APP_LINE}` : "다음 지시를 적어요"}
+        placeholder={ended ? "끝난 세션이에요" : inApp ? REPLY_IN_APP_PLACEHOLDER : "다음 지시를 적어요"}
         data-testid="agent-pane-reply-input"
       />
         <Button

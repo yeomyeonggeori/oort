@@ -307,6 +307,20 @@ async function decisionScenes(browser, origin) {
         const text = await page.textContent('[data-testid="agent-permission-error"]');
         check(`${tag}/서명 필요: 앱 안내 문장, 「소유자만」 아님`, (text ?? "").includes("기기 서명") && !(text ?? "").includes("소유자만"), { text });
         await shot(page, `signature-required-${tag}`);
+        // 제품처럼 플래그를 다시 읽은 뒤: 무장 풀림, 오류 줄 대신 안내 한 줄, 거부 켜짐(review M1).
+        await page.getByTestId("agent-permission-in-app").waitFor();
+        const after = await page.evaluate(() => ({
+          confirm: document.querySelectorAll('[data-testid="agent-permission-confirm"]').length,
+          error: document.querySelectorAll('[data-testid="agent-permission-error"]').length,
+          reject: document.querySelector('[data-testid="agent-permission-reject"]')?.disabled ?? null,
+          focusOnCard: document.activeElement?.getAttribute("data-testid") === "agent-permission",
+        }));
+        check(
+          `${tag}/서명 필요 뒤: 무장 0, 오류 줄 0, 거부 켜짐, 캐럿은 카드`,
+          after.confirm === 0 && after.error === 0 && after.reject === false && after.focusOnCard,
+          after
+        );
+        await shot(page, `signature-required-after-${tag}`);
         await context.close();
       }
       {
