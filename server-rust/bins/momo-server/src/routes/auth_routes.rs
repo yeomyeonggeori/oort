@@ -56,7 +56,29 @@
 //!     in the same transaction (#2677, ADR-0120 D4). The session is a lineage
 //!     (`token.session_id`), not a pair: a phone registers with the access token
 //!     it has at launch and signs out with whatever pair it holds after any
-//!     number of rotations. The response body is unchanged.
+//!     number of rotations. The response body is unchanged. Its device signing
+//!     keys end in the same commit (#3022, ADR-0146 개정 D-7).
+//!
+//! ## Refresh-token reuse ends the lineage (#3022, ADR-0188 §4 R1)
+//!
+//! A refresh token is single-use. Presenting one that is already spent — a
+//! replay of a rotated token (`TokenState::Revoked`) or the loser of a
+//! concurrent rotation (`AlreadyUsed`) — means two parties hold the lineage,
+//! and the server cannot tell which one is the thief. So neither keeps it:
+//! every live token of that `token.session_id` is revoked, and the lineage's
+//! push registrations and device keys end with it, in the transaction that
+//! answers the 401 (it commits). The next rotation by whoever won is refused.
+//!
+//! That only holds if the winner's replacement pair already exists when the
+//! loser sweeps, so every rotation now consumes **and** records its new pair
+//! in one transaction (the linked-device path always did). Before, a plain
+//! rotation revoked in one transaction and recorded in a second, and a reuse
+//! sweep landing between the two left the winner's pair alive.
+//!
+//! Cost, named: a client that loses the response to a successful rotation and
+//! retries with the old token signs itself out. The clients rotate
+//! single-flight (`rotationInFlight`, momo-core `api.ts`), so only a lost
+//! response does this.
 //!
 //! Deviations (deliberate, see PR body):
 //!   * no platform-admin scope elevation and no privileged-session sweep on
@@ -77,18 +99,19 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::Json;
+use momo_auth::device_key::DeviceKeyRevocationReason;
 use momo_auth::{
     carries_privileged_scope, find_linked_device_id_by_refresh_in_tx, lock_linked_device_in_tx,
     lock_member_session_tokens_by_ids, new_session_id, rebind_device_link_session_in_tx,
     rebind_locked_device_link_session_in_tx, record_session_token,
-    record_session_token_with_device, revoke_privileged_session_tokens, revoke_token,
-    session_device_label, session_id_of, sign_access, sign_refresh, token_state, verify_app_access,
-    verify_app_refresh, without_privileged_scopes, AuthError, DeviceSessionRecord, IssuedToken,
-    TokenRejection, SESSION_LABEL_ACCESS, SESSION_LABEL_REFRESH,
+    record_session_token_with_device, revoke_privileged_session_tokens,
+    revoke_session_lineage_tokens, revoke_token, session_device_label, session_id_of, sign_access,
+    sign_refresh, token_state, verify_app_access, verify_app_refresh, without_privileged_scopes,
+    AuthError, DeviceSessionRecord, IssuedToken, TokenRejection, TokenState, SESSION_LABEL_ACCESS,
+    SESSION_LABEL_REFRESH,
 };
-use momo_db::{with_tenant_tx, DbError};
+use momo_db::{with_tenant_tx, DbError, PgConnection};
 use momo_messaging::{get_member, verify_password_login, PasswordLogin};
-use momo_push::invalidate_session_push_tokens_in_tx;
 use uuid::Uuid;
 
 use crate::auth::bearer_token;
@@ -97,6 +120,7 @@ use crate::dto::{
     RefreshResponse,
 };
 use crate::error::{db_error, ApiError};
+use crate::session_end::end_session_lineage_in_tx;
 use crate::AppState;
 
 /// The workspace seeded by `server/Migrations/002_seed.sql`, used when a login
@@ -219,87 +243,6 @@ async fn issue_and_record_session_in_lineage(
     Ok((access, refresh))
 }
 
-/// Rotate a device-link session: record the new pair with the same label and
-/// lineage, and rebind `device_link_token.redeemed_*` so list/revoke still name
-/// this phone.
-#[allow(clippy::too_many_arguments)]
-async fn issue_and_record_device_session(
-    state: &AppState,
-    workspace_id: Uuid,
-    member_id: Uuid,
-    scopes: Vec<String>,
-    device_label: String,
-    old_refresh_id: Uuid,
-    session_id: Uuid,
-    context: &str,
-) -> Result<(IssuedToken, IssuedToken), ApiError> {
-    let access = sign_access(member_id, workspace_id, &scopes, &state.jwt_secret)
-        .map_err(|error| ApiError::internal(&format!("{context}.sign_access"), error))?;
-    let refresh = sign_refresh(member_id, workspace_id, &scopes, &state.jwt_secret)
-        .map_err(|error| ApiError::internal(&format!("{context}.sign_refresh"), error))?;
-
-    let session = SessionTokens {
-        member_id,
-        scopes,
-        access_token: access.token.clone(),
-        access_expires_at: access.expires_at,
-        refresh_token: refresh.token.clone(),
-        refresh_expires_at: refresh.expires_at,
-        session_id,
-    };
-    with_tenant_tx(&state.pool, workspace_id, move |conn| {
-        Box::pin(async move {
-            let access_id = record_session_token_with_device(
-                conn,
-                workspace_id,
-                session.member_id,
-                DeviceSessionRecord {
-                    raw_token: &session.access_token,
-                    label: SESSION_LABEL_ACCESS,
-                    scopes: &session.scopes,
-                    expires_at_unix: session.access_expires_at,
-                    device_label: Some(&device_label),
-                    pending_sas: false,
-                    session_id: session.session_id,
-                },
-            )
-            .await
-            .map_err(DbError::from)?;
-            let refresh_id = record_session_token_with_device(
-                conn,
-                workspace_id,
-                session.member_id,
-                DeviceSessionRecord {
-                    raw_token: &session.refresh_token,
-                    label: SESSION_LABEL_REFRESH,
-                    scopes: &session.scopes,
-                    expires_at_unix: session.refresh_expires_at,
-                    device_label: Some(&device_label),
-                    pending_sas: false,
-                    session_id: session.session_id,
-                },
-            )
-            .await
-            .map_err(DbError::from)?;
-            rebind_device_link_session_in_tx(
-                conn,
-                workspace_id,
-                session.member_id,
-                old_refresh_id,
-                access_id,
-                refresh_id,
-            )
-            .await
-            .map_err(DbError::from)?;
-            Ok::<(), DbError>(())
-        })
-    })
-    .await
-    .map_err(|error| db_error(&format!("{context}.record_device_session"), error))?;
-
-    Ok((access, refresh))
-}
-
 /// The refusal for a `workspace` that was supplied and is not a workspace id.
 ///
 /// It **names the field and both accepted shapes**, because the client maps
@@ -400,16 +343,8 @@ enum RefreshGate {
     MemberInactive,
     /// The atomic single-use gate was lost: this token was already spent.
     AlreadyUsed,
-    /// Gate passed — the presented refresh token is now revoked.
-    /// Non-linked sessions still mint the replacement pair after this
-    /// transaction (ordinary login refresh), in the lineage read here.
-    Rotated {
-        old_refresh_id: Uuid,
-        device_label: Option<String>,
-        session_id: Uuid,
-    },
-    /// Linked-device rotation finished in this transaction: consume, mint,
-    /// record and rebind either all committed or all rolled back.
+    /// Rotation finished in this transaction — linked or not: consume, mint,
+    /// record (and rebind) either all committed or all rolled back (#3022).
     Issued {
         access: IssuedToken,
         refresh: IssuedToken,
@@ -458,17 +393,21 @@ pub async fn refresh(
     let presented = request.refresh_token.clone();
     let jwt_secret = state.jwt_secret.clone();
     let linked_scopes = scopes.clone();
+    let rotated_scopes = scopes.clone();
     let gate = with_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
             // (1) Advisory pre-check — precise 401s for a logged-out/rotated
             // token. The *atomic* gate is the revoke below, not this read.
-            let old_refresh_id = match token_state(conn, &presented)
-                .await
-                .map_err(DbError::from)?
-                .require_active()
-            {
-                Ok(id) => id,
-                Err(rejection) => return Ok(RefreshGate::Rejected(rejection)),
+            let old_refresh_id = match token_state(conn, &presented).await.map_err(DbError::from)? {
+                // R1 (#3022): a spent refresh token, presented again.
+                TokenState::Revoked { id } => {
+                    end_reused_lineage(conn, workspace_id, member_id, id).await?;
+                    return Ok(RefreshGate::Rejected(TokenRejection::Revoked));
+                }
+                other => match other.require_active() {
+                    Ok(id) => id,
+                    Err(rejection) => return Ok(RefreshGate::Rejected(rejection)),
+                },
             };
 
             // (2) The credential is alive, but the human behind it may not be.
@@ -503,9 +442,11 @@ pub async fn refresh(
                         .await
                         .map_err(DbError::from)?
                 else {
+                    end_reused_lineage(conn, workspace_id, member_id, old_refresh_id).await?;
                     return Ok(RefreshGate::AlreadyUsed);
                 };
                 if locked.refresh_id != old_refresh_id {
+                    end_reused_lineage(conn, workspace_id, member_id, old_refresh_id).await?;
                     return Ok(RefreshGate::AlreadyUsed);
                 }
 
@@ -513,6 +454,7 @@ pub async fn refresh(
                     .await
                     .map_err(DbError::from)?;
                 if !revoke.revoked_now {
+                    end_reused_lineage(conn, workspace_id, member_id, old_refresh_id).await?;
                     return Ok(RefreshGate::AlreadyUsed);
                 }
                 if downgrade {
@@ -589,10 +531,12 @@ pub async fn refresh(
 
             // (3) Non-linked single-use gate: exactly one concurrent replay
             // flips the row and may mint a replacement pair (Swift :169-181).
+            // The loser is a reuse (#3022) and ends the lineage.
             let revoke = revoke_token(conn, &presented)
                 .await
                 .map_err(DbError::from)?;
             if !revoke.revoked_now {
+                end_reused_lineage(conn, workspace_id, member_id, old_refresh_id).await?;
                 return Ok(RefreshGate::AlreadyUsed);
             }
             let Some(old_refresh_id) = revoke.id else {
@@ -612,11 +556,24 @@ pub async fn refresh(
                     .map_err(DbError::from)?;
             }
 
-            Ok(RefreshGate::Rotated {
-                old_refresh_id,
-                device_label,
-                session_id,
-            })
+            // (5) Mint and record the replacement in THIS transaction (#3022):
+            // a reuse sweep that commits after this one must find the new pair
+            // and revoke it too. A rotation CONTINUES the session: same lineage,
+            // never a fresh one (#2677).
+            let (access, refresh) = record_rotated_pair_in_tx(
+                conn,
+                RotatedPair {
+                    workspace_id,
+                    member_id,
+                    scopes: &rotated_scopes,
+                    jwt_secret: jwt_secret.as_str(),
+                    device_label: device_label.as_deref(),
+                    old_refresh_id,
+                    session_id,
+                },
+            )
+            .await?;
+            Ok(RefreshGate::Issued { access, refresh })
         })
     })
     .await
@@ -634,42 +591,121 @@ pub async fn refresh(
             access_token: access.token,
             refresh_token: refresh.token,
         })),
-        RefreshGate::Rotated {
-            old_refresh_id,
-            device_label,
-            session_id,
-        } => {
-            let (access, refresh) = if let Some(device_label) = device_label {
-                issue_and_record_device_session(
-                    &state,
-                    workspace_id,
-                    member_id,
-                    scopes,
-                    device_label,
-                    old_refresh_id,
-                    session_id,
-                    "auth.refresh",
-                )
-                .await?
-            } else {
-                // A rotation CONTINUES the session: same lineage, never a fresh
-                // one (#2677). `issue_and_record_session` would open a new one.
-                issue_and_record_session_in_lineage(
-                    &state,
-                    workspace_id,
-                    member_id,
-                    scopes,
-                    session_id,
-                    "auth.refresh",
-                )
-                .await?
-            };
-            Ok(Json(RefreshResponse {
-                access_token: access.token,
-                refresh_token: refresh.token,
-            }))
-        }
     }
+}
+
+/// R1 (#3022): the refresh row `refresh_id` was presented after it was spent.
+/// End its whole lineage — every live token, and with them the lineage's push
+/// registrations and device keys — in the caller's transaction, which the
+/// caller then commits with its 401. A pre-088 row has no lineage to name;
+/// nothing else can be attributed to it, so nothing more is revoked.
+async fn end_reused_lineage(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    refresh_id: Uuid,
+) -> Result<(), DbError> {
+    let Some(session_id) = session_id_of(conn, refresh_id)
+        .await
+        .map_err(DbError::from)?
+    else {
+        return Ok(());
+    };
+    revoke_session_lineage_tokens(conn, workspace_id, member_id, session_id)
+        .await
+        .map_err(DbError::from)?;
+    end_session_lineage_in_tx(
+        conn,
+        workspace_id,
+        member_id,
+        session_id,
+        DeviceKeyRevocationReason::RefreshReuse,
+    )
+    .await
+}
+
+/// What a non-linked rotation records, inside the gate transaction.
+struct RotatedPair<'a> {
+    workspace_id: Uuid,
+    member_id: Uuid,
+    scopes: &'a [String],
+    jwt_secret: &'a str,
+    /// Some for a session that carries an ADR-0180 device label: the new pair
+    /// keeps it and `device_link_token.redeemed_*` is rebound to it.
+    device_label: Option<&'a str>,
+    old_refresh_id: Uuid,
+    session_id: Uuid,
+}
+
+/// Mint the replacement pair and record both halves (and, for a labelled
+/// session, rebind the device link) on the caller's transaction — the rows
+/// [`issue_and_record_session_in_lineage`] writes for a sign-in, plus the
+/// ADR-0180 label and rebind the labelled rotation always carried.
+async fn record_rotated_pair_in_tx(
+    conn: &mut PgConnection,
+    pair: RotatedPair<'_>,
+) -> Result<(IssuedToken, IssuedToken), DbError> {
+    let signing_error =
+        |error: AuthError| DbError::Sqlx(momo_db::sqlx::Error::Protocol(error.to_string()));
+    let access = sign_access(
+        pair.member_id,
+        pair.workspace_id,
+        pair.scopes,
+        pair.jwt_secret,
+    )
+    .map_err(signing_error)?;
+    let refresh = sign_refresh(
+        pair.member_id,
+        pair.workspace_id,
+        pair.scopes,
+        pair.jwt_secret,
+    )
+    .map_err(signing_error)?;
+    let access_id = record_session_token_with_device(
+        conn,
+        pair.workspace_id,
+        pair.member_id,
+        DeviceSessionRecord {
+            raw_token: &access.token,
+            label: SESSION_LABEL_ACCESS,
+            scopes: pair.scopes,
+            expires_at_unix: access.expires_at,
+            device_label: pair.device_label,
+            pending_sas: false,
+            session_id: pair.session_id,
+        },
+    )
+    .await
+    .map_err(DbError::from)?;
+    let refresh_id = record_session_token_with_device(
+        conn,
+        pair.workspace_id,
+        pair.member_id,
+        DeviceSessionRecord {
+            raw_token: &refresh.token,
+            label: SESSION_LABEL_REFRESH,
+            scopes: pair.scopes,
+            expires_at_unix: refresh.expires_at,
+            device_label: pair.device_label,
+            pending_sas: false,
+            session_id: pair.session_id,
+        },
+    )
+    .await
+    .map_err(DbError::from)?;
+    if pair.device_label.is_some() {
+        rebind_device_link_session_in_tx(
+            conn,
+            pair.workspace_id,
+            pair.member_id,
+            pair.old_refresh_id,
+            access_id,
+            refresh_id,
+        )
+        .await
+        .map_err(DbError::from)?;
+    }
+    Ok((access, refresh))
 }
 
 // ---------------------------------------------------------------------------
@@ -789,11 +825,12 @@ pub async fn logout(
                             .await
                             .map_err(DbError::from)?
                         {
-                            invalidate_session_push_tokens_in_tx(
+                            end_session_lineage_in_tx(
                                 conn,
                                 workspace_id,
                                 member_id,
                                 session_id,
+                                DeviceKeyRevocationReason::Logout,
                             )
                             .await?;
                         }

@@ -128,6 +128,11 @@ uuid = { workspace = true }
 momo-wire = { path = "../../crates/momo-wire" }
 ed25519-dalek.workspace = true
 base64.workspace = true
+# #3022 conformance only: `tests/device_key_conformance_pg.rs` plays the person's
+# Secure Enclave key (P-256) that signs endorsement, revocation and
+# host_register letters. Already a direct dependency of momo-wire (E1 #3021,
+# NOTICE there); no new crate enters the lock.
+p256.workspace = true
 # HAP-E7 conformance only: `tests/agent_port_oauth_conformance_pg.rs` recomputes
 # the RFC 7636 code challenge from its fixed verifier, so the PKCE canary is a
 # byte-level derivation rather than a copied literal that could drift.

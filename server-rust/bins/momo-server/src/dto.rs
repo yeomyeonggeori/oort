@@ -827,6 +827,120 @@ pub struct RegisterWorkHostRequest {
     pub public_key: String,
     #[serde(default)]
     pub capabilities: Option<BTreeMap<String, bool>>,
+    /// ADR-0146 개정 D-8 (#3022): the root device key's `host_register`
+    /// statement. Member-scoped `POST …/work-hosts` only; verified whenever
+    /// present, required when the instance turned the requirement on.
+    #[serde(default)]
+    pub registration: Option<HostRegisterSignature>,
+}
+
+/// The signed half of a member-scoped host registration (`momo.human.control.v1`
+/// with `kind=host_register`). The server rebuilds the statement from its own
+/// instance id, the caller's workspace and member, and the host key, id and
+/// display name this request registers; only what it cannot know travels here.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HostRegisterSignature {
+    /// The signing root key (`member_device_key.id`).
+    pub device_key_id: String,
+    /// The host id candidate. The host row is created under this id.
+    pub host_id: String,
+    pub nonce: String,
+    pub issued_at_ms: i64,
+    pub expires_at_ms: i64,
+    /// base64 raw r‖s (64 bytes).
+    pub signature: String,
+}
+
+// ---------------------------------------------------------------------------
+// Device signing keys (ADR-0146 개정 2026-09-28, #3022)
+// ---------------------------------------------------------------------------
+
+/// `POST /v1/workspaces/{ws}/device-keys`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RegisterDeviceKeyRequest {
+    /// `p256`.
+    pub alg: String,
+    /// base64 of the 33-byte compressed SEC1 point (canonical encoding).
+    pub public_key: String,
+    /// `macos` | `ios`.
+    pub platform: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Optional, and only ever the caller: a key is registered for the member
+    /// the bearer names, and any other value is refused.
+    #[serde(default)]
+    pub member_id: Option<String>,
+}
+
+/// `POST /v1/workspaces/{ws}/device-keys/{key}/endorsement` — a
+/// `device_endorse.v1` letter. The letter's other fields are the stored rows.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EndorseDeviceKeyRequest {
+    pub root_key_id: String,
+    /// base64 raw r‖s (64 bytes).
+    pub signature: String,
+}
+
+/// `POST /v1/workspaces/{ws}/device-keys/{key}/revocation` — a
+/// `device_revoke.v1` letter.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RevokeDeviceKeyRequest {
+    pub root_key_id: String,
+    /// The time inside the signed letter.
+    pub revoked_at_ms: i64,
+    /// base64 raw r‖s (64 bytes).
+    pub signature: String,
+}
+
+/// One device key. `state` is derived: `root` (a root candidate), `endorsed`,
+/// `unendorsed` (「지시 불가」) or `revoked`; `canInstruct` is `root|endorsed`.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceKeyDto {
+    pub id: String,
+    pub workspace_id: String,
+    pub member_id: String,
+    pub alg: String,
+    pub public_key: String,
+    pub platform: String,
+    pub label: String,
+    pub state: &'static str,
+    pub can_instruct: bool,
+    /// Registered under the caller's own sign-in.
+    pub current: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endorsed_by_key_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endorsement_signature: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endorsed_at_ms: Option<i64>,
+    pub created_at_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_by_key_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revocation_signature: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revocation_signed_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceKeyResponse {
+    pub device_key: DeviceKeyDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceKeyListResponse {
+    pub device_keys: Vec<DeviceKeyDto>,
 }
 
 // `POST …/work-hosts/{host}/heartbeat` has no request DTO since ADR-0188 D7:

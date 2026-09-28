@@ -26,6 +26,7 @@
 //! problem — and the pair is safe here because the route already required the
 //! path workspace to equal the credential's before asking anything.
 
+use crate::session_end::end_member_sessions_in_tx;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -36,7 +37,6 @@ use momo_messaging::{
     active_workspace_role, read_workspace_for_active_member, WorkspaceIdentity, WorkspaceRead,
     WorkspaceRole,
 };
-use momo_push::invalidate_member_push_tokens_in_tx;
 use momo_settings::{
     create_workspace_in_tx, lock_membership_mutation, normalized_workspace_name,
     normalized_workspace_slug, rename_workspace_in_tx, revoke_member_tokens_in_tx,
@@ -347,8 +347,8 @@ pub async fn leave(
                 // Past every refusal: now write.
                 let revoked = revoke_member_tokens_in_tx(conn, workspace_id, member_id).await?;
                 // Every session just ended; so does every push registration
-                // made under them (#2677).
-                invalidate_member_push_tokens_in_tx(conn, workspace_id, member_id).await?;
+                // (#2677) and device key (#3022) made under them.
+                end_member_sessions_in_tx(conn, workspace_id, member_id).await?;
                 terminate_workspace_membership_in_tx(conn, workspace_id, member_id).await?;
                 write_audit(
                     conn,
