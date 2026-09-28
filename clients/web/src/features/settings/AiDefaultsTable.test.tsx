@@ -326,7 +326,13 @@ describe("팀 줄 상태 (design-review #3042)", () => {
     });
     const select = q("ai-default-teamAgent-select") as HTMLSelectElement;
     expect(select.getAttribute("aria-disabled")).toBe("true");
+    // #3064: 잠금 문법은 흐림까지다. aria-disabled 만 달고 칸이 멀쩡해 보이면
+    // 고를 수 있는 칸처럼 읽힌다(#3042 design-review L1).
+    const classes = select.className.split(/\s+/);
+    expect(classes).toContain("aria-disabled:opacity-50");
+    expect(classes).toContain("aria-disabled:cursor-not-allowed");
     expect(q("ai-default-teamAgent-saved")?.textContent).toBe("저장하고 있어요");
+    expect(select.getAttribute("aria-describedby")).toContain("ai-default-teamAgent-saved");
     act(() => {
       select.value = "link:0:gpt-4o-mini";
       select.dispatchEvent(new Event("change", { bubbles: true }));

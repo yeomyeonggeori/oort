@@ -112,7 +112,7 @@ export function SettingsRoute() {
     target?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [section]);
 
-  // 선택 항목이 폰 캡 아래로 내려가 있으면 스크롤로 드러낸다 (#1867 M-1).
+  // 선택 항목이 폰의 한 줄 목록 밖(가로)에 있으면 스크롤로 드러낸다 (#1867 M-1, #3064).
   useEffect(() => {
     navRefs.current[section]?.scrollIntoView({
       block: "nearest",
@@ -213,8 +213,8 @@ export function SettingsRoute() {
       )}
 
       {/* 폰에서는 두 열이 되지 못한다 (goal B6): 240px 섹션 목록이 390px 화면의
-          본문을 밀어내므로, 그 폭에서는 목록이 본문 **위로** 올라가고, 본문이
-          남은 높이를 전부 받는다 (tokens.css settings-layout / settings-nav). */}
+          본문을 밀어내므로, 그 폭에서는 목록이 본문 **위의 한 줄**로 눕고(#3064),
+          본문이 남은 높이를 전부 받는다 (tokens.css settings-layout / settings-nav). */}
       <div className="settings-layout">
         <nav
           aria-label="설정 섹션"
@@ -222,21 +222,21 @@ export function SettingsRoute() {
           className="settings-nav p-2"
           data-testid="settings-nav"
         >
-          <div className="pb-3">
+          <div className="settings-nav-group">
             <button
               type="button"
               onClick={close}
               data-testid="settings-back-to-app"
-              className="tap-target flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-body hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
+              className="settings-nav-item tap-target flex items-center gap-2 rounded-sm px-2 py-1 text-left text-body hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
             >
               <ArrowLeft className="size-4 shrink-0" aria-hidden="true" />
               앱으로 돌아가기
             </button>
           </div>
           {SETTINGS_GROUPS.map((group) => (
-            <div key={group} className="flex flex-col gap-1 pb-3">
-              <p className="px-2 text-meta text-ink-muted">{group}</p>
-              <ul className="flex flex-col gap-1">
+            <div key={group} className="settings-nav-group">
+              <p className="shrink-0 whitespace-nowrap px-2 text-meta text-ink-muted">{group}</p>
+              <ul className="settings-nav-list">
                 {sections.filter((item) => item.group === group).map((item) => (
                   <li key={item.id}>
                     <button
@@ -248,7 +248,7 @@ export function SettingsRoute() {
                       aria-current={section === item.id ? "page" : undefined}
                       data-testid={`settings-nav-${item.id}`}
                       className={cn(
-                        "tap-target w-full rounded-sm px-2 py-1 text-left text-body focus-visible:focus-ring",
+                        "settings-nav-item tap-target rounded-sm px-2 py-1 text-left text-body focus-visible:focus-ring",
                         section === item.id
                           ? "bg-accent-soft text-ink active:bg-surface-pressed"
                           : "hover:bg-surface-hover active:bg-surface-pressed"

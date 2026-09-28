@@ -139,7 +139,11 @@ describe("permission card (ADR-0188 D5 phone constraints on the desktop pane)", 
 describe("sanitizeDisplayText (D5)", () => {
   it("neutralizes bidi and invisible characters into visible marks", () => {
     const out = sanitizeDisplayText("rm -rf \u202Egnp.exe\u200B ok\u0007");
-    expect(out.text).not.toMatch(/[\u202E\u200B\u0007]/);
+    // Per character, not a regex class: a control character inside a regex
+    // literal trips eslint `no-control-regex` (#3064).
+    for (const ch of ["\u202E", "\u200B", "\u0007"]) {
+      expect(out.text).not.toContain(ch);
+    }
     expect(out.text).toContain("‹U+202E›");
     expect(out.neutralized).toBe(3);
   });
