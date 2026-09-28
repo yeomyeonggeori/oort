@@ -134,6 +134,81 @@ export async function registerRootDeviceKey(
   );
 }
 
+/**
+ * Register the phone's enclave key (#3026 E6, ADR-0146 개정 D-6 ②). It starts
+ * `unendorsed` — 「지시 불가」 — until the root Mac signs `device_endorse.v1`.
+ * No password: an `ios` key cannot sign host registrations or endorse anyone.
+ * `label` must be the name the QR redeem sent (`DeviceLinkDevice.name`): the
+ * Mac pairs its linked-device row with this key by label
+ * (`phoneKeyForLinkedDevice`).
+ */
+export async function registerPhoneDeviceKey(
+  workspaceId: string,
+  input: { publicKey: string; label: string }
+): Promise<DeviceKey> {
+  return one(
+    await settingsRequest<unknown>(base(workspaceId), {
+      method: "POST",
+      body: JSON.stringify({
+        alg: "p256",
+        publicKey: input.publicKey,
+        platform: "ios",
+        label: input.label,
+      }),
+    })
+  );
+}
+
+/**
+ * `GET …/device-keys/signing-context` (#3023): the `instance_id` line every
+ * `momo.human.control.v1` statement carries, verbatim (a client never builds it
+ * from a URL — D-5), and the server clock a signer corrects its own by (D-9).
+ */
+export interface SigningContext {
+  instanceId: string;
+  serverTimeMs: number;
+  maxLifetimeMs: number;
+  maxClockSkewMs: number;
+  humanControlSignatureRequired: boolean;
+  hostRegisterSignatureRequired: boolean;
+}
+
+export function parseSigningContext(value: unknown): SigningContext {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  const instanceId = str(source, "instanceId");
+  const serverTimeMs = num(source, "serverTimeMs");
+  const maxLifetimeMs = num(source, "maxLifetimeMs");
+  const maxClockSkewMs = num(source, "maxClockSkewMs");
+  const humanControlSignatureRequired = bool(source, "humanControlSignatureRequired");
+  const hostRegisterSignatureRequired = bool(source, "hostRegisterSignatureRequired");
+  if (
+    !instanceId ||
+    serverTimeMs === undefined ||
+    maxLifetimeMs === undefined ||
+    maxLifetimeMs <= 0 ||
+    maxClockSkewMs === undefined ||
+    humanControlSignatureRequired === undefined ||
+    hostRegisterSignatureRequired === undefined
+  ) {
+    throw new WireShapeError();
+  }
+  return {
+    instanceId,
+    serverTimeMs,
+    maxLifetimeMs,
+    maxClockSkewMs,
+    humanControlSignatureRequired,
+    hostRegisterSignatureRequired,
+  };
+}
+
+export async function fetchSigningContext(workspaceId: string): Promise<SigningContext> {
+  return parseSigningContext(
+    await settingsRequest<unknown>(`${base(workspaceId)}/signing-context`, { cache: "no-store" })
+  );
+}
+
 export async function submitEndorsement(
   workspaceId: string,
   targetKeyId: string,
@@ -266,29 +341,8 @@ export function deviceKeyServerMessage(code: string | undefined, fallback: strin
 
 // ---- signing context and who may instruct from where (#3029 E9) --------------
 
-/**
- * `GET …/device-keys/signing-context` (E3 #3023, `SigningContextResponse`). This
- * module reads only the flag: the desktop shell fetches the rest itself when it
- * signs (E8 #3028).
- */
-export interface SigningContext {
-  instanceId: string;
-  serverTimeMs: number;
-  /** `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`. */
-  humanControlSignatureRequired: boolean;
-}
-
-export function parseSigningContext(value: unknown): SigningContext {
-  const source = record(value);
-  if (source === null) throw new WireShapeError();
-  const instanceId = str(source, "instanceId");
-  const serverTimeMs = num(source, "serverTimeMs");
-  const required = bool(source, "humanControlSignatureRequired");
-  if (!instanceId || serverTimeMs === undefined || required === undefined) {
-    throw new WireShapeError();
-  }
-  return { instanceId, serverTimeMs, humanControlSignatureRequired: required };
-}
+// `SigningContext` / `parseSigningContext` live above, next to `fetchSigningContext`
+// (#3026 E6: the phone signs with the full context; this flag reader shares it).
 
 /**
  * Whether this server requires a device signature on an allow or an

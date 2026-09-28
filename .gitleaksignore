@@ -281,3 +281,9 @@ b97d2240178b601d1f5e9b1183b36c00a5a14641:clients/web/src/features/welcome/freshS
 0ee16d8edae6298e9440c0ff82c121d7150cdedf:clients/web/src/features/settings/DeviceKeysBlock.test.tsx:generic-api-key:16
 #   clients/web/src/features/settings/DeviceKeysBlock.test.tsx:17  [generic-api-key]  시험용 기기 공개키 상수
 0ee16d8edae6298e9440c0ff82c121d7150cdedf:clients/web/src/features/settings/DeviceKeysBlock.test.tsx:generic-api-key:17
+#   clients/mobile/measure/surfaces.tsx:3468  [generic-api-key]  시험용 기기 공개키 상수 — 공개키는 비밀 아님 (#3026)
+d2e7f6626fa75c026e983cf6fe1e97e54005d46f:clients/mobile/measure/surfaces.tsx:generic-api-key:3468
+#   clients/mobile/__tests__/deviceKeyFingerprint.test.ts:36  [generic-api-key]  시험용 기기 공개키 상수 — 공개키는 비밀 아님 (#3026)
+d2e7f6626fa75c026e983cf6fe1e97e54005d46f:clients/mobile/__tests__/deviceKeyFingerprint.test.ts:generic-api-key:36
+#   clients/mobile/__tests__/deviceKeyEnrollment.test.tsx:87  [generic-api-key]  시험용 기기 공개키 상수 — 공개키는 비밀 아님 (#3026)
+d2e7f6626fa75c026e983cf6fe1e97e54005d46f:clients/mobile/__tests__/deviceKeyEnrollment.test.tsx:generic-api-key:87
