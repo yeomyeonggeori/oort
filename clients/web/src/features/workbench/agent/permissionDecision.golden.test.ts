@@ -1,22 +1,23 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import golden from "../../../../../docs/api/work-permission-decision.golden.json";
-import { installCoreHost, resetCoreHost, type SessionPort } from "../../runtime/host";
+import golden from "../../../../../../docs/api/work-permission-decision.golden.json";
+import { installCoreHost, resetCoreHost, type SessionPort } from "@momo/core/runtime/host";
 import {
   ApiError,
   decideWorkPermission,
   workPermissionDecisionBody,
   type WorkPermissionDecisionBody,
-} from "../../lib/api";
+} from "@momo/core/lib/api";
 import {
   PERMISSION_HOST_WAIT_MS,
   permissionFailure,
   permissionLapsed,
   permissionSentLine,
-} from "./agentPane";
+} from "@momo/core/features/workbench/agentPane";
 
 // #3013: A 칸 권한 카드가 #3000 결정 라우트에 붙는 모양을 골든
 // (docs/api/work-permission-decision.golden.json)과 맞춘다. 서버 단위 시험과 workd
-// inv_3가 같은 파일을 읽는다.
+// inv_3가 같은 파일을 읽는다. 코어 순수성 게이트가 src 밖 import를 막으므로 골든을
+// 읽는 계약 시험은 웹 트리에 둔다(MessageRow.gc8Golden.test.tsx와 같은 자리 규칙).
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const SESSION = golden.ok_response.permissionRequest.sessionId;
