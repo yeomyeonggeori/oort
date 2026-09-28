@@ -268,13 +268,29 @@ impl DeviceKeyRefusal {
 // SQL
 // ---------------------------------------------------------------------------
 
-const KEY_COLUMNS: &str = "k.id, k.workspace_id, k.member_id, k.session_id, k.alg, \
+/// "Key `e` is a live root": unrevoked, and its sign-in can still rotate (a
+/// live, unexpired refresh row of its lineage). One definition for the
+/// endorser state every read derives and for the re-endorse rule, so a phone
+/// whose root lapsed reads `unendorsed` and can be approved again (review M4
+/// residual, L9).
+macro_rules! endorser_live_sql {
+    () => {
+        "(e.id IS NOT NULL AND e.revoked_at IS NULL AND EXISTS ( \
+            SELECT 1 FROM token t \
+             WHERE t.workspace_id = e.workspace_id AND t.actor_member_id = e.member_id \
+               AND t.kind = 'session' AND t.session_id = e.session_id \
+               AND t.label = 'refresh' AND t.revoked_at IS NULL \
+               AND (t.expires_at IS NULL OR t.expires_at > now())))"
+    };
+}
+
+const KEY_COLUMNS: &str = concat!("k.id, k.workspace_id, k.member_id, k.session_id, k.alg, \
      k.public_key, k.platform, k.label, k.endorsed_by_key_id, k.endorsement_sig, \
      (extract(epoch FROM k.endorsed_at) * 1000)::bigint AS endorsed_at_ms, \
-     COALESCE(e.revoked_at IS NULL, false) AS endorser_live, \
+     ", endorser_live_sql!(), " AS endorser_live, \
      (extract(epoch FROM k.created_at) * 1000)::bigint AS created_at_ms, \
      (extract(epoch FROM k.revoked_at) * 1000)::bigint AS revoked_at_ms, \
-     k.revoked_reason, k.revoked_by_key_id, k.revocation_sig, k.revoked_at_ms AS revocation_signed_at_ms";
+     k.revoked_reason, k.revoked_by_key_id, k.revocation_sig, k.revoked_at_ms AS revocation_signed_at_ms");
 
 const KEY_FROM: &str = "FROM member_device_key k \
      LEFT JOIN member_device_key e ON e.id = k.endorsed_by_key_id";
@@ -494,14 +510,16 @@ pub async fn endorse_device_key_in_tx(
         return Ok(Err(DeviceKeyRefusal::NotEndorsable));
     }
 
-    sqlx::query(
+    sqlx::query(concat!(
         "UPDATE member_device_key k \
             SET endorsed_by_key_id = $2, endorsement_sig = $3, endorsed_at = now() \
           WHERE k.id = $1 AND k.revoked_at IS NULL \
             AND (k.endorsed_by_key_id IS NULL \
-                 OR EXISTS (SELECT 1 FROM member_device_key e \
-                             WHERE e.id = k.endorsed_by_key_id AND e.revoked_at IS NOT NULL))",
-    )
+                 OR NOT EXISTS (SELECT 1 FROM member_device_key e \
+                                 WHERE e.id = k.endorsed_by_key_id AND ",
+        endorser_live_sql!(),
+        "))"
+    ))
     .bind(target.id)
     .bind(root.id)
     .bind(&canonical_b64)

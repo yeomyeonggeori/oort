@@ -195,8 +195,11 @@ paths:
         wins. A replay of a token spent more than 30 seconds earlier also ends
         the whole sign-in (#3022, ADR-0188 §4 R1): every live token of the
         session lineage is revoked, with its push registrations and device
-        keys. Inside 30 seconds (another tab, a retried lost response) it is
-        only refused.
+        keys. Inside 30 seconds (a retried lost response) it is only refused.
+        This applies to QR-linked (phone) sessions always, and to password
+        sign-ins only when the instance sets
+        `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=true` (default off: browser
+        tabs rotate without cross-tab coordination).
       security: []
       requestBody:
         required: true

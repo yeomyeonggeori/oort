@@ -169,6 +169,15 @@ fn flag(required: bool) -> DeviceKeySettings {
     DeviceKeySettings {
         instance_id: Some(INSTANCE_ID.to_string()),
         host_register_signature_required: required,
+        refresh_reuse_sweep_all_sessions: false,
+    }
+}
+
+/// `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=true`: password sign-ins are swept too.
+fn sweep_all() -> DeviceKeySettings {
+    DeviceKeySettings {
+        refresh_reuse_sweep_all_sessions: true,
+        ..flag(false)
     }
 }
 
@@ -1047,7 +1056,7 @@ async fn an_access_token_outliving_its_logout_cannot_register_a_key() {
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn a_reused_refresh_token_ends_the_whole_lineage() {
     let _lock = test_lock().await;
-    let w = world().await;
+    let w = world_with(sweep_all()).await;
     let stolen = w.person().await;
     let bystander = w.person().await;
     let key_id = w.key(&stolen, &DeviceKeyPair::new("phone"), "ios").await;
@@ -1476,6 +1485,10 @@ async fn a_root_whose_sign_in_expired_signs_nothing() {
     let root_id = w.key(&mac, &root, "macos").await;
     let handset = DeviceKeyPair::new("phone");
     let phone_id = w.key(&phone, &handset, "ios").await;
+    let endorsed = DeviceKeyPair::new("endorsed phone");
+    let endorsed_id = w.key(&phone, &endorsed, "ios").await;
+    let letter = w.endorsement(w.person_id, &root, root_id, &endorsed, "기기");
+    assert_eq!(w.endorse(&mac, endorsed_id, root_id, &letter).await.0, 200);
     sqlx::query(
         "UPDATE token SET expires_at = now() - interval '1 minute' \
           WHERE session_id = (SELECT session_id FROM member_device_key WHERE id = $1) \
@@ -1506,6 +1519,94 @@ async fn a_root_whose_sign_in_expired_signs_nothing() {
         .await;
     assert_eq!(status, 403, "{body}");
     assert_eq!(code(&body), Some("device_key_revoked"));
+
+    // A phone that root approved is no longer instructable (M4 residual)…
+    let row = w
+        .list(&phone)
+        .await
+        .into_iter()
+        .find(|k| k["id"] == endorsed_id.to_string())
+        .unwrap();
+    assert_eq!(row["state"], "unendorsed", "{row}");
+    assert_eq!(row["canInstruct"], false);
+    // …and a new root on a live sign-in may approve it again (L9).
+    let mac2 = w.person().await;
+    let new_root = DeviceKeyPair::new("new mac");
+    let new_root_id = w.key(&mac2, &new_root, "macos").await;
+    let letter = w.endorsement(w.person_id, &new_root, new_root_id, &endorsed, "기기");
+    let (status, body) = w.endorse(&mac2, endorsed_id, new_root_id, &letter).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["deviceKey"]["state"], "endorsed");
+}
+
+/// H2: by default only a QR-linked (phone) lineage is swept; a password
+/// sign-in — possibly a browser with several tabs — is only refused.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn by_default_a_reuse_ends_a_linked_phone_lineage_but_not_a_password_sign_in() {
+    let _lock = test_lock().await;
+    let w = world().await;
+
+    // A password sign-in (a second browser tab rotated minutes ago).
+    let tab_a = w.person().await;
+    let (status, tab_b) = w.rotate(&tab_a).await;
+    assert_eq!(status, 200);
+    let tab_b = tab_b.unwrap();
+    w.age_spent(&tab_a.refresh).await;
+    let (status, _) = w.rotate(&tab_a).await;
+    assert_eq!(status, 401, "the stale tab is refused");
+    assert!(
+        w.access_works(&tab_b.access).await,
+        "and the other tab keeps the session"
+    );
+    let (status, _) = w.rotate(&tab_b).await;
+    assert_eq!(status, 200);
+
+    // A QR-linked phone: one process, so a stale presentation is a second holder.
+    let desktop = w.person().await;
+    let issued = w
+        .http
+        .post(format!("{}/v1/auth/device-link", w.base))
+        .bearer_auth(&desktop.access)
+        .header("host", &w.host)
+        .header("x-forwarded-proto", "http")
+        .send()
+        .await
+        .expect("issue device link");
+    let voucher = issued.json::<Value>().await.unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let redeemed = w
+        .http
+        .post(format!("{}/v1/auth/device-link/redeem", w.base))
+        .header("host", &w.host)
+        .header("x-forwarded-proto", "http")
+        .json(&json!({ "token": voucher, "device": { "name": "Reuse 3022", "platform": "ios" } }))
+        .send()
+        .await
+        .expect("redeem");
+    let phone = session_from(&redeemed.json::<Value>().await.unwrap());
+    let key_id = w.key(&phone, &DeviceKeyPair::new("phone"), "ios").await;
+    let (status, thief) = w.rotate(&phone).await;
+    assert_eq!(status, 200);
+    let thief = thief.unwrap();
+    w.age_spent(&phone.refresh).await;
+    let (status, _) = w.rotate(&phone).await;
+    assert_eq!(status, 401);
+    let (status, _) = w.rotate(&thief).await;
+    assert_eq!(
+        status, 401,
+        "a linked lineage is swept by default (ADR-0188 R1)"
+    );
+    assert_eq!(
+        w.key_row(key_id).await,
+        (Some("refresh_reuse".to_string()), true)
+    );
+    assert!(
+        w.access_works(&desktop.access).await,
+        "the desktop is untouched"
+    );
 }
 
 /// M3 and L9: a letter is used once, and a phone whose root is gone can be
@@ -1572,7 +1673,7 @@ async fn an_endorsement_letter_is_used_once_and_a_lost_root_can_be_replaced() {
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn a_pre_lineage_session_is_swept_on_reuse() {
     let _lock = test_lock().await;
-    let w = world().await;
+    let w = world_with(sweep_all()).await;
     let old = w.person().await;
     sqlx::query(
         "UPDATE token SET session_id = NULL \

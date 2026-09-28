@@ -1109,10 +1109,17 @@ impl MentionSettings {
 ///   signs yet (E5 #3025), and ADR-0146 D-11 keeps the R2 switches closed
 ///   until the R1 security re-review PASS. A signature that IS sent is verified
 ///   either way.
+/// * `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS` — `true` makes a refresh-token
+///   reuse end the lineage of every session (ADR-0188 §4 R1). Default **off**:
+///   QR-linked (phone) lineages are swept regardless; password sign-ins wait
+///   until the web client coordinates rotation across tabs, because a tab
+///   opened later spends the token an older tab holds and the server cannot
+///   tell that from theft (#3022 review H2).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeviceKeySettings {
     pub instance_id: Option<String>,
     pub host_register_signature_required: bool,
+    pub refresh_reuse_sweep_all_sessions: bool,
 }
 
 impl DeviceKeySettings {
@@ -1120,6 +1127,8 @@ impl DeviceKeySettings {
         DeviceKeySettings {
             instance_id: env("MOMO_INSTANCE_ID").map(|value| value.trim().to_string()),
             host_register_signature_required: env("MOMO_HOST_REGISTER_SIGNATURE_REQUIRED")
+                .is_some_and(|value| value.trim() == "true"),
+            refresh_reuse_sweep_all_sessions: env("MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS")
                 .is_some_and(|value| value.trim() == "true"),
         }
     }
@@ -2128,20 +2137,27 @@ mod tests {
     fn device_key_settings_default_off_and_refuse_an_unsatisfiable_requirement() {
         let default = DeviceKeySettings::default();
         assert!(!default.host_register_signature_required);
+        assert!(
+            !default.refresh_reuse_sweep_all_sessions,
+            "password sign-ins are not swept until the web client coordinates tabs"
+        );
         assert_eq!(default.boot_error(), None);
         let unsatisfiable = DeviceKeySettings {
             instance_id: None,
             host_register_signature_required: true,
+            refresh_reuse_sweep_all_sessions: false,
         };
         assert!(unsatisfiable.boot_error().is_some());
         let on = DeviceKeySettings {
             instance_id: Some("inst_a".into()),
             host_register_signature_required: true,
+            refresh_reuse_sweep_all_sessions: false,
         };
         assert_eq!(on.boot_error(), None);
         let smuggled = DeviceKeySettings {
             instance_id: Some("inst\nb".into()),
             host_register_signature_required: false,
+            refresh_reuse_sweep_all_sessions: false,
         };
         assert!(smuggled.boot_error().is_some());
     }

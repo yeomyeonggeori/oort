@@ -69,6 +69,12 @@
 //! push registrations and device keys end with it, in the transaction that
 //! answers the 401 (it commits). The next rotation by whoever won is refused.
 //!
+//! **Which lineages.** A QR-linked (phone) lineage always; a password
+//! sign-in's only with `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=true` (default
+//! off): browser tabs rotate without cross-tab coordination, so a tab opened
+//! later spends the token an older tab still holds, and that is
+//! indistinguishable from theft (review H2). See `end_reused_lineage`.
+//!
 //! **Grace.** A token spent less than 30 seconds ago is refused without the
 //! sweep (`REFRESH_REUSE_GRACE_SECONDS`): web tabs share one refresh token and
 //! rotate without cross-tab coordination, and a client whose rotation response
@@ -396,6 +402,7 @@ pub async fn refresh(
     let jwt_secret = state.jwt_secret.clone();
     let linked_scopes = scopes.clone();
     let rotated_scopes = scopes.clone();
+    let sweep_all = state.device_keys.refresh_reuse_sweep_all_sessions;
     let gate = with_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
             // (1) Advisory pre-check — precise 401s for a logged-out/rotated
@@ -403,7 +410,7 @@ pub async fn refresh(
             let old_refresh_id = match token_state(conn, &presented).await.map_err(DbError::from)? {
                 // R1 (#3022): a spent refresh token, presented again.
                 TokenState::Revoked { id } => {
-                    end_reused_lineage(conn, workspace_id, member_id, id).await?;
+                    end_reused_lineage(conn, workspace_id, member_id, id, sweep_all).await?;
                     return Ok(RefreshGate::Rejected(TokenRejection::Revoked));
                 }
                 other => match other.require_active() {
@@ -423,26 +430,12 @@ pub async fn refresh(
             // The replacement pair continues this session's lineage (#2677).
             // A pre-088 session has none yet and is given one here, once: from
             // this rotation on, what the phone registers is attributable.
-            let session_id = match session_id_of(conn, old_refresh_id)
+            let (session_id, stamp_lineage) = match session_id_of(conn, old_refresh_id)
                 .await
                 .map_err(DbError::from)?
             {
-                Some(session_id) => session_id,
-                None => {
-                    // #3022 review M5: the spent row carries the lineage too,
-                    // so a later replay of it can name — and end — the
-                    // lineage its successor continues.
-                    let session_id = new_session_id();
-                    momo_db::sqlx::query(
-                        "UPDATE token SET session_id = $2 WHERE id = $1 AND session_id IS NULL",
-                    )
-                    .bind(old_refresh_id)
-                    .bind(session_id)
-                    .execute(&mut *conn)
-                    .await
-                    .map_err(DbError::from)?;
-                    session_id
-                }
+                Some(session_id) => (session_id, false),
+                None => (new_session_id(), true),
             };
 
             if let Some(device_id) = find_linked_device_id_by_refresh_in_tx(
@@ -461,8 +454,15 @@ pub async fn refresh(
                         .await
                         .map_err(DbError::from)?
                 else {
-                    end_lineage_if_spent(conn, workspace_id, member_id, &presented, old_refresh_id)
-                        .await?;
+                    end_lineage_if_spent(
+                        conn,
+                        workspace_id,
+                        member_id,
+                        &presented,
+                        old_refresh_id,
+                        sweep_all,
+                    )
+                    .await?;
                     return Ok(RefreshGate::AlreadyUsed);
                 };
                 // A binding that moved on is a reuse only when it moved
@@ -470,16 +470,29 @@ pub async fn refresh(
                 // rotated it). A binding moved under a still-live token is a
                 // refusal, not evidence of a second holder.
                 if locked.refresh_id != old_refresh_id {
-                    end_lineage_if_spent(conn, workspace_id, member_id, &presented, old_refresh_id)
-                        .await?;
+                    end_lineage_if_spent(
+                        conn,
+                        workspace_id,
+                        member_id,
+                        &presented,
+                        old_refresh_id,
+                        sweep_all,
+                    )
+                    .await?;
                     return Ok(RefreshGate::AlreadyUsed);
+                }
+                // Stamped only now, under the device-link and token locks the
+                // path already holds, so the lock order stays device → token.
+                if stamp_lineage {
+                    stamp_spent_lineage(conn, old_refresh_id, session_id).await?;
                 }
 
                 let revoke = revoke_token(conn, &presented)
                     .await
                     .map_err(DbError::from)?;
                 if !revoke.revoked_now {
-                    end_reused_lineage(conn, workspace_id, member_id, old_refresh_id).await?;
+                    end_reused_lineage(conn, workspace_id, member_id, old_refresh_id, sweep_all)
+                        .await?;
                     return Ok(RefreshGate::AlreadyUsed);
                 }
                 if downgrade {
@@ -561,12 +574,16 @@ pub async fn refresh(
                 .await
                 .map_err(DbError::from)?;
             if !revoke.revoked_now {
-                end_reused_lineage(conn, workspace_id, member_id, old_refresh_id).await?;
+                end_reused_lineage(conn, workspace_id, member_id, old_refresh_id, sweep_all)
+                    .await?;
                 return Ok(RefreshGate::AlreadyUsed);
             }
             let Some(old_refresh_id) = revoke.id else {
                 return Ok(RefreshGate::AlreadyUsed);
             };
+            if stamp_lineage {
+                stamp_spent_lineage(conn, old_refresh_id, session_id).await?;
+            }
             let device_label = session_device_label(conn, old_refresh_id)
                 .await
                 .map_err(DbError::from)?;
@@ -640,15 +657,28 @@ const REFRESH_REUSE_GRACE_SECONDS: f64 = 30.0;
 /// and device keys — in the caller's transaction, which the caller then
 /// commits with its 401. A row with no lineage (spent before 088 and never
 /// rotated since) names nothing else to revoke.
+///
+/// **Which lineages.** A QR-linked lineage (the row carries an ADR-0180
+/// `device_label`) is a phone app: one process, rotations single-flight in
+/// momo-core. That is the device ADR-0188 R1 names (「재사용이 보이면 그
+/// 기기의 세션 계열을 전부 폐기」), and it is swept always. A password
+/// sign-in may be a browser with several tabs, which rotate without cross-tab
+/// coordination: a tab opened later rotates at boot and spends the token an
+/// older tab still holds, and the older tab presents it minutes later — a
+/// shape the server cannot tell from theft (#3022 review H2). Those lineages
+/// are swept only when `MOMO_REFRESH_REUSE_SWEEP_ALL_SESSIONS=true`, off until
+/// the web client coordinates rotation across tabs.
 async fn end_reused_lineage(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
     refresh_id: Uuid,
+    sweep_all: bool,
 ) -> Result<(), DbError> {
-    let row: Option<(Option<Uuid>, bool)> = momo_db::sqlx::query_as(
+    let row: Option<(Option<Uuid>, bool, bool)> = momo_db::sqlx::query_as(
         "SELECT session_id, \
-                COALESCE(revoked_at > now() - make_interval(secs => $2), false) \
+                COALESCE(revoked_at > now() - make_interval(secs => $2), false), \
+                device_label IS NOT NULL \
            FROM token WHERE id = $1",
     )
     .bind(refresh_id)
@@ -656,10 +686,10 @@ async fn end_reused_lineage(
     .fetch_optional(&mut *conn)
     .await
     .map_err(DbError::from)?;
-    let Some((Some(session_id), within_grace)) = row else {
+    let Some((Some(session_id), within_grace, linked)) = row else {
         return Ok(());
     };
-    if within_grace {
+    if within_grace || !(linked || sweep_all) {
         return Ok(());
     }
     revoke_session_lineage_tokens(conn, workspace_id, member_id, session_id)
@@ -683,13 +713,30 @@ async fn end_lineage_if_spent(
     member_id: Uuid,
     presented: &str,
     refresh_id: Uuid,
+    sweep_all: bool,
 ) -> Result<(), DbError> {
     if matches!(
         token_state(conn, presented).await.map_err(DbError::from)?,
         TokenState::Revoked { .. }
     ) {
-        end_reused_lineage(conn, workspace_id, member_id, refresh_id).await?;
+        end_reused_lineage(conn, workspace_id, member_id, refresh_id, sweep_all).await?;
     }
+    Ok(())
+}
+
+/// #3022 review M5: a pre-088 row gets the lineage its successor continues,
+/// so a later replay of it can name — and end — that lineage.
+async fn stamp_spent_lineage(
+    conn: &mut PgConnection,
+    refresh_id: Uuid,
+    session_id: Uuid,
+) -> Result<(), DbError> {
+    momo_db::sqlx::query("UPDATE token SET session_id = $2 WHERE id = $1 AND session_id IS NULL")
+        .bind(refresh_id)
+        .bind(session_id)
+        .execute(&mut *conn)
+        .await
+        .map_err(DbError::from)?;
     Ok(())
 }
 
