@@ -380,14 +380,22 @@ async function signedScenes(browser, origin) {
         const kept = await page.inputValue('[data-testid="agent-pane-reply-input"]');
         check(`${tag}/지시 전달 안 됨: 사유 + 글 남음`, (hint ?? "").startsWith("전달 안 됨") && kept.length > 0, { hint, kept });
         await shot(page, `signed-reply-not-delivered-${tag}`);
+        await context.close();
+      }
+      {
+        // 장면을 섞지 않는다(design-review): 새 칸에서 「거부 + 지시」만.
+        const { context, page } = await open(browser, origin, scheme, "agent-signed-fail", viewport);
         await page.getByTestId("agent-permission-reject").click();
+        const caret = await page.evaluate(() => document.activeElement?.getAttribute("data-testid"));
+        check(`${tag}/거부 무장: 캐럿은 지시 칸`, caret === "agent-permission-reject-note", { caret });
         await page.getByTestId("agent-permission-reject-note").fill("다르게 해 줘");
         await page.waitForTimeout(450);
         await page.getByTestId("agent-permission-commit").click();
         await page.getByTestId("agent-permission-outcome").waitFor();
         const text = await page.textContent('[data-testid="agent-permission-outcome"]');
         const settled = await page.getAttribute('[data-testid="agent-permission"]', "data-settled");
-        check(`${tag}/거부 갔고 지시 전달 안 됨: 둘 다 말함`, settled === "partial" && (text ?? "").includes("전달 안 됨"), { text, settled });
+        const moved = await page.inputValue('[data-testid="agent-pane-reply-input"]');
+        check(`${tag}/거부 갔고 지시 전달 안 됨: 둘 다 말함, 글은 지시 칸으로`, settled === "partial" && (text ?? "").includes("전달 안 됨") && moved === "다르게 해 줘", { text, settled, moved });
         check(`${tag}/실패 장면: 가로 넘침 0`, (await overflowX(page)) <= 0);
         await shot(page, `signed-partial-${tag}`);
         await context.close();
