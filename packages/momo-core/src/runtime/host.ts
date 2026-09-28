@@ -59,7 +59,10 @@ export interface SessionPort {
   /**
    * Run one refresh rotation as the ONLY rotation this credential store sees
    * (#3067). Optional: a host whose store is reachable from exactly one JS
-   * context (the phone) omits it and the core rotates directly.
+   * context may omit it and the core rotates directly. The phone implements it
+   * anyway, for time rather than exclusion: it wraps the rotation in an iOS
+   * background task so leaving the app mid-rotation does not freeze it before
+   * the new token is stored (#3098).
    *
    * A host whose store is shared — browser tabs and desktop windows share
    * localStorage and the keychain item — must, before calling `work`:

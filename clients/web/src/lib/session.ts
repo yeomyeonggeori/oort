@@ -7,7 +7,7 @@ import {
   type SessionStorageMode,
 } from "@momo/core/lib/sessionModel";
 import { withRotationLock } from "./rotationLock";
-import { desktopKeychain, isDesktop } from "./tauri";
+import { desktopKeychain, desktopRotationHold, isDesktop } from "./tauri";
 
 export {
   parsePersistedMetadata,
@@ -412,12 +412,24 @@ function adoptExternal(next: PersistedSession | null): void {
 export function exclusiveRotation<T>(work: () => Promise<T>): Promise<T> {
   return withRotationLock(async () => {
     await resyncFromStore();
-    const result = await work();
-    // Release only once the rotated token is where the next holder reads it.
-    // localStorage writes are synchronous; the keychain's are queued, and a
-    // hung one is waited on only up to KEYCHAIN_WAIT_MS.
-    await flushKeychain();
-    return result;
+    // Desktop: from here until the new token is written, closing the window
+    // waits for this rotation instead of destroying it mid-air (#3098). Taken
+    // after the lock and the re-read — a rotation still queued behind another
+    // window has spent nothing and needs no hold.
+    // Bounded like every other shell call here (#3072 M2): a stuck IPC must
+    // not stall every 401 retry behind the lock.
+    const held =
+      isDesktop() && (await within(desktopRotationHold.begin(), KEYCHAIN_WAIT_MS, false));
+    try {
+      const result = await work();
+      // Release only once the rotated token is where the next holder reads it.
+      // localStorage writes are synchronous; the keychain's are queued, and a
+      // hung one is waited on only up to KEYCHAIN_WAIT_MS.
+      await flushKeychain();
+      return result;
+    } finally {
+      if (held) void desktopRotationHold.end();
+    }
   });
 }
 

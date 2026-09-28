@@ -19,6 +19,8 @@
     "allow-keychain-load-refresh-token",
     "allow-keychain-store-refresh-token",
     "allow-keychain-clear-refresh-token",
+    "allow-session-rotation-begin",
+    "allow-session-rotation-end",
     "allow-open-external-url",
     "allow-open-pdf-attachment",
     "allow-detect-hosted-agents",

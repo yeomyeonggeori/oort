@@ -760,6 +760,33 @@ export const desktopKeychain = {
   },
 };
 
+/**
+ * Tells the shell a refresh rotation is open (#3098), so closing the window
+ * waits — bounded, in Rust — until the rotated token is in the keychain
+ * instead of destroying the webview with the response or the write in flight.
+ * `begin` answers whether the shell took it; only then is `end` owed.
+ */
+export const desktopRotationHold = {
+  async begin(): Promise<boolean> {
+    if (!IS_TAURI) return false;
+    try {
+      await invoke<void>("session_rotation_begin");
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  async end(): Promise<void> {
+    if (!IS_TAURI) return;
+    try {
+      await invoke<void>("session_rotation_end");
+    } catch {
+      // The shell's cap (CLOSE_WAIT_CAP) bounds a hold nobody released.
+    }
+  },
+};
+
 // ---- self-update ------------------------------------------------------------
 
 /** The build this shell is running, e.g. `0.1.0-next.1`. Null in a browser. */
