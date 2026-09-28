@@ -11383,7 +11383,9 @@ components:
             root-signed `momo.human.device_revoke.v1` letters, for workd to verify
             against its pinned root. Omitted when there are none and for a
             workspace host. A session-end revocation carries no letter and is
-            not relayed.
+            not relayed. At most the newest 256 are sent, so a host keeps every
+            letter it has seen. `targetPublicKey` is outside the signed bytes:
+            a host binds it to the key it already holds for `targetKeyId`.
           items:
             $ref: "#/components/schemas/DeviceRevocation"
 
