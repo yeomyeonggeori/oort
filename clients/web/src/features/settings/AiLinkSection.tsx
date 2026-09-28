@@ -508,7 +508,8 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
       data-testid="ai-board"
     >
       <div className="ai-pane flex min-w-0 flex-col gap-6" data-area="top">
-        <AiMyAccountsSection />
+        {/* 추가 창의 「API 키 · 팀이 함께」는 이 절의 「API 키 추가」와 같은 폼을 연다. */}
+        <AiMyAccountsSection onAddApiKey={operator && link ? startEditing : undefined} />
         {teamSection}
       </div>
       <div className="ai-pane flex min-w-0 flex-col gap-6" data-area="bottom">
