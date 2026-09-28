@@ -480,10 +480,8 @@ function PermissionCard({
   }, [armed]);
   // 확정 버튼이 사라지면 캐럿이 body로 떨어지지 않게 카드가 받는다. 결과 문장은 칸이 읽는다.
   useEffect(() => {
-    if (!outcome) return;
-    sectionRef.current?.focus({ preventScroll: true });
-    onOutcome(outcome.text);
-  }, [outcome, onOutcome]);
+    if (outcome) sectionRef.current?.focus({ preventScroll: true });
+  }, [outcome]);
   // 카드가 내려갈 때(서버의 `approval.decided`) 캐럿이 안에 있었으면 칸이 받는다.
   useLayoutEffect(() => {
     const section = sectionRef;
@@ -554,11 +552,16 @@ function PermissionCard({
     try {
       // 본문은 셋뿐이다(골든). 같은 결정을 다시 보내면 서버가 200으로 같은 행을 준다.
       await decide({ sessionId, requestEventId: permission.requestEventId, optionId: choice.optionId, kind });
+      // 칸에 먼저 올린다: 실시간 `approval.decided`가 응답보다 먼저 와 카드가 이미
+      // 내려갔어도 결과는 읽힌다(design-review R2 Low).
+      onOutcome(permissionSentLine(kind));
       setOutcome({ tone: "sent", text: permissionSentLine(kind) });
     } catch (err) {
       const failure = permissionFailure(err);
-      if (failure.closed) setOutcome({ tone: "closed", text: failure.text });
-      else setError(failure.text);
+      if (failure.closed) {
+        onOutcome(failure.text);
+        setOutcome({ tone: "closed", text: failure.text });
+      } else setError(failure.text);
     } finally {
       setBusy(false);
     }
