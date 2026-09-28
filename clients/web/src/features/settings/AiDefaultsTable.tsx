@@ -17,6 +17,19 @@ import {
   type AiDefaultsTeamKey,
   type PersonalRowId,
 } from "@momo/core/features/settings/aiDefaults";
+import {
+  linkUnresolvedSentence,
+  TEAM_DEFAULTS_CHECK_FIRST,
+  TEAM_DEFAULTS_NOT_APPLIED,
+  teamChoiceText,
+  teamModelNote,
+  teamOptionKey,
+  teamOptions,
+  type ProviderDefaultAi,
+  type TeamDefaultAiInput,
+  type TeamDefaultRowId,
+  type TeamLinkModels,
+} from "@momo/core/features/settings/defaultAi";
 import { cn } from "@/design/lib/cn";
 import { Select } from "@/design/ui/select";
 import { AiFoot } from "./aiAccountsParts";
@@ -29,29 +42,49 @@ import { useAiDefaults, useMyAccounts, writeAiDefaults } from "./aiDefaultsStore
 // 설정 › AI 연결 › 기본 AI (#2881 AA-8, 시안 §5 왼쪽 판, brief §4).
 //
 // 여섯 줄: 개인 셋(앱 명령·로컬 터미널·원격 작업)은 이 기기에 저장되는 선택 칸이고,
-// 팀 셋(팀 에이전트·요약·가드레일)은 운영자 서버 설정이라 점선 칸으로 읽기만 한다.
-// 선택지·폴백·저장은 코어 `aiDefaults.ts`가 판정한다. 이 파일은 그리기만 한다.
+// 팀 셋(팀 에이전트·요약·가드레일)은 운영자 서버 설정이다. 선택지·폴백·저장은 코어
+// `aiDefaults.ts`(개인)·`defaultAi.ts`(팀)가 판정한다. 이 파일은 그리기만 한다.
 //
-// 운영자 판정은 팀 연결 절과 같은 서버 응답이다(provider link GET: 운영자면 200, 아니면
-// 403). 팀 행 값을 서버에 저장하는 경로는 아직 없어서 운영자에게도 읽기 전용이고,
-// 그 사실을 표 밑 한 줄이 말한다.
+// 팀 에이전트·요약 줄은 운영자에게 선택 칸이다(#3042, `PUT /v1/provider/default-ai`).
+// 고를 수 있는지는 서버 답이다: default-ai GET 이 200 이면 칸을 열고, 403 이면 점선
+// 칸으로 읽기만 한다. 모델 선택지는 연결 확인의 `modelIds`뿐이다. 가드레일은 서버가
+// `off`만 받아 읽기 전용이다.
 // =============================================================================
 
+/** 운영자인데 팀 줄을 읽지 못했다(옛 서버 404·오류). 저장 칸이 없다는 사실만. */
 const TEAM_FOOT_OPERATOR =
-  "팀 줄은 운영자 설정이에요. 서버에 저장하는 칸이 아직 없어 지금은 서버가 정한 값을 보여 줘요.";
+  "팀 줄은 운영자 설정이에요. 이 서버에서 팀 줄을 불러오지 못해 지금은 서버가 정한 값을 보여 줘요.";
 const TEAM_FOOT_MEMBER = "팀 줄은 이 서버의 운영자만 바꿀 수 있어요.";
 const PERSONAL_FOOT =
   "내 구독은 나만 보는 결과에만 쓰입니다. 팀 에이전트와 요약은 내 구독으로 넘어가지 않습니다.";
+
+/**
+ * 팀 줄의 서버 값(#3042). `ready` = default-ai GET 200(운영자), `hidden` = 403,
+ * `error` = 그 밖(옛 서버 404 포함), `loading` = 아직 모름.
+ */
+export interface TeamDefaultsState {
+  readonly status: "loading" | "ready" | "hidden" | "error";
+  readonly value: ProviderDefaultAi | null;
+  /** 방금 한 연결 확인이 알려 준 연결과 모델. 확인 전이면 빈 목록. */
+  readonly links: readonly TeamLinkModels[];
+  /** 저장이 날고 있는 줄과 그 값. */
+  readonly pending: { rowId: TeamDefaultRowId; input: TeamDefaultAiInput | null } | null;
+  readonly saveError: { rowId: TeamDefaultRowId; message: string } | null;
+  readonly onChoose: (rowId: TeamDefaultRowId, input: TeamDefaultAiInput | null) => void;
+}
 
 export function AiDefaultsTable({
   teamKey,
   operator,
   browserTab,
+  team,
 }: {
   teamKey: AiDefaultsTeamKey;
   /** 서버가 운영자라고 답했나(200)·아니라고 답했나(403). 모르면 null. */
   operator: boolean | null;
   browserTab: boolean;
+  /** 팀 줄의 서버 값. 없으면 팀 줄은 읽기 전용이다. */
+  team?: TeamDefaultsState;
 }) {
   const prefs = useAiDefaults();
   const accounts = useMyAccounts();
@@ -67,6 +100,7 @@ export function AiDefaultsTable({
             prefs={prefs}
             input={input}
             accountsKnown={accounts !== null}
+            team={team}
           />
         ))}
       </ul>
@@ -77,7 +111,7 @@ export function AiDefaultsTable({
       {operator !== null && (
         <AiFoot>
           <span data-testid="ai-defaults-team-foot" data-operator={operator ? "yes" : "no"}>
-            {operator ? TEAM_FOOT_OPERATOR : TEAM_FOOT_MEMBER}
+            {!operator ? TEAM_FOOT_MEMBER : team?.status === "ready" ? TEAM_DEFAULTS_NOT_APPLIED : TEAM_FOOT_OPERATOR}
           </span>
         </AiFoot>
       )}
@@ -91,12 +125,14 @@ function DefaultRow({
   prefs,
   input,
   accountsKnown,
+  team,
 }: {
   row: AiDefaultRow;
   last: boolean;
   prefs: AiDefaultsPrefs;
   input: AiDefaultsInput;
   accountsKnown: boolean;
+  team: TeamDefaultsState | undefined;
 }) {
   const titleId = `ai-default-${row.id}-title`;
   const resolved = resolveRow(row.id, prefs, input);
@@ -104,7 +140,7 @@ function DefaultRow({
   const lines: { key: string; text: string; tone: "muted" | "warn" }[] = [];
   // 칸 밑 줄(모델·안내·폴백)은 선택 칸의 설명이다: 낭독기가 칸에서 경고를 듣는다.
   const lineId = (key: string) => `ai-default-${row.id}-${key}`;
-  const describedBy = ["model", "note", "fallback"].map(lineId).join(" ");
+  const describedBy = ["model", "note", "fallback", "saved", "error"].map(lineId).join(" ");
 
   let choice;
   if (personal) {
@@ -174,6 +210,58 @@ function DefaultRow({
         lines.push({ key: "model", text: modelLine({ kind: "teamKey" }, input.teamKey), tone: "muted" });
       }
     }
+  } else if (
+    (row.id === "teamAgent" || row.id === "summary") &&
+    team?.status === "ready" &&
+    team.value !== null &&
+    input.teamKey.status === "present"
+  ) {
+    // 운영자(서버 200)에게 팀 줄은 서버에 저장되는 선택 칸이다(#3042).
+    const id = row.id;
+    const saved = team.value[id];
+    const pending = team.pending?.rowId === id ? team.pending.input : undefined;
+    const selected: TeamDefaultAiInput | null =
+      pending !== undefined ? pending : saved ? { linkPosition: saved.linkPosition, modelId: saved.modelId } : null;
+    if (team.links.length === 0) {
+      // 확인 전에는 고를 모델을 모른다. 지어낸 목록 대신 저장된 값과 할 일을 말한다.
+      choice = <ReadOnlyBox>{teamChoiceText(id, saved)}</ReadOnlyBox>;
+      lines.push({ key: "model", text: TEAM_DEFAULTS_CHECK_FIRST, tone: "muted" });
+    } else {
+      const options = teamOptions(id, saved, team.links);
+      const value = teamOptionKey(selected);
+      const current = options.find((option) => option.key === value);
+      choice = (
+        <Select
+          aria-labelledby={titleId}
+          aria-describedby={describedBy}
+          value={value}
+          title={current?.text}
+          className="h-control rounded-md text-meta"
+          onChange={(event) => {
+            const picked = options.find((option) => option.key === event.target.value);
+            if (picked) team.onChoose(id, picked.input);
+          }}
+          data-testid={`ai-default-${row.id}-select`}
+        >
+          {options.map((option) => (
+            <option key={option.key} value={option.key}>
+              {option.text}
+            </option>
+          ))}
+        </Select>
+      );
+      const note = teamModelNote(selected, team.links);
+      if (note) lines.push({ key: "model", text: note, tone: "muted" });
+    }
+    if (pending !== undefined) {
+      lines.push({ key: "saved", text: "저장하고 있어요", tone: "muted" });
+    }
+    if (saved && !saved.linkResolved && pending === undefined) {
+      lines.push({ key: "saved", text: linkUnresolvedSentence(saved), tone: "warn" });
+    }
+    if (team.saveError?.rowId === id) {
+      lines.push({ key: "error", text: team.saveError.message, tone: "warn" });
+    }
   } else {
     choice = <ReadOnlyBox>{resolved.using}</ReadOnlyBox>;
     if (row.id === "summary" && input.teamKey.status === "present" && resolved.state === "ok") {
@@ -211,6 +299,7 @@ function DefaultRow({
               line.tone === "warn" ? "text-warn" : "text-ink-muted"
             )}
             data-testid={`ai-default-${row.id}-${line.key}`}
+            role={line.key === "error" ? "alert" : undefined}
           >
             {line.text}
           </span>

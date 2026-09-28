@@ -16,7 +16,15 @@ import { teamCheckResult, teamProbeDetail } from "@momo/core/features/settings/t
 import type { AiDefaultsTeamKey } from "@momo/core/features/settings/aiDefaults";
 import { IS_TAURI } from "@/lib/env";
 import { useSubscriptionEntryState } from "@/features/welcome/SubscriptionAgentEntry";
-import { AiDefaultsTable } from "./AiDefaultsTable";
+import { AiDefaultsTable, type TeamDefaultsState } from "./AiDefaultsTable";
+import {
+  fetchProviderDefaultAi,
+  probeModelLists,
+  putProviderDefaultAi,
+  teamDefaultSaveMessage,
+  type TeamDefaultAiInput,
+  type TeamDefaultRowId,
+} from "@momo/core/features/settings/defaultAi";
 import { myAccountsBrowserTab } from "./aiMyAccountsModel";
 import {
   choiceLabel,
@@ -271,6 +279,31 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
     onSuccess: setProbe,
   });
 
+  // 기본 AI 표의 팀 줄(#3042). 운영자라고 서버가 답한 뒤에만 읽는다: 같은 게이트라
+  // 비운영자는 403 뿐이고, 그 판정은 이미 위 GET 이 줬다.
+  const defaultAiKey = ["settings", "provider-default-ai"];
+  const defaultAi = useQuery({
+    queryKey: defaultAiKey,
+    queryFn: fetchProviderDefaultAi,
+    retry: false,
+    enabled: query.isSuccess,
+  });
+  const [teamSaveError, setTeamSaveError] = useState<TeamDefaultsState["saveError"]>(null);
+  const saveTeamDefault = useMutation({
+    mutationFn: (vars: { rowId: TeamDefaultRowId; input: TeamDefaultAiInput | null }) =>
+      putProviderDefaultAi(vars.rowId, vars.input),
+    onMutate: () => setTeamSaveError(null),
+    onSuccess: (value) => {
+      if (value) client.setQueryData(defaultAiKey, value);
+      else void client.invalidateQueries({ queryKey: defaultAiKey });
+    },
+    onError: (error, vars) => {
+      setTeamSaveError({ rowId: vars.rowId, message: teamDefaultSaveMessage(error) });
+      // 403 이면 서버가 운영자 아님이라고 답한 것이다: 다시 읽어 칸을 읽기 전용으로.
+      if (isOperatorDenied(error)) void client.invalidateQueries({ queryKey: defaultAiKey });
+    },
+  });
+
   /**
    * 저장이 끝났다(폼은 `TeamKeyForm`, 채팅 카드와 같은 것). 폼을 닫고 곧바로 확인을
    * 돈다: 서버에 저장 전 판정 경로가 없으므로 「저장하고 확인」이 이 순서다.
@@ -396,6 +429,26 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
             ? { status: "mock" }
             : { status: "absent" };
   const rowName = link ? (configured ? `${link.endpointLabel} · 팀 기본` : link.endpointLabel) : "";
+  const teamDefaults: TeamDefaultsState = {
+    status: !query.isSuccess
+      ? operatorAnswer === false
+        ? "hidden"
+        : "loading"
+      : defaultAi.isPending
+        ? "loading"
+        : defaultAi.isError
+          ? isOperatorDenied(defaultAi.error)
+            ? "hidden"
+            : "error"
+          : defaultAi.data
+            ? "ready"
+            : "error",
+    value: defaultAi.data ?? null,
+    links: probeModelLists(probe),
+    pending: saveTeamDefault.isPending ? saveTeamDefault.variables : null,
+    saveError: teamSaveError,
+    onChoose: (rowId, input) => saveTeamDefault.mutate({ rowId, input }),
+  };
 
   const teamSection = (
     <AiSection labelledBy={TEAM_HEADING_ID} testId="ai-team">
@@ -551,7 +604,12 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
             title="기본 AI"
             scope="기능마다 부를 계정과 모델"
           />
-          <AiDefaultsTable teamKey={defaultsTeamKey} operator={operatorAnswer} browserTab={browserTab} />
+          <AiDefaultsTable
+            teamKey={defaultsTeamKey}
+            operator={operatorAnswer}
+            browserTab={browserTab}
+            team={teamDefaults}
+          />
         </AiSection>
       </div>
 

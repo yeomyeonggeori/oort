@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AI_DEFAULTS_LOCAL_SLOT } from "@momo/core/features/settings/aiDefaults";
 import type { AiDefaultsTeamKey } from "@momo/core/features/settings/aiDefaults";
 import { HarnessUnlinkDialog } from "@/features/welcome/harnessLogin/HarnessUnlinkDialog";
-import { AiDefaultsTable } from "./AiDefaultsTable";
+import { AiDefaultsTable, type TeamDefaultsState } from "./AiDefaultsTable";
+import { probeModelLists } from "@momo/core/features/settings/defaultAi";
 import { publishMyAccounts, writeAiDefaults } from "./aiDefaultsStore";
 
 // =============================================================================
@@ -148,6 +149,145 @@ describe("기본 AI 표 화면", () => {
     render(AiDefaultsTable, { teamKey: TEAM, operator: true, browserTab: true });
     expect(q("ai-default-localTerminal-select")).toBeNull();
     expect(q("ai-default-localTerminal")?.textContent).toContain("데스크탑 앱에서 고를 수 있어요");
+  });
+});
+
+// #3042: 팀 줄은 운영자(default-ai GET 200)에게 서버 저장 선택 칸이다.
+const PROBE = {
+  ok: true,
+  entries: [
+    {
+      position: 0,
+      endpointLabel: "https://api.openai.com/v1",
+      probe: { outcome: "ok", method: "models", modelIds: ["gpt-4o", "gpt-4o-mini"] },
+    },
+    { position: 1, endpointLabel: "https://openrouter.ai/api/v1", probe: { outcome: "ok", method: "key" } },
+  ],
+};
+
+function teamState(over: Partial<TeamDefaultsState> = {}): TeamDefaultsState {
+  return {
+    status: "ready",
+    value: { teamAgent: null, summary: null },
+    links: probeModelLists(PROBE),
+    pending: null,
+    saveError: null,
+    onChoose: () => undefined,
+    ...over,
+  };
+}
+
+describe("기본 AI 표 팀 줄 저장 (#3042)", () => {
+  it("운영자에게는 선택 칸이고, 선택지는 연결 확인의 모델뿐이며 구독은 한 줄도 없다(교차)", () => {
+    const onChoose = vi.fn();
+    // 이 맥에 로그인된 구독 계정이 있어도(beforeEach) 팀 줄에는 오지 않는다.
+    render(AiDefaultsTable, { teamKey: TEAM, operator: true, browserTab: false, team: teamState({ onChoose }) });
+    for (const id of ["teamAgent", "summary"]) {
+      const select = q(`ai-default-${id}-select`) as HTMLSelectElement;
+      expect(select).not.toBeNull();
+      const texts = Array.from(select.options).map((o) => o.textContent ?? "");
+      expect(texts.slice(1)).toEqual([
+        "api.openai.com · 기본 모델",
+        "api.openai.com · gpt-4o",
+        "api.openai.com · gpt-4o-mini",
+        "openrouter.ai · 기본 모델",
+      ]);
+      expect(texts.join("|")).not.toMatch(/구독|Claude|ChatGPT|이 맥/);
+      expect(Array.from(select.options).map((o) => o.value).join("|")).not.toMatch(/profile/);
+    }
+    // 같은 화면의 개인 줄은 구독을 받는다(양성 대조).
+    const local = q("ai-default-localTerminal-select") as HTMLSelectElement;
+    expect(Array.from(local.options).some((o) => o.textContent?.includes("구독"))).toBe(true);
+    // 가드레일은 여전히 읽기 전용.
+    expect(q("ai-default-guardrail")?.querySelector("select")).toBeNull();
+
+    const select = q("ai-default-teamAgent-select") as HTMLSelectElement;
+    act(() => {
+      select.value = "link:0:gpt-4o-mini";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(onChoose).toHaveBeenCalledWith("teamAgent", { linkPosition: 0, modelId: "gpt-4o-mini" });
+    act(() => {
+      select.value = "";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(onChoose).toHaveBeenLastCalledWith("teamAgent", null);
+    // 저장은 되지만 적용은 준비 중이라고 말한다.
+    expect(q("ai-defaults-team-foot")?.textContent).toBe(
+      "팀 줄의 선택은 서버에 저장돼요. 팀 에이전트와 요약이 이 선택을 따르는 것은 준비 중이에요."
+    );
+  });
+
+  it("목록을 주지 않는 연결을 고르면 기본 모델만이라고 말한다", () => {
+    render(AiDefaultsTable, {
+      teamKey: TEAM,
+      operator: true,
+      browserTab: false,
+      team: teamState({
+        value: {
+          teamAgent: { linkPosition: 1, endpointLabel: "https://openrouter.ai/api/v1", linkResolved: true, modelId: null },
+          summary: null,
+        },
+      }),
+    });
+    expect((q("ai-default-teamAgent-select") as HTMLSelectElement).value).toBe("link:1:");
+    expect(q("ai-default-teamAgent-model")?.textContent).toBe(
+      "이 연결은 모델 목록을 알려 주지 않아요. 기본 모델만 고를 수 있어요."
+    );
+  });
+
+  it("연결 확인 전이면 모델을 지어내지 않고, 저장된 값과 할 일을 말한다", () => {
+    render(AiDefaultsTable, {
+      teamKey: TEAM,
+      operator: true,
+      browserTab: false,
+      team: teamState({
+        links: [],
+        value: {
+          teamAgent: { linkPosition: 0, endpointLabel: "https://api.openai.com/v1", linkResolved: true, modelId: "gpt-4o" },
+          summary: null,
+        },
+      }),
+    });
+    expect(q("ai-default-teamAgent-select")).toBeNull();
+    expect(q("ai-default-teamAgent")?.textContent).toContain("api.openai.com · gpt-4o");
+    expect(q("ai-default-teamAgent-model")?.textContent).toBe("연결 확인을 하면 고를 수 있는 모델이 보여요.");
+    expect(q("ai-default-summary")?.textContent).toContain("고르지 않음 · 서버가 정함");
+  });
+
+  it("고른 연결이 바뀌었으면(linkResolved:false) 조용히 따라가지 않고 말한다", () => {
+    render(AiDefaultsTable, {
+      teamKey: TEAM,
+      operator: true,
+      browserTab: false,
+      team: teamState({
+        value: {
+          teamAgent: null,
+          summary: { linkPosition: 3, endpointLabel: "https://old.example/v1", linkResolved: false, modelId: "m-1" },
+        },
+      }),
+    });
+    const select = q("ai-default-summary-select") as HTMLSelectElement;
+    expect(select.value).toBe("link:3:m-1");
+    expect(select.selectedOptions[0]?.textContent).toBe("old.example · m-1 (연결이 바뀜)");
+    expect(q("ai-default-summary-saved")?.textContent).toBe(
+      "고른 연결(old.example)이 연결 순서에서 바뀌었거나 빠졌어요. 다시 골라 주세요."
+    );
+  });
+
+  it("서버가 403이면(hidden) 운영자여도 읽기 전용이고, 저장 오류는 그 줄에 말한다", () => {
+    render(AiDefaultsTable, { teamKey: TEAM, operator: true, browserTab: false, team: teamState({ status: "hidden" }) });
+    expect(q("ai-default-teamAgent-select")).toBeNull();
+    act(() => root?.unmount());
+    host?.remove();
+    render(AiDefaultsTable, {
+      teamKey: TEAM,
+      operator: true,
+      browserTab: false,
+      team: teamState({ saveError: { rowId: "summary", message: "팀 줄은 이 서버의 운영자만 바꿀 수 있어요." } }),
+    });
+    expect(q("ai-default-summary-error")?.getAttribute("role")).toBe("alert");
+    expect(q("ai-default-teamAgent-error")).toBeNull();
   });
 });
 
