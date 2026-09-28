@@ -228,6 +228,15 @@ impl PreviewLedger {
             .remove(&(session_id, request_event_id));
     }
 
+    /// Drop the entries of sessions that are gone (a task that ended without
+    /// its own cleanup — aborted or panicked).
+    fn retain_sessions(&self, live: impl Fn(&Uuid) -> bool) {
+        self.0
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .retain(|(session_id, _), _| live(session_id));
+    }
+
     fn get(&self, session_id: Uuid, request_event_id: Uuid) -> Option<String> {
         self.0
             .lock()
@@ -280,6 +289,9 @@ impl SessionManager {
     /// Forget sessions whose task has finished (the agent exited on its own).
     pub fn reap(&mut self) {
         self.sessions.retain(|_, handle| !handle.task.is_finished());
+        let sessions = &self.sessions;
+        self.previews
+            .retain_sessions(|session_id| sessions.contains_key(session_id));
     }
 
     /// Open a session for a dispatched spawn. On success the server session

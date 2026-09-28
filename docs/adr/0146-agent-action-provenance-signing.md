@@ -462,6 +462,7 @@ momo.human.control.v1
 - **host가 원천이다.** workd가 ACP `session/request_permission`의 도구 호출(요청의 `toolCall`에, 에이전트가 앞서 알린 같은 `toolCallId`의 필드를 합친 것)에서 미리보기를 만든다.
   - 닫힌 객체 `momo.work_permission.preview.v1`: `schema`, `kind`(ACP ToolKind 닫힌 어휘, 그 밖은 `other`), `title`, `locations`(경로, 줄마다 하나), `input`(원 입력의 압축 JSON), `truncated`.
   - 정화는 0188 D5 규칙 그대로다. 보이지 않는 문자·방향 제어·줄/문단 구분자를 지우고(릴레이 집합 ∪ 자격 스캔의 보이지 않는 집합 ∪ U+2028/2029), 자격 문자열을 가리고, 필드당 3,500자에서 앞뒤를 남기고 자른다. 하나라도 자르면 `truncated`가 참이다.
+  - 자격 문자열은 host 가림(`redact_credentials`)에 더해, 앱 표시 정화(`agentPane.ts` `CREDENTIAL_PATTERNS`)가 가리는 모양을 모두 같거나 더 넓게 가린다(`mask_display_shapes`, 보안 검수 M1). 그래야 정직한 `Authorization: Bearer …` 요청도 앱이 바꾸지 않고 보여 주어 허락할 수 있다.
   - 정규 바이트는 그 객체의 `canonical_json`(bundle_manifest와 같은 함수)이다. 해시는 그 SHA-256 소문자 hex다(`momo_wire::permission_preview`).
 - **host는 요청을 올리기 전에** 해시를 세션의 원장(`SessionManager::permission_preview_sha256`)에 적는다. `approval.requested`에 `preview`와 `preview_sha256`을 싣는다.
 - **서버는 그대로 중계한다.**

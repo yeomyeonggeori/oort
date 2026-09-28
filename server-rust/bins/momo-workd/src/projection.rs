@@ -345,9 +345,126 @@ fn preview_field(text: &str) -> (String, bool) {
                 && !matches!(character, '\u{2028}' | '\u{2029}')
         })
         .collect();
-    let masked = redact_credentials(&visible);
+    let masked = mask_display_shapes(&redact_credentials(&visible));
     let cut = masked.chars().count() > MAX_FIELD_CHARS;
     (bound_field(&masked, MAX_FIELD_CHARS), cut)
+}
+
+/// The credential shapes an app's display sanitiser masks
+/// (`@momo/core` `agentPane.ts` `CREDENTIAL_PATTERNS`), masked here too — each
+/// at least as widely — so the app finds nothing left to mask and shows the
+/// hashed bytes unchanged (#3118 security review M1). A preview the app would
+/// alter cannot be allowed, so without this an honest `curl -H "Authorization:
+/// Bearer …"` request could never be allowed from a phone. Runs after
+/// [`redact_credentials`], whose marks match none of these shapes.
+fn mask_display_shapes(text: &str) -> String {
+    fn word(c: char) -> bool {
+        c.is_ascii_alphanumeric() || c == '_'
+    }
+    fn run(rest: &str, allowed: impl Fn(char) -> bool) -> usize {
+        rest.chars()
+            .take_while(|c| allowed(*c))
+            .map(char::len_utf8)
+            .sum()
+    }
+    fn alnum(c: char) -> bool {
+        c.is_ascii_alphanumeric()
+    }
+    fn b64url(c: char) -> bool {
+        c.is_ascii_alphanumeric() || c == '_' || c == '-'
+    }
+    /// `(bytes kept before the mask, bytes masked)` of a shape starting here.
+    fn shape(rest: &str) -> Option<(usize, usize)> {
+        let prefixed = |prefix: &str, allowed: fn(char) -> bool, min: usize| {
+            let tail = rest.strip_prefix(prefix)?;
+            let n = run(tail, allowed);
+            (tail[..n].chars().count() >= min).then_some((0, prefix.len() + n))
+        };
+        if let Some(hit) = prefixed("sk-", b64url, 16) {
+            return Some(hit);
+        }
+        for p in ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"] {
+            if let Some(hit) = prefixed(p, alnum, 20) {
+                return Some(hit);
+            }
+        }
+        if let Some(hit) = prefixed("github_pat_", word, 20) {
+            return Some(hit);
+        }
+        for p in ["xoxa-", "xoxb-", "xoxp-", "xoxo-", "xoxs-", "xoxr-"] {
+            if let Some(hit) = prefixed(p, |c| c.is_ascii_alphanumeric() || c == '-', 10) {
+                return Some(hit);
+            }
+        }
+        if let Some(hit) = prefixed("AKIA", |c| c.is_ascii_digit() || c.is_ascii_uppercase(), 16) {
+            return Some(hit);
+        }
+        if let Some(hit) = prefixed("AIza", b64url, 30) {
+            return Some(hit);
+        }
+        if let Some(tail) = rest.strip_prefix("eyJ") {
+            let mut at = 0;
+            let mut ok = true;
+            for part in 0..3 {
+                let n = run(&tail[at..], b64url);
+                // The first part's 8 include nothing of `eyJ`, as in the core.
+                if tail[at..at + n].len() < 8 {
+                    ok = false;
+                    break;
+                }
+                at += n;
+                if part < 2 {
+                    if !tail[at..].starts_with('.') {
+                        ok = false;
+                        break;
+                    }
+                    at += 1;
+                }
+            }
+            if ok {
+                return Some((0, 3 + at));
+            }
+        }
+        if rest
+            .get(..6)
+            .is_some_and(|p| p.eq_ignore_ascii_case("bearer"))
+        {
+            let after = &rest[6..];
+            let spaces = run(after, char::is_whitespace);
+            if spaces > 0 {
+                let token = &after[spaces..];
+                let n = run(token, |c| {
+                    c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '~' | '+' | '/' | '-')
+                });
+                if n >= 16 {
+                    let pad = run(&token[n..], |c| c == '=');
+                    return Some((6 + spaces, n + pad));
+                }
+            }
+        }
+        None
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut previous: Option<char> = None;
+    let mut index = 0;
+    while index < text.len() {
+        let rest = &text[index..];
+        let at_boundary = !previous.is_some_and(word);
+        if at_boundary {
+            if let Some((keep, masked)) = shape(rest) {
+                out.push_str(&rest[..keep]);
+                out.push_str(REDACTED_CREDENTIAL);
+                index += keep + masked;
+                previous = Some(']');
+                continue;
+            }
+        }
+        let c = rest.chars().next().expect("index < len");
+        out.push(c);
+        previous = Some(c);
+        index += c.len_utf8();
+    }
+    out
 }
 
 /// Remove characters that change how text renders without being visible:
@@ -673,6 +790,44 @@ mod tests {
         assert!(long.truncated);
         assert_eq!(long.input.chars().count(), MAX_FIELD_CHARS);
         assert!(momo_wire::permission_preview::validate_preview(&long.to_value()).is_ok());
+    }
+
+    /// #3118 security review M1: every shape the app's display sanitiser
+    /// masks is masked by the host first, so an honest preview reaches the
+    /// app unchanged by display and can be allowed.
+    #[test]
+    fn the_preview_masks_every_shape_the_app_would() {
+        let samples = [
+            (
+                "Bearer",
+                "curl -H 'Authorization: Bearer abcdefghijklmnopqrst' x",
+            ),
+            ("bearer lower", "bearer abcdefghijklmnop=="),
+            ("sk-16", "key sk-abcdefghijklmnop end"),
+            ("sk-proj", "sk-proj-abcdefghijklmnop"),
+            ("gh", "ghp_abcdefghijklmnopqrst"),
+            ("github_pat", "github_pat_abcdefghijklmnopqrst"),
+            ("slack", "xoxb-1234567890"),
+            ("aws", "AKIAABCDEFGHIJKLMNOP"),
+            ("google", "AIzaabcdefghijklmnopqrstuvwxyz0123"),
+            ("jwt short", "eyJabcdefgh.abcdefgh.abcdefgh"),
+        ];
+        for (what, sample) in samples {
+            let (field, _) = preview_field(sample);
+            assert!(field.contains(REDACTED_CREDENTIAL), "{what}: {field}");
+            for needle in ["abcdefghijklmnop", "1234567890", "ABCDEFGHIJKLMNOP"] {
+                assert!(!field.contains(needle), "{what}: {field}");
+            }
+        }
+        // Words that merely contain a prefix, and short tokens, are left alone.
+        for text in [
+            "risk-assessment-for-the-quarter",
+            "task-abcdefghijklmnopq",
+            "Bearer short",
+            "한글 설정.md를 고쳐요 ✅ bé",
+        ] {
+            assert_eq!(preview_field(text).0, text);
+        }
     }
 
     #[test]
