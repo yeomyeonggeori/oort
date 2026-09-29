@@ -174,6 +174,33 @@ describe("놓친 대화 요약 카드 상태", () => {
   });
 });
 
+describe("닫기", () => {
+  it("불러오는 동안 닫으면 요약이 도착해도 다시 나오지 않는다", async () => {
+    let release: (value: unknown) => void = () => undefined;
+    getMemorySettings.mockReturnValue(new Promise((resolve) => { release = resolve; }));
+    const { host } = mount(card());
+    click(byTestId(host, "missed-summary-dismiss"));
+    expect(byTestId(host, "missed-summary-card")).toBeNull();
+    release(settings());
+    for (let i = 0; i < 6; i += 1) await flush();
+    expect(byTestId(host, "missed-summary-card")).toBeNull();
+  });
+
+  it("닫은 뒤 알림 콜백을 부른다(초점을 돌려줄 자리)", async () => {
+    const onDismissed = vi.fn();
+    const view = mount(card(undefined, { onDismissed }));
+    for (let i = 0; i < 6; i += 1) await flush();
+    click(byTestId(view.host, "missed-summary-dismiss"));
+    expect(onDismissed).toHaveBeenCalledTimes(1);
+  });
+
+  it("근거 링크의 접근 이름은 보이는 글자로 시작한다", async () => {
+    const { host } = await render();
+    const link = byTestId(host, "missed-summary-evidence-link");
+    expect(link?.getAttribute("aria-label")?.startsWith(link?.textContent ?? "?")).toBe(true);
+  });
+});
+
 describe("근거 링크", () => {
   it("같은 채널의 근거는 타임라인 점프로 간다", async () => {
     const { host, onJump } = await render();
@@ -224,7 +251,7 @@ describe("근거 링크", () => {
 });
 
 describe("이전 요약 접기", () => {
-  it("요약이 셋을 넘으면 오래된 것은 접고 시간순으로 펼친다", async () => {
+  it("요약이 둘을 넘으면 오래된 것은 접고 시간순으로 펼친다", async () => {
     const digests = [1, 2, 3, 4, 5].map((n) =>
       digest({ id: `d${n}`, fromSeq: n * 10, toSeq: n * 10 + 9, body: `요약 본문 ${n}` })
     );
@@ -234,7 +261,7 @@ describe("이전 요약 접기", () => {
       [...host.querySelectorAll('[data-testid="missed-summary-digest"] p:first-child')].map(
         (el) => el.textContent
       );
-    expect(shown()).toEqual(["요약 본문 3", "요약 본문 4", "요약 본문 5"]);
+    expect(shown()).toEqual(["요약 본문 4", "요약 본문 5"]);
     click(byTestId(host, "missed-summary-older"));
     expect(shown()).toEqual([
       "요약 본문 1",

@@ -1310,6 +1310,12 @@ export function ChatShell() {
               lastReadSeq={openedWith.lastReadSeq}
               headSeq={openedWith.latestSeq}
               onJump={onJumpToMessage}
+              // 카드를 닫으면 닫기 버튼(초점이 있던 곳)이 사라진다. 포인터가 세밀한
+              // 기기(키보드가 있는 쪽)에서만 컴포저로 초점을 돌려준다: 폰에서는
+              // 초점이 곧 화상 키보드라 닫기 한 번에 키보드가 올라오면 안 된다.
+              onDismissed={() => {
+                if (window.matchMedia("(pointer: fine)").matches) focusComposer();
+              }}
             />
           )}
 

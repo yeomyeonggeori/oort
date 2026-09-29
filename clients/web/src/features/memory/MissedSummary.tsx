@@ -25,12 +25,10 @@ import {
 // shows again. Leaving the channel and coming back with new unread starts clean.
 // =============================================================================
 
-function shownKey(state: MissedCardState): string {
-  if (state.kind === "ready") {
-    const newest = state.digests.reduce((max, digest) => Math.max(max, digest.toSeq), 0);
-    return `ready:${newest}`;
-  }
-  return state.kind;
+function newestToSeq(state: MissedCardState): number {
+  return state.kind === "ready"
+    ? state.digests.reduce((max, digest) => Math.max(max, digest.toSeq), 0)
+    : 0;
 }
 
 export function MissedSummary({
@@ -39,6 +37,7 @@ export function MissedSummary({
   lastReadSeq,
   headSeq,
   onJump,
+  onDismissed,
 }: {
   workspaceId: string;
   channelId: string;
@@ -47,6 +46,8 @@ export function MissedSummary({
   /** The newest channel sequence when the channel was opened. */
   headSeq: number;
   onJump?: (messageId: string, seq: number) => void;
+  /** Called after the reader closes the card, so the shell can put focus somewhere real. */
+  onDismissed?: () => void;
 }) {
   const settings = useMemorySettings(workspaceId);
   const off =
@@ -69,11 +70,17 @@ export function MissedSummary({
     channelId,
     headSeq,
   });
-  const [dismissed, setDismissed] = useState<string | null>(null);
+  // Dismissal is remembered as "up to here": closing the card in any state hides
+  // it for the visit, and only a digest that reaches PAST what was on screen (or
+  // past the head the reader came back to) shows it again. Keying on the state
+  // kind would bring the card back the moment loading turned into ready.
+  const [dismissedThrough, setDismissedThrough] = useState<number | null>(null);
 
   if (state.kind === "hidden") return null;
-  const key = shownKey(state);
-  if (dismissed === key) return null;
+  if (dismissedThrough !== null) {
+    const fresh = state.kind === "ready" && newestToSeq(state) > dismissedThrough;
+    if (!fresh) return null;
+  }
   return (
     <MissedSummaryCard
       state={state}
@@ -82,7 +89,10 @@ export function MissedSummary({
         void settings.refetch();
         if (digests.isError) void digests.refetch();
       }}
-      onDismiss={() => setDismissed(key)}
+      onDismiss={() => {
+        setDismissedThrough(Math.max(headSeq, newestToSeq(state)));
+        onDismissed?.();
+      }}
       onJump={onJump}
     />
   );

@@ -16,6 +16,8 @@ import {
   canChangeWorkspaceMemory,
   deriveMissedCard,
   deriveReceiptChip,
+  evidenceAccessibleLabel,
+  evidenceLabel,
   memoryOffReason,
   memoryWriteErrorMessage,
 } from "./presentation";
@@ -285,5 +287,17 @@ describe("canChangeWorkspaceMemory", () => {
     expect(canChangeWorkspaceMemory("member")).toBe(false);
     expect(canChangeWorkspaceMemory("guest")).toBe(false);
     expect(canChangeWorkspaceMemory(undefined)).toBe(false);
+  });
+});
+
+describe("evidence labels", () => {
+  it("the accessible name starts with the visible text (label in name)", () => {
+    for (const index of [0, 1, 8]) {
+      expect(evidenceAccessibleLabel(index).startsWith(evidenceLabel(index))).toBe(true);
+    }
+  });
+
+  it("never shows a sequence number as text", () => {
+    expect(evidenceLabel(0)).toBe("근거 1");
   });
 });

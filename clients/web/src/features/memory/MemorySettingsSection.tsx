@@ -170,7 +170,7 @@ export function MemorySettingsSection({
       </Subsection>
 
       <p className="break-keep text-meta text-ink-muted" data-testid="memory-channel-hint">
-        채널마다 제외하거나 멈추려면 채널 헤더의 ⋮ 메뉴에서 기억 설정을 열어요.
+        채널마다 제외하거나 멈추려면 채널 헤더의 더보기 메뉴(⋮)에서 기억 설정을 열어요.
       </p>
     </SectionShell>
   );

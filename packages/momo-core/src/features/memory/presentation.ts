@@ -47,7 +47,7 @@ export function wantsMissedSummary(input: {
 }
 
 /** Digests shown before the rest fold behind a disclosure. */
-export const MISSED_CARD_VISIBLE_DIGESTS = 3;
+export const MISSED_CARD_VISIBLE_DIGESTS = 2;
 
 /** Evidence links shown per digest before the rest fold. */
 export const EVIDENCE_VISIBLE_LINKS = 4;
@@ -189,7 +189,7 @@ export function evidenceLabel(index: number): string {
 }
 
 export function evidenceAccessibleLabel(index: number): string {
-  return `근거 메시지 ${index + 1}로 이동`;
+  return `${evidenceLabel(index)}, 원본 메시지로 이동`;
 }
 
 // ---- receipt chip -----------------------------------------------------------

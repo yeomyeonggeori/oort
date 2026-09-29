@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
@@ -35,18 +35,22 @@ export function MissedSummaryCard({
   onJump?: (messageId: string, seq: number) => void;
 }) {
   const [showOlder, setShowOlder] = useState(false);
+  const headingId = useId();
   return (
     <section
-      aria-label="안 읽은 동안 요약"
+      aria-labelledby={headingId}
       data-testid="missed-summary-card"
       data-state={state.kind}
       className="mx-4 my-2 flex min-w-0 flex-col gap-2 rounded-xl border border-line bg-surface px-4 py-3"
     >
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-body font-semibold text-ink">안 읽은 동안</h2>
+        <h2 id={headingId} className="text-body font-semibold text-ink">
+          안 읽은 동안
+        </h2>
         <Button
           variant="ghost"
           size="icon"
+          className="tap-target"
           aria-label="요약 닫기"
           data-testid="missed-summary-dismiss"
           onClick={onDismiss}
@@ -91,6 +95,7 @@ export function MissedSummaryCard({
           <Button
             variant="secondary"
             size="sm"
+            className="tap-target"
             data-testid="missed-summary-retry"
             onClick={onRetry}
           >
@@ -130,7 +135,7 @@ function ReadyBody({
     ? state.digests
     : state.digests.slice(olderCount);
   return (
-    <div className="flex min-w-0 flex-col gap-3">
+    <div className="flex max-h-pane min-w-0 flex-col gap-3 overflow-y-auto">
       {olderCount > 0 && (
         <button
           type="button"
