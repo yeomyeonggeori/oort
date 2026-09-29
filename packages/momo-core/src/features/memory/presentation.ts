@@ -38,12 +38,32 @@ export function wantsMissedSummary(input: {
   provided: boolean;
   channelId: string | null;
   unreadCount: number;
+  /**
+   * False for a room the server does not summarize by default: a DM between two
+   * people (ADR-0196 D9, 「사람끼리의 DM은 요약·추출에서 기본 제외」). A DM with an
+   * agent stays eligible. Matches the phone client's rule.
+   */
+  eligible: boolean;
 }): boolean {
   return (
     input.provided &&
+    input.eligible &&
     input.channelId !== null &&
     input.unreadCount >= MISSED_CARD_MIN_UNREAD
   );
+}
+
+/**
+ * Whether the server summarizes this room by default. A channel does; a DM only
+ * when the other side is an agent. A DM whose peer is unknown counts as a
+ * person-to-person DM: showing a card there would claim "nothing to summarize"
+ * for a room the server never summarizes.
+ */
+export function memoryEligibleRoom(input: {
+  kind: string | undefined;
+  peerKind: string | undefined;
+}): boolean {
+  return input.kind !== "dm" || input.peerKind === "agent";
 }
 
 /** Digests shown before the rest fold behind a disclosure. */
@@ -82,24 +102,22 @@ export type MissedCardState =
       unsummarizedCount: number | null;
     };
 
+// The sentences below are shared word for word with the phone client
+// (clients/mobile/src/features/memory/copy.ts, #3166) so one state reads the same
+// on every surface. Change them in both places, and only where a surface truly
+// needs different words.
 export const MEMORY_OFF_COPY: Record<MemoryOffReason, string> = {
-  workspaceOff:
-    "이 워크스페이스는 팀 기억을 꺼 두었어요. 관리자가 설정 › 기억에서 켤 수 있어요.",
-  workspacePaused:
-    "팀 기억이 잠시 멈춰 있어요. 관리자가 다시 시작하면 요약이 이어서 만들어져요.",
-  channelExcluded:
-    "이 채널은 요약에서 빠져 있어요. 채널 메뉴의 기억 설정에서 바꿀 수 있어요.",
-  channelPaused:
-    "이 채널의 기억이 잠시 멈춰 있어요. 채널 메뉴의 기억 설정에서 다시 시작할 수 있어요.",
-  mePaused:
-    "내 기억을 멈춰 두었어요. 설정 › 기억에서 다시 시작할 수 있어요.",
+  workspaceOff: "이 워크스페이스는 기억 기능을 꺼 두었어요.",
+  workspacePaused: "팀 기억이 잠시 멈춰 있어서 요약을 만들지 않아요.",
+  channelExcluded: "이 채널은 요약에서 빠져 있어요.",
+  channelPaused: "이 채널의 요약이 잠시 멈춰 있어요.",
+  mePaused: "내 기억 일시정지가 켜져 있어서 요약을 보여 주지 않아요.",
 };
 
 export const MISSED_NOT_YET_COPY =
-  "아직 요약하지 못했어요. 안 읽은 메시지의 요약이 만들어지면 여기에 나타나요.";
-export const MISSED_EMPTY_COPY =
-  "요약할 만한 내용이 없어요. 안 읽은 메시지를 바로 읽어 보세요.";
-export const MISSED_ERROR_COPY = "요약을 불러오지 못했어요. 잠시 뒤에 다시 시도해 주세요.";
+  "아직 요약을 만들지 못했어요. 만들어지면 여기에 보여 줄게요.";
+export const MISSED_EMPTY_COPY = "요약할 만큼 쌓인 대화가 아직 없어요.";
+export const MISSED_ERROR_COPY = "요약을 불러오지 못했어요.";
 
 /**
  * Why memory is not running for this channel and this reader, or null when it
@@ -173,15 +191,11 @@ export function deriveMissedCard(input: {
 
 /** The one line under a digest that tells how much it rests on. */
 export function digestSourceLabel(digest: Pick<MemoryDigest, "sourceCount">): string {
-  return `메시지 ${digest.sourceCount}개를 바탕으로 만들었어요`;
+  return `대화 ${digest.sourceCount}개를 요약했어요`;
 }
 
 /** Sentence for the tail of a card whose summary stops short of the head. */
-export function behindHeadLabel(unsummarizedCount: number | null): string {
-  return unsummarizedCount === null
-    ? "가장 최근 대화는 아직 요약하지 못했어요."
-    : `가장 최근 메시지 ${unsummarizedCount}개는 아직 요약하지 못했어요.`;
-}
+export const BEHIND_HEAD_COPY = "가장 최근 대화는 아직 요약하지 못했어요.";
 
 /** 「근거 1」, the link text for the nth source message (no sequence numbers on screen). */
 export function evidenceLabel(index: number): string {
@@ -214,14 +228,17 @@ export function receiptChipLabel(servedCount: number): string {
 }
 
 export function withheldLabel(count: number): string {
-  return `이 채널 답에는 싣지 않은 기억 ${count}개`;
+  return `이 채널이라 싣지 않은 기억 ${count}개`;
 }
 
 export const WITHHELD_EXPLAIN_COPY =
-  "요청한 분은 볼 수 있지만, 이 채널 멤버 모두에게 보이는 답에는 넣지 않은 기억이에요. 내용은 보이지 않고 개수만 알려요.";
+  "질문한 사람은 볼 수 있지만 이 채널의 모든 멤버가 볼 수는 없어서, 답에는 싣지 않았어요. 내용은 보여 주지 않고 개수만 알려 줘요.";
 
-export function unlistedLabel(count: number): string {
-  return `나머지 ${count}개는 이 목록에서 열 수 없는 기억이에요.`;
+export const RECEIPT_TITLE = "이 답에 참고한 기억";
+export const RECEIPT_ONLY_READABLE = "이 목록에는 내가 볼 수 있는 기억만 나와요.";
+
+export function receiptSummaryLabel(count: number): string {
+  return `기억 ${count}개를 참고해서 답했어요.`;
 }
 
 /**
@@ -244,6 +261,12 @@ export function deriveReceiptChip(
 }
 
 export const CHANNEL_MEMORY_SETTINGS_LABEL = "기억 설정";
+
+export const MEMORY_PAUSE_LABEL = "내 기억 일시정지";
+export const MEMORY_PAUSE_DETAIL_OFF =
+  "켜 두면 새 기억을 모으지도, 에이전트 답에 싣지도 않아요. 이미 있는 기억은 지우지 않고 그대로 둬요.";
+export const MEMORY_PAUSE_DETAIL_ON = "지금 멈춰 있어요. 끄면 다시 요약하고 답에 실어요.";
+export const MEMORY_PAUSE_WORKSPACE_OFF = "지금은 팀 설정에서 기억이 꺼져 있어요.";
 
 // ---- settings ---------------------------------------------------------------
 

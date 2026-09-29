@@ -3,6 +3,10 @@ import { InlineBanner, Skeleton } from "@/features/common/States";
 import { SectionShell, SettingsToggleRow, Subsection } from "@/features/settings/SettingsFields";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
 import {
+  MEMORY_PAUSE_DETAIL_OFF,
+  MEMORY_PAUSE_DETAIL_ON,
+  MEMORY_PAUSE_LABEL,
+  MEMORY_PAUSE_WORKSPACE_OFF,
   MEMORY_SETTINGS_LOAD_ERROR,
   TEAM_MEMORY_NOTICE,
   WORKSPACE_SWITCH_ADMIN_ONLY_REASON,
@@ -111,8 +115,8 @@ export function MemorySettingsSection({
         >
           <SettingsToggleRow
             testId="memory-me-paused"
-            name="내 기억 잠시 멈추기"
-            description="멈춰 두면 내 메시지를 기억에 쓰지 않고, 내가 부른 에이전트도 기억을 참고하지 않아요. 저장된 요약은 그대로 남아요."
+            name={MEMORY_PAUSE_LABEL}
+            description={me.paused ? MEMORY_PAUSE_DETAIL_ON : MEMORY_PAUSE_DETAIL_OFF}
             checked={me.paused}
             disabled={offline || busy}
             describedBy={offline ? offlineReasonId : undefined}
@@ -122,6 +126,11 @@ export function MemorySettingsSection({
             }}
           />
         </div>
+        {!workspace.enabled && (
+          <p className="text-meta text-ink-muted" data-testid="memory-mine-workspace-off">
+            {MEMORY_PAUSE_WORKSPACE_OFF}
+          </p>
+        )}
       </Subsection>
 
       <Subsection title="워크스페이스" lines={[TEAM_MEMORY_NOTICE]}>

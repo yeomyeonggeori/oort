@@ -4,6 +4,10 @@ import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@momo/core/lib/api";
 import {
+  MEMORY_PAUSE_DETAIL_OFF,
+  MEMORY_PAUSE_DETAIL_ON,
+  MEMORY_PAUSE_LABEL,
+  MEMORY_PAUSE_WORKSPACE_OFF,
   WORKSPACE_SWITCH_ADMIN_ONLY_REASON,
   memoryWriteErrorMessage,
 } from "@momo/core/features/memory/presentation";
@@ -133,6 +137,26 @@ describe("설정 › 기억: 상태", () => {
     expect(input(host, "memory-workspace-enabled").disabled).toBe(true);
     expect(input(host, "memory-me-paused").disabled).toBe(true);
     expect(byTestId(host, "memory-offline-reason")?.textContent).toContain("연결이 끊겨");
+  });
+
+  it("내 일시정지 문장은 폰과 같은 상수이고, 켜져 있으면 지금 상태를 말한다", async () => {
+    const { host } = await render("member");
+    expect(host.textContent).toContain(MEMORY_PAUSE_LABEL);
+    expect(host.textContent).toContain(MEMORY_PAUSE_DETAIL_OFF);
+    unmount();
+    getMemorySettings.mockResolvedValue(settings({ me: { paused: true } }));
+    const paused = await render("member");
+    expect(paused.host.textContent).toContain(MEMORY_PAUSE_DETAIL_ON);
+  });
+
+  it("팀 설정에서 꺼져 있으면 내 행 아래에서 그 사실을 말한다", async () => {
+    getMemorySettings.mockResolvedValue(
+      settings({ workspace: { enabled: false, paused: false, resetEpoch: 0 } })
+    );
+    const { host } = await render("member");
+    expect(byTestId(host, "memory-mine-workspace-off")?.textContent).toBe(
+      MEMORY_PAUSE_WORKSPACE_OFF
+    );
   });
 
   it("팀 고지: 채널 대화가 요약 AI에게 간다고 스위치 옆에서 말한다", async () => {

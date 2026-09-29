@@ -4,6 +4,7 @@ import { act, createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@momo/core/lib/api";
 import {
+  BEHIND_HEAD_COPY,
   MEMORY_OFF_COPY,
   MISSED_EMPTY_COPY,
   MISSED_NOT_YET_COPY,
@@ -80,7 +81,7 @@ describe("놓친 대화 요약 카드 상태", () => {
     const { root, host } = await render();
     expect(root()?.getAttribute("data-state")).toBe("ready");
     expect(host.textContent).toContain("결제 오류는 재시도 큐를 늘려 해결하기로 했어요.");
-    expect(host.textContent).toContain("메시지 18개를 바탕으로 만들었어요");
+    expect(host.textContent).toContain("대화 18개를 요약했어요");
     expect(host.querySelectorAll('[data-testid="missed-summary-evidence-link"]')).toHaveLength(2);
     // 클라이언트가 지어낸 요약 줄이 없다: 본문은 서버 문자열 하나다.
     expect(host.querySelectorAll('[data-testid="missed-summary-digest"]')).toHaveLength(1);
@@ -119,7 +120,7 @@ describe("놓친 대화 요약 카드 상태", () => {
   it("일부만 요약됨: 요약은 보이고 최근 구간이 빠졌다고 사실대로 덧붙인다", async () => {
     listMemoryDigests.mockResolvedValue(page({ summarizedThroughSeq: 26 }));
     const { host } = await render();
-    expect(byTestId(host, "missed-summary-behind")?.textContent).toContain("4개");
+    expect(byTestId(host, "missed-summary-behind")?.textContent).toBe(BEHIND_HEAD_COPY);
   });
 
   it("따라잡았으면 덧붙임이 없고, 다시 만드는 중이라는 말은 어디에도 없다", async () => {
@@ -274,10 +275,16 @@ describe("이전 요약 접기", () => {
 });
 
 describe("wantsMissedSummary", () => {
+  const base = { provided: true, channelId: CH, unreadCount: 5, eligible: true };
+
   it("서버가 싣고 안 읽음이 다섯 이상일 때만 세운다", () => {
-    expect(wantsMissedSummary({ provided: true, channelId: CH, unreadCount: 5 })).toBe(true);
-    expect(wantsMissedSummary({ provided: true, channelId: CH, unreadCount: 4 })).toBe(false);
-    expect(wantsMissedSummary({ provided: false, channelId: CH, unreadCount: 40 })).toBe(false);
-    expect(wantsMissedSummary({ provided: true, channelId: null, unreadCount: 40 })).toBe(false);
+    expect(wantsMissedSummary(base)).toBe(true);
+    expect(wantsMissedSummary({ ...base, unreadCount: 4 })).toBe(false);
+    expect(wantsMissedSummary({ ...base, provided: false, unreadCount: 40 })).toBe(false);
+    expect(wantsMissedSummary({ ...base, channelId: null, unreadCount: 40 })).toBe(false);
+  });
+
+  it("사람끼리의 DM처럼 서버가 요약하지 않는 방에는 세우지 않는다", () => {
+    expect(wantsMissedSummary({ ...base, eligible: false, unreadCount: 40 })).toBe(false);
   });
 });

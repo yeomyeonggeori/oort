@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@momo/core/lib/api";
 import type { MemoryReceipt } from "@momo/core/features/memory/model";
-import { WITHHELD_EXPLAIN_COPY } from "@momo/core/features/memory/presentation";
+import { RECEIPT_ONLY_READABLE, WITHHELD_EXPLAIN_COPY } from "@momo/core/features/memory/presentation";
 import { MemoryReceiptChip } from "./MemoryReceiptChip";
 import { CH, RUN, WS, byTestId, click, digest, flush, mount, unmount } from "./memoryTestKit";
 
@@ -121,16 +121,18 @@ describe("기억 n개 참고 칩", () => {
     click(byTestId(host, "memory-receipt-chip"));
     await flush();
     const withheld = byTestId(document.body, "memory-receipt-withheld");
-    expect(withheld?.textContent).toContain("이 채널 답에는 싣지 않은 기억 3개");
+    expect(withheld?.textContent).toContain("이 채널이라 싣지 않은 기억 3개");
     expect(withheld?.textContent).toContain(WITHHELD_EXPLAIN_COPY);
   });
 
-  it("열 수 없는 항목이 있으면 목록과 라벨 숫자가 어긋난 이유를 말한다", async () => {
+  it("목록에는 볼 수 있는 기억만 나온다고 항상 알린다", async () => {
     getRunMemoryReceipt.mockResolvedValue(receipt({ servedCount: 4 }));
     const { host } = await render();
     click(byTestId(host, "memory-receipt-chip"));
     await flush();
-    expect(byTestId(document.body, "memory-receipt-unlisted")?.textContent).toContain("3개");
+    expect(byTestId(document.body, "memory-receipt-only-readable")?.textContent).toBe(
+      RECEIPT_ONLY_READABLE
+    );
   });
 
   it("영수증은 한 번만 받는다(같은 run은 캐시)", async () => {

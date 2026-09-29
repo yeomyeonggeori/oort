@@ -4,7 +4,7 @@ import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import {
   MISSED_CARD_VISIBLE_DIGESTS,
-  behindHeadLabel,
+  BEHIND_HEAD_COPY,
   digestSourceLabel,
   type MissedCardState,
 } from "@momo/core/features/memory/presentation";
@@ -170,7 +170,7 @@ function ReadyBody({
           className="break-keep text-meta text-ink-muted"
           data-testid="missed-summary-behind"
         >
-          {behindHeadLabel(state.unsummarizedCount)}
+          {BEHIND_HEAD_COPY}
         </p>
       )}
     </div>

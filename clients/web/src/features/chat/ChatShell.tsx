@@ -109,7 +109,10 @@ import { PhoneLinkChannelCard } from "@/features/welcome/PhoneLinkChannelCard";
 import type { AiConnectLine } from "@momo/core/features/commands/registry";
 import { AiConnectCard, AiConnectSuggestion } from "./AiConnectCard";
 import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
-import { wantsMissedSummary } from "@momo/core/features/memory/presentation";
+import {
+  memoryEligibleRoom,
+  wantsMissedSummary,
+} from "@momo/core/features/memory/presentation";
 import { MissedSummary } from "@/features/memory/MissedSummary";
 import { CommandSuggestSlot } from "@/features/timeline/commandSuggestSlot";
 import { registerLocalCardHost } from "./localCards";
@@ -1302,6 +1305,10 @@ export function ChatShell() {
             provided: isSurfaceProvided("teamMemory"),
             channelId,
             unreadCount: timelineUnread.unreadCount,
+            // 사람끼리의 DM은 서버가 기본으로 요약하지 않는다(ADR-0196 D9). 상대를
+            // 모르는 DM도 같은 쪽으로 접는다: 모르는 채로 카드를 세우면 「요약이 없다」를
+            // 잘못 말하게 된다. 에이전트와의 DM은 그대로 대상이다.
+            eligible: memoryEligibleRoom({ kind: channel?.kind, peerKind: peer?.kind }),
           }) && (
             <MissedSummary
               key={`${channelId}:${openedWith.lastReadSeq ?? 0}`}

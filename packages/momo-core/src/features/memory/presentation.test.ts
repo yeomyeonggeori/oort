@@ -12,12 +12,12 @@ import {
   MISSED_NOT_YET_COPY,
   CHANNEL_SWITCH_ADMIN_ONLY_REASON,
   WORKSPACE_SWITCH_ADMIN_ONLY_REASON,
-  behindHeadLabel,
   canChangeWorkspaceMemory,
   deriveMissedCard,
   deriveReceiptChip,
   evidenceAccessibleLabel,
   evidenceLabel,
+  memoryEligibleRoom,
   memoryOffReason,
   memoryWriteErrorMessage,
 } from "./presentation";
@@ -209,13 +209,6 @@ describe("deriveMissedCard", () => {
   });
 });
 
-describe("behindHeadLabel", () => {
-  it("names the count only when it is known", () => {
-    expect(behindHeadLabel(3)).toContain("3개");
-    expect(behindHeadLabel(null)).not.toMatch(/\d/);
-  });
-});
-
 describe("deriveReceiptChip", () => {
   function receipt(over: Partial<MemoryReceipt> = {}): MemoryReceipt {
     return {
@@ -299,5 +292,15 @@ describe("evidence labels", () => {
 
   it("never shows a sequence number as text", () => {
     expect(evidenceLabel(0)).toBe("근거 1");
+  });
+});
+
+describe("memoryEligibleRoom", () => {
+  it("summarizes channels and agent DMs, never person-to-person or unknown-peer DMs", () => {
+    expect(memoryEligibleRoom({ kind: "public", peerKind: undefined })).toBe(true);
+    expect(memoryEligibleRoom({ kind: "private", peerKind: undefined })).toBe(true);
+    expect(memoryEligibleRoom({ kind: "dm", peerKind: "agent" })).toBe(true);
+    expect(memoryEligibleRoom({ kind: "dm", peerKind: "human" })).toBe(false);
+    expect(memoryEligibleRoom({ kind: "dm", peerKind: undefined })).toBe(false);
   });
 });

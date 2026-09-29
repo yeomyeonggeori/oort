@@ -6,7 +6,9 @@ import {
   WITHHELD_EXPLAIN_COPY,
   deriveReceiptChip,
   digestSourceLabel,
-  unlistedLabel,
+  RECEIPT_ONLY_READABLE,
+  RECEIPT_TITLE,
+  receiptSummaryLabel,
   withheldLabel,
   type ReceiptChipModel,
 } from "@momo/core/features/memory/presentation";
@@ -74,7 +76,12 @@ export function ReceiptChipView({
         data-testid="memory-receipt-popover"
         className="flex max-h-pane-md flex-col gap-3 overflow-y-auto"
       >
-        <h3 className="text-body font-semibold text-ink">이 답이 참고한 기억</h3>
+        <div className="flex flex-col gap-1">
+          <h3 className="text-body font-semibold text-ink">{RECEIPT_TITLE}</h3>
+          <p className="text-meta text-ink-muted" data-numeric="">
+            {receiptSummaryLabel(model.servedCount)}
+          </p>
+        </div>
         {model.digests.length > 0 ? (
           <ul className="flex flex-col gap-3">
             {model.digests.map((digest) => (
@@ -102,14 +109,12 @@ export function ReceiptChipView({
             참고한 기억을 이 목록에서 열 수 없어요.
           </p>
         )}
-        {model.unlistedCount > 0 && model.digests.length > 0 && (
-          <p
-            className="break-keep text-meta text-ink-muted"
-            data-testid="memory-receipt-unlisted"
-          >
-            {unlistedLabel(model.unlistedCount)}
-          </p>
-        )}
+        <p
+          className="break-keep text-meta text-ink-muted"
+          data-testid="memory-receipt-only-readable"
+        >
+          {RECEIPT_ONLY_READABLE}
+        </p>
         {model.withheldCount !== null && (
           <div
             className="flex flex-col gap-1 border-t border-line pt-3"
