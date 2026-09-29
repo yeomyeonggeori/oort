@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Monitor, Smartphone } from "lucide-react";
+import { Monitor, Server, Smartphone } from "lucide-react";
 import { ApiError } from "@momo/core/lib/api";
 import { NetworkError } from "@momo/core/lib/http";
 import {
@@ -15,6 +15,7 @@ import {
   rootRowFor,
   submitEndorsement,
   submitRevocation,
+  unapprovablePhoneKeys,
   type DeviceKey,
 } from "@momo/core/features/auth/deviceKeys";
 import { Button } from "@/design/ui/button";
@@ -24,6 +25,7 @@ import {
   desktopDeviceKey,
   type DesktopDeviceKeyStatus,
   type DesktopHostDelivery,
+  type DesktopHostPin,
 } from "@/lib/tauri";
 import {
   autoRebindTried,
@@ -58,6 +60,9 @@ import { ConfirmButton, Field, StatusChip, Subsection } from "./SettingsFields";
 
 const LOCAL_KEY = (workspaceId: string) =>
   ["settings", "device-key-local", workspaceId] as const;
+
+/** How often the half state is read again (#3129). workd polls every ~2 s. */
+const HALF_STATE_POLL_MS = 5_000;
 
 const LINES = [
   "에이전트에게 보내는 지시와 권한 허용에는 기기 키 서명이 필요합니다. 이 맥이 서명의 뿌리이고, 폰은 이 맥에서 승인해야 지시할 수 있습니다.",
@@ -105,6 +110,10 @@ export function DeviceKeysBlock({
       return status;
     },
     retry: false,
+    // The half state turns 「켜짐」 on its own a poll after the root is pinned
+    // (#3117): read it again while it lasts rather than show a stale state.
+    refetchInterval: (query) =>
+      query.state.data?.host?.signatureEnforcement === "server_only" ? HALF_STATE_POLL_MS : false,
   });
   const server = useQuery({
     queryKey: DEVICE_KEYS_QUERY_KEY(workspaceId),
@@ -173,6 +182,9 @@ function DeviceKeysBody({
   const bound =
     !mute && local.root !== null && rootRow !== undefined && rootRow.id === local.root.keyId;
   const phones = phoneKeys(keys);
+  // #3129: waiting phones no root may approve (#3119) are shown, not hidden,
+  // with why — the phone says 「QR 연결 필요」 and the person looks for it here.
+  const unapprovable = unapprovablePhoneKeys(keys).sort((a, b) => b.createdAtMs - a.createdAtMs);
   const lockedReasonId = useId();
   const lockedReason = offline
     ? "연결이 끊겨 지금은 승인하거나 끊을 수 없습니다."
@@ -200,9 +212,20 @@ function DeviceKeysBody({
         mute={mute}
         bound={bound}
       />
+      <HostSignatureRow
+        workspaceId={workspaceId}
+        host={local.host}
+        bound={bound}
+        pinned={
+          bound &&
+          local.host?.pinnedRootKeyId != null &&
+          local.root !== null &&
+          local.host.pinnedRootKeyId.toLowerCase() === local.root.keyId.toLowerCase()
+        }
+      />
       <div className="flex min-w-0 flex-col gap-2">
         <h4 className="text-meta font-semibold text-ink">지시 기기</h4>
-        {phones.length === 0 ? (
+        {phones.length === 0 && unapprovable.length === 0 ? (
           <p className="break-keep text-body text-ink-muted" data-testid="device-keys-no-phone">
             승인할 폰이 없습니다. 아래 「폰 연결」로 폰을 붙이면 여기에서 승인합니다.
           </p>
@@ -219,6 +242,9 @@ function DeviceKeysBody({
                 locked={lockedReason !== null}
                 lockedReasonId={lockedReasonId}
               />
+            ))}
+            {unapprovable.map((key) => (
+              <UnapprovablePhoneRow key={key.id} phone={key} />
             ))}
           </ul>
         )}
@@ -820,6 +846,8 @@ function PhoneKeyRow({
   });
 
   const endorsed = phone.state === "endorsed";
+  // #3119/#3129: approved before 「QR 연결로만」 — it keeps working, and says so.
+  const linkNote = endorsed ? approvedLinkNote(phone) : null;
   const close = () => {
     setAsking(false);
     endorse.reset();
@@ -847,9 +875,15 @@ function PhoneKeyRow({
           ) : (
             <StatusChip tone="warn">승인 전</StatusChip>
           )}
+          {linkNote && <StatusChip tone="warn">{linkNote.chip}</StatusChip>}
         </p>
         {/* The approve panel shows it large; one fingerprint on screen at a time. */}
         {fingerprint && !asking && <Fingerprint value={fingerprint} />}
+        {linkNote && (
+          <p className="break-keep text-meta text-ink-muted" data-testid="device-key-phone-link-note">
+            {linkNote.detail}
+          </p>
+        )}
       </div>
     </div>
   );
@@ -984,5 +1018,249 @@ function PhoneKeyRow({
         </p>
       )}
     </li>
+  );
+}
+
+// ---- phones the server will not let a root approve (#3129) -------------------
+
+/**
+ * An approved phone from before 「QR 연결로만」 (ADR-0146 D-6 증보, #3119): it
+ * keeps working; the Mac marks it and recommends a QR re-link. `undefined`
+ * (an older server) says nothing.
+ */
+function approvedLinkNote(phone: DeviceKey): { chip: string; detail: string } | null {
+  if (phone.linkedSession === false) {
+    return {
+      chip: "QR 아님",
+      detail:
+        "QR 연결 전 규칙으로 등록된 폰입니다. 지시 권한을 끊고 QR로 다시 연결하는 것을 권합니다.",
+    };
+  }
+  if (phone.linkedFromMac === false) {
+    return {
+      chip: "맥 QR 아님",
+      detail:
+        "맥이 아닌 곳에서 띄운 QR로 연결된 폰입니다. 지시 권한을 끊고 이 맥의 QR로 다시 연결하는 것을 권합니다.",
+    };
+  }
+  return null;
+}
+
+/** Why a waiting phone cannot be approved, in the phone's own words. */
+function unapprovableCopy(phone: DeviceKey): { chip: string; detail: string } {
+  return phone.linkedSession === false
+    ? {
+        chip: "QR 아님",
+        detail:
+          "QR로 연결하지 않은 로그인에서 등록된 폰이라 승인할 수 없습니다. 폰에서 로그아웃한 뒤 아래 「폰 연결」의 QR로 다시 연결하세요.",
+      }
+    : {
+        chip: "맥 QR 아님",
+        detail:
+          "맥이 아닌 곳에서 띄운 QR로 연결된 폰이라 승인할 수 없습니다. 폰에서 로그아웃한 뒤 아래 「폰 연결」의 QR로 다시 연결하세요.",
+      };
+}
+
+function UnapprovablePhoneRow({ phone }: { phone: DeviceKey }) {
+  const fingerprint = useFingerprint(phone.publicKey);
+  const label = phone.label.trim() || "이름 없는 폰";
+  const copy = unapprovableCopy(phone);
+  return (
+    <li
+      className="flex min-w-0 items-start gap-2 border-b border-line p-3 last:border-b-0"
+      data-testid={`device-key-unapprovable-${phone.id}`}
+      data-device-key-state={phone.state}
+    >
+      <Smartphone className="mt-px size-4 shrink-0 text-ink-muted" aria-hidden="true" />
+      <div className="flex min-w-0 flex-1 flex-col gap-px">
+        <p className="flex min-w-0 flex-wrap items-center gap-2 text-body text-ink">
+          <span className="min-w-0 break-keep">{label}</span>
+          <StatusChip tone="muted">승인 불가</StatusChip>
+          <StatusChip tone="warn">{copy.chip}</StatusChip>
+        </p>
+        {fingerprint && <Fingerprint value={fingerprint} />}
+        <p className="break-keep text-meta text-ink-muted">{copy.detail}</p>
+      </div>
+    </li>
+  );
+}
+
+// ---- this Mac's work host: does it check signatures? (#3129) ------------------
+
+type Enforcement = NonNullable<DesktopHostPin["signatureEnforcement"]>;
+
+/**
+ * What the host's signature check is, in the page's words (#3117 status,
+ * #3129 surface). `server_only` is the half state: the server requires
+ * signatures and this host does not check them yet, because no root is pinned
+ * — the way out is this Mac's root, which the row points at.
+ */
+function hostSignatureCopy(input: {
+  host: DesktopHostPin;
+  bound: boolean;
+  pinned: boolean;
+}): {
+  enforcement: Enforcement;
+  chip: string;
+  tone: "ok" | "warn" | "muted";
+  detail: string;
+  /** The latch can be lowered here: workd latched it on the server's word
+   *  (or could not read it), and the server no longer asks. */
+  canReset: boolean;
+  /** Why it cannot, when it is on and the person may wonder. */
+  resetBlocked: string | null;
+} | null {
+  const { host, bound, pinned } = input;
+  const enforcement = host.signatureEnforcement;
+  if (!host.running || enforcement === undefined) return null;
+  if (!(host.workspaceMatches ?? host.matches)) return null;
+  switch (enforcement) {
+    case "enforced": {
+      const by = host.signaturesRequiredBy ?? null;
+      const serverAsks = host.serverRequiresSignatures === true;
+      return {
+        enforcement,
+        chip: "켜짐",
+        tone: "ok",
+        detail:
+          by === "config"
+            ? "작업 호스트 설정이 켜 두었습니다. 이 맥의 작업 호스트는 서명 없는 지시와 권한 허용을 거절합니다."
+            : by === "unreadable"
+              ? "검증 상태를 읽지 못해 켜 둔 채로 있습니다. 이 맥의 작업 호스트는 서명 없는 지시와 권한 허용을 거절합니다."
+              : serverAsks
+                ? "서버가 요구해 켰습니다. 이 맥의 작업 호스트는 서명 없는 지시와 권한 허용을 거절합니다."
+                : "서버는 서명 요구를 껐지만, 한 번 켜진 검증은 이 맥에서만 끌 수 있습니다.",
+        canReset: by !== "config" && !serverAsks,
+        resetBlocked:
+          by === "config"
+            ? null
+            : serverAsks
+              ? "서버가 서명을 요구하는 동안에는 끌 수 없습니다."
+              : null,
+      };
+    }
+    case "server_only":
+      return {
+        enforcement,
+        chip: "서버만 켜짐",
+        tone: "warn",
+        detail: !bound
+          ? "서버는 지시 서명을 요구하지만 이 맥의 작업 호스트는 아직 검증하지 않습니다. 위에서 이 맥을 뿌리로 등록하면 작업 호스트가 검증을 켭니다."
+          : pinned
+            ? "서버는 지시 서명을 요구하고, 작업 호스트가 뿌리를 고정했습니다. 몇 초 안에 검증이 켜집니다."
+            : "서버는 지시 서명을 요구하지만 이 맥의 작업 호스트는 아직 검증하지 않습니다. 작업 호스트가 이 맥의 키를 뿌리로 고정하면 검증이 켜집니다.",
+        canReset: false,
+        resetBlocked: null,
+      };
+    case "off":
+      return {
+        enforcement,
+        chip: "꺼짐",
+        tone: "muted",
+        detail: "서버가 지시 서명을 요구하지 않아 작업 호스트도 검증하지 않습니다.",
+        canReset: false,
+        resetBlocked: null,
+      };
+  }
+}
+
+function HostSignatureRow({
+  workspaceId,
+  host,
+  bound,
+  pinned,
+}: {
+  workspaceId: string;
+  host: DesktopHostPin | null;
+  bound: boolean;
+  pinned: boolean;
+}) {
+  const client = useQueryClient();
+  const hintId = useId();
+  const [notice, setNotice] = useState<string | null>(null);
+  const reset = useMutation({
+    mutationFn: async () => {
+      setNotice(null);
+      return desktopDeviceKey.resetSignatureRequirement(workspaceId);
+    },
+    onSuccess: ({ required }) =>
+      setNotice(
+        required
+          ? "작업 호스트 설정이 검증을 켜 두어 꺼지지 않았습니다."
+          : "검증을 껐습니다. 서버가 다시 서명을 요구하면 작업 호스트가 스스로 다시 켭니다."
+      ),
+    onSettled: () => void client.invalidateQueries({ queryKey: LOCAL_KEY(workspaceId) }),
+  });
+  if (!host) return null;
+  const copy = hostSignatureCopy({ host, bound, pinned });
+  if (!copy) return null;
+  // The shell rejects with a bare code string (Tauri), typed here as unknown.
+  const failure: unknown = reset.error;
+  const error = reset.isError
+    ? failure === "device_key_declined"
+      ? "검증을 끄지 않았습니다."
+      : deviceKeyErrorMessage(failure)
+    : null;
+  // A local socket call: no server needed, so being offline does not block it.
+  const disabled = reset.isPending;
+  return (
+    <div
+      className="flex min-w-0 items-start gap-2"
+      data-testid="device-key-host-signatures"
+      data-signature-enforcement={copy.enforcement}
+    >
+      <Server className="mt-px size-4 shrink-0 text-ink-muted" aria-hidden="true" />
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <p className="flex min-w-0 flex-wrap items-center gap-2 text-body text-ink">
+          <span className="break-keep">작업 호스트 서명 검증</span>
+          <StatusChip tone={copy.tone}>{copy.chip}</StatusChip>
+        </p>
+        <p
+          className={
+            copy.tone === "warn"
+              ? "break-keep text-meta text-warn"
+              : "break-keep text-meta text-ink-muted"
+          }
+          data-testid="device-key-host-signatures-detail"
+        >
+          {copy.detail}
+        </p>
+        {copy.resetBlocked && (
+          <p className="break-keep text-meta text-ink-muted">{copy.resetBlocked}</p>
+        )}
+        {copy.canReset && (
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <Button
+              size="sm"
+              variant="secondary"
+              aria-disabled={disabled || undefined}
+              aria-busy={reset.isPending || undefined}
+              aria-describedby={hintId}
+              className={disabled ? "opacity-50" : undefined}
+              onClick={() => {
+                if (disabled) return;
+                reset.mutate();
+              }}
+              data-testid="device-key-host-signatures-reset"
+            >
+              {reset.isPending ? "확인 중" : "검증 끄기"}
+            </Button>
+            <span id={hintId} className="break-keep text-meta text-ink-muted">
+              누르면 이 맥이 확인 창을 띄웁니다.
+            </span>
+          </div>
+        )}
+        {error && (
+          <p className="break-keep text-meta text-danger" role="alert">
+            {error}
+          </p>
+        )}
+        {notice && (
+          <p className="break-keep text-meta text-ink-muted" role="status">
+            {notice}
+          </p>
+        )}
+      </div>
+    </div>
   );
 }

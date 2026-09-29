@@ -22,9 +22,10 @@ import {
   replaceInvalidatedKey,
   type DeviceKeyView,
 } from '../src/deviceKey/enrollment';
-import {deviceKeyCopy} from '../src/features/deviceKey/copy';
+import {deviceKeyCopy, QR_LINK_STEPS} from '../src/features/deviceKey/copy';
 import {DeviceKeyLinkGate} from '../src/features/deviceKey/DeviceKeyLinkSheet';
 import {DeviceKeyPanel} from '../src/features/deviceKey/DeviceKeyPanel';
+import {useDeviceKey} from '../src/features/deviceKey/useDeviceKey';
 import {deviceLinkDevice} from '../src/features/deviceLink/deviceIdentity';
 import {noteConnectRoute, resetConnectRoute} from '../src/features/onboarding/phoneFlow';
 import {SessionProvider, useSession} from '../src/session/useSession';
@@ -741,5 +742,143 @@ describe('the QR link gate', () => {
     await act(async () => {});
     expect(posts()).toHaveLength(1);
     expect(screen.queryByTestId('device-key-link-sheet')).toBeNull();
+  });
+});
+
+// ---- #3129: 「QR 연결로만」 on the phone -----------------------------------------
+// (ADR-0146 D-6 증보, #3119). A sign-in that is not a QR link cannot make this
+// phone an instruction device; the panel says so before the button is pressed
+// when it can know (the connect route this run), and after the server's
+// refusal when it cannot (an app restart).
+
+describe('#3129 — a sign-in that is not a QR link', () => {
+  const ready = {status: 'ready' as const, publicKey: KEY};
+  const derive = (over: Partial<Parameters<typeof deriveDeviceKeyView>[0]>) =>
+    deriveDeviceKeyView({local: ready, localError: null, rows: [], rowsError: null, ...over});
+
+  it('an unapprovable waiting key is never 「승인 전」', () => {
+    expect(derive({rows: [row({linkedSession: false, linkedFromMac: false})]})).toEqual({
+      kind: 'unlinked',
+      reason: 'address',
+      fingerprint: SHARED_FINGERPRINT,
+    });
+    expect(derive({rows: [row({linkedSession: true, linkedFromMac: false})]})).toMatchObject({
+      kind: 'unlinked',
+      reason: 'notFromMac',
+    });
+    // An older server says nothing: nothing is inferred.
+    expect(derive({rows: [row()]}).kind).toBe('pending');
+    expect(derive({rows: [row({linkedSession: true, linkedFromMac: true})]}).kind).toBe('pending');
+    // An approved key before the rule keeps working (the Mac marks it 「QR 아님」).
+    expect(
+      derive({rows: [row({state: 'endorsed', canInstruct: true, linkedSession: false})]}).kind,
+    ).toBe('approved');
+  });
+
+  it('a known unlinked sign-in turns 「등록 안 됨」 and 「끊김」 into 「QR 연결 필요」, nothing else', () => {
+    expect(derive({rows: [], signInUnlinked: true})).toMatchObject({
+      kind: 'unlinked',
+      reason: 'address',
+    });
+    expect(derive({local: {status: 'absent', publicKey: null}, signInUnlinked: true})).toEqual({
+      kind: 'unlinked',
+      reason: 'address',
+      fingerprint: null,
+    });
+    expect(derive({rows: [row({state: 'revoked'})], signInUnlinked: true}).kind).toBe('unlinked');
+    expect(
+      derive({rows: [row({state: 'endorsed', canInstruct: true})], signInUnlinked: true}).kind,
+    ).toBe('approved');
+    expect(derive({local: {status: 'unsupported', publicKey: null}, signInUnlinked: true}).kind).toBe(
+      'unsupported',
+    );
+  });
+
+  it('the panel says how, offers no refused button, and uses 합니다체', () => {
+    panelFor({kind: 'unlinked', reason: 'address', fingerprint: null});
+    expect(screen.getByTestId('device-key-badge').props.children).toBe('QR 연결 필요');
+    expect(screen.getByTestId('device-key-headline').props.children).toBe(
+      '이 폰으로 지시하려면 맥에서 QR로 한 번 연결해야 합니다.',
+    );
+    expect(screen.getAllByTestId('device-key-step').map(n => n.props.children)).toEqual([
+      ...QR_LINK_STEPS,
+    ]);
+    expect(QR_LINK_STEPS[0]).toContain('설정 › 기기 › 폰 연결');
+    expect(screen.queryByTestId('device-key-action-enroll')).toBeNull();
+    for (const kind of ['address', 'notFromMac'] as const) {
+      const copy = deviceKeyCopy({kind: 'unlinked', reason: kind, fingerprint: null});
+      for (const sentence of [copy.headline, copy.detail, ...(copy.steps ?? [])]) {
+        expect(sentence).toMatch(/(니다|세요)\.$/);
+      }
+    }
+  });
+
+  it('a QR from somewhere other than a Mac says so, with the same way forward', () => {
+    panelFor({kind: 'unlinked', reason: 'notFromMac', fingerprint: SHARED_FINGERPRINT});
+    expect(screen.getAllByTestId('device-key-step')).toHaveLength(QR_LINK_STEPS.length);
+    expect(shownFingerprint()).toBe(SHARED_FINGERPRINT);
+    expect(screen.getByTestId('device-key-detail').props.children).toContain(
+      '맥이 아닌 곳에서 띄운 QR',
+    );
+  });
+
+  function Probe() {
+    const state = useDeviceKey(WS, {poll: false});
+    return <DeviceKeyPanel state={state} />;
+  }
+  function renderProbe() {
+    const client = new QueryClient({
+      defaultOptions: {queries: {retry: false, gcTime: 0}, mutations: {gcTime: 0}},
+    });
+    return render(
+      <QueryClientProvider client={client}>
+        <Probe />
+      </QueryClientProvider>,
+    );
+  }
+
+  it('after an address sign-in this run: says so before any press, and registers nothing', async () => {
+    noteConnectRoute('signIn');
+    renderProbe();
+    await waitFor(() =>
+      expect(screen.getByTestId('device-key-badge').props.children).toBe('QR 연결 필요'),
+    );
+    expect(screen.queryByTestId('device-key-action-enroll')).toBeNull();
+    expect(posts()).toHaveLength(0);
+  });
+
+  it("after a restart (route unknown): the server's refusal turns the panel, once, without a second sentence", async () => {
+    registerStatus = 403;
+    registerCode = 'device_key_requires_linked_session';
+    renderProbe();
+    await waitFor(() => expect(screen.getByTestId('device-key-action-enroll')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('device-key-action-enroll'));
+    await waitFor(() =>
+      expect(screen.getByTestId('device-key-badge').props.children).toBe('QR 연결 필요'),
+    );
+    expect(posts()).toHaveLength(1);
+    expect(screen.queryByTestId('device-key-failure')).toBeNull();
+    expect(screen.queryByTestId('device-key-action-enroll')).toBeNull();
+  });
+
+  it('another refusal is still a failure sentence under the enroll button', async () => {
+    registerStatus = 403;
+    registerCode = 'forbidden';
+    renderProbe();
+    await waitFor(() => expect(screen.getByTestId('device-key-action-enroll')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('device-key-action-enroll'));
+    await waitFor(() => expect(screen.getByTestId('device-key-failure')).toBeTruthy());
+    expect(screen.getByTestId('device-key-badge').props.children).toBe('등록 안 됨');
+  });
+
+  it('marks only the linked-session refusal as unlinked', async () => {
+    registerStatus = 403;
+    registerCode = 'device_key_requires_linked_session';
+    const error = await enrollDeviceKey({workspaceId: WS, label: 'x'}).catch(e => e);
+    expect(error).toBeInstanceOf(EnrollError);
+    expect(error.unlinked).toBe(true);
+    registerCode = 'session_lineage_ended';
+    const other = await enrollDeviceKey({workspaceId: WS, label: 'x'}).catch(e => e);
+    expect(other.unlinked).toBe(false);
   });
 });

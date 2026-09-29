@@ -201,6 +201,7 @@ pub fn run() {
             device_key::device_key_sign_revoke,
             device_key::device_key_deliver_revocation,
             device_key::device_key_sign_rebind,
+            device_key::device_key_reset_signature_requirement,
         ]);
 
     #[cfg(not(desktop))]

@@ -26,6 +26,7 @@ const desktop = vi.hoisted(() => ({
   signEndorse: vi.fn(),
   signRevoke: vi.fn(),
   signRebind: vi.fn(),
+  resetSignatureRequirement: vi.fn(),
 }));
 const core = vi.hoisted(() => ({
   listDeviceKeys: vi.fn(),
@@ -50,6 +51,7 @@ vi.mock("@/lib/tauri", async (importOriginal) => {
       signEndorse: (...a: unknown[]) => desktop.signEndorse(...a),
       signRevoke: (...a: unknown[]) => desktop.signRevoke(...a),
       signRebind: (...a: unknown[]) => desktop.signRebind(...a),
+      resetSignatureRequirement: (...a: unknown[]) => desktop.resetSignatureRequirement(...a),
       signControl: vi.fn(),
       deliverRevocation: vi.fn(),
     },
@@ -598,5 +600,189 @@ describe("다시 연결 — 계보만 끝난 뿌리 키 (#3103, ADR-0146 D-7 증
       await new Promise((resolve) => setTimeout(resolve, 100));
     });
     expect(desktop.signRebind).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---- #3129: 「QR 연결로만」과 작업 호스트 서명 검증 ----------------------------------
+
+describe("#3129 — QR 아님 · 승인 불가 · 작업 호스트 서명 검증", () => {
+  const OTHER_ID = "00000000-0000-7000-8000-00000000d003";
+
+  it("QR 연결 전 규칙으로 승인된 폰은 그대로 두고 「QR 아님」과 권고를 단다", async () => {
+    core.listDeviceKeys.mockResolvedValue([
+      rootRow,
+      key({ state: "endorsed", canInstruct: true, linkedSession: false, linkedFromMac: false }),
+    ]);
+    const host = mount();
+    await waitFor(() => q(host, `device-key-phone-${PHONE_ID}`) !== null, "phone");
+    const row = q(host, `device-key-phone-${PHONE_ID}`)!;
+    expect(row.textContent).toContain("지시 기기");
+    expect(row.textContent).toContain("QR 아님");
+    expect(q(row, "device-key-phone-link-note")?.textContent).toBe(
+      "QR 연결 전 규칙으로 등록된 폰입니다. 지시 권한을 끊고 QR로 다시 연결하는 것을 권합니다."
+    );
+    // The recommended next step is the button already on the row.
+    expect(q(row, "device-key-revoke")).not.toBeNull();
+  });
+
+  it("맥이 아닌 곳의 QR로 승인된 폰은 「맥 QR 아님」, 옛 서버(값 없음)는 아무 표시도 없다", async () => {
+    core.listDeviceKeys.mockResolvedValue([
+      rootRow,
+      key({ state: "endorsed", canInstruct: true, linkedSession: true, linkedFromMac: false }),
+      key({ id: OTHER_ID, state: "endorsed", canInstruct: true, publicKey: MAC_KEY, label: "옛 폰" }),
+    ]);
+    const host = mount();
+    await waitFor(() => q(host, `device-key-phone-${OTHER_ID}`) !== null, "phones");
+    expect(q(host, `device-key-phone-${PHONE_ID}`)?.textContent).toContain("맥 QR 아님");
+    expect(q(q(host, `device-key-phone-${OTHER_ID}`)!, "device-key-phone-link-note")).toBeNull();
+    expect(q(host, `device-key-phone-${OTHER_ID}`)?.textContent).not.toContain("QR 아님");
+  });
+
+  it("승인할 수 없는 대기 폰은 숨기지 않고, 승인 단추 없이 까닭과 방법을 말한다", async () => {
+    core.listDeviceKeys.mockResolvedValue([
+      rootRow,
+      key({ linkedSession: false, linkedFromMac: false }),
+      key({ id: OTHER_ID, publicKey: MAC_KEY, label: "셀프 QR 폰", linkedSession: true, linkedFromMac: false }),
+    ]);
+    const host = mount();
+    await waitFor(() => q(host, `device-key-unapprovable-${PHONE_ID}`) !== null, "unapprovable");
+    const address = q(host, `device-key-unapprovable-${PHONE_ID}`)!;
+    expect(address.textContent).toContain("승인 불가");
+    expect(address.textContent).toContain("QR 아님");
+    expect(address.textContent).toContain("QR로 연결하지 않은 로그인에서 등록된 폰이라 승인할 수 없습니다.");
+    expect(q(address, "device-key-endorse-start")).toBeNull();
+    const selfQr = q(host, `device-key-unapprovable-${OTHER_ID}`)!;
+    expect(selfQr.textContent).toContain("맥 QR 아님");
+    expect(q(host, "device-keys-no-phone")).toBeNull();
+    expect(q(host, "device-key-endorse-start")).toBeNull();
+  });
+
+  const hostPin = (over: Record<string, unknown>) =>
+    localStatus({
+      host: {
+        running: true,
+        matches: true,
+        pinnedRootKeyId: ROOT_ID,
+        workspaceMatches: true,
+        ...over,
+      } as DesktopDeviceKeyStatus["host"],
+    });
+
+  it("반쯤 상태: 뿌리가 없으면 「서버만 켜짐」과 뿌리 등록 안내를 보인다", async () => {
+    desktop.status.mockResolvedValue({
+      ...localStatus({ support: "absent", publicKey: null, fingerprint: null, root: null }),
+      host: {
+        running: true,
+        matches: false,
+        pinnedRootKeyId: null,
+        signatureEnforcement: "server_only",
+        workspaceMatches: true,
+        serverRequiresSignatures: true,
+        signaturesRequiredBy: null,
+      },
+    });
+    core.listDeviceKeys.mockResolvedValue([key()]);
+    const host = mount();
+    await waitFor(() => q(host, "device-key-host-signatures") !== null, "host line");
+    const line = q(host, "device-key-host-signatures")!;
+    expect(line.dataset.signatureEnforcement).toBe("server_only");
+    expect(line.textContent).toContain("서버만 켜짐");
+    expect(line.textContent).toContain("이 맥을 뿌리로 등록하면 작업 호스트가 검증을 켭니다");
+    expect(q(line, "device-key-host-signatures-reset")).toBeNull();
+  });
+
+  it("켜짐(서버가 계속 요구): 끄기 단추가 없고 까닭을 말한다", async () => {
+    desktop.status.mockResolvedValue(
+      hostPin({
+        signatureEnforcement: "enforced",
+        serverRequiresSignatures: true,
+        signaturesRequiredBy: "server",
+      })
+    );
+    const host = mount();
+    await waitFor(() => q(host, "device-key-host-signatures") !== null, "host line");
+    const line = q(host, "device-key-host-signatures")!;
+    expect(line.textContent).toContain("켜짐");
+    expect(line.textContent).toContain("서버가 서명을 요구하는 동안에는 끌 수 없습니다.");
+    expect(q(line, "device-key-host-signatures-reset")).toBeNull();
+  });
+
+  it("켜짐(설정이 켬): 끄기 단추가 없다", async () => {
+    desktop.status.mockResolvedValue(
+      hostPin({
+        signatureEnforcement: "enforced",
+        serverRequiresSignatures: false,
+        signaturesRequiredBy: "config",
+      })
+    );
+    const host = mount();
+    await waitFor(() => q(host, "device-key-host-signatures") !== null, "host line");
+    expect(q(host, "device-key-host-signatures")!.textContent).toContain("작업 호스트 설정이 켜 두었습니다");
+    expect(q(host, "device-key-host-signatures-reset")).toBeNull();
+  });
+
+  it("래칫만 남은 켜짐: 끄기는 셸 명령(네이티브 확인 창)을 거치고, 끝나면 상태를 다시 읽는다", async () => {
+    desktop.status.mockResolvedValue(
+      hostPin({
+        signatureEnforcement: "enforced",
+        serverRequiresSignatures: false,
+        signaturesRequiredBy: "server",
+      })
+    );
+    desktop.resetSignatureRequirement.mockResolvedValue({ required: false });
+    const host = mount();
+    await waitFor(() => q(host, "device-key-host-signatures-reset") !== null, "reset");
+    const reads = desktop.status.mock.calls.length;
+    await click(q(host, "device-key-host-signatures-reset"), "reset");
+    await waitFor(() => host.textContent?.includes("검증을 껐습니다") ?? false, "notice");
+    expect(desktop.resetSignatureRequirement).toHaveBeenCalledTimes(1);
+    expect(desktop.resetSignatureRequirement).toHaveBeenCalledWith(WS);
+    await waitFor(() => desktop.status.mock.calls.length > reads, "re-read");
+  });
+
+  it("확인 창에서 취소하면 「검증을 끄지 않았습니다」, 설정이 켜 두면 그렇다고 말한다", async () => {
+    desktop.status.mockResolvedValue(
+      hostPin({
+        signatureEnforcement: "enforced",
+        serverRequiresSignatures: false,
+        signaturesRequiredBy: "unreadable",
+      })
+    );
+    desktop.resetSignatureRequirement.mockRejectedValueOnce("device_key_declined");
+    desktop.resetSignatureRequirement.mockResolvedValueOnce({ required: true });
+    const host = mount();
+    await waitFor(() => q(host, "device-key-host-signatures-reset") !== null, "reset");
+    await click(q(host, "device-key-host-signatures-reset"), "reset");
+    await waitFor(() => host.textContent?.includes("검증을 끄지 않았습니다.") ?? false, "declined");
+    await click(q(host, "device-key-host-signatures-reset"), "reset again");
+    await waitFor(
+      () => host.textContent?.includes("작업 호스트 설정이 검증을 켜 두어 꺼지지 않았습니다.") ?? false,
+      "still on"
+    );
+  });
+
+  it("꺼짐, 그리고 다른 워크스페이스의 호스트나 옛 셸(값 없음)은 줄을 그리지 않는다", async () => {
+    desktop.status.mockResolvedValue(hostPin({ signatureEnforcement: "off" }));
+    let host = mount();
+    await waitFor(() => q(host, "device-key-host-signatures") !== null, "off");
+    expect(q(host, "device-key-host-signatures")!.textContent).toContain("꺼짐");
+    act(() => root?.unmount());
+    root = null;
+    hostEl?.remove();
+
+    desktop.status.mockResolvedValue(
+      hostPin({ signatureEnforcement: "enforced", workspaceMatches: false, matches: false })
+    );
+    host = mount();
+    await waitFor(() => q(host, "device-keys") !== null, "body");
+    expect(q(host, "device-key-host-signatures")).toBeNull();
+    act(() => root?.unmount());
+    root = null;
+    hostEl?.remove();
+
+    desktop.status.mockResolvedValue(localStatus());
+    host = mount();
+    await waitFor(() => q(host, "device-keys") !== null, "body");
+    expect(q(host, "device-key-host-signatures")).toBeNull();
   });
 });

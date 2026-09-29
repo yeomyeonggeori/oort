@@ -3513,6 +3513,11 @@ function dkView(which: string): DeviceKeyView {
       return {kind: 'unsupported'};
     case 'servererror':
       return {kind: 'serverError', fingerprint: DK_FINGERPRINT};
+    // #3129: 주소 로그인 폰 · 맥이 아닌 곳의 QR — 「QR 연결 필요」.
+    case 'unlinked':
+      return {kind: 'unlinked', reason: 'address', fingerprint: null};
+    case 'unlinked-notmac':
+      return {kind: 'unlinked', reason: 'notFromMac', fingerprint: DK_FINGERPRINT};
     // #3103: live and approved, its sign-in ended — 「다시 연결 필요」.
     case 'reconnect':
     case 'reconnecting':
