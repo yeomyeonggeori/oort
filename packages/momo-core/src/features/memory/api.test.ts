@@ -3,11 +3,17 @@ import { ApiError } from "../../lib/api";
 import { installCoreHost, resetCoreHost, type SessionPort } from "../../runtime/host";
 import { WireShapeError } from "../../lib/wire";
 import {
+  editMemoryItem,
+  forgetMemoryItem,
   acceptMemoryProposal,
   getMemoryDigest,
+  getMemoryItem,
+  getMemoryItemEvents,
+  getMemoryItemEvidence,
   getMemorySettings,
   getRunMemoryReceipt,
   listMemoryDigests,
+  listMemoryItems,
   listMemoryProposals,
   patchChannelMemorySettings,
   patchMyMemorySettings,
@@ -354,5 +360,157 @@ describe("memory settings", () => {
     await expect(patchWorkspaceMemorySettings(WS, { enabled: false })).rejects.toMatchObject({
       status: 403,
     });
+  });
+});
+
+const BITEM = "00000000-0000-7000-8000-000000000691";
+const BITEM_NEW = "00000000-0000-7000-8000-000000000692";
+
+function itemWire(overrides: Record<string, unknown> = {}) {
+  return {
+    id: BITEM,
+    channelId: CH,
+    spaceKind: "channel",
+    kind: "decision",
+    origin: "extracted",
+    body: "릴리스 동결은 금요일부터",
+    validFromMs: 1_800_000_000_000,
+    recordedAtMs: 1_800_000_000_500,
+    confidence: 0.8,
+    sourceCount: 1,
+    ...overrides,
+  };
+}
+
+describe("memory browser items", () => {
+  it("lists with filters and a keyset cursor, and reads search scores", async () => {
+    installHost();
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(200, { items: [itemWire({ score: 0.9 })], nextCursor: "1.x" })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const page = await listMemoryItems(WS, {
+      channelId: CH,
+      kind: "decision",
+      status: "history",
+      q: "  동결 ",
+      cursor: "9.y",
+      limit: 5,
+    });
+    expect(page.nextCursor).toBe("1.x");
+    expect(page.items[0]).toMatchObject({ id: BITEM, kind: "decision", score: 0.9 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://oort.test/v1/workspaces/${WS}/memory/items?channelId=${CH}&kind=decision&status=history&q=%EB%8F%99%EA%B2%B0&cursor=9.y&limit=5`,
+      expect.anything()
+    );
+  });
+
+  it("treats an empty list as empty and rejects a malformed item", async () => {
+    installHost();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, { items: [] })));
+    expect(await listMemoryItems(WS)).toEqual({ items: [] });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { items: [itemWire({ kind: "gossip" })] }))
+    );
+    await expect(listMemoryItems(WS)).rejects.toBeInstanceOf(WireShapeError);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { items: [itemWire({ spaceKind: "team" })] }))
+    );
+    await expect(listMemoryItems(WS)).rejects.toBeInstanceOf(WireShapeError);
+  });
+
+  it("reads detail, evidence and events; a hidden item is a 404 ApiError", async () => {
+    installHost();
+    const evidence = [{ messageId: MSG, channelId: CH, seq: 7 }];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInit | URL | string) => {
+        const url = String(input);
+        if (url.endsWith("/evidence")) return jsonResponse(200, { evidence });
+        if (url.endsWith("/events")) {
+          return jsonResponse(200, {
+            events: [
+              {
+                id: "e1",
+                action: "superseded",
+                actorMemberId: "m1",
+                detail: { superseded_by: BITEM_NEW },
+                createdAtMs: 5,
+              },
+            ],
+          });
+        }
+        return jsonResponse(200, {
+          item: itemWire({ retiredAtMs: 9, retiredReason: "edited", supersededById: BITEM_NEW }),
+          evidence,
+        });
+      })
+    );
+    const detail = await getMemoryItem(WS, BITEM);
+    expect(detail.item).toMatchObject({ retiredReason: "edited", supersededById: BITEM_NEW });
+    expect(detail.evidence).toEqual(evidence);
+    expect(await getMemoryItemEvidence(WS, BITEM)).toEqual(evidence);
+    expect((await getMemoryItemEvents(WS, BITEM))[0]).toEqual({
+      id: "e1",
+      action: "superseded",
+      actorMemberId: "m1",
+      detail: { superseded_by: BITEM_NEW },
+      createdAtMs: 5,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(404, { error: { message: "memory item not found" } }))
+    );
+    await expect(getMemoryItem(WS, BITEM)).rejects.toMatchObject({ status: 404 });
+    await expect(getMemoryItemEvents(WS, BITEM)).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it("edits with only the fields set and forgets with a count", async () => {
+    installHost();
+    const fetchMock = vi.fn(async (_input: RequestInit | URL | string, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        expect(JSON.parse(String(init.body))).toEqual({ body: "새 문구", kind: "fact" });
+        return jsonResponse(200, {
+          item: itemWire({
+            id: BITEM_NEW,
+            origin: "curated",
+            supersedesId: BITEM,
+            kind: "fact",
+            editedByMemberId: "m1",
+            editedAtMs: 1_800_000_009_000,
+          }),
+          evidence: [{ messageId: MSG, channelId: CH, seq: 7 }],
+          supersededId: BITEM,
+        });
+      }
+      expect(init?.method).toBe("DELETE");
+      return jsonResponse(200, { forgottenCount: 3 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const edited = await editMemoryItem(WS, BITEM, { body: "새 문구", kind: "fact" });
+    expect(edited.item).toMatchObject({
+      id: BITEM_NEW,
+      origin: "curated",
+      supersedesId: BITEM,
+      editedByMemberId: "m1",
+      editedAtMs: 1_800_000_009_000,
+    });
+    expect(edited.supersededId).toBe(BITEM);
+    expect(edited.evidence).toHaveLength(1);
+    expect(await forgetMemoryItem(WS, BITEM)).toBe(3);
+  });
+
+  it("surfaces 404, 409 and 422 of a write as ApiErrors, and rejects a bad forget body", async () => {
+    installHost();
+    for (const status of [404, 409, 422]) {
+      vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(status, { error: { message: "no" } })));
+      await expect(editMemoryItem(WS, BITEM, { body: "x" })).rejects.toMatchObject({ status });
+      await expect(forgetMemoryItem(WS, BITEM)).rejects.toMatchObject({ status });
+    }
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, {})));
+    await expect(forgetMemoryItem(WS, BITEM)).rejects.toBeInstanceOf(WireShapeError);
+    await expect(editMemoryItem(WS, BITEM, { body: "x" })).rejects.toBeInstanceOf(WireShapeError);
   });
 });

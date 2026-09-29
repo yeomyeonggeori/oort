@@ -11,6 +11,13 @@
 //! PATCH /v1/workspaces/{ws}/memory/settings                workspace switch (admin)
 //! PATCH /v1/workspaces/{ws}/channels/{ch}/memory/settings  channel exclude / pause (admin)
 //! PATCH /v1/workspaces/{ws}/memory/settings/me             personal pause (self)
+//!
+//! GET    /v1/workspaces/{ws}/memory/items                  memory browser list / search   (#3208)
+//! GET    /v1/workspaces/{ws}/memory/items/{id}             one item (+ evidence back-links)
+//! GET    /v1/workspaces/{ws}/memory/items/{id}/evidence    source messages of an item
+//! GET    /v1/workspaces/{ws}/memory/items/{id}/events      lifecycle ledger of an item
+//! PATCH  /v1/workspaces/{ws}/memory/items/{id}             edit  (new item supersedes the old)
+//! DELETE /v1/workspaces/{ws}/memory/items/{id}             forget (permanent delete)
 //! ```
 //!
 //! Human only. **The database decides visibility**: each transaction sets
@@ -34,13 +41,16 @@ use momo_auth::{active_workspace_role, Principal, WorkspaceRole};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{DbError, PgConnection, PgPool};
 use momo_messaging::{
-    accept_proposal_in_tx, bind_mem_reader_guc, clamp_mem_digest_limit, clamp_mem_proposal_limit,
-    digests_by_ids_in_tx, evidence_for_digests_in_tx, get_digest_in_tx, get_proposal_in_tx,
-    get_serving_in_tx, items_by_ids_in_tx, last_read_seq_in_tx, list_digests_in_tx,
-    list_proposals_in_tx, list_settings_in_tx, reject_proposal_in_tx, summarized_through_seq_in_tx,
-    upsert_channel_settings_in_tx, upsert_member_settings_in_tx, upsert_workspace_settings_in_tx,
-    DigestListFilter, MemDigest, MemEvidence, MemItemBrief, MemProposal, MemServing,
-    MemSettingsRow, ProposalListFilter,
+    accept_proposal_in_tx, bind_mem_reader_guc, clamp_mem_digest_limit, clamp_mem_item_limit,
+    clamp_mem_proposal_limit, digests_by_ids_in_tx, edit_item_in_tx, evidence_for_digests_in_tx,
+    evidence_for_items_in_tx, forget_item_in_tx, get_digest_in_tx, get_item_in_tx,
+    get_proposal_in_tx, get_serving_in_tx, items_by_ids_in_tx, last_read_seq_in_tx,
+    list_digests_in_tx, list_item_events_in_tx, list_items_in_tx, list_proposals_in_tx,
+    list_settings_in_tx, reject_proposal_in_tx, search_item_rows_in_tx,
+    summarized_through_seq_in_tx, upsert_channel_settings_in_tx, upsert_member_settings_in_tx,
+    upsert_workspace_settings_in_tx, DigestListFilter, ItemListFilter, ItemStatus, MemDigest,
+    MemEvidence, MemItem, MemItemBrief, MemItemEvent, MemItemEvidence, MemProposal, MemServing,
+    MemSettingsRow, ProposalListFilter, MEM_ITEM_KINDS,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -1122,6 +1132,585 @@ pub async fn patch_member_settings(
     }))
 }
 
+// ---------------------------------------------------------------------------
+// memory browser: items (#3208, ADR-0196 D9 / D12 V4)
+// ---------------------------------------------------------------------------
+//
+// Reads are RLS only and answer **no existence oracle**: an item the caller may not read is absent
+// from a list and a 404 on a detail / evidence / events / edit / forget call — byte-identical to a
+// nonexistent id (#3199 F1). Read and audit errors are 500s: the SQLSTATE → HTTP table of
+// [`mem_db_error`] is for the settings writes only (#3189 M-2), and the two item writes map their
+// own definer function's codes at the call site ([`map_item_write_error`]) and nowhere else.
+
+const ITEM_NOT_FOUND: &str = "memory item not found";
+const ITEM_BODY_MAX_CHARS: usize = 600;
+
+/// Reads (and audits): any database error is an internal error, never a policy answer.
+fn settle_mem_read<T>(context: &str, outcome: DbRejectable<T>) -> Result<T, ApiError> {
+    match outcome {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(rejection)) => Err(rejection),
+        Err(error) => Err(ApiError::internal(context, error)),
+    }
+}
+
+/// SQLSTATE → HTTP for errors **raised by** `mem_edit_item` / `mem_forget_item` themselves, applied to
+/// that one call. Every `RAISE` in those functions carries the message prefix `mem_edit_item:` /
+/// `mem_forget_item:` (migration 106); an error without it — a grant regression, an RLS denial, a
+/// CHECK or index violation — is not the function speaking and stays a 500 (#3189 M-2 / L-1).
+/// `None` = not one of theirs → the caller propagates the error.
+fn map_item_write_error(error: &DbError) -> Option<ApiError> {
+    let DbError::Sqlx(momo_db::sqlx::Error::Database(db)) = error else {
+        return None;
+    };
+    let message = db.message();
+    if !(message.starts_with("mem_edit_item:") || message.starts_with("mem_forget_item:")) {
+        return None;
+    }
+    Some(match db.code().as_deref()? {
+        // Not an active human of this workspace / not the API session / a guest.
+        "42501" => ApiError::forbidden("not allowed to change memory items"),
+        // Missing **or unreadable** — one answer, so existence never leaks.
+        "P0002" => ApiError::not_found(ITEM_NOT_FOUND),
+        // Readable but not changeable in its current state (already retired / a newer version).
+        "55000" => ApiError::new(
+            axum::http::StatusCode::CONFLICT,
+            "memory item is no longer current; reload it",
+        ),
+        // Nothing to change (same text, or an identical live item — deliberately one answer) or
+        // a value the function rejects (length, kind, credential-shaped text).
+        "22023" | "23514" => ApiError::new(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "memory item text or kind is not allowed",
+        ),
+        _ => return None,
+    })
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemDto {
+    pub id: String,
+    pub channel_id: String,
+    /// `channel` | `personal`.
+    pub space_kind: String,
+    pub kind: String,
+    pub origin: String,
+    pub body: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject_key: Option<String>,
+    pub valid_from_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub valid_to_ms: Option<i64>,
+    pub recorded_at_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retired_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retired_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supersedes_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub superseded_by_id: Option<String>,
+    pub confidence: f32,
+    pub source_count: i32,
+    /// Curated items only: who wrote the current text, and when.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edited_by_member_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edited_at_ms: Option<i64>,
+    /// Search results only: the keyword score, best first.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<f32>,
+}
+
+fn item_dto(item: &MemItem, score: Option<f32>) -> ItemDto {
+    ItemDto {
+        id: item.id.to_string(),
+        channel_id: item.channel_id.to_string(),
+        space_kind: item.space_kind.clone(),
+        kind: item.kind.clone(),
+        origin: item.origin.clone(),
+        body: item.body.clone(),
+        subject_key: item.subject_key.clone(),
+        valid_from_ms: epoch_ms(item.valid_from),
+        valid_to_ms: item.valid_to.map(epoch_ms),
+        recorded_at_ms: epoch_ms(item.recorded_at),
+        retired_at_ms: item.retired_at.map(epoch_ms),
+        retired_reason: item.retired_reason.clone(),
+        supersedes_id: item.supersedes_id.map(|id| id.to_string()),
+        superseded_by_id: item.superseded_by_id.map(|id| id.to_string()),
+        confidence: item.confidence,
+        source_count: item.source_count,
+        edited_by_member_id: item.edited_by_member_id.map(|id| id.to_string()),
+        edited_at_ms: item.edited_at.map(epoch_ms),
+        score,
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemEvidenceDto {
+    pub message_id: String,
+    pub channel_id: String,
+    pub seq: i64,
+}
+
+fn item_evidence_dtos(evidence: &[MemItemEvidence], item_id: Uuid) -> Vec<ItemEvidenceDto> {
+    evidence
+        .iter()
+        .filter(|link| link.item_id == item_id)
+        .map(|link| ItemEvidenceDto {
+            message_id: link.message_id.to_string(),
+            channel_id: link.channel_id.to_string(),
+            seq: link.seq,
+        })
+        .collect()
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemEventDto {
+    pub id: String,
+    pub action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actor_member_id: Option<String>,
+    /// Ids, kinds and counts only — the ledger never holds memory text.
+    pub detail: serde_json::Value,
+    pub created_at_ms: i64,
+}
+
+fn item_event_dto(event: &MemItemEvent) -> ItemEventDto {
+    ItemEventDto {
+        id: event.id.to_string(),
+        action: event.action.clone(),
+        actor_member_id: event.actor_member_id.map(|id| id.to_string()),
+        detail: event.detail.clone(),
+        created_at_ms: epoch_ms(event.created_at),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListItemsQuery {
+    #[serde(default)]
+    pub channel_id: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// `active` (default) | `history` | `all`.
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Keyword search. Ranked by score, at most 50 hits, no cursor; live items only.
+    #[serde(default)]
+    pub q: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub limit: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemListResponse {
+    pub items: Vec<ItemDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemDetailResponse {
+    pub item: ItemDto,
+    pub evidence: Vec<ItemEvidenceDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemEvidenceResponse {
+    pub evidence: Vec<ItemEvidenceDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemEventsResponse {
+    pub events: Vec<ItemEventDto>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EditItemRequest {
+    pub body: String,
+    #[serde(default)]
+    pub kind: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditItemResponse {
+    /// The new (curated) item.
+    pub item: ItemDto,
+    pub evidence: Vec<ItemEvidenceDto>,
+    /// The item it replaced (now retired as `edited`, kept as history).
+    pub superseded_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForgetItemResponse {
+    /// Item rows permanently removed: the item plus its older versions.
+    pub forgotten_count: i32,
+}
+
+/// `"<recordedAtMicros>.<itemId>"` — the last item of the previous page.
+fn parse_item_cursor(raw: &str) -> Result<(chrono::DateTime<chrono::Utc>, Uuid), ApiError> {
+    let invalid = || ApiError::bad_request("invalid memory cursor");
+    let (micros, id) = raw.split_once('.').ok_or_else(invalid)?;
+    let at = micros
+        .parse::<i64>()
+        .ok()
+        .and_then(chrono::DateTime::<chrono::Utc>::from_timestamp_micros)
+        .ok_or_else(invalid)?;
+    Ok((at, Uuid::parse_str(id).map_err(|_| invalid())?))
+}
+
+fn item_cursor(item: &MemItem) -> String {
+    format!("{}.{}", item.recorded_at.timestamp_micros(), item.id)
+}
+
+fn trimmed(raw: &Option<String>) -> Option<&str> {
+    raw.as_deref().map(str::trim).filter(|v| !v.is_empty())
+}
+
+/// `GET /v1/workspaces/{ws}/memory/items`
+///
+/// The memory browser's list: newest first with a keyset cursor, filtered by `channelId`, `kind`
+/// and `status`; or, with `q`, the keyword search (`mem_search_items`, ranked, no cursor). A
+/// channel the caller cannot read, or one with nothing readable, is an empty list — never an
+/// error and never a hint that hidden items exist.
+pub async fn list_items(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(workspace): Path<String>,
+    Query(query): Query<ListItemsQuery>,
+) -> Result<Json<ItemListResponse>, ApiError> {
+    require_human(&principal, HUMAN_ONLY)?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let channel_id = match trimmed(&query.channel_id) {
+        Some(raw) => Some(path_uuid(raw, "invalid channel id")?),
+        None => None,
+    };
+    let kind = match trimmed(&query.kind) {
+        None => None,
+        Some(kind) if MEM_ITEM_KINDS.contains(&kind) => Some(kind.to_string()),
+        Some(_) => {
+            return Err(ApiError::bad_request(
+                "kind must be decision, fact, commitment, preference or procedure",
+            ))
+        }
+    };
+    let status = match trimmed(&query.status) {
+        None => ItemStatus::Active,
+        Some(raw) => ItemStatus::parse(raw)
+            .ok_or_else(|| ApiError::bad_request("status must be active, history or all"))?,
+    };
+    let search = trimmed(&query.q).map(str::to_string);
+    if search.as_deref().is_some_and(|q| q.contains('\0')) {
+        return Err(ApiError::bad_request("invalid search text"));
+    }
+    if search.is_some() && !matches!(status, ItemStatus::Active) {
+        return Err(ApiError::bad_request(
+            "search covers current items only; drop status or use active",
+        ));
+    }
+    if search.is_some() && trimmed(&query.cursor).is_some() {
+        return Err(ApiError::bad_request("a search has no cursor"));
+    }
+    let before = match trimmed(&query.cursor) {
+        Some(raw) => Some(parse_item_cursor(raw)?),
+        None => None,
+    };
+    let requested = query.limit.as_deref().and_then(|raw| raw.parse().ok());
+    let limit = clamp_mem_item_limit(requested);
+    let member_id = principal.member_id;
+
+    let outcome: DbRejectable<ItemListResponse> =
+        memory_tenant_tx(&state.pool, workspace_id, member_id, move |conn| {
+            Box::pin(async move {
+                if let Err(rejection) = require_live_human(conn, workspace_id, member_id).await? {
+                    return Ok(Err(rejection));
+                }
+                if let Some(text) = search {
+                    let hits = search_item_rows_in_tx(
+                        conn,
+                        &text,
+                        channel_id,
+                        kind.as_deref(),
+                        Some(limit),
+                    )
+                    .await?;
+                    return Ok(Ok(ItemListResponse {
+                        items: hits
+                            .iter()
+                            .map(|(item, score)| item_dto(item, Some(*score)))
+                            .collect(),
+                        next_cursor: None,
+                    }));
+                }
+                let mut rows = list_items_in_tx(
+                    conn,
+                    &ItemListFilter {
+                        viewer: member_id,
+                        channel_id,
+                        kind: kind.as_deref(),
+                        status,
+                        before,
+                        limit: limit + 1,
+                    },
+                )
+                .await?;
+                let next_cursor = if rows.len() as i64 > limit {
+                    rows.pop();
+                    rows.last().map(item_cursor)
+                } else {
+                    None
+                };
+                Ok(Ok(ItemListResponse {
+                    items: rows.iter().map(|item| item_dto(item, None)).collect(),
+                    next_cursor,
+                }))
+            })
+        })
+        .await;
+
+    Ok(Json(settle_mem_read("memory.list_items", outcome)?))
+}
+
+/// `GET /v1/workspaces/{ws}/memory/items/{id}`
+pub async fn get_item(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, item)): Path<(String, String)>,
+) -> Result<Json<ItemDetailResponse>, ApiError> {
+    require_human(&principal, HUMAN_ONLY)?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let item_id = path_uuid(&item, "invalid item id")?;
+    let member_id = principal.member_id;
+
+    let outcome: DbRejectable<ItemDetailResponse> =
+        memory_tenant_tx(&state.pool, workspace_id, member_id, move |conn| {
+            Box::pin(async move {
+                if let Err(rejection) = require_live_human(conn, workspace_id, member_id).await? {
+                    return Ok(Err(rejection));
+                }
+                let Some(found) = get_item_in_tx(conn, item_id).await? else {
+                    return Ok(Err(ApiError::not_found(ITEM_NOT_FOUND)));
+                };
+                let evidence = evidence_for_items_in_tx(conn, &[found.id]).await?;
+                Ok(Ok(ItemDetailResponse {
+                    item: item_dto(&found, None),
+                    evidence: item_evidence_dtos(&evidence, found.id),
+                }))
+            })
+        })
+        .await;
+
+    Ok(Json(settle_mem_read("memory.get_item", outcome)?))
+}
+
+/// `GET /v1/workspaces/{ws}/memory/items/{id}/evidence` — the source messages (ids, channel, seq)
+/// a reader can jump back to. Never message text.
+pub async fn get_item_evidence(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, item)): Path<(String, String)>,
+) -> Result<Json<ItemEvidenceResponse>, ApiError> {
+    require_human(&principal, HUMAN_ONLY)?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let item_id = path_uuid(&item, "invalid item id")?;
+    let member_id = principal.member_id;
+
+    let outcome: DbRejectable<ItemEvidenceResponse> =
+        memory_tenant_tx(&state.pool, workspace_id, member_id, move |conn| {
+            Box::pin(async move {
+                if let Err(rejection) = require_live_human(conn, workspace_id, member_id).await? {
+                    return Ok(Err(rejection));
+                }
+                let Some(found) = get_item_in_tx(conn, item_id).await? else {
+                    return Ok(Err(ApiError::not_found(ITEM_NOT_FOUND)));
+                };
+                let evidence = evidence_for_items_in_tx(conn, &[found.id]).await?;
+                Ok(Ok(ItemEvidenceResponse {
+                    evidence: item_evidence_dtos(&evidence, found.id),
+                }))
+            })
+        })
+        .await;
+
+    Ok(Json(settle_mem_read("memory.get_item_evidence", outcome)?))
+}
+
+/// `GET /v1/workspaces/{ws}/memory/items/{id}/events` — the lifecycle ledger of one item, oldest
+/// first (`created`, `edited`, `superseded`, ...). The `mem_event` policy shows an item's events
+/// only to someone who can read the item; a hidden item is a 404 like everywhere else.
+pub async fn get_item_events(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, item)): Path<(String, String)>,
+) -> Result<Json<ItemEventsResponse>, ApiError> {
+    require_human(&principal, HUMAN_ONLY)?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let item_id = path_uuid(&item, "invalid item id")?;
+    let member_id = principal.member_id;
+
+    let outcome: DbRejectable<ItemEventsResponse> =
+        memory_tenant_tx(&state.pool, workspace_id, member_id, move |conn| {
+            Box::pin(async move {
+                if let Err(rejection) = require_live_human(conn, workspace_id, member_id).await? {
+                    return Ok(Err(rejection));
+                }
+                if get_item_in_tx(conn, item_id).await?.is_none() {
+                    return Ok(Err(ApiError::not_found(ITEM_NOT_FOUND)));
+                }
+                let events = list_item_events_in_tx(conn, item_id).await?;
+                Ok(Ok(ItemEventsResponse {
+                    events: events.iter().map(item_event_dto).collect(),
+                }))
+            })
+        })
+        .await;
+
+    Ok(Json(settle_mem_read("memory.get_item_events", outcome)?))
+}
+
+/// `PATCH /v1/workspaces/{ws}/memory/items/{id}` — edit (ADR-0196 D4/D9): a new `curated` item
+/// with the old one's evidence supersedes the old one, which is retired as `edited` and stays as
+/// history. Who may: a member who can read the item and all its evidence channels (D9 「근거 채널
+/// 멤버」; the personal space's owner). Anyone else — and a nonexistent id — gets the same 404.
+pub async fn edit_item(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, item)): Path<(String, String)>,
+    Json(request): Json<EditItemRequest>,
+) -> Result<Json<EditItemResponse>, ApiError> {
+    require_human(&principal, HUMAN_ONLY)?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let item_id = path_uuid(&item, "invalid item id")?;
+    let body = request.body.trim().to_string();
+    // A NUL byte is not storable in Postgres text (it would surface as an internal error).
+    if body.is_empty() || body.chars().count() > ITEM_BODY_MAX_CHARS || body.contains('\0') {
+        return Err(ApiError::new(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "memory item text must be 1 to 600 characters",
+        ));
+    }
+    let kind = match request.kind.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(kind) if MEM_ITEM_KINDS.contains(&kind) => Some(kind.to_string()),
+        Some(_) => {
+            return Err(ApiError::bad_request(
+                "kind must be decision, fact, commitment, preference or procedure",
+            ))
+        }
+    };
+    let member_id = principal.member_id;
+    let via_token = audit_via_token_id(&principal);
+
+    let outcome: DbRejectable<(MemItem, Vec<MemItemEvidence>)> =
+        memory_tenant_tx(&state.pool, workspace_id, member_id, move |conn| {
+            Box::pin(async move {
+                if let Err(rejection) = require_live_human(conn, workspace_id, member_id).await? {
+                    return Ok(Err(rejection));
+                }
+                let new_id = match edit_item_in_tx(conn, item_id, &body, kind.as_deref()).await {
+                    Ok(id) => id,
+                    Err(error) => {
+                        return match map_item_write_error(&error) {
+                            Some(rejection) => Ok(Err(rejection)),
+                            None => Err(error),
+                        }
+                    }
+                };
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, "memory.item.edited")
+                        .by(member_id)
+                        .target("memory_item", new_id)
+                        .via_token(via_token)
+                        .with_schema(
+                            "momo.memory.item.edited.v1",
+                            serde_json::json!({ "supersedes": item_id }),
+                        ),
+                )
+                .await?;
+                let Some(created) = get_item_in_tx(conn, new_id).await? else {
+                    // The editor can read what they just wrote; anything else is a bug.
+                    return Err(DbError::from(momo_db::sqlx::Error::RowNotFound));
+                };
+                let evidence = evidence_for_items_in_tx(conn, &[created.id]).await?;
+                Ok(Ok((created, evidence)))
+            })
+        })
+        .await;
+
+    let (created, evidence) = settle_mem_read("memory.edit_item", outcome)?;
+    Ok(Json(EditItemResponse {
+        evidence: item_evidence_dtos(&evidence, created.id),
+        item: item_dto(&created, None),
+        superseded_id: item_id.to_string(),
+    }))
+}
+
+/// `DELETE /v1/workspaces/{ws}/memory/items/{id}` — forget (ADR-0196 D9/D10): the item and its
+/// older versions are permanently deleted with their evidence links; only ids stay in the ledger.
+/// Same permission and the same 404 as [`edit_item`]. An older version that a newer one replaced
+/// is a 409 ("forget the newest version").
+pub async fn forget_item(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, item)): Path<(String, String)>,
+) -> Result<Json<ForgetItemResponse>, ApiError> {
+    require_human(&principal, HUMAN_ONLY)?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let item_id = path_uuid(&item, "invalid item id")?;
+    let member_id = principal.member_id;
+    let via_token = audit_via_token_id(&principal);
+
+    let outcome: DbRejectable<i32> =
+        memory_tenant_tx(&state.pool, workspace_id, member_id, move |conn| {
+            Box::pin(async move {
+                if let Err(rejection) = require_live_human(conn, workspace_id, member_id).await? {
+                    return Ok(Err(rejection));
+                }
+                let removed = match forget_item_in_tx(conn, item_id).await {
+                    Ok(count) => count,
+                    Err(error) => {
+                        return match map_item_write_error(&error) {
+                            Some(rejection) => Ok(Err(rejection)),
+                            None => Err(error),
+                        }
+                    }
+                };
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, "memory.item.forgotten")
+                        .by(member_id)
+                        .target("memory_item", item_id)
+                        .via_token(via_token)
+                        .with_schema(
+                            "momo.memory.item.forgotten.v1",
+                            serde_json::json!({ "versions": removed }),
+                        ),
+                )
+                .await?;
+                Ok(Ok(removed))
+            })
+        })
+        .await;
+
+    Ok(Json(ForgetItemResponse {
+        forgotten_count: settle_mem_read("memory.forget_item", outcome)?,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1142,6 +1731,17 @@ mod tests {
         assert!(parse_bool(Some("1"), "x").unwrap());
         assert!(!parse_bool(Some("false"), "x").unwrap());
         assert!(parse_bool(Some("yes"), "x").is_err());
+    }
+
+    #[test]
+    fn item_cursor_round_trips_and_rejects_garbage() {
+        let id = Uuid::new_v4();
+        let (at, parsed) = parse_item_cursor(&format!("1700000000123456.{id}")).unwrap();
+        assert_eq!(parsed, id);
+        assert_eq!(at.timestamp_micros(), 1_700_000_000_123_456);
+        for bad in ["", "1", "x.y", "1700000000123456.not-a-uuid", "..", ".x"] {
+            assert!(parse_item_cursor(bad).is_err(), "{bad:?} must be refused");
+        }
     }
 
     #[test]
