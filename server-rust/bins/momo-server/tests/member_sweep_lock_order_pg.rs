@@ -11,6 +11,7 @@
 //! |---|---|
 //! | `a_member_wide_sweep_and_a_lineage_sweep_never_deadlock` | drop the lock call from `revoke_member_session_tokens` |
 //! | `a_privileged_sweep_and_a_lineage_sweep_never_deadlock` | drop the lock call from `revoke_privileged_session_tokens` |
+//! | `two_downgrading_rotations_on_two_lineages_never_deadlock` | make `lock_member_wide_sweep_in_tx` a no-op (the ordered pre-lock alone is a SECOND acquisition after the lineage lock and does not save this) |
 //!
 //! Deterministic interleaving (no timers): the rows are inserted high id
 //! first, so the sweep scans the high row first; the "lineage sweep" holds the
@@ -27,7 +28,10 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
-use momo_auth::{revoke_member_session_tokens, revoke_privileged_session_tokens};
+use momo_auth::{
+    lock_member_wide_sweep_in_tx, lock_session_rows_in_tx, revoke_member_session_tokens,
+    revoke_privileged_session_tokens,
+};
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -284,4 +288,101 @@ async fn a_member_wide_sweep_and_a_lineage_sweep_never_deadlock() {
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn a_privileged_sweep_and_a_lineage_sweep_never_deadlock() {
     never_deadlocks(Sweep::Privileged).await;
+}
+
+/// The issue's own scenario: two downgrading rotations of one member, on two
+/// devices whose lineages interleave by id (`{a,c}` and `{b,d}`, a<b<c<d).
+/// Each holds its lineage (`lock_session_rows_in_tx`, as `recover_lineage` /
+/// the linked branch do) and then sweeps the member's privileged rows. The
+/// route's first move is `lock_member_wide_sweep_in_tx`; here A waits for B to
+/// have locked its lineage or for 1.5 s — whichever comes first — so the
+/// interleaving is the same with and without the queue: without it both
+/// lineages are held and each sweep wants the other's (40P01); with it B
+/// cannot even lock its lineage until A has committed.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn two_downgrading_rotations_on_two_lineages_never_deadlock() {
+    let _lock = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = app_pool().await;
+    let (workspace, member, _, _) = seed(&su).await;
+    // Two lineages of the same member with interleaved ids.
+    let mut ids: Vec<Uuid> = (0..4).map(|_| Uuid::new_v4()).collect();
+    ids.sort();
+    let (l1, l2) = (Uuid::new_v4(), Uuid::new_v4());
+    let lineage_a = [ids[0], ids[2]];
+    let lineage_b = [ids[1], ids[3]];
+    for (lineage, rows) in [(l1, lineage_a), (l2, lineage_b)] {
+        for row in rows {
+            sqlx::query(
+                "INSERT INTO token (id, workspace_id, kind, actor_member_id, token_hash, \
+                                    scopes, label, session_id) \
+                 VALUES ($1, $2, 'session', $3, digest($4::text, 'sha256'), \
+                         ARRAY['messages:read','platform:read'], 'access', $5)",
+            )
+            .bind(row)
+            .bind(workspace)
+            .bind(member)
+            .bind(row.to_string() + &workspace.to_string())
+            .bind(lineage)
+            .execute(&su)
+            .await
+            .expect("seed lineage row");
+        }
+    }
+
+    let b_locked = std::sync::Arc::new(tokio::sync::Notify::new());
+    let a_locked = std::sync::Arc::new(tokio::sync::Notify::new());
+    let rotation = |lineage: Uuid,
+                    mine: std::sync::Arc<tokio::sync::Notify>,
+                    wait_for: Option<std::sync::Arc<tokio::sync::Notify>>,
+                    peer: Option<std::sync::Arc<tokio::sync::Notify>>| {
+        let pool = app.clone();
+        tokio::spawn(async move {
+            if let Some(gate) = peer {
+                gate.notified().await;
+            }
+            with_tenant_tx(&pool, workspace, move |conn| {
+                Box::pin(async move {
+                    lock_member_wide_sweep_in_tx(conn, workspace, member)
+                        .await
+                        .map_err(DbError::from)?;
+                    lock_session_rows_in_tx(conn, workspace, member, Some(lineage), &[])
+                        .await
+                        .map_err(DbError::from)?;
+                    mine.notify_one();
+                    if let Some(other) = wait_for {
+                        let _ = tokio::time::timeout(
+                            std::time::Duration::from_millis(1500),
+                            other.notified(),
+                        )
+                        .await;
+                    }
+                    revoke_privileged_session_tokens(conn, workspace, member)
+                        .await
+                        .map_err(DbError::from)
+                })
+            })
+            .await
+        })
+    };
+    let a = rotation(l1, a_locked.clone(), Some(b_locked.clone()), None);
+    let b = rotation(l2, b_locked.clone(), None, Some(a_locked.clone()));
+    let a = a
+        .await
+        .expect("task A")
+        .unwrap_or_else(|err| panic!("rotation A died: {err}"));
+    let b = b
+        .await
+        .expect("task B")
+        .unwrap_or_else(|err| panic!("rotation B died: {err}"));
+    // The four lineage rows plus the two `seed` rows (same member, privileged).
+    assert_eq!(a + b, 6, "between them the two sweeps flip every live row");
+
+    sqlx::query("DELETE FROM workspace WHERE id = $1")
+        .bind(workspace)
+        .execute(&su)
+        .await
+        .expect("cleanup");
 }

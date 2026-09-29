@@ -447,9 +447,10 @@ pub async fn revoke_member_session_tokens(
     workspace_id: Uuid,
     member_id: Uuid,
 ) -> Result<u64, sqlx::Error> {
-    // The one rule (#3109): every row this sweep will flip, locked in one
-    // id-ordered acquisition, before the `UPDATE` (whose own lock order is scan
-    // order, not id order).
+    // #3109: one member-wide sweep at a time, then every row it will flip in
+    // one id-ordered acquisition, before the `UPDATE` (whose own lock order is
+    // scan order, not id order).
+    lock_member_wide_sweep_in_tx(conn, workspace_id, member_id).await?;
     lock_member_live_session_rows_in_tx(conn, workspace_id, member_id, false).await?;
     let rows = sqlx::query(REVOKE_MEMBER_SESSION_SQL)
         .bind(workspace_id)
@@ -533,10 +534,11 @@ pub async fn revoke_member_session_tokens_by_ids(
 ///
 /// Member-wide sweeps (`revoke_member_session_tokens`,
 /// `revoke_privileged_session_tokens`) span many lineages. A bare `UPDATE`
-/// locks rows in scan order, so two of them (or one and a lineage sweep) could
-/// each hold what the other needs next: they take their rows first through
+/// locks rows in scan order, so they take their rows first through
 /// [`lock_member_live_session_rows_in_tx`] — the same `ORDER BY id FOR UPDATE`
-/// (#3109).
+/// — and queue behind each other per member ([`lock_member_wide_sweep_in_tx`]):
+/// a sweeper that already holds a lineage cannot be ordered against another
+/// one's (#3109).
 ///
 /// `lock_live_session_lineage` (device keys) is the same rule at `FOR SHARE`:
 /// an id-ordered subset (the lineage's refresh rows) of the same total order,
@@ -595,6 +597,44 @@ pub async fn lock_session_rows_in_tx(
         .map(|(id, live)| LockedSessionRow { id, live })
         .collect())
 }
+
+/// # Member-wide sweeps — one at a time per member (#3109)
+///
+/// A member-wide sweep ends every live session row of the member, so it needs
+/// rows the caller's own lineage lock did not cover. A rotation that
+/// downgrades a privileged session holds its lineage and THEN sweeps: two of
+/// them on two devices each hold their own lineage and want the other's
+/// (`{5,9}` vs `{2,12}`) — and a second id-ordered acquisition after the
+/// lineage one is not id-ordered together with it. So the sweepers queue on a
+/// per-member transaction lock, taken **before the transaction's first
+/// `token` lock** (after the `device_link_token` row is fine: no sweeper waits
+/// on a link row while holding this).
+///
+/// Everything else that locks session rows takes them in ONE acquisition and
+/// wants nothing afterwards, so it can wait for a sweeper but never close a
+/// cycle with one. [`revoke_member_session_tokens`] and
+/// [`revoke_privileged_session_tokens`] call this themselves (re-entrant); a
+/// caller that locks token rows before sweeping must call it first.
+///
+/// SABOTAGE(no-queue): make this a no-op —
+/// `two_downgrading_rotations_on_two_lineages_never_deadlock` goes RED (40P01).
+pub async fn lock_member_wide_sweep_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(MEMBER_WIDE_SWEEP_LOCK_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
+/// The key is the pair of ids, hashed to 64 bits by Postgres (`hashtextextended`,
+/// so no client-side hash to drift). A collision only over-serializes.
+const MEMBER_WIDE_SWEEP_LOCK_SQL: &str = "SELECT pg_advisory_xact_lock( \
+       hashtextextended('member-session-sweep:' || $1::text || ':' || $2::text, 0))";
 
 /// The member-wide lock: the member's live session rows (or, when
 /// `privileged_only`, the live ones carrying an instance-privileged scope) in
@@ -752,7 +792,8 @@ pub async fn revoke_privileged_session_tokens(
     workspace_id: Uuid,
     member_id: Uuid,
 ) -> Result<u64, sqlx::Error> {
-    // The one rule (#3109), narrowed to the privileged rows.
+    // #3109: as `revoke_member_session_tokens`, narrowed to the privileged rows.
+    lock_member_wide_sweep_in_tx(conn, workspace_id, member_id).await?;
     lock_member_live_session_rows_in_tx(conn, workspace_id, member_id, true).await?;
     let rows = sqlx::query(REVOKE_PRIVILEGED_SQL)
         .bind(workspace_id)
