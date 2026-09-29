@@ -778,6 +778,30 @@ async fn a_proposal_is_pending_and_nothing_reads_it_as_memory_until_accepted() {
         "serving offers the accepted memory to a group answer in its own channel"
     );
 
+    // Forgetting (a permanent delete of the item, #3208) leaves the shell without the item: the
+    // foreign key nulls `item_id`, no text was ever kept on the proposal.
+    let (m3, _) = say(&su, w.ws, w.general, w.alice, "잊을 결정의 근거예요").await;
+    let (run_f, _) = mention_run(&su, &w, w.general, w.alice, "@agent 이것도 기억").await;
+    let forget_p = propose(&wk, w.ws, run_f, "decision", "잊게 될 결정이에요", &[m3])
+        .await
+        .expect("propose")
+        .expect("new");
+    let forget_item = accept(&app, w.ws, Some(w.bob), forget_p)
+        .await
+        .expect("accept");
+    su_exec(
+        &su,
+        &format!("DELETE FROM mem_item WHERE id = '{forget_item}'"),
+    )
+    .await;
+    let after: (String, Option<Uuid>, Option<String>) =
+        sqlx::query_as("SELECT status, item_id, body FROM mem_proposal WHERE id = $1")
+            .bind(forget_p)
+            .fetch_one(&su)
+            .await
+            .expect("shell after forget");
+    assert_eq!(after, ("accepted".to_string(), None, None));
+
     // A decided proposal is decided.
     assert_eq!(
         accept(&app, w.ws, Some(w.alice), pid).await,

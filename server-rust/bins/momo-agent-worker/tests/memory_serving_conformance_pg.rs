@@ -2125,6 +2125,28 @@ async fn write_item(wp: &PgPool, fx: &Fx, channel: Uuid, author: Uuid, body: &st
     }
 }
 
+/// One more item on a digest that already exists: the digest set does not change, only the items do.
+async fn add_item_to(wp: &PgPool, fx: &Fx, digest: &Written, body: &str) -> Uuid {
+    let item = NewItem {
+        kind: "fact",
+        body: body.to_string(),
+        subject_key: None,
+        evidence: digest.evidence.iter().map(|e| e.0).take(2).collect(),
+        confidence: 0.8,
+        ephemeral: false,
+    };
+    let digest_id = digest.id;
+    let outcome = mem::with_memory_tx(wp, fx.ws, move |conn| {
+        Box::pin(async move { mem_items::add_item(conn, digest_id, &item, "test-model").await })
+    })
+    .await
+    .expect("add item");
+    match outcome {
+        ItemOutcome::Added(id) => id,
+        other => panic!("expected a new item, got {other:?}"),
+    }
+}
+
 const ITEM_OPEN_TAG: &str = "<기억 항목 참고자료>";
 
 /// The item section of the first model call's memory turn, if any.
@@ -2649,7 +2671,20 @@ async fn a_retry_with_a_different_item_set_serves_no_items() {
     settle_residual_worker_jobs(&su).await;
     let fx = seed(&su).await;
     let wp = momo_worker_pool().await;
-    let first = write_item(&wp, &fx, fx.general, fx.bob, "배포 일정은 금요일이에요").await;
+    // One digest, one item on it. The digest set never changes below: only the items do.
+    let digest = write_digest(
+        &wp,
+        fx.ws,
+        fx.general,
+        fx.bob,
+        "window",
+        "구간 요약이에요",
+        3,
+        None,
+        &[],
+    )
+    .await;
+    let first = add_item_to(&wp, &fx, &digest, "배포 일정은 금요일이에요").await;
     let turn = enqueue_turn(
         &wp,
         &fx,
@@ -2675,8 +2710,9 @@ async fn a_retry_with_a_different_item_set_serves_no_items() {
         Some(a.as_str()),
         "an identical retry is served"
     );
-    // A new matching item appears between the attempts: the rebuilt block differs from the receipt.
-    let second = write_item(&wp, &fx, fx.general, fx.bob, "배포 담당은 밥이다").await;
+    // A new matching item appears between the attempts (same digest): the rebuilt block differs
+    // from the receipt in its items alone.
+    let second = add_item_to(&wp, &fx, &digest, "배포 담당은 밥이다").await;
     let c = serve_direct(&wp, &cfg, &fx, &turn, fx.general).await;
     assert!(
         c.is_none(),
@@ -2687,6 +2723,8 @@ async fn a_retry_with_a_different_item_set_serves_no_items() {
         Some(vec![first]),
         "the original receipt stands"
     );
+    let (digests, _, _, _) = receipt(&su, turn.run_id).await.expect("receipt");
+    assert_eq!(digests, vec![digest.id], "the digest half never changed");
     let _ = second;
 }
 
