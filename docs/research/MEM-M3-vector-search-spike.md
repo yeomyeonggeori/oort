@@ -81,6 +81,8 @@ pool 900(운영에 가까운 좁혀진 범위), 칸 = recall@10 / MRR.
 
 `multilingual-e5-large`(fastembed는 `Qdrant/…` 변환본 사용)는 측정하지 않았다.
 
+크레이트 선택지: fastembed 7.1 = `ort`(ONNX Runtime 바인딩) + `tokenizers` + 모델 레지스트리/다운로더(`hf-hub`)다. `ort` + `tokenizers`를 직접 쓰면 라이선스 집합은 같고 `hf-hub`(따라서 MPL `option-ext`)만 빠진다 — `default-features = false`로 확인한 결과와 같다. `libfuzzer-sys`(NCSA 포함 표기)는 `cargo metadata` 전체 목록에는 나오지만 `cargo tree -i`로 컴파일 그래프에서 경로를 찾지 못했다(빌드 대상 아님). `candle`(순수 Rust) 경로는 조사만 했고 측정하지 않았다.
+
 ### 3.2 품질 — 단독과 융합 (recall@10 / MRR)
 
 pool 900, 전체 96건. 「M0」 = 5종 평균, 「결손」 = 4종 평균.
