@@ -1422,6 +1422,45 @@ async fn a_signed_resume_must_name_the_agent_the_session_ran() {
     let (status, body) = s.post(&liar_path, &s.access, resume(s.person)).await;
     refused(status, &body, "a reported id that is not an agent member");
 
+    // The same lie about an agent that is gone, or that belongs to another
+    // workspace: a reported id is only good for a live agent of this one.
+    let gone = seed_agent(&s, "gone").await;
+    sqlx::query("UPDATE member SET deleted_at = now() WHERE id = $1")
+        .bind(gone)
+        .execute(&s.su)
+        .await
+        .unwrap();
+    let foreign_workspace = Uuid::new_v4();
+    sqlx::query("INSERT INTO workspace (id, slug, name) VALUES ($1, $2, $2)")
+        .bind(foreign_workspace)
+        .bind(format!("hc-{foreign_workspace}"))
+        .execute(&s.su)
+        .await
+        .unwrap();
+    let foreign = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, 'agent', 'foreign', 'foreign')",
+    )
+    .bind(foreign)
+    .bind(foreign_workspace)
+    .execute(&s.su)
+    .await
+    .unwrap();
+    for (agent, what) in [
+        (gone, "a deleted agent"),
+        (foreign, "another workspace's agent"),
+    ] {
+        let source = orphaned_source(&s).await;
+        report_agent(&s, source, agent).await;
+        let path = format!(
+            "/v1/workspaces/{}/work-sessions/{source}/resume",
+            s.workspace
+        );
+        let (status, body) = s.post(&path, &s.access, resume(agent)).await;
+        refused(status, &body, what);
+    }
+
     // The host reports the session's agent: that agent resumes it.
     let (status, body) = s.post(&path, &s.access, resume(ran)).await;
     assert_eq!(status, 201, "{body}");
