@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compile } from "tailwindcss";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   ENTER_CONVERSATION_ANIMATION_NAME,
   ENTER_CONVERSATION_CLASS,
@@ -103,10 +103,46 @@ async function loadStylesheet(id: string, base: string) {
   return { path, base: dirname(path), content: readFileSync(path, "utf8") };
 }
 
-async function buildCss(candidates: string[]): Promise<string> {
-  const compiler = await compile(TOKENS_CSS, { base: HERE, loadStylesheet });
-  return compiler.build(candidates);
+// #3100: compiled CSS is a pure function of the candidates, and the Tailwind
+// compile was the dominant per-test cost under CPU contention (inside each
+// test's 20s budget). Memoized per file; output is identical.
+const cssCache = new Map<string, Promise<string>>();
+function buildCss(candidates: string[]): Promise<string> {
+  const key = candidates.join("\u0000");
+  let hit = cssCache.get(key);
+  if (!hit) {
+    hit = (async () => {
+      const compiler = await compile(TOKENS_CSS, { base: HERE, loadStylesheet });
+      return compiler.build(candidates);
+    })();
+    cssCache.set(key, hit);
+  }
+  return hit;
 }
+
+// #3100: one Chromium per file, launched in a hook with its own budget rather
+// than inside a test's 20s timeout. Each test still gets a fresh page in a
+// fresh context.
+let sharedBrowser: Promise<import("playwright").Browser> | null = null;
+function getBrowser(): Promise<import("playwright").Browser> {
+  if (!sharedBrowser) {
+    sharedBrowser = import("playwright").then(({ chromium }) => chromium.launch());
+  }
+  return sharedBrowser;
+}
+beforeAll(async () => {
+  if (!chromiumAvailable) return;
+  await getBrowser();
+}, 120_000);
+afterAll(async () => {
+  if (!sharedBrowser) return;
+  const browser = await sharedBrowser;
+  sharedBrowser = null;
+  await browser.close();
+}, 60_000);
+
+/** Page-clock frames: unlike a wall-clock sleep they cannot be starved. */
+const FRAMES_JS = `(n) => new Promise((done) => { const step = (left) => left <= 0 ? done() : requestAnimationFrame(() => step(left - 1)); step(n); })`;
 
 function classTokens(className: string): string[] {
   return className.split(/\s+/).filter(Boolean);
@@ -247,17 +283,10 @@ describe("ADR-0179 D3 도착 값", () => {
     "enter-conversation 재생 횟수 1, animationName 일치, duration 500ms",
     async () => {
       const css = await buildCss([ENTER_CONVERSATION_CLASS]);
-      let chromium: typeof import("playwright").chromium;
+      const browser = await getBrowser();
+      const context = await browser.newContext();
       try {
-        ({ chromium } = await import("playwright"));
-      } catch (err) {
-        throw new Error(
-          `playwright import failed after skipIf: ${err instanceof Error ? err.message : err}`
-        );
-      }
-      const browser = await chromium.launch();
-      try {
-        const page = await browser.newPage();
+        const page = await context.newPage();
         await page.emulateMedia({ reducedMotion: "no-preference" });
         await page.setContent(
           `<!doctype html><html><head><style>${css}</style></head><body><article id="row" class="${ENTER_CONVERSATION_CLASS}">새 메시지</article></body></html>`
@@ -277,17 +306,30 @@ describe("ADR-0179 D3 도착 값", () => {
               : null;
           const named = anim as unknown as { animationName?: string };
           const animationName = named.animationName ?? null;
+          // #3100: was a 1200ms `setTimeout` window counting animationend.
+          // Under load the 500ms entrance had not ended inside 1200ms of test
+          // clock (count 0). Count on the page's own clock instead: wait for
+          // the first animationend, then 3 more frames (a replay would start
+          // and its start would be visible as running animation by then),
+          // then require no animation of this name is still running/pending.
           const ends = await new Promise<number>((resolve) => {
             let count = 0;
-            const onEnd = (event: AnimationEvent) => {
+            const onEnd = async (event: AnimationEvent) => {
               if (event.animationName !== "motion-enter-conversation") return;
               count += 1;
+              if (count !== 1) return;
+              await new Promise<void>((done) => {
+                const step = (left: number) =>
+                  left <= 0 ? done() : requestAnimationFrame(() => step(left - 1));
+                step(3);
+              });
+              el.removeEventListener("animationend", onEnd);
+              const replaying = el
+                .getAnimations()
+                .some((animation) => animation.playState !== "finished");
+              resolve(replaying ? count + 1 : count);
             };
             el.addEventListener("animationend", onEnd);
-            window.setTimeout(() => {
-              el.removeEventListener("animationend", onEnd);
-              resolve(count);
-            }, 1_200);
           });
           if (anim) {
             anim.finish();
@@ -321,7 +363,7 @@ describe("ADR-0179 D3 도착 값", () => {
             measured.landedTransform === "matrix(1, 0, 0, 1, 0, 0)"
         ).toBe(true);
       } finally {
-        await browser.close();
+        await context.close();
       }
     },
     20_000
@@ -331,17 +373,10 @@ describe("ADR-0179 D3 도착 값", () => {
     "클래스가 없으면 재생 0",
     async () => {
       const css = await buildCss([ENTER_CONVERSATION_CLASS]);
-      let chromium: typeof import("playwright").chromium;
+      const browser = await getBrowser();
+      const context = await browser.newContext();
       try {
-        ({ chromium } = await import("playwright"));
-      } catch (err) {
-        throw new Error(
-          `playwright import failed after skipIf: ${err instanceof Error ? err.message : err}`
-        );
-      }
-      const browser = await chromium.launch();
-      try {
-        const page = await browser.newPage();
+        const page = await context.newPage();
         await page.setContent(
           `<!doctype html><html><head><style>${css}</style></head><body><article id="row">이미 있던 행</article></body></html>`
         );
@@ -352,7 +387,7 @@ describe("ADR-0179 D3 도착 값", () => {
         });
         expect(playCount).toBe(0);
       } finally {
-        await browser.close();
+        await context.close();
       }
     },
     20_000
@@ -465,17 +500,10 @@ describe("ADR-0179 D5 눌림 단일점", () => {
     async () => {
       const className = buttonVariants({ variant: "secondary" });
       const css = await buildCss(classTokens(className));
-      let chromium: typeof import("playwright").chromium;
+      const browser = await getBrowser();
+      const context = await browser.newContext();
       try {
-        ({ chromium } = await import("playwright"));
-      } catch (err) {
-        throw new Error(
-          `playwright import failed after skipIf: ${err instanceof Error ? err.message : err}`
-        );
-      }
-      const browser = await chromium.launch();
-      try {
-        const page = await browser.newPage();
+        const page = await context.newPage();
         await page.setContent(
           `<!doctype html><html><head><style>${css}</style></head><body><button id="b" class="${className}">변경 저장</button></body></html>`
         );
@@ -495,7 +523,11 @@ describe("ADR-0179 D5 눌림 단일점", () => {
         if (!box) throw new Error("button box missing");
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
         await page.mouse.down();
-        await page.waitForTimeout(180);
+        // #3100: was `waitForTimeout(180)`. Under load the :active style had
+        // not even been recalculated 180ms after mousedown. Wait 3 frames of
+        // the page's own clock instead (style recalc has certainly run), then
+        // read: a product with no transform transition still reads false.
+        await page.evaluate(`(${FRAMES_JS})(3)`);
         const events = await el.evaluate(
           (node) => (node as HTMLElement & { __ev: string[] }).__ev
         );
@@ -505,7 +537,7 @@ describe("ADR-0179 D5 눌림 단일점", () => {
         ).toBe(true);
         await page.mouse.up();
       } finally {
-        await browser.close();
+        await context.close();
       }
     },
     20_000
