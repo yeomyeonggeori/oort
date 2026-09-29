@@ -725,6 +725,7 @@ pub async fn run(
             stop: stop.clone(),
             trust: trust.clone(),
             requirement: requirement.clone(),
+            grants: sessions.grant_epoch(),
         },
     )?;
     // Always with the requirement (#3117): R2 is on while it says so, and the

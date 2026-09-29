@@ -15,6 +15,7 @@
 //! | [`human_trust`] | R2 (ADR-0146 개정): pinned root, endorsement chain, device-signature check, nonce ledger, revocations |
 //! | [`signature_requirement`] | whether R2 is enforced: the owner's config, or the server's word latched with a pinned root (#3117) |
 //! | [`session`] | the session manager and the per-session ACP task |
+//! | [`session_grant`] | 「이 세션 동안」 허락의 범위 규칙과 기억 (#3095) |
 //! | [`acp`] | the JSON-RPC stdio transport |
 //! | [`projection`] | `session/update` → curated server events |
 //! | [`policy`] | the D6 invariants |
@@ -35,4 +36,5 @@ pub mod proctree;
 pub mod projection;
 pub mod redact;
 pub mod session;
+pub mod session_grant;
 pub mod signature_requirement;

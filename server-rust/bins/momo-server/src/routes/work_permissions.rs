@@ -47,8 +47,16 @@
 //! * An **allow** needs it when the instance set
 //!   `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED` (403 `device_signature_required`).
 //! * A **reject** never needs it (D-8: the switch-off side is unsigned).
-//! * Scope `session` (「이 세션 동안」) is refused until E8 (#3028) opens it —
-//!   400 `permission_scope_unsupported`; the host refuses it too.
+//! * Scope `session` (「이 세션 동안」, #3095) is an **allow signed by the
+//!   owner's device, and nothing else**: the scope lives only inside the
+//!   signed statement, so a decision without a signature is `once` by
+//!   construction; `reject_once` never takes it (400 `permission_kind_refused`);
+//!   and only a member host can honour it (400 `permission_scope_unsupported`
+//!   for any other). The server does not remember or judge the grant — the
+//!   host does, under its own scope rule (ADR-0146 증보 #3095) — but the
+//!   verified scope travels in the signed envelope the host receives (the
+//!   control's payload stays the closed three keys), and it is on the
+//!   `approval.decided` event and the audit row.
 //! * The idempotent retry of a decided request answers before the signature
 //!   is looked at, so resending the same signed decision is not a replay.
 
@@ -101,7 +109,8 @@ pub const CODE_OPTION_INVALID: &str = "permission_option_invalid";
 pub const CODE_INSTRUCTION_UNSUPPORTED: &str = "permission_instruction_unsupported";
 pub const CODE_ALREADY_DECIDED: &str = "permission_already_decided";
 pub const CODE_REQUEST_CLOSED: &str = "permission_request_closed";
-/// #3023: a signed decision for 「이 세션 동안」 before E8 (#3028) opens it.
+/// #3095: 「이 세션 동안」 is not available for this host (only a member host
+/// honours a session grant). Older servers answered it for every session scope.
 pub const CODE_SCOPE_UNSUPPORTED: &str = "permission_scope_unsupported";
 
 const AUDIT_PERMISSION_DECIDED: &str = "work.permission.decided";
@@ -182,15 +191,18 @@ fn validated_decision(
             "an instruction with a rejection is not accepted yet (owner input is R2)",
         ));
     }
-    if request
-        .human_signature
-        .as_ref()
-        .is_some_and(|signature| signature.scope.as_deref() == Some("session"))
+    // #3095: 「이 세션 동안」 is a permission to ALLOW; a rejection has no
+    // session-long form (D-8: the switch-off side is unsigned and one-shot).
+    if kind != KIND_ALLOW_ONCE
+        && request
+            .human_signature
+            .as_ref()
+            .is_some_and(|signature| signature.scope.as_deref() == Some("session"))
     {
         return Err(ApiError::coded(
             StatusCode::BAD_REQUEST,
-            CODE_SCOPE_UNSUPPORTED,
-            "「이 세션 동안」 is not accepted yet; sign scope once",
+            CODE_KIND_REFUSED,
+            "a session-long scope belongs to an allow_once decision",
         ));
     }
     Ok(Decision {
@@ -422,6 +434,17 @@ async fn decide_in_tx(
     let host_is_member = target_work_host_in_tx(conn, workspace_id, session.host_id)
         .await?
         .is_some_and(|host| host.scope == HOST_SCOPE_MEMBER);
+    let session_scope = decision
+        .human_signature
+        .as_ref()
+        .is_some_and(|signature| signature.scope.as_deref() == Some("session"));
+    if session_scope && !host_is_member {
+        return Ok(Err(ApiError::coded(
+            StatusCode::BAD_REQUEST,
+            CODE_SCOPE_UNSUPPORTED,
+            "「이 세션 동안」 is available for a member host only",
+        )));
+    }
     let required = settings.human_control_signature_required
         && host_is_member
         && option.kind == KIND_ALLOW_ONCE;
@@ -450,6 +473,15 @@ async fn decide_in_tx(
         Ok(verified) => verified,
         Err(refusal) => return Ok(Err(refusal)),
     };
+
+    // The scope the host will see is the VERIFIED one — the statement's own —
+    // never the request body's word. `session` without a verified statement
+    // cannot happen: the scope is only ever read from the signature.
+    let scope = verified
+        .as_ref()
+        .and_then(|verified| verified.scope)
+        .filter(|scope| *scope == "session")
+        .unwrap_or("once");
 
     // ---- writes ------------------------------------------------------------
     let Some(decided) =
@@ -505,6 +537,7 @@ async fn decide_in_tx(
             "status": if approved { "approved" } else { "rejected" },
             "option_id": option.option_id,
             "request_event_id": decided.request_event_id.to_string(),
+            "scope": scope,
         }),
     };
     let normalized = validated_acp_event(&event, session_id).map_err(|error| {
@@ -527,6 +560,7 @@ async fn decide_in_tx(
                     "host_id": session.host_id.to_string(),
                     "option_id": option.option_id,
                     "kind": option.kind,
+                    "scope": scope,
                     "control_id": control.id.to_string(),
                     "control_status": control.status,
                     "device_key_id": verified.as_ref().map(|v| v.key.id.to_string()),

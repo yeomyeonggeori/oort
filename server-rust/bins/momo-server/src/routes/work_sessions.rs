@@ -1036,6 +1036,9 @@ async fn record_acp_event(
     }))
 }
 
+const AUDIT_PERMISSION_AUTO_ALLOWED: &str = "work.permission.auto_allowed";
+const SCHEMA_PERMISSION_AUTO_ALLOWED: &str = "momo.work_permission.auto_allowed.v1";
+
 async fn record_acp_event_in_tx(
     conn: &mut momo_db::PgConnection,
     workspace_id: Uuid,
@@ -1107,6 +1110,34 @@ async fn record_acp_event_in_tx(
     // The host answered the agent itself (its wait ran out, the turn was
     // cancelled): the request it names can no longer be decided. A host can
     // only withdraw — never approve — through this path.
+    if recorded && event.event_type == "approval.auto_allowed" {
+        // #3095: a request the host answered from the owner's signed 「이 세션
+        // 동안」 grant, without asking. It never reaches the decision route,
+        // so this is the only server-side audit of it (a retried event
+        // records nothing new).
+        {
+            write_audit(
+                conn,
+                &AuditEntry::new(workspace_id, AUDIT_PERMISSION_AUTO_ALLOWED)
+                    .by(existing.member_id)
+                    .about(existing.member_id)
+                    .target("work_session", session_id)
+                    .with_schema(
+                        SCHEMA_PERMISSION_AUTO_ALLOWED,
+                        json!({
+                            "event_id": event.event_id.to_string(),
+                            "work_session_id": session_id.to_string(),
+                            "host_id": existing.host_id.to_string(),
+                            "tool_kind": normalized.safe_payload.get("tool_kind"),
+                            "preview_sha256": normalized.safe_payload.get("preview_sha256"),
+                            "scope": "session",
+                        }),
+                    ),
+            )
+            .await
+            .map_err(T3Error::from)?;
+        }
+    }
     if event.event_type == "approval.decided" {
         if let Some(request_event_id) = normalized
             .safe_payload
@@ -1309,6 +1340,9 @@ pub(crate) fn validated_acp_event(
             // decision closes — named by the server's own decision event and
             // by a host that withdrew a request it answered itself.
             allowed.extend(["action", "status", "option_id", "request_event_id"]);
+            // #3095: the verified scope of the owner's decision (the server's
+            // own event).
+            allowed.extend(["scope"]);
             if let Some(request) = payload.get("request_event_id") {
                 let parsed = request.as_str().map(Uuid::parse_str);
                 if !matches!(parsed, Some(Ok(_))) {
@@ -1321,11 +1355,42 @@ pub(crate) fn validated_acp_event(
             {
                 return Err(ApiError::bad_request("invalid ACP approval decision"));
             }
+            if let Some(scope) = payload.get("scope") {
+                if !matches!(scope.as_str(), Some("once") | Some("session")) {
+                    return Err(ApiError::bad_request("invalid ACP approval scope"));
+                }
+            }
             if status == Some("approved") {
                 "Approval granted".to_string()
             } else {
                 "Approval rejected".to_string()
             }
+        }
+        "approval.auto_allowed" => {
+            // #3095: the host answered a permission request from the owner's
+            // signed 「이 세션 동안」 grant, without asking. A record for the
+            // person and the audit trail — deliberately NOT `approval.decided`,
+            // which every client reads as "the pending card was answered".
+            allowed.extend(["action", "status", "scope", "tool_kind", "preview_sha256"]);
+            let hash_ok = payload
+                .get("preview_sha256")
+                .and_then(Value::as_str)
+                .is_some_and(|hash| {
+                    hash.len() == 64 && hash.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+                });
+            let kind_ok = payload
+                .get("tool_kind")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| !kind.is_empty() && kind.len() <= 32);
+            if payload.get("action").and_then(Value::as_str) != Some("auto_allowed")
+                || payload.get("status").and_then(Value::as_str) != Some("approved")
+                || payload.get("scope").and_then(Value::as_str) != Some("session")
+                || !hash_ok
+                || !kind_ok
+            {
+                return Err(ApiError::bad_request("invalid ACP automatic approval"));
+            }
+            "Approval granted for this session".to_string()
         }
         _ => return Err(ApiError::bad_request("unsupported ACP event type")),
     };

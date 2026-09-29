@@ -4873,9 +4873,9 @@ paths:
         "400":
           description: >
             `error.code` permission_kind_refused (kind is not allow_once or
-            reject_once), permission_option_invalid (optionId is not an offered
+            reject_once, or a signed scope `session` on a reject), permission_option_invalid (optionId is not an offered
             option of that kind), permission_instruction_unsupported, or
-            permission_scope_unsupported (a signed scope `session` before E8).
+            permission_scope_unsupported (a signed scope `session` for a non-member host; #3095 opened 「이 세션 동안」 for member hosts).
           content:
             application/json:
               schema:

@@ -759,10 +759,6 @@ impl HumanTrust {
         // 4. Fresh on this host's clock.
         check_control_window(envelope.issued_at_ms, envelope.expires_at_ms, now_ms)
             .map_err(|_| Refusal::DeviceSignatureExpired)?;
-        // What this host does not run yet is refused before a nonce is spent.
-        if envelope.scope.as_deref() == Some("session") && control.kind == "permission" {
-            return Err(Refusal::UnsupportedControl);
-        }
         // 5. The nonce, on disk before anything is done.
         let mut ledger = self.ledger.clone();
         ledger
