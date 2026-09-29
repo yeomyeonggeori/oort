@@ -2647,6 +2647,18 @@ pub struct RealtimeTokenResponse {
     pub member_id: String,
 }
 
+/// `POST /v1/auth/push-fetch-token` response (#3121). `token` is the notification
+/// extension's credential: two read routes, no refresh half
+/// (`momo_auth::push_fetch_token`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushFetchTokenResponse {
+    pub token: String,
+    pub expires_at_ms: i64,
+    pub ttl_seconds: i64,
+    pub workspace_id: String,
+}
+
 /// Centrifugo subscribe-proxy callback body (Swift `SubscribeProxyRequest`,
 /// `DTOs.swift:906-911`).
 ///
