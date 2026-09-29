@@ -75,8 +75,10 @@
 //!    A lane profile folder `0700` — or finds it — and returns the exact path the
 //!    app signs the official CLI in to as `CLAUDE_CONFIG_DIR` / `CODEX_HOME`)
 //! → {"op":"set_remote_profile","harness":"claude"|"codex","label":"<label>"|null}
-//! ← {"ok":true}     (#3033: this Mac's 「원격 작업」 account — the profile folder
-//!                    remote sessions of that harness run as; `null` clears it)
+//! ← {"ok":true,"reset":bool}     (#3033: this Mac's 「원격 작업」 account — the profile folder
+//!                    remote sessions of that harness run as; `null` clears it.
+//!                    `reset: true`: the choice file was unreadable and the clear
+//!                    reset every harness to no choice)
 //! ← {"ok":false,"error":"invalid_request"|"unknown_harness"|"invalid_label"|
 //!                       "profile_not_found"|"profile_refused"|"profiles_unavailable"}
 //! ```
@@ -473,7 +475,9 @@ pub fn respond(line: &str, identity: &HostIdentity, shared: &SocketShared) -> Va
                 _ => return json!({"ok": false, "error": "invalid_request"}),
             };
             match crate::profile::RemoteProfiles::set(&shared.state_folder, harness, label) {
-                Ok(()) => json!({"ok": true}),
+                // `reset: true` — the choice file was unreadable and clearing
+                // reset every harness to no choice; the app tells the person.
+                Ok(reset) => json!({"ok": true, "reset": reset}),
                 Err(error) => json!({"ok": false, "error": error.label()}),
             }
         }

@@ -389,7 +389,7 @@ impl SessionManager {
             &cwd,
             self.settings.acp_start_timeout,
             profile.is_some(),
-            &[profile::profile_root(&self.settings.state_folder)],
+            &profile::protected_roots(&self.settings.state_folder),
         )
         .await
         {

@@ -70,6 +70,9 @@ pub const PROFILES_DIR: &str = "profiles";
 pub const MAX_LABEL_CHARS: usize = 32;
 /// The choice file in the host state folder.
 pub const PROFILES_FILE: &str = "remote-profiles.json";
+/// Serializes the read-modify-write of the choice file and folder creation
+/// (each control-socket connection runs on its own task).
+static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Largest `settings.json` read.
 const MAX_SETTINGS_BYTES: u64 = 1024 * 1024;
 
@@ -87,6 +90,8 @@ pub const CLAUDE_FORBIDDEN: &[&str] = &[
     "plugins",
     "hooks",
     "output-styles",
+    "rules",
+    "keybindings.json",
     ".mcp.json",
 ];
 
@@ -135,6 +140,10 @@ fn is_invisible(c: char) -> bool {
     matches!(
         c,
         '\u{00AD}'
+            | '\u{034F}'
+            | '\u{2800}'
+            | '\u{FE00}'..='\u{FE0F}'
+            | '\u{E0000}'..='\u{E007F}'
             | '\u{061C}'
             | '\u{180E}'
             | '\u{200B}'..='\u{200F}'
@@ -206,7 +215,13 @@ impl RemoteProfiles {
     /// label names a usable, signed-in-once profile folder now — so the desktop
     /// learns of a typo when it saves, not when the phone asks. Other
     /// harnesses' choices are kept.
-    pub fn set(state_folder: &Path, harness: &str, label: Option<&str>) -> Result<(), SetError> {
+    ///
+    /// `Ok(true)` when the choice file could not be read and clearing reset
+    /// it: every harness is back to no choice, which the caller must tell the
+    /// person (never silent).
+    pub fn set(state_folder: &Path, harness: &str, label: Option<&str>) -> Result<bool, SetError> {
+        // Two overlapping saves must not lose one of the choices.
+        let _guard = WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let adapter = match harness {
             "claude" => AdapterKind::Claude,
             "codex" => AdapterKind::Codex,
@@ -215,9 +230,13 @@ impl RemoteProfiles {
         // A choice file that cannot be read is not overwritten by a new
         // choice (the other harness's would silently fall back to the default
         // account); clearing one harness's choice resets it.
+        let mut reset = false;
         let mut current = match (Self::load(state_folder), label) {
             (Ok(current), _) => current,
-            (Err(_), None) => Self::default(),
+            (Err(_), None) => {
+                reset = true;
+                Self::default()
+            }
             (Err(_), Some(_)) => return Err(SetError::Unavailable),
         };
         let slot = match adapter {
@@ -239,7 +258,8 @@ impl RemoteProfiles {
         }
         let body = serde_json::to_vec(&current).map_err(|_| SetError::Unavailable)?;
         write_private_file(&state_folder.join(PROFILES_FILE), &body)
-            .map_err(|_| SetError::Unavailable)
+            .map_err(|_| SetError::Unavailable)?;
+        Ok(reset)
     }
 }
 
@@ -277,6 +297,20 @@ pub fn profile_root(state_folder: &Path) -> PathBuf {
 /// The profile folder as the path string the CLI will hash: pure, no disk.
 pub fn profile_dir(state_folder: &Path, harness: &str, label: &str) -> PathBuf {
     profile_root(state_folder).join(harness).join(label)
+}
+
+/// The profiles folder as the agent's read/edit deny rules must name it: as
+/// configured, and resolved when the OS resolves it differently (`/var` →
+/// `/private/var`), since a rule matches the path the tool asks for.
+pub fn protected_roots(state_folder: &Path) -> Vec<PathBuf> {
+    let root = profile_root(state_folder);
+    let mut roots = vec![root.clone()];
+    if let Ok(canonical) = root.canonicalize() {
+        if canonical != root {
+            roots.push(canonical);
+        }
+    }
+    roots
 }
 
 fn own_private_dir(metadata: &std::fs::Metadata) -> bool {
@@ -334,6 +368,7 @@ pub fn resolve(state_folder: &Path, harness: &str, label: &str) -> Result<PathBu
 /// `CODEX_HOME`.
 pub fn prepare(state_folder: &Path, harness: &str, label: &str) -> Result<PathBuf, SetError> {
     use std::os::unix::fs::DirBuilderExt as _;
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     if !matches!(harness, "claude" | "codex") {
         return Err(SetError::UnknownHarness);
     }
@@ -789,10 +824,50 @@ mod tests {
             .unwrap()
             .mode();
         assert_eq!(mode & 0o777, 0o600);
-        RemoteProfiles::set(&f.state, "claude", None).unwrap();
+        assert_eq!(
+            RemoteProfiles::set(&f.state, "claude", None),
+            Ok(false),
+            "a readable file is not a reset"
+        );
         let saved = RemoteProfiles::load(&f.state).unwrap();
         assert_eq!(saved.label_for(AdapterKind::Claude), None);
         assert_eq!(saved.label_for(AdapterKind::Codex), Some("Team"), "kept");
+    }
+
+    #[test]
+    fn overlapping_saves_for_two_harnesses_both_land() {
+        let f = fixture(&[("claude", "Work"), ("codex", "Team")]);
+        for round in 0..40 {
+            let state = f.state.clone();
+            let saves: Vec<_> = [("claude", "Work"), ("codex", "Team")]
+                .into_iter()
+                .map(|(harness, label)| {
+                    let state = state.clone();
+                    std::thread::spawn(move || {
+                        RemoteProfiles::set(&state, harness, Some(label)).unwrap()
+                    })
+                })
+                .collect();
+            for save in saves {
+                save.join().unwrap();
+            }
+            let saved = RemoteProfiles::load(&f.state).unwrap();
+            assert_eq!(
+                saved.label_for(AdapterKind::Claude),
+                Some("Work"),
+                "{round}"
+            );
+            assert_eq!(saved.label_for(AdapterKind::Codex), Some("Team"), "{round}");
+            RemoteProfiles::set(&f.state, "claude", None).unwrap();
+            RemoteProfiles::set(&f.state, "codex", None).unwrap();
+        }
+    }
+
+    #[test]
+    fn labels_that_look_alike_through_combining_or_tag_characters_are_refused() {
+        for bad in ["a\u{034F}b", "a\u{FE0F}", "a\u{2800}b", "a\u{E0041}b"] {
+            assert!(!check_label(bad), "{bad:?}");
+        }
     }
 
     #[test]
@@ -833,7 +908,11 @@ mod tests {
             RemoteProfiles::set(&f.state, "claude", Some("Work")),
             Err(SetError::Unavailable)
         );
-        assert_eq!(RemoteProfiles::set(&f.state, "claude", None), Ok(()));
+        assert_eq!(
+            RemoteProfiles::set(&f.state, "claude", None),
+            Ok(true),
+            "the caller is told the file was reset"
+        );
         assert_eq!(
             RemoteProfiles::load(&f.state),
             Ok(RemoteProfiles::default())

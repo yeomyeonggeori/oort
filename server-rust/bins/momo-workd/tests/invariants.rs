@@ -1007,7 +1007,10 @@ async fn inv_4_round_trip_events_idle_input_kill() {
                     // out of the agent's reach too.
                     "deny": momo_workd::policy::claude_read_deny()
                         .into_iter()
-                        .chain([format!("Read({}/**)", profiles.display())])
+                        .chain([
+                            format!("Read(/{}/**)", profiles.display()),
+                            format!("Edit(/{}/**)", profiles.display()),
+                        ])
                         .collect::<Vec<_>>(),
                 },
                 // #2607 N-1: every Bash command in the OS sandbox.
@@ -4106,5 +4109,23 @@ async fn inv_41_the_server_cannot_pick_the_account_through_the_spawn() {
     assert_eq!(
         launches(&h)[0]["env_isolation"]["CLAUDE_CONFIG_DIR"].as_str(),
         Some(dir.to_str().unwrap())
+    );
+}
+
+#[tokio::test]
+async fn inv_42_a_chosen_account_that_is_not_signed_in_says_so() {
+    // The adapter answers ACP `auth_required` at `session/new`. With a chosen
+    // profile that is `profile_login_required`; without one it stays the
+    // adapter failure it always was.
+    let mut h = harness(&[("claude", &["--auth-required"])]);
+    assert_eq!(
+        refused_spawn(&mut h, "claude").await,
+        ControlAck::refused("agent_start_failed")
+    );
+    make_profile(&h, "claude", "Work");
+    choose(&h, "claude", Some("Work"));
+    assert_eq!(
+        refused_spawn(&mut h, "claude").await,
+        ControlAck::refused("profile_login_required")
     );
 }

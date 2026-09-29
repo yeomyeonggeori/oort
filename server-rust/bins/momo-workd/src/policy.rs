@@ -337,7 +337,13 @@ impl AdapterKind {
         let mut deny = claude_read_deny();
         let mut credentials = claude_credential_files();
         for folder in protected {
-            deny.push(format!("Read({}/**)", folder.display()));
+            // Claude Code's rule syntax: `//path` is absolute from the
+            // filesystem root (`/path` is relative to the project root, `~/`
+            // to home). Read and Edit both: an approved write could plant
+            // configuration in another session's account.
+            let rule = format!("/{}/**", folder.display());
+            deny.push(format!("Read({rule})"));
+            deny.push(format!("Edit({rule})"));
             credentials.push(json!({"path": folder.display().to_string(), "mode": "deny"}));
         }
         match self {
@@ -1501,7 +1507,14 @@ mod tests {
             .iter()
             .filter_map(Value::as_str)
             .collect();
-        assert!(deny.contains(&"Read(/state/workd/profiles/**)"), "{deny:?}");
+        assert!(
+            deny.contains(&"Read(//state/workd/profiles/**)"),
+            "{deny:?}"
+        );
+        assert!(
+            deny.contains(&"Edit(//state/workd/profiles/**)"),
+            "{deny:?}"
+        );
         assert!(settings["sandbox"]["credentials"]["files"]
             .as_array()
             .unwrap()
