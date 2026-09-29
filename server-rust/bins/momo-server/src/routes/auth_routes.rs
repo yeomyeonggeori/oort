@@ -131,9 +131,10 @@ use axum::http::HeaderMap;
 use axum::Json;
 use momo_auth::{
     carries_privileged_scope, find_linked_device_id_by_refresh_in_tx, judge_refresh_proof,
-    lock_linked_device_in_tx, lock_member_session_tokens_by_ids, lock_session_rows_in_tx,
-    new_session_id, rebind_device_link_session_in_tx, rebind_locked_device_link_session_in_tx,
-    record_session_token, record_session_token_with_device, revoke_privileged_session_tokens,
+    lock_linked_device_in_tx, lock_member_session_tokens_by_ids, lock_member_wide_sweep_in_tx,
+    lock_session_rows_in_tx, new_session_id, rebind_device_link_session_in_tx,
+    rebind_locked_device_link_session_in_tx, record_session_token,
+    record_session_token_with_device, revoke_privileged_session_tokens,
     revoke_session_lineage_tokens, revoke_token, session_device_label, session_id_of, sign_access,
     sign_refresh, sign_rotation_successor, token_state, verify_app_access, verify_app_refresh,
     without_privileged_scopes, AuthError, DeviceSessionRecord, IssuedToken, PresentedRefreshProof,
@@ -438,6 +439,14 @@ pub async fn refresh(
     });
     let gate = with_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
+            // #3109: a downgrading rotation sweeps the member's other
+            // privileged sessions after locking its own lineage, so it queues
+            // with the other member-wide sweepers BEFORE any token lock below.
+            if downgrade {
+                lock_member_wide_sweep_in_tx(conn, workspace_id, member_id)
+                    .await
+                    .map_err(DbError::from)?;
+            }
             // (1) Advisory pre-check — precise 401s for a logged-out/rotated
             // token. The *atomic* gate is the revoke below, not this read.
             let presented_state = token_state(conn, &presented).await.map_err(DbError::from)?;

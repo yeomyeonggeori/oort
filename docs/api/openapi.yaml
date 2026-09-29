@@ -3280,6 +3280,12 @@ paths:
         included, is 403 `device_key_requires_linked_session` and writes
         nothing. A rebind moves an `ios` key only from such a sign-in to such a
         sign-in (same code).
+        **계보당 폰 키 1개 (#3127).** A sign-in lineage holds at most one live
+        `ios` key: a second one, or a rebind onto a lineage that already holds
+        one, is 409 `device_key_lineage_has_phone_key` and writes nothing. A
+        replacement (Face ID re-enrolled, the old key unusable) starts with the
+        Mac's signed revocation of the old key, or with the phone linking by QR
+        again; the new key then starts unendorsed and needs the Mac's approval.
       security:
         - bearerAuth: []
       parameters:
@@ -3331,8 +3337,9 @@ paths:
             The public key is already live in this workspace on a live sign-in
             (`device_key_already_registered`; also a rebind of such a key), it
             is the caller's on an ended sign-in and must be moved with `rebind`
-            (`device_key_rebind_required`), or this sign-in has ended
-            (`session_lineage_ended`).
+            (`device_key_rebind_required`), this sign-in already holds a live
+            phone key (`device_key_lineage_has_phone_key`, #3127), or this
+            sign-in has ended (`session_lineage_ended`).
         "404":
           description: A rebind of a public key with no live row (`device_key_not_found`) — register it fresh.
           content:
@@ -3425,7 +3432,9 @@ paths:
         Since #3119 the target's sign-in must be QR-linked
         (`linkedSession`, else `device_key_requires_linked_session`) and its QR
         issued from a sign-in that holds or held a `macos` key of the caller
-        (`linkedFromMac`, else `device_key_link_not_from_mac`).
+        (`linkedFromMac`, else `device_key_link_not_from_mac`). Since #3127 a
+        target whose sign-in holds another live `ios` key is 409
+        `device_key_lineage_has_phone_key`: the Mac revokes one first.
       security:
         - bearerAuth: []
       parameters:
@@ -3475,7 +3484,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: "`device_key_not_endorsable` — revoked, a Mac, or already endorsed."
+          description: "`device_key_not_endorsable` — revoked, a Mac, or already endorsed; `device_key_lineage_has_phone_key` — the target's sign-in holds another live phone key (#3127)."
           content:
             application/json:
               schema:

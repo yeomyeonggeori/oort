@@ -332,6 +332,8 @@ export const DEVICE_KEY_REFUSAL = {
   requiresLinkedSession: "device_key_requires_linked_session",
   /** #3119: the phone's QR was not issued from a Mac sign-in. */
   linkNotFromMac: "device_key_link_not_from_mac",
+  /** #3127: this sign-in already holds a live phone key; the Mac revokes it or the phone links again. */
+  lineageHasPhoneKey: "device_key_lineage_has_phone_key",
 } as const;
 
 // ---- views ------------------------------------------------------------------
