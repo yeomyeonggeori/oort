@@ -169,6 +169,9 @@ pub struct MemoryConfig {
     pub regen_min_interval_seconds: i32,
     /// `MEMORY_MAX_CHANNELS` (2000) — channels one sweep looks at.
     pub max_channels: i64,
+    /// `MEMORY_EXTRACT_ENABLED` (**on**; `0|false|no|off` turns it off) — #3168: the window call
+    /// also returns item candidates (decisions, facts, commitments). Off = digests only, as in M1.
+    pub extract_items: bool,
 }
 
 impl Default for MemoryConfig {
@@ -195,6 +198,7 @@ impl Default for MemoryConfig {
             apply_retries: 3,
             regen_min_interval_seconds: 900,
             max_channels: 2_000,
+            extract_items: true,
         }
     }
 }
@@ -243,6 +247,7 @@ impl MemoryConfig {
                 d.regen_min_interval_seconds,
             )?,
             max_channels: env_number("MEMORY_MAX_CHANNELS", d.max_channels)?.max(1),
+            extract_items: report_protocol_enabled(env("MEMORY_EXTRACT_ENABLED").as_deref()),
         })
     }
 }

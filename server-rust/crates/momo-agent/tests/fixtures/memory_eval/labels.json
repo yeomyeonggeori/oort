@@ -612,7 +612,7 @@
       },
       {
         "id": "no_cross_channel_text",
-        "rule": "for every member and channel, context holds no canary from another channel"
+        "rule": "for every member and channel, context holds no canary from another channel (except the requester's own agent DM: ADR-0196 D6-4 union)"
       },
       {
         "id": "public_control_visible",

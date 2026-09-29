@@ -212,7 +212,25 @@ impl MemoryBackend for Unimplemented {
     }
 }
 
-/// THE seam: M1 returns its adapter here (and the `#[ignore]` RED tests go live).
+/// A product adapter, registered by the suite that owns the runtime it needs (a database, a
+/// worker). Kept out of this file so the offline `memory_eval` test binary stays dependency-free.
+pub type ProductFactory = Box<dyn Fn() -> Box<dyn MemoryBackend> + Send + Sync>;
+static PRODUCT: std::sync::OnceLock<ProductFactory> = std::sync::OnceLock::new();
+
+/// Register the product adapter for this test process (first registration wins).
+pub fn register_product_backend(factory: ProductFactory) {
+    let _ = PRODUCT.set(factory);
+}
+
+/// THE seam: the registered product adapter, or [`Unimplemented`] when the running suite
+/// registered none (so an absent implementation is RED, never a vacuous PASS).
+///
+/// #3168 (M2) registers the items path from `momo-agent-worker`'s
+/// `tests/memory_eval_items_pg.rs`: the real worker sweep writes digests + items into Postgres and
+/// the surfaces read them back through RLS. M3 fills the timeline / current-value methods.
 pub fn product_backend() -> Box<dyn MemoryBackend> {
-    Box::new(Unimplemented)
+    match PRODUCT.get() {
+        Some(factory) => factory(),
+        None => Box::new(Unimplemented),
+    }
 }

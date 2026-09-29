@@ -31,8 +31,9 @@ use momo_db::{with_tenant_tx_prelude, DbError, PgConnection, PgPool};
 use sqlx::Row;
 use uuid::Uuid;
 
-/// Bumped whenever the prompt or the digest shape changes; stored on every digest.
-pub const PROMPT_VERSION: &str = "digest-v1";
+/// Bumped whenever the prompt or the digest shape changes; stored on every digest. `digest-v2`
+/// (#3168): a window prompt that also returns item candidates (`{summary, items[]}`).
+pub const PROMPT_VERSION: &str = "digest-v2";
 
 /// `mem_digest.model_source` for a digest made with the team 「기본 AI」 summary row —
 /// ADR-0147's vocabulary (`agent` | `instance_default`), not a new string.

@@ -53,6 +53,7 @@ use momo_agent::memory::{
     RollupInput, SourceMessage, StaleDigest, AUDIT_SUMMARY_TOKEN_CAP, AUDIT_SUMMARY_UNCONFIGURED,
     MODEL_SOURCE_INSTANCE_DEFAULT,
 };
+use momo_agent::memory_items::{self, ItemOutcome};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
 use momo_settings::DefaultAiRole;
@@ -60,6 +61,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::config::MemoryConfig;
+use crate::extract;
 use crate::provider::{ChatMessage, ChatRequest};
 use crate::{now_ms, AgentWorker, DefaultAiOutcome, ResolvedTransport};
 
@@ -241,6 +243,12 @@ pub struct SweepStats {
     pub failures: usize,
     /// Set when the sweep called no model because none is configured.
     pub not_configured: Option<&'static str>,
+    /// #3168 item extraction: candidates written / already remembered / refused by the
+    /// database / dropped by the worker's own validation.
+    pub items_added: usize,
+    pub items_duplicate: usize,
+    pub items_refused: usize,
+    pub items_dropped: usize,
 }
 
 /// Where a digest's content comes from.
@@ -284,6 +292,14 @@ struct Loaded {
     /// Where a window moves the watermark to on success.
     cursor_to: Option<i64>,
     read_at: DateTime<Utc>,
+}
+
+/// What one digest's items became (see [`memory_items::ItemOutcome`]).
+#[derive(Debug, Default)]
+struct ItemTally {
+    added: usize,
+    duplicate: usize,
+    refused: usize,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1096,8 +1112,27 @@ impl AgentWorker {
                     return JobOutcome::Failed;
                 }
             };
-            let prompt = build_prompt(cfg, loaded.level, &loaded.material);
-            let estimate = estimate_tokens(&prompt, cfg.max_output_tokens);
+            // #3168: a window over messages also asks for item candidates in the same call.
+            let extracting = cfg.extract_items
+                && loaded.level == "window"
+                && matches!(&loaded.material, Material::Messages(_));
+            let (prompt, max_output) = match (&loaded.material, extracting) {
+                (Material::Messages(messages), true) => (
+                    extract::build_prompt(
+                        &messages
+                            .iter()
+                            .map(|m| transcript_line(m, cfg.message_max_chars))
+                            .collect::<Vec<_>>(),
+                        extract::conversation_day(&messages[0], self.config.utc_offset_minutes),
+                    ),
+                    cfg.max_output_tokens + extract::ITEMS_OUTPUT_ALLOWANCE,
+                ),
+                _ => (
+                    build_prompt(cfg, loaded.level, &loaded.material),
+                    cfg.max_output_tokens,
+                ),
+            };
+            let estimate = estimate_tokens(&prompt, max_output);
 
             // Daily cap, before the model is called (plan §6.6).
             let cap = cfg.daily_token_cap;
@@ -1132,7 +1167,7 @@ impl AgentWorker {
             }
 
             stats.llm_calls += 1;
-            let reply = match self.call_model(prompt).await {
+            let reply = match self.call_model(prompt, max_output).await {
                 Ok(reply) => reply,
                 Err(CallError::NotConfigured { reason, detail }) => {
                     self.settle_tokens(ws, -estimate).await;
@@ -1154,12 +1189,27 @@ impl AgentWorker {
 
             let token = self.summary.lease_token();
             let lease_secs = cfg.lease_seconds;
-            let mut body = clip_chars(reply.text.trim(), 6_000);
+            let (summary_text, mut candidates) = match (&loaded.material, extracting) {
+                (Material::Messages(window), true) => {
+                    let parsed = extract::parse_reply(&reply.text);
+                    let validated = extract::validate(parsed.items, window);
+                    stats.items_dropped += validated.dropped.len();
+                    if !validated.dropped.is_empty() {
+                        tracing::info!(channel_id = %ch, dropped = ?validated.dropped, "memory: item candidates dropped");
+                    }
+                    (parsed.summary, validated.items)
+                }
+                _ => (reply.text.clone(), Vec::new()),
+            };
+            let mut body = clip_chars(summary_text.trim(), 6_000);
             if mem::looks_like_secret(&body) {
                 // A credential the model echoed is never stored. The digest is written with a
-                // placeholder so the cursor moves (retrying would just burn tokens again).
+                // placeholder so the cursor moves (retrying would just burn tokens again). The
+                // same answer's items are not trusted either.
                 tracing::warn!(channel_id = %ch, "memory: model output looked like a credential; withheld");
                 body = SUMMARY_WITHHELD.to_string();
+                stats.items_dropped += candidates.len();
+                candidates.clear();
             }
             let cursor_to = loaded.cursor_to;
             let (level, thread_root) = (loaded.level, loaded.thread_root);
@@ -1169,7 +1219,7 @@ impl AgentWorker {
             let model = reply.model.clone();
             let applied = mem::with_memory_tx(&self.pool, ws, move |conn| {
                 Box::pin(async move {
-                    mem::apply_digest(
+                    let digest_id = mem::apply_digest(
                         conn,
                         &NewDigest {
                             channel_id: ch,
@@ -1186,17 +1236,32 @@ impl AgentWorker {
                         },
                     )
                     .await?;
+                    // Items are added in the digest's own tx (add-only): they rest on the
+                    // evidence snapshot the digest just validated, and a refused item (23514)
+                    // costs only itself. An edit/delete race (40001/23503) or a flipped switch
+                    // (55000) aborts everything, exactly like the digest, and is retried.
+                    let mut tally = ItemTally::default();
+                    for item in &candidates {
+                        match memory_items::add_item(conn, digest_id, item, &model).await? {
+                            ItemOutcome::Added(_) => tally.added += 1,
+                            ItemOutcome::Duplicate => tally.duplicate += 1,
+                            ItemOutcome::Refused => tally.refused += 1,
+                        }
+                    }
                     if let Some(to) = cursor_to {
                         // Same tx as the digest: a window is either fully applied and the
                         // watermark past it, or neither.
                         mem::advance_cursor(conn, ch, to, token, lease_secs).await?;
                     }
-                    Ok(())
+                    Ok(tally)
                 })
             })
             .await;
             match applied {
-                Ok(()) => {
+                Ok(tally) => {
+                    stats.items_added += tally.added;
+                    stats.items_duplicate += tally.duplicate;
+                    stats.items_refused += tally.refused;
                     if let Some(to) = cursor_to {
                         pass.cursor = to;
                     }
@@ -1417,7 +1482,11 @@ impl AgentWorker {
         with_tenant_tx(&self.pool, ws, body).await
     }
 
-    async fn call_model(&self, messages: Vec<ChatMessage>) -> Result<ModelReply, CallError> {
+    async fn call_model(
+        &self,
+        messages: Vec<ChatMessage>,
+        max_tokens: i32,
+    ) -> Result<ModelReply, CallError> {
         // Re-resolved per call: a fixed row, a refreshed OAuth token or a changed link is seen
         // by the next call, and "no longer configured" stops the sweep mid-way.
         let (mut transport, model) = match self.resolve_summary_model().await {
@@ -1435,7 +1504,7 @@ impl AgentWorker {
         let request = ChatRequest {
             model: model.clone(),
             messages,
-            max_tokens: Some(self.config.memory.max_output_tokens),
+            max_tokens: Some(max_tokens),
             tools: Vec::new(),
             momo_tools: Vec::new(),
         };

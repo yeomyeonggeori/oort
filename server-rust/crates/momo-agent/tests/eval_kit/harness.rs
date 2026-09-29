@@ -112,7 +112,7 @@ pub const LEAK_CASES: [(&str, &str); 8] = [
     ),
     (
         "no_cross_channel_text",
-        "for every member and channel, context holds no canary from another channel",
+        "for every member and channel, context holds no canary from another channel (except the requester's own agent DM: ADR-0196 D6-4 union)",
     ),
     (
         "public_control_visible",
@@ -245,7 +245,14 @@ pub fn leak_violations(factory: Factory<'_>, corpus: &Corpus) -> R<Vec<String>> 
             }
             let ctx = b.agent_context(invoker, channel)?;
             for c in corpus.canaries.iter().chain(corpus.controls.iter()) {
-                if c.channel != channel && ctx.contains(&c.token) {
+                // ADR-0196 D6-4 (Q6=A): in the requester's OWN agent DM the answer may draw on
+                // everything the requester can read (company-brain's DM rule). That is not a leak:
+                // the DM is private to that one human and the canary's channel is one they are in.
+                // In every group channel (and for anything the requester cannot read) it stays a leak.
+                let own_dm_union = channel == Channel::DmXAgent
+                    && invoker.is_human()
+                    && c.channel.members().contains(&invoker);
+                if c.channel != channel && !own_dm_union && ctx.contains(&c.token) {
                     v.push(format!(
                         "no_cross_channel_text: {invoker:?} in {} got {} from {}",
                         channel.label(),

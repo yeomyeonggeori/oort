@@ -2033,8 +2033,14 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
         );
     }
     for (signature, name) in &functions {
-        if name == "mem_digest_evidence_ok" {
-            continue; // the RLS policy calls it as the reading role
+        if name == "mem_digest_evidence_ok"
+            || name == "mem_item_evidence_ok"
+            || name == "mem_search_items"
+        {
+            // The RLS policies call the evidence helpers as the reading role; `mem_search_items`
+            // is the API entry point (session_user guard inside; the worker-only twin is
+            // `mem_search_items_for`, which the loop covers).
+            continue;
         }
         let public_grants: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM pg_proc p, aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a \
@@ -2337,9 +2343,10 @@ fn migration_path() -> PathBuf {
         .join("../../../server/Migrations/101_mem_lockdown_hardening.sql")
 }
 
-/// The allow-list self-check lives in 102 (101 is merged and stays untouched, #3191 M-6).
+/// The allow-list self-check is restated by every migration that adds a definer function (101 and 102
+/// are merged and stay untouched, #3191 M-6); the newest one is the one that matches the real state.
 fn worker_migration_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../server/Migrations/102_mem_worker.sql")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../server/Migrations/104_mem_item.sql")
 }
 
 /// M-1: the lock block is one text in three files. Compared byte for byte (stronger than a
@@ -2464,7 +2471,8 @@ async fn lock_block_also_locks_views_and_materialized_views() {
 }
 
 /// L-1: the SECURITY DEFINER functions owned by mem_definer are exactly this list.
-const DEFINER_ALLOW_LIST: [&str; 17] = [
+const DEFINER_ALLOW_LIST: [&str; 24] = [
+    "mem_add_item",
     "mem_adjust_tokens",
     "mem_advance_cursor",
     "mem_apply_digest",
@@ -2477,9 +2485,15 @@ const DEFINER_ALLOW_LIST: [&str; 17] = [
     "mem_digest_live",
     "mem_digest_rollup_inputs",
     "mem_drop_digest",
+    "mem_item_audience_ok",
+    "mem_item_evidence_ok",
+    "mem_item_live",
+    "mem_item_readable_by",
     "mem_message_changed",
     "mem_record_serving",
     "mem_reserve_tokens",
+    "mem_search_items",
+    "mem_search_items_for",
     "mem_stale_digests",
     "mem_token_budget",
 ];
@@ -2512,7 +2526,7 @@ async fn security_definer_functions_owned_by_mem_definer_are_allow_listed() {
         owned,
         DEFINER_ALLOW_LIST.to_vec(),
         "a SECURITY DEFINER function owned by mem_definer must be added to the allow-list \
-         here and in 102_mem_worker.sql on purpose"
+         here and in the newest migration's allow-list (104_mem_item.sql) on purpose"
     );
     // The migration's own self-check passes on the good state ...
     let check = tail_block(&worker_migration_path(), "-- ── L-1", None);
