@@ -2060,11 +2060,10 @@ async fn assert_privilege_matrix(su: &PgPool, when: &str) {
             .fetch_one(su)
             .await
             .expect("has_function_privilege");
-            assert_eq!(
-                has,
-                role == "momo_memory",
-                "{when}: {role} EXECUTE {signature}"
-            );
+            // `mem_search_items_core` (#3168 M-4) is callable by its owner alone: not even the
+            // worker role may run it, because it takes the serve/browse flag from its caller.
+            let expected = role == "momo_memory" && name != "mem_search_items_core";
+            assert_eq!(has, expected, "{when}: {role} EXECUTE {signature}");
         }
     }
     // Membership: only momo_worker, without inheritance.
@@ -2471,7 +2470,7 @@ async fn lock_block_also_locks_views_and_materialized_views() {
 }
 
 /// L-1: the SECURITY DEFINER functions owned by mem_definer are exactly this list.
-const DEFINER_ALLOW_LIST: [&str; 24] = [
+const DEFINER_ALLOW_LIST: [&str; 28] = [
     "mem_add_item",
     "mem_adjust_tokens",
     "mem_advance_cursor",
@@ -2493,7 +2492,11 @@ const DEFINER_ALLOW_LIST: [&str; 24] = [
     "mem_record_serving",
     "mem_reserve_tokens",
     "mem_search_items",
+    "mem_search_items_core",
     "mem_search_items_for",
+    "mem_serve_candidates",
+    "mem_serve_requester",
+    "mem_serving_of",
     "mem_stale_digests",
     "mem_token_budget",
 ];

@@ -112,7 +112,7 @@ pub const LEAK_CASES: [(&str, &str); 8] = [
     ),
     (
         "no_cross_channel_text",
-        "for every member and channel, context holds no canary from another channel (except the requester's own agent DM: ADR-0196 D6-4 union)",
+        "for every member and channel, context holds no canary from another channel (ADR-0196 D6-4: except the invoker's own 1:1 agent DM, where their readable channels apply)",
     ),
     (
         "public_control_visible",
@@ -187,6 +187,16 @@ pub fn leak_violations(factory: Factory<'_>, corpus: &Corpus) -> R<Vec<String>> 
         if all_surfaces(&*b, Who::X, &c.token)?.contains(&c.token) {
             v.push(format!("left_member_sees_none: X still saw {}", c.token));
         }
+        // ...nor does an agent answer to X: not even in X's own DM, where the union of what X can
+        // read applies (ADR-0196 D6-4) — a channel X has left is no longer one X can read.
+        if b.agent_context(Who::X, Channel::DmXAgent)?
+            .contains(&c.token)
+        {
+            v.push(format!(
+                "left_member_sees_none: X's DM context still carried {}",
+                c.token
+            ));
+        }
     }
 
     // 4
@@ -245,14 +255,14 @@ pub fn leak_violations(factory: Factory<'_>, corpus: &Corpus) -> R<Vec<String>> 
             }
             let ctx = b.agent_context(invoker, channel)?;
             for c in corpus.canaries.iter().chain(corpus.controls.iter()) {
-                // ADR-0196 D6-4 (Q6=A): in the requester's OWN agent DM the answer may draw on
-                // everything the requester can read (company-brain's DM rule). That is not a leak:
-                // the DM is private to that one human and the canary's channel is one they are in.
-                // In every group channel (and for anything the requester cannot read) it stays a leak.
-                let own_dm_union = channel == Channel::DmXAgent
-                    && invoker.is_human()
-                    && c.channel.members().contains(&invoker);
-                if c.channel != channel && !own_dm_union && ctx.contains(&c.token) {
+                // ADR-0196 D6-4 (accepted after this kit was written): in the invoker's own
+                // 1:1 DM with the agent the answer is seen by that person alone, so the union of
+                // what they can read applies. Every canary here sits in a channel the DM's
+                // human belongs to; a group channel gets no such exemption.
+                if channel == Channel::DmXAgent && c.channel.members().contains(&invoker) {
+                    continue;
+                }
+                if c.channel != channel && ctx.contains(&c.token) {
                     v.push(format!(
                         "no_cross_channel_text: {invoker:?} in {} got {} from {}",
                         channel.label(),

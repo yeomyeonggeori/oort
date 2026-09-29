@@ -419,6 +419,13 @@ async fn sabotage_tx(
     edits: &[(&str, &str)],
 ) -> sqlx::Transaction<'static, sqlx::Postgres> {
     let mut tx = su.begin().await.expect("begin");
+    redefine(&mut tx, function, edits).await;
+    tx
+}
+
+/// Redefine `function` inside `tx` with each `from` replaced by `to` (more than one function can be
+/// sabotaged in the same transaction).
+async fn redefine(tx: &mut sqlx::PgConnection, function: &str, edits: &[(&str, &str)]) {
     let mut def: String = sqlx::query_scalar("SELECT pg_get_functiondef($1::regprocedure)")
         .bind(function)
         .fetch_one(&mut *tx)
@@ -432,7 +439,6 @@ async fn sabotage_tx(
         def = def.replacen(from, to, 1);
     }
     sqlx::query(&def).execute(&mut *tx).await.expect("redefine");
-    tx
 }
 
 /// Continue as `role` with the tenant (and optionally viewer) GUCs set, inside `tx`.
@@ -892,10 +898,7 @@ async fn add_item_refuses_what_it_must_and_each_guard_is_load_bearing() {
     );
     su_exec(
         &su,
-        &format!(
-            "DELETE FROM mem_settings WHERE channel_id = '{}'",
-            w.general
-        ),
+        &format!("DELETE FROM mem_settings WHERE channel_id = '{}'", w.dm_aa),
     )
     .await;
     su_exec(
@@ -1020,7 +1023,24 @@ async fn add_item_refuses_what_it_must_and_each_guard_is_load_bearing() {
             s.label
         );
         let sql = add_sql(s.digest, "fact", &s.evidence, false);
-        let mut tx = sabotage_tx(&su, ADD_FN, &[(s.raise, "NULL;")]).await;
+        let l4 = "RAISE EXCEPTION 'mem_add_item: inserted % evidence rows, expected %', v_inserted, v_n\n      USING ERRCODE = '23503';";
+        let mut edits = vec![(s.raise, "NULL;")];
+        if s.label == "evidence outside the digest" {
+            // L-4 is the second net for this shape: with only the subset check gone the count
+            // check on the inserted evidence rows still refuses.
+            let mut tx = sabotage_tx(&su, ADD_FN, &edits).await;
+            become_role(&mut tx, "momo_memory", s.channel_ws, None).await;
+            let net = sqlx::query_scalar::<_, Option<Uuid>>(&sql)
+                .bind(&s.body)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| sqlstate(&e));
+            tx.rollback().await.ok();
+            eprintln!("RED(net) subset check gone, L-4 row-count check still refuses -> {net:?}");
+            assert_eq!(net, Err("23503".to_string()));
+            edits.push((l4, "NULL;"));
+        }
+        let mut tx = sabotage_tx(&su, ADD_FN, &edits).await;
         become_role(&mut tx, "momo_memory", s.channel_ws, None).await;
         let outcome = sqlx::query_scalar::<_, Option<Uuid>>(&sql)
             .bind(&s.body)
@@ -1651,13 +1671,11 @@ async fn search_with(
     ws: Uuid,
     viewer: Uuid,
     query: &str,
-    answer: Option<Uuid>,
 ) -> Vec<Uuid> {
     let mut tx = sabotage_tx(su, function, edits).await;
     become_role(&mut tx, "momo_app", ws, Some(viewer)).await;
-    let ids: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM mem_search_items($1, 20, $2)")
+    let ids: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM mem_search_items($1, 20)")
         .bind(query)
-        .bind(answer)
         .fetch_all(&mut *tx)
         .await
         .expect("search");
@@ -1673,7 +1691,7 @@ async fn search_with_core(
     ws: Uuid,
     viewer: Uuid,
     query: &str,
-    answer: Option<Uuid>,
+    answer: Uuid,
 ) -> Vec<Uuid> {
     let mut tx = sabotage_tx(su, function, edits).await;
     become_role(&mut tx, "momo_memory", ws, None).await;
@@ -1721,10 +1739,27 @@ async fn search(
     q: &str,
     answer: Option<Uuid>,
 ) -> Vec<Uuid> {
+    if let Some(answer) = answer {
+        // Serving: the worker-only entry point, requester as an argument, answer channel required.
+        let Some(viewer) = viewer else {
+            return Vec::new();
+        };
+        let wk = worker_pool(true).await;
+        let mut tx = viewer_tx(&wk, w.ws, None).await;
+        let ids: Vec<Uuid> =
+            sqlx::query_scalar("SELECT id FROM mem_search_items_for($1, $2, 20, $3)")
+                .bind(viewer)
+                .bind(q)
+                .bind(answer)
+                .fetch_all(&mut *tx)
+                .await
+                .expect("serve search");
+        tx.rollback().await.expect("rollback");
+        return ids;
+    }
     let mut tx = viewer_tx(app, w.ws, viewer).await;
-    let ids: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM mem_search_items($1, 20, $2)")
+    let ids: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM mem_search_items($1, 20)")
         .bind(q)
-        .bind(answer)
         .fetch_all(&mut *tx)
         .await
         .expect("search");
@@ -1859,7 +1894,7 @@ async fn search_respects_rls_and_narrows_the_audience() {
         .all(|i| *i != it.hr_item));
 
     // RED: the audience predicate and the read check are load-bearing in the search core ...
-    let core = "public.mem_search_items_for(uuid, text, integer, uuid)";
+    let core = "public.mem_search_items_core(uuid, text, integer, uuid, boolean)";
     let leaked = search_with_core(
         &su,
         core,
@@ -1870,7 +1905,7 @@ async fn search_respects_rls_and_narrows_the_audience() {
         w.ws,
         w.alice,
         word,
-        Some(w.general),
+        w.general,
     )
     .await;
     eprintln!(
@@ -1878,26 +1913,44 @@ async fn search_respects_rls_and_narrows_the_audience() {
         leaked.contains(&it.hr_item)
     );
     assert!(leaked.contains(&it.hr_item) && leaked.contains(&it.dm_item));
-    let leaked = search_with_core(
+    // M-1: the membership narrowing is a second, independent wall in front of the read check: with the
+    // read check gone, carol (not in #hr) still finds nothing ...
+    let narrowing = "AND (i.channel_id IN (SELECT ms.channel_id FROM public.membership ms\n                              WHERE ms.workspace_id = v_ws AND ms.member_id = p_viewer\n                                AND ms.left_at IS NULL)\n            OR (i.space_kind = 'personal' AND i.owner_member_id = p_viewer))";
+    let read_check = (
+        "IF NOT public.mem_item_readable_by(r.item_id, p_viewer) THEN",
+        "IF false THEN",
+    );
+    let only_read_gone = search_with(&su, core, &[read_check], w.ws, w.carol, "연봉").await;
+    eprintln!(
+        "M-1 narrowing alone (read check removed): carol finds {} #hr item(s)",
+        only_read_gone.len()
+    );
+    assert!(
+        only_read_gone.is_empty(),
+        "the channel narrowing keeps #hr out of carol's scan"
+    );
+    // ... and only when BOTH are gone does the #hr item leak (RED for each wall).
+    let leaked = search_with(
         &su,
         core,
-        &[(
-            "IF NOT public.mem_item_readable_by(r.item_id, p_viewer) THEN",
-            "IF false THEN",
-        )],
+        &[read_check, (narrowing, "")],
         w.ws,
         w.carol,
         "연봉",
-        None,
     )
     .await;
     eprintln!(
-        "RED read check removed from search: carol finds {} #hr item(s)",
+        "RED read check AND channel narrowing removed: carol finds {} #hr item(s)",
         leaked.len()
     );
     assert_eq!(leaked, vec![it.hr_item]);
+    let only_narrow_gone = search_with(&su, core, &[(narrowing, "")], w.ws, w.carol, "연봉").await;
+    assert!(
+        only_narrow_gone.is_empty(),
+        "the read check keeps #hr out when only the narrowing is gone"
+    );
     // ... and the DM union lives in the audience rule: without it alice's agent DM gets only its own item.
-    let none = search_with(
+    let none = search_with_core(
         &su,
         "public.mem_item_audience_ok(uuid, uuid, uuid)",
         &[(
@@ -1907,7 +1960,7 @@ async fn search_respects_rls_and_narrows_the_audience() {
         w.ws,
         w.alice,
         word,
-        Some(w.dm_aa),
+        w.dm_aa,
     )
     .await;
     eprintln!(
@@ -1915,34 +1968,9 @@ async fn search_respects_rls_and_narrows_the_audience() {
         none.len()
     );
     assert_eq!(none, vec![it.dm_item]);
-    // The weakened policy function shows up in the API search too (both paths share one rule).
-    let leaked = search_with(
-        &su,
-        EVIDENCE_OK,
-        &[
-            (
-                "AND public.mem_member_can_read(i.channel_id, p_viewer)",
-                "AND true",
-            ),
-            (
-                "public.mem_member_can_read(ev.channel_id, p_viewer)",
-                "true",
-            ),
-        ],
-        w.ws,
-        w.carol,
-        "연봉",
-        None,
-    )
-    .await;
-    eprintln!(
-        "RED readable_by weakened: carol's API search finds {} #hr item(s)",
-        leaked.len()
-    );
-    assert_eq!(leaked, vec![it.hr_item]);
     // The session_user guard: a BYPASSRLS login (momo_worker) cannot read item text through the
     // PUBLIC-executable API function by setting the viewer GUC itself.
-    let api_search = "SELECT count(*) FROM mem_search_items('기억테스트', 10, NULL)";
+    let api_search = "SELECT count(*) FROM mem_search_items('기억테스트', 10)";
     let attempt = |strip_guard: bool| {
         let su = su.clone();
         let (ws, alice) = (w.ws, w.alice);
@@ -1950,7 +1978,7 @@ async fn search_respects_rls_and_narrows_the_audience() {
             let mut tx = if strip_guard {
                 sabotage_tx(
                     &su,
-                    "public.mem_search_items(text, integer, uuid)",
+                    "public.mem_search_items(text, integer)",
                     &[(
                         "IF session_user::text <> 'momo_app'",
                         "IF false AND session_user::text <> 'momo_app'",
@@ -2015,7 +2043,7 @@ async fn search_respects_rls_and_narrows_the_audience() {
         .await
         .contains(&kr_item));
     let cfg: Vec<String> = sqlx::query_scalar(
-        "SELECT unnest(proconfig) FROM pg_proc WHERE proname = 'mem_search_items_for'",
+        "SELECT unnest(proconfig) FROM pg_proc WHERE proname = 'mem_search_items_core'",
     )
     .fetch_all(&su)
     .await
@@ -2029,7 +2057,7 @@ async fn search_respects_rls_and_narrows_the_audience() {
     // worker-only (the closure test).
     let owners: Vec<(String, bool, String)> = sqlx::query_as(
         "SELECT proname::text, prosecdef, pg_get_userbyid(proowner)::text FROM pg_proc \
-          WHERE proname IN ('mem_search_items', 'mem_search_items_for') ORDER BY 1",
+          WHERE proname IN ('mem_search_items', 'mem_search_items_core', 'mem_search_items_for') ORDER BY 1",
     )
     .fetch_all(&su)
     .await
@@ -2039,6 +2067,11 @@ async fn search_respects_rls_and_narrows_the_audience() {
         vec![
             (
                 "mem_search_items".to_string(),
+                true,
+                "mem_definer".to_string()
+            ),
+            (
+                "mem_search_items_core".to_string(),
                 true,
                 "mem_definer".to_string()
             ),
@@ -2058,7 +2091,7 @@ async fn search_respects_rls_and_narrows_the_audience() {
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
 async fn the_item_audience_rule_pins_adr_d6_4() {
-    let (su, _app, wk, w) = setup().await;
+    let (su, app, wk, w) = setup().await;
     let it = seed_items(&su, &wk, &w).await;
     let aud = |item: Uuid, answer: Uuid, who: Uuid| {
         let wk = wk.clone();
@@ -2258,7 +2291,12 @@ async fn the_item_audience_rule_pins_adr_d6_4() {
     .await;
     eprintln!("RED owner clause removed: personal item served to a non-owner = {leaked}");
     assert!(leaked);
+    // switch on the item's HOME channel: #hr excluded, item served into alice's agent DM (union).
     su_exec(&su, &format!("INSERT INTO mem_settings (workspace_id, scope, channel_id, excluded) VALUES ('{}', 'channel', '{}', true)", w.ws, w.hr)).await;
+    assert!(
+        !aud(it.hr_item, w.dm_aa, w.alice).await,
+        "home channel excluded"
+    );
     let leaked = audience_with(
         &su,
         &[(
@@ -2267,17 +2305,95 @@ async fn the_item_audience_rule_pins_adr_d6_4() {
         )],
         w.ws,
         it.hr_item,
-        w.hr,
+        w.dm_aa,
         w.alice,
     )
     .await;
-    eprintln!("RED switch clause removed: excluded channel still served = {leaked}");
+    eprintln!("RED home switch clause removed: excluded home channel still served = {leaked}");
     assert!(leaked);
     su_exec(
         &su,
         &format!("DELETE FROM mem_settings WHERE channel_id = '{}'", w.hr),
     )
     .await;
+    // M-3: switches on the ANSWER channel and the requester's personal pause (same as mem_serve_candidates).
+    // The answer channel is alice's agent DM; the item's home (#hr) stays switched on.
+    su_exec(&su, &format!("INSERT INTO mem_settings (workspace_id, scope, channel_id, excluded) VALUES ('{}', 'channel', '{}', true)", w.ws, w.dm_aa)).await;
+    assert!(
+        !aud(it.hr_item, w.dm_aa, w.alice).await,
+        "answer channel excluded"
+    );
+    assert!(
+        aud(it.hr_item, w.hr, w.alice).await,
+        "... but the item is still servable where its own channel is the answer"
+    );
+    let leaked = audience_with(
+        &su,
+        &[(
+            "IF NOT public.mem_channel_switch(p_answer_channel_id) THEN",
+            "IF false THEN",
+        )],
+        w.ws,
+        it.hr_item,
+        w.dm_aa,
+        w.alice,
+    )
+    .await;
+    eprintln!("RED answer-channel switch removed: excluded answer channel still served = {leaked}");
+    assert!(leaked);
+    su_exec(
+        &su,
+        &format!(
+            "DELETE FROM mem_settings WHERE channel_id = '{}'",
+            w.general
+        ),
+    )
+    .await;
+    su_exec(&su, &format!("INSERT INTO mem_settings (workspace_id, scope, paused) VALUES ('{}', 'workspace', true)", w.ws)).await;
+    assert!(
+        !aud(it.gen_item, w.general, w.alice).await,
+        "workspace paused"
+    );
+    su_exec(
+        &su,
+        &format!("DELETE FROM mem_settings WHERE workspace_id = '{}'", w.ws),
+    )
+    .await;
+    su_exec(&su, &format!("INSERT INTO mem_settings (workspace_id, scope, member_id, paused) VALUES ('{}', 'member', '{}', true)", w.ws, w.alice)).await;
+    assert!(
+        !aud(it.gen_item, w.general, w.alice).await,
+        "the requester paused their own memory"
+    );
+    assert!(
+        aud(it.gen_item, w.general, w.carol).await,
+        "... and only theirs"
+    );
+    let leaked = audience_with(
+        &su,
+        &[(
+            "AND s.member_id = p_requester_member_id AND s.paused) THEN",
+            "AND s.member_id = p_requester_member_id AND s.paused AND false) THEN",
+        )],
+        w.ws,
+        it.gen_item,
+        w.general,
+        w.alice,
+    )
+    .await;
+    eprintln!("RED personal pause removed: a paused requester is still served = {leaked}");
+    assert!(leaked);
+    // ... and the serving search obeys it (the audience filter is inside the SQL).
+    assert!(
+        search(&app, &w, Some(w.alice), "기억테스트", Some(w.general))
+            .await
+            .is_empty()
+    );
+    su_exec(
+        &su,
+        &format!("DELETE FROM mem_settings WHERE member_id = '{}'", w.alice),
+    )
+    .await;
+    assert!(aud(it.gen_item, w.general, w.alice).await);
     let leaked = audience_with(
         &su,
         &[("mm.kind = 'agent' AND mm.status = 'active'", "true")],
@@ -2320,8 +2436,8 @@ async fn worker_only_item_functions_are_closed_to_the_api() {
         (
             "mem_search_items_for",
             format!(
-                "SELECT count(*) FROM mem_search_items_for('{}', '기억테스트', 10, NULL)",
-                w.alice
+                "SELECT count(*) FROM mem_search_items_for('{}', '기억테스트', 10, '{}')",
+                w.alice, w.general
             ),
         ),
         (
@@ -2377,4 +2493,392 @@ async fn worker_only_item_functions_are_closed_to_the_api() {
             "{table}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// review hardening (M-1, M-4, M-6, L-2, L-5, L-6)
+// ---------------------------------------------------------------------------
+
+const CORE: &str = "public.mem_search_items_core(uuid, text, integer, uuid, boolean)";
+const FOR_FN: &str = "public.mem_search_items_for(uuid, text, integer, uuid)";
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn serving_never_runs_without_an_audience_and_queries_are_capped() {
+    let (su, app, wk, w) = setup().await;
+    let it = seed_items(&su, &wk, &w).await;
+    let word = "기억테스트";
+
+    // M-4: the serving entry point refuses a missing answer channel ...
+    let no_channel = format!(
+        "SELECT count(*) FROM mem_search_items_for('{}', '{word}', 10, NULL)",
+        w.alice
+    );
+    assert_eq!(
+        exec(&wk, w.ws, None, &no_channel).await,
+        Err("22023".into())
+    );
+    // ... the core refuses the two mismatched flag/channel combinations (superuser = owner-level access) ...
+    for (label, sql) in [
+        (
+            "serve without a channel",
+            format!(
+                "SELECT count(*) FROM mem_search_items_core('{}', '{word}', 10, NULL, true)",
+                w.alice
+            ),
+        ),
+        (
+            "browse with a channel",
+            format!(
+                "SELECT count(*) FROM mem_search_items_core('{}', '{word}', 10, '{}', false)",
+                w.alice, w.general
+            ),
+        ),
+    ] {
+        assert_eq!(
+            exec(&su, w.ws, None, &sql).await,
+            Err("22023".into()),
+            "{label}"
+        );
+    }
+    // ... and nobody but the owner can call the core: not the worker role, not the API role.
+    let core_call = format!(
+        "SELECT count(*) FROM mem_search_items_core('{}', '{word}', 10, '{}', true)",
+        w.alice, w.general
+    );
+    assert_eq!(exec(&wk, w.ws, None, &core_call).await, Err("42501".into()));
+    assert_eq!(
+        exec(&app, w.ws, Some(w.alice), &core_call).await,
+        Err("42501".into())
+    );
+    // RED: serving regresses to "browse" (the wrapper passes false) — the core guard still stops it ...
+    let serve_as_browse = (
+        "mem_search_items_core(p_viewer, p_query, p_limit, p_answer_channel_id, true)",
+        "mem_search_items_core(p_viewer, p_query, p_limit, p_answer_channel_id, false)",
+    );
+    let serve = format!(
+        "SELECT id FROM mem_search_items_for('{}', '{word}', 20, '{}')",
+        w.alice, w.general
+    );
+    let run_serve = |also_guard: bool| {
+        let (su, serve) = (su.clone(), serve.clone());
+        let ws = w.ws;
+        async move {
+            let mut tx = sabotage_tx(&su, FOR_FN, &[serve_as_browse]).await;
+            if also_guard {
+                redefine(
+                    &mut tx,
+                    CORE,
+                    &[(
+                        "IF p_serve IS DISTINCT FROM (p_answer_channel_id IS NOT NULL) THEN",
+                        "IF false THEN",
+                    )],
+                )
+                .await;
+            }
+            become_role(&mut tx, "momo_memory", ws, None).await;
+            let out = sqlx::query_scalar::<_, Uuid>(&serve)
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(|e| sqlstate(&e));
+            tx.rollback().await.ok();
+            out
+        }
+    };
+    assert_eq!(
+        run_serve(false).await,
+        Err("22023".to_string()),
+        "the core's flag check holds on its own"
+    );
+    let leaked = run_serve(true).await.expect("without the guard it runs");
+    eprintln!("RED serving without audience narrowing: {} item(s) returned into a #general answer, #hr included = {}", leaked.len(), leaked.contains(&it.hr_item));
+    assert!(leaked.contains(&it.hr_item) && leaked.contains(&it.dm_item));
+    // the shipped serving path narrows: only #general's own item.
+    assert_eq!(
+        search(&app, &w, Some(w.alice), word, Some(w.general)).await,
+        vec![it.gen_item]
+    );
+
+    // M-1: p_query is cut to 200 characters inside the function.
+    let long = format!("{} 연봉", "x".repeat(200));
+    assert!(
+        search(&app, &w, Some(w.alice), &long, None)
+            .await
+            .is_empty(),
+        "the tail past 200 characters is ignored"
+    );
+    assert_eq!(
+        search(&app, &w, Some(w.alice), "연봉", None).await,
+        vec![it.hr_item]
+    );
+    let leaked = search_with(
+        &su,
+        CORE,
+        &[(
+            "pg_catalog.left(COALESCE(p_query, ''), 200)",
+            "COALESCE(p_query, '')",
+        )],
+        w.ws,
+        w.alice,
+        &long,
+    )
+    .await;
+    eprintln!(
+        "RED query cap removed: a 205-character query now reaches its tail -> {} hit(s)",
+        leaked.len()
+    );
+    assert_eq!(leaked, vec![it.hr_item]);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn secret_shapes_prose_passwords_and_retired_items() {
+    let (su, app, wk, w) = setup().await;
+    let it = seed_items(&su, &wk, &w).await;
+
+    // M-6: the SQL check agrees with the Rust check on the shared example list.
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../crates/momo-agent/tests/fixtures/memory_secret_shapes.json");
+    let shapes: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("json");
+    for parts in shapes["positives"].as_array().unwrap() {
+        let text: String = parts
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p.as_str().unwrap())
+            .collect();
+        let hit: bool = sqlx::query_scalar("SELECT mem_looks_like_secret($1)")
+            .bind(&text)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+        assert!(hit, "SQL must flag: {text}");
+    }
+    for text in shapes["negatives"].as_array().unwrap() {
+        let text = text.as_str().unwrap();
+        let hit: bool = sqlx::query_scalar("SELECT mem_looks_like_secret($1)")
+            .bind(text)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+        assert!(!hit, "SQL must not flag: {text}");
+    }
+    // ... mem_add_item refuses prose passwords and URL credentials, in the body AND in subject_key.
+    let m = say(&su, w.ws, w.general, w.alice, "비밀번호 얘기는 하지 않았다").await;
+    let d = apply_digest(&wk, w.ws, w.general, &[m]).await;
+    let url = format!("{}{}", "postgres://app:", "s3cretpw@db.internal/x");
+    for (label, body, subject) in [
+        (
+            "prose password in the body",
+            "비밀번호는 abc12345 입니다".to_string(),
+            None,
+        ),
+        (
+            "english prose password",
+            "the password is hunter22 ok".to_string(),
+            None,
+        ),
+        (
+            "url credential in the body",
+            format!("접속은 {url} 로 한다"),
+            None,
+        ),
+        (
+            "url credential in subject_key",
+            "무해한 본문".to_string(),
+            Some(url.clone()),
+        ),
+        (
+            "prose password in subject_key",
+            "무해한 본문".to_string(),
+            Some("비밀번호는 abc12345".to_string()),
+        ),
+    ] {
+        let mut tx = viewer_tx(&wk, w.ws, None).await;
+        let r = sqlx::query_scalar::<_, Option<Uuid>>(&format!(
+            "SELECT mem_add_item('{d}', 'fact', $1, $2, {}, 0.5::real, false, 'items-v1', 'm')",
+            arr(&[m.0])
+        ))
+        .bind(&body)
+        .bind(subject.as_deref())
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| sqlstate(&e));
+        assert_eq!(r, Err("23514".to_string()), "{label}");
+    }
+    // RED: the shared check neutralised -> the same calls succeed.
+    let mut tx = sabotage_tx(
+        &su,
+        "public.mem_looks_like_secret(text)",
+        &[("SELECT COALESCE(", "SELECT false AND COALESCE(")],
+    )
+    .await;
+    become_role(&mut tx, "momo_memory", w.ws, None).await;
+    let r = sqlx::query_scalar::<_, Option<Uuid>>(&format!(
+        "SELECT mem_add_item('{d}', 'fact', '비밀번호는 abc12345 입니다', NULL, {}, 0.5::real, false, 'items-v1', 'm')", arr(&[m.0])))
+        .fetch_one(&mut *tx).await.map_err(|e| sqlstate(&e));
+    tx.rollback().await.ok();
+    eprintln!("RED secret check neutralised: prose password stored -> {r:?}");
+    assert!(matches!(r, Ok(Some(_))));
+
+    // L-2: 'wrong' / 'forgotten' are invisible to everyone; other reasons stay visible as history.
+    for (reason, visible) in [
+        ("wrong", false),
+        ("forgotten", false),
+        ("edited", true),
+        ("merged", true),
+    ] {
+        su_exec(&su, &format!("UPDATE mem_item SET retired_at = now(), retired_reason = '{reason}' WHERE id = '{}'", it.gen_item)).await;
+        let seen = ids_of(&app, w.ws, Some(w.alice), "SELECT id FROM mem_item")
+            .await
+            .contains(&it.gen_item);
+        assert_eq!(seen, visible, "retired_reason {reason}");
+    }
+    su_exec(
+        &su,
+        &format!(
+            "UPDATE mem_item SET retired_at = now(), retired_reason = 'wrong' WHERE id = '{}'",
+            it.gen_item
+        ),
+    )
+    .await;
+    let leaked = items_seen_with(
+        &su,
+        EVIDENCE_OK,
+        &[(
+            "AND (i.retired_reason IS NULL OR i.retired_reason NOT IN ('forgotten', 'wrong'))",
+            "",
+        )],
+        w.ws,
+        w.alice,
+    )
+    .await;
+    eprintln!(
+        "RED retired_reason clause removed: a 'wrong' item is visible again = {}",
+        leaked.contains(&it.gen_item)
+    );
+    assert!(leaked.contains(&it.gen_item));
+    su_exec(
+        &su,
+        &format!(
+            "UPDATE mem_item SET retired_at = NULL, retired_reason = NULL WHERE id = '{}'",
+            it.gen_item
+        ),
+    )
+    .await;
+
+    // L-6: same hash, different body is a collision, not "already remembered".
+    let m2 = say(&su, w.ws, w.general, w.bob, "충돌 시험 메시지").await;
+    let d2 = apply_digest(&wk, w.ws, w.general, &[m2]).await;
+    su_exec(&su, &format!(
+        "INSERT INTO mem_item (workspace_id, space_kind, channel_id, kind, body, valid_from, content_hash, extractor_version, source_count) \
+         VALUES ('{}', 'channel', '{}', 'fact', '전혀 다른 본문', now(), \
+                 encode(sha256(convert_to('fact:충돌 본문', 'UTF8')), 'hex'), 'forged', 1)", w.ws, w.general)).await;
+    assert_eq!(
+        add_item(&wk, w.ws, d2, "fact", "충돌 본문", &[m2.0]).await,
+        Err("23514".into())
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn the_definer_may_only_mark_stale_and_the_deny_policies_are_restrictive() {
+    let (su, _app, wk, w) = setup().await;
+    let it = seed_items(&su, &wk, &w).await;
+    // L-5: mem_definer's UPDATE is limited to `stale` by a column privilege ...
+    let as_definer = |sql: String| {
+        let su = su.clone();
+        let ws = w.ws;
+        async move {
+            let mut tx = su.begin().await.expect("begin");
+            become_role(&mut tx, "mem_definer", ws, None).await;
+            let r = sqlx::query(&sql)
+                .execute(&mut *tx)
+                .await
+                .map(|r| r.rows_affected())
+                .map_err(|e| sqlstate(&e));
+            tx.rollback().await.ok();
+            r
+        }
+    };
+    assert_eq!(
+        as_definer(format!(
+            "UPDATE mem_item SET body = 'x' WHERE id = '{}'",
+            it.gen_item
+        ))
+        .await,
+        Err("42501".to_string())
+    );
+    assert_eq!(
+        as_definer(format!(
+            "UPDATE mem_item SET retired_reason = 'wrong', retired_at = now() WHERE id = '{}'",
+            it.gen_item
+        ))
+        .await,
+        Err("42501".to_string())
+    );
+    assert_eq!(
+        as_definer(format!(
+            "UPDATE mem_item SET stale = true WHERE id = '{}'",
+            it.gen_item
+        ))
+        .await,
+        Ok(1)
+    );
+    assert_eq!(
+        as_definer(format!("DELETE FROM mem_item WHERE id = '{}'", it.gen_item)).await,
+        Err("42501".to_string())
+    );
+    // ... and a permissive write policy added for the API role later cannot open the door (RESTRICTIVE deny).
+    let attempt = |drop_restrictive: bool| {
+        let su = su.clone();
+        let (ws, alice, ch) = (w.ws, w.alice, w.general);
+        async move {
+            let mut tx = su.begin().await.expect("begin");
+            sqlx::query("GRANT SELECT, INSERT, UPDATE, DELETE ON mem_item TO momo_app")
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            sqlx::query("CREATE POLICY evil_all ON mem_item FOR ALL TO momo_app USING (true) WITH CHECK (true)").execute(&mut *tx).await.unwrap();
+            if drop_restrictive {
+                for p in [
+                    "mem_item_only_definer_ins",
+                    "mem_item_only_definer_upd",
+                    "mem_item_only_definer_del",
+                ] {
+                    sqlx::query(&format!("DROP POLICY {p} ON mem_item"))
+                        .execute(&mut *tx)
+                        .await
+                        .unwrap();
+                }
+            }
+            become_role(&mut tx, "momo_app", ws, Some(alice)).await;
+            sqlx::query("SAVEPOINT s").execute(&mut *tx).await.unwrap();
+            let ins = sqlx::query(&format!(
+                "INSERT INTO mem_item (workspace_id, space_kind, channel_id, kind, body, valid_from, content_hash, extractor_version, source_count) \
+                 VALUES ('{ws}', 'channel', '{ch}', 'fact', 'forged by the API role', now(), 'hx', 'x', 1)"))
+                .execute(&mut *tx).await.map(|r| r.rows_affected()).map_err(|e| sqlstate(&e));
+            sqlx::query("ROLLBACK TO SAVEPOINT s")
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            let upd = sqlx::query("UPDATE mem_item SET body = 'tampered'")
+                .execute(&mut *tx)
+                .await
+                .map(|r| r.rows_affected())
+                .map_err(|e| sqlstate(&e));
+            tx.rollback().await.ok();
+            (ins, upd)
+        }
+    };
+    let control = attempt(false).await;
+    assert_eq!(
+        control,
+        (Err("42501".to_string()), Ok(0)),
+        "RESTRICTIVE deny holds against a permissive policy"
+    );
+    let red = attempt(true).await;
+    eprintln!("RED RESTRICTIVE write denies dropped (mem_item): {red:?}");
+    assert!(red.0 == Ok(1) && matches!(red.1, Ok(n) if n > 0));
 }

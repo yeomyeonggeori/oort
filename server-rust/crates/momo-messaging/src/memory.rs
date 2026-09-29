@@ -292,6 +292,15 @@ pub async fn get_serving_in_tx(
     .bind(run_id)
     .fetch_optional(&mut *conn)
     .await?;
+    // #3163 F1: a receipt that lists nothing exists only to carry the requester's withheld
+    // count. To anyone else its very existence would leak one bit ("something was withheld"),
+    // so a non-requester gets the same 404 as "no receipt".
+    let row = row.filter(|row| {
+        let withheld: Option<i32> = row.try_get("withheld_count").ok().flatten();
+        let digests: Vec<Uuid> = row.try_get("digest_ids").unwrap_or_default();
+        let items: Vec<Uuid> = row.try_get("item_ids").unwrap_or_default();
+        withheld.is_some() || !digests.is_empty() || !items.is_empty()
+    });
     row.map(|row| {
         Ok(MemServing {
             run_id: row.try_get("run_id")?,
@@ -463,20 +472,21 @@ pub struct MemItemHit {
     pub evidence_message_ids: Vec<Uuid>,
 }
 
-/// Keyword search over the items the caller may read (`mem_search_items`, migration 104).
+/// Keyword search over the items the caller may read (`mem_search_items`, migration 104): the
+/// memory browser's search. **Browsing only**: it takes no audience narrowing. An agent answer that
+/// will be posted to a channel must be served through the worker-only `mem_search_items_for`
+/// (viewer = the requester, answer channel required), never through this function.
 ///
-/// `SECURITY INVOKER` in the database: the read policy on `mem_item` (as this session's
-/// `app.member_id`) hides what the caller may not see, so this function adds **no permission
-/// predicate of its own** ([`bind_mem_reader_guc`] must have run first; without it the result
-/// is empty). `answer_channel` is the audience narrowing of ADR-0196 D6-4: pass the channel an
-/// agent answer will be posted in and only items whose storage and evidence channels are that
-/// channel (or, in the requester's own agent DM, anything the requester may read) come back.
-/// Omit it for the memory browser.
+/// `mem_search_items` is a `SECURITY DEFINER` function that refuses any session which is not
+/// `momo_app` (or a superuser) and reads the viewer from `app.member_id` — [`bind_mem_reader_guc`]
+/// must have run first (without it the result is empty). It narrows candidates to the viewer's
+/// channels, scores them by trigram word similarity and then applies the *same* readability rule the
+/// RLS policy uses (`mem_item_readable_by`); this module adds no permission predicate of its own.
+/// The query is cut to 200 characters inside the function.
 pub async fn search_items_in_tx(
     conn: &mut PgConnection,
     query: &str,
     limit: Option<i64>,
-    answer_channel: Option<Uuid>,
 ) -> Result<Vec<MemItemHit>, DbError> {
     let limit = match limit {
         Some(value) if value > 0 => value.min(MEM_ITEM_SEARCH_LIMIT_MAX),
@@ -485,11 +495,10 @@ pub async fn search_items_in_tx(
     let rows = sqlx::query(
         "SELECT id, channel_id, space_kind, kind, body, valid_from, valid_to, recorded_at, score, \
                 evidence_message_ids \
-           FROM mem_search_items($1, $2::integer, $3)",
+           FROM mem_search_items($1, $2::integer)",
     )
     .bind(query)
     .bind(limit as i32)
-    .bind(answer_channel)
     .fetch_all(&mut *conn)
     .await?;
     Ok(rows

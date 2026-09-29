@@ -172,6 +172,21 @@ pub struct MemoryConfig {
     /// `MEMORY_EXTRACT_ENABLED` (**on**; `0|false|no|off` turns it off) — #3168: the window call
     /// also returns item candidates (decisions, facts, commitments). Off = digests only, as in M1.
     pub extract_items: bool,
+    /// `MEMORY_SERVE_ENABLED` (**on**; `0|false|no|off` turns it off) — put eligible summaries in
+    /// an agent turn's context (#3163). Independent of the summary loop: turning the loop off
+    /// does not stop already-written summaries from being served (the workspace / channel /
+    /// personal switches do that).
+    pub serve_enabled: bool,
+    /// `MEMORY_SERVE_BUDGET_CHARS` (3000) — the memory block's own budget, apart from the
+    /// conversation window's `max_context_chars`. It counts the whole rendered block (frame,
+    /// labels, bodies). ADR-0196 D7 sets 3,000 for the summary section; the item and profile
+    /// sections (M2) get their own.
+    pub serve_budget_chars: usize,
+    /// `MEMORY_SERVE_MAX_DIGESTS` (12) — candidates the database returns per turn.
+    pub serve_max_digests: i32,
+    /// `MEMORY_SERVE_TIMEOUT_MS` (3000) — the whole serving step (read + receipt). Past it the
+    /// reply goes out without memory; a slow database never delays an answer beyond this.
+    pub serve_timeout: Duration,
 }
 
 impl Default for MemoryConfig {
@@ -199,6 +214,10 @@ impl Default for MemoryConfig {
             regen_min_interval_seconds: 900,
             max_channels: 2_000,
             extract_items: true,
+            serve_enabled: true,
+            serve_budget_chars: 3_000,
+            serve_max_digests: 12,
+            serve_timeout: Duration::from_millis(3_000),
         }
     }
 }
@@ -248,6 +267,18 @@ impl MemoryConfig {
             )?,
             max_channels: env_number("MEMORY_MAX_CHANNELS", d.max_channels)?.max(1),
             extract_items: report_protocol_enabled(env("MEMORY_EXTRACT_ENABLED").as_deref()),
+            serve_enabled: report_protocol_enabled(env("MEMORY_SERVE_ENABLED").as_deref()),
+            serve_budget_chars: env_number("MEMORY_SERVE_BUDGET_CHARS", d.serve_budget_chars)?
+                .clamp(200, 20_000),
+            serve_max_digests: env_number("MEMORY_SERVE_MAX_DIGESTS", d.serve_max_digests)?
+                .clamp(1, 50),
+            serve_timeout: Duration::from_millis(
+                env_number(
+                    "MEMORY_SERVE_TIMEOUT_MS",
+                    d.serve_timeout.as_millis() as u64,
+                )?
+                .clamp(200, 30_000),
+            ),
         })
     }
 }

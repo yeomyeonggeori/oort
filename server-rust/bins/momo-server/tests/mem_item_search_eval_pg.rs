@@ -277,7 +277,7 @@ async fn run_queries(
                 .expect("gucs");
             let started = Instant::now();
             let bodies: Vec<String> =
-                sqlx::query_scalar("SELECT body FROM mem_search_items($1, 10, NULL)")
+                sqlx::query_scalar("SELECT body FROM mem_search_items($1, 10)")
                     .bind(&q.text)
                     .fetch_all(&mut *tx)
                     .await
@@ -350,6 +350,34 @@ async fn korean_recall_and_workspace_scoped_latency() {
     assert!(recall >= 0.8, "recall@10 {recall:.3} is under the ADR bar");
 
     // 2. latency as the workspace grows (noise built from the spike's concept-free lines).
+    // A second viewer who belongs to only 3 of the 30 channels (M-1: the channel narrowing means the
+    // trigram scan touches only their channels).
+    let few = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) VALUES ($1, $2, 'human', 'few', $3)",
+    )
+    .bind(few)
+    .bind(t.ws)
+    .bind(format!("few-{}", &few.simple().to_string()[..10]))
+    .execute(&su)
+    .await
+    .expect("member");
+    for ch in t.channels.iter().take(3) {
+        sqlx::query(
+            "INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)",
+        )
+        .bind(t.ws)
+        .bind(ch)
+        .bind(few)
+        .execute(&su)
+        .await
+        .expect("membership");
+    }
+    let t_few = Tenant {
+        ws: t.ws,
+        viewer: few,
+        channels: t.channels.clone(),
+    };
     let noise_src: Vec<&Doc> = docs.iter().filter(|d| d.concept.is_none()).collect();
     let scales: Vec<usize> = std::env::var("MEM_SEARCH_SCALES")
         .unwrap_or_else(|_| "0,4000".into())
@@ -376,6 +404,12 @@ async fn korean_recall_and_workspace_scoped_latency() {
             percentile(&lat, 0.5),
             percentile(&lat, 0.95),
             lat.last().unwrap()
+        );
+        let (_, _, lat_few) = run_queries(&app, &t_few, &queries, &body_to_docs, 3).await;
+        eprintln!(
+            "    same workspace, viewer in 3 of 30 channels: latency p50 {:>7.1} ms  p95 {:>7.1} ms",
+            percentile(&lat_few, 0.5),
+            percentile(&lat_few, 0.95)
         );
     }
     if other > 0 {

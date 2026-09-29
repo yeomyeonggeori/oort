@@ -233,7 +233,7 @@ impl MemoryBackend for ItemsBackend {
                     &ctx.app,
                     ws,
                     Some(who),
-                    "SELECT body, evidence_message_ids FROM mem_search_items($1, 50, NULL)",
+                    "SELECT body, evidence_message_ids FROM mem_search_items($1, 50)",
                     Some(q),
                     &state.by_message,
                 )
