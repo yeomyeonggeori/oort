@@ -56,9 +56,10 @@ check(
   "vectors carry the root-Mac endorse/revoke payloads")
 check(
   MomoDeviceKeyStore.signingSchemas == [
-    "momo.human.control.v1": 13, "momo.human.control.v2": 13, "momo.human.device_rebind.v1": 7,
+    "momo.human.control.v1": 13, "momo.human.control.v2": 13, "momo.human.control.v3": 13,
+    "momo.human.device_rebind.v1": 7,
   ],
-  "the phone allows only momo.human.control.v1/v2 (13 lines) and its own device_rebind.v1 (7 lines)")
+  "the phone allows only momo.human.control.v1/v2/v3 (13 lines) and its own device_rebind.v1 (7 lines)")
 
 // ---- #3103: the rebind letter momo-wire printed (argv[2]) --------------------
 guard CommandLine.arguments.count > 2,
@@ -152,7 +153,7 @@ var mutations: [(String, Data)] = [
   ("trailing newline", control + Data([0x0A])),
   ("extra line", control + Data("\nx".utf8)),
   ("one line short", Data(controlText.split(separator: "\n").dropLast().joined(separator: "\n").utf8)),
-  ("schema v3", Data(controlText.replacingOccurrences(of: "momo.human.control.v1", with: "momo.human.control.v3").utf8)),
+  ("schema v4", Data(controlText.replacingOccurrences(of: "momo.human.control.v1", with: "momo.human.control.v4").utf8)),
   ("schema with suffix", Data(controlText.replacingOccurrences(of: "momo.human.control.v1\n", with: "momo.human.control.v1x\n").utf8)),
   ("leading space", Data(" ".utf8) + control),
   ("CR line breaks", Data(controlText.replacingOccurrences(of: "\n", with: "\r\n").utf8)),
@@ -306,6 +307,60 @@ do {
 for bad in ["", "YWQQFQM38J.app.momo.ios.shared"] {
   check((try? RK(accessGroup: bad)) == nil, "refresh key: init refuses access group '\(bad)'")
 }
+
+// ---- #3128: control v3 (argv[4], docs/api/human-control-signing-v3.vectors.json)
+// Every v3 payload passes the allow-list, and every recorded signature
+// (WebCrypto, CryptoKit, Secure Enclave) verifies over those bytes here too —
+// the Swift third of the Rust · TS · Swift cross test. A permission payload
+// whose preview-hash-bearing content line is swapped no longer verifies.
+guard CommandLine.arguments.count > 4,
+  let v3Data = FileManager.default.contents(atPath: CommandLine.arguments[4]),
+  let v3JSON = try? JSONSerialization.jsonObject(with: v3Data) as? [String: Any],
+  let v3Cases = v3JSON["cases"] as? [[String: Any]]
+else {
+  print("FAIL: usage: device-key-sim-check <vectors.json> <rebind.json> <refresh.json> <v3 vectors.json>")
+  exit(1)
+}
+check(v3Cases.count == 7, "v3: read \(v3Cases.count) vector cases")
+var v3Permissions = 0
+for c in v3Cases {
+  guard let name = c["name"] as? String, let p = c["payload"] as? String,
+    let sigs = c["signatures"] as? [[String: Any]]
+  else {
+    check(false, "v3: a case without name/payload/signatures")
+    continue
+  }
+  let payload = Data(p.utf8)
+  check(schemaOf(payload) == "momo.human.control.v3", "v3: \(name) is a control.v3 payload")
+  check(!rejects(payload), "v3: accepts \(name)")
+  var verified = 0
+  for sig in sigs {
+    guard let keyB64 = sig["public_key"] as? String, let keyData = Data(base64Encoded: keyB64),
+      let sigB64 = sig["signature"] as? String, let sigData = Data(base64Encoded: sigB64),
+      let pub = try? P256.Signing.PublicKey(compressedRepresentation: keyData),
+      let ecdsa = try? P256.Signing.ECDSASignature(rawRepresentation: sigData)
+    else { continue }
+    if pub.isValidSignature(ecdsa, for: payload) { verified += 1 }
+  }
+  check(verified == sigs.count && verified >= 3, "v3: \(name) — \(verified)/\(sigs.count) signatures verify")
+  if let content = c["content"] as? [String: Any], content["kind"] as? String == "permission" {
+    v3Permissions += 1
+    // Swap the last line (content_sha256 over a body naming another preview).
+    var lines = p.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    lines[lines.count - 1] = String(repeating: "0", count: 64)
+    let swapped = Data(lines.joined(separator: "\n").utf8)
+    let stillVerifies = sigs.contains { sig in
+      guard let keyData = Data(base64Encoded: sig["public_key"] as? String ?? ""),
+        let sigData = Data(base64Encoded: sig["signature"] as? String ?? ""),
+        let pub = try? P256.Signing.PublicKey(compressedRepresentation: keyData),
+        let ecdsa = try? P256.Signing.ECDSASignature(rawRepresentation: sigData)
+      else { return false }
+      return pub.isValidSignature(ecdsa, for: swapped)
+    }
+    check(!stillVerifies, "v3: \(name) — a swapped content line does not verify")
+  }
+}
+check(v3Permissions == 2, "v3: two permission cases")
 
 print(failures == 0 ? "PASS" : "FAILED (\(failures))")
 exit(failures == 0 ? 0 : 1)

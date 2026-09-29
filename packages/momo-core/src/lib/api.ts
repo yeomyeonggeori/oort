@@ -3416,6 +3416,45 @@ export async function decideWorkPermission(
   return res.permissionRequest;
 }
 
+// ---- The owner's read of one permission request (#3118 → #3128) -------------
+// GET /v1/workspaces/{ws}/work-sessions/{session}/permission-requests/{requestEventId}
+//
+// ADR-0188 D5 「미리보기는 소유자의 조회로만」, ADR-0146 증보 2026-09-29 (R2 H1).
+// The host's closed preview (`momo.work_permission.preview.v1`) as the host
+// relayed it, to the session owner only (404 for anyone else — the same answer
+// as a missing request). `preview` is null for a request relayed without one.
+// The caller never trusts it: `checkPermissionPreview` re-hashes what it renders.
+
+export interface WorkPermissionPreviewResponse {
+  permissionRequest: WorkPermissionRequest & {
+    /** Lowercase hex SHA-256 of the host's preview; absent without one. */
+    previewSha256?: string;
+  };
+  options: Array<{ optionId: string; kind: string }>;
+  /** The closed preview object, unchecked (`checkPermissionPreview` reads it). */
+  preview: unknown;
+}
+
+export async function fetchWorkPermissionPreview(
+  workspaceId: string,
+  sessionId: string,
+  requestEventId: string
+): Promise<WorkPermissionPreviewResponse> {
+  const res = await request<Partial<WorkPermissionPreviewResponse>>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/work-sessions/${encodeURIComponent(
+      sessionId
+    )}/permission-requests/${encodeURIComponent(requestEventId)}`
+  );
+  if (typeof res.permissionRequest !== "object" || res.permissionRequest === null) {
+    throw new ApiError(0, "permission preview response has no request");
+  }
+  return {
+    permissionRequest: res.permissionRequest,
+    options: Array.isArray(res.options) ? res.options : [],
+    preview: res.preview ?? null,
+  };
+}
+
 // ---- Signed instruction (#3027 R2-E7 → #3028) --------------------------------
 // POST /v1/workspaces/{ws}/work-sessions/{session}/instructions
 //

@@ -11,12 +11,31 @@ jest.mock('expo-modules-core', () => ({
   requireOptionalNativeModule: () => null,
 }));
 
+jest.mock('@momo/core/lib/api', () => ({
+  ...jest.requireActual('@momo/core/lib/api'),
+  fetchWorkPermissionPreview: jest.fn(),
+}));
+
 import {SignerRefusal} from '@momo/core/features/auth/signedControl';
 import type {PendingPermission} from '@momo/core/features/workbench/agentPane';
-import {ApiError} from '@momo/core/lib/api';
+import {
+  permissionPreviewGate,
+  PERMISSION_PREVIEW_BLOCK_LINE,
+  type PermissionPreviewGate,
+} from '@momo/core/features/workbench/permissionPreviewGate';
+import {
+  permissionPreviewSha256,
+  type PermissionPreview,
+} from '@momo/core/features/workbench/permissionPreview';
+import {ApiError, fetchWorkPermissionPreview} from '@momo/core/lib/api';
+import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
+import {readFileSync} from 'node:fs';
+import {join} from 'node:path';
 
 import {
+  ALLOW_SETTLE_MS,
   SignedWorkControlsView,
+  usePermissionPreviewGate,
   type SignedWorkActions,
 } from '../src/features/work/SignedWorkControls';
 
@@ -29,12 +48,22 @@ import {
 // not arrive says 「전달 안 됨」 and keeps the text.
 // =============================================================================
 
+// #3128: the host's preview from the #3118 v3 vectors (execute, whole).
+const V3 = JSON.parse(
+  readFileSync(join(__dirname, '../../../docs/api/human-control-signing-v3.vectors.json'), 'utf8'),
+) as {cases: {name: string; content: {preview?: PermissionPreview; preview_sha256?: string}}[]};
+const HOST = V3.cases.find(c => c.name === 'control_v3_permission_once')!.content;
+const HOST_PREVIEW = HOST.preview!;
+const HOST_HASH = HOST.preview_sha256!;
+const CUT = V3.cases.find(c => c.name === 'control_v3_permission_session')!.content;
+
 const PERMISSION: PendingPermission = {
   requestEventId: 'ev-1',
   atMs: 1_790_550_000_000,
-  tool: {kind: 'execute', headline: '명령을 실행해도 될까요?'},
-  preview: {text: 'npm test', truncated: false, omitted: 0, masked: 0, neutralized: 0},
-  previewSha256: null,
+  // Inferred from agent.status: must never reach a signing card (#3118 H1).
+  tool: {kind: 'read', headline: '파일을 읽어도 될까요?'},
+  preview: {text: 'INFERRED README.md', truncated: false, omitted: 0, masked: 0, neutralized: 0},
+  previewSha256: HOST_HASH,
   allow: {kind: 'allow_once', optionId: 'once'},
   reject: {kind: 'reject_once', optionId: 'no'},
   hiddenOptions: 0,
@@ -53,10 +82,30 @@ function actions(overrides: Partial<SignedWorkActions> = {}): SignedWorkActions 
   };
 }
 
+function readOf(preview: unknown, previewSha256?: string) {
+  return {
+    permissionRequest: {
+      id: 'r',
+      sessionId: 's',
+      requestEventId: 'ev-1',
+      status: 'pending' as const,
+      ...(previewSha256 ? {previewSha256} : {}),
+    },
+    options: [],
+    preview,
+  };
+}
+
+const READY: PermissionPreviewGate = permissionPreviewGate(HOST_HASH, {
+  status: 'ok',
+  data: readOf(HOST_PREVIEW, HOST_HASH),
+});
+
 function view(a: SignedWorkActions | null, extra: Partial<React.ComponentProps<typeof SignedWorkControlsView>> = {}) {
   return render(
     <SignedWorkControlsView
       permission={PERMISSION}
+      preview={READY}
       ended={false}
       online
       block={null}
@@ -77,7 +126,10 @@ describe('permission card', () => {
     await act(async () => {
       fireEvent.press(screen.getByTestId('work-permission-allow-session'));
     });
-    expect(a.allow).toHaveBeenCalledWith(PERMISSION, 'session');
+    expect(a.allow).toHaveBeenCalledWith(PERMISSION, 'session', {
+      preview: HOST_PREVIEW,
+      sha256: HOST_HASH,
+    });
     expect(screen.getByTestId('work-permission-outcome').props.children).toContain('이 세션 동안');
   });
 
@@ -87,7 +139,69 @@ describe('permission card', () => {
     await act(async () => {
       fireEvent.press(screen.getByTestId('work-permission-allow'));
     });
-    expect(b.allow).toHaveBeenCalledWith(PERMISSION, 'once');
+    expect(b.allow).toHaveBeenCalledWith(PERMISSION, 'once', {
+      preview: HOST_PREVIEW,
+      sha256: HOST_HASH,
+    });
+  });
+
+  it('an allow that opens under the finger takes no press for a moment (design-review R2 H-1)', async () => {
+    const a = actions();
+    const r = view(a, {preview: {state: 'loading'}});
+    const now = jest.spyOn(Date, 'now');
+    now.mockReturnValue(1_000_000);
+    r.rerender(
+      <SignedWorkControlsView
+        permission={PERMISSION}
+        preview={READY}
+        ended={false}
+        online
+        block={null}
+        actions={a}
+        fallbackReject={null}
+        now={() => PERMISSION.atMs + 1_000}
+      />,
+    );
+    now.mockReturnValue(1_000_000 + ALLOW_SETTLE_MS - 1);
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('work-permission-allow-session'));
+    });
+    expect(a.allow).not.toHaveBeenCalled();
+    now.mockReturnValue(1_000_000 + ALLOW_SETTLE_MS);
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('work-permission-allow-session'));
+    });
+    expect(a.allow).toHaveBeenCalledTimes(1);
+    now.mockRestore();
+  });
+
+  it('shows the host preview verbatim and asks from its kind — nothing inferred (#3118 H1)', () => {
+    view(actions());
+    expect(screen.getByText('명령을 실행해도 될까요?')).toBeTruthy();
+    expect(screen.queryByText('파일을 읽어도 될까요?')).toBeNull();
+    expect(screen.queryByText('INFERRED README.md')).toBeNull();
+    expect(screen.getByTestId('work-permission-preview-title').props.children).toBe(HOST_PREVIEW.title);
+    expect(screen.getByTestId('work-permission-preview-input').props.children).toBe(HOST_PREVIEW.input);
+  });
+
+  it.each([
+    ['loading', {state: 'loading'} as PermissionPreviewGate, null],
+    ['mismatch', permissionPreviewGate(HOST_HASH, {status: 'ok', data: readOf({...HOST_PREVIEW, title: 'Read README.md', kind: 'read'})}), PERMISSION_PREVIEW_BLOCK_LINE.mismatch],
+    ['truncated', permissionPreviewGate(CUT.preview_sha256!, {status: 'ok', data: readOf(CUT.preview)}), PERMISSION_PREVIEW_BLOCK_LINE.truncated],
+    ['missing', permissionPreviewGate(null, {status: 'ok', data: readOf(null)}), PERMISSION_PREVIEW_BLOCK_LINE.missing],
+    ['unavailable', permissionPreviewGate(HOST_HASH, {status: 'error'}), PERMISSION_PREVIEW_BLOCK_LINE.unavailable],
+  ])('%s: no allow, one honest sentence, reject still open', async (_what, gate, line) => {
+    const a = actions();
+    view(a, {preview: gate});
+    expect(screen.getByTestId('work-permission-allow').props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByTestId('work-permission-allow-session').props.accessibilityState.disabled).toBe(true);
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('work-permission-allow'));
+    });
+    expect(a.allow).not.toHaveBeenCalled();
+    if (line) expect(screen.getByTestId('work-permission-preview-blocked').props.children).toBe(line);
+    else expect(screen.getByTestId('work-permission-preview-loading')).toBeTruthy();
+    expect(screen.getByTestId('work-permission-reject').props.accessibilityState.disabled).toBe(false);
   });
 
   it('a phone that cannot sign cannot allow, but can still reject (reject is unsigned)', async () => {
@@ -180,6 +294,68 @@ describe('permission card', () => {
     expect(String(screen.getByTestId('work-permission-outcome').props.children)).toContain(
       '이미 다른 결정',
     );
+  });
+});
+
+// Sabotage, end to end through the product hook: the server's owner read
+// answers with a swapped preview (a harmless read over the real command). The
+// card must never open the allow, and the signer is never asked.
+describe('owner read → gate (#3128)', () => {
+  function Harness({a}: {a: SignedWorkActions}) {
+    const gate = usePermissionPreviewGate('ws', 'sess', PERMISSION, true);
+    return (
+      <SignedWorkControlsView
+        permission={PERMISSION}
+        preview={gate}
+        ended={false}
+        online
+        block={null}
+        actions={a}
+        fallbackReject={null}
+        now={() => PERMISSION.atMs + 1_000}
+      />
+    );
+  }
+  function mount(a: SignedWorkActions) {
+    const client = new QueryClient({defaultOptions: {queries: {retry: false, gcTime: 0}}});
+    return render(
+      <QueryClientProvider client={client}>
+        <Harness a={a} />
+      </QueryClientProvider>,
+    );
+  }
+
+  it('a swapped preview from the server: allow stays shut, Face ID never asked', async () => {
+    const swapped = {...HOST_PREVIEW, kind: 'read', title: 'Read README.md', input: '{"path":"README.md"}'};
+    (fetchWorkPermissionPreview as jest.Mock).mockResolvedValue(
+      // The server even sends the swapped preview's own hash: the event's
+      // (host's) hash still disagrees.
+      readOf(swapped, permissionPreviewSha256(swapped as PermissionPreview)),
+    );
+    const a = actions();
+    mount(a);
+    await screen.findByTestId('work-permission-preview-blocked');
+    expect(fetchWorkPermissionPreview).toHaveBeenCalledWith('ws', 'sess', 'ev-1');
+    expect(screen.queryByText('Read README.md')).toBeNull();
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('work-permission-allow'));
+    });
+    expect(a.allow).not.toHaveBeenCalled();
+  });
+
+  it('the host preview: allow opens and signs the recomputed hash', async () => {
+    (fetchWorkPermissionPreview as jest.Mock).mockResolvedValue(readOf(HOST_PREVIEW, HOST_HASH));
+    const a = actions();
+    mount(a);
+    await screen.findByTestId('work-permission-preview');
+    // The allow just opened under the finger: it settles first (R2 H-1).
+    const opened = Date.now();
+    const now = jest.spyOn(Date, 'now').mockReturnValue(opened + ALLOW_SETTLE_MS + 1);
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('work-permission-allow'));
+    });
+    now.mockRestore();
+    expect(a.allow).toHaveBeenCalledWith(PERMISSION, 'once', {preview: HOST_PREVIEW, sha256: HOST_HASH});
   });
 });
 

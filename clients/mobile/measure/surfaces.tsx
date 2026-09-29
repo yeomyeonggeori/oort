@@ -69,6 +69,14 @@ import {
   rejectWithInstructionLine,
   type PendingPermission,
 } from '@momo/core/features/workbench/agentPane';
+import {
+  permissionPreviewGate,
+  type PermissionPreviewGate,
+} from '@momo/core/features/workbench/permissionPreviewGate';
+import {
+  permissionPreviewSha256,
+  type PermissionPreview,
+} from '@momo/core/features/workbench/permissionPreview';
 import {ThemeControl} from '../src/design/ThemeControl';
 import {parseExecutionPlan} from '@momo/core/lib/executionPlan';
 import {measureMode} from './root';
@@ -3578,6 +3586,43 @@ const SW_PERMISSION: PendingPermission = {
   reject: {kind: 'reject_once', optionId: 'no'},
   hiddenOptions: 0,
 };
+// #3128: the host's preview as the owner read returns it (the card shows it
+// verbatim and opens the allow only when its hash is the request's).
+const SW_HOST_PREVIEW: PermissionPreview = {
+  schema: 'momo.work_permission.preview.v1',
+  kind: 'edit',
+  title: 'Edit onboarding/copy.ts',
+  locations: '/Users/me/oort/clients/web/src/onboarding/copy.ts:42',
+  input:
+    '{"new_string":"워크스페이스를 만들어요","old_string":"워크스페이스를 만듭니다","path":"onboarding/copy.ts"}',
+  truncated: false,
+};
+function swGate(which: string): PermissionPreviewGate {
+  const read = (preview: unknown) => ({
+    status: 'ok' as const,
+    data: {
+      permissionRequest: {id: 'r', sessionId: 's', requestEventId: 'ev-1', status: 'pending' as const},
+      options: [],
+      preview,
+    },
+  });
+  const hostHash = permissionPreviewSha256(SW_HOST_PREVIEW);
+  if (which === 'preview-loading') return {state: 'loading'};
+  if (which === 'preview-mismatch') {
+    return permissionPreviewGate(hostHash, read({...SW_HOST_PREVIEW, kind: 'read', title: 'Read README.md'}));
+  }
+  if (which === 'preview-missing') return permissionPreviewGate(null, read(null));
+  if (which === 'preview-unavailable') return permissionPreviewGate(hostHash, {status: 'error'});
+  if (which === 'long-preview') {
+    const long: PermissionPreview = {
+      ...SW_HOST_PREVIEW,
+      locations: Array.from({length: 14}, (_, i) => `/Users/me/oort/clients/web/src/onboarding/step${i + 1}.ts`).join('\n'),
+      truncated: true,
+    };
+    return permissionPreviewGate(permissionPreviewSha256(long), read(long));
+  }
+  return permissionPreviewGate(hostHash, read(SW_HOST_PREVIEW));
+}
 const SW_ACTIONS: SignedWorkActions = {
   allow: async () => undefined,
   reject: async () => undefined,
@@ -3624,16 +3669,9 @@ function SignedWorkSurface({which}: {which: string}): React.JSX.Element {
             permission={
               which === 'no-request' || which === 'box-not-delivered'
                 ? null
-                : which === 'long-preview'
-                  ? {
-                      ...SW_PERMISSION,
-                      preview: {
-                        ...SW_PERMISSION.preview!,
-                        text: Array.from({length: 14}, (_, i) => `${i % 2 ? '+' : '−'} 줄 ${i + 1}: 워크스페이스 문구를 해요체로 바꿔요`).join('\n'),
-                      },
-                    }
-                  : SW_PERMISSION
+                : SW_PERMISSION
             }
+            preview={swGate(which)}
             ended={false}
             online
             block={blocked ? '이 폰은 아직 지시 기기가 아니에요. 프로필 › 지시 기기에서 등록하고 맥의 승인을 받아 주세요.' : null}

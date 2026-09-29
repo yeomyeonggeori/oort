@@ -41,6 +41,7 @@ jest.mock('expo-modules-core', () => ({
 
 import {
   PHONE_SIGNING_SCHEMA,
+  phoneSigningSchema,
   HUMAN_CONTROL_SCHEMAS,
   humanControlContentBytes,
   HumanControlInputError,
@@ -86,6 +87,17 @@ const v2Cases = vectorsV2.cases.filter(
   c => c.schema === 'momo.human.control.v2' && PHONE_KINDS.has(String(c.content.kind)),
 );
 
+// #3128: the #3118 v3 vectors, read in place.
+const vectorsV3 = JSON.parse(
+  readFileSync(
+    join(__dirname, '../../../docs/api/human-control-signing-v3.vectors.json'),
+    'utf8',
+  ),
+) as {cases: VectorCase[]};
+const v3Cases = vectorsV3.cases.filter(
+  c => c.schema === 'momo.human.control.v3' && PHONE_KINDS.has(String(c.content.kind)),
+);
+
 function toFields(c: VectorCase): HumanControlFields {
   const f = c.fields;
   return {
@@ -121,6 +133,7 @@ function toContent(c: VectorCase): HumanControlContent {
         optionId: x.option_id,
         optionKind: x.option_kind,
         scope: x.scope as 'once' | 'session',
+        ...(x.preview_sha256 !== undefined ? {previewSha256: x.preview_sha256} : {}),
       };
     default:
       throw new Error(`not a phone kind: ${x.kind}`);
@@ -212,14 +225,15 @@ describe('momo.human.control.v1 bytes — rebuilt from the shared vectors', () =
     ).toThrow(HumanControlInputError);
   });
 
-  it('knows v1 and v2, and refuses a schema it has no recipe for', () => {
+  it('knows v1, v2 and v3, and refuses a schema it has no recipe for', () => {
     expect(HUMAN_CONTROL_SCHEMAS).toEqual([
       'momo.human.control.v1',
       'momo.human.control.v2',
+      'momo.human.control.v3',
     ]);
     const c = controlCases[0];
     expect(() =>
-      humanControlPayload('momo.human.control.v3', toFields(c), toContent(c)),
+      humanControlPayload('momo.human.control.v4', toFields(c), toContent(c)),
     ).toThrow(HumanControlInputError);
   });
 
@@ -273,6 +287,66 @@ describe('momo.human.control.v2 bytes — rebuilt from the E7 vectors (#3028)', 
       channelId: '00000000-0000-7000-8000-00000000cc02',
     });
     expect(Buffer.from(other).toString('utf8')).not.toBe(c.payload);
+  });
+});
+
+describe('momo.human.control.v3 bytes — rebuilt from the #3118 vectors (#3128)', () => {
+  it('covers input, spawn (new and resume) and two previewed permissions', () => {
+    expect(v3Cases.map(c => c.name).sort()).toEqual(
+      [
+        'control_v3_input_queue_nfc',
+        'control_v3_permission_once',
+        'control_v3_permission_session',
+        'control_v3_spawn',
+        'control_v3_spawn_resume',
+      ].sort(),
+    );
+    // An allow is signed as v3; input and spawn stay v2 (both accepted).
+    expect(phoneSigningSchema('permission')).toBe('momo.human.control.v3');
+    expect(phoneSigningSchema('input')).toBe('momo.human.control.v2');
+    expect(phoneSigningSchema('spawn')).toBe('momo.human.control.v2');
+  });
+
+  it.each(v3Cases.map(c => [c.name, c] as const))(
+    '%s: bytes match and every signer’s signature verifies over them',
+    (_name, c) => {
+      const content = toContent(c);
+      expect(hex(sha256(humanControlContentBytes(c.schema, content)))).toBe(
+        c.content_sha256,
+      );
+      const payload = humanControlPayload(c.schema, toFields(c), content);
+      expect(Buffer.from(payload).toString('utf8')).toBe(c.payload);
+      const signatures = signaturesOf(c);
+      expect(signatures.length).toBeGreaterThanOrEqual(3);
+      for (const s of signatures) {
+        expect(p256Verify(s.publicKey, payload, s.signature)).toBe(true);
+      }
+    },
+  );
+
+  it('the preview line is v3’s alone: missing under v3, refused under v2', () => {
+    const c = v3Cases.find(x => x.name === 'control_v3_permission_once')!;
+    const content = toContent(c) as Extract<HumanControlContent, {kind: 'permission'}>;
+    expect(() =>
+      humanControlPayload(c.schema, toFields(c), {...content, previewSha256: undefined}),
+    ).toThrow(/preview hash/);
+    expect(() =>
+      humanControlPayload(c.schema, toFields(c), {
+        ...content,
+        previewSha256: content.previewSha256!.toUpperCase(),
+      }),
+    ).toThrow(/preview hash/);
+    expect(() =>
+      humanControlPayload('momo.human.control.v2', toFields(c), content),
+    ).toThrow(/only as v3/);
+    // Another preview's hash is other bytes: the recorded signatures fail.
+    const swapped = humanControlPayload(c.schema, toFields(c), {
+      ...content,
+      previewSha256: 'a'.repeat(64),
+    });
+    for (const s of signaturesOf(c)) {
+      expect(p256Verify(s.publicKey, swapped, s.signature)).toBe(false);
+    }
   });
 });
 
@@ -369,7 +443,7 @@ describe('signHumanControl — the call path', () => {
     const c = controlCases[0];
     await expect(
       signHumanControl({
-        schema: 'momo.human.control.v3',
+        schema: 'momo.human.control.v4',
         context: CONTEXT,
         contextReadAtMs: 0,
         workspaceId: 'w',

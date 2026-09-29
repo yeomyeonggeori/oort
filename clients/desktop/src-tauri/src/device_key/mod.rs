@@ -15,8 +15,10 @@
 //   device_key_bind_root       after the server registered the key (password
 //                              re-entered in the web UI): remember key id ↔
 //                              workspace, then `pin_root` on this Mac's workd
-//   device_key_sign_control    momo.human.control.v2 (input · spawn ·
-//                              permission; #3028)
+//   device_key_sign_control    momo.human.control.v2 (input · spawn; #3028)
+//                              and v3 for permission (#3128: the shell
+//                              re-hashes the host's preview, shows it in the
+//                              dialog and signs its hash)
 //   device_key_sign_endorse    device_endorse.v1 for a phone key; records
 //                              (key id → public key) in `endorsed.json`
 //   device_key_sign_revoke     device_revoke.v2 over the public key THIS shell
@@ -824,7 +826,7 @@ pub async fn device_key_bind_root(
     .await
 }
 
-/// The control kinds `device_key_sign_control` signs today (v2).
+/// The control kinds `device_key_sign_control` signs today (v2; a permission v3).
 pub const SIGNABLE_CONTROL_KINDS: [&str; 3] = ["input", "spawn", "permission"];
 
 #[derive(Debug, Serialize)]
