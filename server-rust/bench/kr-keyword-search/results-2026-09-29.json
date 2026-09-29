@@ -1,0 +1,353 @@
+{
+ "pg": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+ "docs": 100900,
+ "corpus_docs": 900,
+ "lc_ctype": "en_US.utf8",
+ "tokenize_us_per_doc": {
+  "bigram": 0.59,
+  "bigram_join": 0.85,
+  "lindera": 6.89
+ },
+ "trgm_sample": "{0x84404d,0x9d6ccd,0xa6bd9b,0xee43c3}",
+ "cands": {
+  "c0_simple_raw": {
+   "insert_s": 0.53,
+   "insert_us_per_doc": 5.3,
+   "gin_bytes": 5488640,
+   "table_bytes": 15114240
+  },
+  "c1_bigram": {
+   "insert_s": 1.06,
+   "insert_us_per_doc": 10.5,
+   "gin_bytes": 9879552,
+   "table_bytes": 31555584
+  },
+  "c1b_bigram_join": {
+   "insert_s": 1.71,
+   "insert_us_per_doc": 16.9,
+   "gin_bytes": 11632640,
+   "table_bytes": 40927232
+  },
+  "c2_lindera": {
+   "insert_s": 0.5,
+   "insert_us_per_doc": 5.0,
+   "gin_bytes": 5218304,
+   "table_bytes": 12632064
+  },
+  "c3_trgm": {
+   "insert_s": 0.71,
+   "insert_us_per_doc": 7.1,
+   "gin_bytes": 10526720,
+   "table_bytes": 10158080
+  }
+ },
+ "quality_small": {
+  "c0_simple_raw": {
+   "recall@10": 0.203,
+   "mrr": 0.502,
+   "by_kind": {
+    "josa": 0.25,
+    "two_syllable": 0.15,
+    "spacing": 0.33,
+    "english": 0.19,
+    "typo": 0.1
+   }
+  },
+  "c1_bigram": {
+   "recall@10": 0.745,
+   "mrr": 0.85,
+   "by_kind": {
+    "josa": 0.55,
+    "two_syllable": 1.0,
+    "spacing": 1.0,
+    "english": 1.0,
+    "typo": 0.17
+   }
+  },
+  "c1b_bigram_join": {
+   "recall@10": 0.745,
+   "mrr": 0.86,
+   "by_kind": {
+    "josa": 0.55,
+    "two_syllable": 1.0,
+    "spacing": 1.0,
+    "english": 1.0,
+    "typo": 0.17
+   }
+  },
+  "c2_lindera": {
+   "recall@10": 0.787,
+   "mrr": 0.895,
+   "by_kind": {
+    "josa": 0.99,
+    "two_syllable": 0.91,
+    "spacing": 0.9,
+    "english": 0.94,
+    "typo": 0.2
+   }
+  },
+  "c3_trgm@0.3": {
+   "recall@10": 0.89,
+   "mrr": 0.953,
+   "by_kind": {
+    "josa": 0.78,
+    "two_syllable": 1.0,
+    "spacing": 0.97,
+    "english": 1.0,
+    "typo": 0.7
+   }
+  },
+  "c3_trgm@0.5": {
+   "recall@10": 0.89,
+   "mrr": 0.953,
+   "by_kind": {
+    "josa": 0.78,
+    "two_syllable": 1.0,
+    "spacing": 0.97,
+    "english": 1.0,
+    "typo": 0.7
+   }
+  },
+  "ilike": {
+   "recall@10": 0.02,
+   "mrr": 0.16,
+   "by_kind": {
+    "josa": 0.0,
+    "two_syllable": 0.04,
+    "spacing": 0.03,
+    "english": 0.04,
+    "typo": 0.0
+   }
+  },
+  "rrf(c2_lindera+c3_trgm@0.3)": {
+   "recall@10": 0.84,
+   "mrr": 0.925,
+   "by_kind": {
+    "josa": 0.9,
+    "two_syllable": 0.96,
+    "spacing": 0.95,
+    "english": 0.96,
+    "typo": 0.42
+   }
+  },
+  "rrf(c1_bigram+c3_trgm@0.3)": {
+   "recall@10": 0.812,
+   "mrr": 0.915,
+   "by_kind": {
+    "josa": 0.68,
+    "two_syllable": 1.0,
+    "spacing": 0.99,
+    "english": 1.0,
+    "typo": 0.4
+   }
+  }
+ },
+ "quality_scale": {
+  "c0_simple_raw": {
+   "recall@10": 0.203,
+   "mrr": 0.502,
+   "by_kind": {
+    "josa": 0.25,
+    "two_syllable": 0.15,
+    "spacing": 0.33,
+    "english": 0.19,
+    "typo": 0.1
+   }
+  },
+  "c1_bigram": {
+   "recall@10": 0.685,
+   "mrr": 0.847,
+   "by_kind": {
+    "josa": 0.25,
+    "two_syllable": 1.0,
+    "spacing": 1.0,
+    "english": 1.0,
+    "typo": 0.17
+   }
+  },
+  "c1b_bigram_join": {
+   "recall@10": 0.685,
+   "mrr": 0.847,
+   "by_kind": {
+    "josa": 0.25,
+    "two_syllable": 1.0,
+    "spacing": 1.0,
+    "english": 1.0,
+    "typo": 0.17
+   }
+  },
+  "c2_lindera": {
+   "recall@10": 0.787,
+   "mrr": 0.895,
+   "by_kind": {
+    "josa": 0.99,
+    "two_syllable": 0.91,
+    "spacing": 0.9,
+    "english": 0.94,
+    "typo": 0.2
+   }
+  },
+  "c3_trgm@0.3": {
+   "recall@10": 0.835,
+   "mrr": 0.951,
+   "by_kind": {
+    "josa": 0.59,
+    "two_syllable": 1.0,
+    "spacing": 0.9,
+    "english": 1.0,
+    "typo": 0.69
+   }
+  },
+  "c3_trgm@0.5": {
+   "recall@10": 0.835,
+   "mrr": 0.951,
+   "by_kind": {
+    "josa": 0.59,
+    "two_syllable": 1.0,
+    "spacing": 0.9,
+    "english": 1.0,
+    "typo": 0.69
+   }
+  },
+  "ilike": {
+   "recall@10": 0.02,
+   "mrr": 0.16,
+   "by_kind": {
+    "josa": 0.0,
+    "two_syllable": 0.04,
+    "spacing": 0.03,
+    "english": 0.04,
+    "typo": 0.0
+   }
+  },
+  "rrf(c2_lindera+c3_trgm@0.3)": {
+   "recall@10": 0.83,
+   "mrr": 0.925,
+   "by_kind": {
+    "josa": 0.86,
+    "two_syllable": 0.96,
+    "spacing": 0.94,
+    "english": 0.96,
+    "typo": 0.42
+   }
+  },
+  "rrf(c1_bigram+c3_trgm@0.3)": {
+   "recall@10": 0.767,
+   "mrr": 0.91,
+   "by_kind": {
+    "josa": 0.49,
+    "two_syllable": 1.0,
+    "spacing": 0.95,
+    "english": 1.0,
+    "typo": 0.4
+   }
+  }
+ },
+ "bm25_reference_small": {
+  "bigram": {
+   "recall@10": 0.76,
+   "mrr": 0.839,
+   "by_kind": {
+    "josa": 0.54,
+    "two_syllable": 1.0,
+    "spacing": 1.0,
+    "english": 1.0,
+    "typo": 0.26
+   }
+  },
+  "bigram_join": {
+   "recall@10": 0.745,
+   "mrr": 0.827,
+   "by_kind": {
+    "josa": 0.53,
+    "two_syllable": 1.0,
+    "spacing": 1.0,
+    "english": 1.0,
+    "typo": 0.2
+   }
+  },
+  "lindera": {
+   "recall@10": 0.795,
+   "mrr": 0.866,
+   "by_kind": {
+    "josa": 0.99,
+    "two_syllable": 0.91,
+    "spacing": 0.86,
+    "english": 0.93,
+    "typo": 0.29
+   }
+  }
+ },
+ "bm25_reference_scale": {
+  "bigram": {
+   "recall@10": 0.645,
+   "mrr": 0.726,
+   "by_kind": {
+    "josa": 0.21,
+    "two_syllable": 1.0,
+    "spacing": 1.0,
+    "english": 1.0,
+    "typo": 0.01
+   }
+  },
+  "bigram_join": {
+   "recall@10": 0.6,
+   "mrr": 0.715,
+   "by_kind": {
+    "josa": 0.21,
+    "two_syllable": 0.78,
+    "spacing": 1.0,
+    "english": 1.0,
+    "typo": 0.01
+   }
+  },
+  "lindera": {
+   "recall@10": 0.745,
+   "mrr": 0.83,
+   "by_kind": {
+    "josa": 0.99,
+    "two_syllable": 0.91,
+    "spacing": 0.86,
+    "english": 0.91,
+    "typo": 0.05
+   }
+  }
+ },
+ "latency_ms": {
+  "c0_simple_raw": {
+   "p50": 0.38,
+   "p95": 0.88,
+   "n": 250
+  },
+  "c1_bigram": {
+   "p50": 3.91,
+   "p95": 12.27,
+   "n": 250
+  },
+  "c1b_bigram_join": {
+   "p50": 5.55,
+   "p95": 14.57,
+   "n": 250
+  },
+  "c2_lindera": {
+   "p50": 3.21,
+   "p95": 5.5,
+   "n": 250
+  },
+  "c3_trgm@0.3": {
+   "p50": 49.93,
+   "p95": 172.51,
+   "n": 251
+  },
+  "c3_trgm@0.5": {
+   "p50": 45.57,
+   "p95": 64.98,
+   "n": 251
+  },
+  "ilike": {
+   "p50": 0.08,
+   "p95": 0.16,
+   "n": 250
+  }
+ }
+}
