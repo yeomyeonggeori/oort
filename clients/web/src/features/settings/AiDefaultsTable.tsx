@@ -44,6 +44,7 @@ import {
   useRemoteWork,
   type RemoteWorkView,
 } from "./remoteWorkStore";
+import { readDesignParam } from "./aiMyAccountsModel";
 import { REMOTE_WORK_APPLYING } from "@momo/core/features/settings/remoteWorkProfile";
 
 // Reading this as: settings (AI 연결 · 기본 AI) for internal team users on web+Tauri,
@@ -120,6 +121,8 @@ export function AiDefaultsTable({
           harness={remote.login.harness}
           profile={remote.login.label}
           remote
+          // design 캡처: PTY 없이 「기다리는 중」 상태로 세운다.
+          fixture={readDesignParam("aiRemote") === "login" ? { status: { phase: "waiting" } } : null}
           onClose={remoteLoginClosed}
           onConnected={remoteLoginConnected}
           // 원격 작업 폴더의 로그인은 명령 복사로 대신하지 않는다(다른 폴더에 로그인된다).

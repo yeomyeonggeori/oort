@@ -12,6 +12,7 @@ import {
 } from "@momo/core/features/settings/remoteWorkProfile";
 import { desktopRemoteProfile, harnessProfileRemoteStatus } from "@/lib/tauri";
 import { readAiDefaults, writeAiDefaults } from "./aiDefaultsStore";
+import { readDesignParam } from "./aiMyAccountsModel";
 
 // =============================================================================
 // 기본 AI 표 「원격 작업 기본 계정」 행 → 이 맥의 workd (#3157).
@@ -62,10 +63,8 @@ export function resetRemoteWorkForTest() {
 
 const keyOf = (choice: RemoteWorkChoice | null) => (choice ? `${choice.harness}/${choice.label}` : "none");
 
-const set_ = (harness: LocalHarnessId, label: string | null) => desktopRemoteProfile.set(harness, label);
-
 const realDeps: RemoteWorkDeps = {
-  set: set_,
+  set: (harness: LocalHarnessId, label: string | null) => desktopRemoteProfile.set(harness, label),
   prepare: (harness, label) => desktopRemoteProfile.prepare(harness, label),
   status: (harness, label) => harnessProfileRemoteStatus({ harness, label }),
   signIn: (harness, label) =>
@@ -74,6 +73,25 @@ const realDeps: RemoteWorkDeps = {
       set({ login: { harness, label } });
     }),
 };
+
+/**
+ * design 캡처: `?aiRemote=refuse:<라벨>`(이 맥이 그 라벨로 거부) · `reset`(선택 파일 초기화)
+ * · `login`(원격 작업 폴더가 로그인 전). 셸 없이 각 결말의 화면을 찍는다. 제품 빌드는 무시한다.
+ */
+function fixtureDeps(mode: string): RemoteWorkDeps {
+  const refuse = mode.startsWith("refuse:") ? mode.slice("refuse:".length) : null;
+  return {
+    set: async () => (refuse ? { ok: false, code: refuse } : { ok: true, reset: mode === "reset" }),
+    prepare: async () => ({ ok: true }),
+    status: async (harness) => ({ id: harness, installed: true, auth: mode === "login" ? "needs_login" : "logged_in" }),
+    signIn: realDeps.signIn,
+  };
+}
+
+function currentDeps(): RemoteWorkDeps {
+  const mode = readDesignParam("aiRemote");
+  return mode ? fixtureDeps(mode) : realDeps;
+}
 
 /** 로그인 창이 연결을 알렸다. */
 export function remoteLoginConnected() {
@@ -97,7 +115,7 @@ function profileChoice(ref: AiCredentialRef | null): RemoteWorkChoice | null {
  */
 export async function chooseRemoteWorkAccount(
   ref: AiCredentialRef | null,
-  deps: RemoteWorkDeps = realDeps
+  deps: RemoteWorkDeps = currentDeps()
 ): Promise<RemoteWorkOutcome | null> {
   if (view.applying) return null;
   const choice = profileChoice(ref);
@@ -126,7 +144,7 @@ const QUIET_SYNC_CODES = new Set(["not_running", "unsupported_platform", "unknow
  */
 export async function syncRemoteWorkAccount(
   prefs: AiDefaultsPrefs,
-  deps: Pick<RemoteWorkDeps, "set"> = { set: set_ }
+  deps: Pick<RemoteWorkDeps, "set"> = currentDeps()
 ): Promise<void> {
   if (view.applying) return;
   const saved = prefs.remoteWork;
