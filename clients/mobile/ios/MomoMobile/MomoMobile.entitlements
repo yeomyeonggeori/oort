@@ -17,16 +17,22 @@
 	     both entitlement files; __tests__/pushContract.test.ts enforces that for the
 	     declaration, ios/ci_scripts/ci_post_xcodebuild.sh for the signed product.
 	     If it diverges the extension does not crash, it silently fails open and
-	     ships the relay's placeholder alert forever. -->
+	     ships the relay's placeholder alert forever.
+	     What lives in this group since #3121 (ADR-0188 §8.7): ONLY the push-fetch
+	     token — two read routes, no refresh half. The refresh token is in the
+	     app-only group below and the access token is in memory. -->
 	<key>keychain-access-groups</key>
 	<array>
 		<string>$(AppIdentifierPrefix)app.momo.ios.shared</string>
 		<!-- APP ONLY (#3026, ADR-0146 개정 2026-09-28 D-2): the Secure Enclave
 		     device key. The extension must never declare it — then it cannot read
 		     the key handle nor raise Face ID for it.
-		     ORDER IS LOAD-BEARING: keychain writes that name no group land in the
-		     FIRST group listed (secureSession.ts). Keep the shared group first so
-		     existing items do not move on upgrade. -->
+		     Since #3121 the REFRESH TOKEN lives here too (secureSession.ts names this
+		     group on every call). ORDER IS STILL LOAD-BEARING: keychain writes that
+		     name no group land in the FIRST group listed, so keep the shared group
+		     first — pre-#3121 items sit there and secureSession moves them out on
+		     first launch — and never let code write a credential without naming its
+		     group. __tests__/keychainGroups.test.ts pins both. -->
 		<string>$(AppIdentifierPrefix)app.momo.ios.devicekey</string>
 	</array>
 </dict>

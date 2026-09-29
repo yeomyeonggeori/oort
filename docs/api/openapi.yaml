@@ -327,6 +327,46 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/auth/push-fetch-token:
+    post:
+      tags: [auth]
+      operationId: authPushFetchToken
+      summary: Mint the notification extension's narrow token (ADR-0188 §8.7, #3121).
+      description: >
+        Human access bearer only. Returns a `typ = push_fetch` token that the
+        phone parks in the keychain group its notification extension reads. It
+        can call exactly `GET /v1/workspaces/{ws}/channels/{ch}/messages` and
+        `GET /v1/workspaces/{ws}/roster` of its own workspace (403 anywhere
+        else, before any query), has no refresh half, cannot mint another, and
+        lives 6 hours or until the session it was minted under can no longer
+        rotate (logout with its refresh half, refresh-reuse sweep, password
+        change, suspension, removal) - whichever is first.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Token minted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushFetchTokenResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller is not a signed-in person (agent bearer, work host, or the push-fetch token itself).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The session has no lineage yet (a pre-088 session); refresh and ask again.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /v1/auth/device-link:
     post:
       tags: [auth]
@@ -9475,6 +9515,22 @@ components:
           type: string
           format: uuid
         memberId:
+          type: string
+          format: uuid
+
+    PushFetchTokenResponse:
+      type: object
+      required: [token, expiresAtMs, ttlSeconds, workspaceId]
+      properties:
+        token:
+          type: string
+          description: A `typ = push_fetch` JWT. Not an access token; refused everywhere but the two reads above.
+        expiresAtMs:
+          type: integer
+          format: int64
+        ttlSeconds:
+          type: integer
+        workspaceId:
           type: string
           format: uuid
 

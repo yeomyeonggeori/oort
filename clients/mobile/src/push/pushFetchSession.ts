@@ -12,9 +12,14 @@ import {keychainAccessGroup} from './native';
 //
 // ADR-0120 D2-A ships id-only payloads: the push carries a message id and no
 // content, and the extension fetches the real title/body itself while the phone
-// is locked. To do that it needs a base URL, a workspace id and an access token,
-// and the two processes share exactly one channel for them — a keychain item in
-// a shared ACCESS GROUP.
+// is locked. To do that it needs a base URL, a workspace id and a token, and the
+// two processes share exactly one channel for them — a keychain item in a shared
+// ACCESS GROUP.
+//
+// The token is a push-fetch token (#3121, ADR-0188 §8.7): it can read one
+// channel's messages and the roster and nothing else, and it cannot be
+// refreshed. It is the ONLY credential the shared group holds; the session's
+// access token stays in memory and its refresh token is in the app-only group.
 //
 // Not the App Group. ADR-0137 D7 정오 2항 corrected the ADR on this: the App
 // Group is declared in both entitlement files but nothing on the extension's
@@ -43,7 +48,11 @@ import {keychainAccessGroup} from './native';
 
 /** The JSON shape `PushFetchSession` decodes — PushNotification.swift:93-103.
  *  Swift's JSONDecoder uses property names verbatim here (no key strategy), so
- *  these three keys are the contract, capitalisation included. */
+ *  these three keys are the contract, capitalisation included.
+ *
+ *  `accessToken` is the Swift property's name and stays. Since #3121 the VALUE
+ *  is a push-fetch token (two read routes, no refresh), never the session's
+ *  access token — `PushFetchSessionInput.fetchToken` says so at the call site. */
 interface PushFetchSessionPayload {
   baseURL: string;
   workspaceID: string;
@@ -65,17 +74,19 @@ export interface PushFetchSessionInput {
   /** Absolute origin the extension will fetch from, e.g. `https://host:28001`. */
   baseUrl: string;
   workspaceId: string;
-  accessToken: string;
+  /** A token from `mintPushFetchToken()` — NOT the session's access token.
+   *  Written under the Swift key `accessToken` (see the payload note above). */
+  fetchToken: string;
 }
 
 /**
  * Publish (or refresh) the session the extension fetches with.
  *
- * Must be called again whenever the access token rotates — roughly every 15
- * minutes. A stale token makes the extension's fetch 401, and a 401 is
- * indistinguishable to the user from a working push with an empty body, because
- * the resolver falls back to the placeholder either way
- * (PushNotification.swift:248-252).
+ * Must be called again before the push-fetch token expires
+ * (`pushFetchKeeper.ts` decides when). An expired token makes the extension's
+ * fetch 401, and a 401 is indistinguishable to the user from a working push
+ * with an empty body, because the resolver falls back to the placeholder either
+ * way (PushNotification.swift:248-252).
  */
 export async function publishPushFetchSession(
   input: PushFetchSessionInput,
@@ -88,7 +99,7 @@ export async function publishPushFetchSession(
   const payload: PushFetchSessionPayload = {
     baseURL: input.baseUrl,
     workspaceID: input.workspaceId,
-    accessToken: input.accessToken,
+    accessToken: input.fetchToken,
   };
 
   try {

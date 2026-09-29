@@ -871,6 +871,12 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/auth/realtime-token",
             post(routes::realtime::issue_token),
         )
+        // #3121 — the notification extension's narrow token. Minted by the app
+        // from its ordinary session; the extension's own token cannot reach it.
+        .route(
+            "/v1/auth/push-fetch-token",
+            post(routes::push_fetch::issue),
+        )
         // ADR-0180 — human issuer only. The phone redeem half is public (below).
         .route(
             "/v1/auth/device-link",
