@@ -3521,6 +3521,11 @@ function dkView(which: string): DeviceKeyView {
       return {kind: 'unsupported'};
     case 'servererror':
       return {kind: 'serverError', fingerprint: DK_FINGERPRINT};
+    // #3129: 주소 로그인 폰 · 맥이 아닌 곳의 QR — 「QR 연결 필요」.
+    case 'unlinked':
+      return {kind: 'unlinked', reason: 'address', fingerprint: null};
+    case 'unlinked-notmac':
+      return {kind: 'unlinked', reason: 'notFromMac', fingerprint: DK_FINGERPRINT};
     // #3103: live and approved, its sign-in ended — 「다시 연결 필요」.
     case 'reconnect':
     case 'reconnecting':
@@ -3696,6 +3701,27 @@ function DeviceKeySurface({which}: {which: string}): React.JSX.Element {
           connected
           onSignOut={() => {}}
           onClose={() => {}}
+        />
+      </View>
+    );
+  }
+  if (which === 'profile-page-unlinked') {
+    // #3129: 실제 프로필 안쪽 장 — 주소 로그인으로 등록된 승인 불가 키.
+    harnessClient.setQueryData(DEVICE_KEY_LOCAL_QUERY_KEY, {status: 'ready', publicKey: DK_KEY});
+    harnessClient.setQueryData(DEVICE_KEYS_QUERY_KEY(HARNESS_MEMBER.workspaceId), [
+      {...DK_ROW, linkedSession: false, linkedFromMac: false},
+    ]);
+    return (
+      <View style={styles.fill}>
+        <Shell />
+        <ProfileSheet
+          workspaceId={HARNESS_MEMBER.workspaceId}
+          member={HARNESS_MEMBER}
+          directory={makeDirectory(SHELL_ROSTER)}
+          connected
+          onSignOut={() => {}}
+          onClose={() => {}}
+          initialPage="deviceKey"
         />
       </View>
     );
