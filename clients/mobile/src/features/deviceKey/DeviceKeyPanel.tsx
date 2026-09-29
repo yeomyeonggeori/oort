@@ -82,6 +82,17 @@ export function deviceKeyActions(view: DeviceKeyView, state: DeviceKeyState): Ac
       return [{key: 'enroll', label: ACTION.enroll, onPress: state.enroll, enrolls: true}];
     case 'revoked':
       return [{key: 'reenroll', label: ACTION.reenroll, onPress: state.enroll, enrolls: true}];
+    case 'replaceBlocked':
+      return view.reason === 'oldKey'
+        ? [recheck]
+        : [
+            {
+              key: 'reenroll-refused',
+              label: ACTION.retry,
+              onPress: state.enroll,
+              enrolls: true,
+            },
+          ];
     case 'invalidated':
       return [{key: 'replace', label: ACTION.replace, onPress: state.replace, enrolls: true}];
     case 'biometryOff':
@@ -122,6 +133,7 @@ export function DeviceKeyPanel({
   const copy = deviceKeyCopy(view, busy);
   const fingerprint =
     'fingerprint' in view && view.fingerprint ? view.fingerprint : null;
+  const fingerprintLabel = copy.fingerprintLabel ?? FINGERPRINT_LABEL;
   const revokedFaceIdOff = view.kind === 'revoked' && view.biometryOff;
   const actions = deviceKeyActions(view, state);
   const [primary, ...rest] = actions;
@@ -195,11 +207,11 @@ export function DeviceKeyPanel({
           <View
             style={styles.fingerprint}
             accessible
-            accessibilityLabel={`${FINGERPRINT_LABEL}, ${fingerprintAccessibilityLabel(fingerprint)}`}
+            accessibilityLabel={`${fingerprintLabel}, ${fingerprintAccessibilityLabel(fingerprint)}`}
             accessibilityHint={FINGERPRINT_HINT}
             testID="device-key-fingerprint"
           >
-            <Text style={styles.fingerprintLabel}>{FINGERPRINT_LABEL}</Text>
+            <Text style={styles.fingerprintLabel}>{fingerprintLabel}</Text>
             <View style={styles.fingerprintGroups}>
               {fingerprint.split(' ').map((group, index) => (
                 <Text

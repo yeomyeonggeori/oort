@@ -1181,3 +1181,42 @@ fn only_v3_has_the_preview_line() {
     let upper = with_preview(&request, preview, Some(hash.to_uppercase()));
     assert!(control_bytes_for(ControlSchema::V3, &signer, &upper).is_err());
 }
+
+/// R2-E8 보안 Low (#3096): the spawn dialog names the channel the signature
+/// binds, and two channels read differently (the tail of the id, like the
+/// agent and host).
+#[test]
+fn the_spawn_dialog_names_the_channel_the_signature_binds() {
+    let case = cases_v2()
+        .into_iter()
+        .find(|c| c["name"] == "control_v2_spawn_resume")
+        .unwrap();
+    let Statement::Control { signer, request } = statement_of(&case) else {
+        unreachable!()
+    };
+    let ControlContent::Spawn { channel_id, .. } = &request.content else {
+        unreachable!()
+    };
+    let tail = channel_id.simple().to_string();
+    let tail = &tail[tail.len() - 8..];
+    let body = Statement::Control {
+        signer,
+        request: request.clone(),
+    }
+    .summary(None)
+    .body;
+    assert!(body.contains(&format!("채널 {tail}")), "{body}");
+
+    let mut other = request.clone();
+    if let ControlContent::Spawn { channel_id, .. } = &mut other.content {
+        *channel_id = Uuid::from_u128(0x77);
+    }
+    let other_body = Statement::Control {
+        signer,
+        request: other,
+    }
+    .summary(None)
+    .body;
+    assert!(other_body.contains("채널 00000077"), "{other_body}");
+    assert_ne!(body, other_body);
+}

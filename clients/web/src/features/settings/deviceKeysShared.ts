@@ -18,6 +18,67 @@ export function hostDeliveryCopy(host: DesktopHostDelivery): string {
   }
 }
 
+// ---- what the approve panel says about a waiting phone (#3145) -----------------
+//
+// The list row's name is whatever the registering sign-in sent — the QR redeem
+// name, unchecked by the server — and a key registered by someone holding a
+// stolen refresh token carries a name they chose (ADR-0146 증보 2026-09-29
+// 「남는 위험: 먼저 등록하는 쪽이 자리를 잡는다」). So the panel shows WHEN it was
+// registered and WHERE the name comes from, next to the fingerprint the person
+// compares. Both are aids: the fingerprint is what is trusted.
+
+const REGISTERED_AT = new Intl.DateTimeFormat("ko-KR", {
+  month: "long",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+/** 「9월 29일 오후 2:03 (12분 전)」. */
+export function registeredAtCopy(createdAtMs: number, nowMs: number): string {
+  const ago = Math.max(0, nowMs - createdAtMs);
+  const minutes = Math.floor(ago / 60_000);
+  const relative =
+    minutes < 1
+      ? "방금"
+      : minutes < 60
+        ? `${minutes}분 전`
+        : minutes < 60 * 24
+          ? `${Math.floor(minutes / 60)}시간 전`
+          : `${Math.floor(minutes / (60 * 24))}일 전`;
+  return `${REGISTERED_AT.format(new Date(createdAtMs))} (${relative})`;
+}
+
+export type PhoneNameOrigin = "matchesLink" | "notInLinks" | "unknown";
+
+/**
+ * Whether a waiting phone's name is one the linked-device list also carries
+ * (the QR redeem records the same name: `DeviceLinkDevice.name`). `undefined`
+ * list = not loaded: say nothing more than that the name is the phone's own.
+ */
+export function phoneNameOrigin(
+  key: { label: string },
+  linked: readonly { label: string; platform: string }[] | undefined
+): PhoneNameOrigin {
+  if (linked === undefined) return "unknown";
+  const same = linked.some((device) => {
+    const platform = device.platform.trim().toLowerCase();
+    return (platform === "ios" || platform === "iphone") && device.label === key.label;
+  });
+  return same ? "matchesLink" : "notInLinks";
+}
+
+export const PHONE_NAME_ORIGIN_COPY: Record<PhoneNameOrigin, string> = {
+  matchesLink: "이 이름은 QR로 연결할 때 폰이 알린 이름과 같습니다.",
+  notInLinks:
+    "이 이름은 연결된 기기 목록에 없습니다. 방금 내가 연결한 폰이 아니라면 승인하지 마세요.",
+  unknown: "연결된 기기 목록을 불러오지 못해 이름을 대조하지 못했습니다.",
+};
+
+/** Always said: the name is not something the Mac or the server verified. */
+export const PHONE_NAME_UNVERIFIED =
+  "이름은 폰이 스스로 정한 값이라 확인된 것이 아닙니다. 믿을 것은 지문입니다.";
+
 function decodeBase64(value: string): Uint8Array<ArrayBuffer> {
   const binary = atob(value);
   const out = new Uint8Array(new ArrayBuffer(binary.length));

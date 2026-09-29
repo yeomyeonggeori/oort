@@ -3483,7 +3483,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
 //
 //   -momoMeasure DEVICE-KEY-PENDING · LIGHT-DEVICE-KEY-PENDING · …
 //   (pending approved revoked invalidated biometryoff unregistered unsupported
-//    servererror registering reconnect reconnecting live profile)
+//    servererror registering reconnect reconnecting live profile
+//    replace-blocked-old replace-blocked-refused)
 
 const DK_KEY = 'A2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW';
 const DK_FINGERPRINT = '5BAF F89D E7DE 5C1D 7B61';
@@ -3526,6 +3527,11 @@ function dkView(which: string): DeviceKeyView {
       return {kind: 'unlinked', reason: 'address', fingerprint: null};
     case 'unlinked-notmac':
       return {kind: 'unlinked', reason: 'notFromMac', fingerprint: DK_FINGERPRINT};
+    // #3145: the old key still holds the place / the server said 409.
+    case 'replace-blocked-old':
+      return {kind: 'replaceBlocked', reason: 'oldKey', fingerprint: DK_FINGERPRINT};
+    case 'replace-blocked-refused':
+      return {kind: 'replaceBlocked', reason: 'registerRefused', fingerprint: null};
     // #3103: live and approved, its sign-in ended — 「다시 연결 필요」.
     case 'reconnect':
     case 'reconnecting':

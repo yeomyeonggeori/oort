@@ -32,7 +32,12 @@ import {
   DEVICE_KEYS_QUERY_KEY,
   deviceKeyFingerprint,
   hostDeliveryCopy,
+  PHONE_NAME_ORIGIN_COPY,
+  PHONE_NAME_UNVERIFIED,
+  phoneNameOrigin,
+  registeredAtCopy,
 } from "./deviceKeysShared";
+import { linkedDevicesQuery } from "./linkedDevicesQuery";
 import { ConfirmButton, Field, StatusChip, Subsection } from "./SettingsFields";
 
 // Reading this as: settings for internal team users on web+Tauri,
@@ -762,6 +767,10 @@ function PhoneKeyRow({
   const [revokeAsking, setRevokeAsking] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const label = phone.label.trim() || "이름 없는 폰";
+  // #3145: read only while the approve panel is open (the list is the settings
+  // page's own cache; a failed read says "could not compare", never a guess).
+  const linked = useQuery({ ...linkedDevicesQuery(), enabled: asking });
+  const nameOrigin = phoneNameOrigin(phone, linked.data);
   const noFingerprintId = useId();
   const startRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -975,6 +984,22 @@ function PhoneKeyRow({
               지문을 계산하지 못해 지금은 승인할 수 없습니다.
             </p>
           )}
+          <div className="flex min-w-0 flex-col gap-px" data-testid="device-key-endorse-origin">
+            <p className="break-keep text-meta text-ink" data-testid="device-key-endorse-registered">
+              <span className="text-ink-muted">등록 시각</span>{" "}
+              {registeredAtCopy(phone.createdAtMs, Date.now())}
+            </p>
+            <p
+              className="break-keep break-words text-meta text-ink"
+              data-testid="device-key-endorse-name"
+              data-name-origin={nameOrigin}
+            >
+              <span className="text-ink-muted">이름</span> {label}
+            </p>
+            <p className="break-keep text-meta text-ink-muted">
+              {PHONE_NAME_ORIGIN_COPY[nameOrigin]} {PHONE_NAME_UNVERIFIED}
+            </p>
+          </div>
           <p className="break-keep text-meta text-ink-muted">
             승인하면 이 맥이 확인 창을 띄우고 Touch ID로 서명합니다. 확인 창의 지문도 같은지 보세요.
           </p>

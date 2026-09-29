@@ -5,6 +5,7 @@ import {useEffect} from 'react';
 import {
   deriveDeviceKeyView,
   EnrollError,
+  holdsThePlace,
   enrollDeviceKey,
   readLocalDeviceKey,
   replaceInvalidatedKey,
@@ -40,6 +41,23 @@ const autoReconnectTried = new Set<string>();
 /** Test seam. */
 export function resetAutoReconnectForTests(): void {
   autoReconnectTried.clear();
+}
+
+/** Workspaces whose last registration got 409 `device_key_lineage_has_phone_key`
+ *  (#3145). The refusal outlives the sheet that got it: the person goes to the
+ *  Mac and comes back, and must still find the reason. Cleared when a
+ *  registration goes through. */
+const placeHeld = new Set<string>();
+
+/** Test seam. */
+export function resetPlaceHeldForTests(): void {
+  placeHeld.clear();
+}
+
+function learnFromRefusal(workspaceId: string, error: unknown): void {
+  if (error instanceof EnrollError && error.lineageHasPhoneKey) {
+    placeHeld.add(workspaceId);
+  }
 }
 
 export interface DeviceKeyState {
@@ -84,7 +102,14 @@ export function useDeviceKey(
         row =>
           row.publicKey === local.data?.publicKey && row.state === 'unendorsed',
       );
-      return pending ? APPROVAL_POLL_MS : false;
+      // #3145: an invalidated key whose row still holds the place — the Mac
+      // revoking it turns the screen to 「새 키로 다시 등록」 without a pull.
+      const held =
+        local.data?.status === 'invalidated' &&
+        query.state.data?.some(
+          row => row.publicKey === local.data?.publicKey && holdsThePlace(row),
+        );
+      return pending || held ? APPROVAL_POLL_MS : false;
     },
   });
 
@@ -95,10 +120,16 @@ export function useDeviceKey(
   const label = deviceLinkDevice().name;
   const enroll = useMutation({
     mutationFn: () => enrollDeviceKey({workspaceId, label}),
+    onSuccess: () => placeHeld.delete(workspaceId),
+    onError: error => learnFromRefusal(workspaceId, error),
     onSettled: settle,
   });
   const replace = useMutation({
     mutationFn: () => replaceInvalidatedKey({workspaceId, label}),
+    onSuccess: outcome => {
+      if (outcome.kind === 'registered') placeHeld.delete(workspaceId);
+    },
+    onError: error => learnFromRefusal(workspaceId, error),
     onSettled: settle,
   });
 
@@ -117,6 +148,7 @@ export function useDeviceKey(
     // server gave: 「불러오지 못했습니다」 is for when there is nothing to show.
     rowsError: hasKey && rows.data === undefined ? rows.error : null,
     signInUnlinked,
+    lineageHasPhoneKey: placeHeld.has(workspaceId),
   });
   const reconnectId =
     autoReconnect && view.kind === 'reconnect' && !view.biometryOff ? view.row.id : null;
@@ -129,7 +161,9 @@ export function useDeviceKey(
   }, [reconnectId, enrollBusy, enrollMutate]);
   const last = replace.submittedAt > enroll.submittedAt ? replace : enroll;
   // The 「QR 연결 필요」 panel already says what the refusal said.
-  const saidByView = last.error instanceof EnrollError && last.error.unlinked;
+  const saidByView =
+    last.error instanceof EnrollError &&
+    (last.error.unlinked || last.error.lineageHasPhoneKey);
   const failure = saidByView
     ? null
     : last.error instanceof Error
