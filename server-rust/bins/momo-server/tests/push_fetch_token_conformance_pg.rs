@@ -12,6 +12,9 @@
 //! | `the_extension_token_reads_messages_and_roster` | drop the `token` row insert in the mint route, or the `NotAccessToken` arm in `require_principal` |
 //! | `every_other_route_is_403_and_never_a_query` | delete the `push_fetch_route_allowed` check in `require_principal` |
 //! | `the_extension_cannot_mint_its_own_successor` | same (the mint route is not on the list) |
+//! | `method_case_and_shape_tricks_stay_refused` | loosen `push_fetch_route_allowed` (method, slashes, extra segments) |
+//! | `a_session_cannot_pile_up_live_tokens` | drop the live-row cap in the mint route |
+//! | `an_access_only_logout_leaves_the_session_and_so_the_token` | make the token outlive the refresh row (drop `push_fetch_session_live`) |
 //! | `it_is_neither_a_refresh_token_nor_a_logout_credential` | let `verify_app_refresh`/`verify_app_access` accept the typ |
 //! | `an_unrecorded_or_foreign_signed_token_is_401` | skip `token_state` for the push-fetch arm |
 //! | `logging_out_ends_the_extension_token` | record the row outside the caller's lineage |
@@ -348,6 +351,98 @@ async fn every_other_route_is_403_and_never_a_query() {
 
 #[tokio::test]
 #[ignore = "needs Postgres + runtime roles (DATABASE_URL)"]
+async fn method_case_and_shape_tricks_stay_refused() {
+    let _guard = test_lock().await;
+    let w = world().await;
+    let session = w.login().await;
+    let push = w.mint(&session).await;
+    let ws = w.workspace;
+    let ch = w.channel;
+    for (method, path) in [
+        ("HEAD", format!("/v1/workspaces/{ws}/roster")),
+        ("DELETE", format!("/v1/workspaces/{ws}/roster")),
+        ("GET", format!("/v1/workspaces/{ws}/roster/")),
+        ("GET", format!("/v1/workspaces/{ws}//roster")),
+        (
+            "GET",
+            format!("/v1/workspaces/{ws}/channels/{ch}/messages/"),
+        ),
+        (
+            "GET",
+            format!("/v1/workspaces/{ws}/channels/{ch}/messages/{ch}/replies"),
+        ),
+        ("GET", format!("/v1/workspaces/{ws}/roster%2F")),
+    ] {
+        let response = match method {
+            "HEAD" => w.http.head(format!("{}{path}", w.base)),
+            "DELETE" => w.http.delete(format!("{}{path}", w.base)),
+            _ => w.http.get(format!("{}{path}", w.base)),
+        }
+        .bearer_auth(&push)
+        .send()
+        .await
+        .expect("request");
+        assert!(
+            matches!(response.status().as_u16(), 403..=405),
+            "{method} {path} must never be served to the extension token, got {}",
+            response.status()
+        );
+        assert_ne!(response.status().as_u16(), 200, "{method} {path}");
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs Postgres + runtime roles (DATABASE_URL)"]
+async fn a_session_cannot_pile_up_live_tokens() {
+    let _guard = test_lock().await;
+    let w = world().await;
+    let session = w.login().await;
+    for _ in 0..momo_auth::MAX_LIVE_PUSH_FETCH_PER_LINEAGE {
+        w.mint(&session).await;
+    }
+    let over = w
+        .http
+        .post(format!("{}/v1/auth/push-fetch-token", w.base))
+        .bearer_auth(&session.access)
+        .send()
+        .await
+        .expect("mint over the cap");
+    assert_eq!(over.status().as_u16(), 429);
+}
+
+#[tokio::test]
+#[ignore = "needs Postgres + runtime roles (DATABASE_URL)"]
+async fn an_access_only_logout_leaves_the_session_and_so_the_token() {
+    // Documented, not a hole: without its refresh half a logout does not end the
+    // session (it can still rotate), so the extension's token lives with it.
+    let _guard = test_lock().await;
+    let w = world().await;
+    let session = w.login().await;
+    let push = w.mint(&session).await;
+    let logout = w
+        .http
+        .post(format!("{}/v1/auth/logout", w.base))
+        .bearer_auth(&session.access)
+        .json(&json!({}))
+        .send()
+        .await
+        .expect("logout");
+    assert_eq!(logout.status().as_u16(), 200);
+    assert_eq!(w.status("GET", &w.roster_path(), &push, None).await, 200);
+    // The rotation half can still end it: revoke the refresh row the way a
+    // password change or a removal does.
+    sqlx::query(
+        "UPDATE token SET revoked_at = now() WHERE workspace_id = $1 AND label = 'refresh'",
+    )
+    .bind(w.workspace)
+    .execute(&w.su)
+    .await
+    .expect("revoke refresh rows");
+    assert_eq!(w.status("GET", &w.roster_path(), &push, None).await, 401);
+}
+
+#[tokio::test]
+#[ignore = "needs Postgres + runtime roles (DATABASE_URL)"]
 async fn the_extension_cannot_mint_its_own_successor() {
     let _guard = test_lock().await;
     let w = world().await;
@@ -409,6 +504,22 @@ async fn an_unrecorded_or_foreign_signed_token_is_401() {
         .expect("sign")
         .token;
     assert_eq!(w.status("GET", &w.roster_path(), &foreign, None).await, 401);
+    // The route list is judged BEFORE the revocation lookup: the same
+    // unrecorded token is a 403 on a route it may never reach and a 401 only on
+    // one it may. (Removing the list check turns this 403 into a 401.)
+    assert_eq!(
+        w.status(
+            "POST",
+            &format!(
+                "/v1/workspaces/{}/channels/{}/messages",
+                w.workspace, w.channel
+            ),
+            &unrecorded,
+            Some(json!({"body": "x"}))
+        )
+        .await,
+        403
+    );
     // A refresh token is not this token either.
     assert_eq!(
         w.status("GET", &w.roster_path(), &session.refresh, None)

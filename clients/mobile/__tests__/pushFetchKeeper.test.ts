@@ -95,6 +95,15 @@ describe('the extension is handed a minted push-fetch token, when one is needed'
     expect(t.mint).toHaveBeenCalledTimes(1);
   });
 
+  it('a mint that finishes after dispose publishes nothing', async () => {
+    const t = setup();
+    t.setNext(minted('push-fetch-1', t.now()));
+    const pending = t.keeper.ensureFresh(WS);
+    t.keeper.dispose();
+    await pending;
+    expect(t.publish).not.toHaveBeenCalled();
+  });
+
   it('refuses a token minted for another workspace', async () => {
     const t = setup();
     t.setNext({...minted('push-fetch-1', t.now()), workspaceId: 'other'});

@@ -87,6 +87,40 @@ pub fn verify_app_push_fetch(token: &str, hmac_secret: &str) -> Result<Principal
     principal_from_claims(claims)
 }
 
+/// The most push-fetch rows one session lineage may hold live at once. The app
+/// mints about every three hours against a six-hour life, so two or three are
+/// live in normal use. The cap exists so that a leaked 15-minute access token
+/// cannot pile up six-hour rows (each of which is also a row every lineage lock
+/// must take, `LOCK_SESSION_ROWS_SQL`); refusing is a read, so it adds no
+/// writes to other rows and no lock-order edge (#3107).
+pub const MAX_LIVE_PUSH_FETCH_PER_LINEAGE: i64 = 4;
+
+/// How many unrevoked, unexpired push-fetch rows `session_id` holds. `conn`
+/// must carry the tenant GUC.
+pub async fn live_push_fetch_count(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    session_id: Uuid,
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) \
+           FROM token \
+          WHERE workspace_id = $1 \
+            AND actor_member_id = $2 \
+            AND session_id = $3 \
+            AND kind = 'session' \
+            AND label = 'push_fetch' \
+            AND revoked_at IS NULL \
+            AND (expires_at IS NULL OR expires_at > now())",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .bind(session_id)
+    .fetch_one(&mut *conn)
+    .await
+}
+
 /// Whether the session a push-fetch token was minted under can still rotate:
 /// its lineage holds an unrevoked, unexpired refresh row. `token_id` is the
 /// push-fetch row's own id; `conn` must carry the tenant GUC. A row with no

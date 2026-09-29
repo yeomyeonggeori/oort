@@ -250,7 +250,11 @@ export default function PushProvider({
     const ensure = () => void keeper.ensureFresh(workspaceId);
 
     ensure();
-    return subscribeSession(ensure);
+    const unsubscribe = subscribeSession(ensure);
+    return () => {
+      unsubscribe();
+      keeper.dispose();
+    };
   }, [workspaceId]);
 
   // ---- 3. The one foreground retry ----------------------------------------

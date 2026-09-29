@@ -23,8 +23,9 @@
 use axum::extract::State;
 use axum::{Extension, Json};
 use momo_auth::{
-    lock_session_for_registration, record_session_token, sign_push_fetch, Principal, PrincipalKind,
-    RegistrationSession, SCOPE_PUSH_FETCH, SESSION_LABEL_PUSH_FETCH,
+    live_push_fetch_count, lock_session_for_registration, record_session_token, sign_push_fetch,
+    Principal, PrincipalKind, RegistrationSession, MAX_LIVE_PUSH_FETCH_PER_LINEAGE,
+    SCOPE_PUSH_FETCH, SESSION_LABEL_PUSH_FETCH,
 };
 use momo_db::{with_tenant_tx, DbError};
 
@@ -37,6 +38,7 @@ enum Minted {
     Recorded,
     Ended,
     NoLineage,
+    TooMany,
 }
 
 pub async fn issue(
@@ -76,6 +78,13 @@ pub async fn issue(
             let Some(lineage) = lineage else {
                 return Ok(Minted::NoLineage);
             };
+            if live_push_fetch_count(conn, workspace_id, member_id, lineage)
+                .await
+                .map_err(DbError::from)?
+                >= MAX_LIVE_PUSH_FETCH_PER_LINEAGE
+            {
+                return Ok(Minted::TooMany);
+            }
             record_session_token(
                 conn,
                 workspace_id,
@@ -102,6 +111,10 @@ pub async fn issue(
             workspace_id: workspace_id.to_string(),
         })),
         Minted::Ended => Err(ApiError::unauthorized("token has been revoked")),
+        Minted::TooMany => Err(ApiError::new(
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            "too many live push-fetch tokens for this session; use the one already minted",
+        )),
         Minted::NoLineage => Err(ApiError::new(
             axum::http::StatusCode::CONFLICT,
             "session has no lineage yet; refresh and ask again",

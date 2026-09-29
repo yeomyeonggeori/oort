@@ -155,7 +155,13 @@ async function storeToken(token: string): Promise<boolean> {
       accessible: KEYCHAIN_ACCESSIBLE,
       ...(groups ? {accessGroup: groups.appOnly} : {}),
     });
-    return result !== false;
+    if (result === false) {
+      return false;
+    }
+    if (sharedSweepPending && groups) {
+      sharedSweepPending = !(await sweepShared());
+    }
+    return true;
   } catch {
     return false;
   }
@@ -217,7 +223,7 @@ async function migrateFromShared(token: string): Promise<void> {
     if ((await readFrom(groups.appOnly)) !== token) {
       return;
     }
-    await sweepShared();
+    sharedSweepPending = !(await sweepShared());
   } catch {
     // Retried at the next launch.
   }
@@ -225,20 +231,28 @@ async function migrateFromShared(token: string): Promise<void> {
 
 /** Delete a leftover shared-group copy. Names the shared group explicitly, so
  *  it can never touch the app-only copy. */
-async function sweepShared(): Promise<void> {
+async function sweepShared(): Promise<boolean> {
   const groups = resolveGroups();
   if (!groups) {
-    return;
+    return true;
   }
   try {
     await resetGenericPassword({
       service: KEYCHAIN_SERVICE,
       accessGroup: groups.shared,
     });
+    return true;
   } catch {
-    // Retried at the next launch.
+    // Retried at the next launch, or at the next successful write.
+    return false;
   }
 }
+
+/** True from the moment hydrate finds the refresh token in the shared group
+ *  until a sweep of that group has succeeded. While it is set, every
+ *  successful app-only write retries the sweep, so a move that failed at launch
+ *  does not leave the token where the extension can read it for the whole run. */
+let sharedSweepPending = false;
 
 /** Delete every copy, in whichever group it sits: with no group named the
  *  delete matches across all the groups this app can see, which is what a
@@ -297,11 +311,14 @@ async function hydrate(): Promise<void> {
     persisted = {refreshToken: loaded.token, ...metadata};
     notify();
     if (loaded.source === 'shared') {
+      sharedSweepPending = true;
       queueKeychain(() => migrateFromShared(loaded.token));
     } else if (loaded.source === 'app-only') {
       // A previous launch may have written the new copy and died before the
       // delete. The app-only copy is the truth; drop any shared leftover.
-      queueKeychain(sweepShared);
+      queueKeychain(async () => {
+        await sweepShared();
+      });
     }
     return;
   }
@@ -444,6 +461,7 @@ export const sessionPort: SessionPort = {
 
 /** Test seam: forget everything in memory, including the hydrate latch. */
 export function __resetSessionStore(): void {
+  sharedSweepPending = false;
   accessToken = null;
   persisted = null;
   authExpired = false;

@@ -64,7 +64,8 @@ describe('no code path hands the extension a session credential', () => {
     // The write helper never names the SHARED group.
     const store = session.match(/async function storeToken[\s\S]*?\n\}\n/);
     expect(store?.[0]).toBeDefined();
-    expect(store?.[0]).not.toMatch(/shared/);
+    expect(store?.[0]).not.toMatch(/groups\.shared/);
+    expect(store?.[0]).toMatch(/accessGroup: groups\.appOnly/);
   });
 
   it('the push-fetch publish takes a minted token, not an access token', () => {

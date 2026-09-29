@@ -202,6 +202,20 @@ describe('an install from before #3121', () => {
     expect(inShared()).toBeUndefined();
   });
 
+  it('after a refused move, the next successful write also clears the shared copy', async () => {
+    await legacyInstall('refresh-legacy');
+    mockFailWritesTo = APP_ONLY;
+    await initSessionStore();
+    await keychainSettled();
+    expect(inShared()).toBe('refresh-legacy');
+
+    mockFailWritesTo = null; // the keychain recovers mid-run
+    applyRotation('access-2', 'refresh-2');
+    await keychainSettled();
+    expect(inAppOnly()).toBe('refresh-2');
+    expect(inShared()).toBeUndefined();
+  });
+
   it('a leftover shared copy next to the app-only one is swept, and the app-only one wins', async () => {
     await legacyInstall('refresh-stale');
     mockKeychain.set(mockKey(KEYCHAIN_SERVICE, APP_ONLY), 'refresh-current');

@@ -26,9 +26,13 @@ export interface PushFetchKeeperDeps {
 
 export function createPushFetchKeeper(deps: PushFetchKeeperDeps): {
   ensureFresh: (workspaceId: string) => Promise<void>;
+  /** After this, a mint still in flight publishes nothing (workspace switch,
+   *  unmount). */
+  dispose: () => void;
 } {
   let current: MintedPushFetchToken | null = null;
   let inFlight: Promise<void> | null = null;
+  let disposed = false;
 
   const stale = (workspaceId: string): boolean => {
     if (!current || current.workspaceId !== workspaceId) {
@@ -40,7 +44,7 @@ export function createPushFetchKeeper(deps: PushFetchKeeperDeps): {
 
   const run = async (workspaceId: string): Promise<void> => {
     const minted = await deps.mint();
-    if (!minted || minted.workspaceId !== workspaceId) {
+    if (disposed || !minted || minted.workspaceId !== workspaceId) {
       return;
     }
     if (await deps.publish(minted.token)) {
@@ -50,13 +54,16 @@ export function createPushFetchKeeper(deps: PushFetchKeeperDeps): {
 
   return {
     ensureFresh(workspaceId) {
-      if (!deps.hasSession() || !stale(workspaceId)) {
+      if (disposed || !deps.hasSession() || !stale(workspaceId)) {
         return Promise.resolve();
       }
       inFlight ??= run(workspaceId).finally(() => {
         inFlight = null;
       });
       return inFlight;
+    },
+    dispose() {
+      disposed = true;
     },
   };
 }

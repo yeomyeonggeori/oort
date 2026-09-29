@@ -177,8 +177,9 @@ pub use owner_claim::{
     OWNER_CLAIM_TTL_SECONDS,
 };
 pub use push_fetch_token::{
-    push_fetch_route_allowed, push_fetch_session_live, sign_push_fetch, verify_app_push_fetch,
-    PUSH_FETCH_TTL_SECONDS, SCOPE_PUSH_FETCH, SESSION_LABEL_PUSH_FETCH, TYP_PUSH_FETCH,
+    live_push_fetch_count, push_fetch_route_allowed, push_fetch_session_live, sign_push_fetch,
+    verify_app_push_fetch, MAX_LIVE_PUSH_FETCH_PER_LINEAGE, PUSH_FETCH_TTL_SECONDS,
+    SCOPE_PUSH_FETCH, SESSION_LABEL_PUSH_FETCH, TYP_PUSH_FETCH,
 };
 pub use realtime::{
     realtime_info_string, sign_centrifugo_connection, CentrifugoConnectionClaims,
