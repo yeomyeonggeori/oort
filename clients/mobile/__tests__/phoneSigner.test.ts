@@ -133,10 +133,10 @@ describe('phoneSigner', () => {
 
   it('an allow without the checked preview hash never reaches Face ID (#3128)', async () => {
     const allow = controlOf(entries.find(x => x.name === 'control_v3_permission_once')!);
-    const {previewSha256: _dropped, ...bare} = allow.content as Extract<
-      ControlToSign['content'],
-      {kind: 'permission'}
-    >;
+    const bare = {
+      ...(allow.content as Extract<ControlToSign['content'], {kind: 'permission'}>),
+      previewSha256: undefined,
+    };
     const native = jest.fn();
     const signer = phoneSigner(identity, {
       context: async () => context('i', 1_790_550_003_000),
@@ -153,7 +153,7 @@ describe('phoneSigner', () => {
     });
     const error = await signer
       .sign({...allow, content: bare as ControlToSign['content']})
-      .catch((e: unknown) => e);
+      .catch((thrown: unknown) => thrown);
     expect(error).toBeInstanceOf(SignerRefusal);
     expect((error as SignerRefusal).message).toContain('미리보기');
     expect(native).not.toHaveBeenCalled();

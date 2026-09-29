@@ -31,6 +31,12 @@ import {
   type HumanControlSigner,
 } from "@momo/core/features/auth/signedControl";
 import {
+  permissionPreviewGate,
+  type PermissionPreviewGate,
+} from "@momo/core/features/workbench/permissionPreviewGate";
+import type { PendingPermission } from "@momo/core/features/workbench/agentPane";
+import {
+  fetchWorkPermissionPreview,
   fetchWorkSessions,
   resumeWorkSession,
   uuidEq,
@@ -68,6 +74,31 @@ export function useHumanControlSigning(
     signed: isDesktop() && signatureRequired === true,
     recheck: () => void client.invalidateQueries({ queryKey: key }),
   };
+}
+
+/**
+ * The owner's read of the open request's host preview, through the shared
+ * gate (#3128). `permission` null = nothing to read (not signing, not the
+ * owner, no request). Read once per request; a failed read says so, it never
+ * falls back to the inferred preview.
+ */
+export function usePermissionPreviewGate(
+  workspaceId: string,
+  sessionId: string,
+  permission: PendingPermission | null
+): PermissionPreviewGate {
+  const requestEventId = permission?.requestEventId ?? "";
+  const read = useQuery({
+    queryKey: ["work-permission-preview", workspaceId, sessionId, requestEventId] as const,
+    queryFn: () => fetchWorkPermissionPreview(workspaceId, sessionId, requestEventId),
+    enabled: permission !== null,
+    staleTime: Infinity,
+    retry: 1,
+  });
+  return permissionPreviewGate(
+    permission?.previewSha256 ?? null,
+    read.data ? { status: "ok", data: read.data } : read.isError ? { status: "error" } : { status: "loading" }
+  );
 }
 
 /** How long a signed statement lives: a Touch ID prompt and one request. The

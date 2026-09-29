@@ -200,6 +200,35 @@
   overflow-y: auto;
 }
 
+/*
+ * 확인한 host 미리보기(#3128): 같은 스크롤 칸 안에 종류 표지와 필드(제목·위치·입력)를
+ * 그대로 쌓는다. 필드 글은 해시한 글 그대로라 줄바꿈·공백을 보존한다.
+ */
+.agent-perm-kind {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.agent-perm-field {
+  display: grid;
+  gap: 0;
+}
+
+.agent-perm-field-label {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-timestamp);
+  color: var(--ink-muted);
+}
+
+.agent-perm-field-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* 계획 목록이 펼쳐져 있으면 「지금:」 줄은 목록이 대신한다. */
 .agent-current[data-plan-open] {
   display: none;

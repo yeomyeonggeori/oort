@@ -12,9 +12,7 @@ import {
   type RejectWithInstructionOutcome,
 } from '@momo/core/features/auth/signedControl';
 import {
-  canAllow,
   pendingPermission,
-  PERMISSION_ASK,
   permissionFailure,
   permissionLapsed,
   PERMISSION_LAPSED_LINE,
@@ -22,8 +20,21 @@ import {
   rejectWithInstructionLine,
   type PendingPermission,
 } from '@momo/core/features/workbench/agentPane';
+import {
+  PERMISSION_PREVIEW_KIND_LABEL,
+  PERMISSION_PREVIEW_LOADING_LINE,
+  permissionGateAsk,
+  permissionPreviewGate,
+  permissionPreviewRows,
+  type PermissionPreviewGate,
+} from '@momo/core/features/workbench/permissionPreviewGate';
+import type {PermissionPreview} from '@momo/core/features/workbench/permissionPreview';
 import type {WorkSessionEvent} from '@momo/core/features/work/workSessionModel';
-import {decideWorkPermission, type WorkSession} from '@momo/core/lib/api';
+import {
+  decideWorkPermission,
+  fetchWorkPermissionPreview,
+  type WorkSession,
+} from '@momo/core/lib/api';
 import {useQuery} from '@tanstack/react-query';
 import React, {useEffect, useMemo, useState} from 'react';
 import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
@@ -51,7 +62,14 @@ import {useDeviceKey} from '../deviceKey/useDeviceKey';
 // read-only detail: nothing here renders.
 //
 // - Allow 「이번 한 번」 or 「이 세션 동안」 (R2 opens the latter on the phone,
-//   0188 D5): Face ID signs the allow (control v2). Face ID IS the confirmation.
+//   0188 D5): Face ID signs the allow (control v3, #3128). The card first
+//   reads the host's preview with the owner's `GET …/permission-requests/{id}`
+//   and shows it verbatim; the allow buttons open only when
+//   `checkPermissionPreview` passes (the hash this phone recomputes equals the
+//   request's and the preview is whole), and that recomputed hash is what Face
+//   ID signs. Nothing on this card is inferred from `agent.status` (#3118 H1):
+//   the question comes from the checked preview's kind, or says no kind at all.
+//   Face ID IS the confirmation.
 // - Reject never signs (D-8). It asks once, with an optional instruction —
 //   「거부 + 지시」: the instruction is a signed `input` sent after the reject.
 // - Instruction: 「다음 차례로 보내기」 (queue, the default) or 「지금 끼어들기」
@@ -69,8 +87,20 @@ export const SIGNING_REQUIRED_QUERY_KEY = (workspaceId: string) =>
 /** Why this phone cannot sign right now, or null when it can. */
 export type SignBlock = string | null;
 
+export const PERMISSION_PREVIEW_QUERY_KEY = (
+  workspaceId: string,
+  sessionId: string,
+  requestEventId: string,
+) => ['work-permission-preview', workspaceId, sessionId, requestEventId] as const;
+
+type CheckedPreview = {preview: PermissionPreview; sha256: string};
+
 export interface SignedWorkActions {
-  allow: (permission: PendingPermission, scope: PermissionScope) => Promise<void>;
+  allow: (
+    permission: PendingPermission,
+    scope: PermissionScope,
+    preview: CheckedPreview,
+  ) => Promise<void>;
   reject: (permission: PendingPermission) => Promise<void>;
   rejectWithInstruction: (
     permission: PendingPermission,
@@ -85,13 +115,14 @@ export function signedWorkActions(
   signer: HumanControlSigner,
 ): SignedWorkActions {
   return {
-    allow: (permission, scope) =>
+    allow: (permission, scope, preview) =>
       signedAllow({
         workspaceId,
         session,
         requestEventId: permission.requestEventId,
         optionId: permission.allow!.optionId,
         scope,
+        preview,
         signer,
       }),
     reject: async permission => {
@@ -126,6 +157,36 @@ export function useSigningRequired(workspaceId: string, enabled: boolean): boole
   return flag.data === true;
 }
 
+/**
+ * The owner's read of the host's preview for the open request, through the
+ * shared gate (#3128). Read once per request; a failed read says so and can be
+ * retried by reopening, it never falls back to an inferred preview.
+ */
+export function usePermissionPreviewGate(
+  workspaceId: string,
+  sessionId: string,
+  permission: PendingPermission | null,
+  enabled: boolean,
+): PermissionPreviewGate {
+  const requestEventId = permission?.requestEventId ?? '';
+  const read = useQuery({
+    queryKey: PERMISSION_PREVIEW_QUERY_KEY(workspaceId, sessionId, requestEventId),
+    queryFn: () =>
+      fetchWorkPermissionPreview(workspaceId, sessionId, requestEventId),
+    enabled: enabled && permission !== null,
+    staleTime: Infinity,
+    retry: 1,
+  });
+  return permissionPreviewGate(
+    permission?.previewSha256 ?? null,
+    read.data
+      ? {status: 'ok', data: read.data}
+      : read.isError
+        ? {status: 'error'}
+        : {status: 'loading'},
+  );
+}
+
 /** Product container: the flag, this phone's key, the signer. */
 export function SignedWorkControls({
   workspaceId,
@@ -156,6 +217,13 @@ export function SignedWorkControls({
           ),
     [deviceKeyId, workspaceId, session, memberId],
   );
+  const permission = pendingPermission(events, session);
+  const preview = usePermissionPreviewGate(
+    workspaceId,
+    session.id,
+    permission,
+    owner && required,
+  );
   // D-11: nothing changes unless the server says signatures are required.
   if (!owner || !required) return null;
   const block: SignBlock =
@@ -170,17 +238,18 @@ export function SignedWorkControls({
           : '이 폰은 아직 지시 기기가 아니에요. 프로필 › 지시 기기에서 등록하고 맥의 승인을 받아 주세요.';
   return (
     <SignedWorkControlsView
-      permission={pendingPermission(events, session)}
+      permission={permission}
+      preview={preview}
       ended={session.status !== 'running' && session.status !== 'idle'}
       online={online}
       block={block}
       actions={actions}
       fallbackReject={
         actions === null
-          ? async permission => {
+          ? async open => {
               await decideWorkPermission(workspaceId, session.id, {
-                requestEventId: permission.requestEventId,
-                optionId: permission.reject!.optionId,
+                requestEventId: open.requestEventId,
+                optionId: open.reject!.optionId,
                 kind: 'reject_once',
               });
             }
@@ -205,6 +274,7 @@ export interface SignedWorkInitial {
 /** Presentational: everything above is data. */
 export function SignedWorkControlsView({
   permission,
+  preview,
   ended,
   online,
   block,
@@ -214,6 +284,8 @@ export function SignedWorkControlsView({
   initial,
 }: {
   permission: PendingPermission | null;
+  /** The host's preview through the shared gate (#3128). */
+  preview: PermissionPreviewGate;
   ended: boolean;
   online: boolean;
   block: SignBlock;
@@ -239,6 +311,7 @@ export function SignedWorkControlsView({
         <PermissionCard
           key={permission.requestEventId}
           permission={permission}
+          preview={preview}
           online={online}
           block={block}
           actions={actions}
@@ -266,6 +339,7 @@ export type CardOutcome = {tone: 'sent' | 'closed' | 'partial'; text: string} | 
 
 function PermissionCard({
   permission,
+  preview,
   online,
   block,
   actions,
@@ -276,6 +350,7 @@ function PermissionCard({
 }: {
   onUndelivered: (text: string) => void;
   permission: PendingPermission;
+  preview: PermissionPreviewGate;
   online: boolean;
   block: SignBlock;
   actions: SignedWorkActions | null;
@@ -294,18 +369,33 @@ function PermissionCard({
       ? {tone: 'closed', text: PERMISSION_LAPSED_LINE}
       : initial?.outcome ?? null,
   );
-  const ask = permission.tool ? permission.tool.headline : PERMISSION_ASK.other;
+  // #3118 H1: the question comes from the checked preview, never agent.status.
+  const ask = permissionGateAsk(preview);
+  const checked = preview.state === 'ready' ? preview : null;
+  const shown =
+    preview.state === 'ready'
+      ? preview.preview
+      : preview.state === 'blocked'
+        ? preview.preview
+        : null;
   const allowable =
-    online && block === null && actions !== null && canAllow(permission);
+    online &&
+    block === null &&
+    actions !== null &&
+    checked !== null &&
+    permission.allow !== null;
   const rejectable =
     online && permission.reject !== null && (actions !== null || fallbackReject !== null);
 
   const allow = async (scope: PermissionScope) => {
-    if (!allowable || busy) return;
+    if (!allowable || busy || !checked) return;
     setBusy(scope);
     setError(null);
     try {
-      await actions!.allow(permission, scope);
+      await actions!.allow(permission, scope, {
+        preview: checked.preview,
+        sha256: checked.sha256,
+      });
       setOutcome({tone: 'sent', text: permissionSentLine('allow_once', scope)});
     } catch (err) {
       const failure = permissionFailure(err);
@@ -358,17 +448,27 @@ function PermissionCard({
         <Sentence style={styles.ask} accessibilityRole="header">
           {ask}
         </Sentence>
-        {permission.preview ? (
-          // The whole preview, never clipped (0188 D5; design-review B1). The
-          // page scrolls, not the box. NOT signed yet: this is inferred from the
-          // server-relayed `agent.status` before the request, and today's allow
-          // (control v2) binds only the request id and option (#3118 R2 H1).
-          // The v3 allow signs the host's preview hash — `checkPermissionPreview`
-          // in @momo/core; moving this card and the signer to it is the uxui
-          // follow-up.
-          <Text style={styles.preview} testID="work-permission-preview">
-            {permission.preview.text}
-          </Text>
+        {shown ? (
+          // The host's preview, whole and verbatim (0188 D5; design-review
+          // B1): the hash Face ID signs is over exactly these characters, so
+          // nothing here is sanitised, clipped or reflowed. The page scrolls,
+          // not the box.
+          <View style={styles.previewBox} testID="work-permission-preview">
+            <Text style={styles.previewKind}>
+              {PERMISSION_PREVIEW_KIND_LABEL[shown.kind]}
+            </Text>
+            {permissionPreviewRows(shown).map(row => (
+              <View key={row.key} style={styles.previewRow}>
+                <Text style={styles.previewLabel}>{row.label}</Text>
+                <Text
+                  selectable
+                  style={styles.preview}
+                  testID={`work-permission-preview-${row.key}`}>
+                  {row.text}
+                </Text>
+              </View>
+            ))}
+          </View>
         ) : null}
         {outcome ? (
           <Sentence
@@ -379,9 +479,16 @@ function PermissionCard({
           </Sentence>
         ) : (
           <>
-            {permission.preview?.truncated ? (
-              <Sentence style={styles.hint} testID="work-permission-truncated">
-                미리보기가 길어 가운데가 잘렸어요. 전체를 보지 않고는 허락할 수 없어요. 거부하거나 호스트에서 결정해 주세요.
+            {preview.state === 'loading' ? (
+              <Sentence style={styles.hint} testID="work-permission-preview-loading">
+                {PERMISSION_PREVIEW_LOADING_LINE}
+              </Sentence>
+            ) : preview.state === 'blocked' ? (
+              <Sentence
+                style={styles.hint}
+                testID="work-permission-preview-blocked"
+                accessibilityLiveRegion="polite">
+                {preview.line}
               </Sentence>
             ) : null}
             {!online ? (
@@ -645,16 +752,27 @@ const buildStyles = (color: Palette) =>
       color: color.text,
       fontWeight: '600',
     },
-    preview: {
-      fontFamily: 'Menlo',
-      fontSize: font.meta,
-      lineHeight: line.meta,
-      color: color.text,
+    previewBox: {
+      gap: space.sm,
       backgroundColor: color.surface,
       borderRadius: ds2Radius.row,
       borderWidth: 1,
       borderColor: color.border,
       padding: space.sm,
+    },
+    previewKind: {
+      fontSize: font.meta,
+      lineHeight: line.meta,
+      color: color.text,
+      fontWeight: '600',
+    },
+    previewRow: {gap: space.xs},
+    previewLabel: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
+    preview: {
+      fontFamily: 'Menlo',
+      fontSize: font.meta,
+      lineHeight: line.meta,
+      color: color.text,
     },
     outcome: {fontSize: font.label, lineHeight: line.label, color: color.text},
     hint: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
