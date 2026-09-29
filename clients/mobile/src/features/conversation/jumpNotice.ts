@@ -55,7 +55,13 @@ export function jumpNoticeSpeech(notice: JumpNotice): string {
  * 조사가 낱말마다 갈린다: 「원본은 · 원본을」과 「메시지는 · 메시지를」. 그래서
  * 주어를 접두사로 갈아 끼울 수 없고, 문장을 통째로 든다.
  */
-export type JumpSubject = 'quote' | 'pin' | 'search' | 'session' | 'notification';
+export type JumpSubject =
+  | 'quote'
+  | 'pin'
+  | 'search'
+  | 'session'
+  | 'notification'
+  | 'memory';
 
 /**
  * 「위쪽에 있다」고 **단정할 수 있는** 주어의 문장.
@@ -129,6 +135,18 @@ export function jumpMissedNotice(
     // 말할 자격이 없는 문장이다.
     return {
       headline: '알림이 가리킨 메시지를 이 화면에서 찾지 못했습니다',
+      detail: ASK,
+    };
+  }
+  if (subject === 'memory') {
+    // 여섯 번째 주어 (#3166). 요약 카드·「기억 n개 참고」 시트의 근거를 누른 사람은
+    // 인용도 고정도 누른 적이 없다. 근거는 seq를 나르므로 `older`를 단정할 수 있다.
+    // 이 갈래만 해요체다(새 표면) — 옆 문장들의 말투를 옮기지 않는다.
+    return {
+      headline:
+        reason === 'older'
+          ? '근거 메시지는 이 대화의 더 위쪽에 있어요'
+          : '근거 메시지를 이 화면에서 찾지 못했어요',
       detail: ASK,
     };
   }
