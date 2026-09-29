@@ -73,3 +73,10 @@ ADR-0196(팀 기억 v2) M1의 요약 루프. `momo-agent-worker` 프로세스 �
 - **후속(F8)**: API의 보류 개수 공개 조건(트리거 작성자 == 뷰어)과 서빙의 요청자 유도(사슬을 오름)가 a2a 사슬에서 다르다 — 사슬로 요청자가 정해진 run은 API에서 개수가 아무에게도 안 보인다. 별도 이슈.
 - **스캔 범위(F3)**: 답 채널 자신의 최근 요약 200개와, 요청자가 멤버인 다른 채널의 최근 요약 200개(보류 개수·DM 합집합 후보)를 따로 잡는다. 부분 인덱스 `mem_digest_home_idx`(채널, 최신순, `NOT stale`) 하나를 두 스캔이 쓴다.
 - **영수증 시간 제한(F5)**: `MEMORY_SERVE_TIMEOUT_MS`는 읽기+조립에만 건다. 영수증은 DB `lock_timeout` ≤1s · `statement_timeout`이 묶고, 커밋되면 블록을 돌려준다. 재시도가 23505를 만나면 기록된 요약 id와 새 블록이 같을 때만 싣는다.
+
+## 항목 서빙과 기억 제안 (#3169)
+- **항목 섹션**: 요약 블록 뒤에 `<기억 항목 참고자료>`가 붙는다(트리거 메시지 본문으로 `mem_serve_items`가 검색). 예산 `MEMORY_SERVE_ITEM_BUDGET_CHARS`(3000), 후보 `MEMORY_SERVE_MAX_ITEMS`(8). 영수증 `budget_chars`는 두 예산의 합(기본 6000). **항목 섹션만 끄기**: `MEMORY_SERVE_ITEMS_ENABLED=0`. 항목 읽기가 실패·시간 초과여도 요약은 그대로 실린다.
+- **에이전트 제안 도구 `memory_suggest`**: 에이전트 프로필의 `enabled_tools`에 넣어야 켜진다(기본 꺼짐 — `card_suggest`와 같은 이름 면제, 프로필이 안 켰으면 호출은 거부된다). 켜진 에이전트의 창에는 사람 메시지마다 `#<seq>`가 붙고(근거 번호), 규칙 블록이 함께 실린다. 도구는 `mem_proposal`에 **대기** 행만 만든다: 검색·서빙·기억 브라우저가 읽지 않는다. 채널 멤버가 `POST …/memory/proposals/{id}/accept`로 수락해야 `origin=confirmed` 항목이 된다.
+- **끄기·회수**: 프로필에서 도구를 빼면 새 제안이 멈춘다. 대기 제안은 14일 뒤 만료(목록에서 사라지고 수락 불가). 만료·근거 삭제된 제안의 본문 정리는 M3 정리 잡(#3172) 몫이다 — 그 전까지 행은 남지만 RLS가 가린다.
+- **한도**: run당 3건 · 채널 대기 20건 · 에이전트당 시간당 30건(도구가 「too many proposals」로 답한다).
+- **모니터링**: 로그 `memory serving recorded`의 `served_items`, `mem_event`의 `proposed`/`created`/`confirmed`/`rejected`, 감사 `memory.proposal.accepted|rejected`.

@@ -3,13 +3,16 @@ import { ApiError } from "../../lib/api";
 import { installCoreHost, resetCoreHost, type SessionPort } from "../../runtime/host";
 import { WireShapeError } from "../../lib/wire";
 import {
+  acceptMemoryProposal,
   getMemoryDigest,
   getMemorySettings,
   getRunMemoryReceipt,
   listMemoryDigests,
+  listMemoryProposals,
   patchChannelMemorySettings,
   patchMyMemorySettings,
   patchWorkspaceMemorySettings,
+  rejectMemoryProposal,
 } from "./api";
 import { memoryIsCaughtUp } from "./model";
 
@@ -139,6 +142,171 @@ describe("memory reads", () => {
     expect(mine.servedCount).toBe(2);
     const others = await getRunMemoryReceipt(WS, RUN);
     expect(others.withheldCount).toBeUndefined();
+  });
+});
+
+const PROPOSAL = "00000000-0000-7000-8000-000000000601";
+const ITEM = "00000000-0000-7000-8000-000000000701";
+const AGENT = "00000000-0000-7000-8000-000000000801";
+const ALICE = "00000000-0000-7000-8000-000000000802";
+
+function proposalWire(overrides: Record<string, unknown> = {}) {
+  return {
+    id: PROPOSAL,
+    channelId: CH,
+    runId: RUN,
+    agentMemberId: AGENT,
+    requesterMemberId: ALICE,
+    kind: "decision",
+    status: "pending",
+    text: "배포는 2026-10-02 금요일 오후 2시로 정했어요",
+    subject: "배포 일정",
+    evidenceMessageIds: [MSG],
+    evidence: [{ messageId: MSG, seq: 7, authorMemberId: ALICE }],
+    callerIsRequester: true,
+    createdAtMs: 1_800_000_000_000,
+    expiresAtMs: 1_801_209_600_000,
+    ...overrides,
+  };
+}
+
+describe("memory receipt items (#3169)", () => {
+  it("reads the items a run was served, tolerating a server that does not send them", async () => {
+    installHost();
+    const base = {
+      runId: RUN,
+      channelId: CH,
+      servedCount: 1,
+      digestIds: [],
+      digests: [],
+      budgetChars: 6000,
+      usedChars: 300,
+      createdAtMs: 1_800_000_001_000,
+    };
+    const item = {
+      id: ITEM,
+      channelId: CH,
+      kind: "decision",
+      origin: "confirmed",
+      body: "배포는 금요일",
+      validFromMs: 1_800_000_000_000,
+      sourceCount: 2,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(200, { receipt: { ...base, itemIds: [ITEM], items: [item] } }))
+        .mockResolvedValueOnce(jsonResponse(200, { receipt: base }))
+        .mockResolvedValueOnce(
+          jsonResponse(200, { receipt: { ...base, itemIds: [ITEM], items: [{ ...item, kind: "gossip" }] } })
+        )
+    );
+    const withItems = await getRunMemoryReceipt(WS, RUN);
+    expect(withItems.itemIds).toEqual([ITEM]);
+    expect(withItems.items?.[0]).toEqual(item);
+    const legacy = await getRunMemoryReceipt(WS, RUN);
+    expect(legacy.items).toBeUndefined();
+    await expect(getRunMemoryReceipt(WS, RUN)).rejects.toBeInstanceOf(WireShapeError);
+  });
+});
+
+describe("memory proposals (#3169)", () => {
+  it("lists a channel's proposals with the filters it was given", async () => {
+    installHost();
+    const fetchMock = vi.fn(async () => jsonResponse(200, { proposals: [proposalWire()] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const rows = await listMemoryProposals(WS, CH, { status: "pending", runId: RUN, limit: 5 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: PROPOSAL, kind: "decision", status: "pending", runId: RUN });
+    expect(rows[0].text).toContain("배포는");
+    expect(rows[0].callerIsRequester).toBe(true);
+    expect(rows[0].evidence).toEqual([{ messageId: MSG, seq: 7, authorMemberId: ALICE }]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://oort.test/v1/workspaces/${WS}/channels/${CH}/memory/proposals?status=pending&runId=${RUN}&limit=5`,
+      expect.anything()
+    );
+    await listMemoryProposals(WS, CH);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `https://oort.test/v1/workspaces/${WS}/channels/${CH}/memory/proposals`,
+      expect.anything()
+    );
+  });
+
+  it("treats an empty list as empty and refuses a malformed row", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(200, { proposals: [] }))
+        .mockResolvedValueOnce(jsonResponse(200, { proposals: [proposalWire({ status: "maybe" })] }))
+        .mockResolvedValueOnce(jsonResponse(200, { proposals: [proposalWire({ evidenceMessageIds: [7] })] }))
+        .mockResolvedValueOnce(jsonResponse(200, { proposals: [proposalWire({ evidence: [{ seq: 7 }] })] }))
+        .mockResolvedValueOnce(jsonResponse(200, { proposals: [proposalWire({ callerIsRequester: undefined })] }))
+    );
+    expect(await listMemoryProposals(WS, CH)).toEqual([]);
+    for (let n = 0; n < 4; n += 1) {
+      await expect(listMemoryProposals(WS, CH)).rejects.toBeInstanceOf(WireShapeError);
+    }
+  });
+
+  it("accepts and rejects with a bodiless POST; the decided shell has no text", async () => {
+    installHost();
+    const fetchMock = vi.fn(async (input: RequestInit | URL | string, init?: RequestInit) => {
+      const url = String(input);
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({});
+      if (url.endsWith("/accept")) {
+        return jsonResponse(200, {
+          proposal: proposalWire({
+            status: "accepted",
+            text: undefined,
+            subject: undefined,
+            evidenceMessageIds: [],
+            evidence: [],
+            decidedBy: ALICE,
+            decidedAtMs: 1_800_000_100_000,
+            itemId: ITEM,
+          }),
+        });
+      }
+      return jsonResponse(200, {
+        proposal: proposalWire({
+          status: "rejected",
+          text: undefined,
+          subject: undefined,
+          evidenceMessageIds: [],
+          evidence: [],
+          decidedBy: ALICE,
+          decidedAtMs: 1_800_000_100_000,
+        }),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const accepted = await acceptMemoryProposal(WS, PROPOSAL);
+    expect(accepted).toMatchObject({ status: "accepted", itemId: ITEM, decidedBy: ALICE });
+    expect(accepted.text).toBeUndefined();
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `https://oort.test/v1/workspaces/${WS}/memory/proposals/${PROPOSAL}/accept`,
+      expect.anything()
+    );
+    const rejected = await rejectMemoryProposal(WS, PROPOSAL);
+    expect(rejected.status).toBe("rejected");
+    expect(rejected.itemId).toBeUndefined();
+  });
+
+  it("surfaces 403 (may not decide) and 409 (already decided / changed) as ApiError", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(403, { error: { message: "not allowed" } }))
+        .mockResolvedValueOnce(jsonResponse(409, { error: { message: "no longer" } }))
+    );
+    await expect(acceptMemoryProposal(WS, PROPOSAL)).rejects.toMatchObject({ status: 403 });
+    await expect(rejectMemoryProposal(WS, PROPOSAL)).rejects.toMatchObject({ status: 409 });
   });
 });
 

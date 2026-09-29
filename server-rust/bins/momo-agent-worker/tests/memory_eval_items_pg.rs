@@ -11,10 +11,13 @@
 //! * **recall** = `momo_app` with `app.member_id` set: the memory browser is `SELECT` on
 //!   `mem_item` / `mem_digest` through RLS, search is `mem_search_items`, receipts are empty until
 //!   #3163's serving lands (`mem_serving` holds ids only).
-//! * **agent_context** = every digest and item that passes the D6-4 audience rules
-//!   (`mem_digest_audience_ok`, `mem_item_audience_ok`) for that invoker and answer channel. This is
-//!   the DATA-LAYER rule the serving code of #3163/#3169 calls; the context builder itself
-//!   (`context.rs`, `serving.rs`) is not run here — that part is runtime-unverified until #3169.
+//! * **agent_context** = what the REAL serving path (#3169) hands an agent run: for every canary and
+//!   control token a mention run is raised the way the send path raises one (a message by the
+//!   invoker in the answer channel, an `agent_run` row triggered by it), and the memory tx reads
+//!   `mem_serve_items` (items matching the trigger message, D6-4 audience rule inside) plus
+//!   `mem_serve_candidates` (summaries). The invoker's rights, the answer channel and the query are
+//!   the run row's, as in production. The worker binary's text framing (`serving::pack`) is not
+//!   run here; it has its own tests and `memory_serving_conformance_pg`.
 //! * `current_value` / `timeline` / `commitments` stay `NotImplemented` (M3 closes validity periods).
 //!
 //! ```text
@@ -51,6 +54,8 @@ struct Ctx {
 struct State {
     seeded: evalpg::Seeded,
     by_message: HashMap<Uuid, String>,
+    /// Every canary / control token: the queries the serving path is asked with.
+    tokens: Vec<String>,
 }
 
 struct ItemsBackend {
@@ -201,7 +206,17 @@ impl MemoryBackend for ItemsBackend {
                 .iter()
                 .map(|(k, v)| (*v, k.clone()))
                 .collect();
-            State { seeded, by_message }
+            let tokens = corpus
+                .canaries
+                .iter()
+                .chain(corpus.controls.iter())
+                .map(|c| c.token.clone())
+                .collect();
+            State {
+                seeded,
+                by_message,
+                tokens,
+            }
         });
         self.state = Some(state);
         Ok(())
@@ -247,34 +262,76 @@ impl MemoryBackend for ItemsBackend {
     fn agent_context(&self, invoker: Who, channel: Channel) -> R<String> {
         let state = self.ids()?;
         let ws = state.seeded.workspace_id;
-        let (requester, answer) = (
+        let (requester, answer, agent) = (
             state.seeded.member[&invoker],
             state.seeded.channel[&channel],
+            state.seeded.member[&Who::Agent],
         );
+        let tokens = state.tokens.clone();
         let su = self.ctx.su.clone();
         Ok(block(&self.ctx, async move {
-            let mut tx = su.begin().await.expect("begin");
-            sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
-                .bind(ws.to_string())
-                .execute(&mut *tx)
+            let wp = momo_worker_pool().await;
+            let mut text = String::new();
+            // Eight distinct words is a query (the search keeps at most eight): a few runs cover
+            // every token, and a wrongly readable canary scores at the top of its run.
+            for group in tokens.chunks(8) {
+                let seq: i64 = sqlx::query_scalar(
+                    "UPDATE channel_seq SET last_seq = last_seq + 1 WHERE channel_id = $1 RETURNING last_seq",
+                )
+                .bind(answer)
+                .fetch_one(&su)
                 .await
-                .expect("ws");
-            let text: Option<String> = sqlx::query_scalar(
-                "SELECT string_agg(body, E'\\n') FROM ( \
-                   SELECT d.body FROM mem_digest d WHERE d.workspace_id = $1 \
-                      AND mem_digest_audience_ok(d.id, $2, $3) \
-                   UNION ALL \
-                   SELECT i.body FROM mem_item i WHERE i.workspace_id = $1 \
-                      AND mem_item_audience_ok(i.id, $2, $3)) t",
-            )
-            .bind(ws)
-            .bind(answer)
-            .bind(requester)
-            .fetch_one(&mut *tx)
-            .await
-            .expect("context");
-            tx.rollback().await.expect("rollback");
-            text.unwrap_or_default()
+                .expect("seq");
+                let trigger = Uuid::new_v4();
+                sqlx::query(
+                    "INSERT INTO message (id, workspace_id, channel_id, seq, hlc_ts, hlc_count, \
+                     author_member_id, type, body) VALUES ($1, $2, $3, $4, 0, 0, $5, 'text', $6)",
+                )
+                .bind(trigger)
+                .bind(ws)
+                .bind(answer)
+                .bind(seq)
+                .bind(requester)
+                .bind(format!("@agent {}", group.join(" ")))
+                .execute(&su)
+                .await
+                .expect("trigger message");
+                let run = Uuid::new_v4();
+                sqlx::query(
+                    "INSERT INTO agent_run (id, workspace_id, agent_member_id, channel_id, trigger_message_id) \
+                     VALUES ($1, $2, $3, $4, $5)",
+                )
+                .bind(run)
+                .bind(ws)
+                .bind(agent)
+                .bind(answer)
+                .bind(trigger)
+                .execute(&su)
+                .await
+                .expect("agent_run");
+                let served = mem::with_memory_tx(&wp, ws, move |conn| {
+                    Box::pin(async move {
+                        let items = mem::serve_items(conn, run, 20, 600).await?;
+                        let digests = mem::serve_candidates(conn, run, None, 50, 3_000).await?;
+                        Ok((items, digests))
+                    })
+                })
+                .await
+                .expect("serve");
+                if let Some(items) = served.0 {
+                    for item in items.items {
+                        text.push_str(&item.body);
+                        text.push('\n');
+                    }
+                }
+                if let Some(candidates) = served.1 {
+                    for digest in candidates.digests {
+                        text.push_str(&digest.body);
+                        text.push('\n');
+                    }
+                }
+            }
+            text
         }))
     }
 

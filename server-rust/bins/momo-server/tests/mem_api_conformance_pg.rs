@@ -17,6 +17,8 @@
 //!   7. settings: non-admin workspace/channel writes are 403, an admin's flip the
 //!      worker's switch, a member cannot touch another member's personal pause
 //!   8. `app.member_id` is not left on the (single) pooled connection
+//!   9. (#3169) the 「기억해 둘게요」 proposals: list / accept / reject over HTTP, the 403 / 409 mapping,
+//!      and the receipt's items
 //!
 //! `#[ignore]` — needs a real Postgres:
 //!
@@ -1057,4 +1059,402 @@ async fn member_id_is_not_left_on_the_pooled_connection() {
         workspace.as_deref().unwrap_or("").is_empty(),
         "app.workspace_id leaked: {workspace:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// #3169 — proposals and the receipt's items
+// ---------------------------------------------------------------------------
+
+async fn post(http: &reqwest::Client, url: &str, token: &str) -> (u16, Value) {
+    let response = http
+        .post(url)
+        .bearer_auth(token)
+        .json(&json!({}))
+        .send()
+        .await
+        .expect("post");
+    let status = response.status().as_u16();
+    (status, response.json().await.unwrap_or(Value::Null))
+}
+
+/// `mem_propose_item` as the worker's memory tx.
+async fn worker_propose(
+    worker: &PgPool,
+    ws: Uuid,
+    run: Uuid,
+    text: &str,
+    evidence: &[Uuid],
+) -> Uuid {
+    let mut tx = worker.begin().await.expect("begin");
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(ws.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("ws guc");
+    let id: Option<Uuid> =
+        sqlx::query_scalar("SELECT mem_propose_item($1, 'decision', $2, NULL, $3)")
+            .bind(run)
+            .bind(text)
+            .bind(evidence)
+            .fetch_one(&mut *tx)
+            .await
+            .expect("mem_propose_item");
+    tx.commit().await.expect("commit");
+    id.expect("a new proposal")
+}
+
+fn proposals_url(base: &str, ws: Uuid, ch: Uuid) -> String {
+    format!("{base}/v1/workspaces/{ws}/channels/{ch}/memory/proposals")
+}
+
+fn decision_url(base: &str, ws: Uuid, proposal: Uuid, verb: &str) -> String {
+    format!("{base}/v1/workspaces/{ws}/memory/proposals/{proposal}/{verb}")
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn proposals_are_listed_decided_and_mapped_over_http() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let worker = worker_pool().await;
+    let w = build_world(&su).await;
+    let agent: Uuid = sqlx::query_scalar("SELECT agent_member_id FROM agent_run WHERE id = $1")
+        .bind(w.run_p1)
+        .fetch_one(&su)
+        .await
+        .expect("agent");
+    join(&su, w.ws, w.p1, agent, "member").await;
+    let base = start_server(momo_app_pool(4).await).await;
+    let http = reqwest::Client::new();
+    let alice = login(&http, &base, w.ws, &w.alice.email).await;
+    let bob = login(&http, &base, w.ws, &w.bob.email).await;
+    let carol = login(&http, &base, w.ws, &w.carol.email).await;
+    let chadmin = login(&http, &base, w.ws, &w.chadmin.email).await;
+    let outsider = login(&http, &base, w.ws_b, &w.outsider.email).await;
+    let erin = login(&http, &base, w.ws, &w.erin.email).await;
+    sqlx::query("UPDATE member SET status = 'suspended' WHERE id = $1")
+        .bind(w.erin.id)
+        .execute(&su)
+        .await
+        .expect("suspend after login");
+
+    let text = "다음 주 화요일에 디자인 검수를 하기로 했어요";
+    let pid = worker_propose(&worker, w.ws, w.run_p1, text, &[w.m_p1.0]).await;
+    let second = worker_propose(
+        &worker,
+        w.ws,
+        w.run_p1,
+        "리뷰어는 밥으로 정했어요",
+        &[w.m_p1.0],
+    )
+    .await;
+
+    // --- list ---------------------------------------------------------------------------
+    let url = proposals_url(&base, w.ws, w.p1);
+    let (status, body) = get(&http, &url, &alice).await;
+    assert_eq!(status, 200);
+    let proposals = body["proposals"].as_array().expect("array");
+    assert_eq!(proposals.len(), 2);
+    let mine = proposals
+        .iter()
+        .find(|p| p["id"] == pid.to_string())
+        .expect("proposal");
+    assert_eq!(mine["status"], "pending");
+    assert_eq!(mine["kind"], "decision");
+    assert_eq!(mine["text"], text);
+    assert_eq!(mine["channelId"], w.p1.to_string());
+    assert_eq!(mine["agentMemberId"], agent.to_string());
+    assert_eq!(mine["requesterMemberId"], w.alice.id.to_string());
+    assert_eq!(mine["runId"], w.run_p1.to_string());
+    assert_eq!(mine["evidenceMessageIds"].as_array().unwrap().len(), 1);
+    assert!(mine.get("itemId").is_none() && mine.get("decidedBy").is_none());
+    // L-4: a card can show who said it and where, without any new text on this API.
+    assert_eq!(
+        mine["callerIsRequester"], true,
+        "alice is the person the agent answered"
+    );
+    let evidence = mine["evidence"].as_array().expect("evidence");
+    assert_eq!(evidence.len(), 1);
+    assert_eq!(evidence[0]["messageId"], w.m_p1.0.to_string());
+    assert_eq!(evidence[0]["seq"], w.m_p1.1);
+    assert_eq!(evidence[0]["authorMemberId"], w.alice.id.to_string());
+    assert!(evidence[0].get("body").is_none() && evidence[0].get("text").is_none());
+    // bob (a member who is neither the requester nor the first author) sees the card too.
+    assert_eq!(
+        get(&http, &url, &bob).await.1["proposals"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        get(&http, &url, &bob).await.1["proposals"][0]["callerIsRequester"],
+        false,
+        "bob is not the requester: no self-accept warning"
+    );
+    // M-2: a guest reads the cards but the decision routes refuse them (route guard; the database
+    // refuses too, see mem_proposal_conformance_pg).
+    let guest = seed_human(&su, w.ws, "guest").await;
+    join(&su, w.ws, w.p1, guest.id, "member").await;
+    let guest_token = login(&http, &base, w.ws, &guest.email).await;
+    assert_eq!(
+        get(&http, &url, &guest_token).await.1["proposals"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        post(
+            &http,
+            &decision_url(&base, w.ws, pid, "accept"),
+            &guest_token
+        )
+        .await
+        .0,
+        403
+    );
+    assert_eq!(
+        post(
+            &http,
+            &decision_url(&base, w.ws, pid, "reject"),
+            &guest_token
+        )
+        .await
+        .0,
+        403
+    );
+    // a non-member sees an empty list (the policy hides the rows), a suspended member is refused.
+    let (status, body) = get(&http, &url, &carol).await;
+    assert_eq!(
+        (status, body["proposals"].as_array().map(Vec::len)),
+        (200, Some(0))
+    );
+    assert_eq!(get(&http, &url, &erin).await.0, 403);
+    // another workspace's token is refused outright.
+    assert!(matches!(get(&http, &url, &outsider).await.0, 403 | 404));
+    // filters
+    assert_eq!(
+        get(&http, &format!("{url}?runId={}", w.run_p1), &alice)
+            .await
+            .1["proposals"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        get(&http, &format!("{url}?runId={}", Uuid::new_v4()), &alice)
+            .await
+            .1["proposals"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(
+        get(&http, &format!("{url}?status=accepted"), &alice)
+            .await
+            .1["proposals"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(
+        get(&http, &format!("{url}?status=bogus"), &alice).await.0,
+        400
+    );
+    assert_eq!(
+        get(&http, &format!("{url}?runId=nope"), &alice).await.0,
+        400
+    );
+
+    // --- who may decide ---------------------------------------------------------------------
+    let accept_url = decision_url(&base, w.ws, pid, "accept");
+    assert_eq!(
+        post(&http, &accept_url, &carol).await.0,
+        403,
+        "a workspace member outside the channel"
+    );
+    assert_eq!(
+        post(&http, &accept_url, &erin).await.0,
+        403,
+        "a suspended member"
+    );
+    assert_eq!(
+        post(
+            &http,
+            &decision_url(&base, w.ws, Uuid::new_v4(), "accept"),
+            &bob
+        )
+        .await
+        .0,
+        403,
+        "an unknown id is not told apart"
+    );
+    assert_eq!(
+        post(&http, &decision_url(&base, w.ws, pid, "reject"), &carol)
+            .await
+            .0,
+        403
+    );
+    assert_eq!(
+        post(&http, &decision_url(&base, w.ws, pid, "bogus"), &bob)
+            .await
+            .0,
+        404
+    );
+    let bad_id = format!(
+        "{base}/v1/workspaces/{}/memory/proposals/not-a-uuid/accept",
+        w.ws
+    );
+    assert_eq!(post(&http, &bad_id, &bob).await.0, 400);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM mem_item WHERE workspace_id = $1")
+            .bind(w.ws)
+            .fetch_one(&su)
+            .await
+            .unwrap(),
+        0,
+        "no refusal remembered anything"
+    );
+
+    // --- accept ----------------------------------------------------------------------------
+    let (status, body) = post(&http, &accept_url, &bob).await;
+    assert_eq!(status, 200, "{body}");
+    let decided = &body["proposal"];
+    assert_eq!(decided["status"], "accepted");
+    assert_eq!(decided["decidedBy"], w.bob.id.to_string());
+    let item_id: Uuid = decided["itemId"].as_str().expect("itemId").parse().unwrap();
+    assert!(
+        decided.get("text").is_none(),
+        "a decided proposal keeps no text: {decided}"
+    );
+    assert_eq!(decided["evidenceMessageIds"].as_array().unwrap().len(), 0);
+    let item: (String, String, String) =
+        sqlx::query_as("SELECT origin, body, space_kind FROM mem_item WHERE id = $1")
+            .bind(item_id)
+            .fetch_one(&su)
+            .await
+            .expect("item");
+    assert_eq!(item, ("confirmed".into(), text.into(), "channel".into()));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM audit_log WHERE workspace_id = $1 AND action = 'memory.proposal.accepted'"
+        )
+        .bind(w.ws)
+        .fetch_one(&su)
+        .await
+        .unwrap(),
+        1,
+        "the decision is audited"
+    );
+    let (_, body) = get(&http, &url, &alice).await;
+    assert_eq!(
+        body["proposals"].as_array().unwrap().len(),
+        1,
+        "only the other one still waits"
+    );
+    let (_, body) = get(&http, &format!("{url}?status=accepted"), &alice).await;
+    assert_eq!(body["proposals"][0]["itemId"], item_id.to_string());
+    assert_eq!(
+        post(&http, &accept_url, &alice).await.0,
+        409,
+        "a second accept"
+    );
+    assert_eq!(
+        post(&http, &decision_url(&base, w.ws, pid, "reject"), &alice)
+            .await
+            .0,
+        409,
+        "reject after accept"
+    );
+
+    // --- reject ----------------------------------------------------------------------------
+    let (status, body) = post(
+        &http,
+        &decision_url(&base, w.ws, second, "reject"),
+        &chadmin,
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["proposal"]["status"], "rejected");
+    assert!(body["proposal"].get("text").is_none() && body["proposal"].get("itemId").is_none());
+    assert_eq!(
+        post(&http, &decision_url(&base, w.ws, second, "accept"), &bob)
+            .await
+            .0,
+        409
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM audit_log WHERE workspace_id = $1 AND action = 'memory.proposal.rejected'"
+        )
+        .bind(w.ws)
+        .fetch_one(&su)
+        .await
+        .unwrap(),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM mem_item WHERE workspace_id = $1")
+            .bind(w.ws)
+            .fetch_one(&su)
+            .await
+            .unwrap(),
+        1,
+        "a rejection remembers nothing"
+    );
+
+    // --- the receipt names served items, and hides one whose evidence is gone ---------------
+    let mut tx = worker.begin().await.expect("begin");
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(w.ws.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("ws guc");
+    sqlx::query_scalar::<_, Uuid>(
+        "SELECT mem_record_serving($1, $2, '{}'::uuid[], $3, 0, 6000, 400)",
+    )
+    .bind(w.run_p1)
+    .bind(w.alice.id)
+    .bind(vec![item_id])
+    .fetch_one(&mut *tx)
+    .await
+    .expect("receipt with an item");
+    tx.commit().await.expect("commit");
+    let receipt_url = format!(
+        "{base}/v1/workspaces/{}/agent-runs/{}/memory-receipt",
+        w.ws, w.run_p1
+    );
+    let (status, body) = get(&http, &receipt_url, &bob).await;
+    assert_eq!(status, 200);
+    assert_eq!(body["receipt"]["servedCount"], 1);
+    assert_eq!(body["receipt"]["itemIds"], json!([item_id.to_string()]));
+    assert_eq!(body["receipt"]["items"][0]["body"], text);
+    assert_eq!(body["receipt"]["items"][0]["origin"], "confirmed");
+    assert_eq!(body["receipt"]["items"][0]["kind"], "decision");
+    assert!(
+        body["receipt"].get("withheldCount").is_none(),
+        "requester-only"
+    );
+    assert_eq!(
+        get(&http, &receipt_url, &carol).await.0,
+        404,
+        "a non-member"
+    );
+    sqlx::query("UPDATE message SET deleted_at = now(), state = 'deleted' WHERE id = $1")
+        .bind(w.m_p1.0)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (_, body) = get(&http, &receipt_url, &bob).await;
+    assert_eq!(
+        body["receipt"]["items"],
+        json!([]),
+        "the item's evidence is gone; its text is not shown"
+    );
+    assert_eq!(body["receipt"]["itemIds"], json!([]));
 }

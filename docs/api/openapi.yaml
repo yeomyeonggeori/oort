@@ -122,8 +122,9 @@ tags:
   - name: memory
     description: >
       ADR-0196 team memory v2 (M1) — channel/thread digests with evidence links,
-      the per-run receipt behind the 「기억 n개 참고」 chip, and the switches
-      (workspace, channel exclude/pause, personal pause). Human-only. Visibility
+      the per-run receipt behind the 「기억 n개 참고」 chip, the switches
+      (workspace, channel exclude/pause, personal pause), and (M2, #3169) the
+      agent's 「기억해 둘게요」 proposals that a person accepts or rejects. Human-only. Visibility
       and write authority are decided by database row-level security, not by the
       handler: a row the caller may not read is simply absent.
   - name: sidebar
@@ -3281,6 +3282,187 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: No receipt for this run, or not readable by the caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/memory/proposals:
+    get:
+      tags: [memory]
+      operationId: listMemoryProposals
+      summary: The 「기억해 둘게요」 proposals of a channel (cards).
+      description: >
+        ADR-0196 D4/D9 (#3169). An agent's `memory_suggest` tool only **proposes**;
+        a proposal is `pending` and is not a memory — search, agent serving and the
+        memory browser never read it — until a person accepts it. A `pending`
+        proposal carries its `text` and evidence message ids; a decided one is a
+        shell (status, who decided, the accepted item's id) with no text. Visibility
+        is decided by row-level security: a channel the caller cannot read is an
+        empty list, a pending proposal whose evidence was deleted or edited, or
+        that is past its 14 days, is absent. `runId` narrows to the proposals of
+        one agent run (the reply's card).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: channelId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, accepted, rejected]
+            default: pending
+        - name: runId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        "200":
+          description: The proposals, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryProposalListResponse"
+        "400":
+          description: Invalid channel id, run id or status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/memory/proposals/{proposalId}/accept:
+    post:
+      tags: [memory]
+      operationId: acceptMemoryProposal
+      summary: Accept a proposal — it becomes a confirmed memory of the channel.
+      description: >
+        ADR-0196 D4 (a person's accept is `origin=confirmed`), D9 (a member of the
+        evidence channel), D6-2. **Who may accept:** any active human member who
+        can read the proposal's channel and is not a guest (workspace or channel role) — the requester has no special right, an
+        agent has none. The deciding member is the caller's credential; there is no
+        member in the request. The database re-validates every evidence message
+        against the caller (in the channel, alive, not edited since the proposal,
+        written by a person, readable by the caller) and the channel's memory
+        switches. Someone who may not decide, and an unknown id, get the same 403.
+        A 1:1 agent DM proposal becomes a personal memory of that person. Audited
+        (`memory.proposal.accepted`).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: proposalId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The decided proposal (a shell with `itemId`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryProposalDecisionResponse"
+        "400":
+          description: Invalid proposal id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not allowed to decide this proposal (or no such proposal).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Already decided, expired, memory is off for the channel, or its evidence changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: The text cannot be remembered as written (credential shape, agent-authored evidence).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/memory/proposals/{proposalId}/reject:
+    post:
+      tags: [memory]
+      operationId: rejectMemoryProposal
+      summary: Reject a proposal — nothing is remembered.
+      description: >
+        Same authority as accepting. The proposal becomes a text-less shell,
+        a `mem_event` records the rejection, and the action is audited
+        (`memory.proposal.rejected`).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: proposalId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The decided proposal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryProposalDecisionResponse"
+        "400":
+          description: Invalid proposal id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not allowed to decide this proposal (or no such proposal).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Already decided.
           content:
             application/json:
               schema:
@@ -11720,13 +11902,25 @@ components:
       properties:
         digest: {$ref: "#/components/schemas/MemoryDigest"}
 
+    MemoryReceiptItem:
+      type: object
+      required: [id, channelId, kind, origin, body, validFromMs, sourceCount]
+      properties:
+        id: {type: string, format: uuid}
+        channelId: {type: string, format: uuid}
+        kind: {type: string, enum: [decision, fact, commitment, preference, procedure]}
+        origin: {type: string, enum: [extracted, confirmed, curated, synthesized]}
+        body: {type: string}
+        validFromMs: {type: integer, format: int64, description: The fact's own time (newest evidence message).}
+        sourceCount: {type: integer, format: int32}
+
     MemoryReceipt:
       type: object
-      required: [runId, channelId, servedCount, digestIds, digests, budgetChars, usedChars, createdAtMs]
+      required: [runId, channelId, servedCount, digestIds, digests, itemIds, items, budgetChars, usedChars, createdAtMs]
       properties:
         runId: {type: string, format: uuid}
         channelId: {type: string, format: uuid}
-        servedCount: {type: integer, format: int32, description: Everything the run was served (the chip's n).}
+        servedCount: {type: integer, format: int32, description: Everything the run was served, digests and items (the chip's n).}
         digestIds:
           type: array
           description: Served digests the caller can read today.
@@ -11734,6 +11928,14 @@ components:
         digests:
           type: array
           items: {$ref: "#/components/schemas/MemoryDigest"}
+        itemIds:
+          type: array
+          description: Served items the caller can read today (#3169).
+          items: {type: string, format: uuid}
+        items:
+          type: array
+          description: Those items, for the popover. One whose evidence was deleted or edited since is absent.
+          items: {$ref: "#/components/schemas/MemoryReceiptItem"}
         withheldCount:
           type: integer
           format: int32
@@ -11747,6 +11949,63 @@ components:
       required: [receipt]
       properties:
         receipt: {$ref: "#/components/schemas/MemoryReceipt"}
+
+    MemoryProposalEvidence:
+      type: object
+      required: [messageId, seq, authorMemberId]
+      properties:
+        messageId: {type: string, format: uuid}
+        seq: {type: integer, format: int64}
+        authorMemberId: {type: string, format: uuid}
+
+    MemoryProposal:
+      type: object
+      required: [id, channelId, agentMemberId, requesterMemberId, kind, status, evidenceMessageIds, evidence, callerIsRequester, createdAtMs, expiresAtMs]
+      properties:
+        id: {type: string, format: uuid}
+        channelId: {type: string, format: uuid}
+        runId: {type: string, format: uuid, description: The agent run that proposed it.}
+        agentMemberId: {type: string, format: uuid}
+        requesterMemberId: {type: string, format: uuid, description: The person the agent was answering — derived by the server.}
+        kind: {type: string, enum: [decision, fact, commitment, preference, procedure]}
+        status: {type: string, enum: [pending, accepted, rejected]}
+        text: {type: string, description: The proposed memory. Only while `pending`.}
+        subject: {type: string}
+        evidenceMessageIds:
+          type: array
+          description: Source messages (ids only). Empty once decided.
+          items: {type: string, format: uuid}
+        evidence:
+          type: array
+          description: >
+            Author and channel sequence of each source message (pending only), for a card's
+            「밥 · #41」 line. Ids and numbers only; read the text through the normal message
+            path with `messageId`. This API never carries it.
+          items: {$ref: "#/components/schemas/MemoryProposalEvidence"}
+        callerIsRequester:
+          type: boolean
+          description: >
+            The caller is the person the agent was answering: warn before a self-accept.
+            Advice for the UI; the server lets any non-guest channel member decide.
+        createdAtMs: {type: integer, format: int64}
+        expiresAtMs: {type: integer, format: int64}
+        decidedBy: {type: string, format: uuid}
+        decidedAtMs: {type: integer, format: int64}
+        itemId: {type: string, format: uuid, description: The confirmed item an accepted proposal became.}
+
+    MemoryProposalListResponse:
+      type: object
+      required: [proposals]
+      properties:
+        proposals:
+          type: array
+          items: {$ref: "#/components/schemas/MemoryProposal"}
+
+    MemoryProposalDecisionResponse:
+      type: object
+      required: [proposal]
+      properties:
+        proposal: {$ref: "#/components/schemas/MemoryProposal"}
 
     WorkspaceMemorySettings:
       type: object

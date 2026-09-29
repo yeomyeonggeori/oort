@@ -843,6 +843,19 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/agent-runs/{run}/memory-receipt",
             get(routes::memory::get_receipt),
         )
+        // #3169 — 「기억해 둘게요」: an agent proposes, a person decides.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/memory/proposals",
+            get(routes::memory::list_proposals),
+        )
+        .route(
+            "/v1/workspaces/{ws}/memory/proposals/{id}/accept",
+            post(routes::memory::accept_proposal),
+        )
+        .route(
+            "/v1/workspaces/{ws}/memory/proposals/{id}/reject",
+            post(routes::memory::reject_proposal),
+        )
         .route(
             "/v1/workspaces/{ws}/memory/settings",
             get(routes::memory::get_settings).patch(routes::memory::patch_workspace_settings),
