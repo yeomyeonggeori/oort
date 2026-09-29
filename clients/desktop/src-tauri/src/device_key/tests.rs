@@ -685,3 +685,217 @@ fn workd_status_says_why_the_host_enforces() {
     assert_eq!(by(serde_json::json!("<script>")), None);
     assert_eq!(by(serde_json::Value::Null), None);
 }
+
+// ---- host_register (#3120, security review H5) ------------------------------
+
+fn host_key_b64() -> String {
+    BASE64.encode([7u8; 32])
+}
+
+fn host_register_ask() -> HostRegisterAsk {
+    HostRegisterAsk {
+        workspace_id: Uuid::from_u128(1),
+        label: "성재의 맥".into(),
+        host_public_key: host_key_b64(),
+        instance_id: Some("inst_1".into()),
+        server_time_ms: Some(NOW),
+    }
+}
+
+fn host_register_statement() -> Statement {
+    Statement::Control {
+        signer: signer(),
+        request: host_register_request(
+            &host_register_ask(),
+            "inst_1",
+            Uuid::from_u128(0xabcdef0123456789),
+            Uuid::from_u128(0xa1),
+            NOW,
+        ),
+    }
+}
+
+#[test]
+fn the_host_register_dialog_shows_the_host_key_the_whole_host_id_and_the_label() {
+    let mut fake = Fake::new(true);
+    let root = fake.public_b64();
+    let statement = host_register_statement();
+    sign_statement(&mut fake, &statement, &root, NOW, None).unwrap();
+    let shown = fake.last_summary.expect("the dialog was shown");
+    assert!(
+        shown.body.contains(&fingerprint(&host_key_b64()).unwrap()),
+        "{}",
+        shown.body
+    );
+    assert!(shown
+        .body
+        .contains(&Uuid::from_u128(0xabcdef0123456789).to_string()));
+    assert!(shown.body.contains("「성재의 맥」"));
+    assert!(shown.full_text.unwrap().contains(&host_key_b64()));
+    assert!(
+        !shown.body.contains("다른 호스트"),
+        "a host that does not exist yet is not another host"
+    );
+}
+
+#[test]
+fn a_host_register_signature_verifies_over_the_e1_bytes() {
+    let mut fake = Fake::new(true);
+    let root = fake.public_b64();
+    let statement = host_register_statement();
+    let signed = sign_statement(&mut fake, &statement, &root, NOW, None).unwrap();
+    let bytes = statement.signed_bytes(NOW).unwrap();
+    let text = String::from_utf8(bytes.clone()).unwrap();
+    assert!(
+        text.starts_with("momo.human.control.v2\ninst_1\n"),
+        "{text}"
+    );
+    assert!(text.contains("\nhost_register\n"), "{text}");
+    assert!(verify_raw(
+        &BASE64.decode(&signed.public_key).unwrap(),
+        &bytes,
+        &BASE64.decode(&signed.signature).unwrap()
+    ));
+}
+
+/// Sabotage-proof by construction: each case is a dialog with exactly one
+/// thing missing, and each must be refused.
+#[test]
+fn a_host_register_dialog_missing_a_field_is_refused() {
+    let statement = host_register_statement();
+    let Statement::Control { request, .. } = &statement else {
+        unreachable!()
+    };
+    let full = statement.summary(None);
+    assert!(host_register_dialog_complete(&full, request));
+    let key = host_key_b64();
+    let fingerprint = fingerprint(&key).unwrap();
+    let host_id = Uuid::from_u128(0xabcdef0123456789).to_string();
+    let cases: [(&str, Summary); 7] = [
+        (
+            "fingerprint",
+            Summary {
+                body: full.body.replace(&fingerprint, "지문 생략"),
+                ..full.clone()
+            },
+        ),
+        (
+            "host id",
+            Summary {
+                body: full.body.replace(&host_id, &host_id[..8]),
+                ..full.clone()
+            },
+        ),
+        (
+            "label",
+            Summary {
+                body: full.body.replace("성재의 맥", "…"),
+                ..full.clone()
+            },
+        ),
+        (
+            "whole workspace id",
+            Summary {
+                body: full.body.replace(&request.workspace_id.to_string(), "…"),
+                ..full.clone()
+            },
+        ),
+        (
+            "server instance",
+            Summary {
+                body: full.body.replace("inst_1", "…"),
+                ..full.clone()
+            },
+        ),
+        (
+            "whole key",
+            Summary {
+                full_text: Some(key[..12].to_string()),
+                ..full.clone()
+            },
+        ),
+        (
+            "no scrolling view",
+            Summary {
+                full_text: None,
+                ..full.clone()
+            },
+        ),
+    ];
+    for (missing, summary) in cases {
+        assert!(
+            !host_register_dialog_complete(&summary, request),
+            "a dialog without the {missing} must not count"
+        );
+    }
+    // Other kinds are not judged by this rule.
+    let mut other = request.clone();
+    other.content = ControlContent::Input {
+        mode: InputMode::Queue,
+        text: "x".into(),
+    };
+    assert!(host_register_dialog_complete(&full, &other));
+}
+
+#[test]
+fn the_ask_becomes_a_statement_on_the_servers_clock_for_five_minutes() {
+    let request = host_register_request(
+        &host_register_ask(),
+        "inst_1",
+        Uuid::from_u128(9),
+        Uuid::from_u128(8),
+        NOW + 999_999,
+    );
+    assert_eq!(request.issued_at_ms, NOW, "the server's clock, not ours");
+    assert_eq!(request.expires_at_ms, NOW + 9 * 60 * 1000);
+    assert_eq!(request.host_id, Uuid::from_u128(9));
+    assert!(matches!(
+        &request.content,
+        ControlContent::HostRegister { host_id, label, .. }
+            if *host_id == Uuid::from_u128(9) && label == "성재의 맥"
+    ));
+    assert_eq!(request.session_id, None);
+}
+
+/// A key that is not 32 canonical bytes never reaches a dialog.
+#[test]
+fn a_host_register_for_a_malformed_key_is_never_shown() {
+    let mut ask = host_register_ask();
+    ask.host_public_key = "AAAA".into();
+    let statement = Statement::Control {
+        signer: signer(),
+        request: host_register_request(&ask, "inst_1", Uuid::from_u128(9), Uuid::from_u128(8), NOW),
+    };
+    let mut fake = Fake::new(true);
+    let root = fake.public_b64();
+    let error = sign_statement(&mut fake, &statement, &root, NOW, None).unwrap_err();
+    assert!(error.starts_with("device_key_payload_rejected"), "{error}");
+    assert_eq!((fake.confirms, fake.signs), (0, 0));
+}
+
+#[test]
+fn a_mac_more_than_five_minutes_off_the_server_is_told_before_the_dialog() {
+    let server = 1_790_000_000_000_i64;
+    let minute = 60_000;
+    // Inside the window, on either side, and exactly at its edge: signs.
+    for offset in [0, 4 * minute, -4 * minute, 5 * minute, -5 * minute] {
+        assert_eq!(
+            check_host_register_clock(Some(server), server + offset),
+            Ok(()),
+            "{offset}"
+        );
+    }
+    // No clock from the server: nothing is signed either, so nothing to refuse.
+    assert_eq!(
+        check_host_register_clock(None, server + 60 * minute),
+        Ok(())
+    );
+    // Past it: a named code, the direction and the size, short enough for the
+    // answer line (120 characters).
+    let fast = check_host_register_clock(Some(server), server + 7 * minute + 1).unwrap_err();
+    assert!(fast.starts_with("device_clock_skew:"), "{fast}");
+    assert!(fast.contains("8분") && fast.contains("빠릅니다"), "{fast}");
+    let slow = check_host_register_clock(Some(server), server - 6 * minute).unwrap_err();
+    assert!(slow.contains("6분") && slow.contains("느립니다"), "{slow}");
+    assert!(fast.chars().count() <= 120 && slow.chars().count() <= 120);
+}

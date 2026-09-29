@@ -447,6 +447,11 @@ pub async fn revoke_member_session_tokens(
     workspace_id: Uuid,
     member_id: Uuid,
 ) -> Result<u64, sqlx::Error> {
+    // #3109: one member-wide sweep at a time, then every row it will flip in
+    // one id-ordered acquisition, before the `UPDATE` (whose own lock order is
+    // scan order, not id order).
+    lock_member_wide_sweep_in_tx(conn, workspace_id, member_id).await?;
+    lock_member_live_session_rows_in_tx(conn, workspace_id, member_id, false).await?;
     let rows = sqlx::query(REVOKE_MEMBER_SESSION_SQL)
         .bind(workspace_id)
         .bind(member_id)
@@ -528,8 +533,16 @@ pub async fn revoke_member_session_tokens_by_ids(
 /// they cannot close a cycle through it.
 ///
 /// Member-wide sweeps (`revoke_member_session_tokens`,
-/// `revoke_privileged_session_tokens`) are plain `UPDATE`s over many lineages
-/// and are not covered by this rule (follow-up, see #3107's PR).
+/// `revoke_privileged_session_tokens`) span many lineages. A bare `UPDATE`
+/// locks rows in scan order, so they take their rows first through
+/// [`lock_member_live_session_rows_in_tx`] — the same `ORDER BY id FOR UPDATE`
+/// — and queue behind each other per member ([`lock_member_wide_sweep_in_tx`]):
+/// a sweeper that already holds a lineage cannot be ordered against another
+/// one's (#3109).
+///
+/// `lock_live_session_lineage` (device keys) is the same rule at `FOR SHARE`:
+/// an id-ordered subset (the lineage's refresh rows) of the same total order,
+/// kept shared so concurrent signers do not queue behind each other.
 const LOCK_SESSION_ROWS_SQL: &str = "SELECT id, \
             (revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())) AS live \
        FROM token \
@@ -583,6 +596,81 @@ pub async fn lock_session_rows_in_tx(
         .into_iter()
         .map(|(id, live)| LockedSessionRow { id, live })
         .collect())
+}
+
+/// # Member-wide sweeps — one at a time per member (#3109)
+///
+/// A member-wide sweep ends every live session row of the member, so it needs
+/// rows the caller's own lineage lock did not cover. A rotation that
+/// downgrades a privileged session holds its lineage and THEN sweeps: two of
+/// them on two devices each hold their own lineage and want the other's
+/// (`{5,9}` vs `{2,12}`) — and a second id-ordered acquisition after the
+/// lineage one is not id-ordered together with it. So the sweepers queue on a
+/// per-member transaction lock, taken **before the transaction's first
+/// `token` lock** (after the `device_link_token` row is fine: no sweeper waits
+/// on a link row while holding this).
+///
+/// Everything else that locks session rows takes them in ONE acquisition and
+/// wants nothing afterwards, so it can wait for a sweeper but never close a
+/// cycle with one. [`revoke_member_session_tokens`] and
+/// [`revoke_privileged_session_tokens`] call this themselves (re-entrant); a
+/// caller that locks token rows before sweeping must call it first.
+///
+/// SABOTAGE(no-queue): make this a no-op —
+/// `two_downgrading_rotations_on_two_lineages_never_deadlock` goes RED (40P01).
+pub async fn lock_member_wide_sweep_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(MEMBER_WIDE_SWEEP_LOCK_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
+/// The key is the pair of ids, hashed to 64 bits by Postgres (`hashtextextended`,
+/// so no client-side hash to drift). A collision only over-serializes.
+const MEMBER_WIDE_SWEEP_LOCK_SQL: &str = "SELECT pg_advisory_xact_lock( \
+       hashtextextended('member-session-sweep:' || $1::text || ':' || $2::text, 0))";
+
+/// The member-wide lock: the member's live session rows (or, when
+/// `privileged_only`, the live ones carrying an instance-privileged scope) in
+/// one `ORDER BY id FOR UPDATE` — the same total order as
+/// [`LOCK_SESSION_ROWS_SQL`]. Under READ COMMITTED the predicate is re-checked
+/// after a wait, so a row a concurrent sweep already revoked drops out.
+const LOCK_MEMBER_LIVE_SESSION_ROWS_SQL: &str = "SELECT id \
+       FROM token \
+      WHERE workspace_id = $1 \
+        AND actor_member_id = $2 \
+        AND kind = 'session' \
+        AND revoked_at IS NULL \
+        AND ( \
+          NOT $3::boolean \
+          OR 'platform:read' = ANY(scopes) \
+          OR 'platform:credits:write' = ANY(scopes) \
+        ) \
+      ORDER BY id \
+        FOR UPDATE";
+
+/// See [`LOCK_MEMBER_LIVE_SESSION_ROWS_SQL`]. Returns the locked ids.
+///
+/// SABOTAGE(unordered): make `revoke_member_session_tokens` skip this call —
+/// `a_member_wide_sweep_and_a_lineage_sweep_never_deadlock` goes RED (40P01).
+pub async fn lock_member_live_session_rows_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    privileged_only: bool,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(LOCK_MEMBER_LIVE_SESSION_ROWS_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(privileged_only)
+        .fetch_all(&mut *conn)
+        .await
 }
 
 /// The lineage sweep. The member predicate is belt-and-braces (a lineage never
@@ -704,6 +792,9 @@ pub async fn revoke_privileged_session_tokens(
     workspace_id: Uuid,
     member_id: Uuid,
 ) -> Result<u64, sqlx::Error> {
+    // #3109: as `revoke_member_session_tokens`, narrowed to the privileged rows.
+    lock_member_wide_sweep_in_tx(conn, workspace_id, member_id).await?;
+    lock_member_live_session_rows_in_tx(conn, workspace_id, member_id, true).await?;
     let rows = sqlx::query(REVOKE_PRIVILEGED_SQL)
         .bind(workspace_id)
         .bind(member_id)
@@ -938,6 +1029,28 @@ mod tests {
             REVOKE_PRIVILEGED_SQL.contains("kind = 'session'"),
             "the sweep is scoped to session tokens (agent bearers are not touched)"
         );
+    }
+
+    #[test]
+    fn the_member_wide_lock_orders_ids_and_names_every_privileged_scope() {
+        for needle in [
+            "actor_member_id = $2",
+            "kind = 'session'",
+            "revoked_at IS NULL",
+            "ORDER BY id",
+            "FOR UPDATE",
+        ] {
+            assert!(
+                LOCK_MEMBER_LIVE_SESSION_ROWS_SQL.contains(needle),
+                "lock_member_live_session_rows_in_tx lost `{needle}`"
+            );
+        }
+        for scope in PRIVILEGED_SCOPES {
+            assert!(
+                LOCK_MEMBER_LIVE_SESSION_ROWS_SQL.contains(&format!("'{scope}' = ANY(scopes)")),
+                "the privileged lock must cover '{scope}' like the sweep does"
+            );
+        }
     }
 
     #[test]

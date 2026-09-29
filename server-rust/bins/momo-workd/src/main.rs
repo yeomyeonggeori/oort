@@ -34,6 +34,7 @@ async fn main() {
             dev_key_file,
             force,
             token_stdin,
+            sign_stdin,
         } => {
             let token = if token_stdin {
                 let mut line = String::new();
@@ -44,7 +45,9 @@ async fn main() {
             } else {
                 std::env::var(cli::REGISTER_TOKEN_ENV).ok()
             };
-            cli::register(config, dev_key_file, force, token)
+            let mut stdio = cli::StdioSigner;
+            let signer = sign_stdin.then_some(&mut stdio as &mut dyn cli::RegistrationSigner);
+            cli::register_signed(config, dev_key_file, force, token, signer)
                 .await
                 .map(|state| {
                     println!(
@@ -53,6 +56,7 @@ async fn main() {
                             "hostId": state.host_id,
                             "ownerMemberId": state.owner_member_id,
                             "workspaceId": state.workspace_id,
+                            "hostKeyFingerprint": cli::host_key_fingerprint(&state.public_key),
                         })
                     );
                 })

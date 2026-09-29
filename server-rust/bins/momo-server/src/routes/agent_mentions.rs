@@ -1022,6 +1022,7 @@ mod tests {
             handle: handle.into(),
             display_name: handle.into(),
             base_model: "hermes-agent".into(),
+            base_model_source: momo_agent::ModelSource::Agent,
             model_pref: None,
             effort_pref: None,
             system_prompt: None,

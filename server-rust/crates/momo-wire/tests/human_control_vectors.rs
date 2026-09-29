@@ -324,12 +324,14 @@ fn every_recorded_signature_verifies() {
     assert_eq!(n, 24 + 21 + 3 + 21);
 }
 
-/// What a verifier accepts ([`HumanControl::verify_any`]): every v2 statement;
-/// a v1 statement for every kind whose v1 bytes say the same; never a v1
-/// `spawn`, which bound neither tool nor channel.
+/// What a verifier accepts ([`HumanControl::verify_any`]): every v2 and v3
+/// statement, and **no** v1 one (#3154). The v1 bytes still build (the
+/// signatures in the vectors verify as raw P-256 over them, above); what is
+/// refused is the schema, for the kinds whose v1 bytes once said the same as
+/// v2's as well as for `spawn`.
 #[test]
-fn verify_any_takes_v2_and_only_the_v1_kinds_that_mean_the_same() {
-    let mut v1_accepted = Vec::new();
+fn verify_any_refuses_every_v1_statement() {
+    let mut v1_refused = Vec::new();
     for tc in cases() {
         let Some(schema) = schema_of(&tc) else {
             continue;
@@ -361,42 +363,40 @@ fn verify_any_takes_v2_and_only_the_v1_kinds_that_mean_the_same() {
         }
         for x in sigs(&tc) {
             let verdict = statement.verify_any(&x.key, &x.sig);
-            match (schema, kind.as_str()) {
-                (ControlSchema::V3, _) => {
+            match schema {
+                ControlSchema::V3 => {
                     let v = verdict.unwrap_or_else(|e| panic!("{name}: {e}"));
                     assert_eq!(v.schema, ControlSchema::V3, "{name}");
                     assert_eq!(v.signed_bytes, rebuild(&tc), "{name}");
                 }
-                (ControlSchema::V2, _) => {
+                ControlSchema::V2 => {
                     let v = verdict.unwrap_or_else(|e| panic!("{name}: {e}"));
                     assert_eq!(v.schema, ControlSchema::V2, "{name}");
                     assert_eq!(v.signed_bytes, rebuild(&tc), "{name}");
                 }
-                (ControlSchema::V1, kind) if kind != "spawn" => {
-                    let v = verdict.unwrap_or_else(|e| panic!("{name}: {e}"));
-                    assert_eq!(v.schema, ControlSchema::V1, "{name}");
-                    v1_accepted.push(name.clone());
-                }
-                (ControlSchema::V1, _) => {
+                ControlSchema::V1 => {
                     assert_eq!(
                         verdict,
                         Err(HumanSigningError::BadSignature),
-                        "{name}: a v1 spawn must not pass a verifier"
+                        "{name} ({kind}): a v1 statement must not pass a verifier"
                     );
+                    v1_refused.push(name.clone());
                 }
             }
         }
     }
-    v1_accepted.dedup();
+    v1_refused.dedup();
     assert_eq!(
-        v1_accepted,
+        v1_refused,
         [
             "control_input_queue_nfc",
             "control_input_interrupt",
+            "control_spawn",
             "control_permission_session",
             "control_bundle_manifest",
             "control_host_register"
-        ]
+        ],
+        "every v1 case in the vectors is refused, whatever its kind"
     );
 }
 

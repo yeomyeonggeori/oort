@@ -65,9 +65,10 @@ use axum::middleware::Next;
 use axum::response::Response;
 use momo_auth::{
     agent_bearer_workspace_id, classify_agent_bearer_in_tx, finalize_agent_bearer_use_in_tx,
-    is_gateway_callback_route, required_agent_scope, resolve_agent_bearer_in_tx, token_state,
-    verify_app_access, AgentBearerClass, AgentBearerIdentity, AgentBearerResolution, AuthError,
-    Principal, PrincipalKind, AUDIT_DETAIL_SCHEMA,
+    is_gateway_callback_route, push_fetch_route_allowed, push_fetch_session_live,
+    required_agent_scope, resolve_agent_bearer_in_tx, token_state, verify_app_access,
+    verify_app_push_fetch, AgentBearerClass, AgentBearerIdentity, AgentBearerResolution, AuthError,
+    Principal, PrincipalKind, TokenState, AUDIT_DETAIL_SCHEMA,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
@@ -685,22 +686,57 @@ pub async fn require_principal(
         request.extensions_mut().insert(principal);
         return Ok(next.run(request).await);
     }
-    let mut principal =
-        verify_app_access(&raw_token, &state.jwt_secret).map_err(|error| match error {
-            AuthError::InvalidToken(_) => ApiError::unauthorized("invalid or expired token"),
-            AuthError::NotAccessToken => ApiError::unauthorized("not an access token"),
-            // Unreachable on this path (`verify_app_access` never returns it),
-            // but named rather than caught by a wildcard so a future variant
-            // fails the build instead of silently reusing another message.
-            AuthError::NotRefreshToken => ApiError::unauthorized("not a refresh token"),
-            AuthError::MalformedClaims => ApiError::unauthorized("malformed token claims"),
-        })?;
+    let mut is_push_fetch = false;
+    let mut principal = match verify_app_access(&raw_token, &state.jwt_secret) {
+        Ok(principal) => principal,
+        // #3121 — the notification extension's token has its own `typ`, so the
+        // access verifier refuses it above; it is taught to exactly this spot.
+        // Its route list is judged BEFORE the database, like the agent bearer's:
+        // anything off the list is a 403 that never becomes a query.
+        Err(AuthError::NotAccessToken) => {
+            let principal = verify_app_push_fetch(&raw_token, &state.jwt_secret)
+                .map_err(|_| ApiError::unauthorized("not an access token"))?;
+            if !push_fetch_route_allowed(&method, &path, principal.workspace_id) {
+                return Err(ApiError::forbidden(
+                    "push-fetch token is not allowed for this route",
+                ));
+            }
+            is_push_fetch = true;
+            principal
+        }
+        Err(error) => {
+            return Err(match error {
+                AuthError::InvalidToken(_) => ApiError::unauthorized("invalid or expired token"),
+                AuthError::NotAccessToken => ApiError::unauthorized("not an access token"),
+                // Unreachable on this path (`verify_app_access` never returns it),
+                // but named rather than caught by a wildcard so a future variant
+                // fails the build instead of silently reusing another message.
+                AuthError::NotRefreshToken => ApiError::unauthorized("not a refresh token"),
+                AuthError::MalformedClaims => ApiError::unauthorized("malformed token claims"),
+            });
+        }
+    };
 
     // MOMO-300 revocation check, fail-closed: an unknown/revoked/expired row is
     // a 401, and so is a token that was never recorded.
     let workspace_id = principal.workspace_id;
     let state_of_token = with_tenant_tx(&state.pool, workspace_id, move |conn| {
-        Box::pin(async move { token_state(conn, &raw_token).await.map_err(DbError::from) })
+        Box::pin(async move {
+            let state = token_state(conn, &raw_token).await.map_err(DbError::from)?;
+            // #3121 — the extension's token is valid only while the session it
+            // was minted under can still rotate (derived, not swept).
+            if is_push_fetch {
+                if let TokenState::Active { id } = state {
+                    if !push_fetch_session_live(conn, id)
+                        .await
+                        .map_err(DbError::from)?
+                    {
+                        return Ok(TokenState::Revoked { id });
+                    }
+                }
+            }
+            Ok(state)
+        })
     })
     .await
     .map_err(|error| ApiError::internal("auth.token_state", error))?;

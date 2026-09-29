@@ -497,11 +497,42 @@ impl Stage {
         host: Uuid,
         session: Uuid,
         request_event_id: Uuid,
+        option: (&str, &str),
+        nonce: Uuid,
+        issued_at_ms: i64,
+        instance_id: &str,
+        preview_sha256: Option<&str>,
+    ) -> Value {
+        self.permission_statement_scoped(
+            key,
+            key_id,
+            host,
+            session,
+            request_event_id,
+            option,
+            nonce,
+            issued_at_ms,
+            instance_id,
+            preview_sha256,
+            PermissionScope::Once,
+        )
+    }
+
+    /// … with the scope the owner chose (#3095: 「이 세션 동안」).
+    #[allow(clippy::too_many_arguments)]
+    fn permission_statement_scoped(
+        &self,
+        key: &DeviceKeyPair,
+        key_id: Uuid,
+        host: Uuid,
+        session: Uuid,
+        request_event_id: Uuid,
         (option_id, option_kind): (&str, &str),
         nonce: Uuid,
         issued_at_ms: i64,
         instance_id: &str,
         preview_sha256: Option<&str>,
+        scope: PermissionScope,
     ) -> Value {
         let expires_at_ms = issued_at_ms + 5 * 60 * 1000;
         let schema = if preview_sha256.is_some() {
@@ -523,7 +554,7 @@ impl Stage {
                 request_event_id,
                 option_id,
                 option_kind,
-                scope: PermissionScope::Once,
+                scope,
                 preview_sha256,
             },
         }
@@ -534,7 +565,7 @@ impl Stage {
             "nonce": nonce,
             "issuedAtMs": issued_at_ms,
             "expiresAtMs": expires_at_ms,
-            "scope": "once",
+            "scope": scope.as_str(),
             "signature": key.sign(&bytes),
         })
     }
@@ -552,6 +583,24 @@ impl Stage {
             Uuid::new_v4(),
             now_ms(),
             INSTANCE_ID,
+        )
+    }
+
+    /// The phone's signature over `allow-once` of `request` for the whole
+    /// session (#3095).
+    fn phone_session_allow(&self, session: Uuid, request: Uuid) -> Value {
+        self.permission_statement_scoped(
+            &self.phone,
+            self.phone_id,
+            self.host,
+            session,
+            request,
+            ("allow-once", "allow_once"),
+            Uuid::new_v4(),
+            now_ms(),
+            INSTANCE_ID,
+            None,
+            PermissionScope::Session,
         )
     }
 
@@ -959,6 +1008,168 @@ async fn a_signed_allow_rides_on_the_control_and_is_recorded_once() {
     assert_eq!(s.controls_of(session).await, 1);
 }
 
+/// #3095 (ADR-0146 증보, D-8): 「이 세션 동안」 is an allow the owner's device
+/// signed with scope `session`. The server verifies it, stores the scope on
+/// the control row, hands the host the envelope, and tells the owner's
+/// surfaces and the audit trail the scope. It is refused as a reject, and
+/// nothing unsigned can carry it (the scope lives only in the signed statement).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_signed_session_allow_is_accepted_and_carries_its_scope() {
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    let session = s.session().await;
+    let request = s.permission_request(session).await;
+    let signature = s.phone_session_allow(session, request);
+    let body = json!({ "requestEventId": request, "optionId": "allow-once", "kind": "allow_once",
+                       "humanSignature": signature });
+    let (status, answer) = s.decide(session, body).await;
+    assert_eq!(status, 200, "the phone's signed session allow: {answer}");
+    let control_id = answer["permissionRequest"]["controlId"].as_str().unwrap();
+
+    // The control row, the host's envelope and the payload all say `session`.
+    let (scope, payload): (String, Value) =
+        sqlx::query_as("SELECT human_scope, payload FROM work_control WHERE id = $1::uuid")
+            .bind(control_id)
+            .fetch_one(&s.su)
+            .await
+            .unwrap();
+    assert_eq!(scope, "session");
+    // The closed payload (092) stays three keys: the scope is the signature's.
+    assert_eq!(payload.as_object().unwrap().len(), 3, "{payload}");
+    assert_eq!(payload["kind"], "allow_once");
+    assert_eq!(s.human_rows().await, (1, 1));
+    let polled = s.poll().await;
+    assert_eq!(
+        polled["workControls"][0]["humanSignature"]["scope"],
+        "session"
+    );
+
+    // The owner's other devices are told the scope; the audit row records it.
+    let event_scope: Option<String> = sqlx::query_scalar(
+        "SELECT props->'event'->>'scope' FROM message \
+          WHERE workspace_id = $1 AND props->>'event_type' = 'approval.decided' \
+            AND props->'event'->>'request_event_id' = $2",
+    )
+    .bind(s.workspace)
+    .bind(request.to_string())
+    .fetch_one(&s.su)
+    .await
+    .unwrap();
+    assert_eq!(event_scope.as_deref(), Some("session"));
+    let audited: Option<String> = sqlx::query_scalar(
+        "SELECT detail->>'scope' FROM audit_log \
+          WHERE workspace_id = $1 AND action = 'work.permission.decided'",
+    )
+    .bind(s.workspace)
+    .fetch_one(&s.su)
+    .await
+    .unwrap();
+    assert_eq!(audited.as_deref(), Some("session"));
+
+    // An unsigned decision carries no scope: `once`.
+    let request2 = s.permission_request(session).await;
+    let (status, plain) = s
+        .decide(
+            session,
+            json!({ "requestEventId": request2, "optionId": "reject-once", "kind": "reject_once" }),
+        )
+        .await;
+    assert_eq!(status, 200, "{plain}");
+    let control2 = plain["permissionRequest"]["controlId"].as_str().unwrap();
+    let scope2: Option<String> =
+        sqlx::query_scalar("SELECT human_scope FROM work_control WHERE id = $1::uuid")
+            .bind(control2)
+            .fetch_one(&s.su)
+            .await
+            .unwrap();
+    assert_eq!(scope2, None, "an unsigned reject carries no scope");
+
+    // A host that is not a member host cannot honour it: 400 by name, and the
+    // signature is not spent.
+    let request3 = s.permission_request(session).await;
+    let before = s.human_rows().await;
+    sqlx::query("UPDATE work_host SET scope = 'workspace' WHERE id = $1")
+        .bind(s.host)
+        .execute(&s.su)
+        .await
+        .unwrap();
+    let (status, refused) = s
+        .decide(
+            session,
+            json!({ "requestEventId": request3, "optionId": "allow-once", "kind": "allow_once",
+                    "humanSignature": s.phone_session_allow(session, request3) }),
+        )
+        .await;
+    sqlx::query("UPDATE work_host SET scope = 'member' WHERE id = $1")
+        .bind(s.host)
+        .execute(&s.su)
+        .await
+        .unwrap();
+    assert_eq!(
+        (status, code(&refused)),
+        (400, Some("permission_scope_unsupported")),
+        "{refused}"
+    );
+    assert_eq!(s.human_rows().await, before, "no nonce spent");
+    assert_eq!(s.request_status(request3).await, "pending");
+
+    // The host's own record of an automatic allow under the grant: a distinct
+    // event type (never `approval.decided`), audited once, malformed ones
+    // refused.
+    let hash = "a".repeat(64);
+    let auto = |event_id: Uuid, payload: Value| {
+        let s = &s;
+        async move {
+            s.host_request(
+                "PATCH",
+                &format!("/v1/workspaces/{}/work-sessions/{session}", s.workspace),
+                Some(json!({ "event": {
+                    "event_id": event_id, "type": "approval.auto_allowed", "v": 1,
+                    "ts": now_ms(), "payload": payload,
+                }})),
+            )
+            .await
+        }
+    };
+    let payload = json!({
+        "run_id": session, "work_session_id": session, "channel_id": s.channel,
+        "action": "auto_allowed", "status": "approved", "scope": "session",
+        "tool_kind": "execute", "preview_sha256": hash,
+    });
+    for (name, bad) in [
+        ("scope once", json!({ "scope": "once" })),
+        ("no hash", json!({ "preview_sha256": null })),
+        ("a short hash", json!({ "preview_sha256": "abc" })),
+        ("no tool kind", json!({ "tool_kind": "" })),
+        ("rejected", json!({ "status": "rejected" })),
+        ("names a request", json!({ "request_event_id": request2 })),
+    ] {
+        let mut body = payload.clone();
+        for (key, value) in bad.as_object().unwrap() {
+            body[key] = value.clone();
+        }
+        let (status, answer) = auto(Uuid::new_v4(), body).await;
+        assert_eq!(status, 400, "{name}: {answer}");
+    }
+    let event_id = Uuid::new_v4();
+    let (status, answer) = auto(event_id, payload.clone()).await;
+    assert_eq!(status, 200, "{answer}");
+    let (status, answer) = auto(event_id, payload.clone()).await;
+    assert_eq!(status, 200, "a retry: {answer}");
+    let rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log \
+          WHERE workspace_id = $1 AND action = 'work.permission.auto_allowed' \
+            AND detail->>'preview_sha256' = $2 AND detail->>'tool_kind' = 'execute'",
+    )
+    .bind(s.workspace)
+    .bind(&hash)
+    .fetch_one(&s.su)
+    .await
+    .unwrap();
+    assert_eq!(rows, 1, "one audit row, however many retries");
+}
+
 /// #3118 (ADR-0146 증보, R2 H1): a request the host relayed with a preview is
 /// allowed only by a v3 statement naming the **stored** preview hash. A v2
 /// allow (no preview line) and an allow over a preview the server showed
@@ -1275,14 +1486,35 @@ async fn every_misplaced_signed_allow_is_refused_by_name() {
             "device_signature_expired",
         ),
         (
-            "scope session before E8",
+            "scope swapped to session after signing once (#3095)",
             {
                 let mut body = allow(s.phone_allow(session, request));
                 body["humanSignature"]["scope"] = json!("session");
                 body
             },
+            403,
+            "device_signature_invalid",
+        ),
+        (
+            "scope swapped to once after signing session (#3095)",
+            {
+                let mut body = allow(s.phone_session_allow(session, request));
+                body["humanSignature"]["scope"] = json!("once");
+                body
+            },
+            403,
+            "device_signature_invalid",
+        ),
+        (
+            "a session scope on a reject (#3095)",
+            {
+                let mut body = allow(s.phone_session_allow(session, request));
+                body["optionId"] = json!("reject-once");
+                body["kind"] = json!("reject_once");
+                body
+            },
             400,
-            "permission_scope_unsupported",
+            "permission_kind_refused",
         ),
         (
             "a mode on a permission",

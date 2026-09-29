@@ -128,7 +128,8 @@ use momo_outbox::{
     NOTIFY_CHANNEL,
 };
 use momo_settings::{
-    decrypt_link, is_unsafe_secret, read_link, reseal_link_credential, resolve_link, seal_bearer,
+    decrypt_chain_entry, decrypt_link, is_unsafe_secret, read_chain, read_default_ai, read_link,
+    redacted_endpoint_label, reseal_link_credential, resolve_link, seal_bearer, DefaultAiRole,
     LinkCredential, OpenAiOAuthCredential, ProviderSource,
 };
 use serde_json::{json, Value};
@@ -600,6 +601,39 @@ impl AgentWorker {
         // shape instead.
         if !self.provider_is_configured(&transport) {
             return self.settle_provider_required(&job, &payload, run_id).await;
+        }
+
+        // #3041 — the operator's 「기본 AI」 row, for a turn whose agent chose no
+        // model of its own. Resolved once, here, before anything runs: a row
+        // that no longer points at the link it was chosen on refuses the turn
+        // (the #2871 line) instead of answering on some other provider.
+        match self.resolve_default_ai(&payload, run_id, &transport).await {
+            DefaultAiOutcome::NotApplicable => {}
+            DefaultAiOutcome::Applied {
+                hop_transport,
+                model_id,
+            } => {
+                if let Some(hop) = hop_transport {
+                    transport = hop;
+                }
+                if let Some(model_id) = model_id {
+                    payload.model = model_id;
+                }
+            }
+            DefaultAiOutcome::Unresolved(detail) => {
+                return self
+                    .settle_default_ai_unresolved(&job, &payload, run_id, detail)
+                    .await;
+            }
+            DefaultAiOutcome::ReadFailed(reason) => {
+                return self
+                    .settle_retryable(
+                        &job,
+                        &format!("default ai read failed: {reason}"),
+                        &transport.endpoint,
+                    )
+                    .await;
+            }
         }
 
         // queued → running. `false` is not an error: a run being retried after a
@@ -2795,6 +2829,174 @@ impl AgentWorker {
     }
 
     // -----------------------------------------------------------------------
+    // 「기본 AI」 team rows (#3041, ADR-0147 증보 2026-09-28)
+    // -----------------------------------------------------------------------
+
+    /// Which model, and on which team link, this turn runs — when the agent chose
+    /// none of its own.
+    ///
+    /// Precedence: the agent's own model > the operator's row > `AGENT_MODEL`.
+    /// `agent.model` is `NOT NULL`, so the model's name cannot say whether it was
+    /// chosen. The server says so on the payload (`model_source`, #3147): only
+    /// `instance_default` applies the row; `agent` (or an absent key) never reads
+    /// it — even when the agent's model happens to equal `AGENT_MODEL`.
+    ///
+    /// The row names a cascade position and the endpoint label it had when
+    /// chosen. Position 0 is the head link this turn already resolved; a
+    /// position from 1 is a `provider_link_chain` hop. Either way the row is used
+    /// only when the position **still shows that label**; anything else is
+    /// [`DefaultAiOutcome::Unresolved`] and the caller refuses the turn — never a
+    /// different provider, never a different model (ADR-0135 D1).
+    async fn resolve_default_ai(
+        &self,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        head: &ResolvedTransport,
+    ) -> DefaultAiOutcome {
+        if !payload.follows_instance_default() {
+            return DefaultAiOutcome::NotApplicable;
+        }
+        let role = if payload.is_welcome() {
+            DefaultAiRole::Summary
+        } else {
+            DefaultAiRole::TeamAgent
+        };
+        let (rows, chain) = {
+            let mut conn = match self.pool.acquire().await {
+                Ok(conn) => conn,
+                Err(error) => return DefaultAiOutcome::ReadFailed(error.to_string()),
+            };
+            let rows = match read_default_ai(&mut conn).await {
+                Ok(rows) => rows,
+                Err(error) => return DefaultAiOutcome::ReadFailed(error.to_string()),
+            };
+            let needs_chain = rows
+                .iter()
+                .any(|row| row.role == role && row.link_position >= 1);
+            let chain = if needs_chain {
+                match read_chain(&mut conn).await {
+                    Ok(chain) => chain,
+                    Err(error) => return DefaultAiOutcome::ReadFailed(error.to_string()),
+                }
+            } else {
+                Vec::new()
+            };
+            (rows, chain)
+        };
+        let Some(row) = rows.into_iter().find(|row| row.role == role) else {
+            return DefaultAiOutcome::NotApplicable;
+        };
+        let unresolved = |current: Option<String>| {
+            DefaultAiOutcome::Unresolved(DefaultAiUnresolved {
+                role,
+                position: row.link_position,
+                stored_label: row.link_endpoint_label.clone(),
+                current_label: current,
+            })
+        };
+        if row.link_position == 0 {
+            let now = redacted_endpoint_label(&head.endpoint.base_url);
+            if head.endpoint.base_url.trim().is_empty() || now != row.link_endpoint_label {
+                return unresolved(Some(now));
+            }
+            return DefaultAiOutcome::Applied {
+                hop_transport: None,
+                model_id: row.model_id,
+            };
+        }
+        let Some(entry) = chain
+            .iter()
+            .find(|entry| entry.position == row.link_position)
+        else {
+            return unresolved(None);
+        };
+        let now = redacted_endpoint_label(&entry.base_url);
+        if now != row.link_endpoint_label || !entry.enabled {
+            return unresolved(Some(now));
+        }
+        let hop = self
+            .config
+            .provider_link_master_key
+            .as_deref()
+            .and_then(|key| decrypt_chain_entry(entry, key))
+            .filter(|hop| !hop.base_url.trim().is_empty() && !hop.bearer.trim().is_empty());
+        let Some(hop) = hop else {
+            // A hop whose key will not open is a link that is not there.
+            return unresolved(Some(now));
+        };
+        tracing::debug!(run_id = %run_id, position = row.link_position, "default ai row: chain hop");
+        DefaultAiOutcome::Applied {
+            hop_transport: Some(ResolvedTransport {
+                endpoint: ProviderEndpoint {
+                    base_url: hop.base_url,
+                    bearer: hop.bearer.clone(),
+                    source: ProviderSource::Database.as_str(),
+                    // Chain hops are bearer keys; the wire is the legacy one.
+                    wire: ProviderWire::ChatCompletions,
+                    account_id: None,
+                },
+                credential: LinkCredential::Bearer(hop.bearer),
+                // A hop is never re-sealed by a turn.
+                link_updated_at_ms: None,
+            }),
+            model_id: row.model_id,
+        }
+    }
+
+    /// The row no longer points where it was chosen: no model is called. The
+    /// operator gets an audit row (position and the two redacted labels — no
+    /// URL, no key), the caller gets the #2871 line, the run closes `failed`.
+    async fn settle_default_ai_unresolved(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        detail: DefaultAiUnresolved,
+    ) -> Settlement {
+        tracing::warn!(
+            run_id = %run_id,
+            role = detail.role.as_str(),
+            position = detail.position,
+            "default ai row does not resolve; refusing the turn"
+        );
+        let workspace_id = job.workspace_id;
+        let audit = json!({
+            "role": detail.role.as_str(),
+            "link_position": detail.position,
+            "stored_label": detail.stored_label,
+            "current_label": detail.current_label,
+            "run_id": run_id,
+        });
+        let written = with_tenant_tx(&self.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, DEFAULT_AI_UNRESOLVED_AUDIT)
+                        .run(run_id)
+                        .with_schema(DEFAULT_AI_UNRESOLVED_AUDIT_SCHEMA, audit),
+                )
+                .await?;
+                Ok(())
+            })
+        })
+        .await;
+        if let Err(error) = written {
+            let endpoint = self.resolve_transport().await.endpoint;
+            return self
+                .settle_retryable(job, &format!("default ai audit failed: {error}"), &endpoint)
+                .await;
+        }
+        self.settle_refused_turn(
+            job,
+            payload,
+            run_id,
+            HostedSkipReason::DefaultAiUnresolved,
+            json!({"code": DEFAULT_AI_UNRESOLVED, "reason": "default ai link changed"}),
+        )
+        .await
+    }
+
+    // -----------------------------------------------------------------------
     // provider resolution (ADR-0004 증보 1 P-1b)
     // -----------------------------------------------------------------------
 
@@ -3189,6 +3391,36 @@ const PROVIDER_REQUIRED: &str = "provider_required";
 /// #2924 — the run error / outbox reason of a subscription agent's job that
 /// reached the team worker.
 const OWNER_ONLY_NOT_WORKER: &str = "owner_only_not_worker";
+/// #3041 — the run error code / job done reason of a turn refused because the
+/// 「기본 AI」 row it would run on no longer resolves.
+const DEFAULT_AI_UNRESOLVED: &str = "default_ai_unresolved";
+/// #3041 — the operator-facing audit row of that refusal.
+const DEFAULT_AI_UNRESOLVED_AUDIT: &str = "provider_default_ai.unresolved";
+const DEFAULT_AI_UNRESOLVED_AUDIT_SCHEMA: &str = "momo.provider_default_ai.unresolved.v0";
+
+/// What the 「기본 AI」 row means for one turn (#3041).
+enum DefaultAiOutcome {
+    /// The agent has its own model, or no row is stored: the turn is unchanged.
+    NotApplicable,
+    /// Run on the row's model id (`None`: the link's own default) and, for a
+    /// chain hop, on that hop's transport.
+    Applied {
+        hop_transport: Option<ResolvedTransport>,
+        model_id: Option<String>,
+    },
+    /// The row's position no longer shows the endpoint it was chosen on.
+    Unresolved(DefaultAiUnresolved),
+    /// The row could not be read (DB trouble): retry, do not guess.
+    ReadFailed(String),
+}
+
+/// Non-secret facts of an unresolved row — position and redacted labels only.
+struct DefaultAiUnresolved {
+    role: DefaultAiRole,
+    position: i32,
+    stored_label: String,
+    current_label: Option<String>,
+}
 
 /// How a turn ended, and — when it failed — under which name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
