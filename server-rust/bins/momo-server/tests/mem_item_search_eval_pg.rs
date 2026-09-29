@@ -407,16 +407,16 @@ async fn korean_recall_and_workspace_scoped_latency() {
     .execute(&mut *tx)
     .await
     .expect("gucs");
-    // The RLS plan for a plain trgm predicate on the table (what the function's inner query is).
+    // A rare token (a noise line's running number), so the planner has every reason to want the GIN index.
     let plan_rls: Vec<String> = sqlx::query_scalar(
-        "EXPLAIN (COSTS OFF) SELECT id FROM mem_item WHERE '승인' <% body LIMIT 10",
+        "EXPLAIN (COSTS OFF) SELECT id FROM mem_item WHERE '4321' <% body LIMIT 10",
     )
     .fetch_all(&mut *tx)
     .await
     .expect("plan");
     tx.rollback().await.expect("rollback");
     let plan_su: Vec<String> = sqlx::query_scalar(
-        "EXPLAIN (COSTS OFF) SELECT id FROM mem_item WHERE '승인' <% body LIMIT 10",
+        "EXPLAIN (COSTS OFF) SELECT id FROM mem_item WHERE '4321' <% body LIMIT 10",
     )
     .fetch_all(&su)
     .await
