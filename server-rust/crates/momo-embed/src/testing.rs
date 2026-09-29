@@ -17,6 +17,8 @@ pub enum Mode {
     Fails,
     /// Every call sleeps this long first (a saturated CPU).
     Slow(Duration),
+    /// Queries come back as the zero vector (a broken model): the database refuses it.
+    ZeroQuery,
 }
 
 pub struct MockEmbedder {
@@ -63,7 +65,7 @@ impl MockEmbedder {
     fn gate(&self) -> Result<(), EmbedError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         match self.mode {
-            Mode::Works => Ok(()),
+            Mode::Works | Mode::ZeroQuery => Ok(()),
             Mode::Fails => Err(EmbedError::Infer(
                 "mock embedder is set to fail".to_string(),
             )),
@@ -104,6 +106,9 @@ impl TextEmbedder for MockEmbedder {
 
     fn embed_query(&self, text: &str) -> Result<Vec<f32>, EmbedError> {
         self.gate()?;
+        if self.mode == Mode::ZeroQuery {
+            return Ok(vec![0.0; DIMS]);
+        }
         Ok(self.one(text))
     }
 

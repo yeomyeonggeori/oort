@@ -524,28 +524,40 @@ pub async fn serve_query(conn: &mut PgConnection, run_id: Uuid) -> Result<Option
     Ok(query)
 }
 
+/// The vector half of a fused item search (see [`serve_items_fused`]).
+#[derive(Debug, Clone, Copy)]
+pub struct FusedQuery<'a> {
+    /// pgvector text (`[0.1,…]`, 384 numbers) of the embedded question.
+    pub vector: &'a str,
+    /// The embedding space `vector` lives in; only stored vectors of this model are compared.
+    pub model: &'a str,
+    /// Cosine floor below which a vector neighbour is not a candidate.
+    pub min_similarity: f32,
+    /// A neighbour farther than this from the nearest *permitted* one is cut.
+    pub margin: f32,
+}
+
 /// [`serve_items`] with a query vector: keyword and vector rankings are fused in SQL (weighted
 /// RRF, keyword x2 : vector x1, k = 60) after the same membership narrowing, `readable_by` and
-/// audience rule have filtered each list. `query_vec` is pgvector text (`[0.1,…]`, 384 numbers);
-/// `min_similarity` is the cosine floor below which a vector neighbour is not a candidate.
+/// audience rule have filtered each list. Permissions are decided in SQL exactly as in
+/// [`serve_items`]; the vector only changes the order and adds neighbours.
 pub async fn serve_items_fused(
     conn: &mut PgConnection,
     run_id: Uuid,
     limit: i32,
     body_max: i32,
-    query_vec: &str,
-    model: &str,
-    min_similarity: f32,
+    query: &FusedQuery<'_>,
 ) -> Result<Option<ServeItems>, DbError> {
     let rows = sqlx::query(&format!(
-        "SELECT {SERVE_ITEM_COLS} FROM mem_serve_items_fused($1, $2, $3, $4, $5, $6)"
+        "SELECT {SERVE_ITEM_COLS} FROM mem_serve_items_fused($1, $2, $3, $4, $5, $6, $7)"
     ))
     .bind(run_id)
     .bind(limit)
     .bind(body_max)
-    .bind(query_vec)
-    .bind(model)
-    .bind(min_similarity)
+    .bind(query.vector)
+    .bind(query.model)
+    .bind(query.min_similarity)
+    .bind(query.margin)
     .fetch_all(&mut *conn)
     .await?;
     Ok(serve_items_from_rows(&rows))

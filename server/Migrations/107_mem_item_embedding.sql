@@ -11,6 +11,8 @@
 --                           같은 등급) — 읽기·쓰기 모두 정의자 함수로만. mem_item 삭제(잊기 포함)와 함께 CASCADE.
 --   mem_set_item_embedding  워커 전용. 근거 항목이 이 워크스페이스에 살아 있을 때만, 멱등.
 --   mem_items_to_embed      워커 전용. 아직 이 모델의 임베딩이 없는 살아 있는 항목(백필·신규·편집본이 한 길).
+--                           뷰어 없이 워크스페이스의 살아 있는 항목 본문을 워커에 내준다 — 워커가 로컬에서 임베딩하기
+--                           위해서이고(요약 워커는 이미 모든 채널의 메시지 본문을 읽는다) 프로세스 밖으로 나가는 것은 없다.
 --   mem_embedding_stats     워커 전용. 살아 있는 항목 수·임베딩된 수(백필 진행·시험용).
 --   mem_serve_gate          소유자 전용. mem_serve_items 의 스위치·요청자·질의 유도를 한 곳으로 모았다(아래).
 --   mem_serve_query         워커 전용. 게이트를 통과한 run 의 질의 본문(트리거 메시지에서 @멘션 뺀 앞 400자)만
@@ -33,8 +35,10 @@
 --    함께 도입한다(후속).
 --  * 필터를 top-N 앞에 둔다(L-3): 벡터 후보는 「멤버십으로 좁힌 행 → 거리순 → readable_by/audience 통과분 K개」
 --    이고, 키워드 후보는 core 가 같은 방식으로 K개를 낸다. 융합은 이미 걸러진 두 목록 위에서만 한다.
---  * 최소 유사도(p_min_similarity): 최근접 이웃은 항상 있으므로 문턱이 없으면 무관한 항목이 실린다.
---    e5 코사인은 좁은 대역에 몰려 있어 값은 워커 설정(MEMORY_EMBED_MIN_SIMILARITY)이 정한다.
+--  * 문턱 둘: 최근접 이웃은 항상 있으므로 문턱이 없으면 무관한 항목이 실린다. e5 코사인은 좁은 대역에 몰려
+--    있어(같은 분야 무관 항목도 0.79~0.86) 절대 문턱(p_min_similarity)만으로는 못 거른다 — 통과한 후보 중 가장
+--    가까운 것에서 p_margin 이상 멀어지면 끊는 상대 문턱을 함께 쓰고, 키워드 후보에 없는 벡터 전용 항목은 3개까지만
+--    싣는다(무관한 질문에도 「그나마 가까운」 항목이 한도까지 차는 것을 막는다). 문턱 값은 워커 설정이 정한다.
 --
 -- 재실행 가능한 문장만 쓴다. schema_v0.sql·100~106 은 고치지 않는다.
 -- =============================================================================
@@ -174,7 +178,7 @@ $$;
 -- 벡터는 문자열 '[0.1,0.2,…]'(pgvector 텍스트 형식)이다 — 서버에 벡터 타입 바인딩 크레이트를 들이지 않는다.
 CREATE OR REPLACE FUNCTION mem_search_items_fused(
   p_viewer uuid, p_query text, p_limit integer, p_answer_channel_id uuid,
-  p_query_vec text, p_model text, p_min_similarity real)
+  p_query_vec text, p_model text, p_min_similarity real, p_margin real)
 RETURNS TABLE (
   id uuid, channel_id uuid, space_kind text, kind text, body text,
   valid_from timestamptz, valid_to timestamptz, recorded_at timestamptz,
@@ -189,6 +193,11 @@ DECLARE
   v_limit integer := LEAST(GREATEST(COALESCE(p_limit, 10), 1), 50);
   v_k integer := LEAST(GREATEST(COALESCE(p_limit, 10), 1) * 3, 50);
   v_min real := LEAST(GREATEST(COALESCE(p_min_similarity, 0.8), 0), 1);
+  v_margin real := LEAST(GREATEST(COALESCE(p_margin, 1), 0), 1);
+  v_best real;
+  -- 키워드 후보에 없는 벡터 전용 항목은 이만큼만 실린다: 최근접 이웃은 항상 있어서(질문이 기억과 무관해도)
+  -- 상한이 없으면 매 답변 프롬프트에 「그나마 가까운」 항목이 한도까지 채워진다. 조정은 후속(게이팅 튜닝).
+  v_vector_only_cap CONSTANT integer := 3;
   v_q public.vector;
   v_vec_ids uuid[] := ARRAY[]::uuid[];
   r record;
@@ -214,7 +223,7 @@ BEGIN
   END IF;
 
   FOR r IN
-    SELECT e.item_id AS eid
+    SELECT e.item_id AS eid, (1 - (e.embedding OPERATOR(public.<=>) v_q))::real AS sim
       FROM public.mem_item_embedding e
       JOIN public.mem_item i ON i.id = e.item_id AND i.workspace_id = e.workspace_id
      WHERE e.workspace_id = v_ws
@@ -236,6 +245,13 @@ BEGIN
     IF NOT public.mem_item_audience_ok(r.eid, p_answer_channel_id, p_viewer) THEN
       CONTINUE;
     END IF;
+    -- 상대 문턱: 통과한 후보 중 가장 가까운 것에서 margin 이상 멀어지면 거기서 끊는다(거리순이라 뒤는 더 멀다).
+    -- 절대 문턱만으로는 e5 의 좁은 유사도 대역에서 「같은 분야의 그럭저럭 비슷한 항목」이 줄줄이 딸려 온다.
+    IF v_best IS NULL THEN
+      v_best := r.sim;
+    ELSIF r.sim < v_best - v_margin THEN
+      EXIT;
+    END IF;
     v_vec_ids := v_vec_ids || r.eid;
     EXIT WHEN pg_catalog.cardinality(v_vec_ids) >= v_k;
   END LOOP;
@@ -253,16 +269,23 @@ BEGIN
   ),
   fused AS (
     SELECT COALESCE(kw.kid, vec.vid) AS fid,
+           (kw.kid IS NULL) AS vonly,
+           vec.vrank AS vrank,
            (COALESCE(2.0 / (60 + kw.krank), 0) + COALESCE(1.0 / (60 + vec.vrank), 0)) AS rrf
       FROM kw FULL OUTER JOIN vec ON vec.vid = kw.kid
+  ),
+  capped AS (
+    SELECT f.*, pg_catalog.row_number() OVER (PARTITION BY f.vonly ORDER BY f.vrank) AS vo_n
+      FROM fused f
   )
   SELECT i.id, i.channel_id, i.space_kind, i.kind, i.body, i.valid_from, i.valid_to, i.recorded_at,
          f.rrf::real,
          (SELECT pg_catalog.array_agg(ev.message_id ORDER BY ev.message_id)
             FROM public.mem_evidence ev
            WHERE ev.item_id = i.id AND ev.workspace_id = v_ws)
-    FROM fused f
+    FROM capped f
     JOIN public.mem_item i ON i.id = f.fid AND i.workspace_id = v_ws
+   WHERE NOT f.vonly OR f.vo_n <= v_vector_only_cap
    ORDER BY f.rrf DESC, (i.valid_to IS NULL) DESC, i.recorded_at DESC, i.id
    LIMIT v_limit;
 END
@@ -271,7 +294,7 @@ $$;
 -- 서빙 진입점(융합 판): 요청자·답 채널·질의는 run 행에서 DB 가 정한다(mem_serve_items 와 같은 게이트).
 CREATE OR REPLACE FUNCTION mem_serve_items_fused(
   p_run_id uuid, p_limit integer, p_body_max integer,
-  p_query_vec text, p_model text, p_min_similarity real)
+  p_query_vec text, p_model text, p_min_similarity real, p_margin real)
 RETURNS TABLE (
   requester_member_id uuid,
   answer_channel_id   uuid,
@@ -307,7 +330,7 @@ BEGIN
          pg_catalog.left(s.body, v_body_max), s.valid_from,
          (SELECT i.source_count FROM public.mem_item i WHERE i.id = s.id)
     FROM public.mem_search_items_fused(
-           v_req, v_query, v_limit, v_channel, p_query_vec, p_model, p_min_similarity) s;
+           v_req, v_query, v_limit, v_channel, p_query_vec, p_model, p_min_similarity, p_margin) s;
 END
 $$;
 
@@ -404,8 +427,8 @@ DECLARE f text;
 BEGIN
   FOREACH f IN ARRAY ARRAY[
     'mem_serve_gate(uuid)', 'mem_serve_query(uuid)',
-    'mem_search_items_fused(uuid, text, integer, uuid, text, text, real)',
-    'mem_serve_items_fused(uuid, integer, integer, text, text, real)',
+    'mem_search_items_fused(uuid, text, integer, uuid, text, text, real, real)',
+    'mem_serve_items_fused(uuid, integer, integer, text, text, real, real)',
     'mem_set_item_embedding(uuid, text, text)', 'mem_items_to_embed(text, integer)',
     'mem_embedding_stats(text)'
   ] LOOP
@@ -449,14 +472,14 @@ DECLARE
   runtime_roles text[] := ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin'];
   worker_only text[] := ARRAY[
     'mem_serve_query(uuid)',
-    'mem_serve_items_fused(uuid, integer, integer, text, text, real)',
+    'mem_serve_items_fused(uuid, integer, integer, text, text, real, real)',
     'mem_set_item_embedding(uuid, text, text)',
     'mem_items_to_embed(text, integer)',
     'mem_embedding_stats(text)'
   ];
   owner_only text[] := ARRAY[
     'mem_serve_gate(uuid)',
-    'mem_search_items_fused(uuid, text, integer, uuid, text, text, real)'
+    'mem_search_items_fused(uuid, text, integer, uuid, text, text, real, real)'
   ];
 BEGIN
   EXECUTE 'REVOKE ALL ON TABLE public.mem_item_embedding FROM PUBLIC';

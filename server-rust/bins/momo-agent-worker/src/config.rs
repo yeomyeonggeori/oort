@@ -215,6 +215,11 @@ pub struct MemoryConfig {
     /// candidate at all. e5 similarities are compressed (unrelated text still scores ~0.7), so
     /// this, not the top-N cut, is what keeps unrelated items out.
     pub embed_min_similarity: f32,
+    /// `MEMORY_EMBED_MARGIN` — a vector neighbour must also be within this cosine distance of the
+    /// nearest one the requester may see. The absolute floor cannot separate "about this" from
+    /// "same field" (e5 scores both 0.79-0.9); the margin keeps the tail of merely-similar items
+    /// out of the reply.
+    pub embed_margin: f32,
     /// `MEMORY_EMBED_POLL_SECONDS` (30) — the embedding sweep's tick (it also wakes when this
     /// process stores a new item).
     pub embed_poll_interval: Duration,
@@ -265,6 +270,7 @@ impl Default for MemoryConfig {
             embed_threads: 2,
             embed_query_timeout: Duration::from_millis(250),
             embed_min_similarity: 0.80,
+            embed_margin: 0.04,
             embed_poll_interval: Duration::from_secs(30),
             embed_batch: 16,
             embed_max_per_sweep: 200,
@@ -355,6 +361,14 @@ impl MemoryConfig {
                     v.clamp(0.0, 1.0)
                 } else {
                     d.embed_min_similarity
+                }
+            },
+            embed_margin: {
+                let v: f32 = env_number("MEMORY_EMBED_MARGIN", d.embed_margin)?;
+                if v.is_finite() {
+                    v.clamp(0.0, 1.0)
+                } else {
+                    d.embed_margin
                 }
             },
             embed_poll_interval: Duration::from_secs(
@@ -617,6 +631,30 @@ mod tests {
         assert_eq!(policy.operator_hosts, vec!["mock-hermes".to_string()]);
     }
     use super::*;
+
+    /// #3173: embedding is on by default (with no model it degrades to keyword-only, so on is
+    /// safe), reads the image's model directory, and every number is inside the range the
+    /// operator can only make slower or smaller.
+    #[test]
+    fn embedding_defaults_are_on_and_point_at_the_images_model_directory() {
+        let d = MemoryConfig::default();
+        assert!(d.embed_enabled);
+        assert_eq!(d.embed_model_dir, "/opt/momo/models/e5-small-int8");
+        assert_eq!(d.embed_query_timeout, Duration::from_millis(250));
+        assert!(
+            d.embed_query_timeout < d.serve_timeout,
+            "the query budget sits inside the serving budget"
+        );
+        assert!((0.0..=1.0).contains(&d.embed_min_similarity));
+        assert!((0.0..=1.0).contains(&d.embed_margin));
+        assert!(d.embed_batch >= 1 && d.embed_max_per_sweep >= d.embed_batch);
+        // The same values a bare `from_env` (no MEMORY_EMBED_* set) produces.
+        let from_env = MemoryConfig::from_env().expect("defaults parse");
+        if std::env::vars().all(|(k, _)| !k.starts_with("MEMORY_EMBED_")) {
+            assert_eq!(from_env.embed_model_dir, d.embed_model_dir);
+            assert_eq!(from_env.embed_enabled, d.embed_enabled);
+        }
+    }
 
     #[test]
     fn log_filter_prefers_rust_log_then_the_compose_log_level() {

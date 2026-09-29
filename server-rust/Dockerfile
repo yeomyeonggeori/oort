@@ -82,6 +82,65 @@ RUN set -eux; \
 ARG MOMO_BUILD_SHA=unknown
 
 # ---------------------------------------------------------------------------
+# model-payload — the memory embedding model (#3173, ADR-0196 D8 증보)
+# ---------------------------------------------------------------------------
+# `intfloat/multilingual-e5-small` (MIT), int8 ONNX, at a PINNED Hugging Face revision, with every
+# file checked against `server-rust/model/e5-small-int8.sha256` — a moved tag, a swapped file or a
+# truncated download fails the build. The weights are never committed (118 MB) and never fetched at
+# run time: the worker loads them from `/opt/momo/models/e5-small-int8`. This stage shares nothing
+# with `build`, so a code change does not re-download the model and a model bump does not recompile.
+#
+# Build-time external downloads of the whole image (both hash-pinned): this stage (huggingface.co)
+# and `ort-payload` below (github.com/microsoft/onnxruntime releases). cargo itself needs neither.
+FROM ${RUNTIME_IMAGE} AS model-payload
+ARG E5_SMALL_REVISION=614241f622f53c4eeff9890bdc4f31cfecc418b3
+WORKDIR /models/e5-small-int8
+COPY server-rust/model/e5-small-int8.sha256 /models/e5-small-int8.sha256
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl; \
+    rm -rf /var/lib/apt/lists/*; \
+    base="https://huggingface.co/intfloat/multilingual-e5-small/resolve/${E5_SMALL_REVISION}"; \
+    curl --fail --silent --show-error --location --retry 3 --retry-delay 2 \
+      -o model_qint8.onnx "${base}/onnx/model_qint8_avx512_vnni.onnx"; \
+    for f in tokenizer.json config.json special_tokens_map.json tokenizer_config.json; do \
+      curl --fail --silent --show-error --location --retry 3 --retry-delay 2 -o "$f" "${base}/$f"; \
+    done; \
+    sha256sum -c /models/e5-small-int8.sha256; \
+    ls -l
+
+# ---------------------------------------------------------------------------
+# ort-payload — ONNX Runtime shared library for the memory embedder (#3173)
+# ---------------------------------------------------------------------------
+# Microsoft's own release build (MIT), pinned by version and sha256 per CPU architecture, loaded at
+# run time through `ORT_DYLIB_PATH` (`ort-load-dynamic`, see crates/momo-embed/Cargo.toml). Why not
+# `ort`'s prebuilt static library: it is built with a newer GCC than bookworm's, so linking it
+# here fails on libstdc++ symbols (`__cxa_call_terminate`). This library needs GLIBCXX <= 3.4.21 and
+# GLIBC <= 2.27, which the runtime base has. LICENSE and ThirdPartyNotices.txt travel with it.
+FROM ${RUNTIME_IMAGE} AS ort-payload
+ARG ORT_VERSION=1.28.2
+ARG ORT_SHA256_X64=d7209b8751b27b862b0c76332c2e20e203396edb5dab700ecf4bb485cf147415
+ARG ORT_SHA256_AARCH64=f020b3d31106cc7db03889b4a5c21e7c38ce4a09ad26119c11d1ad6d3fa0ec04
+WORKDIR /ort
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl; \
+    rm -rf /var/lib/apt/lists/*; \
+    case "$(uname -m)" in \
+      x86_64)  arch=x64;     sha="${ORT_SHA256_X64}" ;; \
+      aarch64) arch=aarch64; sha="${ORT_SHA256_AARCH64}" ;; \
+      *) echo "no pinned ONNX Runtime for $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    curl --fail --silent --show-error --location --retry 3 --retry-delay 2 -o ort.tgz \
+      "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-${arch}-${ORT_VERSION}.tgz"; \
+    echo "${sha}  ort.tgz" | sha256sum -c; \
+    tar -xzf ort.tgz --strip-components=1; \
+    install -Dm755 "lib/libonnxruntime.so.${ORT_VERSION}" /out/lib/libonnxruntime.so; \
+    install -Dm644 LICENSE /out/licenses/LICENSE; \
+    install -Dm644 ThirdPartyNotices.txt /out/licenses/ThirdPartyNotices.txt; \
+    ls -lR /out
+
+# ---------------------------------------------------------------------------
 # build — one workspace build for every binary
 # ---------------------------------------------------------------------------
 FROM ${RUST_IMAGE} AS build
@@ -110,6 +169,7 @@ COPY server-rust/crates/momo-auth/Cargo.toml crates/momo-auth/
 COPY server-rust/crates/momo-db/Cargo.toml crates/momo-db/
 COPY server-rust/crates/momo-drive/Cargo.toml crates/momo-drive/
 COPY server-rust/crates/momo-egress/Cargo.toml crates/momo-egress/
+COPY server-rust/crates/momo-embed/Cargo.toml crates/momo-embed/
 COPY server-rust/crates/momo-ephemeral/Cargo.toml crates/momo-ephemeral/
 COPY server-rust/crates/momo-messaging/Cargo.toml crates/momo-messaging/
 COPY server-rust/crates/momo-mcp/Cargo.toml crates/momo-mcp/
@@ -270,6 +330,14 @@ RUN set -eux; \
 
 COPY --from=build /out/ /usr/local/bin/
 
+# #3173: the memory embedding model, root-owned and read-only to the `momo` user ...
+COPY --from=model-payload /models/e5-small-int8/ /opt/momo/models/e5-small-int8/
+# ... and the ONNX Runtime library it runs on (loaded via ORT_DYLIB_PATH), with its MIT license and
+# third-party notices beside the other license copies.
+COPY --from=ort-payload /out/lib/ /opt/momo/lib/
+COPY --from=ort-payload /out/licenses/ /usr/share/licenses/momo-rust/onnxruntime/
+ENV ORT_DYLIB_PATH=/opt/momo/lib/libonnxruntime.so
+
 # Source-checkout-free migration payload. The SQL is copied verbatim; the image
 # owns no migration of its own and edits none of these files.
 COPY server/Migrations /opt/momo/migrations
@@ -312,11 +380,16 @@ RUN set -eux; \
     test -s /usr/share/licenses/momo-rust/NOTICE; \
     test -s /usr/share/licenses/momo-rust/THIRD_PARTY_NOTICES.md; \
     test -s /usr/share/licenses/momo-rust/GHCR_THIRD_PARTY_NOTICES.txt; \
+    test -s /usr/share/licenses/momo-rust/onnxruntime/LICENSE; \
+    test -s /usr/share/licenses/momo-rust/onnxruntime/ThirdPartyNotices.txt; \
     test -s /opt/momo/web/legal/GHCR_THIRD_PARTY_NOTICES.txt; \
     ( cd /usr/share/licenses/momo-rust && sha256sum -c GHCR_NOTICE_BUNDLE.sha256 ); \
     /usr/local/bin/check_debian_copyrights.sh --output /usr/share/licenses/momo-rust/DEBIAN_COPYRIGHT_INVENTORY.txt; \
     test -s /opt/momo/web/index.html; \
-    momo-migrate --help >/dev/null
+    momo-migrate --help >/dev/null; \
+    # #3173: the model loads under the image's ONNX Runtime and embeds a sentence (a missing or
+    # corrupt model, or a library this base cannot load, fails the build — not a running worker).
+    MEMORY_EMBED_MODEL_DIR=/opt/momo/models/e5-small-int8 momo-agent-worker --embed-check
 
 # The binary binds the production image to these baked `/opt/momo` payloads and
 # rejects every migration/role/owner path override. Source-checkout fixtures may

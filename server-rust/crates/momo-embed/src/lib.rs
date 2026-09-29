@@ -5,6 +5,10 @@
 //! by the operator/image (see `server-rust/Dockerfile`, stage `model-payload`); this crate never
 //! downloads anything at run time and never phones home.
 //!
+//! ONNX Runtime itself is a shared library loaded at run time from `ORT_DYLIB_PATH` (the image
+//! sets it; stage `ort-payload`). A missing or unloadable library is an [`EmbedError::Load`], never
+//! a panic: the worker then serves keyword-only.
+//!
 //! ## Shape
 //!
 //! * [`TextEmbedder`] — the blocking contract the worker codes against. Tests use
@@ -117,6 +121,16 @@ impl OnnxEmbedder {
     /// `intra_threads` caps ONNX Runtime's CPU threads (`None` = all cores); the worker uses a
     /// small number so embedding never starves the reply path.
     pub fn load(dir: &Path, intra_threads: Option<usize>) -> Result<OnnxEmbedder, EmbedError> {
+        // `ort-load-dynamic` resolves the library on first use and panics if it cannot; say what is
+        // wrong up front where we can, and turn any remaining panic into an error below.
+        if let Some(lib) = std::env::var_os("ORT_DYLIB_PATH") {
+            if !Path::new(&lib).is_file() {
+                return Err(EmbedError::Load(format!(
+                    "ORT_DYLIB_PATH does not point at a file: {}",
+                    Path::new(&lib).display()
+                )));
+            }
+        }
         let read = |name: &str| {
             std::fs::read(dir.join(name))
                 .map_err(|e| EmbedError::Load(format!("{}: {e}", dir.join(name).display())))
@@ -131,8 +145,18 @@ impl OnnxEmbedder {
         let model = UserDefinedEmbeddingModel::new(onnx, files).with_pooling(Pooling::Mean);
         let mut options = InitOptionsUserDefined::default();
         options.intra_threads = intra_threads;
-        let model = TextEmbedding::try_new_from_user_defined(model, options)
-            .map_err(|e| EmbedError::Load(e.to_string()))?;
+        let model = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            TextEmbedding::try_new_from_user_defined(model, options)
+        }))
+        .map_err(|panic| {
+            let why = panic
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| panic.downcast_ref::<&str>().map(|s| (*s).to_string()))
+                .unwrap_or_else(|| "unknown panic".to_string());
+            EmbedError::Load(format!("ONNX Runtime could not be loaded: {why}"))
+        })?
+        .map_err(|e| EmbedError::Load(e.to_string()))?;
         Ok(OnnxEmbedder {
             model: Mutex::new(model),
         })

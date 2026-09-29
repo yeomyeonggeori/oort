@@ -774,6 +774,35 @@ async fn fused_rows(
     model: &str,
     min_similarity: f32,
 ) -> Vec<(Uuid, String)> {
+    fused_rows_m(
+        su,
+        ws,
+        viewer,
+        query,
+        limit,
+        channel,
+        vector,
+        model,
+        min_similarity,
+        1.0,
+    )
+    .await
+}
+
+/// [`fused_rows`] with the relative margin (1.0 = no relative cut).
+#[allow(clippy::too_many_arguments)]
+async fn fused_rows_m(
+    su: &PgPool,
+    ws: Uuid,
+    viewer: Uuid,
+    query: &str,
+    limit: i32,
+    channel: Uuid,
+    vector: Option<&str>,
+    model: &str,
+    min_similarity: f32,
+    margin: f32,
+) -> Vec<(Uuid, String)> {
     let mut tx = su.begin().await.expect("tx");
     sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
         .bind(ws.to_string())
@@ -781,7 +810,7 @@ async fn fused_rows(
         .await
         .unwrap();
     let rows =
-        sqlx::query("SELECT id, body FROM mem_search_items_fused($1, $2, $3, $4, $5, $6, $7)")
+        sqlx::query("SELECT id, body FROM mem_search_items_fused($1, $2, $3, $4, $5, $6, $7, $8)")
             .bind(viewer)
             .bind(query)
             .bind(limit)
@@ -789,6 +818,7 @@ async fn fused_rows(
             .bind(vector)
             .bind(model)
             .bind(min_similarity)
+            .bind(margin)
             .fetch_all(&mut *tx)
             .await
             .expect("mem_search_items_fused");
@@ -1067,6 +1097,12 @@ async fn embedder_trouble_means_keyword_only_and_the_reply_always_goes_out() {
             Duration::from_secs(3),
         ),
         (
+            "query vector is all zeros (the fused SQL refuses it)",
+            service(mock_embedder().with_mode(Mode::ZeroQuery), 500),
+            true,
+            Duration::from_secs(3),
+        ),
+        (
             "model directory missing",
             EmbedService::from_config(&momo_agent_worker::config::MemoryConfig {
                 embed_model_dir: "/nonexistent/momo-models".to_string(),
@@ -1090,11 +1126,7 @@ async fn embedder_trouble_means_keyword_only_and_the_reply_always_goes_out() {
             took < bound,
             "{label}: the reply waited {took:?} (bound {bound:?})"
         );
-        assert_eq!(
-            agent_replies(&su, &fx, fx.general).await >= 1,
-            true,
-            "{label}"
-        );
+        assert!(agent_replies(&su, &fx, fx.general).await >= 1, "{label}");
         let section = item_section(&provider).unwrap_or_else(|| {
             panic!("{label}: keyword-only serving still finds the literal match")
         });
@@ -1235,7 +1267,9 @@ async fn the_backfill_is_bounded_idempotent_and_follows_the_model() {
         "a model with no rows finds nothing (keyword has no hit either)"
     );
 
-    // Forgetting an item takes its vectors with it (FK cascade — no orphan inversion material).
+    // Forgetting an item — through the API's own function, as momo_app, under FORCE RLS whose
+    // DELETE policy on the embeddings is `false` — takes its vectors with it (the FK cascade is a
+    // referential action, not a row-security check): no orphan inversion material.
     let victim = ids[2];
     let before: i64 =
         sqlx::query_scalar("SELECT count(*) FROM mem_item_embedding WHERE item_id = $1")
@@ -1244,11 +1278,23 @@ async fn the_backfill_is_bounded_idempotent_and_follows_the_model() {
             .await
             .unwrap();
     assert_eq!(before, 2, "one row per model");
-    sqlx::query("DELETE FROM mem_item WHERE id = $1")
+    let app = momo_app_pool().await;
+    let mut tx = app.begin().await.unwrap();
+    sqlx::query(
+        "SELECT set_config('app.workspace_id', $1, true), set_config('app.member_id', $2, true)",
+    )
+    .bind(fx.ws.to_string())
+    .bind(fx.bob.to_string())
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    let forgotten: i32 = sqlx::query_scalar("SELECT mem_forget_item($1)")
         .bind(victim)
-        .execute(&su)
+        .fetch_one(&mut *tx)
         .await
-        .unwrap();
+        .expect("bob forgets the item through the API function");
+    tx.commit().await.unwrap();
+    assert!(forgotten >= 1);
     let after: i64 =
         sqlx::query_scalar("SELECT count(*) FROM mem_item_embedding WHERE item_id = $1")
             .bind(victim)
@@ -1256,6 +1302,12 @@ async fn the_backfill_is_bounded_idempotent_and_follows_the_model() {
             .await
             .unwrap();
     assert_eq!(after, 0);
+    let gone: i64 = sqlx::query_scalar("SELECT count(*) FROM mem_item WHERE id = $1")
+        .bind(victim)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(gone, 0, "the item itself is gone too");
 }
 
 #[tokio::test]
@@ -1297,14 +1349,14 @@ async fn the_api_role_and_the_worker_login_cannot_reach_the_vector_functions() {
         (
             "mem_serve_items_fused",
             format!(
-                "SELECT * FROM mem_serve_items_fused('{}', 5, 600, '{lit}', 'm', 0.3)",
+                "SELECT * FROM mem_serve_items_fused('{}', 5, 600, '{lit}', 'm', 0.3, 0.05)",
                 Uuid::new_v4()
             ),
         ),
         (
             "mem_search_items_fused",
             format!(
-                "SELECT * FROM mem_search_items_fused('{}', 'x', 5, '{}', '{lit}', 'm', 0.3)",
+                "SELECT * FROM mem_search_items_fused('{}', 'x', 5, '{}', '{lit}', 'm', 0.3, 0.05)",
                 fx.alice, fx.general
             ),
         ),
@@ -1509,7 +1561,7 @@ async fn each_new_sql_guard_is_load_bearing() {
                 .await
                 .unwrap();
             sqlx::query(
-                "SELECT count(*) FROM mem_search_items_fused($1, 'zzzz', $2, $3, $4, $5, 0.0)",
+                "SELECT count(*) FROM mem_search_items_fused($1, 'zzzz', $2, $3, $4, $5, 0.0, 1.0)",
             )
             .bind(fx.alice)
             .bind(limit)
@@ -1637,4 +1689,554 @@ async fn each_new_sql_guard_is_load_bearing() {
         "the x2 keyword weight is load-bearing: {red:?}"
     );
     restore_fused(&su).await;
+
+    // 6) the relative margin cuts a tail of merely-similar items off the nearest one: the paraphrase
+    // target (0.47) is outside 0.05 of the nearest item (0.58), so it is dropped.
+    let near = qvec("배포 미루기 언제");
+    let cut = fused_rows_m(
+        &su,
+        fx.ws,
+        fx.alice,
+        "zzzz",
+        10,
+        fx.general,
+        Some(&near),
+        MOCK_MODEL,
+        0.30,
+        0.05,
+    )
+    .await;
+    assert_eq!(
+        cut.iter().map(|r| r.1.as_str()).collect::<Vec<_>>(),
+        vec!["출시 지연 판단 QA"],
+        "{cut:?}"
+    );
+    sabotage_fused(
+        &su,
+        "ELSIF r.sim < v_best - v_margin THEN",
+        "ELSIF false THEN",
+    )
+    .await;
+    let red = fused_rows_m(
+        &su,
+        fx.ws,
+        fx.alice,
+        "zzzz",
+        10,
+        fx.general,
+        Some(&near),
+        MOCK_MODEL,
+        0.30,
+        0.05,
+    )
+    .await;
+    eprintln!(
+        "RED (relative margin removed): {} items instead of 1",
+        red.len()
+    );
+    assert!(red.len() > 1);
+    restore_fused(&su).await;
+
+    // 7) at most 3 vector-only items ride, however many neighbours there are: an unrelated or vague
+    // question must not fill the reply's memory section with "the nearest thing we have".
+    for n in 1..=6 {
+        write_item(
+            &wp,
+            &fx,
+            fx.general,
+            fx.bob,
+            &format!("배포 미루기 언제 결정 일반 {n}"),
+        )
+        .await;
+    }
+    let w3 = worker_vec(&provider, vec_config(), service(mock_embedder(), 2_000)).await;
+    embed_everything(&w3).await;
+    let neighbours = fused_rows(
+        &su,
+        fx.ws,
+        fx.alice,
+        "zzzz",
+        10,
+        fx.general,
+        Some(&qvec("배포 미루기 언제")),
+        MOCK_MODEL,
+        0.30,
+    )
+    .await;
+    assert_eq!(
+        neighbours.len(),
+        3,
+        "vector-only items are capped: {neighbours:?}"
+    );
+    sabotage_fused(
+        &su,
+        "v_vector_only_cap CONSTANT integer := 3;",
+        "v_vector_only_cap CONSTANT integer := 100;",
+    )
+    .await;
+    let red = fused_rows(
+        &su,
+        fx.ws,
+        fx.alice,
+        "zzzz",
+        10,
+        fx.general,
+        Some(&qvec("배포 미루기 언제")),
+        MOCK_MODEL,
+        0.30,
+    )
+    .await;
+    eprintln!(
+        "RED (vector-only cap removed): {} neighbour items instead of 3",
+        red.len()
+    );
+    assert!(red.len() > 3);
+    restore_fused(&su).await;
+}
+
+// =============================================================================
+// The real model (ignored unless the model directory is present)
+// =============================================================================
+
+fn real_model_dir() -> std::path::PathBuf {
+    std::env::var_os("MOMO_EMBED_MODEL_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(std::env::var("HOME").unwrap())
+                .join(".cache/momo-scratch/3173b/model/e5-small-int8")
+        })
+}
+
+fn fixture(path: &str) -> serde_json::Value {
+    let full = format!("{}/../../bench/{path}", env!("CARGO_MANIFEST_DIR"));
+    serde_json::from_str(&std::fs::read_to_string(&full).unwrap_or_else(|e| panic!("{full}: {e}")))
+        .unwrap()
+}
+
+fn quantile(sorted: &[f32], q: f32) -> f32 {
+    if sorted.is_empty() {
+        return f32::NAN;
+    }
+    sorted[((sorted.len() as f32 - 1.0) * q).round() as usize]
+}
+
+/// Recall@10 (share of the relevant items found) and reciprocal rank of the first relevant hit.
+fn score(rows: &[Uuid], relevant: &[Uuid]) -> (f32, f32) {
+    let top: Vec<&Uuid> = rows.iter().take(10).collect();
+    let hits = relevant.iter().filter(|r| top.contains(r)).count();
+    let rr = rows
+        .iter()
+        .position(|r| relevant.contains(r))
+        .map(|p| 1.0 / (p as f32 + 1.0))
+        .unwrap_or(0.0);
+    (hits as f32 / relevant.len().max(1) as f32, rr)
+}
+
+/// The spike's evaluation (docs/research/MEM-M3-vector-search-spike.md) re-run through the
+/// **production SQL** — `mem_search_items_fused` with RLS-side membership narrowing, `readable_by`
+/// and the audience rule in the loop — over the M0 corpus (900 items), with the real int8 model:
+/// M0's five keyword-friendly kinds, the four deficit kinds, and the 12 hand-written paraphrases.
+/// It also prints the similarity distribution the default `MEMORY_EMBED_MIN_SIMILARITY` is set from.
+///
+/// ```text
+/// ORT_DYLIB_PATH=<libonnxruntime.dylib|.so from a Microsoft release> \
+///   MOMO_EMBED_MODEL_DIR=~/.cache/momo-scratch/3173b/model/e5-small-int8 DATABASE_URL=… \
+///   cargo test -p momo-agent-worker --test memory_embed_conformance_pg \
+///     real_model_recall_through_the_serving_sql -- --ignored --nocapture
+/// ```
+#[tokio::test]
+#[ignore = "needs DATABASE_URL and the real model directory (MOMO_EMBED_MODEL_DIR)"]
+async fn real_model_recall_through_the_serving_sql() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    restore_fused(&su).await;
+    let dir = real_model_dir();
+    let model = Arc::new(
+        momo_embed::OnnxEmbedder::load(&dir, Some(4))
+            .unwrap_or_else(|e| panic!("real model at {}: {e}", dir.display())),
+    );
+    let min_similarity: f32 = std::env::var("MEMORY_EMBED_MIN_SIMILARITY")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(momo_agent_worker::config::MemoryConfig::default().embed_min_similarity);
+
+    let margin: f32 = std::env::var("MEMORY_EMBED_MARGIN")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(momo_agent_worker::config::MemoryConfig::default().embed_margin);
+
+    let fx = seed(&su).await;
+    let wp = momo_worker_pool().await;
+
+    // The M0 corpus as 900 items of one channel.
+    let corpus_path = format!(
+        "{}/../../bench/kr-keyword-search/fixtures/corpus.jsonl",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let docs: Vec<(String, String)> = std::fs::read_to_string(&corpus_path)
+        .expect("corpus")
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| {
+            let v: serde_json::Value = serde_json::from_str(l).unwrap();
+            (
+                v["id"].as_str().unwrap().to_string(),
+                v["text"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    let digest = write_digest(
+        &wp,
+        fx.ws,
+        fx.general,
+        fx.bob,
+        "window",
+        "구간 요약이에요",
+        3,
+        None,
+        &[],
+    )
+    .await;
+    let evidence: Vec<Uuid> = digest.evidence.iter().map(|e| e.0).take(2).collect();
+    let digest_id = digest.id;
+    let texts: Vec<String> = docs.iter().map(|d| d.1.clone()).collect();
+    let added: Vec<Option<Uuid>> = mem::with_memory_tx(&wp, fx.ws, {
+        let evidence = evidence.clone();
+        move |conn| {
+            Box::pin(async move {
+                let mut out = Vec::new();
+                for text in &texts {
+                    let item = NewItem {
+                        kind: "fact",
+                        body: text.clone(),
+                        subject_key: None,
+                        evidence: evidence.clone(),
+                        confidence: 0.8,
+                        ephemeral: false,
+                    };
+                    out.push(
+                        match mem_items::add_item(conn, digest_id, &item, "test-model").await? {
+                            ItemOutcome::Added(id) => Some(id),
+                            _ => None,
+                        },
+                    );
+                }
+                Ok(out)
+            })
+        }
+    })
+    .await
+    .expect("add the corpus");
+    let by_doc: std::collections::HashMap<&str, Uuid> = docs
+        .iter()
+        .zip(&added)
+        .filter_map(|(d, id)| id.map(|id| (d.0.as_str(), id)))
+        .collect();
+    assert_eq!(by_doc.len(), docs.len(), "all 900 documents are stored");
+
+    // Embed through the worker's own sweep, with the real model.
+    let mut cfg = config();
+    cfg.memory.embed_max_per_sweep = 2_000;
+    cfg.memory.embed_batch = 16;
+    let provider = Arc::new(MockChatProvider::echo());
+    let svc = EmbedService::with_embedder(model.clone(), Duration::from_secs(2));
+    let w = worker_vec(&provider, cfg, svc).await;
+    let started = Instant::now();
+    embed_everything(&w).await;
+    eprintln!(
+        "embedded {} items with the real int8 model in {:.1}s (this sweep also covers other test workspaces)",
+        embedded_of(&su, fx.ws, model.model_id()).await,
+        started.elapsed().as_secs_f32()
+    );
+    assert_eq!(embedded_of(&su, fx.ws, model.model_id()).await, 900);
+
+    // Similarity distribution (dot products of unit vectors) for calibrating the floor.
+    let doc_vectors: Vec<Vec<f32>> = model
+        .embed_passages(&docs.iter().map(|d| d.1.clone()).collect::<Vec<_>>())
+        .unwrap();
+    let dot = |a: &[f32], b: &[f32]| a.iter().zip(b).map(|(x, y)| x * y).sum::<f32>();
+
+    let run = |queries: serde_json::Value, label: &'static str| {
+        let (su, model, by_doc, docs, doc_vectors) =
+            (su.clone(), model.clone(), &by_doc, &docs, &doc_vectors);
+        let ws = fx.ws;
+        async move {
+            let mut per_kind: std::collections::BTreeMap<String, Vec<(f32, f32, f32, f32)>> =
+                Default::default();
+            let (mut best_rel, mut best_other) = (Vec::new(), Vec::new());
+            for q in queries.as_array().unwrap() {
+                let text = q["text"].as_str().unwrap();
+                let kind = q["kind"].as_str().unwrap_or(label).to_string();
+                let relevant: Vec<Uuid> = q["relevant"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|d| by_doc[d.as_str().unwrap()])
+                    .collect();
+                let qv = model.embed_query(text).unwrap();
+                let lit = vector_literal(&qv).unwrap();
+                let kw = fused_rows_m(
+                    &su,
+                    ws,
+                    fx.alice,
+                    text,
+                    10,
+                    fx.general,
+                    None,
+                    model.model_id(),
+                    min_similarity,
+                    margin,
+                )
+                .await;
+                let fu = fused_rows_m(
+                    &su,
+                    ws,
+                    fx.alice,
+                    text,
+                    10,
+                    fx.general,
+                    Some(&lit),
+                    model.model_id(),
+                    min_similarity,
+                    margin,
+                )
+                .await;
+                let kw_ids: Vec<Uuid> = kw.iter().map(|r| r.0).collect();
+                let fu_ids: Vec<Uuid> = fu.iter().map(|r| r.0).collect();
+                let (kr, krr) = score(&kw_ids, &relevant);
+                let (fr, frr) = score(&fu_ids, &relevant);
+                per_kind.entry(kind).or_default().push((kr, krr, fr, frr));
+                let rel_docs: std::collections::HashSet<&str> = q["relevant"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|d| d.as_str().unwrap())
+                    .collect();
+                let mut rel_best = f32::MIN;
+                let mut other_best = f32::MIN;
+                for (d, v) in docs.iter().zip(doc_vectors) {
+                    let s = dot(&qv, v);
+                    if rel_docs.contains(d.0.as_str()) {
+                        rel_best = rel_best.max(s)
+                    } else {
+                        other_best = other_best.max(s)
+                    }
+                }
+                best_rel.push(rel_best);
+                best_other.push(other_best);
+            }
+            (per_kind, best_rel, best_other)
+        }
+    };
+    let m0 = fixture("kr-keyword-search/fixtures/queries.json");
+    let deficit = fixture("mem-vector-search/fixtures/queries_deficit.json");
+    eprintln!("\nfloor (MEMORY_EMBED_MIN_SIMILARITY) = {min_similarity}, margin (MEMORY_EMBED_MARGIN) = {margin}");
+    eprintln!(
+        "{:<14} {:>4}  {:>15}  {:>15}",
+        "kind", "n", "keyword R@10/MRR", "fused R@10/MRR"
+    );
+    let mut grand = (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0usize);
+    let mut deficit_only = (0.0f32, 0.0f32, 0usize);
+    let mut all_rel = Vec::new();
+    let mut all_other = Vec::new();
+    for (queries, label) in [(m0, "m0"), (deficit, "deficit")] {
+        let (per_kind, rel, other) = run(queries, label).await;
+        all_rel.extend(rel);
+        all_other.extend(other);
+        for (kind, rows) in &per_kind {
+            let n = rows.len() as f32;
+            let m = |i: usize| rows.iter().map(|r| [r.0, r.1, r.2, r.3][i]).sum::<f32>() / n;
+            eprintln!(
+                "{:<14} {:>4}  {:>7.2} /{:>6.2}  {:>7.2} /{:>6.2}",
+                kind,
+                rows.len(),
+                m(0),
+                m(1),
+                m(2),
+                m(3)
+            );
+            grand.0 += m(0) * n;
+            grand.1 += m(2) * n;
+            grand.4 += rows.len();
+            if label == "deficit" {
+                deficit_only.0 += m(0) * n;
+                deficit_only.1 += m(2) * n;
+                deficit_only.2 += rows.len();
+            }
+        }
+    }
+    eprintln!(
+        "ALL ({:>3})             keyword R@10 {:.3}  fused R@10 {:.3}",
+        grand.4,
+        grand.0 / grand.4 as f32,
+        grand.1 / grand.4 as f32
+    );
+    eprintln!(
+        "DEFICIT ({:>3})         keyword R@10 {:.3}  fused R@10 {:.3}",
+        deficit_only.2,
+        deficit_only.0 / deficit_only.2 as f32,
+        deficit_only.1 / deficit_only.2 as f32
+    );
+    all_rel.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    all_other.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    eprintln!(
+        "best similarity to a RELEVANT item   p10 {:.3} p50 {:.3} p90 {:.3} | best to an IRRELEVANT item  p10 {:.3} p50 {:.3} p90 {:.3}",
+        quantile(&all_rel, 0.1), quantile(&all_rel, 0.5), quantile(&all_rel, 0.9),
+        quantile(&all_other, 0.1), quantile(&all_other, 0.5), quantile(&all_other, 0.9)
+    );
+
+    // Off-topic questions: how many items would clear the floor (should be none or a handful).
+    let offtopic = [
+        "오늘 날씨 어때",
+        "점심 뭐 먹지",
+        "주말에 영화 볼 만한 거 추천해줘",
+        "고양이 사료 추천",
+        "how are you today",
+        "몇 시에 퇴근해요",
+    ];
+    let mut clearing = Vec::new();
+    for q in offtopic {
+        let qv = model.embed_query(q).unwrap();
+        let lit = vector_literal(&qv).unwrap();
+        let rows = fused_rows_m(
+            &su,
+            fx.ws,
+            fx.alice,
+            q,
+            8,
+            fx.general,
+            Some(&lit),
+            model.model_id(),
+            min_similarity,
+            margin,
+        )
+        .await;
+        clearing.push((
+            q,
+            doc_vectors
+                .iter()
+                .filter(|v| dot(&qv, v) >= min_similarity)
+                .count(),
+            rows.len(),
+        ));
+    }
+    eprintln!("off-topic questions -> (items above the floor, items the fusion returns of 8): {clearing:?}");
+
+    // The hand-written paraphrase probe (12 items, 12 questions; no shared words).
+    let probe = fixture("mem-vector-search/fixtures/probe.json");
+    let pfx = seed(&su).await;
+    let pdigest = write_digest(
+        &wp,
+        pfx.ws,
+        pfx.general,
+        pfx.bob,
+        "window",
+        "구간 요약이에요",
+        3,
+        None,
+        &[],
+    )
+    .await;
+    let pev: Vec<Uuid> = pdigest.evidence.iter().map(|e| e.0).take(2).collect();
+    let pitems: Vec<(String, Uuid)> = {
+        let items = probe["items"].as_array().unwrap().clone();
+        let pdid = pdigest.id;
+        mem::with_memory_tx(&wp, pfx.ws, move |conn| {
+            Box::pin(async move {
+                let mut out = Vec::new();
+                for it in &items {
+                    let item = NewItem {
+                        kind: "fact",
+                        body: it["text"].as_str().unwrap().to_string(),
+                        subject_key: None,
+                        evidence: pev.clone(),
+                        confidence: 0.8,
+                        ephemeral: false,
+                    };
+                    if let ItemOutcome::Added(id) =
+                        mem_items::add_item(conn, pdid, &item, "test-model").await?
+                    {
+                        out.push((it["id"].as_str().unwrap().to_string(), id));
+                    }
+                }
+                Ok(out)
+            })
+        })
+        .await
+        .unwrap()
+    };
+    w.embed_service().forget_idle();
+    embed_everything(&w).await;
+    let target = |id: &str| pitems.iter().find(|p| p.0 == id).unwrap().1;
+    let (mut kw_top1, mut kw_found, mut fu_top1, mut fu_found) = (0, 0, 0, 0);
+    for q in probe["queries"].as_array().unwrap() {
+        let text = q["text"].as_str().unwrap();
+        let want = target(q["target"].as_str().unwrap());
+        let lit = vector_literal(&model.embed_query(text).unwrap()).unwrap();
+        let kw = fused_rows_m(
+            &su,
+            pfx.ws,
+            pfx.alice,
+            text,
+            10,
+            pfx.general,
+            None,
+            model.model_id(),
+            min_similarity,
+            margin,
+        )
+        .await;
+        let fu = fused_rows_m(
+            &su,
+            pfx.ws,
+            pfx.alice,
+            text,
+            10,
+            pfx.general,
+            Some(&lit),
+            model.model_id(),
+            min_similarity,
+            margin,
+        )
+        .await;
+        {
+            let qv = model.embed_query(text).unwrap();
+            let pv = model
+                .embed_passages(
+                    &probe["items"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|i| i["text"].as_str().unwrap().to_string())
+                        .collect::<Vec<_>>(),
+                )
+                .unwrap();
+            let sims: Vec<f32> = pv.iter().map(|v| dot(&qv, v)).collect();
+            let tsim = sims[probe["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .position(|i| i["id"] == q["target"])
+                .unwrap()];
+            let other = sims
+                .iter()
+                .cloned()
+                .filter(|s| *s != tsim)
+                .fold(f32::MIN, f32::max);
+            eprintln!("probe {text:?}: target {tsim:.3} best-other {other:.3}");
+        }
+        kw_top1 += usize::from(kw.first().map(|r| r.0) == Some(want));
+        kw_found += usize::from(kw.iter().any(|r| r.0 == want));
+        fu_top1 += usize::from(fu.first().map(|r| r.0) == Some(want));
+        fu_found += usize::from(fu.iter().any(|r| r.0 == want));
+    }
+    eprintln!("paraphrase probe (12): keyword top-1 {kw_top1} found {kw_found} | fused top-1 {fu_top1} found {fu_found}");
+    assert!(
+        fu_top1 > kw_top1,
+        "vectors must find paraphrases keyword search cannot"
+    );
+    assert!(
+        deficit_only.1 / deficit_only.2 as f32 > deficit_only.0 / deficit_only.2 as f32,
+        "deficit recall improves"
+    );
 }

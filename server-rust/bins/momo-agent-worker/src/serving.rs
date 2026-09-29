@@ -387,6 +387,7 @@ pub fn pack_items(
 /// (a mismatch is logged, never obeyed) (F6). `window_from_seq` is the oldest message the
 /// conversation window already carries; the database drops this channel's summaries that begin at
 /// or after it. It trims duplication only — it is not a permission input.
+#[allow(clippy::too_many_arguments)] // the run's identity + the three seams (pool, config, embedder)
 pub async fn serve(
     pool: &PgPool,
     cfg: &MemoryConfig,
@@ -491,6 +492,7 @@ fn tx_bounds(cfg: &MemoryConfig) -> (u32, u32) {
     (stmt_ms.min(1_000), stmt_ms)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn prepare(
     pool: &PgPool,
     cfg: &MemoryConfig,
@@ -603,20 +605,17 @@ async fn read_items(
             return Ok(None);
         };
         if let Some(vector) = embed.embed_query(&query).await {
-            let min_similarity = cfg.embed_min_similarity;
+            let (min_similarity, margin) = (cfg.embed_min_similarity, cfg.embed_margin);
             let fused =
                 mem::with_memory_tx_bounded(pool, workspace_id, lock_ms, stmt_ms, move |conn| {
                     Box::pin(async move {
-                        mem::serve_items_fused(
-                            conn,
-                            run_id,
-                            limit,
-                            600,
-                            &vector.literal,
-                            &vector.model,
+                        let query = mem::FusedQuery {
+                            vector: &vector.literal,
+                            model: &vector.model,
                             min_similarity,
-                        )
-                        .await
+                            margin,
+                        };
+                        mem::serve_items_fused(conn, run_id, limit, 600, &query).await
                     })
                 })
                 .await;
