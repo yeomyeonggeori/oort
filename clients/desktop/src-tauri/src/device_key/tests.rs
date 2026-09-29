@@ -379,6 +379,8 @@ fn trust(root_key_id: Option<u128>, root_public_key: Option<&str>) -> crate::wor
         owner_member_id: Uuid::from_u128(0x101).to_string(),
         root_key_id: root_key_id.map(|id| Uuid::from_u128(id).to_string()),
         root_public_key: root_public_key.map(str::to_string),
+        signatures_required: false,
+        server_requires_signatures: None,
     }
 }
 
@@ -456,6 +458,36 @@ fn workd_status_carries_the_pinned_public_key() {
             .root_public_key,
         None
     );
+}
+
+/// #3117: the half state (the server requires signatures, this host does not
+/// enforce them yet) is said as such, and a workd from before #3117 is `off`.
+#[test]
+fn workd_status_says_whether_the_host_enforces_signatures() {
+    let state = |signatures: serde_json::Value| {
+        let status = serde_json::json!({
+            "hostId": "h", "workspaceId": "w", "ownerMemberId": "m",
+            "humanSignatures": signatures,
+        });
+        crate::work_host::host_trust_of(&status)
+            .unwrap()
+            .signature_enforcement()
+    };
+    assert_eq!(
+        state(serde_json::json!({"required": false, "serverRequired": true})),
+        "server_only"
+    );
+    assert_eq!(
+        state(
+            serde_json::json!({"required": true, "requiredBy": "server", "serverRequired": false})
+        ),
+        "enforced"
+    );
+    assert_eq!(
+        state(serde_json::json!({"required": false, "serverRequired": false})),
+        "off"
+    );
+    assert_eq!(state(serde_json::json!({"required": false})), "off");
 }
 
 /// #3028 security review M1: the webview names the endorsed id (unsigned,
