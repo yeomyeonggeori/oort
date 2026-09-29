@@ -68,6 +68,7 @@ use crate::client::{
 use crate::config::ToolEntry;
 use crate::policy::{self, AdapterKind, ModeAtOpen, Refusal};
 use crate::projection::{self, chunk_field, Projection, MAX_FIELD_CHARS};
+use crate::session_grant::{GrantEpoch, Grants};
 
 /// ACP protocol version this client speaks.
 pub const ACP_PROTOCOL_VERSION: i64 = 1;
@@ -185,12 +186,18 @@ enum Command {
         request_event_id: Uuid,
         option_id: String,
         kind: String,
+        /// #3095: the owner's VERIFIED 「이 세션 동안」 (never the payload's
+        /// word): remember what this allow covers for the session.
+        remember: bool,
         reply: oneshot::Sender<Result<(), Refusal>>,
     },
 }
 
 /// A permission request relayed to the owner and not yet answered.
 struct PendingPermission {
+    /// What the owner was shown (#3095: a 「이 세션 동안」 allow generalises
+    /// from it).
+    preview: momo_wire::permission_preview::PermissionPreview,
     /// The agent's JSON-RPC request id.
     rpc_id: Value,
     /// What the owner may choose — the agent's own one-time options.
@@ -251,6 +258,7 @@ pub struct SessionManager {
     settings: Arc<SessionSettings>,
     sessions: HashMap<Uuid, SessionHandle>,
     previews: PreviewLedger,
+    grant_epoch: GrantEpoch,
 }
 
 impl SessionManager {
@@ -260,7 +268,14 @@ impl SessionManager {
             settings: Arc::new(settings),
             sessions: HashMap::new(),
             previews: PreviewLedger::default(),
+            grant_epoch: GrantEpoch::default(),
         }
+    }
+
+    /// The generation of every 「이 세션 동안」 grant (#3095). The control
+    /// loop and the local control socket retire grants through it.
+    pub fn grant_epoch(&self) -> GrantEpoch {
+        self.grant_epoch.clone()
     }
 
     /// The preview hash this host relayed for `request_event_id` of
@@ -419,6 +434,8 @@ impl SessionManager {
             permission_wait: self.settings.permission_wait,
             previews: self.previews.clone(),
             tool_calls: Vec::new(),
+            grants: Grants::default(),
+            grant_epoch: self.grant_epoch.clone(),
         };
         let join = tokio::spawn(task.run(receiver));
         self.sessions.insert(
@@ -490,6 +507,7 @@ impl SessionManager {
         request_event_id: Uuid,
         option_id: String,
         kind: String,
+        remember: bool,
     ) -> Result<(), Refusal> {
         self.reap();
         let handle = self
@@ -503,6 +521,7 @@ impl SessionManager {
                 request_event_id,
                 option_id,
                 kind,
+                remember,
                 reply,
             })
             .await
@@ -751,6 +770,9 @@ struct SessionTask {
     /// #3118: what the agent announced of its tool calls, for the preview of
     /// a permission request that names one (bounded).
     tool_calls: Vec<(String, Map<String, Value>)>,
+    /// #3095: what the owner allowed 「이 세션 동안」. Ends with this task.
+    grants: Grants,
+    grant_epoch: GrantEpoch,
 }
 
 impl SessionTask {
@@ -782,9 +804,11 @@ impl SessionTask {
                     request_event_id,
                     option_id,
                     kind,
+                    remember,
                     reply,
                 })) => {
-                    let (answer, end) = self.on_owner_decision(request_event_id, &option_id, &kind);
+                    let (answer, end) =
+                        self.on_owner_decision(request_event_id, &option_id, &kind, remember);
                     let _ = reply.send(answer);
                     end
                 }
@@ -917,12 +941,23 @@ impl SessionTask {
             let event_id = Uuid::new_v4();
             // #3118: the host is the preview's source. Its hash is recorded
             // before the request leaves, so no decision can arrive first.
-            let preview = projection::permission_preview(&mut self.tool_calls, params).to_value();
+            let built = projection::permission_preview(&mut self.tool_calls, params);
+            let preview = built.to_value();
+            let preview_value = built;
             let Ok(preview_sha256) = momo_wire::permission_preview::preview_sha256(&preview) else {
                 // Unreachable for a host-built preview; refuse closed.
                 tracing::error!(session_id = %self.session_id, "permission preview did not build; denied");
                 return self.deny_unrelayed(id, &options).await;
             };
+            // #3095: a request the owner's 「이 세션 동안」 covers is answered
+            // here — after the record of it reached the server, so an
+            // automatic allow is never unrecorded.
+            if let Some(end) = self
+                .try_auto_allow(&id, &offered, &preview_value, &preview_sha256)
+                .await
+            {
+                return end;
+            }
             self.previews
                 .insert(self.session_id, event_id, preview_sha256.clone());
             if self
@@ -933,6 +968,7 @@ impl SessionTask {
                 self.permissions.insert(
                     event_id,
                     PendingPermission {
+                        preview: preview_value,
                         rpc_id: id,
                         offered,
                         deadline: Instant::now() + self.permission_wait,
@@ -944,6 +980,39 @@ impl SessionTask {
             tracing::warn!(session_id = %self.session_id, "permission request not relayed; denied");
         }
         self.deny_unrelayed(id, &options).await
+    }
+
+    /// #3095: answer `allow_once` without asking when a live grant covers the
+    /// request. `None` = not answered (ask the owner as usual); `Some(end)` =
+    /// answered, and `end` is the session's end if the agent went away.
+    async fn try_auto_allow(
+        &mut self,
+        id: &Value,
+        offered: &[policy::PermissionOption],
+        preview: &momo_wire::permission_preview::PermissionPreview,
+        preview_sha256: &str,
+    ) -> Option<Option<End>> {
+        if !self.grants.covers(preview, &self.grant_epoch) {
+            return None;
+        }
+        // Only the agent's own one-time allow; never an "always" rule.
+        let option = offered.iter().find(|option| option.kind == "allow_once")?;
+        // The record first: no automatic allow without its audit trail.
+        if !self
+            .relay
+            .permission_auto_allowed(&preview.kind, preview_sha256)
+            .await
+        {
+            return None;
+        }
+        tracing::info!(session_id = %self.session_id, tool_kind = %preview.kind, "permission request answered from the owner's session grant");
+        let decision = policy::PermissionDecision::Selected {
+            option_id: option.option_id.clone(),
+        };
+        if self.conn.respond(id.clone(), decision.to_result()).is_err() {
+            return Some(Some(End::AgentExited));
+        }
+        Some(None)
     }
 
     /// Deny a request that could not be relayed (D5 「올릴 수 없는 요청은 즉시
@@ -969,6 +1038,7 @@ impl SessionTask {
         request_event_id: Uuid,
         option_id: &str,
         kind: &str,
+        remember: bool,
     ) -> (Result<(), Refusal>, Option<End>) {
         let Some(pending) = self.permissions.get(&request_event_id) else {
             return (Err(Refusal::PermissionRequestUnknown), None);
@@ -988,6 +1058,12 @@ impl SessionTask {
             .is_err()
         {
             return (Err(Refusal::SessionClosed), Some(End::AgentExited));
+        }
+        // #3095: the allow was the owner's, signed for the session. What it
+        // covers is remembered only after the agent has its answer.
+        if remember && kind == "allow_once" {
+            let remembered = self.grants.remember(&pending.preview, &self.grant_epoch);
+            tracing::info!(session_id = %self.session_id, tool_kind = %pending.preview.kind, remembered, "owner allowed for the session");
         }
         (Ok(()), None)
     }
@@ -1352,6 +1428,21 @@ impl EventRelay {
         fields.insert("preview".into(), preview);
         fields.insert("preview_sha256".into(), json!(preview_sha256));
         self.send_as(event_id, "approval.requested", fields).await
+    }
+
+    /// #3095: a request answered from the owner's 「이 세션 동안」 grant. Its
+    /// own event type — `approval.decided` closes a pending card on every
+    /// client, and nothing is pending here. `true` when the server recorded it.
+    pub async fn permission_auto_allowed(&mut self, tool_kind: &str, preview_sha256: &str) -> bool {
+        self.flush_ready().await;
+        let mut fields = Map::new();
+        fields.insert("action".into(), json!("auto_allowed"));
+        fields.insert("status".into(), json!("approved"));
+        fields.insert("scope".into(), json!("session"));
+        fields.insert("tool_kind".into(), json!(tool_kind));
+        fields.insert("preview_sha256".into(), json!(preview_sha256));
+        self.send_as(Uuid::new_v4(), "approval.auto_allowed", fields)
+            .await
     }
 
     async fn send(&mut self, event_type: &str, fields: Map<String, Value>) {

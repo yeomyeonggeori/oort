@@ -434,7 +434,10 @@ pub fn respond(line: &str, identity: &HostIdentity, shared: &SocketShared) -> Va
                 return json!({"ok": false, "error": "invalid_root_key"});
             };
             match lock_trust().pin_root(key_id, alg, public_key, crate::client::now_ms()) {
-                Ok(pinned) => json!({"ok": true, "pinned": pinned}),
+                Ok(pinned) => {
+                    shared.grants.retire_all();
+                    json!({"ok": true, "pinned": pinned})
+                }
                 Err(error) => json!({"ok": false, "error": error}),
             }
         }
@@ -445,14 +448,20 @@ pub fn respond(line: &str, identity: &HostIdentity, shared: &SocketShared) -> Va
             match lock_trust()
                 .apply_revocation(revocation, crate::human_trust::RevocationSource::LocalApp)
             {
-                Ok(()) => json!({"ok": true}),
+                Ok(()) => {
+                    shared.grants.retire_all();
+                    json!({"ok": true})
+                }
                 Err(error) => json!({"ok": false, "error": error}),
             }
         }
         Some("reset_signature_requirement") => {
             let mut requirement = shared.requirement.lock().unwrap_or_else(|p| p.into_inner());
             match requirement.reset() {
-                Ok(()) => json!({"ok": true, "required": requirement.required()}),
+                Ok(()) => {
+                    shared.grants.retire_all();
+                    json!({"ok": true, "required": requirement.required()})
+                }
                 Err(error) => {
                     tracing::error!(error = %error, "could not reset the signature requirement");
                     json!({"ok": false, "error": "requirement_unavailable"})
@@ -638,6 +647,7 @@ mod tests {
             requirement: Arc::new(std::sync::Mutex::new(
                 crate::signature_requirement::SignatureRequirement::open(dir, false),
             )),
+            grants: crate::session_grant::GrantEpoch::default(),
         }
     }
 
@@ -684,6 +694,54 @@ mod tests {
             respond(r#"{"op":"shutdown"}"#, &identity(), &shared)["ok"],
             true
         );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// #3095: a 「이 세션 동안」 grant must not outlive a root (re)pin or a
+    /// ratchet reset, and a refused op retires nothing.
+    #[test]
+    fn the_local_ops_retire_session_grants_and_refused_ones_do_not() {
+        use base64::Engine as _;
+        let mut secret = [0u8; 32];
+        secret[31] = 3;
+        let key = p256::ecdsa::SigningKey::from_slice(&secret).unwrap();
+        let public = base64::engine::general_purpose::STANDARD
+            .encode(key.verifying_key().to_sec1_point(true).as_bytes());
+        let dir = scratch();
+        let shared = shared(&dir);
+        let epoch = || shared.grants.current();
+        let start = epoch();
+        // Refused ops retire nothing.
+        let bad_pin = respond(
+            r#"{"op":"pin_root","keyId":"00000000-0000-0000-0000-000000000009","alg":"p256","publicKey":"nope"}"#,
+            &identity(),
+            &shared,
+        );
+        assert_eq!(bad_pin["ok"], false);
+        let bad_revoke = respond(
+            r#"{"op":"revoke_device","revocation":{}}"#,
+            &identity(),
+            &shared,
+        );
+        assert_eq!(bad_revoke["ok"], false);
+        assert_eq!(epoch(), start, "a refused op retires nothing");
+        // A root pin does.
+        let pin = respond(
+            &json!({"op":"pin_root","keyId":Uuid::from_u128(9),"alg":"p256","publicKey":public})
+                .to_string(),
+            &identity(),
+            &shared,
+        );
+        assert_eq!(pin["ok"], true);
+        assert!(epoch() > start, "pin_root retires the grants");
+        // So does the ratchet reset.
+        let before = epoch();
+        respond(
+            r#"{"op":"reset_signature_requirement"}"#,
+            &identity(),
+            &shared,
+        );
+        assert!(epoch() > before, "reset_signature_requirement retires them");
         let _ = std::fs::remove_dir_all(dir);
     }
 

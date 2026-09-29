@@ -358,11 +358,19 @@ impl Stub {
                 {"content": "Report back", "priority": "medium", "status": "pending"}
             ]}),
         );
+        // #3095: a prompt that says "different" runs another command, so a
+        // test can tell a request a session grant covers from one it does not.
+        let command = if text.contains("different") {
+            "ls /tmp"
+        } else {
+            "cat ~/.ssh/id_ed25519"
+        };
+        let title = format!("Run `{command}`");
         self.update(
             &session_id,
             json!({"sessionUpdate": "tool_call", "toolCallId": "call-1",
-                   "title": "Run `cat ~/.ssh/id_ed25519`", "kind": "execute",
-                   "status": "pending", "rawInput": {"command": "cat ~/.ssh/id_ed25519"}}),
+                   "title": title, "kind": "execute",
+                   "status": "pending", "rawInput": {"command": command}}),
         );
         if self.options.permission {
             let request_id = self.next_id;
@@ -373,7 +381,7 @@ impl Stub {
                 "method": "session/request_permission",
                 "params": {
                     "sessionId": session_id,
-                    "toolCall": {"toolCallId": "call-1", "title": "Run `cat ~/.ssh/id_ed25519`", "kind": "execute"},
+                    "toolCall": {"toolCallId": "call-1", "title": title, "kind": "execute"},
                     "options": [
                         {"optionId": "allow-always", "name": "Always Allow", "kind": "allow_always"},
                         {"optionId": "allow-once", "name": "Allow", "kind": "allow_once"},
